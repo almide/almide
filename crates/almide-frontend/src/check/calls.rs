@@ -122,6 +122,7 @@ impl Checker {
         // call site, before any argument inference can bury it under a
         // cascade of type errors.
         self.warn_if_deprecated(callee);
+        self.reject_unopted_memory_unsafe_callee(callee);
         if let [argument] = args {
             self.reject_exit_literal(callee, argument);
         }

@@ -1,0 +1,3 @@
+expects_code = "E100"
+expects_error = "`bytes.from_raw_ptr` is outside the memory-safety guarantee and needs `import ffi` in this file"
+hint_substring = "write `ffi.read` in place of the deprecated `bytes.from_raw_ptr`"

@@ -539,6 +539,12 @@ pub fn is_memory_unsafe_stdlib_fn(module: &str, func: &str) -> bool {
     memory_unsafe_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
 }
 
+/// The import that opts a source file into the `@memory_unsafe` surface
+/// (#4043): outside the stdlib, a call to a `@memory_unsafe` fn is E100
+/// unless the calling file writes `import ffi`. Never auto-imported, so the
+/// import line is the one visible place a reader finds raw memory in a file.
+pub const MEMORY_UNSAFE_OPT_IN: &str = "ffi";
+
 /// The bundled stdlib fns an attribute `mark` (`"@ordered"`) annotates, by a
 /// text scan of the bundled sources (an attribute block, then the fn it
 /// annotates), with each fn's `@intrinsic` runtime symbol when it has one.
@@ -624,5 +630,15 @@ mod ordered_tests {
             ]
         );
         assert!(!super::is_memory_unsafe_stdlib_fn("bytes", "get"));
+    }
+
+    /// #4043: the opt-in is an import a file must WRITE — a module every file
+    /// sees without one would make the gate vacuous.
+    #[test]
+    fn the_memory_unsafe_opt_in_is_never_auto_imported() {
+        let m = super::MEMORY_UNSAFE_OPT_IN;
+        assert!(!super::TIER1_ALWAYS_ACCESSIBLE.contains(&m));
+        assert!(!super::AUTO_IMPORT_BUNDLED.contains(&m));
+        assert!(super::memory_unsafe_stdlib_fns().iter().any(|(module, _, _)| *module == m));
     }
 }

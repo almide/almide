@@ -1,7 +1,7 @@
 <!-- description: The security claim Almide is working toward — the vulnerability classes behind the October 2026 PHP and Go advisories, what makes each impossible in Almide today, the gaps with their issues, and the rule for when the claim may be stated -->
 # Security by construction
 
-> Last updated: 2026-10-23
+> Last updated: 2026-10-24
 > Parent issue: #4011 (memory safety with no gap). Related record: the stdlib redesign's R-L0-45 / R-L0-46.
 
 ## The claim
@@ -35,7 +35,7 @@ table because they are what "PHP-like" means to most readers.
 | 2 | Request state survives into the next request | partly | No mutable variable can be reached from a handler: `var` in a concurrent body is E008 (epoch 6), an app capturing a local of its server fn is E095 (epoch 11). | Freed memory reused across requests reduces to class 3 on the long-lived instance (native loop, wasm P3 reuse up to 128 requests). Closes with class 3. |
 | 3 | Use after free, double free | partly | Perceus reference counting, no manual free in the language. The checker proves RC balance of a witnessed MIR (Rocq); `CowSafety`, `FreeList` proofs cover the retired incumbent runtime. | No per-build certificate on shipped wasm bytes (#1696); native trusted (#4006); the double-free trap is off by default (#4023); the native region arena's `unsafe` traps only behind a switch (#4023); the runtime's `unsafe` lines (#4007, gated by `scripts/check-runtime-unsafe.sh` from #4017). |
 | 4 | Compiler bug removes a bounds check | partly | Every `xs[i]` and stdlib index is checked (C-067; native macros always check). The wasm emitter elides or hoists checks (`bounds_facts.rs`, `len_hoist.rs`, `payload_ptr.rs`, `cow_hoist.rs`) with a soundness argument in each header, no proof. | A bounds term in the certificate (#4005) on top of the `MemorySafe` definition (#4013); until it lands, the differential fuzz runs with the elisions off as the reference (#4009). |
-| 5 | Memory errors through FFI or raw pointers | **open** | `@extern` is counted as every capability (epoch 8). | Safe code can read and write out of bounds today through `bytes.from_raw_ptr` / `copy_to_ptr`, even under `--profile critical` (probe on #4008). Fix: the stdlib redesign closes the surface to `ffi.read` / `ffi.write` behind `import ffi` (R-L0-45, R-ffi-01, #3853); critical refuses `ffi` and `@extern`, and builds record their use (#4008). |
+| 5 | Memory errors through FFI or raw pointers | partly | Raw memory is an explicit opt-in, as in Rust's `unsafe`. The stdlib functions that read or write at a raw address, or hand out the address that does, are declared `@memory_unsafe` once at the function (`ffi.*` and the deprecated `bytes` raw-pointer spellings). Outside the stdlib a call to one, in any spelling, is E100 unless the calling file writes `import ffi` (#4043, epoch 15), so a program whose files have no `import ffi` and no `@extern` cannot read or write memory outside its values on either target. `--profile critical` refuses `ffi`, those spellings and every `@extern` declaration outright, with no `--allow` grant (E100, #4008). `@extern` is counted as every capability (epoch 8). | Inside a file that opted in, nothing checks that an address and a length describe memory the program owns: the caller promises it. A build does not yet say that a program left the guarantee — `almide build` prints the same line for a program that calls `ffi.write` (#4008's receipt criterion). The runtime functions behind `ffi.read` / `ffi.write` are among the `unsafe` lines #4007 audits. |
 | 6 | Data race corrupts memory | partly | Values are copied, not shared (C-033); fan work needs `T: Send` and Rc-backed values are not `Send`; E008; wasm fan is sequential. | The fan synchronisation itself is `unsafe` (lifetime-erasing transmute, `unsafe impl Sync`): Miri and loom over it (#4007, #4009). |
 | 7 | Integer overflow becomes memory corruption | **closed** | Overflow wraps by contract (C-170, C-180) but never reaches memory: every index and size is checked after the arithmetic (C-067), allocation sizes saturate into the out-of-memory abort. `MIN / -1` aborts (C-002). | Silent wraparound is a correctness question, not a memory one; the checked / saturating / wrapping spellings are the stdlib redesign's R-L0-32/34 and R-int-12. |
 | 8 | Null dereference | **closed** | No null in the language (`docs/SPEC.md:84`); absence is `Option`. Only `RawPtr` can be null and its bridge guards it (C-062). | — |
@@ -67,9 +67,11 @@ July 2026's HalluSquatting, up to 85% on repository-cloning prompts), and moved 
 
 ## Order of work
 
-1. **Close class 5 first.** It is the only row where ordinary code can corrupt memory today. The
-   stdlib redesign's `ffi` module (R-ffi-01/02, R-L0-45) lands ahead of the rest of its wave, and
-   #4008 makes `--profile critical` refuse `ffi` and `@extern`.
+1. **Close class 5 first.** Ordinary code can no longer corrupt memory: the stdlib redesign's
+   `ffi` module (R-ffi-01/02, R-L0-45) took the raw-address surface, #4008 made `--profile critical`
+   refuse `ffi` and `@extern`, and #4043 made every `@memory_unsafe` call outside the stdlib need
+   the file's `import ffi` (negative fixtures `tests/diagnostics/e100-no-import-ffi-oob-*`).
+   What is left is the build receipt: a build that reaches `ffi` or `@extern` must say so (#4008).
 2. **Bound untrusted input** (#4019, #4020, #4021) and **scope file access** (#4022): these are
    behaviour changes with contracts and cross-target fixtures, and they move rows 9 and 10 to closed.
 3. **Turn the traps on** (#4023) and **run fuzz under Miri / ASan / a checking allocator** (#4009):

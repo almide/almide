@@ -4795,6 +4795,9 @@ pub const SRC_FFI: &str = r#"
 
 
 
+
+
+
 /// Address of b's first byte; null if b is empty.
 @memory_unsafe
 @intrinsic("almide_rt_ffi_address")

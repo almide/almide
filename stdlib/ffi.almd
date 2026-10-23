@@ -8,7 +8,10 @@
 // `read` and `write` are effect fns (R-ffi-02): `write` changes memory outside
 // Almide's values and `read` reads memory foreign code wrote. Nothing checks
 // that an address and a length describe memory the program owns — the caller
-// promises it. `--profile critical` refuses every `ffi.*` call (#4008).
+// promises it, and `import ffi` is where the file says so: outside the stdlib,
+// a call to any `@memory_unsafe` fn (these four and the deprecated `bytes`
+// raw-pointer spellings) in a file without `import ffi` is E100 (#4043).
+// `--profile critical` refuses every `ffi.*` call even with it (#4008).
 //
 // wasm: the self-hosted bodies live in stdlib/bytes_rawptr.almd (`@implements`).
 /// Address of b's first byte; null if b is empty.
