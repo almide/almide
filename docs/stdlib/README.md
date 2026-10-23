@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 46 stdlib modules, 1135 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 46 stdlib modules, 1136 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -36,7 +36,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [list](#list) | 67 | 0 |
 | [map](#map) | 25 | 0 |
 | [math](#math) | 35 | 0 |
-| [matrix](#matrix) | 48 | 0 |
+| [matrix](#matrix) | 49 | 0 |
 | [net](#net) | 26 | 2 |
 | [option](#option) | 14 | 0 |
 | [path](#path) | 13 | 0 |
@@ -973,6 +973,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `matrix.from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` — f32 LE rows x cols at offset; all 0 if data short.
 - `matrix.to_bytes_f64_le(m: Matrix) -> Bytes` — Row-major f64 LE, 8 bytes per element.
 - `matrix.to_bytes_f32_le(m: Matrix) -> Bytes` — Row-major f32 LE, 4 bytes each (rounded).
+- `matrix.to_bytes_f16_le(m: Matrix) -> Bytes` — Row-major f16 LE, 2 bytes each (rounded to nearest even; overflow is inf).
 - `matrix.from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` — f16 LE rows x cols at offset; all 0 if data short.
 - `matrix.from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` — f64 LE rows x cols at offset; all 0 if data short.
 - `matrix.broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix` — bias added to each row; cols cut to bias.

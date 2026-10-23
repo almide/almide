@@ -148,7 +148,7 @@ The `from_bytes_f16_le` / `_f32_le` / `_f64_le` *decoders* keep a stored
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (48 functions)
+## Signature index (49 functions)
 
 ```
 // rows x cols of 0.0; negatives clamp to 0.
@@ -254,6 +254,10 @@ matrix.to_bytes_f64_le(m: Matrix) -> Bytes
 // Row-major f32 LE, 4 bytes each (rounded).
 // @since 0.13.4 or earlier
 matrix.to_bytes_f32_le(m: Matrix) -> Bytes
+
+// Row-major f16 LE, 2 bytes each (rounded to nearest even; overflow is inf).
+// @since unreleased
+matrix.to_bytes_f16_le(m: Matrix) -> Bytes
 
 // f16 LE rows x cols at offset; all 0 if data short.
 // @since 0.13.4 or earlier
