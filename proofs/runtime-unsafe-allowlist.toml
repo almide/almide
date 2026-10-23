@@ -21,6 +21,12 @@ class = "ffi-surface"
 reason = "from_raw_parts / copy_nonoverlapping behind bytes.from_raw_ptr / copy_to_ptr; moves to ffi.read / ffi.write (R-ffi-01, #3853)"
 
 [[file]]
+path = "runtime/rs/src/ffi.rs"
+count = 2
+class = "ffi-surface"
+reason = "from_raw_parts / copy_nonoverlapping behind ffi.read / ffi.write (R-ffi-01, #4042): the one place a program reads or writes a raw address; @memory_unsafe, refused under --profile critical (E100)"
+
+[[file]]
 path = "runtime/rs/src/http.rs"
 count = 12
 class = "c-call"
