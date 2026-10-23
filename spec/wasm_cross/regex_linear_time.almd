@@ -4,31 +4,36 @@
 // no bound on the steps, so a pattern with nested or overlapping repetition
 // took time exponential in the input's length on a subject it does not match:
 // `(a+)+$` on 30 `a`s and a `!` already took minutes, and every row below
-// would never have finished. Both legs now run a Pike VM that keeps one thread
-// per program state, and answer the same thing the backtracking walk answered
+// would never have finished (2^100 ways to split 100 `a`s). Both legs now run
+// the backtracking walk under a step budget linear in the input and hand over
+// to a Pike VM, which keeps one thread per program state, when it runs out;
+// the answer is the one the walk would have given
 // (tests/regex_pike_differential_test.rs holds the two engines together).
 // The wasm_cross gate's per-run time limit is what turns a regression here
-// into a failure rather than a slow pass.
+// into a failure rather than a slow pass. 100 characters is far past where the
+// old engines stopped answering and inside the reference interpreter's call
+// depth (it does not eliminate tail calls); the differential test runs the
+// same shapes at 100,000 characters natively.
 import regex
 
 fn line(label: String, answer: Bool) -> String = "${label}=${answer}"
 
 fn main() -> Unit = {
-  let a100k = string.repeat("a", 100000)
-  let bang = a100k + "!"
+  let a100 = string.repeat("a", 100)
+  let bang = a100 + "!"
   // nested repetition: every split of the a's between the two loops
   println(line("(a+)+$ miss", regex.is_match("(a+)+$", bang)))
-  println(line("(a+)+$ hit", regex.is_match("(a+)+$", a100k)))
+  println(line("(a+)+$ hit", regex.is_match("(a+)+$", a100)))
   println(line("full (a+)+ miss", regex.full_match("(a+)+", bang)))
   // overlapping alternatives under a star: Fibonacci-many ways to cut the a's
-  println(line("(a|aa)*b", regex.is_match("(a|aa)*b", a100k)))
-  println(line("(a|aa)*b hit", regex.is_match("(a|aa)*b", a100k + "b")))
+  println(line("(a|aa)*b", regex.is_match("(a|aa)*b", a100)))
+  println(line("(a|aa)*b hit", regex.is_match("(a|aa)*b", a100 + "b")))
   // an optional inside a plus: the same blow-up through an empty choice
-  println(line("^(a|a?)+$", regex.is_match("^(a|a?)+$", a100k + "b")))
+  println(line("^(a|a?)+$", regex.is_match("^(a|a?)+$", a100 + "b")))
   // the word-list shape behind many real advisories
   println(line("(\\w+\\s?)+$", regex.is_match("(\\w+\\s?)+$", bang)))
   // the other operations go through the same VM
-  println(line("find", regex.find("(a|aa)*c", a100k) == none))
+  println(line("find", regex.find("(a|aa)*c", a100) == none))
   println(line("replace", regex.replace("(a+)+b", bang, "x") == bang))
   println(line("split", list.len(regex.split("(a+)+b", bang)) == 1))
   // captures: the last instance of the repeated group, as the walk answered
