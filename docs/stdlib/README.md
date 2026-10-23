@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 44 stdlib modules, 1047 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 46 stdlib modules, 1121 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -13,6 +13,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [bytes](#bytes) | 146 | 1 |
 | [compute](#compute) | 6 | 0 |
 | [datetime](#datetime) | 22 | 0 |
+| [deque](#deque) | 58 | 1 |
 | [duration](#duration) | 6 | 0 |
 | [env](#env) | 9 | 0 |
 | [error](#error) | 3 | 0 |
@@ -21,6 +22,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [float64](#float64) | 10 | 0 |
 | [fs](#fs) | 34 | 1 |
 | [hash](#hash) | 4 | 0 |
+| [heap](#heap) | 16 | 1 |
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 5 | 0 |
 | [http](#http) | 48 | 4 |
@@ -262,6 +264,69 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `datetime.weekday(ts: Int) -> String` — English day name in UTC; 0 is Thursday.
 - `datetime.year(ts: Int) -> Int` — Calendar year in UTC.
 
+## deque
+
+[deque.md](deque.md)
+
+- `deque.new() -> Deque[A]` — An empty deque.
+- `deque.from_list(xs: List[A]) -> Deque[A]` — A deque of xs, front to back.
+- `deque.to_list(d: Deque[A]) -> List[A]` — The elements, front to back.
+- `deque.len(d: Deque[A]) -> Int` — Element count; 0 for an empty deque.
+- `deque.is_empty(d: Deque[A]) -> Bool` — true iff d has no elements.
+- `deque.push(mut d: Deque[A], x: A) -> Unit` — Appends x at the back in place.
+- `deque.push_front(mut d: Deque[A], x: A) -> Unit` — Adds x at the front in place.
+- `deque.pop(mut d: Deque[A]) -> Option[A]` — Removes and yields the last element; none when empty.
+- `deque.pop_front(mut d: Deque[A]) -> Option[A]` — Removes and yields the first element; none when empty.
+- `deque.first(d: Deque[A]) -> Option[A]` — The first element, or none when empty.
+- `deque.last(d: Deque[A]) -> Option[A]` — The last element, or none when empty.
+- `deque.get(d: Deque[A], i: Int) -> Option[A]` — Element at index i from the front, or none when out of range.
+- `deque.contains(d: Deque[A], x: A) -> Bool` — true if some element == x.
+- `deque.clear(mut d: Deque[A]) -> Unit` — Removes every element of d in place.
+- `deque.map(d: Deque[A], f: (A) -> B) -> Deque[B]` — Deque of f(x), front to back; f runs front to back.
+- `deque.filter(d: Deque[A], f: (A) -> Bool) -> Deque[A]` — Elements where f holds, order kept.
+- `deque.fold(d: Deque[A], init: B, f: (B, A) -> B) -> B` — Folds f(acc, x) front to back.
+- `deque.any(d: Deque[A], f: (A) -> Bool) -> Bool` — true if f holds for some element; false when empty.
+- `deque.all(d: Deque[A], f: (A) -> Bool) -> Bool` — true if f holds for every element; true when empty.
+- `deque.count(d: Deque[A], f: (A) -> Bool) -> Int` — Number of elements where f holds.
+- `deque.find(d: Deque[A], f: (A) -> Bool) -> Option[A]` — The element nearest the front where f holds, or none.
+- `deque.reverse(d: Deque[A]) -> Deque[A]` — Elements back to front.
+- `deque.take(d: Deque[A], n: Int) -> Deque[A]` — First n elements, as list.take.
+- `deque.drop(d: Deque[A], n: Int) -> Deque[A]` — All but the first n, as list.drop.
+- `deque.take_end(d: Deque[A], n: Int) -> Deque[A]` — Last n elements, as list.take_end.
+- `deque.drop_end(d: Deque[A], n: Int) -> Deque[A]` — All but the last n, as list.drop_end.
+- `deque.slice(d: Deque[A], start: Int, end: Int) -> Deque[A]` — Indices start..<end, as list.slice.
+- `deque.set(d: Deque[A], i: Int, x: A) -> Deque[A]` — Copy with slot i = x, as list.set.
+- `deque.insert(d: Deque[A], i: Int, x: A) -> Deque[A]` — Copy with x at i, as list.insert.
+- `deque.remove_at(d: Deque[A], i: Int) -> Deque[A]` — Copy without slot i, as list.remove_at.
+- `deque.enumerate(d: Deque[A]) -> List[(Int, A)]` — (index, element) pairs, index from 0 at the front.
+- `deque.zip(d: Deque[A], ys: List[B]) -> List[(A, B)]` — Elements paired with ys by position; stops at the shorter.
+- `deque.zip_with(d: Deque[A], ys: List[B], f: (A, B) -> C) -> List[C]` — f over (element, ys element) pairs; stops at the shorter.
+- `deque.filter_map(d: Deque[A], f: (A) -> Option[B]) -> List[B]` — The somes f gives, front to back.
+- `deque.find_map(d: Deque[A], f: (A) -> Option[B]) -> Option[B]` — The first some f gives, or none; f is not called after the hit.
+- `deque.reduce(d: Deque[A], f: (A, A) -> A) -> Option[A]` — Left fold seeded by the first element; none when empty.
+- `deque.scan(d: Deque[A], init: B, f: (B, A) -> B) -> List[B]` — Running fold values front to back, init excluded.
+- `deque.partition(d: Deque[A], f: (A) -> Bool) -> (List[A], List[A])` — (elements where f holds, the rest), order kept.
+- `deque.group_by(d: Deque[A], f: (A) -> B) -> Map[B, List[A]]` — Key f(x) -> elements; keys in first-seen order.
+- `deque.sort(d: Deque[A]) -> List[A]` — Elements in ascending order; Floats in IEEE totalOrder.
+- `deque.sort_by(d: Deque[A], f: (A) -> B) -> List[A]` — Elements sorted by key f(x), stable; f runs once per element.
+- `deque.sort_with(d: Deque[A], cmp: (A, A) -> Int) -> List[A]` — Elements sorted by cmp, stable: negative puts a first.
+- `deque.min(d: Deque[A]) -> Option[A]` — Least element, or none when empty.
+- `deque.max(d: Deque[A]) -> Option[A]` — Greatest element, or none when empty.
+- `deque.min_by(d: Deque[A], f: (A) -> K) -> Option[A]` — Element with the least key f(x); the nearest the front on ties.
+- `deque.max_by(d: Deque[A], f: (A) -> K) -> Option[A]` — Element with the greatest key f(x); the nearest the front on ties.
+- `deque.min_with(d: Deque[A], cmp: (A, A) -> Int) -> Option[A]` — Least element by cmp; the nearest the front on ties.
+- `deque.max_with(d: Deque[A], cmp: (A, A) -> Int) -> Option[A]` — Greatest element by cmp; the nearest the front on ties.
+- `deque.find_index(d: Deque[A], f: (A) -> Bool) -> Option[Int]` — Index from the front of the first x where f holds, or none.
+- `deque.take_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]` — Longest front run where f holds.
+- `deque.drop_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]` — The rest after the longest front run where f holds.
+- `deque.chunk(d: Deque[A], n: Int) -> List[Deque[A]]` — Runs of n from the front, as list.chunk.
+- `deque.window(d: Deque[A], n: Int) -> List[Deque[A]]` — All n-long runs, as list.window.
+- `deque.split_at(d: Deque[A], n: Int) -> (Deque[A], Deque[A])` — (first n, the rest), as list.split_at.
+- `deque.dedup(d: Deque[A]) -> Deque[A]` — Adjacent equal runs collapsed, as list.dedup.
+- `deque.intersperse(d: Deque[A], sep: A) -> Deque[A]` — sep between adjacent elements.
+- `deque.unique(d: Deque[A]) -> Deque[A]` — Duplicates removed; the occurrence nearest the front kept.
+- `deque.unique_by(d: Deque[A], f: (A) -> K) -> Deque[A]` — The first element per distinct key f(x).
+
 ## duration
 
 [duration.md](duration.md)
@@ -423,6 +488,27 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `hash.fnv1a32_bytes(b: Bytes) -> Int` — 32-bit FNV-1a of b, in 0..4294967295.
 - `hash.sha256(b: Bytes) -> Bytes` — 32-byte SHA-256 digest of b.
 - `hash.sha256_hex(s: String) -> String` — SHA-256 of s's UTF-8, 64 lowercase hex chars.
+
+## heap
+
+[heap.md](heap.md)
+
+- `heap.new() -> Heap[A]` — An empty heap; the least element comes out first.
+- `heap.new_by(f: (A) -> K) -> Heap[A]` — An empty heap ordered by key f(x); the least key comes out first.
+- `heap.new_with(cmp: (A, A) -> Int) -> Heap[A]` — An empty heap ordered by cmp; negative puts a first.
+- `heap.from_list(xs: List[A]) -> Heap[A]` — A heap of xs in the natural order; equal elements leave in list order.
+- `heap.push(mut h: Heap[A], x: A) -> Unit` — Adds x in place.
+- `heap.pop(mut h: Heap[A]) -> Option[A]` — Removes and yields the first element out; none when empty.
+- `heap.clear(mut h: Heap[A]) -> Unit` — Removes every element of h in place; the order is kept.
+- `heap.peek(h: Heap[A]) -> Option[A]` — The element pop would yield next, or none when empty.
+- `heap.len(h: Heap[A]) -> Int` — Element count; 0 for an empty heap.
+- `heap.is_empty(h: Heap[A]) -> Bool` — true iff h has no elements.
+- `heap.to_list(h: Heap[A]) -> List[A]` — The elements in pop order.
+- `heap.contains(h: Heap[A], x: A) -> Bool` — true if some element == x.
+- `heap.any(h: Heap[A], f: (A) -> Bool) -> Bool` — true if f holds for some element; false when empty.
+- `heap.all(h: Heap[A], f: (A) -> Bool) -> Bool` — true if f holds for every element; true when empty.
+- `heap.count(h: Heap[A], f: (A) -> Bool) -> Int` — Number of elements where f holds.
+- `heap.filter(h: Heap[A], f: (A) -> Bool) -> Heap[A]` — The elements where f holds, in a heap of the same order; equal elements keep the order they went in.
 
 ## hex
 
