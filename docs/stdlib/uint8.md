@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (39 functions)
+## Signature index (40 functions)
 
 ```
 // Wraps to 8 bits; 255 becomes -1.
@@ -139,6 +139,10 @@ uint8.clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8
 // Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 // @since unreleased
 uint8.floor_div(a: UInt8, b: UInt8) -> UInt8
+
+// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+// @since unreleased
+uint8.modulo(a: UInt8, b: UInt8) -> UInt8
 
 // base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
 // @since unreleased

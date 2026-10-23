@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 48 stdlib modules, 1453 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 48 stdlib modules, 1461 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -29,10 +29,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [html](#html) | 5 | 0 |
 | [http](#http) | 48 | 4 |
 | [int](#int) | 72 | 0 |
-| [int16](#int16) | 49 | 0 |
-| [int32](#int32) | 51 | 0 |
-| [int64](#int64) | 53 | 0 |
-| [int8](#int8) | 47 | 0 |
+| [int16](#int16) | 50 | 0 |
+| [int32](#int32) | 52 | 0 |
+| [int64](#int64) | 54 | 0 |
+| [int8](#int8) | 48 | 0 |
 | [io](#io) | 8 | 0 |
 | [json](#json) | 15 | 0 |
 | [list](#list) | 79 | 0 |
@@ -49,10 +49,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [set](#set) | 40 | 0 |
 | [string](#string) | 88 | 0 |
 | [testing](#testing) | 10 | 0 |
-| [uint16](#uint16) | 43 | 0 |
-| [uint32](#uint32) | 47 | 0 |
-| [uint64](#uint64) | 51 | 0 |
-| [uint8](#uint8) | 39 | 0 |
+| [uint16](#uint16) | 44 | 0 |
+| [uint32](#uint32) | 48 | 0 |
+| [uint64](#uint64) | 52 | 0 |
+| [uint8](#uint8) | 40 | 0 |
 | [url](#url) | 10 | 1 |
 | [value](#value) | 20 | 0 |
 | [zlib](#zlib) | 10 | 0 |
@@ -760,7 +760,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int16.min(a: Int16, b: Int16) -> Int16` — Lesser of a and b.
 - `int16.max(a: Int16, b: Int16) -> Int16` — Greater of a and b.
 - `int16.clamp(x: Int16, lo: Int16, hi: Int16) -> Int16` — x limited to lo..hi; aborts when lo > hi.
-- `int16.floor_div(a: Int16, b: Int16) -> Int16` — Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+- `int16.floor_div(a: Int16, b: Int16) -> Int16` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int16.modulo(a: Int16, b: Int16) -> Int16` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
 - `int16.pow(base: Int16, exp: Int) -> Int16` — base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
 - `int16.is_even(x: Int16) -> Bool` — True when x is a multiple of 2.
 - `int16.is_odd(x: Int16) -> Bool` — True when x is not a multiple of 2.
@@ -816,7 +817,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int32.min(a: Int32, b: Int32) -> Int32` — Lesser of a and b.
 - `int32.max(a: Int32, b: Int32) -> Int32` — Greater of a and b.
 - `int32.clamp(x: Int32, lo: Int32, hi: Int32) -> Int32` — x limited to lo..hi; aborts when lo > hi.
-- `int32.floor_div(a: Int32, b: Int32) -> Int32` — Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+- `int32.floor_div(a: Int32, b: Int32) -> Int32` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int32.modulo(a: Int32, b: Int32) -> Int32` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
 - `int32.pow(base: Int32, exp: Int) -> Int32` — base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
 - `int32.is_even(x: Int32) -> Bool` — True when x is a multiple of 2.
 - `int32.is_odd(x: Int32) -> Bool` — True when x is not a multiple of 2.
@@ -874,7 +876,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int64.min(a: Int64, b: Int64) -> Int64` — Lesser of a and b.
 - `int64.max(a: Int64, b: Int64) -> Int64` — Greater of a and b.
 - `int64.clamp(x: Int64, lo: Int64, hi: Int64) -> Int64` — x limited to lo..hi; aborts when lo > hi.
-- `int64.floor_div(a: Int64, b: Int64) -> Int64` — Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+- `int64.floor_div(a: Int64, b: Int64) -> Int64` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int64.modulo(a: Int64, b: Int64) -> Int64` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
 - `int64.pow(base: Int64, exp: Int) -> Int64` — base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
 - `int64.is_even(x: Int64) -> Bool` — True when x is a multiple of 2.
 - `int64.is_odd(x: Int64) -> Bool` — True when x is not a multiple of 2.
@@ -926,7 +929,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int8.min(a: Int8, b: Int8) -> Int8` — Lesser of a and b.
 - `int8.max(a: Int8, b: Int8) -> Int8` — Greater of a and b.
 - `int8.clamp(x: Int8, lo: Int8, hi: Int8) -> Int8` — x limited to lo..hi; aborts when lo > hi.
-- `int8.floor_div(a: Int8, b: Int8) -> Int8` — Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+- `int8.floor_div(a: Int8, b: Int8) -> Int8` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int8.modulo(a: Int8, b: Int8) -> Int8` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
 - `int8.pow(base: Int8, exp: Int) -> Int8` — base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
 - `int8.is_even(x: Int8) -> Bool` — True when x is a multiple of 2.
 - `int8.is_odd(x: Int8) -> Bool` — True when x is not a multiple of 2.
@@ -1522,6 +1526,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint16.max(a: UInt16, b: UInt16) -> UInt16` — Greater of a and b.
 - `uint16.clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16` — x limited to lo..hi; aborts when lo > hi.
 - `uint16.floor_div(a: UInt16, b: UInt16) -> UInt16` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint16.modulo(a: UInt16, b: UInt16) -> UInt16` — Remainder; the same as a % b for an unsigned type; b == 0 aborts.
 - `uint16.pow(base: UInt16, exp: Int) -> UInt16` — base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
 - `uint16.is_even(x: UInt16) -> Bool` — True when x is a multiple of 2.
 - `uint16.is_odd(x: UInt16) -> Bool` — True when x is not a multiple of 2.
@@ -1574,6 +1579,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint32.max(a: UInt32, b: UInt32) -> UInt32` — Greater of a and b.
 - `uint32.clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32` — x limited to lo..hi; aborts when lo > hi.
 - `uint32.floor_div(a: UInt32, b: UInt32) -> UInt32` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint32.modulo(a: UInt32, b: UInt32) -> UInt32` — Remainder; the same as a % b for an unsigned type; b == 0 aborts.
 - `uint32.pow(base: UInt32, exp: Int) -> UInt32` — base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
 - `uint32.is_even(x: UInt32) -> Bool` — True when x is a multiple of 2.
 - `uint32.is_odd(x: UInt32) -> Bool` — True when x is not a multiple of 2.
@@ -1630,6 +1636,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint64.max(a: UInt64, b: UInt64) -> UInt64` — Greater of a and b.
 - `uint64.clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64` — x limited to lo..hi; aborts when lo > hi.
 - `uint64.floor_div(a: UInt64, b: UInt64) -> UInt64` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint64.modulo(a: UInt64, b: UInt64) -> UInt64` — Remainder; the same as a % b for an unsigned type; b == 0 aborts.
 - `uint64.pow(base: UInt64, exp: Int) -> UInt64` — base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
 - `uint64.is_even(x: UInt64) -> Bool` — True when x is a multiple of 2.
 - `uint64.is_odd(x: UInt64) -> Bool` — True when x is not a multiple of 2.
@@ -1674,6 +1681,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint8.max(a: UInt8, b: UInt8) -> UInt8` — Greater of a and b.
 - `uint8.clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8` — x limited to lo..hi; aborts when lo > hi.
 - `uint8.floor_div(a: UInt8, b: UInt8) -> UInt8` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint8.modulo(a: UInt8, b: UInt8) -> UInt8` — Remainder; the same as a % b for an unsigned type; b == 0 aborts.
 - `uint8.pow(base: UInt8, exp: Int) -> UInt8` — base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
 - `uint8.is_even(x: UInt8) -> Bool` — True when x is a multiple of 2.
 - `uint8.is_odd(x: UInt8) -> Bool` — True when x is not a multiple of 2.

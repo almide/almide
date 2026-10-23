@@ -11019,14 +11019,24 @@ fn max(a: Int16, b: Int16) -> Int16 = if a >= b then a else b
 /// x limited to lo..hi; aborts when lo > hi.
 fn clamp(x: Int16, lo: Int16, hi: Int16) -> Int16 = int.to_int16(int.clamp(int.from_int16(x), int.from_int16(lo), int.from_int16(hi)))
 
-/// Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
-fn floor_div(a: Int16, b: Int16) -> Int16 = int.to_int16(floor_quotient(int.from_int16(a), int.from_int16(b)))
+/// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+fn floor_div(a: Int16, b: Int16) -> Int16 = if int.from_int16(b) == -1 then a / b
+else int.to_int16(floor_quotient(int.from_int16(a), int.from_int16(b)))
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: Int16, b: Int16) -> Int16 = int.to_int16(floor_remainder(int.from_int16(a), int.from_int16(b)))
 
 
-local fn floor_quotient(a: Int, b: Int) -> Int = if b == -1 then 0 - a
-else {
+local fn floor_quotient(a: Int, b: Int) -> Int = {
   let q = a / b
   if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+
+local fn floor_remainder(a: Int, b: Int) -> Int = if b == -1 then 0
+else {
+  let m = a % b
+  if m != 0 and (m < 0) != (b < 0) then m + b else m
 }
 
 /// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
@@ -11313,14 +11323,24 @@ fn max(a: Int32, b: Int32) -> Int32 = if a >= b then a else b
 /// x limited to lo..hi; aborts when lo > hi.
 fn clamp(x: Int32, lo: Int32, hi: Int32) -> Int32 = int.to_int32(int.clamp(int.from_int32(x), int.from_int32(lo), int.from_int32(hi)))
 
-/// Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
-fn floor_div(a: Int32, b: Int32) -> Int32 = int.to_int32(floor_quotient(int.from_int32(a), int.from_int32(b)))
+/// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+fn floor_div(a: Int32, b: Int32) -> Int32 = if int.from_int32(b) == -1 then a / b
+else int.to_int32(floor_quotient(int.from_int32(a), int.from_int32(b)))
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: Int32, b: Int32) -> Int32 = int.to_int32(floor_remainder(int.from_int32(a), int.from_int32(b)))
 
 
-local fn floor_quotient(a: Int, b: Int) -> Int = if b == -1 then 0 - a
-else {
+local fn floor_quotient(a: Int, b: Int) -> Int = {
   let q = a / b
   if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+
+local fn floor_remainder(a: Int, b: Int) -> Int = if b == -1 then 0
+else {
+  let m = a % b
+  if m != 0 and (m < 0) != (b < 0) then m + b else m
 }
 
 /// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
@@ -11629,14 +11649,23 @@ fn max(a: Int64, b: Int64) -> Int64 = if a >= b then a else b
 /// x limited to lo..hi; aborts when lo > hi.
 fn clamp(x: Int64, lo: Int64, hi: Int64) -> Int64 = int.to_int64(int.clamp(int.from_int64(x), int.from_int64(lo), int.from_int64(hi)))
 
-/// Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+/// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
 fn floor_div(a: Int64, b: Int64) -> Int64 = int.to_int64(floor_quotient(int.from_int64(a), int.from_int64(b)))
 
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: Int64, b: Int64) -> Int64 = int.to_int64(floor_remainder(int.from_int64(a), int.from_int64(b)))
 
-local fn floor_quotient(a: Int, b: Int) -> Int = if b == -1 then 0 - a
-else {
+
+local fn floor_quotient(a: Int, b: Int) -> Int = {
   let q = a / b
   if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+
+local fn floor_remainder(a: Int, b: Int) -> Int = if b == -1 then 0
+else {
+  let m = a % b
+  if m != 0 and (m < 0) != (b < 0) then m + b else m
 }
 
 /// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
@@ -11938,14 +11967,24 @@ fn max(a: Int8, b: Int8) -> Int8 = if a >= b then a else b
 /// x limited to lo..hi; aborts when lo > hi.
 fn clamp(x: Int8, lo: Int8, hi: Int8) -> Int8 = int.to_int8(int.clamp(int.from_int8(x), int.from_int8(lo), int.from_int8(hi)))
 
-/// Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
-fn floor_div(a: Int8, b: Int8) -> Int8 = int.to_int8(floor_quotient(int.from_int8(a), int.from_int8(b)))
+/// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+fn floor_div(a: Int8, b: Int8) -> Int8 = if int.from_int8(b) == -1 then a / b
+else int.to_int8(floor_quotient(int.from_int8(a), int.from_int8(b)))
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: Int8, b: Int8) -> Int8 = int.to_int8(floor_remainder(int.from_int8(a), int.from_int8(b)))
 
 
-local fn floor_quotient(a: Int, b: Int) -> Int = if b == -1 then 0 - a
-else {
+local fn floor_quotient(a: Int, b: Int) -> Int = {
   let q = a / b
   if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+
+local fn floor_remainder(a: Int, b: Int) -> Int = if b == -1 then 0
+else {
+  let m = a % b
+  if m != 0 and (m < 0) != (b < 0) then m + b else m
 }
 
 /// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
@@ -38204,6 +38243,9 @@ fn clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16 = int.to_uint16(int.clamp(
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt16, b: UInt16) -> UInt16 = a / b
 
+/// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+fn modulo(a: UInt16, b: UInt16) -> UInt16 = a % b
+
 /// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
 fn pow(base: UInt16, exp: Int) -> UInt16 = int.to_uint16(math.pow(int.from_uint16(base), exp))
 
@@ -38461,6 +38503,9 @@ fn clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32 = int.to_uint32(int.clamp(
 
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt32, b: UInt32) -> UInt32 = a / b
+
+/// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+fn modulo(a: UInt32, b: UInt32) -> UInt32 = a % b
 
 /// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
 fn pow(base: UInt32, exp: Int) -> UInt32 = int.to_uint32(math.pow(int.from_uint32(base), exp))
@@ -38784,6 +38829,9 @@ local fn unbias(n: Int) -> UInt64 = int.to_uint64(int.bxor(n, int.bshl(1, 63)))
 
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt64, b: UInt64) -> UInt64 = a / b
+
+/// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+fn modulo(a: UInt64, b: UInt64) -> UInt64 = a % b
 
 /// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
 fn pow(base: UInt64, exp: Int) -> UInt64 = int.to_uint64(math.pow(int.from_uint64(base), exp))
@@ -39119,6 +39167,9 @@ fn clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8 = int.to_uint8(int.clamp(int.f
 
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt8, b: UInt8) -> UInt8 = a / b
+
+/// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+fn modulo(a: UInt8, b: UInt8) -> UInt8 = a % b
 
 /// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
 fn pow(base: UInt8, exp: Int) -> UInt8 = int.to_uint8(math.pow(int.from_uint8(base), exp))

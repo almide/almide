@@ -54,7 +54,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (53 functions)
+## Signature index (54 functions)
 
 ```
 // Wraps to 8 bits; 128 becomes -128.
@@ -177,9 +177,13 @@ int64.max(a: Int64, b: Int64) -> Int64
 // @since unreleased
 int64.clamp(x: Int64, lo: Int64, hi: Int64) -> Int64
 
-// Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
+// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
 // @since unreleased
 int64.floor_div(a: Int64, b: Int64) -> Int64
+
+// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+// @since unreleased
+int64.modulo(a: Int64, b: Int64) -> Int64
 
 // base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
 // @since unreleased
