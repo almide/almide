@@ -204,9 +204,11 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // (len = bytes both legs), handle+12 = OUR PAYLOAD; the empty-buffer
     // NULL guard is the 2026-08-10 fuzz doctrine.
     "bytes_as_ptr", "bytes_as_mut_ptr", "bytes_from_raw_ptr", "bytes_copy_to_ptr",
-    // ffi_rawptr.almd (R-ffi-01): the same bridge under its `ffi` names —
-    // identical bodies, the address operand first in ffi_write.
-    "ffi_address", "ffi_to_int", "ffi_read", "ffi_write",
+    // The two `ffi` bodies in bytes_rawptr.almd (R-ffi-01): ffi_write is
+    // bytes_copy_to_ptr with the address first, ffi_to_int the identity
+    // ptr_to_int cast; ffi.address / ffi.read run bytes_as_ptr /
+    // bytes_from_raw_ptr above.
+    "ffi_to_int", "ffi_write",
     "bytes_skip_length_prefixed_le",
     // http_response.almd (audited 2026-08-25): PURE Almide over the
     // published List[String] rep — list/string surfaces only, the RFC
