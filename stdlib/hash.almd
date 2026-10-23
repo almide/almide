@@ -28,3 +28,422 @@ fn sha256(b: Bytes) -> Bytes = _
 /// SHA-256 of s's UTF-8, 64 lowercase hex chars.
 @intrinsic("almide_rt_hash_sha256_hex")
 fn sha256_hex(s: String) -> String = _
+
+// ── Checksums and the other digests (R-hash-02, R-hash-03) ──
+// Pure Almide on every target, so native and wasm run the same code. 32-bit
+// lanes are Ints masked to 32 bits after every add; SHA-512's 64-bit lanes are
+// plain Ints, whose + and * wrap mod 2^64 on every leg.
+/// CRC-32 (IEEE, reflected) as an unsigned Int; 0 for empty b.
+fn crc32(b: Bytes) -> Int = {
+  var table = list.repeat(0, 256)
+  var n = 0
+  while n < 256 {
+    var c = n
+    var k = 0
+    while k < 8 {
+      c = int.bxor(int.bshr(c, 1), int.band(3988292384, 0 - int.band(c, 1)))
+      k = k + 1
+    }
+    table[n] = c
+    n = n + 1
+  }
+  var acc = 4294967295
+  var i = 0
+  let len = bytes.len(b)
+  while i < len {
+    acc = int.bxor(table[int.band(int.bxor(acc, bytes.get_or(b, i, 0)), 255)], int.bshr(acc, 8))
+    i = i + 1
+  }
+  int.bxor(acc, 4294967295)
+}
+
+/// Adler-32 as an unsigned Int; 1 for empty b.
+fn adler32(b: Bytes) -> Int = {
+  var s1 = 1
+  var s2 = 0
+  var i = 0
+  let len = bytes.len(b)
+  while i < len {
+    s1 = (s1 + bytes.get_or(b, i, 0)) % 65521
+    s2 = (s2 + s1) % 65521
+    i = i + 1
+  }
+  int.bor(int.bshl(s2, 16), s1)
+}
+
+local fn h_mask32(x: Int) -> Int = int.band(x, 4294967295)
+
+local fn h_rotl32(x: Int, n: Int) -> Int = h_mask32(int.bor(int.bshl(x, n), int.bshr(x, 32 - n)))
+
+// Logical right shift of a 64-bit lane, n in 1..63.
+local fn h_shr64(x: Int, n: Int) -> Int = int.band(int.bshr(x, n), int.bshl(1, 64 - n) - 1)
+
+local fn h_rotr64(x: Int, n: Int) -> Int = int.bor(h_shr64(x, n), int.bshl(x, 64 - n))
+
+// The bit length of an n-byte message as `count` bytes, big- or little-endian.
+local fn h_len_bytes(n: Int, count: Int, big_endian: Bool) -> List[Int] = {
+  let le = list.range(0, count) |> list.map((i) => if i < 8 then int.band(int.bshr(n * 8, i * 8), 255) else 0)
+  if big_endian then list.reverse(le) else le
+}
+
+// The message padded to a whole number of `block`-byte blocks (MD/SHA).
+local fn h_pad(b: Bytes, block: Int, len_count: Int, big_endian: Bool) -> List[Int] = {
+  let n = bytes.len(b)
+  let total = (n + 1 + len_count + block - 1) / block * block
+  bytes.to_list(b) + [128] + list.repeat(0, total - n - 1 - len_count) + h_len_bytes(
+    n,
+    len_count,
+    big_endian,
+  )
+}
+
+local fn h_word32(m: List[Int], at: Int, big_endian: Bool) -> Int =
+  if big_endian then int.bor(
+    int.bor(int.bshl(m[at], 24), int.bshl(m[at + 1], 16)),
+    int.bor(int.bshl(m[at + 2], 8), m[at + 3]),
+  ) else int.bor(
+    int.bor(m[at], int.bshl(m[at + 1], 8)),
+    int.bor(int.bshl(m[at + 2], 16), int.bshl(m[at + 3], 24)),
+  )
+
+local fn h_word64(m: List[Int], at: Int) -> Int = list.range(0, 8) |> list.fold(
+  0,
+  (acc, k) => int.bor(int.bshl(acc, 8), m[at + k]),
+)
+
+// Each word as `width` bytes, big- or little-endian.
+local fn h_out(words: List[Int], width: Int, big_endian: Bool) -> Bytes = words |> list.flat_map((w) => list.range(0, width) |> list.map((k) => {
+  let shift = if big_endian then (width - 1 - k) * 8 else k * 8
+  int.band(int.bshr(w, shift), 255)
+})) |> bytes.from_list
+
+local fn h_hex(b: Bytes) -> String = bytes.to_list(b) |> list.map((x) => string.slice("0123456789abcdef", int.bshr(x, 4), int.bshr(x, 4) + 1) + string.slice(
+  "0123456789abcdef",
+  int.band(x, 15),
+  int.band(x, 15) + 1,
+)) |> string.join("")
+
+local fn h_md5_k() -> List[Int] = [
+  3614090360,
+  3905402710,
+  606105819,
+  3250441966,
+  4118548399,
+  1200080426,
+  2821735955,
+  4249261313,
+  1770035416,
+  2336552879,
+  4294925233,
+  2304563134,
+  1804603682,
+  4254626195,
+  2792965006,
+  1236535329,
+  4129170786,
+  3225465664,
+  643717713,
+  3921069994,
+  3593408605,
+  38016083,
+  3634488961,
+  3889429448,
+  568446438,
+  3275163606,
+  4107603335,
+  1163531501,
+  2850285829,
+  4243563512,
+  1735328473,
+  2368359562,
+  4294588738,
+  2272392833,
+  1839030562,
+  4259657740,
+  2763975236,
+  1272893353,
+  4139469664,
+  3200236656,
+  681279174,
+  3936430074,
+  3572445317,
+  76029189,
+  3654602809,
+  3873151461,
+  530742520,
+  3299628645,
+  4096336452,
+  1126891415,
+  2878612391,
+  4237533241,
+  1700485571,
+  2399980690,
+  4293915773,
+  2240044497,
+  1873313359,
+  4264355552,
+  2734768916,
+  1309151649,
+  4149444226,
+  3174756917,
+  718787259,
+  3951481745
+]
+
+local fn h_md5_s(i: Int) -> Int = {
+  let row = match i / 16 {
+    0 => [7, 12, 17, 22],
+    1 => [5, 9, 14, 20],
+    2 => [4, 11, 16, 23],
+    _ => [6, 10, 15, 21],
+  }
+  row[i % 4]
+}
+
+/// 16-byte MD5 digest of b. For compatibility only: MD5 is broken, never use it for security.
+fn md5(b: Bytes) -> Bytes = {
+  let m = h_pad(b, 64, 8, false)
+  let k = h_md5_k()
+  var h0 = 1732584193
+  var h1 = 4023233417
+  var h2 = 2562383102
+  var h3 = 271733878
+  var off = 0
+  while off < list.len(m) {
+    var a = h0
+    var bb = h1
+    var c = h2
+    var d = h3
+    var i = 0
+    while i < 64 {
+      let fg = match i / 16 {
+        0 => (int.bor(int.band(bb, c), int.band(int.bxor(bb, 4294967295), d)), i),
+        1 => (int.bor(int.band(d, bb), int.band(int.bxor(d, 4294967295), c)), (5 * i + 1) % 16),
+        2 => (int.bxor(int.bxor(bb, c), d), (3 * i + 5) % 16),
+        _ => (int.bxor(c, int.bor(bb, int.bxor(d, 4294967295))), (7 * i) % 16),
+      }
+      let f = h_mask32(fg.0 + a + k[i] + h_word32(m, off + fg.1 * 4, false))
+      a = d
+      d = c
+      c = bb
+      bb = h_mask32(bb + h_rotl32(f, h_md5_s(i)))
+      i = i + 1
+    }
+    h0 = h_mask32(h0 + a)
+    h1 = h_mask32(h1 + bb)
+    h2 = h_mask32(h2 + c)
+    h3 = h_mask32(h3 + d)
+    off = off + 64
+  }
+  h_out([h0, h1, h2, h3], 4, false)
+}
+
+/// MD5 of b as 32 lowercase hex chars. For compatibility only, never for security.
+fn md5_hex(b: Bytes) -> String = h_hex(md5(b))
+
+/// 20-byte SHA-1 digest of b. For compatibility only: SHA-1 is broken, never use it for security.
+fn sha1(b: Bytes) -> Bytes = {
+  let m = h_pad(b, 64, 8, true)
+  var h0 = 1732584193
+  var h1 = 4023233417
+  var h2 = 2562383102
+  var h3 = 271733878
+  var h4 = 3285377520
+  var w = list.repeat(0, 80)
+  var off = 0
+  while off < list.len(m) {
+    var t = 0
+    while t < 80 {
+      w[t] = if t < 16 then h_word32(m, off + t * 4, true)
+      else h_rotl32(int.bxor(int.bxor(w[t - 3], w[t - 8]), int.bxor(w[t - 14], w[t - 16])), 1)
+      t = t + 1
+    }
+    var a = h0
+    var bb = h1
+    var c = h2
+    var d = h3
+    var e = h4
+    var i = 0
+    while i < 80 {
+      let fk = match i / 20 {
+        0 => (int.bor(int.band(bb, c), int.band(int.bxor(bb, 4294967295), d)), 1518500249),
+        1 => (int.bxor(int.bxor(bb, c), d), 1859775393),
+        2 => (int.bor(int.bor(int.band(bb, c), int.band(bb, d)), int.band(c, d)), 2400959708),
+        _ => (int.bxor(int.bxor(bb, c), d), 3395469782),
+      }
+      let temp = h_mask32(h_rotl32(a, 5) + fk.0 + e + fk.1 + w[i])
+      e = d
+      d = c
+      c = h_rotl32(bb, 30)
+      bb = a
+      a = temp
+      i = i + 1
+    }
+    h0 = h_mask32(h0 + a)
+    h1 = h_mask32(h1 + bb)
+    h2 = h_mask32(h2 + c)
+    h3 = h_mask32(h3 + d)
+    h4 = h_mask32(h4 + e)
+    off = off + 64
+  }
+  h_out([h0, h1, h2, h3, h4], 4, true)
+}
+
+/// SHA-1 of b as 40 lowercase hex chars. For compatibility only, never for security.
+fn sha1_hex(b: Bytes) -> String = h_hex(sha1(b))
+
+local fn h_sha512_k() -> List[Int] = [
+  4794697086780616226,
+  8158064640168781261,
+  -5349999486874862801,
+  -1606136188198331460,
+  4131703408338449720,
+  6480981068601479193,
+  -7908458776815382629,
+  -6116909921290321640,
+  -2880145864133508542,
+  1334009975649890238,
+  2608012711638119052,
+  6128411473006802146,
+  8268148722764581231,
+  -9160688886553864527,
+  -7215885187991268811,
+  -4495734319001033068,
+  -1973867731355612462,
+  -1171420211273849373,
+  1135362057144423861,
+  2597628984639134821,
+  3308224258029322869,
+  5365058923640841347,
+  6679025012923562964,
+  8573033837759648693,
+  -7476448914759557205,
+  -6327057829258317296,
+  -5763719355590565569,
+  -4658551843659510044,
+  -4116276920077217854,
+  -3051310485924567259,
+  489312712824947311,
+  1452737877330783856,
+  2861767655752347644,
+  3322285676063803686,
+  5560940570517711597,
+  5996557281743188959,
+  7280758554555802590,
+  8532644243296465576,
+  -9096487096722542874,
+  -7894198246740708037,
+  -6719396339535248540,
+  -6333637450476146687,
+  -4446306890439682159,
+  -4076793802049405392,
+  -3345356375505022440,
+  -2983346525034927856,
+  -860691631967231958,
+  1182934255886127544,
+  1847814050463011016,
+  2177327727835720531,
+  2830643537854262169,
+  3796741975233480872,
+  4115178125766777443,
+  5681478168544905931,
+  6601373596472566643,
+  7507060721942968483,
+  8399075790359081724,
+  8693463985226723168,
+  -8878714635349349518,
+  -8302665154208450068,
+  -8016688836872298968,
+  -6606660893046293015,
+  -4685533653050689259,
+  -4147400797238176981,
+  -3880063495543823972,
+  -3348786107499101689,
+  -1523767162380948706,
+  -757361751448694408,
+  500013540394364858,
+  748580250866718886,
+  1242879168328830382,
+  1977374033974150939,
+  2944078676154940804,
+  3659926193048069267,
+  4368137639120453308,
+  4836135668995329356,
+  5532061633213252278,
+  6448918945643986474,
+  6902733635092675308,
+  7801388544844847127
+]
+
+/// 64-byte SHA-512 digest of b.
+fn sha512(b: Bytes) -> Bytes = {
+  let m = h_pad(b, 128, 16, true)
+  let k = h_sha512_k()
+  var hs = [
+    7640891576956012808,
+    -4942790177534073029,
+    4354685564936845355,
+    -6534734903238641935,
+    5840696475078001361,
+    -7276294671716946913,
+    2270897969802886507,
+    6620516959819538809
+  ]
+  var w = list.repeat(0, 80)
+  var off = 0
+  while off < list.len(m) {
+    var t = 0
+    while t < 80 {
+      w[t] = if t < 16 then h_word64(m, off + t * 8)
+      else {
+        let w15 = w[t - 15]
+        let w2 = w[t - 2]
+        let s0 = int.bxor(int.bxor(h_rotr64(w15, 1), h_rotr64(w15, 8)), h_shr64(w15, 7))
+        let s1 = int.bxor(int.bxor(h_rotr64(w2, 19), h_rotr64(w2, 61)), h_shr64(w2, 6))
+        w[t - 16] + s0 + w[t - 7] + s1
+      }
+      t = t + 1
+    }
+    var a = hs[0]
+    var bb = hs[1]
+    var c = hs[2]
+    var d = hs[3]
+    var e = hs[4]
+    var f = hs[5]
+    var g = hs[6]
+    var h = hs[7]
+    var i = 0
+    while i < 80 {
+      let s1 = int.bxor(int.bxor(h_rotr64(e, 14), h_rotr64(e, 18)), h_rotr64(e, 41))
+      let ch = int.bxor(int.band(e, f), int.band(int.bnot(e), g))
+      let t1 = h + s1 + ch + k[i] + w[i]
+      let s0 = int.bxor(int.bxor(h_rotr64(a, 28), h_rotr64(a, 34)), h_rotr64(a, 39))
+      let maj = int.bxor(int.bxor(int.band(a, bb), int.band(a, c)), int.band(bb, c))
+      let t2 = s0 + maj
+      h = g
+      g = f
+      f = e
+      e = d + t1
+      d = c
+      c = bb
+      bb = a
+      a = t1 + t2
+      i = i + 1
+    }
+    hs = [
+      hs[0] + a,
+      hs[1] + bb,
+      hs[2] + c,
+      hs[3] + d,
+      hs[4] + e,
+      hs[5] + f,
+      hs[6] + g,
+      hs[7] + h
+    ]
+    off = off + 128
+  }
+  h_out(hs, 8, true)
+}
+
+/// SHA-512 of b as 128 lowercase hex chars.
+fn sha512_hex(b: Bytes) -> String = h_hex(sha512(b))
