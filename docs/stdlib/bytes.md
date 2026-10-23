@@ -152,9 +152,11 @@ Appenders (preferred). The `write_*_be` family is the older spelling and remains
 | `bytes.read_length_prefixed_strings_le(b, pos, count)` | List of `count` length-prefixed strings |
 | `bytes.skip_length_prefixed_le(b, pos, count)` | Returns the byte offset past `count` LE-length-prefixed records |
 
-## Pointer interop (advanced)
+## Pointer interop (deprecated — use `ffi`)
 
-For zero-copy interop with native code (e.g. when calling Rust runtime directly).
+Deprecated since dialect epoch 15 in favour of the [`ffi`](ffi.md) module, and
+outside the memory-safety guarantee: each call is E100 in a file without
+`import ffi` (#4043) and under `--profile critical` (#4008).
 
 | Signature | Purpose |
 |---|---|

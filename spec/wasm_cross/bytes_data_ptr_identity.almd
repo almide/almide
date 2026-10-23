@@ -11,6 +11,8 @@
 // divergence. The fuzzer now screens every file naming data_ptr out of its
 // mutation seeds, so this property lives in its own small file and the
 // rest of the bytes family stays a seed.
+import ffi
+
 fn main() -> Unit = {
   let abcde = bytes.from_string("abcde")
   let p1 = bytes.data_ptr(abcde)

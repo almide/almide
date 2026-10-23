@@ -41,7 +41,7 @@ impl super::Checker {
     /// The deprecation marker `key` resolves to: a registered one, else — for
     /// a stdlib fn the call resolves through the bundled-signature fallback,
     /// exactly as `lookup_call_sig` does — the marker on the bundled source.
-    fn deprecation_of(&self, key: &str) -> Option<crate::deprecation::Deprecation> {
+    pub(crate) fn deprecation_of(&self, key: &str) -> Option<crate::deprecation::Deprecation> {
         if let Some(dep) = self.env.deprecations.get(&sym(key)) {
             return Some(dep.clone());
         }

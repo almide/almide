@@ -1,0 +1,12 @@
+// The fix: `import ffi` opts the file in, `ffi.write` (an effect fn, address
+// first) replaces the deprecated spelling, and the capacity is the
+// destination's own length.
+import ffi
+
+effect fn main() -> Unit = {
+  var small = bytes.from_list([1, 2, 3, 4])
+  let big = bytes.from_list(list.repeat(65, 4096))
+  let n = ffi.write(ffi.address(small), big, bytes.len(small))!
+  println(int.to_string(n))
+  println(int.to_string(bytes.len(small)))
+}

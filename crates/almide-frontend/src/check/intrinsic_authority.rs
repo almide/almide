@@ -129,6 +129,107 @@ impl Checker {
         self.emit(diagnostic);
     }
 
+    /// E100 (#4043) for a `module.field` spelling — a call, a pipe target or a
+    /// fn value — that names a `@memory_unsafe` stdlib fn. The module is the
+    /// one the file WROTE; it counts only when it resolves to the stdlib
+    /// module through this file's imports and no local binding shadows it.
+    pub(crate) fn reject_unopted_memory_unsafe_member(&mut self, module: &Sym, field: &Sym, span: Option<Span>) {
+        if self.env.lookup_var(module.as_str()).is_some() {
+            return;
+        }
+        let Some(canonical) = self.env.import_table.resolve(module.as_str()) else { return };
+        if !self.env.import_table.resolves_to_stdlib(module.as_str(), canonical.as_str()) {
+            return;
+        }
+        self.reject_unopted_memory_unsafe(canonical.as_str(), field.as_str(), span);
+    }
+
+    /// E100 (#4043) for a callee as written: `m.f`, or a bare selectively
+    /// imported name. The direct call and the pipe stage both pass here.
+    pub(crate) fn reject_unopted_memory_unsafe_callee(&mut self, callee: &crate::ast::Expr) {
+        use crate::ast::ExprKind;
+        match &callee.kind {
+            ExprKind::Ident { name, .. } => self.reject_unopted_memory_unsafe_bare(name.as_str(), callee.span),
+            ExprKind::Member { object, field, .. } => {
+                if let ExprKind::Ident { name, .. } = &object.kind {
+                    self.reject_unopted_memory_unsafe_member(name, field, object.span);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// E100 (#4043) for a bare name a selective import brought in
+    /// (`import bytes.{from_raw_ptr}` then `from_raw_ptr(p, n)`).
+    pub(crate) fn reject_unopted_memory_unsafe_bare(&mut self, name: &str, span: Option<Span>) {
+        if self.env.lookup_var(name).is_some() {
+            return;
+        }
+        let Some(qualified) = self.env.import_table.resolve_direct(name) else { return };
+        if let Some((module, func)) = qualified.rsplit_once('.') {
+            self.reject_unopted_memory_unsafe(module, func, span);
+        }
+    }
+
+    /// E100 (#4043): a `@memory_unsafe` stdlib fn (`ffi.*`, the deprecated
+    /// `bytes` raw-pointer spellings) called from a file that did not write
+    /// `import ffi`. The import is the opt-in, the one line a reader looks at
+    /// to learn that a file reads or writes memory outside its values, so a
+    /// file with neither `import ffi` nor `@extern` stays inside the
+    /// memory-safety guarantee on every target. The property is read from the
+    /// `@memory_unsafe` declaration, never from a list of names. The stdlib's
+    /// own sources are exempt, as for E085; an unknown origin abstains.
+    /// Under `--profile critical` the profile refuses the call itself (E100
+    /// with the profile's message), so this one stays silent there.
+    pub(crate) fn reject_unopted_memory_unsafe(&mut self, module: &str, func: &str, span: Option<Span>) {
+        use almide_lang::stdlib_info::{MEMORY_UNSAFE_OPT_IN, is_memory_unsafe_stdlib_fn};
+        if !is_memory_unsafe_stdlib_fn(module, func) {
+            return;
+        }
+        let opt_in = almide_base::intern::sym(MEMORY_UNSAFE_OPT_IN);
+        if self.env.import_table.stdlib.contains(&opt_in) {
+            // The call is what the import is FOR: a file whose only raw-memory
+            // use is a deprecated `bytes` spelling still uses `import ffi`, so
+            // neither E060 nor `almide fmt` may take the opt-in away.
+            let written = self.env.import_table.written_name_of(opt_in);
+            self.env.import_table.mark_used(written.as_str());
+            return;
+        }
+        if self.profile_critical || self.stdlib_authority() != Some(false) {
+            return;
+        }
+        let at = span.map(|s| (s.line, s.col));
+        if at.is_some() && self.diagnostics.iter().any(|d| d.code == Some("E100") && d.line.zip(d.col) == at) {
+            return;
+        }
+        let key = format!("{module}.{func}");
+        let rewrite = match self.deprecation_of(&key).and_then(|d| d.use_instead.map(|u| (u, d.note))) {
+            Some((replacement, note)) => format!(
+                "add `import {MEMORY_UNSAFE_OPT_IN}` and write `{replacement}` in place of the deprecated `{key}`{}",
+                note.map(|n| format!(" ({n})")).unwrap_or_default()
+            ),
+            None => format!("add `import {MEMORY_UNSAFE_OPT_IN}` to this file"),
+        };
+        let hint = format!(
+            "`{key}` reads or writes memory at a raw address with a length nothing checks; `import {MEMORY_UNSAFE_OPT_IN}` is the opt-in that marks a file as leaving the memory-safety guarantee — {rewrite}. Without raw memory, use the bounded `bytes` functions (`bytes.slice`, `bytes.get`, `bytes.copy_from`)"
+        );
+        let mut diagnostic = err(
+            format!("`{key}` is outside the memory-safety guarantee and needs `import {MEMORY_UNSAFE_OPT_IN}` in this file"),
+            hint,
+            format!("call to {key}"),
+        )
+        .with_code("E100");
+        if let Some(sp) = span {
+            diagnostic.file = self.source_file.clone();
+            diagnostic.line = Some(sp.line);
+            diagnostic.col = Some(sp.col);
+            if sp.end_col > sp.col {
+                diagnostic.end_col = Some(sp.end_col);
+            }
+        }
+        self.emit(diagnostic);
+    }
+
     /// E085 for `import prim` outside the stdlib: the module is not user
     /// surface, so naming it in an import is refused like naming one of its fns.
     pub(super) fn reject_user_prim_import(&mut self, imports: &[Decl]) {

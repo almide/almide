@@ -6,6 +6,8 @@
 // a tail call whose last argument is the block's last use, a temporary
 // whose only reader is `data_ptr`, an address held in a `let`, and an
 // address that comes out of a helper fn.
+import ffi
+
 @extern(wasm, "js", "js_peek")
 fn js_peek(ptr: Int, len: Int) -> Int
 
