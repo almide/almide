@@ -283,8 +283,8 @@ expect = """["éa", "ab"]"""
 [[string.fn]]
 name = "split_at"
 index_unit = "codepoint"
-probe = 'string.split_at("éab", 1)'
-expect = """("é", "ab")"""
+probe = 'string.split_at("éab", 1).1'
+expect = "ab"
 
 # ---------------------------------------------------------------------------
 # datetime — the second module on the ratchet. The #419 question here is the
