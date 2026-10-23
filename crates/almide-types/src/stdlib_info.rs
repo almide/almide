@@ -6,7 +6,7 @@
 pub const STDLIB_MODULES: &[&str] = &[
     "string", "list", "int", "float", "bytes", "matrix", "fs", "env", "map",
     "json", "http", "process", "math", "random", "regex", "io", "result",
-    "option", "error", "datetime", "testing", "value", "set",
+    "option", "error", "datetime", "testing", "value", "set", "deque", "heap",
     "base64", "hex", "hash", "net", "url", "zlib",
     // Sized numeric types (Stage 3 of the sized-numeric-types arc).
     // Each hosts UFCS conversion methods (`.to_int64()`,
@@ -21,7 +21,7 @@ pub const STDLIB_MODULES: &[&str] = &[
 pub const BUNDLED_MODULES: &[&str] = &[
     "args", "path", "list", "int", "base64", "hex", "hash", "float", "bytes",
     "error", "math", "datetime", "value", "option", "result",
-    "map", "set", "string",
+    "map", "set", "string", "deque", "heap",
     "env", "io", "random", "regex", "testing",
     "process", "fs", "http", "html", "json", "matrix", "net", "url", "zlib",
     "int8", "int16", "int32", "int64",
@@ -59,7 +59,7 @@ pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
     // the auto-import behavior the generated `stdlib_sigs` previously
     // provided.
     "error", "math", "datetime", "value", "option", "result",
-    "map", "set", "string",
+    "map", "set", "string", "deque", "heap",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "float32", "float64",
@@ -136,6 +136,8 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("path", "SafePath"),
     ("process", "ProcessStatus"),
     ("url", "Url"),
+    ("deque", "Deque"),
+    ("heap", "Heap"),
 ];
 
 /// The owning module of a stdlib-owned nominal type, by BARE name — `None`
@@ -243,6 +245,8 @@ fn bundled_source_collections(name: &str) -> Option<&'static str> {
         "result" => Some(crate::embedded::SRC_RESULT),
         "map" => Some(crate::embedded::SRC_MAP),
         "set" => Some(crate::embedded::SRC_SET),
+        "deque" => Some(crate::embedded::SRC_DEQUE),
+        "heap" => Some(crate::embedded::SRC_HEAP),
         "string" => Some(crate::embedded::SRC_STRING),
         "env" => Some(crate::embedded::SRC_ENV),
         "io" => Some(crate::embedded::SRC_IO),
