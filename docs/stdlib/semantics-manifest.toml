@@ -202,6 +202,90 @@ index_unit = "count"
 probe = 'string.run_length_encode("ééa")'
 expect = """[("é", 2), ("a", 1)]"""
 
+[[string.fn]]
+name = "compare"
+index_unit = "ordering"
+probe = '"${string.compare("a", "b")} ${string.compare("é", "é")} ${string.compare("b", "a")}"'
+expect = "-1 0 1"
+
+[[string.fn]]
+name = "byte_len"
+index_unit = "byte"
+probe = 'string.byte_len("café")'
+expect = "5"
+
+[[string.fn]]
+name = "to_utf16"
+index_unit = "value"
+probe = 'string.to_utf16("é😀")'
+expect = "[233, 55357, 56832]"
+
+[[string.fn]]
+name = "from_utf16"
+index_unit = "value"
+probe = 'string.from_utf16([233, 55357, 56832]) ?? "E"'
+expect = "é😀"
+
+[[string.fn]]
+name = "insert"
+index_unit = "codepoint"
+probe = 'string.insert("éa", 1, "X")'
+expect = "éXa"
+
+[[string.fn]]
+name = "remove_at"
+index_unit = "codepoint"
+probe = 'string.remove_at("éab", 1)'
+expect = "éb"
+
+[[string.fn]]
+name = "enumerate"
+index_unit = "codepoint"
+probe = 'string.enumerate("éa")'
+expect = """[(0, "é"), (1, "a")]"""
+
+[[string.fn]]
+name = "sort_with"
+index_unit = "ordering"
+probe = 'string.sort_with("abc", (a, b) => string.compare(b, a))'
+expect = """["c", "b", "a"]"""
+
+[[string.fn]]
+name = "min_with"
+index_unit = "ordering"
+probe = 'string.min_with("bca", (a, b) => string.compare(a, b))'
+expect = """some("a")"""
+
+[[string.fn]]
+name = "max_with"
+index_unit = "ordering"
+probe = 'string.max_with("bca", (a, b) => string.compare(a, b))'
+expect = """some("c")"""
+
+[[string.fn]]
+name = "find_index"
+index_unit = "codepoint"
+probe = 'string.find_index("éa1", (c) => c == "1")'
+expect = "some(2)"
+
+[[string.fn]]
+name = "chunk"
+index_unit = "codepoint"
+probe = 'string.chunk("éabc", 2)'
+expect = """["éa", "bc"]"""
+
+[[string.fn]]
+name = "window"
+index_unit = "codepoint"
+probe = 'string.window("éab", 2)'
+expect = """["éa", "ab"]"""
+
+[[string.fn]]
+name = "split_at"
+index_unit = "codepoint"
+probe = 'string.split_at("éab", 1)'
+expect = """("é", "ab")"""
+
 # ---------------------------------------------------------------------------
 # datetime — the second module on the ratchet. The #419 question here is the
 # TIMESTAMP SCALE (seconds, not milliseconds — a JS-shaped assumption is off by
