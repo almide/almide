@@ -76,12 +76,18 @@ test "binary_search_with finds a value of a list sorted by the comparator" {
 }
 
 test "unzip is the inverse of zip" {
-  assert_eq(list.unzip([(1, "a"), (2, "b")]), ([1, 2], ["a", "b"]))
+  let (ns, ss) = list.unzip([(1, "a"), (2, "b")])
+  assert_eq(ns, [1, 2])
+  assert_eq(ss, ["a", "b"])
   let xs = [1, 2, 3]
   let ys = ["x", "y", "z"]
-  assert_eq(list.unzip(list.zip(xs, ys)), (xs, ys))
+  let (xs2, ys2) = list.unzip(list.zip(xs, ys))
+  assert_eq(xs2, xs)
+  assert_eq(ys2, ys)
   let e: List[(Int, String)] = []
-  assert_eq(list.unzip(e), ([], []))
+  let (en, es) = list.unzip(e)
+  assert_eq(en, [])
+  assert_eq(es, [])
 }
 
 test "range_step counts up, counts down, and is half-open like range" {
