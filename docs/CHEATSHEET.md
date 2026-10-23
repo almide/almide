@@ -934,6 +934,8 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [list](stdlib/list.md) | List operations | auto-imported | 59 |
 | [map](stdlib/map.md) | Map (dictionary) operations | auto-imported | 24 |
 | [set](stdlib/set.md) | Set operations | auto-imported | 19 |
+| [deque](stdlib/deque.md) | Double-ended queue: push/pop at both ends | auto-imported | 58 |
+| [heap](stdlib/heap.md) | Priority queue, least first | auto-imported | 16 |
 | [int](stdlib/int.md) | Integer arithmetic and bitwise | auto-imported | 22 |
 | [float](stdlib/float.md) | Floating-point operations | auto-imported | 17 |
 | [bool](stdlib/bool.md) | Parse, compare and print booleans | auto-imported | 3 |
