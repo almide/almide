@@ -374,6 +374,7 @@
 4581	3242	56114	4581	spec/wasm_cross/json_gltf_walk.almd
 71914	65885	1590792	71914	spec/wasm_cross/json_many_keys.almd
 116	72	1453	116	spec/wasm_cross/json_number_unicode.almd
+53124	49087	724129	53124	spec/wasm_cross/json_parse_depth_bound.almd
 218	203	2995	218	spec/wasm_cross/json_parse_lenient_edges.almd
 718	624	6669	718	spec/wasm_cross/json_path_edges.almd
 1676	1619	20456	1676	spec/wasm_cross/json_path_index_domain.almd
@@ -951,6 +952,7 @@
 93	61	986	93	spec/wasm_cross/witness_straightline.almd
 15	1	643	15	spec/wasm_cross/zip_view_shape.almd
 429	371	74389	429	spec/wasm_cross/zlib_call_vs_user_namesake.almd
+18108	18064	1026953	18089	spec/wasm_cross/zlib_output_bound.almd
 4275	4208	342160	4275	spec/wasm_cross/zlib_selfhost.almd
 2	0	52	0	spec/wasm_fail/effect_err_aborts_both_legs.almd
 2	0	52	0	spec/wasm_fail/int_parse_err_propagates.almd
