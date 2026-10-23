@@ -5112,6 +5112,105 @@ fn to_float64(x: Float32) -> Float64 = float.from_float32(x)
 /// Shortest f32 round-trip digits, no exponent; 0.1 stays 0.1, 2.0 keeps .0.
 @intrinsic("almide_rt_float32_to_string")
 fn to_string(x: Float32) -> String = _
+
+
+/// -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
+fn compare(a: Float32, b: Float32) -> Int = total_order(
+  float.from_float32(a),
+  float.from_float32(b),
+)
+
+local fn total_order(a: Float, b: Float) -> Int = match (float.is_nan(a), float.is_nan(b)) {
+  (true, true) => 0,
+  (true, false) => 1,
+  (false, true) => -1,
+  _ => if a < b then -1
+  else if a > b then 1 else sign_order(float.to_bits(a) < 0, float.to_bits(b) < 0),
+}
+
+
+local fn sign_order(neg_a: Bool, neg_b: Bool) -> Int = match (neg_a, neg_b) {
+  (true, false) => -1,
+  (false, true) => 1,
+  _ => 0,
+}
+
+/// Lesser; a NaN operand is ignored; -0.0 < 0.0.
+fn min(a: Float32, b: Float32) -> Float32 = float.to_float32(float.min(float.from_float32(a), float.from_float32(b)))
+
+/// Greater; a NaN operand is ignored; 0.0 > -0.0.
+fn max(a: Float32, b: Float32) -> Float32 = float.to_float32(float.max(float.from_float32(a), float.from_float32(b)))
+
+/// x limited to lo..hi; lo > hi or a NaN bound aborts.
+fn clamp(x: Float32, lo: Float32, hi: Float32) -> Float32 = float.to_float32(float.clamp(float.from_float32(x), float.from_float32(lo), float.from_float32(hi)))
+
+/// True only for NaN.
+fn is_nan(x: Float32) -> Bool = float.is_nan(float.from_float32(x))
+
+/// True for inf and -inf; false for NaN.
+fn is_infinite(x: Float32) -> Bool = float.is_infinite(float.from_float32(x))
+
+/// True unless x is inf, -inf or NaN.
+fn is_finite(x: Float32) -> Bool = not (float.is_nan(float.from_float32(x)) or float.is_infinite(float.from_float32(x)))
+
+/// Magnitude; -0.0 gives 0.0, NaN stays NaN.
+fn abs(x: Float32) -> Float32 = float.to_float32(float.abs(float.from_float32(x)))
+
+/// Round toward -inf; -0.5 gives -1.0.
+fn floor(x: Float32) -> Float32 = float.to_float32(float.floor(float.from_float32(x)))
+
+/// Round toward +inf; -0.5 gives -0.0.
+fn ceil(x: Float32) -> Float32 = float.to_float32(float.ceil(float.from_float32(x)))
+
+/// Nearest whole value; halves round away from zero.
+fn round(x: Float32) -> Float32 = float.to_float32(float.round(float.from_float32(x)))
+
+/// Round toward 0; -0.5 gives -0.0.
+fn trunc(x: Float32) -> Float32 = {
+  let f = float.from_float32(x)
+  float.to_float32(if f < 0.0 then float.ceil(f) else float.floor(f))
+}
+
+/// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+fn signum(x: Float32) -> Float32 = {
+  let f = float.from_float32(x)
+  if float.is_nan(f) then x
+  else if float.to_bits(f) < 0 then float.to_float32(-1.0) else float.to_float32(1.0)
+}
+
+/// The 32 IEEE-754 binary32 bits as a non-negative Int; any NaN gives 0x7fc00000.
+fn to_bits(x: Float32) -> Int = {
+  let b = float.to_bits(float.from_float32(x))
+  let sign = if b < 0 then 2147483648 else 0
+  sign + binary32_magnitude(int.band(int.bshr(b, 52), 2047), int.band(b, 4503599627370495))
+}
+
+
+
+local fn binary32_magnitude(e: Int, f: Int) -> Int = match e {
+  0 => 0,
+  2047 => if f == 0 then 2139095040 else 2143289344,
+  _ => if e >= 897 then int.bor(int.bshl(e - 896, 23), int.bshr(f, 29))
+  else int.bshr(f + 4503599627370496, 926 - e),
+}
+
+/// Float32 whose binary32 bits are the low 32 bits of bits.
+fn from_bits(bits: Int) -> Float32 = float.to_float32(int.bits_to_f32(bits))
+
+/// Positive infinity.
+fn infinity() -> Float32 = from_bits(2139095040)
+
+/// The one quiet NaN (bits 0x7fc00000).
+fn nan() -> Float32 = from_bits(2143289344)
+
+/// Gap between 1.0 and the next Float32: 2^-23.
+fn epsilon() -> Float32 = from_bits(872415232)
+
+/// Largest finite Float32, about 3.4028235e38.
+fn max_value() -> Float32 = from_bits(2139095039)
+
+/// Most negative finite Float32 (= -max_value()), not the smallest positive.
+fn min_value() -> Float32 = from_bits(4286578687)
 "#;
 pub const SRC_FLOAT32_CONVERT: &str = r#"
 
@@ -5203,6 +5302,98 @@ fn to_float32(x: Float64) -> Float32 = float.to_float32(float.from_float64(x))
 
 /// Plain decimal, never an exponent; 2.0 keeps .0.
 fn to_string(x: Float64) -> String = float.to_string(float.from_float64(x))
+
+
+/// -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
+fn compare(a: Float64, b: Float64) -> Int = total_order(
+  float.from_float64(a),
+  float.from_float64(b),
+)
+
+local fn total_order(a: Float, b: Float) -> Int = match (float.is_nan(a), float.is_nan(b)) {
+  (true, true) => 0,
+  (true, false) => 1,
+  (false, true) => -1,
+  _ => if a < b then -1
+  else if a > b then 1 else sign_order(float.to_bits(a) < 0, float.to_bits(b) < 0),
+}
+
+
+local fn sign_order(neg_a: Bool, neg_b: Bool) -> Int = match (neg_a, neg_b) {
+  (true, false) => -1,
+  (false, true) => 1,
+  _ => 0,
+}
+
+/// Lesser; a NaN operand is ignored; -0.0 < 0.0.
+fn min(a: Float64, b: Float64) -> Float64 = float.to_float64(float.min(float.from_float64(a), float.from_float64(b)))
+
+/// Greater; a NaN operand is ignored; 0.0 > -0.0.
+fn max(a: Float64, b: Float64) -> Float64 = float.to_float64(float.max(float.from_float64(a), float.from_float64(b)))
+
+/// x limited to lo..hi; lo > hi or a NaN bound aborts.
+fn clamp(x: Float64, lo: Float64, hi: Float64) -> Float64 = float.to_float64(float.clamp(float.from_float64(x), float.from_float64(lo), float.from_float64(hi)))
+
+/// True only for NaN.
+fn is_nan(x: Float64) -> Bool = float.is_nan(float.from_float64(x))
+
+/// True for inf and -inf; false for NaN.
+fn is_infinite(x: Float64) -> Bool = float.is_infinite(float.from_float64(x))
+
+/// True unless x is inf, -inf or NaN.
+fn is_finite(x: Float64) -> Bool = not (float.is_nan(float.from_float64(x)) or float.is_infinite(float.from_float64(x)))
+
+/// Magnitude; -0.0 gives 0.0, NaN stays NaN.
+fn abs(x: Float64) -> Float64 = float.to_float64(float.abs(float.from_float64(x)))
+
+/// Round toward -inf; -0.5 gives -1.0.
+fn floor(x: Float64) -> Float64 = float.to_float64(float.floor(float.from_float64(x)))
+
+/// Round toward +inf; -0.5 gives -0.0.
+fn ceil(x: Float64) -> Float64 = float.to_float64(float.ceil(float.from_float64(x)))
+
+/// Nearest whole value; halves round away from zero.
+fn round(x: Float64) -> Float64 = float.to_float64(float.round(float.from_float64(x)))
+
+/// Round toward 0; -0.5 gives -0.0.
+fn trunc(x: Float64) -> Float64 = {
+  let f = float.from_float64(x)
+  float.to_float64(if f < 0.0 then float.ceil(f) else float.floor(f))
+}
+
+/// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+fn signum(x: Float64) -> Float64 = {
+  let f = float.from_float64(x)
+  if float.is_nan(f) then x
+  else if float.to_bits(f) < 0 then float.to_float64(-1.0) else float.to_float64(1.0)
+}
+
+/// The 64 IEEE-754 binary64 bits as Int; any NaN gives the canonical NaN.
+fn to_bits(x: Float64) -> Int = float.to_bits(float.from_float64(x))
+
+/// Float64 whose IEEE-754 binary64 bits are bits.
+fn from_bits(bits: Int) -> Float64 = float.to_float64(int.bits_to_float(bits))
+
+/// Positive infinity.
+fn infinity() -> Float64 = from_bits(9218868437227405312)
+
+/// The one quiet NaN (bits 0x7ff8000000000000).
+fn nan() -> Float64 = from_bits(9221120237041090560)
+
+/// Gap between 1.0 and the next Float64: 2^-52.
+fn epsilon() -> Float64 = from_bits(4372995238176751616)
+
+/// Largest finite Float64, about 1.7976931348623157e308.
+fn max_value() -> Float64 = from_bits(9218868437227405311)
+
+/// Most negative finite Float64 (= -max_value()), not the smallest positive.
+fn min_value() -> Float64 = from_bits(-4503599627370497)
+
+/// Float64 from trimmed s, the grammar of float.parse; err on junk.
+fn parse(s: String) -> Result[Float64, String] = match float.parse(s) {
+  ok(f) => ok(float.to_float64(f)),
+  err(e) => err(e),
+}
 "#;
 pub const SRC_FLOAT64_CONVERT: &str = r#"
 
