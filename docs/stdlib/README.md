@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 48 stdlib modules, 1412 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 48 stdlib modules, 1453 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -20,8 +20,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [error](#error) | 3 | 0 |
 | [ffi](#ffi) | 4 | 0 |
 | [float](#float) | 46 | 0 |
-| [float32](#float32) | 10 | 0 |
-| [float64](#float64) | 10 | 0 |
+| [float32](#float32) | 30 | 0 |
+| [float64](#float64) | 31 | 0 |
 | [fs](#fs) | 34 | 1 |
 | [hash](#hash) | 12 | 0 |
 | [heap](#heap) | 16 | 1 |
@@ -448,6 +448,26 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float32.to_uint64(x: Float32) -> UInt64` — Truncates toward 0, saturating; NaN gives 0.
 - `float32.to_float64(x: Float32) -> Float64` — Exact widening; never rounds.
 - `float32.to_string(x: Float32) -> String` — Shortest f32 round-trip digits, no exponent; 0.1 stays 0.1, 2.0 keeps .0.
+- `float32.compare(a: Float32, b: Float32) -> Int` — -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
+- `float32.min(a: Float32, b: Float32) -> Float32` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
+- `float32.max(a: Float32, b: Float32) -> Float32` — Greater; a NaN operand is ignored; 0.0 > -0.0.
+- `float32.clamp(x: Float32, lo: Float32, hi: Float32) -> Float32` — x limited to lo..hi; lo > hi or a NaN bound aborts.
+- `float32.is_nan(x: Float32) -> Bool` — True only for NaN.
+- `float32.is_infinite(x: Float32) -> Bool` — True for inf and -inf; false for NaN.
+- `float32.is_finite(x: Float32) -> Bool` — True unless x is inf, -inf or NaN.
+- `float32.abs(x: Float32) -> Float32` — Magnitude; -0.0 gives 0.0, NaN stays NaN.
+- `float32.floor(x: Float32) -> Float32` — Round toward -inf; -0.5 gives -1.0.
+- `float32.ceil(x: Float32) -> Float32` — Round toward +inf; -0.5 gives -0.0.
+- `float32.round(x: Float32) -> Float32` — Nearest whole value; halves round away from zero.
+- `float32.trunc(x: Float32) -> Float32` — Round toward 0; -0.5 gives -0.0.
+- `float32.signum(x: Float32) -> Float32` — 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+- `float32.to_bits(x: Float32) -> Int` — The 32 IEEE-754 binary32 bits as a non-negative Int; any NaN gives 0x7fc00000.
+- `float32.from_bits(bits: Int) -> Float32` — Float32 whose binary32 bits are the low 32 bits of bits.
+- `float32.infinity() -> Float32` — Positive infinity.
+- `float32.nan() -> Float32` — The one quiet NaN (bits 0x7fc00000).
+- `float32.epsilon() -> Float32` — Gap between 1.0 and the next Float32: 2^-23.
+- `float32.max_value() -> Float32` — Largest finite Float32, about 3.4028235e38.
+- `float32.min_value() -> Float32` — Most negative finite Float32 (= -max_value()), not the smallest positive.
 
 ## float64
 
@@ -463,6 +483,27 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float64.to_uint64(x: Float64) -> UInt64` — Truncates toward 0, saturating; NaN gives 0.
 - `float64.to_float32(x: Float64) -> Float32` — Nearest Float32; overflow becomes infinity.
 - `float64.to_string(x: Float64) -> String` — Plain decimal, never an exponent; 2.0 keeps .0.
+- `float64.compare(a: Float64, b: Float64) -> Int` — -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
+- `float64.min(a: Float64, b: Float64) -> Float64` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
+- `float64.max(a: Float64, b: Float64) -> Float64` — Greater; a NaN operand is ignored; 0.0 > -0.0.
+- `float64.clamp(x: Float64, lo: Float64, hi: Float64) -> Float64` — x limited to lo..hi; lo > hi or a NaN bound aborts.
+- `float64.is_nan(x: Float64) -> Bool` — True only for NaN.
+- `float64.is_infinite(x: Float64) -> Bool` — True for inf and -inf; false for NaN.
+- `float64.is_finite(x: Float64) -> Bool` — True unless x is inf, -inf or NaN.
+- `float64.abs(x: Float64) -> Float64` — Magnitude; -0.0 gives 0.0, NaN stays NaN.
+- `float64.floor(x: Float64) -> Float64` — Round toward -inf; -0.5 gives -1.0.
+- `float64.ceil(x: Float64) -> Float64` — Round toward +inf; -0.5 gives -0.0.
+- `float64.round(x: Float64) -> Float64` — Nearest whole value; halves round away from zero.
+- `float64.trunc(x: Float64) -> Float64` — Round toward 0; -0.5 gives -0.0.
+- `float64.signum(x: Float64) -> Float64` — 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+- `float64.to_bits(x: Float64) -> Int` — The 64 IEEE-754 binary64 bits as Int; any NaN gives the canonical NaN.
+- `float64.from_bits(bits: Int) -> Float64` — Float64 whose IEEE-754 binary64 bits are bits.
+- `float64.infinity() -> Float64` — Positive infinity.
+- `float64.nan() -> Float64` — The one quiet NaN (bits 0x7ff8000000000000).
+- `float64.epsilon() -> Float64` — Gap between 1.0 and the next Float64: 2^-52.
+- `float64.max_value() -> Float64` — Largest finite Float64, about 1.7976931348623157e308.
+- `float64.min_value() -> Float64` — Most negative finite Float64 (= -max_value()), not the smallest positive.
+- `float64.parse(s: String) -> Result[Float64, String]` — Float64 from trimmed s, the grammar of float.parse; err on junk.
 
 ## fs
 
