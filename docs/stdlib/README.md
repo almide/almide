@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 45 stdlib modules, 1078 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 45 stdlib modules, 1131 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -11,7 +11,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [args](#args) | 7 | 0 |
 | [base64](#base64) | 4 | 0 |
 | [bool](#bool) | 3 | 0 |
-| [bytes](#bytes) | 146 | 1 |
+| [bytes](#bytes) | 199 | 1 |
 | [compute](#compute) | 7 | 0 |
 | [datetime](#datetime) | 23 | 0 |
 | [duration](#duration) | 7 | 0 |
@@ -233,6 +233,59 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `bytes.set_uint32(mut b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
 - `bytes.set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
 - `bytes.set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
+- `bytes.get_u8(b: Bytes, pos: Int) -> Option[Int]` — The byte at pos as 0..255; none outside 0..len.
+- `bytes.get_i8(b: Bytes, pos: Int) -> Option[Int]` — The byte at pos as a signed -128..127; none outside 0..len.
+- `bytes.next_i8(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i8(b, pos), pos + 1); the position stays at pos when nothing is read.
+- `bytes.get_f16_be(b: Bytes, pos: Int) -> Option[Float]` — The big-endian half-precision float at pos; none unless 2 bytes fit.
+- `bytes.next_f16_be(b: Bytes, pos: Int) -> (Option[Float], Int)` — (get_f16_be(b, pos), pos + 2); the position stays at pos when nothing is read.
+- `bytes.get_f16_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]` — count big-endian half floats from pos; none unless all fit or if count < 0.
+- `bytes.take(b: Bytes, n: Int) -> Bytes` — The first n bytes; all of b past its length; n < 0 aborts.
+- `bytes.drop(b: Bytes, n: Int) -> Bytes` — b without its first n bytes; empty past its length; n < 0 aborts.
+- `bytes.take_end(b: Bytes, n: Int) -> Bytes` — The last n bytes; all of b past its length; n < 0 aborts.
+- `bytes.drop_end(b: Bytes, n: Int) -> Bytes` — b without its last n bytes; empty past its length; n < 0 aborts.
+- `bytes.split_at(b: Bytes, n: Int) -> (Bytes, Bytes)` — (first n bytes, the rest); n past the end gives (b, empty); n < 0 aborts.
+- `bytes.first(b: Bytes) -> Option[Int]` — The first byte, or none if b is empty.
+- `bytes.last(b: Bytes) -> Option[Int]` — The last byte, or none if b is empty.
+- `bytes.filter(b: Bytes, f: (Int) -> Bool) -> Bytes` — The bytes for which f is true.
+- `bytes.fold(b: Bytes, init: B, f: (B, Int) -> B) -> B` — f folded over the bytes, left to right.
+- `bytes.any(b: Bytes, f: (Int) -> Bool) -> Bool` — True when f holds for some byte; false for empty b.
+- `bytes.all(b: Bytes, f: (Int) -> Bool) -> Bool` — True when f holds for every byte; true for empty b.
+- `bytes.count(b: Bytes, f: (Int) -> Bool) -> Int` — How many bytes satisfy f.
+- `bytes.find(b: Bytes, f: (Int) -> Bool) -> Option[Int]` — The first byte satisfying f, or none.
+- `bytes.find_index(b: Bytes, f: (Int) -> Bool) -> Option[Int]` — Index of the first byte satisfying f, or none.
+- `bytes.enumerate(b: Bytes) -> List[(Int, Int)]` — (index, byte) pairs from 0.
+- `bytes.zip(b: Bytes, ys: List[B]) -> List[(Int, B)]` — Bytes paired with ys; stops at the shorter.
+- `bytes.zip_with(b: Bytes, ys: List[B], f: (Int, B) -> C) -> List[C]` — f over bytes paired with ys; stops at the shorter.
+- `bytes.filter_map(b: Bytes, f: (Int) -> Option[B]) -> List[B]` — The some results of f over the bytes, in order.
+- `bytes.find_map(b: Bytes, f: (Int) -> Option[B]) -> Option[B]` — The first some result of f over the bytes, or none.
+- `bytes.reduce(b: Bytes, f: (Int, Int) -> Int) -> Option[Int]` — f folded over the bytes from the first; none if b is empty.
+- `bytes.scan(b: Bytes, init: B, f: (B, Int) -> B) -> List[B]` — The running fold over the bytes, init excluded.
+- `bytes.partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int])` — (bytes where f is true, the rest), each in order.
+- `bytes.group_by(b: Bytes, f: (Int) -> B) -> Map[B, List[Int]]` — Bytes grouped by f's key, each group in order.
+- `bytes.sort(b: Bytes) -> List[Int]` — The bytes in ascending order.
+- `bytes.sort_by(b: Bytes, f: (Int) -> B) -> List[Int]` — The bytes ordered by f's key; equal keys keep their order.
+- `bytes.sort_with(b: Bytes, cmp: (Int, Int) -> Int) -> List[Int]` — The bytes ordered by cmp (negative = first argument first); stable.
+- `bytes.min(b: Bytes) -> Option[Int]` — The smallest byte; none if empty.
+- `bytes.max(b: Bytes) -> Option[Int]` — The largest byte; none if empty.
+- `bytes.min_by(b: Bytes, f: (Int) -> K) -> Option[Int]` — The first byte with the smallest key; none if empty.
+- `bytes.max_by(b: Bytes, f: (Int) -> K) -> Option[Int]` — The last byte with the largest key; none if empty.
+- `bytes.min_with(b: Bytes, cmp: (Int, Int) -> Int) -> Option[Int]` — The first smallest byte by cmp; none if empty.
+- `bytes.max_with(b: Bytes, cmp: (Int, Int) -> Int) -> Option[Int]` — The last largest byte by cmp; none if empty.
+- `bytes.sum(b: Bytes) -> Int` — The sum of the bytes; 0 for empty b.
+- `bytes.product(b: Bytes) -> Int` — The product of the bytes, wrapping; 1 for empty b.
+- `bytes.take_while(b: Bytes, f: (Int) -> Bool) -> Bytes` — The longest prefix whose bytes all satisfy f.
+- `bytes.drop_while(b: Bytes, f: (Int) -> Bool) -> Bytes` — b after the longest prefix whose bytes all satisfy f.
+- `bytes.window(b: Bytes, n: Int) -> List[Bytes]` — Every run of n consecutive bytes; [] if n > len; n <= 0 aborts.
+- `bytes.dedup(b: Bytes) -> Bytes` — b with each run of equal adjacent bytes collapsed to one.
+- `bytes.intersperse(b: Bytes, sep: Int) -> Bytes` — The bytes of b with sep between each pair.
+- `bytes.unique(b: Bytes) -> Bytes` — The first occurrence of each byte value, in order.
+- `bytes.unique_by(b: Bytes, f: (Int) -> K) -> Bytes` — The first byte of each key f gives, in order.
+- `bytes.last_index_of(b: Bytes, needle: Bytes) -> Option[Int]` — Byte index of the last needle, or none; an empty needle is found at len.
+- `bytes.replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes` — b with every non-overlapping from replaced by to, left to right.
+- `bytes.replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes` — b with the first from replaced by to.
+- `bytes.strip_prefix(b: Bytes, prefix: Bytes) -> Option[Bytes]` — b without prefix, or none when b does not start with it.
+- `bytes.strip_suffix(b: Bytes, suffix: Bytes) -> Option[Bytes]` — b without suffix, or none when b does not end with it.
+- `bytes.count_matches(b: Bytes, needle: Bytes) -> Int` — Non-overlapping occurrences of needle; len + 1 for an empty needle.
 
 ## compute
 
