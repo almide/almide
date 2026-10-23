@@ -136,10 +136,12 @@ puts the certificate's byte parser inside the proof and extracts
 the structural wasm leg emits it per build as the `bounds` witness (crates/almide-wasm/src/witness_bounds.rs) for every list access the fact discipline of #3345 can reach — the accesses whose check may be elided — and almide-verify and proofs/structural-wall.sh judge it with the extracted checker and the kernel; every other access keeps its check immediately before it, which the witness does not record. TRUSTED: that the recorded events are the accesses and assignments the bytes contain, and that a hoisted count is the list's count (len_hoist.rs). And
 at the SOURCE level, `CoreSafe.v` (#4014) gives a typed core of Almide (ints,
 bools, int lists with value semantics, `let`, assignment, element store,
-`if`, `while`, indexing with its bounds check) a big-step semantics that
+`if`, `while`, indexing with its bounds check, `if` expressions and
+recursive one-argument functions) a big-step semantics that
 emits the heap trace and proves `typed_core_memory_safe`: every finishing or
 check-aborted run of a well-typed core program is `MemorySafe`, all four
-clauses. It is a core (no closures, records, strings, calls; no frees;
+clauses, for any function table whose bodies are well typed. It is a core
+(no closures, records, strings, multi-argument calls; no frees;
 terminating and aborting runs only), and nothing ties it to the compiler's
 lowering. And
 no certificate carries a trace yet, so the theorem the definition is for — `K(c, a) accepts ⟹ MemorySafe a`
