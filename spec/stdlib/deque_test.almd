@@ -213,6 +213,6 @@ test "the ordered cells return deques" {
   assert_eq(deque.to_list(deque.dedup(w)), ["a", "b"])
   assert_eq(deque.to_list(deque.intersperse(w, "-")), ["a", "-", "a", "-", "b"])
   let e: Deque[String] = deque.new()
-  assert_eq(deque.chunk(e, 2), [])
+  assert_eq(list.len(deque.chunk(e, 2)), 0)
   assert_eq(deque.to_list(deque.unique(e)), [])
 }

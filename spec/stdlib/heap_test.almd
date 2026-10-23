@@ -10,10 +10,8 @@ local fn drain(h: Heap[(Int, String)]) -> List[String] = {
   var q = h
   var out: List[String] = []
   for _ in 0..<heap.len(h) {
-    match heap.pop(q) {
-      some((_, s)) => list.push(out, s),
-      none => (),
-    }
+    let next = heap.pop(q) ?? (0, "")
+    list.push(out, next.1)
   }
   out
 }
