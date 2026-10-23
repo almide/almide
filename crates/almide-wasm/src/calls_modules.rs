@@ -306,7 +306,10 @@ impl Emitter<'_> {
                 if let Some(out) = self.lower_fs_call(func.as_str(), args)? {
                     return Ok(out);
                 }
-                unsup(&format!("call:fs.{func}"))
+                // An fs fn written in Almide over the host ops (the rooted
+                // family, #4022) takes the linked route; one with neither
+                // walls as `call:fs.<func>` there, as before.
+                self.lower_linked_call("fs", func.as_str(), args, tail)
             }
             CallTarget::Module { module, func, .. }
                 if matches!(module.as_str(), "env" | "io" | "process") =>

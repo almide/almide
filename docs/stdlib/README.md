@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 48 stdlib modules, 1464 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 48 stdlib modules, 1471 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -22,7 +22,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [float](#float) | 46 | 0 |
 | [float32](#float32) | 30 | 0 |
 | [float64](#float64) | 31 | 0 |
-| [fs](#fs) | 34 | 1 |
+| [fs](#fs) | 41 | 1 |
 | [hash](#hash) | 12 | 0 |
 | [heap](#heap) | 16 | 1 |
 | [hex](#hex) | 3 | 0 |
@@ -543,6 +543,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect fs.is_symlink(path: String) -> Bool` — True for a symlink, even a dangling one.
 - `effect fs.modified_at(path: String) -> Int` — Mtime in Unix seconds; err if missing.
 - `effect fs.read_bytes_raw(path: String) -> Bytes` — Whole file as Bytes; err if missing.
+- `effect fs.open_root(dir: String) -> FsRoot` — dir as an FsRoot; err if dir is not a directory.
+- `effect fs.root_read_text(root: FsRoot, path: String) -> String` — read_text of path inside root; err if it escapes.
+- `effect fs.root_read_bytes(root: FsRoot, path: String) -> Bytes` — read_bytes_raw of path inside root; err if it escapes.
+- `effect fs.root_write_text(root: FsRoot, path: String, content: String) -> Unit` — write of content to path inside root; err if it escapes.
+- `effect fs.root_list_dir(root: FsRoot, path: String) -> List[String]` — list_dir of path inside root; err if it escapes.
+- `effect fs.root_exists(root: FsRoot, path: String) -> Bool` — exists of path inside root; err if it escapes.
+- `effect fs.root_remove(root: FsRoot, path: String) -> Unit` — remove of path inside root; err if it escapes.
 
 ## hash
 
