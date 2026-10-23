@@ -104,8 +104,12 @@ compiler with qualified use in safety-critical settings).
   `certified_with_bounds_cert` states what the pair gives on one interleaved
   trace — `Spatial`, `Temporal` and `WellTyped` — given a fresh allocator
   and layout-true allocations. `access_after_free_not_temporal` is the
-  control: an in-layout read of a freed block is not safe. Not reached:
-  INITIALIZATION, and the link from the certificates' events to the bytes.
+  control: an in-layout read of a freed block is not safe.
+  `certified_memory_safe` reaches all four clauses with one more
+  hypothesis, `init_disc`: every allocation is immediately followed by the
+  store that initializes its whole extent (the constructor discipline; no
+  witness carries it yet). `read_before_init_not_initialized` is its
+  control. Not reached: the link from the certificates' events to the bytes.
 
 ## Verify (the third-party `make verify`)
 
