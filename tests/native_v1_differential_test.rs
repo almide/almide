@@ -131,6 +131,10 @@ const CORPUS: &[(&str, &str)] = &[
     //    float.to_bits floor rows — empty, non-alphabetic and multi-byte text,
     //    an over-long take, an invalid codepoint, a NaN's canonical bits. ──
     ("floor_4006_shims_b", "fn main() -> Unit = {\n  println(bool.to_string(string.is_empty(\"\")))\n  println(bool.to_string(string.is_alpha(\"\u{e9}t\u{e9}\")))\n  println(bool.to_string(string.is_alpha(\"a1\")))\n  println(bool.to_string(string.is_alphanumeric(\"a1\")))\n  println(bool.to_string(string.is_alphanumeric(\"\")))\n  println(string.capitalize(\"\u{df}tra\u{df}e\"))\n  println(string.take(\"h\u{e9}llo\", 3))\n  println(string.take(\"ab\", 9))\n  println(string.from_codepoint(955) + string.from_codepoint(-1) + \"|\")\n  println(int.to_string(float.to_bits(1.5)))\n  println(int.to_string(float.to_bits(0.0 / 0.0)))\n}\n"),
+    // ── #4006: immutable top-level lets whose initializers cannot abort,
+    //    materialized at each use: literals, const arithmetic over other
+    //    lets (wrapping), a float division and a string. ──
+    ("top_let_consts", "let LIMIT = 10\nlet SCALE = LIMIT * 3 + 9223372036854775807\nlet HALF = 1.0 / 2.0\nlet NAME = \"almide\"\nfn main() -> Unit = {\n  println(int.to_string(LIMIT + SCALE))\n  println(float.to_string(HALF))\n  println(NAME)\n}\n"),
 ];
 
 #[test]
@@ -225,6 +229,25 @@ fn out_of_subset_walls_honestly() {
         ("str_split", "fn main() -> Unit = {\n  let parts = string.split(\"a,b\", \",\")\n  println(parts[0])\n}\n"),
         // list_param moved to the POSITIVE corpus — rung 4 renders scalar-list
         // params/literals/indexing natively (`vec![…]` + the bounds shims).
+        // #4006: a top-level let runs EAGERLY before main; one whose
+        // initializer can abort (or calls) must not be materialized lazily
+        // at its uses, so it walls. A mutable top-level var walls too.
+        ("top_let_div_eager", "let BAD = 1 / 0
+fn main() -> Unit = {
+  println(\"never reached\")
+}
+"),
+        ("top_let_call", "fn mk() -> Int = 3
+let X = mk()
+fn main() -> Unit = {
+  println(int.to_string(X))
+}
+"),
+        ("top_var", "var COUNT = 0
+fn main() -> Unit = {
+  println(int.to_string(COUNT))
+}
+"),
     ];
     for (name, src) in walls {
         assert!(
