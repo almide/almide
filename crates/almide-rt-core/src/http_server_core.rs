@@ -8,7 +8,8 @@
 //
 // EVERY byte written here is a cross-lane observable (C-367): the status
 // line and its reason table, the header order, the Content-Length line, the
-// close after one response, the limits' answers (413 / 400 / 503, #2823).
+// close after one response, the limits' answers (413 / 400 / 503, #2823;
+// 408 for a request head not whole by the header deadline, #4021, C-389).
 // Change it here and both lanes change together.
 
 // Splice discipline (see http_client_core.rs): NO `use` lines — every std
