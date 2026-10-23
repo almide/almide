@@ -4,16 +4,38 @@ expression: "run_outline(&[\"@stdlib/set\"])"
 ---
 fn set.__fallible_all[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
 fn set.__fallible_any[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
+fn set.__fallible_count[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Int, E]
 fn set.__fallible_filter[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Set[A], E]
+fn set.__fallible_filter_map[A, B, E](s: Set[A], f: fn(A) -> Result[Option[B], E]) -> Result[List[B], E]
+fn set.__fallible_find[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[A], E]
+fn set.__fallible_find_map[A, B, E](s: Set[A], f: fn(A) -> Result[Option[B], E]) -> Result[Option[B], E]
 fn set.__fallible_fold[A, B, E](s: Set[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[B, E]
+fn set.__fallible_group_by[A, B, E](s: Set[A], f: fn(A) -> Result[B, E]) -> Result[Map[B, List[A]], E]
 fn set.__fallible_map[A, B, E](s: Set[A], f: fn(A) -> Result[B, E]) -> Result[Set[B], E]
+fn set.__fallible_max_by[A, K, E](s: Set[A], f: fn(A) -> Result[K, E]) -> Result[Option[A], E]
+fn set.__fallible_max_with[A, E](s: Set[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[Option[A], E]
+fn set.__fallible_min_by[A, K, E](s: Set[A], f: fn(A) -> Result[K, E]) -> Result[Option[A], E]
+fn set.__fallible_min_with[A, E](s: Set[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[Option[A], E]
+fn set.__fallible_partition[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[(List[A], List[A]), E]
+fn set.__fallible_reduce[A, E](s: Set[A], f: fn(A, A) -> Result[A, E]) -> Result[Option[A], E]
+fn set.__fallible_scan[A, B, E](s: Set[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[List[B], E]
+fn set.__fallible_sort_by[A, B, E](s: Set[A], f: fn(A) -> Result[B, E]) -> Result[List[A], E]
+fn set.__fallible_sort_with[A, E](s: Set[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[List[A], E]
+fn set.__fallible_zip_with[A, B, C, E](s: Set[A], ys: List[B], f: fn(A, B) -> Result[C, E]) -> Result[List[C], E]
 fn set.all[A](s: Set[A], f: fn(A) -> Bool) -> Bool
 fn set.any[A](s: Set[A], f: fn(A) -> Bool) -> Bool
+fn set.clear[A](s: Set[A]) -> Unit
 fn set.contains[A](s: Set[A], value: A) -> Bool
+fn set.count[A](s: Set[A], f: fn(A) -> Bool) -> Int
 fn set.difference[A](a: Set[A], b: Set[A]) -> Set[A]
+fn set.enumerate[A](s: Set[A]) -> List[(Int, A)]
 fn set.filter[A](s: Set[A], f: fn(A) -> Bool) -> Set[A]
+fn set.filter_map[A, B](s: Set[A], f: fn(A) -> Option[B]) -> List[B]
+fn set.find[A](s: Set[A], f: fn(A) -> Bool) -> Option[A]
+fn set.find_map[A, B](s: Set[A], f: fn(A) -> Option[B]) -> Option[B]
 fn set.fold[A, B](s: Set[A], init: B, f: fn(B, A) -> B) -> B
 fn set.from_list[A](xs: List[A]) -> Set[A]
+fn set.group_by[A, B](s: Set[A], f: fn(A) -> B) -> Map[B, List[A]]
 fn set.insert[A](s: Set[A], value: A) -> Set[A]
 fn set.intersection[A](a: Set[A], b: Set[A]) -> Set[A]
 fn set.is_disjoint[A](a: Set[A], b: Set[A]) -> Bool
@@ -21,8 +43,22 @@ fn set.is_empty[A](s: Set[A]) -> Bool
 fn set.is_subset[A](a: Set[A], b: Set[A]) -> Bool
 fn set.len[A](s: Set[A]) -> Int
 fn set.map[A, B](s: Set[A], f: fn(A) -> B) -> Set[B]
+fn set.max[A](s: Set[A]) -> Option[A]
+fn set.max_by[A, K](s: Set[A], f: fn(A) -> K) -> Option[A]
+fn set.max_with[A](s: Set[A], cmp: fn(A, A) -> Int) -> Option[A]
+fn set.min[A](s: Set[A]) -> Option[A]
+fn set.min_by[A, K](s: Set[A], f: fn(A) -> K) -> Option[A]
+fn set.min_with[A](s: Set[A], cmp: fn(A, A) -> Int) -> Option[A]
 fn set.new[A]() -> Set[A]
+fn set.partition[A](s: Set[A], f: fn(A) -> Bool) -> (List[A], List[A])
+fn set.reduce[A](s: Set[A], f: fn(A, A) -> A) -> Option[A]
 fn set.remove[A](s: Set[A], value: A) -> Set[A]
+fn set.scan[A, B](s: Set[A], init: B, f: fn(B, A) -> B) -> List[B]
+fn set.sort[A](s: Set[A]) -> List[A]
+fn set.sort_by[A, B](s: Set[A], f: fn(A) -> B) -> List[A]
+fn set.sort_with[A](s: Set[A], cmp: fn(A, A) -> Int) -> List[A]
 fn set.symmetric_difference[A](a: Set[A], b: Set[A]) -> Set[A]
 fn set.to_list[A](s: Set[A]) -> List[A]
 fn set.union[A](a: Set[A], b: Set[A]) -> Set[A]
+fn set.zip[A, B](s: Set[A], ys: List[B]) -> List[(A, B)]
+fn set.zip_with[A, B, C](s: Set[A], ys: List[B], f: fn(A, B) -> C) -> List[C]

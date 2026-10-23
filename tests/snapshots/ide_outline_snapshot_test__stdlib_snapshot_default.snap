@@ -57,6 +57,8 @@ fn string.trim_start(s: String) -> String
 # @stdlib/list
 fn list.__fallible_all[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
 fn list.__fallible_any[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
+fn list.__fallible_binary_search_by[A, K, E](xs: List[A], target: K, f: fn(A) -> Result[K, E]) -> Result[Option[Int], E]
+fn list.__fallible_binary_search_with[A, E](xs: List[A], target: A, cmp: fn(A, A) -> Result[Int, E]) -> Result[Option[Int], E]
 fn list.__fallible_count[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[Int, E]
 fn list.__fallible_drop_while[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E]
 fn list.__fallible_each[A, E](xs: List[A], f: fn(A) -> Result[Unit, E]) -> Result[Unit, E]
@@ -70,17 +72,30 @@ fn list.__fallible_fold[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, 
 fn list.__fallible_group_by[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[Map[B, List[A]], E]
 fn list.__fallible_iterate[T, E](seed: T, f: fn(T) -> Result[T, E], n: Int) -> Result[List[T], E]
 fn list.__fallible_map[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[B], E]
+fn list.__fallible_max_by[A, K, E](xs: List[A], f: fn(A) -> Result[K, E]) -> Result[Option[A], E]
+fn list.__fallible_max_with[A, E](xs: List[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[Option[A], E]
+fn list.__fallible_min_by[A, K, E](xs: List[A], f: fn(A) -> Result[K, E]) -> Result[Option[A], E]
+fn list.__fallible_min_with[A, E](xs: List[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[Option[A], E]
 fn list.__fallible_partition[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[(List[A], List[A]), E]
 fn list.__fallible_reduce[A, E](xs: List[A], f: fn(A, A) -> Result[A, E]) -> Result[Option[A], E]
 fn list.__fallible_scan[A, B, E](xs: List[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[List[B], E]
 fn list.__fallible_sort_by[A, B, E](xs: List[A], f: fn(A) -> Result[B, E]) -> Result[List[A], E]
+fn list.__fallible_sort_with[A, E](xs: List[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[List[A], E]
 fn list.__fallible_take_while[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) -> Result[List[A], E]
 fn list.__fallible_unique_by[A, K, E](xs: List[A], f: fn(A) -> Result[K, E]) -> Result[List[A], E]
 fn list.__fallible_update[A, E](xs: List[A], i: Int, f: fn(A) -> Result[A, E]) -> Result[List[A], E]
 fn list.__fallible_zip_with[A, B, C, E](xs: List[A], ys: List[B], f: fn(A, B) -> Result[C, E]) -> Result[List[C], E]
+fn list.__key_order[K](a: K, b: K) -> Int
+fn list.__merge_with[A](a: List[A], b: List[A], cmp: fn(A, A) -> Int) -> List[A]
+fn list.__merge_with_fallible[A, E](a: List[A], b: List[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[List[A], E]
+fn list.__pick_by_keys[A, K](xs: List[A], keys: List[K], want: Int) -> Option[A]
+fn list.__pick_with_fallible[A, E](xs: List[A], cmp: fn(A, A) -> Result[Int, E], want: Int) -> Result[Option[A], E]
+fn list.__search_fallible[A, E](xs: List[A], order: fn(A) -> Result[Int, E]) -> Result[Option[Int], E]
 fn list.all[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.any[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.binary_search(xs: List[Int], target: Int) -> Option[Int]
+fn list.binary_search_by[A, K](xs: List[A], target: K, f: fn(A) -> K) -> Option[Int]
+fn list.binary_search_with[A](xs: List[A], target: A, cmp: fn(A, A) -> Int) -> Option[Int]
 fn list.bundled_probe(n: Int) -> Int
 fn list.chunk[A](xs: List[A], n: Int) -> List[List[A]]
 fn list.clear[A](xs: List[A]) -> Unit
@@ -100,6 +115,7 @@ fn list.first[A](xs: List[A]) -> Option[A]
 fn list.flat_map[A, B](xs: List[A], f: fn(A) -> List[B]) -> List[B]
 fn list.flatten[T](xss: List[List[T]]) -> List[T]
 fn list.fold[A, B](xs: List[A], init: B, f: fn(B, A) -> B) -> B
+fn list.from_list[A](xs: List[A]) -> List[A]
 fn list.get[A](xs: List[A], i: Int) -> Option[A]
 fn list.get_or[A](xs: List[A], i: Int, default: A) -> A
 fn list.group_by[A, B](xs: List[A], f: fn(A) -> B) -> Map[B, List[A]]
@@ -114,12 +130,18 @@ fn list.len[A](xs: List[A]) -> Int
 fn list.length[A](xs: List[A]) -> Int
 fn list.map[A, B](xs: List[A], f: fn(A) -> B) -> List[B]
 fn list.max[A](xs: List[A]) -> Option[A]
+fn list.max_by[A, K](xs: List[A], f: fn(A) -> K) -> Option[A]
+fn list.max_with[A](xs: List[A], cmp: fn(A, A) -> Int) -> Option[A]
 fn list.min[A](xs: List[A]) -> Option[A]
+fn list.min_by[A, K](xs: List[A], f: fn(A) -> K) -> Option[A]
+fn list.min_with[A](xs: List[A], cmp: fn(A, A) -> Int) -> Option[A]
+fn list.new[A]() -> List[A]
 fn list.partition[A](xs: List[A], f: fn(A) -> Bool) -> (List[A], List[A])
 fn list.pop[A](xs: List[A]) -> Option[A]
 fn list.product(xs: List[Int]) -> Int
 fn list.push[A](xs: List[A], x: A) -> Unit
 fn list.range(start: Int, end: Int) -> List[Int]
+fn list.range_step(start: Int, end: Int, step: Int) -> List[Int]
 fn list.reduce[A](xs: List[A], f: fn(A, A) -> A) -> Option[A]
 fn list.remove_at[A](xs: List[A], i: Int) -> List[A]
 fn list.repeat[A](val: A, n: Int) -> List[A]
@@ -130,6 +152,7 @@ fn list.shuffle[A](xs: List[A]) -> List[A]
 fn list.slice[A](xs: List[A], start: Int, end: Int) -> List[A]
 fn list.sort[A](xs: List[A]) -> List[A]
 fn list.sort_by[A, B](xs: List[A], f: fn(A) -> B) -> List[A]
+fn list.sort_with[A](xs: List[A], cmp: fn(A, A) -> Int) -> List[A]
 fn list.split_at[T](xs: List[T], n: Int) -> (List[T], List[T])
 fn list.sum(xs: List[Int]) -> Int
 fn list.swap[A](xs: List[A], i: Int, j: Int) -> List[A]
@@ -137,8 +160,10 @@ fn list.tail[A](xs: List[A]) -> List[A]
 fn list.take[A](xs: List[A], n: Int) -> List[A]
 fn list.take_end[A](xs: List[A], n: Int) -> List[A]
 fn list.take_while[A](xs: List[A], f: fn(A) -> Bool) -> List[A]
+fn list.to_list[A](xs: List[A]) -> List[A]
 fn list.unique[A](xs: List[A]) -> List[A]
 fn list.unique_by[A, K](xs: List[A], f: fn(A) -> K) -> List[A]
+fn list.unzip[A, B](xs: List[(A, B)]) -> (List[A], List[B])
 fn list.update[A](xs: List[A], i: Int, f: fn(A) -> A) -> List[A]
 fn list.window[A](xs: List[A], n: Int) -> List[List[A]]
 fn list.windows[A](xs: List[A], n: Int) -> List[List[A]]
@@ -263,11 +288,24 @@ fn map.__fallible_all[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> 
 fn map.__fallible_any[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Bool, E]
 fn map.__fallible_count[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Int, E]
 fn map.__fallible_filter[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Map[K, V], E]
+fn map.__fallible_filter_map[K, V, B, E](m: Map[K, V], f: fn((K, V)) -> Result[Option[B], E]) -> Result[List[B], E]
 fn map.__fallible_find[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Option[(K, V)], E]
+fn map.__fallible_find_map[K, V, B, E](m: Map[K, V], f: fn((K, V)) -> Result[Option[B], E]) -> Result[Option[B], E]
 fn map.__fallible_fold[K, V, A, E](m: Map[K, V], init: A, f: fn(A, K, V) -> Result[A, E]) -> Result[A, E]
+fn map.__fallible_group_by[K, V, B, E](m: Map[K, V], f: fn((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E]
 fn map.__fallible_map[K, V, B, E](m: Map[K, V], f: fn(V) -> Result[B, E]) -> Result[Map[K, B], E]
+fn map.__fallible_max_by[K, V, U, E](m: Map[K, V], f: fn((K, V)) -> Result[U, E]) -> Result[Option[(K, V)], E]
+fn map.__fallible_max_with[K, V, E](m: Map[K, V], cmp: fn((K, V), (K, V)) -> Result[Int, E]) -> Result[Option[(K, V)], E]
+fn map.__fallible_min_by[K, V, U, E](m: Map[K, V], f: fn((K, V)) -> Result[U, E]) -> Result[Option[(K, V)], E]
+fn map.__fallible_min_with[K, V, E](m: Map[K, V], cmp: fn((K, V), (K, V)) -> Result[Int, E]) -> Result[Option[(K, V)], E]
+fn map.__fallible_partition[K, V, E](m: Map[K, V], f: fn((K, V)) -> Result[Bool, E]) -> Result[(List[(K, V)], List[(K, V)]), E]
+fn map.__fallible_reduce[K, V, E](m: Map[K, V], f: fn((K, V), (K, V)) -> Result[(K, V), E]) -> Result[Option[(K, V)], E]
+fn map.__fallible_scan[K, V, B, E](m: Map[K, V], init: B, f: fn(B, (K, V)) -> Result[B, E]) -> Result[List[B], E]
+fn map.__fallible_sort_by[K, V, B, E](m: Map[K, V], f: fn((K, V)) -> Result[B, E]) -> Result[List[(K, V)], E]
+fn map.__fallible_sort_with[K, V, E](m: Map[K, V], cmp: fn((K, V), (K, V)) -> Result[Int, E]) -> Result[List[(K, V)], E]
 fn map.__fallible_update[K, V, E](m: Map[K, V], key: K, f: fn(V) -> Result[V, E]) -> Result[Map[K, V], E]
 fn map.__fallible_upsert[K, V, E](m: Map[K, V], key: K, init: V, f: fn(V) -> Result[V, E]) -> Result[Map[K, V], E]
+fn map.__fallible_zip_with[K, V, B, C, E](m: Map[K, V], ys: List[B], f: fn((K, V), B) -> Result[C, E]) -> Result[List[C], E]
 fn map.all[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Bool
 fn map.any[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Bool
 fn map.clear[K, V](m: Map[K, V]) -> Unit
@@ -275,38 +313,75 @@ fn map.contains[K, V](m: Map[K, V], key: K) -> Bool
 fn map.count[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Int
 fn map.delete[K, V](m: Map[K, V], key: K) -> Unit
 fn map.entries[K, V](m: Map[K, V]) -> List[(K, V)]
+fn map.enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))]
 fn map.filter[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Map[K, V]
+fn map.filter_map[K, V, B](m: Map[K, V], f: fn((K, V)) -> Option[B]) -> List[B]
 fn map.find[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Option[(K, V)]
+fn map.find_map[K, V, B](m: Map[K, V], f: fn((K, V)) -> Option[B]) -> Option[B]
 fn map.fold[K, V, A](m: Map[K, V], init: A, f: fn(A, K, V) -> A) -> A
 fn map.from_list[K, V](pairs: List[(K, V)]) -> Map[K, V]
 fn map.get[K, V](m: Map[K, V], key: K) -> Option[V]
 fn map.get_or[K, V](m: Map[K, V], key: K, default: V) -> V
+fn map.group_by[K, V, B](m: Map[K, V], f: fn((K, V)) -> B) -> Map[B, List[(K, V)]]
 fn map.insert[K, V](m: Map[K, V], key: K, value: V) -> Unit
 fn map.is_empty[K, V](m: Map[K, V]) -> Bool
 fn map.keys[K, V](m: Map[K, V]) -> List[K]
 fn map.len[K, V](m: Map[K, V]) -> Int
 fn map.map[K, V, B](m: Map[K, V], f: fn(V) -> B) -> Map[K, B]
+fn map.max_by[K, V, U](m: Map[K, V], f: fn((K, V)) -> U) -> Option[(K, V)]
+fn map.max_with[K, V](m: Map[K, V], cmp: fn((K, V), (K, V)) -> Int) -> Option[(K, V)]
 fn map.merge[K, V](a: Map[K, V], b: Map[K, V]) -> Map[K, V]
+fn map.min_by[K, V, U](m: Map[K, V], f: fn((K, V)) -> U) -> Option[(K, V)]
+fn map.min_with[K, V](m: Map[K, V], cmp: fn((K, V), (K, V)) -> Int) -> Option[(K, V)]
 fn map.new[K, V]() -> Map[K, V]
+fn map.partition[K, V](m: Map[K, V], f: fn((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)])
+fn map.reduce[K, V](m: Map[K, V], f: fn((K, V), (K, V)) -> (K, V)) -> Option[(K, V)]
 fn map.remove[K, V](m: Map[K, V], key: K) -> Map[K, V]
+fn map.scan[K, V, B](m: Map[K, V], init: B, f: fn(B, (K, V)) -> B) -> List[B]
 fn map.set[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V]
+fn map.sort_by[K, V, B](m: Map[K, V], f: fn((K, V)) -> B) -> List[(K, V)]
+fn map.sort_with[K, V](m: Map[K, V], cmp: fn((K, V), (K, V)) -> Int) -> List[(K, V)]
 fn map.update[K, V](m: Map[K, V], key: K, f: fn(V) -> V) -> Map[K, V]
 fn map.upsert[K, V](m: Map[K, V], key: K, init: V, f: fn(V) -> V) -> Map[K, V]
 fn map.values[K, V](m: Map[K, V]) -> List[V]
+fn map.zip[K, V, B](m: Map[K, V], ys: List[B]) -> List[((K, V), B)]
+fn map.zip_with[K, V, B, C](m: Map[K, V], ys: List[B], f: fn((K, V), B) -> C) -> List[C]
 
 # @stdlib/set
 fn set.__fallible_all[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
 fn set.__fallible_any[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Bool, E]
+fn set.__fallible_count[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Int, E]
 fn set.__fallible_filter[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Set[A], E]
+fn set.__fallible_filter_map[A, B, E](s: Set[A], f: fn(A) -> Result[Option[B], E]) -> Result[List[B], E]
+fn set.__fallible_find[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[Option[A], E]
+fn set.__fallible_find_map[A, B, E](s: Set[A], f: fn(A) -> Result[Option[B], E]) -> Result[Option[B], E]
 fn set.__fallible_fold[A, B, E](s: Set[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[B, E]
+fn set.__fallible_group_by[A, B, E](s: Set[A], f: fn(A) -> Result[B, E]) -> Result[Map[B, List[A]], E]
 fn set.__fallible_map[A, B, E](s: Set[A], f: fn(A) -> Result[B, E]) -> Result[Set[B], E]
+fn set.__fallible_max_by[A, K, E](s: Set[A], f: fn(A) -> Result[K, E]) -> Result[Option[A], E]
+fn set.__fallible_max_with[A, E](s: Set[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[Option[A], E]
+fn set.__fallible_min_by[A, K, E](s: Set[A], f: fn(A) -> Result[K, E]) -> Result[Option[A], E]
+fn set.__fallible_min_with[A, E](s: Set[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[Option[A], E]
+fn set.__fallible_partition[A, E](s: Set[A], f: fn(A) -> Result[Bool, E]) -> Result[(List[A], List[A]), E]
+fn set.__fallible_reduce[A, E](s: Set[A], f: fn(A, A) -> Result[A, E]) -> Result[Option[A], E]
+fn set.__fallible_scan[A, B, E](s: Set[A], init: B, f: fn(B, A) -> Result[B, E]) -> Result[List[B], E]
+fn set.__fallible_sort_by[A, B, E](s: Set[A], f: fn(A) -> Result[B, E]) -> Result[List[A], E]
+fn set.__fallible_sort_with[A, E](s: Set[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[List[A], E]
+fn set.__fallible_zip_with[A, B, C, E](s: Set[A], ys: List[B], f: fn(A, B) -> Result[C, E]) -> Result[List[C], E]
 fn set.all[A](s: Set[A], f: fn(A) -> Bool) -> Bool
 fn set.any[A](s: Set[A], f: fn(A) -> Bool) -> Bool
+fn set.clear[A](s: Set[A]) -> Unit
 fn set.contains[A](s: Set[A], value: A) -> Bool
+fn set.count[A](s: Set[A], f: fn(A) -> Bool) -> Int
 fn set.difference[A](a: Set[A], b: Set[A]) -> Set[A]
+fn set.enumerate[A](s: Set[A]) -> List[(Int, A)]
 fn set.filter[A](s: Set[A], f: fn(A) -> Bool) -> Set[A]
+fn set.filter_map[A, B](s: Set[A], f: fn(A) -> Option[B]) -> List[B]
+fn set.find[A](s: Set[A], f: fn(A) -> Bool) -> Option[A]
+fn set.find_map[A, B](s: Set[A], f: fn(A) -> Option[B]) -> Option[B]
 fn set.fold[A, B](s: Set[A], init: B, f: fn(B, A) -> B) -> B
 fn set.from_list[A](xs: List[A]) -> Set[A]
+fn set.group_by[A, B](s: Set[A], f: fn(A) -> B) -> Map[B, List[A]]
 fn set.insert[A](s: Set[A], value: A) -> Set[A]
 fn set.intersection[A](a: Set[A], b: Set[A]) -> Set[A]
 fn set.is_disjoint[A](a: Set[A], b: Set[A]) -> Bool
@@ -314,8 +389,22 @@ fn set.is_empty[A](s: Set[A]) -> Bool
 fn set.is_subset[A](a: Set[A], b: Set[A]) -> Bool
 fn set.len[A](s: Set[A]) -> Int
 fn set.map[A, B](s: Set[A], f: fn(A) -> B) -> Set[B]
+fn set.max[A](s: Set[A]) -> Option[A]
+fn set.max_by[A, K](s: Set[A], f: fn(A) -> K) -> Option[A]
+fn set.max_with[A](s: Set[A], cmp: fn(A, A) -> Int) -> Option[A]
+fn set.min[A](s: Set[A]) -> Option[A]
+fn set.min_by[A, K](s: Set[A], f: fn(A) -> K) -> Option[A]
+fn set.min_with[A](s: Set[A], cmp: fn(A, A) -> Int) -> Option[A]
 fn set.new[A]() -> Set[A]
+fn set.partition[A](s: Set[A], f: fn(A) -> Bool) -> (List[A], List[A])
+fn set.reduce[A](s: Set[A], f: fn(A, A) -> A) -> Option[A]
 fn set.remove[A](s: Set[A], value: A) -> Set[A]
+fn set.scan[A, B](s: Set[A], init: B, f: fn(B, A) -> B) -> List[B]
+fn set.sort[A](s: Set[A]) -> List[A]
+fn set.sort_by[A, B](s: Set[A], f: fn(A) -> B) -> List[A]
+fn set.sort_with[A](s: Set[A], cmp: fn(A, A) -> Int) -> List[A]
 fn set.symmetric_difference[A](a: Set[A], b: Set[A]) -> Set[A]
 fn set.to_list[A](s: Set[A]) -> List[A]
 fn set.union[A](a: Set[A], b: Set[A]) -> Set[A]
+fn set.zip[A, B](s: Set[A], ys: List[B]) -> List[(A, B)]
+fn set.zip_with[A, B, C](s: Set[A], ys: List[B], f: fn(A, B) -> C) -> List[C]
