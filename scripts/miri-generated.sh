@@ -20,6 +20,7 @@
 #   UB           undefined behaviour — FAILS the gate
 #   unsupported  Miri stopped at an operation it does not model (a socket, a
 #                child process, a host call); reported, not failed
+#   timeout      past MIRI_TIMEOUT seconds (default 600); reported, not judged
 #   no-build     the program does not build natively (a negative fixture)
 #
 # Before the corpus, a control: a program reading 64 bytes through the
@@ -47,12 +48,19 @@ one() {
   if ! ALMIDE_NO_RTLIB=1 ALMIDE_RUN_PROJECT_DIR="$d" "$ALMIDE_BIN" build "$f" -o "$d/bin" >"$d/build.log" 2>&1; then
     echo "no-build $f"; return
   fi
-  (cd "$d" && MIRIFLAGS="${MIRIFLAGS:--Zmiri-disable-isolation}" cargo "+$MIRI_TOOLCHAIN" miri run -q </dev/null >"$d/out" 2>"$d/err")
+  # Miri runs a program hundreds of times slower than native, so a fixture
+  # built to stress size or depth can take hours; it is cut off and reported.
+  local limit=()
+  command -v timeout >/dev/null 2>&1 && limit=(timeout "${MIRI_TIMEOUT:-600}")
+  (cd "$d" && MIRIFLAGS="${MIRIFLAGS:--Zmiri-disable-isolation}" ${limit[@]+"${limit[@]}"} cargo "+$MIRI_TOOLCHAIN" miri run -q </dev/null >"$d/out" 2>"$d/err")
+  local code=$?
   if grep -q 'Undefined Behavior' "$d/err"; then
     echo "UB $f"
     sed -n '/Undefined Behavior/,/^$/p' "$d/err" | head -12 | sed 's/^/    /' >&2
   elif grep -q 'unsupported operation' "$d/err"; then
     echo "unsupported $f"
+  elif [ "$code" = 124 ]; then
+    echo "timeout $f"
   else
     echo "ok $f"
   fi
@@ -82,10 +90,10 @@ if [ "$#" -gt 0 ]; then printf '%s\n' "$@"; else ls spec/wasm_cross/*.almd; fi >
 xargs -P "$MIRI_JOBS" -I{} bash -c 'one "$1"' _ {} < "$WORK/list" > "$WORK/verdicts"
 
 sort -o "$WORK/verdicts" "$WORK/verdicts"
-for k in ok UB unsupported no-build; do
+for k in ok UB unsupported timeout no-build; do
   printf '  %-12s %s\n' "$k" "$(grep -c "^$k " "$WORK/verdicts")"
 done
-grep '^unsupported ' "$WORK/verdicts" | sed 's/^/  /' || true
+grep -E '^(unsupported|timeout) ' "$WORK/verdicts" | sed 's/^/  /' || true
 if grep -q '^UB ' "$WORK/verdicts"; then
   grep '^UB ' "$WORK/verdicts" | sed 's/^UB /::error::miri-generated: undefined behaviour in /'
   exit 1

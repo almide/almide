@@ -837,7 +837,7 @@ wired_by = ".github/workflows/miri-nightly.yml"
 class = "NEGATIVE_TESTED"
 evidence = "#4009 landing (2026-10-23): every invocation first runs a control — a 64-byte ffi.read through a 4-byte buffer's address, the #4043 shape — and refuses to judge unless Miri reports it UB. Its first corpus run was a genuine catch: 10 of 30 fan fixtures were UB because the fan clock declared clock_gettime's clockid_t as i32 where macOS has an unsigned enum, fixed in the same change"
 measures = "the number of spec/wasm_cross programs whose generated native crate Miri reports undefined behaviour in, plus the control's verdict"
-varies = "develop 703bbf298 + the Miri guards read 10 UB of 30 fan fixtures on aarch64-apple-darwin (clock_gettime signature); with the ClockId fix, 0"
+varies = "develop 703bbf298 + the Miri guards, aarch64-apple-darwin: 10 UB of 30 fan fixtures (clock_gettime signature), then over all 958 spec/wasm_cross programs 1 UB (a OnceCell::get_or_init reference held across a re-entrant global access) and 2 no-build (E0747, a user record named D); with the three fixes 949 ok, 0 UB, 2 unsupported (fs), 7 cut off"
 blind = "undefined behaviour Miri does not model or that the corpus does not reach (a program stopped at an unsupported foreign call such as a socket or a child process is reported, not judged, and a code path no fixture runs is not seen) -> UNCOMPENSATED; the wasm leg -> UNCOMPENSATED"
 
 [[gate]]
