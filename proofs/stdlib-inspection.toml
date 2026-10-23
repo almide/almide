@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "77"
+# uninspected_ceiling = "84"
 
 [[fn]]
 name = "args.flag"
@@ -13210,3 +13210,52 @@ sig = "(s: String, ys: List[B], f: (String, B) -> C) -> List[C]"
 class = "pure"
 status = "uninspected"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "fs.open_root"
+sig = "effect (dir: String) -> FsRoot ! String"
+class = "effect"
+status = "uninspected"
+blocked = "new with the rooted fs family (#4022, C-395): awaits its GCE inspection run"
+
+[[fn]]
+name = "fs.root_exists"
+sig = "effect (root: FsRoot, path: String) -> Bool ! String"
+class = "effect"
+status = "uninspected"
+blocked = "new with the rooted fs family (#4022, C-395): awaits its GCE inspection run"
+
+[[fn]]
+name = "fs.root_list_dir"
+sig = "effect (root: FsRoot, path: String) -> List[String] ! String"
+class = "effect"
+status = "uninspected"
+blocked = "new with the rooted fs family (#4022, C-395): awaits its GCE inspection run"
+
+[[fn]]
+name = "fs.root_read_bytes"
+sig = "effect (root: FsRoot, path: String) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+blocked = "new with the rooted fs family (#4022, C-395): awaits its GCE inspection run"
+
+[[fn]]
+name = "fs.root_read_text"
+sig = "effect (root: FsRoot, path: String) -> String ! String"
+class = "effect"
+status = "uninspected"
+blocked = "new with the rooted fs family (#4022, C-395): awaits its GCE inspection run"
+
+[[fn]]
+name = "fs.root_remove"
+sig = "effect (root: FsRoot, path: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+blocked = "new with the rooted fs family (#4022, C-395): awaits its GCE inspection run"
+
+[[fn]]
+name = "fs.root_write_text"
+sig = "effect (root: FsRoot, path: String, content: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+blocked = "new with the rooted fs family (#4022, C-395): awaits its GCE inspection run"
