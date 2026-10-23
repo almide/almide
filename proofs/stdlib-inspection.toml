@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "39"
+# uninspected_ceiling = "77"
 
 [[fn]]
 name = "args.flag"
@@ -12892,6 +12892,272 @@ blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface
 [[fn]]
 name = "url.resolve"
 sig = "(base: Url, ref: String) -> Result[Url, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.byte_len"
+sig = "(s: String) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.chunk"
+sig = "(s: String, n: Int) -> List[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.compare"
+sig = "(a: String, b: String) -> Int"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.dedup"
+sig = "(s: String) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.drop_while"
+sig = "(s: String, f: (String) -> Bool) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.enumerate"
+sig = "(s: String) -> List[(Int, String)]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.filter"
+sig = "(s: String, f: (String) -> Bool) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.filter_map"
+sig = "(s: String, f: (String) -> Option[B]) -> List[B]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.find_index"
+sig = "(s: String, f: (String) -> Bool) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.find_map"
+sig = "(s: String, f: (String) -> Option[B]) -> Option[B]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.fold"
+sig = "(s: String, init: B, f: (B, String) -> B) -> B"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.from_list"
+sig = "(xs: List[String]) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.from_utf16"
+sig = "(xs: List[Int]) -> Result[String, String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.group_by"
+sig = "(s: String, f: (String) -> B) -> Map[B, List[String]]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.insert"
+sig = "(s: String, i: Int, x: String) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.intersperse"
+sig = "(s: String, sep: String) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.max"
+sig = "(s: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.max_by"
+sig = "(s: String, f: (String) -> K) -> Option[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.max_with"
+sig = "(s: String, cmp: (String, String) -> Int) -> Option[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.min"
+sig = "(s: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.min_by"
+sig = "(s: String, f: (String) -> K) -> Option[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.min_with"
+sig = "(s: String, cmp: (String, String) -> Int) -> Option[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.new"
+sig = "() -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.partition"
+sig = "(s: String, f: (String) -> Bool) -> (List[String], List[String])"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.reduce"
+sig = "(s: String, f: (String, String) -> String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.remove_at"
+sig = "(s: String, i: Int) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.scan"
+sig = "(s: String, init: B, f: (B, String) -> B) -> List[B]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.sort"
+sig = "(s: String) -> List[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.sort_by"
+sig = "(s: String, f: (String) -> B) -> List[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.sort_with"
+sig = "(s: String, cmp: (String, String) -> Int) -> List[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.split_at"
+sig = "(s: String, n: Int) -> (String, String)"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.take_while"
+sig = "(s: String, f: (String) -> Bool) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.to_utf16"
+sig = "(s: String) -> List[Int]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.unique"
+sig = "(s: String) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.unique_by"
+sig = "(s: String, f: (String) -> K) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.window"
+sig = "(s: String, n: Int) -> List[String]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.zip"
+sig = "(s: String, ys: List[B]) -> List[(String, B)]"
+class = "pure"
+status = "uninspected"
+blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.zip_with"
+sig = "(s: String, ys: List[B], f: (String, B) -> C) -> List[C]"
 class = "pure"
 status = "uninspected"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
