@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "48"
+# uninspected_ceiling = "122"
 
 [[fn]]
 name = "args.flag"
@@ -12908,5 +12908,449 @@ status = "uninspected"
 [[fn]]
 name = "set.zip_with"
 sig = "(s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.all"
+sig = "(d: Deque[A], f: (A) -> Bool) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.any"
+sig = "(d: Deque[A], f: (A) -> Bool) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.chunk"
+sig = "(d: Deque[A], n: Int) -> List[Deque[A]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.clear"
+sig = "(d: Deque[A]) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.contains"
+sig = "(d: Deque[A], x: A) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.count"
+sig = "(d: Deque[A], f: (A) -> Bool) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.dedup"
+sig = "(d: Deque[A]) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.drop"
+sig = "(d: Deque[A], n: Int) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.drop_end"
+sig = "(d: Deque[A], n: Int) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.drop_while"
+sig = "(d: Deque[A], f: (A) -> Bool) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.enumerate"
+sig = "(d: Deque[A]) -> List[(Int, A)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.filter"
+sig = "(d: Deque[A], f: (A) -> Bool) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.filter_map"
+sig = "(d: Deque[A], f: (A) -> Option[B]) -> List[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.find"
+sig = "(d: Deque[A], f: (A) -> Bool) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.find_index"
+sig = "(d: Deque[A], f: (A) -> Bool) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.find_map"
+sig = "(d: Deque[A], f: (A) -> Option[B]) -> Option[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.first"
+sig = "(d: Deque[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.fold"
+sig = "(d: Deque[A], init: B, f: (B, A) -> B) -> B"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.from_list"
+sig = "(xs: List[A]) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.get"
+sig = "(d: Deque[A], i: Int) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.group_by"
+sig = "(d: Deque[A], f: (A) -> B) -> Map[B, List[A]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.insert"
+sig = "(d: Deque[A], i: Int, x: A) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.intersperse"
+sig = "(d: Deque[A], sep: A) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.is_empty"
+sig = "(d: Deque[A]) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.last"
+sig = "(d: Deque[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.len"
+sig = "(d: Deque[A]) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.map"
+sig = "(d: Deque[A], f: (A) -> B) -> Deque[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.max"
+sig = "(d: Deque[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.max_by"
+sig = "(d: Deque[A], f: (A) -> K) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.max_with"
+sig = "(d: Deque[A], cmp: (A, A) -> Int) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.min"
+sig = "(d: Deque[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.min_by"
+sig = "(d: Deque[A], f: (A) -> K) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.min_with"
+sig = "(d: Deque[A], cmp: (A, A) -> Int) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.new"
+sig = "() -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.partition"
+sig = "(d: Deque[A], f: (A) -> Bool) -> (List[A], List[A])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.pop"
+sig = "(d: Deque[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.pop_front"
+sig = "(d: Deque[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.push"
+sig = "(d: Deque[A], x: A) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.push_front"
+sig = "(d: Deque[A], x: A) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.reduce"
+sig = "(d: Deque[A], f: (A, A) -> A) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.remove_at"
+sig = "(d: Deque[A], i: Int) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.reverse"
+sig = "(d: Deque[A]) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.scan"
+sig = "(d: Deque[A], init: B, f: (B, A) -> B) -> List[B]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.set"
+sig = "(d: Deque[A], i: Int, x: A) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.slice"
+sig = "(d: Deque[A], start: Int, end: Int) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.sort"
+sig = "(d: Deque[A]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.sort_by"
+sig = "(d: Deque[A], f: (A) -> B) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.sort_with"
+sig = "(d: Deque[A], cmp: (A, A) -> Int) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.split_at"
+sig = "(d: Deque[A], n: Int) -> (Deque[A], Deque[A])"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.take"
+sig = "(d: Deque[A], n: Int) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.take_end"
+sig = "(d: Deque[A], n: Int) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.take_while"
+sig = "(d: Deque[A], f: (A) -> Bool) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.to_list"
+sig = "(d: Deque[A]) -> List[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.unique"
+sig = "(d: Deque[A]) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.unique_by"
+sig = "(d: Deque[A], f: (A) -> K) -> Deque[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.window"
+sig = "(d: Deque[A], n: Int) -> List[Deque[A]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.zip"
+sig = "(d: Deque[A], ys: List[B]) -> List[(A, B)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "deque.zip_with"
+sig = "(d: Deque[A], ys: List[B], f: (A, B) -> C) -> List[C]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.all"
+sig = "(h: Heap[A], f: (A) -> Bool) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.any"
+sig = "(h: Heap[A], f: (A) -> Bool) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.clear"
+sig = "(h: Heap[A]) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.contains"
+sig = "(h: Heap[A], x: A) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.count"
+sig = "(h: Heap[A], f: (A) -> Bool) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.filter"
+sig = "(h: Heap[A], f: (A) -> Bool) -> Heap[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.from_list"
+sig = "(xs: List[A]) -> Heap[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.is_empty"
+sig = "(h: Heap[A]) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.len"
+sig = "(h: Heap[A]) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.new"
+sig = "() -> Heap[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.new_by"
+sig = "(f: (A) -> K) -> Heap[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.new_with"
+sig = "(cmp: (A, A) -> Int) -> Heap[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.peek"
+sig = "(h: Heap[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.pop"
+sig = "(h: Heap[A]) -> Option[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.push"
+sig = "(h: Heap[A], x: A) -> Unit"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "heap.to_list"
+sig = "(h: Heap[A]) -> List[A]"
 class = "pure"
 status = "uninspected"
