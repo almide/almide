@@ -425,4 +425,6 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-387 | Identifiers are UAX #31 names held in NFC; compatibility characters are refused; a caseless name is type-side only by declaration; non-ASCII names run byte-identically on every leg | 0.68.0 | active | fixture | 1 |
 | C-388 | A bare call names the definition of its own scope, never a same-spelled fn of the entry program or another module | 0.68.0 | active | fixture | 2 |
 | C-389 | http.serve reads up to 64 connections at once and answers a request head not whole within 10 s with 408, so a slow client holds only its own connection | 0.68.0 | active | fixture | 0 |
+| C-390 | The zlib decoders bound their output: past the bound they stop with one err text on every leg | 0.69.0 | active | fixture | 1 |
+| C-391 | json.parse bounds nesting at 1000 levels with one err text on every leg | 0.69.0 | active | fixture | 1 |
 
