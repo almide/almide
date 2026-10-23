@@ -1,0 +1,89 @@
+// url.encode_form / decode_form (R-url-01), url.parse_query (R-url-02) and
+// url.resolve (R-url-03, the RFC 3986 5.4 examples).
+import url
+
+test "form encoding writes a space as +" {
+  assert_eq(url.encode_form("a b+c&d"), "a+b%2Bc%26d")
+  assert_eq(url.encode_form(""), "")
+  assert_eq(url.encode_form("日本"), "%E6%97%A5%E6%9C%AC")
+}
+
+test "form decoding reads + as a space" {
+  assert_eq(url.decode_form("a+b%2Bc"), ok("a b+c"))
+  assert_eq(url.decode_form("%E6%97%A5"), ok("日"))
+  assert_eq(url.decode_form("%zz"), err("url.decode_form: invalid percent escape"))
+  assert_eq(url.decode_form("%e6%97"), err("url.decode_form: invalid UTF-8 in percent data"))
+  assert_eq(url.decode_form("%4"), err("url.decode_form: truncated percent escape"))
+}
+
+test "decode_form inverts encode_form" {
+  for s in ["", "a b", "x=1&y=2", "100% sure+", "日本 語"] {
+    assert_eq(url.decode_form(url.encode_form(s)), ok(s))
+  }
+}
+
+test "parse_query decodes keys and values" {
+  assert_eq(url.parse_query("q=a+b&lang=ja"), ok([("q", "a b"), ("lang", "ja")]))
+  assert_eq(url.parse_query("flag&x=%41&&"), ok([("flag", ""), ("x", "A")]))
+  assert_eq(url.parse_query(""), ok([]))
+  assert_eq(url.parse_query("x=%zz"), err("url.parse_query: invalid percent escape"))
+}
+
+test "parse_query inverts build_query" {
+  let ps = [("q", "a b"), ("k&", "v=1"), ("empty", "")]
+  assert_eq(url.parse_query(url.build_query(ps)), ok(ps))
+}
+
+fn res(r: String) -> String = match url.parse("http://a/b/c/d;p?q") {
+  ok(base) => match url.resolve(base, r) {
+    ok(u) => url.to_string(u),
+    err(e) => "ERR " + e,
+  },
+  err(e) => "BASE " + e,
+}
+
+test "resolve: RFC 3986 5.4.1 normal examples" {
+  assert_eq(res("g"), "http://a/b/c/g")
+  assert_eq(res("./g"), "http://a/b/c/g")
+  assert_eq(res("g/"), "http://a/b/c/g/")
+  assert_eq(res("/g"), "http://a/g")
+  assert_eq(res("//g"), "http://g")
+  assert_eq(res("?y"), "http://a/b/c/d;p?y")
+  assert_eq(res("g?y"), "http://a/b/c/g?y")
+  assert_eq(res("#s"), "http://a/b/c/d;p?q#s")
+  assert_eq(res("g#s"), "http://a/b/c/g#s")
+  assert_eq(res("g?y#s"), "http://a/b/c/g?y#s")
+  assert_eq(res(";x"), "http://a/b/c/;x")
+  assert_eq(res("g;x"), "http://a/b/c/g;x")
+  assert_eq(res(""), "http://a/b/c/d;p?q")
+  assert_eq(res("."), "http://a/b/c/")
+  assert_eq(res("./"), "http://a/b/c/")
+  assert_eq(res(".."), "http://a/b/")
+  assert_eq(res("../"), "http://a/b/")
+  assert_eq(res("../g"), "http://a/b/g")
+  assert_eq(res("../.."), "http://a/")
+  assert_eq(res("../../"), "http://a/")
+  assert_eq(res("../../g"), "http://a/g")
+}
+
+test "resolve: RFC 3986 5.4.2 abnormal examples" {
+  assert_eq(res("../../../g"), "http://a/g")
+  assert_eq(res("../../../../g"), "http://a/g")
+  assert_eq(res("/./g"), "http://a/g")
+  assert_eq(res("/../g"), "http://a/g")
+  assert_eq(res("g."), "http://a/b/c/g.")
+  assert_eq(res(".g"), "http://a/b/c/.g")
+  assert_eq(res("g.."), "http://a/b/c/g..")
+  assert_eq(res("..g"), "http://a/b/c/..g")
+  assert_eq(res("./../g"), "http://a/b/g")
+  assert_eq(res("./g/."), "http://a/b/c/g/")
+  assert_eq(res("g/./h"), "http://a/b/c/g/h")
+  assert_eq(res("g/../h"), "http://a/b/c/h")
+  assert_eq(res("g;x=1/./y"), "http://a/b/c/g;x=1/y")
+  assert_eq(res("g;x=1/../y"), "http://a/b/c/y")
+}
+
+test "resolve: an absolute reference stands alone" {
+  assert_eq(res("https://x.y/z/../w?k#f"), "https://x.y/w?k#f")
+  assert_eq(res("g:h"), "ERR url.parse: missing '://' scheme separator")
+}
