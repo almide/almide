@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 45 stdlib modules, 1040 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 45 stdlib modules, 1078 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -44,7 +44,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [regex](#regex) | 8 | 0 |
 | [result](#result) | 15 | 0 |
 | [set](#set) | 19 | 0 |
-| [string](#string) | 50 | 0 |
+| [string](#string) | 88 | 0 |
 | [testing](#testing) | 10 | 0 |
 | [uint16](#uint16) | 18 | 0 |
 | [uint32](#uint32) | 22 | 0 |
@@ -1148,6 +1148,44 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.run_length_encode(s: String) -> List[(String, Int)]` — (char, count) per run of equal codepoints.
 - `string.push(mut s: String, suffix: String) -> Unit` — Appends suffix to s in place.
 - `string.clear(mut s: String) -> Unit` — Empties s in place.
+- `string.compare(a: String, b: String) -> Int` — Negative if a sorts before b, 0 if equal, positive after; codepoint order.
+- `string.byte_len(s: String) -> Int` — UTF-8 byte count (string.len counts codepoints).
+- `string.to_utf16(s: String) -> List[Int]` — UTF-16 code units; a codepoint past U+FFFF is a surrogate pair.
+- `string.from_utf16(xs: List[Int]) -> Result[String, String]` — String from UTF-16 code units; err on an unpaired surrogate or a unit outside 0..65535.
+- `string.filter(s: String, f: (String) -> Bool) -> String` — The characters of s for which f is true.
+- `string.fold(s: String, init: B, f: (B, String) -> B) -> B` — f folded over the characters of s, left to right.
+- `string.insert(s: String, i: Int, x: String) -> String` — s with x inserted before character i; i outside 0..=len aborts.
+- `string.remove_at(s: String, i: Int) -> String` — s without character i; i outside 0..len aborts.
+- `string.new() -> String` — The empty string.
+- `string.from_list(xs: List[String]) -> String` — The strings of xs joined with nothing between.
+- `string.enumerate(s: String) -> List[(Int, String)]` — (index, character) pairs from 0.
+- `string.zip(s: String, ys: List[B]) -> List[(String, B)]` — Characters paired with ys; stops at the shorter.
+- `string.zip_with(s: String, ys: List[B], f: (String, B) -> C) -> List[C]` — f over characters paired with ys; stops at the shorter.
+- `string.filter_map(s: String, f: (String) -> Option[B]) -> List[B]` — The some results of f over the characters, in order.
+- `string.find_map(s: String, f: (String) -> Option[B]) -> Option[B]` — The first some result of f over the characters, or none.
+- `string.reduce(s: String, f: (String, String) -> String) -> Option[String]` — f folded over the characters from the first; none if s is empty.
+- `string.scan(s: String, init: B, f: (B, String) -> B) -> List[B]` — The running fold over the characters, init excluded.
+- `string.partition(s: String, f: (String) -> Bool) -> (List[String], List[String])` — (characters where f is true, the rest), each in order.
+- `string.group_by(s: String, f: (String) -> B) -> Map[B, List[String]]` — Characters grouped by f's key, each group in order.
+- `string.sort(s: String) -> List[String]` — The characters in codepoint order.
+- `string.sort_by(s: String, f: (String) -> B) -> List[String]` — The characters ordered by f's key; equal keys keep their order.
+- `string.sort_with(s: String, cmp: (String, String) -> Int) -> List[String]` — The characters ordered by cmp (negative = first argument first); stable.
+- `string.min(s: String) -> Option[String]` — The smallest character in codepoint order; none if empty.
+- `string.max(s: String) -> Option[String]` — The largest character in codepoint order; none if empty.
+- `string.min_by(s: String, f: (String) -> K) -> Option[String]` — The first character with the smallest key; none if empty.
+- `string.max_by(s: String, f: (String) -> K) -> Option[String]` — The last character with the largest key; none if empty.
+- `string.min_with(s: String, cmp: (String, String) -> Int) -> Option[String]` — The first smallest character by cmp; none if empty.
+- `string.max_with(s: String, cmp: (String, String) -> Int) -> Option[String]` — The last largest character by cmp; none if empty.
+- `string.find_index(s: String, f: (String) -> Bool) -> Option[Int]` — Index of the first character where f is true, or none.
+- `string.take_while(s: String, f: (String) -> Bool) -> String` — The longest prefix whose characters all satisfy f.
+- `string.drop_while(s: String, f: (String) -> Bool) -> String` — s after the longest prefix whose characters all satisfy f.
+- `string.chunk(s: String, n: Int) -> List[String]` — Runs of n characters, the last may be shorter; n <= 0 aborts.
+- `string.window(s: String, n: Int) -> List[String]` — Every run of n consecutive characters; [] if n > len; n <= 0 aborts.
+- `string.split_at(s: String, n: Int) -> (String, String)` — (first n characters, the rest); n past the end gives (s, ""); n < 0 aborts.
+- `string.dedup(s: String) -> String` — s with each run of equal adjacent characters collapsed to one.
+- `string.intersperse(s: String, sep: String) -> String` — The characters of s with sep between each pair.
+- `string.unique(s: String) -> String` — The first occurrence of each character, in order.
+- `string.unique_by(s: String, f: (String) -> K) -> String` — The first character of each key f gives, in order.
 
 ## testing
 

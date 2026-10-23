@@ -32704,6 +32704,231 @@ fn push(mut s: String, suffix: String) -> Unit = _
 /// Empties s in place.
 @intrinsic("almide_rt_string_clear")
 fn clear(mut s: String) -> Unit = _
+
+
+
+
+
+
+
+
+/// Negative if a sorts before b, 0 if equal, positive after; codepoint order.
+fn compare(a: String, b: String) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+local fn utf8_width(cp: Int) -> Int = if cp < 128 then 1
+else if cp < 2048 then 2
+else if cp < 65536 then 3 else 4
+
+/// UTF-8 byte count (string.len counts codepoints).
+fn byte_len(s: String) -> Int = string.chars(s) |> list.fold(
+  0,
+  (n, c) => n + utf8_width(string.codepoint(c) ?? 0),
+)
+
+local fn utf16_units(cp: Int) -> List[Int] = if cp < 65536 then [cp]
+else [55296 + (cp - 65536) / 1024, 56320 + (cp - 65536) % 1024]
+
+/// UTF-16 code units; a codepoint past U+FFFF is a surrogate pair.
+fn to_utf16(s: String) -> List[Int] = string.chars(s) |> list.flat_map((c) => utf16_units(string.codepoint(c) ?? 0))
+
+local fn utf16_decode(xs: List[Int], i: Int, acc: List[String]) -> Result[String, String] = match list.get(
+  xs,
+  i,
+) {
+  none => ok(string.join(list.reverse(acc), "")),
+  some(u) => if u < 0 or u > 65535 then err("string.from_utf16: code unit out of range at ${i}: ${u}")
+  else if u >= 55296 and u <= 56319 then match list.get(xs, i + 1) {
+    some(lo) => if lo >= 56320 and lo <= 57343 then utf16_decode(
+      xs,
+      i + 2,
+      [string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320))] + acc,
+    )
+    else err("string.from_utf16: unpaired surrogate at ${i}"),
+    none => err("string.from_utf16: unpaired surrogate at ${i}"),
+  } else if u >= 56320 and u <= 57343 then err("string.from_utf16: unpaired surrogate at ${i}")
+  else utf16_decode(xs, i + 1, [string.from_codepoint(u)] + acc),
+}
+
+/// String from UTF-16 code units; err on an unpaired surrogate or a unit outside 0..65535.
+fn from_utf16(xs: List[Int]) -> Result[String, String] = utf16_decode(xs, 0, [])
+
+/// The characters of s for which f is true.
+fn filter(s: String, f: (String) -> Bool) -> String = string.join(
+  list.filter(string.chars(s), f),
+  "",
+)
+
+/// f folded over the characters of s, left to right.
+fn fold[B](s: String, init: B, f: (B, String) -> B) -> B = list.fold(string.chars(s), init, f)
+
+/// s with x inserted before character i; i outside 0..=len aborts.
+fn insert(s: String, i: Int, x: String) -> String = {
+  let n = string.len(s)
+  if i < 0 or i > n then panic("string.insert: index ${i} out of range 0..=${n}")
+  else string.take(s, i) + x + string.drop(s, i)
+}
+
+/// s without character i; i outside 0..len aborts.
+fn remove_at(s: String, i: Int) -> String = {
+  let n = string.len(s)
+  if i < 0 or i >= n then panic("string.remove_at: index ${i} out of range 0..${n}")
+  else string.take(s, i) + string.drop(s, i + 1)
+}
+
+/// The empty string.
+fn new() -> String = ""
+
+/// The strings of xs joined with nothing between.
+fn from_list(xs: List[String]) -> String = string.join(xs, "")
+
+/// (index, character) pairs from 0.
+fn enumerate(s: String) -> List[(Int, String)] = list.enumerate(string.chars(s))
+
+/// Characters paired with ys; stops at the shorter.
+fn zip[B](s: String, ys: List[B]) -> List[(String, B)] = list.zip(string.chars(s), ys)
+
+/// f over characters paired with ys; stops at the shorter.
+fn zip_with[B, C](s: String, ys: List[B], f: (String, B) -> C) -> List[C] = list.zip_with(
+  string.chars(s),
+  ys,
+  f,
+)
+
+/// The some results of f over the characters, in order.
+fn filter_map[B](s: String, f: (String) -> B?) -> List[B] = list.filter_map(string.chars(s), f)
+
+/// The first some result of f over the characters, or none.
+fn find_map[B](s: String, f: (String) -> B?) -> B? = list.find_map(string.chars(s), f)
+
+/// f folded over the characters from the first; none if s is empty.
+fn reduce(s: String, f: (String, String) -> String) -> String? = list.reduce(string.chars(s), f)
+
+/// The running fold over the characters, init excluded.
+fn scan[B](s: String, init: B, f: (B, String) -> B) -> List[B] = list.scan(string.chars(s), init, f)
+
+/// (characters where f is true, the rest), each in order.
+fn partition(s: String, f: (String) -> Bool) -> (List[String], List[String]) = list.partition(
+  string.chars(s),
+  f,
+)
+
+/// Characters grouped by f's key, each group in order.
+fn group_by[B](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group_by(
+  string.chars(s),
+  f,
+)
+
+/// The characters in codepoint order.
+fn sort(s: String) -> List[String] = list.sort(string.chars(s))
+
+/// The characters ordered by f's key; equal keys keep their order.
+fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.chars(s), f)
+
+local fn merge_with(xs: List[String], ys: List[String], cmp: (String, String) -> Int, acc: List[String]) -> List[String] = match (list.first(xs), list.first(ys)) {
+  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, list.drop(ys, 1), cmp, [y] + acc)
+  else merge_with(list.drop(xs, 1), ys, cmp, [x] + acc),
+  (some(_), none) => list.reverse(acc) + xs,
+  _ => list.reverse(acc) + ys,
+}
+
+local fn merge_sort_with(xs: List[String], cmp: (String, String) -> Int) -> List[String] = {
+  let n = list.len(xs)
+  if n <= 1 then xs
+  else merge_with(
+    merge_sort_with(list.take(xs, n / 2), cmp),
+    merge_sort_with(list.drop(xs, n / 2), cmp),
+    cmp,
+    [],
+  )
+}
+
+/// The characters ordered by cmp (negative = first argument first); stable.
+fn sort_with(s: String, cmp: (String, String) -> Int) -> List[String] = merge_sort_with(
+  string.chars(s),
+  cmp,
+)
+
+/// The smallest character in codepoint order; none if empty.
+fn min(s: String) -> String? = list.min(string.chars(s))
+
+/// The largest character in codepoint order; none if empty.
+fn max(s: String) -> String? = list.max(string.chars(s))
+
+/// The first character with the smallest key; none if empty.
+fn min_by[K](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.chars(s), f))
+
+/// The last character with the largest key; none if empty.
+fn max_by[K](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.chars(s), f))
+
+local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String) -> Int, want_max: Bool) -> String = match list.get(
+  xs,
+  i,
+) {
+  none => best,
+  some(c) => {
+    let o = cmp(c, best)
+    let chosen = if want_max then o >= 0 else o < 0
+    pick_with(xs, i + 1, if chosen then c else best, cmp, want_max)
+  },
+}
+
+/// The first smallest character by cmp; none if empty.
+fn min_with(s: String, cmp: (String, String) -> Int) -> String? = match string.first(s) {
+  some(c) => some(pick_with(string.chars(s), 1, c, cmp, false)),
+  none => none,
+}
+
+/// The last largest character by cmp; none if empty.
+fn max_with(s: String, cmp: (String, String) -> Int) -> String? = match string.first(s) {
+  some(c) => some(pick_with(string.chars(s), 1, c, cmp, true)),
+  none => none,
+}
+
+/// Index of the first character where f is true, or none.
+fn find_index(s: String, f: (String) -> Bool) -> Int? = list.find_index(string.chars(s), f)
+
+/// The longest prefix whose characters all satisfy f.
+fn take_while(s: String, f: (String) -> Bool) -> String = string.join(
+  list.take_while(string.chars(s), f),
+  "",
+)
+
+/// s after the longest prefix whose characters all satisfy f.
+fn drop_while(s: String, f: (String) -> Bool) -> String = string.join(
+  list.drop_while(string.chars(s), f),
+  "",
+)
+
+/// Runs of n characters, the last may be shorter; n <= 0 aborts.
+fn chunk(s: String, n: Int) -> List[String] =
+  if n <= 0 then panic("string.chunk: size must be positive, got ${n}")
+  else list.chunk(string.chars(s), n) |> list.map((cs) => string.join(cs, ""))
+
+/// Every run of n consecutive characters; [] if n > len; n <= 0 aborts.
+fn window(s: String, n: Int) -> List[String] =
+  if n <= 0 then panic("string.window: size must be positive, got ${n}")
+  else list.window(string.chars(s), n) |> list.map((cs) => string.join(cs, ""))
+
+/// (first n characters, the rest); n past the end gives (s, ""); n < 0 aborts.
+fn split_at(s: String, n: Int) -> (String, String) =
+  if n < 0 then panic("string.split_at: negative index ${n}")
+  else (string.take(s, n), string.drop(s, n))
+
+/// s with each run of equal adjacent characters collapsed to one.
+fn dedup(s: String) -> String = string.join(list.dedup(string.chars(s)), "")
+
+/// The characters of s with sep between each pair.
+fn intersperse(s: String, sep: String) -> String = string.join(string.chars(s), sep)
+
+/// The first occurrence of each character, in order.
+fn unique(s: String) -> String = string.join(list.unique(string.chars(s)), "")
+
+/// The first character of each key f gives, in order.
+fn unique_by[K](s: String, f: (String) -> K) -> String = string.join(
+  list.unique_by(string.chars(s), f),
+  "",
+)
 "#;
 pub const SRC_STRING_BYTE_SLICE: &str = r#"
 fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
