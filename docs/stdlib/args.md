@@ -103,7 +103,7 @@ effect fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (6 functions)
+## Signature index (7 functions)
 
 ```
 // Same as env.args; argv[0] excluded.
@@ -113,6 +113,10 @@ effect args.raw() -> List[String]
 // True on --name or -<first letter of name>.
 // @since 0.2.0 or earlier
 effect args.flag(name: String) -> Bool
+
+// True on --name; a one-letter name also matches -name. No short form is derived.
+// @since unreleased
+effect args.has_flag(name: String) -> Bool
 
 // Value of --name=v or --name v; none if absent.
 // @since 0.2.0 or earlier

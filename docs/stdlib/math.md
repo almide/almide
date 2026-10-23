@@ -284,7 +284,7 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (23 functions)
+## Signature index (35 functions)
 
 ```
 // Magnitude of n; min_value wraps to itself.
@@ -378,6 +378,54 @@ math.tan(x: Float) -> Float
 // Hyperbolic tangent in -1..1; inf gives 1.0.
 // @since 0.30.0 or earlier
 math.tanh(x: Float) -> Float
+
+// Arcsine in radians, within -pi/2..pi/2; NaN outside -1..1.
+// @since unreleased
+math.asin(x: Float) -> Float
+
+// Arccosine in radians, within 0..pi; NaN outside -1..1.
+// @since unreleased
+math.acos(x: Float) -> Float
+
+// Angle of the point (x, y) in radians, within -pi..pi.
+// @since unreleased
+math.atan2(y: Float, x: Float) -> Float
+
+// e to the x, minus 1, accurate near 0; -1.0 below about -38.
+// @since unreleased
+math.expm1(x: Float) -> Float
+
+// Natural log of 1 + x, accurate near 0; -inf at -1, NaN below.
+// @since unreleased
+math.log1p(x: Float) -> Float
+
+// Hyperbolic sine; overflows to +-inf past about 710.
+// @since unreleased
+math.sinh(x: Float) -> Float
+
+// Hyperbolic cosine, at least 1.0; overflows to inf past about 710.
+// @since unreleased
+math.cosh(x: Float) -> Float
+
+// sqrt(a*a + b*b) without overflow or underflow on the way.
+// @since unreleased
+math.hypot(a: Float, b: Float) -> Float
+
+// Real cube root; negative x gives a negative root.
+// @since unreleased
+math.cbrt(x: Float) -> Float
+
+// Inverse hyperbolic sine.
+// @since unreleased
+math.asinh(x: Float) -> Float
+
+// Inverse hyperbolic cosine, at least 0.0; NaN below 1.0.
+// @since unreleased
+math.acosh(x: Float) -> Float
+
+// Inverse hyperbolic tangent; +-inf at +-1, NaN outside -1..1.
+// @since unreleased
+math.atanh(x: Float) -> Float
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
