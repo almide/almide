@@ -199,20 +199,37 @@ pub fn almide_rt_matrix_linear_f32_row_no_bias(
         return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
     }
     let mut out = vec![0.0f64; x_rows * out_cols];
-    // Decode each weight straight from its little-endian bytes (no `unsafe`
-    // reinterpret, so alignment does not matter — #4007) and split the output
-    // row across threads: GEMV is embarrassingly parallel over output elements.
+    // Fast path: reinterpret the (4-byte-aligned, little-endian) weight bytes
+    // as &[f32] so the inner dot auto-vectorizes (cvtps2pd + fma), and split
+    // the output row across threads — GEMV is embarrassingly parallel over
+    // output elements. Falls back to per-element decode when misaligned.
     let w_all = &w_bytes[off..off + out_cols * n_in * 4];
-    for i in 0..x_rows {
-        let xi = &x.data[i * n_in..(i + 1) * n_in];
-        par_out_rows(&mut out[i * out_cols..(i + 1) * out_cols], |j, o| {
-            let wj = &w_all[j * n_in * 4..(j + 1) * n_in * 4];
-            let mut acc = 0.0f64;
-            for (xk, c) in xi.iter().zip(wj.chunks_exact(4)) {
-                acc += xk * f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64;
+    let (head, w_f32, _) = unsafe { w_all.align_to::<f32>() };
+    if head.is_empty() && w_f32.len() == out_cols * n_in {
+        for i in 0..x_rows {
+            let xi = &x.data[i * n_in..(i + 1) * n_in];
+            par_out_rows(&mut out[i * out_cols..(i + 1) * out_cols], |j, o| {
+                let wj = &w_f32[j * n_in..(j + 1) * n_in];
+                let mut acc = 0.0f64;
+                for k in 0..n_in {
+                    acc += xi[k] * wj[k] as f64;
+                }
+                *o = acc;
+            });
+        }
+    } else {
+        for j in 0..out_cols {
+            let row_off = off + j * n_in * 4;
+            let wj = &w_bytes[row_off..row_off + n_in * 4];
+            for i in 0..x_rows {
+                let xi = &x.data[i * n_in..(i + 1) * n_in];
+                let mut acc = 0.0f64;
+                for (k, c) in wj.chunks_exact(4).enumerate() {
+                    acc += xi[k] * f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64;
+                }
+                out[i * out_cols + j] = acc;
             }
-            *o = acc;
-        });
+        }
     }
     mk(x_rows, out_cols, out)
 }

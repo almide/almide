@@ -97,9 +97,13 @@
 # are UNCLASSIFIED until ported (79 -> 83); gen-mutation-score.sh has read
 # 41/41 on every sweep since its 2026-09-22 stamp, so no real run has moved
 # its measurand (0 -> 1). Both are enumerated gates, not new ones.
+# The uncompensated count rose 19 -> 22 on 2026-10-23 (#4007): the runtime
+# unsafe ratchet and its negative control land naming what they do not see —
+# compiler-emitted unsafe, whether an allowed site is sound (#4043), and edits
+# the six forged trees do not try.
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "19"
+# uncompensated_blind_ceiling = "22"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -826,6 +830,26 @@ evidence = "str-twin ratchet landing (2026-08-17, #1460 item 2): freezes the std
 measures = "count of `_str`-suffixed stdlib twins, against scripts/str-twin-baseline.txt"
 varies = "2026-08-16 measured 119, 2026-08-17 120 (the creep the ratchet froze); 2026-08-20 eb6529a45 raised the baseline 119 -> 120 on purpose for map_upsert_str (C-301)"
 blind = "UNMAPPED"
+
+[[gate]]
+path = "scripts/check-runtime-unsafe-ratchet.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4007 landing (2026-10-23, PR #4044): scripts/check-runtime-unsafe-ratchet-negative.sh runs on every CI run and copies runtime/rs/src into a scratch tree — one new unsafe line in a listed file (matrix.rs) goes red, an unsafe line in an unlisted file (int.rs) goes red, an allowlist count above the tree goes red as STALE, a row naming a missing file goes red; the committed tree and a comment-only mention of `unsafe` stay green"
+measures = "per-file count of code lines containing the word `unsafe` in runtime/rs/src/*.rs, against scripts/runtime-unsafe-allowlist.txt"
+varies = "origin/develop 3c35408ae reads 29 lines; PR #4044 reads 27 (list.rs UnsafeCell and its unsafe impl Sync replaced by Mutex); the draft that also rewrites matrix_p2.rs align_to read 26"
+blind = "unsafe emitted by the compiler into the output crate (crates/almide-codegen/src/prelude_region.rs, walker/mod.rs, tracked in #4007) -> UNCOMPENSATED; whether an allowed site is sound (#4043 is one that is not) -> UNCOMPENSATED"
+
+[[gate]]
+path = "scripts/check-runtime-unsafe-ratchet-negative.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "EXERCISED"
+evidence = "#4007 landing (2026-10-23, PR #4044): six-mode exercise on every run — two green controls and four red ones against check-runtime-unsafe-ratchet.sh; the script exits 1 if any verdict comes out the other way, so a ratchet that stops failing turns this red"
+measures = "the exit code check-runtime-unsafe-ratchet.sh gives six scratch trees (committed tree, +1 unsafe in a listed file, +1 in an unlisted file, a comment mention, an over-count allowlist, a row for a missing file)"
+varies = "the four forged trees read exit 1 and the two controls read exit 0 in the same run"
+blind = "a way to add unsafe the six forged trees do not try (a new .rs outside runtime/rs/src, `unsafe` split across lines) -> UNCOMPENSATED"
 
 [[gate]]
 path = "scripts/check-dep-shaped-skips.sh"
