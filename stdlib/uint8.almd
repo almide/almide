@@ -63,6 +63,9 @@ fn clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8 = int.to_uint8(int.clamp(int.f
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt8, b: UInt8) -> UInt8 = a / b
 
+/// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+fn modulo(a: UInt8, b: UInt8) -> UInt8 = a % b
+
 /// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
 fn pow(base: UInt8, exp: Int) -> UInt8 = int.to_uint8(math.pow(int.from_uint8(base), exp))
 

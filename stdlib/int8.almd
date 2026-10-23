@@ -87,14 +87,24 @@ fn max(a: Int8, b: Int8) -> Int8 = if a >= b then a else b
 /// x limited to lo..hi; aborts when lo > hi.
 fn clamp(x: Int8, lo: Int8, hi: Int8) -> Int8 = int.to_int8(int.clamp(int.from_int8(x), int.from_int8(lo), int.from_int8(hi)))
 
-/// Quotient rounded toward -inf; b == 0 aborts; min_value / -1 wraps.
-fn floor_div(a: Int8, b: Int8) -> Int8 = int.to_int8(floor_quotient(int.from_int8(a), int.from_int8(b)))
+/// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+fn floor_div(a: Int8, b: Int8) -> Int8 = if int.from_int8(b) == -1 then a / b
+else int.to_int8(floor_quotient(int.from_int8(a), int.from_int8(b)))
 
-// b == -1 is answered before `/` and `%`, which abort on min_value / -1.
-local fn floor_quotient(a: Int, b: Int) -> Int = if b == -1 then 0 - a
-else {
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: Int8, b: Int8) -> Int8 = int.to_int8(floor_remainder(int.from_int8(a), int.from_int8(b)))
+
+// b == -1 never reaches here: it divides exactly, and the type's own `/` aborts on min_value / -1.
+local fn floor_quotient(a: Int, b: Int) -> Int = {
   let q = a / b
   if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+// b == -1 divides every a, and Int's `%` aborts on min_value % -1: answered first.
+local fn floor_remainder(a: Int, b: Int) -> Int = if b == -1 then 0
+else {
+  let m = a % b
+  if m != 0 and (m < 0) != (b < 0) then m + b else m
 }
 
 /// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.

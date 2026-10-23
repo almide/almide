@@ -75,6 +75,9 @@ fn clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16 = int.to_uint16(int.clamp(
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt16, b: UInt16) -> UInt16 = a / b
 
+/// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+fn modulo(a: UInt16, b: UInt16) -> UInt16 = a % b
+
 /// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
 fn pow(base: UInt16, exp: Int) -> UInt16 = int.to_uint16(math.pow(int.from_uint16(base), exp))
 

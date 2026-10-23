@@ -87,6 +87,9 @@ fn clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32 = int.to_uint32(int.clamp(
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt32, b: UInt32) -> UInt32 = a / b
 
+/// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+fn modulo(a: UInt32, b: UInt32) -> UInt32 = a % b
+
 /// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
 fn pow(base: UInt32, exp: Int) -> UInt32 = int.to_uint32(math.pow(int.from_uint32(base), exp))
 

@@ -132,6 +132,9 @@ local fn unbias(n: Int) -> UInt64 = int.to_uint64(int.bxor(n, int.bshl(1, 63)))
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt64, b: UInt64) -> UInt64 = a / b
 
+/// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+fn modulo(a: UInt64, b: UInt64) -> UInt64 = a % b
+
 /// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
 fn pow(base: UInt64, exp: Int) -> UInt64 = int.to_uint64(math.pow(int.from_uint64(base), exp))
 
