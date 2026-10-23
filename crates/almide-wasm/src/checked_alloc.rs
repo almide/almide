@@ -16,10 +16,21 @@
 //!   differential run (scripts/wasm-checked-alloc.sh: checked build against
 //!   the ordinary build) shows as a changed output.
 //!
-//! Not covered: blocks above the class ceiling (the large list keeps its own
-//! links in the payload), blocks too small to file, and an out-of-bounds
-//! write into a LIVE block — its corruption is only seen if it changes the
-//! output. The shipped module never carries this code: OFF (the default) the
+//! - every block `$alloc` hands out is [`CANARY`] bytes larger than the
+//!   request, its header's `cap` stops short of them, and they hold the
+//!   canary word; `$free` checks the canary before filing the block and,
+//!   when it is broken, prints [`OVERRUN_TEXT`] and exits [`EXIT`] — a
+//!   write ran past the end of the block's usable capacity (a heap
+//!   overflow).
+//!
+//! Not covered: poison in blocks above the class ceiling (the large list
+//! keeps its own links in the payload) and in blocks too small to file; an
+//! overrun of a block that is never freed (a top-level value, a region the
+//! window discards wholesale) or one that skips the canary and lands
+//! further on; and an out-of-bounds write INSIDE the usable capacity — its
+//! corruption is only seen if it changes the output. Inside a region-pure
+//! fn the inline allocation arm (alloc_inline.rs) is off under the switch,
+//! so every block takes `$alloc`. The shipped module never carries this code: OFF (the default) the
 //! module is byte-identical to a build without the switch, so the decoded
 //! `$alloc` / `$free` bytes the proofs read (StructuralDecode.v) are
 //! unchanged. The CLI arms it from `ALMIDE_WASM_CHECKED_ALLOC`; a test arms
@@ -32,6 +43,7 @@ use wasm_encoder::{BlockType, InstructionSink, MemArg};
 thread_local! {
     static ARMED: Cell<bool> = const { Cell::new(false) };
     static MESSAGE: Cell<u32> = const { Cell::new(0) };
+    static OVERRUN_MESSAGE: Cell<u32> = const { Cell::new(0) };
 }
 
 /// The exit status of a failed check — distinct from a program's own
@@ -41,11 +53,24 @@ pub const EXIT: i32 = 70;
 /// The failed check's message.
 pub const TEXT: &str = "Error: heap check: a freed block was written (a use after free, or a stray write)";
 
+/// The broken canary's message.
+pub const OVERRUN_TEXT: &str = "Error: heap check: a write ran past the end of a block (a heap overflow)";
+
 /// Record the pooled address of [`TEXT`] for `$alloc` (assembly.rs interns
 /// it only while armed, so the shipped data segment is unchanged).
 pub(crate) fn set_message(addr: u32) {
     MESSAGE.with(|c| c.set(addr));
 }
+
+/// Record the pooled address of [`OVERRUN_TEXT`] for `$free`.
+pub(crate) fn set_overrun_message(addr: u32) {
+    OVERRUN_MESSAGE.with(|c| c.set(addr));
+}
+
+/// The canary: this many bytes past a block's usable capacity, two words of
+/// [`CANARY_WORD`].
+pub const CANARY: i32 = 8;
+const CANARY_WORD: i32 = 0xC3C3_C3C3_u32 as i32;
 
 /// The poison byte, and the word four of them make.
 pub const POISON: u8 = 0xA5;
@@ -115,4 +140,51 @@ pub(crate) fn emit_poison_check(i: &mut InstructionSink<'_>, head: u32, p: u32, 
     i.local_get(p).i32_const(4).i32_add().local_set(p);
     i.br(0);
     i.end().end();
+}
+
+fn word(offset: u32) -> MemArg {
+    MemArg { offset: u64::from(offset), align: 2, memory_index: 0 }
+}
+
+/// `$alloc`, on entry: size the block [`CANARY`] bytes past the request
+/// (`len` is the request parameter). Nothing when the switch is off.
+pub(crate) fn emit_canary_reserve(i: &mut InstructionSink<'_>, len: u32) {
+    if !armed() {
+        return;
+    }
+    i.local_get(len).i32_const(CANARY).i32_add().local_set(len);
+}
+
+/// `$alloc`, at each return with the block in `b`: the header's `len` back
+/// to the request, `cap` short of the canary, and the canary written right
+/// after the usable capacity. Nothing when the switch is off.
+pub(crate) fn emit_canary_set(i: &mut InstructionSink<'_>, b: u32, len: u32) {
+    if !armed() {
+        return;
+    }
+    let (lenf, capf) = (almide_layout::LEN.offset, almide_layout::CAP.offset);
+    i.local_get(b).local_get(len).i32_const(CANARY).i32_sub().i32_store(word(lenf));
+    i.local_get(b).local_get(b).i32_load(word(capf)).i32_const(CANARY).i32_sub().i32_store(word(capf));
+    for k in 0..2 {
+        i.local_get(b).local_get(b).i32_load(word(capf)).i32_add();
+        i.i32_const(CANARY_WORD).i32_store(word(almide_layout::PAYLOAD + 4 * k));
+    }
+}
+
+/// `$free`, on entry: trap unless the canary after the usable capacity is
+/// intact, then hand the block its full capacity back so the filing below
+/// derives the class `$alloc` took it from. Nothing when the switch is off.
+pub(crate) fn emit_canary_check(i: &mut InstructionSink<'_>, block: u32) {
+    if !armed() {
+        return;
+    }
+    let capf = almide_layout::CAP.offset;
+    for k in 0..2 {
+        i.local_get(block).local_get(block).i32_load(word(capf)).i32_add();
+        i.i32_load(word(almide_layout::PAYLOAD + 4 * k)).i32_const(CANARY_WORD).i32_ne().if_(BlockType::Empty);
+        i.i32_const(OVERRUN_MESSAGE.with(|c| c.get()) as i32).call(crate::F_EPRINTLN_BLOCK);
+        i.i32_const(EXIT).call(crate::F_EXIT_IMPORT).unreachable();
+        i.end();
+    }
+    i.local_get(block).local_get(block).i32_load(word(capf)).i32_const(CANARY).i32_add().i32_store(word(capf));
 }

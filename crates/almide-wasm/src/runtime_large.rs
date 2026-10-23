@@ -117,6 +117,7 @@ pub(crate) fn emit_ltake(
             .i32_const(almide_layout::PAYLOAD as i32)
             .i32_sub()
             .i32_store(word(almide_layout::CAP.offset));
+        crate::checked_alloc::emit_canary_set(i, q, len);
         i.local_get(q).return_();
     }
     i.end();

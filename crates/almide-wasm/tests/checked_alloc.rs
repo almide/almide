@@ -7,6 +7,8 @@
 //!   finds the poison broken, prints the heap-check message and exits 70.
 //!   The ordinary build runs the same program to exit 0 — the silent
 //!   corruption the switch exists to expose.
+//! - ON, a 16-byte write into a 4-byte buffer: the block's canary is broken
+//!   when `$free` files it; the overrun message, exit 70. Ordinarily: exit 0.
 
 mod harness;
 use harness::run_wasm;
@@ -34,6 +36,7 @@ const SMALL_CHURN: &str = r#"fn main() -> Unit = {
 "#;
 
 const UAF_WRITE: &str = include_str!("../../../proofs/fixtures/heap-check/uaf_write.almd");
+const OVERRUN_WRITE: &str = include_str!("../../../proofs/fixtures/heap-check/overrun_write.almd");
 
 #[test]
 fn off_is_byte_identical_and_on_changes_only_the_allocator() {
@@ -59,4 +62,13 @@ fn a_write_after_free_is_caught_on_reuse() {
     assert_eq!(checked.exit, almide_wasm::checked_alloc::EXIT, "{}", show(&checked));
     assert!(checked.stderr.contains(almide_wasm::checked_alloc::TEXT), "{}", show(&checked));
     assert!(checked.stdout.is_empty(), "the check fires before the program prints: {}", show(&checked));
+}
+
+#[test]
+fn a_write_past_the_end_is_caught_on_free() {
+    let plain = run_wasm(&emit(OVERRUN_WRITE, false)).expect("run");
+    assert_eq!((plain.exit, plain.stdout.as_str()), (0, "wrote 16\n"), "the ordinary build corrupts silently: {}", show(&plain));
+    let checked = run_wasm(&emit(OVERRUN_WRITE, true)).expect("run");
+    assert_eq!(checked.exit, almide_wasm::checked_alloc::EXIT, "{}", show(&checked));
+    assert!(checked.stderr.contains(almide_wasm::checked_alloc::OVERRUN_TEXT), "{}", show(&checked));
 }

@@ -4,15 +4,18 @@
 # its ordinary build.
 #
 # Under ALMIDE_WASM_CHECKED_ALLOC, `$free` poisons a freed block and
-# `$alloc` checks the poison before reusing it. A program that writes into a
-# freed block exits 70 with the heap-check message; one that READS a freed
-# block sees poison and prints something else. Either shows up here as a
-# difference in stdout, stderr or exit status between the two builds.
+# `$alloc` checks the poison before reusing it, and every block carries a
+# canary past its usable capacity that `$free` checks. A program that writes
+# into a freed block, or past the end of a block, exits 70 with a heap-check
+# message; one that READS a freed block sees poison and prints something
+# else. Either shows up here as a difference in stdout, stderr or exit
+# status between the two builds.
 #
-# The negative control proofs/fixtures/heap-check/uaf_write.almd writes
-# through a dangling `ffi` address: it must exit 0 in the ordinary build
-# (the corruption is silent) and 70 under the switch, or the check has no
-# teeth and the gate fails.
+# Two negative controls must exit 0 in the ordinary build (the corruption is
+# silent) and 70 with their message under the switch, or the check has no
+# teeth and the gate fails: proofs/fixtures/heap-check/uaf_write.almd writes
+# through a dangling `ffi` address, and overrun_write.almd writes 16 bytes
+# into a 4-byte buffer.
 #
 #   scripts/wasm-checked-alloc.sh [fixture.almd ...]   (default: spec/wasm_cross/*.almd)
 #   WASM_CHECKED_SHARD=i/n                              (every n-th fixture from i)
@@ -48,16 +51,21 @@ run() {
   (cd "$tmp" && with_timeout "$WASMTIME" run --dir=. "$1" </dev/null >"$2.out" 2>"$2.err"; echo $? >"$2.rc")
 }
 
-echo "== negative control: a write after free =="
-CONTROL="$ROOT/proofs/fixtures/heap-check/uaf_write.almd"
-build "$CONTROL" "$tmp/c0.wasm" 0 && build "$CONTROL" "$tmp/c1.wasm" 1 || { echo "FAIL: the control does not build" >&2; exit 1; }
-run "$tmp/c0.wasm" "$tmp/c0"; run "$tmp/c1.wasm" "$tmp/c1"
-c0=$(cat "$tmp/c0.rc"); c1=$(cat "$tmp/c1.rc")
-if [ "$c0" != 0 ] || [ "$c1" != 70 ] || ! grep -q "heap check" "$tmp/c1.err"; then
-  echo "FAIL: the control must exit 0 ordinarily and 70 with the heap-check message under the switch (got $c0 and $c1)" >&2
-  exit 1
-fi
-echo "  ok: ordinary build exit 0 (silent corruption); checked build exit 70: $(cat "$tmp/c1.err")"
+# control <fixture> <message fragment> <what it does>
+control() {
+  echo "== negative control: $3 =="
+  local f="$ROOT/proofs/fixtures/heap-check/$1"
+  build "$f" "$tmp/c0.wasm" 0 && build "$f" "$tmp/c1.wasm" 1 || { echo "FAIL: the control $1 does not build" >&2; exit 1; }
+  run "$tmp/c0.wasm" "$tmp/c0"; run "$tmp/c1.wasm" "$tmp/c1"
+  local c0 c1; c0=$(cat "$tmp/c0.rc"); c1=$(cat "$tmp/c1.rc")
+  if [ "$c0" != 0 ] || [ "$c1" != 70 ] || ! grep -q "$2" "$tmp/c1.err"; then
+    echo "FAIL: the control $1 must exit 0 ordinarily and 70 with '$2' under the switch (got $c0 and $c1)" >&2
+    exit 1
+  fi
+  echo "  ok: ordinary build exit 0 (silent corruption); checked build exit 70: $(cat "$tmp/c1.err")"
+}
+control uaf_write.almd "a freed block was written" "a write after free"
+control overrun_write.almd "ran past the end of a block" "a write past the end of a block"
 
 if [ "$#" -gt 0 ]; then files=("$@"); else files=(spec/wasm_cross/*.almd); fi
 shard="${WASM_CHECKED_SHARD:-0/1}"; si="${shard%/*}"; sn="${shard#*/}"

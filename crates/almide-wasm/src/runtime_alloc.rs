@@ -33,6 +33,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
             .i64_add()
             .global_set(c + crate::alloc_count::BYTES);
     }
+    crate::checked_alloc::emit_canary_reserve(&mut i, len); // #4009, only when armed
     // want = max(16, (PAYLOAD + len + 3) & !3); class = ceil_log2(want) - 4
     i.local_get(len)
         .i32_const(almide_layout::PAYLOAD as i32 + 3)
@@ -74,6 +75,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
         .i32_const(almide_layout::PAYLOAD as i32)
         .i32_sub()
         .i32_store(word(almide_layout::CAP.offset));
+    crate::checked_alloc::emit_canary_set(&mut i, head, len);
     i.local_get(head).return_();
     i.end();
     // Freelist miss: round the bump request UP to the class size —
@@ -168,6 +170,7 @@ pub(crate) fn emit_alloc(oom_msg: u32, counters: Option<u32>, canonical: bool) -
         .i32_sub()
         .i32_store(word(almide_layout::CAP.offset));
     i.local_get(next).global_set(G_HEAP);
+    crate::checked_alloc::emit_canary_set(&mut i, base, len);
     i.local_get(base);
     i.end();
     f
@@ -191,6 +194,7 @@ pub(crate) fn emit_free(counters: Option<u32>, canonical: bool) -> Function {
     if let Some(c) = counters {
         bump_counter(&mut i, c + crate::alloc_count::FREES);
     }
+    crate::checked_alloc::emit_canary_check(&mut i, block); // #4009, only when armed
     // total = (len + PAYLOAD + 3) & !3; too small to hold the next ptr → abandon
     i.local_get(block)
         .i32_load(word(almide_layout::CAP.offset))
