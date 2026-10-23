@@ -66,15 +66,21 @@ test "filter_map, find_map, reduce and scan" {
 
 test "partition and group_by" {
   let s = set.from_list([1, 2, 3, 4, 5])
-  assert_eq(set.partition(s, (x) => x % 2 == 1), ([1, 3, 5], [2, 4]))
+  let r1 = set.partition(s, (x) => x % 2 == 1)
+  assert_eq(r1.0, [1, 3, 5])
+  assert_eq(r1.1, [2, 4])
   let g = set.group_by(s, (x) => x % 2)
   assert_eq(map.get(g, 1), some([1, 3, 5]))
   assert_eq(map.get(g, 0), some([2, 4]))
   let w = set.from_list(["aa", "b", "cc"])
-  assert_eq(set.partition(w, (x) => string.len(x) == 2), (["aa", "cc"], ["b"]))
+  let r2 = set.partition(w, (x) => string.len(x) == 2)
+  assert_eq(r2.0, ["aa", "cc"])
+  assert_eq(r2.1, ["b"])
   assert_eq(map.keys(set.group_by(w, (x) => string.len(x))), [2, 1])
   let e: Set[String] = set.new()
-  assert_eq(set.partition(e, (x) => x == ""), ([], []))
+  let r3 = set.partition(e, (x) => x == "")
+  assert_eq(list.len(r3.0), 0)
+  assert_eq(list.len(r3.1), 0)
   assert_eq(map.len(set.group_by(e, (x) => x)), 0)
 }
 
