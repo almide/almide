@@ -206,6 +206,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_datetime_monotonic_ns" => &[],
         "almide_rt_datetime_month" => &[false],
         "almide_rt_datetime_now" => &[],
+        "almide_rt_datetime_now_ms" => &[],
         "almide_rt_datetime_parse_iso" => &[false],
         "almide_rt_datetime_second" => &[false],
         "almide_rt_datetime_to_iso" => &[false],
