@@ -38,6 +38,7 @@ for f in "$WF"/*.yml; do
   awk -v F="$base" '
     function strip(s) { sub(/#.*/, "", s); gsub(/["'"'"' ]/, "", s); return s }
     /^  RUST_TOOLCHAIN:/ { v = $0; sub(/^  RUST_TOOLCHAIN:/, "", v); env = strip(v); print "rustc " env }
+    !injobs && /^  [A-Z0-9_]+:[[:space:]]*[^[:space:]]/ { k = $1; sub(/:$/, "", k); v = $0; sub(/^  [A-Z0-9_]+:/, "", v); envv[k] = strip(v) }
     /^  [A-Za-z0-9_-]+:[[:space:]]*$/ && injobs { job = $1; sub(/:$/, "", job) }
     /^jobs:/ { injobs = 1 }
     /uses: dtolnay\/rust-toolchain@/ {
@@ -47,6 +48,7 @@ for f in "$WF"/*.yml; do
     pending && /^[[:space:]]+toolchain:/ {
       v = $0; sub(/^[[:space:]]+toolchain:/, "", v)
       if (v ~ /env\.RUST_TOOLCHAIN/) { pending = 0; next }
+      if (v ~ /env\.[A-Z0-9_]+/) { k = v; sub(/.*env\./, "", k); sub(/[^A-Z0-9_].*/, "", k); print "rustc " (k in envv ? envv[k] : "${{env." k "}}"); pending = 0; next }
       if (v ~ /inputs\.toolchain/) { d = v; sub(/.*\|\|[[:space:]]*/, "", d); sub(/[[:space:]]*}}.*/, "", d); print "rustc " strip(d); pending = 0; next }
       print "rustc " strip(v); pending = 0; next
     }
