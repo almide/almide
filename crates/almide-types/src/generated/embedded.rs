@@ -12947,7 +12947,7 @@ pub const SRC_JSON: &str = r#"
 
 
 
-/// Value or err; lenient, trailing text ignored.
+/// Value or err; lenient, trailing text ignored; nesting over 1000 is err.
 @intrinsic("almide_rt_json_parse")
 fn parse(text: String) -> Result[Value, String] = _
 
@@ -13116,10 +13116,14 @@ pub const SRC_JSON_PARSE: &str = r#"
 
 
 
+
+
+
+
 fn json_parse(text: String) -> Result[Value, String] = {
   let h = prim.handle(text)
   let blen = prim.load32(h + 4)
-  match __jp_value(h + 12, blen, 0) {
+  match __jp_value(h + 12, blen, 0, 0) {
     ok(r) => {
       let (v, _p) = r
       ok(v)
@@ -13188,7 +13192,7 @@ else {
 }
 
 
-fn __jp_value(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
+fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), String] = {
   let q = __jp_ws(base, len, p)
   if q >= len then err("unexpected end of input")
   else {
@@ -13196,14 +13200,15 @@ fn __jp_value(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
     if b == 34 then {
       let (s, np) = __jp_string(base, len, q)
       ok((value.str(s), np))
-    } else if b == 123 then {
+    } else if (b == 123 or b == 91) and depth >= 1000 then err("json: nesting deeper than 1000")
+    else if b == 123 then {
       let q2 = __jp_ws(base, len, q + 1)
       if q2 < len and prim.load8(base + q2) == 125 then {
         let empty: List[(String, Value)] = []
         ok((value.object(empty), q2 + 1))
       } else {
         let acc0: List[(String, Value)] = []
-        __jp_object(base, len, q2, acc0)
+        __jp_object(base, len, q2, acc0, depth + 1)
       }
     } else if b == 91 then {
       let q2 = __jp_ws(base, len, q + 1)
@@ -13212,7 +13217,7 @@ fn __jp_value(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
         ok((value.array(empty), q2 + 1))
       } else {
         let acc0: List[Value] = []
-        __jp_array(base, len, q2, acc0)
+        __jp_array(base, len, q2, acc0, depth + 1)
       }
     } else if b == 116 or b == 102 then __jp_bool(base, len, q)
     else if b == 110 then __jp_null(base, len, q)
@@ -13439,13 +13444,13 @@ fn __jp_null(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] =
 
 
 
-fn __jp_array(base: Int, len: Int, p0: Int, acc0: List[Value]) -> Result[(Value, Int), String] = {
+fn __jp_array(base: Int, len: Int, p0: Int, acc0: List[Value], depth: Int) -> Result[(Value, Int), String] = {
   var p = p0
   var acc = acc0
   var endp = 0 - 1
   var error = ""
   while endp < 0 and string.len(error) == 0 {
-    match __jp_value(base, len, p) {
+    match __jp_value(base, len, p, depth) {
       ok(r) => {
         let (v, np) = r
         list.push(acc, v)
@@ -13472,7 +13477,7 @@ fn __jp_array(base: Int, len: Int, p0: Int, acc0: List[Value]) -> Result[(Value,
 
 
 
-fn __jp_object(base: Int, len: Int, p0: Int, acc0: List[(String, Value)]) -> Result[(Value, Int), String] = {
+fn __jp_object(base: Int, len: Int, p0: Int, acc0: List[(String, Value)], depth: Int) -> Result[(Value, Int), String] = {
   var p = p0
   var acc = acc0
   var endp = 0 - 1
@@ -13482,7 +13487,7 @@ fn __jp_object(base: Int, len: Int, p0: Int, acc0: List[(String, Value)]) -> Res
     let (k, kp) = __jp_string(base, len, q)
     let q2 = __jp_ws(base, len, kp)
     let q3 = if q2 < len and prim.load8(base + q2) == 58 then q2 + 1 else q2
-    match __jp_value(base, len, q3) {
+    match __jp_value(base, len, q3, depth) {
       ok(r) => {
         let (v, np) = r
         let q4 = __jp_ws(base, len, np)
@@ -41426,9 +41431,13 @@ effect fn compress(data: Bytes) -> Result[Bytes, String] = _
 @intrinsic("almide_rt_zlib_compress_level")
 effect fn compress_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
 
-/// Inflated zlib stream; err on corrupt input.
+/// Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_decompress")
 effect fn decompress(data: Bytes) -> Result[Bytes, String] = _
+
+/// Like decompress, output bound max_len bytes; max_len <= 0 aborts.
+@intrinsic("almide_rt_zlib_decompress_max")
+fn decompress_max(data: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 
 /// Raw DEFLATE, no header; bytes vary by target.
@@ -41439,9 +41448,13 @@ effect fn deflate(data: Bytes) -> Result[Bytes, String] = _
 @intrinsic("almide_rt_zlib_deflate_level")
 effect fn deflate_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
 
-/// Raw DEFLATE decoded; err on a corrupt stream.
+/// Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_inflate")
 effect fn inflate(data: Bytes) -> Result[Bytes, String] = _
+
+/// Like inflate, output bound max_len bytes; max_len <= 0 aborts.
+@intrinsic("almide_rt_zlib_inflate_max")
+fn inflate_max(data: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 
 /// RFC 1952 gzip of data; bytes vary by target.
@@ -41450,9 +41463,18 @@ effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
 
 
 
-/// Gzip member decoded; err on bad header, CRC or empty input.
+
+
+
+
+
+/// Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_gunzip")
 effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _
+
+/// Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
+@intrinsic("almide_rt_zlib_gunzip_max")
+fn gunzip_max(data: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 
 
@@ -41663,6 +41685,14 @@ effect fn zlib_gzip(data: Bytes) -> Result[Bytes, String] = {
 }
 "#;
 pub const SRC_ZLIB_INFLATE: &str = r#"
+
+
+
+
+
+
+
+
 
 
 
@@ -41909,7 +41939,7 @@ else if sym == 17 then 3 else 4
 
 
 
-fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int, lencode: List[Int], distcode: List[Int]) -> (Int, Int, Int, Int) = {
+fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int, limit: Int, lencode: List[Int], distcode: List[Int]) -> (Int, Int, Int, Int) = {
   let lbase = zli_lbase()
   let lext = zli_lext()
   let dbase = zli_dbase()
@@ -41934,7 +41964,12 @@ fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int
         status = 0 - 1
         running = false
       },
-      1 => { bytes.push(out, sym) },
+      1 => {
+        if bytes.len(out) >= limit then {
+          status = 0 - 3
+          running = false
+        } else { bytes.push(out, sym) }
+      },
       2 => {
         running = false
       },
@@ -41948,9 +41983,12 @@ fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int
         b = b5
         c = c5
         let bad = if ds < 0 or ds >= 30 then 1 else 0
-        status = 0 - bad
-        running = bad == 0
-        clen = if bad == 1 then 0 else lbase[li] + eb
+        let want = if bad == 1 then 0 else lbase[li] + eb
+        let over = bad == 0 and bytes.len(out) + want > limit
+        status = if bad == 1 then 0 - 1
+        else if over then 0 - 3 else 0
+        running = status == 0
+        clen = if over then 0 else want
         dist = dbase[dsc] + db
       },
     }
@@ -42042,7 +42080,7 @@ fn zli_cl_order() -> List[Int] = [
 ]
 
 
-fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int) -> (Int, Int, Int, Int) = {
+fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int, limit: Int) -> (Int, Int, Int, Int) = {
   let (nlit, p1, b1, c1) = zli_bits(pos, buf, cnt, inp, 5)
   let (ndist, p2, b2, c2) = zli_bits(p1, b1, c1, inp, 5)
   let (ncode, p3, b3, c3) = zli_bits(p2, b2, c2, inp, 4)
@@ -42052,12 +42090,12 @@ fn zli_dynamic(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: I
 
 
   if nlen > 286 or ndis > 30 then (0 - 1, p3, b3, c3)
-  else zli_dynamic_tables(p3, b3, c3, inp, out, base, nlen, ndis, ncode)
+  else zli_dynamic_tables(p3, b3, c3, inp, out, base, limit, nlen, ndis, ncode)
 }
 
 
 
-fn zli_dynamic_tables(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int, nlen: Int, ndis: Int, ncode: Int) -> (Int, Int, Int, Int) = {
+fn zli_dynamic_tables(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int, limit: Int, nlen: Int, ndis: Int, ncode: Int) -> (Int, Int, Int, Int) = {
   let order = zli_cl_order()
   var p = pos
   var b = buf
@@ -42095,6 +42133,7 @@ fn zli_dynamic_tables(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, 
       inp,
       out,
       base,
+      limit,
       zli_construct(lengths, nlen),
       zli_construct(dlens, ndis),
     )
@@ -42102,13 +42141,19 @@ fn zli_dynamic_tables(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, 
 }
 
 
-fn zli_stored(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int, Int, Int) = {
+fn zli_stored(pos: Int, inp: Bytes, mut out: Bytes, limit: Int) -> (Int, Int, Int, Int) = {
   let len = int.bor(bytes.get_or(inp, pos, 0), int.bshl(bytes.get_or(inp, pos + 1, 0), 8))
   let nlen = int.bor(bytes.get_or(inp, pos + 2, 0), int.bshl(bytes.get_or(inp, pos + 3, 0), 8))
   let start = pos + 4
 
 
+
+  let held = int.max(0, int.min(len, bytes.len(inp) - start))
+
+
+
   let status = if int.bxor(len, nlen) != 65535 then 0 - 1
+  else if bytes.len(out) + held > limit then 0 - 3
   else if start + len > bytes.len(inp) then 0 - 2 else 0
   let n = if status != 0 then 0 else len
   var k = 0
@@ -42120,7 +42165,8 @@ fn zli_stored(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int, Int, Int) = {
 }
 
 
-fn zli_inflate_stream(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int) = {
+
+fn zli_inflate_stream(pos: Int, inp: Bytes, mut out: Bytes, limit: Int) -> (Int, Int) = {
   let flit = zli_fixed_lit()
 
 
@@ -42137,9 +42183,9 @@ fn zli_inflate_stream(pos: Int, inp: Bytes, mut out: Bytes) -> (Int, Int) = {
     let (kind, p2, b2, c2) = zli_bits(p1, b1, c1, inp, 2)
     last = l
     let (s, p3, b3, c3) = match int.band(kind, 3) {
-      0 => zli_stored(p2, inp, out),
-      1 => zli_codes(p2, b2, c2, inp, out, base, flit, fdist),
-      2 => zli_dynamic(p2, b2, c2, inp, out, base),
+      0 => zli_stored(p2, inp, out, limit),
+      1 => zli_codes(p2, b2, c2, inp, out, base, limit, flit, fdist),
+      2 => zli_dynamic(p2, b2, c2, inp, out, base, limit),
       _ => (0 - 1, p2, b2, c2),
     }
     status = s
@@ -42256,7 +42302,8 @@ fn zli_header_end(t: List[Int], inp: Bytes, pos: Int) -> Int = {
 
 
 
-fn zli_gunzip_members(inp: Bytes, mut out: Bytes) -> Int = {
+
+fn zli_gunzip_members(inp: Bytes, mut out: Bytes, limit: Int) -> Int = {
   let t = zli_crc_table()
   var pos = 0
   var code = if bytes.len(inp) == 0 then 5 else 0
@@ -42268,9 +42315,10 @@ fn zli_gunzip_members(inp: Bytes, mut out: Bytes) -> Int = {
       -3 => 7,
       _ => {
         let member_start = bytes.len(out)
-        let (status, after) = zli_inflate_stream(start, inp, out)
+        let (status, after) = zli_inflate_stream(start, inp, out, limit)
         pos = after + 8
         if status == 0 - 2 then 6
+        else if status == 0 - 3 then 8
         else if status != 0 then 2
         else if after + 8 > bytes.len(inp) then 5
         else if zli_crc32_from(t, out, member_start) != zli_u32_le(inp, after) then 3
@@ -42295,24 +42343,36 @@ fn zli_gunzip_error(code: Int) -> String = match code {
 }
 
 
-effect fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = {
+fn zli_default_limit() -> Int = 268435456
+
+fn zli_exceeds(limit: Int) -> String = "zlib: output exceeds ${int.to_string(limit)} bytes"
+
+
+
+fn zli_check_limit(func: String, max_len: Int) -> Unit =
+  if max_len <= 0 then panic("zlib.${func}: max_len must be positive, got ${max_len}")
+  else ()
+
+fn zli_gunzip(data: Bytes, limit: Int) -> Result[Bytes, String] = {
   var out = bytes.new(0)
-  let code = zli_gunzip_members(data, out)
+  let code = zli_gunzip_members(data, out, limit)
   if code == 0 then ok(out)
+  else if code == 8 then err(zli_exceeds(limit))
   else err("zlib.gunzip: ${zli_gunzip_error(code)}")
 }
 
-effect fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = {
+fn zli_inflate(data: Bytes, limit: Int) -> Result[Bytes, String] = {
   var out = bytes.new(0)
-  let (status, _after) = zli_inflate_stream(0, data, out)
+  let (status, _after) = zli_inflate_stream(0, data, out, limit)
   if status == 0 then ok(out)
+  else if status == 0 - 3 then err(zli_exceeds(limit))
   else if status == 0 - 2 then err("zlib.inflate: incomplete deflate stream") else err("zlib.inflate: corrupt deflate stream")
 }
 
 
 
 
-effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = {
+fn zli_decompress(data: Bytes, limit: Int) -> Result[Bytes, String] = {
   let cmf = bytes.get_or(data, 0, 0)
   let flg = bytes.get_or(data, 1, 0)
   if bytes.len(data) < 2 then err("zlib.decompress: unexpected end of file")
@@ -42320,7 +42380,7 @@ effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = {
   else if int.band(flg, 32) != 0 then err("zlib.decompress: preset dictionary unsupported")
   else {
     var out = bytes.new(0)
-    let (status, after) = zli_inflate_stream(2, data, out)
+    let (status, after) = zli_inflate_stream(2, data, out, limit)
     let stored = int.bor(
       int.bshl(bytes.get_or(data, after, 0), 24),
       int.bor(
@@ -42328,11 +42388,43 @@ effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = {
         int.bor(int.bshl(bytes.get_or(data, after + 2, 0), 8), bytes.get_or(data, after + 3, 0)),
       ),
     )
-    if status == 0 - 2 then err("zlib.decompress: incomplete deflate stream")
+    if status == 0 - 3 then err(zli_exceeds(limit))
+    else if status == 0 - 2 then err("zlib.decompress: incomplete deflate stream")
     else if status != 0 then err("zlib.decompress: corrupt deflate stream")
     else if after + 4 > bytes.len(data) then err("zlib.decompress: unexpected end of file")
     else if zli_adler32_from(out, 0) != stored then err("zlib.decompress: adler32 mismatch") else ok(out)
   }
+}
+
+
+effect fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = zli_gunzip(data, zli_default_limit())
+
+effect fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = zli_inflate(
+  data,
+  zli_default_limit(),
+)
+
+effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = zli_decompress(
+  data,
+  zli_default_limit(),
+)
+
+@implements("zlib.gunzip_max")
+fn zlib_gunzip_max(data: Bytes, max_len: Int) -> Result[Bytes, String] = {
+  zli_check_limit("gunzip_max", max_len)
+  zli_gunzip(data, max_len)
+}
+
+@implements("zlib.inflate_max")
+fn zlib_inflate_max(data: Bytes, max_len: Int) -> Result[Bytes, String] = {
+  zli_check_limit("inflate_max", max_len)
+  zli_inflate(data, max_len)
+}
+
+@implements("zlib.decompress_max")
+fn zlib_decompress_max(data: Bytes, max_len: Int) -> Result[Bytes, String] = {
+  zli_check_limit("decompress_max", max_len)
+  zli_decompress(data, max_len)
 }
 "#;
 

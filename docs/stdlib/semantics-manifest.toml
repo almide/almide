@@ -2629,6 +2629,40 @@ probe = "adl"
 expect = "851975"
 note = "The Int is the Adler-32 checksum value ((s2 << 16) | s1, mod 65521) — pure Almide on every leg (#1700)."
 
+# The `_max` decoders (R-zlib-04, #4020): max_len is a BYTE-COUNT of decoded
+# output — the most bytes the result may hold (the default decoders' bound is
+# 268435456). A 3-byte output is ok at max_len 3 and err at 2 (the `?? 9-byte`
+# fallback shows which).
+[[zlib.fn]]
+name = "inflate_max"
+index_unit = "byte-count"
+setup = [
+  "let sm_raw = bytes.from_list([1, 3, 0, 252, 255, 9, 8, 7])",
+  'let sm_out = "${bytes.len(zlib.inflate_max(sm_raw, 3) ?? bytes.new(9))} ${bytes.len(zlib.inflate_max(sm_raw, 2) ?? bytes.new(9))}"',
+]
+probe = "sm_out"
+expect = "3 9"
+
+[[zlib.fn]]
+name = "decompress_max"
+index_unit = "byte-count"
+setup = [
+  "let sm_z = bytes.from_list([120, 1, 1, 3, 0, 252, 255, 9, 8, 7, 0, 53, 0, 25])",
+  'let sm_out = "${bytes.len(zlib.decompress_max(sm_z, 3) ?? bytes.new(9))} ${bytes.len(zlib.decompress_max(sm_z, 2) ?? bytes.new(9))}"',
+]
+probe = "sm_out"
+expect = "3 9"
+
+[[zlib.fn]]
+name = "gunzip_max"
+index_unit = "byte-count"
+setup = [
+  "let sm_gz = bytes.from_list([31, 139, 8, 0, 0, 0, 0, 0, 0, 255, 1, 3, 0, 252, 255, 9, 8, 7, 54, 253, 45, 166, 3, 0, 0, 0])",
+  'let sm_out = "${bytes.len(zlib.gunzip_max(sm_gz, 3) ?? bytes.new(9))} ${bytes.len(zlib.gunzip_max(sm_gz, 2) ?? bytes.new(9))}"',
+]
+probe = "sm_out"
+expect = "3 9"
+
 [fs]
 default_index_unit = "byte-value"
 

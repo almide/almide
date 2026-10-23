@@ -807,11 +807,14 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_zlib_compress" => &[false],
         "almide_rt_zlib_compress_level" => &[false, false],
         "almide_rt_zlib_decompress" => &[false],
+        "almide_rt_zlib_decompress_max" => &[false, false],
         "almide_rt_zlib_deflate" => &[false],
         "almide_rt_zlib_deflate_level" => &[false, false],
         "almide_rt_zlib_gunzip" => &[false],
+        "almide_rt_zlib_gunzip_max" => &[false, false],
         "almide_rt_zlib_gzip" => &[false],
         "almide_rt_zlib_inflate" => &[false],
+        "almide_rt_zlib_inflate_max" => &[false, false],
         _ => return None,
     })
 }
