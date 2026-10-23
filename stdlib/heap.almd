@@ -40,9 +40,9 @@ fn new_with[A](cmp: (A, A) -> Int) -> Heap[A] = { slots: [], next: 0, cmp: cmp }
 
 /// A heap of xs in the natural order; equal elements leave in list order.
 fn from_list[A](xs: List[A]) -> Heap[A] = {
-  var h: Heap[A] = heap.new()
+  var h: Heap[A] = new()
   for x in xs {
-    heap.push(h, x)
+    push(h, x)
   }
   h
 }
@@ -145,7 +145,7 @@ fn to_list[A](h: Heap[A]) -> List[A] = {
   var q = h
   var out: List[A] = []
   for _ in 0..<list.len(h.slots) {
-    match heap.pop(q) {
+    match pop(q) {
       some(x) => list.push(out, x),
       none => (),
     }
@@ -169,20 +169,20 @@ fn contains[A](h: Heap[A], x: A) -> Bool = {
 }
 
 /// true if f holds for some element; false when empty.
-fn any[A](h: Heap[A], f: (A) -> Bool) -> Bool = list.any(heap.to_list(h), f)
+fn any[A](h: Heap[A], f: (A) -> Bool) -> Bool = list.any(to_list(h), f)
 
 /// true if f holds for every element; true when empty.
-fn all[A](h: Heap[A], f: (A) -> Bool) -> Bool = list.all(heap.to_list(h), f)
+fn all[A](h: Heap[A], f: (A) -> Bool) -> Bool = list.all(to_list(h), f)
 
 /// Number of elements where f holds.
-fn count[A](h: Heap[A], f: (A) -> Bool) -> Int = list.count(heap.to_list(h), f)
+fn count[A](h: Heap[A], f: (A) -> Bool) -> Int = list.count(to_list(h), f)
 
 /// The elements where f holds, in a heap of the same order; equal elements
 /// keep the order they went in.
 fn filter[A](h: Heap[A], f: (A) -> Bool) -> Heap[A] = {
   var out: Heap[A] = { slots: [], next: 0, cmp: h.cmp }
-  for x in heap.to_list(h) {
-    if f(x) then heap.push(out, x) else ()
+  for x in to_list(h) {
+    if f(x) then push(out, x) else ()
   }
   out
 }
