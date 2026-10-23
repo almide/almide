@@ -1,4 +1,4 @@
-// @contract: C-367
+// @contract: C-367, C-389
 // A SERVER fixture for what the shared server core answers ITSELF and how it
 // shapes a handler's answer (almide/almide#2823, #2826, #2822): no generic
 // runner executes it. The driver (tests/http_serve_cross_test.rs in
@@ -10,7 +10,9 @@
 // CR/LF, and the answers the core refuses or reshapes: a status that is not
 // a final status code, a header name that is not a token, a value holding a
 // control character, and the framing fields the server owns. Each leg must
-// answer the same.
+// answer the same. It also holds one connection open sending its request
+// head byte by byte (almide/almide#4021, C-389): another client must be
+// answered at once, and the slow one `408` at the 10 s header deadline.
 // Usage: almide run http_serve_limits.almd [--target wasm] -- <port>
 import env
 import http
