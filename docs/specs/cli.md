@@ -1144,6 +1144,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_UPDATE_SIZE_LADDER` | harness | regenerate the stdlib-linking size ladder ledger (#2141) |
 | `ALMIDE_UPDATE_SNAPSHOTS` | tool | same as `almide test --update-snapshots` |
 | `ALMIDE_UPDATE_SURFACE` | harness | regenerate the exercised-surface golden |
+| `ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR` | harness | regenerate proofs/native-verified-floor.txt, the spec/wasm_cross fixtures the verified native renderer covers (#4006, tests/native_verified_floor_test.rs) |
 | `ALMIDE_UPDATE_WITNESS_FLOOR` | harness | regenerate the certificate witness floor |
 | `ALMIDE_VERBOSE` | debug | same as `almide -v`: surface the native wall-and-fallback notes that a quiet run hides |
 | `ALMIDE_VERIFIED_DEBUG` | debug | name the wasm leg that rendered, and why the other declined (the route oracle) |

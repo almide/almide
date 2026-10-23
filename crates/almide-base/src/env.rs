@@ -217,6 +217,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_UPDATE_SIZE_LADDER", Flag, Harness, "regenerate the stdlib-linking size ladder ledger (#2141)"),
     sw("ALMIDE_UPDATE_SNAPSHOTS", Flag, Tool, "same as `almide test --update-snapshots`"),
     sw("ALMIDE_UPDATE_SURFACE", Flag, Harness, "regenerate the exercised-surface golden"),
+    sw("ALMIDE_UPDATE_NATIVE_VERIFIED_FLOOR", Flag, Harness, "regenerate proofs/native-verified-floor.txt, the spec/wasm_cross fixtures the verified native renderer covers (#4006, tests/native_verified_floor_test.rs)"),
     sw("ALMIDE_UPDATE_WITNESS_FLOOR", Flag, Harness, "regenerate the certificate witness floor"),
     sw("ALMIDE_VERBOSE", Flag, Dbg, "same as `almide -v`: surface the native wall-and-fallback notes that a quiet run hides"),
     sw("ALMIDE_VERIFIED_DEBUG", Flag, Dbg, "name the wasm leg that rendered, and why the other declined (the route oracle)"),
