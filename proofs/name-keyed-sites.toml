@@ -272,7 +272,7 @@ names = 42
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::MODULE_DESCRIPTIONS::table"
 class = "legacy"
-names = 43
+names = 44
 
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::comparison_operator_of::or-pattern"
@@ -707,7 +707,7 @@ names = 9
 [[site]]
 id = "crates/almide-mir/src/purity.rs::PURE_MODULES::table"
 class = "legacy"
-names = 145
+names = 147
 
 [[site]]
 id = "crates/almide-mir/src/purity.rs::is_pure_fn_in_impure_module::or-pattern"
