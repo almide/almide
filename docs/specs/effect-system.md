@@ -481,6 +481,61 @@ effect fn fetch() -> Result[String, String] = http.get("https://example.com")
 The gate runs after codegen: `almide check` and `almide test` accept the file,
 `almide build` refuses it.
 
+### Directory scope: `fs`
+
+`[permissions] fs` lists the directories a program may touch at all (#4022):
+
+```toml
+[permissions]
+fs = ["./data", "/tmp"]
+```
+
+A relative entry is a directory of the project, anchored to the directory of
+`almide.toml` (as a relative `path` dependency is), so the scope does not move
+with the directory the program is started from.
+
+- **Absent** (no `fs` key): every path, as before. This is the default, so no
+  program that works today stops working. `fs = []` allows no path.
+- **Resolution, not spelling.** A path is judged by where the OS would reach:
+  absolute against the working directory, the longest existing prefix with
+  every symlink and `..` resolved by the OS, the rest applied lexically. A
+  path that lands outside every granted directory, or passes a dangling
+  symlink, is refused before it is touched: `fs.exists`, `fs.is_dir`,
+  `fs.is_file` and `fs.is_symlink` answer `false`, every other `fs` call
+  `err("fs: \"<path>\" is outside [permissions] fs")`. The no-follow calls
+  are judged by where the path leads too, so a link inside a granted
+  directory that points out of it can be neither asked about nor removed.
+  `copy` and `rename` check both paths, the temp calls the temp dir they
+  create in, `glob` its pattern's literal base.
+- **Native** (`almide run`, `almide build`): the build wraps each of the
+  program's calls to the fs runtime in the check and sets the roots as the
+  first statement of `main`; the runtime itself is unchanged. A test harness
+  build (`almide test`) has no `main` and is not bounded.
+- **Wasm, embedded host** (`almide run --target wasm`, the wasm leg of
+  `almide test`): the same check, from the same source
+  (`crates/almide-base/src/fs_scope.rs`), sits in front of the host's one fs
+  import, so both targets refuse the same paths with the same bytes. A
+  program that runs as its p3 component (the full-response http family)
+  gets the granted directories as its WASI preopens — and, without the key,
+  the working directory and the temp dir, no longer `/` — so there the
+  refusal is WASI's own error.
+- **Wasm, stock runtime**: an artifact from `almide build --target wasm`
+  reaches what its operator preopens (`wasmtime --dir`); the manifest does
+  not travel with it.
+
+The check runs before the operation, so a tree rewritten between the two (a
+directory swapped for a symlink) can race it. Within a program, `fs.open_root`
+(`docs/stdlib/fs.md`) bounds the paths built from untrusted input to one
+directory on top of this scope.
+
+Flipping the default — an absent `fs` key meaning the project directory only —
+would refuse every program that reads outside its project today (absolute
+config paths, `$HOME` files, `/dev/stdin`). It needs a dialect epoch entry, a
+`fs = ["/"]` hint in the refusal, and `almide init` writing the key; it is not
+part of this change.
+
+Test: `tests/fs_scope_test.rs`
+
 ### Callbacks: the set rides the value (ADR-0026 D1)
 
 A closure's categories are performed where it is **called**, and the set moves
