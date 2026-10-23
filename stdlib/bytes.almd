@@ -109,7 +109,7 @@ fn contains(b: Bytes, pattern: Bytes) -> Bool = _
 fn copy_from(mut dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = _
 
 /// Writes up to cap bytes to ptr; count, 0 if null.
-@deprecated(since=15, use="ffi.write", note="the address comes first, `ffi.write(ptr, b, cap)`, and it is an effect fn")
+@deprecated(since=15, use="ffi.write", note="the address comes first (ptr, b, cap), and it is an effect fn")
 @memory_unsafe
 @intrinsic("almide_rt_bytes_copy_to_ptr")
 fn copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = _
@@ -137,7 +137,7 @@ fn fill(mut b: Bytes, val: Int) -> Unit = _
 fn from_list(xs: List[Int]) -> Bytes = _
 
 /// Copy of len bytes at ptr; empty if null or len <= 0.
-@deprecated(since=15, use="ffi.read", note="`ffi.read(ptr, len)` is an effect fn")
+@deprecated(since=15, use="ffi.read", note="ffi.read is an effect fn")
 @memory_unsafe
 @intrinsic("almide_rt_bytes_from_raw_ptr")
 fn from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes = _

@@ -404,7 +404,7 @@ fn check_window(
 /// `as_mut_ptr` it replaces (R-ffi-01). The address is a
 /// BORROW of the block — the host or a later read follows it — so the
 /// block must outlive every use of the pointer, exactly as under a `prim.*`
-/// body (bytes_rawptr.almd, which serves `ffi` too, computes these as
+/// body (bytes_rawptr.almd, which ffi_bridge.almd calls, computes these as
 /// `prim.handle(b) + 12`).
 pub(crate) fn is_raw_address_op(target: &almide_ir::CallTarget) -> bool {
     matches!(target, almide_ir::CallTarget::Module { module, func, .. }

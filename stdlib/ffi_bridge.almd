@@ -1,0 +1,16 @@
+// ffi_bridge — SELF-HOSTED `ffi` (R-ffi-01) over the bytes raw-pointer bridge.
+//
+// `ffi.address` / `ffi.read` / `ffi.write` are the deprecated `bytes`
+// spellings under their new names (the address first in `write`, R-ffi-03),
+// so the bodies are calls to them: one implementation per operation, and
+// this file reaches no `prim.` (stdlib/bytes_rawptr.almd does). Epoch 16
+// removes the `bytes` spellings; their bodies move here then. `ffi.to_int`
+// lives in bytes_rawptr.almd, since it is a prim cast.
+@implements("ffi.address")
+fn ffi_address(b: Bytes) -> RawPtr = bytes.as_ptr(b)
+
+@implements("ffi.read")
+fn ffi_read(ptr: RawPtr, len: Int) -> Bytes = bytes.from_raw_ptr(ptr, len)
+
+@implements("ffi.write")
+fn ffi_write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = bytes.copy_to_ptr(b, ptr, cap)
