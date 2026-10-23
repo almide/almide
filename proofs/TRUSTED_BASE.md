@@ -51,13 +51,16 @@ Critical-profile surface: an artifact that imports more than its five WASI
 calls (fs, env, args) is refused at load, so for those artifacts wasmtime
 remains the only engine.
 
-**Floating steps (debt).** Nine CI steps install Rust without a version and
-run whatever `stable` or `nightly` is that day. Among them are the three
-commissioned wasm gate jobs, which include REQ-VM-9, the perf ratchets, and
-`almide-gates`. They are listed by job in `scripts/toolchain-pins.txt`. A new
-one fails the gate, and pinning one requires deleting its line. They are not
-pinned yet because pinning moves the numbers the perf and coverage ratchets
-measure. That move should be its own change.
+**Floating steps (debt).** Five CI steps install Rust without a version and
+run whatever `stable` or `nightly` is that day: the two perf ratchets, the
+commissioned wasm probes (the runtime ratio), fuzz-nightly's coverage ratchet,
+and the Miri job for `almide-str`. They are listed by job in
+`scripts/toolchain-pins.txt`. A new one fails the gate, and pinning one
+requires deleting its line. Each measures a number a pin would move (or needs
+a nightly that ships Miri), so each should be pinned in a change that re-takes
+its baseline. The four that judge no measured number (`shard-coverage`,
+`almide-gates` and the two commissioned wasm gate jobs that run REQ-VM-9) are
+pinned to `RUST_TOOLCHAIN` since #4010.
 
 **On a toolchain bump.** Raising `RUST_TOOLCHAIN` or a wasmtime version
 changes a trusted component, so before it lands:

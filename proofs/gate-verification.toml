@@ -838,7 +838,7 @@ wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
 evidence = "#4010 landing (2026-10-23): scripts/check-toolchain-pins-negative.sh runs on every CI run over a scratch copy of the workflows, the embedded engine's Cargo.toml, the pins list and TRUSTED_BASE.md. A new job installing rustc with no version, an unlisted rustc version, the embedded wasmtime bumped alone, an unlisted stock wasmtime CLI, a floating step whose list line was deleted, a list line for a step that no longer exists, and the ledger no longer naming a pinned version each go red. The committed tree and a new job pinned to RUST_TOOLCHAIN stay green"
 measures = "the set of rustc / wasmtime versions and version-less rustc steps the workflows and crates/almide-wasm-run/Cargo.toml use, against scripts/toolchain-pins.txt, and each listed version's presence in proofs/TRUSTED_BASE.md"
-varies = "develop 703bbf298 reads 7 pinned versions (rustc 1.96.0, 1.95.0, nightly-2026-08-01, nightly-2025-06-01; wasmtime crate 49.0.4; stock CLI 49.0.1 and 27.0.0) and 9 floating steps"
+varies = "develop 703bbf298 reads 7 pinned versions (rustc 1.96.0, 1.95.0, nightly-2026-08-01, nightly-2025-06-01; wasmtime crate 49.0.4; stock CLI 49.0.1 and 27.0.0) and 9 floating steps; with shard-coverage, almide-gates and the two commissioned wasm gate jobs pinned, 5"
 blind = "a toolchain installed some other way (a container image, apt, a setup action other than dtolnay/rust-toolchain, a wasmtime install step not named for wasmtime) -> UNCOMPENSATED"
 
 [[gate]]
