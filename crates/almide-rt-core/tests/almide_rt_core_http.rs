@@ -572,14 +572,14 @@ fn a_short_body_is_400_and_a_stalled_one_is_503() {
         |_, r| panic!("the handler saw {r:?}"),
     );
     assert_eq!(status_line(&cut), "HTTP/1.1 400 Bad Request");
-    let limits = server::HttpServerLimits { max_body_bytes: 1 << 20, request_timeout_ms: 300 };
+    let limits = server::HttpServerLimits { max_body_bytes: 1 << 20, request_timeout_ms: 300, ..server::HTTP_SERVER_DEFAULT_LIMITS };
     let stalled = exchange(b"POST /x HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc", false, limits, |_, r| panic!("the handler saw {r:?}"));
     assert_eq!(status_line(&stalled), "HTTP/1.1 503 Service Unavailable");
 }
 
 #[test]
 fn a_response_after_the_request_timeout_is_503() {
-    let limits = server::HttpServerLimits { max_body_bytes: 1 << 20, request_timeout_ms: 200 };
+    let limits = server::HttpServerLimits { max_body_bytes: 1 << 20, request_timeout_ms: 200, ..server::HTTP_SERVER_DEFAULT_LIMITS };
     let resp = exchange(b"GET /slow HTTP/1.1\r\n\r\n", false, limits, |conn, _| {
         thread::sleep(Duration::from_millis(400));
         server::http_server_write(conn, 200, &[], "late").expect("written");
@@ -597,7 +597,7 @@ fn a_chunked_body_is_decoded_and_bounded() {
         |conn, (method, _, body, _)| server::http_server_write(conn, 200, &[], &format!("{method} {body}")).expect("written"),
     );
     assert!(resp.ends_with("\r\n\r\nPOST hello"), "{resp:?}");
-    let limits = server::HttpServerLimits { max_body_bytes: 4, request_timeout_ms: 30_000 };
+    let limits = server::HttpServerLimits { max_body_bytes: 4, request_timeout_ms: 30_000, ..server::HTTP_SERVER_DEFAULT_LIMITS };
     let over = exchange(
         b"POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n",
         false,
@@ -737,4 +737,110 @@ fn a_request_without_a_body_reads_as_empty_and_a_garbled_length_is_400() {
         panic!("the handler saw {r:?}")
     });
     assert_eq!(status_line(&nan), "HTTP/1.1 400 Bad Request");
+}
+
+// ── slow clients (#4021) ──
+
+/// Serve `listener` through the pool on a thread of its own, answering each
+/// request with its target. The thread is left running: a test never sends
+/// the shutdown signal, which is process-global.
+fn pool_serving(listener: TcpListener, limits: server::HttpServerLimits) {
+    thread::spawn(move || {
+        let pool = server::http_server_pool(listener, limits);
+        while let Some((conn, req)) = pool.next() {
+            let _ = server::http_server_write(conn, 200, &[], &req.1);
+        }
+    });
+}
+
+/// A client that sends `head` one byte every `gap`, then waits for the
+/// server's answer: answers it and how long after connecting it arrived.
+fn trickle(port: u16, head: &'static [u8], gap: Duration) -> thread::JoinHandle<(String, Duration)> {
+    thread::spawn(move || {
+        let started = std::time::Instant::now();
+        let mut s = TcpStream::connect(("127.0.0.1", port)).expect("the slow client connects");
+        for b in head {
+            // The server may close the connection first (the deadline): stop.
+            if s.write_all(&[*b]).is_err() {
+                break;
+            }
+            thread::sleep(gap);
+            // Once the server answered, stop writing: a late byte would turn
+            // its close into a reset that can discard the answer.
+            s.set_nonblocking(true).expect("nonblocking");
+            let answered = !matches!(s.peek(&mut [0u8; 1]), Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock);
+            s.set_nonblocking(false).expect("blocking");
+            if answered {
+                break;
+            }
+        }
+        let mut out = Vec::new();
+        let _ = s.read_to_end(&mut out);
+        (String::from_utf8_lossy(&out).into_owned(), started.elapsed())
+    })
+}
+
+#[test]
+fn a_client_trickling_its_head_does_not_hold_up_the_next_client() {
+    let listener = server::http_server_bind(0).expect("bind");
+    let port = port_of(&listener);
+    pool_serving(listener, server::HTTP_SERVER_DEFAULT_LIMITS);
+    // 40 bytes at 50 ms: two seconds of head, well under the 10 s deadline.
+    let slow = trickle(port, b"GET /slow HTTP/1.1\r\nHost: a\r\nX-A: 1\r\n\r\n", Duration::from_millis(50));
+    thread::sleep(Duration::from_millis(200));
+    let started = std::time::Instant::now();
+    let fast = fetch(port, b"GET /fast HTTP/1.1\r\n\r\n").expect("the second client is answered");
+    let took = started.elapsed();
+    assert!(fast.ends_with("\r\n\r\n/fast"), "{fast:?}");
+    assert!(took < Duration::from_secs(1), "the second client waited {took:?} behind the slow one");
+    // The slow client is answered too, once its head is whole.
+    let (resp, _) = join(slow);
+    assert!(resp.ends_with("\r\n\r\n/slow"), "{resp:?}");
+}
+
+#[test]
+fn a_head_not_whole_by_the_header_deadline_is_408_and_a_silent_client_is_closed_unanswered() {
+    let limits = server::HttpServerLimits { header_timeout_ms: 300, ..server::HTTP_SERVER_DEFAULT_LIMITS };
+    let listener = server::http_server_bind(0).expect("bind");
+    let port = port_of(&listener);
+    pool_serving(listener, limits);
+    // One byte every 50 ms for six seconds: the deadline cuts it at 300 ms.
+    let slow = trickle(port, &[b'G'; 120], Duration::from_millis(50));
+    let silent = thread::spawn(move || {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).expect("the silent client connects");
+        let mut out = Vec::new();
+        let _ = s.read_to_end(&mut out);
+        out
+    });
+    let (resp, took) = join(slow);
+    assert_eq!(status_line(&resp), "HTTP/1.1 408 Request Timeout", "{resp:?}");
+    assert!(resp.contains("\r\nConnection: close\r\n"), "{resp:?}");
+    assert!(took >= Duration::from_millis(300) && took < Duration::from_secs(3), "the 408 came after {took:?}");
+    assert!(join(silent).is_empty(), "a client that sent nothing gets no answer");
+    // The sequential reader applies the same deadline.
+    let limits = server::HttpServerLimits { header_timeout_ms: 200, ..server::HTTP_SERVER_DEFAULT_LIMITS };
+    let resp = exchange(b"GET /x HTTP/1.1\r\nHost: a\r\n", false, limits, |_, r| panic!("the handler saw {r:?}"));
+    assert_eq!(status_line(&resp), "HTTP/1.1 408 Request Timeout");
+    // A stalled body is still the request timeout's 503, not a 408.
+    let limits = server::HttpServerLimits { header_timeout_ms: 200, request_timeout_ms: 400, ..server::HTTP_SERVER_DEFAULT_LIMITS };
+    let resp = exchange(b"POST /x HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc", false, limits, |_, r| panic!("the handler saw {r:?}"));
+    assert_eq!(status_line(&resp), "HTTP/1.1 503 Service Unavailable");
+}
+
+#[test]
+fn at_max_in_flight_the_pool_stops_accepting_until_a_connection_closes() {
+    let limits = server::HttpServerLimits { header_timeout_ms: 500, max_in_flight: 2, ..server::HTTP_SERVER_DEFAULT_LIMITS };
+    let listener = server::http_server_bind(0).expect("bind");
+    let port = port_of(&listener);
+    pool_serving(listener, limits);
+    // Two silent connections take both places until the header deadline
+    // closes them.
+    let held: Vec<TcpStream> = (0..2).map(|_| TcpStream::connect(("127.0.0.1", port)).expect("connect")).collect();
+    thread::sleep(Duration::from_millis(100));
+    let started = std::time::Instant::now();
+    let third = fetch(port, b"GET /third HTTP/1.1\r\n\r\n").expect("the third client is answered");
+    let took = started.elapsed();
+    assert!(third.ends_with("\r\n\r\n/third"), "{third:?}");
+    assert!(took >= Duration::from_millis(300), "the third connection was read at {took:?}, past the bound of 2");
+    drop(held);
 }
