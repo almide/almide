@@ -159,10 +159,23 @@ none
 
 ## Supported syntax
 
-The engine is a backtracking matcher: alternatives are tried left to right,
-greedy quantifiers longest-first, lazy quantifiers shortest-first, and a group
-or quantifier that leads the rest of the pattern to fail is retried with its
-next choice. Native and wasm run the same algorithm and agree byte for byte.
+A match is the leftmost one, and among those starting there the first in this
+order: alternatives left to right, greedy quantifiers longest-first, lazy
+quantifiers shortest-first, a group or quantifier that leads the rest of the
+pattern to fail retried with its next choice. A repeated group's capture is its
+last instance; an instance that matched nothing counts but ends the
+repetition. Native and wasm agree byte for byte.
+
+Matching takes time proportional to the pattern's size times the subject's
+length, whatever the pattern (#4019): `(a+)+$` or `(a|aa)*b` on 100,000
+characters answers at once. Each call first runs a backtracking matcher under a
+step budget of 4 × (pattern length + 1) × (subject length + 1) — it is the
+faster engine on ordinary patterns — and, if the budget runs out, a Pike VM
+(Thompson's NFA with the same preferences, one thread per program state) gives
+the same answer. Counted repetition is expanded in the VM's program, one copy
+per count; a pattern whose program would exceed 20,000 states (`.{0,20000}`,
+`((a){200}){200}`) is matched by the backtracking matcher alone, without the
+budget, so for such a pattern the linear bound does not hold.
 
 | Syntax | Meaning |
 |---|---|

@@ -1451,3 +1451,13 @@ evidence = "landing (2026-10-23): compares the committed signature-index blocks 
 measures = "how far the shipped stdlib surface is from the redesign target: target functions missing, present with another signature, and removed functions still public without @deprecated"
 varies = "landing (2026-10-23): 742 / 152 / 408 against develop 8d872cf72; each stdlib redesign PR lowers it"
 blind = "a signature the index renders differently from the target for the same type (an alias, a spelled-out Result on a pure fn) reads as a shape difference, so the count can over-report but never hides a missing fn -> UNCOMPENSATED; whether the shipped behaviour matches the target (abort vs none, clamping) is not read, only names and types -> spec/stdlib"
+
+[[gate]]
+path = "scripts/check-rawptr-surface.py"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "landing (2026-10-23, #4008): reads the committed signature-index blocks of docs/stdlib/*.md; at landing 8 RawPtr signatures — the 4 of ffi and the 4 allowlisted deprecated bytes spellings. --self-test forges five surfaces in memory and asserts each is refused exactly once: a RawPtr return outside ffi, a RawPtr parameter outside ffi, an allowlisted bytes fn deleted (the allowlist must shrink), a fifth ffi fn, and an ffi fn missing. An empty index exits 2 instead of passing vacuously."
+measures = "which public stdlib functions carry RawPtr in their signature (R-L0-45: only ffi, plus the shrink-only allowlist of deprecated bytes spellings), and whether ffi's surface is exactly the four functions of R-ffi-01"
+varies = "landing (2026-10-23): 8 RawPtr signatures, allowlist 4; epoch 16 removes the bytes spellings and the allowlist goes to 0"
+blind = "a memory-unsafe function whose signature carries no RawPtr (bytes.data_ptr returns an Int address) -> tests/critical_profile_test.rs (#4008: --profile critical refuses every @memory_unsafe stdlib fn, bytes.data_ptr included); whether a non-ffi function writes outside its value without a RawPtr in its type is not read, only types -> spec/stdlib out-of-range fixtures (R-L0-46)"

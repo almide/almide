@@ -15,7 +15,7 @@
 
 /// Stdlib modules whose calls are effects, or read the outside world.
 pub const EFFECT_MODULES: &[&str] = &[
-    "args", "datetime", "env", "fan", "fs", "http", "io", "net",
+    "args", "datetime", "env", "fan", "ffi", "fs", "http", "io", "net",
     "process", "random", "testing", "time", "zlib",
 ];
 

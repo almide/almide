@@ -1,0 +1,32 @@
+// ffi — raw addresses at the foreign-function boundary (R-ffi-01, #3853).
+//
+// The only stdlib surface that reaches memory outside an Almide value:
+// `read` and `write` (R-L0-45). `address` and `to_int` only build an address
+// as a value and touch no memory. Requires `import ffi`; `bytes` is visible
+// from every file without an import, so it carries none of this.
+//
+// `read` and `write` are effect fns (R-ffi-02): `write` changes memory outside
+// Almide's values and `read` reads memory foreign code wrote. Nothing checks
+// that an address and a length describe memory the program owns — the caller
+// promises it. `--profile critical` refuses every `ffi.*` call (#4008).
+//
+// wasm: the self-hosted bodies live in stdlib/bytes_rawptr.almd (`@implements`).
+/// Address of b's first byte; null if b is empty.
+@memory_unsafe
+@intrinsic("almide_rt_ffi_address")
+fn address(b: Bytes) -> RawPtr = _
+
+/// The address as an Int; null is 0.
+@memory_unsafe
+@intrinsic("almide_rt_ffi_to_int")
+fn to_int(p: RawPtr) -> Int = _
+
+/// Copy of len bytes at ptr; empty if null or len <= 0.
+@memory_unsafe
+@intrinsic("almide_rt_ffi_read")
+effect fn read(ptr: RawPtr, len: Int) -> Bytes = _
+
+/// Writes up to cap bytes of b to ptr; the count, 0 if null.
+@memory_unsafe
+@intrinsic("almide_rt_ffi_write")
+effect fn write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = _

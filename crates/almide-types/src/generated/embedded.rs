@@ -331,11 +331,15 @@ fn append_u32_le(mut b: Bytes, val: Int) -> Unit = _
 fn append_u8(mut b: Bytes, val: Int) -> Unit = _
 
 /// Mutable address of the data; null if empty.
+@deprecated(since=15, use="ffi.address")
+@memory_unsafe
 @intrinsic("almide_rt_bytes_as_mut_ptr")
 @mutating
 fn as_mut_ptr(b: Bytes) -> RawPtr = _
 
 /// Address of the data; null if empty.
+@deprecated(since=15, use="ffi.address")
+@memory_unsafe
 @intrinsic("almide_rt_bytes_as_ptr")
 fn as_ptr(b: Bytes) -> RawPtr = _
 
@@ -364,10 +368,14 @@ fn contains(b: Bytes, pattern: Bytes) -> Bool = _
 fn copy_from(mut dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = _
 
 /// Writes up to cap bytes to ptr; count, 0 if null.
+@deprecated(since=15, use="ffi.write", note="the address comes first (ptr, b, cap), and it is an effect fn")
+@memory_unsafe
 @intrinsic("almide_rt_bytes_copy_to_ptr")
 fn copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = _
 
 /// Address of the data as an Int; target-specific.
+@deprecated(since=15, use="ffi.address", note="write `ffi.to_int(ffi.address(b))`, which is 0 for an empty b")
+@memory_unsafe
 @intrinsic("almide_rt_bytes_data_ptr")
 fn data_ptr(b: Bytes) -> Int = _
 
@@ -388,6 +396,8 @@ fn fill(mut b: Bytes, val: Int) -> Unit = _
 fn from_list(xs: List[Int]) -> Bytes = _
 
 /// Copy of len bytes at ptr; empty if null or len <= 0.
+@deprecated(since=15, use="ffi.read", note="ffi.read is an effect fn")
+@memory_unsafe
 @intrinsic("almide_rt_bytes_from_raw_ptr")
 fn from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes = _
 
@@ -2725,6 +2735,9 @@ pub const SRC_BYTES_RAWPTR: &str = r#"
 
 
 
+
+
+
 fn bytes_as_ptr(b: Bytes) -> RawPtr = {
   let h = prim.handle(b)
   if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
@@ -2768,6 +2781,10 @@ fn bytes_copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = {
   let _c = __brp_copy(dst, h + 12, n, 0)
   n
 }
+
+
+@implements("ffi.to_int")
+fn ffi_to_int(p: RawPtr) -> Int = prim.ptr_to_int(p)
 "#;
 pub const SRC_BYTES_SKIP: &str = r#"
 
@@ -4510,6 +4527,56 @@ fn fan_map_sf(xs: List[String], f: (String) -> Result[Float, String]) -> Result[
   [],
   none,
 )
+"#;
+pub const SRC_FFI: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+/// Address of b's first byte; null if b is empty.
+@memory_unsafe
+@intrinsic("almide_rt_ffi_address")
+fn address(b: Bytes) -> RawPtr = _
+
+/// The address as an Int; null is 0.
+@memory_unsafe
+@intrinsic("almide_rt_ffi_to_int")
+fn to_int(p: RawPtr) -> Int = _
+
+/// Copy of len bytes at ptr; empty if null or len <= 0.
+@memory_unsafe
+@intrinsic("almide_rt_ffi_read")
+effect fn read(ptr: RawPtr, len: Int) -> Bytes = _
+
+/// Writes up to cap bytes of b to ptr; the count, 0 if null.
+@memory_unsafe
+@intrinsic("almide_rt_ffi_write")
+effect fn write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = _
+"#;
+pub const SRC_FFI_BRIDGE: &str = r#"
+
+
+
+
+
+
+
+@implements("ffi.address")
+fn ffi_address(b: Bytes) -> RawPtr = bytes.as_ptr(b)
+
+@implements("ffi.read")
+fn ffi_read(ptr: RawPtr, len: Int) -> Bytes = bytes.from_raw_ptr(ptr, len)
+
+@implements("ffi.write")
+fn ffi_write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = bytes.copy_to_ptr(b, ptr, cap)
 "#;
 pub const SRC_FLOAT: &str = r#"
 
@@ -28213,6 +28280,8 @@ else {
 
 
 
+
+
 fn __rx_back(t: Int, ts: Int) -> Int = {
   let t1 = t - 1
   if t1 <= ts then ts
@@ -28237,10 +28306,10 @@ fn __rx_eol(t: Int, te: Int, pat0: Int) -> Bool = t == te or (__rx_flags(pat0) =
 
 
 
-fn __rx_vm(pat0: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at: Int) -> List[Int] = {
-  let vm = prim.alloc_list(272)
+fn __rx_vm(pat0: Int, pe: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at: Int) -> List[Int] = {
+  let vm = prim.alloc_list(276)
   let m = prim.handle(vm) + 12
-  prim.store64(m, m + 128)
+  prim.store64(m, m + 160)
   prim.store64(m + 8, 2048)
   prim.store64(m + 32, ts)
   prim.store64(m + 40, te)
@@ -28248,6 +28317,10 @@ fn __rx_vm(pat0: Int, ts: Int, te: Int, caps: Int, nslots: Int, end_at: Int) -> 
   prim.store64(m + 56, pat0)
   prim.store64(m + 64, end_at)
   prim.store64(m + 80, nslots)
+  prim.store64(m + 120, 0)
+  prim.store64(m + 128, 0)
+  prim.store64(m + 136, 4 * (pe - pat0 + 1) * (te - ts + 1))
+  prim.store64(m + 144, 0)
   vm
 }
 
@@ -28557,6 +28630,7 @@ fn __rx_lazy(ae: Int, pnext: Int) -> Int =
 fn __rx_seq(p: Int, pend: Int, t: Int, k: Int, m: Int) -> Int = {
   let room = prim.load64(m + 8) - prim.load64(m + 16)
   if room < 512 then __rx_suspend(p, pend, t, k, m)
+  else if __rx_tick(m) then 0 - 3
   else if p >= pend then __rx_run(k, t, m)
   else __rx_piece(p, pend, t, k, m)
 }
@@ -28619,7 +28693,8 @@ fn __rx_rep_lazy(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, count: Int, mn:
 
 fn __rx_repi_fwd(p: Int, ae: Int, pnext: Int, pend: Int, t: Int, count: Int, mn: Int, mx: Int, k: Int, m: Int) -> Int = {
   let under_max = if mx < 0 then true else count < mx
-  if under_max and __rx_char_match(p, ae, t, prim.load64(m + 40)) then __rx_repi_fwd(
+  if __rx_tick(m) then 0 - 3
+  else if under_max and __rx_char_match(p, ae, t, prim.load64(m + 40)) then __rx_repi_fwd(
     p,
     ae,
     pnext,
@@ -28648,6 +28723,571 @@ fn __rx_repi_try(pnext: Int, pend: Int, t: Int, i: Int, mn: Int, k: Int, m: Int)
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+fn __rx_cslot(cb: Int, i: Int) -> Int = prim.load64(cb + i * 8)
+
+fn __rx_cset(cb: Int, i: Int, v: Int) -> Int = {
+  prim.store64(cb + i * 8, v)
+  0
+}
+
+
+fn __rx_emit(cb: Int, op: Int, a: Int, b: Int, c: Int, e: Int) -> Int = {
+  let n = __rx_cslot(cb, 1)
+  let base = __rx_cslot(cb, 0)
+  let _0 = if base == 0 then 0
+  else {
+    let at = base + n * 48
+    prim.store64(at, op)
+    prim.store64(at + 8, a)
+    prim.store64(at + 16, b)
+    prim.store64(at + 24, c)
+    prim.store64(at + 32, e)
+    prim.store64(at + 40, __rx_cslot(cb, 2))
+    0
+  }
+  let _1 = __rx_cset(cb, 1, n + 1)
+  let _2 = if (n + 1) * (__rx_cslot(cb, 3) + 1) > 20000 then __rx_cset(cb, 4, 1)
+  else 0
+  n
+}
+
+
+fn __rx_iset(cb: Int, pc: Int, f: Int, v: Int) -> Int = {
+  let base = __rx_cslot(cb, 0)
+  let _0 = if base == 0 then 0
+  else {
+    prim.store64(base + pc * 48 + f * 8, v)
+    0
+  }
+  0
+}
+
+
+fn __rx_hole(cb: Int, pc: Int, f: Int, chain: Int) -> Int = {
+  let _0 = __rx_iset(cb, pc, f, chain)
+  pc * 8 + f
+}
+
+
+fn __rx_patch(cb: Int, chain: Int, to: Int) -> Int = {
+  let base = __rx_cslot(cb, 0)
+  if chain < 0 or base == 0 then 0
+  else {
+    let at = base + (chain / 8) * 48 + (chain % 8) * 8
+    let next = prim.load64(at)
+    prim.store64(at, to)
+    __rx_patch(cb, next, to)
+  }
+}
+
+fn __rx_over(cb: Int) -> Bool = __rx_cslot(cb, 4) == 1
+
+
+
+fn __rx_null_alts(p: Int, pend: Int, pat0: Int) -> Bool = {
+  let aend = __rx_alt_end(p, pend)
+  if __rx_null_seq(p, aend, pat0) then true
+  else if aend < pend then __rx_null_alts(aend + 1, pend, pat0)
+  else false
+}
+
+fn __rx_null_seq(p: Int, pend: Int, pat0: Int) -> Bool = if p >= pend then true
+else if __rx_null_piece(p, pend, pat0) then __rx_null_seq(__rx_piece_end(p, pend), pend, pat0)
+else false
+
+fn __rx_null_piece(p: Int, pend: Int, pat0: Int) -> Bool = {
+  let b = prim.load8(p)
+  let pnext = __rx_piece_end(p, pend)
+  let ae = __rx_atom_end(p, pend)
+  if b == 94 or b == 36 then true
+  else if b == 92 and p + 1 < pend and (prim.load8(p + 1) == 98 or prim.load8(p + 1) == 66) then true
+  else if b == 40 and p == pat0 and __rx_flags(pat0) == 1 then true
+  else if ae < pnext and __rx_quant_min(ae, pnext) == 0 then true
+  else if b == 40 then {
+    let ce = if ae > p + 1 and prim.load8(ae - 1) == 41 then ae - 1 else ae
+    __rx_null_alts(if prim.load8(p + 1) == 63 then p + 3 else p + 1, ce, pat0)
+  } else false
+}
+
+
+fn __rx_quant_min(ae: Int, pnext: Int) -> Int = {
+  let q = prim.load8(ae)
+  if q == 42 or q == 63 then 0
+  else if q == 43 then 1 else __rx_brace_min(ae, pnext)
+}
+
+fn __rx_quant_max(ae: Int, pnext: Int) -> Int = {
+  let q = prim.load8(ae)
+  if q == 42 or q == 43 then 0 - 1
+  else if q == 63 then 1 else __rx_brace_max(ae, pnext)
+}
+
+
+fn __rx_c_alts(cb: Int, p: Int, pend: Int, ends: Int) -> Int =
+  if __rx_over(cb) then 0
+  else {
+    let aend = __rx_alt_end(p, pend)
+    if aend < pend then {
+      let sp = __rx_emit(cb, 3, __rx_cslot(cb, 1) + 1, 0, 0, 0)
+      let _0 = __rx_c_seq(cb, p, aend)
+      let j = __rx_emit(cb, 4, 0, 0, 0, 0)
+      let ends2 = __rx_hole(cb, j, 1, ends)
+      let _1 = __rx_iset(cb, sp, 2, __rx_cslot(cb, 1))
+      __rx_c_alts(cb, aend + 1, pend, ends2)
+    } else {
+      let _0 = __rx_c_seq(cb, p, aend)
+      __rx_patch(cb, ends, __rx_cslot(cb, 1))
+    }
+  }
+
+
+fn __rx_c_seq(cb: Int, p: Int, pend: Int) -> Int = if p >= pend or __rx_over(cb) then 0
+else {
+  let _0 = __rx_c_piece(cb, p, pend)
+  __rx_c_seq(cb, __rx_piece_end(p, pend), pend)
+}
+
+fn __rx_c_piece(cb: Int, p: Int, pend: Int) -> Int = {
+  let b = prim.load8(p)
+  let pnext = __rx_piece_end(p, pend)
+  let pat0 = __rx_cslot(cb, 5)
+  if b == 94 then __rx_emit(cb, 2, 0, 0, 0, 0)
+  else if b == 36 then __rx_emit(cb, 2, 1, 0, 0, 0)
+  else if b == 92 and p + 1 < pend and (prim.load8(p + 1) == 98 or prim.load8(p + 1) == 66) then __rx_emit(
+    cb,
+    2,
+    if prim.load8(p + 1) == 98 then 2 else 3,
+    0,
+    0,
+    0,
+  )
+  else if b == 40 and p == pat0 and __rx_flags(pat0) == 1 then 0
+  else {
+    let ae = __rx_atom_end(p, pend)
+    let quantified = ae < pnext
+    let mn = if quantified then __rx_quant_min(ae, pnext) else 1
+    let mx = if quantified then __rx_quant_max(ae, pnext) else 1
+    let lazy = if quantified then __rx_lazy(ae, pnext) else 0
+    if mx >= 0 and mn > mx then __rx_emit(cb, 8, 0, 0, 0, 0)
+    else if b == 40 then __rx_c_group(cb, p, ae, mn, mx, lazy)
+    else __rx_c_atom(cb, p, ae, mn, mx, lazy)
+  }
+}
+
+
+fn __rx_c_chars(cb: Int, p: Int, ae: Int, k: Int) -> Int = if k <= 0 or __rx_over(cb) then 0
+else {
+  let _0 = __rx_emit(cb, 1, p, ae, 0, 0)
+  __rx_c_chars(cb, p, ae, k - 1)
+}
+
+
+
+fn __rx_c_opt(cb: Int, p: Int, ae: Int, k: Int, mx: Int, lazy: Int, exits: Int) -> Int =
+  if k >= mx or __rx_over(cb) then __rx_patch(cb, exits, __rx_cslot(cb, 1))
+  else {
+    let sp = __rx_emit(cb, 3, 0, 0, 0, 0)
+    let body = __rx_emit(cb, 1, p, ae, 0, 0)
+    let _0 = __rx_iset(cb, sp, if lazy == 1 then 2 else 1, body)
+    __rx_c_opt(cb, p, ae, k + 1, mx, lazy, __rx_hole(cb, sp, if lazy == 1 then 1 else 2, exits))
+  }
+
+
+fn __rx_c_atom(cb: Int, p: Int, ae: Int, mn: Int, mx: Int, lazy: Int) -> Int = {
+  let _0 = __rx_c_chars(cb, p, ae, mn)
+  if mx >= 0 then __rx_c_opt(cb, p, ae, mn, mx, lazy, 0 - 1)
+  else {
+    let top = __rx_emit(cb, 3, 0, 0, 0, 0)
+    let body = __rx_emit(cb, 1, p, ae, 0, 0)
+    let _1 = __rx_emit(cb, 4, top, 0, 0, 0)
+    let exit = __rx_cslot(cb, 1)
+    let _2 = __rx_iset(cb, top, 1, if lazy == 1 then exit else body)
+    __rx_iset(cb, top, 2, if lazy == 1 then body else exit)
+  }
+}
+
+
+
+
+fn __rx_c_group(cb: Int, p: Int, ae: Int, mn: Int, mx: Int, lazy: Int) -> Int = {
+  let pat0 = __rx_cslot(cb, 5)
+  let ce = if ae > p + 1 and prim.load8(ae - 1) == 41 then ae - 1 else ae
+  let noncap = prim.load8(p + 1) == 63
+  let body = if noncap then p + 3 else p + 1
+  let ci = if noncap then 0 else __rx_ngroups(pat0, p) + 1
+  let tracked = (mn != 1 or mx != 1) and __rx_null_alts(body, ce, pat0)
+  let outer = if tracked then __rx_cslot(cb, 2) else 0 - 1
+  let _0 = if tracked and outer + 1 > __rx_cslot(cb, 3) then __rx_cset(cb, 3, outer + 1)
+  else 0
+  __rx_c_copy(cb, body, ce, ci, outer, mn, mx, lazy, 0, 0 - 1)
+}
+
+fn __rx_c_copy(cb: Int, body: Int, ce: Int, ci: Int, outer: Int, mn: Int, mx: Int, lazy: Int, c: Int, exits: Int) -> Int =
+  if __rx_over(cb) then 0
+  else if mx >= 0 and c >= mx then __rx_patch(cb, exits, __rx_cslot(cb, 1))
+  else {
+    let rc = __rx_cslot(cb, 1)
+    let exits1 = if c >= mn then {
+      let sp = __rx_emit(cb, 3, 0, 0, 0, 0)
+      let _0 = __rx_iset(cb, sp, if lazy == 1 then 2 else 1, rc + 1)
+      __rx_hole(cb, sp, if lazy == 1 then 1 else 2, exits)
+    } else exits
+    let _1 = if outer >= 0 then __rx_cset(cb, 2, outer + 1)
+    else 0
+    let _2 = if ci > 0 then __rx_emit(cb, 5, ci, 0, 0, 0)
+    else 0
+    let _3 = __rx_c_alts(cb, body, ce, 0 - 1)
+    let loops = mx < 0 and c == mn
+    let nonempty = if loops then rc else __rx_cslot(cb, 1) + 1
+    let end = __rx_emit(cb, 6, ci, outer, 0 - 1, nonempty)
+    let exits2 = if c + 1 < mn then exits1
+    else __rx_hole(cb, end, 3, exits1)
+    let _4 = if outer >= 0 then __rx_cset(cb, 2, outer)
+    else 0
+    let last = if mx < 0 then mn else mx
+    if loops or c >= last then __rx_patch(cb, exits2, __rx_cslot(cb, 1))
+    else __rx_c_copy(cb, body, ce, ci, outer, mn, mx, lazy, c + 1, exits2)
+  }
+
+
+
+fn __rx_compile(cb: Int, base: Int, p0: Int, pe: Int) -> Int = {
+  let _0 = __rx_cset(cb, 0, base)
+  let _1 = __rx_cset(cb, 1, 0)
+  let _2 = __rx_cset(cb, 2, 0)
+  let _3 = __rx_cset(cb, 3, 0)
+  let _4 = __rx_cset(cb, 4, 0)
+  let _5 = __rx_cset(cb, 5, p0)
+  let _6 = __rx_c_alts(cb, p0, pe, 0 - 1)
+  let _7 = __rx_emit(cb, 7, 0, 0, 0, 0)
+  if __rx_over(cb) then 0 - 1 else __rx_cslot(cb, 1)
+}
+
+
+
+
+
+
+
+
+fn __rx_wk(w: Int, i: Int) -> Int = prim.load64(w + i * 8)
+
+fn __rx_wset(w: Int, i: Int, v: Int) -> Int = {
+  prim.store64(w + i * 8, v)
+  0
+}
+
+
+fn __rx_work_size(n: Int, width: Int, ns: Int) -> Int = {
+  let k = n * width
+  32 + 2 * (8 + 2 * k + k * ns + k) + 3 * (3 * k + 8) + 2 * ns
+}
+
+
+fn __rx_work_init(w: Int, prog: Int, n: Int, width: Int, ns: Int, ts: Int, te: Int, pat0: Int, track: Int) -> Int = {
+  let k = n * width
+  let l0 = w + 32 * 8
+  let l1 = l0 + (8 + 2 * k + k * ns + k) * 8
+  let stack = l1 + (8 + 2 * k + k * ns + k) * 8
+  let scratch = stack + 3 * (3 * k + 8) * 8
+  let _0 = __rx_wset(w, 0, prog)
+  let _1 = __rx_wset(w, 1, width)
+  let _2 = __rx_wset(w, 2, ns)
+  let _3 = __rx_wset(w, 3, ts)
+  let _4 = __rx_wset(w, 4, te)
+  let _5 = __rx_wset(w, 5, pat0)
+  let _6 = __rx_wset(w, 6, track)
+  let _7 = __rx_wset(w, 7, stack)
+  let _8 = __rx_wset(w, 8, 0)
+  let _9 = __rx_wset(w, 10, scratch + ns * 8)
+  let _10 = __rx_wset(w, 11, l0)
+  let _11 = __rx_wset(w, 12, l1)
+  let _12 = __rx_wset(w, 16, scratch)
+  let _13 = __rx_wset(w, 17, 0)
+  let _14 = __rx_list_init(l0, k, ns)
+  __rx_list_init(l1, k, ns)
+}
+
+fn __rx_list_init(l: Int, k: Int, ns: Int) -> Int = {
+  let pairs = l + 8 * 8
+  let slots = pairs + 2 * k * 8
+  let seen = slots + k * ns * 8
+  let _0 = __rx_wset(l, 0, 0)
+  let _1 = __rx_wset(l, 1, 0)
+  let _2 = __rx_wset(l, 2, pairs)
+  let _3 = __rx_wset(l, 3, slots)
+  let _4 = __rx_wset(l, 4, seen)
+  __rx_fill_zero(seen, k)
+}
+
+fn __rx_fill_zero(dst: Int, n: Int) -> Int = if n <= 0 then 0
+else {
+  prim.store64(dst, 0)
+  __rx_fill_zero(dst + 8, n - 1)
+}
+
+
+fn __rx_list_clear(w: Int, l: Int) -> Int = {
+  let s = __rx_wk(w, 17) + 1
+  let _0 = __rx_wset(w, 17, s)
+  let _1 = __rx_wset(l, 1, s)
+  __rx_wset(l, 0, 0)
+}
+
+fn __rx_push(w: Int, kind: Int, a: Int, b: Int) -> Int = {
+  let top = __rx_wk(w, 8)
+  let at = __rx_wk(w, 7) + top * 24
+  prim.store64(at, kind)
+  prim.store64(at + 8, a)
+  prim.store64(at + 16, b)
+  __rx_wset(w, 8, top + 1)
+}
+
+
+fn __rx_assert(w: Int, kind: Int, t: Int) -> Bool = {
+  let ts = __rx_wk(w, 3)
+  let te = __rx_wk(w, 4)
+  let pat0 = __rx_wk(w, 5)
+  if kind == 0 then __rx_bol(t, ts, pat0)
+  else if kind == 1 then __rx_eol(t, te, pat0)
+  else if kind == 2 then __rx_at_boundary(t, ts, te)
+  else __rx_at_boundary(t, ts, te) == false
+}
+
+
+
+
+fn __rx_add(w: Int, l: Int, pc: Int, d: Int, t: Int) -> Int = {
+  let _0 = __rx_push(w, 0, pc, d)
+  __rx_closure(w, l, t)
+}
+
+fn __rx_closure(w: Int, l: Int, t: Int) -> Int = {
+  let top = __rx_wk(w, 8)
+  if top == 0 then 0
+  else {
+    let at = __rx_wk(w, 7) + (top - 1) * 24
+    let kind = prim.load64(at)
+    let a = prim.load64(at + 8)
+    let b = prim.load64(at + 16)
+    let _0 = __rx_wset(w, 8, top - 1)
+    if kind == 1 then {
+      prim.store64(__rx_wk(w, 16) + a * 8, b)
+      __rx_closure(w, l, t)
+    } else {
+      let seen = __rx_wk(l, 4) + (a * __rx_wk(w, 1) + b) * 8
+      if prim.load64(seen) == __rx_wk(l, 1) then __rx_closure(w, l, t)
+      else {
+        prim.store64(seen, __rx_wk(l, 1))
+        let _1 = __rx_visit(w, l, a, b, t)
+        __rx_closure(w, l, t)
+      }
+    }
+  }
+}
+
+
+fn __rx_visit(w: Int, l: Int, pc: Int, d: Int, t: Int) -> Int = {
+  let ins = __rx_wk(w, 0) + pc * 48
+  let op = prim.load64(ins)
+  let a = prim.load64(ins + 8)
+  if op == 1 or op == 7 then {
+    let i = __rx_wk(l, 0)
+    let ns = __rx_wk(w, 2)
+    let pair = __rx_wk(l, 2) + i * 16
+    prim.store64(pair, pc)
+    prim.store64(pair + 8, d)
+    let _0 = __rx_copy64(__rx_wk(w, 16), __rx_wk(l, 3) + i * ns * 8, ns)
+    __rx_wset(l, 0, i + 1)
+  } else if op == 2 then {
+    if __rx_assert(w, a, t) then __rx_push(w, 0, pc + 1, d)
+    else 0
+  } else if op == 3 then {
+    let _0 = __rx_push(w, 0, prim.load64(ins + 16), d)
+    __rx_push(w, 0, a, d)
+  } else if op == 4 then __rx_push(w, 0, a, d)
+  else if op == 5 then {
+    let _0 = if __rx_wk(w, 6) == 1 then {
+      let slot = __rx_wk(w, 16) + a * 24
+      let _1 = __rx_push(w, 1, 3 * a, prim.load64(slot))
+      prim.store64(slot, t)
+      0
+    } else 0
+    __rx_push(w, 0, pc + 1, d)
+  } else if op == 6 then {
+    let outer = prim.load64(ins + 16)
+    let _0 = if a > 0 and __rx_wk(w, 6) == 1 then {
+      let sc = __rx_wk(w, 16)
+      let s0 = sc + (3 * a - 2) * 8
+      let _1 = __rx_push(w, 1, 3 * a - 2, prim.load64(s0))
+      let _2 = __rx_push(w, 1, 3 * a - 1, prim.load64(s0 + 8))
+      prim.store64(s0, prim.load64(sc + 3 * a * 8))
+      prim.store64(s0 + 8, t)
+      0
+    } else 0
+
+    let empty = outer >= 0 and d <= outer
+    let to = if empty then prim.load64(ins + 24) else prim.load64(ins + 32)
+    let d2 = if outer >= 0 and outer < d then outer else d
+    if to >= 0 then __rx_push(w, 0, to, d2)
+    else 0
+  } else 0
+}
+
+
+
+
+fn __rx_threads(w: Int, i: Int, t: Int, tn: Int) -> Int = {
+  let cl = __rx_wk(w, 11)
+  if i >= __rx_wk(cl, 0) then 0
+  else {
+    let pair = __rx_wk(cl, 2) + i * 16
+    let pc = prim.load64(pair)
+    let ins = __rx_wk(w, 0) + pc * 48
+    let op = prim.load64(ins)
+    let ns = __rx_wk(w, 2)
+    let slots = __rx_wk(cl, 3) + i * ns * 8
+    if op == 7 then {
+      let e = __rx_wk(w, 14)
+      if e < 0 or t == e then {
+        let _0 = __rx_copy64(slots, __rx_wk(w, 10), ns)
+        let _1 = __rx_wset(w, 9, t)
+        if __rx_wk(w, 15) == 1 then 2 else 1
+      } else __rx_threads(w, i + 1, t, tn)
+    } else if __rx_char_match(prim.load64(ins + 8), prim.load64(ins + 16), t, __rx_wk(w, 4)) then {
+      let _0 = __rx_copy64(slots, __rx_wk(w, 16), ns)
+      let _1 = __rx_add(w, __rx_wk(w, 12), pc + 1, prim.load64(ins + 40), tn)
+      __rx_threads(w, i + 1, t, tn)
+    } else __rx_threads(w, i + 1, t, tn)
+  }
+}
+
+
+fn __rx_seed(w: Int, t: Int) -> Int = {
+  let sc = __rx_wk(w, 16)
+  let _0 = __rx_fill_neg(sc, __rx_wk(w, 2))
+  prim.store64(sc, t)
+  0
+}
+
+
+fn __rx_steps(w: Int, t: Int) -> Int = {
+  let te = __rx_wk(w, 4)
+  let tn = if t < te then t + __rx_w(t) else t
+  let _0 = __rx_list_clear(w, __rx_wk(w, 12))
+  let r = __rx_threads(w, 0, t, tn)
+  if r == 2 or t >= te then 0
+  else {
+    let _1 = if __rx_wk(w, 9) < 0 and __rx_wk(w, 13) == 0 then {
+      let _2 = __rx_seed(w, tn)
+      __rx_add(w, __rx_wk(w, 12), 0, 0, tn)
+    } else 0
+    let nl = __rx_wk(w, 12)
+    if __rx_wk(nl, 0) == 0 and (__rx_wk(w, 9) >= 0 or __rx_wk(w, 13) == 1) then 0
+    else {
+      let _3 = __rx_wset(w, 12, __rx_wk(w, 11))
+      let _4 = __rx_wset(w, 11, nl)
+      __rx_steps(w, tn)
+    }
+  }
+}
+
+
+
+
+fn __rx_pike(w: Int, t: Int, anchored: Int, end_at: Int, any: Int) -> Int = {
+  let _0 = __rx_wset(w, 9, 0 - 1)
+  let _1 = __rx_wset(w, 13, anchored)
+  let _2 = __rx_wset(w, 14, end_at)
+  let _3 = __rx_wset(w, 15, any)
+  let _4 = __rx_wset(w, 8, 0)
+  let cl = __rx_wk(w, 11)
+  let _5 = __rx_list_clear(w, cl)
+  let _6 = __rx_seed(w, t)
+  let _7 = __rx_add(w, cl, 0, 0, t)
+  let _8 = __rx_steps(w, t)
+  if __rx_wk(w, 9) < 0 then 0 - 1 else prim.load64(__rx_wk(w, 10))
+}
+
+
+
+
+fn __rx_program(p0: Int, pe: Int) -> List[Int] = {
+  let cbl = prim.alloc_list(8)
+  let cb = prim.handle(cbl) + 12
+  let n = __rx_compile(cb, 0, p0, pe)
+  if n < 0 then prim.alloc_list(0)
+  else {
+    let prog = prim.alloc_list(8 + n * 6)
+    let pa = prim.handle(prog) + 12
+    let _0 = __rx_compile(cb, pa + 64, p0, pe)
+    prim.store64(pa, n)
+    prim.store64(pa + 8, __rx_cslot(cb, 3) + 1)
+    prog
+  }
+}
+
+
+
+
+
+fn __rx_work(ph: Int, ncap: Int, ts: Int, te: Int, pat0: Int, track: Int) -> List[Int] = {
+  let pa = ph + 12
+  if prim.load32(ph + 4) == 0 then prim.alloc_list(0)
+  else {
+    let n = prim.load64(pa)
+    let width = prim.load64(pa + 8)
+    let ns = if track == 1 then 1 + 3 * ncap else 1
+    let work = prim.alloc_list(__rx_work_size(n, width, ns))
+    let _0 = __rx_work_init(prim.handle(work) + 12, pa + 64, n, width, ns, ts, te, pat0, track)
+    work
+  }
+}
+
+
+fn __rx_work_at(wh: Int) -> Int = if prim.load32(wh + 4) == 0 then 0 else wh + 12
+
+
+
+fn __rx_pike_find(w: Int, t: Int, m: Int) -> Int = {
+  let st = __rx_pike(w, t, 0, 0 - 1, 0)
+  let _0 = if st >= 0 then __rx_wset(m, 9, __rx_wk(w, 9))
+  else 0
+  st
+}
+
+
+
+
+
+
 fn __rx_te(m: Int) -> Int = prim.load64(m + 40)
 
 fn __rx_end(m: Int) -> Int = prim.load64(m + 72)
@@ -28655,12 +29295,48 @@ fn __rx_end(m: Int) -> Int = prim.load64(m + 72)
 
 
 fn __rx_find_start(p: Int, pe: Int, t: Int, m: Int) -> Int = {
+  let w = prim.load64(m + 120)
+  if w != 0 then __rx_pike_find(w, t, m)
+  else __rx_find_start_walk(p, pe, t, m)
+}
+
+
+
+fn __rx_find_start_walk(p: Int, pe: Int, t: Int, m: Int) -> Int = {
   let r = __rx_exec(p, pe, t, m)
   if r >= 0 then {
     prim.store64(m + 72, r)
     t
-  } else if t >= prim.load64(m + 40) then 0 - 1
-  else __rx_find_start(p, pe, t + __rx_w(t), m)
+  } else if r == 0 - 3 or t >= prim.load64(m + 40) then 0 - 1
+  else __rx_find_start_walk(p, pe, t + __rx_w(t), m)
+}
+
+
+
+
+
+
+
+fn __rx_tick(m: Int) -> Bool = {
+  let steps = prim.load64(m + 128) + 1
+  prim.store64(m + 128, steps)
+  let budget = prim.load64(m + 136)
+  if budget >= 0 and steps > budget then {
+    prim.store64(m + 144, 1)
+    true
+  } else false
+}
+
+fn __rx_gave_up(m: Int) -> Bool = prim.load64(m + 144) == 1
+
+
+
+
+fn __rx_hand_over(m: Int, w: Int) -> Int = {
+  prim.store64(m + 120, w)
+  prim.store64(m + 144, 0)
+  prim.store64(m + 136, 0 - 1)
+  0
 }
 
 fn regex_is_match(pat: String, s: String) -> Bool = {
@@ -28670,8 +29346,15 @@ fn regex_is_match(pat: String, s: String) -> Bool = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm(p0, t0, te, 0, 0, 0 - 1)
-  __rx_find_start(p0, pe, t0, prim.handle(vm) + 12) >= 0
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
+  let m = prim.handle(vm) + 12
+  let st = __rx_find_start(p0, pe, t0, m)
+  if __rx_gave_up(m) then {
+    let prog = __rx_program(p0, pe)
+    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+    let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
+    __rx_find_start(p0, pe, t0, m) >= 0
+  } else st >= 0
 }
 
 
@@ -28682,8 +29365,17 @@ fn regex_full_match(pat: String, s: String) -> Bool = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm(p0, t0, te, 0, 0, te)
-  __rx_exec(p0, pe, t0, prim.handle(vm) + 12) == te
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, te)
+  let m = prim.handle(vm) + 12
+  let r = __rx_exec(p0, pe, t0, m)
+  if __rx_gave_up(m) then {
+    let prog = __rx_program(p0, pe)
+    let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+    let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
+    let w = __rx_work_at(prim.handle(work))
+    if w != 0 then __rx_pike(w, t0, 1, te, 0) >= 0
+    else __rx_exec(p0, pe, t0, m) == te
+  } else r == te
 }
 
 
@@ -28700,6 +29392,39 @@ fn __rx_sub(a: Int, b: Int) -> String = {
   out
 }
 
+
+
+fn __rx_vm_find(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> Int = {
+  let prog = __rx_program(p0, pe)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
+  __rx_find_start(p0, pe, t0, m)
+}
+
+fn __rx_vm_find_all(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> List[String] = {
+  let prog = __rx_program(p0, pe)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
+  let acc: List[String] = []
+  __rx_find_all_go(p0, pe, t0, m, acc)
+}
+
+fn __rx_vm_replace(p0: Int, pe: Int, t0: Int, te: Int, m: Int, rep: String) -> String = {
+  let prog = __rx_program(p0, pe)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
+  let acc = ""
+  __rx_replace_go(p0, pe, t0, m, rep, acc)
+}
+
+fn __rx_vm_split(p0: Int, pe: Int, t0: Int, te: Int, m: Int) -> List[String] = {
+  let prog = __rx_program(p0, pe)
+  let work = __rx_work(prim.handle(prog), 0, t0, te, p0, 0)
+  let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
+  let acc: List[String] = []
+  __rx_split_go(p0, pe, t0, t0, m, acc)
+}
+
 fn regex_find(pat: String, s: String) -> String? = {
   let ph = prim.handle(pat)
   let sh = prim.handle(s)
@@ -28707,9 +29432,11 @@ fn regex_find(pat: String, s: String) -> String? = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm(p0, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
-  let st = __rx_find_start(p0, pe, t0, m)
+  let st0 = __rx_find_start(p0, pe, t0, m)
+  let st = if __rx_gave_up(m) then __rx_vm_find(p0, pe, t0, te, m)
+  else st0
   if st < 0 then none
   else {
     let hit = __rx_sub(st, __rx_end(m))
@@ -28741,9 +29468,12 @@ fn regex_find_all(pat: String, s: String) -> List[String] = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm(p0, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
+  let m = prim.handle(vm) + 12
   let acc: List[String] = []
-  __rx_find_all_go(p0, pe, t0, prim.handle(vm) + 12, acc)
+  let r = __rx_find_all_go(p0, pe, t0, m, acc)
+  if __rx_gave_up(m) then __rx_vm_find_all(p0, pe, t0, te, m)
+  else r
 }
 
 
@@ -28781,9 +29511,12 @@ fn regex_replace(pat: String, s: String, rep: String) -> String = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm(p0, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
+  let m = prim.handle(vm) + 12
   let acc = ""
-  __rx_replace_go(p0, pe, t0, prim.handle(vm) + 12, rep, acc)
+  let r = __rx_replace_go(p0, pe, t0, m, rep, acc)
+  if __rx_gave_up(m) then __rx_vm_replace(p0, pe, t0, te, m, rep)
+  else r
 }
 
 fn regex_replace_first(pat: String, s: String, rep: String) -> String = {
@@ -28793,9 +29526,11 @@ fn regex_replace_first(pat: String, s: String, rep: String) -> String = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm(p0, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
   let m = prim.handle(vm) + 12
-  let st = __rx_find_start(p0, pe, t0, m)
+  let st0 = __rx_find_start(p0, pe, t0, m)
+  let st = if __rx_gave_up(m) then __rx_vm_find(p0, pe, t0, te, m)
+  else st0
   if st < 0 then s else __rx_sub(t0, st) + rep + __rx_sub(__rx_end(m), te)
 }
 
@@ -28827,9 +29562,12 @@ fn regex_split(pat: String, s: String) -> List[String] = {
   let pe = p0 + prim.load32(ph + 4)
   let t0 = sh + 12
   let te = t0 + prim.load32(sh + 4)
-  let vm = __rx_vm(p0, t0, te, 0, 0, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, 0, 0, 0 - 1)
+  let m = prim.handle(vm) + 12
   let acc: List[String] = []
-  __rx_split_go(p0, pe, t0, t0, prim.handle(vm) + 12, acc)
+  let r = __rx_split_go(p0, pe, t0, t0, m, acc)
+  if __rx_gave_up(m) then __rx_vm_split(p0, pe, t0, te, m)
+  else r
 }
 
 
@@ -28867,6 +29605,18 @@ else {
   __rx_fill_neg(dst + 8, n - 1)
 }
 
+
+fn __rx_pcaps_out(found: Int, i: Int, ncap: Int, acc: List[String]) -> List[String] =
+  if i >= ncap then acc
+  else {
+    let st = prim.load64(found + (3 * i + 1) * 8)
+    if st < 0 then __rx_pcaps_out(found, i + 1, ncap, acc + [""])
+    else {
+      let hit = __rx_sub(st, prim.load64(found + (3 * i + 2) * 8))
+      __rx_pcaps_out(found, i + 1, ncap, acc + [hit])
+    }
+  }
+
 fn __rx_caps_out(caps: Int, i: Int, ncap: Int, acc: List[String]) -> List[String] =
   if i >= ncap then acc
   else {
@@ -28901,11 +29651,34 @@ fn regex_captures(pat: String, s: String) -> List[String]? = {
   let nslots = if ncap == 0 then 2 else ncap * 2
   let buf = prim.alloc_list(nslots)
   let bd = prim.handle(buf) + 12
-  let vm = __rx_vm(p0, t0, te, bd, nslots, 0 - 1)
+  let vm = __rx_vm(p0, pe, t0, te, bd, nslots, 0 - 1)
   let m = prim.handle(vm) + 12
   let ms = __rx_find_start(p0, pe, t0, m)
-  if ms < 0 then none
+  if __rx_gave_up(m) then __rx_vm_captures(p0, pe, t0, te, ncap, bd, m)
+  else if ms < 0 then none
   else {
+    let whole = __rx_sub(ms, __rx_end(m))
+    let acc: List[String] = [whole]
+    some(__rx_caps_out(bd, 0, ncap, acc))
+  }
+}
+
+
+
+
+fn __rx_vm_captures(p0: Int, pe: Int, t0: Int, te: Int, ncap: Int, bd: Int, m: Int) -> List[String]? = {
+  let prog = __rx_program(p0, pe)
+  let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, 1)
+  let w = __rx_work_at(prim.handle(work))
+  let _0 = __rx_hand_over(m, __rx_work_at(prim.handle(work)))
+  let ms = if w != 0 then __rx_pike(w, t0, 0, 0 - 1, 0)
+  else __rx_find_start(p0, pe, t0, m)
+  if ms < 0 then none
+  else if w != 0 then {
+    let whole = __rx_sub(ms, __rx_wk(w, 9))
+    let acc: List[String] = [whole]
+    some(__rx_pcaps_out(__rx_wk(w, 10), 0, ncap, acc))
+  } else {
     let whole = __rx_sub(ms, __rx_end(m))
     let acc: List[String] = [whole]
     some(__rx_caps_out(bd, 0, ncap, acc))
@@ -38065,6 +38838,8 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "error_message" => Some(SRC_ERROR_MESSAGE),
         "fan_any" => Some(SRC_FAN_ANY),
         "fan_map" => Some(SRC_FAN_MAP),
+        "ffi" => Some(SRC_FFI),
+        "ffi_bridge" => Some(SRC_FFI_BRIDGE),
         "float" => Some(SRC_FLOAT),
         "float32" => Some(SRC_FLOAT32),
         "float32_convert" => Some(SRC_FLOAT32_CONVERT),

@@ -1640,6 +1640,11 @@ jobs:
           python3 scripts/check-stdlib-target.py --self-test
           python3 scripts/check-stdlib-target.py
 
+      - name: RawPtr surface closed to ffi (R-L0-45 — no RawPtr signature outside ffi but the deprecated bytes spellings, shrink-only)
+        run: |
+          python3 scripts/check-rawptr-surface.py --self-test
+          python3 scripts/check-rawptr-surface.py
+
       - name: Gate verification ledger (every gate classified by how it can fail — no decorative gates)
         run: bash scripts/check-gate-verification.sh
 

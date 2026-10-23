@@ -1042,6 +1042,9 @@ impl Target {
             .map(|i| {
                 let e = match i {
                     _ if Some(i) == slot => "x".to_string(),
+                    // The diamond path's own `var` (`<path>m`); the direct
+                    // program binds the mutated operand as `a<i>`.
+                    _ if Some(i) == self.mut_param && !path.is_empty() => format!("{path}m"),
                     _ if self.per_step(i) => format!("{path}a{i}"),
                     _ => format!("a{i}"),
                 };

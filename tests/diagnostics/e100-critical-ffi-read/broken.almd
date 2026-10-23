@@ -1,0 +1,9 @@
+// E100 (#4008): `ffi.read` copies a length nothing checks from a raw address,
+// so `--profile critical` refuses it, whatever `--allow` grants.
+import ffi
+
+effect fn main() -> Unit = {
+  let b = bytes.from_string("abc")
+  let c = ffi.read(ffi.address(b), 3)
+  println(int.to_string(bytes.len(c)))
+}

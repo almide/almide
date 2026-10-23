@@ -53,6 +53,11 @@ const DIR_DEPTH: &str = "one frame per directory level / path segment, not per d
 /// the engine's own nesting is the arena's growth:
 const ARENA_DOUBLING: &str =
     "one frame per doubling of the backtracking arena: log2 of its final size, not the input's length";
+/// The Pike VM's compiler (#4019) and its can-match-empty test walk the
+/// pattern text: alternatives, sequences and copies of a counted group are tail
+/// loops, and the only frames kept are the ones a group's body nests inside.
+const PATTERN_NESTING: &str =
+    "a few frames per level of group nesting in the PATTERN text, not per input character, piece or repetition count";
 
 const BOUNDED: &[(&str, &str, &str, &str)] = &[
     // (file, function, non-tail callee, why its depth does not follow the input's length)
@@ -89,6 +94,11 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
     ("regex_engine.almd", "__rx_ngroups", "__rx_ngroups",
         "one frame per capture group written in the pattern text, not per input character"),
     ("regex_engine.almd", "__rx_grow", "__rx_drive", ARENA_DOUBLING),
+    ("regex_engine.almd", "__rx_c_alts", "__rx_c_seq", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_c_copy", "__rx_c_alts", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_c_seq", "__rx_c_piece", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_null_alts", "__rx_null_seq", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_null_seq", "__rx_null_piece", PATTERN_NESTING),
     ("result_to_string.almd", "__rts_fill_digits", "__rts_fill_digits", DIGITS),
     ("result_to_string.almd", "__rts_fill_neg", "__rts_fill_neg", DIGITS),
     ("set_to_string.almd", "__sts_fill_digits", "__sts_fill_digits", DIGITS),

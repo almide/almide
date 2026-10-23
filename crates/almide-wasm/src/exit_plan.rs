@@ -400,13 +400,16 @@ fn check_window(
 }
 
 /// The surface ops that hand out the ADDRESS of a heap block's data
-/// (#3420): `bytes.data_ptr` / `as_ptr` / `as_mut_ptr`. The address is a
+/// (#3420): `ffi.address` and the deprecated `bytes.data_ptr` / `as_ptr` /
+/// `as_mut_ptr` it replaces (R-ffi-01). The address is a
 /// BORROW of the block — the host or a later read follows it — so the
 /// block must outlive every use of the pointer, exactly as under a `prim.*`
-/// body (bytes_rawptr.almd computes these as `prim.handle(b) + 12`).
+/// body (bytes_rawptr.almd, which ffi_bridge.almd calls, computes these as
+/// `prim.handle(b) + 12`).
 pub(crate) fn is_raw_address_op(target: &almide_ir::CallTarget) -> bool {
     matches!(target, almide_ir::CallTarget::Module { module, func, .. }
-        if module.as_str() == "bytes" && matches!(func.as_str(), "data_ptr" | "as_ptr" | "as_mut_ptr"))
+        if (module.as_str() == "bytes" && matches!(func.as_str(), "data_ptr" | "as_ptr" | "as_mut_ptr"))
+            || (module.as_str() == "ffi" && func.as_str() == "address"))
 }
 
 /// Does any call in `body` satisfy `hit`?

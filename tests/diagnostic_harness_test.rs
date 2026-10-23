@@ -31,6 +31,10 @@
 //! in `meta.toml`: both halves are then checked with `almide check
 //! --target wasm` (#1922), the route E082 is reported on (#3285).
 //!
+//! A case whose diagnostic belongs to a PROFILE sets `check_profile =
+//! "critical"`: every check of the case (both halves, `--json` included) then
+//! runs `almide check --profile critical` (E100, #4008).
+//!
 //! Running: `cargo test --test diagnostic_harness_test`.
 
 use std::collections::HashMap;
@@ -51,6 +55,8 @@ struct Meta {
     expects_line_col: Option<String>,
     /// `--target` for `almide check` (only `wasm`): the E082 families.
     check_target: Option<String>,
+    /// `--profile` for `almide check` (only `critical`): the E100 families.
+    check_profile: Option<String>,
 }
 
 fn parse_meta(path: &Path) -> Meta {
@@ -69,6 +75,7 @@ fn parse_meta(path: &Path) -> Meta {
                 "hint_substring" => "hint_substring",
                 "expects_line_col" => "expects_line_col",
                 "check_target" => "check_target",
+                "check_profile" => "check_profile",
                 _ => continue,
             },
             value,
@@ -80,6 +87,7 @@ fn parse_meta(path: &Path) -> Meta {
         hint_substring: fields.remove("hint_substring"),
         expects_line_col: fields.remove("expects_line_col"),
         check_target: fields.remove("check_target"),
+        check_profile: fields.remove("check_profile"),
     }
 }
 
@@ -107,11 +115,20 @@ fn run_check(file: &Path) -> (bool, String, String) {
     run_check_target(file, None)
 }
 
+/// The `--profile` a fixture file's case declares (`check_profile` in the
+/// `meta.toml` beside it), as extra `almide check` arguments.
+fn profile_args(file: &Path) -> Vec<String> {
+    let meta = file.parent().map(|d| parse_meta(&d.join("meta.toml"))).unwrap_or_default();
+    meta.check_profile.map(|p| vec!["--profile".to_string(), p]).unwrap_or_default()
+}
+
 fn run_check_target(file: &Path, target: Option<&str>) -> (bool, String, String) {
+    let profile = profile_args(file);
     let mut args = vec!["check", file.to_str().unwrap()];
     if let Some(t) = target {
         args.extend(["--target", t]);
     }
+    args.extend(profile.iter().map(String::as_str));
     let out = Command::new(almide())
         .args(&args)
         .output()
@@ -270,6 +287,7 @@ fn fixed_files_compile_cleanly() {
 fn run_check_json(file: &Path) -> Vec<DiagJson> {
     let out = Command::new(almide())
         .args(["check", "--json", file.to_str().unwrap()])
+        .args(profile_args(file))
         .output()
         .expect("almide check --json");
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -576,6 +594,7 @@ fn repair_grep_needles_appear_in_the_diagnostic() {
         let meta = parse_meta(&case.join("meta.toml"));
         let out = Command::new(almide())
             .args(["check", "--json", case.join("broken.almd").to_str().unwrap()])
+            .args(profile_args(&case.join("broken.almd")))
             .output()
             .expect("almide check --json");
         let stdout = String::from_utf8_lossy(&out.stdout).to_string();

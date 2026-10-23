@@ -84,6 +84,7 @@ const MODULE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("net", "TCP sockets"),
     ("url", "URL parsing, building, and percent-encoding (RFC 3986-lite)"),
     ("zlib", "zlib compression and decompression"),
+    ("ffi", "raw addresses for foreign functions (outside the memory-safety guarantee)"),
     ("prim", "primitive memory and file-descriptor operations"),
     ("int8", "8-bit signed integer conversions"),
     ("int16", "16-bit signed integer conversions"),
