@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "464"
+# uninspected_ceiling = "471"
 
 [[fn]]
 name = "args.flag"
@@ -15465,4 +15465,46 @@ status = "uninspected"
 name = "zlib.inflate_max"
 sig = "(data: Bytes, max_len: Int) -> Result[Bytes, String]"
 class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "fs.open_root"
+sig = "effect (dir: String) -> FsRoot ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.root_exists"
+sig = "effect (root: FsRoot, path: String) -> Bool ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.root_list_dir"
+sig = "effect (root: FsRoot, path: String) -> List[String] ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.root_read_bytes"
+sig = "effect (root: FsRoot, path: String) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.root_read_text"
+sig = "effect (root: FsRoot, path: String) -> String ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.root_remove"
+sig = "effect (root: FsRoot, path: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.root_write_text"
+sig = "effect (root: FsRoot, path: String, content: String) -> Unit ! String"
+class = "effect"
 status = "uninspected"

@@ -231,6 +231,7 @@ call:fs.is_symlink
 call:fs.list_dir
 call:fs.mkdir_p
 call:fs.modified_at
+call:fs.open_root
 call:fs.read_bytes
 call:fs.read_bytes_if_exists
 call:fs.read_bytes_raw
@@ -242,6 +243,11 @@ call:fs.read_text_if_exists
 call:fs.remove
 call:fs.remove_all
 call:fs.rename
+call:fs.root_exists
+call:fs.root_list_dir
+call:fs.root_read_text
+call:fs.root_remove
+call:fs.root_write_text
 call:fs.temp_dir
 call:fs.walk
 call:fs.write

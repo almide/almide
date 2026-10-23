@@ -258,6 +258,7 @@
 5598	spec/wasm_cross/fs_read_lines.almd
 8306	spec/wasm_cross/fs_read_text_utf8.almd
 2619	spec/wasm_cross/fs_relative_path.almd
+9258	spec/wasm_cross/fs_root_escape.almd
 7627	spec/wasm_cross/fs_write_errno.almd
 2981	spec/wasm_cross/fuel_bare_result.almd
 2565	spec/wasm_cross/fuel_block_body.almd
