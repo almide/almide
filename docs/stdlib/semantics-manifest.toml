@@ -1523,12 +1523,6 @@ probe = "bytes.to_list(b)"
 expect = "[0, 63, 192, 0, 0, 0]"
 
 [[bytes.fn]]
-name = "get_u8"
-index_unit = "byte-value"
-probe = 'bytes.get_u8(bytes.from_list([7, 200]), 1)'
-expect = "some(200)"
-
-[[bytes.fn]]
 name = "get_i8"
 index_unit = "byte-value"
 probe = 'bytes.get_i8(bytes.from_list([7, 200]), 1)'

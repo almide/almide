@@ -59,6 +59,7 @@ const HALVING: &str = "one frame per halving of the list (n / 2 per level): log2
 
 const BOUNDED: &[(&str, &str, &str, &str)] = &[
     // (file, function, non-tail callee, why its depth does not follow the input's length)
+    ("bytes.almd", "merge_sort_with", "merge_sort_with", HALVING),
     ("datetime_format.almd", "__iso_digits", "__iso_digits", DIGITS),
     ("float_to_string.almd", "__sf_pow10_small", "__sf_pow10_small",
         "called only with j < 9 (`__sf_pow10_loop` takes 10^9 steps above that): at most 8 frames"),

@@ -1361,10 +1361,6 @@ test "bytes.set_float32 unit=byte-offset" {
   assert_eq("${bytes.to_list(b)}", "[0, 63, 192, 0, 0, 0]")
 }
 
-test "bytes.get_u8 unit=byte-value" {
-  assert_eq("${bytes.get_u8(bytes.from_list([7, 200]), 1)}", "some(200)")
-}
-
 test "bytes.get_i8 unit=byte-value" {
   assert_eq("${bytes.get_i8(bytes.from_list([7, 200]), 1)}", "some(-56)")
 }

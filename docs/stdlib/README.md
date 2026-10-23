@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 45 stdlib modules, 1132 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 45 stdlib modules, 1131 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -11,7 +11,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [args](#args) | 7 | 0 |
 | [base64](#base64) | 4 | 0 |
 | [bool](#bool) | 3 | 0 |
-| [bytes](#bytes) | 199 | 1 |
+| [bytes](#bytes) | 198 | 1 |
 | [compute](#compute) | 7 | 0 |
 | [datetime](#datetime) | 23 | 0 |
 | [duration](#duration) | 7 | 0 |
@@ -233,7 +233,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `bytes.set_uint32(mut b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
 - `bytes.set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
 - `bytes.set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
-- `bytes.get_u8(b: Bytes, pos: Int) -> Option[Int]` — The byte at pos as 0..255; none outside 0..len.
 - `bytes.get_i8(b: Bytes, pos: Int) -> Option[Int]` — The byte at pos as a signed -128..127; none outside 0..len.
 - `bytes.next_i8(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i8(b, pos), pos + 1); the position stays at pos when nothing is read.
 - `bytes.get_f16_be(b: Bytes, pos: Int) -> Option[Float]` — The big-endian half-precision float at pos; none unless 2 bytes fit.

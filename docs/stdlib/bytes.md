@@ -166,7 +166,7 @@ For zero-copy interop with native code (e.g. when calling Rust runtime directly)
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (199 functions)
+## Signature index (198 functions)
 
 ```
 // Appends val rounded to f32, BE.
@@ -752,10 +752,6 @@ bytes.set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit
 // Writes value at offset; no-op out of range.
 // @since 0.15.0 or earlier
 bytes.set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit
-
-// The byte at pos as 0..255; none outside 0..len.
-// @since unreleased
-bytes.get_u8(b: Bytes, pos: Int) -> Option[Int]
 
 // The byte at pos as a signed -128..127; none outside 0..len.
 // @since unreleased

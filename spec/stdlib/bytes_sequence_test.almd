@@ -7,10 +7,7 @@ fn b(xs: List[Int]) -> Bytes = bytes.from_list(xs)
 
 fn l(x: Bytes) -> List[Int] = bytes.to_list(x)
 
-test "get_u8, get_i8, next_i8" {
-  assert_eq(bytes.get_u8(b([7, 255]), 1), some(255))
-  assert_eq(bytes.get_u8(b([7]), 1), none)
-  assert_eq(bytes.get_u8(b([7]), -1), none)
+test "get_i8, next_i8" {
   assert_eq(bytes.get_i8(b([127, 128, 255]), 1), some(-128))
   assert_eq(bytes.get_i8(b([255]), 0), some(-1))
   assert_eq(bytes.next_i8(b([1, 254]), 1), (some(-2), 2))

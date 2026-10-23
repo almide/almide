@@ -82,7 +82,6 @@
 "bytes.get_f16_be_array" = "unreleased"
 "bytes.get_i8" = "unreleased"
 "bytes.get_or" = "<=0.9.3"
-"bytes.get_u8" = "unreleased"
 "bytes.group_by" = "unreleased"
 "bytes.index_of" = "<=0.13.4"
 "bytes.insert" = "<=0.13.4"
