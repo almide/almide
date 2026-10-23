@@ -1,0 +1,8 @@
+// args.has_flag (R-args-01): --name only; a one-letter name also matches
+// -name. A test binary runs with no program arguments, so every flag is absent.
+import args
+
+test "has_flag is false with no arguments" {
+  assert_eq(args.has_flag("verbose")!, false)
+  assert_eq(args.has_flag("v")!, false)
+}
