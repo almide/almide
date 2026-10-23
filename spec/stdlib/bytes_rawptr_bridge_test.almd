@@ -3,6 +3,8 @@
 // offset on wasm; the pointer VALUE differs by target (and is never observed
 // here), but the bytes it moves are observably identical, so these are
 // cross-target-clean.
+import ffi
+
 test "as_ptr + from_raw_ptr round-trips the bytes (read side)" {
   let src = bytes.from_list([11, 22, 33, 44])
   let copy = bytes.from_raw_ptr(bytes.as_ptr(src), 4)

@@ -47,6 +47,7 @@ impl Checker {
         {
             self.reject_dead_try_spelling(mod_name, field, object.id, object.span, Some(args));
             self.reject_user_prim(mod_name, field, object.span);
+            self.reject_unopted_memory_unsafe_member(mod_name, field, object.span);
         }
         // Try static resolution: module.func, alias.func, TypeName.method, codec.encode Thread the callee's span so `E002` can emit a mechanically-applicable `try_replace` when the stdlib alias map supplies a clean rename target.
         let prev = self.callee_span_hint.take();
@@ -203,6 +204,7 @@ impl Checker {
                 (start >= s.col).then_some(ast::Span { col: start, ..s })
             });
             self.warn_if_deprecated_method(module, field.as_str(), method_span);
+            self.reject_unopted_memory_unsafe(module, field.as_str(), method_span.or(callee_span));
             let mut all_args = vec![obj_ty.clone()];
             all_args.extend(arg_tys.iter().cloned());
             let ty = self.check_named_call(&key, &all_args);

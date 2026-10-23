@@ -1009,7 +1009,7 @@ name = "copy_to_ptr"
 index_unit = "byte-count"
 setup = [
   "var dst = bytes.new(4)",
-  "let n = bytes.copy_to_ptr(bytes.from_list([9, 8, 7]), bytes.as_mut_ptr(dst), 2)",
+  "let n = bytes.copy_to_ptr(bytes.from_list([9, 8, 7]), ffi.address(dst), 2)",
   'let sm_out = "${n} ${bytes.to_list(dst)}"',
 ]
 probe = "sm_out"
@@ -1053,7 +1053,7 @@ index_unit = "byte-count"
 setup = [
   "let src = bytes.from_list([1, 2, 3, 4])",
 ]
-probe = "bytes.to_list(bytes.from_raw_ptr(bytes.as_ptr(src), 3))"
+probe = "bytes.to_list(bytes.from_raw_ptr(ffi.address(src), 3))"
 expect = "[1, 2, 3]"
 
 [[bytes.fn]]

@@ -446,6 +446,7 @@ fn try_snippets_with_replace_span_apply_cleanly() {
         let broken = case.join("broken.almd");
         let fixed = case.join("fixed.almd");
         let diagnostics = run_check_json(&broken);
+        let meta = parse_meta(&case.join("meta.toml"));
         // A case with SEVERAL span-anchored fixes (e.g. two unused imports)
         // reaches fixed.almd only after `almide fix`'s multi-round application;
         // a single application cannot equal it. Each application must still
@@ -481,7 +482,11 @@ fn try_snippets_with_replace_span_apply_cleanly() {
                 "applied try: did not compile in {}:\nrewritten:\n{}\nstdout: {}\nstderr: {}",
                 case.display(), rewritten, stdout, stderr
             );
-            if span_fix_count == 1 {
+            // A fix for a NEIGHBOUR of the case's subject (the E052 rename
+            // beside an E032 case, #4043) repairs a different defect, so it
+            // cannot be expected to produce fixed.almd; it must still compile.
+            let fixes_the_subject = meta.expects_code.as_deref().is_none_or(|c| d.code.as_deref() == Some(c));
+            if span_fix_count == 1 && fixes_the_subject {
                 let fixed_src = std::fs::read_to_string(&fixed).unwrap();
                 let norm = |s: &str| s.replace("\r\n", "\n").trim_end().to_string();
                 assert_eq!(

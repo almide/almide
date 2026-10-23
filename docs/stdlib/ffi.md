@@ -9,7 +9,12 @@ the program owns — the caller promises it. They are `effect fn`s: `write`
 changes memory outside Almide's values, and `read` reads memory foreign code
 wrote. `ffi.address` and `ffi.to_int` only build an address as a value.
 
-`almide check --profile critical` refuses every `ffi.*` call (E100, #4008).
+`import ffi` is the opt-in: outside the stdlib, a call to any of these four
+functions, or to one of the deprecated `bytes` raw-pointer spellings below, is
+E100 in a file that does not write `import ffi` (#4043). The rule is per file,
+so a program whose files have no `import ffi` and no `@extern` cannot read or
+write memory outside its values. `almide check --profile critical` refuses
+every `ffi.*` call even with the import (E100, #4008).
 
 **Both targets.** An address is a `*mut u8` on native and a linear-memory
 offset on wasm. Its value differs per target and is never printed; null-ness
@@ -17,7 +22,8 @@ and the bytes moved through it are the same on both (`spec/stdlib/ffi_test.almd`
 The address of an empty buffer is null on both targets.
 
 The `bytes` raw-pointer functions this module replaces are deprecated since
-dialect epoch 15 and removed at epoch 16 (R-ffi-01):
+dialect epoch 15 and removed at epoch 16 (R-ffi-01). Until then they check only
+in a file with `import ffi`, with an E052 warning:
 
 | Deprecated | Write |
 |---|---|

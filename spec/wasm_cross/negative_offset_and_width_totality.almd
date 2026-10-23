@@ -14,6 +14,7 @@
 //      width asked for an astronomical pad and panicked with a capacity overflow,
 //      where the wasm self-host correctly returned the string unchanged.
 import bytes
+import ffi
 
 fn show(label: String, v: Float) -> Unit = println(label + ":" + float.to_string(v))
 

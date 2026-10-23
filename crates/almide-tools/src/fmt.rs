@@ -186,6 +186,17 @@ fn import_is_live(
     if name.starts_with('_') || path.first().map(|s| s.as_str()) == Some("self") {
         return true;
     }
+    // #4043: `import ffi` is the opt-in a `@memory_unsafe` call needs (E100
+    // without it), so a file that calls one — a deprecated `bytes` raw-pointer
+    // spelling, say — uses the import even when it never writes `ffi.`.
+    let opt_in = path.len() == 1 && path[0].as_str() == almide_lang::stdlib_info::MEMORY_UNSAFE_OPT_IN;
+    if opt_in
+        && token_refs.iter().any(|(m, fields)| {
+            fields.iter().any(|f| almide_lang::stdlib_info::is_memory_unsafe_stdlib_fn(m, f))
+        })
+    {
+        return true;
+    }
     used.contains(&name) || token_refs.contains_key(&name)
 }
 
