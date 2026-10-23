@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "199"
+# uninspected_ceiling = "456"
 
 [[fn]]
 name = "args.flag"
@@ -13940,5 +13940,1547 @@ status = "uninspected"
 [[fn]]
 name = "set.zip_with"
 sig = "(s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.abs"
+sig = "(x: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.ceil"
+sig = "(x: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.clamp"
+sig = "(x: Float32, lo: Float32, hi: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.compare"
+sig = "(a: Float32, b: Float32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.epsilon"
+sig = "() -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.floor"
+sig = "(x: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.from_bits"
+sig = "(bits: Int) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.infinity"
+sig = "() -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.is_finite"
+sig = "(x: Float32) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.is_infinite"
+sig = "(x: Float32) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.is_nan"
+sig = "(x: Float32) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.max"
+sig = "(a: Float32, b: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.max_value"
+sig = "() -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.min"
+sig = "(a: Float32, b: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.min_value"
+sig = "() -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.nan"
+sig = "() -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.round"
+sig = "(x: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.signum"
+sig = "(x: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.to_bits"
+sig = "(x: Float32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float32.trunc"
+sig = "(x: Float32) -> Float32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.abs"
+sig = "(x: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.ceil"
+sig = "(x: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.clamp"
+sig = "(x: Float64, lo: Float64, hi: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.compare"
+sig = "(a: Float64, b: Float64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.epsilon"
+sig = "() -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.floor"
+sig = "(x: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.from_bits"
+sig = "(bits: Int) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.infinity"
+sig = "() -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.is_finite"
+sig = "(x: Float64) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.is_infinite"
+sig = "(x: Float64) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.is_nan"
+sig = "(x: Float64) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.max"
+sig = "(a: Float64, b: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.max_value"
+sig = "() -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.min"
+sig = "(a: Float64, b: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.min_value"
+sig = "() -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.nan"
+sig = "() -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.parse"
+sig = "(s: String) -> Result[Float64, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.round"
+sig = "(x: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.signum"
+sig = "(x: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.to_bits"
+sig = "(x: Float64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "float64.trunc"
+sig = "(x: Float64) -> Float64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.abs"
+sig = "(x: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.band"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.bit_length"
+sig = "(x: Int16) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.bnot"
+sig = "(x: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.bor"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.bshl"
+sig = "(a: Int16, n: Int) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.bshr"
+sig = "(a: Int16, n: Int) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.bxor"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.byte_swap"
+sig = "(x: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.clamp"
+sig = "(x: Int16, lo: Int16, hi: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.compare"
+sig = "(a: Int16, b: Int16) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.count_leading_zeros"
+sig = "(x: Int16) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.count_ones"
+sig = "(x: Int16) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.count_trailing_zeros"
+sig = "(x: Int16) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.floor_div"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.is_even"
+sig = "(x: Int16) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.is_odd"
+sig = "(x: Int16) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.max"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.min"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.modulo"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.parse"
+sig = "(s: String) -> Result[Int16, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.pow"
+sig = "(base: Int16, exp: Int) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.rotate_left"
+sig = "(a: Int16, n: Int) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.rotate_right"
+sig = "(a: Int16, n: Int) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.sign"
+sig = "(x: Int16) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.wrap_add"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.wrap_mul"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int16.wrap_sub"
+sig = "(a: Int16, b: Int16) -> Int16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.abs"
+sig = "(x: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.band"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.bit_length"
+sig = "(x: Int32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.bnot"
+sig = "(x: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.bor"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.bshl"
+sig = "(a: Int32, n: Int) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.bshr"
+sig = "(a: Int32, n: Int) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.bxor"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.byte_swap"
+sig = "(x: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.clamp"
+sig = "(x: Int32, lo: Int32, hi: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.compare"
+sig = "(a: Int32, b: Int32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.count_leading_zeros"
+sig = "(x: Int32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.count_ones"
+sig = "(x: Int32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.count_trailing_zeros"
+sig = "(x: Int32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.floor_div"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.is_even"
+sig = "(x: Int32) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.is_odd"
+sig = "(x: Int32) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.max"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.min"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.modulo"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.parse"
+sig = "(s: String) -> Result[Int32, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.pow"
+sig = "(base: Int32, exp: Int) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.rotate_left"
+sig = "(a: Int32, n: Int) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.rotate_right"
+sig = "(a: Int32, n: Int) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.sign"
+sig = "(x: Int32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.wrap_add"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.wrap_mul"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int32.wrap_sub"
+sig = "(a: Int32, b: Int32) -> Int32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.abs"
+sig = "(x: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.band"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.bit_length"
+sig = "(x: Int64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.bnot"
+sig = "(x: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.bor"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.bshl"
+sig = "(a: Int64, n: Int) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.bshr"
+sig = "(a: Int64, n: Int) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.bxor"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.byte_swap"
+sig = "(x: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.clamp"
+sig = "(x: Int64, lo: Int64, hi: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.compare"
+sig = "(a: Int64, b: Int64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.count_leading_zeros"
+sig = "(x: Int64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.count_ones"
+sig = "(x: Int64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.count_trailing_zeros"
+sig = "(x: Int64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.floor_div"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.is_even"
+sig = "(x: Int64) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.is_odd"
+sig = "(x: Int64) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.max"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.min"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.modulo"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.parse"
+sig = "(s: String) -> Result[Int64, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.pow"
+sig = "(base: Int64, exp: Int) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.rotate_left"
+sig = "(a: Int64, n: Int) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.rotate_right"
+sig = "(a: Int64, n: Int) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.sign"
+sig = "(x: Int64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.wrap_add"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.wrap_mul"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int64.wrap_sub"
+sig = "(a: Int64, b: Int64) -> Int64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.abs"
+sig = "(x: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.band"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.bit_length"
+sig = "(x: Int8) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.bnot"
+sig = "(x: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.bor"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.bshl"
+sig = "(a: Int8, n: Int) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.bshr"
+sig = "(a: Int8, n: Int) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.bxor"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.byte_swap"
+sig = "(x: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.clamp"
+sig = "(x: Int8, lo: Int8, hi: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.compare"
+sig = "(a: Int8, b: Int8) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.count_leading_zeros"
+sig = "(x: Int8) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.count_ones"
+sig = "(x: Int8) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.count_trailing_zeros"
+sig = "(x: Int8) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.floor_div"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.is_even"
+sig = "(x: Int8) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.is_odd"
+sig = "(x: Int8) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.max"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.min"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.modulo"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.parse"
+sig = "(s: String) -> Result[Int8, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.pow"
+sig = "(base: Int8, exp: Int) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.rotate_left"
+sig = "(a: Int8, n: Int) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.rotate_right"
+sig = "(a: Int8, n: Int) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.sign"
+sig = "(x: Int8) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.wrap_add"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.wrap_mul"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "int8.wrap_sub"
+sig = "(a: Int8, b: Int8) -> Int8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.band"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.bit_length"
+sig = "(x: UInt16) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.bnot"
+sig = "(x: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.bor"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.bshl"
+sig = "(a: UInt16, n: Int) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.bshr"
+sig = "(a: UInt16, n: Int) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.bxor"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.byte_swap"
+sig = "(x: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.clamp"
+sig = "(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.compare"
+sig = "(a: UInt16, b: UInt16) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.count_leading_zeros"
+sig = "(x: UInt16) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.count_ones"
+sig = "(x: UInt16) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.count_trailing_zeros"
+sig = "(x: UInt16) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.floor_div"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.is_even"
+sig = "(x: UInt16) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.is_odd"
+sig = "(x: UInt16) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.max"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.min"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.modulo"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.parse"
+sig = "(s: String) -> Result[UInt16, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.pow"
+sig = "(base: UInt16, exp: Int) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.rotate_left"
+sig = "(a: UInt16, n: Int) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.rotate_right"
+sig = "(a: UInt16, n: Int) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.wrap_add"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.wrap_mul"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint16.wrap_sub"
+sig = "(a: UInt16, b: UInt16) -> UInt16"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.band"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.bit_length"
+sig = "(x: UInt32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.bnot"
+sig = "(x: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.bor"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.bshl"
+sig = "(a: UInt32, n: Int) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.bshr"
+sig = "(a: UInt32, n: Int) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.bxor"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.byte_swap"
+sig = "(x: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.clamp"
+sig = "(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.compare"
+sig = "(a: UInt32, b: UInt32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.count_leading_zeros"
+sig = "(x: UInt32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.count_ones"
+sig = "(x: UInt32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.count_trailing_zeros"
+sig = "(x: UInt32) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.floor_div"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.is_even"
+sig = "(x: UInt32) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.is_odd"
+sig = "(x: UInt32) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.max"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.min"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.modulo"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.parse"
+sig = "(s: String) -> Result[UInt32, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.pow"
+sig = "(base: UInt32, exp: Int) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.rotate_left"
+sig = "(a: UInt32, n: Int) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.rotate_right"
+sig = "(a: UInt32, n: Int) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.wrap_add"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.wrap_mul"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint32.wrap_sub"
+sig = "(a: UInt32, b: UInt32) -> UInt32"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.band"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.bit_length"
+sig = "(x: UInt64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.bnot"
+sig = "(x: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.bor"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.bshl"
+sig = "(a: UInt64, n: Int) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.bshr"
+sig = "(a: UInt64, n: Int) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.bxor"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.byte_swap"
+sig = "(x: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.clamp"
+sig = "(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.compare"
+sig = "(a: UInt64, b: UInt64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.count_leading_zeros"
+sig = "(x: UInt64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.count_ones"
+sig = "(x: UInt64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.count_trailing_zeros"
+sig = "(x: UInt64) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.floor_div"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.is_even"
+sig = "(x: UInt64) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.is_odd"
+sig = "(x: UInt64) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.max"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.min"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.modulo"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.parse"
+sig = "(s: String) -> Result[UInt64, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.pow"
+sig = "(base: UInt64, exp: Int) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.rotate_left"
+sig = "(a: UInt64, n: Int) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.rotate_right"
+sig = "(a: UInt64, n: Int) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.wrap_add"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.wrap_mul"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint64.wrap_sub"
+sig = "(a: UInt64, b: UInt64) -> UInt64"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.band"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.bit_length"
+sig = "(x: UInt8) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.bnot"
+sig = "(x: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.bor"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.bshl"
+sig = "(a: UInt8, n: Int) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.bshr"
+sig = "(a: UInt8, n: Int) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.bxor"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.byte_swap"
+sig = "(x: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.clamp"
+sig = "(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.compare"
+sig = "(a: UInt8, b: UInt8) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.count_leading_zeros"
+sig = "(x: UInt8) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.count_ones"
+sig = "(x: UInt8) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.count_trailing_zeros"
+sig = "(x: UInt8) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.floor_div"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.is_even"
+sig = "(x: UInt8) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.is_odd"
+sig = "(x: UInt8) -> Bool"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.max"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.min"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.modulo"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.parse"
+sig = "(s: String) -> Result[UInt8, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.pow"
+sig = "(base: UInt8, exp: Int) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.rotate_left"
+sig = "(a: UInt8, n: Int) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.rotate_right"
+sig = "(a: UInt8, n: Int) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.wrap_add"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.wrap_mul"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "uint8.wrap_sub"
+sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
