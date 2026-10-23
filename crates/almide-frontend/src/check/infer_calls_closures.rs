@@ -1131,7 +1131,15 @@ impl Checker {
                         fallible = true;
                     }
                 }
-                ExprKind::Ident { name, .. } if self.fallible_marker_fns.contains(name) => {
+                // A parameter or local that shares a fallible fn's name is not
+                // that fn: `list.filter(xs, f)` inside `fn keep(.., f: (Int) ->
+                // Bool)` stays the plain form even when some top-level `f` is
+                // declared `-> T!` (the bundled stdlib bodies sit in the same
+                // checker as the user's program, so a user `fn f(..) -> T!` once
+                // retyped `string.filter`'s callback slot).
+                ExprKind::Ident { name, .. }
+                    if self.fallible_marker_fns.contains(name) && self.env.lookup_var(name.as_str()).is_none() =>
+                {
                     fallible = true;
                 }
                 _ => {}
