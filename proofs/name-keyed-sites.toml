@@ -1178,3 +1178,15 @@ id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::SIGNED::table"
 class = "justified"
 names = 2
 why = "The columns of a family gate: the SignedInteger requirements (abs, sign; R-sized-10) the four signed fixed-width integers carry. A specification the gate checks against the module interfaces; no codegen leg reads it."
+
+[[site]]
+id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::FLOATS::table"
+class = "justified"
+names = 2
+why = "The rows of a family gate: the fixed-width floating-point carriers (float32, float64) that conform to FloatingPoint (R-sized-11). A specification the gate checks against the module interfaces; no codegen leg reads it."
+
+[[site]]
+id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::FLOATING::table"
+class = "justified"
+names = 21
+why = "The columns of a family gate: the FloatingPoint requirements (protocol-view.md, R-sized-02/03/08/11) every fixed-width float must carry as a concrete function until a built-in type can conform to a protocol. The gate asserts every carrier x requirement cell exists; no codegen leg reads it."

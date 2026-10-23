@@ -334,14 +334,16 @@ fn module_function_names(m: &str) -> std::collections::HashSet<String> {
     iface.functions.iter().map(|f| f.name.clone()).collect()
 }
 
-/// The fixed-width numeric PROTOCOL matrix gate (R-sized-02/08/10, R-int-11/12).
+/// The fixed-width numeric PROTOCOL matrix gate (R-sized-02/03/08/10/11, R-int-11/12).
 /// The protocol pyramid (docs/roadmap/stdlib-redesign/protocol-view.md) is an assumed
 /// design: the language cannot yet say `Int8: Integer`, so every type carries each
 /// requirement as a concrete function. That makes the requirements a matrix — every
 /// carrier × every requirement of each protocol it conforms to — and this gate checks
 /// every cell exists, so the family can only be extended a whole row or column at a
 /// time. `mod` is absent from the integer rows on purpose: it is a reserved word, so
-/// `fn mod(...)` cannot be declared today.
+/// `fn mod(...)` cannot be declared today. `float32.parse` is absent on purpose: a
+/// binary64 parse narrowed to binary32 rounds twice, so it needs a direct binary32
+/// reader first.
 fn check_numeric_protocol_matrix() -> Vec<String> {
     const INTEGERS: &[(&str, bool)] = &[
         ("int8", true), ("int16", true), ("int32", true), ("int64", true),
@@ -357,6 +359,14 @@ fn check_numeric_protocol_matrix() -> Vec<String> {
     ];
     // SignedInteger (R-sized-10).
     const SIGNED: &[&str] = &["abs", "sign"];
+    // FloatingPoint (R-sized-02/03/08/11).
+    const FLOATS: &[&str] = &["float32", "float64"];
+    const FLOATING: &[&str] = &[
+        "compare", "min", "max", "clamp", "to_string",
+        "is_nan", "is_infinite", "is_finite",
+        "abs", "floor", "ceil", "round", "trunc", "signum",
+        "to_bits", "from_bits", "infinity", "nan", "epsilon", "max_value", "min_value",
+    ];
 
     let mut drifts = Vec::new();
     let mut require = |m: &str, names: &[&str]| {
@@ -370,6 +380,11 @@ fn check_numeric_protocol_matrix() -> Vec<String> {
     for (m, signed) in INTEGERS {
         let mut names: Vec<&str> = INTEGER.to_vec();
         if *signed { names.extend_from_slice(SIGNED); }
+        require(m, &names);
+    }
+    for m in FLOATS {
+        let mut names: Vec<&str> = FLOATING.to_vec();
+        if *m == "float64" { names.push("parse"); }
         require(m, &names);
     }
     drifts
