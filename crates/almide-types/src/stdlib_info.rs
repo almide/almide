@@ -62,10 +62,13 @@ pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
     // the auto-import behavior the generated `stdlib_sigs` previously
     // provided.
     "error", "math", "datetime", "value", "option", "result",
-    "map", "set", "string", "deque", "heap",
+    "map", "set", "string",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "float32", "float64",
+    // `deque` and `heap` are NOT auto-imported (`import deque`): an
+    // auto-imported module is parsed and checked in every program, and the two
+    // made `almide check` of a one-line file 19 ms -> 24 ms (#4078).
     // env / io / random / regex / testing are NOT auto-imported —
     // users still need `import env` / `import io` etc. These bundled
     // modules exist so `@inline_rust` templates are discoverable when
