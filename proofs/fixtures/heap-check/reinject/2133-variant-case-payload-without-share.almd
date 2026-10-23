@@ -1,0 +1,19 @@
+type V =
+  | S{ m: List[String], src: String }
+  | N
+
+fn mk(xs: List[String]) -> V = {
+  let checked = list.map(xs, (x) => x + "!")
+  S { m: checked, src: "a" }
+}
+
+fn show(v: V) -> String =
+  match v {
+    S{ m, src } => "${m} ${src}",
+    N => "none",
+  }
+
+fn main() -> Unit = {
+  let v = mk(["p", "q"])
+  println(show(v))
+}
