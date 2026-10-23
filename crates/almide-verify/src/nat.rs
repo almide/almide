@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 pub(crate) struct Nat(Vec<u8>);
 
 impl Nat {
-    fn from_digits(digits: &[u8]) -> Nat {
+    pub(crate) fn from_digits(digits: &[u8]) -> Nat {
         let first = digits.iter().position(|&d| d != b'0').unwrap_or(digits.len());
         Nat(digits[first..].to_vec())
     }

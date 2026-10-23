@@ -214,3 +214,22 @@ Proof. reflexivity. Qed.
 
 Example rejects_stray_close : check_bounds_cert "c0 a0 }" = false.
 Proof. reflexivity. Qed.
+
+(* The edges crates/almide-verify/src/bounds.rs pins too: slots compare as
+   numbers, tokens need no space between them, the empty witness and a
+   trailing `;` are vacuous, `L` must touch its `{`, and a `|` outside a
+   branch is junk. *)
+Example slots_are_numbers : check_bounds_cert "c007 a7" = true.
+Proof. reflexivity. Qed.
+
+Example tokens_need_no_space : check_bounds_cert "c0a0" = true.
+Proof. reflexivity. Qed.
+
+Example empty_is_vacuous : check_bounds_cert "" = true /\ check_bounds_cert ";" = true.
+Proof. split; reflexivity. Qed.
+
+Example rejects_detached_brace : check_bounds_cert "L {c0}" = false.
+Proof. reflexivity. Qed.
+
+Example rejects_stray_bar : check_bounds_cert "c0 | a0" = false.
+Proof. reflexivity. Qed.

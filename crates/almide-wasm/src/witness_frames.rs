@@ -50,6 +50,7 @@ pub(super) const CONTEXT_MARK: &str = "\u{0}context";
 /// Both markers go through `push`, a no-op unless a sweep collects.
 pub(crate) fn mark_pass(pass: usize) {
     crate::witness::modes::begin_pass(pass);
+    crate::witness::bounds::begin_pass(pass);
     push(PASS_MARK, pass.to_string());
 }
 

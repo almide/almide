@@ -77,8 +77,12 @@ compiler with qualified use in safety-critical settings).
   refused shape does read out of bounds. `BoundsCert.v` adds the byte
   format and its parser inside the proof; `check_bounds_cert` is extracted
   (driver mode `bounds`) and `check_bounds_cert_sound` states what ACCEPT
-  means. A malformed string is rejected, never read as a prefix. Not yet:
-  the compiler emitting the certificate.
+  means. A malformed string is rejected, never read as a prefix. The
+  structural wasm leg emits it per build as the `bounds` witness
+  (crates/almide-wasm/src/witness_bounds.rs) for every access whose check
+  #3345 may elide, and `structural-wall.sh` judges it three ways (extracted
+  checker, kernel, almide-verify). That the witness's events are the
+  accesses the bytes contain is trusted, as for the ownership witness.
 
 ## Verify (the third-party `make verify`)
 
