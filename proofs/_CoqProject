@@ -27,3 +27,4 @@ StructuralRuntime.v
 StructuralAlloc.v
 StructuralDecode.v
 StructuralRun.v
+MemorySafe.v

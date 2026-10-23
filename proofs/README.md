@@ -50,6 +50,17 @@ compiler with qualified use in safety-critical settings).
   operational — the proof stops being "about a model" and becomes "a running
   binary that carries its soundness proof and judges real output".
 
+- **#4013: `MemorySafe.v` — the one definition of memory safety.** Over a heap
+  trace (alloc / store / load / inc / dec), `MemorySafe` is four clauses:
+  SPATIAL (in bounds), TEMPORAL (no use-after-free, double free or
+  resurrection), INITIALIZATION (no read of an unwritten byte) and TYPE (no
+  representation confusion); `memory_safe_iff_clauses` proves it is exactly
+  those. A trace checker is sound and complete for it, with a negative
+  control per clause. `rc_check_gives_temporal` maps brick 1 into it: the
+  guarded RC check yields TEMPORAL, and only TEMPORAL. No certificate carries
+  a trace yet, so this fixes the right-hand side of
+  `K(c, a) accepts ⟹ MemorySafe a` rather than proving it of shipped bytes.
+
 ## Verify (the third-party `make verify`)
 
 ```

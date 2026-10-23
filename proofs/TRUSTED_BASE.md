@@ -100,13 +100,33 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `rc_inc_bytes_isa_effect` | WasmDecode.v | Closed under the global context |
 | `rc_dec_bytes_isa_traps` | WasmDecode.v | Closed under the global context |
 | `rc_dec_bytes_isa_frees` | WasmDecode.v | Closed under the global context |
+| `memory_safe_iff_clauses` | MemorySafe.v | Closed under the global context |
+| `check_trace_sound` | MemorySafe.v | Closed under the global context |
+| `check_trace_complete` | MemorySafe.v | Closed under the global context |
+| `rc_check_gives_temporal` | MemorySafe.v | Closed under the global context |
+| `unguarded_rc_check_misses_resurrection` | MemorySafe.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
+
+**What "memory safe" means here (#4013).** `MemorySafe.v` is the one
+definition: over a heap trace (alloc / store / load / inc / dec, each naming a
+block), every load and store is inside its live block (SPATIAL), nothing
+touches a freed block and no allocation hands out a live one (TEMPORAL), every
+byte read was written since allocation (INITIALIZATION), and every access uses
+the block's representation (TYPE). A decidable trace checker is sound and
+complete for it (`check_trace_sound` / `check_trace_complete`). Of the four
+clauses, the spine's earlier theorems reach only TEMPORAL:
+`rc_check_gives_temporal` derives it from the guarded RC check plus the
+allocator's freshness (`FreeList.alloc_not_live`). SPATIAL, INITIALIZATION and
+TYPE have no counterpart in any other file. And no certificate carries a trace
+yet, so the theorem the definition is for — `K(c, a) accepts ⟹ MemorySafe a`
+for a shipped artifact `a` — is still open (#4005, #4006, #1696). Until it is
+proven, "memory safe" is a claim about the trace model, not about the bytes.
 
 The receipt's claims are scoped to exactly this:
 
 - **The flight-grade property SET is complete on the value-semantics subset**:
-  RC balance (memory safety), name totality, capability bound (incl. transitive),
+  RC balance (the TEMPORAL clause of `MemorySafe`, see below), name totality, capability bound (incl. transitive),
   type-concretization, memory-model leak-freedom, reuse soundness (a `Reuse` acts
   only on a UNIQUELY-owned object — no aliased in-place reuse), free-list
   reuse-safety (a valid allocation never returns a currently-LIVE block — no
@@ -136,7 +156,7 @@ The receipt's claims are scoped to exactly this:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (100 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (105 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
