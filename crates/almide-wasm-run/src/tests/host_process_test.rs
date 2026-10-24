@@ -42,6 +42,20 @@ fn the_allowlist_refuses_a_command_outside_it_by_name() {
     set_allowlist(None);
 }
 
+/// C-418 (#4126): a refused command is named with its control characters
+/// escaped, so it cannot forge a line of the error text.
+#[test]
+fn a_refused_command_is_named_escaped() {
+    let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    set_allowlist(Some(vec!["echo".to_string()]));
+    let refused = call(80, "x\ny\u{1b}", &frame(&[]), &|| {}).unwrap_err();
+    assert_eq!(
+        refused,
+        "process.exec(\"x\\ny\\u{1b}\"): `x\\ny\\u{1b}` is not in [permissions] proc"
+    );
+    set_allowlist(None);
+}
+
 #[test]
 fn the_fs_call_form_packs_status_and_length() {
     let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());

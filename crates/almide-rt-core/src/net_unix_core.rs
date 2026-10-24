@@ -99,13 +99,13 @@ impl AlmideUnixTables {
 
     /// Connect a stream socket to the listener at `path`; its descriptor.
     pub fn unix_connect(&mut self, path: &str) -> Result<i64, String> {
-        let s = std::os::unix::net::UnixStream::connect(path).map_err(|e| format!("unix_connect({path}): {e}"))?;
+        let s = std::os::unix::net::UnixStream::connect(path).map_err(|e| format!("unix_connect({}): {e}", almide_rt_errtext_escape(path)))?;
         Ok(self.hold(std::os::fd::OwnedFd::from(s)))
     }
 
     /// Listen for stream connections at `path` (which must not exist yet).
     pub fn unix_listen(&mut self, path: &str) -> Result<i64, String> {
-        let l = std::os::unix::net::UnixListener::bind(path).map_err(|e| format!("unix_listen({path}): {e}"))?;
+        let l = std::os::unix::net::UnixListener::bind(path).map_err(|e| format!("unix_listen({}): {e}", almide_rt_errtext_escape(path)))?;
         Ok(self.hold(std::os::fd::OwnedFd::from(l)))
     }
 
