@@ -506,6 +506,7 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
         utf8_helpers::emit_bytes_to_string_helper(*inv_pre, *inv_mid, *inc_pre)
     }
     _ => match map_index::helper_body(h)
+        .or_else(|| crate::map_ordered::helper_body(h, work.helper_base.get() + hpos as u32))
         .or_else(|| crate::fan::js_async::helper_body(h))
         .or_else(|| runtime_alloc::helper_body(h, work))
         .or_else(|| runtime_line::helper_body(h, work))
@@ -530,6 +531,7 @@ pub(crate) fn resolve_extras(
     let helper_snapshot: Vec<Helper> = work.helpers.borrow().clone();
     for (hpos, h) in helper_snapshot.iter().enumerate() {
         let params = match map_index::helper_params(h)
+            .or_else(|| crate::map_ordered::helper_params(h))
             .or_else(|| crate::fan::js_async::helper_params(h))
             .or_else(|| runtime_alloc::helper_params(h))
             .or_else(|| runtime_line::helper_params(h))
