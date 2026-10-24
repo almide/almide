@@ -60,5 +60,5 @@ string.slice  codec_decode_error_surface  floor: consumed inside a self-hosted b
 string.split  datetime_parse_iso_strict  floor: consumed inside a self-hosted body
 string.starts_with  codec_decode_error_surface  floor: consumed inside a self-hosted body
 string.take  json_path_edges  floor: consumed inside a self-hosted body
-string.to_upper  string_case_unicode  floor: consumed inside a self-hosted body
-string.trim  ctor_scalar_call_payload  floor: consumed inside a self-hosted body
+string.to_upper  string_case_no_ascii_fold  floor: consumed inside a self-hosted body
+string.trim  datetime_parse_iso_strict  floor: consumed inside a self-hosted body
