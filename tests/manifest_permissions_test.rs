@@ -219,13 +219,15 @@ fn an_explicit_empty_allow_denies_every_capability() {
         let (ok, stderr) = almide(&dir, args);
         assert!(!ok, "`almide {}` ran a file read under allow = []:\n{stderr}", args.join(" "));
         assert!(
-            stderr.contains("capability violation") && stderr.contains("IO is not in [permissions].allow"),
-            "`almide {}` should refuse IO by the permission error:\n{stderr}",
+            stderr.contains("capability violation") && stderr.contains("IO.stdout is not in [permissions].allow"),
+            "`almide {}` should refuse IO.stdout by the permission error:\n{stderr}",
             args.join(" ")
         );
     }
-    // A pure program passes the same manifest.
-    std::fs::write(dir.join("main.almd"), "fn main() -> Unit = println(int.to_string(1 + 2))\n").unwrap();
+    // A program that performs nothing passes the same manifest. Printing is
+    // not that: `println` is the `IO.stdout` leaf (#4155, ADR-0026 D2), which
+    // `allow = []` does not grant.
+    std::fs::write(dir.join("main.almd"), "fn total() -> Int = 1 + 2\n\nfn main() -> Unit = {\n  let _ = total()\n}\n").unwrap();
     let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
     assert!(ok, "a pure program was refused under allow = []:\n{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
