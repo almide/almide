@@ -73,6 +73,58 @@ fn received_descriptors_are_held_once_taken() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// The descriptors this process has open, counted from /dev/fd (both Linux and
+/// macOS list one entry per open descriptor there).
+fn open_descriptors() -> usize {
+    std::fs::read_dir("/dev/fd").map(|d| d.count()).unwrap_or(0)
+}
+
+/// #4124: a peer that sends a descriptor with every message cannot fill the
+/// program's descriptor table through a socket the program only reads. At
+/// most `MAX_FDS` (28) received descriptors wait untaken per socket; the
+/// ones that arrive while 28 wait are closed on receipt, never held.
+#[test]
+fn received_descriptors_waiting_untaken_are_bounded_per_socket() {
+    let path = sock_path("flood");
+    let p = path.to_str().unwrap();
+    let mut peer = AlmideUnixTables::default();
+    let mut t = AlmideUnixTables::default();
+    let l = t.unix_listen(p).unwrap();
+    let c = peer.unix_connect(p).unwrap();
+    let s = t.unix_accept(l).unwrap();
+    let a = peer.shm_create(8).unwrap();
+    let held_before = t.held();
+    let open_before = open_descriptors();
+    let mut most = 0usize;
+    for _ in 0..300 {
+        peer.unix_send(c, b"x", &[a]).unwrap();
+        assert_eq!(t.unix_recv(s, 1).unwrap(), b"x");
+        most = most.max(open_descriptors());
+    }
+    assert_eq!(
+        t.held(),
+        held_before + 28,
+        "the table holds 28 waiting descriptors, no more"
+    );
+    // Other tests in this binary run on other threads and open a few
+    // descriptors of their own: the slack covers them, not the 272 extra.
+    assert!(
+        most <= open_before + 28 + 16,
+        "open descriptors grew from {open_before} to {most}"
+    );
+    let file = std::env::temp_dir().join(format!("arc-{}-flood.txt", std::process::id()));
+    std::fs::write(&file, "still opens").unwrap();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "still opens");
+    let _ = std::fs::remove_file(&file);
+    let got = t.unix_take_fds(s);
+    assert_eq!(got.len(), 28);
+    // Taken, the queue has room again.
+    peer.unix_send(c, b"y", &[a]).unwrap();
+    assert_eq!(t.unix_recv(s, 1).unwrap(), b"y");
+    assert_eq!(t.unix_take_fds(s).len(), 1);
+    let _ = std::fs::remove_file(&path);
+}
+
 /// #4123: a read's `len` is an upper bound, never an allocation size: 2^62
 /// answers the bytes there are instead of aborting the process.
 #[test]
