@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "456"
+# uninspected_ceiling = "466"
 
 [[fn]]
 name = "args.flag"
@@ -15484,3 +15484,73 @@ name = "uint8.wrap_sub"
 sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
+
+[[fn]]
+name = "bytes.is_equal_constant_time"
+sig = "(a: Bytes, b: Bytes) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.hmac_sha256"
+sig = "(key: Bytes, b: Bytes) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.hmac_sha256_hex"
+sig = "(key: Bytes, b: Bytes) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.hmac_sha512"
+sig = "(key: Bytes, b: Bytes) -> Bytes"
+class = "pure"
+status = "uninspected"
+blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.hmac_sha512_hex"
+sig = "(key: Bytes, b: Bytes) -> String"
+class = "pure"
+status = "uninspected"
+blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.is_valid_hmac_sha256"
+sig = "(key: Bytes, b: Bytes, tag: Bytes) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.is_valid_hmac_sha256_hex"
+sig = "(key: Bytes, b: Bytes, tag: String) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.is_valid_hmac_sha512"
+sig = "(key: Bytes, b: Bytes, tag: Bytes) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
+
+[[fn]]
+name = "hash.is_valid_hmac_sha512_hex"
+sig = "(key: Bytes, b: Bytes, tag: String) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
+
+[[fn]]
+name = "string.is_equal_constant_time"
+sig = "(a: String, b: String) -> Bool"
+class = "pure"
+status = "uninspected"
+blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
