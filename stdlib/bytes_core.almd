@@ -116,23 +116,6 @@ fn bytes_repeat(b: Bytes, count: Int) -> Bytes = {
 }
 
 // Are the n bytes at pa equal to the n bytes at pb? (Lazy recursion: only the taken arm runs.)
-// Constant-time compare (#4106): OR-accumulate a[i] ^ b[i] over all n bytes. The only
-// branch is the index check `i >= n`; no byte value reaches a condition, so the walk
-// never exits early. Kept apart from `__byteq` (which does exit early) on purpose.
-fn __ct_acc(pa: Int, pb: Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else __ct_acc(pa, pb, n, i + 1, prim.bor(acc, prim.bxor(prim.load8(pa + i), prim.load8(pb + i))))
-
-// bytes.is_equal_constant_time(a, b): a length mismatch is false at once (lengths are
-// public); otherwise every byte is read.
-fn bytes_is_equal_constant_time(a: Bytes, b: Bytes) -> Bool = {
-  let ha = prim.handle(a)
-  let hb = prim.handle(b)
-  let na = prim.load32(ha + 4)
-  let nb = prim.load32(hb + 4)
-  if na != nb then false
-  else __ct_acc(ha + 12, hb + 12, na, 0, 0) == 0
-}
-
 fn __byteq(pa: Int, pb: Int, n: Int, i: Int) -> Bool = if i >= n then true
 else {
   let x = prim.load8(pa + i)

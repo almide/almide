@@ -532,11 +532,6 @@ impl Emitter<'_> {
                 // stores into a fresh alloc_str buffer only.
                 "string_take_end",
                 "string_drop_end",
-                // (String, String) -> Bool (#4106): read-only load8 walk over
-                // both payloads (handle+12) and the LEN headers (+4, bytes on
-                // both layouts); no store, scalar result. Parity evidence:
-                // spec/wasm_cross/bytes_is_equal_constant_time.almd.
-                "string_is_equal_constant_time",
                 // string_from_bytes is NOT here: its `prim.load32(h+4)`
                 // reads the LIST len header as an ELEMENT COUNT — the
                 // incumbent's unit — where ours holds BYTES (8× the
