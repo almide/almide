@@ -8,6 +8,14 @@
 //!
 //! a block of an H-byte header (`$alloc` writes rc / len / cap) and N slots
 //! of W bytes, representation R, then the slots stored, in emission order.
+//! A block whose slot count is a run-time value is a LOOP FILL:
+//!
+//!   `h H w W v K r R f L t S`
+//!
+//! the count in wasm local K at the `call $alloc`, then the countdown loop
+//! on local L whose cursor advances S bytes per stored slot. The checker
+//! accepts it when K = L and S = W — the loop counts down the count the
+//! block was sized from, one slot per step (InitCert.v `fill_window`).
 //! Sites are joined by `;`. The checker accepts a site when every slot below
 //! N is stored and none at or past it; InitCert.v proves that the window of
 //! an accepted site leaves its block initialized over its whole extent, with
@@ -19,7 +27,8 @@
 //! the checker rejects (scripts/witness-reinject.sh init re-injects such a
 //! bug and requires the rejection).
 //!
-//! COVERAGE: list literals (`[a, b, c]`, emitter.rs). Every other allocation
+//! COVERAGE: list literals (`[a, b, c]`, emitter.rs) and range lists
+//! (`a..b`, ranges.rs — a loop fill). Every other allocation
 //! site — records, variants, strings, the runtime's routines — records
 //! nothing yet, so INITIALIZATION is certified for list-literal blocks only;
 //! the corpus count of recorded sites is reported by proofs/structural-wall.sh.
@@ -80,6 +89,27 @@ pub(crate) fn site(hdr: u32, width: u32, count: usize, repr: u32) -> Option<Site
         s.sites.push(format!("h{hdr} w{width} n{count} r{repr} "));
         Site(s.sites.len() - 1)
     })
+}
+
+/// The `call $alloc` of a block of a run-time count of `width`-byte slots,
+/// the count in wasm local `count_local`, was just emitted.
+pub(crate) fn fill_site(hdr: u32, width: u32, count_local: u32, repr: u32) -> Option<Site> {
+    with(|s| {
+        s.sites.push(format!("h{hdr} w{width} v{count_local} r{repr} "));
+        Site(s.sites.len() - 1)
+    })
+}
+
+/// `site`'s countdown fill loop was just emitted: it counts down local
+/// `counter` and advances its cursor `step` bytes per stored slot.
+pub(crate) fn fill(site: Option<Site>, counter: u32, step: u32) {
+    if let Some(Site(k)) = site {
+        with(|s| {
+            if let Some(t) = s.sites.get_mut(k) {
+                t.push_str(&format!("f{counter} t{step} "));
+            }
+        });
+    }
 }
 
 /// Slot `i` of `site` was just stored.

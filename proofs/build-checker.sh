@@ -141,6 +141,10 @@ runi $GATE_TMP/init_literal.cert 0
 runi $GATE_TMP/init_missing.cert 1
 runi $GATE_TMP/init_past.cert 1
 runi $GATE_TMP/init_junk.cert 1
+printf 'h12 w8 v4 r0 f4 t8'  > $GATE_TMP/init_fill.cert      # a range's loop fill: counts down the count it was sized from, one slot per step → ACCEPT
+printf 'h12 w8 v4 r0 f4 t16' > $GATE_TMP/init_fill_skip.cert # the cursor skips a slot per step → REJECT
+runi $GATE_TMP/init_fill.cert 0
+runi $GATE_TMP/init_fill_skip.cert 1
 
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"
