@@ -301,6 +301,12 @@ impl<'a> Interpreter<'a> {
             "min" => Some(self.list_min_max(args, false)),
             "max" => Some(self.list_min_max(args, true)),
             "__join_string" => Some(self.list_join(args)),
+            // The generic `list.join[T: Text]` as an UNMONOMORPHIZED self-hosted
+            // body calls it: the stdlib pool lowers without mono, so there is no
+            // `list.join` body for String parts to reach — its String instance
+            // is the join above. A Bytes join (T = Bytes) falls through and
+            // abstains.
+            "join" if matches!(args.get(1), Some(Value::Str(_))) => Some(self.list_join(args)),
             "sort" => Some(self.list_sort(args)),
             "enumerate" => Some(self.list_enumerate(args)),
             _ => self.eval_container_op_list_slice(func, args),
