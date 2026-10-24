@@ -67,13 +67,6 @@ fn main() {
     std::env::set_current_dir(&root).unwrap_or_else(|e| fail(&format!("cd {}: {e}", root.display())));
     let text = std::fs::read_to_string(&rel).unwrap_or_else(|e| fail(&format!("read {rel}: {e}")));
     let (records, uncertified, shipped, anchor_file) = produce(&rel, &text);
-    if let Some(path) = &anchors {
-        std::fs::write(path, &anchor_file).unwrap_or_else(|e| fail(&format!("write {}: {e}", path.display())));
-        if artifact.is_none() {
-            let w = path.with_extension("anchors.wasm");
-            std::fs::write(&w, &shipped).unwrap_or_else(|e| fail(&format!("write {}: {e}", w.display())));
-        }
-    }
     if let Some((p, f)) = only {
         match records.iter().find(|r| r.property == p && r.function == f) {
             Some(r) => {
@@ -97,6 +90,14 @@ fn main() {
         let hex: String = sha2::Sha256::digest(&file).iter().map(|b| format!("{b:02x}")).collect();
         (hex, path.display().to_string())
     });
+    // Written only once the artifact is known to be these bytes.
+    if let Some(path) = &anchors {
+        std::fs::write(path, &anchor_file).unwrap_or_else(|e| fail(&format!("write {}: {e}", path.display())));
+        if artifact.is_none() {
+            let w = path.with_extension("anchors.wasm");
+            std::fs::write(&w, &shipped).unwrap_or_else(|e| fail(&format!("write {}: {e}", w.display())));
+        }
+    }
     let out = almide_wasm::witness::bundle::render(
         "almide-wasm emit_structural_bundle",
         &rel,
