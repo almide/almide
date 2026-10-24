@@ -58,3 +58,9 @@ path = "crates/almide-rt-core/src/fs_beneath_sys.rs"
 count = 14
 class = "c-call"
 reason = "the rooted fs family and every fs call under [permissions] fs by descriptor (#4084): openat / readlinkat / unlinkat / mkdirat / renameat / fdopendir / readdir / closedir, Linux openat2 via syscall, errno reset for readdir, and owning a descriptor a successful open returned"
+
+[[file]]
+path = "runtime/rs/src/random.rs"
+count = 4
+class = "c-call"
+reason = "random.bytes (#3938): the getrandom(2) and getentropy(3) declarations and calls that fill a caller-owned buffer from the OS CSPRNG; each call's pointer and length come from one live &mut [u8]"
