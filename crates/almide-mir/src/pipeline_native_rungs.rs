@@ -319,6 +319,15 @@ let mut sigs: crate::render_native::NativeSigs = Default::default();
 include!("pipeline_native_concurrency.rs");
 
 pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
+    try_render_rust_source_certified(source).map(|(rust, _)| rust)
+}
+
+/// [`try_render_rust_source`] with the ownership certificate of EVERY
+/// function it rendered (#4006): the certificates are taken from the exact
+/// MIR handed to the renderer — after the probe charges, the result-window
+/// rewrite and the make-unique elision — so `proofs/native-wall.sh` judges
+/// the functions the Rust source was rendered from, not a sibling lowering.
+pub fn try_render_rust_source_certified(source: &str) -> Result<(String, Vec<(String, String)>), LowerError> {
     // Debug aid: ALMIDE_DUMP_MIR=1 prints every lowered fn's op stream (the
     // same view `debug_dump_mir` builds) before the native render runs.
     if almide_base::env::flag("ALMIDE_DUMP_MIR") {
@@ -417,7 +426,8 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
     // Op::MakeUnique => {}`), so this is a no-op cleanup here, kept only so both
     // legs run the identical target-agnostic MIR pass list.
     crate::alias_safety::elide_unaliased_make_unique(&mut functions);
-    crate::render_native::try_render_native_program(
+    let certs = functions.iter().map(|f| (f.name.to_string(), crate::certificate::ownership_certificate(f))).collect();
+    let rust = crate::render_native::try_render_native_program(
         &MirProgram {
             functions,
             exports: Vec::new(),
@@ -425,7 +435,8 @@ pub fn try_render_rust_source(source: &str) -> Result<String, LowerError> {
             mutable_global_count: 0,
         },
         &sigs,
-    )
+    )?;
+    Ok((rust, certs))
 }
 
 
