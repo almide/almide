@@ -73,6 +73,28 @@ fn received_descriptors_are_held_once_taken() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// #4123: a read's `len` is an upper bound, never an allocation size: 2^62
+/// answers the bytes there are instead of aborting the process.
+#[test]
+fn a_huge_read_length_answers_the_bytes_there_are() {
+    let path = sock_path("huge");
+    let p = path.to_str().unwrap();
+    let mut t = AlmideUnixTables::default();
+    let a = t.shm_create(16).unwrap();
+    t.shm_write(a, 0, b"0123456789abcdef").unwrap();
+    assert_eq!(t.shm_read(a, 0, 1 << 62).unwrap(), b"0123456789abcdef");
+    assert_eq!(t.shm_read(a, 4, 1 << 62).unwrap(), b"456789abcdef");
+    let l = t.unix_listen(p).unwrap();
+    let c = t.unix_connect(p).unwrap();
+    let s = t.unix_accept(l).unwrap();
+    t.unix_send(c, b"0123456789abcdef", &[]).unwrap();
+    assert_eq!(t.unix_recv(s, 1 << 62).unwrap(), b"0123456789abcdef");
+    for fd in [s, c, l, a] {
+        t.unix_close(fd).unwrap();
+    }
+    let _ = std::fs::remove_file(&path);
+}
+
 /// `unsafe` is denied crate-wide (the workspace forbids it; this crate's own
 /// lints deny it so ONE module can be sanctioned): the descriptor syscalls
 /// std has no safe form of (sendmsg / recvmsg with SCM_RIGHTS, poll, fcntl)

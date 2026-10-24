@@ -136,11 +136,12 @@ impl AlmideUnixTables {
         Ok(())
     }
 
-    /// Up to `max` bytes (blocking until some arrive); empty once the peer
+    /// Up to `max` bytes — at most 64 KiB per call, the buffer is never `max`
+    /// itself (#4123) — blocking until some arrive; empty once the peer
     /// closed. Descriptors that came with them wait for `unix_take_fds`.
     pub fn unix_recv(&mut self, sock: i64, max: i64) -> Result<Vec<u8>, String> {
         let sock = self.check("unix_recv", sock)?;
-        let mut buf = vec![0u8; max.max(0) as usize];
+        let mut buf = vec![0u8; (max.max(0) as usize).min(ALMIDE_UNIX_RECV_CHUNK)];
         let s = self.borrow(sock);
         let (n, fds) = almide_unix_retry(|| almide_unix_sys::recv(&s, &mut buf)).map_err(|e| format!("unix_recv: {e}"))?;
         let got: Vec<i64> = fds.into_iter().map(|f| self.hold(f)).collect();
@@ -259,17 +260,24 @@ fn almide_shm_open() -> std::io::Result<std::fs::File> {
     Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "no free name"))
 }
 
+/// The most one `unix_recv` or one `shm_read` step takes into memory (#4123).
+#[cfg(unix)]
+const ALMIDE_UNIX_RECV_CHUNK: usize = 64 * 1024;
+
+/// Up to `len` bytes from `offset`, the answer growing with the bytes the file
+/// has (#4123): allocating the program's `len` up front aborted the process
+/// on a huge one.
 #[cfg(unix)]
 fn almide_shm_read_at(f: &std::fs::File, offset: u64, len: usize) -> std::io::Result<Vec<u8>> {
-    let mut buf = vec![0u8; len];
-    let mut got = 0usize;
-    while got < buf.len() {
-        match almide_unix_retry(|| std::os::unix::fs::FileExt::read_at(f, &mut buf[got..], offset + got as u64))? {
+    let mut chunk = vec![0u8; len.min(ALMIDE_UNIX_RECV_CHUNK)];
+    let mut buf = Vec::new();
+    while buf.len() < len {
+        let want = (len - buf.len()).min(chunk.len());
+        match almide_unix_retry(|| std::os::unix::fs::FileExt::read_at(f, &mut chunk[..want], offset + buf.len() as u64))? {
             0 => break,
-            n => got += n,
+            n => buf.extend_from_slice(&chunk[..n]),
         }
     }
-    buf.truncate(got);
     Ok(buf)
 }
 
