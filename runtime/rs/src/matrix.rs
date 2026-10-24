@@ -370,21 +370,8 @@ pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix 
     let mut out = vec![0.0f64; m * n];
     #[cfg(have_blas)]
     {
-        // CblasRowMajor=101, CblasNoTrans=111. C = 1.0·A·B + 0.0·C.
-        extern "C" {
-            fn cblas_dgemm(
-                order: i32, transa: i32, transb: i32, m: i32, n: i32, k: i32,
-                alpha: f64, a: *const f64, lda: i32, b: *const f64, ldb: i32,
-                beta: f64, c: *mut f64, ldc: i32,
-            );
-        }
-        unsafe {
-            cblas_dgemm(
-                101, 111, 111, m as i32, n as i32, k as i32, 1.0,
-                a.data.as_ptr(), k as i32, b.data.as_ptr(), n as i32,
-                0.0, out.as_mut_ptr(), n as i32,
-            );
-        }
+        // cblas_dgemm, through sys.rs.
+        almide_rt_sys_ffi::dgemm(m, n, k, &a.data, &b.data, &mut out);
     }
     #[cfg(not(have_blas))]
     {
