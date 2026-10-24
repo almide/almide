@@ -140,7 +140,15 @@ effect fn main() -> Unit = {
 
 ### `process.kill(pid: Int, signal: Int) -> Result[Unit, String]`
 
-Send a signal to a process by PID (e.g. 15 for SIGTERM, 9 for SIGKILL)
+Send a signal to a process by PID (e.g. 15 for SIGTERM, 9 for SIGKILL). The
+signal goes through the kill(2) system call, never a `kill` program found on
+`PATH`. `pid` must be in 1..=2147483647 — `0` (the caller's process group) and
+`-1` (every process the user may signal) are refused — and `signal` in 0..=31
+(0 only asks whether the process exists). Every err is a fixed text:
+`process.kill(<pid>, <signal>): pid must be in 1..=2147483647`,
+`…: signal must be in 0..=31`, or the kill(2) failure as `no such process`,
+`operation not permitted` or `invalid signal`. Under `[permissions] proc`,
+`kill` must be on the list.
 
 ```almd check
 import process
@@ -156,7 +164,9 @@ effect fn main() -> Unit = {
 Check if a process with the given PID is still running. A child this process
 spawned is polled through its handle (and reaped once it has exited), so the
 answer turns `false` when the child exits or is killed — a zombie never
-answers `true`. Any other pid is asked of the OS.
+answers `true`. Any other pid is asked of the OS with kill(2) and signal 0
+(a process owned by another user is alive). A pid outside 1..=2147483647 is
+never alive. Under `[permissions] proc`, `kill` must be on the list.
 
 ```almd check
 import process
@@ -327,7 +337,7 @@ effect process.env(key: String) -> Option[String]
 // @since 0.12.3 or earlier
 effect process.spawn(cmd: String, args: List[String]) -> Int
 
-// Sends signal to pid; err is kill's stderr.
+// Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
 // @since 0.12.3 or earlier
 effect process.kill(pid: Int, signal: Int) -> Unit
 
@@ -335,7 +345,7 @@ effect process.kill(pid: Int, signal: Int) -> Unit
 // @since 0.20.0 or earlier
 effect process.sleep(ms: Int) -> Unit
 
-// True while pid exists, zombies included.
+// True while pid exists; false for a pid <= 0.
 // @since 0.12.3 or earlier
 effect process.is_alive(pid: Int) -> Bool
 ```
