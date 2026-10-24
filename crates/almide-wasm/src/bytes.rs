@@ -219,6 +219,7 @@ impl Emitter<'_> {
         let ho = self.hold_i32()?;
         let hw = self.hold_i32()?;
         let oom = self.pool.intern("Error: out of memory");
+        let too_large = self.pool.intern("Error: repeat result too large");
         let mut i = self.f.instructions();
         i.local_set(hn);
         // n = (n > 0 && len > 0) ? n : 0  (select: v1 first). An EMPTY
@@ -229,6 +230,20 @@ impl Emitter<'_> {
         i.local_get(hn).i64_const(0).i64_gt_s();
         i.local_get(bh).i32_load(len_memarg()).i32_const(0).i32_ne().i32_and();
         i.select().local_set(hn);
+        // The repeat family's shared 2^31-byte ceiling (C-054/C-161), the
+        // `$str_repeat` / stdlib `bytes_repeat` guard verbatim and judged
+        // by DIVISION for the same reason as the bound below: past it is
+        // `Error: repeat result too large` + exit 1 on every leg (#4154 —
+        // native built a 2 GiB buffer where this leg died out of memory).
+        // Same max(len, 1) divisor: n is already 0 when len is 0.
+        i.local_get(hn).i64_const(1 << 31);
+        i.local_get(bh).i32_load(len_memarg()).i64_extend_i32_u();
+        i.local_get(bh).i32_load(len_memarg()).i32_eqz().i64_extend_i32_u();
+        i.i64_add().i64_div_u();
+        i.i64_gt_s().if_(BlockType::Empty);
+        i.i32_const(too_large as i32).call(F_EPRINTLN_BLOCK);
+        i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
+        i.end();
         // total = len * n past the structural bound is the C-197 die —
         // judged by DIVISION, `n > 0x7FFF_0000 / len`, never on the
         // product: `len * n` wraps i64 for a huge n (`[1, 2, 3]` ×
