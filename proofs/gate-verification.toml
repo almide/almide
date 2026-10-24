@@ -103,10 +103,12 @@
 # parse, and drifts the controls do not try. The Miri gate (#4009) adds two
 # more: the UB Miri does not model or the corpus does not reach, and the whole
 # wasm leg (22 -> 24), and its AddressSanitizer twin three (24 -> 27). The
-# checked-allocator switch (#4009) adds three (27 -> 30).
+# checked-allocator switch (#4009) adds three (27 -> 30). The unsafe ledger's
+# scope reaching the emitted preludes (#4023) names two more: emitted unsafe
+# outside prelude_*.rs, and a `//` inside an emitted string (30 -> 32).
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "30"
+# uncompensated_blind_ceiling = "32"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -1510,7 +1512,7 @@ path = "scripts/check-runtime-unsafe.sh"
 reads = "scalar"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
-evidence = "landing (2026-10-23, #4007): 54 unsafe lines in 9 files under runtime/rs/src, runtime/rs/burn and crates/almide-rt-core/src, each file listed in proofs/runtime-unsafe-allowlist.toml with a class and a reason. --self-test copies the trees to a scratch root, expects the unforged copy to pass, appends an unsafe block to runtime/rs/src/int.rs (an unlisted file) and expects a refusal, then replaces it with a comment mentioning unsafe and expects a pass. A scan that reads zero unsafe lines exits 2 rather than reporting a clean runtime."
-measures = "the per-file count of non-comment lines holding the word unsafe in the native runtime, against the allowlist"
-varies = "landing (2026-10-23): 55 -> 54 with the matrix_p2 align_to removal"
-blind = "an unsafe operation reached through a dependency crate (rayon, the regex crate, std) is not counted, only this repo's own lines -> UNCOMPENSATED; whether each listed line is actually sound is not read, only that it is listed -> proofs/runtime-unsafe-allowlist.toml"
+evidence = "landing (2026-10-23, #4007): 54 unsafe lines in 9 files under runtime/rs/src, runtime/rs/burn and crates/almide-rt-core/src, each file listed in proofs/runtime-unsafe-allowlist.toml with a class and a reason. --self-test copies the trees to a scratch root, expects the unforged copy to pass, appends an unsafe block to runtime/rs/src/int.rs (an unlisted file) and expects a refusal, then replaces it with a comment mentioning unsafe and expects a pass. A scan that reads zero unsafe lines exits 2 rather than reporting a clean runtime. #4023 (2026-10-24) extends the scope to the preludes the compiler emits into generated programs (crates/almide-codegen/src/prelude_*.rs): prelude_region.rs 9 lines and prelude_rem_body.rs 1 line got rows (43 lines in 9 files), and --self-test also appends one extra unsafe-bearing push_str line to the copied prelude_region.rs and expects a refusal."
+measures = "the per-file count of non-comment lines holding the word unsafe in the native runtime and in the compiler-emitted preludes (crates/almide-codegen/src/prelude_*.rs), against the allowlist"
+varies = "landing (2026-10-23): 55 -> 54 with the matrix_p2 align_to removal; #4023 (2026-10-24): 33 -> 43 when the emitted preludes came into scope"
+blind = "an unsafe operation reached through a dependency crate (rayon, the regex crate, std) is not counted, only this repo's own lines -> UNCOMPENSATED; whether each listed line is actually sound is not read, only that it is listed -> proofs/runtime-unsafe-allowlist.toml; unsafe the compiler emits from outside prelude_*.rs (walker/extern_c.rs's @extern \"C\" call wrapper, walker/mod.rs's SIGPIPE prelude) is not counted -> UNCOMPENSATED; an emitted line whose string literal holds a `//` before the word is dropped by the comment filter -> UNCOMPENSATED"
