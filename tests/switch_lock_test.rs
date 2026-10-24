@@ -70,9 +70,9 @@ fn the_overlay_environment_variables_change_nothing() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// `almide build` enforces the version pin (`check` and `emit` do not), and
-/// the wasm target reaches it without a cargo build.
-const EMIT: [&str; 6] = ["build", "src/main.almd", "--target", "wasm", "-o", "out.wasm"];
+/// The native `almide build` enforces the version pin (`check`, `emit` and
+/// the wasm build do not); a refused pin stops it before cargo runs.
+const EMIT: [&str; 4] = ["build", "src/main.almd", "-o", "out.bin"];
 
 /// A project pinned to a compiler version no build satisfies.
 fn pinned_project(tag: &str) -> PathBuf {
