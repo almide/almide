@@ -150,6 +150,17 @@ almide build --release --target-cpu portable -o app  # AVX2 の無い CPU にも
 - `almide.toml` があれば `[package] name`
 - なければソースファイル名から `.almd` を除いた名前
 
+#### rustc の下限（#4110）
+
+ネイティブビルド（`almide run` / `build` / `test` / `bench`、cdylib と install の経路）は、
+rustc や cargo を起動する前に `rustc --version`（PATH の rustc と、設定されていれば `$RUSTC`）を読み、
+**rustc 1.96.0** 未満なら何もビルドせず終了コード 1 で拒否する。エラーには見つかった版、必要な版、
+直し方（`rustup update`）が出る。下限は `src/cli/rustc_floor.rs` の `MIN_RUSTC` 一か所に書かれ、
+max(1.77.2, CI が生成コードを検証する `RUST_TOOLCHAIN`) である。1.77.2 は CVE-2024-24576
+（Windows の `Command` が `.bat` / `.cmd` への引数を cmd.exe で無害化しなかった）の修正版で、
+古い rustc で作ったバイナリでは `process.exec` 経由のシェル注入が再び開く。
+`--target wasm`（直接 emit）は rustc を使わないので対象外。
+
 ---
 
 ### `almide test`
