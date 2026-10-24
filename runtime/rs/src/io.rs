@@ -16,12 +16,20 @@ pub fn almide_rt_io_print(s: &str) {
     almide_stdout_flush();
 }
 
+// The line is read as BYTES and decoded lossily (#4142): `read_line` into a String
+// rejected a line holding an invalid byte and `unwrap_or(0)` turned it into "", so the
+// bad line was consumed and read as an empty one, where the wasm self-host
+// (stdlib/io_read_line.almd) decodes it with U+FFFD. One rule on both legs: each
+// invalid sequence becomes one U+FFFD (`String::from_utf8_lossy`). An I/O error ends
+// the input, as it does on the wasm legs (an errno ends their fd_read loop).
 pub fn almide_rt_io_read_line() -> AlmideString {
     let __almide_out: String = {
+        use std::io::BufRead;
         almide_stdout_flush();
-        let mut buf = String::new();
-        std::io::stdin().read_line(&mut buf).unwrap_or(0);
-        buf.trim_end_matches('\n').trim_end_matches('\r').to_string()
+        let mut buf: Vec<u8> = Vec::new();
+        let _ = std::io::stdin().lock().read_until(b'\n', &mut buf);
+        let line = String::from_utf8_lossy(&buf);
+        line.trim_end_matches('\n').trim_end_matches('\r').to_string()
     };
     __almide_out.into()
 }
@@ -52,9 +60,13 @@ pub fn almide_rt_io_read_all() -> AlmideString {
     let __almide_out: String = {
         almide_stdout_flush();
         use std::io::Read;
-        let mut buf = String::new();
-        std::io::stdin().read_to_string(&mut buf).unwrap_or(0);
-        buf
+        // Bytes first, decoded lossily once (#4142): `read_to_string` refused the whole
+        // stream on one invalid byte and `unwrap_or(0)` answered "", where the wasm
+        // self-host (stdlib/io_read_all.almd) decodes the same bytes with U+FFFD. The
+        // bytes read before an I/O error are kept — the wasm fd_read loop stops there too.
+        let mut buf: Vec<u8> = Vec::new();
+        let _ = std::io::stdin().lock().read_to_end(&mut buf);
+        String::from_utf8_lossy(&buf).into_owned()
     };
     __almide_out.into()
 }
