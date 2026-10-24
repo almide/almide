@@ -53,6 +53,18 @@ patterns = [
 [[class]]
 name = "BRIDGEABLE"
 patterns = [
+  # (#4182) The stdlib redesign's renamed/self-hosted surfaces the interp's
+  # pool does not lower yet: the wave 3 bytes readers (get_<t>, next_<t>,
+  # chunk), the regex constructors of the Regex-first surface, and the
+  # protocol batch's http.query_params decoder. Each is a pure stdlib body
+  # the pool can lower with dispatch glue — bounded work, no architectural
+  # change.
+  "capability: bytes.get_",
+  "capability: bytes.next_",
+  "capability: bytes.chunk",
+  "capability: regex.new",
+  "capability: regex.compile",
+  "capability: http.query_params",
   # env.sleep_ms (#1423 bucket A): the pause is wall-clock with no
   # observable value, so a sleep-that-does-nothing interp arm is a
   # faithful vote — bounded glue, no architectural change.
