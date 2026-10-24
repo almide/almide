@@ -37,7 +37,9 @@
 ### R-secret-01 `secret.new` と `secret.reveal` を足す — ○ 採用
 
 - 内容: `fn secret.new[A](x: A) -> Secret[A]`、`fn secret.reveal[A](s: Secret[A]) -> A`。`import secret` が要ります（自動 import しない）。
-- 根拠の L0 規則: R-L0-00（2/8 の型の形）、R-L0-03（主語は先頭）。
+- 根拠の L0 規則: R-L0-00（2/8 の型の形）、R-L0-03（主語は先頭）、R-L0-30（要素の値は `x`。主語の名前は `s`）。
+- 綴り: 主語のない構築子は `new`（R-L0-02。`map.new`・`regex.new` と同じ）。取り出しに多数派はありません（Rust secrecy `expose_secret`、pydantic `get_secret_value`、Go・Swift・Kotlin は持たない）。`to_string` は `Repr`（R-L0-38）の名前で、Secret では `Secret(***)` を返すので使えません（`html.to_string` は `SafeHtml` の中身を返しますが、SafeHtml は隠す型ではありません）。`unwrap` は Almide にありません（`??` に一本化、R-L0-06）。中身を出す箇所が grep で見つかる、ほかの意味を持たない動詞として `reveal` にします。
+- protocol（R-L0-37）: `Repr`（常に `Secret(***)`）、`Eq` は `A` が `String`・`Bytes` のときだけ（条件つきの準拠。それ以外は E103）、`Hash`・`Ord` なし、`Codec` は decode の半分だけ。[protocol-view](protocol-view.md) の型の表に載せるのは、条件つきの準拠が言語に入ってからです（想定設計）。
 - (b) 純粋です。両 target で同じです。
 - (c) `secret` という名前のローカル変数がよく書かれるので、自動 import にすると衝突します。import 行が見える opt-in です。
 - issue: #4107
