@@ -204,7 +204,8 @@ the structural wasm leg emits it per build as the `bounds` witness (crates/almid
 at the SOURCE level, `CoreSafe.v` (#4014) gives a typed core of Almide (ints,
 bools, int lists with value semantics, `let`, assignment, element store,
 `if`, `while`, indexing with its bounds check, `if` expressions and
-recursive one-argument functions) a big-step semantics that
+recursive one- and two-argument functions, the two parameters distinct and
+each argument given back in order when the call returns) a big-step semantics that
 emits the heap trace — with reference counting: a shared read increments,
 a consumed operand, an overwritten variable and a returning call's
 parameter decrement, a block whose count reaches zero is freed, and freeing
