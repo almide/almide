@@ -511,24 +511,23 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         26 | 27 | 28 | 29 | 33 | 37 => fs_dispatch_env(op, a, b),
         // incremental stdin (op 35) — same empty answer in the harness.
         35 => (pack(0, 0), Vec::new()),
-        32 => {
-            let n = b.len();
-            let mut seed = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos() as u64
-                | 1;
-            let mut out = Vec::with_capacity(n);
-            for _ in 0..n {
-                seed ^= seed << 13;
-                seed ^= seed >> 7;
-                seed ^= seed << 17;
-                out.push(seed as u8);
-            }
-            (pack(0, out.len()), out)
-        }
+        32 => fs_entropy(b.len()),
         _ => err_s(format!("unknown fs op {op}")),
     }
+}
+
+/// op 32 (`prim.random_get`, #4122): `n` bytes from the OS CSPRNG
+/// (getrandom(2) / getentropy(3) / BCryptGenRandom), the source the stock
+/// wasm leg's WASI `random_get` and native `random.*` draw from. A clock-seeded
+/// generator reseeded per call answered the SAME bytes to every call inside
+/// one clock tick. An OS entropy failure is a host fault, not a guest value:
+/// it aborts the run instead of handing out predictable bytes.
+fn fs_entropy(n: usize) -> (i64, Vec<u8>) {
+    let mut out = vec![0u8; n];
+    if let Err(e) = getrandom::fill(&mut out) {
+        panic!("random: the OS entropy source failed: {e}");
+    }
+    (pack(0, out.len()), out)
 }
 
 /// The http op family (43..=50) of `fs_dispatch_host`, verbatim.

@@ -5181,3 +5181,26 @@ evidence  = [
   { path = "spec/wasm_cross/base64_decode_canonical.almd", class = "fixture" },
   { path = "spec/stdlib/encoding_test.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-415"
+spec      = "ALS-R5"
+title     = "random.int, float, choice and shuffle draw from OS entropy on native and the embedded wasm lane: draws in one clock tick differ, and threads started together draw different streams"
+statement = "ALS-R5 (almide/almide#4122): `random.int`, `random.float`, `random.choice` and `random.shuffle` take their randomness from the operating system, never from a clock, on every leg. On wasm every draw reads `prim.random_get`: the stock artifact's WASI `random_get` (served by the runtime from the OS) and the EMBEDDED host's fs op 32, which answers from the OS CSPRNG (`getrandom` on Linux, `getentropy` on macOS). On native each thread's generator is seeded once from the OS entropy std's `RandomState` keys draw per thread, so two threads (two `fan` arms) draw different streams however close together they start. Consequently 1,000 consecutive `random.int(0, 1_000_000_000)` draws hold at least 990 distinct values and no two equal neighbours, and eight `fan` arms drawing four values each answer eight different lists, on native and on the embedded lane. These four functions remain not for secrets (only `random.bytes` is a CSPRNG promise); the drawn values themselves are not an observable. NOT covered: the quality of the native generator beyond its seed (an xorshift); the stock runtime's entropy source, which is host configuration."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/random_entropy_streams.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-416"
+spec      = "ALS-R5"
+title     = "net reads and received descriptors are bounded: a read never pre-allocates its length, and at most 28 untaken descriptors wait per Unix socket"
+statement = "ALS-R5 (almide/almide#4123, almide/almide#4124): the length a program passes to `net.tcp_read`, `net.tcp_read_timeout`, `net.tcp_read_exact`, `net.unix_recv` or `net.shm_read` is an upper bound on the answer, never an allocation the call makes before reading: on native and the embedded wasm lane, each read with a length of 2^62 on a socket or shm file holding 16 bytes answers those 16 bytes (`shm_read` from offset 10 answers the 6 after it), and `tcp_read_exact`, whose peer closed after 16 bytes, answers `tcp_read_exact: connection closed after 16 of 4611686018427387904 bytes`; the process neither aborts nor runs out of memory. One `tcp_read`, `tcp_read_timeout` or `unix_recv` answers at most 65536 bytes (a read may always answer fewer than asked). Descriptors received with `unix_recv` (SCM_RIGHTS) wait for `unix_take_fds` at most 28 per socket: a descriptor that arrives while 28 wait untaken on that socket is closed on receipt and is never held, so a peer that sends one with every message cannot exhaust the program's descriptors; once taken, the queue has room again. After 300 one-byte messages carrying one descriptor each, `unix_take_fds` answers 28 descriptors and a file still opens, identically on native and the embedded lane. NOT covered: how many bytes one read answers when more than one write's worth is readable (timing); which descriptors beyond the 28 the platform delivers at all."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/net_huge_read_lengths.almd", class = "fixture" },
+  { path = "spec/embedded_cross/net_unix_fd_bound.almd", class = "fixture" },
+]
