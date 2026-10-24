@@ -31,6 +31,9 @@ fn touched(op: i32, a: &str, b: &[u8]) -> Vec<String> {
         10 | 21 => vec![std::env::temp_dir().to_string_lossy().to_string()],
         19 | 20 => vec![a.to_string(), String::from_utf8_lossy(b).to_string()],
         39 => vec![almide_base::fs_scope::fs_scope_glob_base(a)],
+        // The rooted ops (#4084): the root is judged; the descriptor walk
+        // keeps the rest beneath it.
+        120..=125 => vec![a.split('\0').next().unwrap_or("").to_string()],
         1..=9 | 11..=18 | 22..=25 | 38 | 41 | 51 | 52 | 61..=64 => vec![a.to_string()],
         _ => Vec::new(),
     }
