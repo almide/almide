@@ -35,6 +35,17 @@ pub fn cmd_self_update(version: Option<&str>, skip_attestation: bool) {
         err(&format!("almide {} is already up to date.", CURRENT_VERSION));
         return;
     }
+    // Never downgrade without being asked (#4181): "latest" can name an older
+    // release than the one installed, and an older release is still genuinely
+    // signed, so the attestation check would let it replace a binary that
+    // carries fixes it lacks. Only an explicit version may go backwards.
+    if version.is_none() && is_older(&target_version, CURRENT_VERSION) {
+        err(&format!(
+            "almide {} is newer than the latest release ({}); nothing to update.\n       To install {} anyway, name it: `almide self-update v{}`",
+            CURRENT_VERSION, target_version, target_version, target_version
+        ));
+        return;
+    }
 
     err(&format!(
         "Updating almide {} → {}",
@@ -254,6 +265,16 @@ fn curl_download(url: &str, dest: &str) {
     if let Err(e) = std::fs::write(dest, &body) {
         err(&format!("error: cannot write {}: {}", dest, e));
         std::process::exit(1);
+    }
+}
+
+/// Is `candidate` an older version than `current`? A version that does not
+/// parse is treated as older, so an unreadable "latest" never replaces a
+/// binary without an explicit request.
+fn is_older(candidate: &str, current: &str) -> bool {
+    match (semver::Version::parse(candidate), semver::Version::parse(current)) {
+        (Ok(c), Ok(cur)) => c < cur,
+        _ => true,
     }
 }
 
@@ -522,5 +543,14 @@ dddd  almide-macos-aarch64.tar.gz extra-field
         assert!(e.contains("redirects"), "{e}");
         // A non-2xx is an error, not a file.
         assert!(follow_https("https://a.example/x", &mut |_: &str| Ok((404, vec![], b"nope".to_vec()))).is_err());
+    }
+
+    /// #4181: an implicit update never goes backwards.
+    #[test]
+    fn latest_older_than_installed_is_not_a_downgrade_target() {
+        assert!(is_older("0.67.1", "0.68.0"));
+        assert!(!is_older("0.68.1", "0.68.0"));
+        assert!(is_older("0.68.0-rc1", "0.68.0"), "a pre-release sorts below its release");
+        assert!(is_older("not-a-version", "0.68.0"), "an unreadable version is never installed implicitly");
     }
 }
