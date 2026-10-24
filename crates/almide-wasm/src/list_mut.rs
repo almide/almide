@@ -198,7 +198,7 @@ impl Emitter<'_> {
             Ty::Bytes => IrExprKind::Call {
                 target: almide_ir::CallTarget::Module {
                     module: almide_base::intern::sym("bytes"),
-                    func: almide_base::intern::sym("new"),
+                    func: almide_base::intern::sym("zeros"),
                     def_id: None,
                 },
                 args: vec![IrExpr { kind: IrExprKind::LitInt { value: 0 }, ty: Ty::Int, span: None, def_id: None }],
