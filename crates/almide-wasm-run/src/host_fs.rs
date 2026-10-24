@@ -377,20 +377,13 @@ fn fs_temp_file(prefix: &str) -> (i64, Vec<u8>) {
 /// same list, in the same order, with the same walk errors as native.
 fn fs_glob(pattern: &str) -> (i64, Vec<u8>) {
     use std::path::Path;
+    // A symlinked directory is an entry, never descended (#4143): the
+    // shared descriptor walk native's glob runs.
     fn walk(dir: &Path, rel_prefix: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), String> {
-        for entry in
-            sfs::read_dir(dir).map_err(|e| io_err("fs.glob", &q(&dir.to_string_lossy()), e))?
-        {
-            let entry = entry.map_err(|e| io_err("fs.glob", &q(&dir.to_string_lossy()), e))?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let rel = if rel_prefix.is_empty() { name } else { format!("{rel_prefix}/{name}") };
-            let path = entry.path();
-            let descend = depth != Some(1) && sfs::is_dir(&path);
-            out.push(rel.clone());
-            if descend {
-                walk(&path, &rel, depth.map(|d| d - 1), out)?;
-            }
-        }
+        use almide_rt_core::fs_beneath_core::{fs_walk_join, fs_walk_nofollow};
+        let d = dir.to_string_lossy();
+        let rels = fs_walk_nofollow(&d, depth).map_err(|(rel, e)| io_err("fs.glob", &q(&fs_walk_join(&d, &rel)), e))?;
+        out.extend(rels.into_iter().map(|r| if rel_prefix.is_empty() { r } else { format!("{rel_prefix}/{r}") }));
         Ok(())
     }
     fn segs_match(pats: &[&str], segs: &[&str]) -> bool {
@@ -463,18 +456,13 @@ fn fs_glob(pattern: &str) -> (i64, Vec<u8>) {
 
 fn fs_walk_sorted(root: &str) -> (i64, Vec<u8>) {
     use std::path::Path;
+    // A symlink is an entry, never a level (#4143): the shared descriptor
+    // walk native's fs.walk runs.
     fn walk(dir: &Path, out: &mut Vec<String>) -> Result<(), String> {
-        for entry in
-            sfs::read_dir(dir).map_err(|e| io_err("fs.walk", &q(&dir.to_string_lossy()), e))?
-        {
-            let entry =
-                entry.map_err(|e| io_err("fs.walk", &q(&dir.to_string_lossy()), e))?;
-            let path = entry.path();
-            out.push(path.to_string_lossy().replace('\\', "/"));
-            if sfs::is_dir(&path) {
-                walk(&path, out)?;
-            }
-        }
+        use almide_rt_core::fs_beneath_core::{fs_walk_join, fs_walk_nofollow};
+        let d = dir.to_string_lossy();
+        let rels = fs_walk_nofollow(&d, None).map_err(|(rel, e)| io_err("fs.walk", &q(&fs_walk_join(&d, &rel)), e))?;
+        out.extend(rels.iter().map(|r| fs_walk_join(&d, r).replace('\\', "/")));
         Ok(())
     }
     let mut results = Vec::new();

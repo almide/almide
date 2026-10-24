@@ -770,3 +770,71 @@ pub mod almide_sfs {
         }
     }
 }
+
+/// `dir/rel` as `Path::join` spells it (`dir` itself for an empty `rel`):
+/// the path a walk's entry and its error name.
+pub fn fs_walk_join(dir: &str, rel: &str) -> String {
+    if rel.is_empty() { dir.to_string() } else { std::path::Path::new(dir).join(rel).to_string_lossy().into_owned() }
+}
+
+/// The entries under the directory `dir`, each as its `/`-joined path
+/// relative to `dir`, in the system's order (#4143): a directory is
+/// descended into, a symlink is an entry and never followed — so a link to
+/// the outside lists nothing outside and a link loop cannot repeat the walk.
+/// `depth` counts the levels still to list (`Some(1)`: `dir` only; `None`:
+/// unbounded). The walk holds each directory by descriptor and opens the
+/// next one from it with O_NOFOLLOW, so a directory swapped for a symlink
+/// mid-walk is not followed either; `dir` itself is opened as `fs.read_dir`
+/// would (its own symlinks followed: the program named it), beneath the
+/// granted root under `[permissions] fs`. An error names the directory it
+/// came from, as `fs_walk_join(dir, rel)`.
+pub fn fs_walk_nofollow(dir: &str, depth: Option<usize>) -> Result<Vec<String>, (String, std::io::Error)> {
+    let mut out = Vec::new();
+    fs_walk_imp(dir, depth, &mut out)?;
+    Ok(out)
+}
+
+#[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
+fn fs_walk_imp(dir: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), (String, std::io::Error)> {
+    fn level(fd: &std::os::fd::OwnedFd, rel: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), (String, std::io::Error)> {
+        let names = fd.try_clone().and_then(almide_fs_beneath_sys::list_fd).map_err(|e| (rel.to_string(), e))?;
+        for n in names {
+            let name = String::from_utf8_lossy(&n).into_owned();
+            let r = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            out.push(r.clone());
+            if depth == Some(1) {
+                continue;
+            }
+            match almide_fs_beneath_sys::open_at(std::os::fd::AsFd::as_fd(fd), &name, almide_fs_beneath_sys::Open::Dir) {
+                Ok(child) => level(&child, &r, depth.map(|d| d - 1), out)?,
+                // Not a directory, a symlink (never followed), or gone since
+                // the listing: an entry, not a level.
+                Err(e) if matches!(e.raw_os_error(), Some(2 | 20 | 40 | 62)) => {}
+                // A directory the walk may not open: the plain walk's err.
+                Err(e) => return Err((r, e)),
+            }
+        }
+        Ok(())
+    }
+    let root = almide_sfs::open_dir(dir).map_err(|e| (String::new(), e))?;
+    level(&root, "", depth, out)
+}
+
+#[cfg(not(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64")))]
+fn fs_walk_imp(dir: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), (String, std::io::Error)> {
+    fn level(base: &str, rel: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), (String, std::io::Error)> {
+        let here = fs_walk_join(base, rel);
+        for e in almide_sfs::read_dir(&here).map_err(|e| (rel.to_string(), e))? {
+            let e = e.map_err(|e| (rel.to_string(), e))?;
+            let name = e.file_name().to_string_lossy().into_owned();
+            let r = if rel.is_empty() { name } else { format!("{rel}/{name}") };
+            out.push(r.clone());
+            let p = fs_walk_join(base, &r);
+            if depth != Some(1) && std::fs::symlink_metadata(&p).is_ok_and(|m| m.is_dir()) {
+                level(base, &r, depth.map(|d| d - 1), out)?;
+            }
+        }
+        Ok(())
+    }
+    level(dir, "", depth, out)
+}

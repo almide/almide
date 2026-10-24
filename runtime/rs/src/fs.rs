@@ -568,13 +568,13 @@ pub fn almide_rt_fs_walk(dir: &str) -> Result<Vec<AlmideString>, AlmideString> {
     __almide_v.into_almide()
 }
 
+// A symlink is an entry, never a level (#4143): the descriptor walk of
+// almide-rt-core opens each directory from its parent with O_NOFOLLOW, so a
+// link to the outside lists nothing outside and a link loop cannot repeat.
 fn walk_recursive(dir: &Path, results: &mut Vec<String>) -> Result<(), String> {
-    for entry in std::fs::read_dir(dir).map_err(|e| io_err("fs.walk", &fs_q(&dir.to_string_lossy()), e))? {
-        let entry = entry.map_err(|e| io_err("fs.walk", &fs_q(&dir.to_string_lossy()), e))?;
-        let path = entry.path();
-        results.push(path.to_string_lossy().replace('\\', "/"));
-        if path.is_dir() { walk_recursive(&path, results)?; }
-    }
+    let d = dir.to_string_lossy();
+    let rels = fs_walk_nofollow(&d, None).map_err(|(rel, e)| io_err("fs.walk", &fs_q(&fs_walk_join(&d, &rel)), e))?;
+    results.extend(rels.iter().map(|r| fs_walk_join(&d, r).replace('\\', "/")));
     Ok(())
 }
 
@@ -628,16 +628,12 @@ pub fn almide_rt_fs_glob(pattern: &str) -> Result<Vec<AlmideString>, AlmideStrin
 // Collects every entry below `dir` as a `/`-joined path relative to the walk
 // root; `depth` is the count of levels still to visit (`Some(1)` = list `dir`
 // only), `None` unbounded.
+// The same no-follow walk as fs.walk (#4143): a symlinked directory is
+// matched as an entry and never descended.
 fn glob_walk(dir: &Path, rel_prefix: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), String> {
-    for entry in std::fs::read_dir(dir).map_err(|e| io_err("fs.glob", &fs_q(&dir.to_string_lossy()), e))? {
-        let entry = entry.map_err(|e| io_err("fs.glob", &fs_q(&dir.to_string_lossy()), e))?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let rel = if rel_prefix.is_empty() { name } else { format!("{}/{}", rel_prefix, name) };
-        let path = entry.path();
-        let descend = depth != Some(1) && path.is_dir();
-        out.push(rel.clone());
-        if descend { glob_walk(&path, &rel, depth.map(|d| d - 1), out)?; }
-    }
+    let d = dir.to_string_lossy();
+    let rels = fs_walk_nofollow(&d, depth).map_err(|(rel, e)| io_err("fs.glob", &fs_q(&fs_walk_join(&d, &rel)), e))?;
+    out.extend(rels.into_iter().map(|r| if rel_prefix.is_empty() { r } else { format!("{}/{}", rel_prefix, r) }));
     Ok(())
 }
 

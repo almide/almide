@@ -8171,13 +8171,22 @@ fn __walk_ftype(path: String) -> Int = {
   if errno != 0 then 0 else prim.load8(p + 16)
 }
 
+
+
+fn __walk_ftype_nofollow(path: String) -> Int = {
+  let buf = prim.alloc_bytes(64)
+  let p = prim.handle(buf) + 12
+  let errno = prim.path_filestat_nofollow(p, path)
+  if errno != 0 then 0 else prim.load8(p + 16)
+}
+
 effect fn __walk_entries(dir: String, entries: List[String], i: Int, depth: Int, acc: List[String], call: String) -> Result[List[String], String] =
   if i >= list.len(entries) then ok(acc)
   else {
     let name = list.get(entries, i) ?? ""
     let p = dir + "/" + name
     let acc2 = acc + [p]
-    if depth != 1 and __walk_ftype(p) == 3 then {
+    if depth != 1 and __walk_ftype_nofollow(p) == 3 then {
       let sub = __walk_into(p, depth - 1, acc2, call)!
       __walk_entries(dir, entries, i + 1, depth, sub, call)
     } else __walk_entries(dir, entries, i + 1, depth, acc2, call)

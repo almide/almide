@@ -33,6 +33,13 @@ struct Item {
     text: String,
 }
 
+impl Item {
+    /// Whether the fn is `pub` (attributes and comments before it skipped).
+    fn is_pub(&self) -> bool {
+        self.text.lines().find(|l| !l.starts_with("#[")).is_some_and(|l| l.starts_with("pub "))
+    }
+}
+
 /// The twin module for `entries` over the fs runtime `src`, and the entry
 /// names it holds.
 pub(crate) fn scoped_twin(src: &str, entries: &BTreeSet<String>) -> (String, BTreeSet<String>) {
@@ -42,7 +49,14 @@ pub(crate) fn scoped_twin(src: &str, entries: &BTreeSet<String>) -> (String, BTr
     let mut work: Vec<String> = keep.iter().cloned().collect();
     while let Some(n) = work.pop() {
         for id in idents(&by_name[n.as_str()].text) {
-            if by_name.contains_key(id) && keep.insert(id.to_string()) {
+            // A `pub` fn the rewrite leaves unchanged (a shared core walk
+            // that is already scope-aware) is reached through `use super::*`
+            // in both build modes, and so are its callees: not twinned.
+            let Some(item) = by_name.get(id) else { continue };
+            if item.is_pub() && rewrite(&item.text) == item.text {
+                continue;
+            }
+            if keep.insert(id.to_string()) {
                 work.push(id.to_string());
             }
         }

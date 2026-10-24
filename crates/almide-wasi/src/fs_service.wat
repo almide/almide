@@ -457,6 +457,12 @@
     (if (call $stat (local.get $p) (local.get $l) (i32.const 1)) (then (return (i32.const 0))))
     (i32.eq (call $ftype) (i32.const 3)))
 
+  ;; A directory itself, its symlink NOT followed: walk and glob descend only
+  ;; into these, so a symlinked directory is an entry, never a level (#4143).
+  (func $is_dir_nofollow (param $p i32) (param $l i32) (result i32)
+    (if (call $stat (local.get $p) (local.get $l) (i32.const 0)) (then (return (i32.const 0))))
+    (i32.eq (call $ftype) (i32.const 3)))
+
   ;; ── reading ────────────────────────────────────────────────────────────
 
   ;; One fd_read / fd_write slice: at most 64 KiB (#3206, the p1 shims'
@@ -1272,7 +1278,7 @@
   ;; ── walk / glob ────────────────────────────────────────────────────────
 
   ;; Depth-first: every entry's joined path, descending into directories
-  ;; (followed); a directory that cannot be read names itself in $ep/$el.
+  ;; (a symlinked one is an entry, never followed, #4143); a directory that cannot be read names itself in $ep/$el.
   (func $walk_rec (param $d i32) (param $dl i32) (result i32)
     (local $fd i32) (local $rp i32) (local $rl i32) (local $head i32) (local $cnt i32) (local $e i32) (local $cp i32) (local $cl i32)
     (call $resolve (local.get $d) (local.get $dl)) (local.set $rl) (local.set $rp) (local.set $fd)
@@ -1284,7 +1290,7 @@
       (call $join (local.get $d) (local.get $dl) (i32.add (local.get $head) (i32.const 8)) (i32.load offset=4 (local.get $head)))
       (local.set $cl) (local.set $cp)
       (call $push (local.get $cp) (local.get $cl))
-      (if (call $is_dir_path (local.get $cp) (local.get $cl))
+      (if (call $is_dir_nofollow (local.get $cp) (local.get $cl))
         (then
           (local.set $e (call $walk_rec (local.get $cp) (local.get $cl)))
           (if (local.get $e) (then (return (local.get $e))))))
@@ -1432,7 +1438,7 @@
       (call $push (local.get $xp) (local.get $xl))
       (if (i32.ne (local.get $depth) (i32.const 1))
         (then
-          (if (call $is_dir_path (local.get $cp) (local.get $cl))
+          (if (call $is_dir_nofollow (local.get $cp) (local.get $cl))
             (then
               (local.set $e (call $glob_walk (local.get $cp) (local.get $cl) (local.get $xp) (local.get $xl)
                                              (select (i32.const -1) (i32.sub (local.get $depth) (i32.const 1))
