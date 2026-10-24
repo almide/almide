@@ -1658,7 +1658,7 @@ jobs:
           python3 scripts/check-rawptr-surface.py --self-test
           python3 scripts/check-rawptr-surface.py
 
-      - name: Runtime unsafe ledger (#4007 — every unsafe line in the native runtime listed with a reason)
+      - name: Runtime unsafe ledger (#4007 — every unsafe line in the native runtime and the compiler-emitted code listed with a class and a reason)
         run: |
           bash scripts/check-runtime-unsafe.sh --self-test
           bash scripts/check-runtime-unsafe.sh
