@@ -5157,3 +5157,15 @@ evidence  = [
   { path = "tests/fs_scope_test.rs", name = "permissions_fs_bounds_every_fs_call_alike_on_both_targets", class = "fixture" },
   { path = "tests/fs_scope_test.rs", name = "the_component_host_preopens_only_the_granted_roots", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-394"
+spec      = "ALS-R5"
+title     = "random.bytes draws n bytes from the platform CSPRNG: n = 0 is empty, a negative n aborts with one text on every leg"
+statement = "`random.bytes(n)` (#3938, R-random-02) is an `effect fn` answering `n` bytes from the platform's cryptographically secure random source: the operating system's (`getrandom` on Linux, `getentropy` elsewhere, read in chunks of at most 256 bytes) on native, `wasi:random` `get-random-bytes` (`random_get`) on wasm. It is the only cryptographic randomness the stdlib promises; `random.int`, `random.float`, `random.choice` and `random.shuffle` are not for secrets. `n = 0` answers the empty `Bytes`. A negative `n` aborts before anything is drawn with `Error: random.bytes: negative length <n>` and exit 1 on every leg (the ALS-T6 form). Two successive 32-byte draws differ (equal with probability 2^-256), and a draw longer than one 256-byte chunk is drawn past the chunk too. The drawn bytes themselves are not an observable; the observables are the lengths, the inequality, stdout, stderr and the exit code."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/random_bytes.almd", class = "fixture" },
+  { path = "spec/wasm_cross/random_bytes_negative_abort.almd", class = "fixture" },
+]
