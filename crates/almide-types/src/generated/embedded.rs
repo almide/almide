@@ -5463,10 +5463,10 @@ fn unique_by[A, K](d: Deque[A], f: (A) -> K) -> Deque[A] = from_list(list.unique
 
 
 /// Sum of the elements; 0 when empty; integers wrap on overflow.
-fn sum[A: Numeric](d: Deque[A]) -> A = A.__sum(deque.to_list(d))
+fn sum[A: Numeric](d: Deque[A]) -> A = A.__sum(to_list(d))
 
 /// Product of the elements; 1 when empty; integers wrap on overflow.
-fn product[A: Numeric](d: Deque[A]) -> A = A.__product(deque.to_list(d))
+fn product[A: Numeric](d: Deque[A]) -> A = A.__product(to_list(d))
 "#;
 pub const SRC_ENV: &str = r#"
 
