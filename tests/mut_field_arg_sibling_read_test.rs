@@ -177,7 +177,7 @@ fn every_in_place_mutator_with_a_field_receiver_evaluates_sibling_reads_before_t
     // The matrix is only as good as its row count: the byte writers alone are
     // ~50 fns, and push/insert anchor the list/map/string rows.
     assert!(ms.len() >= 50, "found only {} mutators — the signature scan broke", ms.len());
-    for (m, f) in [("bytes", "set_u8"), ("bytes", "copy_within"), ("string", "push"), ("list", "push"), ("map", "insert")] {
+    for (m, f) in [("bytes", "put_u8"), ("bytes", "copy_within"), ("string", "push"), ("list", "push"), ("map", "insert")] {
         assert!(ms.iter().any(|x| x.module == m && x.name == f), "{m}.{f} missing from the matrix");
     }
     let dir = tempfile::tempdir().expect("tempdir");
