@@ -21,20 +21,20 @@ use std::path::Path;
 
 /// `root/sub/deep/a.txt` = "inside", `outside/sub/deep/a.txt` = "outside".
 fn tree() -> (tempfile::TempDir, String, std::path::PathBuf) {
-    let t = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(t.path()).unwrap();
+    let t = tempfile::tempdir().expect("test fixture setup");
+    let base = std::fs::canonicalize(t.path()).expect("test fixture setup");
     for (top, text) in [("root", "inside"), ("outside", "outside")] {
-        std::fs::create_dir_all(base.join(top).join("sub/deep")).unwrap();
-        std::fs::write(base.join(top).join("sub/deep/a.txt"), text).unwrap();
+        std::fs::create_dir_all(base.join(top).join("sub/deep")).expect("test fixture setup");
+        std::fs::write(base.join(top).join("sub/deep/a.txt"), text).expect("test fixture setup");
     }
-    let root = base.join("root").to_str().unwrap().to_string();
+    let root = base.join("root").to_str().expect("test fixture setup").to_string();
     (t, root, base)
 }
 
 /// Replace `root/sub` by a symlink to `outside/sub` (the original kept aside).
 fn swap(base: &Path) {
-    std::fs::rename(base.join("root/sub"), base.join("root/sub.orig")).unwrap();
-    std::os::unix::fs::symlink(base.join("outside/sub"), base.join("root/sub")).unwrap();
+    std::fs::rename(base.join("root/sub"), base.join("root/sub.orig")).expect("test fixture setup");
+    std::os::unix::fs::symlink(base.join("outside/sub"), base.join("root/sub")).expect("test fixture setup");
 }
 
 fn escapes<T: std::fmt::Debug>(r: Result<T, FsBeneathError>) -> bool {
@@ -55,7 +55,7 @@ fn a_dir_swapped_for_a_symlink_mid_walk_is_never_followed() {
                 swapped = true;
                 // The window is real: a path-based read at this instant —
                 // the pre-#4084 check-then-use — reaches the outside file.
-                assert_eq!(std::fs::read_to_string(format!("{root}/sub/deep/a.txt")).unwrap(), "outside");
+                assert_eq!(std::fs::read_to_string(format!("{root}/sub/deep/a.txt")).expect("test fixture setup"), "outside");
             }
         });
         assert!(swapped, "the hook never ran at {at}");
@@ -74,7 +74,7 @@ fn a_dir_swapped_for_a_symlink_mid_walk_is_never_followed() {
 fn a_symlink_at_any_segment_is_refused_by_every_call() {
     let (_t, root, base) = tree();
     swap(&base);
-    std::os::unix::fs::symlink(base.join("outside/sub/deep/a.txt"), base.join("root/flink")).unwrap();
+    std::os::unix::fs::symlink(base.join("outside/sub/deep/a.txt"), base.join("root/flink")).expect("test fixture setup");
     assert!(escapes(fs_beneath_read(&root, "sub/deep/a.txt")));
     assert!(escapes(fs_beneath_read_with(&root, "sub/deep/a.txt", true, &mut |_| {})));
     assert!(escapes(fs_beneath_read(&root, "flink")));
@@ -86,7 +86,7 @@ fn a_symlink_at_any_segment_is_refused_by_every_call() {
     assert!(escapes(fs_beneath_exists(&root, "sub/deep/a.txt")));
     assert!(escapes(fs_beneath_remove(&root, "flink")));
     assert!(escapes(fs_beneath_remove(&root, "sub/deep/a.txt")));
-    assert_eq!(std::fs::read_to_string(base.join("outside/sub/deep/a.txt")).unwrap(), "outside");
+    assert_eq!(std::fs::read_to_string(base.join("outside/sub/deep/a.txt")).expect("test fixture setup"), "outside");
     assert!(!base.join("outside/sub/deep/new.txt").exists());
     assert!(base.join("root/flink").exists(), "the refused remove took the link");
 }
@@ -94,18 +94,18 @@ fn a_symlink_at_any_segment_is_refused_by_every_call() {
 #[test]
 fn a_path_without_symlinks_is_the_plain_call() {
     let (_t, root, base) = tree();
-    assert_eq!(fs_beneath_read_text(&root, "sub/deep/a.txt").unwrap(), "inside");
-    fs_beneath_write(&root, "sub/b.txt", b"new").unwrap();
-    assert_eq!(std::fs::read_to_string(base.join("root/sub/b.txt")).unwrap(), "new");
-    assert_eq!(fs_beneath_list(&root, "sub").unwrap(), vec!["b.txt".to_string(), "deep".to_string()]);
-    assert_eq!(fs_beneath_list(&root, "").unwrap(), vec!["sub".to_string()]);
-    assert!(fs_beneath_exists(&root, "sub/b.txt").unwrap());
-    assert!(!fs_beneath_exists(&root, "sub/none").unwrap());
-    assert!(!fs_beneath_exists(&root, "none/x").unwrap());
-    fs_beneath_remove(&root, "sub/b.txt").unwrap();
+    assert_eq!(fs_beneath_read_text(&root, "sub/deep/a.txt").expect("test fixture setup"), "inside");
+    fs_beneath_write(&root, "sub/b.txt", b"new").expect("test fixture setup");
+    assert_eq!(std::fs::read_to_string(base.join("root/sub/b.txt")).expect("test fixture setup"), "new");
+    assert_eq!(fs_beneath_list(&root, "sub").expect("test fixture setup"), vec!["b.txt".to_string(), "deep".to_string()]);
+    assert_eq!(fs_beneath_list(&root, "").expect("test fixture setup"), vec!["sub".to_string()]);
+    assert!(fs_beneath_exists(&root, "sub/b.txt").expect("test fixture setup"));
+    assert!(!fs_beneath_exists(&root, "sub/none").expect("test fixture setup"));
+    assert!(!fs_beneath_exists(&root, "none/x").expect("test fixture setup"));
+    fs_beneath_remove(&root, "sub/b.txt").expect("test fixture setup");
     assert!(!base.join("root/sub/b.txt").exists());
-    fs_beneath_remove(&root, "sub/deep/a.txt").unwrap();
-    fs_beneath_remove(&root, "sub/deep").unwrap();
+    fs_beneath_remove(&root, "sub/deep/a.txt").expect("test fixture setup");
+    fs_beneath_remove(&root, "sub/deep").expect("test fixture setup");
     assert!(!base.join("root/sub/deep").exists());
     // The plain call's own errors.
     assert!(matches!(fs_beneath_read(&root, "none/x"), Err(FsBeneathError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound));
@@ -132,10 +132,10 @@ fn a_concurrent_flip_never_leaks_the_outside() {
         std::thread::spawn(move || {
             let (sub, aside) = (base.join("root/sub"), base.join("root/sub.real"));
             while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-                std::fs::rename(&sub, &aside).unwrap();
-                std::os::unix::fs::symlink(base.join("outside/sub"), &sub).unwrap();
-                std::fs::remove_file(&sub).unwrap();
-                std::fs::rename(&aside, &sub).unwrap();
+                std::fs::rename(&sub, &aside).expect("test fixture setup");
+                std::os::unix::fs::symlink(base.join("outside/sub"), &sub).expect("test fixture setup");
+                std::fs::remove_file(&sub).expect("test fixture setup");
+                std::fs::rename(&aside, &sub).expect("test fixture setup");
             }
         })
     };
@@ -150,6 +150,6 @@ fn a_concurrent_flip_never_leaks_the_outside() {
         }
     }
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
-    flipper.join().unwrap();
+    flipper.join().expect("test fixture setup");
     assert!(inside + refused == 20_000);
 }
