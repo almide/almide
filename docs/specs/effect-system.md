@@ -1,4 +1,4 @@
-> Last updated: 2026-10-10
+> Last updated: 2026-10-25
 
 # Effect System
 
@@ -185,6 +185,63 @@ Tests: `tests/diagnostics/e092-pure-calls-println/`,
 `tests/diagnostics/e092-pure-reaches-assert-via-helper/`,
 `tests/diagnostics/e092-pure-calls-categorised-stdlib/`,
 `tests/diagnostics/e092-pure-on-effect-fn/`.
+
+### 2.4 Effect fns reached as values (E006, E109)
+
+*Added with #4151.* The guarantee of §1 holds for an effect fn reached as a
+VALUE too: a callback, a record field, a list element, a closure another
+function built. Two rules carry it (ADR-0009 D2, ADR-0026 D1):
+
+1. **Naming an effect fn as an argument is an effect call.** A bare fn-typed
+   parameter is transparent: `apply(fs.read_text, p)` runs whatever `apply`
+   runs, so the call is an effect call, and from a pure fn it is E006 — for a
+   bare name (`list.map(xs, eff)`) and a module path (`list.map(xs,
+   fs.read_text)`) alike. An explicit `effect (A) -> B` slot is exempt: it
+   asks for an effect fn, and only an effect context may call it.
+2. **The effect bit rides the value.** A function value carries the bit when
+   it is an `effect fn` or a closure that calls one, and keeps it wherever it
+   is stored. A pure fn whose body runs a value carrying the bit — not through
+   a fn-typed parameter of its own, which rule 1 charges at its call sites —
+   is E109, with the path from the pure fn to the effect fn.
+
+```almide check-fail=E109
+import fs
+
+type Reader = { read: (String) -> Result[String, String] }
+
+// E109: `main` stored fs.read_text in the field; this pure fn runs it.
+fn pure_looking(r: Reader) -> Result[String, String] = (r.read)("s.txt")
+
+effect fn main() -> Unit = {
+  let r = Reader { read: fs.read_text }
+  println(pure_looking(r) ?? "none")
+}
+```
+
+```almide check-fail=E006
+import fs
+
+fn apply(f: (String) -> Result[String, String], p: String) -> Result[String, String] = f(p)
+
+// E006: `apply` is transparent, so this call reads the file.
+fn sneaky(p: String) -> Result[String, String] = apply(fs.read_text, p)
+```
+
+From an `effect fn` both programs are accepted: `effect fn reads(r: Reader)`
+may run the field, and `apply(fs.read_text, p)` in an effect fn is an effect
+call like any other. `process.exit` (`-> Never`) does not carry the bit: it is
+§2.1's abort.
+
+The analysis is whole-program, after type checking, on every route (`check`,
+`build`, `run`, `test`, both targets) and conservative: a value that leaves the
+tracked positions is pooled with every other value of its signature (§8,
+*Callbacks*), so a pure fn calling a function it read from a list is refused
+when any function of that signature that runs an effect fn was put in a list
+anywhere in the program. `almide check` judges the entry file's own functions;
+a module's functions are judged by the build routes, which lower every module.
+
+Tests: `tests/diagnostics/e109-*`, `tests/diagnostics/e006-effect-fn-path-to-user-hof/`,
+`tests/diagnostics/e006-effect-fs-remove-as-value/`, `tests/effect_value_laundering_test.rs`.
 
 ## 3. Return Type Wrapping
 
@@ -551,9 +608,18 @@ written:
   field (the union of every closure stored in that field), a return value, a
   top-level `let`.
 - A closure put anywhere else (a list, an option payload, a variant, an
-  argument of a stdlib call) joins a pool of its arity; calling a value read
-  back from such a place is charged with that pool. A stdlib call is assumed
-  to run every closure it is given.
+  argument of an unknown callee) joins the pool of its signature (aliases
+  expanded, an `effect (A) -> B` slot in its carrier form); calling a value
+  read back from such a place is charged with that pool, and a read whose type
+  leaves the signature open (a type variable) is charged with every pool it
+  could alias. A value passed into a generic parameter is pooled at its
+  concrete type by the call site (#4151).
+- A stdlib function whose body is the runtime's (`@intrinsic`, `= _`) runs
+  each fn-typed argument and keeps none; a value it receives in a type-variable
+  parameter is pooled, and its result is read from the pools at the call's
+  type. Before #4152 such a body was read as "does nothing", so
+  `list.map(paths, fs.read_text)` charged `IO` to nobody and a manifest
+  without `IO` built it. A stdlib fn taken as a value carries its category.
 
 ```
   call_box  → {IO}
@@ -595,4 +661,5 @@ Test: Effect inference unit tests in `crates/almide-codegen/src/pass_effect_infe
 | E006 | Effect isolation violation | Pure `fn` calls an `effect fn` | Mark the caller as `effect fn`; a call whose Result is not already consumed (`!` / `??` / `?` / `match`) also takes `!` — the hint names both steps, and the same expression's `expected T but got Result[T, String]` is not reported separately (#3515, test: `tests/e006_fallible_cascade_test.rs`) |
 | E007 | Fan block in pure function | `fan { ... }` used outside effect context | Mark the enclosing function as `effect fn` |
 | E008 | Mutable variable capture in fan | `fan` block references a `var` binding | Change `var` to `let`, or copy the value into a `let` before the `fan` |
+| E109 | Effect fn run through a value | A pure `fn` runs an `effect fn` it reached as a value (a field, a list element, a stored closure) | Mark the fn `effect fn`, or hand it a value that does no I/O |
 | E092 | `@pure` fn is not pure | A `@pure` fn reaches output, an abort, a categorised stdlib call or an `@extern` | Move the call to a caller, or remove `@pure` |

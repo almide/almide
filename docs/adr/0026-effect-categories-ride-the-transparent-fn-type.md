@@ -261,3 +261,31 @@ error[E0xx]: `validate` may write files, but its bound is {FS.read}
 - Internal: #3238, `crates/almide-ir/src/effect.rs`,
   `crates/almide-codegen/src/pass_effect_inference.rs`,
   `src/cli/mod.rs::check_permissions`, `docs/wasm/capability-system.md`
+
+## Implementation note — categories through stdlib callbacks and fn values (#4152, 2026-10-25)
+
+D1's sets did not survive a stdlib higher-order call: an `@intrinsic`
+function (`list.map`, `= _`) was scanned as an empty body, so
+`list.map(paths, fs.read_text)` charged `IO` to no one and a manifest
+allowing only `Time` built and read the file (#4152). Now:
+
+- A bodyless stdlib function runs each fn-typed argument (the call site is
+  charged, as D1's transparent parameter) and keeps none — checked against
+  every `@intrinsic` HOF in `stdlib/`: none stores a callback in what it
+  returns. A value it receives in a type-variable parameter is pooled at the
+  argument's concrete type, and its result is read from the pools at the
+  call's type. `almide check`, which does not lower stdlib bodies, reads the
+  same facts off the declaration (`effect::stdlib_param_uses`).
+- A stdlib fn taken as a value carries its category (`fs.read_text` → `IO`)
+  and, for an `effect fn`, the effect bit (ADR-0009, E109).
+- Escaped values are pooled per signature (aliases expanded, an `effect`
+  slot in its carrier form) instead of per arity, and a generic body does
+  not re-pool a type-variable value; a read whose type leaves the signature
+  open reads every pool it could alias. This is what keeps a pure middleware
+  chain over `(Handler) -> Handler` from being charged with every handler.
+- The category of a stdlib function is charged at its uses, not on its
+  declaration, so `[permissions]` does not judge an unused bodyless
+  declaration.
+
+§Open is unchanged: the six-category vocabulary, a declared bound's syntax,
+the plain-fn bound and manifest versioning are not decided here.
