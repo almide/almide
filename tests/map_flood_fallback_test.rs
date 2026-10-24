@@ -87,6 +87,11 @@ effect fn main() -> Unit = {
   let t1 = datetime.monotonic_ns()!
   println(int.to_string(map.len(m)))
   println(int.to_string((t1 - t0) / 1000000))
+  let gone = ks |> list.take(10)
+  let m2 = gone |> list.fold(m, (acc, k) => map.remove(acc, k))
+  let m3 = map.set(m2, list.get(ks, 20) ?? 0, 7)
+  println(int.to_string(map.len(m3)))
+  println("${map.contains(m3, list.get(ks, 0) ?? 0)} ${map.contains(m3, list.get(ks, 10) ?? 0)} ${map.get(m3, list.get(ks, 20) ?? 0) ?? 0}")
 }
 "#,
     )
@@ -102,4 +107,7 @@ effect fn main() -> Unit = {
     assert_eq!(lines.next(), Some(N.to_string().as_str()), "every distinct key is kept");
     let ms: u64 = lines.next().and_then(|l| l.trim().parse().ok()).expect("elapsed ms");
     assert!(ms < 3_000, "building a map of {N} colliding keys took {ms} ms: the flood fallback did not engage");
+    // The ordered index answers removes, overwrites and lookups exactly.
+    assert_eq!(lines.next(), Some((N - 10).to_string().as_str()), "ten removed keys are gone");
+    assert_eq!(lines.next(), Some("false true 7"), "a removed key is absent, a kept one present, an overwrite visible");
 }
