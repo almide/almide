@@ -61,7 +61,7 @@ pub use commands::{cmd_init, cmd_test, cmd_test_fast, cmd_test_json, cmd_test_up
 pub use test_wasm::cmd_test_wasm;
 pub use fmt_command::{cmd_fmt, FmtMode};
 pub use clean::cmd_clean;
-pub use install::cmd_install;
+pub use install::{cmd_install, InstallGrants};
 pub use selfupdate::cmd_self_update;
 pub use verify::cmd_verify;
 pub use ide::{cmd_ide_outline, cmd_ide_doc, cmd_ide_stdlib_snapshot};
