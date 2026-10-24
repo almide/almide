@@ -30,14 +30,25 @@ bytes you run. The Coq theorems `WasmEncode.v` / `WasmExec.v` / `WasmRcDec.v`
 stand about a *modeled* runtime (the retired incumbent's).
 
 The `--target wasm` leg — the structural emitter in `crates/almide-wasm`, the
-only wasm renderer — is **trusted end to end, certificate pending**
-(#2755–#2760): no row of the table below applies to its output. Its evidence is
-differential and CI-gated: byte-identity against native and the interpreter on
-the whole `spec/wasm_cross` corpus (grow-only), semantic-mutation nets over the
-emitter, per-fixture allocation and size ledgers, a refusal ratchet (a shape it
-refuses must stay refused — silently emitting it again is the #1688 regression
-class), and `proofs/check-structural-bytes.sh`, which grounds the structural
-runtime's bytes against the Coq decoder model `StructuralDecode.v`.
+only wasm renderer — records its own certificate at emission time (#1696,
+closed): an ownership witness per frame, call modes, name totality and
+capabilities over the shipped stock-WASI bytes, and the `bounds` witness of
+every `xs[i]` / `b[i]` read and store (#4005). `proofs/structural-wall.sh`
+judges every certified fixture's bundle with the extracted checker, the Rocq
+kernel and `almide-verify`, all three agreeing, and pins the SHA-256 of the
+file `almide build --target wasm` wrote. The rows below do not apply to it;
+what it trusts is that the recorded events are the instructions the bytes
+contain (the recording discipline), and every heap access outside the index
+operator. Per clause of `MemorySafe`, the proven / checked-per-build / trusted
+split is the gap table in
+[docs/design/MEMORY-SAFETY.md](../design/MEMORY-SAFETY.md#the-gap-table-2026-10-24-4011).
+Its other evidence is differential and CI-gated: byte-identity against native
+and the interpreter on the whole `spec/wasm_cross` corpus (grow-only),
+semantic-mutation nets over the emitter, per-fixture allocation and size
+ledgers, a refusal ratchet (a shape it refuses must stay refused — silently
+emitting it again is the #1688 regression class), and
+`proofs/check-structural-bytes.sh`, which grounds the structural runtime's
+bytes against the Coq decoder model `StructuralDecode.v`.
 
 ## Where the boundary runs (the MIR certificate pipeline)
 
@@ -183,6 +194,8 @@ axiom.
 | Gate | Claim | NOT a claim |
 |---|---|---|
 | `proofs/gate.sh` | the witnessed MIR is RC-safe, name-total, capability-bounded; `almide-verify` gives the extracted checker's verdict on every row and on 1,000 seeded random witnesses | that the wasm bytes match the witness; that `almide-verify` agrees on inputs outside those rows (it carries no theorem) |
+| `proofs/structural-wall.sh` | for every fixture in `witness-fixtures.txt`, the shipped file's SHA-256 is the one the bundle pins, and every ownership, call-mode, name, capability and bounds witness of the structural build is accepted by the extracted checker, the kernel and `almide-verify` alike; by `accepts_spatial`, an accepted bounds witness's every run keeps each recorded index access inside its block | that the recorded events are the instructions in the bytes; anything about a heap access the bounds witness does not record (record fields, string bytes, map slots, `for`-loop element reads, the runtime's routines) |
+| `scripts/bounds-witness-reinject.sh` | each re-injected lost bounds check (the store route's, the read route's, a stale #3345 fact) leaves a bounds witness `almide-verify` rejects, and the unpatched emitter's witness for the same program is accepted | that a lost check whose recording call survives is caught — the recording discipline is what it relies on |
 | `proofs/corpus-wall.sh` | `lower_function` is total over the corpus: every function is `Ok` or an explicit `Unsupported` | that an `Ok` function has correct output |
 | `proofs/output-parity.sh` | native and the structural wasm build agree, for the baseline set; the structural walls inside it are exactly the rows of `proofs/output-parity-walled-baseline.txt` (#2793) | anything outside that set |
 | `scripts/check-contracts.sh` | every observable cross-target promise has executable evidence | that the promise is the right one |
