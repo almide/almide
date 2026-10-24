@@ -228,6 +228,8 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("datetime", include_str!("../../../../stdlib/datetime.almd"), false),
     ("http", include_str!("../../../../stdlib/http.almd"), true),
     ("html", include_str!("../../../../stdlib/html.almd"), true),
+    // An opaque holder whose renderers all print `Secret(***)` (#4107).
+    ("secret", include_str!("../../../../stdlib/secret.almd"), true),
     // The asserts abort the same way on every leg outside a test block
     // (C-381, C-339), so a failing one is an observable, comparable outcome.
     ("testing", include_str!("../../../../stdlib/testing.almd"), true),

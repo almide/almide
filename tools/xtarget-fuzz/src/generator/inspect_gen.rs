@@ -202,6 +202,23 @@ const CODEC_BYTES: &str = "bytes.from_list(list.range(0, {n}) |> list.map((i) =>
 pub mod effect_recipes;
 
 const SHAPE_RECIPES: &[Recipe] = &[
+    // #4106: the message is the size (the key is fixed, one block). A verify
+    // call is in-domain only with the right tag — the MAC of the same key and
+    // message, computed once outside the timed calls — so it runs the full
+    // compare and answers true; a 2-byte or non-hex generic tag is refused
+    // by the length check or the hex decode before any compare.
+    Recipe { func: "hash.hmac_sha256", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))")] },
+    Recipe { func: "hash.hmac_sha256_hex", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))")] },
+    Recipe { func: "hash.is_valid_hmac_sha256", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))"), ("tag", "hash.hmac_sha256(bytes.from_string(\"key\"), bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))")] },
+    Recipe { func: "hash.is_valid_hmac_sha256_hex", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))"), ("tag", "hash.hmac_sha256_hex(bytes.from_string(\"key\"), bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))")] },
+    Recipe { func: "hash.hmac_sha512", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))")] },
+    Recipe { func: "hash.hmac_sha512_hex", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))")] },
+    Recipe { func: "hash.is_valid_hmac_sha512", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))"), ("tag", "hash.hmac_sha512(bytes.from_string(\"key\"), bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))")] },
+    Recipe { func: "hash.is_valid_hmac_sha512_hex", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))"), ("tag", "hash.hmac_sha512_hex(bytes.from_string(\"key\"), bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))")] },
+    // Equal operands: the whole walk runs and the answer is true (a length
+    // mismatch is answered before the walk).
+    Recipe { func: "bytes.is_equal_constant_time", size: "a", args: &[("a", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))")] },
+    Recipe { func: "string.is_equal_constant_time", size: "a", args: &[("a", "string.repeat(\"aé\", {n})"), ("b", "string.repeat(\"aé\", {n})")] },
     // A (T, in_ch) input, an (out_ch, in_ch × kernel) weight, one bias per
     // out_ch; kernel 3, stride 1, padding 1 give T output rows of out_ch =
     // in_ch, so the rebound input keeps its shape. n is T.
@@ -1152,6 +1169,7 @@ fn small(t: &GenType) -> String {
         GenType::Endian => "BigEndian".into(),
         GenType::Set(e) => format!("set.from_list([{}])", small(e)),
         GenType::Nominal(k) => nominal::get(k).map_or_else(|| "()".into(), |d| d.small.to_string()),
+        GenType::Secret(e) => format!("secret.new({})", small(e)),
     }
 }
 
@@ -1186,6 +1204,7 @@ fn elem(t: &GenType) -> String {
         GenType::Tuple3(a, b, c) => format!("({}, {}, {})", elem(a), elem(b), elem(c)),
         GenType::Sized(name) => GenType::sized_literal(name, "i % 100"),
         GenType::Set(e) => format!("set.from_list([{}])", elem(e)),
+        GenType::Secret(e) => format!("secret.new({})", elem(e)),
         other => small(other),
     }
 }
@@ -1205,6 +1224,8 @@ fn sized(t: &GenType, n: u64) -> String {
         GenType::Value => format!("value.object(list.range(0, {n}) |> list.map((i) => (\"k${{100000000 + i}}\", value.int(100000000 + i))))"),
         GenType::Set(e) => format!("list.range(0, {n}) |> list.map((i) => {}) |> set.from_list", elem(e)),
         GenType::Nominal(k) => nominal::get(k).map_or_else(|| "()".into(), |d| nominal::fill(d.sized, "", n)),
+        // The size of what it holds.
+        GenType::Secret(e) => format!("secret.new({})", sized(e, n)),
         other => small(other),
     }
 }
@@ -1278,6 +1299,8 @@ fn digest(v: &str, t: &GenType) -> String {
         GenType::Endian => "1".into(),
         GenType::Set(_) => format!("set.len({v})"),
         GenType::Nominal(k) => nominal::get(k).map_or_else(|| "1".into(), |d| nominal::fill(d.digest, v, 0)),
+        // What it holds, read through the one way out.
+        GenType::Secret(e) => digest(&format!("secret.reveal({v})"), e),
     }
 }
 
