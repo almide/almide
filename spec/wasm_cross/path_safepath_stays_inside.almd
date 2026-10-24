@@ -1,4 +1,4 @@
-// @contract: C-432
+// @contract: C-398
 // #4146: `path.from_string` (the SafePath constructor) admits only a path
 // that stays inside the directory it is joined to — relative, no `..` segment
 // on either separator, no leading `~`, no drive letter, no NUL — and

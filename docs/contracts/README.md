@@ -429,7 +429,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-391 | json.parse bounds nesting at 1000 levels with one err text on every leg | 0.69.0 | active | fixture | 1 |
 | C-392 | fs.open_root's family keeps every path inside its root: a path that leaves it by .., an absolute path or a symlink is refused with one message on every target | 0.69.0 | active | fixture | 1 |
 | C-393 | [permissions] fs bounds every fs call to the granted directories, symlinks resolved, with one refusal on native and the embedded wasm host | 0.69.0 | active | fixture | 0 |
-| C-430 | fs.walk and fs.glob list a symlink as an entry and never descend into it, on every leg | 0.69.0 | active | fixture | 0 |
-| C-431 | fs.create_temp_file and fs.create_temp_dir create a new entry exclusively under an entropy name, private to its owner | 0.69.0 | active | fixture | 0 |
-| C-432 | path.from_string admits only a path that stays inside the directory it is joined to, and path.join_within refuses any other child | 0.69.0 | active | fixture | 1 |
+| C-396 | fs.walk and fs.glob list a symlink as an entry and never descend into it, on every leg | 0.69.0 | active | fixture | 0 |
+| C-397 | fs.create_temp_file and fs.create_temp_dir create a new entry exclusively under an entropy name, private to its owner | 0.69.0 | active | fixture | 0 |
+| C-398 | path.from_string admits only a path that stays inside the directory it is joined to, and path.join_within refuses any other child | 0.69.0 | active | fixture | 1 |
 
