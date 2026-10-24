@@ -1,0 +1,12 @@
+// @contract: C-394
+// random.bytes with a negative n is a contract violation (#3938): it aborts
+// in the ALS-T6 form, one stderr line `Error: random.bytes: negative length
+// <n>` and exit 1, byte-identical on both targets, before anything is drawn.
+// The draw before it stays total.
+import random
+
+effect fn main() -> Unit = {
+  println("pre: ${bytes.len(random.bytes(0))}")
+  let b = random.bytes(-1)
+  println("unreachable: ${bytes.len(b)}")
+}
