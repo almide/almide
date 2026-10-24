@@ -23,7 +23,22 @@ slope 1.132
 #   eight runs:
 #     4.298 4.351 4.362 4.403 4.424 4.435 4.454 4.690 (the 4.690 is load 42.4)
 #   an 8.9% total spread. Budget +25%.
-ratio 4.403
+# ratio moved 4.403 -> 6.650 (2026-10-24, #4071): an auto-imported bundled
+#   module is now loaded only when the program reaches it, so the 4-line floor
+#   rung (`println` alone) no longer checks and lowers the auto-imported stdlib
+#   while every corpus rung still does. The floor got cheaper; the rungs did
+#   not move. Same-machine A/B (M4 Pro, load 2.0-3.2), five interleaved pairs
+#   of the full ladder, develop b83f513a8 vs this change:
+#     before  3.229 3.239 3.246 3.247 3.250   median 3.246
+#     after   5.110 5.163 5.168 5.177 5.234   median 5.168   factor 1.592
+#   Anchored on CI, not on this box (whose ratio already sat under the old
+#   floor): the develop Perf ratchet job 120353343348 (5059b4cde) read 4.1775,
+#   x 1.592 = 6.650. The floor's own split on that job (check 8.55ms of a
+#   26.2ms floor) projects ~7.3, inside the band. slope and slope_check stay
+#   anchored: the same A/B moved them 1.154 -> 1.108 and 1.139 -> 1.102 (both
+#   about -4%, inside their bands). Re-anchor from CI readings if the first
+#   develop jobs after this land sit past half the band.
+ratio 6.650
 #
 # ── PER-PHASE ANCHORS (#1311) ────────────────────────────────────────────────
 # The same ladder, checked with `almide check --timings`, splits the front end
