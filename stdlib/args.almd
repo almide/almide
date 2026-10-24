@@ -12,21 +12,36 @@ import env
 /// Same as env.args; argv[0] excluded.
 effect fn raw() -> List[String] = env.args()
 
-/// True on --name or -<first letter of name>.
-effect fn flag(name: String) -> Bool = {
+/// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
+effect fn flag(name: String) -> Bool = __has(__options(env.args()), name)
+
+/// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
+effect fn has_flag(name: String) -> Bool = __has(__options(env.args()), name)
+
+// No short spelling is DERIVED from a long name (#4144: `-d` used to set both
+// --dry-run and --delete). A long name's "short" comparand is "--" + name
+// again, so only --name matches; a one-letter name also matches -name, which
+// is how a program declares a short form: `has_flag("dry-run")! or has_flag("n")!`.
+fn __has(args: List[String], name: String) -> Bool = {
   // Recursion instead of `list.any` with a CAPTURING lambda: a capture inside
-  // a BUNDLED module mislowers on wasm (#892 — the closure env held garbage,
-  // so the result was a truncated string or an out-of-bounds trap). The
-  // recursion carries the two comparands as parameters, so nothing is
-  // captured; it is also the form CLAUDE.md's idioms prefer.
-  __flag_at(env.args(), "--" + name, "-" + string.slice(name, 0, 1), 0)
+  // a BUNDLED module mislowers on wasm (#892). The recursion carries the two
+  // comparands as parameters, so nothing is captured.
+  let short = if string.len(name) == 1 then "-" + name else "--" + name
+  __flag_at(args, "--" + name, short, 0)
 }
 
-/// True on --name; a one-letter name also matches -name. No short form is derived.
-effect fn has_flag(name: String) -> Bool = {
-  // A long name's "short" spelling is "--" + name again, so only --name matches.
-  let short = if string.len(name) == 1 then "-" + name else "--" + name
-  __flag_at(env.args(), "--" + name, short, 0)
+// The arguments before the first `--` (#4144): `--` ends option parsing, so
+// flags and options are read from this prefix only, and everything after the
+// marker is positional.
+fn __options(args: List[String]) -> List[String] = match list.index_of(args, "--") {
+  some(i) => list.take(args, i),
+  none => args,
+}
+
+// The arguments after the first `--` (none when there is no marker).
+fn __operands(args: List[String]) -> List[String] = match list.index_of(args, "--") {
+  some(i) => list.drop(args, i + 1),
+  none => [],
 }
 
 fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
@@ -39,12 +54,12 @@ fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
     else __flag_at(args, long, short, i + 1)
   }
 
-/// Value of --name=v or --name v; none if absent.
+/// Value of --name=v or --name v before `--`; none if absent.
 effect fn option(name: String) -> String? = {
-  let args = env.args()
+  let args = __options(env.args())
   let long = "--" + name
   let eq_prefix = long + "="
-  // Recursion, not `list.find` with a CAPTURING lambda — see `flag` (#892).
+  // Recursion, not `list.find` with a CAPTURING lambda — see `__has` (#892).
   let eq_match = __find_prefixed(args, eq_prefix, 0)
   match eq_match {
     some(a) => string.strip_prefix(a, eq_prefix),
@@ -69,13 +84,17 @@ effect fn option_or(name: String, fallback: String) -> String = match option(nam
   none => fallback,
 }
 
-/// Args not starting with -; option values too.
-effect fn positional() -> List[String] = {
-  // `env.args()` ALREADY excludes argv[0] — it is the user's arguments, the
-  // ones after `--`. Dropping one more here ate the FIRST real argument
-  // (#891: `-- input.csv out.csv` gave `out.csv`).
-  list.filter(env.args(), (a) => not string.starts_with(a, "-"))
-}
+/// Args before `--` not starting with -, then every arg after `--`; option values too.
+effect fn positional() -> List[String] = __positional(env.args())
+
+// `env.args()` ALREADY excludes argv[0] — it is the user's arguments, the ones
+// after `--`. Dropping one more here ate the FIRST real argument (#891:
+// `-- input.csv out.csv` gave `out.csv`). After the first `--` every argument
+// is positional, a leading `-` included (#4144: a file named `-d`).
+fn __positional(args: List[String]) -> List[String] = list.filter(
+  __options(args),
+  (a) => not string.starts_with(a, "-"),
+) + __operands(args)
 
 /// i-th positional arg; none if out of range.
 effect fn positional_at(i: Int) -> String? = list.get(positional()!, i)
