@@ -252,8 +252,12 @@ pub(crate) fn cwd_project() -> Option<project::Project> {
 pub(crate) fn optimize_gate_and_link(
     ir: &mut almide::ir::IrProgram,
     proj: Option<&project::Project>,
+    entry: (&str, &str),
     verify: impl FnOnce(&almide::ir::IrProgram) -> Result<(), String>,
 ) -> Result<(), String> {
+    // E109 (#4151): judged on the lowered program before the optimizer
+    // rewrites it, the IR `check` judges too.
+    enforce_effect_values(ir, entry)?;
     almide_driver::optimize_half(ir);
     verify(ir)?;
     if let Some(proj) = proj {
@@ -263,6 +267,20 @@ pub(crate) fn optimize_gate_and_link(
     }
     almide_driver::link_half(ir);
     Ok(())
+}
+
+/// E109 (#4151): refuse a pure fn that runs an `effect fn` reached through a
+/// function value. `entry` is the entry file and its source, for rendering.
+pub(crate) fn enforce_effect_values(ir: &almide::ir::IrProgram, entry: (&str, &str)) -> Result<(), String> {
+    let diags = almide::effect_value_gate::effect_value_diagnostics(ir, entry.0);
+    if diags.is_empty() {
+        return Ok(());
+    }
+    for d in &diags {
+        err(&format!("{}", diagnostic_render::display_with_source(d, entry.1)));
+    }
+    err(&format!("\n{} error(s) found", diags.len()));
+    Err(format!("{} error(s) found", diags.len()))
 }
 
 /// `try_compile_with_ir`'s parse + project/dep resolution phase. Extracted
@@ -363,11 +381,11 @@ fn typecheck_and_lower_for_compile(
 /// `try_compile_with_ir`'s post-typecheck IR pipeline: optimize, verify
 /// integrity, check `[permissions]`, monomorphize, and link dependency
 /// modules into the root. Extracted verbatim.
-fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, parsed_project: &Option<project::Project>) -> Result<(), String> {
+fn optimize_verify_and_link(ir_program: &mut Option<almide::ir::IrProgram>, parsed_project: &Option<project::Project>, entry: (&str, &str)) -> Result<(), String> {
     // The driver's two halves with the integrity check and the `[permissions]`
     // gate (Security Layer 2) between them — the sequence the wasm route shares.
     match ir_program.as_mut() {
-        Some(ir) => optimize_gate_and_link(ir, parsed_project.as_ref(), verify_ir_or_err),
+        Some(ir) => optimize_gate_and_link(ir, parsed_project.as_ref(), entry, verify_ir_or_err),
         None => Ok(()),
     }
 }
@@ -395,7 +413,7 @@ pub(crate) fn try_compile_reporting(file: &str, no_check: bool, codegen_opts: &c
         (ir_program, outside_guarantee) = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
     }
 
-    optimize_verify_and_link(&mut ir_program, &parsed_project)?;
+    optimize_verify_and_link(&mut ir_program, &parsed_project, (file, &source_text))?;
 
     let metered = ir_program.as_ref().filter(|ir| almide::ir::runtime_use::uses_metered_prims(ir)).cloned();
     // Codegen v3: three-layer pipeline (Nanopass + Templates)

@@ -374,6 +374,11 @@ fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut ch
             module_diags.iter().flat_map(|(_, _, ds)| ds.iter()).filter(|d| d.level == diagnostic::Level::Error),
         ));
     }
+    // E109 (#4151): the gate every route runs.
+    let refused = almide::effect_value_gate::effect_value_diagnostics(&ir_program, "");
+    if !refused.is_empty() {
+        return Err(render_error_summary(refused.iter()));
+    }
     Ok(ir_program)
 }
 

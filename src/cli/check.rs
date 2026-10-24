@@ -183,12 +183,16 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
 
     // Lower to IR for unused variable analysis (only if no parse or type errors)
     let has_type_errors = diagnostics.iter().any(|d| d.level == diagnostic::Level::Error);
+    let mut effect_value_errors = Vec::new();
     let unused_warnings = if parse_errors.is_empty() && !has_type_errors {
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+        // E109 (#4151): the same gate the build routes run.
+        effect_value_errors = almide::effect_value_gate::effect_value_diagnostics(&ir, file);
         almide::ir::collect_unused_var_warnings(&ir, file)
     } else {
         Vec::new()
     };
+    let diagnostics: Vec<diagnostic::Diagnostic> = diagnostics.into_iter().chain(effect_value_errors).collect();
 
     // #2159: a shebang that only runs on macOS. Text-only, so it sits with
     // the other file-level warnings rather than in the checker.
@@ -357,9 +361,15 @@ fn check_json_one(file: &str, critical: Option<&[String]>) -> bool {
 
     // Lower to IR for unused variable warnings (skip if type errors)
     let has_type_errors = diagnostics.iter().any(|d| d.level == diagnostic::Level::Error);
-    let clean = parse_errors.is_empty() && !has_type_errors;
+    let mut clean = parse_errors.is_empty() && !has_type_errors;
     if clean {
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+        // E109 (#4151): the same gate the build routes run.
+        let effect_value_errors = almide::effect_value_gate::effect_value_diagnostics(&ir, file);
+        for d in &effect_value_errors {
+            out(&format!("{}", crate::diagnostic_render::to_json(d)));
+        }
+        clean = effect_value_errors.is_empty();
         let unused = almide::ir::collect_unused_var_warnings(&ir, file);
         for d in &unused {
             out(&format!("{}", crate::diagnostic_render::to_json(d)));

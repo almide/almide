@@ -27,16 +27,18 @@ effect fn main() -> Unit = {
 }
 "#;
 
-/// A plain fn calls whatever closure a record field holds.
+/// A fn calls whatever closure a record field holds. It is an `effect fn`:
+/// a plain one running a file-reading closure is E109 (#4151), refused
+/// before `[permissions]` is consulted.
 const RECORD_FIELD: &str = r#"import fs
 
 type Box = { run: (String) -> String }
 
-fn call_box(b: Box) -> String = (b.run)("/etc/hosts")
+effect fn call_box(b: Box) -> String = (b.run)("/etc/hosts")
 
 effect fn main() -> Unit = {
   let b = Box { run: (p) => fs.read_text(p) ?? "" }
-  println(call_box(b))
+  println(call_box(b)!)
 }
 "#;
 
@@ -116,7 +118,7 @@ fn a_called_fn_parameter_is_named_with_its_position() {
 #[test]
 fn a_called_record_field_carries_the_set_stored_in_it() {
     let report = effects_report("record", RECORD_FIELD);
-    assert!(report.contains("  call_box  → {IO}\n"), "{report}");
+    assert!(report.contains("  call_box  → {IO} (effect fn)\n"), "{report}");
     assert!(report.contains("2 functions: 0 pure, 2 with effects"), "{report}");
 }
 

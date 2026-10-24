@@ -11,7 +11,7 @@ fn call_it(g: () -> Int) -> Int = g()
 
 fn runner(r: (String, List[String]) -> Result[String, String]) -> Int = 0
 
-fn main() -> Unit = {
+effect fn main() -> Unit = {
   let f = process.pid
   let probe = Probe { read: process.pid }
   let fs = [process.pid]

@@ -64,6 +64,7 @@ pub mod serve_export;
 pub mod project_fetch;
 pub mod resolve;
 pub mod source_overlay;
+pub mod effect_value_gate;
 
 // ── Wall marker: the machine-readable line of a wasm wall's stderr ──
 //
