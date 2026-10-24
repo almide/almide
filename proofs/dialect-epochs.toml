@@ -343,6 +343,7 @@ breaks = [
   "the buffered http client (`http.get` family, `http.request_response`, `http.request_bytes`) answers `malformed or incomplete response from \"<url>\"` for a response with no whole head, a body shorter than Content-Length, or a chunked body without its 0-chunk, and for a head past 1 MiB (C-408, #4137), where it used to return what had arrived as ok",
   "the http client's URL splitter cleans and refuses as `url.parse` does (C-402, #4116 comment): a backslash or control character and a non-canonical numeric host (`127.1`, `0x7f.0.0.1`) are URL errors, leading/trailing C0 and space and tab/LF/CR are removed, and `.` / `..` segments (with `%2e` spellings) leave the target before it is sent",
   "an `http.serve` handler's `err(m)` is answered with the fixed body `Internal Server Error (request <id>)` (`id` = 8 hex digits of `hash.fnv1a32(method + \" \" + target + \"\\n\" + body)`) and `m` goes to stderr only, quoted, as `http.serve: request <id>: handler error: <m>`; a refused response's body is `Internal Server Error` (C-409, #4150). A client or test that read the error text from the body must read the server's stderr",
+  "an attribute on a record field that the compiler does not read is an error (E053); the field vocabulary is `@builtin`, `@location`, `@skip`, `@skip_decode`"
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
