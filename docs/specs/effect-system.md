@@ -407,7 +407,11 @@ The `[permissions]` section in `almide.toml` restricts which effect categories a
 allow = ["IO", "Net"]
 ```
 
-If `[permissions]` is absent or `allow` is empty, all capabilities are permitted (backwards compatible).
+If `[permissions]` is absent, or it has no `allow` key, capabilities are not
+checked (backwards compatible). An explicit **`allow = []` allows none**
+(#4101): every function that reaches a capability is a capability violation,
+so `allow = []` is how a manifest says "this program touches nothing". It used
+to read the same as an absent key, which granted everything.
 
 `almide.toml` is read as TOML, so `allow` may use any array spelling: one
 line, several lines, a trailing comma, comments between the items (#3253).
