@@ -375,13 +375,15 @@ pub(crate) enum Commands {
         /// Target version (e.g., v0.13.0); defaults to latest
         version: Option<String>,
     },
-    /// Re-check a program's flight-grade certificates with the independent
-    /// `almide-verify` binary (found next to almide, else on PATH; there is no
-    /// built-in fallback). `almide verify app.almd [--emit out.bundle]`
-    /// produces the certificate bundle and hands it over; any other arguments
-    /// go to almide-verify verbatim (e.g. `almide verify ownership w.cert`).
+    /// Re-check the certificates of the wasm module `almide build --target
+    /// wasm` ships with the independent `almide-verify` binary (found next to
+    /// almide, else on PATH; there is no built-in fallback). `almide verify
+    /// app.almd [--artifact app.wasm] [--emit out.bundle]` builds the program,
+    /// writes its certificate bundle — pinned to the built file's SHA-256
+    /// when one is present — and hands it over; any other arguments go to
+    /// almide-verify verbatim (e.g. `almide verify ownership w.cert`).
     Verify {
-        /// `<file.almd> [--emit <bundle>]`, or arguments for almide-verify
+        /// `<file.almd> [--artifact <file.wasm>] [--emit <bundle>]`, or arguments for almide-verify
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },

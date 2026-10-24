@@ -2,13 +2,26 @@
 //! binary (#2152).
 //!
 //! The compiler never judges its own certificates. `almide verify <file.almd>`
-//! runs only the untrusted PRODUCER here (lower the program, emit every
-//! witness into a certificate bundle) and then execs `almide-verify bundle`,
-//! found next to this executable or on PATH, forwarding its standard streams
-//! and exit status. Any other arguments are handed to `almide-verify`
+//! runs only the untrusted PRODUCER here and then execs `almide-verify
+//! bundle`, found next to this executable or on PATH, forwarding its standard
+//! streams and exit status. Any other arguments are handed to `almide-verify`
 //! verbatim. There is NO linked fallback: without the binary the command
 //! fails with a named error — a verifier the compiler carried inside itself
 //! would be the compiler vouching for itself.
+//!
+//! THE PRODUCER (#4011) is the structural wasm leg — the one renderer
+//! `almide build --target wasm` ships. The program is built by the same
+//! route with the witness sinks armed, and the bundle carries what that
+//! build recorded (crates/almide-wasm/src/witness_bundle.rs): ownership per
+//! frame, call modes, bounds, names over the shipped bytes, capabilities.
+//! When the built file is present (`--artifact`, or the file `almide build`
+//! writes by default), the producer refuses unless it is byte-for-byte the
+//! module this build produced, and pins its SHA-256 in the bundle (version
+//! 2): almide-verify recomputes the digest and rejects a mismatch, so the
+//! verdict is about THAT file. Before #4011 this command certified the MIR
+//! lowering's witnesses, which no shipped wasm byte comes from since #2761;
+//! those witnesses stay the input of proofs/gate.sh and corpus-wall.sh (the
+//! native leg's MIR), not of this command.
 
 use crate::err;
 use std::path::{Path, PathBuf};
@@ -65,40 +78,6 @@ fn delegate(verifier: &Path, args: &[String]) -> i32 {
     }
 }
 
-/// One framing-safe line: a name or reason may not break the bundle's lines.
-fn one_line(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// Serialize the producer's output as a certificate bundle (format version 1,
-/// `almide_verify::bundle`). Length-prefixed witnesses; walled functions as
-/// `uncertified` records.
-fn render_bundle(file: &str, w: &almide_mir::pipeline::ProgramWitnesses) -> Vec<u8> {
-    let mut out = format!(
-        "almide-certificate-bundle 1\nproducer almide {}\nsource {}\n",
-        one_line(env!("ALMIDE_VERSION_LINE")),
-        one_line(file)
-    )
-    .into_bytes();
-    let mut record = |property: &str, function: &str, bytes: &str| {
-        out.extend(format!("witness {property} {} {}\n", bytes.len(), one_line(function)).into_bytes());
-        out.extend(bytes.as_bytes());
-        out.push(b'\n');
-    };
-    for f in &w.functions {
-        record("ownership", &f.name, &f.ownership);
-        record("names", &f.name, &f.names);
-        record("caps", &f.name, &f.caps);
-    }
-    if let Some(modes) = &w.call_modes {
-        record("call-modes", "(program)", modes);
-    }
-    for (function, reason) in &w.walled {
-        out.extend(format!("uncertified {} {}\n", one_line(function), one_line(reason)).into_bytes());
-    }
-    out
-}
-
 /// `[permissions].allow` from `./almide.toml`, when it names any — the same
 /// manifest `almide check` enforces; it makes the caps witness able to reject.
 fn manifest_allow() -> Option<Vec<String>> {
@@ -110,37 +89,161 @@ fn manifest_allow() -> Option<Vec<String>> {
     (!proj.permissions.is_empty()).then_some(proj.permissions)
 }
 
+/// What the bundle is pinned to: the shipped file, if one is named or
+/// present at the default build output.
+enum Pin<'a> {
+    /// `--artifact <path>`: must exist and match.
+    Named(&'a str),
+    /// The file `almide build <file> --target wasm` writes, if present.
+    Default,
+}
+
 /// Produce the bundle for `file` and write it to `out`.
-fn produce(file: &str, out: &Path) -> Result<(), i32> {
-    let (_program, source_text, resolved, _deps) = super::wasm_compile::parse_and_resolve_wasm(file).map_err(|()| 1)?;
-    let modules: Vec<(String, almide_lang::ast::Program, bool)> =
-        resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect();
+fn produce(file: &str, pin: Pin<'_>, out: &Path) -> Result<(), i32> {
+    almide_wasm::witness::start_collecting();
+    let built = super::wasm_compile::compile_to_wasm_bytes_surfaced(file, false, false, true, false);
+    let Ok((emitted, host_ops, _surface, _outside)) = built else {
+        let _ = almide_wasm::witness::take();
+        err(&format!("error: {file} cannot be certified — it does not build for --target wasm (above)"));
+        return Err(1);
+    };
+    let shipped = match super::build_wasm::shipped_core_module(file, &emitted, &host_ops) {
+        Ok(b) => b,
+        Err(leg) => {
+            let _ = almide_wasm::witness::take();
+            err(&format!(
+                "error: {file} builds as a component ({leg}); `almide verify` certifies the core module a plain `almide build --target wasm` writes"
+            ));
+            return Err(1);
+        }
+    };
     let allow = manifest_allow();
-    let witnesses = almide_mir::pipeline::program_witnesses(&source_text, &modules, allow.as_deref()).map_err(|e| {
-        err(&format!("error: {file} cannot be certified — it does not lower as a whole program: {e}"));
+    let (records, uncertified) = almide_wasm::witness::bundle::records(&emitted, &shipped, allow.as_deref()).map_err(|e| {
+        err(&format!("error: {file}: the structural build recorded no complete certificate: {e}"));
         1
     })?;
-    std::fs::write(out, render_bundle(file, &witnesses)).map_err(|e| {
+    let default_out = super::build_wasm::default_wasm_output(file);
+    let (path, required) = match pin {
+        Pin::Named(p) => (p.to_string(), true),
+        Pin::Default => (default_out, false),
+    };
+    let artifact = match std::fs::read(&path) {
+        Ok(bytes) if bytes == shipped => {
+            use sha2::Digest;
+            let hex: String = sha2::Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+            let abs = std::path::absolute(&path).map(|p| p.display().to_string()).unwrap_or(path.clone());
+            Some((hex, abs))
+        }
+        Ok(bytes) => {
+            err(&format!(
+                "error: {path} ({} bytes) is not the module `almide build {file} --target wasm` produces now ({} bytes) — the certificate would describe other bytes\n  \
+                 hint: rebuild it, or name the right file with --artifact",
+                bytes.len(),
+                shipped.len()
+            ));
+            return Err(1);
+        }
+        Err(e) if required => {
+            err(&format!("error: cannot read the artifact {path}: {e}"));
+            return Err(1);
+        }
+        Err(_) => {
+            err(&format!(
+                "note: no {path} to pin — the bundle certifies the module this build produces, not a file; \
+                 run `almide build {file} --target wasm` first to pin the file you ship"
+            ));
+            None
+        }
+    };
+    let text = almide_wasm::witness::bundle::render(
+        &format!("almide {}", env!("ALMIDE_VERSION_LINE")),
+        file,
+        artifact.as_ref().map(|(h, p)| (h.as_str(), p.as_str())),
+        &records,
+        &uncertified,
+    );
+    std::fs::write(out, text).map_err(|e| {
         err(&format!("error: cannot write the certificate bundle {}: {e}", out.display()));
         1
     })
 }
 
-/// `<file.almd> [--emit <bundle>]`, split; `None` when the arguments are not
-/// that shape (they are then forwarded verbatim).
-fn certify_args(args: &[String]) -> Option<(&str, Option<&str>)> {
-    match args {
-        [file] if file.ends_with(".almd") => Some((file.as_str(), None)),
-        [file, flag, out] | [flag, out, file] if file.ends_with(".almd") && flag == "--emit" => {
-            Some((file.as_str(), Some(out.as_str())))
-        }
-        _ => None,
+/// One framing-safe line: a name or reason may not break the bundle's lines.
+fn one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// `--mir`: the MIR lowering's witnesses (format version 1). No shipped
+/// wasm byte comes from MIR lowering since #2761, so this certifies the MIR,
+/// not a build; it stays because proofs/coverage.sh drives the MIR
+/// certificate producers (`certificate*.rs`, `pipeline_witnesses.rs`)
+/// through it, and their coverage floor is a ratchet.
+fn produce_mir(file: &str, out: &Path) -> Result<(), i32> {
+    let (_program, source_text, resolved, _deps) = super::wasm_compile::parse_and_resolve_wasm(file).map_err(|()| 1)?;
+    let modules: Vec<(String, almide_lang::ast::Program, bool)> =
+        resolved.modules.iter().map(|(n, p, _pkg, s)| (n.clone(), p.clone(), *s)).collect();
+    let allow = manifest_allow();
+    let w = almide_mir::pipeline::program_witnesses(&source_text, &modules, allow.as_deref()).map_err(|e| {
+        err(&format!("error: {file} cannot be certified — it does not lower as a whole program: {e}"));
+        1
+    })?;
+    let mut text = format!(
+        "almide-certificate-bundle 1\nproducer almide {} (MIR witnesses)\nsource {}\n",
+        one_line(env!("ALMIDE_VERSION_LINE")),
+        one_line(file)
+    );
+    let mut record = |property: &str, function: &str, bytes: &str| {
+        text.push_str(&format!("witness {property} {} {}\n{bytes}\n", bytes.len(), one_line(function)));
+    };
+    for f in &w.functions {
+        record("ownership", &f.name, &f.ownership);
+        record("names", &f.name, &f.names);
+        record("caps", &f.name, &f.caps);
     }
+    if let Some(modes) = &w.call_modes {
+        record("call-modes", "(program)", modes);
+    }
+    for (function, reason) in &w.walled {
+        text.push_str(&format!("uncertified {} {}\n", one_line(function), one_line(reason)));
+    }
+    std::fs::write(out, text).map_err(|e| {
+        err(&format!("error: cannot write the certificate bundle {}: {e}", out.display()));
+        1
+    })
+}
+
+/// The `<file.almd>` form's options; `None` when the arguments are not that
+/// shape (they are then forwarded verbatim).
+struct CertifyArgs<'a> {
+    file: &'a str,
+    emit: Option<&'a str>,
+    artifact: Option<&'a str>,
+    mir: bool,
+}
+
+/// `<file.almd> [--emit <bundle>] [--artifact <file.wasm>] [--mir]`, in
+/// any order (`--mir` takes no `--artifact`: nothing ships from MIR).
+fn certify_args(args: &[String]) -> Option<CertifyArgs<'_>> {
+    let (mut file, mut emit, mut artifact, mut mir) = (None, None, None, false);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--emit" if emit.is_none() => emit = Some(it.next()?.as_str()),
+            "--artifact" if artifact.is_none() => artifact = Some(it.next()?.as_str()),
+            "--mir" if !mir => mir = true,
+            f if f.ends_with(".almd") && file.is_none() => file = Some(f),
+            _ => return None,
+        }
+    }
+    if mir && artifact.is_some() {
+        return None;
+    }
+    Some(CertifyArgs { file: file?, emit, artifact, mir })
 }
 
 pub fn cmd_verify(args: &[String]) -> i32 {
     let verifier = locate_verifier();
-    let Some((file, emit)) = certify_args(args) else {
+    let Some(CertifyArgs { file, emit, artifact, mir }) = certify_args(args) else {
         return verifier.map_or_else(no_verifier, |v| delegate(&v, args));
     };
     if verifier.is_none() && emit.is_none() {
@@ -148,7 +251,9 @@ pub fn cmd_verify(args: &[String]) -> i32 {
     }
     let scratch = std::env::temp_dir().join(format!("almide-verify-{}.bundle", std::process::id()));
     let bundle = emit.map_or(scratch.clone(), PathBuf::from);
-    if let Err(code) = produce(file, &bundle) {
+    let pin = artifact.map_or(Pin::Default, Pin::Named);
+    let produced = if mir { produce_mir(file, &bundle) } else { produce(file, pin, &bundle) };
+    if let Err(code) = produced {
         return code;
     }
     let code = match &verifier {

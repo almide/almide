@@ -651,6 +651,11 @@ pub use bounds::take as take_bounds;
 #[path = "witness_bounds.rs"]
 pub(crate) mod bounds;
 
+/// The certificate bundle of one build's shipped pass (witness_bundle.rs):
+/// the one producer `almide verify` and the corpus sweep share.
+#[path = "witness_bundle.rs"]
+pub mod bundle;
+
 /// The per-pass declaration table the name and capability witnesses read
 /// (#2759, witness_decls.rs).
 #[path = "witness_decls.rs"]
