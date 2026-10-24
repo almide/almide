@@ -99,7 +99,11 @@ jobs:
     # an opam cache miss). Without a ceiling, a superlinear-witness regression runs
     # to GitHub's 6h default and dies CANCELLED by the next push — never red, so
     # nobody sees it (the 2026-07-27 fan_any_early_winner incident burned a full
-    # day of runners this way). 100 min = cold build + headroom, still a fast red.
+    # day of runners this way). The walls grew past that budget: with the
+    # structural wall's per-artifact anchor check (#4011 (d)) and the native wall
+    # (#4006), a warm run measured ~1h40m (40124872670, 2026-10-24: every wall
+    # passed, then the 100-min ceiling cancelled the tests). 150 min = that run +
+    # headroom; a superlinear regression still goes red, not to the 6h default.
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
