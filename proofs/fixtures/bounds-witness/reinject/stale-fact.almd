@@ -1,0 +1,15 @@
+// #4005 drill: an assignment of the index no longer drops the bounds fact
+// it names (bounds_facts.rs), so the second read's check is elided after
+// `i` moved. The witness still records the `s` and then a bare `a`, which
+// the checker rejects.
+effect fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  var i = 0
+  var s = 0
+  while i < 3 {
+    s = s + xs[i]
+    i = i + 1
+    s = s + xs[i]
+  }
+  println("${s}")
+}
