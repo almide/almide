@@ -253,6 +253,19 @@ no certificate carries a trace yet, so the theorem the definition is for — `K(
 for a shipped artifact `a` — is still open (#4005, #4006, #1696). Until it is
 proven, "memory safe" is a claim about the trace model, not about the bytes.
 
+**The native leg (#4006).** For the programs the verified native renderer
+renders (`proofs/native-verified-floor.txt`, 106 of 958 `spec/wasm_cross`
+programs, grow-only), `proofs/native-wall.sh` judges per build the ownership
+certificate of every rendered function — taken from the exact MIR the
+renderer rendered (`try_render_rust_source_certified`), so the probe charges,
+the result-window rewrite and the make-unique elision are inside what is
+certified — with the extracted checker, the Rocq kernel and almide-verify,
+and pins the rendered Rust source's SHA-256. Its poison leg rejects the
+witness of a render that lost a release with its Rust-mirror check bypassed
+(`scripts/witness-reinject.sh native`). TRUSTED: that rustc compiles the
+rendered source into a binary keeping that balance, and every program off the
+floor, which ships from the standard codegen with no certificate.
+
 The receipt's claims are scoped to exactly this:
 
 - **The flight-grade property SET is complete on the value-semantics subset**:

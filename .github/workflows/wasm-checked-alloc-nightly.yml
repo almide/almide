@@ -102,14 +102,15 @@ jobs:
     # proofs/fixtures/<property>-witness/reinject/ is put back into the
     # emitter and its witness must be rejected, while the unpatched
     # emitter's witness for the same program is accepted — a lost bounds
-    # check for `bounds`, a lost list-literal slot store for `init`.
+    # check for `bounds`, a lost list-literal slot store for `init`, a lost
+    # release in the verified native render for `native` (#4006).
     name: Re-injected lost instructions are rejected (${{ matrix.property }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        property: [bounds, init]
+        property: [bounds, init, native]
     steps:
       - uses: actions/checkout@v7
 
