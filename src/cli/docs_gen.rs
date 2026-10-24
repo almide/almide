@@ -445,6 +445,8 @@ fn check_numeric_protocol_matrix() -> Vec<String> {
 /// expected surface from the range table and diffs it against the compiler's
 /// own module interfaces in both directions, so the family can never again be
 /// extended point-wise: a new carrier or a forgotten cell is a drift here.
+/// The Float source row is asserted too (#4145: the `float.to_int` cell had no
+/// `_checked`/`_saturating` twin and nothing noticed).
 fn check_numeric_conversion_matrix() -> Vec<String> {
     // (module, min, max) — i128 so u64::MAX fits.
     const CARRIERS: &[(&str, i128, i128)] = &[
@@ -482,6 +484,14 @@ fn check_numeric_conversion_matrix() -> Vec<String> {
         target.push(("int", format!("to_{}_checked", s.0)));
         target.push(("int", format!("to_{}_saturating", s.0)));
     }
+    // The Float row (#4145): Float → any integer carrier is lossy (NaN, ±inf,
+    // a fractional part, out of range), so every destination — the Int column
+    // included, spelled `float.to_int` — carries the whole trio.
+    for d in CARRIERS.iter().map(|c| c.0).chain(["int"]) {
+        expect_present.push(("float", format!("to_{d}")));
+        expect_present.push(("float", format!("to_{d}_checked")));
+        expect_present.push(("float", format!("to_{d}_saturating")));
+    }
     for m in CARRIERS.iter().map(|c| c.0).chain(["int"]) {
         expect_present.push((m, "min_value".to_string()));
         expect_present.push((m, "max_value".to_string()));
@@ -490,7 +500,7 @@ fn check_numeric_conversion_matrix() -> Vec<String> {
     let mut drifts = Vec::new();
     let mut surface: std::collections::HashMap<&str, std::collections::HashSet<String>> =
         std::collections::HashMap::new();
-    for m in CARRIERS.iter().map(|c| c.0).chain(["int"]) {
+    for m in CARRIERS.iter().map(|c| c.0).chain(["int", "float"]) {
         surface.insert(m, module_function_names(m));
     }
     for (m, f) in &expect_present {
