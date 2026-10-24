@@ -11,7 +11,7 @@
 > Untrusted input can make it fail, but only with a defined error or a defined abort, within
 > documented bounds on time and memory.
 
-It may be stated without qualification only when every row of the table below reads **closed**:
+It may be stated without qualification only when every row of both tables below reads **closed**:
 the class is impossible by construction, or a mechanism prevents it and a gate in CI fails when
 the mechanism stops working. Until then the claim is stated per class, with this page as the
 reference. What stays trusted even then (the Rocq kernel, rustc / LLVM / wasmtime, the hardware,
@@ -47,6 +47,24 @@ table because they are what "PHP-like" means to most readers.
 | 11d | Shell injection | **closed** | `process.*` takes a program and an argv list and spawns it without a shell (`crates/almide-rt-core/src/process_core.rs`). | — |
 | 11e | HTML injection | **closed** | `SafeHtml` is opaque; `html.escape` is the only way in from a `String`, `html.raw` is the named opt-out. | — |
 
+## Toolchain and supply chain
+
+The first table covers what an Almide program can be made to do. These rows cover how attacker
+code reaches a program before it runs: through the source a reviewer reads, the dependencies a
+model writes, and the CI that builds and signs the release. The 2026 sources: the npm worms
+spread by maintainer account takeover (Shai-Hulud and its August 2026 keyv / cacheable variant),
+models inventing package and repository names that attackers then register (slopsquatting, and
+July 2026's HalluSquatting, up to 85% on repository-cloning prompts), and moved action tags
+(tj-actions/changed-files, CVE-2025-30066).
+
+| # | Class | Status | Mechanism today | Gap and work |
+|---|---|---|---|---|
+| 12 | Predictable randomness used for a secret | **open** | wasm reads host entropy (`prim.random_get`, `wasi:random`). | Native `random.int` / `float` / `choice` / `shuffle` are a time-seeded xorshift (`runtime/rs/src/random.rs`), and no function promises cryptographic randomness, so a model writing a token with `random.int` writes a guessable one. `random.bytes` as the one CSPRNG, the others documented as not for secrets (#3938). |
+| 13 | Source that reads differently from what compiles (Trojan Source) | partly | Identifiers are ASCII-only (`crates/almide-syntax/src/lexer.rs:212`), so homoglyph identifiers cannot be written. | Raw bidirectional control characters (U+202A–U+202E, U+2066–U+2069) in comments and string literals pass `almide check` with no diagnostic (#4092). |
+| 14 | A hallucinated or typo'd dependency | **open** | `almide.lock` pins each locked dependency to a commit. | `almide add owner/repo` fetches any owner's repository with no check and no prompt before the first fetch (`src/project_fetch.rs:334`) (#4093). |
+| 15 | A dependency's code runs at build time | **open** | `@extern` is counted as every capability (epoch 8). | A dependency's `native/*.rs` is injected into the build, and `[native-deps]` crates run their `build.rs` on the developer's machine during `almide build` / `run` / `test`, outside `[permissions]` and with no grant (#4093). |
+| 16 | A compromised CI action | partly | Release assets carry Sigstore attestations and sha256 checksums (#1534); the default workflow token is read-only; Dependabot covers the `github-actions` ecosystem. | Every `uses:` is a tag or branch, not a commit, and the repository does not require commit pins. `release.yml`, which can write and attest a release, is exposed to a moved tag (#4094). |
+
 ## Order of work
 
 1. **Close class 5 first.** It is the only row where ordinary code can corrupt memory today. The
@@ -62,6 +80,9 @@ table because they are what "PHP-like" means to most readers.
    from "partly" to closed.
 5. **Source semantics** (#4014) is the long tail: it proves the checker's verdict means what this
    page says.
+6. **The toolchain rows** run alongside steps 1–5, since none of them depends on the compiler's
+   memory model. Do the small ones first: commit-pinned actions (#4094), the bidi refusal (#4092),
+   `random.bytes` (#3938). Then the dependency grant (#4093), which needs a ruling on its options.
 
 ## How the page stays true
 
