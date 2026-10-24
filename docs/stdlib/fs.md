@@ -456,6 +456,18 @@ false true
 
 Recursively list every entry — files AND directories — in a directory tree
 
+A symlink is listed as an entry and never followed (C-396): a link to a
+directory outside the tree lists nothing outside it, and a link loop cannot
+repeat the walk. `fs.glob` walks the same way. `dir` itself is opened as
+written, its own symlinks followed.
+
+Following links is a non-goal for now: there is no opt-in. Not following is
+the safe default for a directory others can write to (an upload or spool
+directory, an extracted archive, a cloned repository). Of the walkers measured
+(2026-10-25), Go's `filepath.WalkDir` has no follow option either, while
+Python's `os.walk(followlinks=True)` and Rust's walkdir `follow_links(true)`
+do. To descend into a linked directory, name it to `fs.walk` yourself.
+
 ```almd run
 import fs
 
