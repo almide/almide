@@ -99,15 +99,16 @@ fn render_bundle(file: &str, w: &almide_mir::pipeline::ProgramWitnesses) -> Vec<
     out
 }
 
-/// `[permissions].allow` from `./almide.toml`, when it names any — the same
-/// manifest `almide check` enforces; it makes the caps witness able to reject.
+/// `[permissions].allow` from `./almide.toml`, when the key is written — the
+/// same manifest `almide check` enforces; it makes the caps witness able to
+/// reject. An explicit `allow = []` grants nothing (#4101).
 fn manifest_allow() -> Option<Vec<String>> {
     let path = Path::new("almide.toml");
     if !path.exists() {
         return None;
     }
     let proj = crate::project::parse_toml(path).ok()?;
-    (!proj.permissions.is_empty()).then_some(proj.permissions)
+    proj.permissions
 }
 
 /// Produce the bundle for `file` and write it to `out`.

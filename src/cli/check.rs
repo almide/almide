@@ -213,7 +213,7 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
     // Security Layer 2: check permissions if defined in almide.toml
     if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            if !proj.permissions.is_empty() || proj.proc_allow.is_some() {
+            if proj.permissions.is_some() || proj.proc_allow.is_some() {
                 let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
                 if super::enforce_project_permissions(&ir, &proj).is_err() {
                     std::process::exit(1);
@@ -377,7 +377,7 @@ fn enforce_effect_permissions(
     proj: &project::Project,
     entries: &[(&String, &almide::codegen::pass_effect_inference::FunctionEffects)],
 ) {
-    let Ok(allowed) = super::allowed_permissions_or_report(&proj.permissions) else {
+    let Ok(allowed) = super::allowed_permissions_or_report(proj.permissions.as_deref().unwrap_or_default()) else {
         std::process::exit(1);
     };
 
@@ -408,7 +408,7 @@ fn enforce_effect_permissions(
         err(&format!("\n{} capability violation(s) found", violations));
         std::process::exit(1);
     }
-    err(&format!("\nPermissions OK: all effects within [permissions].allow = {:?}", proj.permissions));
+    err(&format!("\nPermissions OK: all effects within [permissions].allow = {:?}", proj.permissions.as_deref().unwrap_or_default()));
 }
 
 pub fn cmd_check_effects(file: &str) {
@@ -465,7 +465,7 @@ pub fn cmd_check_effects(file: &str) {
     // Check permissions from almide.toml
     if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            if !proj.permissions.is_empty() {
+            if proj.permissions.is_some() {
                 enforce_effect_permissions(&proj, &entries);
             }
         }

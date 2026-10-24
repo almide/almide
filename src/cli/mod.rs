@@ -188,8 +188,10 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
 /// the build routes reach it through `compile_driver::optimize_gate_and_link`,
 /// and `check` calls it directly. Each violation is printed as it is found.
 pub fn enforce_project_permissions(ir: &almide::ir::IrProgram, proj: &crate::project::Project) -> Result<(), String> {
-    if !proj.permissions.is_empty() {
-        check_permissions(ir, &proj.permissions)?;
+    // An absent `allow` is unchecked; an explicit `allow = []` allows no
+    // capability at all (#4101).
+    if let Some(allow) = &proj.permissions {
+        check_permissions(ir, allow)?;
     }
     enforce_proc_allowlist(ir, proj.proc_allow.as_deref())
 }
