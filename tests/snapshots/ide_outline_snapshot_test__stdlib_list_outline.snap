@@ -32,12 +32,15 @@ fn list.__fallible_take_while[A, E](xs: List[A], f: fn(A) -> Result[Bool, E]) ->
 fn list.__fallible_unique_by[A, K, E](xs: List[A], f: fn(A) -> Result[K, E]) -> Result[List[A], E]
 fn list.__fallible_update[A, E](xs: List[A], i: Int, f: fn(A) -> Result[A, E]) -> Result[List[A], E]
 fn list.__fallible_zip_with[A, B, C, E](xs: List[A], ys: List[B], f: fn(A, B) -> Result[C, E]) -> Result[List[C], E]
+fn list.__join_string(xs: List[String], sep: String) -> String
 fn list.__key_order[K](a: K, b: K) -> Int
 fn list.__merge_with[A](a: List[A], b: List[A], cmp: fn(A, A) -> Int) -> List[A]
 fn list.__merge_with_fallible[A, E](a: List[A], b: List[A], cmp: fn(A, A) -> Result[Int, E]) -> Result[List[A], E]
 fn list.__pick_by_keys[A, K](xs: List[A], keys: List[K], want: Int) -> Option[A]
 fn list.__pick_with_fallible[A, E](xs: List[A], cmp: fn(A, A) -> Result[Int, E], want: Int) -> Result[Option[A], E]
+fn list.__product_int(xs: List[Int]) -> Int
 fn list.__search_fallible[A, E](xs: List[A], order: fn(A) -> Result[Int, E]) -> Result[Option[Int], E]
+fn list.__sum_int(xs: List[Int]) -> Int
 fn list.all[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.any[A](xs: List[A], f: fn(A) -> Bool) -> Bool
 fn list.binary_search(xs: List[Int], target: Int) -> Option[Int]
@@ -71,7 +74,7 @@ fn list.insert[A](xs: List[A], i: Int, val: A) -> List[A]
 fn list.intersperse[A](xs: List[A], sep: A) -> List[A]
 fn list.is_empty[A](xs: List[A]) -> Bool
 fn list.iterate[T](seed: T, f: fn(T) -> T, n: Int) -> List[T]
-fn list.join(xs: List[String], sep: String) -> String
+fn list.join[T](xs: List[T], sep: T) -> T
 fn list.last[A](xs: List[A]) -> Option[A]
 fn list.len[A](xs: List[A]) -> Int
 fn list.length[A](xs: List[A]) -> Int
@@ -85,7 +88,7 @@ fn list.min_with[A](xs: List[A], cmp: fn(A, A) -> Int) -> Option[A]
 fn list.new[A]() -> List[A]
 fn list.partition[A](xs: List[A], f: fn(A) -> Bool) -> (List[A], List[A])
 fn list.pop[A](xs: List[A]) -> Option[A]
-fn list.product(xs: List[Int]) -> Int
+fn list.product[A](xs: List[A]) -> A
 fn list.push[A](xs: List[A], x: A) -> Unit
 fn list.range(start: Int, end: Int) -> List[Int]
 fn list.range_step(start: Int, end: Int, step: Int) -> List[Int]
@@ -101,7 +104,7 @@ fn list.sort[A](xs: List[A]) -> List[A]
 fn list.sort_by[A, B](xs: List[A], f: fn(A) -> B) -> List[A]
 fn list.sort_with[A](xs: List[A], cmp: fn(A, A) -> Int) -> List[A]
 fn list.split_at[T](xs: List[T], n: Int) -> (List[T], List[T])
-fn list.sum(xs: List[Int]) -> Int
+fn list.sum[A](xs: List[A]) -> A
 fn list.swap[A](xs: List[A], i: Int, j: Int) -> List[A]
 fn list.tail[A](xs: List[A]) -> List[A]
 fn list.take[A](xs: List[A], n: Int) -> List[A]
