@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 48 stdlib modules, 1471 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 48 stdlib modules, 1473 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -19,7 +19,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [env](#env) | 9 | 0 |
 | [error](#error) | 3 | 0 |
 | [ffi](#ffi) | 4 | 0 |
-| [float](#float) | 46 | 0 |
+| [float](#float) | 48 | 0 |
 | [float32](#float32) | 30 | 0 |
 | [float64](#float64) | 31 | 0 |
 | [fs](#fs) | 41 | 1 |
@@ -62,11 +62,11 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 [args.md](args.md)
 
 - `effect args.raw() -> List[String]` — Same as env.args; argv[0] excluded.
-- `effect args.flag(name: String) -> Bool` — True on --name or -<first letter of name>.
-- `effect args.has_flag(name: String) -> Bool` — True on --name; a one-letter name also matches -name.
-- `effect args.option(name: String) -> Option[String]` — Value of --name=v or --name v; none if absent.
+- `effect args.flag(name: String) -> Bool` — True on --name before `--`; a one-letter name also matches -name.
+- `effect args.has_flag(name: String) -> Bool` — True on --name before `--`; a one-letter name also matches -name.
+- `effect args.option(name: String) -> Option[String]` — Value of --name=v or --name v before `--`; none if absent.
 - `effect args.option_or(name: String, fallback: String) -> String` — option(name), or fallback when absent.
-- `effect args.positional() -> List[String]` — Args not starting with -; option values too.
+- `effect args.positional() -> List[String]` — Args before `--` not starting with -, then every arg after `--`; option values too.
 - `effect args.positional_at(i: Int) -> Option[String]` — i-th positional arg; none if out of range.
 
 ## base64
@@ -416,6 +416,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float.to_float64(n: Float) -> Float64` — Same f64 value; always exact.
 - `float.from_float32(n: Float32) -> Float` — Exact widening; never rounds.
 - `float.from_float64(n: Float64) -> Float` — Same f64 value; always exact.
+- `float.to_int_checked(n: Float) -> Option[Int]` — some iff n is an integer in -2^63..2^63-1; NaN and ±inf give none.
 - `float.to_int8_checked(n: Float) -> Option[Int8]` — some iff n is an integer in -128..127.
 - `float.to_int16_checked(n: Float) -> Option[Int16]` — some iff n is an integer in -32768..32767.
 - `float.to_int32_checked(n: Float) -> Option[Int32]` — some iff n is an integer in -2^31..2^31-1.
@@ -425,6 +426,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float.to_uint32_checked(n: Float) -> Option[UInt32]` — some iff n is an integer in 0..2^32-1.
 - `float.to_uint64_checked(n: Float) -> Option[UInt64]` — some iff n is an integer in 0..2^64-1.
 - `float.to_float32_checked(n: Float) -> Option[Float32]` — some if n is exact in Float32; NaN and ±inf give none.
+- `float.to_int_saturating(n: Float) -> Int` — Truncates, clamps to Int range; NaN gives 0.
 - `float.to_int8_saturating(n: Float) -> Int8` — Truncates, clamps to -128..127; NaN gives 0.
 - `float.to_int16_saturating(n: Float) -> Int16` — Truncates, clamps to -32768..32767; NaN gives 0.
 - `float.to_int32_saturating(n: Float) -> Int32` — Truncates, clamps to Int32 range; NaN gives 0.
@@ -965,10 +967,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [io.md](io.md)
 
-- `effect io.read_line() -> String` — Next stdin line, newline cut; "" at EOF too — read_line_opt tells them apart.
+- `effect io.read_line() -> String` — Next stdin line, newline cut, bad UTF-8 as U+FFFD; "" at EOF too — read_line_opt tells them apart.
 - `effect io.read_line_opt() -> Option[String]` — Next stdin line, newline cut; none at EOF, some("") for an empty line.
 - `effect io.print(s: String) -> Unit` — Writes s, no newline, then flushes.
-- `effect io.read_all() -> String` — Rest of stdin as text; empty at EOF.
+- `effect io.read_all() -> String` — Rest of stdin as text, bad UTF-8 as U+FFFD; empty at EOF.
 - `effect io.read_byte() -> Int` — Next stdin byte 0..255, or -1 at EOF.
 - `effect io.read_n_bytes(n: Int) -> List[Int]` — Up to n stdin bytes; [] if n <= 0.
 - `io.write_bytes(data: List[Int]) -> Unit` — Low byte of each Int to stdout; unflushed.
