@@ -166,16 +166,24 @@ pattern to fail retried with its next choice. A repeated group's capture is its
 last instance; an instance that matched nothing counts but ends the
 repetition. Native and wasm agree byte for byte.
 
-Matching takes time proportional to the pattern's size times the subject's
-length, whatever the pattern (#4019): `(a+)+$` or `(a|aa)*b` on 100,000
-characters answers at once. Each call first runs a backtracking matcher under a
-step budget of 4 × (pattern length + 1) × (subject length + 1) — it is the
-faster engine on ordinary patterns — and, if the budget runs out, a Pike VM
-(Thompson's NFA with the same preferences, one thread per program state) gives
-the same answer. Counted repetition is expanded in the VM's program, one copy
-per count; a pattern whose program would exceed 20,000 states (`.{0,20000}`,
-`((a){200}){200}`) is matched by the backtracking matcher alone, without the
-budget, so for such a pattern the linear bound does not hold.
+Matching takes time linear in the subject's length, whatever the pattern
+(#4019, #4083): `(a+)+$` or `(a|aa)*b` on 100,000 characters answers at once.
+Each call first runs a backtracking matcher under a step budget of
+4 × (pattern length + 1) × (subject length + 1) — it is the faster engine on
+ordinary patterns — and, if the budget runs out, a Pike VM (Thompson's NFA with
+the same preferences, at most one thread per state) gives the same answer. The
+VM's work per subject character is at most its number of states: about the
+pattern's length, with each counted repetition multiplying the part it repeats
+by its count (`a{0,20000}b` has about 40,000; nested counts multiply,
+`((a){200}){200}` about 120,000). Below 20,000 states the program holds one
+copy of a repeated body per count; past that it holds one copy and counts in a
+register per thread, so its size stays the pattern's and its memory is the
+threads actually live — the bound is the same either way. So the time is
+proportional to that state count times the subject's length: a 20,000-state
+pattern like `(a|aa){0,2500}b` on 100,000 characters takes about 17 s native
+and 150 s on wasm in the worst case, where every state is live at every
+character; most patterns keep only a few live. A pattern taken from input can
+still choose a large state count with nested counts.
 
 | Syntax | Meaning |
 |---|---|
