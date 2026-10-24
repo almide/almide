@@ -1,0 +1,7 @@
+// #4011 (d) drill: a range fill's cursor advances two slots per step while
+// the witness still records the one-slot step — the init checker accepts,
+// the bytes write past the block.
+effect fn main() -> Unit = {
+  let ys = 0..<4
+  println("${list.len(ys)}")
+}

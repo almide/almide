@@ -1,0 +1,7 @@
+// #4011 (d) drill: a list literal's first element is stored into the second
+// slot while the witness still records `s0 s1` — the init checker accepts,
+// the bytes leave slot 0 unwritten.
+effect fn main() -> Unit = {
+  let xs = [4, 5]
+  println("${list.len(xs)}")
+}
