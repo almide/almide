@@ -46,10 +46,11 @@ fn repo_root() -> PathBuf {
 }
 
 fn scan_diagnostic_codes() -> BTreeSet<String> {
-    // Scan every `crates/**/*.rs` for `with_code("E###")`; collect
-    // unique codes. Deliberately doesn't use a regex crate — the
-    // test crate stays dependency-light.
-    let root = repo_root().join("crates");
+    // Scan every `crates/**/*.rs` and `src/**/*.rs` for `with_code("E###")`;
+    // collect unique codes. The CLI crate raises some diagnostics itself
+    // (E109, `src/effect_value_gate.rs`), so `src/` is scanned too.
+    // Deliberately doesn't use a regex crate — the test crate stays
+    // dependency-light.
     let mut codes = BTreeSet::new();
     fn walk(dir: &Path, codes: &mut BTreeSet<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -71,7 +72,8 @@ fn scan_diagnostic_codes() -> BTreeSet<String> {
             }
         }
     }
-    walk(&root, &mut codes);
+    walk(&repo_root().join("crates"), &mut codes);
+    walk(&repo_root().join("src"), &mut codes);
     codes
 }
 
@@ -142,7 +144,7 @@ fn scan_doc_codes() -> BTreeSet<String> {
 #[test]
 fn diagnostic_fixture_and_doc_coverage_report() {
     let codes = scan_diagnostic_codes();
-    assert!(!codes.is_empty(), "no diagnostic codes found under crates/");
+    assert!(!codes.is_empty(), "no diagnostic codes found under crates/ or src/");
 
     let fixtures = scan_fixture_codes();
     let docs = scan_doc_codes();
