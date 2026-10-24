@@ -464,23 +464,6 @@ impl Emitter<'_> {
         }
     }
 
-    /// The local a borrowed TAIL shares: a Var (through block tails), or an
-    /// `if` / `match` whose every arm yields that same local — a `mut`
-    /// param's write-back frame (`if fits(b, …) then set(b, …) else abort(…)`
-    /// ends each arm in `b`). The ret-inc runs once after the join, on the
-    /// one object every arm left on the stack.
-    fn witness_tail_src(&self, tail: &almide_ir::IrExpr) -> Option<u32> {
-        use almide_ir::IrExprKind;
-        let arms: Vec<&almide_ir::IrExpr> = match &crate::rc_ownership::rc_tail(tail).kind {
-            IrExprKind::If { then, else_, .. } => vec![then, else_],
-            IrExprKind::Match { arms, .. } => arms.iter().map(|a| &a.body).collect(),
-            _ => return self.witness_src_local(tail),
-        };
-        let mut srcs = arms.into_iter().map(|a| self.witness_tail_src(a));
-        let first = srcs.next()??;
-        srcs.all(|s| s == Some(first)).then_some(first)
-    }
-
     /// A self tail call in LOOP form (#2757, tco.rs) ends this activation's
     /// path. Each owner local it CARRIES keeps its block until the local's
     /// next rebind releases it (the Bind route's dec-old, stmts.rs) or the
