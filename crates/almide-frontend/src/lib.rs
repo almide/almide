@@ -10,6 +10,7 @@ pub mod deprecation;
 /// Where a stdlib spelling removed at a dialect epoch went (read from the ledger).
 pub mod removed_spellings;
 pub mod attr_vocab;
+pub mod secret_type;
 pub mod stdlib;
 pub mod bundled_sigs;
 /// Which auto-imported bundled modules a program reaches (#4071).

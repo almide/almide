@@ -29,11 +29,34 @@ impl Checker {
         }
         let obj_ty = self.infer_expr(object);
         let concrete = resolve_ty(&obj_ty, &self.uf);
+        self.reject_foreign_opaque_record(&concrete, &format!("read field '{}' of", field));
         let field_ty = self.resolve_field_type(&concrete, field);
         if matches!(field_ty, Ty::Unknown) {
             self.report_unknown_member(object, field, &concrete, member_span);
         }
         field_ty
+    }
+
+    /// E033 (#4107): `ty` is a bundled module's `mod type` record and this
+    /// code is outside that module — the type is opaque here, so `doing` (a
+    /// field read, a literal) is refused and the module's own fns named.
+    pub(crate) fn reject_foreign_opaque_record(&mut self, ty: &Ty, doing: &str) {
+        let Ty::Named(n, _) = ty else { return };
+        let bare = n.as_str().rsplit('.').next().unwrap_or(n.as_str());
+        let Some(owner) = self.env.opaque_records.get(&sym(bare)).copied() else { return };
+        if self.current_module_prefix.as_deref() == Some(owner.as_str()) {
+            return;
+        }
+        let msg = format!("cannot {} opaque type '{}' outside its module '{}'", doing, bare, owner);
+        let line = self.current_span.map(|s| s.line);
+        if self.diagnostics.iter().any(|d| d.message == msg && d.line == line) {
+            return;
+        }
+        self.emit(super::err(
+            msg,
+            format!("'{}' is opaque: build and read it with the `{}` module's fns (`{}.new`, `{}.reveal`)", bare, owner, owner, owner),
+            format!("opaque type {}", bare),
+        ).with_code("E033"));
     }
 
     /// Resolve `mod.name` where `mod` names a module rather than a value.

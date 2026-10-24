@@ -62,7 +62,10 @@ fn lower_for_interp(source: &str) -> Result<almide_ir::IrProgram, String> {
         //          (`path.from_string`); a `mod type SafePath = String` twin.
         //   url  — #1844: closes stdlib_type_shadow (`url.parse`); pure
         //          string arithmetic over the bridge, no prim reached.
-        const INTERP_BUNDLED_MODULES: &[&str] = &["args", "html", "path", "url"];
+        //   secret — #4107: `secret.new` / `secret.reveal` and the type's
+        //          declared `Secret.repr`, pure Almide (the declared-repr
+        //          walkers are frontend IR, so the interp runs them as is).
+        const INTERP_BUNDLED_MODULES: &[&str] = &["args", "html", "path", "secret", "url"];
         let mut bundled: Vec<(String, almide_lang::ast::Program)> = Vec::new();
         for imp in &prog.imports {
             let almide_lang::ast::Decl::Import { path, .. } = imp else { continue };
