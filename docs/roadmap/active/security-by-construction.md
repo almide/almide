@@ -1,7 +1,7 @@
 <!-- description: The security claim Almide is working toward — the vulnerability classes behind the October 2026 PHP and Go advisories, what makes each impossible in Almide today, the gaps with their issues, and the rule for when the claim may be stated -->
 # Security by construction
 
-> Last updated: 2026-10-24
+> Last updated: 2026-10-25
 > Parent issue: #4011 (memory safety with no gap). Related record: the stdlib redesign's R-L0-45 / R-L0-46.
 
 ## The claim
@@ -11,7 +11,7 @@
 > Untrusted input can make it fail, but only with a defined error or a defined abort, within
 > documented bounds on time and memory.
 
-It may be stated without qualification only when every row of both tables below reads **closed**:
+It may be stated without qualification only when every row of every table below reads **closed**:
 the class is impossible by construction, or a mechanism prevents it and a gate in CI fails when
 the mechanism stops working. Until then the claim is stated per class, with this page as the
 reference. What stays trusted even then (the Rocq kernel, rustc / LLVM / wasmtime, the hardware,
@@ -64,6 +64,51 @@ July 2026's HalluSquatting, up to 85% on repository-cloning prompts), and moved 
 | 14 | A hallucinated or typo'd dependency | **open** | `almide.lock` pins each locked dependency to a commit. | `almide add owner/repo` fetches any owner's repository with no check and no prompt before the first fetch (`src/project_fetch.rs:334`) (#4093). |
 | 15 | A dependency's code runs at build time | **open** | `@extern` is counted as every capability (epoch 8). | A dependency's `native/*.rs` is injected into the build, and `[native-deps]` crates run their `build.rs` on the developer's machine during `almide build` / `run` / `test`, outside `[permissions]` and with no grant (#4093). |
 | 16 | A compromised CI action | partly | Release assets carry Sigstore attestations and sha256 checksums (#1534); the default workflow token is read-only; Dependabot covers the `github-actions` ecosystem. | Every `uses:` is a tag or branch, not a commit, and the repository does not require commit pins. `release.yml`, which can write and attest a release, is exposed to a moved tag (#4094). |
+
+## Found by the red team (2026-10-24 / 25)
+
+A red-team sweep against develop (programs, stdlib, runtime, embedded host, toolchain, and the
+contract ledger) found classes the two tables above did not name, and gaps inside rows they do.
+Every item was reproduced on a real binary, native and wasm, and has an issue with its probe.
+The new classes are rows of this page like any other: the claim waits on them too.
+
+| # | Class | Status | Mechanism today | Gap and work |
+|---|---|---|---|---|
+| 17 | A dependency's inline Rust escapes every check | **open** | `@intrinsic` / `@wasm_intrinsic` / `prim` outside the stdlib are refused (E085). | A package's `@inline_rust` is spliced into the native build with no effect category, outside E006, `[permissions]` and the native grant; E085 decides "is stdlib" by path (#4100). |
+| 18 | A manifest that means "nothing" allows everything | **open** | A non-empty `[permissions] allow` is checked on every target (#3275). | `allow = []` is read as "no `[permissions]`", so deny-all cannot be written (#4101). |
+| 19 | The module does not carry its capability set | **open** | Effects are inferred over the linked program. | Every wasm module imports `fs_call` / `host_read` whatever its effects (#4102). |
+| 20 | A secret authenticated or compared with the wrong primitive | **open** | FIPS 180-4 digests on both legs. | No MAC and no constant-time compare, so `sha256(secret ++ body)` and `token == expected` are what a model writes (#4106). |
+| 21 | A secret or internal state reaches output through a renderer | **open** | A type's own `T.repr` is used by interpolation. | An `assert` failure ignores `T.repr` (#4107); runtime error lines embed paths and arguments raw (#4126); an `http.serve` handler error becomes the 500 body and nothing is logged (#4150). |
+| 22 | Input sets a field the program never meant to take from input | **open** | `Codec` runs no code (11c). | Mass assignment: decode fills a defaulted privileged field and drops unknown keys, with no exclusion or strict mode (#4108). |
+| 23 | An outdated toolchain re-opens a fixed std vulnerability | **open** | `almide build` checks that `rustc` runs. | No minimum version; CVE-2024-24576 returns on Windows below 1.77.2 (#4110). |
+| 24 | Input that two parsers read differently | **open** | Native and wasm parse identically for most inputs. | JSON deletes a lone surrogate (`ad\ud800min` → `admin`, #4111) and is lenient on duplicates and trailing data (#4112); HTTP request line and header leniency (#4112); url vs WHATWG (#4116); `query_params` native ≠ wasm (#4117); `parse_iso` year wrap (#4118); base64 malleability (#4119); case mapping and NaN / Unicode-space number parsing (#4121); router vs middleware path (#4133); truncated HTTP responses accepted (#4137); stdin errors read as "" on native (#4142); `args` `-d` collision (#4144); `float.to_int` with no checked twin (#4145); negative `take` (#4147); `from_parts` rollover (#4149). |
+| 25 | The toolchain acts on an untrusted project before it is run | **open** | `didChange` never fetches (#927). | The LSP's `didOpen` and `almide ide` fetch dependencies and write `almide.lock` (#4128); environment switches replace the compiled source or skip checks in release builds (#4129); `fmt` / `test` walkers follow symlinks and rewrite files outside the target (#4140). |
+| 26 | A capability reaches code through a function value or a misfiled category | **open** | E006 and `[permissions]` see direct calls and `let` aliases. | Passing an effect fn as a value (`list.map(fs.read_text)`, user higher-order functions, record fields, fn-typed parameters, `option.map`) lets a pure fn do I/O (#4151) and bypasses `[permissions]` (#4152); process spawning is the `Env` category (#4155); a protocol-bound call skips E006 (#4158); host functions declared as plain `fn` (#4159). |
+| 27 | Compile cost from untrusted source | **open** | Syntactic nesting is capped at 500. | Inferred types grow 2^n with no sharing (#4114). ADR-0030 makes compile cost a contract (#4136). |
+
+Gaps the sweep found inside rows 1–16 (each row's status changes only in its gate PR, as below):
+
+- **Row 3**: C-376 is violated. Rebinding a `var` frees the block under a live `let p = ffi.address(v)`, and a write corrupts an unrelated value on native (#4153).
+- **Row 9**:
+  - hash flooding (#4104);
+  - net reads allocate the requested length (#4123);
+  - unix fds pile up (#4124);
+  - embedded-host caps multiply per fan worker (#4135);
+  - fan threads are unbounded (#4141);
+  - `bytes.repeat` has no ceiling (#4154);
+  - derived `Codec.decode` aborts on a short variant payload, a one-request DoS (#4164).
+- **Row 10**:
+  - no safe temp file, and `create_temp_*` use predictable names (#4113);
+  - route params bind `..` (#4134);
+  - `fs.walk` follows symlinks (#4143);
+  - SafePath admits absolute paths (#4146);
+  - wasm `read_text_if_exists` reads ELOOP as absent (#4154).
+- **Row 11d**: `process.kill` / `is_alive` run `kill` from `PATH` and accept pid ≤ 0 (#4125); `process.run` is `ok` on failure (#4148).
+- **Row 11e**: `html.escape` is text-context only, and no HTML response requires `SafeHtml` (#4120). The class is partly open in substance.
+- **Row 12**: the embedded host serves `random_get` from a clock-seeded xorshift (#4122).
+- **Row 14**: an unknown import hints at adding a dependency (#4109).
+- **Row 16**: self-update and the installers fail open and do not verify the attestation (#4127).
+- **Cross-target divergences** (no row of their own; each breaks the byte-identity promise): #4117, #4138, #4142, #4154, #4161, #4163, #4165.
 
 ## Order of work
 
