@@ -22,6 +22,11 @@ mod runtime_random {
         env!("CARGO_MANIFEST_DIR"),
         "/runtime/rs/src/random.rs"
     ));
+
+    // The emitted prelude's abort, which random.bytes calls on a negative n.
+    fn almide_abort(msg: impl std::fmt::Display) -> ! {
+        panic!("{msg}")
+    }
 }
 
 fn source(rel: &str) -> String {
