@@ -24,6 +24,7 @@ impl<'a> Interpreter<'a> {
             "fold" => self.hof_try_map_fold(a),
             "update" => self.hof_try_map_update(a, false),
             "upsert" => self.hof_try_map_update(a, true),
+            h if almide_lang::fallible_hofs::is_fallible_hof("list", h) => self.try_sequence_cell(h, a),
             _ => Flow::Unsupported(format!("HOF map.__fallible_{hof}")),
         }
     }
@@ -159,6 +160,7 @@ impl<'a> Interpreter<'a> {
                     other => other,
                 }
             }
+            h if almide_lang::fallible_hofs::is_fallible_hof("list", h) => self.try_sequence_cell(h, a),
             _ => Flow::Unsupported(format!("HOF set.__fallible_{hof}")),
         }
     }

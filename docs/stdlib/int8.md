@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (20 functions)
+## Signature index (48 functions)
 
 ```
 // Sign-extending widen; always exact.
@@ -143,6 +143,118 @@ int8.min_value() -> Int8
 // Largest Int8: 127.
 // @since 0.38.0
 int8.max_value() -> Int8
+
+// -1, 0 or 1 as a is below, equal to or above b.
+// @since unreleased
+int8.compare(a: Int8, b: Int8) -> Int
+
+// Lesser of a and b.
+// @since unreleased
+int8.min(a: Int8, b: Int8) -> Int8
+
+// Greater of a and b.
+// @since unreleased
+int8.max(a: Int8, b: Int8) -> Int8
+
+// x limited to lo..hi; aborts when lo > hi.
+// @since unreleased
+int8.clamp(x: Int8, lo: Int8, hi: Int8) -> Int8
+
+// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+// @since unreleased
+int8.floor_div(a: Int8, b: Int8) -> Int8
+
+// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+// @since unreleased
+int8.modulo(a: Int8, b: Int8) -> Int8
+
+// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+// @since unreleased
+int8.pow(base: Int8, exp: Int) -> Int8
+
+// True when x is a multiple of 2.
+// @since unreleased
+int8.is_even(x: Int8) -> Bool
+
+// True when x is not a multiple of 2.
+// @since unreleased
+int8.is_odd(x: Int8) -> Bool
+
+// Magnitude of x; min_value wraps to itself.
+// @since unreleased
+int8.abs(x: Int8) -> Int8
+
+// -1, 0 or 1 by the sign of x.
+// @since unreleased
+int8.sign(x: Int8) -> Int
+
+// Bitwise AND.
+// @since unreleased
+int8.band(a: Int8, b: Int8) -> Int8
+
+// Bitwise OR.
+// @since unreleased
+int8.bor(a: Int8, b: Int8) -> Int8
+
+// Bitwise XOR.
+// @since unreleased
+int8.bxor(a: Int8, b: Int8) -> Int8
+
+// Bitwise complement of all 8 bits.
+// @since unreleased
+int8.bnot(x: Int8) -> Int8
+
+// a shifted left by n bits; n is taken mod 8.
+// @since unreleased
+int8.bshl(a: Int8, n: Int) -> Int8
+
+// Sign-filling right shift; n is taken mod 8.
+// @since unreleased
+int8.bshr(a: Int8, n: Int) -> Int8
+
+// Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+// @since unreleased
+int8.count_leading_zeros(x: Int8) -> Int
+
+// Zero bits below the lowest set bit; 8 for 0.
+// @since unreleased
+int8.count_trailing_zeros(x: Int8) -> Int
+
+// Number of set bits among the 8.
+// @since unreleased
+int8.count_ones(x: Int8) -> Int
+
+// The bytes in reverse order; one byte, so x itself.
+// @since unreleased
+int8.byte_swap(x: Int8) -> Int8
+
+// a + b wrapped to 8 bits.
+// @since unreleased
+int8.wrap_add(a: Int8, b: Int8) -> Int8
+
+// a - b wrapped to 8 bits.
+// @since unreleased
+int8.wrap_sub(a: Int8, b: Int8) -> Int8
+
+// a * b wrapped to 8 bits.
+// @since unreleased
+int8.wrap_mul(a: Int8, b: Int8) -> Int8
+
+// The 8 bits of a rotated left by n; n is taken mod 8.
+// @since unreleased
+int8.rotate_left(a: Int8, n: Int) -> Int8
+
+// The 8 bits of a rotated right by n; n is taken mod 8.
+// @since unreleased
+int8.rotate_right(a: Int8, n: Int) -> Int8
+
+// Bits needed to hold x; 0 for 0, 8 if negative.
+// @since unreleased
+int8.bit_length(x: Int8) -> Int
+
+// Decimal Int8 from trimmed s; err on junk or outside -128..127.
+// @since unreleased
+int8.parse(s: String) -> Result[Int8, String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

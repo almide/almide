@@ -87,3 +87,122 @@ fn min_value() -> Int64 = int.to_int64(-9223372036854775807 - 1)
 
 /// Largest Int64: 2^63-1.
 fn max_value() -> Int64 = int.to_int64(9223372036854775807)
+
+// ── Integer: compare, select, divide (R-sized-02, R-sized-08, R-sized-10) ──
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: Int64, b: Int64) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: Int64, b: Int64) -> Int64 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: Int64, b: Int64) -> Int64 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: Int64, lo: Int64, hi: Int64) -> Int64 = int.to_int64(int.clamp(int.from_int64(x), int.from_int64(lo), int.from_int64(hi)))
+
+/// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+fn floor_div(a: Int64, b: Int64) -> Int64 = int.to_int64(floor_quotient(int.from_int64(a), int.from_int64(b)))
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: Int64, b: Int64) -> Int64 = int.to_int64(floor_remainder(int.from_int64(a), int.from_int64(b)))
+
+// Int's `/` aborts on min_value / -1, as Int64's `/` does (Int64 arithmetic goes through Int, #4055).
+local fn floor_quotient(a: Int, b: Int) -> Int = {
+  let q = a / b
+  if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+// b == -1 divides every a, and Int's `%` aborts on min_value % -1: answered first.
+local fn floor_remainder(a: Int, b: Int) -> Int = if b == -1 then 0
+else {
+  let m = a % b
+  if m != 0 and (m < 0) != (b < 0) then m + b else m
+}
+
+/// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+fn pow(base: Int64, exp: Int) -> Int64 = int.to_int64(math.pow(int.from_int64(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: Int64) -> Bool = int.from_int64(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: Int64) -> Bool = int.from_int64(x) % 2 != 0
+
+/// Magnitude of x; min_value wraps to itself.
+fn abs(x: Int64) -> Int64 = int.to_int64(int.abs(int.from_int64(x)))
+
+/// -1, 0 or 1 by the sign of x.
+fn sign(x: Int64) -> Int = math.sign(int.from_int64(x))
+
+// ── Integer: bitwise, FixedWidthInteger: bit counts (R-sized-10) ──
+/// Bitwise AND.
+fn band(a: Int64, b: Int64) -> Int64 = int.to_int64(int.band(int.from_int64(a), int.from_int64(b)))
+
+/// Bitwise OR.
+fn bor(a: Int64, b: Int64) -> Int64 = int.to_int64(int.bor(int.from_int64(a), int.from_int64(b)))
+
+/// Bitwise XOR.
+fn bxor(a: Int64, b: Int64) -> Int64 = int.to_int64(int.bxor(int.from_int64(a), int.from_int64(b)))
+
+/// Bitwise complement of all 64 bits.
+fn bnot(x: Int64) -> Int64 = int.to_int64(int.bnot(int.from_int64(x)))
+
+/// a shifted left by n bits; n is taken mod 64.
+fn bshl(a: Int64, n: Int) -> Int64 = int.to_int64(int.bshl(int.from_int64(a), shift_count(n)))
+
+/// Sign-filling right shift; n is taken mod 64.
+fn bshr(a: Int64, n: Int) -> Int64 = int.to_int64(int.bshr(int.from_int64(a), shift_count(n)))
+
+// n reduced into 0..63, a negative n included.
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+fn count_leading_zeros(x: Int64) -> Int = int.count_leading_zeros(int.from_int64(x))
+
+/// Zero bits below the lowest set bit; 64 for 0.
+fn count_trailing_zeros(x: Int64) -> Int = int.min(int.count_trailing_zeros(int.from_int64(x)), 64)
+
+/// Number of set bits among the 64.
+fn count_ones(x: Int64) -> Int = int.pop_count(int.from_int64(x))
+
+/// The 8 bytes in reverse order (endian flip).
+fn byte_swap(x: Int64) -> Int64 = int.to_int64(int.byte_swap(int.from_int64(x)))
+
+// ── FixedWidthInteger: wrapping, rotation, bit length; parse (R-int-11, R-int-12, R-sized-02) ──
+/// a + b wrapped to 64 bits.
+fn wrap_add(a: Int64, b: Int64) -> Int64 = int.to_int64(int.from_int64(a) + int.from_int64(b))
+
+/// a - b wrapped to 64 bits.
+fn wrap_sub(a: Int64, b: Int64) -> Int64 = int.to_int64(int.from_int64(a) - int.from_int64(b))
+
+/// a * b wrapped to 64 bits.
+fn wrap_mul(a: Int64, b: Int64) -> Int64 = int.to_int64(int.from_int64(a) * int.from_int64(b))
+
+/// The 64 bits of a rotated left by n; n is taken mod 64.
+fn rotate_left(a: Int64, n: Int) -> Int64 = int.to_int64(rotate_bits(int.from_int64(a), rotate_count(n)))
+
+/// The 64 bits of a rotated right by n; n is taken mod 64.
+fn rotate_right(a: Int64, n: Int) -> Int64 = int.to_int64(rotate_bits(int.from_int64(a), rotate_count(0 - rotate_count(n))))
+
+// The low 64 bits v rotated left by k (k in 0..63); bits above 64 are dropped by the narrowing.
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.band(int.bshr(v, 64 - k), int.bnot(int.bshl(-1, k))))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Bits needed to hold x; 0 for 0, 64 if negative.
+fn bit_length(x: Int64) -> Int = 64 - int.count_leading_zeros(int.from_int64(x))
+
+/// Decimal Int64 from trimmed s; err on junk or overflow.
+fn parse(s: String) -> Result[Int64, String] = match int.parse(s) {
+  ok(n) => ok(int.to_int64(n)),
+  err(e) => err(e),
+}

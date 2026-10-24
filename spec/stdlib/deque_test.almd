@@ -1,0 +1,218 @@
+// deque (R-deque-01..04, R-L0-42): a double-ended queue whose four end
+// operations are in-place `mut` verbs and whose other fns are the list fn of
+// the same name over the front-to-back order. Each generic fn runs with Int
+// and String elements and meets the empty deque; the one-position reads give
+// none out of range.
+local fn asc(a: Int, b: Int) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+local fn by_len(a: String, b: String) -> Int = string.len(a) - string.len(b)
+
+local fn drain_front(d: Deque[Int]) -> List[Int] = {
+  var q = d
+  var out: List[Int] = []
+  for _ in 0..<deque.len(d) {
+    match deque.pop_front(q) {
+      some(x) => list.push(out, x),
+      none => (),
+    }
+  }
+  out
+}
+
+test "new, from_list, to_list, len and is_empty" {
+  let e: Deque[Int] = deque.new()
+  assert_eq(deque.to_list(e), [])
+  assert_eq(deque.len(e), 0)
+  assert_eq(deque.is_empty(e), true)
+  let d = deque.from_list(["a", "b", "c"])
+  assert_eq(deque.to_list(d), ["a", "b", "c"])
+  assert_eq(deque.len(d), 3)
+  assert_eq(deque.is_empty(d), false)
+}
+
+test "push and push_front add at the two ends in place" {
+  var d: Deque[Int] = deque.new()
+  deque.push(d, 2)
+  deque.push(d, 3)
+  deque.push_front(d, 1)
+  deque.push_front(d, 0)
+  assert_eq(deque.to_list(d), [0, 1, 2, 3])
+  var w: Deque[String] = deque.new()
+  deque.push_front(w, "b")
+  deque.push(w, "c")
+  deque.push_front(w, "a")
+  assert_eq(deque.to_list(w), ["a", "b", "c"])
+}
+
+test "pop and pop_front take from the two ends in place, none when empty" {
+  var d = deque.from_list([1, 2, 3, 4])
+  assert_eq(deque.pop_front(d), some(1))
+  assert_eq(deque.pop(d), some(4))
+  assert_eq(deque.to_list(d), [2, 3])
+  assert_eq(deque.pop(d), some(3))
+  assert_eq(deque.pop(d), some(2))
+  assert_eq(deque.pop(d), none)
+  assert_eq(deque.pop_front(d), none)
+  var w: Deque[String] = deque.new()
+  deque.push_front(w, "y")
+  deque.push_front(w, "x")
+  assert_eq(deque.pop(w), some("y"))
+  assert_eq(deque.pop_front(w), some("x"))
+  assert_eq(deque.pop_front(w), none)
+}
+
+test "a queue and a stack drain in their orders across many splits" {
+  var d: Deque[Int] = deque.new()
+  for i in 0..<50 {
+    deque.push(d, i)
+  }
+  assert_eq(drain_front(d), list.range(0, 50))
+  var s: Deque[Int] = deque.new()
+  for i in 0..<50 {
+    deque.push_front(s, i)
+  }
+  var back: List[Int] = []
+  for _ in 0..<50 {
+    match deque.pop(s) {
+      some(x) => list.push(back, x),
+      none => (),
+    }
+  }
+  assert_eq(back, list.range(0, 50))
+  var m = deque.from_list([
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ])
+  assert_eq(deque.pop(m), some(6))
+  assert_eq(deque.pop_front(m), some(1))
+  assert_eq(deque.pop_front(m), some(2))
+  assert_eq(deque.pop(m), some(5))
+  assert_eq(deque.to_list(m), [3, 4])
+}
+
+test "first, last and get read without removing; out of range is none" {
+  var d = deque.from_list([2, 3])
+  deque.push_front(d, 1)
+  assert_eq(deque.first(d), some(1))
+  assert_eq(deque.last(d), some(3))
+  assert_eq(deque.get(d, 0), some(1))
+  assert_eq(deque.get(d, 1), some(2))
+  assert_eq(deque.get(d, 2), some(3))
+  assert_eq(deque.get(d, 3), none)
+  assert_eq(deque.get(d, -1), none)
+  let w = deque.from_list(["a"])
+  assert_eq(deque.first(w), some("a"))
+  assert_eq(deque.last(w), some("a"))
+  let e: Deque[String] = deque.new()
+  assert_eq(deque.first(e), none)
+  assert_eq(deque.last(e), none)
+  assert_eq(deque.get(e, 0), none)
+}
+
+test "contains, clear and the Container combinators" {
+  var d = deque.from_list([1, 2, 3, 4])
+  deque.push_front(d, 0)
+  assert_eq(deque.contains(d, 0), true)
+  assert_eq(deque.contains(d, 9), false)
+  assert_eq(deque.to_list(deque.map(d, (x) => x * 10)), [0, 10, 20, 30, 40])
+  assert_eq(deque.to_list(deque.filter(d, (x) => x % 2 == 0)), [0, 2, 4])
+  assert_eq(deque.fold(d, "", (acc, x) => acc + int.to_string(x)), "01234")
+  assert_eq(deque.any(d, (x) => x > 3), true)
+  assert_eq(deque.all(d, (x) => x > 0), false)
+  assert_eq(deque.count(d, (x) => x > 1), 3)
+  assert_eq(deque.find(d, (x) => x > 1), some(2))
+  deque.clear(d)
+  assert_eq(deque.is_empty(d), true)
+  let w = deque.from_list(["a", "bb"])
+  assert_eq(deque.contains(w, "bb"), true)
+  assert_eq(deque.to_list(deque.map(w, (s) => string.len(s))), [1, 2])
+  let e: Deque[Int] = deque.new()
+  assert_eq(deque.any(e, (x) => x > 0), false)
+  assert_eq(deque.all(e, (x) => x > 0), true)
+  assert_eq(deque.find(e, (x) => x > 0), none)
+}
+
+test "position and range fns answer as the list fn of the same name" {
+  var d = deque.from_list([2, 3, 4])
+  deque.push_front(d, 1)
+  let xs = [1, 2, 3, 4]
+  assert_eq(deque.to_list(deque.reverse(d)), list.reverse(xs))
+  assert_eq(deque.to_list(deque.take(d, 2)), list.take(xs, 2))
+  assert_eq(deque.to_list(deque.drop(d, 2)), list.drop(xs, 2))
+  assert_eq(deque.to_list(deque.take_end(d, 3)), list.take_end(xs, 3))
+  assert_eq(deque.to_list(deque.drop_end(d, 3)), list.drop_end(xs, 3))
+  assert_eq(deque.to_list(deque.slice(d, 1, 3)), list.slice(xs, 1, 3))
+  assert_eq(deque.to_list(deque.slice(d, 2, 99)), list.slice(xs, 2, 99))
+  assert_eq(deque.to_list(deque.set(d, 0, 9)), list.set(xs, 0, 9))
+  assert_eq(deque.to_list(deque.insert(d, 1, 9)), list.insert(xs, 1, 9))
+  assert_eq(deque.to_list(deque.remove_at(d, 3)), list.remove_at(xs, 3))
+  assert_eq(deque.to_list(deque.take(d, 99)), xs)
+  let w = deque.from_list(["a", "b"])
+  assert_eq(deque.to_list(deque.reverse(w)), ["b", "a"])
+  let e: Deque[String] = deque.new()
+  assert_eq(deque.to_list(deque.take(e, 1)), [])
+}
+
+test "the sequence algorithms walk front to back" {
+  var d = deque.from_list([3, 1])
+  deque.push_front(d, 4)
+  deque.push(d, 2)
+  let xs = [4, 3, 1, 2]
+  assert_eq(deque.enumerate(d), list.enumerate(xs))
+  assert_eq(deque.zip(d, ["a", "b"]), [(4, "a"), (3, "b")])
+  assert_eq(deque.zip_with(d, [10, 20], (a, b) => a + b), [14, 23])
+  assert_eq(deque.filter_map(d, (x) => if x > 2 then some(x) else none), [4, 3])
+  assert_eq(deque.find_map(d, (x) => if x < 3 then some(x * 10) else none), some(10))
+  assert_eq(deque.reduce(d, (a, b) => a * 10 + b), some(4312))
+  assert_eq(deque.scan(d, 0, (a, b) => a + b), [4, 7, 8, 10])
+  assert_eq(deque.partition(d, (x) => x > 2), ([4, 3], [1, 2]))
+  assert_eq(map.get(deque.group_by(d, (x) => x % 2), 0), some([4, 2]))
+  assert_eq(deque.sort(d), [1, 2, 3, 4])
+  assert_eq(deque.sort_by(d, (x) => 0 - x), [4, 3, 2, 1])
+  assert_eq(deque.sort_with(d, asc), [1, 2, 3, 4])
+  assert_eq(deque.min(d), some(1))
+  assert_eq(deque.max(d), some(4))
+  assert_eq(deque.min_by(d, (x) => x % 3), some(3))
+  assert_eq(deque.max_by(d, (x) => x % 3), some(2))
+  assert_eq(deque.min_with(d, asc), some(1))
+  assert_eq(deque.max_with(d, asc), some(4))
+  let w = deque.from_list(["bb", "a", "cc"])
+  assert_eq(deque.sort(w), ["a", "bb", "cc"])
+  assert_eq(deque.min_with(w, by_len), some("a"))
+  assert_eq(deque.max_with(w, by_len), some("bb"))
+  assert_eq(deque.max_by(w, (s) => string.len(s)), some("bb"))
+  let e: Deque[Int] = deque.new()
+  assert_eq(deque.reduce(e, (a, b) => a + b), none)
+  assert_eq(deque.min(e), none)
+  assert_eq(deque.sort(e), [])
+  assert_eq(deque.enumerate(e), [])
+}
+
+test "the ordered cells return deques" {
+  var d = deque.from_list([2, 2, 3, 1])
+  deque.push_front(d, 1)
+  let xs = [1, 2, 2, 3, 1]
+  assert_eq(deque.find_index(d, (x) => x == 3), some(3))
+  assert_eq(deque.find_index(d, (x) => x > 9), none)
+  assert_eq(deque.to_list(deque.take_while(d, (x) => x < 3)), [1, 2, 2])
+  assert_eq(deque.to_list(deque.drop_while(d, (x) => x < 3)), [3, 1])
+  assert_eq(deque.chunk(d, 2) |> list.map((c) => deque.to_list(c)), list.chunk(xs, 2))
+  assert_eq(deque.window(d, 4) |> list.map((c) => deque.to_list(c)), list.window(xs, 4))
+  let (a, b) = deque.split_at(d, 2)
+  assert_eq((deque.to_list(a), deque.to_list(b)), list.split_at(xs, 2))
+  assert_eq(deque.to_list(deque.dedup(d)), [1, 2, 3, 1])
+  assert_eq(deque.to_list(deque.intersperse(d, 0)), list.intersperse(xs, 0))
+  assert_eq(deque.to_list(deque.unique(d)), [1, 2, 3])
+  assert_eq(deque.to_list(deque.unique_by(d, (x) => x % 2)), [1, 2])
+  let w = deque.from_list(["a", "a", "b"])
+  assert_eq(deque.to_list(deque.dedup(w)), ["a", "b"])
+  assert_eq(deque.to_list(deque.intersperse(w, "-")), ["a", "-", "a", "-", "b"])
+  let e: Deque[String] = deque.new()
+  assert_eq(list.len(deque.chunk(e, 2)), 0)
+  assert_eq(deque.to_list(deque.unique(e)), [])
+}

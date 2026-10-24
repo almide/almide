@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (18 functions)
+## Signature index (44 functions)
 
 ```
 // Wraps to 8 bits; 255 becomes -1.
@@ -135,6 +135,110 @@ uint16.min_value() -> UInt16
 // Largest UInt16: 65535.
 // @since 0.38.0
 uint16.max_value() -> UInt16
+
+// -1, 0 or 1 as a is below, equal to or above b.
+// @since unreleased
+uint16.compare(a: UInt16, b: UInt16) -> Int
+
+// Lesser of a and b.
+// @since unreleased
+uint16.min(a: UInt16, b: UInt16) -> UInt16
+
+// Greater of a and b.
+// @since unreleased
+uint16.max(a: UInt16, b: UInt16) -> UInt16
+
+// x limited to lo..hi; aborts when lo > hi.
+// @since unreleased
+uint16.clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16
+
+// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+// @since unreleased
+uint16.floor_div(a: UInt16, b: UInt16) -> UInt16
+
+// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+// @since unreleased
+uint16.modulo(a: UInt16, b: UInt16) -> UInt16
+
+// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+// @since unreleased
+uint16.pow(base: UInt16, exp: Int) -> UInt16
+
+// True when x is a multiple of 2.
+// @since unreleased
+uint16.is_even(x: UInt16) -> Bool
+
+// True when x is not a multiple of 2.
+// @since unreleased
+uint16.is_odd(x: UInt16) -> Bool
+
+// Bitwise AND.
+// @since unreleased
+uint16.band(a: UInt16, b: UInt16) -> UInt16
+
+// Bitwise OR.
+// @since unreleased
+uint16.bor(a: UInt16, b: UInt16) -> UInt16
+
+// Bitwise XOR.
+// @since unreleased
+uint16.bxor(a: UInt16, b: UInt16) -> UInt16
+
+// Bitwise complement of all 16 bits.
+// @since unreleased
+uint16.bnot(x: UInt16) -> UInt16
+
+// a shifted left by n bits; n is taken mod 16.
+// @since unreleased
+uint16.bshl(a: UInt16, n: Int) -> UInt16
+
+// Zero-filling right shift; n is taken mod 16.
+// @since unreleased
+uint16.bshr(a: UInt16, n: Int) -> UInt16
+
+// Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+// @since unreleased
+uint16.count_leading_zeros(x: UInt16) -> Int
+
+// Zero bits below the lowest set bit; 16 for 0.
+// @since unreleased
+uint16.count_trailing_zeros(x: UInt16) -> Int
+
+// Number of set bits among the 16.
+// @since unreleased
+uint16.count_ones(x: UInt16) -> Int
+
+// The 2 bytes in reverse order (endian flip).
+// @since unreleased
+uint16.byte_swap(x: UInt16) -> UInt16
+
+// a + b wrapped to 16 bits.
+// @since unreleased
+uint16.wrap_add(a: UInt16, b: UInt16) -> UInt16
+
+// a - b wrapped to 16 bits.
+// @since unreleased
+uint16.wrap_sub(a: UInt16, b: UInt16) -> UInt16
+
+// a * b wrapped to 16 bits.
+// @since unreleased
+uint16.wrap_mul(a: UInt16, b: UInt16) -> UInt16
+
+// The 16 bits of a rotated left by n; n is taken mod 16.
+// @since unreleased
+uint16.rotate_left(a: UInt16, n: Int) -> UInt16
+
+// The 16 bits of a rotated right by n; n is taken mod 16.
+// @since unreleased
+uint16.rotate_right(a: UInt16, n: Int) -> UInt16
+
+// Bits needed to hold x; 0 for 0.
+// @since unreleased
+uint16.bit_length(x: UInt16) -> Int
+
+// Decimal UInt16 from trimmed s; err on junk, a sign of -, or above 65535.
+// @since unreleased
+uint16.parse(s: String) -> Result[UInt16, String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

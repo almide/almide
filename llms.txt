@@ -14,8 +14,8 @@ read here is what the current compiler accepts.
 ## Fast facts
 
 - Extension: `.almd`. Auto-imported (no `import` needed): `string`, `int`,
-  `float`, `bool`, `list`, `map`, `set`, `option`, `result`, `value`, `error`,
-  `math`, `datetime`.
+  `float`, `bool`, `list`, `map`, `set`, `deque`, `heap`, `option`, `result`,
+  `value`, `error`, `math`, `datetime`.
   Sized-numeric conversion modules (`int8`, `int16`, `int32`, `int64`,
   `uint8`, `uint16`, `uint32`, `uint64`, `float32`, `float64`) are also
   auto-imported for UFCS — e.g. `x.to_int64()` on `x: Int32` resolves to

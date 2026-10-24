@@ -109,3 +109,133 @@ fn min_value() -> UInt64 = int.to_uint64(0)
 // -1 reinterprets to the all-ones lane = 2^64 - 1 (truncating `to_uint64`).
 /// Largest UInt64: 2^64-1.
 fn max_value() -> UInt64 = int.to_uint64(-1)
+
+// ── Integer: compare, select, divide (R-sized-02, R-sized-08, R-sized-10) ──
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: UInt64, b: UInt64) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: UInt64, b: UInt64) -> UInt64 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: UInt64, b: UInt64) -> UInt64 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64 = unbias(int.clamp(bias(x), bias(lo), bias(hi)))
+
+// The top bit flipped: unsigned order becomes Int's signed order.
+local fn bias(x: UInt64) -> Int = int.bxor(int.from_uint64(x), int.bshl(1, 63))
+
+local fn unbias(n: Int) -> UInt64 = int.to_uint64(int.bxor(n, int.bshl(1, 63)))
+
+/// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+fn floor_div(a: UInt64, b: UInt64) -> UInt64 = a / b
+
+/// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+fn modulo(a: UInt64, b: UInt64) -> UInt64 = a % b
+
+/// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+fn pow(base: UInt64, exp: Int) -> UInt64 = int.to_uint64(math.pow(int.from_uint64(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: UInt64) -> Bool = int.from_uint64(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: UInt64) -> Bool = int.from_uint64(x) % 2 != 0
+
+// ── Integer: bitwise, FixedWidthInteger: bit counts (R-sized-10) ──
+/// Bitwise AND.
+fn band(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.band(int.from_uint64(a), int.from_uint64(b)))
+
+/// Bitwise OR.
+fn bor(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.bor(int.from_uint64(a), int.from_uint64(b)))
+
+/// Bitwise XOR.
+fn bxor(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.bxor(int.from_uint64(a), int.from_uint64(b)))
+
+/// Bitwise complement of all 64 bits.
+fn bnot(x: UInt64) -> UInt64 = int.to_uint64(int.bnot(int.from_uint64(x)))
+
+/// a shifted left by n bits; n is taken mod 64.
+fn bshl(a: UInt64, n: Int) -> UInt64 = int.to_uint64(int.bshl(int.from_uint64(a), shift_count(n)))
+
+/// Zero-filling right shift; n is taken mod 64.
+fn bshr(a: UInt64, n: Int) -> UInt64 = int.to_uint64(shift_right_zero(int.from_uint64(a), shift_count(n)))
+
+// A right shift of the 64-bit pattern that fills with zeros (k in 0..63).
+local fn shift_right_zero(v: Int, k: Int) -> Int = if k == 0 then v
+else int.band(int.bshr(v, k), int.bnot(int.bshl(-1, 64 - k)))
+
+// n reduced into 0..63, a negative n included.
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+fn count_leading_zeros(x: UInt64) -> Int = int.count_leading_zeros(int.from_uint64(x))
+
+/// Zero bits below the lowest set bit; 64 for 0.
+fn count_trailing_zeros(x: UInt64) -> Int = int.min(
+  int.count_trailing_zeros(int.from_uint64(x)),
+  64,
+)
+
+/// Number of set bits among the 64.
+fn count_ones(x: UInt64) -> Int = int.pop_count(int.from_uint64(x))
+
+/// The 8 bytes in reverse order (endian flip).
+fn byte_swap(x: UInt64) -> UInt64 = int.to_uint64(int.byte_swap(int.from_uint64(x)))
+
+// ── FixedWidthInteger: wrapping, rotation, bit length; parse (R-int-11, R-int-12, R-sized-02) ──
+/// a + b wrapped to 64 bits.
+fn wrap_add(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) + int.from_uint64(b))
+
+/// a - b wrapped to 64 bits.
+fn wrap_sub(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) - int.from_uint64(b))
+
+/// a * b wrapped to 64 bits.
+fn wrap_mul(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) * int.from_uint64(b))
+
+/// The 64 bits of a rotated left by n; n is taken mod 64.
+fn rotate_left(a: UInt64, n: Int) -> UInt64 = int.to_uint64(rotate_bits(int.from_uint64(a), rotate_count(n)))
+
+/// The 64 bits of a rotated right by n; n is taken mod 64.
+fn rotate_right(a: UInt64, n: Int) -> UInt64 = int.to_uint64(rotate_bits(int.from_uint64(a), rotate_count(0 - rotate_count(n))))
+
+// The low 64 bits v rotated left by k (k in 0..63); bits above 64 are dropped by the narrowing.
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.band(int.bshr(v, 64 - k), int.bnot(int.bshl(-1, k))))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Bits needed to hold x; 0 for 0.
+fn bit_length(x: UInt64) -> Int = 64 - int.count_leading_zeros(int.from_uint64(x))
+
+/// Decimal UInt64 from trimmed s; err on junk, a sign of -, or above 2^64-1.
+fn parse(s: String) -> Result[UInt64, String] = {
+  let t = string.trim(s)
+  if string.starts_with(t, "-") then err("invalid digit found in string")
+  else match int.parse(t) {
+    ok(n) => ok(int.to_uint64(n)),
+    err(e) => match parse_upper(t) {
+      some(u) => ok(u),
+      none => err(e),
+    },
+  }
+}
+
+// int.parse refused t. When t is a decimal in 2^63..2^64-1, its value is head * 10 plus
+// the last digit, and head fits Int (1844674407370955161 * 10 + 5 is 2^64-1).
+local fn parse_upper(t: String) -> UInt64? = {
+  let n = string.len(t)
+  match (int.parse(string.slice(t, 0, n - 1)), int.parse(string.slice(t, n - 1, n))) {
+    (ok(head), ok(digit)) => if head < 1844674407370955161 or head == 1844674407370955161 and digit <= 5 then some(int.to_uint64(head) * int.to_uint64(10) + int.to_uint64(digit))
+    else none,
+    _ => none,
+  }
+}

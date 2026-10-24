@@ -207,8 +207,11 @@ mod bounded_tables_tests {
 
     /// Every registry module is classified pure or denied (or is `io`, the
     /// print-family special case), so a new host-reaching module cannot slip
-    /// past the profile unclassified: an unlisted module is E074 today by
-    /// accident of the fall-through, not by decision.
+    /// past the profile unclassified. A module the effect table declares
+    /// `Pure` and the profile does not list (`deque`, `heap`) is decided, not
+    /// fallen through: it reaches no host, and its calls are E074 until its
+    /// functions are shown to fit the profile. The pure list only shrinks
+    /// (proofs/name-keyed-sites.toml), so it is not where a new module goes.
     #[test]
     fn every_registry_module_is_classified() {
         let unclassified: Vec<&str> = STDLIB_MODULES
@@ -216,7 +219,10 @@ mod bounded_tables_tests {
             .chain(BUNDLED_MODULES)
             .copied()
             .filter(|m| {
-                *m != "io" && !BOUNDED_PURE_MODULES.contains(m) && !BOUNDED_DENIED_MODULES.contains(m)
+                *m != "io"
+                    && !BOUNDED_PURE_MODULES.contains(m)
+                    && !BOUNDED_DENIED_MODULES.contains(m)
+                    && almide_ir::effect::module_effects(m) != Some(almide_ir::effect::ModuleEffects::Pure)
             })
             .collect();
         assert!(unclassified.is_empty(), "registry modules the profile does not classify: {unclassified:?}");

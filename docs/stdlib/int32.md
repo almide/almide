@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (24 functions)
+## Signature index (52 functions)
 
 ```
 // Wraps to 8 bits; 128 becomes -128.
@@ -159,6 +159,118 @@ int32.min_value() -> Int32
 // Largest Int32: 2147483647.
 // @since 0.38.0
 int32.max_value() -> Int32
+
+// -1, 0 or 1 as a is below, equal to or above b.
+// @since unreleased
+int32.compare(a: Int32, b: Int32) -> Int
+
+// Lesser of a and b.
+// @since unreleased
+int32.min(a: Int32, b: Int32) -> Int32
+
+// Greater of a and b.
+// @since unreleased
+int32.max(a: Int32, b: Int32) -> Int32
+
+// x limited to lo..hi; aborts when lo > hi.
+// @since unreleased
+int32.clamp(x: Int32, lo: Int32, hi: Int32) -> Int32
+
+// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+// @since unreleased
+int32.floor_div(a: Int32, b: Int32) -> Int32
+
+// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+// @since unreleased
+int32.modulo(a: Int32, b: Int32) -> Int32
+
+// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+// @since unreleased
+int32.pow(base: Int32, exp: Int) -> Int32
+
+// True when x is a multiple of 2.
+// @since unreleased
+int32.is_even(x: Int32) -> Bool
+
+// True when x is not a multiple of 2.
+// @since unreleased
+int32.is_odd(x: Int32) -> Bool
+
+// Magnitude of x; min_value wraps to itself.
+// @since unreleased
+int32.abs(x: Int32) -> Int32
+
+// -1, 0 or 1 by the sign of x.
+// @since unreleased
+int32.sign(x: Int32) -> Int
+
+// Bitwise AND.
+// @since unreleased
+int32.band(a: Int32, b: Int32) -> Int32
+
+// Bitwise OR.
+// @since unreleased
+int32.bor(a: Int32, b: Int32) -> Int32
+
+// Bitwise XOR.
+// @since unreleased
+int32.bxor(a: Int32, b: Int32) -> Int32
+
+// Bitwise complement of all 32 bits.
+// @since unreleased
+int32.bnot(x: Int32) -> Int32
+
+// a shifted left by n bits; n is taken mod 32.
+// @since unreleased
+int32.bshl(a: Int32, n: Int) -> Int32
+
+// Sign-filling right shift; n is taken mod 32.
+// @since unreleased
+int32.bshr(a: Int32, n: Int) -> Int32
+
+// Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+// @since unreleased
+int32.count_leading_zeros(x: Int32) -> Int
+
+// Zero bits below the lowest set bit; 32 for 0.
+// @since unreleased
+int32.count_trailing_zeros(x: Int32) -> Int
+
+// Number of set bits among the 32.
+// @since unreleased
+int32.count_ones(x: Int32) -> Int
+
+// The 4 bytes in reverse order (endian flip).
+// @since unreleased
+int32.byte_swap(x: Int32) -> Int32
+
+// a + b wrapped to 32 bits.
+// @since unreleased
+int32.wrap_add(a: Int32, b: Int32) -> Int32
+
+// a - b wrapped to 32 bits.
+// @since unreleased
+int32.wrap_sub(a: Int32, b: Int32) -> Int32
+
+// a * b wrapped to 32 bits.
+// @since unreleased
+int32.wrap_mul(a: Int32, b: Int32) -> Int32
+
+// The 32 bits of a rotated left by n; n is taken mod 32.
+// @since unreleased
+int32.rotate_left(a: Int32, n: Int) -> Int32
+
+// The 32 bits of a rotated right by n; n is taken mod 32.
+// @since unreleased
+int32.rotate_right(a: Int32, n: Int) -> Int32
+
+// Bits needed to hold x; 0 for 0, 32 if negative.
+// @since unreleased
+int32.bit_length(x: Int32) -> Int
+
+// Decimal Int32 from trimmed s; err on junk or outside -2147483648..2147483647.
+// @since unreleased
+int32.parse(s: String) -> Result[Int32, String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

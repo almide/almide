@@ -53,5 +53,35 @@ fn set_map_is_linear_on_wasm_and_keeps_its_answers() {
     assert_eq!(String::from_utf8_lossy(&run.stdout), EXPECTED, "wasm");
     let counts = String::from_utf8_lossy(&run.stderr);
     assert!(counts.contains("live=0"), "wasm must free everything: {counts}");
-    assert!(took < Duration::from_secs(4), "wasm set.map took {took:?} for 400,000 members — quadratic again?");
+    // The bound is RELATIVE: the same program at a quarter of the sizes, timed
+    // interleaved on the same runner. Linear work grows ~4x, quadratic ~16x;
+    // an absolute bound (4 s) failed merge-queue runs at 7.4 s and 9 s on a
+    // loaded runner while the same build ran it in 0.18 s locally.
+    let _ = took;
+    let quarter = dir.path().join("set_map_quarter.almd");
+    std::fs::write(&quarter, quarter_source()).expect("quarter source");
+    let warm_q = Command::new(env!("CARGO_BIN_EXE_almide")).arg("run").arg(&quarter).args(["--target", "wasm"]).output().expect("warm quarter");
+    assert!(warm_q.status.success(), "{}", String::from_utf8_lossy(&warm_q.stderr));
+    let time = |f: &std::path::Path| {
+        let t = Instant::now();
+        let out = Command::new(env!("CARGO_BIN_EXE_almide")).arg("run").arg(f).args(["--target", "wasm"]).output().expect("timed run");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        t.elapsed()
+    };
+    let (mut full, mut small) = (Duration::MAX, Duration::MAX);
+    for _ in 0..3 {
+        small = small.min(time(&quarter));
+        full = full.min(time(&file));
+    }
+    assert!(full < small * 8, "wasm set.map at 400,000 members took {full:?} against {small:?} at a quarter of the size — quadratic again?");
+}
+
+/// SOURCE with every collection size divided by four.
+fn quarter_source() -> String {
+    SOURCE
+        .replace("300000", "75000")
+        .replace("200000", "50000")
+        .replace("199999", "49999")
+        .replace("100000", "25000")
+        .replace("70000", "17500")
 }

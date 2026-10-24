@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (22 functions)
+## Signature index (48 functions)
 
 ```
 // Wraps to 8 bits; 255 becomes -1.
@@ -151,6 +151,110 @@ uint32.min_value() -> UInt32
 // Largest UInt32: 4294967295.
 // @since 0.38.0
 uint32.max_value() -> UInt32
+
+// -1, 0 or 1 as a is below, equal to or above b.
+// @since unreleased
+uint32.compare(a: UInt32, b: UInt32) -> Int
+
+// Lesser of a and b.
+// @since unreleased
+uint32.min(a: UInt32, b: UInt32) -> UInt32
+
+// Greater of a and b.
+// @since unreleased
+uint32.max(a: UInt32, b: UInt32) -> UInt32
+
+// x limited to lo..hi; aborts when lo > hi.
+// @since unreleased
+uint32.clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32
+
+// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+// @since unreleased
+uint32.floor_div(a: UInt32, b: UInt32) -> UInt32
+
+// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+// @since unreleased
+uint32.modulo(a: UInt32, b: UInt32) -> UInt32
+
+// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+// @since unreleased
+uint32.pow(base: UInt32, exp: Int) -> UInt32
+
+// True when x is a multiple of 2.
+// @since unreleased
+uint32.is_even(x: UInt32) -> Bool
+
+// True when x is not a multiple of 2.
+// @since unreleased
+uint32.is_odd(x: UInt32) -> Bool
+
+// Bitwise AND.
+// @since unreleased
+uint32.band(a: UInt32, b: UInt32) -> UInt32
+
+// Bitwise OR.
+// @since unreleased
+uint32.bor(a: UInt32, b: UInt32) -> UInt32
+
+// Bitwise XOR.
+// @since unreleased
+uint32.bxor(a: UInt32, b: UInt32) -> UInt32
+
+// Bitwise complement of all 32 bits.
+// @since unreleased
+uint32.bnot(x: UInt32) -> UInt32
+
+// a shifted left by n bits; n is taken mod 32.
+// @since unreleased
+uint32.bshl(a: UInt32, n: Int) -> UInt32
+
+// Zero-filling right shift; n is taken mod 32.
+// @since unreleased
+uint32.bshr(a: UInt32, n: Int) -> UInt32
+
+// Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+// @since unreleased
+uint32.count_leading_zeros(x: UInt32) -> Int
+
+// Zero bits below the lowest set bit; 32 for 0.
+// @since unreleased
+uint32.count_trailing_zeros(x: UInt32) -> Int
+
+// Number of set bits among the 32.
+// @since unreleased
+uint32.count_ones(x: UInt32) -> Int
+
+// The 4 bytes in reverse order (endian flip).
+// @since unreleased
+uint32.byte_swap(x: UInt32) -> UInt32
+
+// a + b wrapped to 32 bits.
+// @since unreleased
+uint32.wrap_add(a: UInt32, b: UInt32) -> UInt32
+
+// a - b wrapped to 32 bits.
+// @since unreleased
+uint32.wrap_sub(a: UInt32, b: UInt32) -> UInt32
+
+// a * b wrapped to 32 bits.
+// @since unreleased
+uint32.wrap_mul(a: UInt32, b: UInt32) -> UInt32
+
+// The 32 bits of a rotated left by n; n is taken mod 32.
+// @since unreleased
+uint32.rotate_left(a: UInt32, n: Int) -> UInt32
+
+// The 32 bits of a rotated right by n; n is taken mod 32.
+// @since unreleased
+uint32.rotate_right(a: UInt32, n: Int) -> UInt32
+
+// Bits needed to hold x; 0 for 0.
+// @since unreleased
+uint32.bit_length(x: UInt32) -> Int
+
+// Decimal UInt32 from trimmed s; err on junk, a sign of -, or above 4294967295.
+// @since unreleased
+uint32.parse(s: String) -> Result[UInt32, String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

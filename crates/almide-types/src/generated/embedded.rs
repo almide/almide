@@ -3990,6 +3990,243 @@ fn datetime_parse_iso(s: String) -> Result[Int, String] = {
   }
 }
 "#;
+pub const SRC_DEQUE: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// A double-ended queue, front to back.
+type Deque[A] = { front: List[A], back: List[A] }
+
+
+/// An empty deque.
+fn new[A]() -> Deque[A] = { front: [], back: [] }
+
+/// A deque of xs, front to back.
+fn from_list[A](xs: List[A]) -> Deque[A] = { front: [], back: xs }
+
+/// The elements, front to back.
+fn to_list[A](d: Deque[A]) -> List[A] = list.reverse(d.front) + d.back
+
+/// Element count; 0 for an empty deque.
+fn len[A](d: Deque[A]) -> Int = list.len(d.front) + list.len(d.back)
+
+/// true iff d has no elements.
+fn is_empty[A](d: Deque[A]) -> Bool = list.is_empty(d.front) and list.is_empty(d.back)
+
+
+/// Appends x at the back in place.
+fn push[A](mut d: Deque[A], x: A) -> Unit = list.push(d.back, x)
+
+/// Adds x at the front in place.
+fn push_front[A](mut d: Deque[A], x: A) -> Unit = list.push(d.front, x)
+
+/// Removes and yields the last element; none when empty.
+fn pop[A](mut d: Deque[A]) -> A? = {
+  if list.is_empty(d.back) then {
+    let xs = list.reverse(d.front)
+    let keep = list.len(xs) / 2
+    d = { front: list.reverse(list.take(xs, keep)), back: list.drop(xs, keep) }
+  } else ()
+  list.pop(d.back)
+}
+
+/// Removes and yields the first element; none when empty.
+fn pop_front[A](mut d: Deque[A]) -> A? = {
+  if list.is_empty(d.front) then {
+    let keep = (list.len(d.back) + 1) / 2
+    d = { front: list.reverse(list.take(d.back, keep)), back: list.drop(d.back, keep) }
+  } else ()
+  list.pop(d.front)
+}
+
+/// The first element, or none when empty.
+fn first[A](d: Deque[A]) -> A? = match list.last(d.front) {
+  some(x) => some(x),
+  none => list.first(d.back),
+}
+
+/// The last element, or none when empty.
+fn last[A](d: Deque[A]) -> A? = match list.last(d.back) {
+  some(x) => some(x),
+  none => list.first(d.front),
+}
+
+/// Element at index i from the front, or none when out of range.
+fn get[A](d: Deque[A], i: Int) -> A? = {
+  let nf = list.len(d.front)
+  if i < 0 then none
+  else if i < nf then list.get(d.front, nf - 1 - i)
+  else list.get(d.back, i - nf)
+}
+
+/// true if some element == x.
+fn contains[A](d: Deque[A], x: A) -> Bool = list.contains(d.front, x) or list.contains(d.back, x)
+
+/// Removes every element of d in place.
+fn clear[A](mut d: Deque[A]) -> Unit = {
+  d = { front: [], back: [] }
+}
+
+
+/// Deque of f(x), front to back; f runs front to back.
+fn map[A, B](d: Deque[A], f: (A) -> B) -> Deque[B] = from_list(list.map(to_list(d), f))
+
+/// Elements where f holds, order kept.
+fn filter[A](d: Deque[A], f: (A) -> Bool) -> Deque[A] = from_list(list.filter(to_list(d), f))
+
+/// Folds f(acc, x) front to back.
+fn fold[A, B](d: Deque[A], init: B, f: (B, A) -> B) -> B = list.fold(to_list(d), init, f)
+
+/// true if f holds for some element; false when empty.
+fn any[A](d: Deque[A], f: (A) -> Bool) -> Bool = list.any(to_list(d), f)
+
+/// true if f holds for every element; true when empty.
+fn all[A](d: Deque[A], f: (A) -> Bool) -> Bool = list.all(to_list(d), f)
+
+/// Number of elements where f holds.
+fn count[A](d: Deque[A], f: (A) -> Bool) -> Int = list.count(to_list(d), f)
+
+/// The element nearest the front where f holds, or none.
+fn find[A](d: Deque[A], f: (A) -> Bool) -> A? = list.find(to_list(d), f)
+
+
+/// Elements back to front.
+fn reverse[A](d: Deque[A]) -> Deque[A] = { front: d.back, back: d.front }
+
+/// First n elements, as list.take.
+fn take[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take(to_list(d), n))
+
+/// All but the first n, as list.drop.
+fn drop[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.drop(to_list(d), n))
+
+/// Last n elements, as list.take_end.
+fn take_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.take_end(to_list(d), n))
+
+/// All but the last n, as list.drop_end.
+fn drop_end[A](d: Deque[A], n: Int) -> Deque[A] = from_list(list.drop_end(to_list(d), n))
+
+/// Indices start..<end, as list.slice.
+fn slice[A](d: Deque[A], start: Int, end: Int) -> Deque[A] = from_list(list.slice(to_list(d), start, end))
+
+/// Copy with slot i = x, as list.set.
+fn set[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.set(to_list(d), i, x))
+
+/// Copy with x at i, as list.insert.
+fn insert[A](d: Deque[A], i: Int, x: A) -> Deque[A] = from_list(list.insert(to_list(d), i, x))
+
+/// Copy without slot i, as list.remove_at.
+fn remove_at[A](d: Deque[A], i: Int) -> Deque[A] = from_list(list.remove_at(to_list(d), i))
+
+
+/// (index, element) pairs, index from 0 at the front.
+fn enumerate[A](d: Deque[A]) -> List[(Int, A)] = list.enumerate(to_list(d))
+
+/// Elements paired with ys by position; stops at the shorter.
+fn zip[A, B](d: Deque[A], ys: List[B]) -> List[(A, B)] = list.zip(to_list(d), ys)
+
+/// f over (element, ys element) pairs; stops at the shorter.
+fn zip_with[A, B, C](d: Deque[A], ys: List[B], f: (A, B) -> C) -> List[C] = list.zip_with(
+  to_list(d),
+  ys,
+  f,
+)
+
+/// The somes f gives, front to back.
+fn filter_map[A, B](d: Deque[A], f: (A) -> B?) -> List[B] = list.filter_map(to_list(d), f)
+
+/// The first some f gives, or none; f is not called after the hit.
+fn find_map[A, B](d: Deque[A], f: (A) -> B?) -> B? = list.find_map(to_list(d), f)
+
+/// Left fold seeded by the first element; none when empty.
+fn reduce[A](d: Deque[A], f: (A, A) -> A) -> A? = list.reduce(to_list(d), f)
+
+/// Running fold values front to back, init excluded.
+fn scan[A, B](d: Deque[A], init: B, f: (B, A) -> B) -> List[B] = list.scan(
+  to_list(d),
+  init,
+  f,
+)
+
+/// (elements where f holds, the rest), order kept.
+fn partition[A](d: Deque[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partition(
+  to_list(d),
+  f,
+)
+
+/// Key f(x) -> elements; keys in first-seen order.
+fn group_by[A, B](d: Deque[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(to_list(d), f)
+
+/// Elements in ascending order; Floats in IEEE totalOrder.
+fn sort[A](d: Deque[A]) -> List[A] = list.sort(to_list(d))
+
+/// Elements sorted by key f(x), stable; f runs once per element.
+fn sort_by[A, B](d: Deque[A], f: (A) -> B) -> List[A] = list.sort_by(to_list(d), f)
+
+/// Elements sorted by cmp, stable: negative puts a first.
+fn sort_with[A](d: Deque[A], cmp: (A, A) -> Int) -> List[A] = list.sort_with(to_list(d), cmp)
+
+/// Least element, or none when empty.
+fn min[A](d: Deque[A]) -> A? = list.min(to_list(d))
+
+/// Greatest element, or none when empty.
+fn max[A](d: Deque[A]) -> A? = list.max(to_list(d))
+
+/// Element with the least key f(x); the nearest the front on ties.
+fn min_by[A, K](d: Deque[A], f: (A) -> K) -> A? = list.min_by(to_list(d), f)
+
+/// Element with the greatest key f(x); the nearest the front on ties.
+fn max_by[A, K](d: Deque[A], f: (A) -> K) -> A? = list.max_by(to_list(d), f)
+
+/// Least element by cmp; the nearest the front on ties.
+fn min_with[A](d: Deque[A], cmp: (A, A) -> Int) -> A? = list.min_with(to_list(d), cmp)
+
+/// Greatest element by cmp; the nearest the front on ties.
+fn max_with[A](d: Deque[A], cmp: (A, A) -> Int) -> A? = list.max_with(to_list(d), cmp)
+
+/// Index from the front of the first x where f holds, or none.
+fn find_index[A](d: Deque[A], f: (A) -> Bool) -> Int? = list.find_index(to_list(d), f)
+
+/// Longest front run where f holds.
+fn take_while[A](d: Deque[A], f: (A) -> Bool) -> Deque[A] = from_list(list.take_while(to_list(d), f))
+
+/// The rest after the longest front run where f holds.
+fn drop_while[A](d: Deque[A], f: (A) -> Bool) -> Deque[A] = from_list(list.drop_while(to_list(d), f))
+
+/// Runs of n from the front, as list.chunk.
+fn chunk[A](d: Deque[A], n: Int) -> List[Deque[A]] = list.chunk(to_list(d), n) |> list.map((xs) => from_list(xs))
+
+/// All n-long runs, as list.window.
+fn window[A](d: Deque[A], n: Int) -> List[Deque[A]] = list.window(to_list(d), n) |> list.map((xs) => from_list(xs))
+
+/// (first n, the rest), as list.split_at.
+fn split_at[A](d: Deque[A], n: Int) -> (Deque[A], Deque[A]) = {
+  let xs = to_list(d)
+  (from_list(list.take(xs, n)), from_list(list.drop(xs, n)))
+}
+
+/// Adjacent equal runs collapsed, as list.dedup.
+fn dedup[A](d: Deque[A]) -> Deque[A] = from_list(list.dedup(to_list(d)))
+
+/// sep between adjacent elements.
+fn intersperse[A](d: Deque[A], sep: A) -> Deque[A] = from_list(list.intersperse(to_list(d), sep))
+
+/// Duplicates removed; the occurrence nearest the front kept.
+fn unique[A](d: Deque[A]) -> Deque[A] = from_list(list.unique(to_list(d)))
+
+/// The first element per distinct key f(x).
+fn unique_by[A, K](d: Deque[A], f: (A) -> K) -> Deque[A] = from_list(list.unique_by(to_list(d), f))
+"#;
 pub const SRC_ENV: &str = r#"
 
 
@@ -4875,6 +5112,105 @@ fn to_float64(x: Float32) -> Float64 = float.from_float32(x)
 /// Shortest f32 round-trip digits, no exponent; 0.1 stays 0.1, 2.0 keeps .0.
 @intrinsic("almide_rt_float32_to_string")
 fn to_string(x: Float32) -> String = _
+
+
+/// -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
+fn compare(a: Float32, b: Float32) -> Int = total_order(
+  float.from_float32(a),
+  float.from_float32(b),
+)
+
+local fn total_order(a: Float, b: Float) -> Int = match (float.is_nan(a), float.is_nan(b)) {
+  (true, true) => 0,
+  (true, false) => 1,
+  (false, true) => -1,
+  _ => if a < b then -1
+  else if a > b then 1 else sign_order(float.to_bits(a) < 0, float.to_bits(b) < 0),
+}
+
+
+local fn sign_order(neg_a: Bool, neg_b: Bool) -> Int = match (neg_a, neg_b) {
+  (true, false) => -1,
+  (false, true) => 1,
+  _ => 0,
+}
+
+/// Lesser; a NaN operand is ignored; -0.0 < 0.0.
+fn min(a: Float32, b: Float32) -> Float32 = float.to_float32(float.min(float.from_float32(a), float.from_float32(b)))
+
+/// Greater; a NaN operand is ignored; 0.0 > -0.0.
+fn max(a: Float32, b: Float32) -> Float32 = float.to_float32(float.max(float.from_float32(a), float.from_float32(b)))
+
+/// x limited to lo..hi; lo > hi or a NaN bound aborts.
+fn clamp(x: Float32, lo: Float32, hi: Float32) -> Float32 = float.to_float32(float.clamp(float.from_float32(x), float.from_float32(lo), float.from_float32(hi)))
+
+/// True only for NaN.
+fn is_nan(x: Float32) -> Bool = float.is_nan(float.from_float32(x))
+
+/// True for inf and -inf; false for NaN.
+fn is_infinite(x: Float32) -> Bool = float.is_infinite(float.from_float32(x))
+
+/// True unless x is inf, -inf or NaN.
+fn is_finite(x: Float32) -> Bool = not (float.is_nan(float.from_float32(x)) or float.is_infinite(float.from_float32(x)))
+
+/// Magnitude; -0.0 gives 0.0, NaN stays NaN.
+fn abs(x: Float32) -> Float32 = float.to_float32(float.abs(float.from_float32(x)))
+
+/// Round toward -inf; -0.5 gives -1.0.
+fn floor(x: Float32) -> Float32 = float.to_float32(float.floor(float.from_float32(x)))
+
+/// Round toward +inf; -0.5 gives -0.0.
+fn ceil(x: Float32) -> Float32 = float.to_float32(float.ceil(float.from_float32(x)))
+
+/// Nearest whole value; halves round away from zero.
+fn round(x: Float32) -> Float32 = float.to_float32(float.round(float.from_float32(x)))
+
+/// Round toward 0; -0.5 gives -0.0.
+fn trunc(x: Float32) -> Float32 = {
+  let f = float.from_float32(x)
+  float.to_float32(if f < 0.0 then float.ceil(f) else float.floor(f))
+}
+
+/// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+fn signum(x: Float32) -> Float32 = {
+  let f = float.from_float32(x)
+  if float.is_nan(f) then x
+  else if float.to_bits(f) < 0 then float.to_float32(-1.0) else float.to_float32(1.0)
+}
+
+/// The 32 IEEE-754 binary32 bits as a non-negative Int; any NaN gives 0x7fc00000.
+fn to_bits(x: Float32) -> Int = {
+  let b = float.to_bits(float.from_float32(x))
+  let sign = if b < 0 then 2147483648 else 0
+  sign + binary32_magnitude(int.band(int.bshr(b, 52), 2047), int.band(b, 4503599627370495))
+}
+
+
+
+local fn binary32_magnitude(e: Int, f: Int) -> Int = match e {
+  0 => 0,
+  2047 => if f == 0 then 2139095040 else 2143289344,
+  _ => if e >= 897 then int.bor(int.bshl(e - 896, 23), int.bshr(f, 29))
+  else int.bshr(f + 4503599627370496, 926 - e),
+}
+
+/// Float32 whose binary32 bits are the low 32 bits of bits.
+fn from_bits(bits: Int) -> Float32 = float.to_float32(int.bits_to_f32(bits))
+
+/// Positive infinity.
+fn infinity() -> Float32 = from_bits(2139095040)
+
+/// The one quiet NaN (bits 0x7fc00000).
+fn nan() -> Float32 = from_bits(2143289344)
+
+/// Gap between 1.0 and the next Float32: 2^-23.
+fn epsilon() -> Float32 = from_bits(872415232)
+
+/// Largest finite Float32, about 3.4028235e38.
+fn max_value() -> Float32 = from_bits(2139095039)
+
+/// Most negative finite Float32 (= -max_value()), not the smallest positive.
+fn min_value() -> Float32 = from_bits(4286578687)
 "#;
 pub const SRC_FLOAT32_CONVERT: &str = r#"
 
@@ -4966,6 +5302,98 @@ fn to_float32(x: Float64) -> Float32 = float.to_float32(float.from_float64(x))
 
 /// Plain decimal, never an exponent; 2.0 keeps .0.
 fn to_string(x: Float64) -> String = float.to_string(float.from_float64(x))
+
+
+/// -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
+fn compare(a: Float64, b: Float64) -> Int = total_order(
+  float.from_float64(a),
+  float.from_float64(b),
+)
+
+local fn total_order(a: Float, b: Float) -> Int = match (float.is_nan(a), float.is_nan(b)) {
+  (true, true) => 0,
+  (true, false) => 1,
+  (false, true) => -1,
+  _ => if a < b then -1
+  else if a > b then 1 else sign_order(float.to_bits(a) < 0, float.to_bits(b) < 0),
+}
+
+
+local fn sign_order(neg_a: Bool, neg_b: Bool) -> Int = match (neg_a, neg_b) {
+  (true, false) => -1,
+  (false, true) => 1,
+  _ => 0,
+}
+
+/// Lesser; a NaN operand is ignored; -0.0 < 0.0.
+fn min(a: Float64, b: Float64) -> Float64 = float.to_float64(float.min(float.from_float64(a), float.from_float64(b)))
+
+/// Greater; a NaN operand is ignored; 0.0 > -0.0.
+fn max(a: Float64, b: Float64) -> Float64 = float.to_float64(float.max(float.from_float64(a), float.from_float64(b)))
+
+/// x limited to lo..hi; lo > hi or a NaN bound aborts.
+fn clamp(x: Float64, lo: Float64, hi: Float64) -> Float64 = float.to_float64(float.clamp(float.from_float64(x), float.from_float64(lo), float.from_float64(hi)))
+
+/// True only for NaN.
+fn is_nan(x: Float64) -> Bool = float.is_nan(float.from_float64(x))
+
+/// True for inf and -inf; false for NaN.
+fn is_infinite(x: Float64) -> Bool = float.is_infinite(float.from_float64(x))
+
+/// True unless x is inf, -inf or NaN.
+fn is_finite(x: Float64) -> Bool = not (float.is_nan(float.from_float64(x)) or float.is_infinite(float.from_float64(x)))
+
+/// Magnitude; -0.0 gives 0.0, NaN stays NaN.
+fn abs(x: Float64) -> Float64 = float.to_float64(float.abs(float.from_float64(x)))
+
+/// Round toward -inf; -0.5 gives -1.0.
+fn floor(x: Float64) -> Float64 = float.to_float64(float.floor(float.from_float64(x)))
+
+/// Round toward +inf; -0.5 gives -0.0.
+fn ceil(x: Float64) -> Float64 = float.to_float64(float.ceil(float.from_float64(x)))
+
+/// Nearest whole value; halves round away from zero.
+fn round(x: Float64) -> Float64 = float.to_float64(float.round(float.from_float64(x)))
+
+/// Round toward 0; -0.5 gives -0.0.
+fn trunc(x: Float64) -> Float64 = {
+  let f = float.from_float64(x)
+  float.to_float64(if f < 0.0 then float.ceil(f) else float.floor(f))
+}
+
+/// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+fn signum(x: Float64) -> Float64 = {
+  let f = float.from_float64(x)
+  if float.is_nan(f) then x
+  else if float.to_bits(f) < 0 then float.to_float64(-1.0) else float.to_float64(1.0)
+}
+
+/// The 64 IEEE-754 binary64 bits as Int; any NaN gives the canonical NaN.
+fn to_bits(x: Float64) -> Int = float.to_bits(float.from_float64(x))
+
+/// Float64 whose IEEE-754 binary64 bits are bits.
+fn from_bits(bits: Int) -> Float64 = float.to_float64(int.bits_to_float(bits))
+
+/// Positive infinity.
+fn infinity() -> Float64 = from_bits(9218868437227405312)
+
+/// The one quiet NaN (bits 0x7ff8000000000000).
+fn nan() -> Float64 = from_bits(9221120237041090560)
+
+/// Gap between 1.0 and the next Float64: 2^-52.
+fn epsilon() -> Float64 = from_bits(4372995238176751616)
+
+/// Largest finite Float64, about 1.7976931348623157e308.
+fn max_value() -> Float64 = from_bits(9218868437227405311)
+
+/// Most negative finite Float64 (= -max_value()), not the smallest positive.
+fn min_value() -> Float64 = from_bits(-4503599627370497)
+
+/// Float64 from trimmed s, the grammar of float.parse; err on junk.
+fn parse(s: String) -> Result[Float64, String] = match float.parse(s) {
+  ok(f) => ok(float.to_float64(f)),
+  err(e) => err(e),
+}
 "#;
 pub const SRC_FLOAT64_CONVERT: &str = r#"
 
@@ -8579,6 +9007,195 @@ fn hash_sha256_hex(s: String) -> String = {
   out
 }
 "#;
+pub const SRC_HEAP: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// A priority queue; the least element by its order comes out first.
+type Heap[A] = { slots: List[(A, Int)], next: Int, cmp: (A, A) -> Int }
+
+
+
+fn __natural[A](a: A, b: A) -> Int =
+  if a == b then 0
+  else match list.first(list.sort_by([1, 0], (i) => if i == 0 then a else b)) {
+    some(0) => -1,
+    _ => 1,
+  }
+
+
+/// An empty heap; the least element comes out first.
+fn new[A]() -> Heap[A] = { slots: [], next: 0, cmp: (a, b) => __natural(a, b) }
+
+/// An empty heap ordered by key f(x); the least key comes out first.
+fn new_by[A, K](f: (A) -> K) -> Heap[A] = {
+  slots: [],
+  next: 0,
+  cmp: (a, b) => __natural(f(a), f(b)),
+}
+
+/// An empty heap ordered by cmp; negative puts a first.
+fn new_with[A](cmp: (A, A) -> Int) -> Heap[A] = { slots: [], next: 0, cmp: cmp }
+
+/// A heap of xs in the natural order; equal elements leave in list order.
+fn from_list[A](xs: List[A]) -> Heap[A] = {
+  var h: Heap[A] = new()
+  for x in xs {
+    push(h, x)
+  }
+  h
+}
+
+
+fn __before[A](h: Heap[A], a: (A, Int), b: (A, Int)) -> Bool = {
+  let c = (h.cmp)(a.0, b.0)
+  c < 0 or (c == 0 and a.1 < b.1)
+}
+
+
+fn __swap[A](xs: List[(A, Int)], i: Int, j: Int) -> List[(A, Int)] = list.swap(xs, i, j)
+
+
+/// Adds x in place.
+fn push[A](mut h: Heap[A], x: A) -> Unit = {
+  var slots = h.slots
+  list.push(slots, (x, h.next))
+  var i = list.len(slots) - 1
+  var moving = true
+  while moving and i > 0 {
+    let parent = (i - 1) / 2
+    match (list.get(slots, i), list.get(slots, parent)) {
+      (some(child), some(up)) => if __before(h, child, up) then {
+        slots = __swap(slots, i, parent)
+        i = parent
+      } else {
+        moving = false
+      },
+      _ => {
+        moving = false
+      },
+    }
+  }
+  h = { slots: slots, next: h.next + 1, cmp: h.cmp }
+}
+
+/// Removes and yields the first element out; none when empty.
+fn pop[A](mut h: Heap[A]) -> A? = {
+  let n = list.len(h.slots)
+  if n == 0 then none
+  else {
+    let top = list.get(h.slots, 0)
+    var slots = __swap(h.slots, 0, n - 1)
+    let _ = list.pop(slots)
+    let size = n - 1
+    var i = 0
+    var moving = true
+    while moving {
+      let l = 2 * i + 1
+      let r = l + 1
+      var best = i
+      match (list.get(slots, l), list.get(slots, best)) {
+        (some(a), some(b)) => if l < size and __before(h, a, b) then {
+          best = l
+        } else (),
+        _ => (),
+      }
+      match (list.get(slots, r), list.get(slots, best)) {
+        (some(a), some(b)) => if r < size and __before(h, a, b) then {
+          best = r
+        } else (),
+        _ => (),
+      }
+      if best == i then {
+        moving = false
+      } else {
+        slots = __swap(slots, i, best)
+        i = best
+      }
+    }
+    h = { slots: slots, next: h.next, cmp: h.cmp }
+    match top {
+      some((x, _)) => some(x),
+      none => none,
+    }
+  }
+}
+
+/// Removes every element of h in place; the order is kept.
+fn clear[A](mut h: Heap[A]) -> Unit = {
+  h = { slots: [], next: 0, cmp: h.cmp }
+}
+
+
+/// The element pop would yield next, or none when empty.
+fn peek[A](h: Heap[A]) -> A? = match list.first(h.slots) {
+  some((x, _)) => some(x),
+  none => none,
+}
+
+/// Element count; 0 for an empty heap.
+fn len[A](h: Heap[A]) -> Int = list.len(h.slots)
+
+/// true iff h has no elements.
+fn is_empty[A](h: Heap[A]) -> Bool = list.is_empty(h.slots)
+
+/// The elements in pop order.
+fn to_list[A](h: Heap[A]) -> List[A] = {
+  var q = h
+  var out: List[A] = []
+  for _ in 0..<list.len(h.slots) {
+    match pop(q) {
+      some(x) => list.push(out, x),
+      none => (),
+    }
+  }
+  out
+}
+
+
+
+
+
+/// true if some element == x.
+fn contains[A](h: Heap[A], x: A) -> Bool = {
+  var hit = false
+  for (y, _) in h.slots {
+    if y == x then {
+      hit = true
+    } else ()
+  }
+  hit
+}
+
+/// true if f holds for some element; false when empty.
+fn any[A](h: Heap[A], f: (A) -> Bool) -> Bool = list.any(to_list(h), f)
+
+/// true if f holds for every element; true when empty.
+fn all[A](h: Heap[A], f: (A) -> Bool) -> Bool = list.all(to_list(h), f)
+
+/// Number of elements where f holds.
+fn count[A](h: Heap[A], f: (A) -> Bool) -> Int = list.count(to_list(h), f)
+
+/// The elements where f holds, in a heap of the same order; equal elements
+/// keep the order they went in.
+fn filter[A](h: Heap[A], f: (A) -> Bool) -> Heap[A] = {
+  var out: Heap[A] = { slots: [], next: 0, cmp: h.cmp }
+  for x in to_list(h) {
+    if f(x) then push(out, x) else ()
+  }
+  out
+}
+"#;
 pub const SRC_HEX: &str = r#"
 
 
@@ -10056,7 +10673,6 @@ fn clamp(n: Int, lo: Int, hi: Int) -> Int = _
 
 
 
-
 /// True when n % 2 == 0; exact for negatives.
 fn is_even(n: Int) -> Bool = n % 2 == 0
 
@@ -10388,6 +11004,128 @@ fn min_value() -> Int16 = int.to_int16(-32768)
 
 /// Largest Int16: 32767.
 fn max_value() -> Int16 = int.to_int16(32767)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: Int16, b: Int16) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: Int16, b: Int16) -> Int16 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: Int16, b: Int16) -> Int16 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: Int16, lo: Int16, hi: Int16) -> Int16 = int.to_int16(int.clamp(int.from_int16(x), int.from_int16(lo), int.from_int16(hi)))
+
+/// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+fn floor_div(a: Int16, b: Int16) -> Int16 = if int.from_int16(b) == -1 then a / b
+else int.to_int16(floor_quotient(int.from_int16(a), int.from_int16(b)))
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: Int16, b: Int16) -> Int16 = int.to_int16(floor_remainder(int.from_int16(a), int.from_int16(b)))
+
+
+local fn floor_quotient(a: Int, b: Int) -> Int = {
+  let q = a / b
+  if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+
+local fn floor_remainder(a: Int, b: Int) -> Int = if b == -1 then 0
+else {
+  let m = a % b
+  if m != 0 and (m < 0) != (b < 0) then m + b else m
+}
+
+/// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+fn pow(base: Int16, exp: Int) -> Int16 = int.to_int16(math.pow(int.from_int16(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: Int16) -> Bool = int.from_int16(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: Int16) -> Bool = int.from_int16(x) % 2 != 0
+
+/// Magnitude of x; min_value wraps to itself.
+fn abs(x: Int16) -> Int16 = int.to_int16(int.abs(int.from_int16(x)))
+
+/// -1, 0 or 1 by the sign of x.
+fn sign(x: Int16) -> Int = math.sign(int.from_int16(x))
+
+
+/// Bitwise AND.
+fn band(a: Int16, b: Int16) -> Int16 = int.to_int16(int.band(int.from_int16(a), int.from_int16(b)))
+
+/// Bitwise OR.
+fn bor(a: Int16, b: Int16) -> Int16 = int.to_int16(int.bor(int.from_int16(a), int.from_int16(b)))
+
+/// Bitwise XOR.
+fn bxor(a: Int16, b: Int16) -> Int16 = int.to_int16(int.bxor(int.from_int16(a), int.from_int16(b)))
+
+/// Bitwise complement of all 16 bits.
+fn bnot(x: Int16) -> Int16 = int.to_int16(int.bnot(int.from_int16(x)))
+
+/// a shifted left by n bits; n is taken mod 16.
+fn bshl(a: Int16, n: Int) -> Int16 = int.to_int16(int.bshl(int.from_int16(a), shift_count(n)))
+
+/// Sign-filling right shift; n is taken mod 16.
+fn bshr(a: Int16, n: Int) -> Int16 = int.to_int16(int.bshr(int.from_int16(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 16
+  if r < 0 then r + 16 else r
+}
+
+/// Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+fn count_leading_zeros(x: Int16) -> Int = int.count_leading_zeros(int.band(int.from_int16(x), 65535)) - 48
+
+/// Zero bits below the lowest set bit; 16 for 0.
+fn count_trailing_zeros(x: Int16) -> Int = int.min(int.count_trailing_zeros(int.from_int16(x)), 16)
+
+/// Number of set bits among the 16.
+fn count_ones(x: Int16) -> Int = int.pop_count(int.band(int.from_int16(x), 65535))
+
+/// The 2 bytes in reverse order (endian flip).
+fn byte_swap(x: Int16) -> Int16 = int.to_int16(int.bshr(int.byte_swap(int.band(int.from_int16(x), 65535)), 48))
+
+
+/// a + b wrapped to 16 bits.
+fn wrap_add(a: Int16, b: Int16) -> Int16 = int.to_int16(int.from_int16(a) + int.from_int16(b))
+
+/// a - b wrapped to 16 bits.
+fn wrap_sub(a: Int16, b: Int16) -> Int16 = int.to_int16(int.from_int16(a) - int.from_int16(b))
+
+/// a * b wrapped to 16 bits.
+fn wrap_mul(a: Int16, b: Int16) -> Int16 = int.to_int16(int.from_int16(a) * int.from_int16(b))
+
+/// The 16 bits of a rotated left by n; n is taken mod 16.
+fn rotate_left(a: Int16, n: Int) -> Int16 = int.to_int16(rotate_bits(int.band(int.from_int16(a), 65535), rotate_count(n)))
+
+/// The 16 bits of a rotated right by n; n is taken mod 16.
+fn rotate_right(a: Int16, n: Int) -> Int16 = int.to_int16(rotate_bits(int.band(int.from_int16(a), 65535), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 16 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 16
+  if r < 0 then r + 16 else r
+}
+
+/// Bits needed to hold x; 0 for 0, 16 if negative.
+fn bit_length(x: Int16) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int16(x), 65535))
+
+/// Decimal Int16 from trimmed s; err on junk or outside -32768..32767.
+fn parse(s: String) -> Result[Int16, String] = match int.parse(s) {
+  ok(n) => if n < -32768 then err("number too small to fit in target type")
+  else if n > 32767 then err("number too large to fit in target type")
+  else ok(int.to_int16(n)),
+  err(e) => err(e),
+}
 "#;
 pub const SRC_INT16_CONVERT: &str = r#"
 
@@ -10570,6 +11308,128 @@ fn min_value() -> Int32 = int.to_int32(-2147483648)
 
 /// Largest Int32: 2147483647.
 fn max_value() -> Int32 = int.to_int32(2147483647)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: Int32, b: Int32) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: Int32, b: Int32) -> Int32 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: Int32, b: Int32) -> Int32 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: Int32, lo: Int32, hi: Int32) -> Int32 = int.to_int32(int.clamp(int.from_int32(x), int.from_int32(lo), int.from_int32(hi)))
+
+/// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+fn floor_div(a: Int32, b: Int32) -> Int32 = if int.from_int32(b) == -1 then a / b
+else int.to_int32(floor_quotient(int.from_int32(a), int.from_int32(b)))
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: Int32, b: Int32) -> Int32 = int.to_int32(floor_remainder(int.from_int32(a), int.from_int32(b)))
+
+
+local fn floor_quotient(a: Int, b: Int) -> Int = {
+  let q = a / b
+  if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+
+local fn floor_remainder(a: Int, b: Int) -> Int = if b == -1 then 0
+else {
+  let m = a % b
+  if m != 0 and (m < 0) != (b < 0) then m + b else m
+}
+
+/// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+fn pow(base: Int32, exp: Int) -> Int32 = int.to_int32(math.pow(int.from_int32(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: Int32) -> Bool = int.from_int32(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: Int32) -> Bool = int.from_int32(x) % 2 != 0
+
+/// Magnitude of x; min_value wraps to itself.
+fn abs(x: Int32) -> Int32 = int.to_int32(int.abs(int.from_int32(x)))
+
+/// -1, 0 or 1 by the sign of x.
+fn sign(x: Int32) -> Int = math.sign(int.from_int32(x))
+
+
+/// Bitwise AND.
+fn band(a: Int32, b: Int32) -> Int32 = int.to_int32(int.band(int.from_int32(a), int.from_int32(b)))
+
+/// Bitwise OR.
+fn bor(a: Int32, b: Int32) -> Int32 = int.to_int32(int.bor(int.from_int32(a), int.from_int32(b)))
+
+/// Bitwise XOR.
+fn bxor(a: Int32, b: Int32) -> Int32 = int.to_int32(int.bxor(int.from_int32(a), int.from_int32(b)))
+
+/// Bitwise complement of all 32 bits.
+fn bnot(x: Int32) -> Int32 = int.to_int32(int.bnot(int.from_int32(x)))
+
+/// a shifted left by n bits; n is taken mod 32.
+fn bshl(a: Int32, n: Int) -> Int32 = int.to_int32(int.bshl(int.from_int32(a), shift_count(n)))
+
+/// Sign-filling right shift; n is taken mod 32.
+fn bshr(a: Int32, n: Int) -> Int32 = int.to_int32(int.bshr(int.from_int32(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 32
+  if r < 0 then r + 32 else r
+}
+
+/// Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+fn count_leading_zeros(x: Int32) -> Int = int.count_leading_zeros(int.band(int.from_int32(x), 4294967295)) - 32
+
+/// Zero bits below the lowest set bit; 32 for 0.
+fn count_trailing_zeros(x: Int32) -> Int = int.min(int.count_trailing_zeros(int.from_int32(x)), 32)
+
+/// Number of set bits among the 32.
+fn count_ones(x: Int32) -> Int = int.pop_count(int.band(int.from_int32(x), 4294967295))
+
+/// The 4 bytes in reverse order (endian flip).
+fn byte_swap(x: Int32) -> Int32 = int.to_int32(int.bshr(int.byte_swap(int.band(int.from_int32(x), 4294967295)), 32))
+
+
+/// a + b wrapped to 32 bits.
+fn wrap_add(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) + int.from_int32(b))
+
+/// a - b wrapped to 32 bits.
+fn wrap_sub(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) - int.from_int32(b))
+
+/// a * b wrapped to 32 bits.
+fn wrap_mul(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) * int.from_int32(b))
+
+/// The 32 bits of a rotated left by n; n is taken mod 32.
+fn rotate_left(a: Int32, n: Int) -> Int32 = int.to_int32(rotate_bits(int.band(int.from_int32(a), 4294967295), rotate_count(n)))
+
+/// The 32 bits of a rotated right by n; n is taken mod 32.
+fn rotate_right(a: Int32, n: Int) -> Int32 = int.to_int32(rotate_bits(int.band(int.from_int32(a), 4294967295), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 32 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 32
+  if r < 0 then r + 32 else r
+}
+
+/// Bits needed to hold x; 0 for 0, 32 if negative.
+fn bit_length(x: Int32) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int32(x), 4294967295))
+
+/// Decimal Int32 from trimmed s; err on junk or outside -2147483648..2147483647.
+fn parse(s: String) -> Result[Int32, String] = match int.parse(s) {
+  ok(n) => if n < -2147483648 then err("number too small to fit in target type")
+  else if n > 2147483647 then err("number too large to fit in target type")
+  else ok(int.to_int32(n)),
+  err(e) => err(e),
+}
 "#;
 pub const SRC_INT32_CONVERT: &str = r#"
 
@@ -10774,6 +11634,125 @@ fn min_value() -> Int64 = int.to_int64(-9223372036854775807 - 1)
 
 /// Largest Int64: 2^63-1.
 fn max_value() -> Int64 = int.to_int64(9223372036854775807)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: Int64, b: Int64) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: Int64, b: Int64) -> Int64 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: Int64, b: Int64) -> Int64 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: Int64, lo: Int64, hi: Int64) -> Int64 = int.to_int64(int.clamp(int.from_int64(x), int.from_int64(lo), int.from_int64(hi)))
+
+/// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+fn floor_div(a: Int64, b: Int64) -> Int64 = int.to_int64(floor_quotient(int.from_int64(a), int.from_int64(b)))
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: Int64, b: Int64) -> Int64 = int.to_int64(floor_remainder(int.from_int64(a), int.from_int64(b)))
+
+
+local fn floor_quotient(a: Int, b: Int) -> Int = {
+  let q = a / b
+  if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+
+local fn floor_remainder(a: Int, b: Int) -> Int = if b == -1 then 0
+else {
+  let m = a % b
+  if m != 0 and (m < 0) != (b < 0) then m + b else m
+}
+
+/// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+fn pow(base: Int64, exp: Int) -> Int64 = int.to_int64(math.pow(int.from_int64(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: Int64) -> Bool = int.from_int64(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: Int64) -> Bool = int.from_int64(x) % 2 != 0
+
+/// Magnitude of x; min_value wraps to itself.
+fn abs(x: Int64) -> Int64 = int.to_int64(int.abs(int.from_int64(x)))
+
+/// -1, 0 or 1 by the sign of x.
+fn sign(x: Int64) -> Int = math.sign(int.from_int64(x))
+
+
+/// Bitwise AND.
+fn band(a: Int64, b: Int64) -> Int64 = int.to_int64(int.band(int.from_int64(a), int.from_int64(b)))
+
+/// Bitwise OR.
+fn bor(a: Int64, b: Int64) -> Int64 = int.to_int64(int.bor(int.from_int64(a), int.from_int64(b)))
+
+/// Bitwise XOR.
+fn bxor(a: Int64, b: Int64) -> Int64 = int.to_int64(int.bxor(int.from_int64(a), int.from_int64(b)))
+
+/// Bitwise complement of all 64 bits.
+fn bnot(x: Int64) -> Int64 = int.to_int64(int.bnot(int.from_int64(x)))
+
+/// a shifted left by n bits; n is taken mod 64.
+fn bshl(a: Int64, n: Int) -> Int64 = int.to_int64(int.bshl(int.from_int64(a), shift_count(n)))
+
+/// Sign-filling right shift; n is taken mod 64.
+fn bshr(a: Int64, n: Int) -> Int64 = int.to_int64(int.bshr(int.from_int64(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+fn count_leading_zeros(x: Int64) -> Int = int.count_leading_zeros(int.from_int64(x))
+
+/// Zero bits below the lowest set bit; 64 for 0.
+fn count_trailing_zeros(x: Int64) -> Int = int.min(int.count_trailing_zeros(int.from_int64(x)), 64)
+
+/// Number of set bits among the 64.
+fn count_ones(x: Int64) -> Int = int.pop_count(int.from_int64(x))
+
+/// The 8 bytes in reverse order (endian flip).
+fn byte_swap(x: Int64) -> Int64 = int.to_int64(int.byte_swap(int.from_int64(x)))
+
+
+/// a + b wrapped to 64 bits.
+fn wrap_add(a: Int64, b: Int64) -> Int64 = int.to_int64(int.from_int64(a) + int.from_int64(b))
+
+/// a - b wrapped to 64 bits.
+fn wrap_sub(a: Int64, b: Int64) -> Int64 = int.to_int64(int.from_int64(a) - int.from_int64(b))
+
+/// a * b wrapped to 64 bits.
+fn wrap_mul(a: Int64, b: Int64) -> Int64 = int.to_int64(int.from_int64(a) * int.from_int64(b))
+
+/// The 64 bits of a rotated left by n; n is taken mod 64.
+fn rotate_left(a: Int64, n: Int) -> Int64 = int.to_int64(rotate_bits(int.from_int64(a), rotate_count(n)))
+
+/// The 64 bits of a rotated right by n; n is taken mod 64.
+fn rotate_right(a: Int64, n: Int) -> Int64 = int.to_int64(rotate_bits(int.from_int64(a), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.band(int.bshr(v, 64 - k), int.bnot(int.bshl(-1, k))))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Bits needed to hold x; 0 for 0, 64 if negative.
+fn bit_length(x: Int64) -> Int = 64 - int.count_leading_zeros(int.from_int64(x))
+
+/// Decimal Int64 from trimmed s; err on junk or overflow.
+fn parse(s: String) -> Result[Int64, String] = match int.parse(s) {
+  ok(n) => ok(int.to_int64(n)),
+  err(e) => err(e),
+}
 "#;
 pub const SRC_INT64_CONVERT: &str = r#"
 
@@ -10973,6 +11952,128 @@ fn min_value() -> Int8 = int.to_int8(-128)
 
 /// Largest Int8: 127.
 fn max_value() -> Int8 = int.to_int8(127)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: Int8, b: Int8) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: Int8, b: Int8) -> Int8 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: Int8, b: Int8) -> Int8 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: Int8, lo: Int8, hi: Int8) -> Int8 = int.to_int8(int.clamp(int.from_int8(x), int.from_int8(lo), int.from_int8(hi)))
+
+/// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+fn floor_div(a: Int8, b: Int8) -> Int8 = if int.from_int8(b) == -1 then a / b
+else int.to_int8(floor_quotient(int.from_int8(a), int.from_int8(b)))
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: Int8, b: Int8) -> Int8 = int.to_int8(floor_remainder(int.from_int8(a), int.from_int8(b)))
+
+
+local fn floor_quotient(a: Int, b: Int) -> Int = {
+  let q = a / b
+  if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+
+local fn floor_remainder(a: Int, b: Int) -> Int = if b == -1 then 0
+else {
+  let m = a % b
+  if m != 0 and (m < 0) != (b < 0) then m + b else m
+}
+
+/// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+fn pow(base: Int8, exp: Int) -> Int8 = int.to_int8(math.pow(int.from_int8(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: Int8) -> Bool = int.from_int8(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: Int8) -> Bool = int.from_int8(x) % 2 != 0
+
+/// Magnitude of x; min_value wraps to itself.
+fn abs(x: Int8) -> Int8 = int.to_int8(int.abs(int.from_int8(x)))
+
+/// -1, 0 or 1 by the sign of x.
+fn sign(x: Int8) -> Int = math.sign(int.from_int8(x))
+
+
+/// Bitwise AND.
+fn band(a: Int8, b: Int8) -> Int8 = int.to_int8(int.band(int.from_int8(a), int.from_int8(b)))
+
+/// Bitwise OR.
+fn bor(a: Int8, b: Int8) -> Int8 = int.to_int8(int.bor(int.from_int8(a), int.from_int8(b)))
+
+/// Bitwise XOR.
+fn bxor(a: Int8, b: Int8) -> Int8 = int.to_int8(int.bxor(int.from_int8(a), int.from_int8(b)))
+
+/// Bitwise complement of all 8 bits.
+fn bnot(x: Int8) -> Int8 = int.to_int8(int.bnot(int.from_int8(x)))
+
+/// a shifted left by n bits; n is taken mod 8.
+fn bshl(a: Int8, n: Int) -> Int8 = int.to_int8(int.bshl(int.from_int8(a), shift_count(n)))
+
+/// Sign-filling right shift; n is taken mod 8.
+fn bshr(a: Int8, n: Int) -> Int8 = int.to_int8(int.bshr(int.from_int8(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 8
+  if r < 0 then r + 8 else r
+}
+
+/// Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+fn count_leading_zeros(x: Int8) -> Int = int.count_leading_zeros(int.band(int.from_int8(x), 255)) - 56
+
+/// Zero bits below the lowest set bit; 8 for 0.
+fn count_trailing_zeros(x: Int8) -> Int = int.min(int.count_trailing_zeros(int.from_int8(x)), 8)
+
+/// Number of set bits among the 8.
+fn count_ones(x: Int8) -> Int = int.pop_count(int.band(int.from_int8(x), 255))
+
+/// The bytes in reverse order; one byte, so x itself.
+fn byte_swap(x: Int8) -> Int8 = x
+
+
+/// a + b wrapped to 8 bits.
+fn wrap_add(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) + int.from_int8(b))
+
+/// a - b wrapped to 8 bits.
+fn wrap_sub(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) - int.from_int8(b))
+
+/// a * b wrapped to 8 bits.
+fn wrap_mul(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) * int.from_int8(b))
+
+/// The 8 bits of a rotated left by n; n is taken mod 8.
+fn rotate_left(a: Int8, n: Int) -> Int8 = int.to_int8(rotate_bits(int.band(int.from_int8(a), 255), rotate_count(n)))
+
+/// The 8 bits of a rotated right by n; n is taken mod 8.
+fn rotate_right(a: Int8, n: Int) -> Int8 = int.to_int8(rotate_bits(int.band(int.from_int8(a), 255), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 8 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 8
+  if r < 0 then r + 8 else r
+}
+
+/// Bits needed to hold x; 0 for 0, 8 if negative.
+fn bit_length(x: Int8) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int8(x), 255))
+
+/// Decimal Int8 from trimmed s; err on junk or outside -128..127.
+fn parse(s: String) -> Result[Int8, String] = match int.parse(s) {
+  ok(n) => if n < -128 then err("number too small to fit in target type")
+  else if n > 127 then err("number too large to fit in target type")
+  else ok(int.to_int8(n)),
+  err(e) => err(e),
+}
 "#;
 pub const SRC_INT8_CONVERT: &str = r#"
 
@@ -13012,6 +14113,203 @@ fn find_map[A, B](xs: List[A], f: (A) -> B?) -> B? = {
 
 
 
+/// An empty list; the same value as [].
+fn new[A]() -> List[A] = []
+
+/// xs itself; the Container constructor from a list.
+fn from_list[A](xs: List[A]) -> List[A] = xs
+
+/// xs itself; the Container view as a list.
+fn to_list[A](xs: List[A]) -> List[A] = xs
+
+
+
+
+
+
+/// Stable sort by cmp: negative puts a first, 0 keeps input order.
+fn sort_with[A](xs: List[A], cmp: (A, A) -> Int) -> List[A] = {
+  let n = list.len(xs)
+  if n <= 1 then xs
+  else {
+    let half = n / 2
+    __merge_with(sort_with(list.take(xs, half), cmp), sort_with(list.drop(xs, half), cmp), cmp)
+  }
+}
+
+
+
+fn __merge_with[A](a: List[A], b: List[A], cmp: (A, A) -> Int) -> List[A] = {
+  var out: List[A] = []
+  var i = 0
+  var j = 0
+  for _ in 0..<(list.len(a) + list.len(b)) {
+    match (list.get(a, i), list.get(b, j)) {
+      (some(x), some(y)) => if cmp(x, y) > 0 then {
+        list.push(out, y)
+        j = j + 1
+      } else {
+        list.push(out, x)
+        i = i + 1
+      },
+      (some(x), none) => {
+        list.push(out, x)
+        i = i + 1
+      },
+      (none, some(y)) => {
+        list.push(out, y)
+        j = j + 1
+      },
+      (none, none) => (),
+    }
+  }
+  out
+}
+
+
+
+
+
+fn __key_order[K](a: K, b: K) -> Int =
+  if a == b then 0
+  else match list.first(list.sort_by([1, 0], (i) => if i == 0 then a else b)) {
+    some(0) => -1,
+    _ => 1,
+  }
+
+/// Element with the least key f(x); the first on ties; f runs once per x.
+fn min_by[A, K](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), -1)
+
+/// Element with the greatest key f(x); the first on ties; f runs once per x.
+fn max_by[A, K](xs: List[A], f: (A) -> K) -> A? = __pick_by_keys(xs, list.map(xs, f), 1)
+
+
+
+
+fn __pick_by_keys[A, K](xs: List[A], keys: List[K], want: Int) -> A? = {
+  var best: A? = none
+  var best_key: K? = none
+  var i = 0
+  for x in xs {
+    match list.get(keys, i) {
+      some(k) => {
+        let better = match best_key {
+          some(bk) => __key_order(k, bk) == want,
+          none => true,
+        }
+        if better then {
+          best = some(x)
+          best_key = some(k)
+        } else ()
+      },
+      none => (),
+    }
+    i = i + 1
+  }
+  best
+}
+
+/// Least element by cmp; the first on ties; none when empty.
+fn min_with[A](xs: List[A], cmp: (A, A) -> Int) -> A? = {
+  var best: A? = none
+  for x in xs {
+    best = match best {
+      some(b) => if cmp(x, b) < 0 then some(x) else some(b),
+      none => some(x),
+    }
+  }
+  best
+}
+
+/// Greatest element by cmp; the first on ties; none when empty.
+fn max_with[A](xs: List[A], cmp: (A, A) -> Int) -> A? = {
+  var best: A? = none
+  for x in xs {
+    best = match best {
+      some(b) => if cmp(x, b) > 0 then some(x) else some(b),
+      none => some(x),
+    }
+  }
+  best
+}
+
+
+
+/// Index of target among keys f(x) of xs sorted by key, or none.
+fn binary_search_by[A, K](xs: List[A], target: K, f: (A) -> K) -> Int? = {
+  var base = 0
+  var size = list.len(xs)
+  while size > 1 {
+    let half = size / 2
+    let mid = base + half
+    match list.get(xs, mid) {
+      some(e) => if __key_order(f(e), target) > 0 then ()
+      else {
+        base = mid
+      },
+      none => (),
+    }
+    size = size - half
+  }
+  if size == 0 then none
+  else match list.get(xs, base) {
+    some(e) => if __key_order(f(e), target) == 0 then some(base) else none,
+    none => none,
+  }
+}
+
+/// Index of target in xs sorted by cmp, or none; cmp(x, target) is asked.
+fn binary_search_with[A](xs: List[A], target: A, cmp: (A, A) -> Int) -> Int? = {
+  var base = 0
+  var size = list.len(xs)
+  while size > 1 {
+    let half = size / 2
+    let mid = base + half
+    match list.get(xs, mid) {
+      some(e) => if cmp(e, target) > 0 then ()
+      else {
+        base = mid
+      },
+      none => (),
+    }
+    size = size - half
+  }
+  if size == 0 then none
+  else match list.get(xs, base) {
+    some(e) => if cmp(e, target) == 0 then some(base) else none,
+    none => none,
+  }
+}
+
+
+/// (firsts, seconds) of a list of pairs; the inverse of zip.
+fn unzip[A, B](xs: List[(A, B)]) -> (List[A], List[B]) = {
+  var firsts: List[A] = []
+  var seconds: List[B] = []
+  for (a, b) in xs {
+    list.push(firsts, a)
+    list.push(seconds, b)
+  }
+  (firsts, seconds)
+}
+
+/// start, start + step, ... before end; counts down for step < 0; step = 0 aborts.
+fn range_step(start: Int, end: Int, step: Int) -> List[Int] = {
+  if step == 0 then panic("list.range_step: step must not be 0") else ()
+  let steps = if step > 0 then (if end > start then (end - start - 1) / step + 1 else 0)
+  else if start > end then (start - end - 1) / (0 - step) + 1
+  else 0
+  var out: List[Int] = []
+  for i in 0..<steps {
+    list.push(out, start + i * step)
+  }
+  out
+}
+
+
+
+
+
 
 
 
@@ -13527,6 +14825,170 @@ fn __fallible_unique_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[
 ) {
   ok(keys) => ok(list.zip(keys, xs) |> list.unique_by((p) => p.0) |> list.map((p) => p.1)),
   err(e) => err(e),
+}
+
+
+
+
+
+fn __fallible_min_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
+  xs,
+  f,
+) {
+  ok(keys) => ok(__pick_by_keys(xs, keys, -1)),
+  err(e) => err(e),
+}
+
+fn __fallible_max_by[A, K, E](xs: List[A], f: (A) -> Result[K, E]) -> Result[A?, E] = match __fallible_map(
+  xs,
+  f,
+) {
+  ok(keys) => ok(__pick_by_keys(xs, keys, 1)),
+  err(e) => err(e),
+}
+
+fn __fallible_min_with[A, E](xs: List[A], cmp: (A, A) -> Result[Int, E]) -> Result[A?, E] = __pick_with_fallible(
+  xs,
+  cmp,
+  -1,
+)
+
+fn __fallible_max_with[A, E](xs: List[A], cmp: (A, A) -> Result[Int, E]) -> Result[A?, E] = __pick_with_fallible(
+  xs,
+  cmp,
+  1,
+)
+
+
+fn __pick_with_fallible[A, E](xs: List[A], cmp: (A, A) -> Result[Int, E], want: Int) -> Result[A?, E] = {
+  var best: A? = none
+  var failed: E? = none
+  var stop = false
+  for x in xs {
+    if stop then ()
+    else match best {
+      some(b) => match cmp(x, b) {
+        ok(c) => if c * want > 0 then {
+          best = some(x)
+        } else (),
+        err(e) => {
+          failed = some(e)
+          stop = true
+        },
+      },
+      none => {
+        best = some(x)
+      },
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(best),
+  }
+}
+
+fn __fallible_sort_with[A, E](xs: List[A], cmp: (A, A) -> Result[Int, E]) -> Result[List[A], E] = {
+  let n = list.len(xs)
+  if n <= 1 then ok(xs)
+  else {
+    let half = n / 2
+    match __fallible_sort_with(list.take(xs, half), cmp) {
+      ok(a) => match __fallible_sort_with(list.drop(xs, half), cmp) {
+        ok(b) => __merge_with_fallible(a, b, cmp),
+        err(e) => err(e),
+      },
+      err(e) => err(e),
+    }
+  }
+}
+
+fn __merge_with_fallible[A, E](a: List[A], b: List[A], cmp: (A, A) -> Result[Int, E]) -> Result[List[A], E] = {
+  var out: List[A] = []
+  var failed: E? = none
+  var stop = false
+  var i = 0
+  var j = 0
+  for _ in 0..<(list.len(a) + list.len(b)) {
+    if stop then ()
+    else match (list.get(a, i), list.get(b, j)) {
+      (some(x), some(y)) => match cmp(x, y) {
+        ok(c) => if c > 0 then {
+          list.push(out, y)
+          j = j + 1
+        } else {
+          list.push(out, x)
+          i = i + 1
+        },
+        err(e) => {
+          failed = some(e)
+          stop = true
+        },
+      },
+      (some(x), none) => {
+        list.push(out, x)
+        i = i + 1
+      },
+      (none, some(y)) => {
+        list.push(out, y)
+        j = j + 1
+      },
+      (none, none) => (),
+    }
+  }
+  match failed {
+    some(e) => err(e),
+    none => ok(out),
+  }
+}
+
+
+fn __fallible_binary_search_by[A, K, E](xs: List[A], target: K, f: (A) -> Result[K, E]) -> Result[Int?, E] = __search_fallible(
+  xs,
+  (e) => match f(e) {
+    ok(k) => ok(__key_order(k, target)),
+    err(x) => err(x),
+  },
+)
+
+fn __fallible_binary_search_with[A, E](xs: List[A], target: A, cmp: (A, A) -> Result[Int, E]) -> Result[Int?, E] = __search_fallible(
+  xs,
+  (e) => cmp(e, target),
+)
+
+
+fn __search_fallible[A, E](xs: List[A], order: (A) -> Result[Int, E]) -> Result[Int?, E] = {
+  var base = 0
+  var size = list.len(xs)
+  var failed: E? = none
+  while size > 1 {
+    let half = size / 2
+    let mid = base + half
+    match list.get(xs, mid) {
+      some(e) => match order(e) {
+        ok(c) => if c > 0 then ()
+        else {
+          base = mid
+        },
+        err(x) => {
+          failed = some(x)
+          size = 1
+        },
+      },
+      none => (),
+    }
+    size = if size == 1 then 1 else size - half
+  }
+  match failed {
+    some(x) => err(x),
+    none => if list.len(xs) == 0 then ok(none)
+    else match list.get(xs, base) {
+      some(e) => match order(e) {
+        ok(c) => ok(if c == 0 then some(base) else none),
+        err(x) => err(x),
+      },
+      none => ok(none),
+    },
+  }
 }
 "#;
 pub const SRC_LIST_ANYALL: &str = r#"
@@ -18489,6 +19951,88 @@ fn clear[K, V](mut m: Map[K, V]) -> Unit = _
 
 
 
+/// (index, (key, value)) pairs in insertion order, index from 0.
+fn enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))] = list.enumerate(map.entries(m))
+
+/// Entries paired with ys by position; stops at the shorter.
+fn zip[K, V, B](m: Map[K, V], ys: List[B]) -> List[((K, V), B)] = list.zip(map.entries(m), ys)
+
+/// f over (entry, ys element) pairs; stops at the shorter.
+fn zip_with[K, V, B, C](m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C] = list.zip_with(
+  map.entries(m),
+  ys,
+  f,
+)
+
+/// The somes f gives over the entries, in insertion order.
+fn filter_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> List[B] = list.filter_map(
+  map.entries(m),
+  f,
+)
+
+/// The first some f gives over the entries, or none; f is not called after the hit.
+fn find_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> B? = list.find_map(map.entries(m), f)
+
+/// Left fold of the entries seeded by the first; none when empty.
+fn reduce[K, V](m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> (K, V)? = list.reduce(
+  map.entries(m),
+  f,
+)
+
+/// Running fold values over the entries, init excluded.
+fn scan[K, V, B](m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B] = list.scan(
+  map.entries(m),
+  init,
+  f,
+)
+
+/// (entries where f holds, the rest), insertion order kept.
+fn partition[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)]) = list.partition(
+  map.entries(m),
+  f,
+)
+
+/// Key f(entry) -> entries; keys in first-seen order.
+fn group_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = list.group_by(
+  map.entries(m),
+  f,
+)
+
+/// Entries sorted by key f(entry), stable; f runs once per entry.
+fn sort_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)] = list.sort_by(
+  map.entries(m),
+  f,
+)
+
+/// Entries sorted by cmp, stable: negative puts a first.
+fn sort_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)] = list.sort_with(
+  map.entries(m),
+  cmp,
+)
+
+/// Entry with the least f(entry); the first on ties.
+fn min_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.entries(m), f)
+
+/// Entry with the greatest f(entry); the first on ties.
+fn max_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.entries(m), f)
+
+/// Least entry by cmp; the first on ties.
+fn min_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.min_with(
+  map.entries(m),
+  cmp,
+)
+
+/// Greatest entry by cmp; the first on ties.
+fn max_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.max_with(
+  map.entries(m),
+  cmp,
+)
+
+
+
+
+
+
 
 
 fn __fallible_map[K, V, B, E](m: Map[K, V], f: (V) -> Result[B, E]) -> Result[Map[K, B], E] = {
@@ -18676,6 +20220,76 @@ fn __fallible_upsert[K, V, E](m: Map[K, V], key: K, init: V, f: (V) -> Result[V,
     err(e) => err(e),
   },
 }
+
+
+
+
+fn __fallible_zip_with[K, V, B, C, E](m: Map[K, V], ys: List[B], f: ((K, V), B) -> Result[C, E]) -> Result[List[C], E] = list.zip_with(
+  map.entries(m),
+  ys,
+  (p, y) => f(p, y)!,
+)
+
+fn __fallible_filter_map[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B?, E]) -> Result[List[B], E] = list.filter_map(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_find_map[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B?, E]) -> Result[B?, E] = list.find_map(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_reduce[K, V, E](m: Map[K, V], f: ((K, V), (K, V)) -> Result[(K, V), E]) -> Result[(K, V)?, E] = list.reduce(
+  map.entries(m),
+  (a, b) => f(a, b)!,
+)
+
+fn __fallible_scan[K, V, B, E](m: Map[K, V], init: B, f: (B, (K, V)) -> Result[B, E]) -> Result[List[B], E] = list.scan(
+  map.entries(m),
+  init,
+  (acc, p) => f(acc, p)!,
+)
+
+fn __fallible_partition[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -> Result[(List[(K, V)], List[(K, V)]), E] = list.partition(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_group_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E] = list.group_by(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_sort_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[List[(K, V)], E] = list.sort_by(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_sort_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[List[(K, V)], E] = list.sort_with(
+  map.entries(m),
+  (a, b) => cmp(a, b)!,
+)
+
+fn __fallible_min_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.min_by(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_max_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.max_by(
+  map.entries(m),
+  (p) => f(p)!,
+)
+
+fn __fallible_min_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[(K, V)?, E] = list.min_with(
+  map.entries(m),
+  (a, b) => cmp(a, b)!,
+)
+
+fn __fallible_max_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[(K, V)?, E] = list.max_with(
+  map.entries(m),
+  (a, b) => cmp(a, b)!,
+)
 "#;
 pub const SRC_MAP_CORE: &str = r#"
 
@@ -31992,6 +33606,80 @@ fn all[A](s: Set[A], f: (A) -> Bool) -> Bool = _
 
 
 
+/// Number of members where f holds.
+fn count[A](s: Set[A], f: (A) -> Bool) -> Int = list.count(set.to_list(s), f)
+
+/// First member, in insertion order, where f holds, or none.
+fn find[A](s: Set[A], f: (A) -> Bool) -> A? = list.find(set.to_list(s), f)
+
+/// Removes every member of s in place.
+fn clear[A](mut s: Set[A]) -> Unit = {
+  s = set.new()
+}
+
+/// (index, member) pairs in insertion order, index from 0.
+fn enumerate[A](s: Set[A]) -> List[(Int, A)] = list.enumerate(set.to_list(s))
+
+/// Members paired with ys by position; stops at the shorter.
+fn zip[A, B](s: Set[A], ys: List[B]) -> List[(A, B)] = list.zip(set.to_list(s), ys)
+
+/// f over (member, ys element) pairs; stops at the shorter.
+fn zip_with[A, B, C](s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C] = list.zip_with(
+  set.to_list(s),
+  ys,
+  f,
+)
+
+/// The somes f gives, in insertion order.
+fn filter_map[A, B](s: Set[A], f: (A) -> B?) -> List[B] = list.filter_map(set.to_list(s), f)
+
+/// The first some f gives, or none; f is not called after the hit.
+fn find_map[A, B](s: Set[A], f: (A) -> B?) -> B? = list.find_map(set.to_list(s), f)
+
+/// Left fold seeded by the first member; none when empty.
+fn reduce[A](s: Set[A], f: (A, A) -> A) -> A? = list.reduce(set.to_list(s), f)
+
+/// Running fold values in insertion order, init excluded.
+fn scan[A, B](s: Set[A], init: B, f: (B, A) -> B) -> List[B] = list.scan(set.to_list(s), init, f)
+
+/// (members where f holds, the rest), insertion order kept.
+fn partition[A](s: Set[A], f: (A) -> Bool) -> (List[A], List[A]) = list.partition(set.to_list(s), f)
+
+/// Key f(x) -> members; keys in first-seen order.
+fn group_by[A, B](s: Set[A], f: (A) -> B) -> Map[B, List[A]] = list.group_by(set.to_list(s), f)
+
+/// Members in ascending order; Floats in IEEE totalOrder.
+fn sort[A](s: Set[A]) -> List[A] = list.sort(set.to_list(s))
+
+/// Members sorted by key f(x), stable; f runs once per member.
+fn sort_by[A, B](s: Set[A], f: (A) -> B) -> List[A] = list.sort_by(set.to_list(s), f)
+
+/// Members sorted by cmp, stable: negative puts a first.
+fn sort_with[A](s: Set[A], cmp: (A, A) -> Int) -> List[A] = list.sort_with(set.to_list(s), cmp)
+
+/// Least member, or none when empty.
+fn min[A](s: Set[A]) -> A? = list.min(set.to_list(s))
+
+/// Greatest member, or none when empty.
+fn max[A](s: Set[A]) -> A? = list.max(set.to_list(s))
+
+/// Member with the least key f(x); the first on ties.
+fn min_by[A, K](s: Set[A], f: (A) -> K) -> A? = list.min_by(set.to_list(s), f)
+
+/// Member with the greatest key f(x); the first on ties.
+fn max_by[A, K](s: Set[A], f: (A) -> K) -> A? = list.max_by(set.to_list(s), f)
+
+/// Least member by cmp; the first on ties.
+fn min_with[A](s: Set[A], cmp: (A, A) -> Int) -> A? = list.min_with(set.to_list(s), cmp)
+
+/// Greatest member by cmp; the first on ties.
+fn max_with[A](s: Set[A], cmp: (A, A) -> Int) -> A? = list.max_with(set.to_list(s), cmp)
+
+
+
+
+
+
 
 fn __fallible_map[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Set[B], E] = {
   var out: List[B] = []
@@ -32101,6 +33789,86 @@ fn __fallible_all[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[Bool, E]
     none => ok(held),
   }
 }
+
+
+
+
+fn __fallible_count[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[Int, E] = list.count(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_find[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[A?, E] = list.find(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_zip_with[A, B, C, E](s: Set[A], ys: List[B], f: (A, B) -> Result[C, E]) -> Result[List[C], E] = list.zip_with(
+  set.to_list(s),
+  ys,
+  (a, b) => f(a, b)!,
+)
+
+fn __fallible_filter_map[A, B, E](s: Set[A], f: (A) -> Result[B?, E]) -> Result[List[B], E] = list.filter_map(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_find_map[A, B, E](s: Set[A], f: (A) -> Result[B?, E]) -> Result[B?, E] = list.find_map(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_reduce[A, E](s: Set[A], f: (A, A) -> Result[A, E]) -> Result[A?, E] = list.reduce(
+  set.to_list(s),
+  (a, b) => f(a, b)!,
+)
+
+fn __fallible_scan[A, B, E](s: Set[A], init: B, f: (B, A) -> Result[B, E]) -> Result[List[B], E] = list.scan(
+  set.to_list(s),
+  init,
+  (acc, x) => f(acc, x)!,
+)
+
+fn __fallible_partition[A, E](s: Set[A], f: (A) -> Result[Bool, E]) -> Result[(List[A], List[A]), E] = list.partition(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_group_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[Map[B, List[A]], E] = list.group_by(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_sort_by[A, B, E](s: Set[A], f: (A) -> Result[B, E]) -> Result[List[A], E] = list.sort_by(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_sort_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Result[List[A], E] = list.sort_with(
+  set.to_list(s),
+  (a, b) => cmp(a, b)!,
+)
+
+fn __fallible_min_by[A, K, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.min_by(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_max_by[A, K, E](s: Set[A], f: (A) -> Result[K, E]) -> Result[A?, E] = list.max_by(
+  set.to_list(s),
+  (x) => f(x)!,
+)
+
+fn __fallible_min_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Result[A?, E] = list.min_with(
+  set.to_list(s),
+  (a, b) => cmp(a, b)!,
+)
+
+fn __fallible_max_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Result[A?, E] = list.max_with(
+  set.to_list(s),
+  (a, b) => cmp(a, b)!,
+)
 "#;
 pub const SRC_SET_CORE: &str = r#"
 
@@ -36457,6 +38225,111 @@ fn min_value() -> UInt16 = int.to_uint16(0)
 
 /// Largest UInt16: 65535.
 fn max_value() -> UInt16 = int.to_uint16(65535)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: UInt16, b: UInt16) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: UInt16, b: UInt16) -> UInt16 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: UInt16, b: UInt16) -> UInt16 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16 = int.to_uint16(int.clamp(int.from_uint16(x), int.from_uint16(lo), int.from_uint16(hi)))
+
+/// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+fn floor_div(a: UInt16, b: UInt16) -> UInt16 = a / b
+
+/// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+fn modulo(a: UInt16, b: UInt16) -> UInt16 = a % b
+
+/// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+fn pow(base: UInt16, exp: Int) -> UInt16 = int.to_uint16(math.pow(int.from_uint16(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: UInt16) -> Bool = int.from_uint16(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: UInt16) -> Bool = int.from_uint16(x) % 2 != 0
+
+
+/// Bitwise AND.
+fn band(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.band(int.from_uint16(a), int.from_uint16(b)))
+
+/// Bitwise OR.
+fn bor(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.bor(int.from_uint16(a), int.from_uint16(b)))
+
+/// Bitwise XOR.
+fn bxor(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.bxor(int.from_uint16(a), int.from_uint16(b)))
+
+/// Bitwise complement of all 16 bits.
+fn bnot(x: UInt16) -> UInt16 = int.to_uint16(int.bnot(int.from_uint16(x)))
+
+/// a shifted left by n bits; n is taken mod 16.
+fn bshl(a: UInt16, n: Int) -> UInt16 = int.to_uint16(int.bshl(int.from_uint16(a), shift_count(n)))
+
+/// Zero-filling right shift; n is taken mod 16.
+fn bshr(a: UInt16, n: Int) -> UInt16 = int.to_uint16(int.bshr(int.from_uint16(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 16
+  if r < 0 then r + 16 else r
+}
+
+/// Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+fn count_leading_zeros(x: UInt16) -> Int = int.count_leading_zeros(int.from_uint16(x)) - 48
+
+/// Zero bits below the lowest set bit; 16 for 0.
+fn count_trailing_zeros(x: UInt16) -> Int = int.min(
+  int.count_trailing_zeros(int.from_uint16(x)),
+  16,
+)
+
+/// Number of set bits among the 16.
+fn count_ones(x: UInt16) -> Int = int.pop_count(int.from_uint16(x))
+
+/// The 2 bytes in reverse order (endian flip).
+fn byte_swap(x: UInt16) -> UInt16 = int.to_uint16(int.bshr(int.byte_swap(int.from_uint16(x)), 48))
+
+
+/// a + b wrapped to 16 bits.
+fn wrap_add(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.from_uint16(a) + int.from_uint16(b))
+
+/// a - b wrapped to 16 bits.
+fn wrap_sub(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.from_uint16(a) - int.from_uint16(b))
+
+/// a * b wrapped to 16 bits.
+fn wrap_mul(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.from_uint16(a) * int.from_uint16(b))
+
+/// The 16 bits of a rotated left by n; n is taken mod 16.
+fn rotate_left(a: UInt16, n: Int) -> UInt16 = int.to_uint16(rotate_bits(int.from_uint16(a), rotate_count(n)))
+
+/// The 16 bits of a rotated right by n; n is taken mod 16.
+fn rotate_right(a: UInt16, n: Int) -> UInt16 = int.to_uint16(rotate_bits(int.from_uint16(a), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 16 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 16
+  if r < 0 then r + 16 else r
+}
+
+/// Bits needed to hold x; 0 for 0.
+fn bit_length(x: UInt16) -> Int = 64 - int.count_leading_zeros(int.from_uint16(x))
+
+/// Decimal UInt16 from trimmed s; err on junk, a sign of -, or above 65535.
+fn parse(s: String) -> Result[UInt16, String] =
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match int.parse(s) {
+    ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.to_uint16(n)),
+    err(e) => err(e),
+  }
 "#;
 pub const SRC_UINT16_CONVERT: &str = r#"
 
@@ -36613,6 +38486,111 @@ fn min_value() -> UInt32 = int.to_uint32(0)
 
 /// Largest UInt32: 4294967295.
 fn max_value() -> UInt32 = int.to_uint32(4294967295)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: UInt32, b: UInt32) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: UInt32, b: UInt32) -> UInt32 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: UInt32, b: UInt32) -> UInt32 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32 = int.to_uint32(int.clamp(int.from_uint32(x), int.from_uint32(lo), int.from_uint32(hi)))
+
+/// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+fn floor_div(a: UInt32, b: UInt32) -> UInt32 = a / b
+
+/// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+fn modulo(a: UInt32, b: UInt32) -> UInt32 = a % b
+
+/// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+fn pow(base: UInt32, exp: Int) -> UInt32 = int.to_uint32(math.pow(int.from_uint32(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: UInt32) -> Bool = int.from_uint32(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: UInt32) -> Bool = int.from_uint32(x) % 2 != 0
+
+
+/// Bitwise AND.
+fn band(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.band(int.from_uint32(a), int.from_uint32(b)))
+
+/// Bitwise OR.
+fn bor(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.bor(int.from_uint32(a), int.from_uint32(b)))
+
+/// Bitwise XOR.
+fn bxor(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.bxor(int.from_uint32(a), int.from_uint32(b)))
+
+/// Bitwise complement of all 32 bits.
+fn bnot(x: UInt32) -> UInt32 = int.to_uint32(int.bnot(int.from_uint32(x)))
+
+/// a shifted left by n bits; n is taken mod 32.
+fn bshl(a: UInt32, n: Int) -> UInt32 = int.to_uint32(int.bshl(int.from_uint32(a), shift_count(n)))
+
+/// Zero-filling right shift; n is taken mod 32.
+fn bshr(a: UInt32, n: Int) -> UInt32 = int.to_uint32(int.bshr(int.from_uint32(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 32
+  if r < 0 then r + 32 else r
+}
+
+/// Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+fn count_leading_zeros(x: UInt32) -> Int = int.count_leading_zeros(int.from_uint32(x)) - 32
+
+/// Zero bits below the lowest set bit; 32 for 0.
+fn count_trailing_zeros(x: UInt32) -> Int = int.min(
+  int.count_trailing_zeros(int.from_uint32(x)),
+  32,
+)
+
+/// Number of set bits among the 32.
+fn count_ones(x: UInt32) -> Int = int.pop_count(int.from_uint32(x))
+
+/// The 4 bytes in reverse order (endian flip).
+fn byte_swap(x: UInt32) -> UInt32 = int.to_uint32(int.bshr(int.byte_swap(int.from_uint32(x)), 32))
+
+
+/// a + b wrapped to 32 bits.
+fn wrap_add(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.from_uint32(a) + int.from_uint32(b))
+
+/// a - b wrapped to 32 bits.
+fn wrap_sub(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.from_uint32(a) - int.from_uint32(b))
+
+/// a * b wrapped to 32 bits.
+fn wrap_mul(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.from_uint32(a) * int.from_uint32(b))
+
+/// The 32 bits of a rotated left by n; n is taken mod 32.
+fn rotate_left(a: UInt32, n: Int) -> UInt32 = int.to_uint32(rotate_bits(int.from_uint32(a), rotate_count(n)))
+
+/// The 32 bits of a rotated right by n; n is taken mod 32.
+fn rotate_right(a: UInt32, n: Int) -> UInt32 = int.to_uint32(rotate_bits(int.from_uint32(a), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 32 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 32
+  if r < 0 then r + 32 else r
+}
+
+/// Bits needed to hold x; 0 for 0.
+fn bit_length(x: UInt32) -> Int = 64 - int.count_leading_zeros(int.from_uint32(x))
+
+/// Decimal UInt32 from trimmed s; err on junk, a sign of -, or above 4294967295.
+fn parse(s: String) -> Result[UInt32, String] =
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match int.parse(s) {
+    ok(n) => if n > 4294967295 then err("number too large to fit in target type") else ok(int.to_uint32(n)),
+    err(e) => err(e),
+  }
 "#;
 pub const SRC_UINT32_CONVERT: &str = r#"
 
@@ -36829,6 +38807,136 @@ fn min_value() -> UInt64 = int.to_uint64(0)
 
 /// Largest UInt64: 2^64-1.
 fn max_value() -> UInt64 = int.to_uint64(-1)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: UInt64, b: UInt64) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: UInt64, b: UInt64) -> UInt64 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: UInt64, b: UInt64) -> UInt64 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64 = unbias(int.clamp(bias(x), bias(lo), bias(hi)))
+
+
+local fn bias(x: UInt64) -> Int = int.bxor(int.from_uint64(x), int.bshl(1, 63))
+
+local fn unbias(n: Int) -> UInt64 = int.to_uint64(int.bxor(n, int.bshl(1, 63)))
+
+/// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+fn floor_div(a: UInt64, b: UInt64) -> UInt64 = a / b
+
+/// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+fn modulo(a: UInt64, b: UInt64) -> UInt64 = a % b
+
+/// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+fn pow(base: UInt64, exp: Int) -> UInt64 = int.to_uint64(math.pow(int.from_uint64(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: UInt64) -> Bool = int.from_uint64(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: UInt64) -> Bool = int.from_uint64(x) % 2 != 0
+
+
+/// Bitwise AND.
+fn band(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.band(int.from_uint64(a), int.from_uint64(b)))
+
+/// Bitwise OR.
+fn bor(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.bor(int.from_uint64(a), int.from_uint64(b)))
+
+/// Bitwise XOR.
+fn bxor(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.bxor(int.from_uint64(a), int.from_uint64(b)))
+
+/// Bitwise complement of all 64 bits.
+fn bnot(x: UInt64) -> UInt64 = int.to_uint64(int.bnot(int.from_uint64(x)))
+
+/// a shifted left by n bits; n is taken mod 64.
+fn bshl(a: UInt64, n: Int) -> UInt64 = int.to_uint64(int.bshl(int.from_uint64(a), shift_count(n)))
+
+/// Zero-filling right shift; n is taken mod 64.
+fn bshr(a: UInt64, n: Int) -> UInt64 = int.to_uint64(shift_right_zero(int.from_uint64(a), shift_count(n)))
+
+
+local fn shift_right_zero(v: Int, k: Int) -> Int = if k == 0 then v
+else int.band(int.bshr(v, k), int.bnot(int.bshl(-1, 64 - k)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+fn count_leading_zeros(x: UInt64) -> Int = int.count_leading_zeros(int.from_uint64(x))
+
+/// Zero bits below the lowest set bit; 64 for 0.
+fn count_trailing_zeros(x: UInt64) -> Int = int.min(
+  int.count_trailing_zeros(int.from_uint64(x)),
+  64,
+)
+
+/// Number of set bits among the 64.
+fn count_ones(x: UInt64) -> Int = int.pop_count(int.from_uint64(x))
+
+/// The 8 bytes in reverse order (endian flip).
+fn byte_swap(x: UInt64) -> UInt64 = int.to_uint64(int.byte_swap(int.from_uint64(x)))
+
+
+/// a + b wrapped to 64 bits.
+fn wrap_add(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) + int.from_uint64(b))
+
+/// a - b wrapped to 64 bits.
+fn wrap_sub(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) - int.from_uint64(b))
+
+/// a * b wrapped to 64 bits.
+fn wrap_mul(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) * int.from_uint64(b))
+
+/// The 64 bits of a rotated left by n; n is taken mod 64.
+fn rotate_left(a: UInt64, n: Int) -> UInt64 = int.to_uint64(rotate_bits(int.from_uint64(a), rotate_count(n)))
+
+/// The 64 bits of a rotated right by n; n is taken mod 64.
+fn rotate_right(a: UInt64, n: Int) -> UInt64 = int.to_uint64(rotate_bits(int.from_uint64(a), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.band(int.bshr(v, 64 - k), int.bnot(int.bshl(-1, k))))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+/// Bits needed to hold x; 0 for 0.
+fn bit_length(x: UInt64) -> Int = 64 - int.count_leading_zeros(int.from_uint64(x))
+
+/// Decimal UInt64 from trimmed s; err on junk, a sign of -, or above 2^64-1.
+fn parse(s: String) -> Result[UInt64, String] = {
+  let t = string.trim(s)
+  if string.starts_with(t, "-") then err("invalid digit found in string")
+  else match int.parse(t) {
+    ok(n) => ok(int.to_uint64(n)),
+    err(e) => match parse_upper(t) {
+      some(u) => ok(u),
+      none => err(e),
+    },
+  }
+}
+
+
+
+local fn parse_upper(t: String) -> UInt64? = {
+  let n = string.len(t)
+  match (int.parse(string.slice(t, 0, n - 1)), int.parse(string.slice(t, n - 1, n))) {
+    (ok(head), ok(digit)) => if head < 1844674407370955161 or head == 1844674407370955161 and digit <= 5 then some(int.to_uint64(head) * int.to_uint64(10) + int.to_uint64(digit))
+    else none,
+    _ => none,
+  }
+}
 "#;
 pub const SRC_UINT64_CONVERT: &str = r#"
 
@@ -37042,6 +39150,108 @@ fn min_value() -> UInt8 = int.to_uint8(0)
 
 /// Largest UInt8: 255.
 fn max_value() -> UInt8 = int.to_uint8(255)
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: UInt8, b: UInt8) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: UInt8, b: UInt8) -> UInt8 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: UInt8, b: UInt8) -> UInt8 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8 = int.to_uint8(int.clamp(int.from_uint8(x), int.from_uint8(lo), int.from_uint8(hi)))
+
+/// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+fn floor_div(a: UInt8, b: UInt8) -> UInt8 = a / b
+
+/// Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+fn modulo(a: UInt8, b: UInt8) -> UInt8 = a % b
+
+/// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+fn pow(base: UInt8, exp: Int) -> UInt8 = int.to_uint8(math.pow(int.from_uint8(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: UInt8) -> Bool = int.from_uint8(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: UInt8) -> Bool = int.from_uint8(x) % 2 != 0
+
+
+/// Bitwise AND.
+fn band(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.band(int.from_uint8(a), int.from_uint8(b)))
+
+/// Bitwise OR.
+fn bor(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.bor(int.from_uint8(a), int.from_uint8(b)))
+
+/// Bitwise XOR.
+fn bxor(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.bxor(int.from_uint8(a), int.from_uint8(b)))
+
+/// Bitwise complement of all 8 bits.
+fn bnot(x: UInt8) -> UInt8 = int.to_uint8(int.bnot(int.from_uint8(x)))
+
+/// a shifted left by n bits; n is taken mod 8.
+fn bshl(a: UInt8, n: Int) -> UInt8 = int.to_uint8(int.bshl(int.from_uint8(a), shift_count(n)))
+
+/// Zero-filling right shift; n is taken mod 8.
+fn bshr(a: UInt8, n: Int) -> UInt8 = int.to_uint8(int.bshr(int.from_uint8(a), shift_count(n)))
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 8
+  if r < 0 then r + 8 else r
+}
+
+/// Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+fn count_leading_zeros(x: UInt8) -> Int = int.count_leading_zeros(int.from_uint8(x)) - 56
+
+/// Zero bits below the lowest set bit; 8 for 0.
+fn count_trailing_zeros(x: UInt8) -> Int = int.min(int.count_trailing_zeros(int.from_uint8(x)), 8)
+
+/// Number of set bits among the 8.
+fn count_ones(x: UInt8) -> Int = int.pop_count(int.from_uint8(x))
+
+/// The bytes in reverse order; one byte, so x itself.
+fn byte_swap(x: UInt8) -> UInt8 = x
+
+
+/// a + b wrapped to 8 bits.
+fn wrap_add(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.from_uint8(a) + int.from_uint8(b))
+
+/// a - b wrapped to 8 bits.
+fn wrap_sub(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.from_uint8(a) - int.from_uint8(b))
+
+/// a * b wrapped to 8 bits.
+fn wrap_mul(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.from_uint8(a) * int.from_uint8(b))
+
+/// The 8 bits of a rotated left by n; n is taken mod 8.
+fn rotate_left(a: UInt8, n: Int) -> UInt8 = int.to_uint8(rotate_bits(int.from_uint8(a), rotate_count(n)))
+
+/// The 8 bits of a rotated right by n; n is taken mod 8.
+fn rotate_right(a: UInt8, n: Int) -> UInt8 = int.to_uint8(rotate_bits(int.from_uint8(a), rotate_count(0 - rotate_count(n))))
+
+
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 8 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 8
+  if r < 0 then r + 8 else r
+}
+
+/// Bits needed to hold x; 0 for 0.
+fn bit_length(x: UInt8) -> Int = 64 - int.count_leading_zeros(int.from_uint8(x))
+
+/// Decimal UInt8 from trimmed s; err on junk, a sign of -, or above 255.
+fn parse(s: String) -> Result[UInt8, String] =
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match int.parse(s) {
+    ok(n) => if n > 255 then err("number too large to fit in target type") else ok(int.to_uint8(n)),
+    err(e) => err(e),
+  }
 "#;
 pub const SRC_UINT8_CONVERT: &str = r#"
 
@@ -40154,6 +42364,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "datetime_calendar" => Some(SRC_DATETIME_CALENDAR),
         "datetime_format" => Some(SRC_DATETIME_FORMAT),
         "datetime_parse_iso" => Some(SRC_DATETIME_PARSE_ISO),
+        "deque" => Some(SRC_DEQUE),
         "env" => Some(SRC_ENV),
         "env_args" => Some(SRC_ENV_ARGS),
         "env_cwd" => Some(SRC_ENV_CWD),
@@ -40216,6 +42427,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "fs_write_bytes_raw" => Some(SRC_FS_WRITE_BYTES_RAW),
         "hash" => Some(SRC_HASH),
         "hash_impl" => Some(SRC_HASH_IMPL),
+        "heap" => Some(SRC_HEAP),
         "hex" => Some(SRC_HEX),
         "hex_encode" => Some(SRC_HEX_ENCODE),
         "html" => Some(SRC_HTML),

@@ -72,3 +72,125 @@ fn min_value() -> Int8 = int.to_int8(-128)
 
 /// Largest Int8: 127.
 fn max_value() -> Int8 = int.to_int8(127)
+
+// ── Integer: compare, select, divide (R-sized-02, R-sized-08, R-sized-10) ──
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: Int8, b: Int8) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// Lesser of a and b.
+fn min(a: Int8, b: Int8) -> Int8 = if a <= b then a else b
+
+/// Greater of a and b.
+fn max(a: Int8, b: Int8) -> Int8 = if a >= b then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: Int8, lo: Int8, hi: Int8) -> Int8 = int.to_int8(int.clamp(int.from_int8(x), int.from_int8(lo), int.from_int8(hi)))
+
+/// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+fn floor_div(a: Int8, b: Int8) -> Int8 = if int.from_int8(b) == -1 then a / b
+else int.to_int8(floor_quotient(int.from_int8(a), int.from_int8(b)))
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: Int8, b: Int8) -> Int8 = int.to_int8(floor_remainder(int.from_int8(a), int.from_int8(b)))
+
+// b == -1 never reaches here: it divides exactly, and the type's own `/` aborts on min_value / -1.
+local fn floor_quotient(a: Int, b: Int) -> Int = {
+  let q = a / b
+  if a % b != 0 and (a < 0) != (b < 0) then q - 1 else q
+}
+
+// b == -1 divides every a, and Int's `%` aborts on min_value % -1: answered first.
+local fn floor_remainder(a: Int, b: Int) -> Int = if b == -1 then 0
+else {
+  let m = a % b
+  if m != 0 and (m < 0) != (b < 0) then m + b else m
+}
+
+/// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+fn pow(base: Int8, exp: Int) -> Int8 = int.to_int8(math.pow(int.from_int8(base), exp))
+
+/// True when x is a multiple of 2.
+fn is_even(x: Int8) -> Bool = int.from_int8(x) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: Int8) -> Bool = int.from_int8(x) % 2 != 0
+
+/// Magnitude of x; min_value wraps to itself.
+fn abs(x: Int8) -> Int8 = int.to_int8(int.abs(int.from_int8(x)))
+
+/// -1, 0 or 1 by the sign of x.
+fn sign(x: Int8) -> Int = math.sign(int.from_int8(x))
+
+// ── Integer: bitwise, FixedWidthInteger: bit counts (R-sized-10) ──
+/// Bitwise AND.
+fn band(a: Int8, b: Int8) -> Int8 = int.to_int8(int.band(int.from_int8(a), int.from_int8(b)))
+
+/// Bitwise OR.
+fn bor(a: Int8, b: Int8) -> Int8 = int.to_int8(int.bor(int.from_int8(a), int.from_int8(b)))
+
+/// Bitwise XOR.
+fn bxor(a: Int8, b: Int8) -> Int8 = int.to_int8(int.bxor(int.from_int8(a), int.from_int8(b)))
+
+/// Bitwise complement of all 8 bits.
+fn bnot(x: Int8) -> Int8 = int.to_int8(int.bnot(int.from_int8(x)))
+
+/// a shifted left by n bits; n is taken mod 8.
+fn bshl(a: Int8, n: Int) -> Int8 = int.to_int8(int.bshl(int.from_int8(a), shift_count(n)))
+
+/// Sign-filling right shift; n is taken mod 8.
+fn bshr(a: Int8, n: Int) -> Int8 = int.to_int8(int.bshr(int.from_int8(a), shift_count(n)))
+
+// n reduced into 0..7, a negative n included.
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 8
+  if r < 0 then r + 8 else r
+}
+
+/// Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+fn count_leading_zeros(x: Int8) -> Int = int.count_leading_zeros(int.band(int.from_int8(x), 255)) - 56
+
+/// Zero bits below the lowest set bit; 8 for 0.
+fn count_trailing_zeros(x: Int8) -> Int = int.min(int.count_trailing_zeros(int.from_int8(x)), 8)
+
+/// Number of set bits among the 8.
+fn count_ones(x: Int8) -> Int = int.pop_count(int.band(int.from_int8(x), 255))
+
+/// The bytes in reverse order; one byte, so x itself.
+fn byte_swap(x: Int8) -> Int8 = x
+
+// ── FixedWidthInteger: wrapping, rotation, bit length; parse (R-int-11, R-int-12, R-sized-02) ──
+/// a + b wrapped to 8 bits.
+fn wrap_add(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) + int.from_int8(b))
+
+/// a - b wrapped to 8 bits.
+fn wrap_sub(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) - int.from_int8(b))
+
+/// a * b wrapped to 8 bits.
+fn wrap_mul(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) * int.from_int8(b))
+
+/// The 8 bits of a rotated left by n; n is taken mod 8.
+fn rotate_left(a: Int8, n: Int) -> Int8 = int.to_int8(rotate_bits(int.band(int.from_int8(a), 255), rotate_count(n)))
+
+/// The 8 bits of a rotated right by n; n is taken mod 8.
+fn rotate_right(a: Int8, n: Int) -> Int8 = int.to_int8(rotate_bits(int.band(int.from_int8(a), 255), rotate_count(0 - rotate_count(n))))
+
+// The low 8 bits v rotated left by k (k in 0..7); bits above 8 are dropped by the narrowing.
+local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
+else int.bor(int.bshl(v, k), int.bshr(v, 8 - k))
+
+local fn rotate_count(n: Int) -> Int = {
+  let r = n % 8
+  if r < 0 then r + 8 else r
+}
+
+/// Bits needed to hold x; 0 for 0, 8 if negative.
+fn bit_length(x: Int8) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int8(x), 255))
+
+/// Decimal Int8 from trimmed s; err on junk or outside -128..127.
+fn parse(s: String) -> Result[Int8, String] = match int.parse(s) {
+  ok(n) => if n < -128 then err("number too small to fit in target type")
+  else if n > 127 then err("number too large to fit in target type")
+  else ok(int.to_int8(n)),
+  err(e) => err(e),
+}

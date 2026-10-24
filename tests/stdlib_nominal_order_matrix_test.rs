@@ -29,16 +29,33 @@ use almide_lang::ast::{Decl, Visibility};
 /// `(module, type name, is an opaque newtype)` for every stdlib-owned type.
 fn stdlib_types() -> BTreeMap<(String, String), bool> {
     let mut out: BTreeMap<(String, String), bool> = BTreeMap::new();
+    // A generic declaration has no single element type to probe — whether a
+    // bundled module declares it or the owned-type table names it
+    // (`deque.Deque[A]`, `heap.Heap[A]`).
+    let mut generic: std::collections::BTreeSet<(String, String)> = Default::default();
+    for module in almide_lang::stdlib_info::BUNDLED_MODULES {
+        let Some(source) = almide_lang::stdlib_info::bundled_source(module) else { continue };
+        let Some(program) = almide_lang::parse_cached(source) else { continue };
+        for decl in &program.decls {
+            if let Decl::Type { name, generics: Some(g), .. } = decl
+                && !g.is_empty()
+            {
+                generic.insert((module.to_string(), name.as_str().to_string()));
+            }
+        }
+    }
     for (m, t) in almide_lang::stdlib_info::STDLIB_OWNED_TYPES {
-        out.insert((m.to_string(), t.to_string()), false);
+        let key = (m.to_string(), t.to_string());
+        if !generic.contains(&key) {
+            out.insert(key, false);
+        }
     }
     for module in almide_lang::stdlib_info::BUNDLED_MODULES {
         let Some(source) = almide_lang::stdlib_info::bundled_source(module) else { continue };
         let Some(program) = almide_lang::parse_cached(source) else { continue };
         for decl in &program.decls {
-            if let Decl::Type { name, visibility, generics, .. } = decl {
-                // A generic declaration has no single element type to probe.
-                if generics.as_ref().is_some_and(|g| !g.is_empty()) {
+            if let Decl::Type { name, visibility, .. } = decl {
+                if generic.contains(&(module.to_string(), name.as_str().to_string())) {
                     continue;
                 }
                 let opaque = matches!(visibility, Visibility::Mod | Visibility::Local);

@@ -96,8 +96,6 @@ json.set_path :: UNPROBEABLE :: parameter type outside the synthesizer
 json.stringify :: UNPROBEABLE :: no candidate shape builds natively
 json.stringify_pretty :: UNPROBEABLE :: no candidate shape builds natively
 json.to_map :: UNPROBEABLE :: no candidate shape builds natively
-list.with_capacity :: UNPROBEABLE :: no candidate shape builds natively
-map.new :: UNPROBEABLE :: no candidate shape builds natively
 matrix.mul_f32 :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_t :: UNPROBEABLE :: parameter type outside the synthesizer
@@ -139,14 +137,11 @@ result.is_ok :: UNPROBEABLE :: no candidate shape builds natively
 result.map :: UNPROBEABLE :: no candidate shape builds natively
 result.map_err :: UNPROBEABLE :: no candidate shape builds natively
 result.or_else :: UNPROBEABLE :: no candidate shape builds natively
-result.partition :: UNPROBEABLE :: no candidate shape builds natively
-result.to_err_option :: UNPROBEABLE :: no candidate shape builds natively
 result.to_list :: UNPROBEABLE :: no candidate shape builds natively
 result.to_option :: UNPROBEABLE :: no candidate shape builds natively
 result.unwrap_or :: UNPROBEABLE :: no candidate shape builds natively
 result.unwrap_or_else :: UNPROBEABLE :: no candidate shape builds natively
 result.zip :: UNPROBEABLE :: no candidate shape builds natively
-set.new :: UNPROBEABLE :: no candidate shape builds natively
 testing.assert_aborts :: UNPROBEABLE :: no candidate shape builds natively
 testing.assert_err :: UNPROBEABLE :: no candidate shape builds natively
 testing.assert_ok :: UNPROBEABLE :: no candidate shape builds natively

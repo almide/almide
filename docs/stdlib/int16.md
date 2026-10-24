@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (22 functions)
+## Signature index (50 functions)
 
 ```
 // Wraps to 8 bits; 128 becomes -128.
@@ -151,6 +151,118 @@ int16.min_value() -> Int16
 // Largest Int16: 32767.
 // @since 0.38.0
 int16.max_value() -> Int16
+
+// -1, 0 or 1 as a is below, equal to or above b.
+// @since unreleased
+int16.compare(a: Int16, b: Int16) -> Int
+
+// Lesser of a and b.
+// @since unreleased
+int16.min(a: Int16, b: Int16) -> Int16
+
+// Greater of a and b.
+// @since unreleased
+int16.max(a: Int16, b: Int16) -> Int16
+
+// x limited to lo..hi; aborts when lo > hi.
+// @since unreleased
+int16.clamp(x: Int16, lo: Int16, hi: Int16) -> Int16
+
+// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+// @since unreleased
+int16.floor_div(a: Int16, b: Int16) -> Int16
+
+// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+// @since unreleased
+int16.modulo(a: Int16, b: Int16) -> Int16
+
+// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+// @since unreleased
+int16.pow(base: Int16, exp: Int) -> Int16
+
+// True when x is a multiple of 2.
+// @since unreleased
+int16.is_even(x: Int16) -> Bool
+
+// True when x is not a multiple of 2.
+// @since unreleased
+int16.is_odd(x: Int16) -> Bool
+
+// Magnitude of x; min_value wraps to itself.
+// @since unreleased
+int16.abs(x: Int16) -> Int16
+
+// -1, 0 or 1 by the sign of x.
+// @since unreleased
+int16.sign(x: Int16) -> Int
+
+// Bitwise AND.
+// @since unreleased
+int16.band(a: Int16, b: Int16) -> Int16
+
+// Bitwise OR.
+// @since unreleased
+int16.bor(a: Int16, b: Int16) -> Int16
+
+// Bitwise XOR.
+// @since unreleased
+int16.bxor(a: Int16, b: Int16) -> Int16
+
+// Bitwise complement of all 16 bits.
+// @since unreleased
+int16.bnot(x: Int16) -> Int16
+
+// a shifted left by n bits; n is taken mod 16.
+// @since unreleased
+int16.bshl(a: Int16, n: Int) -> Int16
+
+// Sign-filling right shift; n is taken mod 16.
+// @since unreleased
+int16.bshr(a: Int16, n: Int) -> Int16
+
+// Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+// @since unreleased
+int16.count_leading_zeros(x: Int16) -> Int
+
+// Zero bits below the lowest set bit; 16 for 0.
+// @since unreleased
+int16.count_trailing_zeros(x: Int16) -> Int
+
+// Number of set bits among the 16.
+// @since unreleased
+int16.count_ones(x: Int16) -> Int
+
+// The 2 bytes in reverse order (endian flip).
+// @since unreleased
+int16.byte_swap(x: Int16) -> Int16
+
+// a + b wrapped to 16 bits.
+// @since unreleased
+int16.wrap_add(a: Int16, b: Int16) -> Int16
+
+// a - b wrapped to 16 bits.
+// @since unreleased
+int16.wrap_sub(a: Int16, b: Int16) -> Int16
+
+// a * b wrapped to 16 bits.
+// @since unreleased
+int16.wrap_mul(a: Int16, b: Int16) -> Int16
+
+// The 16 bits of a rotated left by n; n is taken mod 16.
+// @since unreleased
+int16.rotate_left(a: Int16, n: Int) -> Int16
+
+// The 16 bits of a rotated right by n; n is taken mod 16.
+// @since unreleased
+int16.rotate_right(a: Int16, n: Int) -> Int16
+
+// Bits needed to hold x; 0 for 0, 16 if negative.
+// @since unreleased
+int16.bit_length(x: Int16) -> Int
+
+// Decimal Int16 from trimmed s; err on junk or outside -32768..32767.
+// @since unreleased
+int16.parse(s: String) -> Result[Int16, String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

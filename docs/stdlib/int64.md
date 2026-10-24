@@ -54,7 +54,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (26 functions)
+## Signature index (54 functions)
 
 ```
 // Wraps to 8 bits; 128 becomes -128.
@@ -160,6 +160,118 @@ int64.min_value() -> Int64
 // Largest Int64: 2^63-1.
 // @since 0.38.0
 int64.max_value() -> Int64
+
+// -1, 0 or 1 as a is below, equal to or above b.
+// @since unreleased
+int64.compare(a: Int64, b: Int64) -> Int
+
+// Lesser of a and b.
+// @since unreleased
+int64.min(a: Int64, b: Int64) -> Int64
+
+// Greater of a and b.
+// @since unreleased
+int64.max(a: Int64, b: Int64) -> Int64
+
+// x limited to lo..hi; aborts when lo > hi.
+// @since unreleased
+int64.clamp(x: Int64, lo: Int64, hi: Int64) -> Int64
+
+// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+// @since unreleased
+int64.floor_div(a: Int64, b: Int64) -> Int64
+
+// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+// @since unreleased
+int64.modulo(a: Int64, b: Int64) -> Int64
+
+// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+// @since unreleased
+int64.pow(base: Int64, exp: Int) -> Int64
+
+// True when x is a multiple of 2.
+// @since unreleased
+int64.is_even(x: Int64) -> Bool
+
+// True when x is not a multiple of 2.
+// @since unreleased
+int64.is_odd(x: Int64) -> Bool
+
+// Magnitude of x; min_value wraps to itself.
+// @since unreleased
+int64.abs(x: Int64) -> Int64
+
+// -1, 0 or 1 by the sign of x.
+// @since unreleased
+int64.sign(x: Int64) -> Int
+
+// Bitwise AND.
+// @since unreleased
+int64.band(a: Int64, b: Int64) -> Int64
+
+// Bitwise OR.
+// @since unreleased
+int64.bor(a: Int64, b: Int64) -> Int64
+
+// Bitwise XOR.
+// @since unreleased
+int64.bxor(a: Int64, b: Int64) -> Int64
+
+// Bitwise complement of all 64 bits.
+// @since unreleased
+int64.bnot(x: Int64) -> Int64
+
+// a shifted left by n bits; n is taken mod 64.
+// @since unreleased
+int64.bshl(a: Int64, n: Int) -> Int64
+
+// Sign-filling right shift; n is taken mod 64.
+// @since unreleased
+int64.bshr(a: Int64, n: Int) -> Int64
+
+// Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+// @since unreleased
+int64.count_leading_zeros(x: Int64) -> Int
+
+// Zero bits below the lowest set bit; 64 for 0.
+// @since unreleased
+int64.count_trailing_zeros(x: Int64) -> Int
+
+// Number of set bits among the 64.
+// @since unreleased
+int64.count_ones(x: Int64) -> Int
+
+// The 8 bytes in reverse order (endian flip).
+// @since unreleased
+int64.byte_swap(x: Int64) -> Int64
+
+// a + b wrapped to 64 bits.
+// @since unreleased
+int64.wrap_add(a: Int64, b: Int64) -> Int64
+
+// a - b wrapped to 64 bits.
+// @since unreleased
+int64.wrap_sub(a: Int64, b: Int64) -> Int64
+
+// a * b wrapped to 64 bits.
+// @since unreleased
+int64.wrap_mul(a: Int64, b: Int64) -> Int64
+
+// The 64 bits of a rotated left by n; n is taken mod 64.
+// @since unreleased
+int64.rotate_left(a: Int64, n: Int) -> Int64
+
+// The 64 bits of a rotated right by n; n is taken mod 64.
+// @since unreleased
+int64.rotate_right(a: Int64, n: Int) -> Int64
+
+// Bits needed to hold x; 0 for 0, 64 if negative.
+// @since unreleased
+int64.bit_length(x: Int64) -> Int
+
+// Decimal Int64 from trimmed s; err on junk or overflow.
+// @since unreleased
+int64.parse(s: String) -> Result[Int64, String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

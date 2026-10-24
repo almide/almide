@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 46 stdlib modules, 1082 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 48 stdlib modules, 1461 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -14,27 +14,29 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [bytes](#bytes) | 146 | 1 |
 | [compute](#compute) | 7 | 0 |
 | [datetime](#datetime) | 23 | 0 |
+| [deque](#deque) | 58 | 1 |
 | [duration](#duration) | 7 | 0 |
 | [env](#env) | 9 | 0 |
 | [error](#error) | 3 | 0 |
 | [ffi](#ffi) | 4 | 0 |
 | [float](#float) | 46 | 0 |
-| [float32](#float32) | 10 | 0 |
-| [float64](#float64) | 10 | 0 |
+| [float32](#float32) | 30 | 0 |
+| [float64](#float64) | 31 | 0 |
 | [fs](#fs) | 34 | 1 |
 | [hash](#hash) | 12 | 0 |
+| [heap](#heap) | 16 | 1 |
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 5 | 0 |
 | [http](#http) | 48 | 4 |
 | [int](#int) | 72 | 0 |
-| [int16](#int16) | 22 | 0 |
-| [int32](#int32) | 24 | 0 |
-| [int64](#int64) | 26 | 0 |
-| [int8](#int8) | 20 | 0 |
+| [int16](#int16) | 50 | 0 |
+| [int32](#int32) | 52 | 0 |
+| [int64](#int64) | 54 | 0 |
+| [int8](#int8) | 48 | 0 |
 | [io](#io) | 8 | 0 |
 | [json](#json) | 15 | 0 |
-| [list](#list) | 67 | 0 |
-| [map](#map) | 25 | 0 |
+| [list](#list) | 79 | 0 |
+| [map](#map) | 40 | 0 |
 | [math](#math) | 35 | 0 |
 | [matrix](#matrix) | 48 | 0 |
 | [net](#net) | 26 | 2 |
@@ -44,13 +46,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [random](#random) | 9 | 0 |
 | [regex](#regex) | 8 | 0 |
 | [result](#result) | 15 | 0 |
-| [set](#set) | 19 | 0 |
+| [set](#set) | 40 | 0 |
 | [string](#string) | 88 | 0 |
 | [testing](#testing) | 10 | 0 |
-| [uint16](#uint16) | 18 | 0 |
-| [uint32](#uint32) | 22 | 0 |
-| [uint64](#uint64) | 26 | 0 |
-| [uint8](#uint8) | 14 | 0 |
+| [uint16](#uint16) | 44 | 0 |
+| [uint32](#uint32) | 48 | 0 |
+| [uint64](#uint64) | 52 | 0 |
+| [uint8](#uint8) | 40 | 0 |
 | [url](#url) | 10 | 1 |
 | [value](#value) | 20 | 0 |
 | [zlib](#zlib) | 10 | 0 |
@@ -275,6 +277,69 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `datetime.weekday(ts: Int) -> String` — English day name in UTC; 0 is Thursday.
 - `datetime.year(ts: Int) -> Int` — Calendar year in UTC.
 
+## deque
+
+[deque.md](deque.md)
+
+- `deque.new() -> Deque[A]` — An empty deque.
+- `deque.from_list(xs: List[A]) -> Deque[A]` — A deque of xs, front to back.
+- `deque.to_list(d: Deque[A]) -> List[A]` — The elements, front to back.
+- `deque.len(d: Deque[A]) -> Int` — Element count; 0 for an empty deque.
+- `deque.is_empty(d: Deque[A]) -> Bool` — true iff d has no elements.
+- `deque.push(mut d: Deque[A], x: A) -> Unit` — Appends x at the back in place.
+- `deque.push_front(mut d: Deque[A], x: A) -> Unit` — Adds x at the front in place.
+- `deque.pop(mut d: Deque[A]) -> Option[A]` — Removes and yields the last element; none when empty.
+- `deque.pop_front(mut d: Deque[A]) -> Option[A]` — Removes and yields the first element; none when empty.
+- `deque.first(d: Deque[A]) -> Option[A]` — The first element, or none when empty.
+- `deque.last(d: Deque[A]) -> Option[A]` — The last element, or none when empty.
+- `deque.get(d: Deque[A], i: Int) -> Option[A]` — Element at index i from the front, or none when out of range.
+- `deque.contains(d: Deque[A], x: A) -> Bool` — true if some element == x.
+- `deque.clear(mut d: Deque[A]) -> Unit` — Removes every element of d in place.
+- `deque.map(d: Deque[A], f: (A) -> B) -> Deque[B]` — Deque of f(x), front to back; f runs front to back.
+- `deque.filter(d: Deque[A], f: (A) -> Bool) -> Deque[A]` — Elements where f holds, order kept.
+- `deque.fold(d: Deque[A], init: B, f: (B, A) -> B) -> B` — Folds f(acc, x) front to back.
+- `deque.any(d: Deque[A], f: (A) -> Bool) -> Bool` — true if f holds for some element; false when empty.
+- `deque.all(d: Deque[A], f: (A) -> Bool) -> Bool` — true if f holds for every element; true when empty.
+- `deque.count(d: Deque[A], f: (A) -> Bool) -> Int` — Number of elements where f holds.
+- `deque.find(d: Deque[A], f: (A) -> Bool) -> Option[A]` — The element nearest the front where f holds, or none.
+- `deque.reverse(d: Deque[A]) -> Deque[A]` — Elements back to front.
+- `deque.take(d: Deque[A], n: Int) -> Deque[A]` — First n elements, as list.take.
+- `deque.drop(d: Deque[A], n: Int) -> Deque[A]` — All but the first n, as list.drop.
+- `deque.take_end(d: Deque[A], n: Int) -> Deque[A]` — Last n elements, as list.take_end.
+- `deque.drop_end(d: Deque[A], n: Int) -> Deque[A]` — All but the last n, as list.drop_end.
+- `deque.slice(d: Deque[A], start: Int, end: Int) -> Deque[A]` — Indices start..<end, as list.slice.
+- `deque.set(d: Deque[A], i: Int, x: A) -> Deque[A]` — Copy with slot i = x, as list.set.
+- `deque.insert(d: Deque[A], i: Int, x: A) -> Deque[A]` — Copy with x at i, as list.insert.
+- `deque.remove_at(d: Deque[A], i: Int) -> Deque[A]` — Copy without slot i, as list.remove_at.
+- `deque.enumerate(d: Deque[A]) -> List[(Int, A)]` — (index, element) pairs, index from 0 at the front.
+- `deque.zip(d: Deque[A], ys: List[B]) -> List[(A, B)]` — Elements paired with ys by position; stops at the shorter.
+- `deque.zip_with(d: Deque[A], ys: List[B], f: (A, B) -> C) -> List[C]` — f over (element, ys element) pairs; stops at the shorter.
+- `deque.filter_map(d: Deque[A], f: (A) -> Option[B]) -> List[B]` — The somes f gives, front to back.
+- `deque.find_map(d: Deque[A], f: (A) -> Option[B]) -> Option[B]` — The first some f gives, or none; f is not called after the hit.
+- `deque.reduce(d: Deque[A], f: (A, A) -> A) -> Option[A]` — Left fold seeded by the first element; none when empty.
+- `deque.scan(d: Deque[A], init: B, f: (B, A) -> B) -> List[B]` — Running fold values front to back, init excluded.
+- `deque.partition(d: Deque[A], f: (A) -> Bool) -> (List[A], List[A])` — (elements where f holds, the rest), order kept.
+- `deque.group_by(d: Deque[A], f: (A) -> B) -> Map[B, List[A]]` — Key f(x) -> elements; keys in first-seen order.
+- `deque.sort(d: Deque[A]) -> List[A]` — Elements in ascending order; Floats in IEEE totalOrder.
+- `deque.sort_by(d: Deque[A], f: (A) -> B) -> List[A]` — Elements sorted by key f(x), stable; f runs once per element.
+- `deque.sort_with(d: Deque[A], cmp: (A, A) -> Int) -> List[A]` — Elements sorted by cmp, stable: negative puts a first.
+- `deque.min(d: Deque[A]) -> Option[A]` — Least element, or none when empty.
+- `deque.max(d: Deque[A]) -> Option[A]` — Greatest element, or none when empty.
+- `deque.min_by(d: Deque[A], f: (A) -> K) -> Option[A]` — Element with the least key f(x); the nearest the front on ties.
+- `deque.max_by(d: Deque[A], f: (A) -> K) -> Option[A]` — Element with the greatest key f(x); the nearest the front on ties.
+- `deque.min_with(d: Deque[A], cmp: (A, A) -> Int) -> Option[A]` — Least element by cmp; the nearest the front on ties.
+- `deque.max_with(d: Deque[A], cmp: (A, A) -> Int) -> Option[A]` — Greatest element by cmp; the nearest the front on ties.
+- `deque.find_index(d: Deque[A], f: (A) -> Bool) -> Option[Int]` — Index from the front of the first x where f holds, or none.
+- `deque.take_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]` — Longest front run where f holds.
+- `deque.drop_while(d: Deque[A], f: (A) -> Bool) -> Deque[A]` — The rest after the longest front run where f holds.
+- `deque.chunk(d: Deque[A], n: Int) -> List[Deque[A]]` — Runs of n from the front, as list.chunk.
+- `deque.window(d: Deque[A], n: Int) -> List[Deque[A]]` — All n-long runs, as list.window.
+- `deque.split_at(d: Deque[A], n: Int) -> (Deque[A], Deque[A])` — (first n, the rest), as list.split_at.
+- `deque.dedup(d: Deque[A]) -> Deque[A]` — Adjacent equal runs collapsed, as list.dedup.
+- `deque.intersperse(d: Deque[A], sep: A) -> Deque[A]` — sep between adjacent elements.
+- `deque.unique(d: Deque[A]) -> Deque[A]` — Duplicates removed; the occurrence nearest the front kept.
+- `deque.unique_by(d: Deque[A], f: (A) -> K) -> Deque[A]` — The first element per distinct key f(x).
+
 ## duration
 
 [duration.md](duration.md)
@@ -383,6 +448,26 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float32.to_uint64(x: Float32) -> UInt64` — Truncates toward 0, saturating; NaN gives 0.
 - `float32.to_float64(x: Float32) -> Float64` — Exact widening; never rounds.
 - `float32.to_string(x: Float32) -> String` — Shortest f32 round-trip digits, no exponent; 0.1 stays 0.1, 2.0 keeps .0.
+- `float32.compare(a: Float32, b: Float32) -> Int` — -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
+- `float32.min(a: Float32, b: Float32) -> Float32` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
+- `float32.max(a: Float32, b: Float32) -> Float32` — Greater; a NaN operand is ignored; 0.0 > -0.0.
+- `float32.clamp(x: Float32, lo: Float32, hi: Float32) -> Float32` — x limited to lo..hi; lo > hi or a NaN bound aborts.
+- `float32.is_nan(x: Float32) -> Bool` — True only for NaN.
+- `float32.is_infinite(x: Float32) -> Bool` — True for inf and -inf; false for NaN.
+- `float32.is_finite(x: Float32) -> Bool` — True unless x is inf, -inf or NaN.
+- `float32.abs(x: Float32) -> Float32` — Magnitude; -0.0 gives 0.0, NaN stays NaN.
+- `float32.floor(x: Float32) -> Float32` — Round toward -inf; -0.5 gives -1.0.
+- `float32.ceil(x: Float32) -> Float32` — Round toward +inf; -0.5 gives -0.0.
+- `float32.round(x: Float32) -> Float32` — Nearest whole value; halves round away from zero.
+- `float32.trunc(x: Float32) -> Float32` — Round toward 0; -0.5 gives -0.0.
+- `float32.signum(x: Float32) -> Float32` — 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+- `float32.to_bits(x: Float32) -> Int` — The 32 IEEE-754 binary32 bits as a non-negative Int; any NaN gives 0x7fc00000.
+- `float32.from_bits(bits: Int) -> Float32` — Float32 whose binary32 bits are the low 32 bits of bits.
+- `float32.infinity() -> Float32` — Positive infinity.
+- `float32.nan() -> Float32` — The one quiet NaN (bits 0x7fc00000).
+- `float32.epsilon() -> Float32` — Gap between 1.0 and the next Float32: 2^-23.
+- `float32.max_value() -> Float32` — Largest finite Float32, about 3.4028235e38.
+- `float32.min_value() -> Float32` — Most negative finite Float32 (= -max_value()), not the smallest positive.
 
 ## float64
 
@@ -398,6 +483,27 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float64.to_uint64(x: Float64) -> UInt64` — Truncates toward 0, saturating; NaN gives 0.
 - `float64.to_float32(x: Float64) -> Float32` — Nearest Float32; overflow becomes infinity.
 - `float64.to_string(x: Float64) -> String` — Plain decimal, never an exponent; 2.0 keeps .0.
+- `float64.compare(a: Float64, b: Float64) -> Int` — -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
+- `float64.min(a: Float64, b: Float64) -> Float64` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
+- `float64.max(a: Float64, b: Float64) -> Float64` — Greater; a NaN operand is ignored; 0.0 > -0.0.
+- `float64.clamp(x: Float64, lo: Float64, hi: Float64) -> Float64` — x limited to lo..hi; lo > hi or a NaN bound aborts.
+- `float64.is_nan(x: Float64) -> Bool` — True only for NaN.
+- `float64.is_infinite(x: Float64) -> Bool` — True for inf and -inf; false for NaN.
+- `float64.is_finite(x: Float64) -> Bool` — True unless x is inf, -inf or NaN.
+- `float64.abs(x: Float64) -> Float64` — Magnitude; -0.0 gives 0.0, NaN stays NaN.
+- `float64.floor(x: Float64) -> Float64` — Round toward -inf; -0.5 gives -1.0.
+- `float64.ceil(x: Float64) -> Float64` — Round toward +inf; -0.5 gives -0.0.
+- `float64.round(x: Float64) -> Float64` — Nearest whole value; halves round away from zero.
+- `float64.trunc(x: Float64) -> Float64` — Round toward 0; -0.5 gives -0.0.
+- `float64.signum(x: Float64) -> Float64` — 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+- `float64.to_bits(x: Float64) -> Int` — The 64 IEEE-754 binary64 bits as Int; any NaN gives the canonical NaN.
+- `float64.from_bits(bits: Int) -> Float64` — Float64 whose IEEE-754 binary64 bits are bits.
+- `float64.infinity() -> Float64` — Positive infinity.
+- `float64.nan() -> Float64` — The one quiet NaN (bits 0x7ff8000000000000).
+- `float64.epsilon() -> Float64` — Gap between 1.0 and the next Float64: 2^-52.
+- `float64.max_value() -> Float64` — Largest finite Float64, about 1.7976931348623157e308.
+- `float64.min_value() -> Float64` — Most negative finite Float64 (= -max_value()), not the smallest positive.
+- `float64.parse(s: String) -> Result[Float64, String]` — Float64 from trimmed s, the grammar of float.parse; err on junk.
 
 ## fs
 
@@ -454,6 +560,27 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `hash.sha1_hex(b: Bytes) -> String` — SHA-1 of b as 40 lowercase hex chars.
 - `hash.sha512(b: Bytes) -> Bytes` — 64-byte SHA-512 digest of b.
 - `hash.sha512_hex(b: Bytes) -> String` — SHA-512 of b as 128 lowercase hex chars.
+
+## heap
+
+[heap.md](heap.md)
+
+- `heap.new() -> Heap[A]` — An empty heap; the least element comes out first.
+- `heap.new_by(f: (A) -> K) -> Heap[A]` — An empty heap ordered by key f(x); the least key comes out first.
+- `heap.new_with(cmp: (A, A) -> Int) -> Heap[A]` — An empty heap ordered by cmp; negative puts a first.
+- `heap.from_list(xs: List[A]) -> Heap[A]` — A heap of xs in the natural order; equal elements leave in list order.
+- `heap.push(mut h: Heap[A], x: A) -> Unit` — Adds x in place.
+- `heap.pop(mut h: Heap[A]) -> Option[A]` — Removes and yields the first element out; none when empty.
+- `heap.clear(mut h: Heap[A]) -> Unit` — Removes every element of h in place; the order is kept.
+- `heap.peek(h: Heap[A]) -> Option[A]` — The element pop would yield next, or none when empty.
+- `heap.len(h: Heap[A]) -> Int` — Element count; 0 for an empty heap.
+- `heap.is_empty(h: Heap[A]) -> Bool` — true iff h has no elements.
+- `heap.to_list(h: Heap[A]) -> List[A]` — The elements in pop order.
+- `heap.contains(h: Heap[A], x: A) -> Bool` — true if some element == x.
+- `heap.any(h: Heap[A], f: (A) -> Bool) -> Bool` — true if f holds for some element; false when empty.
+- `heap.all(h: Heap[A], f: (A) -> Bool) -> Bool` — true if f holds for every element; true when empty.
+- `heap.count(h: Heap[A], f: (A) -> Bool) -> Int` — Number of elements where f holds.
+- `heap.filter(h: Heap[A], f: (A) -> Bool) -> Heap[A]` — The elements where f holds, in a heap of the same order; equal elements keep the order they went in.
 
 ## hex
 
@@ -629,6 +756,34 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int16.to_uint64_saturating(x: Int16) -> UInt64` — Negative x clamps to 0.
 - `int16.min_value() -> Int16` — Smallest Int16: -32768.
 - `int16.max_value() -> Int16` — Largest Int16: 32767.
+- `int16.compare(a: Int16, b: Int16) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int16.min(a: Int16, b: Int16) -> Int16` — Lesser of a and b.
+- `int16.max(a: Int16, b: Int16) -> Int16` — Greater of a and b.
+- `int16.clamp(x: Int16, lo: Int16, hi: Int16) -> Int16` — x limited to lo..hi; aborts when lo > hi.
+- `int16.floor_div(a: Int16, b: Int16) -> Int16` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int16.modulo(a: Int16, b: Int16) -> Int16` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+- `int16.pow(base: Int16, exp: Int) -> Int16` — base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+- `int16.is_even(x: Int16) -> Bool` — True when x is a multiple of 2.
+- `int16.is_odd(x: Int16) -> Bool` — True when x is not a multiple of 2.
+- `int16.abs(x: Int16) -> Int16` — Magnitude of x; min_value wraps to itself.
+- `int16.sign(x: Int16) -> Int` — -1, 0 or 1 by the sign of x.
+- `int16.band(a: Int16, b: Int16) -> Int16` — Bitwise AND.
+- `int16.bor(a: Int16, b: Int16) -> Int16` — Bitwise OR.
+- `int16.bxor(a: Int16, b: Int16) -> Int16` — Bitwise XOR.
+- `int16.bnot(x: Int16) -> Int16` — Bitwise complement of all 16 bits.
+- `int16.bshl(a: Int16, n: Int) -> Int16` — a shifted left by n bits; n is taken mod 16.
+- `int16.bshr(a: Int16, n: Int) -> Int16` — Sign-filling right shift; n is taken mod 16.
+- `int16.count_leading_zeros(x: Int16) -> Int` — Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+- `int16.count_trailing_zeros(x: Int16) -> Int` — Zero bits below the lowest set bit; 16 for 0.
+- `int16.count_ones(x: Int16) -> Int` — Number of set bits among the 16.
+- `int16.byte_swap(x: Int16) -> Int16` — The 2 bytes in reverse order (endian flip).
+- `int16.wrap_add(a: Int16, b: Int16) -> Int16` — a + b wrapped to 16 bits.
+- `int16.wrap_sub(a: Int16, b: Int16) -> Int16` — a - b wrapped to 16 bits.
+- `int16.wrap_mul(a: Int16, b: Int16) -> Int16` — a * b wrapped to 16 bits.
+- `int16.rotate_left(a: Int16, n: Int) -> Int16` — The 16 bits of a rotated left by n; n is taken mod 16.
+- `int16.rotate_right(a: Int16, n: Int) -> Int16` — The 16 bits of a rotated right by n; n is taken mod 16.
+- `int16.bit_length(x: Int16) -> Int` — Bits needed to hold x; 0 for 0, 16 if negative.
+- `int16.parse(s: String) -> Result[Int16, String]` — Decimal Int16 from trimmed s; err on junk or outside -32768..32767.
 
 ## int32
 
@@ -658,6 +813,34 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int32.to_uint64_saturating(x: Int32) -> UInt64` — Negative x clamps to 0.
 - `int32.min_value() -> Int32` — Smallest Int32: -2147483648.
 - `int32.max_value() -> Int32` — Largest Int32: 2147483647.
+- `int32.compare(a: Int32, b: Int32) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int32.min(a: Int32, b: Int32) -> Int32` — Lesser of a and b.
+- `int32.max(a: Int32, b: Int32) -> Int32` — Greater of a and b.
+- `int32.clamp(x: Int32, lo: Int32, hi: Int32) -> Int32` — x limited to lo..hi; aborts when lo > hi.
+- `int32.floor_div(a: Int32, b: Int32) -> Int32` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int32.modulo(a: Int32, b: Int32) -> Int32` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+- `int32.pow(base: Int32, exp: Int) -> Int32` — base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+- `int32.is_even(x: Int32) -> Bool` — True when x is a multiple of 2.
+- `int32.is_odd(x: Int32) -> Bool` — True when x is not a multiple of 2.
+- `int32.abs(x: Int32) -> Int32` — Magnitude of x; min_value wraps to itself.
+- `int32.sign(x: Int32) -> Int` — -1, 0 or 1 by the sign of x.
+- `int32.band(a: Int32, b: Int32) -> Int32` — Bitwise AND.
+- `int32.bor(a: Int32, b: Int32) -> Int32` — Bitwise OR.
+- `int32.bxor(a: Int32, b: Int32) -> Int32` — Bitwise XOR.
+- `int32.bnot(x: Int32) -> Int32` — Bitwise complement of all 32 bits.
+- `int32.bshl(a: Int32, n: Int) -> Int32` — a shifted left by n bits; n is taken mod 32.
+- `int32.bshr(a: Int32, n: Int) -> Int32` — Sign-filling right shift; n is taken mod 32.
+- `int32.count_leading_zeros(x: Int32) -> Int` — Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+- `int32.count_trailing_zeros(x: Int32) -> Int` — Zero bits below the lowest set bit; 32 for 0.
+- `int32.count_ones(x: Int32) -> Int` — Number of set bits among the 32.
+- `int32.byte_swap(x: Int32) -> Int32` — The 4 bytes in reverse order (endian flip).
+- `int32.wrap_add(a: Int32, b: Int32) -> Int32` — a + b wrapped to 32 bits.
+- `int32.wrap_sub(a: Int32, b: Int32) -> Int32` — a - b wrapped to 32 bits.
+- `int32.wrap_mul(a: Int32, b: Int32) -> Int32` — a * b wrapped to 32 bits.
+- `int32.rotate_left(a: Int32, n: Int) -> Int32` — The 32 bits of a rotated left by n; n is taken mod 32.
+- `int32.rotate_right(a: Int32, n: Int) -> Int32` — The 32 bits of a rotated right by n; n is taken mod 32.
+- `int32.bit_length(x: Int32) -> Int` — Bits needed to hold x; 0 for 0, 32 if negative.
+- `int32.parse(s: String) -> Result[Int32, String]` — Decimal Int32 from trimmed s; err on junk or outside -2147483648..2147483647.
 
 ## int64
 
@@ -689,6 +872,34 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int64.to_uint64_saturating(x: Int64) -> UInt64` — Negative x clamps to 0.
 - `int64.min_value() -> Int64` — Smallest Int64: -2^63.
 - `int64.max_value() -> Int64` — Largest Int64: 2^63-1.
+- `int64.compare(a: Int64, b: Int64) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int64.min(a: Int64, b: Int64) -> Int64` — Lesser of a and b.
+- `int64.max(a: Int64, b: Int64) -> Int64` — Greater of a and b.
+- `int64.clamp(x: Int64, lo: Int64, hi: Int64) -> Int64` — x limited to lo..hi; aborts when lo > hi.
+- `int64.floor_div(a: Int64, b: Int64) -> Int64` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int64.modulo(a: Int64, b: Int64) -> Int64` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+- `int64.pow(base: Int64, exp: Int) -> Int64` — base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+- `int64.is_even(x: Int64) -> Bool` — True when x is a multiple of 2.
+- `int64.is_odd(x: Int64) -> Bool` — True when x is not a multiple of 2.
+- `int64.abs(x: Int64) -> Int64` — Magnitude of x; min_value wraps to itself.
+- `int64.sign(x: Int64) -> Int` — -1, 0 or 1 by the sign of x.
+- `int64.band(a: Int64, b: Int64) -> Int64` — Bitwise AND.
+- `int64.bor(a: Int64, b: Int64) -> Int64` — Bitwise OR.
+- `int64.bxor(a: Int64, b: Int64) -> Int64` — Bitwise XOR.
+- `int64.bnot(x: Int64) -> Int64` — Bitwise complement of all 64 bits.
+- `int64.bshl(a: Int64, n: Int) -> Int64` — a shifted left by n bits; n is taken mod 64.
+- `int64.bshr(a: Int64, n: Int) -> Int64` — Sign-filling right shift; n is taken mod 64.
+- `int64.count_leading_zeros(x: Int64) -> Int` — Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+- `int64.count_trailing_zeros(x: Int64) -> Int` — Zero bits below the lowest set bit; 64 for 0.
+- `int64.count_ones(x: Int64) -> Int` — Number of set bits among the 64.
+- `int64.byte_swap(x: Int64) -> Int64` — The 8 bytes in reverse order (endian flip).
+- `int64.wrap_add(a: Int64, b: Int64) -> Int64` — a + b wrapped to 64 bits.
+- `int64.wrap_sub(a: Int64, b: Int64) -> Int64` — a - b wrapped to 64 bits.
+- `int64.wrap_mul(a: Int64, b: Int64) -> Int64` — a * b wrapped to 64 bits.
+- `int64.rotate_left(a: Int64, n: Int) -> Int64` — The 64 bits of a rotated left by n; n is taken mod 64.
+- `int64.rotate_right(a: Int64, n: Int) -> Int64` — The 64 bits of a rotated right by n; n is taken mod 64.
+- `int64.bit_length(x: Int64) -> Int` — Bits needed to hold x; 0 for 0, 64 if negative.
+- `int64.parse(s: String) -> Result[Int64, String]` — Decimal Int64 from trimmed s; err on junk or overflow.
 
 ## int8
 
@@ -714,6 +925,34 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int8.to_uint64_saturating(x: Int8) -> UInt64` — Negative x clamps to 0.
 - `int8.min_value() -> Int8` — Smallest Int8: -128.
 - `int8.max_value() -> Int8` — Largest Int8: 127.
+- `int8.compare(a: Int8, b: Int8) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int8.min(a: Int8, b: Int8) -> Int8` — Lesser of a and b.
+- `int8.max(a: Int8, b: Int8) -> Int8` — Greater of a and b.
+- `int8.clamp(x: Int8, lo: Int8, hi: Int8) -> Int8` — x limited to lo..hi; aborts when lo > hi.
+- `int8.floor_div(a: Int8, b: Int8) -> Int8` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int8.modulo(a: Int8, b: Int8) -> Int8` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+- `int8.pow(base: Int8, exp: Int) -> Int8` — base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+- `int8.is_even(x: Int8) -> Bool` — True when x is a multiple of 2.
+- `int8.is_odd(x: Int8) -> Bool` — True when x is not a multiple of 2.
+- `int8.abs(x: Int8) -> Int8` — Magnitude of x; min_value wraps to itself.
+- `int8.sign(x: Int8) -> Int` — -1, 0 or 1 by the sign of x.
+- `int8.band(a: Int8, b: Int8) -> Int8` — Bitwise AND.
+- `int8.bor(a: Int8, b: Int8) -> Int8` — Bitwise OR.
+- `int8.bxor(a: Int8, b: Int8) -> Int8` — Bitwise XOR.
+- `int8.bnot(x: Int8) -> Int8` — Bitwise complement of all 8 bits.
+- `int8.bshl(a: Int8, n: Int) -> Int8` — a shifted left by n bits; n is taken mod 8.
+- `int8.bshr(a: Int8, n: Int) -> Int8` — Sign-filling right shift; n is taken mod 8.
+- `int8.count_leading_zeros(x: Int8) -> Int` — Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+- `int8.count_trailing_zeros(x: Int8) -> Int` — Zero bits below the lowest set bit; 8 for 0.
+- `int8.count_ones(x: Int8) -> Int` — Number of set bits among the 8.
+- `int8.byte_swap(x: Int8) -> Int8` — The bytes in reverse order; one byte, so x itself.
+- `int8.wrap_add(a: Int8, b: Int8) -> Int8` — a + b wrapped to 8 bits.
+- `int8.wrap_sub(a: Int8, b: Int8) -> Int8` — a - b wrapped to 8 bits.
+- `int8.wrap_mul(a: Int8, b: Int8) -> Int8` — a * b wrapped to 8 bits.
+- `int8.rotate_left(a: Int8, n: Int) -> Int8` — The 8 bits of a rotated left by n; n is taken mod 8.
+- `int8.rotate_right(a: Int8, n: Int) -> Int8` — The 8 bits of a rotated right by n; n is taken mod 8.
+- `int8.bit_length(x: Int8) -> Int` — Bits needed to hold x; 0 for 0, 8 if negative.
+- `int8.parse(s: String) -> Result[Int8, String]` — Decimal Int8 from trimmed s; err on junk or outside -128..127.
 
 ## io
 
@@ -819,6 +1058,18 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.split_at(xs: List[T], n: Int) -> (List[T], List[T])` — (take n, drop n); n past the end gives (xs, []).
 - `list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]` — [seed, f(seed), ...] of length n; [] if n <= 0.
 - `list.find_map(xs: List[A], f: (A) -> Option[B]) -> Option[B]` — The first some that f gives, or none; f is not called after the hit.
+- `list.new() -> List[A]` — An empty list; the same value as [].
+- `list.from_list(xs: List[A]) -> List[A]` — xs itself; the Container constructor from a list.
+- `list.to_list(xs: List[A]) -> List[A]` — xs itself; the Container view as a list.
+- `list.sort_with(xs: List[A], cmp: (A, A) -> Int) -> List[A]` — Stable sort by cmp: negative puts a first, 0 keeps input order.
+- `list.min_by(xs: List[A], f: (A) -> K) -> Option[A]` — Element with the least key f(x); the first on ties; f runs once per x.
+- `list.max_by(xs: List[A], f: (A) -> K) -> Option[A]` — Element with the greatest key f(x); the first on ties; f runs once per x.
+- `list.min_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]` — Least element by cmp; the first on ties; none when empty.
+- `list.max_with(xs: List[A], cmp: (A, A) -> Int) -> Option[A]` — Greatest element by cmp; the first on ties; none when empty.
+- `list.binary_search_by(xs: List[A], target: K, f: (A) -> K) -> Option[Int]` — Index of target among keys f(x) of xs sorted by key, or none.
+- `list.binary_search_with(xs: List[A], target: A, cmp: (A, A) -> Int) -> Option[Int]` — Index of target in xs sorted by cmp, or none; cmp(x, target) is asked.
+- `list.unzip(xs: List[(A, B)]) -> (List[A], List[B])` — (firsts, seconds) of a list of pairs; the inverse of zip.
+- `list.range_step(start: Int, end: Int, step: Int) -> List[Int]` — start, start + step, ...
 
 ## map
 
@@ -849,6 +1100,21 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `map.insert(mut m: Map[K, V], key: K, value: V) -> Unit` — In-place key -> value; an existing key is overwritten and keeps its position.
 - `map.delete(mut m: Map[K, V], key: K) -> Unit` — Removes key in place; no-op when absent.
 - `map.clear(mut m: Map[K, V]) -> Unit` — Removes every entry of m in place.
+- `map.enumerate(m: Map[K, V]) -> List[(Int, (K, V))]` — (index, (key, value)) pairs in insertion order, index from 0.
+- `map.zip(m: Map[K, V], ys: List[B]) -> List[((K, V), B)]` — Entries paired with ys by position; stops at the shorter.
+- `map.zip_with(m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C]` — f over (entry, ys element) pairs; stops at the shorter.
+- `map.filter_map(m: Map[K, V], f: ((K, V)) -> Option[B]) -> List[B]` — The somes f gives over the entries, in insertion order.
+- `map.find_map(m: Map[K, V], f: ((K, V)) -> Option[B]) -> Option[B]` — The first some f gives over the entries, or none; f is not called after the hit.
+- `map.reduce(m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> Option[(K, V)]` — Left fold of the entries seeded by the first; none when empty.
+- `map.scan(m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B]` — Running fold values over the entries, init excluded.
+- `map.partition(m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)])` — (entries where f holds, the rest), insertion order kept.
+- `map.group_by(m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]]` — Key f(entry) -> entries; keys in first-seen order.
+- `map.sort_by(m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)]` — Entries sorted by key f(entry), stable; f runs once per entry.
+- `map.sort_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)]` — Entries sorted by cmp, stable: negative puts a first.
+- `map.min_by(m: Map[K, V], f: ((K, V)) -> U) -> Option[(K, V)]` — Entry with the least f(entry); the first on ties.
+- `map.max_by(m: Map[K, V], f: ((K, V)) -> U) -> Option[(K, V)]` — Entry with the greatest f(entry); the first on ties.
+- `map.min_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> Option[(K, V)]` — Least entry by cmp; the first on ties.
+- `map.max_with(m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> Option[(K, V)]` — Greatest entry by cmp; the first on ties.
 
 ## math
 
@@ -1103,6 +1369,27 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `set.fold(s: Set[A], init: B, f: (B, A) -> B) -> B` — Folds f(acc, x) in insertion order.
 - `set.any(s: Set[A], f: (A) -> Bool) -> Bool` — true if f holds for some member; false if empty.
 - `set.all(s: Set[A], f: (A) -> Bool) -> Bool` — true if f holds for every member; true if empty.
+- `set.count(s: Set[A], f: (A) -> Bool) -> Int` — Number of members where f holds.
+- `set.find(s: Set[A], f: (A) -> Bool) -> Option[A]` — First member, in insertion order, where f holds, or none.
+- `set.clear(mut s: Set[A]) -> Unit` — Removes every member of s in place.
+- `set.enumerate(s: Set[A]) -> List[(Int, A)]` — (index, member) pairs in insertion order, index from 0.
+- `set.zip(s: Set[A], ys: List[B]) -> List[(A, B)]` — Members paired with ys by position; stops at the shorter.
+- `set.zip_with(s: Set[A], ys: List[B], f: (A, B) -> C) -> List[C]` — f over (member, ys element) pairs; stops at the shorter.
+- `set.filter_map(s: Set[A], f: (A) -> Option[B]) -> List[B]` — The somes f gives, in insertion order.
+- `set.find_map(s: Set[A], f: (A) -> Option[B]) -> Option[B]` — The first some f gives, or none; f is not called after the hit.
+- `set.reduce(s: Set[A], f: (A, A) -> A) -> Option[A]` — Left fold seeded by the first member; none when empty.
+- `set.scan(s: Set[A], init: B, f: (B, A) -> B) -> List[B]` — Running fold values in insertion order, init excluded.
+- `set.partition(s: Set[A], f: (A) -> Bool) -> (List[A], List[A])` — (members where f holds, the rest), insertion order kept.
+- `set.group_by(s: Set[A], f: (A) -> B) -> Map[B, List[A]]` — Key f(x) -> members; keys in first-seen order.
+- `set.sort(s: Set[A]) -> List[A]` — Members in ascending order; Floats in IEEE totalOrder.
+- `set.sort_by(s: Set[A], f: (A) -> B) -> List[A]` — Members sorted by key f(x), stable; f runs once per member.
+- `set.sort_with(s: Set[A], cmp: (A, A) -> Int) -> List[A]` — Members sorted by cmp, stable: negative puts a first.
+- `set.min(s: Set[A]) -> Option[A]` — Least member, or none when empty.
+- `set.max(s: Set[A]) -> Option[A]` — Greatest member, or none when empty.
+- `set.min_by(s: Set[A], f: (A) -> K) -> Option[A]` — Member with the least key f(x); the first on ties.
+- `set.max_by(s: Set[A], f: (A) -> K) -> Option[A]` — Member with the greatest key f(x); the first on ties.
+- `set.min_with(s: Set[A], cmp: (A, A) -> Int) -> Option[A]` — Least member by cmp; the first on ties.
+- `set.max_with(s: Set[A], cmp: (A, A) -> Int) -> Option[A]` — Greatest member by cmp; the first on ties.
 
 ## string
 
@@ -1234,6 +1521,32 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint16.to_uint8_saturating(x: UInt16) -> UInt8` — Clamps x to at most 255.
 - `uint16.min_value() -> UInt16` — Smallest UInt16: 0.
 - `uint16.max_value() -> UInt16` — Largest UInt16: 65535.
+- `uint16.compare(a: UInt16, b: UInt16) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `uint16.min(a: UInt16, b: UInt16) -> UInt16` — Lesser of a and b.
+- `uint16.max(a: UInt16, b: UInt16) -> UInt16` — Greater of a and b.
+- `uint16.clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16` — x limited to lo..hi; aborts when lo > hi.
+- `uint16.floor_div(a: UInt16, b: UInt16) -> UInt16` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint16.modulo(a: UInt16, b: UInt16) -> UInt16` — Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+- `uint16.pow(base: UInt16, exp: Int) -> UInt16` — base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
+- `uint16.is_even(x: UInt16) -> Bool` — True when x is a multiple of 2.
+- `uint16.is_odd(x: UInt16) -> Bool` — True when x is not a multiple of 2.
+- `uint16.band(a: UInt16, b: UInt16) -> UInt16` — Bitwise AND.
+- `uint16.bor(a: UInt16, b: UInt16) -> UInt16` — Bitwise OR.
+- `uint16.bxor(a: UInt16, b: UInt16) -> UInt16` — Bitwise XOR.
+- `uint16.bnot(x: UInt16) -> UInt16` — Bitwise complement of all 16 bits.
+- `uint16.bshl(a: UInt16, n: Int) -> UInt16` — a shifted left by n bits; n is taken mod 16.
+- `uint16.bshr(a: UInt16, n: Int) -> UInt16` — Zero-filling right shift; n is taken mod 16.
+- `uint16.count_leading_zeros(x: UInt16) -> Int` — Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
+- `uint16.count_trailing_zeros(x: UInt16) -> Int` — Zero bits below the lowest set bit; 16 for 0.
+- `uint16.count_ones(x: UInt16) -> Int` — Number of set bits among the 16.
+- `uint16.byte_swap(x: UInt16) -> UInt16` — The 2 bytes in reverse order (endian flip).
+- `uint16.wrap_add(a: UInt16, b: UInt16) -> UInt16` — a + b wrapped to 16 bits.
+- `uint16.wrap_sub(a: UInt16, b: UInt16) -> UInt16` — a - b wrapped to 16 bits.
+- `uint16.wrap_mul(a: UInt16, b: UInt16) -> UInt16` — a * b wrapped to 16 bits.
+- `uint16.rotate_left(a: UInt16, n: Int) -> UInt16` — The 16 bits of a rotated left by n; n is taken mod 16.
+- `uint16.rotate_right(a: UInt16, n: Int) -> UInt16` — The 16 bits of a rotated right by n; n is taken mod 16.
+- `uint16.bit_length(x: UInt16) -> Int` — Bits needed to hold x; 0 for 0.
+- `uint16.parse(s: String) -> Result[UInt16, String]` — Decimal UInt16 from trimmed s; err on junk, a sign of -, or above 65535.
 
 ## uint32
 
@@ -1261,6 +1574,32 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint32.to_uint16_saturating(x: UInt32) -> UInt16` — Clamps x to at most 65535.
 - `uint32.min_value() -> UInt32` — Smallest UInt32: 0.
 - `uint32.max_value() -> UInt32` — Largest UInt32: 4294967295.
+- `uint32.compare(a: UInt32, b: UInt32) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `uint32.min(a: UInt32, b: UInt32) -> UInt32` — Lesser of a and b.
+- `uint32.max(a: UInt32, b: UInt32) -> UInt32` — Greater of a and b.
+- `uint32.clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32` — x limited to lo..hi; aborts when lo > hi.
+- `uint32.floor_div(a: UInt32, b: UInt32) -> UInt32` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint32.modulo(a: UInt32, b: UInt32) -> UInt32` — Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+- `uint32.pow(base: UInt32, exp: Int) -> UInt32` — base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
+- `uint32.is_even(x: UInt32) -> Bool` — True when x is a multiple of 2.
+- `uint32.is_odd(x: UInt32) -> Bool` — True when x is not a multiple of 2.
+- `uint32.band(a: UInt32, b: UInt32) -> UInt32` — Bitwise AND.
+- `uint32.bor(a: UInt32, b: UInt32) -> UInt32` — Bitwise OR.
+- `uint32.bxor(a: UInt32, b: UInt32) -> UInt32` — Bitwise XOR.
+- `uint32.bnot(x: UInt32) -> UInt32` — Bitwise complement of all 32 bits.
+- `uint32.bshl(a: UInt32, n: Int) -> UInt32` — a shifted left by n bits; n is taken mod 32.
+- `uint32.bshr(a: UInt32, n: Int) -> UInt32` — Zero-filling right shift; n is taken mod 32.
+- `uint32.count_leading_zeros(x: UInt32) -> Int` — Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
+- `uint32.count_trailing_zeros(x: UInt32) -> Int` — Zero bits below the lowest set bit; 32 for 0.
+- `uint32.count_ones(x: UInt32) -> Int` — Number of set bits among the 32.
+- `uint32.byte_swap(x: UInt32) -> UInt32` — The 4 bytes in reverse order (endian flip).
+- `uint32.wrap_add(a: UInt32, b: UInt32) -> UInt32` — a + b wrapped to 32 bits.
+- `uint32.wrap_sub(a: UInt32, b: UInt32) -> UInt32` — a - b wrapped to 32 bits.
+- `uint32.wrap_mul(a: UInt32, b: UInt32) -> UInt32` — a * b wrapped to 32 bits.
+- `uint32.rotate_left(a: UInt32, n: Int) -> UInt32` — The 32 bits of a rotated left by n; n is taken mod 32.
+- `uint32.rotate_right(a: UInt32, n: Int) -> UInt32` — The 32 bits of a rotated right by n; n is taken mod 32.
+- `uint32.bit_length(x: UInt32) -> Int` — Bits needed to hold x; 0 for 0.
+- `uint32.parse(s: String) -> Result[UInt32, String]` — Decimal UInt32 from trimmed s; err on junk, a sign of -, or above 4294967295.
 
 ## uint64
 
@@ -1292,6 +1631,32 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint64.to_uint32_saturating(x: UInt64) -> UInt32` — Clamps x to at most 2^32-1.
 - `uint64.min_value() -> UInt64` — Smallest UInt64: 0.
 - `uint64.max_value() -> UInt64` — Largest UInt64: 2^64-1.
+- `uint64.compare(a: UInt64, b: UInt64) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `uint64.min(a: UInt64, b: UInt64) -> UInt64` — Lesser of a and b.
+- `uint64.max(a: UInt64, b: UInt64) -> UInt64` — Greater of a and b.
+- `uint64.clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64` — x limited to lo..hi; aborts when lo > hi.
+- `uint64.floor_div(a: UInt64, b: UInt64) -> UInt64` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint64.modulo(a: UInt64, b: UInt64) -> UInt64` — Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+- `uint64.pow(base: UInt64, exp: Int) -> UInt64` — base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+- `uint64.is_even(x: UInt64) -> Bool` — True when x is a multiple of 2.
+- `uint64.is_odd(x: UInt64) -> Bool` — True when x is not a multiple of 2.
+- `uint64.band(a: UInt64, b: UInt64) -> UInt64` — Bitwise AND.
+- `uint64.bor(a: UInt64, b: UInt64) -> UInt64` — Bitwise OR.
+- `uint64.bxor(a: UInt64, b: UInt64) -> UInt64` — Bitwise XOR.
+- `uint64.bnot(x: UInt64) -> UInt64` — Bitwise complement of all 64 bits.
+- `uint64.bshl(a: UInt64, n: Int) -> UInt64` — a shifted left by n bits; n is taken mod 64.
+- `uint64.bshr(a: UInt64, n: Int) -> UInt64` — Zero-filling right shift; n is taken mod 64.
+- `uint64.count_leading_zeros(x: UInt64) -> Int` — Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
+- `uint64.count_trailing_zeros(x: UInt64) -> Int` — Zero bits below the lowest set bit; 64 for 0.
+- `uint64.count_ones(x: UInt64) -> Int` — Number of set bits among the 64.
+- `uint64.byte_swap(x: UInt64) -> UInt64` — The 8 bytes in reverse order (endian flip).
+- `uint64.wrap_add(a: UInt64, b: UInt64) -> UInt64` — a + b wrapped to 64 bits.
+- `uint64.wrap_sub(a: UInt64, b: UInt64) -> UInt64` — a - b wrapped to 64 bits.
+- `uint64.wrap_mul(a: UInt64, b: UInt64) -> UInt64` — a * b wrapped to 64 bits.
+- `uint64.rotate_left(a: UInt64, n: Int) -> UInt64` — The 64 bits of a rotated left by n; n is taken mod 64.
+- `uint64.rotate_right(a: UInt64, n: Int) -> UInt64` — The 64 bits of a rotated right by n; n is taken mod 64.
+- `uint64.bit_length(x: UInt64) -> Int` — Bits needed to hold x; 0 for 0.
+- `uint64.parse(s: String) -> Result[UInt64, String]` — Decimal UInt64 from trimmed s; err on junk, a sign of -, or above 2^64-1.
 
 ## uint8
 
@@ -1311,6 +1676,32 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint8.to_int8_saturating(x: UInt8) -> Int8` — Clamps x to at most 127.
 - `uint8.min_value() -> UInt8` — Smallest UInt8: 0.
 - `uint8.max_value() -> UInt8` — Largest UInt8: 255.
+- `uint8.compare(a: UInt8, b: UInt8) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `uint8.min(a: UInt8, b: UInt8) -> UInt8` — Lesser of a and b.
+- `uint8.max(a: UInt8, b: UInt8) -> UInt8` — Greater of a and b.
+- `uint8.clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8` — x limited to lo..hi; aborts when lo > hi.
+- `uint8.floor_div(a: UInt8, b: UInt8) -> UInt8` — Quotient; the same as a / b for an unsigned type; b == 0 aborts.
+- `uint8.modulo(a: UInt8, b: UInt8) -> UInt8` — Remainder; the same as a % b for an unsigned type; b == 0 aborts.
+- `uint8.pow(base: UInt8, exp: Int) -> UInt8` — base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
+- `uint8.is_even(x: UInt8) -> Bool` — True when x is a multiple of 2.
+- `uint8.is_odd(x: UInt8) -> Bool` — True when x is not a multiple of 2.
+- `uint8.band(a: UInt8, b: UInt8) -> UInt8` — Bitwise AND.
+- `uint8.bor(a: UInt8, b: UInt8) -> UInt8` — Bitwise OR.
+- `uint8.bxor(a: UInt8, b: UInt8) -> UInt8` — Bitwise XOR.
+- `uint8.bnot(x: UInt8) -> UInt8` — Bitwise complement of all 8 bits.
+- `uint8.bshl(a: UInt8, n: Int) -> UInt8` — a shifted left by n bits; n is taken mod 8.
+- `uint8.bshr(a: UInt8, n: Int) -> UInt8` — Zero-filling right shift; n is taken mod 8.
+- `uint8.count_leading_zeros(x: UInt8) -> Int` — Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
+- `uint8.count_trailing_zeros(x: UInt8) -> Int` — Zero bits below the lowest set bit; 8 for 0.
+- `uint8.count_ones(x: UInt8) -> Int` — Number of set bits among the 8.
+- `uint8.byte_swap(x: UInt8) -> UInt8` — The bytes in reverse order; one byte, so x itself.
+- `uint8.wrap_add(a: UInt8, b: UInt8) -> UInt8` — a + b wrapped to 8 bits.
+- `uint8.wrap_sub(a: UInt8, b: UInt8) -> UInt8` — a - b wrapped to 8 bits.
+- `uint8.wrap_mul(a: UInt8, b: UInt8) -> UInt8` — a * b wrapped to 8 bits.
+- `uint8.rotate_left(a: UInt8, n: Int) -> UInt8` — The 8 bits of a rotated left by n; n is taken mod 8.
+- `uint8.rotate_right(a: UInt8, n: Int) -> UInt8` — The 8 bits of a rotated right by n; n is taken mod 8.
+- `uint8.bit_length(x: UInt8) -> Int` — Bits needed to hold x; 0 for 0.
+- `uint8.parse(s: String) -> Result[UInt8, String]` — Decimal UInt8 from trimmed s; err on junk, a sign of -, or above 255.
 
 ## url
 
