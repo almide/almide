@@ -22,6 +22,10 @@ cut. At end of input it returns `""` — the same value it returns for an empty
 line, so it cannot tell the two apart; use `io.read_line_opt` when the loop
 has to stop at the end of input.
 
+The line's bytes are decoded as UTF-8; each invalid sequence becomes one
+`U+FFFD` (`�`), the same on every target (#4142). A read error ends the
+input, like end of file.
+
 ```almd check
 import io
 
@@ -73,7 +77,10 @@ Enter name: Alice
 
 ### `io.read_all() -> String`
 
-Read all of standard input as a single string
+Read all of standard input as a single string. The bytes are decoded as
+UTF-8; each invalid sequence becomes one `U+FFFD` (`�`), the same on every
+target (#4142). A read error ends the input: the bytes read before it are
+kept.
 
 ```almd check
 import io
