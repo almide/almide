@@ -187,7 +187,7 @@ local fn rotate_count(n: Int) -> Int = {
 /// Bits needed to hold x; 0 for 0, 8 if negative.
 fn bit_length(x: Int8) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int8(x), 255))
 
-/// Decimal Int8 from trimmed s; err on junk or outside -128..127.
+/// Decimal Int8 from ASCII-trimmed s; err on junk or outside -128..127.
 fn parse(s: String) -> Result[Int8, String] = match int.parse(s) {
   ok(n) => if n < -128 then err("number too small to fit in target type")
   else if n > 127 then err("number too large to fit in target type")
