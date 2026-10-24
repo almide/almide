@@ -1302,9 +1302,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `process.pid() -> Int` — OS process ID of this program.
 - `process.env(key: String) -> Option[String]` — Variable value, or none if unset.
 - `effect process.spawn(cmd: String, args: List[String]) -> Int` — Pid of cmd started in the background.
-- `effect process.kill(pid: Int, signal: Int) -> Unit` — Sends signal to pid; err is kill's stderr.
+- `effect process.kill(pid: Int, signal: Int) -> Unit` — Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
 - `process.sleep(ms: Int) -> Unit` — Blocks ms milliseconds; negative is 0.
-- `process.is_alive(pid: Int) -> Bool` — True while pid exists, zombies included.
+- `process.is_alive(pid: Int) -> Bool` — True while pid exists; false for a pid <= 0.
 
 ## random
 
