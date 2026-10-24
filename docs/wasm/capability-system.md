@@ -256,8 +256,13 @@ proc = ["git", "cargo"]
   as a value, cannot be checked and is refused too (`cli::check_proc_allowlist`:
   `run`, `build` and `test` on both targets; `almide check` sees the direct
   calls).
+- `process.kill` and `process.is_alive` start no child but reach processes, so
+  the list bounds them as the `kill` command (#4125): without `kill` on it they
+  are refused with ``process.kill("kill") (line N): `kill` is not in
+  [permissions] proc``.
 - The embedded wasm host holds the same list and answers a command outside it
-  with an err naming the command, before anything runs.
+  with an err naming the command, before anything runs (`kill` / `is_alive`
+  outside it: the same err, and not-alive).
 - Without the key nothing is bounded. `proc = []` allows no command.
 
 #### On wasm: the private `almide:process/spawn` import

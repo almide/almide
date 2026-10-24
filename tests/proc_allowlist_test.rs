@@ -84,3 +84,35 @@ fn a_listed_command_runs_on_both_targets_and_no_key_bounds_nothing() {
         }
     }
 }
+
+/// #4125: process.kill / is_alive start no child but reach processes, so the
+/// list bounds them as the `kill` command they used to run — on every route,
+/// with the refused-spawn text. Listing `kill` lifts it.
+#[test]
+fn signalling_needs_kill_on_the_list() {
+    let td = tempfile::TempDir::new().unwrap();
+    for (call, line) in [
+        ("  process.kill(-1, 0)!", "process.kill(\"kill\") (line 4): `kill` is not in [permissions] proc"),
+        ("  println(\"${process.is_alive(1)}\")", "process.is_alive(\"kill\") (line 4): `kill` is not in [permissions] proc"),
+    ] {
+        project(td.path(), "proc = [\"echo\"]", call);
+        for args in [
+            &["check", "src/main.almd"][..],
+            &["run", "src/main.almd"],
+            &["run", "src/main.almd", "--target", "wasm"],
+            &["build", "src/main.almd", "--target", "wasm", "-o", "m.wasm"],
+        ] {
+            let o = almide(td.path(), args);
+            assert!(!o.status.success(), "{args:?} must refuse:\n{}", text(&o));
+            assert!(text(&o).contains(line), "{args:?}:\n{}", text(&o));
+        }
+    }
+    project(td.path(), "proc = [\"echo\", \"kill\"]", "  println(\"${process.is_alive(process.pid())}\")");
+    for extra in [&[][..], &["--target", "wasm"]] {
+        let mut args = vec!["run", "src/main.almd"];
+        args.extend_from_slice(extra);
+        let o = almide(td.path(), &args);
+        assert!(o.status.success(), "{args:?}: {}", text(&o));
+        assert_eq!(String::from_utf8_lossy(&o.stdout), "true\n", "{args:?}");
+    }
+}
