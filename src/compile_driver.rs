@@ -276,13 +276,22 @@ pub(crate) fn optimize_gate_and_link(
 /// (check has printed them); `None` when it fails, which check has reported.
 pub(crate) fn whole_program_ir(file: &str) -> Option<almide::ir::IrProgram> {
     let was = crate::SUPPRESS_WARNINGS.swap(true, std::sync::atomic::Ordering::Relaxed);
-    let ir = (|| {
+    // A debug-build assertion in module lowering (`increment_use` on a
+    // `self.` module lowered from outside its package directory) must not
+    // turn a clean `check` into a crash: the gates then judge the entry's own
+    // IR, as before this change, and the build route reports the defect.
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let ir = std::panic::catch_unwind(|| {
         let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, _, self_versioned) =
             parse_and_resolve_for_compile(file).ok()?;
         let parsed = ParsedSource { file, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
         let mut module_irs = std::collections::HashMap::new();
         typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs).ok()?.0
-    })();
+    })
+    .ok()
+    .flatten();
+    std::panic::set_hook(hook);
     crate::SUPPRESS_WARNINGS.store(was, std::sync::atomic::Ordering::Relaxed);
     ir
 }
