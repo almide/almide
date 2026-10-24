@@ -701,21 +701,35 @@ fn __rx_repi_try(pnext: Int, pend: Int, t: Int, i: Int, mn: Int, k: Int, m: Int)
 // open ones. `d` counts the open instances of TRACKED groups (whose body can
 // match empty) that began before here; reading a character makes them all old.
 //
-// Counted repetition is expanded, one body copy per count. Past 20,000 states
-// the pattern is matched by the walk instead — the same answers without the
-// linear bound — so a huge `{n}` cannot allocate without limit.
+// Counted repetition is expanded, one body copy per count, while the program
+// stays within __rx_pike_states() states. Past that (`.{0,20000}`,
+// `((a){200}){200}`) the pattern is compiled COUNTED (#4083): a repetition
+// with more than one copy is ONE copy of its body between a CLOOP and a CEND,
+// its count in a counter register of the thread (one per nesting level of
+// counted repetitions, 0 outside the loop: CRESET puts it back on the way
+// out). A state is then (pc, d, registers) — the expanded program's state
+// written differently, so the threads, their order and every answer are the
+// same — and two threads in one state are found through a hash table keyed by
+// the whole state. The work per character is the number of states threads are
+// in, at most the expanded program's state count: the bound the expansion had,
+// with memory for the live threads only.
 //
 // The program is 6 slots per instruction: [op, a, b, c, e, depth], depth = the
 // tracked instances open there. Ops: 1 CHAR [p, ae] (the atom's pattern
 // bytes); 2 ASSERT [kind: 0 ^, 1 $, 2 \b, 3 \B]; 3 SPLIT [first, second];
 // 4 JMP [to]; 5 GSTART [ci]; 6 GEND [ci, outer (-1 = untracked), empty
-// (-1 = fail), nonempty]; 7 MATCH; 8 FAIL. ci is 1-based, 0 = no capture.
+// (-1 = fail), nonempty]; 7 MATCH; 8 FAIL; counted mode: 9 CLOOP [level, min,
+// max (-1 = unbounded), exit * 2 + lazy]; 10 CEND [ci, outer, the CLOOP's pc];
+// 11 CRESET [level]. ci is 1-based, 0 = no capture.
 // Targets not known yet are HOLES: the field holds the next hole of its chain
 // (pc * 8 + field, -1 ends it) until __rx_patch fills the chain.
 //
 // The compiler block `cb` (8-byte slots): 0 program address (0 = a dry run that
 // only counts), 1 instructions so far, 2 tracked instances open, 3 the deepest
-// nesting of them, 4 over budget (1), 5 pat0.
+// nesting of them, 4 over budget (1), 5 pat0, 6 counted (1), 7 counted
+// repetitions open, 8 the deepest nesting of them (the counter registers).
+fn __rx_pike_states() -> Int = 20000
+
 fn __rx_cslot(cb: Int, i: Int) -> Int = prim.load64(cb + i * 8)
 
 fn __rx_cset(cb: Int, i: Int, v: Int) -> Int = {
@@ -739,7 +753,11 @@ fn __rx_emit(cb: Int, op: Int, a: Int, b: Int, c: Int, e: Int) -> Int = {
     0
   }
   let _1 = __rx_cset(cb, 1, n + 1)
-  let _2 = if (n + 1) * (__rx_cslot(cb, 3) + 1) > 20000 then __rx_cset(cb, 4, 1)
+  let _2 = if __rx_cslot(cb, 6) == 0 and (n + 1) * (__rx_cslot(cb, 3) + 1) > __rx_pike_states() then __rx_cset(
+    cb,
+    4,
+    1,
+  )
   else 0
   n
 }
@@ -885,8 +903,26 @@ fn __rx_c_opt(cb: Int, p: Int, ae: Int, k: Int, mx: Int, lazy: Int, exits: Int) 
     __rx_c_opt(cb, p, ae, k + 1, mx, lazy, __rx_hole(cb, sp, if lazy == 1 then 1 else 2, exits))
   }
 
+// How many copies of its body a repetition expands to: one per count up to
+// mx, or up to mn and then one that loops.
+fn __rx_copies(mn: Int, mx: Int) -> Int = if mx < 0 then mn + 1 else mx
+
 // A single-character atom repeated mn..mx times (mx = -1: unbounded).
-fn __rx_c_atom(cb: Int, p: Int, ae: Int, mn: Int, mx: Int, lazy: Int) -> Int = {
+fn __rx_c_atom(cb: Int, p: Int, ae: Int, mn: Int, mx: Int, lazy: Int) -> Int =
+  if __rx_cslot(cb, 6) == 1 and __rx_copies(mn, mx) > 1 then __rx_c_counted(
+    cb,
+    false,
+    p,
+    ae,
+    0,
+    false,
+    mn,
+    mx,
+    lazy,
+  )
+  else __rx_c_atom_expanded(cb, p, ae, mn, mx, lazy)
+
+fn __rx_c_atom_expanded(cb: Int, p: Int, ae: Int, mn: Int, mx: Int, lazy: Int) -> Int = {
   let _0 = __rx_c_chars(cb, p, ae, mn)
   if mx >= 0 then __rx_c_opt(cb, p, ae, mn, mx, lazy, 0 - 1)
   else {
@@ -909,10 +945,51 @@ fn __rx_c_group(cb: Int, p: Int, ae: Int, mn: Int, mx: Int, lazy: Int) -> Int = 
   let body = if noncap then p + 3 else p + 1
   let ci = if noncap then 0 else __rx_ngroups(pat0, p) + 1
   let tracked = (mn != 1 or mx != 1) and __rx_null_alts(body, ce, pat0)
-  let outer = if tracked then __rx_cslot(cb, 2) else 0 - 1
-  let _0 = if tracked and outer + 1 > __rx_cslot(cb, 3) then __rx_cset(cb, 3, outer + 1)
+  if __rx_cslot(cb, 6) == 1 and __rx_copies(mn, mx) > 1 then __rx_c_counted(
+    cb,
+    true,
+    body,
+    ce,
+    ci,
+    tracked,
+    mn,
+    mx,
+    lazy,
+  )
+  else {
+    let outer = if tracked then __rx_cslot(cb, 2) else 0 - 1
+    let _0 = if tracked and outer + 1 > __rx_cslot(cb, 3) then __rx_cset(cb, 3, outer + 1)
+    else 0
+    __rx_c_copy(cb, body, ce, ci, outer, mn, mx, lazy, 0, 0 - 1)
+  }
+}
+
+// Counted mode: the repetition as CLOOP, its body (a group's GSTART and
+// alternatives [b0, b1), or the atom [b0, b1) as one CHAR), CEND, CRESET — the
+// expanded copies folded into one, the count in register `level`.
+fn __rx_c_counted(cb: Int, group: Bool, b0: Int, b1: Int, ci: Int, tracked: Bool, mn: Int, mx: Int, lazy: Int) -> Int = {
+  let level = __rx_cslot(cb, 7)
+  let _0 = __rx_cset(cb, 7, level + 1)
+  let _1 = if level + 1 > __rx_cslot(cb, 8) then __rx_cset(cb, 8, level + 1)
   else 0
-  __rx_c_copy(cb, body, ce, ci, outer, mn, mx, lazy, 0, 0 - 1)
+  let open = __rx_cslot(cb, 2)
+  let outer = if tracked then open else 0 - 1
+  let _2 = if tracked and open + 1 > __rx_cslot(cb, 3) then __rx_cset(cb, 3, open + 1)
+  else 0
+  let lp = __rx_emit(cb, 9, level, mn, mx, lazy)
+  let _3 = if tracked then __rx_cset(cb, 2, open + 1)
+  else 0
+  let _4 = if group then {
+    let _5 = if ci > 0 then __rx_emit(cb, 5, ci, 0, 0, 0)
+    else 0
+    __rx_c_alts(cb, b0, b1, 0 - 1)
+  } else __rx_emit(cb, 1, b0, b1, 0, 0)
+  let _6 = __rx_emit(cb, 10, ci, outer, lp, 0)
+  let _7 = if tracked then __rx_cset(cb, 2, open)
+  else 0
+  let _8 = __rx_cset(cb, 7, level)
+  let exit = __rx_emit(cb, 11, level, 0, 0, 0)
+  __rx_iset(cb, lp, 4, exit * 2 + lazy)
 }
 
 fn __rx_c_copy(cb: Int, body: Int, ce: Int, ci: Int, outer: Int, mn: Int, mx: Int, lazy: Int, c: Int, exits: Int) -> Int =
@@ -942,15 +1019,19 @@ fn __rx_c_copy(cb: Int, body: Int, ce: Int, ci: Int, outer: Int, mn: Int, mx: In
     else __rx_c_copy(cb, body, ce, ci, outer, mn, mx, lazy, c + 1, exits2)
   }
 
-// Compile [p0, pe) into the program at `base` (0 = count only): its length,
-// or -1 when it is over the state budget.
-fn __rx_compile(cb: Int, base: Int, p0: Int, pe: Int) -> Int = {
+// Compile [p0, pe) into the program at `base` (0 = count only), expanded
+// (`counted` 0) or counted (1): its length, or -1 when an expanded program is
+// over the state budget.
+fn __rx_compile(cb: Int, base: Int, p0: Int, pe: Int, counted: Int) -> Int = {
   let _0 = __rx_cset(cb, 0, base)
   let _1 = __rx_cset(cb, 1, 0)
   let _2 = __rx_cset(cb, 2, 0)
   let _3 = __rx_cset(cb, 3, 0)
   let _4 = __rx_cset(cb, 4, 0)
   let _5 = __rx_cset(cb, 5, p0)
+  let _c = __rx_cset(cb, 6, counted)
+  let _l = __rx_cset(cb, 7, 0)
+  let _m = __rx_cset(cb, 8, 0)
   let _6 = __rx_c_alts(cb, p0, pe, 0 - 1)
   let _7 = __rx_emit(cb, 7, 0, 0, 0, 0)
   if __rx_over(cb) then 0 - 1 else __rx_cslot(cb, 1)
@@ -961,8 +1042,16 @@ fn __rx_compile(cb: Int, base: Int, p0: Int, pe: Int) -> Int = {
 // start), 3 ts, 4 te, 5 pat0, 6 track, 7 stack address, 8 stack depth,
 // 9 found end (-1 = none), 10 found slots, 11 current list, 12 next list,
 // 13 anchored, 14 end_at (-1 = anywhere), 15 any, 16 scratch slots, 17 the
-// last stamp used. A list block: 0 count, 1 stamp, 2 (pc, d) pairs, 3 slots,
-// 4 the stamp each state was last added under.
+// last stamp used, 18 the capture slots (the counter registers follow them in
+// a thread's ns slots), 19 counter registers (0 = an expanded program), 20 the
+// stack's capacity in entries, 22 what is full (__rx_full), 23 the list it is
+// in. A list block: 0 count, 1 stamp, 2 (pc, d) pairs, 3 slots, 4 the stamp
+// each (pc, d) was last added under (expanded program), 5 thread capacity;
+// counted program: 6 hash table of the states added under the current stamp
+// (entries [stamp, pc, d, registers...], an older stamp is a free entry), 7
+// its capacity in entries (0 at first), 8 entries used. A counted program's
+// threads can outgrow the room the block has, which is sized for an expanded
+// one's: __rx_regrow gives a full buffer more.
 fn __rx_wk(w: Int, i: Int) -> Int = prim.load64(w + i * 8)
 
 fn __rx_wset(w: Int, i: Int, v: Int) -> Int = {
@@ -973,15 +1062,15 @@ fn __rx_wset(w: Int, i: Int, v: Int) -> Int = {
 // The work block's size in slots for a program of `n` instructions.
 fn __rx_work_size(n: Int, width: Int, ns: Int) -> Int = {
   let k = n * width
-  32 + 2 * (8 + 2 * k + k * ns + k) + 3 * (3 * k + 8) + 2 * ns
+  32 + 2 * (16 + 2 * k + k * ns + k) + 3 * (3 * k + 8) + 2 * ns
 }
 
 // Lay out the work block at `w` (all its stamps zero).
 fn __rx_work_init(w: Int, prog: Int, n: Int, width: Int, ns: Int, ts: Int, te: Int, pat0: Int, track: Int) -> Int = {
   let k = n * width
   let l0 = w + 32 * 8
-  let l1 = l0 + (8 + 2 * k + k * ns + k) * 8
-  let stack = l1 + (8 + 2 * k + k * ns + k) * 8
+  let l1 = l0 + (16 + 2 * k + k * ns + k) * 8
+  let stack = l1 + (16 + 2 * k + k * ns + k) * 8
   let scratch = stack + 3 * (3 * k + 8) * 8
   let _0 = __rx_wset(w, 0, prog)
   let _1 = __rx_wset(w, 1, width)
@@ -997,12 +1086,14 @@ fn __rx_work_init(w: Int, prog: Int, n: Int, width: Int, ns: Int, ts: Int, te: I
   let _11 = __rx_wset(w, 12, l1)
   let _12 = __rx_wset(w, 16, scratch)
   let _13 = __rx_wset(w, 17, 0)
+  let _s = __rx_wset(w, 20, 3 * k + 8)
+  let _h = __rx_wset(w, 22, 0)
   let _14 = __rx_list_init(l0, k, ns)
   __rx_list_init(l1, k, ns)
 }
 
 fn __rx_list_init(l: Int, k: Int, ns: Int) -> Int = {
-  let pairs = l + 8 * 8
+  let pairs = l + 16 * 8
   let slots = pairs + 2 * k * 8
   let seen = slots + k * ns * 8
   let _0 = __rx_wset(l, 0, 0)
@@ -1010,6 +1101,8 @@ fn __rx_list_init(l: Int, k: Int, ns: Int) -> Int = {
   let _2 = __rx_wset(l, 2, pairs)
   let _3 = __rx_wset(l, 3, slots)
   let _4 = __rx_wset(l, 4, seen)
+  let _5 = __rx_wset(l, 5, k)
+  let _6 = __rx_fill_zero(l + 6 * 8, 3)
   __rx_fill_zero(seen, k)
 }
 
@@ -1024,16 +1117,77 @@ fn __rx_list_clear(w: Int, l: Int) -> Int = {
   let s = __rx_wk(w, 17) + 1
   let _0 = __rx_wset(w, 17, s)
   let _1 = __rx_wset(l, 1, s)
+  let _2 = __rx_wset(l, 8, 0)
   __rx_wset(l, 0, 0)
+}
+
+// A state's bucket in a table of mask + 1 (a power of two) entries, the
+// registers read from `rb` — runtime/rs/src/regex.rs's rx_hash, step for step
+// (every value stays below 2^56).
+fn __rx_hash(pc: Int, d: Int, rb: Int, regs: Int, mask: Int) -> Int = {
+  let h0 = prim.band(pc, mask)
+  let h1 = prim.band(h0 * 40503 + prim.band(d, mask), mask)
+  prim.band(__rx_hash_regs(h1, rb, regs, mask) * 40503, mask)
+}
+
+fn __rx_hash_regs(h: Int, rb: Int, n: Int, mask: Int) -> Int = if n <= 0 then h
+else __rx_hash_regs(
+  prim.band(h * 40503 + prim.band(prim.load64(rb), mask), mask),
+  rb + 8,
+  n - 1,
+  mask,
+)
+
+// Are the `n` slots at `a` and `b` equal?
+fn __rx_eq64(a: Int, b: Int, n: Int) -> Bool = if n <= 0 then true
+else if prim.load64(a) != prim.load64(b) then false
+else __rx_eq64(a + 8, b + 8, n - 1)
+
+// Counted program: add the state (pc, d, the scratch registers) to list `l`'s
+// table under its stamp — false when it is already there, or when the table
+// is full (the step then stops to grow it, __rx_full).
+fn __rx_tvisit(w: Int, l: Int, pc: Int, d: Int) -> Bool =
+  if (__rx_wk(l, 8) + 1) * 2 > __rx_wk(l, 7) then __rx_full(w, l, 4) == 1
+  else {
+    let regs = __rx_wk(w, 19)
+    let mask = __rx_wk(l, 7) - 1
+    let rb = __rx_wk(w, 16) + __rx_wk(w, 18) * 8
+    __rx_tprobe(l, pc, d, rb, regs, __rx_hash(pc, d, rb, regs, mask), mask)
+  }
+
+fn __rx_tprobe(l: Int, pc: Int, d: Int, rb: Int, regs: Int, i: Int, mask: Int) -> Bool = {
+  let at = __rx_wk(l, 6) + i * (3 + regs) * 8
+  if prim.load64(at) != __rx_wk(l, 1) then {
+    prim.store64(at, __rx_wk(l, 1))
+    prim.store64(at + 8, pc)
+    prim.store64(at + 16, d)
+    let _0 = __rx_copy64(rb, at + 24, regs)
+    let _1 = __rx_wset(l, 8, __rx_wk(l, 8) + 1)
+    true
+  } else if prim.load64(at + 8) == pc and prim.load64(at + 16) == d and __rx_eq64(at + 24, rb, regs) then false
+  else __rx_tprobe(l, pc, d, rb, regs, prim.band(i + 1, mask), mask)
+}
+
+// A buffer of list `l` (`what`: 2 its threads, 4 its table) or the stack (1)
+// is full: the step stops (every loop of it checks slot 22) and is done again
+// from its start once __rx_regrow has made the buffer bigger. 0.
+fn __rx_full(w: Int, l: Int, what: Int) -> Int = {
+  let _0 = __rx_wset(w, 22, prim.bor(__rx_wk(w, 22), what))
+  let _1 = if what != 1 then __rx_wset(w, 23, l)
+  else 0
+  0
 }
 
 fn __rx_push(w: Int, kind: Int, a: Int, b: Int) -> Int = {
   let top = __rx_wk(w, 8)
-  let at = __rx_wk(w, 7) + top * 24
-  prim.store64(at, kind)
-  prim.store64(at + 8, a)
-  prim.store64(at + 16, b)
-  __rx_wset(w, 8, top + 1)
+  if top >= __rx_wk(w, 20) then __rx_full(w, 0, 1)
+  else {
+    let at = __rx_wk(w, 7) + top * 24
+    prim.store64(at, kind)
+    prim.store64(at + 8, a)
+    prim.store64(at + 16, b)
+    __rx_wset(w, 8, top + 1)
+  }
 }
 
 // Does the zero-width test `kind` hold at `t`?
@@ -1057,7 +1211,7 @@ fn __rx_add(w: Int, l: Int, pc: Int, d: Int, t: Int) -> Int = {
 
 fn __rx_closure(w: Int, l: Int, t: Int) -> Int = {
   let top = __rx_wk(w, 8)
-  if top == 0 then 0
+  if top == 0 or __rx_wk(w, 22) != 0 then 0
   else {
     let at = __rx_wk(w, 7) + (top - 1) * 24
     let kind = prim.load64(at)
@@ -1068,10 +1222,8 @@ fn __rx_closure(w: Int, l: Int, t: Int) -> Int = {
       prim.store64(__rx_wk(w, 16) + a * 8, b)
       __rx_closure(w, l, t)
     } else {
-      let seen = __rx_wk(l, 4) + (a * __rx_wk(w, 1) + b) * 8
-      if prim.load64(seen) == __rx_wk(l, 1) then __rx_closure(w, l, t)
+      if __rx_seen(w, l, a, b) then __rx_closure(w, l, t)
       else {
-        prim.store64(seen, __rx_wk(l, 1))
         let _1 = __rx_visit(w, l, a, b, t)
         __rx_closure(w, l, t)
       }
@@ -1079,12 +1231,31 @@ fn __rx_closure(w: Int, l: Int, t: Int) -> Int = {
   }
 }
 
+// Is the state at (pc, d) — and the scratch registers — in list `l` already?
+// If not, it is now. A counted program does not look up a CEND, CRESET or
+// GSTART: no cycle runs through one without a CLOOP or SPLIT, which are looked
+// up, and a second visit only reaches states already there.
+fn __rx_seen(w: Int, l: Int, pc: Int, d: Int) -> Bool =
+  if __rx_wk(w, 19) > 0 then {
+    let op = prim.load64(__rx_wk(w, 0) + pc * 48)
+    if op == 10 or op == 11 or op == 5 then false
+    else __rx_tvisit(w, l, pc, d) == false
+  } else {
+    let seen = __rx_wk(l, 4) + (pc * __rx_wk(w, 1) + d) * 8
+    if prim.load64(seen) == __rx_wk(l, 1) then true
+    else {
+      prim.store64(seen, __rx_wk(l, 1))
+      false
+    }
+  }
+
 // One state of the closure: what instruction `pc` does at `t` with `d`.
 fn __rx_visit(w: Int, l: Int, pc: Int, d: Int, t: Int) -> Int = {
   let ins = __rx_wk(w, 0) + pc * 48
   let op = prim.load64(ins)
   let a = prim.load64(ins + 8)
-  if op == 1 or op == 7 then {
+  if (op == 1 or op == 7) and __rx_wk(l, 0) >= __rx_wk(l, 5) then __rx_full(w, l, 2)
+  else if op == 1 or op == 7 then {
     let i = __rx_wk(l, 0)
     let ns = __rx_wk(w, 2)
     let pair = __rx_wk(l, 2) + i * 16
@@ -1124,7 +1295,69 @@ fn __rx_visit(w: Int, l: Int, pc: Int, d: Int, t: Int) -> Int = {
     let d2 = if outer >= 0 and outer < d then outer else d
     if to >= 0 then __rx_push(w, 0, to, d2)
     else 0
+  } else if op == 9 then __rx_visit_loop(w, ins, pc, d, a)
+  else if op == 10 then __rx_visit_cend(w, ins, pc, d, t, a)
+  else if op == 11 then {
+    let reg = __rx_wk(w, 18) + a
+    let rs = __rx_wk(w, 16) + reg * 8
+    let _0 = __rx_push(w, 1, reg, prim.load64(rs))
+    prim.store64(rs, 0)
+    __rx_push(w, 0, pc + 1, d)
   } else 0
+}
+
+// CLOOP [level, min, max, exit * 2 + lazy] with the count c in register
+// `level`: past max leave; from min on greedy prefers another instance (pc + 1)
+// and lazy prefers to leave; below min the instance is required.
+fn __rx_visit_loop(w: Int, ins: Int, pc: Int, d: Int, level: Int) -> Int = {
+  let c = prim.load64(__rx_wk(w, 16) + (__rx_wk(w, 18) + level) * 8)
+  let mn = prim.load64(ins + 16)
+  let mx = prim.load64(ins + 24)
+  let ex = prim.load64(ins + 32)
+  let exit = ex / 2
+  if mx >= 0 and c >= mx then __rx_push(w, 0, exit, d)
+  else if c >= mn then {
+    if ex % 2 == 1 then {
+      let _0 = __rx_push(w, 0, pc + 1, d)
+      __rx_push(w, 0, exit, d)
+    } else {
+      let _0 = __rx_push(w, 0, exit, d)
+      __rx_push(w, 0, pc + 1, d)
+    }
+  } else __rx_push(w, 0, pc + 1, d)
+}
+
+// CEND [ci, outer, lp]: record capture ci like GEND; an empty instance (a
+// tracked group's only) counts but ends the repetition — below min it fails —
+// and any other counts one more and goes back to the CLOOP at lp.
+fn __rx_visit_cend(w: Int, ins: Int, pc: Int, d: Int, t: Int, ci: Int) -> Int = {
+  let sc = __rx_wk(w, 16)
+  let _0 = if ci > 0 and __rx_wk(w, 6) == 1 then {
+    let s0 = sc + (3 * ci - 2) * 8
+    let _1 = __rx_push(w, 1, 3 * ci - 2, prim.load64(s0))
+    let _2 = __rx_push(w, 1, 3 * ci - 1, prim.load64(s0 + 8))
+    prim.store64(s0, prim.load64(sc + 3 * ci * 8))
+    prim.store64(s0 + 8, t)
+    0
+  } else 0
+  let outer = prim.load64(ins + 16)
+  let lp = prim.load64(ins + 24)
+  let lins = __rx_wk(w, 0) + lp * 48
+  let reg = __rx_wk(w, 18) + prim.load64(lins + 8)
+  let mn = prim.load64(lins + 16)
+  let mx = prim.load64(lins + 24)
+  let rs = sc + reg * 8
+  let c = prim.load64(rs)
+  let d2 = if outer >= 0 and outer < d then outer else d
+  if outer >= 0 and d <= outer then {
+    if c + 1 >= mn then __rx_push(w, 0, pc + 1, d2)
+    else 0
+  } else {
+    let _3 = __rx_push(w, 1, reg, c)
+    let next = if mx < 0 and c + 1 > mn then mn else c + 1
+    prim.store64(rs, next)
+    __rx_push(w, 0, lp, d2)
+  }
 }
 
 // Advance the current list's threads i.. over the character at `t` into the
@@ -1132,7 +1365,7 @@ fn __rx_visit(w: Int, l: Int, pc: Int, d: Int, t: Int) -> Int = {
 // 2 = a match ends the search (`any`).
 fn __rx_threads(w: Int, i: Int, t: Int, tn: Int) -> Int = {
   let cl = __rx_wk(w, 11)
-  if i >= __rx_wk(cl, 0) then 0
+  if i >= __rx_wk(cl, 0) or __rx_wk(w, 22) != 0 then 0
   else {
     let pair = __rx_wk(cl, 2) + i * 16
     let pc = prim.load64(pair)
@@ -1158,31 +1391,106 @@ fn __rx_threads(w: Int, i: Int, t: Int, tn: Int) -> Int = {
 // Reset the scratch slots for a thread starting at `t`.
 fn __rx_seed(w: Int, t: Int) -> Int = {
   let sc = __rx_wk(w, 16)
-  let _0 = __rx_fill_neg(sc, __rx_wk(w, 2))
+  let _0 = __rx_fill_neg(sc, __rx_wk(w, 18))
+  let _1 = __rx_fill_zero(sc + __rx_wk(w, 18) * 8, __rx_wk(w, 19))
   prim.store64(sc, t)
   0
 }
 
 // One step at text position `t`, then the next.
-fn __rx_steps(w: Int, t: Int) -> Int = {
+// -1 when the search is over; when a buffer is full, the step to do again
+// once it has grown: t * 2, or t * 2 + 1 for the search's first one (`first`:
+// seed the current list at `t`). A step only writes the next list (the first
+// one the current list), so doing it again from its start gives what it
+// would have given.
+fn __rx_steps(w: Int, t: Int, first: Int) -> Int = if first == 1 then {
+  let _0 = __rx_list_clear(w, __rx_wk(w, 11))
+  let _1 = __rx_seed(w, t)
+  let _2 = __rx_add(w, __rx_wk(w, 11), 0, 0, t)
+  if __rx_wk(w, 22) != 0 then t * 2 + 1
+  else __rx_steps(w, t, 0)
+} else {
   let te = __rx_wk(w, 4)
   let tn = if t < te then t + __rx_w(t) else t
   let _0 = __rx_list_clear(w, __rx_wk(w, 12))
   let r = __rx_threads(w, 0, t, tn)
-  if r == 2 or t >= te then 0
+  if __rx_wk(w, 22) != 0 then t * 2
+  else if r == 2 or t >= te then 0 - 1
   else {
     let _1 = if __rx_wk(w, 9) < 0 and __rx_wk(w, 13) == 0 then {
       let _2 = __rx_seed(w, tn)
       __rx_add(w, __rx_wk(w, 12), 0, 0, tn)
     } else 0
     let nl = __rx_wk(w, 12)
-    if __rx_wk(nl, 0) == 0 and (__rx_wk(w, 9) >= 0 or __rx_wk(w, 13) == 1) then 0
+    if __rx_wk(w, 22) != 0 then t * 2
+    else if __rx_wk(nl, 0) == 0 and (__rx_wk(w, 9) >= 0 or __rx_wk(w, 13) == 1) then 0 - 1
     else {
       let _3 = __rx_wset(w, 12, __rx_wk(w, 11))
       let _4 = __rx_wset(w, 11, nl)
-      __rx_steps(w, tn)
+      __rx_steps(w, tn, 0)
     }
   }
+}
+
+// Run the Pike VM's search from step (t, first) to its end. A step that stops on a full
+// buffer is done again after __rx_regrow.
+fn __rx_pike_run(w: Int, t: Int, first: Int) -> Int = {
+  let r = __rx_steps(w, t, first)
+  if r < 0 then 0 else __rx_regrow(w, r)
+}
+
+// Give the full buffer (slot 22 says which; slot 23 names the list) four
+// times its room and run the rest of the search from the stopped step. The
+// new buffers are this call's own lists, so they have to outlive the rest of
+// the search: the run is not a tail call, and nests once per growth (a few
+// dozen times at most, the room growing fourfold each time). The old buffers
+// are put back afterwards for the next search; the step starts over, so
+// nothing is copied.
+fn __rx_regrow(w: Int, r: Int) -> Int = {
+  let need = __rx_wk(w, 22)
+  let l = __rx_wk(w, 23)
+  let stack0 = __rx_wk(w, 7)
+  let scap0 = __rx_wk(w, 20)
+  let pairs0 = __rx_wk(l, 2)
+  let slots0 = __rx_wk(l, 3)
+  let tcap0 = __rx_wk(l, 5)
+  let table0 = __rx_wk(l, 6)
+  let hcap0 = __rx_wk(l, 7)
+  let ns = __rx_wk(w, 2)
+  let entry = 3 + __rx_wk(w, 19)
+  let scap = if prim.band(need, 1) != 0 then scap0 * 4 else 0
+  let tcap = if prim.band(need, 2) != 0 then tcap0 * 4 else 0
+  let hcap = if prim.band(need, 4) == 0 then 0
+  else if hcap0 == 0 then 1024 else hcap0 * 4
+  let sl = prim.alloc_list(scap * 3 + 1)
+  let pl = prim.alloc_list(tcap * 2 + 1)
+  let ql = prim.alloc_list(tcap * ns + 1)
+  let hl = prim.alloc_list(hcap * entry + 1)
+  let _0 = if scap > 0 then {
+    let _1 = __rx_wset(w, 7, prim.handle(sl) + 12)
+    __rx_wset(w, 20, scap)
+  } else 0
+  let _2 = if tcap > 0 then {
+    let _3 = __rx_wset(l, 2, prim.handle(pl) + 12)
+    let _4 = __rx_wset(l, 3, prim.handle(ql) + 12)
+    __rx_wset(l, 5, tcap)
+  } else 0
+  let _5 = if hcap > 0 then {
+    let _6 = __rx_fill_zero(prim.handle(hl) + 12, hcap * entry)
+    let _7 = __rx_wset(l, 6, prim.handle(hl) + 12)
+    __rx_wset(l, 7, hcap)
+  } else 0
+  let _8 = __rx_wset(w, 22, 0)
+  let _9 = __rx_wset(w, 8, 0)
+  let res = __rx_pike_run(w, r / 2, r % 2)
+  let _10 = __rx_wset(w, 7, stack0)
+  let _11 = __rx_wset(w, 20, scap0)
+  let _12 = __rx_wset(l, 2, pairs0)
+  let _13 = __rx_wset(l, 3, slots0)
+  let _14 = __rx_wset(l, 5, tcap0)
+  let _15 = __rx_wset(l, 6, table0)
+  let _16 = __rx_wset(l, 7, hcap0)
+  res
 }
 
 // The walk's first success from a start at or after `t` (only at `t` when
@@ -1194,30 +1502,29 @@ fn __rx_pike(w: Int, t: Int, anchored: Int, end_at: Int, any: Int) -> Int = {
   let _2 = __rx_wset(w, 14, end_at)
   let _3 = __rx_wset(w, 15, any)
   let _4 = __rx_wset(w, 8, 0)
-  let cl = __rx_wk(w, 11)
-  let _5 = __rx_list_clear(w, cl)
-  let _6 = __rx_seed(w, t)
-  let _7 = __rx_add(w, cl, 0, 0, t)
-  let _8 = __rx_steps(w, t)
+  let _5 = __rx_wset(w, 22, 0)
+  let _6 = __rx_pike_run(w, t, 1)
   if __rx_wk(w, 9) < 0 then 0 - 1 else prim.load64(__rx_wk(w, 10))
 }
 
-// The program of [p0, pe), compiled: an empty list when the pattern is over
-// the state budget (it then runs on the walk). The block's slot 0 is the
-// instruction count, slot 1 the states per pc; the program follows at slot 8.
+// The program of [p0, pe), compiled expanded when that fits the state budget
+// and counted past it. The block's slot 0 is the instruction count, slot 1
+// the states per pc, slot 2 the counter registers (0 = expanded); the program
+// follows at slot 8.
 fn __rx_program(p0: Int, pe: Int) -> List[Int] = {
-  let cbl = prim.alloc_list(8)
+  let cbl = prim.alloc_list(12)
   let cb = prim.handle(cbl) + 12
-  let n = __rx_compile(cb, 0, p0, pe)
-  if n < 0 then prim.alloc_list(0)
-  else {
-    let prog = prim.alloc_list(8 + n * 6)
-    let pa = prim.handle(prog) + 12
-    let _0 = __rx_compile(cb, pa + 64, p0, pe)
-    prim.store64(pa, n)
-    prim.store64(pa + 8, __rx_cslot(cb, 3) + 1)
-    prog
-  }
+  let n0 = __rx_compile(cb, 0, p0, pe, 0)
+  let counted = if n0 < 0 then 1 else 0
+  let n = if n0 < 0 then __rx_compile(cb, 0, p0, pe, 1)
+  else n0
+  let prog = prim.alloc_list(8 + n * 6)
+  let pa = prim.handle(prog) + 12
+  let _0 = __rx_compile(cb, pa + 64, p0, pe, counted)
+  prim.store64(pa, n)
+  prim.store64(pa + 8, __rx_cslot(cb, 3) + 1)
+  prim.store64(pa + 16, __rx_cslot(cb, 8))
+  prog
 }
 
 // The work block for the program whose list handle is `ph` over the text
@@ -1230,9 +1537,14 @@ fn __rx_work(ph: Int, ncap: Int, ts: Int, te: Int, pat0: Int, track: Int) -> Lis
   else {
     let n = prim.load64(pa)
     let width = prim.load64(pa + 8)
-    let ns = if track == 1 then 1 + 3 * ncap else 1
+    let regs = prim.load64(pa + 16)
+    let r0 = if track == 1 then 1 + 3 * ncap else 1
+    let ns = r0 + regs
     let work = prim.alloc_list(__rx_work_size(n, width, ns))
-    let _0 = __rx_work_init(prim.handle(work) + 12, pa + 64, n, width, ns, ts, te, pat0, track)
+    let w = prim.handle(work) + 12
+    let _0 = __rx_work_init(w, pa + 64, n, width, ns, ts, te, pat0, track)
+    let _1 = __rx_wset(w, 18, r0)
+    let _2 = __rx_wset(w, 19, regs)
     work
   }
 }
@@ -1296,8 +1608,9 @@ fn __rx_tick(m: Int) -> Bool = {
 fn __rx_gave_up(m: Int) -> Bool = prim.load64(m + 144) == 1
 
 // After the walk gave up: from now on __rx_find_start runs the VM whose work
-// block is at `w` — or, for a pattern over the VM's state budget (no work
-// block), the walk again without a step budget.
+// block is at `w`. With no work block (`w` 0) it would run the walk again
+// without a step budget; since #4083 every pattern has a program, so a call
+// does not reach that.
 fn __rx_hand_over(m: Int, w: Int) -> Int = {
   prim.store64(m + 120, w)
   prim.store64(m + 144, 0)
@@ -1630,8 +1943,9 @@ fn regex_captures(pat: String, s: String) -> List[String]? = {
 }
 
 // captures again once the walk gave up: on the Pike VM (its groups come back
-// in its found slots), or for a pattern over the VM's state budget on the walk
-// without a step budget (its groups in `bd`).
+// in its found slots), or without a work block on the walk without a step
+// budget (its groups in `bd`; unreached since every pattern has a program,
+// #4083).
 fn __rx_vm_captures(p0: Int, pe: Int, t0: Int, te: Int, ncap: Int, bd: Int, m: Int) -> List[String]? = {
   let prog = __rx_program(p0, pe)
   let work = __rx_work(prim.handle(prog), ncap, t0, te, p0, 1)
