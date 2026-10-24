@@ -108,6 +108,12 @@ pub struct Project {
     /// touch, anchored to [`Project::root`] when relative. `None` (no key) =
     /// every path, as before; `[]` = none.
     pub fs_allow: Option<Vec<String>>,
+    /// `[permissions] native = [...]` (#4093): the dependency packages whose
+    /// native code (`native/`, `[native-deps]`, `@extern(rust|c)` fns) the
+    /// build may compile. A dependency that brings native code and is not
+    /// named here is refused; the root package's own native code needs no
+    /// grant. See `crate::native_grant`.
+    pub native_grants: Vec<String>,
     /// Native Rust crate dependencies added to generated Cargo.toml.
     /// e.g., [("wasmtime", "42.0.0")]
     pub native_deps: Vec<NativeDep>,
@@ -656,7 +662,7 @@ pub const PACKAGE_METADATA_KEYS: &[&str] = &["description", "edition", "license"
 /// The keys one `[dependencies]` entry has.
 pub const DEPENDENCY_KEYS: &[&str] = &["git", "tag", "branch", "version", "path", "subdir"];
 /// The keys `[permissions]` has.
-pub const PERMISSION_KEYS: &[&str] = &["allow", "proc", "fs"];
+pub const PERMISSION_KEYS: &[&str] = &["allow", "proc", "fs", "native"];
 /// The tables a `[target.<platform>]` table may hold (anything else is an
 /// error, not a warning — it was refused before #3382).
 pub const TARGET_PLATFORM_KEYS: &[&str] = &["native-deps"];
@@ -791,6 +797,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
     };
     let permissions = names("allow")?.unwrap_or_default();
     let proc_allow = names("proc")?;
+    let native_grants = names("native")?.unwrap_or_default();
 
     let root = project_root_from_toml_path(path);
     // Relative roots are the project's own directories: anchored to the
@@ -809,6 +816,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
         permissions,
         proc_allow,
         fs_allow,
+        native_grants,
         native_deps,
         root,
     })
