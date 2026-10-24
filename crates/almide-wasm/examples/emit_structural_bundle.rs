@@ -13,7 +13,8 @@
 //!   for every declined frame;
 //! - `call-modes`, the program's call-mode witness (witness_modes.rs);
 //! - `bounds`, the program's bounds witness (witness_bounds.rs, #4005): every
-//!   list access whose check #3345 elided, re-derived from the checks before it;
+//!   `xs[i]` / `b[i]` read and store with the check before it, so the checks
+//!   #3345 elided are re-derived from the checks that were emitted;
 //! - `names`, over the stock-WASI bytes the build writes (`to_wasi` of the
 //!   module): `(module:<space>)` per shared index space, `locals:<fn>` per
 //!   function (cert_project.rs);
@@ -124,8 +125,8 @@ fn produce(rel: &str, text: &str) -> (Vec<Record>, Vec<(String, String)>, Vec<u8
     if let Some((_, w)) = modes.into_iter().find(|(p, _)| *p == pass) {
         records.push(Record { property: "call-modes", function: "(program)".into(), bytes: w });
     }
-    // A pass with no fact-candidate access records no stretch; its witness is
-    // the empty program, which the checker accepts vacuously.
+    // A pass with no index access records no stretch; its witness is the
+    // empty program, which the checker accepts vacuously.
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
     records.push(Record { property: "bounds", function: "(program)".into(), bytes: b });
     // `to_wasi` keeps every defined function's order and moves it by the
