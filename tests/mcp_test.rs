@@ -286,6 +286,76 @@ fn protocol_errors_are_distinguished_from_tool_errors() {
     assert_eq!(responses[3]["result"], json!({}), "ping");
 }
 
+/// The error text of a tool call that must fail.
+fn tool_error(response: &Value) -> String {
+    assert_eq!(response["result"]["isError"], true, "expected a tool error: {}", response);
+    response["result"]["content"][0]["text"].as_str().expect("text content").to_string()
+}
+
+/// #4178: `"path": "--update-snapshots"` reached `almide test` as the flag
+/// and rewrote the failing test's expected snapshot. A tool argument is a
+/// path, never a flag: the call is refused and the file stays byte-identical.
+/// Control: the same tool with a real path runs and reports the mismatch.
+#[test]
+fn a_flag_shaped_test_path_is_refused_and_the_snapshot_is_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = "import testing\ntest \"snap\" { testing.assert_snapshot(\"actual\", \"expected\") }\n";
+    let file = write_temp(dir.path(), "snap_test.almd", source);
+    let responses = mcp_session_in(dir.path(), &[
+        init(),
+        call(2, "almide_test", json!({"path": "--update-snapshots"})),
+        call(3, "almide_test", json!({"path": "--no-check"})),
+        call(4, "almide_test", json!({"path": "snap_test.almd", "run": "--update-snapshots"})),
+        call(5, "almide_test", json!({"path": "snap_test.almd"})),
+    ]);
+    for r in &responses[1..3] {
+        assert!(tool_error(r).contains("never a flag"), "{}", r);
+    }
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), source, "a tool argument rewrote the snapshot");
+    // A flag-shaped `run` filter is the filter's VALUE: no test matches it.
+    let filtered = payload(&responses[3]);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), source, "a `run` filter rewrote the snapshot: {}", filtered);
+    let ran = payload(&responses[4]);
+    assert_eq!(ran["ok"], false, "{}", ran);
+    assert_eq!(ran["files_failed"], 1, "{}", ran);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+}
+
+/// #4178: paths are confined to the project the server serves. `..`, an
+/// absolute path elsewhere, a symlink out of the root and a `cwd` outside it
+/// are all refused before the child runs, so neither a file's first token
+/// nor its existence leaks. Control: a path inside the root is checked.
+#[test]
+fn paths_outside_the_project_root_are_refused() {
+    let outer = tempfile::tempdir().unwrap();
+    let project = outer.path().join("project");
+    let outside = outer.path().join("outside");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let secret = write_temp(&outside, "env.almd", "AWS_SECRET = hunter2\n");
+    write_temp(&project, "ok.almd", "fn add(a: Int, b: Int) -> Int = a + b\n");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, project.join("link")).unwrap();
+    let responses = mcp_session_in(&project, &[
+        init(),
+        call(2, "almide_check", json!({"file": "../outside/env.almd"})),
+        call(3, "almide_check", json!({"file": secret})),
+        call(4, "almide_check", json!({"file": "ok.almd", "cwd": outside.to_string_lossy()})),
+        call(5, "almide_check", json!({"file": "../outside/missing.almd"})),
+        call(6, "almide_fmt_check", json!({"paths": ["ok.almd", "../outside"]})),
+        call(7, "almide_api", json!({"target": "../outside/env.almd"})),
+        call(8, "almide_check", json!({"file": "ok.almd"})),
+        call(9, "almide_check", json!({"file": "link/env.almd"})),
+    ]);
+    for r in responses[1..7].iter().chain(responses.get(8)) {
+        let e = tool_error(r);
+        assert!(e.contains("outside the project root"), "{}", e);
+        assert!(!e.contains("AWS_SECRET") && !e.contains("hunter2"), "the refusal leaked the file: {}", e);
+    }
+    let ok = payload(&responses[7]);
+    assert_eq!(ok["ok"], true, "{}", ok);
+}
+
 /// #4179: `almide_check` is annotated read-only and offline, so its child
 /// resolves dependencies from the cache only: a git dependency that is not
 /// cached is an error, nothing is cloned under `$HOME/.almide/cache`, and
