@@ -195,6 +195,47 @@ pub fn enforce_project_permissions(ir: &almide::ir::IrProgram, proj: &crate::pro
     enforce_proc_allowlist(ir, proj.proc_allow.as_deref())
 }
 
+/// `[permissions] native` (#4093): `Err` with the refusal when a fetched
+/// dependency of `proj` brings native code the manifest does not grant.
+/// With `announce`, a native build names each granted dependency that brings
+/// native code, once per package per process (a test run builds many files).
+pub(crate) fn enforce_native_grants(
+    proj: &crate::project::Project,
+    fetched: &[crate::project::FetchedDep],
+    announce: bool,
+) -> Result<(), String> {
+    let deps = crate::native_grant::survey(proj, fetched);
+    if let Some(refusal) = crate::native_grant::refusal(proj, &deps) {
+        return Err(refusal);
+    }
+    if announce {
+        static ANNOUNCED: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+        let mut seen = ANNOUNCED.lock().unwrap_or_else(|p| p.into_inner());
+        if !seen.contains(&proj.root) {
+            seen.push(proj.root.clone());
+            for line in crate::native_grant::granted_lines(&deps) {
+                err(&line);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// [`enforce_native_grants`] for `./almide.toml`, before a command that
+/// builds runs: print the refusal and exit 1. A manifest that does not parse
+/// or a fetch that fails is left to the command, which reports it.
+pub(crate) fn refuse_ungranted_native_deps_in_cwd() {
+    let Some(proj) = crate::compile_driver::cwd_project() else { return };
+    if proj.dependencies.is_empty() {
+        return;
+    }
+    let Ok(fetched) = crate::project_fetch::fetch_all_deps(&proj) else { return };
+    if let Err(refusal) = enforce_native_grants(&proj, &fetched, false) {
+        err(&refusal);
+        std::process::exit(1);
+    }
+}
+
 pub fn enforce_proc_allowlist(ir: &almide::ir::IrProgram, allow: Option<&[String]>) -> Result<(), String> {
     almide_wasm_run::set_proc_allowlist(allow.map(<[String]>::to_vec));
     match allow {
