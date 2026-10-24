@@ -52,7 +52,8 @@ fn routes(root: &Path) -> Vec<(std::path::PathBuf, Vec<&'static str>)> {
         // The entry file's project, from outside it.
         (elsewhere.clone(), vec!["check", "../proj/src/main.almd"]),
         (elsewhere.clone(), vec!["run", "../proj/src/main.almd"]),
-        (elsewhere, vec!["run", "../proj/src/main.almd", "--target", "wasm"]),
+        (elsewhere.clone(), vec!["run", "../proj/src/main.almd", "--target", "wasm"]),
+        (elsewhere, vec!["../proj/src/main.almd", "--target", "rust"]),
         // `check` judges the module's function.
         (proj.clone(), vec!["check", "src/main.almd"]),
         // Both test lanes.
