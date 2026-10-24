@@ -36,6 +36,7 @@ mod survive_edit;
 mod survive_legs;
 mod docs_gen;
 mod cargo_build;
+pub(crate) mod rustc_floor;
 mod cargo_ice;
 mod cargo_toml;
 mod crate_inputs;
