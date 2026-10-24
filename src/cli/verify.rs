@@ -78,15 +78,16 @@ fn delegate(verifier: &Path, args: &[String]) -> i32 {
     }
 }
 
-/// `[permissions].allow` from `./almide.toml`, when it names any — the same
-/// manifest `almide check` enforces; it makes the caps witness able to reject.
+/// `[permissions].allow` from `./almide.toml`, when the key is written — the
+/// same manifest `almide check` enforces; it makes the caps witness able to
+/// reject. An explicit `allow = []` grants nothing (#4101).
 fn manifest_allow() -> Option<Vec<String>> {
     let path = Path::new("almide.toml");
     if !path.exists() {
         return None;
     }
     let proj = crate::project::parse_toml(path).ok()?;
-    (!proj.permissions.is_empty()).then_some(proj.permissions)
+    proj.permissions
 }
 
 /// What the bundle is pinned to: the shipped file, if one is named or
