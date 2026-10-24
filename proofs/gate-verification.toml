@@ -110,7 +110,7 @@
 # never reach, and a region bug that shows only in the unarmed layout (32 -> 34).
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "33"
+# uncompensated_blind_ceiling = "36"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
