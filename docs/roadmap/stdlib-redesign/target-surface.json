@@ -7966,6 +7966,14 @@
 "to": "`int.from`"
 },
 {
+"name": "to_int_checked",
+"to": "`int.from_checked`"
+},
+{
+"name": "to_int_saturating",
+"to": "`int.from_saturating`"
+},
+{
 "name": "from_int",
 "to": "`int.to_float` と同じ"
 },
