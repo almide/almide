@@ -1072,6 +1072,28 @@ declaration: `Option[Option[T]]` (indistinguishable on the wire), `Option[Value]
 outside field position, and non-wire leaves (Map, Bytes, tuples, sized ints,
 fn types, Result) — wrap those in a named Codec type or convert at the boundary.
 
+**Secrets: `Secret[A]` (`import secret`).** Every value prints structurally
+unless its type declares a repr, so a password in a plain `String` field
+shows up in `"${user}"`, in an `assert_eq` failure and in the `almide test`
+report. Hold it as `Secret[String]`: every renderer prints `Secret(***)`,
+`secret.reveal(s)` is the one way out, `==` on `Secret[String]` /
+`Secret[Bytes]` is constant time (any other `Secret` has no `==`, E103), and a
+`: Codec` record with a Secret field derives `decode` only — `T.encode` is
+E023, so build an outgoing Value by hand with `secret.reveal`.
+
+```almide check
+import json
+import secret
+
+type LoginInput: Codec = { user: String, password: Secret[String] }
+
+effect fn main() -> Unit = {
+  let input = LoginInput.decode(json.parse("{\"user\":\"ana\",\"password\":\"hunter2\"}")!)!
+  println("${input}")   // LoginInput { user: "ana", password: Secret(***) }
+  println(if input.password == secret.new("hunter2") then "ok" else "denied")
+}
+```
+
 ## Verifying a webhook signature (HMAC)
 
 `import hash`. Verify with the `is_valid_` cell, key first: it computes
