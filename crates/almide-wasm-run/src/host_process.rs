@@ -79,6 +79,28 @@ fn head_and_args(b: &str) -> Result<(String, Vec<String>), String> {
     Ok((head, all))
 }
 
+/// The core's signal syscall (#4125): kill(2) through rustix (safe), never a
+/// `kill` looked up on PATH. The core has already refused pid <= 0 and a
+/// signal outside 0..=31.
+#[cfg(unix)]
+fn signal(pid: i32, sig: i32) -> Result<(), i32> {
+    let Some(pid) = rustix::process::Pid::from_raw(pid) else { return Err(3) };
+    let r = if sig == 0 {
+        rustix::process::test_kill_process(pid)
+    } else {
+        // from_named_raw answers None for a number that is not a named signal.
+        match rustix::process::Signal::from_named_raw(sig) {
+            Some(s) => rustix::process::kill_process(pid, s),
+            None => return Err(22),
+        }
+    };
+    r.map_err(|e| e.raw_os_error())
+}
+#[cfg(windows)]
+fn signal(pid: i32, sig: i32) -> Result<(), i32> {
+    almide_rt_core::process_core::almide_proc_signal_windows(pid, sig)
+}
+
 /// Serve one operation. `flush` runs before a child that shares this
 /// program's stdout starts (run / run_in), as native flushes its own.
 pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String, String> {
@@ -118,12 +140,19 @@ pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String
             core::almide_proc_spawn(a, &cells(b)?).map(|p| p.to_string())
         }
         87 => {
+            // #4125: signalling is bounded by `[permissions] proc` as the
+            // `kill` command it used to run (src/cli/mod.rs PROC_SIGNALLING).
+            allowed("process.kill", "kill")?;
             let num = |s: &str| s.parse::<i64>().map_err(|_| format!("malformed process operand `{s}`"));
-            core::almide_proc_kill(num(a)?, num(b)?).map(|()| String::new())
+            core::almide_proc_kill(num(a)?, num(b)?, signal).map(|()| String::new())
         }
         88 => {
             let pid = a.parse::<i64>().map_err(|_| format!("malformed process operand `{a}`"))?;
-            Ok(if core::almide_proc_is_alive(pid) { "1" } else { "0" }.to_string())
+            // is_alive answers a Bool: outside the bound it is never alive.
+            if allowed("process.is_alive", "kill").is_err() {
+                return Ok("0".to_string());
+            }
+            Ok(if core::almide_proc_is_alive(pid, signal) { "1" } else { "0" }.to_string())
         }
         89 => Ok(std::process::id().to_string()),
         90 => {
