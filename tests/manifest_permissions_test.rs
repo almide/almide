@@ -201,3 +201,40 @@ fn a_manifest_that_is_not_toml_is_refused_on_its_line() {
     assert!(stderr.contains("almide.toml:8:") && stderr.contains("almide.toml is read as TOML"), "{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #4101: an explicit `allow = []` allows NO capability. It used to read the
+/// same as an absent key, "every capability", so a manifest written to lock a
+/// program down granted it everything without a word. An absent key (or no
+/// `[permissions]` table) stays unchecked.
+#[test]
+fn an_explicit_empty_allow_denies_every_capability() {
+    let dir = project("empty-allow", "");
+    for args in [&["check", "main.almd"][..], &["check", "--effects", "main.almd"][..], &["build", "main.almd", "--target", "wasm", "-o", "out.wasm"][..], &["run", "main.almd"][..]] {
+        let (ok, stderr) = almide(&dir, args);
+        assert!(!ok, "`almide {}` ran a file read under allow = []:\n{stderr}", args.join(" "));
+        assert!(
+            stderr.contains("capability violation") && stderr.contains("IO is not in [permissions].allow"),
+            "`almide {}` should refuse IO by the permission error:\n{stderr}",
+            args.join(" ")
+        );
+    }
+    // A pure program passes the same manifest.
+    std::fs::write(dir.join("main.almd"), "fn main() -> Unit = println(int.to_string(1 + 2))\n").unwrap();
+    let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
+    assert!(ok, "a pure program was refused under allow = []:\n{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_absent_allow_stays_unchecked() {
+    for (tag, manifest) in [
+        ("no-table", "[package]\nname = \"permfx\"\nversion = \"0.1.0\"\n"),
+        ("no-key", "[package]\nname = \"permfx\"\nversion = \"0.1.0\"\n\n[permissions]\nproc = []\n"),
+    ] {
+        let dir = project(tag, "");
+        std::fs::write(dir.join("almide.toml"), manifest).unwrap();
+        let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
+        assert!(ok, "{tag}: an absent `allow` refused a file read:\n{stderr}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
