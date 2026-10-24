@@ -357,8 +357,10 @@ Attribute names with semantic meaning today:
 authority, not just by convention (#2152): the checker accepts them in the
 stdlib's own sources — the bundled stdlib copy, or a file under `stdlib/`
 whose text is exactly the embedded source of its name (#4100: identity, not
-layout; a package that copies the `stdlib/` layout is not the stdlib) — and
-rejects them anywhere else with
+layout; a package that copies the `stdlib/` layout is not the stdlib), or any
+source under a directory the invoker names with `--stdlib-authority <dir>` (a
+command-line flag for harnesses that build a modified stdlib copy; no manifest
+key or environment variable can grant it) — and rejects them anywhere else with
 E085 ("intrinsics live in the stdlib; wrap in an effect fn"). The `prim`
 module (the primitive floor the stdlib is written over) is held to the same
 authority (#3025): `prim.<fn>` and `import prim` outside the stdlib are E085,

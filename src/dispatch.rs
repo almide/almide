@@ -713,6 +713,12 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
         // SAFETY: single-threaded at this point (process entry, pre-dispatch).
         unsafe { std::env::set_var("ALMIDE_VERBOSE", "1") };
     }
+    for dir in &cli.stdlib_authority {
+        if let Err(e) = almide::check::grant_stdlib_authority(dir) {
+            err(&format!("error: {e}"));
+            std::process::exit(2);
+        }
+    }
     let command = match cli.command {
         Some(cmd) => cmd,
         None => {

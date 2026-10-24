@@ -19,6 +19,11 @@ pub(crate) struct Cli {
     /// Show internal pipeline notes (e.g. which codegen path built the binary)
     #[arg(short = 'v', long = "verbose", global = true)]
     pub(crate) verbose: bool,
+    /// Treat every .almd source under DIR as the standard library's own (E085
+    /// authority) — for a harness that builds a modified copy of a stdlib
+    /// source. A flag only: a dependency cannot grant it
+    #[arg(long = "stdlib-authority", value_name = "DIR", global = true, hide = true)]
+    pub(crate) stdlib_authority: Vec<std::path::PathBuf>,
 }
 
 #[derive(Subcommand)]

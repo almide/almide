@@ -425,8 +425,9 @@ fn run(dir: &Path, args: &[&str]) -> String {
 /// The self-hosted engine with its entry points renamed `rxt_*` and the
 /// walk's step budget fixed at `budget` (0 = every call goes to the Pike VM,
 /// -1 = the walk answers every call). The file is checked as the stdlib's own
-/// (a `regex_engine.almd` in a directory named `stdlib`), which is what lets it
-/// use the `prim` floor outside the bundle.
+/// because the run passes `--stdlib-authority` for its directory, which is
+/// what lets it use the `prim` floor outside the bundle (#4100: a `stdlib/`
+/// layout alone no longer grants that).
 fn engine_copy(budget: &str) -> String {
     let src = std::fs::read_to_string(repo().join("stdlib/regex_engine.almd")).expect("engine source");
     let line = "prim.store64(m + 136, 4 * (pe - pat0 + 1) * (te - ts + 1))";
@@ -482,7 +483,9 @@ fn nested_groups_agree_native_and_wasm() {
         std::fs::create_dir_all(&sub).expect("mkdir");
         let copy = sub.join("regex_engine.almd");
         std::fs::write(&copy, format!("{}\n{}", engine_copy(budget), body.replace("NS_", "rxt_"))).expect("write");
-        let wasm = run(dir.path(), &["run", copy.to_str().expect("path"), "--target", "wasm"]);
+        // The copy is modified, so its text is not the embedded engine's:
+        // the invoker grants it stdlib authority explicitly (#4100).
+        let wasm = run(dir.path(), &["run", copy.to_str().expect("path"), "--target", "wasm", "--stdlib-authority", sub.to_str().expect("path")]);
         if native != wasm {
             let first = native
                 .lines()
@@ -495,4 +498,30 @@ fn nested_groups_agree_native_and_wasm() {
         }
     }
     assert!(native.lines().count() >= calls.len(), "the program printed less than it asked");
+}
+
+/// The negative control for the grant above: the same modified copy without
+/// `--stdlib-authority` is refused (E085), so the authority comes from the
+/// invoker's flag and not from the `stdlib/` layout a dependency could copy.
+#[test]
+fn a_modified_stdlib_copy_without_the_flag_is_refused() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sub = dir.path().join("vm/stdlib");
+    std::fs::create_dir_all(&sub).expect("mkdir");
+    let copy = sub.join("regex_engine.almd");
+    std::fs::write(&copy, engine_copy("0")).expect("write");
+    let bin = std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string());
+    let check = |extra: &[&str]| {
+        std::process::Command::new(&bin)
+            .args(["check", copy.to_str().expect("path")])
+            .args(extra)
+            .current_dir(dir.path())
+            .output()
+            .expect("spawn almide")
+    };
+    let refused = check(&[]);
+    let stderr = String::from_utf8_lossy(&refused.stderr);
+    assert!(!refused.status.success() && stderr.contains("E085"), "a modified stdlib copy passed without the flag:\n{stderr}");
+    let granted = check(&["--stdlib-authority", sub.to_str().expect("path")]);
+    assert!(granted.status.success(), "the granted copy was refused:\n{}", String::from_utf8_lossy(&granted.stderr));
 }
