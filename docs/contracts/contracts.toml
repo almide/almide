@@ -4953,6 +4953,7 @@ since     = "0.67.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/bytes_rawptr.almd", class = "fixture" },
+  { path = "spec/wasm_cross/ffi_address_var_rebind.almd", class = "fixture" },
 ]
 [[contract]]
 id        = "C-377"
