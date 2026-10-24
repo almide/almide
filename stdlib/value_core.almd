@@ -206,10 +206,11 @@ fn __vobj_key_at(pairs: List[(String, Value)], i: Int) -> String = match list.ge
   none => "",
 }
 
-fn __vobj_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool = if i >= n then false
-else if j >= n then __vobj_dup_small(pairs, i + 1, i + 2, n)
-else if __vobj_key_at(pairs, i) == __vobj_key_at(pairs, j) then true
-else __vobj_dup_small(pairs, i, j + 1, n)
+fn __vobj_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool =
+  if i >= n then false
+  else if j >= n then __vobj_dup_small(pairs, i + 1, i + 2, n)
+  else if __vobj_key_at(pairs, i) == __vobj_key_at(pairs, j) then true
+  else __vobj_dup_small(pairs, i, j + 1, n)
 
 fn __vobj_has_dup(pairs: List[(String, Value)]) -> Bool = {
   let n = list.len(pairs)
@@ -247,8 +248,9 @@ fn __vobj_upsert(pairs: List[(String, Value)]) -> List[(String, Value)] = {
   list.zip(keys, vals)
 }
 
-fn value_object(pairs: List[(String, Value)]) -> Value = if list.len(pairs) > 1 and __vobj_has_dup(pairs) then __vobj_build(__vobj_upsert(pairs))
-else __vobj_build(pairs)
+fn value_object(pairs: List[(String, Value)]) -> Value =
+  if list.len(pairs) > 1 and __vobj_has_dup(pairs) then __vobj_build(__vobj_upsert(pairs))
+  else __vobj_build(pairs)
 
 fn __vobj_build(pairs: List[(String, Value)]) -> Value = {
   let ph = prim.handle(pairs)

@@ -11330,7 +11330,10 @@ fn __bad_escape(path: String) -> Bool = string.split(path, "%") |> list.drop(1) 
 
 
 fn __encodes_unreserved(p: String) -> Bool = match url.decode_component("%" + string.take(p, 2)) {
-  ok(c) => string.len(c) == 1 and string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~", c),
+  ok(c) => string.len(c) == 1 and string.contains(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~",
+    c,
+  ),
   err(_) => false,
 }
 
@@ -11348,7 +11351,10 @@ fn __canonical(path: String) -> Bool = {
 
 
 
-fn __param_bad(v: String) -> Bool = v == "." or v == ".." or string.contains(v, "/") or string.contains(v, "\\") or string.contains(v, "\u{0}")
+fn __param_bad(v: String) -> Bool = v == "." or v == ".." or string.contains(v, "/") or string.contains(
+  v,
+  "\\",
+) or string.contains(v, "\u{0}")
 
 fn __bad_binding(segs: List[String], parts: List[String]) -> Bool = {
   let fixed = segs |> list.take_while((s) => not __is_rest(s))
@@ -12156,8 +12162,9 @@ fn __hs_owned(k: String) -> Bool = list.contains(
 
 
 
-fn __hs_nosniff(pairs: List[(String, String)]) -> List[(String, String)] = if pairs |> list.any(((k, _)) => string.to_lower(k) == "x-content-type-options") then pairs
-else pairs + [("X-Content-Type-Options", "nosniff")]
+fn __hs_nosniff(pairs: List[(String, String)]) -> List[(String, String)] =
+  if pairs |> list.any(((k, _)) => string.to_lower(k) == "x-content-type-options") then pairs
+  else pairs + [("X-Content-Type-Options", "nosniff")]
 
 fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_nosniff(__hs_pairs(resp) |> list.filter(((k, _)) => not __hs_owned(k))) |> list.flat_map(((k, v)) => [k, v]))
 
@@ -12175,6 +12182,7 @@ fn __hs_request_id(raw: List[String]) -> String = string.pad_start(
   8,
   "0",
 )
+
 
 
 
@@ -15256,7 +15264,8 @@ fn json_parse(text: String) -> Result[Value, String] = {
     ok(r) => {
       let (v, p) = r
       let q = __jp_ws(h + 12, blen, p)
-      if q < blen then err(__jp_at("json: trailing data", h + 12, q)) else ok(v)
+      if q < blen then err(__jp_at("json: trailing data", h + 12, q))
+      else ok(v)
     },
     err(e) => err(e),
   }
@@ -15301,7 +15310,8 @@ fn __jp_at(what: String, base: Int, p: Int) -> String = what + " at pos " + int.
 fn __jp_ws(base: Int, len: Int, p: Int) -> Int = if p >= len then p
 else {
   let b = prim.load8(base + p)
-  if b == 32 or b == 9 or b == 10 or b == 13 then __jp_ws(base, len, p + 1) else p
+  if b == 32 or b == 9 or b == 10 or b == 13 then __jp_ws(base, len, p + 1)
+  else p
 }
 
 
@@ -15393,34 +15403,48 @@ fn __jp_str_err(base: Int, code: Int) -> String = {
 
 
 
-fn __jp_str_check(base: Int, len: Int, p: Int, n: Int, open: Int) -> Int = if p >= len then __jp_str_fail(open, 0)
-else {
-  let b = prim.load8(base + p)
-  if b == 34 then n
-  else if b < 32 then __jp_str_fail(p, 1)
-  else if b == 92 then {
-    if p + 1 >= len then __jp_str_fail(open, 0)
-    else {
-      let e = prim.load8(base + p + 1)
-      if e == 34 or e == 92 or e == 47 or e == 98 or e == 102 or e == 110 or e == 114 or e == 116 then __jp_str_check(base, len, p + 2, n + 1, open)
-      else if e == 117 then __jp_str_check_u(base, len, p, n, open)
-      else __jp_str_fail(p, 2)
-    }
-  } else if b >= 239 then {
-    let (cp, l) = __jp_cp(base, p)
-    if __jp_nonchar(cp) then __jp_str_fail(p, 5) else __jp_str_check(base, len, p + l, n + l, open)
-  } else __jp_str_check(base, len, p + 1, n + 1, open)
-}
+fn __jp_str_check(base: Int, len: Int, p: Int, n: Int, open: Int) -> Int =
+  if p >= len then __jp_str_fail(open, 0)
+  else {
+    let b = prim.load8(base + p)
+    if b == 34 then n
+    else if b < 32 then __jp_str_fail(p, 1)
+    else if b == 92 then {
+      if p + 1 >= len then __jp_str_fail(open, 0)
+      else {
+        let e = prim.load8(base + p + 1)
+        if e == 34 or e == 92 or e == 47 or e == 98 or e == 102 or e == 110 or e == 114 or e == 116 then __jp_str_check(
+          base,
+          len,
+          p + 2,
+          n + 1,
+          open,
+        )
+        else if e == 117 then __jp_str_check_u(base, len, p, n, open)
+        else __jp_str_fail(p, 2)
+      }
+    } else if b >= 239 then {
+      let (cp, l) = __jp_cp(base, p)
+      if __jp_nonchar(cp) then __jp_str_fail(p, 5)
+      else __jp_str_check(base, len, p + l, n + l, open)
+    } else __jp_str_check(base, len, p + 1, n + 1, open)
+  }
 
 
 fn __jp_str_check_u(base: Int, len: Int, p: Int, n: Int, open: Int) -> Int = {
   let unit = __jp_hex4(base, len, p + 2)
   if unit < 0 then __jp_str_fail(p, 3)
   else if unit >= 55296 and unit <= 56319 then {
-    let lo = if p + 7 < len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then __jp_hex4(base, len, p + 8) else 0 - 1
+    let lo = if p + 7 < len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then __jp_hex4(
+      base,
+      len,
+      p + 8,
+    )
+    else 0 - 1
     if lo >= 56320 and lo <= 57343 then {
       let cp = 65536 + (unit - 55296) * 1024 + (lo - 56320)
-      if __jp_nonchar(cp) then __jp_str_fail(p, 5) else __jp_str_check(base, len, p + 12, n + 4, open)
+      if __jp_nonchar(cp) then __jp_str_fail(p, 5)
+      else __jp_str_check(base, len, p + 12, n + 4, open)
     } else __jp_str_fail(p, 4)
   } else if unit >= 56320 and unit <= 57343 then __jp_str_fail(p, 4)
   else if __jp_nonchar(unit) then __jp_str_fail(p, 5)
@@ -15525,7 +15549,12 @@ fn __jp_digits(base: Int, len: Int, p: Int) -> Int =
 fn __jp_numrun(base: Int, len: Int, p: Int) -> Int = if p >= len then p
 else {
   let b = prim.load8(base + p)
-  if (b >= 48 and b <= 57) or b == 43 or b == 45 or b == 46 or b == 101 or b == 69 then __jp_numrun(base, len, p + 1) else p
+  if (b >= 48 and b <= 57) or b == 43 or b == 45 or b == 46 or b == 101 or b == 69 then __jp_numrun(
+    base,
+    len,
+    p + 1,
+  )
+  else p
 }
 
 
@@ -15537,7 +15566,8 @@ fn __jp_num_end(base: Int, end: Int, p: Int) -> Int = {
   else if prim.load8(base + p1) == 48 and p2 > p1 + 1 then 0 - 1
   else {
     let has_frac = p2 < end and prim.load8(base + p2) == 46
-    let p3 = if has_frac then __jp_digits(base, end, p2 + 1) else p2
+    let p3 = if has_frac then __jp_digits(base, end, p2 + 1)
+    else p2
     if has_frac and p3 == p2 + 1 then 0 - 1
     else {
       let eb = if p3 < end then prim.load8(base + p3) else 0
@@ -43033,11 +43063,13 @@ fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) =>
 
 fn __url_cp(c: String) -> Int = string.codepoint(c) ?? 0
 
-fn __url_first_kept(cs: List[String], i: Int) -> Int = if i < list.len(cs) and __url_cp(list.get(cs, i) ?? "") <= 32 then __url_first_kept(cs, i + 1)
-else i
+fn __url_first_kept(cs: List[String], i: Int) -> Int =
+  if i < list.len(cs) and __url_cp(list.get(cs, i) ?? "") <= 32 then __url_first_kept(cs, i + 1)
+  else i
 
-fn __url_last_kept(cs: List[String], i: Int) -> Int = if i > 0 and __url_cp(list.get(cs, i - 1) ?? "") <= 32 then __url_last_kept(cs, i - 1)
-else i
+fn __url_last_kept(cs: List[String], i: Int) -> Int =
+  if i > 0 and __url_cp(list.get(cs, i - 1) ?? "") <= 32 then __url_last_kept(cs, i - 1)
+  else i
 
 fn __url_clean(s: String, who: String) -> Result[String, String] = {
   let cs = string.chars(s)
@@ -43067,14 +43099,18 @@ fn __url_hex_digit(c: String) -> Bool = match __url_hex_val(c) {
 fn __url_ends_in_number(host: String) -> Bool = {
   let labels = string.split(host, ".")
   let n = list.len(labels)
-  let last = if n > 1 and (list.get(labels, n - 1) ?? "") == "" then list.get(labels, n - 2) ?? "" else list.get(labels, n - 1) ?? ""
+  let last = if n > 1 and (list.get(labels, n - 1) ?? "") == "" then list.get(labels, n - 2) ?? ""
+  else list.get(labels, n - 1) ?? ""
   __url_all_digits(last) or ((string.starts_with(last, "0x") or string.starts_with(last, "0X")) and string.chars(string.drop(last, 2)) |> list.all((c) => __url_hex_digit(c)))
 }
 
 
 fn __url_canonical_ipv4(host: String) -> Bool = {
   let labels = string.split(host, ".")
-  list.len(labels) == 4 and labels |> list.all((l) => __url_all_digits(l) and string.len(l) <= 3 and (string.len(l) == 1 or not string.starts_with(l, "0")) and (int.parse(l) ?? 256) <= 255)
+  list.len(labels) == 4 and labels |> list.all((l) => __url_all_digits(l) and string.len(l) <= 3 and (string.len(l) == 1 or not string.starts_with(
+    l,
+    "0",
+  )) and (int.parse(l) ?? 256) <= 255)
 }
 
 
@@ -43091,17 +43127,19 @@ fn __url_dot_kind(seg: String) -> Int = match string.to_lower(seg) {
 
 
 
-fn __url_dots_go(segs: List[String], i: Int, n: Int, out: List[String]) -> List[String] = if i >= n then out
-else {
-  let seg = list.get(segs, i) ?? ""
-  let last = i + 1 == n
-  let kind = __url_dot_kind(seg)
-  let kept = if kind == 2 and list.len(out) > 0 then list.take(out, list.len(out) - 1)
-  else out
-  let next = if kind == 0 then kept + [seg]
-  else if last then kept + [""] else kept
-  __url_dots_go(segs, i + 1, n, next)
-}
+fn __url_dots_go(segs: List[String], i: Int, n: Int, out: List[String]) -> List[String] =
+  if i >= n then out
+  else {
+    let seg = list.get(segs, i) ?? ""
+    let last = i + 1 == n
+    let kind = __url_dot_kind(seg)
+    let kept = if kind == 2 and list.len(out) > 0 then list.take(out, list.len(out) - 1)
+    else out
+    let next = if kind == 0 then kept + [seg]
+    else if last then kept + [""]
+    else kept
+    __url_dots_go(segs, i + 1, n, next)
+  }
 
 fn __url_remove_dots(path: String) -> String = if string.len(path) == 0 then ""
 else {
@@ -43145,7 +43183,10 @@ fn __url_parse_clean(s: String) -> Result[Url, String] = match string.index_of(s
   none => err("url.parse: missing '://' scheme separator"),
   some(i) => {
     if i == 0 then err("url.parse: empty scheme")
-    else if not __url_scheme_ok(string.take(s, i)) then err("url.parse: invalid scheme: " + string.take(s, i))
+    else if not __url_scheme_ok(string.take(s, i)) then err("url.parse: invalid scheme: " + string.take(
+      s,
+      i,
+    ))
     else if string.slice(s, i + 1, i + 3) != "//" then err("url.parse: missing '://' scheme separator")
     else {
       let scheme = string.to_lower(string.take(s, i))
@@ -43632,10 +43673,11 @@ fn __vobj_key_at(pairs: List[(String, Value)], i: Int) -> String = match list.ge
   none => "",
 }
 
-fn __vobj_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool = if i >= n then false
-else if j >= n then __vobj_dup_small(pairs, i + 1, i + 2, n)
-else if __vobj_key_at(pairs, i) == __vobj_key_at(pairs, j) then true
-else __vobj_dup_small(pairs, i, j + 1, n)
+fn __vobj_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool =
+  if i >= n then false
+  else if j >= n then __vobj_dup_small(pairs, i + 1, i + 2, n)
+  else if __vobj_key_at(pairs, i) == __vobj_key_at(pairs, j) then true
+  else __vobj_dup_small(pairs, i, j + 1, n)
 
 fn __vobj_has_dup(pairs: List[(String, Value)]) -> Bool = {
   let n = list.len(pairs)
@@ -43673,8 +43715,9 @@ fn __vobj_upsert(pairs: List[(String, Value)]) -> List[(String, Value)] = {
   list.zip(keys, vals)
 }
 
-fn value_object(pairs: List[(String, Value)]) -> Value = if list.len(pairs) > 1 and __vobj_has_dup(pairs) then __vobj_build(__vobj_upsert(pairs))
-else __vobj_build(pairs)
+fn value_object(pairs: List[(String, Value)]) -> Value =
+  if list.len(pairs) > 1 and __vobj_has_dup(pairs) then __vobj_build(__vobj_upsert(pairs))
+  else __vobj_build(pairs)
 
 fn __vobj_build(pairs: List[(String, Value)]) -> Value = {
   let ph = prim.handle(pairs)
@@ -45072,10 +45115,11 @@ fn __vu_ren_s(v: Value) -> Value = {
 
 
 
-fn __vu_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool = if i >= n then false
-else if j >= n then __vu_dup_small(pairs, i + 1, i + 2, n)
-else if __vu_key_at(pairs, i) == __vu_key_at(pairs, j) then true
-else __vu_dup_small(pairs, i, j + 1, n)
+fn __vu_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool =
+  if i >= n then false
+  else if j >= n then __vu_dup_small(pairs, i + 1, i + 2, n)
+  else if __vu_key_at(pairs, i) == __vu_key_at(pairs, j) then true
+  else __vu_dup_small(pairs, i, j + 1, n)
 
 fn __vu_key_at(pairs: List[(String, Value)], i: Int) -> String = match list.get(pairs, i) {
   some((k, _)) => k,
@@ -45099,25 +45143,26 @@ fn __vu_has_dup(pairs: List[(String, Value)]) -> Bool = {
   }
 }
 
-fn __vu_fold_pairs(pairs: List[(String, Value)]) -> List[(String, Value)] = if list.len(pairs) < 2 or not __vu_has_dup(pairs) then pairs
-else {
-  var at: Map[String, Int] = map.new()
-  var keys: List[String] = []
-  var vals: List[Value] = []
-  for (k, v) in pairs {
-    match map.get(at, k) {
-      some(i) => {
-        vals = list.set(vals, i, v)
-      },
-      none => {
-        map.insert(at, k, list.len(keys))
-        list.push(keys, k)
-        list.push(vals, v)
-      },
+fn __vu_fold_pairs(pairs: List[(String, Value)]) -> List[(String, Value)] =
+  if list.len(pairs) < 2 or not __vu_has_dup(pairs) then pairs
+  else {
+    var at: Map[String, Int] = map.new()
+    var keys: List[String] = []
+    var vals: List[Value] = []
+    for (k, v) in pairs {
+      match map.get(at, k) {
+        some(i) => {
+          vals = list.set(vals, i, v)
+        },
+        none => {
+          map.insert(at, k, list.len(keys))
+          list.push(keys, k)
+          list.push(vals, v)
+        },
+      }
     }
+    list.zip(keys, vals)
   }
-  list.zip(keys, vals)
-}
 
 
 

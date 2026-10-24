@@ -89,8 +89,9 @@ fn __hs_owned(k: String) -> Bool = list.contains(
 
 // The core's secure default (C-407): `X-Content-Type-Options: nosniff` is
 // added unless the handler set the field.
-fn __hs_nosniff(pairs: List[(String, String)]) -> List[(String, String)] = if pairs |> list.any(((k, _)) => string.to_lower(k) == "x-content-type-options") then pairs
-else pairs + [("X-Content-Type-Options", "nosniff")]
+fn __hs_nosniff(pairs: List[(String, String)]) -> List[(String, String)] =
+  if pairs |> list.any(((k, _)) => string.to_lower(k) == "x-content-type-options") then pairs
+  else pairs + [("X-Content-Type-Options", "nosniff")]
 
 fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_nosniff(__hs_pairs(resp) |> list.filter(((k, _)) => not __hs_owned(k))) |> list.flat_map(((k, v)) => [k, v]))
 
@@ -108,6 +109,7 @@ fn __hs_request_id(raw: List[String]) -> String = string.pad_start(
   8,
   "0",
 )
+
 // `http.serve` is typed never-err (`-> Unit`), so its caller's `!` is a no-op
 // (#1049) and nothing could observe a returned err: a bind failure ABORTS,
 // `Error: bind failed: <os message>` and exit 1, as the native runtime does.

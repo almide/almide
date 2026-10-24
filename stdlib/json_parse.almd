@@ -41,7 +41,8 @@ fn json_parse(text: String) -> Result[Value, String] = {
     ok(r) => {
       let (v, p) = r
       let q = __jp_ws(h + 12, blen, p)
-      if q < blen then err(__jp_at("json: trailing data", h + 12, q)) else ok(v)
+      if q < blen then err(__jp_at("json: trailing data", h + 12, q))
+      else ok(v)
     },
     err(e) => err(e),
   }
@@ -86,7 +87,8 @@ fn __jp_at(what: String, base: Int, p: Int) -> String = what + " at pos " + int.
 fn __jp_ws(base: Int, len: Int, p: Int) -> Int = if p >= len then p
 else {
   let b = prim.load8(base + p)
-  if b == 32 or b == 9 or b == 10 or b == 13 then __jp_ws(base, len, p + 1) else p
+  if b == 32 or b == 9 or b == 10 or b == 13 then __jp_ws(base, len, p + 1)
+  else p
 }
 
 // I-JSON §2.1: U+FDD0..U+FDEF and every U+xFFFE / U+xFFFF.
@@ -178,34 +180,48 @@ fn __jp_str_err(base: Int, code: Int) -> String = {
 // whose opening quote is at `open`, or a refusal (__jp_str_fail). Per branch:
 // a simple escape consumes 2 and writes 1; a \uXXXX consumes 6 and writes at
 // most 3; a surrogate pair consumes 12 and writes 4; a plain byte is 1 for 1.
-fn __jp_str_check(base: Int, len: Int, p: Int, n: Int, open: Int) -> Int = if p >= len then __jp_str_fail(open, 0)
-else {
-  let b = prim.load8(base + p)
-  if b == 34 then n
-  else if b < 32 then __jp_str_fail(p, 1)
-  else if b == 92 then {
-    if p + 1 >= len then __jp_str_fail(open, 0)
-    else {
-      let e = prim.load8(base + p + 1)
-      if e == 34 or e == 92 or e == 47 or e == 98 or e == 102 or e == 110 or e == 114 or e == 116 then __jp_str_check(base, len, p + 2, n + 1, open)
-      else if e == 117 then __jp_str_check_u(base, len, p, n, open)
-      else __jp_str_fail(p, 2)
-    }
-  } else if b >= 239 then {
-    let (cp, l) = __jp_cp(base, p)
-    if __jp_nonchar(cp) then __jp_str_fail(p, 5) else __jp_str_check(base, len, p + l, n + l, open)
-  } else __jp_str_check(base, len, p + 1, n + 1, open)
-}
+fn __jp_str_check(base: Int, len: Int, p: Int, n: Int, open: Int) -> Int =
+  if p >= len then __jp_str_fail(open, 0)
+  else {
+    let b = prim.load8(base + p)
+    if b == 34 then n
+    else if b < 32 then __jp_str_fail(p, 1)
+    else if b == 92 then {
+      if p + 1 >= len then __jp_str_fail(open, 0)
+      else {
+        let e = prim.load8(base + p + 1)
+        if e == 34 or e == 92 or e == 47 or e == 98 or e == 102 or e == 110 or e == 114 or e == 116 then __jp_str_check(
+          base,
+          len,
+          p + 2,
+          n + 1,
+          open,
+        )
+        else if e == 117 then __jp_str_check_u(base, len, p, n, open)
+        else __jp_str_fail(p, 2)
+      }
+    } else if b >= 239 then {
+      let (cp, l) = __jp_cp(base, p)
+      if __jp_nonchar(cp) then __jp_str_fail(p, 5)
+      else __jp_str_check(base, len, p + l, n + l, open)
+    } else __jp_str_check(base, len, p + 1, n + 1, open)
+  }
 
 // \uXXXX at p (p = the backslash).
 fn __jp_str_check_u(base: Int, len: Int, p: Int, n: Int, open: Int) -> Int = {
   let unit = __jp_hex4(base, len, p + 2)
   if unit < 0 then __jp_str_fail(p, 3)
   else if unit >= 55296 and unit <= 56319 then {
-    let lo = if p + 7 < len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then __jp_hex4(base, len, p + 8) else 0 - 1
+    let lo = if p + 7 < len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then __jp_hex4(
+      base,
+      len,
+      p + 8,
+    )
+    else 0 - 1
     if lo >= 56320 and lo <= 57343 then {
       let cp = 65536 + (unit - 55296) * 1024 + (lo - 56320)
-      if __jp_nonchar(cp) then __jp_str_fail(p, 5) else __jp_str_check(base, len, p + 12, n + 4, open)
+      if __jp_nonchar(cp) then __jp_str_fail(p, 5)
+      else __jp_str_check(base, len, p + 12, n + 4, open)
     } else __jp_str_fail(p, 4)
   } else if unit >= 56320 and unit <= 57343 then __jp_str_fail(p, 4)
   else if __jp_nonchar(unit) then __jp_str_fail(p, 5)
@@ -310,7 +326,12 @@ fn __jp_digits(base: Int, len: Int, p: Int) -> Int =
 fn __jp_numrun(base: Int, len: Int, p: Int) -> Int = if p >= len then p
 else {
   let b = prim.load8(base + p)
-  if (b >= 48 and b <= 57) or b == 43 or b == 45 or b == 46 or b == 101 or b == 69 then __jp_numrun(base, len, p + 1) else p
+  if (b >= 48 and b <= 57) or b == 43 or b == 45 or b == 46 or b == 101 or b == 69 then __jp_numrun(
+    base,
+    len,
+    p + 1,
+  )
+  else p
 }
 
 // End of the RFC 8259 number that starts at p and ends by `end`, or -1 when
@@ -322,7 +343,8 @@ fn __jp_num_end(base: Int, end: Int, p: Int) -> Int = {
   else if prim.load8(base + p1) == 48 and p2 > p1 + 1 then 0 - 1
   else {
     let has_frac = p2 < end and prim.load8(base + p2) == 46
-    let p3 = if has_frac then __jp_digits(base, end, p2 + 1) else p2
+    let p3 = if has_frac then __jp_digits(base, end, p2 + 1)
+    else p2
     if has_frac and p3 == p2 + 1 then 0 - 1
     else {
       let eb = if p3 < end then prim.load8(base + p3) else 0

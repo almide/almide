@@ -183,10 +183,11 @@ fn __vu_ren_s(v: Value) -> Value = {
 // the list this returns, so a pair list that repeats a key becomes one entry
 // per key — its first position, its last value — exactly as native's
 // almide_rt_object_upsert and value_core's value_object fold it.
-fn __vu_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool = if i >= n then false
-else if j >= n then __vu_dup_small(pairs, i + 1, i + 2, n)
-else if __vu_key_at(pairs, i) == __vu_key_at(pairs, j) then true
-else __vu_dup_small(pairs, i, j + 1, n)
+fn __vu_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool =
+  if i >= n then false
+  else if j >= n then __vu_dup_small(pairs, i + 1, i + 2, n)
+  else if __vu_key_at(pairs, i) == __vu_key_at(pairs, j) then true
+  else __vu_dup_small(pairs, i, j + 1, n)
 
 fn __vu_key_at(pairs: List[(String, Value)], i: Int) -> String = match list.get(pairs, i) {
   some((k, _)) => k,
@@ -210,25 +211,26 @@ fn __vu_has_dup(pairs: List[(String, Value)]) -> Bool = {
   }
 }
 
-fn __vu_fold_pairs(pairs: List[(String, Value)]) -> List[(String, Value)] = if list.len(pairs) < 2 or not __vu_has_dup(pairs) then pairs
-else {
-  var at: Map[String, Int] = map.new()
-  var keys: List[String] = []
-  var vals: List[Value] = []
-  for (k, v) in pairs {
-    match map.get(at, k) {
-      some(i) => {
-        vals = list.set(vals, i, v)
-      },
-      none => {
-        map.insert(at, k, list.len(keys))
-        list.push(keys, k)
-        list.push(vals, v)
-      },
+fn __vu_fold_pairs(pairs: List[(String, Value)]) -> List[(String, Value)] =
+  if list.len(pairs) < 2 or not __vu_has_dup(pairs) then pairs
+  else {
+    var at: Map[String, Int] = map.new()
+    var keys: List[String] = []
+    var vals: List[Value] = []
+    for (k, v) in pairs {
+      match map.get(at, k) {
+        some(i) => {
+          vals = list.set(vals, i, v)
+        },
+        none => {
+          map.insert(at, k, list.len(keys))
+          list.push(keys, k)
+          list.push(vals, v)
+        },
+      }
     }
+    list.zip(keys, vals)
   }
-  list.zip(keys, vals)
-}
 
 // Two keys that rename to one (`a_b` and `aB` under camelCase) are folded by
 // value.object's upsert (C-401): first position, last value, as natively.

@@ -395,7 +395,10 @@ fn __bad_escape(path: String) -> Bool = string.split(path, "%") |> list.drop(1) 
 // `%XX` that decodes to an unreserved character (RFC 3986: ALPHA / DIGIT /
 // "-" / "." / "_" / "~"), which a canonical path spells literally.
 fn __encodes_unreserved(p: String) -> Bool = match url.decode_component("%" + string.take(p, 2)) {
-  ok(c) => string.len(c) == 1 and string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~", c),
+  ok(c) => string.len(c) == 1 and string.contains(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~",
+    c,
+  ),
   err(_) => false,
 }
 
@@ -413,7 +416,10 @@ fn __canonical(path: String) -> Bool = {
 // `/`, `\` or NUL: `/u/..%2F..%2Fetc%2Fpasswd` would hand a handler
 // `../../etc/passwd`. A `{name...}` tail is checked segment by segment; the
 // anonymous `{...}` of a mount is checked by the sub-app's own router.
-fn __param_bad(v: String) -> Bool = v == "." or v == ".." or string.contains(v, "/") or string.contains(v, "\\") or string.contains(v, "\u{0}")
+fn __param_bad(v: String) -> Bool = v == "." or v == ".." or string.contains(v, "/") or string.contains(
+  v,
+  "\\",
+) or string.contains(v, "\u{0}")
 
 fn __bad_binding(segs: List[String], parts: List[String]) -> Bool = {
   let fixed = segs |> list.take_while((s) => not __is_rest(s))

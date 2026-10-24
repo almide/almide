@@ -189,11 +189,13 @@ fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) =>
 // refusing it keeps every reader on one URL).
 fn __url_cp(c: String) -> Int = string.codepoint(c) ?? 0
 
-fn __url_first_kept(cs: List[String], i: Int) -> Int = if i < list.len(cs) and __url_cp(list.get(cs, i) ?? "") <= 32 then __url_first_kept(cs, i + 1)
-else i
+fn __url_first_kept(cs: List[String], i: Int) -> Int =
+  if i < list.len(cs) and __url_cp(list.get(cs, i) ?? "") <= 32 then __url_first_kept(cs, i + 1)
+  else i
 
-fn __url_last_kept(cs: List[String], i: Int) -> Int = if i > 0 and __url_cp(list.get(cs, i - 1) ?? "") <= 32 then __url_last_kept(cs, i - 1)
-else i
+fn __url_last_kept(cs: List[String], i: Int) -> Int =
+  if i > 0 and __url_cp(list.get(cs, i - 1) ?? "") <= 32 then __url_last_kept(cs, i - 1)
+  else i
 
 fn __url_clean(s: String, who: String) -> Result[String, String] = {
   let cs = string.chars(s)
@@ -223,14 +225,18 @@ fn __url_hex_digit(c: String) -> Bool = match __url_hex_val(c) {
 fn __url_ends_in_number(host: String) -> Bool = {
   let labels = string.split(host, ".")
   let n = list.len(labels)
-  let last = if n > 1 and (list.get(labels, n - 1) ?? "") == "" then list.get(labels, n - 2) ?? "" else list.get(labels, n - 1) ?? ""
+  let last = if n > 1 and (list.get(labels, n - 1) ?? "") == "" then list.get(labels, n - 2) ?? ""
+  else list.get(labels, n - 1) ?? ""
   __url_all_digits(last) or ((string.starts_with(last, "0x") or string.starts_with(last, "0X")) and string.chars(string.drop(last, 2)) |> list.all((c) => __url_hex_digit(c)))
 }
 
 // Four decimal labels, each `0` or a non-zero-led number up to 255.
 fn __url_canonical_ipv4(host: String) -> Bool = {
   let labels = string.split(host, ".")
-  list.len(labels) == 4 and labels |> list.all((l) => __url_all_digits(l) and string.len(l) <= 3 and (string.len(l) == 1 or not string.starts_with(l, "0")) and (int.parse(l) ?? 256) <= 255)
+  list.len(labels) == 4 and labels |> list.all((l) => __url_all_digits(l) and string.len(l) <= 3 and (string.len(l) == 1 or not string.starts_with(
+    l,
+    "0",
+  )) and (int.parse(l) ?? 256) <= 255)
 }
 
 // The dot-segment rule (WHATWG path state): `.` and `%2e` (any case) are a
@@ -247,17 +253,19 @@ fn __url_dot_kind(seg: String) -> Int = match string.to_lower(seg) {
 
 // A double-dot drops the segment before it; either kind, as the last
 // segment, leaves the path ending in `/`.
-fn __url_dots_go(segs: List[String], i: Int, n: Int, out: List[String]) -> List[String] = if i >= n then out
-else {
-  let seg = list.get(segs, i) ?? ""
-  let last = i + 1 == n
-  let kind = __url_dot_kind(seg)
-  let kept = if kind == 2 and list.len(out) > 0 then list.take(out, list.len(out) - 1)
-  else out
-  let next = if kind == 0 then kept + [seg]
-  else if last then kept + [""] else kept
-  __url_dots_go(segs, i + 1, n, next)
-}
+fn __url_dots_go(segs: List[String], i: Int, n: Int, out: List[String]) -> List[String] =
+  if i >= n then out
+  else {
+    let seg = list.get(segs, i) ?? ""
+    let last = i + 1 == n
+    let kind = __url_dot_kind(seg)
+    let kept = if kind == 2 and list.len(out) > 0 then list.take(out, list.len(out) - 1)
+    else out
+    let next = if kind == 0 then kept + [seg]
+    else if last then kept + [""]
+    else kept
+    __url_dots_go(segs, i + 1, n, next)
+  }
 
 fn __url_remove_dots(path: String) -> String = if string.len(path) == 0 then ""
 else {
@@ -301,7 +309,10 @@ fn __url_parse_clean(s: String) -> Result[Url, String] = match string.index_of(s
   none => err("url.parse: missing '://' scheme separator"),
   some(i) => {
     if i == 0 then err("url.parse: empty scheme")
-    else if not __url_scheme_ok(string.take(s, i)) then err("url.parse: invalid scheme: " + string.take(s, i))
+    else if not __url_scheme_ok(string.take(s, i)) then err("url.parse: invalid scheme: " + string.take(
+      s,
+      i,
+    ))
     else if string.slice(s, i + 1, i + 3) != "//" then err("url.parse: missing '://' scheme separator")
     else {
       let scheme = string.to_lower(string.take(s, i))
