@@ -26,6 +26,7 @@ fn mk_project(almide_min: Option<&str>) -> Project {
         permissions: vec![],
         proc_allow: None,
         fs_allow: None,
+        native_grants: vec![],
         native_deps: vec![],
         root: std::path::PathBuf::from("."),
     }
