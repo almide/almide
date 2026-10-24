@@ -140,7 +140,7 @@ local fn rotate_count(n: Int) -> Int = {
 /// Bits needed to hold x; 0 for 0.
 fn bit_length(x: UInt8) -> Int = 64 - int.count_leading_zeros(int.from_uint8(x))
 
-/// Decimal UInt8 from trimmed s; err on junk, a sign of -, or above 255.
+/// Decimal UInt8 from ASCII-trimmed s; err on junk, a sign of -, or above 255.
 fn parse(s: String) -> Result[UInt8, String] =
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
   else match int.parse(s) {

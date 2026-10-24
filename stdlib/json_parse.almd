@@ -303,9 +303,15 @@ fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
     __jp_digits(base, len, ps2)
   } else p3
   let s = __jp_substr(base, p, p4)
+  // float.parse is finite-only (C-413); json.parse keeps native's `s.parse::<f64>()`
+  // reading, where an overflowing literal ("1e400") is ±inf — built at RUNTIME
+  // (prim.i2f division, not a folded literal), signed by the literal's '-'.
   if has_frac or has_exp then match float.parse(s) {
     ok(f) => ok((value.float(f), p4)),
-    err(m) => err(m),
+    err(m) => if m == "float literal out of range" then {
+      let infv = prim.i2f(1) / prim.i2f(0)
+      ok((value.float(if p1 > p then 0.0 - infv else infv), p4))
+    } else err(m),
   } else match int.parse(s) {
     ok(n) => ok((value.int(n), p4)),
     err(m) => err(m),

@@ -372,7 +372,8 @@ fn int_fn_b(func: &str, args: &[Value]) -> Option<Flow> {
         "parse" | "from_string" => {
             let s = as_str(args.first())?;
             // Returns Result[Int, String] — matches almide_rt_int_parse.
-            match s.trim().parse::<i64>() {
+            // ASCII whitespace only (str::trim_ascii, C-413).
+            match s.trim_ascii().parse::<i64>() {
                 Ok(n) => Flow::val(Value::Result(Ok(Box::new(Value::Int(n))))),
                 Err(e) => Flow::val(Value::Result(Err(Box::new(Value::str(e.to_string()))))),
             }

@@ -201,7 +201,7 @@ local fn rotate_count(n: Int) -> Int = {
 /// Bits needed to hold x; 0 for 0, 64 if negative.
 fn bit_length(x: Int64) -> Int = 64 - int.count_leading_zeros(int.from_int64(x))
 
-/// Decimal Int64 from trimmed s; err on junk or overflow.
+/// Decimal Int64 from ASCII-trimmed s; err on junk or overflow.
 fn parse(s: String) -> Result[Int64, String] = match int.parse(s) {
   ok(n) => ok(int.to_int64(n)),
   err(e) => err(e),

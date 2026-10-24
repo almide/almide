@@ -24,10 +24,22 @@ pub fn almide_rt_float32_to_string(n: f32) -> AlmideString {
     };
     __almide_out.into()
 }
-// Any spelling of nan parses to the fixed +qNaN 0x7FF8000000000000 (C-055):
-// Rust's parser answers -NaN for "-nan", and the self-hosted wasm parse has no
-// sign to copy, so the sign is fixed rather than inherited.
-pub fn almide_rt_float_parse(s: &str) -> Result<f64, AlmideString> { let __almide_r: Result<f64, String> = (|| { s.trim().parse::<f64>().map(|v| if v.is_nan() { f64::from_bits(0x7FF8_0000_0000_0000) } else { v }).map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
+// Finite-only (C-413, #4121): a NaN / inf spelling ("nan", "inf", "Infinity",
+// any case or sign) is `invalid float literal`, and a finite literal that
+// rounds past f64::MAX ("1e400") is `float literal out of range`; underflow to
+// 0 stays ok. Trims ASCII whitespace only (str::trim_ascii, C-413). A
+// non-finite parse of text holding a digit can only be overflow: Rust's
+// grammar spells the specials with letters alone.
+pub fn almide_rt_float_parse(s: &str) -> Result<f64, AlmideString> {
+    let t = s.trim_ascii();
+    let r: Result<f64, String> = match t.parse::<f64>() {
+        Ok(v) if v.is_finite() => Ok(v),
+        Ok(_) if t.bytes().any(|b| b.is_ascii_digit()) => Err("float literal out of range".to_string()),
+        Ok(_) => Err("invalid float literal".to_string()),
+        Err(e) => Err(e.to_string()),
+    };
+    r.map_err(Into::into)
+}
 pub fn almide_rt_float_abs(n: f64) -> f64 { n.abs() }
 pub fn almide_rt_float_ceil(n: f64) -> f64 { n.ceil() }
 pub fn almide_rt_float_floor(n: f64) -> f64 { n.floor() }
