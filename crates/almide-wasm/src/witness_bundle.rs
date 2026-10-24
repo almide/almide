@@ -11,6 +11,9 @@
 //! - `call-modes`, the program's call-mode witness (witness_modes.rs);
 //! - `bounds`, every `xs[i]` / `b[i]` access with the check before it
 //!   (witness_bounds.rs, #4005);
+//! - `init`, every construction site the emitter fills itself — the
+//!   allocation and the slot stores that initialize it (witness_init.rs,
+//!   #4013);
 //! - `names`, over the stock-WASI bytes the build ships: `(module:<space>)`
 //!   per shared index space, `locals:<fn>` per function (cert_project.rs);
 //! - `caps` per source-declared function and one `caps-transitive` call
@@ -41,6 +44,7 @@ pub fn records(
     let (pass, frames) = super::take_shipped().ok_or("no shipped pass recorded")?;
     let modes = super::take_modes();
     let bounds = super::take_bounds();
+    let init = super::take_init();
     let decls = super::decls::take_for(emitted).ok_or("no declaration table for the shipped module")?;
 
     let mut records = Vec::new();
@@ -59,6 +63,8 @@ pub fn records(
     // empty program, which the checker accepts vacuously.
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
     records.push(Record { property: "bounds", function: "(program)".into(), bytes: b });
+    let i = init.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
+    records.push(Record { property: "init", function: "(program)".into(), bytes: i });
     // `to_wasi` keeps every defined function's order and moves it by the
     // change in the import count — up for the imports it adds, down for the
     // uncalled ones it prunes (#3114) — so a declared function keeps its
