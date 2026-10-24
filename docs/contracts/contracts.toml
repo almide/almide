@@ -5186,6 +5186,34 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-412"
+spec      = "ALS-T5"
+title     = "Case mapping never folds a non-ASCII scalar into ASCII: string.to_upper, to_lower and capitalize leave such a scalar unchanged"
+statement = "`string.to_upper`, `string.to_lower` and the head of `string.capitalize` (#4121) map an ASCII scalar by the ASCII rules and a non-ASCII scalar by its default, locale-independent full Unicode mapping (SpecialCasing 1:N maps included), EXCEPT that a non-ASCII scalar whose mapping contains any ASCII scalar is left unchanged. With the Unicode the toolchain ships, that holds back 17 scalars upper-casing — U+00DF, U+0131, U+0149, U+017F, U+01F0, U+1E96..U+1E9A, U+FB00..U+FB06 (`string.to_upper(\"adm\\u{131}n\")` is `ADM\\u{131}N`, not `ADMIN`; `\\u{17F}ecret` stays `\\u{17F}ECRET`) — and 2 lower-casing — U+0130 and U+212A (`string.to_lower(\"\\u{212A}ey\")` is `\\u{212A}ey`, not `key`). Final_Sigma is judged on the original string, so a held-back U+212A still counts as a cased neighbour (`\\u{212A}\\u{3A3}` lowers to `\\u{212A}\\u{3C2}`). Every other mapping is unchanged, including the 1:N maps whose result stays non-ASCII (U+0390 -> U+0399 U+0308 U+0301). This deliberately departs from the Unicode default mapping, which Rust, Python and JavaScript apply (they fold all of these), and from Go's simple mapping (which folds U+0131, U+017F, U+212A and U+0130): a name that passed a check on its raw text cannot become an ASCII identifier after case mapping. The mapping is not for identity comparison. Native, wasm and the reference evaluator answer byte-identically."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/string_case_no_ascii_fold.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_case_unicode.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-413"
+spec      = "ALS-T2"
+title     = "int.parse and float.parse accept only finite decimal text trimmed of ASCII whitespace"
+statement = "`int.parse` and `float.parse` (#4121) remove leading and trailing ASCII whitespace only — exactly Rust's `str::trim_ascii` set, U+0009, U+000A, U+000C, U+000D and U+0020 — before reading the number. U+000B (VT) and every non-ASCII White_Space scalar are not removed, so the digit grammar refuses them: `int.parse(\"\\u{A0}5\")`, `\"\\u{3000}5\"`, `\"\\u{2028}5\"` and `\"\\u{B}5\"` are `err(\"invalid digit found in string\")`, the same inputs to `float.parse` are `err(\"invalid float literal\")`, and `\"\\t\\n\\u{C}\\r 5 \"` is `ok(5)`. The sized parses that go through `int.parse` (`int8.parse` … `uint64.parse`) use the same set; `string.trim` keeps the full Unicode White_Space set (C-021) and `int.from_hex` keeps its own trim. `float.parse` answers only finite values: a NaN or infinity spelling — `nan`, `NaN`, `+nan`, `-nan`, `inf`, `-inf`, `infinity`, `Infinity`, in any case and with either sign — is `err(\"invalid float literal\")`; a finite decimal literal whose correctly rounded value is ±inf (`1e400`, `-1e400`, `1.7976931348623159e308`) is `err(\"float literal out of range\")`; a literal that rounds to zero stays ok (`1e-400` is `0.0`, `-1e-400` is `-0.0`), as do f64::MAX and every subnormal. `cannot parse float from empty string` is unchanged. Measured: Rust's `str::parse::<f64>`, Python's `float()` and Go's `strconv.ParseFloat` accept the NaN and infinity spellings (Go refuses `+nan`) — a NaN makes every comparison false, so `if amount > limit then reject` let it through; the overflow error follows Go, which returns +Inf with `ErrRange` for `1e400`, where Rust and Python answer inf; Go's `strconv` and Rust's `parse` trim nothing, Python's `int()` / `float()` strip Unicode whitespace including U+00A0, U+3000 and U+000B. `json.parse` is not `float.parse`: an overflowing JSON number still decodes to ±inf there. Native, wasm and the reference evaluator answer byte-identically."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_parse_finite_only.almd", class = "fixture" },
+  { path = "spec/wasm_cross/number_parse_ascii_trim.almd", class = "fixture" },
+  { path = "spec/wasm_cross/number_parse_ascii_trim_sized.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_parse.almd", class = "fixture" },
+  { path = "spec/wasm_cross/float_parse_special.almd", class = "fixture" },
+  { path = "spec/wasm_cross/string_whitespace.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-415"
 spec      = "ALS-R5"
 title     = "random.int, float, choice and shuffle draw from OS entropy on native and the embedded wasm lane: draws in one clock tick differ, and threads started together draw different streams"
