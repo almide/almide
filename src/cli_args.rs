@@ -437,6 +437,17 @@ pub(crate) enum Commands {
         /// a package named `git` or `almide` cannot silently replace a tool.
         #[arg(long)]
         force: bool,
+        /// Trust the owner of a remote spec that is not trusted by default
+        /// (#4184): `host/owner`, or `owner` for github.com. Only
+        /// github.com/almide is trusted without it.
+        #[arg(long)]
+        trust: Option<String>,
+        /// Allow the installed package's own native code to be compiled
+        /// (#4184): its `native/` Rust files, its `[native-deps]` crates (their
+        /// build scripts run at build time) and its `@extern(rust|c)` fns.
+        /// Without it such a package is refused and its native code listed.
+        #[arg(long = "allow-native")]
+        allow_native: bool,
     },
     /// Update almide to the latest version
     #[command(name = "self-update")]
