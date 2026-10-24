@@ -46,19 +46,38 @@ reads each request within limits before the handler sees it:
 
 A body shorter than its `Content-Length` is `400`. The handler is not called
 for any of these. A chunked request body is decoded.
+The request head is read by RFC 9112 (C-405): a line that does not end in
+CRLF, a request line that is not `METHOD SP target SP HTTP/1.1` (or
+`HTTP/1.0`) with a token method, an `OPTIONS *` or `CONNECT host:port`
+target, whitespace before a header colon (`Transfer-Encoding : chunked`), a
+header line without a colon, an obs-fold continuation line, two `Host`
+fields, and an HTTP/1.1 request without `Host` are each `400` before the
+handler runs. An absolute-form target (`GET http://host/p?q HTTP/1.1`) reaches
+the handler as `/p?q`.
 The response goes out as `HTTP/1.1 <status> <reason>` (the registered reason,
 empty for an unregistered code), the response's headers in order,
 `Connection: close`, `Content-Length`, the body, and then the connection
 closes. A HEAD request, a `204` and a `304` get no body. The server owns the
 framing: a handler's `Connection`, `Content-Length`, `Transfer-Encoding` and
-`Keep-Alive` fields are dropped. A response header whose name is not a token,
+`Keep-Alive` fields are dropped. Every response carries
+`X-Content-Type-Options: nosniff` unless the handler set that field (C-407).
+A response header whose name is not a token,
 or whose value holds a control character other than HTAB, and a status
 outside `200..=599` (a 1xx included) are refused: the answer is a `500` whose
-body is `Internal error: <reason>` (for example `Internal error: response
-status 42 is not a final status code`) and one line goes to stderr. A response later than 30 s is
-replaced by `503`. A handler `err(m)` answers `500` with the body
-`Internal error: <m>`. If the port cannot be bound, the program stops with
-`Error: bind failed: <reason>` and exit code 1.
+body is `Internal Server Error`, and the reason goes to stderr as one line
+(`http.serve: refused the response: response status 42 is not a final status
+code`). A response later than 30 s is replaced by `503`.
+
+A handler `err(m)` never reaches the client (C-409, #4150): `m` can carry a
+path, an operand or errno text (`fs.read_text(p)!` in a handler puts the
+absolute path in it). The client gets `500` with the fixed body
+`Internal Server Error (request <id>)`, where `id` is 8 lowercase hex digits of
+the 32-bit FNV-1a (`hash.fnv1a32`) of the request's method, a space, its
+target, a LF and its body — the same on every target for the same request.
+stderr gets `http.serve: request <id>: handler error: "<m>"`, with `\`, `"`
+and control characters escaped so input in `m` cannot forge a log line. Find
+the error by the id the client reports. If the port cannot be bound, the
+program stops with `Error: bind failed: <reason>` and exit code 1.
 
 **On wasm** (C-367): `almide run app.almd --target wasm` serves the same
 program on the embedded host. One instance handles every request, one at a
@@ -81,6 +100,19 @@ behave identically on native and wasm, and a router is served like any other
 handler.
 The example prints the lines below on both targets; on wasm the router is
 served by the structural leg (#2664; held by `spec/stdlib/http_router_test.almd`).
+
+The router and any middleware in front of it read ONE canonical path (C-406,
+#4133): a path with an empty segment inside it (`//admin`), a `.` or `..`
+segment, a percent-encoded unreserved byte (`%61dmin`, `%2e`), a backslash or
+a control character is `400 Bad Request: the path is not in canonical form`.
+So a guard such as `string.starts_with(http.req_path(req), "/admin")` checks
+the same path the router dispatches on. A bound parameter that decodes to `.`
+or `..`, or holds `/` (`%2F`), `\` or NUL, is `400 Bad Request: a path
+parameter is a dot segment or holds a /, \ or NUL` (#4134), so
+`/static/{file}` never binds `../../etc/passwd`. There is no static-file
+helper yet (`http.serve_dir` does not exist); when a handler serves files,
+resolve the name inside a root with the rooted `fs` family, never by string
+concatenation.
 
 ```almd check
 import http
@@ -438,18 +470,24 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `http.query_params(req: HttpRequest) -> Map[String, String]`
+### `http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]`
 
-Get all query parameters from a request as a map. Values are percent-decoded
-(`%XX` → byte, `+` → space), so `?q=%E7%8C%AB` yields `{"q": "猫"}`.
+The query as `url.parse_query` reads it (C-404, #4117): the target's text after
+its FIRST `?`, split on `&`, empty pieces dropped, each pair split at its first
+`=` (a bare key has the value `""`), `+` a space, `%XX` decoded as strict
+UTF-8. Every pair is kept in arrival order, so `?tag=a&tag=b` gives both. A
+truncated or non-hex escape, or percent data that is not UTF-8, is an `err`
+(`http.query_params: invalid percent escape`, …). The same on native and wasm.
 
 ```almd check
 import http
 
-fn handle(req: HttpRequest) -> HttpResponse = {
-  let params = http.query_params(req) // {"page": "1", "q": "test"}
-  let q = map.get(params, "q") ?? ""
-  http.response(200, "q=${q}")
+fn handle(req: HttpRequest) -> HttpResponse = match http.query_params(req) {
+  ok(params) => {
+    let q = list.find(params, ((k, _)) => k == "q") |> option.map(((_, v)) => v) ?? ""
+    http.response(200, "q=${q}")
+  },
+  err(e) => http.response(400, e),
 }
 
 effect fn main() -> Unit = {
@@ -459,8 +497,10 @@ effect fn main() -> Unit = {
 
 ### `http.url_decode(s: String) -> String`
 
-Percent-decode a URL component (`%XX` → byte, `+` → space). `query_params`
-already decodes its values; use this for manually-extracted query/form text.
+Percent-decode a URL component (`%XX` → byte, `+` → space) leniently: a bad
+escape is kept and invalid UTF-8 becomes U+FFFD. It is not the query decoder —
+`query_params` and `url.parse_query` refuse what this keeps; prefer
+`url.decode_form` when the input may be malformed.
 
 ```almd check
 import http
@@ -474,7 +514,17 @@ fn main() -> Unit = {
 
 ### `http.get(url: String) -> Result[String, String]`
 
-Send an HTTP GET request and return the response body
+Send an HTTP GET request and return the response body.
+
+Every client function reads a response whole or answers
+`malformed or incomplete response from "<url>"` (C-408, #4137): a response
+with no complete head, a body shorter than its `Content-Length`, a chunked
+body without its terminating 0-chunk, and a head over 1 MiB are errors, never
+a partial `ok`. The URL is split as `url.parse` reads it where a browser could
+disagree (C-402): a backslash or control character and a non-canonical
+numeric host (`127.1`, `0x7f.0.0.1`) are refused, surrounding whitespace and
+tab/LF/CR are removed, and `.` / `..` segments (`%2e` too) are resolved before
+the request is sent.
 
 ```almd check
 import http
@@ -1093,9 +1143,9 @@ http.req_body(req: HttpRequest) -> String
 // @since 0.6.0 or earlier
 http.req_header(req: HttpRequest, key: String) -> Option[String]
 
-// Decoded query map; last duplicate wins.
+// url.parse_query of the target after its first ?; pairs in order; err on a bad escape.
 // @since 0.6.0 or earlier
-http.query_params(req: HttpRequest) -> Map[String, String]
+http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]
 
 // + to space, %XX to byte; bad escapes kept.
 // @since 0.27.7 or earlier
