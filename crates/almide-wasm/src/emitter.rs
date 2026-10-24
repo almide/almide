@@ -289,8 +289,7 @@ impl Emitter<'_> {
         self.f.instructions().local_set(hold);
         self.lower(index, Some(INT))?;
         let idx = self.hold_i64()?;
-        // #4005: the witness records the check where it is emitted and the
-        // read where it is emitted (witness_bounds.rs).
+        // #4005: the witness records the check and the read where emitted.
         let site = self.bounds_site(list_var, index);
         if known {
             self.f.instructions().local_set(idx);
@@ -312,18 +311,14 @@ impl Emitter<'_> {
     /// The read's bounds check of the index on the stack (consumed).
     fn emit_read_bounds_check(&mut self, hold: u32, hoisted: Option<u32>, stride: u32, site: Option<crate::witness::bounds::Site>) {
         let msg = self.pool.intern("index out of bounds");
-        // ONE UNSIGNED compare (#2319): `idx >=u count` is exactly
-        // `idx < 0 || idx >= count` — a negative i64 index reads as a value
-        // above every possible count — and the count is unsigned anyway. The
-        // two-signed-compares-and-or form cost 7 % of spectralnorm's inner
-        // loop, where this check runs once per element read.
+        // ONE UNSIGNED compare (#2319): `idx >=u count` is `idx < 0 || idx >= count`
+        // (a negative i64 reads above any count); two signed compares cost 7 % of
+        // spectralnorm's inner loop.
         {
             let mut i = self.f.instructions();
             match hoisted {
                 // The count came from the local a loop loaded it into.
-                Some(count) => {
-                    i.local_get(count);
-                }
+                Some(count) => { i.local_get(count); }
                 None => {
                     i.local_get(hold).i32_load(len_memarg()).i32_const(stride as i32).i32_div_u();
                     i.i64_extend_i32_u();
@@ -334,8 +329,7 @@ impl Emitter<'_> {
             i.i32_const(msg as i32);
         }
         crate::witness::bounds::check(site);
-        // #2755: out of bounds ABORTS the process — a recorded abort
-        // terminal on its own arm (data_unwrap.rs `abort_frame`).
+        // #2755: out of bounds ABORTS — a recorded abort terminal on its own arm.
         self.witness_branch_open();
         self.witness_branch_arm();
         self.abort_frame();
@@ -668,8 +662,7 @@ impl Emitter<'_> {
                     .i32_const((elements.len() as u32 * stride) as i32)
                     .call(F_ALLOC)
                     .local_set(hold);
-                // #4013: a construction site — the block's slots, each
-                // recorded as its store is emitted (witness_init.rs).
+                // #4013: a construction site; each slot is recorded as its store is emitted.
                 let site = crate::witness::init::site(almide_layout::PAYLOAD, stride, elements.len(), h.index() as u32);
                 for (i, el) in elements.iter().enumerate() {
                     self.f.instructions().local_get(hold);
