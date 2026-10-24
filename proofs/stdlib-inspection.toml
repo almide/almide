@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "918"
+# uninspected_ceiling = "916"
 
 [[fn]]
 name = "args.flag"
@@ -15144,22 +15144,8 @@ status = "uninspected"
 blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
 
 [[fn]]
-name = "hash.is_valid_hmac_sha256_hex"
-sig = "(key: Bytes, b: Bytes, tag: String) -> Bool"
-class = "pure"
-status = "uninspected"
-blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
-
-[[fn]]
 name = "hash.is_valid_hmac_sha512"
 sig = "(key: Bytes, b: Bytes, tag: Bytes) -> Bool"
-class = "pure"
-status = "uninspected"
-blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
-
-[[fn]]
-name = "hash.is_valid_hmac_sha512_hex"
-sig = "(key: Bytes, b: Bytes, tag: String) -> Bool"
 class = "pure"
 status = "uninspected"
 blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"

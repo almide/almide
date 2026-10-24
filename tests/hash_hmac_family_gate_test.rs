@@ -19,8 +19,11 @@ fn stdlib(name: &str) -> String {
 /// The digests the HMAC matrix covers, with the output length of each.
 const HMAC_ALGS: &[&str] = &["sha256", "sha512"];
 
-/// Shrink-only: HMAC cells deliberately NOT provided.
-const INTENTIONALLY_OMITTED: &[&str] = &["hmac_md5", "hmac_sha1"];
+/// Shrink-only: HMAC cells deliberately NOT provided. `is_valid_hmac_*_hex`
+/// would give `_hex` a second meaning (the encoding of an INPUT); R-hash-05
+/// keeps it for the output only, so a hex tag goes through `hex.decode`.
+const INTENTIONALLY_OMITTED: &[&str] =
+    &["hmac_md5", "hmac_sha1", "is_valid_hmac_sha256_hex", "is_valid_hmac_sha512_hex"];
 
 /// Every signature the family rule requires, derived from the declared axes.
 fn required_cells() -> Vec<(&'static str, String)> {
@@ -29,7 +32,6 @@ fn required_cells() -> Vec<(&'static str, String)> {
         cells.push(("hash", format!("fn hmac_{alg}(key: Bytes, b: Bytes) -> Bytes")));
         cells.push(("hash", format!("fn hmac_{alg}_hex(key: Bytes, b: Bytes) -> String")));
         cells.push(("hash", format!("fn is_valid_hmac_{alg}(key: Bytes, b: Bytes, tag: Bytes) -> Bool")));
-        cells.push(("hash", format!("fn is_valid_hmac_{alg}_hex(key: Bytes, b: Bytes, tag: String) -> Bool")));
     }
     cells.push(("bytes", "fn is_equal_constant_time(a: Bytes, b: Bytes) -> Bool".to_string()));
     cells.push(("string", "fn is_equal_constant_time(a: String, b: String) -> Bool".to_string()));
@@ -57,7 +59,6 @@ fn family_problems(hash: &str, bytes: &str, string: &str) -> Vec<String> {
                 format!("hmac_{a}"),
                 format!("hmac_{a}_hex"),
                 format!("is_valid_hmac_{a}"),
-                format!("is_valid_hmac_{a}_hex"),
             ]
         })
         .collect();
@@ -81,7 +82,7 @@ fn the_hmac_family_is_the_full_matrix_and_nothing_else() {
     let problems = family_problems(&stdlib("hash.almd"), &stdlib("bytes.almd"), &stdlib("string.almd"));
     assert!(
         problems.is_empty(),
-        "R-hash-06: the HMAC family is {{sha256, sha512}} × {{raw, _hex}} × {{compute, is_valid_}} plus \
+        "R-hash-06: the HMAC family is {{sha256, sha512}} × {{compute, compute _hex, is_valid_}} plus \
          is_equal_constant_time on {{Bytes, String}} (update the rule in L2-hash.md and this gate in the \
          same PR):\n{}",
         problems.join("\n")
@@ -95,9 +96,9 @@ fn the_hmac_family_is_the_full_matrix_and_nothing_else() {
 fn control_the_gate_fails_when_a_cell_is_dropped_or_added_pointwise() {
     let hash = stdlib("hash.almd");
     let (bytes, string) = (stdlib("bytes.almd"), stdlib("string.almd"));
-    let dropped = hash.replace("fn is_valid_hmac_sha512_hex(", "fn removed_cell(");
+    let dropped = hash.replace("fn is_valid_hmac_sha512(", "fn removed_cell(");
     assert!(
-        family_problems(&dropped, &bytes, &string).iter().any(|p| p.contains("is_valid_hmac_sha512_hex")),
+        family_problems(&dropped, &bytes, &string).iter().any(|p| p.contains("is_valid_hmac_sha512(")),
         "control: dropping a cell must fail the gate"
     );
     let no_ct = string.replace("fn is_equal_constant_time(", "fn removed_cell(");

@@ -260,9 +260,11 @@
 ### R-string-19 定数時間の比較 `string.is_equal_constant_time` を置く — ○ 採用
 
 - いま: webhook の署名ヘッダやトークンは `String` で届きます。`==` で比べると、最初に違うバイトで返るので、時間から値を当てられます。
-- 案: `string.is_equal_constant_time(a: String, b: String) -> Bool`。UTF-8 のバイトを比べます。バイト長が違えばすぐ false。`bytes.is_equal_constant_time`（R-bytes-29）と同じ仕組みで、{Bytes, String} の型の行列のセルです。HMAC の検証には `hash.is_valid_hmac_sha256_hex` を使います（R-hash-06）。
+- 案: `string.is_equal_constant_time(a: String, b: String) -> Bool`。UTF-8 のバイトを比べます。バイト長が違えばすぐ false。`bytes.is_equal_constant_time`（R-bytes-29）と同じ仕組みで、{Bytes, String} の型の行列のセルです。HMAC の検証には `hash.is_valid_hmac_sha256` を使います（R-hash-06）。
 - 根拠の L0 規則: R-L0-09、R-L0-30。
 - (a) Python `secrets.compare_digest`（str も受け取る）、Erlang `crypto:hash_equals`。
+- protocol（R-L0-37）: `String` と `Bytes` が同じ役割で持つので、`Text` の要件として 1 回だけ宣言します（[protocol-view](protocol-view.md) の `Text` の行。モジュールの関数は要件そのもの）。
+- 綴り（R-L0-00）: 多数派はありません（Go `ConstantTimeCompare`・`hmac.Equal`、Python `compare_digest`、Node `timingSafeEqual`、Erlang `hash_equals`、Rust `subtle` の `ct_eq`、Java `isEqual`）。`compare` は `Ord` の 3 値（R-L0-16）なので使わず、Bool の `is_`（R-L0-09）に「等しい」と「定数時間」をそのまま書きます。
 - (d) 追加。契約 C-421。issue: #4106
 
 ## L3: 関数表
