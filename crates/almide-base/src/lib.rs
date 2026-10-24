@@ -11,6 +11,8 @@ pub mod fs_scope;
 /// program's runtime: read here, inside its own package, so a vendored build
 /// finds it (#3361).
 pub const FS_SCOPE_SOURCE: &str = include_str!("fs_scope.rs");
+/// C-419's one escaper for user data in runtime error texts (#4126).
+pub mod err_text;
 pub mod native_stack_guard;
 pub mod rust_lit;
 
