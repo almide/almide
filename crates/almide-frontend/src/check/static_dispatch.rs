@@ -2,7 +2,7 @@
 
 use almide_lang::ast;
 use almide_lang::ast::ExprKind;
-use almide_base::intern::sym;
+use almide_base::intern::{sym, Sym};
 use crate::types::{Ty, TypeConstructorId};
 use super::types::resolve_ty;
 use super::Checker;
@@ -60,6 +60,15 @@ impl Checker {
                 return Some(ty);
             }
         }
+        // `A.method(...)` where `A` is a type parameter in scope: a protocol
+        // requirement reached through the type variable, with no receiver
+        // (`A.__sum(xs)` under `[A: Numeric]`). Monomorphization sends it to
+        // the concrete type's own function once `A` is known.
+        if let ExprKind::TypeName { name: type_name, .. } = &object.kind {
+            if let Some(ty) = self.check_typevar_static_requirement(*type_name, field, arg_tys) {
+                return Some(ty);
+            }
+        }
         // TypeName.method() — direct convention call
         if let ExprKind::TypeName { name: type_name, .. } = &object.kind {
             let key = format!("{}.{}", type_name, field);
@@ -68,6 +77,28 @@ impl Checker {
             }
         }
         None
+    }
+
+    /// A requirement of one of type parameter `tv`'s bounds, called through
+    /// the type variable. Checks the arguments against the requirement with
+    /// `Self` read as `tv` and returns its result type; `None` when `tv` is not
+    /// a bounded type parameter or no bound declares `field`.
+    fn check_typevar_static_requirement(&mut self, tv: Sym, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
+        let protos = self.env.generic_protocol_bounds.get(&tv).cloned()?;
+        let self_ty = Ty::TypeVar(tv);
+        let sig = protos.iter()
+            .filter_map(|p| self.env.protocols.get(p))
+            .find_map(|p| p.methods.iter().find(|m| m.name.as_str() == field).cloned())?;
+        if sig.params.len() != arg_tys.len() {
+            self.emit(super::err(
+                format!("{}.{}() expects {} argument(s) but got {}", tv, field, sig.params.len(), arg_tys.len()),
+                "Check the number of arguments", format!("call to {}.{}()", tv, field)).with_code("E004"));
+        }
+        for ((pname, pty), aty) in sig.params.iter().zip(arg_tys.iter()) {
+            let expected = self.substitute_self_in_ty(pty, &self_ty);
+            self.constrain(expected, aty.clone(), format!("argument '{}' of {}.{}", pname, tv, field));
+        }
+        Some(self.substitute_self_in_ty(&sig.ret, &self_ty))
     }
 
     /// Dot-chain submodule access (`a.b.fn(...)`), which the module system no

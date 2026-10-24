@@ -51,9 +51,10 @@ pub fn cmd_docs_gen(check: bool) {
     drifts.extend(check_stdlib_fn_count());
     drifts.extend(check_numeric_conversion_matrix());
     drifts.extend(check_numeric_protocol_matrix());
+    drifts.extend(check_builtin_conformance_matrix());
 
     if drifts.is_empty() {
-        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection, stdlib count, numeric matrix, numeric protocol matrix)"));
+        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection, stdlib count, numeric matrix, numeric protocol matrix, built-in conformance matrix)"));
         return;
     }
 
@@ -332,6 +333,29 @@ fn module_function_names(m: &str) -> std::collections::HashSet<String> {
     let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
     let iface = almide::interface::extract(&ir, m, Some(&source_text));
     iface.functions.iter().map(|f| f.name.clone()).collect()
+}
+
+/// The built-in conformances, as a matrix read from the protocol declaration
+/// (`almide::canonicalize::protocols::BUILTIN_PROTOCOLS`): every built-in type
+/// a non-derivable protocol lists (`Int8: Numeric`, `String: Text`) must
+/// define each of the protocol's requirements in its stdlib module, the
+/// internal `__` pivots included — a generic body reaches them through a type
+/// variable, and monomorphization calls `<module>.<requirement>` with nothing
+/// else to check that it exists. Operator requirements (`add`, `neg`) are the
+/// operators on a primitive and are not functions.
+fn check_builtin_conformance_matrix() -> Vec<String> {
+    let mut seen: std::collections::HashMap<&str, std::collections::HashSet<String>> = std::collections::HashMap::new();
+    let mut drifts = Vec::new();
+    for (module, proto, method) in almide::canonicalize::protocols::builtin_conformance_requirements() {
+        let names = seen.entry(module).or_insert_with(|| module_function_names(module));
+        if !names.contains(&method) {
+            drifts.push(format!(
+                "built-in conformance: `{}` conforms to {} but does not define `{}.{}`",
+                module, proto, module, method
+            ));
+        }
+    }
+    drifts
 }
 
 /// The fixed-width numeric PROTOCOL matrix gate (R-sized-02/03/08/10/11, R-int-11/12).

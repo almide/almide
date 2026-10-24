@@ -282,6 +282,15 @@ fn link_self_host(
         }
     }
 
+    fn demand_requirement(key: &str, out: &mut HashSet<String>) {
+        let Some((_, method)) = key.split_once('.') else { return };
+        for (module, _, req) in crate::canonicalize::protocols::builtin_conformance_requirements() {
+            if req == method {
+                out.insert(format!("{module}.{method}"));
+            }
+        }
+    }
+
     fn scan_expr(e: &crate::ir::IrExpr, out: &mut HashSet<String>) {
         match &e.kind {
             crate::ir::IrExprKind::Call { target, args, .. }
@@ -320,6 +329,18 @@ fn link_self_host(
                     // dunder name — the demand key IS the name.
                     crate::ir::CallTarget::Named { name } if name.as_str().starts_with("__") => {
                         out.insert(name.as_str().to_string());
+                    }
+                    // A protocol requirement reached through a type variable
+                    // (`T.__join` in `list.join[T: Text]`) becomes a call to
+                    // some conforming type's `<module>.<requirement>` only at
+                    // monomorphization, after this scan: demand the
+                    // requirement of every built-in conformer (an unused load
+                    // is reachability-pruned).
+                    crate::ir::CallTarget::Named { name } if name.as_str().contains('.') => {
+                        demand_requirement(name.as_str(), out);
+                    }
+                    crate::ir::CallTarget::Method { method, .. } if method.as_str().contains('.') => {
+                        demand_requirement(method.as_str(), out);
                     }
                     _ => {}
                 }

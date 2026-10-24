@@ -386,7 +386,7 @@ impl Checker {
             })
     }
     /// Substitute Ty::TypeVar("Self") with a concrete type in a protocol method return type.
-    fn substitute_self_in_ty(&self, ty: &Ty, replacement: &Ty) -> Ty {
+    pub(super) fn substitute_self_in_ty(&self, ty: &Ty, replacement: &Ty) -> Ty {
         match ty {
             Ty::TypeVar(name) if name == "Self" => replacement.clone(),
             _ => ty.map_children(&|child| self.substitute_self_in_ty(child, replacement)),

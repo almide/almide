@@ -528,7 +528,10 @@ impl Checker {
                 Ty::Int | Ty::Float | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
                 | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
                 | Ty::Float32 | Ty::Float64 | Ty::String | Ty::Bool
-                | Ty::Unknown | Ty::TypeVar(_) | Ty::Never);
+                | Ty::Unknown | Ty::TypeVar(_) | Ty::Never)
+                // a declared type ordered by its protocol's `compare` (BigInt: Integer)
+                || matches!(&lc, Ty::Named(n, _) if crate::canonicalize::protocols::type_requires(
+                    &self.env, n.as_str(), crate::canonicalize::protocols::ORDER_REQUIREMENT));
             if !orderable {
                 self.emit(super::err(
                     format!("operator '{}' is not defined for {} — ordering applies to Int, Float, String, and Bool", op, lc.display()),

@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::collections::{HashSet, HashMap};
 use almide_base::intern::Sym;
 use almide_ir::*;
-use almide_lang::types::{Ty, TypeConstructorId};
+use almide_lang::types::Ty;
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]

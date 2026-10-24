@@ -53,12 +53,31 @@ struct Spelled {
     /// UFCS call when `a` is a binding (`let list = "s"; list.len()` is
     /// `string.len`).
     qualified: HashSet<(String, String)>,
-    /// Every name the sources bind (params, lets, patterns, loop vars). A
-    /// module name bound anywhere is read as a binding wherever it is spelled.
+    /// Every name the source binds (params, lets, patterns, loop vars). A
+    /// module name a source binds anywhere is read as a binding wherever that
+    /// source spells it — and only there: `string.join(list: ...)` binding
+    /// `list` says nothing about `list.min(..)` in another module.
     binders: HashSet<String>,
+    /// `a.f` read as a call into module `a`, classified by the binders of the
+    /// source that spells it (`absorb`).
+    module_calls: HashSet<(String, String)>,
 }
 
 impl Spelled {
+    /// Fold one source's names in: its `a.f` pairs become module calls or
+    /// UFCS members by THAT source's binders.
+    fn absorb(&mut self, local: Spelled) {
+        for (a, m) in &local.qualified {
+            if local.is_module_qualifier(a) {
+                self.module_calls.insert((a.clone(), m.clone()));
+            } else {
+                self.members.insert(m.clone());
+            }
+        }
+        self.idents.extend(local.idents);
+        self.members.extend(local.members);
+    }
+
     /// Is `a` in `a.f` (certainly) a module rather than a binding?
     fn is_module_qualifier(&self, a: &str) -> bool {
         !self.binders.contains(a)
@@ -113,10 +132,17 @@ fn auto_modules() -> &'static [(&'static str, &'static Program, Surface)] {
 pub fn reached_auto_bundled<'a>(roots: impl IntoIterator<Item = &'a Program>) -> Vec<&'static str> {
     let mut spelled = Spelled::default();
     for p in roots {
-        spell_program(p, &mut spelled);
+        spell_unit(p, p.decls.iter().chain(p.imports.iter()), &mut spelled);
     }
     let modules = auto_modules();
     let mut reached: HashSet<&'static str> = HashSet::new();
+    // A reached module's function bounded on a built-in protocol
+    // (`int.from[S: Numeric]`) calls the protocol's requirements through its
+    // type variable (`x.__trunc()`), which reach every conforming type's
+    // module. Its body is spelled only once the function itself is named, so
+    // `int.to_string` does not load the twelve other number modules that
+    // `int.from` may dispatch into.
+    let mut deferred: Vec<(&'static str, &'static Program, &'static Decl)> = Vec::new();
     loop {
         let mut grew = false;
         for (name, prog, surface) in modules {
@@ -124,7 +150,16 @@ pub fn reached_auto_bundled<'a>(roots: impl IntoIterator<Item = &'a Program>) ->
                 continue;
             }
             reached.insert(name);
-            spell_program(prog, &mut spelled);
+            let (later, now): (Vec<&'static Decl>, Vec<&'static Decl>) =
+                prog.decls.iter().chain(prog.imports.iter()).partition(|d| is_protocol_generic_fn(d));
+            spell_unit(prog, now.into_iter(), &mut spelled);
+            deferred.extend(later.into_iter().map(|d| (*name, *prog, d)));
+            grew = true;
+        }
+        let (named, rest): (Vec<_>, Vec<_>) = deferred.into_iter().partition(|(m, _, d)| fn_is_named(&spelled, m, d));
+        deferred = rest;
+        for (_, prog, d) in named {
+            spell_unit(prog, std::iter::once(d), &mut spelled);
             grew = true;
         }
         if !grew {
@@ -134,17 +169,28 @@ pub fn reached_auto_bundled<'a>(roots: impl IntoIterator<Item = &'a Program>) ->
     modules.iter().map(|(n, ..)| *n).filter(|n| reached.contains(n)).collect()
 }
 
+/// A function generic over a built-in protocol bound (`[S: Numeric]`).
+fn is_protocol_generic_fn(d: &Decl) -> bool {
+    let Decl::Fn { generics: Some(gs), .. } = d else { return false };
+    gs.iter().flat_map(|g| g.bounds.iter().flatten())
+        .any(|b| crate::canonicalize::protocols::builtin_protocol(b.as_str()).is_some())
+}
+
+/// Does a loaded source name function `d` of `module` — qualified
+/// (`int.from`), as a member (`xs.sum()`), or bare (a sibling call)?
+fn fn_is_named(spelled: &Spelled, module: &str, d: &Decl) -> bool {
+    let Decl::Fn { name, .. } = d else { return false };
+    let f = name.as_str();
+    spelled.module_calls.contains(&(module.to_string(), f.to_string()))
+        || spelled.members.contains(f)
+        || spelled.idents.contains(f)
+}
+
 fn reaches(spelled: &Spelled, name: &str, surface: &Surface) -> bool {
-    let qualified_here = spelled
-        .qualified
-        .iter()
-        .any(|(a, _)| a == name && spelled.is_module_qualifier(a));
+    let qualified_here = spelled.module_calls.iter().any(|(a, _)| a == name);
     // A member on a binding (or on anything that is not a module name) may
     // be a UFCS call into any module declaring it.
-    let ufcs = |f: &String| {
-        spelled.members.contains(f)
-            || spelled.qualified.iter().any(|(a, m)| m == f && !spelled.is_module_qualifier(a))
-    };
+    let ufcs = |f: &String| spelled.members.contains(f);
     qualified_here
         || spelled.idents.contains(name)
         || surface.fns.iter().any(ufcs)
@@ -159,9 +205,18 @@ fn variant_case_name(c: &VariantCase) -> &str {
     }
 }
 
-fn spell_program(p: &Program, out: &mut Spelled) {
-    for d in p.decls.iter().chain(p.imports.iter()) {
-        spell_decl(d, out);
+/// Spell `decls` of source `p` into `out`, classifying each `a.f` by the
+/// names in scope where it is spelled: the declaration's own bindings
+/// (params, lets, patterns) and the source's top-level `let`s.
+fn spell_unit<'d>(p: &Program, decls: impl Iterator<Item = &'d Decl>, out: &mut Spelled) {
+    let top: HashSet<String> = p.decls.iter().filter_map(|d| match d {
+        Decl::TopLet { name, .. } => Some(name.to_string()),
+        _ => None,
+    }).collect();
+    for d in decls {
+        let mut local = Spelled { binders: top.clone(), ..Spelled::default() };
+        spell_decl(d, &mut local);
+        out.absorb(local);
     }
 }
 
@@ -464,6 +519,16 @@ mod tests {
         // every module that declares one.
         let r = reached("fn main() -> Unit = println(int.to_string(1))\n");
         assert!(!r.contains(&"int8") && !r.contains(&"float64"), "{r:?}");
+    }
+
+    #[test]
+    fn a_protocol_generic_body_loads_its_conformers_only_when_named() {
+        // `int.from[S: Numeric]` dispatches into whichever number module `S`
+        // is, so naming it reaches them all; `int.to_string` names none of it.
+        let r = reached("fn main() -> Unit = println(int.to_string(int.from(2.5)))\n");
+        assert!(r.contains(&"int8") && r.contains(&"float64"), "{r:?}");
+        let r = reached("fn main() -> Unit = println(int.to_string(list.len([1])))\n");
+        assert!(!r.contains(&"int8"), "{r:?}");
     }
 
     #[test]
