@@ -692,7 +692,10 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
             } else {
                 // `[permissions] fs` (#4022): a path outside the granted roots is
                 // refused before the host touches it, with native's bytes.
-                crate::host_fs_scope::refuse(op, &a, &b).unwrap_or_else(|| fs_dispatch(op, &a, &b))
+                // The op itself runs beneath the granted root (#4084); a
+                // symlink it meets there answers the same refusal.
+                crate::host_fs_scope::refuse(op, &a, &b)
+                    .unwrap_or_else(|| crate::host_fs_scope::refused_by_call(op, &a, &b, fs_dispatch(op, &a, &b)))
             };
             *caller.data().fs_buf.lock().expect("fs buf") = buf;
             Ok(ret)

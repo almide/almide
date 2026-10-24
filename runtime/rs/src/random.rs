@@ -1,5 +1,6 @@
 // random extern — Rust native implementations (no external crate)
-// Uses simple xorshift for deterministic-free randomness seeded from time
+// int/float/choice/shuffle use a time-seeded xorshift (not for secrets);
+// random.bytes reads the OS CSPRNG (getrandom / getentropy).
 
 use std::cell::Cell;
 
@@ -58,6 +59,63 @@ pub fn almide_rt_random_shuffle<T: Clone>(mut xs: Vec<T>) -> Vec<T> {
         xs.swap(i, j);
     }
     xs
+}
+
+// `random.bytes(n)` (C-394): the one CSPRNG — n bytes from the operating
+// system's cryptographic source, never the xorshift above. Linux reads the
+// getrandom(2) syscall through libc; every other unix reads getentropy(3),
+// which serves at most 256 bytes a call, so the fill goes in 256-byte chunks
+// on every OS. A negative n is a contract violation (the ALS-T6 abort, the
+// text the wasm self-host `random_bytes` dies with). A source that fails is
+// an abort too: handing back fewer or predictable bytes would be silent.
+#[cfg(target_os = "linux")]
+fn almide_os_entropy(chunk: &mut [u8]) -> bool {
+    unsafe extern "C" {
+        fn getrandom(buf: *mut u8, buflen: usize, flags: u32) -> isize;
+    }
+    let mut filled = 0;
+    while filled < chunk.len() {
+        let rest = &mut chunk[filled..];
+        let r = unsafe { getrandom(rest.as_mut_ptr(), rest.len(), 0) };
+        if r > 0 {
+            filled += r as usize;
+        } else if r < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        } else {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn almide_os_entropy(chunk: &mut [u8]) -> bool {
+    unsafe extern "C" {
+        fn getentropy(buf: *mut u8, buflen: usize) -> i32;
+    }
+    unsafe { getentropy(chunk.as_mut_ptr(), chunk.len()) == 0 }
+}
+
+#[cfg(not(unix))]
+fn almide_os_entropy(_chunk: &mut [u8]) -> bool {
+    false
+}
+
+pub fn almide_rt_random_bytes(n: i64) -> Vec<u8> {
+    if n < 0 {
+        almide_abort(format!("random.bytes: negative length {n}"));
+    }
+    let mut v: Vec<u8> = Vec::new();
+    if v.try_reserve_exact(n as usize).is_err() {
+        almide_abort("out of memory");
+    }
+    v.resize(n as usize, 0);
+    for chunk in v.chunks_mut(256) {
+        if !almide_os_entropy(chunk) {
+            almide_abort("random.bytes: the OS random source failed");
+        }
+    }
+    v
 }
 
 // The 53-bit construction's boundary cells are EXECUTED, but not from here:

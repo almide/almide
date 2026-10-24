@@ -7043,6 +7043,9 @@ effect fn read_bytes_raw(path: String) -> Result[Bytes, String] = _
 
 
 
+
+
+
 /// A directory that every root_* call stays inside; made by open_root.
 mod type FsRoot = String
 
@@ -7077,47 +7080,80 @@ local fn __root_segments(path: String) -> List[String]? =
   )
 
 
-local effect fn __root_has_symlink(dir: String, segs: List[String]) -> Bool = match list.first(segs) {
-  none => false,
-  some(seg) => {
-    let next = dir + "/" + seg
-    if fs.is_symlink(next) then true else __root_has_symlink(next, list.drop(segs, 1))
-  },
+
+local fn __root_at(root: FsRoot, path: String) -> Result[String, String] = match __root_segments(path) {
+  none => err("fs: path escapes root: " + path),
+  some(segs) => ok(__root_dir(root) + "\u{0}" + string.join(segs, "/")),
 }
 
 
-local effect fn __root_resolve(root: FsRoot, path: String) -> Result[String, String] = {
-  let dir = __root_dir(root)
-  match __root_segments(path) {
-    none => err("fs: path escapes root: " + path),
-    some(segs) => if __root_has_symlink(dir, segs) then err("fs: path escapes root: " + path)
-    else if list.len(segs) == 0 then ok(dir)
-    else ok(dir + "/" + string.join(segs, "/")),
-  }
+local fn __root_answer[A](r: Result[A, String], path: String) -> Result[A, String] = match r {
+  ok(v) => ok(v),
+  err(e) => if e == "fs: path escapes root" then err("fs: path escapes root: " + path) else err(e),
 }
+
+
+
+
+@intrinsic("almide_rt_fs___root_read_text")
+effect fn __root_read_text(at: String) -> Result[String, String] = _
+
+@intrinsic("almide_rt_fs___root_read_bytes")
+effect fn __root_read_bytes(at: String) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_fs___root_list_dir")
+effect fn __root_list_dir(at: String) -> Result[List[String], String] = _
+
+
+@intrinsic("almide_rt_fs___root_exists")
+effect fn __root_exists(at: String) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_fs___root_write_text")
+effect fn __root_write_text(at: String, content: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs___root_remove")
+effect fn __root_remove(at: String) -> Result[Unit, String] = _
 
 /// read_text of path inside root; err if it escapes.
-effect fn root_read_text(root: FsRoot, path: String) -> Result[String, String] = read_text(__root_resolve(root, path)!)
+effect fn root_read_text(root: FsRoot, path: String) -> Result[String, String] = __root_answer(
+  __root_read_text(__root_at(root, path)!),
+  path,
+)
 
 /// read_bytes_raw of path inside root; err if it escapes.
-effect fn root_read_bytes(root: FsRoot, path: String) -> Result[Bytes, String] = read_bytes_raw(__root_resolve(root, path)!)
+effect fn root_read_bytes(root: FsRoot, path: String) -> Result[Bytes, String] = __root_answer(
+  __root_read_bytes(__root_at(root, path)!),
+  path,
+)
 
 /// write of content to path inside root; err if it escapes.
 @ordered
-effect fn root_write_text(root: FsRoot, path: String, content: String) -> Result[Unit, String] = write(
-  __root_resolve(root, path)!,
-  content,
+effect fn root_write_text(root: FsRoot, path: String, content: String) -> Result[Unit, String] = __root_answer(
+  __root_write_text(__root_at(root, path)!, content),
+  path,
 )
 
 /// list_dir of path inside root; err if it escapes.
-effect fn root_list_dir(root: FsRoot, path: String) -> Result[List[String], String] = list_dir(__root_resolve(root, path)!)
+effect fn root_list_dir(root: FsRoot, path: String) -> Result[List[String], String] = __root_answer(
+  __root_list_dir(__root_at(root, path)!),
+  path,
+)
 
 /// exists of path inside root; err if it escapes.
-effect fn root_exists(root: FsRoot, path: String) -> Result[Bool, String] = ok(fs.exists(__root_resolve(root, path)!))
+effect fn root_exists(root: FsRoot, path: String) -> Result[Bool, String] = match __root_answer(
+  __root_exists(__root_at(root, path)!),
+  path,
+) {
+  ok(b) => ok(bytes.len(b) > 0),
+  err(e) => err(e),
+}
 
 /// remove of path inside root; err if it escapes.
 @ordered
-effect fn root_remove(root: FsRoot, path: String) -> Result[Unit, String] = remove(__root_resolve(root, path)!)
+effect fn root_remove(root: FsRoot, path: String) -> Result[Unit, String] = __root_answer(
+  __root_remove(__root_at(root, path)!),
+  path,
+)
 "#;
 pub const SRC_FS_APPEND: &str = r#"
 
@@ -30429,22 +30465,26 @@ pub const SRC_RANDOM: &str = r#"
 
 
 
-/// Random Int in [min, max]; min if max <= min.
+/// Random Int in [min, max]; min if max <= min. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_int")
 effect fn int(min: Int, max: Int) -> Int = _
 
-/// Random Float in [0, 1); not crypto-grade.
+/// Random Float in [0, 1). Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_float")
 effect fn float() -> Float = _
 
-/// Random element of xs; none when empty.
+/// Random element of xs; none when empty. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_choice")
 effect fn choice[T](xs: List[T]) -> T? = _
 
-/// Random permutation of xs as a new list.
+/// Random permutation of xs as a new list. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_shuffle")
 @consume(xs)
 effect fn shuffle[T](xs: List[T]) -> List[T] = _
+
+/// n bytes from the OS cryptographic random source (CSPRNG); n < 0 aborts.
+@intrinsic("almide_rt_random_bytes")
+effect fn bytes(n: Int) -> Bytes = _
 
 
 
@@ -30529,6 +30569,48 @@ fn next_shuffle[A](rng: Rng, xs: List[A]) -> (List[A], Rng) = {
     i = i - 1
   }
   (ys, r)
+}
+"#;
+pub const SRC_RANDOM_BYTES: &str = r#"
+
+
+
+
+
+
+
+
+
+fn random_bytes(n: Int) -> Bytes = {
+  if n < 0 then prim.die(prim.handle("Error: random.bytes: negative length ${int.to_string(n)}\n"))
+  else ()
+  let buf = prim.alloc_bytes(n)
+  let p = prim.handle(buf) + 12
+  var off = 0
+  while off + 256 <= n {
+    let _e = prim.random_get(p + off, 256)
+    off = off + 256
+  }
+  while off + 8 <= n {
+    let _e = prim.random_get(p + off, 8)
+    off = off + 8
+  }
+  if off < n then __rb_tail(p, off, n)
+  else ()
+  buf
+}
+
+fn __rb_tail(p: Int, off: Int, n: Int) -> Unit = {
+  let scratch = prim.alloc_bytes(8)
+  let sp = prim.handle(scratch) + 12
+  let _e = prim.random_get(sp, 8)
+  var r = prim.load64(sp)
+  var i = off
+  while i < n {
+    prim.store8(p + i, int.band(r, 255))
+    r = int.bshr(r, 8)
+    i = i + 1
+  }
 }
 "#;
 pub const SRC_RANDOM_CHOICE: &str = r#"
@@ -42775,6 +42857,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "process_stdin_lines" => Some(SRC_PROCESS_STDIN_LINES),
         "process_wasm" => Some(SRC_PROCESS_WASM),
         "random" => Some(SRC_RANDOM),
+        "random_bytes" => Some(SRC_RANDOM_BYTES),
         "random_choice" => Some(SRC_RANDOM_CHOICE),
         "random_float" => Some(SRC_RANDOM_FLOAT),
         "random_int" => Some(SRC_RANDOM_INT),

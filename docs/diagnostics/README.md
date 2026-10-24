@@ -68,6 +68,7 @@ equal to the set of codes the compiler emits.
 | [E098](E098.md) | The closure passed to `testing.assert_aborts` captures a local of the test, or is a fn value rather than a lambda written in the call: it runs in a child process or instance, where the test's locals do not exist |
 | [E099](E099.md) | `testing.assert_aborts` called outside a test block, used as a value, or called inside another `assert_aborts` closure |
 | [E100](E100.md) | Outside the memory-safety guarantee: a `@memory_unsafe` call (`ffi.*`, a deprecated `bytes` raw-pointer call) in a file without `import ffi` (#4043); under `--profile critical`, any of those or an `@extern` fn (#4008) |
+| [E101](E101.md) | A raw bidirectional control character (U+202A–U+202E, U+2066–U+2069) in a comment, string literal or heredoc — Trojan Source; write `\u{202E}` in a literal (#4092) |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

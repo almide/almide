@@ -515,14 +515,17 @@ with the directory the program is started from.
   directory that points out of it can be neither asked about nor removed.
   `copy` and `rename` check both paths, the temp calls the temp dir they
   create in, `glob` its pattern's literal base.
-- **Native** (`almide run`, `almide build`): the build wraps each of the
-  program's calls to the fs runtime in the check and sets the roots as the
-  first statement of `main`; the runtime itself is unchanged. A test harness
-  build (`almide test`) has no `main` and is not bounded.
+- **Native** (`almide run`, `almide build`, `almide test`): the build wraps
+  each of the program's calls to the fs runtime in the check, with the roots
+  baked in and resolved on the first fs call, and calls a scoped twin of the
+  runtime fn (`src/cli/fs_scope_twin.rs`: the same bodies with their
+  `std::fs` calls made through the scope); the runtime itself is unchanged.
+  A test harness build has no `main` and is bounded the same way (#4084).
 - **Wasm, embedded host** (`almide run --target wasm`, the wasm leg of
   `almide test`): the same check, from the same source
-  (`crates/almide-base/src/fs_scope.rs`), sits in front of the host's one fs
-  import, so both targets refuse the same paths with the same bytes. A
+  (`crates/almide-rt-core/src/fs_scope.rs`), sits in front of the host's one
+  fs import, and the host's fs calls go through the same scoped core, so
+  both targets refuse the same paths with the same bytes. A
   program that runs as its p3 component (the full-response http family)
   gets the granted directories as its WASI preopens — and, without the key,
   the working directory and the temp dir, no longer `/` — so there the
@@ -531,10 +534,23 @@ with the directory the program is started from.
   reaches what its operator preopens (`wasmtime --dir`); the manifest does
   not travel with it.
 
-The check runs before the operation, so a tree rewritten between the two (a
-directory swapped for a symlink) can race it. Within a program, `fs.open_root`
+The check only decides where a path lands; on native and the embedded host
+the operation then runs beneath a descriptor of the granted directory it
+lands under, opened once on first use (`crates/almide-rt-core/src/fs_scoped_core.rs`,
+#4084): the decided segments are walked from that descriptor without
+following a symlink (openat2 `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS` on Linux,
+an `O_NOFOLLOW` openat walk on macOS) and the last one is opened, created,
+listed, removed or renamed from its parent's descriptor. A tree rewritten
+between the check and the call (a directory swapped for a symlink) is refused
+by the call with the same `err`, never followed. What remains path-based: an
+operation on a granted directory itself, the metadata of an entry the process
+may not open, and every call on a platform other than 64-bit Linux and macOS,
+where the check still runs before a plain call and a rewrite can race it. The
+p3 component's bound is its preopens, which the runtime (wasmtime-wasi over
+cap-std) resolves beneath the preopened descriptor at the call itself. Within a program, `fs.open_root`
 (`docs/stdlib/fs.md`) bounds the paths built from untrusted input to one
-directory on top of this scope.
+directory on top of this scope, and its calls refuse a symlink by descriptor
+on every leg (#4084), so a rewrite cannot race them.
 
 Flipping the default — an absent `fs` key meaning the project directory only —
 would refuse every program that reads outside its project today (absolute

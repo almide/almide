@@ -138,6 +138,8 @@ pub const HOST_OPS: &[HostOp] = &[
     op("random", "float", "almide_rt_random_float", ENTROPY),
     op("random", "choice", "almide_rt_random_choice", ENTROPY).routed(),
     op("random", "shuffle", "almide_rt_random_shuffle", ENTROPY).routed().by_value(&[0]),
+    // `random.bytes` (C-394): the OS CSPRNG on native, `random_get` on wasm.
+    op("random", "bytes", "almide_rt_random_bytes", ENTROPY),
     // ── io ──
     op("io", "print", "almide_rt_io_print", OUT),
     op("io", "write", "almide_rt_io_write", OUT),
@@ -174,6 +176,11 @@ pub const HOST_OPS: &[HostOp] = &[
     op("fs", "for_each_line", "almide_rt_fs_for_each_line", READ).result(),
     op("fs", "__fallible_fold_lines", "almide_rt_fs_fold_lines_effect", READ).routed().by_value(&[1]).result(),
     op("fs", "__fallible_for_each_line", "almide_rt_fs_for_each_line_effect", READ).result(),
+    // The rooted family's descriptor calls (#4084): `fs.root_*` reach them.
+    op("fs", "__root_read_text", "almide_rt_fs___root_read_text", READ).result(),
+    op("fs", "__root_read_bytes", "almide_rt_fs___root_read_bytes", READ).result(),
+    op("fs", "__root_list_dir", "almide_rt_fs___root_list_dir", READ).result(),
+    op("fs", "__root_exists", "almide_rt_fs___root_exists", READ).result(),
     // `fs.temp_dir` is env.temp_dir's other spelling (C-189): an environment read.
     op("fs", "temp_dir", "almide_rt_fs_temp_dir", ENV),
     // ── fs: writes ──
@@ -182,11 +189,13 @@ pub const HOST_OPS: &[HostOp] = &[
     op("fs", "write_bytes_raw", "almide_rt_fs_write_bytes_raw", WRITE).result(),
     op("fs", "mkdir_p", "almide_rt_fs_mkdir_p", WRITE).result(),
     op("fs", "remove_all", "almide_rt_fs_remove_all", WRITE).result(),
+    op("fs", "__root_write_text", "almide_rt_fs___root_write_text", WRITE).result(),
     op("fs", "rename", "almide_rt_fs_rename", WRITE).result(),
     // Read-then-write compositions, and the unique-name creators (entropy suffix).
     op("fs", "copy", "almide_rt_fs_copy", READ_WRITE).result(),
     op("fs", "append", "almide_rt_fs_append", READ_WRITE).result(),
     op("fs", "remove", "almide_rt_fs_remove", READ_WRITE).result(),
+    op("fs", "__root_remove", "almide_rt_fs___root_remove", READ_WRITE).result(),
     op("fs", "create_temp_dir", "almide_rt_fs_create_temp_dir", WRITE_ENTROPY).result(),
     op("fs", "create_temp_file", "almide_rt_fs_create_temp_file", WRITE_ENTROPY).result(),
     // ── http: the String client, one row per verb ──

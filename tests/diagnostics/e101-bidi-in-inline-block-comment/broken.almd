@@ -1,0 +1,4 @@
+// E101 variant: an LRO inside an inline block comment, which the parser drops
+// from the token stream before the grammar sees it.
+fn add(a: Int, b: Int) -> Int = a + b
+fn main() -> Unit = println(int.to_string(add(1 /* ‭ first */, 2)))

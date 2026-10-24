@@ -234,6 +234,11 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // prim.random_get (the op-32 entropy boundary) + pure span math —
     // the VALUE is nondeterministic by contract (C-112 pins the range).
     "random_int",
+    // random_bytes.almd (C-394): the same op-32 boundary in literal 256- and
+    // 8-byte draws into a fresh n-byte Bytes, the tail by prim.store8 from an
+    // 8-byte scratch, a T6 prim.die on a negative n; C-394 pins the lengths
+    // and two draws differing, not the bytes.
+    "random_bytes",
     // json_path.almd, READ side only (audited 2026-08-25): the path rep
     // is a plain List[String]; get walks value.field / value.as_array /
     // list.get — all native arms here, no raw layout reads. set/remove
