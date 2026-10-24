@@ -20,5 +20,5 @@ effect fn main() -> Unit = {
   println("len 256: ${bytes.len(random.bytes(256))}")
   let c = random.bytes(300)
   println("len 300: ${bytes.len(c)}")
-  println("tail drawn: ${bytes.slice(c, 256, 300) != bytes.new(44)}")
+  println("tail drawn: ${bytes.slice(c, 256, 300) != bytes.zeros(44)}")
 }

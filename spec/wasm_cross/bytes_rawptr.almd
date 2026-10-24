@@ -88,11 +88,11 @@ effect fn rebind_as_ptr() -> Unit = {
 // the hold must share the block AFTER that: a write through the address is
 // the var's own until the var is rebound.
 effect fn as_mut_ptr_write() -> Unit = {
-  var d = bytes.new(4)
+  var d = bytes.zeros(4)
   let p = bytes.as_mut_ptr(d)
   let n = bytes.copy_to_ptr(bytes.from_list([65, 66, 67, 68]), p, 4)
   println("as_mut_ptr: ${n} ${show(d)}")
-  d = bytes.new(1)
+  d = bytes.zeros(1)
   let filler = fillers("f")
   let m = bytes.copy_to_ptr(bytes.from_string("PWNED"), p, 4)
   println("as_mut_ptr: ${m} corrupted ${corrupted(filler)} ${show(bytes.from_raw_ptr(p, 4))} ${bytes.len(d)}")
