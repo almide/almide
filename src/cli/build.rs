@@ -452,11 +452,9 @@ pub(crate) fn inject_fs_scope(rs_code: String) -> String {
     };
     let user = wrap_fs_calls(user, &guards);
     let list: Vec<String> = roots.iter().map(|r| format!("{r:?}")).collect();
-    let prelude = format!(
-        "\n{}\nconst __ALMIDE_FS_SCOPE_ROOTS: &[&str] = &[{}];\n{FS_SCOPE_GUARDS}",
-        almide_base::FS_SCOPE_SOURCE,
-        list.join(", ")
-    );
+    // The scope's own items (`fs_scope_*`) are the runtime's: fs.rs includes
+    // them through almide-rt-core fs_beneath_core.rs.
+    let prelude = format!("\nconst __ALMIDE_FS_SCOPE_ROOTS: &[&str] = &[{}];\n{FS_SCOPE_GUARDS}", list.join(", "));
     if head.is_empty() {
         splice_after_inner_attrs(&user, &prelude)
     } else {

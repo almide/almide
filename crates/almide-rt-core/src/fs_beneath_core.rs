@@ -31,9 +31,15 @@
 // symlink and then make the plain call — the pre-#4084 check, which a
 // concurrent rewrite can race.
 //
+// Under `[permissions] fs` (fs_scoped_core.rs, included below) the root
+// itself is opened beneath the granted directory it falls under, so a rooted
+// call cannot be steered out of the grant through the root's own path either;
+// without the key it is opened by its path, as before.
+//
 // Splice discipline (lib.rs): no `crate::` paths, no `mod`, no `use` lines.
 
 include!("fs_beneath_sys.rs");
+include!("fs_scoped_core.rs");
 
 /// The refusal a rooted call answers for a symlink on its way; the Almide
 /// side completes it with the path the program wrote (`fs: path escapes
@@ -85,7 +91,7 @@ pub fn fs_beneath_read_text(dir: &str, rel: &str) -> Result<String, FsBeneathErr
 pub fn fs_beneath_write(dir: &str, rel: &str, data: &[u8]) -> Result<(), FsBeneathError> {
     let segs = fs_beneath_segments(rel)?;
     let Some((last, parents)) = segs.split_last() else {
-        return std::fs::write(dir, data).map_err(FsBeneathError::Io);
+        return almide_sfs::write(dir, data).map_err(FsBeneathError::Io);
     };
     fs_beneath_imp::write(dir, parents, last, data)
 }
@@ -103,7 +109,7 @@ pub fn fs_beneath_list(dir: &str, rel: &str) -> Result<Vec<String>, FsBeneathErr
 pub fn fs_beneath_exists(dir: &str, rel: &str) -> Result<bool, FsBeneathError> {
     let segs = fs_beneath_segments(rel)?;
     let Some((last, parents)) = segs.split_last() else {
-        return Ok(std::path::Path::new(dir).exists());
+        return Ok(almide_sfs::exists(dir));
     };
     fs_beneath_imp::exists(dir, parents, last)
 }
@@ -112,8 +118,7 @@ pub fn fs_beneath_exists(dir: &str, rel: &str) -> Result<bool, FsBeneathError> {
 pub fn fs_beneath_remove(dir: &str, rel: &str) -> Result<(), FsBeneathError> {
     let segs = fs_beneath_segments(rel)?;
     let Some((last, parents)) = segs.split_last() else {
-        let p = std::path::Path::new(dir);
-        let r = if p.is_dir() { std::fs::remove_dir(p) } else { std::fs::remove_file(p) };
+        let r = if almide_sfs::is_dir(dir) { almide_sfs::remove_dir(dir) } else { almide_sfs::remove_file(dir) };
         return r.map_err(FsBeneathError::Io);
     };
     fs_beneath_imp::remove(dir, parents, last)
@@ -127,7 +132,7 @@ pub fn fs_beneath_remove(dir: &str, rel: &str) -> Result<(), FsBeneathError> {
 pub fn fs_beneath_read_with(dir: &str, rel: &str, walk_only: bool, hook: &mut dyn FnMut(usize)) -> Result<Vec<u8>, FsBeneathError> {
     let segs = fs_beneath_segments(rel)?;
     let Some((last, parents)) = segs.split_last() else {
-        return std::fs::read(dir).map_err(FsBeneathError::Io);
+        return almide_sfs::read(dir).map_err(FsBeneathError::Io);
     };
     fs_beneath_imp::read(dir, parents, last, walk_only, hook)
 }
@@ -139,7 +144,7 @@ mod fs_beneath_imp {
 
     /// A failed open of `name` under `dir`: `Escape` when `name` is a
     /// symlink, the open's own error otherwise.
-    fn classify(dir: &OwnedFd, name: &str, e: std::io::Error) -> FsBeneathError {
+    pub fn classify(dir: &OwnedFd, name: &str, e: std::io::Error) -> FsBeneathError {
         match super::almide_fs_beneath_sys::symlink_at(std::os::fd::AsFd::as_fd(&dir), name) {
             Ok(true) => FsBeneathError::Escape,
             _ => FsBeneathError::Io(e),
@@ -149,14 +154,25 @@ mod fs_beneath_imp {
     /// The directory `<root>/<parents...>`, reached without following any
     /// symlink below the root.
     fn parent(dir: &str, parents: &[&str], walk_only: bool, hook: &mut dyn FnMut(usize)) -> Result<OwnedFd, FsBeneathError> {
-        let root: OwnedFd = std::fs::File::open(dir).map_err(FsBeneathError::Io)?.into();
+        let root = super::almide_sfs::open_dir(dir).map_err(FsBeneathError::Io)?;
         if parents.is_empty() {
             hook(0);
             return Ok(root);
         }
+        parent_from(&root, parents, walk_only, hook)
+    }
+
+    /// The directory `<root>/<parents...>` from the held root descriptor,
+    /// without following any symlink below it (the root itself is
+    /// duplicated for an empty `parents`).
+    pub fn parent_from(root: &OwnedFd, parents: &[&str], walk_only: bool, hook: &mut dyn FnMut(usize)) -> Result<OwnedFd, FsBeneathError> {
+        if parents.is_empty() {
+            hook(0);
+            return root.try_clone().map_err(FsBeneathError::Io);
+        }
         #[cfg(target_os = "linux")]
         if !walk_only {
-            if let Some(r) = super::almide_fs_beneath_sys::openat2_dir(std::os::fd::AsFd::as_fd(&root), &parents.join("/")) {
+            if let Some(r) = super::almide_fs_beneath_sys::openat2_dir(std::os::fd::AsFd::as_fd(root), &parents.join("/")) {
                 return match r {
                     Ok(fd) => {
                         hook(parents.len());
@@ -169,16 +185,17 @@ mod fs_beneath_imp {
             }
         }
         let _ = walk_only;
-        let mut cur = root;
+        let mut cur: Option<OwnedFd> = None;
         for (i, seg) in parents.iter().enumerate() {
             hook(i);
-            cur = match super::almide_fs_beneath_sys::open_at(std::os::fd::AsFd::as_fd(&cur), seg, super::almide_fs_beneath_sys::Open::Dir) {
+            let at = cur.as_ref().unwrap_or(root);
+            cur = Some(match super::almide_fs_beneath_sys::open_at(std::os::fd::AsFd::as_fd(at), seg, super::almide_fs_beneath_sys::Open::Dir) {
                 Ok(next) => next,
-                Err(e) => return Err(classify(&cur, seg, e)),
-            };
+                Err(e) => return Err(classify(at, seg, e)),
+            });
         }
         hook(parents.len());
-        Ok(cur)
+        cur.ok_or(FsBeneathError::Escape)
     }
 
     pub fn read(dir: &str, parents: &[&str], last: &str, walk_only: bool, hook: &mut dyn FnMut(usize)) -> Result<Vec<u8>, FsBeneathError> {
@@ -197,7 +214,7 @@ mod fs_beneath_imp {
 
     pub fn list(dir: &str, segs: &[&str]) -> Result<Vec<String>, FsBeneathError> {
         let fd = match segs.split_last() {
-            None => std::fs::File::open(dir).map_err(FsBeneathError::Io)?.into(),
+            None => super::almide_sfs::open_dir(dir).map_err(FsBeneathError::Io)?,
             Some((last, parents)) => {
                 let p = parent(dir, parents, false, &mut |_| {})?;
                 super::almide_fs_beneath_sys::open_at(std::os::fd::AsFd::as_fd(&p), last, super::almide_fs_beneath_sys::Open::Dir).map_err(|e| classify(&p, last, e))?

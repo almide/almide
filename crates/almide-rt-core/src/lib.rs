@@ -32,5 +32,7 @@ pub mod net_unix_core;
 /// The rooted fs family by descriptor (#4084): `runtime/rs/src/fs.rs`
 /// includes it, the embedded host serves its rooted ops 120..=125 with it.
 /// Its syscall module (fs_beneath_sys.rs, included) is the crate's second
-/// sanctioned `unsafe` site.
+/// sanctioned `unsafe` site. It also includes fs_scoped_core.rs (and its
+/// fs_scope.rs): every fs call under `[permissions] fs` made beneath the
+/// granted root's descriptor, through the `almide_sfs` facade.
 pub mod fs_beneath_core;
