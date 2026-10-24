@@ -61,7 +61,7 @@
 5899	spec/wasm_cross/bytes_param_writeback.almd
 2927	spec/wasm_cross/bytes_push_growth.almd
 1964	spec/wasm_cross/bytes_push_inplace.almd
-4963	spec/wasm_cross/bytes_rawptr.almd
+5047	spec/wasm_cross/bytes_rawptr.almd
 2741	spec/wasm_cross/bytes_repeat_product_wrap_oom.almd
 17394	spec/wasm_cross/bytes_search_edit_family.almd
 7550	spec/wasm_cross/bytes_set_on_record_field.almd
@@ -219,6 +219,7 @@
 4953	spec/wasm_cross/fan_trap_waits_for_elements_below.almd
 2780	spec/wasm_cross/fan_var_thunk_list.almd
 2736	spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
+8806	spec/wasm_cross/ffi_address_var_rebind.almd
 4640	spec/wasm_cross/field_and_interp_accumulator.almd
 2815	spec/wasm_cross/filter_map_conditional_arm.almd
 3109	spec/wasm_cross/flat_map_aliased_field.almd
