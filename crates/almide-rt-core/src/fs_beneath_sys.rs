@@ -111,12 +111,11 @@ mod almide_fs_beneath_sys {
     }
 
     fn open_flags(how: Open) -> CInt {
-        use flags::*;
-        let base = O_NOFOLLOW | O_CLOEXEC;
+        let base = flags::O_NOFOLLOW | flags::O_CLOEXEC;
         match how {
-            Open::Dir => base | O_DIRECTORY,
+            Open::Dir => base | flags::O_DIRECTORY,
             Open::Read => base,
-            Open::WriteTrunc => base | O_WRONLY | O_CREAT | O_TRUNC,
+            Open::WriteTrunc => base | flags::O_WRONLY | flags::O_CREAT | flags::O_TRUNC,
         }
     }
 
