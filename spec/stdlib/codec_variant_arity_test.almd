@@ -1,0 +1,36 @@
+// #4164: a derived tuple-variant decode refuses a payload array whose length
+// is not the case's arity, with an err naming the case and both counts —
+// never an index-out-of-bounds abort, never a silent drop of extra elements.
+import json
+
+type Role: Codec = | Guest | Admin(String) | Pair(Int, Int)
+
+fn decode(text: String) -> Result[Role, String] = Role.decode(json.parse(text) ?? value.null())
+
+test "too short is an err, not an abort" {
+  assert_eq(
+    decode("{\"Admin\": []}"),
+    err("expected 1 element(s) for variant Admin of Role, received 0"),
+  )
+  assert_eq(
+    decode("{\"Pair\": [1]}"),
+    err("expected 2 element(s) for variant Pair of Role, received 1"),
+  )
+}
+
+test "too long is an err, not a silent drop" {
+  assert_eq(
+    decode("{\"Admin\": [\"a\", \"b\"]}"),
+    err("expected 1 element(s) for variant Admin of Role, received 2"),
+  )
+  assert_eq(
+    decode("{\"Pair\": [1, 2, 3]}"),
+    err("expected 2 element(s) for variant Pair of Role, received 3"),
+  )
+}
+
+test "the exact arity decodes" {
+  assert_eq(decode("{\"Admin\": [\"root\"]}"), ok(Admin("root")))
+  assert_eq(decode("{\"Pair\": [1, 2]}"), ok(Pair(1, 2)))
+  assert_eq(decode("{\"Guest\": null}"), ok(Guest))
+}

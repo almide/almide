@@ -1,0 +1,27 @@
+// @contract: C-298
+// #4164: a derived tuple-variant decode checks the payload array's length
+// against the case's arity. Too short used to abort the process (index out of
+// bounds) on every leg; too long was accepted with the extra elements dropped.
+// Both are now a decode err naming the case and both counts; the exact arity
+// decodes as before, and the program runs to its last line.
+import json
+
+type Role: Codec = | Guest | Admin(String) | Pair(Int, Int)
+
+fn show(text: String) -> String = match Role.decode(json.parse(text) ?? value.null()) {
+  ok(Guest) => "ok Guest",
+  ok(Admin(n)) => "ok Admin(${n})",
+  ok(Pair(a, b)) => "ok Pair(${a}, ${b})",
+  err(e) => "err ${e}",
+}
+
+fn main() -> Unit = {
+  println(show("{\"Admin\": []}"))
+  println(show("{\"Admin\": [\"root\"]}"))
+  println(show("{\"Admin\": [\"root\", \"extra\"]}"))
+  println(show("{\"Pair\": [1]}"))
+  println(show("{\"Pair\": [1, 2]}"))
+  println(show("{\"Pair\": [1, 2, 3]}"))
+  println(show("{\"Guest\": null}"))
+  println("done")
+}
