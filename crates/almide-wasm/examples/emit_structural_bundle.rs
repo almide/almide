@@ -76,6 +76,7 @@ fn main() {
         }
         return;
     }
+    let pinned = artifact.is_some();
     let pin = artifact.map(|path| {
         let file = std::fs::read(&path).unwrap_or_else(|e| fail(&format!("read {}: {e}", path.display())));
         if file != shipped {
@@ -93,7 +94,7 @@ fn main() {
     // Written only once the artifact is known to be these bytes.
     if let Some(path) = &anchors {
         std::fs::write(path, &anchor_file).unwrap_or_else(|e| fail(&format!("write {}: {e}", path.display())));
-        if artifact.is_none() {
+        if !pinned {
             let w = path.with_extension("anchors.wasm");
             std::fs::write(&w, &shipped).unwrap_or_else(|e| fail(&format!("write {}: {e}", w.display())));
         }
