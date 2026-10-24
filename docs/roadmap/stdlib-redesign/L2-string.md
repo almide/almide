@@ -1,7 +1,7 @@
 <!-- description: Stdlib redesign L2/L3 — string: one join (list.join), the UTF-8 codec moves wholly to bytes, run_length_encode and length retire, compare/byte_len/UTF-16 are added -->
 # L2/L3: string
 
-> Last updated: 2026-10-21
+> Last updated: 2026-10-24
 > 前提: [L0](L0-conventions.md)・[L1](L1-categories.md)
 > 出典: Rust https://doc.rust-lang.org/std/primitive.str.html (F) ・ Go https://pkg.go.dev/strings (F) ・ Python https://docs.python.org/3/library/stdtypes.html (F) ・ TS/JS https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String (F) ・ Gleam https://gleam-stdlib.hexdocs.pm/gleam/string.html (F) ・ Elixir https://elixir.hexdocs.pm/String.html (F) ・ OCaml https://ocaml.org/manual/latest/api/String.html (F) ・ Kotlin https://kotlinlang.org/api/core/kotlin-stdlib/kotlin.text/ (一部 F) ・ Swift https://developer.apple.com/documentation/swift/string （ページが JS 描画のため取り寄せ不可。Swift の欄は F なし）
 > 実測: `almide 0.68.0 (dev, 437b8f127)`、プローブは `scratchpad/sr/probe-string/`（a〜e.almd）
@@ -257,6 +257,14 @@
 - (d) 改名と追加です。epoch 15 で `string.count(s, sub)`（文字列を渡す形）を `@deprecated(use="count_matches")` にし、epoch 16 で述語の形だけにします。`almide fix` が文字列を渡す呼び出しを `count_matches` に書き換えます。
 - issue: #4012
 
+### R-string-19 定数時間の比較 `string.is_equal_constant_time` を置く — ○ 採用
+
+- いま: webhook の署名ヘッダやトークンは `String` で届きます。`==` で比べると、最初に違うバイトで返るので、時間から値を当てられます。
+- 案: `string.is_equal_constant_time(a: String, b: String) -> Bool`。UTF-8 のバイトを比べます。バイト長が違えばすぐ false。`bytes.is_equal_constant_time`（R-bytes-29）と同じ仕組みで、{Bytes, String} の型の行列のセルです。HMAC の検証には `hash.is_valid_hmac_sha256_hex` を使います（R-hash-06）。
+- 根拠の L0 規則: R-L0-09、R-L0-30。
+- (a) Python `secrets.compare_digest`（str も受け取る）、Erlang `crypto:hash_equals`。
+- (d) 追加。契約 C-421。issue: #4106
+
 ## L3: 関数表
 
 | 関数 | シグネチャ(現行, mut 表示) | 他言語の主な綴り | 判定 | 案 |
@@ -351,6 +359,7 @@
 | `unique` | （追加）`string.unique(s: String) -> String` | Kotlin `distinct` | 追加 | R-L0-42 |
 | `unique_by` | （追加）`string.unique_by(s: String, f: (String) -> K) -> String` | Kotlin `distinctBy` | 追加 | R-L0-42 |
 | `count` | （追加）`(s: String, f: (String) -> Bool) -> Int` | Kotlin `count {}` / Swift `count(where:)` | 追加 | R-string-18、R-L0-42 |
+| `is_equal_constant_time` | `string.is_equal_constant_time(a: String, b: String) -> Bool`（案） | Python `secrets.compare_digest` / Erlang `crypto:hash_equals` | 追加 | R-string-19 |
 
 現行 50 関数 + 追加 4 = 54 行。
 

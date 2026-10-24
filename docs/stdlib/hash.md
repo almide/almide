@@ -1,6 +1,6 @@
 # hash
 
-Non-cryptographic digests and SHA-256. `import hash`.
+Checksums, digests (SHA-256/512, MD5/SHA-1 for compatibility) and HMAC. `import hash`.
 
 Pure — no capability, byte-identical on both targets (C-299). The wasm leg is
 fully self-hosted; no new intrinsic.
@@ -74,9 +74,60 @@ fn main() -> Unit = {
 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 ```
 
-Out of scope, deliberately: TLS, AEAD, and asymmetric crypto (#1467 keeps
-those a separate decision). Keyed hashing (HMAC) composes from `sha256` when
-needed.
+### `hash.hmac_sha256(key: Bytes, b: Bytes) -> Bytes`
+
+HMAC-SHA256 (RFC 2104) of `b` under `key` — **key first**. 32 bytes; the
+`_hex` cell gives 64 lowercase hex characters, and `hmac_sha512` /
+`hmac_sha512_hex` are the SHA-512 pair. Equal to the RFC 4231 vectors on
+both targets (C-420). Never build a MAC as `hash.sha256(key ++ msg)`: that
+is forgeable by length extension.
+
+```almd run
+import hash
+
+fn main() -> Unit = {
+  println(hash.hmac_sha256_hex(bytes.from_string("Jefe"), bytes.from_string("what do ya want for nothing?")))
+}
+```
+```output
+5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843
+```
+
+### `hash.is_valid_hmac_sha256_hex(key: Bytes, b: Bytes, tag: String) -> Bool`
+
+Verify a MAC: true iff `tag` (hex, either case) is the HMAC-SHA256 of `b`
+under `key`, compared in constant time (C-421). Bad hex is `false`, never an
+abort. This is the call for a webhook signature header — do not compute the
+MAC and compare it with `==`, which returns at the first differing byte and
+leaks the MAC through timing. `is_valid_hmac_sha256` takes the tag as raw
+`Bytes`; the `sha512` pair has the same shape.
+
+```almd run
+import hash
+
+fn main() -> Unit = {
+  let key = bytes.from_string("Jefe")
+  let body = bytes.from_string("what do ya want for nothing?")
+  let header = "5BDCC146BF60754E6A042426089575C75A003F089D2739839DEC58B964EC3843"
+  println("${hash.is_valid_hmac_sha256_hex(key, body, header)}")
+  println("${hash.is_valid_hmac_sha256_hex(key, bytes.from_string("tampered"), header)}")
+}
+```
+```output
+true
+false
+```
+
+`bytes.is_equal_constant_time` / `string.is_equal_constant_time` are the
+compare these use: a length mismatch is false at once, and otherwise every
+byte is read with no branch on the contents.
+
+`md5`, `md5_hex`, `sha1` and `sha1_hex` are for compatibility only: they
+carry `@insecure_digest`, and `--profile critical` refuses a call to one
+(E100).
+
+Out of scope, deliberately: TLS, AEAD, signatures and asymmetric crypto
+(#2596's `crypto` module).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
