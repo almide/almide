@@ -456,7 +456,7 @@ pub(crate) fn inject_fs_scope(rs_code: String) -> String {
         &format!("\nfn main() {{\n    let _ = __ALMIDE_FS_SCOPE.set([{}].iter().map(|r| fs_scope_root(r)).collect());\n", list.join(", ")),
         1,
     );
-    let prelude = format!("\n{}\n{FS_SCOPE_GUARDS}", include_str!("../../crates/almide-base/src/fs_scope.rs"));
+    let prelude = format!("\n{}\n{FS_SCOPE_GUARDS}", almide_base::FS_SCOPE_SOURCE);
     if head.is_empty() {
         splice_after_inner_attrs(&user, &prelude)
     } else {
