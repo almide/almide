@@ -412,6 +412,37 @@ pub fn decl_names(decls: &PassDecls) -> Result<BTreeMap<u32, String>, String> {
 /// function, and the `declared|direct|callees` call graph of every defined
 /// function (`check_prog_cert`).
 pub fn caps(decls: &PassDecls) -> Result<(Vec<(String, String)>, String), String> {
+    caps_allowed(decls, None)
+}
+
+/// The capabilities an `almide.toml [permissions].allow` list grants an
+/// `effect fn` — the same reading as the MIR producer's
+/// `certificate::manifest_caps`: `IO` the console, stdin and the file
+/// system, `Rand` entropy, `Env` arguments, environment and processes,
+/// `Time` the clock, `Net` the network. A name outside the list grants
+/// nothing.
+pub fn manifest_bound(allow: &[String]) -> BTreeSet<u32> {
+    use cap::*;
+    allow
+        .iter()
+        .flat_map(|p| match p.as_str() {
+            "IO" => &[STDOUT, STDIN, FS_READ, FS_WRITE][..],
+            "Rand" => &[ENTROPY][..],
+            "Env" => &[ENV, PROC][..],
+            "Time" => &[CLOCK][..],
+            "Net" => &[NET][..],
+            _ => &[][..],
+        })
+        .copied()
+        .collect()
+}
+
+/// [`caps`] under a manifest: with `allow`, every `effect fn` declares only
+/// what the list grants (a plain `fn` keeps its bound — a manifest never
+/// grants what the effect system denies), so a program that reaches past
+/// its manifest is REJECTED by the checker.
+pub fn caps_allowed(decls: &PassDecls, allow: Option<&[String]>) -> Result<(Vec<(String, String)>, String), String> {
+    let manifest = allow.map(manifest_bound);
     let m = decode(&decls.bytes)?;
     let n_imports = m.imports.len() as u32;
     let callees: Vec<BTreeSet<usize>> = m.bodies.iter().map(|b| graph_edges(&m, b)).collect();
@@ -434,7 +465,7 @@ pub fn caps(decls: &PassDecls) -> Result<(Vec<(String, String)>, String), String
         .enumerate()
         .map(|(j, b)| direct_caps(&m, b, meter.get(&j).copied().unwrap_or(0)))
         .collect();
-    let bound = least_bounds(&direct, &callees, &declared);
+    let bound = least_bounds(&direct, &callees, &declared, manifest.as_ref());
     let flat = declared
         .iter()
         .map(|(&j, (name, _))| (name.clone(), format!("{}|{}", ids(bound[j].iter().copied()), ids(reach(&direct, &callees, j)))))
@@ -591,11 +622,12 @@ fn least_bounds(
     direct: &[BTreeSet<u32>],
     callees: &[BTreeSet<usize>],
     declared: &BTreeMap<usize, (String, Declared)>,
+    manifest: Option<&BTreeSet<u32>>,
 ) -> Vec<BTreeSet<u32>> {
     let fixed = |j: usize| {
         declared.get(&j).map(|(_, d)| match d {
             Declared::Pure => PURE_BOUND.iter().copied().collect::<BTreeSet<u32>>(),
-            Declared::Effect => EFFECT_BOUND.iter().copied().collect(),
+            Declared::Effect => EFFECT_BOUND.iter().copied().filter(|c| manifest.is_none_or(|m| m.contains(c))).collect(),
         })
     };
     let mut bound: Vec<BTreeSet<u32>> = (0..direct.len()).map(|j| fixed(j).unwrap_or_else(|| direct[j].clone())).collect();
@@ -669,7 +701,7 @@ mod tests {
         let direct = vec![BTreeSet::new(), BTreeSet::new(), [cap::FS_READ].into()];
         let callees = vec![[1].into(), [2].into(), BTreeSet::new()];
         let declared: BTreeMap<usize, (String, Declared)> = [(0, ("f".to_string(), Declared::Pure))].into();
-        let b = least_bounds(&direct, &callees, &declared);
+        let b = least_bounds(&direct, &callees, &declared, None);
         assert_eq!(b[1], [cap::FS_READ].into());
         assert_eq!(reach(&direct, &callees, 0), vec![cap::FS_READ]);
     }

@@ -38,11 +38,7 @@ fn fail(msg: &str) -> ! {
     std::process::exit(2);
 }
 
-struct Record {
-    property: &'static str,
-    function: String,
-    bytes: String,
-}
+use almide_wasm::witness::bundle::Record;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -70,83 +66,40 @@ fn main() {
         }
         return;
     }
-    let mut out = match &artifact {
-        None => format!("almide-certificate-bundle 1\nproducer almide-wasm emit_structural_bundle\nsource {rel}\n"),
-        Some(path) => {
-            let file = std::fs::read(path).unwrap_or_else(|e| fail(&format!("read {}: {e}", path.display())));
-            if file != shipped {
-                fail(&format!(
-                    "{} ({} bytes) is not the stock-WASI module the route produced for {rel} ({} bytes) — the witnesses would describe other bytes",
-                    path.display(),
-                    file.len(),
-                    shipped.len()
-                ));
-            }
-            use sha2::Digest;
-            let hex: String = sha2::Sha256::digest(&file).iter().map(|b| format!("{b:02x}")).collect();
-            format!(
-                "almide-certificate-bundle 2\nproducer almide-wasm emit_structural_bundle\nsource {rel}\nartifact sha256 {hex} {}\n",
-                path.display()
-            )
+    let pin = artifact.map(|path| {
+        let file = std::fs::read(&path).unwrap_or_else(|e| fail(&format!("read {}: {e}", path.display())));
+        if file != shipped {
+            fail(&format!(
+                "{} ({} bytes) is not the stock-WASI module the route produced for {rel} ({} bytes) — the witnesses would describe other bytes",
+                path.display(),
+                file.len(),
+                shipped.len()
+            ));
         }
-    };
-    for r in &records {
-        out.push_str(&format!("witness {} {} {}\n{}\n", r.property, r.bytes.len(), r.function, r.bytes));
-    }
-    for (f, reason) in &uncertified {
-        out.push_str(&format!("uncertified {f} {reason}\n"));
-    }
+        use sha2::Digest;
+        let hex: String = sha2::Sha256::digest(&file).iter().map(|b| format!("{b:02x}")).collect();
+        (hex, path.display().to_string())
+    });
+    let out = almide_wasm::witness::bundle::render(
+        "almide-wasm emit_structural_bundle",
+        &rel,
+        pin.as_ref().map(|(h, p)| (h.as_str(), p.as_str())),
+        &records,
+        &uncertified,
+    );
     let _ = std::io::stdout().write_all(out.as_bytes());
 }
 
 /// Build `rel` through the product route and collect every witness, with
-/// the stock-WASI bytes the witnesses describe.
+/// the stock-WASI bytes the witnesses describe (witness_bundle.rs).
 fn produce(rel: &str, text: &str) -> (Vec<Record>, Vec<(String, String)>, Vec<u8>) {
     use almide::wasm_route::{render_wasm_routed, ModuleSource, RouteOptions};
     almide_wasm::witness::start_collecting();
     let opts = RouteOptions { library: true, ..RouteOptions::default() };
     let routed = render_wasm_routed(rel, text, ModuleSource::Disk { dep_paths: &[] }, opts)
         .unwrap_or_else(|e| fail(&format!("{rel} does not build on the structural leg: {e:?}")));
-    let (pass, frames) = almide_wasm::witness::take_shipped().unwrap_or_else(|| fail("no shipped pass recorded"));
-    let modes = almide_wasm::witness::take_modes();
-    let bounds = almide_wasm::witness::take_bounds();
-    let decls = almide_wasm::witness::decls::take_for(&routed.bytes).unwrap_or_else(|| fail("no declaration table for the shipped module"));
     let shipped = routed.stock_wasi().unwrap_or_else(|e| fail(&format!("to_wasi: {e}")));
-
-    let mut records = Vec::new();
-    let mut uncertified = Vec::new();
-    for (name, cert) in frames {
-        match cert.strip_prefix(almide_wasm::witness::DECLINE_PREFIX) {
-            Some(reason) => uncertified.push((name, reason.trim().to_string())),
-            None if cert.starts_with('!') => uncertified.push((name, cert.trim().to_string())),
-            None => records.push(Record { property: "ownership", function: name, bytes: cert }),
-        }
-    }
-    if let Some((_, w)) = modes.into_iter().find(|(p, _)| *p == pass) {
-        records.push(Record { property: "call-modes", function: "(program)".into(), bytes: w });
-    }
-    // A pass with no index access records no stretch; its witness is the
-    // empty program, which the checker accepts vacuously.
-    let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
-    records.push(Record { property: "bounds", function: "(program)".into(), bytes: b });
-    // `to_wasi` keeps every defined function's order and moves it by the
-    // change in the import count — up for the imports it adds, down for the
-    // uncalled ones it prunes (#3114) — so a declared function keeps its
-    // name in the stock-WASI bytes; any other function is named by index.
-    let named = almide_wasm::cert_project::decl_names(&decls).unwrap_or_else(|e| fail(&format!("decls: {e}")));
-    let imports = |b: &[u8]| almide_wasm::cert_project::function_imports(b).unwrap_or_else(|e| fail(&format!("imports: {e}")));
-    let (shipped_imports, emitted_imports) = (imports(&shipped), imports(&routed.bytes));
-    let label = |i: u32| match i.checked_sub(shipped_imports).and_then(|d| named.get(&(d + emitted_imports))) {
-        Some(n) => format!("locals:{n}"),
-        _ => format!("locals:func[{i}]"),
-    };
-    for (function, bytes) in almide_wasm::cert_project::names(&shipped, &label).unwrap_or_else(|e| fail(&format!("names: {e}"))) {
-        records.push(Record { property: "names", function, bytes });
-    }
-    let (flat, graph) = almide_wasm::cert_project::caps(&decls).unwrap_or_else(|e| fail(&format!("caps: {e}")));
-    for (function, bytes) in flat {
-        records.push(Record { property: "caps", function, bytes });
-    }
-    records.push(Record { property: "caps-transitive", function: "(program)".into(), bytes: graph });
+    let (records, uncertified) =
+        almide_wasm::witness::bundle::records(&routed.bytes, &shipped, None).unwrap_or_else(|e| fail(&e));
     (records, uncertified, shipped)
 }
