@@ -33,6 +33,11 @@ pub(crate) enum Commands {
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
+        /// Refuse any dependency fetch `almide.lock` does not already name,
+        /// and write no lock (#4093). For CI: a build never resolves
+        /// something new
+        #[arg(long)]
+        locked: bool,
         /// Build with optimisations (cargo --release). Required for any
         /// performance-sensitive comparison; without it the generated
         /// Rust runs in dev profile.
@@ -124,6 +129,11 @@ pub(crate) enum Commands {
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
+        /// Refuse any dependency fetch `almide.lock` does not already name,
+        /// and write no lock (#4093). For CI: a build never resolves
+        /// something new
+        #[arg(long)]
+        locked: bool,
         /// Add #[repr(C)] to structs/enums for stable C ABI
         #[arg(long)]
         repr_c: bool,
@@ -198,6 +208,11 @@ pub(crate) enum Commands {
         /// Skip type checking
         #[arg(long)]
         no_check: bool,
+        /// Refuse any dependency fetch `almide.lock` does not already name,
+        /// and write no lock (#4093). For CI: a build never resolves
+        /// something new
+        #[arg(long)]
+        locked: bool,
         /// Output test results as JSON (one per line)
         #[arg(long)]
         json: bool,
@@ -338,6 +353,22 @@ pub(crate) enum Commands {
         /// component
         #[arg(long)]
         subdir: Option<String>,
+        /// Trust the source's owner (`host/owner`, or `owner` for
+        /// github.com): it must be the owner the source resolves to, and it
+        /// is written into `[trust] owners` (#4093). Needed for any owner
+        /// other than github.com/almide that the project does not trust yet
+        #[arg(long)]
+        trust: Option<String>,
+        /// Print the resolved source, the trust verdict and whether the
+        /// repository exists; fetch and write nothing
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Trust a source owner (`host/owner`, or `owner` for github.com):
+    /// add it to `[trust] owners` in almide.toml (#4093)
+    Trust {
+        /// The owner, e.g. `github.com/alice`
+        owner: String,
     },
     /// List dependencies
     Deps,
