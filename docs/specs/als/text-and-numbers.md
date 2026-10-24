@@ -22,29 +22,37 @@ Fixture: `spec/wasm_cross/string_whitespace.almd`。
 
 ## ALS-T2 `float.parse`
 
-受理文法（大文字小文字不問の `inf` / `infinity` / `nan` を含む）:
+受理文法（**有限値のみ**。`inf` / `infinity` / `nan` の綴りは大文字小文字・符号を
+問わず受理しない — C-413）:
 
 ```ebnf
-float   := ws* sign? (number | "inf" | "infinity" | "nan") ws*
+float   := ws* sign? number ws*
 number  := digits ("." digits?)? exponent? | "." digits exponent?
 exponent:= ("e"|"E") sign? digits
+ws      := U+0009 | U+000A | U+000C | U+000D | U+0020
 ```
+
+`ws` は **ASCII の 5 文字だけ**である（C-413）。ALS-T1 の Unicode White_Space 集合
+ではなく、U+000B（VT）も含まない。それ以外の空白は文法違反になる。
 
 **値の規範**: 受理された 10 進表記に対し、**IEEE-754 binary64 の最近接偶数丸め
 （round-half-to-even）における正確な最近値**を返す。これは桁数・指数の大きさに
 よらない（denormal 最小値 4.9e-324、最大値 1.7976931348623157e308、19 桁超の
-仮数を含む）。オーバーフローは ±inf、アンダーフローは ±0（符号保存。`-0.0` は
-負のゼロを返す）。
+仮数を含む）。丸めた結果が ±inf になる表記（オーバーフロー）はエラー、アンダーフローは
+±0（符号保存。`-0.0` は負のゼロを返す）。結果は常に有限である。
 
 **エラー文言（規範）**: 空入力は `cannot parse float from empty string`、
-文法違反は `invalid float literal`。exit code は通常のエラー伝播に従う。
-Fixture: `spec/wasm_cross/float_parse.almd`。
+文法違反（非有限値の綴りを含む）は `invalid float literal`、オーバーフローは
+`float literal out of range`。exit code は通常のエラー伝播に従う。
+Fixture: `spec/wasm_cross/float_parse.almd`、`float_parse_finite_only.almd`、
+`number_parse_ascii_trim.almd`。
 
 ## ALS-T3 `json.parse`
 
 受理文法は RFC 8259 に、次の**裁定**を加えたもの:
 
-- 数値は ALS-T2 の値規範で binary64 化する
+- 数値は ALS-T2 の値規範で binary64 化する。ただしオーバーフローはエラーにせず
+  ±inf とする（`float.parse` だけが有限値に限られる — C-413）
 - 文字列のサロゲートペア（`\uD800`–`\uDBFF` + `\uDC00`–`\uDFFF`）は合成する。
   不対サロゲートは**黙って落ちる**（寛容 — `json_string_span.almd` が
   両ターゲット同一で pin。厳格拒否は不採用）
@@ -83,9 +91,19 @@ SpecialCasing.txt の 1:N 対応、例: ß→SS）。`to_lower` は **Final_Sigm
 （Unicode 標準 3.13: 語末の Σ→ς）を適用する。ロケール依存規則（トルコ語 İ/ı 等）は
 **適用しない**（ロケール非依存の裁定）。
 
+**ASCII への畳み込み禁止**（C-412）: ASCII のスカラーは ASCII の規則で写す。非 ASCII の
+スカラーは上記の対応で写すが、写した結果に ASCII のスカラーが一つでも含まれるなら、
+そのスカラーは**変えずに残す**。Unicode 標準の対応そのものが U+0131→I、U+212A→k、
+U+017F→S を含むため、この規則は標準からの意図的な逸脱である。現行の Unicode で
+残るスカラーは、`to_upper` が U+00DF, U+0131, U+0149, U+017F, U+01F0,
+U+1E96–U+1E9A, U+FB00–U+FB06、`to_lower` が U+0130, U+212A。Final_Sigma の文脈判定は
+元の文字列に対して行う（残した U+212A も cased として数える）。`capitalize` の先頭文字も
+同じ規則に従う。この写像はロケール非依存であり、識別子の同一性比較には使わない。
+
 実装は Unicode バージョンの更新に追随する義務を負う（現行の生成表は
 `scripts/gen-case-tables.py` — 生成元がいずれの実装であっても、適合判定は本節と
-fixture `spec/wasm_cross/string_case_unicode.almd` に対して行う）。
+fixture `spec/wasm_cross/string_case_unicode.almd`、`string_case_no_ascii_fold.almd`
+に対して行う）。
 
 ## ALS-T6 整数演算の終了規約（termination convention）
 
@@ -123,8 +141,9 @@ Fixtures: `spec/wasm_cross/top_let_div_eager.almd`, `top_let_div_used.almd`。
 
 ## ALS-T8 整数パースの文法とエラー規範
 
-`int.parse(s)` は、まず ALS-T1 の **Unicode White_Space 集合**を先頭・末尾から除去し
-（`"\u{00A0}99\u{3000}"` → 99）、残りを `sign? digit+`（10 進、下線なし）として
+`int.parse(s)` は、まず **ASCII 空白**（U+0009, U+000A, U+000C, U+000D, U+0020 — ALS-T2 の
+`ws`。VT と非 ASCII の空白は含まない、C-413）を先頭・末尾から除去し
+（`"\u{00A0}99\u{3000}"` は `invalid digit found in string`）、残りを `sign? digit+`（10 進、下線なし）として
 読む。エラーメッセージは Rust `ParseIntError` の Display と byte 一致する:
 空入力（除去後に空）は `cannot parse integer from empty string`、不正文字は
 `invalid digit found in string`、範囲外は `number too large to fit in target type` /
@@ -148,8 +167,9 @@ hexdigit:= [0-9a-fA-F]                          (* 下線は不可 *)
   `int.parse` と同じ 2 文言。
 
 ```almide
-test "int.parse trims Unicode whitespace; int.from_hex strips lowercase 0x repeatedly, sign after the prefix" {
-  assert_eq(int.parse("\u{00A0}99\u{3000}") ?? -1, 99)
+test "int.parse trims ASCII whitespace only; int.from_hex strips lowercase 0x repeatedly, sign after the prefix" {
+  assert_eq(int.parse("\u{00A0}99\u{3000}") ?? -1, -1)
+  assert_eq(int.parse("\t 99\r\n") ?? -1, 99)
   assert_eq(int.from_hex("0x0x0x10") ?? -1, 16)
   assert_eq(int.from_hex("0x-ff") ?? 0, -255)
   assert_eq(int.from_hex("0X10") ?? -1, -1)
@@ -157,7 +177,8 @@ test "int.parse trims Unicode whitespace; int.from_hex strips lowercase 0x repea
 }
 ```
 
-Fixture: `spec/wasm_cross/int_from_hex.almd`、`spec/wasm_cross/string_whitespace.almd`。
+Fixture: `spec/wasm_cross/int_from_hex.almd`、`spec/wasm_cross/string_whitespace.almd`、
+`spec/wasm_cross/number_parse_ascii_trim.almd`。
 Contracts: C-028, C-029。
 
 ## ALS-T9 固定小数表示
