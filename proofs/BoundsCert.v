@@ -233,3 +233,26 @@ Proof. reflexivity. Qed.
 
 Example rejects_stray_bar : check_bounds_cert "c0 | a0" = false.
 Proof. reflexivity. Qed.
+
+(* ── Controls: what the structural emitter writes (#4005) ─────────────── *)
+
+(* Every index-operator access is recorded; one that is no fact candidate
+   gets a fresh slot in the pass's loose stretch, decided by its own check.
+   The flip probe's whole witness (crates/almide-wasm/tests/witness_bounds.rs):
+   the loop's stretch, then the two reads of the `println` outside it. *)
+Example accepts_flip_with_loose_reads :
+  check_bounds_cert "c0 a0 c1 a1 w0 w1 s0 s1;c0 a0 c1 a1" = true.
+Proof. reflexivity. Qed.
+
+(* The three witnesses scripts/bounds-witness-reinject.sh gets from an
+   emitter with one bounds check lost, pinned in proofs/poisoned-certs/bounds/:
+   the read route's check dropped, a #3345 fact kept after its index moved,
+   and the store route's check dropped. *)
+Example rejects_drill_read_check_dropped : check_bounds_cert "a0" = false.
+Proof. reflexivity. Qed.
+
+Example rejects_drill_stale_fact : check_bounds_cert "c0 a0 s0 a0" = false.
+Proof. reflexivity. Qed.
+
+Example rejects_drill_store_check_dropped : check_bounds_cert "w0 w1 c2 a2" = false.
+Proof. reflexivity. Qed.
