@@ -539,7 +539,7 @@ native = ["nat"]
 
 `build`, `run`, `test` and `bench` refuse an ungranted one on every target;
 the root package's own native code needs no grant
-([package-system.md §6.3](./package-system.md#63-native-code-from-a-dependency-needs-a-grant-permissions-native)).
+([package-system.md §6.4](./package-system.md#64-native-code-from-a-dependency-needs-a-grant-permissions-native)).
 
 ### Design layers
 
