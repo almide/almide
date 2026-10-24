@@ -55,7 +55,7 @@ pub fn almide_rt_datetime_to_iso(ts: i64) -> AlmideString {
 /// `YYYY-MM-DDTHH:MM:SS` followed by `Z`, `+HH:MM`, `-HH:MM` or nothing (UTC).
 /// Every field is ASCII digits of any width (`2024-1-5T1:2:3` is accepted; a
 /// sign, a space or a letter is not), exactly three date and three time
-/// fields; month 1..=12, day 1..=days-in-month (proleptic Gregorian), hour
+/// fields; year 0..=9999 (RFC 3339 `date-fullyear = 4DIGIT`), month 1..=12, day 1..=days-in-month (proleptic Gregorian), hour
 /// 0..=23, minute and second 0..=59 (no leap second), offset hours 0..=23 and
 /// minutes 0..=59. The offset is APPLIED — the answer is the UTC instant, so
 /// `…T10:30:00+09:00` equals `…T01:30:00Z`.
@@ -65,6 +65,13 @@ pub fn almide_rt_datetime_to_iso(ts: i64) -> AlmideString {
 /// (`00+09` failed to parse and vanished), and month 13 / day 45 / hour 99
 /// were "ok" — February of the next year. The self-host twin is
 /// stdlib/datetime_parse_iso.almd; the two must answer the same bytes.
+///
+/// The year bound (#4118) is what keeps the arithmetic exact: before it,
+/// `584554051223-01-01T00:00:00Z` overflowed `epoch_from_civil` and answered
+/// ok(-26982016) — a day in 1969. With every field bounded (year ≤ 9999,
+/// offset < 1 day) the largest magnitude reached is ~3.2e11 seconds, so no
+/// step below can wrap on either leg; an out-of-range year is an `err` that
+/// names it, checked first, before the fields whose range depends on it.
 pub fn almide_rt_datetime_parse_iso(s: &str) -> Result<i64, AlmideString> {
     let __almide_r: Result<i64, String> = (|| {
         let t = s.trim();
@@ -105,6 +112,7 @@ pub fn almide_rt_datetime_parse_iso(s: &str) -> Result<i64, AlmideString> {
         };
         let (y, mo, dd) = (d[0], d[1], d[2]);
         let (h, mi, sec) = (tm[0], tm[1], tm[2]);
+        if !(0..=9999).contains(&y) { return Err(format!("year out of range: {y}")); }
         if !(1..=12).contains(&mo) { return Err(format!("month out of range: {mo}")); }
         if dd < 1 || dd > almide_rt_days_in_month(y, mo) { return Err(format!("day out of range: {dd}")); }
         if !(0..=23).contains(&h) { return Err(format!("hour out of range: {h}")); }
