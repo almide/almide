@@ -701,7 +701,41 @@ fn refuse_invalid_manifest(command: &Commands) {
         err(&format!("error: {}", e));
         std::process::exit(1);
     }
+    refuse_older_compiler(command, path);
     report_manifest_warnings(command, path, &content);
+}
+
+/// #4172: the package's `almide = "X.Y.Z"` minimum holds on every command
+/// that checks or compiles it — not only the native build, whose compile
+/// driver was the one reader. A package pinning the release that carries a
+/// fix (a soundness or a permission fix) must not be built, checked or run
+/// by an older compiler on any target. Package management (`add`, `deps`,
+/// `update`, `install`) and `fmt` still run, so the pin can be read and
+/// changed.
+fn refuse_older_compiler(command: &Commands, path: &std::path::Path) {
+    let compiles = matches!(
+        command,
+        Commands::Run { .. }
+            | Commands::Bench { .. }
+            | Commands::Build { .. }
+            | Commands::Test { .. }
+            | Commands::Check { .. }
+            | Commands::Compile { .. }
+            | Commands::Fix { .. }
+            | Commands::Survive { .. }
+            | Commands::Apply { .. }
+            | Commands::SurviveTestLeg { .. }
+            | Commands::Emit { .. }
+            | Commands::Verify { .. }
+    );
+    if !compiles {
+        return;
+    }
+    let Ok(proj) = project::parse_toml(path) else { return };
+    if let Err(e) = project::check_compiler_version(&proj) {
+        err(&format!("error: {}", e));
+        std::process::exit(1);
+    }
 }
 
 /// A key the manifest writes and no reader reads (#3382) is a warning, once

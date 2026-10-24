@@ -135,6 +135,25 @@ still one dependency declared twice.
 
 Test: `tests/manifest_duplicate_key_test.rs`.
 
+**`[package] almide = "X.Y.Z"` is the minimum compiler** (#4172). Write it as a
+plain version or as `">=X.Y.Z"`; any other operator is an invalid pin. Every
+command that checks or compiles the package refuses an older compiler before
+it reads a source: `check`, `emit`, `compile`, `build`, `run` and `test` on
+every target, plus `bench`, `fix`, `survive`, `apply` and `verify`. It used to
+be read only by the native build, so `check` and the wasm target compiled with
+any compiler. Package management (`add`, `deps`, `update`, `install`) and
+`fmt` still run, so the pin can be read and changed.
+
+```text
+error: package 'myapp' requires almide >= 0.70.0
+  installed version: 0.68.0
+```
+
+`ALMIDE_SKIP_VERSION_CHECK=1` bypasses it. A release build honours that only
+with `--allow-switch ALMIDE_SKIP_VERSION_CHECK` (#4129).
+
+Test: `tests/version_pin_commands_test.rs`.
+
 **A key no reader reads is a warning** (#3382). It used to be dropped without a
 word, so `brnach = "main"` or `tags = "v0.1.0"` in a dependency built from the
 default ref, not the one written. Every command that reads `almide.toml` now

@@ -895,6 +895,9 @@ pub fn check_compiler_version(project: &Project) -> Result<(), String> {
 pub fn check_compiler_version_with(project: &Project, skip: bool) -> Result<(), String> {
     let Some(required) = project.package.almide_min.as_deref() else { return Ok(()); };
     if skip { return Ok(()); }
+    // The field is a MINIMUM; `almide = ">=0.60"` spells the same thing and
+    // is accepted as it (#4172). Any other operator stays an invalid pin.
+    let required = required.trim().strip_prefix(">=").map(str::trim).unwrap_or(required.trim());
     let installed = env!("CARGO_PKG_VERSION");
     let req = semver::VersionReq::parse(&format!(">={}", required))
         .map_err(|e| format!(
@@ -906,7 +909,8 @@ pub fn check_compiler_version_with(project: &Project, skip: bool) -> Result<(), 
     if req.matches(&have) { return Ok(()); }
     Err(format!(
         "package '{}' requires almide >= {}\n  installed version: {}\n  run 'almide self-update' to update, \
-         or set ALMIDE_SKIP_VERSION_CHECK=1 to bypass",
+         or set ALMIDE_SKIP_VERSION_CHECK=1 to bypass (a release build honours it only with \
+         `--allow-switch ALMIDE_SKIP_VERSION_CHECK`)",
         project.package.name, required, installed
     ))
 }
