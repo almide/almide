@@ -76,7 +76,7 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
     let mut rust_entries: Vec<_> = fs::read_dir(&rust_dir)?
         .collect::<io::Result<Vec<_>>>()?
         .into_iter()
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "rs"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "rs"))
         .filter(|e| e.file_name() != "lib.rs")
         .collect();
     rust_entries.sort_by_key(|e| e.file_name());
@@ -506,12 +506,12 @@ fn try_raw_fn_last_arg_helper_at(content: &str, cursor: usize, rel: usize) -> (u
     }
 
     // Last param's type is exactly one of those Fn generics.
-    if let Some(last) = split_top_level(params).last() {
-        if let Some(colon) = last.rfind(':') {
-            let ty = last[colon + 1..].trim();
-            if fn_generics.contains(&ty) {
-                return (new_cursor, Some(name));
-            }
+    if let Some(last) = split_top_level(params).last()
+        && let Some(colon) = last.rfind(':')
+    {
+        let ty = last[colon + 1..].trim();
+        if fn_generics.contains(&ty) {
+            return (new_cursor, Some(name));
         }
     }
     (new_cursor, None)
