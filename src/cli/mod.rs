@@ -3,6 +3,7 @@
 mod run;
 mod build_dir;
 pub(crate) mod build;
+mod fs_scope_twin;
 mod build_wasm;
 mod wasm_compile;
 mod bench;
