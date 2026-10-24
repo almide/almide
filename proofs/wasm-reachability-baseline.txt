@@ -41,6 +41,12 @@
 bytes.copy_to_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 bytes.from_raw_ptr :: UNPROBEABLE :: parameter type outside the synthesizer
 fs.fold_lines_chunked :: UNPROBEABLE :: no candidate shape builds natively
+fs.root_exists :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)
+fs.root_list_dir :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)
+fs.root_read_bytes :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)
+fs.root_read_text :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)
+fs.root_remove :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)
+fs.root_write_text :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)
 http.body :: UNPROBEABLE :: parameter type outside the synthesizer
 http.cancel :: UNPROBEABLE :: parameter type outside the synthesizer
 http.decode_json :: UNPROBEABLE :: parameter type outside the synthesizer
