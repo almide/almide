@@ -1079,15 +1079,17 @@ Codec type holding only what the client may set, decode into it with
 
 ```almide check
 import json
+import secret
 
 // Only what the client may set. `User` is not Codec at all, so a request
-// body can never be decoded into it — `is_admin` has no way in.
-type SignupInput: Codec = { name: String, email: String }
-type User = { name: String, email: String, is_admin: Bool }
+// body can never be decoded into it — `is_admin` has no way in. The password
+// stays a Secret: it prints as Secret(***) in logs and assert failures.
+type SignupInput: Codec = { name: String, email: String, password: Secret[String] }
+type User = { name: String, email: String, password: Secret[String], is_admin: Bool }
 
 effect fn signup(body: String) -> User = {
   let input = SignupInput.decode_strict(json.parse(body)!)!   // unknown keys → err
-  User { name: input.name, email: input.email, is_admin: false }
+  User { name: input.name, email: input.email, password: input.password, is_admin: false }
 }
 
 // A type that must be Codec both ways keeps input off a field with @skip_decode
