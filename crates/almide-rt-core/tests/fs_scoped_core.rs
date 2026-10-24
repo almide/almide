@@ -24,20 +24,20 @@ use std::path::Path;
 /// `data/sub/{a.txt,d/x.txt}` = "inside", `outside/sub/{a.txt,d/x.txt}` =
 /// "outside"; the scope grants `data`.
 fn tree() -> (tempfile::TempDir, std::path::PathBuf) {
-    let t = tempfile::tempdir().unwrap();
-    let base = std::fs::canonicalize(t.path()).unwrap();
+    let t = tempfile::tempdir().expect("test fixture setup");
+    let base = std::fs::canonicalize(t.path()).expect("test fixture setup");
     for (top, text) in [("data", "inside"), ("outside", "outside")] {
-        std::fs::create_dir_all(base.join(top).join("sub/d")).unwrap();
-        std::fs::write(base.join(top).join("sub/a.txt"), text).unwrap();
-        std::fs::write(base.join(top).join("sub/d/x.txt"), text).unwrap();
+        std::fs::create_dir_all(base.join(top).join("sub/d")).expect("test fixture setup");
+        std::fs::write(base.join(top).join("sub/a.txt"), text).expect("test fixture setup");
+        std::fs::write(base.join(top).join("sub/d/x.txt"), text).expect("test fixture setup");
     }
     (t, base)
 }
 
 /// Replace `data/sub` by a symlink to `outside/sub`.
 fn swap(base: &Path) {
-    std::fs::rename(base.join("data/sub"), base.join("data/sub.orig")).unwrap();
-    std::os::unix::fs::symlink(base.join("outside/sub"), base.join("data/sub")).unwrap();
+    std::fs::rename(base.join("data/sub"), base.join("data/sub.orig")).expect("test fixture setup");
+    std::os::unix::fs::symlink(base.join("outside/sub"), base.join("data/sub")).expect("test fixture setup");
 }
 
 fn refused<T: std::fmt::Debug>(r: std::io::Result<T>) -> bool {
@@ -47,11 +47,11 @@ fn refused<T: std::fmt::Debug>(r: std::io::Result<T>) -> bool {
 /// The outside tree is exactly as [`tree`] made it.
 fn outside_untouched(base: &Path) {
     let o = base.join("outside/sub");
-    let mut names: Vec<_> = std::fs::read_dir(&o).unwrap().map(|e| e.unwrap().file_name()).collect();
+    let mut names: Vec<_> = std::fs::read_dir(&o).expect("test fixture setup").map(|e| e.expect("test fixture setup").file_name()).collect();
     names.sort();
     assert_eq!(names, ["a.txt", "d"], "an entry appeared or vanished outside");
-    assert_eq!(std::fs::read_to_string(o.join("a.txt")).unwrap(), "outside");
-    assert_eq!(std::fs::read_to_string(o.join("d/x.txt")).unwrap(), "outside");
+    assert_eq!(std::fs::read_to_string(o.join("a.txt")).expect("test fixture setup"), "outside");
+    assert_eq!(std::fs::read_to_string(o.join("d/x.txt")).expect("test fixture setup"), "outside");
 }
 
 #[test]
@@ -75,7 +75,7 @@ fn a_dir_swapped_for_a_symlink_after_the_decision_is_never_followed() {
             std::io::Write::write_all(&mut f, b"pwned").map(|()| String::new())
         }),
         ("mkdir_p", "sub/d/e/f", |p, _| almide_sfs::create_dir_all(p).map(|()| String::new())),
-        ("list", "sub/d", |p, _| almide_sfs::read_dir(p).map(|r| r.map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect())),
+        ("list", "sub/d", |p, _| almide_sfs::read_dir(p).map(|r| r.map(|e| e.expect("test fixture setup").file_name().to_string_lossy().into_owned()).collect())),
         ("metadata", "sub/a.txt", |p, _| almide_sfs::metadata(p).map(|m| m.len().to_string())),
         ("remove", "sub/a.txt", |p, _| almide_sfs::remove_file(p).map(|()| String::new())),
         ("remove_all", "sub/d", |p, _| almide_sfs::remove_dir_all(p).map(|()| String::new())),
@@ -84,15 +84,15 @@ fn a_dir_swapped_for_a_symlink_after_the_decision_is_never_followed() {
     ];
     for (name, rel, call) in calls {
         let (_t, base2) = tree();
-        let data = base2.join("data").to_str().unwrap().to_string();
+        let data = base2.join("data").to_str().expect("test fixture setup").to_string();
         fs_scoped_install(Some(&[data]));
-        let path = base2.join("data").join(rel).to_str().unwrap().to_string();
-        let dst = base2.join("data/copied.txt").to_str().unwrap().to_string();
+        let path = base2.join("data").join(rel).to_str().expect("test fixture setup").to_string();
+        let dst = base2.join("data/copied.txt").to_str().expect("test fixture setup").to_string();
         assert!(fs_scoped_admits(&path), "{name}: the intact tree is inside the scope");
         swap(&base2);
         if *rel == "sub/a.txt" {
             // The window is real: a path-based read now reaches the outside.
-            assert_eq!(std::fs::read_to_string(&path).unwrap(), "outside");
+            assert_eq!(std::fs::read_to_string(&path).expect("test fixture setup"), "outside");
         }
         let r = call(&path, &dst);
         assert!(refused(r.as_ref().map(|_| ()).map_err(|e| std::io::Error::new(e.kind(), e.to_string()))), "{name}: not refused: {r:?}");
@@ -102,8 +102,8 @@ fn a_dir_swapped_for_a_symlink_after_the_decision_is_never_followed() {
 
     // The predicates answer false, never the outside's answer.
     let (_t, base3) = tree();
-    fs_scoped_install(Some(&[base3.join("data").to_str().unwrap().to_string()]));
-    let a = base3.join("data/sub/a.txt").to_str().unwrap().to_string();
+    fs_scoped_install(Some(&[base3.join("data").to_str().expect("test fixture setup").to_string()]));
+    let a = base3.join("data/sub/a.txt").to_str().expect("test fixture setup").to_string();
     assert!(fs_scoped_admits(&a));
     swap(&base3);
     assert!(!almide_sfs::exists(&a) && !almide_sfs::is_file(&a));
@@ -111,24 +111,24 @@ fn a_dir_swapped_for_a_symlink_after_the_decision_is_never_followed() {
     // Without a swap the scoped calls are the plain calls, symlinks inside
     // the grant followed as the decision resolved them.
     let (_t, base4) = tree();
-    fs_scoped_install(Some(&[base4.join("data").to_str().unwrap().to_string()]));
-    std::os::unix::fs::symlink(base4.join("data/sub"), base4.join("data/alias")).unwrap();
-    let q = |rel: &str| base4.join("data").join(rel).to_str().unwrap().to_string();
-    assert_eq!(almide_sfs::read_to_string(q("alias/a.txt")).unwrap(), "inside");
-    almide_sfs::create_dir_all(q("alias/n/m")).unwrap();
+    fs_scoped_install(Some(&[base4.join("data").to_str().expect("test fixture setup").to_string()]));
+    std::os::unix::fs::symlink(base4.join("data/sub"), base4.join("data/alias")).expect("test fixture setup");
+    let q = |rel: &str| base4.join("data").join(rel).to_str().expect("test fixture setup").to_string();
+    assert_eq!(almide_sfs::read_to_string(q("alias/a.txt")).expect("test fixture setup"), "inside");
+    almide_sfs::create_dir_all(q("alias/n/m")).expect("test fixture setup");
     assert!(base4.join("data/sub/n/m").is_dir());
-    almide_sfs::write(q("sub/n/m/f"), "1").unwrap();
-    let mut f = almide_sfs::OpenOptions::new().append(true).create(true).open(q("sub/n/m/f")).unwrap();
-    std::io::Write::write_all(&mut f, b"2").unwrap();
-    assert_eq!(std::fs::read_to_string(base4.join("data/sub/n/m/f")).unwrap(), "12");
-    assert_eq!(almide_sfs::copy(q("sub/n/m/f"), q("sub/g")).unwrap(), 2);
-    almide_sfs::rename(q("sub/g"), q("sub/h")).unwrap();
+    almide_sfs::write(q("sub/n/m/f"), "1").expect("test fixture setup");
+    let mut f = almide_sfs::OpenOptions::new().append(true).create(true).open(q("sub/n/m/f")).expect("test fixture setup");
+    std::io::Write::write_all(&mut f, b"2").expect("test fixture setup");
+    assert_eq!(std::fs::read_to_string(base4.join("data/sub/n/m/f")).expect("test fixture setup"), "12");
+    assert_eq!(almide_sfs::copy(q("sub/n/m/f"), q("sub/g")).expect("test fixture setup"), 2);
+    almide_sfs::rename(q("sub/g"), q("sub/h")).expect("test fixture setup");
     assert!(almide_sfs::is_file(q("sub/h")) && !almide_sfs::exists(q("sub/g")));
     assert!(almide_sfs::is_symlink(q("alias")) && almide_sfs::is_dir(q("alias")));
     // A no-follow call acts on the link itself.
-    almide_sfs::remove_file(q("alias")).unwrap();
+    almide_sfs::remove_file(q("alias")).expect("test fixture setup");
     assert!(base4.join("data/sub/a.txt").exists() && !base4.join("data/alias").exists());
-    almide_sfs::remove_dir_all(q("sub/n")).unwrap();
+    almide_sfs::remove_dir_all(q("sub/n")).expect("test fixture setup");
     assert!(!base4.join("data/sub/n").exists());
     // The plain call's own errors, byte for byte.
     let plain = std::fs::read_to_string(base4.join("data/none/x")).unwrap_err().to_string();
@@ -144,5 +144,5 @@ fn a_dir_swapped_for_a_symlink_after_the_decision_is_never_followed() {
     assert!(refused(almide_sfs::write(base4.join("data/../outside/sub/new"), "x")));
     assert!(!base4.join("outside/sub/new").exists());
     fs_scoped_install(None);
-    assert_eq!(almide_sfs::read_to_string(base4.join("outside/sub/a.txt")).unwrap(), "outside");
+    assert_eq!(almide_sfs::read_to_string(base4.join("outside/sub/a.txt")).expect("test fixture setup"), "outside");
 }
