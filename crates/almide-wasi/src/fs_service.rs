@@ -74,6 +74,14 @@ pub const FS_SERVICE_OPS: &[(i32, &str, i32)] = &[
     // says `fs.read_bytes_raw`).
     (63, "op_read_bytes", 63),
     (64, "op_read_bytes_if_exists", 64),
+    // 120..=125: the rooted family by descriptor (#4084) — a walk from the
+    // root that follows no symlink, then the plain call's body.
+    (120, "op_root_read", 120),
+    (121, "op_root_read", 121),
+    (122, "op_root_list", 122),
+    (123, "op_root_exists", 123),
+    (124, "op_root_write", 124),
+    (125, "op_root_remove", 125),
 ];
 
 /// Whether the fs service answers `op`.
@@ -114,6 +122,14 @@ const FS_OP_NAMES: &[(i32, &str)] = &[
     (62, "fs.fold_lines_chunked"),
     (63, "fs.read_bytes_raw"),
     (64, "fs.read_bytes_raw_if_exists"),
+    // 120..=125: the rooted family's descriptor ops (#4084), each under the
+    // PLAIN call whose answer it gives on `<root>/<segments>`.
+    (120, "fs.read_text"),
+    (121, "fs.read_bytes_raw"),
+    (122, "fs.list_dir"),
+    (123, "fs.exists"),
+    (124, "fs.write"),
+    (125, "fs.remove"),
 ];
 
 /// The call name of an fs op (`"fs"` for one without its own row).
@@ -152,6 +168,7 @@ pub fn service_wat_ext(fsp: u32, ops: &[i32], extra_arms: &str) -> String {
         ("tmpdir", b"TMPDIR"),
         ("slash_tmp", b"/tmp"),
         ("dot", b"."),
+        ("root_escape", b"fs: path escapes root"),
         ("slash", b"/"),
         ("wasi", b"wasi"),
     ];

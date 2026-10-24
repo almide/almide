@@ -63,6 +63,9 @@ pub const P1_SERVED_OPS: &[i32] = &[
     // The subprocess family (#2589, ADR-0025): forwarded to the private
     // `almide:process/spawn` import, which a stock runtime refuses at load.
     80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90,
+    // The rooted fs family by descriptor (#4084): the fs service's segment
+    // walk from the root, lookupflags 0 at every step.
+    120, 121, 122, 123, 124, 125,
 ];
 
 pub mod env_overlay;

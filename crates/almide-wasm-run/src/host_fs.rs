@@ -643,8 +643,36 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     }
 }
 
+/// The rooted family's descriptor ops 120..=125 (#4084): `a` is
+/// `<root>\0<segments>`; the shared core (`almide_rt_core::fs_beneath_core`,
+/// which native includes) walks from the root without following a symlink.
+/// An io error names the plain call and `<root>/<segments>`, as native's.
+fn fs_dispatch_root(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
+    use almide_rt_core::fs_beneath_core as fb;
+    let (dir, rel) = a.split_once('\0').unwrap_or((a, ""));
+    let fail = |e: fb::FsBeneathError| match e {
+        fb::FsBeneathError::Escape => fs_err(fb::FS_BENEATH_ESCAPE.to_string()),
+        fb::FsBeneathError::Io(e) => fs_err(io_err(fs_op_name(op), &q(&fb::fs_beneath_joined(dir, rel)), e)),
+    };
+    let unit = |r: Result<(), fb::FsBeneathError>| r.map_or_else(fail, |()| (pack(0, 0), Vec::new()));
+    match op {
+        120 => fb::fs_beneath_read_text(dir, rel).map_or_else(fail, |t| (pack(0, t.len()), t.into_bytes())),
+        121 => fb::fs_beneath_read(dir, rel).map_or_else(fail, |v| (pack(0, v.len()), v)),
+        122 => fb::fs_beneath_list(dir, rel).map_or_else(fail, |names| {
+            let buf = frames(&names);
+            (pack(0, buf.len()), buf)
+        }),
+        123 => fb::fs_beneath_exists(dir, rel).map_or_else(fail, |e| (pack(0, usize::from(e)), if e { vec![1] } else { Vec::new() })),
+        124 => unit(fb::fs_beneath_write(dir, rel, b)),
+        _ => unit(fb::fs_beneath_remove(dir, rel)),
+    }
+}
+
 fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     use std::path::Path;
+    if (120..=125).contains(&op) {
+        return fs_dispatch_root(op, a, b);
+    }
     // The fan prefetch pair (#1628 increment 2b). The guest re-sends the
     // path at await, so the sequential host needs NO slot state: start is
     // a no-op and await IS the read — byte-identical to sequential fan.
