@@ -132,7 +132,7 @@ impl FixOutcome<'_> {
 fn print_fix_detail_lines(outcome: &FixOutcome, print: fn(&str)) {
     if outcome.operator_count > 0 {
         print(&format!(
-            "  Rewrote {} comparison / fallback call(s) to operator form (int.gt/lt/eq/... → > < == ...; option/result.unwrap_or → ??)",
+            "  Rewrote {} comparison / fallback call(s) to operator form (int.gt/lt/eq/... → > < == ...; option/result.unwrap_or → ??; a regex pattern → regex.new(…))",
             outcome.operator_count
         ));
     }
@@ -421,7 +421,7 @@ fn apply_ast_family(file: &str, source: &str) -> (String, Vec<String>, usize) {
     // Almide never defined these comparison functions; LLMs reach for them
     // from Go-ish / Java-ish training data. Mechanically substituting to
     // `a > b` etc. turns the error case into working code.
-    let operator_count = rewrite_comparison_calls(&mut program) + rewrite_unwrap_or_calls(&mut program);
+    let operator_count = rewrite_comparison_calls(&mut program) + rewrite_unwrap_or_calls(&mut program) + rewrite_regex_pattern_calls(&mut program);
     // The rewrite can land INSIDE a `${…}` interpolation hole, and a string
     // literal reprints its own source text verbatim (#1263) — which would
     // reprint the pre-rewrite hole and silently drop the fix. Dropping the
@@ -597,6 +597,73 @@ fn rewrite_unwrap_or_calls(program: &mut ast::Program) -> usize {
         | ExprKind::UnwrapOr { expr: e, .. } => wrap(e),
         ExprKind::Unary { operand, .. } => wrap(operand),
         _ => {}
+    });
+    count
+}
+
+/// R-regex-02 / R-regex-01 (#3942, #3940): a regex operation takes a `Regex`,
+/// and `regex.full_match` is `regex.is_full_match`. A string-literal pattern
+/// in an operation's first place is wrapped in `regex.new(…)` — the literal is
+/// still checked, by E102 — and the rename is applied. A pattern held in a
+/// variable is left alone: its type error names the same fix, and whether it
+/// wants `regex.new` (abort) or `regex.compile` (err) is the writer's call. A
+/// pipe stage (`s |> regex.find("…")`) is left alone too: there the subject is
+/// in the pattern's place, which is the swap this type exists to stop.
+/// The `regex` functions whose first parameter is a `Regex`, read from the
+/// module's own declarations (stdlib/regex.almd), so the rewrite follows the
+/// signatures rather than a list of names kept beside them.
+fn regex_first_ops() -> std::collections::HashSet<String> {
+    let Some(src) = almide_types::stdlib_info::bundled_source("regex") else { return Default::default() };
+    let mut parser = almide::parser::Parser::new(almide::lexer::Lexer::tokenize(src));
+    let Ok(prog) = parser.parse() else { return Default::default() };
+    prog.decls
+        .iter()
+        .filter_map(|d| match d {
+            ast::Decl::Fn { name, params, .. } => match params.first().map(|p| &p.ty) {
+                Some(ast::TypeExpr::Simple { name: ty }) if ty.as_str() == "Regex" => Some(name.as_str().to_string()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+fn rewrite_regex_pattern_calls(program: &mut ast::Program) -> usize {
+    let ops = regex_first_ops();
+    let mut count = 0;
+    let mut fresh = u32::MAX - (1 << 20);
+    ast::visit_exprs_mut(program, &mut |expr: &mut Expr| {
+        let ExprKind::Call { callee, args, named_args, type_args } = &mut expr.kind else { return };
+        if !named_args.is_empty() || type_args.is_some() || args.len() < 2 {
+            return;
+        }
+        let Some((module, func)) = extract_module_call(callee) else { return };
+        if module != "regex" || !ops.contains(func.as_str()) {
+            return;
+        }
+        if func == "full_match" {
+            if let ExprKind::Member { field, .. } = &mut callee.kind {
+                *field = sym("is_full_match");
+                count += 1;
+            }
+        }
+        if !matches!(args[0].kind, ExprKind::String { .. }) {
+            return;
+        }
+        let span = args[0].span;
+        let mut next = || {
+            fresh -= 1;
+            ast::ExprId(fresh)
+        };
+        let lit = std::mem::replace(&mut args[0], Expr::new(next(), span, ExprKind::Unit));
+        let object = Expr::new(next(), span, ExprKind::Ident { name: sym("regex") });
+        let new_callee = Expr::new(next(), span, ExprKind::Member { object: Box::new(object), field: sym("new") });
+        args[0] = Expr::new(
+            next(),
+            span,
+            ExprKind::Call { callee: Box::new(new_callee), args: vec![lit], named_args: Vec::new(), type_args: None },
+        );
+        count += 1;
     });
     count
 }
