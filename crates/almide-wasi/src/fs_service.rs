@@ -123,11 +123,11 @@ const FS_OP_NAMES: &[(i32, &str)] = &[
     (63, "fs.read_bytes_raw"),
     (64, "fs.read_bytes_raw_if_exists"),
     // 120..=125: the rooted family's descriptor ops (#4084), each under the
-    // PLAIN call whose answer it gives on `<root>/<segments>`.
+    // PLAIN call whose answer it gives on `<root>/<segments>` (123, exists,
+    // answers no io error, so it needs no name).
     (120, "fs.read_text"),
     (121, "fs.read_bytes_raw"),
     (122, "fs.list_dir"),
-    (123, "fs.exists"),
     (124, "fs.write"),
     (125, "fs.remove"),
 ];
