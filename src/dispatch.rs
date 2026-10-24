@@ -230,9 +230,11 @@ fn collect_almd(dir: &std::path::Path, out: &mut Vec<String>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        // A symlink is neither descended nor collected (#4140).
+        let Ok(kind) = entry.file_type() else { continue };
+        if kind.is_dir() {
             collect_almd(&path, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("almd") {
+        } else if kind.is_file() && path.extension().and_then(|e| e.to_str()) == Some("almd") {
             out.push(path.to_string_lossy().replace('\\', "/"));
         }
     }

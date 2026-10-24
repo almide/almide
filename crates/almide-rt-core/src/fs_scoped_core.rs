@@ -311,7 +311,7 @@ impl FsScoped {
             let next = match open(&cur) {
                 Ok(fd) => fd,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    match almide_fs_beneath_sys::mkdir_at(std::os::fd::AsFd::as_fd(&cur), seg) {
+                    match almide_fs_beneath_sys::mkdir_at(std::os::fd::AsFd::as_fd(&cur), seg, 0o777) {
                         Ok(()) => {}
                         Err(m) if m.kind() == std::io::ErrorKind::AlreadyExists => {}
                         Err(m) => return Err(m),
@@ -370,6 +370,26 @@ impl FsScoped {
         }
     }
 
+    /// A NEW file at `path` (O_EXCL, 0o600): an existing entry there — a
+    /// symlink included, never followed — is EEXIST.
+    pub fn create_new(&self, path: &str) -> std::io::Result<std::fs::File> {
+        let (i, segs) = self.place(path, false)?.segs()?;
+        let Some((last, parents)) = segs.split_last() else {
+            return Err(std::io::Error::from_raw_os_error(17));
+        };
+        let dir = self.dir(i, parents)?;
+        almide_fs_beneath_sys::open_at(std::os::fd::AsFd::as_fd(&dir), last, almide_fs_beneath_sys::Open::CreateNew).map(std::fs::File::from)
+    }
+
+    /// A NEW directory at `path` with `mode`: an existing entry is EEXIST.
+    pub fn create_dir(&self, path: &str, mode: u16) -> std::io::Result<()> {
+        let (i, segs) = self.place(path, false)?.segs()?;
+        let Some((last, parents)) = segs.split_last() else {
+            return Err(std::io::Error::from_raw_os_error(17));
+        };
+        almide_fs_beneath_sys::mkdir_at(std::os::fd::AsFd::as_fd(&self.dir(i, parents)?), last, mode)
+    }
+
     /// Whether `path` itself is a symlink (its last name not followed).
     pub fn is_symlink(&self, path: &str) -> bool {
         let Ok((i, segs)) = self.place(path, false).and_then(FsScopedPlace::segs) else { return false };
@@ -388,6 +408,7 @@ fn fs_scoped_open_path(p: &std::path::Path, how: almide_fs_beneath_sys::Open) ->
         almide_fs_beneath_sys::Open::Dir | almide_fs_beneath_sys::Open::Read | almide_fs_beneath_sys::Open::Meta => o.read(true),
         almide_fs_beneath_sys::Open::WriteTrunc => o.write(true).create(true).truncate(true),
         almide_fs_beneath_sys::Open::Append => o.append(true).create(true),
+        almide_fs_beneath_sys::Open::CreateNew => o.write(true).create_new(true),
     };
     o.open(p)
 }
@@ -463,6 +484,12 @@ impl FsScoped {
     }
     pub fn is_symlink(&self, path: &str) -> bool {
         self.decided(path, false).is_ok_and(|p| p.is_symlink())
+    }
+    pub fn create_new(&self, path: &str) -> std::io::Result<std::fs::File> {
+        std::fs::OpenOptions::new().write(true).create_new(true).open(self.decided(path, false)?)
+    }
+    pub fn create_dir(&self, path: &str, _mode: u16) -> std::io::Result<()> {
+        std::fs::create_dir(self.decided(path, false)?)
     }
 }
 
@@ -705,6 +732,37 @@ pub mod almide_sfs {
         }
     }
 
+    /// A NEW file, private to its owner (O_CREAT | O_EXCL, 0o600 on unix):
+    /// an existing entry at `p` — a symlink included, never followed — is
+    /// EEXIST.
+    pub fn create_new_file<P: AsRef<std::path::Path>>(p: P) -> std::io::Result<std::fs::File> {
+        match scope() {
+            None => {
+                let mut o = std::fs::OpenOptions::new();
+                o.write(true).create_new(true);
+                #[cfg(unix)]
+                std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+                o.open(p)
+            }
+            Some(sc) => sc.create_new(&s(p.as_ref())),
+        }
+    }
+
+    /// A NEW directory with `mode` on unix (not recursive): an existing
+    /// entry at `p` is EEXIST.
+    pub fn create_dir_with_mode<P: AsRef<std::path::Path>>(p: P, mode: u16) -> std::io::Result<()> {
+        match scope() {
+            None => {
+                let mut b = std::fs::DirBuilder::new();
+                #[cfg(unix)]
+                std::os::unix::fs::DirBuilderExt::mode(&mut b, u32::from(mode));
+                let _ = mode;
+                b.create(p)
+            }
+            Some(sc) => sc.create_dir(&s(p.as_ref()), mode),
+        }
+    }
+
     pub fn exists<P: AsRef<std::path::Path>>(p: P) -> bool {
         metadata(p).is_ok()
     }
@@ -769,4 +827,118 @@ pub mod almide_sfs {
             self.file_type().is_symlink()
         }
     }
+}
+
+/// `dir/rel` as `Path::join` spells it (`dir` itself for an empty `rel`):
+/// the path a walk's entry and its error name.
+pub fn fs_walk_join(dir: &str, rel: &str) -> String {
+    if rel.is_empty() { dir.to_string() } else { std::path::Path::new(dir).join(rel).to_string_lossy().into_owned() }
+}
+
+/// The entries under the directory `dir`, each as its `/`-joined path
+/// relative to `dir`, in the system's order (#4143): a directory is
+/// descended into, a symlink is an entry and never followed — so a link to
+/// the outside lists nothing outside and a link loop cannot repeat the walk.
+/// `depth` counts the levels still to list (`Some(1)`: `dir` only; `None`:
+/// unbounded). The walk holds each directory by descriptor and opens the
+/// next one from it with O_NOFOLLOW, so a directory swapped for a symlink
+/// mid-walk is not followed either; `dir` itself is opened as `fs.read_dir`
+/// would (its own symlinks followed: the program named it), beneath the
+/// granted root under `[permissions] fs`. An error names the directory it
+/// came from, as `fs_walk_join(dir, rel)`.
+pub fn fs_walk_nofollow(dir: &str, depth: Option<usize>) -> Result<Vec<String>, (String, std::io::Error)> {
+    let mut out = Vec::new();
+    fs_walk_imp(dir, depth, &mut out)?;
+    Ok(out)
+}
+
+#[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
+fn fs_walk_imp(dir: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), (String, std::io::Error)> {
+    fn level(fd: &std::os::fd::OwnedFd, rel: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), (String, std::io::Error)> {
+        let names = fd.try_clone().and_then(almide_fs_beneath_sys::list_fd).map_err(|e| (rel.to_string(), e))?;
+        for n in names {
+            let name = String::from_utf8_lossy(&n).into_owned();
+            let r = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            out.push(r.clone());
+            if depth == Some(1) {
+                continue;
+            }
+            match almide_fs_beneath_sys::open_at(std::os::fd::AsFd::as_fd(fd), &name, almide_fs_beneath_sys::Open::Dir) {
+                Ok(child) => level(&child, &r, depth.map(|d| d - 1), out)?,
+                // Not a directory, a symlink (never followed), or gone since
+                // the listing: an entry, not a level.
+                Err(e) if matches!(e.raw_os_error(), Some(2 | 20 | 40 | 62)) => {}
+                // A directory the walk may not open: the plain walk's err.
+                Err(e) => return Err((r, e)),
+            }
+        }
+        Ok(())
+    }
+    let root = almide_sfs::open_dir(dir).map_err(|e| (String::new(), e))?;
+    level(&root, "", depth, out)
+}
+
+#[cfg(not(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64")))]
+fn fs_walk_imp(dir: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), (String, std::io::Error)> {
+    fn level(base: &str, rel: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), (String, std::io::Error)> {
+        let here = fs_walk_join(base, rel);
+        for e in almide_sfs::read_dir(&here).map_err(|e| (rel.to_string(), e))? {
+            let e = e.map_err(|e| (rel.to_string(), e))?;
+            let name = e.file_name().to_string_lossy().into_owned();
+            let r = if rel.is_empty() { name } else { format!("{rel}/{name}") };
+            out.push(r.clone());
+            let p = fs_walk_join(base, &r);
+            if depth != Some(1) && std::fs::symlink_metadata(&p).is_ok_and(|m| m.is_dir()) {
+                level(base, &r, depth.map(|d| d - 1), out)?;
+            }
+        }
+        Ok(())
+    }
+    level(dir, "", depth, out)
+}
+
+/// The random part of a temp name (#4113): 16 hex digits of OS entropy —
+/// `/dev/urandom` where it can be read, else std's per-process SipHash keys
+/// (themselves drawn from the OS CSPRNG) over a counter and the clock. Never
+/// the clock alone: a name another user can predict is a name they can plant.
+pub fn fs_temp_suffix() -> String {
+    let mut b = [0u8; 8];
+    let urandom = std::fs::File::open("/dev/urandom").and_then(|mut f| std::io::Read::read_exact(&mut f, &mut b));
+    if urandom.is_err() {
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let mut h = std::hash::BuildHasher::build_hasher(&std::collections::hash_map::RandomState::new());
+        std::hash::Hasher::write_u64(&mut h, N.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+        std::hash::Hasher::write_u128(&mut h, t);
+        b = std::hash::Hasher::finish(&h).to_le_bytes();
+    }
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+/// A new, uniquely named file (`dir` false, 0o600) or directory (`dir`
+/// true, 0o700) in the temp dir, named `<prefix><16 hex of OS entropy>`
+/// (#4113). Created exclusively (O_EXCL / a plain mkdir), so an entry
+/// already at the name — one another user planted, a symlink included — is
+/// never followed, truncated or reused: the next name is tried, up to 64
+/// times. Its path, or the error of the last try with that try's path.
+pub fn fs_temp_create(prefix: &str, dir: bool) -> Result<String, (String, std::io::Error)> {
+    fs_temp_create_in(&std::env::temp_dir(), prefix, dir, &mut fs_temp_suffix)
+}
+
+/// [`fs_temp_create`] under `base` with the name source exposed, for the
+/// collision tests (tests/fs_scoped_core.rs).
+#[doc(hidden)]
+pub fn fs_temp_create_in(base: &std::path::Path, prefix: &str, dir: bool, suffix: &mut dyn FnMut() -> String) -> Result<String, (String, std::io::Error)> {
+    let mut last = (String::new(), std::io::Error::from_raw_os_error(17));
+    for _ in 0..64 {
+        let path = base.join(format!("{prefix}{}", suffix()));
+        let shown = path.to_string_lossy().replace('\\', "/");
+        let r = if dir { almide_sfs::create_dir_with_mode(&path, 0o700) } else { almide_sfs::create_new_file(&path).map(drop) };
+        match r {
+            Ok(()) => return Ok(shown),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = (shown, e),
+            Err(e) => return Err((shown, e)),
+        }
+    }
+    Err(last)
 }

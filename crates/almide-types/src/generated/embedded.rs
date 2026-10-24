@@ -8429,7 +8429,7 @@ effect fn copy(src: String, dst: String) -> Result[Unit, String] = _
 @intrinsic("almide_rt_fs_rename")
 effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
 
-/// Sorted paths below dir, recursive; dirs too.
+/// Sorted paths below dir; links listed, not followed.
 @intrinsic("almide_rt_fs_walk")
 effect fn walk(dir: String) -> Result[List[String], String] = _
 
@@ -8445,7 +8445,7 @@ effect fn file_size(path: String) -> Result[Int, String] = _
 
 
 
-/// Host temp dir; may end with /.
+/// Host temp dir; a location, not a safe name.
 @intrinsic("almide_rt_fs_temp_dir")
 effect fn temp_dir() -> String = _
 
@@ -8453,16 +8453,16 @@ effect fn temp_dir() -> String = _
 @intrinsic("almide_rt_fs_stat")
 effect fn stat(path: String) -> Result[FileStat, String] = _
 
-/// Sorted * and ** matches; [] if base is absent.
+/// Sorted * and ** matches; links not followed.
 @intrinsic("almide_rt_fs_glob")
 effect fn glob(pattern: String) -> Result[List[String], String] = _
 
-/// New empty file temp_dir/prefix+nanos; its path.
+/// New private file, random name; its path.
 @ordered
 @intrinsic("almide_rt_fs_create_temp_file")
 effect fn create_temp_file(prefix: String) -> Result[String, String] = _
 
-/// New dir temp_dir/prefix+nanos; its path.
+/// New private dir, random name; its path.
 @ordered
 @intrinsic("almide_rt_fs_create_temp_dir")
 effect fn create_temp_dir(prefix: String) -> Result[String, String] = _
@@ -9621,13 +9621,22 @@ fn __walk_ftype(path: String) -> Int = {
   if errno != 0 then 0 else prim.load8(p + 16)
 }
 
+
+
+fn __walk_ftype_nofollow(path: String) -> Int = {
+  let buf = prim.alloc_bytes(64)
+  let p = prim.handle(buf) + 12
+  let errno = prim.path_filestat_nofollow(p, path)
+  if errno != 0 then 0 else prim.load8(p + 16)
+}
+
 effect fn __walk_entries(dir: String, entries: List[String], i: Int, depth: Int, acc: List[String], call: String) -> Result[List[String], String] =
   if i >= list.len(entries) then ok(acc)
   else {
     let name = list.get(entries, i) ?? ""
     let p = dir + "/" + name
     let acc2 = acc + [p]
-    if depth != 1 and __walk_ftype(p) == 3 then {
+    if depth != 1 and __walk_ftype_nofollow(p) == 3 then {
       let sub = __walk_into(p, depth - 1, acc2, call)!
       __walk_entries(dir, entries, i + 1, depth, sub, call)
     } else __walk_entries(dir, entries, i + 1, depth, acc2, call)
@@ -31441,12 +31450,29 @@ pub const SRC_PATH: &str = r#"
 mod type SafePath = String
 
 
-/// SafePath of s; err if any segment is "..".
-fn from_string(s: String) -> Result[SafePath, String] = {
-  let segments = string.split(s, "/")
-  let has_traversal = list.any(segments, (seg) => seg == "..")
-  if has_traversal then err("path traversal rejected: " + s) else ok(SafePath(s))
+
+
+
+
+
+
+
+
+local fn stays_inside(s: String) -> Bool = {
+  let segs = string.split(string.replace(s, "\\", "/"), "/")
+  let first = list.first(segs) ?? ""
+  let rooted = string.starts_with(s, "/") or string.starts_with(s, "\\")
+  let drive = string.len(first) >= 2 and string.slice(first, 1, 2) == ":"
+  let home = string.starts_with(s, "~")
+  let nul = string.contains(s, "\u{0}")
+  let climbs = list.any(segs, (seg) => seg == "..")
+  not (rooted or drive or home or nul or climbs)
 }
+
+
+/// SafePath of s; err unless relative and inside.
+fn from_string(s: String) -> Result[SafePath, String] =
+  if stays_inside(s) then ok(SafePath(s)) else err("path traversal rejected: " + s)
 
 
 /// SafePath of s with no traversal check.
@@ -31458,6 +31484,8 @@ fn to_string(p: SafePath) -> String = match p {
   SafePath(s) => s
 }
 
+
+
 /// base/child; an absolute child replaces base.
 fn join(base: String, child: String) -> String = {
 
@@ -31468,6 +31496,13 @@ fn join(base: String, child: String) -> String = {
     if string.len(b) == 0 then child else b + "/" + child
   }
 }
+
+
+
+
+/// base/child; err if child could leave base.
+fn join_within(base: String, child: String) -> Result[String, String] =
+  if stays_inside(child) then ok(join(base, child)) else err("path traversal rejected: " + child)
 
 /// p minus last segment; "" if no slash.
 fn dirname(p: String) -> String = {

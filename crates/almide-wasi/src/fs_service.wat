@@ -42,6 +42,7 @@
   (import "wasi_snapshot_preview1" "path_remove_directory" (func $path_remove_directory (param i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "path_unlink_file" (func $path_unlink_file (param i32 i32 i32) (result i32)))
   (import "wasi_snapshot_preview1" "path_rename" (func $path_rename (param i32 i32 i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "random_get" (func $random_get (param i32 i32) (result i32)))
   (import "env" "memory" (memory 1))
   (import "shim" "plen" (global $plen (mut i32)))
   (import "shim" "ppos" (global $ppos (mut i32)))
@@ -455,6 +456,12 @@
 
   (func $is_dir_path (param $p i32) (param $l i32) (result i32)
     (if (call $stat (local.get $p) (local.get $l) (i32.const 1)) (then (return (i32.const 0))))
+    (i32.eq (call $ftype) (i32.const 3)))
+
+  ;; A directory itself, its symlink NOT followed: walk and glob descend only
+  ;; into these, so a symlinked directory is an entry, never a level (#4143).
+  (func $is_dir_nofollow (param $p i32) (param $l i32) (result i32)
+    (if (call $stat (local.get $p) (local.get $l) (i32.const 0)) (then (return (i32.const 0))))
     (i32.eq (call $ftype) (i32.const 3)))
 
   ;; ── reading ────────────────────────────────────────────────────────────
@@ -1239,31 +1246,59 @@
       (else (local.set $e (call $path_unlink_file (local.get $fd) (local.get $rp) (local.get $rl)))))
     (call $write_result (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0) (i32.const 0) (local.get $e)))
 
-  ;; temp root + prefix + the wall clock's nanoseconds (the host's name)
+;; temp root + prefix + 16 hex digits of the host's entropy (#4113): never the
+  ;; clock, a name another user could predict and plant first.
   (func $temp_path (param $a i32) (param $al i32) (result i32 i32)
-    (local $tp i32) (local $tl i32) (local $np i32) (local $nl i32) (local $name i32) (local $w i32)
+    (local $tp i32) (local $tl i32) (local $name i32) (local $w i32) (local $i i32) (local $b i32)
     (call $tmp) (local.set $tl) (local.set $tp)
-    (drop (call $clock_time_get (i32.const 0) (i64.const 1) (i32.add (global.get $fsp) (i32.const 40))))
-    (call $utoa (i64.load offset=40 (global.get $fsp))) (local.set $nl) (local.set $np)
-    (local.set $name (call $alloc (i32.add (local.get $al) (local.get $nl))))
+    (drop (call $random_get (i32.add (global.get $fsp) (i32.const 40)) (i32.const 8)))
+    (local.set $name (call $alloc (i32.add (local.get $al) (i32.const 16))))
     (local.set $w (call $put (local.get $name) (local.get $a) (local.get $al)))
-    (local.set $w (call $put (local.get $w) (local.get $np) (local.get $nl)))
+    (block $d (loop $n
+      (br_if $d (i32.ge_u (local.get $i) (i32.const 8)))
+      (local.set $b (i32.load8_u (i32.add (i32.add (global.get $fsp) (i32.const 40)) (local.get $i))))
+      (i32.store8 (local.get $w) (call $hexdig (i32.shr_u (local.get $b) (i32.const 4))))
+      (i32.store8 offset=1 (local.get $w) (call $hexdig (i32.and (local.get $b) (i32.const 15))))
+      (local.set $w (i32.add (local.get $w) (i32.const 2)))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $n)))
     (call $join (local.get $tp) (local.get $tl) (local.get $name) (i32.sub (local.get $w) (local.get $name))))
 
+  (func $hexdig (param $n i32) (result i32)
+    (select (i32.add (local.get $n) (i32.const 48)) (i32.add (local.get $n) (i32.const 87))
+            (i32.lt_u (local.get $n) (i32.const 10))))
+
+  ;; A new directory, created exclusively (a plain path_create_directory, not
+  ;; mkdir_all: an existing entry is EEXIST, never reused); a taken name is
+  ;; retried under a fresh one, up to 64 times (#4113). WASI preview1 sets no
+  ;; mode: the host's defaults apply.
   (func $op_create_temp_dir (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
-    (local $p i32) (local $l i32) (local $fd i32) (local $rp i32) (local $rl i32) (local $e i32)
-    (call $temp_path (local.get $a) (local.get $al)) (local.set $l) (local.set $p)
-    (call $resolve (local.get $p) (local.get $l)) (local.set $rl) (local.set $rp) (local.set $fd)
-    (local.set $e (call $mkdir_all (local.get $fd) (local.get $rp) (local.get $rl)))
+    (local $p i32) (local $l i32) (local $fd i32) (local $rp i32) (local $rl i32) (local $e i32) (local $k i32)
+    (block $done (loop $try
+      (call $temp_path (local.get $a) (local.get $al)) (local.set $l) (local.set $p)
+      (call $resolve (local.get $p) (local.get $l)) (local.set $rl) (local.set $rp) (local.set $fd)
+      (local.set $e (call $path_create_directory (local.get $fd) (local.get $rp) (local.get $rl)))
+      (br_if $done (i32.ne (local.get $e) (i32.const 20)))
+      (local.set $k (i32.add (local.get $k) (i32.const 1)))
+      (br_if $try (i32.lt_u (local.get $k) (i32.const 64)))))
     (if (local.get $e)
       (then (return (call $write_result (local.get $op) (local.get $p) (local.get $l) (i32.const 0) (i32.const 0)
                                         (i32.const 0) (local.get $e)))))
     (call $ok (local.get $p) (local.get $l)))
 
+  ;; A new empty file, created exclusively and without following a symlink at
+  ;; the name (O_CREAT | O_EXCL, lookupflags 0): a taken name is retried under
+  ;; a fresh one, up to 64 times (#4113).
   (func $op_create_temp_file (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
-    (local $p i32) (local $l i32) (local $e i32)
-    (call $temp_path (local.get $a) (local.get $al)) (local.set $l) (local.set $p)
-    (local.set $e (call $write_at (local.get $p) (local.get $l) (i32.const 0) (i32.const 0) (i32.const 9) (i32.const 0)))
+    (local $p i32) (local $l i32) (local $fd i32) (local $rp i32) (local $rl i32) (local $e i32) (local $k i32)
+    (block $done (loop $try
+      (call $temp_path (local.get $a) (local.get $al)) (local.set $l) (local.set $p)
+      (call $resolve (local.get $p) (local.get $l)) (local.set $rl) (local.set $rp) (local.set $fd)
+      (local.set $e (call $write_fd (local.get $fd) (local.get $rp) (local.get $rl) (i32.const 0)
+                                    (i32.const 0) (i32.const 0) (i32.const 5) (i32.const 0)))
+      (br_if $done (i32.ne (local.get $e) (i32.const 20)))
+      (local.set $k (i32.add (local.get $k) (i32.const 1)))
+      (br_if $try (i32.lt_u (local.get $k) (i32.const 64)))))
     (if (local.get $e)
       (then (return (call $write_result (local.get $op) (local.get $p) (local.get $l) (i32.const 0) (i32.const 0)
                                         (i32.const 0) (local.get $e)))))
@@ -1272,7 +1307,7 @@
   ;; ── walk / glob ────────────────────────────────────────────────────────
 
   ;; Depth-first: every entry's joined path, descending into directories
-  ;; (followed); a directory that cannot be read names itself in $ep/$el.
+  ;; (a symlinked one is an entry, never followed, #4143); a directory that cannot be read names itself in $ep/$el.
   (func $walk_rec (param $d i32) (param $dl i32) (result i32)
     (local $fd i32) (local $rp i32) (local $rl i32) (local $head i32) (local $cnt i32) (local $e i32) (local $cp i32) (local $cl i32)
     (call $resolve (local.get $d) (local.get $dl)) (local.set $rl) (local.set $rp) (local.set $fd)
@@ -1284,7 +1319,7 @@
       (call $join (local.get $d) (local.get $dl) (i32.add (local.get $head) (i32.const 8)) (i32.load offset=4 (local.get $head)))
       (local.set $cl) (local.set $cp)
       (call $push (local.get $cp) (local.get $cl))
-      (if (call $is_dir_path (local.get $cp) (local.get $cl))
+      (if (call $is_dir_nofollow (local.get $cp) (local.get $cl))
         (then
           (local.set $e (call $walk_rec (local.get $cp) (local.get $cl)))
           (if (local.get $e) (then (return (local.get $e))))))
@@ -1432,7 +1467,7 @@
       (call $push (local.get $xp) (local.get $xl))
       (if (i32.ne (local.get $depth) (i32.const 1))
         (then
-          (if (call $is_dir_path (local.get $cp) (local.get $cl))
+          (if (call $is_dir_nofollow (local.get $cp) (local.get $cl))
             (then
               (local.set $e (call $glob_walk (local.get $cp) (local.get $cl) (local.get $xp) (local.get $xl)
                                              (select (i32.const -1) (i32.sub (local.get $depth) (i32.const 1))

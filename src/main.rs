@@ -47,15 +47,20 @@ fn find_rustc() -> String {
     cli::rustc_floor::locate_rustc()
 }
 
+/// The `.almd` files under `dir` (`almide fmt`'s sweep). A symlink — to a
+/// directory or to a file — is neither descended nor collected (#4140): a
+/// link loop would repeat the sweep, and a link to a file outside `dir`
+/// would have `fmt` rewrite it there.
 fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
         entries.sort_by_key(|e| e.path());
         for entry in entries {
             let path = entry.path();
-            if path.is_dir() {
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_dir() {
                 collect_almd_files(&path, out);
-            } else if path.extension().map_or(false, |ext| ext == "almd") {
+            } else if kind.is_file() && path.extension().map_or(false, |ext| ext == "almd") {
                 out.push(path.to_string_lossy().to_string());
             }
         }

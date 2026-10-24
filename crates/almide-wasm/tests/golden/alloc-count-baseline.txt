@@ -25,7 +25,7 @@
 14036	14002	34222253	14036	spec/wasm_cross/assign_self_call_release.almd
 9	0	121	9	spec/wasm_cross/autotry_construction.almd
 5	3	55	5	spec/wasm_cross/autotry_result_first_arg.almd
-205	140	2805	205	spec/wasm_cross/availability_pure_batch.almd
+223	157	2927	223	spec/wasm_cross/availability_pure_batch.almd
 28	10	332	28	spec/wasm_cross/bang_in_record_literal_field.almd
 187	162	1522	187	spec/wasm_cross/base64_encode.almd
 4	0	52	4	spec/wasm_cross/binary_operators.almd

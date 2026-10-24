@@ -459,9 +459,12 @@ pub(crate) fn load_native_build_config(file: &str) -> (Vec<crate::project::Nativ
 }
 
 /// `collect_test_files`'s per-entry body: recurse into subdirectories, or
-/// check a `.almd` file for a `test` block. Extracted verbatim.
+/// check a `.almd` file for a `test` block. A symlinked directory is not
+/// descended (#4140): a link loop would collect the same files at every
+/// level, and a link out would run tests from outside the tree.
 fn collect_test_files_entry(path: &std::path::Path, files: &mut Vec<String>) {
-    if path.is_dir() {
+    let is_link = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    if path.is_dir() && !is_link {
         files.extend(collect_test_files(path));
     } else if path.extension().map(|e| e == "almd").unwrap_or(false) {
         // Check if file contains a test block
@@ -483,6 +486,9 @@ fn collect_test_files(dir: &std::path::Path) -> Vec<String> {
     }
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.filter_map(|e| e.ok()) {
+            if entry.file_type().is_ok_and(|t| t.is_symlink()) && entry.path().is_dir() {
+                continue;
+            }
             collect_test_files_entry(&entry.path(), &mut files);
         }
     }

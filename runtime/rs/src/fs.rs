@@ -527,30 +527,16 @@ pub fn almide_rt_fs_stat(path: &str) -> Result<AlmideFileStat, AlmideString> {
 
 // Temp
 pub fn almide_rt_fs_temp_dir() -> AlmideString { let __almide_out: String = std::env::temp_dir().to_string_lossy().replace('\\', "/"); __almide_out.into() }
+// A new, uniquely named temp file (0o600) / directory (0o700) (#4113): the
+// name's random part is OS entropy, and the entry is created exclusively —
+// a name already taken (planted, a symlink included) is never followed or
+// reused, the next one is tried (almide-rt-core fs_temp_create).
 pub fn almide_rt_fs_create_temp_file(prefix: &str) -> Result<AlmideString, AlmideString> {
-    let __almide_v: Result<String, AlmideString> = {
-        let __almide_r: Result<String, String> = (|| {
-            let dir = std::env::temp_dir();
-            let name = format!("{}{}", prefix, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
-            let path = dir.join(&name);
-            std::fs::write(&path, "").map_err(|e| io_err("fs.create_temp_file", &fs_q(&path.to_string_lossy()), e))?;
-            Ok(path.to_string_lossy().replace('\\', "/"))
-        })();
-        __almide_r.map_err(Into::into)
-    };
+    let __almide_v: Result<String, AlmideString> = fs_temp_create(prefix, false).map_err(|(p, e)| io_err("fs.create_temp_file", &fs_q(&p), e).into());
     __almide_v.into_almide()
 }
 pub fn almide_rt_fs_create_temp_dir(prefix: &str) -> Result<AlmideString, AlmideString> {
-    let __almide_v: Result<String, AlmideString> = {
-        let __almide_r: Result<String, String> = (|| {
-            let dir = std::env::temp_dir();
-            let name = format!("{}{}", prefix, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
-            let path = dir.join(&name);
-            std::fs::create_dir_all(&path).map_err(|e| io_err("fs.create_temp_dir", &fs_q(&path.to_string_lossy()), e))?;
-            Ok(path.to_string_lossy().replace('\\', "/"))
-        })();
-        __almide_r.map_err(Into::into)
-    };
+    let __almide_v: Result<String, AlmideString> = fs_temp_create(prefix, true).map_err(|(p, e)| io_err("fs.create_temp_dir", &fs_q(&p), e).into());
     __almide_v.into_almide()
 }
 
@@ -568,13 +554,13 @@ pub fn almide_rt_fs_walk(dir: &str) -> Result<Vec<AlmideString>, AlmideString> {
     __almide_v.into_almide()
 }
 
+// A symlink is an entry, never a level (#4143): the descriptor walk of
+// almide-rt-core opens each directory from its parent with O_NOFOLLOW, so a
+// link to the outside lists nothing outside and a link loop cannot repeat.
 fn walk_recursive(dir: &Path, results: &mut Vec<String>) -> Result<(), String> {
-    for entry in std::fs::read_dir(dir).map_err(|e| io_err("fs.walk", &fs_q(&dir.to_string_lossy()), e))? {
-        let entry = entry.map_err(|e| io_err("fs.walk", &fs_q(&dir.to_string_lossy()), e))?;
-        let path = entry.path();
-        results.push(path.to_string_lossy().replace('\\', "/"));
-        if path.is_dir() { walk_recursive(&path, results)?; }
-    }
+    let d = dir.to_string_lossy();
+    let rels = fs_walk_nofollow(&d, None).map_err(|(rel, e)| io_err("fs.walk", &fs_q(&fs_walk_join(&d, &rel)), e))?;
+    results.extend(rels.iter().map(|r| fs_walk_join(&d, r).replace('\\', "/")));
     Ok(())
 }
 
@@ -628,16 +614,12 @@ pub fn almide_rt_fs_glob(pattern: &str) -> Result<Vec<AlmideString>, AlmideStrin
 // Collects every entry below `dir` as a `/`-joined path relative to the walk
 // root; `depth` is the count of levels still to visit (`Some(1)` = list `dir`
 // only), `None` unbounded.
+// The same no-follow walk as fs.walk (#4143): a symlinked directory is
+// matched as an entry and never descended.
 fn glob_walk(dir: &Path, rel_prefix: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), String> {
-    for entry in std::fs::read_dir(dir).map_err(|e| io_err("fs.glob", &fs_q(&dir.to_string_lossy()), e))? {
-        let entry = entry.map_err(|e| io_err("fs.glob", &fs_q(&dir.to_string_lossy()), e))?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let rel = if rel_prefix.is_empty() { name } else { format!("{}/{}", rel_prefix, name) };
-        let path = entry.path();
-        let descend = depth != Some(1) && path.is_dir();
-        out.push(rel.clone());
-        if descend { glob_walk(&path, &rel, depth.map(|d| d - 1), out)?; }
-    }
+    let d = dir.to_string_lossy();
+    let rels = fs_walk_nofollow(&d, depth).map_err(|(rel, e)| io_err("fs.glob", &fs_q(&fs_walk_join(&d, &rel)), e))?;
+    out.extend(rels.into_iter().map(|r| if rel_prefix.is_empty() { r } else { format!("{}/{}", rel_prefix, r) }));
     Ok(())
 }
 

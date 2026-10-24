@@ -65,12 +65,14 @@ fn scan_submodules_recursive(dir: &std::path::Path, prefix: &str, out: &mut std:
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
-        if path.is_file() && name.ends_with(".almd") {
+        // Symlinks are neither followed nor read (#4140).
+        let Ok(kind) = entry.file_type() else { continue };
+        if kind.is_file() && name.ends_with(".almd") {
             let stem = name.trim_end_matches(".almd");
             if stem == "mod" || stem == "lib" || stem == "main" { continue; }
             let full = format!("{}.{}", prefix, stem);
             out.insert(stem.to_string(), full);
-        } else if path.is_dir() && !name.starts_with('.') {
+        } else if kind.is_dir() && !name.starts_with('.') {
             let sub_prefix = format!("{}.{}", prefix, name);
             scan_submodules_recursive(&path, &sub_prefix, out);
         }
@@ -137,6 +139,36 @@ fn report_fmt_check(mode: FmtMode, total: usize, unformatted: &[String], unreada
     std::process::exit(1);
 }
 
+/// Write `formatted` over `file` (#4140): into a fresh temp file beside it,
+/// then renamed onto it, so the file is replaced whole and a symlink at
+/// `file` is never written through. A symlink is refused: `fmt` rewrites
+/// regular files only, never a target somewhere else.
+fn write_formatted(file: &str, formatted: &str) -> std::io::Result<()> {
+    let path = std::path::Path::new(file);
+    if std::fs::symlink_metadata(path)?.file_type().is_symlink() {
+        return Err(std::io::Error::other("a symlink: almide fmt rewrites regular files only"));
+    }
+    let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let perms = std::fs::metadata(path)?.permissions();
+    for k in 0..100u32 {
+        let tmp = dir.join(format!(".{name}.almide-fmt-{}-{k}", std::process::id()));
+        let mut f = match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(f) => f,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        };
+        let written = std::io::Write::write_all(&mut f, formatted.as_bytes())
+            .and_then(|()| f.set_permissions(perms.clone()))
+            .and_then(|()| std::fs::rename(&tmp, path));
+        if written.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        return written;
+    }
+    Err(std::io::Error::other("no free temp name beside the file"))
+}
+
 pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
     // Load dependency info from almide.toml (if present)
     let (dep_names, dep_submodules) = load_dep_info_for_fmt();
@@ -184,8 +216,10 @@ pub fn cmd_fmt(files: &[String], mode: FmtMode, no_import_edit: bool) {
         }
         match mode {
             FmtMode::Write => {
-                std::fs::write(file, &formatted)
-                    .unwrap_or_else(|e| { err(&format!("Failed to write {}: {}", file, e)); std::process::exit(1); });
+                if formatted != source_text {
+                    write_formatted(file, &formatted)
+                        .unwrap_or_else(|e| { err(&format!("Failed to write {}: {}", file, e)); std::process::exit(1); });
+                }
                 err(&format!("Formatted {}", file));
             }
             FmtMode::Check | FmtMode::CheckJson => {
