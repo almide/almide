@@ -1,0 +1,53 @@
+// @contract: C-412
+// Case mapping never folds a non-ASCII scalar INTO ASCII (#4121): an ASCII
+// scalar maps by the ASCII rules; a non-ASCII scalar takes its default
+// (locale-independent, full SpecialCasing) Unicode mapping unless that mapping
+// contains an ASCII scalar, and then it is left unchanged. Pins the issue's
+// three probes (each comparison is now false), every scalar the rule holds back
+// in each direction (upper: U+00DF U+0131 U+0149 U+017F U+01F0 U+1E96..U+1E9A
+// U+FB00..U+FB06; lower: U+0130 U+212A), capitalize's head, and that Final_Sigma
+// still reads the held-back Kelvin sign as a cased neighbour.
+fn cps(s: String) -> String = string.chars(s) |> list.map((c) => int.to_hex(string.codepoint(c) ?? 0)) |> list.join(" ")
+
+effect fn main() -> Unit = {
+  // The issue's probes: a check on the raw name and on the mapped name agree.
+  println(if string.to_upper("adm\u{131}n") == "ADMIN" then "folds" else "kept")
+  // kept
+  println(if string.to_lower("\u{212A}ey") == "key" then "folds" else "kept")
+  // kept
+  println(if string.to_upper("\u{17F}ecret") == "SECRET" then "folds" else "kept")
+  // kept
+  println(cps(string.to_upper("adm\u{131}n")))
+  // 41 44 4d 131 4e
+  println(cps(string.to_lower("\u{212A}ey")))
+  // 212a 65 79
+  // Every held-back scalar, upper direction: unchanged.
+  let up = "\u{DF}\u{131}\u{149}\u{17F}\u{1F0}\u{1E96}\u{1E97}\u{1E98}\u{1E99}\u{1E9A}\u{FB00}\u{FB01}\u{FB02}\u{FB03}\u{FB04}\u{FB05}\u{FB06}"
+  println(if string.to_upper(up) == up then "upper: all 17 kept" else "upper: ${cps(string.to_upper(up))}")
+  // upper: all 17 kept
+  // Lower direction: U+0130 (-> i + U+0307) and U+212A (-> k) unchanged.
+  println(cps(string.to_lower("\u{130}\u{212A}")))
+  // 130 212a
+  // Their non-folding case partners still map (they stay non-ASCII or are ASCII).
+  println(cps(string.to_lower("\u{C5}\u{212B}\u{3A3}\u{1E9E}")))
+  // e5 e5 3c3 df
+  println(cps(string.to_upper("\u{E5}\u{390}\u{587}")))
+  // c5 399 308 301 535 552
+  // ASCII is ASCII: unaffected.
+  println(string.to_upper("admin key secret file"))
+  // ADMIN KEY SECRET FILE
+  println(string.to_lower("ADMIN KEY SECRET FILE"))
+  // admin key secret file
+  // capitalize upper-cases its head under the same rule.
+  println(cps(string.capitalize("\u{131}d")))
+  // 131 64
+  println(cps(string.capitalize("\u{FB01}le")))
+  // fb01 6c 65
+  println(cps(string.capitalize("\u{E9}t\u{E9}")))
+  // c9 74 e9
+  // Final_Sigma: the kept Kelvin sign is still a cased letter before the sigma.
+  println(cps(string.to_lower("\u{212A}\u{3A3}")))
+  // 212a 3c2
+  // 3c3 212a
+  println(cps(string.to_lower("\u{3A3}\u{212A}")))
+}
