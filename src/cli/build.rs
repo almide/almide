@@ -305,7 +305,7 @@ pub fn cmd_build(args: BuildArgs) {
             // SAFETY: the whole CLI runs sequentially on the one `almide-main`
             // worker thread and no other thread is alive to read the
             // environment concurrently.
-            unsafe { std::env::set_var("ALMIDE_NO_RTLIB", "1") };
+            unsafe { almide_base::env::arm("ALMIDE_NO_RTLIB", "1") };
             inject_heap_cap(&rs_code, n)
         }
         None => rs_code,
@@ -628,7 +628,7 @@ pub(crate) fn arm_alloc_count(rs_code: String) -> String {
     }
     // SAFETY: the whole CLI runs sequentially on the one `almide-main` worker
     // thread and no other thread is alive to read the environment concurrently.
-    unsafe { std::env::set_var("ALMIDE_NO_RTLIB", "1") };
+    unsafe { almide_base::env::arm("ALMIDE_NO_RTLIB", "1") };
     inject_alloc_count(&rs_code)
 }
 

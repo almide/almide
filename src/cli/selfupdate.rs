@@ -187,13 +187,56 @@ fn archive_stem() -> String {
     format!("almide-{}-{}", OS, ARCH)
 }
 
+/// A fresh private staging directory (#4127). The name is not predictable:
+/// it is hashed with a per-process random key (std's `RandomState`). The
+/// directory is created exclusively, with mode 0700 on unix, so a directory
+/// another user created first is never reused. The old
+/// `temp_dir()/almide-update-<pid>` with `create_dir_all` accepted any
+/// existing directory, including one someone else owned.
 fn tempdir() -> String {
-    let dir = std::env::temp_dir().join(format!("almide-update-{}", std::process::id()));
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        err(&format!("Failed to create {}: {}", dir.display(), e));
-        std::process::exit(1);
+    use std::hash::{BuildHasher, Hasher};
+    let base = std::env::temp_dir();
+    for _ in 0..16 {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u128(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
+        );
+        h.write_u32(std::process::id());
+        let dir = base.join(format!("almide-update-{:016x}", h.finish()));
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        match builder.create(&dir) {
+            Ok(()) => return dir.to_string_lossy().to_string(),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                err(&format!("Failed to create {}: {}", dir.display(), e));
+                std::process::exit(1);
+            }
+        }
     }
-    dir.to_string_lossy().to_string()
+    err("error: could not create a private staging directory for the update");
+    std::process::exit(1);
+}
+
+/// The hash the checksum file lists for exactly `archive_name`. It matches
+/// the file-name field (`<hash>  <name>` or `<hash> *<name>`), never a
+/// substring: an asset whose name only CONTAINS the archive name, such as
+/// a `.sig` or `.sbom` for it, cannot supply the hash (#4127).
+fn expected_checksum(checksums: &str, archive_name: &str) -> Option<String> {
+    checksums.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let hash = fields.next()?;
+        let name = fields.next()?;
+        let name = name.strip_prefix('*').unwrap_or(name);
+        (name == archive_name && fields.next().is_none()).then(|| hash.to_ascii_lowercase())
+    })
 }
 
 fn curl_download(url: &str, dest: &str) {
@@ -218,14 +261,10 @@ fn verify_checksum(archive_path: &str, checksum_path: &str, archive_name: &str) 
         std::process::exit(1);
     });
 
-    let expected = checksums
-        .lines()
-        .find(|line| line.contains(archive_name))
-        .and_then(|line| line.split_whitespace().next())
-        .unwrap_or_else(|| {
-            err(&format!("error: checksum not found for {}", archive_name));
-            std::process::exit(1);
-        });
+    let expected = expected_checksum(&checksums, archive_name).unwrap_or_else(|| {
+        err(&format!("error: checksum not found for {}", archive_name));
+        std::process::exit(1);
+    });
 
     // Try sha256sum first (Linux), then shasum (macOS)
     let actual = if let Ok(output) = Command::new("sha256sum").arg(archive_path).output() {
@@ -242,12 +281,15 @@ fn verify_checksum(archive_path: &str, checksum_path: &str, archive_name: &str) 
         shasum_fallback(archive_path)
     };
 
+    // Fail closed (#4127): no hash means no install. This used to print a
+    // warning and go on to replace the running binary unverified.
     if actual.is_empty() {
-        err(&format!("warning: could not verify checksum (sha256sum/shasum not found)"));
-        return;
+        err("error: could not verify checksum (sha256sum/shasum not found); refusing to install");
+        err("       install sha256sum or shasum, or install from a verified release archive");
+        std::process::exit(1);
     }
 
-    if expected != actual {
+    if expected != actual.to_ascii_lowercase() {
         err(&format!("error: checksum mismatch"));
         err(&format!("       expected: {}", expected));
         err(&format!("       got:      {}", actual));
@@ -341,5 +383,44 @@ fn replace_binary(new_path: &str, current_exe: &std::path::Path) {
             std::process::exit(1);
         });
         let _ = std::fs::remove_file(&old_path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #4127: the checksum line is matched on the exact file-name field.
+    /// A substring match let a `.sig` / `.sbom` line for the same archive
+    /// supply the hash.
+    #[test]
+    fn expected_checksum_matches_the_exact_name_only() {
+        let sums = "\
+aaaa  almide-macos-aarch64.tar.gz.sig
+BBBB *almide-macos-aarch64.tar.gz
+cccc  almide-linux-x86_64.tar.gz
+dddd  almide-macos-aarch64.tar.gz extra-field
+";
+        assert_eq!(expected_checksum(sums, "almide-macos-aarch64.tar.gz").as_deref(), Some("bbbb"));
+        assert_eq!(expected_checksum(sums, "almide-linux-x86_64.tar.gz").as_deref(), Some("cccc"));
+        assert_eq!(expected_checksum(sums, "almide-macos.tar.gz"), None);
+        assert_eq!(expected_checksum("aaaa  almide-x.tar.gz.sig\n", "almide-x.tar.gz"), None);
+    }
+
+    /// #4127: the staging directory is fresh, private and unpredictable.
+    #[test]
+    fn tempdir_is_fresh_and_private() {
+        let a = tempdir();
+        let b = tempdir();
+        assert_ne!(a, b, "two staging dirs must not share a name");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&a).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700, "staging dir mode {mode:o}");
+        }
+        assert!(!a.ends_with(&format!("almide-update-{}", std::process::id())), "name must not be the pid");
+        let _ = std::fs::remove_dir(&a);
+        let _ = std::fs::remove_dir(&b);
     }
 }

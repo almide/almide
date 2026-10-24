@@ -209,6 +209,38 @@ fn packages_in(checkout: &Path) -> Vec<String> {
     found
 }
 
+thread_local! {
+    /// Set while [`resolve_cached_deps`] runs: no clone and no lock write.
+    static OFFLINE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn offline() -> bool {
+    OFFLINE.with(|o| o.get())
+}
+
+/// Restores the previous offline state when dropped.
+struct OfflineGuard(bool);
+
+impl Drop for OfflineGuard {
+    fn drop(&mut self) {
+        OFFLINE.with(|o| o.set(self.0));
+    }
+}
+
+/// The project's dependencies, resolved from what is already on disk: path
+/// dependencies and checkouts already in the cache. It never runs `git` to
+/// fetch, and never writes `almide.lock`. A dependency that is not cached
+/// yet is an error naming the command that fetches it.
+///
+/// For tools that look at a project without being asked to build it — the
+/// LSP opening a file, `almide ide` — so that an untrusted project cannot
+/// choose which hosts this machine contacts, or write into its own tree,
+/// before anything is run (#4128).
+pub fn resolve_cached_deps(project: &Project) -> Result<Vec<FetchedDep>, String> {
+    let _restore = OfflineGuard(OFFLINE.with(|o| o.replace(true)));
+    fetch_all_deps(project)
+}
+
 /// Populate cache dir `dir` atomically: run `clone` against a fresh sibling
 /// temp dir, then rename it into place. Callers may race — `almide test`
 /// compiles test files on parallel threads and every thread resolves deps,
@@ -221,6 +253,12 @@ fn packages_in(checkout: &Path) -> Vec<String> {
 fn populate_cache_dir(dir: &Path, clone: impl FnOnce(&Path) -> Result<(), String>) -> Result<(), String> {
     if dir.exists() {
         return Ok(());
+    }
+    if offline() {
+        return Err(format!(
+            "dependency not fetched yet ({}); run `almide build` in the project to fetch it",
+            dir.display()
+        ));
     }
     let parent = dir.parent().ok_or_else(|| "cache dir has no parent".to_string())?;
     std::fs::create_dir_all(parent)
@@ -475,8 +513,9 @@ pub fn fetch_all_deps(project: &Project) -> Result<Vec<FetchedDep>, String> {
                      hint: run the command without --locked to update almide.lock, review the diff, and commit it"
                     .to_string());
             }
-        } else {
-            // Update lock file if it doesn't exist or deps changed
+        } else if !offline() {
+            // Update lock file if it doesn't exist or deps changed. A
+            // cache-only resolve (`resolve_cached_deps`) never writes it (#4128).
             let _ = update_lock_file(&project.root, &project.dependencies, &resolved, &fetched);
         }
     }
@@ -1109,6 +1148,47 @@ mod tests {
         // `--git` keeps the first argument as the name.
         let (name, _, _) = resolve_add_target("cg".into(), Some("file:///r".into()), None, Some("ceangal"));
         assert_eq!(name, "cg");
+    }
+
+    /// #4128: a cache-only resolve of a git dependency that is not cached
+    /// fails without cloning and without writing almide.lock; path
+    /// dependencies still resolve.
+    #[test]
+    fn resolve_cached_deps_never_fetches_or_writes_the_lock() {
+        let root = std::env::temp_dir().join(format!("almide-offline-unit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let app = root.join("app");
+        let local = root.join("local");
+        std::fs::create_dir_all(app.join("src")).unwrap();
+        std::fs::create_dir_all(local.join("src")).unwrap();
+        std::fs::write(local.join("almide.toml"), "[package]\nname = \"local\"\nversion = \"0.1.0\"\n").unwrap();
+        std::fs::write(local.join("src/mod.almd"), "fn f() -> Int = 1\n").unwrap();
+        // A git source no cache entry exists for: a never-created local path.
+        let git = format!("file://{}", root.join("no-such-repo").display());
+        std::fs::write(
+            app.join("almide.toml"),
+            format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nlocal = {{ path = \"{}\" }}\nremote = {{ git = \"{git}\", tag = \"v0.1.0\" }}\n", local.display()),
+        )
+        .unwrap();
+        let project = parse_toml(&app.join("almide.toml")).unwrap();
+
+        let err = resolve_cached_deps(&project).unwrap_err();
+        assert!(err.contains("not fetched yet"), "{err}");
+        assert!(!app.join("almide.lock").exists(), "a cache-only resolve wrote almide.lock");
+        // The guard is restored: offline mode does not leak past the call.
+        assert!(!offline());
+
+        // Path-only projects still resolve offline.
+        std::fs::write(
+            app.join("almide.toml"),
+            format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nlocal = {{ path = \"{}\" }}\n", local.display()),
+        )
+        .unwrap();
+        let project = parse_toml(&app.join("almide.toml")).unwrap();
+        let deps = resolve_cached_deps(&project).unwrap();
+        assert_eq!(deps.len(), 1);
+        assert!(!app.join("almide.lock").exists(), "a cache-only resolve wrote almide.lock");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// #3381: the checks the fetch makes on a `subdir` — a package

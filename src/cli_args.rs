@@ -24,6 +24,34 @@ pub(crate) struct Cli {
     /// source. A flag only: a dependency cannot grant it
     #[arg(long = "stdlib-authority", value_name = "DIR", global = true, hide = true)]
     pub(crate) stdlib_authority: Vec<std::path::PathBuf>,
+    /// Honour this `ALMIDE_*` route / gate / ablation / trap switch from the
+    /// environment (repeatable). A release build ignores such a switch
+    /// without it, so an environment you do not control cannot change what
+    /// is compiled or skip a check (#4129). `--profile critical` refuses them
+    /// regardless.
+    #[arg(long = "allow-switch", value_name = "NAME", global = true)]
+    pub(crate) allow_switch: Vec<String>,
+    /// Lock the build-changing switches as a release build does, in any
+    /// build — the instrument the #4129 tests drive a dev binary with.
+    #[arg(long = "lock-switches", global = true, hide = true)]
+    pub(crate) lock_switches: bool,
+    /// `almide survive`'s hand-off to its child runs (#2147, #4129): every
+    /// compiler read of this `.almd` path returns the text of
+    /// `--survive-overlay-text` instead of the disk bytes. An argument, never
+    /// an environment variable, so only the parent that spawned the run can
+    /// arm it.
+    #[arg(long = "survive-overlay", value_name = "PATH", global = true, hide = true, requires = "survive_overlay_text")]
+    pub(crate) survive_overlay: Option<String>,
+    /// The file holding the proposed text for `--survive-overlay`.
+    #[arg(long = "survive-overlay-text", value_name = "FILE", global = true, hide = true, requires = "survive_overlay")]
+    pub(crate) survive_overlay_text: Option<String>,
+}
+
+/// Was this binary built by the release workflow? `build.rs` writes the kind
+/// into the version line (`<version> (release[, <sha>])`), from
+/// `ALMIDE_BUILD_PROVENANCE`, which only `.github/workflows/release.yml` sets.
+pub(crate) fn is_release_build() -> bool {
+    VERSION_LINE.contains("(release")
 }
 
 #[derive(Subcommand)]

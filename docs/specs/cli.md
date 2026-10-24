@@ -729,7 +729,9 @@ git diff src/calc.almd | almide survive src/calc.almd --with - --json
   `// @contract: C-NNN` を持つ到達ファイル（native と `--target wasm` の stdout と
   exit code のバイト一致）
 - **メモリ上で当てる仕組み**: 各レッグは子 `almide` プロセスで、編集後側だけ
-  `ALMIDE_SURVIVE_OVERLAY` / `ALMIDE_SURVIVE_OVERLAY_TEXT` を渡す。コンパイラの
+  隠し引数 `--survive-overlay <PATH> --survive-overlay-text <FILE>` を渡す（#4129 で
+  環境変数から引数に移した。環境変数だと、開発者が管理していない環境がどのビルドにも
+  ディスク上と違うテキストをコンパイルさせられたため）。コンパイラの
   `.almd` 読み取りはすべて `almide::source_overlay::read_to_string` を通り、対象
   ファイルの読み取りだけが提案テキストを返す。提案テキストはツリーの外（システムの
   一時ディレクトリ）に置く
@@ -1072,6 +1074,16 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 - 種別 `route`（実行するレッグを強制する）と `gate`（既定の検査を迂回する）のスイッチが ON のときは、
   そのプロセスで最初に読まれた時点で stderr に 1 行（`[almide] ALMIDE_X is set: …`）が出る。
   強制されたルートで出た verdict は、そう名乗る。
+- **スイッチ錠**（#4129）: 種別 `route` / `gate` / `ablation` / `trap` は「何をコンパイルするか・どの検査を走らせるか」を
+  変える。リリースビルド（`almide --version` が `(release…)` と名乗るもの）は、こうしたスイッチを環境から
+  受け継いでも無視し、stderr に `[almide] ALMIDE_X is set but IGNORED: …` と 1 行出す。効かせるには
+  コマンドラインで `--allow-switch ALMIDE_X` と名指しする（複数回可）。CI、`.envrc`、devcontainer、
+  エディタのタスクなど、開発者が管理していない環境が、レビューしたものと別のソースをコンパイルさせたり
+  検査を飛ばさせたりできないようにするため。ツールが自分で立てるスイッチ（`almide test` の
+  `ALMIDE_NO_RTLIB`、`--time-report` の `ALMIDE_FUEL_PROBE`）は錠の対象外。開発ビルドは従来どおり
+  環境を読み、隠しフラグ `--lock-switches` でリリースと同じ錠をかけられる。
+- `--profile critical` は、こうしたスイッチが環境から 1 つでも ON で渡ると、`--allow-switch` の有無に
+  関係なく拒否する（exit 1）。
 - `harness` はテストハーネス（`tests/`, `crates/*/tests`, `tools/`）が読むフック、`ci` はワークフローと
   `scripts/` だけが使うもの、`runtime` はコンパイルされたプログラム自身が実行時に読むもの。
 
@@ -1152,7 +1164,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_INLINE_OFF` | ablation | turn the structural leg's small scalar-fn inliner off (#2980): every call kept, for an A/B |
 | `ALMIDE_INSTALL=value` | tool | the directory `almide install` installs binaries into (overrides the default `~/.local/bin`) |
 | `ALMIDE_INTERP_SWEEP_THREADS=value` | harness | interp sweep thread count; 1 = serial (#2381) |
-| `ALMIDE_IR_FAULT=value` | harness | inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary |
+| `ALMIDE_IR_FAULT=value` | route | inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary (a release build honours it only with `--allow-switch ALMIDE_IR_FAULT`, #4129) |
 | `ALMIDE_KEEP_SCRATCH` | tool | keep the `almide test` scratch build directory instead of deleting it |
 | `ALMIDE_LSP_TRACE` | debug | print every LSP request and response the language server handles |
 | `ALMIDE_MANIFEST_TREE_CHECK=value` | ci | the parity-manifest generators' stale-tree refusal (#2405, scripts/lib/oracle-header.sh): `strict` (default) refuses an ORACLE that is not `<Cargo.toml version> (dev…)`, is stamped with a commit other than HEAD, or is unstamped and older than the sources; a worktree behind its upstream; and an untracked spec/ fixture. `gate` keeps only the untracked-fixture check (scripts/check-parity-goldens.sh vouches for CI's artifact). `off` is the deliberate override |
@@ -1192,8 +1204,8 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_SKIP_PASS=value` | ablation | skip the named optional passes (comma-separated) — a pass-dependency probe: output must not change |
 | `ALMIDE_SKIP_VERSION_CHECK` | gate | skip the project's `almide` version requirement check |
 | `ALMIDE_STREAM_FUSION_OFF` | ablation | turn the stream-fusion pass off |
-| `ALMIDE_SURVIVE_OVERLAY=value` | route | set by `almide survive` on its child runs (#2147): every compiler read of this `.almd` path returns the text in `ALMIDE_SURVIVE_OVERLAY_TEXT` instead of the disk bytes, so a proposed edit is judged without being written |
-| `ALMIDE_SURVIVE_OVERLAY_TEXT=value` | route | the file holding the proposed text for `ALMIDE_SURVIVE_OVERLAY`; set without it, the overlay refuses to run rather than read the disk file |
+| `ALMIDE_SURVIVE_OVERLAY=value` | harness | RETIRED (#4129): no longer read. `almide survive` hands its overlay to a child run as `--survive-overlay` / `--survive-overlay-text` arguments, so an environment cannot make the compiler read other text than the disk file; kept registered so the regression test can set it and watch nothing change |
+| `ALMIDE_SURVIVE_OVERLAY_TEXT=value` | harness | RETIRED (#4129) with `ALMIDE_SURVIVE_OVERLAY`: no longer read |
 | `ALMIDE_TCO_DEBUG` | debug | print the native tail-call loop rewrite decisions |
 | `ALMIDE_TEST_ABORT_PROBE` | runtime | marks a native testing.assert_aborts child (ADR-0029) so `panic` takes the C-219 abort path there; set by the parent, never by hand |
 | `ALMIDE_TEST_LAX_WASM` | gate | let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run |

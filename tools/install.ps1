@@ -43,8 +43,17 @@ try {
 
     Write-Host "Verifying checksum..."
     $Checksums = Get-Content "$Tmp\checksums.sha256"
-    $Line = $Checksums | Where-Object { $_ -match [regex]::Escape($Archive) }
-    $Expected = ($Line -split '\s+')[0].ToLower()
+    # Match the file-name field exactly (optional leading `*`), never a
+    # substring: a `.sig` / `.sbom` line must not supply the hash (#4127).
+    $Expected = $null
+    foreach ($L in $Checksums) {
+        $F = $L.Trim() -split '\s+'
+        if ($F.Count -eq 2 -and $F[1].TrimStart('*') -eq $Archive) { $Expected = $F[0].ToLower(); break }
+    }
+    if (-not $Expected) {
+        Write-Host "error: no checksum listed for $Archive" -ForegroundColor Red
+        exit 1
+    }
     $Actual = (Get-FileHash "$Tmp\$Archive" -Algorithm SHA256).Hash.ToLower()
 
     if ($Expected -ne $Actual) {
