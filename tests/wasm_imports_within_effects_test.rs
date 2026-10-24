@@ -11,6 +11,14 @@
 //! import section. Neither is derived from the other: the emitter keeps an
 //! import only when a reachable function calls it.
 //!
+//! The same holds one layer down, for the in-process module `almide run
+//! --target wasm` hands the embedded host. That module imports the whole
+//! `almide.fs_call` gateway whatever its effects, so the bound there is the
+//! op numbers: every `fs_call` site's op must be a visible constant
+//! (`almide_wasm::cert_project::fs_call_ops`), the host serves no other op
+//! (crates/almide-wasm-run/src/host.rs `op_allowed`), and the capabilities
+//! those ops reach (`cert_project::op_caps`) stay inside the effects.
+//!
 //! Controls, so the gate cannot pass blind:
 //! - every fixture's effect report must be read. A missing report fails the
 //!   fixture; it is never read as "no effects";
@@ -22,6 +30,9 @@
 //! gates job's release-only root tests.
 
 use std::collections::BTreeSet;
+
+use almide::wasm_route::{route_wasm, ModuleSource, RouteOptions};
+use almide_wasm::cert_project::{cap, fs_call_ops, op_caps};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -62,6 +73,21 @@ const BY_EFFECT: &[(&str, &[&str])] = &[
     ("Env", &["environ_get", "environ_sizes_get", "args_get", "args_sizes_get"]),
     ("Rand", &["random_get"]),
     ("Time", &[]),
+    ("Fan", &[]),
+];
+
+/// The `cert_project::cap` ids any program's `fs_call` ops may reach:
+/// console output and the clock, as [`BASE`].
+const BASE_CAPS: &[u32] = &[cap::STDOUT, cap::CLOCK];
+
+/// The capability ids each effect adds to [`BASE_CAPS`], as [`BY_EFFECT`].
+const CAPS_BY_EFFECT: &[(&str, &[u32])] = &[
+    ("IO", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN]),
+    ("Env", &[cap::ENV]),
+    ("Rand", &[cap::ENTROPY]),
+    ("Time", &[cap::CLOCK]),
+    ("Net", &[cap::NET]),
+    ("Process", &[cap::PROC]),
     ("Fan", &[]),
 ];
 
@@ -114,10 +140,23 @@ fn allowed(effects: &BTreeSet<String>) -> BTreeSet<&'static str> {
     out
 }
 
+fn allowed_caps(effects: &BTreeSet<String>) -> BTreeSet<u32> {
+    let mut out: BTreeSet<u32> = BASE_CAPS.iter().copied().collect();
+    for (eff, caps) in CAPS_BY_EFFECT {
+        if effects.contains(*eff) {
+            out.extend(caps.iter().copied());
+        }
+    }
+    out
+}
+
 struct Row {
     name: String,
     effects: BTreeSet<String>,
     imports: BTreeSet<String>,
+    /// The in-process module's `fs_call` ops; `None` when a site's op is not
+    /// a visible constant.
+    raw_ops: Option<BTreeSet<i32>>,
 }
 
 fn measure(bin: &str, src: &Path, dir: &Path) -> Result<Row, String> {
@@ -134,7 +173,14 @@ fn measure(bin: &str, src: &Path, dir: &Path) -> Result<Row, String> {
     }
     let bytes = std::fs::read(&wasm).map_err(|e| format!("{name}: {e}"))?;
     let imports = imports(&bytes).map_err(|e| format!("{name}: {e}"))?;
-    Ok(Row { name, effects, imports })
+    // The in-process module, routed the way `almide build` routes it.
+    let path = src.to_str().expect("utf8");
+    let text = std::fs::read_to_string(src).map_err(|e| format!("{name}: {e}"))?;
+    let opts = RouteOptions { library: true, ..RouteOptions::default() };
+    let raw = route_wasm(path, &text, ModuleSource::Disk { dep_paths: &[] }, None, opts, &mut |_| {})
+        .map_err(|e| format!("{name}: the in-process route failed: {e:?}"))?;
+    let raw_ops = fs_call_ops(&raw.bytes).map_err(|e| format!("{name}: {e}"))?;
+    Ok(Row { name, effects, imports, raw_ops })
 }
 
 #[cfg_attr(debug_assertions, ignore = "full corpus build — release-only (CI: commissioned wasm gates)")]
@@ -156,7 +202,11 @@ fn every_shipped_module_imports_only_what_its_effects_allow() {
             .chunks(chunk)
             .map(|part| {
                 let (bin, tmp) = (&bin, tmp.path());
-                s.spawn(move || part.iter().map(|src| measure(bin, src, tmp)).collect::<Vec<_>>())
+                // The compiler runs on a deep stack (src/main.rs).
+                std::thread::Builder::new()
+                    .stack_size(256 * 1024 * 1024)
+                    .spawn_scoped(s, move || part.iter().map(|src| measure(bin, src, tmp)).collect::<Vec<_>>())
+                    .expect("worker thread")
             })
             .collect();
         handles.into_iter().flat_map(|h| h.join().expect("worker")).collect()
@@ -176,6 +226,20 @@ fn every_shipped_module_imports_only_what_its_effects_allow() {
         let extra: Vec<&String> = row.imports.iter().filter(|i| !ok.contains(i.as_str())).collect();
         if !extra.is_empty() {
             wrong.push(format!("{}: effects {:?} do not allow the import(s) {:?}", row.name, row.effects, extra));
+        }
+        match &row.raw_ops {
+            None => wrong.push(format!("{}: an `fs_call` site's op is not a visible constant, so the embedded host cannot bound it", row.name)),
+            Some(ops) => {
+                let ok = allowed_caps(&row.effects);
+                let over: Vec<(i32, u32)> = ops
+                    .iter()
+                    .flat_map(|&op| op_caps(op).iter().map(move |&c| (op, c)))
+                    .filter(|(_, c)| !ok.contains(c))
+                    .collect();
+                if !over.is_empty() {
+                    wrong.push(format!("{}: effects {:?} do not allow the in-process (op, capability) pair(s) {:?}", row.name, row.effects, over));
+                }
+            }
         }
         if row.effects.is_empty() {
             pure += 1;
