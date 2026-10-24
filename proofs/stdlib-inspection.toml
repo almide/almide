@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "466"
+# uninspected_ceiling = "468"
 
 [[fn]]
 name = "args.flag"
@@ -10199,6 +10199,18 @@ parity = "PASS: seed 1792410355, 200 programs; 200 program(s) call it, 164 of th
 complexity = "PASS: [vars=Int] no size parameter — constant-size arguments only (the plain call is the parity campaign's) || [vars=String] no size parameter — constant-size arguments only (the plain call is the parity campaign's)"
 alloc = "PASS: [vars=Int] call live=0 || [vars=String] call live=0"
 diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s) each) || [vars=String] direct = via left = via right on both legs (1 line(s) each)"
+
+[[fn]]
+name = "secret.new"
+sig = "(x: A) -> Secret[A]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "secret.reveal"
+sig = "(s: Secret[A]) -> A"
+class = "pure"
+status = "uninspected"
 
 [[fn]]
 name = "set.all"
