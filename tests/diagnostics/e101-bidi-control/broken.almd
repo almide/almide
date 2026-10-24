@@ -1,0 +1,11 @@
+// E101: raw bidirectional control characters (Trojan Source, #4092) —
+// one in a comment, one in a string literal, one in a heredoc.
+fn main() -> Unit = {
+  let admin = false
+  // ‮ } ⁦if admin then⁩ { begin admins only
+  let s = "user‮ txt.exe"
+  let doc = """
+    owner: ‮nimda
+    """
+  println(if admin then s else doc)
+}
