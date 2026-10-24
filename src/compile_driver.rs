@@ -269,6 +269,24 @@ pub(crate) fn optimize_gate_and_link(
     Ok(())
 }
 
+/// The whole lowered program — the entry and every user module — for the
+/// gates `almide check` runs after its own type check (E109 and
+/// `[permissions]`): check lowers only the entry, so a module's function was
+/// never judged there. Re-runs the build's front end with warnings silenced
+/// (check has printed them); `None` when it fails, which check has reported.
+pub(crate) fn whole_program_ir(file: &str) -> Option<almide::ir::IrProgram> {
+    let was = crate::SUPPRESS_WARNINGS.swap(true, std::sync::atomic::Ordering::Relaxed);
+    let ir = (|| {
+        let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, _, self_versioned) =
+            parse_and_resolve_for_compile(file).ok()?;
+        let parsed = ParsedSource { file, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
+        let mut module_irs = std::collections::HashMap::new();
+        typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs).ok()?.0
+    })();
+    crate::SUPPRESS_WARNINGS.store(was, std::sync::atomic::Ordering::Relaxed);
+    ir
+}
+
 /// E109 (#4151): refuse a pure fn that runs an `effect fn` reached through a
 /// function value. `entry` is the entry file and its source, for rendering.
 pub(crate) fn enforce_effect_values(ir: &almide::ir::IrProgram, entry: (&str, &str)) -> Result<(), String> {
@@ -413,7 +431,10 @@ pub(crate) fn try_compile_reporting(file: &str, no_check: bool, codegen_opts: &c
         (ir_program, outside_guarantee) = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
     }
 
-    optimize_verify_and_link(&mut ir_program, &parsed_project, (file, &source_text))?;
+    // `[permissions]` come from the entry file's own project (#4159 audit),
+    // whatever directory the command runs in.
+    let permissions_project = project::permissions_project_for(file).or(parsed_project);
+    optimize_verify_and_link(&mut ir_program, &permissions_project, (file, &source_text))?;
 
     let metered = ir_program.as_ref().filter(|ir| almide::ir::runtime_use::uses_metered_prims(ir)).cloned();
     // Codegen v3: three-layer pipeline (Nanopass + Templates)

@@ -161,7 +161,7 @@ fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::C
     // gate judges this route exactly as it does the native build, on the same
     // post-optimize, pre-mono IR. This route's integrity check is
     // `verify_wasm_ir`, after the link.
-    let proj = crate::compile_driver::cwd_project();
+    let proj = project::permissions_project_for(entry.0).or_else(crate::compile_driver::cwd_project);
     crate::compile_driver::optimize_gate_and_link(&mut ir_program, proj.as_ref(), entry, |_| Ok(())).map_err(|_| ())?;
 
     Ok(ir_program)

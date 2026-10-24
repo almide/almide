@@ -179,6 +179,13 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
         Ok(ir) => ir,
         Err(e) => { wall("lower", e); return None; }
     };
+    // `[permissions]` bound the wasm test lane as they bound the native one
+    // (#4159 audit: this lane ran a test the manifest forbids). A refusal
+    // falls to the native fallback, which refuses it with the report.
+    if wasm_test_permissions_refuse(test_file, &ir) {
+        wall("permissions", "[permissions] refuse this program".to_string());
+        return None;
+    }
     // ALMIDE_WASM_ALLOC_COUNT (#2407): arm the counters as `almide run
     // --target wasm` does; the embedded run below prints the line.
     let _alloc_count = almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT").then(almide_wasm::alloc_count::CountGuard::set);
@@ -382,6 +389,18 @@ fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut ch
     Ok(ir_program)
 }
 
+/// `[permissions]` on a wasm test lane: the entry file's project manifest,
+/// judged on the lowered program. The violations are printed by the gate;
+/// `true` refuses the file on this lane.
+fn wasm_test_permissions_refuse(test_file: &str, ir: &almide::ir::IrProgram) -> bool {
+    match crate::project::permissions_project_for(test_file) {
+        Some(proj) if !proj.permissions.is_empty() || proj.proc_allow.is_some() => {
+            super::enforce_project_permissions(ir, &proj).is_err()
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run_filter: Option<&str>) -> WasmTestOutcome {
     let skip = |reason: String| WasmTestOutcome::Skip {
         file: test_file.to_string(),
@@ -429,6 +448,9 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
         Ok(ir) => ir,
         Err(detail) => return compile_error(detail),
     };
+    if wasm_test_permissions_refuse(test_file, &ir_program) {
+        return compile_error("[permissions] refuse this program".to_string());
+    }
     mark(prof, &mut marks, "lower_modules");
     // Nothing to run on any leg — the v1 renderer would refuse this program
     // ("no `main` and no test blocks") and the refusal read as a WALL, i.e. a

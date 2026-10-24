@@ -616,6 +616,32 @@ pub fn allowed_effects(allow: &[String]) -> Result<std::collections::HashSet<alm
     Ok(out)
 }
 
+/// The manifest whose `[permissions]` govern `entry`: the nearest
+/// `almide.toml` in the entry file's directory or above it, else the one in
+/// the working directory. Before, only the working directory was read, so
+/// `almide run sub/app.almd` from outside the project ran with no
+/// `[permissions]` at all.
+pub fn manifest_for_entry(entry: &str) -> Option<std::path::PathBuf> {
+    let start = std::path::Path::new(entry).parent().map(|p| if p.as_os_str().is_empty() { std::path::Path::new(".") } else { p });
+    let mut dir = start.and_then(|d| d.canonicalize().ok());
+    while let Some(d) = dir {
+        let candidate = d.join("almide.toml");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        dir = d.parent().map(std::path::Path::to_path_buf);
+    }
+    let cwd = std::path::Path::new("almide.toml");
+    cwd.is_file().then(|| cwd.to_path_buf())
+}
+
+/// The project [`manifest_for_entry`] names, parsed (`None` when there is
+/// none or it does not parse — the manifest gate in `main` has already
+/// refused a broken one in the working directory).
+pub fn permissions_project_for(entry: &str) -> Option<Project> {
+    manifest_for_entry(entry).and_then(|p| parse_toml(&p).ok())
+}
+
 /// Refuse an `almide.toml` before any command runs (#2583, #3247, #3253): a
 /// key written twice, text that is not TOML, or a `[permissions].allow` name
 /// that is not an effect category — each on the line that writes it. The

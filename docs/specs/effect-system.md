@@ -550,8 +550,12 @@ effect fn fetch() -> Result[String, String] = http.get("https://example.com")
 //     Net.fetch is not in [permissions].allow
 ```
 
-The gate runs after codegen: `almide check` and `almide test` accept the file,
-`almide build` refuses it.
+Every route applies the gate: `almide check`, `build`, `run`, `emit` and both
+`almide test` lanes, on both targets. The manifest is the entry file's project
+— the nearest `almide.toml` at or above the entry file, else the working
+directory's — and `check` judges every user module, not only the entry file.
+
+Test: `tests/permissions_routes_test.rs`.
 
 ### Directory scope: `fs`
 

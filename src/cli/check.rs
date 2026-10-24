@@ -184,11 +184,22 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
     // Lower to IR for unused variable analysis (only if no parse or type errors)
     let has_type_errors = diagnostics.iter().any(|d| d.level == diagnostic::Level::Error);
     let mut effect_value_errors = Vec::new();
+    // The gates below judge the whole program: check lowers only the entry,
+    // so with user modules the build's front end lowers them all (#4159
+    // audit — a module's function was never judged by `check`).
+    let mut whole_ir: Option<almide::ir::IrProgram> = None;
     let unused_warnings = if parse_errors.is_empty() && !has_type_errors {
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+        if !checker.env.user_modules.is_empty() {
+            whole_ir = crate::compile_driver::whole_program_ir(file);
+        }
         // E109 (#4151): the same gate the build routes run.
-        effect_value_errors = almide::effect_value_gate::effect_value_diagnostics(&ir, file);
-        almide::ir::collect_unused_var_warnings(&ir, file)
+        effect_value_errors = almide::effect_value_gate::effect_value_diagnostics(whole_ir.as_ref().unwrap_or(&ir), file);
+        let unused = almide::ir::collect_unused_var_warnings(&ir, file);
+        if whole_ir.is_none() {
+            whole_ir = Some(ir);
+        }
+        unused
     } else {
         Vec::new()
     };
@@ -214,19 +225,18 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
     // Combine parse errors + checker errors
     report_check_errors_or_exit(&parse_errors, &diagnostics, &warnings, &source_text, deny_warnings);
 
-    // Security Layer 2: check permissions if defined in almide.toml
-    if std::path::Path::new("almide.toml").exists() {
-        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            // #4155: under `--profile critical`, granting `Proc` without a
-            // command list is refused (elsewhere it is a warning).
-            if critical.is_some() && super::proc_grant_without_list(&proj, true).is_err() {
+    // Security Layer 2: the `[permissions]` of the entry file's project
+    // (the nearest almide.toml at or above it, else the working directory's).
+    if let Some(proj) = project::permissions_project_for(file) {
+        // #4155: under `--profile critical`, granting `Proc` without a
+        // command list is refused (elsewhere it is a warning).
+        if critical.is_some() && super::proc_grant_without_list(&proj, true).is_err() {
+            std::process::exit(1);
+        }
+        if !proj.permissions.is_empty() || proj.proc_allow.is_some() {
+            let ir = whole_ir.unwrap_or_else(|| almide::lower::lower_program(&program, &checker.env, &checker.type_map));
+            if super::enforce_project_permissions(&ir, &proj).is_err() {
                 std::process::exit(1);
-            }
-            if !proj.permissions.is_empty() || proj.proc_allow.is_some() {
-                let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-                if super::enforce_project_permissions(&ir, &proj).is_err() {
-                    std::process::exit(1);
-                }
             }
         }
     }
@@ -369,8 +379,10 @@ fn check_json_one(file: &str, critical: Option<&[String]>) -> bool {
     let mut clean = parse_errors.is_empty() && !has_type_errors;
     if clean {
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-        // E109 (#4151): the same gate the build routes run.
-        let effect_value_errors = almide::effect_value_gate::effect_value_diagnostics(&ir, file);
+        // E109 (#4151): the same gate the build routes run, over every
+        // module when there are user modules.
+        let whole = (!checker.env.user_modules.is_empty()).then(|| crate::compile_driver::whole_program_ir(file)).flatten();
+        let effect_value_errors = almide::effect_value_gate::effect_value_diagnostics(whole.as_ref().unwrap_or(&ir), file);
         for d in &effect_value_errors {
             out(&format!("{}", crate::diagnostic_render::to_json(d)));
         }
@@ -477,9 +489,9 @@ pub fn cmd_check_effects(file: &str) {
     let dependent_part = if dependent > 0 { format!(", {dependent} callback-dependent") } else { String::new() };
     err(&format!("\n{} functions: {} pure{}, {} with effects", entries.len(), pure, dependent_part, effects));
 
-    // Check permissions from almide.toml
-    if std::path::Path::new("almide.toml").exists() {
-        if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+    // Check permissions from the entry file's almide.toml
+    {
+        if let Some(proj) = project::permissions_project_for(file) {
             if !proj.permissions.is_empty() {
                 enforce_effect_permissions(&proj, &entries);
             }
