@@ -33,6 +33,7 @@
 | protocol の階層 | 標準の型は protocol の階層（[protocol-view.md](protocol-view.md)。手本は Swift）に準拠し、モジュールの関数はその protocol の関数そのものです。protocol が要件とする関数は、準拠する型のどれにも同じ名前・同じ形であります。`compare` を持つ型は `min`・`max`・`clamp` を、すべての値の型は `to_string` を、既定の実装で持ちます（この一覧には、型のページに行のある分だけ載せています）。 | R-L0-37、R-L0-38 |
 | 範囲外の扱い | 関数の役割で決まります。範囲を取り出す関数（`slice`・`take`・`drop` など）は、長さを超えた分を丸め、負の位置・負の数は abort です。位置の 1 つを読む関数（`get`・`first`・`bytes.get_*`・`next_*`）は none です。位置の 1 つを書く関数（`set`・`update`・`insert`・`remove_at`・`bytes.put_*`）と、形を前提にする関数（`matrix` の演算、`bytes.xor`、`chunk(0)`）は abort です。 | R-L0-33、R-L0-29 |
 | `zlib` の圧縮 | 圧縮した出力のバイト列は native と wasm で違います。これは「両 target で同じ結果」の約束がまだ果たせていない箇所で、`effect` を付けているのは目印にすぎず、解決ではありません。同じ実装に替えたときの速さと圧縮率を測ってから決めます。往復（圧縮して戻す）は両 target で同じです。 | R-zlib-03（保留、未達） |
+| Codec の入力 | Codec のレコード型 `T` は、`T.decode` のほかに `T.decode_strict` を導出します。`decode` は知らないキーを無視し、`decode_strict` はフィールドを読む前に最初の知らないキーを `unknown key '<k>'` で拒みます。`@skip` のフィールドは読みも書きもせず、`@skip_decode` のフィールドは読まずに書きます（どちらも既定値が必要）。フィールドに置ける属性はこの 2 つと `@builtin`・`@location` だけで、ほかはエラーの E053 です。 | R-L0-48 |
 
 ## 全体の数
 

@@ -51,6 +51,38 @@ fn main() -> Unit = {
 {"name":"Alice","age":30}
 ```
 
+### Typed decode: `T.decode` and `T.decode_strict`
+
+A `: Codec` record type `T` derives `T.decode` and `T.decode_strict` (and
+`T.encode`). `T.decode` ignores keys it does not know; `T.decode_strict`
+refuses the first one with `unknown key '<k>'` before reading any field. A
+field marked `@skip_decode` is never read from input (it keeps its default)
+and is still encoded; `@skip` is neither read nor written. Untrusted input is
+best decoded into a type holding only what the client may set (CHEATSHEET,
+JSON Rule 5).
+
+```almd run
+import json
+
+type User: Codec = { name: String, @skip_decode is_admin: Bool = false }
+
+fn main() -> Unit = {
+  let body = json.parse("{\"name\": \"m\", \"is_admin\": true}") ?? value.null()
+  match User.decode(body) {
+    ok(u) => println("${u.name} admin=${u.is_admin}"),
+    err(e) => println(e),
+  }
+  match User.decode_strict(body) {
+    ok(u) => println("${u.name} admin=${u.is_admin}"),
+    err(e) => println(e),
+  }
+}
+```
+```output
+m admin=false
+unknown key 'is_admin'
+```
+
 ### `json.stringify_pretty(j: Value) -> String`
 
 Convert a Json value to a pretty-printed JSON string with indentation. A non-finite
