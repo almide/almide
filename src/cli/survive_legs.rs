@@ -127,7 +127,7 @@ pub fn declared_contracts(text: &str) -> Vec<String> {
 
 fn walk_almd(dir: &Path, out: &mut Vec<PathBuf>) {
     let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if (name.starts_with('.') && name != "." && name != "..") || name == "target" || name == "node_modules" {
+    if super::project_scope::is_skipped_dir(name) {
         return;
     }
     let Ok(entries) = std::fs::read_dir(dir) else { return };
