@@ -1,0 +1,32 @@
+// bytes_ct — SELF-HOSTED constant-time equality for wasm (#4106, C-421):
+// `bytes.is_equal_constant_time` and `string.is_equal_constant_time`. The
+// native leg is the runtime intrinsic (runtime/rs/src/{bytes,string}.rs).
+//
+// The walk ORs a[i] ^ b[i] over EVERY index and tests the accumulator against
+// zero once, after the walk. The only branches are the public length check and
+// the index check `i >= n` (plus `bytes.get_or`'s own bounds check, also on the
+// index): no byte value reaches a condition, so there is no early exit on the
+// first difference. tests/constant_time_compare_structure_test.rs inspects the
+// emitted wasm for exactly that. This file never reaches `prim.`, so its
+// `@implements` bodies are admitted by declaration, not by a name list.
+fn __bct_acc(a: Bytes, b: Bytes, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else __bct_acc(
+    a,
+    b,
+    n,
+    i + 1,
+    int.bor(acc, int.bxor(bytes.get_or(a, i, 0), bytes.get_or(b, i, 0))),
+  )
+
+@implements("bytes.is_equal_constant_time")
+fn bytes_is_equal_constant_time(a: Bytes, b: Bytes) -> Bool =
+  if bytes.len(a) != bytes.len(b) then false
+  else __bct_acc(a, b, bytes.len(a), 0, 0) == 0
+
+// A String compares its UTF-8 bytes.
+@implements("string.is_equal_constant_time")
+fn string_is_equal_constant_time(a: String, b: String) -> Bool = bytes_is_equal_constant_time(
+  bytes.from_string(a),
+  bytes.from_string(b),
+)

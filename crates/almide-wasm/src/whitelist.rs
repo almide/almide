@@ -162,8 +162,6 @@ pub(crate) const BYTES_FAMILY_VERIFIED: &[&str] = &[
     "bytes_cmp", "bytes_contains", "bytes_data_ptr", "bytes_ends_with", "bytes_eof",
     "bytes_insert", "bytes_is_empty", "bytes_is_valid_utf8", "bytes_map_each",
     "bytes_remove_at", "bytes_reverse", "bytes_skip", "bytes_starts_with", "bytes_xor",
-    // #4106: read-only load8 walk, scalar Bool result (spec/wasm_cross/bytes_is_equal_constant_time.almd).
-    "bytes_is_equal_constant_time",
 ];
 
 /// The exempt-tier members of the same audit (tuple/Option returners
