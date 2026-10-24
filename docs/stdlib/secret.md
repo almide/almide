@@ -55,7 +55,7 @@ fn main() -> Unit = {
   let key = secret.new("k-123")
   let given = secret.new("k-123")
   println(if key == given then "accepted" else "refused")
-  println(string.len(secret.reveal(key)))
+  println("${string.len(secret.reveal(key))} characters")
 }
 ```
 
