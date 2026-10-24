@@ -1190,3 +1190,9 @@ id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::FLOATING::table"
 class = "justified"
 names = 21
 why = "The columns of a family gate: the FloatingPoint requirements (protocol-view.md, R-sized-02/03/08/11) every fixed-width float must carry as a concrete function until a built-in type can conform to a protocol. The gate asserts every carrier x requirement cell exists; no codegen leg reads it."
+
+[[site]]
+id = "src/cli/fs_scope_twin.rs::rewrite::table"
+class = "justified"
+names = 4
+why = "Rust's std::path::Path methods that reach the filesystem (`.exists()`, `.is_dir()`, `.is_file()`, `.is_symlink()`), not Almide stdlib functions: the scoped twin of the native fs runtime (#4084) respells them through the descriptor facade so a [permissions] fs build cannot follow a path std resolves on its own. The set is std's API, closed and checked by the twin's own test (`twin_leaks`); it collides with the names of `fs.exists` and its kin only by spelling."
