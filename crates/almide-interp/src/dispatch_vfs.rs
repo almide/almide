@@ -106,10 +106,10 @@ impl<'a> Interpreter<'a> {
     /// own call over the quoted path; a `_as` twin names the call its `call`
     /// argument spells (`args[head]`); a `_as_pair` twin also names BOTH operands
     /// (`args[head + 1..]`) in message order — `fs.copy(src, dst)` from a floor that
-    /// sees one path. The quoting is native's `fs_q`: the path verbatim between
-    /// two quotes, no escaping.
+    /// sees one path. The quoting is native's `fs_q`: the path between two quotes,
+    /// C-418's control/bidi escapes applied (almide-base's err_text.rs, #4126).
     fn fs_floor_err(&mut self, func: &str, head: usize, args: &[Value], path: &str, e: String) -> Result<String, Flow> {
-        let q = |s: &str| format!("\"{s}\"");
+        let q = almide_base::err_text::almide_rt_errtext_quote;
         if !func.ends_with("_as") && !func.ends_with("_as_pair") {
             return Ok(Self::fs_prim_err(func, &q(path), e));
         }
@@ -250,7 +250,11 @@ impl<'a> Interpreter<'a> {
                     crate::vfs::RenameOutcome::Failed(e) => {
                         Flow::val(Value::Result(Err(Box::new(Value::str(Self::fs_prim_err(
                             func,
-                            &format!("\"{src}\", \"{dst}\""),
+                            &format!(
+                                "{}, {}",
+                                almide_base::err_text::almide_rt_errtext_quote(&src),
+                                almide_base::err_text::almide_rt_errtext_quote(&dst)
+                            ),
                             e,
                         ))))))
                     }

@@ -50,7 +50,7 @@ fn almide_net_len(f: &str, len: i64) -> Result<usize, String> {
 /// Resolve `host:port`. An IP literal (IPv6 bare or in brackets) is parsed,
 /// never looked up; a name goes to the platform resolver.
 fn almide_net_resolve(f: &str, host: &str, port: i64) -> Result<Vec<std::net::SocketAddr>, String> {
-    let head = format!("{f}({host}:{port})");
+    let head = format!("{f}({}:{port})", almide_rt_errtext_escape(host));
     let port = u16::try_from(port).map_err(|_| net_err_port_range(&head))?;
     let bare = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
     if let Ok(ip) = bare.parse::<std::net::IpAddr>() {
@@ -75,7 +75,7 @@ fn almide_net_each<T>(f: &str, host: &str, port: i64, mut go: impl FnMut(&std::n
             Err(e) => last = Some(e),
         }
     }
-    let head = format!("{f}({host}:{port})");
+    let head = format!("{f}({}:{port})", almide_rt_errtext_escape(host));
     Err(last.map_or_else(|| net_err_unresolvable(&head, host), |e| net_io_error_text(&head, &e)))
 }
 

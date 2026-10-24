@@ -36,9 +36,10 @@ pub fn set_allowlist(list: Option<Vec<String>>) {
 
 fn allowed(call: &str, cmd: &str) -> Result<(), String> {
     match &*ALLOW.lock().unwrap_or_else(|p| p.into_inner()) {
-        Some(list) if !list.iter().any(|c| c == cmd) => Err(format!(
-            "{call}(\"{cmd}\"): `{cmd}` is not in [permissions] proc"
-        )),
+        Some(list) if !list.iter().any(|c| c == cmd) => {
+            let shown = almide_base::err_text::almide_rt_errtext_escape(cmd);
+            Err(format!("{call}(\"{shown}\"): `{shown}` is not in [permissions] proc"))
+        }
         _ => Ok(()),
     }
 }
