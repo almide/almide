@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # A structural witness must catch an emitter that loses what it certifies:
-#   bounds (#4005) — a bounds check;   init (#4013) — a slot store.
+#   bounds (#4005) — a bounds check;   init (#4013) — a slot store;
+#   native (#4006) — a release in the verified native render, with the
+#   renderer's own Rust-mirror check bypassed (the witness is main's
+#   ownership witness in the native bundle, judged by check_xc).
 # Each proofs/fixtures/<property>-witness/reinject/<name>.patch puts one such
 # bug into the emitter; <name>.almd is its reproduction. In a throwaway
 # worktree, for each:
@@ -22,7 +25,7 @@
 # instructions but keeps the recording call beside them — the recording
 # discipline stays trusted.
 #
-#   scripts/witness-reinject.sh <bounds|init> [name ...]   (default: every patch)
+#   scripts/witness-reinject.sh <bounds|init|native> [name ...]   (default: every patch)
 set -uo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -31,7 +34,8 @@ PROP="${1:-}"
 case "$PROP" in
   bounds) ISSUE=4005 ;;
   init) ISSUE=4013 ;;
-  *) echo "usage: scripts/witness-reinject.sh <bounds|init> [name ...]" >&2; exit 2 ;;
+  native) ISSUE=4006 ;;
+  *) echo "usage: scripts/witness-reinject.sh <bounds|init|native> [name ...]" >&2; exit 2 ;;
 esac
 shift
 DIR="$ROOT/proofs/fixtures/$PROP-witness/reinject"
@@ -46,9 +50,39 @@ wt=$(mktemp -d)
 trap 'git -C "$ROOT" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"' EXIT
 git -C "$ROOT" worktree add --detach -q "$wt" HEAD || exit 2
 
-build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-wasm --example emit_structural_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify); }
+if [ "$PROP" = native ]; then
+  build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-mir --example emit_native_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify); }
+else
+  build() { (cd "$wt" && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-wasm --example emit_structural_bundle && CARGO_TARGET_DIR="$TARGET" cargo build -q -p almide-verify); }
+fi
+# main's ownership witness out of a native bundle.
+main_witness() {
+  python3 -c '
+import sys
+b = open(sys.argv[1], "rb").read()
+i = b.index(b"\n") + 1
+while i < len(b):
+    j = b.index(b"\n", i)
+    line = b[i:j].decode()
+    i = j + 1
+    if line.startswith("witness "):
+        _, prop, n, fn = line.split(" ", 3)
+        if prop == "ownership" and fn == "main":
+            sys.stdout.write(b[i:i + int(n)].decode())
+        i += int(n) + 1
+' "$1"
+}
 # verdict <name>: almide-verify's exit on the reproduction's $PROP witness.
 verdict() {
+  if [ "$PROP" = native ]; then
+    if ! "$TARGET/debug/examples/emit_native_bundle" "$DIR/$1.almd" "$wt/native.rs" > "$wt/native.bundle" 2> "$wt/producer.err"; then
+      echo "producer-failed"; return
+    fi
+    main_witness "$wt/native.bundle" > "$wt/witness.w"
+    "$TARGET/debug/almide-verify" ownership "$wt/witness.w" > /dev/null 2>&1
+    echo "$?"
+    return
+  fi
   if ! "$TARGET/debug/examples/emit_structural_bundle" "$DIR/$1.almd" --only "$PROP" '(program)' > "$wt/witness.w" 2> "$wt/producer.err"; then
     echo "producer-failed"; return
   fi
