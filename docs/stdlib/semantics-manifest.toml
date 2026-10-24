@@ -2392,6 +2392,27 @@ negative operand is the discriminating case — floor would give -4.
 """
 
 [[float.fn]]
+name = "to_int_checked"
+index_unit = "value"
+probe = '"${float.to_int_checked(0.0 - 3.0)} ${float.to_int_checked(0.0 - 3.9)}"'
+expect = "some(-3) none"
+note = """
+The checked cell of the Float -> Int trio (#4145): some only for an integer
+value in the Int range. -3.9 is the discriminating case — a truncating or
+flooring conversion would answer some(-3) or some(-4) instead of none.
+"""
+
+[[float.fn]]
+name = "to_int_saturating"
+index_unit = "value"
+probe = 'float.to_int_saturating(0.0 - 3.9)'
+expect = "-3"
+note = """
+The saturating cell of the Float -> Int trio (#4145): float.to_int spelled
+explicitly — truncation toward zero, so -3.9 becomes -3, not -4.
+"""
+
+[[float.fn]]
 name = "from_int"
 index_unit = "value"
 probe = 'float.from_int(2)'
