@@ -219,7 +219,6 @@
 4953	spec/wasm_cross/fan_trap_waits_for_elements_below.almd
 2780	spec/wasm_cross/fan_var_thunk_list.almd
 2736	spec/wasm_cross/fan_worker_abort_keeps_stdout.almd
-8806	spec/wasm_cross/ffi_address_var_rebind.almd
 4640	spec/wasm_cross/field_and_interp_accumulator.almd
 2815	spec/wasm_cross/filter_map_conditional_arm.almd
 3109	spec/wasm_cross/flat_map_aliased_field.almd
