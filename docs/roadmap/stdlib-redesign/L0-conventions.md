@@ -597,6 +597,7 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - (c) 覚える名前が、型 13 × 変換先 12 × 接尾辞の行列から、接尾辞 4 つになります。パイプでも同じに書けます（`n |> float.from`）。
 - (d) 改名と撤去です。epoch 15 で `to_<T>…` を `@deprecated(since=15, use="<T>.from…")` にし、epoch 16 で撤去します。`almide fix` が `int.to_float(n)` を `float.from(n)` に機械的に書き換えます。数の型どうしの `to_string`・`parse` はこの案の外です。
 - 言語に要るもの: 型引数つきの総称関数を protocol の境界（`S: Numeric`）で受け、受け手のない要件（`T.from`）を呼べること（#4000）。
+- 実装の状況（wave 2、2026-10-24）: 想定設計（future）として残します。整数 9 型・浮動小数点 3 型・`bigint` の `from`・`from_checked`・`from_saturating`・`from_wrapping` の 44 関数は実装していません。実測（`almide 0.68.0 dev`）: 組み込みの型を利用者の protocol に準拠させる `fn Int.to_f(x: Int)` は「`Int` が `Int` に合わない」の型エラーになり、受け手のない要件（`T.from`）も呼べないので、結果の型で変換先を選ぶ形を書けません。いまの具体的な形（`int.to_float` などの `to_<T>` の列）を残し、`scripts/check-stdlib-target.py` は 44 関数を `lang_wait` に数えます。
 - issue: #4003
 
 ## R-L0-41 ビット演算を演算子にし、`>>` を関数の合成から外す — × 取り消し（十二巡目。記号の意味を入れ替えないため → R-L0-43）

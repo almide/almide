@@ -97,6 +97,13 @@
 - (d) 追加 6。
 - issue: #4000
 
+## 実装の状況（wave 2、2026-10-24）
+
+- 実装済み: L3 表の公開 22 関数（`from`・`from_checked` を除く）。`stdlib/bigint.almd` に純粋な Almide で書き、`import bigint` で使います。表現は 30 bit の limb を下位から並べた `List[Int]` と符号で、0 は負にならず上位に 0 の limb を持たないので、`==` は値の比較になります。
+- 想定設計（future）として残すもの:
+  - 演算子 `+ - * / %` と単項 `-`、`<` などの比較の脱糖（R-L1-03、R-bigint-04）。脱糖先の内部の関数（加算・減算・乗算・0 方向の除算と剰余・符号反転）はモジュールの中に `local fn` としてあり、`floor_div`・`modulo`・`pow`・`bnot` がそれを使います。検査器と lowering に「`BigInt` の二項演算を `bigint` の関数の呼び出しにする」規則を足す変更は、言語の変更なのでこの wave に含めていません。それまでは、値は `parse` と `pow` で作ります。
+  - `bigint.from`・`from_checked`（R-L0-40）。R-L0-37 の `lang_wait` と同じ理由です。`Int` との行き来（`int.to_bigint`・`bigint.to_int` の 3 つ組）は R-L0-40 で `from` に置き換わった綴りで、一覧にないので足していません。
+
 ## L3: 関数表（提案）
 
 | 関数 | シグネチャ(提案) | 他言語の主な綴り | 判定 | 案 |
