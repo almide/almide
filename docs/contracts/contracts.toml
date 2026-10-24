@@ -3993,6 +3993,7 @@ evidence  = [
   { path = "spec/wasm_cross/codec_option_numeric.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_string_escapes.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_variant_roundtrip.almd", class = "fixture" },
+  { path = "spec/wasm_cross/codec_variant_tuple_arity.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_whitespace_tolerance.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_list_default.almd", class = "fixture" },
   { path = "spec/wasm_cross/codec_triple_list.almd", class = "fixture" },
