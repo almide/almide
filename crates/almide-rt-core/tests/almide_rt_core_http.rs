@@ -239,7 +239,7 @@ fn a_malformed_request_line_or_host_is_400() {
         &b"GET /a\x00b HTTP/1.1\r\nHost: a\r\n\r\n"[..],
         &b"OPTIONS * HTTP/1.1\r\nHost: a\r\n\r\n"[..],
         &b"CONNECT 127.0.0.1:22 HTTP/1.1\r\nHost: a\r\n\r\n"[..],
-        &b"GET /x HTTP/1.1\r\nHost: a\r\n\r\n"[..],
+        &b"GET /x HTTP/1.1\r\n\r\n"[..],
         &b"GET /x HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n"[..],
         &b"GET /x HTTP/1.1\r\nHost : a\r\n\r\n"[..],
         &b"GET /x HTTP/1.1\nHost: a\n\n"[..],
