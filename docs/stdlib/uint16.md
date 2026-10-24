@@ -236,7 +236,7 @@ uint16.rotate_right(a: UInt16, n: Int) -> UInt16
 // @since unreleased
 uint16.bit_length(x: UInt16) -> Int
 
-// Decimal UInt16 from trimmed s; err on junk, a sign of -, or above 65535.
+// Decimal UInt16 from ASCII-trimmed s; err on junk, a sign of -, or above 65535.
 // @since unreleased
 uint16.parse(s: String) -> Result[UInt16, String]
 
