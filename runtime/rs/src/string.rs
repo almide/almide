@@ -5,8 +5,39 @@
 // The whole position API (len / index_of / last_index_of / get / slice /
 // take / drop) is CODEPOINT-indexed — one unit, no byte/char mixing (#419).
 pub fn almide_rt_string_len(s: &str) -> i64 { s.chars().count() as i64 }
-pub fn almide_rt_string_to_upper(s: &str) -> AlmideString { let __almide_out: String = s.to_uppercase(); __almide_out.into() }
-pub fn almide_rt_string_to_lower(s: &str) -> AlmideString { let __almide_out: String = s.to_lowercase(); __almide_out.into() }
+// Case mapping never folds a non-ASCII scalar INTO ASCII (C-412, #4121): an
+// ASCII scalar maps by the ASCII rules; a non-ASCII scalar takes its default
+// (locale-independent, full SpecialCasing) Unicode mapping UNLESS that mapping
+// contains an ASCII scalar, and then it is left unchanged — so "adm\u{131}n"
+// never upper-cases to "ADMIN" nor "\u{212A}ey" lower-cases to "key". The
+// scalars this holds back (Unicode as shipped with the pinned rustc): upper
+// U+00DF U+0131 U+0149 U+017F U+01F0 U+1E96..U+1E9A U+FB00..U+FB06; lower
+// U+0130 U+212A. The wasm tables (scripts/gen-case-tables.py) apply the same
+// filter. Not for identity comparison either way.
+fn almide_case_push(out: &mut String, c: char, mapped: impl Iterator<Item = char> + Clone) {
+    if !c.is_ascii() && mapped.clone().any(|m| m.is_ascii()) { out.push(c) } else { out.extend(mapped) }
+}
+pub fn almide_rt_string_to_upper(s: &str) -> AlmideString {
+    if s.is_ascii() { return s.to_ascii_uppercase().into(); }
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() { almide_case_push(&mut out, c, c.to_uppercase()); }
+    out.into()
+}
+// str::to_lowercase carries Final_Sigma (Σ → ς by its context in the WHOLE
+// source string); every other scalar lowers alone. Walk that result in step
+// with the per-scalar lengths so each source scalar's span is known, and hold
+// back a span that would fold a non-ASCII scalar into ASCII.
+pub fn almide_rt_string_to_lower(s: &str) -> AlmideString {
+    if s.is_ascii() { return s.to_ascii_lowercase().into(); }
+    let full = s.to_lowercase();
+    let mut lowered = full.chars();
+    let mut out = String::with_capacity(full.len());
+    for c in s.chars() {
+        let span: Vec<char> = lowered.by_ref().take(c.to_lowercase().count()).collect();
+        almide_case_push(&mut out, c, span.into_iter());
+    }
+    out.into()
+}
 pub fn almide_rt_string_trim(s: &str) -> AlmideString { let __almide_out: String = s.trim().to_string(); __almide_out.into() }
 pub fn almide_rt_string_trim_start(s: &str) -> AlmideString { let __almide_out: String = s.trim_start().to_string(); __almide_out.into() }
 pub fn almide_rt_string_trim_end(s: &str) -> AlmideString { let __almide_out: String = s.trim_end().to_string(); __almide_out.into() }
@@ -88,7 +119,13 @@ pub fn almide_rt_string_is_digit(s: &str) -> bool { !s.is_empty() && s.chars().a
 pub fn almide_rt_string_is_alphanumeric(s: &str) -> bool { !s.is_empty() && s.chars().all(|c| c.is_alphanumeric()) }
 pub fn almide_rt_string_is_upper(s: &str) -> bool { !s.is_empty() && s.chars().any(|c| c.is_alphabetic()) && s.chars().all(|c| !c.is_alphabetic() || c.is_uppercase()) }
 pub fn almide_rt_string_is_lower(s: &str) -> bool { !s.is_empty() && s.chars().any(|c| c.is_alphabetic()) && s.chars().all(|c| !c.is_alphabetic() || c.is_lowercase()) }
-pub fn almide_rt_string_capitalize(s: &str) -> AlmideString { let __almide_out: String = { let mut c = s.chars(); match c.next() { Some(f) => format!("{}{}", f.to_uppercase(), c.collect::<String>()), None => String::new() } }; __almide_out.into() }
+// The first scalar upper-cases under the to_upper rule (C-412): never into ASCII from non-ASCII.
+pub fn almide_rt_string_capitalize(s: &str) -> AlmideString {
+    let mut c = s.chars();
+    let mut out = String::with_capacity(s.len());
+    if let Some(f) = c.next() { almide_case_push(&mut out, f, f.to_uppercase()); out.push_str(c.as_str()); }
+    out.into()
+}
 pub fn almide_rt_string_to_int(s: &str) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { s.trim().parse::<i64>().map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_string_to_float(s: &str) -> Result<f64, AlmideString> { let __almide_r: Result<f64, String> = (|| { s.trim().parse::<f64>().map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_string_to_bytes(s: &str) -> Vec<i64> { s.bytes().map(|b| b as i64).collect() }
