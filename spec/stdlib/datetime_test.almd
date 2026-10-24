@@ -207,3 +207,22 @@ test "datetime.parse_iso rejects out-of-range fields by name (#2489)" {
   assert_eq(parse_err("2024-01-15T10:30"), "invalid datetime format")
   assert_eq(parse_err("2024-01-15"), "expected YYYY-MM-DDTHH:MM:SSZ")
 }
+
+// #4118: the year is RFC 3339's four digits, 0..=9999. Beyond it the calendar
+// arithmetic wrapped and answered ok with a wrong instant (584554051223-… was
+// ok(-26982016), a day in 1969). The year is the first field checked.
+test "datetime.parse_iso refuses a year outside 0..=9999 (#4118)" {
+  assert_eq(parse_err("9999-12-31T23:59:59Z"), "ok(253402300799)")
+  assert_eq(parse_err("0000-01-01T00:00:00Z"), "ok(-62167219200)")
+  assert_eq(parse_err("10000-01-01T00:00:00Z"), "year out of range: 10000")
+  assert_eq(parse_err("584554051223-01-01T00:00:00Z"), "year out of range: 584554051223")
+  assert_eq(parse_err("292277026597-01-01T00:00:00Z"), "year out of range: 292277026597")
+  assert_eq(
+    parse_err("9223372036854775807-01-01T00:00:00Z"),
+    "year out of range: 9223372036854775807",
+  )
+  assert_eq(parse_err("10000-13-45T99:99:99Z"), "year out of range: 10000")
+  assert_eq(parse_err("99999999999999999999-01-01T00:00:00Z"), "invalid datetime format")
+  assert_eq(parse_err(datetime.to_iso(253402300799)), "ok(253402300799)")
+  assert_eq(parse_err(datetime.to_iso(253402300800)), "year out of range: 10000")
+}
