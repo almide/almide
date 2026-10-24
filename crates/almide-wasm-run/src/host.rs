@@ -126,6 +126,31 @@ struct Host {
     /// The `testing.assert_aborts` site this instance was started to run
     /// (op 118, ADR-0029), or -1: the run's own instance runs its tests.
     abort_site: i64,
+    /// The `fs_call` ops this module was built with (#4102), or `None` when
+    /// they could not be read as constants. The in-process module imports
+    /// the whole gateway whatever its effects; an op outside this set traps,
+    /// so a miscompile cannot steer the gateway into a capability the program
+    /// never had.
+    allowed_ops: AllowedOps,
+}
+
+/// See [`Host::allowed_ops`].
+pub(crate) type AllowedOps = Option<Arc<std::collections::BTreeSet<i32>>>;
+
+/// The `fs_call` op set of `bytes` (#4102), shared by every instance of it.
+fn allowed_ops_of(bytes: &[u8]) -> anyhow::Result<AllowedOps> {
+    let ops = almide_wasm::cert_project::fs_call_ops(bytes).map_err(anyhow::Error::msg)?;
+    Ok(ops.map(Arc::new))
+}
+
+/// Refuse an `fs_call` op the module was not built with (#4102).
+fn op_allowed(host: &Host, op: i32) -> wasmtime::Result<()> {
+    match &host.allowed_ops {
+        Some(ok) if !ok.contains(&op) => Err(wasmtime::Error::msg(format!(
+            "almide.fs_call: op {op} is not one this module was built with"
+        ))),
+        _ => Ok(()),
+    }
 }
 
 /// Is the process's stdout a terminal (native flushes per write there).
@@ -418,7 +443,8 @@ fn run_wasm_src_here(
     cfg.async_stack_size(EMBEDDED_WASM_STACK + 1024 * 1024);
     let engine = wasmtime::Engine::new(&cfg)?;
     let module = wasmtime::Module::new(&engine, bytes)?;
-    run_compiled(&engine, &module, Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site: -1 })
+    let allowed_ops = allowed_ops_of(bytes)?;
+    run_compiled(&engine, &module, Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site: -1, allowed_ops })
 }
 
 /// How one instance of a compiled module is started: the run's own, or an
@@ -431,11 +457,13 @@ struct Launch<'a> {
     live: bool,
     /// The abort site this instance runs (op 118), or -1 for the tests.
     abort_site: i64,
+    /// The module's `fs_call` op set (#4102).
+    allowed_ops: AllowedOps,
 }
 
 /// Instantiate `module` once and run its `main` to completion.
 fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: Launch<'_>) -> anyhow::Result<RunResult> {
-    let Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site } = launch;
+    let Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site, allowed_ops } = launch;
     let (engine, module) = (engine.clone(), module.clone());
     let out = Arc::new(Mutex::new(Vec::new()));
     let err = Arc::new(Mutex::new(Vec::new()));
@@ -463,6 +491,7 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
             err_last: Arc::new(Mutex::new(String::new())),
             par: None,
             abort_site,
+            allowed_ops: allowed_ops.clone(),
         },
     );
     store.limiter(|h| &mut h.limits);
@@ -475,6 +504,7 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
         max_memory_bytes,
         ticked.clone(),
         args.to_vec(),
+        allowed_ops,
     )));
     let ticker = watchdog.map(|after| {
         store.set_epoch_deadline(1);
@@ -612,6 +642,7 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
          b_ptr: i32,
          b_len: i32|
          -> wasmtime::Result<i64> {
+            op_allowed(caller.data(), op)?;
             // op 74 = the instance-parallel fan offer (#3003): the request
             // and the answer room are raw i64 slots, never text.
             if op == fan::OP_FAN_PAR {
@@ -773,11 +804,19 @@ fn abort_site_op(caller: &wasmtime::Caller<'_, Host>, op: i32, a_len: i32) -> i6
     let par = if caller.data().abort_site >= 0 { None } else { caller.data().par.clone() };
     let child = match par {
         Some(par) => {
-            let (engine, module, max_memory_bytes, args) = par.compiled();
+            let (engine, module, max_memory_bytes, args, allowed_ops) = par.compiled();
             std::thread::scope(|s| {
                 spawn_guest_thread(s, || {
                     let launch =
-                        Launch { stdin: StdinSource::Buf(Vec::new()), max_memory_bytes, args, watchdog: None, live: false, abort_site: i64::from(a_len) };
+                        Launch {
+                        stdin: StdinSource::Buf(Vec::new()),
+                        max_memory_bytes,
+                        args,
+                        watchdog: None,
+                        live: false,
+                        abort_site: i64::from(a_len),
+                        allowed_ops: allowed_ops.clone(),
+                    };
                     run_compiled(engine, module, launch)
                 })
                 .join()
