@@ -19,6 +19,11 @@
 //! its `--check` form; the writing forms (`almide fmt`, `almide fix`,
 //! `almide apply`) stay on the CLI, where the edit is visible in the agent's
 //! own transcript. `almide_survive` judges an edit without writing it.
+//!
+//! **Offline (#4179).** Every child runs with `ALMIDE_DEPS_CACHE_ONLY`: the
+//! dependencies resolve from what is already on disk, a dependency that is not
+//! cached is a tool error, and nothing clones a repository or writes
+//! `almide.lock` — so `readOnlyHint` / `openWorldHint: false` stay true.
 
 use serde_json::{json, Value};
 
@@ -47,6 +52,7 @@ fn run_cli_with_stdin(args: &[String], cwd: Option<&str>, stdin: Option<&str>) -
         .map_err(|e| format!("cannot locate the almide binary: {}", e))?;
     let mut cmd = std::process::Command::new(exe);
     cmd.args(args)
+        .env("ALMIDE_DEPS_CACHE_ONLY", "1")
         .stdin(if stdin.is_some() { std::process::Stdio::piped() } else { std::process::Stdio::null() })
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
