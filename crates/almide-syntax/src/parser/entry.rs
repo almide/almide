@@ -59,6 +59,7 @@ impl Parser {
         // #1311 front-end phase accounting (no-op unless `--timings`).
         let _phase = almide_base::profile::phase_scope(almide_base::profile::Phase::Parse);
         self.report_invalid_escapes();
+        self.report_bidi_controls();
         let mut program = Program {
             dialect: None,
             module: None,
