@@ -169,22 +169,12 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
     match op {
-        10 => {
-            let dir = std::env::temp_dir();
-            let name = format!(
-                "{}{}",
-                a,
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
-            );
-            let path = dir.join(&name);
-            match sfs::create_dir_all(&path).map_err(|e| io_err(fs_op_name(op), &q(&path.to_string_lossy()), e)) {
-                Ok(()) => ok_text(path.to_string_lossy().replace('\\', "/")),
-                Err(m) => err_s(m),
-            }
-        }
+        // A new private temp dir under an OS-entropy name, created
+        // exclusively (#4113): native's fs_temp_create.
+        10 => match almide_rt_core::fs_beneath_core::fs_temp_create(a, true) {
+            Ok(p) => ok_text(p),
+            Err((p, e)) => err_s(io_err(fs_op_name(op), &q(&p), e)),
+        },
         11 => match sfs::read_dir(a) {
             Ok(entries) => {
                 let mut names = Vec::new();
@@ -348,25 +338,15 @@ fn fs_read_lines(path: &str) -> (i64, Vec<u8>) {
     }
 }
 
-/// op 21: create an empty uniquely-named temp file, return its path.
+/// op 21: a new, empty, private temp file under an OS-entropy name,
+/// created exclusively (#4113): native's fs_temp_create.
 fn fs_temp_file(prefix: &str) -> (i64, Vec<u8>) {
-    let name = format!(
-        "{}{}",
-        prefix,
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    );
-    let path = std::env::temp_dir().join(&name);
-    match sfs::write(&path, "")
-        .map_err(|e| io_err("fs.create_temp_file", &q(&path.to_string_lossy()), e))
-    {
-        Ok(()) => {
-            let t = path.to_string_lossy().replace('\\', "/");
-            (pack(0, t.len()), t.into_bytes())
+    match almide_rt_core::fs_beneath_core::fs_temp_create(prefix, false) {
+        Ok(t) => (pack(0, t.len()), t.into_bytes()),
+        Err((p, e)) => {
+            let m = io_err("fs.create_temp_file", &q(&p), e);
+            (pack(1, m.len()), m.into_bytes())
         }
-        Err(m) => (pack(1, m.len()), m.into_bytes()),
     }
 }
 

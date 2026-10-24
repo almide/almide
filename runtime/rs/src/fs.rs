@@ -527,30 +527,16 @@ pub fn almide_rt_fs_stat(path: &str) -> Result<AlmideFileStat, AlmideString> {
 
 // Temp
 pub fn almide_rt_fs_temp_dir() -> AlmideString { let __almide_out: String = std::env::temp_dir().to_string_lossy().replace('\\', "/"); __almide_out.into() }
+// A new, uniquely named temp file (0o600) / directory (0o700) (#4113): the
+// name's random part is OS entropy, and the entry is created exclusively —
+// a name already taken (planted, a symlink included) is never followed or
+// reused, the next one is tried (almide-rt-core fs_temp_create).
 pub fn almide_rt_fs_create_temp_file(prefix: &str) -> Result<AlmideString, AlmideString> {
-    let __almide_v: Result<String, AlmideString> = {
-        let __almide_r: Result<String, String> = (|| {
-            let dir = std::env::temp_dir();
-            let name = format!("{}{}", prefix, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
-            let path = dir.join(&name);
-            std::fs::write(&path, "").map_err(|e| io_err("fs.create_temp_file", &fs_q(&path.to_string_lossy()), e))?;
-            Ok(path.to_string_lossy().replace('\\', "/"))
-        })();
-        __almide_r.map_err(Into::into)
-    };
+    let __almide_v: Result<String, AlmideString> = fs_temp_create(prefix, false).map_err(|(p, e)| io_err("fs.create_temp_file", &fs_q(&p), e).into());
     __almide_v.into_almide()
 }
 pub fn almide_rt_fs_create_temp_dir(prefix: &str) -> Result<AlmideString, AlmideString> {
-    let __almide_v: Result<String, AlmideString> = {
-        let __almide_r: Result<String, String> = (|| {
-            let dir = std::env::temp_dir();
-            let name = format!("{}{}", prefix, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
-            let path = dir.join(&name);
-            std::fs::create_dir_all(&path).map_err(|e| io_err("fs.create_temp_dir", &fs_q(&path.to_string_lossy()), e))?;
-            Ok(path.to_string_lossy().replace('\\', "/"))
-        })();
-        __almide_r.map_err(Into::into)
-    };
+    let __almide_v: Result<String, AlmideString> = fs_temp_create(prefix, true).map_err(|(p, e)| io_err("fs.create_temp_dir", &fs_q(&p), e).into());
     __almide_v.into_almide()
 }
 

@@ -38,6 +38,7 @@ mod almide_fs_beneath_sys {
         pub const O_NOFOLLOW: i32 = 0x100;
         pub const O_CREAT: i32 = 0x200;
         pub const O_TRUNC: i32 = 0x400;
+        pub const O_EXCL: i32 = 0x800;
         pub const O_DIRECTORY: i32 = 0x10_0000;
         pub const O_CLOEXEC: i32 = 0x100_0000;
         pub const AT_REMOVEDIR: i32 = 0x80;
@@ -51,6 +52,7 @@ mod almide_fs_beneath_sys {
         pub const O_APPEND: i32 = 0o2000;
         pub const O_NONBLOCK: i32 = 0o4000;
         pub const O_TRUNC: i32 = 0o1000;
+        pub const O_EXCL: i32 = 0o200;
         pub const O_DIRECTORY: i32 = 0o40000;
         pub const O_NOFOLLOW: i32 = 0o100000;
         pub const O_CLOEXEC: i32 = 0o2000000;
@@ -65,6 +67,7 @@ mod almide_fs_beneath_sys {
         pub const O_APPEND: i32 = 0o2000;
         pub const O_NONBLOCK: i32 = 0o4000;
         pub const O_TRUNC: i32 = 0o1000;
+        pub const O_EXCL: i32 = 0o200;
         pub const O_DIRECTORY: i32 = 0o200000;
         pub const O_NOFOLLOW: i32 = 0o400000;
         pub const O_CLOEXEC: i32 = 0o2000000;
@@ -122,6 +125,9 @@ mod almide_fs_beneath_sys {
         Read,
         /// A file to write: created (0o666 before the umask) or truncated.
         WriteTrunc,
+        /// A new file only (O_EXCL: an existing entry, a symlink included,
+        /// fails EEXIST), private to its owner (0o600).
+        CreateNew,
         /// A file to append to: created (0o666 before the umask) when missing.
         Append,
         /// An entry to take the metadata of: read-only and non-blocking (a
@@ -135,6 +141,7 @@ mod almide_fs_beneath_sys {
             Open::Dir => base | flags::O_DIRECTORY,
             Open::Read => base,
             Open::WriteTrunc => base | flags::O_WRONLY | flags::O_CREAT | flags::O_TRUNC,
+            Open::CreateNew => base | flags::O_WRONLY | flags::O_CREAT | flags::O_EXCL,
             Open::Append => base | flags::O_WRONLY | flags::O_CREAT | flags::O_APPEND,
             Open::Meta => base | flags::O_NONBLOCK,
         }
@@ -144,9 +151,10 @@ mod almide_fs_beneath_sys {
     /// at `name` fails (ELOOP, or ENOTDIR for a directory open).
     pub fn open_at(dir: std::os::fd::BorrowedFd<'_>, name: &str, how: Open) -> std::io::Result<std::os::fd::OwnedFd> {
         let c = cname(name)?;
+        let mode: CInt = if matches!(how, Open::CreateNew) { 0o600 } else { 0o666 };
         // SAFETY: `c` is a NUL-terminated string alive for the call and `dir`
         // is borrowed from a held OwnedFd; the mode is read only with O_CREAT.
-        let fd = unsafe { openat(std::os::fd::AsRawFd::as_raw_fd(&dir), c.as_ptr(), open_flags(how), 0o666 as CInt) };
+        let fd = unsafe { openat(std::os::fd::AsRawFd::as_raw_fd(&dir), c.as_ptr(), open_flags(how), mode) };
         owned(fd)
     }
 
@@ -179,12 +187,13 @@ mod almide_fs_beneath_sys {
         if r < 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
     }
 
-    /// Create the directory `name` under `dir` (0o777 before the umask); a
+    /// Create the directory `name` under `dir` with `mode` (before the
+    /// umask); a
     /// symlink at `name` is not followed (EEXIST).
-    pub fn mkdir_at(dir: std::os::fd::BorrowedFd<'_>, name: &str) -> std::io::Result<()> {
+    pub fn mkdir_at(dir: std::os::fd::BorrowedFd<'_>, name: &str, mode: u16) -> std::io::Result<()> {
         let c = cname(name)?;
         // SAFETY: as in `open_at`.
-        let r = unsafe { mkdirat(std::os::fd::AsRawFd::as_raw_fd(&dir), c.as_ptr(), 0o777) };
+        let r = unsafe { mkdirat(std::os::fd::AsRawFd::as_raw_fd(&dir), c.as_ptr(), ModeT::from(mode)) };
         if r < 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
     }
 

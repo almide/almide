@@ -6979,7 +6979,7 @@ effect fn copy(src: String, dst: String) -> Result[Unit, String] = _
 @intrinsic("almide_rt_fs_rename")
 effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
 
-/// Sorted paths below dir, recursive; dirs too.
+/// Sorted paths below dir; links listed, not followed.
 @intrinsic("almide_rt_fs_walk")
 effect fn walk(dir: String) -> Result[List[String], String] = _
 
@@ -6995,7 +6995,7 @@ effect fn file_size(path: String) -> Result[Int, String] = _
 
 
 
-/// Host temp dir; may end with /.
+/// Host temp dir; a location, not a safe name.
 @intrinsic("almide_rt_fs_temp_dir")
 effect fn temp_dir() -> String = _
 
@@ -7003,16 +7003,16 @@ effect fn temp_dir() -> String = _
 @intrinsic("almide_rt_fs_stat")
 effect fn stat(path: String) -> Result[FileStat, String] = _
 
-/// Sorted * and ** matches; [] if base is absent.
+/// Sorted * and ** matches; links not followed.
 @intrinsic("almide_rt_fs_glob")
 effect fn glob(pattern: String) -> Result[List[String], String] = _
 
-/// New empty file temp_dir/prefix+nanos; its path.
+/// New private file, random name; its path.
 @ordered
 @intrinsic("almide_rt_fs_create_temp_file")
 effect fn create_temp_file(prefix: String) -> Result[String, String] = _
 
-/// New dir temp_dir/prefix+nanos; its path.
+/// New private dir, random name; its path.
 @ordered
 @intrinsic("almide_rt_fs_create_temp_dir")
 effect fn create_temp_dir(prefix: String) -> Result[String, String] = _
