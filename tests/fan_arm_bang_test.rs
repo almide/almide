@@ -239,7 +239,7 @@ effect fn main() -> Unit = {{
     assert!(emitted.status.success(), "emit failed:\n{}", String::from_utf8_lossy(&emitted.stderr));
     let rust = String::from_utf8_lossy(&emitted.stdout).into_owned();
     let user = rust.rsplit("//__ALMIDE_RT_BOUNDARY__").next().unwrap();
-    assert!(user.contains("__almide_s.spawn"), "a fan whose arms capture no Rc value keeps its threads:\n{user}");
+    assert!(user.contains("almide_fan_spawn(__almide_s"), "a fan whose arms capture no Rc value keeps its threads:\n{user}");
     assert!(user.contains("(boom(1i64))?"), "the arm's `!` is the spawn closure's own `?`:\n{user}");
     let rs = dir.join("main.rs");
     std::fs::write(&rs, &rust).expect("write rust");
