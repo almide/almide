@@ -2557,8 +2557,7 @@ fn bytes_repeat(b: Bytes, count: Int) -> Bytes = {
 
 
 
-  let wrap_bound = if blen > 0 then 9223372036854775807 / blen else 0
-  if n > wrap_bound then prim.die(prim.handle("Error: out of memory\n")) else ()
+  if blen > 0 and n > 2147483648 / blen then prim.die(prim.handle("Error: repeat result too large\n")) else ()
   let out = prim.alloc_bytes(blen * n)
   let _x = __repcopy(prim.handle(out) + 12, prim.handle(b) + 12, blen, n, 0)
   out
@@ -14772,7 +14771,7 @@ pub const SRC_IO: &str = r#"
 
 
 
-/// Next stdin line, newline cut; "" at EOF too — read_line_opt tells them apart.
+/// Next stdin line, newline cut, bad UTF-8 as U+FFFD; "" at EOF too — read_line_opt tells them apart.
 @ordered
 @intrinsic("almide_rt_io_read_line")
 effect fn read_line() -> String = _
@@ -14787,7 +14786,7 @@ effect fn read_line_opt() -> String? = _
 @category("IO.stdout")
 effect fn print(s: String) -> Unit = _
 
-/// Rest of stdin as text; empty at EOF.
+/// Rest of stdin as text, bad UTF-8 as U+FFFD; empty at EOF.
 @ordered
 @intrinsic("almide_rt_io_read_all")
 effect fn read_all() -> String = _
@@ -14839,7 +14838,6 @@ fn io_print(s: String) -> Unit = {
 }
 "#;
 pub const SRC_IO_READ_ALL: &str = r#"
-
 
 
 
