@@ -633,6 +633,7 @@ pub fn start_collecting() {
     crate::witness::modes::start();
     crate::witness::bounds::start();
     crate::witness::init::start();
+    crate::witness::anchor::start();
     crate::witness::decls::start();
 }
 
@@ -659,6 +660,11 @@ pub use init::take as take_init;
 /// The init witness sink (split for the file budget).
 #[path = "witness_init.rs"]
 pub(crate) mod init;
+
+/// Where in the bytes each bounds / init event is (#4011 (d),
+/// witness_anchor.rs).
+#[path = "witness_anchor.rs"]
+pub mod anchor;
 
 /// The certificate bundle of one build's shipped pass (witness_bundle.rs):
 /// the one producer `almide verify` and the corpus sweep share.

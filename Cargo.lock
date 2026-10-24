@@ -75,6 +75,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "almide-anchor-check"
+version = "0.1.0"
+dependencies = [
+ "wasmparser 0.262.0",
+ "wat",
+]
+
+[[package]]
 name = "almide-base"
 version = "0.12.2"
 dependencies = [

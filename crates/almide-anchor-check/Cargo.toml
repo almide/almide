@@ -1,0 +1,23 @@
+[package]
+name = "almide-anchor-check"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+description = "Checks that the bounds and init witnesses' events are the instructions the shipped wasm bytes contain (#4011 (d))"
+
+# One dependency, on purpose: a wasm DECODER and validator. The checker links
+# none of the compiler — the emitter is the untrusted producer of the anchors
+# it reads, and it decodes the shipped bytes itself.
+[dependencies]
+wasmparser = "0.262"
+
+[dev-dependencies]
+wat = "1"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "almide-anchor-check"
+path = "src/main.rs"

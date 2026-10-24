@@ -347,6 +347,7 @@ pub(crate) fn lower_fn(
     let no_cells: HashSet<VarId> = HashSet::new();
     let no_ranges: HashMap<VarId, (u32, u32, bool)> = HashMap::new();
     let mut f = Function::new(local_decls);
+    let anchor_serial = crate::witness::anchor::begin_fn();
     let mut calls: HashSet<usize> = HashSet::new();
     {
         let mut em = Emitter {
@@ -629,6 +630,7 @@ pub(crate) fn lower_fn(
     crate::exit_plan::validate_exits(&f, &exit_ledger, &fn_name, &drop_fns, |idx| {
         local_names.get(&idx).map_or_else(|| format!("local #{idx}"), |n| format!("local `{n}`"))
     })?;
+    crate::witness::anchor::seal(anchor_serial, &f);
     Ok((f, calls))
 }
 

@@ -33,10 +33,15 @@
 //! (scripts/witness-reinject.sh bounds re-injects such bugs and requires the
 //! rejection).
 //!
-//! TRUSTED, as for the ownership witness: that these events are the
-//! accesses the bytes contain — that the recording calls sit next to the
-//! instructions they describe, an `s` at every change of a variable a key
-//! names — and that the hoisted count is the list's count (len_hoist.rs).
+//! Each `c` / `a` / `w` also keeps its ANCHOR (witness_anchor.rs): where in
+//! the body its instruction ends. `almide-anchor-check` decodes the shipped
+//! bytes and checks each located event there (#4011 (d)): a `c` is an
+//! unsigned compare (or a Bytes room test) opening an `if` that aborts, an
+//! `a` a load, a `w` a store, and a slot's events lie in byte order.
+//!
+//! TRUSTED: that the compare's operands are the access's index and its
+//! list's count — the hoisted count among them (len_hoist.rs) — and that
+//! an `s` sits at every change of a variable a key names.
 //! Element accesses that do not go through the index operator (a `for`
 //! loop's element reads, stdlib `list.get`, the runtime's own routines) are
 //! not recorded.
@@ -50,6 +55,8 @@ pub(crate) type Key = (u32, u32, i64);
 struct Stretch {
     slots: Vec<Key>,
     text: String,
+    /// One anchor per token of `text`.
+    anchors: String,
 }
 
 #[derive(Default)]
@@ -59,7 +66,9 @@ struct State {
     /// The pass's non-candidate accesses, one fresh slot each.
     loose: Stretch,
     stretches: Vec<String>,
+    stretch_anchors: Vec<String>,
     done: Vec<(usize, String)>,
+    done_anchors: Vec<(usize, String)>,
     /// A site outlived its stretch: the witness is made unparseable, so it
     /// is rejected rather than read short.
     broken: bool,
@@ -103,6 +112,7 @@ impl State {
             && !st.text.is_empty()
         {
             self.stretches.push(st.text.trim_end().to_string());
+            self.stretch_anchors.push(st.anchors.trim_end().to_string());
         }
     }
 
@@ -113,13 +123,17 @@ impl State {
         let loose = std::mem::take(&mut self.loose);
         if !loose.text.is_empty() {
             self.stretches.push(loose.text.trim_end().to_string());
+            self.stretch_anchors.push(loose.anchors.trim_end().to_string());
         }
         if std::mem::take(&mut self.broken) {
             self.stretches.push("x".to_string());
+            self.stretch_anchors.push("-".to_string());
         }
         let stretches = std::mem::take(&mut self.stretches);
+        let anchors = std::mem::take(&mut self.stretch_anchors);
         if !stretches.is_empty() {
             self.done.push((self.pass, stretches.join(";")));
+            self.done_anchors.push((self.pass, anchors.join(";")));
         }
     }
 
@@ -142,10 +156,10 @@ impl State {
         }
     }
 
-    fn text_of(&mut self, site: Site) -> Option<&mut String> {
+    fn text_of(&mut self, site: Site) -> Option<&mut Stretch> {
         match site.depth {
-            None => Some(&mut self.loose.text),
-            Some(d) if d < self.open.len() => Some(&mut self.open[d].text),
+            None => Some(&mut self.loose),
+            Some(d) if d < self.open.len() => Some(&mut self.open[d]),
             Some(_) => {
                 self.broken = true;
                 None
@@ -153,9 +167,15 @@ impl State {
         }
     }
 
+    #[cfg(test)]
     fn push(&mut self, site: Site, tag: char) {
+        self.push_at(site, tag, "-");
+    }
+
+    fn push_at(&mut self, site: Site, tag: char, at: &str) {
         if let Some(t) = self.text_of(site) {
-            t.push_str(&format!("{tag}{} ", site.slot));
+            t.text.push_str(&format!("{tag}{} ", site.slot));
+            t.anchors.push_str(&format!("{at} "));
         }
     }
 
@@ -164,6 +184,7 @@ impl State {
             for (n, &(xs, i, _)) in st.slots.iter().enumerate() {
                 if xs == v || i == v {
                     st.text.push_str(&format!("s{n} "));
+                    st.anchors.push_str("- ");
                 }
             }
         }
@@ -188,16 +209,18 @@ pub(crate) fn site(k: Option<Key>) -> Option<Site> {
 }
 
 /// The compare guarding `site`'s access was just emitted.
-pub(crate) fn check(site: Option<Site>) {
+pub(crate) fn check(site: Option<Site>, at: &wasm_encoder::Function) {
     if let Some(site) = site {
-        with(|s| s.push(site, 'c'));
+        let a = crate::witness::anchor::at(at);
+        with(|s| s.push_at(site, 'c', &a));
     }
 }
 
 /// `site`'s element was just loaded (`write` false) or stored.
-pub(crate) fn access(site: Option<Site>, write: bool) {
+pub(crate) fn access(site: Option<Site>, write: bool, at: &wasm_encoder::Function) {
     if let Some(site) = site {
-        with(|s| s.push(site, if write { 'w' } else { 'a' }));
+        let a = crate::witness::anchor::at(at);
+        with(|s| s.push_at(site, if write { 'w' } else { 'a' }, &a));
     }
 }
 
@@ -211,7 +234,21 @@ pub fn take() -> Vec<(usize, String)> {
     let mut g = state().lock().expect("bounds sink");
     let Some(mut s) = g.take() else { return Vec::new() };
     s.flush();
+    *taken_anchors().lock().expect("bounds anchors") = std::mem::take(&mut s.done_anchors);
     s.done
+}
+
+fn taken_anchors() -> &'static Mutex<Vec<(usize, String)>> {
+    use std::sync::OnceLock;
+    static A: OnceLock<Mutex<Vec<(usize, String)>>> = OnceLock::new();
+    A.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// The anchors of the witness the last [`take`] returned, per pass: per
+/// stretch (`;`-joined) one anchor per token, `serial@offset` or `-` (a
+/// kill, which no instruction carries).
+pub fn take_anchors() -> Vec<(usize, String)> {
+    std::mem::take(&mut *taken_anchors().lock().expect("bounds anchors"))
 }
 
 #[cfg(test)]
