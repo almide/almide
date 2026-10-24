@@ -1,0 +1,12 @@
+// E006 (#4151): a module-path effect fn passed as an argument from a pure fn
+// carries its effect bit to the call (ADR-0009 D2), as a bare name does
+// (e006-effect-fn-as-callback). `apply` is a user HOF with a plain fn-typed
+// parameter, which is transparent: the call `apply(fs.read_text, p)` is an
+// effect call.
+import fs
+
+fn apply(f: (String) -> Result[String, String], p: String) -> Result[String, String] = f(p)
+
+fn sneaky(p: String) -> Result[String, String] = apply(fs.read_text, p)
+
+effect fn main() -> Unit = println(sneaky("s.txt") ?? "none")

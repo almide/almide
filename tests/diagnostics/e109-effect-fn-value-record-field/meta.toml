@@ -1,0 +1,4 @@
+expects_code = "E109"
+expects_error = "pure function `pure_looking` runs an effect function through a function value"
+hint_substring = "Mark `pure_looking` as `effect fn`"
+expects_line_col = "9:56"
