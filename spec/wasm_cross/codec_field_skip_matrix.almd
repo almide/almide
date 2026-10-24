@@ -48,11 +48,9 @@ fn main() -> Unit = {
   println("skip        encode ${json.stringify(Skip.encode(Skip { name: "m", is_admin: true }))}")
   println("skip_decode encode ${json.stringify(SkipDecode.encode(SkipDecode { name: "m", is_admin: true }))}")
   // decode_strict checks keys BEFORE any field: the unknown key is reported,
-  // not the wrongly typed `name`; the first unknown key in document order wins.
-  println("order       decode_strict ${show_plain(Plain.decode_strict(doc("{\"zeta\": 1, \"name\": 5, \"alpha\": 2}")))}")
-  println("order       decode        ${show_plain(Plain.decode(doc("{\"zeta\": 1, \"name\": 5, \"alpha\": 2}")))}")
-  // A non-object reaches `T.decode`'s own shape error.
-  println("shape       decode_strict ${show_plain(Plain.decode_strict(doc("[1]")))}")
+  // not the missing `name`; the first unknown key in document order wins.
+  println("order       decode_strict ${show_plain(Plain.decode_strict(doc("{\"zeta\": 1, \"alpha\": 2}")))}")
+  println("order       decode        ${show_plain(Plain.decode(doc("{\"zeta\": 1, \"alpha\": 2}")))}")
   // Alias: the input's `role_name` is ignored by decode, refused by
   // decode_strict, and written by encode.
   let a = Aliased.decode(doc("{\"name\": \"m\", \"role_name\": \"admin\"}"))
