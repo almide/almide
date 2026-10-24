@@ -251,6 +251,375 @@ fn base64_decode(s: String) -> Result[Bytes, String] = {
 
 fn base64_decode_url(s: String) -> Result[Bytes, String] = base64_decode(s)
 "#;
+pub const SRC_BIGINT: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// An arbitrary-precision integer.
+type BigInt = { neg: Bool, limbs: List[Int] }
+
+
+/// BigInt from trimmed decimal s with an optional + or -; err on junk.
+fn parse(s: String) -> Result[BigInt, String] = parse_radix(s, 10)
+
+/// BigInt from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
+/// err on junk; radix outside 2..36 aborts.
+fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
+  check_radix(radix)
+  let bytes = string.to_bytes(string.trim(s))
+  match bytes {
+    [] => err("cannot parse integer from empty string"),
+    [45, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, true),
+    [43, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, false),
+    _ => read_digits(strip_radix_prefix(bytes, radix), radix, false),
+  }
+}
+
+/// Decimal digits, with - when negative.
+fn to_string(x: BigInt) -> String = to_string_radix(x, 10)
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: BigInt, radix: Int) -> String = {
+  check_radix(radix)
+  let k = chunk_width(radix, 1, radix)
+  let chunks = radix_chunks(x.limbs, int.pow(radix, k), [])
+  let text = match chunks {
+    [] => "0",
+    [top, ..rest] => int.to_string_radix(top, radix) + (rest |> list.map((c) => string.pad_start(int.to_string_radix(c, radix), k, "0")) |> string.join("")),
+  }
+  if x.neg then "-" + text else text
+}
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: BigInt, b: BigInt) -> Int = match (a.neg, b.neg) {
+  (false, true) => 1,
+  (true, false) => -1,
+  (false, false) => compare_mag(a.limbs, b.limbs),
+  _ => compare_mag(b.limbs, a.limbs),
+}
+
+/// Lesser of a and b.
+fn min(a: BigInt, b: BigInt) -> BigInt = if compare(a, b) <= 0 then a else b
+
+/// Greater of a and b.
+fn max(a: BigInt, b: BigInt) -> BigInt = if compare(a, b) >= 0 then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: BigInt, lo: BigInt, hi: BigInt) -> BigInt =
+  if compare(lo, hi) > 0 then panic("clamp requires min <= max")
+  else max(lo, min(x, hi))
+
+/// Magnitude of x.
+fn abs(x: BigInt) -> BigInt = { neg: false, limbs: x.limbs }
+
+/// -1, 0 or 1 by the sign of x; 0 for 0.
+fn sign(x: BigInt) -> Int = if x.neg then -1
+else if list.is_empty(x.limbs) then 0 else 1
+
+/// True when x is a multiple of 2.
+fn is_even(x: BigInt) -> Bool = limb(x.limbs, 0) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: BigInt) -> Bool = limb(x.limbs, 0) % 2 != 0
+
+/// Quotient rounded toward -inf; b == 0 aborts.
+fn floor_div(a: BigInt, b: BigInt) -> BigInt = {
+  let (q, r) = divide(a, b)
+  if list.is_empty(r.limbs) or a.neg == b.neg then q else add(q, small(-1))
+}
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: BigInt, b: BigInt) -> BigInt = {
+  let (_, r) = divide(a, b)
+  if list.is_empty(r.limbs) or a.neg == b.neg then r else add(r, b)
+}
+
+/// base raised to exp; exp < 0 aborts.
+fn pow(base: BigInt, exp: Int) -> BigInt = if exp < 0 then panic("negative exponent")
+else power(base, exp, small(1))
+
+/// Bits needed to hold the magnitude of x; 0 for 0.
+fn bit_length(x: BigInt) -> Int = match list.len(x.limbs) {
+  0 => 0,
+  n => 30 * (n - 1) + int.bit_length(limb(x.limbs, n - 1)),
+}
+
+
+/// Bitwise AND.
+fn band(a: BigInt, b: BigInt) -> BigInt = bitwise(a, b, a.neg and b.neg, (x, y) => int.band(x, y))
+
+/// Bitwise OR.
+fn bor(a: BigInt, b: BigInt) -> BigInt = bitwise(a, b, a.neg or b.neg, (x, y) => int.bor(x, y))
+
+/// Bitwise XOR.
+fn bxor(a: BigInt, b: BigInt) -> BigInt = bitwise(a, b, a.neg != b.neg, (x, y) => int.bxor(x, y))
+
+/// Bitwise complement; equals -x - 1.
+fn bnot(x: BigInt) -> BigInt = add(negate(x), small(-1))
+
+/// a shifted left by n bits (a * 2^n); n < 0 aborts.
+fn bshl(a: BigInt, n: Int) -> BigInt = if n < 0 then panic("shift count must not be negative")
+else make(a.neg, list.repeat(0, n / 30) + shift_left_bits(a.limbs, n % 30, 0, 0, []))
+
+/// a shifted right by n bits, rounding toward -inf (sign-filling); n < 0 aborts.
+fn bshr(a: BigInt, n: Int) -> BigInt = if n < 0 then panic("shift count must not be negative")
+else if a.neg then bnot(bshr(bnot(a), n))
+else make(false, shift_right_bits(list.drop(a.limbs, n / 30), n % 30))
+
+
+local fn add(a: BigInt, b: BigInt) -> BigInt =
+  if a.neg == b.neg then make(a.neg, add_mag(a.limbs, b.limbs))
+  else if compare_mag(a.limbs, b.limbs) >= 0 then make(a.neg, sub_mag(a.limbs, b.limbs))
+  else make(b.neg, sub_mag(b.limbs, a.limbs))
+
+local fn negate(x: BigInt) -> BigInt = make(not x.neg, x.limbs)
+
+local fn multiply(a: BigInt, b: BigInt) -> BigInt = make(a.neg != b.neg, mul_mag(a.limbs, b.limbs))
+
+
+local fn divide(a: BigInt, b: BigInt) -> (BigInt, BigInt) =
+  if list.is_empty(b.limbs) then panic("division by zero")
+  else {
+    let (q, r) = divmod_mag(a.limbs, b.limbs)
+    (make(a.neg != b.neg, q), make(a.neg, r))
+  }
+
+local fn power(base: BigInt, exp: Int, acc: BigInt) -> BigInt = if exp == 0 then acc
+else if exp == 1 then multiply(acc, base)
+else if exp % 2 == 1 then power(multiply(base, base), exp / 2, multiply(acc, base))
+else power(multiply(base, base), exp / 2, acc)
+
+
+local fn limb_base() -> Int = 1073741824
+
+local fn limb_mask() -> Int = 1073741823
+
+local fn limb(l: List[Int], i: Int) -> Int = list.get(l, i) ?? 0
+
+
+local fn make(neg: Bool, limbs: List[Int]) -> BigInt = {
+  let l = list.take(limbs, top_nonzero(limbs, list.len(limbs)))
+  { neg: neg and not list.is_empty(l), limbs: l }
+}
+
+local fn top_nonzero(l: List[Int], n: Int) -> Int =
+  if n > 0 and limb(l, n - 1) == 0 then top_nonzero(l, n - 1) else n
+
+local fn small(n: Int) -> BigInt = make(n < 0, int_limbs(if n < 0 then n else 0 - n, []))
+
+
+local fn int_limbs(n: Int, acc: List[Int]) -> List[Int] = if n == 0 then acc
+else int_limbs(n / limb_base(), acc + [0 - n % limb_base()])
+
+
+local fn compare_mag(a: List[Int], b: List[Int]) -> Int = {
+  let n = list.len(a)
+  let m = list.len(b)
+  if n != m then int.compare(n, m)
+  else compare_from_top(a, b, n - 1)
+}
+
+local fn compare_from_top(a: List[Int], b: List[Int], i: Int) -> Int = if i < 0 then 0
+else if limb(a, i) != limb(b, i) then int.compare(limb(a, i), limb(b, i))
+else compare_from_top(a, b, i - 1)
+
+local fn add_mag(a: List[Int], b: List[Int]) -> List[Int] = add_from(
+  a,
+  b,
+  0,
+  0,
+  int.max(list.len(a), list.len(b)),
+  [],
+)
+
+local fn add_from(a: List[Int], b: List[Int], i: Int, carry: Int, n: Int, acc: List[Int]) -> List[Int] =
+  if i >= n then (if carry > 0 then acc + [carry]
+  else acc)
+  else {
+    let s = limb(a, i) + limb(b, i) + carry
+    add_from(a, b, i + 1, s / limb_base(), n, acc + [int.band(s, limb_mask())])
+  }
+
+
+local fn sub_mag(a: List[Int], b: List[Int]) -> List[Int] = sub_from(a, b, 0, 0, list.len(a), [])
+
+local fn sub_from(a: List[Int], b: List[Int], i: Int, borrow: Int, n: Int, acc: List[Int]) -> List[Int] =
+  if i >= n then acc
+  else {
+    let d = limb(a, i) - limb(b, i) - borrow
+    if d < 0 then sub_from(a, b, i + 1, 1, n, acc + [d + limb_base()])
+    else sub_from(a, b, i + 1, 0, n, acc + [d])
+  }
+
+local fn mul_mag(a: List[Int], b: List[Int]) -> List[Int] = list.enumerate(b) |> list.fold(
+  [],
+  (acc, (i, d)) => add_mag(acc, list.repeat(0, i) + mul_small(a, d)),
+)
+
+
+local fn mul_small(a: List[Int], m: Int) -> List[Int] = if m == 0 then []
+else mul_small_from(a, m, 0, 0, [])
+
+local fn mul_small_from(a: List[Int], m: Int, i: Int, carry: Int, acc: List[Int]) -> List[Int] =
+  if i >= list.len(a) then (if carry > 0 then acc + [carry]
+  else acc)
+  else {
+    let p = limb(a, i) * m + carry
+    mul_small_from(a, m, i + 1, p / limb_base(), acc + [int.band(p, limb_mask())])
+  }
+
+
+local fn divmod_small(a: List[Int], d: Int) -> (List[Int], Int) = divmod_small_from(
+  a,
+  d,
+  list.len(a) - 1,
+  0,
+  [],
+)
+
+local fn divmod_small_from(a: List[Int], d: Int, i: Int, rem: Int, acc: List[Int]) -> (List[Int], Int) =
+  if i < 0 then (list.take(acc, top_nonzero(acc, list.len(acc))), rem)
+  else {
+    let cur = rem * limb_base() + limb(a, i)
+    divmod_small_from(a, d, i - 1, cur % d, [cur / d] + acc)
+  }
+
+
+
+local fn divmod_mag(a: List[Int], b: List[Int]) -> (List[Int], List[Int]) =
+  if compare_mag(a, b) < 0 then ([], a)
+  else if list.len(b) == 1 then {
+    let (q, r) = divmod_small(a, limb(b, 0))
+    (q, if r == 0 then []
+    else [r])
+  } else long_divide(a, b, list.len(a) - 1, [], [])
+
+local fn long_divide(a: List[Int], b: List[Int], i: Int, rem: List[Int], acc: List[Int]) -> (List[Int], List[Int]) =
+  if i < 0 then (list.take(acc, top_nonzero(acc, list.len(acc))), rem)
+  else {
+    let shifted = trim([limb(a, i)] + rem)
+    let q = quotient_limb(shifted, b)
+    long_divide(a, b, i - 1, trim(sub_mag(shifted, mul_small(b, q))), [q] + acc)
+  }
+
+local fn trim(l: List[Int]) -> List[Int] = list.take(l, top_nonzero(l, list.len(l)))
+
+
+local fn quotient_limb(rem: List[Int], b: List[Int]) -> Int = {
+  let m = list.len(b)
+  let top = limb(b, m - 1)
+  let t = if list.len(rem) > m then limb(rem, m) * limb_base() + limb(rem, m - 1) else limb(
+    rem,
+    m - 1,
+  )
+  search_quotient(rem, b, t / (top + 1), int.min(limb_mask(), (t + 1) / top))
+}
+
+local fn search_quotient(rem: List[Int], b: List[Int], lo: Int, hi: Int) -> Int =
+  if lo >= hi then lo
+  else {
+    let mid = (lo + hi + 1) / 2
+    if compare_mag(trim(mul_small(b, mid)), rem) <= 0 then search_quotient(rem, b, mid, hi)
+    else search_quotient(rem, b, lo, mid - 1)
+  }
+
+
+local fn shift_left_bits(a: List[Int], r: Int, i: Int, carry: Int, acc: List[Int]) -> List[Int] =
+  if i >= list.len(a) then acc + [carry]
+  else {
+    let v = int.bshl(limb(a, i), r) + carry
+    shift_left_bits(a, r, i + 1, int.bshr(v, 30), acc + [int.band(v, limb_mask())])
+  }
+
+local fn shift_right_bits(a: List[Int], r: Int) -> List[Int] = list.range(0, list.len(a)) |> list.map((i) => int.band(int.bor(int.bshr(limb(a, i), r), int.bshl(limb(a, i + 1), 30 - r)), limb_mask()))
+
+
+
+local fn bitwise(a: BigInt, b: BigInt, neg: Bool, f: (Int, Int) -> Int) -> BigInt = {
+  let n = int.max(list.len(a.limbs), list.len(b.limbs)) + 1
+  let r = list.zip_with(twos(a, n), twos(b, n), f)
+  if neg then make(true, add_mag(complement(r), [1]))
+  else make(false, r)
+}
+
+local fn twos(x: BigInt, n: Int) -> List[Int] =
+  if x.neg then complement(pad(sub_mag(x.limbs, [1]), n))
+  else pad(x.limbs, n)
+
+local fn pad(l: List[Int], n: Int) -> List[Int] = l + list.repeat(0, n - list.len(l))
+
+local fn complement(l: List[Int]) -> List[Int] = l |> list.map((d) => limb_mask() - d)
+
+
+local fn check_radix(radix: Int) -> Unit =
+  if radix < 2 or radix > 36 then panic("radix must be in 2..36, got ${radix}") else ()
+
+
+local fn chunk_width(radix: Int, k: Int, p: Int) -> Int = if p * radix > limb_base() then k
+else chunk_width(radix, k + 1, p * radix)
+
+
+local fn radix_chunks(l: List[Int], d: Int, acc: List[Int]) -> List[Int] =
+  if list.is_empty(l) then acc
+  else {
+    let (q, r) = divmod_small(l, d)
+    radix_chunks(q, d, [r] + acc)
+  }
+
+
+local fn strip_radix_prefix(bytes: List[Int], radix: Int) -> List[Int] = match bytes {
+  [48, p, d, ..rest] => if prefix_radix(p) == radix then [d] + rest
+  else bytes,
+  _ => bytes,
+}
+
+local fn prefix_radix(b: Int) -> Int = match b {
+  120 | 88 => 16,
+  111 | 79 => 8,
+  98 | 66 => 2,
+  _ => 0,
+}
+
+
+local fn digit_value(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
+else if b >= 97 and b <= 122 then b - 87
+else if b >= 65 and b <= 90 then b - 55
+else 99
+
+local fn read_digits(digits: List[Int], radix: Int, neg: Bool) -> Result[BigInt, String] =
+  if list.is_empty(digits) then err("invalid digit found in string")
+  else if list.any(digits, (b) => digit_value(b) >= radix) then err("invalid digit found in string")
+  else {
+    let k = chunk_width(radix, 1, radix)
+    ok(make(
+      neg,
+      list.chunk(digits, k) |> list.fold(
+        [],
+        (acc, chunk) => add_mag(
+          mul_small(acc, int.pow(radix, list.len(chunk))),
+          chunk_value(chunk, radix),
+        ),
+      ),
+    ))
+  }
+
+local fn chunk_value(chunk: List[Int], radix: Int) -> List[Int] = {
+  let v = chunk |> list.fold(0, (acc, b) => acc * radix + digit_value(b))
+  if v == 0 then []
+  else [v]
+}
+"#;
 pub const SRC_BOOL: &str = r#"
 
 
@@ -42837,6 +43206,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "args" => Some(SRC_ARGS),
         "base64" => Some(SRC_BASE64),
         "base64_encode" => Some(SRC_BASE64_ENCODE),
+        "bigint" => Some(SRC_BIGINT),
         "bool" => Some(SRC_BOOL),
         "bytes" => Some(SRC_BYTES),
         "bytes_append_multi" => Some(SRC_BYTES_APPEND_MULTI),
