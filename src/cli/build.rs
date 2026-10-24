@@ -421,11 +421,12 @@ pub(crate) fn alloc_count_armed() -> bool {
 /// `ALMIDE_ALLOC_COUNT` (#2228): inject the counting allocator when the lane is
 /// armed, taking the self-contained cargo path the same way `--heap-cap` does
 /// (see the comment there for why the rlib fast path cannot carry it).
-/// `[permissions] fs` (#4022) on native: the granted roots, set as the first
-/// statement of `main` (`almide_fs_scope_set`, runtime/rs/src/fs.rs), so every
-/// fs call of the run asks the scope before it touches a path. Only a program
-/// that reaches the fs runtime carries the call; a test harness build has no
-/// `main` and runs unscoped. The roots are absolute: the manifest anchored
+/// `[permissions] fs` (#4022) on native: the granted roots, baked into the
+/// program as a constant and resolved on the first fs call (a `OnceLock`), so
+/// every fs call asks the scope before it touches a path. Nothing hangs on
+/// `main`: a test harness build (`almide test`, which has none) is bounded
+/// exactly like `almide run` (#4084). Only a program that reaches the fs
+/// runtime carries the check. The roots are absolute: the manifest anchored
 /// the relative ones to its own directory.
 ///
 /// The check wraps the program's CALLS, not the runtime's fns: each
@@ -438,7 +439,7 @@ pub(crate) fn alloc_count_armed() -> bool {
 /// emitted unchanged.
 pub(crate) fn inject_fs_scope(rs_code: String) -> String {
     let Some(roots) = almide_wasm_run::fs_scope() else { return rs_code };
-    if !rs_code.contains("almide_rt_fs_") || !rs_code.contains("\nfn main() {\n") {
+    if !rs_code.contains("almide_rt_fs_") {
         return rs_code;
     }
     let guards = fs_runtime_guards();
@@ -451,12 +452,11 @@ pub(crate) fn inject_fs_scope(rs_code: String) -> String {
     };
     let user = wrap_fs_calls(user, &guards);
     let list: Vec<String> = roots.iter().map(|r| format!("{r:?}")).collect();
-    let user = user.replacen(
-        "\nfn main() {\n",
-        &format!("\nfn main() {{\n    let _ = __ALMIDE_FS_SCOPE.set([{}].iter().map(|r| fs_scope_root(r)).collect());\n", list.join(", ")),
-        1,
+    let prelude = format!(
+        "\n{}\nconst __ALMIDE_FS_SCOPE_ROOTS: &[&str] = &[{}];\n{FS_SCOPE_GUARDS}",
+        almide_base::FS_SCOPE_SOURCE,
+        list.join(", ")
     );
-    let prelude = format!("\n{}\n{FS_SCOPE_GUARDS}", almide_base::FS_SCOPE_SOURCE);
     if head.is_empty() {
         splice_after_inner_attrs(&user, &prelude)
     } else {
@@ -467,10 +467,8 @@ pub(crate) fn inject_fs_scope(rs_code: String) -> String {
 /// The guard macros and the scope cell `inject_fs_scope` splices in.
 const FS_SCOPE_GUARDS: &str = r#"static __ALMIDE_FS_SCOPE: std::sync::OnceLock<Vec<std::path::PathBuf>> = std::sync::OnceLock::new();
 fn __almide_fs_scope_check(path: &str) -> Result<(), String> {
-    match __ALMIDE_FS_SCOPE.get() {
-        Some(roots) if !fs_scope_admits(path, roots) => Err(fs_scope_refusal(path)),
-        _ => Ok(()),
-    }
+    let roots = __ALMIDE_FS_SCOPE.get_or_init(|| __ALMIDE_FS_SCOPE_ROOTS.iter().map(|r| fs_scope_root(r)).collect());
+    if fs_scope_admits(path, roots) { Ok(()) } else { Err(fs_scope_refusal(path)) }
 }
 macro_rules! __almide_fs_path { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let __almide_p = $p; match __almide_fs_scope_check(&*__almide_p) { Ok(()) => ($f)(__almide_p $(, $a)*), Err(e) => Err(e.into()) } }}; }
 macro_rules! __almide_fs_bool { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; if __almide_fs_scope_check(&*__almide_p).is_ok() { ($f)(__almide_p) } else { false } }}; }

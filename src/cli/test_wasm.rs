@@ -392,6 +392,11 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
     let prof = almide_base::env::flag("ALMIDE_PROFILE");
     let mut marks: Vec<(&'static str, std::time::Instant)> = vec![("start", std::time::Instant::now())];
 
+    // `[permissions] fs` (#4084): the embedded host bounds a test run to the
+    // granted directories exactly as it bounds `almide run --target wasm`.
+    // The manifest is the working directory's, as every build route reads it
+    // (`compile_driver`), so every file of one run sets the same scope.
+    almide_wasm_run::set_fs_scope(cwd_fs_scope());
     let (mut program, source_text, parse_errors) = parse_file(test_file);
     // Counted before any filtering so the summary can say what `--run` excluded.
     let declared_tests = program
@@ -638,6 +643,16 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool,
 
 /// `cmd_test_fast`'s Phase 1: run every file on the fast rustc-free WASM
 /// path, in parallel (bounded by `cpus`). Extracted verbatim.
+/// The working directory's `[permissions] fs` roots (anchored to the
+/// manifest), or `None` without a manifest or without the key.
+fn cwd_fs_scope() -> Option<Vec<String>> {
+    let manifest = std::path::Path::new("almide.toml");
+    if !manifest.exists() {
+        return None;
+    }
+    crate::project::parse_toml(manifest).ok().and_then(|p| p.fs_allow)
+}
+
 pub(super) fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScratch>, cpus: usize, run_filter: Option<&str>) -> Vec<WasmTestOutcome> {
     let run_filter: Option<String> = run_filter.map(str::to_string);
     let scratch = scratch.clone();
