@@ -65,6 +65,13 @@ impl<T: PartialEq + 'static> AlmideSet<T> {
             if let Some(h) = h {
                 ix.push(h);
             }
+            if ix.flooded() {
+                // #4104: re-index under the keyed hash, as AlmideMap does.
+                self.items.retain(Option::is_some);
+                self.dead = 0;
+                let n = self.items.len();
+                self.lookup.rebuild_keyed(self.items.iter().flatten(), n);
+            }
             return;
         }
         // A linear set has no holes, so member order is position order.
