@@ -930,6 +930,32 @@ almide trust bob                # github.com/bob と同じ
 
 ---
 
+### `almide install`
+
+```bash
+almide install github.com/almide/<repo>          # 既定のブランチの最新コミット
+almide install <spec> --tag v1.2.0               # タグ
+almide install ./path/to/project                 # ローカルのディレクトリ
+almide install <spec> --name tool --bin-dir ~/bin
+```
+
+パッケージを取得し、そのパッケージをルートプロジェクトとして `--release` でビルドして、bin ディレクトリ
+（`--bin-dir`、`ALMIDE_INSTALL`、既定 `~/.local/bin` の順）に置く。
+
+- **信頼**（#4184）: 取得元の持ち主（`host/owner`）は、既定で信頼される `github.com/almide` か、
+  `--trust <owner>` で名指ししたものに限る。それ以外は**取得する前に**拒否する。`almide add` と同じ規則。
+  ローカルのディレクトリには信頼は要らない。
+- **ネイティブコード**（#4184）: パッケージ自身のネイティブコード（`native/` の Rust、`[native-deps]`
+  のクレートとその build script、`@extern(rust|c)`）は、ビルド時に利用者の権限で動く。
+  `[permissions] native` が見るのは依存だけなので、install はそれを列挙し、`--allow-native`
+  が無ければ拒否する。純 Almide のパッケージはフラグ無しで入る。
+- **置き場所**（#4183）: 名前（`[package] name` か `--name`）は 1 つの素の識別子
+  （英字・数字・`_`、数字で始まらない）でなければならない。出力は bin ディレクトリ内の一時名に作ってから
+  rename で置くので、宛先の symlink の先には決して書かない。almide が入れていない既存のファイル
+  （bin ディレクトリの `.almide-installed` に記録が無いもの）や symlink は、`--force` が無ければ置き換えない。
+
+テスト: `tests/install_destination_test.rs`、`tests/install_native_gate_test.rs`
+
 ### `almide deps`
 
 依存パッケージの一覧を表示。依存を取得し、各パッケージ(直接依存の後に、それらを通じて
