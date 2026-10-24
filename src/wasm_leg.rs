@@ -300,6 +300,15 @@ fn link_self_host(
                         if module.as_str() == "string" && func.as_str() == "from_bytes" {
                             out.insert("bytes.to_string_lossy".to_string());
                         }
+                        // value.object and the key renames box their pairs
+                        // through the linked `__vu_fold_pairs` (C-401: one
+                        // entry per key), which lives in value_utils — linked
+                        // through its registered surface value.pick.
+                        if module.as_str() == "value"
+                            && matches!(func.as_str(), "object" | "to_camel_case" | "to_snake_case")
+                        {
+                            out.insert("value.pick".to_string());
+                        }
                         // testing.assert_contains lowers as a native arm
                         // over the linked string.contains (#2743).
                         if module.as_str() == "testing" && func.as_str() == "assert_contains" {

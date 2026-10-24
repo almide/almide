@@ -107,6 +107,12 @@ impl Emitter<'_> {
                 if !ok {
                     return Err(EmitError::Unsupported("value.object-el".into()));
                 }
+                // No Object holds a key twice (C-401): the pair list goes
+                // through the self-host fold (first position, last value)
+                // before it is boxed; the fold takes the retained list and
+                // answers an owned one.
+                let fold = self.value_fold_helper()?;
+                self.f.instructions().call(fold);
                 self.emit_value_box(VT_OBJECT, Some(STR))?;
                 Some(Lowered::owned(SliceTy::Value))
             }
@@ -156,8 +162,19 @@ impl Emitter<'_> {
             .i32_const(VT_OBJECT)
             .i32_ne()
             .if_(BlockType::Result(wasm_encoder::ValType::I32));
-        i.local_get(hv).call(F_INC);
-        i.local_get(hv);
+        if keep_found == 1 {
+            // pick: a non-object has none of the keys, so it picks to the
+            // empty object (C-401) — never the value back whole.
+            i.i32_const(0).call(F_ALLOC).local_set(ho);
+            i.local_get(ho).i32_const(0).i32_store(len_memarg());
+            i.i32_const(16).call(F_ALLOC).local_set(hp);
+            i.local_get(hp).i32_const(VT_OBJECT).i32_store(slot_memarg(almide_layout::SUM_TAG));
+            i.local_get(hp).local_get(ho).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+            i.local_get(hp);
+        } else {
+            i.local_get(hv).call(F_INC);
+            i.local_get(hv);
+        }
         i.else_();
         i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD)).local_set(hp);
         i.local_get(hp).i32_load(len_memarg()).call(F_ALLOC).local_set(ho);
@@ -193,6 +210,19 @@ impl Emitter<'_> {
         Ok(SliceTy::Value)
     }
 
+    /// `__vu_fold_pairs` (stdlib/value_utils.almd): the duplicate-key fold
+    /// every Object construction goes through (C-401).
+    fn value_fold_helper(&mut self) -> Result<u32, EmitError> {
+        let Some(hi) = self.selfhost_helper("__vu_fold_pairs") else {
+            return Err(EmitError::Unsupported("value.object:unlinked:__vu_fold_pairs".into()));
+        };
+        if let Some(r) = &self.table.infos[hi].refuse {
+            return Err(EmitError::Unsupported(format!("call-fn:__vu_fold_pairs:{r}")));
+        }
+        self.calls.insert(hi);
+        Ok(self.table.infos[hi].wasm_index)
+    }
+
     /// A self-host module's PRIVATE helper by unique `.name` suffix —
     /// registry modules carry ordinal names (`__selfhost_N`), so the
     /// qualified key is not spellable up front. Ambiguity walls.
@@ -221,6 +251,8 @@ impl Emitter<'_> {
         }
         let transform = self.table.infos[hi].wasm_index;
         self.calls.insert(hi);
+        // Two keys that rename to one fold as value.object folds them (C-401).
+        let fold = self.value_fold_helper()?;
         self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
         let hv = self.hold_i32()?;
         self.f.instructions().local_set(hv);
@@ -260,6 +292,7 @@ impl Emitter<'_> {
         i.local_get(hw).i32_const(4).i32_add().local_set(hw);
         i.br(0).end().end();
         i.local_get(ho).local_get(hw).i32_store(len_memarg());
+        i.local_get(ho).call(fold).local_set(ho);
         // box a fresh Object value
         i.i32_const(16).call(F_ALLOC).local_set(hp);
         i.local_get(hp).i32_const(VT_OBJECT).i32_store(slot_memarg(almide_layout::SUM_TAG));
