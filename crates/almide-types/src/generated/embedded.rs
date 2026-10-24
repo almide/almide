@@ -42470,6 +42470,8 @@ fn __sum(xs: List[UInt64]) -> UInt64 = {
 fn __product(xs: List[UInt64]) -> UInt64 = {
   let one: UInt64 = 1
   list.fold(xs, one, (a, b) => a * b)
+}
+
 
 local fn is_ascii_ws(c: String) -> Bool = match c {
   " " | "\t" | "\n" | "\r" => true,
