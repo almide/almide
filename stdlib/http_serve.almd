@@ -18,6 +18,8 @@
 // embedded host (crates/almide-wasm-run/src/host_serve.rs). The response
 // crosses as http_framed cells `<char count>\n<payload>`: status, body, then
 // each header name and value.
+import hash
+
 effect fn __http_serve_bind(port: String) -> Result[Unit, String] = _
 
 effect fn __http_serve_next() -> Result[List[String], String] = _
@@ -85,9 +87,27 @@ fn __hs_owned(k: String) -> Bool = list.contains(
   string.to_lower(k),
 )
 
-fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_pairs(resp) |> list.filter(((k, _)) => not __hs_owned(k)) |> list.flat_map(((k, v)) => [k, v]))
+// The core's secure default (C-407): `X-Content-Type-Options: nosniff` is
+// added unless the handler set the field.
+fn __hs_nosniff(pairs: List[(String, String)]) -> List[(String, String)] = if pairs |> list.any(((k, _)) => string.to_lower(k) == "x-content-type-options") then pairs
+else pairs + [("X-Content-Type-Options", "nosniff")]
 
-// A handler err is native's 500: `Internal error: <msg>` as text/plain.
+fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_nosniff(__hs_pairs(resp) |> list.filter(((k, _)) => not __hs_owned(k))) |> list.flat_map(((k, v)) => [k, v]))
+
+// A handler err is native's 500 (C-409, #4150): the client gets the fixed
+// body `Internal Server Error (request <id>)` and stderr gets `http.serve:
+// request <id>: handler error: <the err, quoted>` — the core's
+// http_server_handler_error_body / _line texts. The id is 8 lowercase hex
+// digits of hash.fnv1a32(method + " " + target + "\n" + body), the core's
+// http_server_request_id, so a stock export instance that sees one request
+// names it as native does. A refused response is the fixed body
+// `Internal Server Error`. TODO(#4126): share that issue's escaping once it
+// lands.
+fn __hs_request_id(raw: List[String]) -> String = string.pad_start(
+  int.to_hex(hash.fnv1a32((list.get(raw, 0) ?? "") + " " + (list.get(raw, 1) ?? "") + "\n" + (list.get(raw, 2) ?? ""))),
+  8,
+  "0",
+)
 // `http.serve` is typed never-err (`-> Unit`), so its caller's `!` is a no-op
 // (#1049) and nothing could observe a returned err: a bind failure ABORTS,
 // `Error: bind failed: <os message>` and exit 1, as the native runtime does.
@@ -108,16 +128,20 @@ effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Uni
       let req = __hs_request(raw)
       let resp = match f(req) {
         ok(r) => r,
-        err(e) => ["500", "Internal error: ${e}", "Content-Type", "text/plain"],
+        err(e) => {
+          let id = __hs_request_id(raw)
+          eprintln("http.serve: request ${id}: handler error: ${__hs_quote(e)}")
+          ["500", "Internal Server Error (request ${id})", "Content-Type", "text/plain"]
+        },
       }
       let answer = match __hs_refusal(resp) {
         some(why) => {
           eprintln("http.serve: refused the response: ${why}")
-          ["500", "Internal error: ${why}", "Content-Type", "text/plain"]
+          ["500", "Internal Server Error", "Content-Type", "text/plain"]
         },
-        none => __hs_shaped(resp),
+        none => resp,
       }
-      __http_serve_reply(__hs_frame(answer))!
+      __http_serve_reply(__hs_frame(__hs_shaped(answer)))!
     }
   }
 }
