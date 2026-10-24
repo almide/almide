@@ -116,8 +116,8 @@
 | [ALS-R2](./runtime.md#als-r2-補間の表示形) | 補間の表示形 | C-008, C-009, C-010, C-011, C-222 |
 | [ALS-R3](./runtime.md#als-r3-fan-並行コンビネータの決定性) | fan 並行コンビネータの決定性 | C-004, C-005, C-006, C-199, C-321, C-349, C-386 |
 | [ALS-R4](./runtime.md#als-r4-非有限浮動小数の定数表示) | 非有限浮動小数の定数表示 | C-012 |
-| [ALS-R5](./runtime.md#als-r5-プロセス環境) | プロセス環境 | C-096, C-112, C-118, C-133, C-189, C-214, C-215, C-290, C-327, C-330, C-328, C-329, C-331, C-366, C-367, C-370, C-374, C-375, C-377, C-378, C-379, C-382, C-383, C-385 |
-| [ALS-R6](./runtime.md#als-r6-ファイルシステムのパス解決) | ファイルシステムのパス解決 | C-042, C-137, C-220, C-225, C-227, C-228, C-229, C-230, C-270, C-272, C-273, C-278, C-282, C-283, C-284 |
+| [ALS-R5](./runtime.md#als-r5-プロセス環境) | プロセス環境 | C-096, C-112, C-118, C-133, C-189, C-214, C-215, C-290, C-327, C-330, C-328, C-329, C-331, C-366, C-367, C-370, C-374, C-375, C-377, C-378, C-379, C-382, C-383, C-385, C-389, C-390, C-415, C-416, C-418, C-419 |
+| [ALS-R6](./runtime.md#als-r6-ファイルシステムのパス解決) | ファイルシステムのパス解決 | C-042, C-137, C-220, C-225, C-227, C-228, C-229, C-230, C-270, C-272, C-273, C-278, C-282, C-283, C-284, C-392, C-393 |
 | [ALS-R7](./runtime.md#als-r7-ストリーミング行走査の可謬コールバック) | ストリーミング行走査の可謬コールバック | C-274, C-335 |
 | [ALS-R8](./runtime.md#als-r8-http-レスポンスヘッダの規範) | HTTP レスポンスヘッダの規範 | C-275, C-368 |
 | [ALS-R9](./runtime.md#als-r9-プロセス終了コードの値域) | プロセス終了コードの値域 | C-350, C-351 |
@@ -158,16 +158,16 @@
 | ID | Section | Contracts |
 |----|---------|-----------|
 | [ALS-T1](./text-and-numbers.md#als-t1-stringtrim) | `string.trim` | C-021, C-294 |
-| [ALS-T2](./text-and-numbers.md#als-t2-floatparse) | `float.parse` | C-024, C-210, C-300, C-301 |
-| [ALS-T3](./text-and-numbers.md#als-t3-jsonparse) | `json.parse` | C-087, C-298, C-299 |
+| [ALS-T2](./text-and-numbers.md#als-t2-floatparse) | `float.parse` | C-024, C-210, C-300, C-301, C-413 |
+| [ALS-T3](./text-and-numbers.md#als-t3-jsonparse) | `json.parse` | C-087, C-298, C-299, C-391 |
 | [ALS-T4](./text-and-numbers.md#als-t4-listchunk--listwindows) | `list.chunk` / `list.windows` | C-129, C-171 |
-| [ALS-T5](./text-and-numbers.md#als-t5-stringto_upper--stringto_lower) | `string.to_upper` / `string.to_lower` | C-020, C-162 |
+| [ALS-T5](./text-and-numbers.md#als-t5-stringto_upper--stringto_lower) | `string.to_upper` / `string.to_lower` | C-020, C-162, C-412, C-417 |
 | [ALS-T6](./text-and-numbers.md#als-t6-整数演算の終了規約（termination-convention）) | 整数演算の終了規約（termination convention） | C-001, C-002, C-047, C-067, C-154, C-155, C-161, C-169, C-184, C-196, C-197, C-198, C-200, C-219, C-353 |
 | [ALS-T7](./text-and-numbers.md#als-t7-トップレベル-let-の評価時機) | トップレベル let の評価時機 | C-007, C-077, C-111 |
 | [ALS-T8](./text-and-numbers.md#als-t8-整数パースの文法とエラー規範) | 整数パースの文法とエラー規範 | C-028, C-029 |
 | [ALS-T9](./text-and-numbers.md#als-t9-固定小数表示) | 固定小数表示 | C-025 |
 | [ALS-T10](./text-and-numbers.md#als-t10-数学関数の決定性) | 数学関数の決定性 | C-026, C-051, C-134 |
-| [ALS-T11](./text-and-numbers.md#als-t11-バイナリテキスト符号化) | バイナリテキスト符号化 | C-027, C-030 |
+| [ALS-T11](./text-and-numbers.md#als-t11-バイナリテキスト符号化) | バイナリテキスト符号化 | C-027, C-030, C-411 |
 | [ALS-T12](./text-and-numbers.md#als-t12-非-abort-整数除算の一致) | 非 abort 整数除算の一致 | C-003 |
 | [ALS-T13](./text-and-numbers.md#als-t13-浮動小数の文字列化) | 浮動小数の文字列化 | C-023 |
 | [ALS-T14](./text-and-numbers.md#als-t14-wrap--rotate-のマスク飽和) | wrap / rotate のマスク飽和 | C-048 |
@@ -180,9 +180,9 @@
 | [ALS-T21](./text-and-numbers.md#als-t21-非正規数の保存) | 非正規数の保存 | C-304 |
 | [ALS-T22](./text-and-numbers.md#als-t22-超越関数の誤差上限) | 超越関数の誤差上限 | C-305 |
 | [ALS-T23](./text-and-numbers.md#als-t23-符号付きゼロ) | 符号付きゼロ | C-306, C-355 |
-| [ALS-T24](./text-and-numbers.md#als-t24-float-→-int-変換) | Float → Int 変換 | C-307, C-338, C-341 |
+| [ALS-T24](./text-and-numbers.md#als-t24-float-→-int-変換) | Float → Int 変換 | C-307, C-338, C-341, C-414 |
 | [ALS-T25](./text-and-numbers.md#als-t25-matrix-の超越計算と積の順序) | matrix の超越計算と積の順序 | C-223 |
-| [ALS-T26](./text-and-numbers.md#als-t26-datetime-の暦フィールドと-parse_iso-の文法) | datetime の暦フィールドと parse_iso の文法 | C-359, C-360 |
+| [ALS-T26](./text-and-numbers.md#als-t26-datetime-の暦フィールドと-parse_iso-の文法) | datetime の暦フィールドと parse_iso の文法 | C-359, C-360, C-410 |
 | [ALS-T27](./text-and-numbers.md#als-t27-urlparse-の-authority-規範) | url.parse の authority 規範 | C-361 |
 | [ALS-T28](./text-and-numbers.md#als-t28-float32-演算の-binary32-丸め) | Float32 演算の binary32 丸め | C-371 |
 | [ALS-T29](./text-and-numbers.md#als-t29-float32-の表示) | Float32 の表示 | C-372 |
