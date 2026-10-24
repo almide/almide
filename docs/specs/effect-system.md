@@ -461,7 +461,7 @@ The `[permissions]` section in `almide.toml` restricts which effect categories a
 
 ```toml
 [permissions]
-allow = ["IO", "Net"]
+allow = ["FS.read", "IO", "Net.fetch"]
 ```
 
 If `[permissions]` is absent or `allow` is empty, all capabilities are permitted (backwards compatible).
@@ -472,40 +472,55 @@ A multi-line array used to read as empty, which permitted everything.
 
 ### Effect categories
 
-The `EffectInferencePass` classifies each call into one of six categories. The
-classification is one table, `STDLIB_MODULE_EFFECTS` in
-`crates/almide-ir/src/effect.rs`; a gate beside it refuses a stdlib module with
-no row, and an `@intrinsic` whose runtime symbol classifies unlike the function
-that declares it (#3246).
+Categories are ADR-0026 D2's closed two-level hierarchy (#4155). Inference and
+`[permissions]` work in **leaves**; a manifest may grant a **parent**, which
+means the leaves listed under it here — a leaf added later does not join a
+parent on its own.
 
-| Category | What carries it |
-|----------|-----------------|
-| `IO` | `fs`, `io` (files and the standard streams) |
-| `Net` | `net`, and the `effect fn`s of `http` (its builders and router are pure) |
-| `Env` | `env`, `process`, `args` |
-| `Time` | the `effect fn`s of `datetime` (`now`, `monotonic_ns`); the calendar math is pure |
-| `Rand` | `random` |
-| `Fan` | `fan` |
+| Parent | Leaves | What carries them |
+|--------|--------|-------------------|
+| `FS` | `FS.read`, `FS.write` | `fs`: reading and listing is `FS.read`; writing, removing, renaming, creating is `FS.write` (`fs.copy` both) |
+| `Net` | `Net.fetch`, `Net.listen` | `http`'s `effect fn`s are `Net.fetch`, `http.serve` `Net.listen`; `net.tcp_connect` / `unix_connect` `Net.fetch`, the listen/accept fns `Net.listen`, and an operation on an open stream or a shared-memory region both (it cannot tell which side opened it) |
+| `IO` | `IO.stdin`, `IO.stdout`, `IO.stderr` | the `io` readers are `IO.stdin`, `io.print` / `write` / `write_bytes` and `println` are `IO.stdout`, `eprintln` is `IO.stderr` |
+| `Env` | `Env.read`, `Env.write` | `env` and `args` read (`Env.read`); `env.set` writes (`Env.write`); `process.args` / `pid` / `env` read |
+| — | `Proc` | starting and signalling a process: `process.exec` and friends, `kill`, `is_alive`. No parent grants it: a started command can reach every other capability |
+| — | `Time` | the clock: `datetime.now` / `monotonic_ns`, `env.millis` / `unix_timestamp` / `sleep_ms`, `process.sleep` |
+| — | `Rand` | `random` |
+| — | `Fan` | `fan` |
+| — | `Abort` | `panic`, a failing `assert*`, `process.exit` (`panic` and a failing assert also write `IO.stderr`) |
 
-Every other stdlib module — `path`, `url`, `json`, `regex`, `zlib`, the
-collections and numerics — carries no category.
+A module's row in `STDLIB_MODULE_EFFECTS` (`crates/almide-ir/src/effect.rs`)
+is its default; a function whose operation differs declares its own leaves on
+its declaration, `@category("FS.write")`. The gate beside the table refuses a
+stdlib module with no row, an `@intrinsic` whose runtime symbol classifies
+unlike the function that declares it (#3246), a `@category` naming no leaf,
+and an `effect fn` of a classified module with no category.
 
-A call to an **`@extern` fn is every category** (⊤, #3245). Its body is foreign,
-inference cannot see into it, and no bound can be declared on it yet (ADR-0027
-§5 proposes one), so it passes `[permissions]` only when `allow` lists all six.
+`path`, `url`, `json`, `regex`, `zlib`, the collections and numerics carry
+none. A call to an **`@extern` fn is every leaf** (⊤, #3245): its body is
+foreign, so it passes `[permissions]` only when `allow` grants all fourteen.
 
-Tests: `tests/effect_permissions_test.rs`; the table's gate is the
-`classification_gate` module in `crates/almide-ir/src/effect.rs`.
+**Since dialect epoch 15** `IO` no longer covers files (they are `FS`), `Env`
+no longer admits starting a process (it is `Proc`), and the output and abort
+builtins carry `IO.stdout` / `IO.stderr` / `Abort`. A refused leaf the old
+name would have covered prints a `note:` naming the new one.
+
+`[permissions].allow` granting `Proc` with no `proc = [...]` command list
+(ADR-0025) is a warning on every route — the program may start any command —
+and an error under `almide check --profile critical`.
+
+Tests: `tests/effect_permissions_test.rs`, `tests/proc_category_test.rs`; the
+table's gate is the `classification_gate` module in `crates/almide-ir/src/effect.rs`.
 
 ### Unknown names
 
-`allow` accepts exactly these six names. Any other name, including a
-different case (`io`), is an error on the manifest line that writes it, before
-any command runs (#3247):
+`allow` accepts exactly the four parents and the fourteen leaves. Any other
+name, including a different case (`io`), is an error on the manifest line that
+writes it, before any command runs (#3247):
 
 ```
-error: almide.toml:6: unknown capability `Fil` in [permissions].allow — grantable capabilities are IO, Net, Env, Time, Rand, Fan
-  hint: did you mean `IO`?
+error: almide.toml:6: unknown capability `Fil` in [permissions].allow — grantable capabilities are FS, Net, IO, Env, FS.read, FS.write, Net.fetch, Net.listen, IO.stdin, IO.stdout, IO.stderr, Env.read, Env.write, Proc, Time, Rand, Fan, Abort
+  hint: did you mean `FS`?
 ```
 
 The hint names the nearest capability, the same way `almide check --profile
@@ -529,10 +544,10 @@ allow = ["IO"]
 // file: main.almd
 import http
 
-// This function uses Net (http.get) -> build error
+// This function uses Net.fetch (http.get) -> build error
 effect fn fetch() -> Result[String, String] = http.get("https://example.com")
 //   error: capability violation in `fetch`
-//     Net is not in [permissions].allow
+//     Net.fetch is not in [permissions].allow
 ```
 
 The gate runs after codegen: `almide check` and `almide test` accept the file,
@@ -622,10 +637,10 @@ written:
   without `IO` built it. A stdlib fn taken as a value carries its category.
 
 ```
-  call_box  → {IO}
-  make  → {} (effect fn); returns a closure doing {IO}
+  call_box  → {FS.read}
+  make  → {} (effect fn); returns a closure doing {FS.read}
   use_it  → {} + whatever f (arg 1) does
-  main  → {IO} (effect fn)
+  main  → {FS.read, IO.stdout} (effect fn)
 ```
 
 `[permissions].allow` is checked on these sets, so a violation names the
@@ -636,7 +651,7 @@ pooled value) the next step is prefixed `e.g.`:
 
 ```
 error: capability violation in `main`
-  IO is not in [permissions].allow
+  FS.read is not in [permissions].allow
   path: main → use_it → f (arg 1 of use_it) → closure (line 3:42 in make) → fs.read_text (line 3:49)
 ```
 

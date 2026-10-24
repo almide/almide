@@ -601,18 +601,19 @@ pub fn unknown_capability_message(name: &str, site: &str, grantable: &[&str]) ->
 /// matcher every enforcement path uses (`almide check`, `check --effects`,
 /// `build` / `run`), so the vocabulary is `Effect::ALL` and cannot drift
 /// between copies again. An unknown name is an error, never dropped (#3247).
+///
+/// A name is an ADR-0026 D2 leaf (`FS.read`, `Proc`) or one of the four
+/// parents (`FS`, `Net`, `IO`, `Env`), which grants its leaves (#4155).
 pub fn allowed_effects(allow: &[String]) -> Result<std::collections::HashSet<almide_ir::effect::Effect>, String> {
     use almide_ir::effect::Effect;
-    allow
-        .iter()
-        .map(|name| {
-            Effect::from_name(name).ok_or_else(|| {
-                let names: Vec<String> = Effect::ALL.iter().map(|e| e.to_string()).collect();
-                let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-                unknown_capability_message(name, "[permissions].allow", &refs)
-            })
-        })
-        .collect()
+    let mut out = std::collections::HashSet::new();
+    for name in allow {
+        let leaves = Effect::granted_by(name).ok_or_else(|| {
+            unknown_capability_message(name, "[permissions].allow", &Effect::grantable_names())
+        })?;
+        out.extend(leaves);
+    }
+    Ok(out)
 }
 
 /// Refuse an `almide.toml` before any command runs (#2583, #3247, #3253): a

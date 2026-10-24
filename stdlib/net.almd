@@ -13,6 +13,7 @@ type TcpListener = Int
 // ── Connect ──
 /// Connected stream handle; err if refused.
 @intrinsic("almide_rt_net_tcp_connect")
+@category("Net.fetch")
 effect fn tcp_connect(host: String, port: Int) -> Result[Int, String] = _
 
 // ── Read / Write ──
@@ -55,31 +56,38 @@ effect fn tcp_available(stream: Int) -> Result[Int, String] = _
 // ── Server ──
 /// Listener bound to host:port; err if in use.
 @intrinsic("almide_rt_net_tcp_listen")
+@category("Net.listen")
 effect fn tcp_listen(host: String, port: Int) -> Result[Int, String] = _
 
 /// The port a listener is bound to: the one the OS chose when it listened on port 0.
 @intrinsic("almide_rt_net_tcp_local_port")
+@category("Net.listen")
 effect fn tcp_local_port(listener: Int) -> Result[Int, String] = _
 
 /// Blocks for the next client; its stream handle.
 @intrinsic("almide_rt_net_tcp_accept")
+@category("Net.listen")
 effect fn tcp_accept(listener: Int) -> Result[Int, String] = _
 
 /// Stops listening; closing twice is ok.
 @intrinsic("almide_rt_net_tcp_close_listener")
+@category("Net.listen")
 effect fn tcp_close_listener(listener: Int) -> Result[Unit, String] = _
 
 // ── Unix-domain sockets ──
 /// Stream socket connected to the listener at path; its descriptor.
 @intrinsic("almide_rt_net_unix_connect")
+@category("Net.fetch")
 effect fn unix_connect(path: String) -> Result[Int, String] = _
 
 /// Listener bound at path, which must not exist yet.
 @intrinsic("almide_rt_net_unix_listen")
+@category("Net.listen")
 effect fn unix_listen(path: String) -> Result[Int, String] = _
 
 /// Blocks for the next connection; its descriptor.
 @intrinsic("almide_rt_net_unix_accept")
+@category("Net.listen")
 effect fn unix_accept(listener: Int) -> Result[Int, String] = _
 
 /// Sends all of data, the descriptors fds riding with its first byte.

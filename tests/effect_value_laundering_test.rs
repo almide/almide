@@ -10,8 +10,8 @@
 //! - the pure form is refused (E006 at a call that names the effect fn, E109
 //!   where only the value flow sees it), and no route reads the file;
 //! - the effect form under `allow = ["Time"]` is a capability violation
-//!   naming `IO`, and no route reads the file;
-//! - the control: the same effect form under `allow = ["Time", "IO"]` checks,
+//!   naming `FS.read`, and no route reads the file;
+//! - the control: the same effect form under `allow = ["Time", "FS", "IO"]` checks,
 //!   and does read the file — so each refusal above is about the shape, not a
 //!   program that could not have read anything.
 
@@ -127,7 +127,7 @@ fn permissions_see_a_category_carried_by_a_fn_value() {
     for &(shape, _, _, effect) in SHAPES {
         let td = tempfile::TempDir::new().unwrap();
         project(td.path(), Some("\"Time\""), effect);
-        refused_everywhere(td.path(), shape, "IO is not in [permissions].allow");
+        refused_everywhere(td.path(), shape, "FS.read is not in [permissions].allow");
     }
 }
 
@@ -137,14 +137,14 @@ fn permissions_see_a_category_carried_by_a_fn_value() {
 fn the_effect_forms_read_the_file_when_io_is_granted() {
     for &(shape, _, _, effect) in SHAPES {
         let td = tempfile::TempDir::new().unwrap();
-        project(td.path(), Some("\"Time\", \"IO\""), effect);
+        project(td.path(), Some("\"Time\", \"FS\", \"IO\""), effect);
         let check = almide(td.path(), &["check", "main.almd"]);
         assert!(check.status.success(), "{shape}: check refused the granted form:\n{}", text(&check));
         let run = almide(td.path(), &["run", "main.almd", "--target", "wasm"]);
         assert!(run.status.success() && text(&run).contains(SECRET), "{shape}: wasm run did not read the file:\n{}", text(&run));
     }
     let td = tempfile::TempDir::new().unwrap();
-    project(td.path(), Some("\"Time\", \"IO\""), SHAPES[2].3);
+    project(td.path(), Some("\"Time\", \"FS\", \"IO\""), SHAPES[2].3);
     let run = almide(td.path(), &["run", "main.almd"]);
     assert!(run.status.success() && text(&run).contains(SECRET), "native run did not read the file:\n{}", text(&run));
 }

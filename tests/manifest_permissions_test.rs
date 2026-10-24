@@ -47,7 +47,7 @@ fn an_unknown_name_is_refused_on_its_manifest_line_by_every_command() {
         assert!(!ok, "`almide {}` accepted `Fil`:\n{stderr}", args.join(" "));
         assert!(
             stderr.contains("almide.toml:6: unknown capability `Fil` in [permissions].allow")
-                && stderr.contains("grantable capabilities are IO, Net, Env, Time, Rand, Fan")
+                && stderr.contains("grantable capabilities are FS, Net, IO, Env, FS.read, FS.write, Net.fetch")
                 && stderr.contains("hint: did you mean"),
             "`almide {}` should name the line, the name and the vocabulary:\n{stderr}",
             args.join(" ")
@@ -76,22 +76,28 @@ fn log_is_not_a_capability() {
 /// program is then judged against it as before.
 #[test]
 fn every_valid_name_still_passes() {
-    let dir = project("valid", "\"IO\", \"Net\", \"Env\", \"Time\", \"Rand\", \"Fan\"");
+    let dir = project("valid", "\"FS\", \"Net\", \"IO\", \"Env\", \"Time\", \"Rand\", \"Fan\", \"Abort\"");
     let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
-    assert!(ok, "the full vocabulary was refused:\n{stderr}");
+    assert!(ok, "the parents and the parentless leaves were refused:\n{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
 
-    // A valid manifest that does not grant IO still refuses the read — the
+    // The leaves the program reaches, named one by one (ADR-0026 D2, #4155).
+    let dir = project("valid-leaves", "\"FS.read\", \"IO.stdout\"");
+    let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
+    assert!(ok, "the exact leaves were refused:\n{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // A valid manifest that does not grant FS still refuses the read — the
     // enforcement itself is unchanged.
     let dir = project("valid-narrow", "\"Net\"");
     let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
-    assert!(!ok && stderr.contains("IO is not in [permissions].allow"), "{stderr}");
+    assert!(!ok && stderr.contains("FS.read is not in [permissions].allow"), "{stderr}");
     assert!(!stderr.contains("unknown capability"), "{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
 
     // `proc` (#2589) lists commands, not capabilities: the name gate leaves
     // it alone.
-    let dir = project("valid-proc", "\"IO\"]\nproc = [\"git\", \"my-tool\"");
+    let dir = project("valid-proc", "\"FS\", \"IO\"]\nproc = [\"git\", \"my-tool\"");
     let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
     assert!(ok, "a proc list was judged as capability names:\n{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
@@ -122,7 +128,7 @@ fn critical_allow_suggests_the_nearest_capability() {
 // names was judged. It is the `toml` crate now.
 
 /// A scratch project whose `[permissions]` table is `permissions` verbatim,
-/// with a main that reads a file (`IO`) and runs `git` (`Env`, `proc`).
+/// with a main that reads a file (`FS.read`) and prints (`IO.stdout`).
 fn raw_project(tag: &str, permissions: &str, main: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("almide-issue3253-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -144,11 +150,11 @@ fn a_multi_line_allow_is_the_narrow_grant_it_spells() {
     let dir = raw_project("narrow", allow, READS_A_FILE);
     let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
     assert!(!ok, "a multi-line `Net` grant admitted a file read:\n{stderr}");
-    assert!(stderr.contains("IO is not in [permissions].allow"), "{stderr}");
+    assert!(stderr.contains("FS.read is not in [permissions].allow"), "{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
 
-    // The same grant widened to IO on its own line admits it.
-    let dir = raw_project("narrow-io", "allow = [\n  \"Net\",\n  \"IO\",\n]", READS_A_FILE);
+    // The same grant widened to FS and IO on their own lines admits it.
+    let dir = raw_project("narrow-io", "allow = [\n  \"Net\",\n  \"FS\",\n  \"IO\",\n]", READS_A_FILE);
     let (ok, stderr) = almide(&dir, &["check", "main.almd"]);
     assert!(ok, "a multi-line grant naming IO refused the read:\n{stderr}");
     let _ = std::fs::remove_dir_all(&dir);
@@ -175,7 +181,7 @@ fn an_unknown_name_in_a_multi_line_allow_is_refused_on_its_line() {
 /// static gate, `make` is refused by name.
 #[test]
 fn a_multi_line_proc_list_is_the_list_it_spells() {
-    let permissions = "allow = [\"Env\"]\nproc = [\n  \"git\",  # version control\n  \"cargo\",\n]";
+    let permissions = "allow = [\"Proc\", \"IO\"]\nproc = [\n  \"git\",  # version control\n  \"cargo\",\n]";
     let listed = "import process\n\neffect fn main() -> Unit = {\n  let out = process.exec(\"git\", [\"--version\"])!\n  println(out)\n}\n";
     let dir = raw_project("proc-ok", permissions, listed);
     let (ok, stderr) = almide(&dir, &["check", "main.almd"]);

@@ -4246,6 +4246,7 @@ pub const SRC_ENV: &str = r#"
 
 /// Wall-clock seconds since the Unix epoch.
 @intrinsic("almide_rt_env_unix_timestamp")
+@category("Time")
 effect fn unix_timestamp() -> Int = _
 
 /// Program arguments, argv[0] excluded.
@@ -4259,6 +4260,7 @@ effect fn get(name: String) -> String? = _
 /// Sets name for this process and later spawns.
 @ordered
 @intrinsic("almide_rt_env_set")
+@category("Env.write")
 effect fn set(name: String, value: String) -> Unit = _
 
 /// Absolute current directory; err if unreadable.
@@ -4267,10 +4269,12 @@ effect fn cwd() -> Result[String, String] = _
 
 /// Wall-clock ms since the Unix epoch.
 @intrinsic("almide_rt_env_millis")
+@category("Time")
 effect fn millis() -> Int = _
 
 /// Blocks ms milliseconds; a negative ms hangs.
 @intrinsic("almide_rt_env_sleep_ms")
+@category("Time")
 effect fn sleep_ms(ms: Int) -> Unit = _
 
 /// Host temp dir; may end with /.
@@ -6844,26 +6848,31 @@ effect fn read_bytes(path: String) -> Result[List[Int], String] = _
 /// Overwrites or creates; err if no parent dir.
 @ordered
 @intrinsic("almide_rt_fs_write")
+@category("FS.write")
 effect fn write(path: String, content: String) -> Result[Unit, String] = _
 
 /// Writes low byte of each Int (-1 -> 255).
 @ordered
 @intrinsic("almide_rt_fs_write_bytes")
+@category("FS.write")
 effect fn write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = _
 
 /// Writes data verbatim, replacing the file.
 @ordered
 @intrinsic("almide_rt_fs_write_bytes_raw")
+@category("FS.write")
 effect fn write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Appends content; creates the file if missing.
 @ordered
 @intrinsic("almide_rt_fs_append")
+@category("FS.write")
 effect fn append(path: String, content: String) -> Result[Unit, String] = _
 
 /// Creates dir and parents; ok if it exists.
 @ordered
 @intrinsic("almide_rt_fs_mkdir_p")
+@category("FS.write")
 effect fn mkdir_p(path: String) -> Result[Unit, String] = _
 
 /// False if missing or a dangling symlink.
@@ -6958,6 +6967,7 @@ effect fn read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = _
 /// Deletes a file or empty dir; err if missing.
 @ordered
 @intrinsic("almide_rt_fs_remove")
+@category("FS.write")
 effect fn remove(path: String) -> Result[Unit, String] = _
 
 /// Sorted names (not paths); err if not a dir.
@@ -6975,11 +6985,13 @@ effect fn is_file(path: String) -> Bool = _
 /// Copies src to dst; overwrites dst.
 @ordered
 @intrinsic("almide_rt_fs_copy")
+@category("FS.read", "FS.write")
 effect fn copy(src: String, dst: String) -> Result[Unit, String] = _
 
 /// Moves src to dst; replaces an existing dst.
 @ordered
 @intrinsic("almide_rt_fs_rename")
+@category("FS.write")
 effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
 
 /// Sorted paths below dir, recursive; dirs too.
@@ -6989,6 +7001,7 @@ effect fn walk(dir: String) -> Result[List[String], String] = _
 /// Deletes a tree or file; err if missing.
 @ordered
 @intrinsic("almide_rt_fs_remove_all")
+@category("FS.write")
 effect fn remove_all(path: String) -> Result[Unit, String] = _
 
 /// Size in bytes; err if missing.
@@ -7013,11 +7026,13 @@ effect fn glob(pattern: String) -> Result[List[String], String] = _
 /// New empty file temp_dir/prefix+nanos; its path.
 @ordered
 @intrinsic("almide_rt_fs_create_temp_file")
+@category("FS.write")
 effect fn create_temp_file(prefix: String) -> Result[String, String] = _
 
 /// New dir temp_dir/prefix+nanos; its path.
 @ordered
 @intrinsic("almide_rt_fs_create_temp_dir")
+@category("FS.write")
 effect fn create_temp_dir(prefix: String) -> Result[String, String] = _
 
 /// True for a symlink, even a dangling one.
@@ -7104,6 +7119,7 @@ effect fn root_read_bytes(root: FsRoot, path: String) -> Result[Bytes, String] =
 
 /// write of content to path inside root; err if it escapes.
 @ordered
+@category("FS.write")
 effect fn root_write_text(root: FsRoot, path: String, content: String) -> Result[Unit, String] = write(
   __root_resolve(root, path)!,
   content,
@@ -7117,6 +7133,7 @@ effect fn root_exists(root: FsRoot, path: String) -> Result[Bool, String] = ok(f
 
 /// remove of path inside root; err if it escapes.
 @ordered
+@category("FS.write")
 effect fn root_remove(root: FsRoot, path: String) -> Result[Unit, String] = remove(__root_resolve(root, path)!)
 "#;
 pub const SRC_FS_APPEND: &str = r#"
@@ -9450,6 +9467,7 @@ import json
 /// Serves 0.0.0.0:port forever; handler err is a 500.
 @intrinsic("almide_rt_http_serve")
 @concurrent(f)
+@category("Net.listen")
 effect fn serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit = _
 
 
@@ -9949,6 +9967,7 @@ fn __not_allowed(hits: List[(HttpRoute, List[String])]) -> HttpResponse = {
   )
 }
 
+@category()
 effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) -> HttpResponse = {
   let method = http.req_method(req)
   let path = __path_of(http.req_path(req))
@@ -12811,6 +12830,7 @@ effect fn read_line_opt() -> String? = _
 
 /// Writes s, no newline, then flushes.
 @intrinsic("almide_rt_io_print")
+@category("IO.stdout")
 effect fn print(s: String) -> Unit = _
 
 /// Rest of stdin as text; empty at EOF.
@@ -12830,10 +12850,12 @@ effect fn read_n_bytes(n: Int) -> List[Int] = _
 
 /// Low byte of each Int to stdout; unflushed.
 @intrinsic("almide_rt_io_write_bytes")
+@category("IO.stdout")
 fn write_bytes(data: List[Int]) -> Unit = _
 
 /// Raw data to stdout; no newline.
 @intrinsic("almide_rt_io_write")
+@category("IO.stdout")
 fn write(data: Bytes) -> Unit = _
 "#;
 pub const SRC_IO_PRINT: &str = r#"
@@ -27627,6 +27649,7 @@ type TcpListener = Int
 
 /// Connected stream handle; err if refused.
 @intrinsic("almide_rt_net_tcp_connect")
+@category("Net.fetch")
 effect fn tcp_connect(host: String, port: Int) -> Result[Int, String] = _
 
 
@@ -27669,31 +27692,38 @@ effect fn tcp_available(stream: Int) -> Result[Int, String] = _
 
 /// Listener bound to host:port; err if in use.
 @intrinsic("almide_rt_net_tcp_listen")
+@category("Net.listen")
 effect fn tcp_listen(host: String, port: Int) -> Result[Int, String] = _
 
 /// The port a listener is bound to: the one the OS chose when it listened on port 0.
 @intrinsic("almide_rt_net_tcp_local_port")
+@category("Net.listen")
 effect fn tcp_local_port(listener: Int) -> Result[Int, String] = _
 
 /// Blocks for the next client; its stream handle.
 @intrinsic("almide_rt_net_tcp_accept")
+@category("Net.listen")
 effect fn tcp_accept(listener: Int) -> Result[Int, String] = _
 
 /// Stops listening; closing twice is ok.
 @intrinsic("almide_rt_net_tcp_close_listener")
+@category("Net.listen")
 effect fn tcp_close_listener(listener: Int) -> Result[Unit, String] = _
 
 
 /// Stream socket connected to the listener at path; its descriptor.
 @intrinsic("almide_rt_net_unix_connect")
+@category("Net.fetch")
 effect fn unix_connect(path: String) -> Result[Int, String] = _
 
 /// Listener bound at path, which must not exist yet.
 @intrinsic("almide_rt_net_unix_listen")
+@category("Net.listen")
 effect fn unix_listen(path: String) -> Result[Int, String] = _
 
 /// Blocks for the next connection; its descriptor.
 @intrinsic("almide_rt_net_unix_accept")
+@category("Net.listen")
 effect fn unix_accept(listener: Int) -> Result[Int, String] = _
 
 /// Sends all of data, the descriptors fds riding with its first byte.
@@ -30166,15 +30196,18 @@ effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _
 
 /// Ends with code 0..=255; others abort, exit 1.
 @intrinsic("almide_rt_process_exit")
+@category("Abort")
 effect fn exit(code: Int) -> Never = _
 
 /// Full argv, program name at index 0.
 @intrinsic("almide_rt_process_args")
+@category("Env.read")
 effect fn args() -> List[String] = _
 
 /// All stdin lines; err on non-UTF-8 input.
 @ordered
 @intrinsic("almide_rt_process_stdin_lines")
+@category("IO.stdin")
 effect fn stdin_lines() -> Result[List[String], String] = _
 
 /// exec in dir; err is stderr, maybe empty.
@@ -30235,10 +30268,12 @@ effect fn exec_attached(cmd: String, args: List[String]) -> Result[Int, String] 
 
 /// OS process ID of this program.
 @intrinsic("almide_rt_process_pid")
+@category("Env.read")
 fn pid() -> Int = _
 
 /// Variable value, or none if unset.
 @intrinsic("almide_rt_process_env")
+@category("Env.read")
 fn env(key: String) -> String? = _
 
 /// Pid of cmd started in the background.
@@ -30253,6 +30288,7 @@ effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 
 /// Blocks ms milliseconds; negative is 0.
 @intrinsic("almide_rt_process_sleep")
+@category("Time")
 fn sleep(ms: Int) -> Unit = _
 
 /// True while pid exists, zombies included.

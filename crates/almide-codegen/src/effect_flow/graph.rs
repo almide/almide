@@ -180,9 +180,9 @@ mod tests {
         for i in 0..n - 1 {
             g.edges.push(Edge::Inst { to: own[i], src: own[i + 1], callee: i + 1, args: Vec::new() });
         }
-        g.edges.push(Edge::Const { to: own[n - 1], cats: bit(Effect::IO), sym: None, label: None });
+        g.edges.push(Edge::Const { to: own[n - 1], cats: bit(Effect::FsRead), sym: None, label: None });
         g.solve();
-        assert!(own.iter().all(|&o| g.nodes[o].value.cats == bit(Effect::IO)));
+        assert!(own.iter().all(|&o| g.nodes[o].value.cats == bit(Effect::FsRead)));
     }
 
     /// A parameter sym is replaced by the argument at each call site: the
@@ -194,7 +194,7 @@ mod tests {
         g.edges.push(Edge::Const { to: apply_own, cats: 0, sym: Some(0), label: None });
         let pure_arg = g.node(None);
         let io_arg = g.node(None);
-        g.edges.push(Edge::Const { to: io_arg, cats: bit(Effect::IO), sym: None, label: None });
+        g.edges.push(Edge::Const { to: io_arg, cats: bit(Effect::FsRead), sym: None, label: None });
         let caller_a = g.node(None);
         let caller_b = g.node(None);
         g.edges.push(Edge::Inst { to: caller_a, src: apply_own, callee: 0, args: vec![Some(pure_arg)] });
@@ -202,7 +202,7 @@ mod tests {
         g.param_in = vec![Vec::new()];
         g.solve();
         assert_eq!(g.nodes[caller_a].value.cats, 0);
-        assert_eq!(g.nodes[caller_b].value.cats, bit(Effect::IO));
+        assert_eq!(g.nodes[caller_b].value.cats, bit(Effect::FsRead));
         assert_eq!(g.nodes[apply_own].value.syms, [0].into());
     }
 }

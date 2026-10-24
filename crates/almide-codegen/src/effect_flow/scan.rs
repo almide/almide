@@ -207,7 +207,7 @@ impl Scan<'_, '_> {
                 self.join(&both)
             }
             IrExprKind::Fan { exprs } => {
-                self.perform(Some(almide_ir::effect::Effect::Fan), format!("fan ({})", loc(e.span)));
+                self.perform(vec![almide_ir::effect::Effect::Fan], format!("fan ({})", loc(e.span)));
                 exprs.iter().for_each(|x| self.consume(x));
                 None
             }
@@ -274,9 +274,10 @@ impl Scan<'_, '_> {
         }
     }
 
-    fn perform(&mut self, cat: Option<almide_ir::effect::Effect>, label: String) {
-        if let Some(c) = cat {
-            self.g.push(Edge::Const { to: self.performer, cats: bit(c), sym: None, label: Some(label) });
+    fn perform(&mut self, cats: Vec<almide_ir::effect::Effect>, label: String) {
+        let mask = cats.into_iter().fold(0, |m, c| m | bit(c));
+        if mask != 0 {
+            self.g.push(Edge::Const { to: self.performer, cats: mask, sym: None, label: Some(label) });
         }
     }
 
@@ -354,18 +355,24 @@ impl Scan<'_, '_> {
             let val = self.ix.fns[f].fn_val;
             // A stdlib fn the program carries (bundled): its category rides
             // the value too, as a call of it performs it (#4152).
-            let Some(c) = name.split_once('.').and_then(|(m, f)| module_to_effect(m, f)) else { return Some(val) };
+            let cats = name.split_once('.').map_or(0, |(m, f)| module_to_effect(m, f).into_iter().fold(0, |a, c| a | bit(c)));
+            if cats == 0 {
+                return Some(val);
+            }
             let n = self.g.node(None);
             self.g.copy(n, val);
-            self.g.push(Edge::Const { to: n, cats: bit(c), sym: None, label: Some(name.to_string()) });
+            self.g.push(Edge::Const { to: n, cats, sym: None, label: Some(name.to_string()) });
             return Some(n);
         }
         // A stdlib fn taken as a value: its module's category, and the
         // effect bit when it is an `effect fn` (#4151).
-        let cat = name.split_once('.').and_then(|(m, f)| module_to_effect(m, f)).or_else(|| runtime_name_to_effect(name));
+        let mut cat = name.split_once('.').map(|(m, f)| module_to_effect(m, f)).unwrap_or_default();
+        if cat.is_empty() {
+            cat = runtime_name_to_effect(name);
+        }
         let effect = name.split_once('.').is_some_and(|(m, f)| almide_ir::effect::stdlib_fn_is_effect(m, f))
             || almide_ir::effect::runtime_symbol_is_effect(name);
-        let cats = cat.map_or(0, bit) | if effect { EFFECT_FN } else { 0 };
+        let cats = cat.into_iter().fold(0, |m, c| m | bit(c)) | if effect { EFFECT_FN } else { 0 };
         (cats != 0).then(|| {
             let n = self.g.node(None);
             self.g.push(Edge::Const { to: n, cats, sym: None, label: Some(name.to_string()) });
@@ -394,7 +401,11 @@ impl Scan<'_, '_> {
                     return self.user_call(f, vals, args, e);
                 }
                 let label = format!("{} ({})", name, loc(e.span));
-                self.perform(runtime_name_to_effect(name), label.clone());
+                // An output or abort builtin (`println`, `panic`, …) carries
+                // its D2 leaves (ADR-0026, #4155); a runtime symbol its module's.
+                let mut cats = almide_ir::effect::builtin_call_effects(name);
+                cats.extend(runtime_name_to_effect(name));
+                self.perform(cats, label.clone());
                 self.perform_effect_fn(almide_ir::effect::runtime_symbol_is_effect(name), label);
                 self.store_args(&vals, args);
                 self.untracked(&e.ty)

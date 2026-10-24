@@ -108,8 +108,8 @@ fn effects_report(tag: &str, main: &str) -> String {
 fn a_called_fn_parameter_is_named_with_its_position() {
     let report = effects_report("param", RETURNED_CLOSURE);
     assert!(report.contains("  use_it  → {} + whatever f (arg 1) does\n"), "{report}");
-    // The builder performs nothing; the closure it returns carries IO (D1).
-    assert!(report.contains("  make  → {} (effect fn); returns a closure doing {IO}\n"), "{report}");
+    // The builder performs nothing; the closure it returns carries FS.read (D1).
+    assert!(report.contains("  make  → {} (effect fn); returns a closure doing {FS.read}\n"), "{report}");
     // A fn with no indirect call stays `{}` and is counted pure.
     assert!(report.contains("  shout  → {}\n"), "{report}");
     assert!(report.contains("4 functions: 2 pure, 1 callback-dependent, 1 with effects"), "{report}");
@@ -118,7 +118,7 @@ fn a_called_fn_parameter_is_named_with_its_position() {
 #[test]
 fn a_called_record_field_carries_the_set_stored_in_it() {
     let report = effects_report("record", RECORD_FIELD);
-    assert!(report.contains("  call_box  → {IO} (effect fn)\n"), "{report}");
+    assert!(report.contains("  call_box  → {FS.read} (effect fn)\n"), "{report}");
     assert!(report.contains("2 functions: 0 pure, 2 with effects"), "{report}");
 }
 
@@ -133,14 +133,14 @@ fn a_parameter_handed_to_a_hof_counts_and_an_own_lambda_does_not() {
 fn a_named_fn_taken_as_a_value_charges_its_taker() {
     let report = effects_report("fnref", NAMED_FN_VALUE);
     assert!(report.contains("  apply  → {} + whatever f (arg 1) does\n"), "{report}");
-    assert!(report.contains("  main  → {IO} (effect fn)\n"), "{report}");
+    assert!(report.contains("  main  → {FS.read, IO.stdout} (effect fn)\n"), "{report}");
     let dir = project("fnref-perm", Some("\"Env\""), NAMED_FN_VALUE);
     let (ok, stderr) = almide(&dir, &["check", "--effects", "main.almd"]);
     let _ = std::fs::remove_dir_all(&dir);
     assert!(!ok && stderr.contains("capability violation in `main`"), "{stderr}");
 }
 
-/// A grant without IO still refuses both programs, and names the function
+/// A grant without FS still refuses both programs, and names the function
 /// that runs the closure (ADR-0026 D1), not the one that builds it.
 #[test]
 fn permissions_refuse_the_runner() {
@@ -149,7 +149,7 @@ fn permissions_refuse_the_runner() {
         for args in [&["check", "main.almd"][..], &["check", "--effects", "main.almd"][..]] {
             let (ok, stderr) = almide(&dir, args);
             assert!(!ok, "`almide {}` admitted a file read under allow = [\"Env\"]:\n{stderr}", args.join(" "));
-            assert!(stderr.contains("IO is not in [permissions].allow"), "{stderr}");
+            assert!(stderr.contains("FS.read is not in [permissions].allow"), "{stderr}");
             if args.contains(&"--effects") {
                 assert!(stderr.contains(&format!("capability violation in `{runner}`")), "{stderr}");
             }

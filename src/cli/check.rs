@@ -217,6 +217,11 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
     // Security Layer 2: check permissions if defined in almide.toml
     if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+            // #4155: under `--profile critical`, granting `Proc` without a
+            // command list is refused (elsewhere it is a warning).
+            if critical.is_some() && super::proc_grant_without_list(&proj, true).is_err() {
+                std::process::exit(1);
+            }
             if !proj.permissions.is_empty() || proj.proc_allow.is_some() {
                 let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
                 if super::enforce_project_permissions(&ir, &proj).is_err() {

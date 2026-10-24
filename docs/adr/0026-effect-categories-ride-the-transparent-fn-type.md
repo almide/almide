@@ -289,3 +289,36 @@ allowing only `Time` built and read the file (#4152). Now:
 
 §Open is unchanged: the six-category vocabulary, a declared bound's syntax,
 the plain-fn bound and manifest versioning are not decided here.
+
+## Implementation note — D2's leaves (#4155, 2026-10-25)
+
+`process` was classified `Env`, so a manifest granting `Env` to read `$HOME`
+also started any command. D2 is implemented as written:
+
+- `Effect` is the fourteen leaves; `[permissions].allow` takes a leaf or one
+  of the four parents (`FS`, `Net`, `IO`, `Env`), which grants the leaves it
+  lists. `Proc` is under no parent.
+- Per operation: a module's row in `STDLIB_MODULE_EFFECTS` is its default and
+  a function whose operation differs declares `@category("FS.write")` on its
+  own declaration (`fs.write`, `env.set`, `http.serve`, `process.args`, …).
+- The output and abort builtins carry their leaves (`println` `IO.stdout`,
+  `eprintln` `IO.stderr`, `panic` and a failing `assert*` `Abort` +
+  `IO.stderr`, `process.exit` `Abort`): D2 says inference and `[permissions]`
+  work in leaves, and §Open's "plain fn bound" is about a declared bound, not
+  about what a manifest grants.
+- `[permissions]` judges the program's own functions (entry and user
+  modules); a stdlib function is judged through the callers it is charged to,
+  so an unused `panic` inside `list.range_step` refuses nothing.
+
+Choices where D2 or §Open is silent, taken on the conservative side:
+
+1. **An operation on an open socket or a shared-memory region** (`net.tcp_read`,
+   `unix_send`, `shm_write`, …) carries `Net.fetch` and `Net.listen` both: the
+   handle does not say which side opened it.
+2. **`Proc` without a `proc = [...]` list** is a warning on every route and
+   an error under `--profile critical`.
+3. **The old names keep parsing** (`IO`, `Env`, `Net` are parents) but mean
+   less; a refused leaf the old meaning covered prints a migration note. A
+   dialect-epoch-15 break records it.
+4. **Not changed here (§Open, one vocabulary):** `--profile critical --allow`
+   still takes `IO, Net, Env, Time, Rand, Process`.
