@@ -7,9 +7,11 @@
 // through n a's, and took 46 s at 30 characters. Such a pattern is now
 // compiled COUNTED — one copy of each repetition's body and a counter register
 // per thread — and runs on the same VM, whose answers are the walk's. Every
-// row below is past the expanded budget and would not have finished; the
-// wasm_cross gate's per-run time limit turns a regression into a failure.
-// 120 characters stay inside the reference interpreter's call depth;
+// pattern below is past the expanded budget, and the ones with two ways
+// through each character would not have finished (2^40 ways at 40
+// characters: hours); the wasm_cross gate's per-run time limit turns a
+// regression into a failure. 40 characters stay inside the reference
+// interpreter's step fuel;
 // tests/regex_pike_differential_test.rs runs the same shapes at 100,000
 // characters natively and holds the counted VM to the walk's answers over the
 // whole fuzz grammar, on both legs.
@@ -18,18 +20,18 @@ import regex
 fn line(label: String, answer: Bool) -> String = "${label}=${answer}"
 
 fn main() -> Unit = {
-  let a120 = string.repeat("a", 120)
+  let a40 = string.repeat("a", 40)
   // two equal alternatives under a big count: 2^n ways for the walk
-  println(line("(a|a){0,30000}b miss", regex.is_match("^(a|a){0,30000}b", a120)))
-  println(line("(a|a){0,30000}b hit", regex.is_match("^(a|a){0,30000}b", a120 + "b")))
+  println(line("(a|a){0,30000}b miss", regex.is_match("^(a|a){0,30000}b", a40)))
+  println(line("(a|a){0,30000}b hit", regex.is_match("^(a|a){0,30000}b", a40 + "b")))
   // nested counts multiplying: 3000 x 10 copies expanded
-  println(line("nested miss", regex.full_match("((a|a){10}){1,3000}b", a120 + "!")))
-  println(line("nested hit", regex.full_match("((a|a){10}){1,3000}b", a120 + "b")))
+  println(line("nested miss", regex.full_match("((a|a){10}){1,3000}b", a40 + "!")))
+  println(line("nested hit", regex.full_match("((a|a){10}){1,3000}b", a40 + "b")))
   // a group that can match empty, under a big minimum
-  println(line("(a|a?){3,25000}$", regex.is_match("^(a|a?){3,25000}$", a120 + "b")))
+  println(line("(a|a?){3,25000}$", regex.is_match("^(a|a?){3,25000}$", a40 + "b")))
   // a big count on a single character
-  println(line("a{0,20000}b", regex.is_match("a{0,20000}b", a120)))
-  println(line("a{100,20000}b", regex.is_match("a{100,20000}b", a120 + "b")))
+  println(line("a{0,20000}b", regex.is_match("a{0,20000}b", a40)))
+  println(line("a{30,20000}b", regex.is_match("a{30,20000}b", a40 + "b")))
   // the other operations go through the same VM
   println(ostr(regex.find("(a|a){2,30000}?b", "xaaab")))
   println(list.join(regex.find_all("(a|a){2,25000}", "aaaaa b aa a"), "|"))
@@ -37,7 +39,7 @@ fn main() -> Unit = {
   println(regex.replace("(x?){3,20000}y", "xxyaxy", "<>"))
   println(regex.replace_first("(a|a){1,30000}", "baab", "<>"))
   // captures: the last instance of a repeated group, as the walk answers
-  println(ostr(regex.captures("^(a|a){2,30000}(a*)$", a120) |> option.map((cs) => "${list.len(cs)} ${string.len(list.get_or(cs, 0, ""))} ${list.get_or(cs, 1, "")} ${string.len(list.get_or(cs, 2, ""))}")))
+  println(ostr(regex.captures("^(a|a){2,30000}(a*)$", a40) |> option.map((cs) => "${list.len(cs)} ${string.len(list.get_or(cs, 0, ""))} ${list.get_or(cs, 1, "")} ${string.len(list.get_or(cs, 2, ""))}")))
   println(ostr(regex.captures("(a|ab)(c|bcd){1,30000}(d*)", "abcdbcd") |> option.map((cs) => list.join(cs, ","))))
 }
 
