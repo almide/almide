@@ -193,7 +193,15 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
             if q != end { return bad(); }
             *pos = end;
             let s = &t[start..end];
-            if is_float { s.parse::<f64>().map(AlmideValue::Float).map_err(|e| e.to_string()) }
+            // A float token reads as `float.parse` reads it (C-413), the wasm
+            // leg's json_parse.almd included: one that overflows binary64 is
+            // the same err there, never an infinity (I-JSON, RFC 7493 §2.2).
+            if is_float {
+                match s.parse::<f64>() {
+                    Ok(f) if f.is_infinite() => Err("float literal out of range".to_string()),
+                    r => r.map(AlmideValue::Float).map_err(|e| e.to_string()),
+                }
+            }
             else { s.parse::<i64>().map(AlmideValue::Int).map_err(|e| e.to_string()) }
         }
         fn parse_array(t: &str, pos: &mut usize, depth: usize) -> Result<AlmideValue, String> {
