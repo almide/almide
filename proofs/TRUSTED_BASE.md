@@ -77,6 +77,23 @@ changes a trusted component, so before it lands:
 3. Update `scripts/toolchain-pins.txt` and this table in the same PR. The
    gate refuses the PR otherwise.
 
+**The user's rustc (#4110).** CI's pin says nothing about the toolchain on
+the user's machine, and a std security fix reaches a native Almide binary
+only if that toolchain has it (CVE-2024-24576: on Windows, `Command` running
+a `.bat` / `.cmd` passed arguments through cmd.exe unescaped before 1.77.2,
+which would re-open shell injection through `process.exec`). So every native
+build (`almide run` / `build` / `test` / `bench`, the cdylib and install
+routes) reads `rustc --version` before rustc or cargo runs, and refuses
+anything below rustc 1.96.0 — `MIN_RUSTC` in `src/cli/rustc_floor.rs`, the
+one place it is written: max(1.77.2, the `RUST_TOOLCHAIN` the generated code
+is verified with). It is raised when a std fix Almide relies on lands; the
+constant's comment lists the advisory each bump covers.
+`tests/rustc_floor_test.rs` runs a fake rustc reporting 1.77.1 and one patch
+below the floor (refused) and the floor (built and run), and checks this
+paragraph and docs/specs/cli.md against the constant. Out of its reach: the
+Ferrocene lane compiles emitted Rust with its own rustc directly, and a
+binary already in the build cache is reused without a new check.
+
 ## The irreducible base (cannot be discharged by proof — "消えない底")
 
 These four are trusted by necessity; everything else is proven against them:
