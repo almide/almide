@@ -1120,7 +1120,6 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_PROBE_OUT=value` | harness | the file a charge-probed native program writes its `__ALMD_PROBE` meter line to; `almide run --time-report` sets it to a fresh temp path so the program's own stderr is never read as the reading (#3489). Unset = the line goes to stderr |
 | `ALMIDE_PROBE_SRC=value` | harness | the source file the heap probe compiles (unset = the probe is skipped) |
 | `ALMIDE_PROFILE` | debug | print per-pass and per-phase timings of the native pipeline |
-| `ALMIDE_RC_TRAP_DOUBLE_FREE` | trap | arm the structural leg's double-free trap: releasing a block already at rc 0 traps instead of wrapping |
 | `ALMIDE_REGION_DEBUG` | debug | print the region-window pass's decisions (native and structural leg) |
 | `ALMIDE_REGION_OFF` | ablation | turn the region-window allocation pass off (native and structural leg) |
 | `ALMIDE_REGION_TRAP_STALE` | trap | arm the native region prelude's stale-reference trap (#2200) |

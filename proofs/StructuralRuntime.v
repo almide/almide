@@ -32,12 +32,17 @@
      Rust-side hash pin (crates/almide-wasm/tests/runtime_tree_pin.rs);
      drift on either side fails loudly, but the byte-decode theorem
      (WasmDecode's role for rc_inc) is the recorded next half.
-   - `$dec_flat` carries NO zero-sentinel (unlike the incumbent's
-     `$rc_dec`, whose trap WasmRcDec.v models): the structural leg's
-     double-free defense is the Perceus certificate upstream. The
-     realization theorem therefore carries the precondition `1 <= rc` —
-     the PCC framing: the model VALIDATES what the checker guarantees;
-     the emitted code does not re-check it.
+   - `$dec_flat` carries a zero-sentinel since #4023 (the incumbent's
+     `$rc_dec` always did; WasmRcDec.v models it): a dec of a block
+     already at rc 0 hits `unreachable` before anything is stored. The
+     realization theorems keep the precondition `1 <= rc` — the PCC
+     framing, the Perceus certificate upstream guarantees it — and under
+     it the sentinel's branch is never taken; `dec_freed_block_traps`
+     states the other side: at rc 0 the tree stops with memory untouched
+     (no wrapped count stored, `$free` not reached). The model stops the
+     RUNNER at the trap (`STrap` halts like a return); that the wasm
+     `unreachable` ends the whole program is the engine's, as for every
+     other instruction here.
    - `clz32` is DEFINED as `31 - Z.log2` on positives; the i32-op
      agreement over the bounded operand ranges is part of the tree-level
      trust, like every operator spelling in the transcription.
@@ -229,6 +234,7 @@ Inductive expr : Type :=
   | ELtU (a b : expr)
   | EGeU (a b : expr)
   | EEqz (a : expr)
+  | EEq (a b : expr)  (* i32.eq ($dec_flat's double-free sentinel, #4023) *)
   | ELoad (a : expr).
 
 Record C := mkC { ctot : Z; ccls : Z; ctmp : Z; cm : Mem }.
@@ -249,6 +255,7 @@ Fixpoint ev (e : expr) (c : C) : Z :=
   | ELtU a b => if Z.ltb (ev a c) (ev b c) then 1 else 0
   | EGeU a b => if Z.geb (ev a c) (ev b c) then 1 else 0
   | EEqz a => if Z.eqb (ev a c) 0 then 1 else 0
+  | EEq a b => if Z.eqb (ev a c) (ev b c) then 1 else 0
   | ELoad a => cm c (ev a c)
   end.
 
@@ -260,6 +267,7 @@ Inductive stmt : Type :=
   | SIf (cond : expr) (body : stmt)
   | SRet
   | SCallFree
+  | STrap           (* unreachable: the double-free trap (#4023) *)
   | SLRun (ss : list LargeTree.lstmt).
       (* an inlined loop tree (the large-list release, LargeTree.lfree_tree),
          then return *)
@@ -277,6 +285,7 @@ Fixpoint sstep (fsem : C -> C) (s : stmt) (c : C) : bool * C :=
   | SIf e b => if Z.eqb (ev e c) 0 then (false, c) else sstep fsem b c
   | SRet => (true, c)
   | SCallFree => (false, fsem c)
+  | STrap => (true, c)
   | SLRun ss => (true, mkC (ctot c) (ccls c) (ctmp c)
                             (LargeTree.lfree_mem_of ss blk (ctot c) (ccls c) (cm c)))
   end.
@@ -299,11 +308,14 @@ Definition inc_body : list stmt :=
 
 (* ── `$dec_flat` — emit_dec_flat, 1:1:
      if (block < line_end) return;
-     rc = load(block) - 1; store(block, rc);
+     rc = load(block) - 1;
+     if (rc == -1) unreachable;      (the double-free trap, #4023)
+     store(block, rc);
      if (rc == 0) call $free. ── *)
 Definition dec_body : list stmt :=
   [ SIf (ELtU EBlk EFloor) SRet;
     SSetTmp (ESub (ELoad EBlk) (EC 1));
+    SIf (EEq ETmp (EC (-1))) STrap;
     SStore EBlk ETmp;
     SIf (EEqz ETmp) SCallFree ].
 
@@ -380,6 +392,9 @@ Proof.
   replace (blk <? floor) with false
     by (symmetry; apply Z.ltb_ge; exact Hf).
   cbn.
+  replace (cm c blk - 1 =? -1) with false
+    by (symmetry; apply Z.eqb_neq; lia).
+  cbn.
   replace (cm c blk - 1 =? 0) with false
     by (symmetry; apply Z.eqb_neq; lia).
   cbn.
@@ -398,6 +413,21 @@ Theorem dec_unique_hands_to_free : forall c,
   cm c blk = 1 ->
   run_dec c = run_free (mkC (ctot c) (ccls c) 0
                             (upd (cm c) blk 0)).
+Proof.
+  intros c Hf Hrc. unfold run_dec, dec_body. cbn.
+  replace (blk <? floor) with false
+    by (symmetry; apply Z.ltb_ge; exact Hf).
+  cbn. rewrite Hrc. cbn.
+  reflexivity.
+Qed.
+
+(* `$dec_flat` on a FREED block (rc = 0, a double free): the sentinel
+   fires before the store — memory is exactly what it was, the count is
+   not wrapped to -1 and `$free` is not reached (#4023). *)
+Theorem dec_freed_block_traps : forall c,
+  floor <= blk ->
+  cm c blk = 0 ->
+  cm (run_dec c) = cm c.
 Proof.
   intros c Hf Hrc. unfold run_dec, dec_body. cbn.
   replace (blk <? floor) with false
