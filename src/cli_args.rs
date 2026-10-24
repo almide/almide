@@ -402,6 +402,13 @@ pub(crate) enum Commands {
     SelfUpdate {
         /// Target version (e.g., v0.13.0); defaults to latest
         version: Option<String>,
+        /// Install without verifying the release's Sigstore attestation
+        /// (#4127). The checksum is still checked, but it comes from the same
+        /// place as the archive, so it proves integrity, not origin. By default
+        /// the update verifies the attestation with `gh attestation verify`
+        /// and refuses when `gh` is missing.
+        #[arg(long = "skip-attestation")]
+        skip_attestation: bool,
     },
     /// Re-check a program's flight-grade certificates with the independent
     /// `almide-verify` binary (found next to almide, else on PATH; there is no

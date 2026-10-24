@@ -471,8 +471,8 @@ fn dispatch_packages(command: Commands) {
                 target.as_deref(),
             );
         }
-        Commands::SelfUpdate { version } => {
-            cli::cmd_self_update(version.as_deref());
+        Commands::SelfUpdate { version, skip_attestation } => {
+            cli::cmd_self_update(version.as_deref(), skip_attestation);
         }
         // `command`'s static type is the full `Commands` enum — Rust can't
         // narrow it to the variants `dispatch` and `dispatch_tooling` leave
