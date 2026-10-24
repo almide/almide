@@ -35,7 +35,7 @@ ALMIDE = os.environ.get("ALMIDE_BIN", os.path.join(REPO, "target/release/almide"
 # Modules requiring an explicit `import` (CLAUDE.md); everything else is auto-imported.
 NEEDS_IMPORT = {"json", "fs", "http", "env", "io", "random", "regex", "process",
                 "testing", "net", "zlib", "base64", "hash", "hex", "html", "path", "compute",
-                "url"}
+                "url", "bigint"}
 
 _MEMORY_UNSAFE = None
 MEMORY_UNSAFE_RX = re.compile(r"^@memory_unsafe\s*\n(?:@[^\n]*\n)*(?:effect )?fn (\w+)", re.M)
@@ -115,6 +115,7 @@ NAMED_CANDIDATES = {
     "Float32": ["(1.0).to_float32()"], "Float64": ["(1.0).to_float64()"],
     "Endian": ["LittleEndian"],
     "Deque": ["deque.from_list([1, 2])"], "Heap": ["heap.from_list([1, 2])"],
+    "BigInt": ['match bigint.parse("12") { ok(b) => b, err(e) => panic(e) }'],
 }
 
 
