@@ -44,6 +44,9 @@ http-body-util = "0.1"
 bytes = "1"
 wit-component = "0.262"
 wit-parser = "0.262"
+# op 32 (`prim.random_get`, #4122): the OS CSPRNG without `unsafe` (the
+# workspace forbids it). Already in the tree via tempfile/rand.
+getrandom = "0.4"
 
 # The fan cost model's clock (#3341): a worker thread's CPU time, read
 # without `unsafe` (the workspace forbids it). Already in the tree via wasmtime.

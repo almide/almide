@@ -334,6 +334,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "ctrlc",
+ "getrandom 0.4.2",
  "http",
  "http-body-util",
  "rustix",
