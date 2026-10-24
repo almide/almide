@@ -129,6 +129,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_DEBUG_EFFECTS", Flag, Dbg, "print the effect inference pass's per-function results (native codegen)"),
     sw("ALMIDE_DEBUG_MIR_OPS", Flag, Harness, "print every MIR op with its index (the classify_corpus example — the certificate-bisection instrument)"),
     sw("ALMIDE_DEFAULTS_DEBUG", Flag, Dbg, "print the record-default resolution when no default keys were found (native codegen)"),
+    sw("ALMIDE_DEPS_CACHE_ONLY", Flag, Tool, "resolve dependencies only from what is already on disk: a dependency not in the cache is an error, nothing is cloned and `almide.lock` is never written. Set by `almide mcp` on every tool child (#4179)"),
     sw("ALMIDE_DISABLE_OPT", Flag, Ablation, "run the optimiser pipeline with every optional pass off (ablation; the always-on enabler passes still run)"),
     sw("ALMIDE_DUMP_IR", Value, Dbg, "dump the IR after the named passes (comma-separated, or `all`) on the native pipeline, and the post-chain body of every fn whose name contains the value on the v1 pipeline"),
     sw("ALMIDE_DUMP_MIR", Flag, Dbg, "print every lowered fn's op stream before the native render runs"),

@@ -24,7 +24,24 @@ fn almide() -> &'static str {
 /// EOF is the server's exit condition, so this cannot hang on a missing
 /// response the way a framed, long-lived client can.
 fn mcp_session(requests: &[Value]) -> Vec<Value> {
-    let mut child = Command::new(almide())
+    mcp_session_with(None, None, requests)
+}
+
+/// [`mcp_session`] with the server started in `dir`: the directory it serves,
+/// which every path argument must stay under (#4178).
+fn mcp_session_in(dir: &std::path::Path, requests: &[Value]) -> Vec<Value> {
+    mcp_session_with(Some(dir), None, requests)
+}
+
+fn mcp_session_with(dir: Option<&std::path::Path>, home: Option<&std::path::Path>, requests: &[Value]) -> Vec<Value> {
+    let mut cmd = Command::new(almide());
+    if let Some(d) = dir {
+        cmd.current_dir(d);
+    }
+    if let Some(h) = home {
+        cmd.env("HOME", h);
+    }
+    let mut child = cmd
         .arg("mcp")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -110,7 +127,7 @@ fn survive_reports_the_delta_of_an_edit_without_writing_it() {
     let dir = tempfile::tempdir().unwrap();
     let before = "fn label(n: Int) -> String = n\n";
     let file = write_temp(dir.path(), "label.almd", before);
-    let responses = mcp_session(&[
+    let responses = mcp_session_in(dir.path(), &[
         init(),
         call(2, "almide_survive", json!({
             "file": file,
@@ -135,7 +152,7 @@ fn check_returns_structured_diagnostics_with_a_fix_snippet() {
         "bad.almd",
         "fn add(a: Int, b: Int) -> Int = a + b\n\nfn main() -> Unit = {\n  print(add(1, 2))\n}\n",
     );
-    let responses = mcp_session(&[init(), call(2, "almide_check", json!({"file": file}))]);
+    let responses = mcp_session_in(dir.path(), &[init(), call(2, "almide_check", json!({"file": file}))]);
     let out = payload(&responses[1]);
     assert_eq!(out["ok"], false);
     assert!(out["errors"].as_u64().unwrap() >= 1, "{}", out);
@@ -153,7 +170,7 @@ fn check_returns_structured_diagnostics_with_a_fix_snippet() {
 fn check_on_a_clean_file_is_ok_with_no_diagnostics() {
     let dir = tempfile::tempdir().unwrap();
     let file = write_temp(dir.path(), "ok.almd", "fn add(a: Int, b: Int) -> Int = a + b\n");
-    let responses = mcp_session(&[init(), call(2, "almide_check", json!({"file": file}))]);
+    let responses = mcp_session_in(dir.path(), &[init(), call(2, "almide_check", json!({"file": file}))]);
     let out = payload(&responses[1]);
     assert_eq!(out["ok"], true, "{}", out);
     assert_eq!(out["errors"], 0);
@@ -184,7 +201,7 @@ fn json_check_reports_a_total_parse_failure_as_json() {
     assert_eq!(out.status.code(), Some(1));
 
     // Same file through MCP: structured, and honestly marked not-ok.
-    let responses = mcp_session(&[init(), call(2, "almide_check", json!({"file": file}))]);
+    let responses = mcp_session_in(dir.path(), &[init(), call(2, "almide_check", json!({"file": file}))]);
     let payload = payload(&responses[1]);
     assert_eq!(payload["ok"], false);
     assert_eq!(payload["diagnostics"][0]["line"], 1);
@@ -211,7 +228,7 @@ fn api_lists_stdlib_signatures() {
 fn api_on_a_broken_file_is_a_tool_error_that_says_what_to_do() {
     let dir = tempfile::tempdir().unwrap();
     let file = write_temp(dir.path(), "broken.almd", "fn f() -> Int = \"nope\"\n");
-    let responses = mcp_session(&[init(), call(2, "almide_api", json!({"target": file}))]);
+    let responses = mcp_session_in(dir.path(), &[init(), call(2, "almide_api", json!({"target": file}))]);
     assert_eq!(responses[1]["result"]["isError"], true);
     let text = responses[1]["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("almide_check"), "{}", text);
@@ -246,7 +263,7 @@ fn fmt_check_json_reports_drift_and_keeps_the_gate_exit_code() {
     assert_eq!(out.status.code(), Some(0));
 
     // Same answer through MCP.
-    let responses = mcp_session(&[init(), call(2, "almide_fmt_check", json!({"paths": [messy]}))]);
+    let responses = mcp_session_in(dir.path(), &[init(), call(2, "almide_fmt_check", json!({"paths": [messy]}))]);
     let out = payload(&responses[1]);
     assert_eq!(out["report"]["ok"], false);
     assert_eq!(out["exit_code"], 1);
@@ -267,4 +284,68 @@ fn protocol_errors_are_distinguished_from_tool_errors() {
     assert_eq!(responses[1]["error"]["code"], -32601, "unadvertised method");
     assert_eq!(responses[2]["result"]["isError"], true, "unknown tool is a tool error");
     assert_eq!(responses[3]["result"], json!({}), "ping");
+}
+
+/// #4179: `almide_check` is annotated read-only and offline, so its child
+/// resolves dependencies from the cache only: a git dependency that is not
+/// cached is an error, nothing is cloned under `$HOME/.almide/cache`, and
+/// `almide.lock` is not written. Control: a plain `almide check` in the same
+/// project fetches the dependency and writes the lock.
+#[test]
+fn check_never_fetches_or_writes_the_lock() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    let home = root.path().join("home");
+    let app = root.path().join("app");
+    for d in [&repo.join("src"), &home, &app] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(repo.join("almide.toml"), "[package]\nname = \"dep\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(repo.join("src/mod.almd"), "fn f() -> Int = 1\n").unwrap();
+    let git = |args: &[&str]| {
+        let ok = Command::new("git")
+            .args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        assert!(ok, "git {args:?} failed");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "init"]);
+    git(&["tag", "v0.1.0"]);
+    std::fs::write(
+        app.join("almide.toml"),
+        format!(
+            "[package]\nname = \"mcp_offline_probe\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = {{ git = \"file://{}\", tag = \"v0.1.0\" }}\n",
+            repo.display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(app.join("main.almd"), "effect fn main() -> Unit = println(\"x\")\n").unwrap();
+    let cache = home.join(".almide").join("cache");
+    let cloned = || std::fs::read_dir(&cache).map(|mut d| d.next().is_some()).unwrap_or(false);
+
+    let responses = mcp_session_with(Some(&app), Some(&home), &[
+        init(),
+        call(2, "almide_check", json!({"file": "main.almd"})),
+    ]);
+    let text = responses[1]["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string();
+    assert!(!app.join("almide.lock").exists(), "almide_check wrote almide.lock: {}", text);
+    assert!(!cloned(), "almide_check cloned into the dependency cache: {}", text);
+    assert!(text.contains("not fetched yet"), "an uncached dependency must be reported, not fetched: {}", text);
+
+    let control = Command::new(almide())
+        .args(["check", "main.almd"])
+        .current_dir(&app)
+        .env("HOME", &home)
+        .output()
+        .expect("run almide check");
+    assert!(
+        app.join("almide.lock").exists() && cloned(),
+        "control: a plain `almide check` must fetch and lock (stderr: {})",
+        String::from_utf8_lossy(&control.stderr)
+    );
 }
