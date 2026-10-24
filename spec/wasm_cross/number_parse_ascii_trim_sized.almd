@@ -1,0 +1,28 @@
+// @contract: C-413
+// The sized integer parses ride int.parse's ASCII-only trim (#4121): int8.parse
+// calls int.parse, and uint64.parse — which trims before its own sign and
+// 2^63..2^64-1 handling — trims the same TAB/LF/FF/CR/SPACE set, so a
+// non-ASCII space is junk there too. UInt32 refuses a leading '-' first.
+effect fn main() -> Unit = {
+  // The sized wrappers ride int.parse's trim.
+  println(match int8.parse("\u{A0}5") {
+    ok(_) => "int8 ok",
+    err(e) => "int8 err(${e})",
+  })
+  // int8 err(invalid digit found in string)
+  println(match uint64.parse("\u{3000}5") {
+    ok(_) => "uint64 ok",
+    err(e) => "uint64 err(${e})",
+  })
+  // uint64 err(invalid digit found in string)
+  println(match uint64.parse(" 18446744073709551615\n") {
+    ok(_) => "uint64 max ok",
+    err(e) => "uint64 err(${e})",
+  })
+  // uint64 max ok
+  // uint32 err(invalid digit found in string)
+  println(match uint32.parse("\u{A0}-5") {
+    ok(_) => "uint32 ok",
+    err(e) => "uint32 err(${e})",
+  })
+}
