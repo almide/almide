@@ -134,6 +134,7 @@ mod map_inplace;
 mod map_holes;
 mod map_index;
 mod map_merge;
+mod map_ordered;
 mod map_remove;
 mod set_insert;
 mod program_tables;

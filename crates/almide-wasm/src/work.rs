@@ -127,16 +127,28 @@ pub(crate) enum Helper {
     /// been given — one per functional rebuild probed twice.
     MapIdxForget { side_get: u32, side_set: u32 },
     MapIdxHash { key: crate::map_index::IdxKey },
-    MapIdxBuild { key: crate::map_index::IdxKey, hash: u32 },
+    MapIdxBuild { key: crate::map_index::IdxKey, hash: u32, ord_build: u32 },
     MapIdxFind { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, build: u32 },
     MapIdxAppend { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, grow: u32 },
     /// The hole family (#3691, map_index.rs "Holes"): the index doubled with
     /// its tombstones dropped, the delete's tombstone, the in-place
     /// compaction and the hole count.
-    MapIdxGrow { key: crate::map_index::IdxKey, hash: u32 },
+    MapIdxGrow { key: crate::map_index::IdxKey, hash: u32, from_index: u32 },
     MapIdxKill { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns, build: u32 },
     MapIdxSettle { key: crate::map_index::IdxKey, fns: crate::map_index::IdxFns },
     MapIdxDead { side_get: u32 },
+    /// The flood fallback (#4104, map_ordered.rs): the AVL index a block's
+    /// hash index turns into once an insert probes past `FLOOD_PROBES`.
+    MapOrdRot { left: bool },
+    MapOrdBalance { rot_l: u32, rot_r: u32 },
+    MapOrdDelMin { balance: u32 },
+    MapOrdInsert { key: crate::map_index::IdxKey, balance: u32 },
+    MapOrdDelete { key: crate::map_index::IdxKey, balance: u32, delmin: u32 },
+    MapOrdFind { key: crate::map_index::IdxKey },
+    MapOrdNew,
+    MapOrdAdd { key: crate::map_index::IdxKey, insert: u32 },
+    MapOrdFromIndex { add: u32, new: u32 },
+    MapOrdBuildAll { key: crate::map_index::IdxKey, add: u32, new: u32 },
     /// `$drop_list(block)` — the typed drop of a List whose elements are
     /// heap HANDLES (#2010 stage 2b): the spine's credit down; at zero
     /// every element released through `elem_dec` (`$dec_flat` for a
