@@ -268,7 +268,7 @@ uint64.rotate_right(a: UInt64, n: Int) -> UInt64
 // @since unreleased
 uint64.bit_length(x: UInt64) -> Int
 
-// Decimal UInt64 from trimmed s; err on junk, a sign of -, or above 2^64-1.
+// Decimal UInt64 from ASCII-trimmed s; err on junk, a sign of -, or above 2^64-1.
 // @since unreleased
 uint64.parse(s: String) -> Result[UInt64, String]
 

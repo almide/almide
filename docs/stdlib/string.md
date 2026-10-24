@@ -146,7 +146,7 @@ fn main() -> Unit = {
 
 ### `string.capitalize(s: String) -> String`
 
-Capitalize the first character of a string.
+Capitalize the first character of a string. The first character is upper-cased by the same rule as `string.to_upper`, so a non-ASCII first character whose uppercase would contain ASCII (`ı`, `ß`, `ﬁ`) is left as it is.
 
 ```almd run
 fn main() -> Unit = {
@@ -159,7 +159,9 @@ Hello
 
 ### `string.to_upper(s: String) -> String`
 
-Convert all characters to uppercase.
+Convert all characters to uppercase, using Unicode's default (locale-independent) full case mapping, which may lengthen the string.
+
+One deliberate exception: a non-ASCII character whose uppercase would contain an ASCII character is left unchanged, so text never folds into ASCII. `string.to_upper("adm\u{131}n")` is `"ADMıN"`, not `"ADMIN"`, and `ß`, `ſ` and the ligatures `ﬀ`–`ﬆ` stay as they are. Rust, Python and JavaScript fold these (Go folds `ı` and `ſ`); Almide does not, so a name that passed a check on the raw text cannot become `"ADMIN"` afterwards. The mapping is locale-independent and is not for identity comparison: compare identifiers as ASCII, or normalize them explicitly.
 
 ```almd run
 fn main() -> Unit = {
@@ -172,7 +174,9 @@ HELLO
 
 ### `string.to_lower(s: String) -> String`
 
-Convert all characters to lowercase.
+Convert all characters to lowercase, using Unicode's default (locale-independent) full case mapping, including the word-final `ς` rule for `Σ`.
+
+As with `string.to_upper`, a non-ASCII character whose lowercase would contain an ASCII character is left unchanged: `string.to_lower("\u{212A}ey")` (Kelvin sign) is `"\u{212A}ey"`, not `"key"`, and `İ` (U+0130) stays `İ`. The mapping is locale-independent and is not for identity comparison.
 
 ```almd run
 fn main() -> Unit = {
@@ -699,15 +703,15 @@ string.pad_start(s: String, n: Int, ch: String) -> String
 // @since 0.5.0 or earlier
 string.to_bytes(s: String) -> List[Int]
 
-// First char uppercased, rest untouched.
+// First char uppercased as to_upper does, rest untouched.
 // @since 0.5.13 or earlier
 string.capitalize(s: String) -> String
 
-// Unicode uppercase; may lengthen s.
+// Unicode uppercase; never folds non-ASCII into ASCII; not for identity.
 // @since 0.5.0 or earlier
 string.to_upper(s: String) -> String
 
-// Unicode lowercase, not just ASCII.
+// Unicode lowercase; never folds non-ASCII into ASCII; not for identity.
 // @since 0.5.0 or earlier
 string.to_lower(s: String) -> String
 

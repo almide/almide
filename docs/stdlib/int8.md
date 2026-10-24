@@ -252,7 +252,7 @@ int8.rotate_right(a: Int8, n: Int) -> Int8
 // @since unreleased
 int8.bit_length(x: Int8) -> Int
 
-// Decimal Int8 from trimmed s; err on junk or outside -128..127.
+// Decimal Int8 from ASCII-trimmed s; err on junk or outside -128..127.
 // @since unreleased
 int8.parse(s: String) -> Result[Int8, String]
 
