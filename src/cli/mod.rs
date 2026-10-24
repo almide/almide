@@ -194,8 +194,10 @@ pub fn enforce_project_permissions(ir: &almide::ir::IrProgram, proj: &crate::pro
     // embedded wasm host checks every fs op and preopens only these roots, and
     // the native build embeds them in `main` (`build::inject_fs_scope`).
     almide_wasm_run::set_fs_scope(proj.fs_allow.clone());
-    if !proj.permissions.is_empty() {
-        check_permissions(ir, &proj.permissions)?;
+    // An absent `allow` is unchecked; an explicit `allow = []` allows no
+    // capability at all (#4101).
+    if let Some(allow) = &proj.permissions {
+        check_permissions(ir, allow)?;
     }
     enforce_proc_allowlist(ir, proj.proc_allow.as_deref())
 }

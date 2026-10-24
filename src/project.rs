@@ -96,11 +96,13 @@ impl Dependency {
 pub struct Project {
     pub package: Package,
     pub dependencies: Vec<Dependency>,
-    /// Allowed effect capabilities for this package (Security Layer 2).
-    /// If empty, all capabilities are allowed (backwards compatible).
-    /// e.g., ["IO", "Net"]. Each name is an `Effect` category
-    /// (`allowed_effects`); any other name is refused (#3247).
-    pub permissions: Vec<String>,
+    /// `[permissions] allow = [...]`: the effect capabilities this package
+    /// may use (Security Layer 2), e.g. `["IO", "Net"]`. Each name is an
+    /// `Effect` category (`allowed_effects`); any other name is refused
+    /// (#3247). `None` (no `allow` key) leaves capabilities unchecked;
+    /// `Some([])` (an explicit empty list) allows none, so every capability
+    /// use is refused (#4101). An empty list used to mean "allow all".
+    pub permissions: Option<Vec<String>>,
     /// `[permissions] proc = [...]` (#2589, ADR-0025): the commands the
     /// subprocess family may start. `None` (no key) = any command.
     pub proc_allow: Option<Vec<String>>,
@@ -821,7 +823,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
     let names = |key: &str| -> Result<Option<Vec<String>>, String> {
         Ok(manifest.permission_list(path, &content, key)?.map(|l| l.into_iter().map(|(n, _)| n).collect()))
     };
-    let permissions = names("allow")?.unwrap_or_default();
+    let permissions = names("allow")?;
     let proc_allow = names("proc")?;
     let native_grants = names("native")?.unwrap_or_default();
     let trust_owners = manifest.trust_owners(path, &content)?;
