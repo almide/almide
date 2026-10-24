@@ -304,7 +304,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (crate::embedded::SRC_JSON_PATH, &[("json_path_root", "json.root"), ("json_path_field", "json.field"), ("json_path_index", "json.index"), ("json_path_get", "json.get_path"), ("json_path_set", "json.set_path"), ("json_path_remove", "json.remove_path")]),
         (crate::embedded::SRC_RESULT_COLLECT, &[("result_partition", "result.partition")]),
         (crate::embedded::SRC_VALUE_UTILS, &[("value_pick", "value.pick"), ("value_omit", "value.omit"), ("value_to_camel_case", "value.to_camel_case"), ("value_to_snake_case", "value.to_snake_case")]),
-        (crate::embedded::SRC_HTTP_URL_DECODE, &[("http_url_decode", "http.url_decode"), ("http_query_params", "http.query_params")]),
+        (crate::embedded::SRC_HTTP_URL_DECODE, &[("http_url_decode", "http.url_decode")]),
         // The http call handle (#2633): `__call_start` / `__request_stream_limited` are
         // http.almd's private leaves (bare dunder demand keys, the codec-splice
         // convention); poll / read_new / wait / cancel are its public intrinsics.

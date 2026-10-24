@@ -869,7 +869,7 @@
 | `param` | `fn http.param(req: HttpRequest, name: String) -> String?` |  |  |
 | `path` | `fn http.path(req: HttpRequest) -> String` | 改名（旧 `req_path`）。クエリを含むことを文書に明記 | R-http-14 |
 | `poll` | `effect fn http.poll(c: HttpCall) -> Result[HttpResponse, String]?` |  | R-http-01 |
-| `query_params` | `fn http.query_params(req: HttpRequest) -> List[(String, String)]` | 意味変更: `List[(String, String)]` を返す | R-http-10 |
+| `query_params` | `fn http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]` | 意味変更: `url.parse_query` と同じ一つの復号器（不正なエスケープは err、#4117、C-404） | R-http-10 |
 | `read_new` | `effect fn http.read_new(c: HttpCall) -> String` |  | R-http-01 |
 | `redirect` | `fn http.redirect(url: String) -> HttpResponse` |  |  |
 | `request` | `effect fn http.request(method: String, url: String, body: String, headers: List[(String, String)]) -> String` | 意味変更: `headers` を `List[(String, String)]` に | R-http-09 |

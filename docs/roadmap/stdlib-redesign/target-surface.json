@@ -2529,7 +2529,7 @@
 {
 "mod": "http",
 "name": "query_params",
-"sig": "fn http.query_params(req: HttpRequest) -> List[(String, String)]",
+"sig": "fn http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]",
 "kind": "意味変更"
 },
 {
