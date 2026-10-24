@@ -59,6 +59,12 @@ fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
             let path = entry.path();
             let Ok(kind) = entry.file_type() else { continue };
             if kind.is_dir() {
+                // Version control, build output and vendored dependencies
+                // are never swept; `almide fmt .git/hooks` (named) still
+                // reaches them (#4186).
+                if path.file_name().and_then(|n| n.to_str()).is_some_and(cli::project_scope::is_skipped_dir) {
+                    continue;
+                }
                 collect_almd_files(&path, out);
             } else if kind.is_file() && path.extension().map_or(false, |ext| ext == "almd") {
                 out.push(path.to_string_lossy().to_string());

@@ -175,15 +175,18 @@ fn compute_workspace_symbols(query: &str, workspace_root: &Option<std::path::Pat
     results
 }
 
+/// The workspace index's sweep. The skip rule applies to the directories it
+/// FINDS, not to the root it was given: a workspace that itself lives in a
+/// dot-directory (a temp dir, `~/.config/x`) is still indexed (#4186).
 fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-    let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if name.starts_with('.') || name == "target" || name == "node_modules" { return; }
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let p = entry.path();
             // Symlinks are neither followed nor collected (#4140).
             let Ok(kind) = entry.file_type() else { continue };
-            if kind.is_dir() { collect_almd_files(&p, out); }
+            if kind.is_dir() {
+                if !super::project_scope::is_skipped_dir(&entry.file_name().to_string_lossy()) { collect_almd_files(&p, out); }
+            }
             else if kind.is_file() && p.extension().map_or(false, |e| e == "almd") { out.push(p); }
         }
     }
