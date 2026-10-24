@@ -1,0 +1,99 @@
+// parse_radix / to_string_radix on the eight fixed-width integer types (R-sized-06): the
+// SHAPE is the numeric protocol matrix gate in `almide docs-gen --check`; this file pins the
+// round trip of min_value and max_value in radix 2, 16 and 36, the range errors, the unsigned
+// refusal of a - sign, uint64 above 2^63, and float32.parse.
+import testing
+
+test "signed round trips at the bounds" {
+  for r in [2, 16, 36] {
+    assert_eq(int8.parse_radix(int8.to_string_radix(int8.min_value(), r), r), ok(int8.min_value()))
+    assert_eq(int8.parse_radix(int8.to_string_radix(int8.max_value(), r), r), ok(int8.max_value()))
+    assert_eq(
+      int16.parse_radix(int16.to_string_radix(int16.min_value(), r), r),
+      ok(int16.min_value()),
+    )
+    assert_eq(
+      int16.parse_radix(int16.to_string_radix(int16.max_value(), r), r),
+      ok(int16.max_value()),
+    )
+    assert_eq(
+      int32.parse_radix(int32.to_string_radix(int32.min_value(), r), r),
+      ok(int32.min_value()),
+    )
+    assert_eq(
+      int32.parse_radix(int32.to_string_radix(int32.max_value(), r), r),
+      ok(int32.max_value()),
+    )
+    assert_eq(
+      int64.parse_radix(int64.to_string_radix(int64.min_value(), r), r),
+      ok(int64.min_value()),
+    )
+    assert_eq(
+      int64.parse_radix(int64.to_string_radix(int64.max_value(), r), r),
+      ok(int64.max_value()),
+    )
+  }
+  assert_eq(int8.to_string_radix(int8.min_value(), 16), "-80")
+  assert_eq(int32.to_string_radix(int32.min_value(), 2), "-10000000000000000000000000000000")
+}
+
+test "unsigned round trips at the bounds" {
+  for r in [2, 16, 36] {
+    assert_eq(
+      uint8.parse_radix(uint8.to_string_radix(uint8.max_value(), r), r),
+      ok(uint8.max_value()),
+    )
+    assert_eq(
+      uint16.parse_radix(uint16.to_string_radix(uint16.max_value(), r), r),
+      ok(uint16.max_value()),
+    )
+    assert_eq(
+      uint32.parse_radix(uint32.to_string_radix(uint32.max_value(), r), r),
+      ok(uint32.max_value()),
+    )
+    assert_eq(
+      uint64.parse_radix(uint64.to_string_radix(uint64.max_value(), r), r),
+      ok(uint64.max_value()),
+    )
+    assert_eq(
+      uint64.parse_radix(uint64.to_string_radix(int.to_uint64(int.min_value()), r), r),
+      ok(int.to_uint64(int.min_value())),
+    )
+  }
+  assert_eq(uint64.to_string_radix(uint64.max_value(), 16), "ffffffffffffffff")
+  assert_eq(uint64.to_string_radix(uint64.max_value(), 36), "3w5e11264sgsf")
+  assert_eq(uint8.to_string_radix(uint8.max_value(), 2), "11111111")
+}
+
+test "range errors and the unsigned - sign" {
+  assert_eq(int8.parse_radix("80", 16), err("number too large to fit in target type"))
+  assert_eq(int8.parse_radix("-81", 16), err("number too small to fit in target type"))
+  assert_eq(int8.parse_radix("-0x80", 16), ok(int8.min_value()))
+  assert_eq(uint8.parse_radix("100", 16), err("number too large to fit in target type"))
+  assert_eq(uint8.parse_radix("0b11111111", 2), ok(uint8.max_value()))
+  assert_eq(uint8.parse_radix("-0", 10), err("invalid digit found in string"))
+  assert_eq(uint64.parse_radix("-1", 16), err("invalid digit found in string"))
+  assert_eq(
+    uint64.parse_radix("10000000000000000", 16),
+    err("number too large to fit in target type"),
+  )
+  assert_eq(
+    uint64.parse_radix("18446744073709551616", 10),
+    err("number too large to fit in target type"),
+  )
+  assert_eq(uint64.parse_radix("0xFFFFFFFFFFFFFFFF", 16), ok(uint64.max_value()))
+  assert_eq(uint64.parse_radix("1z", 16), err("invalid digit found in string"))
+  testing.assert_aborts(
+    "radix must be in 2..36, got 37",
+    () => uint64.to_string_radix(uint64.max_value(), 37),
+  )
+  testing.assert_aborts("radix must be in 2..36, got 1", () => int8.parse_radix("1", 1))
+}
+
+test "float32.parse" {
+  assert_eq(float32.parse("3.5"), ok(float.to_float32(3.5)))
+  assert_eq(float32.parse(" -0.25 "), ok(float.to_float32(-0.25)))
+  assert(float32.is_infinite(float32.parse("1e40") ?? float.to_float32(0.0)))
+  assert(float32.is_nan(float32.parse("nan") ?? float.to_float32(0.0)))
+  assert_eq(float32.parse("x"), err("invalid float literal"))
+}

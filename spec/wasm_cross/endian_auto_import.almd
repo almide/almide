@@ -38,13 +38,13 @@ fn main() -> Unit = {
   // ── and the bare ctor form beside it (one representation) ──
   println("${int.from_uint16(bytes.read_uint16(b, 2, LittleEndian))} ${int.from_uint16(bytes.read_uint16(b, 2, BigEndian))}")
   // ── writes and sets with the bound value ──
-  var w = bytes.new(0)
+  var w = bytes.zeros(0)
   bytes.write_uint16(w, 258, e)
   bytes.write_uint32(w, 258, f)
   bytes.write_int32(w, -2, flip(f))
   bytes.write_float32(w, 1.5, e)
   println("${bytes.to_list(w)}")
-  var s = bytes.new(8)
+  var s = bytes.zeros(8)
   bytes.set_uint16(s, 0, 258, e)
   bytes.set_uint32(s, 2, 258, f)
   bytes.set_int32(s, 4, -2, pick(false))

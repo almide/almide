@@ -13,7 +13,7 @@ effect fn main() -> Unit = {
   let d = fs.create_temp_dir("b2")!
   fs.write_bytes(d + "/wb.bin", [72, 105, 33, 300])!
   println("wb=${fs.read_text(d + "/wb.bin")!}")
-  var raw = bytes.new(3)
+  var raw = bytes.zeros(3)
   bytes.set_at(raw, 0, 65)
   bytes.set_at(raw, 1, 66)
   bytes.set_at(raw, 2, 67)

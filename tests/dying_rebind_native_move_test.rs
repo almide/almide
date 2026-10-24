@@ -51,7 +51,7 @@ fn tail(ty: &str, mutate: &str, after: &str) -> String {
         match ty {
             "List[Int]" => "[]",
             "String" => "\"\"",
-            _ => "bytes.new(100)",
+            _ => "bytes.zeros(100)",
         }
     )
 }
@@ -61,7 +61,7 @@ fn a_dying_param_rebound_before_a_self_tail_call_moves() {
     for (ty, mutate) in [
         ("List[Int]", "list.push(a, x)"),
         ("String", "string.push(a, \"b\")"),
-        ("Bytes", "bytes.set_u8(a, x, 1)"),
+        ("Bytes", "bytes.put_u8(a, x, 1)"),
         ("Bytes", "bytes.append_u8(a, 1)"),
     ] {
         let rust = emit_rust("move", &tail(ty, mutate, ""));
@@ -104,9 +104,9 @@ fn main() -> Unit = {
   let held = [7]
   let t = go(held, 0)
   println("${held} ${t}")
-  var b = bytes.new(2)
+  var b = bytes.zeros(2)
   var c = b
-  bytes.set_u8(c, 0, 5)
+  bytes.put_u8(c, 0, 5)
   println("${bytes.get_or(b, 0, 0 - 1)} ${bytes.get_or(c, 0, 0 - 1)}")
   println(keep("hi"))
   let base = "x"

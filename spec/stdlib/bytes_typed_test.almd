@@ -10,50 +10,50 @@
 import bytes
 
 test "read_uint16 LE round-trip" {
-  var b: Bytes = bytes.new(2)
-  bytes.set_u16_le(b, 0, 0xABCD)
+  var b: Bytes = bytes.zeros(2)
+  bytes.put_u16_le(b, 0, 0xABCD)
   let v: UInt16 = bytes.read_uint16(b, 0, LittleEndian)
   assert_eq(v.to_int64(), 0xABCD)
 }
 
 test "read_uint16 BE round-trip" {
-  var b: Bytes = bytes.new(2)
-  bytes.set_u16_be(b, 0, 0x1234)
+  var b: Bytes = bytes.zeros(2)
+  bytes.put_u16_be(b, 0, 0x1234)
   let v: UInt16 = bytes.read_uint16(b, 0, BigEndian)
   assert_eq(v.to_int64(), 0x1234)
 }
 
 test "read_uint32 LE round-trip" {
-  var b: Bytes = bytes.new(4)
-  bytes.set_u32_le(b, 0, 0x12345678)
+  var b: Bytes = bytes.zeros(4)
+  bytes.put_u32_le(b, 0, 0x12345678)
   let v: UInt32 = bytes.read_uint32(b, 0, LittleEndian)
   assert_eq(v.to_int64(), 0x12345678)
 }
 
 test "read_uint32 BE round-trip" {
-  var b: Bytes = bytes.new(4)
-  bytes.set_u32_be(b, 0, 0x12345678)
+  var b: Bytes = bytes.zeros(4)
+  bytes.put_u32_be(b, 0, 0x12345678)
   let v: UInt32 = bytes.read_uint32(b, 0, BigEndian)
   assert_eq(v.to_int64(), 0x12345678)
 }
 
 test "read_int32 LE negative round-trip" {
-  var b: Bytes = bytes.new(4)
-  bytes.set_i32_le(b, 0, -42)
+  var b: Bytes = bytes.zeros(4)
+  bytes.put_i32_le(b, 0, -42)
   let v: Int32 = bytes.read_int32(b, 0, LittleEndian)
   assert_eq(v.to_int64(), -42)
 }
 
 test "read_int32 BE positive round-trip" {
-  var b: Bytes = bytes.new(4)
-  bytes.set_i32_be(b, 0, 123456)
+  var b: Bytes = bytes.zeros(4)
+  bytes.put_i32_be(b, 0, 123456)
   let v: Int32 = bytes.read_int32(b, 0, BigEndian)
   assert_eq(v.to_int64(), 123456)
 }
 
 test "read_float32 LE round-trip" {
-  var b: Bytes = bytes.new(4)
-  bytes.set_f32_le(b, 0, 3.14)
+  var b: Bytes = bytes.zeros(4)
+  bytes.put_f32_le(b, 0, 3.14)
   let v: Float32 = bytes.read_float32(b, 0, LittleEndian)
   let f: Float = v.to_float64()
   assert_eq(f > 3.13, true)
@@ -61,8 +61,8 @@ test "read_float32 LE round-trip" {
 }
 
 test "read_float32 BE round-trip" {
-  var b: Bytes = bytes.new(4)
-  bytes.set_f32_be(b, 0, -1.5)
+  var b: Bytes = bytes.zeros(4)
+  bytes.put_f32_be(b, 0, -1.5)
   let v: Float32 = bytes.read_float32(b, 0, BigEndian)
   let f: Float = v.to_float64()
   assert_eq(f, -1.5)
@@ -70,64 +70,64 @@ test "read_float32 BE round-trip" {
 
 test "Endian variant used as binding target" {
   let chosen: Endian = BigEndian
-  var b: Bytes = bytes.new(4)
-  bytes.set_u32_be(b, 0, 100)
+  var b: Bytes = bytes.zeros(4)
+  bytes.put_u32_be(b, 0, 100)
   let v: UInt32 = bytes.read_uint32(b, 0, chosen)
   assert_eq(v.to_int64(), 100)
 }
 
 // ── write/set typed API ───────────────────────────────────────────────
 test "write_uint16 round-trip LE" {
-  var b: Bytes = bytes.new(0)
+  var b: Bytes = bytes.new()
   bytes.write_uint16(b, 0xABCD.to_uint16(), LittleEndian)
   let v: UInt16 = bytes.read_uint16(b, 0, LittleEndian)
   assert_eq(v.to_int64(), 0xABCD)
 }
 
 test "write_uint32 round-trip LE" {
-  var b: Bytes = bytes.new(0)
+  var b: Bytes = bytes.new()
   bytes.write_uint32(b, 0xDEADBEEF.to_uint32(), LittleEndian)
   let v: UInt32 = bytes.read_uint32(b, 0, LittleEndian)
   assert_eq(v.to_int64(), 0xDEADBEEF)
 }
 
 test "write_uint32 round-trip BE" {
-  var b: Bytes = bytes.new(0)
+  var b: Bytes = bytes.new()
   bytes.write_uint32(b, 42.to_uint32(), BigEndian)
   let v: UInt32 = bytes.read_uint32(b, 0, BigEndian)
   assert_eq(v.to_int64(), 42)
 }
 
 test "write_int32 negative round-trip" {
-  var b: Bytes = bytes.new(0)
+  var b: Bytes = bytes.new()
   bytes.write_int32(b, (-12345).to_int32(), BigEndian)
   let v: Int32 = bytes.read_int32(b, 0, BigEndian)
   assert_eq(v.to_int64(), -12345)
 }
 
 test "write_float32 round-trip" {
-  var b: Bytes = bytes.new(0)
+  var b: Bytes = bytes.new()
   bytes.write_float32(b, 2.5.to_float32(), LittleEndian)
   let v: Float32 = bytes.read_float32(b, 0, LittleEndian)
   assert_eq(v.to_float64(), 2.5)
 }
 
 test "set_uint32 in place LE" {
-  var b: Bytes = bytes.new(4)
+  var b: Bytes = bytes.zeros(4)
   bytes.set_uint32(b, 0, 0x12345678.to_uint32(), LittleEndian)
   let v: UInt32 = bytes.read_uint32(b, 0, LittleEndian)
   assert_eq(v.to_int64(), 0x12345678)
 }
 
 test "set_int32 in place BE" {
-  var b: Bytes = bytes.new(4)
+  var b: Bytes = bytes.zeros(4)
   bytes.set_int32(b, 0, (-999).to_int32(), BigEndian)
   let v: Int32 = bytes.read_int32(b, 0, BigEndian)
   assert_eq(v.to_int64(), -999)
 }
 
 test "set_float32 in place" {
-  var b: Bytes = bytes.new(4)
+  var b: Bytes = bytes.zeros(4)
   bytes.set_float32(b, 0, 3.14.to_float32(), LittleEndian)
   let v: Float32 = bytes.read_float32(b, 0, LittleEndian)
   let f: Float = v.to_float64()
@@ -136,7 +136,7 @@ test "set_float32 in place" {
 }
 
 test "typed write chain accumulates" {
-  var b: Bytes = bytes.new(0)
+  var b: Bytes = bytes.new()
   bytes.write_uint32(b, 1.to_uint32(), BigEndian)
   bytes.write_uint32(b, 2.to_uint32(), BigEndian)
   bytes.write_uint32(b, 3.to_uint32(), BigEndian)

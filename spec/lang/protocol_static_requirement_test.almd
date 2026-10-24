@@ -1,0 +1,45 @@
+// A protocol requirement with no receiver, called through a bounded type
+// parameter (`M.empty()`): monomorphization sends it to the concrete type's
+// own function — a convention method for a declared type (and the stdlib
+// module's function for a built-in one, as `list.sum[A: Numeric]` uses).
+protocol Monoid {
+  fn empty() -> Self
+  fn combine(a: Self, b: Self) -> Self
+}
+
+type Len: Monoid = { n: Int }
+
+fn Len.empty() -> Len = { n: 0 }
+
+fn Len.combine(a: Len, b: Len) -> Len = { n: a.n + b.n }
+
+type Longest: Monoid = { s: String }
+
+fn Longest.empty() -> Longest = { s: "" }
+
+fn Longest.combine(a: Longest, b: Longest) -> Longest = if string.len(b.s) > string.len(a.s) then b else a
+
+fn concat_all[M: Monoid](xs: List[M]) -> M = xs |> list.fold(
+  M.empty(),
+  (acc, x) => M.combine(acc, x),
+)
+
+test "a receiver-less requirement reaches each conforming type" {
+  assert_eq(
+    concat_all([
+      Len { n: 2 },
+      Len { n: 3 }
+    ]).n,
+    5,
+  )
+  let none_len: List[Len] = []
+  assert_eq(concat_all(none_len).n, 0)
+  assert_eq(
+    concat_all([
+      Longest { s: "ab" },
+      Longest { s: "abcd" },
+      Longest { s: "x" }
+    ]).s,
+    "abcd",
+  )
+}

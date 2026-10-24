@@ -130,7 +130,7 @@ fn user_type_named_json_path_builds_beside_json() {
 fn user_type_named_endian_builds_with_bytes_rs_spliced() {
     assert_user_type_builds(
         "Endian",
-        "import bytes\ntype Endian = { n: Int }\neffect fn main() -> Unit = {\n  let x = Endian { n: 7 }\n  println(\"${x.n} ${bytes.len(bytes.new(2))}\")\n}\n",
+        "import bytes\ntype Endian = { n: Int }\neffect fn main() -> Unit = {\n  let x = Endian { n: 7 }\n  println(\"${x.n} ${bytes.len(bytes.zeros(2))}\")\n}\n",
         "7 2\n",
     );
 }
@@ -177,7 +177,7 @@ fn user_type_named_after_a_runtime_private_item_builds() {
 fn endian_ctors_qualify_without_an_explicit_bytes_import() {
     assert_user_type_builds(
         "EndianAuto",
-        "fn pick(big: Bool) -> Endian = if big then BigEndian else LittleEndian\nfn name(e: Endian) -> String = match e { LittleEndian => \"le\", BigEndian => \"be\" }\neffect fn main() -> Unit = {\n  var t = bytes.new(0)\n  bytes.write_uint16(t, 258, LittleEndian)\n  bytes.write_uint16(t, 258, pick(true))\n  println(\"${int.from_uint16(bytes.read_uint16(t, 0, LittleEndian))} ${int.from_uint16(bytes.read_uint16(t, 2, BigEndian))} ${name(pick(false))} ${name(pick(true))}\")\n}\n",
+        "fn pick(big: Bool) -> Endian = if big then BigEndian else LittleEndian\nfn name(e: Endian) -> String = match e { LittleEndian => \"le\", BigEndian => \"be\" }\neffect fn main() -> Unit = {\n  var t = bytes.zeros(0)\n  bytes.write_uint16(t, 258, LittleEndian)\n  bytes.write_uint16(t, 258, pick(true))\n  println(\"${int.from_uint16(bytes.read_uint16(t, 0, LittleEndian))} ${int.from_uint16(bytes.read_uint16(t, 2, BigEndian))} ${name(pick(false))} ${name(pick(true))}\")\n}\n",
         "258 258 le be\n",
     );
 }
@@ -191,7 +191,7 @@ fn runtime_twins_keep_their_repr_equality_and_patterns() {
     // only NAMES `Endian` never splices bytes.rs, and under the auto-import
     // the bundled decl never reaches the program so `${e}` has no repr route
     // — both pre-existing walls on either side of this change.)
-    let source = "import bytes\nimport fs\nimport process\nfn kind(m: FileStat) -> String = match m { FileStat { is_dir, .. } => if is_dir then \"dir\" else \"file\" }\neffect fn main() -> Unit = {\n  let p = \"/tmp/almd_1821_twin_repr_pin.txt\"\n  fs.write(p, \"abc\")!\n  let m = fs.stat(p)!\n  println(\"${m.size} ${m.is_file} ${m == m}\")\n  println(kind(m))\n  let s = process.exec_status(\"true\", [])!\n  println(\"${s.code} ${s} ${s == s}\")\n  let e: Endian = BigEndian\n  println(\"${e} ${e == LittleEndian} ${bytes.len(bytes.new(0))}\")\n}\n";
+    let source = "import bytes\nimport fs\nimport process\nfn kind(m: FileStat) -> String = match m { FileStat { is_dir, .. } => if is_dir then \"dir\" else \"file\" }\neffect fn main() -> Unit = {\n  let p = \"/tmp/almd_1821_twin_repr_pin.txt\"\n  fs.write(p, \"abc\")!\n  let m = fs.stat(p)!\n  println(\"${m.size} ${m.is_file} ${m == m}\")\n  println(kind(m))\n  let s = process.exec_status(\"true\", [])!\n  println(\"${s.code} ${s} ${s == s}\")\n  let e: Endian = BigEndian\n  println(\"${e} ${e == LittleEndian} ${bytes.len(bytes.zeros(0))}\")\n}\n";
     let (ok, stdout, stderr) = run_inline("twins", source);
     assert!(ok, "the twin program must build on the inline native path:\n{stderr}");
     assert_eq!(

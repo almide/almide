@@ -1,5 +1,5 @@
 # Shrink-only distance from docs/stdlib/*.md to the stdlib redesign target (scripts/check-stdlib-target.py).
-missing = 280
-shape = 152
+missing = 83
+shape = 128
 undeprecated = 403
-lang_wait = 51
+lang_wait = 0

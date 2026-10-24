@@ -131,19 +131,31 @@ impl<'a> Interpreter<'a> {
         for a in &args[1..] {
             rest.push(val!(self.eval_expr(a, scope)));
         }
+        if let Some(Some(msg)) = scope.with_slot(recv, |slot| crate::inplace::put_out_of_range(m, f, slot, &rest)) {
+            return self.put_abort(msg);
+        }
         // The mutation runs against the binding's own storage — `with_slot`
         // rather than get/assign, so `Rc::make_mut` inside can keep a push loop
         // linear. Every argument is already a value by here, so nothing under
         // this closure re-enters the scope.
-        match scope.with_slot(recv, |slot| crate::inplace::apply(m, f, slot, rest)) {
+        match scope.with_slot(recv, |slot| {
+            crate::inplace::apply(m, f, slot, rest).map(|out| moved_back(m, f, out, slot))
+        }) {
             Some(Some(out)) => Flow::val(out),
             Some(None) => Flow::Abort(format!("internal: malformed `{m}.{f}` receiver or args")),
             None => Flow::Abort(format!("internal: `{m}.{f}` on an unbound receiver")),
         }
     }
 
+    /// A `bytes.put_*` window outside the buffer: the stdlib body's `panic`,
+    /// so the same `PANIC:` termination.
+    fn put_abort(&self, msg: String) -> Flow {
+        self.panicked.set(true);
+        Flow::Abort(msg)
+    }
+
     /// [`Self::eval_inplace_mutation`] for a receiver that is not a variable.
-    /// A TEMPORARY — a call result (`bytes.append_u8(bytes.new(2), 7)`,
+    /// A TEMPORARY — a call result (`bytes.append_u8(bytes.zeros(2), 7)`,
     /// #1849) — has no binding to write back to, and none is needed: both
     /// backends evaluate the arguments in order, mutate the temporary and
     /// drop it, so the statement observes nothing but its own argument
@@ -177,15 +189,24 @@ impl<'a> Interpreter<'a> {
             for a in &args[1..] {
                 rest.push(val!(self.eval_expr(a, scope)));
             }
-            return match scope.with_slot(id, |slot| {
+            let mut oob = None;
+            let applied = scope.with_slot(id, |slot| {
                 let mut cur = slot;
                 for field in &path {
                     let Value::Record { fields, .. } = cur else { return None };
                     let fields = std::rc::Rc::make_mut(fields);
                     cur = &mut fields.iter_mut().find(|(k, _)| k == field)?.1;
                 }
-                crate::inplace::apply(m, f, cur, rest)
-            }) {
+                oob = crate::inplace::put_out_of_range(m, f, cur, &rest);
+                if oob.is_some() {
+                    return Some(Value::Unit);
+                }
+                crate::inplace::apply(m, f, cur, rest).map(|out| moved_back(m, f, out, cur))
+            });
+            if let Some(msg) = oob {
+                return self.put_abort(msg);
+            }
+            return match applied {
                 Some(Some(out)) => Flow::val(out),
                 Some(None) => Flow::Abort(format!(
                     "internal: `{m}.{f}` through a record field the binding does not hold"
@@ -211,8 +232,11 @@ impl<'a> Interpreter<'a> {
         for a in &args[1..] {
             rest.push(val!(self.eval_expr(a, scope)));
         }
+        if let Some(msg) = crate::inplace::put_out_of_range(m, f, &temp, &rest) {
+            return self.put_abort(msg);
+        }
         match crate::inplace::apply(m, f, &mut temp, rest) {
-            Some(out) => Flow::val(out),
+            Some(out) => Flow::val(moved_back(m, f, out, &temp)),
             None => Flow::Abort(format!("internal: malformed `{m}.{f}` receiver or args")),
         }
     }
@@ -562,5 +586,20 @@ fn member_path(recv: &IrExpr) -> Option<(almide_ir::VarId, Vec<almide_base::inte
             }
             _ => return None,
         }
+    }
+}
+
+/// What an intercepted writer's call evaluates to. A stdlib writer with an
+/// Almide body over `mut b` (`bytes.put_u16_le`, `bytes.pop`) arrives move-mode
+/// rewritten (almide-ir `mut_param`): its call answers the written buffer — and
+/// `(result, buffer)` when it returned a value of its own — which the rewritten
+/// site stores back. An intrinsic writer's call answers its own result.
+fn moved_back(m: &str, f: &str, out: Value, buf: &Value) -> Value {
+    if !almide_ir::mut_args::stdlib_fn_has_almide_body(m, f) {
+        return out;
+    }
+    match out {
+        Value::Unit => buf.clone(),
+        out => Value::tuple(vec![out, buf.clone()]),
     }
 }

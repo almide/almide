@@ -23,7 +23,7 @@ fn stream(mut out: Bytes, n: Int) -> Unit = {
 }
 
 fn main() -> Unit = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   stream(out, 16)
   println("head=${out |> bytes.to_list |> list.take(5) |> list.map((x) => int.to_string(x)) |> list.join(",")}")
   println("len=${bytes.len(out)}")

@@ -1,4 +1,4 @@
-<!-- description: First-party Hono-like web framework with template and Codec integration -->
+<!-- description: Hono-like web framework as an external package over stdlib http, with template and Codec integration -->
 # Web Framework
 
 ## Vision
@@ -6,6 +6,16 @@
 Almide's first-party web framework. Achieves Hono-equivalent DX with Almide's philosophy.
 
 A thin layer on top of stdlib's `http` primitives. Provided as an external library, but template / Codec integration is uniquely Almide.
+
+## Status (2026-10-24 decision)
+
+- **Placement: an external package, not the stdlib.** Stdlib `http` keeps the surface the stdlib redesign fixed (`route` / `router` / `mount` / `wrap` / `param` / `serve`, unchanged in [L2-http](../stdlib-redesign/L2-http.md)). This layer sits on top of it and adds nothing to `stdlib/http.almd`.
+- **Hono's look, Almide's semantics.** Keep the vocabulary models already know (`app |> get(...) |> post(...) |> use(...)`, `json` / `text` / `html` responders). Replace what depends on shared mutable state:
+  - `c.set` / `c.get` becomes values passed with the request;
+  - the `await next()` onion becomes middleware as `Handler -> Handler` (what `http.wrap` already composes);
+  - a mutating `app` becomes a pipe-built value.
+- **Waiting on:** optional arguments (`json(data)` vs `json(data, 201)`) need default parameters, which the language does not have; until then the status variant is a separately named function.
+- **When:** after the stdlib redesign waves and the v0.68.0 release.
 
 ## Design Principles
 

@@ -251,6 +251,510 @@ fn base64_decode(s: String) -> Result[Bytes, String] = {
 
 fn base64_decode_url(s: String) -> Result[Bytes, String] = base64_decode(s)
 "#;
+pub const SRC_BIGINT: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// An arbitrary-precision integer.
+type BigInt: Numeric, Integer = { neg: Bool, limbs: List[Int] }
+
+
+/// BigInt from trimmed decimal s with an optional + or -; err on junk.
+fn parse(s: String) -> Result[BigInt, String] = parse_radix(s, 10)
+
+/// BigInt from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
+/// err on junk; radix outside 2..36 aborts.
+fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
+  check_radix(radix)
+  let bytes = string.to_bytes(string.trim(s))
+  match bytes {
+    [] => err("cannot parse integer from empty string"),
+    [45, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, true),
+    [43, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, false),
+    _ => read_digits(strip_radix_prefix(bytes, radix), radix, false),
+  }
+}
+
+/// Decimal digits, with - when negative.
+fn to_string(x: BigInt) -> String = to_string_radix(x, 10)
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: BigInt, radix: Int) -> String = {
+  check_radix(radix)
+  let k = chunk_width(radix, 1, radix)
+  let chunks = radix_chunks(x.limbs, int.pow(radix, k), [])
+  let text = match chunks {
+    [] => "0",
+    [top, ..rest] => int.to_string_radix(top, radix) + (rest |> list.map((c) => string.pad_start(int.to_string_radix(c, radix), k, "0")) |> string.join("")),
+  }
+  if x.neg then "-" + text else text
+}
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: BigInt, b: BigInt) -> Int = match (a.neg, b.neg) {
+  (false, true) => 1,
+  (true, false) => -1,
+  (false, false) => compare_mag(a.limbs, b.limbs),
+  _ => compare_mag(b.limbs, a.limbs),
+}
+
+/// Lesser of a and b.
+fn min(a: BigInt, b: BigInt) -> BigInt = if compare(a, b) <= 0 then a else b
+
+/// Greater of a and b.
+fn max(a: BigInt, b: BigInt) -> BigInt = if compare(a, b) >= 0 then a else b
+
+/// x limited to lo..hi; aborts when lo > hi.
+fn clamp(x: BigInt, lo: BigInt, hi: BigInt) -> BigInt =
+  if compare(lo, hi) > 0 then panic("clamp requires min <= max")
+  else max(lo, min(x, hi))
+
+/// Magnitude of x.
+fn abs(x: BigInt) -> BigInt = { neg: false, limbs: x.limbs }
+
+/// -1, 0 or 1 by the sign of x; 0 for 0.
+fn sign(x: BigInt) -> Int = if x.neg then -1
+else if list.is_empty(x.limbs) then 0 else 1
+
+/// True when x is a multiple of 2.
+fn is_even(x: BigInt) -> Bool = limb(x.limbs, 0) % 2 == 0
+
+/// True when x is not a multiple of 2.
+fn is_odd(x: BigInt) -> Bool = limb(x.limbs, 0) % 2 != 0
+
+/// Quotient rounded toward -inf; b == 0 aborts.
+fn floor_div(a: BigInt, b: BigInt) -> BigInt = {
+  let (q, r) = divide(a, b)
+  if list.is_empty(r.limbs) or a.neg == b.neg then q else add(q, small(-1))
+}
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: BigInt, b: BigInt) -> BigInt = {
+  let (_, r) = divide(a, b)
+  if list.is_empty(r.limbs) or a.neg == b.neg then r else add(r, b)
+}
+
+/// base raised to exp; exp < 0 aborts.
+fn pow(base: BigInt, exp: Int) -> BigInt = if exp < 0 then panic("negative exponent")
+else power(base, exp, small(1))
+
+/// Bits needed to hold the magnitude of x; 0 for 0.
+fn bit_length(x: BigInt) -> Int = match list.len(x.limbs) {
+  0 => 0,
+  n => 30 * (n - 1) + int.bit_length(limb(x.limbs, n - 1)),
+}
+
+
+/// Bitwise AND.
+fn band(a: BigInt, b: BigInt) -> BigInt = bitwise(a, b, a.neg and b.neg, (x, y) => int.band(x, y))
+
+/// Bitwise OR.
+fn bor(a: BigInt, b: BigInt) -> BigInt = bitwise(a, b, a.neg or b.neg, (x, y) => int.bor(x, y))
+
+/// Bitwise XOR.
+fn bxor(a: BigInt, b: BigInt) -> BigInt = bitwise(a, b, a.neg != b.neg, (x, y) => int.bxor(x, y))
+
+/// Bitwise complement; equals -x - 1.
+fn bnot(x: BigInt) -> BigInt = add(negate(x), small(-1))
+
+/// a shifted left by n bits (a * 2^n); n < 0 aborts.
+fn bshl(a: BigInt, n: Int) -> BigInt = if n < 0 then panic("shift count must not be negative")
+else make(a.neg, list.repeat(0, n / 30) + shift_left_bits(a.limbs, n % 30, 0, 0, []))
+
+/// a shifted right by n bits, rounding toward -inf (sign-filling); n < 0 aborts.
+fn bshr(a: BigInt, n: Int) -> BigInt = if n < 0 then panic("shift count must not be negative")
+else if a.neg then bnot(shr_magnitude(bnot(a), n))
+else shr_magnitude(a, n)
+
+
+local fn shr_magnitude(a: BigInt, n: Int) -> BigInt = make(
+  false,
+  shift_right_bits(list.drop(a.limbs, n / 30), n % 30),
+)
+
+
+
+local fn sub(a: BigInt, b: BigInt) -> BigInt = add(a, negate(b))
+
+local fn mul(a: BigInt, b: BigInt) -> BigInt = multiply(a, b)
+
+local fn div(a: BigInt, b: BigInt) -> BigInt = {
+  let (q, _) = divide(a, b)
+  q
+}
+
+local fn rem(a: BigInt, b: BigInt) -> BigInt = {
+  let (_, r) = divide(a, b)
+  r
+}
+
+local fn neg(a: BigInt) -> BigInt = negate(a)
+
+local fn add(a: BigInt, b: BigInt) -> BigInt =
+  if a.neg == b.neg then make(a.neg, add_mag(a.limbs, b.limbs))
+  else if compare_mag(a.limbs, b.limbs) >= 0 then make(a.neg, sub_mag(a.limbs, b.limbs))
+  else make(b.neg, sub_mag(b.limbs, a.limbs))
+
+local fn negate(x: BigInt) -> BigInt = make(not x.neg, x.limbs)
+
+local fn multiply(a: BigInt, b: BigInt) -> BigInt = make(a.neg != b.neg, mul_mag(a.limbs, b.limbs))
+
+
+local fn divide(a: BigInt, b: BigInt) -> (BigInt, BigInt) =
+  if list.is_empty(b.limbs) then panic("division by zero")
+  else {
+    let (q, r) = divmod_mag(a.limbs, b.limbs)
+    (make(a.neg != b.neg, q), make(a.neg, r))
+  }
+
+local fn power(base: BigInt, exp: Int, acc: BigInt) -> BigInt = if exp == 0 then acc
+else if exp == 1 then multiply(acc, base)
+else if exp % 2 == 1 then power(multiply(base, base), exp / 2, multiply(acc, base))
+else power(multiply(base, base), exp / 2, acc)
+
+
+local fn limb_base() -> Int = 1073741824
+
+local fn limb_mask() -> Int = 1073741823
+
+local fn limb(l: List[Int], i: Int) -> Int = list.get(l, i) ?? 0
+
+
+local fn make(neg: Bool, limbs: List[Int]) -> BigInt = {
+  let l = list.take(limbs, top_nonzero(limbs, list.len(limbs)))
+  { neg: neg and not list.is_empty(l), limbs: l }
+}
+
+local fn top_nonzero(l: List[Int], n: Int) -> Int =
+  if n > 0 and limb(l, n - 1) == 0 then top_nonzero(l, n - 1) else n
+
+local fn small(n: Int) -> BigInt = make(n < 0, int_limbs(if n < 0 then n else 0 - n, []))
+
+
+local fn int_limbs(n: Int, acc: List[Int]) -> List[Int] = if n == 0 then acc
+else int_limbs(n / limb_base(), acc + [0 - n % limb_base()])
+
+
+local fn compare_mag(a: List[Int], b: List[Int]) -> Int = {
+  let n = list.len(a)
+  let m = list.len(b)
+  if n != m then int.compare(n, m)
+  else compare_from_top(a, b, n - 1)
+}
+
+local fn compare_from_top(a: List[Int], b: List[Int], i: Int) -> Int = if i < 0 then 0
+else if limb(a, i) != limb(b, i) then int.compare(limb(a, i), limb(b, i))
+else compare_from_top(a, b, i - 1)
+
+local fn add_mag(a: List[Int], b: List[Int]) -> List[Int] = add_from(
+  a,
+  b,
+  0,
+  0,
+  int.max(list.len(a), list.len(b)),
+  [],
+)
+
+local fn add_from(a: List[Int], b: List[Int], i: Int, carry: Int, n: Int, acc: List[Int]) -> List[Int] =
+  if i >= n then (if carry > 0 then acc + [carry]
+  else acc)
+  else {
+    let s = limb(a, i) + limb(b, i) + carry
+    add_from(a, b, i + 1, s / limb_base(), n, acc + [int.band(s, limb_mask())])
+  }
+
+
+local fn sub_mag(a: List[Int], b: List[Int]) -> List[Int] = sub_from(a, b, 0, 0, list.len(a), [])
+
+local fn sub_from(a: List[Int], b: List[Int], i: Int, borrow: Int, n: Int, acc: List[Int]) -> List[Int] =
+  if i >= n then acc
+  else {
+    let d = limb(a, i) - limb(b, i) - borrow
+    if d < 0 then sub_from(a, b, i + 1, 1, n, acc + [d + limb_base()])
+    else sub_from(a, b, i + 1, 0, n, acc + [d])
+  }
+
+local fn mul_mag(a: List[Int], b: List[Int]) -> List[Int] = list.enumerate(b) |> list.fold(
+  [],
+  (acc, (i, d)) => add_mag(acc, list.repeat(0, i) + mul_small(a, d)),
+)
+
+
+local fn mul_small(a: List[Int], m: Int) -> List[Int] = if m == 0 then []
+else mul_small_from(a, m, 0, 0, [])
+
+local fn mul_small_from(a: List[Int], m: Int, i: Int, carry: Int, acc: List[Int]) -> List[Int] =
+  if i >= list.len(a) then (if carry > 0 then acc + [carry]
+  else acc)
+  else {
+    let p = limb(a, i) * m + carry
+    mul_small_from(a, m, i + 1, p / limb_base(), acc + [int.band(p, limb_mask())])
+  }
+
+
+local fn divmod_small(a: List[Int], d: Int) -> (List[Int], Int) = divmod_small_from(
+  a,
+  d,
+  list.len(a) - 1,
+  0,
+  [],
+)
+
+local fn divmod_small_from(a: List[Int], d: Int, i: Int, rem: Int, acc: List[Int]) -> (List[Int], Int) =
+  if i < 0 then (list.take(acc, top_nonzero(acc, list.len(acc))), rem)
+  else {
+    let cur = rem * limb_base() + limb(a, i)
+    divmod_small_from(a, d, i - 1, cur % d, [cur / d] + acc)
+  }
+
+
+
+local fn divmod_mag(a: List[Int], b: List[Int]) -> (List[Int], List[Int]) =
+  if compare_mag(a, b) < 0 then ([], a)
+  else if list.len(b) == 1 then {
+    let (q, r) = divmod_small(a, limb(b, 0))
+    (q, if r == 0 then []
+    else [r])
+  } else long_divide(a, b, list.len(a) - 1, [], [])
+
+local fn long_divide(a: List[Int], b: List[Int], i: Int, rem: List[Int], acc: List[Int]) -> (List[Int], List[Int]) =
+  if i < 0 then (list.take(acc, top_nonzero(acc, list.len(acc))), rem)
+  else {
+    let shifted = trim([limb(a, i)] + rem)
+    let q = quotient_limb(shifted, b)
+    long_divide(a, b, i - 1, trim(sub_mag(shifted, mul_small(b, q))), [q] + acc)
+  }
+
+local fn trim(l: List[Int]) -> List[Int] = list.take(l, top_nonzero(l, list.len(l)))
+
+
+local fn quotient_limb(rem: List[Int], b: List[Int]) -> Int = {
+  let m = list.len(b)
+  let top = limb(b, m - 1)
+  let t = if list.len(rem) > m then limb(rem, m) * limb_base() + limb(rem, m - 1) else limb(
+    rem,
+    m - 1,
+  )
+  search_quotient(rem, b, t / (top + 1), int.min(limb_mask(), (t + 1) / top))
+}
+
+local fn search_quotient(rem: List[Int], b: List[Int], lo: Int, hi: Int) -> Int =
+  if lo >= hi then lo
+  else {
+    let mid = (lo + hi + 1) / 2
+    if compare_mag(trim(mul_small(b, mid)), rem) <= 0 then search_quotient(rem, b, mid, hi)
+    else search_quotient(rem, b, lo, mid - 1)
+  }
+
+
+local fn shift_left_bits(a: List[Int], r: Int, i: Int, carry: Int, acc: List[Int]) -> List[Int] =
+  if i >= list.len(a) then acc + [carry]
+  else {
+    let v = int.bshl(limb(a, i), r) + carry
+    shift_left_bits(a, r, i + 1, int.bshr(v, 30), acc + [int.band(v, limb_mask())])
+  }
+
+local fn shift_right_bits(a: List[Int], r: Int) -> List[Int] = list.range(0, list.len(a)) |> list.map((i) => int.band(int.bor(int.bshr(limb(a, i), r), int.bshl(limb(a, i + 1), 30 - r)), limb_mask()))
+
+
+
+local fn bitwise(a: BigInt, b: BigInt, neg: Bool, f: (Int, Int) -> Int) -> BigInt = {
+  let n = int.max(list.len(a.limbs), list.len(b.limbs)) + 1
+  let r = list.zip_with(twos(a, n), twos(b, n), f)
+  if neg then make(true, add_mag(complement(r), [1]))
+  else make(false, r)
+}
+
+local fn twos(x: BigInt, n: Int) -> List[Int] =
+  if x.neg then complement(pad(sub_mag(x.limbs, [1]), n))
+  else pad(x.limbs, n)
+
+local fn pad(l: List[Int], n: Int) -> List[Int] = l + list.repeat(0, n - list.len(l))
+
+local fn complement(l: List[Int]) -> List[Int] = l |> list.map((d) => limb_mask() - d)
+
+
+local fn check_radix(radix: Int) -> Unit =
+  if radix < 2 or radix > 36 then panic("radix must be in 2..36, got ${radix}") else ()
+
+
+local fn chunk_width(radix: Int, k: Int, p: Int) -> Int = if p * radix > limb_base() then k
+else chunk_width(radix, k + 1, p * radix)
+
+
+local fn radix_chunks(l: List[Int], d: Int, acc: List[Int]) -> List[Int] =
+  if list.is_empty(l) then acc
+  else {
+    let (q, r) = divmod_small(l, d)
+    radix_chunks(q, d, [r] + acc)
+  }
+
+
+local fn strip_radix_prefix(bytes: List[Int], radix: Int) -> List[Int] = match bytes {
+  [48, p, d, ..rest] => if prefix_radix(p) == radix then [d] + rest
+  else bytes,
+  _ => bytes,
+}
+
+local fn prefix_radix(b: Int) -> Int = match b {
+  120 | 88 => 16,
+  111 | 79 => 8,
+  98 | 66 => 2,
+  _ => 0,
+}
+
+
+local fn digit_value(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
+else if b >= 97 and b <= 122 then b - 87
+else if b >= 65 and b <= 90 then b - 55
+else 99
+
+local fn read_digits(digits: List[Int], radix: Int, neg: Bool) -> Result[BigInt, String] =
+  if list.is_empty(digits) then err("invalid digit found in string")
+  else if list.any(digits, (b) => digit_value(b) >= radix) then err("invalid digit found in string")
+  else {
+    let k = chunk_width(radix, 1, radix)
+    ok(make(
+      neg,
+      list.chunk(digits, k) |> list.fold(
+        [],
+        (acc, chunk) => add_mag(
+          mul_small(acc, int.pow(radix, list.len(chunk))),
+          chunk_value(chunk, radix),
+        ),
+      ),
+    ))
+  }
+
+local fn chunk_value(chunk: List[Int], radix: Int) -> List[Int] = {
+  let v = chunk |> list.fold(0, (acc, b) => acc * radix + digit_value(b))
+  if v == 0 then []
+  else [v]
+}
+
+
+
+
+
+/// x as BigInt, toward zero; NaN or an infinity aborts.
+fn from[S: Numeric](x: S) -> BigInt = match from_checked(x.__trunc()) {
+  some(b) => b,
+  none => panic("bigint.from: the value is not a finite number"),
+}
+
+/// some(x as BigInt) when x is an integer, else none (a fraction, NaN, an infinity).
+fn from_checked[S: Numeric](x: S) -> BigInt? = match x.__int_exact() {
+  some(n) => some(small(n)),
+  none => match x.__decimal_exact() {
+    some(digits) => match parse(digits) {
+      ok(b) => some(b),
+      err(_) => none,
+    },
+    none => none,
+  },
+}
+
+
+
+
+fn __int_exact(x: BigInt) -> Int? =
+  if compare(x, small(int.min_value())) >= 0 and compare(x, small(int.max_value())) <= 0 then some(int_value(x))
+  else none
+
+fn __uint64_exact(x: BigInt) -> UInt64? = if x.neg or bit_length(x) > 64 then none
+else {
+
+  let lo = int_value(make(false, list.take(x.limbs, 2)))
+  let hi = int_value(make(false, list.drop(x.limbs, 2)))
+  some(int.to_uint64(lo) + int.to_uint64(hi) * int.to_uint64(1152921504606846976))
+}
+
+fn __trunc(x: BigInt) -> BigInt = x
+
+fn __int_sat(x: BigInt) -> Int = match __int_exact(x) {
+  some(n) => n,
+  none => if x.neg then int.min_value() else int.max_value(),
+}
+
+fn __uint64_sat(x: BigInt) -> UInt64 = if x.neg then int.to_uint64(0)
+else match __uint64_exact(x) {
+  some(u) => u,
+  none => uint64.max_value(),
+}
+
+fn __to_float(x: BigInt) -> Float = match __int_exact(x) {
+  some(n) => int.to_float(n),
+  none => {
+
+    let (top, e) = top_bits(x, 61)
+    pow2(e) * int.to_float(top)
+  },
+}
+
+fn __to_float_exact(x: BigInt) -> Float? = {
+  let f = __to_float(x)
+  if float.__decimal_exact(f) == some(to_string(x)) then some(f) else none
+}
+
+fn __to_float32(x: BigInt) -> Float32 = match __int_exact(x) {
+  some(n) => int.to_float32(n),
+  none => {
+    let (top, e) = top_bits(x, 61)
+    if e > 200 then float.to_float32(if x.neg then 0.0 - float.infinity() else float.infinity())
+    else float.to_float32(pow2(e) * float.from_float32(int.to_float32(top)))
+  },
+}
+
+fn __to_float32_exact(x: BigInt) -> Float32? = {
+  let f = __to_float32(x)
+  if float.__decimal_exact(float.from_float32(f)) == some(to_string(x)) then some(f) else none
+}
+
+fn __decimal_exact(x: BigInt) -> String? = some(to_string(x))
+
+fn __bits64(x: BigInt) -> Int = {
+  let low = band(x, add(bshl(small(1), 64), small(-1)))
+  if bit_length(low) <= 63 then int_value(low)
+  else int_value(sub(low, bshl(small(1), 64)))
+}
+
+fn __sum(xs: List[BigInt]) -> BigInt = xs |> list.fold(small(0), (a, b) => add(a, b))
+
+fn __product(xs: List[BigInt]) -> BigInt = xs |> list.fold(small(1), (a, b) => multiply(a, b))
+
+
+
+local fn int_value(x: BigInt) -> Int = list.reverse(x.limbs) |> list.fold(
+  0,
+  (acc, l) => if x.neg then acc * 1073741824 - l else acc * 1073741824 + l,
+)
+
+
+
+
+local fn top_bits(x: BigInt, n: Int) -> (Int, Int) = {
+  let mag = abs(x)
+  let shift = bit_length(mag) - n
+  let top = shr_magnitude(mag, shift)
+  let sticky = if compare(bshl(top, shift), mag) == 0 then 0 else 1
+  let t = int_value(top) * 2 + sticky
+  (if x.neg then 0 - t else t, shift - 1)
+}
+
+
+local fn pow2(e: Int) -> Float = if e > 1023 then float.infinity() else float.from_bits(int.bshl(e + 1023, 52))
+"#;
 pub const SRC_BOOL: &str = r#"
 
 
@@ -277,71 +781,65 @@ pub const SRC_BYTES: &str = r#"
 
 
 
-
-
-
-
-
-
-/// Appends val rounded to f32, BE.
+/// Appends x rounded to f32, BE.
 @intrinsic("almide_rt_bytes_append_f32_be")
-fn append_f32_be(mut b: Bytes, val: Float) -> Unit = _
+fn append_f32_be(mut b: Bytes, x: Float) -> Unit = _
 
-/// Appends val rounded to f32, LE.
+/// Appends x rounded to f32, LE.
 @intrinsic("almide_rt_bytes_append_f32_le")
-fn append_f32_le(mut b: Bytes, val: Float) -> Unit = _
+fn append_f32_le(mut b: Bytes, x: Float) -> Unit = _
 
-/// Appends val as 8-byte f64, BE.
+/// Appends x as 8-byte f64, BE.
 @intrinsic("almide_rt_bytes_append_f64_be")
-fn append_f64_be(mut b: Bytes, val: Float) -> Unit = _
+fn append_f64_be(mut b: Bytes, x: Float) -> Unit = _
 
-/// Appends val as 8-byte f64, LE.
+/// Appends x as 8-byte f64, LE.
 @intrinsic("almide_rt_bytes_append_f64_le")
-fn append_f64_le(mut b: Bytes, val: Float) -> Unit = _
+fn append_f64_le(mut b: Bytes, x: Float) -> Unit = _
 
-/// Appends val's low 16 bits, BE.
+/// Appends x's low 16 bits, BE.
 @intrinsic("almide_rt_bytes_append_i16_be")
-fn append_i16_be(mut b: Bytes, val: Int) -> Unit = _
+fn append_i16_be(mut b: Bytes, x: Int) -> Unit = _
 
-/// Appends val's low 16 bits, LE.
+/// Appends x's low 16 bits, LE.
 @intrinsic("almide_rt_bytes_append_i16_le")
-fn append_i16_le(mut b: Bytes, val: Int) -> Unit = _
+fn append_i16_le(mut b: Bytes, x: Int) -> Unit = _
 
-/// Appends val's low 32 bits, BE.
+/// Appends x's low 32 bits, BE.
 @intrinsic("almide_rt_bytes_append_i32_be")
-fn append_i32_be(mut b: Bytes, val: Int) -> Unit = _
+fn append_i32_be(mut b: Bytes, x: Int) -> Unit = _
 
-/// Appends val's low 32 bits, LE.
+/// Appends x's low 32 bits, LE.
 @intrinsic("almide_rt_bytes_append_i32_le")
-fn append_i32_le(mut b: Bytes, val: Int) -> Unit = _
+fn append_i32_le(mut b: Bytes, x: Int) -> Unit = _
 
-/// Appends val as 8 bytes, BE.
+/// Appends x as 8 bytes, BE.
 @intrinsic("almide_rt_bytes_append_i64_be")
-fn append_i64_be(mut b: Bytes, val: Int) -> Unit = _
+fn append_i64_be(mut b: Bytes, x: Int) -> Unit = _
 
-/// Appends val as 8 bytes, LE.
+/// Appends x as 8 bytes, LE.
 @intrinsic("almide_rt_bytes_append_i64_le")
-fn append_i64_le(mut b: Bytes, val: Int) -> Unit = _
+fn append_i64_le(mut b: Bytes, x: Int) -> Unit = _
 
-/// Appends val's low 16 bits, BE.
+/// Appends x's low 16 bits, BE.
 @intrinsic("almide_rt_bytes_append_u16_be")
-fn append_u16_be(mut b: Bytes, val: Int) -> Unit = _
+fn append_u16_be(mut b: Bytes, x: Int) -> Unit = _
 
-/// Appends val's low 16 bits, LE.
+/// Appends x's low 16 bits, LE.
 @intrinsic("almide_rt_bytes_append_u16_le")
-fn append_u16_le(mut b: Bytes, val: Int) -> Unit = _
+fn append_u16_le(mut b: Bytes, x: Int) -> Unit = _
 
-/// Appends val's low 32 bits, BE.
+/// Appends x's low 32 bits, BE.
 @intrinsic("almide_rt_bytes_append_u32_be")
-fn append_u32_be(mut b: Bytes, val: Int) -> Unit = _
+fn append_u32_be(mut b: Bytes, x: Int) -> Unit = _
 
-/// Appends val's low 32 bits, LE.
+/// Appends x's low 32 bits, LE.
 @intrinsic("almide_rt_bytes_append_u32_le")
-fn append_u32_le(mut b: Bytes, val: Int) -> Unit = _
+fn append_u32_le(mut b: Bytes, x: Int) -> Unit = _
 
-/// Appends val's low 8 bits; 256 becomes 0.
+/// Appends x's low 8 bits; 256 becomes 0.
 @intrinsic("almide_rt_bytes_append_u8")
-fn append_u8(mut b: Bytes, val: Int) -> Unit = _
+fn append_u8(mut b: Bytes, x: Int) -> Unit = _
 
 /// Mutable address of the data; null if empty.
 @deprecated(since=15, use="ffi.address")
@@ -358,7 +856,7 @@ fn as_ptr(b: Bytes) -> RawPtr = _
 
 /// size-byte pieces, last may be short; [] if size <= 0.
 @intrinsic("almide_rt_bytes_chunks")
-fn chunks(b: Bytes, size: Int) -> List[Bytes] = _
+fn __chunks(b: Bytes, size: Int) -> List[Bytes] = _
 
 /// Truncates b to length 0 in place.
 @intrinsic("almide_rt_bytes_clear")
@@ -366,19 +864,19 @@ fn clear(mut b: Bytes) -> Unit = _
 
 /// Lexicographic -1, 0 or 1; a prefix sorts first.
 @intrinsic("almide_rt_bytes_cmp")
-fn cmp(a: Bytes, b: Bytes) -> Int = _
+fn compare(a: Bytes, b: Bytes) -> Int = _
 
 /// New Bytes holding a then b.
 @intrinsic("almide_rt_bytes_concat")
 fn concat(a: Bytes, b: Bytes) -> Bytes = _
 
-/// True if pattern occurs in b, or pattern is empty.
+/// True if needle occurs in b, or needle is empty.
 @intrinsic("almide_rt_bytes_contains")
-fn contains(b: Bytes, pattern: Bytes) -> Bool = _
+fn contains(b: Bytes, needle: Bytes) -> Bool = _
 
-/// Copies len bytes of src into dst; clamped to fit.
+/// Copies len bytes of src into b; clamped to fit.
 @intrinsic("almide_rt_bytes_copy_from")
-fn copy_from(mut dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = _
+fn copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = _
 
 /// Writes up to cap bytes to ptr; count, 0 if null.
 @deprecated(since=15, use="ffi.write", note="the address comes first (ptr, b, cap), and it is an effect fn")
@@ -398,11 +896,11 @@ fn ends_with(b: Bytes, suffix: Bytes) -> Bool = _
 
 /// True if pos >= len or pos is negative.
 @intrinsic("almide_rt_bytes_eof")
-fn eof(b: Bytes, pos: Int) -> Bool = _
+fn is_eof(b: Bytes, pos: Int) -> Bool = _
 
-/// Sets every byte to val's low 8 bits in place.
+/// Sets every byte to x's low 8 bits in place.
 @intrinsic("almide_rt_bytes_fill")
-fn fill(mut b: Bytes, val: Int) -> Unit = _
+fn fill(mut b: Bytes, x: Int) -> Unit = _
 
 /// xs as bytes, low 8 bits each; -1 becomes 255.
 @intrinsic("almide_rt_bytes_from_list")
@@ -426,13 +924,13 @@ fn get(b: Bytes, i: Int) -> Int? = _
 @intrinsic("almide_rt_bytes_get_or")
 fn get_or(b: Bytes, i: Int, default: Int) -> Int = _
 
-/// First offset of pattern, or none; some(0) if empty.
+/// First offset of needle, or none; some(0) if empty.
 @intrinsic("almide_rt_bytes_index_of")
-fn index_of(b: Bytes, pattern: Bytes) -> Int? = _
+fn index_of(b: Bytes, needle: Bytes) -> Int? = _
 
-/// Copy with val's low byte at pos, clamped to 0..len.
+/// Copy with x's low byte at i, clamped to 0..len.
 @intrinsic("almide_rt_bytes_insert")
-fn insert(b: Bytes, pos: Int, val: Int) -> Bytes = _
+fn insert(b: Bytes, i: Int, x: Int) -> Bytes = _
 
 /// True when b holds no bytes.
 @intrinsic("almide_rt_bytes_is_empty")
@@ -452,23 +950,23 @@ fn lines(b: Bytes) -> List[Bytes] = _
 
 /// f applied per byte; results cut to low 8 bits.
 @intrinsic("almide_rt_bytes_map_each")
-fn map_each(b: Bytes, f: (Int) -> Int) -> Bytes = _
+fn map(b: Bytes, f: (Int) -> Int) -> Bytes = _
 
-/// len zero bytes; empty if len <= 0.
-@intrinsic("almide_rt_bytes_new")
-fn new(len: Int) -> Bytes = _
+/// n zero bytes; empty if n <= 0.
+@intrinsic("almide_rt_bytes_zeros")
+fn zeros(n: Int) -> Bytes = _
 
-/// Left-padded with val to target_len; as-is if longer.
+/// Left-padded with fill to length n; as-is if longer.
 @intrinsic("almide_rt_bytes_pad_left")
-fn pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes = _
+fn pad_start(b: Bytes, n: Int, fill: Int) -> Bytes = _
 
-/// Right-padded with val to target_len; as-is if longer.
+/// Right-padded with fill to length n; as-is if longer.
 @intrinsic("almide_rt_bytes_pad_right")
-fn pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes = _
+fn pad_end(b: Bytes, n: Int, fill: Int) -> Bytes = _
 
-/// Appends val's low 8 bits in place.
+/// Appends x's low 8 bits in place.
 @intrinsic("almide_rt_bytes_push")
-fn push(mut b: Bytes, val: Int) -> Unit = _
+fn push(mut b: Bytes, x: Int) -> Unit = _
 
 /// Sets byte i to val's low 8 bits; no-op out of range.
 @intrinsic("almide_rt_bytes_set_at")
@@ -480,143 +978,143 @@ fn copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit = _
 
 /// Byte at pos != 0; false if out of range.
 @intrinsic("almide_rt_bytes_read_bool")
-fn read_bool(b: Bytes, pos: Int) -> Bool = _
+fn __read_bool(b: Bytes, pos: Int) -> Bool = _
 
 /// (pos+1, byte != 0); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_bool_at")
-fn read_bool_at(b: Bytes, pos: Int) -> (Int, Bool?) = _
+fn __read_bool_at(b: Bytes, pos: Int) -> (Int, Bool?) = _
 
 /// f16 LE at pos; 0.0 if out of range.
 @intrinsic("almide_rt_bytes_read_f16_le")
-fn read_f16_le(b: Bytes, pos: Int) -> Float = _
+fn __read_f16_le(b: Bytes, pos: Int) -> Float = _
 
 /// (pos+2, f16 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_f16_le_at")
-fn read_f16_le_at(b: Bytes, pos: Int) -> (Int, Float?) = _
+fn __read_f16_le_at(b: Bytes, pos: Int) -> (Int, Float?) = _
 
 /// count f16 LE from pos; 0.0 past the end.
 @intrinsic("almide_rt_bytes_read_f16_le_array")
-fn read_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
+fn __read_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
 
 /// f32 BE at pos; 0.0 if out of range.
 @intrinsic("almide_rt_bytes_read_f32_be")
-fn read_f32_be(b: Bytes, pos: Int) -> Float = _
+fn __read_f32_be(b: Bytes, pos: Int) -> Float = _
 
 /// count f32 BE from pos; 0.0 past the end.
 @intrinsic("almide_rt_bytes_read_f32_be_array")
-fn read_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
+fn __read_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
 
 /// (pos+4, f32 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_f32_be_at")
-fn read_f32_be_at(b: Bytes, pos: Int) -> (Int, Float?) = _
+fn __read_f32_be_at(b: Bytes, pos: Int) -> (Int, Float?) = _
 
 /// f32 LE at pos; 0.0 if out of range.
 @intrinsic("almide_rt_bytes_read_f32_le")
-fn read_f32_le(b: Bytes, pos: Int) -> Float = _
+fn __read_f32_le(b: Bytes, pos: Int) -> Float = _
 
 /// count f32 LE from pos; 0.0 past the end.
 @intrinsic("almide_rt_bytes_read_f32_le_array")
-fn read_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
+fn __read_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
 
 /// (pos+4, f32 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_f32_le_at")
-fn read_f32_le_at(b: Bytes, pos: Int) -> (Int, Float?) = _
+fn __read_f32_le_at(b: Bytes, pos: Int) -> (Int, Float?) = _
 
 /// f64 BE at pos; 0.0 if out of range.
 @intrinsic("almide_rt_bytes_read_f64_be")
-fn read_f64_be(b: Bytes, pos: Int) -> Float = _
+fn __read_f64_be(b: Bytes, pos: Int) -> Float = _
 
 /// count f64 BE from pos; 0.0 past the end.
 @intrinsic("almide_rt_bytes_read_f64_be_array")
-fn read_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
+fn __read_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
 
 /// (pos+8, f64 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_f64_be_at")
-fn read_f64_be_at(b: Bytes, pos: Int) -> (Int, Float?) = _
+fn __read_f64_be_at(b: Bytes, pos: Int) -> (Int, Float?) = _
 
 /// f64 LE at pos; 0.0 if out of range.
 @intrinsic("almide_rt_bytes_read_f64_le")
-fn read_f64_le(b: Bytes, pos: Int) -> Float = _
+fn __read_f64_le(b: Bytes, pos: Int) -> Float = _
 
 /// count f64 LE from pos; 0.0 past the end.
 @intrinsic("almide_rt_bytes_read_f64_le_array")
-fn read_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
+fn __read_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = _
 
 /// (pos+8, f64 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_f64_le_at")
-fn read_f64_le_at(b: Bytes, pos: Int) -> (Int, Float?) = _
+fn __read_f64_le_at(b: Bytes, pos: Int) -> (Int, Float?) = _
 
 /// i16 BE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_i16_be")
-fn read_i16_be(b: Bytes, pos: Int) -> Int = _
+fn __read_i16_be(b: Bytes, pos: Int) -> Int = _
 
 /// (pos+2, i16 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_i16_be_at")
-fn read_i16_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
+fn __read_i16_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
 /// count i16 BE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_i16_be_array")
-fn read_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
+fn __read_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
 /// i16 LE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_i16_le")
-fn read_i16_le(b: Bytes, pos: Int) -> Int = _
+fn __read_i16_le(b: Bytes, pos: Int) -> Int = _
 
 /// (pos+2, i16 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_i16_le_at")
-fn read_i16_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
+fn __read_i16_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
 /// count i16 LE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_i16_le_array")
-fn read_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
+fn __read_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
 /// i32 BE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_i32_be")
-fn read_i32_be(b: Bytes, pos: Int) -> Int = _
+fn __read_i32_be(b: Bytes, pos: Int) -> Int = _
 
 /// count i32 BE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_i32_be_array")
-fn read_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
+fn __read_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
 /// (pos+4, i32 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_i32_be_at")
-fn read_i32_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
+fn __read_i32_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
 /// i32 LE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_i32_le")
-fn read_i32_le(b: Bytes, pos: Int) -> Int = _
+fn __read_i32_le(b: Bytes, pos: Int) -> Int = _
 
 /// count i32 LE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_i32_le_array")
-fn read_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
+fn __read_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
 /// (pos+4, i32 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_i32_le_at")
-fn read_i32_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
+fn __read_i32_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
 /// i64 BE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_i64_be")
-fn read_i64_be(b: Bytes, pos: Int) -> Int = _
+fn __read_i64_be(b: Bytes, pos: Int) -> Int = _
 
 /// count i64 BE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_i64_be_array")
-fn read_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
+fn __read_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
 /// (pos+8, i64 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_i64_be_at")
-fn read_i64_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
+fn __read_i64_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
 /// i64 LE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_i64_le")
-fn read_i64_le(b: Bytes, pos: Int) -> Int = _
+fn __read_i64_le(b: Bytes, pos: Int) -> Int = _
 
 /// count i64 LE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_i64_le_array")
-fn read_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
+fn __read_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
 /// (pos+8, i64 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_i64_le_at")
-fn read_i64_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
+fn __read_i64_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
 /// Up to count u32-LE-prefixed strings; stops if cut off.
 @intrinsic("almide_rt_bytes_read_length_prefixed_strings_le")
@@ -636,51 +1134,51 @@ fn read_string_be_at(b: Bytes, pos: Int) -> (Int, String?) = _
 
 /// u16 BE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_u16_be")
-fn read_u16_be(b: Bytes, pos: Int) -> Int = _
+fn __read_u16_be(b: Bytes, pos: Int) -> Int = _
 
 /// (pos+2, u16 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u16_be_at")
-fn read_u16_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
+fn __read_u16_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
 /// count u16 BE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_u16_be_array")
-fn read_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
+fn __read_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
 /// u16 LE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_u16_le")
-fn read_u16_le(b: Bytes, pos: Int) -> Int = _
+fn __read_u16_le(b: Bytes, pos: Int) -> Int = _
 
 /// count u16 LE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_u16_le_array")
-fn read_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
+fn __read_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
 /// (pos+2, u16 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u16_le_at")
-fn read_u16_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
+fn __read_u16_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
 /// u32 BE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_u32_be")
-fn read_u32_be(b: Bytes, pos: Int) -> Int = _
+fn __read_u32_be(b: Bytes, pos: Int) -> Int = _
 
 /// count u32 BE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_u32_be_array")
-fn read_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
+fn __read_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
 /// (pos+4, u32 BE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u32_be_at")
-fn read_u32_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
+fn __read_u32_be_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
 /// u32 LE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_u32_le")
-fn read_u32_le(b: Bytes, pos: Int) -> Int = _
+fn __read_u32_le(b: Bytes, pos: Int) -> Int = _
 
 /// count u32 LE from pos; 0 past the end.
 @intrinsic("almide_rt_bytes_read_u32_le_array")
-fn read_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
+fn __read_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 
 /// (pos+4, u32 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u32_le_at")
-fn read_u32_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
+fn __read_u32_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
 /// Byte at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_u8")
@@ -688,11 +1186,11 @@ fn read_u8(b: Bytes, pos: Int) -> Int = _
 
 /// (pos+1, byte); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u8_at")
-fn read_u8_at(b: Bytes, pos: Int) -> (Int, Int?) = _
+fn __read_u8_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
 /// Copy without the byte at pos; as-is if out of range.
 @intrinsic("almide_rt_bytes_remove_at")
-fn remove_at(b: Bytes, pos: Int) -> Bytes = _
+fn remove_at(b: Bytes, i: Int) -> Bytes = _
 
 /// b concatenated n times; empty if n <= 0.
 @intrinsic("almide_rt_bytes_repeat")
@@ -702,70 +1200,70 @@ fn repeat(b: Bytes, n: Int) -> Bytes = _
 @intrinsic("almide_rt_bytes_reverse")
 fn reverse(b: Bytes) -> Bytes = _
 
-/// Copy with byte i set to val; as-is if out of range.
+/// Copy with byte i set to x; as-is if out of range.
 @intrinsic("almide_rt_bytes_set")
 @reuse(b)
-fn set(b: Bytes, i: Int, val: Int) -> Bytes = _
+fn set(b: Bytes, i: Int, x: Int) -> Bytes = _
 
 /// Writes f32 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_f32_be")
-fn set_f32_be(mut b: Bytes, pos: Int, val: Float) -> Unit = _
+fn __set_f32_be(mut b: Bytes, pos: Int, val: Float) -> Unit = _
 
 /// Writes f32 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_f32_le")
-fn set_f32_le(mut b: Bytes, pos: Int, val: Float) -> Unit = _
+fn __set_f32_le(mut b: Bytes, pos: Int, val: Float) -> Unit = _
 
 /// Writes f64 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_f64_be")
-fn set_f64_be(mut b: Bytes, pos: Int, val: Float) -> Unit = _
+fn __set_f64_be(mut b: Bytes, pos: Int, val: Float) -> Unit = _
 
 /// Writes f64 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_f64_le")
-fn set_f64_le(mut b: Bytes, pos: Int, val: Float) -> Unit = _
+fn __set_f64_le(mut b: Bytes, pos: Int, val: Float) -> Unit = _
 
 /// Writes i16 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_i16_be")
-fn set_i16_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
+fn __set_i16_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
 /// Writes i16 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_i16_le")
-fn set_i16_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
+fn __set_i16_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
 /// Writes i32 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_i32_be")
-fn set_i32_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
+fn __set_i32_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
 /// Writes i32 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_i32_le")
-fn set_i32_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
+fn __set_i32_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
 /// Writes i64 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_i64_be")
-fn set_i64_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
+fn __set_i64_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
 /// Writes i64 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_i64_le")
-fn set_i64_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
+fn __set_i64_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
 /// Writes u16 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_u16_be")
-fn set_u16_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
+fn __set_u16_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
 /// Writes u16 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_u16_le")
-fn set_u16_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
+fn __set_u16_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
 /// Writes u32 BE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_u32_be")
-fn set_u32_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
+fn __set_u32_be(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
 /// Writes u32 LE at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_u32_le")
-fn set_u32_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
+fn __set_u32_le(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
 /// Writes val's low byte at pos; no-op out of range.
 @intrinsic("almide_rt_bytes_set_u8")
-fn set_u8(mut b: Bytes, pos: Int, val: Int) -> Unit = _
+fn __set_u8(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 
 /// pos + n, capped at len.
 @intrinsic("almide_rt_bytes_skip")
@@ -789,7 +1287,7 @@ fn starts_with(b: Bytes, prefix: Bytes) -> Bool = _
 
 /// (pos+n, n-byte copy); (pos, none) if out of range.
 @intrinsic("almide_rt_bytes_take_at")
-fn take_at(b: Bytes, pos: Int, n: Int) -> (Int, Bytes?) = _
+fn __take_at(b: Bytes, pos: Int, n: Int) -> (Int, Bytes?) = _
 
 /// Each byte as an Int in 0..255.
 @intrinsic("almide_rt_bytes_to_list")
@@ -805,7 +1303,7 @@ fn to_string_lossy(b: Bytes) -> String = _
 
 /// Appends 1 for true, 0 for false.
 @intrinsic("almide_rt_bytes_write_bool")
-fn write_bool(mut b: Bytes, val: Bool) -> Unit = _
+fn append_bool(mut b: Bytes, x: Bool) -> Unit = _
 
 /// Appends val as 8-byte f64, BE.
 @intrinsic("almide_rt_bytes_write_f64_be")
@@ -830,19 +1328,6 @@ fn write_u8(mut b: Bytes, val: Int) -> Unit = _
 /// Bytewise XOR, as long as the shorter input.
 @intrinsic("almide_rt_bytes_xor")
 fn xor(a: Bytes, b: Bytes) -> Bytes = _
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -899,6 +1384,752 @@ fn set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit = 
 /// Writes value at offset; no-op out of range.
 @intrinsic("almide_rt_bytes_set_float32")
 fn set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit = _
+
+
+/// The parts with sep between them; empty for [].
+@intrinsic("almide_rt_bytes_join")
+fn __join(xs: List[Bytes], sep: Bytes) -> Bytes = _
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+local fn put_out_of_range(name: String, b: Bytes, pos: Int, w: Int) -> Unit = panic("bytes.${name}: ${w}-byte write at ${pos} is out of range for length ${bytes.len(b)}")
+
+
+local fn fits(b: Bytes, pos: Int, w: Int) -> Bool = pos >= 0 and pos <= bytes.len(b) - w
+
+
+local fn array_fits(b: Bytes, pos: Int, count: Int, w: Int) -> Bool = count >= 0 and pos >= 0 and pos <= bytes.len(b) and count <= (bytes.len(b) - pos) / w
+
+/// The byte at pos as 0..255; none outside 0..len. The same value as get.
+fn get_u8(b: Bytes, pos: Int) -> Int? = bytes.get(b, pos)
+
+/// (get_u8(b, pos), pos + 1); the position stays at pos when nothing is read.
+fn next_u8(b: Bytes, pos: Int) -> (Int?, Int) = match get_u8(b, pos) {
+  some(v) => (some(v), pos + 1),
+  none => (none, pos),
+}
+
+/// Writes x's low 8 bits at pos in place; pos outside 0..len aborts.
+fn put_u8(mut b: Bytes, pos: Int, x: Int) -> Unit =
+  if fits(b, pos, 1) then bytes.__set_u8(b, pos, x)
+  else put_out_of_range("put_u8", b, pos, 1)
+
+/// The byte at pos as a signed -128..127; none outside 0..len.
+fn get_i8(b: Bytes, pos: Int) -> Int? = match bytes.get(b, pos) {
+  some(v) => some(if v >= 128 then v - 256 else v),
+  none => none,
+}
+
+/// (get_i8(b, pos), pos + 1); the position stays at pos when nothing is read.
+fn next_i8(b: Bytes, pos: Int) -> (Int?, Int) = match get_i8(b, pos) {
+  some(v) => (some(v), pos + 1),
+  none => (none, pos),
+}
+
+/// Writes x's low 8 bits at pos in place; pos outside 0..len aborts.
+fn put_i8(mut b: Bytes, pos: Int, x: Int) -> Unit =
+  if fits(b, pos, 1) then bytes.__set_u8(b, pos, x)
+  else put_out_of_range("put_i8", b, pos, 1)
+
+/// Appends x's low 8 bits in place; -1 becomes 255.
+fn append_i8(mut b: Bytes, x: Int) -> Unit = bytes.push(b, x)
+
+/// The byte at pos != 0; none outside 0..len.
+fn get_bool(b: Bytes, pos: Int) -> Bool? = if fits(b, pos, 1) then some(bytes.__read_bool(b, pos))
+else none
+
+/// (get_bool(b, pos), pos + 1); the position stays at pos when nothing is read.
+fn next_bool(b: Bytes, pos: Int) -> (Bool?, Int) = match get_bool(b, pos) {
+  some(v) => (some(v), pos + 1),
+  none => (none, pos),
+}
+
+/// Writes 1 for true, 0 for false at pos in place; pos outside 0..len aborts.
+fn put_bool(mut b: Bytes, pos: Int, x: Bool) -> Unit =
+  if fits(b, pos, 1) then bytes.__set_u8(b, pos, if x then 1 else 0)
+  else put_out_of_range("put_bool", b, pos, 1)
+
+/// The u16 LE at pos; none unless 2 bytes fit.
+fn get_u16_le(b: Bytes, pos: Int) -> Int? =
+  if fits(b, pos, 2) then some(bytes.__read_u16_le(b, pos))
+  else none
+
+/// (get_u16_le(b, pos), pos + 2); the position stays at pos when nothing is read.
+fn next_u16_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_u16_le(b, pos) {
+  some(v) => (some(v), pos + 2),
+  none => (none, pos),
+}
+
+/// count u16 LE from pos; none unless all fit or if count < 0.
+fn get_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
+  if array_fits(b, pos, count, 2) then some(bytes.__read_u16_le_array(b, pos, count))
+  else none
+
+/// Writes x as u16 LE at pos in place; a window outside 0..len aborts.
+fn put_u16_le(mut b: Bytes, pos: Int, x: Int) -> Unit =
+  if fits(b, pos, 2) then bytes.__set_u16_le(b, pos, x)
+  else put_out_of_range("put_u16_le", b, pos, 2)
+
+/// The u16 BE at pos; none unless 2 bytes fit.
+fn get_u16_be(b: Bytes, pos: Int) -> Int? =
+  if fits(b, pos, 2) then some(bytes.__read_u16_be(b, pos))
+  else none
+
+/// (get_u16_be(b, pos), pos + 2); the position stays at pos when nothing is read.
+fn next_u16_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_u16_be(b, pos) {
+  some(v) => (some(v), pos + 2),
+  none => (none, pos),
+}
+
+/// count u16 BE from pos; none unless all fit or if count < 0.
+fn get_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
+  if array_fits(b, pos, count, 2) then some(bytes.__read_u16_be_array(b, pos, count))
+  else none
+
+/// Writes x as u16 BE at pos in place; a window outside 0..len aborts.
+fn put_u16_be(mut b: Bytes, pos: Int, x: Int) -> Unit =
+  if fits(b, pos, 2) then bytes.__set_u16_be(b, pos, x)
+  else put_out_of_range("put_u16_be", b, pos, 2)
+
+/// The i16 LE at pos; none unless 2 bytes fit.
+fn get_i16_le(b: Bytes, pos: Int) -> Int? =
+  if fits(b, pos, 2) then some(bytes.__read_i16_le(b, pos))
+  else none
+
+/// (get_i16_le(b, pos), pos + 2); the position stays at pos when nothing is read.
+fn next_i16_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_i16_le(b, pos) {
+  some(v) => (some(v), pos + 2),
+  none => (none, pos),
+}
+
+/// count i16 LE from pos; none unless all fit or if count < 0.
+fn get_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
+  if array_fits(b, pos, count, 2) then some(bytes.__read_i16_le_array(b, pos, count))
+  else none
+
+/// Writes x as i16 LE at pos in place; a window outside 0..len aborts.
+fn put_i16_le(mut b: Bytes, pos: Int, x: Int) -> Unit =
+  if fits(b, pos, 2) then bytes.__set_i16_le(b, pos, x)
+  else put_out_of_range("put_i16_le", b, pos, 2)
+
+/// The i16 BE at pos; none unless 2 bytes fit.
+fn get_i16_be(b: Bytes, pos: Int) -> Int? =
+  if fits(b, pos, 2) then some(bytes.__read_i16_be(b, pos))
+  else none
+
+/// (get_i16_be(b, pos), pos + 2); the position stays at pos when nothing is read.
+fn next_i16_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_i16_be(b, pos) {
+  some(v) => (some(v), pos + 2),
+  none => (none, pos),
+}
+
+/// count i16 BE from pos; none unless all fit or if count < 0.
+fn get_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
+  if array_fits(b, pos, count, 2) then some(bytes.__read_i16_be_array(b, pos, count))
+  else none
+
+/// Writes x as i16 BE at pos in place; a window outside 0..len aborts.
+fn put_i16_be(mut b: Bytes, pos: Int, x: Int) -> Unit =
+  if fits(b, pos, 2) then bytes.__set_i16_be(b, pos, x)
+  else put_out_of_range("put_i16_be", b, pos, 2)
+
+/// The u32 LE at pos; none unless 4 bytes fit.
+fn get_u32_le(b: Bytes, pos: Int) -> Int? =
+  if fits(b, pos, 4) then some(bytes.__read_u32_le(b, pos))
+  else none
+
+/// (get_u32_le(b, pos), pos + 4); the position stays at pos when nothing is read.
+fn next_u32_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_u32_le(b, pos) {
+  some(v) => (some(v), pos + 4),
+  none => (none, pos),
+}
+
+/// count u32 LE from pos; none unless all fit or if count < 0.
+fn get_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
+  if array_fits(b, pos, count, 4) then some(bytes.__read_u32_le_array(b, pos, count))
+  else none
+
+/// Writes x as u32 LE at pos in place; a window outside 0..len aborts.
+fn put_u32_le(mut b: Bytes, pos: Int, x: Int) -> Unit =
+  if fits(b, pos, 4) then bytes.__set_u32_le(b, pos, x)
+  else put_out_of_range("put_u32_le", b, pos, 4)
+
+/// The u32 BE at pos; none unless 4 bytes fit.
+fn get_u32_be(b: Bytes, pos: Int) -> Int? =
+  if fits(b, pos, 4) then some(bytes.__read_u32_be(b, pos))
+  else none
+
+/// (get_u32_be(b, pos), pos + 4); the position stays at pos when nothing is read.
+fn next_u32_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_u32_be(b, pos) {
+  some(v) => (some(v), pos + 4),
+  none => (none, pos),
+}
+
+/// count u32 BE from pos; none unless all fit or if count < 0.
+fn get_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
+  if array_fits(b, pos, count, 4) then some(bytes.__read_u32_be_array(b, pos, count))
+  else none
+
+/// Writes x as u32 BE at pos in place; a window outside 0..len aborts.
+fn put_u32_be(mut b: Bytes, pos: Int, x: Int) -> Unit =
+  if fits(b, pos, 4) then bytes.__set_u32_be(b, pos, x)
+  else put_out_of_range("put_u32_be", b, pos, 4)
+
+/// The i32 LE at pos; none unless 4 bytes fit.
+fn get_i32_le(b: Bytes, pos: Int) -> Int? =
+  if fits(b, pos, 4) then some(bytes.__read_i32_le(b, pos))
+  else none
+
+/// (get_i32_le(b, pos), pos + 4); the position stays at pos when nothing is read.
+fn next_i32_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_i32_le(b, pos) {
+  some(v) => (some(v), pos + 4),
+  none => (none, pos),
+}
+
+/// count i32 LE from pos; none unless all fit or if count < 0.
+fn get_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
+  if array_fits(b, pos, count, 4) then some(bytes.__read_i32_le_array(b, pos, count))
+  else none
+
+/// Writes x as i32 LE at pos in place; a window outside 0..len aborts.
+fn put_i32_le(mut b: Bytes, pos: Int, x: Int) -> Unit =
+  if fits(b, pos, 4) then bytes.__set_i32_le(b, pos, x)
+  else put_out_of_range("put_i32_le", b, pos, 4)
+
+/// The i32 BE at pos; none unless 4 bytes fit.
+fn get_i32_be(b: Bytes, pos: Int) -> Int? =
+  if fits(b, pos, 4) then some(bytes.__read_i32_be(b, pos))
+  else none
+
+/// (get_i32_be(b, pos), pos + 4); the position stays at pos when nothing is read.
+fn next_i32_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_i32_be(b, pos) {
+  some(v) => (some(v), pos + 4),
+  none => (none, pos),
+}
+
+/// count i32 BE from pos; none unless all fit or if count < 0.
+fn get_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
+  if array_fits(b, pos, count, 4) then some(bytes.__read_i32_be_array(b, pos, count))
+  else none
+
+/// Writes x as i32 BE at pos in place; a window outside 0..len aborts.
+fn put_i32_be(mut b: Bytes, pos: Int, x: Int) -> Unit =
+  if fits(b, pos, 4) then bytes.__set_i32_be(b, pos, x)
+  else put_out_of_range("put_i32_be", b, pos, 4)
+
+/// The i64 LE at pos; none unless 8 bytes fit.
+fn get_i64_le(b: Bytes, pos: Int) -> Int? =
+  if fits(b, pos, 8) then some(bytes.__read_i64_le(b, pos))
+  else none
+
+/// (get_i64_le(b, pos), pos + 8); the position stays at pos when nothing is read.
+fn next_i64_le(b: Bytes, pos: Int) -> (Int?, Int) = match get_i64_le(b, pos) {
+  some(v) => (some(v), pos + 8),
+  none => (none, pos),
+}
+
+/// count i64 LE from pos; none unless all fit or if count < 0.
+fn get_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
+  if array_fits(b, pos, count, 8) then some(bytes.__read_i64_le_array(b, pos, count))
+  else none
+
+/// Writes x as i64 LE at pos in place; a window outside 0..len aborts.
+fn put_i64_le(mut b: Bytes, pos: Int, x: Int) -> Unit =
+  if fits(b, pos, 8) then bytes.__set_i64_le(b, pos, x)
+  else put_out_of_range("put_i64_le", b, pos, 8)
+
+/// The i64 BE at pos; none unless 8 bytes fit.
+fn get_i64_be(b: Bytes, pos: Int) -> Int? =
+  if fits(b, pos, 8) then some(bytes.__read_i64_be(b, pos))
+  else none
+
+/// (get_i64_be(b, pos), pos + 8); the position stays at pos when nothing is read.
+fn next_i64_be(b: Bytes, pos: Int) -> (Int?, Int) = match get_i64_be(b, pos) {
+  some(v) => (some(v), pos + 8),
+  none => (none, pos),
+}
+
+/// count i64 BE from pos; none unless all fit or if count < 0.
+fn get_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]? =
+  if array_fits(b, pos, count, 8) then some(bytes.__read_i64_be_array(b, pos, count))
+  else none
+
+/// Writes x as i64 BE at pos in place; a window outside 0..len aborts.
+fn put_i64_be(mut b: Bytes, pos: Int, x: Int) -> Unit =
+  if fits(b, pos, 8) then bytes.__set_i64_be(b, pos, x)
+  else put_out_of_range("put_i64_be", b, pos, 8)
+
+/// The f32 LE at pos; none unless 4 bytes fit.
+fn get_f32_le(b: Bytes, pos: Int) -> Float? =
+  if fits(b, pos, 4) then some(bytes.__read_f32_le(b, pos))
+  else none
+
+/// (get_f32_le(b, pos), pos + 4); the position stays at pos when nothing is read.
+fn next_f32_le(b: Bytes, pos: Int) -> (Float?, Int) = match get_f32_le(b, pos) {
+  some(v) => (some(v), pos + 4),
+  none => (none, pos),
+}
+
+/// count f32 LE from pos; none unless all fit or if count < 0.
+fn get_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
+  if array_fits(b, pos, count, 4) then some(bytes.__read_f32_le_array(b, pos, count))
+  else none
+
+/// Writes x as f32 LE at pos in place; a window outside 0..len aborts.
+fn put_f32_le(mut b: Bytes, pos: Int, x: Float) -> Unit =
+  if fits(b, pos, 4) then bytes.__set_f32_le(b, pos, x)
+  else put_out_of_range("put_f32_le", b, pos, 4)
+
+/// The f32 BE at pos; none unless 4 bytes fit.
+fn get_f32_be(b: Bytes, pos: Int) -> Float? =
+  if fits(b, pos, 4) then some(bytes.__read_f32_be(b, pos))
+  else none
+
+/// (get_f32_be(b, pos), pos + 4); the position stays at pos when nothing is read.
+fn next_f32_be(b: Bytes, pos: Int) -> (Float?, Int) = match get_f32_be(b, pos) {
+  some(v) => (some(v), pos + 4),
+  none => (none, pos),
+}
+
+/// count f32 BE from pos; none unless all fit or if count < 0.
+fn get_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
+  if array_fits(b, pos, count, 4) then some(bytes.__read_f32_be_array(b, pos, count))
+  else none
+
+/// Writes x as f32 BE at pos in place; a window outside 0..len aborts.
+fn put_f32_be(mut b: Bytes, pos: Int, x: Float) -> Unit =
+  if fits(b, pos, 4) then bytes.__set_f32_be(b, pos, x)
+  else put_out_of_range("put_f32_be", b, pos, 4)
+
+/// The f64 LE at pos; none unless 8 bytes fit.
+fn get_f64_le(b: Bytes, pos: Int) -> Float? =
+  if fits(b, pos, 8) then some(bytes.__read_f64_le(b, pos))
+  else none
+
+/// (get_f64_le(b, pos), pos + 8); the position stays at pos when nothing is read.
+fn next_f64_le(b: Bytes, pos: Int) -> (Float?, Int) = match get_f64_le(b, pos) {
+  some(v) => (some(v), pos + 8),
+  none => (none, pos),
+}
+
+/// count f64 LE from pos; none unless all fit or if count < 0.
+fn get_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
+  if array_fits(b, pos, count, 8) then some(bytes.__read_f64_le_array(b, pos, count))
+  else none
+
+/// Writes x as f64 LE at pos in place; a window outside 0..len aborts.
+fn put_f64_le(mut b: Bytes, pos: Int, x: Float) -> Unit =
+  if fits(b, pos, 8) then bytes.__set_f64_le(b, pos, x)
+  else put_out_of_range("put_f64_le", b, pos, 8)
+
+/// The f64 BE at pos; none unless 8 bytes fit.
+fn get_f64_be(b: Bytes, pos: Int) -> Float? =
+  if fits(b, pos, 8) then some(bytes.__read_f64_be(b, pos))
+  else none
+
+/// (get_f64_be(b, pos), pos + 8); the position stays at pos when nothing is read.
+fn next_f64_be(b: Bytes, pos: Int) -> (Float?, Int) = match get_f64_be(b, pos) {
+  some(v) => (some(v), pos + 8),
+  none => (none, pos),
+}
+
+/// count f64 BE from pos; none unless all fit or if count < 0.
+fn get_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
+  if array_fits(b, pos, count, 8) then some(bytes.__read_f64_be_array(b, pos, count))
+  else none
+
+/// Writes x as f64 BE at pos in place; a window outside 0..len aborts.
+fn put_f64_be(mut b: Bytes, pos: Int, x: Float) -> Unit =
+  if fits(b, pos, 8) then bytes.__set_f64_be(b, pos, x)
+  else put_out_of_range("put_f64_be", b, pos, 8)
+
+
+
+/// The IEEE half bits of x, rounded to nearest even straight from the f64 (no
+/// f32 double rounding); overflow is +-inf and a NaN is the quiet 0x7E00.
+fn __f16_bits(x: Float) -> Int = {
+  let bits = float.to_bits(x)
+  let sign = if bits < 0 then 32768 else 0
+  let exp = int.band(int.bshr(bits, 52), 2047)
+  let mant = int.band(bits, 4503599627370495)
+  if exp == 2047 then (if mant != 0 then 32256 else sign + 31744)
+  else if exp == 0 then sign
+  else {
+    let e = exp - 1023 + 15
+    let m = 4503599627370496 + mant
+    let shift = if e >= 1 then 42 else 42 + (1 - e)
+    if shift > 53 then sign
+    else {
+      let q0 = int.bshr(m, shift)
+      let r = int.band(m, int.bshl(1, shift) - 1)
+      let half = int.bshl(1, shift - 1)
+      let q = if r > half or (r == half and int.band(q0, 1) == 1) then q0 + 1 else q0
+      let out = if e >= 1 then int.bshl(e, 10) + (q - 1024) else q
+      if out >= 31744 then sign + 31744 else sign + out
+    }
+  }
+}
+
+
+local fn f16_be_at(b: Bytes, pos: Int) -> Float = bytes.__read_f16_le(
+  bytes.from_list([
+    bytes.get(b, pos + 1) ?? 0,
+    bytes.get(b, pos) ?? 0
+  ]),
+  0,
+)
+
+/// The f16 LE at pos as a Float; none unless 2 bytes fit.
+fn get_f16_le(b: Bytes, pos: Int) -> Float? =
+  if fits(b, pos, 2) then some(bytes.__read_f16_le(b, pos))
+  else none
+
+/// (get_f16_le(b, pos), pos + 2); the position stays at pos when nothing is read.
+fn next_f16_le(b: Bytes, pos: Int) -> (Float?, Int) = match get_f16_le(b, pos) {
+  some(v) => (some(v), pos + 2),
+  none => (none, pos),
+}
+
+/// count f16 LE from pos; none unless all fit or if count < 0.
+fn get_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
+  if array_fits(b, pos, count, 2) then some(bytes.__read_f16_le_array(b, pos, count))
+  else none
+
+/// The f16 BE at pos as a Float; none unless 2 bytes fit.
+fn get_f16_be(b: Bytes, pos: Int) -> Float? = if fits(b, pos, 2) then some(f16_be_at(b, pos))
+else none
+
+/// (get_f16_be(b, pos), pos + 2); the position stays at pos when nothing is read.
+fn next_f16_be(b: Bytes, pos: Int) -> (Float?, Int) = match get_f16_be(b, pos) {
+  some(v) => (some(v), pos + 2),
+  none => (none, pos),
+}
+
+/// count f16 BE from pos; none unless all fit or if count < 0.
+fn get_f16_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]? =
+  if array_fits(b, pos, count, 2) then some(list.range(0, count) |> list.map((i) => f16_be_at(b, pos + 2 * i)))
+  else none
+
+/// Writes x rounded to f16 LE at pos in place; a window outside 0..len aborts.
+fn put_f16_le(mut b: Bytes, pos: Int, x: Float) -> Unit =
+  if fits(b, pos, 2) then bytes.__set_u16_le(b, pos, __f16_bits(x))
+  else put_out_of_range("put_f16_le", b, pos, 2)
+
+/// Writes x rounded to f16 BE at pos in place; a window outside 0..len aborts.
+fn put_f16_be(mut b: Bytes, pos: Int, x: Float) -> Unit =
+  if fits(b, pos, 2) then bytes.__set_u16_be(b, pos, __f16_bits(x))
+  else put_out_of_range("put_f16_be", b, pos, 2)
+
+/// Appends x rounded to f16 (nearest even; overflow is inf), LE.
+fn append_f16_le(mut b: Bytes, x: Float) -> Unit = bytes.append_u16_le(b, __f16_bits(x))
+
+/// Appends x rounded to f16 (nearest even; overflow is inf), BE.
+fn append_f16_be(mut b: Bytes, x: Float) -> Unit = bytes.append_u16_be(b, __f16_bits(x))
+
+
+/// (the n bytes at pos, pos + n); (none, pos) unless they fit or if n < 0.
+fn next_bytes(b: Bytes, pos: Int, n: Int) -> (Bytes?, Int) = {
+  let (next, v) = bytes.__take_at(b, pos, n)
+  (v, next)
+}
+
+/// Appends src's bytes to b in place.
+fn append_bytes(mut b: Bytes, src: Bytes) -> Unit = {
+  b = bytes.concat(b, src)
+}
+
+/// An empty byte buffer.
+fn new() -> Bytes = bytes.zeros(0)
+
+/// n-byte pieces in order, the last may be short; n <= 0 aborts.
+fn chunk(b: Bytes, n: Int) -> List[Bytes] = if n <= 0 then panic("chunk size must be positive")
+else bytes.__chunks(b, n)
+
+/// Removes and returns the last byte; none if b is empty.
+fn pop(mut b: Bytes) -> Int? = {
+  let n = bytes.len(b)
+  let last = bytes.get(b, n - 1)
+  if n > 0 then {
+    b = bytes.slice(b, 0, n - 1)
+  } else ()
+  last
+}
+
+/// The first n bytes; all of b past its length; n < 0 aborts.
+fn take(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.take: negative count ${n}")
+else bytes.slice(b, 0, n)
+
+/// b without its first n bytes; empty past its length; n < 0 aborts.
+fn drop(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.drop: negative count ${n}")
+else bytes.slice(b, n, bytes.len(b))
+
+/// The last n bytes; all of b past its length; n < 0 aborts.
+fn take_end(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.take_end: negative count ${n}")
+else bytes.slice(b, int.max(bytes.len(b) - n, 0), bytes.len(b))
+
+/// b without its last n bytes; empty past its length; n < 0 aborts.
+fn drop_end(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.drop_end: negative count ${n}")
+else bytes.slice(b, 0, int.max(bytes.len(b) - n, 0))
+
+/// (first n bytes, the rest); n past the end gives (b, empty); n < 0 aborts.
+fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) =
+  if n < 0 then panic("bytes.split_at: negative index ${n}")
+  else (bytes.slice(b, 0, n), bytes.slice(b, n, bytes.len(b)))
+
+/// The first byte, or none if b is empty.
+fn first(b: Bytes) -> Int? = bytes.get(b, 0)
+
+/// The last byte, or none if b is empty.
+fn last(b: Bytes) -> Int? = bytes.get(b, bytes.len(b) - 1)
+
+/// The bytes for which f is true.
+fn filter(b: Bytes, f: (Int) -> Bool) -> Bytes = bytes.from_list(list.filter(bytes.to_list(b), f))
+
+/// f folded over the bytes, left to right.
+fn fold[B](b: Bytes, init: B, f: (B, Int) -> B) -> B = list.fold(bytes.to_list(b), init, f)
+
+/// True when f holds for some byte; false for empty b.
+fn any(b: Bytes, f: (Int) -> Bool) -> Bool = list.any(bytes.to_list(b), f)
+
+/// True when f holds for every byte; true for empty b.
+fn all(b: Bytes, f: (Int) -> Bool) -> Bool = list.all(bytes.to_list(b), f)
+
+/// How many bytes satisfy f.
+fn count(b: Bytes, f: (Int) -> Bool) -> Int = list.count(bytes.to_list(b), f)
+
+/// The first byte satisfying f, or none.
+fn find(b: Bytes, f: (Int) -> Bool) -> Int? = list.find(bytes.to_list(b), f)
+
+/// Index of the first byte satisfying f, or none.
+fn find_index(b: Bytes, f: (Int) -> Bool) -> Int? = list.find_index(bytes.to_list(b), f)
+
+/// (index, byte) pairs from 0.
+fn enumerate(b: Bytes) -> List[(Int, Int)] = list.enumerate(bytes.to_list(b))
+
+/// Bytes paired with ys; stops at the shorter.
+fn zip[B](b: Bytes, ys: List[B]) -> List[(Int, B)] = list.zip(bytes.to_list(b), ys)
+
+/// f over bytes paired with ys; stops at the shorter.
+fn zip_with[B, C](b: Bytes, ys: List[B], f: (Int, B) -> C) -> List[C] = list.zip_with(
+  bytes.to_list(b),
+  ys,
+  f,
+)
+
+/// The some results of f over the bytes, in order.
+fn filter_map[B](b: Bytes, f: (Int) -> B?) -> List[B] = list.filter_map(bytes.to_list(b), f)
+
+/// The first some result of f over the bytes, or none.
+fn find_map[B](b: Bytes, f: (Int) -> B?) -> B? = list.find_map(bytes.to_list(b), f)
+
+/// f folded over the bytes from the first; none if b is empty.
+fn reduce(b: Bytes, f: (Int, Int) -> Int) -> Int? = list.reduce(bytes.to_list(b), f)
+
+/// The running fold over the bytes, init excluded.
+fn scan[B](b: Bytes, init: B, f: (B, Int) -> B) -> List[B] = list.scan(bytes.to_list(b), init, f)
+
+/// (bytes where f is true, the rest), each in order.
+fn partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int]) = list.partition(
+  bytes.to_list(b),
+  f,
+)
+
+/// Bytes grouped by f's key, each group in order.
+fn group_by[B](b: Bytes, f: (Int) -> B) -> Map[B, List[Int]] = list.group_by(bytes.to_list(b), f)
+
+/// The bytes in ascending order.
+fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
+
+/// The bytes ordered by f's key; equal keys keep their order.
+fn sort_by[B](b: Bytes, f: (Int) -> B) -> List[Int] = list.sort_by(bytes.to_list(b), f)
+
+local fn merge_with(xs: List[Int], ys: List[Int], cmp: (Int, Int) -> Int, i: Int, j: Int, acc: List[Int]) -> List[Int] = match (list.get(
+  xs,
+  i,
+), list.get(ys, j)) {
+  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, ys, cmp, i, j + 1, acc + [y])
+  else merge_with(xs, ys, cmp, i + 1, j, acc + [x]),
+  (some(_), none) => acc + list.drop(xs, i),
+  _ => acc + list.drop(ys, j),
+}
+
+local fn merge_sort_with(xs: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
+  let n = list.len(xs)
+  if n <= 1 then xs
+  else merge_with(
+    merge_sort_with(list.take(xs, n / 2), cmp),
+    merge_sort_with(list.drop(xs, n / 2), cmp),
+    cmp,
+    0,
+    0,
+    [],
+  )
+}
+
+/// The bytes ordered by cmp (negative = first argument first); stable.
+fn sort_with(b: Bytes, cmp: (Int, Int) -> Int) -> List[Int] = merge_sort_with(bytes.to_list(b), cmp)
+
+/// The smallest byte; none if empty.
+fn min(b: Bytes) -> Int? = list.min(bytes.to_list(b))
+
+/// The largest byte; none if empty.
+fn max(b: Bytes) -> Int? = list.max(bytes.to_list(b))
+
+/// The first byte with the smallest key; none if empty.
+fn min_by[K](b: Bytes, f: (Int) -> K) -> Int? = list.first(list.sort_by(bytes.to_list(b), f))
+
+/// The last byte with the largest key; none if empty.
+fn max_by[K](b: Bytes, f: (Int) -> K) -> Int? = list.last(list.sort_by(bytes.to_list(b), f))
+
+local fn pick_with(xs: List[Int], i: Int, best: Int, cmp: (Int, Int) -> Int, want_max: Bool) -> Int = match list.get(
+  xs,
+  i,
+) {
+  none => best,
+  some(c) => {
+    let o = cmp(c, best)
+    let chosen = if want_max then o >= 0 else o < 0
+    pick_with(xs, i + 1, if chosen then c else best, cmp, want_max)
+  },
+}
+
+/// The first smallest byte by cmp; none if empty.
+fn min_with(b: Bytes, cmp: (Int, Int) -> Int) -> Int? = match bytes.get(b, 0) {
+  some(c) => some(pick_with(bytes.to_list(b), 1, c, cmp, false)),
+  none => none,
+}
+
+/// The last largest byte by cmp; none if empty.
+fn max_with(b: Bytes, cmp: (Int, Int) -> Int) -> Int? = match bytes.get(b, 0) {
+  some(c) => some(pick_with(bytes.to_list(b), 1, c, cmp, true)),
+  none => none,
+}
+
+/// The sum of the bytes; 0 for empty b.
+fn sum(b: Bytes) -> Int = list.fold(bytes.to_list(b), 0, (acc, x) => acc + x)
+
+/// The product of the bytes, wrapping; 1 for empty b.
+fn product(b: Bytes) -> Int = list.fold(bytes.to_list(b), 1, (acc, x) => acc * x)
+
+/// The longest prefix whose bytes all satisfy f.
+fn take_while(b: Bytes, f: (Int) -> Bool) -> Bytes = bytes.from_list(list.take_while(bytes.to_list(b), f))
+
+/// b after the longest prefix whose bytes all satisfy f.
+fn drop_while(b: Bytes, f: (Int) -> Bool) -> Bytes = bytes.from_list(list.drop_while(bytes.to_list(b), f))
+
+/// Every run of n consecutive bytes; [] if n > len; n <= 0 aborts.
+fn window(b: Bytes, n: Int) -> List[Bytes] =
+  if n <= 0 then panic("bytes.window: size must be positive, got ${n}")
+  else list.window(bytes.to_list(b), n) |> list.map((xs) => bytes.from_list(xs))
+
+/// b with each run of equal adjacent bytes collapsed to one.
+fn dedup(b: Bytes) -> Bytes = bytes.from_list(list.dedup(bytes.to_list(b)))
+
+/// The bytes of b with sep between each pair.
+fn intersperse(b: Bytes, sep: Int) -> Bytes = bytes.from_list(list.intersperse(bytes.to_list(b), sep))
+
+/// The first occurrence of each byte value, in order.
+fn unique(b: Bytes) -> Bytes = bytes.from_list(list.unique(bytes.to_list(b)))
+
+/// The first byte of each key f gives, in order.
+fn unique_by[K](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
+
+
+local fn matches_at(xs: List[Int], needle: List[Int], i: Int) -> Bool = list.slice(
+  xs,
+  i,
+  i + list.len(needle),
+) == needle
+
+
+local fn find_from(xs: List[Int], needle: List[Int], i: Int) -> Int =
+  if i + list.len(needle) > list.len(xs) then -1
+  else if matches_at(xs, needle, i) then i
+  else find_from(xs, needle, i + 1)
+
+
+local fn find_back(xs: List[Int], needle: List[Int], i: Int) -> Int =
+  if i < 0 then -1
+  else if matches_at(xs, needle, i) then i
+  else find_back(xs, needle, i - 1)
+
+/// Byte index of the last needle, or none; an empty needle is found at len.
+fn last_index_of(b: Bytes, needle: Bytes) -> Int? = {
+  let xs = bytes.to_list(b)
+  let ns = bytes.to_list(needle)
+  let i = find_back(xs, ns, list.len(xs) - list.len(ns))
+  if i < 0 then none else some(i)
+}
+
+
+local fn replace_go(xs: List[Int], from: List[Int], to: List[Int], i: Int, limit: Int, acc: List[Int]) -> List[Int] = {
+  let j = if limit == 0 then -1
+  else find_from(xs, from, i)
+  if j < 0 then acc + list.drop(xs, i)
+  else replace_go(xs, from, to, j + list.len(from), limit - 1, acc + list.slice(xs, i, j) + to)
+}
+
+
+local fn replace_empty(xs: List[Int], to: List[Int], limit: Int) -> List[Int] =
+  if limit < 0 then to + (xs |> list.flat_map((x) => [x] + to))
+  else to + xs
+
+/// b with every non-overlapping from replaced by to, left to right.
+fn replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes = {
+  let xs = bytes.to_list(b)
+  let fs = bytes.to_list(from)
+  let ts = bytes.to_list(to)
+  if list.is_empty(fs) then bytes.from_list(replace_empty(xs, ts, -1))
+  else bytes.from_list(replace_go(xs, fs, ts, 0, -1, []))
+}
+
+/// b with the first from replaced by to.
+fn replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes = {
+  let xs = bytes.to_list(b)
+  let fs = bytes.to_list(from)
+  let ts = bytes.to_list(to)
+  if list.is_empty(fs) then bytes.from_list(replace_empty(xs, ts, 1))
+  else bytes.from_list(replace_go(xs, fs, ts, 0, 1, []))
+}
+
+/// b without prefix, or none when b does not start with it.
+fn strip_prefix(b: Bytes, prefix: Bytes) -> Bytes? =
+  if bytes.starts_with(b, prefix) then some(bytes.slice(b, bytes.len(prefix), bytes.len(b)))
+  else none
+
+/// b without suffix, or none when b does not end with it.
+fn strip_suffix(b: Bytes, suffix: Bytes) -> Bytes? =
+  if bytes.ends_with(b, suffix) then some(bytes.slice(b, 0, bytes.len(b) - bytes.len(suffix)))
+  else none
+
+local fn count_go(xs: List[Int], needle: List[Int], i: Int, n: Int) -> Int = {
+  let j = find_from(xs, needle, i)
+  if j < 0 then n
+  else count_go(xs, needle, j + list.len(needle), n + 1)
+}
+
+/// Non-overlapping occurrences of needle; len + 1 for an empty needle.
+fn count_matches(b: Bytes, needle: Bytes) -> Int = if bytes.len(needle) == 0 then bytes.len(b) + 1
+else count_go(bytes.to_list(b), bytes.to_list(needle), 0, 0)
 "#;
 pub const SRC_BYTES_APPEND_MULTI: &str = r#"
 
@@ -1009,7 +2240,7 @@ pub const SRC_BYTES_ARRAY: &str = r#"
 
 fn __arr_u16le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let v = bytes.read_u16_le(b, pos + i * 2)
+  let v = bytes.__read_u16_le(b, pos + i * 2)
   prim.store64(dh + 12 + i * 8, v)
   __arr_u16le(b, dh, pos, count, i + 1)
 }
@@ -1023,7 +2254,7 @@ fn bytes_read_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = {
 
 fn __arr_u32le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let v = bytes.read_u32_le(b, pos + i * 4)
+  let v = bytes.__read_u32_le(b, pos + i * 4)
   prim.store64(dh + 12 + i * 8, v)
   __arr_u32le(b, dh, pos, count, i + 1)
 }
@@ -1037,7 +2268,7 @@ fn bytes_read_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = {
 
 fn __arr_i32le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let v = bytes.read_i32_le(b, pos + i * 4)
+  let v = bytes.__read_i32_le(b, pos + i * 4)
   prim.store64(dh + 12 + i * 8, v)
   __arr_i32le(b, dh, pos, count, i + 1)
 }
@@ -1051,7 +2282,7 @@ fn bytes_read_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = {
 
 fn __arr_u16be(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let v = bytes.read_u16_be(b, pos + i * 2)
+  let v = bytes.__read_u16_be(b, pos + i * 2)
   prim.store64(dh + 12 + i * 8, v)
   __arr_u16be(b, dh, pos, count, i + 1)
 }
@@ -1065,7 +2296,7 @@ fn bytes_read_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = {
 
 fn __arr_u32be(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let v = bytes.read_u32_be(b, pos + i * 4)
+  let v = bytes.__read_u32_be(b, pos + i * 4)
   prim.store64(dh + 12 + i * 8, v)
   __arr_u32be(b, dh, pos, count, i + 1)
 }
@@ -1079,7 +2310,7 @@ fn bytes_read_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = {
 
 fn __arr_i16le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let v = bytes.read_i16_le(b, pos + i * 2)
+  let v = bytes.__read_i16_le(b, pos + i * 2)
   prim.store64(dh + 12 + i * 8, v)
   __arr_i16le(b, dh, pos, count, i + 1)
 }
@@ -1093,7 +2324,7 @@ fn bytes_read_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = {
 
 fn __arr_i16be(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let v = bytes.read_i16_be(b, pos + i * 2)
+  let v = bytes.__read_i16_be(b, pos + i * 2)
   prim.store64(dh + 12 + i * 8, v)
   __arr_i16be(b, dh, pos, count, i + 1)
 }
@@ -1107,7 +2338,7 @@ fn bytes_read_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = {
 
 fn __arr_i32be(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let v = bytes.read_i32_be(b, pos + i * 4)
+  let v = bytes.__read_i32_be(b, pos + i * 4)
   prim.store64(dh + 12 + i * 8, v)
   __arr_i32be(b, dh, pos, count, i + 1)
 }
@@ -1121,7 +2352,7 @@ fn bytes_read_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = {
 
 fn __arr_i64le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let v = bytes.read_i64_le(b, pos + i * 8)
+  let v = bytes.__read_i64_le(b, pos + i * 8)
   prim.store64(dh + 12 + i * 8, v)
   __arr_i64le(b, dh, pos, count, i + 1)
 }
@@ -1135,7 +2366,7 @@ fn bytes_read_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = {
 
 fn __arr_i64be(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let v = bytes.read_i64_be(b, pos + i * 8)
+  let v = bytes.__read_i64_be(b, pos + i * 8)
   prim.store64(dh + 12 + i * 8, v)
   __arr_i64be(b, dh, pos, count, i + 1)
 }
@@ -1153,7 +2384,7 @@ fn bytes_read_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int] = {
 
 fn __arr_f64le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let x = bytes.read_f64_le(b, pos + i * 8)
+  let x = bytes.__read_f64_le(b, pos + i * 8)
   let bits = prim.fbits(x)
   prim.store64(dh + 12 + i * 8, bits)
   __arr_f64le(b, dh, pos, count, i + 1)
@@ -1168,7 +2399,7 @@ fn bytes_read_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = {
 
 fn __arr_f64be(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let x = bytes.read_f64_be(b, pos + i * 8)
+  let x = bytes.__read_f64_be(b, pos + i * 8)
   let bits = prim.fbits(x)
   prim.store64(dh + 12 + i * 8, bits)
   __arr_f64be(b, dh, pos, count, i + 1)
@@ -1185,7 +2416,7 @@ fn bytes_read_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float] = {
 
 fn __arr_f32le(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let x = bytes.read_f32_le(b, pos + i * 4)
+  let x = bytes.__read_f32_le(b, pos + i * 4)
   let bits = prim.fbits(x)
   prim.store64(dh + 12 + i * 8, bits)
   __arr_f32le(b, dh, pos, count, i + 1)
@@ -1200,7 +2431,7 @@ fn bytes_read_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = {
 
 fn __arr_f32be(b: Bytes, dh: Int, pos: Int, count: Int, i: Int) -> Int = if i >= count then 0
 else {
-  let x = bytes.read_f32_be(b, pos + i * 4)
+  let x = bytes.__read_f32_be(b, pos + i * 4)
   let bits = prim.fbits(x)
   prim.store64(dh + 12 + i * 8, bits)
   __arr_f32be(b, dh, pos, count, i + 1)
@@ -2196,91 +3427,91 @@ fn bytes_read_bool_at(b: Bytes, pos: Int) -> (Int, Bool?) =
   if pos < 0 or pos >= __bc_n(b) then (pos, none) else (pos + 1, some(prim.load8(prim.handle(b) + 12 + pos) != 0))
 
 fn bytes_read_u16_le_at(b: Bytes, pos: Int) -> (Int, Int?) =
-  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_u16_le(
+  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.__read_u16_le(
     b,
     pos,
   )))
 
 fn bytes_read_u16_be_at(b: Bytes, pos: Int) -> (Int, Int?) =
-  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_u16_be(
+  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.__read_u16_be(
     b,
     pos,
   )))
 
 fn bytes_read_i16_le_at(b: Bytes, pos: Int) -> (Int, Int?) =
-  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_i16_le(
+  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.__read_i16_le(
     b,
     pos,
   )))
 
 fn bytes_read_i16_be_at(b: Bytes, pos: Int) -> (Int, Int?) =
-  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_i16_be(
+  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.__read_i16_be(
     b,
     pos,
   )))
 
 fn bytes_read_u32_le_at(b: Bytes, pos: Int) -> (Int, Int?) =
-  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_u32_le(
+  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.__read_u32_le(
     b,
     pos,
   )))
 
 fn bytes_read_u32_be_at(b: Bytes, pos: Int) -> (Int, Int?) =
-  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_u32_be(
+  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.__read_u32_be(
     b,
     pos,
   )))
 
 fn bytes_read_i32_le_at(b: Bytes, pos: Int) -> (Int, Int?) =
-  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_i32_le(
+  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.__read_i32_le(
     b,
     pos,
   )))
 
 fn bytes_read_i32_be_at(b: Bytes, pos: Int) -> (Int, Int?) =
-  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_i32_be(
+  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.__read_i32_be(
     b,
     pos,
   )))
 
 fn bytes_read_i64_le_at(b: Bytes, pos: Int) -> (Int, Int?) =
-  if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.read_i64_le(
+  if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.__read_i64_le(
     b,
     pos,
   )))
 
 fn bytes_read_i64_be_at(b: Bytes, pos: Int) -> (Int, Int?) =
-  if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.read_i64_be(
+  if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.__read_i64_be(
     b,
     pos,
   )))
 
 fn bytes_read_f16_le_at(b: Bytes, pos: Int) -> (Int, Float?) =
-  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.read_f16_le(
+  if pos < 0 or pos > __bc_n(b) - 2 then (pos, none) else (pos + 2, some(bytes.__read_f16_le(
     b,
     pos,
   )))
 
 fn bytes_read_f32_le_at(b: Bytes, pos: Int) -> (Int, Float?) =
-  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_f32_le(
+  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.__read_f32_le(
     b,
     pos,
   )))
 
 fn bytes_read_f32_be_at(b: Bytes, pos: Int) -> (Int, Float?) =
-  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.read_f32_be(
+  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none) else (pos + 4, some(bytes.__read_f32_be(
     b,
     pos,
   )))
 
 fn bytes_read_f64_le_at(b: Bytes, pos: Int) -> (Int, Float?) =
-  if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.read_f64_le(
+  if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.__read_f64_le(
     b,
     pos,
   )))
 
 fn bytes_read_f64_be_at(b: Bytes, pos: Int) -> (Int, Float?) =
-  if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.read_f64_be(
+  if pos < 0 or pos > __bc_n(b) - 8 then (pos, none) else (pos + 8, some(bytes.__read_f64_be(
     b,
     pos,
   )))
@@ -2302,7 +3533,7 @@ fn bytes_take_at(b: Bytes, pos: Int, len: Int) -> (Int, Bytes?) =
 fn bytes_read_string_be_at(b: Bytes, pos: Int) -> (Int, String?) =
   if pos < 0 or pos > __bc_n(b) - 4 then (pos, none)
   else {
-    let slen = bytes.read_u32_be(b, pos)
+    let slen = bytes.__read_u32_be(b, pos)
     if slen > __bc_n(b) - 4 - pos then (pos, none)
     else (pos + 4 + slen, some(bytes.read_string_at(b, pos + 4, slen)))
   }
@@ -2404,14 +3635,14 @@ fn __lps_count(b: Bytes, blen: Int, p: Int, remaining: Int, acc: Int) -> Int =
   if remaining == 0 then acc
   else if p < 0 or p > blen - 4 then acc
   else {
-    let sl = bytes.read_u32_le(b, p)
+    let sl = bytes.__read_u32_le(b, p)
     if sl > blen - 4 - p then acc
     else __lps_count(b, blen, p + 4 + sl, remaining - 1, acc + 1)
   }
 
 fn __lps_fill(dh: Int, b: Bytes, p: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
-  let sl = bytes.read_u32_le(b, p)
+  let sl = bytes.__read_u32_le(b, p)
   let s = bytes.to_string_lossy(bytes.slice(b, p + 4, p + 4 + sl))
   prim.store_str(dh + 12 + i * 8, s)
   __lps_fill(dh, b, p + 4 + sl, n, i + 1)
@@ -3072,31 +4303,34 @@ fn __endian_is_le(e: Endian) -> Bool = match e {
 }
 
 fn bytes_read_uint16(b: Bytes, offset: Int, e: Endian) -> Int =
-  if __endian_is_le(e) then bytes.read_u16_le(
+  if __endian_is_le(e) then bytes.__read_u16_le(
     b,
     offset,
   )
-  else bytes.read_u16_be(b, offset)
+  else bytes.__read_u16_be(b, offset)
 
 fn bytes_read_uint32(b: Bytes, offset: Int, e: Endian) -> Int =
-  if __endian_is_le(e) then bytes.read_u32_le(
+  if __endian_is_le(e) then bytes.__read_u32_le(
     b,
     offset,
   )
-  else bytes.read_u32_be(b, offset)
+  else bytes.__read_u32_be(b, offset)
 
 fn bytes_read_int32(b: Bytes, offset: Int, e: Endian) -> Int =
-  if __endian_is_le(e) then bytes.read_i32_le(
+  if __endian_is_le(e) then bytes.__read_i32_le(
     b,
     offset,
   )
-  else bytes.read_i32_be(b, offset)
+  else bytes.__read_i32_be(b, offset)
 
 
 
 
 fn bytes_read_float32(b: Bytes, offset: Int, e: Endian) -> Float32 = {
-  let f = if __endian_is_le(e) then bytes.read_f32_le(b, offset) else bytes.read_f32_be(b, offset)
+  let f = if __endian_is_le(e) then bytes.__read_f32_le(b, offset) else bytes.__read_f32_be(
+    b,
+    offset,
+  )
   float.to_float32(f)
 }
 
@@ -4226,6 +5460,13 @@ fn unique[A](d: Deque[A]) -> Deque[A] = from_list(list.unique(to_list(d)))
 
 /// The first element per distinct key f(x).
 fn unique_by[A, K](d: Deque[A], f: (A) -> K) -> Deque[A] = from_list(list.unique_by(to_list(d), f))
+
+
+/// Sum of the elements; 0 when empty; integers wrap on overflow.
+fn sum[A: Numeric](d: Deque[A]) -> A = A.__sum(to_list(d))
+
+/// Product of the elements; 1 when empty; integers wrap on overflow.
+fn product[A: Numeric](d: Deque[A]) -> A = A.__product(to_list(d))
 "#;
 pub const SRC_ENV: &str = r#"
 
@@ -4912,8 +6153,13 @@ fn max(a: Float, b: Float) -> Float = _
 fn clamp(n: Float, lo: Float, hi: Float) -> Float = _
 
 /// 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
+@deprecated(since=15, use="float.signum", note="signum keeps sign's answers, 1.0 for 0.0 included")
 @intrinsic("almide_rt_float_sign")
 fn sign(n: Float) -> Float = _
+
+/// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+fn signum(x: Float) -> Float = if float.is_nan(x) then x
+else if float.to_bits(x) < 0 then -1.0 else 1.0
 
 
 /// True only for NaN (unequal to itself).
@@ -5078,6 +6324,116 @@ fn to_uint32_saturating(n: Float) -> UInt32 = float.to_uint32(n)
 
 /// Truncates, clamps to 0..2^64-1; NaN gives 0.
 fn to_uint64_saturating(n: Float) -> UInt64 = float.to_uint64(n)
+
+
+/// Round toward 0; -0.5 gives -0.0.
+fn trunc(x: Float) -> Float = if x < 0.0 then float.ceil(x) else float.floor(x)
+
+/// True unless x is inf, -inf or NaN.
+fn is_finite(x: Float) -> Bool = not (float.is_nan(x) or float.is_infinite(x))
+
+/// base to the exp; NaN for a negative base with a fractional exp.
+fn pow(base: Float, exp: Float) -> Float = math.fpow(base, exp)
+
+/// -1, 0 or 1 in IEEE-754 total order: -0.0 < 0.0, NaN above inf and equal to itself.
+fn compare(a: Float, b: Float) -> Int = int.compare(order_key(a), order_key(b))
+
+
+local fn order_key(x: Float) -> Int = {
+  let bits = float.to_bits(x)
+  if bits < 0 then int.bxor(bits, int.max_value()) else bits
+}
+
+
+/// Float whose IEEE-754 binary64 bits are bits; any NaN gives the one NaN.
+fn from_bits(bits: Int) -> Float = int.bits_to_float(bits)
+
+/// Positive infinity.
+fn infinity() -> Float = from_bits(9218868437227405312)
+
+/// The one quiet NaN (bits 0x7ff8000000000000).
+fn nan() -> Float = from_bits(9221120237041090560)
+
+/// Gap between 1.0 and the next Float: 2^-52.
+fn epsilon() -> Float = from_bits(4372995238176751616)
+
+/// Largest finite Float, about 1.7976931348623157e308.
+fn max_value() -> Float = from_bits(9218868437227405311)
+
+/// Most negative finite Float (= -max_value()), not the smallest positive.
+fn min_value() -> Float = from_bits(-4503599627370497)
+
+
+
+
+
+/// x as the nearest Float (ties to even); NaN stays NaN.
+fn from[S: Numeric](x: S) -> Float = x.__to_float()
+
+/// some(x as Float) when Float holds x exactly, else none (a rounded value, NaN).
+fn from_checked[S: Numeric](x: S) -> Float? = x.__to_float_exact()
+
+
+
+
+fn __int_exact(x: Float) -> Int? =
+  if x == float.trunc(x) and x >= -9223372036854775808.0 and x < 9223372036854775808.0 then some(float.to_int(x))
+  else none
+
+fn __uint64_exact(x: Float) -> UInt64? =
+  if x == float.trunc(x) and x >= 0.0 and x < 18446744073709551616.0 then some(float.to_uint64(x))
+  else none
+
+fn __trunc(x: Float) -> Float = float.trunc(x)
+
+fn __int_sat(x: Float) -> Int =
+  if float.is_nan(x) then 0
+  else if x >= 9223372036854775808.0 then int.max_value()
+  else if x <= -9223372036854775808.0 then int.min_value()
+  else float.to_int(x)
+
+fn __uint64_sat(x: Float) -> UInt64 = float.to_uint64_saturating(x)
+
+fn __to_float(x: Float) -> Float = x
+
+fn __to_float_exact(x: Float) -> Float? = if float.is_nan(x) then none else some(x)
+
+fn __to_float32(x: Float) -> Float32 = float.to_float32(x)
+
+fn __to_float32_exact(x: Float) -> Float32? = float.to_float32_checked(x)
+
+fn __decimal_exact(x: Float) -> String? = match float.__int_exact(x) {
+  some(n) => some(int.to_string(n)),
+  none => if float.is_finite(x) and x == float.trunc(x) then some(decimal_of_integral(x)) else none,
+}
+
+fn __sum(xs: List[Float]) -> Float = list.fold(xs, 0.0, (a, b) => a + b)
+
+fn __product(xs: List[Float]) -> Float = list.fold(xs, 1.0, (a, b) => a * b)
+
+
+
+local fn decimal_of_integral(x: Float) -> String = {
+  let bits = float.to_bits(x)
+  let e = int.band(int.bshr(bits, 52), 2047) - 1075
+  let m = int.bor(int.band(bits, 4503599627370495), 4503599627370496)
+  let limbs = double_n([m % 1000000000, m / 1000000000], e)
+  let digits = list.reverse(limbs) |> list.enumerate |> list.map(((i, d)) => if i == 0 then int.to_string(d) else pad9(int.to_string(d)))
+  (if x < 0.0 then "-" else "") + list.fold(digits, "", (a, b) => a + b)
+}
+
+local fn double_n(l: List[Int], n: Int) -> List[Int] = if n <= 0 then l
+else double_n(double_from(l, 0, 0, []), n - 1)
+
+local fn double_from(l: List[Int], i: Int, carry: Int, acc: List[Int]) -> List[Int] =
+  if i >= list.len(l) then (if carry > 0 then acc + [carry]
+  else acc)
+  else {
+    let v = (list.get(l, i) ?? 0) * 2 + carry
+    double_from(l, i + 1, v / 1000000000, acc + [v % 1000000000])
+  }
+
+local fn pad9(s: String) -> String = if string.len(s) >= 9 then s else pad9("0" + s)
 "#;
 pub const SRC_FLOAT32: &str = r#"
 
@@ -5214,6 +6570,57 @@ fn max_value() -> Float32 = from_bits(2139095039)
 
 /// Most negative finite Float32 (= -max_value()), not the smallest positive.
 fn min_value() -> Float32 = from_bits(4286578687)
+
+
+
+/// Float32 from trimmed s, the grammar of float.parse; err on junk; overflow gives inf.
+fn parse(s: String) -> Result[Float32, String] = match float.parse(s) {
+  ok(f) => ok(float.to_float32(f)),
+  err(e) => err(e),
+}
+
+
+
+
+
+/// x as the nearest Float32 (ties to even), rounded once; NaN stays NaN.
+fn from[S: Numeric](x: S) -> Float32 = x.__to_float32()
+
+/// some(x as Float32) when Float32 holds x exactly, else none (a rounded value, NaN).
+fn from_checked[S: Numeric](x: S) -> Float32? = x.__to_float32_exact()
+
+
+
+
+fn __int_exact(x: Float32) -> Int? = float.__int_exact(float.from_float32(x))
+
+fn __uint64_exact(x: Float32) -> UInt64? = float.__uint64_exact(float.from_float32(x))
+
+fn __trunc(x: Float32) -> Float32 = float32.trunc(x)
+
+fn __int_sat(x: Float32) -> Int = float.__int_sat(float.from_float32(x))
+
+fn __uint64_sat(x: Float32) -> UInt64 = float.__uint64_sat(float.from_float32(x))
+
+fn __to_float(x: Float32) -> Float = float.from_float32(x)
+
+fn __to_float_exact(x: Float32) -> Float? = float.__to_float_exact(float.from_float32(x))
+
+fn __to_float32(x: Float32) -> Float32 = x
+
+fn __to_float32_exact(x: Float32) -> Float32? = if float32.is_nan(x) then none else some(x)
+
+fn __decimal_exact(x: Float32) -> String? = float.__decimal_exact(float.from_float32(x))
+
+fn __sum(xs: List[Float32]) -> Float32 = {
+  let zero: Float32 = 0.0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[Float32]) -> Float32 = {
+  let one: Float32 = 1.0
+  list.fold(xs, one, (a, b) => a * b)
+}
 "#;
 pub const SRC_FLOAT32_CONVERT: &str = r#"
 
@@ -5397,6 +6804,46 @@ fn parse(s: String) -> Result[Float64, String] = match float.parse(s) {
   ok(f) => ok(float.to_float64(f)),
   err(e) => err(e),
 }
+
+
+
+
+
+/// x as the nearest Float64 (ties to even); NaN stays NaN.
+fn from[S: Numeric](x: S) -> Float64 = float.to_float64(x.__to_float())
+
+/// some(x as Float64) when Float64 holds x exactly, else none (a rounded value, NaN).
+fn from_checked[S: Numeric](x: S) -> Float64? = match x.__to_float_exact() {
+  some(f) => some(float.to_float64(f)),
+  none => none,
+}
+
+
+
+
+fn __int_exact(x: Float64) -> Int? = float.__int_exact(float.from_float64(x))
+
+fn __uint64_exact(x: Float64) -> UInt64? = float.__uint64_exact(float.from_float64(x))
+
+fn __trunc(x: Float64) -> Float64 = float64.trunc(x)
+
+fn __int_sat(x: Float64) -> Int = float.__int_sat(float.from_float64(x))
+
+fn __uint64_sat(x: Float64) -> UInt64 = float.__uint64_sat(float.from_float64(x))
+
+fn __to_float(x: Float64) -> Float = float.from_float64(x)
+
+fn __to_float_exact(x: Float64) -> Float? = float.__to_float_exact(float.from_float64(x))
+
+fn __to_float32(x: Float64) -> Float32 = float64.to_float32(x)
+
+fn __to_float32_exact(x: Float64) -> Float32? = float.to_float32_checked(float.from_float64(x))
+
+fn __decimal_exact(x: Float64) -> String? = float.__decimal_exact(float.from_float64(x))
+
+fn __sum(xs: List[Float64]) -> Float64 = float.to_float64(list.fold(xs, 0.0, (a, b) => a + float.from_float64(b)))
+
+fn __product(xs: List[Float64]) -> Float64 = float.to_float64(list.fold(xs, 1.0, (a, b) => a * float.from_float64(b)))
 "#;
 pub const SRC_FLOAT64_CONVERT: &str = r#"
 
@@ -10840,8 +12287,13 @@ fn count_leading_zeros(n: Int) -> Int = _
 fn count_trailing_zeros(n: Int) -> Int = _
 
 /// Number of set bits; 64 for -1.
+@deprecated(since=15, use="int.count_ones")
 @intrinsic("almide_rt_int_pop_count")
 fn pop_count(n: Int) -> Int = _
+
+/// Number of set bits; 64 for -1.
+@intrinsic("almide_rt_int_pop_count")
+fn count_ones(x: Int) -> Int = _
 
 /// The 64 bits in reverse order; 1 gives min_value.
 @intrinsic("almide_rt_int_bit_reverse")
@@ -10852,8 +12304,13 @@ fn bit_reverse(n: Int) -> Int = _
 fn byte_swap(n: Int) -> Int = _
 
 /// Bits needed to hold n; 0 for 0, 64 if negative.
+@deprecated(since=15, use="int.bit_length")
 @intrinsic("almide_rt_int_bit_width")
 fn bit_width(n: Int) -> Int = _
+
+/// Bits needed to hold x; 0 for 0, 64 if negative.
+@intrinsic("almide_rt_int_bit_width")
+fn bit_length(x: Int) -> Int = _
 
 /// Floor of log2(n); -1 when n <= 0.
 @intrinsic("almide_rt_int_log2_floor")
@@ -11058,6 +12515,176 @@ fn min_value() -> Int = -9223372036854775807 - 1
 
 /// Largest Int: 2^63-1.
 fn max_value() -> Int = 9223372036854775807
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: Int, b: Int) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// -1, 0 or 1 by the sign of x; 0 for 0.
+fn sign(x: Int) -> Int = compare(x, 0)
+
+/// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+fn pow(base: Int, exp: Int) -> Int = math.pow(base, exp)
+
+/// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+fn floor_div(a: Int, b: Int) -> Int = {
+  let q = a / b
+  let r = a % b
+  if r != 0 and (r < 0) != (b < 0) then q - 1 else q
+}
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: Int, b: Int) -> Int = if b == -1 then 0
+else {
+  let m = a % b
+  if m != 0 and (m < 0) != (b < 0) then m + b else m
+}
+
+
+/// x mod 2^bits, non-negative when bits < 64; bits <= 0 aborts, bits >= 64 keeps x.
+fn wrap(x: Int, bits: Int) -> Int = if bits <= 0 then panic("wrap width must be positive")
+else if bits >= 64 then x
+else int.band(x, int.bnot(int.bshl(-1, bits)))
+
+/// a - b wrapped to 64 bits.
+fn wrap_sub(a: Int, b: Int) -> Int = int.wrap_add(int.wrap_add(a, int.bnot(b), 64), 1, 64)
+
+/// Zero-filling right shift of the 64 bits; n is taken mod 64.
+fn bshr_logical(a: Int, n: Int) -> Int = {
+  let k = shift_count(n)
+  if k == 0 then a else int.band(int.bshr(a, k), int.bnot(int.bshl(-1, 64 - k)))
+}
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+
+/// Signed digits of x in radix, lowercase; -255 in 16 is "-ff"; radix outside 2..36 aborts.
+fn to_string_radix(x: Int, radix: Int) -> String = {
+  check_radix(radix)
+
+  let digits = radix_digits(if x < 0 then x else 0 - x, radix, [])
+  string.from_bytes(if x < 0 then [45] + digits
+  else digits)
+}
+
+/// Int from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
+/// err on junk or overflow; radix outside 2..36 aborts.
+fn parse_radix(s: String, radix: Int) -> Result[Int, String] = {
+  check_radix(radix)
+  let t = string.trim(s)
+  let bytes = string.to_bytes(t)
+  match bytes {
+    [] => err("cannot parse integer from empty string"),
+    [45, ..rest] => accumulate_negative(strip_radix_prefix(rest, radix), radix, 0, true),
+    [43, ..rest] => accumulate_negative(strip_radix_prefix(rest, radix), radix, 0, false),
+    _ => accumulate_negative(strip_radix_prefix(bytes, radix), radix, 0, false),
+  }
+}
+
+local fn check_radix(radix: Int) -> Unit =
+  if radix < 2 or radix > 36 then panic("radix must be in 2..36, got ${radix}") else ()
+
+
+local fn radix_digits(n: Int, radix: Int, acc: List[Int]) -> List[Int] = {
+  let q = n / radix
+  let digits = [digit_byte(0 - n % radix)] + acc
+  if q == 0 then digits
+  else radix_digits(q, radix, digits)
+}
+
+local fn digit_byte(d: Int) -> Int = if d < 10 then 48 + d else 87 + d
+
+
+local fn digit_value(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
+else if b >= 97 and b <= 122 then b - 87
+else if b >= 65 and b <= 90 then b - 55
+else 99
+
+
+local fn strip_radix_prefix(bytes: List[Int], radix: Int) -> List[Int] = match bytes {
+  [48, p, d, ..rest] => if prefix_radix(p) == radix then [d] + rest
+  else bytes,
+  _ => bytes,
+}
+
+local fn prefix_radix(b: Int) -> Int = match b {
+  120 | 88 => 16,
+  111 | 79 => 8,
+  98 | 66 => 2,
+  _ => 0,
+}
+
+
+
+local fn accumulate_negative(digits: List[Int], radix: Int, acc: Int, negative: Bool) -> Result[Int, String] = match digits {
+  [] => err("invalid digit found in string"),
+  _ => accumulate_digits(digits, radix, acc, negative),
+}
+
+local fn accumulate_digits(digits: List[Int], radix: Int, acc: Int, negative: Bool) -> Result[Int, String] = match digits {
+  [] => if negative then ok(acc)
+  else if acc == int.min_value() then err("number too large to fit in target type")
+  else ok(0 - acc),
+  [b, ..rest] => {
+    let d = digit_value(b)
+    if d >= radix then err("invalid digit found in string")
+    else if acc < (int.min_value() + d) / radix then err(if negative then "number too small to fit in target type" else "number too large to fit in target type")
+    else accumulate_digits(rest, radix, acc * radix - d, negative)
+  },
+}
+
+
+
+
+
+/// x as Int, toward zero; NaN, an infinity or a value outside Int aborts.
+fn from[S: Numeric](x: S) -> Int = x.__trunc().__int_exact() ?? panic("int.from: the value is not a number in the range of Int")
+
+/// some(x as Int) when Int holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int? = x.__int_exact()
+
+/// x as Int, toward zero, clamped to Int's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int = x.__int_sat()
+
+/// The low 64 bits of integer x as Int (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int = x.__bits64()
+
+
+
+
+fn __int_exact(x: Int) -> Int? = some(x)
+
+fn __uint64_exact(x: Int) -> UInt64? = int.to_uint64_checked(x)
+
+fn __trunc(x: Int) -> Int = x
+
+fn __int_sat(x: Int) -> Int = x
+
+fn __uint64_sat(x: Int) -> UInt64 = int.to_uint64_saturating(x)
+
+fn __to_float(x: Int) -> Float = int.to_float(x)
+
+fn __to_float_exact(x: Int) -> Float? = {
+  let f = int.to_float(x)
+  if f < 9223372036854775808.0 and float.to_int(f) == x then some(f) else none
+}
+
+fn __to_float32(x: Int) -> Float32 = int.to_float32(x)
+
+fn __to_float32_exact(x: Int) -> Float32? = int.to_float32_checked(x)
+
+fn __decimal_exact(x: Int) -> String? = some(int.to_string(x))
+
+fn __bits64(x: Int) -> Int = x
+
+fn __sum(xs: List[Int]) -> Int = list.__sum_int(xs)
+
+fn __product(xs: List[Int]) -> Int = list.__product_int(xs)
 "#;
 pub const SRC_INT16: &str = r#"
 
@@ -11251,6 +12878,78 @@ fn parse(s: String) -> Result[Int16, String] = match int.parse(s) {
   else if n > 32767 then err("number too large to fit in target type")
   else ok(int.to_int16(n)),
   err(e) => err(e),
+}
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: Int16, radix: Int) -> String = int.to_string_radix(int.from_int16(x), radix)
+
+/// Int16 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -32768..32767.
+fn parse_radix(s: String, radix: Int) -> Result[Int16, String] = match int.parse_radix(s, radix) {
+  ok(n) => if n < -32768 then err("number too small to fit in target type")
+  else if n > 32767 then err("number too large to fit in target type")
+  else ok(int.to_int16(n)),
+  err(e) => err(e),
+}
+
+
+
+
+
+/// x as Int16, toward zero; NaN, an infinity or a value outside Int16 aborts.
+fn from[S: Numeric](x: S) -> Int16 = match x.__trunc().__int_exact() {
+  some(n) => int.to_int16_checked(n) ?? panic("int16.from: the value is not a number in the range of Int16"),
+  none => panic("int16.from: the value is not a number in the range of Int16"),
+}
+
+/// some(x as Int16) when Int16 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int16? = match x.__int_exact() {
+  some(n) => int.to_int16_checked(n),
+  none => none,
+}
+
+/// x as Int16, toward zero, clamped to Int16's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int16 = int.to_int16_saturating(x.__int_sat())
+
+/// The low 16 bits of integer x as Int16 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int16 = {
+  let u = int.wrap(x.__bits64(), 16)
+  int.to_int16(if u >= 32768 then u - 65536 else u)
+}
+
+
+
+
+fn __int_exact(x: Int16) -> Int? = some(int.from_int16(x))
+
+fn __uint64_exact(x: Int16) -> UInt64? = int.__uint64_exact(int.from_int16(x))
+
+fn __trunc(x: Int16) -> Int16 = x
+
+fn __int_sat(x: Int16) -> Int = int.from_int16(x)
+
+fn __uint64_sat(x: Int16) -> UInt64 = int.__uint64_sat(int.from_int16(x))
+
+fn __to_float(x: Int16) -> Float = int.to_float(int.from_int16(x))
+
+fn __to_float_exact(x: Int16) -> Float? = int.__to_float_exact(int.from_int16(x))
+
+fn __to_float32(x: Int16) -> Float32 = int.to_float32(int.from_int16(x))
+
+fn __to_float32_exact(x: Int16) -> Float32? = int.to_float32_checked(int.from_int16(x))
+
+fn __decimal_exact(x: Int16) -> String? = some(int.to_string(int.from_int16(x)))
+
+fn __bits64(x: Int16) -> Int = int.from_int16(x)
+
+fn __sum(xs: List[Int16]) -> Int16 = {
+  let zero: Int16 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[Int16]) -> Int16 = {
+  let one: Int16 = 1
+  list.fold(xs, one, (a, b) => a * b)
 }
 "#;
 pub const SRC_INT16_CONVERT: &str = r#"
@@ -11555,6 +13254,78 @@ fn parse(s: String) -> Result[Int32, String] = match int.parse(s) {
   else if n > 2147483647 then err("number too large to fit in target type")
   else ok(int.to_int32(n)),
   err(e) => err(e),
+}
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: Int32, radix: Int) -> String = int.to_string_radix(int.from_int32(x), radix)
+
+/// Int32 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -2147483648..2147483647.
+fn parse_radix(s: String, radix: Int) -> Result[Int32, String] = match int.parse_radix(s, radix) {
+  ok(n) => if n < -2147483648 then err("number too small to fit in target type")
+  else if n > 2147483647 then err("number too large to fit in target type")
+  else ok(int.to_int32(n)),
+  err(e) => err(e),
+}
+
+
+
+
+
+/// x as Int32, toward zero; NaN, an infinity or a value outside Int32 aborts.
+fn from[S: Numeric](x: S) -> Int32 = match x.__trunc().__int_exact() {
+  some(n) => int.to_int32_checked(n) ?? panic("int32.from: the value is not a number in the range of Int32"),
+  none => panic("int32.from: the value is not a number in the range of Int32"),
+}
+
+/// some(x as Int32) when Int32 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int32? = match x.__int_exact() {
+  some(n) => int.to_int32_checked(n),
+  none => none,
+}
+
+/// x as Int32, toward zero, clamped to Int32's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int32 = int.to_int32_saturating(x.__int_sat())
+
+/// The low 32 bits of integer x as Int32 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int32 = {
+  let u = int.wrap(x.__bits64(), 32)
+  int.to_int32(if u >= 2147483648 then u - 4294967296 else u)
+}
+
+
+
+
+fn __int_exact(x: Int32) -> Int? = some(int.from_int32(x))
+
+fn __uint64_exact(x: Int32) -> UInt64? = int.__uint64_exact(int.from_int32(x))
+
+fn __trunc(x: Int32) -> Int32 = x
+
+fn __int_sat(x: Int32) -> Int = int.from_int32(x)
+
+fn __uint64_sat(x: Int32) -> UInt64 = int.__uint64_sat(int.from_int32(x))
+
+fn __to_float(x: Int32) -> Float = int.to_float(int.from_int32(x))
+
+fn __to_float_exact(x: Int32) -> Float? = int.__to_float_exact(int.from_int32(x))
+
+fn __to_float32(x: Int32) -> Float32 = int.to_float32(int.from_int32(x))
+
+fn __to_float32_exact(x: Int32) -> Float32? = int.to_float32_checked(int.from_int32(x))
+
+fn __decimal_exact(x: Int32) -> String? = some(int.to_string(int.from_int32(x)))
+
+fn __bits64(x: Int32) -> Int = int.from_int32(x)
+
+fn __sum(xs: List[Int32]) -> Int32 = {
+  let zero: Int32 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[Int32]) -> Int32 = {
+  let one: Int32 = 1
+  list.fold(xs, one, (a, b) => a * b)
 }
 "#;
 pub const SRC_INT32_CONVERT: &str = r#"
@@ -11879,6 +13650,67 @@ fn parse(s: String) -> Result[Int64, String] = match int.parse(s) {
   ok(n) => ok(int.to_int64(n)),
   err(e) => err(e),
 }
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: Int64, radix: Int) -> String = int.to_string_radix(int.from_int64(x), radix)
+
+/// Int64 from trimmed s in radix, the grammar of int.parse_radix; err on junk or overflow.
+fn parse_radix(s: String, radix: Int) -> Result[Int64, String] = match int.parse_radix(s, radix) {
+  ok(n) => ok(int.to_int64(n)),
+  err(e) => err(e),
+}
+
+
+
+
+
+/// x as Int64, toward zero; NaN, an infinity or a value outside Int64 aborts.
+fn from[S: Numeric](x: S) -> Int64 = match x.__trunc().__int_exact() {
+  some(n) => int.to_int64(n),
+  none => panic("int64.from: the value is not a number in the range of Int64"),
+}
+
+/// some(x as Int64) when Int64 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int64? = match x.__int_exact() {
+  some(n) => some(int.to_int64(n)),
+  none => none,
+}
+
+/// x as Int64, toward zero, clamped to Int64's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int64 = int.to_int64(x.__int_sat())
+
+/// The low 64 bits of integer x as Int64 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int64 = int.to_int64(x.__bits64())
+
+
+
+
+fn __int_exact(x: Int64) -> Int? = some(int.from_int64(x))
+
+fn __uint64_exact(x: Int64) -> UInt64? = int.__uint64_exact(int.from_int64(x))
+
+fn __trunc(x: Int64) -> Int64 = x
+
+fn __int_sat(x: Int64) -> Int = int.from_int64(x)
+
+fn __uint64_sat(x: Int64) -> UInt64 = int.__uint64_sat(int.from_int64(x))
+
+fn __to_float(x: Int64) -> Float = int.to_float(int.from_int64(x))
+
+fn __to_float_exact(x: Int64) -> Float? = int.__to_float_exact(int.from_int64(x))
+
+fn __to_float32(x: Int64) -> Float32 = int.to_float32(int.from_int64(x))
+
+fn __to_float32_exact(x: Int64) -> Float32? = int.to_float32_checked(int.from_int64(x))
+
+fn __decimal_exact(x: Int64) -> String? = some(int.to_string(int.from_int64(x)))
+
+fn __bits64(x: Int64) -> Int = int.from_int64(x)
+
+fn __sum(xs: List[Int64]) -> Int64 = int.to_int64(list.fold(xs, 0, (a, b) => a + int.from_int64(b)))
+
+fn __product(xs: List[Int64]) -> Int64 = int.to_int64(list.fold(xs, 1, (a, b) => a * int.from_int64(b)))
 "#;
 pub const SRC_INT64_CONVERT: &str = r#"
 
@@ -12199,6 +14031,78 @@ fn parse(s: String) -> Result[Int8, String] = match int.parse(s) {
   else if n > 127 then err("number too large to fit in target type")
   else ok(int.to_int8(n)),
   err(e) => err(e),
+}
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: Int8, radix: Int) -> String = int.to_string_radix(int.from_int8(x), radix)
+
+/// Int8 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -128..127.
+fn parse_radix(s: String, radix: Int) -> Result[Int8, String] = match int.parse_radix(s, radix) {
+  ok(n) => if n < -128 then err("number too small to fit in target type")
+  else if n > 127 then err("number too large to fit in target type")
+  else ok(int.to_int8(n)),
+  err(e) => err(e),
+}
+
+
+
+
+
+/// x as Int8, toward zero; NaN, an infinity or a value outside Int8 aborts.
+fn from[S: Numeric](x: S) -> Int8 = match x.__trunc().__int_exact() {
+  some(n) => int.to_int8_checked(n) ?? panic("int8.from: the value is not a number in the range of Int8"),
+  none => panic("int8.from: the value is not a number in the range of Int8"),
+}
+
+/// some(x as Int8) when Int8 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int8? = match x.__int_exact() {
+  some(n) => int.to_int8_checked(n),
+  none => none,
+}
+
+/// x as Int8, toward zero, clamped to Int8's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int8 = int.to_int8_saturating(x.__int_sat())
+
+/// The low 8 bits of integer x as Int8 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int8 = {
+  let u = int.wrap(x.__bits64(), 8)
+  int.to_int8(if u >= 128 then u - 256 else u)
+}
+
+
+
+
+fn __int_exact(x: Int8) -> Int? = some(int.from_int8(x))
+
+fn __uint64_exact(x: Int8) -> UInt64? = int.__uint64_exact(int.from_int8(x))
+
+fn __trunc(x: Int8) -> Int8 = x
+
+fn __int_sat(x: Int8) -> Int = int.from_int8(x)
+
+fn __uint64_sat(x: Int8) -> UInt64 = int.__uint64_sat(int.from_int8(x))
+
+fn __to_float(x: Int8) -> Float = int.to_float(int.from_int8(x))
+
+fn __to_float_exact(x: Int8) -> Float? = int.__to_float_exact(int.from_int8(x))
+
+fn __to_float32(x: Int8) -> Float32 = int.to_float32(int.from_int8(x))
+
+fn __to_float32_exact(x: Int8) -> Float32? = int.to_float32_checked(int.from_int8(x))
+
+fn __decimal_exact(x: Int8) -> String? = some(int.to_string(int.from_int8(x)))
+
+fn __bits64(x: Int8) -> Int = int.from_int8(x)
+
+fn __sum(xs: List[Int8]) -> Int8 = {
+  let zero: Int8 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[Int8]) -> Int8 = {
+  let one: Int8 = 1
+  list.fold(xs, one, (a, b) => a * b)
 }
 "#;
 pub const SRC_INT8_CONVERT: &str = r#"
@@ -12911,7 +14815,7 @@ pub const SRC_IO_READ_ALL: &str = r#"
 
 
 effect fn io_read_all() -> String = {
-  var buf = bytes.new(0)
+  var buf = bytes.zeros(0)
   var n = 1
   while n > 0 {
     let chunk = prim.read_n_bytes(4096)
@@ -12957,7 +14861,7 @@ pub const SRC_IO_READ_LINE_OPT: &str = r#"
 
 
 effect fn io_read_line_opt() -> String? = {
-  var buf = bytes.new(0)
+  var buf = bytes.zeros(0)
   var got = 0
   var open = true
   while open {
@@ -13971,13 +15875,18 @@ fn last[A](xs: List[A]) -> A? = _
 @intrinsic("almide_rt_list_chunk")
 fn chunk[A](xs: List[A], n: Int) -> List[List[A]] = _
 
-/// Sum; 0 when empty; wraps on overflow.
-@intrinsic("almide_rt_list_sum")
-fn sum(xs: List[Int]) -> Int = _
+/// Sum of any numbers (R-L0-42); 0 when empty; integers wrap on overflow.
+fn sum[A: Numeric](xs: List[A]) -> A = A.__sum(xs)
 
-/// Product; 1 when empty; wraps on overflow.
+/// Product of any numbers (R-L0-42); 1 when empty; integers wrap on overflow.
+fn product[A: Numeric](xs: List[A]) -> A = A.__product(xs)
+
+
+@intrinsic("almide_rt_list_sum")
+fn __sum_int(xs: List[Int]) -> Int = _
+
 @intrinsic("almide_rt_list_product")
-fn product(xs: List[Int]) -> Int = _
+fn __product_int(xs: List[Int]) -> Int = _
 
 /// Head element, or none when empty.
 @intrinsic("almide_rt_list_first")
@@ -13995,9 +15904,12 @@ fn min[A](xs: List[A]) -> A? = _
 @intrinsic("almide_rt_list_max")
 fn max[A](xs: List[A]) -> A? = _
 
-/// Strings joined by sep; empty string for [].
+/// The parts joined by sep (R-L0-42): Strings or Bytes; empty for [].
+fn join[T: Text](xs: List[T], sep: T) -> T = T.__join(xs, sep)
+
+
 @intrinsic("almide_rt_list_join")
-fn join(xs: List[String], sep: String) -> String = _
+fn __join_string(xs: List[String], sep: String) -> String = _
 
 
 
@@ -26207,6 +28119,10 @@ fn to_bytes_f64_le(m: Matrix) -> Bytes = _
 @intrinsic("almide_rt_matrix_to_bytes_f32_le")
 fn to_bytes_f32_le(m: Matrix) -> Bytes = _
 
+/// Row-major f16 LE, 2 bytes each (rounded to nearest even; overflow is inf).
+@intrinsic("almide_rt_matrix_to_bytes_f16_le")
+fn to_bytes_f16_le(m: Matrix) -> Bytes = _
+
 /// f16 LE rows x cols at offset; all 0 if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f16_le")
 fn from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
@@ -27647,6 +29563,31 @@ fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix
   if matrix.cols(rows_probe) + matrix.cols(cols_probe) < 0 then a
   else matrix.from_lists(__matrix_zip_rows(matrix.to_lists(a), matrix.to_lists(b), f, 0, []))
 }
+
+
+
+
+
+fn __matrix_f16_bits(x: Float) -> Int = bytes.__f16_bits(x)
+
+fn __matrix_f16_row(row: List[Float], i: Int, acc: List[Int]) -> List[Int] = match list.get(row, i) {
+  some(x) => {
+    let h = __matrix_f16_bits(x)
+    __matrix_f16_row(row, i + 1, acc + [int.band(h, 255), int.bshr(h, 8)])
+  },
+  none => acc,
+}
+
+fn __matrix_f16_rows(rows: List[List[Float]], i: Int, acc: List[Int]) -> List[Int] = match list.get(
+  rows,
+  i,
+) {
+  some(row) => __matrix_f16_rows(rows, i + 1, __matrix_f16_row(row, 0, acc)),
+  none => acc,
+}
+
+@implements("matrix.to_bytes_f16_le")
+fn __matrix_to_bytes_f16_le(m: Matrix) -> Bytes = bytes.from_list(__matrix_f16_rows(matrix.to_lists(m), 0, []))
 "#;
 pub const SRC_NET: &str = r#"
 
@@ -28567,6 +30508,18 @@ fn option_to_string_b(o: Bool?) -> String = match o {
 
 @implements("bool.to_string")
 fn __bool_to_string(b: Bool) -> String = if b then "true" else "false"
+
+
+
+
+
+
+
+@implements("bytes.__join")
+fn bytes_join(xs: List[Bytes], sep: Bytes) -> Bytes = match xs {
+  [] => bytes.zeros(0),
+  [first, ..rest] => rest |> list.fold(first, (acc, b) => bytes.concat(bytes.concat(acc, sep), b)),
+}
 "#;
 pub const SRC_OPTION_TO_STRING_F: &str = r#"
 
@@ -30320,7 +32273,7 @@ import io
 
 @implements("process.stdin_lines")
 effect fn process_stdin_lines() -> Result[List[String], String] = {
-  var buf = bytes.new(0)
+  var buf = bytes.zeros(0)
   var n = 1
   while n > 0 {
     let chunk = io.read_n_bytes(4096)
@@ -30363,7 +32316,10 @@ import process
 
 fn __proc_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __proc_argv(args: List[String]) -> String = args |> list.map((a) => __proc_cell(a)) |> list.join("")
+
+
+
+fn __proc_argv(args: List[String]) -> String = args |> list.map((a) => __proc_cell(a)) |> list.__join_string("")
 
 effect fn __proc_exec(cmd: String, argv: String) -> Result[String, String] = _
 
@@ -34046,6 +36002,13 @@ fn __fallible_max_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Result
   set.to_list(s),
   (a, b) => cmp(a, b)!,
 )
+
+
+/// Sum of the elements; 0 when empty; integers wrap on overflow.
+fn sum[A: Numeric](s: Set[A]) -> A = A.__sum(set.to_list(s))
+
+/// Product of the elements; 1 when empty; integers wrap on overflow.
+fn product[A: Numeric](s: Set[A]) -> A = A.__product(set.to_list(s))
 "#;
 pub const SRC_SET_CORE: &str = r#"
 
@@ -35652,6 +37615,9 @@ fn unique_by[K](s: String, f: (String) -> K) -> String = string.join(
   list.unique_by(string.chars(s), f),
   "",
 )
+
+
+fn __join(xs: List[String], sep: String) -> String = list.__join_string(xs, sep)
 "#;
 pub const SRC_STRING_BYTE_SLICE: &str = r#"
 fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
@@ -38507,6 +40473,77 @@ fn parse(s: String) -> Result[UInt16, String] =
     ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.to_uint16(n)),
     err(e) => err(e),
   }
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: UInt16, radix: Int) -> String = int.to_string_radix(int.from_uint16(x), radix)
+
+/// UInt16 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 65535.
+fn parse_radix(s: String, radix: Int) -> Result[UInt16, String] = {
+  let parsed = int.parse_radix(s, radix)
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match parsed {
+    ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.to_uint16(n)),
+    err(e) => err(e),
+  }
+}
+
+
+
+
+
+/// x as UInt16, toward zero; NaN, an infinity or a value outside UInt16 aborts.
+fn from[S: Numeric](x: S) -> UInt16 = match x.__trunc().__int_exact() {
+  some(n) => int.to_uint16_checked(n) ?? panic("uint16.from: the value is not a number in the range of UInt16"),
+  none => panic("uint16.from: the value is not a number in the range of UInt16"),
+}
+
+/// some(x as UInt16) when UInt16 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> UInt16? = match x.__int_exact() {
+  some(n) => int.to_uint16_checked(n),
+  none => none,
+}
+
+/// x as UInt16, toward zero, clamped to UInt16's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> UInt16 = int.to_uint16_saturating(x.__int_sat())
+
+/// The low 16 bits of integer x as UInt16 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> UInt16 = int.to_uint16(int.wrap(x.__bits64(), 16))
+
+
+
+
+fn __int_exact(x: UInt16) -> Int? = some(int.from_uint16(x))
+
+fn __uint64_exact(x: UInt16) -> UInt64? = int.__uint64_exact(int.from_uint16(x))
+
+fn __trunc(x: UInt16) -> UInt16 = x
+
+fn __int_sat(x: UInt16) -> Int = int.from_uint16(x)
+
+fn __uint64_sat(x: UInt16) -> UInt64 = int.__uint64_sat(int.from_uint16(x))
+
+fn __to_float(x: UInt16) -> Float = int.to_float(int.from_uint16(x))
+
+fn __to_float_exact(x: UInt16) -> Float? = int.__to_float_exact(int.from_uint16(x))
+
+fn __to_float32(x: UInt16) -> Float32 = int.to_float32(int.from_uint16(x))
+
+fn __to_float32_exact(x: UInt16) -> Float32? = int.to_float32_checked(int.from_uint16(x))
+
+fn __decimal_exact(x: UInt16) -> String? = some(int.to_string(int.from_uint16(x)))
+
+fn __bits64(x: UInt16) -> Int = int.from_uint16(x)
+
+fn __sum(xs: List[UInt16]) -> UInt16 = {
+  let zero: UInt16 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[UInt16]) -> UInt16 = {
+  let one: UInt16 = 1
+  list.fold(xs, one, (a, b) => a * b)
+}
 "#;
 pub const SRC_UINT16_CONVERT: &str = r#"
 
@@ -38768,6 +40805,77 @@ fn parse(s: String) -> Result[UInt32, String] =
     ok(n) => if n > 4294967295 then err("number too large to fit in target type") else ok(int.to_uint32(n)),
     err(e) => err(e),
   }
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: UInt32, radix: Int) -> String = int.to_string_radix(int.from_uint32(x), radix)
+
+/// UInt32 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 4294967295.
+fn parse_radix(s: String, radix: Int) -> Result[UInt32, String] = {
+  let parsed = int.parse_radix(s, radix)
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match parsed {
+    ok(n) => if n > 4294967295 then err("number too large to fit in target type") else ok(int.to_uint32(n)),
+    err(e) => err(e),
+  }
+}
+
+
+
+
+
+/// x as UInt32, toward zero; NaN, an infinity or a value outside UInt32 aborts.
+fn from[S: Numeric](x: S) -> UInt32 = match x.__trunc().__int_exact() {
+  some(n) => int.to_uint32_checked(n) ?? panic("uint32.from: the value is not a number in the range of UInt32"),
+  none => panic("uint32.from: the value is not a number in the range of UInt32"),
+}
+
+/// some(x as UInt32) when UInt32 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> UInt32? = match x.__int_exact() {
+  some(n) => int.to_uint32_checked(n),
+  none => none,
+}
+
+/// x as UInt32, toward zero, clamped to UInt32's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> UInt32 = int.to_uint32_saturating(x.__int_sat())
+
+/// The low 32 bits of integer x as UInt32 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> UInt32 = int.to_uint32(int.wrap(x.__bits64(), 32))
+
+
+
+
+fn __int_exact(x: UInt32) -> Int? = some(int.from_uint32(x))
+
+fn __uint64_exact(x: UInt32) -> UInt64? = int.__uint64_exact(int.from_uint32(x))
+
+fn __trunc(x: UInt32) -> UInt32 = x
+
+fn __int_sat(x: UInt32) -> Int = int.from_uint32(x)
+
+fn __uint64_sat(x: UInt32) -> UInt64 = int.__uint64_sat(int.from_uint32(x))
+
+fn __to_float(x: UInt32) -> Float = int.to_float(int.from_uint32(x))
+
+fn __to_float_exact(x: UInt32) -> Float? = int.__to_float_exact(int.from_uint32(x))
+
+fn __to_float32(x: UInt32) -> Float32 = int.to_float32(int.from_uint32(x))
+
+fn __to_float32_exact(x: UInt32) -> Float32? = int.to_float32_checked(int.from_uint32(x))
+
+fn __decimal_exact(x: UInt32) -> String? = some(int.to_string(int.from_uint32(x)))
+
+fn __bits64(x: UInt32) -> Int = int.from_uint32(x)
+
+fn __sum(xs: List[UInt32]) -> UInt32 = {
+  let zero: UInt32 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[UInt32]) -> UInt32 = {
+  let one: UInt32 = 1
+  list.fold(xs, one, (a, b) => a * b)
+}
 "#;
 pub const SRC_UINT32_CONVERT: &str = r#"
 
@@ -39114,6 +41222,109 @@ local fn parse_upper(t: String) -> UInt64? = {
     _ => none,
   }
 }
+
+
+/// Digits of x in radix, lowercase, no sign; exact up to 2^64-1; radix outside 2..36 aborts.
+fn to_string_radix(x: UInt64, radix: Int) -> String =
+  if int.from_uint64(x) >= 0 then int.to_string_radix(int.from_uint64(x), radix)
+  else {
+
+    let r = int.to_uint64(radix)
+    int.to_string_radix(int.from_uint64(x / r), radix) + int.to_string_radix(
+      int.from_uint64(x % r),
+      radix,
+    )
+  }
+
+/// UInt64 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 2^64-1.
+fn parse_radix(s: String, radix: Int) -> Result[UInt64, String] = {
+  let parsed = int.parse_radix(s, radix)
+  let t = string.trim(s)
+  if string.starts_with(t, "-") then err("invalid digit found in string")
+  else match parsed {
+    ok(n) => ok(int.to_uint64(n)),
+    err(e) => if e == "number too large to fit in target type" then parse_radix_upper(t, radix) ?? err(e)
+    else err(e),
+  }
+}
+
+
+
+local fn parse_radix_upper(t: String, radix: Int) -> Result[UInt64, String]? = {
+  let n = string.len(t)
+  match (int.parse_radix(string.slice(t, 0, n - 1), radix), int.parse_radix(
+    string.slice(t, n - 1, n),
+    radix,
+  )) {
+    (ok(head), ok(digit)) => {
+      let r = int.to_uint64(radix)
+      let d = int.to_uint64(digit)
+      if int.to_uint64(head) <= (max_value() - d) / r then some(ok(int.to_uint64(head) * r + d)) else none
+    },
+    _ => none,
+  }
+}
+
+
+
+
+
+/// x as UInt64, toward zero; NaN, an infinity or a value outside UInt64 aborts.
+fn from[S: Numeric](x: S) -> UInt64 = x.__trunc().__uint64_exact() ?? panic("uint64.from: the value is not a number in the range of UInt64")
+
+/// some(x as UInt64) when UInt64 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> UInt64? = x.__uint64_exact()
+
+/// x as UInt64, toward zero, clamped to UInt64's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> UInt64 = x.__uint64_sat()
+
+/// The low 64 bits of integer x as UInt64 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> UInt64 = {
+  let b = x.__bits64()
+  if b >= 0 then int.to_uint64(b)
+  else int.to_uint64(int.band(b, 9223372036854775807)) + int.to_uint64(4611686018427387904) * int.to_uint64(2)
+}
+
+
+
+
+fn __int_exact(x: UInt64) -> Int? = int.from_uint64_checked(x)
+
+fn __uint64_exact(x: UInt64) -> UInt64? = some(x)
+
+fn __trunc(x: UInt64) -> UInt64 = x
+
+fn __int_sat(x: UInt64) -> Int = int.from_uint64_saturating(x)
+
+fn __uint64_sat(x: UInt64) -> UInt64 = x
+
+fn __to_float(x: UInt64) -> Float = float.from_float64(uint64.to_float64(x))
+
+fn __to_float_exact(x: UInt64) -> Float? = {
+  let f = uint64.__to_float(x)
+  if float.__uint64_exact(f) == some(x) then some(f) else none
+}
+
+fn __to_float32(x: UInt64) -> Float32 = uint64.to_float32(x)
+
+fn __to_float32_exact(x: UInt64) -> Float32? = {
+  let f = uint64.to_float32(x)
+  if float.__uint64_exact(float.from_float32(f)) == some(x) then some(f) else none
+}
+
+fn __decimal_exact(x: UInt64) -> String? = some(uint64.to_string(x))
+
+fn __bits64(x: UInt64) -> Int = int.from_uint64(x)
+
+fn __sum(xs: List[UInt64]) -> UInt64 = {
+  let zero: UInt64 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[UInt64]) -> UInt64 = {
+  let one: UInt64 = 1
+  list.fold(xs, one, (a, b) => a * b)
+}
 "#;
 pub const SRC_UINT64_CONVERT: &str = r#"
 
@@ -39429,6 +41640,77 @@ fn parse(s: String) -> Result[UInt8, String] =
     ok(n) => if n > 255 then err("number too large to fit in target type") else ok(int.to_uint8(n)),
     err(e) => err(e),
   }
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: UInt8, radix: Int) -> String = int.to_string_radix(int.from_uint8(x), radix)
+
+/// UInt8 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 255.
+fn parse_radix(s: String, radix: Int) -> Result[UInt8, String] = {
+  let parsed = int.parse_radix(s, radix)
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match parsed {
+    ok(n) => if n > 255 then err("number too large to fit in target type") else ok(int.to_uint8(n)),
+    err(e) => err(e),
+  }
+}
+
+
+
+
+
+/// x as UInt8, toward zero; NaN, an infinity or a value outside UInt8 aborts.
+fn from[S: Numeric](x: S) -> UInt8 = match x.__trunc().__int_exact() {
+  some(n) => int.to_uint8_checked(n) ?? panic("uint8.from: the value is not a number in the range of UInt8"),
+  none => panic("uint8.from: the value is not a number in the range of UInt8"),
+}
+
+/// some(x as UInt8) when UInt8 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> UInt8? = match x.__int_exact() {
+  some(n) => int.to_uint8_checked(n),
+  none => none,
+}
+
+/// x as UInt8, toward zero, clamped to UInt8's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> UInt8 = int.to_uint8_saturating(x.__int_sat())
+
+/// The low 8 bits of integer x as UInt8 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> UInt8 = int.to_uint8(int.wrap(x.__bits64(), 8))
+
+
+
+
+fn __int_exact(x: UInt8) -> Int? = some(int.from_uint8(x))
+
+fn __uint64_exact(x: UInt8) -> UInt64? = int.__uint64_exact(int.from_uint8(x))
+
+fn __trunc(x: UInt8) -> UInt8 = x
+
+fn __int_sat(x: UInt8) -> Int = int.from_uint8(x)
+
+fn __uint64_sat(x: UInt8) -> UInt64 = int.__uint64_sat(int.from_uint8(x))
+
+fn __to_float(x: UInt8) -> Float = int.to_float(int.from_uint8(x))
+
+fn __to_float_exact(x: UInt8) -> Float? = int.__to_float_exact(int.from_uint8(x))
+
+fn __to_float32(x: UInt8) -> Float32 = int.to_float32(int.from_uint8(x))
+
+fn __to_float32_exact(x: UInt8) -> Float32? = int.to_float32_checked(int.from_uint8(x))
+
+fn __decimal_exact(x: UInt8) -> String? = some(int.to_string(int.from_uint8(x)))
+
+fn __bits64(x: UInt8) -> Int = int.from_uint8(x)
+
+fn __sum(xs: List[UInt8]) -> UInt8 = {
+  let zero: UInt8 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[UInt8]) -> UInt8 = {
+  let one: UInt8 = 1
+  list.fold(xs, one, (a, b) => a * b)
+}
 "#;
 pub const SRC_UINT8_CONVERT: &str = r#"
 
@@ -41802,7 +44084,7 @@ fn zld_adler32(b: Bytes) -> Int = {
 
 
 effect fn zlib_deflate(data: Bytes) -> Result[Bytes, String] = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   zld_stored_stream(data, out)
   ok(out)
 }
@@ -41813,7 +44095,7 @@ effect fn zlib_deflate_level(data: Bytes, level: Int) -> Result[Bytes, String] =
 }
 
 effect fn zlib_compress(data: Bytes) -> Result[Bytes, String] = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   bytes.push(out, 120)
   bytes.push(out, 1)
   zld_stored_stream(data, out)
@@ -41831,7 +44113,7 @@ effect fn zlib_compress_level(data: Bytes, level: Int) -> Result[Bytes, String] 
 }
 
 effect fn zlib_gzip(data: Bytes) -> Result[Bytes, String] = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   bytes.push(out, 31)
   bytes.push(out, 139)
   bytes.push(out, 8)
@@ -42526,7 +44808,7 @@ fn zli_check_limit(func: String, max_len: Int) -> Unit =
   else ()
 
 fn zli_gunzip(data: Bytes, limit: Int) -> Result[Bytes, String] = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   let code = zli_gunzip_members(data, out, limit)
   if code == 0 then ok(out)
   else if code == 8 then err(zli_exceeds(limit))
@@ -42534,7 +44816,7 @@ fn zli_gunzip(data: Bytes, limit: Int) -> Result[Bytes, String] = {
 }
 
 fn zli_inflate(data: Bytes, limit: Int) -> Result[Bytes, String] = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   let (status, _after) = zli_inflate_stream(0, data, out, limit)
   if status == 0 then ok(out)
   else if status == 0 - 3 then err(zli_exceeds(limit))
@@ -42551,7 +44833,7 @@ fn zli_decompress(data: Bytes, limit: Int) -> Result[Bytes, String] = {
   else if int.band(cmf, 15) != 8 or int.bshr(cmf, 4) > 7 or (cmf * 256 + flg) % 31 != 0 then err("zlib.decompress: invalid zlib header")
   else if int.band(flg, 32) != 0 then err("zlib.decompress: preset dictionary unsupported")
   else {
-    var out = bytes.new(0)
+    var out = bytes.zeros(0)
     let (status, after) = zli_inflate_stream(2, data, out, limit)
     let stored = int.bor(
       int.bshl(bytes.get_or(data, after, 0), 24),
@@ -42606,6 +44888,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "args" => Some(SRC_ARGS),
         "base64" => Some(SRC_BASE64),
         "base64_encode" => Some(SRC_BASE64_ENCODE),
+        "bigint" => Some(SRC_BIGINT),
         "bool" => Some(SRC_BOOL),
         "bytes" => Some(SRC_BYTES),
         "bytes_append_multi" => Some(SRC_BYTES_APPEND_MULTI),

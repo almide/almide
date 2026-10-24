@@ -20,9 +20,9 @@ read here is what the current compiler accepts.
   `uint8`, `uint16`, `uint32`, `uint64`, `float32`, `float64`) are also
   auto-imported for UFCS — e.g. `x.to_int64()` on `x: Int32` resolves to
   `int32.to_int64(x)`.
-  Everything else needs an explicit `import`: `args`, `base64`, `bytes`,
-  `env`, `fs`, `hash`, `hex`, `html`, `http`, `io`, `json`, `matrix`,
-  `net`, `path`, `process`, `random`, `regex`, `testing`, `zlib`.
+  Everything else needs an explicit `import`: `args`, `base64`, `bigint`,
+  `bytes`, `env`, `fs`, `hash`, `hex`, `html`, `http`, `io`, `json`,
+  `matrix`, `net`, `path`, `process`, `random`, `regex`, `testing`, `zlib`.
 - Not in the stdlib since dialect epoch 14: the neural-network kernels
   (`gelu`, `softmax_rows`, attention, RoPE, the row norms, Q1_0/Q8_0, the
   Qwen3 blocks) are package `almide/nnlib` (`import nnlib`, then `nnlib.gelu(m)`),

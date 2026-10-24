@@ -123,7 +123,7 @@ fn main() -> Unit = {
   // ── the copy is rc-gated: an UNALIASED buffer is still written in place,
   // so a build loop through a `mut` parameter stays linear ──
   var acc: List[Int] = []
-  var buf = bytes.new(0)
+  var buf = bytes.zeros(0)
   for i in 0..<4000 {
     push_list_at(acc, i)
     grow_bytes(buf)

@@ -5,7 +5,7 @@
 //!
 //! The native call site takes `&mut r.buf`; a sibling `pos(&r)` evaluated
 //! after it is rustc E0502, so the borrow-conflict hoist moves each such
-//! sibling into a temporary first (`bytes.set_u8(s.buf, pos(s), 7)` was
+//! sibling into a temporary first (`bytes.put_u8(s.buf, pos(s), 7)` was
 //! E0502 on 0.64.0). With two or more hoisted siblings every temporary also
 //! needs its own name — a shared `__hoist` handed every argument the last
 //! one's value (#3049), which the ORACLE here catches: the same statements
@@ -144,7 +144,7 @@ fn drive(mut r: R) -> Unit = {{
 {in_param}}}
 
 effect fn main() -> Unit = {{
-  var r = R {{ buf: bytes.new(40), s: "s", xs: [0], m: [:], n: 0 }}
+  var r = R {{ buf: bytes.zeros(40), s: "s", xs: [0], m: [:], n: 0 }}
 {in_var}  println(show(r))
   drive(r)
   println(show(r))
@@ -177,7 +177,7 @@ fn every_in_place_mutator_with_a_field_receiver_evaluates_sibling_reads_before_t
     // The matrix is only as good as its row count: the byte writers alone are
     // ~50 fns, and push/insert anchor the list/map/string rows.
     assert!(ms.len() >= 50, "found only {} mutators — the signature scan broke", ms.len());
-    for (m, f) in [("bytes", "set_u8"), ("bytes", "copy_within"), ("string", "push"), ("list", "push"), ("map", "insert")] {
+    for (m, f) in [("bytes", "put_u8"), ("bytes", "copy_within"), ("string", "push"), ("list", "push"), ("map", "insert")] {
         assert!(ms.iter().any(|x| x.module == m && x.name == f), "{m}.{f} missing from the matrix");
     }
     let dir = tempfile::tempdir().expect("tempdir");

@@ -831,9 +831,15 @@ fn rc_cow_symbol_is_native_runtime(symbol: &str) -> bool {
         }) => rest,
         None => return false,
     };
-    crate::generated::rust_runtime::RUST_RUNTIME_MODULES
-        .iter()
-        .any(|(m, _)| rest.strip_prefix(m).is_some_and(|r| r.starts_with('_')))
+    crate::generated::rust_runtime::RUST_RUNTIME_MODULES.iter().any(|(m, _)| {
+        rest.strip_prefix(m).and_then(|r| r.strip_prefix('_')).is_some_and(|func| {
+            // A bundled stdlib fn with an Almide body (`bytes.get_i8`) renders
+            // as a generated fn in the runtime spelling, but its params are the
+            // mapped `&AlmideRcCow<Vec<u8>>` of user code: a Bytes global must
+            // reach it glued, exactly as it reaches a user fn.
+            !almide_ir::mut_args::stdlib_fn_has_almide_body(m, func)
+        })
+    })
 }
 
 /// The runtime modules whose intrinsic symbols are spelled `almide_<module>_…`
@@ -978,9 +984,17 @@ fn render_call_with_copied_global_places(
     let rendered: Vec<String> = args.iter().zip(places).map(|(a, place)| match place {
         Some((static_name, suffix)) => {
             let k = copy_in.len();
-            copy_in.push(format!(
-                "let mut __almide_gp{k} = {static_name}.with(|__almide_gc| (**__almide_gc.borrow()){suffix}.clone());"
-            ));
+            // The global stores the RAW Bytes/Matrix shape (#617); the callee's
+            // `&mut` param is the mapped `AlmideRcCow` one (a runtime callee's raw
+            // `&mut Vec<u8>` deref-coerces from it), and the write-back `.into()`
+            // turns it raw again.
+            let ty = match &a.kind {
+                IrExprKind::Borrow { expr: inner, .. } => &inner.ty,
+                _ => &a.ty,
+            };
+            let read = format!("{static_name}.with(|__almide_gc| (**__almide_gc.borrow()){suffix}.clone())");
+            let read = if suffix.is_empty() { rc_cow_result_glue(read, ty) } else { read };
+            copy_in.push(format!("let mut __almide_gp{k} = {read};"));
             write_back.push(if suffix.is_empty() {
                 format!("{static_name}.with(|__almide_gc| *__almide_gc.borrow_mut() = std::rc::Rc::new((__almide_gp{k}).into()));")
             } else {

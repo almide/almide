@@ -240,6 +240,79 @@ breaks = [
   "an `@inline_rust` fn outside the stdlib counts as every effect category, like an `@extern` fn (epoch 8), so a project whose `[permissions].allow` omits one now fails `almide build` with a capability violation; a dependency that carries one also needs `[permissions] native`. A file is the stdlib's for E085 only when its text is the embedded stdlib source of its name, not because it sits under `stdlib/` (#4100)",
   "an explicit `[permissions] allow = []` now allows no capability: every function that reaches one is a capability violation (an absent `allow` key or table stays unchecked). It used to mean every capability; a project that relied on that removes the empty `allow` line or lists what it uses (#4101)",
   "a raw Unicode bidirectional control character (U+202A–U+202E, U+2066–U+2069) anywhere in a source file, in a comment, a string literal, a heredoc or a raw string, is E101 (Trojan Source, CVE-2021-42574), where it used to be accepted silently (#4092). Remove it from a comment; in a literal write the escape `\\u{202E}` (`\\u{...}` with its codepoint), which decodes to the same character",
+  "`bytes.cmp(a, b)` → rewrite as `bytes.compare(a, b)`: the same answer under the spelling list and string use (R-bytes-07/08)",
+  "`bytes.eof(b, pos)` → rewrite as `bytes.is_eof(b, pos)`: the same answer under the spelling list and string use (R-bytes-07/08)",
+  "`bytes.map_each(b, f)` → rewrite as `bytes.map(b, f)`: the same answer under the spelling list and string use (R-bytes-07/08)",
+  "`bytes.pad_left(b, n, fill)` → rewrite as `bytes.pad_start(b, n, fill)`: the same answer under the spelling list and string use (R-bytes-07/08)",
+  "`bytes.pad_right(b, n, fill)` → rewrite as `bytes.pad_end(b, n, fill)`: the same answer under the spelling list and string use (R-bytes-07/08)",
+  "`bytes.chunks(b, n)` → rewrite as `bytes.chunk(b, n)`: the same pieces, but `n <= 0` aborts where it returned `[]`, as `list.chunk` does (R-bytes-08/22)",
+  "`bytes.write_bool(b, x)` → rewrite as `bytes.append_bool(b, x)`: the same 1-byte append under the matrix's `append_` verb (R-bytes-03)",
+  "`bytes.set_u8(b, pos, x)` → rewrite as `bytes.put_u8(b, pos, x)`: the same in-place write, but a position outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_u16_le(b, pos, x)` → rewrite as `bytes.put_u16_le(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_u16_be(b, pos, x)` → rewrite as `bytes.put_u16_be(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_i16_le(b, pos, x)` → rewrite as `bytes.put_i16_le(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_i16_be(b, pos, x)` → rewrite as `bytes.put_i16_be(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_u32_le(b, pos, x)` → rewrite as `bytes.put_u32_le(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_u32_be(b, pos, x)` → rewrite as `bytes.put_u32_be(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_i32_le(b, pos, x)` → rewrite as `bytes.put_i32_le(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_i32_be(b, pos, x)` → rewrite as `bytes.put_i32_be(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_i64_le(b, pos, x)` → rewrite as `bytes.put_i64_le(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_i64_be(b, pos, x)` → rewrite as `bytes.put_i64_be(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_f32_le(b, pos, x)` → rewrite as `bytes.put_f32_le(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_f32_be(b, pos, x)` → rewrite as `bytes.put_f32_be(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_f64_le(b, pos, x)` → rewrite as `bytes.put_f64_le(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.set_f64_be(b, pos, x)` → rewrite as `bytes.put_f64_be(b, pos, x)`: the same in-place write, but a window outside the buffer aborts where it was skipped (R-bytes-01/11)",
+  "`bytes.read_u16_le(b, pos)` → rewrite as `bytes.get_u16_le(b, pos) ?? 0`: out of range is `none` instead of 0 (R-bytes-09); `?` or a meaningful fallback is better than 0",
+  "`bytes.read_u16_be(b, pos)` → rewrite as `bytes.get_u16_be(b, pos) ?? 0`: out of range is `none` instead of 0 (R-bytes-09); `?` or a meaningful fallback is better than 0",
+  "`bytes.read_i16_le(b, pos)` → rewrite as `bytes.get_i16_le(b, pos) ?? 0`: out of range is `none` instead of 0 (R-bytes-09); `?` or a meaningful fallback is better than 0",
+  "`bytes.read_i16_be(b, pos)` → rewrite as `bytes.get_i16_be(b, pos) ?? 0`: out of range is `none` instead of 0 (R-bytes-09); `?` or a meaningful fallback is better than 0",
+  "`bytes.read_u32_le(b, pos)` → rewrite as `bytes.get_u32_le(b, pos) ?? 0`: out of range is `none` instead of 0 (R-bytes-09); `?` or a meaningful fallback is better than 0",
+  "`bytes.read_u32_be(b, pos)` → rewrite as `bytes.get_u32_be(b, pos) ?? 0`: out of range is `none` instead of 0 (R-bytes-09); `?` or a meaningful fallback is better than 0",
+  "`bytes.read_i32_le(b, pos)` → rewrite as `bytes.get_i32_le(b, pos) ?? 0`: out of range is `none` instead of 0 (R-bytes-09); `?` or a meaningful fallback is better than 0",
+  "`bytes.read_i32_be(b, pos)` → rewrite as `bytes.get_i32_be(b, pos) ?? 0`: out of range is `none` instead of 0 (R-bytes-09); `?` or a meaningful fallback is better than 0",
+  "`bytes.read_i64_le(b, pos)` → rewrite as `bytes.get_i64_le(b, pos) ?? 0`: out of range is `none` instead of 0 (R-bytes-09); `?` or a meaningful fallback is better than 0",
+  "`bytes.read_i64_be(b, pos)` → rewrite as `bytes.get_i64_be(b, pos) ?? 0`: out of range is `none` instead of 0 (R-bytes-09); `?` or a meaningful fallback is better than 0",
+  "`bytes.read_f32_le(b, pos)` → rewrite as `bytes.get_f32_le(b, pos) ?? 0.0`: out of range is `none` instead of 0.0 (R-bytes-09); `?` or a meaningful fallback is better than 0.0",
+  "`bytes.read_f32_be(b, pos)` → rewrite as `bytes.get_f32_be(b, pos) ?? 0.0`: out of range is `none` instead of 0.0 (R-bytes-09); `?` or a meaningful fallback is better than 0.0",
+  "`bytes.read_f64_le(b, pos)` → rewrite as `bytes.get_f64_le(b, pos) ?? 0.0`: out of range is `none` instead of 0.0 (R-bytes-09); `?` or a meaningful fallback is better than 0.0",
+  "`bytes.read_f64_be(b, pos)` → rewrite as `bytes.get_f64_be(b, pos) ?? 0.0`: out of range is `none` instead of 0.0 (R-bytes-09); `?` or a meaningful fallback is better than 0.0",
+  "`bytes.read_f16_le(b, pos)` → rewrite as `bytes.get_f16_le(b, pos) ?? 0.0`: out of range is `none` instead of 0.0 (R-bytes-09); `?` or a meaningful fallback is better than 0.0",
+  "`bytes.read_bool(b, pos)` → rewrite as `bytes.get_bool(b, pos) ?? false`: out of range is `none` instead of false (R-bytes-09)",
+  "`bytes.read_u16_le_array(b, pos, count)` → rewrite as `bytes.get_u16_le_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_u16_be_array(b, pos, count)` → rewrite as `bytes.get_u16_be_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_i16_le_array(b, pos, count)` → rewrite as `bytes.get_i16_le_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_i16_be_array(b, pos, count)` → rewrite as `bytes.get_i16_be_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_u32_le_array(b, pos, count)` → rewrite as `bytes.get_u32_le_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_u32_be_array(b, pos, count)` → rewrite as `bytes.get_u32_be_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_i32_le_array(b, pos, count)` → rewrite as `bytes.get_i32_le_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_i32_be_array(b, pos, count)` → rewrite as `bytes.get_i32_be_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_i64_le_array(b, pos, count)` → rewrite as `bytes.get_i64_le_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_i64_be_array(b, pos, count)` → rewrite as `bytes.get_i64_be_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_f32_le_array(b, pos, count)` → rewrite as `bytes.get_f32_le_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_f32_be_array(b, pos, count)` → rewrite as `bytes.get_f32_be_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_f64_le_array(b, pos, count)` → rewrite as `bytes.get_f64_le_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_f64_be_array(b, pos, count)` → rewrite as `bytes.get_f64_be_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_f16_le_array(b, pos, count)` → rewrite as `bytes.get_f16_le_array(b, pos, count) ?? []`: `none` unless every element fits, where the old read padded a cut-off tail with zeros (R-bytes-09)",
+  "`bytes.read_u8_at(b, pos)` → rewrite as `bytes.next_u8(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_bool_at(b, pos)` → rewrite as `bytes.next_bool(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_u16_le_at(b, pos)` → rewrite as `bytes.next_u16_le(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_u16_be_at(b, pos)` → rewrite as `bytes.next_u16_be(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_i16_le_at(b, pos)` → rewrite as `bytes.next_i16_le(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_i16_be_at(b, pos)` → rewrite as `bytes.next_i16_be(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_u32_le_at(b, pos)` → rewrite as `bytes.next_u32_le(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_u32_be_at(b, pos)` → rewrite as `bytes.next_u32_be(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_i32_le_at(b, pos)` → rewrite as `bytes.next_i32_le(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_i32_be_at(b, pos)` → rewrite as `bytes.next_i32_be(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_i64_le_at(b, pos)` → rewrite as `bytes.next_i64_le(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_i64_be_at(b, pos)` → rewrite as `bytes.next_i64_be(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_f32_le_at(b, pos)` → rewrite as `bytes.next_f32_le(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_f32_be_at(b, pos)` → rewrite as `bytes.next_f32_be(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_f64_le_at(b, pos)` → rewrite as `bytes.next_f64_le(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_f64_be_at(b, pos)` → rewrite as `bytes.next_f64_be(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.read_f16_le_at(b, pos)` → rewrite as `bytes.next_f16_le(b, pos)`: the pair is `(value, next position)` now, so swap the destructuring `let (p, v)` to `let (v, p)` (R-bytes-13)",
+  "`bytes.take_at(b, pos, n)` → rewrite as `bytes.next_bytes(b, pos, n)`: the pair is `(bytes, next position)` now, so swap the destructuring `let (p, s)` to `let (s, p)` (R-bytes-13)",
+  "`bytes.new(n)` is `bytes.zeros(n)` (n zero bytes); `bytes.new()` is now the empty buffer, as every container's `new()` is, so the one-argument call is E004 (R-bytes-28)",
+  "the `bytes` parameters `val` / `pattern` / `dst` / `pos` of `append_*`, `push`, `fill`, `set`, `insert`, `remove_at`, `contains`, `index_of` and `copy_from` are named `x` / `needle` / `b` / `i`, the names list and string use (R-L0-30)",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
@@ -257,5 +330,14 @@ since = "0.69.0"
 removal_epoch = 16
 summary = "The five `bytes` raw-pointer functions are `@deprecated` (E052) in favour of the `ffi` module, which needs `import ffi` (R-ffi-01). `ffi.read` / `ffi.write` are effect fns (R-ffi-02) and `ffi.write` takes the address first (R-ffi-03)."
 removal = "`bytes.as_ptr(b)` / `bytes.as_mut_ptr(b)` → `ffi.address(b)`; `bytes.data_ptr(b)` → `ffi.to_int(ffi.address(b))` (0 for an empty b); `bytes.from_raw_ptr(p, n)` → `ffi.read(p, n)` from an effect fn; `bytes.copy_to_ptr(b, p, c)` → `ffi.write(p, b, c)` from an effect fn — each with `import ffi`"
+
+[[deprecation]]
+id = "numeric-renames-wave-2"
+issue = 3985
+since_epoch = 15
+since = "0.69.0"
+removal_epoch = 16
+summary = "Three numeric functions are `@deprecated` (E052) under a new name with the same signature and answers: `int.pop_count` → `int.count_ones` (R-int-07, #3985), `int.bit_width` → `int.bit_length` (R-int-11, #4004), and `float.sign` → `float.signum` (R-float-05, #3972), which frees `sign` for the 0-for-0 answer every other number type gives."
+removal = "`int.pop_count(n)` → `int.count_ones(n)`; `int.bit_width(n)` → `int.bit_length(n)`; `float.sign(x)` → `float.signum(x)` (still 1.0 for 0.0 and -1.0 for -0.0)"
 
 # ======================================================

@@ -1,0 +1,94 @@
+// The bigint module (R-bigint-01/05/07): text in any radix, the Integer order and division
+// functions, and the two's-complement bitwise functions, against values far past Int.
+// The values are built with parse and pow; the operators (R-bigint-04) are
+// spec/stdlib/bigint_operators_test.almd.
+import bigint
+import testing
+
+fn b(s: String) -> BigInt = match bigint.parse(s) {
+  ok(x) => x,
+  err(e) => panic(e),
+}
+
+fn s(x: BigInt) -> String = bigint.to_string(x)
+
+test "parse and to_string round-trip past Int" {
+  assert_eq(
+    s(bigint.pow(b("2"), 200)),
+    "1606938044258990275541962092341162602522202993782792835301376",
+  )
+  assert_eq(bigint.to_string_radix(bigint.pow(b("2"), 64), 16), "10000000000000000")
+  assert_eq(bigint.to_string_radix(bigint.pow(b("-3"), 41), 36), "-7p3rq5zujif6r")
+  let big = bigint.pow(b("12345678901234567"), 40)
+  for r in [2, 7, 10, 16, 36] {
+    assert_eq(bigint.parse_radix(bigint.to_string_radix(big, r), r), ok(big))
+  }
+  assert_eq(s(b(" -000123 ")), "-123")
+  assert_eq(b("-0"), b("0"))
+  assert_eq(s(b("+42")), "42")
+  assert_eq(bigint.parse_radix("-0xFF", 16), ok(b("-255")))
+}
+
+test "parse errors and the radix range" {
+  assert_eq(bigint.parse(""), err("cannot parse integer from empty string"))
+  assert_eq(bigint.parse("-"), err("invalid digit found in string"))
+  assert_eq(bigint.parse("12x"), err("invalid digit found in string"))
+  assert_eq(bigint.parse("0x10"), err("invalid digit found in string"))
+  testing.assert_aborts("radix must be in 2..36, got 37", () => bigint.to_string_radix(b("1"), 37))
+  testing.assert_aborts("radix must be in 2..36, got 1", () => bigint.parse_radix("1", 1))
+}
+
+test "compare, min, max, clamp, abs, sign and parity" {
+  assert_eq(bigint.compare(b("-5"), b("3")), -1)
+  assert_eq(bigint.compare(bigint.pow(b("10"), 30), bigint.pow(b("10"), 29)), 1)
+  assert_eq(bigint.compare(b("-100000000000000000000"), b("-99999999999999999999")), -1)
+  assert_eq(bigint.compare(b("7"), b("7")), 0)
+  assert_eq(s(bigint.min(b("-50"), b("7"))), "-50")
+  assert_eq(s(bigint.max(b("-50"), b("7"))), "7")
+  assert_eq(s(bigint.clamp(b("50"), b("-3"), b("7"))), "7")
+  assert_eq(s(bigint.abs(b("-123456789012345678901234567890"))), "123456789012345678901234567890")
+  assert_eq(bigint.sign(b("-1")), -1)
+  assert_eq(bigint.sign(b("0")), 0)
+  assert_eq(bigint.sign(bigint.pow(b("2"), 100)), 1)
+  assert(bigint.is_even(bigint.pow(b("2"), 100)))
+  assert(bigint.is_odd(b("-5")))
+  assert(bigint.is_even(b("0")))
+  testing.assert_aborts("clamp requires min <= max", () => bigint.clamp(b("1"), b("1"), b("0")))
+}
+
+test "floor_div and modulo in the four sign quadrants" {
+  assert_eq(s(bigint.floor_div(b("-7"), b("2"))), "-4")
+  assert_eq(s(bigint.modulo(b("-7"), b("2"))), "1")
+  assert_eq(s(bigint.floor_div(b("7"), b("-2"))), "-4")
+  assert_eq(s(bigint.modulo(b("7"), b("-2"))), "-1")
+  assert_eq(s(bigint.floor_div(b("-7"), b("-2"))), "3")
+  assert_eq(s(bigint.modulo(b("-7"), b("-2"))), "-1")
+  let x = bigint.pow(b("10"), 60)
+  let y = b("-123456789012345678901234567890123")
+  assert_eq(s(bigint.floor_div(x, y)), "-8100000072900000663390006037")
+  assert_eq(s(bigint.modulo(x, y)), "-18631493010830219381783322672551")
+  assert_eq(
+    s(bigint.floor_div(bigint.pow(b("12345678901234567"), 30), bigint.pow(b("12345678901234567"), 29))),
+    "12345678901234567",
+  )
+  assert_eq(s(bigint.modulo(bigint.pow(b("12345678901234567"), 30), b("1000000007"))), "514064383")
+  testing.assert_aborts("division by zero", () => bigint.floor_div(b("1"), b("0")))
+  testing.assert_aborts("negative exponent", () => bigint.pow(b("2"), -1))
+}
+
+test "bit_length and the two's-complement bitwise functions" {
+  let p70 = bigint.pow(b("2"), 70)
+  assert_eq(bigint.bit_length(b("0")), 0)
+  assert_eq(bigint.bit_length(b("-5")), 3)
+  assert_eq(bigint.bit_length(p70), 71)
+  assert_eq(s(bigint.bnot(p70)), "-1180591620717411303425")
+  assert_eq(s(bigint.band(b("-5"), p70)), "1180591620717411303424")
+  assert_eq(s(bigint.bor(b("-5"), p70)), "-5")
+  assert_eq(s(bigint.bxor(b("-1"), p70)), "-1180591620717411303425")
+  assert_eq(s(bigint.band(b("-1073741824"), b("1073741823"))), "0")
+  assert_eq(s(bigint.bshl(b("-5"), 61)), "-11529215046068469760")
+  assert_eq(s(bigint.bshr(b("-5"), 1)), "-3")
+  assert_eq(s(bigint.bshr(bigint.bnot(p70), 65)), "-33")
+  assert_eq(s(bigint.bshr(p70, 65)), "32")
+  testing.assert_aborts("shift count must not be negative", () => bigint.bshl(b("1"), -1))
+}

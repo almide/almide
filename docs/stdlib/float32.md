@@ -46,7 +46,7 @@ value outside binary32's range becomes an infinity rather than an error.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (30 functions)
+## Signature index (33 functions)
 
 ```
 // Truncates toward 0, saturating; NaN gives 0.
@@ -168,6 +168,18 @@ float32.max_value() -> Float32
 // Most negative finite Float32 (= -max_value()), not the smallest positive.
 // @since unreleased
 float32.min_value() -> Float32
+
+// Float32 from trimmed s, the grammar of float.parse; err on junk; overflow gives inf.
+// @since unreleased
+float32.parse(s: String) -> Result[Float32, String]
+
+// x as the nearest Float32 (ties to even), rounded once; NaN stays NaN.
+// @since unreleased
+float32.from(x: S) -> Float32
+
+// some(x as Float32) when Float32 holds x exactly, else none (a rounded value, NaN).
+// @since unreleased
+float32.from_checked(x: S) -> Option[Float32]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

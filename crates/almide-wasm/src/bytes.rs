@@ -1,7 +1,7 @@
 //! Bytes — the byte-packed buffer surface (String's layout twin). The
 //! oracle allows in-place `set_*` (a `mut`/buffer API); under the
 //! bind-deep-copy doctrine a local's block is uniquely its own, so the
-//! stores are unobservable through aliases. `bytes.new` zero-fills its
+//! stores are unobservable through aliases. `bytes.zeros` zero-fills its
 //! payload itself: a block may come off a free list, so nothing may
 //! assume fresh memory (the bump path's zero pages were never a
 //! guarantee once frees became real, #2004).
@@ -49,7 +49,7 @@ impl Emitter<'_> {
         i.end();
         i.local_get(h).i32_wrap_i64().call(F_ALLOC);
         let _ = i;
-        // `bytes.new(n)` IS n zero bytes. The block may come off a free
+        // `bytes.zeros(n)` IS n zero bytes. The block may come off a free
         // list with a previous life's contents — the "bump memory is
         // zero" assumption held only while every block leaked (#2004
         // made the frees real and `bytes_writer_family` printed a stale
@@ -403,6 +403,21 @@ impl Emitter<'_> {
         func: &str,
         args: &[IrExpr],
     ) -> ArmResult {
+        // A `__`-named declaration is the width primitive under a checked
+        // public wrapper (`bytes.__chunks` under `bytes.chunk`, the typed byte
+        // IO matrix's position `__read_*` / `__set_*`): the same native arm as
+        // before. The linked primitives (`__read_*_at`, `__read_*_array`) keep
+        // their `__` name — it is their registry key.
+        let func = match func.strip_prefix("__") {
+            Some(f)
+                if f == "chunks"
+                    || f.starts_with("set_")
+                    || (f.starts_with("read_") && !f.ends_with("_at") && !f.ends_with("_array")) =>
+            {
+                f
+            }
+            _ => func,
+        };
         if let Some(out) = self.lower_bytes_rw(func, args)? {
             return Ok(out);
         }
@@ -410,7 +425,7 @@ impl Emitter<'_> {
             // Shape-grouped dispatch (pattern-count complexity; the
             // name split lives in the per-shape sub-dispatchers).
             ("to_string" | "to_list" | "to_string_lossy" | "len" | "from_string"
-            | "from_list" | "new" | "lines", [x]) => self.lower_bytes_unary(func, x),
+            | "from_list" | "zeros" | "lines", [x]) => self.lower_bytes_unary(func, x),
             ("concat" | "chunks" | "repeat" | "get" | "split", [a, b]) => {
                 self.lower_bytes_pair(func, a, b)
             }
@@ -429,8 +444,8 @@ impl Emitter<'_> {
             ("push", [b, v]) | ("append_u8", [b, v]) => self.lower_bytes_push(b, v),
             // pad to target with `val` on the chosen side; target <= len
             // (negative INCLUDED — the signed read, both legs) is a copy.
-            ("pad_left" | "pad_right", [b, target, v]) => {
-                let left = func == "pad_left";
+            ("pad_start" | "pad_end", [b, target, v]) => {
+                let left = func == "pad_start";
                 self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
                 let bh = self.hold_i32()?;
                 self.f.instructions().local_set(bh);
@@ -453,7 +468,7 @@ impl Emitter<'_> {
                 // single form BEFORE the i32 wrap — `i64::MAX` wrapped to -1
                 // reached `$alloc` and trapped out of bounds where native and
                 // the incumbent abort `Error: out of memory`. The same guard
-                // `bytes.new` carries (differential fuzz, seed 20260906:431).
+                // `bytes.zeros` carries (differential fuzz, seed 20260906:431).
                 i.local_get(ht).i64_const(0x7FFF_0000).i64_gt_s().if_(BlockType::Empty);
                 i.i32_const(oom as i32).call(F_EPRINTLN_BLOCK);
                 i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
@@ -610,7 +625,14 @@ impl Emitter<'_> {
             // on a var writes the fresh result back (the list.push
             // convention); on a temporary the fresh result is released
             // (#1849, bytes_recv.rs).
-            (f, [b, ..]) if f.starts_with("append_") || f.starts_with("write_") => {
+            // Only an intrinsic's linked FUNCTIONAL twin takes this arm; an
+            // append with an Almide body over `mut b` (`append_i8`,
+            // `append_f16_*`, `append_bytes`) arrives move-mode rewritten
+            // (`c = bytes.append_i8(c, x)`) and is an ordinary linked call below.
+            (f, [b, ..])
+                if (f.starts_with("append_") || f.starts_with("write_"))
+                    && !almide_ir::mut_args::stdlib_fn_has_almide_body("bytes", f) =>
+            {
                 let recv = self.bytes_recv("append", b)?;
                 match self.lower_linked_call("bytes", func, args, false)? {
                     Some(Lowered { ty: SliceTy::Scalar(Scalar::Bytes), .. }) => {}

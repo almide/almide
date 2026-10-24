@@ -200,6 +200,10 @@ fn list_ops() {
   println("${list.reverse(xs)}")"#), "[3, 2, 1]\n");
     expect_out(&main_print(r#"  let xs = [1, 2, 3]
   println("${list.sum(xs)}")"#), "6\n");
+    expect_out(&main_print(r#"  let xs = [1.5, 2.5]
+  println("${list.sum(xs)}")"#), "4\n");
+    expect_out(&main_print(r#"  let xs: List[Float] = []
+  println("${list.product(xs)}")"#), "1\n");
 }
 
 #[test]

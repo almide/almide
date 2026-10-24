@@ -59,7 +59,7 @@ fn bytes_coalesce_inline_in_call_arg_compiles() {
         "bytes_len",
         r#"import bytes
 fn pick(flag: Bool) -> Bytes? = if flag then some(bytes.from_list([7])) else none
-fn main() -> Unit = println("${bytes.len(pick(false) ?? bytes.new(0))}")
+fn main() -> Unit = println("${bytes.len(pick(false) ?? bytes.zeros(0))}")
 "#,
         "0",
     );
@@ -73,7 +73,7 @@ fn bytes_coalesce_taken_side_still_unwraps() {
         "bytes_some",
         r#"import bytes
 fn pick(flag: Bool) -> Bytes? = if flag then some(bytes.from_list([7, 8])) else none
-fn main() -> Unit = println("${bytes.len(pick(true) ?? bytes.new(0))}")
+fn main() -> Unit = println("${bytes.len(pick(true) ?? bytes.zeros(0))}")
 "#,
         "2",
     );

@@ -151,7 +151,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (crate::embedded::SRC_LIST_REVERSE_STR, &[("list_reverse_str", "list.reverse_str")]),
         (crate::embedded::SRC_LIST_TAKEDROP_STR, &[("list_take_str", "list.take_str"), ("list_drop_str", "list.drop_str"), ("list_slice_str", "list.slice_str")]),
         (crate::embedded::SRC_LIST_GET_STR, &[("list_get_str", "list.get_str"), ("list_first_str", "list.first_str"), ("list_last_str", "list.last_str")]),
-        (crate::embedded::SRC_BYTES_ARRAY, &[("bytes_read_u16_le_array", "bytes.read_u16_le_array"), ("bytes_read_u32_le_array", "bytes.read_u32_le_array"), ("bytes_read_i32_le_array", "bytes.read_i32_le_array"), ("bytes_read_u16_be_array", "bytes.read_u16_be_array"), ("bytes_read_u32_be_array", "bytes.read_u32_be_array"), ("bytes_read_i16_le_array", "bytes.read_i16_le_array"), ("bytes_read_i16_be_array", "bytes.read_i16_be_array"), ("bytes_read_i32_be_array", "bytes.read_i32_be_array"), ("bytes_read_i64_le_array", "bytes.read_i64_le_array"), ("bytes_read_i64_be_array", "bytes.read_i64_be_array"), ("bytes_read_f64_le_array", "bytes.read_f64_le_array"), ("bytes_read_f64_be_array", "bytes.read_f64_be_array"), ("bytes_read_f32_le_array", "bytes.read_f32_le_array"), ("bytes_read_f32_be_array", "bytes.read_f32_be_array")]),
+        (crate::embedded::SRC_BYTES_ARRAY, &[("bytes_read_u16_le_array", "bytes.__read_u16_le_array"), ("bytes_read_u32_le_array", "bytes.__read_u32_le_array"), ("bytes_read_i32_le_array", "bytes.__read_i32_le_array"), ("bytes_read_u16_be_array", "bytes.__read_u16_be_array"), ("bytes_read_u32_be_array", "bytes.__read_u32_be_array"), ("bytes_read_i16_le_array", "bytes.__read_i16_le_array"), ("bytes_read_i16_be_array", "bytes.__read_i16_be_array"), ("bytes_read_i32_be_array", "bytes.__read_i32_be_array"), ("bytes_read_i64_le_array", "bytes.__read_i64_le_array"), ("bytes_read_i64_be_array", "bytes.__read_i64_be_array"), ("bytes_read_f64_le_array", "bytes.__read_f64_le_array"), ("bytes_read_f64_be_array", "bytes.__read_f64_be_array"), ("bytes_read_f32_le_array", "bytes.__read_f32_le_array"), ("bytes_read_f32_be_array", "bytes.__read_f32_be_array")]),
         (crate::embedded::SRC_SET_CORE, &[("set_from_list", "set.from_list"), ("set_len", "set.len"), ("set_is_empty", "set.is_empty"), ("set_contains", "set.contains"), ("set_to_list", "set.to_list"), ("set_union", "set.union"), ("set_intersection", "set.intersection"), ("set_difference", "set.difference"), ("set_is_subset", "set.is_subset"), ("set_is_disjoint", "set.is_disjoint"), ("set_eq", "set.eq"), ("set_new", "set.new"), ("set_insert", "set.insert"), ("set_remove", "set.remove"), ("set_symmetric_difference", "set.symmetric_difference"), ("set_filter", "set.filter"), ("set_all", "set.all"), ("set_any", "set.any"), ("set_map", "set.map"), ("set_fold", "set.fold")]),
         (crate::embedded::SRC_LIST_STR, &[("list_contains_str", "list.contains_str"), ("list_index_of_str", "list.index_of_str"), ("list_any_str", "list.any_str"), ("list_all_str", "list.all_str"), ("list_count_str", "list.count_str"), ("list_fold_str", "list.fold_str"), ("list_find_str", "list.find_str"), ("list_unique_str", "list.unique_str"), ("list_dedup_str", "list.dedup_str"), ("list_intersperse_str", "list.intersperse_str")]),
         (crate::embedded::SRC_LIST_FOLD_OLS, &[("list_fold_ols", "list.fold_ols"), ("list_fold_str_hacc", "list.fold_str_hacc"), ("set_fold_str_hacc", "set.fold_str_hacc")]),
@@ -246,10 +246,10 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (crate::embedded::SRC_MATH_FPOW, &[("math_fpow", "math.fpow")]),
         (crate::embedded::SRC_FLOAT_FMOD, &[("float_fmod", "float.fmod")]),
         (crate::embedded::SRC_MATH_LGAMMA, &[("math_log_gamma", "math.log_gamma")]),
-        (crate::embedded::SRC_BYTES_APPEND_MULTI, &[("bytes_append_u16_le", "bytes.append_u16_le"), ("bytes_append_u16_be", "bytes.append_u16_be"), ("bytes_append_i16_le", "bytes.append_i16_le"), ("bytes_append_i16_be", "bytes.append_i16_be"), ("bytes_append_u32_le", "bytes.append_u32_le"), ("bytes_append_u32_be", "bytes.append_u32_be"), ("bytes_append_i32_le", "bytes.append_i32_le"), ("bytes_append_i32_be", "bytes.append_i32_be"), ("bytes_append_i64_le", "bytes.append_i64_le"), ("bytes_append_i64_be", "bytes.append_i64_be"), ("bytes_append_f32_le", "bytes.append_f32_le"), ("bytes_append_f32_be", "bytes.append_f32_be"), ("bytes_append_f64_le", "bytes.append_f64_le"), ("bytes_append_f64_be", "bytes.append_f64_be"), ("bytes_write_bool", "bytes.write_bool"), ("bytes_write_string_be", "bytes.write_string_be")]),
+        (crate::embedded::SRC_BYTES_APPEND_MULTI, &[("bytes_append_u16_le", "bytes.append_u16_le"), ("bytes_append_u16_be", "bytes.append_u16_be"), ("bytes_append_i16_le", "bytes.append_i16_le"), ("bytes_append_i16_be", "bytes.append_i16_be"), ("bytes_append_u32_le", "bytes.append_u32_le"), ("bytes_append_u32_be", "bytes.append_u32_be"), ("bytes_append_i32_le", "bytes.append_i32_le"), ("bytes_append_i32_be", "bytes.append_i32_be"), ("bytes_append_i64_le", "bytes.append_i64_le"), ("bytes_append_i64_be", "bytes.append_i64_be"), ("bytes_append_f32_le", "bytes.append_f32_le"), ("bytes_append_f32_be", "bytes.append_f32_be"), ("bytes_append_f64_le", "bytes.append_f64_le"), ("bytes_append_f64_be", "bytes.append_f64_be"), ("bytes_write_bool", "bytes.append_bool"), ("bytes_write_string_be", "bytes.write_string_be")]),
         (crate::embedded::SRC_BYTES_TYPED, &[("bytes_read_uint16", "bytes.read_uint16"), ("bytes_read_uint32", "bytes.read_uint32"), ("bytes_read_int32", "bytes.read_int32"), ("bytes_read_float32", "bytes.read_float32"), ("bytes_write_uint16", "bytes.write_uint16"), ("bytes_write_uint32", "bytes.write_uint32"), ("bytes_write_int32", "bytes.write_int32"), ("bytes_write_float32", "bytes.write_float32"), ("bytes_set_uint16", "bytes.set_uint16"), ("bytes_set_uint32", "bytes.set_uint32"), ("bytes_set_int32", "bytes.set_int32"), ("bytes_set_float32", "bytes.set_float32")]),
-        (crate::embedded::SRC_BYTES_CURSOR, &[("bytes_read_u8_at", "bytes.read_u8_at"), ("bytes_read_bool_at", "bytes.read_bool_at"), ("bytes_read_u16_le_at", "bytes.read_u16_le_at"), ("bytes_read_u16_be_at", "bytes.read_u16_be_at"), ("bytes_read_i16_le_at", "bytes.read_i16_le_at"), ("bytes_read_i16_be_at", "bytes.read_i16_be_at"), ("bytes_read_u32_le_at", "bytes.read_u32_le_at"), ("bytes_read_u32_be_at", "bytes.read_u32_be_at"), ("bytes_read_i32_le_at", "bytes.read_i32_le_at"), ("bytes_read_i32_be_at", "bytes.read_i32_be_at"), ("bytes_read_i64_le_at", "bytes.read_i64_le_at"), ("bytes_read_i64_be_at", "bytes.read_i64_be_at"), ("bytes_read_f16_le_at", "bytes.read_f16_le_at"), ("bytes_read_f32_le_at", "bytes.read_f32_le_at"), ("bytes_read_f32_be_at", "bytes.read_f32_be_at"), ("bytes_read_f64_le_at", "bytes.read_f64_le_at"), ("bytes_read_f64_be_at", "bytes.read_f64_be_at"), ("bytes_take_at", "bytes.take_at"), ("bytes_read_string_be_at", "bytes.read_string_be_at")]),
-        (crate::embedded::SRC_BYTES_F16, &[("bytes_read_f16_le", "bytes.read_f16_le"), ("bytes_read_f16_le_array", "bytes.read_f16_le_array")]),
+        (crate::embedded::SRC_BYTES_CURSOR, &[("bytes_read_u8_at", "bytes.__read_u8_at"), ("bytes_read_bool_at", "bytes.__read_bool_at"), ("bytes_read_u16_le_at", "bytes.__read_u16_le_at"), ("bytes_read_u16_be_at", "bytes.__read_u16_be_at"), ("bytes_read_i16_le_at", "bytes.__read_i16_le_at"), ("bytes_read_i16_be_at", "bytes.__read_i16_be_at"), ("bytes_read_u32_le_at", "bytes.__read_u32_le_at"), ("bytes_read_u32_be_at", "bytes.__read_u32_be_at"), ("bytes_read_i32_le_at", "bytes.__read_i32_le_at"), ("bytes_read_i32_be_at", "bytes.__read_i32_be_at"), ("bytes_read_i64_le_at", "bytes.__read_i64_le_at"), ("bytes_read_i64_be_at", "bytes.__read_i64_be_at"), ("bytes_read_f16_le_at", "bytes.__read_f16_le_at"), ("bytes_read_f32_le_at", "bytes.__read_f32_le_at"), ("bytes_read_f32_be_at", "bytes.__read_f32_be_at"), ("bytes_read_f64_le_at", "bytes.__read_f64_le_at"), ("bytes_read_f64_be_at", "bytes.__read_f64_be_at"), ("bytes_take_at", "bytes.__take_at"), ("bytes_read_string_be_at", "bytes.read_string_be_at")]),
+        (crate::embedded::SRC_BYTES_F16, &[("bytes_read_f16_le", "bytes.__read_f16_le"), ("bytes_read_f16_le_array", "bytes.__read_f16_le_array")]),
         (
             crate::embedded::SRC_MATRIX_SHAPE,
             &[("matrix_shape", "matrix.shape")],
@@ -344,7 +344,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (crate::embedded::SRC_STRING_SPLIT_ONCE, &[("string_split_once", "string.split_once")]),
         (crate::embedded::SRC_STRING_CHARS, &[("string_chars", "string.chars")]),
         (crate::embedded::SRC_STRING_LINES, &[("string_lines", "string.lines")]),
-        (crate::embedded::SRC_STRING_JOIN, &[("string_join", "string.join"), ("list_join", "list.join")]),
+        (crate::embedded::SRC_STRING_JOIN, &[("string_join", "string.join"), ("list_join", "list.__join_string")]),
         (
             crate::embedded::SRC_BYTES_CORE,
             BYTES_CORE_FNS,
@@ -391,7 +391,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
             &[
                 ("bytes_split", "bytes.split"),
                 ("bytes_lines", "bytes.lines"),
-                ("bytes_chunks", "bytes.chunks"),
+                ("bytes_chunks", "bytes.__chunks"),
             ],
         ),
         (
@@ -588,7 +588,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (crate::embedded::SRC_RESULT_MAP, &[("result_map", "result.map"), ("result_flat_map", "result.flat_map"), ("result_to_err_option", "result.to_err_option"), ("result_unwrap_or_else", "result.unwrap_or_else"), ("result_map_err", "result.map_err"), ("result_filter", "result.filter"), ("result_or_else", "result.or_else"), ("result_flatten", "result.flatten"), ("result_map_h", "result.map_h"), ("result_map_err_h", "result.map_err_h"), ("result_flat_map_h", "result.flat_map_h"), ("result_unwrap_or_else_h", "result.unwrap_or_else_h"), ("result_to_option_h", "result.to_option_h"), ("result_filter_h", "result.filter_h"), ("result_to_err_option_h", "result.to_err_option_h"), ("result_map_s2h", "result.map_s2h"), ("result_zip_fs", "result.zip_fs"), ("result_unwrap_or_else_fs", "result.unwrap_or_else_fs")]),
         (crate::embedded::SRC_STRING_TO_INT, &[("string_to_int", "int.parse"), ("int_from_hex", "int.from_hex")]),
         (crate::embedded::SRC_LIST_IS_EMPTY, &[("list_is_empty", "list.is_empty")]),
-        (crate::embedded::SRC_LIST_SUM, &[("list_sum", "list.sum")]),
+        (crate::embedded::SRC_LIST_SUM, &[("list_sum", "list.__sum_int")]),
         (crate::embedded::SRC_LIST_SORT, &[("list_sort", "list.sort"), ("list_sort_str", "list.sort_str"), ("list_min_str", "list.min_str"), ("list_max_str", "list.max_str")]),
         (crate::embedded::SRC_LIST_ORD_COMPOUND, &[("list_sort_tss", "list.sort_tss"), ("list_sort_tsstr", "list.sort_tsstr"), ("list_sort_lint", "list.sort_lint"), ("list_sort_oint", "list.sort_oint"), ("list_min_tss", "list.min_tss"), ("list_max_tss", "list.max_tss"), ("list_min_tsstr", "list.min_tsstr"), ("list_max_tsstr", "list.max_tsstr"), ("list_min_lint", "list.min_lint"), ("list_max_lint", "list.max_lint"), ("list_min_lstr", "list.min_lstr"), ("list_max_lstr", "list.max_lstr"), ("list_min_oint", "list.min_oint"), ("list_max_oint", "list.max_oint")]),
         (crate::embedded::SRC_LIST_SORT_FLOAT, &[("list_sort_float", "list.sort_float"), ("list_unique_float", "list.unique_float"), ("list_dedup_float", "list.dedup_float"), ("list_contains_float", "list.contains_float"), ("list_index_of_float", "list.index_of_float")]),
@@ -742,9 +742,11 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
             crate::embedded::SRC_INT_BITCOUNT,
             &[
                 ("int_pop_count", "int.pop_count"),
+                ("int_pop_count", "int.count_ones"),
                 ("int_count_trailing_zeros", "int.count_trailing_zeros"),
                 ("int_count_leading_zeros", "int.count_leading_zeros"),
                 ("int_bit_width", "int.bit_width"),
+                ("int_bit_width", "int.bit_length"),
                 ("int_log2_floor", "int.log2_floor"),
                 ("int_log2_ceil", "int.log2_ceil"),
                 ("int_next_power_of_two", "int.next_power_of_two"),
@@ -803,7 +805,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (
             crate::embedded::SRC_LIST_FOLD,
             &[
-                ("list_product", "list.product"),
+                ("list_product", "list.__product_int"),
                 ("list_max", "list.max"),
                 ("list_min", "list.min"),
             ],

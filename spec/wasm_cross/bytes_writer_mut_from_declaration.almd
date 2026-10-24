@@ -17,7 +17,7 @@ fn show(label: String, b: Bytes) -> Unit = println(label + " " + int.to_string(b
 
 effect fn main() -> Unit = {
   // An alias taken before a typed write keeps the old contents.
-  var a = bytes.new(8)
+  var a = bytes.zeros(8)
   let a0 = a
   bytes.set_uint16(a, 0, 258, LittleEndian)
   show("set_uint16 alias", a0)
@@ -35,11 +35,11 @@ effect fn main() -> Unit = {
   show("write_uint16 alias", a3)
   show("write_uint16 own", a)
   // A write inside a closure lands in the captured var.
-  var c = bytes.new(4)
-  let set8 = () => bytes.set_u8(c, 0, 7)
+  var c = bytes.zeros(4)
+  let set8 = () => bytes.put_u8(c, 0, 7)
   set8()
   show("set_u8 closure", c)
-  let set16 = () => bytes.set_u16_le(c, 0, 1027)
+  let set16 = () => bytes.put_u16_le(c, 0, 1027)
   set16()
   show("set_u16_le closure", c)
   let app = () => bytes.append_u8(c, 9)

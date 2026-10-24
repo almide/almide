@@ -318,7 +318,7 @@ effect fn width(b: Bytes) -> Int = ok(bytes.len(b))
 
 effect fn main() -> Unit = {{
   var total = 0
-  var held = bytes.new(64)
+  var held = bytes.zeros(64)
   var i = 0
   while i < {n} {{
 {body}
@@ -333,7 +333,7 @@ effect fn main() -> Unit = {{
     flat_in(
         mut_param,
         "poke(fresh buffer)!",
-        "    var b = bytes.new(64)\n    poke(b, 7)!\n    total = total + bytes.get_or(b, 0, 0)",
+        "    var b = bytes.zeros(64)\n    poke(b, 7)!\n    total = total + bytes.get_or(b, 0, 0)",
         "7000",
         "56000",
     );
@@ -350,7 +350,7 @@ effect fn main() -> Unit = {{
     flat_in(
         mut_param,
         "width(fresh buffer)!",
-        "    let t = bytes.new(64)\n    total = total + width(t)!",
+        "    let t = bytes.zeros(64)\n    total = total + width(t)!",
         "64000",
         "512000",
     );
@@ -403,7 +403,7 @@ effect fn main() -> Unit = {{
 fn append_heap(n: u32) -> (u64, String) {
     let src = format!(
         r#"effect fn main() -> Unit = {{
-  var b = bytes.new(0)
+  var b = bytes.zeros(0)
   for i in 0..<{n} {{
     bytes.append_u16_le(b, i)
   }}
@@ -643,7 +643,7 @@ fn growth_in(program: fn(u32, &str) -> String, name: &str, body: &str, expect_10
 /// borrowed views of its fields, exactly as they are under a written-out name.
 fn destructure_program(n: u32, body: &str) -> String {
     format!(
-        r#"fn mkt(v: Int) -> (Bytes, Int) = (bytes.new(64), v)
+        r#"fn mkt(v: Int) -> (Bytes, Int) = (bytes.zeros(64), v)
 
 fn mks(v: Int) -> (String, List[Int]) = (int.to_string(v % 10) + "s", [v, v])
 
@@ -686,13 +686,13 @@ fn an_owned_tuple_destructure_releases_the_tuple_and_its_contents() {
         ("let (b, _) = mkt(i) in a tail", "    let b = first(i)\n    total = total + bytes.len(b)", "64000", "512000"),
         (
             "stamp(fresh buffer) — the mut-param value return",
-            "    var b = bytes.new(64)\n    let r = stamp(b, 7)\n    total = total + r + bytes.get_or(b, 0, 0)",
+            "    var b = bytes.zeros(64)\n    let r = stamp(b, 7)\n    total = total + r + bytes.get_or(b, 0, 0)",
             "14000",
             "112000",
         ),
         (
             "estamp(fresh buffer)! — the mut-param effect value return",
-            "    var b = bytes.new(64)\n    let r = estamp(b, 7)!\n    total = total + r + bytes.get_or(b, 0, 0)",
+            "    var b = bytes.zeros(64)\n    let r = estamp(b, 7)!\n    total = total + r + bytes.get_or(b, 0, 0)",
             "14000",
             "112000",
         ),
@@ -723,9 +723,9 @@ fn a_borrowed_tuple_destructure_keeps_its_subject() {
 /// left the cell at rc 1 forever (144 B per call).
 fn to_option_program(n: u32, body: &str) -> String {
     format!(
-        r#"effect fn mko(v: Int) -> Bytes = if v % 3 == 2 then err("skip") else ok(bytes.new(64))
+        r#"effect fn mko(v: Int) -> Bytes = if v % 3 == 2 then err("skip") else ok(bytes.zeros(64))
 
-fn mkr(v: Int) -> Result[Bytes, String] = if v % 3 == 2 then err("skip") else ok(bytes.new(64))
+fn mkr(v: Int) -> Result[Bytes, String] = if v % 3 == 2 then err("skip") else ok(bytes.zeros(64))
 
 fn width(o: Bytes?) -> Int = match o {{
   some(b) => bytes.len(b),

@@ -137,7 +137,7 @@ fn endian_interpolation_under_the_auto_import_has_a_repr_route() {
     );
     assert_native_builds(
         "endian_repr_beside_a_call",
-        "effect fn main() -> Unit = {\n  let e: Endian = BigEndian\n  println(\"${e} ${bytes.len(bytes.new(0))}\")\n}\n",
+        "effect fn main() -> Unit = {\n  let e: Endian = BigEndian\n  println(\"${e} ${bytes.len(bytes.zeros(0))}\")\n}\n",
         "BigEndian 0\n",
     );
     // #2496: the MODULE-QUALIFIED ctor spelling types as `bytes.Endian`,

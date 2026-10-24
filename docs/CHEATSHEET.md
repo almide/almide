@@ -177,12 +177,12 @@ let add10 = (x) => add(x, 10)   // ✓ name the missing value with a lambda
 ```almide check
 fn incr(mut x: Int) -> Unit = { x = x + 1 }
 
-fn stamp(mut b: Bytes, v: Int) -> Unit = bytes.set_u8(b, 0, v)  // a helper that fills its caller's buffer
+fn stamp(mut b: Bytes, v: Int) -> Unit = bytes.put_u8(b, 0, v)  // a helper that fills its caller's buffer
 
 fn main() -> Unit = {
   var n = 5
   incr(n)          // n is now 6 -- mutated in place, not returned
-  var buf = bytes.new(4)   // `var`, not `let`: the writers take `mut b`
+  var buf = bytes.zeros(4)   // `var`, not `let`: the writers take `mut b`
   bytes.append_u8(buf, 7)
   stamp(buf, 9)
   println("${n} ${bytes.to_list(buf)}")
@@ -192,7 +192,7 @@ Caller must pass a `var` binding (`let`, a non-`mut` parameter or a temporary
 is E032). `mut` can be on any parameter, any position. This is how every
 in-place stdlib op works (`list.push`, `list.pop`, `list.clear`, `map.insert`,
 `map.delete`, `map.clear`, `string.push`, `string.clear`, and the whole `bytes` writer family — `push`, `append_*`,
-`set_*`, `write_*`, `fill`, `clear`, `copy_from`): the receiver is a `mut`
+`put_*`, `write_*`, `fill`, `clear`, `copy_from`): the receiver is a `mut`
 parameter, so a local buffer is a `var` and a helper that writes its caller's
 buffer declares `mut b: Bytes`. Value semantics otherwise: `let c = a` copies,
 and a callee cannot reach its caller's binding through a plain parameter.
@@ -1064,7 +1064,7 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 
 ## Naming conventions across stdlib
 
-- `bytes`: `read_<dtype>_le|be(b, pos)` for one value, `read_<dtype>_le_array(b, pos, count)` for bulk, `set_<dtype>_le(b, pos, val)` to overwrite, `append_<dtype>_le(b, val)` to grow. `<dtype>` ∈ `u8|u16|u32|i32|i64|f16|f32|f64`.
+- `bytes`: typed byte IO is one matrix — `get_<t>(b, pos) -> T?` reads at a position (none out of range), `next_<t>(b, pos) -> (T?, next_pos)` reads and advances (the position stays when nothing is read), `put_<t>(b, pos, x)` overwrites in place (a window outside the buffer aborts), `append_<t>(b, x)` grows; `get_<t>_array(b, pos, count) -> List[T]?` for bulk. Every type of 2+ bytes carries `_le` / `_be`; `<t>` ∈ `u8|i8|u16|i16|u32|i32|i64|f16|f32|f64|bool` (no u64: `get_i64_*` reads the same bits). `bytes.new()` is empty, `bytes.zeros(n)` is n zero bytes.
 - `matrix` holds the generic dense ops; the neural-network kernels (`gelu`, `softmax_rows`, attention, RoPE, norms, Q1_0/Q8_0, Qwen3 blocks) are package `almide/nnlib` and the OpenAI / Anthropic streaming clients package `almide/llm` since dialect epoch 14 (`import nnlib`, `nnlib.gelu(m)`).
 - `matrix`: row-shaped ops use `_rows` suffix (`slice_rows`, `gather_rows`); singular `_row` when an op consumes/produces *one* row (`linear_row`, `dot_row`, `broadcast_add_row`); column ops use `_cols` (`split_cols_even`, `concat_cols`).
 - `from_X` builds from another representation, `to_X` is its inverse (e.g. `from_bytes_f64_le` ↔ `to_bytes_f64_le`).

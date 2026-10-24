@@ -11,7 +11,7 @@
 // caps-verified only if it declares Stdin (an `effect fn`). Matches io.almd's
 // `effect fn read_all() -> String`.
 effect fn io_read_all() -> String = {
-  var buf = bytes.new(0)
+  var buf = bytes.zeros(0)
   var n = 1
   while n > 0 {
     let chunk = prim.read_n_bytes(4096)

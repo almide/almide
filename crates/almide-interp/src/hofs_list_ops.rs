@@ -62,6 +62,15 @@ impl<'a> Interpreter<'a> {
             "result" => Self::eval_container_op_result,
             _ => return None,
         };
+        // The generic `list.sum` / `list.product` [A: Numeric] reached as an
+        // unmonomorphized `list.*` call: only the STATIC element type says
+        // which number type's fold answers it (a sized Int is a `Value::Int`
+        // too), so an element type outside Int / Float abstains.
+        let op: Op<'a> = match (module, func) {
+            ("list", "sum") => Self::numeric_list_fold(tys.as_deref())?,
+            ("list", "product") => Self::numeric_list_fold(tys.as_deref())?,
+            _ => op,
+        };
         // INSIDE the pool tier a heap value is its address, so a native op
         // over a real container would store or compare an ARGUMENT's address
         // (`map.set(acc, k, v)` with a String `k` a body just built): two
@@ -285,9 +294,46 @@ impl<'a> Interpreter<'a> {
         Flow::val(Value::list(r))
     }
 
-    fn eval_container_op_list_agg(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+    /// The fold answering the generic `list.sum` / `list.product` for the
+    /// call's static element type, or none (abstain) outside Int / Float.
+    #[allow(clippy::type_complexity)]
+    fn numeric_list_fold(
+        tys: Option<&[almide_lang::types::Ty]>,
+    ) -> Option<fn(&mut Interpreter<'a>, &str, &[Value]) -> Option<Flow>> {
+        match list_elem_ty(tys)? {
+            almide_lang::types::Ty::Int => Some(Self::eval_container_op_list_agg_int),
+            almide_lang::types::Ty::Float => Some(Self::list_float_fold),
+            _ => None,
+        }
+    }
+
+    /// `list.sum` / `list.product` over `List[Int]`: the Int instances
+    /// `int.__sum` / `int.__product` answer with (wrapping, C-056).
+    fn eval_container_op_list_agg_int(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         match func {
             "sum" => Some(self.list_sum(args)),
+            _ => Some(self.list_product(args)),
+        }
+    }
+
+    /// `list.sum` / `list.product` over `List[Float]`: `float.__sum` /
+    /// `float.__product`'s left fold from 0.0 / 1.0 (an empty list is the
+    /// Float identity, never the Int 0 the untyped `list_sum` would answer).
+    fn list_float_fold(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        let items = args.first().and_then(|v| v.as_iter_items())?;
+        let (init, step): (f64, fn(f64, f64) -> f64) =
+            if func == "sum" { (0.0, |a, b| a + b) } else { (1.0, |a, b| a * b) };
+        let mut acc = init;
+        for v in items.iter() {
+            let Value::Float(f) = v else { return None };
+            acc = step(acc, *f);
+        }
+        Some(Flow::val(Value::Float(acc)))
+    }
+
+    fn eval_container_op_list_agg(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        match func {
+            "__sum_int" => Some(self.list_sum(args)),
             // Structural, element-type-blind, mirroring the v0 runtime
             // exactly (runtime/rs/src/list.rs): dedup drops CONSECUTIVE
             // equals, unique keeps first occurrences, both under the same
@@ -297,10 +343,16 @@ impl<'a> Interpreter<'a> {
             "flatten" => Some(self.list_flatten(args)),
             "intersperse" => Some(self.list_intersperse(args)),
             "zip" => Some(self.list_zip(args)),
-            "product" => Some(self.list_product(args)),
+            "__product_int" => Some(self.list_product(args)),
             "min" => Some(self.list_min_max(args, false)),
             "max" => Some(self.list_min_max(args, true)),
-            "join" => Some(self.list_join(args)),
+            "__join_string" => Some(self.list_join(args)),
+            // The generic `list.join[T: Text]` as an UNMONOMORPHIZED self-hosted
+            // body calls it: the stdlib pool lowers without mono, so there is no
+            // `list.join` body for String parts to reach — its String instance
+            // is the join above. A Bytes join (T = Bytes) falls through and
+            // abstains.
+            "join" if matches!(args.get(1), Some(Value::Str(_))) => Some(self.list_join(args)),
             "sort" => Some(self.list_sort(args)),
             "enumerate" => Some(self.list_enumerate(args)),
             _ => self.eval_container_op_list_slice(func, args),
@@ -735,15 +787,21 @@ impl<'a> Interpreter<'a> {
 /// `set_*` / `append_*` / `write_*` families do not — they are `@intrinsic`s whose
 /// mutation lives in the native signature (`&mut Vec<u8>`), invisible to the `.almd`
 /// declaration. So an enumerated list here had nothing to be checked against and
-/// silently fell behind: `bytes.set_f32_le` reported the generic "unknown
+/// silently fell behind: `bytes.put_f32_le` reported the generic "unknown
 /// capability" abstain instead of naming what it actually is, which is what the
 /// ledger gate caught on `mutable_global_bytes_arena`. Every `set_*`/`append_*`/
 /// `write_*` in `stdlib/bytes.almd` returns Unit and mutates in place, and the
 /// functional `bytes.set(b, i, v) -> Bytes` is excluded by the underscore — the
 /// prefix is the whole rule, and a new family member is covered on arrival.
 pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
+    // `bytes.__set_*` is the width primitive under the checked `bytes.put_*`.
+    let func = if module == "bytes" { func.strip_prefix("__").unwrap_or(func) } else { func };
     if module == "bytes"
-        && (func.starts_with("set_") || func.starts_with("append_") || func.starts_with("write_"))
+        && (func.starts_with("set_")
+            || func.starts_with("put_")
+            || func.starts_with("append_")
+            || func.starts_with("write_"))
+        && crate::inplace::bytes_write_op(func).is_some()
     {
         return true;
     }
@@ -758,9 +816,19 @@ pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
             | ("string", "push")
             | ("string", "clear")
             | ("bytes", "push")
+            | ("bytes", "pop")
             | ("bytes", "clear")
             | ("bytes", "fill")
             | ("bytes", "copy_from")
             | ("bytes", "copy_within")
     )
+}
+
+/// The element type of a call's first argument when it is statically a `List[T]`.
+fn list_elem_ty(tys: Option<&[almide_lang::types::Ty]>) -> Option<&almide_lang::types::Ty> {
+    use almide_lang::types::constructor::TypeConstructorId as C;
+    match tys?.first()? {
+        almide_lang::types::Ty::Applied(C::List, a) if a.len() == 1 => a.first(),
+        _ => None,
+    }
 }

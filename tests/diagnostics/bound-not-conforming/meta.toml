@@ -1,0 +1,2 @@
+expects_error = "does not implement protocol 'Integer'"
+hint_substring = "Integer"

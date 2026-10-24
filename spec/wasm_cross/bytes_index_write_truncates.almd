@@ -9,7 +9,7 @@ fn poke(mut b: Bytes, i: Int, v: Int) -> Unit = {
 }
 
 effect fn main() -> Unit = {
-  var buf: Bytes = bytes.new(6)
+  var buf: Bytes = bytes.zeros(6)
   buf[0] = 300
   buf[1] = 511
   buf[2] = 256

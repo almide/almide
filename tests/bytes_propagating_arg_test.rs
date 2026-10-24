@@ -17,8 +17,8 @@ fn main() -> Unit = {
   let c = list.len([1, 2]) > 1
   println(int.to_string(total(if c then bytes.from_list([1]) else bytes.from_list([2, 3]))))
   println(int.to_string(bytes.len(if c then bytes.from_list([1]) else bytes.from_list([2, 3]))))
-  let m = match c { true => bytes.from_list([4]), false => bytes.new(0) }
-  println(int.to_string(total(match c { true => bytes.from_list([4]), false => bytes.new(0) }) + bytes.len(m)))
+  let m = match c { true => bytes.from_list([4]), false => bytes.zeros(0) }
+  println(int.to_string(total(match c { true => bytes.from_list([4]), false => bytes.zeros(0) }) + bytes.len(m)))
 }
 "#;
 

@@ -121,6 +121,7 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     ("bool", ModuleEffects::Pure),
     ("int", ModuleEffects::Pure),
     ("float", ModuleEffects::Pure),
+    ("bigint", ModuleEffects::Pure),
     ("int8", ModuleEffects::Pure),
     ("int16", ModuleEffects::Pure),
     ("int32", ModuleEffects::Pure),

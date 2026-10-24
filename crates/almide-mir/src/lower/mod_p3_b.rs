@@ -672,7 +672,7 @@ const BYTES_INPLACE_APPENDS: &[&str] = &[
     // another name, `write_u8` is the 1-byte push, and bool/string have their
     // own functional twins in bytes_append_multi.almd.
     "write_u8", "write_u32_be", "write_i64_be", "write_f64_be",
-    "write_bool", "write_string_be",
+    "append_bool", "write_string_be",
 ];
 
 /// Rewrite a v0 IN-PLACE mutator call in statement position to its functional
@@ -826,7 +826,7 @@ fn rewrite_push_concat(module: &str, func: &str, args: &[IrExpr]) -> Option<IrSt
 /// store into the SHARED block) must never be reached from here — they are
 /// the alias-observes-clear defect the released 0.62.0 default route shipped.
 /// map / list / string rebind to a literal (adds no call); bytes rebinds to
-/// `bytes.new(0)` — one call for the one clear call the source node credits
+/// `bytes.zeros(0)` — one call for the one clear call the source node credits
 /// (mir <= ir holds). A `Var` receiver rebinds via Assign; a FIELD receiver
 /// (`string.clear(r.name)` — the C-132 mut-param write-back shape) routes
 /// through FieldAssign exactly as `list.push(b.xs, v)` does, so the record's
@@ -850,7 +850,7 @@ fn rewrite_clear(module: &str, func: &str, args: &[IrExpr]) -> Option<IrStmt> {
         "list" => IrExprKind::List { elements: vec![] },
         "string" => IrExprKind::LitStr { value: String::new() },
         _ => IrExprKind::Call {
-            target: CallTarget::Module { module: sym("bytes"), func: sym("new"), def_id: None },
+            target: CallTarget::Module { module: sym("bytes"), func: sym("zeros"), def_id: None },
             args: vec![IrExpr {
                 kind: IrExprKind::LitInt { value: 0 },
                 ty: Ty::Int,

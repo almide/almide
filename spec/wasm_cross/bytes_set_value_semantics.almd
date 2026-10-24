@@ -46,7 +46,7 @@ fn main() -> Unit = {
   println(bytes.to_list(out) |> list.map((x) => int.to_string(x)) |> list.join(","))
   println(bytes.to_list(st.iv) |> list.map((x) => int.to_string(x)) |> list.join(","))
   // The fast self-update path still works (fresh, unaliased buffer).
-  var buf = bytes.new(4)
+  var buf = bytes.zeros(4)
   for i in 0..<4 {
     buf = bytes.set(buf, i, (i + 1) * 3)
   }

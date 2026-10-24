@@ -489,63 +489,63 @@ expect = "2024"
 default_index_unit = "byte-offset"
 
 [[bytes.fn]]
-name = "read_i16_be"
+name = "get_i16_be"
 index_unit = "value"
-probe = 'bytes.read_i16_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+probe = '(bytes.get_i16_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0) ?? 0)'
 expect = "-2"
 
 [[bytes.fn]]
-name = "read_i16_le"
+name = "get_i16_le"
 index_unit = "value"
-probe = 'bytes.read_i16_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+probe = '(bytes.get_i16_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0) ?? 0)'
 expect = "-257"
 
 [[bytes.fn]]
-name = "read_u16_be"
+name = "get_u16_be"
 index_unit = "value"
-probe = 'bytes.read_u16_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+probe = '(bytes.get_u16_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0) ?? 0)'
 expect = "65534"
 
 [[bytes.fn]]
-name = "read_u16_le"
+name = "get_u16_le"
 index_unit = "value"
-probe = 'bytes.read_u16_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+probe = '(bytes.get_u16_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0) ?? 0)'
 expect = "65279"
 
 [[bytes.fn]]
-name = "read_i32_be"
+name = "get_i32_be"
 index_unit = "value"
-probe = 'bytes.read_i32_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+probe = '(bytes.get_i32_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0) ?? 0)'
 expect = "-66052"
 
 [[bytes.fn]]
-name = "read_i32_le"
+name = "get_i32_le"
 index_unit = "value"
-probe = 'bytes.read_i32_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+probe = '(bytes.get_i32_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0) ?? 0)'
 expect = "-50462977"
 
 [[bytes.fn]]
-name = "read_u32_be"
+name = "get_u32_be"
 index_unit = "value"
-probe = 'bytes.read_u32_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+probe = '(bytes.get_u32_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0) ?? 0)'
 expect = "4294901244"
 
 [[bytes.fn]]
-name = "read_u32_le"
+name = "get_u32_le"
 index_unit = "value"
-probe = 'bytes.read_u32_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+probe = '(bytes.get_u32_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0) ?? 0)'
 expect = "4244504319"
 
 [[bytes.fn]]
-name = "read_i64_be"
+name = "get_i64_be"
 index_unit = "value"
-probe = 'bytes.read_i64_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+probe = '(bytes.get_i64_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0) ?? 0)'
 expect = "-283686952306184"
 
 [[bytes.fn]]
-name = "read_i64_le"
+name = "get_i64_le"
 index_unit = "value"
-probe = 'bytes.read_i64_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+probe = '(bytes.get_i64_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0) ?? 0)'
 expect = "-506097522914230529"
 
 [[bytes.fn]]
@@ -555,33 +555,33 @@ probe = 'bytes.read_u8(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248])
 expect = "254"
 
 [[bytes.fn]]
-name = "read_f32_be"
+name = "get_f32_be"
 index_unit = "value"
-probe = 'bytes.read_f32_be(bytes.from_list([63, 192, 0, 0]), 0)'
+probe = '(bytes.get_f32_be(bytes.from_list([63, 192, 0, 0]), 0) ?? 0.0)'
 expect = "1.5"
 
 [[bytes.fn]]
-name = "read_f32_le"
+name = "get_f32_le"
 index_unit = "value"
-probe = 'bytes.read_f32_le(bytes.from_list([0, 0, 192, 63]), 0)'
+probe = '(bytes.get_f32_le(bytes.from_list([0, 0, 192, 63]), 0) ?? 0.0)'
 expect = "1.5"
 
 [[bytes.fn]]
-name = "read_f64_be"
+name = "get_f64_be"
 index_unit = "value"
-probe = 'bytes.read_f64_be(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0]), 0)'
+probe = '(bytes.get_f64_be(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0]), 0) ?? 0.0)'
 expect = "1.5"
 
 [[bytes.fn]]
-name = "read_f64_le"
+name = "get_f64_le"
 index_unit = "value"
-probe = 'bytes.read_f64_le(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63]), 0)'
+probe = '(bytes.get_f64_le(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63]), 0) ?? 0.0)'
 expect = "1.5"
 
 [[bytes.fn]]
-name = "read_f16_le"
+name = "get_f16_le"
 index_unit = "value"
-probe = 'bytes.read_f16_le(bytes.from_list([0, 62]), 0)'
+probe = '(bytes.get_f16_le(bytes.from_list([0, 62]), 0) ?? 0.0)'
 expect = "1.5"
 
 # The `_at` CURSOR family. The returned Int is the NEXT byte offset, not a
@@ -593,170 +593,170 @@ expect = "1.5"
 # both lowers AND pins the decoded value alongside the cursor.
 
 [[bytes.fn]]
-name = "read_i16_be_at"
+name = "next_i16_be"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_i16_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let (v, cur) = bytes.next_i16_be(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
   'let combined = "${cur}/${v ?? -1}"',
 ]
 probe = 'combined'
 expect = "2/258"
 
 [[bytes.fn]]
-name = "read_i16_le_at"
+name = "next_i16_le"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_i16_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let (v, cur) = bytes.next_i16_le(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
   'let combined = "${cur}/${v ?? -1}"',
 ]
 probe = 'combined'
 expect = "2/513"
 
 [[bytes.fn]]
-name = "read_u16_be_at"
+name = "next_u16_be"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_u16_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let (v, cur) = bytes.next_u16_be(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
   'let combined = "${cur}/${v ?? -1}"',
 ]
 probe = 'combined'
 expect = "2/258"
 
 [[bytes.fn]]
-name = "read_u16_le_at"
+name = "next_u16_le"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_u16_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let (v, cur) = bytes.next_u16_le(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
   'let combined = "${cur}/${v ?? -1}"',
 ]
 probe = 'combined'
 expect = "2/513"
 
 [[bytes.fn]]
-name = "read_i32_be_at"
+name = "next_i32_be"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_i32_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let (v, cur) = bytes.next_i32_be(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
   'let combined = "${cur}/${v ?? -1}"',
 ]
 probe = 'combined'
 expect = "4/16909060"
 
 [[bytes.fn]]
-name = "read_i32_le_at"
+name = "next_i32_le"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_i32_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let (v, cur) = bytes.next_i32_le(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
   'let combined = "${cur}/${v ?? -1}"',
 ]
 probe = 'combined'
 expect = "4/67305985"
 
 [[bytes.fn]]
-name = "read_u32_be_at"
+name = "next_u32_be"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_u32_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let (v, cur) = bytes.next_u32_be(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
   'let combined = "${cur}/${v ?? -1}"',
 ]
 probe = 'combined'
 expect = "4/16909060"
 
 [[bytes.fn]]
-name = "read_u32_le_at"
+name = "next_u32_le"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_u32_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let (v, cur) = bytes.next_u32_le(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
   'let combined = "${cur}/${v ?? -1}"',
 ]
 probe = 'combined'
 expect = "4/67305985"
 
 [[bytes.fn]]
-name = "read_i64_be_at"
+name = "next_i64_be"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_i64_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let (v, cur) = bytes.next_i64_be(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
   'let combined = "${cur}/${v ?? -1}"',
 ]
 probe = 'combined'
 expect = "8/72623859790382856"
 
 [[bytes.fn]]
-name = "read_i64_le_at"
+name = "next_i64_le"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_i64_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let (v, cur) = bytes.next_i64_le(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
   'let combined = "${cur}/${v ?? -1}"',
 ]
 probe = 'combined'
 expect = "8/578437695752307201"
 
 [[bytes.fn]]
-name = "read_u8_at"
+name = "next_u8"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_u8_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let (v, cur) = bytes.next_u8(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
   'let combined = "${cur}/${v ?? -1}"',
 ]
 probe = 'combined'
 expect = "1/1"
 
 [[bytes.fn]]
-name = "read_f32_be_at"
+name = "next_f32_be"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_f32_be_at(bytes.from_list([63, 192, 0, 0]), 0)',
+  'let (v, cur) = bytes.next_f32_be(bytes.from_list([63, 192, 0, 0]), 0)',
   'let combined = "${cur}/${v ?? -1.0}"',
 ]
 probe = 'combined'
 expect = "4/1.5"
 
 [[bytes.fn]]
-name = "read_f32_le_at"
+name = "next_f32_le"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_f32_le_at(bytes.from_list([0, 0, 192, 63]), 0)',
+  'let (v, cur) = bytes.next_f32_le(bytes.from_list([0, 0, 192, 63]), 0)',
   'let combined = "${cur}/${v ?? -1.0}"',
 ]
 probe = 'combined'
 expect = "4/1.5"
 
 [[bytes.fn]]
-name = "read_f64_be_at"
+name = "next_f64_be"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_f64_be_at(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0]), 0)',
+  'let (v, cur) = bytes.next_f64_be(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0]), 0)',
   'let combined = "${cur}/${v ?? -1.0}"',
 ]
 probe = 'combined'
 expect = "8/1.5"
 
 [[bytes.fn]]
-name = "read_f64_le_at"
+name = "next_f64_le"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_f64_le_at(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63]), 0)',
+  'let (v, cur) = bytes.next_f64_le(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63]), 0)',
   'let combined = "${cur}/${v ?? -1.0}"',
 ]
 probe = 'combined'
 expect = "8/1.5"
 
 [[bytes.fn]]
-name = "read_f16_le_at"
+name = "next_f16_le"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_f16_le_at(bytes.from_list([0, 62]), 0)',
+  'let (v, cur) = bytes.next_f16_le(bytes.from_list([0, 62]), 0)',
   'let combined = "${cur}/${v ?? -1.0}"',
 ]
 probe = 'combined'
 expect = "2/1.5"
 
 [[bytes.fn]]
-name = "read_bool_at"
+name = "next_bool"
 index_unit = "cursor"
 setup = [
-  'let (cur, v) = bytes.read_bool_at(bytes.from_list([1, 0]), 0)',
+  'let (v, cur) = bytes.next_bool(bytes.from_list([1, 0]), 0)',
   'let combined = "${cur}/${v ?? false}"',
 ]
 probe = 'combined'
@@ -780,100 +780,100 @@ expect = "7/abc"
 # The i64 probes need a 16-byte fixture for the same reason.
 
 [[bytes.fn]]
-name = "read_i16_be_array"
+name = "get_i16_be_array"
 index_unit = "element-count"
-probe = 'bytes.read_i16_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+probe = '(bytes.get_i16_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2) ?? [])'
 expect = "[258, 772]"
 
 [[bytes.fn]]
-name = "read_i16_le_array"
+name = "get_i16_le_array"
 index_unit = "element-count"
-probe = 'bytes.read_i16_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+probe = '(bytes.get_i16_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2) ?? [])'
 expect = "[513, 1027]"
 
 [[bytes.fn]]
-name = "read_u16_be_array"
+name = "get_u16_be_array"
 index_unit = "element-count"
-probe = 'bytes.read_u16_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+probe = '(bytes.get_u16_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2) ?? [])'
 expect = "[258, 772]"
 
 [[bytes.fn]]
-name = "read_u16_le_array"
+name = "get_u16_le_array"
 index_unit = "element-count"
-probe = 'bytes.read_u16_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+probe = '(bytes.get_u16_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2) ?? [])'
 expect = "[513, 1027]"
 
 [[bytes.fn]]
-name = "read_i32_be_array"
+name = "get_i32_be_array"
 index_unit = "element-count"
-probe = 'bytes.read_i32_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+probe = '(bytes.get_i32_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2) ?? [])'
 expect = "[16909060, 84281096]"
 
 [[bytes.fn]]
-name = "read_i32_le_array"
+name = "get_i32_le_array"
 index_unit = "element-count"
-probe = 'bytes.read_i32_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+probe = '(bytes.get_i32_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2) ?? [])'
 expect = "[67305985, 134678021]"
 
 [[bytes.fn]]
-name = "read_u32_be_array"
+name = "get_u32_be_array"
 index_unit = "element-count"
-probe = 'bytes.read_u32_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+probe = '(bytes.get_u32_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2) ?? [])'
 expect = "[16909060, 84281096]"
 
 [[bytes.fn]]
-name = "read_u32_le_array"
+name = "get_u32_le_array"
 index_unit = "element-count"
-probe = 'bytes.read_u32_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+probe = '(bytes.get_u32_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2) ?? [])'
 expect = "[67305985, 134678021]"
 
 [[bytes.fn]]
-name = "read_i64_be_array"
+name = "get_i64_be_array"
 index_unit = "element-count"
-probe = 'bytes.read_i64_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]), 0, 2)'
+probe = '(bytes.get_i64_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]), 0, 2) ?? [])'
 expect = "[72623859790382856, 651345242494996240]"
 
 [[bytes.fn]]
-name = "read_i64_le_array"
+name = "get_i64_le_array"
 index_unit = "element-count"
-probe = 'bytes.read_i64_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]), 0, 2)'
+probe = '(bytes.get_i64_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]), 0, 2) ?? [])'
 expect = "[578437695752307201, 1157159078456920585]"
 
 [[bytes.fn]]
-name = "read_f32_be_array"
+name = "get_f32_be_array"
 index_unit = "element-count"
-probe = 'bytes.read_f32_be_array(bytes.from_list([63, 192, 0, 0, 64, 32, 0, 0]), 0, 2)'
+probe = '(bytes.get_f32_be_array(bytes.from_list([63, 192, 0, 0, 64, 32, 0, 0]), 0, 2) ?? [])'
 expect = "[1.5, 2.5]"
 
 [[bytes.fn]]
-name = "read_f32_le_array"
+name = "get_f32_le_array"
 index_unit = "element-count"
-probe = 'bytes.read_f32_le_array(bytes.from_list([0, 0, 192, 63, 0, 0, 32, 64]), 0, 2)'
+probe = '(bytes.get_f32_le_array(bytes.from_list([0, 0, 192, 63, 0, 0, 32, 64]), 0, 2) ?? [])'
 expect = "[1.5, 2.5]"
 
 [[bytes.fn]]
-name = "read_f64_be_array"
+name = "get_f64_be_array"
 index_unit = "element-count"
-probe = 'bytes.read_f64_be_array(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0, 64, 4, 0, 0, 0, 0, 0, 0]), 0, 2)'
+probe = '(bytes.get_f64_be_array(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0, 64, 4, 0, 0, 0, 0, 0, 0]), 0, 2) ?? [])'
 expect = "[1.5, 2.5]"
 
 [[bytes.fn]]
-name = "read_f64_le_array"
+name = "get_f64_le_array"
 index_unit = "element-count"
-probe = 'bytes.read_f64_le_array(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63, 0, 0, 0, 0, 0, 0, 4, 64]), 0, 2)'
+probe = '(bytes.get_f64_le_array(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63, 0, 0, 0, 0, 0, 0, 4, 64]), 0, 2) ?? [])'
 expect = "[1.5, 2.5]"
 
 [[bytes.fn]]
-name = "read_f16_le_array"
+name = "get_f16_le_array"
 index_unit = "element-count"
-probe = 'bytes.read_f16_le_array(bytes.from_list([0, 62, 0, 65]), 0, 2)'
+probe = '(bytes.get_f16_le_array(bytes.from_list([0, 62, 0, 65]), 0, 2) ?? [])'
 expect = "[1.5, 2.5]"
 
 [[bytes.fn]]
 name = "append_i16_be"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.append_i16_be(b, -2)",
 ]
 probe = "bytes.to_list(b)"
@@ -883,7 +883,7 @@ expect = "[255, 254]"
 name = "append_i16_le"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.append_i16_le(b, -2)",
 ]
 probe = "bytes.to_list(b)"
@@ -893,7 +893,7 @@ expect = "[254, 255]"
 name = "append_i32_be"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.append_i32_be(b, 258)",
 ]
 probe = "bytes.to_list(b)"
@@ -903,7 +903,7 @@ expect = "[0, 0, 1, 2]"
 name = "append_i32_le"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.append_i32_le(b, 258)",
 ]
 probe = "bytes.to_list(b)"
@@ -913,7 +913,7 @@ expect = "[2, 1, 0, 0]"
 name = "append_i64_be"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.append_i64_be(b, -2)",
 ]
 probe = "bytes.to_list(b)"
@@ -923,7 +923,7 @@ expect = "[255, 255, 255, 255, 255, 255, 255, 254]"
 name = "append_i64_le"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.append_i64_le(b, 258)",
 ]
 probe = "bytes.to_list(b)"
@@ -933,7 +933,7 @@ expect = "[2, 1, 0, 0, 0, 0, 0, 0]"
 name = "append_u16_be"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.append_u16_be(b, 65534)",
 ]
 probe = "bytes.to_list(b)"
@@ -943,7 +943,7 @@ expect = "[255, 254]"
 name = "append_u16_le"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.append_u16_le(b, 65534)",
 ]
 probe = "bytes.to_list(b)"
@@ -953,7 +953,7 @@ expect = "[254, 255]"
 name = "append_u32_be"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.append_u32_be(b, 4294967294)",
 ]
 probe = "bytes.to_list(b)"
@@ -963,7 +963,7 @@ expect = "[255, 255, 255, 254]"
 name = "append_u32_le"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.append_u32_le(b, 258)",
 ]
 probe = "bytes.to_list(b)"
@@ -973,23 +973,23 @@ expect = "[2, 1, 0, 0]"
 name = "append_u8"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.append_u8(b, 200)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[200]"
 
 [[bytes.fn]]
-name = "chunks"
+name = "chunk"
 index_unit = "byte-count"
-probe = "bytes.chunks(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 3) |> list.map((c) => bytes.len(c))"
+probe = "bytes.chunk(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 3) |> list.map((c) => bytes.len(c))"
 expect = "[3, 3, 2]"
 
 [[bytes.fn]]
-name = "cmp"
+name = "compare"
 index_unit = "ordering"
 setup = [
-  'let sm_out = "${bytes.cmp(bytes.from_list([1, 2]), bytes.from_list([1, 3]))} ${bytes.cmp(bytes.from_list([1, 2]), bytes.from_list([1, 2]))} ${bytes.cmp(bytes.from_list([1, 3]), bytes.from_list([1, 2]))}"',
+  'let sm_out = "${bytes.compare(bytes.from_list([1, 2]), bytes.from_list([1, 3]))} ${bytes.compare(bytes.from_list([1, 2]), bytes.from_list([1, 2]))} ${bytes.compare(bytes.from_list([1, 3]), bytes.from_list([1, 2]))}"',
 ]
 probe = "sm_out"
 expect = "-1 0 1"
@@ -998,7 +998,7 @@ expect = "-1 0 1"
 name = "copy_from"
 index_unit = "byte-offset"
 setup = [
-  "var dst = bytes.new(4)",
+  "var dst = bytes.zeros(4)",
   "bytes.copy_from(dst, bytes.from_list([9, 8, 7, 6]), 1, 2, 2)",
 ]
 probe = "bytes.to_list(dst)"
@@ -1008,7 +1008,7 @@ expect = "[0, 7, 6, 0]"
 name = "copy_to_ptr"
 index_unit = "byte-count"
 setup = [
-  "var dst = bytes.new(4)",
+  "var dst = bytes.zeros(4)",
   "let n = bytes.copy_to_ptr(bytes.from_list([9, 8, 7]), ffi.address(dst), 2)",
   'let sm_out = "${n} ${bytes.to_list(dst)}"',
 ]
@@ -1022,11 +1022,11 @@ probe = "bytes.data_ptr(bytes.from_list([1])) != 0"
 expect = "true"
 
 [[bytes.fn]]
-name = "eof"
+name = "is_eof"
 index_unit = "byte-offset"
 setup = [
   "let b8 = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
-  'let sm_out = "${bytes.eof(b8, 7)} ${bytes.eof(b8, 8)}"',
+  'let sm_out = "${bytes.is_eof(b8, 7)} ${bytes.is_eof(b8, 8)}"',
 ]
 probe = "sm_out"
 expect = "false true"
@@ -1035,7 +1035,7 @@ expect = "false true"
 name = "fill"
 index_unit = "byte-value"
 setup = [
-  "var b = bytes.new(3)",
+  "var b = bytes.zeros(3)",
   "bytes.fill(b, 7)",
 ]
 probe = "bytes.to_list(b)"
@@ -1099,27 +1099,27 @@ probe = "bytes.len(bytes.from_list([1, 2, 3]))"
 expect = "3"
 
 [[bytes.fn]]
-name = "map_each"
+name = "map"
 index_unit = "byte-value"
-probe = "bytes.to_list(bytes.map_each(bytes.from_list([1, 2, 200]), (x) => x * 2))"
+probe = "bytes.to_list(bytes.map(bytes.from_list([1, 2, 200]), (x) => x * 2))"
 expect = "[2, 4, 144]"
 
 [[bytes.fn]]
-name = "new"
+name = "zeros"
 index_unit = "byte-count"
-probe = "bytes.to_list(bytes.new(3))"
+probe = "bytes.to_list(bytes.zeros(3))"
 expect = "[0, 0, 0]"
 
 [[bytes.fn]]
-name = "pad_left"
+name = "pad_start"
 index_unit = "byte-count"
-probe = "bytes.to_list(bytes.pad_left(bytes.from_list([1, 2]), 4, 9))"
+probe = "bytes.to_list(bytes.pad_start(bytes.from_list([1, 2]), 4, 9))"
 expect = "[9, 9, 1, 2]"
 
 [[bytes.fn]]
-name = "pad_right"
+name = "pad_end"
 index_unit = "byte-count"
-probe = "bytes.to_list(bytes.pad_right(bytes.from_list([1, 2]), 4, 9))"
+probe = "bytes.to_list(bytes.pad_end(bytes.from_list([1, 2]), 4, 9))"
 expect = "[1, 2, 9, 9]"
 
 [[bytes.fn]]
@@ -1153,11 +1153,11 @@ probe = "bytes.to_list(b)"
 expect = "[1, 2, 3, 4, 5, 1, 2, 3]"
 
 [[bytes.fn]]
-name = "read_bool"
+name = "get_bool"
 index_unit = "byte-offset"
 setup = [
   "let bb = bytes.from_list([0, 1, 2])",
-  'let sm_out = "${bytes.read_bool(bb, 0)} ${bytes.read_bool(bb, 1)} ${bytes.read_bool(bb, 2)}"',
+  'let sm_out = "${(bytes.get_bool(bb, 0) ?? false)} ${(bytes.get_bool(bb, 1) ?? false)} ${(bytes.get_bool(bb, 2) ?? false)}"',
 ]
 probe = "sm_out"
 expect = "false true true"
@@ -1166,7 +1166,7 @@ expect = "false true true"
 name = "read_length_prefixed_strings_le"
 index_unit = "element-count"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.append_u32_le(b, 1)",
   "bytes.append_u8(b, 65)",
   "bytes.append_u32_le(b, 2)",
@@ -1186,7 +1186,7 @@ expect = "é"
 name = "read_string_be"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   'bytes.write_string_be(b, "hi")',
 ]
 probe = "bytes.read_string_be(b, 0)"
@@ -1216,151 +1216,151 @@ probe = "sm_out"
 expect = "[1, 2] [9, 2]"
 
 [[bytes.fn]]
-name = "set_f32_be"
+name = "put_f32_be"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(6)",
-  "bytes.set_f32_be(b, 1, 1.5)",
+  "var b = bytes.zeros(6)",
+  "bytes.put_f32_be(b, 1, 1.5)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 63, 192, 0, 0, 0]"
 
 [[bytes.fn]]
-name = "set_f32_le"
+name = "put_f32_le"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(6)",
-  "bytes.set_f32_le(b, 1, 1.5)",
+  "var b = bytes.zeros(6)",
+  "bytes.put_f32_le(b, 1, 1.5)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 0, 0, 192, 63, 0]"
 
 [[bytes.fn]]
-name = "set_f64_be"
+name = "put_f64_be"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(10)",
-  "bytes.set_f64_be(b, 1, 1.5)",
+  "var b = bytes.zeros(10)",
+  "bytes.put_f64_be(b, 1, 1.5)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 63, 248, 0, 0, 0, 0, 0, 0, 0]"
 
 [[bytes.fn]]
-name = "set_f64_le"
+name = "put_f64_le"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(10)",
-  "bytes.set_f64_le(b, 1, 1.5)",
+  "var b = bytes.zeros(10)",
+  "bytes.put_f64_le(b, 1, 1.5)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 0, 0, 0, 0, 0, 0, 248, 63, 0]"
 
 [[bytes.fn]]
-name = "set_i16_be"
+name = "put_i16_be"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(4)",
-  "bytes.set_i16_be(b, 1, -2)",
+  "var b = bytes.zeros(4)",
+  "bytes.put_i16_be(b, 1, -2)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 255, 254, 0]"
 
 [[bytes.fn]]
-name = "set_i16_le"
+name = "put_i16_le"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(4)",
-  "bytes.set_i16_le(b, 1, -2)",
+  "var b = bytes.zeros(4)",
+  "bytes.put_i16_le(b, 1, -2)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 254, 255, 0]"
 
 [[bytes.fn]]
-name = "set_i32_be"
+name = "put_i32_be"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(6)",
-  "bytes.set_i32_be(b, 1, -2)",
+  "var b = bytes.zeros(6)",
+  "bytes.put_i32_be(b, 1, -2)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 255, 255, 255, 254, 0]"
 
 [[bytes.fn]]
-name = "set_i32_le"
+name = "put_i32_le"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(6)",
-  "bytes.set_i32_le(b, 1, -2)",
+  "var b = bytes.zeros(6)",
+  "bytes.put_i32_le(b, 1, -2)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 254, 255, 255, 255, 0]"
 
 [[bytes.fn]]
-name = "set_i64_be"
+name = "put_i64_be"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(10)",
-  "bytes.set_i64_be(b, 1, -2)",
+  "var b = bytes.zeros(10)",
+  "bytes.put_i64_be(b, 1, -2)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 255, 255, 255, 255, 255, 255, 255, 254, 0]"
 
 [[bytes.fn]]
-name = "set_i64_le"
+name = "put_i64_le"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(10)",
-  "bytes.set_i64_le(b, 1, -2)",
+  "var b = bytes.zeros(10)",
+  "bytes.put_i64_le(b, 1, -2)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 254, 255, 255, 255, 255, 255, 255, 255, 0]"
 
 [[bytes.fn]]
-name = "set_u16_be"
+name = "put_u16_be"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(4)",
-  "bytes.set_u16_be(b, 1, 65534)",
+  "var b = bytes.zeros(4)",
+  "bytes.put_u16_be(b, 1, 65534)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 255, 254, 0]"
 
 [[bytes.fn]]
-name = "set_u16_le"
+name = "put_u16_le"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(4)",
-  "bytes.set_u16_le(b, 1, 65534)",
+  "var b = bytes.zeros(4)",
+  "bytes.put_u16_le(b, 1, 65534)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 254, 255, 0]"
 
 [[bytes.fn]]
-name = "set_u32_be"
+name = "put_u32_be"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(6)",
-  "bytes.set_u32_be(b, 1, 4294967294)",
+  "var b = bytes.zeros(6)",
+  "bytes.put_u32_be(b, 1, 4294967294)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 255, 255, 255, 254, 0]"
 
 [[bytes.fn]]
-name = "set_u32_le"
+name = "put_u32_le"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(6)",
-  "bytes.set_u32_le(b, 1, 4294967294)",
+  "var b = bytes.zeros(6)",
+  "bytes.put_u32_le(b, 1, 4294967294)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 254, 255, 255, 255, 0]"
 
 [[bytes.fn]]
-name = "set_u8"
+name = "put_u8"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(3)",
-  "bytes.set_u8(b, 1, 200)",
+  "var b = bytes.zeros(3)",
+  "bytes.put_u8(b, 1, 200)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 200, 0]"
@@ -1379,7 +1379,7 @@ expect = "5 8"
 name = "skip_length_prefixed_le"
 index_unit = "cursor"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.append_u32_le(b, 1)",
   "bytes.append_u8(b, 65)",
   "bytes.append_u32_le(b, 2)",
@@ -1396,11 +1396,11 @@ probe = "bytes.to_list(bytes.slice(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 2,
 expect = "[3, 4, 5]"
 
 [[bytes.fn]]
-name = "take_at"
+name = "next_bytes"
 index_unit = "cursor"
 setup = [
-  "let (p, t) = bytes.take_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 2, 3)",
-  "let ts = match t { Some(v) => v, None => bytes.new(0) }",
+  "let (t, p) = bytes.next_bytes(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 2, 3)",
+  "let ts = match t { Some(v) => v, None => bytes.new() }",
   'let sm_out = "${p} ${bytes.to_list(ts)}"',
 ]
 probe = "sm_out"
@@ -1416,7 +1416,7 @@ expect = "[200, 255]"
 name = "write_i64_be"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.write_i64_be(b, 258)",
 ]
 probe = "bytes.to_list(b)"
@@ -1426,7 +1426,7 @@ expect = "[0, 0, 0, 0, 0, 0, 1, 2]"
 name = "write_u32_be"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.write_u32_be(b, 258)",
 ]
 probe = "bytes.to_list(b)"
@@ -1436,7 +1436,7 @@ expect = "[0, 0, 1, 2]"
 name = "write_u8"
 index_unit = "value"
 setup = [
-  "var b = bytes.new(0)",
+  "var b = bytes.new()",
   "bytes.write_u8(b, 200)",
 ]
 probe = "bytes.to_list(b)"
@@ -1475,8 +1475,8 @@ expect = "-2"
 name = "read_float32"
 index_unit = "value"
 setup = [
-  "var fb = bytes.new(4)",
-  "bytes.set_f32_be(fb, 0, 1.5)",
+  "var fb = bytes.zeros(4)",
+  "bytes.put_f32_be(fb, 0, 1.5)",
   "let fv = bytes.read_float32(fb, 0, BigEndian).to_float64()",
 ]
 probe = "float.to_string(fv)"
@@ -1486,7 +1486,7 @@ expect = "1.5"
 name = "set_uint16"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(4)",
+  "var b = bytes.zeros(4)",
   "bytes.set_uint16(b, 1, (258).to_uint16(), BigEndian)",
 ]
 probe = "bytes.to_list(b)"
@@ -1496,7 +1496,7 @@ expect = "[0, 1, 2, 0]"
 name = "set_uint32"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(6)",
+  "var b = bytes.zeros(6)",
   "bytes.set_uint32(b, 1, (258).to_uint32(), BigEndian)",
 ]
 probe = "bytes.to_list(b)"
@@ -1506,7 +1506,7 @@ expect = "[0, 0, 0, 1, 2, 0]"
 name = "set_int32"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(6)",
+  "var b = bytes.zeros(6)",
   "bytes.set_int32(b, 1, (-2).to_int32(), BigEndian)",
 ]
 probe = "bytes.to_list(b)"
@@ -1516,11 +1516,293 @@ expect = "[0, 255, 255, 255, 254, 0]"
 name = "set_float32"
 index_unit = "byte-offset"
 setup = [
-  "var b = bytes.new(6)",
+  "var b = bytes.zeros(6)",
   "bytes.set_float32(b, 1, 1.5.to_float32(), BigEndian)",
 ]
 probe = "bytes.to_list(b)"
 expect = "[0, 63, 192, 0, 0, 0]"
+
+[[bytes.fn]]
+name = "get_u8"
+index_unit = "byte-value"
+probe = 'bytes.get_u8(bytes.from_list([7, 200]), 1)'
+expect = "some(200)"
+
+[[bytes.fn]]
+name = "put_i8"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(3)",
+  "bytes.put_i8(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 0]"
+
+[[bytes.fn]]
+name = "append_i8"
+index_unit = "value"
+setup = [
+  "var b = bytes.new()",
+  "bytes.append_i8(b, -1)",
+]
+probe = "bytes.to_list(b)"
+expect = "[255]"
+
+[[bytes.fn]]
+name = "put_bool"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(3)",
+  "bytes.put_bool(b, 2, true)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 1]"
+
+[[bytes.fn]]
+name = "__f16_bits"
+index_unit = "bit-pattern"
+probe = 'bytes.__f16_bits(-2.0)'
+expect = "49152"
+
+[[bytes.fn]]
+name = "put_f16_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(3)",
+  "bytes.put_f16_le(b, 1, 1.0)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 60]"
+
+[[bytes.fn]]
+name = "put_f16_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(3)",
+  "bytes.put_f16_be(b, 1, 1.0)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 60, 0]"
+
+[[bytes.fn]]
+name = "pop"
+index_unit = "byte-value"
+setup = [
+  "var b = bytes.from_list([7, 200])",
+  "let last = bytes.pop(b)",
+]
+probe = '"${last} ${bytes.to_list(b)}"'
+expect = "some(200) [7]"
+
+[[bytes.fn]]
+name = "get_i8"
+index_unit = "byte-value"
+probe = 'bytes.get_i8(bytes.from_list([7, 200]), 1)'
+expect = "some(-56)"
+
+[[bytes.fn]]
+name = "next_i8"
+index_unit = "byte-offset"
+probe = 'bytes.next_i8(bytes.from_list([7, 200]), 1).1'
+expect = "2"
+
+[[bytes.fn]]
+name = "get_f16_be"
+index_unit = "byte-offset"
+probe = 'bytes.get_f16_be(bytes.from_list([0, 60, 0]), 1)'
+expect = "some(1)"
+
+[[bytes.fn]]
+name = "next_f16_be"
+index_unit = "byte-offset"
+probe = 'bytes.next_f16_be(bytes.from_list([0, 60, 0]), 1).1'
+expect = "3"
+
+[[bytes.fn]]
+name = "get_f16_be_array"
+index_unit = "byte-offset"
+probe = 'bytes.get_f16_be_array(bytes.from_list([0, 60, 0, 64, 0]), 1, 2)'
+expect = "some([1, 2])"
+
+[[bytes.fn]]
+name = "take"
+index_unit = "byte-count"
+probe = 'bytes.to_list(bytes.take(bytes.from_list([1, 2, 3]), 2))'
+expect = "[1, 2]"
+
+[[bytes.fn]]
+name = "drop"
+index_unit = "byte-count"
+probe = 'bytes.to_list(bytes.drop(bytes.from_list([1, 2, 3]), 2))'
+expect = "[3]"
+
+[[bytes.fn]]
+name = "take_end"
+index_unit = "byte-count"
+probe = 'bytes.to_list(bytes.take_end(bytes.from_list([1, 2, 3]), 2))'
+expect = "[2, 3]"
+
+[[bytes.fn]]
+name = "drop_end"
+index_unit = "byte-count"
+probe = 'bytes.to_list(bytes.drop_end(bytes.from_list([1, 2, 3]), 2))'
+expect = "[1]"
+
+[[bytes.fn]]
+name = "split_at"
+index_unit = "byte-offset"
+probe = 'bytes.to_list(bytes.split_at(bytes.from_list([1, 2, 3]), 1).1)'
+expect = "[2, 3]"
+
+[[bytes.fn]]
+name = "first"
+index_unit = "byte-value"
+probe = 'bytes.first(bytes.from_list([9, 8]))'
+expect = "some(9)"
+
+[[bytes.fn]]
+name = "last"
+index_unit = "byte-value"
+probe = 'bytes.last(bytes.from_list([9, 8]))'
+expect = "some(8)"
+
+[[bytes.fn]]
+name = "filter"
+index_unit = "byte-value"
+probe = 'bytes.to_list(bytes.filter(bytes.from_list([1, 200, 3]), (v) => v > 2))'
+expect = "[200, 3]"
+
+[[bytes.fn]]
+name = "any"
+index_unit = "byte-value"
+probe = 'bytes.any(bytes.from_list([1, 200]), (v) => v == 200)'
+expect = "true"
+
+[[bytes.fn]]
+name = "all"
+index_unit = "byte-value"
+probe = 'bytes.all(bytes.from_list([1, 200]), (v) => v > 0)'
+expect = "true"
+
+[[bytes.fn]]
+name = "count"
+index_unit = "count"
+probe = 'bytes.count(bytes.from_list([5, 1, 5]), (v) => v == 5)'
+expect = "2"
+
+[[bytes.fn]]
+name = "find"
+index_unit = "byte-value"
+probe = 'bytes.find(bytes.from_list([1, 200, 3]), (v) => v > 2)'
+expect = "some(200)"
+
+[[bytes.fn]]
+name = "find_index"
+index_unit = "byte-offset"
+probe = 'bytes.find_index(bytes.from_list([1, 200, 3]), (v) => v > 2)'
+expect = "some(1)"
+
+[[bytes.fn]]
+name = "enumerate"
+index_unit = "byte-offset"
+probe = 'bytes.enumerate(bytes.from_list([9, 8]))'
+expect = "[(0, 9), (1, 8)]"
+
+[[bytes.fn]]
+name = "reduce"
+index_unit = "byte-value"
+probe = 'bytes.reduce(bytes.from_list([1, 2, 3]), (a, b) => a + b)'
+expect = "some(6)"
+
+[[bytes.fn]]
+name = "partition"
+index_unit = "byte-value"
+probe = 'bytes.partition(bytes.from_list([1, 200, 3]), (v) => v > 2).0'
+expect = "[200, 3]"
+
+[[bytes.fn]]
+name = "sort"
+index_unit = "byte-value"
+probe = 'bytes.sort(bytes.from_list([200, 1, 3]))'
+expect = "[1, 3, 200]"
+
+[[bytes.fn]]
+name = "sort_with"
+index_unit = "ordering"
+probe = 'bytes.sort_with(bytes.from_list([1, 200, 3]), (a, b) => b - a)'
+expect = "[200, 3, 1]"
+
+[[bytes.fn]]
+name = "min"
+index_unit = "byte-value"
+probe = 'bytes.min(bytes.from_list([200, 1, 3]))'
+expect = "some(1)"
+
+[[bytes.fn]]
+name = "max"
+index_unit = "byte-value"
+probe = 'bytes.max(bytes.from_list([200, 1, 3]))'
+expect = "some(200)"
+
+[[bytes.fn]]
+name = "min_with"
+index_unit = "ordering"
+probe = 'bytes.min_with(bytes.from_list([200, 1, 3]), (a, b) => a - b)'
+expect = "some(1)"
+
+[[bytes.fn]]
+name = "max_with"
+index_unit = "ordering"
+probe = 'bytes.max_with(bytes.from_list([200, 1, 3]), (a, b) => a - b)'
+expect = "some(200)"
+
+[[bytes.fn]]
+name = "sum"
+index_unit = "value"
+probe = 'bytes.sum(bytes.from_list([200, 100]))'
+expect = "300"
+
+[[bytes.fn]]
+name = "product"
+index_unit = "value"
+probe = 'bytes.product(bytes.from_list([200, 100]))'
+expect = "20000"
+
+[[bytes.fn]]
+name = "take_while"
+index_unit = "byte-value"
+probe = 'bytes.to_list(bytes.take_while(bytes.from_list([1, 2, 200, 1]), (v) => v < 100))'
+expect = "[1, 2]"
+
+[[bytes.fn]]
+name = "drop_while"
+index_unit = "byte-value"
+probe = 'bytes.to_list(bytes.drop_while(bytes.from_list([1, 2, 200, 1]), (v) => v < 100))'
+expect = "[200, 1]"
+
+[[bytes.fn]]
+name = "window"
+index_unit = "byte-count"
+probe = 'bytes.window(bytes.from_list([1, 2, 3]), 2) |> list.map((w) => bytes.to_list(w))'
+expect = "[[1, 2], [2, 3]]"
+
+[[bytes.fn]]
+name = "intersperse"
+index_unit = "byte-value"
+probe = 'bytes.to_list(bytes.intersperse(bytes.from_list([1, 2]), 0))'
+expect = "[1, 0, 2]"
+
+[[bytes.fn]]
+name = "last_index_of"
+index_unit = "byte-offset"
+probe = 'bytes.last_index_of(bytes.from_list([1, 2, 1, 2]), bytes.from_list([1, 2]))'
+expect = "some(2)"
+
+[[bytes.fn]]
+name = "count_matches"
+index_unit = "count"
+probe = 'bytes.count_matches(bytes.from_list([1, 2, 1, 2]), bytes.from_list([1, 2]))'
+expect = "2"
 
 
 # index_unit vocabulary — list (the GENERIC fns — len[A], get[A], take[A] … —
@@ -1535,16 +1817,479 @@ expect = "[0, 63, 192, 0, 0, 0]"
 [list]
 default_index_unit = "value"
 
-[[list.fn]]
-name = "sum"
+[[bytes.fn]]
+name = "__read_i16_be"
 index_unit = "value"
-probe = 'list.sum([1, 2, 3])'
+probe = 'bytes.__read_i16_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-2"
+[[bytes.fn]]
+name = "__read_i16_le"
+index_unit = "value"
+probe = 'bytes.__read_i16_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-257"
+[[bytes.fn]]
+name = "__read_u16_be"
+index_unit = "value"
+probe = 'bytes.__read_u16_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "65534"
+[[bytes.fn]]
+name = "__read_u16_le"
+index_unit = "value"
+probe = 'bytes.__read_u16_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "65279"
+[[bytes.fn]]
+name = "__read_i32_be"
+index_unit = "value"
+probe = 'bytes.__read_i32_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-66052"
+[[bytes.fn]]
+name = "__read_i32_le"
+index_unit = "value"
+probe = 'bytes.__read_i32_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-50462977"
+[[bytes.fn]]
+name = "__read_u32_be"
+index_unit = "value"
+probe = 'bytes.__read_u32_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "4294901244"
+[[bytes.fn]]
+name = "__read_u32_le"
+index_unit = "value"
+probe = 'bytes.__read_u32_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "4244504319"
+[[bytes.fn]]
+name = "__read_i64_be"
+index_unit = "value"
+probe = 'bytes.__read_i64_be(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-283686952306184"
+[[bytes.fn]]
+name = "__read_i64_le"
+index_unit = "value"
+probe = 'bytes.__read_i64_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0)'
+expect = "-506097522914230529"
+[[bytes.fn]]
+name = "__read_f32_be"
+index_unit = "value"
+probe = 'bytes.__read_f32_be(bytes.from_list([63, 192, 0, 0]), 0)'
+expect = "1.5"
+[[bytes.fn]]
+name = "__read_f32_le"
+index_unit = "value"
+probe = 'bytes.__read_f32_le(bytes.from_list([0, 0, 192, 63]), 0)'
+expect = "1.5"
+[[bytes.fn]]
+name = "__read_f64_be"
+index_unit = "value"
+probe = 'bytes.__read_f64_be(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0]), 0)'
+expect = "1.5"
+[[bytes.fn]]
+name = "__read_f64_le"
+index_unit = "value"
+probe = 'bytes.__read_f64_le(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63]), 0)'
+expect = "1.5"
+[[bytes.fn]]
+name = "__read_f16_le"
+index_unit = "value"
+probe = 'bytes.__read_f16_le(bytes.from_list([0, 62]), 0)'
+expect = "1.5"
+[[bytes.fn]]
+name = "__read_i16_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_i16_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "2/258"
+[[bytes.fn]]
+name = "__read_i16_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_i16_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "2/513"
+[[bytes.fn]]
+name = "__read_u16_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_u16_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "2/258"
+[[bytes.fn]]
+name = "__read_u16_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_u16_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "2/513"
+[[bytes.fn]]
+name = "__read_i32_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_i32_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "4/16909060"
+[[bytes.fn]]
+name = "__read_i32_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_i32_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "4/67305985"
+[[bytes.fn]]
+name = "__read_u32_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_u32_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "4/16909060"
+[[bytes.fn]]
+name = "__read_u32_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_u32_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "4/67305985"
+[[bytes.fn]]
+name = "__read_i64_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_i64_be_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "8/72623859790382856"
+[[bytes.fn]]
+name = "__read_i64_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_i64_le_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "8/578437695752307201"
+[[bytes.fn]]
+name = "__read_u8_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_u8_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0)',
+  'let combined = "${cur}/${v ?? -1}"',
+]
+probe = 'combined'
+expect = "1/1"
+[[bytes.fn]]
+name = "__read_f32_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_f32_be_at(bytes.from_list([63, 192, 0, 0]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "4/1.5"
+[[bytes.fn]]
+name = "__read_f32_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_f32_le_at(bytes.from_list([0, 0, 192, 63]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "4/1.5"
+[[bytes.fn]]
+name = "__read_f64_be_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_f64_be_at(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "8/1.5"
+[[bytes.fn]]
+name = "__read_f64_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_f64_le_at(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "8/1.5"
+[[bytes.fn]]
+name = "__read_f16_le_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_f16_le_at(bytes.from_list([0, 62]), 0)',
+  'let combined = "${cur}/${v ?? -1.0}"',
+]
+probe = 'combined'
+expect = "2/1.5"
+[[bytes.fn]]
+name = "__read_bool_at"
+index_unit = "cursor"
+setup = [
+  'let (cur, v) = bytes.__read_bool_at(bytes.from_list([1, 0]), 0)',
+  'let combined = "${cur}/${v ?? false}"',
+]
+probe = 'combined'
+expect = "1/true"
+[[bytes.fn]]
+name = "__read_i16_be_array"
+index_unit = "element-count"
+probe = 'bytes.__read_i16_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[258, 772]"
+[[bytes.fn]]
+name = "__read_i16_le_array"
+index_unit = "element-count"
+probe = 'bytes.__read_i16_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[513, 1027]"
+[[bytes.fn]]
+name = "__read_u16_be_array"
+index_unit = "element-count"
+probe = 'bytes.__read_u16_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[258, 772]"
+[[bytes.fn]]
+name = "__read_u16_le_array"
+index_unit = "element-count"
+probe = 'bytes.__read_u16_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[513, 1027]"
+[[bytes.fn]]
+name = "__read_i32_be_array"
+index_unit = "element-count"
+probe = 'bytes.__read_i32_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[16909060, 84281096]"
+[[bytes.fn]]
+name = "__read_i32_le_array"
+index_unit = "element-count"
+probe = 'bytes.__read_i32_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[67305985, 134678021]"
+[[bytes.fn]]
+name = "__read_u32_be_array"
+index_unit = "element-count"
+probe = 'bytes.__read_u32_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[16909060, 84281096]"
+[[bytes.fn]]
+name = "__read_u32_le_array"
+index_unit = "element-count"
+probe = 'bytes.__read_u32_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 0, 2)'
+expect = "[67305985, 134678021]"
+[[bytes.fn]]
+name = "__read_i64_be_array"
+index_unit = "element-count"
+probe = 'bytes.__read_i64_be_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]), 0, 2)'
+expect = "[72623859790382856, 651345242494996240]"
+[[bytes.fn]]
+name = "__read_i64_le_array"
+index_unit = "element-count"
+probe = 'bytes.__read_i64_le_array(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]), 0, 2)'
+expect = "[578437695752307201, 1157159078456920585]"
+[[bytes.fn]]
+name = "__read_f32_be_array"
+index_unit = "element-count"
+probe = 'bytes.__read_f32_be_array(bytes.from_list([63, 192, 0, 0, 64, 32, 0, 0]), 0, 2)'
+expect = "[1.5, 2.5]"
+[[bytes.fn]]
+name = "__read_f32_le_array"
+index_unit = "element-count"
+probe = 'bytes.__read_f32_le_array(bytes.from_list([0, 0, 192, 63, 0, 0, 32, 64]), 0, 2)'
+expect = "[1.5, 2.5]"
+[[bytes.fn]]
+name = "__read_f64_be_array"
+index_unit = "element-count"
+probe = 'bytes.__read_f64_be_array(bytes.from_list([63, 248, 0, 0, 0, 0, 0, 0, 64, 4, 0, 0, 0, 0, 0, 0]), 0, 2)'
+expect = "[1.5, 2.5]"
+[[bytes.fn]]
+name = "__read_f64_le_array"
+index_unit = "element-count"
+probe = 'bytes.__read_f64_le_array(bytes.from_list([0, 0, 0, 0, 0, 0, 248, 63, 0, 0, 0, 0, 0, 0, 4, 64]), 0, 2)'
+expect = "[1.5, 2.5]"
+[[bytes.fn]]
+name = "__read_f16_le_array"
+index_unit = "element-count"
+probe = 'bytes.__read_f16_le_array(bytes.from_list([0, 62, 0, 65]), 0, 2)'
+expect = "[1.5, 2.5]"
+[[bytes.fn]]
+name = "__chunks"
+index_unit = "byte-count"
+probe = "bytes.__chunks(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 3) |> list.map((c) => bytes.len(c))"
+expect = "[3, 3, 2]"
+[[bytes.fn]]
+name = "__read_bool"
+index_unit = "byte-offset"
+setup = [
+  "let bb = bytes.from_list([0, 1, 2])",
+  'let sm_out = "${bytes.__read_bool(bb, 0)} ${bytes.__read_bool(bb, 1)} ${bytes.__read_bool(bb, 2)}"',
+]
+probe = "sm_out"
+expect = "false true true"
+[[bytes.fn]]
+name = "__set_f32_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(6)",
+  "bytes.__set_f32_be(b, 1, 1.5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 63, 192, 0, 0, 0]"
+[[bytes.fn]]
+name = "__set_f32_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(6)",
+  "bytes.__set_f32_le(b, 1, 1.5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 0, 192, 63, 0]"
+[[bytes.fn]]
+name = "__set_f64_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(10)",
+  "bytes.__set_f64_be(b, 1, 1.5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 63, 248, 0, 0, 0, 0, 0, 0, 0]"
+[[bytes.fn]]
+name = "__set_f64_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(10)",
+  "bytes.__set_f64_le(b, 1, 1.5)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 0, 0, 0, 0, 0, 0, 248, 63, 0]"
+[[bytes.fn]]
+name = "__set_i16_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(4)",
+  "bytes.__set_i16_be(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 254, 0]"
+[[bytes.fn]]
+name = "__set_i16_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(4)",
+  "bytes.__set_i16_le(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 0]"
+[[bytes.fn]]
+name = "__set_i32_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(6)",
+  "bytes.__set_i32_be(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 255, 255, 254, 0]"
+[[bytes.fn]]
+name = "__set_i32_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(6)",
+  "bytes.__set_i32_le(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 255, 255, 0]"
+[[bytes.fn]]
+name = "__set_i64_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(10)",
+  "bytes.__set_i64_be(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 255, 255, 255, 255, 255, 255, 254, 0]"
+[[bytes.fn]]
+name = "__set_i64_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(10)",
+  "bytes.__set_i64_le(b, 1, -2)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 255, 255, 255, 255, 255, 255, 0]"
+[[bytes.fn]]
+name = "__set_u16_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(4)",
+  "bytes.__set_u16_be(b, 1, 65534)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 254, 0]"
+[[bytes.fn]]
+name = "__set_u16_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(4)",
+  "bytes.__set_u16_le(b, 1, 65534)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 0]"
+[[bytes.fn]]
+name = "__set_u32_be"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(6)",
+  "bytes.__set_u32_be(b, 1, 4294967294)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 255, 255, 255, 254, 0]"
+[[bytes.fn]]
+name = "__set_u32_le"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(6)",
+  "bytes.__set_u32_le(b, 1, 4294967294)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 254, 255, 255, 255, 0]"
+[[bytes.fn]]
+name = "__set_u8"
+index_unit = "byte-offset"
+setup = [
+  "var b = bytes.zeros(3)",
+  "bytes.__set_u8(b, 1, 200)",
+]
+probe = "bytes.to_list(b)"
+expect = "[0, 200, 0]"
+[[bytes.fn]]
+name = "__take_at"
+index_unit = "cursor"
+setup = [
+  "let (p, t) = bytes.__take_at(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 2, 3)",
+  "let ts = match t { Some(v) => v, None => bytes.new() }",
+  'let sm_out = "${p} ${bytes.to_list(ts)}"',
+]
+probe = "sm_out"
+expect = "5 [3, 4, 5]"
+
+[[list.fn]]
+name = "__sum_int"
+index_unit = "value"
+probe = 'list.__sum_int([1, 2, 3])'
 expect = "6"
 
 [[list.fn]]
-name = "product"
+name = "__product_int"
 index_unit = "value"
-probe = 'list.product([2, 3, 4])'
+probe = 'list.__product_int([2, 3, 4])'
 expect = "24"
 
 [[list.fn]]
@@ -1664,9 +2409,37 @@ index_unit = "bit-pattern"
 probe = 'float.to_bits(1.0)'
 expect = "4607182418800017408"
 
+[[float.fn]]
+name = "compare"
+index_unit = "value"
+probe = 'float.compare(0.0 * (0.0 - 1.0), 0.0)'
+expect = "-1"
+note = """
+The IEEE total order: -0.0 sorts below 0.0, where -0.0 < 0.0 is false.
+"""
+
+[[float.fn]]
+name = "from_bits"
+index_unit = "bit-pattern"
+probe = 'float.to_string(float.from_bits(4607182418800017408))'
+expect = "1.0"
+
 # index_unit vocabulary — io:
 #   byte-value — the Int is one byte 0–255, or -1 as the EOF sentinel
 #   byte-count — the Int counts bytes to read
+
+[[float.fn]]
+name = "__int_exact"
+index_unit = "value"
+probe = 'float.__int_exact(-3.0)'
+expect = "some(-3)"
+
+[[float.fn]]
+name = "__int_sat"
+index_unit = "value"
+probe = 'float.__int_sat(1e30)'
+expect = "9223372036854775807"
+
 [io]
 default_index_unit = "byte-value"
 
@@ -1893,6 +2666,93 @@ name = "parse"
 index_unit = "value"
 probe = 'int.parse("-42") ?? 0'
 expect = "-42"
+
+[[int.fn]]
+name = "count_ones"
+index_unit = "count"
+probe = 'int.count_ones(255)'
+expect = "8"
+
+[[int.fn]]
+name = "bit_length"
+index_unit = "count"
+probe = 'int.bit_length(255)'
+expect = "8"
+
+[[int.fn]]
+name = "compare"
+index_unit = "value"
+probe = 'int.compare(0 - 5, 3)'
+expect = "-1"
+
+[[int.fn]]
+name = "sign"
+index_unit = "value"
+probe = 'int.sign(0 - 9)'
+expect = "-1"
+
+[[int.fn]]
+name = "pow"
+index_unit = "value"
+probe = 'int.pow(0 - 2, 3)'
+expect = "-8"
+
+[[int.fn]]
+name = "floor_div"
+index_unit = "value"
+probe = 'int.floor_div(0 - 7, 2)'
+expect = "-4"
+note = """
+Rounds toward -inf, not toward 0: -7 / 2 is -3, floor_div(-7, 2) is -4.
+"""
+
+[[int.fn]]
+name = "modulo"
+index_unit = "value"
+probe = 'int.modulo(0 - 7, 3)'
+expect = "2"
+note = """
+The remainder takes the sign of the divisor: -7 % 3 is -1, modulo(-7, 3) is 2.
+"""
+
+[[int.fn]]
+name = "wrap"
+index_unit = "count"
+probe = 'int.wrap(0 - 1, 8)'
+expect = "255"
+note = """
+The `bits` param is a WIDTH count: -1 kept to its low 8 bits is 255.
+"""
+
+[[int.fn]]
+name = "wrap_sub"
+index_unit = "value"
+probe = 'int.wrap_sub(int.min_value(), 1)'
+expect = "9223372036854775807"
+
+[[int.fn]]
+name = "bshr_logical"
+index_unit = "bit-pattern"
+probe = 'int.bshr_logical(0 - 1, 63)'
+expect = "1"
+note = """
+The shift fills with zeros: the 64-bit pattern of -1 shifted 63 leaves only the low bit.
+"""
+
+[[int.fn]]
+name = "to_string_radix"
+index_unit = "value"
+probe = 'int.to_string_radix(0 - 255, 16)'
+expect = "-ff"
+note = """
+Signed digits, not the bit pattern: to_hex(-255) is the 16-digit two's complement, to_string_radix(-255, 16) is -ff.
+"""
+
+[[int.fn]]
+name = "parse_radix"
+index_unit = "value"
+probe = 'int.parse_radix("-0xff", 16) ?? 0'
+expect = "-255"
 
 [[int.fn]]
 name = "from_hex"
@@ -2346,6 +3206,85 @@ expect = "9223372036854775807"
 #                    kill's signal 9 is SIGKILL, 15 SIGTERM)
 #   millisecond    — a duration in MILLISECONDS (sleep's ms,
 #                    exec_status_timeout's timeout_ms — never seconds)
+
+[[int.fn]]
+name = "__int_exact"
+index_unit = "value"
+probe = 'int.__int_exact(7)'
+expect = "some(7)"
+
+[[int.fn]]
+name = "__uint64_exact"
+index_unit = "value"
+probe = 'int.__uint64_exact(-1)'
+expect = "none"
+
+[[int.fn]]
+name = "__trunc"
+index_unit = "value"
+probe = 'int.__trunc(-7)'
+expect = "-7"
+
+[[int.fn]]
+name = "__int_sat"
+index_unit = "value"
+probe = 'int.__int_sat(-7)'
+expect = "-7"
+
+[[int.fn]]
+name = "__uint64_sat"
+index_unit = "value"
+probe = 'int.__uint64_sat(-5)'
+expect = "0"
+
+[[int.fn]]
+name = "__to_float"
+index_unit = "value"
+probe = 'int.__to_float(3)'
+expect = "3"
+
+[[int.fn]]
+name = "__to_float_exact"
+index_unit = "value"
+probe = 'int.__to_float_exact(9007199254740993)'
+expect = "none"
+
+[[int.fn]]
+name = "__to_float32"
+index_unit = "value"
+probe = 'int.__to_float32(16777217)'
+expect = "16777216"
+
+[[int.fn]]
+name = "__to_float32_exact"
+index_unit = "value"
+probe = 'int.__to_float32_exact(16777216)'
+expect = "some(16777216)"
+
+[[int.fn]]
+name = "__decimal_exact"
+index_unit = "value"
+probe = 'int.__decimal_exact(-42)'
+expect = "some(\"-42\")"
+
+[[int.fn]]
+name = "__bits64"
+index_unit = "bit-pattern"
+probe = 'int.__bits64(-1)'
+expect = "-1"
+
+[[int.fn]]
+name = "__sum"
+index_unit = "value"
+probe = 'int.__sum([1, 2, 3])'
+expect = "6"
+
+[[int.fn]]
+name = "__product"
+index_unit = "value"
+probe = 'int.__product([2, 3, 4])'
+expect = "24"
+
 [process]
 default_index_unit = "value"
 
@@ -2653,7 +3592,7 @@ name = "inflate_max"
 index_unit = "byte-count"
 setup = [
   "let sm_raw = bytes.from_list([1, 3, 0, 252, 255, 9, 8, 7])",
-  'let sm_out = "${bytes.len(zlib.inflate_max(sm_raw, 3) ?? bytes.new(9))} ${bytes.len(zlib.inflate_max(sm_raw, 2) ?? bytes.new(9))}"',
+  'let sm_out = "${bytes.len(zlib.inflate_max(sm_raw, 3) ?? bytes.zeros(9))} ${bytes.len(zlib.inflate_max(sm_raw, 2) ?? bytes.zeros(9))}"',
 ]
 probe = "sm_out"
 expect = "3 9"
@@ -2663,7 +3602,7 @@ name = "decompress_max"
 index_unit = "byte-count"
 setup = [
   "let sm_z = bytes.from_list([120, 1, 1, 3, 0, 252, 255, 9, 8, 7, 0, 53, 0, 25])",
-  'let sm_out = "${bytes.len(zlib.decompress_max(sm_z, 3) ?? bytes.new(9))} ${bytes.len(zlib.decompress_max(sm_z, 2) ?? bytes.new(9))}"',
+  'let sm_out = "${bytes.len(zlib.decompress_max(sm_z, 3) ?? bytes.zeros(9))} ${bytes.len(zlib.decompress_max(sm_z, 2) ?? bytes.zeros(9))}"',
 ]
 probe = "sm_out"
 expect = "3 9"
@@ -2673,7 +3612,7 @@ name = "gunzip_max"
 index_unit = "byte-count"
 setup = [
   "let sm_gz = bytes.from_list([31, 139, 8, 0, 0, 0, 0, 0, 0, 255, 1, 3, 0, 252, 255, 9, 8, 7, 54, 253, 45, 166, 3, 0, 0, 0])",
-  'let sm_out = "${bytes.len(zlib.gunzip_max(sm_gz, 3) ?? bytes.new(9))} ${bytes.len(zlib.gunzip_max(sm_gz, 2) ?? bytes.new(9))}"',
+  'let sm_out = "${bytes.len(zlib.gunzip_max(sm_gz, 3) ?? bytes.zeros(9))} ${bytes.len(zlib.gunzip_max(sm_gz, 2) ?? bytes.zeros(9))}"',
 ]
 probe = "sm_out"
 expect = "3 9"

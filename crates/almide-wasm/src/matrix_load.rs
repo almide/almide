@@ -125,7 +125,7 @@ impl Emitter<'_> {
         i.i32_wrap_i64().i32_store(slot_memarg(4));
         // The cells start ZERO by contract (the OOB→zeros edge of the byte
         // loaders fills nothing): `$alloc` hands back reused blocks
-        // unzeroed, so the constructor zeroes — the `bytes.new` lesson
+        // unzeroed, so the constructor zeroes — the `bytes.zeros` lesson
         // (#2004), met again the moment list spines were freed (#2010).
         i.local_get(ho).i32_const(almide_layout::PAYLOAD as i32 + 8).i32_add();
         i.i32_const(0);

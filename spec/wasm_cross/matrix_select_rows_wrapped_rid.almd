@@ -13,9 +13,9 @@ import matrix
 import bytes
 
 effect fn main() -> Unit = {
-  var f32d = bytes.new(8)
-  bytes.set_f32_le(f32d, 0, 1.5)
-  bytes.set_f32_le(f32d, 4, 2.5)
+  var f32d = bytes.zeros(8)
+  bytes.put_f32_le(f32d, 0, 1.5)
+  bytes.put_f32_le(f32d, 4, 2.5)
   let mf = matrix.select_rows_f32(f32d, 4, 1, [9223372036854775807, 0])
   println("f32=${matrix.to_lists(mf)}")
 }

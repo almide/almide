@@ -38,7 +38,7 @@ fn round_trip_held(s: String) -> Bytes = {
   copy_out(p, n + bytes.len(other) - 28)
 }
 
-fn pointer_of(b: Bytes) -> RawPtr = if bytes.len(b) > 1000000 then bytes.as_ptr(bytes.new(0)) else bytes.as_ptr(b)
+fn pointer_of(b: Bytes) -> RawPtr = if bytes.len(b) > 1000000 then bytes.as_ptr(bytes.zeros(0)) else bytes.as_ptr(b)
 
 fn round_trip_helper(s: String) -> Bytes = {
   let b = bytes.from_string(s)
@@ -147,12 +147,12 @@ effect fn main() -> Unit = {
   let copy = bytes.from_raw_ptr(bytes.as_ptr(src), 4)
   println("copy:" + row(copy))
   // write side: copy_to_ptr through as_mut_ptr
-  var dst = bytes.new(4)
+  var dst = bytes.zeros(4)
   let n = bytes.copy_to_ptr(copy, bytes.as_mut_ptr(dst), 4)
   println("n:" + int.to_string(n))
   println("dst:" + row(dst))
   // capacity clamp: only 2 of 4 bytes land
-  var small = bytes.new(4)
+  var small = bytes.zeros(4)
   let m = bytes.copy_to_ptr(src, bytes.as_mut_ptr(small), 2)
   println("m:" + int.to_string(m))
   println("small01:" + int.to_string(bytes.read_u8(small, 0)) + "," + int.to_string(bytes.read_u8(small, 1)))
@@ -162,7 +162,7 @@ effect fn main() -> Unit = {
   // corruption, the process died with no output) while the wasm self-host
   // handed out a real address past the 0-len block and overwrote the NEXT
   // allocation (differential fuzz, 2026-08-10 night).
-  var empty = bytes.new(-1)
+  var empty = bytes.zeros(-1)
   let z = bytes.copy_to_ptr(src, bytes.as_mut_ptr(empty), 2)
   println("z:" + int.to_string(z))
   let back = bytes.from_raw_ptr(bytes.as_ptr(empty), 3)

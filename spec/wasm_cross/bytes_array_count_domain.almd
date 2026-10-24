@@ -1,4 +1,7 @@
 // @contract: C-054
+// The `__`-named calls are the width primitives under the typed byte IO
+// matrix's checked `get_` / `put_` wrappers (R-bytes-09/11): this fixture pins
+// the primitives' own total domain, which the wrappers no longer reach.
 // The `count` of a `bytes.read_*_array` is the OUTPUT size, and its one portable
 // rule is: NEGATIVE reads NOTHING. Before this, native read `count as usize`, so
 // a negative count became ~1.8e19 and the reader looped that many times, while
@@ -14,7 +17,7 @@
 // One reader stands for the family here; the matrix covers all sixteen.
 import bytes
 
-fn arr(n: Int) -> String = int.to_string(list.len(bytes.read_i32_le_array(bytes.from_list([1, 2, 3, 4, 5]), 0, n)))
+fn arr(n: Int) -> String = int.to_string(list.len(bytes.__read_i32_le_array(bytes.from_list([1, 2, 3, 4, 5]), 0, n)))
 
 fn main() -> Unit = {
   // In-range: 5 bytes hold one i32; the reader pads past EOF, so the count is

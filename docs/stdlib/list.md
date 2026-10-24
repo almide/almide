@@ -926,13 +926,13 @@ list.last(xs: List[A]) -> Option[A]
 // @since 0.5.0 or earlier
 list.chunk(xs: List[A], n: Int) -> List[List[A]]
 
-// Sum; 0 when empty; wraps on overflow.
+// Sum of any numbers (R-L0-42); 0 when empty; integers wrap on overflow.
 // @since 0.5.0 or earlier
-list.sum(xs: List[Int]) -> Int
+list.sum(xs: List[A]) -> A
 
-// Product; 1 when empty; wraps on overflow.
+// Product of any numbers (R-L0-42); 1 when empty; integers wrap on overflow.
 // @since 0.5.0 or earlier
-list.product(xs: List[Int]) -> Int
+list.product(xs: List[A]) -> A
 
 // Head element, or none when empty.
 // @since 0.5.0 or earlier
@@ -950,9 +950,9 @@ list.min(xs: List[A]) -> Option[A]
 // @since 0.5.0 or earlier
 list.max(xs: List[A]) -> Option[A]
 
-// Strings joined by sep; empty string for [].
+// The parts joined by sep (R-L0-42): Strings or Bytes; empty for [].
 // @since 0.5.0 or earlier
-list.join(xs: List[String], sep: String) -> String
+list.join(xs: List[T], sep: T) -> T
 
 // f applied to each element, in order.
 // @since 0.5.0 or earlier

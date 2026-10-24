@@ -11,7 +11,7 @@ import bytes
 
 fn main() -> Unit = {
   let b = bytes.from_list([1, 2])
-  println("before=" + int.to_string(bytes.len(bytes.pad_right(b, 5, 9))))
-  println("pad_max=" + int.to_string(bytes.len(bytes.pad_right(b, 9223372036854775807, 9))))
+  println("before=" + int.to_string(bytes.len(bytes.pad_end(b, 5, 9))))
+  println("pad_max=" + int.to_string(bytes.len(bytes.pad_end(b, 9223372036854775807, 9))))
   println("after")
 }

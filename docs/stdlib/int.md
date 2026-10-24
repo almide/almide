@@ -349,7 +349,7 @@ numeric-matrix gate in `almide docs-gen --check`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (72 functions)
+## Signature index (88 functions)
 
 ```
 // Decimal digits, with - when negative.
@@ -438,7 +438,11 @@ int.count_trailing_zeros(n: Int) -> Int
 
 // Number of set bits; 64 for -1.
 // @since 0.16.0 or earlier
-int.pop_count(n: Int) -> Int
+int.pop_count(n: Int) -> Int   (deprecated — use int.count_ones)
+
+// Number of set bits; 64 for -1.
+// @since unreleased
+int.count_ones(x: Int) -> Int
 
 // The 64 bits in reverse order; 1 gives min_value.
 // @since 0.16.0 or earlier
@@ -450,7 +454,11 @@ int.byte_swap(n: Int) -> Int
 
 // Bits needed to hold n; 0 for 0, 64 if negative.
 // @since 0.16.0 or earlier
-int.bit_width(n: Int) -> Int
+int.bit_width(n: Int) -> Int   (deprecated — use int.bit_length)
+
+// Bits needed to hold x; 0 for 0, 64 if negative.
+// @since unreleased
+int.bit_length(x: Int) -> Int
 
 // Floor of log2(n); -1 when n <= 0.
 // @since 0.16.0 or earlier
@@ -639,6 +647,63 @@ int.min_value() -> Int
 // Largest Int: 2^63-1.
 // @since 0.38.0
 int.max_value() -> Int
+
+// -1, 0 or 1 as a is below, equal to or above b.
+// @since unreleased
+int.compare(a: Int, b: Int) -> Int
+
+// -1, 0 or 1 by the sign of x; 0 for 0.
+// @since unreleased
+int.sign(x: Int) -> Int
+
+// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+// @since unreleased
+int.pow(base: Int, exp: Int) -> Int
+
+// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+// @since unreleased
+int.floor_div(a: Int, b: Int) -> Int
+
+// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+// @since unreleased
+int.modulo(a: Int, b: Int) -> Int
+
+// x mod 2^bits, non-negative when bits < 64; bits <= 0 aborts, bits >= 64 keeps x.
+// @since unreleased
+int.wrap(x: Int, bits: Int) -> Int
+
+// a - b wrapped to 64 bits.
+// @since unreleased
+int.wrap_sub(a: Int, b: Int) -> Int
+
+// Zero-filling right shift of the 64 bits; n is taken mod 64.
+// @since unreleased
+int.bshr_logical(a: Int, n: Int) -> Int
+
+// Signed digits of x in radix, lowercase; -255 in 16 is "-ff"; radix outside 2..36 aborts.
+// @since unreleased
+int.to_string_radix(x: Int, radix: Int) -> String
+
+// Int from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
+// err on junk or overflow; radix outside 2..36 aborts.
+// @since unreleased
+int.parse_radix(s: String, radix: Int) -> Result[Int, String]
+
+// x as Int, toward zero; NaN, an infinity or a value outside Int aborts.
+// @since unreleased
+int.from(x: S) -> Int
+
+// some(x as Int) when Int holds x exactly, else none (a fraction, NaN, out of range).
+// @since unreleased
+int.from_checked(x: S) -> Option[Int]
+
+// x as Int, toward zero, clamped to Int's range; NaN is 0.
+// @since unreleased
+int.from_saturating(x: S) -> Int
+
+// The low 64 bits of integer x as Int (two's complement).
+// @since unreleased
+int.from_wrapping(x: S) -> Int
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
