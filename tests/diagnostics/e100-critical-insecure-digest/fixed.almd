@@ -1,0 +1,6 @@
+// A digest that holds for security: SHA-256.
+import hash
+
+fn main() -> Unit = {
+  println(int.to_string(bytes.len(hash.sha256(bytes.from_string("abc")))))
+}
