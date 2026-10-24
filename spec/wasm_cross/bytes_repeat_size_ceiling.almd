@@ -1,0 +1,21 @@
+// @contract: C-054, C-161
+// `bytes.repeat` is in the repeat family, and the family's shared 2^31-byte
+// result ceiling binds it like `string.repeat` and `list.repeat`: past it is
+// `Error: repeat result too large` + exit 1 on every leg (ALS-T6). Before,
+// `bytes.repeat([1, 2], 2^30 + 1)` built a 2 GiB buffer natively and printed
+// its length, exit 0, while wasm died `Error: out of memory` (almide/almide#4154).
+// The ceiling is tested by division, so the result size is never computed from
+// a product that could wrap. Small counts, an empty base at i64::MAX and a
+// negative count are unaffected; the fixture ends at the abort.
+import bytes
+
+fn main() -> Unit = {
+  let b = bytes.from_list([1, 2])
+  println("rep_ok=" + int.to_string(bytes.len(bytes.repeat(b, 3))))
+  println("rep_zero=" + int.to_string(bytes.len(bytes.repeat(b, 0))))
+  println("rep_neg=" + int.to_string(bytes.len(bytes.repeat(b, 0 - 5))))
+  println("rep_empty_max=" + int.to_string(bytes.len(bytes.repeat(bytes.from_list([]), 9223372036854775807))))
+  println("about to exceed")
+  println(int.to_string(bytes.len(bytes.repeat(b, 1073741825))))
+  println("unreachable")
+}

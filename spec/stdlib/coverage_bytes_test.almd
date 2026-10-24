@@ -1,4 +1,6 @@
 // Coverage tests for bytes functions
+import testing
+
 test "bytes.from_string" {
   let b = bytes.from_string("Hi")
   assert_eq(bytes.len(b), 2)
@@ -14,6 +16,23 @@ test "bytes.repeat" {
   let b = bytes.from_list([1, 2])
   let b2 = bytes.repeat(b, 3)
   assert_eq(bytes.len(b2), 6)
+}
+
+// The repeat family's 2^31-byte result ceiling (C-054/C-161, #4154): over it is
+// the T6 abort on every leg, never a native 2 GiB success. Dividing, not
+// multiplying, so a count whose product wraps i64 hits the same line.
+test "bytes.repeat aborts past the shared ceiling" {
+  let b = bytes.from_list([1, 2])
+  testing.assert_aborts(
+    "repeat result too large",
+    () => bytes.len(bytes.repeat(bytes.from_list([1, 2]), 1073741825)),
+  )
+  testing.assert_aborts(
+    "repeat result too large",
+    () => bytes.len(bytes.repeat(bytes.from_list([1, 2, 3]), 6148914691236517206)),
+  )
+  assert_eq(bytes.len(bytes.repeat(bytes.from_list([]), 9223372036854775807)), 0)
+  assert_eq(bytes.len(bytes.repeat(b, -5)), 0)
 }
 
 test "bytes.clear" {

@@ -41,3 +41,20 @@ fn list_repeat_over_the_ceiling_aborts() {
     assert_eq!(code, 1, "{err}");
     assert!(err.contains("repeat result too large"), "{err}");
 }
+
+// `bytes.repeat` joined the repeat family's ceiling (#4154): the interp runs
+// the self-hosted `bytes_repeat` body, so this pins that its guard aborts with
+// the native line rather than materializing a 2 GiB buffer.
+#[test]
+fn bytes_repeat_over_the_ceiling_aborts() {
+    let src = r#"import bytes
+fn main() -> Unit = {
+  println("${bytes.len(bytes.repeat(bytes.from_list([1, 2]), 3))}")
+  println("${bytes.len(bytes.repeat(bytes.from_list([1, 2]), 1073741825))}")
+}
+"#;
+    let (code, out, err) = run(src);
+    assert_eq!(code, 1, "{err}");
+    assert_eq!(out.trim(), "6");
+    assert!(err.contains("repeat result too large"), "{err}");
+}
