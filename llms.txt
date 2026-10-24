@@ -342,6 +342,7 @@ fn isqrt(n: Int) -> Int = {
 | E098 | The closure passed to `testing.assert_aborts` captures a local of the test (a `let`, `var`, `where` binding or outer lambda parameter), or is a fn value rather than a lambda written in the call — it runs in a child process or instance where the locals do not exist | Compute the value inside the closure, or make it a top-level `let` |
 | E099 | `testing.assert_aborts` outside a direct call in a test block — in a `fn`, `main` or a top-level `let`, used as a value, or inside another `assert_aborts` closure | Call it directly in the `test` block, once per abort |
 | E100 | Under `--profile critical`: an `ffi.*` call, a deprecated `bytes` raw-pointer call (`as_ptr`, `as_mut_ptr`, `data_ptr`, `from_raw_ptr`, `copy_to_ptr`) or an `@extern` fn is outside the memory-safety guarantee | Keep raw-address and foreign code in a module not checked with `--profile critical`; no `--allow` grants it |
+| E102 | A `regex.new` literal pattern the engine refuses — an unclosed group or class, nothing to repeat, a malformed `{…}`, a named group, lookaround, or more than 20,000 states — the same reason `regex.new` would abort with at run time | Fix the pattern (escape a literal `(`, `[`, `{` or `*` with `\\`, use a numbered group, shrink a large count), or build it with `regex.compile` and handle the err |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates

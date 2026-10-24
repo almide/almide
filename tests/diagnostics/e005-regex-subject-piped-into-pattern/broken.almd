@@ -1,0 +1,6 @@
+// R-regex-02 (#3942): piping the subject into a regex operation puts it in
+// the pattern's place. With both arguments String this silently searched the
+// pattern "[0-9]+" for the subject; a Regex parameter makes it a type error.
+import regex
+
+fn main() -> Unit = println("${"order 42" |> regex.is_match("[0-9]+")}")
