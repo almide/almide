@@ -532,14 +532,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect fs.is_file(path: String) -> Bool` — True for a regular file; follows symlinks.
 - `effect fs.copy(src: String, dst: String) -> Unit` — Copies src to dst; overwrites dst.
 - `effect fs.rename(src: String, dst: String) -> Unit` — Moves src to dst; replaces an existing dst.
-- `effect fs.walk(dir: String) -> List[String]` — Sorted paths below dir, recursive; dirs too.
+- `effect fs.walk(dir: String) -> List[String]` — Sorted paths below dir; links listed, not followed.
 - `effect fs.remove_all(path: String) -> Unit` — Deletes a tree or file; err if missing.
 - `effect fs.file_size(path: String) -> Int` — Size in bytes; err if missing.
-- `effect fs.temp_dir() -> String` — Host temp dir; may end with /.
+- `effect fs.temp_dir() -> String` — Host temp dir; a location, not a safe name.
 - `effect fs.stat(path: String) -> FileStat` — Size, kind and mtime; err if missing.
-- `effect fs.glob(pattern: String) -> List[String]` — Sorted * and ** matches; [] if base is absent.
-- `effect fs.create_temp_file(prefix: String) -> String` — New empty file temp_dir/prefix+nanos; its path.
-- `effect fs.create_temp_dir(prefix: String) -> String` — New dir temp_dir/prefix+nanos; its path.
+- `effect fs.glob(pattern: String) -> List[String]` — Sorted * and ** matches; links not followed.
+- `effect fs.create_temp_file(prefix: String) -> String` — New private file, random name; its path.
+- `effect fs.create_temp_dir(prefix: String) -> String` — New private dir, random name; its path.
 - `effect fs.is_symlink(path: String) -> Bool` — True for a symlink, even a dangling one.
 - `effect fs.modified_at(path: String) -> Int` — Mtime in Unix seconds; err if missing.
 - `effect fs.read_bytes_raw(path: String) -> Bytes` — Whole file as Bytes; err if missing.

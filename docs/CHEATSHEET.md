@@ -903,14 +903,18 @@ effect fn main() -> Unit = {
 `effect fn main()` is auto-wrapped to return `Result<(), String>`. No need to write `ok(())` or `-> Result[...]`.
 Write `effect fn main()` only when `main` does a real effect (reads, files, network, `fan`, `!`); a `main` that only computes and prints is `fn main() -> Unit`.
 
-**Temp files**: never hardcode `/tmp` — it does not exist on Windows. Use
-`fs.temp_dir()` (platform-correct: `%TMP%` on Windows native; on wasm the
-Go/Python WASI rule `$TMPDIR` else `/tmp`, so it converges on the host's
-real temp dir) or `fs.create_temp_file(prefix)` / `fs.create_temp_dir(prefix)`:
+**Temp files**: create them with `fs.create_temp_file(prefix)` /
+`fs.create_temp_dir(prefix)` — never a fixed name under `fs.temp_dir()`.
+The temp dir is shared, so a fixed name is one another user can create
+first (as a symlink to your file). The create functions pick a random name,
+create it exclusively (an existing entry is never reused or followed) and
+make it private to you; they return the path. `fs.temp_dir()` is a
+location, not a safe name. Never hardcode `/tmp` either: it does not exist
+on Windows.
 
 ```almide
-let dir = fs.temp_dir()
-fs.write("${dir}/scratch.txt", data)!
+let path = fs.create_temp_file("report")!
+fs.write(path, data)!
 ```
 Command-line arguments are accessed via `process.args()` (not main parameters).
 

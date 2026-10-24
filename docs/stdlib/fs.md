@@ -736,7 +736,7 @@ effect fs.copy(src: String, dst: String) -> Unit
 // @since 0.5.0 or earlier
 effect fs.rename(src: String, dst: String) -> Unit
 
-// Sorted paths below dir, recursive; dirs too.
+// Sorted paths below dir; links listed, not followed.
 // @since 0.5.0 or earlier
 effect fs.walk(dir: String) -> List[String]
 
@@ -748,7 +748,7 @@ effect fs.remove_all(path: String) -> Unit
 // @since 0.5.0 or earlier
 effect fs.file_size(path: String) -> Int
 
-// Host temp dir; may end with /.
+// Host temp dir; a location, not a safe name.
 // @since 0.5.0 or earlier
 effect fs.temp_dir() -> String
 
@@ -756,15 +756,15 @@ effect fs.temp_dir() -> String
 // @since 0.5.0 or earlier
 effect fs.stat(path: String) -> FileStat
 
-// Sorted * and ** matches; [] if base is absent.
+// Sorted * and ** matches; links not followed.
 // @since 0.6.0 or earlier
 effect fs.glob(pattern: String) -> List[String]
 
-// New empty file temp_dir/prefix+nanos; its path.
+// New private file, random name; its path.
 // @since 0.6.0 or earlier
 effect fs.create_temp_file(prefix: String) -> String
 
-// New dir temp_dir/prefix+nanos; its path.
+// New private dir, random name; its path.
 // @since 0.6.0 or earlier
 effect fs.create_temp_dir(prefix: String) -> String
 
