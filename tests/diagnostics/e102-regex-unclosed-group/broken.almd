@@ -1,0 +1,5 @@
+// E102 (#3942): `(` used to be read as an empty group, so this matched
+// every string. A literal pattern is checked by `almide check`.
+import regex
+
+fn main() -> Unit = println("${regex.is_match(regex.new("(a|b"), "abc")}")

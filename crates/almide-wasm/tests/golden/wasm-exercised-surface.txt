@@ -600,10 +600,12 @@ call:process.exit
 call:random.bytes
 call:random.int
 call:regex.captures
+call:regex.compile
 call:regex.find
 call:regex.find_all
-call:regex.full_match
+call:regex.is_full_match
 call:regex.is_match
+call:regex.new
 call:regex.replace
 call:regex.replace_first
 call:regex.split

@@ -8,6 +8,6 @@ fn find_len(s: String) -> Int = string.len(s) * 2
 
 effect fn main() -> Unit = {
   let v = parse("[1]") ?? value.null()
-  let hit = find("a", "abc") ?? ""
+  let hit = find(regex.new("a"), "abc") ?? ""
   println(int.to_string(parse_len(json.stringify(v)) + find_len(hit)))
 }

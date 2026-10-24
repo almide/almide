@@ -6,6 +6,7 @@ pub mod env;
 pub mod names;
 pub mod profile;
 pub mod fs_errno;
+pub mod fs_scope;
 pub mod native_stack_guard;
 pub mod rust_lit;
 

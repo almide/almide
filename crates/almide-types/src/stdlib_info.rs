@@ -146,6 +146,7 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("path", "SafePath"),
     ("process", "ProcessStatus"),
     ("random", "Rng"),
+    ("regex", "Regex"),
     ("url", "Url"),
     ("deque", "Deque"),
     ("heap", "Heap"),

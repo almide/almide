@@ -1,0 +1,6 @@
+// E102 (#4083): nested counts multiply, so this 15-character pattern has
+// more than 20,000 Pike VM states; a pattern that size is refused so that
+// every match takes time bounded by the subject's length.
+import regex
+
+fn main() -> Unit = println("${regex.is_match(regex.new("((a){200}){200}"), "aaa")}")

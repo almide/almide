@@ -77,15 +77,42 @@ fn top_level_names(rust: &str) -> Vec<String> {
     names
 }
 
+/// The types the stdlib modules declare (`type Deque[A] = …` in
+/// `stdlib/deque.almd`), read from the sources. An auto-imported module's
+/// type is emitted under its own name in every program, but it cannot collide
+/// with user code: a user type of the same name is emitted as
+/// `almide_rt_self_<Name>`, and a user fn cannot be capitalized.
+fn stdlib_type_names() -> std::collections::HashSet<String> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib");
+    let mut names = std::collections::HashSet::new();
+    for entry in std::fs::read_dir(dir).expect("stdlib dir") {
+        let path = entry.expect("entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("almd") {
+            continue;
+        }
+        for line in std::fs::read_to_string(&path).expect("read").lines() {
+            if let Some(after) = line.strip_prefix("type ") {
+                let name: String = after.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+                if !name.is_empty() {
+                    names.insert(name);
+                }
+            }
+        }
+    }
+    names
+}
+
 #[test]
 fn every_top_level_runtime_item_is_almide_prefixed() {
     if !tools_available() {
         return;
     }
     let rust = emit_rust("fn main() -> Unit = println(\"x\")\n", "hello");
+    let stdlib_types = stdlib_type_names();
     let bare: Vec<String> = top_level_names(&rust)
         .into_iter()
         .filter(|n| !(n.starts_with("almide") || n.starts_with("Almide") || n.starts_with("__almide") || n == "main"))
+        .filter(|n| !stdlib_types.contains(n))
         .collect();
     assert!(
         bare.is_empty(),

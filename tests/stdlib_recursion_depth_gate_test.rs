@@ -57,7 +57,7 @@ const ARENA_DOUBLING: &str =
 /// pattern text: alternatives, sequences and copies of a counted group are tail
 /// loops, and the only frames kept are the ones a group's body nests inside.
 const PATTERN_NESTING: &str =
-    "a few frames per level of group nesting in the PATTERN text, not per input character, piece or repetition count";
+    "a few frames per level of group nesting in the PATTERN text, not per input character, piece or repetition count; regex.new refuses nesting past 250 (C-395)";
 
 /// A merge sort: one frame per halving of the list, so log2 of its length.
 const HALVING: &str = "one frame per halving of the list (n / 2 per level): log2 of its length, at most 63";
@@ -103,6 +103,12 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
     ("regex_engine.almd", "__rx_c_alts", "__rx_c_seq", PATTERN_NESTING),
     ("regex_engine.almd", "__rx_c_copy", "__rx_c_alts", PATTERN_NESTING),
     ("regex_engine.almd", "__rx_c_seq", "__rx_c_piece", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_c_counted", "__rx_c_alts", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_ck_arms", "__rx_ck_seq", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_ck_piece", "__rx_ck_arms", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_ck_seq", "__rx_ck_piece", PATTERN_NESTING),
+    ("regex_engine.almd", "__rx_regrow", "__rx_pike_run",
+        "one frame per quadrupling of a Pike VM buffer (stack, thread table, visited set): log4 of its final size, not the input's length"),
     ("regex_engine.almd", "__rx_null_alts", "__rx_null_seq", PATTERN_NESTING),
     ("regex_engine.almd", "__rx_null_seq", "__rx_null_piece", PATTERN_NESTING),
     ("result_to_string.almd", "__rts_fill_digits", "__rts_fill_digits", DIGITS),

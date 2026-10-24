@@ -1,5 +1,14 @@
 # =============================================================
 # DIALECT EPOCH LEDGER — what a `@dialect(N)` stamp means
+[[deprecation]]
+id = "regex-full-match-renamed"
+issue = 3942
+since_epoch = 15
+since = "0.69.0"
+removal_epoch = 16
+summary = "`regex.full_match` is `@deprecated` (E052) in favour of `regex.is_full_match` (R-regex-01): every other Bool question in the stdlib is spelled `is_*`. It takes a `Regex` like the rest of the module."
+removal = "`regex.full_match(re, s)` → `regex.is_full_match(re, s)`; `almide fix` renames it"
+
 # =============================================================
 # Almide's users are code generators. A model writes against whatever dialect
 # it learned, and the file records that dialect in a `@dialect(N)` stamp so the
@@ -313,6 +322,7 @@ breaks = [
   "`bytes.take_at(b, pos, n)` → rewrite as `bytes.next_bytes(b, pos, n)`: the pair is `(bytes, next position)` now, so swap the destructuring `let (p, s)` to `let (s, p)` (R-bytes-13)",
   "`bytes.new(n)` is `bytes.zeros(n)` (n zero bytes); `bytes.new()` is now the empty buffer, as every container's `new()` is, so the one-argument call is E004 (R-bytes-28)",
   "the `bytes` parameters `val` / `pattern` / `dst` / `pos` of `append_*`, `push`, `fill`, `set`, `insert`, `remove_at`, `contains`, `index_of` and `copy_from` are named `x` / `needle` / `b` / `i`, the names list and string use (R-L0-30)",
+  "the `regex` module takes a compiled `Regex` (R-regex-02, #3942, C-395): every operation's first argument is a `Regex` made by `regex.new(pat)` (a refused pattern aborts with `Error: invalid regex: <reason>`; a literal one is E102 at check time) or `regex.compile(pat) -> Result[Regex, String]`, so `regex.find(\"[0-9]+\", s)` is a type error whose hint is `regex.find(regex.new(\"[0-9]+\"), s)` and `almide fix` wraps a literal pattern; a pattern the engine read leniently is refused (`(`, `[`, `*`, `a{`, `a{2`, a named group `(?P<n>…)`), as is one past 20,000 states; `regex.captures` answers `List[String?]` with `none` for a group that took no part (R-regex-08), where it answered the empty string; `regex.replace` reads `rep` literally as before and `regex.replace_with` takes the function. Migrated here: 519 call sites in 24 spec/proof/bench files and 10 in Rust test generators; downstream repos call regex from no .almd file",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them

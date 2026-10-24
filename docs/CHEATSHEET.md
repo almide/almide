@@ -944,7 +944,7 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [option](stdlib/option.md) | Option type operations | auto-imported | 12 |
 | [json](stdlib/json.md) | JSON parsing and querying | `import json` | 29 |
 | [math](stdlib/math.md) | Mathematical functions | auto-imported | 21 |
-| [regex](stdlib/regex.md) | Regular expressions | `import regex` | 8 |
+| [regex](stdlib/regex.md) | Regular expressions over a compiled `Regex` (`regex.new(pat)` / `regex.compile(pat)`) | `import regex` | 16 |
 | [datetime](stdlib/datetime.md) | Date and time | auto-imported | 21 |
 | [compute](stdlib/compute.md) | Deterministic compute-time constructors (fan budgets) | auto (checker surface) | 6 |
 | [duration](stdlib/duration.md) | Wall-clock time constructors | auto (checker surface) | 6 |
@@ -958,6 +958,31 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [io](stdlib/io.md) | Standard I/O | `import io` | 7 |
 | [http](stdlib/http.md) | HTTP client and server | `import http` | 23 |
 | [random](stdlib/random.md) | Random number generation; for secrets use `random.bytes` | `import random` | 10 |
+
+### Regex: compile once, pass the `Regex` first
+
+Every `regex` operation takes a `Regex`, never a pattern string. `regex.new` takes
+a literal pattern (checked by `almide check`, E102; a refused one aborts);
+`regex.compile` takes one built at run time and answers `err(reason)`. A
+capture group that took no part is `none`.
+
+```almide check
+import regex
+
+fn main() -> Unit = {
+  let digits = regex.new("[0-9]+")
+  println(regex.find(digits, "order 66") ?? "none")
+  println(regex.find_all(digits, "1 22 333") |> list.join(","))
+  let date = regex.new("(\\d+)-(\\d+)(-x)?")
+  let groups = regex.captures(date, "2026-10") ?? []
+  println(groups |> list.map((g) => g ?? "-") |> list.join("|"))
+  match regex.compile("a(b") {
+    ok(_) => println("valid"),
+    err(reason) => println(reason),
+  }
+  println(regex.replace_with(digits, "a1b22", (cs) => "<${list.get_or(cs, 0, none) ?? ""}>"))
+}
+```
 
 ## JSON & the wire
 

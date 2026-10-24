@@ -1,4 +1,4 @@
 import regex
 import regex as rx
 
-fn main() -> Unit = println(if regex.is_match("a", "a") and rx.is_match("b", "b") then "y" else "n")
+fn main() -> Unit = println(if regex.is_match(regex.new("a"), "a") and rx.is_match(rx.new("b"), "b") then "y" else "n")
