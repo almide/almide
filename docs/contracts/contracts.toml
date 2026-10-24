@@ -5368,6 +5368,18 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-410"
+spec      = "ALS-T26"
+title     = "datetime.parse_iso refuses a year outside 0..=9999 by name instead of answering a wrapped instant"
+statement = "`datetime.parse_iso` reads the year as RFC 3339's `date-fullyear` (§5.6, four digits): a year outside 0..=9999 is `err(\"year out of range: <y>\")`, byte-identically on every leg (#4118). The year is the FIRST field checked, before month / day / hour / minute / second, so `10000-13-45T99:99:99Z` is `year out of range: 10000`; the malformed-string and offset refusals still come before it, and a year too long for an Int (`99999999999999999999-…`) stays `invalid datetime format`. `9999-12-31T23:59:59Z` is ok(253402300799) and `0000-01-01T00:00:00Z` is ok(-62167219200); an offset is applied after the bound, so `9999-12-31T23:59:59-23:59` and `0000-01-01T00:00:00+23:59` are ok instants just outside the range. Inside the bound no step of the calendar arithmetic can wrap. `parse_iso(to_iso(t))` round-trips for every t from 0000-01-01T00:00:00Z to 9999-12-31T23:59:59Z; `to_iso` of a later instant renders a five-digit year that parse_iso refuses. Before this the year had no bound and the arithmetic wrapped: `292277026597-01-01T00:00:00Z` was ok(-9223372036852412416) and `584554051223-01-01T00:00:00Z` was ok(-26982016), a day in 1969 — the bound matches Go `time.Parse(time.RFC3339)`, JavaScript `Date.parse` and Rust chrono `parse_from_rfc3339` (all 0000..=9999; Python `fromisoformat` takes 1..=9999). spec/wasm_cross/datetime_parse_iso_year_range.almd pins the issue's probes, both edges and the to_iso round trip at the top edge on every leg; spec/stdlib/datetime_test.almd carries the same rows as assertions."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/datetime_parse_iso_year_range.almd", class = "fixture" },
+  { path = "spec/stdlib/datetime_test.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-422"
 spec      = "ALS-T31"
 title     = "hash.hmac_sha256/512 equal the RFC 4231 vectors on every leg, key first, and is_valid_ accepts exactly the right tag"

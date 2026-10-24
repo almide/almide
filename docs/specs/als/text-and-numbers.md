@@ -514,7 +514,9 @@ zone     := "Z" | ("+" | "-") digit+ ":" digit+
 
 各欄は ASCII 数字のみ（幅は任意 — `2024-1-5T1:2:3` は受理、符号・空白・英字は
 不可）。`Z` と数値オフセットは排他である。オフセットは**適用**され、結果は UTC
-の瞬間を指す: `2024-01-15T10:30:00+09:00` は 1705282200。値域は月 1..=12、
+の瞬間を指す: `2024-01-15T10:30:00+09:00` は 1705282200。値域は年 0..=9999
+（RFC 3339 §5.6 の `date-fullyear = 4DIGIT`。範囲外の年は ok の巻き戻った瞬間では
+なく err になる）、月 1..=12、
 日 1..=その月の日数（先発グレゴリオ暦の閏年規則）、時 0..=23、分・秒 0..=59
 （閏秒なし）、オフセットは時 0..=23・分 0..=59。
 
@@ -522,14 +524,15 @@ err の文字列は次のとおり（先に違反した欄が勝つ）:
 
 | 入力 | err |
 |------|-----|
-| 月・日・時・分・秒が範囲外 | `<field> out of range: <value>`（`month` / `day` / `hour` / `minute` / `second`） |
+| 年・月・日・時・分・秒が範囲外 | `<field> out of range: <value>`（`year` / `month` / `day` / `hour` / `minute` / `second`） |
 | オフセットが不正または範囲外 | `invalid offset: <符号以降の文字列>` |
 | その他の不正な綴り | `invalid datetime format` |
 | `T` が無い | `expected YYYY-MM-DDTHH:MM:SSZ` |
 
 テスト: `spec/wasm_cross/datetime_pre_epoch.almd`、
 `spec/wasm_cross/datetime_parse_iso_strict.almd`、
-`spec/stdlib/datetime_test.almd`。Contracts: C-359、C-360。
+`spec/wasm_cross/datetime_parse_iso_year_range.almd`、
+`spec/stdlib/datetime_test.almd`。Contracts: C-359、C-360、C-410。
 
 ## ALS-T27 url.parse の authority 規範
 
