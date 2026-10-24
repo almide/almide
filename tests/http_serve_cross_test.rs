@@ -96,20 +96,26 @@ fn kill_group(child: &mut Child) {
     let _ = child.wait();
 }
 
-/// One request on a fresh connection; the answer is everything up to the
-/// server's close. Connection attempts retry while the server binds (its
-/// "ready" line is printed just before `http.serve`).
-fn ask(port: u16, raw: &[u8]) -> Vec<u8> {
+/// A connection to `port`, retried while the server binds (its "ready" line
+/// is printed just before `http.serve`).
+fn connect_when_bound(port: u16) -> TcpStream {
     let deadline = Instant::now() + Duration::from_secs(60);
-    let mut conn = loop {
+    loop {
         match TcpStream::connect(("127.0.0.1", port)) {
-            Ok(c) => break c,
+            Ok(c) => return c,
             Err(e) => {
                 assert!(Instant::now() < deadline, "server on {port} never accepted: {e}");
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
-    };
+    }
+}
+
+/// One request on a fresh connection; the answer is everything up to the
+/// server's close. Connection attempts retry while the server binds (its
+/// "ready" line is printed just before `http.serve`).
+fn ask(port: u16, raw: &[u8]) -> Vec<u8> {
+    let mut conn = connect_when_bound(port);
     conn.set_read_timeout(Some(Duration::from_secs(60))).expect("timeout");
     conn.write_all(raw).expect("send request");
     let mut out = Vec::new();
@@ -385,7 +391,7 @@ impl Leg {
 
 /// Sends `raw`, half-closes, and reads the answer to the server's close.
 fn ask_then_close(port: u16, raw: &[u8]) -> Vec<u8> {
-    let mut conn = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    let mut conn = connect_when_bound(port);
     conn.set_read_timeout(Some(Duration::from_secs(60))).expect("timeout");
     conn.write_all(raw).expect("send request");
     conn.shutdown(std::net::Shutdown::Write).expect("half-close");
@@ -541,8 +547,8 @@ fn a_bad_status_or_field_is_refused_and_the_handlers_framing_fields_are_dropped_
 /// client stops writing as soon as bytes arrive, so its own late bytes never
 /// turn the server's close into a reset that would discard the answer.
 fn trickle_head(port: u16, head: &[u8], gap: Duration, give_up: Duration) -> (Vec<u8>, Duration) {
+    let mut conn = connect_when_bound(port);
     let started = Instant::now();
-    let mut conn = TcpStream::connect(("127.0.0.1", port)).expect("the slow client connects");
     for b in head {
         if started.elapsed() > give_up || conn.write_all(&[*b]).is_err() {
             break;
