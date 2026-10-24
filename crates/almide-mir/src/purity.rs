@@ -378,32 +378,20 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
         // The whole zlib surface is a DETERMINISTIC data transform of its
         // input bytes (#1700): the self-host bodies (stdlib/zlib_inflate.almd
         // / zlib_deflate.almd) reach no host capability, and the `effect fn`
-        // spelling is the Result carrier, not an effect. Same admission class
-        // as http's pure codecs below — enumerated, so a future zlib fn with
-        // a real capability does not ride in silently.
+        // spelling is the Result carrier, not an effect. The bounded decoders
+        // (`inflate_max` / `decompress_max` / `gunzip_max`, #4020) are the same
+        // transforms with a caller-chosen output bound. The module is admitted
+        // whole, as `ffi` is, rather than by a list of its names: a list is a
+        // second copy of the surface, and the bounded decoders were missing
+        // from it. A future zlib fn that reaches a real capability is a host
+        // op, and `host_ops::classify` answers HostOp before it asks purity.
         // `ffi` (R-ffi-01): `address` / `to_int` build an address as a value,
         // and `read` / `write` copy through one inside the program's own
         // memory (stdlib/ffi_bridge.almd over bytes_rawptr.almd: prim loads and stores, no host op).
         // The `effect fn` spelling of read/write marks memory outside Almide's
         // values (R-ffi-02), not a host capability; `--profile critical`
         // refuses the module wholesale (#4008).
-        "ffi" => true,
-        "zlib" => matches!(
-            func,
-            "compress"
-                | "compress_level"
-                | "decompress"
-                | "decompress_max"
-                | "deflate"
-                | "deflate_level"
-                | "inflate"
-                | "inflate_max"
-                | "gzip"
-                | "gunzip"
-                | "gunzip_max"
-                | "crc32"
-                | "adler32"
-        ),
+        "ffi" | "zlib" => true,
         // Pure data codecs on the blanket-impure http module (the network fns stay
         // walled): url_decode is a percent-decoder (stdlib/http_url_decode.almd).
         //
