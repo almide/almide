@@ -264,47 +264,82 @@ pub fn almide_proc_spawn(cmd: &str, args: &[impl AsRef<str>]) -> Result<i64, Str
     Ok(pid as i64)
 }
 
-/// Send `signal` to `pid`; the err is the platform tool's stderr.
-pub fn almide_proc_kill(pid: i64, signal: i64) -> Result<(), String> {
-    #[cfg(unix)]
-    let cmd = std::process::Command::new("kill").args([&format!("-{}", signal), &pid.to_string()]).output();
-    #[cfg(windows)]
-    let cmd = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]).output();
-    let cmd = cmd.map_err(|e| almide_proc_call_err("process.kill", &format!("{pid}, {signal}"), e))?;
-    if cmd.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&cmd.stderr).trim().to_string())
+/// The signal syscall a consumer hands the core (#4125): `kill(pid, sig)`,
+/// `Err(errno)` on failure. The core holds no `unsafe` and links no libc, so
+/// native passes its sys.rs wrapper and the embedded host a rustix call —
+/// either way the kernel is asked directly, never a `kill` found on PATH.
+pub type AlmideProcSignal = fn(i32, i32) -> Result<(), i32>;
+
+/// The errno of a failed kill(2), as a fixed text (no OS wording, so every
+/// leg and platform prints the same bytes). The values are POSIX's and the
+/// same on Linux and macOS / BSD.
+pub fn almide_proc_signal_errno_text(errno: i32) -> String {
+    match errno {
+        1 => "operation not permitted".to_string(),
+        3 => "no such process".to_string(),
+        22 => "invalid signal".to_string(),
+        n => format!("signal failed (errno {n})"),
     }
 }
 
+/// `pid` as a kill(2) target: only a single positive process id. `0` (this
+/// process group), `-1` (every process this user may signal) and `-pgid` are
+/// never an Almide pid, and pid_t is 32 bits.
+pub fn almide_proc_target_pid(pid: i64) -> Option<i32> {
+    i32::try_from(pid).ok().filter(|p| *p > 0)
+}
+
+/// Send `signal` to `pid` through `send` (#4125). `pid` must be in
+/// 1..=2147483647 and `signal` in 0..=31 (0 = the existence probe); a refused
+/// operand or a failed kill(2) is a fixed text:
+/// `process.kill(<pid>, <signal>): <reason>`.
+pub fn almide_proc_kill(pid: i64, signal: i64, send: AlmideProcSignal) -> Result<(), String> {
+    let fail = |why: &str| almide_proc_call_err("process.kill", &format!("{pid}, {signal}"), why);
+    let target = almide_proc_target_pid(pid).ok_or_else(|| fail("pid must be in 1..=2147483647"))?;
+    if !(0..=31).contains(&signal) {
+        return Err(fail("signal must be in 0..=31"));
+    }
+    send(target, signal as i32).map_err(|errno| fail(&almide_proc_signal_errno_text(errno)))
+}
+
 /// True while `pid` exists. A child of ours answers through its handle (an
-/// exited child is reaped and answers false); any other pid asks the platform.
-pub fn almide_proc_is_alive(pid: i64) -> bool {
-    if let Ok(pid32) = u32::try_from(pid) {
+/// exited child is reaped and answers false); any other positive pid is asked
+/// with signal 0 through `send` (EPERM = it exists, owned by someone else).
+/// A pid outside 1..=2147483647 is never alive (#4125).
+pub fn almide_proc_is_alive(pid: i64, send: AlmideProcSignal) -> bool {
+    let Some(target) = almide_proc_target_pid(pid) else { return false };
+    {
         let mut children = almide_proc_spawned_children().lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(child) = children.get_mut(&pid32) {
+        if let Some(child) = children.get_mut(&(target as u32)) {
             let running = matches!(child.try_wait(), Ok(None));
             if !running {
-                children.remove(&pid32);
+                children.remove(&(target as u32));
             }
             return running;
         }
     }
-    #[cfg(unix)]
-    {
-        std::process::Command::new("kill")
-            .args(["-0", &pid.to_string()])
+    matches!(send(target, 0), Ok(()) | Err(1))
+}
+
+/// The Windows `send` (no kill(2) there): signal 0 asks `tasklist`, any other
+/// signal ends the process with `taskkill /F`. Both by their absolute
+/// System32 path, never a PATH lookup. A missing process answers ESRCH.
+#[cfg(windows)]
+pub fn almide_proc_signal_windows(pid: i32, sig: i32) -> Result<(), i32> {
+    const SYSTEM32: &str = "C:\\Windows\\System32\\";
+    let out = if sig == 0 {
+        std::process::Command::new(format!("{SYSTEM32}tasklist.exe"))
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
             .output()
-            .map(|out| out.status.success())
-            .unwrap_or(false)
-    }
-    #[cfg(windows)]
-    {
-        std::process::Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {}", pid), "/NH"])
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+    } else {
+        std::process::Command::new(format!("{SYSTEM32}taskkill.exe"))
+            .args(["/PID", &pid.to_string(), "/F"])
             .output()
-            .map(|out| String::from_utf8_lossy(&out.stdout).contains(&pid.to_string()))
-            .unwrap_or(false)
+            .map(|o| o.status.success())
+    };
+    match out {
+        Ok(true) => Ok(()),
+        _ => Err(3),
     }
 }

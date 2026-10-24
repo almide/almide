@@ -49,9 +49,10 @@ wit-parser = "0.262"
 getrandom = "0.4"
 
 # The fan cost model's clock (#3341): a worker thread's CPU time, read
-# without `unsafe` (the workspace forbids it). Already in the tree via wasmtime.
+# without `unsafe` (the workspace forbids it), and kill(2) for process.kill /
+# is_alive (#4125: the syscall, never a `kill` on PATH). Already in the tree via wasmtime.
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", default-features = false, features = ["std", "time"] }
+rustix = { version = "1", default-features = false, features = ["std", "time", "process"] }
 
 [lints]
 workspace = true
