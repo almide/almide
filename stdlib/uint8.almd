@@ -147,3 +147,17 @@ fn parse(s: String) -> Result[UInt8, String] =
     ok(n) => if n > 255 then err("number too large to fit in target type") else ok(int.to_uint8(n)),
     err(e) => err(e),
   }
+
+// ── Integer: radix text (R-sized-06) ──
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: UInt8, radix: Int) -> String = int.to_string_radix(int.from_uint8(x), radix)
+
+/// UInt8 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 255.
+fn parse_radix(s: String, radix: Int) -> Result[UInt8, String] = {
+  let parsed = int.parse_radix(s, radix)
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match parsed {
+    ok(n) => if n > 255 then err("number too large to fit in target type") else ok(int.to_uint8(n)),
+    err(e) => err(e),
+  }
+}

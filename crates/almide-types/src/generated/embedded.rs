@@ -4912,8 +4912,13 @@ fn max(a: Float, b: Float) -> Float = _
 fn clamp(n: Float, lo: Float, hi: Float) -> Float = _
 
 /// 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
+@deprecated(since=15, use="float.signum", note="signum keeps sign's answers, 1.0 for 0.0 included")
 @intrinsic("almide_rt_float_sign")
 fn sign(n: Float) -> Float = _
+
+/// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+fn signum(x: Float) -> Float = if float.is_nan(x) then x
+else if float.to_bits(x) < 0 then -1.0 else 1.0
 
 
 /// True only for NaN (unequal to itself).
@@ -5078,6 +5083,44 @@ fn to_uint32_saturating(n: Float) -> UInt32 = float.to_uint32(n)
 
 /// Truncates, clamps to 0..2^64-1; NaN gives 0.
 fn to_uint64_saturating(n: Float) -> UInt64 = float.to_uint64(n)
+
+
+/// Round toward 0; -0.5 gives -0.0.
+fn trunc(x: Float) -> Float = if x < 0.0 then float.ceil(x) else float.floor(x)
+
+/// True unless x is inf, -inf or NaN.
+fn is_finite(x: Float) -> Bool = not (float.is_nan(x) or float.is_infinite(x))
+
+/// base to the exp; NaN for a negative base with a fractional exp.
+fn pow(base: Float, exp: Float) -> Float = math.fpow(base, exp)
+
+/// -1, 0 or 1 in IEEE-754 total order: -0.0 < 0.0, NaN above inf and equal to itself.
+fn compare(a: Float, b: Float) -> Int = int.compare(order_key(a), order_key(b))
+
+
+local fn order_key(x: Float) -> Int = {
+  let bits = float.to_bits(x)
+  if bits < 0 then int.bxor(bits, int.max_value()) else bits
+}
+
+
+/// Float whose IEEE-754 binary64 bits are bits; any NaN gives the one NaN.
+fn from_bits(bits: Int) -> Float = int.bits_to_float(bits)
+
+/// Positive infinity.
+fn infinity() -> Float = from_bits(9218868437227405312)
+
+/// The one quiet NaN (bits 0x7ff8000000000000).
+fn nan() -> Float = from_bits(9221120237041090560)
+
+/// Gap between 1.0 and the next Float: 2^-52.
+fn epsilon() -> Float = from_bits(4372995238176751616)
+
+/// Largest finite Float, about 1.7976931348623157e308.
+fn max_value() -> Float = from_bits(9218868437227405311)
+
+/// Most negative finite Float (= -max_value()), not the smallest positive.
+fn min_value() -> Float = from_bits(-4503599627370497)
 "#;
 pub const SRC_FLOAT32: &str = r#"
 
@@ -5214,6 +5257,14 @@ fn max_value() -> Float32 = from_bits(2139095039)
 
 /// Most negative finite Float32 (= -max_value()), not the smallest positive.
 fn min_value() -> Float32 = from_bits(4286578687)
+
+
+
+/// Float32 from trimmed s, the grammar of float.parse; err on junk; overflow gives inf.
+fn parse(s: String) -> Result[Float32, String] = match float.parse(s) {
+  ok(f) => ok(float.to_float32(f)),
+  err(e) => err(e),
+}
 "#;
 pub const SRC_FLOAT32_CONVERT: &str = r#"
 
@@ -10804,8 +10855,13 @@ fn count_leading_zeros(n: Int) -> Int = _
 fn count_trailing_zeros(n: Int) -> Int = _
 
 /// Number of set bits; 64 for -1.
+@deprecated(since=15, use="int.count_ones")
 @intrinsic("almide_rt_int_pop_count")
 fn pop_count(n: Int) -> Int = _
+
+/// Number of set bits; 64 for -1.
+@intrinsic("almide_rt_int_pop_count")
+fn count_ones(x: Int) -> Int = _
 
 /// The 64 bits in reverse order; 1 gives min_value.
 @intrinsic("almide_rt_int_bit_reverse")
@@ -10816,8 +10872,13 @@ fn bit_reverse(n: Int) -> Int = _
 fn byte_swap(n: Int) -> Int = _
 
 /// Bits needed to hold n; 0 for 0, 64 if negative.
+@deprecated(since=15, use="int.bit_length")
 @intrinsic("almide_rt_int_bit_width")
 fn bit_width(n: Int) -> Int = _
+
+/// Bits needed to hold x; 0 for 0, 64 if negative.
+@intrinsic("almide_rt_int_bit_width")
+fn bit_length(x: Int) -> Int = _
 
 /// Floor of log2(n); -1 when n <= 0.
 @intrinsic("almide_rt_int_log2_floor")
@@ -11022,6 +11083,128 @@ fn min_value() -> Int = -9223372036854775807 - 1
 
 /// Largest Int: 2^63-1.
 fn max_value() -> Int = 9223372036854775807
+
+
+/// -1, 0 or 1 as a is below, equal to or above b.
+fn compare(a: Int, b: Int) -> Int = if a < b then -1
+else if a > b then 1 else 0
+
+/// -1, 0 or 1 by the sign of x; 0 for 0.
+fn sign(x: Int) -> Int = compare(x, 0)
+
+/// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+fn pow(base: Int, exp: Int) -> Int = math.pow(base, exp)
+
+/// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+fn floor_div(a: Int, b: Int) -> Int = {
+  let q = a / b
+  let r = a % b
+  if r != 0 and (r < 0) != (b < 0) then q - 1 else q
+}
+
+/// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+fn modulo(a: Int, b: Int) -> Int = if b == -1 then 0
+else {
+  let m = a % b
+  if m != 0 and (m < 0) != (b < 0) then m + b else m
+}
+
+
+/// x mod 2^bits, non-negative when bits < 64; bits <= 0 aborts, bits >= 64 keeps x.
+fn wrap(x: Int, bits: Int) -> Int = if bits <= 0 then panic("wrap width must be positive")
+else if bits >= 64 then x
+else int.band(x, int.bnot(int.bshl(-1, bits)))
+
+/// a - b wrapped to 64 bits.
+fn wrap_sub(a: Int, b: Int) -> Int = int.wrap_add(int.wrap_add(a, int.bnot(b), 64), 1, 64)
+
+/// Zero-filling right shift of the 64 bits; n is taken mod 64.
+fn bshr_logical(a: Int, n: Int) -> Int = {
+  let k = shift_count(n)
+  if k == 0 then a else int.band(int.bshr(a, k), int.bnot(int.bshl(-1, 64 - k)))
+}
+
+
+local fn shift_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
+}
+
+
+/// Signed digits of x in radix, lowercase; -255 in 16 is "-ff"; radix outside 2..36 aborts.
+fn to_string_radix(x: Int, radix: Int) -> String = {
+  check_radix(radix)
+
+  let digits = radix_digits(if x < 0 then x else 0 - x, radix, [])
+  string.from_bytes(if x < 0 then [45] + digits
+  else digits)
+}
+
+/// Int from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
+/// err on junk or overflow; radix outside 2..36 aborts.
+fn parse_radix(s: String, radix: Int) -> Result[Int, String] = {
+  check_radix(radix)
+  let t = string.trim(s)
+  let bytes = string.to_bytes(t)
+  match bytes {
+    [] => err("cannot parse integer from empty string"),
+    [45, ..rest] => accumulate_negative(strip_radix_prefix(rest, radix), radix, 0, true),
+    [43, ..rest] => accumulate_negative(strip_radix_prefix(rest, radix), radix, 0, false),
+    _ => accumulate_negative(strip_radix_prefix(bytes, radix), radix, 0, false),
+  }
+}
+
+local fn check_radix(radix: Int) -> Unit =
+  if radix < 2 or radix > 36 then panic("radix must be in 2..36, got ${radix}") else ()
+
+
+local fn radix_digits(n: Int, radix: Int, acc: List[Int]) -> List[Int] = {
+  let q = n / radix
+  let digits = [digit_byte(0 - n % radix)] + acc
+  if q == 0 then digits
+  else radix_digits(q, radix, digits)
+}
+
+local fn digit_byte(d: Int) -> Int = if d < 10 then 48 + d else 87 + d
+
+
+local fn digit_value(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
+else if b >= 97 and b <= 122 then b - 87
+else if b >= 65 and b <= 90 then b - 55
+else 99
+
+
+local fn strip_radix_prefix(bytes: List[Int], radix: Int) -> List[Int] = match bytes {
+  [48, p, d, ..rest] => if prefix_radix(p) == radix then [d] + rest
+  else bytes,
+  _ => bytes,
+}
+
+local fn prefix_radix(b: Int) -> Int = match b {
+  120 | 88 => 16,
+  111 | 79 => 8,
+  98 | 66 => 2,
+  _ => 0,
+}
+
+
+
+local fn accumulate_negative(digits: List[Int], radix: Int, acc: Int, negative: Bool) -> Result[Int, String] = match digits {
+  [] => err("invalid digit found in string"),
+  _ => accumulate_digits(digits, radix, acc, negative),
+}
+
+local fn accumulate_digits(digits: List[Int], radix: Int, acc: Int, negative: Bool) -> Result[Int, String] = match digits {
+  [] => if negative then ok(acc)
+  else if acc == int.min_value() then err("number too large to fit in target type")
+  else ok(0 - acc),
+  [b, ..rest] => {
+    let d = digit_value(b)
+    if d >= radix then err("invalid digit found in string")
+    else if acc < (int.min_value() + d) / radix then err(if negative then "number too small to fit in target type" else "number too large to fit in target type")
+    else accumulate_digits(rest, radix, acc * radix - d, negative)
+  },
+}
 "#;
 pub const SRC_INT16: &str = r#"
 
@@ -11211,6 +11394,18 @@ fn bit_length(x: Int16) -> Int = 64 - int.count_leading_zeros(int.band(int.from_
 
 /// Decimal Int16 from trimmed s; err on junk or outside -32768..32767.
 fn parse(s: String) -> Result[Int16, String] = match int.parse(s) {
+  ok(n) => if n < -32768 then err("number too small to fit in target type")
+  else if n > 32767 then err("number too large to fit in target type")
+  else ok(int.to_int16(n)),
+  err(e) => err(e),
+}
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: Int16, radix: Int) -> String = int.to_string_radix(int.from_int16(x), radix)
+
+/// Int16 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -32768..32767.
+fn parse_radix(s: String, radix: Int) -> Result[Int16, String] = match int.parse_radix(s, radix) {
   ok(n) => if n < -32768 then err("number too small to fit in target type")
   else if n > 32767 then err("number too large to fit in target type")
   else ok(int.to_int16(n)),
@@ -11515,6 +11710,18 @@ fn bit_length(x: Int32) -> Int = 64 - int.count_leading_zeros(int.band(int.from_
 
 /// Decimal Int32 from trimmed s; err on junk or outside -2147483648..2147483647.
 fn parse(s: String) -> Result[Int32, String] = match int.parse(s) {
+  ok(n) => if n < -2147483648 then err("number too small to fit in target type")
+  else if n > 2147483647 then err("number too large to fit in target type")
+  else ok(int.to_int32(n)),
+  err(e) => err(e),
+}
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: Int32, radix: Int) -> String = int.to_string_radix(int.from_int32(x), radix)
+
+/// Int32 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -2147483648..2147483647.
+fn parse_radix(s: String, radix: Int) -> Result[Int32, String] = match int.parse_radix(s, radix) {
   ok(n) => if n < -2147483648 then err("number too small to fit in target type")
   else if n > 2147483647 then err("number too large to fit in target type")
   else ok(int.to_int32(n)),
@@ -11843,6 +12050,16 @@ fn parse(s: String) -> Result[Int64, String] = match int.parse(s) {
   ok(n) => ok(int.to_int64(n)),
   err(e) => err(e),
 }
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: Int64, radix: Int) -> String = int.to_string_radix(int.from_int64(x), radix)
+
+/// Int64 from trimmed s in radix, the grammar of int.parse_radix; err on junk or overflow.
+fn parse_radix(s: String, radix: Int) -> Result[Int64, String] = match int.parse_radix(s, radix) {
+  ok(n) => ok(int.to_int64(n)),
+  err(e) => err(e),
+}
 "#;
 pub const SRC_INT64_CONVERT: &str = r#"
 
@@ -12159,6 +12376,18 @@ fn bit_length(x: Int8) -> Int = 64 - int.count_leading_zeros(int.band(int.from_i
 
 /// Decimal Int8 from trimmed s; err on junk or outside -128..127.
 fn parse(s: String) -> Result[Int8, String] = match int.parse(s) {
+  ok(n) => if n < -128 then err("number too small to fit in target type")
+  else if n > 127 then err("number too large to fit in target type")
+  else ok(int.to_int8(n)),
+  err(e) => err(e),
+}
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: Int8, radix: Int) -> String = int.to_string_radix(int.from_int8(x), radix)
+
+/// Int8 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -128..127.
+fn parse_radix(s: String, radix: Int) -> Result[Int8, String] = match int.parse_radix(s, radix) {
   ok(n) => if n < -128 then err("number too small to fit in target type")
   else if n > 127 then err("number too large to fit in target type")
   else ok(int.to_int8(n)),
@@ -38425,6 +38654,20 @@ fn parse(s: String) -> Result[UInt16, String] =
     ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.to_uint16(n)),
     err(e) => err(e),
   }
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: UInt16, radix: Int) -> String = int.to_string_radix(int.from_uint16(x), radix)
+
+/// UInt16 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 65535.
+fn parse_radix(s: String, radix: Int) -> Result[UInt16, String] = {
+  let parsed = int.parse_radix(s, radix)
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match parsed {
+    ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.to_uint16(n)),
+    err(e) => err(e),
+  }
+}
 "#;
 pub const SRC_UINT16_CONVERT: &str = r#"
 
@@ -38686,6 +38929,20 @@ fn parse(s: String) -> Result[UInt32, String] =
     ok(n) => if n > 4294967295 then err("number too large to fit in target type") else ok(int.to_uint32(n)),
     err(e) => err(e),
   }
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: UInt32, radix: Int) -> String = int.to_string_radix(int.from_uint32(x), radix)
+
+/// UInt32 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 4294967295.
+fn parse_radix(s: String, radix: Int) -> Result[UInt32, String] = {
+  let parsed = int.parse_radix(s, radix)
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match parsed {
+    ok(n) => if n > 4294967295 then err("number too large to fit in target type") else ok(int.to_uint32(n)),
+    err(e) => err(e),
+  }
+}
 "#;
 pub const SRC_UINT32_CONVERT: &str = r#"
 
@@ -39032,6 +39289,48 @@ local fn parse_upper(t: String) -> UInt64? = {
     _ => none,
   }
 }
+
+
+/// Digits of x in radix, lowercase, no sign; exact up to 2^64-1; radix outside 2..36 aborts.
+fn to_string_radix(x: UInt64, radix: Int) -> String =
+  if int.from_uint64(x) >= 0 then int.to_string_radix(int.from_uint64(x), radix)
+  else {
+
+    let r = int.to_uint64(radix)
+    int.to_string_radix(int.from_uint64(x / r), radix) + int.to_string_radix(
+      int.from_uint64(x % r),
+      radix,
+    )
+  }
+
+/// UInt64 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 2^64-1.
+fn parse_radix(s: String, radix: Int) -> Result[UInt64, String] = {
+  let parsed = int.parse_radix(s, radix)
+  let t = string.trim(s)
+  if string.starts_with(t, "-") then err("invalid digit found in string")
+  else match parsed {
+    ok(n) => ok(int.to_uint64(n)),
+    err(e) => if e == "number too large to fit in target type" then parse_radix_upper(t, radix) ?? err(e)
+    else err(e),
+  }
+}
+
+
+
+local fn parse_radix_upper(t: String, radix: Int) -> Result[UInt64, String]? = {
+  let n = string.len(t)
+  match (int.parse_radix(string.slice(t, 0, n - 1), radix), int.parse_radix(
+    string.slice(t, n - 1, n),
+    radix,
+  )) {
+    (ok(head), ok(digit)) => {
+      let r = int.to_uint64(radix)
+      let d = int.to_uint64(digit)
+      if int.to_uint64(head) <= (max_value() - d) / r then some(ok(int.to_uint64(head) * r + d)) else none
+    },
+    _ => none,
+  }
+}
 "#;
 pub const SRC_UINT64_CONVERT: &str = r#"
 
@@ -39347,6 +39646,20 @@ fn parse(s: String) -> Result[UInt8, String] =
     ok(n) => if n > 255 then err("number too large to fit in target type") else ok(int.to_uint8(n)),
     err(e) => err(e),
   }
+
+
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: UInt8, radix: Int) -> String = int.to_string_radix(int.from_uint8(x), radix)
+
+/// UInt8 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 255.
+fn parse_radix(s: String, radix: Int) -> Result[UInt8, String] = {
+  let parsed = int.parse_radix(s, radix)
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match parsed {
+    ok(n) => if n > 255 then err("number too large to fit in target type") else ok(int.to_uint8(n)),
+    err(e) => err(e),
+  }
+}
 "#;
 pub const SRC_UINT8_CONVERT: &str = r#"
 

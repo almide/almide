@@ -2400,6 +2400,13 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "int"
+name     = "count_ones"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
 name     = "bit_reverse"
 native   = 1
 emitter  = 0
@@ -2415,6 +2422,13 @@ total    = 2
 [[hole]]
 module   = "int"
 name     = "bit_width"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "bit_length"
 native   = 1
 emitter  = 0
 selfhost = 1

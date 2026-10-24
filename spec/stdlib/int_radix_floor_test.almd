@@ -1,0 +1,135 @@
+// The wave 2 int functions: compare and sign (R-sized-02, R-math-01), pow, floor_div and
+// modulo in the four sign quadrants (R-int-03, R-int-13), wrap / wrap_sub / bshr_logical
+// (R-int-02, R-int-06, R-int-12), the renamed count_ones / bit_length (R-int-07, R-int-11),
+// and the radix pair to_string_radix / parse_radix round-tripping at the bounds (R-int-04).
+import testing
+
+fn ok_int(r: Result[Int, String]) -> Int = match r {
+  ok(n) => n,
+  err(e) => panic(e),
+}
+
+fn err_text(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok ${n}",
+  err(e) => e,
+}
+
+test "compare, sign and pow" {
+  assert_eq(int.compare(-5, 3), -1)
+  assert_eq(int.compare(3, 3), 0)
+  assert_eq(int.compare(int.max_value(), int.min_value()), 1)
+  assert_eq(int.sign(-9), -1)
+  assert_eq(int.sign(0), 0)
+  assert_eq(int.sign(int.max_value()), 1)
+  assert_eq(int.pow(2, 10), 1024)
+  assert_eq(int.pow(-2, 3), -8)
+  assert_eq(int.pow(7, 0), 1)
+  assert_eq(int.pow(2, 63), int.min_value())
+}
+
+test "floor_div and modulo in the four sign quadrants" {
+  assert_eq(int.floor_div(7, 2), 3)
+  assert_eq(int.floor_div(-7, 2), -4)
+  assert_eq(int.floor_div(7, -2), -4)
+  assert_eq(int.floor_div(-7, -2), 3)
+  assert_eq(int.floor_div(6, -3), -2)
+  assert_eq(int.modulo(7, 3), 1)
+  assert_eq(int.modulo(-7, 3), 2)
+  assert_eq(int.modulo(7, -3), -2)
+  assert_eq(int.modulo(-7, -3), -1)
+  assert_eq(int.modulo(-6, 3), 0)
+  assert_eq(int.modulo(int.min_value(), -1), 0)
+  assert_eq(int.floor_div(int.min_value(), 1), int.min_value())
+  let pairs = [
+    (17, 5),
+    (-17, 5),
+    (17, -5),
+    (-17, -5),
+    (0, 3),
+    (int.min_value(), 7),
+    (int.max_value(), -7)
+  ]
+  for (a, b) in pairs {
+    assert_eq(int.floor_div(a, b) * b + int.modulo(a, b), a)
+  }
+}
+
+test "floor_div and modulo abort like / and %" {
+  testing.assert_aborts("division by zero", () => int.floor_div(1, 0))
+  testing.assert_aborts("division by zero", () => int.modulo(1, 0))
+  testing.assert_aborts("integer overflow", () => int.floor_div(int.min_value(), -1))
+  testing.assert_aborts("negative exponent", () => int.pow(2, -1))
+}
+
+test "wrap, wrap_sub and bshr_logical" {
+  assert_eq(int.wrap(-1, 8), 255)
+  assert_eq(int.wrap(300, 8), 44)
+  assert_eq(int.wrap(-1, 63), int.max_value())
+  assert_eq(int.wrap(-1, 64), -1)
+  assert_eq(int.wrap(-1, 65), -1)
+  assert_eq(int.wrap(5, 1), 1)
+  assert_eq(int.wrap_sub(int.min_value(), 1), int.max_value())
+  assert_eq(int.wrap_sub(int.max_value(), -1), int.min_value())
+  assert_eq(int.wrap_sub(5, 7), -2)
+  assert_eq(int.bshr_logical(-1, 1), int.max_value())
+  assert_eq(int.bshr_logical(-1, 63), 1)
+  assert_eq(int.bshr_logical(-1, 64), -1)
+  assert_eq(int.bshr_logical(-1, -1), 1)
+  assert_eq(int.bshr_logical(-16, 2), 4611686018427387900)
+  assert_eq(int.bshr_logical(16, 2), 4)
+  testing.assert_aborts("wrap width must be positive", () => int.wrap(5, 0))
+}
+
+test "count_ones and bit_length" {
+  assert_eq(int.count_ones(-1), 64)
+  assert_eq(int.count_ones(7), 3)
+  assert_eq(int.count_ones(0), 0)
+  assert_eq(int.bit_length(0), 0)
+  assert_eq(int.bit_length(255), 8)
+  assert_eq(int.bit_length(-1), 64)
+}
+
+test "to_string_radix round-trips through parse_radix at the bounds" {
+  let xs = [
+    0,
+    1,
+    -1,
+    255,
+    -255,
+    int.max_value(),
+    int.min_value()
+  ]
+  for radix in list.range(2, 37) {
+    for x in xs {
+      assert_eq(ok_int(int.parse_radix(int.to_string_radix(x, radix), radix)), x)
+    }
+  }
+  assert_eq(int.to_string_radix(-255, 16), "-ff")
+  assert_eq(int.to_string_radix(255, 2), "11111111")
+  assert_eq(int.to_string_radix(1295, 36), "zz")
+  assert_eq(int.to_string_radix(int.min_value(), 16), "-8000000000000000")
+}
+
+test "parse_radix grammar and errors" {
+  assert_eq(ok_int(int.parse_radix(" 7f ", 16)), 127)
+  assert_eq(ok_int(int.parse_radix("-0xFF", 16)), -255)
+  assert_eq(ok_int(int.parse_radix("+0b101", 2)), 5)
+  assert_eq(ok_int(int.parse_radix("0o17", 8)), 15)
+  assert_eq(ok_int(int.parse_radix("ZZ", 36)), 1295)
+  assert_eq(ok_int(int.parse_radix("-9223372036854775808", 10)), int.min_value())
+  assert_eq(err_text(int.parse_radix("", 16)), "cannot parse integer from empty string")
+  assert_eq(err_text(int.parse_radix("-", 16)), "invalid digit found in string")
+  assert_eq(err_text(int.parse_radix("0x", 16)), "invalid digit found in string")
+  assert_eq(err_text(int.parse_radix("0xff", 10)), "invalid digit found in string")
+  assert_eq(err_text(int.parse_radix("12", 2)), "invalid digit found in string")
+  assert_eq(
+    err_text(int.parse_radix("9223372036854775808", 10)),
+    "number too large to fit in target type",
+  )
+  assert_eq(
+    err_text(int.parse_radix("-9223372036854775809", 10)),
+    "number too small to fit in target type",
+  )
+  testing.assert_aborts("radix must be in 2..36, got 1", () => int.to_string_radix(5, 1))
+  testing.assert_aborts("radix must be in 2..36, got 37", () => int.parse_radix("5", 37))
+}

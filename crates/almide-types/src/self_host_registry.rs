@@ -741,9 +741,11 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
             crate::embedded::SRC_INT_BITCOUNT,
             &[
                 ("int_pop_count", "int.pop_count"),
+                ("int_pop_count", "int.count_ones"),
                 ("int_count_trailing_zeros", "int.count_trailing_zeros"),
                 ("int_count_leading_zeros", "int.count_leading_zeros"),
                 ("int_bit_width", "int.bit_width"),
+                ("int_bit_width", "int.bit_length"),
                 ("int_log2_floor", "int.log2_floor"),
                 ("int_log2_ceil", "int.log2_ceil"),
                 ("int_next_power_of_two", "int.next_power_of_two"),
