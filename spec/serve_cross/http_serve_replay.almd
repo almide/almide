@@ -1,4 +1,4 @@
-// @contract: C-367
+// @contract: C-367, C-409
 // A SERVER fixture: it never exits, so no generic runner executes it. The
 // driver (tests/http_serve_cross_test.rs in almide/almide) starts it with
 // `almide run` natively and with `almide run --target wasm`, waits for the
@@ -13,10 +13,10 @@ import random
 
 fn deny(path: String) -> Result[Unit, String] = err("denied ${path}")
 
-// Query parameters in key order: map iteration order is not the promise here.
-fn render_query(req: HttpRequest) -> String = {
-  let q = http.query_params(req)
-  map.keys(q) |> list.sort |> list.map((k) => "${k}=${map.get(q, k) ?? ""}") |> list.join("&")
+// Query parameters in arrival order (C-404), or the decoder's err.
+fn render_query(req: HttpRequest) -> String = match http.query_params(req) {
+  ok(ps) => ps |> list.map(((k, v)) => "${k}=${v}") |> list.join("&"),
+  err(e) => e,
 }
 
 effect fn handle(req: HttpRequest) -> HttpResponse = {

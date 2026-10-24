@@ -435,4 +435,14 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-397 | fs.create_temp_file and fs.create_temp_dir create a new entry exclusively under an entropy name, private to its owner | 0.69.0 | active | fixture | 0 |
 | C-398 | path.from_string admits only a path that stays inside the directory it is joined to, and path.join_within refuses any other child | 0.69.0 | active | fixture | 1 |
 | C-399 | io.write and io.write_bytes emit exactly their bytes on every target and host | 0.68.0 | active | fixture | 1 |
+| C-400 | json.parse refuses a lone surrogate, an unknown or short escape, a raw control character, a noncharacter and an unterminated string, never deleting input | 0.69.0 | active | fixture | 2 |
+| C-401 | json.parse accepts exactly one RFC 8259 value: a duplicate key, trailing data, an unquoted key, a trailing comma, a missing separator, non-JSON whitespace and a malformed number are errs | 0.69.0 | active | fixture | 3 |
+| C-402 | url.parse cleans the input as WHATWG does, validates the scheme at the start, refuses a backslash, a control character, a % in the host and a non-canonical numeric host, and removes dot segments, %2e included | 0.69.0 | active | fixture | 2 |
+| C-403 | url.resolve cleans the reference by url.parse's rules and runs every path through the one dot-segment rule, %2e included | 0.69.0 | active | fixture | 1 |
+| C-404 | http.query_params is url.parse_query of the target after its first ?, one decoder on every leg, every pair kept in order and a bad escape an err | 0.69.0 | active | fixture | 1 |
+| C-405 | the socket host answers 400 to a request head RFC 9112 refuses: a bare LF or CR, a malformed request line, a non-origin target, whitespace before a header colon, a colon-less line, obs-fold, a missing or repeated Host | 0.69.0 | active | fixture | 0 |
+| C-406 | the router and the middleware before it read one canonical path: a non-canonical path and a parameter that decodes to a traversal are 400 | 0.69.0 | active | fixture | 0 |
+| C-407 | every http.serve response carries X-Content-Type-Options: nosniff unless the handler set the field | 0.69.0 | active | fixture | 0 |
+| C-408 | the buffered http client refuses a response that ended before its framing did, and caps the response head, as the call-handle client does | 0.69.0 | active | fixture | 0 |
+| C-409 | a handler's err never reaches the client: a fixed 500 body names the request's number, and stderr gets the err quoted under it | 0.69.0 | active | fixture | 0 |
 
