@@ -1,8 +1,9 @@
-// fs_beneath_sys (#4084): the descriptor syscalls the rooted fs family needs
-// and std has no form of — openat (relative to a directory descriptor, with
-// O_NOFOLLOW), readlinkat (is this entry a symlink, without following it),
-// unlinkat, fdopendir / readdir (list the directory a descriptor holds), and
-// on Linux openat2 (RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS). The walk built on
+// fs_beneath_sys (#4084): the descriptor syscalls the rooted fs family and
+// the `[permissions] fs` scope need and std has no form of — openat (relative
+// to a directory descriptor, with O_NOFOLLOW), readlinkat (is this entry a
+// symlink, without following it), unlinkat, mkdirat, renameat, fdopendir /
+// readdir (list the directory a descriptor holds), and on Linux openat2
+// (RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS). The walk built on
 // them (fs_beneath_core.rs, safe code) is what keeps a rooted call inside its
 // root when the tree is rewritten between the check and the use.
 //
@@ -23,10 +24,17 @@
 #[allow(unsafe_code)]
 mod almide_fs_beneath_sys {
     type CInt = i32;
+    /// `mode_t`: u16 on macOS, u32 on Linux.
+    #[cfg(target_os = "macos")]
+    type ModeT = u16;
+    #[cfg(target_os = "linux")]
+    type ModeT = u32;
 
     #[cfg(target_os = "macos")]
     mod flags {
         pub const O_WRONLY: i32 = 0x1;
+        pub const O_NONBLOCK: i32 = 0x4;
+        pub const O_APPEND: i32 = 0x8;
         pub const O_NOFOLLOW: i32 = 0x100;
         pub const O_CREAT: i32 = 0x200;
         pub const O_TRUNC: i32 = 0x400;
@@ -40,6 +48,8 @@ mod almide_fs_beneath_sys {
     mod flags {
         pub const O_WRONLY: i32 = 0o1;
         pub const O_CREAT: i32 = 0o100;
+        pub const O_APPEND: i32 = 0o2000;
+        pub const O_NONBLOCK: i32 = 0o4000;
         pub const O_TRUNC: i32 = 0o1000;
         pub const O_DIRECTORY: i32 = 0o40000;
         pub const O_NOFOLLOW: i32 = 0o100000;
@@ -52,6 +62,8 @@ mod almide_fs_beneath_sys {
     mod flags {
         pub const O_WRONLY: i32 = 0o1;
         pub const O_CREAT: i32 = 0o100;
+        pub const O_APPEND: i32 = 0o2000;
+        pub const O_NONBLOCK: i32 = 0o4000;
         pub const O_TRUNC: i32 = 0o1000;
         pub const O_DIRECTORY: i32 = 0o200000;
         pub const O_NOFOLLOW: i32 = 0o400000;
@@ -73,6 +85,8 @@ mod almide_fs_beneath_sys {
         fn openat(dirfd: CInt, path: *const std::ffi::c_char, flags: CInt, ...) -> CInt;
         fn readlinkat(dirfd: CInt, path: *const std::ffi::c_char, buf: *mut u8, len: usize) -> isize;
         fn unlinkat(dirfd: CInt, path: *const std::ffi::c_char, flags: CInt) -> CInt;
+        fn mkdirat(dirfd: CInt, path: *const std::ffi::c_char, mode: ModeT) -> CInt;
+        fn renameat(olddirfd: CInt, old: *const std::ffi::c_char, newdirfd: CInt, new: *const std::ffi::c_char) -> CInt;
         #[cfg_attr(all(target_os = "macos", target_arch = "x86_64"), link_name = "fdopendir$INODE64")]
         fn fdopendir(fd: CInt) -> *mut Dir;
         #[cfg_attr(all(target_os = "macos", target_arch = "x86_64"), link_name = "readdir$INODE64")]
@@ -108,6 +122,11 @@ mod almide_fs_beneath_sys {
         Read,
         /// A file to write: created (0o666 before the umask) or truncated.
         WriteTrunc,
+        /// A file to append to: created (0o666 before the umask) when missing.
+        Append,
+        /// An entry to take the metadata of: read-only and non-blocking (a
+        /// FIFO answers at once), whatever its type.
+        Meta,
     }
 
     fn open_flags(how: Open) -> CInt {
@@ -116,6 +135,8 @@ mod almide_fs_beneath_sys {
             Open::Dir => base | flags::O_DIRECTORY,
             Open::Read => base,
             Open::WriteTrunc => base | flags::O_WRONLY | flags::O_CREAT | flags::O_TRUNC,
+            Open::Append => base | flags::O_WRONLY | flags::O_CREAT | flags::O_APPEND,
+            Open::Meta => base | flags::O_NONBLOCK,
         }
     }
 
@@ -155,6 +176,25 @@ mod almide_fs_beneath_sys {
         let how = if is_dir { flags::AT_REMOVEDIR } else { 0 };
         // SAFETY: as in `open_at`.
         let r = unsafe { unlinkat(std::os::fd::AsRawFd::as_raw_fd(&dir), c.as_ptr(), how) };
+        if r < 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
+    }
+
+    /// Create the directory `name` under `dir` (0o777 before the umask); a
+    /// symlink at `name` is not followed (EEXIST).
+    pub fn mkdir_at(dir: std::os::fd::BorrowedFd<'_>, name: &str) -> std::io::Result<()> {
+        let c = cname(name)?;
+        // SAFETY: as in `open_at`.
+        let r = unsafe { mkdirat(std::os::fd::AsRawFd::as_raw_fd(&dir), c.as_ptr(), 0o777) };
+        if r < 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
+    }
+
+    /// Rename the entry `from` under `from_dir` to `to` under `to_dir`;
+    /// neither name is followed when it is a symlink.
+    pub fn rename_at(from_dir: std::os::fd::BorrowedFd<'_>, from: &str, to_dir: std::os::fd::BorrowedFd<'_>, to: &str) -> std::io::Result<()> {
+        let (a, b) = (cname(from)?, cname(to)?);
+        // SAFETY: two NUL-terminated strings alive for the call and two
+        // directory descriptors borrowed from held OwnedFds.
+        let r = unsafe { renameat(std::os::fd::AsRawFd::as_raw_fd(&from_dir), a.as_ptr(), std::os::fd::AsRawFd::as_raw_fd(&to_dir), b.as_ptr()) };
         if r < 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
     }
 
