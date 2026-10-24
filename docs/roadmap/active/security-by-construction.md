@@ -1,7 +1,7 @@
 <!-- description: The security claim Almide is working toward — the vulnerability classes behind the October 2026 PHP and Go advisories, what makes each impossible in Almide today, the gaps with their issues, and the rule for when the claim may be stated -->
 # Security by construction
 
-> Last updated: 2026-10-23
+> Last updated: 2026-10-24
 > Parent issue: #4011 (memory safety with no gap). Related record: the stdlib redesign's R-L0-45 / R-L0-46.
 
 ## The claim
@@ -64,6 +64,9 @@ July 2026's HalluSquatting, up to 85% on repository-cloning prompts), and moved 
 | 14 | A hallucinated or typo'd dependency | **open** | `almide.lock` pins each locked dependency to a commit. | `almide add owner/repo` fetches any owner's repository with no check and no prompt before the first fetch (`src/project_fetch.rs:334`) (#4093). |
 | 15 | A dependency's code runs at build time | **open** | `@extern` is counted as every capability (epoch 8). | A dependency's `native/*.rs` is injected into the build, and `[native-deps]` crates run their `build.rs` on the developer's machine during `almide build` / `run` / `test`, outside `[permissions]` and with no grant (#4093). |
 | 16 | A compromised CI action | partly | Release assets carry Sigstore attestations and sha256 checksums (#1534); the default workflow token is read-only; Dependabot covers the `github-actions` ecosystem. | Every `uses:` is a tag or branch, not a commit, and the repository does not require commit pins. `release.yml`, which can write and attest a release, is exposed to a moved tag (#4094). |
+| 17 | A dependency's inline Rust escapes every check | **open** | `@intrinsic` / `@wasm_intrinsic` / `prim` outside the stdlib are refused (E085). | A package's `@inline_rust` is spliced into the native build (`crates/almide-codegen/src/pass_stdlib_lowering.rs:296`). It gets no effect category, so `[permissions]` and `check --effects` miss it; a plain `fn` hides it from E006; the native grant (#4093) does not cover it; the body may contain `unsafe`. E085 decides "is stdlib" by path, so a copied `stdlib/` layout may pass (#4100). |
+| 18 | A manifest that means "nothing" allows everything | **open** | A non-empty `[permissions] allow` is checked over the linked program on every target (#3275). | `allow = []` is read as "no `[permissions]`" (`src/project.rs:100, 773`) and the check is skipped (`src/cli/mod.rs:191`), so deny-all cannot be written and the lock-down a reader expects silently allows every capability (#4101). |
+| 19 | The module does not carry its capability set | **open** | Effects are inferred over the linked program (`effect_flow/`). | Every wasm module imports `println`, `eprintln`, `exit`, `fs_call` and `host_read` whatever its effects (`crates/almide-wasm/src/assembly.rs:204-209`), so a pure module still holds the file gateway if a miscompile lets it reach it, and a host cannot read the capability set from the imports (#4102). |
 
 ## Order of work
 
@@ -82,6 +85,10 @@ July 2026's HalluSquatting, up to 85% on repository-cloning prompts), and moved 
 6. **The toolchain rows** run alongside steps 1–5, since none of them depends on the compiler's
    memory model. Do the small ones first: commit-pinned actions (#4094), the bidi refusal (#4092),
    `random.bytes` (#3938). Then the dependency grant (#4093), which needs a ruling on its options.
+   Rows 17 and 18 ride with it: `@inline_rust` refused outside the embedded stdlib (#4100) and
+   `allow = []` as deny-all (#4101) are small, and #4100 closes the one dependency path the grant
+   does not see. Row 19 (#4102) comes after the certificates, since it is the line that holds
+   when they are wrong.
 
 ## How the page stays true
 
