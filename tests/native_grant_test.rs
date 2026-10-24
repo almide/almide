@@ -189,3 +189,27 @@ fn the_root_packages_own_native_code_needs_no_grant() {
     assert!(!stderr(&o).contains("building native code from"), "a dependency without native code was announced");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn deps_lists_capabilities_native_code_and_grant() {
+    let root = scratch("deps");
+    write(root.join("pure/almide.toml"), "[package]\nname = \"pure\"\nversion = \"0.2.0\"\n");
+    write(root.join("pure/src/mod.almd"), "fn add(a: Int, b: Int) -> Int = a + b\n");
+    let dir = app(&root, "app", &["mid", "pure", "crates"], Some(&["crates"]), "pure.add(mid.twice(), crates.one())", "85");
+    let o = almide(&dir, &root, &["deps"]);
+    let out = String::from_utf8_lossy(&o.stdout).into_owned();
+    assert!(o.status.success(), "deps failed:\n{}", stderr(&o));
+    let every = "capabilities: Env, Fan, IO, Net, Rand, Time";
+    let expected = [
+        "mid = path ../mid\n  version: 0.1.0\n".to_string(),
+        format!("  {every}\n  native code: none\n"),
+        "pure = path ../pure\n  version: 0.2.0\n  capabilities: none\n  native code: none\n".to_string(),
+        "crates = path ../crates\n  version: 0.1.0\n  capabilities: none\n  native code: [native-deps] itoa (granted by [permissions].native)\n".to_string(),
+        "nat (required by another dependency) = ".to_string(),
+        format!("  version: 0.3.0\n  {every}\n  native code: native/natval.rs; @extern fn `number` (src/mod.almd:2) (NOT granted: build, run and test refuse it until [permissions].native names \"nat\")\n"),
+    ];
+    for piece in &expected {
+        assert!(out.contains(piece.as_str()), "`almide deps` is missing\n{piece}\n--- got ---\n{out}");
+    }
+    let _ = std::fs::remove_dir_all(&root);
+}

@@ -407,6 +407,38 @@ pub(crate) fn try_compile_reporting(file: &str, no_check: bool, codegen_opts: &c
     Ok((code, metered, outside_guarantee))
 }
 
+/// Each dependency package's capability set (#4093, `almide deps`): the
+/// effect categories its functions reach, by the same inference
+/// `[permissions].allow` is checked on (`EffectInferencePass`, where an
+/// `@extern` fn is every category). `entry` is a program that imports the
+/// cwd package's direct dependencies; a package reached only through them is
+/// measured over the modules they load. Keyed by package name; a package
+/// none of whose modules was loaded is absent. `Err` when the dependencies do
+/// not compile (the diagnostics were printed).
+pub(crate) fn dependency_capabilities(entry: &str) -> Result<std::collections::HashMap<String, std::collections::BTreeSet<String>>, String> {
+    use almide::codegen::pass::NanoPass;
+    let (mut program, source_text, parse_errors, has_parse_errors, mut resolved, _proj, self_versioned) = parse_and_resolve_for_compile(entry)?;
+    let package_of: std::collections::HashMap<String, String> = resolved.modules.iter()
+        .filter_map(|(name, _, pkg, _)| pkg.as_ref().map(|p| (name.clone(), p.name.clone())))
+        .collect();
+    let parsed = ParsedSource { file: entry, source_text: &source_text, parse_errors: &parse_errors, has_parse_errors };
+    let mut module_irs = std::collections::HashMap::new();
+    let (ir, _) = typecheck_and_lower_for_compile(parsed, &mut program, &mut resolved, &self_versioned, &mut module_irs)?;
+    let ir = ir.ok_or("the dependencies did not parse")?;
+    let ir = almide::codegen::pass_effect_inference::EffectInferencePass.run(ir, codegen::pass::Target::Rust).program;
+    let mut caps: std::collections::HashMap<String, std::collections::BTreeSet<String>> = std::collections::HashMap::new();
+    for module in &ir.modules {
+        let Some(pkg) = package_of.get(&module.name.to_string()) else { continue };
+        let set = caps.entry(pkg.clone()).or_default();
+        for func in &module.functions {
+            if let Some(fe) = ir.effect_map.functions.get(&format!("{}.{}", module.name, func.name)) {
+                set.extend(fe.transitive.iter().map(|e| e.to_string()));
+            }
+        }
+    }
+    Ok(caps)
+}
+
 /// #3673: build a metered program's linked IR with the codegen's own
 /// deterministic meter (`MeterChargePass`), its runtime appended.
 pub(crate) fn codegen_metered(mut ir: almide::ir::IrProgram, codegen_opts: &codegen::CodegenOptions) -> String {

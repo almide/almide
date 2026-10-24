@@ -358,26 +358,81 @@ fn dispatch_update(dep: Option<String>) {
 
 /// `dispatch`'s `Commands::Deps` arm. Extracted verbatim.
 fn dispatch_deps() {
-    if std::path::Path::new("almide.toml").exists() {
-        let proj = project::parse_toml(std::path::Path::new("almide.toml"))
-            .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
-        if proj.dependencies.is_empty() {
-            out(&format!("No dependencies"));
-        } else {
-            for dep in &proj.dependencies {
-                if let Some(ref path) = dep.path {
-                    out(&format!("{} = path {}", dep.name, path));
-                    continue;
-                }
-                let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
-                match &dep.subdir {
-                    Some(sub) => out(&format!("{} = {} ({}) subdir {}", dep.name, dep.git, ref_name, sub)),
-                    None => out(&format!("{} = {} ({})", dep.name, dep.git, ref_name)),
-                }
-            }
-        }
-    } else {
+    if !std::path::Path::new("almide.toml").exists() {
         err(&format!("No almide.toml found"));
+        return;
+    }
+    let proj = project::parse_toml(std::path::Path::new("almide.toml"))
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    if proj.dependencies.is_empty() {
+        out(&format!("No dependencies"));
+        return;
+    }
+    // #4093: each package with what it can reach and the native code it
+    // brings, so a dependency is judged before `almide build` runs its code.
+    let fetched = project_fetch::fetch_all_deps(&proj)
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    let natives = crate::native_grant::survey(&proj, &fetched);
+    let caps = dependency_capabilities_report(&proj);
+    for dep in &proj.dependencies {
+        out(&dependency_source_line(dep));
+        if let Some(n) = natives.iter().find(|n| n.name == dep.name) {
+            print_dependency_details(n, caps.as_ref());
+        }
+    }
+    for n in natives.iter().filter(|n| !n.direct) {
+        out(&format!("{} (required by another dependency) = {}", n.name, n.package_dir.display()));
+        print_dependency_details(n, caps.as_ref());
+    }
+}
+
+/// `almide deps`'s first line for a declared dependency: where it comes from.
+fn dependency_source_line(dep: &project::Dependency) -> String {
+    if let Some(ref path) = dep.path {
+        return format!("{} = path {}", dep.name, path);
+    }
+    let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
+    match &dep.subdir {
+        Some(sub) => format!("{} = {} ({}) subdir {}", dep.name, dep.git, ref_name, sub),
+        None => format!("{} = {} ({})", dep.name, dep.git, ref_name),
+    }
+}
+
+/// The capability sets of every dependency package, measured over a program
+/// that imports the direct ones; `None` when they do not compile.
+fn dependency_capabilities_report(proj: &project::Project) -> Option<std::collections::HashMap<String, std::collections::BTreeSet<String>>> {
+    let dir = std::env::temp_dir().join(format!("almide-deps-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).ok()?;
+    let entry = dir.join("deps_entry.almd");
+    let imports: String = proj.dependencies.iter().map(|d| format!("import {}\n", d.name)).collect();
+    std::fs::write(&entry, imports).ok()?;
+    crate::SUPPRESS_WARNINGS.store(true, std::sync::atomic::Ordering::Relaxed);
+    let caps = crate::compile_driver::dependency_capabilities(&entry.to_string_lossy()).ok();
+    crate::SUPPRESS_WARNINGS.store(false, std::sync::atomic::Ordering::Relaxed);
+    let _ = std::fs::remove_dir_all(&dir);
+    caps
+}
+
+/// `almide deps`'s indented lines for one package: version, capabilities,
+/// native code and its grant.
+fn print_dependency_details(n: &crate::native_grant::DepNative, caps: Option<&std::collections::HashMap<String, std::collections::BTreeSet<String>>>) {
+    out(&format!("  version: {}", n.version));
+    let caps_text = match caps.map(|c| c.get(&n.name)) {
+        None => "unknown (the dependencies do not compile)".to_string(),
+        Some(None) => "unknown (no module of it is imported)".to_string(),
+        Some(Some(set)) if set.is_empty() => "none".to_string(),
+        Some(Some(set)) => set.iter().cloned().collect::<Vec<_>>().join(", "),
+    };
+    out(&format!("  capabilities: {}", caps_text));
+    if n.code.is_empty() {
+        out("  native code: none");
+    } else if n.granted {
+        out(&format!("  native code: {} (granted by [permissions].native)", n.code.describe()));
+    } else {
+        out(&format!(
+            "  native code: {} (NOT granted: build, run and test refuse it until [permissions].native names \"{}\")",
+            n.code.describe(), n.name
+        ));
     }
 }
 
