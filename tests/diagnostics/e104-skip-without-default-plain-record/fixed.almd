@@ -1,0 +1,4 @@
+// The fix: give the skipped field its default.
+type Cache = { key: String, @skip hits: Int = 0 }
+
+fn main() -> Unit = println("ok")
