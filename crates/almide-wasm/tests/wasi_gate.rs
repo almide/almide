@@ -24,12 +24,17 @@ fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().expect("test harness invariant")
 }
 
+/// The manifest's normalization, on BYTES (C-399: stdout is compared exactly,
+/// invalid UTF-8 included): drop NUL bytes and trailing newlines the way
+/// gen-run-manifest.sh's `$(...)` capture does, then end in one `\n` unless empty.
 fn normalized_hash(stdout: &[u8]) -> String {
-    let text = String::from_utf8_lossy(stdout);
-    let no_nul: String = text.chars().filter(|c| *c != '\0').collect();
-    let trimmed = no_nul.trim_end_matches('\n');
-    let text = if trimmed.is_empty() { String::new() } else { format!("{trimmed}\n") };
-    Sha256::digest(text.as_bytes()).iter().map(|b| format!("{b:02x}")).collect::<String>()
+    let no_nul: Vec<u8> = stdout.iter().copied().filter(|b| *b != 0).collect();
+    let end = no_nul.iter().rposition(|b| *b != b'\n').map_or(0, |i| i + 1);
+    let mut text = no_nul[..end].to_vec();
+    if !text.is_empty() {
+        text.push(b'\n');
+    }
+    Sha256::digest(&text).iter().map(|b| format!("{b:02x}")).collect::<String>()
 }
 
 fn wasmtime_bin() -> String {
