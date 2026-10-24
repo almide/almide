@@ -17,6 +17,7 @@
 # sorted. Needs `gh` (authenticated) and network; run it by hand when the
 # org gains or renames a package, and commit the result.
 set -euo pipefail
+export LC_ALL=C
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/src/almide_packages.txt"
 tmp="$(mktemp)"
