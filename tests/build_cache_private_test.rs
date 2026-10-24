@@ -59,20 +59,27 @@ fn plant(path: &Path, marker: &Path) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-/// The cached binaries under the run cache: `target/<profile>/almide-<hash>`.
+/// The cached binaries anywhere under the base: files named
+/// `almide-<16 hex digits>` (the content-keyed name, without the digest).
 fn cached_binaries(base: &Path) -> Vec<PathBuf> {
-    let dir = base.join("run/target/debug");
-    let mut out: Vec<PathBuf> = std::fs::read_dir(&dir)
-        .map(|rd| {
-            rd.flatten()
-                .map(|e| e.path())
-                .filter(|p| {
-                    let n = p.file_name().unwrap().to_string_lossy().into_owned();
-                    n.starts_with("almide-") && !n.contains('.') && p.is_file()
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        for e in rd.flatten() {
+            let p = e.path();
+            let Ok(ft) = e.file_type() else { continue };
+            if ft.is_dir() {
+                walk(&p, out);
+            } else if ft.is_file() {
+                let n = p.file_name().unwrap().to_string_lossy().into_owned();
+                let hex = n.strip_prefix("almide-").unwrap_or("");
+                if hex.len() == 16 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                    out.push(p);
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(base, &mut out);
     out.sort();
     out
 }
@@ -120,7 +127,7 @@ fn a_cached_binary_that_no_longer_matches_its_digest_is_rebuilt_not_run() {
     let meta = std::fs::metadata(&base).unwrap();
     assert_eq!(meta.permissions().mode() & 0o077, 0, "the base is created private");
     let bins = cached_binaries(&base);
-    assert_eq!(bins.len(), 1, "one cached binary: {bins:?}");
+    assert_eq!(bins.len(), 1, "one cached binary under the base: {bins:?}");
 
     // Control: an untouched cache is a hit and prints the program's output.
     let o = run(td.path(), &program);
