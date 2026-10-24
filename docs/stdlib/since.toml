@@ -1167,6 +1167,7 @@
 "matrix.slice_rows" = "<=0.13.4"
 "matrix.split_cols_even" = "<=0.13.4"
 "matrix.sub" = "<=0.13.4"
+"matrix.to_bytes_f16_le" = "unreleased"
 "matrix.to_bytes_f32_le" = "<=0.13.4"
 "matrix.to_bytes_f64_le" = "<=0.13.4"
 "matrix.to_lists" = "<=0.9.3"

@@ -28083,6 +28083,10 @@ fn to_bytes_f64_le(m: Matrix) -> Bytes = _
 @intrinsic("almide_rt_matrix_to_bytes_f32_le")
 fn to_bytes_f32_le(m: Matrix) -> Bytes = _
 
+/// Row-major f16 LE, 2 bytes each (rounded to nearest even; overflow is inf).
+@intrinsic("almide_rt_matrix_to_bytes_f16_le")
+fn to_bytes_f16_le(m: Matrix) -> Bytes = _
+
 /// f16 LE rows x cols at offset; all 0 if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f16_le")
 fn from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
@@ -29523,6 +29527,31 @@ fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix
   if matrix.cols(rows_probe) + matrix.cols(cols_probe) < 0 then a
   else matrix.from_lists(__matrix_zip_rows(matrix.to_lists(a), matrix.to_lists(b), f, 0, []))
 }
+
+
+
+
+
+fn __matrix_f16_bits(x: Float) -> Int = bytes.__f16_bits(x)
+
+fn __matrix_f16_row(row: List[Float], i: Int, acc: List[Int]) -> List[Int] = match list.get(row, i) {
+  some(x) => {
+    let h = __matrix_f16_bits(x)
+    __matrix_f16_row(row, i + 1, acc + [int.band(h, 255), int.bshr(h, 8)])
+  },
+  none => acc,
+}
+
+fn __matrix_f16_rows(rows: List[List[Float]], i: Int, acc: List[Int]) -> List[Int] = match list.get(
+  rows,
+  i,
+) {
+  some(row) => __matrix_f16_rows(rows, i + 1, __matrix_f16_row(row, 0, acc)),
+  none => acc,
+}
+
+@implements("matrix.to_bytes_f16_le")
+fn __matrix_to_bytes_f16_le(m: Matrix) -> Bytes = bytes.from_list(__matrix_f16_rows(matrix.to_lists(m), 0, []))
 "#;
 pub const SRC_NET: &str = r#"
 
