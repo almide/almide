@@ -13,6 +13,9 @@ use std::sync::{Arc, Mutex};
 #[path = "host_fan.rs"]
 mod fan;
 
+#[path = "host_budget.rs"]
+mod budget;
+
 /// One wasm run's cross-target observables: stdout, stderr, exit code.
 /// A trap WITHOUT a recorded `almide.exit` code is a runtime abort
 /// (unreachable / div-by-zero / OOB) — exit 1, the native abort contract,
@@ -102,8 +105,10 @@ struct Host {
     /// Program args for op 29 (#1716): framed as [argv0, args...] — the
     /// guest's args arm skips the first frame, matching native argv[1..].
     args: Vec<String>,
-    /// Linear-memory budget (heap-budget gates); unlimited by default.
-    limits: wasmtime::StoreLimits,
+    /// This store's share of the run's ONE linear-memory budget (#4135):
+    /// every store of a run — its own, its fan workers', an abort-site
+    /// child's — meters against the same cap (`host_budget.rs`).
+    meter: budget::Meter,
     /// The run's live http calls (#2633) — cancelled when the run ends.
     calls: Arc<Mutex<crate::http_call_host::HttpCalls>>,
     /// `http.serve`'s listener and pending connection (ops 70..=72, #2650).
@@ -133,6 +138,40 @@ fn stdout_is_terminal() -> bool {
     use std::io::IsTerminal as _;
     std::io::stdout().is_terminal()
 }
+
+/// The store limiter of every store of a run: linear-memory growth is
+/// metered against the run's shared budget (#4135); tables, instance and
+/// memory counts keep wasmtime's defaults, as `StoreLimits` did.
+impl wasmtime::ResourceLimiter for Host {
+    fn memory_growing(&mut self, current: usize, desired: usize, maximum: Option<usize>) -> wasmtime::Result<bool> {
+        if maximum.is_some_and(|m| desired > m) {
+            return Ok(false);
+        }
+        let delta = desired.saturating_sub(current);
+        if self.meter.reserve(delta) {
+            return Ok(true);
+        }
+        // The run's own instance takes back what its idle pooled fan
+        // workers hold before it is refused: alone, it reaches the whole cap.
+        match &self.par {
+            Some(par) => {
+                par.release_pool();
+                Ok(self.meter.reserve(delta))
+            }
+            None => Ok(false),
+        }
+    }
+
+    fn memory_grow_failed(&mut self, _error: wasmtime::Error) -> wasmtime::Result<()> {
+        self.meter.undo_last();
+        Ok(())
+    }
+
+    fn table_growing(&mut self, _current: usize, desired: usize, maximum: Option<usize>) -> wasmtime::Result<bool> {
+        Ok(maximum.is_none_or(|m| desired <= m))
+    }
+}
+
 
 /// Append program output: into the capture buffer, or — live — to the
 /// real stream with native's buffering rule. The bytes go through exactly
@@ -424,14 +463,17 @@ fn run_wasm_src_here(
     cfg.async_stack_size(EMBEDDED_WASM_STACK + 1024 * 1024);
     let engine = wasmtime::Engine::new(&cfg)?;
     let module = wasmtime::Module::new(&engine, bytes)?;
-    run_compiled(&engine, &module, Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site: -1 })
+    let budget = budget::Budget::new(max_memory_bytes);
+    run_compiled(&engine, &module, Launch { stdin, budget, args, watchdog, live, abort_site: -1 })
 }
 
 /// How one instance of a compiled module is started: the run's own, or an
 /// abort-site child of it (`testing.assert_aborts`, ADR-0029).
 struct Launch<'a> {
     stdin: StdinSource,
-    max_memory_bytes: Option<usize>,
+    /// The run's linear-memory budget — an abort-site child shares its
+    /// parent's (#4135).
+    budget: Arc<budget::Budget>,
     args: &'a [String],
     watchdog: Option<std::time::Duration>,
     live: bool,
@@ -441,17 +483,13 @@ struct Launch<'a> {
 
 /// Instantiate `module` once and run its `main` to completion.
 fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: Launch<'_>) -> anyhow::Result<RunResult> {
-    let Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site } = launch;
+    let Launch { stdin, budget, args, watchdog, live, abort_site } = launch;
     let (engine, module) = (engine.clone(), module.clone());
     let out = Arc::new(Mutex::new(Vec::new()));
     let err = Arc::new(Mutex::new(Vec::new()));
     let exit = Arc::new(Mutex::new(None));
     let fs_buf = Arc::new(Mutex::new(Vec::new()));
     let stdin_buf = Arc::new(Mutex::new(stdin));
-    let limits = match max_memory_bytes {
-        Some(cap) => wasmtime::StoreLimitsBuilder::new().memory_size(cap).build(),
-        None => wasmtime::StoreLimits::default(),
-    };
     let mut store = wasmtime::Store::new(
         &engine,
         Host {
@@ -461,7 +499,7 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
             fs_buf: fs_buf.clone(),
             stdin: stdin_buf.clone(),
             args: args.to_vec(),
-            limits,
+            meter: budget::Meter::new(budget.clone()),
             calls: Arc::default(),
             serve: Arc::new(Mutex::new(crate::host_serve::ServeState::default())),
             net: Arc::default(),
@@ -471,14 +509,14 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
             abort_site,
         },
     );
-    store.limiter(|h| &mut h.limits);
+    store.limiter(|h| h as &mut dyn wasmtime::ResourceLimiter);
     let linker = host_linker(&engine)?;
     // #3003 (ADR-0011 §D2a): the instance-parallel fan offer (op 74) runs a
     // chunk on fresh instances of THIS module, through THIS import set.
     let ticked = watchdog.map(|_| Arc::new(std::sync::atomic::AtomicBool::new(false)));
     store.data_mut().par = Some(Arc::new(fan::ParCtx::new(
         (engine.clone(), module.clone(), linker.clone()),
-        max_memory_bytes,
+        budget,
         ticked.clone(),
         args.to_vec(),
     )));
@@ -772,11 +810,15 @@ fn abort_site_op(caller: &wasmtime::Caller<'_, Host>, op: i32, a_len: i32) -> i6
     let par = if caller.data().abort_site >= 0 { None } else { caller.data().par.clone() };
     let child = match par {
         Some(par) => {
-            let (engine, module, max_memory_bytes, args) = par.compiled();
+            // the child meters against the run's own budget (#4135); the
+            // parent's idle fan workers give their memory back first, as the
+            // parent's own growth would make them
+            par.release_pool();
+            let (engine, module, budget, args) = par.compiled();
             std::thread::scope(|s| {
                 spawn_guest_thread(s, || {
                     let launch =
-                        Launch { stdin: StdinSource::Buf(Vec::new()), max_memory_bytes, args, watchdog: None, live: false, abort_site: i64::from(a_len) };
+                        Launch { stdin: StdinSource::Buf(Vec::new()), budget, args, watchdog: None, live: false, abort_site: i64::from(a_len) };
                     run_compiled(engine, module, launch)
                 })
                 .join()
