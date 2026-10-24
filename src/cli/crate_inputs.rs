@@ -56,7 +56,12 @@ impl CrateInputs {
         if !toml_path.exists() { return Ok(inputs); }
         let proj = crate::project::parse_toml(&toml_path).map_err(|e| format!("parse almide.toml: {}", e))?;
         if proj.dependencies.is_empty() { return Ok(inputs); }
-        for dep in crate::project_fetch::fetch_all_deps(&proj)? {
+        let fetched = crate::project_fetch::fetch_all_deps(&proj)?;
+        // The injection point itself refuses an ungranted dependency's native
+        // code (#4093), whichever command reached it; `dispatch` refuses the
+        // same graph earlier, on every target.
+        super::enforce_native_grants(&proj, &fetched, true)?;
+        for dep in fetched {
             inputs.packages.push(PackageNatives::read(&dep.package_dir)?);
             let dep_toml = dep.package_dir.join("almide.toml");
             if let Some(dep_proj) = dep_toml.exists().then(|| crate::project::parse_toml(&dep_toml).ok()).flatten() {
