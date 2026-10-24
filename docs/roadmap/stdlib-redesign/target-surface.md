@@ -606,7 +606,7 @@
 | `to_string` | `fn float.to_string(x: Float) -> String` |  |  |
 | `trunc` | `fn float.trunc(x: Float) -> Float` | 新規 | R-float-04 |
 
-撤去（32）:
+撤去（34）:
 
 | 関数 | 代わり | 案 |
 |---|---|---|
@@ -618,6 +618,8 @@
 | `to_float32_checked` | `float32.from_checked` | R-L0-40 |
 | `to_float64` | `float64.from` | R-L0-40 |
 | `to_int` | `int.from` | R-L0-40 |
+| `to_int_checked` | `int.from_checked` | R-L0-40 |
+| `to_int_saturating` | `int.from_saturating` | R-L0-40 |
 | `to_int16` | `int16.from` | R-L0-40 |
 | `to_int16_checked` | `int16.from_checked` | R-L0-40 |
 | `to_int16_saturating` | `int16.from_saturating` | R-L0-40 |
