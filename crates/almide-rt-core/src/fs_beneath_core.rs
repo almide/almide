@@ -172,16 +172,20 @@ mod fs_beneath_imp {
         }
         #[cfg(target_os = "linux")]
         if !walk_only {
-            if let Some(r) = super::almide_fs_beneath_sys::openat2_dir(std::os::fd::AsFd::as_fd(root), &parents.join("/")) {
-                return match r {
-                    Ok(fd) => {
-                        hook(parents.len());
-                        Ok(fd)
-                    }
-                    // ELOOP 40: a symlink on the way; EXDEV 18: a step out.
-                    Err(e) if matches!(e.raw_os_error(), Some(40 | 18)) => Err(FsBeneathError::Escape),
-                    Err(e) => Err(FsBeneathError::Io(e)),
-                };
+            match super::almide_fs_beneath_sys::openat2_dir(std::os::fd::AsFd::as_fd(root), &parents.join("/")) {
+                Some(Ok(fd)) => {
+                    hook(parents.len());
+                    return Ok(fd);
+                }
+                // ELOOP 40: a symlink on the way; EXDEV 18: a step out.
+                Some(Err(e)) if matches!(e.raw_os_error(), Some(40 | 18)) => return Err(FsBeneathError::Escape),
+                // Any other failure is told apart by the walk below: a
+                // symlink as the LAST segment answers ENOTDIR under
+                // O_NOFOLLOW | O_DIRECTORY before RESOLVE_NO_SYMLINKS'
+                // ELOOP, and the walk's per-segment check names it an
+                // escape; a missing or non-directory segment fails there
+                // with the plain call's own errno.
+                Some(Err(_)) | None => {}
             }
         }
         let _ = walk_only;
