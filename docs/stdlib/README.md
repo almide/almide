@@ -363,7 +363,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect datetime.now() -> Int` — Wall-clock Unix seconds (not monotonic).
 - `effect datetime.monotonic_ns() -> Int` — Monotonic ns since first call; compare differences.
 - `effect datetime.now_ms() -> Int` — Wall-clock milliseconds since the Unix epoch (not monotonic).
-- `datetime.parse_iso(s: String) -> Result[Int, String]` — Epoch secs of YYYY-MM-DDTHH:MM:SSZ; fractions err.
+- `datetime.parse_iso(s: String) -> Result[Int, String]` — Epoch secs of YYYY-MM-DDTHH:MM:SSZ, year 0..=9999; fractions err.
 - `datetime.second(ts: Int) -> Int` — UTC second, 0..59.
 - `datetime.to_iso(ts: Int) -> String` — YYYY-MM-DDTHH:MM:SSZ in UTC.
 - `datetime.to_unix(ts: Int) -> Int` — Identity: a timestamp is already Unix seconds.
