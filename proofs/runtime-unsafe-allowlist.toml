@@ -52,3 +52,9 @@ path = "crates/almide-rt-core/src/net_unix_sys.rs"
 count = 5
 class = "c-call"
 reason = "SCM_RIGHTS descriptor passing (sendmsg / recvmsg / cmsg) and memfd for the unix module"
+
+[[file]]
+path = "crates/almide-rt-core/src/fs_beneath_sys.rs"
+count = 12
+class = "c-call"
+reason = "the rooted fs family by descriptor (#4084): openat / readlinkat / unlinkat / fdopendir / readdir / closedir, Linux openat2 via syscall, errno reset for readdir, and owning a descriptor a successful open returned"
