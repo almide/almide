@@ -1,0 +1,2 @@
+expects_error = "module 'jsonn' not found"
+hint_substring = "did you mean `import json`?"

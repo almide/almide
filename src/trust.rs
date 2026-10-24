@@ -168,6 +168,50 @@ fn edit_distance(a: &str, b: &str) -> usize {
     prev[b.len()]
 }
 
+/// The candidate within edit distance 2 of `wanted` — and at most a third of
+/// its length, so a short name is not "near" everything — closest first,
+/// after lowercasing and folding `-` `_` `.` away. Never `wanted` itself.
+pub fn near_name<'a>(wanted: &str, candidates: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
+    let key = |s: &str| -> String { s.to_ascii_lowercase().chars().filter(|c| !matches!(c, '-' | '_' | '.')).collect() };
+    let w = key(wanted);
+    candidates
+        .into_iter()
+        .filter(|c| *c != wanted)
+        .map(|c| (edit_distance(&key(c), &w), c))
+        .filter(|(d, _)| *d <= 2 && *d * 3 <= w.len())
+        .min_by_key(|(d, c)| (*d, c.len()))
+        .map(|(_, c)| c)
+}
+
+/// The hint for `import <name>` that names no module (#4109): the nearest
+/// stdlib module, then the nearest declared dependency, then the nearest
+/// package under github.com/almide. Only a name the stdlib, the manifest or
+/// the org snapshot already holds is ever suggested, and it is never
+/// substituted. `None` when nothing is near.
+pub fn import_hint(name: &str, dependencies: &[&str]) -> Option<String> {
+    use almide_lang::stdlib_info::{AUTO_IMPORT_BUNDLED, BUNDLED_MODULES, STDLIB_MODULES, TIER1_ALWAYS_ACCESSIBLE};
+    let user_stdlib = STDLIB_MODULES.iter().chain(BUNDLED_MODULES).copied().filter(|m| *m != "prim");
+    if let Some(m) = near_name(name, user_stdlib) {
+        let auto = AUTO_IMPORT_BUNDLED.contains(&m) || TIER1_ALWAYS_ACCESSIBLE.contains(&m);
+        return Some(if auto {
+            format!("did you mean `{m}`? It is a standard library module and is always in scope: delete `import {name}` and write `{m}.…`")
+        } else {
+            format!("did you mean `import {m}`? (`{m}` is a standard library module)")
+        });
+    }
+    if let Some(d) = near_name(name, dependencies.iter().copied()) {
+        return Some(format!("did you mean `import {d}`? (`{d}` is in [dependencies])"));
+    }
+    let packages = almide_packages();
+    if let Some(p) = near_name(name, packages.iter().map(|(p, _)| *p)) {
+        let repo = packages.iter().find(|(q, _)| *q == p).map_or(p, |(_, r)| *r);
+        return Some(format!(
+            "did you mean `{p}`? It is a package under github.com/almide/{repo}: `almide add {p}`, then `import {p}`"
+        ));
+    }
+    None
+}
+
 /// A "did you mean" line for a refused or not-found source, or `None`.
 ///
 /// Three shapes, after [`fold`]: the same name as an almide package under
@@ -232,6 +276,16 @@ mod tests {
         assert!(suggestion("https://github.com/almlde/whatever").unwrap().contains("github.com/almide/whatever"));
         assert_eq!(suggestion("https://github.com/alice/totally-unrelated-thing"), None);
         assert_eq!(suggestion("https://github.com/alice/mylib"), None, "two edits on a five-letter name is noise");
+    }
+
+    #[test]
+    fn an_unknown_import_suggests_stdlib_then_dependencies_then_packages() {
+        assert!(import_hint("jsonn", &[]).unwrap().contains("`import json`"));
+        assert!(import_hint("strng", &[]).unwrap().contains("always in scope"));
+        assert!(import_hint("mylibb", &["mylib"]).unwrap().contains("`import mylib`"));
+        assert!(import_hint("bindgn", &[]).unwrap().contains("almide add bindgen"));
+        assert_eq!(import_hint("zzqx", &[]), None);
+        assert_eq!(import_hint("prin", &[]), None, "`prim` is not user surface");
     }
 
     #[test]
