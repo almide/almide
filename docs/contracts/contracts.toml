@@ -5101,7 +5101,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-420"
-spec      = "ALS-T11"
+spec      = "ALS-T31"
 title     = "hash.hmac_sha256/512 equal the RFC 4231 vectors on every leg, key first, and is_valid_ accepts exactly the right tag"
 statement = "hash.hmac_sha256(key, b) / hmac_sha512(key, b) are HMAC (RFC 2104) over SHA-256 / SHA-512 with the KEY FIRST: a key longer than the block (64 bytes for SHA-256, 128 for SHA-512) is hashed first, a shorter one is zero-padded to the block, and the result is H((K xor opad) ++ H((K xor ipad) ++ b)) — 32 and 64 bytes. The _hex cells are the same digest as lowercase hex (64 / 128 chars). They answer byte-identically on native and wasm and equal RFC 4231 test cases 1-7 for both digests, including case 5's 128-bit truncation (taken with bytes.slice) and the 131-byte key of cases 6-7; every vector pins the argument order, so a call with key and message swapped differs. hash.is_valid_hmac_sha256(key, b, tag) / is_valid_hmac_sha512 are true iff tag equals the computed MAC, compared through bytes.is_equal_constant_time (C-421); a tag of another length (a truncated tag, a SHA-256 tag against SHA-512) is false. The _hex verify cells take the tag as hex in either case: an odd-length string, a non-hex character or an empty string is false, never an abort. HMAC is pure Almide (stdlib/hash.almd) on every leg, so both legs run the same code."
 since     = "0.69.0"
@@ -5113,7 +5113,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-421"
-spec      = "ALS-T11"
+spec      = "ALS-T31"
 title     = "bytes/string.is_equal_constant_time answer equality with no data-dependent branch"
 statement = "bytes.is_equal_constant_time(a, b) and string.is_equal_constant_time(a, b) are true iff a and b have the same length and the same bytes (a String compares its UTF-8 bytes, so two spellings of one character that differ in bytes are unequal); both empty is true. A length mismatch is false at once: lengths are public. Otherwise every byte pair is read: the result is the OR of a[i] xor b[i] over all i, tested against zero once after the walk, so no branch, index or exit depends on the contents. The answer is byte-identical on native, wasm and the reference interpreter. The timing half is held structurally on the code each leg runs: on wasm the compare's functions have no if/br_if/br_table/select whose condition derives from a byte load; on native the runtime fn at opt-level 3 has no conditional branch on a value derived from a byte load and no bcmp/memcmp call (each step passes through core::hint::black_box). An early-exit twin and plain == are caught by the same walks on both legs."
 since     = "0.69.0"
@@ -5126,7 +5126,7 @@ evidence  = [
 
 [[contract]]
 id        = "C-422"
-spec      = "ALS-B7"
+spec      = "ALS-B12"
 title     = "--profile critical refuses a call to an @insecure_digest fn (md5, sha1) with E100"
 statement = "hash.md5, hash.md5_hex, hash.sha1 and hash.sha1_hex carry the declared attribute @insecure_digest: digests broken for security, kept for compatibility. Under --profile critical a call to one is E100 at check time, whatever --allow grants, with a hint naming hash.sha256 / hash.sha512 and hash.hmac_sha256 / hash.is_valid_hmac_sha256; the pipe form is refused the same way. The set is derived from the one declaration site (the attribute in stdlib/hash.almd), never from a list of names. The same program checked without the profile is unchanged."
 since     = "0.69.0"
