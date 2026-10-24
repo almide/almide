@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 48 stdlib modules, 1461 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 48 stdlib modules, 1462 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -43,7 +43,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [option](#option) | 14 | 0 |
 | [path](#path) | 13 | 0 |
 | [process](#process) | 17 | 1 |
-| [random](#random) | 9 | 0 |
+| [random](#random) | 10 | 0 |
 | [regex](#regex) | 8 | 0 |
 | [result](#result) | 15 | 0 |
 | [set](#set) | 40 | 0 |
@@ -1304,9 +1304,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 [random.md](random.md)
 
 - `effect random.int(min: Int, max: Int) -> Int` — Random Int in [min, max]; min if max <= min.
-- `effect random.float() -> Float` — Random Float in [0, 1); not crypto-grade.
+- `effect random.float() -> Float` — Random Float in [0, 1).
 - `effect random.choice(xs: List[T]) -> Option[T]` — Random element of xs; none when empty.
 - `effect random.shuffle(xs: List[T]) -> List[T]` — Random permutation of xs as a new list.
+- `effect random.bytes(n: Int) -> Bytes` — n bytes from the OS cryptographic random source (CSPRNG); n < 0 aborts.
 - `random.seeded(seed: Int) -> Rng` — A generator whose stream is fixed by seed.
 - `random.next_int(rng: Rng, min: Int, max: Int) -> (Int, Rng)` — An Int in [min, max] (both ends) and the next state; min, state unchanged, if max <= min.
 - `random.next_float(rng: Rng) -> (Float, Rng)` — A Float in [0, 1) from the top 53 bits, and the next state.
