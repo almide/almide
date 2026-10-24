@@ -44,6 +44,7 @@ dependencies = [
  "almide-lang",
  "almide-mir",
  "almide-optimize",
+ "almide-rt-core",
  "almide-tools",
  "almide-types",
  "almide-verify",

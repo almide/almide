@@ -2,8 +2,8 @@
 # Almide installer — downloads a prebuilt binary from GitHub Releases.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh | sh
-#   curl -fsSL ... | sh -s -- v0.12.3          # specific version
+#   curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh | sh
+#   curl --proto '=https' --tlsv1.2 -fsSL ... | sh -s -- v0.12.3          # specific version
 #   ALMIDE_INSTALL=~/bin sh install.sh          # custom install dir
 
 set -eu
@@ -53,17 +53,21 @@ CHECKSUM_URL="${BASE}/almide-checksums.sha256"
 
 # --- Download ---
 
+# Every download (#4181): ignore ~/.curlrc (-q, which must come first), https
+# only, a redirect only to https, and TLS 1.2 or newer.
+CURL="curl -q --proto =https --proto-redir =https --tlsv1.2 -fsSL"
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 echo "Downloading ${ARCHIVE}..."
-if ! curl -fsSL "$URL" -o "${TMP}/${ARCHIVE}"; then
+if ! $CURL "$URL" -o "${TMP}/${ARCHIVE}"; then
   echo "error: download failed" >&2
   echo "       check that the version exists: https://github.com/${REPO}/releases" >&2
   exit 1
 fi
 
-curl -fsSL "$CHECKSUM_URL" -o "${TMP}/checksums.sha256"
+$CURL "$CHECKSUM_URL" -o "${TMP}/checksums.sha256"
 
 # --- Verify checksum ---
 
