@@ -121,6 +121,7 @@ fn derive_codec(
     // `wk` collects them across the encode/decode builders, memoized by name.
     let mut workers = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    let ctx_env = ctx.env;
     {
         let mut wk = CodecWk {
             vt: &mut ctx.var_table,
@@ -130,7 +131,9 @@ fn derive_codec(
         };
         match (fields, &td.kind) {
             (Some(fields), _) => {
-                if wants("encode") {
+                // #4107 (R-secret-04): a Secret field is decoded, never encoded.
+                let holds_secret = fields.iter().any(|f| crate::secret_type::holds_secret(ctx_env, &f.ty));
+                if wants("encode") && !holds_secret {
                     out.push(auto_derive_encode(&mut wk, type_ty, fields));
                 }
                 if wants("decode") {
@@ -156,7 +159,11 @@ fn derive_codec(
     // every Codec type provides — real bodies the v1 leg links; on v0 the
     // BuiltinLowering call-rewrite keeps them unused (DCE'd).
     if !fn_names.contains(format!("__encode_list_{}", td.name).as_str()) {
-        out.extend(derive_container_helpers(&mut ctx.var_table, &td.name, type_ty));
+        // A Secret-holding type has no `encode`, so no encode helpers (#4107).
+        let no_encode = fields.is_some_and(|fs| fs.iter().any(|f| crate::secret_type::holds_secret(ctx_env, &f.ty)));
+        out.extend(derive_container_helpers(&mut ctx.var_table, &td.name, type_ty)
+            .into_iter()
+            .filter(|f| !(no_encode && (f.name.as_str().starts_with("__encode_") || f.name.as_str().ends_with(".__list_enc_go")))));
     }
     out
 }
