@@ -740,7 +740,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `http.req_path(req: HttpRequest) -> String` — Request target, query string included.
 - `http.req_body(req: HttpRequest) -> String` — Body text; empty without a Content-Length.
 - `http.req_header(req: HttpRequest, key: String) -> Option[String]` — First value for key, any case; none if absent.
-- `http.query_params(req: HttpRequest) -> Map[String, String]` — Decoded query map; last duplicate wins.
+- `http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]` — url.parse_query of the target after its first ?; pairs in order; err on a bad escape.
 - `http.url_decode(s: String) -> String` — + to space, %XX to byte; bad escapes kept.
 - `effect http.get(url: String) -> String` — Body even for a 404; err only on transport.
 - `effect http.post(url: String, body: String) -> String` — Reply body of a POST; JSON type by default.
@@ -1906,14 +1906,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `url.encode_component(s: String) -> String` — All but A-Za-z0-9-._~ as UTF-8 %XX escapes.
 - `url.decode_component(s: String) -> Result[String, String]` — Percent-decoded s; err on bad escape/UTF-8; + kept.
-- `url.parse(s: String) -> Result[Url, String]` — Url from s; err without ://, on an empty/invalid host, userinfo, an IPv6 literal, or a bad port.
+- `url.parse(s: String) -> Result[Url, String]` — Url from s, cleaned as WHATWG does; err on a bad scheme, host or port, a backslash or control char, userinfo, IPv6.
 - `url.to_string(u: Url) -> String` — URL text of u; empty query/fragment omitted.
 - `url.query_pairs(query: String) -> List[(String, String)]` — Undecoded (k, v) pairs; bare key gets "".
 - `url.build_query(pairs: List[(String, String)]) -> String` — k=v joined by &, both sides percent-encoded.
 - `url.encode_form(s: String) -> String` — Like encode_component, but a space becomes +.
 - `url.decode_form(s: String) -> Result[String, String]` — + as space, then percent-decoded; err on bad escape/UTF-8.
 - `url.parse_query(query: String) -> Result[List[(String, String)], String]` — Decoded (k, v) pairs; bare key gets ""; err on a bad escape.
-- `url.resolve(base: Url, ref: String) -> Result[Url, String]` — ref resolved against base (RFC 3986 5.2); err when the result is not a URL.
+- `url.resolve(base: Url, ref: String) -> Result[Url, String]` — ref cleaned as parse does, resolved against base (RFC 3986 5.2); err when the result is not a URL.
 
 ## value
 
@@ -1930,9 +1930,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `value.int(n: Int) -> Value` — Value holding the Int n.
 - `value.merge(a: Value, b: Value) -> Value` — Shallow merge, b's keys win; b if not both objects.
 - `value.null() -> Value` — The JSON null Value.
-- `value.object(pairs: List[(String, Value)]) -> Value` — Wraps pairs as an Object; duplicate keys kept.
+- `value.object(pairs: List[(String, Value)]) -> Value` — Wraps pairs as an Object; a repeated key keeps its first position, last value.
 - `value.omit(v: Value, keys: List[String]) -> Value` — v minus the listed keys; non-objects as-is.
-- `value.pick(v: Value, keys: List[String]) -> Value` — Only the listed keys of v; non-objects as-is.
+- `value.pick(v: Value, keys: List[String]) -> Value` — Only the listed keys of v; a non-object picks to {}.
 - `value.str(s: String) -> Value` — Value holding the String s.
 - `value.stringify(v: Value) -> String` — Compact JSON; NaN/inf print as null.
 - `value.to_camel_case(v: Value) -> Value` — Top-level keys to camelCase; nested untouched.
