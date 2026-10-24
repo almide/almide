@@ -22,6 +22,8 @@ rustls-native-certs = "0.8"
 # Test-only: the audit tests (tests/http_client_audit.rs) mint a throwaway CA
 # and leaf so SSL_CERT_FILE / SSL_CERT_DIR are exercised against a CA that
 # exists nowhere else (#2820). Same ring backend the client uses.
+# Scratch trees for the rooted fs tests (tests/fs_beneath_core.rs, #4084).
+tempfile = "3"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 
 # Its own lints, not `[lints] workspace = true` (#3620): the workspace FORBIDS
