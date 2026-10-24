@@ -9446,6 +9446,7 @@ pub const SRC_HTTP: &str = r#"
 
 
 import json
+import url
 
 /// Serves 0.0.0.0:port forever; handler err is a 500.
 @intrinsic("almide_rt_http_serve")
@@ -9538,10 +9539,20 @@ fn req_body(req: HttpRequest) -> String = _
 @borrow_ref(req)
 fn req_header(req: HttpRequest, key: String) -> String? = _
 
-/// Decoded query map; last duplicate wins.
-@intrinsic("almide_http_query_params")
-@borrow_ref(req)
-fn query_params(req: HttpRequest) -> Map[String, String] = _
+
+
+
+
+
+
+
+
+/// url.parse_query of the target after its first ?; pairs in order; err on a bad escape.
+fn query_params(req: HttpRequest) -> Result[List[(String, String)], String] = match url.parse_query(__query_of(http.req_path(req))) {
+  ok(ps) => ok(ps),
+  err(e) => err(string.replace(e, "url.parse_query", "http.query_params")),
+}
+
 
 
 
@@ -9795,6 +9806,47 @@ fn __is_hex(c: String) -> Bool = c != "" and string.contains("0123456789abcdefAB
 
 fn __bad_escape(path: String) -> Bool = string.split(path, "%") |> list.drop(1) |> list.any((p) => not __hex_pair(p))
 
+
+
+
+
+
+
+
+
+
+fn __encodes_unreserved(p: String) -> Bool = match url.decode_component("%" + string.take(p, 2)) {
+  ok(c) => string.len(c) == 1 and string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~", c),
+  err(_) => false,
+}
+
+fn __canonical(path: String) -> Bool = {
+  let segs = string.split(string.drop(path, 1), "/")
+  let n = list.len(segs)
+  let empty_inner = list.enumerate(segs) |> list.any(((i, s)) => s == "" and i + 1 < n)
+  let dot = segs |> list.any((s) => s == "." or s == "..")
+  let unreserved = string.split(path, "%") |> list.drop(1) |> list.any((p) => __encodes_unreserved(p))
+  let odd = string.chars(path) |> list.any((c) => c == "\\" or (string.codepoint(c) ?? 0) < 32 or (string.codepoint(c) ?? 0) == 127)
+  not empty_inner and not dot and not unreserved and not odd
+}
+
+
+
+
+
+fn __param_bad(v: String) -> Bool = v == "." or v == ".." or string.contains(v, "/") or string.contains(v, "\\") or string.contains(v, "\u{0}")
+
+fn __bad_binding(segs: List[String], parts: List[String]) -> Bool = {
+  let fixed = segs |> list.take_while((s) => not __is_rest(s))
+  let n = list.len(fixed)
+  let fixed_bad = list.zip(fixed, parts) |> list.any(((s, part)) => __is_param(s) and __param_bad(__decode_part(part)))
+  let rest_bad = match list.get(segs, n) {
+    some(r) => __name_of(r) != "" and (list.drop(parts, n) |> list.any((part) => __param_bad(__decode_part(part)))),
+    none => false,
+  }
+  fixed_bad or rest_bad
+}
+
 fn __hex_pair(p: String) -> Bool = {
   let cs = string.chars(string.take(p, 2))
   list.len(cs) == 2 and list.all(cs, __is_hex)
@@ -9960,13 +10012,21 @@ effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) ->
     400,
     "Bad Request: malformed percent-encoding in the path",
   )
+  else if not __canonical(path) then http.response(
+    400,
+    "Bad Request: the path is not in canonical form",
+  )
   else {
     let exact = hits |> list.filter(((r, _)) => r.method == method or r.method == "")
     let via_get = method == "HEAD" and list.is_empty(exact)
     let allowed = if via_get then hits |> list.filter(((r, _)) => r.method == "GET")
     else exact
     match allowed |> list.find(((a, _)) => list.all(allowed, ((b, _)) => __route_covers(a, b))) {
-      some((r, bound)) => {
+      some((r, bound)) => if __bad_binding(r.segments, __parts(path)) then http.response(
+        400,
+        "Bad Request: a path parameter is a dot segment or holds a /, \\ or NUL",
+      )
+      else {
         let res = r.handler(http.__with_params(req, bound))!
         if via_get then http.__set_body(res, "") else res
       },
@@ -10510,6 +10570,8 @@ pub const SRC_HTTP_SERVE: &str = r#"
 
 
 
+import hash
+
 effect fn __http_serve_bind(port: String) -> Result[Unit, String] = _
 
 effect fn __http_serve_next() -> Result[List[String], String] = _
@@ -10577,9 +10639,27 @@ fn __hs_owned(k: String) -> Bool = list.contains(
   string.to_lower(k),
 )
 
-fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_pairs(resp) |> list.filter(((k, _)) => not __hs_owned(k)) |> list.flat_map(((k, v)) => [k, v]))
 
 
+fn __hs_nosniff(pairs: List[(String, String)]) -> List[(String, String)] = if pairs |> list.any(((k, _)) => string.to_lower(k) == "x-content-type-options") then pairs
+else pairs + [("X-Content-Type-Options", "nosniff")]
+
+fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_nosniff(__hs_pairs(resp) |> list.filter(((k, _)) => not __hs_owned(k))) |> list.flat_map(((k, v)) => [k, v]))
+
+
+
+
+
+
+
+
+
+
+fn __hs_request_id(raw: List[String]) -> String = string.pad_start(
+  int.to_hex(hash.fnv1a32((list.get(raw, 0) ?? "") + " " + (list.get(raw, 1) ?? "") + "\n" + (list.get(raw, 2) ?? ""))),
+  8,
+  "0",
+)
 
 
 
@@ -10600,16 +10680,20 @@ effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Uni
       let req = __hs_request(raw)
       let resp = match f(req) {
         ok(r) => r,
-        err(e) => ["500", "Internal error: ${e}", "Content-Type", "text/plain"],
+        err(e) => {
+          let id = __hs_request_id(raw)
+          eprintln("http.serve: request ${id}: handler error: ${__hs_quote(e)}")
+          ["500", "Internal Server Error (request ${id})", "Content-Type", "text/plain"]
+        },
       }
       let answer = match __hs_refusal(resp) {
         some(why) => {
           eprintln("http.serve: refused the response: ${why}")
-          ["500", "Internal error: ${why}", "Content-Type", "text/plain"]
+          ["500", "Internal Server Error", "Content-Type", "text/plain"]
         },
-        none => __hs_shaped(resp),
+        none => resp,
       }
-      __http_serve_reply(__hs_frame(answer))!
+      __http_serve_reply(__hs_frame(__hs_shaped(answer)))!
     }
   }
 }
@@ -10655,33 +10739,6 @@ fn http_url_decode(s: String) -> String = {
   let buf = prim.alloc_list(m)
   let _x = __ud_fill(prim.handle(buf), h + 12, n, 0, 0)
   string.from_bytes(buf)
-}
-
-
-
-
-
-fn __qp_fill(pairs: List[String], i: Int, acc: Map[String, String]) -> Map[String, String] =
-  if i >= list.len(pairs) then acc
-  else {
-    let p = list.get(pairs, i) ?? ""
-    match string.index_of(p, "=") {
-      some(at) => __qp_fill(
-        pairs,
-        i + 1,
-        map.set(acc, http_url_decode(string.take(p, at)), http_url_decode(string.drop(p, at + 1))),
-      ),
-      none => __qp_fill(pairs, i + 1, acc),
-    }
-  }
-
-fn http_query_params(req: List[String]) -> Map[String, String] = {
-  let target = list.get(req, 1) ?? ""
-  let q = match string.index_of(target, "?") {
-    some(at) => string.drop(target, at + 1),
-    none => "",
-  }
-  __qp_fill(string.split(q, "&"), 0, map.new())
 }
 "#;
 pub const SRC_INT: &str = r#"
@@ -13210,13 +13267,22 @@ pub const SRC_JSON_PARSE: &str = r#"
 
 
 
+
+
+
+
+
+
+
+
 fn json_parse(text: String) -> Result[Value, String] = {
   let h = prim.handle(text)
   let blen = prim.load32(h + 4)
   match __jp_value(h + 12, blen, 0, 0) {
     ok(r) => {
-      let (v, _p) = r
-      ok(v)
+      let (v, p) = r
+      let q = __jp_ws(h + 12, blen, p)
+      if q < blen then err(__jp_at("json: trailing data", h + 12, q)) else ok(v)
     },
     err(e) => err(e),
   }
@@ -13255,31 +13321,17 @@ fn __jp_substr(base: Int, from: Int, to: Int) -> String = {
 }
 
 
-
-fn __jp_is_uws(c: Int) -> Bool = if c == 32 then true
-else if c >= 9 and c <= 13 then true
-else if c == 133 then true
-else if c == 160 then true
-else if c == 5760 then true
-else if c >= 8192 and c <= 8202 then true
-else if c == 8232 then true
-else if c == 8233 then true
-else if c == 8239 then true
-else if c == 8287 then true
-else if c == 12288 then true else false
-
+fn __jp_at(what: String, base: Int, p: Int) -> String = what + " at pos " + int.to_string(__jp_charpos(base, p, 0, 0))
 
 
 fn __jp_ws(base: Int, len: Int, p: Int) -> Int = if p >= len then p
 else {
   let b = prim.load8(base + p)
-  if b == 32 or (b >= 9 and b <= 13) then __jp_ws(base, len, p + 1)
-  else if b >= 194 then {
-    let (cp, l) = __jp_cp(base, p)
-    if __jp_is_uws(cp) then __jp_ws(base, len, p + l)
-    else p
-  } else p
+  if b == 32 or b == 9 or b == 10 or b == 13 then __jp_ws(base, len, p + 1) else p
 }
+
+
+fn __jp_nonchar(cp: Int) -> Bool = (cp >= 64976 and cp <= 65007) or cp % 65536 >= 65534
 
 
 fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), String] = {
@@ -13287,9 +13339,12 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
   if q >= len then err("unexpected end of input")
   else {
     let b = prim.load8(base + q)
-    if b == 34 then {
-      let (s, np) = __jp_string(base, len, q)
-      ok((value.str(s), np))
+    if b == 34 then match __jp_string(base, len, q) {
+      ok(r) => {
+        let (s, np) = r
+        ok((value.str(s), np))
+      },
+      err(e) => err(e),
     } else if (b == 123 or b == 91) and depth >= 1000 then err("json: nesting deeper than 1000")
     else if b == 123 then {
       let q2 = __jp_ws(base, len, q + 1)
@@ -13332,34 +13387,72 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
 
 
 
-fn __jp_string(base: Int, len: Int, p: Int) -> (String, Int) = {
-  let buf = prim.alloc_str(__jp_str_span(base, len, p + 1, 0))
-  let dh = prim.handle(buf) + 12
-  let (np, outn) = __jp_str_fill(base, len, p + 1, dh, 0)
-  prim.store32(prim.handle(buf) + 4, outn)
-  (buf, np)
+fn __jp_string(base: Int, len: Int, p: Int) -> Result[(String, Int), String] = {
+  let span = __jp_str_check(base, len, p + 1, 0, p)
+  if span < 0 then err(__jp_str_err(base, 0 - 1 - span))
+  else {
+    let buf = prim.alloc_str(span)
+    let dh = prim.handle(buf) + 12
+    let (np, outn) = __jp_str_fill(base, len, p + 1, dh, 0)
+    prim.store32(prim.handle(buf) + 4, outn)
+    ok((buf, np))
+  }
+}
+
+
+fn __jp_str_fail(pos: Int, kind: Int) -> Int = 0 - 1 - (pos * 8 + kind)
+
+fn __jp_str_err(base: Int, code: Int) -> String = {
+  let kind = code % 8
+  let what = match kind {
+    0 => "json: unterminated string",
+    1 => "json: control character in string",
+    2 => "json: unknown escape",
+    3 => "json: invalid unicode escape",
+    4 => "json: lone surrogate",
+    _ => "json: noncharacter",
+  }
+  __jp_at(what, base, code / 8)
 }
 
 
 
 
 
-fn __jp_str_span(base: Int, len: Int, p: Int, n: Int) -> Int = if p >= len then n
+fn __jp_str_check(base: Int, len: Int, p: Int, n: Int, open: Int) -> Int = if p >= len then __jp_str_fail(open, 0)
 else {
   let b = prim.load8(base + p)
   if b == 34 then n
+  else if b < 32 then __jp_str_fail(p, 1)
   else if b == 92 then {
-    let e = if p + 1 < len then prim.load8(base + p + 1) else 0
-    if e == 117 then {
-      let unit = __jp_hex4(base, len, p + 2)
-      if unit >= 55296 and unit <= 56319 and p + 8 <= len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then {
-        let lo = __jp_hex4(base, len, p + 8)
-        if lo >= 56320 and lo <= 57343 then __jp_str_span(base, len, p + 12, n + 4)
-        else __jp_str_span(base, len, p + 6, n + 3)
-      } else __jp_str_span(base, len, p + 6, n + 3)
-    } else __jp_str_span(base, len, p + 2, n + 1)
-  } else __jp_str_span(base, len, p + 1, n + 1)
+    if p + 1 >= len then __jp_str_fail(open, 0)
+    else {
+      let e = prim.load8(base + p + 1)
+      if e == 34 or e == 92 or e == 47 or e == 98 or e == 102 or e == 110 or e == 114 or e == 116 then __jp_str_check(base, len, p + 2, n + 1, open)
+      else if e == 117 then __jp_str_check_u(base, len, p, n, open)
+      else __jp_str_fail(p, 2)
+    }
+  } else if b >= 239 then {
+    let (cp, l) = __jp_cp(base, p)
+    if __jp_nonchar(cp) then __jp_str_fail(p, 5) else __jp_str_check(base, len, p + l, n + l, open)
+  } else __jp_str_check(base, len, p + 1, n + 1, open)
 }
+
+
+fn __jp_str_check_u(base: Int, len: Int, p: Int, n: Int, open: Int) -> Int = {
+  let unit = __jp_hex4(base, len, p + 2)
+  if unit < 0 then __jp_str_fail(p, 3)
+  else if unit >= 55296 and unit <= 56319 then {
+    let lo = if p + 7 < len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then __jp_hex4(base, len, p + 8) else 0 - 1
+    if lo >= 56320 and lo <= 57343 then {
+      let cp = 65536 + (unit - 55296) * 1024 + (lo - 56320)
+      if __jp_nonchar(cp) then __jp_str_fail(p, 5) else __jp_str_check(base, len, p + 12, n + 4, open)
+    } else __jp_str_fail(p, 4)
+  } else if unit >= 56320 and unit <= 57343 then __jp_str_fail(p, 4)
+  else if __jp_nonchar(unit) then __jp_str_fail(p, 5)
+  else __jp_str_check(base, len, p + 6, n + 3, open)
+}
+
 
 
 fn __jp_str_fill(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) =
@@ -13368,33 +13461,12 @@ fn __jp_str_fill(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) =
     let b = prim.load8(base + p)
     if b == 34 then (p + 1, o)
     else if b == 92 then {
-      let e = if p + 1 < len then prim.load8(base + p + 1) else 0
-      if e == 110 then {
-        prim.store8(dh + o, 10)
+      let e = prim.load8(base + p + 1)
+      if e == 117 then __jp_str_u(base, len, p, dh, o)
+      else {
+        prim.store8(dh + o, __jp_simple_escape(e))
         __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 116 then {
-        prim.store8(dh + o, 9)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 114 then {
-        prim.store8(dh + o, 13)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 98 then {
-        prim.store8(dh + o, 8)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 102 then {
-        prim.store8(dh + o, 12)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 34 then {
-        prim.store8(dh + o, 34)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 92 then {
-        prim.store8(dh + o, 92)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 47 then {
-        prim.store8(dh + o, 47)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 117 then __jp_str_u(base, len, p, dh, o)
-      else __jp_str_fill(base, len, p + 2, dh, o)
+      }
     } else {
       prim.store8(dh + o, b)
       __jp_str_fill(base, len, p + 1, dh, o + 1)
@@ -13402,21 +13474,24 @@ fn __jp_str_fill(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) =
   }
 
 
+fn __jp_simple_escape(e: Int) -> Int = match e {
+  110 => 10,
+  116 => 9,
+  114 => 13,
+  98 => 8,
+  102 => 12,
+  _ => e,
+}
 
 
 
 fn __jp_str_u(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) = {
   let unit = __jp_hex4(base, len, p + 2)
-  if unit < 0 then __jp_str_fill(base, len, p + 6, dh, o)
-  else if unit >= 55296 and unit <= 56319 and p + 8 <= len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then {
+  if unit >= 55296 and unit <= 56319 then {
     let lo = __jp_hex4(base, len, p + 8)
-    if lo >= 56320 and lo <= 57343 then {
-      let cp = 65536 + (unit - 55296) * 1024 + (lo - 56320)
-      let w = __jp_utf8_write(dh, o, cp)
-      __jp_str_fill(base, len, p + 12, dh, o + w)
-    } else __jp_str_fill(base, len, p + 6, dh, o)
-  } else if unit >= 55296 and unit <= 57343 then __jp_str_fill(base, len, p + 6, dh, o)
-  else {
+    let w = __jp_utf8_write(dh, o, 65536 + (unit - 55296) * 1024 + (lo - 56320))
+    __jp_str_fill(base, len, p + 12, dh, o + w)
+  } else {
     let w = __jp_utf8_write(dh, o, unit)
     __jp_str_fill(base, len, p + 6, dh, o + w)
   }
@@ -13464,6 +13539,26 @@ else {
 }
 
 
+
+fn __jp_hex_digit(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
+else if b >= 97 and b <= 102 then b - 87
+else if b >= 65 and b <= 70 then b - 55 else 0 - 1
+
+
+
+
+
+
+fn __jp_hex4(base: Int, len: Int, p: Int) -> Int = if p > len - 4 then 0 - 1
+else {
+  let a = __jp_hex_digit(prim.load8(base + p))
+  let b = __jp_hex_digit(prim.load8(base + p + 1))
+  let c = __jp_hex_digit(prim.load8(base + p + 2))
+  let d = __jp_hex_digit(prim.load8(base + p + 3))
+  if a < 0 or b < 0 or c < 0 or d < 0 then 0 - 1 else ((a * 16 + b) * 16 + c) * 16 + d
+}
+
+
 fn __jp_digits(base: Int, len: Int, p: Int) -> Int =
   if p < len and prim.load8(base + p) >= 48 and prim.load8(base + p) <= 57 then __jp_digits(
     base,
@@ -13472,27 +13567,50 @@ fn __jp_digits(base: Int, len: Int, p: Int) -> Int =
   )
   else p
 
-fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
+
+fn __jp_numrun(base: Int, len: Int, p: Int) -> Int = if p >= len then p
+else {
+  let b = prim.load8(base + p)
+  if (b >= 48 and b <= 57) or b == 43 or b == 45 or b == 46 or b == 101 or b == 69 then __jp_numrun(base, len, p + 1) else p
+}
+
+
+
+fn __jp_num_end(base: Int, end: Int, p: Int) -> Int = {
   let p1 = if prim.load8(base + p) == 45 then p + 1 else p
-  let p2 = __jp_digits(base, len, p1)
-  let has_frac = p2 < len and prim.load8(base + p2) == 46
-  let p3 = if has_frac then __jp_digits(base, len, p2 + 1)
-  else p2
-  let eb = if p3 < len then prim.load8(base + p3) else 0
-  let has_exp = eb == 101 or eb == 69
-  let p4 = if has_exp then {
-    let ps = p3 + 1
-    let sb = if ps < len then prim.load8(base + ps) else 0
-    let ps2 = if sb == 43 or sb == 45 then ps + 1 else ps
-    __jp_digits(base, len, ps2)
-  } else p3
-  let s = __jp_substr(base, p, p4)
-  if has_frac or has_exp then match float.parse(s) {
-    ok(f) => ok((value.float(f), p4)),
-    err(m) => err(m),
-  } else match int.parse(s) {
-    ok(n) => ok((value.int(n), p4)),
-    err(m) => err(m),
+  let p2 = __jp_digits(base, end, p1)
+  if p2 == p1 then 0 - 1
+  else if prim.load8(base + p1) == 48 and p2 > p1 + 1 then 0 - 1
+  else {
+    let has_frac = p2 < end and prim.load8(base + p2) == 46
+    let p3 = if has_frac then __jp_digits(base, end, p2 + 1) else p2
+    if has_frac and p3 == p2 + 1 then 0 - 1
+    else {
+      let eb = if p3 < end then prim.load8(base + p3) else 0
+      if eb == 101 or eb == 69 then {
+        let sb = if p3 + 1 < end then prim.load8(base + p3 + 1) else 0
+        let ps = if sb == 43 or sb == 45 then p3 + 2 else p3 + 1
+        let p4 = __jp_digits(base, end, ps)
+        if p4 == ps then 0 - 1 else p4
+      } else p3
+    }
+  }
+}
+
+fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
+  let end = __jp_numrun(base, len, p)
+  let q = __jp_num_end(base, end, p)
+  if q != end then err(__jp_at("json: invalid number", base, p))
+  else {
+    let s = __jp_substr(base, p, end)
+    let is_float = string.contains(s, ".") or string.contains(s, "e") or string.contains(s, "E")
+    if is_float then match float.parse(s) {
+      ok(f) => ok((value.float(f), end)),
+      err(m) => err(m),
+    } else match int.parse(s) {
+      ok(n) => ok((value.int(n), end)),
+      err(m) => err(m),
+    }
   }
 }
 
@@ -13545,13 +13663,22 @@ fn __jp_array(base: Int, len: Int, p0: Int, acc0: List[Value], depth: Int) -> Re
         let (v, np) = r
         list.push(acc, v)
         let q = __jp_ws(base, len, np)
-        let b = if q < len then prim.load8(base + q) else 0
-        if b == 44 then {
-          p = q + 1
-        } else if b == 93 then {
-          endp = q + 1
+        if q >= len then {
+          error = "unexpected end of input"
         } else {
-          endp = q
+          let b = prim.load8(base + q)
+          if b == 93 then {
+            endp = q + 1
+          } else if b == 44 then {
+            let n = __jp_ws(base, len, q + 1)
+            if n < len and prim.load8(base + n) == 93 then {
+              error = __jp_at("json: trailing comma", base, q)
+            } else {
+              p = n
+            }
+          } else {
+            error = __jp_at("json: expected ',' or ']'", base, q)
+          }
         }
       },
       err(e) => {
@@ -13570,30 +13697,62 @@ fn __jp_array(base: Int, len: Int, p0: Int, acc0: List[Value], depth: Int) -> Re
 fn __jp_object(base: Int, len: Int, p0: Int, acc0: List[(String, Value)], depth: Int) -> Result[(Value, Int), String] = {
   var p = p0
   var acc = acc0
+  var seen: Map[String, Int] = map.new()
   var endp = 0 - 1
   var error = ""
   while endp < 0 and string.len(error) == 0 {
-    let q = __jp_ws(base, len, p)
-    let (k, kp) = __jp_string(base, len, q)
-    let q2 = __jp_ws(base, len, kp)
-    let q3 = if q2 < len and prim.load8(base + q2) == 58 then q2 + 1 else q2
-    match __jp_value(base, len, q3, depth) {
-      ok(r) => {
-        let (v, np) = r
-        let q4 = __jp_ws(base, len, np)
-        let b = if q4 < len then prim.load8(base + q4) else 0
-        list.push(acc, (k, v))
-        if b == 44 then {
-          p = q4 + 1
-        } else if b == 125 then {
-          endp = q4 + 1
-        } else {
-          endp = q4
-        }
-      },
-      err(e) => {
-        error = e
-      },
+    if p >= len then {
+      error = "unexpected end of input"
+    } else if prim.load8(base + p) != 34 then {
+      error = __jp_at("json: unquoted key", base, p)
+    } else {
+      match __jp_string(base, len, p) {
+        err(e) => {
+          error = e
+        },
+        ok(kr) => {
+          let (k, kp) = kr
+          if map.contains(seen, k) then {
+            error = __jp_at("json: duplicate key", base, p)
+          } else {
+            map.insert(seen, k, 0)
+            let c = __jp_ws(base, len, kp)
+            if c >= len then {
+              error = "unexpected end of input"
+            } else if prim.load8(base + c) != 58 then {
+              error = __jp_at("json: expected ':'", base, c)
+            } else {
+              match __jp_value(base, len, c + 1, depth) {
+                ok(r) => {
+                  let (v, np) = r
+                  list.push(acc, (k, v))
+                  let q = __jp_ws(base, len, np)
+                  if q >= len then {
+                    error = "unexpected end of input"
+                  } else {
+                    let b = prim.load8(base + q)
+                    if b == 125 then {
+                      endp = q + 1
+                    } else if b == 44 then {
+                      let n = __jp_ws(base, len, q + 1)
+                      if n < len and prim.load8(base + n) == 125 then {
+                        error = __jp_at("json: trailing comma", base, q)
+                      } else {
+                        p = n
+                      }
+                    } else {
+                      error = __jp_at("json: expected ',' or '}'", base, q)
+                    }
+                  }
+                },
+                err(e) => {
+                  error = e
+                },
+              }
+            }
+          }
+        },
+      }
     }
   }
   if string.len(error) > 0 then err(error) else ok((value.object(acc), endp))
@@ -39429,6 +39588,13 @@ pub const SRC_URL: &str = r##"
 
 
 
+
+
+
+
+
+
+
 /// Parsed URL; port none, other parts "" when absent.
 type Url = { scheme: String, host: String, port: Int?, path: String, query: String, fragment: String }
 
@@ -39583,7 +39749,7 @@ fn decode_component(s: String) -> Result[String, String] = {
 
 
 
-fn __url_host_char(cp: Int) -> Bool = __url_is_unreserved(cp) or cp == 37 or cp == 33 or cp == 36 or cp == 38 or cp == 39 or cp == 40 or cp == 41 or cp == 42 or cp == 43 or cp == 44 or cp == 59 or cp == 61
+fn __url_host_char(cp: Int) -> Bool = __url_is_unreserved(cp) or cp == 33 or cp == 36 or cp == 38 or cp == 39 or cp == 40 or cp == 41 or cp == 42 or cp == 43 or cp == 44 or cp == 59 or cp == 61
 
 fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) => match string.codepoint(c) {
   some(cp) => __url_host_char(cp),
@@ -39594,6 +39760,86 @@ fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) =>
 
 
 
+fn __url_cp(c: String) -> Int = string.codepoint(c) ?? 0
+
+fn __url_first_kept(cs: List[String], i: Int) -> Int = if i < list.len(cs) and __url_cp(list.get(cs, i) ?? "") <= 32 then __url_first_kept(cs, i + 1)
+else i
+
+fn __url_last_kept(cs: List[String], i: Int) -> Int = if i > 0 and __url_cp(list.get(cs, i - 1) ?? "") <= 32 then __url_last_kept(cs, i - 1)
+else i
+
+fn __url_clean(s: String, who: String) -> Result[String, String] = {
+  let cs = string.chars(s)
+  let start = __url_first_kept(cs, 0)
+  let end = __url_last_kept(cs, list.len(cs))
+  let kept = cs |> list.take(end) |> list.drop(start) |> list.filter((c) => c != "\t" and c != "\n" and c != "\r")
+  if kept |> list.any((c) => __url_cp(c) < 32 or __url_cp(c) == 127) then err(who + ": control character in URL")
+  else if kept |> list.any((c) => c == "\\") then err(who + ": backslash in URL")
+  else ok(list.join(kept, ""))
+}
+
+
+fn __url_scheme_ok(t: String) -> Bool = string.len(t) > 0 and string.chars(t) |> list.enumerate |> list.all(((j, c)) => {
+  let cp = __url_cp(c)
+  (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122) or (j > 0 and ((cp >= 48 and cp <= 57) or cp == 43 or cp == 45 or cp == 46))
+})
+
+fn __url_all_digits(t: String) -> Bool = string.len(t) > 0 and string.chars(t) |> list.all((c) => __url_cp(c) >= 48 and __url_cp(c) <= 57)
+
+fn __url_hex_digit(c: String) -> Bool = match __url_hex_val(c) {
+  some(_) => true,
+  none => false,
+}
+
+
+
+fn __url_ends_in_number(host: String) -> Bool = {
+  let labels = string.split(host, ".")
+  let n = list.len(labels)
+  let last = if n > 1 and (list.get(labels, n - 1) ?? "") == "" then list.get(labels, n - 2) ?? "" else list.get(labels, n - 1) ?? ""
+  __url_all_digits(last) or ((string.starts_with(last, "0x") or string.starts_with(last, "0X")) and string.chars(string.drop(last, 2)) |> list.all((c) => __url_hex_digit(c)))
+}
+
+
+fn __url_canonical_ipv4(host: String) -> Bool = {
+  let labels = string.split(host, ".")
+  list.len(labels) == 4 and labels |> list.all((l) => __url_all_digits(l) and string.len(l) <= 3 and (string.len(l) == 1 or not string.starts_with(l, "0")) and (int.parse(l) ?? 256) <= 255)
+}
+
+
+
+fn __url_dot_kind(seg: String) -> Int = match string.to_lower(seg) {
+  "." => 1,
+  "%2e" => 1,
+  ".." => 2,
+  ".%2e" => 2,
+  "%2e." => 2,
+  "%2e%2e" => 2,
+  _ => 0,
+}
+
+
+
+fn __url_dots_go(segs: List[String], i: Int, n: Int, out: List[String]) -> List[String] = if i >= n then out
+else {
+  let seg = list.get(segs, i) ?? ""
+  let last = i + 1 == n
+  let kind = __url_dot_kind(seg)
+  let kept = if kind == 2 and list.len(out) > 0 then list.take(out, list.len(out) - 1)
+  else out
+  let next = if kind == 0 then kept + [seg]
+  else if last then kept + [""] else kept
+  __url_dots_go(segs, i + 1, n, next)
+}
+
+fn __url_remove_dots(path: String) -> String = if string.len(path) == 0 then ""
+else {
+  let rooted = string.starts_with(path, "/")
+  let body = if rooted then string.drop(path, 1) else path
+  let segs = string.split(body, "/")
+  let joined = list.join(__url_dots_go(segs, 0, list.len(segs), []), "/")
+  if rooted then "/" + joined else joined
+}
 
 
 
@@ -39607,19 +39853,37 @@ fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) =>
 
 
 
-/// Url from s; err without ://, on an empty/invalid host, userinfo, an IPv6 literal, or a bad port.
-fn parse(s: String) -> Result[Url, String] = match string.index_of(s, "://") {
+
+
+
+
+
+
+
+
+
+
+
+/// Url from s, cleaned as WHATWG does; err on a bad scheme, host or port, a backslash or control char, userinfo, IPv6.
+fn parse(s: String) -> Result[Url, String] = match __url_clean(s, "url.parse") {
+  err(e) => err(e),
+  ok(t) => __url_parse_clean(t),
+}
+
+fn __url_parse_clean(s: String) -> Result[Url, String] = match string.index_of(s, ":") {
   none => err("url.parse: missing '://' scheme separator"),
   some(i) => {
     if i == 0 then err("url.parse: empty scheme")
+    else if not __url_scheme_ok(string.take(s, i)) then err("url.parse: invalid scheme: " + string.take(s, i))
+    else if string.slice(s, i + 1, i + 3) != "//" then err("url.parse: missing '://' scheme separator")
     else {
-      let scheme = string.slice(s, 0, i)
+      let scheme = string.to_lower(string.take(s, i))
       let rest = string.slice(s, i + 3, string.len(s))
       let hf = __url_split_once(rest, "#")
       let qs = __url_split_once(hf.0, "?")
       let ps = __url_split_once(qs.0, "/")
       let authority = ps.0
-      let path = if ps.2 then "/" + ps.1
+      let path = if ps.2 then __url_remove_dots("/" + ps.1)
       else ""
       if string.contains(authority, "@") then err("url.parse: userinfo is not supported: " + authority)
       else if string.starts_with(authority, "[") then err("url.parse: IPv6 hosts are not supported: " + authority)
@@ -39628,12 +39892,13 @@ fn parse(s: String) -> Result[Url, String] = match string.index_of(s, "://") {
         let host = hp.0
         if string.len(host) == 0 then err("url.parse: empty host")
         else if not __url_host_ok(host) then err("url.parse: invalid host: " + host)
+        else if __url_ends_in_number(host) and not __url_canonical_ipv4(host) then err("url.parse: non-canonical IPv4 host: " + host)
         else if hp.2 then {
           if not string.is_digit(hp.1) then err("url.parse: invalid port: " + hp.1)
           else match int.parse(hp.1) {
             ok(p) => if p <= 65535 then ok(Url {
               scheme: scheme,
-              host: host,
+              host: string.to_lower(host),
               port: some(p),
               path: path,
               query: qs.1,
@@ -39644,7 +39909,7 @@ fn parse(s: String) -> Result[Url, String] = match string.index_of(s, "://") {
           }
         } else ok(Url {
           scheme: scheme,
-          host: host,
+          host: string.to_lower(host),
           port: none,
           path: path,
           query: qs.1,
@@ -39738,34 +40003,6 @@ fn parse_query(query: String) -> Result[List[(String, String)], String] = __url_
 )
 
 
-fn __url_rds(input: String, out: String) -> String =
-  if string.len(input) == 0 then out
-  else if string.starts_with(input, "../") then __url_rds(string.drop(input, 3), out)
-  else if string.starts_with(input, "./") then __url_rds(string.drop(input, 2), out)
-  else if string.starts_with(input, "/./") then __url_rds("/" + string.drop(input, 3), out)
-  else if input == "/." then __url_rds("/", out)
-  else if string.starts_with(input, "/../") then __url_rds(
-    "/" + string.drop(input, 4),
-    __url_pop_segment(out),
-  )
-  else if input == "/.." then __url_rds("/", __url_pop_segment(out))
-  else if input == "." or input == ".." then out
-  else {
-    let lead = if string.starts_with(input, "/") then 1 else 0
-    let seg_end = match string.index_of(string.drop(input, lead), "/") {
-      some(i) => i + lead,
-      none => string.len(input),
-    }
-    __url_rds(string.drop(input, seg_end), out + string.take(input, seg_end))
-  }
-
-
-fn __url_pop_segment(out: String) -> String = match string.last_index_of(out, "/") {
-  some(i) => string.take(out, i),
-  none => "",
-}
-
-
 fn __url_merge(base: Url, rel: String) -> String = if string.len(base.path) == 0 then "/" + rel
 else match string.last_index_of(base.path, "/") {
   some(i) => string.take(base.path, i + 1) + rel,
@@ -39775,10 +40012,7 @@ else match string.last_index_of(base.path, "/") {
 
 fn __url_has_scheme(r: String) -> Bool = match string.index_of(r, ":") {
   none => false,
-  some(i) => i > 0 and string.take(r, i) |> string.chars |> list.enumerate |> list.all(((j, c)) => match string.codepoint(c) {
-    some(cp) => (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122) or (j > 0 and ((cp >= 48 and cp <= 57) or cp == 43 or cp == 45 or cp == 46)),
-    none => false,
-  }),
+  some(i) => __url_scheme_ok(string.take(r, i)),
 }
 
 
@@ -39788,25 +40022,26 @@ fn __url_has_scheme(r: String) -> Bool = match string.index_of(r, ":") {
 
 
 
-/// ref resolved against base (RFC 3986 5.2); err when the result is not a URL.
-fn resolve(base: Url, ref: String) -> Result[Url, String] =
-  if __url_has_scheme(ref) then match parse(ref) {
-    ok(u) => ok({ ...u, path: __url_rds(u.path, "") }),
-    err(e) => err(e),
-  } else if string.starts_with(ref, "//") then match parse(base.scheme + ":" + ref) {
-    ok(u) => ok({ ...u, path: __url_rds(u.path, "") }),
-    err(e) => err(e),
-  } else {
-    let hf = __url_split_once(ref, "#")
+
+
+
+/// ref cleaned as parse does, resolved against base (RFC 3986 5.2); err when the result is not a URL.
+fn resolve(base: Url, ref: String) -> Result[Url, String] = match __url_clean(ref, "url.resolve") {
+  err(e) => err(e),
+  ok(r) => if __url_has_scheme(r) then parse(r)
+  else if string.starts_with(r, "//") then parse(base.scheme + ":" + r)
+  else {
+    let hf = __url_split_once(r, "#")
     let qs = __url_split_once(hf.0, "?")
     let rpath = qs.0
     let path = if string.len(rpath) == 0 then base.path
-    else if string.starts_with(rpath, "/") then __url_rds(rpath, "")
-    else __url_rds(__url_merge(base, rpath), "")
+    else if string.starts_with(rpath, "/") then __url_remove_dots(rpath)
+    else __url_remove_dots(__url_merge(base, rpath))
     let query = if string.len(rpath) == 0 and not qs.2 then base.query
     else qs.1
     ok({ ...base, path: path, query: query, fragment: hf.1 })
-  }
+  },
+}
 
 
 fn __url_t_pctend(s: String) -> Int = __url_pct_end(string.chars(s), 1, string.len(s))
@@ -39876,7 +40111,7 @@ fn merge(a: Value, b: Value) -> Value = _
 @intrinsic("almide_rt_value_null")
 fn null() -> Value = _
 
-/// Wraps pairs as an Object; duplicate keys kept.
+/// Wraps pairs as an Object; a repeated key keeps its first position, last value.
 @intrinsic("almide_rt_value_object")
 @reuse(pairs)
 fn object(pairs: List[(String, Value)]) -> Value = _
@@ -39885,7 +40120,7 @@ fn object(pairs: List[(String, Value)]) -> Value = _
 @intrinsic("almide_rt_value_omit")
 fn omit(v: Value, keys: List[String]) -> Value = _
 
-/// Only the listed keys of v; non-objects as-is.
+/// Only the listed keys of v; a non-object picks to {}.
 @intrinsic("almide_rt_value_pick")
 fn pick(v: Value, keys: List[String]) -> Value = _
 
@@ -40115,7 +40350,62 @@ else {
 
 
 
-fn value_object(pairs: List[(String, Value)]) -> Value = {
+
+
+
+
+
+
+fn __vobj_key_at(pairs: List[(String, Value)], i: Int) -> String = match list.get(pairs, i) {
+  some((k, _)) => k,
+  none => "",
+}
+
+fn __vobj_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool = if i >= n then false
+else if j >= n then __vobj_dup_small(pairs, i + 1, i + 2, n)
+else if __vobj_key_at(pairs, i) == __vobj_key_at(pairs, j) then true
+else __vobj_dup_small(pairs, i, j + 1, n)
+
+fn __vobj_has_dup(pairs: List[(String, Value)]) -> Bool = {
+  let n = list.len(pairs)
+  if n < 16 then __vobj_dup_small(pairs, 0, 1, n)
+  else {
+    var seen: Map[String, Int] = map.new()
+    var dup = false
+    for (k, _) in pairs {
+      if map.contains(seen, k) then {
+        dup = true
+      } else {
+        map.insert(seen, k, 0)
+      }
+    }
+    dup
+  }
+}
+
+fn __vobj_upsert(pairs: List[(String, Value)]) -> List[(String, Value)] = {
+  var at: Map[String, Int] = map.new()
+  var keys: List[String] = []
+  var vals: List[Value] = []
+  for (k, v) in pairs {
+    match map.get(at, k) {
+      some(i) => {
+        vals = list.set(vals, i, v)
+      },
+      none => {
+        map.insert(at, k, list.len(keys))
+        list.push(keys, k)
+        list.push(vals, v)
+      },
+    }
+  }
+  list.zip(keys, vals)
+}
+
+fn value_object(pairs: List[(String, Value)]) -> Value = if list.len(pairs) > 1 and __vobj_has_dup(pairs) then __vobj_build(__vobj_upsert(pairs))
+else __vobj_build(pairs)
+
+fn __vobj_build(pairs: List[(String, Value)]) -> Value = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)
   let v = prim.alloc_value(2 * n)
@@ -41385,13 +41675,18 @@ fn __vu_sel(v: Value, keys: List[String], want: Bool) -> Value = {
   dst
 }
 
+
+
 fn value_pick(v: Value, keys: List[String]) -> Value =
   if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
     v,
     keys,
     true,
   )
-  else v
+  else {
+    let none_: List[(String, Value)] = []
+    value.object(none_)
+  }
 
 fn value_omit(v: Value, keys: List[String]) -> Value =
   if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
@@ -41502,11 +41797,78 @@ fn __vu_ren_s(v: Value) -> Value = {
   dst
 }
 
+
+
+
+
+fn __vu_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool = if i >= n then false
+else if j >= n then __vu_dup_small(pairs, i + 1, i + 2, n)
+else if __vu_key_at(pairs, i) == __vu_key_at(pairs, j) then true
+else __vu_dup_small(pairs, i, j + 1, n)
+
+fn __vu_key_at(pairs: List[(String, Value)], i: Int) -> String = match list.get(pairs, i) {
+  some((k, _)) => k,
+  none => "",
+}
+
+fn __vu_has_dup(pairs: List[(String, Value)]) -> Bool = {
+  let n = list.len(pairs)
+  if n < 16 then __vu_dup_small(pairs, 0, 1, n)
+  else {
+    var seen: Map[String, Int] = map.new()
+    var dup = false
+    for (k, _) in pairs {
+      if map.contains(seen, k) then {
+        dup = true
+      } else {
+        map.insert(seen, k, 0)
+      }
+    }
+    dup
+  }
+}
+
+fn __vu_fold_pairs(pairs: List[(String, Value)]) -> List[(String, Value)] = if list.len(pairs) < 2 or not __vu_has_dup(pairs) then pairs
+else {
+  var at: Map[String, Int] = map.new()
+  var keys: List[String] = []
+  var vals: List[Value] = []
+  for (k, v) in pairs {
+    match map.get(at, k) {
+      some(i) => {
+        vals = list.set(vals, i, v)
+      },
+      none => {
+        map.insert(at, k, list.len(keys))
+        list.push(keys, k)
+        list.push(vals, v)
+      },
+    }
+  }
+  list.zip(keys, vals)
+}
+
+
+
+fn __vu_pair(v: Value, i: Int) -> (String, Value) = {
+  let h = prim.handle(v)
+  let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+  let x: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+  (k, x)
+}
+
+fn __vu_refold(v: Value) -> Value = {
+  let keys = value.keys(v)
+  let n = list.len(keys)
+  if list.len(list.unique(keys)) == n then v
+  else value.object(list.range(0, n) |> list.map((i) => __vu_pair(v, i)))
+}
+
 fn value_to_camel_case(v: Value) -> Value =
-  if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_c(v) else v
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_refold(__vu_ren_c(v)) else v
 
 fn value_to_snake_case(v: Value) -> Value =
-  if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_s(v) else v
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_refold(__vu_ren_s(v)) else v
 "#;
 pub const SRC_ZLIB: &str = r#"
 
