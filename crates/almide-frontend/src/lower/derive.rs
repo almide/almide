@@ -5,7 +5,7 @@ use crate::types::Ty;
 use almide_base::intern::{Sym, sym};
 use super::LowerCtx;
 use super::derive_codec::{
-    auto_derive_encode, auto_derive_decode, CodecWk,
+    auto_derive_encode, auto_derive_decode, auto_derive_decode_strict, CodecWk,
     auto_derive_variant_encode, auto_derive_variant_decode,
     derive_container_helpers,
 };
@@ -135,6 +135,9 @@ fn derive_codec(
                 }
                 if wants("decode") {
                     out.push(auto_derive_decode(&mut wk, type_ty, fields));
+                }
+                if wants("decode_strict") {
+                    out.push(auto_derive_decode_strict(&mut wk, type_ty, fields));
                 }
             }
             (None, IrTypeDeclKind::Variant { cases, .. }) => {
