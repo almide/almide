@@ -495,6 +495,23 @@ fn math_fn(func: &str, args: &[Value]) -> Option<Flow> {
 
 // ── string ──────────────────────────────────────────────────────
 
+/// `string.to_upper` under C-412: an ASCII scalar maps by the ASCII rules; a
+/// non-ASCII scalar takes its full Unicode uppercase unless that mapping holds
+/// an ASCII scalar (U+0131 ı → I, U+017F ſ → S, U+FB01 ﬁ → FI, …), and then it
+/// stays unchanged — the native runtime's `almide_rt_string_to_upper`.
+fn to_upper_no_ascii_fold(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        let m = c.to_uppercase();
+        if !c.is_ascii() && m.clone().any(|x| x.is_ascii()) {
+            out.push(c)
+        } else {
+            out.extend(m)
+        }
+    }
+    out
+}
+
 fn string_fn(func: &str, args: &[Value]) -> Option<Flow> {
     string_fn_whole(func, args)
         .or_else(|| string_fn_slice(func, args))
@@ -509,7 +526,7 @@ fn string_fn(func: &str, args: &[Value]) -> Option<Flow> {
 fn string_fn_whole(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
         "len" | "length" => Flow::val(Value::Int(as_str(args.first())?.chars().count() as i64)),
-        "to_upper" => Flow::val(Value::str(as_str(args.first())?.to_uppercase())),
+        "to_upper" => Flow::val(Value::str(to_upper_no_ascii_fold(as_str(args.first())?))),
         "trim" => Flow::val(Value::str(as_str(args.first())?.trim().to_string())),
         "contains" => Flow::val(Value::Bool(
             as_str(args.first())?.contains(as_str(args.get(1))?),
