@@ -22,7 +22,12 @@ read here is what the current compiler accepts.
   `int32.to_int64(x)`.
   Everything else needs an explicit `import`: `args`, `base64`, `bigint`,
   `bytes`, `env`, `fs`, `hash`, `hex`, `html`, `http`, `io`, `json`,
-  `matrix`, `net`, `path`, `process`, `random`, `regex`, `testing`, `zlib`.
+  `matrix`, `net`, `path`, `process`, `random`, `regex`, `secret`, `testing`,
+  `zlib`.
+- `secret.Secret[A]` holds a password or key: every renderer (interpolation,
+  assert/abort output, the test report) prints `Secret(***)`, `secret.reveal(s)`
+  reads it, `==` is constant time on `Secret[String]`/`Secret[Bytes]` (E103
+  otherwise), and a Codec record with a Secret field derives `decode` only.
 - Not in the stdlib since dialect epoch 14: the neural-network kernels
   (`gelu`, `softmax_rows`, attention, RoPE, the row norms, Q1_0/Q8_0, the
   Qwen3 blocks) are package `almide/nnlib` (`import nnlib`, then `nnlib.gelu(m)`),
