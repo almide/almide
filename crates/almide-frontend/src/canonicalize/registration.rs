@@ -558,7 +558,7 @@ pub fn validate_protocols(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>, deri
         }
     }
 }
-pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str, prefix: Option<&str>) {
+pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str, prefix: Option<&str>, is_record: bool) {
     // #433: the VALUE type in derived signatures must carry the canonical qualified name for a user module's type — `Pigment.decode`'s `Result[Pigment, String]` with a bare name leaked into callers' var tables (found by the NameResolutionTotal gate). The fn KEYS stay as they were (separate resolution system).
     let canonical = match prefix {
         Some(m) if !almide_lang::stdlib_info::is_bundled_module(m) => format!("{}.{}", m, type_name),
@@ -587,6 +587,12 @@ pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str,
             "Codec" => {
                 register(env, "encode", FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
                 register(env, "decode", FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
+                // #4108: the strict sibling — refuses a key outside the
+                // record's decoded fields. Records only: a variant's wire form
+                // is a tag plus a payload, with no field set to hold keys to.
+                if is_record {
+                    register(env, "decode_strict", FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
+                }
             }
             _ => {}
         }

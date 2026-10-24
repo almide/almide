@@ -62,8 +62,15 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     register_type_decl_finalize(env, name, ty, prefix, resolved, user_shadow);
     register_type_params(env, name, prefix, &gnames, user_shadow);
 
+    // Record-field attributes (#4108): the field vocabulary (E053, an error)
+    // and a skip attribute's required default (E104).
+    for field in crate::attr_vocab::declared_fields(ty) {
+        crate::attr_vocab::check_field_attrs(field, &mut env.attr_diagnostics);
+    }
+
     if let Some(derives) = deriving {
-        register_derive_sigs(env, derives, name, prefix);
+        let is_record = matches!(ty, ast::TypeExpr::Record { .. } | ast::TypeExpr::OpenRecord { .. });
+        register_derive_sigs(env, derives, name, prefix, is_record);
     }
 }
 /// `mod`/local type alias → nominal newtype (opaque constructor), when the declared visibility isn't Public and the resolved shape isn't already a Record/Variant. Registers the opaque-alias bookkeeping under the newtype's `identity` and returns the (possibly rewritten) resolved type. Verbatim text move out of [`register_type_decl`].

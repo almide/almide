@@ -11,7 +11,10 @@ pub(super) fn auto_derive_encode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
     let var = wk.vt.alloc(sym("_v"), type_ty.clone(), Mutability::Let, None);
     let value_ty = Ty::Named(sym("Value"), vec![]);
 
-    let entries: Vec<(String, Ty, IrExpr)> = fields.iter().map(|f| {
+    // `@skip` fields are never written (#4108): CODEC_FIELD_SKIPS decides.
+    let entries: Vec<(String, Ty, IrExpr)> = fields.iter()
+        .filter(|f| crate::attr_vocab::codec_field_use(&f.attrs).encoded)
+        .map(|f| {
         let field_access = IrExpr {
             kind: IrExprKind::Member {
                 object: Box::new(IrExpr { kind: IrExprKind::Var { id: var }, ty: type_ty.clone(), span: None, def_id: None }),
