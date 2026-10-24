@@ -372,6 +372,18 @@ varies = "flight-evidence-gaps.md F8: a live REJECT exposed the via_if miscompil
 blind = "UNMAPPED"
 
 [[gate]]
+path = "proofs/native-wall.sh"
+# It runs the native producer and the three checkers and compares their
+# verdict strings and exit codes; the floor list is read as a line list.
+reads = "scalar"
+wired_by = "Makefile"
+class = "KERNEL_PROVEN"
+evidence = "#4006 (2026-10-25): the verdict core is the extracted checker, re-derived by the Rocq kernel and cross-checked by almide-verify on every ownership witness of every function the verified native renderer rendered; the artifact drill flips one byte of a rendered Rust source and almide-verify reads MISMATCH, exit 1; the POISON LEG runs proofs/poisoned-certs/native/*.cert — the witness the renderer writes with a release lost and its Rust-mirror check bypassed (scripts/witness-reinject.sh native pins it) — through all three verdicts, which must REJECT"
+measures = "per fixture on proofs/native-verified-floor.txt: the extracted checker's verdict on each rendered function's ownership witness, almide-verify's verdict and SHA-256 recomputation on the fixture's bundle, and the Rocq kernel's vm_compute verdict; plus the tamper drill's verdict and each poisoned certificate's three verdicts"
+varies = "sec-proof-chain (2026-10-25): the first local run accepted 380/380 witnesses of 106 rendered programs; the poison leg failed while proofs/poisoned-certs/native/ was empty and passes with the release-dropped witness; the tamper drill read MISMATCH"
+blind = "a rendered program whose Rust source rustc compiles into a binary that does not keep the MIR's RC balance (the render and rustc are trusted) -> .github/workflows/miri-nightly.yml; every program off the native floor, which ships from the standard codegen with no certificate -> .github/workflows/miri-nightly.yml"
+
+[[gate]]
 path = "proofs/structural-wall.sh"
 # It runs the producer and the three checkers and compares their verdict
 # strings and exit codes; the fixture list and the exception ledger are read
