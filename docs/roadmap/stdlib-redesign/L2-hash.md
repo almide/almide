@@ -89,15 +89,15 @@ MD5・SHA-1・SHA-512 は 7 言語（● と ◐）が持っています（[fact
 ### R-hash-06 HMAC と定数時間の比較を `hash` に置く（完全性の規則 4 の見直し） — ○ 採用
 
 - いま: 鍵つきの要約がありません。モデルは `hash.sha256(key ++ body)` と書きます。これは length extension で偽造できます。さらに計算した MAC を `==` で比べると、最初に違うバイトで返るので、時間から MAC を 1 バイトずつ当てられます。
-- 案: `hash.hmac_sha256(key: Bytes, b: Bytes) -> Bytes`、`hmac_sha256_hex`、`hmac_sha512`、`hmac_sha512_hex` と、検証のセル `hash.is_valid_hmac_sha256(key, b, tag: Bytes) -> Bool`、`is_valid_hmac_sha256_hex(key, b, tag: String) -> Bool`（16 進は大文字でも小文字でもよく、16 進でない文字列は false）、同じ組を sha512 に置きます。検証のセルは `bytes.is_equal_constant_time` で比べます。比べる関数は `bytes.is_equal_constant_time(a, b)` と `string.is_equal_constant_time(a, b)` の 2 つです（R-bytes-29・R-string-19）。
+- 案: `hash.hmac_sha256(key: Bytes, b: Bytes) -> Bytes`、`hmac_sha256_hex`、`hmac_sha512`、`hmac_sha512_hex` と、検証のセル `hash.is_valid_hmac_sha256(key, b, tag: Bytes) -> Bool`、同じ組を sha512 に置きます。16 進で届く tag（webhook のヘッダ `sha256=<hex>`）は `hex.decode` で戻してから渡します: `hash.is_valid_hmac_sha256(key, body, hex.decode(sig) ?? bytes.from_list([]))`。16 進でない文字列は空の tag になり、長さが違うので false です。検証のセルは `bytes.is_equal_constant_time` で比べます。比べる関数は `bytes.is_equal_constant_time(a, b)` と `string.is_equal_constant_time(a, b)` の 2 つです（R-bytes-29・R-string-19）。
 - 鍵が先です（RFC 2104 の HMAC(K, m)。Go・Rust・Python・Node・Erlang・JVM の 6/8）。両方 `Bytes` なので取り違えは型で気づけません。RFC 4231 のベクトルが順序を固定します。
 - 置き場所: R-L1-05 は「要約を返す関数は `hash`」です。HMAC は `Bytes -> Bytes` の要約で、壊れた書き方 `sha256(key ++ msg)` を書くモデルは、すでに `hash` の中にいます。正しいセルはその隣に置きます。
 - md5・sha1 は名前を残し、宣言した属性 `@insecure_digest` を付けます。`--profile critical` はこの属性の関数の呼び出しを E100 で拒みます（`@memory_unsafe` と同じ仕組み、epoch 15 の breaks に 1 行）。既定のプロファイルは変わりません。
 - 定数時間の主張: 入力の中身について、ソースにも出力したコードにも、秘密に依存する分岐と添字はありません。長さは公開です（長さが違えば、走査せずにすぐ false）。native は runtime の関数で、毎回 `core::hint::black_box` を通して OR を積みます。wasm は添字の比較だけを分岐にした固定のループです。両方を `tests/constant_time_compare_structure_test.rs` が出力したコードで確かめます（早く抜ける対照が落ちることも確かめます）。HMAC 本体は SHA の固定回数のラウンドで、分岐は公開の長さ（鍵がブロックより長いか）だけです。
 - 完全性の規則（4 を置き換え、5 を追加）:
   4. **意図した抜け**: SHA-224・SHA-384・SHA-3・BLAKE2、逐次の hasher、鍵つきのうち AEAD と署名（#2596 の `crypto`）。
-  5. **鍵つき要約の族**: {sha256, sha512} × {生, `_hex`} × {計算, `is_valid_`} の 8 セル。意図した抜けは `hmac_md5`・`hmac_sha1` です（Twilio や GitHub の古いヘッダは SHA-1 を使うので、足すときは同じ `@insecure_digest` を付けます）。`tests/hash_hmac_family_gate_test.rs` が族を検査します。
-- 根拠の L0 規則: R-L0-09（Bool は `is_`）、R-L0-30（役割ごとに 1 つの引数名: `key`・`b`・`tag`）、規則 1（入力は `Bytes`）、R-hash-05（`_hex` は出力の符号化。検証のセルでは `tag` の符号化）。
+  5. **鍵つき要約の族**: {sha256, sha512} × {計算, 計算の `_hex`, `is_valid_`} の 6 セル。意図した抜けは `is_valid_hmac_<alg>_hex` と `hmac_md5`・`hmac_sha1` です。`is_valid_` の `_hex` 版は、`_hex` に「入力の符号化」という 2 つ目の意味を与えるので置きません（R-hash-05 は `_hex` を出力の符号化だけに決めています。R-L0-25 のとおり 16 進の文字列は `hex.decode` で戻します）。`hmac_md5`・`hmac_sha1` は（Twilio や GitHub の古いヘッダは SHA-1 を使うので、足すときは同じ `@insecure_digest` を付けます）。`tests/hash_hmac_family_gate_test.rs` が族を検査します。
+- 根拠の L0 規則: R-L0-09（Bool は `is_`）、R-L0-30（役割ごとに 1 つの引数名: `key`・`b`・`tag`）、規則 1（入力は `Bytes`）、R-hash-05（`_hex` は出力の符号化だけ）、R-L0-25（16 進の文字列からは `hex.decode`）、R-L0-01（`is_valid_` と `hex.decode` の組み合わせを、もう 1 つの綴りにしない）。
 - (a) Swift CryptoKit `HMAC<SHA256>.isValidAuthenticationCode`、Rust `Mac::verify_slice`（検証のセル）。Go `hmac.Equal`、Python `hmac.compare_digest`、Node `crypto.timingSafeEqual`（定数時間の比較）。
 - (d) 追加。md5・sha1 の E100 は `--profile critical` だけの拒否で、epoch 15 の breaks に記録します。
 - 契約: C-420（RFC 4231）、C-421（定数時間の比較）、C-422（E100）。
@@ -124,6 +124,4 @@ MD5・SHA-1・SHA-512 は 7 言語（● と ◐）が持っています（[fact
 | `hmac_sha512` | `hash.hmac_sha512(key: Bytes, b: Bytes) -> Bytes`（案） | Go `hmac.New(sha512.New, key)` / Python `hmac.digest(key, msg, "sha512")` | 追加 | R-hash-06 |
 | `hmac_sha512_hex` | `hash.hmac_sha512_hex(key: Bytes, b: Bytes) -> String`（案） | Python `hexdigest()` | 追加 | R-hash-06 |
 | `is_valid_hmac_sha256` | `hash.is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool`（案） | Swift `HMAC<SHA256>.isValidAuthenticationCode` / Rust `Mac::verify_slice` | 追加 | R-hash-06 |
-| `is_valid_hmac_sha256_hex` | `hash.is_valid_hmac_sha256_hex(key: Bytes, b: Bytes, tag: String) -> Bool`（案） | —（webhook のヘッダ `sha256=<hex>` をそのまま渡す） | 追加 | R-hash-06 |
 | `is_valid_hmac_sha512` | `hash.is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool`（案） | Swift `HMAC<SHA512>.isValidAuthenticationCode` | 追加 | R-hash-06 |
-| `is_valid_hmac_sha512_hex` | `hash.is_valid_hmac_sha512_hex(key: Bytes, b: Bytes, tag: String) -> Bool`（案） | — | 追加 | R-hash-06 |

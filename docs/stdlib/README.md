@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 49 stdlib modules, 1473 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 49 stdlib modules, 1471 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -23,7 +23,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [float32](#float32) | 30 | 0 |
 | [float64](#float64) | 31 | 0 |
 | [fs](#fs) | 34 | 1 |
-| [hash](#hash) | 20 | 0 |
+| [hash](#hash) | 18 | 0 |
 | [heap](#heap) | 16 | 1 |
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 5 | 0 |
@@ -567,9 +567,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `hash.hmac_sha512(key: Bytes, b: Bytes) -> Bytes` — 64-byte HMAC-SHA512 of b under key (RFC 2104); key first.
 - `hash.hmac_sha512_hex(key: Bytes, b: Bytes) -> String` — HMAC-SHA512 of b under key as 128 lowercase hex chars.
 - `hash.is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool` — True if tag is the HMAC-SHA256 of b under key, compared in constant time.
-- `hash.is_valid_hmac_sha256_hex(key: Bytes, b: Bytes, tag: String) -> Bool` — True if tag (hex, either case) is the HMAC-SHA256 of b under key, compared in constant time; false for bad hex.
 - `hash.is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool` — True if tag is the HMAC-SHA512 of b under key, compared in constant time.
-- `hash.is_valid_hmac_sha512_hex(key: Bytes, b: Bytes, tag: String) -> Bool` — True if tag (hex, either case) is the HMAC-SHA512 of b under key, compared in constant time; false for bad hex.
 
 ## heap
 

@@ -628,9 +628,10 @@ HMAC（RFC 2104）で、**鍵が第一引数**である。ブロック長（64�
 `_hex` は同じ値の小文字 16 進（64・128 文字）。RFC 4231 のテストケース 1〜7 に
 両ダイジェストで一致する。`hash.is_valid_hmac_sha256(key, b, tag)`・
 `is_valid_hmac_sha512` は `tag` が計算した MAC と等しいときだけ true で、比較は
-`bytes.is_equal_constant_time` を通る。長さの違う tag は false。`_hex` の検証は
-tag を大小どちらの 16 進でも受け、奇数長・16 進でない文字・空文字列は abort
-せず false を返す。
+`bytes.is_equal_constant_time` を通る。長さの違う tag は false。16 進で届く
+tag は `hex.decode` で戻してから渡す（大小どちらの 16 進も受ける）。
+`hex.decode(sig) ?? bytes.from_list([])` は奇数長・16 進でない文字・空文字列を
+空の tag にし、検証は abort せず false を返す。
 
 `bytes.is_equal_constant_time(a, b)`・`string.is_equal_constant_time(a, b)` は
 長さとバイト列が等しいときだけ true（String は UTF-8 のバイトを比べる）。長さ

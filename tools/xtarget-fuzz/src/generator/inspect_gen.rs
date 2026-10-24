@@ -205,16 +205,14 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // #4106: the message is the size (the key is fixed, one block). A verify
     // call is in-domain only with the right tag — the MAC of the same key and
     // message, computed once outside the timed calls — so it runs the full
-    // compare and answers true; a 2-byte or non-hex generic tag is refused
-    // by the length check or the hex decode before any compare.
+    // compare and answers true; a 2-byte generic tag is refused
+    // by the length check before any compare.
     Recipe { func: "hash.hmac_sha256", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))")] },
     Recipe { func: "hash.hmac_sha256_hex", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))")] },
     Recipe { func: "hash.is_valid_hmac_sha256", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))"), ("tag", "hash.hmac_sha256(bytes.from_string(\"key\"), bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))")] },
-    Recipe { func: "hash.is_valid_hmac_sha256_hex", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))"), ("tag", "hash.hmac_sha256_hex(bytes.from_string(\"key\"), bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))")] },
     Recipe { func: "hash.hmac_sha512", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))")] },
     Recipe { func: "hash.hmac_sha512_hex", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))")] },
     Recipe { func: "hash.is_valid_hmac_sha512", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))"), ("tag", "hash.hmac_sha512(bytes.from_string(\"key\"), bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))")] },
-    Recipe { func: "hash.is_valid_hmac_sha512_hex", size: "b", args: &[("key", "bytes.from_string(\"key\")"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))"), ("tag", "hash.hmac_sha512_hex(bytes.from_string(\"key\"), bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))")] },
     // Equal operands: the whole walk runs and the answer is true (a length
     // mismatch is answered before the walk).
     Recipe { func: "bytes.is_equal_constant_time", size: "a", args: &[("a", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))"), ("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))")] },
