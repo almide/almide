@@ -220,15 +220,22 @@ pub(crate) fn enforce_native_grants(
     Ok(())
 }
 
-/// [`enforce_native_grants`] for `./almide.toml`, before a command that
-/// builds runs: print the refusal and exit 1. A manifest that does not parse
-/// or a fetch that fails is left to the command, which reports it.
-pub(crate) fn refuse_ungranted_native_deps_in_cwd() {
+/// Resolve `./almide.toml`'s dependencies before a command that builds runs
+/// (#4093): a fetch error (an untrusted owner, a source changed under the
+/// lock, a `--locked` miss, a missing repository) and an ungranted native
+/// dependency ([`enforce_native_grants`]) are printed and exit 1. Several
+/// build routes read the dependencies with errors swallowed (the wasm test
+/// lane resolved against an empty set), so the refusal is made once, here,
+/// for every route. A manifest that does not parse is left to the command.
+pub(crate) fn resolve_cwd_deps_or_exit() {
     let Some(proj) = crate::compile_driver::cwd_project() else { return };
     if proj.dependencies.is_empty() {
         return;
     }
-    let Ok(fetched) = crate::project_fetch::fetch_all_deps(&proj) else { return };
+    let fetched = crate::project_fetch::fetch_all_deps(&proj).unwrap_or_else(|e| {
+        err(&e);
+        std::process::exit(1);
+    });
     if let Err(refusal) = enforce_native_grants(&proj, &fetched, false) {
         err(&refusal);
         std::process::exit(1);

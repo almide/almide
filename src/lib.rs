@@ -63,6 +63,7 @@ pub mod wasm_route;
 pub mod serve_export;
 pub mod project_fetch;
 pub mod native_grant;
+pub mod trust;
 pub mod resolve;
 pub mod source_overlay;
 
