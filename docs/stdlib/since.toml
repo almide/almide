@@ -1300,6 +1300,8 @@
 "result.unwrap_or" = "<=0.5.13"
 "result.unwrap_or_else" = "<=0.5.13"
 "result.zip" = "<=0.15.0"
+"secret.new" = "unreleased"
+"secret.reveal" = "unreleased"
 "set.all" = "<=0.9.0"
 "set.any" = "<=0.9.0"
 "set.clear" = "unreleased"
