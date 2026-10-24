@@ -57,13 +57,18 @@ fn __vu_sel(v: Value, keys: List[String], want: Bool) -> Value = {
   dst
 }
 
+// A non-object picks to the empty object (C-401): an allowlist over a value
+// that is not an object lets nothing through.
 fn value_pick(v: Value, keys: List[String]) -> Value =
   if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
     v,
     keys,
     true,
   )
-  else v
+  else {
+    let none_: List[(String, Value)] = []
+    value.object(none_)
+  }
 
 fn value_omit(v: Value, keys: List[String]) -> Value =
   if prim.load32(prim.handle(v) + 4) == 6 then __vu_sel(
@@ -174,8 +179,75 @@ fn __vu_ren_s(v: Value) -> Value = {
   dst
 }
 
+// value.object's fold on the structural wasm leg (C-401): the emitter boxes
+// the list this returns, so a pair list that repeats a key becomes one entry
+// per key — its first position, its last value — exactly as native's
+// almide_rt_object_upsert and value_core's value_object fold it.
+fn __vu_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool = if i >= n then false
+else if j >= n then __vu_dup_small(pairs, i + 1, i + 2, n)
+else if __vu_key_at(pairs, i) == __vu_key_at(pairs, j) then true
+else __vu_dup_small(pairs, i, j + 1, n)
+
+fn __vu_key_at(pairs: List[(String, Value)], i: Int) -> String = match list.get(pairs, i) {
+  some((k, _)) => k,
+  none => "",
+}
+
+fn __vu_has_dup(pairs: List[(String, Value)]) -> Bool = {
+  let n = list.len(pairs)
+  if n < 16 then __vu_dup_small(pairs, 0, 1, n)
+  else {
+    var seen: Map[String, Int] = map.new()
+    var dup = false
+    for (k, _) in pairs {
+      if map.contains(seen, k) then {
+        dup = true
+      } else {
+        map.insert(seen, k, 0)
+      }
+    }
+    dup
+  }
+}
+
+fn __vu_fold_pairs(pairs: List[(String, Value)]) -> List[(String, Value)] = if list.len(pairs) < 2 or not __vu_has_dup(pairs) then pairs
+else {
+  var at: Map[String, Int] = map.new()
+  var keys: List[String] = []
+  var vals: List[Value] = []
+  for (k, v) in pairs {
+    match map.get(at, k) {
+      some(i) => {
+        vals = list.set(vals, i, v)
+      },
+      none => {
+        map.insert(at, k, list.len(keys))
+        list.push(keys, k)
+        list.push(vals, v)
+      },
+    }
+  }
+  list.zip(keys, vals)
+}
+
+// Two keys that rename to one (`a_b` and `aB` under camelCase) are folded by
+// value.object's upsert (C-401): first position, last value, as natively.
+fn __vu_pair(v: Value, i: Int) -> (String, Value) = {
+  let h = prim.handle(v)
+  let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+  let x: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+  (k, x)
+}
+
+fn __vu_refold(v: Value) -> Value = {
+  let keys = value.keys(v)
+  let n = list.len(keys)
+  if list.len(list.unique(keys)) == n then v
+  else value.object(list.range(0, n) |> list.map((i) => __vu_pair(v, i)))
+}
+
 fn value_to_camel_case(v: Value) -> Value =
-  if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_c(v) else v
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_refold(__vu_ren_c(v)) else v
 
 fn value_to_snake_case(v: Value) -> Value =
-  if prim.load32(prim.handle(v) + 4) == 6 then __vu_ren_s(v) else v
+  if prim.load32(prim.handle(v) + 4) == 6 then __vu_refold(__vu_ren_s(v)) else v

@@ -64,14 +64,43 @@ pub fn almide_rt_value_int(n: i64) -> AlmideValue { AlmideValue::Int(n) }
 pub fn almide_rt_value_float(f: f64) -> AlmideValue { AlmideValue::Float(f) }
 pub fn almide_rt_value_bool(b: bool) -> AlmideValue { AlmideValue::Bool(b) }
 pub fn almide_rt_value_array(items: &[AlmideValue]) -> AlmideValue { AlmideValue::Array(items.to_vec()) }
-pub fn almide_rt_value_object(pairs: &[(AlmideString, AlmideValue)]) -> AlmideValue { AlmideValue::Object(pairs.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect()) }
+pub fn almide_rt_value_object(pairs: &[(AlmideString, AlmideValue)]) -> AlmideValue { AlmideValue::Object(almide_rt_object_upsert(pairs.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect())) }
+/// No Object holds a key twice (C-401, #4112): a pair list that repeats a key
+/// is folded as one upsert per pair — the key keeps the POSITION of its first
+/// occurrence and takes the VALUE of its last, the `json.to_map` rule (C-380,
+/// ALS-C1). So every reader of the Object (`field`, `keys`, `stringify`,
+/// `to_map`) sees one entry, and `json.stringify` never writes a key twice.
+/// Small lists compare pairwise; from 16 pairs an index answers.
+pub(crate) fn almide_rt_object_upsert(pairs: Vec<(AlmideKey, AlmideValue)>) -> Vec<(AlmideKey, AlmideValue)> {
+    let dup = if pairs.len() < 16 {
+        (1..pairs.len()).any(|i| pairs[..i].iter().any(|(k, _)| *k == pairs[i].0))
+    } else {
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::with_capacity(pairs.len());
+        !pairs.iter().all(|(k, _)| seen.insert(k.as_ref()))
+    };
+    if !dup {
+        return pairs;
+    }
+    let mut out: Vec<(AlmideKey, AlmideValue)> = Vec::with_capacity(pairs.len());
+    let mut at: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for (k, v) in pairs {
+        match at.get(k.as_ref()) {
+            Some(&i) => out[i].1 = v,
+            None => {
+                at.insert(k.to_string(), out.len());
+                out.push((k, v));
+            }
+        }
+    }
+    out
+}
 // The `@reuse` twins (#2157): a source at its last use — the list literal or
 // `list.map` result a document is built from, almost always — is taken by
 // value and its elements MOVED into the Value. The borrowing forms above
 // cloned every element, so building a document copied each subtree once per
 // nesting level, and freed the copies' originals right after.
 pub fn almide_rt_value_array_owned(items: Vec<AlmideValue>) -> AlmideValue { AlmideValue::Array(items) }
-pub fn almide_rt_value_object_owned(pairs: Vec<(AlmideString, AlmideValue)>) -> AlmideValue { AlmideValue::Object(pairs.into_iter().map(|(k, v)| (almide_rt_intern_key(&k), v)).collect()) }
+pub fn almide_rt_value_object_owned(pairs: Vec<(AlmideString, AlmideValue)>) -> AlmideValue { AlmideValue::Object(almide_rt_object_upsert(pairs.into_iter().map(|(k, v)| (almide_rt_intern_key(&k), v)).collect())) }
 pub fn almide_rt_value_null() -> AlmideValue { AlmideValue::Null }
 // Structural equality (`value.eq`). The wasm leg had this in its self-host
 // registry all along; native only ever reached AlmideValue equality through user
@@ -330,13 +359,16 @@ pub fn almide_rt_value_keys(v: &AlmideValue) -> Vec<AlmideString> {
     __almide_v.into_almide()
 }
 
-/// Pick specific keys from an Object, discarding the rest.
+/// Pick specific keys from an Object, discarding the rest. A non-object has
+/// none of the keys, so it picks to the empty object (C-401, #4112): an
+/// allowlist over a value that is not an object lets nothing through, where
+/// it used to hand the value back whole.
 pub fn almide_rt_value_pick(v: &AlmideValue, keys: &[AlmideString]) -> AlmideValue {
     match v {
         AlmideValue::Object(pairs) => {
             AlmideValue::Object(pairs.iter().filter(|(k, _)| keys.iter().any(|x| x.as_str() == k.as_ref())).cloned().collect())
         }
-        other => other.clone(),
+        _ => AlmideValue::Object(Vec::new()),
     }
 }
 
@@ -344,7 +376,7 @@ pub fn almide_rt_value_pick(v: &AlmideValue, keys: &[AlmideString]) -> AlmideVal
 pub fn almide_rt_value_rename_keys(v: &AlmideValue, f: impl Fn(AlmideString) -> AlmideString) -> AlmideValue {
     match v {
         AlmideValue::Object(pairs) => {
-            AlmideValue::Object(pairs.iter().map(|(k, v)| (almide_rt_intern_key(&f(AlmideString::from(k.to_string()))), v.clone())).collect())
+            AlmideValue::Object(almide_rt_object_upsert(pairs.iter().map(|(k, v)| (almide_rt_intern_key(&f(AlmideString::from(k.to_string()))), v.clone())).collect()))
         }
         other => other.clone(),
     }

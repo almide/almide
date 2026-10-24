@@ -44,7 +44,7 @@ fn merge(a: Value, b: Value) -> Value = _
 @intrinsic("almide_rt_value_null")
 fn null() -> Value = _
 
-/// Wraps pairs as an Object; duplicate keys kept.
+/// Wraps pairs as an Object; a repeated key keeps its first position, last value.
 @intrinsic("almide_rt_value_object")
 @reuse(pairs)
 fn object(pairs: List[(String, Value)]) -> Value = _
@@ -53,7 +53,7 @@ fn object(pairs: List[(String, Value)]) -> Value = _
 @intrinsic("almide_rt_value_omit")
 fn omit(v: Value, keys: List[String]) -> Value = _
 
-/// Only the listed keys of v; non-objects as-is.
+/// Only the listed keys of v; a non-object picks to {}.
 @intrinsic("almide_rt_value_pick")
 fn pick(v: Value, keys: List[String]) -> Value = _
 
