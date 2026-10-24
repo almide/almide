@@ -38,7 +38,11 @@ fn main() -> Unit = {
   )
   show(
     "built",
-    value.object([("k", value.int(1)), ("j", value.str("two")), ("k", value.object([("x", value.int(3))]))]),
+    value.object([
+      ("k", value.int(1)),
+      ("j", value.str("two")),
+      ("k", value.object([("x", value.int(3))]))
+    ]),
   )
   match json.parse("{\"k\":1,\"j\":\"two\",\"k\":{\"x\":3}}") {
     ok(v) => show("parsed", v),

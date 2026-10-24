@@ -35,7 +35,7 @@ effect fn main() -> Unit = {
     "/p?%41=1",
     "/p",
     "/p?",
-    "/p?a=1#frag",
+    "/p?a=1#frag"
   ] {
     println("${target} => ${q(target)}")
   }

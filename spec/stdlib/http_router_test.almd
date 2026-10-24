@@ -265,7 +265,10 @@ test "a middleware can answer without calling the handler" {
 
 // C-406 (#4133, #4134): one canonical path for the router and the middleware
 // in front of it, and no parameter that decodes to a traversal.
-fn admin_guard(next: HttpHandler) -> HttpHandler = (r) => if string.starts_with(http.req_path(r), "/admin") then http.response(
+fn admin_guard(next: HttpHandler) -> HttpHandler = (r) => if string.starts_with(
+  http.req_path(r),
+  "/admin",
+) then http.response(
   403,
   "denied",
 )
@@ -273,24 +276,37 @@ else next(r)!
 
 effect fn secret(req: HttpRequest) -> HttpResponse = http.response(200, "SECRET")
 
-effect fn file_of(req: HttpRequest) -> HttpResponse = http.response(200, "file=" + (http.param(req, "file") ?? "-"))
+effect fn file_of(req: HttpRequest) -> HttpResponse = http.response(
+  200,
+  "file=" + (http.param(req, "file") ?? "-"),
+)
 
-effect fn tail_of(req: HttpRequest) -> HttpResponse = http.response(200, "tail=" + (http.param(req, "rest") ?? "-"))
+effect fn tail_of(req: HttpRequest) -> HttpResponse = http.response(
+  200,
+  "tail=" + (http.param(req, "rest") ?? "-"),
+)
 
 effect fn guarded() -> HttpHandler = http.wrap(
-  http.router([
-    http.route("GET /admin/secret", secret),
-    http.route("GET /static/{file}", file_of),
-    http.route("GET /u/{file}", file_of),
-    http.route("GET /t/{rest...}", tail_of)
-  ])!,
+  http.router([http.route("GET /admin/secret", secret), http.route("GET /static/{file}", file_of), http.route(
+    "GET /u/{file}",
+    file_of,
+  ), http.route("GET /t/{rest...}", tail_of)])!,
   [admin_guard],
 )
 
 test "a path the guard reads differently from the router is a 400 (C-406)" {
   let h = guarded()!
   assert_eq(show(h(req("GET", "/admin/secret"))!), "403 denied")
-  for p in ["//admin/secret", "/%61dmin/secret", "/./admin/secret", "/x/../admin/secret", "/static/../../etc/passwd", "/static/%2e%2e/%2e%2e/etc/passwd", "/a\\b", "/x/%7E"] {
+  for p in [
+    "//admin/secret",
+    "/%61dmin/secret",
+    "/./admin/secret",
+    "/x/../admin/secret",
+    "/static/../../etc/passwd",
+    "/static/%2e%2e/%2e%2e/etc/passwd",
+    "/a\\b",
+    "/x/%7E"
+  ] {
     assert_eq(show(h(req("GET", p))!), "400 Bad Request: the path is not in canonical form")
   }
   assert_eq(show(h(req("GET", "/static/a.txt/"))!), "200 file=a.txt")
@@ -300,7 +316,10 @@ test "a path the guard reads differently from the router is a 400 (C-406)" {
 test "a parameter that decodes to a traversal, a slash or NUL is a 400 (C-406)" {
   let h = guarded()!
   for p in ["/u/..%2F..%2Fetc%2Fpasswd", "/static/a%2F..%2F..%2Fx", "/u/a%00b", "/u/a%5Cb", "/t/ok/a%2Fb"] {
-    assert_eq(show(h(req("GET", p))!), "400 Bad Request: a path parameter is a dot segment or holds a /, \\ or NUL")
+    assert_eq(
+      show(h(req("GET", p))!),
+      "400 Bad Request: a path parameter is a dot segment or holds a /, \\ or NUL",
+    )
   }
   assert_eq(show(h(req("GET", "/t/a/b/c"))!), "200 tail=a/b/c")
 }

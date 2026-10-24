@@ -22,11 +22,20 @@ effect fn main() -> Unit = {
   let wide = value.object(0..<40 |> list.map((i) => ("k${i % 20}", value.int(i))))
   println("${list.len(value.keys(wide))} ${json.stringify(wide)}")
   // A nested object folds too; the merged result stays one entry per key.
-  let nested = value.object([("a", role), ("a", value.object([("x", value.int(1)), ("x", value.int(2))]))])
+  let nested = value.object([
+    ("a", role),
+    ("a", value.object([("x", value.int(1)), ("x", value.int(2))]))
+  ])
   println(json.stringify(nested))
   println(json.stringify(value.merge(role, value.object([("id", value.int(8)), ("id", value.int(9))]))))
   // pick on a non-object: nothing passes; omit: unchanged.
-  for v in [value.str("admin"), value.int(1), value.null(), value.array([value.int(1)]), role] {
+  for v in [
+    value.str("admin"),
+    value.int(1),
+    value.null(),
+    value.array([value.int(1)]),
+    role
+  ] {
     println("pick ${json.stringify(value.pick(v, ["role"]))} omit ${json.stringify(value.omit(v, ["role"]))}")
   }
   // A parsed document already has unique keys; a parse of a repeat is refused.

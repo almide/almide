@@ -28,7 +28,7 @@ effect fn main() -> Unit = {
     "://good.com",
     "no-colon-here",
     "a+b-c.d://h/",
-    "HTTP://Good.COM/X",
+    "HTTP://Good.COM/X"
   ] {
     println("parse ${raw} => ${show(url.parse(raw))}")
   }
@@ -59,7 +59,7 @@ effect fn main() -> Unit = {
     "http://example.123/",
     "http://0x/",
     "http://1.2.3.x/",
-    "http://v1.example.com/",
+    "http://v1.example.com/"
   ] {
     println("parse ${raw} => ${show(url.parse(raw))}")
   }
@@ -73,7 +73,7 @@ effect fn main() -> Unit = {
     "http://good.com/..",
     "http://good.com/a//b",
     "http://good.com/%2e%2f/x",
-    "http://good.com/a?x=/../y#/../z",
+    "http://good.com/a?x=/../y#/../z"
   ] {
     println("parse ${raw} => ${show(url.parse(raw))}")
   }
@@ -95,7 +95,7 @@ effect fn main() -> Unit = {
       "?q=1",
       "#f",
       "",
-      "./",
+      "./"
     ] {
       println("resolve ${r} => ${show(url.resolve(base, r))}")
     },
