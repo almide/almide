@@ -97,6 +97,21 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
   exit 1
 fi
 
+# --- Verify origin ---
+# The checksum came from the same place as the archive: integrity, not origin
+# (#4127). Every release asset carries a Sigstore attestation (#1534); verify
+# it when the GitHub CLI is here, and say how to otherwise.
+if command -v gh >/dev/null 2>&1; then
+  echo "Verifying the release attestation..."
+  if ! gh attestation verify "$ARCHIVE" -R "$REPO" >/dev/null; then
+    echo "error: the release attestation did not verify; refusing to install" >&2
+    exit 1
+  fi
+else
+  echo "note: gh not found, so the release attestation was not verified (the checksum proves integrity, not origin)" >&2
+  echo "      to verify: gh attestation verify ${ARCHIVE} -R ${REPO}" >&2
+fi
+
 # --- Install ---
 
 tar xzf "$ARCHIVE"

@@ -63,6 +63,22 @@ try {
         exit 1
     }
 
+    # --- Verify origin ---
+    # The checksum came from the same place as the archive: integrity, not
+    # origin (#4127). Verify the release's Sigstore attestation (#1534) when
+    # the GitHub CLI is here.
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        Write-Host "Verifying the release attestation..."
+        & gh attestation verify "$Tmp\$Archive" -R $Repo | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "error: the release attestation did not verify; refusing to install" -ForegroundColor Red
+            exit 1
+        }
+    } else {
+        Write-Host "note: gh not found, so the release attestation was not verified (the checksum proves integrity, not origin)"
+        Write-Host "      to verify: gh attestation verify $Archive -R $Repo"
+    }
+
     # --- Install ---
 
     Expand-Archive -Path "$Tmp\$Archive" -DestinationPath "$Tmp\extracted" -Force
