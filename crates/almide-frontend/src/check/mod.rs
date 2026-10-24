@@ -36,6 +36,7 @@ mod pure_attr;
 mod bang_error_channel;
 mod lambda_channel;
 mod intrinsic_authority;
+pub use intrinsic_authority::grant_stdlib_authority;
 mod extern_abi_check;
 mod prim_wrappers;
 mod exhaustiveness;
