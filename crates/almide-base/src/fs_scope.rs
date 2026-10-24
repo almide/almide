@@ -15,9 +15,11 @@
 // holds no symlink because it does not exist). A dangling symlink in that rest
 // is refused: a write through it would create its target, wherever that is.
 // The check runs before the operation, so a tree an attacker rewrites between
-// the two (a directory swapped for a symlink) can still race it; the rooted
-// API (`fs.open_root`) has the same window. Closing it needs descriptor-based
-// resolution (openat2 RESOLVE_BENEATH on native, WASI preopens on wasm).
+// the two (a directory swapped for a symlink) can still race it on native and
+// the embedded host; the p3 component's preopens are resolved beneath their
+// descriptor by the runtime (cap-std) and do not race. The rooted API
+// (`fs.open_root`) closes the window for the paths it takes: its calls walk
+// by descriptor and refuse any symlink (almide-rt-core fs_beneath_core, #4084).
 
 /// The refusal for a path outside every granted root, on every leg.
 pub fn fs_scope_refusal(path: &str) -> String {
