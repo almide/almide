@@ -26,7 +26,7 @@
 | ALS-B4 | C-311 | `tests/diagnostics/e071-bounded-alloc-in-loop/broken.almd` (checker)<br>`spec/stdlib/bounded_profile_test.almd` (both-target test) |
 | ALS-B5 | C-312 | `tests/diagnostics/e072-bounded-break/broken.almd` (checker) |
 | ALS-B6 | C-313 | `tests/diagnostics/e073-bounded-recursion/broken.almd` (checker)<br>`spec/stdlib/bounded_profile_test.almd` (both-target test) |
-| ALS-B7 | C-314 | `tests/diagnostics/e074-bounded-unbounded-callee/broken.almd` (checker)<br>`tests/diagnostics/e074-bounded-higher-order/broken.almd` (checker)<br>`spec/stdlib/bounded_profile_test.almd` (both-target test) |
+| ALS-B7 | C-314, C-422 | `tests/diagnostics/e074-bounded-unbounded-callee/broken.almd` (checker)<br>`tests/diagnostics/e074-bounded-higher-order/broken.almd` (checker)<br>`spec/stdlib/bounded_profile_test.almd` (both-target test)<br>`tests/diagnostics/e100-critical-insecure-digest/broken.almd` (checker) |
 | ALS-B8 | C-315 | `tests/diagnostics/e075-bounded-runtime-length-heap/broken.almd` (checker) |
 | ALS-B9 | C-316 | `tests/diagnostics/e076-bounded-effect-outside-capability/broken.almd` (checker) |
 | ALS-B10 | C-317 | `tests/diagnostics/e077-bounded-float-arithmetic/broken.almd` (checker) |
@@ -135,7 +135,7 @@
 | ALS-T8 | C-028, C-029 | `spec/wasm_cross/int_from_hex.almd` (byte-compare)<br>`spec/wasm_cross/int_parse_overflow.almd` (byte-compare) |
 | ALS-T9 | C-025 | `spec/wasm_cross/float_to_fixed.almd` (byte-compare) |
 | ALS-T10 | C-026, C-051, C-134 | `spec/wasm_cross/trig_libm.almd` (byte-compare)<br>`spec/wasm_cross/math_explog.almd` (byte-compare)<br>`spec/wasm_cross/math_pow.almd` (byte-compare)<br>`spec/wasm_cross/math_log_gamma.almd` (byte-compare)<br>`spec/wasm_cross/math_log_gamma_negative.almd` (byte-compare)<br>`spec/wasm_cross/math_atan_tanh.almd` (byte-compare) |
-| ALS-T11 | C-027, C-030 | `spec/wasm_cross/encoding_base64.almd` (byte-compare)<br>`spec/wasm_cross/hex_two_module_link.almd` (byte-compare) |
+| ALS-T11 | C-027, C-030, C-420, C-421 | `spec/wasm_cross/encoding_base64.almd` (byte-compare)<br>`spec/wasm_cross/hex_two_module_link.almd` (byte-compare)<br>`spec/wasm_cross/hash_hmac_rfc4231.almd` (byte-compare)<br>`spec/wasm_cross/bytes_is_equal_constant_time.almd` (byte-compare) |
 | ALS-T12 | C-003 | `spec/wasm_cross/int_div_mod_ok.almd` (byte-compare) |
 | ALS-T13 | C-023 | `spec/wasm_cross/float_shortest_roundtrip.almd` (byte-compare)<br>`spec/wasm_cross/num_edge_to_string.almd` (byte-compare)<br>`tests/float_gtable_exact_test.rs` (cargo gate) |
 | ALS-T14 | C-048 | `spec/wasm_cross/int_wrap_rotate_width.almd` (byte-compare) |
