@@ -109,6 +109,39 @@ test "base64 decode error strings" {
   }
 }
 
+fn b64(r: Result[Bytes, String]) -> String = match r {
+  ok(b) => "ok(${hex.encode(b)})",
+  err(e) => e,
+}
+
+// #4119: each decoder accepts exactly the canonical padded form its encoder
+// emits, in its own alphabet; checks run length → padding → character →
+// trailing bits.
+test "base64 decode is canonical (#4119)" {
+  assert_eq(b64(base64.decode("QQ==")), "ok(41)")
+  assert_eq(b64(base64.decode("QUI=")), "ok(4142)")
+  assert_eq(b64(base64.decode("QUJ=")), "invalid base64 trailing bits")
+  assert_eq(b64(base64.decode("")), "ok()")
+  assert_eq(b64(base64.decode("QR==")), "invalid base64 trailing bits")
+  assert_eq(b64(base64.decode("QX==")), "invalid base64 trailing bits")
+  assert_eq(b64(base64.decode("QUK=")), "invalid base64 trailing bits")
+  assert_eq(b64(base64.decode("QQ")), "invalid base64 length: 2")
+  assert_eq(b64(base64.decode("QQ========")), "invalid base64 length: 10")
+  assert_eq(b64(base64.decode("QUJD=")), "invalid base64 length: 5")
+  assert_eq(b64(base64.decode("=")), "invalid base64 length: 1")
+  assert_eq(b64(base64.decode("QUJD====")), "invalid base64 padding")
+  assert_eq(b64(base64.decode("====")), "invalid base64 padding")
+  assert_eq(b64(base64.decode("Q===")), "invalid base64 padding")
+  assert_eq(b64(base64.decode("QQ=A")), "invalid base64 character")
+  assert_eq(b64(base64.decode("+/8=")), "ok(fbff)")
+  assert_eq(b64(base64.decode("-_8=")), "invalid base64 character")
+  assert_eq(b64(base64.decode_url("-_8=")), "ok(fbff)")
+  assert_eq(b64(base64.decode_url("+/8=")), "invalid base64 character")
+  assert_eq(b64(base64.decode_url("QR==")), "invalid base64 trailing bits")
+  assert_eq(b64(base64.decode_url("QQ")), "invalid base64 length: 2")
+  assert_eq(b64(base64.decode_url("QUJD====")), "invalid base64 padding")
+}
+
 // ── int.from_hex (native i64::from_str_radix oracle, with quirks) ──
 test "int from_hex basics and quirks" {
   assert_eq(int.from_hex("ff") ?? -1, 255)
