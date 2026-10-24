@@ -572,6 +572,8 @@ impl Emitter<'_> {
                     self.f.instructions().i64_const(0);
                     self.lower(operand, Some(INT))?;
                     self.f.instructions().i64_sub();
+                    // #4163: a sized int's negation wraps at its width, as binary `-` does.
+                    self.emit_narrow_wrap(&e.ty, &operand.ty);
                     INT
                 }
                 UnOp::Not => {
