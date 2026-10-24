@@ -855,11 +855,6 @@ class = "legacy"
 names = 2
 
 [[site]]
-id = "crates/almide-wasm/src/bytes_rw.rs::lower_bytes_rw::or-pattern"
-class = "legacy"
-names = 32
-
-[[site]]
 id = "crates/almide-wasm/src/calls.rs::resolve_qualified::VERIFIED::table"
 class = "legacy"
 names = 20

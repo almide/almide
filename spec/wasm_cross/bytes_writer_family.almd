@@ -1,4 +1,7 @@
 // @contract: C-213
+// The `__`-named calls are the width primitives under the typed byte IO
+// matrix's checked `get_` / `put_` wrappers (R-bytes-09/11): this fixture pins
+// the primitives' own total domain, which the wrappers no longer reach.
 // Cross-target differential fixture: the `bytes` BYTE-LEVEL WRITER family.
 //
 // One buffer, written through every shape the family has:
@@ -19,7 +22,7 @@ fn show(label: String, b: Bytes) -> Unit = println(label + " " + "${bytes.to_lis
 
 fn main() -> Unit = {
   // ── append: width, order, and the truncating cast ──
-  var a = bytes.new(0)
+  var a = bytes.zeros(0)
   bytes.append_u8(a, 511)
   bytes.append_u16_le(a, 258)
   bytes.append_u16_be(a, 258)
@@ -28,21 +31,21 @@ fn main() -> Unit = {
   show("append", a)
   // A negative value and its unsigned twin write the SAME bytes — two's
   // complement, not a separate signed encoding.
-  var s = bytes.new(0)
+  var s = bytes.zeros(0)
   bytes.append_i16_le(s, -2)
   bytes.append_u16_le(s, -2)
   bytes.append_i64_be(s, -1)
   show("signed", s)
   // ── floats: f32 rounds on the way in, f64 is exact ──
-  var f = bytes.new(0)
+  var f = bytes.zeros(0)
   bytes.append_f32_le(f, 1.5)
   bytes.append_f64_be(f, 1.5)
   show("float", f)
   // ── set: splice in place; a window past the end changes nothing ──
-  var p = bytes.new(6)
-  bytes.set_u32_le(p, 1, 258)
+  var p = bytes.zeros(6)
+  bytes.__set_u32_le(p, 1, 258)
   show("set_fit", p)
-  bytes.set_u32_le(p, 4, 999)
+  bytes.__set_u32_le(p, 4, 999)
   show("set_past_end", p)
   bytes.set_at(p, 0, 511)
   bytes.set_at(p, 6, 7)
@@ -50,14 +53,14 @@ fn main() -> Unit = {
   // ── the Endian-parameterized sized-type surface (#1098 closed the native
   // leg: the runtime owns the enum + dispatch; wasm links the bytes_typed
   // twins) — the order is an ARGUMENT, not part of the name ──
-  var t = bytes.new(0)
+  var t = bytes.zeros(0)
   bytes.write_uint16(t, 258, LittleEndian)
   bytes.write_uint16(t, 258, BigEndian)
   bytes.write_uint32(t, 258, BigEndian)
   bytes.write_int32(t, -2, LittleEndian)
   bytes.write_float32(t, 1.5, LittleEndian)
   show("sized_append", t)
-  var u = bytes.new(4)
+  var u = bytes.zeros(4)
   bytes.set_uint32(u, 0, 258, LittleEndian)
   bytes.set_uint16(u, 2, 258, BigEndian)
   show("sized_set", u)
@@ -79,31 +82,31 @@ fn main() -> Unit = {
   println(float.to_string(float.from_float32(bytes.read_float32(bytes.from_list([0, 0, 192, 63]), 0, LittleEndian))))
   // ── the serialization cursor: BE twins, bool, and the length-prefixed
   // string (#1099 closed the wasm self-host gap) ──
-  var w = bytes.new(0)
+  var w = bytes.zeros(0)
   bytes.write_u8(w, 7)
   bytes.write_u32_be(w, 258)
   bytes.write_i64_be(w, -1)
-  bytes.write_bool(w, true)
-  bytes.write_bool(w, false)
+  bytes.append_bool(w, true)
+  bytes.append_bool(w, false)
   bytes.write_string_be(w, "hi")
   show("cursor", w)
   // f64 BE: 1.5 = 0x3FF8000000000000.
-  var wf = bytes.new(0)
+  var wf = bytes.zeros(0)
   bytes.write_f64_be(wf, 1.5)
   show("cursor_f64", wf)
   // A multibyte string counts BYTES in its prefix, not characters.
-  var m = bytes.new(0)
+  var m = bytes.zeros(0)
   bytes.write_string_be(m, "é")
   show("cursor_utf8", m)
   // ── fill / copy_from / copy_within ──
-  var g = bytes.new(3)
+  var g = bytes.zeros(3)
   bytes.fill(g, 511)
   show("fill", g)
-  var empty = bytes.new(0)
+  var empty = bytes.zeros(0)
   bytes.fill(empty, 7)
   show("fill_empty", empty)
   let src = bytes.from_list([7, 8, 9])
-  var d = bytes.new(4)
+  var d = bytes.zeros(4)
   bytes.copy_from(d, src, 1, 0, 99)
   show("copy_from_clamped", d)
   var c = bytes.from_list([1, 2, 3, 0, 0])

@@ -13,14 +13,14 @@ fn __lps_count(b: Bytes, blen: Int, p: Int, remaining: Int, acc: Int) -> Int =
   if remaining == 0 then acc
   else if p < 0 or p > blen - 4 then acc
   else {
-    let sl = bytes.read_u32_le(b, p)
+    let sl = bytes.__read_u32_le(b, p)
     if sl > blen - 4 - p then acc
     else __lps_count(b, blen, p + 4 + sl, remaining - 1, acc + 1)
   }
 
 fn __lps_fill(dh: Int, b: Bytes, p: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
-  let sl = bytes.read_u32_le(b, p)
+  let sl = bytes.__read_u32_le(b, p)
   let s = bytes.to_string_lossy(bytes.slice(b, p + 4, p + 4 + sl))
   prim.store_str(dh + 12 + i * 8, s)
   __lps_fill(dh, b, p + 4 + sl, n, i + 1)

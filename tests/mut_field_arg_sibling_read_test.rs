@@ -5,7 +5,7 @@
 //!
 //! The native call site takes `&mut r.buf`; a sibling `pos(&r)` evaluated
 //! after it is rustc E0502, so the borrow-conflict hoist moves each such
-//! sibling into a temporary first (`bytes.set_u8(s.buf, pos(s), 7)` was
+//! sibling into a temporary first (`bytes.put_u8(s.buf, pos(s), 7)` was
 //! E0502 on 0.64.0). With two or more hoisted siblings every temporary also
 //! needs its own name — a shared `__hoist` handed every argument the last
 //! one's value (#3049), which the ORACLE here catches: the same statements
@@ -144,7 +144,7 @@ fn drive(mut r: R) -> Unit = {{
 {in_param}}}
 
 effect fn main() -> Unit = {{
-  var r = R {{ buf: bytes.new(40), s: "s", xs: [0], m: [:], n: 0 }}
+  var r = R {{ buf: bytes.zeros(40), s: "s", xs: [0], m: [:], n: 0 }}
 {in_var}  println(show(r))
   drive(r)
   println(show(r))

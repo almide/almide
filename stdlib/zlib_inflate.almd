@@ -668,7 +668,7 @@ fn zli_check_limit(func: String, max_len: Int) -> Unit =
   else ()
 
 fn zli_gunzip(data: Bytes, limit: Int) -> Result[Bytes, String] = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   let code = zli_gunzip_members(data, out, limit)
   if code == 0 then ok(out)
   else if code == 8 then err(zli_exceeds(limit))
@@ -676,7 +676,7 @@ fn zli_gunzip(data: Bytes, limit: Int) -> Result[Bytes, String] = {
 }
 
 fn zli_inflate(data: Bytes, limit: Int) -> Result[Bytes, String] = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   let (status, _after) = zli_inflate_stream(0, data, out, limit)
   if status == 0 then ok(out)
   else if status == 0 - 3 then err(zli_exceeds(limit))
@@ -693,7 +693,7 @@ fn zli_decompress(data: Bytes, limit: Int) -> Result[Bytes, String] = {
   else if int.band(cmf, 15) != 8 or int.bshr(cmf, 4) > 7 or (cmf * 256 + flg) % 31 != 0 then err("zlib.decompress: invalid zlib header")
   else if int.band(flg, 32) != 0 then err("zlib.decompress: preset dictionary unsupported")
   else {
-    var out = bytes.new(0)
+    var out = bytes.zeros(0)
     let (status, after) = zli_inflate_stream(2, data, out, limit)
     let stored = int.bor(
       int.bshl(bytes.get_or(data, after, 0), 24),

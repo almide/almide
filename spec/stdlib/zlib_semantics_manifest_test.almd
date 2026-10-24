@@ -34,7 +34,7 @@ test "zlib.inflate_max unit=byte-count" {
     8,
     7
   ])
-  let sm_out = "${bytes.len(zlib.inflate_max(sm_raw, 3) ?? bytes.new(9))} ${bytes.len(zlib.inflate_max(sm_raw, 2) ?? bytes.new(9))}"
+  let sm_out = "${bytes.len(zlib.inflate_max(sm_raw, 3) ?? bytes.zeros(9))} ${bytes.len(zlib.inflate_max(sm_raw, 2) ?? bytes.zeros(9))}"
   assert_eq("${sm_out}", "3 9")
 }
 
@@ -55,7 +55,7 @@ test "zlib.decompress_max unit=byte-count" {
     0,
     25
   ])
-  let sm_out = "${bytes.len(zlib.decompress_max(sm_z, 3) ?? bytes.new(9))} ${bytes.len(zlib.decompress_max(sm_z, 2) ?? bytes.new(9))}"
+  let sm_out = "${bytes.len(zlib.decompress_max(sm_z, 3) ?? bytes.zeros(9))} ${bytes.len(zlib.decompress_max(sm_z, 2) ?? bytes.zeros(9))}"
   assert_eq("${sm_out}", "3 9")
 }
 
@@ -88,6 +88,6 @@ test "zlib.gunzip_max unit=byte-count" {
     0,
     0
   ])
-  let sm_out = "${bytes.len(zlib.gunzip_max(sm_gz, 3) ?? bytes.new(9))} ${bytes.len(zlib.gunzip_max(sm_gz, 2) ?? bytes.new(9))}"
+  let sm_out = "${bytes.len(zlib.gunzip_max(sm_gz, 3) ?? bytes.zeros(9))} ${bytes.len(zlib.gunzip_max(sm_gz, 2) ?? bytes.zeros(9))}"
   assert_eq("${sm_out}", "3 9")
 }

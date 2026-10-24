@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 49 stdlib modules, 1581 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 49 stdlib modules, 1644 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -12,7 +12,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [base64](#base64) | 4 | 0 |
 | [bigint](#bigint) | 24 | 1 |
 | [bool](#bool) | 3 | 0 |
-| [bytes](#bytes) | 146 | 1 |
+| [bytes](#bytes) | 209 | 1 |
 | [compute](#compute) | 7 | 0 |
 | [datetime](#datetime) | 23 | 0 |
 | [deque](#deque) | 60 | 1 |
@@ -120,134 +120,69 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [bytes.md](bytes.md)
 
-- `bytes.append_f32_be(mut b: Bytes, val: Float) -> Unit` — Appends val rounded to f32, BE.
-- `bytes.append_f32_le(mut b: Bytes, val: Float) -> Unit` — Appends val rounded to f32, LE.
-- `bytes.append_f64_be(mut b: Bytes, val: Float) -> Unit` — Appends val as 8-byte f64, BE.
-- `bytes.append_f64_le(mut b: Bytes, val: Float) -> Unit` — Appends val as 8-byte f64, LE.
-- `bytes.append_i16_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, BE.
-- `bytes.append_i16_le(mut b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, LE.
-- `bytes.append_i32_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, BE.
-- `bytes.append_i32_le(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, LE.
-- `bytes.append_i64_be(mut b: Bytes, val: Int) -> Unit` — Appends val as 8 bytes, BE.
-- `bytes.append_i64_le(mut b: Bytes, val: Int) -> Unit` — Appends val as 8 bytes, LE.
-- `bytes.append_u16_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, BE.
-- `bytes.append_u16_le(mut b: Bytes, val: Int) -> Unit` — Appends val's low 16 bits, LE.
-- `bytes.append_u32_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, BE.
-- `bytes.append_u32_le(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, LE.
-- `bytes.append_u8(mut b: Bytes, val: Int) -> Unit` — Appends val's low 8 bits; 256 becomes 0.
+- `bytes.append_f32_be(mut b: Bytes, x: Float) -> Unit` — Appends x rounded to f32, BE.
+- `bytes.append_f32_le(mut b: Bytes, x: Float) -> Unit` — Appends x rounded to f32, LE.
+- `bytes.append_f64_be(mut b: Bytes, x: Float) -> Unit` — Appends x as 8-byte f64, BE.
+- `bytes.append_f64_le(mut b: Bytes, x: Float) -> Unit` — Appends x as 8-byte f64, LE.
+- `bytes.append_i16_be(mut b: Bytes, x: Int) -> Unit` — Appends x's low 16 bits, BE.
+- `bytes.append_i16_le(mut b: Bytes, x: Int) -> Unit` — Appends x's low 16 bits, LE.
+- `bytes.append_i32_be(mut b: Bytes, x: Int) -> Unit` — Appends x's low 32 bits, BE.
+- `bytes.append_i32_le(mut b: Bytes, x: Int) -> Unit` — Appends x's low 32 bits, LE.
+- `bytes.append_i64_be(mut b: Bytes, x: Int) -> Unit` — Appends x as 8 bytes, BE.
+- `bytes.append_i64_le(mut b: Bytes, x: Int) -> Unit` — Appends x as 8 bytes, LE.
+- `bytes.append_u16_be(mut b: Bytes, x: Int) -> Unit` — Appends x's low 16 bits, BE.
+- `bytes.append_u16_le(mut b: Bytes, x: Int) -> Unit` — Appends x's low 16 bits, LE.
+- `bytes.append_u32_be(mut b: Bytes, x: Int) -> Unit` — Appends x's low 32 bits, BE.
+- `bytes.append_u32_le(mut b: Bytes, x: Int) -> Unit` — Appends x's low 32 bits, LE.
+- `bytes.append_u8(mut b: Bytes, x: Int) -> Unit` — Appends x's low 8 bits; 256 becomes 0.
 - `bytes.as_mut_ptr(b: Bytes) -> RawPtr   (deprecated — use ffi.address)` — Mutable address of the data; null if empty.
 - `bytes.as_ptr(b: Bytes) -> RawPtr   (deprecated — use ffi.address)` — Address of the data; null if empty.
-- `bytes.chunks(b: Bytes, size: Int) -> List[Bytes]` — size-byte pieces, last may be short; [] if size <= 0.
 - `bytes.clear(mut b: Bytes) -> Unit` — Truncates b to length 0 in place.
-- `bytes.cmp(a: Bytes, b: Bytes) -> Int` — Lexicographic -1, 0 or 1; a prefix sorts first.
+- `bytes.compare(a: Bytes, b: Bytes) -> Int` — Lexicographic -1, 0 or 1; a prefix sorts first.
 - `bytes.concat(a: Bytes, b: Bytes) -> Bytes` — New Bytes holding a then b.
-- `bytes.contains(b: Bytes, pattern: Bytes) -> Bool` — True if pattern occurs in b, or pattern is empty.
-- `bytes.copy_from(mut dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit` — Copies len bytes of src into dst; clamped to fit.
+- `bytes.contains(b: Bytes, needle: Bytes) -> Bool` — True if needle occurs in b, or needle is empty.
+- `bytes.copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit` — Copies len bytes of src into b; clamped to fit.
 - `bytes.copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int   (deprecated — use ffi.write)` — Writes up to cap bytes to ptr; count, 0 if null.
 - `bytes.data_ptr(b: Bytes) -> Int   (deprecated — use ffi.address)` — Address of the data as an Int; target-specific.
 - `bytes.ends_with(b: Bytes, suffix: Bytes) -> Bool` — True if b ends with suffix, or suffix is empty.
-- `bytes.eof(b: Bytes, pos: Int) -> Bool` — True if pos >= len or pos is negative.
-- `bytes.fill(mut b: Bytes, val: Int) -> Unit` — Sets every byte to val's low 8 bits in place.
+- `bytes.is_eof(b: Bytes, pos: Int) -> Bool` — True if pos >= len or pos is negative.
+- `bytes.fill(mut b: Bytes, x: Int) -> Unit` — Sets every byte to x's low 8 bits in place.
 - `bytes.from_list(xs: List[Int]) -> Bytes` — xs as bytes, low 8 bits each; -1 becomes 255.
 - `bytes.from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes   (deprecated — use ffi.read)` — Copy of len bytes at ptr; empty if null or len <= 0.
 - `bytes.from_string(s: String) -> Bytes` — UTF-8 encoding of s.
 - `bytes.get(b: Bytes, i: Int) -> Option[Int]` — Byte at index i, or none when out of range.
 - `bytes.get_or(b: Bytes, i: Int, default: Int) -> Int` — Byte at index i, or default when out of range.
-- `bytes.index_of(b: Bytes, pattern: Bytes) -> Option[Int]` — First offset of pattern, or none; some(0) if empty.
-- `bytes.insert(b: Bytes, pos: Int, val: Int) -> Bytes` — Copy with val's low byte at pos, clamped to 0..len.
+- `bytes.index_of(b: Bytes, needle: Bytes) -> Option[Int]` — First offset of needle, or none; some(0) if empty.
+- `bytes.insert(b: Bytes, i: Int, x: Int) -> Bytes` — Copy with x's low byte at i, clamped to 0..len.
 - `bytes.is_empty(b: Bytes) -> Bool` — True when b holds no bytes.
 - `bytes.is_valid_utf8(b: Bytes) -> Bool` — Whether b is valid UTF-8; true when empty.
 - `bytes.len(b: Bytes) -> Int` — Byte count; 0 for an empty buffer.
 - `bytes.lines(b: Bytes) -> List[Bytes]` — Pieces split at LF; CR kept; a final LF adds no piece.
-- `bytes.map_each(b: Bytes, f: (Int) -> Int) -> Bytes` — f applied per byte; results cut to low 8 bits.
-- `bytes.new(len: Int) -> Bytes` — len zero bytes; empty if len <= 0.
-- `bytes.pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes` — Left-padded with val to target_len; as-is if longer.
-- `bytes.pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes` — Right-padded with val to target_len; as-is if longer.
-- `bytes.push(mut b: Bytes, val: Int) -> Unit` — Appends val's low 8 bits in place.
+- `bytes.map(b: Bytes, f: (Int) -> Int) -> Bytes` — f applied per byte; results cut to low 8 bits.
+- `bytes.zeros(n: Int) -> Bytes` — n zero bytes; empty if n <= 0.
+- `bytes.pad_start(b: Bytes, n: Int, fill: Int) -> Bytes` — Left-padded with fill to length n; as-is if longer.
+- `bytes.pad_end(b: Bytes, n: Int, fill: Int) -> Bytes` — Right-padded with fill to length n; as-is if longer.
+- `bytes.push(mut b: Bytes, x: Int) -> Unit` — Appends x's low 8 bits in place.
 - `bytes.set_at(mut b: Bytes, i: Int, val: Int) -> Unit` — Sets byte i to val's low 8 bits; no-op out of range.
 - `bytes.copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit` — Copies src_start..src_end to dst; no-op if it won't fit.
-- `bytes.read_bool(b: Bytes, pos: Int) -> Bool` — Byte at pos != 0; false if out of range.
-- `bytes.read_bool_at(b: Bytes, pos: Int) -> (Int, Option[Bool])` — (pos+1, byte != 0); (pos, none) at EOF.
-- `bytes.read_f16_le(b: Bytes, pos: Int) -> Float` — f16 LE at pos; 0.0 if out of range.
-- `bytes.read_f16_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])` — (pos+2, f16 LE); (pos, none) at EOF.
-- `bytes.read_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]` — count f16 LE from pos; 0.0 past the end.
-- `bytes.read_f32_be(b: Bytes, pos: Int) -> Float` — f32 BE at pos; 0.0 if out of range.
-- `bytes.read_f32_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]` — count f32 BE from pos; 0.0 past the end.
-- `bytes.read_f32_be_at(b: Bytes, pos: Int) -> (Int, Option[Float])` — (pos+4, f32 BE); (pos, none) at EOF.
-- `bytes.read_f32_le(b: Bytes, pos: Int) -> Float` — f32 LE at pos; 0.0 if out of range.
-- `bytes.read_f32_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]` — count f32 LE from pos; 0.0 past the end.
-- `bytes.read_f32_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])` — (pos+4, f32 LE); (pos, none) at EOF.
-- `bytes.read_f64_be(b: Bytes, pos: Int) -> Float` — f64 BE at pos; 0.0 if out of range.
-- `bytes.read_f64_be_array(b: Bytes, pos: Int, count: Int) -> List[Float]` — count f64 BE from pos; 0.0 past the end.
-- `bytes.read_f64_be_at(b: Bytes, pos: Int) -> (Int, Option[Float])` — (pos+8, f64 BE); (pos, none) at EOF.
-- `bytes.read_f64_le(b: Bytes, pos: Int) -> Float` — f64 LE at pos; 0.0 if out of range.
-- `bytes.read_f64_le_array(b: Bytes, pos: Int, count: Int) -> List[Float]` — count f64 LE from pos; 0.0 past the end.
-- `bytes.read_f64_le_at(b: Bytes, pos: Int) -> (Int, Option[Float])` — (pos+8, f64 LE); (pos, none) at EOF.
-- `bytes.read_i16_be(b: Bytes, pos: Int) -> Int` — i16 BE at pos; 0 if out of range.
-- `bytes.read_i16_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+2, i16 BE); (pos, none) at EOF.
-- `bytes.read_i16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count i16 BE from pos; 0 past the end.
-- `bytes.read_i16_le(b: Bytes, pos: Int) -> Int` — i16 LE at pos; 0 if out of range.
-- `bytes.read_i16_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+2, i16 LE); (pos, none) at EOF.
-- `bytes.read_i16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count i16 LE from pos; 0 past the end.
-- `bytes.read_i32_be(b: Bytes, pos: Int) -> Int` — i32 BE at pos; 0 if out of range.
-- `bytes.read_i32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count i32 BE from pos; 0 past the end.
-- `bytes.read_i32_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+4, i32 BE); (pos, none) at EOF.
-- `bytes.read_i32_le(b: Bytes, pos: Int) -> Int` — i32 LE at pos; 0 if out of range.
-- `bytes.read_i32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count i32 LE from pos; 0 past the end.
-- `bytes.read_i32_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+4, i32 LE); (pos, none) at EOF.
-- `bytes.read_i64_be(b: Bytes, pos: Int) -> Int` — i64 BE at pos; 0 if out of range.
-- `bytes.read_i64_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count i64 BE from pos; 0 past the end.
-- `bytes.read_i64_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+8, i64 BE); (pos, none) at EOF.
-- `bytes.read_i64_le(b: Bytes, pos: Int) -> Int` — i64 LE at pos; 0 if out of range.
-- `bytes.read_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count i64 LE from pos; 0 past the end.
-- `bytes.read_i64_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+8, i64 LE); (pos, none) at EOF.
 - `bytes.read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String]` — Up to count u32-LE-prefixed strings; stops if cut off.
 - `bytes.read_string_at(b: Bytes, pos: Int, len: Int) -> String` — len bytes at pos, lossy UTF-8; empty if out of range.
 - `bytes.read_string_be(b: Bytes, pos: Int) -> String` — String after a u32 BE length at pos; empty if cut off.
 - `bytes.read_string_be_at(b: Bytes, pos: Int) -> (Int, Option[String])` — Cursor form of read_string_be; (pos, none) if cut off.
-- `bytes.read_u16_be(b: Bytes, pos: Int) -> Int` — u16 BE at pos; 0 if out of range.
-- `bytes.read_u16_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+2, u16 BE); (pos, none) at EOF.
-- `bytes.read_u16_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count u16 BE from pos; 0 past the end.
-- `bytes.read_u16_le(b: Bytes, pos: Int) -> Int` — u16 LE at pos; 0 if out of range.
-- `bytes.read_u16_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count u16 LE from pos; 0 past the end.
-- `bytes.read_u16_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+2, u16 LE); (pos, none) at EOF.
-- `bytes.read_u32_be(b: Bytes, pos: Int) -> Int` — u32 BE at pos; 0 if out of range.
-- `bytes.read_u32_be_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count u32 BE from pos; 0 past the end.
-- `bytes.read_u32_be_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+4, u32 BE); (pos, none) at EOF.
-- `bytes.read_u32_le(b: Bytes, pos: Int) -> Int` — u32 LE at pos; 0 if out of range.
-- `bytes.read_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int]` — count u32 LE from pos; 0 past the end.
-- `bytes.read_u32_le_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+4, u32 LE); (pos, none) at EOF.
 - `bytes.read_u8(b: Bytes, pos: Int) -> Int` — Byte at pos; 0 if out of range.
-- `bytes.read_u8_at(b: Bytes, pos: Int) -> (Int, Option[Int])` — (pos+1, byte); (pos, none) at EOF.
-- `bytes.remove_at(b: Bytes, pos: Int) -> Bytes` — Copy without the byte at pos; as-is if out of range.
+- `bytes.remove_at(b: Bytes, i: Int) -> Bytes` — Copy without the byte at pos; as-is if out of range.
 - `bytes.repeat(b: Bytes, n: Int) -> Bytes` — b concatenated n times; empty if n <= 0.
 - `bytes.reverse(b: Bytes) -> Bytes` — Copy with the byte order reversed.
-- `bytes.set(b: Bytes, i: Int, val: Int) -> Bytes` — Copy with byte i set to val; as-is if out of range.
-- `bytes.set_f32_be(mut b: Bytes, pos: Int, val: Float) -> Unit` — Writes f32 BE at pos; no-op out of range.
-- `bytes.set_f32_le(mut b: Bytes, pos: Int, val: Float) -> Unit` — Writes f32 LE at pos; no-op out of range.
-- `bytes.set_f64_be(mut b: Bytes, pos: Int, val: Float) -> Unit` — Writes f64 BE at pos; no-op out of range.
-- `bytes.set_f64_le(mut b: Bytes, pos: Int, val: Float) -> Unit` — Writes f64 LE at pos; no-op out of range.
-- `bytes.set_i16_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i16 BE at pos; no-op out of range.
-- `bytes.set_i16_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i16 LE at pos; no-op out of range.
-- `bytes.set_i32_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i32 BE at pos; no-op out of range.
-- `bytes.set_i32_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i32 LE at pos; no-op out of range.
-- `bytes.set_i64_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i64 BE at pos; no-op out of range.
-- `bytes.set_i64_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes i64 LE at pos; no-op out of range.
-- `bytes.set_u16_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes u16 BE at pos; no-op out of range.
-- `bytes.set_u16_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes u16 LE at pos; no-op out of range.
-- `bytes.set_u32_be(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes u32 BE at pos; no-op out of range.
-- `bytes.set_u32_le(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes u32 LE at pos; no-op out of range.
-- `bytes.set_u8(mut b: Bytes, pos: Int, val: Int) -> Unit` — Writes val's low byte at pos; no-op out of range.
+- `bytes.set(b: Bytes, i: Int, x: Int) -> Bytes` — Copy with byte i set to x; as-is if out of range.
 - `bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` — pos + n, capped at len.
 - `bytes.skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int` — Offset past count u32-LE-prefixed records.
 - `bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` — Copy of start..end capped at len; empty if start >= end.
 - `bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]` — Pieces between sep matches; [b] for an empty sep.
 - `bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool` — True if b begins with prefix, or prefix is empty.
-- `bytes.take_at(b: Bytes, pos: Int, n: Int) -> (Int, Option[Bytes])` — (pos+n, n-byte copy); (pos, none) if out of range.
 - `bytes.to_list(b: Bytes) -> List[Int]` — Each byte as an Int in 0..255.
 - `bytes.to_string(b: Bytes) -> Result[String, String]` — UTF-8 decode; err "invalid UTF-8: ..." if bad.
 - `bytes.to_string_lossy(b: Bytes) -> String` — UTF-8 decode; invalid sequences become U+FFFD.
-- `bytes.write_bool(mut b: Bytes, val: Bool) -> Unit` — Appends 1 for true, 0 for false.
+- `bytes.append_bool(mut b: Bytes, x: Bool) -> Unit` — Appends 1 for true, 0 for false.
 - `bytes.write_f64_be(mut b: Bytes, val: Float) -> Unit` — Appends val as 8-byte f64, BE.
 - `bytes.write_i64_be(mut b: Bytes, val: Int) -> Unit` — Appends val as 8 bytes, BE.
 - `bytes.write_string_be(mut b: Bytes, s: String) -> Unit` — Appends s after a u32 BE byte-length prefix.
@@ -266,6 +201,134 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `bytes.set_uint32(mut b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
 - `bytes.set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
 - `bytes.set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
+- `bytes.get_u8(b: Bytes, pos: Int) -> Option[Int]` — The byte at pos as 0..255; none outside 0..len.
+- `bytes.next_u8(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_u8(b, pos), pos + 1); the position stays at pos when nothing is read.
+- `bytes.put_u8(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x's low 8 bits at pos in place; pos outside 0..len aborts.
+- `bytes.get_i8(b: Bytes, pos: Int) -> Option[Int]` — The byte at pos as a signed -128..127; none outside 0..len.
+- `bytes.next_i8(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i8(b, pos), pos + 1); the position stays at pos when nothing is read.
+- `bytes.put_i8(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x's low 8 bits at pos in place; pos outside 0..len aborts.
+- `bytes.append_i8(mut b: Bytes, x: Int) -> Unit` — Appends x's low 8 bits in place; -1 becomes 255.
+- `bytes.get_bool(b: Bytes, pos: Int) -> Option[Bool]` — The byte at pos != 0; none outside 0..len.
+- `bytes.next_bool(b: Bytes, pos: Int) -> (Option[Bool], Int)` — (get_bool(b, pos), pos + 1); the position stays at pos when nothing is read.
+- `bytes.put_bool(mut b: Bytes, pos: Int, x: Bool) -> Unit` — Writes 1 for true, 0 for false at pos in place; pos outside 0..len aborts.
+- `bytes.get_u16_le(b: Bytes, pos: Int) -> Option[Int]` — The u16 LE at pos; none unless 2 bytes fit.
+- `bytes.next_u16_le(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_u16_le(b, pos), pos + 2); the position stays at pos when nothing is read.
+- `bytes.get_u16_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count u16 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_u16_le(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as u16 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_u16_be(b: Bytes, pos: Int) -> Option[Int]` — The u16 BE at pos; none unless 2 bytes fit.
+- `bytes.next_u16_be(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_u16_be(b, pos), pos + 2); the position stays at pos when nothing is read.
+- `bytes.get_u16_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count u16 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_u16_be(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as u16 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_i16_le(b: Bytes, pos: Int) -> Option[Int]` — The i16 LE at pos; none unless 2 bytes fit.
+- `bytes.next_i16_le(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i16_le(b, pos), pos + 2); the position stays at pos when nothing is read.
+- `bytes.get_i16_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count i16 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_i16_le(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as i16 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_i16_be(b: Bytes, pos: Int) -> Option[Int]` — The i16 BE at pos; none unless 2 bytes fit.
+- `bytes.next_i16_be(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i16_be(b, pos), pos + 2); the position stays at pos when nothing is read.
+- `bytes.get_i16_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count i16 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_i16_be(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as i16 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_u32_le(b: Bytes, pos: Int) -> Option[Int]` — The u32 LE at pos; none unless 4 bytes fit.
+- `bytes.next_u32_le(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_u32_le(b, pos), pos + 4); the position stays at pos when nothing is read.
+- `bytes.get_u32_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count u32 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_u32_le(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as u32 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_u32_be(b: Bytes, pos: Int) -> Option[Int]` — The u32 BE at pos; none unless 4 bytes fit.
+- `bytes.next_u32_be(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_u32_be(b, pos), pos + 4); the position stays at pos when nothing is read.
+- `bytes.get_u32_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count u32 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_u32_be(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as u32 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_i32_le(b: Bytes, pos: Int) -> Option[Int]` — The i32 LE at pos; none unless 4 bytes fit.
+- `bytes.next_i32_le(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i32_le(b, pos), pos + 4); the position stays at pos when nothing is read.
+- `bytes.get_i32_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count i32 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_i32_le(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as i32 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_i32_be(b: Bytes, pos: Int) -> Option[Int]` — The i32 BE at pos; none unless 4 bytes fit.
+- `bytes.next_i32_be(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i32_be(b, pos), pos + 4); the position stays at pos when nothing is read.
+- `bytes.get_i32_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count i32 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_i32_be(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as i32 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_i64_le(b: Bytes, pos: Int) -> Option[Int]` — The i64 LE at pos; none unless 8 bytes fit.
+- `bytes.next_i64_le(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i64_le(b, pos), pos + 8); the position stays at pos when nothing is read.
+- `bytes.get_i64_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count i64 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_i64_le(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as i64 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_i64_be(b: Bytes, pos: Int) -> Option[Int]` — The i64 BE at pos; none unless 8 bytes fit.
+- `bytes.next_i64_be(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_i64_be(b, pos), pos + 8); the position stays at pos when nothing is read.
+- `bytes.get_i64_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Int]]` — count i64 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_i64_be(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x as i64 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_f32_le(b: Bytes, pos: Int) -> Option[Float]` — The f32 LE at pos; none unless 4 bytes fit.
+- `bytes.next_f32_le(b: Bytes, pos: Int) -> (Option[Float], Int)` — (get_f32_le(b, pos), pos + 4); the position stays at pos when nothing is read.
+- `bytes.get_f32_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]` — count f32 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_f32_le(mut b: Bytes, pos: Int, x: Float) -> Unit` — Writes x as f32 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_f32_be(b: Bytes, pos: Int) -> Option[Float]` — The f32 BE at pos; none unless 4 bytes fit.
+- `bytes.next_f32_be(b: Bytes, pos: Int) -> (Option[Float], Int)` — (get_f32_be(b, pos), pos + 4); the position stays at pos when nothing is read.
+- `bytes.get_f32_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]` — count f32 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_f32_be(mut b: Bytes, pos: Int, x: Float) -> Unit` — Writes x as f32 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_f64_le(b: Bytes, pos: Int) -> Option[Float]` — The f64 LE at pos; none unless 8 bytes fit.
+- `bytes.next_f64_le(b: Bytes, pos: Int) -> (Option[Float], Int)` — (get_f64_le(b, pos), pos + 8); the position stays at pos when nothing is read.
+- `bytes.get_f64_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]` — count f64 LE from pos; none unless all fit or if count < 0.
+- `bytes.put_f64_le(mut b: Bytes, pos: Int, x: Float) -> Unit` — Writes x as f64 LE at pos in place; a window outside 0..len aborts.
+- `bytes.get_f64_be(b: Bytes, pos: Int) -> Option[Float]` — The f64 BE at pos; none unless 8 bytes fit.
+- `bytes.next_f64_be(b: Bytes, pos: Int) -> (Option[Float], Int)` — (get_f64_be(b, pos), pos + 8); the position stays at pos when nothing is read.
+- `bytes.get_f64_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]` — count f64 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_f64_be(mut b: Bytes, pos: Int, x: Float) -> Unit` — Writes x as f64 BE at pos in place; a window outside 0..len aborts.
+- `bytes.get_f16_le(b: Bytes, pos: Int) -> Option[Float]` — The f16 LE at pos as a Float; none unless 2 bytes fit.
+- `bytes.next_f16_le(b: Bytes, pos: Int) -> (Option[Float], Int)` — (get_f16_le(b, pos), pos + 2); the position stays at pos when nothing is read.
+- `bytes.get_f16_le_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]` — count f16 LE from pos; none unless all fit or if count < 0.
+- `bytes.get_f16_be(b: Bytes, pos: Int) -> Option[Float]` — The f16 BE at pos as a Float; none unless 2 bytes fit.
+- `bytes.next_f16_be(b: Bytes, pos: Int) -> (Option[Float], Int)` — (get_f16_be(b, pos), pos + 2); the position stays at pos when nothing is read.
+- `bytes.get_f16_be_array(b: Bytes, pos: Int, count: Int) -> Option[List[Float]]` — count f16 BE from pos; none unless all fit or if count < 0.
+- `bytes.put_f16_le(mut b: Bytes, pos: Int, x: Float) -> Unit` — Writes x rounded to f16 LE at pos in place; a window outside 0..len aborts.
+- `bytes.put_f16_be(mut b: Bytes, pos: Int, x: Float) -> Unit` — Writes x rounded to f16 BE at pos in place; a window outside 0..len aborts.
+- `bytes.append_f16_le(mut b: Bytes, x: Float) -> Unit` — Appends x rounded to f16 (nearest even; overflow is inf), LE.
+- `bytes.append_f16_be(mut b: Bytes, x: Float) -> Unit` — Appends x rounded to f16 (nearest even; overflow is inf), BE.
+- `bytes.next_bytes(b: Bytes, pos: Int, n: Int) -> (Option[Bytes], Int)` — (the n bytes at pos, pos + n); (none, pos) unless they fit or if n < 0.
+- `bytes.append_bytes(mut b: Bytes, src: Bytes) -> Unit` — Appends src's bytes to b in place.
+- `bytes.new() -> Bytes` — An empty byte buffer.
+- `bytes.chunk(b: Bytes, n: Int) -> List[Bytes]` — n-byte pieces in order, the last may be short; n <= 0 aborts.
+- `bytes.pop(mut b: Bytes) -> Option[Int]` — Removes and returns the last byte; none if b is empty.
+- `bytes.take(b: Bytes, n: Int) -> Bytes` — The first n bytes; all of b past its length; n < 0 aborts.
+- `bytes.drop(b: Bytes, n: Int) -> Bytes` — b without its first n bytes; empty past its length; n < 0 aborts.
+- `bytes.take_end(b: Bytes, n: Int) -> Bytes` — The last n bytes; all of b past its length; n < 0 aborts.
+- `bytes.drop_end(b: Bytes, n: Int) -> Bytes` — b without its last n bytes; empty past its length; n < 0 aborts.
+- `bytes.split_at(b: Bytes, n: Int) -> (Bytes, Bytes)` — (first n bytes, the rest); n past the end gives (b, empty); n < 0 aborts.
+- `bytes.first(b: Bytes) -> Option[Int]` — The first byte, or none if b is empty.
+- `bytes.last(b: Bytes) -> Option[Int]` — The last byte, or none if b is empty.
+- `bytes.filter(b: Bytes, f: (Int) -> Bool) -> Bytes` — The bytes for which f is true.
+- `bytes.fold(b: Bytes, init: B, f: (B, Int) -> B) -> B` — f folded over the bytes, left to right.
+- `bytes.any(b: Bytes, f: (Int) -> Bool) -> Bool` — True when f holds for some byte; false for empty b.
+- `bytes.all(b: Bytes, f: (Int) -> Bool) -> Bool` — True when f holds for every byte; true for empty b.
+- `bytes.count(b: Bytes, f: (Int) -> Bool) -> Int` — How many bytes satisfy f.
+- `bytes.find(b: Bytes, f: (Int) -> Bool) -> Option[Int]` — The first byte satisfying f, or none.
+- `bytes.find_index(b: Bytes, f: (Int) -> Bool) -> Option[Int]` — Index of the first byte satisfying f, or none.
+- `bytes.enumerate(b: Bytes) -> List[(Int, Int)]` — (index, byte) pairs from 0.
+- `bytes.zip(b: Bytes, ys: List[B]) -> List[(Int, B)]` — Bytes paired with ys; stops at the shorter.
+- `bytes.zip_with(b: Bytes, ys: List[B], f: (Int, B) -> C) -> List[C]` — f over bytes paired with ys; stops at the shorter.
+- `bytes.filter_map(b: Bytes, f: (Int) -> Option[B]) -> List[B]` — The some results of f over the bytes, in order.
+- `bytes.find_map(b: Bytes, f: (Int) -> Option[B]) -> Option[B]` — The first some result of f over the bytes, or none.
+- `bytes.reduce(b: Bytes, f: (Int, Int) -> Int) -> Option[Int]` — f folded over the bytes from the first; none if b is empty.
+- `bytes.scan(b: Bytes, init: B, f: (B, Int) -> B) -> List[B]` — The running fold over the bytes, init excluded.
+- `bytes.partition(b: Bytes, f: (Int) -> Bool) -> (List[Int], List[Int])` — (bytes where f is true, the rest), each in order.
+- `bytes.group_by(b: Bytes, f: (Int) -> B) -> Map[B, List[Int]]` — Bytes grouped by f's key, each group in order.
+- `bytes.sort(b: Bytes) -> List[Int]` — The bytes in ascending order.
+- `bytes.sort_by(b: Bytes, f: (Int) -> B) -> List[Int]` — The bytes ordered by f's key; equal keys keep their order.
+- `bytes.sort_with(b: Bytes, cmp: (Int, Int) -> Int) -> List[Int]` — The bytes ordered by cmp (negative = first argument first); stable.
+- `bytes.min(b: Bytes) -> Option[Int]` — The smallest byte; none if empty.
+- `bytes.max(b: Bytes) -> Option[Int]` — The largest byte; none if empty.
+- `bytes.min_by(b: Bytes, f: (Int) -> K) -> Option[Int]` — The first byte with the smallest key; none if empty.
+- `bytes.max_by(b: Bytes, f: (Int) -> K) -> Option[Int]` — The last byte with the largest key; none if empty.
+- `bytes.min_with(b: Bytes, cmp: (Int, Int) -> Int) -> Option[Int]` — The first smallest byte by cmp; none if empty.
+- `bytes.max_with(b: Bytes, cmp: (Int, Int) -> Int) -> Option[Int]` — The last largest byte by cmp; none if empty.
+- `bytes.sum(b: Bytes) -> Int` — The sum of the bytes; 0 for empty b.
+- `bytes.product(b: Bytes) -> Int` — The product of the bytes, wrapping; 1 for empty b.
+- `bytes.take_while(b: Bytes, f: (Int) -> Bool) -> Bytes` — The longest prefix whose bytes all satisfy f.
+- `bytes.drop_while(b: Bytes, f: (Int) -> Bool) -> Bytes` — b after the longest prefix whose bytes all satisfy f.
+- `bytes.window(b: Bytes, n: Int) -> List[Bytes]` — Every run of n consecutive bytes; [] if n > len; n <= 0 aborts.
+- `bytes.dedup(b: Bytes) -> Bytes` — b with each run of equal adjacent bytes collapsed to one.
+- `bytes.intersperse(b: Bytes, sep: Int) -> Bytes` — The bytes of b with sep between each pair.
+- `bytes.unique(b: Bytes) -> Bytes` — The first occurrence of each byte value, in order.
+- `bytes.unique_by(b: Bytes, f: (Int) -> K) -> Bytes` — The first byte of each key f gives, in order.
+- `bytes.last_index_of(b: Bytes, needle: Bytes) -> Option[Int]` — Byte index of the last needle, or none; an empty needle is found at len.
+- `bytes.replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes` — b with every non-overlapping from replaced by to, left to right.
+- `bytes.replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes` — b with the first from replaced by to.
+- `bytes.strip_prefix(b: Bytes, prefix: Bytes) -> Option[Bytes]` — b without prefix, or none when b does not start with it.
+- `bytes.strip_suffix(b: Bytes, suffix: Bytes) -> Option[Bytes]` — b without suffix, or none when b does not end with it.
+- `bytes.count_matches(b: Bytes, needle: Bytes) -> Int` — Non-overlapping occurrences of needle; len + 1 for an empty needle.
 
 ## compute
 

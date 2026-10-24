@@ -4,7 +4,7 @@
 // rewrites `bytes.push(buf, x)` to a functional rebind `buf = bytes.append(buf, x)` (bytes_core's
 // self-hosted append). Byte-matches v0 (length 3 for 0x010203).
 fn fi(n: Int) -> Bytes = {
-  var buf = bytes.new(0)
+  var buf = bytes.zeros(0)
   var v = n
   while v > 0 {
     bytes.push(buf, int.band(v, 0xFF))

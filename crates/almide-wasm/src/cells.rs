@@ -58,7 +58,7 @@ impl IrVisitor for Scan {
                 // of mutators lived here and drifted twice: bytes' writers
                 // were missing (the develop wasm_runtime catch), and then
                 // every bytes writer but six still was — a captured Bytes
-                // written through `bytes.set_u8` took the env value-copy
+                // written through `bytes.put_u8` took the env value-copy
                 // path and the write was lost (#2951).
                 // The written place may be a field or tuple slot of the
                 // var (`list.push(h.xs, 1)`, #2961): its ROOT is mutated.

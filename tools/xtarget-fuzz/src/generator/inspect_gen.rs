@@ -1197,7 +1197,7 @@ fn sized(t: &GenType, n: u64) -> String {
         GenType::String => format!("string.repeat(\"aé\", {n})"),
         GenType::List(e) => format!("list.range(0, {n}) |> list.map((i) => {})", elem(e)),
         GenType::Map(v) => format!("list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${{100000000 + i}}\", {}))", elem(v)),
-        GenType::Bytes => format!("bytes.new({n})"),
+        GenType::Bytes => format!("bytes.zeros({n})"),
         GenType::Matrix => format!("matrix.zeros({n}, 2)"),
         // An object of n keys: what `field` / `keys` / `pick` / `omit` /
         // `merge` and the case converters walk. Keys and values are fixed
@@ -1646,14 +1646,14 @@ pub(crate) mod tests {
     fn a_mutator_is_called_on_a_var_and_each_diamond_path_prints_its_own_copy() {
         let t = target("bytes.push");
         let direct = t.direct_program(1000, 4, true);
-        assert!(direct.contains("  var x: Bytes = bytes.new(1000)"), "{direct}");
+        assert!(direct.contains("  var x: Bytes = bytes.zeros(1000)"), "{direct}");
         assert!(direct.contains("let r: Unit = bytes.push(x, "), "{direct}");
         let project = t.diamond_project(1000);
         let file = |suffix: &str| project.files.iter().find(|(p, _)| p.ends_with(suffix)).map(|(_, s)| s.clone()).unwrap();
         assert!(file("base.almd").contains("pub fn call(mut a0: Bytes, a1: Int) -> Unit = bytes.push(a0, a1)"), "{}", file("base.almd"));
         let main = file("main.almd");
         for v in ["d", "l", "r"] {
-            assert!(main.contains(&format!("  var {v}m: Bytes = bytes.new(1000)")), "{main}");
+            assert!(main.contains(&format!("  var {v}m: Bytes = bytes.zeros(1000)")), "{main}");
             assert!(main.contains(&format!("let {v}m_o: List[Int] = bytes.to_list({v}m)\n  println(\"{v}m = ${{{v}m_o}}\")")), "{main}");
         }
         assert!(main.contains("println(\"d = ()\")"), "a Unit return prints its one value, not its string form (E089): {main}");

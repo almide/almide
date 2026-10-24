@@ -619,7 +619,7 @@ impl LowerCtx {
 
     /// #906: COW the STORAGE SLOT of a mutable module-level `var` before an in-place
     /// mutator writes through it — nendo's module-level scratch arena
-    /// (`var g_pool = bytes.new(N)` + `bytes.set_f32_le(g_pool, …)`), which walled with
+    /// (`var g_pool = bytes.zeros(N)` + `bytes.put_f32_le(g_pool, …)`), which walled with
     /// "use of unbound var" because a mutable global never enters `value_of`.
     ///
     /// The slot owns the block, so this is the two-level COW with the RECORD level
@@ -702,7 +702,7 @@ impl LowerCtx {
 /// #3261 / #3265: the vars whose block, or a block on their field path, may be
 /// released or written in place before scope end somewhere in `body`:
 /// - the receiver root of an in-place mutator (`list.pop(cell.words)`,
-///   `list.pop(xs)`, `bytes.set_u8(p.buf, …)`): the two-level field COW
+///   `list.pop(xs)`, `bytes.put_u8(p.buf, …)`): the two-level field COW
 ///   releases the var's old block, and a unique list is popped in place;
 /// - the target of a write (`xs = …`, `xs[i] = …`, `cell.f = …`, `m[k] = …`,
 ///   and a `mut`-param call's write-back `xs = f(xs)`): under a branch or a
@@ -760,6 +760,8 @@ pub(crate) fn place_root(e: &IrExpr) -> Option<VarId> {
 }
 
 pub(crate) fn is_inplace_mutator(module: &str, func: &str) -> bool {
+    // `bytes.__set_*` is the width primitive under the checked `bytes.put_*`.
+    let func = if module == "bytes" { func.strip_prefix("__").unwrap_or(func) } else { func };
     (module == "bytes"
         && (func.starts_with("set_")
             || func.starts_with("write_")

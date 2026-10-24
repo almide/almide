@@ -7,7 +7,7 @@
 import bytes
 
 effect fn main() -> Unit = {
-  var b: Bytes = bytes.new(0)
+  var b: Bytes = bytes.zeros(0)
   bytes.write_uint16(b, 0xABCD.to_uint16(), LittleEndian)
   bytes.write_uint32(b, 0xDEADBEEF.to_uint32(), BigEndian)
   bytes.write_int32(b, (-2).to_int32(), LittleEndian)

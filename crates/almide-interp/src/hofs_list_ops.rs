@@ -741,15 +741,21 @@ impl<'a> Interpreter<'a> {
 /// `set_*` / `append_*` / `write_*` families do not — they are `@intrinsic`s whose
 /// mutation lives in the native signature (`&mut Vec<u8>`), invisible to the `.almd`
 /// declaration. So an enumerated list here had nothing to be checked against and
-/// silently fell behind: `bytes.set_f32_le` reported the generic "unknown
+/// silently fell behind: `bytes.put_f32_le` reported the generic "unknown
 /// capability" abstain instead of naming what it actually is, which is what the
 /// ledger gate caught on `mutable_global_bytes_arena`. Every `set_*`/`append_*`/
 /// `write_*` in `stdlib/bytes.almd` returns Unit and mutates in place, and the
 /// functional `bytes.set(b, i, v) -> Bytes` is excluded by the underscore — the
 /// prefix is the whole rule, and a new family member is covered on arrival.
 pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
+    // `bytes.__set_*` is the width primitive under the checked `bytes.put_*`.
+    let func = if module == "bytes" { func.strip_prefix("__").unwrap_or(func) } else { func };
     if module == "bytes"
-        && (func.starts_with("set_") || func.starts_with("append_") || func.starts_with("write_"))
+        && (func.starts_with("set_")
+            || func.starts_with("put_")
+            || func.starts_with("append_")
+            || func.starts_with("write_"))
+        && crate::inplace::bytes_write_op(func).is_some()
     {
         return true;
     }
@@ -764,6 +770,7 @@ pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
             | ("string", "push")
             | ("string", "clear")
             | ("bytes", "push")
+            | ("bytes", "pop")
             | ("bytes", "clear")
             | ("bytes", "fill")
             | ("bytes", "copy_from")

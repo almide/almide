@@ -9,9 +9,9 @@
 // borrowed cell turns one var's Result into an Option twice and reads the
 // Result again afterwards: its cells hold VIEWS of the carrier's payload, so
 // they must not spend the carrier's credit.
-effect fn mko(v: Int) -> Bytes = if v % 3 == 2 then err("skip") else ok(bytes.new(64))
+effect fn mko(v: Int) -> Bytes = if v % 3 == 2 then err("skip") else ok(bytes.zeros(64))
 
-fn mkr(v: Int) -> Result[Bytes, String] = if v % 3 == 2 then err("skip") else ok(bytes.new(64))
+fn mkr(v: Int) -> Result[Bytes, String] = if v % 3 == 2 then err("skip") else ok(bytes.zeros(64))
 
 fn width(o: Bytes?) -> Int = match o {
   some(b) => bytes.len(b),

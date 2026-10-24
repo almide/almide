@@ -79,7 +79,7 @@ effect fn main() -> Unit = {
   println("m=" + show_map(m))
   // Bytes: every window writer on a local, the growth push and the writers
   // through `mut` params, and a captured var.
-  var b = bytes.new(4)
+  var b = bytes.zeros(4)
   bytes.fill(b, 3)
   bytes.write_u8(b, 513)
   bytes.copy_within(b, 0, 2, 3)
@@ -90,7 +90,7 @@ effect fn main() -> Unit = {
   grow(b, 20)
   stamp(b)
   println("b.len=" + int.to_string(bytes.len(b)) + " tail=" + int.to_string(bytes.get_or(b, 24, -1)))
-  var c = bytes.new(3)
+  var c = bytes.zeros(3)
   let cw = () => bytes.copy_within(c, 0, 1, 1)
   cw()
   println("c=" + show_bytes(c))

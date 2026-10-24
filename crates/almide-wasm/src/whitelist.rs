@@ -246,7 +246,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // zlib_inflate.almd / zlib_deflate.almd (#1700, audited 2026-09-01):
     // the C-326 gzip decoder promoted to stdlib plus the stored-block
     // encoder. Every Result is built via language-level ok()/err(); the
-    // buffers are bytes.new/bytes.push/bytes.get_or (public surface — the
+    // buffers are bytes.zeros/bytes.push/bytes.get_or (public surface — the
     // exact construction the C-326 fixture already runs byte-identical on
     // the structural leg); no prim access at all. Parity evidence:
     // spec/wasm_cross/zlib_selfhost.almd (known-answer decode + round

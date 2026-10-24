@@ -1,7 +1,7 @@
 //! The mut-receiver and inlined-thunk witness hooks (#2755), split from
 //! witness_hooks.rs for the file budget.
 //!
-//! A mut RECEIVER (`list.push(xs, v)`'s `xs`, `bytes.set_u8(b, …)`'s `b`,
+//! A mut RECEIVER (`list.push(xs, v)`'s `xs`, `bytes.put_u8(b, …)`'s `b`,
 //! `string.push(h.f, s)`'s `h`) never passes `lower_arg`: the arm reads the
 //! var's slot and writes the result back. Every write-back site records the
 //! rebind ([`Emitter::witness_mut_rebind`]) and notes the var for the

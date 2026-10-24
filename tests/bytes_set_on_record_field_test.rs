@@ -31,7 +31,7 @@ fn main() -> Unit = {
 const SETS_IN_LOOP_AFTER_SNAPSHOT: &str = r#"
 type Pack = { tag: String, buf: Bytes }
 fn main() -> Unit = {
-  var acc = Pack { tag: "acc", buf: bytes.new(64) }
+  var acc = Pack { tag: "acc", buf: bytes.zeros(64) }
   let snap = acc
   for i in 0..<64 {
     bytes.set_at(acc.buf, i, i * 3)

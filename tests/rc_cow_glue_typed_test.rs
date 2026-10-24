@@ -3,18 +3,18 @@
 //! surrounding call, and a generic producer such as
 //! `almide_rt_option_unwrap_or_else(…)` then had nothing to fix it (E0282 in
 //! the generated Rust; the program type-checks and runs on wasm). Found by the
-//! inspection's parity campaign (`bytes.read_u32_le`, seed 1791720899).
+//! inspection's parity campaign (`bytes.get_u32_le`, seed 1791720899).
 use std::process::Command;
 
 const SOURCE: &str = r#"effect fn main() -> Unit = {
-  let r3: Int = bytes.read_u32_le(
+  let r3: Int = bytes.get_u32_le(
     option.unwrap_or_else(
       list.find(list.repeat(bytes.from_list([0, 2, 1]), 5), (s2) => false),
       () => bytes.from_list([7, 0, 0, 0]),
     ),
     0,
-  )
-  let r4: Int = bytes.len(option.unwrap_or_else(list.find([bytes.from_list([1, 2, 3])], (b) => true), () => bytes.new(0)))
+  ) ?? 0
+  let r4: Int = bytes.len(option.unwrap_or_else(list.find([bytes.from_list([1, 2, 3])], (b) => true), () => bytes.zeros(0)))
   let r5: Int = matrix.rows(option.unwrap_or_else(list.find([matrix.zeros(2, 3)], (m) => false), () => matrix.zeros(4, 1)))
   println("${r3} ${r4} ${r5}")
 }

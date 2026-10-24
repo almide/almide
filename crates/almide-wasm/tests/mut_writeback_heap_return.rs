@@ -55,7 +55,7 @@ fn fill(mut out: Bytes, n: Int) -> {ret_ty} = {{
 }}
 
 fn run(nb: Int) -> Int = {{
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   var acc = 0
   var i = 0
   while i < nb {{
@@ -105,7 +105,7 @@ const ALIAS: &str = r#"fn fill(mut out: Bytes, n: Int) -> (Int, String) = {
 }
 
 fn main() -> Unit = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   var log = ""
   var i = 0
   while i < 3 {
@@ -141,7 +141,7 @@ fn boxed(mut out: Bytes, v: Int) -> Box = {
 }
 
 fn main() -> Unit = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   var keep: List[Bytes] = []
   var i = 0
   while i < 3 {

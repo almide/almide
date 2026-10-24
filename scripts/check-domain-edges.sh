@@ -45,7 +45,7 @@
 #
 # That decision is right and stays. It also draws the blind spot exactly over the
 # parameters the room guards read — `pos` is not in the name list, so
-# `bytes.set_f32_le` was found by fuzzing; `size` is, so `bytes.chunks` never
+# `bytes.put_f32_le` was found by fuzzing; `size` is, so `bytes.chunk` never
 # could be. This gate covers what the lottery structurally cannot.
 #
 # Usage:

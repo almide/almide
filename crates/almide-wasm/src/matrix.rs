@@ -102,7 +102,7 @@ impl Emitter<'_> {
                 // after a released matrix printed the dead block's cells
                 // (#1423 stage 4, found the day the structural leg took the
                 // matrix ops that free their temporaries). The mat_alloc_out64
-                // / bytes.new lesson, met a third time.
+                // / bytes.zeros lesson, met a third time.
                 let mut i = self.f.instructions();
                 i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32 + 8).i32_add();
                 i.i32_const(0);

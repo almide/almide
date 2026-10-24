@@ -7,6 +7,6 @@
 fn main() -> Unit = {
   let small = bytes.from_list([1, 2, 3])
   println("before ${bytes.len(small)}")
-  let huge = bytes.new(9223372036854775807)
+  let huge = bytes.zeros(9223372036854775807)
   println("unreachable ${bytes.len(huge)}")
 }

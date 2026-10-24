@@ -81,7 +81,7 @@ fn zld_adler32(b: Bytes) -> Int = {
 
 // ── The stdlib entry points ──
 effect fn zlib_deflate(data: Bytes) -> Result[Bytes, String] = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   zld_stored_stream(data, out)
   ok(out)
 }
@@ -92,7 +92,7 @@ effect fn zlib_deflate_level(data: Bytes, level: Int) -> Result[Bytes, String] =
 }
 
 effect fn zlib_compress(data: Bytes) -> Result[Bytes, String] = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   bytes.push(out, 120)
   bytes.push(out, 1)
   zld_stored_stream(data, out)
@@ -110,7 +110,7 @@ effect fn zlib_compress_level(data: Bytes, level: Int) -> Result[Bytes, String] 
 }
 
 effect fn zlib_gzip(data: Bytes) -> Result[Bytes, String] = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   bytes.push(out, 31)
   bytes.push(out, 139)
   bytes.push(out, 8)

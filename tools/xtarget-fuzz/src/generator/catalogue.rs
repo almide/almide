@@ -475,7 +475,7 @@ mod availability_tests {
 
     #[test]
     fn a_program_calling_an_import_only_module_gets_its_import() {
-        let src = "fn main() -> Unit = {\n  let a = base64.encode(bytes.new(2))\n  let b = regex.is_match(\"a\", \"a\")\n}\n";
+        let src = "fn main() -> Unit = {\n  let a = base64.encode(bytes.zeros(2))\n  let b = regex.is_match(\"a\", \"a\")\n}\n";
         assert_eq!(imports_for(src), "import base64\nimport regex\n");
         // auto-imported modules and look-alike identifiers need none
         assert_eq!(imports_for("let x = error.chain(\"a\", \"b\")\nlet y = mypath.x"), "");

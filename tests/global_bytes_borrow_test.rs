@@ -27,7 +27,7 @@ fn almide_bin() -> String {
 }
 
 const SRC: &str = r#"
-var pending: Bytes = bytes.new(0)
+var pending: Bytes = bytes.zeros(0)
 var chunks: List[Bytes] = []
 var last: Bytes? = none
 let TBL = bytes.from_list([16, 32, 48])
@@ -83,7 +83,7 @@ fn global_bytes_passed_to_user_fns_on_wasm() {
 /// The same globals and fns in a non-entry module, called from inside it —
 /// where a call to the module's own fn is spelled `almide_rt_buf_<fn>`.
 const MODULE_SRC: &str = r#"
-var pending: Bytes = bytes.new(0)
+var pending: Bytes = bytes.zeros(0)
 var chunks: List[Bytes] = []
 var last: Bytes? = none
 let TBL = bytes.from_list([16, 32, 48])

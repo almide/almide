@@ -114,7 +114,7 @@ pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> {
     for _ in 0..n { v.extend_from_slice(b); }
     v
 }
-pub fn almide_rt_bytes_new(len: i64) -> Vec<u8> {
+pub fn almide_rt_bytes_zeros(len: i64) -> Vec<u8> {
     let n = len.max(0) as usize;
     let mut v = alloc_bytes_or_oom(n);
     v.resize(n, 0);

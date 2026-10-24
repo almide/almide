@@ -21,7 +21,7 @@ effect fn main() -> Unit = {
   var fresh = 0
   var i = 0
   while i < 2000 {
-    var b = bytes.new(1024)
+    var b = bytes.zeros(1024)
     poke(b, int.band(i, 255))!
     fresh = fresh + bytes.get_or(b, 0, 0)
     i = i + 1
@@ -29,7 +29,7 @@ effect fn main() -> Unit = {
   println("fresh=${fresh}")
   // ONE long-lived buffer: the count that used to grow by one per call, with
   // nothing but the count to show for it.
-  var held = bytes.new(64)
+  var held = bytes.zeros(64)
   var j = 0
   while j < 2000 {
     poke(held, int.band(j, 127))!
@@ -41,7 +41,7 @@ effect fn main() -> Unit = {
   var sum = 0
   var k = 0
   while k < 2000 {
-    let t = bytes.new(8)
+    let t = bytes.zeros(8)
     sum = sum + width(t)!
     k = k + 1
   }

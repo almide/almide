@@ -65,7 +65,7 @@ fn unwrap_or_call_name_option_value_family(arg_tys: &[Ty]) -> Option<String> {
 /// FLAT scalar-element list payload (`map.get(groups, "0") ?? []` — Option[List[Int]], the
 /// group_by class): the rc-correct flat variant. A scalar TUPLE, a NESTED `Option[<scalar>]`
 /// payload (C-149), or a Bytes payload is the SAME flat block shape (uniform slots / raw
-/// bytes @12, flat rc_dec drop) — bytes.chunks' element class. Verbatim.
+/// bytes @12, flat rc_dec drop) — bytes.chunk' element class. Verbatim.
 fn unwrap_or_call_name_option_flat_scalar(arg_tys: &[Ty]) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
     let Some(Ty::Applied(TypeConstructorId::Option, a)) = arg_tys.first() else { return None };

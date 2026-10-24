@@ -9,7 +9,7 @@ import io
 
 fn compute_chunk(y_start: Int, y_end: Int, n: Int, inv_n: Float) -> Bytes = {
   let cr_step = 2.0 / inv_n
-  var result = bytes.new((y_end - y_start) * ((n + 7) / 8))
+  var result = bytes.zeros((y_end - y_start) * ((n + 7) / 8))
   bytes.clear(result)
 
   var y = y_start

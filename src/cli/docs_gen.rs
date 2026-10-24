@@ -23,6 +23,8 @@ use crate::{err, out};
 
 #[path = "docs_gen_counts.rs"]
 mod counts;
+#[path = "docs_gen_bytes_matrix.rs"]
+mod bytes_matrix;
 
 const LLMS_TXT: &str = "llms.txt";
 const DIAGNOSTICS_DIR: &str = "docs/diagnostics";
@@ -52,9 +54,10 @@ pub fn cmd_docs_gen(check: bool) {
     drifts.extend(check_numeric_conversion_matrix());
     drifts.extend(check_numeric_protocol_matrix());
     drifts.extend(check_builtin_conformance_matrix());
+    drifts.extend(check_bytes_io_matrix());
 
     if drifts.is_empty() {
-        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection, stdlib count, numeric matrix, numeric protocol matrix, built-in conformance matrix)"));
+        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection, stdlib count, numeric matrix, numeric protocol matrix, built-in conformance matrix, bytes IO matrix)"));
         return;
     }
 
@@ -333,6 +336,17 @@ fn module_function_names(m: &str) -> std::collections::HashSet<String> {
     let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
     let iface = almide::interface::extract(&ir, m, Some(&source_text));
     iface.functions.iter().map(|f| f.name.clone()).collect()
+}
+
+/// The typed byte IO matrix (`docs_gen_bytes_matrix.rs`), checked against
+/// `bytes`' interface as the compiler extracts it.
+fn check_bytes_io_matrix() -> Vec<String> {
+    let (file, bundled_module) = super::compile::resolve_module_to_file("bytes");
+    let (program, source_text, checker) =
+        super::compile::parse_and_typecheck_for_compile(&file, bundled_module.as_deref());
+    let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+    let iface = almide::interface::extract(&ir, "bytes", Some(&source_text));
+    bytes_matrix::check(&iface.functions)
 }
 
 /// The built-in conformances, as a matrix read from the protocol declaration

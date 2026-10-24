@@ -40,7 +40,7 @@ effect fn main() -> Unit = {
   println("matrix ${ms |> list.map((m) => matrix.get(m, 0, 0))}")
   let ms_id = fs.fold_lines_chunked(p, 3, matrix.from_lists([[1.0]]), (m, l) => m)!
   println("matrix-id ${ms_id |> list.map((m) => matrix.get(m, 0, 0))}")
-  let bs = fs.fold_lines_chunked(p, 3, bytes.new(0), (b, l) => bytes.concat(b, bytes.from_string(l)))!
+  let bs = fs.fold_lines_chunked(p, 3, bytes.zeros(0), (b, l) => bytes.concat(b, bytes.from_string(l)))!
   println("bytes ${bs |> list.map((b) => bytes.to_string(b) ?? "?")}")
   let k = bytes.from_string("kk")
   let cs = fs.fold_lines_chunked(p, 2, 0, (n, l) => n + bytes.len(k) + string.len(l))!
@@ -58,7 +58,7 @@ effect fn main() -> Unit = {
   println("int ${ns}")
   let e = d + "/empty.txt"
   fs.write(e, "")!
-  let parts = fs.fold_lines_chunked(e, 4, bytes.new(1), (b, l) => b)!
+  let parts = fs.fold_lines_chunked(e, 4, bytes.zeros(1), (b, l) => b)!
   println("empty ${list.len(parts)}")
   fs.remove_all(d)!
 }

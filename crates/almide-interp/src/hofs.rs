@@ -74,7 +74,7 @@ impl<'a> Interpreter<'a> {
             ("option", _) => self.eval_hof_option(f, &evaled),
             ("result", _) => self.eval_hof_result(f, &evaled),
             ("set", _) => self.eval_hof_set(f, &evaled),
-            ("bytes", "map_each") => self.hof_bytes_map_each(&evaled),
+            ("bytes", "map") => self.hof_bytes_map(&evaled),
             ("fs", "__fallible_fold_lines") => self.hof_fs_try_fold_lines(&evaled),
             ("fs", "for_each_line") => self.hof_fs_for_each_line(&evaled, false),
             ("fs", "__fallible_for_each_line") => self.hof_fs_for_each_line(&evaled, true),
@@ -176,13 +176,13 @@ impl<'a> Interpreter<'a> {
         Ok(lines)
     }
 
-    /// `bytes.map_each(b, f)` — every octet through `f` once, in order, the
+    /// `bytes.map(b, f)` — every octet through `f` once, in order, the
     /// result TRUNCATED to u8 (native `f(*x as i64) as u8`, the wasm twins'
     /// `band(v, 255)`). The Bytes model is a list of octets, so this is
     /// `hof_map` plus the truncation the #1505 lesson demands of every
     /// byte store (an untruncated `-1` would vote `-1` where both targets
     /// print `255`).
-    fn hof_bytes_map_each(&mut self, args: &[Value]) -> Flow {
+    fn hof_bytes_map(&mut self, args: &[Value]) -> Flow {
         let items = match Self::recv_items(args) {
             Ok(i) => i,
             Err(f) => return f,
