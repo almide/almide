@@ -33659,8 +33659,10 @@ fn new[A](x: A) -> Secret[A] = { hidden: x }
 /// The value s wraps.
 fn reveal[A](s: Secret[A]) -> A = s.hidden
 
-/// `Secret(***)`, for every A: the one form every renderer prints.
-fn Secret.repr[A](s: Secret[A]) -> String = "Secret(***)"
+/// `Secret(***)`, for every A: the one form every renderer prints. A
+/// convention method of the type, not a module fn: `mod`, so it is no entry
+/// of the module's public surface, and every renderer still reaches it.
+mod fn Secret.repr[A](s: Secret[A]) -> String = "Secret(***)"
 "#;
 pub const SRC_SET: &str = r#"
 
