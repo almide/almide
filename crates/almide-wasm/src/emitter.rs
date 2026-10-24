@@ -289,24 +289,28 @@ impl Emitter<'_> {
         self.f.instructions().local_set(hold);
         self.lower(index, Some(INT))?;
         let idx = self.hold_i64()?;
+        // #4005: the witness records the check where it is emitted and the
+        // read where it is emitted (witness_bounds.rs).
+        let site = self.bounds_site(list_var, index);
         if known {
             self.f.instructions().local_set(idx);
         } else {
             self.f.instructions().local_tee(idx);
-            self.emit_read_bounds_check(hold, hoisted, stride);
+            self.emit_read_bounds_check(hold, hoisted, stride, site);
         }
         if let Some(id) = list_var {
-            self.bounds_note(id, index, !known, false);
+            self.bounds_note(id, index, !known);
         }
         let off = self.emit_elem_addr(list_var, hold, idx, index, i64::from(stride))?;
         self.load_slot_off(elem, off);
+        crate::witness::bounds::access(site, false);
         self.release_i64();
         self.release_i32();
         Ok(elem)
     }
 
     /// The read's bounds check of the index on the stack (consumed).
-    fn emit_read_bounds_check(&mut self, hold: u32, hoisted: Option<u32>, stride: u32) {
+    fn emit_read_bounds_check(&mut self, hold: u32, hoisted: Option<u32>, stride: u32, site: Option<crate::witness::bounds::Site>) {
         let msg = self.pool.intern("index out of bounds");
         // ONE UNSIGNED compare (#2319): `idx >=u count` is exactly
         // `idx < 0 || idx >= count` — a negative i64 index reads as a value
@@ -329,6 +333,7 @@ impl Emitter<'_> {
             i.if_(BlockType::Empty);
             i.i32_const(msg as i32);
         }
+        crate::witness::bounds::check(site);
         // #2755: out of bounds ABORTS the process — a recorded abort
         // terminal on its own arm (data_unwrap.rs `abort_frame`).
         self.witness_branch_open();
