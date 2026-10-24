@@ -280,7 +280,15 @@ pub fn convention_fn_key(env: &TypeEnv, type_name: &str, method: &str) -> Option
         return Some(qualified);
     }
     let k = sym(&format!("{}.{}", bare_type_name(type_name), method));
-    env.functions.contains_key(&k).then_some(k)
+    if env.functions.contains_key(&k) {
+        return Some(k);
+    }
+    // A bundled module's own type keeps its BARE name (`Secret`), while the
+    // module's explicit method registers under the module prefix
+    // (`secret.Secret.repr`, #4107): the owner module names the key.
+    let owner = almide_lang::stdlib_info::stdlib_owned_type_owner(bare_type_name(type_name))?;
+    let owned = sym(&format!("{}.{}.{}", owner, bare_type_name(type_name), method));
+    env.functions.contains_key(&owned).then_some(owned)
 }
 
 fn bare_type_name(type_name: &str) -> &str {
@@ -296,7 +304,14 @@ fn bare_type_name(type_name: &str) -> &str {
 /// Emitting the prefixed spelling produced calls to `lib_Color_repr` against a
 /// definition called `almide_rt_lib_Color_repr` (#1087).
 pub fn convention_emit_key(env: &TypeEnv, type_name: &str, method: &str) -> Option<Sym> {
-    convention_fn_key(env, type_name, method).map(|_| {
+    convention_fn_key(env, type_name, method).map(|held| {
+        // A bundled module's method (`secret.Secret.repr`, #4107) links under
+        // the key it was found by: there is one owner and no bare spelling.
+        if almide_lang::stdlib_info::stdlib_owned_type_owner(bare_type_name(type_name))
+            .is_some_and(|m| held.as_str() == format!("{}.{}.{}", m, bare_type_name(type_name), method))
+        {
+            return held;
+        }
         // A receiver whose canonical type is module-qualified (`moda.Box`)
         // emits the QUALIFIED method name ONLY when the bare spelling is
         // AMBIGUOUS — two modules each registered `<mod>.Box.tag`, so the

@@ -31,6 +31,8 @@ pub use types::lower_bundled_type_decl;
 mod derive;
 mod derive_codec;
 mod auto_try;
+mod declared_repr;
+mod secret_eq;
 
 use expressions::lower_expr;
 pub(crate) use calls::{qualify_callee_module_idents, substitute_call_params};
@@ -76,6 +78,9 @@ pub struct LowerCtx<'a> {
     pub annotated_result_vars: std::collections::HashSet<VarId>,
     /// Functions synthesized during expression lowering (fan.bounded outlining).
     pub synthesized_fns: Vec<almide_ir::IrFunction>,
+    /// Declared-repr walkers being synthesized (`declared_repr.rs`, #4107):
+    /// a recursive type names its own walker before the body exists.
+    declared_repr_pending: Vec<Sym>,
     /// `testing.assert_aborts` sites lifted so far (ADR-0029), in declaration
     /// order: whether each lifted site fn is an effect fn. The dispatcher is
     /// synthesized from it once the program is lowered.
@@ -109,6 +114,7 @@ impl<'a> LowerCtx<'a> {
             in_test: false,
             annotated_result_vars: std::collections::HashSet::new(),
             synthesized_fns: Vec::new(),
+            declared_repr_pending: Vec::new(),
             bounded_counter: 0,
             abort_sites: Vec::new(),
             escaped_fns: std::collections::HashSet::new(),

@@ -208,7 +208,9 @@ impl Checker {
                 }
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 if let Some(n) = name {
-                    self.infer_expr_record_named(n, fields)
+                    let n = *n;
+                    self.reject_foreign_opaque_record(&Ty::Named(n, vec![]), "build a literal of");
+                    self.infer_expr_record_named(&n, fields)
                 } else {
                     let field_tys: Vec<(Sym, Ty)> = fields.iter().map(|f| {
                         let ty = self.type_map.get(&f.value.id).map(|it| resolve_ty(it, &self.uf)).unwrap_or(Ty::Unknown);

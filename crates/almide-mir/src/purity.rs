@@ -257,6 +257,7 @@ pub const PURE_MODULES: &[&str] = &[
     "result_core",
     "result_map",
     "result_to_string",
+    "secret",
     "set",
     "set_core",
     "set_str",

@@ -79,6 +79,7 @@ const MODULE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("set", "hash set operations"),
     ("deque", "double-ended queue"),
     ("heap", "priority queue (least first)"),
+    ("secret", "a value every renderer prints as Secret(***)"),
     ("args", "command-line arguments"),
     ("path", "file path manipulation"),
     ("base64", "Base64 encoding and decoding"),

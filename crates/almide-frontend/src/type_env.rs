@@ -316,6 +316,10 @@ pub struct TypeEnv {
     pub opaque_alias_visibility: std::collections::HashMap<Sym, crate::ast::Visibility>,
     /// Which module defined each opaque alias (None = main file).
     pub opaque_alias_module: std::collections::HashMap<Sym, Option<Sym>>,
+    /// A bundled module's `mod type` RECORD (`secret.Secret`, #4107): outside
+    /// its module the type is opaque — its fields cannot be read and its
+    /// literal cannot be written (E033). Bare type name → owning module.
+    pub opaque_records: std::collections::HashMap<Sym, Sym>,
 }
 
 impl TypeEnv {
@@ -382,6 +386,7 @@ impl TypeEnv {
             def_map: std::collections::HashMap::new(),
             opaque_alias_targets: std::collections::HashMap::new(),
             opaque_alias_visibility: std::collections::HashMap::new(),
+            opaque_records: std::collections::HashMap::new(),
             opaque_alias_module: std::collections::HashMap::new(),
             alias_owner_module: None,
             entry_bundled_module: None,
