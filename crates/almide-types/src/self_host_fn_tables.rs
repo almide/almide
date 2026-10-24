@@ -13,6 +13,7 @@ pub(crate) const BYTES_CORE_FNS: &[(&str, &str)] = &[("bytes_to_string", "bytes.
                 ("bytes_reverse", "bytes.reverse"),
                 ("bytes_repeat", "bytes.repeat"),
                 ("bytes_starts_with", "bytes.starts_with"),
+                ("bytes_is_equal_constant_time", "bytes.is_equal_constant_time"),
                 ("bytes_ends_with", "bytes.ends_with"),
                 ("bytes_slice", "bytes.slice"),
                 ("bytes_cmp", "bytes.compare"),

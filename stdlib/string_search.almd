@@ -12,6 +12,27 @@ else {
   else false
 }
 
+// Constant-time compare (#4106): OR-accumulate x ^ y over all n bytes. The only branch is
+// the index check `i >= n`; no byte value reaches a condition (unlike `__byte_eq`).
+fn __str_ct_acc(pa: Int, pb: Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+else __str_ct_acc(
+  pa,
+  pb,
+  n,
+  i + 1,
+  prim.bor(acc, prim.bxor(prim.load8(pa + i), prim.load8(pb + i))),
+)
+
+// string.is_equal_constant_time(a, b): a byte-length mismatch is false at once.
+fn string_is_equal_constant_time(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let na = prim.load32(ha + 4)
+  let nb = prim.load32(hb + 4)
+  if na != nb then false
+  else __str_ct_acc(ha + 12, hb + 12, na, 0, 0) == 0
+}
+
 fn string_starts_with(s: String, prefix: String) -> Bool = {
   let hs = prim.handle(s)
   let hp = prim.handle(prefix)
