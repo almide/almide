@@ -178,6 +178,7 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `certified_sited_memory_safe` | InitCert.v | Closed under the global context |
 | `reorder_memory_safe` | InitCert.v | Closed under the global context |
 | `check_init_cert_sound` | InitCert.v | Closed under the global context |
+| `fill_window` | InitCert.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -235,14 +236,18 @@ with no hypothesis about initialization or layout left; `reorder_memory_safe`
 proves MemorySafe invariant under swapping adjacent events on different
 blocks, so a site's window may interleave with its elements' own events;
 `check_init_cert_sound` puts the byte parser inside the proof (driver mode
-`init`). The structural leg emits the `init` witness per build for every list
-literal (crates/almide-wasm/src/witness_init.rs) and proofs/structural-wall.sh
+`init`); `fill_window` extends it to a LOOP FILL — a block sized from a
+run-time count and filled by a countdown loop — accepted when the loop counts
+down the same local the block was sized from and its cursor advances by one
+slot, and then MemorySafe and initializing at every count. The structural leg
+emits the `init` witness per build for every list literal and every range
+list (a loop fill) (crates/almide-wasm/src/witness_init.rs) and proofs/structural-wall.sh
 judges it with the extracted checker, the kernel and almide-verify (on the
 certified corpus, trust-spine run 40094443633: 2973 sites in 554 non-empty
 witnesses, all accepted); every
 other allocation site (records, variants, strings, the runtime's routines)
 records nothing yet, so `sited` — every allocation a recorded site — holds of
-a run only when all its allocations are list literals. TRUSTED: the recording
+a run only when all its allocations are list literals or ranges. TRUSTED: the recording
 discipline, and that a site's block stays private until its last store. And
 no certificate carries a trace yet, so the theorem the definition is for — `K(c, a) accepts ⟹ MemorySafe a`
 for a shipped artifact `a` — is still open (#4005, #4006, #1696). Until it is
@@ -281,7 +286,7 @@ The receipt's claims are scoped to exactly this:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (125 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (126 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties
