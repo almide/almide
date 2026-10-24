@@ -321,13 +321,17 @@ fn desugar_assert_outside_test(
     if !is_assert {
         return None;
     }
-    // Inside a test the harness forms report the assert — unless an operand's
-    // type declares its repr somewhere (#4107): the harness forms print the
-    // value structurally on every leg, so such an assert takes the abort form
-    // (as `assert_snapshot` does in tests) and prints through the declaration.
-    if ctx.in_test && !(matches!(n, "assert_eq" | "assert_ne")
-        && ir_args.iter().any(|a| ctx.holds_declared_repr(&a.ty, &mut Vec::new())))
-    {
+    if ctx.in_test {
+        // Inside a test the harness forms report the assert. An operand whose
+        // type declares its repr somewhere (#4107) would print structurally
+        // there, so that assert becomes the harness `assert(cond, msg)` with
+        // the operands rendered through the declaration — the test still
+        // fails alone and the run goes on (`test_report::repr_assert`).
+        if matches!(n, "assert_eq" | "assert_ne")
+            && ir_args.iter().any(|a| ctx.holds_declared_repr(&a.ty, &mut Vec::new()))
+        {
+            return Some(declared_repr_test_assert(ctx, n, ir_args.to_vec(), span));
+        }
         return None;
     }
     Some(desugar_assert_abort(ctx, n, ir_args.to_vec(), span))
@@ -601,6 +605,47 @@ fn strip_result_ok(ty: &Ty) -> Ty {
         Ty::Applied(TypeConstructorId::Result, args) if !args.is_empty() => args[0].clone(),
         _ => ty.clone(),
     }
+}
+
+/// An in-test `assert_eq` / `assert_ne` over a type that declares its repr
+/// (#4107): `assert(<comparison>, "assert_eq\n  expected: <r>\n  found: <l>")`,
+/// the operands bound once and rendered through their declared repr.
+fn declared_repr_test_assert(
+    ctx: &mut LowerCtx,
+    name: &str,
+    ir_args: Vec<IrExpr>,
+    span: Option<ast::Span>,
+) -> IrExpr {
+    let (mut stmts, vars) = bind_assert_operands(ctx, ir_args, span);
+    let negate = name == "assert_ne";
+    let cond = ctx.lower_secret_eq(vars[0].clone(), vars[1].clone(), negate).unwrap_or_else(|| ctx.mk(
+        IrExprKind::BinOp {
+            op: if negate { BinOp::Neq } else { BinOp::Eq },
+            left: Box::new(vars[0].clone()),
+            right: Box::new(vars[1].clone()),
+        },
+        Ty::Bool,
+        span,
+    ));
+    let (expected, found) = if negate { (vars[0].clone(), vars[0].clone()) } else { (vars[1].clone(), vars[0].clone()) };
+    // The header says when the operand type ITSELF declares its repr: the
+    // report then shows the two renderings as they are, never a field diff
+    // (`test_report::repr_assert`).
+    let own = if ctx.find_explicit_convention_fn(&vars[0].ty, "repr").is_some() { " (declared repr)" } else { "" };
+    let parts = vec![
+        IrStringPart::Lit { value: format!("{name}{own}\n  expected: {}", if negate { "!= " } else { "" }) },
+        IrStringPart::Expr { expr: ctx.render_declared(expected) },
+        IrStringPart::Lit { value: "\n  found: ".into() },
+        IrStringPart::Expr { expr: ctx.render_declared(found) },
+    ];
+    let msg = ctx.mk(IrExprKind::StringInterp { parts }, Ty::String, span);
+    let call = ctx.mk(
+        IrExprKind::Call { target: CallTarget::Named { name: sym("assert") }, args: vec![cond, msg], type_args: vec![] },
+        Ty::Unit,
+        span,
+    );
+    stmts.push(IrStmt { kind: IrStmtKind::Expr { expr: call }, span: None });
+    ctx.mk(IrExprKind::Block { stmts, expr: Some(Box::new(ctx.mk(IrExprKind::Unit, Ty::Unit, span))) }, Ty::Unit, span)
 }
 
 /// Build the ALS-T18 abort form for a non-test assert:
