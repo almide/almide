@@ -30,6 +30,7 @@ almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム�
 |---|---|
 | `--target rust\|wasm` | 実行ターゲット。`rust`（既定、ネイティブバイナリ）または `wasm`（v1 trust-spine が直接 WASM を生成し `wasmtime` CLI で実行。rustc 不要）。両ターゲットは同一の観測可能挙動（stdout/stderr/exit）を出す（クロスターゲット等価性保証）。`wasm` には PATH に `wasmtime` が必要 |
 | `--no-check` | 型チェックをスキップ |
+| `--locked` | `almide.lock` に無い依存のフェッチと、ロックを変える解決を拒否し、ロックを書かない(#4093)。CI 向け |
 | `--release` | 最適化ビルド。opt-level=3、fat LTO、codegen-units=1。ターゲットが x86_64 なら **`x86-64-v3`（AVX2・FMA。Intel は 2013 年の Haswell 以降、AMD は 2017 年の Zen 以降）に合わせて調整する**（#3604）。実測（spectralnorm、実行時の `n`）では汎用 → v3 が AMD Zen3 で 87.8 → 67.2 ms、Intel Xeon 8581C で 57.1 → 45.4 ms。`native` は Zen3 で 109.8 ms と逆に遅く、一度既定にして取り消した（#3727 → #3734）。AVX2 を持たない CPU では `SIGILL` で落ちるので、そこに配るなら `--target-cpu portable`。aarch64 などほかのターゲットは汎用のまま |
 
 `almide` 自身のフラグ（`--target` / `--no-check` / `--release`）は `--` の前で解釈され、`--` 以降はそのままプログラムに渡る（`cargo run` と同じ規約）。プログラム内で `env.args()` を呼ぶと `--` 以降の引数が `List[String]` で返る。
@@ -134,6 +135,7 @@ almide build --release --target-cpu portable -o app  # AVX2 の無い CPU にも
 | `--fast` | `--release` と同じ（互換のために残す） |
 | `--unchecked-index` | 配列の境界チェックを無効化（unsafe） |
 | `--no-check` | 型チェックをスキップ |
+| `--locked` | `almide.lock` に無い依存のフェッチと、ロックを変える解決を拒否し、ロックを書かない(#4093)。CI 向け |
 | `--repr-c` | struct/enum に `#[repr(C)]` を付与（C ABI 互換） |
 | `--cdylib` | 共有ライブラリ（`.so` / `.dylib` / `.dll`）を生成。`-o` 省略時はカレントディレクトリの `lib<名前>.<拡張子>`（Windows は `<名前>.dll`）。Cargo の crate 名は `-o` ではなくパッケージ名（`almide.toml` の `[package].name`、無ければエントリファイル名）から作る（#3349） |
 
@@ -170,6 +172,7 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 |---|---|
 | `-r, --run <pattern>` | テスト名のパターンフィルタ(下記) |
 | `--no-check` | 型チェックをスキップ |
+| `--locked` | `almide.lock` に無い依存のフェッチと、ロックを変える解決を拒否し、ロックを書かない(#4093)。CI 向け |
 | `--json` | JSON 形式で結果出力 |
 | `--target wasm` | wasm レグだけで実行（native fallback なし） |
 | `--update-snapshots` | `testing.assert_snapshot` の不一致を受理し、呼び出し側の期待値リテラルをソース内で書き換える(`ALMIDE_UPDATE_SNAPSHOTS=1` でも同じ) |
@@ -860,30 +863,57 @@ almide update            # tag 固定でない全依存
 - 変更した entry だけを書き換え、他の pin はバイト単位で不変。
 - 前進時は当該 ref のキャッシュディレクトリを破棄し、次のフェッチで再取得させる。
 - `git ls-remote` 1 回で解決(clone しない)。
+- ネットワークに触れる前に所有者を `[trust] owners` と照合する(#4093)。
+- `almide.toml` の `git` がロックと違う依存(ソース変更)は、tag 固定でも古い pin を捨てて新しいソースから
+  ロックし直す。ビルドはソース変更を拒否し、本コマンドを案内する([package-system.md §6.3](./package-system.md))。
 
 出力は `name <old12> -> <new12>`(初回ロックは `name -> <new12>`)。
 
 ### `almide add`
 
-依存パッケージを追加。`almide.toml` の `[dependencies]` に書き込み、即フェッチ。
+依存パッケージを追加する。順序は「解決 → 所有者の信頼確認 → 存在確認(`git ls-remote`)→ フェッチ →
+`almide.toml` と `almide.lock` の書き込み」(#4093)。拒否・失敗はすべて終了コード 1 で、両ファイルを一切変えない。
 
 ```bash
-almide add bindgen                      # github.com/almide/bindgen
-almide add almide/almide-bindgen        # github.com/almide/almide-bindgen
-almide add user/repo@v0.1.0             # バージョン指定
-almide add --git https://example.com/repo.git --tag v1.0 mylib
-almide add almide-graphics/ceangal2@v0.1.0 --subdir ceangal  # リポジトリ内のサブディレクトリにあるパッケージ
+almide add bindgen                      # github.com/almide/almide-bindgen(パッケージ一覧のスナップショットで解決)
+almide add almide/almide-bindgen        # 同上(パッケージ名 bindgen)
+almide add user/repo@v0.1.0 --trust github.com/user   # github.com/almide 以外の所有者は --trust が要る
+almide add --git https://example.com/team/repo.git --tag v1.0 --trust example.com/team mylib
+almide add almide-graphics/ceangal2@v0.1.0 --subdir ceangal --trust almide-graphics  # サブディレクトリのパッケージ
+almide add user/repo --dry-run          # 解決・信頼判定・存在確認だけを表示し、何も書かない
 ```
 
+| フラグ | 意味 |
+|---|---|
+| `--trust <owner>` | ソースの所有者(`host/owner`、github.com なら `owner` だけでも可)を信頼し `[trust] owners` に書く。解決した所有者と一致しなければエラー |
+| `--dry-run` | 解決結果・信頼判定・存在確認を表示して終了。フェッチも書き込みもしない(拒否される追加なら終了コード 1) |
+
+`--yes` / `--force` や、すべてを信頼する環境変数は存在しない。所有者を書いた許可だけが通る
+([package-system.md §6.3](./package-system.md))。存在しないリポジトリは not found として報告し、近い
+almide パッケージがあれば実行できる `did you mean \`almide add <x>\`` を添える(提案だけで置き換えない)。
+
 短縮記法:
-- `almide add name` → `https://github.com/almide/{name}`
+- `almide add name` → github.com/almide の `name` パッケージ(パッケージ名とリポジトリ名が違う場合は
+  埋め込みスナップショット `src/almide_packages.txt` で引く。無ければ `https://github.com/almide/{name}`)
 - `almide add user/repo` → `https://github.com/{user}/{repo}`
 - `@v0.1.0` → `tag = "v0.1.0"`
 - `--subdir <dir>` → `subdir = "<dir>"`(#3381、[package-system.md §6.1](./package-system.md))。パッケージ名は
   subdir の最後の要素(`--git` 指定時は第 1 引数)。
 
-フェッチと検査(subdir の存在・`almide.toml` の package name が依存名と一致)が通ってから
-`almide.toml` に書き込む。失敗時はマニフェストを変更しない。
+フェッチと検査(subdir の存在・`almide.toml` の package name が依存名と一致・推移的依存の所有者)が
+通ってから `almide.toml` と `almide.lock` に書き込む。失敗時は両方を元に戻す。
+
+---
+
+### `almide trust`
+
+所有者を `almide.toml` の `[trust] owners` に加える(#4093)。`almide add` を経ない依存(推移的依存、
+手書きのマニフェスト行)が拒否されたとき、その拒否メッセージが示す 1 手。
+
+```bash
+almide trust github.com/bob     # [trust] owners = ["github.com/bob"]
+almide trust bob                # github.com/bob と同じ
+```
 
 ---
 
@@ -894,7 +924,7 @@ almide add almide-graphics/ceangal2@v0.1.0 --subdir ceangal  # リポジトリ�
 `@extern` fn は全カテゴリ)、持ち込むネイティブコード(`native/`、`[native-deps]`、
 `@extern(rust|c)` fn)と、それが `[permissions].native` で許可されているかを表示する(#4093)。
 許可の無いネイティブコードを持つ依存は `build` / `run` / `test` / `bench` が拒否する
-(`docs/specs/package-system.md` §6.3)。
+(`docs/specs/package-system.md` §6.4)。
 
 ```bash
 almide deps

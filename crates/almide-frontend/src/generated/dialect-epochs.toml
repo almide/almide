@@ -230,6 +230,8 @@ name = "stdlib-redesign"
 summary = "The standard-library redesign (docs/roadmap/stdlib-redesign/). Its waves add their breaks here. First: the memory-unsafe stdlib surface moves to an explicitly imported `ffi` module (R-ffi-01, R-L0-45), and `--profile critical` refuses everything outside the memory-safety guarantee (#4008)."
 breaks = [
   "under `--profile critical`, every `ffi.*` call, the deprecated `bytes` raw-pointer functions (`as_ptr`, `as_mut_ptr`, `data_ptr`, `from_raw_ptr`, `copy_to_ptr`) and an `@extern` fn declaration are E100 (outside the memory-safety guarantee), and no `--allow` grants them; the program checked without the profile is unchanged. Keep raw-address and foreign code in a module that is not checked with `--profile critical`",
+  "a dependency that brings native code (`native/` files, `[native-deps]`, or an `@extern(rust|c)` fn) is refused by `almide build` / `run` / `test` / `bench` on every target unless the root almide.toml grants it by name; add `native = [\"<dep>\"]` under `[permissions]` (#4093)",
+  "a git dependency is fetched only from an owner the root almide.toml trusts: github.com/almide by default, any other `host/owner` listed in `[trust] owners` (direct, transitive and locked dependencies alike, on `add` and every fetch); add `[trust] owners = [\"github.com/<owner>\"]`, or run `almide trust <owner>`. A dependency whose almide.toml `git` changed under almide.lock is refused until `almide update <name>` re-locks it (#4093)"
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
