@@ -20,16 +20,20 @@ on:
         description: "tree to measure — must predate the wasmtime-47 embed (21b9ede16 raised the workspace MSRV to 1.94, past the last MC/DC rustc)"
         required: false
         default: "7877b03a6b3767f033527c76f6ed927e25e11c67"
+# #4094: the same read-only token the repository default gives, stated here so a
+# settings change cannot widen it. A job that needs more declares it itself.
+permissions: read-all
+
 jobs:
   mcdc-probe:
     name: MC/DC one-shot on ${{ inputs.toolchain || 'nightly-2025-06-01' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || '7877b03a6b3767f033527c76f6ed927e25e11c67' }}
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ inputs.toolchain || 'nightly-2025-06-01' }}
           components: llvm-tools-preview
@@ -70,7 +74,7 @@ jobs:
           { head -2 mcdc-report.txt; grep -E 'perceus_verified|mir/src/certificate|check/calls\.rs|infer_calls_closures|pass_effect_inference|^TOTAL' mcdc-report.txt; } | tee mcdc-safety.txt
           "$LB/llvm-cov" show $OBJS -instr-profile="$COV/all.profdata" --show-mcdc \
             crates/almide-codegen/src/perceus_verified.rs > mcdc-perceus-detail.txt || true
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: mcdc-probe-report
           path: |

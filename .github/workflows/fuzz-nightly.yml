@@ -59,6 +59,10 @@ env:
   # profile (#1006) — it only bloats the caches. Opt out.
   CARGO_INCREMENTAL: "0"
 
+# #4094: the same read-only token the repository default gives, stated here so a
+# settings change cannot widen it. A job that needs more declares it itself.
+permissions: read-all
+
 jobs:
   # The build is its OWN job so the fuzz job spends its whole runner lifetime
   # fuzzing. When both lived in one job, a cold build took 4m48s of the 7m44s
@@ -84,13 +88,13 @@ jobs:
           - { os: ubuntu-24.04-arm, arch: aarch64 }
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -128,7 +132,7 @@ jobs:
         run: cargo test --release generator::inspect_gen
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-binaries-${{ github.run_id }}-${{ matrix.arch }}
           path: |
@@ -191,10 +195,10 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download binaries
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: fuzz-binaries-${{ github.run_id }}-${{ matrix.arch }}
 
@@ -205,7 +209,7 @@ jobs:
           ./target/release/almide --version
 
       - name: Cache wasmtime tarball
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: wasmtime-v49.0.1-${{ matrix.arch }}-linux.tar.xz
           key: wasmtime-v49.0.1-${{ matrix.arch }}-linux
@@ -293,7 +297,7 @@ jobs:
       # reporting IS the report.
       - name: Upload shard output
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-shard-${{ github.run_id }}-${{ matrix.shard }}
           path: |
@@ -343,10 +347,10 @@ jobs:
       # unknown, and the night reads lower than it ran.
       actions: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download shard outputs
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: fuzz-shard-${{ github.run_id }}-*
           path: shards
@@ -405,7 +409,7 @@ jobs:
 
       - name: Upload findings
         if: steps.agg.outputs.findings != '0'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-findings-${{ github.run_id }}
           path: night-findings/
@@ -493,17 +497,17 @@ jobs:
     # adds an `almide test spec/ --target rust` sweep to a ~45-minute job.
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Pin the toolchain like every other job (#990): this job used to rely
       # on the runner image's default rustup toolchain, which is exactly the
       # kind of unpinned input the coverage ratchet should not depend on.
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           # Follows the workspace MSRV: the wasmtime-49 embed (#2955)
           # requires rustc >= 1.96 — the old 1.89.0 hardcode would fail the
           # instrumented build at dependency resolution.
           toolchain: "1.96.0"
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -524,7 +528,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90  # the native codegen leg, as above (#3195)
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # rustc's MC/DC instrumentation was REMOVED upstream (rust-lang/rust
       # #144999, Aug 2025); `condition` is the strongest remaining option and
       # is nightly-gated, so this job pins a DATED nightly — the stable
@@ -533,11 +537,11 @@ jobs:
       # the SAME floors. The first step PROBES the flag on this exact pin: a
       # toolchain bump that loses the flag turns the job red, never silently
       # weaker (#990 class).
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: "nightly-2026-08-01"
           components: llvm-tools-preview
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -564,11 +568,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: "1.96.0"
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -596,7 +600,7 @@ jobs:
       issues: write
       actions: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Open / update the coverage-ratchet issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
