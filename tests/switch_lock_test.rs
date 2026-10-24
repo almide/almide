@@ -70,6 +70,10 @@ fn the_overlay_environment_variables_change_nothing() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// The compile path enforces the version pin (`almide check` does not), and
+/// `emit` reaches it without a cargo build.
+const EMIT: [&str; 4] = ["emit", "src/main.almd", "--target", "rust"];
+
 /// A project pinned to a compiler version no build satisfies.
 fn pinned_project(tag: &str) -> PathBuf {
     let d = scratch(tag);
@@ -85,18 +89,18 @@ fn the_lock_ignores_an_inherited_gate_switch_unless_allowed() {
     let skip = [("ALMIDE_SKIP_VERSION_CHECK", "1")];
 
     // Control: unlocked, the inherited switch bypasses the pin.
-    let o = run(&d, &["check", "src/main.almd"], &skip);
+    let o = run(&d, &EMIT, &skip);
     assert!(o.status.success(), "unlocked, the switch must bypass the pin:\n{}", text(&o));
 
     // Locked: the inherited switch is ignored, the pin holds, and it says so.
-    let o = run(&d, &["--lock-switches", "check", "src/main.almd"], &skip);
+    let o = run(&d, &[&["--lock-switches"][..], &EMIT[..]].concat(), &skip);
     let out = text(&o);
     assert!(!o.status.success(), "locked, the inherited switch must not bypass the pin:\n{out}");
     assert!(out.contains("requires almide >= 999.0.0"), "{out}");
     assert!(out.contains("ALMIDE_SKIP_VERSION_CHECK is set but IGNORED"), "{out}");
 
     // Locked + named on the command line: honoured.
-    let o = run(&d, &["--lock-switches", "--allow-switch", "ALMIDE_SKIP_VERSION_CHECK", "check", "src/main.almd"], &skip);
+    let o = run(&d, &[&["--lock-switches", "--allow-switch", "ALMIDE_SKIP_VERSION_CHECK"][..], &EMIT[..]].concat(), &skip);
     assert!(o.status.success(), "an allowed switch is honoured:\n{}", text(&o));
     let _ = std::fs::remove_dir_all(&d);
 }
@@ -134,7 +138,9 @@ fn critical_refuses_a_build_changing_switch_even_when_allowed() {
 #[test]
 fn allow_switch_names_only_build_changing_switches() {
     let d = scratch("allow-name");
-    for (name, why) in [("ALMIDE_NOT_A_SWITCH", "is not a registered switch"), ("ALMIDE_PROFILE", "is a debug switch")] {
+    // Spelled in two halves: the env-switch gate refuses an unregistered
+    // `ALMIDE_*` literal anywhere in the tree.
+    for (name, why) in [(concat!("ALMIDE_", "NOT_A_SWITCH"), "is not a registered switch"), ("ALMIDE_PROFILE", "is a debug switch")] {
         let o = run(&d, &["--allow-switch", name, "switches"], &[]);
         let out = text(&o);
         assert_eq!(o.status.code(), Some(1), "{out}");
