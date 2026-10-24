@@ -895,6 +895,16 @@ varies = "develop 5059b4cde + the switch: 3 patches (#3538, #2397 fused fold, #2
 blind = "a memory bug with no re-injection patch (only #3538, #2397 and #2133 have one, #1770 no longer reproduces by reverting its fix since the frame releases are a set union, and the older I-unsound fixes no longer reverse-apply) -> UNCOMPENSATED"
 
 [[gate]]
+path = "scripts/bounds-witness-reinject.sh"
+reads = "scalar"
+wired_by = ".github/workflows/wasm-checked-alloc-nightly.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4005 landing (2026-10-24): per patch it first requires the CONTROL — the unpatched emitter's bounds witness for the reproduction accepted by almide-verify (exit 0) — then the re-injected emitter's witness rejected (exit 1); a patch that no longer applies fails it. Locally all three patches read control 0, re-injected 1"
+measures = "the number of re-injected lost-bounds-check bugs (proofs/fixtures/bounds-witness/reinject/*.patch) whose reproduction's bounds witness almide-verify does NOT reject, plus failed controls and patches that no longer apply"
+varies = "sec-proof-chain, aarch64-apple-darwin: 3 patches (store route's check dropped, read route's check dropped, a stale #3345 fact after the index moved), 3 rejected, 0 missed; each control witness accepted"
+blind = "a lost compare whose recording call survives (the recording discipline) -> .github/workflows/ci-cross-target.yml; a lost check on a heap access outside the index operator, which the witness does not record -> .github/workflows/wasm-checked-alloc-nightly.yml"
+
+[[gate]]
 path = "scripts/check-dep-shaped-skips.sh"
 reads = "scalar"
 wired_by = ".github/workflows/ci.yml"
