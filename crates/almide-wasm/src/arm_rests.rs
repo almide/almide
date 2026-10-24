@@ -58,6 +58,14 @@ impl ArmRests {
     pub(crate) fn truncate(&mut self, mark: usize) {
         self.live.truncate(mark);
     }
+
+    /// A non-rest local that holds a credit only the exit edges must
+    /// release (a metered fold's accumulator, writeback_move.rs): the same
+    /// exit-plan treatment as a rest, scoped by [`Self::mark`] /
+    /// [`Self::truncate`] around the body that may exit.
+    pub(crate) fn hold_local(&mut self, local: u32, ty: SliceTy) {
+        self.live.push((local, ty));
+    }
 }
 
 impl Emitter<'_> {
