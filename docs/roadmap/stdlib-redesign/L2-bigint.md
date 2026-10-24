@@ -99,10 +99,9 @@
 
 ## 実装の状況（wave 2、2026-10-24）
 
-- 実装済み: L3 表の公開 22 関数（`from`・`from_checked` を除く）。`stdlib/bigint.almd` に純粋な Almide で書き、`import bigint` で使います。表現は 30 bit の limb を下位から並べた `List[Int]` と符号で、0 は負にならず上位に 0 の limb を持たないので、`==` は値の比較になります。
-- 想定設計（future）として残すもの:
-  - 演算子 `+ - * / %` と単項 `-`、`<` などの比較の脱糖（R-L1-03、R-bigint-04）。脱糖先の内部の関数（加算・減算・乗算・0 方向の除算と剰余・符号反転）はモジュールの中に `local fn` としてあり、`floor_div`・`modulo`・`pow`・`bnot` がそれを使います。検査器と lowering に「`BigInt` の二項演算を `bigint` の関数の呼び出しにする」規則を足す変更は、言語の変更なのでこの wave に含めていません。それまでは、値は `parse` と `pow` で作ります。
-  - `bigint.from`・`from_checked`（R-L0-40）。R-L0-37 の `lang_wait` と同じ理由です。`Int` との行き来（`int.to_bigint`・`bigint.to_int` の 3 つ組）は R-L0-40 で `from` に置き換わった綴りで、一覧にないので足していません。
+- 実装済み: L3 表の公開 24 関数（`from`・`from_checked` を含む）。`stdlib/bigint.almd` に純粋な Almide で書き、`import bigint` で使います。表現は 30 bit の limb を下位から並べた `List[Int]` と符号で、0 は負にならず上位に 0 の limb を持たないので、`==` は値の比較になります。
+- 演算子（R-L1-03、R-bigint-04）も実装しました（2026-10-24）。`BigInt` は `type BigInt: Numeric, Integer` と宣言し、`+ - * / %` と単項 `-` はモジュールの中の `local fn` の `add`・`sub`・`mul`・`div`・`rem`・`neg` に、`< <= > >=` は `compare(a, b)` と 0 の比較に脱糖します（どの演算子がどの要件かは `OPERATOR_REQUIREMENTS` の 1 か所）。`/` は 0 の方向、`%` は割られる数の符号で、`Int` と同じです。脱糖先の関数は公開しません。`list.sum` も `BigInt` を足せます。`spec/stdlib/bigint_operators_test.almd` が両 target で確かめます。
+- `bigint.from` は、整数ならそのまま、浮動小数点なら 0 の方向に切り捨てた正確な値（`1e300` も桁を落とさない）です。`from_checked` は小数部・NaN・無限大で none です。
 
 ## L3: 関数表（提案）
 
