@@ -15513,26 +15513,6 @@ else {
 }
 
 
-
-fn __jp_hex_digit(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
-else if b >= 97 and b <= 102 then b - 87
-else if b >= 65 and b <= 70 then b - 55 else 0 - 1
-
-
-
-
-
-
-fn __jp_hex4(base: Int, len: Int, p: Int) -> Int = if p > len - 4 then 0 - 1
-else {
-  let a = __jp_hex_digit(prim.load8(base + p))
-  let b = __jp_hex_digit(prim.load8(base + p + 1))
-  let c = __jp_hex_digit(prim.load8(base + p + 2))
-  let d = __jp_hex_digit(prim.load8(base + p + 3))
-  if a < 0 or b < 0 or c < 0 or d < 0 then 0 - 1 else ((a * 16 + b) * 16 + c) * 16 + d
-}
-
-
 fn __jp_digits(base: Int, len: Int, p: Int) -> Int =
   if p < len and prim.load8(base + p) >= 48 and prim.load8(base + p) <= 57 then __jp_digits(
     base,

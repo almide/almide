@@ -297,26 +297,6 @@ else {
   if a < 0 or b < 0 or c < 0 or d < 0 then 0 - 1 else ((a * 16 + b) * 16 + c) * 16 + d
 }
 
-// Exactly 4 ASCII hex digits at base+p → the code unit; anything else → -1.
-// (from_str_radix rejects whitespace/`0x`, so this is hand-rolled.)
-fn __jp_hex_digit(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
-else if b >= 97 and b <= 102 then b - 87
-else if b >= 65 and b <= 70 then b - 55 else 0 - 1
-
-// The bound is `p > len - 4`, not `p + 4 > len`: the additive form WRAPS at a
-// near-`i64::MAX` position and admits an out-of-range read. `len` is a
-// non-negative i32-ranged length, so `len - 4` cannot overflow. A negative `p`
-// is impossible here (the scanner only advances), but the subtractive form is
-// correct for it too.
-fn __jp_hex4(base: Int, len: Int, p: Int) -> Int = if p > len - 4 then 0 - 1
-else {
-  let a = __jp_hex_digit(prim.load8(base + p))
-  let b = __jp_hex_digit(prim.load8(base + p + 1))
-  let c = __jp_hex_digit(prim.load8(base + p + 2))
-  let d = __jp_hex_digit(prim.load8(base + p + 3))
-  if a < 0 or b < 0 or c < 0 or d < 0 then 0 - 1 else ((a * 16 + b) * 16 + c) * 16 + d
-}
-
 // ── numbers ──
 fn __jp_digits(base: Int, len: Int, p: Int) -> Int =
   if p < len and prim.load8(base + p) >= 48 and prim.load8(base + p) <= 57 then __jp_digits(
