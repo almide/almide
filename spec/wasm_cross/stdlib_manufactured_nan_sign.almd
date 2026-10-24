@@ -10,6 +10,8 @@
 //
 // Every row is fed twice: from a literal (the optimizer may fold it) and from
 // a value parsed at run time (it cannot), so both regimes are pinned.
+// float.parse no longer answers a NaN or an inf at all (C-413, #4121): the
+// run-time infinities are a run-time 1/0 instead, and its nan rows are gone.
 fn sign_of(v: Float) -> String = {
   let lo = list.min([v, -0.0]) ?? 1.0
   let hi = list.max([v, 0.0]) ?? 1.0
@@ -26,8 +28,8 @@ fn row(name: String, folded: Float, runtime: Float) -> Unit = println("${name}: 
 fn main() -> Unit = {
   let neg = rt("-3")
   let one_neg = rt("-1")
-  let inf = rt("inf")
-  let ninf = rt("-inf")
+  let inf = rt("1") / rt("0")
+  let ninf = rt("-1") / rt("0")
   let half = rt("0.5")
   row("math.sqrt", math.sqrt(-3.0), math.sqrt(neg))
   row("float.sqrt", float.sqrt(-3.0), float.sqrt(neg))
@@ -44,9 +46,6 @@ fn main() -> Unit = {
   row("math.cos(-inf)", math.cos(-1.0 / 0.0), math.cos(ninf))
   row("math.tan", math.tan(1.0 / 0.0), math.tan(inf))
   row("math.tan(-inf)", math.tan(-1.0 / 0.0), math.tan(ninf))
-  row("float.parse(nan)", float.parse("nan") ?? 0.0, rt("NaN"))
-  row("float.parse(-nan)", float.parse("-nan") ?? 0.0, rt("-NaN"))
-  row("float.parse(+nan)", float.parse("+nan") ?? 0.0, rt("+NaN"))
   let r0 = math.log(rt("1e-323"))
   println("seed 1792404782 #69: ${list.min(list.insert([-0.0], 5, math.log(r0)))}")
 }

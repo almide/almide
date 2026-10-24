@@ -2,7 +2,7 @@
 // Cross-target gate for the three DRIVABLE float divergences, against the native
 // oracle (runtime/rs/src/float.rs):
 //   float.to_string : Rust f64 Display (with a ".0" suffix for whole values)
-//   float.parse     : s.trim().parse::<f64>()  (Err strings byte-compared)
+//   float.parse     : s.trim_ascii().parse::<f64>(), finite only (C-413)  (Err strings byte-compared)
 //   float.to_fixed  : format!("{:.N}")  (round-HALF-to-EVEN)
 //
 // Only EXACT-representable floats are used (0.5, -0.5, -0.0, 1.5, 100.0, -10.75,
@@ -27,7 +27,7 @@ effect fn main() -> Unit = {
   println(float.to_string(0.0))
   println(float.to_string(1.5))
   println(float.to_string(100.0))
-  // ---- float.parse: whitespace, sign, scientific, inf/nan, error strings ----
+  // ---- float.parse: whitespace, sign, scientific, inf/nan (refused, C-413), error strings ----
   println(pshow("2.5"))
   println(pshow("  2.5  "))
   println(pshow("\t-0.5\n"))
