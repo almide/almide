@@ -145,7 +145,7 @@ impl Emitter<'_> {
                         i.i64_ge_u().if_(BlockType::Empty);
                         i.i32_const(msg as i32);
                     }
-                    crate::witness::bounds::check(site);
+                    crate::witness::bounds::check(site, self.f);
                     self.emit_error_frame_abort();
                     self.witness_abort_site();
                     self.f.instructions().end();
@@ -184,12 +184,12 @@ impl Emitter<'_> {
                 if let Some(dec) = self.elem_is_handle(el).then(|| self.dec_fn_of(el)) {
                     let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
                     self.f.instructions().i32_load(wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 }).call(dec);
-                    crate::witness::bounds::access(site, false);
+                    crate::witness::bounds::access(site, false, self.f);
                 }
                 let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
                 self.f.instructions().local_get(hv);
                 self.store_slot_off(el, off);
-                crate::witness::bounds::access(site, true);
+                crate::witness::bounds::access(site, true, self.f);
                 self.release_i32();
                 self.release_val(el);
                 self.release_i64();
@@ -225,7 +225,7 @@ impl Emitter<'_> {
         self.bytes_room(hb, hi, 1);
         let msg = self.pool.intern("index out of bounds");
         self.f.instructions().i32_eqz().if_(BlockType::Empty).i32_const(msg as i32);
-        crate::witness::bounds::check(site);
+        crate::witness::bounds::check(site, self.f);
         self.emit_error_frame_abort();
         self.witness_abort_site();
         self.f.instructions().end();
@@ -240,7 +240,7 @@ impl Emitter<'_> {
         let mut i = self.f.instructions();
         i.local_get(hb).local_get(hi).i32_wrap_i64().i32_add().local_get(hv);
         i.i64_store8(crate::bytes::byte_k(0));
-        crate::witness::bounds::access(site, true);
+        crate::witness::bounds::access(site, true, self.f);
         self.release_i32();
         self.release_i64();
         self.release_i64();

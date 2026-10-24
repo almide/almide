@@ -299,7 +299,7 @@ impl Emitter<'_> {
         }
         let off = self.emit_elem_addr(list_var, hold, idx, index, i64::from(stride))?;
         self.load_slot_off(elem, off);
-        crate::witness::bounds::access(site, false);
+        crate::witness::bounds::access(site, false, self.f);
         self.release_i64();
         self.release_i32();
         Ok(elem)
@@ -325,7 +325,7 @@ impl Emitter<'_> {
             i.if_(BlockType::Empty);
             i.i32_const(msg as i32);
         }
-        crate::witness::bounds::check(site);
+        crate::witness::bounds::check(site, self.f);
         // #2755: out of bounds ABORTS — a recorded abort terminal on its own arm.
         self.witness_branch_open();
         self.witness_branch_arm();
@@ -655,14 +655,14 @@ impl Emitter<'_> {
                     .call(F_ALLOC)
                     .local_set(hold);
                 // #4013: a construction site; each slot is recorded as its store is emitted.
-                let site = crate::witness::init::site(almide_layout::PAYLOAD, stride, elements.len(), h.index() as u32);
+                let site = crate::witness::init::site(almide_layout::PAYLOAD, stride, elements.len(), h.index() as u32, self.f);
                 for (i, el) in elements.iter().enumerate() {
                     self.f.instructions().local_get(hold);
                     self.lower(el, Some(elem))?;
                     self.rc_share_guard(el, elem);
                     self.witness_store(el, elem);
                     self.store_ty_slot(elem, i as u32 * stride);
-                    crate::witness::init::store(site, i);
+                    crate::witness::init::store(site, i, self.f);
                 }
                 self.f.instructions().local_get(hold);
                 self.release_i32();

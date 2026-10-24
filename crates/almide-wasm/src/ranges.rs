@@ -181,7 +181,7 @@ impl crate::emitter::Emitter<'_> {
                         .call(F_ALLOC)
                         .local_set(hb);
                 }
-                let site = crate::witness::init::fill_site(almide_layout::PAYLOAD, SLOT, hd, list_ty);
+                let site = crate::witness::init::fill_site(almide_layout::PAYLOAD, SLOT, hd, list_ty, self.f);
                 {
                     let mut i = self.f.instructions();
                     // fill ascending: payload[k] = start + k
@@ -204,7 +204,7 @@ impl crate::emitter::Emitter<'_> {
                     i.end();
                     i.local_get(hb);
                 }
-                crate::witness::init::fill(site, hd, STEP as u32);
+                crate::witness::init::fill(site, hd, STEP as u32, self.f);
                 self.release_i32();
                 self.release_i32();
                 self.release_i64();

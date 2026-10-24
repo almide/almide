@@ -593,6 +593,7 @@ fn build_helper_body(
     let scr_f64 = scr_i64 + 1;
     let holds = scr_f64 + 1;
     let mut f = wasm_encoder::Function::new(local_decls);
+    let anchor_serial = crate::witness::anchor::begin_fn();
     let mut calls = std::collections::HashSet::new();
     let empty_locals = std::collections::HashMap::new();
     let empty_globals = std::collections::HashMap::new();
@@ -662,6 +663,7 @@ fn build_helper_body(
     }
     f.instructions().end();
     crate::witness::helper::finish(hw, recorded, footprint, &f);
+    crate::witness::anchor::seal(anchor_serial, &f);
     Ok((f, calls))
 }
 
