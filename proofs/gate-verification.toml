@@ -106,7 +106,7 @@
 # checked-allocator switch (#4009) adds three (27 -> 30).
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "30"
+# uncompensated_blind_ceiling = "31"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -183,6 +183,16 @@ evidence = "#2403 landing (2026-09-21): recorded 12-mode exercise on every run (
 measures = "the exit code and named id/field/direction check-als-pin.sh gives ten forged ledger/allowance files (a judge statement extended, our statement extended, a title changed, a diverged statement, a listed and a stale allowance, a removed id, ...)"
 varies = "#2403 landing (2026-09-21): the pre-#2403 id-only gate reads the extended-judge-statement control as `OK 351/351` (exit 0); the new gate reads it as `FAILED: 1 drifted` naming `C-001.statement`"
 blind = "UNMAPPED"
+
+[[gate]]
+path = "scripts/check-action-pins.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4094 landing (2026-10-24): `--self-test` runs on every CI run. It forges a workflow with a tag pin (actions/checkout@v7), a branch pin (dtolnay/rust-toolchain@stable), a local action and a commit pin, and requires exit 1 naming both refs and `2 of 3`, then pins both and requires exit 0. Against the real tree before #4094 (origin/develop at 56a3d0f90, extracted with git archive), the gate exits 1 with `218 of 218 action references are not pinned to a commit`; the pinned tree reads `OK — 218 action references`."
+measures = "the count of `uses: owner/repo@ref` lines in .github/workflows and .github/actions whose ref is not a 40-hex commit (local ./ actions and docker:// excluded)"
+varies = "#4094 landing (2026-10-24): 218 unpinned on origin/develop 56a3d0f90, 0 on the pinned tree; 2 on the self-test's forged workflow"
+blind = "an action whose pinned commit fetches more code by tag or branch (a composite action's own `uses:`, rustup installing the current toolchain) -> UNCOMPENSATED; a commit that was already malicious when it was pinned -> .github/dependabot.yml"
 
 [[gate]]
 path = "scripts/check-exit-sites.sh"
