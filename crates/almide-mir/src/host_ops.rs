@@ -138,6 +138,8 @@ pub const HOST_OPS: &[HostOp] = &[
     op("random", "float", "almide_rt_random_float", ENTROPY),
     op("random", "choice", "almide_rt_random_choice", ENTROPY).routed(),
     op("random", "shuffle", "almide_rt_random_shuffle", ENTROPY).routed().by_value(&[0]),
+    // `random.bytes` (C-394): the OS CSPRNG on native, `random_get` on wasm.
+    op("random", "bytes", "almide_rt_random_bytes", ENTROPY),
     // ── io ──
     op("io", "print", "almide_rt_io_print", OUT),
     op("io", "write", "almide_rt_io_write", OUT),
