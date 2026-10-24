@@ -119,20 +119,39 @@ NAMED_CANDIDATES = {
 }
 
 
-def render_ty(ty):
-    """A type annotation for a JSON-shaped type with every type variable at Int,
-    or None. A generic constructor that takes no element (`heap.new()`,
+# The instantiations a type variable is probed at, in order: (literal, type).
+# The interface JSON does not carry a bound, so a protocol-bounded generic
+# (`list.join[T: Text]`) that does not check at Int gets its turn at String.
+TYPE_VAR_INSTANTIATIONS = (("1", "Int"), ('"a"', "String"))
+
+
+def has_type_var(ty):
+    """Whether a JSON-shaped type mentions a type variable anywhere."""
+    if isinstance(ty, dict):
+        if ty.get("kind") == "type_var" or (ty.get("kind") == "named"
+                                            and len(ty.get("name", "")) == 1
+                                            and ty.get("name", "").isupper()):
+            return True
+        return any(has_type_var(v) for v in ty.values())
+    if isinstance(ty, list):
+        return any(has_type_var(v) for v in ty)
+    return False
+
+
+def render_ty(ty, tv="Int"):
+    """A type annotation for a JSON-shaped type with every type variable at
+    `tv`, or None. A generic constructor that takes no element (`heap.new()`,
     `list.new()`) leaves its element type open, so its probe only types with
     the binding annotated."""
     k = ty.get("kind")
     simple = {"int": "Int", "float": "Float", "string": "String", "bool": "Bool",
-              "unit": "Unit", "bytes": "Bytes", "matrix": "Matrix", "type_var": "Int"}
+              "unit": "Unit", "bytes": "Bytes", "matrix": "Matrix", "type_var": tv}
     if k in simple:
         return simple[k]
     def inner(key):
-        return render_ty(ty.get(key, {}))
+        return render_ty(ty.get(key, {}), tv)
     if k == "named":
-        args = [render_ty(a) for a in ty.get("args", []) or []]
+        args = [render_ty(a, tv) for a in ty.get("args", []) or []]
         if any(a is None for a in args):
             return None
         return ty.get("name", "") + (f"[{', '.join(args)}]" if args else "")
@@ -146,13 +165,14 @@ def render_ty(ty):
         a, b = inner("key"), inner("value")
         return f"Map[{a}, {b}]" if a and b else None
     if k == "tuple":
-        parts = [render_ty(e) for e in ty.get("elements", []) or []]
+        parts = [render_ty(e, tv) for e in ty.get("elements", []) or []]
         return "(" + ", ".join(parts) + ")" if parts and all(parts) else None
     return None
 
 
-def synth_ty(ty, depth=0):
-    """Candidate spellings for a value of a JSON-shaped type."""
+def synth_ty(ty, depth=0, tv="1"):
+    """Candidate spellings for a value of a JSON-shaped type, every type
+    variable spelled by the literal `tv`."""
     if depth > 4:
         return []
     k = ty.get("kind")
@@ -166,25 +186,25 @@ def synth_ty(ty, depth=0):
     if k in ("named", "type_var"):
         name = ty.get("name", "")
         if name in NAMED_CANDIDATES: return NAMED_CANDIDATES[name]
-        if len(name) == 1 and name.isupper(): return ["1"]
+        if len(name) == 1 and name.isupper(): return [tv]
         return []
     if k == "list":
-        return [f"[{c}]" for c in synth_ty(ty.get("inner", {}), depth + 1)[:1]]
+        return [f"[{c}]" for c in synth_ty(ty.get("inner", {}), depth + 1, tv)[:1]]
     if k == "set":
-        return [f"set.from_list([{c}])" for c in synth_ty(ty.get("inner", {}), depth + 1)[:1]]
+        return [f"set.from_list([{c}])" for c in synth_ty(ty.get("inner", {}), depth + 1, tv)[:1]]
     if k == "option":
-        return [f"some({c})" for c in synth_ty(ty.get("inner", {}), depth + 1)[:1]]
+        return [f"some({c})" for c in synth_ty(ty.get("inner", {}), depth + 1, tv)[:1]]
     if k == "result":
-        return [f"ok({c})" for c in synth_ty(ty.get("ok", ty.get("inner", {})), depth + 1)[:1]]
+        return [f"ok({c})" for c in synth_ty(ty.get("ok", ty.get("inner", {})), depth + 1, tv)[:1]]
     if k == "map":
-        ks = synth_ty(ty.get("key", {}), depth + 1)
-        vs = synth_ty(ty.get("value", {}), depth + 1)
+        ks = synth_ty(ty.get("key", {}), depth + 1, tv)
+        vs = synth_ty(ty.get("value", {}), depth + 1, tv)
         return [f"[{ks[0]}: {vs[0]}]"] if ks and vs else []
     if k == "tuple":
-        parts = [synth_ty(e, depth + 1) for e in ty.get("elements", []) or []]
+        parts = [synth_ty(e, depth + 1, tv) for e in ty.get("elements", []) or []]
         return ["(" + ", ".join(x[0] for x in parts) + ")"] if parts and all(parts) else []
     if k == "fn":
-        rets = synth_ty(ty.get("return", {}), depth + 1)
+        rets = synth_ty(ty.get("return", {}), depth + 1, tv)
         if not rets:
             return []
         names = ", ".join(f"p{i}" for i in range(len(ty.get("params", []))))
@@ -192,18 +212,18 @@ def synth_ty(ty, depth=0):
     return []
 
 
-def synth_args(params):
+def synth_args(params, tv="1"):
     """One argument spelling per param (first candidate), or None."""
     out = []
     for prm in params:
-        c = synth_ty(prm["type"])
+        c = synth_ty(prm["type"], tv=tv)
         if not c:
             return None
         out.append((c[0], prm["type"].get("kind")))
     return out
 
 
-def programs(f, args):
+def programs(f, args, tv="Int"):
     """Candidate probe shapes. `var`-hoisted receivers (a `let` receiver cannot
     be passed to an in-place mutator, which alone accounted for most of the old
     UNPROBEABLE set), the mixed shape (scalar literals inline — an all-hoisted
@@ -234,7 +254,7 @@ def programs(f, args):
         if f["ret"] == "Unit":               # a Unit result binds to nothing useful
             bodies.reverse()
         else:
-            annot = render_ty(f.get("ret_json", {}))
+            annot = render_ty(f.get("ret_json", {}), tv)
             if annot:
                 bodies.append(f"  let _: {annot} = {call}{bang}")
         for b in bodies:
@@ -253,12 +273,29 @@ WALL_RX = re.compile(r"not yet supported by the verified wasm renderer|^wall:", 
 
 
 def classify(f):
-    args = synth_args(f["params"])
-    if args is None:
-        return "UNPROBEABLE", "parameter type outside the synthesizer"
+    """The verdict over the type-variable instantiations in turn: the first
+    one whose probe TYPES decides (Int first, so a fn that checks at Int is
+    probed exactly as before)."""
+    generic = has_type_var(f["params"]) or has_type_var(f.get("ret_json", {}))
+    insts = TYPE_VAR_INSTANTIATIONS if generic else TYPE_VAR_INSTANTIATIONS[:1]
+    verdict = None
+    for lit, ty in insts:
+        args = synth_args(f["params"], lit)
+        if args is None:
+            verdict = verdict or ("UNPROBEABLE", "parameter type outside the synthesizer")
+            continue
+        verdict, checked = classify_at(f, args, ty)
+        if checked:
+            return verdict
+    return verdict
+
+
+def classify_at(f, args, tv):
+    """(verdict, whether any shape type-checked) at one instantiation."""
     first_gap = None
     any_native = False
-    for src in programs(f, args):
+    any_checked = False
+    for src in programs(f, args, tv):
         tf = tempfile.NamedTemporaryFile("w", suffix=".almd", delete=False, dir="/tmp")
         tf.write(src); tf.close()
         try:
@@ -266,12 +303,13 @@ def classify(f):
             # nothing about the function and the next shape gets a turn.
             if run([ALMIDE, "check", tf.name])[0] != 0:
                 continue
+            any_checked = True
             if run([ALMIDE, "build", tf.name, "-o", tf.name + ".bin"])[0] != 0:
                 continue
             any_native = True
             rc, out = run([ALMIDE, "build", tf.name, "--target", "wasm", "-o", tf.name + ".wasm"])
             if rc == 0:
-                return "PARITY", ""
+                return ("PARITY", ""), True
             if first_gap is None:
                 m = re.search(r"wall: (.+)", out)
                 first_gap = (m.group(1)[:160] if m else
@@ -281,8 +319,8 @@ def classify(f):
                 try: os.unlink(tf.name + ext)
                 except OSError: pass
     if any_native:
-        return "GAP", first_gap or "wasm build failed"
-    return "UNPROBEABLE", "no candidate shape builds natively"
+        return ("GAP", first_gap or "wasm build failed"), True
+    return ("UNPROBEABLE", "no candidate shape builds natively"), any_checked
 
 
 def main():
