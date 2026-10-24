@@ -1593,9 +1593,15 @@ test "built-ins" {
 }
 ```
 
-String representation is not a built-in function: a type declares the `Repr`
-convention and its value renders through interpolation (`"${x}"`, ALS-R2), or
-it defines `fn T.repr(x: T) -> String` and calls `x.repr()`.
+String representation is not a built-in function. Every value prints
+structurally unless its type declares a repr: a record as `Name { f: v }`, a
+list as `[a, b]`, a string inside a container quoted. A type that defines
+`fn T.repr(x: T) -> String` prints through it everywhere it is rendered — at
+the top of an interpolation (`"${x}"`, ALS-R2), inside an enclosing record,
+list, option, result, tuple, map or variant, and in an `assert_eq` /
+`assert_ne` failure and the `almide test` report. `secret.Secret[A]` is the
+stdlib type that declares one: it prints `Secret(***)` on every path
+(`docs/stdlib/secret.md`).
 
 There is no `print` function -- use `println` for all output.
 
