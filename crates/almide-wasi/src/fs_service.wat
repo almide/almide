@@ -631,11 +631,11 @@
   (func $op_read_lines_if_exists (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
     (call $read_text_as (local.get $op) (local.get $a) (local.get $al) (i32.const 1) (i32.const 1)))
 
-  ;; read_text_if_exists asks Path::exists first (a path whose parent is a
-  ;; file is absent too), then reads.
+  ;; read_text_if_exists: absence is the read's own ENOENT, as native and its
+  ;; byte and line twins classify it (C-215); a symlink loop or a file parent
+  ;; is the read's err, never absent (#4154).
   (func $op_read_text_if_exists (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
-    (if (call $stat (local.get $a) (local.get $al) (i32.const 1)) (then (return (call $none))))
-    (call $read_text_as (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0)))
+    (call $read_text_as (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 1)))
 
   (func $read_bytes_as (param $op i32) (param $a i32) (param $al i32) (param $absent_none i32) (result i64)
     (local $p i32) (local $l i32) (local $e i32)

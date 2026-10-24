@@ -213,16 +213,14 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
             Ok(bytes) => stream_line_frames(op, a, bytes),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
-        13 => {
-            if Path::new(a).exists() {
-                match std::fs::read_to_string(a) {
-                    Ok(t) => ok_text(t),
-                    Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
-                }
-            } else {
-                (pack(2, 0), Vec::new())
-            }
-        }
+        // Absence is the READ's own NotFound, as native classifies it
+        // (C-215): an `exists` pre-check read a symlink loop (ELOOP) or a
+        // file parent (ENOTDIR) as absent where native errs (#4154).
+        13 => match std::fs::read_to_string(a) {
+            Ok(t) => ok_text(t),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (pack(2, 0), Vec::new()),
+            Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
+        },
         _ => match std::fs::read(a) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
