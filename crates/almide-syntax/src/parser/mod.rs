@@ -87,6 +87,10 @@ pub struct Parser {
     /// cases; their tokens were reclassified `TypeName`, and an
     /// interpolation hole's sub-parse applies the same set.
     pub(crate) caseless_type_names: std::collections::HashSet<String>,
+    /// #4092: raw bidirectional control characters found in the token stream
+    /// (comments, string literals, stray characters), as `(char, line, col)`.
+    /// Reported as E101 by `parse`, once the file name is known.
+    pub(crate) bidi_controls: Vec<(char, usize, usize)>,
 }
 
 /// A comment collected from a continuation gap (#1326): the Newline/Comment
@@ -113,10 +117,29 @@ pub(crate) enum CommentSide {
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
+        // E101 (#4092): scanned BEFORE inline comments leave the stream, so a
+        // bidi control in `f(1 /* … */, 2)` is seen like any other.
+        let bidi_controls = Self::collect_bidi_controls(&tokens);
         let (mut tokens, inline_comments) = Self::drop_inline_comments(tokens);
         let caseless_type_names = caseless::declared_caseless_type_names(&tokens);
         caseless::reclassify(&mut tokens, &caseless_type_names);
-        Parser { caseless_type_names, tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None, last_fn_body: None, preceding_expr_fn: None }
+        Parser { caseless_type_names, tokens, pos: 0, inline_comments, expr_comments: std::collections::HashMap::new(), pending_gap: None, errors: Vec::new(), file: None, next_expr_id: 0, depth: 0, failed_fn_names: std::collections::HashSet::new(), delim_depth: 0, block_head_depth: None, last_fn_body: None, preceding_expr_fn: None, bidi_controls }
+    }
+
+    /// #4092: every raw bidirectional control character in the tokens'
+    /// verbatim text (`raw` for the string family, `value` for comments and
+    /// stray characters), located in the source as `(char, line, col)`.
+    fn collect_bidi_controls(tokens: &[Token]) -> Vec<(char, usize, usize)> {
+        let mut out = Vec::new();
+        for tok in tokens {
+            let text = tok.raw.as_deref().unwrap_or(&tok.value);
+            for b in crate::lexer::find_bidi_controls(text) {
+                let line = tok.line + b.line_offset;
+                let col = if b.line_offset == 0 { tok.col + b.col_offset } else { b.col_offset + 1 };
+                out.push((b.ch, line, col));
+            }
+        }
+        out
     }
 
     /// Drop Comment tokens sitting INLINE mid-expression (`f(1 /* x */, 2)`) so the

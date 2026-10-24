@@ -145,6 +145,36 @@ impl Parser {
         self.errors.extend(diags);
     }
 
+    /// E101 (#4092): refuse every raw bidirectional control character
+    /// (U+202A..U+202E, U+2066..U+2069) anywhere in the file — comments,
+    /// string literals, heredocs, stray characters. With one in the source,
+    /// the text a reviewer reads is not the text the compiler reads (Trojan
+    /// Source, CVE-2021-42574). The escape `\u{202E}` is unaffected: its
+    /// spelling is ASCII.
+    pub(crate) fn report_bidi_controls(&mut self) {
+        let found = std::mem::take(&mut self.bidi_controls);
+        for (ch, line, col) in found {
+            let name = crate::lexer::bidi_control_name(ch).unwrap_or("BIDIRECTIONAL CONTROL");
+            let message = format!(
+                "raw bidirectional control character U+{:04X} {} at line {}, column {}",
+                ch as u32, name, line, col
+            );
+            let hint = format!(
+                "this character makes the source display differently from how it compiles \
+                 (Trojan Source). Remove it from a comment; inside a string literal, write \
+                 the escape `\\u{{{:04X}}}` if the character is intended",
+                ch as u32
+            );
+            let mut d = Diagnostic::error(message, hint, "source text")
+                .with_code("E101");
+            if let Some(f) = &self.file { d.file = Some(f.clone()); }
+            d.line = Some(line);
+            d.col = Some(col);
+            d.end_col = Some(col + 1);
+            self.errors.push(d);
+        }
+    }
+
     pub(crate) fn string_to_diagnostic(&self, msg: &str) -> Diagnostic {
         let (line, col) = if let Some(idx) = msg.find("at line ") {
             let rest = &msg[idx + 8..];
