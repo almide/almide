@@ -12876,6 +12876,13 @@ status = "uninspected"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
+name = "random.bytes"
+sig = "effect (n: Int) -> Bytes ! String"
+class = "effect"
+status = "uninspected"
+blocked = "new in the stdlib redesign (R-random-02, #3938, C-394): awaits its ADR-0027 effect inspection run (on the deterministic host: the length is n and two calls differ)"
+
+[[fn]]
 name = "random.seeded"
 sig = "(seed: Int) -> Rng"
 class = "pure"
