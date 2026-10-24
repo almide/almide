@@ -67,7 +67,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-029 | int.parse error modes byte-match native ParseIntError | 0.24.0 | active | fixture | 1 |
 | C-030 | hex.encode / hex.decode are byte-identical incl. positional error detail | 0.24.0 | active | fixture | 2 |
 | C-031 | json get/set/remove_path edge cases match the infallible native oracle | 0.24.0 | active | fixture | 3 |
-| C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 4 |
+| C-032 | Regex engine is byte-identical to the native engine over a fuzzed grammar | 0.24.0 | active | fuzz(220) | 5 |
 | C-033 | [Value semantics for aliased mutables (copy-on-write)](C-033-cow-truth-table.md) | 0.24.0 | active | fixture | 21 |
 | C-034 | Out-of-range list ops clamp / no-op gracefully (no OOB heap access) | 0.24.0 | active | fixture | 8 |
 | C-035 | Effect-main errors terminate uniformly: Error: <msg> + exit 1 | 0.24.0 | active | fixture | 6 |
@@ -430,4 +430,8 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-392 | fs.open_root's family keeps every path inside its root: a path that leaves it by .., an absolute path or a symlink is refused with one message on every target | 0.69.0 | active | fixture | 1 |
 | C-393 | [permissions] fs bounds every fs call to the granted directories, symlinks resolved, with one refusal on native and the embedded wasm host | 0.69.0 | active | fixture | 0 |
 | C-394 | random.bytes draws n bytes from the platform CSPRNG: n = 0 is empty, a negative n aborts with one text on every leg | 0.69.0 | active | fixture | 2 |
+| C-395 | regex.new aborts and regex.compile answers err, with one reason on every leg, for a pattern outside the engine's grammar or past 20,000 states | 0.69.0 | active | fuzz(300) | 3 |
+| C-396 | fs.walk and fs.glob list a symlink as an entry and never descend into it, on every leg | 0.69.0 | active | fixture | 0 |
+| C-397 | fs.create_temp_file and fs.create_temp_dir create a new entry exclusively under an entropy name, private to its owner | 0.69.0 | active | fixture | 0 |
+| C-398 | path.from_string admits only a path that stays inside the directory it is joined to, and path.join_within refuses any other child | 0.69.0 | active | fixture | 1 |
 
