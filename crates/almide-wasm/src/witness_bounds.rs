@@ -30,7 +30,7 @@
 //! (`emit_read_bounds_check`, the store route's compare, the Bytes room
 //! test), `a` / `w` right after the load or store. An emitter that drops a
 //! check therefore leaves a bare `a` / `w`, which the checker rejects
-//! (scripts/bounds-witness-reinject.sh re-injects such bugs and requires the
+//! (scripts/witness-reinject.sh bounds re-injects such bugs and requires the
 //! rejection).
 //!
 //! TRUSTED, as for the ownership witness: that these events are the

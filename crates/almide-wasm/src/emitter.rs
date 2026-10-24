@@ -655,8 +655,8 @@ impl Emitter<'_> {
             // local (kept live across element lowering — the pool makes
             // nesting safe by construction).
             IrExprKind::List { elements } => {
-                let (hty, elem) = match want.map_or_else(|| self.infer(e), Ok)? {
-                    SliceTy::List(h) => (SliceTy::List(h), self.types.el(h)),
+                let (hty, elem, h) = match want.map_or_else(|| self.infer(e), Ok)? {
+                    SliceTy::List(h) => (SliceTy::List(h), self.types.el(h), h),
                     other => return unsup(&format!("ty-mismatch:list-vs-{other:?}")),
                 };
                 let stride = elem.slot_size();
@@ -666,12 +666,16 @@ impl Emitter<'_> {
                     .i32_const((elements.len() as u32 * stride) as i32)
                     .call(F_ALLOC)
                     .local_set(hold);
+                // #4013: a construction site — the block's slots, each
+                // recorded as its store is emitted (witness_init.rs).
+                let site = crate::witness::init::site(almide_layout::PAYLOAD, stride, elements.len(), h.index() as u32);
                 for (i, el) in elements.iter().enumerate() {
                     self.f.instructions().local_get(hold);
                     self.lower(el, Some(elem))?;
                     self.rc_share_guard(el, elem);
                     self.witness_store(el, elem);
                     self.store_ty_slot(elem, i as u32 * stride);
+                    crate::witness::init::store(site, i);
                 }
                 self.f.instructions().local_get(hold);
                 self.release_i32();
