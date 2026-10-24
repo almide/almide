@@ -1,0 +1,11 @@
+effect fn twice(n: Int) -> Int = {
+  println("io")
+  n * 2
+}
+
+fn apply(f: (Int) -> Int, x: Int) -> Int = f(x)
+
+effect fn main() -> Unit = {
+  let g: effect (Int) -> Int = twice
+  println(int.to_string(apply(g, 3)))
+}

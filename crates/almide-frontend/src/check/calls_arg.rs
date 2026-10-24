@@ -60,6 +60,15 @@ impl Checker {
         let expected_resolved = self.env.resolve_named(&expected);
         let arg_resolved = self.env.resolve_named(arg_ty);
         if !types_mismatch(&expected_resolved, &arg_resolved) {
+            // #4173: structural compatibility ignores the effect bit, so an
+            // `effect (A) -> B` value passed check into a plain `(A) -> B`
+            // slot and failed later in rustc (E0271 / E0308) or walled the
+            // wasm leg. The runtime shapes differ: the value returns the
+            // effect carrier.
+            if self.effect_value_in_pure_slot(&expected_resolved, &arg_resolved) {
+                self.emit_effect_value_in_pure_slot(site, &expected, arg_ty);
+                return true;
+            }
             return false;
         }
         // #1055: an `effect (A) -> B` slot accepts BOTH a pure `(A) -> B`
@@ -75,6 +84,51 @@ impl Checker {
         let arg_resolved = self.with_slot_defaults(&arg_resolved);
         self.emit_call_arg_mismatch(site, &expected, &arg_shown, &expected_resolved, &arg_resolved);
         true
+    }
+
+    /// #4173: does an `effect (A) -> B` value fill a plain `(A) -> B` slot,
+    /// directly or as the element of the same container (`List`, `Option`, a
+    /// tuple)? Only the plain-spelled effect type is meant: a value typed with
+    /// the carrier (`(A) -> Result[B, String]`, a named effect fn) already
+    /// mismatches on its return, and the fallible-HOF rewrites own that shape.
+    fn effect_value_in_pure_slot(&self, expected: &Ty, actual: &Ty) -> bool {
+        let inner = |e: &Ty, a: &Ty| self.effect_value_in_pure_slot(&self.env.resolve_named(e), &self.env.resolve_named(a));
+        match (expected, actual) {
+            (Ty::Fn { is_effect: false, .. }, Ty::Fn { is_effect: true, ret, .. }) => {
+                !matches!(self.env.resolve_named(ret), Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _))
+            }
+            (Ty::Applied(ei, ea), Ty::Applied(ai, aa)) if ei == ai && ea.len() == aa.len() => {
+                ea.iter().zip(aa.iter()).any(|(e, a)| inner(e, a))
+            }
+            (Ty::Tuple(ea), Ty::Tuple(aa)) if ea.len() == aa.len() => ea.iter().zip(aa.iter()).any(|(e, a)| inner(e, a)),
+            _ => false,
+        }
+    }
+
+    /// The #4173 diagnostic: E005, naming both ways out.
+    fn emit_effect_value_in_pure_slot(&mut self, site: ArgSite<'_>, expected: &Ty, arg_ty: &Ty) {
+        let ArgSite { fn_name, param_name } = site;
+        let mut diag = super::err(
+            format!(
+                "argument '{}' expects {} but got {}: an effect fn value cannot fill a plain fn slot",
+                param_name,
+                expected.display(),
+                arg_ty.display()
+            ),
+            format!(
+                "The value runs effects and returns the effect carrier, so a plain `{}` slot cannot call it. \
+                 Either make the slot an effect slot — `{}: effect (A) -> B` — in an `effect fn`, or pass a \
+                 lambda that handles the error: `(x) => f(x) ?? fallback`.",
+                expected.display(),
+                param_name
+            ),
+            format!("call to {}()", fn_name),
+        )
+        .with_code("E005");
+        if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(fn_name)) {
+            diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));
+        }
+        self.emit(diag);
     }
 
     /// The #1055 effect-slot acceptance: expected is `Fn { is_effect: true }`

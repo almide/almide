@@ -1,0 +1,3 @@
+expects_code = "E005"
+expects_error = "an effect fn value cannot fill a plain fn slot"
+hint_substring = "effect slot"
