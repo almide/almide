@@ -1,0 +1,20 @@
+// @contract: C-399
+// `io.write_bytes` and `io.write` emit EXACTLY their bytes on every target —
+// all 256 byte values, and a run that is not UTF-8 (a PNG signature's
+// 0x89 'P' 'N' 'G', lone 0xFF / 0xFE / 0x80, a NUL) — never a decoded text.
+// The embedded host (`almide run --target wasm`) used to pass both through
+// `String::from_utf8_lossy`, so every byte past 0x7F that was not part of a
+// valid UTF-8 sequence came out as U+FFFD (EF BF BD) where native and a stock
+// WASI runtime wrote the byte itself (almide/almide#4138). This lane pins the
+// program on native, the stock artifact and the reference evaluator; the
+// judges here decode stdout as UTF-8 with replacement, so a non-UTF-8 byte and
+// U+FFFD compare equal in it — the spec/embedded_cross twin compares raw bytes.
+import io
+
+effect fn main() -> Unit = {
+  println("begin")
+  io.write_bytes(list.range(0, 256))
+  io.write(bytes.from_list([255, 0, 128, 137, 80, 78, 71, 255, 254, 10]))
+  io.write_bytes([256 + 65, -1, 10])
+  println("end")
+}

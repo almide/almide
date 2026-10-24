@@ -12,16 +12,24 @@
 // used char-indexed string.get + per-char string concat, O(n²), and timed out
 // on a multi-KB glTF document). The oracle's positions are CHAR indices, so an
 // error message converts its byte offset with one linear count at ERROR time
-// only. Oracle-faithful details (all deliberate, covered by the fixtures):
-//   - parse_string never fails: an unterminated string yields what was read;
-//     unknown escapes and invalid \uXXXX units are silently dropped; a
-//     high+low surrogate pair joins into one astral codepoint (#651).
-//   - whitespace is char::is_whitespace (Unicode) — ASCII fast path, decode
-//     only for lead bytes >= 0xC2.
-//   - trailing separators are lenient exactly where the oracle is; `{x: 1}`
-//     hunts the key through parse_string unconditionally.
-//   - numbers: `-?digits[.digits][eE[+-]digits]`; any fraction/exponent makes
-//     a Float, else Int; parse errors pass the Rust error message through.
+// only. The grammar is RFC 8259 plus I-JSON (RFC 7493), STRICT (C-087, C-400,
+// C-401, #4111 / #4112), with one err text per case, the oracle's:
+//   - the whole text is one value between JSON whitespace (space, tab, LF,
+//     CR); anything left is `json: trailing data`.
+//   - a string is checked in full BEFORE anything is written (__jp_str_check):
+//     an unterminated string, a raw control character, an unknown escape, a
+//     `\u` without four hex digits, a surrogate that is not a high+low pair
+//     and a noncharacter are each an err; nothing is ever dropped (the parser
+//     used to delete a lone surrogate and an unknown escape, so `ad\ud800min`
+//     decoded to `admin`). A valid high+low pair joins into one astral
+//     codepoint (#651).
+//   - an object key must be a string, a repeated key is an err at the
+//     repeat's opening quote, a `,` before `]`/`}` is a trailing comma, and a
+//     missing `:` or separator is named.
+//   - a number token (the run of `0-9 + - . e E`) must match
+//     `-? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)?` whole; a fraction
+//     or exponent makes a Float, else Int; an out-of-range Int passes
+//     int.parse's error message through.
 //   - nesting is bounded (R-L0-47, R-json-04, #4020): an array or object
 //     opened inside 1000 others is `json: nesting deeper than 1000`, checked
 //     where the oracle checks it. `depth` counts the containers around the
@@ -31,8 +39,9 @@ fn json_parse(text: String) -> Result[Value, String] = {
   let blen = prim.load32(h + 4)
   match __jp_value(h + 12, blen, 0, 0) {
     ok(r) => {
-      let (v, _p) = r
-      ok(v)
+      let (v, p) = r
+      let q = __jp_ws(h + 12, blen, p)
+      if q < blen then err(__jp_at("json: trailing data", h + 12, q)) else ok(v)
     },
     err(e) => err(e),
   }
@@ -70,32 +79,18 @@ fn __jp_substr(base: Int, from: Int, to: Int) -> String = {
   s
 }
 
-// char::is_whitespace for a decoded codepoint (the same 25-codepoint set as
-// string.trim's oracle-derived table).
-fn __jp_is_uws(c: Int) -> Bool = if c == 32 then true
-else if c >= 9 and c <= 13 then true
-else if c == 133 then true
-else if c == 160 then true
-else if c == 5760 then true
-else if c >= 8192 and c <= 8202 then true
-else if c == 8232 then true
-else if c == 8233 then true
-else if c == 8239 then true
-else if c == 8287 then true
-else if c == 12288 then true else false
+// "<what> at pos N" with N the CHAR index of byte offset p.
+fn __jp_at(what: String, base: Int, p: Int) -> String = what + " at pos " + int.to_string(__jp_charpos(base, p, 0, 0))
 
-// Skip Unicode whitespace from byte offset p. ASCII fast path; a lead byte
-// >= 0xC2 decodes (NBSP/ideographic space etc.), anything else stops.
+// JSON whitespace only: space, tab, LF, CR (RFC 8259 §2).
 fn __jp_ws(base: Int, len: Int, p: Int) -> Int = if p >= len then p
 else {
   let b = prim.load8(base + p)
-  if b == 32 or (b >= 9 and b <= 13) then __jp_ws(base, len, p + 1)
-  else if b >= 194 then {
-    let (cp, l) = __jp_cp(base, p)
-    if __jp_is_uws(cp) then __jp_ws(base, len, p + l)
-    else p
-  } else p
+  if b == 32 or b == 9 or b == 10 or b == 13 then __jp_ws(base, len, p + 1) else p
 }
+
+// I-JSON §2.1: U+FDD0..U+FDEF and every U+xFFFE / U+xFFFF.
+fn __jp_nonchar(cp: Int) -> Bool = (cp >= 64976 and cp <= 65007) or cp % 65536 >= 65534
 
 // ── the value grammar ──
 fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), String] = {
@@ -103,9 +98,12 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
   if q >= len then err("unexpected end of input")
   else {
     let b = prim.load8(base + q)
-    if b == 34 then {
-      let (s, np) = __jp_string(base, len, q)
-      ok((value.str(s), np))
+    if b == 34 then match __jp_string(base, len, q) {
+      ok(r) => {
+        let (s, np) = r
+        ok((value.str(s), np))
+      },
+      err(e) => err(e),
     } else if (b == 123 or b == 91) and depth >= 1000 then err("json: nesting deeper than 1000")
     else if b == 123 then {
       let q2 = __jp_ws(base, len, q + 1)
@@ -137,102 +135,122 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
 }
 
 // ── strings ──
-// Two passes over THIS string's own bytes: measure an upper bound on the
-// decoded length, allocate exactly that, then write bytes through a cursor and
-// patch the String's len header — the same write-cursor + len-patch discipline
-// as list.filter. p is at the opening `"` (or whatever byte the object-key path
-// hands it — consumed unconditionally, like the oracle's parse_string).
+// Two passes over THIS string's own bytes: __jp_str_check validates the whole
+// string and measures an upper bound on the decoded length, then the buffer is
+// allocated exactly that and __jp_str_fill writes bytes through a cursor and
+// patches the String's len header — the same write-cursor + len-patch
+// discipline as list.filter. p is at the opening `"`.
 //
 // The bound must come from the string's own span, NOT from `len - p - 1` (the
 // rest of the document): sizing by the document remainder makes parsing cost
-// O(strings x document length), which timed out on real glTF (#939). The span
-// pass mirrors __jp_str_fill's advance and stop conditions exactly — advancing
-// less would under-allocate and corrupt the heap, so the two must stay in step.
-fn __jp_string(base: Int, len: Int, p: Int) -> (String, Int) = {
-  let buf = prim.alloc_str(__jp_str_span(base, len, p + 1, 0))
-  let dh = prim.handle(buf) + 12
-  let (np, outn) = __jp_str_fill(base, len, p + 1, dh, 0)
-  prim.store32(prim.handle(buf) + 4, outn)
-  (buf, np)
+// O(strings x document length), which timed out on real glTF (#939). The fill
+// only ever runs on a string the check accepted, so it meets no bad escape and
+// advances exactly as the check did.
+fn __jp_string(base: Int, len: Int, p: Int) -> Result[(String, Int), String] = {
+  let span = __jp_str_check(base, len, p + 1, 0, p)
+  if span < 0 then err(__jp_str_err(base, 0 - 1 - span))
+  else {
+    let buf = prim.alloc_str(span)
+    let dh = prim.handle(buf) + 12
+    let (np, outn) = __jp_str_fill(base, len, p + 1, dh, 0)
+    prim.store32(prim.handle(buf) + 4, outn)
+    ok((buf, np))
+  }
 }
 
-// An upper bound on the bytes __jp_str_fill will write, walking the same path
-// it does. Per branch: a simple escape consumes 2 and writes at most 1; a
-// \uXXXX consumes 6 and writes at most 3 (any BMP codepoint); a surrogate pair
-// consumes 12 and writes exactly 4; a plain byte is 1 for 1.
-fn __jp_str_span(base: Int, len: Int, p: Int, n: Int) -> Int = if p >= len then n
+// A refusal travels as a negative Int: 0 - 1 - (position * 8 + kind).
+fn __jp_str_fail(pos: Int, kind: Int) -> Int = 0 - 1 - (pos * 8 + kind)
+
+fn __jp_str_err(base: Int, code: Int) -> String = {
+  let kind = code % 8
+  let what = match kind {
+    0 => "json: unterminated string",
+    1 => "json: control character in string",
+    2 => "json: unknown escape",
+    3 => "json: invalid unicode escape",
+    4 => "json: lone surrogate",
+    _ => "json: noncharacter",
+  }
+  __jp_at(what, base, code / 8)
+}
+
+// The span (an upper bound on the bytes __jp_str_fill writes) of the string
+// whose opening quote is at `open`, or a refusal (__jp_str_fail). Per branch:
+// a simple escape consumes 2 and writes 1; a \uXXXX consumes 6 and writes at
+// most 3; a surrogate pair consumes 12 and writes 4; a plain byte is 1 for 1.
+fn __jp_str_check(base: Int, len: Int, p: Int, n: Int, open: Int) -> Int = if p >= len then __jp_str_fail(open, 0)
 else {
   let b = prim.load8(base + p)
   if b == 34 then n
+  else if b < 32 then __jp_str_fail(p, 1)
   else if b == 92 then {
-    let e = if p + 1 < len then prim.load8(base + p + 1) else 0
-    if e == 117 then {
-      let unit = __jp_hex4(base, len, p + 2)
-      if unit >= 55296 and unit <= 56319 and p + 8 <= len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then {
-        let lo = __jp_hex4(base, len, p + 8)
-        if lo >= 56320 and lo <= 57343 then __jp_str_span(base, len, p + 12, n + 4)
-        else __jp_str_span(base, len, p + 6, n + 3)
-      } else __jp_str_span(base, len, p + 6, n + 3)
-    } else __jp_str_span(base, len, p + 2, n + 1)
-  } else __jp_str_span(base, len, p + 1, n + 1)
+    if p + 1 >= len then __jp_str_fail(open, 0)
+    else {
+      let e = prim.load8(base + p + 1)
+      if e == 34 or e == 92 or e == 47 or e == 98 or e == 102 or e == 110 or e == 114 or e == 116 then __jp_str_check(base, len, p + 2, n + 1, open)
+      else if e == 117 then __jp_str_check_u(base, len, p, n, open)
+      else __jp_str_fail(p, 2)
+    }
+  } else if b >= 239 then {
+    let (cp, l) = __jp_cp(base, p)
+    if __jp_nonchar(cp) then __jp_str_fail(p, 5) else __jp_str_check(base, len, p + l, n + l, open)
+  } else __jp_str_check(base, len, p + 1, n + 1, open)
 }
 
-// Returns (position after the closing quote / end, bytes written).
+// \uXXXX at p (p = the backslash).
+fn __jp_str_check_u(base: Int, len: Int, p: Int, n: Int, open: Int) -> Int = {
+  let unit = __jp_hex4(base, len, p + 2)
+  if unit < 0 then __jp_str_fail(p, 3)
+  else if unit >= 55296 and unit <= 56319 then {
+    let lo = if p + 7 < len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then __jp_hex4(base, len, p + 8) else 0 - 1
+    if lo >= 56320 and lo <= 57343 then {
+      let cp = 65536 + (unit - 55296) * 1024 + (lo - 56320)
+      if __jp_nonchar(cp) then __jp_str_fail(p, 5) else __jp_str_check(base, len, p + 12, n + 4, open)
+    } else __jp_str_fail(p, 4)
+  } else if unit >= 56320 and unit <= 57343 then __jp_str_fail(p, 4)
+  else if __jp_nonchar(unit) then __jp_str_fail(p, 5)
+  else __jp_str_check(base, len, p + 6, n + 3, open)
+}
+
+// Returns (position after the closing quote, bytes written). Runs only on a
+// string __jp_str_check accepted.
 fn __jp_str_fill(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) =
   if p >= len then (p, o)
   else {
     let b = prim.load8(base + p)
     if b == 34 then (p + 1, o)
     else if b == 92 then {
-      let e = if p + 1 < len then prim.load8(base + p + 1) else 0
-      if e == 110 then {
-        prim.store8(dh + o, 10)
+      let e = prim.load8(base + p + 1)
+      if e == 117 then __jp_str_u(base, len, p, dh, o)
+      else {
+        prim.store8(dh + o, __jp_simple_escape(e))
         __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 116 then {
-        prim.store8(dh + o, 9)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 114 then {
-        prim.store8(dh + o, 13)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 98 then {
-        prim.store8(dh + o, 8)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 102 then {
-        prim.store8(dh + o, 12)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 34 then {
-        prim.store8(dh + o, 34)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 92 then {
-        prim.store8(dh + o, 92)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 47 then {
-        prim.store8(dh + o, 47)
-        __jp_str_fill(base, len, p + 2, dh, o + 1)
-      } else if e == 117 then __jp_str_u(base, len, p, dh, o)
-      else __jp_str_fill(base, len, p + 2, dh, o)
+      }
     } else {
       prim.store8(dh + o, b)
       __jp_str_fill(base, len, p + 1, dh, o + 1)
     }
   }
 
-// \uXXXX at p (p = the backslash). The oracle advances past the 4 hex digits
-// UNCONDITIONALLY, writes only when they parse; a D800–DBFF unit followed by a
-// \uDC00–DFFF unit joins into one astral codepoint; lone/invalid surrogates
-// are dropped.
+// The byte a checked one-char escape stands for.
+fn __jp_simple_escape(e: Int) -> Int = match e {
+  110 => 10,
+  116 => 9,
+  114 => 13,
+  98 => 8,
+  102 => 12,
+  _ => e,
+}
+
+// A checked \uXXXX at p: a high unit is followed by its low unit and joins
+// into one astral codepoint; anything else is one BMP codepoint.
 fn __jp_str_u(base: Int, len: Int, p: Int, dh: Int, o: Int) -> (Int, Int) = {
   let unit = __jp_hex4(base, len, p + 2)
-  if unit < 0 then __jp_str_fill(base, len, p + 6, dh, o)
-  else if unit >= 55296 and unit <= 56319 and p + 8 <= len and prim.load8(base + p + 6) == 92 and prim.load8(base + p + 7) == 117 then {
+  if unit >= 55296 and unit <= 56319 then {
     let lo = __jp_hex4(base, len, p + 8)
-    if lo >= 56320 and lo <= 57343 then {
-      let cp = 65536 + (unit - 55296) * 1024 + (lo - 56320)
-      let w = __jp_utf8_write(dh, o, cp)
-      __jp_str_fill(base, len, p + 12, dh, o + w)
-    } else __jp_str_fill(base, len, p + 6, dh, o)
-  } else if unit >= 55296 and unit <= 57343 then __jp_str_fill(base, len, p + 6, dh, o)
-  else {
+    let w = __jp_utf8_write(dh, o, 65536 + (unit - 55296) * 1024 + (lo - 56320))
+    __jp_str_fill(base, len, p + 12, dh, o + w)
+  } else {
     let w = __jp_utf8_write(dh, o, unit)
     __jp_str_fill(base, len, p + 6, dh, o + w)
   }
@@ -279,6 +297,26 @@ else {
   if a < 0 or b < 0 or c < 0 or d < 0 then 0 - 1 else ((a * 16 + b) * 16 + c) * 16 + d
 }
 
+// Exactly 4 ASCII hex digits at base+p → the code unit; anything else → -1.
+// (from_str_radix rejects whitespace/`0x`, so this is hand-rolled.)
+fn __jp_hex_digit(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
+else if b >= 97 and b <= 102 then b - 87
+else if b >= 65 and b <= 70 then b - 55 else 0 - 1
+
+// The bound is `p > len - 4`, not `p + 4 > len`: the additive form WRAPS at a
+// near-`i64::MAX` position and admits an out-of-range read. `len` is a
+// non-negative i32-ranged length, so `len - 4` cannot overflow. A negative `p`
+// is impossible here (the scanner only advances), but the subtractive form is
+// correct for it too.
+fn __jp_hex4(base: Int, len: Int, p: Int) -> Int = if p > len - 4 then 0 - 1
+else {
+  let a = __jp_hex_digit(prim.load8(base + p))
+  let b = __jp_hex_digit(prim.load8(base + p + 1))
+  let c = __jp_hex_digit(prim.load8(base + p + 2))
+  let d = __jp_hex_digit(prim.load8(base + p + 3))
+  if a < 0 or b < 0 or c < 0 or d < 0 then 0 - 1 else ((a * 16 + b) * 16 + c) * 16 + d
+}
+
 // ── numbers ──
 fn __jp_digits(base: Int, len: Int, p: Int) -> Int =
   if p < len and prim.load8(base + p) >= 48 and prim.load8(base + p) <= 57 then __jp_digits(
@@ -288,27 +326,50 @@ fn __jp_digits(base: Int, len: Int, p: Int) -> Int =
   )
   else p
 
-fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
+// The number token: the run of `0-9 + - . e E` from p.
+fn __jp_numrun(base: Int, len: Int, p: Int) -> Int = if p >= len then p
+else {
+  let b = prim.load8(base + p)
+  if (b >= 48 and b <= 57) or b == 43 or b == 45 or b == 46 or b == 101 or b == 69 then __jp_numrun(base, len, p + 1) else p
+}
+
+// End of the RFC 8259 number that starts at p and ends by `end`, or -1 when
+// the token is not one (the run must be matched whole).
+fn __jp_num_end(base: Int, end: Int, p: Int) -> Int = {
   let p1 = if prim.load8(base + p) == 45 then p + 1 else p
-  let p2 = __jp_digits(base, len, p1)
-  let has_frac = p2 < len and prim.load8(base + p2) == 46
-  let p3 = if has_frac then __jp_digits(base, len, p2 + 1)
-  else p2
-  let eb = if p3 < len then prim.load8(base + p3) else 0
-  let has_exp = eb == 101 or eb == 69
-  let p4 = if has_exp then {
-    let ps = p3 + 1
-    let sb = if ps < len then prim.load8(base + ps) else 0
-    let ps2 = if sb == 43 or sb == 45 then ps + 1 else ps
-    __jp_digits(base, len, ps2)
-  } else p3
-  let s = __jp_substr(base, p, p4)
-  if has_frac or has_exp then match float.parse(s) {
-    ok(f) => ok((value.float(f), p4)),
-    err(m) => err(m),
-  } else match int.parse(s) {
-    ok(n) => ok((value.int(n), p4)),
-    err(m) => err(m),
+  let p2 = __jp_digits(base, end, p1)
+  if p2 == p1 then 0 - 1
+  else if prim.load8(base + p1) == 48 and p2 > p1 + 1 then 0 - 1
+  else {
+    let has_frac = p2 < end and prim.load8(base + p2) == 46
+    let p3 = if has_frac then __jp_digits(base, end, p2 + 1) else p2
+    if has_frac and p3 == p2 + 1 then 0 - 1
+    else {
+      let eb = if p3 < end then prim.load8(base + p3) else 0
+      if eb == 101 or eb == 69 then {
+        let sb = if p3 + 1 < end then prim.load8(base + p3 + 1) else 0
+        let ps = if sb == 43 or sb == 45 then p3 + 2 else p3 + 1
+        let p4 = __jp_digits(base, end, ps)
+        if p4 == ps then 0 - 1 else p4
+      } else p3
+    }
+  }
+}
+
+fn __jp_number(base: Int, len: Int, p: Int) -> Result[(Value, Int), String] = {
+  let end = __jp_numrun(base, len, p)
+  let q = __jp_num_end(base, end, p)
+  if q != end then err(__jp_at("json: invalid number", base, p))
+  else {
+    let s = __jp_substr(base, p, end)
+    let is_float = string.contains(s, ".") or string.contains(s, "e") or string.contains(s, "E")
+    if is_float then match float.parse(s) {
+      ok(f) => ok((value.float(f), end)),
+      err(m) => err(m),
+    } else match int.parse(s) {
+      ok(n) => ok((value.int(n), end)),
+      err(m) => err(m),
+    }
   }
 }
 
@@ -361,13 +422,22 @@ fn __jp_array(base: Int, len: Int, p0: Int, acc0: List[Value], depth: Int) -> Re
         let (v, np) = r
         list.push(acc, v)
         let q = __jp_ws(base, len, np)
-        let b = if q < len then prim.load8(base + q) else 0
-        if b == 44 then {
-          p = q + 1
-        } else if b == 93 then {
-          endp = q + 1
+        if q >= len then {
+          error = "unexpected end of input"
         } else {
-          endp = q
+          let b = prim.load8(base + q)
+          if b == 93 then {
+            endp = q + 1
+          } else if b == 44 then {
+            let n = __jp_ws(base, len, q + 1)
+            if n < len and prim.load8(base + n) == 93 then {
+              error = __jp_at("json: trailing comma", base, q)
+            } else {
+              p = n
+            }
+          } else {
+            error = __jp_at("json: expected ',' or ']'", base, q)
+          }
         }
       },
       err(e) => {
@@ -378,38 +448,70 @@ fn __jp_array(base: Int, len: Int, p0: Int, acc0: List[Value], depth: Int) -> Re
   if string.len(error) > 0 then err(error) else ok((value.array(acc), endp))
 }
 
-// p is at the first key (post-`{`, post-ws, non-`}`). The oracle re-skips ws
-// at the loop head and consumes `:` only if present.
-// The same loop shape as `__jp_array`, for the same two reasons (#939): the
-// per-key `acc + [(k, v)]` copy was quadratic and the per-key call frame
-// overflowed the stack on wide objects.
+// p is at the first key (post-`{`, post-ws, non-`}`); every later round starts
+// past a `,` and its whitespace. A key must be a string, and a key the object
+// already holds is refused at the repeat's opening quote (I-JSON §2.3) — the
+// keys read so far sit in a map, so the check is O(1) per key on wide objects.
+// The same loop shape as `__jp_array`, for the same two reasons (#939).
 fn __jp_object(base: Int, len: Int, p0: Int, acc0: List[(String, Value)], depth: Int) -> Result[(Value, Int), String] = {
   var p = p0
   var acc = acc0
+  var seen: Map[String, Int] = map.new()
   var endp = 0 - 1
   var error = ""
   while endp < 0 and string.len(error) == 0 {
-    let q = __jp_ws(base, len, p)
-    let (k, kp) = __jp_string(base, len, q)
-    let q2 = __jp_ws(base, len, kp)
-    let q3 = if q2 < len and prim.load8(base + q2) == 58 then q2 + 1 else q2
-    match __jp_value(base, len, q3, depth) {
-      ok(r) => {
-        let (v, np) = r
-        let q4 = __jp_ws(base, len, np)
-        let b = if q4 < len then prim.load8(base + q4) else 0
-        list.push(acc, (k, v))
-        if b == 44 then {
-          p = q4 + 1
-        } else if b == 125 then {
-          endp = q4 + 1
-        } else {
-          endp = q4
-        }
-      },
-      err(e) => {
-        error = e
-      },
+    if p >= len then {
+      error = "unexpected end of input"
+    } else if prim.load8(base + p) != 34 then {
+      error = __jp_at("json: unquoted key", base, p)
+    } else {
+      match __jp_string(base, len, p) {
+        err(e) => {
+          error = e
+        },
+        ok(kr) => {
+          let (k, kp) = kr
+          if map.contains(seen, k) then {
+            error = __jp_at("json: duplicate key", base, p)
+          } else {
+            map.insert(seen, k, 0)
+            let c = __jp_ws(base, len, kp)
+            if c >= len then {
+              error = "unexpected end of input"
+            } else if prim.load8(base + c) != 58 then {
+              error = __jp_at("json: expected ':'", base, c)
+            } else {
+              match __jp_value(base, len, c + 1, depth) {
+                ok(r) => {
+                  let (v, np) = r
+                  list.push(acc, (k, v))
+                  let q = __jp_ws(base, len, np)
+                  if q >= len then {
+                    error = "unexpected end of input"
+                  } else {
+                    let b = prim.load8(base + q)
+                    if b == 125 then {
+                      endp = q + 1
+                    } else if b == 44 then {
+                      let n = __jp_ws(base, len, q + 1)
+                      if n < len and prim.load8(base + n) == 125 then {
+                        error = __jp_at("json: trailing comma", base, q)
+                      } else {
+                        p = n
+                      }
+                    } else {
+                      error = __jp_at("json: expected ',' or '}'", base, q)
+                    }
+                  }
+                },
+                err(e) => {
+                  error = e
+                },
+              }
+            }
+          }
+        },
+      }
     }
   }
   if string.len(error) > 0 then err(error) else ok((value.object(acc), endp))

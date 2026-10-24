@@ -456,6 +456,18 @@ false true
 
 Recursively list every entry — files AND directories — in a directory tree
 
+A symlink is listed as an entry and never followed (C-396): a link to a
+directory outside the tree lists nothing outside it, and a link loop cannot
+repeat the walk. `fs.glob` walks the same way. `dir` itself is opened as
+written, its own symlinks followed.
+
+Following links is a non-goal for now: there is no opt-in. Not following is
+the safe default for a directory others can write to (an upload or spool
+directory, an extracted archive, a cloned repository). Of the walkers measured
+(2026-10-25), Go's `filepath.WalkDir` has no follow option either, while
+Python's `os.walk(followlinks=True)` and Rust's walkdir `follow_links(true)`
+do. To descend into a linked directory, name it to `fs.walk` yourself.
+
 ```almd run
 import fs
 
@@ -736,7 +748,7 @@ effect fs.copy(src: String, dst: String) -> Unit
 // @since 0.5.0 or earlier
 effect fs.rename(src: String, dst: String) -> Unit
 
-// Sorted paths below dir, recursive; dirs too.
+// Sorted paths below dir; links listed, not followed.
 // @since 0.5.0 or earlier
 effect fs.walk(dir: String) -> List[String]
 
@@ -748,7 +760,7 @@ effect fs.remove_all(path: String) -> Unit
 // @since 0.5.0 or earlier
 effect fs.file_size(path: String) -> Int
 
-// Host temp dir; may end with /.
+// Host temp dir; a location, not a safe name.
 // @since 0.5.0 or earlier
 effect fs.temp_dir() -> String
 
@@ -756,15 +768,15 @@ effect fs.temp_dir() -> String
 // @since 0.5.0 or earlier
 effect fs.stat(path: String) -> FileStat
 
-// Sorted * and ** matches; [] if base is absent.
+// Sorted * and ** matches; links not followed.
 // @since 0.6.0 or earlier
 effect fs.glob(pattern: String) -> List[String]
 
-// New empty file temp_dir/prefix+nanos; its path.
+// New private file, random name; its path.
 // @since 0.6.0 or earlier
 effect fs.create_temp_file(prefix: String) -> String
 
-// New dir temp_dir/prefix+nanos; its path.
+// New private dir, random name; its path.
 // @since 0.6.0 or earlier
 effect fs.create_temp_dir(prefix: String) -> String
 

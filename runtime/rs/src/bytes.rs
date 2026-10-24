@@ -61,6 +61,15 @@ pub fn almide_rt_bytes_slice(b: &Vec<u8>, start: i64, end: i64) -> Vec<u8> {
 pub fn almide_rt_bytes_from_list(xs: &[i64]) -> Vec<u8> { xs.iter().map(|&x| x as u8).collect() }
 pub fn almide_rt_bytes_to_list(b: &Vec<u8>) -> Vec<i64> { b.iter().map(|&x| x as i64).collect() }
 pub fn almide_rt_bytes_concat(a: &Vec<u8>, b: &Vec<u8>) -> Vec<u8> { let mut r = a.clone(); r.extend_from_slice(b); r }
+/// `bytes.__join` (the Text requirement `list.join` reads): the parts with `sep` between them.
+pub fn almide_rt_bytes_join<B: std::ops::Deref<Target = Vec<u8>>>(xs: &[B], sep: &Vec<u8>) -> Vec<u8> {
+    let mut r: Vec<u8> = Vec::new();
+    for (i, x) in xs.iter().enumerate() {
+        if i > 0 { r.extend_from_slice(sep); }
+        r.extend_from_slice(x);
+    }
+    r
+}
 // C-197: an allocation the process cannot satisfy is the DEFINED abort
 // (`Error: out of memory` + exit 1) on BOTH targets — the wasm render's $oom
 // prints the same line. The infallible `vec![0; n]` here instead died on the
@@ -94,18 +103,32 @@ fn alloc_bytes_or_oom(n: usize) -> Vec<u8> {
     }
     v
 }
+/// `bytes.repeat`'s result ceiling: the repeat family's shared 2^31 bytes
+/// (C-054/C-161), declared here because the runtime is flattened per program
+/// and string.rs is not always linked beside this module.
+pub const ALMIDE_BYTES_REPEAT_MAX_BYTES: i64 = 1 << 31;
 pub fn almide_rt_bytes_repeat(b: &Vec<u8>, n: i64) -> Vec<u8> {
     // An EMPTY base is empty at ANY count (#2690): the extend loop below
     // runs `n` times whatever `b.len()` is, so `repeat(empty, i64::MAX)`
     // never returned.
     if b.is_empty() { return Vec::new(); }
-    let n = n.max(0) as usize;
+    let n = n.max(0);
+    // The repeat family's shared 2^31-byte ceiling (C-054/C-161), the
+    // `string.repeat` guard verbatim: `bytes.repeat([1, 2], 2^30 + 1)` built
+    // a 2 GiB buffer and exited 0 here while wasm died `out of memory`
+    // (#4154). The value is rostered in scripts/check-alloc-ceilings.sh
+    // beside ALMIDE_REPEAT_MAX_BYTES (string.rs) and the `bytes_repeat`
+    // guard in stdlib/bytes_core.almd.
+    if (b.len() as i64).saturating_mul(n) > ALMIDE_BYTES_REPEAT_MAX_BYTES {
+        almide_abort("repeat result too large");
+    }
+    let n = n as usize;
     let total = b.len().checked_mul(n).unwrap_or(usize::MAX);
     let mut v = alloc_bytes_or_oom(total);
     for _ in 0..n { v.extend_from_slice(b); }
     v
 }
-pub fn almide_rt_bytes_new(len: i64) -> Vec<u8> {
+pub fn almide_rt_bytes_zeros(len: i64) -> Vec<u8> {
     let n = len.max(0) as usize;
     let mut v = alloc_bytes_or_oom(n);
     v.resize(n, 0);

@@ -1,0 +1,1 @@
+fn main() -> Unit = println("price: \u{2067}100\u{2069} USD")

@@ -1,13 +1,13 @@
 diff --git a/crates/almide-wasm/src/stmts_index.rs b/crates/almide-wasm/src/stmts_index.rs
-index 318f34d5e..d9f8f07ad 100644
+index 918f31680..e0b1da760 100644
 --- a/crates/almide-wasm/src/stmts_index.rs
 +++ b/crates/almide-wasm/src/stmts_index.rs
-@@ -181,7 +181,7 @@ impl Emitter<'_> {
-                     let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
+@@ -186,7 +186,7 @@ impl Emitter<'_> {
                      self.f.instructions().i32_load(wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 }).call(dec);
+                     crate::witness::bounds::access(site, false);
                  }
 -                let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
 +                let off = self.emit_elem_addr(list, hb, hi, index, stride)?.saturating_sub(u64::from(almide_layout::PAYLOAD)); // [MUTANT: header write]
                  self.f.instructions().local_get(hv);
                  self.store_slot_off(el, off);
-                 self.release_i32();
+                 crate::witness::bounds::access(site, true);

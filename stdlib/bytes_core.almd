@@ -37,14 +37,14 @@ fn bytes_get_or(b: Bytes, i: Int, default: Int) -> Int = {
   } else default
 }
 
-// Fill n bytes at p with zero (bytes.new returns a zeroed block; alloc_bytes leaves it raw).
+// Fill n bytes at p with zero (bytes.zeros returns a zeroed block; alloc_bytes leaves it raw).
 fn __zerofill(p: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   prim.store8(p + i, 0)
   __zerofill(p, n, i + 1)
 }
 
-// bytes.new(len) -> a fresh zero-filled Bytes of max(0, len) bytes.
+// bytes.zeros(len) -> a fresh zero-filled Bytes of max(0, len) bytes.
 // No stdlib allocation guard (ratified A, 2026-08-17): measured on 0.57.0, this
 // leg's floor turns every unsatisfiable size — 2.5 GiB in a full heap, u32::MAX,
 // i64::MAX — into the defined `Error: out of memory`, never a trap. A 2^31 guard
@@ -102,15 +102,14 @@ fn bytes_repeat(b: Bytes, count: Int) -> Bytes = {
   let blen = prim.load32(prim.handle(b) + 4)
   // An EMPTY base is empty at ANY count (#2690) — the copy recursion runs n times.
   let n = if count > 0 and blen > 0 then count else 0
-  // `blen * n` must not WRAP (#2782): `[1, 2, 3]` × 6148914691236517206 is 2
-  // in i64, sized a 2-byte block and the copy recursion wrote past it into an
-  // out-of-bounds trap. A product past i64 is unsatisfiable, so it is the
-  // floor's own `Error: out of memory` (C-197) — tested by division, never on
-  // the wrapped product; below that the floor judges the size as before.
-  // `wrap_bound` is the largest count whose product fits i64 — an overflow
-  // bound, not an allocation ceiling (the floor still owns that).
-  let wrap_bound = if blen > 0 then 9223372036854775807 / blen else 0
-  if n > wrap_bound then prim.die(prim.handle("Error: out of memory\n")) else ()
+  // A result past the repeat family's shared 2^31-byte ceiling ABORTS in the
+  // T6 form (C-054/C-161), the `string_repeat` guard verbatim: without it
+  // `bytes.repeat([1, 2], 2^30 + 1)` was a 2 GiB success natively and
+  // `out of memory` here (#4154). Tested by DIVISION, never on the product:
+  // `blen * n` WRAPS for a huge n (#2782 — `[1, 2, 3]` × 6148914691236517206
+  // is 2 in i64), so a guard computed from it tests nothing.
+  // Keep in sync with ALMIDE_BYTES_REPEAT_MAX_BYTES in runtime/rs/src/bytes.rs.
+  if blen > 0 and n > 2147483648 / blen then prim.die(prim.handle("Error: repeat result too large\n")) else ()
   let out = prim.alloc_bytes(blen * n)
   let _x = __repcopy(prim.handle(out) + 12, prim.handle(b) + 12, blen, n, 0)
   out
@@ -178,7 +177,7 @@ fn __bytecmp(pa: Int, pb: Int, na: Int, nb: Int, i: Int) -> Int =
     }
   }
 
-// bytes.cmp(a, b) -> -1 / 0 / 1 (lexicographic).
+// bytes.compare(a, b) -> -1 / 0 / 1 (lexicographic).
 fn bytes_cmp(a: Bytes, b: Bytes) -> Int = {
   let na = prim.load32(prim.handle(a) + 4)
   let nb = prim.load32(prim.handle(b) + 4)
@@ -232,7 +231,7 @@ else {
   __fillval(p, n, val, i + 1)
 }
 
-// bytes.pad_left(b, target_len, val) -> b prefixed with `val` bytes up to target_len (no-op if longer).
+// bytes.pad_start(b, target_len, val) -> b prefixed with `val` bytes up to target_len (no-op if longer).
 fn bytes_pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes = {
   let n = prim.load32(prim.handle(b) + 4)
   let t = if target_len > n then target_len else n
@@ -244,7 +243,7 @@ fn bytes_pad_left(b: Bytes, target_len: Int, val: Int) -> Bytes = {
   out
 }
 
-// bytes.pad_right(b, target_len, val) -> b suffixed with `val` bytes up to target_len (no-op if longer).
+// bytes.pad_end(b, target_len, val) -> b suffixed with `val` bytes up to target_len (no-op if longer).
 fn bytes_pad_right(b: Bytes, target_len: Int, val: Int) -> Bytes = {
   let n = prim.load32(prim.handle(b) + 4)
   let t = if target_len > n then target_len else n
@@ -372,7 +371,7 @@ fn __sext16(u: Int) -> Int = if u >= 32768 then u - 65536 else u
 
 fn __sext32(u: Int) -> Int = if u >= 2147483648 then u - 4294967296 else u
 
-// bytes.read_u16_be(b, pos) -> the unsigned big-endian u16 at pos (0 if out of range).
+// bytes.__read_u16_be(b, pos) -> the unsigned big-endian u16 at pos (0 if out of range).
 fn bytes_read_u16_be(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -388,7 +387,7 @@ fn bytes_read_u16_be(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_i16_be(b, pos) -> the signed big-endian i16 at pos (0 if out of range).
+// bytes.__read_i16_be(b, pos) -> the signed big-endian i16 at pos (0 if out of range).
 fn bytes_read_i16_be(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -405,7 +404,7 @@ fn bytes_read_i16_be(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_i16_le(b, pos) -> the signed little-endian i16 at pos (0 if out of range).
+// bytes.__read_i16_le(b, pos) -> the signed little-endian i16 at pos (0 if out of range).
 fn bytes_read_i16_le(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -422,7 +421,7 @@ fn bytes_read_i16_le(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_i32_be(b, pos) -> the signed big-endian i32 at pos (0 if out of range).
+// bytes.__read_i32_be(b, pos) -> the signed big-endian i32 at pos (0 if out of range).
 fn bytes_read_i32_be(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -472,7 +471,7 @@ fn __byte_nonzero(addr: Int) -> Bool = {
   v != 0
 }
 
-// bytes.read_bool(b, pos) -> is the byte at pos non-zero? (false if out of range).
+// bytes.__read_bool(b, pos) -> is the byte at pos non-zero? (false if out of range).
 fn bytes_read_bool(b: Bytes, pos: Int) -> Bool = {
   let h = prim.handle(b)
   let n = prim.load32(h + 4)
@@ -482,7 +481,7 @@ fn bytes_read_bool(b: Bytes, pos: Int) -> Bool = {
   }
 }
 
-// bytes.read_u16_le(b, pos) -> the unsigned little-endian u16 at pos (0 if out of range).
+// bytes.__read_u16_le(b, pos) -> the unsigned little-endian u16 at pos (0 if out of range).
 fn bytes_read_u16_le(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -498,7 +497,7 @@ fn bytes_read_u16_le(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_u32_be(b, pos) -> the unsigned big-endian u32 at pos (0 if out of range).
+// bytes.__read_u32_be(b, pos) -> the unsigned big-endian u32 at pos (0 if out of range).
 fn bytes_read_u32_be(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -520,7 +519,7 @@ fn bytes_read_u32_be(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_u32_le(b, pos) -> the unsigned little-endian u32 at pos (0 if out of range).
+// bytes.__read_u32_le(b, pos) -> the unsigned little-endian u32 at pos (0 if out of range).
 fn bytes_read_u32_le(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -542,7 +541,7 @@ fn bytes_read_u32_le(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_i32_le(b, pos) -> the signed little-endian i32 at pos (0 if out of range).
+// bytes.__read_i32_le(b, pos) -> the signed little-endian i32 at pos (0 if out of range).
 fn bytes_read_i32_le(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -565,7 +564,7 @@ fn bytes_read_i32_le(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_i64_be(b, pos) -> the signed big-endian i64 at pos (full width, 0 if out of range).
+// bytes.__read_i64_be(b, pos) -> the signed big-endian i64 at pos (full width, 0 if out of range).
 fn bytes_read_i64_be(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -599,7 +598,7 @@ fn bytes_read_i64_be(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_i64_le(b, pos) -> the signed little-endian i64 at pos (full width, 0 if out of range).
+// bytes.__read_i64_le(b, pos) -> the signed little-endian i64 at pos (full width, 0 if out of range).
 fn bytes_read_i64_le(b: Bytes, pos: Int) -> Int = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -633,7 +632,7 @@ fn bytes_read_i64_le(b: Bytes, pos: Int) -> Int = {
   }
 }
 
-// bytes.read_f64_be(b, pos) -> the big-endian IEEE-754 f64 at pos (0.0 if out of range). The
+// bytes.__read_f64_be(b, pos) -> the big-endian IEEE-754 f64 at pos (0.0 if out of range). The
 // 8 bytes form the i64 bit pattern; prim.ffrombits reinterprets it as the Float.
 fn bytes_read_f64_be(b: Bytes, pos: Int) -> Float = {
   let n = prim.load32(prim.handle(b) + 4)
@@ -669,7 +668,7 @@ fn bytes_read_f64_be(b: Bytes, pos: Int) -> Float = {
   }
 }
 
-// bytes.read_f64_le(b, pos) -> the little-endian IEEE-754 f64 at pos (0.0 if out of range).
+// bytes.__read_f64_le(b, pos) -> the little-endian IEEE-754 f64 at pos (0.0 if out of range).
 fn bytes_read_f64_le(b: Bytes, pos: Int) -> Float = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12 + pos
@@ -739,7 +738,7 @@ fn bytes_index_of(b: Bytes, pat: Bytes) -> Int? = {
   if idx < 0 then __byte_none() else __byte_some_idx(idx)
 }
 
-// bytes.eof(b, pos) -> is pos at/past the end? v0 casts pos to usize, so a NEGATIVE pos wraps to
+// bytes.is_eof(b, pos) -> is pos at/past the end? v0 casts pos to usize, so a NEGATIVE pos wraps to
 // a huge unsigned value that is always >= len → true (the past-end sentinel). Reads the header.
 // A negative pos folds to n (so `p >= n` holds), matching the usize-wrap; the tail is a bare
 // comparison (the proven Bool-returning shape).
@@ -836,7 +835,7 @@ fn bytes_skip(b: Bytes, pos: Int, n: Int) -> Int = {
   if np > len then len else np
 }
 
-// bytes.read_f32_le(b, pos) -> the little-endian IEEE-754 f32 (widened to Float) at pos (0.0 if out
+// bytes.__read_f32_le(b, pos) -> the little-endian IEEE-754 f32 (widened to Float) at pos (0.0 if out
 // of range). Assemble the 4 LE bytes into the u32 bit pattern, then prim.bits_to_f32 = f32::from_bits
 // as f64 (NOT ffrombits, which is the f64 identity). Out-of-range / negative pos -> +0.0.
 fn bytes_read_f32_le(b: Bytes, pos: Int) -> Float = {
@@ -861,7 +860,7 @@ fn bytes_read_f32_le(b: Bytes, pos: Int) -> Float = {
   }
 }
 
-// bytes.read_f32_be(b, pos) -> the big-endian IEEE-754 f32 (widened to Float) at pos (0.0 if out of
+// bytes.__read_f32_be(b, pos) -> the big-endian IEEE-754 f32 (widened to Float) at pos (0.0 if out of
 // range).
 fn bytes_read_f32_be(b: Bytes, pos: Int) -> Float = {
   let n = prim.load32(prim.handle(b) + 4)
@@ -936,7 +935,7 @@ fn bytes_to_string(b: Bytes) -> Result[String, String] = {
   }
 }
 
-// ── bytes.map_each ── every byte through `f` (once, in order), the result truncated
+// ── bytes.map ── every byte through `f` (once, in order), the result truncated
 // to u8 (native: `f(*x as i64) as u8`).
 fn __bme_fill(dh: Int, sh: Int, f: (Int) -> Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {

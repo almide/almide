@@ -214,6 +214,13 @@ pub(crate) fn lower_resolved(
         .filter(|name| sources.contains_key(name))
         .collect();
     almide_wasm::package_keys::rekey_package_modules(&mut ir, &package);
+    // E109 (#4151): the same gate every other route runs, before tests are
+    // synthesized and before the program is linked or emitted.
+    let refused = crate::effect_value_gate::effect_value_diagnostics(&ir, path);
+    if !refused.is_empty() {
+        let text: Vec<String> = refused.iter().map(|d| crate::diagnostic_render::display_with_source(d, source_text).to_string()).collect();
+        return Err(text.join("\n"));
+    }
     if let Some(run_filter) = tests {
         // The structural leg's in-test assert lowering (the frontend's
         // non-test abort form), then the shared runner synthesis.
@@ -282,6 +289,15 @@ fn link_self_host(
         }
     }
 
+    fn demand_requirement(key: &str, out: &mut HashSet<String>) {
+        let Some((_, method)) = key.split_once('.') else { return };
+        for (module, _, req) in crate::canonicalize::protocols::builtin_conformance_requirements() {
+            if req == method {
+                out.insert(format!("{module}.{method}"));
+            }
+        }
+    }
+
     fn scan_expr(e: &crate::ir::IrExpr, out: &mut HashSet<String>) {
         match &e.kind {
             crate::ir::IrExprKind::Call { target, args, .. }
@@ -299,6 +315,15 @@ fn link_self_host(
                         // linked lossy decoder (same WHATWG algorithm).
                         if module.as_str() == "string" && func.as_str() == "from_bytes" {
                             out.insert("bytes.to_string_lossy".to_string());
+                        }
+                        // value.object and the key renames box their pairs
+                        // through the linked `__vu_fold_pairs` (C-401: one
+                        // entry per key), which lives in value_utils — linked
+                        // through its registered surface value.pick.
+                        if module.as_str() == "value"
+                            && matches!(func.as_str(), "object" | "to_camel_case" | "to_snake_case")
+                        {
+                            out.insert("value.pick".to_string());
                         }
                         // testing.assert_contains lowers as a native arm
                         // over the linked string.contains (#2743).
@@ -320,6 +345,18 @@ fn link_self_host(
                     // dunder name — the demand key IS the name.
                     crate::ir::CallTarget::Named { name } if name.as_str().starts_with("__") => {
                         out.insert(name.as_str().to_string());
+                    }
+                    // A protocol requirement reached through a type variable
+                    // (`T.__join` in `list.join[T: Text]`) becomes a call to
+                    // some conforming type's `<module>.<requirement>` only at
+                    // monomorphization, after this scan: demand the
+                    // requirement of every built-in conformer (an unused load
+                    // is reachability-pruned).
+                    crate::ir::CallTarget::Named { name } if name.as_str().contains('.') => {
+                        demand_requirement(name.as_str(), out);
+                    }
+                    crate::ir::CallTarget::Method { method, .. } if method.as_str().contains('.') => {
+                        demand_requirement(method.as_str(), out);
                     }
                     _ => {}
                 }
@@ -415,6 +452,39 @@ fn link_self_host(
             }
         }
         let mut grew = false;
+        // A splice body links after module resolution, so a call it makes
+        // into an Almide-bodied fn of a bundled module the entry never reached
+        // (`bytes.__f16_bits` from matrix's f16 writer) has no lowered body:
+        // load that module now, by the same steps `lower_resolved` takes.
+        for surface in &needed {
+            if registry.contains_key(surface) {
+                continue;
+            }
+            let Some((module, _)) = surface.split_once('.') else { continue };
+            if !crate::stdlib::is_bundled_module(module)
+                || ir.modules.iter().any(|m| m.name.as_str() == module)
+            {
+                continue;
+            }
+            let Some(src) = almide_types::stdlib_info::bundled_source(module) else { continue };
+            let mut parser = crate::parser::Parser::new(crate::lexer::Lexer::tokenize(src));
+            let Ok(mut mod_prog) = parser.parse() else { continue };
+            let has_bridge_surface = mod_prog.decls.iter().any(|d| {
+                matches!(d, crate::ast::Decl::Fn { body: None, extern_attrs, .. } if extern_attrs.is_empty())
+            });
+            if !parser.errors.is_empty() || has_bridge_surface {
+                continue;
+            }
+            infer_module_capturing(checker, module, &mut mod_prog, sources, &mut module_diags);
+            let (mod_table, _) =
+                crate::import_table::build_import_table(&mod_prog, Some(module), &checker.env.user_modules);
+            let saved_table = std::mem::replace(&mut checker.env.import_table, mod_table);
+            let mut mod_ir = crate::lower::lower_module(module, &mod_prog, &checker.env, &checker.type_map, None);
+            checker.env.import_table = saved_table;
+            drop_registered_intrinsic_stubs(module, &mut mod_ir);
+            ir.modules.push(mod_ir);
+            grew = true;
+        }
         for surface in needed {
             let Some(&src) = registry.get(&surface) else { continue };
             if loaded.contains(&src) {

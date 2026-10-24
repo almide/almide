@@ -6,7 +6,7 @@
 // the bytes decode lossily, exactly as the native line does. Reaching prim.read_n_bytes
 // carries Capability::Stdin (the SAME cap as io.read_line).
 effect fn io_read_line_opt() -> String? = {
-  var buf = bytes.new(0)
+  var buf = bytes.zeros(0)
   var got = 0
   var open = true
   while open {

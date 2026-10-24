@@ -179,6 +179,13 @@ fn structural_test_render(test_file: &str, source_text: &str, ir_program: &almid
         Ok(ir) => ir,
         Err(e) => { wall("lower", e); return None; }
     };
+    // `[permissions]` bound the wasm test lane as they bound the native one
+    // (#4159 audit: this lane ran a test the manifest forbids). A refusal
+    // falls to the native fallback, which refuses it with the report.
+    if wasm_test_permissions_refuse(test_file, &ir) {
+        wall("permissions", "[permissions] refuse this program".to_string());
+        return None;
+    }
     // ALMIDE_WASM_ALLOC_COUNT (#2407): arm the counters as `almide run
     // --target wasm` does; the embedded run below prints the line.
     let _alloc_count = almide_base::env::flag("ALMIDE_WASM_ALLOC_COUNT").then(almide_wasm::alloc_count::CountGuard::set);
@@ -374,7 +381,24 @@ fn lower_wasm_test_modules(program: &almide_lang::ast::Program, checker: &mut ch
             module_diags.iter().flat_map(|(_, _, ds)| ds.iter()).filter(|d| d.level == diagnostic::Level::Error),
         ));
     }
+    // E109 (#4151): the gate every route runs.
+    let refused = almide::effect_value_gate::effect_value_diagnostics(&ir_program, "");
+    if !refused.is_empty() {
+        return Err(render_error_summary(refused.iter()));
+    }
     Ok(ir_program)
+}
+
+/// `[permissions]` on a wasm test lane: the entry file's project manifest,
+/// judged on the lowered program. The violations are printed by the gate;
+/// `true` refuses the file on this lane.
+fn wasm_test_permissions_refuse(test_file: &str, ir: &almide::ir::IrProgram) -> bool {
+    match crate::project::permissions_project_for(test_file) {
+        Some(proj) if proj.permissions.is_some() || proj.proc_allow.is_some() => {
+            super::enforce_project_permissions(ir, &proj).is_err()
+        }
+        _ => false,
+    }
 }
 
 pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::PathBuf, run_filter: Option<&str>) -> WasmTestOutcome {
@@ -392,6 +416,11 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
     let prof = almide_base::env::flag("ALMIDE_PROFILE");
     let mut marks: Vec<(&'static str, std::time::Instant)> = vec![("start", std::time::Instant::now())];
 
+    // `[permissions] fs` (#4084): the embedded host bounds a test run to the
+    // granted directories exactly as it bounds `almide run --target wasm`.
+    // The manifest is the working directory's, as every build route reads it
+    // (`compile_driver`), so every file of one run sets the same scope.
+    almide_wasm_run::set_fs_scope(cwd_fs_scope());
     let (mut program, source_text, parse_errors) = parse_file(test_file);
     // Counted before any filtering so the summary can say what `--run` excluded.
     let declared_tests = program
@@ -424,6 +453,9 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
         Ok(ir) => ir,
         Err(detail) => return compile_error(detail),
     };
+    if wasm_test_permissions_refuse(test_file, &ir_program) {
+        return compile_error("[permissions] refuse this program".to_string());
+    }
     mark(prof, &mut marks, "lower_modules");
     // Nothing to run on any leg — the v1 renderer would refuse this program
     // ("no `main` and no test blocks") and the refusal read as a WALL, i.e. a
@@ -638,6 +670,16 @@ pub fn cmd_test_wasm(file: &str, run_filter: Option<&str>, allow_no_tests: bool,
 
 /// `cmd_test_fast`'s Phase 1: run every file on the fast rustc-free WASM
 /// path, in parallel (bounded by `cpus`). Extracted verbatim.
+/// The working directory's `[permissions] fs` roots (anchored to the
+/// manifest), or `None` without a manifest or without the key.
+fn cwd_fs_scope() -> Option<Vec<String>> {
+    let manifest = std::path::Path::new("almide.toml");
+    if !manifest.exists() {
+        return None;
+    }
+    crate::project::parse_toml(manifest).ok().and_then(|p| p.fs_allow)
+}
+
 pub(super) fn run_wasm_test_phase(test_files: &[String], scratch: &std::sync::Arc<TestScratch>, cpus: usize, run_filter: Option<&str>) -> Vec<WasmTestOutcome> {
     let run_filter: Option<String> = run_filter.map(str::to_string);
     let scratch = scratch.clone();

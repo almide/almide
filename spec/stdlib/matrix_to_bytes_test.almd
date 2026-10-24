@@ -36,5 +36,5 @@ test "to_bytes_f64_le on a 1x1 matrix" {
   ])
   let b = matrix.to_bytes_f64_le(m)
   assert_eq(bytes.len(b), 8)
-  assert_eq(bytes.read_f64_le(b, 0), 42.0)
+  assert_eq(bytes.get_f64_le(b, 0) ?? 0.0, 42.0)
 }

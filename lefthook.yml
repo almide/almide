@@ -54,6 +54,10 @@ pre-commit:
       # every workflow file whenever one changes.
       glob: "{.github/workflows/*.yml,.github/workflows/*.yaml,scripts/check-workflows.sh}"
       run: bash scripts/check-workflows.sh
+    action-pins:
+      # #4094: a tag can be moved to another commit; a 40-hex commit cannot.
+      glob: "{.github/workflows/*.yml,.github/workflows/*.yaml,.github/actions/**/*.yml,scripts/check-action-pins.sh}"
+      run: bash scripts/check-action-pins.sh
     semantics-manifest:
       # Globbed by PATTERN, not by covered module: the hook named
       # stdlib/string.almd literally, so the next module onto the ratchet

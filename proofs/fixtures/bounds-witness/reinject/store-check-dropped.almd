@@ -1,0 +1,9 @@
+// #4005 drill: the store route emits no bounds check (the C-067 write-path
+// class, #807's shape). The witness then holds a bare `w`, which the
+// checker rejects.
+effect fn main() -> Unit = {
+  var xs = [1, 2]
+  xs[1] = 5
+  xs[7] = 9
+  println("${xs[1]}")
+}

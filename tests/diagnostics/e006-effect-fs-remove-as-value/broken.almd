@@ -1,0 +1,7 @@
+// E006 (#4151): `fs.remove` passed as a value from a pure fn. A pure-typed
+// function deleted files on both targets.
+import fs
+
+fn tidy(paths: List[String]) -> List[Result[Unit, String]] = list.map(paths, fs.remove)
+
+effect fn main() -> Unit = println("${list.len(tidy([]))}")

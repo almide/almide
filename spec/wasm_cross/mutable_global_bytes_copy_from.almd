@@ -18,9 +18,9 @@
 //      this from the aliasing hoist's clone; the wasm self-host routes the
 //      aliased case through copy_within's direction-switching memmove.
 //      Before #963 wasm's forward byte loop observed its own writes.
-var arena = bytes.new(8)
+var arena = bytes.zeros(8)
 
-var other = bytes.new(8)
+var other = bytes.zeros(8)
 
 fn main() -> Unit = {
   // 1. distinct globals: other[3] → arena[0]
@@ -32,7 +32,7 @@ fn main() -> Unit = {
   bytes.copy_from(arena, arena, 4, 3, 1)
   println(int.to_string(bytes.get_or(arena, 4, -1)))
   // 3. local src into a global dst
-  var scratch = bytes.new(4)
+  var scratch = bytes.zeros(4)
   bytes.set_at(scratch, 0, 9)
   bytes.copy_from(arena, scratch, 7, 0, 1)
   println(int.to_string(bytes.get_or(arena, 7, -1)))

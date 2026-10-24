@@ -146,7 +146,8 @@ impl Checker {
                 fn_name, sib
             );
         }
-        self.narrowed_try_hint(tys)
+        regex_pattern_hint(fn_name, tys)
+            .or_else(|| self.narrowed_try_hint(tys))
             .or_else(|| self.likely_typevar_hint(fn_name, tys))
             .or_else(|| unwrap_family_hint(fn_name, tys))
             .or_else(|| wrapped_into_plain_hint(tys))
@@ -386,7 +387,7 @@ impl Checker {
             })
     }
     /// Substitute Ty::TypeVar("Self") with a concrete type in a protocol method return type.
-    fn substitute_self_in_ty(&self, ty: &Ty, replacement: &Ty) -> Ty {
+    pub(super) fn substitute_self_in_ty(&self, ty: &Ty, replacement: &Ty) -> Ty {
         match ty {
             Ty::TypeVar(name) if name == "Self" => replacement.clone(),
             _ => ty.map_children(&|child| self.substitute_self_in_ty(child, replacement)),
@@ -431,6 +432,15 @@ fn unwrap_family_hint(fn_name: &str, tys: MismatchTys<'_>) -> Option<String> {
 /// sibling) handed to a plain-T param means the caller meant the payload.
 /// "Fix the argument type" names no path; the unwrap operators are the path
 /// (#1050).
+/// R-regex-02 (#3942): a regex operation takes a `Regex`, made once by
+/// `regex.new`; a String in that place is a pattern written the old way, or
+/// the subject piped into the pattern's place.
+fn regex_pattern_hint(fn_name: &str, tys: MismatchTys<'_>) -> Option<String> {
+    let expected = tys.expected.display();
+    (fn_name.starts_with("regex.") && matches!(tys.arg_resolved, Ty::String) && expected.contains("Regex"))
+        .then(|| "a regex operation takes a Regex, made once from the pattern: `regex.find(regex.new(\"[0-9]+\"), s)`; a pattern built at run time goes through `regex.compile`, and the subject goes second, never piped into the pattern's place".to_string())
+}
+
 fn wrapped_into_plain_hint(tys: MismatchTys<'_>) -> Option<String> {
     if tys.arg.is_result() && !tys.expected.is_result() && !tys.expected.is_unresolved() {
         return Some(format!(

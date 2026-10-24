@@ -447,3 +447,6 @@ fn unique_by[K](s: String, f: (String) -> K) -> String = string.join(
   list.unique_by(string.chars(s), f),
   "",
 )
+
+// ── Text requirement (R-L0-42): `list.join[T: Text]` over Strings ──
+fn __join(xs: List[String], sep: String) -> String = list.__join_string(xs, sep)

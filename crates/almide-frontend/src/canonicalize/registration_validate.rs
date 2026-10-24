@@ -289,6 +289,10 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
                 let target = ImplTarget { name: *type_name, is_generic, ty: &type_ty };
                 if !is_generic_protocol {
                     validate_protocol_method_impl(env, diagnostics, &target, *proto_name, method_sig);
+                    // #4158: effect-ness and `mut` modes are part of the
+                    // signature on a non-generic protocol too — an `effect`
+                    // impl of a pure method let a pure bounded caller run it.
+                    validate_protocol_method_modes(env, diagnostics, &target, *proto_name, method_sig);
                     continue;
                 }
                 let applied = crate::types::ProtocolMethodSig {
@@ -322,12 +326,18 @@ fn validate_protocol_method_impl(
     let ImplTarget { name: type_name, is_generic, ty: type_ty } = *target;
     // A derived method is keyed bare while an explicit one is keyed prefixed,
     // so the key has to be resolved rather than assumed (#1087).
-    let fn_key = super::registration::convention_fn_key(env, &type_name.to_string(), &method_sig.name.to_string())
-        .map_or_else(|| format!("{}.{}", type_name, method_sig.name), |k| k.to_string());
+    // A built-in conformer (`Int: Numeric`) satisfies its requirements with
+    // its stdlib module's functions and the operators; the conformance matrix
+    // gate checks those, not this per-declaration pass.
+    if super::protocols::is_builtin_conformer(type_name.as_str(), proto_name.as_str()) {
+        return;
+    }
+    let fn_key = super::protocols::requirement_fn_key(env, type_name.as_str(), method_sig.name.as_str())
+        .unwrap_or_else(|| format!("{}.{}", type_name, method_sig.name));
     let Some(sig) = env.functions.get(&sym(&fn_key)) else {
-        let is_builtin = matches!(proto_name.as_str(),
-            "Eq" | "Repr" | "Ord" | "Hash" | "Codec" | "Encode" | "Decode"
-            | "Numeric");
+        // A derivable built-in (Eq, Repr, Ord, Hash, Codec) may leave its
+        // requirements to auto-derive; any other protocol's must be written.
+        let is_builtin = super::protocols::builtin_protocol(proto_name.as_str()).is_some_and(|p| p.derivable);
         if !is_builtin {
             diagnostics.push(err(
                 format!("type '{}' declares protocol '{}' but missing method '{}'",
@@ -439,8 +449,14 @@ fn validate_protocol_method_modes(
     method_sig: &crate::types::ProtocolMethodSig,
 ) {
     let type_name = target.name;
-    let fn_key = super::registration::convention_fn_key(env, &type_name.to_string(), &method_sig.name.to_string())
-        .map_or_else(|| format!("{}.{}", type_name, method_sig.name), |k| k.to_string());
+    // A built-in conformer (`Int: Numeric`) satisfies its requirements with
+    // its stdlib module's functions and the operators; the conformance matrix
+    // gate checks those, not this per-declaration pass.
+    if super::protocols::is_builtin_conformer(type_name.as_str(), proto_name.as_str()) {
+        return;
+    }
+    let fn_key = super::protocols::requirement_fn_key(env, type_name.as_str(), method_sig.name.as_str())
+        .unwrap_or_else(|| format!("{}.{}", type_name, method_sig.name));
     let Some(sig) = env.functions.get(&sym(&fn_key)) else { return };
     if sig.is_effect != method_sig.is_effect {
         let (want, have) = if method_sig.is_effect { ("an `effect fn`", "a pure fn") } else { ("a pure fn", "an `effect fn`") };

@@ -36,13 +36,13 @@ fn main() -> Unit = {
   bytes.set_at(acc.buf, 3, 12)
   println("snapshot.mut=" + show(acc.buf))
   println("snapshot.orig=" + show(snap.buf) + " " + snap.tag)
-  var o = Only { buf: bytes.new(11) }
+  var o = Only { buf: bytes.zeros(11) }
   let o0 = o
-  bytes.set_u16_le(o.buf, 0, 1027)
-  bytes.set_f64_le(o.buf, 3, 1.5)
+  bytes.put_u16_le(o.buf, 0, 1027)
+  bytes.put_f64_le(o.buf, 3, 1.5)
   println("widths.mut=" + show(o.buf))
   println("widths.orig=" + show(o0.buf))
-  println("widths.f64=" + float.to_string(bytes.read_f64_le(o.buf, 3)))
+  println("widths.f64=" + float.to_string(bytes.get_f64_le(o.buf, 3) ?? 0.0))
   let held = bytes.from_list([5, 6])
   var s = Pack { tag: "s", buf: held }
   bytes.set_at(s.buf, 0, 50)

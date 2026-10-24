@@ -267,6 +267,13 @@ impl Checker {
                             // — a let-binding, a match subject — type-check against a shape
                             // codegen never emits, so `check` passed and rustc rejected the
                             // generated code (#1545).
+                            // #4158: an `effect` protocol method dispatched through a
+                            // bound is an effect call, as the concrete method is
+                            // (every conformance must match the declaration's
+                            // effect-ness, `validate_protocol_method_modes`).
+                            if method_sig.is_effect {
+                                self.check_effect_isolation_via_bound(&format!("{}.{}", proto_name, field));
+                            }
                             if method_sig.is_effect && !ret.is_result() {
                                 return Some(Ty::result(ret, Ty::String));
                             }
@@ -542,7 +549,9 @@ impl Checker {
             Ty::UInt16 => Some(sym("UInt16")),
             Ty::UInt32 => Some(sym("UInt32")),
             Ty::UInt64 => Some(sym("UInt64")),
+            Ty::Int64 => Some(sym("Int64")),
             Ty::Float32 => Some(sym("Float32")),
+            Ty::Float64 => Some(sym("Float64")),
             Ty::String => Some(sym("String")),
             Ty::Bool => Some(sym("Bool")),
             Ty::Bytes => Some(sym("Bytes")),

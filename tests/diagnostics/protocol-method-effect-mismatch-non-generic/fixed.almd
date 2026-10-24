@@ -1,0 +1,14 @@
+// The protocol says `load` is an effect, and so does its pure-looking caller.
+import fs
+
+protocol Loader {
+  effect fn load(a: Self) -> String
+}
+
+type Src: Loader = { path: String }
+
+effect fn Src.load(a: Src) -> String = fs.read_text(a.path)!
+
+effect fn use_it[T: Loader](x: T) -> String = x.load()!
+
+effect fn main() -> Unit = println(use_it(Src { path: "s.txt" })!)

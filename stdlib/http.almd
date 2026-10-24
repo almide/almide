@@ -24,10 +24,12 @@
 // Ok-wrapped by the checker's carrier typing, so both spellings arrive
 // uniform.
 import json
+import url
 
 /// Serves 0.0.0.0:port forever; handler err is a 500.
 @intrinsic("almide_rt_http_serve")
 @concurrent(f)
+@category("Net.listen")
 effect fn serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit = _
 
 // ── Response builders ──
@@ -116,13 +118,23 @@ fn req_body(req: HttpRequest) -> String = _
 @borrow_ref(req)
 fn req_header(req: HttpRequest, key: String) -> String? = _
 
-/// Decoded query map; last duplicate wins.
-@intrinsic("almide_http_query_params")
-@borrow_ref(req)
-fn query_params(req: HttpRequest) -> Map[String, String] = _
+// The query is `url.parse_query` of the target's text after its FIRST `?`:
+// one decoder, defined once, the same on every leg (ALS-R5, C-404, #4117).
+// Every pair is kept in arrival order (a repeated key appears as often as it
+// was sent), a bare key has value "", `+` is a space, and a bad escape or
+// invalid UTF-8 is an err naming http.query_params. Native used to cut the
+// query at the SECOND `?` and both legs decoded leniently by rules of their own.
+// Example: match http.query_params(http.new_request("GET", "/p?a=1?b=2&a=3", "", map.new())) { ok(ps) => ps == [("a", "1?b=2"), ("a", "3")], err(_) => false }
+// Example: match http.query_params(http.new_request("GET", "/p?k=%zz", "", map.new())) { ok(_) => false, err(e) => e == "http.query_params: invalid percent escape" }
+/// url.parse_query of the target after its first ?; pairs in order; err on a bad escape.
+fn query_params(req: HttpRequest) -> Result[List[(String, String)], String] = match url.parse_query(__query_of(http.req_path(req))) {
+  ok(ps) => ok(ps),
+  err(e) => err(string.replace(e, "url.parse_query", "http.query_params")),
+}
 
-// Percent-decode a URL component (`+` → space, `%XX` → byte). `query_params`
-// already decodes its values; use this for manually-extracted query/form text.
+// Percent-decode a URL component (`+` → space, `%XX` → byte), LENIENTLY: a
+// bad escape is kept and invalid UTF-8 becomes U+FFFD. It is not the query
+// decoder — `query_params` and `url.parse_query` refuse what this keeps.
 /// + to space, %XX to byte; bad escapes kept.
 @intrinsic("almide_http_url_decode")
 fn url_decode(s: String) -> String = _
@@ -373,6 +385,47 @@ fn __is_hex(c: String) -> Bool = c != "" and string.contains("0123456789abcdefAB
 // the path per char, O(L²) in the request.
 fn __bad_escape(path: String) -> Bool = string.split(path, "%") |> list.drop(1) |> list.any((p) => not __hex_pair(p))
 
+// ONE canonical path for the router and the middleware in front of it (C-406,
+// #4133): the router answers 400 to a path it would otherwise read differently
+// from a `req_path` guard — an empty segment (`//admin`), a `.` or `..`
+// segment, a percent-encoded unreserved byte (`%61dmin`, `%2e`), a backslash
+// or a control character. What reaches a handler through the router is
+// therefore exactly what a middleware's `req_path` check saw. `%2F` stays
+// encoded (an encoded slash is not a separator), and a trailing `/` is kept.
+// `%XX` that decodes to an unreserved character (RFC 3986: ALPHA / DIGIT /
+// "-" / "." / "_" / "~"), which a canonical path spells literally.
+fn __encodes_unreserved(p: String) -> Bool = match url.decode_component("%" + string.take(p, 2)) {
+  ok(c) => string.len(c) == 1 and string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~", c),
+  err(_) => false,
+}
+
+fn __canonical(path: String) -> Bool = {
+  let segs = string.split(string.drop(path, 1), "/")
+  let n = list.len(segs)
+  let empty_inner = list.enumerate(segs) |> list.any(((i, s)) => s == "" and i + 1 < n)
+  let dot = segs |> list.any((s) => s == "." or s == "..")
+  let unreserved = string.split(path, "%") |> list.drop(1) |> list.any((p) => __encodes_unreserved(p))
+  let odd = string.chars(path) |> list.any((c) => c == "\\" or (string.codepoint(c) ?? 0) < 32 or (string.codepoint(c) ?? 0) == 127)
+  not empty_inner and not dot and not unreserved and not odd
+}
+
+// A bound parameter (C-406, #4134) must not decode to `.` or `..` or hold a
+// `/`, `\` or NUL: `/u/..%2F..%2Fetc%2Fpasswd` would hand a handler
+// `../../etc/passwd`. A `{name...}` tail is checked segment by segment; the
+// anonymous `{...}` of a mount is checked by the sub-app's own router.
+fn __param_bad(v: String) -> Bool = v == "." or v == ".." or string.contains(v, "/") or string.contains(v, "\\") or string.contains(v, "\u{0}")
+
+fn __bad_binding(segs: List[String], parts: List[String]) -> Bool = {
+  let fixed = segs |> list.take_while((s) => not __is_rest(s))
+  let n = list.len(fixed)
+  let fixed_bad = list.zip(fixed, parts) |> list.any(((s, part)) => __is_param(s) and __param_bad(__decode_part(part)))
+  let rest_bad = match list.get(segs, n) {
+    some(r) => __name_of(r) != "" and (list.drop(parts, n) |> list.any((part) => __param_bad(__decode_part(part)))),
+    none => false,
+  }
+  fixed_bad or rest_bad
+}
+
 fn __hex_pair(p: String) -> Bool = {
   let cs = string.chars(string.take(p, 2))
   list.len(cs) == 2 and list.all(cs, __is_hex)
@@ -527,6 +580,7 @@ fn __not_allowed(hits: List[(HttpRoute, List[String])]) -> HttpResponse = {
   )
 }
 
+@category
 effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) -> HttpResponse = {
   let method = http.req_method(req)
   let path = __path_of(http.req_path(req))
@@ -538,13 +592,21 @@ effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) ->
     400,
     "Bad Request: malformed percent-encoding in the path",
   )
+  else if not __canonical(path) then http.response(
+    400,
+    "Bad Request: the path is not in canonical form",
+  )
   else {
     let exact = hits |> list.filter(((r, _)) => r.method == method or r.method == "")
     let via_get = method == "HEAD" and list.is_empty(exact)
     let allowed = if via_get then hits |> list.filter(((r, _)) => r.method == "GET")
     else exact
     match allowed |> list.find(((a, _)) => list.all(allowed, ((b, _)) => __route_covers(a, b))) {
-      some((r, bound)) => {
+      some((r, bound)) => if __bad_binding(r.segments, __parts(path)) then http.response(
+        400,
+        "Bad Request: a path parameter is a dot segment or holds a /, \\ or NUL",
+      )
+      else {
         let res = r.handler(http.__with_params(req, bound))!
         if via_get then http.__set_body(res, "") else res
       },

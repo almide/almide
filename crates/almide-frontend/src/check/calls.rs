@@ -580,6 +580,14 @@ impl Checker {
         }
     }
 
+    /// E006 for an `effect` protocol method reached through a protocol bound
+    /// (`x.save()` with `x: T, T: Saver`, #4158). `name` is `Protocol.method`.
+    pub(crate) fn check_effect_isolation_via_bound(&mut self, name: &str) {
+        if !self.env.can_call_effect {
+            self.report_effect_isolation(name, None);
+        }
+    }
+
     /// The E006 of [`Self::check_effect_isolation`]. `via` names the binding
     /// the effect fn `name` was reached through (#3274: `let g = rd; g(x)`).
     pub(crate) fn report_effect_isolation(&mut self, name: &str, via: Option<&str>) {
@@ -726,6 +734,11 @@ impl Checker {
                 let type_name = self.resolve_type_name_for_protocol(concrete_ty);
                 if let Some(type_name) = type_name {
                     for proto in proto_names {
+                        // An unknown protocol is reported once, at the bound
+                        // (`enter_generics`), not again at every call.
+                        if !self.env.protocols.contains_key(proto) {
+                            continue;
+                        }
                         let has_proto = self.env.type_protocols
                             .get(&type_name)
                             .map_or(false, |ps| ps.contains(proto));

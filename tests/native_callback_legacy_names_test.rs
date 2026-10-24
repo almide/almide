@@ -74,7 +74,7 @@ fn tf_package(dir: &Path, host: &str) {
 fn app_package(dir: &Path, dep: &str, dep_dir: &Path, expr: &str) {
     write(
         dir.join("almide.toml"),
-        &format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n{dep} = {{ path = \"{}\" }}\n", dep_dir.display()),
+        &format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\n{dep} = {{ path = \"{}\" }}\n\n[permissions]\nnative = [\"{dep}\"]\n", dep_dir.display()),
     );
     write(dir.join("src/main.almd"), &format!("import {dep}\n\nfn main() -> Unit = println(int.to_string({expr}))\n"));
 }

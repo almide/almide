@@ -6,7 +6,7 @@ import env
 
 effect fn main() -> Unit = {
   let n = list.len(env.args())
-  let matched = regex.is_match("^a+$", "aaa")
+  let matched = regex.is_match(regex.new("^a+$"), "aaa")
   let v = json.parse("[${n}]")!
   println(json.stringify(v) + " " + (if matched then "y" else "n"))
 }

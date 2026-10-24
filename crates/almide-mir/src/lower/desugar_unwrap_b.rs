@@ -571,7 +571,7 @@ fn let_unwrap_err_payload(
         IrExprKind::Call {
             target: almide_ir::CallTarget::Module {
                 module: almide_lang::intern::sym("list"),
-                func: almide_lang::intern::sym("join"),
+                func: almide_lang::intern::sym("__join_string"),
                 def_id: None,
             },
             args: vec![

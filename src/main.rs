@@ -14,7 +14,7 @@ mod dispatch;
 pub use almide::{
     ast, canonicalize, check, codegen, diagnostic, diagnostic_render, fmt,
     import_table, intern, ir, lexer, lower, mono, optimize,
-    parser, project, project_fetch, resolve, stdlib, types,
+    parser, project, project_fetch, native_grant, trust, resolve, stdlib, types,
     out, out_no_nl, err, err_no_nl, WASM_WALL_MARKER,
 };
 
@@ -23,7 +23,6 @@ pub use almide::{
 // to change after the `compile_driver` split.
 use compile_driver::{parse_file, try_compile, register_versioned_module_names, try_compile_with_ir, try_compile_reporting, codegen_metered};
 
-use std::process::Command;
 
 /// When true, suppress warning output during compilation (used by REPL).
 pub(crate) static SUPPRESS_WARNINGS: std::sync::atomic::AtomicBool =
@@ -37,28 +36,31 @@ use cli_args::Cli;
 use dispatch::dispatch;
 
 
+/// The rustc the direct-rustc build routes run, refused below the floor
+/// (#4110, `cli::rustc_floor::MIN_RUSTC`): every native route reaches rustc
+/// through here or cargo through `cli::rustc_floor::cargo_command`.
 fn find_rustc() -> String {
-    if Command::new("rustc").arg("--version").output().is_ok() {
-        return "rustc".to_string();
+    if let Err(e) = cli::rustc_floor::require() {
+        eprintln!("{e}");
+        std::process::exit(1);
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        let cargo_rustc = std::path::PathBuf::from(home).join(".cargo/bin/rustc");
-        if cargo_rustc.exists() {
-            return cargo_rustc.to_string_lossy().to_string();
-        }
-    }
-    "rustc".to_string()
+    cli::rustc_floor::locate_rustc()
 }
 
+/// The `.almd` files under `dir` (`almide fmt`'s sweep). A symlink — to a
+/// directory or to a file — is neither descended nor collected (#4140): a
+/// link loop would repeat the sweep, and a link to a file outside `dir`
+/// would have `fmt` rewrite it there.
 fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
         entries.sort_by_key(|e| e.path());
         for entry in entries {
             let path = entry.path();
-            if path.is_dir() {
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_dir() {
                 collect_almd_files(&path, out);
-            } else if path.extension().map_or(false, |ext| ext == "almd") {
+            } else if kind.is_file() && path.extension().map_or(false, |ext| ext == "almd") {
                 out.push(path.to_string_lossy().to_string());
             }
         }

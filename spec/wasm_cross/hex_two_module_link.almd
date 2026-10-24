@@ -23,7 +23,7 @@ fn main() -> Unit = {
   println(int.to_hex(258))
   // hex_encode's leg, over the exact bytes from the issue's repro —
   // expects: 02010000 / 4869
-  var b = bytes.new(0)
+  var b = bytes.zeros(0)
   bytes.append_u32_le(b, 258)
   println(hex.encode(b))
   println(hex.encode_upper(bytes.from_string("Hi")))

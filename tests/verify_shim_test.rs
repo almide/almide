@@ -9,7 +9,10 @@
 //!   the bundle, which the verifier's own parser reads and judges;
 //! - present: arguments, standard streams and the exit status pass through,
 //!   and a real program's bundle is judged by the real verifier — a
-//!   capability violation in source comes back as a REJECT and exit 1.
+//!   capability past the manifest comes back as a REJECT and exit 1;
+//! - the bundle is the STRUCTURAL leg's (#4011): the build `almide build
+//!   --target wasm` ships, with its bounds witness, and pinned by SHA-256 to
+//!   the built file when one is present — a stale file is refused.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -145,11 +148,31 @@ fn emit_writes_the_bundle_even_without_the_verifier() {
     let bundle = almide_verify::bundle::parse(&std::fs::read(&out).expect("bundle written"))
         .expect("the producer writes a bundle the verifier's parser reads");
     assert!(bundle.metadata.iter().any(|(k, v)| k == "producer" && v.starts_with("almide ")));
+    assert!(bundle.artifact.is_none(), "no built file in reach: nothing to pin");
     let (verdicts, _) = almide_verify::bundle::verify(&bundle);
     let main_names: Vec<_> = verdicts.iter().filter(|v| v.function == "main").map(|v| v.property.name()).collect();
-    assert_eq!(main_names, ["ownership", "names", "caps"], "per-function witnesses for main");
-    assert!(verdicts.iter().any(|v| v.property.name() == "call-modes"), "the program-level call-mode witness");
+    assert_eq!(main_names, ["ownership", "caps"], "per-function witnesses for main");
+    for program_level in ["call-modes", "bounds", "init", "caps-transitive"] {
+        assert!(verdicts.iter().any(|v| v.property.name() == program_level), "the program-level {program_level} witness");
+    }
+    assert!(verdicts.iter().any(|v| v.property.name() == "names"), "the names witnesses of the shipped bytes");
     assert!(verdicts.iter().all(|v| v.accepted), "every heap_arg_call witness is accepted: {verdicts:?}");
+}
+
+#[test]
+fn mir_emits_the_mir_lowering_witnesses() {
+    // `--mir` (#4011): the MIR producer proofs/coverage.sh drives — per
+    // function ownership, names and caps, no artifact, no bounds witness.
+    let stage = Stage::new("mir", false);
+    let out = stage.dir.join("heap_arg_call.bundle");
+    let o = stage.verify(&["--mir", &fixture("heap_arg_call.almd"), "--emit", &out.display().to_string()]);
+    assert_eq!(o.status.code(), Some(127), "{:?}: {}", o.status, text(&o.stderr));
+    let bundle = almide_verify::bundle::parse(&std::fs::read(&out).expect("bundle written")).expect("a bundle");
+    let (verdicts, _) = almide_verify::bundle::verify(&bundle);
+    let main_names: Vec<_> = verdicts.iter().filter(|v| v.function == "main").map(|v| v.property.name()).collect();
+    assert_eq!(main_names, ["ownership", "names", "caps"], "per-function MIR witnesses for main");
+    assert!(!verdicts.iter().any(|v| v.property.name() == "bounds"), "MIR carries no bounds witness");
+    assert!(verdicts.iter().all(|v| v.accepted), "{verdicts:?}");
 }
 
 #[test]
@@ -170,13 +193,43 @@ fn a_real_program_is_judged_by_the_real_verifier() {
     let stage = Stage::new("program", true);
     let o = stage.verify(&[&fixture("heap_arg_call.almd")]);
     let out = text(&o.stdout);
-    assert!(out.contains("ACCEPT  call-modes"), "{out}\n{}", text(&o.stderr));
+    assert!(out.contains("ACCEPT  call-modes") && out.contains("ACCEPT  bounds"), "{out}\n{}", text(&o.stderr));
     assert!(!out.contains("REJECT"), "{out}");
 
-    // print_str's main reaches Stdout without declaring it: the sandbox
-    // promise, caught on real source, comes back through the shim as exit 1.
-    let o = stage.verify(&[&fixture("print_str.almd")]);
+    // A manifest that grants only `Rand`: main's console output reaches past
+    // what the effect fn may declare, so the capability witness — real
+    // source, real build — comes back through the shim as a REJECT, exit 1.
+    std::fs::write(stage.dir.join("almide.toml"), "[package]\nname = \"m\"\nversion = \"0.1.0\"\n\n[permissions]\nallow = [\"Rand\"]\n")
+        .expect("manifest");
+    std::fs::write(stage.dir.join("app.almd"), "effect fn main() -> Unit = {\n  println(\"hi\")\n}\n").expect("source");
+    let o = stage.verify(&["app.almd"]);
     let out = text(&o.stdout);
     assert_eq!(o.status.code(), Some(1), "{out}\n{}", text(&o.stderr));
     assert!(out.contains("REJECT  caps") && out.contains("-> REJECTED"), "{out}");
+}
+
+#[test]
+fn the_bundle_is_pinned_to_the_built_file_and_a_stale_file_is_refused() {
+    let stage = Stage::new("pin", true);
+    std::fs::copy(fixture("heap_arg_call.almd"), stage.dir.join("app.almd")).expect("source");
+    let built = Command::new(stage.dir.join(exe("almide")))
+        .args(["build", "app.almd", "--target", "wasm"])
+        .current_dir(&stage.dir)
+        .output()
+        .expect("staged almide builds");
+    assert!(built.status.success(), "{}", text(&built.stderr));
+    let o = stage.verify(&["app.almd"]);
+    let out = text(&o.stdout);
+    assert_eq!(o.status.code(), Some(0), "{out}\n{}", text(&o.stderr));
+    assert!(out.contains("ARTIFACT") && out.contains("app.wasm: MATCH"), "the verdict names the built file: {out}");
+
+    // One byte more: the file is no longer what this build produces.
+    let wasm = stage.dir.join("app.wasm");
+    let mut bytes = std::fs::read(&wasm).expect("built file");
+    bytes.push(0);
+    std::fs::write(&wasm, bytes).expect("tamper");
+    let o = stage.verify(&["app.almd"]);
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o.stderr));
+    assert!(text(&o.stderr).contains("is not the module"), "{}", text(&o.stderr));
+    assert!(o.stdout.is_empty(), "no verdict on a stale file: {}", text(&o.stdout));
 }

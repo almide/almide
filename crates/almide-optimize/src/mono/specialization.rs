@@ -342,37 +342,33 @@ fn substitute_match_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
 
 fn substitute_call_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
     let IrExprKind::Call { target, args, .. } = &mut expr.kind else { unreachable!() };
-    // A protocol method specialized to a concrete type, rewritten to the
-    // `Named` + receiver-as-argument-0 form (see below). Collected first
-    // because it replaces `target` and pushes onto `args`.
-    let mut specialized: Option<(almide_base::intern::Sym, IrExpr)> = None;
+    // A protocol requirement reached through a type variable, rewritten once
+    // the variable is concrete: `T.show` → `Dog.show` (a convention method,
+    // `Named`), `S.__trunc` → `float32.__trunc` (a built-in type's module
+    // function, `Module`). `Some(receiver)` for the method form, whose
+    // receiver becomes argument 0; `None` for the receiver-less `A.zero()`.
+    let mut specialized: Option<(CallTarget, Option<IrExpr>)> = None;
     match target {
         CallTarget::Method { object, method } => {
+            let was_generic = matches!(object.ty, Ty::TypeVar(_));
             substitute_expr_types(object, bindings);
-            // Rewrite protocol method calls: T.show → Dog.show when T → Dog
-            if let Some(dot_pos) = method.find('.') {
-                let tv_name = &method[..dot_pos];
-                if let Some(concrete_ty) = bindings.get(tv_name) {
-                    if let Some(concrete_name) = ty_to_name(concrete_ty) {
-                        let method_name = &method[dot_pos + 1..];
-                        // The DEFINITION of a convention method is named with
-                        // the BARE type and carries its module in
-                        // `module_origin`, and only the `Named` path
-                        // re-attaches that module. Left as a qualified
-                        // `Method`, this flattened to a call to
-                        // `lib_P_encode` against a definition called
-                        // `almide_rt_lib_P_encode`, so a `[T: Codec]` bound
-                        // could not be applied to a type from another module
-                        // (#1087).
-                        let bare = concrete_name
-                            .rsplit_once('.')
-                            .map_or(concrete_name.as_str(), |(_, t)| t);
-                        specialized = Some((
-                            almide_base::intern::sym(&format!("{}.{}", bare, method_name)),
-                            (**object).clone(),
-                        ));
-                    }
+            if let Some(t) = requirement_target(method.as_str(), bindings) {
+                specialized = Some((t, Some((**object).clone())));
+            } else if was_generic && !method.contains('.') {
+                // A bare method on a receiver that was a type variable and is
+                // now a built-in type: the module call every leg understands
+                // (codegen's Rust-only UFCS fallback is not on the wasm leg).
+                if let Some(module) = object.ty.stdlib_module()
+                    .filter(|m| almide_lang::stdlib_info::resolve_ufcs_candidates(method.as_str()).contains(m))
+                {
+                    let t = CallTarget::Module { module: almide_base::intern::sym(module), func: *method, def_id: None };
+                    specialized = Some((t, Some((**object).clone())));
                 }
+            }
+        }
+        CallTarget::Named { name } => {
+            if let Some(t) = requirement_target(name.as_str(), bindings) {
+                specialized = Some((t, None));
             }
         }
         CallTarget::Computed { callee: object } => {
@@ -380,11 +376,33 @@ fn substitute_call_types(expr: &mut IrExpr, bindings: &HashMap<String, Ty>) {
         }
         _ => {}
     }
-    if let Some((name, receiver)) = specialized {
-        *target = CallTarget::Named { name };
-        args.insert(0, receiver);
+    if let Some((t, receiver)) = specialized {
+        *target = t;
+        if let Some(r) = receiver { args.insert(0, r); }
     }
     for a in args { substitute_expr_types(a, bindings); }
+}
+
+/// The concrete call a `TV.method` requirement key becomes when `TV` is bound.
+/// A built-in or stdlib-declared type's requirement is its stdlib module's
+/// function of that name (`Ty::owning_module`: `int8.__trunc`, `bigint.add`);
+/// a user-declared
+/// type's is its convention method `Type.method`. The DEFINITION of a
+/// convention method is named with the BARE type and carries its module in
+/// `module_origin`, and only the `Named` path re-attaches that module (#1087).
+fn requirement_target(key: &str, bindings: &HashMap<String, Ty>) -> Option<CallTarget> {
+    let (tv_name, method_name) = key.split_once('.')?;
+    let concrete_ty = bindings.get(tv_name)?;
+    if let Some(module) = concrete_ty.owning_module() {
+        return Some(CallTarget::Module {
+            module: almide_base::intern::sym(module),
+            func: almide_base::intern::sym(method_name),
+            def_id: None,
+        });
+    }
+    let concrete_name = ty_to_name(concrete_ty)?;
+    let bare = concrete_name.rsplit_once('.').map_or(concrete_name.as_str(), |(_, t)| t);
+    Some(CallTarget::Named { name: almide_base::intern::sym(&format!("{}.{}", bare, method_name)) })
 }
 
 fn substitute_pattern_types(pattern: &mut IrPattern, bindings: &HashMap<String, Ty>) {

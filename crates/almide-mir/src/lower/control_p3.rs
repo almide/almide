@@ -273,7 +273,7 @@ impl LowerCtx {
         // an outer var must hit its stable local (see `LowerCtx::unit_arm_depth`).
         // Without this the modeled-frame fence (`in_frame > 0 && unit_arm_depth == 0`)
         // misfired on the ordinary early-return guard `if len(d) < 12 then 0 else
-        // { bytes.set_i32_le(g, …) … }`: the arm's stmt walled, the scalar-if rolled
+        // { bytes.put_i32_le(g, …) … }`: the arm's stmt walled, the scalar-if rolled
         // back, and the whole fn fell to the linearization wall blaming the CONDITION
         // (#907, nendo's load_vrm_data). The fence still walls the true both-arms
         // linearization — `lower_branch_arm` raises only `in_frame`.

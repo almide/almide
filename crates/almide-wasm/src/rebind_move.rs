@@ -3,7 +3,7 @@
 //!
 //! `var a = acc` in a fold callback, or `var a = s` before a self tail call,
 //! shared the block (+1) although nothing reads the source again. The first
-//! in-place write on `a` — `list.push`, `bytes.set_u8`, a string append, any
+//! in-place write on `a` — `list.push`, `bytes.put_u8`, a string append, any
 //! mutator that judges `rc == 1` — then met the block at rc 2 and copied it
 //! whole, so a loop of such writes stayed quadratic. Where the bind is the
 //! source's last read, the bind now MOVES the credit: no share, the source's

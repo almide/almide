@@ -362,7 +362,7 @@ impl<'a> Interpreter<'a> {
                 }
                 // A TEMPORARY argument. For a `mut` param this is unreachable
                 // (E032 forbids it); for a by-type `Bytes` param it is legal
-                // (`fill(bytes.new(4))`) and there is simply no caller slot to
+                // (`fill(bytes.zeros(4))`) and there is simply no caller slot to
                 // copy back into — nothing downstream can observe the buffer,
                 // so skipping is exact rather than a guess.
                 _ => {}
@@ -704,6 +704,6 @@ pub(crate) fn is_hof(module: &str, func: &str) -> bool {
             | ("result", "unwrap_or_else")
             | ("result", "or_else")
             | ("result", "filter")
-            | ("bytes", "map_each")
+            | ("bytes", "map")
     )
 }

@@ -122,6 +122,9 @@ impl Emitter<'_> {
                 // #3345: an earlier check of this same `xs[i]` still decides
                 // it (bounds_facts.rs) — the check is not emitted again.
                 let known = is_local && !in_cell && self.bounds_known(*target, index);
+                // #4005: a cell or a global is never a fact candidate — a
+                // fresh loose slot, decided by its own check alone.
+                let site = self.bounds_site((is_local && !in_cell).then_some(*target), index);
                 if !known {
                     self.f.instructions().local_get(hi);
                     match hoisted {
@@ -142,14 +145,13 @@ impl Emitter<'_> {
                         i.i64_ge_u().if_(BlockType::Empty);
                         i.i32_const(msg as i32);
                     }
+                    crate::witness::bounds::check(site);
                     self.emit_error_frame_abort();
                     self.witness_abort_site();
                     self.f.instructions().end();
                     if is_local && !in_cell {
-                        self.bounds_note(*target, index, true, true);
+                        self.bounds_note(*target, index, true);
                     }
-                } else {
-                    self.bounds_note(*target, index, false, true);
                 }
                 // RC-5: the COW judge, not an unconditional copy — a
                 // uniquely-held list takes the store IN PLACE, a shared one
@@ -182,10 +184,12 @@ impl Emitter<'_> {
                 if let Some(dec) = self.elem_is_handle(el).then(|| self.dec_fn_of(el)) {
                     let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
                     self.f.instructions().i32_load(wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 }).call(dec);
+                    crate::witness::bounds::access(site, false);
                 }
                 let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
                 self.f.instructions().local_get(hv);
                 self.store_slot_off(el, off);
+                crate::witness::bounds::access(site, true);
                 self.release_i32();
                 self.release_val(el);
                 self.release_i64();
@@ -216,9 +220,12 @@ impl Emitter<'_> {
             None => self.f.instructions().local_get(self.locals[target].0).local_set(hb),
             Some(g) => self.f.instructions().global_get(g).local_set(hb),
         };
+        // #4005: a Bytes index is never a fact candidate (a loose slot).
+        let site = crate::witness::bounds::site(None);
         self.bytes_room(hb, hi, 1);
         let msg = self.pool.intern("index out of bounds");
         self.f.instructions().i32_eqz().if_(BlockType::Empty).i32_const(msg as i32);
+        crate::witness::bounds::check(site);
         self.emit_error_frame_abort();
         self.witness_abort_site();
         self.f.instructions().end();
@@ -233,6 +240,7 @@ impl Emitter<'_> {
         let mut i = self.f.instructions();
         i.local_get(hb).local_get(hi).i32_wrap_i64().i32_add().local_get(hv);
         i.i64_store8(crate::bytes::byte_k(0));
+        crate::witness::bounds::access(site, true);
         self.release_i32();
         self.release_i64();
         self.release_i64();

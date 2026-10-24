@@ -1,7 +1,7 @@
 // @contract: C-054, C-197
 // The OVER-BOUND cell of the string pad pair, and the twin of
 // bytes_pad_ceiling_oom.almd — the same defect, in the same shape, in the
-// other family. `bytes.pad_right` wrapped an i64 target to i32 before the
+// other family. `bytes.pad_end` wrapped an i64 target to i32 before the
 // allocator saw it and died as a raw trap; that was fixed in #1978 and pinned
 // there. `string.pad_start`/`pad_end` were never swept with it, and did
 // something worse than trapping: they ANSWERED with the width taken mod 2^32,

@@ -31,6 +31,50 @@ fn main() -> Unit = {
 {"name":"Alice"}
 ```
 
+The grammar is RFC 8259 plus I-JSON (RFC 7493), read **strictly** (ALS-T3,
+C-400 / C-401): the whole text is one value between JSON whitespace (space,
+tab, LF, CR), and every other input is an `err` with one text per case, the
+same on every target. `N` is the character index where the problem starts.
+
+| Input | Error |
+|---|---|
+| `"ad\ud800min"` (a surrogate that is not a high+low pair) | `json: lone surrogate at pos N` |
+| `"ad\qmin"` (an escape other than `\" \\ \/ \b \f \n \r \t \u`) | `json: unknown escape at pos N` |
+| `"\u12"` (`\u` without four hex digits) | `json: invalid unicode escape at pos N` |
+| a raw U+0000–U+001F inside a string | `json: control character in string at pos N` |
+| U+FDD0–U+FDEF, U+xFFFE, U+xFFFF (escaped or raw) | `json: noncharacter at pos N` |
+| `"abc` | `json: unterminated string at pos N` |
+| `{"a":1,"a":2}` | `json: duplicate key at pos N` |
+| `[1,2] [3]`, `{} garbage` | `json: trailing data at pos N` |
+| `{x: 1}` | `json: unquoted key at pos N` |
+| `[1,]`, `{"a":1,}` | `json: trailing comma at pos N` |
+| `{"a" 1}` | `json: expected ':' at pos N` |
+| `[1 2]` / `{"a":1 "b":2}` | `json: expected ',' or ']' at pos N` / `json: expected ',' or '}' at pos N` |
+| `01`, `1.`, `-`, `1e` | `json: invalid number at pos N` |
+
+Nothing is dropped or guessed: a lone surrogate or an unknown escape is never
+deleted (`ad\ud800min` does not become `admin`), and a repeated key is never
+resolved first-wins or last-wins, so a parser in front of the program cannot
+read a different document from the same bytes.
+
+```almd run
+import json
+
+fn main() -> Unit = {
+  for text in ["{\"user\":\"ad\\ud800min\"}", "{\"user\":\"alice\",\"user\":\"admin\"}", "[1,2] [3]"] {
+    match json.parse(text) {
+      ok(j) => println(json.stringify(j)),
+      err(e) => println(e),
+    }
+  }
+}
+```
+```output
+json: lone surrogate at pos 11
+json: duplicate key at pos 17
+json: trailing data at pos 6
+```
+
 ### `json.stringify(v: Value) -> String`
 
 Convert a Value to a JSON string. A non-finite Float (NaN, +inf, -inf) has no

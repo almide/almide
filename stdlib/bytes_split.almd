@@ -137,7 +137,7 @@ fn bytes_chunks(b: Bytes, size: Int) -> List[Bytes] = {
   let total = prim.load32(bh + 4)
   // Ceiling division WITHOUT the `+ size - 1` rounding trick: for a large `size` that sum
   // overflows, and the chunk COUNT computed from the overflowed value is garbage — the
-  // allocation that follows is then sized from it. `bytes.chunks(b, i64::MAX)` is one chunk,
+  // allocation that follows is then sized from it. `bytes.__chunks(b, i64::MAX)` is one chunk,
   // not a wrapped count. Identical to the form `list.chunk` takes for the same reason.
   let num = if size <= 0 then 0
   else total / size + (if total % size != 0 then 1 else 0)

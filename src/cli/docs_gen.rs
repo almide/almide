@@ -23,6 +23,8 @@ use crate::{err, out};
 
 #[path = "docs_gen_counts.rs"]
 mod counts;
+#[path = "docs_gen_bytes_matrix.rs"]
+mod bytes_matrix;
 
 const LLMS_TXT: &str = "llms.txt";
 const DIAGNOSTICS_DIR: &str = "docs/diagnostics";
@@ -51,9 +53,11 @@ pub fn cmd_docs_gen(check: bool) {
     drifts.extend(check_stdlib_fn_count());
     drifts.extend(check_numeric_conversion_matrix());
     drifts.extend(check_numeric_protocol_matrix());
+    drifts.extend(check_builtin_conformance_matrix());
+    drifts.extend(check_bytes_io_matrix());
 
     if drifts.is_empty() {
-        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection, stdlib count, numeric matrix, numeric protocol matrix)"));
+        out(&format!("docs-gen: ok (version, llms.txt diagnostic refs, auto-imported, registry bijection, stdlib count, numeric matrix, numeric protocol matrix, built-in conformance matrix, bytes IO matrix)"));
         return;
     }
 
@@ -334,6 +338,40 @@ fn module_function_names(m: &str) -> std::collections::HashSet<String> {
     iface.functions.iter().map(|f| f.name.clone()).collect()
 }
 
+/// The typed byte IO matrix (`docs_gen_bytes_matrix.rs`), checked against
+/// `bytes`' interface as the compiler extracts it.
+fn check_bytes_io_matrix() -> Vec<String> {
+    let (file, bundled_module) = super::compile::resolve_module_to_file("bytes");
+    let (program, source_text, checker) =
+        super::compile::parse_and_typecheck_for_compile(&file, bundled_module.as_deref());
+    let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
+    let iface = almide::interface::extract(&ir, "bytes", Some(&source_text));
+    bytes_matrix::check(&iface.functions)
+}
+
+/// The built-in conformances, as a matrix read from the protocol declaration
+/// (`almide::canonicalize::protocols::BUILTIN_PROTOCOLS`): every built-in type
+/// a non-derivable protocol lists (`Int8: Numeric`, `String: Text`) must
+/// define each of the protocol's requirements in its stdlib module, the
+/// internal `__` pivots included — a generic body reaches them through a type
+/// variable, and monomorphization calls `<module>.<requirement>` with nothing
+/// else to check that it exists. Operator requirements (`add`, `neg`) are the
+/// operators on a primitive and are not functions.
+fn check_builtin_conformance_matrix() -> Vec<String> {
+    let mut seen: std::collections::HashMap<&str, std::collections::HashSet<String>> = std::collections::HashMap::new();
+    let mut drifts = Vec::new();
+    for (module, proto, method) in almide::canonicalize::protocols::builtin_conformance_requirements() {
+        let names = seen.entry(module).or_insert_with(|| module_function_names(module));
+        if !names.contains(&method) {
+            drifts.push(format!(
+                "built-in conformance: `{}` conforms to {} but does not define `{}.{}`",
+                module, proto, module, method
+            ));
+        }
+    }
+    drifts
+}
+
 /// The fixed-width numeric PROTOCOL matrix gate (R-sized-02/03/08/10/11, R-int-11/12).
 /// The protocol pyramid (docs/roadmap/stdlib-redesign/protocol-view.md) is an assumed
 /// design: the language cannot yet say `Int8: Integer`, so every type carries each
@@ -345,24 +383,32 @@ fn module_function_names(m: &str) -> std::collections::HashSet<String> {
 /// binary64 parse narrowed to binary32 rounds twice, so it needs a direct binary32
 /// reader first.
 fn check_numeric_protocol_matrix() -> Vec<String> {
-    const INTEGERS: &[(&str, bool)] = &[
-        ("int8", true), ("int16", true), ("int32", true), ("int64", true),
-        ("uint8", false), ("uint16", false), ("uint32", false), ("uint64", false),
+    // (module, signed, fixed width): `int` and the eight sized types are fixed width,
+    // `bigint` has no width (R-bigint-07: no bit counts, wrapping or rotation).
+    const INTEGERS: &[(&str, bool, bool)] = &[
+        ("int", true, true),
+        ("int8", true, true), ("int16", true, true), ("int32", true, true), ("int64", true, true),
+        ("uint8", false, true), ("uint16", false, true), ("uint32", false, true), ("uint64", false, true),
+        ("bigint", true, false),
     ];
-    // Integer (R-sized-02/08/10, R-int-11) and FixedWidthInteger (R-sized-10, R-int-12).
+    // Integer (R-sized-02/06/08/10, R-int-03/04/11, R-bigint-01/05/07).
     const INTEGER: &[&str] = &[
-        "compare", "min", "max", "clamp", "to_string", "min_value", "max_value",
-        "floor_div", "pow", "is_even", "is_odd",
+        "compare", "min", "max", "clamp", "to_string", "parse", "parse_radix", "to_string_radix",
+        "floor_div", "modulo", "pow", "is_even", "is_odd", "bit_length",
         "band", "bor", "bxor", "bnot", "bshl", "bshr",
+    ];
+    // FixedWidthInteger (R-sized-10, R-int-12).
+    const FIXED_WIDTH: &[&str] = &[
+        "min_value", "max_value",
         "count_leading_zeros", "count_trailing_zeros", "count_ones", "byte_swap",
-        "parse", "bit_length", "wrap_add", "wrap_sub", "wrap_mul", "rotate_left", "rotate_right",
+        "wrap_add", "wrap_sub", "wrap_mul", "rotate_left", "rotate_right",
     ];
     // SignedInteger (R-sized-10).
     const SIGNED: &[&str] = &["abs", "sign"];
-    // FloatingPoint (R-sized-02/03/08/11).
-    const FLOATS: &[&str] = &["float32", "float64"];
+    // FloatingPoint (R-sized-02/03/08/11, R-float-02/03/04/05).
+    const FLOATS: &[&str] = &["float", "float32", "float64"];
     const FLOATING: &[&str] = &[
-        "compare", "min", "max", "clamp", "to_string",
+        "compare", "min", "max", "clamp", "to_string", "parse",
         "is_nan", "is_infinite", "is_finite",
         "abs", "floor", "ceil", "round", "trunc", "signum",
         "to_bits", "from_bits", "infinity", "nan", "epsilon", "max_value", "min_value",
@@ -377,15 +423,14 @@ fn check_numeric_protocol_matrix() -> Vec<String> {
             }
         }
     };
-    for (m, signed) in INTEGERS {
+    for (m, signed, fixed) in INTEGERS {
         let mut names: Vec<&str> = INTEGER.to_vec();
         if *signed { names.extend_from_slice(SIGNED); }
+        if *fixed { names.extend_from_slice(FIXED_WIDTH); }
         require(m, &names);
     }
     for m in FLOATS {
-        let mut names: Vec<&str> = FLOATING.to_vec();
-        if *m == "float64" { names.push("parse"); }
-        require(m, &names);
+        require(m, FLOATING);
     }
     drifts
 }

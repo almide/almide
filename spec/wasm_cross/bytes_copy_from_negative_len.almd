@@ -28,8 +28,8 @@ fn self_copy(doff: Int, soff: Int, n: Int) -> String = {
 }
 
 fn main() -> Unit = {
-  var a = bytes.new(8)
-  var o = bytes.new(8)
+  var a = bytes.zeros(8)
+  var o = bytes.zeros(8)
   bytes.set_at(o, 3, 42)
   bytes.copy_from(a, o, 0, 3, -128)
   println("negative len: ${bytes.get_or(a, 0, -1)}")
@@ -42,7 +42,7 @@ fn main() -> Unit = {
   bytes.copy_from(a, o, 6, 3, 100)
   println("clamped run: ${bytes.get_or(a, 6, -1)} ${bytes.get_or(a, 7, -1)}")
   let lo = -9223372036854775807 - 1
-  var z = bytes.new(8)
+  var z = bytes.zeros(8)
   bytes.copy_from(z, o, 0, 3, 0)
   bytes.copy_from(z, o, 0, 3, -1)
   bytes.copy_from(z, o, 0, 3, lo)

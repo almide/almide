@@ -29,8 +29,8 @@ pub const CONSTANT_APP: &str = "fn app(req: HttpRequest) -> Result[HttpResponse,
 /// from a request header, a status outside the reason table, and an err.
 pub const PROBE_APP: &str = r#"fn app(req: HttpRequest) -> Result[HttpResponse, String] = {
   let path = http.req_path(req)
-  let q = http.query_params(req)
-  let keys = map.keys(q) |> list.sort |> list.join(",")
+  let q = http.query_params(req) ?? []
+  let keys = q |> list.map(((k, _)) => k) |> list.join(",")
   match path {
     "/missing" => err("no route ${path}"),
     "/a/b" => ok(http.response(200, http.req_body(req)) |> http.status(418) |> http.set_header("x-kind", "teapot")),
@@ -95,7 +95,7 @@ const READERS: &[(&str, &str, fn() -> GenType)] = &[
     ("body", "http.req_body(req)", || GenType::String),
     ("token", "http.req_header(req, \"x-token\") ?? \"none\"", || GenType::String),
     ("ctype", "http.req_header(req, \"Content-Type\") ?? \"\"", || GenType::String),
-    ("query", "http.query_params(req)", || GenType::Map(Box::new(GenType::String))),
+    ("query", "http.query_params(req) ?? []", || GenType::List(Box::new(GenType::Tuple2(Box::new(GenType::String), Box::new(GenType::String))))),
 ];
 
 /// Goal types of the extra bindings a handler computes before its answer.

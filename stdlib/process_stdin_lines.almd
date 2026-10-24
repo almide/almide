@@ -14,7 +14,7 @@ import io
 
 @implements("process.stdin_lines")
 effect fn process_stdin_lines() -> Result[List[String], String] = {
-  var buf = bytes.new(0)
+  var buf = bytes.zeros(0)
   var n = 1
   while n > 0 {
     let chunk = io.read_n_bytes(4096)

@@ -156,10 +156,12 @@ CLI="$COVDIR/t/release/almide"
 #   - `almide build --target wasm` with the structural leg forced — the
 #     default wasm emitter (almide-wasm) and its route. Forced, so a wall is a
 #     wall and never an incumbent fallback that would measure deleted code.
-#   - `almide verify --emit` — the untrusted producer only: MIR lowering and
+#   - `almide verify --mir --emit` — the untrusted producer only: MIR lowering and
 #     the ownership / name / capability witnesses (`certificate*.rs`,
 #     `pipeline_witnesses.rs`). With no `almide-verify` beside the binary it
 #     exits 127 after writing the bundle; the producer has already run.
+#     (`--mir` since #4011: plain `almide verify` certifies the structural
+#     leg's build, which this sweep already drives through `almide build`.)
 # The profile names are per-workload so a single workload's contribution can
 # be isolated from the profraw set (the #2753 mutation evidence did that).
 # `%4m`, not `%p`: a per-process file made ~1,900 raw profiles (tens of GB,
@@ -176,7 +178,7 @@ nw="$(tr '\n' '\0' < "$COVDIR/sweep.list" | COVDIR="$COVDIR" CLI="$CLI" xargs -0
     if ALMIDE_WASM_SKIP_STOCK_AUDIT=1 LLVM_PROFILE_FILE="$COVDIR/wasm-%4m.profraw" \
          "$CLI" build "$1" --target wasm -o "$out.wasm" >/dev/null 2>&1; then echo emitted; fi
     LLVM_PROFILE_FILE="$COVDIR/verify-%4m.profraw" \
-      "$CLI" verify "$1" --emit "$out.bundle" >/dev/null 2>&1
+      "$CLI" verify --mir "$1" --emit "$out.bundle" >/dev/null 2>&1
     rm -f "$out.wasm" "$out.bundle"
     exit 0
 ' sh | grep -c emitted || true)"

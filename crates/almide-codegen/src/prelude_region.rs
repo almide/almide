@@ -22,8 +22,7 @@
 //! rewound: rustc cannot see a handle that outlives its window, so a wrong
 //! region-pure verdict in `pass_region_window.rs` is a SILENT use-after-rewind
 //! — the slot still holds the old bytes until the next window overwrites it.
-//! `ALMIDE_REGION_TRAP_STALE=1` (read at BUILD time, like
-//! `ALMIDE_RC_TRAP_DOUBLE_FREE` on the wasm leg) arms the trap: every block
+//! `ALMIDE_REGION_TRAP_STALE=1` (read at BUILD time) arms the trap: every block
 //! gets an 8-byte generation header, the handle carries the generation it was
 //! allocated under, a rewind poisons every header it releases and bumps the
 //! generation, and every `Deref` compares the two — a stale read panics with a
@@ -31,6 +30,9 @@
 //! keep their outer handles live (only the released headers are poisoned) and
 //! re-use of a rewound slot is caught by the generation (ABA). Off by default:
 //! the shipped prelude is byte-identical to the one before the knob existed.
+//! #4023 measured the armed prelude at +30% (binarytrees) and +52%
+//! (treealloc) wall time, so instead of shipping it CI runs `spec/` and the
+//! differential fuzz with it armed (`scripts/check-memory-traps.sh`).
 //! `tests/region_window_trap_test.rs` pins both the trap and the silence, and
 //! runs a region-shaped corpus armed on native against the wasm leg.
 

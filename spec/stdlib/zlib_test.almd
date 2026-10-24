@@ -40,7 +40,7 @@ test "zlib compress_level round trips at both ends of the dial" {
 }
 
 test "round trips at the empty and one-byte sizes" {
-  let empty = bytes.new(0)
+  let empty = bytes.new()
   assert(bytes.len(zlib.decompress(zlib.compress(empty)!)!) == 0, "zlib empty round trip")
   assert(bytes.len(zlib.inflate(zlib.deflate(empty)!)!) == 0, "deflate empty round trip")
   assert(bytes.len(zlib.gunzip(zlib.gzip(empty)!)!) == 0, "gzip empty round trip")
@@ -49,14 +49,14 @@ test "round trips at the empty and one-byte sizes" {
 }
 
 test "crc32 known answers" {
-  assert(zlib.crc32(bytes.new(0)) == 0, "crc32 of empty")
+  assert(zlib.crc32(bytes.new()) == 0, "crc32 of empty")
   assert(zlib.crc32(bytes.from_list([1, 2, 3])) == 1438416925, "crc32 of 1,2,3")
   assert(zlib.crc32(bytes.from_string("123456789")) == 3421780262, "crc32 check vector")
 }
 
 // 256 bytes is where crc32 switches from the bit step to the table (#3848).
 test "crc32 across the table threshold" {
-  let pad = (n) => bytes.pad_right(bytes.from_list([1, 7, 2, 2, 7]), n, 255)
+  let pad = (n) => bytes.pad_end(bytes.from_list([1, 7, 2, 2, 7]), n, 255)
   assert(zlib.crc32(pad(255)) == 2380377564, "crc32 of 255 bytes")
   assert(zlib.crc32(pad(256)) == 1894285138, "crc32 of 256 bytes")
   assert(zlib.crc32(pad(257)) == 2048252071, "crc32 of 257 bytes")
@@ -68,7 +68,7 @@ test "crc32 across the table threshold" {
 }
 
 test "adler32 known answers" {
-  assert(zlib.adler32(bytes.new(0)) == 1, "adler32 of empty")
+  assert(zlib.adler32(bytes.new()) == 1, "adler32 of empty")
   assert(zlib.adler32(bytes.from_list([1, 2, 3])) == 851975, "adler32 of 1,2,3")
   assert(zlib.adler32(bytes.from_string("123456789")) == 152961502, "adler32 check vector")
 }
@@ -84,7 +84,7 @@ test "gunzip rejects non-gzip input" {
 // one text on every leg (the self-hosted member loop used to run zero times
 // and answer ok with 0 bytes).
 test "gunzip of empty input is an error" {
-  match zlib.gunzip(bytes.new(0)) {
+  match zlib.gunzip(bytes.new()) {
     ok(_) => assert(false, "gunzip accepted empty input"),
     err(e) => assert_eq(e, "zlib.gunzip: unexpected end of file"),
   }

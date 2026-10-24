@@ -54,7 +54,7 @@ fn a_disallowed_effect_is_refused_by_the_native_and_the_wasm_build_alike() {
     for (route, o) in [("build", &native), ("build --target wasm", &wasm)] {
         assert!(!o.status.success(), "`almide {route}` built a program that reads a file under allow = [\"Env\"]:\n{}", stderr(o));
         assert!(
-            stderr(o).contains("error: capability violation in `main`") && stderr(o).contains("IO is not in [permissions].allow"),
+            stderr(o).contains("error: capability violation in `main`") && stderr(o).contains("FS.read is not in [permissions].allow"),
             "`almide {route}` should name the fn and the capability:\n{}",
             stderr(o)
         );
@@ -72,7 +72,7 @@ fn a_disallowed_effect_is_refused_by_the_native_and_the_wasm_build_alike() {
 #[test]
 fn an_allowed_effect_builds_on_both_targets() {
     let td = tempfile::TempDir::new().unwrap();
-    project(td.path(), "\"Env\", \"IO\"");
+    project(td.path(), "\"Env\", \"FS\", \"IO\"");
     let native = almide(td.path(), &["build", "main.almd", "-o", "app"]);
     assert!(native.status.success(), "native build refused an allowed program:\n{}", stderr(&native));
     let wasm = almide(td.path(), &["build", "main.almd", "--target", "wasm", "-o", "app.wasm"]);

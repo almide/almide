@@ -16,7 +16,7 @@ fn probe(n: u32, crc: bool) -> String {
     format!(
         r#"import zlib
 fn probe() -> Int = {{
-  let b = bytes.pad_right(bytes.from_list([1, 7, 2, 2, 7]), {n}, 255)
+  let b = bytes.pad_end(bytes.from_list([1, 7, 2, 2, 7]), {n}, 255)
   {r}
 }}
 "#

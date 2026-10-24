@@ -365,6 +365,13 @@ fn lower_expr_unary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
                 }
             }
             let o = lower_expr(ctx, operand);
+            // Unary `-` on a declared numeric type is its `neg` requirement.
+            if op.as_str() == "-" {
+                let operand_ty = o.ty.clone();
+                if let Some(target) = requirement_call_target(ctx, &operand_ty, crate::canonicalize::protocols::NEG_REQUIREMENT) {
+                    return ctx.mk(IrExprKind::Call { target, args: vec![o], type_args: vec![] }, ty, span);
+                }
+            }
             let un_op = match (op.as_str(), &o.ty) {
                 ("not", _) => UnOp::Not,
                 ("-", Ty::Float | Ty::Float32 | Ty::Float64) => UnOp::NegFloat,
@@ -429,6 +436,9 @@ fn lower_expr_binary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                 }
                 let bin_op = binop_for(op.as_str(), &Ty::Int, &Ty::Int);
                 return ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span);
+            }
+            if let Some(out) = lower_requirement_operator(ctx, op.as_str(), left_ty, (l.clone(), r.clone()), ty.clone(), span) {
+                return out;
             }
             let bin_op = binop_for(op.as_str(), left_ty, right_ty);
             ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span)

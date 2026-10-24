@@ -93,7 +93,7 @@ fn unsafe_lives_in_the_one_sanctioned_module() {
             if !opens {
                 continue;
             }
-            assert_eq!(name, "net_unix_sys.rs", "{name}:{}: unsafe outside the sanctioned module", i + 1);
+            assert!(matches!(name.as_str(), "net_unix_sys.rs" | "fs_beneath_sys.rs"), "{name}:{}: unsafe outside the sanctioned modules", i + 1);
             if code.contains("unsafe {") || code.contains("unsafe extern") {
                 let above = lines[..i].iter().rev().take(4).any(|l| l.trim_start().starts_with("// SAFETY:"));
                 assert!(above, "{name}:{}: an unsafe block without a SAFETY line", i + 1);

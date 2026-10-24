@@ -432,7 +432,7 @@ fn wasm_bytes_mutable_capture_through_closure() {
     // pushes twice -> len 2. Cross-target = 2.
     assert_cross_target_effect_main(
         "effect fn main() -> Unit = {\n\
-         \x20 var buf: Bytes = bytes.new(0)\n\
+         \x20 var buf: Bytes = bytes.zeros(0)\n\
          \x20 let f = () => { bytes.push(buf, 65) }\n\
          \x20 f()\n\
          \x20 f()\n\

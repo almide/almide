@@ -6,7 +6,7 @@ import ffi
 // buffer dies when this returns, and `$free` checks the canary.
 effect fn overrun() -> Int = {
   let src = bytes.from_list([7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7])
-  let small = bytes.new(4)
+  let small = bytes.zeros(4)
   ffi.write(ffi.address(small), src, 16)
 }
 

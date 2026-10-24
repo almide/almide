@@ -523,8 +523,8 @@ pub fn inline_pure_call_globals(program: &mut almide_ir::IrProgram) {
             // site freezes the read at the init value (writes through the global slot
             // become invisible — `speeds[i]` read `list.repeat(0.0, 4)[i]` = 0.0 forever).
             .filter(|tl| !tl.mutable)
-            // Nor may an IN-PLACE MUTATOR's receiver (#906): substituting `bytes.new(64)`
-            // into `bytes.set_f32_le(g_pool, …)` turns the receiver into a fresh temporary,
+            // Nor may an IN-PLACE MUTATOR's receiver (#906): substituting `bytes.zeros(64)`
+            // into `bytes.put_f32_le(g_pool, …)` turns the receiver into a fresh temporary,
             // and the wall that catches it names the SUBSTITUTED shape ("a non-var
             // receiver") instead of the global the user wrote. Keeping the `Var` lets the
             // receiver check report the real cause and the real fix (declare it `var`).

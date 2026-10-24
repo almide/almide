@@ -17,7 +17,7 @@ use std::process::Command;
 // identically on both legs.) Native answers 2143289356 from host memory.
 const PROBE: &str = r#"fn main() -> Unit = {
   println("before")
-  var b = bytes.new(2143289344)
+  var b = bytes.zeros(2143289344)
   bytes.append_f64_le(b, 1.5)
   bytes.append_f32_le(b, 1.5)
   println("unreachable ${bytes.len(b)}")

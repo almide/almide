@@ -162,3 +162,74 @@ fn parse(s: String) -> Result[UInt16, String] =
     ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.to_uint16(n)),
     err(e) => err(e),
   }
+
+// ── Integer: radix text (R-sized-06) ──
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: UInt16, radix: Int) -> String = int.to_string_radix(int.from_uint16(x), radix)
+
+/// UInt16 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 65535.
+fn parse_radix(s: String, radix: Int) -> Result[UInt16, String] = {
+  let parsed = int.parse_radix(s, radix)
+  if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
+  else match parsed {
+    ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.to_uint16(n)),
+    err(e) => err(e),
+  }
+}
+
+// ── The `from` family (R-L0-40): UInt16 from any number. The source is any
+//    `Numeric` type; the body reads the source through the protocol's
+//    conversion pivots (`__int_exact`, `__trunc`, ...), which every numeric
+//    type defines below its own conversions. ──
+/// x as UInt16, toward zero; NaN, an infinity or a value outside UInt16 aborts.
+fn from[S: Numeric](x: S) -> UInt16 = match x.__trunc().__int_exact() {
+  some(n) => int.to_uint16_checked(n) ?? panic("uint16.from: the value is not a number in the range of UInt16"),
+  none => panic("uint16.from: the value is not a number in the range of UInt16"),
+}
+
+/// some(x as UInt16) when UInt16 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> UInt16? = match x.__int_exact() {
+  some(n) => int.to_uint16_checked(n),
+  none => none,
+}
+
+/// x as UInt16, toward zero, clamped to UInt16's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> UInt16 = int.to_uint16_saturating(x.__int_sat())
+
+/// The low 16 bits of integer x as UInt16 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> UInt16 = int.to_uint16(int.wrap(x.__bits64(), 16))
+
+// ── Numeric / Integer requirements: the conversion pivots the `<T>.from`
+//    family reads through a type variable, and the receiver-less sum and
+//    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
+fn __int_exact(x: UInt16) -> Int? = some(int.from_uint16(x))
+
+fn __uint64_exact(x: UInt16) -> UInt64? = int.__uint64_exact(int.from_uint16(x))
+
+fn __trunc(x: UInt16) -> UInt16 = x
+
+fn __int_sat(x: UInt16) -> Int = int.from_uint16(x)
+
+fn __uint64_sat(x: UInt16) -> UInt64 = int.__uint64_sat(int.from_uint16(x))
+
+fn __to_float(x: UInt16) -> Float = int.to_float(int.from_uint16(x))
+
+fn __to_float_exact(x: UInt16) -> Float? = int.__to_float_exact(int.from_uint16(x))
+
+fn __to_float32(x: UInt16) -> Float32 = int.to_float32(int.from_uint16(x))
+
+fn __to_float32_exact(x: UInt16) -> Float32? = int.to_float32_checked(int.from_uint16(x))
+
+fn __decimal_exact(x: UInt16) -> String? = some(int.to_string(int.from_uint16(x)))
+
+fn __bits64(x: UInt16) -> Int = int.from_uint16(x)
+
+fn __sum(xs: List[UInt16]) -> UInt16 = {
+  let zero: UInt16 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[UInt16]) -> UInt16 = {
+  let one: UInt16 = 1
+  list.fold(xs, one, (a, b) => a * b)
+}

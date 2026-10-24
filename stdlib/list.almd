@@ -102,13 +102,18 @@ fn last[A](xs: List[A]) -> A? = _
 @intrinsic("almide_rt_list_chunk")
 fn chunk[A](xs: List[A], n: Int) -> List[List[A]] = _
 
-/// Sum; 0 when empty; wraps on overflow.
-@intrinsic("almide_rt_list_sum")
-fn sum(xs: List[Int]) -> Int = _
+/// Sum of any numbers (R-L0-42); 0 when empty; integers wrap on overflow.
+fn sum[A: Numeric](xs: List[A]) -> A = A.__sum(xs)
 
-/// Product; 1 when empty; wraps on overflow.
+/// Product of any numbers (R-L0-42); 1 when empty; integers wrap on overflow.
+fn product[A: Numeric](xs: List[A]) -> A = A.__product(xs)
+
+// The Int sum and product `int.__sum` / `int.__product` answer `list.sum` with.
+@intrinsic("almide_rt_list_sum")
+fn __sum_int(xs: List[Int]) -> Int = _
+
 @intrinsic("almide_rt_list_product")
-fn product(xs: List[Int]) -> Int = _
+fn __product_int(xs: List[Int]) -> Int = _
 
 /// Head element, or none when empty.
 @intrinsic("almide_rt_list_first")
@@ -126,9 +131,12 @@ fn min[A](xs: List[A]) -> A? = _
 @intrinsic("almide_rt_list_max")
 fn max[A](xs: List[A]) -> A? = _
 
-/// Strings joined by sep; empty string for [].
+/// The parts joined by sep (R-L0-42): Strings or Bytes; empty for [].
+fn join[T: Text](xs: List[T], sep: T) -> T = T.__join(xs, sep)
+
+// The String join `string.__join` answers `list.join` with.
 @intrinsic("almide_rt_list_join")
-fn join(xs: List[String], sep: String) -> String = _
+fn __join_string(xs: List[String], sep: String) -> String = _
 
 // ── closure-bearing (IterChain-handled: map, filter, find, any, all,
 //    count, flat_map, filter_map, fold — the `try_lower_to_iter_chain`

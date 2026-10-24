@@ -1,0 +1,7 @@
+// #4013 drill: the list literal route never lowers or stores its first
+// element (an off-by-one in the element loop). The init witness then lists
+// the site without slot 0, which the checker rejects.
+effect fn main() -> Unit = {
+  let xs = [1, 2, 3]
+  println("${xs[1]}")
+}

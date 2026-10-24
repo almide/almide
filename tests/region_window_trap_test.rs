@@ -3,9 +3,9 @@
 //! see a handle that outlives its window — a wrong region-pure verdict in
 //! `pass_region_window.rs` is a SILENT use-after-rewind.
 //!
-//! Two nets. `ALMIDE_REGION_TRAP_STALE=1` (read at BUILD time, the twin of
-//! `ALMIDE_RC_TRAP_DOUBLE_FREE`) emits a generation-checked handle: a stale
-//! read panics naming the pass. The first test drives the prelude directly
+//! Two nets. `ALMIDE_REGION_TRAP_STALE=1` (read at BUILD time; its wasm twin,
+//! the double-free trap, is in every build since #4023) emits a
+//! generation-checked handle: a stale read panics naming the pass. The first test drives the prelude directly
 //! with rustc and pins both the trap and the silence it replaces. The second
 //! is the differential lane: a corpus of region-window-shaped programs built
 //! armed on native and compared byte-for-byte with the wasm leg — a verdict

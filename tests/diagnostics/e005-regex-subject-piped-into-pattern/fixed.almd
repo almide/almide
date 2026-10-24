@@ -1,0 +1,4 @@
+// The Regex first, the subject second.
+import regex
+
+fn main() -> Unit = println("${regex.is_match(regex.new("[0-9]+"), "order 42")}")

@@ -1,20 +1,19 @@
-// @contract: C-087
-// The lenient edges of json.parse, pinned against the native oracle (ALS-T3).
-// The native parser moved from a Vec<char> to byte offsets (#1678); nothing
-// here may move with it. Two things are only observable through these shapes:
+// @contract: C-087, C-401
+// The edges json.parse used to accept leniently, now each an err with one
+// text on every leg (ALS-T3, almide/almide#4111, #4112). The cases are the
+// ones this fixture pinned while the leniency was the rule, kept so the file
+// shows what each old shape answers now:
 //
 //   - An error names the CHAR index of the offending position, not the byte
 //     offset. A 3-byte 日 and a 4-byte emoji before the bad token each count
-//     once. (The self-hosted leg counts at error time; the native leg now does
-//     the same — both from a byte position.)
-//   - Whitespace is Unicode White_Space (`char::is_whitespace`): ideographic
-//     space, NBSP, em space, NEL and the ASCII VT/FF are all skipped between
-//     tokens; a non-space multi-byte char in value position is an error.
-//
-// Everything else is the oracle's documented leniency: trailing content after
-// the top-level value is ignored, a missing `,` ends the container early, an
-// object key is hunted through the string reader whatever char starts it, and
-// the four Rust number-parse messages pass through verbatim.
+//     once.
+//   - Whitespace is JSON whitespace (space, tab, LF, CR). Ideographic space,
+//     NBSP, em space, NEL, LINE SEPARATOR and the ASCII VT/FF are not, so
+//     between tokens they are an unexpected char, and after the value they
+//     are trailing data.
+//   - Trailing content after the top-level value, a missing `,`, an unquoted
+//     key and a trailing comma are each an err; a number must match RFC 8259's
+//     grammar whole.
 import json
 
 fn s(text: String) -> String = match json.parse(text) {

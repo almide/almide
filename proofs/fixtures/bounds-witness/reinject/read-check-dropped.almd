@@ -1,0 +1,8 @@
+// #4005 drill: the read route treats every access as already checked
+// (a #3345 elision with no fact behind it). The witness then holds a bare
+// `a`, which the checker rejects.
+effect fn main() -> Unit = {
+  let xs = [1, 2]
+  let i = 5
+  println("${xs[i]}")
+}

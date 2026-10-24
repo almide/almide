@@ -287,7 +287,7 @@ fn opaque_newtype_ctor_is_identity_on_its_payload() {
 /// mutated as a COW copy — the binding is untouched.
 ///
 /// Until dialect epoch 5 the same shapes were written with a TEMPORARY receiver
-/// (`bytes.append_u8(bytes.new(2), 511)`, `bytes.fill(same(x), 9)`), which the
+/// (`bytes.append_u8(bytes.zeros(2), 511)`, `bytes.fill(same(x), 9)`), which the
 /// checker admitted because the writers took a plain receiver. #2466 declared
 /// every writer's receiver `mut`, so a temporary — like a `let` — is E032 and
 /// cannot reach this interpreter at all (the rejection itself is pinned by
@@ -310,7 +310,7 @@ fn inplace_writer_on_a_var_receiver_writes_back_and_cows_an_alias() {
          \x20 var borrowed2 = same(x)\n\
          \x20 bytes.fill(borrowed2, 9)\n\
          \x20 println(\"${bytes.to_list(x)}\")\n\
-         \x20 var v = bytes.new(0)\n\
+         \x20 var v = bytes.zeros(0)\n\
          \x20 bytes.append_u8(v, 511)\n\
          \x20 println(\"${bytes.to_list(v)}\")\n\
          }\n",

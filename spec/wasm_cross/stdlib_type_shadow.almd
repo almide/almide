@@ -57,7 +57,7 @@ effect fn main() -> Unit = {
   println("${json.stringify(doc)} ${json.stringify(value.int(3))}")
   let r = http.response(200, "body")
   println("${show(Small(3))} ${show(Big)} ${http.body(r)}")
-  var t = bytes.new(0)
+  var t = bytes.zeros(0)
   bytes.write_uint16(t, 258, LittleEndian)
   let e: Endian = pick(true)
   println("${int.from_uint16(bytes.read_uint16(t, 0, LittleEndian))} ${int.from_uint16(bytes.read_uint16(t, 0, BigEndian))} ${e.n}")

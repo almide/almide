@@ -1,0 +1,16 @@
+// E109 (#4151): a fn-typed parameter is transparent (ADR-0009 D2), so
+// `call_it` itself is fine — its CALLER is charged with what it is handed.
+// Here the caller is pure and hands it a record field that `main` filled with
+// a closure reading a file: the pure caller runs the read.
+import fs
+
+type Reader = { read: (String) -> Result[String, String] }
+
+fn call_it(f: (String) -> Result[String, String]) -> Result[String, String] = f("s.txt")
+
+fn pure_looking(r: Reader) -> Result[String, String] = call_it(r.read)
+
+effect fn main() -> Unit = {
+  let r = Reader { read: (p) => fs.read_text(p) }
+  println(pure_looking(r) ?? "none")
+}

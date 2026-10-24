@@ -55,7 +55,7 @@ of `b`.
 import ffi
 
 effect fn main() -> Unit = {
-  var dst = bytes.new(4)
+  var dst = bytes.zeros(4)
   let n = ffi.write(ffi.address(dst), bytes.from_string("hi"), 4)
   println(int.to_string(n))
 }

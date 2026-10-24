@@ -1,0 +1,56 @@
+// The wave 2 float functions: the FloatingPoint cells float32 and float64 already carry
+// (R-float-02/03/04, R-sized-02), signum (R-float-05) and pow (R-math-01), at -0.0, NaN
+// and the infinities.
+fn inf() -> Float = 1.0 / 0.0
+
+test "trunc and is_finite" {
+  assert_eq(float.trunc(1.5), 1.0)
+  assert_eq(float.trunc(-1.5), -1.0)
+  assert_eq(float.to_bits(float.trunc(-0.5)), float.to_bits(-0.0))
+  assert_eq(float.trunc(inf()), inf())
+  assert(float.is_nan(float.trunc(0.0 / 0.0)))
+  assert(float.is_finite(1e308))
+  assert(not float.is_finite(inf()))
+  assert(not float.is_finite(0.0 - inf()))
+  assert(not float.is_finite(0.0 / 0.0))
+}
+
+test "signum keeps the sign bit's answer" {
+  assert_eq(float.signum(0.0), 1.0)
+  assert_eq(float.signum(-0.0), -1.0)
+  assert_eq(float.signum(-2.5), -1.0)
+  assert_eq(float.signum(inf()), 1.0)
+  assert(float.is_nan(float.signum(0.0 / 0.0)))
+}
+
+test "compare is the IEEE total order" {
+  let xs = [
+    0.0 - inf(),
+    -1.5,
+    -0.0,
+    0.0,
+    1.5,
+    inf(),
+    0.0 / 0.0
+  ]
+  for (i, a) in list.enumerate(xs) {
+    for (j, b) in list.enumerate(xs) {
+      assert_eq(float.compare(a, b), int.compare(i, j))
+    }
+  }
+}
+
+test "from_bits, the constants and pow" {
+  assert_eq(float.from_bits(float.to_bits(1.5)), 1.5)
+  assert_eq(float.to_bits(float.from_bits(-1)), float.to_bits(float.nan()))
+  assert_eq(float.to_bits(float.nan()), 9221120237041090560)
+  assert(float.is_nan(float.nan()))
+  assert_eq(float.infinity(), inf())
+  assert(1.0 + float.epsilon() > 1.0)
+  assert_eq(1.0 + float.epsilon() / 2.0, 1.0)
+  assert_eq(float.min_value(), 0.0 - float.max_value())
+  assert(float.is_infinite(float.max_value() * 2.0))
+  assert_eq(float.pow(2.0, 10.0), 1024.0)
+  assert(float.is_nan(float.pow(-8.0, 0.5)))
+  assert_eq(float.pow(0.0, -1.0), inf())
+}

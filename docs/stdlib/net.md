@@ -201,7 +201,7 @@ effect net.tcp_close(stream: Int) -> Unit
 
 // False after tcp_close; a peer close is not seen.
 // @since 0.20.0 or earlier
-net.tcp_is_open(stream: Int) -> Bool
+effect net.tcp_is_open(stream: Int) -> Bool
 
 // Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
 // @since 0.20.0 or earlier

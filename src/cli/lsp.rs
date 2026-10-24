@@ -16,7 +16,7 @@ struct AnalyzedDoc {
 }
 
 /// Dependency source dirs cached per almide.toml, so a keystroke never
-/// re-runs the fetcher (which shells out to git and writes almide.lock).
+/// re-resolves them. Resolution is cache-only and never fetches (#4128).
 /// Each entry carries the manifest + lock fingerprint it was resolved from
 /// ([`manifest_fingerprint`]), and an entry whose fingerprint no longer
 /// matches the files is stale (#3097).
@@ -481,11 +481,12 @@ fn derive_workspace_root(init: &InitializeParams) -> Option<std::path::PathBuf> 
 
 /// `run_lsp`'s notification dispatch (`didOpen`/`didChange`/`didClose`).
 ///
-/// Dep fetching (git shell-out, almide.lock write) is allowed only on
-/// didOpen — opening a file is a deliberate user action. didChange runs on
-/// every keystroke and serves the dep list cached at open time; a project
-/// never opened in this session analyzes against no deps rather than
-/// touching the network (#927).
+/// The server never fetches dependencies: opening a file of an untrusted
+/// project must not contact the hosts its manifest names or write
+/// almide.lock into its tree (#4128). didOpen resolves the dep list from
+/// what is already on disk; didChange runs on every keystroke and serves the
+/// list resolved at open time, and a project never opened in this session
+/// analyzes against no deps (#927).
 // `Uri` keys trip clippy::mutable_key_type across this server — a false
 // positive (Uri hashes by its string form; no key is mutated in place), and
 // the same shape the pre-existing documents/analyzed maps already carry.

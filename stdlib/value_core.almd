@@ -195,7 +195,62 @@ else {
 
 // json.keys — the Object's keys as a fresh `List[String]` (each key SHALLOW-COPIED via the
 // `acc + [k]` list-concat rc_inc; the returned list co-owns each, freed by its scope-end DropListStr).
-fn value_object(pairs: List[(String, Value)]) -> Value = {
+// No Object holds a key twice (C-401, #4112): a pair list that repeats a key
+// is folded as one upsert per pair — the key keeps the POSITION of its first
+// occurrence and takes the VALUE of its last, the json.to_map rule (C-380,
+// ALS-C1), as native's almide_rt_object_upsert does. Every reader (field,
+// keys, stringify, to_map) then sees one entry, and json.stringify never
+// writes a key twice. A short list compares pairwise; a longer one is indexed.
+fn __vobj_key_at(pairs: List[(String, Value)], i: Int) -> String = match list.get(pairs, i) {
+  some((k, _)) => k,
+  none => "",
+}
+
+fn __vobj_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool = if i >= n then false
+else if j >= n then __vobj_dup_small(pairs, i + 1, i + 2, n)
+else if __vobj_key_at(pairs, i) == __vobj_key_at(pairs, j) then true
+else __vobj_dup_small(pairs, i, j + 1, n)
+
+fn __vobj_has_dup(pairs: List[(String, Value)]) -> Bool = {
+  let n = list.len(pairs)
+  if n < 16 then __vobj_dup_small(pairs, 0, 1, n)
+  else {
+    var seen: Map[String, Int] = map.new()
+    var dup = false
+    for (k, _) in pairs {
+      if map.contains(seen, k) then {
+        dup = true
+      } else {
+        map.insert(seen, k, 0)
+      }
+    }
+    dup
+  }
+}
+
+fn __vobj_upsert(pairs: List[(String, Value)]) -> List[(String, Value)] = {
+  var at: Map[String, Int] = map.new()
+  var keys: List[String] = []
+  var vals: List[Value] = []
+  for (k, v) in pairs {
+    match map.get(at, k) {
+      some(i) => {
+        vals = list.set(vals, i, v)
+      },
+      none => {
+        map.insert(at, k, list.len(keys))
+        list.push(keys, k)
+        list.push(vals, v)
+      },
+    }
+  }
+  list.zip(keys, vals)
+}
+
+fn value_object(pairs: List[(String, Value)]) -> Value = if list.len(pairs) > 1 and __vobj_has_dup(pairs) then __vobj_build(__vobj_upsert(pairs))
+else __vobj_build(pairs)
+
+fn __vobj_build(pairs: List[(String, Value)]) -> Value = {
   let ph = prim.handle(pairs)
   let n = prim.load32(ph + 4)
   let v = prim.alloc_value(2 * n)
