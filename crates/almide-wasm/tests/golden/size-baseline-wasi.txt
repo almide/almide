@@ -102,14 +102,14 @@
 26811	spec/wasm_cross/codec_float_int.almd
 26993	spec/wasm_cross/codec_int_float_boundaries.almd
 30057	spec/wasm_cross/codec_list_default.almd
-32088	spec/wasm_cross/codec_list_default_field.almd
+32087	spec/wasm_cross/codec_list_default_field.almd
 29030	spec/wasm_cross/codec_list_list_field.almd
 29598	spec/wasm_cross/codec_nested_records.almd
-33918	spec/wasm_cross/codec_none_omission.almd
+33915	spec/wasm_cross/codec_none_omission.almd
 27772	spec/wasm_cross/codec_option_numeric.almd
 31266	spec/wasm_cross/codec_option_record_default.almd
 25377	spec/wasm_cross/codec_string_escapes.almd
-28989	spec/wasm_cross/codec_triple_list.almd
+28990	spec/wasm_cross/codec_triple_list.almd
 30531	spec/wasm_cross/codec_variant_roundtrip.almd
 27373	spec/wasm_cross/codec_whitespace_tolerance.almd
 5956	spec/wasm_cross/collection_literals.almd
