@@ -5404,6 +5404,45 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-423"
+spec      = "ALS-E16"
+title     = "A value prints through its type's declared repr wherever it is rendered; a Secret prints Secret(***) on every path"
+statement = "A value whose type declares `fn T.repr` renders as that function's result wherever the value is rendered: at the top of a string interpolation, inside an enclosing record, list, option, result, tuple, map or variant payload, and as an operand of an `assert_eq` / `assert_ne` failure block. A value with no declared repr anywhere in its type renders structurally, as before. `secret.Secret[A]` declares one: a Secret renders as the 11 bytes `Secret(***)` for every A, so no stdout or stderr byte of a run carries the wrapped value unless the program calls `secret.reveal`. Identical on native, wasm and the interpreter."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/secret_never_rendered.almd", class = "fixture" },
+  { path = "tests/secret_render_canary_test.rs", name = "no_renderer_prints_a_planted_canary", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-424"
+spec      = "ALS-C3"
+title     = "== on Secret[String] and Secret[Bytes] compares the revealed values; any other Secret, and a variant or map holding one, is E103"
+statement = "`==` / `!=` (and `assert_eq` / `assert_ne`) on `Secret[String]` or `Secret[Bytes]` is true exactly when the revealed values are equal, computed by `string.is_equal_constant_time` / `bytes.is_equal_constant_time`; a record, tuple, list, option or result holding such a Secret compares field by field, element by element, with that rule at each Secret. `==` on a `Secret[A]` for any other A, on a variant holding a Secret, or on a map or set holding a Secret is refused at check time with E103 and the hint `secret.reveal(a) == secret.reveal(b)`. Identical on native, wasm and the interpreter."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/secret_eq_and_decode.almd", class = "fixture" },
+  { path = "tests/diagnostics/e103-secret-eq-non-string/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e103-secret-variant-eq/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e103-secret-assert-eq-non-string/broken.almd", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-425"
+spec      = "ALS-D6"
+title     = "A Codec record decodes a Secret field from its value's wire form and derives no encode (E023)"
+statement = "A `: Codec` record whose field has type `Secret[A]` derives `T.decode`: the field reads A's wire form under the field's key (a declared default applies when the key is absent) and holds it as a Secret. Such a type derives no `T.encode`: a reference to `T.encode`, `json.encode(x)` of it, or an outer Codec type that would encode it is refused with E023 naming the Secret. A Secret anywhere in a field type other than the field's own type (`List[Secret[String]]`), `Secret[Bytes]`, and a Secret in a Codec variant are E023 at the declaration. The opaque Secret's field and record literal are E033 outside the `secret` module. Identical on native, wasm and the interpreter."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/secret_eq_and_decode.almd", class = "fixture" },
+  { path = "tests/diagnostics/e023-encode-secret/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e033-secret-field-read/broken.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-426"
 spec      = "ALS-D6"
 title     = "A `@skip` record field is neither decoded nor encoded and a `@skip_decode` field is never decoded but still encoded; both need a default"
