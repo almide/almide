@@ -5380,6 +5380,18 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-411"
+spec      = "ALS-T11"
+title     = "base64.decode and decode_url accept only the canonical padded form of their own alphabet"
+statement = "`base64.decode` (alphabet `+` `/`) and `base64.decode_url` (alphabet `-` `_`) accept exactly the canonical padded form their encoders emit, so one byte string has one accepted spelling (#4119, RFC 4648 §3.2 / §3.5 / §12), byte-identically on every leg. The checks run in this order and the first failure is the answer: the input's UTF-8 byte length is a multiple of 4, else `invalid base64 length: <len>` (`QQ` → 2, `QUJD=` → 5, `QQ========` → 10, `=` → 1); at most two trailing `=`, else `invalid base64 padding` (`QUJD====`, `====`, `Q===`); every other byte is in the function's own alphabet, else `invalid base64 character` (a `=` before the trailing run as in `QQ=A`, the other alphabet's 62/63 pair — `decode(\"-_8=\")`, `decode_url(\"+/8=\")` — or any other byte); and the bits the padding drops are zero (the low 2 bits of the last symbol under one `=`, the low 4 under two), else `invalid base64 trailing bits` (`QR==`, `QX==`, `QUJ=`). `\"\"` is ok(empty). Before this both decoders read both alphabets, stripped any number of trailing `=`, accepted missing padding and ignored the dropped bits, so `QQ==`, `QR==`, `QX==`, `QQ` and `QQ========` all decoded to `A`. The rule set is Go's `Encoding.Strict()` (which refuses every one of these); Python's `b64decode(validate=True)` refuses the same padding and alphabet cases and accepts only the nonzero trailing bits. spec/wasm_cross/base64_decode_canonical.almd runs every probe through both decoders on every leg; spec/stdlib/encoding_test.almd carries the same matrix as assertions."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/base64_decode_canonical.almd", class = "fixture" },
+  { path = "spec/stdlib/encoding_test.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-422"
 spec      = "ALS-T31"
 title     = "hash.hmac_sha256/512 equal the RFC 4231 vectors on every leg, key first, and is_valid_ accepts exactly the right tag"
