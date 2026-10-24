@@ -15449,24 +15449,24 @@ sig = "(a: UInt8, b: UInt8) -> UInt8"
 class = "pure"
 status = "uninspected"
 
+
 [[fn]]
 name = "zlib.decompress_max"
-sig = "(data: Bytes, max_len: Int) -> Result[Bytes, String]"
+sig = "(b: Bytes, max_len: Int) -> Result[Bytes, String]"
 class = "pure"
 status = "uninspected"
 
 [[fn]]
 name = "zlib.gunzip_max"
-sig = "(data: Bytes, max_len: Int) -> Result[Bytes, String]"
+sig = "(b: Bytes, max_len: Int) -> Result[Bytes, String]"
 class = "pure"
 status = "uninspected"
 
 [[fn]]
 name = "zlib.inflate_max"
-sig = "(data: Bytes, max_len: Int) -> Result[Bytes, String]"
+sig = "(b: Bytes, max_len: Int) -> Result[Bytes, String]"
 class = "pure"
 status = "uninspected"
-
 [[fn]]
 name = "fs.open_root"
 sig = "effect (dir: String) -> FsRoot ! String"
