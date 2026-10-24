@@ -29,3 +29,8 @@ pub mod net_core;
 /// 104..=116 with it. Its syscall module (net_unix_sys.rs, included) is the
 /// crate's one sanctioned `unsafe` site — see Cargo.toml's lints.
 pub mod net_unix_core;
+/// The rooted fs family by descriptor (#4084): `runtime/rs/src/fs.rs`
+/// includes it, the embedded host serves its rooted ops 120..=125 with it.
+/// Its syscall module (fs_beneath_sys.rs, included) is the crate's second
+/// sanctioned `unsafe` site.
+pub mod fs_beneath_core;
