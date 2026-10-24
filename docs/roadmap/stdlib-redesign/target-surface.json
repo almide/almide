@@ -2330,20 +2330,8 @@
 },
 {
 "mod": "hash",
-"name": "is_valid_hmac_sha256_hex",
-"sig": "fn hash.is_valid_hmac_sha256_hex(key: Bytes, b: Bytes, tag: String) -> Bool",
-"kind": "追加"
-},
-{
-"mod": "hash",
 "name": "is_valid_hmac_sha512",
 "sig": "fn hash.is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool",
-"kind": "追加"
-},
-{
-"mod": "hash",
-"name": "is_valid_hmac_sha512_hex",
-"sig": "fn hash.is_valid_hmac_sha512_hex(key: Bytes, b: Bytes, tag: String) -> Bool",
 "kind": "追加"
 },
 {

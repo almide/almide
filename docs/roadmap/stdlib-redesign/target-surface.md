@@ -39,20 +39,20 @@
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1304 | 409 | 720 | 88 | 87 | 417 |
+| 1001 | 1302 | 409 | 718 | 88 | 87 | 417 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
 ## 実体の数
 
-この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,304 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
+この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,302 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
 
 | 数え方 | 一覧の行 | 覚える名前 |
 |---|---:|---:|
 | protocol の要件（protocol ごとに 1 回） | 796 | 166 |
 | 値の型だけが持つ関数 | 297 | 297 |
-| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 211 | 211 |
-| 計 | 1304 | 674 |
+| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 209 | 209 |
+| 計 | 1302 | 672 |
 
 ## モジュールごとの数
 
@@ -74,7 +74,7 @@
 | [`float32`](#float32) | 24 | 23 | 0 | 0 | 9 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`float64`](#float64) | 24 | 23 | 0 | 0 | 9 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`fs`](#fs) | 30 | 1 | 2 | 4 | 5 | [L2-fs.md](L2-fs.md) |
-| [`hash`](#hash) | 19 | 16 | 0 | 2 | 1 | [L2-hash.md](L2-hash.md) |
+| [`hash`](#hash) | 17 | 14 | 0 | 2 | 1 | [L2-hash.md](L2-hash.md) |
 | [`heap`](#heap)（新しいモジュール） | 16 | 16 | 0 | 0 | 0 | [L2-heap.md](L2-heap.md) |
 | [`hex`](#hex) | 3 | 0 | 0 | 0 | 0 | [L2-hex.md](L2-hex.md) |
 | [`html`](#html) | 5 | 0 | 0 | 0 | 0 | [L2-html.md](L2-html.md) |
@@ -794,9 +794,7 @@
 | `hmac_sha512` | `fn hash.hmac_sha512(key: Bytes, b: Bytes) -> Bytes` | 新規 | R-hash-06 |
 | `hmac_sha512_hex` | `fn hash.hmac_sha512_hex(key: Bytes, b: Bytes) -> String` | 新規 | R-hash-06 |
 | `is_valid_hmac_sha256` | `fn hash.is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool` | 新規 | R-hash-06 |
-| `is_valid_hmac_sha256_hex` | `fn hash.is_valid_hmac_sha256_hex(key: Bytes, b: Bytes, tag: String) -> Bool` | 新規 | R-hash-06 |
 | `is_valid_hmac_sha512` | `fn hash.is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool` | 新規 | R-hash-06 |
-| `is_valid_hmac_sha512_hex` | `fn hash.is_valid_hmac_sha512_hex(key: Bytes, b: Bytes, tag: String) -> Bool` | 新規 | R-hash-06 |
 | `md5` | `fn hash.md5(b: Bytes) -> Bytes` | 新規 | R-hash-03 |
 | `md5_hex` | `fn hash.md5_hex(b: Bytes) -> String` | 新規。`Bytes` を受け取る | R-hash-03、R-hash-05 |
 | `sha1` | `fn hash.sha1(b: Bytes) -> Bytes` | 新規 | R-hash-03 |

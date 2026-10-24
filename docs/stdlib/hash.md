@@ -93,24 +93,28 @@ fn main() -> Unit = {
 5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843
 ```
 
-### `hash.is_valid_hmac_sha256_hex(key: Bytes, b: Bytes, tag: String) -> Bool`
+### `hash.is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool`
 
-Verify a MAC: true iff `tag` (hex, either case) is the HMAC-SHA256 of `b`
-under `key`, compared in constant time (C-421). Bad hex is `false`, never an
-abort. This is the call for a webhook signature header — do not compute the
-MAC and compare it with `==`, which returns at the first differing byte and
-leaks the MAC through timing. `is_valid_hmac_sha256` takes the tag as raw
-`Bytes`; the `sha512` pair has the same shape.
+Verify a MAC: true iff `tag` is the HMAC-SHA256 of `b` under `key`, compared
+in constant time (C-421). This is the call for a webhook signature header — do
+not compute the MAC and compare it with `==`, which returns at the first
+differing byte and leaks the MAC through timing. A header carries the tag as
+hex: decode it with `hex.decode` (either case). `?? bytes.from_list([])` turns
+bad hex into the empty tag, which verifies `false`, never an abort. There is no
+`_hex` verify cell: `_hex` only ever names a hex OUTPUT. The `sha512` pair has
+the same shape.
 
 ```almd run
 import hash
+import hex
 
 fn main() -> Unit = {
   let key = bytes.from_string("Jefe")
   let body = bytes.from_string("what do ya want for nothing?")
   let header = "5BDCC146BF60754E6A042426089575C75A003F089D2739839DEC58B964EC3843"
-  println("${hash.is_valid_hmac_sha256_hex(key, body, header)}")
-  println("${hash.is_valid_hmac_sha256_hex(key, bytes.from_string("tampered"), header)}")
+  let tag = hex.decode(header) ?? bytes.from_list([])
+  println("${hash.is_valid_hmac_sha256(key, body, tag)}")
+  println("${hash.is_valid_hmac_sha256(key, bytes.from_string("tampered"), tag)}")
 }
 ```
 ```output
@@ -131,7 +135,7 @@ Out of scope, deliberately: TLS, AEAD, signatures and asymmetric crypto
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (20 functions)
+## Signature index (18 functions)
 
 ```
 // 32-bit FNV-1a of s's UTF-8; non-negative Int.
@@ -198,21 +202,13 @@ hash.hmac_sha512(key: Bytes, b: Bytes) -> Bytes
 // @since unreleased
 hash.hmac_sha512_hex(key: Bytes, b: Bytes) -> String
 
-// True if tag is the HMAC-SHA256 of b under key, compared in constant time. Use this, not ==.
+// True if tag is the HMAC-SHA256 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha256(key, b, hex.decode(sig) ?? bytes.from_list([])).
 // @since unreleased
 hash.is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool
 
-// True if tag (hex, either case) is the HMAC-SHA256 of b under key, compared in constant time; false for bad hex.
-// @since unreleased
-hash.is_valid_hmac_sha256_hex(key: Bytes, b: Bytes, tag: String) -> Bool
-
-// True if tag is the HMAC-SHA512 of b under key, compared in constant time. Use this, not ==.
+// True if tag is the HMAC-SHA512 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha512(key, b, hex.decode(sig) ?? bytes.from_list([])).
 // @since unreleased
 hash.is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool
-
-// True if tag (hex, either case) is the HMAC-SHA512 of b under key, compared in constant time; false for bad hex.
-// @since unreleased
-hash.is_valid_hmac_sha512_hex(key: Bytes, b: Bytes, tag: String) -> Bool
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

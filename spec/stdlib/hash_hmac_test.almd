@@ -1,5 +1,6 @@
 // #4106: HMAC (RFC 2104 / RFC 4231) and the constant-time compare.
 import hash
+import hex
 
 fn s(t: String) -> Bytes = bytes.from_string(t)
 
@@ -40,13 +41,13 @@ test "is_valid_ accepts the right tag only" {
   let tag = hash.hmac_sha256(k, m)
   let h = hash.hmac_sha256_hex(k, m)
   assert(hash.is_valid_hmac_sha256(k, m, tag))
-  assert(hash.is_valid_hmac_sha256_hex(k, m, h))
-  assert(hash.is_valid_hmac_sha256_hex(k, m, string.to_upper(h)))
+  assert(hash.is_valid_hmac_sha256(k, m, hex.decode(h) ?? bytes.from_list([])))
+  assert(hash.is_valid_hmac_sha256(k, m, hex.decode(string.to_upper(h)) ?? bytes.from_list([])))
   assert(not hash.is_valid_hmac_sha256(k, s("massage"), tag))
   assert(not hash.is_valid_hmac_sha256(k, m, bytes.slice(tag, 0, 31)))
-  assert(not hash.is_valid_hmac_sha256_hex(k, m, "not hex"))
-  assert(not hash.is_valid_hmac_sha256_hex(k, m, string.slice(h, 0, 63)))
-  assert(hash.is_valid_hmac_sha512_hex(k, m, hash.hmac_sha512_hex(k, m)))
+  assert(not hash.is_valid_hmac_sha256(k, m, hex.decode("not hex") ?? bytes.from_list([])))
+  assert(not hash.is_valid_hmac_sha256(k, m, hex.decode(string.slice(h, 0, 63)) ?? bytes.from_list([])))
+  assert(hash.is_valid_hmac_sha512(k, m, hash.hmac_sha512(k, m)))
   assert(not hash.is_valid_hmac_sha512(k, m, tag))
 }
 

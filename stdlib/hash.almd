@@ -469,26 +469,6 @@ local fn h_hmac(key: Bytes, b: Bytes, wide: Bool) -> Bytes = {
   h_digest(bytes.concat(opad, h_digest(bytes.concat(ipad, b), wide)), wide)
 }
 
-// One hex digit's value, either case; -1 for any other character.
-local fn h_nibble(c: Int) -> Int =
-  if c >= 48 and c <= 57 then c - 48
-  else if c >= 97 and c <= 102 then c - 87
-  else if c >= 65 and c <= 70 then c - 55
-  else -1
-
-// The bytes a hex string spells, either case; none for an odd length or a non-hex char.
-local fn h_unhex(s: String) -> Bytes? = {
-  let ns = bytes.to_list(bytes.from_string(s)) |> list.map((c) => h_nibble(c))
-  let n = list.len(ns)
-  if n % 2 != 0 or list.any(ns, (x) => x < 0) then none
-  else some(list.range(0, n / 2) |> list.map((i) => ns[2 * i] * 16 + ns[2 * i + 1]) |> bytes.from_list)
-}
-
-local fn h_is_valid_hex(mac: Bytes, tag: String) -> Bool = match h_unhex(tag) {
-  some(t) => bytes.is_equal_constant_time(mac, t),
-  none => false,
-}
-
 /// 32-byte HMAC-SHA256 of b under key (RFC 2104); key first.
 fn hmac_sha256(key: Bytes, b: Bytes) -> Bytes = h_hmac(key, b, false)
 
@@ -501,26 +481,14 @@ fn hmac_sha512(key: Bytes, b: Bytes) -> Bytes = h_hmac(key, b, true)
 /// HMAC-SHA512 of b under key as 128 lowercase hex chars.
 fn hmac_sha512_hex(key: Bytes, b: Bytes) -> String = h_hex(hmac_sha512(key, b))
 
-/// True if tag is the HMAC-SHA256 of b under key, compared in constant time. Use this, not ==.
+/// True if tag is the HMAC-SHA256 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha256(key, b, hex.decode(sig) ?? bytes.from_list([])).
 fn is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool = bytes.is_equal_constant_time(
   hmac_sha256(key, b),
   tag,
 )
 
-/// True if tag (hex, either case) is the HMAC-SHA256 of b under key, compared in constant time; false for bad hex.
-fn is_valid_hmac_sha256_hex(key: Bytes, b: Bytes, tag: String) -> Bool = h_is_valid_hex(
-  hmac_sha256(key, b),
-  tag,
-)
-
-/// True if tag is the HMAC-SHA512 of b under key, compared in constant time. Use this, not ==.
+/// True if tag is the HMAC-SHA512 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha512(key, b, hex.decode(sig) ?? bytes.from_list([])).
 fn is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool = bytes.is_equal_constant_time(
-  hmac_sha512(key, b),
-  tag,
-)
-
-/// True if tag (hex, either case) is the HMAC-SHA512 of b under key, compared in constant time; false for bad hex.
-fn is_valid_hmac_sha512_hex(key: Bytes, b: Bytes, tag: String) -> Bool = h_is_valid_hex(
   hmac_sha512(key, b),
   tag,
 )
