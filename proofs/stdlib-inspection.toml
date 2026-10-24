@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "456"
+# uninspected_ceiling = "459"
 
 [[fn]]
 name = "args.flag"
@@ -4534,15 +4534,7 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "http.serve"
 sig = "effect (port: Int, f: (HttpRequest) -> Result[HttpResponse, String]) -> Unit ! String"
 class = "effect"
-status = "inspected"
-impl = "fnv1a:3bae0c1cc297a23d"
-stamp = "almide 0.68.0 (dev) at insp-0680b 07588809b (insp-0680 plus the fixed +qNaN a stdlib function manufactures #3846, the canonical allocator's O(1) large-block release #3849, the http client's retried interrupted read #3857, the table-driven zlib.crc32 #3848, and the counted judge's k bounded by the projected wall of its longest run #3859); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-20; codopsy: every workspace crate A at the same sha"
-order = "n"
-parity = "PASS: seed 1792434852, 200 generated handlers over a 8-request script; legs native, embedded, stock (wasmtime serve); 182 served, 180 clean on every leg, 2 trapped alike on the socket hosts (stock not compared, C-375); 18 generator rejects (first: error[E002]: undefined method 'extension' on string); unique findings 0"
-complexity = "PASS: serve(n=request body bytes, k=requests) meter=instructions:u+bytes-moved alloc=canonical(wasm) n=16384..262144 native k=256..512 8.061e7/1.438e8/2.702e8/5.227e8/1.028e9 fit n (rms 0.0%) moved 1.268e7/2.107e7/3.784e7/7.140e7/1.385e8B fit n (rms 0.0%) wall 0.023/0.022/0.052/0.098/0.200s wasm k=256..512 1.659e8/2.942e8/5.556e8/1.074e9/2.118e9 fit n (rms 0.3%) moved 2.962e7/5.480e7/1.051e8/2.058e8/4.071e8B fit n (rms 0.0%) wall 0.032/0.042/0.046/0.100/0.258s (order n ok)"
-alloc = "PASS: probe-app live=0 after 16 requests and the SIGTERM, constant-app live=0 after 16 requests and the SIGTERM"
-diamond = "PASS: direct = via left = via right on both legs (9 transcript line(s) per path: 8 responses and exit 0)"
-
+status = "uninspected"
 
 [[fn]]
 name = "http.set_header"
@@ -8682,14 +8674,8 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "matrix.mul"
 sig = "(a: Matrix, b: Matrix) -> Matrix"
 class = "pure"
-status = "inspected"
-impl = "fnv1a:ee0c0719d670d2ce"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "n; rebind (loop, tail, fold) n"
-parity = "PASS: seed 1792420130, 200 programs; 200 program(s) call it, 181 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 3.841e7/7.681e7/1.536e8/3.072e8/6.144e8 fit n (rms 0.0%) moved 0.000e0/3.000e0/0.000e0/0.000e0/3.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.010/0.015/0.031s wasm k=16..32 4.737e7/9.473e7/1.895e8/3.789e8/7.578e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.010/0.025/0.046/0.086s (order n ok); loop meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 3.845e7/7.685e7/1.537e8/3.073e8/6.145e8 fit n (rms 0.0%) moved 5.120e2/5.120e2/5.120e2/5.120e2/5.120e2B fit 1 (rms 0.0%) wall 0.005/0.005/0.010/0.015/0.030s wasm k=16..32 4.611e7/9.218e7/1.844e8/3.687e8/7.373e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.010/0.020/0.040/0.081s (order n ok); tail meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 3.845e7/7.685e7/1.537e8/3.073e8/6.145e8 fit n (rms 0.0%) moved 5.120e2/5.120e2/5.120e2/5.120e2/5.120e2B fit 1 (rms 0.0%) wall 0.005/0.005/0.010/0.015/0.035s wasm k=16..32 4.607e7/9.215e7/1.843e8/3.686e8/7.373e8 fit n (rms 0.0%) moved 5.116e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.015/0.025/0.050/0.101s (order n ok); fold meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 3.845e7/7.685e7/1.537e8/3.073e8/6.145e8 fit n (rms 0.0%) moved 5.120e2/5.120e2/5.120e2/5.120e2/5.120e2B fit 1 (rms 0.0%) wall 0.005/0.005/0.010/0.015/0.030s wasm k=16..32 4.611e7/9.219e7/1.844e8/3.687e8/7.373e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.010/0.020/0.045/0.081s (order n ok)"
-alloc = "PASS: call live=0, loop live=0, tail live=0, fold live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+status = "uninspected"
+
 [[fn]]
 name = "matrix.mul_f32"
 sig = "(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32]"
@@ -8747,14 +8733,7 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 name = "matrix.mul_scaled"
 sig = "(a: Matrix, alpha: Float, b: Matrix) -> Matrix"
 class = "pure"
-status = "inspected"
-impl = "fnv1a:110e0fd2efeec0b7"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "n; rebind (loop, tail, fold) n"
-parity = "PASS: seed 1792407783, 200 programs; 200 program(s) call it, 178 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=4..8 6.707e7/1.341e8/2.682e8/5.364e8/1.073e9 fit n (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/3.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.010/0.010/0.025/0.046/0.091s wasm k=16..32 5.890e7/1.178e8/2.355e8/4.711e8/9.421e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.015/0.035/0.061/0.126s (order n ok); loop meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=4..8 6.652e7/1.330e8/2.660e8/5.319e8/1.064e9 fit n (rms 0.0%) moved 1.280e2/1.280e2/1.280e2/1.280e2/1.280e2B fit 1 (rms 0.0%) wall 0.005/0.010/0.015/0.030/0.051s wasm k=16..32 5.891e7/1.178e8/2.356e8/4.711e8/9.422e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.010/0.030/0.066/0.122s (order n ok); tail meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=4..8 6.652e7/1.330e8/2.660e8/5.319e8/1.064e9 fit n (rms 0.0%) moved 1.280e2/1.280e2/1.280e2/1.280e2/1.280e2B fit 1 (rms 0.0%) wall 0.010/0.005/0.015/0.025/0.066s wasm k=16..32 5.889e7/1.178e8/2.355e8/4.711e8/9.421e8 fit n (rms 0.0%) moved 5.116e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.010/0.015/0.030/0.061/0.121s (order n ok); fold meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=4..8 6.652e7/1.330e8/2.660e8/5.319e8/1.064e9 fit n (rms 0.0%) moved 1.280e2/1.280e2/1.280e2/1.280e2/1.280e2B fit 1 (rms 0.0%) wall 0.010/0.005/0.020/0.030/0.061s wasm k=16..32 5.892e7/1.178e8/2.356e8/4.711e8/9.422e8 fit n (rms 0.0%) moved 5.120e6/1.024e7/2.048e7/4.096e7/8.192e7B fit n (rms 0.0%) wall 0.005/0.015/0.030/0.066/0.121s (order n ok)"
-alloc = "PASS: call live=0, loop live=0, tail live=0, fold live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+status = "uninspected"
 
 [[fn]]
 name = "matrix.neg"
