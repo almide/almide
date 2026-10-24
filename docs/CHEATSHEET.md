@@ -1106,6 +1106,27 @@ declaration: `Option[Option[T]]` (indistinguishable on the wire), `Option[Value]
 outside field position, and non-wire leaves (Map, Bytes, tuples, sized ints,
 fn types, Result) — wrap those in a named Codec type or convert at the boundary.
 
+## Verifying a webhook signature (HMAC)
+
+`import hash`. Verify with the `is_valid_` cell, key first: it computes
+HMAC-SHA256 and compares in constant time. Never `hash.sha256(key + body)`
+(forgeable by length extension), never `hash.hmac_sha256_hex(key, body) ==
+header` (`==` returns at the first differing byte and leaks the MAC through
+timing). Bad hex in the header is `false`, not an abort.
+
+```almide check
+import hash
+
+fn is_signed(secret: String, body: String, header: String) -> Bool = {
+  let sig = string.strip_prefix(header, "sha256=") ?? header
+  hash.is_valid_hmac_sha256_hex(bytes.from_string(secret), bytes.from_string(body), sig)
+}
+```
+
+Comparing two tokens yourself: `string.is_equal_constant_time(a, b)` /
+`bytes.is_equal_constant_time(a, b)`. `hash.md5` / `hash.sha1` are for
+compatibility only; `--profile critical` refuses them (E100).
+
 ## Key rules
 - Newline = statement separator (no semicolons needed)
 - `[]` for generics, NOT `<>`

@@ -160,6 +160,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-bytes-26](L2-bytes.md#r-bytes-26-bytesget_u8-と-getappend_u8-と-push-を-1-つにする---不採用役割の違いを明記) | `bytes.get_u8` と `get`、`append_u8` と `push` を 1 つにする | × | なし |
 | [R-bytes-27](L2-bytes.md#r-bytes-27-bytes-に-text-の要件をそろえる---採用) | `bytes` に `Text` の要件をそろえる | ○ | #4012 |
 | [R-bytes-28](L2-bytes.md#r-bytes-28-bytesnewlen-を-byteszerosn-に改名しbytesnew-を空のバイト列にする---採用) | `bytes.new(len)` を `bytes.zeros(n)` に改名し、`bytes.new()` を空のバイト列にする | ○ | #4012 |
+| [R-bytes-29](L2-bytes.md#r-bytes-29-定数時間の比較-bytesis_equal_constant_time-を置く---採用) | 定数時間の比較 `bytes.is_equal_constant_time` を置く | ○ | #4106 |
 | [R-compute-01](L2-compute.md#r-compute-01-computecompare-を足す---採用) | `compute.compare` を足す | ○ | #3902 |
 | [R-compute-02](L2-compute.md#r-compute-02-duration-と統合するまたは読み出し関数を足す---不採用) | `duration` と統合する、または読み出し関数を足す | × | — |
 | [R-compute-03](L2-compute.md#r-compute-03-compute-を共通のプロトコル-timeamount-に従わせる---採用) | `Compute` を共通のプロトコル `TimeAmount` に従わせる | ○ | #3964 |
@@ -208,6 +209,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-hash-03](L2-hash.md#r-hash-03-md5sha-1sha-512-を足す---採用) | MD5・SHA-1・SHA-512 を足す | ○ | #3915 |
 | [R-hash-04](L2-hash.md#r-hash-04-_hex-のセルの入力を-bytes-に変える---不採用-r-hash-05-で採用に変更) | `_hex` のセルの入力を Bytes に変える | ×（→ R-hash-05） | — |
 | [R-hash-05](L2-hash.md#r-hash-05-_hex-も-bytes-を受け取る完全性の規則-2-の見直し---採用) | `_hex` も `Bytes` を受け取る（完全性の規則 2 の見直し） | ○ | #3985 |
+| [R-hash-06](L2-hash.md#r-hash-06-hmac-と定数時間の比較を-hash-に置く完全性の規則-4-の見直し---採用) | HMAC と定数時間の比較を `hash` に置く（完全性の規則 4 の見直し） | ○ | #4106 |
 | [R-heap-01](L2-heap.md#r-heap-01-heap-モジュールを足す---採用) | `heap` モジュールを足す | ○ | #3933 |
 | [R-heap-02](L2-heap.md#r-heap-02-heap-には中の並びに依存しないセルだけを置くcontainsanyallcountfilterclear---採用) | heap には中の並びに依存しないセルだけを置く（`contains`・`any`・`all`・`count`・`filter`・`clear`） | ○ | #3968 |
 | [R-heap-03](L2-heap.md#r-heap-03-heapnew_with-の例を引き算にしない---採用文書だけ) | `heap.new_with` の例を引き算にしない | ○ | #3968 |
@@ -381,6 +383,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-string-16](L2-string.md#r-string-16-string-に-sequencegrowable-の要件をそろえる---採用) | `string` に `Sequence`・`Growable` の要件をそろえる | ○ | #4000 |
 | [R-string-17](L2-string.md#r-string-17-stringchars-を-to_list-にしnewfrom_list-を置く---採用r-string-16-の保留を解く) | `string.chars` を `to_list` にし、`new`・`from_list` を置く | ○ | #4004 |
 | [R-string-18](L2-string.md#r-string-18-部分文字列を数える-stringcount-を-count_matches-にしcount-は-container-の述語の形にする---採用) | 部分文字列を数える `string.count` を `count_matches` にし、`count` は `Container` の述語の形にする | ○ | #4012 |
+| [R-string-19](L2-string.md#r-string-19-定数時間の比較-stringis_equal_constant_time-を置く---採用) | 定数時間の比較 `string.is_equal_constant_time` を置く | ○ | #4106 |
 | [R-testing-01](L2-testing.md#r-testing-01-大小と含むの族の規則をゲートに書く---採用関数は変えない) | 大小と含むの族の規則をゲートに書く | ○ | #3949 |
 | [R-testing-02](L2-testing.md#r-testing-02-assert_gtassert_lt-を順序のある型すべてで使えるようにする---採用) | `assert_gt`・`assert_lt` を順序のある型すべてで使えるようにする | ○ | #3980 |
 | [R-unix-01](L2-unix.md#r-unix-01-unix-モジュールを作りnetunix_netshm_-を移す---採用) | `unix` モジュールを作り、`net.unix_*`・`net.shm_*` を移す | ○ | #3853 |
