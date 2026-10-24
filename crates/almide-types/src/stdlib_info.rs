@@ -135,6 +135,7 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("http", "HttpMiddleware"),
     ("http", "HttpRoute"),
     ("fs", "FileStat"),
+    ("fs", "FsRoot"),
     ("html", "SafeHtml"),
     ("net", "TcpListener"),
     ("net", "TcpStream"),
@@ -617,7 +618,7 @@ mod ordered_tests {
         assert!(!super::is_ordered_stdlib_fn("fs", "read_text"));
         assert!(!super::is_ordered_stdlib_fn("io", "print"));
         assert!(!super::is_ordered_runtime_symbol("almide_rt_env_get"));
-        assert_eq!(t.len(), 28, "{t:?}");
+        assert_eq!(t.len(), 30, "{t:?}");
     }
 
     #[test]
