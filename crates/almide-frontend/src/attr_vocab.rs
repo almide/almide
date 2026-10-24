@@ -190,7 +190,7 @@ pub const KNOWN_FIELD_ATTRS: &[&str] = &[
 /// `@skip_decode` field from input again, which must flip the fixture's
 /// `admin=false` cell to `admin=true` and fail it. Never set it otherwise.
 pub fn codec_field_use(attrs: &[ast::Attribute]) -> CodecFieldUse {
-    let ignore_skip_decode = std::env::var_os("ALMIDE_CONTROL_IGNORE_SKIP_DECODE").is_some();
+    let ignore_skip_decode = almide_base::env::flag("ALMIDE_CONTROL_IGNORE_SKIP_DECODE");
     let mut out = CodecFieldUse { decoded: true, encoded: true };
     for a in attrs {
         if let Some((name, u)) = CODEC_FIELD_SKIPS.iter().find(|(n, _)| *n == a.name.as_str()) {
