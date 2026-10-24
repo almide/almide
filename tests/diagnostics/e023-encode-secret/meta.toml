@@ -1,0 +1,3 @@
+expects_code = "E023"
+expects_error = "holds a Secret"
+hint_substring = "secret.reveal"
