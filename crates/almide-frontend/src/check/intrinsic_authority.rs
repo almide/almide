@@ -29,7 +29,32 @@
 //! neither is a package that copies the layout with its own text (#4100). When the checker has no
 //! origin at all (no source path and not inside a bundled module — the LSP's
 //! in-memory analysis) it abstains, as E084 does, rather than guess.
+//!
+//! One explicit grant exists for the invoker: `--stdlib-authority <dir>` on
+//! the command line ([`grant_stdlib_authority`]) treats every source under
+//! `<dir>` as the stdlib's own. A harness that builds a MODIFIED copy of a
+//! stdlib source (a differential test forcing an engine path) needs it, since
+//! its text no longer matches the embedded one. It is a flag, never a
+//! manifest key or an environment variable: the person running the compiler
+//! already controls the build, and a dependency cannot pass flags.
 use super::{Checker, err};
+
+static STDLIB_AUTHORITY_DIRS: std::sync::RwLock<Vec<std::path::PathBuf>> = std::sync::RwLock::new(Vec::new());
+
+/// Grant stdlib authority to every source under `dir` for the rest of this
+/// process (`--stdlib-authority`). `Err` when `dir` is not a directory.
+pub fn grant_stdlib_authority(dir: &std::path::Path) -> Result<(), String> {
+    let canonical = std::fs::canonicalize(dir)
+        .ok()
+        .filter(|d| d.is_dir())
+        .ok_or_else(|| format!("--stdlib-authority {}: not a directory", dir.display()))?;
+    STDLIB_AUTHORITY_DIRS.write().unwrap_or_else(|p| p.into_inner()).push(canonical);
+    Ok(())
+}
+
+fn under_granted_dir(path: &std::path::Path) -> bool {
+    STDLIB_AUTHORITY_DIRS.read().unwrap_or_else(|p| p.into_inner()).iter().any(|d| path.starts_with(d))
+}
 use crate::ast::{Attribute, Decl, Span};
 use almide_base::intern::Sym;
 
@@ -43,6 +68,9 @@ impl Checker {
         let file = self.source_file.as_deref()?;
         let raw = std::path::Path::new(file);
         let path = std::fs::canonicalize(raw).unwrap_or_else(|_| raw.to_path_buf());
+        if under_granted_dir(&path) {
+            return Some(true);
+        }
         let in_stdlib_dir = path
             .parent()
             .and_then(|d| d.file_name())
