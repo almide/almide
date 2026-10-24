@@ -2880,6 +2880,7 @@ evidence  = [
   { path = "spec/wasm_cross/fs_read_bytes_raw_call_head.almd", class = "fixture" },
   { path = "spec/wasm_cross/fs_fallible_walker_call_head.almd", class = "fixture" },
   { path = "tests/component_p3_fs_cross_test.rs", class = "fixture", name = "p3_component_fs_fixtures_match_native" },
+  { path = "tests/fs_if_exists_eloop_test.rs", name = "a_symlink_loop_is_the_readers_err_not_absence_on_every_leg", class = "fixture" },
 ]
 [[contract]]
 id        = "C-216"
