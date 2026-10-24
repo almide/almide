@@ -1,0 +1,18 @@
+// #4023 control for the native region stale trap. With
+// region-producer-window-rewinds-before-consume.patch applied, the producer
+// make(10) runs in a region window of its own, which rewinds before check()
+// reads the tree: every read is of a rewound slot. Unarmed, the slots still
+// hold the old bytes and the program prints 2047 and exits 0 (silent);
+// built with ALMIDE_REGION_TRAP_STALE=1 the first read panics (exit 101).
+type Tree = Leaf | Node(Tree, Tree)
+
+fn make(depth: Int) -> Tree =
+  if depth == 0 then Leaf
+  else Node(make(depth - 1), make(depth - 1))
+
+fn check(tree: Tree) -> Int = match tree {
+  Leaf => 1,
+  Node(left, right) => check(left) + check(right) + 1,
+}
+
+fn main() -> Unit = println(int.to_string(check(make(10))))

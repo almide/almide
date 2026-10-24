@@ -105,10 +105,12 @@
 # wasm leg (22 -> 24), and its AddressSanitizer twin three (24 -> 27). The
 # checked-allocator switch (#4009) adds three (27 -> 30). The unsafe ledger's
 # scope reaching the emitted preludes (#4023) names two more: emitted unsafe
-# outside prelude_*.rs, and a `//` inside an emitted string (30 -> 32).
+# outside prelude_*.rs, and a `//` inside an emitted string (30 -> 32). The
+# memory-trap gate (#4023) names two: a trap violation the corpus and the seed
+# never reach, and a region bug that shows only in the unarmed layout (32 -> 34).
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "33"
+# uncompensated_blind_ceiling = "34"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -1526,3 +1528,13 @@ evidence = "landing (2026-10-23, #4007): 54 unsafe lines in 9 files under runtim
 measures = "the per-file count of non-comment lines holding the word unsafe in the native runtime and in the compiler-emitted preludes (crates/almide-codegen/src/prelude_*.rs), against the allowlist"
 varies = "landing (2026-10-23): 55 -> 54 with the matrix_p2 align_to removal; #4023 (2026-10-24): 33 -> 43 when the emitted preludes came into scope"
 blind = "an unsafe operation reached through a dependency crate (rayon, the regex crate, std) is not counted, only this repo's own lines -> UNCOMPENSATED; whether each listed line is actually sound is not read, only that it is listed -> proofs/runtime-unsafe-allowlist.toml; unsafe the compiler emits from outside prelude_*.rs (walker/extern_c.rs's @extern \"C\" call wrapper, walker/mod.rs's SIGPIPE prelude) is not counted -> UNCOMPENSATED; an emitted line whose string literal holds a `//` before the word is dropped by the comment filter -> UNCOMPENSATED"
+
+[[gate]]
+path = "scripts/check-memory-traps.sh"
+reads = "scalar"
+wired_by = ".github/workflows/ci-cross-target.yml, .github/workflows/memory-traps-nightly.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4023 landing (2026-10-24): `controls` re-injects one fixed bug per trap in a scratch worktree and requires its abort. Wasm: #3538 (proofs/fixtures/heap-check/reinject/3538-payload-copy-without-credit.patch) with proofs/fixtures/memory-traps/rc-3538-zip-let-bound-double-release.almd exits 1 (the double-free trap's `unreachable` behind the stock build's proc_exit); the same patch and program on b19d88caa, before the trap was in every build, exit 0 with the right output. Native: proofs/fixtures/memory-traps/region-producer-window-rewinds-before-consume.patch gives the producer a window of its own; unarmed the program exits 0 printing 2047, with ALMIDE_REGION_TRAP_STALE=1 it exits 101 naming the trap. A patch that no longer applies fails the run."
+measures = "spec/ test files failing on native with ALMIDE_REGION_TRAP_STALE=1 and on wasm (the double-free trap always on), plus proofs/diff-fuzz.sh and one xtarget-fuzz campaign (seed 4023) diverging with the region trap armed; for `controls`, whether each re-injected bug ends in its trap's exit code"
+varies = "#4023 landing, aarch64-apple-darwin: spec/ 537/537 files (4609 tests) native armed, 531 passed / 6 skipped wasm; diff-fuzz 150/150 match; xtarget-fuzz 300 generated, 267 clean, 0 findings. Controls: wasm 0 -> 1 across the trap's landing, native 0 unarmed -> 101 armed"
+blind = "a stale region read or a double free the corpus and the fuzz seed never reach -> UNCOMPENSATED; a wasm double release whose block was re-allocated between the two releases (rc back at 1, so the sentinel sees nothing — #3538's own partition reproduction, #2133 and #2397 are this shape) -> scripts/wasm-checked-alloc.sh; a region bug that only shows in the shipped arena layout (the armed prelude adds an 8-byte header per block) -> UNCOMPENSATED"
