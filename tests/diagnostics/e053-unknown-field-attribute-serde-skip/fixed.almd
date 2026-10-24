@@ -1,0 +1,4 @@
+// The fix: the Almide spelling.
+type User: Codec = { name: String, @skip is_admin: Bool = false }
+
+fn main() -> Unit = println("ok")

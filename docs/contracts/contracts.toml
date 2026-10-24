@@ -5098,3 +5098,36 @@ evidence  = [
   { path = "spec/integration/modules/name_resolves_by_definition_test.almd", class = "fixture" },
   { path = "spec/wasm_cross/zlib_call_vs_user_namesake.almd", class = "fixture" },
 ]
+[[contract]]
+id        = "C-426"
+spec      = "ALS-D6"
+title     = "A `@skip` record field is neither decoded nor encoded and a `@skip_decode` field is never decoded but still encoded; both need a default"
+statement = "In a derived Codec record, a field carrying `@skip` is left out of both `T.decode` and `T.encode`, and a field carrying `@skip_decode` is left out of `T.decode` and still written by `T.encode` (#4108). `T.decode` never reads a skipped field's key: the field takes its declared default whether the key is absent, present with any value, or explicit null, so a request body `{\"name\": \"m\", \"is_admin\": true}` decodes a `@skip_decode is_admin: Bool = false` field to `false`; the key is treated exactly like an unknown key (ignored by `decode`, refused by `decode_strict`, C-427). `T.encode` omits a `@skip` field's key and writes a `@skip_decode` field under its key in declaration order. The attributes compose with the alias syntax (`@skip_decode role as \"role_name\": String = \"user\"`: the wire key is `role_name`). A `@skip` / `@skip_decode` field without a default (`= value`) is refused at check time with E104 (`field '<f>' is `@skip_decode` but has no default`). The two attributes are the declared family {decode, encode} × {kept, skipped}; the output-only cell (`@skip_encode`) is an intentional omission. Every leg prints the matrix byte for byte; native = wasm = interp."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/codec_field_skip_matrix.almd", class = "fixture" },
+  { path = "tests/diagnostics/e104-skip-without-default/broken.almd", class = "fixture" },
+  { path = "tests/codec_field_skip_test.rs", name = "every_family_row_is_honoured_by_the_derive_on_both_legs", class = "fixture" },
+]
+[[contract]]
+id        = "C-427"
+spec      = "ALS-D6"
+title     = "A derived `T.decode_strict` refuses the first key outside the record's decoded fields with `unknown key '<k>'`; `T.decode` stays lenient"
+statement = "Every Codec RECORD type `T` has a derived `T.decode_strict(v: Value) -> Result[T, String]` beside `T.decode` (#4108); a hand-written `T.decode_strict` replaces it. Before any field is decoded it looks at the object's keys in document order and returns `err(\"unknown key '<k>'\")` for the first key that is not the wire key of a DECODED field — a key naming a `@skip` / `@skip_decode` field (C-426) is such a key. With no such key it returns exactly what `T.decode(v)` returns, so a non-object input gets `T.decode`'s own `expected Object, received <Variant>`. The key check comes first: `{\"zeta\": 1, \"name\": 5, \"alpha\": 2}` is `unknown key 'zeta'`, not the type error on `name`. It is shallow: a nested Codec field decodes with its own lenient `decode`. `T.decode` is unchanged and ignores unknown keys. Variant types have no `decode_strict` (their wire form is a tag and a payload). The error text is identical on every leg; native = wasm = interp."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/codec_field_skip_matrix.almd", class = "fixture" },
+]
+[[contract]]
+id        = "C-428"
+spec      = "ALS-DL1"
+title     = "An attribute on a record field that the compiler does not read is a check error (E053); the field vocabulary is @builtin, @location, @skip, @skip_decode"
+statement = "A record field (a record type's field or a variant case's record-payload field) accepts only the attributes `@builtin`, `@location`, `@skip` and `@skip_decode`. Any other attribute on a field is refused at check time with the ERROR E053 `unknown attribute `@<name>` on record field '<field>'` (dialect epoch 15; before it the attribute parsed and did nothing, so `@serde(skip) is_admin: Bool = false` compiled and decode still set `is_admin` from input). The hint names the Almide spelling for other ecosystems' field rules: `@serde(skip)` / `@json_ignore` / `@transient` / `@ignore` → `@skip`; `@serde(skip_deserializing)` / `@skip_deserializing` / `@readonly` / `@read_only` → `@skip_decode`; `@redact` / `@sensitive` / `@secret` → the type `Secret[String]` (`import secret`); otherwise the nearest field attribute, or the whole vocabulary. A fn attribute outside the fn vocabulary stays the E053 warning."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e053-unknown-field-attribute-serde-skip/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e053-unknown-field-attribute-redact/broken.almd", class = "fixture" },
+]
