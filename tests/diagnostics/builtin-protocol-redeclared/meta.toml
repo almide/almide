@@ -1,2 +1,0 @@
-expects_error = "is built in and cannot be redeclared"
-hint_substring = "another name"
