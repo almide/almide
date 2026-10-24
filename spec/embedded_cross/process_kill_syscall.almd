@@ -1,0 +1,57 @@
+// @contract: C-418
+// process.kill / process.is_alive ask the kernel (kill(2)) on every leg and
+// never run a `kill` found on PATH (#4125). A fake `kill` is put first on
+// PATH: it exits 0 (so a PATH lookup would answer "alive" for a dead pid)
+// and leaves a marker file. The dead pid is a grandchild `sh` reaped before
+// it is asked about, so it is in no child table. Also pinned: a pid outside
+// 1..=2147483647 (0 = this process group, -1 = every process this user may
+// signal) is refused by kill with a fixed text and is never alive; a signal
+// outside 0..=31 is refused; a failed kill(2) answers a fixed errno text.
+import fs
+import env
+import process
+
+fn show(r: Result[Unit, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  let dir = "${fs.temp_dir()}/almide-c418-${process.pid()}"
+  fs.mkdir_p(dir)!
+  let marker = "${dir}/fake-kill-ran"
+  fs.write("${dir}/kill", "#!/bin/sh\necho ran > '${marker}'\nexit 0\n")!
+  let _ = process.exec("chmod", ["+x", "${dir}/kill"])!
+  let old_path = env.get("PATH") ?? "/usr/bin:/bin"
+  env.set("PATH", "${dir}:${old_path}")
+  let dead = process.exec(
+    "/bin/sh",
+    [
+      "-c",
+      "/bin/sh -c 'exit 0' & p=$!; wait $p; printf %s $p"
+    ],
+  )!
+  let dead_pid = int.parse(dead) ?? 0
+  println("dead pid parsed=${dead_pid > 0}")
+  println("is_alive(dead)=${process.is_alive(dead_pid)}")
+  println("kill(dead, 0): ${show(process.kill(dead_pid, 0))}" |> string.replace(
+    int.to_string(dead_pid),
+    "<pid>",
+  ))
+  println("is_alive(-1)=${process.is_alive(-1)} is_alive(0)=${process.is_alive(0)}")
+  println("is_alive(2147483648)=${process.is_alive(2147483648)}")
+  println(show(process.kill(-1, 0)))
+  println(show(process.kill(0, 0)))
+  println(show(process.kill(-1, 9)))
+  println(show(process.kill(2147483648, 0)))
+  println(show(process.kill(process.pid(), -1)) |> string.replace(int.to_string(process.pid()), "<pid>"))
+  println(show(process.kill(process.pid(), 32)) |> string.replace(int.to_string(process.pid()), "<pid>"))
+  println("kill(self, 0): ${show(process.kill(process.pid(), 0))} is_alive(self)=${process.is_alive(process.pid())}")
+  let child = process.spawn("sleep", ["5"])!
+  println("kill(child, 15): ${show(process.kill(child, 15))}")
+  process.sleep(300)
+  println("after kill alive=${process.is_alive(child)}")
+  env.set("PATH", old_path)
+  println("fake kill ran=${fs.exists(marker)}")
+  let _ = process.exec("rm", ["-rf", dir])
+}

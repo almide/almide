@@ -5204,3 +5204,26 @@ evidence  = [
   { path = "spec/embedded_cross/net_huge_read_lengths.almd", class = "fixture" },
   { path = "spec/embedded_cross/net_unix_fd_bound.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-418"
+spec      = "ALS-R5"
+title     = "process.kill and process.is_alive ask the kernel with kill(2), refuse a pid outside 1..=2147483647, answer fixed err texts, and are bounded by [permissions] proc as the kill command"
+statement = "ALS-R5 (almide/almide#4125): `process.kill(pid, signal)` and `process.is_alive(pid)` signal through the kill(2) system call on native and on the embedded wasm host alike, and never run a `kill` program found on `PATH`: with a program named `kill` first on `PATH`, `is_alive` of a dead pid is `false` and that program never runs. `pid` must be in 1..=2147483647 (`0` names the caller's process group and `-1` every process the user may signal; neither is an Almide pid) and `signal` in 0..=31 (0 only asks whether the process exists). `process.kill` answers `err` with exactly `process.kill(<pid>, <signal>): pid must be in 1..=2147483647` or `process.kill(<pid>, <signal>): signal must be in 0..=31` before any system call, and a failed kill(2) as `process.kill(<pid>, <signal>): <reason>` with the reason fixed by errno — ESRCH `no such process`, EPERM `operation not permitted`, EINVAL `invalid signal`, any other `signal failed (errno <n>)` — never the platform's wording. `process.is_alive` answers `false` for a pid outside the range; a child the program spawned answers through its handle (an exited child is reaped and is `false`); any other pid is alive when kill(pid, 0) succeeds or fails with EPERM. Under `[permissions] proc` the pair is bounded as the `kill` command: without `kill` on the list every route refuses a call to either at compile time with ``process.kill(\"kill\") (line N): `kill` is not in [permissions] proc`` (`process.is_alive(\"kill\") …` for is_alive), and the embedded host answers the same err for kill and `false` for is_alive."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/embedded_cross/process_kill_syscall.almd", class = "fixture" },
+  { path = "tests/proc_allowlist_test.rs", name = "signalling_needs_kill_on_the_list", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-419"
+spec      = "ALS-R5"
+title     = "a runtime error text escapes the control and bidi characters of the user data it embeds, with one rule and the same bytes on every leg"
+statement = "ALS-R5 (almide/almide#4126): when a runtime error text embeds a string the program passed — the path of an `fs.*` call, the command of a `process.*` call, the path of `net.unix_connect` / `net.unix_listen`, the host of `net.tcp_connect` / `net.tcp_listen` — every C0 control (U+0000..=U+001F), DEL (U+007F), C1 control (U+0080..=U+009F) and bidirectional control (U+061C, U+200E, U+200F, U+202A..=U+202E, U+2066..=U+2069) in it is written as an escape: `\\n`, `\\r`, `\\t`, `\\0`, and otherwise `\\u{<lowercase hex, no leading zeros>}` (ESC is `\\u{1b}`, U+0085 `\\u{85}`, U+202E `\\u{202e}`). Every other character is kept as it is — the quote and the backslash included, so an ordinary path, a Windows one too, reads back exactly as written. So the operand of `fs.read_text(\"<path>\"): <reason>` can neither start a new line of a log nor drive the reader's terminal: the text holds no raw byte below 0x20. The rule is one function, and the bytes are the same on native, the embedded wasm host, the stock wasm artifact's fs service and the interp oracle."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/fs_error_path_escape.almd", class = "fixture" },
+]
