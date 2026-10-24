@@ -30,6 +30,13 @@ read here is what the current compiler accepts.
   (`import llm`, then `llm.openai_streaming_call(...)`); add one with
   `almide add almide/nnlib@v0.1.0`. The `mem` module and `bytes.heap_save` /
   `heap_restore` are gone: they did nothing under reference counting.
+- Dependencies come from `github.com/almide` unless the project's
+  `almide.toml` trusts another owner (`[trust] owners = ["github.com/alice"]`).
+  `almide add alice/lib` is refused; add `--trust github.com/alice` only when
+  the user asked for that exact repository. Never invent a repository name:
+  an invented name may be registered by an attacker. A dependency that brings
+  native code (`native/`, `[native-deps]`, `@extern`) also needs
+  `[permissions] native = ["lib"]` (#4093).
 - Null is spelled `T?` (shorthand for `Option[T]`, valid in every type
   position — the canonical spelling, `almide fmt` normalizes to it; ADR-0010).
   `?` binds to the preceding type atom, never across `->`: `(A) -> B?` is a fn

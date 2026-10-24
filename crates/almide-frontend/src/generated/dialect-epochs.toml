@@ -234,6 +234,9 @@ breaks = [
   "`zlib.inflate`, `zlib.decompress` and `zlib.gunzip` return `err(\"zlib: output exceeds 268435456 bytes\")` for a stream whose output passes 256 MiB, where they used to decode it whole (R-zlib-04, #4020, C-390); a program that decodes more than 256 MiB at once writes `zlib.inflate_max(data, n)` / `decompress_max` / `gunzip_max` with its own bound",
   "`json.parse` returns `err(\"json: nesting deeper than 1000\")` for an array or object opened inside 1000 others, where it used to recurse until the stack ran out (R-json-04, #4020, C-391); a document nested more than 1000 deep cannot be parsed",
   "a program that runs as its p3 component on the embedded wasm host (`almide run --target wasm` of a program naming the full-response http family) has the working directory and the temp dir preopened instead of `/` (#4022): an fs path outside both now errs there; grant it with `[permissions] fs = [\"<dir>\", …]` in almide.toml, which preopens exactly the listed directories",
+
+  "a dependency that brings native code (`native/` files, `[native-deps]`, or an `@extern(rust|c)` fn) is refused by `almide build` / `run` / `test` / `bench` on every target unless the root almide.toml grants it by name; add `native = [\"<dep>\"]` under `[permissions]` (#4093)",
+  "a git dependency is fetched only from an owner the root almide.toml trusts: github.com/almide by default, any other `host/owner` listed in `[trust] owners` (direct, transitive and locked dependencies alike, on `add` and every fetch); add `[trust] owners = [\"github.com/<owner>\"]`, or run `almide trust <owner>`. A dependency whose almide.toml `git` changed under almide.lock is refused until `almide update <name>` re-locks it (#4093)"
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
