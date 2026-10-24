@@ -1,6 +1,6 @@
 # ALS — コレクション（Collections）
 
-> Last updated: 2026-08-20
+> Last updated: 2026-10-24
 
 コレクション型（List / Map / Set / タプル / レコード）の観測規範。参照方法は
 [strings.md](strings.md) 冒頭と同じ（契約台帳の `spec` キーから参照される）。
@@ -24,7 +24,10 @@ Contracts: C-014。
 Option/Result・ネストした複合値は、要素ごとに再帰的に比較される。参照
 （ポインタ）比較は不適合。Float 成分は IEEE-754 ビット比較でなく数値比較
 （NaN != NaN）。
-Contracts: C-015。
+`Secret[String]` と `Secret[Bytes]` の `==` は中身を定数時間で比べる（ALS-T31）。
+それ以外の `Secret[A]`、Secret を含む variant・Map・Set の `==` は検査時のエラー
+E103 で拒否する（`spec/wasm_cross/secret_eq_and_decode.almd`）。
+Contracts: C-015, C-424。
 
 ## ALS-C4 範囲外アクセスの縮退規則
 

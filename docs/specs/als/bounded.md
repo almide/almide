@@ -1,6 +1,6 @@
 # ALS §B — The Bounded Profile (normative)
 
-> Last updated: 2026-09-18
+> Last updated: 2026-10-24
 
 > **Status**: normative（ADR-0017、2026-08-21 裁定）。本章は**有界プロファイル**
 > — 言語の**サブセット**であって方言ではない — を定める。`@bounded` を付けた関数は、
@@ -348,3 +348,13 @@ effect fn main() -> Unit = println("${sum_first([1, 2, 3]) ?? -1}")
 ```
 
 テスト: `tests/diagnostics/e078-bounded-early-exit-in-loop/`。Contracts: C-318。
+
+## ALS-B12 critical プロファイルが拒否する宣言属性
+
+`--profile critical` での検査は、宣言属性 `@insecure_digest` を持つ stdlib 関数
+（`hash.md5`・`hash.md5_hex`・`hash.sha1`・`hash.sha1_hex`）の呼び出しを、
+`--allow` が何を与えていても検査時のエラー E100 で拒否する。パイプ形も同じく
+拒否する。拒否する集合は宣言（`stdlib/hash.almd` の属性）から導き、名前の一覧
+からは導かない。プロファイルなしで検査した同じプログラムは変わらない。
+
+テスト: `tests/diagnostics/e100-critical-insecure-digest/`。Contracts: C-422。

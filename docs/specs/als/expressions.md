@@ -1,6 +1,6 @@
 # ALS §E — Expression Semantics (normative)
 
-> Last updated: 2026-10-18
+> Last updated: 2026-10-24
 
 > **Status**: normative. これらの節は実装から独立した**規範**であり、v0(native)と
 > v1(MIR/wasm)の両実装がこの節に適合する義務を負う。適合の証拠は
@@ -281,10 +281,18 @@ t + 1 }` → 11、if アーム内ブロック → 9、両ターゲット同一)�
 形(`1.5` を実測 pin; 網羅的な浮動小数点表示規範は ALS-E3/T2 の裁定後)。
 補間全体の型は `String`。
 
+**宣言された repr**: どの値も構造的な表示形で出る。ただし型が `fn T.repr` を
+宣言していれば、その値はどの深さ（レコード・variant・リスト・Option・Result・
+タプル・Map の中）でもその repr の文字列で出る。同じ規則が `assert_eq` /
+`assert_ne` の失敗ブロック（ALS-T18）の `expected:` / `found:` にも及ぶ。
+`import secret` の `Secret[A]` は `A` が何であっても `Secret(***)` と出て、
+中身を出すのは `secret.reveal(s)` だけである。
+
 **`!` の裁定**: 補間内の前置 `!` は式文位置と同じ `not` 誘導で拒否される
 (ALS-E7、`tests/unary_not_diag_test.rs` の補間側ケース)。
 
-テスト: `spec/wasm_cross/string_interpolation.almd`(契約 C-245)。
+テスト: `spec/wasm_cross/string_interpolation.almd`(契約 C-245)、
+`spec/wasm_cross/secret_never_rendered.almd`(契約 C-423)。
 
 ## ALS-E17 識別子(`ExprKind::Ident`)
 
@@ -576,7 +584,14 @@ C-094/C-126(`protocol_ufcs_inferred_lambda.almd`)が pin。test ブロックは
 
 **Strict は撤去済み**: `strict <mode>` は受理されるだけで何も消費しない宣言だった(#1321)。裁定(2026-08-13)により**文法から削除** — 効かない検査モードを約束する形は言語に残さない。以後 `strict` は通常の識別子であり、宣言として書けばパースエラーになる。
 
-テスト: `spec/wasm_cross/declaration_forms.almd`(契約 C-260)。
+**レコードフィールドの属性**: フィールドが受理する属性は `@builtin`・`@location`・
+`@skip`・`@skip_decode` の四つに限る。それ以外の属性をフィールドに書くと検査
+エラー E053(`unknown attribute `@<name>` on record field '<field>'`)で拒否する
+(dialect epoch 15)。fn の属性語彙外は従来どおり E053 の警告。
+
+テスト: `spec/wasm_cross/declaration_forms.almd`(契約 C-260)、
+`tests/diagnostics/e053-unknown-field-attribute-serde-skip/`・
+`tests/diagnostics/e053-unknown-field-attribute-redact/`(契約 C-428)。
 
 ## ALS-E3 浮動小数点リテラル(`ExprKind::Float`)— 部分節
 
