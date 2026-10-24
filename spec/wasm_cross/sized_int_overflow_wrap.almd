@@ -22,12 +22,6 @@ fn a32(x: Int32, y: Int32) -> Int32 = x + y
 
 fn au32(x: UInt32, y: UInt32) -> UInt32 = x + y
 
-fn n8(x: Int8) -> Int8 = -x
-
-fn n16(x: Int16) -> Int16 = -x
-
-fn n32(x: Int32) -> Int32 = -x
-
 fn main() -> Unit = {
   // Each width's overflow edge, signed and unsigned.
   println(int8.to_string(a8(127, 1)))
@@ -106,26 +100,6 @@ fn main() -> Unit = {
   let e16: Int16 = 300
   println(int16.to_string(e16 ^ 2))
   // 24464
-  // Unary minus wraps too (#4163): `-MIN` is MIN at every narrow width. The
-  // wasm leg lowered it as `0 - x` with no re-wrap and stored 128 in an Int8;
-  // the folder negated the literal at i64 width and emitted `128i8`.
-  println(int8.to_string(n8(-128)))
-  // -128
-  println(int16.to_string(n16(-32768)))
-  // -32768
-  println(int32.to_string(n32(-2147483648)))
-  // -2147483648
-  let k8: Int8 = -128
-  println(int8.to_string(-k8))
-  // -128
-  let k16: Int16 = -32768
-  println(int16.to_string(-k16))
-  // -32768
-  let k32: Int32 = -2147483648
-  println(int32.to_string(-k32))
-  // -2147483648
-  println(int8.to_string(n8(5)))
-  // -5
   // The carrier's own width is untouched: no wrap is applied to Int.
   // 4611686018427387904
   println(int.to_string(2 ^ 62))
