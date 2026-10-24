@@ -55,7 +55,17 @@ impl<T: PartialEq + 'static> AlmideSet<T> {
     #[inline]
     fn position<Q: ?Sized + PartialEq + AlmideMapKey>(&self, value: &Q) -> Option<usize>
     where T: std::borrow::Borrow<Q> {
+        if let Some(found) = self.lookup.ordered_position(value) {
+            return found;
+        }
         self.position_with(value, self.lookup.hash_for(value))
+    }
+
+    /// The ordered fallback (#4104), as AlmideMap's.
+    fn to_ordered(&mut self) {
+        self.items.retain(Option::is_some);
+        self.dead = 0;
+        self.lookup.rebuild_ordered(self.items.iter().flatten());
     }
 
     /// A new item was appended: extend the index, or build it at the threshold.
@@ -66,11 +76,7 @@ impl<T: PartialEq + 'static> AlmideSet<T> {
                 ix.push(h);
             }
             if ix.flooded() {
-                // #4104: re-index under the keyed hash, as AlmideMap does.
-                self.items.retain(Option::is_some);
-                self.dead = 0;
-                let n = self.items.len();
-                self.lookup.rebuild_keyed(self.items.iter().flatten(), n);
+                self.to_ordered();
             }
             return;
         }
@@ -82,6 +88,18 @@ impl<T: PartialEq + 'static> AlmideSet<T> {
 
     /// Append if absent (preserves first-seen order). Returns true if inserted.
     pub fn insert(&mut self, value: T) -> bool {
+        if let Some(found) = self.lookup.ordered_position(&value) {
+            if found.is_some() {
+                return false;
+            }
+            let p = self.items.len();
+            let b = value.almide_key_bytes();
+            self.items.push(Some(value));
+            if let (AlmideKeyLookup::Ordered(t), Some(b)) = (&mut self.lookup, b) {
+                t.insert(b, p);
+            }
+            return true;
+        }
         let h = self.lookup.hash_for(&value);
         if self.position_with(&value, h).is_some() {
             return false;
@@ -99,6 +117,17 @@ impl<T: PartialEq + 'static> AlmideSet<T> {
     /// present.
     pub fn remove(&mut self, value: &T) -> bool {
         let Some(i) = self.position(value) else { return false };
+        if let AlmideKeyLookup::Ordered(t) = &mut self.lookup {
+            if let Some(b) = value.almide_key_bytes() {
+                t.remove(&b);
+            }
+            self.items[i] = None;
+            self.dead += 1;
+            if self.dead * 2 > self.items.len() {
+                self.to_ordered();
+            }
+            return true;
+        }
         let AlmideKeyLookup::Built(ix) = &mut self.lookup else {
             self.items.remove(i);
             return true;
