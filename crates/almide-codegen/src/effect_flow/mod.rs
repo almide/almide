@@ -83,9 +83,11 @@ fn scan_function(program: &IrProgram, ix: &Index<'_>, pools: &Pools, sh: &mut Sh
         Some(func) => {
             // An `@extern` fn is ⊤ (#3245): its foreign body performs every
             // category, seeded as a constant on its own node.
-            let declared = declared_direct_effects(func).into_iter().fold(0, |m, c| m | graph::bit(c));
+            let in_stdlib = info.table > 0 && crate::pass_effect_inference::is_stdlib_module(&program.modules[info.table - 1]);
+            let declared = declared_direct_effects(func, in_stdlib).into_iter().fold(0, |m, c| m | graph::bit(c));
             if declared != 0 {
-                let label = format!("@extern {}", func.name);
+                let kind = if func.extern_attrs.is_empty() { "@inline_rust" } else { "@extern" };
+                let label = format!("{kind} {}", func.name);
                 scan.g.edges.push(Edge::Const { to: info.own, cats: declared, sym: None, label: Some(label) });
             }
             scan.params = func.params.iter().enumerate().filter(|(_, p)| may_hold_fn(&p.ty)).map(|(i, p)| (p.var, i)).collect();

@@ -36,11 +36,16 @@ pub struct NativeCode {
     pub crates: Vec<String>,
     /// `@extern(rust|c)` fns, as `` `name` (file:line) ``, in file order.
     pub externs: Vec<String>,
+    /// Fns whose body is a Rust template or a runtime binding:
+    /// `@inline_rust`, and defensively `@intrinsic` / `@wasm_intrinsic`
+    /// (E085 refuses those outside the stdlib), as
+    /// `` @inline_rust fn `name` (file:line) `` (#4100).
+    pub templates: Vec<String>,
 }
 
 impl NativeCode {
     pub fn is_empty(&self) -> bool {
-        self.modules.is_empty() && self.assets == 0 && self.crates.is_empty() && self.externs.is_empty()
+        self.modules.is_empty() && self.assets == 0 && self.crates.is_empty() && self.externs.is_empty() && self.templates.is_empty()
     }
 
     /// One line naming every piece, e.g.
@@ -59,6 +64,7 @@ impl NativeCode {
         if !self.externs.is_empty() {
             parts.push(format!("@extern fn {}", self.externs.join(", ")));
         }
+        parts.extend(self.templates.iter().cloned());
         parts.join("; ")
     }
 }
@@ -103,7 +109,9 @@ pub fn native_code_of(package_dir: &Path, source_dir: &Path) -> NativeCode {
     files.sort();
     for file in files {
         let rel = file.strip_prefix(package_dir).unwrap_or(&file).display().to_string();
-        code.externs.extend(native_externs(&file).into_iter().map(|(name, line)| format!("`{name}` ({rel}:{line})")));
+        let (externs, templates) = native_fns(&file);
+        code.externs.extend(externs.into_iter().map(|(name, line)| format!("`{name}` ({rel}:{line})")));
+        code.templates.extend(templates.into_iter().map(|(attr, name, line)| format!("@{attr} fn `{name}` ({rel}:{line})")));
     }
     code
 }
@@ -146,26 +154,35 @@ fn almd_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// `(fn name, line)` of every top-level fn in `file` bound natively — an
-/// `@extern` attribute whose target the native build binds (`rust`/`rs`,
-/// `c`; the same predicate the checker and codegen use). A file that does
-/// not parse contributes nothing here; the build reports it.
-fn native_externs(file: &Path) -> Vec<(String, usize)> {
-    let Ok(source) = std::fs::read_to_string(file) else { return Vec::new() };
+/// The attributes that make a fn's body Rust text or a runtime binding
+/// (#4100). `@inline_rust` is legal in a package (aes and sha1 use it, with
+/// a `native/` module behind it); the other two are refused outside the
+/// stdlib by E085, and are listed so a package that slipped past it is still
+/// named here.
+const TEMPLATE_ATTRS: &[&str] = &["inline_rust", "intrinsic", "wasm_intrinsic"];
+
+/// The top-level fns in `file` that bring native code: `(name, line)` of
+/// each `@extern` whose target the native build binds (`rust`/`rs`, `c`; the
+/// predicate the checker and codegen use), and `(attribute, name, line)` of
+/// each fn carrying one of [`TEMPLATE_ATTRS`]. A file that does not parse
+/// contributes nothing here; the build reports it.
+#[allow(clippy::type_complexity)]
+fn native_fns(file: &Path) -> (Vec<(String, usize)>, Vec<(String, String, usize)>) {
+    let (mut externs, mut templates) = (Vec::new(), Vec::new());
+    let Ok(source) = std::fs::read_to_string(file) else { return (externs, templates) };
     let tokens = crate::lexer::Lexer::tokenize(&source);
-    let Ok(program) = crate::parser::Parser::new(tokens).parse() else { return Vec::new() };
-    program
-        .decls
-        .iter()
-        .filter_map(|d| match d {
-            crate::ast::Decl::Fn { name, extern_attrs, span, .. }
-                if extern_attrs.iter().any(|a| crate::types::extern_abi::native_extern_kind(a.target.as_str()).is_some()) =>
-            {
-                Some((name.to_string(), span.map_or(0, |s| s.line)))
-            }
-            _ => None,
-        })
-        .collect()
+    let Ok(program) = crate::parser::Parser::new(tokens).parse() else { return (externs, templates) };
+    for d in &program.decls {
+        let crate::ast::Decl::Fn { name, extern_attrs, attrs, span, .. } = d else { continue };
+        let line = span.map_or(0, |s| s.line);
+        if extern_attrs.iter().any(|a| crate::types::extern_abi::native_extern_kind(a.target.as_str()).is_some()) {
+            externs.push((name.to_string(), line));
+        }
+        if let Some(a) = attrs.iter().find(|a| TEMPLATE_ATTRS.contains(&a.name.as_str())) {
+            templates.push((a.name.to_string(), name.to_string(), line));
+        }
+    }
+    (externs, templates)
 }
 
 /// Every fetched dependency of `proj` with the native code it brings.

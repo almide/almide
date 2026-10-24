@@ -23,9 +23,10 @@
 //! The judgement is by ORIGIN, never by module name: a user module named
 //! `list` is still a user module. A source is the stdlib when the module
 //! driver says it is a bundled module (compiled into the binary, no path), or
-//! when it is a file named after an embedded stdlib source in a directory
-//! named `stdlib` — so `stdlib/fs_read_text.almd` checked on its own is the
-//! stdlib and `spec/stdlib/fs_test.almd` is not. When the checker has no
+//! when it is a file in a directory named `stdlib` whose text is exactly the
+//! embedded stdlib source of its name — so `stdlib/fs_read_text.almd`
+//! checked on its own is the stdlib, `spec/stdlib/fs_test.almd` is not, and
+//! neither is a package that copies the layout with its own text (#4100). When the checker has no
 //! origin at all (no source path and not inside a bundled module — the LSP's
 //! in-memory analysis) it abstains, as E084 does, rather than guess.
 use super::{Checker, err};
@@ -46,11 +47,19 @@ impl Checker {
             .parent()
             .and_then(|d| d.file_name())
             .is_some_and(|d| d == "stdlib");
-        let embedded_stem = path
+        // #4100: identity, not layout. A file is the stdlib's only when its
+        // text IS the embedded source of that name (the compiler's own
+        // copy); a package laid out as `stdlib/string.almd` with its own
+        // `@intrinsic`s is not. The text compared is the one under check.
+        let embedded_identity = path
             .file_stem()
             .and_then(|s| s.to_str())
-            .is_some_and(|s| almide_lang::embedded::source_of(s).is_some());
-        Some(in_stdlib_dir && embedded_stem)
+            .and_then(almide_lang::embedded::source_of)
+            .is_some_and(|embedded| match self.source_text.as_deref() {
+                Some(text) => text == embedded,
+                None => std::fs::read_to_string(&path).is_ok_and(|t| t == embedded),
+            });
+        Some(in_stdlib_dir && embedded_identity)
     }
 
     pub(super) fn reject_user_intrinsic(&mut self, fn_name: &str, attrs: &[Attribute], decl_span: Option<Span>) {
