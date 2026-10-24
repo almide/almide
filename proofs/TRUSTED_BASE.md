@@ -51,6 +51,17 @@ Critical-profile surface: an artifact that imports more than its five WASI
 calls (fs, env, args) is refused at load, so for those artifacts wasmtime
 remains the only engine.
 
+**The embedded host is not a sandbox.** `almide run --target wasm` grants the
+guest the user's authority, as the native binary has it: the core-module lane's
+fs ops reach the whole host filesystem, and the p3 component lane
+(`run_component`, `crates/almide-wasm-run/src/component_host.rs`) preopens `/`
+read-write and inherits the environment. Wasm bounds the guest's memory
+accesses, and the host bounds what the guest can make it allocate: one
+linear-memory budget per run across all its instances, and every guest span
+checked against memory before the host reads it (#4135). It does not bound
+what the guest may ask the host to do. `docs/wasm/README.md` ("What the
+embedded host grants") has the per-lane table; scoping file access is #4022.
+
 **Floating steps (debt).** Four CI steps install Rust without a version and
 run whatever `stable` is that day: the two perf ratchets, the commissioned
 wasm probes (the runtime ratio) and fuzz-nightly's coverage ratchet. They are
