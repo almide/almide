@@ -539,6 +539,21 @@ pub fn is_memory_unsafe_stdlib_fn(module: &str, func: &str) -> bool {
     memory_unsafe_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
 }
 
+/// Every bundled stdlib fn declared `@insecure_digest` (#4106): a digest that
+/// is broken for security (`hash.md5`, `md5_hex`, `sha1`, `sha1_hex`), kept for
+/// compatibility only. `--profile critical` refuses a call to one (E100); the
+/// default profile is unchanged. Derived from the one declaration site.
+pub fn insecure_digest_stdlib_fns() -> &'static [(&'static str, String, Option<String>)] {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<Vec<(&'static str, String, Option<String>)>> = OnceLock::new();
+    TABLE.get_or_init(|| marked_stdlib_fns("@insecure_digest"))
+}
+
+/// True if `module.func` is an `@insecure_digest` stdlib fn (#4106).
+pub fn is_insecure_digest_stdlib_fn(module: &str, func: &str) -> bool {
+    insecure_digest_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
+}
+
 /// The bundled stdlib fns an attribute `mark` (`"@ordered"`) annotates, by a
 /// text scan of the bundled sources (an attribute block, then the fn it
 /// annotates), with each fn's `@intrinsic` runtime symbol when it has one.
@@ -624,5 +639,14 @@ mod ordered_tests {
             ]
         );
         assert!(!super::is_memory_unsafe_stdlib_fn("bytes", "get"));
+    }
+
+    #[test]
+    fn the_insecure_digest_table_is_md5_and_sha1() {
+        let mut t: Vec<String> = super::insecure_digest_stdlib_fns().iter().map(|(m, f, _)| format!("{m}.{f}")).collect();
+        t.sort();
+        assert_eq!(t, ["hash.md5", "hash.md5_hex", "hash.sha1", "hash.sha1_hex"]);
+        assert!(!super::is_insecure_digest_stdlib_fn("hash", "sha256"));
+        assert!(!super::is_insecure_digest_stdlib_fn("hash", "hmac_sha256"));
     }
 }

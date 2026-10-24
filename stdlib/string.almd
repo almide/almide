@@ -44,6 +44,13 @@ fn length(s: String) -> Int = _
 @intrinsic("almide_rt_string_contains")
 fn contains(s: String, sub: String) -> Bool = _
 
+/// True if a and b hold the same UTF-8 bytes, in time that depends only on
+/// their lengths: no early exit on the first differing byte. Use it to compare
+/// a token or signature header; `==` returns at the first difference. A length
+/// mismatch is false at once (lengths are public).
+@intrinsic("almide_rt_string_is_equal_constant_time")
+fn is_equal_constant_time(a: String, b: String) -> Bool = _
+
 /// s begins with prefix; "" always matches.
 @intrinsic("almide_rt_string_starts_with")
 fn starts_with(s: String, prefix: String) -> Bool = _

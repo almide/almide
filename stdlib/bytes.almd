@@ -515,6 +515,13 @@ fn split(b: Bytes, sep: Bytes) -> List[Bytes] = _
 @intrinsic("almide_rt_bytes_starts_with")
 fn starts_with(b: Bytes, prefix: Bytes) -> Bool = _
 
+/// True if a and b hold the same bytes, in time that depends only on their
+/// lengths: no early exit on the first differing byte. Use it to compare a
+/// MAC, token or password hash; `==` returns at the first difference. A length
+/// mismatch is false at once (lengths are public).
+@intrinsic("almide_rt_bytes_is_equal_constant_time")
+fn is_equal_constant_time(a: Bytes, b: Bytes) -> Bool = _
+
 /// (pos+n, n-byte copy); (pos, none) if out of range.
 @intrinsic("almide_rt_bytes_take_at")
 fn take_at(b: Bytes, pos: Int, n: Int) -> (Int, Bytes?) = _

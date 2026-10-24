@@ -80,7 +80,7 @@ needed.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (12 functions)
+## Signature index (20 functions)
 
 ```
 // 32-bit FNV-1a of s's UTF-8; non-negative Int.
@@ -91,7 +91,7 @@ hash.fnv1a32(s: String) -> Int
 // @since 0.58.0 or earlier
 hash.fnv1a32_bytes(b: Bytes) -> Int
 
-// 32-byte SHA-256 digest of b.
+// 32-byte SHA-256 digest of b. Not a MAC: sha256(key ++ msg) is forgeable by length extension; use hash.hmac_sha256 / hash.is_valid_hmac_sha256.
 // @since 0.2.2 or earlier
 hash.sha256(b: Bytes) -> Bytes
 
@@ -123,13 +123,45 @@ hash.sha1(b: Bytes) -> Bytes
 // @since unreleased
 hash.sha1_hex(b: Bytes) -> String
 
-// 64-byte SHA-512 digest of b.
+// 64-byte SHA-512 digest of b. Not a MAC: sha512(key ++ msg) is forgeable by length extension; use hash.hmac_sha512 / hash.is_valid_hmac_sha512.
 // @since unreleased
 hash.sha512(b: Bytes) -> Bytes
 
 // SHA-512 of b as 128 lowercase hex chars.
 // @since unreleased
 hash.sha512_hex(b: Bytes) -> String
+
+// 32-byte HMAC-SHA256 of b under key (RFC 2104); key first.
+// @since unreleased
+hash.hmac_sha256(key: Bytes, b: Bytes) -> Bytes
+
+// HMAC-SHA256 of b under key as 64 lowercase hex chars.
+// @since unreleased
+hash.hmac_sha256_hex(key: Bytes, b: Bytes) -> String
+
+// 64-byte HMAC-SHA512 of b under key (RFC 2104); key first.
+// @since unreleased
+hash.hmac_sha512(key: Bytes, b: Bytes) -> Bytes
+
+// HMAC-SHA512 of b under key as 128 lowercase hex chars.
+// @since unreleased
+hash.hmac_sha512_hex(key: Bytes, b: Bytes) -> String
+
+// True if tag is the HMAC-SHA256 of b under key, compared in constant time. Use this, not ==.
+// @since unreleased
+hash.is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool
+
+// True if tag (hex, either case) is the HMAC-SHA256 of b under key, compared in constant time; false for bad hex.
+// @since unreleased
+hash.is_valid_hmac_sha256_hex(key: Bytes, b: Bytes, tag: String) -> Bool
+
+// True if tag is the HMAC-SHA512 of b under key, compared in constant time. Use this, not ==.
+// @since unreleased
+hash.is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool
+
+// True if tag (hex, either case) is the HMAC-SHA512 of b under key, compared in constant time; false for bad hex.
+// @since unreleased
+hash.is_valid_hmac_sha512_hex(key: Bytes, b: Bytes, tag: String) -> Bool
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

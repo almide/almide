@@ -398,6 +398,21 @@ pub fn almide_rt_bytes_index_of(b: &Vec<u8>, pat: &Vec<u8>) -> Option<i64> {
     b.windows(pat.len()).position(|w| w == pat.as_slice()).map(|i| i as i64)
 }
 
+/// Constant-time equality (#4106). A length mismatch returns false at once
+/// (lengths are public); otherwise every byte pair is XORed and ORed into one
+/// accumulator, each step passed through `black_box` so neither LLVM's loop
+/// idioms (bcmp/memcmp, MergeICmps) nor a future pass can turn the walk back
+/// into an early exit on the first difference.
+#[inline(never)]
+pub fn almide_rt_bytes_is_equal_constant_time(a: &Vec<u8>, b: &Vec<u8>) -> bool {
+    if a.len() != b.len() { return false; }
+    let mut acc: u8 = 0;
+    for i in 0..a.len() {
+        acc |= core::hint::black_box(a[i] ^ b[i]);
+    }
+    core::hint::black_box(acc) == 0
+}
+
 pub fn almide_rt_bytes_starts_with(b: &Vec<u8>, prefix: &Vec<u8>) -> bool {
     b.starts_with(prefix.as_slice())
 }

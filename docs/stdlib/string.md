@@ -644,7 +644,7 @@ hel
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (88 functions)
+## Signature index (89 functions)
 
 ```
 // s without leading/trailing whitespace.
@@ -674,6 +674,13 @@ string.length(s: String) -> Int   (deprecated — use string.len)
 // sub occurs in s; true for empty sub.
 // @since 0.6.0 or earlier
 string.contains(s: String, sub: String) -> Bool
+
+// True if a and b hold the same UTF-8 bytes, in time that depends only on
+// their lengths: no early exit on the first differing byte. Use it to compare
+// a token or signature header; `==` returns at the first difference. A length
+// mismatch is false at once (lengths are public).
+// @since unreleased
+string.is_equal_constant_time(a: String, b: String) -> Bool
 
 // s begins with prefix; "" always matches.
 // @since 0.6.0 or earlier
