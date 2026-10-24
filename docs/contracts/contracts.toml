@@ -5162,7 +5162,7 @@ evidence  = [
   { path = "tests/fs_scope_test.rs", name = "almide_test_is_bounded_by_permissions_fs_on_both_targets", class = "fixture" },
   { path = "tests/fs_scope_test.rs", name = "a_directory_flipped_to_a_symlink_under_permissions_fs_never_leaks_on_either_target", class = "fixture" },
   { path = "crates/almide-rt-core/tests/fs_scoped_core.rs", name = "a_dir_swapped_for_a_symlink_after_the_decision_is_never_followed", class = "fixture" },
-
+]
 
 [[contract]]
 id        = "C-394"
