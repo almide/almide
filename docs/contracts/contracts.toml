@@ -5206,6 +5206,18 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-417"
+spec      = "ALS-T5"
+title     = "io.write and io.write_bytes emit exactly their bytes on every target and host"
+statement = "`io.write(data: Bytes)` and `io.write_bytes(data: List[Int])` (each Int's low byte) write EXACTLY their bytes to stdout on every target and every host: native, a stock WASI runtime, the embedded host (`almide run --target wasm`) and the reference evaluator. Nothing decodes them as UTF-8, so a run that is not UTF-8 (0x80-0xFF outside a valid sequence, a lone 0xFF, a PNG signature's 0x89) is never replaced by U+FFFD (EF BF BD). The embedded host writes every stream the same way, stderr and `println` / `eprintln` included: it writes the guest's bytes and does not re-encode them. Before almide/almide#4138 the embedded host passed its stdout op (30) and its raw stderr op (73) through a lossy UTF-8 decode, so `[255, 0, 128, 137, 80, 78, 71]` came out as `EF BF BD 00 EF BF BD EF BF BD 50 4E 47` where native and wasmtime wrote the bytes themselves. The fixtures write all 256 byte values and a non-UTF-8 run. spec/embedded_cross compares stdout as raw bytes. The spec/wasm_cross judges decode stdout as UTF-8 with replacement, so there a replaced byte and the byte compare equal; the raw-byte claim rests on the embedded_cross lane and on the reference evaluator's plain `run` mode, which replays stdout as bytes."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/io_write_raw_bytes.almd", class = "fixture" },
+  { path = "spec/embedded_cross/io_write_raw_bytes.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-418"
 spec      = "ALS-R5"
 title     = "process.kill and process.is_alive ask the kernel with kill(2), refuse a pid outside 1..=2147483647, answer fixed err texts, and are bounded by [permissions] proc as the kill command"
