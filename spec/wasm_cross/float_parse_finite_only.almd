@@ -64,7 +64,8 @@ effect fn main() -> Unit = {
   }
   println(verdict)
   // refuse
-  // json.parse is not float.parse: an overflowing number is still ±inf there.
+  // json.parse reads a float token as float.parse does (ALS-T3 via ALS-T2):
+  // an overflowing number is the same out-of-range err there.
   match json.parse("[1e400, -1e400]") {
     ok(v) => println("json ok ${json.stringify(v)}"),
     err(e) => println("json err ${e}"),
