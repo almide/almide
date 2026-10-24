@@ -79,7 +79,7 @@ effect fn main() -> Unit = {
 }
 ", "30\n");
     assert!(user.contains("__almide_fan_r0"), "expected the inline fan form:\n{user}");
-    assert!(!user.contains("__almide_s.spawn"), "a fan arm holding an Rc closure must not be spawned:\n{user}");
+    assert!(!user.contains("almide_fan_spawn(__almide_s"), "a fan arm holding an Rc closure must not be spawned:\n{user}");
 }
 
 #[test]
@@ -172,5 +172,5 @@ effect fn main() -> Unit = {
   println(int.to_string(a + b))
 }
 ", "9\n");
-    assert!(user.contains("__almide_s.spawn"), "a fan over Send captures keeps its threads:\n{user}");
+    assert!(user.contains("almide_fan_spawn(__almide_s"), "a fan over Send captures keeps its threads:\n{user}");
 }
