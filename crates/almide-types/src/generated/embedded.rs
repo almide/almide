@@ -906,11 +906,6 @@ fn set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit = 
 /// Writes value at offset; no-op out of range.
 @intrinsic("almide_rt_bytes_set_float32")
 fn set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit = _
-
-
-
-/// a and b are equal; stand-in.
-fn is_equal_constant_time(a: Bytes, b: Bytes) -> Bool = a == b
 "#;
 pub const SRC_BYTES_APPEND_MULTI: &str = r#"
 
@@ -35633,11 +35628,6 @@ fn unique_by[K](s: String, f: (String) -> K) -> String = string.join(
   list.unique_by(string.chars(s), f),
   "",
 )
-
-
-
-/// a and b are equal; stand-in.
-fn is_equal_constant_time(a: String, b: String) -> Bool = a == b
 "#;
 pub const SRC_STRING_BYTE_SLICE: &str = r#"
 fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
