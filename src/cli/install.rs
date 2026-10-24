@@ -26,7 +26,15 @@ pub fn cmd_install(
     name_override: Option<&str>,
     bin_dir: Option<&Path>,
     target: Option<&str>,
+    force: bool,
 ) {
+    // A `--name` is checked before anything is fetched (#4183).
+    if let Some(n) = name_override {
+        if let Err(e) = check_bin_name(n) {
+            err(&format!("error: --name {e}"));
+            std::process::exit(1);
+        }
+    }
     let src_dir = match resolve_source(spec, tag, branch) {
         Ok(p) => p,
         Err(e) => {
@@ -60,6 +68,13 @@ pub fn cmd_install(
         ));
         std::process::exit(1);
     }
+    // #4183: the name becomes a file name in the bin dir, so it must be one
+    // plain identifier. `name = "../x"` used to install outside the bin dir,
+    // and an absolute name replaced the bin dir in the join.
+    if let Err(e) = check_bin_name(&bin_name) {
+        err(&format!("error: the package name {e}; pass --name with a plain name"));
+        std::process::exit(1);
+    }
 
     let install_dir = bin_dir
         .map(|p| p.to_path_buf())
@@ -73,6 +88,15 @@ pub fn cmd_install(
         std::process::exit(1);
     }
     let install_path = install_dir.join(&bin_name);
+    // #4183: never replace a file `almide install` did not put here unless
+    // asked, and never write through a symlink.
+    if let Err(e) = check_destination(&install_dir, &install_path, &bin_name, force) {
+        err(&format!("error: {e}"));
+        std::process::exit(1);
+    }
+    // Build to a staging name in the same dir, then rename over the
+    // destination: a symlink there is replaced, never written through.
+    let staged_path = install_dir.join(format!(".{}.almide-install-{}", bin_name, std::process::id()));
 
     let entry_rel = "src/main.almd";
     let entry = src_dir.join(entry_rel);
@@ -105,7 +129,7 @@ pub fn cmd_install(
         std::process::exit(1);
     }
 
-    let install_path_str = install_path.to_string_lossy().to_string();
+    let install_path_str = staged_path.to_string_lossy().to_string();
     crate::cli::cmd_build(crate::cli::BuildArgs {
         file: entry_rel,
         output: Some(&install_path_str),
@@ -129,6 +153,18 @@ pub fn cmd_install(
     });
 
     let _ = std::env::set_current_dir(&prev_cwd);
+
+    if staged_path.is_file() {
+        if install_path.exists() || install_path.symlink_metadata().is_ok() {
+            err(&format!("replacing {}", install_path.display()));
+        }
+        if let Err(e) = std::fs::rename(&staged_path, &install_path) {
+            let _ = std::fs::remove_file(&staged_path);
+            err(&format!("error: cannot install {}: {}", install_path.display(), e));
+            std::process::exit(1);
+        }
+        record_installed(&install_dir, &bin_name);
+    }
 
     if install_path.is_file() {
         err("");
@@ -193,6 +229,57 @@ fn resolve_source(
         return project_fetch::fetch_dep_with_lock(&dep, Some(&head));
     }
     project_fetch::fetch_dep(&dep)
+}
+
+/// The installed binary's name must be one plain identifier (#4183): it is
+/// joined onto the bin dir, so a `/`, `\\`, `..` or an absolute path would
+/// put the file somewhere else.
+fn check_bin_name(name: &str) -> Result<(), String> {
+    let mut chars = name.chars();
+    let first_ok = chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+    if first_ok && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        Ok(())
+    } else {
+        Err(format!("`{name}` is not a plain name (letters, digits and `_`, not starting with a digit)"))
+    }
+}
+
+/// The record of what `almide install` put in a bin dir (#4183), one name
+/// per line.
+const INSTALL_RECEIPT: &str = ".almide-installed";
+
+fn installed_names(install_dir: &Path) -> Vec<String> {
+    std::fs::read_to_string(install_dir.join(INSTALL_RECEIPT))
+        .map(|s| s.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+        .unwrap_or_default()
+}
+
+fn record_installed(install_dir: &Path, name: &str) {
+    let mut names = installed_names(install_dir);
+    if !names.iter().any(|n| n == name) {
+        names.push(name.to_string());
+        let _ = std::fs::write(install_dir.join(INSTALL_RECEIPT), names.join("\n") + "\n");
+    }
+}
+
+/// May `almide install` put `name` at `path`? A free name, or a file this
+/// bin dir's receipt says almide installed. Anything else — a tool the user
+/// put there, `almide` itself, a symlink — needs `--force`.
+fn check_destination(install_dir: &Path, path: &Path, name: &str, force: bool) -> Result<(), String> {
+    let Ok(md) = path.symlink_metadata() else { return Ok(()) };
+    if force {
+        return Ok(());
+    }
+    if md.file_type().is_symlink() {
+        return Err(format!("{} is a symlink; pass --force to replace the link (its target is never written)", path.display()));
+    }
+    if installed_names(install_dir).iter().any(|n| n == name) {
+        return Ok(());
+    }
+    Err(format!(
+        "{} already exists and was not installed by almide; pass --force to replace it",
+        path.display()
+    ))
 }
 
 fn default_install_dir() -> PathBuf {
