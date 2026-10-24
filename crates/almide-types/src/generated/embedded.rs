@@ -32280,7 +32280,10 @@ import process
 
 fn __proc_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __proc_argv(args: List[String]) -> String = args |> list.map((a) => __proc_cell(a)) |> list.join("")
+
+
+
+fn __proc_argv(args: List[String]) -> String = args |> list.map((a) => __proc_cell(a)) |> list.__join_string("")
 
 effect fn __proc_exec(cmd: String, argv: String) -> Result[String, String] = _
 
