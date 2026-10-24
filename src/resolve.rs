@@ -755,10 +755,19 @@ fn find_module_file(name: &str, base_dir: &Path, dep_paths: &[(project::PkgId, P
     if let Some(hint) = almide_frontend::removed_spellings::removed_module_hint(name) {
         return Err(format!("module '{name}' not found\n  hint: {hint}"));
     }
+    // #4109: a near stdlib module, dependency or almide package first. The
+    // hint a writer acts on must not point at `almide add <guessed name>`,
+    // the first step of installing a typo-squatted package.
+    let deps: Vec<&str> = dep_paths.iter().map(|(p, _)| p.name.as_str()).collect();
+    let hint = crate::trust::import_hint(name, &deps).unwrap_or_else(|| {
+        format!(
+            "Create {name}.almd in the same directory. If `{name}` is a package you already trust, add it to [dependencies] in almide.toml; do not add a package whose name you guessed"
+        )
+    });
     Err(format!(
-        "module '{}' not found\n  searched: {}\n  hint: Create {}.almd in the same directory, or add to [dependencies] in almide.toml",
+        "module '{}' not found\n  searched: {}\n  hint: {}",
         name,
         local_candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "),
-        name,
+        hint,
     ))
 }
