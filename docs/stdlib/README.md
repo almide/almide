@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 48 stdlib modules, 1471 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 48 stdlib modules, 1472 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -41,7 +41,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [matrix](#matrix) | 48 | 0 |
 | [net](#net) | 26 | 2 |
 | [option](#option) | 14 | 0 |
-| [path](#path) | 13 | 0 |
+| [path](#path) | 14 | 0 |
 | [process](#process) | 17 | 1 |
 | [random](#random) | 9 | 0 |
 | [regex](#regex) | 8 | 0 |
@@ -1270,10 +1270,11 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [path.md](path.md)
 
-- `path.from_string(s: String) -> Result[SafePath, String]` — SafePath of s; err if any segment is "..".
+- `path.from_string(s: String) -> Result[SafePath, String]` — SafePath of s; err unless relative and inside.
 - `path.trusted(s: String) -> SafePath` — SafePath of s with no traversal check.
 - `path.to_string(p: SafePath) -> String` — Path text inside p, unchanged.
 - `path.join(base: String, child: String) -> String` — base/child; an absolute child replaces base.
+- `path.join_within(base: String, child: String) -> Result[String, String]` — base/child; err if child could leave base.
 - `path.dirname(p: String) -> String` — p minus last segment; "" if no slash.
 - `path.basename(p: String) -> String` — Last non-empty segment; "" for / or empty p.
 - `path.extension(p: String) -> Option[String]` — After basename's last dot; none if no dot or dotfile.

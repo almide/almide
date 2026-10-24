@@ -1075,6 +1075,7 @@
 "path.from_string" = "<=0.18.1"
 "path.is_absolute" = "<=0.2.0"
 "path.join" = "<=0.2.0"
+"path.join_within" = "unreleased"
 "path.normalize" = "<=0.3.0"
 "path.relative_to" = "unreleased"
 "path.stem" = "<=0.3.0"

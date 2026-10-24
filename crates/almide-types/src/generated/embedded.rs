@@ -29494,12 +29494,29 @@ pub const SRC_PATH: &str = r#"
 mod type SafePath = String
 
 
-/// SafePath of s; err if any segment is "..".
-fn from_string(s: String) -> Result[SafePath, String] = {
-  let segments = string.split(s, "/")
-  let has_traversal = list.any(segments, (seg) => seg == "..")
-  if has_traversal then err("path traversal rejected: " + s) else ok(SafePath(s))
+
+
+
+
+
+
+
+
+local fn stays_inside(s: String) -> Bool = {
+  let segs = string.split(string.replace(s, "\\", "/"), "/")
+  let first = list.first(segs) ?? ""
+  let rooted = string.starts_with(s, "/") or string.starts_with(s, "\\")
+  let drive = string.len(first) >= 2 and string.slice(first, 1, 2) == ":"
+  let home = string.starts_with(s, "~")
+  let nul = string.contains(s, "\u{0}")
+  let climbs = list.any(segs, (seg) => seg == "..")
+  not (rooted or drive or home or nul or climbs)
 }
+
+
+/// SafePath of s; err unless relative and inside.
+fn from_string(s: String) -> Result[SafePath, String] =
+  if stays_inside(s) then ok(SafePath(s)) else err("path traversal rejected: " + s)
 
 
 /// SafePath of s with no traversal check.
@@ -29511,6 +29528,8 @@ fn to_string(p: SafePath) -> String = match p {
   SafePath(s) => s
 }
 
+
+
 /// base/child; an absolute child replaces base.
 fn join(base: String, child: String) -> String = {
 
@@ -29521,6 +29540,13 @@ fn join(base: String, child: String) -> String = {
     if string.len(b) == 0 then child else b + "/" + child
   }
 }
+
+
+
+
+/// base/child; err if child could leave base.
+fn join_within(base: String, child: String) -> Result[String, String] =
+  if stays_inside(child) then ok(join(base, child)) else err("path traversal rejected: " + child)
 
 /// p minus last segment; "" if no slash.
 fn dirname(p: String) -> String = {
