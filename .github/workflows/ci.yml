@@ -2237,9 +2237,10 @@ jobs:
     # evicted, and a cancelled run saves none). 45 covers the cold path; the
     # develop-only `save-if` on every rust-cache step keeps merge-queue and
     # PR refs, which nothing ever reads back, from evicting develop's entries.
-    # 70 since the double-free trap step (#4081) reruns backend_parity and the
-    # gauntlet: develop's run measured 17-41 min before it, and #4081's main
-    # test step alone took 42 min of 45 on 2026-10-23 before it was cancelled.
+    # 70 since #4081: develop's run measured 17-41 min, and #4081's main test
+    # step alone took 42 min of 45 on 2026-10-23 before it was cancelled. (The
+    # separate double-free trap sweep #4081 added is gone: the trap is in every
+    # wasm build since #4023, so the carried-gates step runs under it.)
     timeout-minutes: 70
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2284,13 +2285,6 @@ jobs:
       # regex programs where the size story is actually decided.
       - name: Stdlib-linking wasm size ladder (#2141 — a shrink-only ceiling per rung, the table in the log)
         run: cargo test --release --locked -p almide-wasm --test size_ladder -- --nocapture
-      # #2010 stage 2b: under the double-free trap a second release of a
-      # freed block traps instead of wrapping to 0xFFFF_FFFF — the corpus
-      # and the gauntlet must hold under it (five fixtures only showed
-      # their dangling reads with it armed, 2026-09-08). Rides the compile
-      # above (76 s), so it stays in this job.
-      - name: Double-free trap sweep (corpus burn-up + gauntlet)
-        run: ALMIDE_RC_TRAP_DOUBLE_FREE=1 cargo test --release --locked -p almide-wasm --test backend_parity --test gauntlet
 
   commissioned-wasm-gates-root:
     name: Commissioned wasm gates (release-only root tests)

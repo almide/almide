@@ -62,14 +62,9 @@ fn wasmtime_available() -> bool {
 /// Build and run `program` on both legs, asserting the observable agrees. The
 /// wasm build must also come from the STRUCTURAL leg: an answer that agrees
 /// only because the build silently fell back is the state this issue was.
+/// Every wasm build carries the double-free trap (#4023): a second release of
+/// a freed block traps instead of wrapping its refcount to 0xFFFF_FFFF.
 fn agree_on_the_structural_leg(program: &str, label: &str) -> String {
-    agree_on_the_structural_leg_with(program, label, false)
-}
-
-/// `trap_double_free` arms `ALMIDE_RC_TRAP_DOUBLE_FREE` on the wasm BUILD (the
-/// flag is read at emit time, not at run time): a second release of a freed
-/// block then traps instead of wrapping its refcount to 0xFFFF_FFFF.
-fn agree_on_the_structural_leg_with(program: &str, label: &str, trap_double_free: bool) -> String {
     let dir = tempfile::tempdir().expect("tempdir");
     let source = dir.path().join("main.almd");
     std::fs::write(&source, program).expect("source");
@@ -87,10 +82,6 @@ fn agree_on_the_structural_leg_with(program: &str, label: &str, trap_double_free
                 artifact.to_str().expect("path"),
             ])
             .env_remove("ALMIDE_COMPONENT_P3");
-        match trap_double_free && target == "wasm" {
-            true => build.env("ALMIDE_RC_TRAP_DOUBLE_FREE", "1"),
-            false => build.env_remove("ALMIDE_RC_TRAP_DOUBLE_FREE"),
-        };
         let built = build.output().expect("build");
         assert!(
             built.status.success(),
@@ -192,10 +183,9 @@ fn the_cached_compound_keys_are_released_exactly_once() {
         eprintln!("wasmtime unavailable — skipping");
         return;
     }
-    let out = agree_on_the_structural_leg_with(
+    let out = agree_on_the_structural_leg(
         REPEATED_TUPLE_KEY_SORTS,
         "repeated tuple-key sorts under the double-free trap",
-        true,
     );
     assert_eq!(out, "400\n", "50 rounds x (c=6 + len(\"w0\")=2): the max count, ties broken by the word");
 }
