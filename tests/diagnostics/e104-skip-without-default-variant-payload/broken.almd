@@ -1,0 +1,4 @@
+// A variant case's record payload is a record too: its skipped field needs a default.
+type Event: Codec = | Login { user: String, @skip_decode trusted: Bool } | Logout
+
+fn main() -> Unit = println("ok")

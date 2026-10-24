@@ -122,6 +122,46 @@ fn every_family_row_is_honoured_by_the_derive_on_both_legs() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// The same family on a VARIANT case's record payload — the second lowering
+/// (`derive_codec_variant.rs`) reads `codec_field_use` too, or a
+/// `@skip_decode` payload field would be set from input again.
+#[test]
+fn every_family_row_is_honoured_by_the_variant_payload_derive_on_both_legs() {
+    if !tool_available() {
+        eprintln!("almide unavailable — skipping");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("almide-codec-skip-variant-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let rows: Vec<(Option<&str>, CodecFieldUse)> = std::iter::once((None, CodecFieldUse { decoded: true, encoded: true }))
+        .chain(CODEC_FIELD_SKIPS.iter().map(|(n, u)| (Some(*n), *u)))
+        .collect();
+    let legs: &[bool] = if wasmtime_available() { &[false, true] } else { &[false] };
+    for (attr, want) in rows {
+        let at = attr.map(|a| format!("@{a} ")).unwrap_or_default();
+        let src = format!(
+            "import json\n\
+             type E: Codec = | A {{ name: String, {at}x: Int = 0 }} | B\n\
+             fn main() -> Unit = {{\n\
+               let d = E.decode(json.parse(\"{{\\\"A\\\": {{\\\"name\\\": \\\"m\\\", \\\"x\\\": 7}}}}\") ?? value.null())\n\
+               println(match d {{ ok(A {{ name, x }}) => \"decoded x=${{x}}\", ok(_) => \"other\", err(e) => \"err ${{e}}\" }})\n\
+               println(\"encoded ${{json.stringify(E.encode(A {{ name: \\\"m\\\", x: 7 }}))}}\")\n\
+             }}\n"
+        );
+        let path = dir.join(format!("variant_{}.almd", attr.unwrap_or("plain")));
+        std::fs::write(&path, &src).unwrap();
+        for &wasm in legs {
+            let leg = if wasm { "wasm" } else { "native" };
+            let (ok, out, err) = run(&path, wasm, None);
+            assert!(ok, "{leg} {attr:?}: run failed\n{err}\n{src}");
+            assert!(out.contains("decoded x="), "{leg} {attr:?}: decode did not succeed:\n{out}");
+            assert_eq!(out.contains("decoded x=7"), want.decoded, "{leg} {attr:?}: decode direction wrong:\n{out}");
+            assert_eq!(out.contains("\"x\":7"), want.encoded, "{leg} {attr:?}: encode direction wrong:\n{out}");
+        }
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 const MATRIX: &str = "spec/wasm_cross/codec_field_skip_matrix.almd";
 /// The cell #4108 exists for: a request body carrying `"is_admin": true`
 /// must not make a `@skip_decode` field true.

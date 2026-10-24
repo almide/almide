@@ -34,6 +34,11 @@ pub(super) fn auto_derive_variant_encode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                 let mut pat_fields = vec![];
                 let mut entries: Vec<(String, Ty, IrExpr)> = vec![];
                 for f in fields {
+                    // `@skip` (#4108): never written — the pattern only skips it.
+                    if !crate::attr_vocab::codec_field_use(&f.attrs).encoded {
+                        pat_fields.push(IrFieldPattern { name: f.name.to_string(), pattern: Some(IrPattern::Wildcard) });
+                        continue;
+                    }
                     // `_f_` prefix: see auto_derive_decode — a payload field named
                     // `v`/`tag`/`payload` must not shadow the fn's own locals.
                     let pv = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
@@ -54,7 +59,7 @@ pub(super) fn auto_derive_variant_encode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                     let worker_name = format!("{}.__enc_case_{}", type_name, case.name);
                     let mut wparams: Vec<(VarId, String, Ty)> = vec![];
                     let mut wentries: Vec<(String, Ty, IrExpr)> = vec![];
-                    for f in fields {
+                    for f in fields.iter().filter(|f| crate::attr_vocab::codec_field_use(&f.attrs).encoded) {
                         let pv2 = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
                         wparams.push((pv2, format!("_f_{}", f.name), f.ty.clone()));
                         wentries.push((
@@ -234,7 +239,13 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                 let mut field_pairs = vec![];
                 for f in fields {
                     let key = f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string());
-                    let decoded = if f.ty.is_option() {
+                    let decoded = if !crate::attr_vocab::codec_field_use(&f.attrs).decoded {
+                        // `@skip` / `@skip_decode` (#4108): never read from the
+                        // payload; the declared default (required, E104) is the value.
+                        let mut d = f.default.clone().unwrap_or(IrExpr { kind: IrExprKind::Unit, ty: f.ty.clone(), span: None, def_id: None });
+                        if matches!(d.ty, Ty::Unknown) { d.ty = f.ty.clone(); }
+                        d
+                    } else if f.ty.is_option() {
                         let inner_ty = f.ty.inner().cloned().unwrap_or_else(|| f.ty.clone());
                         let payload = IrExpr { kind: IrExprKind::Var { id: var_payload }, ty: value_ty.clone(), span: None, def_id: None };
                         if let Some(inline) = decode_option_field_inline(wk, payload.clone(), &key, &inner_ty, &value_ty) {
