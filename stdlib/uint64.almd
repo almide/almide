@@ -216,9 +216,9 @@ local fn rotate_count(n: Int) -> Int = {
 /// Bits needed to hold x; 0 for 0.
 fn bit_length(x: UInt64) -> Int = 64 - int.count_leading_zeros(int.from_uint64(x))
 
-/// Decimal UInt64 from trimmed s; err on junk, a sign of -, or above 2^64-1.
+/// Decimal UInt64 from ASCII-trimmed s; err on junk, a sign of -, or above 2^64-1.
 fn parse(s: String) -> Result[UInt64, String] = {
-  let t = string.trim(s)
+  let t = trim_ascii_ws(s)
   if string.starts_with(t, "-") then err("invalid digit found in string")
   else match int.parse(t) {
     ok(n) => ok(int.to_uint64(n)),
@@ -341,4 +341,17 @@ fn __sum(xs: List[UInt64]) -> UInt64 = {
 fn __product(xs: List[UInt64]) -> UInt64 = {
   let one: UInt64 = 1
   list.fold(xs, one, (a, b) => a * b)
+}
+
+// int.parse's trim (C-413): ASCII TAB LF FF CR SPACE only, so "\u{a0}5" stays junk here too.
+local fn is_ascii_ws(c: String) -> Bool = match c {
+  " " | "\t" | "\n" | "\r" => true,
+  _ => c == string.from_codepoint(12),
+}
+
+local fn trim_ascii_ws(s: String) -> String = {
+  let n = string.len(s)
+  if n > 0 and is_ascii_ws(string.take(s, 1)) then trim_ascii_ws(string.drop(s, 1))
+  else if n > 0 and is_ascii_ws(string.slice(s, n - 1, n)) then trim_ascii_ws(string.take(s, n - 1))
+  else s
 }

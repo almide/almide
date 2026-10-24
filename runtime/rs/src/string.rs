@@ -139,8 +139,8 @@ pub fn almide_rt_string_capitalize(s: &str) -> AlmideString {
     if let Some(f) = c.next() { almide_case_push(&mut out, f, f.to_uppercase()); out.push_str(c.as_str()); }
     out.into()
 }
-pub fn almide_rt_string_to_int(s: &str) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { s.trim().parse::<i64>().map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
-pub fn almide_rt_string_to_float(s: &str) -> Result<f64, AlmideString> { let __almide_r: Result<f64, String> = (|| { s.trim().parse::<f64>().map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_string_to_int(s: &str) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { s.trim_ascii().parse::<i64>().map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_string_to_float(s: &str) -> Result<f64, AlmideString> { almide_rt_float_parse(s) }
 pub fn almide_rt_string_to_bytes(s: &str) -> Vec<i64> { s.bytes().map(|b| b as i64).collect() }
 // UTF-8 lossy decode — the inverse of `to_bytes` (which emits UTF-8), matching
 // Almide's `bytes.to_string_lossy` and every other language's bytes→string. (Was

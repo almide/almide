@@ -11,16 +11,13 @@
 //    (with a truncation-sticky bit past 800 digits), and the f64 is assembled bit-exactly via
 //    prim.ffrombits. Denormal min (5e-324), f64 max (1.7976931348623157e308), and 19+-digit
 //    mantissas all round exactly as Rust does. (flight-evidence-gaps F7.)
-// Out-of-grammar input (junk, no digit) returns `err`; "inf"/"infinity"/"nan" parse as IEEE
-// specials. Uses only scalar helpers + position arithmetic + a byte buffer (the v1 subset).
+// Out-of-grammar input (junk, no digit) returns `err`. FINITE-ONLY (C-413): "inf"/"infinity"/"nan"
+// in any case or sign are out of grammar (`invalid float literal`), and a finite literal that rounds
+// past f64::MAX is `float literal out of range`; underflow to 0 stays ok. Uses only scalar helpers + position arithmetic + a byte buffer (the v1 subset).
 fn __fp_isdigit(b: Int) -> Bool = b >= 48 and b <= 57
 
-fn __fp_isspace(b: Int) -> Bool = b == 32 or b == 9
-
-// Case-insensitive byte match (Rust's f64 parser accepts "inf"/"Infinity"/"NaN" in any case).
-fn __fp_lc(b: Int) -> Int = if b >= 65 and b <= 90 then b + 32 else b
-
-fn __fp_eqci(addr: Int, c: Int) -> Bool = __fp_lc(prim.load8(addr)) == c
+// ASCII whitespace exactly as Rust's str::trim_ascii (C-413): TAB LF FF CR SPACE — not VT, no Unicode space.
+fn __fp_isspace(b: Int) -> Bool = b == 32 or b == 9 or b == 10 or b == 12 or b == 13
 
 fn __fp_skip_sp(addr: Int, end: Int) -> Int =
   if addr < end and __fp_isspace(prim.load8(addr)) then __fp_skip_sp(
@@ -300,11 +297,8 @@ fn __fp_slow(p0: Int, i_end: Int, f_start: Int, f_end: Int, ex: Int, neg: Bool) 
   __fp_exact(hb, neg)
 }
 
-// v0 trims UNICODE whitespace (`s.trim()`); see string_to_int. (C-021.)
-fn float_parse(s: String) -> Result[Float, String] = {
-  let t = string.trim(s)
-  __fp_raw(t)
-}
+// Trims ASCII whitespace only, inside __fp_raw (C-413); "\u{a0}5" is junk.
+fn float_parse(s: String) -> Result[Float, String] = __fp_raw(s)
 
 fn __fp_raw(s: String) -> Result[Float, String] = {
   let h = prim.handle(s)
@@ -314,24 +308,6 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
   let en = __fp_skip_sp_end(st, base + blen)
   let neg = st < en and prim.load8(st) == 45
   let p0 = if st < en and (prim.load8(st) == 45 or prim.load8(st) == 43) then st + 1 else st
-  // IEEE special values (Rust's strtod accepts these): "inf" / "infinity" / "nan", case-insensitive,
-  // the optional sign already folded into neg/p0. Checked before the digit grammar (which rejects them).
-  // inf is built by RUNTIME division (prim.i2f, NOT a folded literal): 1/0 = +inf on every host. Any
-  // spelling of nan ("nan", "-nan", "+NaN", ...) is the ONE fixed pattern +qNaN 0x7FF8000000000000
-  // (C-055): a runtime 0/0 is -NaN on x86 and +NaN on aarch64, and Rust's own parser answers -NaN
-  // for "-nan", so the sign would otherwise decide list.min/max differently per leg.
-  let tlen = en - p0
-  let is_inf = (tlen == 3 and __fp_eqci(p0, 105) and __fp_eqci(p0 + 1, 110) and __fp_eqci(
-    p0 + 2,
-    102,
-  )) or (tlen == 8 and __fp_eqci(p0, 105) and __fp_eqci(p0 + 1, 110) and __fp_eqci(p0 + 2, 102) and __fp_eqci(
-    p0 + 3,
-    105,
-  ) and __fp_eqci(p0 + 4, 110) and __fp_eqci(p0 + 5, 105) and __fp_eqci(p0 + 6, 116) and __fp_eqci(
-    p0 + 7,
-    121,
-  ))
-  let is_nan = tlen == 3 and __fp_eqci(p0, 110) and __fp_eqci(p0 + 1, 97) and __fp_eqci(p0 + 2, 110)
   // integer part
   let i_end = __fp_scan_digits(p0, en)
   let icnt = i_end - p0
@@ -356,11 +332,7 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
   let got_digit = icnt + fcnt > 0
   let consumed_all = e_end >= en
   let ok_form = got_digit and (e_cnt > 0) and consumed_all
-  if is_inf then {
-    let infv = prim.i2f(1) / prim.i2f(0)
-    if neg then ok(0.0 - infv) else ok(infv)
-  } else if is_nan then ok(prim.ffrombits(0x7FF8000000000000))
-  else if not ok_form then (if en <= st then err("cannot parse float from empty string") else err("invalid float literal"))
+  if not ok_form then (if en <= st then err("cannot parse float from empty string") else err("invalid float literal"))
   else {
     let net = exp - fcnt
     let pos_net = if net >= 0 then net else 0 - net
@@ -374,6 +346,11 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
       // ("-0.0" parsed sign-less, #663). Multiply by -1.0 instead: -1.0 * 0.0 = -0.0.
       let v = if neg then -1.0 * scaled else scaled
       ok(v)
-    } else ok(__fp_slow(p0, i_end, f_start, f_end, exp, neg))
+    } else {
+      // Only the slow path can overflow (the fast path tops out near 1e37).
+      let v = __fp_slow(p0, i_end, f_start, f_end, exp, neg)
+      let mag = if v < 0.0 then 0.0 - v else v
+      if mag > 1.7976931348623157e308 then err("float literal out of range") else ok(v)
+    }
   }
 }

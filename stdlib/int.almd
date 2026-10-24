@@ -28,7 +28,7 @@ fn to_string(n: Int) -> String = _
 @intrinsic("almide_rt_int_to_hex")
 fn to_hex(n: Int) -> String = _
 
-/// Decimal Int from trimmed s; err on junk or overflow.
+/// Decimal Int from s trimmed of ASCII space/tab/LF/FF/CR; err on junk or overflow.
 @intrinsic("almide_rt_int_parse")
 fn parse(s: String) -> Result[Int, String] = _
 

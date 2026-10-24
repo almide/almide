@@ -26,7 +26,7 @@ fn to_int(n: Float) -> Int = _
 @intrinsic("almide_rt_float_from_int")
 fn from_int(n: Int) -> Float = _
 
-/// Float from trimmed s; takes 1e3, inf, NaN; err on junk.
+/// Finite Float from s trimmed of ASCII space; err on junk, inf, NaN, overflow.
 @intrinsic("almide_rt_float_parse")
 fn parse(s: String) -> Result[Float, String] = _
 
