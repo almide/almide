@@ -67,6 +67,9 @@ wasmparser = "0.262"
 # `almide verify` pins the SHA-256 of the file it certifies (#4011); almide-verify
 # recomputes it with its own implementation.
 sha2 = "0.11"
+# The in-tree HTTPS client self-update downloads with (#4181): the stdlib
+# `http` module's rustls client, so no `curl` from PATH is run.
+almide-rt-core = { path = "crates/almide-rt-core" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

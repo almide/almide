@@ -165,19 +165,10 @@ fn fetch_latest_version() -> Result<String, String> {
         "https://api.github.com/repos/{}/releases/latest",
         REPO
     );
-    let output = Command::new("curl")
-        .args(["-fsSL", "-H", "Accept: application/vnd.github+json", &url])
-        .output()
-        .map_err(|e| format!("curl not found: {}", e))?;
+    let body = https_get(&url, &[("Accept", "application/vnd.github+json")])
+        .map_err(|e| format!("GitHub API request failed: {e}"))?;
 
-    if !output.status.success() {
-        return Err(format!(
-            "GitHub API request failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+    let json: serde_json::Value = serde_json::from_slice(&body)
         .map_err(|e| format!("failed to parse GitHub API response: {}", e))?;
 
     let tag = json
@@ -253,19 +244,63 @@ fn expected_checksum(checksums: &str, archive_name: &str) -> Option<String> {
 }
 
 fn curl_download(url: &str, dest: &str) {
-    let status = Command::new("curl")
-        .args(["-fsSL", "-o", dest, url])
-        .status()
-        .unwrap_or_else(|e| {
-            err(&format!("error: curl not found: {}", e));
-            err(&format!("       curl is required for self-update"));
-            std::process::exit(1);
-        });
-    if !status.success() {
-        err(&format!("error: download failed: {}", url));
+    // In-process HTTPS (#4181): no `curl` from PATH, no `.curlrc`, and a
+    // redirect may only lead to another https URL.
+    let body = https_get(url, &[]).unwrap_or_else(|e| {
+        err(&format!("error: download failed: {}: {}", url, e));
         err(&format!("       check that the version exists: https://github.com/{}/releases", REPO));
         std::process::exit(1);
+    });
+    if let Err(e) = std::fs::write(dest, &body) {
+        err(&format!("error: cannot write {}: {}", dest, e));
+        std::process::exit(1);
     }
+}
+
+/// The most redirects a download follows (GitHub's release assets take one).
+const MAX_REDIRECTS: usize = 5;
+
+/// GET `url` over the in-tree HTTPS client (rustls, the one the stdlib
+/// `http` module uses), following redirects under [`follow_https`]'s rules.
+fn https_get(url: &str, headers: &[(&str, &str)]) -> Result<Vec<u8>, String> {
+    let mut hs: Vec<(String, String)> = vec![("User-Agent".into(), format!("almide-self-update/{CURRENT_VERSION}"))];
+    hs.extend(headers.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+    follow_https(url, &mut |u: &str| almide_rt_core::http_client_core::request_response_bytes("GET", u, "", &hs))
+}
+
+/// One fetch: `(status, headers, body)`.
+type Fetched = (i64, Vec<(String, String)>, Vec<u8>);
+
+/// The redirect policy of a self-update download (#4181): every URL —
+/// the first and each `Location` — must be `https://`; at most
+/// [`MAX_REDIRECTS`] hops; a 2xx is the answer and anything else an error.
+fn follow_https(url: &str, fetch: &mut dyn FnMut(&str) -> Result<Fetched, String>) -> Result<Vec<u8>, String> {
+    let mut url = url.to_string();
+    for _ in 0..=MAX_REDIRECTS {
+        if !url.starts_with("https://") {
+            return Err(format!("refusing a non-https URL: {url}"));
+        }
+        let (status, headers, body) = fetch(&url)?;
+        match status {
+            200..=299 => return Ok(body),
+            301 | 302 | 303 | 307 | 308 => {
+                let loc = headers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("location"))
+                    .map(|(_, v)| v.trim().to_string())
+                    .ok_or_else(|| format!("HTTP {status} without a Location from {url}"))?;
+                url = if loc.starts_with('/') {
+                    // An absolute path on the same origin.
+                    let origin_end = url["https://".len()..].find('/').map_or(url.len(), |i| i + "https://".len());
+                    format!("{}{}", &url[..origin_end], loc)
+                } else {
+                    loc
+                };
+            }
+            other => return Err(format!("HTTP {other} from {url}")),
+        }
+    }
+    Err(format!("more than {MAX_REDIRECTS} redirects"))
 }
 
 fn verify_checksum(archive_path: &str, checksum_path: &str, archive_name: &str) {
@@ -448,5 +483,44 @@ dddd  almide-macos-aarch64.tar.gz extra-field
         let failing = verify_attestation("false", "x.tar.gz").unwrap_err();
         assert!(failing.contains("did not verify"), "{failing}");
         assert!(verify_attestation("true", "x.tar.gz").is_ok());
+    }
+
+    fn redirect(to: &str) -> Result<Fetched, String> {
+        Ok((302, vec![("Location".into(), to.into())], Vec::new()))
+    }
+
+    /// #4181: the download follows redirects only to https, and a bounded number.
+    #[test]
+    fn downloads_follow_only_https_redirects() {
+        // https → https → 200: followed.
+        let mut seen = Vec::new();
+        let got = follow_https("https://a.example/x", &mut |u: &str| {
+            seen.push(u.to_string());
+            match u {
+                "https://a.example/x" => redirect("https://b.example/y"),
+                "https://b.example/y" => redirect("/z"),
+                _ => Ok((200, vec![], b"ok".to_vec())),
+            }
+        });
+        assert_eq!(got.unwrap(), b"ok");
+        assert_eq!(seen, ["https://a.example/x", "https://b.example/y", "https://b.example/z"]);
+        // A redirect to plain http is refused before it is fetched.
+        let mut fetched_http = false;
+        let e = follow_https("https://a.example/x", &mut |u: &str| {
+            if u.starts_with("http://") {
+                fetched_http = true;
+            }
+            redirect("http://evil.example/x")
+        })
+        .unwrap_err();
+        assert!(e.contains("non-https"), "{e}");
+        assert!(!fetched_http);
+        // The first URL is held to the same rule.
+        assert!(follow_https("http://a.example/x", &mut |_: &str| Ok((200, vec![], vec![]))).is_err());
+        // A redirect loop ends.
+        let e = follow_https("https://a.example/x", &mut |_: &str| redirect("https://a.example/x")).unwrap_err();
+        assert!(e.contains("redirects"), "{e}");
+        // A non-2xx is an error, not a file.
+        assert!(follow_https("https://a.example/x", &mut |_: &str| Ok((404, vec![], b"nope".to_vec()))).is_err());
     }
 }
