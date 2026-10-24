@@ -32,3 +32,6 @@ almide-driver = { path = "../almide-driver" }
 # DEV-ONLY so the workspace-root `almide` crate can depend on almide-mir's LIB
 # WITHOUT a cycle (the lib's dependency graph never reaches `almide`).
 almide = { path = "../.." }
+# The native wall (#4006): emit_native_bundle pins the rendered Rust source
+# by SHA-256 in the certificate bundle; almide-verify recomputes it.
+sha2 = "0.11"
