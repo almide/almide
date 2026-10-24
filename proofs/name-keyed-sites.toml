@@ -1042,7 +1042,7 @@ names = 4
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_SUM::table"
 class = "legacy"
-names = 91
+names = 92
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_VERIFIED::table"
