@@ -75,7 +75,8 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "456"
+# 2026-10-24: 456 -> 457 for random.bytes (#3938), new and uninspected until its ADR-0027 effect inspection run.
+# uninspected_ceiling = "457"
 
 [[fn]]
 name = "args.flag"
