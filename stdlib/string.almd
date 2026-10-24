@@ -76,15 +76,15 @@ fn pad_start(s: String, n: Int, ch: String) -> String = _
 @intrinsic("almide_rt_string_to_bytes")
 fn to_bytes(s: String) -> List[Int] = _
 
-/// First char uppercased, rest untouched.
+/// First char uppercased as to_upper does, rest untouched.
 @intrinsic("almide_rt_string_capitalize")
 fn capitalize(s: String) -> String = _
 
-/// Unicode uppercase; may lengthen s.
+/// Unicode uppercase; never folds non-ASCII into ASCII; not for identity.
 @intrinsic("almide_rt_string_to_upper")
 fn to_upper(s: String) -> String = _
 
-/// Unicode lowercase, not just ASCII.
+/// Unicode lowercase; never folds non-ASCII into ASCII; not for identity.
 @intrinsic("almide_rt_string_to_lower")
 fn to_lower(s: String) -> String = _
 
