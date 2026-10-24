@@ -23,7 +23,6 @@ pub use almide::{
 // to change after the `compile_driver` split.
 use compile_driver::{parse_file, try_compile, register_versioned_module_names, try_compile_with_ir, try_compile_reporting, codegen_metered};
 
-use std::process::Command;
 
 /// When true, suppress warning output during compilation (used by REPL).
 pub(crate) static SUPPRESS_WARNINGS: std::sync::atomic::AtomicBool =
@@ -37,17 +36,15 @@ use cli_args::Cli;
 use dispatch::dispatch;
 
 
+/// The rustc the direct-rustc build routes run, refused below the floor
+/// (#4110, `cli::rustc_floor::MIN_RUSTC`): every native route reaches rustc
+/// through here or cargo through `cli::rustc_floor::cargo_command`.
 fn find_rustc() -> String {
-    if Command::new("rustc").arg("--version").output().is_ok() {
-        return "rustc".to_string();
+    if let Err(e) = cli::rustc_floor::require() {
+        eprintln!("{e}");
+        std::process::exit(1);
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        let cargo_rustc = std::path::PathBuf::from(home).join(".cargo/bin/rustc");
-        if cargo_rustc.exists() {
-            return cargo_rustc.to_string_lossy().to_string();
-        }
-    }
-    "rustc".to_string()
+    cli::rustc_floor::locate_rustc()
 }
 
 fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<String>) {
