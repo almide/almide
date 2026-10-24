@@ -37,6 +37,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
+# #4094: the same read-only token the repository default gives, stated here so a
+# settings change cannot widen it. A job that needs more declares it itself.
+permissions: read-all
+
 jobs:
   sweep:
     name: Mutation sweep (shard ${{ matrix.shard }}/4)
@@ -48,8 +52,8 @@ jobs:
         # 1-based for the job name; the gate's ALMIDE_MUTATION_SHARD stays 0-based.
         shard: [1, 2, 3, 4]
     steps:
-      - uses: actions/checkout@v7
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: this shard's mutants must all be caught
         run: |
           set -o pipefail
@@ -57,7 +61,7 @@ jobs:
           ALMIDE_MUTATION_SHARD=$(( ${{ matrix.shard }} - 1 )) \
             bash scripts/check-mutation-gate.sh | tee mutation-shard-${{ matrix.shard }}.log
       # The per-mutant verdict lines are the measurement the score job reads.
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: mutation-shard-${{ matrix.shard }}
@@ -75,8 +79,8 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: mutation-shard-*
           path: shards
