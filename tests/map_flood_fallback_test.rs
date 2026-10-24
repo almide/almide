@@ -1,7 +1,9 @@
 //! #4104: keys crafted to collide under the map index's fast hash must not
 //! make building a native `Map` quadratic. The index stays on the fast hash
 //! by default; a map whose inserts probe past `ALMIDE_MAP_FLOOD_PROBES`
-//! re-indexes itself under a per-process keyed hash.
+//! moves to an index ordered by each key's canonical bytes. That index is
+//! deterministic, uses no hidden entropy, and costs O(log n) per operation
+//! whatever the keys.
 //!
 //! The keys are made by inverting the runtime's `almide_rt_map_mix64` (the
 //! Int key hash): every target hash shares its low 20 bits, so every key
