@@ -5156,4 +5156,5 @@ status    = "active"
 evidence  = [
   { path = "tests/fs_scope_test.rs", name = "permissions_fs_bounds_every_fs_call_alike_on_both_targets", class = "fixture" },
   { path = "tests/fs_scope_test.rs", name = "the_component_host_preopens_only_the_granted_roots", class = "fixture" },
+  { path = "tests/fs_scope_test.rs", name = "almide_test_is_bounded_by_permissions_fs_on_both_targets", class = "fixture" },
 ]
