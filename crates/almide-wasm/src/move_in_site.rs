@@ -89,6 +89,10 @@ pub(super) struct MoveIn {
     pub(super) subject: Option<Subject>,
     /// The index of the last statement of the site (the last write-back).
     pub(super) last: usize,
+    /// The sites (argument slices) that are FRAME-TAIL leaves: a var there is
+    /// dead because the frame ends, which holds for a local only — a module
+    /// global outlives every frame, so it never moves at one of these.
+    frame_tail: Vec<usize>,
 }
 
 impl MoveIn {
@@ -96,8 +100,9 @@ impl MoveIn {
     /// block lowered inside it, whose own walk would otherwise drop them).
     pub(super) fn joined(site: Option<MoveIn>, outer: &Option<MoveIn>) -> Option<MoveIn> {
         let Some(o) = outer else { return site };
-        let mut m = site.unwrap_or(MoveIn { at: Vec::new(), subject: None, last: usize::MAX });
+        let mut m = site.unwrap_or(MoveIn { at: Vec::new(), subject: None, last: usize::MAX, frame_tail: Vec::new() });
         m.at.extend(o.at.iter().cloned());
+        m.frame_tail.extend(o.frame_tail.iter().copied());
         Some(m)
     }
 
@@ -105,6 +110,11 @@ impl MoveIn {
     pub(super) fn vars_at(&self, args: &[IrExpr]) -> Option<Vec<Place>> {
         let at = args.as_ptr() as usize;
         self.at.iter().find(|(p, _)| *p == at).map(|(_, v)| v.clone())
+    }
+
+    /// Is the call with this argument slice a frame-tail leaf site?
+    pub(super) fn is_frame_tail(&self, args: &[IrExpr]) -> bool {
+        self.frame_tail.contains(&(args.as_ptr() as usize))
     }
 }
 
@@ -141,7 +151,7 @@ pub(super) fn move_in_site(stmts: &[IrStmt], tail: Option<&IrExpr>, i: usize) ->
     }
     let mut at = Vec::new();
     exit_calls(value, &vars, &mut at);
-    (!at.is_empty()).then_some(MoveIn { at, subject, last })
+    (!at.is_empty()).then_some(MoveIn { at, subject, last, frame_tail: Vec::new() })
 }
 
 /// The move-in sites of a fold body: the fold rebinds the accumulator
@@ -150,7 +160,7 @@ pub(super) fn move_in_site(stmts: &[IrStmt], tail: Option<&IrExpr>, i: usize) ->
 pub(super) fn fold_site(body: &IrExpr, acc: VarId) -> Option<MoveIn> {
     let mut at = Vec::new();
     exit_calls(body, &[Place::Var(acc)], &mut at);
-    (!at.is_empty()).then_some(MoveIn { at, subject: None, last: usize::MAX })
+    (!at.is_empty()).then_some(MoveIn { at, subject: None, last: usize::MAX, frame_tail: Vec::new() })
 }
 
 /// The frame-tail move-in sites: a call nested in one of the body's result
@@ -166,7 +176,8 @@ pub(super) fn fold_site(body: &IrExpr, acc: VarId) -> Option<MoveIn> {
 pub(super) fn frame_tail_sites(body: &IrExpr) -> Option<MoveIn> {
     let mut at = Vec::new();
     tail_leaves(body, &mut Vec::new(), &mut at);
-    (!at.is_empty()).then_some(MoveIn { at, subject: None, last: usize::MAX })
+    let frame_tail = at.iter().map(|(p, _)| *p).collect();
+    (!at.is_empty()).then_some(MoveIn { at, subject: None, last: usize::MAX, frame_tail })
 }
 
 fn tail_leaves<'e>(e: &'e IrExpr, views: &mut Vec<&'e IrExpr>, out: &mut Vec<(usize, Vec<Place>)>) {

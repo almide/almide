@@ -74,7 +74,12 @@ impl Spelled {
                 self.members.insert(m.clone());
             }
         }
-        self.idents.extend(local.idents);
+        // A bare name the same declaration BINDS (`fn replace(b, from, to)`'s
+        // `from`) is that binding, never a call to a sibling fn of that name —
+        // counting it named `int.from[S: Numeric]` and loaded every number
+        // module into any program that reached `bytes`.
+        let binders = local.binders;
+        self.idents.extend(local.idents.into_iter().filter(|i| !binders.contains(i)));
         self.members.extend(local.members);
     }
 
@@ -528,6 +533,13 @@ mod tests {
         let r = reached("fn main() -> Unit = println(int.to_string(int.from(2.5)))\n");
         assert!(r.contains(&"int8") && r.contains(&"float64"), "{r:?}");
         let r = reached("fn main() -> Unit = println(int.to_string(list.len([1])))\n");
+        assert!(!r.contains(&"int8"), "{r:?}");
+    }
+
+    #[test]
+    fn a_param_named_like_a_generic_fn_does_not_name_it() {
+        // `from` here is the parameter, not `int.from[S: Numeric]`.
+        let r = reached("fn f(from: Int) -> Int = int.abs(from)\n");
         assert!(!r.contains(&"int8"), "{r:?}");
     }
 

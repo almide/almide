@@ -419,7 +419,12 @@ impl Emitter<'_> {
         let g = (self.var_space, id);
         let Some(&(gidx, _)) = self.globals.get(&g) else { return Ok(None) };
         let reaches = !matches!(self.work.global_reach.borrow().get(i), Some(Some(set)) if !set.contains(&g));
+        // A frame-tail leaf frees a LOCAL (the frame ends); a global outlives
+        // it, so moving one there emptied the global (`fn show(p) =
+        // f(arena, p)` left `arena` empty for the next reader).
+        let frame_tail = self.moves.move_in.as_ref().is_some_and(|m| m.is_frame_tail(args));
         if reaches
+            || frame_tail
             || !matches!(move_in, MoveSet::Vars(v) if v.contains(&place))
             || args.iter().enumerate().any(|(j, o)| j != k && mentions_beyond_scalar(o, id))
         {
