@@ -44,11 +44,29 @@ pub(crate) fn runtime_name_to_effect(name: &str) -> Option<Effect> {
 /// Before this, its `_` body contributed nothing and a foreign call reached
 /// the host uncategorised, past `[permissions]` and `check --effects`.
 /// `crate::effect_flow` seeds it as a constant on the fn's own node.
-pub(crate) fn declared_direct_effects(func: &IrFunction) -> HashSet<Effect> {
-    if func.extern_attrs.is_empty() {
-        return HashSet::new();
+///
+/// An `@inline_rust` template outside the stdlib is foreign code the same
+/// way (#4100): the native build splices the Rust text in place of the
+/// Almide body, which inference reads but the binary never runs. It is ⊤
+/// too. The stdlib's own templates (`in_stdlib`) are categorised by the
+/// stdlib call table instead, as before.
+pub(crate) fn declared_direct_effects(func: &IrFunction, in_stdlib: bool) -> HashSet<Effect> {
+    if !func.extern_attrs.is_empty() || (!in_stdlib && has_inline_rust(func)) {
+        return Effect::ALL.into_iter().collect();
     }
-    Effect::ALL.into_iter().collect()
+    HashSet::new()
+}
+
+/// Does `func` carry an `@inline_rust` template?
+pub(crate) fn has_inline_rust(func: &IrFunction) -> bool {
+    func.attrs.iter().any(|a| a.name.as_str() == "inline_rust")
+}
+
+/// Is `module` the stdlib's own: a stdlib module name lowered without a
+/// package identity? A dependency package always carries its versioned
+/// name, so one named like a stdlib module is not mistaken for it.
+pub(crate) fn is_stdlib_module(module: &IrModule) -> bool {
+    module.versioned_name.is_none() && almide_lang::stdlib_info::is_any_stdlib(module.name.as_str())
 }
 
 #[derive(Debug)]
@@ -159,8 +177,23 @@ mod tests {
     fn an_extern_fn_is_every_category() {
         for is_effect in [false, true] {
             let f = extern_fn("push_u32", is_effect);
-            assert_eq!(declared_direct_effects(&f), Effect::ALL.into_iter().collect(), "is_effect={is_effect}");
+            assert_eq!(declared_direct_effects(&f, false), Effect::ALL.into_iter().collect(), "is_effect={is_effect}");
         }
+    }
+
+    // #4100: an `@inline_rust` template is foreign code outside the stdlib.
+    #[test]
+    fn an_inline_rust_fn_outside_the_stdlib_is_every_category() {
+        let mut f = extern_fn("splice", false);
+        f.extern_attrs.clear();
+        assert!(declared_direct_effects(&f, false).is_empty(), "a plain fn declares nothing");
+        f.attrs.push(almide_lang::ast::Attribute {
+            name: almide_base::intern::sym("inline_rust"),
+            args: vec![],
+            span: None,
+        });
+        assert_eq!(declared_direct_effects(&f, false), Effect::ALL.into_iter().collect());
+        assert!(declared_direct_effects(&f, true).is_empty(), "the stdlib's own templates are categorised by the call table");
     }
 
     #[test]
