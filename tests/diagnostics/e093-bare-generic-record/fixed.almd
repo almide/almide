@@ -1,0 +1,8 @@
+type Box[A] = { v: A }
+
+fn keep(x: Box[Int]) -> Box[Int] = x
+
+effect fn main() -> Unit = {
+  let b = keep({ v: 1 })
+  println(int.to_string(b.v))
+}

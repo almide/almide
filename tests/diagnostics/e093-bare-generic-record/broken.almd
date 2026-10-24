@@ -1,0 +1,10 @@
+// A one-parameter generic record spelled without its type argument (#4085):
+// check passed it, the native build then failed and wasm ran it.
+type Box[A] = { v: A }
+
+fn keep(x: Box) -> Box = x
+
+effect fn main() -> Unit = {
+  let b = keep({ v: 1 })
+  println(int.to_string(b.v))
+}
