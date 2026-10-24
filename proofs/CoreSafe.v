@@ -46,7 +46,9 @@
 
    HONEST SCOPE. A core, not the language: no closures, records with more
    than one field, variants, strings, maps or effects; a function takes one
-   argument and its body is an expression; list elements are ints; a `let`
+   or two arguments (ECall, ECall2: each argument is owned by the callee for
+   the call and given back, in order, when it returns) and its body is an
+   expression; list elements are ints; a `let`
    binds a fresh name (a front end renames shadowing away). A binding is
    released when it is overwritten, not when its scope ends, and an
    aborting run releases nothing: both only leak, and a leak is not a
@@ -84,12 +86,17 @@ Inductive expr :=
   | ELen (e : expr)
   | EIf (c e1 e2 : expr)               (* if c then e1 else e2 *)
   | ECall (f : nat) (a : expr)         (* a call of function f on one argument *)
+  | ECall2 (f : nat) (a1 a2 : expr)    (* a call of two-argument function f *)
   | EBox (e : expr)                    (* a fresh box holding e's value *)
   | EUnbox (e : expr).                 (* the value a box holds *)
 
 (* A function: one parameter, an expression body, a declared signature.
    Recursion (direct or mutual) is a call to a function in the same table. *)
 Record FunDef := { fparam : Var; fpty : ty; fbody : expr; frty : ty }.
+
+(* A two-argument function: two distinct parameters, both owned by the
+   callee for the call and given back, in order, when it returns. *)
+Record FunDef2 := { f2p1 : Var; f2t1 : ty; f2p2 : Var; f2t2 : ty; f2body : expr; f2rty : ty }.
 
 Inductive stmt :=
   | SSkip
@@ -159,6 +166,7 @@ Inductive binop_step : binop -> val -> val -> nat -> list Ev -> res -> Prop :=
    arbitrary table; the theorem asks only that every body is well typed. *)
 Section Calls.
 Variable funs : nat -> option FunDef.
+Variable funs2 : nat -> option FunDef2.
 
 Definition empty_env : Env := fun _ => None.
 
@@ -201,6 +209,30 @@ Inductive eval : Heap -> Env -> nat -> expr -> list Ev -> res -> Prop :=
       eval (fold_left step t1 h) (upd empty_env (fparam d) v) n1 (fbody d) t2 Abort ->
       eval h r n (ECall f a) (t1 ++ t2) Abort
   | EvCallAbort : forall h r n f a t1, eval h r n a t1 Abort -> eval h r n (ECall f a) t1 Abort
+  (* A two-argument call: both arguments, left to right, moved into a fresh
+     environment holding only the two parameters; the body; then the first
+     parameter's reference given back, then the second's. *)
+  | EvCall2 : forall h r n f d a1 a2 t1 v1 n1 t2 v2 n2 t3 v' n3,
+      funs2 f = Some d -> eval h r n a1 t1 (Val v1 n1) ->
+      eval (fold_left step t1 h) r n1 a2 t2 (Val v2 n2) ->
+      eval (fold_left step t2 (fold_left step t1 h)) (upd (upd empty_env (f2p1 d) v1) (f2p2 d) v2) n2
+           (f2body d) t3 (Val v' n3) ->
+      eval h r n (ECall2 f a1 a2)
+        (t1 ++ t2 ++ t3 ++
+         dropv (fold_left step t3 (fold_left step t2 (fold_left step t1 h))) v1 ++
+         dropv (fold_left step (dropv (fold_left step t3 (fold_left step t2 (fold_left step t1 h))) v1)
+                  (fold_left step t3 (fold_left step t2 (fold_left step t1 h)))) v2)
+        (Val v' n3)
+  | EvCall2BodyAbort : forall h r n f d a1 a2 t1 v1 n1 t2 v2 n2 t3,
+      funs2 f = Some d -> eval h r n a1 t1 (Val v1 n1) ->
+      eval (fold_left step t1 h) r n1 a2 t2 (Val v2 n2) ->
+      eval (fold_left step t2 (fold_left step t1 h)) (upd (upd empty_env (f2p1 d) v1) (f2p2 d) v2) n2
+           (f2body d) t3 Abort ->
+      eval h r n (ECall2 f a1 a2) (t1 ++ t2 ++ t3) Abort
+  | EvCall2Abort1 : forall h r n f a1 a2 t1, eval h r n a1 t1 Abort -> eval h r n (ECall2 f a1 a2) t1 Abort
+  | EvCall2Abort2 : forall h r n f a1 a2 t1 v1 n1 t2,
+      eval h r n a1 t1 (Val v1 n1) -> eval (fold_left step t1 h) r n1 a2 t2 Abort ->
+      eval h r n (ECall2 f a1 a2) (t1 ++ t2) Abort
   (* A box: a fresh block, initialized, the value MOVED into its slot. *)
   | EvBox : forall h r n e t v n1,
       eval h r n e t (Val v n1) ->
@@ -291,6 +323,8 @@ Inductive etyped (g : Ctx) : expr -> ty -> Prop :=
   | TyLen : forall e, etyped g e TList -> etyped g (ELen e) TInt
   | TyEIf : forall c e1 e2 t, etyped g c TBool -> etyped g e1 t -> etyped g e2 t -> etyped g (EIf c e1 e2) t
   | TyCall : forall f d a, funs f = Some d -> etyped g a (fpty d) -> etyped g (ECall f a) (frty d)
+  | TyCall2 : forall f d a1 a2, funs2 f = Some d -> etyped g a1 (f2t1 d) -> etyped g a2 (f2t2 d) ->
+      etyped g (ECall2 f a1 a2) (f2rty d)
   | TyBox : forall e t, etyped g e t -> etyped g (EBox e) (TBox t)
   | TyUnbox : forall e t, etyped g e (TBox t) -> etyped g (EUnbox e) t.
 
@@ -310,6 +344,17 @@ Definition funs_ok : Prop :=
   forall f d, funs f = Some d -> etyped (fun y => if Nat.eqb y (fparam d) then Some (fpty d) else None) (fbody d) (frty d).
 
 Hypothesis Hfuns : funs_ok.
+
+(* The two parameters' context. *)
+Definition ctx2 (d : FunDef2) : Ctx :=
+  fun y => if Nat.eqb y (f2p2 d) then Some (f2t2 d) else if Nat.eqb y (f2p1 d) then Some (f2t1 d) else None.
+
+(* Every two-argument function has distinct parameters and a body well typed
+   under them alone. *)
+Definition funs2_ok : Prop :=
+  forall f d, funs2 f = Some d -> f2p1 d <> f2p2 d /\ etyped (ctx2 d) (f2body d) (f2rty d).
+
+Hypothesis Hfuns2 : funs2_ok.
 
 (* ── The invariant ──────────────────────────────────────────────────────── *)
 
@@ -1042,6 +1087,92 @@ Proof.
   - (* EvCallAbort *)
     destruct (IHHev g _ s D F ltac:(eassumption) Dg E W0 O C) as [S1 [G1 _]].
     split; [exact S1 |]. split; [exact G1 | discriminate].
+  - (* EvCall2: both arguments, then the body under the two parameters, then
+       each parameter's reference given back *)
+    match goal with Hd : funs2 f = Some d, Hd' : funs2 f = Some ?d0 |- _ => rewrite Hd in Hd'; injection Hd' as <- end.
+    destruct (Hfuns2 f d H) as [Ne Hb].
+    destruct (IHHev1 g (f2t1 d) s D F ltac:(eassumption) Dg E W0 O C) as [S1 [G1 R1]].
+    destruct (R1 v1 n1 eq_refl) as [N1 [s1 [X1 [W1 [O1 [V1 C1]]]]]].
+    set (h1 := fold_left step t1 h) in *.
+    destruct (IHHev2 g (f2t2 d) s1 D (fun b => F b + vref v1 b)%nat ltac:(eassumption) Dg
+                (envok_mono g r s s1 h h1 n n1 G1 N1 X1 E) W1 O1
+                ltac:(eapply cnt_le; [| exact C1]; intro b; cbv beta; lia)) as [S2 [G2 R2]].
+    destruct (R2 v2 n2 eq_refl) as [N2 [s2 [X2 [W2 [O2 [V2 C2]]]]]].
+    set (h2 := fold_left step t2 h1) in *.
+    set (env2 := upd (upd empty_env (f2p1 d) v1) (f2p2 d) v2).
+    assert (V1' : vty s2 h2 n2 v1 (f2t1 d)) by exact (vty_mono _ s1 s2 h1 h2 n1 n2 v1 G2 N2 X2 V1).
+    assert (Ec : envok (ctx2 d) env2 s2 h2 n2).
+    { intros y ty0 Hy. unfold ctx2, env2, upd in *.
+      destruct (Nat.eqb y (f2p2 d)); [injection Hy as <-; eauto |].
+      destruct (Nat.eqb y (f2p1 d)); [injection Hy as <-; eauto | discriminate]. }
+    assert (Dc : dom_in (ctx2 d) [f2p1 d; f2p2 d]).
+    { intros y ty0 Hy. unfold ctx2 in Hy.
+      destruct (Nat.eqb y (f2p2 d)) eqn:B2; [apply Nat.eqb_eq in B2; right; left; symmetry; exact B2 |].
+      destruct (Nat.eqb y (f2p1 d)) eqn:B1; [apply Nat.eqb_eq in B1; left; symmetry; exact B1 | discriminate]. }
+    assert (Rp : forall b, envrefs [f2p1 d; f2p2 d] env2 b = (vref v1 b + vref v2 b)%nat).
+    { intro b. unfold env2, upd. simpl. rewrite Nat.eqb_refl.
+      replace (Nat.eqb (f2p1 d) (f2p2 d)) with false by (symmetry; apply Nat.eqb_neq; exact Ne).
+      rewrite Nat.eqb_refl. simpl. lia. }
+    destruct (IHHev3 (ctx2 d) (f2rty d) s2 [f2p1 d; f2p2 d] (fun b => envrefs D r b + F b)%nat Hb Dc Ec W2 O2
+                ltac:(eapply cnt_le; [| exact C2]; intro b; cbv beta; rewrite Rp; lia)) as [S3 [G3 R3]].
+    destruct (R3 v' n3 eq_refl) as [N3 [s3 [X3 [W3 [O3 [V3 C3]]]]]].
+    set (h3 := fold_left step t3 h2) in *.
+    destruct (dropv_ok v1 s3 h3 n3 (fun b => envrefs D r b + F b + vref v' b + vref v2 b)%nat (f2t1 d) W3 O3
+                (vty_mono (f2t1 d) s2 s3 h2 h3 n2 n3 v1 G3 N3 X3 V1')
+                ltac:(eapply cnt_le; [| exact C3]; intro b; cbv beta; rewrite Rp; lia)) as [S4 [G4 [W4 C4]]].
+    set (h4 := fold_left step (dropv h3 v1) h3) in *.
+    destruct (dropv_ok v2 s3 h4 n3 (fun b => envrefs D r b + F b + vref v' b)%nat (f2t2 d) W4
+                (sok_mono s3 h3 h4 n3 n3 G4 (le_n n3) O3)
+                (vty_mono (f2t2 d) s2 s3 h2 h4 n2 n3 v2 (grows_trans _ _ _ G3 G4) N3 X3 V2)
+                ltac:(eapply cnt_le; [| exact C4]; intro b; cbv beta; lia)) as [S5 [G5 [W5 C5]]].
+    rewrite !holds_app, !fold_left_app. fold h1. fold h2. fold h3. fold h4.
+    split; [split; [exact S1 | split; [exact S2 | split; [exact S3 | split; [exact S4 | exact S5]]]] |].
+    split; [exact (grows_trans _ _ _ G1 (grows_trans _ _ _ G2 (grows_trans _ _ _ G3 (grows_trans _ _ _ G4 G5)))) |].
+    intros vv nn Ev. injection Ev as <- <-. split; [lia |]. exists s3.
+    split; [exact (sext_trans _ _ _ X1 (sext_trans _ _ _ X2 X3)) |]. split; [exact W5 |].
+    split; [exact (sok_mono s3 h3 _ n3 n3 (grows_trans _ _ _ G4 G5) (le_n n3) O3) |].
+    split; [exact (vty_mono _ s3 s3 h3 _ n3 n3 v' (grows_trans _ _ _ G4 G5) (le_n n3) (sext_refl s3) V3) | exact C5].
+  - (* EvCall2BodyAbort *)
+    match goal with Hd : funs2 f = Some d, Hd' : funs2 f = Some ?d0 |- _ => rewrite Hd in Hd'; injection Hd' as <- end.
+    destruct (Hfuns2 f d H) as [Ne Hb].
+    destruct (IHHev1 g (f2t1 d) s D F ltac:(eassumption) Dg E W0 O C) as [S1 [G1 R1]].
+    destruct (R1 v1 n1 eq_refl) as [N1 [s1 [X1 [W1 [O1 [V1 C1]]]]]].
+    set (h1 := fold_left step t1 h) in *.
+    destruct (IHHev2 g (f2t2 d) s1 D (fun b => F b + vref v1 b)%nat ltac:(eassumption) Dg
+                (envok_mono g r s s1 h h1 n n1 G1 N1 X1 E) W1 O1
+                ltac:(eapply cnt_le; [| exact C1]; intro b; cbv beta; lia)) as [S2 [G2 R2]].
+    destruct (R2 v2 n2 eq_refl) as [N2 [s2 [X2 [W2 [O2 [V2 C2]]]]]].
+    set (h2 := fold_left step t2 h1) in *.
+    set (env2 := upd (upd empty_env (f2p1 d) v1) (f2p2 d) v2).
+    assert (V1' : vty s2 h2 n2 v1 (f2t1 d)) by exact (vty_mono _ s1 s2 h1 h2 n1 n2 v1 G2 N2 X2 V1).
+    assert (Ec : envok (ctx2 d) env2 s2 h2 n2).
+    { intros y ty0 Hy. unfold ctx2, env2, upd in *.
+      destruct (Nat.eqb y (f2p2 d)); [injection Hy as <-; eauto |].
+      destruct (Nat.eqb y (f2p1 d)); [injection Hy as <-; eauto | discriminate]. }
+    assert (Dc : dom_in (ctx2 d) [f2p1 d; f2p2 d]).
+    { intros y ty0 Hy. unfold ctx2 in Hy.
+      destruct (Nat.eqb y (f2p2 d)) eqn:B2; [apply Nat.eqb_eq in B2; right; left; symmetry; exact B2 |].
+      destruct (Nat.eqb y (f2p1 d)) eqn:B1; [apply Nat.eqb_eq in B1; left; symmetry; exact B1 | discriminate]. }
+    assert (Rp : forall b, envrefs [f2p1 d; f2p2 d] env2 b = (vref v1 b + vref v2 b)%nat).
+    { intro b. unfold env2, upd. simpl. rewrite Nat.eqb_refl.
+      replace (Nat.eqb (f2p1 d) (f2p2 d)) with false by (symmetry; apply Nat.eqb_neq; exact Ne).
+      rewrite Nat.eqb_refl. simpl. lia. }
+    destruct (IHHev3 (ctx2 d) (f2rty d) s2 [f2p1 d; f2p2 d] (fun b => envrefs D r b + F b)%nat Hb Dc Ec W2 O2
+                ltac:(eapply cnt_le; [| exact C2]; intro b; cbv beta; rewrite Rp; lia)) as [S3 [G3 _]].
+    rewrite !holds_app, !fold_left_app. fold h1. fold h2.
+    split; [split; [exact S1 | split; [exact S2 | exact S3]] |].
+    split; [exact (grows_trans _ _ _ G1 (grows_trans _ _ _ G2 G3)) | discriminate].
+  - (* EvCall2Abort1 *)
+    destruct (IHHev g _ s D F ltac:(eassumption) Dg E W0 O C) as [S1 [G1 _]].
+    split; [exact S1 |]. split; [exact G1 | discriminate].
+  - (* EvCall2Abort2 *)
+    destruct (IHHev1 g _ s D F ltac:(eassumption) Dg E W0 O C) as [S1 [G1 R1]].
+    destruct (R1 v1 n1 eq_refl) as [N1 [s1 [X1 [W1 [O1 [V1 C1]]]]]].
+    destruct (IHHev2 g _ s1 D (fun b => F b + vref v1 b)%nat ltac:(eassumption) Dg
+                (envok_mono g r s s1 h _ n n1 G1 N1 X1 E) W1 O1
+                ltac:(eapply cnt_le; [| exact C1]; intro b; cbv beta; lia)) as [S2 [G2 _]].
+    rewrite holds_app, fold_left_app. split; [split; [exact S1 | exact S2] |].
+    split; [exact (grows_trans _ _ _ G1 G2) | discriminate].
   - (* EvBox: a fresh box; the value moves into its slot *)
     destruct (IHHev g t0 s D F ltac:(eassumption) Dg E W0 O C) as [S1 [G1 R1]].
     destruct (R1 v n1 eq_refl) as [N1 [s1 [X1 [W1 [O1 [V1 C1]]]]]].
@@ -1411,7 +1542,10 @@ Print Assumptions typed_core_memory_safe.
 
 (* A program with no functions. *)
 Definition no_funs : nat -> option FunDef := fun _ => None.
-Lemma no_funs_ok : funs_ok no_funs.
+Definition no_funs2 : nat -> option FunDef2 := fun _ => None.
+Lemma no_funs_ok : funs_ok no_funs no_funs2.
+Proof. intros f d H; discriminate. Qed.
+Lemma no_funs2_ok : funs2_ok no_funs no_funs2.
 Proof. intros f d H; discriminate. Qed.
 
 (* The check is what the theorem rests on: the load an unchecked `xs[5]`
@@ -1426,29 +1560,29 @@ Print Assumptions unchecked_index_not_safe.
 
 (* The type system is what keeps a list where an int is expected: `5[0]`
    (an int indexed) has no type, and no rule evaluates it. *)
-Example int_index_untyped : forall fs g t, ~ etyped fs g (EBin Index (EInt 5) (EInt 0)) t.
+Example int_index_untyped : forall fs fs2 g t, ~ etyped fs fs2 g (EBin Index (EInt 5) (EInt 0)) t.
 Proof.
-  intros fs g t H. inversion H; subst.
+  intros fs fs2 g t H. inversion H; subst.
   match goal with Hop : optype Index _ _ _ |- _ => inversion Hop; subst end.
-  match goal with He : etyped _ _ (EInt 5) TList |- _ => inversion He end.
+  match goal with He : etyped _ _ _ (EInt 5) TList |- _ => inversion He end.
 Qed.
 
 (* A run that the check aborts: `let xs = make(1, 7); xs[3] = 0` stops at
    the store's check, and its trace is still MemorySafe. *)
 Example aborting_run_is_safe :
   let s := SSeq (SLet 0%nat (EBin Make (EInt 1) (EInt 7))) (SSet 0%nat (EInt 3) (EInt 0)) in
-  exists t, exec no_funs empty_heap empty_env 0 s t SAbort /\ MemorySafe t.
+  exists t, exec no_funs no_funs2 empty_heap empty_env 0 s t SAbort /\ MemorySafe t.
 Proof.
   intro s.
-  assert (Ht : styped no_funs empty_ctx s (tupd empty_ctx 0%nat TList)).
-  { apply (TySeq no_funs _ _ (tupd empty_ctx 0%nat TList));
+  assert (Ht : styped no_funs no_funs2 empty_ctx s (tupd empty_ctx 0%nat TList)).
+  { apply (TySeq no_funs no_funs2 _ _ (tupd empty_ctx 0%nat TList));
       [apply TyLet; [reflexivity | eapply TyBin; [apply OMake | apply TyInt | apply TyInt]] |].
     apply TySet; [reflexivity | apply TyInt | apply TyInt]. }
   eexists. match goal with |- ?A /\ _ => assert (Hx : A) end.
   { eapply XSeq.
     - apply XLet. eapply EvBin; [apply EvInt | apply EvInt | apply BMake; lia].
     - eapply XSetOut; [reflexivity | apply EvInt | apply EvInt |]. simpl. lia. }
-  split; [exact Hx | exact (typed_core_memory_safe no_funs no_funs_ok s _ _ _ Ht Hx)].
+  split; [exact Hx | exact (typed_core_memory_safe no_funs no_funs2 no_funs_ok no_funs2_ok s _ _ _ Ht Hx)].
 Qed.
 
 (* Sharing, then mutation, then a read of the alias, then a release:
@@ -1466,17 +1600,17 @@ Definition alias_prog : stmt :=
         (SAssign 1%nat (EBin Make (EInt 0) (EInt 0)))))).
 
 Example shared_list_survives_mutation :
-  exists t r n, exec no_funs empty_heap empty_env 0 alias_prog t (Normal r n) /\ MemorySafe t /\
+  exists t r n, exec no_funs no_funs2 empty_heap empty_env 0 alias_prog t (Normal r n) /\ MemorySafe t /\
     r 2%nat = Some (VInt 7) /\ rcof (fold_left step t empty_heap) 0%nat = 0.
 Proof.
   set (g1 := tupd empty_ctx 0%nat TList).
   set (g2 := tupd g1 1%nat TList).
-  assert (Ht : styped no_funs empty_ctx alias_prog (tupd g2 2%nat TInt)).
+  assert (Ht : styped no_funs no_funs2 empty_ctx alias_prog (tupd g2 2%nat TInt)).
   { unfold alias_prog.
-    apply (TySeq no_funs _ _ g1); [apply TyLet; [reflexivity | eapply TyBin; [apply OMake | apply TyInt | apply TyInt]] |].
-    apply (TySeq no_funs _ _ g2); [apply TyLet; [reflexivity | apply TyVar; reflexivity] |].
-    apply (TySeq no_funs _ _ g2); [apply TySet; [reflexivity | apply TyInt | apply TyInt] |].
-    apply (TySeq no_funs _ _ (tupd g2 2%nat TInt));
+    apply (TySeq no_funs no_funs2 _ _ g1); [apply TyLet; [reflexivity | eapply TyBin; [apply OMake | apply TyInt | apply TyInt]] |].
+    apply (TySeq no_funs no_funs2 _ _ g2); [apply TyLet; [reflexivity | apply TyVar; reflexivity] |].
+    apply (TySeq no_funs no_funs2 _ _ g2); [apply TySet; [reflexivity | apply TyInt | apply TyInt] |].
+    apply (TySeq no_funs no_funs2 _ _ (tupd g2 2%nat TInt));
       [apply TyLet; [reflexivity | eapply TyBin; [apply OIndex | apply TyVar; reflexivity | apply TyInt]] |].
     eapply TyAssign; [reflexivity | eapply TyBin; [apply OMake | apply TyInt | apply TyInt]]. }
   do 3 eexists. match goal with |- ?A /\ _ => assert (Hx : A) end.
@@ -1485,7 +1619,7 @@ Proof.
     eapply XSeq; [eapply XSet; [reflexivity | apply EvInt | apply EvInt | simpl; lia] |].
     eapply XSeq; [apply XLet; eapply EvBin; [apply EvVar; reflexivity | apply EvInt | apply BIndex; simpl; lia] |].
     apply XAssign. eapply EvBin; [apply EvInt | apply EvInt | apply BMake; lia]. }
-  split; [exact Hx |]. split; [exact (typed_core_memory_safe no_funs no_funs_ok alias_prog _ _ _ Ht Hx) |].
+  split; [exact Hx |]. split; [exact (typed_core_memory_safe no_funs no_funs2 no_funs_ok no_funs2_ok alias_prog _ _ _ Ht Hx) |].
   split; [reflexivity | vm_compute; reflexivity].
 Qed.
 Print Assumptions shared_list_survives_mutation.
@@ -1529,7 +1663,7 @@ Definition box_prog : stmt :=
         (SAssign 1%nat (EBox (EBin Make (EInt 0) (EInt 0)))))))).
 
 Example box_frees_and_keeps_content :
-  exists t r n, exec no_funs empty_heap empty_env 0 box_prog t (Normal r n) /\ MemorySafe t /\
+  exists t r n, exec no_funs no_funs2 empty_heap empty_env 0 box_prog t (Normal r n) /\ MemorySafe t /\
     r 3%nat = Some (VInt 7) /\
     rcof (fold_left step t empty_heap) 1%nat = 0 /\ rcof (fold_left step t empty_heap) 0%nat = 1.
 Proof.
@@ -1537,13 +1671,13 @@ Proof.
   set (g2 := tupd g1 1%nat (TBox TList)).
   set (g3 := tupd g2 2%nat TList).
   set (g4 := tupd g3 3%nat TInt).
-  assert (Ht : styped no_funs empty_ctx box_prog g4).
+  assert (Ht : styped no_funs no_funs2 empty_ctx box_prog g4).
   { unfold box_prog.
-    apply (TySeq no_funs _ _ g1); [apply TyLet; [reflexivity | eapply TyBin; [apply OMake | apply TyInt | apply TyInt]] |].
-    apply (TySeq no_funs _ _ g2); [apply TyLet; [reflexivity | apply TyBox; apply TyVar; reflexivity] |].
-    apply (TySeq no_funs _ _ g2); [apply TySet; [reflexivity | apply TyInt | apply TyInt] |].
-    apply (TySeq no_funs _ _ g3); [apply TyLet; [reflexivity | apply TyUnbox; apply TyVar; reflexivity] |].
-    apply (TySeq no_funs _ _ g4);
+    apply (TySeq no_funs no_funs2 _ _ g1); [apply TyLet; [reflexivity | eapply TyBin; [apply OMake | apply TyInt | apply TyInt]] |].
+    apply (TySeq no_funs no_funs2 _ _ g2); [apply TyLet; [reflexivity | apply TyBox; apply TyVar; reflexivity] |].
+    apply (TySeq no_funs no_funs2 _ _ g2); [apply TySet; [reflexivity | apply TyInt | apply TyInt] |].
+    apply (TySeq no_funs no_funs2 _ _ g3); [apply TyLet; [reflexivity | apply TyUnbox; apply TyVar; reflexivity] |].
+    apply (TySeq no_funs no_funs2 _ _ g4);
       [apply TyLet; [reflexivity | eapply TyBin; [apply OIndex | apply TyVar; reflexivity | apply TyInt]] |].
     eapply TyAssign; [reflexivity | apply TyBox; eapply TyBin; [apply OMake | apply TyInt | apply TyInt]]. }
   do 3 eexists. match goal with |- ?A /\ _ => assert (Hx : A) end.
@@ -1553,7 +1687,7 @@ Proof.
     eapply XSeq; [apply XLet; apply EvUnbox; apply EvVar; reflexivity |].
     eapply XSeq; [apply XLet; eapply EvBin; [apply EvVar; reflexivity | apply EvInt | apply BIndex; simpl; lia] |].
     apply XAssign. apply EvBox. eapply EvBin; [apply EvInt | apply EvInt | apply BMake; lia]. }
-  split; [exact Hx |]. split; [exact (typed_core_memory_safe no_funs no_funs_ok box_prog _ _ _ Ht Hx) |].
+  split; [exact Hx |]. split; [exact (typed_core_memory_safe no_funs no_funs2 no_funs_ok no_funs2_ok box_prog _ _ _ Ht Hx) |].
   split; [reflexivity |]. split; vm_compute; reflexivity.
 Qed.
 Print Assumptions box_frees_and_keeps_content.
@@ -1594,7 +1728,7 @@ Definition count_down_def : FunDef :=
 Definition count_down : nat -> option FunDef := fun f =>
   match f with O => Some count_down_def | _ => None end.
 
-Example count_down_ok : funs_ok count_down.
+Example count_down_ok : funs_ok count_down no_funs2.
 Proof.
   intros f d H. destruct f as [| f]; [| discriminate]. injection H as <-. simpl.
   apply TyEIf.
@@ -1604,3 +1738,30 @@ Proof.
     apply TyCall; [reflexivity |]. simpl.
     eapply TyBin; [apply OAdd | apply TyVar; reflexivity | apply TyInt].
 Qed.
+
+(* Two arguments are in (#4014): function 0 reads `xs[i]`, holding the list
+   and the index as its two parameters; its table is well typed, so every
+   program over it is covered by typed_core_memory_safe, and the list the
+   callee held is given back when it returns. *)
+Definition at_def : FunDef2 :=
+  {| f2p1 := 0%nat; f2t1 := TList; f2p2 := 1%nat; f2t2 := TInt;
+     f2body := EBin Index (EVar 0%nat) (EVar 1%nat); f2rty := TInt |}.
+
+Definition at_funs : nat -> option FunDef2 := fun f =>
+  match f with O => Some at_def | _ => None end.
+
+Example at_funs_ok : funs2_ok no_funs at_funs.
+Proof.
+  intros f d H. destruct f as [| f]; [| discriminate]. injection H as <-. simpl.
+  split; [discriminate |].
+  eapply TyBin; [apply OIndex | apply TyVar; reflexivity | apply TyVar; reflexivity].
+Qed.
+
+(* Control: one name for both parameters is refused. Under one name the
+   second argument overwrites the first in the callee's environment, which
+   then holds one reference where the caller handed over two — the counting
+   the release of both rests on. *)
+Example same_param_refused :
+  ~ funs2_ok no_funs (fun _ => Some {| f2p1 := 0%nat; f2t1 := TInt; f2p2 := 0%nat; f2t2 := TInt;
+                                        f2body := EInt 0; f2rty := TInt |}).
+Proof. intro H. destruct (H 0%nat _ eq_refl) as [Ne _]. apply Ne. reflexivity. Qed.
