@@ -79,7 +79,7 @@ effect zlib.decompress(data: Bytes) -> Bytes
 
 // Like decompress, output bound max_len bytes; max_len <= 0 aborts.
 // @since unreleased
-zlib.decompress_max(data: Bytes, max_len: Int) -> Result[Bytes, String]
+zlib.decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String]
 
 // Raw DEFLATE, no header; bytes vary by target.
 // @since 0.20.0 or earlier
@@ -95,7 +95,7 @@ effect zlib.inflate(data: Bytes) -> Bytes
 
 // Like inflate, output bound max_len bytes; max_len <= 0 aborts.
 // @since unreleased
-zlib.inflate_max(data: Bytes, max_len: Int) -> Result[Bytes, String]
+zlib.inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String]
 
 // RFC 1952 gzip of data; bytes vary by target.
 // @since 0.20.0 or earlier
@@ -107,7 +107,7 @@ effect zlib.gunzip(data: Bytes) -> Bytes
 
 // Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 // @since unreleased
-zlib.gunzip_max(data: Bytes, max_len: Int) -> Result[Bytes, String]
+zlib.gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String]
 
 // CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
 // @since 0.62.0

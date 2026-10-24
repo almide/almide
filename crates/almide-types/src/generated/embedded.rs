@@ -41527,7 +41527,7 @@ effect fn decompress(data: Bytes) -> Result[Bytes, String] = _
 
 /// Like decompress, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_decompress_max")
-fn decompress_max(data: Bytes, max_len: Int) -> Result[Bytes, String] = _
+fn decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 
 /// Raw DEFLATE, no header; bytes vary by target.
@@ -41544,7 +41544,7 @@ effect fn inflate(data: Bytes) -> Result[Bytes, String] = _
 
 /// Like inflate, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_inflate_max")
-fn inflate_max(data: Bytes, max_len: Int) -> Result[Bytes, String] = _
+fn inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 
 /// RFC 1952 gzip of data; bytes vary by target.
@@ -41564,7 +41564,7 @@ effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _
 
 /// Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_gunzip_max")
-fn gunzip_max(data: Bytes, max_len: Int) -> Result[Bytes, String] = _
+fn gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 
 

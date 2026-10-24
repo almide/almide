@@ -1757,13 +1757,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect zlib.compress(data: Bytes) -> Bytes` — Zlib-framed DEFLATE of data; bytes vary by target.
 - `effect zlib.compress_level(data: Bytes, level: Int) -> Bytes` — Like compress; level clamped to 0..9, unused on wasm.
 - `effect zlib.decompress(data: Bytes) -> Bytes` — Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
-- `zlib.decompress_max(data: Bytes, max_len: Int) -> Result[Bytes, String]` — Like decompress, output bound max_len bytes; max_len <= 0 aborts.
+- `zlib.decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like decompress, output bound max_len bytes; max_len <= 0 aborts.
 - `effect zlib.deflate(data: Bytes) -> Bytes` — Raw DEFLATE, no header; bytes vary by target.
 - `effect zlib.deflate_level(data: Bytes, level: Int) -> Bytes` — Like deflate; level clamped to 0..9, unused on wasm.
 - `effect zlib.inflate(data: Bytes) -> Bytes` — Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
-- `zlib.inflate_max(data: Bytes, max_len: Int) -> Result[Bytes, String]` — Like inflate, output bound max_len bytes; max_len <= 0 aborts.
+- `zlib.inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like inflate, output bound max_len bytes; max_len <= 0 aborts.
 - `effect zlib.gzip(data: Bytes) -> Bytes` — RFC 1952 gzip of data; bytes vary by target.
 - `effect zlib.gunzip(data: Bytes) -> Bytes` — Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
-- `zlib.gunzip_max(data: Bytes, max_len: Int) -> Result[Bytes, String]` — Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
+- `zlib.gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 - `zlib.crc32(data: Bytes) -> Int` — CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
 - `zlib.adler32(data: Bytes) -> Int` — Adler-32 as an unsigned Int; 1 for empty data.
