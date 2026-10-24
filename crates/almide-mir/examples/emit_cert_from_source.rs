@@ -41,6 +41,7 @@ fn read_manifest_allow(path: &str) -> Vec<String> {
     almide::project::parse_toml(std::path::Path::new(path))
         .unwrap_or_else(|e| die(format!("cannot read manifest {path}: {e}")))
         .permissions
+        .unwrap_or_default()
 }
 
 /// Lower `.almd` source to a linked `IrProgram` at the pre-codegen cut point
