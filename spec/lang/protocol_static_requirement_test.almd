@@ -25,10 +25,13 @@ fn concat_all[M: Monoid](xs: List[M]) -> M = xs |> list.fold(
 )
 
 test "a receiver-less requirement reaches each conforming type" {
-  assert_eq(concat_all([
-    Len { n: 2 },
-    Len { n: 3 }
-  ]).n, 5)
+  assert_eq(
+    concat_all([
+      Len { n: 2 },
+      Len { n: 3 }
+    ]).n,
+    5,
+  )
   let none_len: List[Len] = []
   assert_eq(concat_all(none_len).n, 0)
   assert_eq(
