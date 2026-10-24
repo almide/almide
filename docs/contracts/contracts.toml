@@ -5163,3 +5163,38 @@ evidence  = [
   { path = "tests/fs_scope_test.rs", name = "a_directory_flipped_to_a_symlink_under_permissions_fs_never_leaks_on_either_target", class = "fixture" },
   { path = "crates/almide-rt-core/tests/fs_scoped_core.rs", name = "a_dir_swapped_for_a_symlink_after_the_decision_is_never_followed", class = "fixture" },
 ]
+
+
+[[contract]]
+id        = "C-430"
+spec      = "ALS-R6"
+title     = "fs.walk and fs.glob list a symlink as an entry and never descend into it, on every leg"
+statement = "`fs.walk(dir)` and `fs.glob(pattern)` (#4143) descend only into real directories: an entry that is a symlink — to a directory, to a file, or dangling — is listed as an entry like any other and is never followed, so a link to a directory outside `dir` lists nothing outside it and a link loop cannot repeat the walk. `dir` itself, and a glob's literal base, is opened as written, its own symlinks followed: the program named it. Native and the embedded wasm host walk by descriptor (each directory opened from its parent with O_NOFOLLOW), so a directory swapped for a symlink during the walk is not followed either; the stock artifact's p1 fs service and the self-hosted twin descend only into an entry whose no-follow filestat is a directory. A directory the walk may not open is the call's `err`, naming it, as before. The pre-#4143 walk descended on a following `is_dir`: a tree of two files, a link to the outside and a link loop walked as 165 entries, the outside file among them."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "tests/fs_walk_nofollow_test.rs", name = "walk_and_glob_list_a_symlinked_directory_as_an_entry_on_every_leg", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-431"
+spec      = "ALS-R6"
+title     = "fs.create_temp_file and fs.create_temp_dir create a new entry exclusively under an entropy name, private to its owner"
+statement = "`fs.create_temp_file(prefix)` and `fs.create_temp_dir(prefix)` (#4113) create a NEW entry in the temp dir named `<prefix>` followed by 16 lowercase hex digits drawn from the host's entropy source, never from the clock, and answer its path. The creation is exclusive: the file is opened with O_CREAT | O_EXCL, so an entry already at the name — a symlink another user planted included — is never followed, truncated or reused; the directory is made by one non-recursive mkdir, so an existing directory is never reused. A taken name is retried under a fresh one, up to 64 tries; when all are taken the call's `err` names the last try's path. On native and the embedded wasm host the file is created with mode 0600 and the directory with mode 0700 (before the umask); the stock artifact's p1 fs service creates them the same way, except that WASI preview1 has no mode to set. `fs.temp_dir()` is a location, not a safe name: a fixed name under it is one another user can create first."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "tests/fs_temp_create_legs_test.rs", name = "temp_entries_are_exclusive_entropy_named_and_private_on_every_leg", class = "fixture" },
+  { path = "crates/almide-rt-core/tests/fs_temp_create.rs", name = "a_planted_symlink_at_the_temp_name_is_skipped_never_written_through", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-432"
+spec      = "ALS-R6"
+title     = "path.from_string admits only a path that stays inside the directory it is joined to, and path.join_within refuses any other child"
+statement = "`path.from_string(s)`, the `SafePath` constructor (#4146), answers `ok` only for a path that stays inside whatever directory it is joined to: relative — no leading `/` or `\\`, no drive letter (a first segment whose second character is `:`), no leading `~` — holding no NUL, and with no `..` segment when split on `/` AND on `\\`, so `..\\..\\x` is refused on every host. Every other path is `err(\"path traversal rejected: <s>\")`. Percent-encoded forms such as `%2e%2e` are not decoded: to the filesystem they are ordinary names. `path.join_within(base, child)` answers `ok(path.join(base, child))` for a `child` that `from_string` admits and the same `err` for any other, so its result always names a place under `base`; `path.join` keeps its rule that an absolute child replaces the base. The pre-#4146 check split on `/` only and looked for `..` alone, so `/etc/passwd`, `..\\..\\windows\\win.ini` and `~/.ssh/id_rsa` were admitted."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/path_safepath_stays_inside.almd", class = "fixture" },
+]

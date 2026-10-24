@@ -1,4 +1,4 @@
-//! #4143: `fs.walk` and `fs.glob` never descend into a symlinked
+//! #4143 (C-430): `fs.walk` and `fs.glob` never descend into a symlinked
 //! directory; the symlink is an entry like any other. A link to the outside
 //! therefore lists nothing outside the walked directory, and a link loop
 //! cannot repeat the walk.

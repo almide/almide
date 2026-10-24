@@ -1,0 +1,38 @@
+// @contract: C-432
+// #4146: `path.from_string` (the SafePath constructor) admits only a path
+// that stays inside the directory it is joined to — relative, no `..` segment
+// on either separator, no leading `~`, no drive letter, no NUL — and
+// `path.join_within(base, child)` refuses a child `from_string` would refuse.
+// Negative control: the pre-#4146 check split on `/` only and looked for
+// `..` alone, so `/etc/passwd`, `..\..\windows\win.ini` and `~/.ssh/id_rsa`
+// were admitted, and `path.join` lets an absolute child replace the base.
+import path
+
+fn show(label: String, r: Result[String, String]) -> Unit = match r {
+  ok(v) => println("${label}: ok ${v}"),
+  err(e) => println("${label}: err ${e}"),
+}
+
+fn main() -> Unit = {
+  let probes = [
+    "/etc/passwd",
+    "..\\..\\windows\\win.ini",
+    "a/%2e%2e/b",
+    "~/.ssh/id_rsa",
+    "a/../b",
+    "\\server\\share",
+    "C:\\Windows",
+    "c:/x",
+    "a/./b",
+    "uploads/report.txt",
+    ""
+  ]
+  for p in probes {
+    show("from_string ${p}", path.from_string(p) |> result.map((s) => path.to_string(s)))
+  }
+  println("from_string NUL: ${result.is_err(path.from_string("a/\u{0}b"))}")
+  show("join_within abs", path.join_within("/srv/uploads", "/etc/passwd"))
+  show("join_within up", path.join_within("/srv/uploads", "../../etc/passwd"))
+  show("join_within ok", path.join_within("/srv/uploads", "a/b.txt"))
+  println("join abs ${path.join("/srv/uploads", "/etc/passwd")}")
+}

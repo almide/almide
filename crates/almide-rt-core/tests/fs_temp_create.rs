@@ -1,4 +1,4 @@
-//! #4113: temp files and directories are created exclusively under an
+//! #4113 (C-431): temp files and directories are created exclusively under an
 //! OS-entropy name, private to their owner. Its own test binary: the
 //! `[permissions] fs` scope is process-wide, and tests/fs_scoped_core.rs
 //! installs one.

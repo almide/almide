@@ -1,4 +1,4 @@
-//! #4113: `fs.create_temp_file` / `fs.create_temp_dir` on every leg name the
+//! #4113 (C-431): `fs.create_temp_file` / `fs.create_temp_dir` on every leg name the
 //! entry `<prefix><16 hex digits of OS entropy>` and create it exclusively;
 //! on native and the embedded wasm host the file is 0o600 and the directory
 //! 0o700 (WASI preview1, the stock artifact's interface, sets no mode). The
