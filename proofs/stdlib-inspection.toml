@@ -575,18 +575,12 @@ name = "bytes.remove_at"
 sig = "(b: Bytes, i: Int) -> Bytes"
 class = "pure"
 status = "uninspected"
+
 [[fn]]
 name = "bytes.repeat"
 sig = "(b: Bytes, n: Int) -> Bytes"
 class = "pure"
-status = "inspected"
-impl = "fnv1a:fbc064af13b92e44"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "n; rebind (loop, tail, fold) n"
-parity = "PASS: seed 1792395497, 200 programs; 200 program(s) call it, 181 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=256..512 4.117e7/8.213e7/1.640e8/3.279e8/6.556e8 fit n (rms 0.0%) moved 1.024e7/2.048e7/4.096e7/8.192e7/1.638e8B fit n (rms 0.0%) wall 0.000/0.005/0.015/0.020/0.041s wasm k=256..512 4.104e7/8.201e7/1.639e8/3.278e8/6.555e8 fit n (rms 0.0%) moved 1.024e7/2.048e7/4.096e7/8.192e7/1.638e8B fit n (rms 0.0%) wall 0.005/0.015/0.025/0.051/0.101s (order n ok); rebind shapes not timed: the value grows geometrically per step (16 -> 256 after 4 steps)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+status = "uninspected"
 [[fn]]
 name = "bytes.reverse"
 sig = "(b: Bytes) -> Bytes"
@@ -5336,20 +5330,12 @@ complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) 
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
+
 [[fn]]
 name = "io.read_line"
 sig = "effect () -> String ! String"
 class = "effect"
-status = "inspected"
-impl = "fnv1a:b1f6eef674705b24"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "n"
-parity = "PASS: seed 1792403509, 200 programs; 200 program(s) call it, 183 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=256..512 7.338e7/1.461e8/2.915e8/5.822e8/1.163e9 fit n (rms 0.0%) moved 1.536e7/3.072e7/6.144e7/1.229e8/2.458e8B fit n (rms 0.0%) wall 0.005/0.010/0.020/0.046/0.081s wasm k=1..2 6.260e7/1.252e8/2.504e8/5.007e8/1.001e9 fit n (rms 0.0%) moved 9.255e4/1.852e5/3.707e5/7.418e5/1.484e6B fit n (rms 0.0%) wall 0.005/0.010/0.020/0.035/0.076s (order n ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-
-
+status = "uninspected"
 [[fn]]
 name = "io.read_line_opt"
 sig = "effect () -> Option[String] ! String"
