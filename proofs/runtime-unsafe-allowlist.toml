@@ -6,7 +6,9 @@
 #
 # class: fan-sync (Almide values cross threads; Miri/loom are the plan), ffi-surface
 # (the raw-pointer stdlib surface, closed to ffi.read/ffi.write by R-L0-45),
-# c-call (a C / OS function; safe when its arguments are).
+# c-call (a C / OS function; safe when its arguments are), emitted-prelude (Rust text the
+# compiler pastes into every generated program that needs it — crates/almide-codegen/src/
+# prelude_*.rs, counted since #4023: the line is in the user's binary, not in runtime/rs).
 
 [[file]]
 path = "runtime/rs/src/list.rs"
@@ -52,3 +54,15 @@ path = "crates/almide-rt-core/src/net_unix_sys.rs"
 count = 5
 class = "c-call"
 reason = "SCM_RIGHTS descriptor passing (sendmsg / recvmsg / cmsg) and memfd for the unix module"
+
+[[file]]
+path = "crates/almide-codegen/src/prelude_region.rs"
+count = 9
+class = "emitted-prelude"
+reason = "the region-window bump arena (#1991): AlmideRgn's Deref (one line per trap variant), the trapped header read, and the three TLS-cell borrows of alloc / save / restore per variant. Sound only while every handle dies inside its window, i.e. while pass_region_window.rs's region-pure verdict is right; ALMIDE_REGION_TRAP_STALE=1 arms a generation check that turns a wrong verdict into a panic (#4023: off by default — measured +30% on binarytrees and +52% on treealloc — and CI runs spec/ and the differential fuzz with it armed)"
+
+[[file]]
+path = "crates/almide-codegen/src/prelude_rem_body.rs"
+count = 1
+class = "emitted-prelude"
+reason = "one `imul r64` inline asm in almide_mulhs (the high half of a signed product for the constant-divisor remainder): pure, nomem, nostack; cfg'd off under Miri"
