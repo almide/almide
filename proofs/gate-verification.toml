@@ -909,14 +909,14 @@ varies = "develop 5059b4cde + the switch: 3 patches (#3538, #2397 fused fold, #2
 blind = "a memory bug with no re-injection patch (only #3538, #2397 and #2133 have one, #1770 no longer reproduces by reverting its fix since the frame releases are a set union, and the older I-unsound fixes no longer reverse-apply) -> UNCOMPENSATED"
 
 [[gate]]
-path = "scripts/bounds-witness-reinject.sh"
+path = "scripts/witness-reinject.sh"
 reads = "scalar"
 wired_by = ".github/workflows/wasm-checked-alloc-nightly.yml"
 class = "NEGATIVE_TESTED"
-evidence = "#4005 landing (2026-10-24): per patch it first requires the CONTROL — the unpatched emitter's bounds witness for the reproduction accepted by almide-verify (exit 0) — then the re-injected emitter's witness rejected (exit 1); a patch that no longer applies fails it. Locally all three patches read control 0, re-injected 1"
-measures = "the number of re-injected lost-bounds-check bugs (proofs/fixtures/bounds-witness/reinject/*.patch) whose reproduction's bounds witness almide-verify does NOT reject, plus failed controls and patches that no longer apply"
-varies = "sec-proof-chain, aarch64-apple-darwin: 3 patches (store route's check dropped, read route's check dropped, a stale #3345 fact after the index moved), 3 rejected, 0 missed; each control witness accepted"
-blind = "a lost compare whose recording call survives (the recording discipline) -> .github/workflows/ci-cross-target.yml; a lost check on a heap access outside the index operator, which the witness does not record -> .github/workflows/wasm-checked-alloc-nightly.yml"
+evidence = "#4005 landing (2026-10-24), #4013 (2026-10-25): per patch it first requires the CONTROL — the unpatched emitter's witness for the reproduction accepted by almide-verify (exit 0) — then the re-injected emitter's witness rejected (exit 1) and byte-identical to its pinned poisoned certificate; a patch that no longer applies fails it. Bounds: locally and on CI (run 40085284699) all three patches read control 0, re-injected 1. Init: locally the lost first-slot store reads control 0, re-injected 1"
+measures = "the number of re-injected lost-instruction bugs (proofs/fixtures/<property>-witness/reinject/*.patch, property bounds or init) whose reproduction's witness almide-verify does NOT reject, plus failed controls, pin mismatches and patches that no longer apply"
+varies = "sec-proof-chain, aarch64-apple-darwin and ubuntu CI: bounds — 3 patches (store route's check dropped, read route's check dropped, a stale #3345 fact after the index moved), 3 rejected, 0 missed; init — 1 patch (a list literal's first slot never stored), 1 rejected; each control witness accepted"
+blind = "a lost instruction whose recording call survives (the recording discipline) -> .github/workflows/ci-cross-target.yml; a lost bounds check on a heap access outside the index operator, or a lost store at an allocation site other than a list literal, which no witness records -> .github/workflows/wasm-checked-alloc-nightly.yml"
 
 [[gate]]
 path = "scripts/check-dep-shaped-skips.sh"
