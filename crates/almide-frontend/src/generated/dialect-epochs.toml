@@ -233,6 +233,7 @@ breaks = [
   "`zlib.inflate`, `zlib.decompress` and `zlib.gunzip` return `err(\"zlib: output exceeds 268435456 bytes\")` for a stream whose output passes 256 MiB, where they used to decode it whole (R-zlib-04, #4020, C-390); a program that decodes more than 256 MiB at once writes `zlib.inflate_max(data, n)` / `decompress_max` / `gunzip_max` with its own bound",
   "`json.parse` returns `err(\"json: nesting deeper than 1000\")` for an array or object opened inside 1000 others, where it used to recurse until the stack ran out (R-json-04, #4020, C-391); a document nested more than 1000 deep cannot be parsed",
   "a program that runs as its p3 component on the embedded wasm host (`almide run --target wasm` of a program naming the full-response http family) has the working directory and the temp dir preopened instead of `/` (#4022): an fs path outside both now errs there; grant it with `[permissions] fs = [\"<dir>\", …]` in almide.toml, which preopens exactly the listed directories",
+  "a raw Unicode bidirectional control character (U+202A–U+202E, U+2066–U+2069) anywhere in a source file, in a comment, a string literal, a heredoc or a raw string, is E101 (Trojan Source, CVE-2021-42574), where it used to be accepted silently (#4092). Remove it from a comment; in a literal write the escape `\\u{202E}` (`\\u{...}` with its codepoint), which decodes to the same character",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
