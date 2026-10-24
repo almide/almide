@@ -322,3 +322,27 @@ Choices where D2 or §Open is silent, taken on the conservative side:
    dialect-epoch-15 break records it.
 4. **Not changed here (§Open, one vocabulary):** `--profile critical --allow`
    still takes `IO, Net, Env, Time, Rand, Process`.
+
+## Implementation note — dispatch, plain host fns, routes (#4158, #4159, 2026-10-25)
+
+- **Protocol dispatch (#4158).** An `effect` protocol method called through
+  a bound is E006 from a pure fn, and an implementation's effect-ness must
+  match its protocol's declaration on every protocol, including the
+  conventions `==` and the derives call implicitly. So a pure caller never
+  dispatches into an effect impl, and the sets need no dispatch edge.
+- **Plain host fns (#4159).** The plain `fn`s that act on the host became
+  `effect fn`s; a gate refuses a public plain fn in an `All(_)` module unless
+  it declares `@category()` (it reaches no host: `random`'s seeded
+  generator, `env.os`), and refuses a host category on any plain fn.
+  `env.millis` / `unix_timestamp` / `sleep_ms` are `Time`.
+- **Not changed — a plain-`fn` `@extern` (#4159, needs a ruling).** It still
+  carries every category (⊤) for `[permissions]`, but neither E006 nor the
+  effect bit treats its call as an effect: the JS host's synchronous imports
+  (`spec/wasm_host_js`) are plain `@extern` fns called from pure fns whose
+  exported wrappers the host calls as plain values, and making those calls
+  effects changes that export ABI. The conservative alternatives — refuse a
+  plain `@extern`, or treat its call as an effect — are both breaking for
+  that model, and ADR-0027 §5 (bounds on externs) is where it belongs.
+- **Routes.** `[permissions]` come from the entry file's project (the
+  nearest `almide.toml` at or above it), `check` judges every user module,
+  and both `almide test` lanes and `emit` apply them.
