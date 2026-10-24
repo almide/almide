@@ -507,10 +507,11 @@ with the directory the program is started from.
   directory that points out of it can be neither asked about nor removed.
   `copy` and `rename` check both paths, the temp calls the temp dir they
   create in, `glob` its pattern's literal base.
-- **Native** (`almide run`, `almide build`): the build wraps each of the
-  program's calls to the fs runtime in the check and sets the roots as the
-  first statement of `main`; the runtime itself is unchanged. A test harness
-  build (`almide test`) has no `main` and is not bounded.
+- **Native** (`almide run`, `almide build`, `almide test`): the build wraps
+  each of the program's calls to the fs runtime in the check, with the roots
+  baked in and resolved on the first fs call; the runtime itself is
+  unchanged. A test harness build has no `main` and is bounded the same way
+  (#4084).
 - **Wasm, embedded host** (`almide run --target wasm`, the wasm leg of
   `almide test`): the same check, from the same source
   (`crates/almide-base/src/fs_scope.rs`), sits in front of the host's one fs
@@ -523,10 +524,14 @@ with the directory the program is started from.
   reaches what its operator preopens (`wasmtime --dir`); the manifest does
   not travel with it.
 
-The check runs before the operation, so a tree rewritten between the two (a
-directory swapped for a symlink) can race it. Within a program, `fs.open_root`
+On native and the embedded host the check runs before the operation, so a
+tree rewritten between the two (a directory swapped for a symlink) can race
+it. The p3 component's bound is its preopens, which the runtime (wasmtime-wasi
+over cap-std) resolves beneath the preopened descriptor at the call itself, so
+there the race is closed. Within a program, `fs.open_root`
 (`docs/stdlib/fs.md`) bounds the paths built from untrusted input to one
-directory on top of this scope.
+directory on top of this scope, and its calls refuse a symlink by descriptor
+on every leg (#4084), so a rewrite cannot race them.
 
 Flipping the default — an absent `fs` key meaning the project directory only —
 would refuse every program that reads outside its project today (absolute
