@@ -161,7 +161,7 @@
 5350	spec/wasm_cross/effect_slot_never_err_bang.almd
 5569	spec/wasm_cross/effect_tail_carrier_family.almd
 2515	spec/wasm_cross/effect_tco.almd
-7897	spec/wasm_cross/effect_tco_err_rewrap.almd
+7783	spec/wasm_cross/effect_tco_err_rewrap.almd
 3850	spec/wasm_cross/effect_tuple_result_tco.almd
 4671	spec/wasm_cross/effect_unit_yields_result.almd
 5417	spec/wasm_cross/effect_unwrap_in_loop.almd
@@ -245,8 +245,8 @@
 2483	spec/wasm_cross/fold_heap_acc.almd
 9972	spec/wasm_cross/fold_init_rebinds_source.almd
 1949	spec/wasm_cross/for_in_forms.almd
-26473	spec/wasm_cross/fs_call_head_family.almd
-22472	spec/wasm_cross/fs_composition_family.almd
+26459	spec/wasm_cross/fs_call_head_family.almd
+22458	spec/wasm_cross/fs_composition_family.almd
 16988	spec/wasm_cross/fs_fallible_stream_callback.almd
 14642	spec/wasm_cross/fs_fallible_walker_call_head.almd
 15235	spec/wasm_cross/fs_glob_segments.almd
@@ -254,9 +254,9 @@
 14547	spec/wasm_cross/fs_metadata_family.almd
 8563	spec/wasm_cross/fs_preopen_resolve.almd
 11627	spec/wasm_cross/fs_read_bytes_raw_call_head.almd
-15694	spec/wasm_cross/fs_read_directory_errno.almd
+15652	spec/wasm_cross/fs_read_directory_errno.almd
 12392	spec/wasm_cross/fs_read_lines.almd
-14790	spec/wasm_cross/fs_read_text_utf8.almd
+14748	spec/wasm_cross/fs_read_text_utf8.almd
 9201	spec/wasm_cross/fs_relative_path.almd
 17145	spec/wasm_cross/fs_root_escape.almd
 15287	spec/wasm_cross/fs_write_errno.almd
