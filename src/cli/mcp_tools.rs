@@ -173,59 +173,15 @@ fn place(args: &Value) -> Result<Place, String> {
         .map_err(|e| format!("cannot resolve the server's project root: {}", e))?;
     let cwd = match arg_str(args, "cwd") {
         None => root.clone(),
-        Some(c) => confined(&root, &root, &c, "cwd")?,
+        Some(c) => super::project_scope::confined(&root, &root, &c, "cwd")?,
     };
     Ok(Place { root, cwd })
-}
-
-/// `p` resolved against `base`, with every symlink in its existing part
-/// followed, required to stay under `root`. A value starting with `-` is
-/// refused before anything else: it would be a flag, not a path.
-fn confined(root: &std::path::Path, base: &std::path::Path, p: &str, key: &str) -> Result<std::path::PathBuf, String> {
-    if p.is_empty() || p.starts_with('-') {
-        return Err(format!("argument `{}` = `{}` is not a path: a tool argument is never a flag", key, p));
-    }
-    let joined = base.join(p);
-    // The longest prefix that exists is canonicalized (symlinks and `..`
-    // resolved by the OS); the rest does not exist, so it holds no symlink,
-    // and its `..` are resolved lexically.
-    let mut head = joined.as_path();
-    let mut rest: Vec<std::ffi::OsString> = Vec::new();
-    let real_head = loop {
-        if let Ok(c) = head.canonicalize() {
-            break c;
-        }
-        match (head.parent(), head.file_name()) {
-            (Some(parent), Some(name)) => {
-                rest.push(name.to_os_string());
-                head = parent;
-            }
-            _ => return Err(format!("argument `{}` = `{}` does not resolve", key, p)),
-        }
-    };
-    let mut real = real_head;
-    for part in rest.iter().rev() {
-        if part == ".." {
-            real.pop();
-        } else if part != "." {
-            real.push(part);
-        }
-    }
-    if !real.starts_with(root) {
-        return Err(format!(
-            "argument `{}` = `{}` is outside the project root {} — an MCP tool only reads the project it serves",
-            key,
-            p,
-            root.display()
-        ));
-    }
-    Ok(real)
 }
 
 /// A confined path argument, handed to the child as given (it runs in the
 /// confined cwd) after the confinement check.
 fn path_arg(pl: &Place, p: &str, key: &str) -> Result<String, String> {
-    confined(&pl.root, &pl.cwd, p, key)?;
+    super::project_scope::confined(&pl.root, &pl.cwd, p, key)?;
     Ok(p.to_string())
 }
 
