@@ -1,5 +1,5 @@
-// float_checked — SELF-HOSTED float.to_{int,uint}{8,16,32,64}_checked for v1: Some(T) iff `n` is
-// an EXACT integer in T's range, else None (NaN / infinity / fractional / out-of-range → None),
+// float_checked — SELF-HOSTED float.to_int_checked and float.to_{int,uint}{8,16,32,64}_checked
+// for v1: Some(T) iff `n` is an EXACT integer in T's range, else None (NaN / infinity / fractional / out-of-range → None),
 // byte-matching v0 (stdlib/float.almd) cell for cell.
 //
 // THE FAMILY RULE (#2487): every cell is a RANGE test on the source value against the target's
@@ -128,6 +128,27 @@ fn float_to_int64_checked(n: Float) -> Int64? = {
   let lo = prim.flt(n, neg63)
   let hi = prim.fge(n, two63)
   let i = float.to_int64(n)
+  let fl = prim.ffloor(n)
+  let rt = prim.feq(fl, n)
+  if nan then none
+  else if inf then none
+  else if lo then none
+  else if hi then none
+  else if rt then some(i) else none
+}
+
+// Int (the default-width cell, #4145): the Int64 cell over `float.to_int` — the same bounds,
+// since Int is 64-bit.
+fn float_to_int_checked(n: Float) -> Int? = {
+  let nan = float.is_nan(n)
+  let inf = float.is_infinite(n)
+  let p62 = prim.bshl(1, 62)
+  let f62 = prim.i2f(p62)
+  let two63 = prim.fadd(f62, f62)
+  let neg63 = prim.fneg(two63)
+  let lo = prim.flt(n, neg63)
+  let hi = prim.fge(n, two63)
+  let i = float.to_int(n)
   let fl = prim.ffloor(n)
   let rt = prim.feq(fl, n)
   if nan then none
