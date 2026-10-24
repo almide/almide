@@ -231,6 +231,15 @@ with open(kgen, "w") as g:
 
 for p, (a, t) in stats.items():
     print(f"  [{p}] {a}/{t} witness(es) accepted by the extracted checker and almide-verify")
+# #4005 coverage: how many index-operator accesses the bounds witnesses
+# record, and how many of them carry no check of their own token count
+# (elided by #3345 and re-derived by the checker). Only accepted witnesses.
+import re as _re
+toks = {k: 0 for k in "acws"}
+for w in accepts["bounds"]:
+    for t in _re.findall(r"[acws](?=\d)", w):
+        toks[t] += 1
+print(f"  [bounds] recorded: {toks['a']} read(s), {toks['w']} write(s), {toks['c']} emitted check(s), {toks['s']} kill(s), over {sum(1 for w in accepts['bounds'] if w.strip(';'))} non-empty witness(es)")
 n = sum(1 for _ in open(os.path.join(out, "index")))
 print(f"  {fixtures_ok}/{n} fixture(s) accepted on every property; {len(rejects)} rejected witness(es), each named in the exception ledger")
 for m in fail[:20]:
