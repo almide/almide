@@ -1,0 +1,38 @@
+// @contract: C-416
+// Received descriptors are bounded per socket (#4124). `unix_recv` kept every
+// descriptor that arrived (SCM_RIGHTS) until `unix_take_fds`, so a peer that
+// sent one with each message filled the program's descriptor table through a
+// socket the program only read, and every later open failed. Now at most 28
+// wait untaken per socket; one that arrives while 28 wait is closed on
+// receipt and never held. Here 300 messages each carry one descriptor: 28
+// are taken, a file still opens, and once taken the queue has room again.
+import env
+import fs
+import net
+import random
+
+effect fn main() -> Unit = {
+  let path = "${env.temp_dir()}/almide-fdbound-${random.int(0, 999999999)}.sock"
+  let l = net.unix_listen(path)!
+  let c = net.unix_connect(path)!
+  let s = net.unix_accept(l)!
+  let m = net.shm_create(4)!
+  let lens = list.range(0, 300) |> list.map((_) => {
+    net.unix_send(c, bytes.from_string("x"), [m])!
+    ok(bytes.len(net.unix_recv(s, 1)!))
+  })!
+  println("received ${list.len(lens)} one-byte messages ${list.all(lens, (n) => n == 1)}")
+  let note = "${path}.txt"
+  fs.write(note, "still opens")!
+  println("read_text after: ${fs.read_text(note)!}")
+  fs.remove(note)!
+  let taken = net.unix_take_fds(s)
+  println("taken ${list.len(taken)}")
+  net.unix_send(c, bytes.from_string("y"), [m])!
+  println("after taking: ${bytes.to_string_lossy(net.unix_recv(s, 1)!)} with ${list.len(net.unix_take_fds(s))}")
+  for fd in taken + [m, s, c, l] {
+    net.unix_close(fd)!
+  }
+  fs.remove(path)!
+  println("done")
+}

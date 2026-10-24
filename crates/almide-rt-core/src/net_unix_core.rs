@@ -14,7 +14,8 @@
 // Descriptors are the RAW OS numbers, on both legs: a descriptor is what
 // crosses to the peer, and one received from it is a number the program
 // passes on. The table holds every descriptor the program was given (opened
-// here or received), each as an `OwnedFd`, and a call naming any other
+// here or received — at most MAX_FDS untaken per socket, the rest closed on
+// receipt, #4124), each as an `OwnedFd`, and a call naming any other
 // number — never issued, a standard stream, closed — is refused before any
 // system call. That is what keeps a guest on the embedded host from reaching
 // the host's own descriptors, and native answers the same by construction.
@@ -138,13 +139,19 @@ impl AlmideUnixTables {
 
     /// Up to `max` bytes — at most 64 KiB per call, the buffer is never `max`
     /// itself (#4123) — blocking until some arrive; empty once the peer
-    /// closed. Descriptors that came with them wait for `unix_take_fds`.
+    /// closed. Descriptors that came with them wait for `unix_take_fds`, at
+    /// most `MAX_FDS` per socket (#4124): one that arrives while that many
+    /// wait untaken is closed on receipt and never held, so a peer cannot
+    /// fill the program's descriptor table through a socket it only reads.
     pub fn unix_recv(&mut self, sock: i64, max: i64) -> Result<Vec<u8>, String> {
         let sock = self.check("unix_recv", sock)?;
         let mut buf = vec![0u8; (max.max(0) as usize).min(ALMIDE_UNIX_RECV_CHUNK)];
         let s = self.borrow(sock);
         let (n, fds) = almide_unix_retry(|| almide_unix_sys::recv(&s, &mut buf)).map_err(|e| format!("unix_recv: {e}"))?;
-        let got: Vec<i64> = fds.into_iter().map(|f| self.hold(f)).collect();
+        let waiting = self.received.get(&sock).map_or(0, |q| q.len());
+        let room = almide_unix_sys::MAX_FDS.saturating_sub(waiting);
+        // `fds` beyond the room drop here: their OwnedFd closes them.
+        let got: Vec<i64> = fds.into_iter().take(room).map(|f| self.hold(f)).collect();
         if !got.is_empty() {
             self.received.entry(sock).or_default().extend(got);
         }
