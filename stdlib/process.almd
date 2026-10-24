@@ -99,7 +99,7 @@ effect fn env(key: String) -> String? = _
 @intrinsic("almide_rt_process_spawn")
 effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _
 
-/// Sends signal to pid; err is kill's stderr.
+/// Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
 @ordered
 @intrinsic("almide_rt_process_kill")
 effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
@@ -109,6 +109,6 @@ effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 @category("Time")
 effect fn sleep(ms: Int) -> Unit = _
 
-/// True while pid exists, zombies included.
+/// True while pid exists; false for a pid <= 0.
 @intrinsic("almide_rt_process_is_alive")
 effect fn is_alive(pid: Int) -> Bool = _
