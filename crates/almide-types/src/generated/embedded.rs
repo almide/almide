@@ -30451,7 +30451,8 @@ pub const SRC_RANDOM_BYTES: &str = r#"
 
 
 fn random_bytes(n: Int) -> Bytes = {
-  if n < 0 then prim.die(prim.handle("Error: random.bytes: negative length ${int.to_string(n)}\n")) else ()
+  if n < 0 then prim.die(prim.handle("Error: random.bytes: negative length ${int.to_string(n)}\n"))
+  else ()
   let buf = prim.alloc_bytes(n)
   let p = prim.handle(buf) + 12
   var off = 0
@@ -30463,7 +30464,8 @@ fn random_bytes(n: Int) -> Bytes = {
     let _e = prim.random_get(p + off, 8)
     off = off + 8
   }
-  if off < n then __rb_tail(p, off, n) else ()
+  if off < n then __rb_tail(p, off, n)
+  else ()
   buf
 }
 
