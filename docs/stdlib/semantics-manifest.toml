@@ -1756,6 +1756,7 @@ native semantics are pinned by the duration tests.
 #   value — the Int is a produced or bounding value. int(min, max) is
 #           INCLUSIVE ON BOTH ENDS (range = max - min + 1), and min >= max
 #           collapses to min — both pinned below
+#   byte-count — bytes(n): n is the length of the result
 [random]
 default_index_unit = "value"
 
@@ -1794,6 +1795,20 @@ probe = 'r >= 1 and r <= 6 and collapsed == 9'
 expect = "true"
 note = """
 The bounds rule of random.int: both ends inclusive, and min >= max returns min.
+"""
+
+[[random.fn]]
+name = "bytes"
+index_unit = "byte-count"
+setup = [
+  "let b = random.bytes(13)",
+  "let e = random.bytes(0)",
+]
+probe = 'bytes.len(b) == 13 and bytes.len(e) == 0'
+expect = "true"
+note = """
+n is a byte COUNT: the result is exactly n bytes long, n = 0 is empty (C-394).
+The bytes themselves are the OS CSPRNG's and not probed; a negative n aborts.
 """
 
 # index_unit vocabulary — json:
