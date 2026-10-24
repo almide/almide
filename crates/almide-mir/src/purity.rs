@@ -63,6 +63,7 @@ pub const PURE_MODULES: &[&str] = &[
     "bytes_append_multi",
     "bytes_array",
     "bytes_core",
+    "bytes_ct",
     "bytes_cursor",
     "bytes_f16",
     "bytes_lenprefix",

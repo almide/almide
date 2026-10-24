@@ -1,0 +1,61 @@
+// #4106: HMAC (RFC 2104 / RFC 4231) and the constant-time compare.
+import hash
+
+fn s(t: String) -> Bytes = bytes.from_string(t)
+
+test "hmac_sha256 and hmac_sha512 equal RFC 4231 test case 2, key first" {
+  assert_eq(
+    hash.hmac_sha256_hex(s("Jefe"), s("what do ya want for nothing?")),
+    "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843",
+  )
+  assert_eq(
+    hash.hmac_sha512_hex(s("Jefe"), s("what do ya want for nothing?")),
+    "164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea2505549758bf75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737",
+  )
+  assert(hash.hmac_sha256_hex(s("what do ya want for nothing?"), s("Jefe")) != hash.hmac_sha256_hex(
+    s("Jefe"),
+    s("what do ya want for nothing?"),
+  ))
+}
+
+test "a key longer than the block is hashed first (RFC 4231 test case 6)" {
+  let k = bytes.from_list(list.repeat(170, 131))
+  assert_eq(
+    hash.hmac_sha256_hex(k, s("Test Using Larger Than Block-Size Key - Hash Key First")),
+    "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54",
+  )
+}
+
+test "the raw and hex cells agree and have the digest lengths" {
+  let k = s("k")
+  let m = s("m")
+  assert_eq(bytes.len(hash.hmac_sha256(k, m)), 32)
+  assert_eq(bytes.len(hash.hmac_sha512(k, m)), 64)
+  assert_eq(string.len(hash.hmac_sha512_hex(k, m)), 128)
+}
+
+test "is_valid_ accepts the right tag only" {
+  let k = s("key")
+  let m = s("message")
+  let tag = hash.hmac_sha256(k, m)
+  let h = hash.hmac_sha256_hex(k, m)
+  assert(hash.is_valid_hmac_sha256(k, m, tag))
+  assert(hash.is_valid_hmac_sha256_hex(k, m, h))
+  assert(hash.is_valid_hmac_sha256_hex(k, m, string.to_upper(h)))
+  assert(not hash.is_valid_hmac_sha256(k, s("massage"), tag))
+  assert(not hash.is_valid_hmac_sha256(k, m, bytes.slice(tag, 0, 31)))
+  assert(not hash.is_valid_hmac_sha256_hex(k, m, "not hex"))
+  assert(not hash.is_valid_hmac_sha256_hex(k, m, string.slice(h, 0, 63)))
+  assert(hash.is_valid_hmac_sha512_hex(k, m, hash.hmac_sha512_hex(k, m)))
+  assert(not hash.is_valid_hmac_sha512(k, m, tag))
+}
+
+test "is_equal_constant_time answers what == answers" {
+  assert(bytes.is_equal_constant_time(s("abc"), s("abc")))
+  assert(not bytes.is_equal_constant_time(s("abc"), s("abd")))
+  assert(not bytes.is_equal_constant_time(s("abc"), s("ab")))
+  assert(bytes.is_equal_constant_time(s(""), s("")))
+  assert(string.is_equal_constant_time("token", "token"))
+  assert(not string.is_equal_constant_time("token", "tokem"))
+  assert(not string.is_equal_constant_time("token", "tokens"))
+}

@@ -1339,23 +1339,6 @@ fn bytes_repeat(b: Bytes, count: Int) -> Bytes = {
 }
 
 
-
-
-
-fn __ct_acc(pa: Int, pb: Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else __ct_acc(pa, pb, n, i + 1, prim.bor(acc, prim.bxor(prim.load8(pa + i), prim.load8(pb + i))))
-
-
-
-fn bytes_is_equal_constant_time(a: Bytes, b: Bytes) -> Bool = {
-  let ha = prim.handle(a)
-  let hb = prim.handle(b)
-  let na = prim.load32(ha + 4)
-  let nb = prim.load32(hb + 4)
-  if na != nb then false
-  else __ct_acc(ha + 12, hb + 12, na, 0, 0) == 0
-}
-
 fn __byteq(pa: Int, pb: Int, n: Int, i: Int) -> Bool = if i >= n then true
 else {
   let x = prim.load8(pa + i)
@@ -2191,6 +2174,39 @@ fn bytes_map_each(b: Bytes, f: (Int) -> Int) -> Bytes = {
   let _x = __bme_fill(prim.handle(out) + 12, h + 12, f, n, 0)
   out
 }
+"#;
+pub const SRC_BYTES_CT: &str = r#"
+
+
+
+
+
+
+
+
+
+
+fn __bct_acc(a: Bytes, b: Bytes, n: Int, i: Int, acc: Int) -> Int =
+  if i >= n then acc
+  else __bct_acc(
+    a,
+    b,
+    n,
+    i + 1,
+    int.bor(acc, int.bxor(bytes.get_or(a, i, 0), bytes.get_or(b, i, 0))),
+  )
+
+@implements("bytes.is_equal_constant_time")
+fn bytes_is_equal_constant_time(a: Bytes, b: Bytes) -> Bool =
+  if bytes.len(a) != bytes.len(b) then false
+  else __bct_acc(a, b, bytes.len(a), 0, 0) == 0
+
+
+@implements("string.is_equal_constant_time")
+fn string_is_equal_constant_time(a: String, b: String) -> Bool = bytes_is_equal_constant_time(
+  bytes.from_string(a),
+  bytes.from_string(b),
+)
 "#;
 pub const SRC_BYTES_CURSOR: &str = r#"
 
@@ -37005,27 +37021,6 @@ else {
   else false
 }
 
-
-
-fn __str_ct_acc(pa: Int, pb: Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else __str_ct_acc(
-  pa,
-  pb,
-  n,
-  i + 1,
-  prim.bor(acc, prim.bxor(prim.load8(pa + i), prim.load8(pb + i))),
-)
-
-
-fn string_is_equal_constant_time(a: String, b: String) -> Bool = {
-  let ha = prim.handle(a)
-  let hb = prim.handle(b)
-  let na = prim.load32(ha + 4)
-  let nb = prim.load32(hb + 4)
-  if na != nb then false
-  else __str_ct_acc(ha + 12, hb + 12, na, 0, 0) == 0
-}
-
 fn string_starts_with(s: String, prefix: String) -> Bool = {
   let hs = prim.handle(s)
   let hp = prim.handle(prefix)
@@ -42476,6 +42471,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "bytes_append_multi" => Some(SRC_BYTES_APPEND_MULTI),
         "bytes_array" => Some(SRC_BYTES_ARRAY),
         "bytes_core" => Some(SRC_BYTES_CORE),
+        "bytes_ct" => Some(SRC_BYTES_CT),
         "bytes_cursor" => Some(SRC_BYTES_CURSOR),
         "bytes_f16" => Some(SRC_BYTES_F16),
         "bytes_lenprefix" => Some(SRC_BYTES_LENPREFIX),
