@@ -182,11 +182,29 @@ Contracts: C-026。
 ## ALS-T11 バイナリテキスト符号化
 
 `base64.encode/decode`（standard + URL-safe）と `hex.encode/decode` は RFC 4648
-に従い、decode エラーは両ターゲット同文言（base64 は位置なし —
-`invalid base64 character` / `invalid base64 length: N`; 位置付きは hex 側
-`invalid hex char at 0`、C-030）。大文字小文字の
-扱い・パディング規則・不正長の検出を含む。
-Contracts: C-027, C-030。
+に従い、decode エラーは両ターゲット同文言（base64 は位置なし; 位置付きは hex 側
+`invalid hex char at 0`、C-030）。大文字小文字の扱い・パディング規則・不正長の
+検出を含む。
+
+base64 の encode は `=` 付きの正規形を出し、`base64.decode`（`+` `/`）と
+`base64.decode_url`（`-` `_`）は**自分の英字の正規形だけ**を受理する。一つのバイト列
+の綴りは一つである（RFC 4648 §12 の可鍛性を持たない）。次の順に検査し、最初に
+違反した規則の err を返す:
+
+| 規則 | err |
+|------|-----|
+| UTF-8 のバイト長が 4 の倍数 | `invalid base64 length: <バイト長>` |
+| 末尾の `=` は 2 個まで | `invalid base64 padding` |
+| 残りのバイトはすべてその関数の英字（途中の `=`、他方の英字の 62/63 番を含め不可） | `invalid base64 character` |
+| `=` が落とすビット（`=` 1 個なら最後の文字の下位 2 ビット、2 個なら下位 4 ビット）が 0 | `invalid base64 trailing bits` |
+
+`QQ==` は `A`、`QR==` は `invalid base64 trailing bits`、`QQ` は
+`invalid base64 length: 2`、`QUJD====` は `invalid base64 padding`、
+`decode("-_8=")` と `decode_url("+/8=")` は `invalid base64 character`。
+
+テスト: `spec/wasm_cross/encoding_base64.almd`、
+`spec/wasm_cross/base64_decode_canonical.almd`、`spec/stdlib/encoding_test.almd`。
+Contracts: C-027, C-030, C-411。
 
 ## ALS-T12 非 abort 整数除算の一致
 
