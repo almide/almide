@@ -142,3 +142,47 @@ fn the_component_host_preopens_only_the_granted_roots() {
     let lines: Vec<&str> = wasm.lines().collect();
     assert_eq!((lines[1], lines.last().copied()), ("hello", Some("false")), "{wasm}");
 }
+
+const SCOPED_TEST: &str = r#"import fs
+
+test "a path outside the scope is refused" {
+  assert_eq(fs.read_text("../outside/s.txt"), err("fs: \"../outside/s.txt\" is outside [permissions] fs"))
+  assert_eq(fs.read_text("data/link/s.txt"), err("fs: \"data/link/s.txt\" is outside [permissions] fs"))
+  assert(not fs.exists("../outside/s.txt"))
+}
+
+test "a path inside the scope is read" {
+  assert_eq(fs.read_text("data/sub/a.txt"), ok("hello\n"))
+}
+"#;
+
+fn test_run(dir: &Path, args: &[&str]) -> (bool, String) {
+    let o = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .arg("test")
+        .arg("scoped_test.almd")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("spawn");
+    (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)))
+}
+
+/// #4084: a test harness build has no `main`, and `[permissions] fs` used to
+/// hang on it — `almide test` ran unbounded. The scope is now resolved on the
+/// first fs call (native) and set for the test run (the embedded wasm host),
+/// so a test file is bounded like `almide run`, on both legs. Without the
+/// key the same file fails: the outside read succeeds.
+#[test]
+fn almide_test_is_bounded_by_permissions_fs_on_both_targets() {
+    let (_t, proj) = tree(Some("[package]\nname = \"scoped\"\n\n[permissions]\nfs = [\"./data\"]\n"));
+    std::fs::write(proj.join("scoped_test.almd"), SCOPED_TEST).expect("write");
+    for args in [&["--target", "native"][..], &["--target", "wasm"][..], &[][..]] {
+        let (ok, out) = test_run(&proj, args);
+        assert!(ok, "{args:?}: the scoped test file failed:\n{out}");
+    }
+    std::fs::remove_file(proj.join("almide.toml")).expect("rm manifest");
+    for args in [&["--target", "native"][..], &["--target", "wasm"][..]] {
+        let (ok, out) = test_run(&proj, args);
+        assert!(!ok, "{args:?}: without the key the outside read should succeed and the assertion fail:\n{out}");
+    }
+}
