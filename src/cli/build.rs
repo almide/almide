@@ -144,7 +144,7 @@ fn install_artifact(built: &std::path::Path, dest: &std::path::Path) -> std::io:
 /// write it to `dest`. Exits the process on a compile error, otherwise prints
 /// the written path and returns.
 fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>, note: &str) {
-    let project_dir = std::env::temp_dir().join("almide-build-cdylib");
+    let project_dir = super::build_dir::cache_base().join("build-cdylib");
     // Strip fn main() from the code — cdylib has no entry point
     let lib_code = rs_code.replace("fn main()", "fn __almide_unused_main()");
     // Serialize across processes: the shared scratch dir's src + target would

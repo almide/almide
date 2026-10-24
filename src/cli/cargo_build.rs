@@ -455,7 +455,7 @@ fn build_runtime_rlib(opt_level: &str, cpu: Option<&str>, llvm: &[&str]) -> Resu
     let flags = RUNTIME_RLIB_CODEGEN_ARGS.join(" ");
     let llvm_key = if llvm.is_empty() { String::new() } else { format!("|llvm={}", llvm.join(" ")) };
     let key = format!("{:016x}", super::hash64(format!("{src}|{rustc_ver}|opt{opt_level}|ed2021{cpu_key}|{flags}{llvm_key}").as_bytes()));
-    let dir = std::env::temp_dir().join(format!("almide-rtlib-{key}"));
+    let dir = super::build_dir::cache_base().join(format!("almide-rtlib-{key}"));
     let rlib = dir.join("libalmide_rt.rlib");
     if rlib.exists() {
         return Ok(rlib);

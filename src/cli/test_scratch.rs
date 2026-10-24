@@ -18,7 +18,7 @@
 //! destructors — unless `ALMIDE_KEEP_SCRATCH=1`, which keeps it and prints
 //! where it is.
 //!
-//! The native worker dir stays PERSISTENT (`$TMPDIR/almide-test/native/`):
+//! The native worker dir stays PERSISTENT (`<cache base>/test/native/`, the cache base being `build_dir::cache_base`):
 //! it is a build cache — its content-hashed binary names and per-dir flock
 //! already make concurrent use of one dir correct (`build_native_cached`) —
 //! and moving it under the per-run root cold-builds every native-fallback
@@ -27,17 +27,17 @@
 use std::path::{Path, PathBuf};
 
 pub(crate) struct TestScratch {
-    /// Per-run root: `<temp>/almide-test-<pid>-<nonce>/`, removed on finish.
+    /// Per-run root: `<cache base>/test-run-<pid>-<nonce>/`, removed on finish.
     root: PathBuf,
-    /// Persistent native build cache: `<temp>/almide-test/native/`.
+    /// Persistent native build cache: `<cache base>/test/native/`.
     native_cache: PathBuf,
     keep: bool,
 }
 
-/// The persistent per-test-file native build cache: `<temp>/almide-test/native`.
+/// The persistent per-test-file native build cache: `<cache base>/test/native` (#4180).
 /// One resolution, shared by [`TestScratch`] and by `almide clean` (#2504).
 pub(crate) fn native_worker_cache() -> PathBuf {
-    std::env::temp_dir().join("almide-test").join("native")
+    super::build_dir::cache_base().join("test").join("native")
 }
 
 impl TestScratch {
@@ -63,7 +63,7 @@ impl TestScratch {
             let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             super::hash64(format!("{}:{}:{}", std::process::id(), nanos, seq).as_bytes())
         };
-        let root = std::env::temp_dir().join(format!("almide-test-{}-{:016x}", std::process::id(), nonce));
+        let root = super::build_dir::cache_base().join(format!("test-run-{}-{:016x}", std::process::id(), nonce));
         std::fs::create_dir_all(root.join("wasm")).ok();
         let native_cache = native_worker_cache();
         let keep = almide_base::env::flag("ALMIDE_KEEP_SCRATCH");

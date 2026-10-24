@@ -95,6 +95,10 @@ fs2 = "0.4"
 
 # `almide run` on Windows waits for the program and ignores the console's
 # Ctrl-C itself, which the program also receives (#2809). Unix execs instead.
+# The effective uid that owns the private build-cache base (#4180).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 ctrlc = "3.5"
 
