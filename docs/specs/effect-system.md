@@ -436,6 +436,10 @@ collections and numerics — carries no category.
 A call to an **`@extern` fn is every category** (⊤, #3245). Its body is foreign,
 inference cannot see into it, and no bound can be declared on it yet (ADR-0027
 §5 proposes one), so it passes `[permissions]` only when `allow` lists all six.
+An **`@inline_rust` fn outside the stdlib is every category too** (#4100): the
+native build splices its Rust template in place of the Almide body, so the
+body inference reads is not the code that runs. The stdlib's own templates
+are categorised by the call table above.
 
 Tests: `tests/effect_permissions_test.rs`; the table's gate is the
 `classification_gate` module in `crates/almide-ir/src/effect.rs`.
