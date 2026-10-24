@@ -86,7 +86,7 @@ fn a_list_of_strings_releases_its_elements() {
 /// #2010 stage 2b: a spine COPIED from another spine (slice / take /
 /// filter / concat / reverse …) holds its own element credits — the copy
 /// and the source each release exactly what they hold, flat and without
-/// a double free (the double-free trap is armed on the corpus sweep).
+/// a double free (the double-free trap is in every wasm build since #4023).
 #[test]
 fn a_copied_spine_holds_its_own_element_credits() {
     flat(
