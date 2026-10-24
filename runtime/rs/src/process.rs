@@ -102,19 +102,15 @@ pub fn almide_rt_process_exec_in(dir: &str, cmd: &str, args: &[AlmideString]) ->
 /// ignored, the write fails with EPIPE, as on the embedded host (ALS-R5).
 struct AlmideSigpipeIgnored {
     #[cfg(unix)]
-    previous: usize,
-}
-
-#[cfg(unix)]
-extern "C" {
-    fn signal(sig: i32, handler: usize) -> usize;
+    previous: almide_rt_sys_ffi::Disposition,
 }
 
 impl AlmideSigpipeIgnored {
     fn new() -> Self {
-        // SIGPIPE = 13, SIG_IGN = 1.
         #[cfg(unix)]
-        return AlmideSigpipeIgnored { previous: unsafe { signal(13, 1) } };
+        return AlmideSigpipeIgnored {
+            previous: almide_rt_sys_ffi::set_signal(almide_rt_sys_ffi::SIGPIPE, almide_rt_sys_ffi::Disposition::IGNORE),
+        };
         #[cfg(not(unix))]
         AlmideSigpipeIgnored {}
     }
@@ -123,9 +119,7 @@ impl AlmideSigpipeIgnored {
 impl Drop for AlmideSigpipeIgnored {
     fn drop(&mut self) {
         #[cfg(unix)]
-        unsafe {
-            signal(13, self.previous);
-        }
+        almide_rt_sys_ffi::set_signal(almide_rt_sys_ffi::SIGPIPE, self.previous);
     }
 }
 
@@ -181,17 +175,10 @@ fn almide_process_poll_child(child: &mut std::process::Child) -> std::io::Result
     }
     #[cfg(unix)]
     {
-        extern "C" {
-            fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
-        }
         // POSIX values, identical on Linux and macOS / BSD.
-        const WNOHANG: i32 = 1;
-        const WUNTRACED: i32 = 2;
         const SIGTTIN: i32 = 21;
         const SIGTTOU: i32 = 22;
-        let mut raw: i32 = 0;
-        let r = unsafe { waitpid(child.id() as i32, &mut raw, WNOHANG | WUNTRACED) };
-        if r == child.id() as i32 {
+        if let Some(raw) = almide_rt_sys_ffi::wait_exited_or_stopped(child.id() as i32) {
             // WIFSTOPPED / WSTOPSIG (the same encoding on Linux and macOS).
             if raw & 0xff == 0x7f {
                 return Ok(match (raw >> 8) & 0xff {
