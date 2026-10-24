@@ -1,10 +1,11 @@
-// string_to_int — SELF-HOSTED string.to_int for v1: `s.trim().parse::<i64>().map_err(|e|
+// string_to_int — SELF-HOSTED int.parse for v1: `s.trim_ascii().parse::<i64>().map_err(|e|
 // e.to_string())`. Returns Result[Int, String] (the Ok/Err DynListStr machinery). The Err strings
 // are Rust's EXACT ParseIntError messages so the error path byte-matches v0. Overflow is detected
 // against i64::MAX/MIN without ever representing 2^63 as a literal (it overflows the parser): the
 // running magnitude is compared to CUTOFF = i64::MAX/10 with a per-sign last-digit limit, and the
-// negative i64::MIN boundary (…808) is allowed only as the final digit. Trim is ASCII-whitespace
-// (v0's .trim() is Unicode; ASCII covers the parse-input common case). Reads only; result owned.
+// negative i64::MIN boundary (…808) is allowed only as the final digit. int.parse trims ASCII
+// whitespace ONLY, exactly str::trim_ascii (C-413): TAB LF FF CR SPACE — not VT, no Unicode space
+// ("\u{a0}5" is junk). int.from_hex keeps its Unicode string.trim + __sti_ws skip. Reads only.
 // ASCII whitespace byte? (\t \n \v \f \r and space)
 fn __sti_ws(b: Int) -> Bool = if b == 32 then true
 else if b < 9 then false
@@ -69,16 +70,20 @@ else {
   __sti_val(data, pos + 1, end, m2)
 }
 
-// v0 trims UNICODE whitespace (`s.trim()`), not just ASCII — route through the
-// (now Unicode) string.trim self-host first; the internal ASCII skip below is
-// then a no-op kept for the raw path's self-containment. (C-021.)
-fn string_to_int(s: String) -> Result[Int, String] = if __sti_bare(s) then __sti_raw(s)
-else {
-  let t = string.trim(s)
-  __sti_raw(t)
-}
+// str::trim_ascii's set (C-413): TAB LF FF CR SPACE — VT (11) is NOT trimmed.
+fn __sti_aws(b: Int) -> Bool = b == 32 or b == 9 or b == 10 or b == 12 or b == 13
 
-// Does the text start AND end with a visible ASCII byte (33..=126)? Then the
+fn __sti_atrim_s(data: Int, pos: Int, end: Int) -> Int =
+  if pos < end and __sti_aws(prim.load8(data + pos)) then __sti_atrim_s(data, pos + 1, end)
+  else pos
+
+fn __sti_atrim_e(data: Int, start: Int, end: Int) -> Int =
+  if end > start and __sti_aws(prim.load8(data + end - 1)) then __sti_atrim_e(data, start, end - 1)
+  else end
+
+fn string_to_int(s: String) -> Result[Int, String] = __sti_raw(s)
+
+// (int.from_hex) Does the text start AND end with a visible ASCII byte (33..=126)? Then the
 // Unicode trim strips nothing — every Unicode whitespace is an ASCII byte
 // <= 32 or a multi-byte sequence, whose first and last bytes are >= 128 — and
 // the text is parsed in place instead of through a trimmed copy.
@@ -97,8 +102,8 @@ fn __sti_raw(s: String) -> Result[Int, String] = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
   let data = h + 12
-  let ts = __sti_trim_s(data, 0, blen)
-  let te = __sti_trim_e(data, blen)
+  let ts = __sti_atrim_s(data, 0, blen)
+  let te = __sti_atrim_e(data, ts, blen)
   let empty = ts >= te
   let b0 = if empty then 48 else prim.load8(data + ts)
   let neg = b0 == 45

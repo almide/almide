@@ -155,7 +155,7 @@ local fn rotate_count(n: Int) -> Int = {
 /// Bits needed to hold x; 0 for 0.
 fn bit_length(x: UInt16) -> Int = 64 - int.count_leading_zeros(int.from_uint16(x))
 
-/// Decimal UInt16 from trimmed s; err on junk, a sign of -, or above 65535.
+/// Decimal UInt16 from ASCII-trimmed s; err on junk, a sign of -, or above 65535.
 fn parse(s: String) -> Result[UInt16, String] =
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
   else match int.parse(s) {

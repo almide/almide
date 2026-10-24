@@ -124,7 +124,7 @@ fn max_value() -> Float64 = from_bits(9218868437227405311)
 /// Most negative finite Float64 (= -max_value()), not the smallest positive.
 fn min_value() -> Float64 = from_bits(-4503599627370497)
 
-/// Float64 from trimmed s, the grammar of float.parse; err on junk.
+/// Float64 from ASCII-trimmed s, the grammar of float.parse; err on junk, inf, NaN.
 fn parse(s: String) -> Result[Float64, String] = match float.parse(s) {
   ok(f) => ok(float.to_float64(f)),
   err(e) => err(e),
