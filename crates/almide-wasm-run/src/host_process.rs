@@ -199,8 +199,9 @@ fn spawn_call<T>(caller: &mut wasmtime::Caller<'_, T>, [op, a_ptr, a_len, b_ptr,
         .and_then(|e| e.into_memory())
         .ok_or_else(|| wasmtime::Error::msg("almide:process/spawn: the guest exports no memory"))?;
     let read = |caller: &wasmtime::Caller<'_, T>, ptr: i32, len: i32| -> wasmtime::Result<String> {
-        let mut buf = vec![0u8; len as u32 as usize];
-        mem.read(caller, ptr as u32 as usize, &mut buf)?;
+        // Bounds-checked before anything is allocated (#4135): a forged
+        // length traps instead of reserving up to 4 GiB.
+        let buf = crate::host::read_guest(caller, mem, ptr, len)?;
         String::from_utf8(buf).map_err(|_| wasmtime::Error::msg("almide:process/spawn: operand is not UTF-8"))
     };
     let a = read(caller, a_ptr, a_len)?;
