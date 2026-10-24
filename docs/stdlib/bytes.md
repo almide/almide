@@ -13,24 +13,28 @@ UTF-8 token by its byte offsets, use `string.byte_slice(source, start, end)`.
 
 ## Naming convention
 
-- `read_<dtype>_le|be(b, pos)` — read one value at a byte offset (no advance).
-- `read_<dtype>_le_array(b, pos, count)` — read `count` consecutive values into a `List[T]`.
-- `set_<dtype>_le(b, pos, val)` — overwrite at offset (length unchanged).
-- `append_<dtype>_le(b, val)` — append to the end (length grows by sizeof(dtype)).
-- `write_<dtype>_be(b, val)` — append big-endian (legacy; prefer `append_*_le`).
+`<t>` is one of `u8 | i8 | u16 | i16 | u32 | i32 | i64 | f16 | f32 | f64`; every
+width except `u8`/`i8` comes in `_le` and `_be`. Almide `Int` is i64 and `Float`
+is f64; smaller widths are sign- or zero-extended on read and truncated on
+write, and `f16`/`f32` round to nearest even.
 
-`<dtype>` is one of `u8 | u16 | u32 | i32 | i64 | f16 | f32 | f64` (or `bool`/`string` for the BE family). Almide `Int` is i64 and `Float` is f64; smaller widths are sign- or zero-extended on read and truncated on write.
+- `get_<t>(b, i) -> T?` — read one value at byte offset `i`; `none` when the value does not fit inside the buffer.
+- `get_<t>_array(b, i, count) -> List[T]?` — `count` consecutive values; `none` if any is cut off.
+- `next_<t>(b, i) -> (T?, Int)` — a cursor read: the value and the offset just past it (unchanged on `none`).
+- `put_<t>(b, i, x)` — overwrite at offset `i` in place; a write outside the buffer aborts.
+- `append_<t>(b, x)` — grow the buffer by one value.
+- `get_bool` / `next_bool` / `put_bool` / `append_bool` use one byte.
 
-The writers — `set_*`, `append_*`, `write_*`, `push`, `set_at`, `fill`,
-`clear`, `copy_from`, `copy_within` — change their receiver in place, and the
+The writers — `put_*`, `append_*`, `push`, `pop`, `fill`, `clear`,
+`copy_from`, `copy_within` — change their receiver in place, and the
 receiver is a `mut` parameter: pass a `var` (or a `mut` parameter of your own).
 A `let` binding, a plain parameter or a temporary is E032.
 
 ```almd check
-fn stamp(mut b: Bytes, v: Int) -> Unit = bytes.set_u8(b, 0, v)  // a helper that fills its caller's buffer
+fn stamp(mut b: Bytes, v: Int) -> Unit = bytes.put_u8(b, 0, v)  // a helper that fills its caller's buffer
 
 fn main() -> Unit = {
-  var buf = bytes.new(4)   // `var`, not `let`
+  var buf = bytes.zeros(4)   // `var`, not `let`
   bytes.append_u8(buf, 7)
   stamp(buf, 9)
 }
@@ -40,14 +44,17 @@ fn main() -> Unit = {
 
 | Signature | Purpose |
 |---|---|
-| `bytes.new(len: Int) -> Bytes` | Allocate `len` zeroed bytes |
+| `bytes.new() -> Bytes` | An empty buffer |
+| `bytes.zeros(n: Int) -> Bytes` | `n` zeroed bytes |
 | `bytes.from_list(xs: List[Int]) -> Bytes` | From a list of byte values |
 | `bytes.from_string(s: String) -> Bytes` | Copy UTF-8 into a compact byte buffer (one byte per element) |
 | `bytes.to_list(b) -> List[Int]` | Materialise as a list |
 | `bytes.len(b) -> Int` | Length |
 | `bytes.is_empty(b) -> Bool` | Length == 0 |
-| `bytes.get(b, i) -> Option[Int]` | Single byte |
+| `bytes.is_eof(b, i) -> Bool` | `i` is at or past the end |
+| `bytes.get(b, i) -> Int?` | Single byte |
 | `bytes.get_or(b, i, default) -> Int` | Single byte with fallback |
+| `bytes.compare(a, b) -> Int` | Lexicographic order |
 
 ## Slicing & combining
 
@@ -55,94 +62,26 @@ fn main() -> Unit = {
 |---|---|
 | `bytes.slice(b, start, end) -> Bytes` | Half-open slice |
 | `bytes.concat(a, b) -> Bytes` | Concatenate |
-| `bytes.repeat(b, n) -> Bytes` | Repeat n times |
-| `bytes.set(b, i, val) -> Bytes` | Replace one byte |
-| `bytes.push(b, val)` | Append one byte (mutates) |
+| `bytes.repeat(b, n) -> Bytes` | Repeat `n` times (bounded; an oversized result aborts) |
+| `bytes.chunk(b, n) -> List[Bytes]` | Pieces of `n` bytes; `n <= 0` aborts |
+| `bytes.pad_start(b, n, byte)` / `bytes.pad_end(b, n, byte)` | Pad to length `n` |
+| `bytes.set(b, i, x) -> Bytes` | A copy with one byte replaced |
+| `bytes.push(b, x)` / `bytes.pop(b)` | Append / remove the last byte (mutate) |
+| `bytes.append_bytes(b, other)` | Append a whole buffer (mutates) |
 | `bytes.clear(b)` | Truncate to length 0 (mutates) |
 
-## Little-endian readers (single value)
+## Typed reads and writes
 
-| Signature | Width |
-|---|---|
-| `bytes.read_u8(b, pos)` | 1 byte |
-| `bytes.read_u16_le(b, pos)` | 2 bytes |
-| `bytes.read_u32_le(b, pos)` | 4 bytes (zero-extended) |
-| `bytes.read_i32_le(b, pos)` | 4 bytes (sign-extended) |
-| `bytes.read_i64_le(b, pos)` | 8 bytes |
-| `bytes.read_f16_le(b, pos)` | 2 bytes → Float (IEEE-754 half) |
-| `bytes.read_f32_le(b, pos)` | 4 bytes → Float (promoted) |
-| `bytes.read_f64_le(b, pos)` | 8 bytes → Float |
+| Family | Shape | Out of range |
+|---|---|---|
+| `bytes.get_u16_le(b, i)` … | `T?` | `none` |
+| `bytes.get_i32_le_array(b, i, count)` … | `List[T]?` | `none` |
+| `bytes.next_u32_be(b, i)` … | `(T?, Int)` | `(none, i)` |
+| `bytes.put_f64_le(b, i, x)` … | `Unit`, in place | aborts |
+| `bytes.append_i64_be(b, x)` … | `Unit`, grows | — |
 
-## Little-endian readers (bulk arrays)
-
-Each returns a `List[T]` — one native call beats `count` Almide-side reads.
-
-| Signature | Element width |
-|---|---|
-| `bytes.read_i32_le_array(b, pos, count)` | 4 bytes → `List[Int]` |
-| `bytes.read_u32_le_array(b, pos, count)` | 4 bytes → `List[Int]` |
-| `bytes.read_i64_le_array(b, pos, count)` | 8 bytes → `List[Int]` |
-| `bytes.read_f16_le_array(b, pos, count)` | 2 bytes → `List[Float]` |
-| `bytes.read_f32_le_array(b, pos, count)` | 4 bytes → `List[Float]` |
-| `bytes.read_f64_le_array(b, pos, count)` | 8 bytes → `List[Float]` |
-
-## Little-endian writers
-
-`set_*_le` overwrites at a fixed position; `append_*_le` grows the buffer.
-
-| Signature | Effect |
-|---|---|
-| `bytes.set_u8(b, pos, val)` | Overwrite 1 byte |
-| `bytes.set_u16_le(b, pos, val)` | Overwrite 2 bytes |
-| `bytes.set_u32_le(b, pos, val)` | Overwrite 4 bytes |
-| `bytes.set_i32_le(b, pos, val)` | Overwrite 4 bytes |
-| `bytes.set_i64_le(b, pos, val)` | Overwrite 8 bytes |
-| `bytes.set_f32_le(b, pos, val)` | Overwrite 4 bytes (demoted from f64) |
-| `bytes.set_f64_le(b, pos, val)` | Overwrite 8 bytes |
-| `bytes.append_u8(b, val)` | Append 1 byte |
-| `bytes.append_u16_le(b, val)` | Append 2 bytes |
-| `bytes.append_u32_le(b, val)` | Append 4 bytes |
-| `bytes.append_i32_le(b, val)` | Append 4 bytes |
-| `bytes.append_i64_le(b, val)` | Append 8 bytes |
-| `bytes.append_f32_le(b, val)` | Append 4 bytes (demoted from f64) |
-| `bytes.append_f64_le(b, val)` | Append 8 bytes |
-
-## Big-endian (network protocols)
-
-Single-value readers (returns 0 on out-of-bounds — see roadmap for `_at` variants):
-
-| Signature | Width |
-|---|---|
-| `bytes.read_u32_be(b, pos)` | 4 bytes |
-| `bytes.read_i32_be(b, pos)` | 4 bytes (sign-extended) |
-| `bytes.read_i64_be(b, pos)` | 8 bytes |
-| `bytes.read_f32_be(b, pos)` | 4 bytes → Float |
-| `bytes.read_f64_be(b, pos)` | 8 bytes → Float |
-| `bytes.read_string_be(b, pos)` | length-prefixed string |
-| `bytes.read_bool(b, pos)` | 1-byte bool |
-
-Bulk readers (symmetric to LE):
-
-| Signature | Element width |
-|---|---|
-| `bytes.read_u32_be_array(b, pos, count)` | 4 bytes → `List[Int]` |
-| `bytes.read_i32_be_array(b, pos, count)` | 4 bytes → `List[Int]` |
-| `bytes.read_i64_be_array(b, pos, count)` | 8 bytes → `List[Int]` |
-| `bytes.read_f32_be_array(b, pos, count)` | 4 bytes → `List[Float]` |
-| `bytes.read_f64_be_array(b, pos, count)` | 8 bytes → `List[Float]` |
-
-Appenders (preferred). The `write_*_be` family is the older spelling and remains as an alias.
-
-| Signature | Width |
-|---|---|
-| `bytes.append_u16_be(b, val)` | 2 bytes |
-| `bytes.append_u32_be(b, val)` | 4 bytes |
-| `bytes.append_i32_be(b, val)` | 4 bytes |
-| `bytes.append_i64_be(b, val)` | 8 bytes |
-| `bytes.append_f32_be(b, val)` | 4 bytes (demoted from f64) |
-| `bytes.append_f64_be(b, val)` | 8 bytes |
-| `bytes.write_string_be(b, s)` | Length-prefixed string |
-| `bytes.write_bool(b, val)` | 1-byte bool |
+Every cell of type × byte order × operation exists; `almide docs-gen --check`
+fails if one is missing. The signature index below lists each one.
 
 ## Higher-level readers
 
@@ -150,7 +89,8 @@ Appenders (preferred). The `write_*_be` family is the older spelling and remains
 |---|---|
 | `bytes.read_string_at(b, pos, len)` | UTF-8 substring of `len` bytes |
 | `bytes.read_length_prefixed_strings_le(b, pos, count)` | List of `count` length-prefixed strings |
-| `bytes.skip_length_prefixed_le(b, pos, count)` | Returns the byte offset past `count` LE-length-prefixed records |
+| `bytes.skip_length_prefixed_le(b, pos, count)` | The byte offset past `count` LE-length-prefixed records |
+| `bytes.write_string_be(b, s)` | Append a length-prefixed string |
 
 ## Pointer interop (deprecated — use `ffi`)
 

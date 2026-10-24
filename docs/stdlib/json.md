@@ -71,7 +71,7 @@ fn main() -> Unit = {
 ```
 ```output
 json: lone surrogate at pos 11
-json: duplicate key at pos 17
+json: duplicate key at pos 16
 json: trailing data at pos 6
 ```
 
