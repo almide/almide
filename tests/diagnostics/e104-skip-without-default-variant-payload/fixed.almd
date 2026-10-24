@@ -1,0 +1,4 @@
+// The fix: give the skipped field its default.
+type Event: Codec = | Login { user: String, @skip_decode trusted: Bool = false } | Logout
+
+fn main() -> Unit = println("ok")
