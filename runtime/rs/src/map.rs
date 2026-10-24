@@ -103,6 +103,61 @@ fn almide_map_hash_seq(hs: impl Iterator<Item = u64>) -> u64 {
     almide_rt_map_mix64(hs.fold(0x51_7CC1_B727_220A_95u64, almide_rt_map_hash_pair))
 }
 
+/// The two base hashes the key-hash family is built from (#4104): one for a
+/// byte string, one for a 64-bit word. [`AlmideFastHash`] is the default,
+/// unkeyed and fast; [`AlmideKeyedHash`] is keyed per process and is what a
+/// map falls back to once crafted keys flood its index. Each is a zero-sized
+/// type, so every key type's hash is monomorphized per mode: the fast path
+/// pays nothing for the fallback existing.
+pub trait AlmideWordHash {
+    fn bytes(b: &[u8]) -> u64;
+    /// A whole key that is one word.
+    fn word(x: u64) -> u64;
+    /// A word inside a compound key, before the pair / sequence combine.
+    fn raw(x: u64) -> u64;
+}
+
+/// The default, unkeyed hash (#2150): fast, and invertible.
+pub struct AlmideFastHash;
+impl AlmideWordHash for AlmideFastHash {
+    #[inline]
+    fn bytes(b: &[u8]) -> u64 {
+        almide_rt_map_hash_bytes(b)
+    }
+    #[inline]
+    fn word(x: u64) -> u64 {
+        almide_rt_map_mix64(x)
+    }
+    #[inline]
+    fn raw(x: u64) -> u64 {
+        x
+    }
+}
+
+/// The flooding fallback (#4104): SipHash keyed with a per-process random
+/// key, so keys crafted against the fast hash scatter.
+pub struct AlmideKeyedHash;
+fn almide_map_keyed_state() -> &'static std::collections::hash_map::RandomState {
+    static STATE: std::sync::OnceLock<std::collections::hash_map::RandomState> = std::sync::OnceLock::new();
+    STATE.get_or_init(std::collections::hash_map::RandomState::new)
+}
+impl AlmideWordHash for AlmideKeyedHash {
+    #[inline]
+    fn bytes(b: &[u8]) -> u64 {
+        use std::hash::BuildHasher;
+        almide_map_keyed_state().hash_one(b)
+    }
+    #[inline]
+    fn word(x: u64) -> u64 {
+        use std::hash::BuildHasher;
+        almide_map_keyed_state().hash_one(x)
+    }
+    #[inline]
+    fn raw(x: u64) -> u64 {
+        Self::word(x)
+    }
+}
+
 /// Hash for the key types the index supports. `None` = this key type stays
 /// on the linear path (the answer is per TYPE, never per value, so one probe
 /// decides a map's fate). Equality is always re-confirmed with `PartialEq`
@@ -112,51 +167,61 @@ fn almide_map_hash_seq(hs: impl Iterator<Item = u64>) -> u64 {
 /// build.rs's RUNTIME_DEPS extraction learns that a module referencing this
 /// helper (set.rs) needs map's source spliced in.
 pub fn almide_rt_map_key_hash<K: 'static>(k: &K) -> Option<u64> {
+    almide_map_key_hash_by::<K, AlmideFastHash>(k)
+}
+
+/// [`almide_rt_map_key_hash`] under the keyed fallback hash (#4104).
+pub fn almide_rt_map_key_hash_keyed<K: 'static>(k: &K) -> Option<u64> {
+    almide_map_key_hash_by::<K, AlmideKeyedHash>(k)
+}
+
+#[inline]
+fn almide_map_key_hash_by<K: 'static, H: AlmideWordHash>(k: &K) -> Option<u64> {
     let a = k as &dyn std::any::Any;
     if let Some(x) = a.downcast_ref::<i64>() {
-        return Some(almide_rt_map_mix64(*x as u64));
+        return Some(H::word(*x as u64));
     }
     if let Some(s) = a.downcast_ref::<AlmideString>() {
-        return Some(almide_rt_map_hash_bytes(s.as_bytes()));
+        return Some(H::bytes(s.as_bytes()));
     }
     if let Some(b) = a.downcast_ref::<bool>() {
-        return Some(almide_rt_map_mix64(*b as u64));
+        return Some(H::word(*b as u64));
     }
-    almide_map_key_hash_compound(a)
+    almide_map_key_hash_compound::<H>(a)
 }
 
-fn almide_map_key_hash_compound(a: &dyn std::any::Any) -> Option<u64> {
+fn almide_map_key_hash_compound<H: AlmideWordHash>(a: &dyn std::any::Any) -> Option<u64> {
     if let Some((x, y)) = a.downcast_ref::<(i64, i64)>() {
-        return Some(almide_rt_map_hash_pair(*x as u64, *y as u64));
+        return Some(almide_rt_map_hash_pair(H::raw(*x as u64), H::raw(*y as u64)));
     }
     if let Some((x, y)) = a.downcast_ref::<(AlmideString, AlmideString)>() {
-        return Some(almide_rt_map_hash_pair(almide_rt_map_hash_bytes(x.as_bytes()), almide_rt_map_hash_bytes(y.as_bytes())));
+        return Some(almide_rt_map_hash_pair(H::bytes(x.as_bytes()), H::bytes(y.as_bytes())));
     }
     if let Some((x, y)) = a.downcast_ref::<(AlmideString, i64)>() {
-        return Some(almide_rt_map_hash_pair(almide_rt_map_hash_bytes(x.as_bytes()), *y as u64));
+        return Some(almide_rt_map_hash_pair(H::bytes(x.as_bytes()), H::raw(*y as u64)));
     }
     if let Some((x, y)) = a.downcast_ref::<(i64, AlmideString)>() {
-        return Some(almide_rt_map_hash_pair(*x as u64, almide_rt_map_hash_bytes(y.as_bytes())));
+        return Some(almide_rt_map_hash_pair(H::raw(*x as u64), H::bytes(y.as_bytes())));
     }
     if let Some(xs) = a.downcast_ref::<Vec<i64>>() {
-        return Some(almide_map_hash_seq(xs.iter().map(|x| *x as u64)));
+        return Some(almide_map_hash_seq(xs.iter().map(|x| H::raw(*x as u64))));
     }
     if let Some(xs) = a.downcast_ref::<Vec<AlmideString>>() {
-        return Some(almide_map_hash_seq(xs.iter().map(|s| almide_rt_map_hash_bytes(s.as_bytes()))));
+        return Some(almide_map_hash_seq(xs.iter().map(|s| H::bytes(s.as_bytes()))));
     }
-    almide_map_key_hash_sized_int(a)
+    almide_map_key_hash_sized_int::<H>(a)
 }
 
-fn almide_map_key_hash_sized_int(a: &dyn std::any::Any) -> Option<u64> {
-    if let Some(x) = a.downcast_ref::<i32>() { return Some(almide_rt_map_mix64(*x as u64)); }
-    if let Some(x) = a.downcast_ref::<i16>() { return Some(almide_rt_map_mix64(*x as u64)); }
-    if let Some(x) = a.downcast_ref::<i8>() { return Some(almide_rt_map_mix64(*x as u64)); }
-    if let Some(x) = a.downcast_ref::<u64>() { return Some(almide_rt_map_mix64(*x)); }
-    if let Some(x) = a.downcast_ref::<u32>() { return Some(almide_rt_map_mix64(*x as u64)); }
-    if let Some(x) = a.downcast_ref::<u16>() { return Some(almide_rt_map_mix64(*x as u64)); }
-    if let Some(x) = a.downcast_ref::<u8>() { return Some(almide_rt_map_mix64(*x as u64)); }
+fn almide_map_key_hash_sized_int<H: AlmideWordHash>(a: &dyn std::any::Any) -> Option<u64> {
+    if let Some(x) = a.downcast_ref::<i32>() { return Some(H::word(*x as u64)); }
+    if let Some(x) = a.downcast_ref::<i16>() { return Some(H::word(*x as u64)); }
+    if let Some(x) = a.downcast_ref::<i8>() { return Some(H::word(*x as u64)); }
+    if let Some(x) = a.downcast_ref::<u64>() { return Some(H::word(*x)); }
+    if let Some(x) = a.downcast_ref::<u32>() { return Some(H::word(*x as u64)); }
+    if let Some(x) = a.downcast_ref::<u16>() { return Some(H::word(*x as u64)); }
+    if let Some(x) = a.downcast_ref::<u8>() { return Some(H::word(*x as u64)); }
     // A runtime-internal `String` key (not an Almide String, which is `AlmideString` above).
-    if let Some(s) = a.downcast_ref::<String>() { return Some(almide_rt_map_hash_bytes(s.as_bytes())); }
+    if let Some(s) = a.downcast_ref::<String>() { return Some(H::bytes(s.as_bytes())); }
     None
 }
 
@@ -168,11 +233,17 @@ fn almide_map_key_hash_sized_int(a: &dyn std::any::Any) -> Option<u64> {
 /// hashes byte-identically to the stored `AlmideString`.
 pub trait AlmideMapKey {
     fn almide_key_hash(&self) -> Option<u64>;
+    /// The same key under the keyed fallback hash (#4104).
+    fn almide_key_hash_keyed(&self) -> Option<u64>;
 }
 impl<T: 'static> AlmideMapKey for T {
     #[inline]
     fn almide_key_hash(&self) -> Option<u64> {
         almide_rt_map_key_hash(self)
+    }
+    #[inline]
+    fn almide_key_hash_keyed(&self) -> Option<u64> {
+        almide_rt_map_key_hash_keyed(self)
     }
 }
 impl AlmideMapKey for str {
@@ -180,7 +251,17 @@ impl AlmideMapKey for str {
     fn almide_key_hash(&self) -> Option<u64> {
         Some(almide_rt_map_hash_bytes(self.as_bytes()))
     }
+    #[inline]
+    fn almide_key_hash_keyed(&self) -> Option<u64> {
+        Some(AlmideKeyedHash::bytes(self.as_bytes()))
+    }
 }
+
+/// The probe distance at which an insert marks its index flooded (#4104).
+/// A good hash at load 3/4 keeps clusters far shorter; keys crafted to
+/// collide under the fast hash make every insert walk the whole cluster, so
+/// past this the owner rebuilds the index under the keyed hash.
+pub const ALMIDE_MAP_FLOOD_PROBES: usize = 128;
 
 /// The hash index beside an insertion-ordered entry vector: `hashes[p]` is
 /// the full hash of entry `p`, `slots` is a power-of-two linear-probe table
@@ -204,12 +285,16 @@ impl AlmideMapKey for str {
 pub struct AlmideKeyIndex {
     hashes: Vec<u64>,
     slots: Vec<u64>,
+    /// Hashes are under [`AlmideKeyedHash`], not the fast hash (#4104).
+    keyed: bool,
+    /// An insert probed past [`ALMIDE_MAP_FLOOD_PROBES`] under the fast hash.
+    flooded: bool,
 }
 
 impl AlmideKeyIndex {
     pub fn with_capacity(n: usize) -> Self {
         let slot_len = (n * 4 / 3 + 1).next_power_of_two().max(32);
-        AlmideKeyIndex { hashes: Vec::with_capacity(n), slots: vec![ALMIDE_MAP_SLOT_EMPTY; slot_len] }
+        AlmideKeyIndex { hashes: Vec::with_capacity(n), slots: vec![ALMIDE_MAP_SLOT_EMPTY; slot_len], keyed: false, flooded: false }
     }
 
     /// Position of the entry whose hash is `h` and whose key `eq` confirms.
@@ -289,10 +374,21 @@ impl AlmideKeyIndex {
     fn place(&mut self, h: u64, p: u32) {
         let mask = self.slots.len() - 1;
         let mut i = (h as usize) & mask;
+        let mut probes = 0usize;
         while self.slots[i] != ALMIDE_MAP_SLOT_EMPTY {
             i = (i + 1) & mask;
+            probes += 1;
         }
         self.slots[i] = (h & ALMIDE_MAP_SLOT_TAG) | p as u64;
+        if probes > ALMIDE_MAP_FLOOD_PROBES && !self.keyed {
+            self.flooded = true;
+        }
+    }
+
+    /// Did an insert under the fast hash probe past the flood bound (#4104)?
+    #[inline]
+    pub fn flooded(&self) -> bool {
+        self.flooded
     }
 }
 
@@ -307,10 +403,12 @@ pub enum AlmideKeyLookup {
 }
 
 impl AlmideKeyLookup {
-    /// Hash `k` only when a built index will consume it.
+    /// Hash `k` only when a built index will consume it, under the hash the
+    /// index was built with.
     #[inline]
     pub fn hash_for<Q: ?Sized + AlmideMapKey>(&self, k: &Q) -> Option<u64> {
         match self {
+            AlmideKeyLookup::Built(ix) if ix.keyed => k.almide_key_hash_keyed(),
             AlmideKeyLookup::Built(_) => k.almide_key_hash(),
             _ => None,
         }
@@ -318,9 +416,22 @@ impl AlmideKeyLookup {
 
     /// Index every key of a collection that just crossed the threshold.
     pub fn build<'a, K: AlmideMapKey + 'a>(&mut self, keys: impl Iterator<Item = &'a K>, n: usize) {
+        self.build_with(keys, n, false);
+    }
+
+    /// Re-index under the keyed hash (#4104), after the fast-hash index was
+    /// flooded. `keys` are the owner's live keys in position order (the owner
+    /// compacts its holes first). A map stays keyed from then on.
+    pub fn rebuild_keyed<'a, K: AlmideMapKey + 'a>(&mut self, keys: impl Iterator<Item = &'a K>, n: usize) {
+        self.build_with(keys, n, true);
+    }
+
+    fn build_with<'a, K: AlmideMapKey + 'a>(&mut self, keys: impl Iterator<Item = &'a K>, n: usize, keyed: bool) {
         let mut ix = AlmideKeyIndex::with_capacity(n);
+        ix.keyed = keyed;
         for k in keys {
-            match k.almide_key_hash() {
+            let h = if keyed { k.almide_key_hash_keyed() } else { k.almide_key_hash() };
+            match h {
                 Some(h) => ix.push(h),
                 None => {
                     *self = AlmideKeyLookup::Unhashable;
@@ -396,6 +507,14 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
         if let AlmideKeyLookup::Built(ix) = &mut self.lookup {
             if let Some(h) = h {
                 ix.push(h);
+            }
+            if ix.flooded() {
+                // #4104: crafted keys collide under the fast hash. Drop the
+                // holes and re-index this map under the keyed hash.
+                self.entries.retain(Option::is_some);
+                self.dead = 0;
+                let n = self.entries.len();
+                self.lookup.rebuild_keyed(self.entries.iter().flatten().map(|(k, _)| k), n);
             }
             return;
         }
