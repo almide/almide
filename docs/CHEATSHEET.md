@@ -957,7 +957,7 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [process](stdlib/process.md) | Process execution, env vars, signals | `import process` | 12 |
 | [io](stdlib/io.md) | Standard I/O | `import io` | 7 |
 | [http](stdlib/http.md) | HTTP client and server | `import http` | 23 |
-| [random](stdlib/random.md) | Random number generation | `import random` | 4 |
+| [random](stdlib/random.md) | Random number generation; for secrets use `random.bytes` | `import random` | 10 |
 
 ## JSON & the wire
 
@@ -1090,6 +1090,7 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - `let err = f()` → **WRONG**. `ok`/`err`/`some`/`none` (and capitalized forms) are the built-in Result/Option constructors — reserved words. Rename the binding (`let msg = f()`), or backtick-escape to keep the name (`let `err` = f()`)
 - Nested `fn` inside a function → **WRONG**. All `fn` must be top-level. Use `let helper = (x) => ...` for local functions
 - `match x { ... pattern => expr }` with `...` → **WRONG**. No spread in patterns
+- `random.int(0, 255)` in a loop for a token, key or password → **WRONG**. `random.int` / `float` / `choice` / `shuffle` are not for secrets. For secrets use `random.bytes(n)`, the OS cryptographic source
 - `try f()` / `try! f()` / `f()?` for an effect call → **WRONG**. Write `f()!`. Almide's `!` is Swift's `try` (propagate), never `try!` (trap); `?` converts Result → Option
 - `async fn` / `await` → **WRONG**. Almide has no async/await. Use `fan { }` / `fan.map` / `fan.settle` / `fan.min(clock)` / `fan.bounded` / `fan.timeout`
 - `fan.race { … }` → **WRONG** (renamed in dialect epoch 14, E027). Write `fan.min(compute.ms(5)) { … }` — the clock argument is required and says what "least" is measured on

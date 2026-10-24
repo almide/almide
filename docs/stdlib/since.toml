@@ -1099,6 +1099,7 @@
 "process.sleep" = "<=0.20.0"
 "process.spawn" = "<=0.12.3"
 "process.stdin_lines" = "<=0.5.0"
+"random.bytes" = "unreleased"
 "random.choice" = "<=0.5.0"
 "random.float" = "<=0.5.0"
 "random.int" = "<=0.5.0"
