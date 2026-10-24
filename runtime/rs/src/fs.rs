@@ -26,6 +26,28 @@ fn io_err(call: &str, args: &str, e: std::io::Error) -> String {
     format!("{call}({args}): {}", fs_io_error_text(&e))
 }
 include!("../../../crates/almide-base/src/fs_errno_classified.rs");
+// The rooted family's calls (#4084, C-392): made by descriptor from the root
+// (openat2 RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS on Linux, an O_NOFOLLOW
+// segment walk elsewhere), so a symlink swapped in after the Almide-side
+// check is refused by the call itself. The core is shared with the embedded
+// wasm host (ops 120..=125). `at` is `<root>\0<rel>`: one operand, so the
+// wasm leg passes it through the one fs import unchanged, and the
+// `[permissions] fs` guard judges the root before it (src/cli/build.rs).
+include!("../../../crates/almide-rt-core/src/fs_beneath_core.rs");
+fn fs_root_err(call: &str, at: &str, e: FsBeneathError) -> String {
+    let (dir, rel) = fs_root_at(at);
+    match e {
+        FsBeneathError::Escape => FS_BENEATH_ESCAPE.to_string(),
+        FsBeneathError::Io(e) => io_err(call, &fs_q(&fs_beneath_joined(dir, rel)), e),
+    }
+}
+fn fs_root_at(at: &str) -> (&str, &str) { at.split_once('\0').unwrap_or((at, "")) }
+pub fn almide_rt_fs___root_read_text(at: &str) -> Result<AlmideString, AlmideString> { let (d, r) = fs_root_at(at); let __almide_v: Result<String, AlmideString> = fs_beneath_read_text(d, r).map_err(|e| fs_root_err("fs.read_text", at, e).into()); __almide_v.into_almide() }
+pub fn almide_rt_fs___root_read_bytes(at: &str) -> Result<Vec<u8>, AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_read(d, r).map_err(|e| fs_root_err("fs.read_bytes_raw", at, e).into()) }
+pub fn almide_rt_fs___root_list_dir(at: &str) -> Result<Vec<AlmideString>, AlmideString> { let (d, r) = fs_root_at(at); let __almide_v: Result<Vec<String>, AlmideString> = fs_beneath_list(d, r).map_err(|e| fs_root_err("fs.list_dir", at, e).into()); __almide_v.into_almide() }
+pub fn almide_rt_fs___root_exists(at: &str) -> Result<Vec<u8>, AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_exists(d, r).map(|e| if e { vec![1] } else { Vec::new() }).map_err(|e| fs_root_err("fs.exists", at, e).into()) }
+pub fn almide_rt_fs___root_write_text(at: &str, content: &str) -> Result<(), AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_write(d, r, content.as_bytes()).map_err(|e| fs_root_err("fs.write", at, e).into()) }
+pub fn almide_rt_fs___root_remove(at: &str) -> Result<(), AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_remove(d, r).map_err(|e| fs_root_err("fs.remove", at, e).into()) }
 // Source-shaped quoting, so the operand reads back as the writer spelled it.
 //
 // DELIBERATELY not Rust's `{:?}`. Four independent implementations have to emit
