@@ -779,3 +779,4 @@ pub(super) fn decode_option_field_inline(wk: &mut CodecWk, payload: IrExpr, key:
 include!("derive_codec_decode.rs");
 
 include!("derive_codec_variant.rs");
+include!("derive_codec_arity.rs");
