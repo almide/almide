@@ -28,6 +28,14 @@
 # implementations of one number — and a drill flips one byte of a built
 # artifact, which almide-verify must reject.
 #
+# ANCHORS (#4011 (d)): the producer also writes where in the shipped bytes
+# each bounds and init event is, and almide-anchor-check (its own wasm
+# decoder, no compiler code) holds every located event to the instruction
+# there — a site's allocation size and its stores' width, offset and address
+# local, a fill loop's exact shape, a check's compare-and-abort, an access's
+# load or store. Every fixture must read ANCHORS OK: the events the proven
+# checkers judge are the instructions the artifact contains.
+#
 # Every witness is judged by THREE independent verdicts, and all three must
 # agree: the checker extracted from the Coq proof (proofs/checker), the Rocq
 # KERNEL itself (a generated file of vm_compute goals, coqc'd), and
@@ -47,11 +55,12 @@ COQC="${COQC:-$(command -v coqc || true)}"
 [ -n "$COQC" ] || { echo "STRUCTURAL WALL FAIL: coqc is not on PATH (the kernel verdict needs it)" >&2; exit 1; }
 
 echo "== build the compiler, the bundle producer, almide-verify and the kernel-proven checker =="
-(cd "$ROOT" && cargo build -q --bin almide && cargo build -q -p almide-wasm --example emit_structural_bundle && cargo build -q -p almide-verify)
+(cd "$ROOT" && cargo build -q --bin almide && cargo build -q -p almide-wasm --example emit_structural_bundle && cargo build -q -p almide-verify -p almide-anchor-check)
 TD="${CARGO_TARGET_DIR:-$ROOT/target}/debug"
 ALMIDE="$TD/almide"
 PRODUCER="$TD/examples/emit_structural_bundle"
 VERIFY="$TD/almide-verify"
+ANCHORCHECK="$TD/almide-anchor-check"
 ./build-checker.sh >/dev/null
 HASHES="$ROOT/proofs/structural-artifacts.sha256"
 
@@ -88,7 +97,7 @@ while IFS= read -r f; do
     sed 's/^/  /' "$OUT/$N.err" >&2
     exit 1
   fi
-  if ! (cd "$ROOT" && "$PRODUCER" "$f" --artifact "$OUT/$N.wasm") > "$OUT/$N.bundle" 2> "$OUT/$N.err"; then
+  if ! (cd "$ROOT" && "$PRODUCER" "$f" --artifact "$OUT/$N.wasm" --anchors "$OUT/$N.anchors") > "$OUT/$N.bundle" 2> "$OUT/$N.err"; then
     echo "STRUCTURAL WALL FAIL: the producer refused a certified fixture: $f" >&2
     sed 's/^/  /' "$OUT/$N.err" >&2
     exit 1
@@ -107,11 +116,33 @@ while IFS= read -r f; do
     exit 1
   fi
   printf '%s  %s\n' "$sum" "$f" >> "$HASHES.tmp"
+  # #4011 (d): every located bounds / init event is its instruction.
+  if ! "$ANCHORCHECK" "$OUT/$N.wasm" "$OUT/$N.bundle" "$OUT/$N.anchors" > "$OUT/$N.anchor" 2>&1; then
+    echo "STRUCTURAL WALL FAIL: $f: a witness event is not the instruction the shipped bytes hold:" >&2
+    sed 's/^/  /' "$OUT/$N.anchor" >&2
+    exit 1
+  fi
 done < "$OUT/selected"
 [ "$N" -gt 0 ] || { echo "STRUCTURAL WALL FAIL: no certified fixture listed in $FIXTURES" >&2; exit 1; }
 [ "$N" -eq "$(wc -l < "$OUT/selected" | tr -d ' ')" ] || { echo "STRUCTURAL WALL FAIL: built $N of the selected fixtures — the scan went blind" >&2; exit 1; }
 mv "$HASHES.tmp" "$HASHES"
 echo "  $N fixture bundle(s); artifact digests in proofs/structural-artifacts.sha256"
+python3 - "$OUT" <<'PYEOF'
+import os, re, sys
+out = sys.argv[1]
+keys = ["init_sites", "init_stores", "fills", "init_unlocated", "checks", "accesses", "bounds_unlocated"]
+tot = dict.fromkeys(keys, 0)
+pat = re.compile(r"init (\d+) site\(s\) / (\d+) store\(s\), (\d+) fill\(s\), (\d+) unlocated; bounds (\d+) check\(s\), (\d+) access\(es\), (\d+) unlocated")
+for f in os.listdir(out):
+    if f.endswith(".anchor"):
+        m = pat.search(open(os.path.join(out, f)).read())
+        if m:
+            for k, v in zip(keys, m.groups()):
+                tot[k] += int(v)
+print(f"  [anchors] ANCHORS OK on every artifact: {tot['init_sites']} site(s) / {tot['init_stores']} store(s) and {tot['fills']} fill(s), "
+      f"{tot['checks']} check(s) and {tot['accesses']} access(es) held to the shipped bytes; unlocated (dead bodies): "
+      f"{tot['init_unlocated']} site(s), {tot['bounds_unlocated']} bounds event(s)")
+PYEOF
 
 echo "== drill: one byte of a shipped artifact changed — the verifier must reject =="
 mkdir -p "$OUT/tamper"
