@@ -583,16 +583,29 @@ fn rx_backtrack_find_at<'a>(vm: &mut AlmideRxVm<'a>, rx: &'a AlmideRxPat, start:
 // can match empty — the "tracked" ones) that began BEFORE here, and the rest
 // began here. Reading a character makes every open instance old.
 //
-// Counted repetition is expanded: `x{2,4}` becomes x x (x (x)?)?, one copy of
-// the body per count, so the count is part of pc. A huge count therefore makes a
-// huge program; past `ALMIDE_RX_PIKE_STATES` states the pattern is matched by
-// the backtracking walk instead (same answers, no linear-time bound) rather
-// than allocating without limit. The self-hosted twin in
-// stdlib/regex_engine.almd compiles the same program and runs the same VM, so
-// the two legs still agree on every match, capture and failure.
+// Counted repetition is expanded when the program stays small: `x{2,4}`
+// becomes x x (x (x)?)?, one copy of the body per count, so the count is part
+// of pc. Past `ALMIDE_RX_PIKE_STATES` states (`.{0,20000}`, `((a){200}){200}`)
+// the pattern is compiled COUNTED instead (#4083): each repetition with more
+// than one copy is ONE copy of its body between a CLoop and a CEnd, and the
+// count lives in a per-thread counter register — one register per nesting
+// level of counted repetitions, 0 whenever the thread is outside the loop
+// (CReset puts it back on the way out). A state is then (pc, d, registers).
+// That is exactly the expanded program's state, written differently: the
+// expanded pc IS (pc, the counts of the loops around it), the instructions are
+// in the same order, and so the threads, their priorities and every answer are
+// the same; only the program stops growing with the counts. Two threads in
+// one state are still one, found through a hash table keyed by the whole state
+// instead of an array indexed by (pc, d). The cost per character is the number
+// of states threads are in, at most the expanded program's state count, so a
+// match still takes time proportional to that count times the input's length —
+// the bound the expansion had — with memory for the live threads only. The
+// self-hosted twin in stdlib/regex_engine.almd compiles the same programs and
+// runs the same VM, so the two legs still agree on every match, capture and
+// failure.
 
-/// The most (pc, d) states a compiled pattern may have before it is matched by
-/// the backtracking walk instead. Every ordinary pattern is far below it; what
+/// The most (pc, d) states an expanded program may have before the pattern is
+/// compiled counted instead. Every ordinary pattern is far below it; what
 /// reaches it is a counted repetition in the thousands (`.{0,10000}`) or nested
 /// counts multiplying (`((a){100}){100}`).
 const ALMIDE_RX_PIKE_STATES: usize = 20000;
@@ -616,6 +629,17 @@ enum AlmideRxInst {
     /// at `nonempty`, or at `empty` when the instance matched nothing (only a
     /// tracked group, whose `outer` is the d count outside it, can tell).
     GEnd { ci: usize, tracked: bool, outer: usize, empty: usize, nonempty: usize },
+    /// Counted mode: the decision before another instance of a repetition
+    /// whose count is register `level` (c): past `max` leave for `exit`; from
+    /// `min` on greedy prefers another instance (pc + 1), lazy prefers `exit`;
+    /// below `min` the instance is required.
+    CLoop { level: usize, min: usize, max: Option<usize>, lazy: bool, exit: usize },
+    /// Counted mode: an instance ends. Record capture `ci` like GEnd; an empty
+    /// instance (tracked groups only) leaves for pc + 1 (or fails below
+    /// `min`), any other counts one more and goes back to the CLoop at `lp`.
+    CEnd { ci: usize, tracked: bool, outer: usize, lp: usize },
+    /// Counted mode: leave a repetition, its register back to 0.
+    CReset(usize),
     Match,
     Fail,
 }
@@ -628,6 +652,9 @@ struct AlmideRxProg {
     depth: Vec<usize>,
     /// States per pc: one more than the deepest nesting of tracked groups.
     width: usize,
+    /// Counter registers (counted mode): the deepest nesting of counted
+    /// repetitions; 0 for an expanded program.
+    regs: usize,
     /// The atoms a match can begin with, when every match begins by reading
     /// one (no assertion or empty match before the first character). A start
     /// position whose character none of them accepts cannot begin a match, so
@@ -653,6 +680,15 @@ fn rx_first_atoms(insts: &[AlmideRxInst]) -> Option<Vec<usize>> {
             AlmideRxInst::Jmp(a) => todo.push(a),
             AlmideRxInst::GStart(_) => todo.push(pc + 1),
             AlmideRxInst::GEnd { empty, nonempty, .. } => todo.extend([empty, nonempty]),
+            // Before any character every register is 0, so a loop with a
+            // minimum is entered; an instance can only end empty here.
+            AlmideRxInst::CLoop { min, exit, .. } => {
+                todo.push(pc + 1);
+                if min == 0 {
+                    todo.push(exit);
+                }
+            }
+            AlmideRxInst::CEnd { .. } | AlmideRxInst::CReset(_) => todo.push(pc + 1),
             AlmideRxInst::Fail => {}
         }
     }
@@ -669,6 +705,11 @@ struct AlmideRxComp<'a> {
     cur: usize,
     deepest: usize,
     over: bool,
+    /// Compile repetitions counted (one body copy, a counter register).
+    counted: bool,
+    /// Counted repetitions open here, and the most ever open.
+    level: usize,
+    levels: usize,
 }
 
 /// Can `alts` match without reading a character? Assertions count as
@@ -700,7 +741,7 @@ impl<'a> AlmideRxComp<'a> {
     fn emit(&mut self, inst: AlmideRxInst) -> usize {
         self.insts.push(inst);
         self.depth.push(self.cur);
-        if self.insts.len() * (self.deepest + 1) > ALMIDE_RX_PIKE_STATES {
+        if !self.counted && self.insts.len() * (self.deepest + 1) > ALMIDE_RX_PIKE_STATES {
             self.over = true;
         }
         self.insts.len() - 1
@@ -725,6 +766,7 @@ impl<'a> AlmideRxComp<'a> {
                     empty: if empty == HOLE { to } else { empty },
                     nonempty: if nonempty == HOLE { to } else { nonempty },
                 },
+                AlmideRxInst::CLoop { level, min, max, lazy, .. } => AlmideRxInst::CLoop { level, min, max, lazy, exit: to },
                 other => other,
             };
         }
@@ -778,6 +820,12 @@ impl<'a> AlmideRxComp<'a> {
             return;
         }
         let n = self.node(node);
+        if self.counted && rx_copies(piece.min, piece.max) > 1 {
+            self.counted_loop(piece.min, piece.max, piece.lazy, false, 0, |comp| {
+                comp.emit(AlmideRxInst::Char(n));
+            });
+            return;
+        }
         for _ in 0..piece.min {
             if self.over {
                 return;
@@ -822,6 +870,15 @@ impl<'a> AlmideRxComp<'a> {
             return;
         }
         let tracked = (min, max) != (1, Some(1)) && rx_nullable(alts);
+        if self.counted && rx_copies(min, max) > 1 {
+            self.counted_loop(min, max, lazy, tracked, ci, |comp| {
+                if ci > 0 {
+                    comp.emit(AlmideRxInst::GStart(ci));
+                }
+                comp.alts(alts);
+            });
+            return;
+        }
         let outer = self.cur;
         if tracked && outer + 1 > self.deepest {
             self.deepest = outer + 1;
@@ -868,11 +925,49 @@ impl<'a> AlmideRxComp<'a> {
         let exit = self.here();
         self.patch(&exits, exit);
     }
+
+    /// Counted mode: the repetition as CLoop, the body (`body` emits it: a
+    /// Char, or a group's GStart and alternatives), CEnd, CReset — the
+    /// expanded copies folded into one, the count in register `level`.
+    fn counted_loop(&mut self, min: usize, max: Option<usize>, lazy: bool, tracked: bool, ci: usize, body: impl FnOnce(&mut Self)) {
+        const HOLE: usize = usize::MAX - 1;
+        let level = self.level;
+        self.level += 1;
+        self.levels = self.levels.max(self.level);
+        let outer = self.cur;
+        if tracked && outer + 1 > self.deepest {
+            self.deepest = outer + 1;
+        }
+        let lp = self.emit(AlmideRxInst::CLoop { level, min, max, lazy, exit: HOLE });
+        if tracked {
+            self.cur += 1;
+        }
+        body(self);
+        self.emit(AlmideRxInst::CEnd { ci, tracked, outer, lp });
+        if tracked {
+            self.cur -= 1;
+        }
+        self.level -= 1;
+        let exit = self.emit(AlmideRxInst::CReset(level));
+        self.patch(&[lp], exit);
+    }
 }
 
-/// The pattern's program, or None when it has more states than the Pike VM
-/// is given (see ALMIDE_RX_PIKE_STATES).
+/// How many copies of its body a repetition expands to: one per count up to
+/// `max`, or up to `min` and then one that loops.
+fn rx_copies(min: usize, max: Option<usize>) -> usize {
+    max.unwrap_or(min.saturating_add(1))
+}
+
+/// The pattern's program: expanded while that fits in ALMIDE_RX_PIKE_STATES
+/// states, counted past it (see the comment above ALMIDE_RX_PIKE_STATES).
+/// None only for a pattern over the walk's own use (never).
 fn rx_program(rx: &AlmideRxPat) -> Option<AlmideRxProg> {
+    rx_program_as(rx, false).or_else(|| rx_program_as(rx, true))
+}
+
+/// The program compiled expanded (None past the state budget) or counted.
+fn rx_program_as(rx: &AlmideRxPat, counted: bool) -> Option<AlmideRxProg> {
     let mut comp = AlmideRxComp {
         insts: Vec::new(),
         nodes: Vec::new(),
@@ -882,6 +977,9 @@ fn rx_program(rx: &AlmideRxPat) -> Option<AlmideRxProg> {
         cur: 0,
         deepest: 0,
         over: false,
+        counted,
+        level: 0,
+        levels: 0,
     };
     comp.alts(&rx.alts);
     comp.emit(AlmideRxInst::Match);
@@ -889,30 +987,104 @@ fn rx_program(rx: &AlmideRxPat) -> Option<AlmideRxProg> {
         return None;
     }
     let first = rx_first_atoms(&comp.insts);
-    Some(AlmideRxProg { insts: comp.insts, nodes: comp.nodes, depth: comp.depth, width: comp.deepest + 1, first })
+    Some(AlmideRxProg { insts: comp.insts, nodes: comp.nodes, depth: comp.depth, width: comp.deepest + 1, regs: comp.levels, first })
 }
 
 /// One list of threads, in priority order: each at a pc with its d, and its
-/// `nslots` slots ([match start, then per group: start, end, instance start]).
+/// `stride` slots ([match start, then per group: start, end, instance start,
+/// then the counter registers]).
 struct AlmideRxThreads {
     pcs: Vec<(usize, usize)>,
     slots: Vec<usize>,
     /// The stamp each state was last added under; a state is in this list when
-    /// its stamp is the list's.
+    /// its stamp is the list's. Indexed by (pc, d) for an expanded program.
     seen: Vec<u64>,
     stamp: u64,
+    /// Counted mode: the states added under the current stamp, an open-
+    /// addressing hash table of entries [stamp, pc, d, registers...]; an entry
+    /// with an older stamp is free.
+    table: Vec<u64>,
+    /// Entries in `table` (a power of two, 0 before the first), and used.
+    cap: usize,
+    used: usize,
 }
 
 impl AlmideRxThreads {
     fn new(states: usize) -> Self {
-        AlmideRxThreads { pcs: Vec::new(), slots: Vec::new(), seen: vec![0; states], stamp: 0 }
+        AlmideRxThreads { pcs: Vec::new(), slots: Vec::new(), seen: vec![0; states], stamp: 0, table: Vec::new(), cap: 0, used: 0 }
     }
 
     fn clear(&mut self) {
         self.pcs.clear();
         self.slots.clear();
         self.stamp += 1;
+        self.used = 0;
     }
+
+    /// Counted mode: add the state (pc, d, regs) under the current stamp —
+    /// false when it is already there. The self-hosted twin hashes the same way.
+    fn visit(&mut self, pc: usize, d: usize, regs: &[usize]) -> bool {
+        let entry = 3 + regs.len();
+        if (self.used + 1) * 2 > self.cap {
+            self.grow(entry);
+        }
+        let cap = self.cap;
+        let mut i = rx_hash(pc, d, regs, cap - 1);
+        loop {
+            let at = i * entry;
+            if self.table[at] != self.stamp {
+                self.table[at] = self.stamp;
+                self.table[at + 1] = pc as u64;
+                self.table[at + 2] = d as u64;
+                for (k, &r) in regs.iter().enumerate() {
+                    self.table[at + 3 + k] = r as u64;
+                }
+                self.used += 1;
+                return true;
+            }
+            if self.table[at + 1] == pc as u64
+                && self.table[at + 2] == d as u64
+                && regs.iter().enumerate().all(|(k, &r)| self.table[at + 3 + k] == r as u64)
+            {
+                return false;
+            }
+            i = (i + 1) & (cap - 1);
+        }
+    }
+
+    /// Twice the entries (1024 at first), the current ones moved over.
+    fn grow(&mut self, entry: usize) {
+        let old_cap = self.cap;
+        let cap = if old_cap == 0 { 1024 } else { old_cap * 2 };
+        let old = std::mem::replace(&mut self.table, vec![0; cap * entry]);
+        self.cap = cap;
+        // Stamps start at 1, so a zeroed entry is free.
+        for e in 0..old_cap {
+            let at = e * entry;
+            if old[at] != self.stamp {
+                continue;
+            }
+            let regs: Vec<usize> = old[at + 3..at + entry].iter().map(|&r| r as usize).collect();
+            let mut i = rx_hash(old[at + 1] as usize, old[at + 2] as usize, &regs, cap - 1);
+            while self.table[i * entry] == self.stamp {
+                i = (i + 1) & (cap - 1);
+            }
+            self.table[i * entry..(i + 1) * entry].copy_from_slice(&old[at..at + entry]);
+        }
+    }
+}
+
+/// A state's bucket in a table of `mask + 1` (a power of two) entries. Every
+/// step stays below 2^56, so the self-hosted twin computes it exactly.
+fn rx_hash(pc: usize, d: usize, regs: &[usize], mask: usize) -> usize {
+    let mut h = pc & mask;
+    h = (h * 40503 + (d & mask)) & mask;
+    for &r in regs {
+        h = (h * 40503 + (r & mask)) & mask;
+    }
+    // Spread runs of neighbouring keys (one pc, consecutive counts) apart, so
+    // linear probing does not walk them.
+    (h * 40503) & mask
 }
 
 enum AlmideRxStep {
@@ -934,13 +1106,19 @@ struct AlmideRxPike {
     found: Vec<usize>,
     /// Only `captures` reads the groups, so only it carries them.
     track: bool,
+    /// Slots per thread: the capture slots (`ncap`), then `regs` counter
+    /// registers.
     nslots: usize,
+    ncap_slots: usize,
+    regs: usize,
 }
 
 impl AlmideRxPike {
     fn new(prog: &AlmideRxProg, ncap: usize, track: bool) -> Self {
-        let states = prog.insts.len() * prog.width;
-        let nslots = if track { 1 + 3 * ncap } else { 1 };
+        // A counted program finds its states through the hash table.
+        let states = if prog.regs > 0 { 0 } else { prog.insts.len() * prog.width };
+        let ncap_slots = if track { 1 + 3 * ncap } else { 1 };
+        let nslots = ncap_slots + prog.regs;
         AlmideRxPike {
             clist: AlmideRxThreads::new(states),
             nlist: AlmideRxThreads::new(states),
@@ -949,6 +1127,8 @@ impl AlmideRxPike {
             found: vec![ALMIDE_RX_UNSET; nslots],
             track,
             nslots,
+            ncap_slots,
+            regs: prog.regs,
         }
     }
 
@@ -970,11 +1150,22 @@ impl AlmideRxPike {
                 }
                 AlmideRxStep::Go(pc, d) => (pc, d),
             };
-            let key = pc * w + d;
-            if list.seen[key] == list.stamp {
-                continue;
+            let r0 = self.ncap_slots;
+            if self.regs > 0 {
+                // A CEnd, CReset or GStart is not looked up: no cycle runs
+                // through one without a CLoop or Split, which are, and a
+                // second visit only reaches states already there.
+                let pass = matches!(prog.insts[pc], AlmideRxInst::CEnd { .. } | AlmideRxInst::CReset(_) | AlmideRxInst::GStart(_));
+                if !pass && !list.visit(pc, d, &slots[r0..r0 + self.regs]) {
+                    continue;
+                }
+            } else {
+                let key = pc * w + d;
+                if list.seen[key] == list.stamp {
+                    continue;
+                }
+                list.seen[key] = list.stamp;
             }
-            list.seen[key] = list.stamp;
             match prog.insts[pc] {
                 AlmideRxInst::Char(_) | AlmideRxInst::Match => {
                     list.pcs.push((pc, d));
@@ -1014,6 +1205,46 @@ impl AlmideRxPike {
                         stack.push(AlmideRxStep::Go(to, d.min(outer)));
                     }
                 }
+                AlmideRxInst::CLoop { level, min, max, lazy, exit } => {
+                    let c = slots[r0 + level];
+                    if max.is_some_and(|mx| c >= mx) {
+                        stack.push(AlmideRxStep::Go(exit, d));
+                    } else if c >= min {
+                        let (first, second) = if lazy { (exit, pc + 1) } else { (pc + 1, exit) };
+                        stack.push(AlmideRxStep::Go(second, d));
+                        stack.push(AlmideRxStep::Go(first, d));
+                    } else {
+                        stack.push(AlmideRxStep::Go(pc + 1, d));
+                    }
+                }
+                AlmideRxInst::CEnd { ci, tracked, outer, lp } => {
+                    if ci > 0 && self.track {
+                        let (s0, s1) = (3 * ci - 2, 3 * ci - 1);
+                        stack.push(AlmideRxStep::Restore(s0, slots[s0]));
+                        stack.push(AlmideRxStep::Restore(s1, slots[s1]));
+                        slots[s0] = slots[3 * ci];
+                        slots[s1] = p;
+                    }
+                    let AlmideRxInst::CLoop { level, min, max, .. } = prog.insts[lp] else { continue };
+                    let reg = r0 + level;
+                    let c = slots[reg];
+                    if tracked && d <= outer {
+                        // empty: it counts but ends the repetition
+                        if c + 1 >= min {
+                            stack.push(AlmideRxStep::Go(pc + 1, d.min(outer)));
+                        }
+                    } else {
+                        stack.push(AlmideRxStep::Restore(reg, c));
+                        slots[reg] = if max.is_none() { (c + 1).min(min) } else { c + 1 };
+                        stack.push(AlmideRxStep::Go(lp, d.min(outer)));
+                    }
+                }
+                AlmideRxInst::CReset(level) => {
+                    let reg = r0 + level;
+                    stack.push(AlmideRxStep::Restore(reg, slots[reg]));
+                    slots[reg] = 0;
+                    stack.push(AlmideRxStep::Go(pc + 1, d));
+                }
                 AlmideRxInst::Fail => {}
             }
         }
@@ -1023,6 +1254,7 @@ impl AlmideRxPike {
     /// false) or the next one.
     fn seed(&mut self, prog: &AlmideRxProg, cx: &AlmideRxCx, next: bool, p: usize) {
         self.scratch.iter_mut().for_each(|s| *s = ALMIDE_RX_UNSET);
+        self.scratch[self.ncap_slots..].iter_mut().for_each(|r| *r = 0);
         self.scratch[0] = p;
         self.add(prog, cx, next, 0, 0, p);
     }
@@ -1102,8 +1334,8 @@ impl AlmideRxPike {
     }
 }
 
-/// A pattern compiled once: its tree (the walk's input), its program (None =
-/// over the VM's state budget), and the VM's working memory for the plain and
+/// A pattern compiled once: its tree (the walk's input), its program (always
+/// there since #4083; tests set None to ask the walk alone), and the VM's working memory for the plain and
 /// the capture-tracking search, kept for the next call.
 struct AlmideRxCompiled {
     rx: AlmideRxPat,
@@ -1153,7 +1385,8 @@ const ALMIDE_RX_WALK_STEPS: usize = 4;
 /// a step budget linear in the text's length: it is the faster engine on the
 /// patterns people write, and it gives the same answers as the Pike VM. When
 /// the budget runs out the VM answers instead, so a call never takes more than
-/// linear time. A pattern too large for the VM keeps the walk, unbounded.
+/// linear time. Every pattern has a program (#4083), so no call keeps the
+/// walk past its budget.
 struct AlmideRxMatcher<'a> {
     c: &'a AlmideRxCompiled,
     track: bool,
