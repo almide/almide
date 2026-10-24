@@ -18,8 +18,10 @@ into a single project that type-checks clean.
 
 RUNGS are nested prefixes of that byte-sorted list at cumulative-line targets, so
 rung k's sources are a subset of rung k+1's and the only variable is size. Rung 0
-is the entry alone: the constant floor (process spawn + the auto-imported bundled
-stdlib every check pays regardless of project size). Marginal time is measured
+is the entry alone: the constant floor (process spawn and the front end's fixed
+cost; since #4071 an auto-imported bundled module is loaded only when a source
+reaches it, so the floor no longer checks the stdlib and every corpus rung
+does — the ratio anchor moved for it). Marginal time is measured
 against that floor, which is what makes the slope a statement about the project's
 lines rather than about the compiler's startup.
 
