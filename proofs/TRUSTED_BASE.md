@@ -172,6 +172,12 @@ fabricated row fails the gate). The table is a representative sample of the spin
 | `missing_inc_is_use_after_free` | CoreSafe.v | Closed under the global context |
 | `box_frees_and_keeps_content` | CoreSafe.v | Closed under the global context |
 | `box_store_without_share_is_use_after_free` | CoreSafe.v | Closed under the global context |
+| `site_window` | InitCert.v | Closed under the global context |
+| `sited_init` | InitCert.v | Closed under the global context |
+| `sited_alloc_ok` | InitCert.v | Closed under the global context |
+| `certified_sited_memory_safe` | InitCert.v | Closed under the global context |
+| `reorder_memory_safe` | InitCert.v | Closed under the global context |
+| `check_init_cert_sound` | InitCert.v | Closed under the global context |
 
 ## Known limitations (what is NOT yet proven — recorded, not hidden)
 
@@ -193,7 +199,7 @@ arm and reassigned i64 index, is `Spatial` — with the emitter's one unsigned
 compare excluding negative indices (`unsigned_ge_excludes`). `BoundsCert.v`
 puts the certificate's byte parser inside the proof and extracts
 `check_bounds_cert` (driver mode `bounds`, `check_bounds_cert_sound`), and
-the structural wasm leg emits it per build as the `bounds` witness (crates/almide-wasm/src/witness_bounds.rs) for every index-operator access — each `xs[i]` read and store of a list and each `b[i]` read and store of Bytes, the fact candidates of #3345 in their stretch and every other access under a fresh slot of its own — with the check recorded where the compare is emitted and the access where the load or store is emitted; almide-verify and proofs/structural-wall.sh judge it with the extracted checker and the kernel, and scripts/bounds-witness-reinject.sh re-injects three lost-check bugs into the emitter and requires each witness rejected. Coverage on the certified corpus (trust-spine run 40085282713, 2026-10-24): 954/954 bounds witnesses accepted, recording 365 reads and 82 writes against 434 emitted checks in 93 non-empty witnesses — before this every-access recording, 5 witnesses were non-empty. TRUSTED: that the recording calls sit beside the instructions they describe (a lost compare whose recording call survives is not caught), that a hoisted count is the list's count (len_hoist.rs), and every heap access outside the index operator, which no witness records. And
+the structural wasm leg emits it per build as the `bounds` witness (crates/almide-wasm/src/witness_bounds.rs) for every index-operator access — each `xs[i]` read and store of a list and each `b[i]` read and store of Bytes, the fact candidates of #3345 in their stretch and every other access under a fresh slot of its own — with the check recorded where the compare is emitted and the access where the load or store is emitted; almide-verify and proofs/structural-wall.sh judge it with the extracted checker and the kernel, and scripts/witness-reinject.sh bounds re-injects three lost-check bugs into the emitter and requires each witness rejected. Coverage on the certified corpus (trust-spine run 40085282713, 2026-10-24): 954/954 bounds witnesses accepted, recording 365 reads and 82 writes against 434 emitted checks in 93 non-empty witnesses — before this every-access recording, 5 witnesses were non-empty. TRUSTED: that the recording calls sit beside the instructions they describe (a lost compare whose recording call survives is not caught), that a hoisted count is the list's count (len_hoist.rs), and every heap access outside the index operator, which no witness records. And
 at the SOURCE level, `CoreSafe.v` (#4014) gives a typed core of Almide (ints,
 bools, int lists with value semantics, `let`, assignment, element store,
 `if`, `while`, indexing with its bounds check, `if` expressions and
@@ -215,8 +221,27 @@ block's stream, a fresh allocator, layout-true allocations, and the trace's
 accesses being a run of an accepted bounds certificate give `Spatial`,
 `Temporal` and `WellTyped`; `certified_memory_safe` adds INITIALIZATION from
 one more hypothesis, the constructor discipline (every allocation is
-immediately followed by the store that initializes its whole extent), which
-no witness checks yet. And
+immediately followed by the store that initializes its whole extent).
+`InitCert.v` (#4013) replaces that hypothesis and the layout one
+(`alloc_ok`) with a per-build certificate: a construction site (an
+allocation's header, slot width, slot count and representation, then the
+slots it stores) is accepted when every slot is stored and none past the end;
+`site_window` proves an accepted site's window MemorySafe and leaves its block
+initialized over its whole extent; `sited_init` and `sited_alloc_ok` give
+INITIALIZATION and the layout of every allocation in a trace built from
+accepted sites; `certified_sited_memory_safe` composes the RC certificate,
+the bounds certificate and the sites into `MemorySafe`, all four clauses,
+with no hypothesis about initialization or layout left; `reorder_memory_safe`
+proves MemorySafe invariant under swapping adjacent events on different
+blocks, so a site's window may interleave with its elements' own events;
+`check_init_cert_sound` puts the byte parser inside the proof (driver mode
+`init`). The structural leg emits the `init` witness per build for every list
+literal (crates/almide-wasm/src/witness_init.rs) and proofs/structural-wall.sh
+judges it with the extracted checker, the kernel and almide-verify; every
+other allocation site (records, variants, strings, the runtime's routines)
+records nothing yet, so `sited` — every allocation a recorded site — holds of
+a run only when all its allocations are list literals. TRUSTED: the recording
+discipline, and that a site's block stays private until its last store. And
 no certificate carries a trace yet, so the theorem the definition is for — `K(c, a) accepts ⟹ MemorySafe a`
 for a shipped artifact `a` — is still open (#4005, #4006, #1696). Until it is
 proven, "memory safe" is a claim about the trace model, not about the bytes.
@@ -254,7 +279,7 @@ The receipt's claims are scoped to exactly this:
   machine + the FULL `$rc_dec` bytes' SAFETY — no double-free AND leak-freedom —
   executed on the renderer's real bytes by a general interpreter (`WasmExec`),
   operand-stack balance, and termination of the loop-free fragment — all
-  kernel-checked and axiom-clean (119 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
+  kernel-checked and axiom-clean (125 audited theorems). What remains is DEPTH (the byte-binding ISA layer; and
   the RENDERER realizing the free-list/`rc_inc` — its safety MODEL is now proven,
   so that slice REFINES a proof rather than adding trusted runtime) and BREADTH
   (lowering beyond the subset: control flow, closures, stdlib) — not new properties

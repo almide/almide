@@ -9,6 +9,7 @@ From AlmideTrust Require Import CapabilityBound.
 From AlmideTrust Require Import CapabilityReach.
 From AlmideTrust Require Import CallModes.
 From AlmideTrust Require Import BoundsCert.
+From AlmideTrust Require Import InitCert.
 From Stdlib Require Import Extraction.
 From Stdlib Require Import ExtrOcamlBasic ExtrOcamlNativeString.
 
@@ -54,4 +55,8 @@ Set Extraction Output Directory ".".
    `;`-separated per-stretch bounds programs and decides `accepts` on each, so
    `accept ⟹ every run of every program is Spatial and WellTyped`
    (`check_bounds_cert_sound`, via SpatialCert.accepts_spatial). *)
-Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_xc check_names_cert check_caps_cert check_prog_cert check_modes_cert check_bounds_cert.
+(* `check_init_cert` (InitCert, #4013) is the INIT checker: it parses the
+   `;`-separated construction sites and decides `site_ok` on each, so
+   `accept ⟹ every site's window leaves its block initialized over its whole
+   extent` (`check_init_cert_sound`, via InitCert.site_window). *)
+Extraction "checker.ml" check_cert check_cert_lc check_clc check_bc check_xc check_names_cert check_caps_cert check_prog_cert check_modes_cert check_bounds_cert check_init_cert.
