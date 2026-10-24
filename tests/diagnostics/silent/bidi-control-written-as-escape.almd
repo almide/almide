@@ -1,0 +1,3 @@
+// silent (E101 near-miss): a bidirectional control character written as an
+// escape is ASCII in the source and still decodes to the character.
+fn main() -> Unit = println("abc\u{202E}def\u{2066}x\u{2069}")

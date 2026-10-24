@@ -1,0 +1,9 @@
+fn main() -> Unit = {
+  let admin = false
+  // begin admins only
+  let s = "user\u{202E} txt.exe"
+  let doc = """
+    owner: \u{202E}nimda
+    """
+  println(if admin then s else doc)
+}
