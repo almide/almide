@@ -251,6 +251,12 @@ pub(crate) fn read_guest<T>(caller: &wasmtime::Caller<'_, T>, mem: wasmtime::Mem
     }
 }
 
+/// Is the guest span `[ptr, ptr + len)` inside `mem` (the answer room a host
+/// op writes back into)?
+pub(crate) fn guest_span_fits<T>(caller: &wasmtime::Caller<'_, T>, mem: wasmtime::Memory, ptr: i32, len: usize) -> bool {
+    (ptr as u32 as usize).checked_add(len).is_some_and(|end| end <= mem.data_size(caller))
+}
+
 /// `println` / `eprintln`: the guest's bytes plus a line end, written as
 /// they are (a `String` is already UTF-8; nothing is decoded).
 fn append_line(caller: &mut wasmtime::Caller<'_, Host>, to_err: bool, ptr: i32, len: i32) -> wasmtime::Result<()> {
@@ -623,7 +629,11 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
             // buffer would read a_len bytes of guest memory (the 4 GiB
             // trap the op-31 comment in the emitter records).
             if op == 35 {
-                let n = i64::from(a_len).max(0) as usize;
+                // never more than the guest could receive: host_read copies
+                // the parked bytes into its memory (#4135 — the real stream
+                // would otherwise reserve up to 2 GiB on the guest's word)
+                let room = guest_memory(&mut caller)?.data_size(&caller);
+                let n = (i64::from(a_len).max(0) as usize).min(room);
                 let got = caller.data().stdin.lock().expect("stdin").take(n);
                 let len = got.len();
                 *caller.data().fs_buf.lock().expect("fs buf") = got;
@@ -667,14 +677,9 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
             if op == 117 || op == 118 {
                 return Ok(abort_site_op(&caller, op, a_len));
             }
-            let mem = caller
-                .get_export("memory")
-                .and_then(|e| e.into_memory())
-                .expect("exported memory");
-            let mut a = vec![0u8; a_len as u32 as usize];
-            mem.read(&caller, a_ptr as u32 as usize, &mut a)?;
-            let mut b = vec![0u8; b_len as u32 as usize];
-            mem.read(&caller, b_ptr as u32 as usize, &mut b)?;
+            let mem = guest_memory(&mut caller)?;
+            let a = read_guest(&caller, mem, a_ptr, a_len)?;
+            let b = read_guest(&caller, mem, b_ptr, b_len)?;
             let a = String::from_utf8_lossy(&a).to_string();
             // op 30 = raw stdout append (io.write / io.write_bytes):
             // PROGRAM order with println is the C-contract, so it goes
@@ -742,10 +747,7 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
         "almide",
         "host_read",
         |mut caller: wasmtime::Caller<'_, Host>, dst: i32| -> wasmtime::Result<()> {
-            let mem = caller
-                .get_export("memory")
-                .and_then(|e| e.into_memory())
-                .expect("exported memory");
+            let mem = guest_memory(&mut caller)?;
             let buf = caller.data().fs_buf.lock().expect("fs buf").clone();
             mem.write(&mut caller, dst as u32 as usize, &buf)?;
             Ok(())
@@ -983,5 +985,39 @@ mod tests {
         let body = call0(&[73, 0, 0, 16, bytes.len() as i32], true);
         let r = run_wasm(&calling("fs_call", &bytes, true, &body)).expect("engine runs the module");
         assert_eq!(r.stderr_bytes, bytes);
+    }
+
+    /// #4135: a guest pointer or length past the end of memory is the
+    /// guest's own out-of-bounds trap — `Error: wasm trap: out of bounds
+    /// memory access`, exit 1, as a guest load past the end gives — never a
+    /// host panic, and never a host allocation sized by the forged length.
+    #[test]
+    fn a_forged_span_traps_instead_of_panicking_the_host() {
+        let oob = "Error: wasm trap: out of bounds memory access\n";
+        let page = 65536;
+        let cases: [(&str, Vec<Instruction<'static>>); 6] = [
+            // println / eprintln: a span crossing the end, a 4 GiB length, a
+            // pointer past the end
+            ("println", call0(&[page - 2, 100], false)),
+            ("println", call0(&[0, -1], false)),
+            ("eprintln", call0(&[-16, 4], false)),
+            // fs_call: the a-span and the b-span, each forged
+            ("fs_call", call0(&[30, -1, 8, 0, 0], true)),
+            ("fs_call", call0(&[30, 0, 0, 16, -1], true)),
+            ("fs_call", call0(&[1, 0, i32::MAX, 0, 0], true)),
+        ];
+        for (name, body) in cases {
+            let r = run_wasm(&calling(name, b"x", true, &body)).expect("engine runs the module");
+            assert_eq!((r.exit, r.stderr.as_str()), (1, oob), "{name} {body:?}");
+        }
+    }
+
+    /// A module that exports no memory and calls a host op that reads it is
+    /// an error of the run, not a host panic.
+    #[test]
+    fn a_host_op_without_an_exported_memory_is_an_error_not_a_panic() {
+        let r = run_wasm(&calling("println", b"x", false, &call0(&[16, 1], false))).expect("engine runs the module");
+        assert_eq!(r.exit, 1);
+        assert_eq!(r.stderr, "Error: wasm trap: the module exports no memory\n");
     }
 }

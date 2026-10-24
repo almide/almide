@@ -291,13 +291,19 @@ pub(super) fn serve(
     (b_ptr, b_len): (i32, i32),
 ) -> wasmtime::Result<i64> {
     let Some(ctx) = caller.data().par.clone() else { return Ok(0) };
-    let mem = caller.get_export("memory").and_then(|e| e.into_memory()).expect("exported memory");
-    let mut a = vec![0u8; a_len as u32 as usize];
-    mem.read(&*caller, a_ptr as u32 as usize, &mut a)?;
+    let mem = super::guest_memory(caller)?;
+    let a = super::read_guest(caller, mem, a_ptr, a_len)?;
     let Some(req) = parse(&a) else { return Ok(0) };
     let width = req.fields.len().max(1);
-    if b_len as u32 as usize != 8 * width * req.n {
+    // the answer room is checked BEFORE the offer runs (#4135): its size is
+    // what the result buffer is sized from, so a forged one cannot make the
+    // host reserve memory the guest does not have
+    let room = 8usize.checked_mul(width).and_then(|w| w.checked_mul(req.n));
+    if room != Some(b_len as u32 as usize) {
         return Ok(0);
+    }
+    if !super::guest_span_fits(caller, mem, b_ptr, b_len as u32 as usize) {
+        return Err(wasmtime::Trap::MemoryOutOfBounds.into());
     }
     let site = req.site.clone();
     let n = req.n;
