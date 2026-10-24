@@ -68,7 +68,8 @@ impl IrMutVisitor for ConstFolder {
         }
         if let IrExprKind::UnOp { op: UnOp::NegInt, operand } = &expr.kind {
             if let IrExprKind::LitInt { value } = &operand.kind {
-                expr.kind = IrExprKind::LitInt { value: -*value };
+                // #4163: `-MIN` wraps to MIN at a sized width, never `128i8`.
+                expr.kind = IrExprKind::LitInt { value: narrow_to_width(value.wrapping_neg(), &operand.ty) };
                 self.changed = true;
             }
         }
