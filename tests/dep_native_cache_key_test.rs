@@ -41,7 +41,7 @@ fn scratch(name: &str) -> PathBuf {
     write(root.join("nat/native/data/word.txt"), "alpha\n");
     write(
         root.join("app/almide.toml"),
-        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nnat = { path = \"../nat\" }\n",
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nnat = { path = \"../nat\" }\n\n[permissions]\nnative = [\"nat\"]\n",
     );
     write(
         root.join("app/src/main.almd"),

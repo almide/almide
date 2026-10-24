@@ -534,6 +534,16 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
         }
     };
     refuse_invalid_manifest(&command);
+    // #4093: a dependency's native code is compiled and run by cargo, outside
+    // every `[permissions]` check, so a command that builds refuses an
+    // ungranted one before anything is compiled — on every `--target`.
+    if matches!(
+        command,
+        Commands::Run { .. } | Commands::Test { .. } | Commands::Bench { .. }
+            | Commands::Build { print_release_rustflags: false, .. }
+    ) {
+        cli::refuse_ungranted_native_deps_in_cwd();
+    }
     match command {
         Commands::Init => cli::cmd_init(),
         Commands::Run { file, no_check, release, target, verified: _, no_verified, time_report, program_args } =>
