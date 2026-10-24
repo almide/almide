@@ -246,10 +246,10 @@ pub fn resolve_imports_with_deps(
         std::iter::once(program).chain(ctx.loaded.iter().map(|(_, p, _, _)| p)),
     );
     for name in reached {
-        if !ctx.loaded_names.contains(name) {
-            if let Some(source) = stdlib::get_bundled_source(name) {
-                load_bundled_module(name, source, &mut ctx)?;
-            }
+        if !ctx.loaded_names.contains(name)
+            && let Some(source) = stdlib::get_bundled_source(name)
+        {
+            load_bundled_module(name, source, &mut ctx)?;
         }
     }
 
