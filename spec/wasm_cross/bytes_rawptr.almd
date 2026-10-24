@@ -1,6 +1,5 @@
 // @contract: C-062, C-376
 import ffi
-
 // Cross-target differential fixture: the RawPtr / linear-memory bridge
 // (`bytes.as_ptr` / `as_mut_ptr` / `from_raw_ptr` / `copy_to_ptr`, #440).
 //
@@ -141,6 +140,32 @@ effect fn grow_in_place() -> Unit = {
   println("grow: wrote ${n}; corrupted ${corrupted(filler)}; ${show(r)}; b=${bytes.len(b)}")
 }
 
+// #4169: an address ASSIGNED to an outer `var` is held for that var's scope,
+// not just for the branch the assignment sits in.
+effect fn assigned_to_outer_var(take: Bool) -> Unit = {
+  var b = bytes.from_string("outer-var-address-01234")
+  var p = ffi.address(bytes.zeros(0))
+  if take then {
+    p = ffi.address(b)
+  } else ()
+  b = bytes.from_string("x")
+  let filler = fillers("g")
+  let before = ffi.read(p, 8)!
+  let n = ffi.write(p, bytes.from_string("PWNED"), 5)!
+  println("outer: wrote ${n}; corrupted ${corrupted(filler)}; ${show(before)}; b=${bytes.len(b)}")
+}
+
+// #4169: a `mut` parameter rebound inside the callee releases the caller's
+// block; an address taken from it is held like a `var`'s.
+effect fn mut_param(mut b: Bytes) -> Unit = {
+  let p = ffi.address(b)
+  b = bytes.from_string("y")
+  let filler = fillers("h")
+  let before = ffi.read(p, 8)!
+  let n = ffi.write(p, bytes.from_string("PWNED"), 5)!
+  println("param: wrote ${n}; corrupted ${corrupted(filler)}; ${show(before)}; b=${bytes.len(b)}")
+}
+
 effect fn main() -> Unit = {
   let src = bytes.from_list([65, 66, 67, 68])
   // read side: copy via a raw offset
@@ -178,4 +203,8 @@ effect fn main() -> Unit = {
   write_seen_by_var()!
   rebind_in_loop()!
   grow_in_place()!
+  assigned_to_outer_var(true)!
+  var c = bytes.from_string("mut-param-address-56789")
+  mut_param(c)!
+  println("caller: ${bytes.to_string(c) ?? "?"}")
 }
