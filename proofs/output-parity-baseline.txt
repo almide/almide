@@ -280,6 +280,7 @@ spec/wasm_cross/effect_slot_carrier.almd
 spec/wasm_cross/effect_slot_never_err_bang.almd
 spec/wasm_cross/effect_tail_carrier_family.almd
 spec/wasm_cross/effect_tco.almd
+spec/wasm_cross/effect_tco_err_rewrap.almd
 spec/wasm_cross/effect_tuple_result_tco.almd
 spec/wasm_cross/effect_unit_yields_result.almd
 spec/wasm_cross/effect_unwrap_in_loop.almd

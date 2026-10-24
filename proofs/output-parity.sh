@@ -137,7 +137,12 @@ run_one() { # $1=file -> sets VERDICT to match|mismatch|wall|runerr|hang|v0fail
     if [ "$v0rc" -ne 0 ]; then VERDICT=v0fail; else VERDICT=wall; fi
     return
   }
-  to "$t" wasmtime "$TMP/m.wasm" > "$TMP/v1" 2>"$TMP/v1e" < /dev/null
+  # The wasm leg gets the working directory as a preopen (#4188), the
+  # filesystem the native leg runs in: a relative path then means the same
+  # file on both legs, and an absent one answers ENOENT — absence — as on
+  # native. Without it every relative fs call fails EBADF on the wasm leg,
+  # which `_if_exists` rightly reads as an error, not as absence (#4154).
+  to "$t" wasmtime --dir=. "$TMP/m.wasm" > "$TMP/v1" 2>"$TMP/v1e" < /dev/null
   local v1rc=$?
   # The alarm fired on the wasm leg (142 = 128 + SIGALRM from the perl wrapper;
   # 124 is what a `timeout`-style wrapper reports): the module never finished.
