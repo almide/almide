@@ -114,6 +114,11 @@ pub struct Project {
     /// named here is refused; the root package's own native code needs no
     /// grant. See `crate::native_grant`.
     pub native_grants: Vec<String>,
+    /// `[trust] owners = [...]` (#4093): the `host/owner`s this project
+    /// fetches git dependencies from beyond `github.com/almide`, which is
+    /// trusted by default. Only the root manifest's list is read. See
+    /// `crate::trust`.
+    pub trust_owners: Vec<String>,
     /// Native Rust crate dependencies added to generated Cargo.toml.
     /// e.g., [("wasmtime", "42.0.0")]
     pub native_deps: Vec<NativeDep>,
@@ -273,13 +278,28 @@ impl Manifest<'_> {
     /// strings is refused on its line, never read as an empty list.
     fn permission_list(&self, path: &Path, content: &str, key: &str) -> Result<Option<Vec<(String, usize)>>, String> {
         debug_assert!(PERMISSION_KEYS.contains(&key), "[permissions].{key} is read but not in PERMISSION_KEYS");
-        let Some(perm) = spanned_entry(&self.spans, "permissions") else { return Ok(None) };
+        self.string_list(path, content, "permissions", key)
+    }
+
+    /// `[trust].owners` (#4093), each entry checked to be `host/owner` on
+    /// its line.
+    fn trust_owners(&self, path: &Path, content: &str) -> Result<Vec<String>, String> {
+        let owners = self.string_list(path, content, "trust", "owners")?.unwrap_or_default();
+        owners
+            .into_iter()
+            .map(|(o, at)| crate::trust::validate_owner_entry(&o).map(|()| o).map_err(|e| located(path, content, at, &e)))
+            .collect()
+    }
+
+    /// `[<table>].<key>` as an array of strings, as in [`Self::permission_list`].
+    fn string_list(&self, path: &Path, content: &str, table_name: &str, key: &str) -> Result<Option<Vec<(String, usize)>>, String> {
+        let Some(perm) = spanned_entry(&self.spans, table_name) else { return Ok(None) };
         let Some(table) = perm.get_ref().as_table() else {
-            return Err(located(path, content, perm.span().start, "[permissions] must be a table"));
+            return Err(located(path, content, perm.span().start, &format!("[{table_name}] must be a table")));
         };
         let Some(list) = spanned_entry(table, key) else { return Ok(None) };
         let not_a_list = || {
-            located(path, content, list.span().start, &format!("[permissions].{key} must be an array of strings, like `{key} = [\"…\"]`"))
+            located(path, content, list.span().start, &format!("[{table_name}].{key} must be an array of strings, like `{key} = [\"…\"]`"))
         };
         let items = list.get_ref().as_array().ok_or_else(not_a_list)?;
         items
@@ -547,7 +567,7 @@ fn find_duplicate_key(content: &str, tables: Option<&[&str]>) -> Option<Duplicat
 }
 
 /// The tables `parse_toml` reads — a duplicate in any of them is refused.
-const MANIFEST_TABLES: &[&str] = &["package", "dependencies", "permissions", "native-deps"];
+const MANIFEST_TABLES: &[&str] = &["package", "dependencies", "permissions", "native-deps", "trust"];
 
 /// Refuse an `almide.toml` that writes a key twice in a table the manifest
 /// reader reads, naming both lines and the fix (#2583).
@@ -631,6 +651,7 @@ pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
     let manifest = read_manifest(path, content)?;
     manifest.permission_list(path, content, "proc")?;
     manifest.permission_list(path, content, "fs")?;
+    manifest.trust_owners(path, content)?;
     manifest.target_native_deps(path, content)?;
     manifest.dependencies(path, content)?;
     for (name, at) in manifest.permission_list(path, content, "allow")?.unwrap_or_default() {
@@ -650,7 +671,7 @@ pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
 // drifting.
 
 /// The top-level tables `parse_toml` reads.
-pub const TOP_LEVEL_KEYS: &[&str] = &["package", "dependencies", "native-deps", "permissions", "target"];
+pub const TOP_LEVEL_KEYS: &[&str] = &["package", "dependencies", "native-deps", "permissions", "target", "trust"];
 /// The keys `[package]` has.
 pub const PACKAGE_KEYS: &[&str] = &["name", "version", "almide"];
 /// `[package]` keys that describe the package and that no reader reads, so
@@ -663,6 +684,8 @@ pub const PACKAGE_METADATA_KEYS: &[&str] = &["description", "edition", "license"
 pub const DEPENDENCY_KEYS: &[&str] = &["git", "tag", "branch", "version", "path", "subdir"];
 /// The keys `[permissions]` has.
 pub const PERMISSION_KEYS: &[&str] = &["allow", "proc", "fs", "native"];
+/// The keys `[trust]` has (#4093).
+pub const TRUST_KEYS: &[&str] = &["owners"];
 /// The tables a `[target.<platform>]` table may hold (anything else is an
 /// error, not a warning — it was refused before #3382).
 pub const TARGET_PLATFORM_KEYS: &[&str] = &["native-deps"];
@@ -744,6 +767,9 @@ pub fn manifest_warnings(path: &Path, content: &str) -> Vec<Diagnostic> {
     if let Some(t) = sub("permissions") {
         out.extend(unknown_key_warnings(path, content, t, "[permissions]", "key", PERMISSION_KEYS));
     }
+    if let Some(t) = sub("trust") {
+        out.extend(unknown_key_warnings(path, content, t, "[trust]", "key", TRUST_KEYS));
+    }
     let Some(deps) = sub("dependencies") else { return out };
     let mut entries: Vec<_> = deps.iter().collect();
     entries.sort_by_key(|(k, _)| k.span().start);
@@ -798,6 +824,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
     let permissions = names("allow")?.unwrap_or_default();
     let proc_allow = names("proc")?;
     let native_grants = names("native")?.unwrap_or_default();
+    let trust_owners = manifest.trust_owners(path, &content)?;
 
     let root = project_root_from_toml_path(path);
     // Relative roots are the project's own directories: anchored to the
@@ -817,6 +844,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
         proc_allow,
         fs_allow,
         native_grants,
+        trust_owners,
         native_deps,
         root,
     })
@@ -861,7 +889,7 @@ pub fn cache_dir() -> PathBuf {
 }
 
 /// A locked dependency entry for almide.lock
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockedDep {
     pub name: String,
     pub git: String,
@@ -967,4 +995,63 @@ pub fn write_lock_file(path: &Path, locked: &[LockedDep]) -> Result<(), String> 
     }
     std::fs::write(path, content)
         .map_err(|e| format!("Failed to write {}: {}", path.display(), e))
+}
+
+/// Add `owner` (`host/owner`) to `[trust] owners` in the manifest at `path`
+/// (#4093), keeping every other byte: into the existing array, under an
+/// existing `[trust]` header, or as a new `[trust]` table at the end. `Ok(false)`
+/// when the owner is already listed. The result is re-read before it is kept,
+/// so a manifest this cannot edit cleanly is left untouched with an error.
+pub fn add_trust_owner(path: &Path, owner: &str) -> Result<bool, String> {
+    crate::trust::validate_owner_entry(owner)?;
+    let content = std::fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+    let current = parse_toml(path)?;
+    if current.trust_owners.iter().any(|o| o.eq_ignore_ascii_case(owner)) {
+        return Ok(false);
+    }
+    let quoted = format!("\"{owner}\"");
+    let by_hand = || format!("{}: cannot add {quoted} to [trust] owners automatically\n  hint: add it by hand: [trust] owners = [{quoted}]", path.display());
+    let manifest = read_manifest(path, &content)?;
+    let edited = match spanned_entry(&manifest.spans, "trust") {
+        None => {
+            let sep = if content.ends_with('\n') || content.is_empty() { "" } else { "\n" };
+            format!("{content}{sep}\n[trust]\nowners = [{quoted}]\n")
+        }
+        Some(table) => {
+            let table = table.get_ref().as_table().ok_or_else(by_hand)?;
+            match spanned_entry(table, "owners") {
+                Some(list) => {
+                    let span = list.span();
+                    let text = &content[span.start..span.end];
+                    let close = span.start + text.rfind(']').ok_or_else(by_hand)?;
+                    let empty = list.get_ref().as_array().is_some_and(|a| a.is_empty());
+                    let before = content[span.start + 1..close].trim_end();
+                    let insert = if empty || before.ends_with(',') { quoted.clone() } else { format!(", {quoted}") };
+                    format!("{}{}{}", &content[..close], insert, &content[close..])
+                }
+                None => {
+                    let mut offset = 0;
+                    let mut at = None;
+                    for line in content.split_inclusive('\n') {
+                        offset += line.len();
+                        if line.trim() == "[trust]" {
+                            at = Some(offset);
+                            break;
+                        }
+                    }
+                    let at = at.ok_or_else(by_hand)?;
+                    let nl = if content[..at].ends_with('\n') { "" } else { "\n" };
+                    format!("{}{nl}owners = [{quoted}]\n{}", &content[..at], &content[at..])
+                }
+            }
+        }
+    };
+    std::fs::write(path, &edited).map_err(|e| format!("Failed to write {}: {e}", path.display()))?;
+    match parse_toml(path) {
+        Ok(p) if p.trust_owners.iter().any(|o| o.eq_ignore_ascii_case(owner)) => Ok(true),
+        _ => {
+            let _ = std::fs::write(path, &content);
+            Err(by_hand())
+        }
+    }
 }

@@ -87,17 +87,27 @@ fn stderr(o: &Output) -> String {
     String::from_utf8_lossy(&o.stderr).to_string()
 }
 
-/// The checkout directories under the shared clone root(s).
+/// The checkout directories under the source-keyed clone roots: the
+/// children of every `@` directory below `~/.almide/cache/.sources` (#4093).
 fn shared_checkouts(home: &Path) -> Vec<PathBuf> {
-    let repos = home.join(".almide").join("cache").join(".repos");
-    let mut out = Vec::new();
-    for src in std::fs::read_dir(&repos).map(|r| r.flatten().collect::<Vec<_>>()).unwrap_or_default() {
-        for co in std::fs::read_dir(src.path()).map(|r| r.flatten().collect::<Vec<_>>()).unwrap_or_default() {
-            if !co.file_name().to_string_lossy().starts_with('.') {
-                out.push(co.path());
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).map(|r| r.flatten().collect::<Vec<_>>()).unwrap_or_default() {
+            if !e.path().is_dir() {
+                continue;
+            }
+            if e.file_name() == "@" {
+                for co in std::fs::read_dir(e.path()).map(|r| r.flatten().collect::<Vec<_>>()).unwrap_or_default() {
+                    if !co.file_name().to_string_lossy().starts_with('.') {
+                        out.push(co.path());
+                    }
+                }
+            } else {
+                walk(&e.path(), out);
             }
         }
     }
+    let mut out = Vec::new();
+    walk(&home.join(".almide").join("cache").join(".sources"), &mut out);
     out
 }
 
