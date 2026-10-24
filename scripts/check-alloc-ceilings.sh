@@ -7,6 +7,7 @@
 # in every spelling:
 #
 #   runtime/rs/src/string.rs  ALMIDE_REPEAT_MAX_BYTES       1 << 31   bytes  x1
+#   runtime/rs/src/bytes.rs   ALMIDE_BYTES_REPEAT_MAX_BYTES 1 << 31   bytes  x1
 #   runtime/rs/src/list.rs    ALMIDE_LIST_REPEAT_MAX_ELEMS  (1<<31)/8 slots  x8
 #   runtime/rs/src/matrix.rs  ALMIDE_MATRIX_MAX_ELEMS       1 << 28   f64    x8
 #   stdlib/*.almd             a literal in a `prim.die` guard
@@ -57,6 +58,7 @@ def ev(expr):
 # ── 1. the named native constants, each converted to bytes ──────────────────
 NATIVE = [
     ("runtime/rs/src/string.rs", "ALMIDE_REPEAT_MAX_BYTES",      1),
+    ("runtime/rs/src/bytes.rs",  "ALMIDE_BYTES_REPEAT_MAX_BYTES", 1),
     ("runtime/rs/src/list.rs",   "ALMIDE_LIST_REPEAT_MAX_ELEMS", 8),
     ("runtime/rs/src/matrix.rs", "ALMIDE_MATRIX_MAX_ELEMS",      8),
 ]
