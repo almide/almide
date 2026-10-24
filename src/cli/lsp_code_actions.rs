@@ -181,8 +181,10 @@ fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) 
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let p = entry.path();
-            if p.is_dir() { collect_almd_files(&p, out); }
-            else if p.extension().map_or(false, |e| e == "almd") { out.push(p); }
+            // Symlinks are neither followed nor collected (#4140).
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_dir() { collect_almd_files(&p, out); }
+            else if kind.is_file() && p.extension().map_or(false, |e| e == "almd") { out.push(p); }
         }
     }
 }
