@@ -665,6 +665,8 @@
 26000	spec/wasm_cross/r5_wasm_interp_alias_rc.almd
 3919	spec/wasm_cross/r5_wasm_split_replace_iterative.almd
 2680	spec/wasm_cross/r5_wasm_tuple_variant_pattern.almd
+3246	spec/wasm_cross/random_bytes.almd
+2431	spec/wasm_cross/random_bytes_negative_abort.almd
 1911	spec/wasm_cross/random_int_entropy.almd
 1818	spec/wasm_cross/range_bind_huge.almd
 3164	spec/wasm_cross/range_bind_no_materialize.almd

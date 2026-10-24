@@ -597,6 +597,7 @@ call:path.trusted
 call:println
 call:process.args
 call:process.exit
+call:random.bytes
 call:random.int
 call:regex.captures
 call:regex.find
