@@ -1,0 +1,9 @@
+import json
+import secret
+
+type LoginInput: Codec = { user: String, password: Secret[String] }
+
+fn main() -> Unit = {
+  let x = LoginInput { user: "ana", password: secret.new("hunter2") }
+  println(json.stringify(LoginInput.encode(x)))
+}

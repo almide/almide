@@ -1,0 +1,7 @@
+import secret
+
+fn main() -> Unit = {
+  let pin = secret.new(1234)
+  assert_eq(secret.reveal(pin), 1234)
+  println("checked")
+}
