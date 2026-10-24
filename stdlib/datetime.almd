@@ -81,7 +81,7 @@ effect fn monotonic_ns() -> Int = _
 @intrinsic("almide_rt_datetime_now_ms")
 effect fn now_ms() -> Int = _
 
-/// Epoch secs of YYYY-MM-DDTHH:MM:SSZ; fractions err.
+/// Epoch secs of YYYY-MM-DDTHH:MM:SSZ, year 0..=9999; fractions err.
 @intrinsic("almide_rt_datetime_parse_iso")
 fn parse_iso(s: String) -> Result[Int, String] = _
 
