@@ -180,7 +180,6 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_PROBE_OUT", Value, Harness, "the file a charge-probed native program writes its `__ALMD_PROBE` meter line to; `almide run --time-report` sets it to a fresh temp path so the program's own stderr is never read as the reading (#3489). Unset = the line goes to stderr"),
     sw("ALMIDE_PROBE_SRC", Value, Harness, "the source file the heap probe compiles (unset = the probe is skipped)"),
     sw("ALMIDE_PROFILE", Flag, Dbg, "print per-pass and per-phase timings of the native pipeline"),
-    sw("ALMIDE_RC_TRAP_DOUBLE_FREE", Flag, Trap, "arm the structural leg's double-free trap: releasing a block already at rc 0 traps instead of wrapping"),
     sw("ALMIDE_REGION_DEBUG", Flag, Dbg, "print the region-window pass's decisions (native and structural leg)"),
     sw("ALMIDE_REGION_OFF", Flag, Ablation, "turn the region-window allocation pass off (native and structural leg)"),
     sw("ALMIDE_REGION_TRAP_STALE", Flag, Trap, "arm the native region prelude's stale-reference trap (#2200)"),
