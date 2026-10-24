@@ -154,7 +154,7 @@ impl<'a> Interpreter<'a> {
         let text = match crate::vfs::read_text(&self.vfs, &path) {
             Ok(t) => t,
             Err(e) => {
-                let m = format!("{shown}(\"{path}\"): {e}");
+                let m = format!("{shown}({}): {e}", almide_base::err_text::almide_rt_errtext_quote(&path));
                 return Err(Flow::val(Value::Result(Err(Box::new(Value::str(m))))));
             }
         };

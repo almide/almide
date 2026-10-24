@@ -219,9 +219,12 @@ effect fn main() -> Unit = {
     let built = Command::new(almide()).arg("build").arg(&file).arg("-o").arg(&app).output().expect("build");
     assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
     for (cmd, quoted) in [
-        ("missing-2103-\"quote", "\"missing-2103-\\\"quote\""),
-        ("missing-2103-\\slash", "\"missing-2103-\\\\slash\""),
+        // C-419 (#4126): quote and backslash are kept, control and bidi
+        // characters are escaped — the one rule every error text uses.
+        ("missing-2103-\"quote", "\"missing-2103-\"quote\""),
+        ("missing-2103-\\slash", "\"missing-2103-\\slash\""),
         ("missing-2103-\n\r\tcontrol", "\"missing-2103-\\n\\r\\tcontrol\""),
+        ("missing-2103-\u{1b}\u{85}\u{202e}", "\"missing-2103-\\u{1b}\\u{85}\\u{202e}\""),
         ("missing-2103-日本語", "\"missing-2103-日本語\""),
     ] {
         let host = Command::new(cmd).arg("private-argument-2103").output().expect_err("missing command").to_string();

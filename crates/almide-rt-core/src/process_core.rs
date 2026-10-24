@@ -21,9 +21,10 @@ pub fn almide_proc_call_err(call: &str, args: &str, e: impl std::fmt::Display) -
     format!("{call}({args}): {e}")
 }
 
-/// Source-shaped quoting (plain quotes, no escape table) — the family's rule.
+/// The operand in quotes, its control and bidi characters escaped (C-419's
+/// one rule, almide-base's err_text.rs) — the family's quoting.
 pub fn almide_proc_q(s: &str) -> String {
-    format!("\"{s}\"")
+    almide_rt_errtext_quote(s)
 }
 
 /// Stdout on exit 0; else the stderr text, or a status line when it is empty.
@@ -35,7 +36,7 @@ pub fn almide_proc_exec(cmd: &str, args: &[impl AsRef<str>]) -> Result<String, S
             } else {
                 let stderr = String::from_utf8_lossy(&out.stderr).to_string();
                 if stderr.is_empty() {
-                    Err(format!("process '{}' exited with status {}", cmd, out.status))
+                    Err(format!("process '{}' exited with status {}", almide_rt_errtext_escape(cmd), out.status))
                 } else {
                     Err(stderr)
                 }
@@ -95,7 +96,7 @@ pub fn almide_proc_exec_status(cmd: &str, args: &[impl AsRef<str>]) -> Result<(i
             String::from_utf8_lossy(&out.stderr).to_string(),
         )),
         // C-214: quote the command, omit arguments, retain the host error.
-        Err(e) => Err(almide_proc_call_err("process.exec_status", &format!("{cmd:?}"), e)),
+        Err(e) => Err(almide_proc_call_err("process.exec_status", &almide_proc_q(cmd), e)),
     }
 }
 
@@ -137,7 +138,7 @@ pub fn almide_proc_exec_status_timeout(
     {
         std::os::unix::process::CommandExt::process_group(&mut command, 0);
     }
-    let operand = format!("{cmd:?}, {timeout_ms}");
+    let operand = format!("{}, {timeout_ms}", almide_proc_q(cmd));
     let mut child = command
         .spawn()
         .map_err(|e| almide_proc_call_err("process.exec_status_timeout", &operand, e))?;
@@ -221,7 +222,7 @@ pub fn almide_proc_stop_tree(child: &mut std::process::Child) {
 pub fn almide_proc_run(cmd: &str, args: &[impl AsRef<str>]) -> Result<i64, String> {
     match std::process::Command::new(cmd).args(args.iter().map(|a| a.as_ref())).status() {
         Ok(status) => Ok(status.code().unwrap_or(-1) as i64),
-        Err(e) => Err(almide_proc_call_err("process.run", &format!("{cmd:?}"), e)),
+        Err(e) => Err(almide_proc_call_err("process.run", &almide_proc_q(cmd), e)),
     }
 }
 

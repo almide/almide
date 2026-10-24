@@ -31,10 +31,11 @@ impl FsErrSuffix for &str {
         (*self).to_string()
     }
 }
-/// Source-shaped quoting — the twin of `fs.rs`'s `q`. Deliberately not `{:?}`;
-/// see that file for why the escape table is not reproduced.
+/// Source-shaped quoting — the twin of `fs.rs`'s `fs_q`: quotes plus C-419's
+/// control/bidi escapes, the ONE function every leg runs (almide-base's
+/// err_text.rs, #4126). Deliberately not `{:?}`; see fs.rs for why.
 fn q(s: &str) -> String {
-    format!("\"{s}\"")
+    almide_base::err_text::almide_rt_errtext_quote(s)
 }
 /// The Almide call an fs op came from — ONE table with the p1 fs service
 /// (`almide_wasi::fs_op_name`), so the stock-runtime artifact and this host

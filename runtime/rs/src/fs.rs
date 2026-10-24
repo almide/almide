@@ -26,22 +26,20 @@ fn io_err(call: &str, args: &str, e: std::io::Error) -> String {
     format!("{call}({args}): {}", fs_io_error_text(&e))
 }
 include!("../../../crates/almide-base/src/fs_errno_classified.rs");
-// Source-shaped quoting, so the operand reads back as the writer spelled it.
-//
-// DELIBERATELY not Rust's `{:?}`. Four independent implementations have to emit
-// these bytes identically — this file, the embedded host, the interp VFS and the
-// v0 leg's generated WAT — and `{:?}`'s escape table (`\"`, `\\`, `\n`,
-// `\u{..}`) is a much larger surface to reproduce in hand-written WAT than a
-// pair of quotes. For any path that is not pathological the two are byte-equal;
-// for one that is, every leg still renders the SAME bytes, which is what C-215
-// promises. Readability of a filename containing a quote is not worth a
-// divergence none of the gates would catch.
+// Source-shaped quoting, so the operand reads back as the writer spelled it —
+// with C-419's one exception (#4126): a control or bidi character is written
+// as its escape (`\n`, `\u{1b}`, `\u{202e}`), so a path cannot forge a log
+// line or drive the reader's terminal. The rule is almide-base's err_text.rs
+// (runtime/rs/src/errtext.rs here), which the embedded host, the stock
+// artifact's fs service (WAT) and the interp VFS reproduce byte for byte.
+// Quote and backslash stay as they are (not Rust's `{:?}`), so an ordinary
+// path, a Windows one included, is unchanged.
 // NAME-SPACED per runtime file: every `runtime/rs/src/*.rs` chunk is emitted
 // WHOLE into one generated crate, so a program importing both `fs` and
 // `process` gets both files' helpers side by side. A bare `q` in each is
 // `error[E0428]: the name `q` is defined multiple times` —
 // native_runtime_name_collision_pin_test exists for exactly this.
-fn fs_q(s: &str) -> String { format!("\"{s}\"") }
+fn fs_q(s: &str) -> String { almide_rt_errtext_quote(s) }
 
 // The runtime-side twin of stdlib/fs.almd's `type FileStat = { size, is_dir,
 // is_file, modified }`: the bundled decl types the surface at check time, this

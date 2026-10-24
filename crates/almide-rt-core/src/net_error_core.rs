@@ -140,5 +140,5 @@ pub fn net_err_port_range(head: &str) -> String {
     format!("{head}: port out of range 0..=65535")
 }
 pub fn net_err_unresolvable(f: &str, host: &str) -> String {
-    format!("{f}: cannot resolve host \"{host}\"")
+    format!("{f}: cannot resolve host {}", almide_rt_errtext_quote(host))
 }

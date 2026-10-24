@@ -13,8 +13,9 @@
 fn call_err(call: &str, args: &str, e: impl std::fmt::Display) -> String {
     format!("{call}({args}): {e}")
 }
-// The quoting twin (`almide_proc_q`, plain quotes, no escape table — the
-// rule `fs` can reproduce in its hand-written WAT) lives in the shared core.
+// The quoting twin (`almide_proc_q`: quotes plus C-419's control/bidi
+// escapes, the rule `fs` reproduces in its hand-written WAT) lives in the
+// shared core.
 
 // The runtime-side twin of stdlib/process.almd's `type ProcessStatus = { code,
 // stdout, stderr }` — the AlmideFileStat treatment (fs.rs, #1821): the emitter
