@@ -420,7 +420,7 @@ fn take(ctx: &ParCtx, k: usize) -> Vec<Worker> {
 /// left that a later chunk could notice (the reset invariant).
 fn reusable(w: &Worker) -> bool {
     let h = w.store.data();
-    let quiet = |m: &Arc<Mutex<String>>| m.lock().is_ok_and(|s| s.is_empty());
+    let quiet = |m: &Arc<Mutex<Vec<u8>>>| m.lock().is_ok_and(|s| s.is_empty());
     let exited = h.exit.lock().map_or(true, |e| e.is_some());
     !exited && quiet(&h.out) && quiet(&h.err) && w.memory.data_size(&w.store) <= RESET_BYTES
 }
