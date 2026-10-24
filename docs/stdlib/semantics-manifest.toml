@@ -1536,15 +1536,15 @@ expect = "[0, 63, 192, 0, 0, 0]"
 default_index_unit = "value"
 
 [[list.fn]]
-name = "sum"
+name = "__sum_int"
 index_unit = "value"
-probe = 'list.sum([1, 2, 3])'
+probe = 'list.__sum_int([1, 2, 3])'
 expect = "6"
 
 [[list.fn]]
-name = "product"
+name = "__product_int"
 index_unit = "value"
-probe = 'list.product([2, 3, 4])'
+probe = 'list.__product_int([2, 3, 4])'
 expect = "24"
 
 [[list.fn]]
@@ -1682,6 +1682,19 @@ expect = "1.0"
 # index_unit vocabulary — io:
 #   byte-value — the Int is one byte 0–255, or -1 as the EOF sentinel
 #   byte-count — the Int counts bytes to read
+
+[[float.fn]]
+name = "__int_exact"
+index_unit = "value"
+probe = 'float.__int_exact(-3.0)'
+expect = "some(-3)"
+
+[[float.fn]]
+name = "__int_sat"
+index_unit = "value"
+probe = 'float.__int_sat(1e30)'
+expect = "9223372036854775807"
+
 [io]
 default_index_unit = "byte-value"
 
@@ -2433,6 +2446,85 @@ expect = "9223372036854775807"
 #                    kill's signal 9 is SIGKILL, 15 SIGTERM)
 #   millisecond    — a duration in MILLISECONDS (sleep's ms,
 #                    exec_status_timeout's timeout_ms — never seconds)
+
+[[int.fn]]
+name = "__int_exact"
+index_unit = "value"
+probe = 'int.__int_exact(7)'
+expect = "some(7)"
+
+[[int.fn]]
+name = "__uint64_exact"
+index_unit = "value"
+probe = 'int.__uint64_exact(-1)'
+expect = "none"
+
+[[int.fn]]
+name = "__trunc"
+index_unit = "value"
+probe = 'int.__trunc(-7)'
+expect = "-7"
+
+[[int.fn]]
+name = "__int_sat"
+index_unit = "value"
+probe = 'int.__int_sat(-7)'
+expect = "-7"
+
+[[int.fn]]
+name = "__uint64_sat"
+index_unit = "value"
+probe = 'int.__uint64_sat(-5)'
+expect = "0"
+
+[[int.fn]]
+name = "__to_float"
+index_unit = "value"
+probe = 'int.__to_float(3)'
+expect = "3"
+
+[[int.fn]]
+name = "__to_float_exact"
+index_unit = "value"
+probe = 'int.__to_float_exact(9007199254740993)'
+expect = "none"
+
+[[int.fn]]
+name = "__to_float32"
+index_unit = "value"
+probe = 'int.__to_float32(16777217)'
+expect = "16777216"
+
+[[int.fn]]
+name = "__to_float32_exact"
+index_unit = "value"
+probe = 'int.__to_float32_exact(16777216)'
+expect = "some(16777216)"
+
+[[int.fn]]
+name = "__decimal_exact"
+index_unit = "value"
+probe = 'int.__decimal_exact(-42)'
+expect = "some(\"-42\")"
+
+[[int.fn]]
+name = "__bits64"
+index_unit = "bit-pattern"
+probe = 'int.__bits64(-1)'
+expect = "-1"
+
+[[int.fn]]
+name = "__sum"
+index_unit = "value"
+probe = 'int.__sum([1, 2, 3])'
+expect = "6"
+
+[[int.fn]]
+name = "__product"
+index_unit = "value"
+probe = 'int.__product([2, 3, 4])'
+expect = "24"
+
 [process]
 default_index_unit = "value"
 

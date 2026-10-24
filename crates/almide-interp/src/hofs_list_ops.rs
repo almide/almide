@@ -287,7 +287,7 @@ impl<'a> Interpreter<'a> {
 
     fn eval_container_op_list_agg(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         match func {
-            "sum" => Some(self.list_sum(args)),
+            "__sum_int" => Some(self.list_sum(args)),
             // Structural, element-type-blind, mirroring the v0 runtime
             // exactly (runtime/rs/src/list.rs): dedup drops CONSECUTIVE
             // equals, unique keeps first occurrences, both under the same
@@ -297,10 +297,10 @@ impl<'a> Interpreter<'a> {
             "flatten" => Some(self.list_flatten(args)),
             "intersperse" => Some(self.list_intersperse(args)),
             "zip" => Some(self.list_zip(args)),
-            "product" => Some(self.list_product(args)),
+            "__product_int" => Some(self.list_product(args)),
             "min" => Some(self.list_min_max(args, false)),
             "max" => Some(self.list_min_max(args, true)),
-            "join" => Some(self.list_join(args)),
+            "__join_string" => Some(self.list_join(args)),
             "sort" => Some(self.list_sort(args)),
             "enumerate" => Some(self.list_enumerate(args)),
             _ => self.eval_container_op_list_slice(func, args),

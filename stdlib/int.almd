@@ -468,3 +468,51 @@ local fn accumulate_digits(digits: List[Int], radix: Int, acc: Int, negative: Bo
     else accumulate_digits(rest, radix, acc * radix - d, negative)
   },
 }
+
+// ── The `from` family (R-L0-40): Int from any number. The source is any
+//    `Numeric` type; the body reads the source through the protocol's
+//    conversion pivots (`__int_exact`, `__trunc`, ...), which every numeric
+//    type defines below its own conversions. ──
+/// x as Int, toward zero; NaN, an infinity or a value outside Int aborts.
+fn from[S: Numeric](x: S) -> Int = x.__trunc().__int_exact() ?? panic("int.from: the value is not a number in the range of Int")
+
+/// some(x as Int) when Int holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int? = x.__int_exact()
+
+/// x as Int, toward zero, clamped to Int's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int = x.__int_sat()
+
+/// The low 64 bits of integer x as Int (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int = x.__bits64()
+
+// ── Numeric / Integer requirements: the conversion pivots the `<T>.from`
+//    family reads through a type variable, and the receiver-less sum and
+//    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
+fn __int_exact(x: Int) -> Int? = some(x)
+
+fn __uint64_exact(x: Int) -> UInt64? = int.to_uint64_checked(x)
+
+fn __trunc(x: Int) -> Int = x
+
+fn __int_sat(x: Int) -> Int = x
+
+fn __uint64_sat(x: Int) -> UInt64 = int.to_uint64_saturating(x)
+
+fn __to_float(x: Int) -> Float = int.to_float(x)
+
+fn __to_float_exact(x: Int) -> Float? = {
+  let f = int.to_float(x)
+  if f < 9223372036854775808.0 and float.to_int(f) == x then some(f) else none
+}
+
+fn __to_float32(x: Int) -> Float32 = int.to_float32(x)
+
+fn __to_float32_exact(x: Int) -> Float32? = int.to_float32_checked(x)
+
+fn __decimal_exact(x: Int) -> String? = some(int.to_string(x))
+
+fn __bits64(x: Int) -> Int = x
+
+fn __sum(xs: List[Int]) -> Int = list.__sum_int(xs)
+
+fn __product(xs: List[Int]) -> Int = list.__product_int(xs)

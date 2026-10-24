@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 49 stdlib modules, 1533 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 49 stdlib modules, 1581 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -10,30 +10,30 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 |---|---:|---:|
 | [args](#args) | 7 | 0 |
 | [base64](#base64) | 4 | 0 |
-| [bigint](#bigint) | 22 | 1 |
+| [bigint](#bigint) | 24 | 1 |
 | [bool](#bool) | 3 | 0 |
 | [bytes](#bytes) | 146 | 1 |
 | [compute](#compute) | 7 | 0 |
 | [datetime](#datetime) | 23 | 0 |
-| [deque](#deque) | 58 | 1 |
+| [deque](#deque) | 60 | 1 |
 | [duration](#duration) | 7 | 0 |
 | [env](#env) | 9 | 0 |
 | [error](#error) | 3 | 0 |
 | [ffi](#ffi) | 4 | 0 |
-| [float](#float) | 57 | 0 |
-| [float32](#float32) | 31 | 0 |
-| [float64](#float64) | 31 | 0 |
+| [float](#float) | 59 | 0 |
+| [float32](#float32) | 33 | 0 |
+| [float64](#float64) | 33 | 0 |
 | [fs](#fs) | 41 | 1 |
 | [hash](#hash) | 12 | 0 |
 | [heap](#heap) | 16 | 1 |
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 5 | 0 |
 | [http](#http) | 48 | 4 |
-| [int](#int) | 84 | 0 |
-| [int16](#int16) | 52 | 0 |
-| [int32](#int32) | 54 | 0 |
-| [int64](#int64) | 56 | 0 |
-| [int8](#int8) | 50 | 0 |
+| [int](#int) | 88 | 0 |
+| [int16](#int16) | 56 | 0 |
+| [int32](#int32) | 58 | 0 |
+| [int64](#int64) | 60 | 0 |
+| [int8](#int8) | 54 | 0 |
 | [io](#io) | 8 | 0 |
 | [json](#json) | 15 | 0 |
 | [list](#list) | 79 | 0 |
@@ -47,13 +47,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [random](#random) | 9 | 0 |
 | [regex](#regex) | 8 | 0 |
 | [result](#result) | 15 | 0 |
-| [set](#set) | 40 | 0 |
+| [set](#set) | 42 | 0 |
 | [string](#string) | 88 | 0 |
 | [testing](#testing) | 10 | 0 |
-| [uint16](#uint16) | 46 | 0 |
-| [uint32](#uint32) | 50 | 0 |
-| [uint64](#uint64) | 54 | 0 |
-| [uint8](#uint8) | 42 | 0 |
+| [uint16](#uint16) | 50 | 0 |
+| [uint32](#uint32) | 54 | 0 |
+| [uint64](#uint64) | 58 | 0 |
+| [uint8](#uint8) | 46 | 0 |
 | [url](#url) | 10 | 1 |
 | [value](#value) | 20 | 0 |
 | [zlib](#zlib) | 13 | 0 |
@@ -105,6 +105,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `bigint.bnot(x: BigInt) -> BigInt` — Bitwise complement; equals -x - 1.
 - `bigint.bshl(a: BigInt, n: Int) -> BigInt` — a shifted left by n bits (a * 2^n); n < 0 aborts.
 - `bigint.bshr(a: BigInt, n: Int) -> BigInt` — a shifted right by n bits, rounding toward -inf (sign-filling); n < 0 aborts.
+- `bigint.from(x: S) -> BigInt` — x as BigInt, toward zero; NaN or an infinity aborts.
+- `bigint.from_checked(x: S) -> Option[BigInt]` — some(x as BigInt) when x is an integer, else none (a fraction, NaN, an infinity).
 
 ## bool
 
@@ -367,6 +369,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `deque.intersperse(d: Deque[A], sep: A) -> Deque[A]` — sep between adjacent elements.
 - `deque.unique(d: Deque[A]) -> Deque[A]` — Duplicates removed; the occurrence nearest the front kept.
 - `deque.unique_by(d: Deque[A], f: (A) -> K) -> Deque[A]` — The first element per distinct key f(x).
+- `deque.sum(d: Deque[A]) -> A` — Sum of the elements; 0 when empty; integers wrap on overflow.
+- `deque.product(d: Deque[A]) -> A` — Product of the elements; 1 when empty; integers wrap on overflow.
 
 ## duration
 
@@ -472,6 +476,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float.epsilon() -> Float` — Gap between 1.0 and the next Float: 2^-52.
 - `float.max_value() -> Float` — Largest finite Float, about 1.7976931348623157e308.
 - `float.min_value() -> Float` — Most negative finite Float (= -max_value()), not the smallest positive.
+- `float.from(x: S) -> Float` — x as the nearest Float (ties to even); NaN stays NaN.
+- `float.from_checked(x: S) -> Option[Float]` — some(x as Float) when Float holds x exactly, else none (a rounded value, NaN).
 
 ## float32
 
@@ -508,6 +514,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float32.max_value() -> Float32` — Largest finite Float32, about 3.4028235e38.
 - `float32.min_value() -> Float32` — Most negative finite Float32 (= -max_value()), not the smallest positive.
 - `float32.parse(s: String) -> Result[Float32, String]` — Float32 from trimmed s, the grammar of float.parse; err on junk; overflow gives inf.
+- `float32.from(x: S) -> Float32` — x as the nearest Float32 (ties to even), rounded once; NaN stays NaN.
+- `float32.from_checked(x: S) -> Option[Float32]` — some(x as Float32) when Float32 holds x exactly, else none (a rounded value, NaN).
 
 ## float64
 
@@ -544,6 +552,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float64.max_value() -> Float64` — Largest finite Float64, about 1.7976931348623157e308.
 - `float64.min_value() -> Float64` — Most negative finite Float64 (= -max_value()), not the smallest positive.
 - `float64.parse(s: String) -> Result[Float64, String]` — Float64 from trimmed s, the grammar of float.parse; err on junk.
+- `float64.from(x: S) -> Float64` — x as the nearest Float64 (ties to even); NaN stays NaN.
+- `float64.from_checked(x: S) -> Option[Float64]` — some(x as Float64) when Float64 holds x exactly, else none (a rounded value, NaN).
 
 ## fs
 
@@ -788,6 +798,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int.bshr_logical(a: Int, n: Int) -> Int` — Zero-filling right shift of the 64 bits; n is taken mod 64.
 - `int.to_string_radix(x: Int, radix: Int) -> String` — Signed digits of x in radix, lowercase; -255 in 16 is "-ff"; radix outside 2..36 aborts.
 - `int.parse_radix(s: String, radix: Int) -> Result[Int, String]` — Int from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2; err on junk or overflow; radix outside 2..36 aborts.
+- `int.from(x: S) -> Int` — x as Int, toward zero; NaN, an infinity or a value outside Int aborts.
+- `int.from_checked(x: S) -> Option[Int]` — some(x as Int) when Int holds x exactly, else none (a fraction, NaN, out of range).
+- `int.from_saturating(x: S) -> Int` — x as Int, toward zero, clamped to Int's range; NaN is 0.
+- `int.from_wrapping(x: S) -> Int` — The low 64 bits of integer x as Int (two's complement).
 
 ## int16
 
@@ -845,6 +859,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int16.parse(s: String) -> Result[Int16, String]` — Decimal Int16 from trimmed s; err on junk or outside -32768..32767.
 - `int16.to_string_radix(x: Int16, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
 - `int16.parse_radix(s: String, radix: Int) -> Result[Int16, String]` — Int16 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -32768..32767.
+- `int16.from(x: S) -> Int16` — x as Int16, toward zero; NaN, an infinity or a value outside Int16 aborts.
+- `int16.from_checked(x: S) -> Option[Int16]` — some(x as Int16) when Int16 holds x exactly, else none (a fraction, NaN, out of range).
+- `int16.from_saturating(x: S) -> Int16` — x as Int16, toward zero, clamped to Int16's range; NaN is 0.
+- `int16.from_wrapping(x: S) -> Int16` — The low 16 bits of integer x as Int16 (two's complement).
 
 ## int32
 
@@ -904,6 +922,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int32.parse(s: String) -> Result[Int32, String]` — Decimal Int32 from trimmed s; err on junk or outside -2147483648..2147483647.
 - `int32.to_string_radix(x: Int32, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
 - `int32.parse_radix(s: String, radix: Int) -> Result[Int32, String]` — Int32 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -2147483648..2147483647.
+- `int32.from(x: S) -> Int32` — x as Int32, toward zero; NaN, an infinity or a value outside Int32 aborts.
+- `int32.from_checked(x: S) -> Option[Int32]` — some(x as Int32) when Int32 holds x exactly, else none (a fraction, NaN, out of range).
+- `int32.from_saturating(x: S) -> Int32` — x as Int32, toward zero, clamped to Int32's range; NaN is 0.
+- `int32.from_wrapping(x: S) -> Int32` — The low 32 bits of integer x as Int32 (two's complement).
 
 ## int64
 
@@ -965,6 +987,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int64.parse(s: String) -> Result[Int64, String]` — Decimal Int64 from trimmed s; err on junk or overflow.
 - `int64.to_string_radix(x: Int64, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
 - `int64.parse_radix(s: String, radix: Int) -> Result[Int64, String]` — Int64 from trimmed s in radix, the grammar of int.parse_radix; err on junk or overflow.
+- `int64.from(x: S) -> Int64` — x as Int64, toward zero; NaN, an infinity or a value outside Int64 aborts.
+- `int64.from_checked(x: S) -> Option[Int64]` — some(x as Int64) when Int64 holds x exactly, else none (a fraction, NaN, out of range).
+- `int64.from_saturating(x: S) -> Int64` — x as Int64, toward zero, clamped to Int64's range; NaN is 0.
+- `int64.from_wrapping(x: S) -> Int64` — The low 64 bits of integer x as Int64 (two's complement).
 
 ## int8
 
@@ -1020,6 +1046,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int8.parse(s: String) -> Result[Int8, String]` — Decimal Int8 from trimmed s; err on junk or outside -128..127.
 - `int8.to_string_radix(x: Int8, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
 - `int8.parse_radix(s: String, radix: Int) -> Result[Int8, String]` — Int8 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -128..127.
+- `int8.from(x: S) -> Int8` — x as Int8, toward zero; NaN, an infinity or a value outside Int8 aborts.
+- `int8.from_checked(x: S) -> Option[Int8]` — some(x as Int8) when Int8 holds x exactly, else none (a fraction, NaN, out of range).
+- `int8.from_saturating(x: S) -> Int8` — x as Int8, toward zero, clamped to Int8's range; NaN is 0.
+- `int8.from_wrapping(x: S) -> Int8` — The low 8 bits of integer x as Int8 (two's complement).
 
 ## io
 
@@ -1077,13 +1107,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.index_of(xs: List[A], x: A) -> Option[Int]` — Index of the first x, or none.
 - `list.last(xs: List[A]) -> Option[A]` — Final element, or none when empty.
 - `list.chunk(xs: List[A], n: Int) -> List[List[A]]` — Runs of n, last may be short; n = 0 aborts.
-- `list.sum(xs: List[Int]) -> Int` — Sum; 0 when empty; wraps on overflow.
-- `list.product(xs: List[Int]) -> Int` — Product; 1 when empty; wraps on overflow.
+- `list.sum(xs: List[A]) -> A` — Sum of any numbers (R-L0-42); 0 when empty; integers wrap on overflow.
+- `list.product(xs: List[A]) -> A` — Product of any numbers (R-L0-42); 1 when empty; integers wrap on overflow.
 - `list.first(xs: List[A]) -> Option[A]` — Head element, or none when empty.
 - `list.is_empty(xs: List[A]) -> Bool` — true iff xs has no elements.
 - `list.min(xs: List[A]) -> Option[A]` — Least element, or none when empty.
 - `list.max(xs: List[A]) -> Option[A]` — Greatest element, or none when empty.
-- `list.join(xs: List[String], sep: String) -> String` — Strings joined by sep; empty string for [].
+- `list.join(xs: List[T], sep: T) -> T` — The parts joined by sep (R-L0-42): Strings or Bytes; empty for [].
 - `list.map(xs: List[A], f: (A) -> B) -> List[B]` — f applied to each element, in order.
 - `list.filter(xs: List[A], f: (A) -> Bool) -> List[A]` — Elements where f is true, order kept.
 - `list.find(xs: List[A], f: (A) -> Bool) -> Option[A]` — First element where f holds, or none.
@@ -1457,6 +1487,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `set.max_by(s: Set[A], f: (A) -> K) -> Option[A]` — Member with the greatest key f(x); the first on ties.
 - `set.min_with(s: Set[A], cmp: (A, A) -> Int) -> Option[A]` — Least member by cmp; the first on ties.
 - `set.max_with(s: Set[A], cmp: (A, A) -> Int) -> Option[A]` — Greatest member by cmp; the first on ties.
+- `set.sum(s: Set[A]) -> A` — Sum of the elements; 0 when empty; integers wrap on overflow.
+- `set.product(s: Set[A]) -> A` — Product of the elements; 1 when empty; integers wrap on overflow.
 
 ## string
 
@@ -1616,6 +1648,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint16.parse(s: String) -> Result[UInt16, String]` — Decimal UInt16 from trimmed s; err on junk, a sign of -, or above 65535.
 - `uint16.to_string_radix(x: UInt16, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
 - `uint16.parse_radix(s: String, radix: Int) -> Result[UInt16, String]` — UInt16 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 65535.
+- `uint16.from(x: S) -> UInt16` — x as UInt16, toward zero; NaN, an infinity or a value outside UInt16 aborts.
+- `uint16.from_checked(x: S) -> Option[UInt16]` — some(x as UInt16) when UInt16 holds x exactly, else none (a fraction, NaN, out of range).
+- `uint16.from_saturating(x: S) -> UInt16` — x as UInt16, toward zero, clamped to UInt16's range; NaN is 0.
+- `uint16.from_wrapping(x: S) -> UInt16` — The low 16 bits of integer x as UInt16 (two's complement).
 
 ## uint32
 
@@ -1671,6 +1707,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint32.parse(s: String) -> Result[UInt32, String]` — Decimal UInt32 from trimmed s; err on junk, a sign of -, or above 4294967295.
 - `uint32.to_string_radix(x: UInt32, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
 - `uint32.parse_radix(s: String, radix: Int) -> Result[UInt32, String]` — UInt32 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 4294967295.
+- `uint32.from(x: S) -> UInt32` — x as UInt32, toward zero; NaN, an infinity or a value outside UInt32 aborts.
+- `uint32.from_checked(x: S) -> Option[UInt32]` — some(x as UInt32) when UInt32 holds x exactly, else none (a fraction, NaN, out of range).
+- `uint32.from_saturating(x: S) -> UInt32` — x as UInt32, toward zero, clamped to UInt32's range; NaN is 0.
+- `uint32.from_wrapping(x: S) -> UInt32` — The low 32 bits of integer x as UInt32 (two's complement).
 
 ## uint64
 
@@ -1730,6 +1770,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint64.parse(s: String) -> Result[UInt64, String]` — Decimal UInt64 from trimmed s; err on junk, a sign of -, or above 2^64-1.
 - `uint64.to_string_radix(x: UInt64, radix: Int) -> String` — Digits of x in radix, lowercase, no sign; exact up to 2^64-1; radix outside 2..36 aborts.
 - `uint64.parse_radix(s: String, radix: Int) -> Result[UInt64, String]` — UInt64 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 2^64-1.
+- `uint64.from(x: S) -> UInt64` — x as UInt64, toward zero; NaN, an infinity or a value outside UInt64 aborts.
+- `uint64.from_checked(x: S) -> Option[UInt64]` — some(x as UInt64) when UInt64 holds x exactly, else none (a fraction, NaN, out of range).
+- `uint64.from_saturating(x: S) -> UInt64` — x as UInt64, toward zero, clamped to UInt64's range; NaN is 0.
+- `uint64.from_wrapping(x: S) -> UInt64` — The low 64 bits of integer x as UInt64 (two's complement).
 
 ## uint8
 
@@ -1777,6 +1821,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint8.parse(s: String) -> Result[UInt8, String]` — Decimal UInt8 from trimmed s; err on junk, a sign of -, or above 255.
 - `uint8.to_string_radix(x: UInt8, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
 - `uint8.parse_radix(s: String, radix: Int) -> Result[UInt8, String]` — UInt8 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 255.
+- `uint8.from(x: S) -> UInt8` — x as UInt8, toward zero; NaN, an infinity or a value outside UInt8 aborts.
+- `uint8.from_checked(x: S) -> Option[UInt8]` — some(x as UInt8) when UInt8 holds x exactly, else none (a fraction, NaN, out of range).
+- `uint8.from_saturating(x: S) -> UInt8` — x as UInt8, toward zero, clamped to UInt8's range; NaN is 0.
+- `uint8.from_wrapping(x: S) -> UInt8` — The low 8 bits of integer x as UInt8 (two's complement).
 
 ## url
 

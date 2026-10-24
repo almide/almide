@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (42 functions)
+## Signature index (46 functions)
 
 ```
 // Wraps to 8 bits; 255 becomes -1.
@@ -231,6 +231,22 @@ uint8.to_string_radix(x: UInt8, radix: Int) -> String
 // UInt8 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 255.
 // @since unreleased
 uint8.parse_radix(s: String, radix: Int) -> Result[UInt8, String]
+
+// x as UInt8, toward zero; NaN, an infinity or a value outside UInt8 aborts.
+// @since unreleased
+uint8.from(x: S) -> UInt8
+
+// some(x as UInt8) when UInt8 holds x exactly, else none (a fraction, NaN, out of range).
+// @since unreleased
+uint8.from_checked(x: S) -> Option[UInt8]
+
+// x as UInt8, toward zero, clamped to UInt8's range; NaN is 0.
+// @since unreleased
+uint8.from_saturating(x: S) -> UInt8
+
+// The low 8 bits of integer x as UInt8 (two's complement).
+// @since unreleased
+uint8.from_wrapping(x: S) -> UInt8
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

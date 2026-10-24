@@ -101,6 +101,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_bytes_insert" => &[false, false, false],
         "almide_rt_bytes_is_empty" => &[false],
         "almide_rt_bytes_is_valid_utf8" => &[false],
+        "almide_rt_bytes_join" => &[false, false],
         "almide_rt_bytes_len" => &[false],
         "almide_rt_bytes_lines" => &[false],
         "almide_rt_bytes_map_each" => &[false, false],

@@ -161,3 +161,60 @@ fn parse_radix(s: String, radix: Int) -> Result[UInt8, String] = {
     err(e) => err(e),
   }
 }
+
+// ── The `from` family (R-L0-40): UInt8 from any number. The source is any
+//    `Numeric` type; the body reads the source through the protocol's
+//    conversion pivots (`__int_exact`, `__trunc`, ...), which every numeric
+//    type defines below its own conversions. ──
+/// x as UInt8, toward zero; NaN, an infinity or a value outside UInt8 aborts.
+fn from[S: Numeric](x: S) -> UInt8 = match x.__trunc().__int_exact() {
+  some(n) => int.to_uint8_checked(n) ?? panic("uint8.from: the value is not a number in the range of UInt8"),
+  none => panic("uint8.from: the value is not a number in the range of UInt8"),
+}
+
+/// some(x as UInt8) when UInt8 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> UInt8? = match x.__int_exact() {
+  some(n) => int.to_uint8_checked(n),
+  none => none,
+}
+
+/// x as UInt8, toward zero, clamped to UInt8's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> UInt8 = int.to_uint8_saturating(x.__int_sat())
+
+/// The low 8 bits of integer x as UInt8 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> UInt8 = int.to_uint8(int.wrap(x.__bits64(), 8))
+
+// ── Numeric / Integer requirements: the conversion pivots the `<T>.from`
+//    family reads through a type variable, and the receiver-less sum and
+//    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
+fn __int_exact(x: UInt8) -> Int? = some(int.from_uint8(x))
+
+fn __uint64_exact(x: UInt8) -> UInt64? = int.__uint64_exact(int.from_uint8(x))
+
+fn __trunc(x: UInt8) -> UInt8 = x
+
+fn __int_sat(x: UInt8) -> Int = int.from_uint8(x)
+
+fn __uint64_sat(x: UInt8) -> UInt64 = int.__uint64_sat(int.from_uint8(x))
+
+fn __to_float(x: UInt8) -> Float = int.to_float(int.from_uint8(x))
+
+fn __to_float_exact(x: UInt8) -> Float? = int.__to_float_exact(int.from_uint8(x))
+
+fn __to_float32(x: UInt8) -> Float32 = int.to_float32(int.from_uint8(x))
+
+fn __to_float32_exact(x: UInt8) -> Float32? = int.to_float32_checked(int.from_uint8(x))
+
+fn __decimal_exact(x: UInt8) -> String? = some(int.to_string(int.from_uint8(x)))
+
+fn __bits64(x: UInt8) -> Int = int.from_uint8(x)
+
+fn __sum(xs: List[UInt8]) -> UInt8 = {
+  let zero: UInt8 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[UInt8]) -> UInt8 = {
+  let one: UInt8 = 1
+  list.fold(xs, one, (a, b) => a * b)
+}

@@ -266,7 +266,7 @@ pub const SRC_BIGINT: &str = r#"
 
 
 /// An arbitrary-precision integer.
-type BigInt = { neg: Bool, limbs: List[Int] }
+type BigInt: Numeric, Integer = { neg: Bool, limbs: List[Int] }
 
 
 /// BigInt from trimmed decimal s with an optional + or -; err on junk.
@@ -383,6 +383,23 @@ local fn shr_magnitude(a: BigInt, n: Int) -> BigInt = make(
   shift_right_bits(list.drop(a.limbs, n / 30), n % 30),
 )
 
+
+
+local fn sub(a: BigInt, b: BigInt) -> BigInt = add(a, negate(b))
+
+local fn mul(a: BigInt, b: BigInt) -> BigInt = multiply(a, b)
+
+local fn div(a: BigInt, b: BigInt) -> BigInt = {
+  let (q, _) = divide(a, b)
+  q
+}
+
+local fn rem(a: BigInt, b: BigInt) -> BigInt = {
+  let (_, r) = divide(a, b)
+  r
+}
+
+local fn neg(a: BigInt) -> BigInt = negate(a)
 
 local fn add(a: BigInt, b: BigInt) -> BigInt =
   if a.neg == b.neg then make(a.neg, add_mag(a.limbs, b.limbs))
@@ -625,6 +642,118 @@ local fn chunk_value(chunk: List[Int], radix: Int) -> List[Int] = {
   if v == 0 then []
   else [v]
 }
+
+
+
+
+
+/// x as BigInt, toward zero; NaN or an infinity aborts.
+fn from[S: Numeric](x: S) -> BigInt = match from_checked(x.__trunc()) {
+  some(b) => b,
+  none => panic("bigint.from: the value is not a finite number"),
+}
+
+/// some(x as BigInt) when x is an integer, else none (a fraction, NaN, an infinity).
+fn from_checked[S: Numeric](x: S) -> BigInt? = match x.__int_exact() {
+  some(n) => some(small(n)),
+  none => match x.__decimal_exact() {
+    some(digits) => match parse(digits) {
+      ok(b) => some(b),
+      err(_) => none,
+    },
+    none => none,
+  },
+}
+
+
+
+
+fn __int_exact(x: BigInt) -> Int? =
+  if compare(x, small(int.min_value())) >= 0 and compare(x, small(int.max_value())) <= 0 then some(int_value(x))
+  else none
+
+fn __uint64_exact(x: BigInt) -> UInt64? = if x.neg or bit_length(x) > 64 then none
+else {
+
+  let lo = int_value(make(false, list.take(x.limbs, 2)))
+  let hi = int_value(make(false, list.drop(x.limbs, 2)))
+  some(int.to_uint64(lo) + int.to_uint64(hi) * int.to_uint64(1152921504606846976))
+}
+
+fn __trunc(x: BigInt) -> BigInt = x
+
+fn __int_sat(x: BigInt) -> Int = match __int_exact(x) {
+  some(n) => n,
+  none => if x.neg then int.min_value() else int.max_value(),
+}
+
+fn __uint64_sat(x: BigInt) -> UInt64 = if x.neg then int.to_uint64(0)
+else match __uint64_exact(x) {
+  some(u) => u,
+  none => uint64.max_value(),
+}
+
+fn __to_float(x: BigInt) -> Float = match __int_exact(x) {
+  some(n) => int.to_float(n),
+  none => {
+
+    let (top, e) = top_bits(x, 61)
+    pow2(e) * int.to_float(top)
+  },
+}
+
+fn __to_float_exact(x: BigInt) -> Float? = {
+  let f = __to_float(x)
+  if float.__decimal_exact(f) == some(to_string(x)) then some(f) else none
+}
+
+fn __to_float32(x: BigInt) -> Float32 = match __int_exact(x) {
+  some(n) => int.to_float32(n),
+  none => {
+    let (top, e) = top_bits(x, 61)
+    if e > 200 then float.to_float32(if x.neg then 0.0 - float.infinity() else float.infinity())
+    else float.to_float32(pow2(e) * float.from_float32(int.to_float32(top)))
+  },
+}
+
+fn __to_float32_exact(x: BigInt) -> Float32? = {
+  let f = __to_float32(x)
+  if float.__decimal_exact(float.from_float32(f)) == some(to_string(x)) then some(f) else none
+}
+
+fn __decimal_exact(x: BigInt) -> String? = some(to_string(x))
+
+fn __bits64(x: BigInt) -> Int = {
+  let low = band(x, add(bshl(small(1), 64), small(-1)))
+  if bit_length(low) <= 63 then int_value(low)
+  else int_value(sub(low, bshl(small(1), 64)))
+}
+
+fn __sum(xs: List[BigInt]) -> BigInt = xs |> list.fold(small(0), (a, b) => add(a, b))
+
+fn __product(xs: List[BigInt]) -> BigInt = xs |> list.fold(small(1), (a, b) => multiply(a, b))
+
+
+
+local fn int_value(x: BigInt) -> Int = list.reverse(x.limbs) |> list.fold(
+  0,
+  (acc, l) => if x.neg then acc * 1073741824 - l else acc * 1073741824 + l,
+)
+
+
+
+
+local fn top_bits(x: BigInt, n: Int) -> (Int, Int) = {
+  let mag = abs(x)
+  let shift = bit_length(mag) - n
+  let top = shr_magnitude(mag, shift)
+  let sticky = if compare(bshl(top, shift), mag) == 0 then 0 else 1
+  let t = int_value(top) * 2 + sticky
+  (if x.neg then 0 - t else t, shift - 1)
+}
+
+
+local fn pow2(e: Int) -> Float = if e > 1023 then float.infinity() else float.from_bits(int.bshl(e + 1023, 52))
 "#;
 pub const SRC_BOOL: &str = r#"
 
@@ -1274,6 +1403,11 @@ fn set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit = 
 /// Writes value at offset; no-op out of range.
 @intrinsic("almide_rt_bytes_set_float32")
 fn set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit = _
+
+
+/// The parts with sep between them; empty for [].
+@intrinsic("almide_rt_bytes_join")
+fn __join(xs: List[Bytes], sep: Bytes) -> Bytes = _
 "#;
 pub const SRC_BYTES_APPEND_MULTI: &str = r#"
 
@@ -4601,6 +4735,13 @@ fn unique[A](d: Deque[A]) -> Deque[A] = from_list(list.unique(to_list(d)))
 
 /// The first element per distinct key f(x).
 fn unique_by[A, K](d: Deque[A], f: (A) -> K) -> Deque[A] = from_list(list.unique_by(to_list(d), f))
+
+
+/// Sum of the elements; 0 when empty; integers wrap on overflow.
+fn sum[A: Numeric](d: Deque[A]) -> A = A.__sum(deque.to_list(d))
+
+/// Product of the elements; 1 when empty; integers wrap on overflow.
+fn product[A: Numeric](d: Deque[A]) -> A = A.__product(deque.to_list(d))
 "#;
 pub const SRC_ENV: &str = r#"
 
@@ -5496,6 +5637,78 @@ fn max_value() -> Float = from_bits(9218868437227405311)
 
 /// Most negative finite Float (= -max_value()), not the smallest positive.
 fn min_value() -> Float = from_bits(-4503599627370497)
+
+
+
+
+
+/// x as the nearest Float (ties to even); NaN stays NaN.
+fn from[S: Numeric](x: S) -> Float = x.__to_float()
+
+/// some(x as Float) when Float holds x exactly, else none (a rounded value, NaN).
+fn from_checked[S: Numeric](x: S) -> Float? = x.__to_float_exact()
+
+
+
+
+fn __int_exact(x: Float) -> Int? =
+  if x == float.trunc(x) and x >= -9223372036854775808.0 and x < 9223372036854775808.0 then some(float.to_int(x))
+  else none
+
+fn __uint64_exact(x: Float) -> UInt64? =
+  if x == float.trunc(x) and x >= 0.0 and x < 18446744073709551616.0 then some(float.to_uint64(x))
+  else none
+
+fn __trunc(x: Float) -> Float = float.trunc(x)
+
+fn __int_sat(x: Float) -> Int =
+  if float.is_nan(x) then 0
+  else if x >= 9223372036854775808.0 then int.max_value()
+  else if x <= -9223372036854775808.0 then int.min_value()
+  else float.to_int(x)
+
+fn __uint64_sat(x: Float) -> UInt64 = float.to_uint64_saturating(x)
+
+fn __to_float(x: Float) -> Float = x
+
+fn __to_float_exact(x: Float) -> Float? = if float.is_nan(x) then none else some(x)
+
+fn __to_float32(x: Float) -> Float32 = float.to_float32(x)
+
+fn __to_float32_exact(x: Float) -> Float32? = float.to_float32_checked(x)
+
+fn __decimal_exact(x: Float) -> String? = match float.__int_exact(x) {
+  some(n) => some(int.to_string(n)),
+  none => if float.is_finite(x) and x == float.trunc(x) then some(decimal_of_integral(x)) else none,
+}
+
+fn __sum(xs: List[Float]) -> Float = list.fold(xs, 0.0, (a, b) => a + b)
+
+fn __product(xs: List[Float]) -> Float = list.fold(xs, 1.0, (a, b) => a * b)
+
+
+
+local fn decimal_of_integral(x: Float) -> String = {
+  let bits = float.to_bits(x)
+  let e = int.band(int.bshr(bits, 52), 2047) - 1075
+  let m = int.bor(int.band(bits, 4503599627370495), 4503599627370496)
+  let limbs = double_n([m % 1000000000, m / 1000000000], e)
+  let digits = list.reverse(limbs) |> list.enumerate |> list.map(((i, d)) => if i == 0 then int.to_string(d) else pad9(int.to_string(d)))
+  (if x < 0.0 then "-" else "") + list.fold(digits, "", (a, b) => a + b)
+}
+
+local fn double_n(l: List[Int], n: Int) -> List[Int] = if n <= 0 then l
+else double_n(double_from(l, 0, 0, []), n - 1)
+
+local fn double_from(l: List[Int], i: Int, carry: Int, acc: List[Int]) -> List[Int] =
+  if i >= list.len(l) then (if carry > 0 then acc + [carry]
+  else acc)
+  else {
+    let v = (list.get(l, i) ?? 0) * 2 + carry
+    double_from(l, i + 1, v / 1000000000, acc + [v % 1000000000])
+  }
+
+local fn pad9(s: String) -> String = if string.len(s) >= 9 then s else pad9("0" + s)
 "#;
 pub const SRC_FLOAT32: &str = r#"
 
@@ -5639,6 +5852,49 @@ fn min_value() -> Float32 = from_bits(4286578687)
 fn parse(s: String) -> Result[Float32, String] = match float.parse(s) {
   ok(f) => ok(float.to_float32(f)),
   err(e) => err(e),
+}
+
+
+
+
+
+/// x as the nearest Float32 (ties to even), rounded once; NaN stays NaN.
+fn from[S: Numeric](x: S) -> Float32 = x.__to_float32()
+
+/// some(x as Float32) when Float32 holds x exactly, else none (a rounded value, NaN).
+fn from_checked[S: Numeric](x: S) -> Float32? = x.__to_float32_exact()
+
+
+
+
+fn __int_exact(x: Float32) -> Int? = float.__int_exact(float.from_float32(x))
+
+fn __uint64_exact(x: Float32) -> UInt64? = float.__uint64_exact(float.from_float32(x))
+
+fn __trunc(x: Float32) -> Float32 = float32.trunc(x)
+
+fn __int_sat(x: Float32) -> Int = float.__int_sat(float.from_float32(x))
+
+fn __uint64_sat(x: Float32) -> UInt64 = float.__uint64_sat(float.from_float32(x))
+
+fn __to_float(x: Float32) -> Float = float.from_float32(x)
+
+fn __to_float_exact(x: Float32) -> Float? = float.__to_float_exact(float.from_float32(x))
+
+fn __to_float32(x: Float32) -> Float32 = x
+
+fn __to_float32_exact(x: Float32) -> Float32? = if float32.is_nan(x) then none else some(x)
+
+fn __decimal_exact(x: Float32) -> String? = float.__decimal_exact(float.from_float32(x))
+
+fn __sum(xs: List[Float32]) -> Float32 = {
+  let zero: Float32 = 0.0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[Float32]) -> Float32 = {
+  let one: Float32 = 1.0
+  list.fold(xs, one, (a, b) => a * b)
 }
 "#;
 pub const SRC_FLOAT32_CONVERT: &str = r#"
@@ -5823,6 +6079,46 @@ fn parse(s: String) -> Result[Float64, String] = match float.parse(s) {
   ok(f) => ok(float.to_float64(f)),
   err(e) => err(e),
 }
+
+
+
+
+
+/// x as the nearest Float64 (ties to even); NaN stays NaN.
+fn from[S: Numeric](x: S) -> Float64 = float.to_float64(x.__to_float())
+
+/// some(x as Float64) when Float64 holds x exactly, else none (a rounded value, NaN).
+fn from_checked[S: Numeric](x: S) -> Float64? = match x.__to_float_exact() {
+  some(f) => some(float.to_float64(f)),
+  none => none,
+}
+
+
+
+
+fn __int_exact(x: Float64) -> Int? = float.__int_exact(float.from_float64(x))
+
+fn __uint64_exact(x: Float64) -> UInt64? = float.__uint64_exact(float.from_float64(x))
+
+fn __trunc(x: Float64) -> Float64 = float64.trunc(x)
+
+fn __int_sat(x: Float64) -> Int = float.__int_sat(float.from_float64(x))
+
+fn __uint64_sat(x: Float64) -> UInt64 = float.__uint64_sat(float.from_float64(x))
+
+fn __to_float(x: Float64) -> Float = float.from_float64(x)
+
+fn __to_float_exact(x: Float64) -> Float? = float.__to_float_exact(float.from_float64(x))
+
+fn __to_float32(x: Float64) -> Float32 = float64.to_float32(x)
+
+fn __to_float32_exact(x: Float64) -> Float32? = float.to_float32_checked(float.from_float64(x))
+
+fn __decimal_exact(x: Float64) -> String? = float.__decimal_exact(float.from_float64(x))
+
+fn __sum(xs: List[Float64]) -> Float64 = float.to_float64(list.fold(xs, 0.0, (a, b) => a + float.from_float64(b)))
+
+fn __product(xs: List[Float64]) -> Float64 = float.to_float64(list.fold(xs, 1.0, (a, b) => a * float.from_float64(b)))
 "#;
 pub const SRC_FLOAT64_CONVERT: &str = r#"
 
@@ -11580,6 +11876,54 @@ local fn accumulate_digits(digits: List[Int], radix: Int, acc: Int, negative: Bo
     else accumulate_digits(rest, radix, acc * radix - d, negative)
   },
 }
+
+
+
+
+
+/// x as Int, toward zero; NaN, an infinity or a value outside Int aborts.
+fn from[S: Numeric](x: S) -> Int = x.__trunc().__int_exact() ?? panic("int.from: the value is not a number in the range of Int")
+
+/// some(x as Int) when Int holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int? = x.__int_exact()
+
+/// x as Int, toward zero, clamped to Int's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int = x.__int_sat()
+
+/// The low 64 bits of integer x as Int (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int = x.__bits64()
+
+
+
+
+fn __int_exact(x: Int) -> Int? = some(x)
+
+fn __uint64_exact(x: Int) -> UInt64? = int.to_uint64_checked(x)
+
+fn __trunc(x: Int) -> Int = x
+
+fn __int_sat(x: Int) -> Int = x
+
+fn __uint64_sat(x: Int) -> UInt64 = int.to_uint64_saturating(x)
+
+fn __to_float(x: Int) -> Float = int.to_float(x)
+
+fn __to_float_exact(x: Int) -> Float? = {
+  let f = int.to_float(x)
+  if f < 9223372036854775808.0 and float.to_int(f) == x then some(f) else none
+}
+
+fn __to_float32(x: Int) -> Float32 = int.to_float32(x)
+
+fn __to_float32_exact(x: Int) -> Float32? = int.to_float32_checked(x)
+
+fn __decimal_exact(x: Int) -> String? = some(int.to_string(x))
+
+fn __bits64(x: Int) -> Int = x
+
+fn __sum(xs: List[Int]) -> Int = list.__sum_int(xs)
+
+fn __product(xs: List[Int]) -> Int = list.__product_int(xs)
 "#;
 pub const SRC_INT16: &str = r#"
 
@@ -11785,6 +12129,66 @@ fn parse_radix(s: String, radix: Int) -> Result[Int16, String] = match int.parse
   else if n > 32767 then err("number too large to fit in target type")
   else ok(int.to_int16(n)),
   err(e) => err(e),
+}
+
+
+
+
+
+/// x as Int16, toward zero; NaN, an infinity or a value outside Int16 aborts.
+fn from[S: Numeric](x: S) -> Int16 = match x.__trunc().__int_exact() {
+  some(n) => int.to_int16_checked(n) ?? panic("int16.from: the value is not a number in the range of Int16"),
+  none => panic("int16.from: the value is not a number in the range of Int16"),
+}
+
+/// some(x as Int16) when Int16 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int16? = match x.__int_exact() {
+  some(n) => int.to_int16_checked(n),
+  none => none,
+}
+
+/// x as Int16, toward zero, clamped to Int16's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int16 = int.to_int16_saturating(x.__int_sat())
+
+/// The low 16 bits of integer x as Int16 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int16 = {
+  let u = int.wrap(x.__bits64(), 16)
+  int.to_int16(if u >= 32768 then u - 65536 else u)
+}
+
+
+
+
+fn __int_exact(x: Int16) -> Int? = some(int.from_int16(x))
+
+fn __uint64_exact(x: Int16) -> UInt64? = int.__uint64_exact(int.from_int16(x))
+
+fn __trunc(x: Int16) -> Int16 = x
+
+fn __int_sat(x: Int16) -> Int = int.from_int16(x)
+
+fn __uint64_sat(x: Int16) -> UInt64 = int.__uint64_sat(int.from_int16(x))
+
+fn __to_float(x: Int16) -> Float = int.to_float(int.from_int16(x))
+
+fn __to_float_exact(x: Int16) -> Float? = int.__to_float_exact(int.from_int16(x))
+
+fn __to_float32(x: Int16) -> Float32 = int.to_float32(int.from_int16(x))
+
+fn __to_float32_exact(x: Int16) -> Float32? = int.to_float32_checked(int.from_int16(x))
+
+fn __decimal_exact(x: Int16) -> String? = some(int.to_string(int.from_int16(x)))
+
+fn __bits64(x: Int16) -> Int = int.from_int16(x)
+
+fn __sum(xs: List[Int16]) -> Int16 = {
+  let zero: Int16 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[Int16]) -> Int16 = {
+  let one: Int16 = 1
+  list.fold(xs, one, (a, b) => a * b)
 }
 "#;
 pub const SRC_INT16_CONVERT: &str = r#"
@@ -12101,6 +12505,66 @@ fn parse_radix(s: String, radix: Int) -> Result[Int32, String] = match int.parse
   else if n > 2147483647 then err("number too large to fit in target type")
   else ok(int.to_int32(n)),
   err(e) => err(e),
+}
+
+
+
+
+
+/// x as Int32, toward zero; NaN, an infinity or a value outside Int32 aborts.
+fn from[S: Numeric](x: S) -> Int32 = match x.__trunc().__int_exact() {
+  some(n) => int.to_int32_checked(n) ?? panic("int32.from: the value is not a number in the range of Int32"),
+  none => panic("int32.from: the value is not a number in the range of Int32"),
+}
+
+/// some(x as Int32) when Int32 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int32? = match x.__int_exact() {
+  some(n) => int.to_int32_checked(n),
+  none => none,
+}
+
+/// x as Int32, toward zero, clamped to Int32's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int32 = int.to_int32_saturating(x.__int_sat())
+
+/// The low 32 bits of integer x as Int32 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int32 = {
+  let u = int.wrap(x.__bits64(), 32)
+  int.to_int32(if u >= 2147483648 then u - 4294967296 else u)
+}
+
+
+
+
+fn __int_exact(x: Int32) -> Int? = some(int.from_int32(x))
+
+fn __uint64_exact(x: Int32) -> UInt64? = int.__uint64_exact(int.from_int32(x))
+
+fn __trunc(x: Int32) -> Int32 = x
+
+fn __int_sat(x: Int32) -> Int = int.from_int32(x)
+
+fn __uint64_sat(x: Int32) -> UInt64 = int.__uint64_sat(int.from_int32(x))
+
+fn __to_float(x: Int32) -> Float = int.to_float(int.from_int32(x))
+
+fn __to_float_exact(x: Int32) -> Float? = int.__to_float_exact(int.from_int32(x))
+
+fn __to_float32(x: Int32) -> Float32 = int.to_float32(int.from_int32(x))
+
+fn __to_float32_exact(x: Int32) -> Float32? = int.to_float32_checked(int.from_int32(x))
+
+fn __decimal_exact(x: Int32) -> String? = some(int.to_string(int.from_int32(x)))
+
+fn __bits64(x: Int32) -> Int = int.from_int32(x)
+
+fn __sum(xs: List[Int32]) -> Int32 = {
+  let zero: Int32 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[Int32]) -> Int32 = {
+  let one: Int32 = 1
+  list.fold(xs, one, (a, b) => a * b)
 }
 "#;
 pub const SRC_INT32_CONVERT: &str = r#"
@@ -12435,6 +12899,57 @@ fn parse_radix(s: String, radix: Int) -> Result[Int64, String] = match int.parse
   ok(n) => ok(int.to_int64(n)),
   err(e) => err(e),
 }
+
+
+
+
+
+/// x as Int64, toward zero; NaN, an infinity or a value outside Int64 aborts.
+fn from[S: Numeric](x: S) -> Int64 = match x.__trunc().__int_exact() {
+  some(n) => int.to_int64(n),
+  none => panic("int64.from: the value is not a number in the range of Int64"),
+}
+
+/// some(x as Int64) when Int64 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int64? = match x.__int_exact() {
+  some(n) => some(int.to_int64(n)),
+  none => none,
+}
+
+/// x as Int64, toward zero, clamped to Int64's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int64 = int.to_int64(x.__int_sat())
+
+/// The low 64 bits of integer x as Int64 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int64 = int.to_int64(x.__bits64())
+
+
+
+
+fn __int_exact(x: Int64) -> Int? = some(int.from_int64(x))
+
+fn __uint64_exact(x: Int64) -> UInt64? = int.__uint64_exact(int.from_int64(x))
+
+fn __trunc(x: Int64) -> Int64 = x
+
+fn __int_sat(x: Int64) -> Int = int.from_int64(x)
+
+fn __uint64_sat(x: Int64) -> UInt64 = int.__uint64_sat(int.from_int64(x))
+
+fn __to_float(x: Int64) -> Float = int.to_float(int.from_int64(x))
+
+fn __to_float_exact(x: Int64) -> Float? = int.__to_float_exact(int.from_int64(x))
+
+fn __to_float32(x: Int64) -> Float32 = int.to_float32(int.from_int64(x))
+
+fn __to_float32_exact(x: Int64) -> Float32? = int.to_float32_checked(int.from_int64(x))
+
+fn __decimal_exact(x: Int64) -> String? = some(int.to_string(int.from_int64(x)))
+
+fn __bits64(x: Int64) -> Int = int.from_int64(x)
+
+fn __sum(xs: List[Int64]) -> Int64 = int.to_int64(list.fold(xs, 0, (a, b) => a + int.from_int64(b)))
+
+fn __product(xs: List[Int64]) -> Int64 = int.to_int64(list.fold(xs, 1, (a, b) => a * int.from_int64(b)))
 "#;
 pub const SRC_INT64_CONVERT: &str = r#"
 
@@ -12767,6 +13282,66 @@ fn parse_radix(s: String, radix: Int) -> Result[Int8, String] = match int.parse_
   else if n > 127 then err("number too large to fit in target type")
   else ok(int.to_int8(n)),
   err(e) => err(e),
+}
+
+
+
+
+
+/// x as Int8, toward zero; NaN, an infinity or a value outside Int8 aborts.
+fn from[S: Numeric](x: S) -> Int8 = match x.__trunc().__int_exact() {
+  some(n) => int.to_int8_checked(n) ?? panic("int8.from: the value is not a number in the range of Int8"),
+  none => panic("int8.from: the value is not a number in the range of Int8"),
+}
+
+/// some(x as Int8) when Int8 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int8? = match x.__int_exact() {
+  some(n) => int.to_int8_checked(n),
+  none => none,
+}
+
+/// x as Int8, toward zero, clamped to Int8's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int8 = int.to_int8_saturating(x.__int_sat())
+
+/// The low 8 bits of integer x as Int8 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int8 = {
+  let u = int.wrap(x.__bits64(), 8)
+  int.to_int8(if u >= 128 then u - 256 else u)
+}
+
+
+
+
+fn __int_exact(x: Int8) -> Int? = some(int.from_int8(x))
+
+fn __uint64_exact(x: Int8) -> UInt64? = int.__uint64_exact(int.from_int8(x))
+
+fn __trunc(x: Int8) -> Int8 = x
+
+fn __int_sat(x: Int8) -> Int = int.from_int8(x)
+
+fn __uint64_sat(x: Int8) -> UInt64 = int.__uint64_sat(int.from_int8(x))
+
+fn __to_float(x: Int8) -> Float = int.to_float(int.from_int8(x))
+
+fn __to_float_exact(x: Int8) -> Float? = int.__to_float_exact(int.from_int8(x))
+
+fn __to_float32(x: Int8) -> Float32 = int.to_float32(int.from_int8(x))
+
+fn __to_float32_exact(x: Int8) -> Float32? = int.to_float32_checked(int.from_int8(x))
+
+fn __decimal_exact(x: Int8) -> String? = some(int.to_string(int.from_int8(x)))
+
+fn __bits64(x: Int8) -> Int = int.from_int8(x)
+
+fn __sum(xs: List[Int8]) -> Int8 = {
+  let zero: Int8 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[Int8]) -> Int8 = {
+  let one: Int8 = 1
+  list.fold(xs, one, (a, b) => a * b)
 }
 "#;
 pub const SRC_INT8_CONVERT: &str = r#"
@@ -14539,13 +15114,18 @@ fn last[A](xs: List[A]) -> A? = _
 @intrinsic("almide_rt_list_chunk")
 fn chunk[A](xs: List[A], n: Int) -> List[List[A]] = _
 
-/// Sum; 0 when empty; wraps on overflow.
-@intrinsic("almide_rt_list_sum")
-fn sum(xs: List[Int]) -> Int = _
+/// Sum of any numbers (R-L0-42); 0 when empty; integers wrap on overflow.
+fn sum[A: Numeric](xs: List[A]) -> A = A.__sum(xs)
 
-/// Product; 1 when empty; wraps on overflow.
+/// Product of any numbers (R-L0-42); 1 when empty; integers wrap on overflow.
+fn product[A: Numeric](xs: List[A]) -> A = A.__product(xs)
+
+
+@intrinsic("almide_rt_list_sum")
+fn __sum_int(xs: List[Int]) -> Int = _
+
 @intrinsic("almide_rt_list_product")
-fn product(xs: List[Int]) -> Int = _
+fn __product_int(xs: List[Int]) -> Int = _
 
 /// Head element, or none when empty.
 @intrinsic("almide_rt_list_first")
@@ -14563,9 +15143,12 @@ fn min[A](xs: List[A]) -> A? = _
 @intrinsic("almide_rt_list_max")
 fn max[A](xs: List[A]) -> A? = _
 
-/// Strings joined by sep; empty string for [].
+/// The parts joined by sep (R-L0-42): Strings or Bytes; empty for [].
+fn join[T: Text](xs: List[T], sep: T) -> T = T.__join(xs, sep)
+
+
 @intrinsic("almide_rt_list_join")
-fn join(xs: List[String], sep: String) -> String = _
+fn __join_string(xs: List[String], sep: String) -> String = _
 
 
 
@@ -29135,6 +29718,18 @@ fn option_to_string_b(o: Bool?) -> String = match o {
 
 @implements("bool.to_string")
 fn __bool_to_string(b: Bool) -> String = if b then "true" else "false"
+
+
+
+
+
+
+
+@implements("bytes.__join")
+fn bytes_join(xs: List[Bytes], sep: Bytes) -> Bytes = match xs {
+  [] => bytes.new(0),
+  [first, ..rest] => rest |> list.fold(first, (acc, b) => bytes.concat(bytes.concat(acc, sep), b)),
+}
 "#;
 pub const SRC_OPTION_TO_STRING_F: &str = r#"
 
@@ -34568,6 +35163,13 @@ fn __fallible_max_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Result
   set.to_list(s),
   (a, b) => cmp(a, b)!,
 )
+
+
+/// Sum of the elements; 0 when empty; integers wrap on overflow.
+fn sum[A: Numeric](s: Set[A]) -> A = A.__sum(set.to_list(s))
+
+/// Product of the elements; 1 when empty; integers wrap on overflow.
+fn product[A: Numeric](s: Set[A]) -> A = A.__product(set.to_list(s))
 "#;
 pub const SRC_SET_CORE: &str = r#"
 
@@ -36174,6 +36776,9 @@ fn unique_by[K](s: String, f: (String) -> K) -> String = string.join(
   list.unique_by(string.chars(s), f),
   "",
 )
+
+
+fn __join(xs: List[String], sep: String) -> String = list.__join_string(xs, sep)
 "#;
 pub const SRC_STRING_BYTE_SLICE: &str = r#"
 fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
@@ -39043,6 +39648,63 @@ fn parse_radix(s: String, radix: Int) -> Result[UInt16, String] = {
     err(e) => err(e),
   }
 }
+
+
+
+
+
+/// x as UInt16, toward zero; NaN, an infinity or a value outside UInt16 aborts.
+fn from[S: Numeric](x: S) -> UInt16 = match x.__trunc().__int_exact() {
+  some(n) => int.to_uint16_checked(n) ?? panic("uint16.from: the value is not a number in the range of UInt16"),
+  none => panic("uint16.from: the value is not a number in the range of UInt16"),
+}
+
+/// some(x as UInt16) when UInt16 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> UInt16? = match x.__int_exact() {
+  some(n) => int.to_uint16_checked(n),
+  none => none,
+}
+
+/// x as UInt16, toward zero, clamped to UInt16's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> UInt16 = int.to_uint16_saturating(x.__int_sat())
+
+/// The low 16 bits of integer x as UInt16 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> UInt16 = int.to_uint16(int.wrap(x.__bits64(), 16))
+
+
+
+
+fn __int_exact(x: UInt16) -> Int? = some(int.from_uint16(x))
+
+fn __uint64_exact(x: UInt16) -> UInt64? = int.__uint64_exact(int.from_uint16(x))
+
+fn __trunc(x: UInt16) -> UInt16 = x
+
+fn __int_sat(x: UInt16) -> Int = int.from_uint16(x)
+
+fn __uint64_sat(x: UInt16) -> UInt64 = int.__uint64_sat(int.from_uint16(x))
+
+fn __to_float(x: UInt16) -> Float = int.to_float(int.from_uint16(x))
+
+fn __to_float_exact(x: UInt16) -> Float? = int.__to_float_exact(int.from_uint16(x))
+
+fn __to_float32(x: UInt16) -> Float32 = int.to_float32(int.from_uint16(x))
+
+fn __to_float32_exact(x: UInt16) -> Float32? = int.to_float32_checked(int.from_uint16(x))
+
+fn __decimal_exact(x: UInt16) -> String? = some(int.to_string(int.from_uint16(x)))
+
+fn __bits64(x: UInt16) -> Int = int.from_uint16(x)
+
+fn __sum(xs: List[UInt16]) -> UInt16 = {
+  let zero: UInt16 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[UInt16]) -> UInt16 = {
+  let one: UInt16 = 1
+  list.fold(xs, one, (a, b) => a * b)
+}
 "#;
 pub const SRC_UINT16_CONVERT: &str = r#"
 
@@ -39317,6 +39979,63 @@ fn parse_radix(s: String, radix: Int) -> Result[UInt32, String] = {
     ok(n) => if n > 4294967295 then err("number too large to fit in target type") else ok(int.to_uint32(n)),
     err(e) => err(e),
   }
+}
+
+
+
+
+
+/// x as UInt32, toward zero; NaN, an infinity or a value outside UInt32 aborts.
+fn from[S: Numeric](x: S) -> UInt32 = match x.__trunc().__int_exact() {
+  some(n) => int.to_uint32_checked(n) ?? panic("uint32.from: the value is not a number in the range of UInt32"),
+  none => panic("uint32.from: the value is not a number in the range of UInt32"),
+}
+
+/// some(x as UInt32) when UInt32 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> UInt32? = match x.__int_exact() {
+  some(n) => int.to_uint32_checked(n),
+  none => none,
+}
+
+/// x as UInt32, toward zero, clamped to UInt32's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> UInt32 = int.to_uint32_saturating(x.__int_sat())
+
+/// The low 32 bits of integer x as UInt32 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> UInt32 = int.to_uint32(int.wrap(x.__bits64(), 32))
+
+
+
+
+fn __int_exact(x: UInt32) -> Int? = some(int.from_uint32(x))
+
+fn __uint64_exact(x: UInt32) -> UInt64? = int.__uint64_exact(int.from_uint32(x))
+
+fn __trunc(x: UInt32) -> UInt32 = x
+
+fn __int_sat(x: UInt32) -> Int = int.from_uint32(x)
+
+fn __uint64_sat(x: UInt32) -> UInt64 = int.__uint64_sat(int.from_uint32(x))
+
+fn __to_float(x: UInt32) -> Float = int.to_float(int.from_uint32(x))
+
+fn __to_float_exact(x: UInt32) -> Float? = int.__to_float_exact(int.from_uint32(x))
+
+fn __to_float32(x: UInt32) -> Float32 = int.to_float32(int.from_uint32(x))
+
+fn __to_float32_exact(x: UInt32) -> Float32? = int.to_float32_checked(int.from_uint32(x))
+
+fn __decimal_exact(x: UInt32) -> String? = some(int.to_string(int.from_uint32(x)))
+
+fn __bits64(x: UInt32) -> Int = int.from_uint32(x)
+
+fn __sum(xs: List[UInt32]) -> UInt32 = {
+  let zero: UInt32 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[UInt32]) -> UInt32 = {
+  let one: UInt32 = 1
+  list.fold(xs, one, (a, b) => a * b)
 }
 "#;
 pub const SRC_UINT32_CONVERT: &str = r#"
@@ -39706,6 +40425,67 @@ local fn parse_radix_upper(t: String, radix: Int) -> Result[UInt64, String]? = {
     _ => none,
   }
 }
+
+
+
+
+
+/// x as UInt64, toward zero; NaN, an infinity or a value outside UInt64 aborts.
+fn from[S: Numeric](x: S) -> UInt64 = x.__trunc().__uint64_exact() ?? panic("uint64.from: the value is not a number in the range of UInt64")
+
+/// some(x as UInt64) when UInt64 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> UInt64? = x.__uint64_exact()
+
+/// x as UInt64, toward zero, clamped to UInt64's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> UInt64 = x.__uint64_sat()
+
+/// The low 64 bits of integer x as UInt64 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> UInt64 = {
+  let b = x.__bits64()
+  if b >= 0 then int.to_uint64(b)
+  else int.to_uint64(int.band(b, 9223372036854775807)) + int.to_uint64(4611686018427387904) * int.to_uint64(2)
+}
+
+
+
+
+fn __int_exact(x: UInt64) -> Int? = int.from_uint64_checked(x)
+
+fn __uint64_exact(x: UInt64) -> UInt64? = some(x)
+
+fn __trunc(x: UInt64) -> UInt64 = x
+
+fn __int_sat(x: UInt64) -> Int = int.from_uint64_saturating(x)
+
+fn __uint64_sat(x: UInt64) -> UInt64 = x
+
+fn __to_float(x: UInt64) -> Float = float.from_float64(uint64.to_float64(x))
+
+fn __to_float_exact(x: UInt64) -> Float? = {
+  let f = uint64.__to_float(x)
+  if float.__uint64_exact(f) == some(x) then some(f) else none
+}
+
+fn __to_float32(x: UInt64) -> Float32 = uint64.to_float32(x)
+
+fn __to_float32_exact(x: UInt64) -> Float32? = {
+  let f = uint64.to_float32(x)
+  if float.__uint64_exact(float.from_float32(f)) == some(x) then some(f) else none
+}
+
+fn __decimal_exact(x: UInt64) -> String? = some(uint64.to_string(x))
+
+fn __bits64(x: UInt64) -> Int = int.from_uint64(x)
+
+fn __sum(xs: List[UInt64]) -> UInt64 = {
+  let zero: UInt64 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[UInt64]) -> UInt64 = {
+  let one: UInt64 = 1
+  list.fold(xs, one, (a, b) => a * b)
+}
 "#;
 pub const SRC_UINT64_CONVERT: &str = r#"
 
@@ -40034,6 +40814,63 @@ fn parse_radix(s: String, radix: Int) -> Result[UInt8, String] = {
     ok(n) => if n > 255 then err("number too large to fit in target type") else ok(int.to_uint8(n)),
     err(e) => err(e),
   }
+}
+
+
+
+
+
+/// x as UInt8, toward zero; NaN, an infinity or a value outside UInt8 aborts.
+fn from[S: Numeric](x: S) -> UInt8 = match x.__trunc().__int_exact() {
+  some(n) => int.to_uint8_checked(n) ?? panic("uint8.from: the value is not a number in the range of UInt8"),
+  none => panic("uint8.from: the value is not a number in the range of UInt8"),
+}
+
+/// some(x as UInt8) when UInt8 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> UInt8? = match x.__int_exact() {
+  some(n) => int.to_uint8_checked(n),
+  none => none,
+}
+
+/// x as UInt8, toward zero, clamped to UInt8's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> UInt8 = int.to_uint8_saturating(x.__int_sat())
+
+/// The low 8 bits of integer x as UInt8 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> UInt8 = int.to_uint8(int.wrap(x.__bits64(), 8))
+
+
+
+
+fn __int_exact(x: UInt8) -> Int? = some(int.from_uint8(x))
+
+fn __uint64_exact(x: UInt8) -> UInt64? = int.__uint64_exact(int.from_uint8(x))
+
+fn __trunc(x: UInt8) -> UInt8 = x
+
+fn __int_sat(x: UInt8) -> Int = int.from_uint8(x)
+
+fn __uint64_sat(x: UInt8) -> UInt64 = int.__uint64_sat(int.from_uint8(x))
+
+fn __to_float(x: UInt8) -> Float = int.to_float(int.from_uint8(x))
+
+fn __to_float_exact(x: UInt8) -> Float? = int.__to_float_exact(int.from_uint8(x))
+
+fn __to_float32(x: UInt8) -> Float32 = int.to_float32(int.from_uint8(x))
+
+fn __to_float32_exact(x: UInt8) -> Float32? = int.to_float32_checked(int.from_uint8(x))
+
+fn __decimal_exact(x: UInt8) -> String? = some(int.to_string(int.from_uint8(x)))
+
+fn __bits64(x: UInt8) -> Int = int.from_uint8(x)
+
+fn __sum(xs: List[UInt8]) -> UInt8 = {
+  let zero: UInt8 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[UInt8]) -> UInt8 = {
+  let one: UInt8 = 1
+  list.fold(xs, one, (a, b) => a * b)
 }
 "#;
 pub const SRC_UINT8_CONVERT: &str = r#"

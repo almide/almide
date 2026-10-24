@@ -203,3 +203,63 @@ fn parse_radix(s: String, radix: Int) -> Result[Int16, String] = match int.parse
   else ok(int.to_int16(n)),
   err(e) => err(e),
 }
+
+// ── The `from` family (R-L0-40): Int16 from any number. The source is any
+//    `Numeric` type; the body reads the source through the protocol's
+//    conversion pivots (`__int_exact`, `__trunc`, ...), which every numeric
+//    type defines below its own conversions. ──
+/// x as Int16, toward zero; NaN, an infinity or a value outside Int16 aborts.
+fn from[S: Numeric](x: S) -> Int16 = match x.__trunc().__int_exact() {
+  some(n) => int.to_int16_checked(n) ?? panic("int16.from: the value is not a number in the range of Int16"),
+  none => panic("int16.from: the value is not a number in the range of Int16"),
+}
+
+/// some(x as Int16) when Int16 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int16? = match x.__int_exact() {
+  some(n) => int.to_int16_checked(n),
+  none => none,
+}
+
+/// x as Int16, toward zero, clamped to Int16's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int16 = int.to_int16_saturating(x.__int_sat())
+
+/// The low 16 bits of integer x as Int16 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int16 = {
+  let u = int.wrap(x.__bits64(), 16)
+  int.to_int16(if u >= 32768 then u - 65536 else u)
+}
+
+// ── Numeric / Integer requirements: the conversion pivots the `<T>.from`
+//    family reads through a type variable, and the receiver-less sum and
+//    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
+fn __int_exact(x: Int16) -> Int? = some(int.from_int16(x))
+
+fn __uint64_exact(x: Int16) -> UInt64? = int.__uint64_exact(int.from_int16(x))
+
+fn __trunc(x: Int16) -> Int16 = x
+
+fn __int_sat(x: Int16) -> Int = int.from_int16(x)
+
+fn __uint64_sat(x: Int16) -> UInt64 = int.__uint64_sat(int.from_int16(x))
+
+fn __to_float(x: Int16) -> Float = int.to_float(int.from_int16(x))
+
+fn __to_float_exact(x: Int16) -> Float? = int.__to_float_exact(int.from_int16(x))
+
+fn __to_float32(x: Int16) -> Float32 = int.to_float32(int.from_int16(x))
+
+fn __to_float32_exact(x: Int16) -> Float32? = int.to_float32_checked(int.from_int16(x))
+
+fn __decimal_exact(x: Int16) -> String? = some(int.to_string(int.from_int16(x)))
+
+fn __bits64(x: Int16) -> Int = int.from_int16(x)
+
+fn __sum(xs: List[Int16]) -> Int16 = {
+  let zero: Int16 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[Int16]) -> Int16 = {
+  let one: Int16 = 1
+  list.fold(xs, one, (a, b) => a * b)
+}

@@ -236,7 +236,7 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (57 functions)
+## Signature index (59 functions)
 
 ```
 // Shortest round-trip digits, no exponent; 2.0 keeps .0.
@@ -466,6 +466,14 @@ float.max_value() -> Float
 // Most negative finite Float (= -max_value()), not the smallest positive.
 // @since unreleased
 float.min_value() -> Float
+
+// x as the nearest Float (ties to even); NaN stays NaN.
+// @since unreleased
+float.from(x: S) -> Float
+
+// some(x as Float) when Float holds x exactly, else none (a rounded value, NaN).
+// @since unreleased
+float.from_checked(x: S) -> Option[Float]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

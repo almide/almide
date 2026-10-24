@@ -1,7 +1,7 @@
 // The bigint module (R-bigint-01/05/07): text in any radix, the Integer order and division
 // functions, and the two's-complement bitwise functions, against values far past Int.
-// Arithmetic operators on BigInt wait on the language (R-bigint-04), so the values are
-// built with parse and pow.
+// The values are built with parse and pow; the operators (R-bigint-04) are
+// spec/stdlib/bigint_operators_test.almd.
 import bigint
 import testing
 

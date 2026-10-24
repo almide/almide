@@ -26,3 +26,11 @@ test "float.compare unit=value" {
 test "float.from_bits unit=bit-pattern" {
   assert_eq("${float.to_string(float.from_bits(4607182418800017408))}", "1.0")
 }
+
+test "float.__int_exact unit=value" {
+  assert_eq("${float.__int_exact(-3.0)}", "some(-3)")
+}
+
+test "float.__int_sat unit=value" {
+  assert_eq("${float.__int_sat(1e30)}", "9223372036854775807")
+}

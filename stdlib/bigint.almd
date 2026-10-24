@@ -6,14 +6,14 @@
 // BigInts compares values. A limb product is below 2^60, which leaves Int room
 // for the carry, so every step is exact Int arithmetic on both targets.
 //
-// The spellings are int's (R-bigint-01 rule 1). The arithmetic operators and the
-// conversions from the other number types are not here yet: `+ - * / %` on
-// BigInt desugar to the internal add/sub/mul/div/rem (R-bigint-04) and `bigint.from`
-// takes any Numeric (R-L0-40), and both wait on the language (README, 想定設計).
-// Bitwise functions treat a negative value as two's complement with an endless
-// run of 1 bits above it (R-bigint-07), as Python's int does.
+// The spellings are int's (R-bigint-01 rule 1). BigInt is Numeric and Integer:
+// `+ - * / %` and unary `-` desugar to the module's internal add/sub/mul/div/rem/neg
+// and `< <= > >=` to compare (R-bigint-04), `bigint.from` takes any number
+// (R-L0-40), and `list.sum` adds BigInts. Bitwise functions treat a negative
+// value as two's complement with an endless run of 1 bits above it (R-bigint-07),
+// as Python's int does.
 /// An arbitrary-precision integer.
-type BigInt = { neg: Bool, limbs: List[Int] }
+type BigInt: Numeric, Integer = { neg: Bool, limbs: List[Int] }
 
 // ── text (R-bigint-01) ──
 /// BigInt from trimmed decimal s with an optional + or -; err on junk.
@@ -130,7 +130,24 @@ local fn shr_magnitude(a: BigInt, n: Int) -> BigInt = make(
   shift_right_bits(list.drop(a.limbs, n / 30), n % 30),
 )
 
-// ── the internal arithmetic the operators will desugar to (R-bigint-04) ──
+// ── the internal arithmetic the operators desugar to (R-bigint-04): Numeric's
+//    operator requirements, module functions that are not public ──
+local fn sub(a: BigInt, b: BigInt) -> BigInt = add(a, negate(b))
+
+local fn mul(a: BigInt, b: BigInt) -> BigInt = multiply(a, b)
+
+local fn div(a: BigInt, b: BigInt) -> BigInt = {
+  let (q, _) = divide(a, b)
+  q
+}
+
+local fn rem(a: BigInt, b: BigInt) -> BigInt = {
+  let (_, r) = divide(a, b)
+  r
+}
+
+local fn neg(a: BigInt) -> BigInt = negate(a)
+
 local fn add(a: BigInt, b: BigInt) -> BigInt =
   if a.neg == b.neg then make(a.neg, add_mag(a.limbs, b.limbs))
   else if compare_mag(a.limbs, b.limbs) >= 0 then make(a.neg, sub_mag(a.limbs, b.limbs))
@@ -372,3 +389,115 @@ local fn chunk_value(chunk: List[Int], radix: Int) -> List[Int] = {
   if v == 0 then []
   else [v]
 }
+
+// ── The `from` family (R-L0-40): BigInt from any number. The source is any
+//    `Numeric` type; the body reads the source through the protocol's
+//    conversion pivots (`__int_exact`, `__trunc`, ...), which every numeric
+//    type defines below its own conversions. ──
+/// x as BigInt, toward zero; NaN or an infinity aborts.
+fn from[S: Numeric](x: S) -> BigInt = match from_checked(x.__trunc()) {
+  some(b) => b,
+  none => panic("bigint.from: the value is not a finite number"),
+}
+
+/// some(x as BigInt) when x is an integer, else none (a fraction, NaN, an infinity).
+fn from_checked[S: Numeric](x: S) -> BigInt? = match x.__int_exact() {
+  some(n) => some(small(n)),
+  none => match x.__decimal_exact() {
+    some(digits) => match parse(digits) {
+      ok(b) => some(b),
+      err(_) => none,
+    },
+    none => none,
+  },
+}
+
+// ── Numeric / Integer requirements: the conversion pivots the `<T>.from`
+//    family reads through a type variable, and the receiver-less sum and
+//    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
+fn __int_exact(x: BigInt) -> Int? =
+  if compare(x, small(int.min_value())) >= 0 and compare(x, small(int.max_value())) <= 0 then some(int_value(x))
+  else none
+
+fn __uint64_exact(x: BigInt) -> UInt64? = if x.neg or bit_length(x) > 64 then none
+else {
+  // x = hi * 2^60 + lo, hi < 16
+  let lo = int_value(make(false, list.take(x.limbs, 2)))
+  let hi = int_value(make(false, list.drop(x.limbs, 2)))
+  some(int.to_uint64(lo) + int.to_uint64(hi) * int.to_uint64(1152921504606846976))
+}
+
+fn __trunc(x: BigInt) -> BigInt = x
+
+fn __int_sat(x: BigInt) -> Int = match __int_exact(x) {
+  some(n) => n,
+  none => if x.neg then int.min_value() else int.max_value(),
+}
+
+fn __uint64_sat(x: BigInt) -> UInt64 = if x.neg then int.to_uint64(0)
+else match __uint64_exact(x) {
+  some(u) => u,
+  none => uint64.max_value(),
+}
+
+fn __to_float(x: BigInt) -> Float = match __int_exact(x) {
+  some(n) => int.to_float(n),
+  none => {
+    // the top 61 bits with a sticky bit below them round like the whole value
+    let (top, e) = top_bits(x, 61)
+    pow2(e) * int.to_float(top)
+  },
+}
+
+fn __to_float_exact(x: BigInt) -> Float? = {
+  let f = __to_float(x)
+  if float.__decimal_exact(f) == some(to_string(x)) then some(f) else none
+}
+
+fn __to_float32(x: BigInt) -> Float32 = match __int_exact(x) {
+  some(n) => int.to_float32(n),
+  none => {
+    let (top, e) = top_bits(x, 61)
+    if e > 200 then float.to_float32(if x.neg then 0.0 - float.infinity() else float.infinity())
+    else float.to_float32(pow2(e) * float.from_float32(int.to_float32(top)))
+  },
+}
+
+fn __to_float32_exact(x: BigInt) -> Float32? = {
+  let f = __to_float32(x)
+  if float.__decimal_exact(float.from_float32(f)) == some(to_string(x)) then some(f) else none
+}
+
+fn __decimal_exact(x: BigInt) -> String? = some(to_string(x))
+
+fn __bits64(x: BigInt) -> Int = {
+  let low = band(x, add(bshl(small(1), 64), small(-1)))
+  if bit_length(low) <= 63 then int_value(low)
+  else int_value(sub(low, bshl(small(1), 64)))
+}
+
+fn __sum(xs: List[BigInt]) -> BigInt = xs |> list.fold(small(0), (a, b) => add(a, b))
+
+fn __product(xs: List[BigInt]) -> BigInt = xs |> list.fold(small(1), (a, b) => multiply(a, b))
+
+// The Int value of an x that fits, accumulated from the top limb toward the
+// sign so Int's minimum never overflows.
+local fn int_value(x: BigInt) -> Int = list.reverse(x.limbs) |> list.fold(
+  0,
+  (acc, l) => if x.neg then acc * 1073741824 - l else acc * 1073741824 + l,
+)
+
+// The top n bits of |x| as a signed Int with a sticky low bit (set when any bit
+// below them is), and the power of two that scales them back: x is about
+// top * 2^e, and rounding top rounds x the same way.
+local fn top_bits(x: BigInt, n: Int) -> (Int, Int) = {
+  let mag = abs(x)
+  let shift = bit_length(mag) - n
+  let top = shr_magnitude(mag, shift)
+  let sticky = if compare(bshl(top, shift), mag) == 0 then 0 else 1
+  let t = int_value(top) * 2 + sticky
+  (if x.neg then 0 - t else t, shift - 1)
+}
+
+// 2^e as a Float, exactly; above Float's range, infinity.
+local fn pow2(e: Int) -> Float = if e > 1023 then float.infinity() else float.from_bits(int.bshl(e + 1023, 52))

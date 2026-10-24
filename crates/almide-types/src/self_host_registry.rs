@@ -343,7 +343,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (crate::embedded::SRC_STRING_SPLIT_ONCE, &[("string_split_once", "string.split_once")]),
         (crate::embedded::SRC_STRING_CHARS, &[("string_chars", "string.chars")]),
         (crate::embedded::SRC_STRING_LINES, &[("string_lines", "string.lines")]),
-        (crate::embedded::SRC_STRING_JOIN, &[("string_join", "string.join"), ("list_join", "list.join")]),
+        (crate::embedded::SRC_STRING_JOIN, &[("string_join", "string.join"), ("list_join", "list.__join_string")]),
         (
             crate::embedded::SRC_BYTES_CORE,
             BYTES_CORE_FNS,
@@ -587,7 +587,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (crate::embedded::SRC_RESULT_MAP, &[("result_map", "result.map"), ("result_flat_map", "result.flat_map"), ("result_to_err_option", "result.to_err_option"), ("result_unwrap_or_else", "result.unwrap_or_else"), ("result_map_err", "result.map_err"), ("result_filter", "result.filter"), ("result_or_else", "result.or_else"), ("result_flatten", "result.flatten"), ("result_map_h", "result.map_h"), ("result_map_err_h", "result.map_err_h"), ("result_flat_map_h", "result.flat_map_h"), ("result_unwrap_or_else_h", "result.unwrap_or_else_h"), ("result_to_option_h", "result.to_option_h"), ("result_filter_h", "result.filter_h"), ("result_to_err_option_h", "result.to_err_option_h"), ("result_map_s2h", "result.map_s2h"), ("result_zip_fs", "result.zip_fs"), ("result_unwrap_or_else_fs", "result.unwrap_or_else_fs")]),
         (crate::embedded::SRC_STRING_TO_INT, &[("string_to_int", "int.parse"), ("int_from_hex", "int.from_hex")]),
         (crate::embedded::SRC_LIST_IS_EMPTY, &[("list_is_empty", "list.is_empty")]),
-        (crate::embedded::SRC_LIST_SUM, &[("list_sum", "list.sum")]),
+        (crate::embedded::SRC_LIST_SUM, &[("list_sum", "list.__sum_int")]),
         (crate::embedded::SRC_LIST_SORT, &[("list_sort", "list.sort"), ("list_sort_str", "list.sort_str"), ("list_min_str", "list.min_str"), ("list_max_str", "list.max_str")]),
         (crate::embedded::SRC_LIST_ORD_COMPOUND, &[("list_sort_tss", "list.sort_tss"), ("list_sort_tsstr", "list.sort_tsstr"), ("list_sort_lint", "list.sort_lint"), ("list_sort_oint", "list.sort_oint"), ("list_min_tss", "list.min_tss"), ("list_max_tss", "list.max_tss"), ("list_min_tsstr", "list.min_tsstr"), ("list_max_tsstr", "list.max_tsstr"), ("list_min_lint", "list.min_lint"), ("list_max_lint", "list.max_lint"), ("list_min_lstr", "list.min_lstr"), ("list_max_lstr", "list.max_lstr"), ("list_min_oint", "list.min_oint"), ("list_max_oint", "list.max_oint")]),
         (crate::embedded::SRC_LIST_SORT_FLOAT, &[("list_sort_float", "list.sort_float"), ("list_unique_float", "list.unique_float"), ("list_dedup_float", "list.dedup_float"), ("list_contains_float", "list.contains_float"), ("list_index_of_float", "list.index_of_float")]),
@@ -804,7 +804,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (
             crate::embedded::SRC_LIST_FOLD,
             &[
-                ("list_product", "list.product"),
+                ("list_product", "list.__product_int"),
                 ("list_max", "list.max"),
                 ("list_min", "list.min"),
             ],

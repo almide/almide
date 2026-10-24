@@ -30,11 +30,11 @@ impl Emitter<'_> {
             // Shape-grouped dispatch: or-patterns keep this match at
             // pattern-count complexity; the name split happens in the
             // per-shape sub-dispatchers below.
-            ("len" | "length" | "first" | "last" | "sum" | "dedup" | "product"
+            ("len" | "length" | "first" | "last" | "__sum_int" | "dedup" | "__product_int"
             | "flatten" | "unique" | "enumerate", [xs]) => {
                 self.lower_list_unary_named(func, xs)
             }
-            ("get" | "join" | "find" | "find_index" | "contains" | "index_of" | "intersperse"
+            ("get" | "__join_string" | "find" | "find_index" | "contains" | "index_of" | "intersperse"
             | "zip" | "map" | "filter" | "any" | "all" | "count" | "take_while"
             | "drop_while" | "reduce" | "flat_map" | "filter_map" | "binary_search"
             | "window" | "unique_by" | "group_by" | "partition", [a, b]) => {
@@ -394,9 +394,9 @@ impl Emitter<'_> {
             "length" => self.lower_list_length_arm(xs),
             "first" => self.lower_list_first_arm(xs),
             "last" => self.lower_list_last(xs),
-            "sum" => self.lower_list_sum(xs),
+            "__sum_int" => self.lower_list_sum(xs),
             "dedup" => self.lower_list_dedup(xs),
-            "product" => self.lower_list_product(xs),
+            "__product_int" => self.lower_list_product(xs),
             "flatten" => self.lower_list_flatten(xs),
             "unique" => self.lower_list_unique(xs),
             _ => self.lower_list_enumerate(xs),
@@ -412,7 +412,7 @@ impl Emitter<'_> {
     ) -> ArmResult {
         match func {
             "get" => self.lower_list_get_arm(a, b),
-            "join" => self.lower_list_join_arm(a, b),
+            "__join_string" => self.lower_list_join_arm(a, b),
             "find" => self.lower_list_find(a, b),
             // #1423 stage 4: the index sibling — the same first-match
             // scan, the some payload is the INDEX (an Int slot).

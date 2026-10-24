@@ -349,7 +349,7 @@ numeric-matrix gate in `almide docs-gen --check`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (84 functions)
+## Signature index (88 functions)
 
 ```
 // Decimal digits, with - when negative.
@@ -688,6 +688,22 @@ int.to_string_radix(x: Int, radix: Int) -> String
 // err on junk or overflow; radix outside 2..36 aborts.
 // @since unreleased
 int.parse_radix(s: String, radix: Int) -> Result[Int, String]
+
+// x as Int, toward zero; NaN, an infinity or a value outside Int aborts.
+// @since unreleased
+int.from(x: S) -> Int
+
+// some(x as Int) when Int holds x exactly, else none (a fraction, NaN, out of range).
+// @since unreleased
+int.from_checked(x: S) -> Option[Int]
+
+// x as Int, toward zero, clamped to Int's range; NaN is 0.
+// @since unreleased
+int.from_saturating(x: S) -> Int
+
+// The low 64 bits of integer x as Int (two's complement).
+// @since unreleased
+int.from_wrapping(x: S) -> Int
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

@@ -284,3 +284,75 @@ fn max_value() -> Float = from_bits(9218868437227405311)
 
 /// Most negative finite Float (= -max_value()), not the smallest positive.
 fn min_value() -> Float = from_bits(-4503599627370497)
+
+// ── The `from` family (R-L0-40): Float from any number. The source is any
+//    `Numeric` type; the body reads the source through the protocol's
+//    conversion pivots (`__int_exact`, `__trunc`, ...), which every numeric
+//    type defines below its own conversions. ──
+/// x as the nearest Float (ties to even); NaN stays NaN.
+fn from[S: Numeric](x: S) -> Float = x.__to_float()
+
+/// some(x as Float) when Float holds x exactly, else none (a rounded value, NaN).
+fn from_checked[S: Numeric](x: S) -> Float? = x.__to_float_exact()
+
+// ── Numeric requirements: the conversion pivots the `<T>.from`
+//    family reads through a type variable, and the receiver-less sum and
+//    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
+fn __int_exact(x: Float) -> Int? =
+  if x == float.trunc(x) and x >= -9223372036854775808.0 and x < 9223372036854775808.0 then some(float.to_int(x))
+  else none
+
+fn __uint64_exact(x: Float) -> UInt64? =
+  if x == float.trunc(x) and x >= 0.0 and x < 18446744073709551616.0 then some(float.to_uint64(x))
+  else none
+
+fn __trunc(x: Float) -> Float = float.trunc(x)
+
+fn __int_sat(x: Float) -> Int =
+  if float.is_nan(x) then 0
+  else if x >= 9223372036854775808.0 then int.max_value()
+  else if x <= -9223372036854775808.0 then int.min_value()
+  else float.to_int(x)
+
+fn __uint64_sat(x: Float) -> UInt64 = float.to_uint64_saturating(x)
+
+fn __to_float(x: Float) -> Float = x
+
+fn __to_float_exact(x: Float) -> Float? = if float.is_nan(x) then none else some(x)
+
+fn __to_float32(x: Float) -> Float32 = float.to_float32(x)
+
+fn __to_float32_exact(x: Float) -> Float32? = float.to_float32_checked(x)
+
+fn __decimal_exact(x: Float) -> String? = match float.__int_exact(x) {
+  some(n) => some(int.to_string(n)),
+  none => if float.is_finite(x) and x == float.trunc(x) then some(decimal_of_integral(x)) else none,
+}
+
+fn __sum(xs: List[Float]) -> Float = list.fold(xs, 0.0, (a, b) => a + b)
+
+fn __product(xs: List[Float]) -> Float = list.fold(xs, 1.0, (a, b) => a * b)
+
+// The exact digits of an integral Float beyond Int: mantissa * 2^exponent,
+// doubled in base-10^9 limbs (little end first).
+local fn decimal_of_integral(x: Float) -> String = {
+  let bits = float.to_bits(x)
+  let e = int.band(int.bshr(bits, 52), 2047) - 1075
+  let m = int.bor(int.band(bits, 4503599627370495), 4503599627370496)
+  let limbs = double_n([m % 1000000000, m / 1000000000], e)
+  let digits = list.reverse(limbs) |> list.enumerate |> list.map(((i, d)) => if i == 0 then int.to_string(d) else pad9(int.to_string(d)))
+  (if x < 0.0 then "-" else "") + list.fold(digits, "", (a, b) => a + b)
+}
+
+local fn double_n(l: List[Int], n: Int) -> List[Int] = if n <= 0 then l
+else double_n(double_from(l, 0, 0, []), n - 1)
+
+local fn double_from(l: List[Int], i: Int, carry: Int, acc: List[Int]) -> List[Int] =
+  if i >= list.len(l) then (if carry > 0 then acc + [carry]
+  else acc)
+  else {
+    let v = (list.get(l, i) ?? 0) * 2 + carry
+    double_from(l, i + 1, v / 1000000000, acc + [v % 1000000000])
+  }
+
+local fn pad9(s: String) -> String = if string.len(s) >= 9 then s else pad9("0" + s)

@@ -141,3 +141,46 @@ fn parse(s: String) -> Result[Float32, String] = match float.parse(s) {
   ok(f) => ok(float.to_float32(f)),
   err(e) => err(e),
 }
+
+// ── The `from` family (R-L0-40): Float32 from any number. The source is any
+//    `Numeric` type; the body reads the source through the protocol's
+//    conversion pivots (`__int_exact`, `__trunc`, ...), which every numeric
+//    type defines below its own conversions. ──
+/// x as the nearest Float32 (ties to even), rounded once; NaN stays NaN.
+fn from[S: Numeric](x: S) -> Float32 = x.__to_float32()
+
+/// some(x as Float32) when Float32 holds x exactly, else none (a rounded value, NaN).
+fn from_checked[S: Numeric](x: S) -> Float32? = x.__to_float32_exact()
+
+// ── Numeric requirements: the conversion pivots the `<T>.from`
+//    family reads through a type variable, and the receiver-less sum and
+//    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
+fn __int_exact(x: Float32) -> Int? = float.__int_exact(float.from_float32(x))
+
+fn __uint64_exact(x: Float32) -> UInt64? = float.__uint64_exact(float.from_float32(x))
+
+fn __trunc(x: Float32) -> Float32 = float32.trunc(x)
+
+fn __int_sat(x: Float32) -> Int = float.__int_sat(float.from_float32(x))
+
+fn __uint64_sat(x: Float32) -> UInt64 = float.__uint64_sat(float.from_float32(x))
+
+fn __to_float(x: Float32) -> Float = float.from_float32(x)
+
+fn __to_float_exact(x: Float32) -> Float? = float.__to_float_exact(float.from_float32(x))
+
+fn __to_float32(x: Float32) -> Float32 = x
+
+fn __to_float32_exact(x: Float32) -> Float32? = if float32.is_nan(x) then none else some(x)
+
+fn __decimal_exact(x: Float32) -> String? = float.__decimal_exact(float.from_float32(x))
+
+fn __sum(xs: List[Float32]) -> Float32 = {
+  let zero: Float32 = 0.0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[Float32]) -> Float32 = {
+  let one: Float32 = 1.0
+  list.fold(xs, one, (a, b) => a * b)
+}

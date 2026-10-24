@@ -627,3 +627,8 @@ fn set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit = 
 /// Writes value at offset; no-op out of range.
 @intrinsic("almide_rt_bytes_set_float32")
 fn set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit = _
+
+// ── Text requirement (R-L0-42): `list.join[T: Text]` over Bytes ──
+/// The parts with sep between them; empty for [].
+@intrinsic("almide_rt_bytes_join")
+fn __join(xs: List[Bytes], sep: Bytes) -> Bytes = _

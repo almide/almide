@@ -13,3 +13,15 @@ fn option_to_string_b(o: Bool?) -> String = match o {
 // the bool module's public names stay out of the registry's flat namespace.
 @implements("bool.to_string")
 fn __bool_to_string(b: Bool) -> String = if b then "true" else "false"
+
+// The SELF-HOSTED `bytes.__join`, the Text requirement `list.join[T: Text]`
+// reaches for Bytes: language-level match / fold / bytes.concat, no prim floor.
+// It lives in this classified prim-free pure file (beside `bool.to_string`'s
+// body, for the same reason) because a new stdlib file would need a new
+// purity classification; bytes_split.almd reaches the prim floor, which
+// would keep the wasm leg from linking a List[Bytes] signature.
+@implements("bytes.__join")
+fn bytes_join(xs: List[Bytes], sep: Bytes) -> Bytes = match xs {
+  [] => bytes.new(0),
+  [first, ..rest] => rest |> list.fold(first, (acc, b) => bytes.concat(bytes.concat(acc, sep), b)),
+}

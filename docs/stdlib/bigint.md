@@ -33,7 +33,7 @@ effect fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (22 functions)
+## Signature index (24 functions)
 
 ```
 // BigInt from trimmed decimal s with an optional + or -; err on junk.
@@ -124,6 +124,14 @@ bigint.bshl(a: BigInt, n: Int) -> BigInt
 // a shifted right by n bits, rounding toward -inf (sign-filling); n < 0 aborts.
 // @since unreleased
 bigint.bshr(a: BigInt, n: Int) -> BigInt
+
+// x as BigInt, toward zero; NaN or an infinity aborts.
+// @since unreleased
+bigint.from(x: S) -> BigInt
+
+// some(x as BigInt) when x is an integer, else none (a fraction, NaN, an infinity).
+// @since unreleased
+bigint.from_checked(x: S) -> Option[BigInt]
 ```
 
 ## Type index (1 types)

@@ -281,3 +281,64 @@ local fn parse_radix_upper(t: String, radix: Int) -> Result[UInt64, String]? = {
     _ => none,
   }
 }
+
+// ── The `from` family (R-L0-40): UInt64 from any number. The source is any
+//    `Numeric` type; the body reads the source through the protocol's
+//    conversion pivots (`__int_exact`, `__trunc`, ...), which every numeric
+//    type defines below its own conversions. ──
+/// x as UInt64, toward zero; NaN, an infinity or a value outside UInt64 aborts.
+fn from[S: Numeric](x: S) -> UInt64 = x.__trunc().__uint64_exact() ?? panic("uint64.from: the value is not a number in the range of UInt64")
+
+/// some(x as UInt64) when UInt64 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> UInt64? = x.__uint64_exact()
+
+/// x as UInt64, toward zero, clamped to UInt64's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> UInt64 = x.__uint64_sat()
+
+/// The low 64 bits of integer x as UInt64 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> UInt64 = {
+  let b = x.__bits64()
+  if b >= 0 then int.to_uint64(b)
+  else int.to_uint64(int.band(b, 9223372036854775807)) + int.to_uint64(4611686018427387904) * int.to_uint64(2)
+}
+
+// ── Numeric / Integer requirements: the conversion pivots the `<T>.from`
+//    family reads through a type variable, and the receiver-less sum and
+//    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
+fn __int_exact(x: UInt64) -> Int? = int.from_uint64_checked(x)
+
+fn __uint64_exact(x: UInt64) -> UInt64? = some(x)
+
+fn __trunc(x: UInt64) -> UInt64 = x
+
+fn __int_sat(x: UInt64) -> Int = int.from_uint64_saturating(x)
+
+fn __uint64_sat(x: UInt64) -> UInt64 = x
+
+fn __to_float(x: UInt64) -> Float = float.from_float64(uint64.to_float64(x))
+
+fn __to_float_exact(x: UInt64) -> Float? = {
+  let f = uint64.__to_float(x)
+  if float.__uint64_exact(f) == some(x) then some(f) else none
+}
+
+fn __to_float32(x: UInt64) -> Float32 = uint64.to_float32(x)
+
+fn __to_float32_exact(x: UInt64) -> Float32? = {
+  let f = uint64.to_float32(x)
+  if float.__uint64_exact(float.from_float32(f)) == some(x) then some(f) else none
+}
+
+fn __decimal_exact(x: UInt64) -> String? = some(uint64.to_string(x))
+
+fn __bits64(x: UInt64) -> Int = int.from_uint64(x)
+
+fn __sum(xs: List[UInt64]) -> UInt64 = {
+  let zero: UInt64 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[UInt64]) -> UInt64 = {
+  let one: UInt64 = 1
+  list.fold(xs, one, (a, b) => a * b)
+}

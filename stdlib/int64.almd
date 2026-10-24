@@ -216,3 +216,54 @@ fn parse_radix(s: String, radix: Int) -> Result[Int64, String] = match int.parse
   ok(n) => ok(int.to_int64(n)),
   err(e) => err(e),
 }
+
+// ── The `from` family (R-L0-40): Int64 from any number. The source is any
+//    `Numeric` type; the body reads the source through the protocol's
+//    conversion pivots (`__int_exact`, `__trunc`, ...), which every numeric
+//    type defines below its own conversions. ──
+/// x as Int64, toward zero; NaN, an infinity or a value outside Int64 aborts.
+fn from[S: Numeric](x: S) -> Int64 = match x.__trunc().__int_exact() {
+  some(n) => int.to_int64(n),
+  none => panic("int64.from: the value is not a number in the range of Int64"),
+}
+
+/// some(x as Int64) when Int64 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int64? = match x.__int_exact() {
+  some(n) => some(int.to_int64(n)),
+  none => none,
+}
+
+/// x as Int64, toward zero, clamped to Int64's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int64 = int.to_int64(x.__int_sat())
+
+/// The low 64 bits of integer x as Int64 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int64 = int.to_int64(x.__bits64())
+
+// ── Numeric / Integer requirements: the conversion pivots the `<T>.from`
+//    family reads through a type variable, and the receiver-less sum and
+//    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
+fn __int_exact(x: Int64) -> Int? = some(int.from_int64(x))
+
+fn __uint64_exact(x: Int64) -> UInt64? = int.__uint64_exact(int.from_int64(x))
+
+fn __trunc(x: Int64) -> Int64 = x
+
+fn __int_sat(x: Int64) -> Int = int.from_int64(x)
+
+fn __uint64_sat(x: Int64) -> UInt64 = int.__uint64_sat(int.from_int64(x))
+
+fn __to_float(x: Int64) -> Float = int.to_float(int.from_int64(x))
+
+fn __to_float_exact(x: Int64) -> Float? = int.__to_float_exact(int.from_int64(x))
+
+fn __to_float32(x: Int64) -> Float32 = int.to_float32(int.from_int64(x))
+
+fn __to_float32_exact(x: Int64) -> Float32? = int.to_float32_checked(int.from_int64(x))
+
+fn __decimal_exact(x: Int64) -> String? = some(int.to_string(int.from_int64(x)))
+
+fn __bits64(x: Int64) -> Int = int.from_int64(x)
+
+fn __sum(xs: List[Int64]) -> Int64 = int.to_int64(list.fold(xs, 0, (a, b) => a + int.from_int64(b)))
+
+fn __product(xs: List[Int64]) -> Int64 = int.to_int64(list.fold(xs, 1, (a, b) => a * int.from_int64(b)))
