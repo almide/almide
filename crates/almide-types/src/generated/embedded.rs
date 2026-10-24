@@ -374,8 +374,14 @@ else make(a.neg, list.repeat(0, n / 30) + shift_left_bits(a.limbs, n % 30, 0, 0,
 
 /// a shifted right by n bits, rounding toward -inf (sign-filling); n < 0 aborts.
 fn bshr(a: BigInt, n: Int) -> BigInt = if n < 0 then panic("shift count must not be negative")
-else if a.neg then bnot(bshr(bnot(a), n))
-else make(false, shift_right_bits(list.drop(a.limbs, n / 30), n % 30))
+else if a.neg then bnot(shr_magnitude(bnot(a), n))
+else shr_magnitude(a, n)
+
+
+local fn shr_magnitude(a: BigInt, n: Int) -> BigInt = make(
+  false,
+  shift_right_bits(list.drop(a.limbs, n / 30), n % 30),
+)
 
 
 local fn add(a: BigInt, b: BigInt) -> BigInt =
