@@ -42,7 +42,9 @@ for f in "$WF"/*.yml; do
     /^  [A-Za-z0-9_-]+:[[:space:]]*$/ && injobs { job = $1; sub(/:$/, "", job) }
     /^jobs:/ { injobs = 1 }
     /uses: dtolnay\/rust-toolchain@/ {
-      ref = $0; sub(/.*@/, "", ref); ref = strip(ref)
+      ref = $0; sub(/.*@/, "", ref); cmt = ref; ref = strip(ref)
+      # #4094: a commit pin carries its ref in the trailing comment (`@<sha> # stable`).
+      if (length(ref) == 40 && ref ~ /^[0-9a-f]+$/ && cmt ~ /#/) { sub(/^[^#]*#[[:space:]]*/, "", cmt); split(cmt, w, /[[:space:]]+/); ref = w[1] }
       pending = 1; pjob = job; pref = ref; left = 4; next
     }
     pending && /^[[:space:]]+toolchain:/ {
