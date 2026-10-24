@@ -41,7 +41,8 @@ gh attestation verify <asset> -R almide/almide
 
 The tools check this themselves (#4127):
 
-- `almide self-update` hashes the archive in-process, matches the checksum
+- `almide self-update` downloads over the compiler's own HTTPS client (rustls; no
+  `curl` from PATH, redirects only to https, #4181), hashes the archive in-process, matches the checksum
   line on the exact file name, stages in a fresh private directory, and
   verifies the attestation with `gh attestation verify`. Without `gh` it
   refuses; `--skip-attestation` installs on the checksum alone and says so.

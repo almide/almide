@@ -67,7 +67,7 @@ The diagnostic is the fix: the model's next turn is `Triangle(b, h) => 0.5 * b *
 **[Try it in your browser →](https://almide.github.io/playground/)** — no installation.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh | sh   # macOS / Linux
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/almide/almide/main/tools/install.sh | sh   # macOS / Linux
 irm https://raw.githubusercontent.com/almide/almide/main/tools/install.ps1 | iex        # Windows (PowerShell)
 ```
 
