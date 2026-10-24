@@ -11,6 +11,19 @@ pub fn almide_rt_string_trim(s: &str) -> AlmideString { let __almide_out: String
 pub fn almide_rt_string_trim_start(s: &str) -> AlmideString { let __almide_out: String = s.trim_start().to_string(); __almide_out.into() }
 pub fn almide_rt_string_trim_end(s: &str) -> AlmideString { let __almide_out: String = s.trim_end().to_string(); __almide_out.into() }
 pub fn almide_rt_string_contains(s: &str, sub: &str) -> bool { s.contains(sub) }
+/// Constant-time equality over the UTF-8 bytes (#4106): same algorithm as
+/// `almide_rt_bytes_is_equal_constant_time` (kept self-contained so this
+/// module links without `bytes`). Length mismatch is false at once.
+#[inline(never)]
+pub fn almide_rt_string_is_equal_constant_time(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() { return false; }
+    let mut acc: u8 = 0;
+    for i in 0..a.len() {
+        acc |= core::hint::black_box(a[i] ^ b[i]);
+    }
+    core::hint::black_box(acc) == 0
+}
 pub fn almide_rt_string_starts_with(s: &str, prefix: &str) -> bool { s.starts_with(prefix) }
 pub fn almide_rt_string_ends_with(s: &str, suffix: &str) -> bool { s.ends_with(suffix) }
 // A one-byte ASCII separator is searched as a `char` (a memchr scan) rather

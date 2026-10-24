@@ -139,6 +139,14 @@ fn bytes_fn(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
         "to_list" => Flow::val(args.first()?.clone()),
         "len" => Flow::val(Value::Int(args.first()?.as_iter_items()?.len() as i64)),
+        // #4106: the value of the constant-time compare (timing is not an
+        // observable this oracle judges): same length and same bytes.
+        "is_equal_constant_time" => {
+            let (a, b) = (args.first()?.as_iter_items()?, args.get(1)?.as_iter_items()?);
+            let same = a.len() == b.len()
+                && a.iter().zip(b.iter()).all(|(x, y)| matches!((x, y), (Value::Int(p), Value::Int(q)) if p == q));
+            Flow::val(Value::Bool(same))
+        }
         // C-197: an unsatisfiable size is the defined abort on every leg —
         // the infallible `vec![_; n]` panicked with a capacity overflow on
         // `bytes.zeros(i64::MAX)` instead (fuzz seed 500705518626 index 711).
@@ -516,6 +524,10 @@ fn string_fn_whole(func: &str, args: &[Value]) -> Option<Flow> {
         )),
         "starts_with" => Flow::val(Value::Bool(
             as_str(args.first())?.starts_with(as_str(args.get(1))?),
+        )),
+        // #4106: the value of the constant-time compare (byte equality).
+        "is_equal_constant_time" => Flow::val(Value::Bool(
+            as_str(args.first())?.as_bytes() == as_str(args.get(1))?.as_bytes(),
         )),
         "ends_with" => Flow::val(Value::Bool(
             as_str(args.first())?.ends_with(as_str(args.get(1))?),

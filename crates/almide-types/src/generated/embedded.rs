@@ -1287,6 +1287,13 @@ fn split(b: Bytes, sep: Bytes) -> List[Bytes] = _
 @intrinsic("almide_rt_bytes_starts_with")
 fn starts_with(b: Bytes, prefix: Bytes) -> Bool = _
 
+/// True if a and b hold the same bytes, in time that depends only on their
+/// lengths: no early exit on the first differing byte. Use it to compare a
+/// MAC, token or password hash; `==` returns at the first difference. A length
+/// mismatch is false at once (lengths are public).
+@intrinsic("almide_rt_bytes_is_equal_constant_time")
+fn is_equal_constant_time(a: Bytes, b: Bytes) -> Bool = _
+
 /// (pos+n, n-byte copy); (pos, none) if out of range.
 @intrinsic("almide_rt_bytes_take_at")
 fn __take_at(b: Bytes, pos: Int, n: Int) -> (Int, Bytes?) = _
@@ -2563,6 +2570,23 @@ fn bytes_repeat(b: Bytes, count: Int) -> Bytes = {
   out
 }
 
+
+
+
+
+fn __ct_acc(pa: Int, pb: Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+else __ct_acc(pa, pb, n, i + 1, prim.bor(acc, prim.bxor(prim.load8(pa + i), prim.load8(pb + i))))
+
+
+
+fn bytes_is_equal_constant_time(a: Bytes, b: Bytes) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let na = prim.load32(ha + 4)
+  let nb = prim.load32(hb + 4)
+  if na != nb then false
+  else __ct_acc(ha + 12, hb + 12, na, 0, 0) == 0
+}
 
 fn __byteq(pa: Int, pb: Int, n: Int, i: Int) -> Bool = if i >= n then true
 else {
@@ -9910,7 +9934,7 @@ fn fnv1a32(s: String) -> Int = _
 @intrinsic("almide_rt_hash_fnv1a32_bytes")
 fn fnv1a32_bytes(b: Bytes) -> Int = _
 
-/// 32-byte SHA-256 digest of b.
+/// 32-byte SHA-256 digest of b. Not a MAC: sha256(key ++ msg) is forgeable by length extension; use hash.hmac_sha256 / hash.is_valid_hmac_sha256.
 @intrinsic("almide_rt_hash_sha256")
 fn sha256(b: Bytes) -> Bytes = _
 
@@ -10090,6 +10114,7 @@ local fn h_md5_s(i: Int) -> Int = {
 }
 
 /// 16-byte MD5 digest of b. For compatibility only: MD5 is broken, never use it for security.
+@insecure_digest
 fn md5(b: Bytes) -> Bytes = {
   let m = h_pad(b, 64, 8, false)
   let k = h_md5_k()
@@ -10128,9 +10153,11 @@ fn md5(b: Bytes) -> Bytes = {
 }
 
 /// MD5 of b as 32 lowercase hex chars. For compatibility only, never for security.
+@insecure_digest
 fn md5_hex(b: Bytes) -> String = h_hex(md5(b))
 
 /// 20-byte SHA-1 digest of b. For compatibility only: SHA-1 is broken, never use it for security.
+@insecure_digest
 fn sha1(b: Bytes) -> Bytes = {
   let m = h_pad(b, 64, 8, true)
   var h0 = 1732584193
@@ -10179,6 +10206,7 @@ fn sha1(b: Bytes) -> Bytes = {
 }
 
 /// SHA-1 of b as 40 lowercase hex chars. For compatibility only, never for security.
+@insecure_digest
 fn sha1_hex(b: Bytes) -> String = h_hex(sha1(b))
 
 local fn h_sha512_k() -> List[Int] = [
@@ -10264,7 +10292,7 @@ local fn h_sha512_k() -> List[Int] = [
   7801388544844847127
 ]
 
-/// 64-byte SHA-512 digest of b.
+/// 64-byte SHA-512 digest of b. Not a MAC: sha512(key ++ msg) is forgeable by length extension; use hash.hmac_sha512 / hash.is_valid_hmac_sha512.
 fn sha512(b: Bytes) -> Bytes = {
   let m = h_pad(b, 128, 16, true)
   let k = h_sha512_k()
@@ -10336,6 +10364,79 @@ fn sha512(b: Bytes) -> Bytes = {
 
 /// SHA-512 of b as 128 lowercase hex chars.
 fn sha512_hex(b: Bytes) -> String = h_hex(sha512(b))
+
+
+
+
+
+
+
+local fn h_digest(b: Bytes, wide: Bool) -> Bytes = if wide then hash.sha512(b) else hash.sha256(b)
+
+local fn h_hmac(key: Bytes, b: Bytes, wide: Bool) -> Bytes = {
+  let block = if wide then 128 else 64
+  let k0 = if bytes.len(key) > block then h_digest(key, wide) else key
+  let k = bytes.to_list(k0) + list.repeat(0, block - bytes.len(k0))
+  let ipad = k |> list.map((x) => int.bxor(x, 54)) |> bytes.from_list
+  let opad = k |> list.map((x) => int.bxor(x, 92)) |> bytes.from_list
+  h_digest(bytes.concat(opad, h_digest(bytes.concat(ipad, b), wide)), wide)
+}
+
+
+local fn h_nibble(c: Int) -> Int =
+  if c >= 48 and c <= 57 then c - 48
+  else if c >= 97 and c <= 102 then c - 87
+  else if c >= 65 and c <= 70 then c - 55
+  else -1
+
+
+local fn h_unhex(s: String) -> Bytes? = {
+  let ns = bytes.to_list(bytes.from_string(s)) |> list.map((c) => h_nibble(c))
+  let n = list.len(ns)
+  if n % 2 != 0 or list.any(ns, (x) => x < 0) then none
+  else some(list.range(0, n / 2) |> list.map((i) => ns[2 * i] * 16 + ns[2 * i + 1]) |> bytes.from_list)
+}
+
+local fn h_is_valid_hex(mac: Bytes, tag: String) -> Bool = match h_unhex(tag) {
+  some(t) => bytes.is_equal_constant_time(mac, t),
+  none => false,
+}
+
+/// 32-byte HMAC-SHA256 of b under key (RFC 2104); key first.
+fn hmac_sha256(key: Bytes, b: Bytes) -> Bytes = h_hmac(key, b, false)
+
+/// HMAC-SHA256 of b under key as 64 lowercase hex chars.
+fn hmac_sha256_hex(key: Bytes, b: Bytes) -> String = h_hex(hmac_sha256(key, b))
+
+/// 64-byte HMAC-SHA512 of b under key (RFC 2104); key first.
+fn hmac_sha512(key: Bytes, b: Bytes) -> Bytes = h_hmac(key, b, true)
+
+/// HMAC-SHA512 of b under key as 128 lowercase hex chars.
+fn hmac_sha512_hex(key: Bytes, b: Bytes) -> String = h_hex(hmac_sha512(key, b))
+
+/// True if tag is the HMAC-SHA256 of b under key, compared in constant time. Use this, not ==.
+fn is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool = bytes.is_equal_constant_time(
+  hmac_sha256(key, b),
+  tag,
+)
+
+/// True if tag (hex, either case) is the HMAC-SHA256 of b under key, compared in constant time; false for bad hex.
+fn is_valid_hmac_sha256_hex(key: Bytes, b: Bytes, tag: String) -> Bool = h_is_valid_hex(
+  hmac_sha256(key, b),
+  tag,
+)
+
+/// True if tag is the HMAC-SHA512 of b under key, compared in constant time. Use this, not ==.
+fn is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool = bytes.is_equal_constant_time(
+  hmac_sha512(key, b),
+  tag,
+)
+
+/// True if tag (hex, either case) is the HMAC-SHA512 of b under key, compared in constant time; false for bad hex.
+fn is_valid_hmac_sha512_hex(key: Bytes, b: Bytes, tag: String) -> Bool = h_is_valid_hex(
+  hmac_sha512(key, b),
+  tag,
+)
 "#;
 pub const SRC_HASH_IMPL: &str = r#"
 
@@ -38308,6 +38409,13 @@ fn length(s: String) -> Int = _
 @intrinsic("almide_rt_string_contains")
 fn contains(s: String, sub: String) -> Bool = _
 
+/// True if a and b hold the same UTF-8 bytes, in time that depends only on
+/// their lengths: no early exit on the first differing byte. Use it to compare
+/// a token or signature header; `==` returns at the first difference. A length
+/// mismatch is false at once (lengths are public).
+@intrinsic("almide_rt_string_is_equal_constant_time")
+fn is_equal_constant_time(a: String, b: String) -> Bool = _
+
 /// s begins with prefix; "" always matches.
 @intrinsic("almide_rt_string_starts_with")
 fn starts_with(s: String, prefix: String) -> Bool = _
@@ -40134,6 +40242,27 @@ else {
   let y = prim.load8(b)
   if x == y then __byte_eq(a + 1, b + 1, n - 1)
   else false
+}
+
+
+
+fn __str_ct_acc(pa: Int, pb: Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+else __str_ct_acc(
+  pa,
+  pb,
+  n,
+  i + 1,
+  prim.bor(acc, prim.bxor(prim.load8(pa + i), prim.load8(pb + i))),
+)
+
+
+fn string_is_equal_constant_time(a: String, b: String) -> Bool = {
+  let ha = prim.handle(a)
+  let hb = prim.handle(b)
+  let na = prim.load32(ha + 4)
+  let nb = prim.load32(hb + 4)
+  if na != nb then false
+  else __str_ct_acc(ha + 12, hb + 12, na, 0, 0) == 0
 }
 
 fn string_starts_with(s: String, prefix: String) -> Bool = {

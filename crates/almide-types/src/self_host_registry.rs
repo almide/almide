@@ -814,6 +814,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
             crate::embedded::SRC_STRING_SEARCH,
             &[
                 ("string_starts_with", "string.starts_with"),
+                ("string_is_equal_constant_time", "string.is_equal_constant_time"),
                 ("string_ends_with", "string.ends_with"),
                 ("string_contains", "string.contains"),
                 ("string_count", "string.count"),
