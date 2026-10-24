@@ -2,9 +2,10 @@
 //!
 //! `runtime/rs/src/regex.rs` carries both engines: the linear-time Pike VM
 //! every pattern now runs on, and the backtracking walk that used to be the
-//! only one (still the route for a pattern too large for the VM's state
-//! budget). This test includes the shipped file — not a copy — and asks both
-//! engines the same questions: whether the pattern matches, the leftmost
+//! only one. The VM runs an expanded program, or past its state budget a
+//! counted one (#4083) — and the counted program is asked every question too,
+//! as if every pattern were past the budget. This test includes the shipped
+//! file — not a copy — and asks the engines the same questions: whether the pattern matches, the leftmost
 //! match's span, every capture group, the full sequence of `find_all` spans, and
 //! `full_match`. They must agree on all of it.
 //!
@@ -39,16 +40,33 @@ mod rt {
 
     include!(concat!(env!("CARGO_MANIFEST_DIR"), "/runtime/rs/src/regex.rs"));
 
+    /// The engines `answers` can ask: the walk, the VM on the program the
+    /// public API compiles, and the VM on the counted program (#4083) even
+    /// where the expanded one would fit.
+    #[derive(Clone, Copy, PartialEq)]
+    pub enum Engine {
+        Walk,
+        Pike,
+        Counted,
+    }
+
     /// Everything one engine answers about (pat, s), as text.
-    pub fn answers(pat: &str, s: &str, pike: bool) -> Option<String> {
+    pub fn answers(pat: &str, s: &str, engine: Engine) -> Option<String> {
+        let pike = engine != Engine::Walk;
         // The VM side goes through the per-thread cache, so its reuse of a
         // compiled program and working memory is what is tested.
-        let c = if pike {
-            rx_cached(pat)
-        } else {
-            let mut c = rx_compiled(pat);
-            c.prog = None;
-            std::rc::Rc::new(c)
+        let c = match engine {
+            Engine::Pike => rx_cached(pat),
+            Engine::Walk => {
+                let mut c = rx_compiled(pat);
+                c.prog = None;
+                std::rc::Rc::new(c)
+            }
+            Engine::Counted => {
+                let mut c = rx_compiled(pat);
+                c.prog = rx_program_as(&c.rx, true);
+                std::rc::Rc::new(c)
+            }
         };
         if c.prog.is_none() && pike {
             return None;
@@ -82,9 +100,18 @@ mod rt {
         Some(out)
     }
 
+    /// The expanded program's state count, None past the budget (the
+    /// pattern is then compiled counted).
     pub fn pike_states(pat: &str) -> Option<usize> {
         let rx = rx_compile(pat);
-        rx_program(&rx).map(|p| p.insts.len() * p.width)
+        rx_program_as(&rx, false).map(|p| p.insts.len() * p.width)
+    }
+
+    /// The program the public API runs: (instructions, counter registers).
+    pub fn program_shape(pat: &str) -> (usize, usize) {
+        let rx = rx_compile(pat);
+        let p = rx_program(&rx).expect("every pattern has a program");
+        (p.insts.len(), p.regs)
     }
 
     pub fn pike_is_match(pat: &str, s: &str) -> bool {
@@ -275,11 +302,14 @@ fn compare(pat: &str, s: &str, failures: &mut Vec<String>, checked: &mut usize) 
     if std::env::var_os("REGEX_PIKE_TRACE").is_some() {
         eprintln!("{pat:?} {s:?}");
     }
-    let Some(new) = rt::answers(pat, s, true) else { return };
-    let old = rt::answers(pat, s, false).expect("the walk always answers");
-    *checked += 1;
-    if new != old && failures.len() < 40 {
-        failures.push(format!("pattern {pat:?} on {s:?}\n  walk: {old}\n  pike: {new}"));
+    let old = rt::answers(pat, s, rt::Engine::Walk).expect("the walk always answers");
+    for engine in [rt::Engine::Pike, rt::Engine::Counted] {
+        let Some(new) = rt::answers(pat, s, engine) else { continue };
+        *checked += 1;
+        if new != old && failures.len() < 40 {
+            let name = if engine == rt::Engine::Pike { "pike" } else { "counted" };
+            failures.push(format!("pattern {pat:?} on {s:?}\n  walk: {old}\n  {name}: {new}"));
+        }
     }
 }
 
@@ -383,17 +413,50 @@ fn the_walk_hands_over_to_the_vm_without_a_seam() {
 }
 
 /// A huge count does not allocate a huge program: past the state budget the
-/// pattern goes to the walk, which counts instead of expanding.
+/// pattern is compiled counted, one copy of each repetition's body and a
+/// counter register per nesting level (#4083).
 #[test]
 fn a_huge_count_stays_bounded() {
     assert!(rt::pike_states("a{10}").is_some());
     assert!(rt::pike_states("(ab){0,1000}").is_some());
+    assert_eq!(rt::program_shape("a{10}").1, 0, "a small count stays expanded");
     assert!(rt::pike_states("a{1000000}").is_none());
     assert!(rt::pike_states("((a){1000}){1000}").is_none());
+    assert_eq!(rt::program_shape("a{1000000}"), (5, 1));
+    let (insts, regs) = rt::program_shape("((a){1000}){1000}");
+    assert!(insts < 20 && regs == 2, "a counted program is the size of the pattern: {insts} instructions, {regs} registers");
     let s = "a".repeat(2000);
     assert!(rt::pike_full_match("a{2000}", &s));
     assert!(rt::pike_is_match("a{1000000}|a", &s));
     assert!(!rt::pike_full_match("a{1000000}", &s));
+}
+
+/// #4083: a pattern past the expanded program's state budget used to be
+/// matched by the walk alone, with no step budget, so a shape that is
+/// exponential for the walk never finished: `^(a|a){0,30000}b` tries 2^n ways
+/// through n a's, and the walk was still on it after ten minutes. Compiled
+/// counted, these run on the VM like any other pattern, in time proportional
+/// to the states its threads are in times the input's length — here a handful,
+/// since each count is fixed by the position.
+#[test]
+fn counted_patterns_finish_on_long_input() {
+    let a100k = "a".repeat(100_000);
+    let rows = ["^(a|a){0,30000}b", "^((a|a)(a|a)){0,30000}b", "((a|a){10}){1,3000}b", "^(a|a?){3,25000}$", "^(a|a){2,30000}(a*)$"];
+    for pat in rows {
+        assert!(rt::pike_states(pat).is_none(), "{pat} is meant to be past the expanded program's budget");
+    }
+    let started = std::time::Instant::now();
+    assert!(!rt::pike_is_match("^(a|a){0,30000}b", &a100k));
+    assert!(rt::pike_is_match("^(a|a){0,30000}b", &(a100k[..20_000].to_string() + "b")));
+    assert!(!rt::pike_is_match("^((a|a)(a|a)){0,30000}b", &a100k));
+    assert!(!rt::pike_full_match("((a|a){10}){1,3000}b", &(a100k.clone() + "!")));
+    assert!(!rt::pike_is_match("^(a|a?){3,25000}$", &(a100k.clone() + "b")));
+    let caps = rt::pike_captures("^(a|a){2,30000}(a*)$", &a100k).expect("matches");
+    assert_eq!((caps[0].len(), caps[1].len(), caps[2].len()), (100_000, 1, 70_000));
+    let elapsed = started.elapsed();
+    // A handful of live states per character: well under a second in a
+    // release build, a few in a debug one.
+    assert!(elapsed.as_secs() < 60, "the counted rows took {elapsed:?}");
 }
 
 // ── the wasm leg over the same grammar ──
@@ -424,14 +487,20 @@ fn run(dir: &Path, args: &[&str]) -> String {
 
 /// The self-hosted engine with its entry points renamed `rxt_*` and the
 /// walk's step budget fixed at `budget` (0 = every call goes to the Pike VM,
-/// -1 = the walk answers every call). The file is checked as the stdlib's own
-/// (a `regex_engine.almd` in a directory named `stdlib`), which is what lets it
-/// use the `prim` floor outside the bundle.
-fn engine_copy(budget: &str) -> String {
+/// -1 = the walk answers every call); `counted` compiles every program counted
+/// (#4083), as a pattern past the expanded program's state budget is. The file
+/// is checked as the stdlib's own (a `regex_engine.almd` in a directory named
+/// `stdlib`), which is what lets it use the `prim` floor outside the bundle.
+fn engine_copy(budget: &str, counted: bool) -> String {
     let src = std::fs::read_to_string(repo().join("stdlib/regex_engine.almd")).expect("engine source");
     let line = "prim.store64(m + 136, 4 * (pe - pat0 + 1) * (te - ts + 1))";
     assert!(src.contains(line), "the engine's step-budget line moved; update this test");
     let mut out = src.replace(line, &format!("prim.store64(m + 136, {budget})"));
+    if counted {
+        let cap = "fn __rx_pike_states() -> Int = 20000";
+        assert!(out.contains(cap), "the engine's state budget moved; update this test");
+        out = out.replace(cap, "fn __rx_pike_states() -> Int = 0");
+    }
     for op in ["is_match", "full_match", "find_all", "find", "replace_first", "replace", "split", "captures"] {
         let def = format!("fn regex_{op}(");
         assert!(out.contains(&def), "no {def} in the engine");
@@ -477,11 +546,11 @@ fn nested_groups_agree_native_and_wasm() {
     let public = dir.path().join("public.almd");
     std::fs::write(&public, format!("import regex\n\n{}", body.replace("NS_", "regex."))).expect("write");
     let native = run(dir.path(), &["run", public.to_str().expect("path")]);
-    for (budget, engine) in [("0", "Pike VM"), ("0 - 1", "walk")] {
-        let sub = dir.path().join(format!("{}/stdlib", if budget == "0" { "vm" } else { "walk" }));
+    for (budget, counted, engine) in [("0", false, "Pike VM"), ("0", true, "counted Pike VM"), ("0 - 1", false, "walk")] {
+        let sub = dir.path().join(format!("{}/stdlib", engine.replace(' ', "_")));
         std::fs::create_dir_all(&sub).expect("mkdir");
         let copy = sub.join("regex_engine.almd");
-        std::fs::write(&copy, format!("{}\n{}", engine_copy(budget), body.replace("NS_", "rxt_"))).expect("write");
+        std::fs::write(&copy, format!("{}\n{}", engine_copy(budget, counted), body.replace("NS_", "rxt_"))).expect("write");
         let wasm = run(dir.path(), &["run", copy.to_str().expect("path"), "--target", "wasm"]);
         if native != wasm {
             let first = native
