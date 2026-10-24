@@ -1,0 +1,4 @@
+expects_code = "E101"
+expects_error = "U+202D LEFT-TO-RIGHT OVERRIDE"
+hint_substring = "Trojan Source"
+expects_line_col = "4:52"

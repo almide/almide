@@ -1,0 +1,4 @@
+expects_code = "E101"
+expects_error = "U+202E RIGHT-TO-LEFT OVERRIDE"
+hint_substring = "u{202E}` if the character is intended"
+expects_line_col = "5:6"

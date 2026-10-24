@@ -1,0 +1,4 @@
+expects_code = "E101"
+expects_error = "U+2067 RIGHT-TO-LEFT ISOLATE"
+hint_substring = "u{2067}` if the character is intended"
+expects_line_col = "2:38"
