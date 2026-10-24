@@ -1,7 +1,7 @@
 <!-- description: Stdlib redesign — the standard library as it stands once every adopted proposal lands: every public function with its post-redesign signature, per module, and what was removed -->
 # リデザイン後の標準ライブラリ（設計）
 
-> Last updated: 2026-10-22
+> Last updated: 2026-10-24
 > 元の記録: [README.md](README.md)（案の索引）・各 L2 ページの L3 関数表
 
 採用した案（○）をすべて適用したあとの、標準ライブラリの公開関数の一覧です。各 L2 ページの L3 関数表から機械的に組み立てています。表と食い違うときは、L3 の表と L2 の案が正です。
@@ -39,20 +39,20 @@
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1292 | 409 | 708 | 88 | 87 | 417 |
+| 1001 | 1302 | 409 | 718 | 88 | 87 | 417 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
 ## 実体の数
 
-この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,292 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
+この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,302 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
 
 | 数え方 | 一覧の行 | 覚える名前 |
 |---|---:|---:|
 | protocol の要件（protocol ごとに 1 回） | 796 | 166 |
-| 値の型だけが持つ関数 | 293 | 293 |
-| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 203 | 203 |
-| 計 | 1292 | 662 |
+| 値の型だけが持つ関数 | 295 | 295 |
+| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 211 | 211 |
+| 計 | 1302 | 672 |
 
 ## モジュールごとの数
 
@@ -62,7 +62,7 @@
 | [`base64`](#base64) | 4 | 0 | 0 | 2 | 0 | [L2-base64.md](L2-base64.md) |
 | [`bigint`](#bigint)（新しいモジュール） | 24 | 24 | 0 | 0 | 0 | [L2-bigint.md](L2-bigint.md) |
 | [`bool`](#bool) | 3 | 3 | 0 | 0 | 0 | [L2-bool.md](L2-bool.md) |
-| [`bytes`](#bytes) | 177 | 63 | 72 | 6 | 34 | [L2-bytes.md](L2-bytes.md) |
+| [`bytes`](#bytes) | 178 | 64 | 72 | 6 | 34 | [L2-bytes.md](L2-bytes.md) |
 | [`compute`](#compute) | 7 | 1 | 0 | 0 | 0 | [L2-compute.md](L2-compute.md) |
 | [`datetime`](#datetime) | 18 | 1 | 0 | 1 | 5 | [L2-datetime.md](L2-datetime.md) |
 | [`deque`](#deque)（新しいモジュール） | 60 | 60 | 0 | 0 | 0 | [L2-deque.md](L2-deque.md) |
@@ -74,7 +74,7 @@
 | [`float32`](#float32) | 24 | 23 | 0 | 0 | 9 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`float64`](#float64) | 24 | 23 | 0 | 0 | 9 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`fs`](#fs) | 30 | 1 | 2 | 4 | 5 | [L2-fs.md](L2-fs.md) |
-| [`hash`](#hash) | 11 | 8 | 0 | 2 | 1 | [L2-hash.md](L2-hash.md) |
+| [`hash`](#hash) | 19 | 16 | 0 | 2 | 1 | [L2-hash.md](L2-hash.md) |
 | [`heap`](#heap)（新しいモジュール） | 16 | 16 | 0 | 0 | 0 | [L2-heap.md](L2-heap.md) |
 | [`hex`](#hex) | 3 | 0 | 0 | 0 | 0 | [L2-hex.md](L2-hex.md) |
 | [`html`](#html) | 5 | 0 | 0 | 0 | 0 | [L2-html.md](L2-html.md) |
@@ -98,7 +98,7 @@
 | [`regex`](#regex) | 15 | 7 | 1 | 7 | 0 | [L2-regex.md](L2-regex.md) |
 | [`result`](#result) | 14 | 0 | 0 | 0 | 1 | [L2-result.md](L2-result.md) |
 | [`set`](#set) | 42 | 23 | 0 | 0 | 0 | [L2-set.md](L2-set.md) |
-| [`string`](#string) | 85 | 40 | 3 | 2 | 5 | [L2-string.md](L2-string.md) |
+| [`string`](#string) | 86 | 41 | 3 | 2 | 5 | [L2-string.md](L2-string.md) |
 | [`testing`](#testing) | 10 | 0 | 0 | 2 | 0 | [L2-testing.md](L2-testing.md) |
 | [`uint16`](#uint16) | 35 | 32 | 0 | 0 | 15 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`uint32`](#uint32) | 35 | 32 | 0 | 0 | 19 | [L2-sized-numbers.md](L2-sized-numbers.md) |
@@ -275,6 +275,7 @@
 | `insert` | `fn bytes.insert(b: Bytes, i: Int, x: Int) -> Bytes` | 意味変更: `0..=len` の外は abort | R-bytes-11 |
 | `intersperse` | `fn bytes.intersperse(b: Bytes, sep: Int) -> Bytes` | 新規 | R-L0-42 |
 | `is_empty` | `fn bytes.is_empty(b: Bytes) -> Bool` |  |  |
+| `is_equal_constant_time` | `fn bytes.is_equal_constant_time(a: Bytes, b: Bytes) -> Bool` | 新規 | R-bytes-29 |
 | `is_eof` | `fn bytes.is_eof(b: Bytes, pos: Int) -> Bool` | 改名（旧 `eof`） | R-bytes-07 |
 | `is_valid_utf8` | `fn bytes.is_valid_utf8(b: Bytes) -> Bool` |  |  |
 | `last` | `fn bytes.last(b: Bytes) -> Int?` | 新規 | R-bytes-20 |
@@ -787,6 +788,14 @@
 | `adler32` | `fn hash.adler32(b: Bytes) -> Int` | 新規 | R-hash-02 |
 | `crc32` | `fn hash.crc32(b: Bytes) -> Int` | 新規 | R-hash-02 |
 | `fnv1a32` | `fn hash.fnv1a32(b: Bytes) -> Int` | 意味変更: 引数を `Bytes` に。`fnv1a32(bytes.from_string(s))` | R-hash-01 |
+| `hmac_sha256` | `fn hash.hmac_sha256(key: Bytes, b: Bytes) -> Bytes` | 新規 | R-hash-06 |
+| `hmac_sha256_hex` | `fn hash.hmac_sha256_hex(key: Bytes, b: Bytes) -> String` | 新規 | R-hash-06 |
+| `hmac_sha512` | `fn hash.hmac_sha512(key: Bytes, b: Bytes) -> Bytes` | 新規 | R-hash-06 |
+| `hmac_sha512_hex` | `fn hash.hmac_sha512_hex(key: Bytes, b: Bytes) -> String` | 新規 | R-hash-06 |
+| `is_valid_hmac_sha256` | `fn hash.is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool` | 新規 | R-hash-06 |
+| `is_valid_hmac_sha256_hex` | `fn hash.is_valid_hmac_sha256_hex(key: Bytes, b: Bytes, tag: String) -> Bool` | 新規 | R-hash-06 |
+| `is_valid_hmac_sha512` | `fn hash.is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool` | 新規 | R-hash-06 |
+| `is_valid_hmac_sha512_hex` | `fn hash.is_valid_hmac_sha512_hex(key: Bytes, b: Bytes, tag: String) -> Bool` | 新規 | R-hash-06 |
 | `md5` | `fn hash.md5(b: Bytes) -> Bytes` | 新規 | R-hash-03 |
 | `md5_hex` | `fn hash.md5_hex(b: Bytes) -> String` | 新規。`Bytes` を受け取る | R-hash-03、R-hash-05 |
 | `sha1` | `fn hash.sha1(b: Bytes) -> Bytes` | 新規 | R-hash-03 |
@@ -1880,6 +1889,7 @@
 | `is_alphanumeric` | `fn string.is_alphanumeric(s: String) -> Bool` |  |  |
 | `is_digit` | `fn string.is_digit(s: String) -> Bool` |  |  |
 | `is_empty` | `fn string.is_empty(s: String) -> Bool` |  |  |
+| `is_equal_constant_time` | `fn string.is_equal_constant_time(a: String, b: String) -> Bool` | 新規 | R-string-19 |
 | `is_lower` | `fn string.is_lower(s: String) -> Bool` |  |  |
 | `is_upper` | `fn string.is_upper(s: String) -> Bool` |  |  |
 | `is_whitespace` | `fn string.is_whitespace(s: String) -> Bool` |  |  |

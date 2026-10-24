@@ -1,7 +1,7 @@
 <!-- description: Stdlib redesign L2/L3 — bytes: in-place verbs (push / put_ / append_), one byte-IO family, raw pointers out to ffi, and the same sequence names as list and string -->
 # L2/L3: bytes
 
-> Last updated: 2026-10-21
+> Last updated: 2026-10-24
 > 前提: [L0](L0-conventions.md)・[L1](L1-categories.md)
 > 出典: Rust https://doc.rust-lang.org/std/vec/struct.Vec.html ・ https://doc.rust-lang.org/std/primitive.u32.html ・ Go https://pkg.go.dev/encoding/binary (F) ・ https://pkg.go.dev/bytes ・ Python https://docs.python.org/3/library/struct.html ・ https://docs.python.org/3/library/stdtypes.html#bytearray ・ TS/JS https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/DataView (F) ・ Gleam https://gleam-stdlib.hexdocs.pm/gleam/bit_array.html (F) ・ Elixir https://elixir.hexdocs.pm/Kernel.html#binary_part/3 ・ OCaml https://ocaml.org/manual/latest/api/Bytes.html (F) ・ Kotlin https://kotlinlang.org/api/core/kotlin-stdlib/kotlin/-byte-array/ ・ Swift https://developer.apple.com/documentation/foundation/data
 > 実測: `almide 0.68.0 (dev, 437b8f127)`、native と `--target wasm` の両方。プローブは scratchpad の `probe-bytes/`。
@@ -350,6 +350,15 @@
 - (d) 改名と追加です。`almide fix` が `bytes.new(n)` を `bytes.zeros(n)` に書き換えます。
 - issue: #4012
 
+### R-bytes-29 定数時間の比較 `bytes.is_equal_constant_time` を置く — ○ 採用
+
+- いま: `==` は最初に違うバイトで返ります。MAC やトークンを `==` で比べると、時間から値を 1 バイトずつ当てられます。
+- 案: `bytes.is_equal_constant_time(a: Bytes, b: Bytes) -> Bool`。長さが違えばすぐ false（長さは公開）。同じ長さなら全部のバイトを読み、`a[i] xor b[i]` の OR を最後に 1 回だけ 0 と比べます。`string.is_equal_constant_time`（R-string-19）と {Bytes, String} の型の行列のセルです（R-L0-01 の行列の例外）。
+- native は `@intrinsic`（runtime で毎回 `core::hint::black_box`）、wasm は添字の比較だけが分岐の固定のループです。`tests/constant_time_compare_structure_test.rs` が出力したコードを検査します。
+- 根拠の L0 規則: R-L0-09（Bool は `is_`）、R-L0-30（対等な 2 つは `a`・`b`）。
+- (a) Go `subtle.ConstantTimeCompare`、Python `hmac.compare_digest`、Node `crypto.timingSafeEqual`、Java `MessageDigest.isEqual`。
+- (d) 追加。契約 C-421。issue: #4106（R-hash-06）
+
 ## L3: 関数表
 
 （146 関数 + 追加 13。判定の内訳: 据え置き 58・改名 53・撤去 31・意味変更 4・追加 13。改名の `put_` 15 件は、R-bytes-11 で範囲外の挙動も変わります）
@@ -567,6 +576,7 @@
 | `strip_suffix` | （追加）`bytes.strip_suffix(b: Bytes, suffix: Bytes) -> Bytes?` | Rust `strip_suffix` / Go `CutSuffix` | 追加 | R-bytes-27 |
 | `count_matches` | （追加）`bytes.count_matches(b: Bytes, needle: Bytes) -> Int` | Go `bytes.Count` / Python `count` | 追加 | R-bytes-27 |
 | `new` | （追加）`bytes.new() -> Bytes` | Rust `Vec::new` / Swift `Data()` / Go `[]byte{}` | 追加 | R-bytes-28 |
+| `is_equal_constant_time` | `bytes.is_equal_constant_time(a: Bytes, b: Bytes) -> Bool`（案） | Go `subtle.ConstantTimeCompare` / Python `hmac.compare_digest` / Node `crypto.timingSafeEqual` | 追加 | R-bytes-29 |
 
 ## L0 への差し戻し（処理済み）
 
