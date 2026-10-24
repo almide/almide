@@ -59,6 +59,26 @@ fn leaf_satisfies(env: &TypeEnv, leaf: Sym, proto: &str) -> bool {
     }
     false
 }
+/// A Secret in `ty` that no nominal Codec type of its own decodes (#4107):
+/// `List[Secret[String]]` is one, a field of a `: Codec` record that holds
+/// Secret fields itself (it derives its own `decode`) is not.
+fn secret_outside_codec_types(env: &TypeEnv, ty: &Ty) -> bool {
+    if crate::secret_type::secret_payload(ty).is_some() {
+        return true;
+    }
+    match ty {
+        Ty::Named(n, _) => {
+            let bare = n.as_str().rsplit('.').next().unwrap_or(n.as_str());
+            if env.functions.contains_key(&sym(&format!("{}.decode", n))) || env.functions.contains_key(&sym(&format!("{}.decode", bare))) {
+                return false;
+            }
+            env.types.get(n).is_some_and(|t| crate::secret_type::holds_secret(env, t))
+        }
+        Ty::Applied(_, args) | Ty::Tuple(args) => args.iter().any(|a| secret_outside_codec_types(env, a)),
+        Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| secret_outside_codec_types(env, t)),
+        _ => false,
+    }
+}
 /// The Codec derive serializes a field by structural recursion over String/Int/Float/Bool/Option/List/Named — it has NO Map or Set arm, so a `Map[K,V]` / `Set[T]` field silently falls through to the `Value`-as-String fallback: invalid Rust natively (E0614/E0308) and wrong/silent on wasm (#655). Detect such a container anywhere in the field type (under List/Option/Result/Tuple/anon-record). A `Map`/`Set` reached only through a NAMED type is that type's own concern (its `: Codec` is checked by the leaf rule), so we stop at `Ty::Named`.
 fn codec_unsupported_container(ty: &Ty) -> Option<&'static str> {
     use almide_lang::types::TypeConstructorId as TC;
@@ -206,6 +226,37 @@ fn validate_derive_field(
     // two could be passed from different protocols at the call site. One name,
     // derived here.
     let p = proto.as_str();
+    // #4107 (R-secret-04): a `Secret[A]` FIELD decodes from A's wire form and
+    // is never encoded; A follows the ordinary field grammar (Secret[Bytes]
+    // is the Bytes E023). A Secret anywhere else in the field type has no
+    // wire form at all.
+    if p == "Codec" {
+        let is_variant = matches!(env.types.get(&type_name), Some(Ty::Variant { .. }));
+        if let Some(payload) = crate::secret_type::secret_payload(field_ty).filter(|_| !is_variant) {
+            if let Some((offender, hint)) = codec_field_shape_error(payload) {
+                if reported.insert((type_name, proto, sym(&offender))) {
+                    diagnostics.push(err(
+                        format!("type '{}' derives 'Codec' but field '{}' is a Secret of {}, which the Codec derive cannot decode",
+                            type_name, field_name, offender),
+                        hint,
+                        format!("type {} : Codec", type_name),
+                    ).with_code("E023"));
+                }
+            }
+            return;
+        }
+        if secret_outside_codec_types(env, field_ty) {
+            if reported.insert((type_name, proto, sym("<nested-secret>"))) {
+                diagnostics.push(err(
+                    format!("type '{}' derives 'Codec' but field '{}' holds a Secret inside '{}', which the Codec derive cannot decode",
+                        type_name, field_name, field_ty.display()),
+                    "A Codec record decodes a Secret only as a field's own type (`password: Secret[String]`). Decode the inner shape into its own Codec type with Secret fields, or hand-write Type.decode.".to_string(),
+                    format!("type {} : Codec", type_name),
+                ).with_code("E023"));
+            }
+            return;
+        }
+    }
     // #655: the Codec derive has no Map/Set arm — reject such a field here rather than emitting invalid Rust / silent-wrong wasm. Same E023 family (a field that cannot satisfy Codec).
     if p == "Codec" {
         if let Some(container) = codec_unsupported_container(field_ty) {

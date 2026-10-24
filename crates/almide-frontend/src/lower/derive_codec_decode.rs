@@ -12,7 +12,22 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
     let mut field_vars = Vec::new();
     let key_name = |f: &IrFieldDecl| -> String { f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string()) };
 
-    for f in fields {
+    for f_decl in fields {
+        // #4107 (R-secret-04): a `Secret[A]` field decodes as an A field
+        // (its default revealed) and is wrapped as the Secret afterwards.
+        let secret_inner = crate::secret_type::secret_payload(&f_decl.ty).cloned();
+        let f_owned;
+        let f = match &secret_inner {
+            Some(a) => {
+                f_owned = IrFieldDecl {
+                    ty: a.clone(),
+                    default: f_decl.default.clone().map(|d| e_(IrExprKind::Member { object: Box::new(d), field: sym("hidden") }, a.clone())),
+                    ..f_decl.clone()
+                };
+                &f_owned
+            }
+            None => f_decl,
+        };
         let is_option = f.ty.is_option();
         let has_default = f.default.is_some();
         let inner_ty = f.ty.inner().cloned().unwrap_or_else(|| f.ty.clone());
@@ -20,7 +35,7 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
         // field literally named `v` would shadow the document in the emitted
         // Rust and every later field would read the decoded value instead of
         // the doc ("expected Object" at runtime).
-        let field_var = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
+        let field_var = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f_decl.ty.clone(), Mutability::Let, None);
 
         // value.field(_v, "key") — returns Result[Value, String]
         let get_field_call = IrExpr {
@@ -140,11 +155,18 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
             dec_field_expr(wk, get_and_try, &f.ty, &value_ty, &key_name(f))
         };
 
+        let decode_expr = match &secret_inner {
+            Some(_) => e_(IrExprKind::Record {
+                name: Some(sym(crate::secret_type::SECRET_TYPE.1)),
+                fields: vec![(sym("hidden"), decode_expr)],
+            }, f_decl.ty.clone()),
+            None => decode_expr,
+        };
         stmts.push(IrStmt {
-            kind: IrStmtKind::Bind { var: field_var, mutability: Mutability::Let, ty: f.ty.clone(), value: decode_expr },
+            kind: IrStmtKind::Bind { var: field_var, mutability: Mutability::Let, ty: f_decl.ty.clone(), value: decode_expr },
             span: None,
         });
-        field_vars.push((f.name, field_var, f.ty.clone()));
+        field_vars.push((f.name, field_var, f_decl.ty.clone()));
     }
 
     // ok(TypeName { field1: _field1, field2: _field2, ... })

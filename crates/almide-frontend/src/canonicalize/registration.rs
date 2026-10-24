@@ -600,7 +600,13 @@ pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str,
             "Eq" => register(env, "eq", FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] }),
             "Repr" => register(env, "repr", FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] }),
             "Codec" => {
-                register(env, "encode", FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
+                // #4107 (R-secret-04): a type holding a Secret derives `decode`
+                // only; its `encode` does not exist (E023 at the reference).
+                let holds = env.types.get(&sym(&canonical)).or_else(|| env.types.get(&sym(type_name)))
+                    .is_some_and(|t| crate::secret_type::holds_secret(env, t));
+                if !holds {
+                    register(env, "encode", FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
+                }
                 register(env, "decode", FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
                 // #4108: the strict sibling — refuses a key outside the
                 // record's decoded fields. Records only: a variant's wire form

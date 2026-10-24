@@ -120,6 +120,9 @@ impl Checker {
         // the callable-object constrain below and E001'd "expected P but got
         // fn() -> …" — but the object was never a function; the METHOD is
         // what does not exist. Name that directly.
+        if field == "encode" && self.reject_secret_encode(&obj_concrete) {
+            return Ty::Named(sym("Value"), vec![]);
+        }
         if matches!(&obj_concrete, Ty::Named(..) | Ty::Record { .. }) && !obj_concrete.contains_typevar() {
             let type_name = obj_concrete.display();
             self.emit(super::err(
@@ -323,6 +326,9 @@ impl Checker {
                 format!("method call .{}()", field),
             ).with_code("E002"));
             return Some(Ty::Unknown);
+        }
+        if field == "encode" && self.reject_secret_encode(&Ty::Named(almide_base::intern::sym(module), vec![])) {
+            return Some(Ty::Named(almide_base::intern::sym("Value"), vec![]));
         }
         // Use the *full* surface (TOML + bundled `.almd`) so fns migrated through the Stdlib Unification arc still power the E002 suggestion. `module_functions` only sees TOML, so after `stdlib/string.almd` replaced the TOML the method-call try-snippet silently disappeared.
         let module_funcs = crate::stdlib::module_functions_current(module);

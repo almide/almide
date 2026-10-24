@@ -240,7 +240,8 @@ impl TestFailure {
                 return out;
             }
         };
-        match Diff::of(expected, found) {
+        let diff = if self.message == DECLARED_REPR { None } else { Diff::of(expected, found) };
+        match diff {
             Some(d) => {
                 out.push_str(&format!("  hint: {}\n", d.hint()));
                 out.push_str("  diff: -expected +found\n");
@@ -268,6 +269,7 @@ impl TestFailure {
             .expected
             .as_deref()
             .zip(self.found.as_deref())
+            .filter(|_| self.message != DECLARED_REPR)
             .and_then(|(e, f)| Diff::of(e, f))
             .map(|d| d.render());
         let v = serde_json::json!({
@@ -391,6 +393,9 @@ pub(super) fn is_block_end(line: &str) -> bool {
 /// print `assertion \`left == right\` failed[: <msg>]` + `  left:` / ` right:`,
 /// and the `<msg>` is the `at line N` the builtin-lowering pass injected.
 fn classify(file: &str, payload: &[String]) -> TestFailure {
+    if let Some(f) = repr_assert(file, payload) {
+        return f;
+    }
     let head = payload[0].as_str();
     let (op, message) = head_op(head);
     let base = TestFailure {
@@ -412,6 +417,49 @@ fn classify(file: &str, payload: &[String]) -> TestFailure {
     // as two identical values.
     let expected = if op == "assert_ne" { format!("!= {right}") } else { right };
     TestFailure { expected: Some(expected), found: Some(left), ..base }
+}
+
+/// The message marking an assert over a type that declares its own repr
+/// (#4107): its expected/found are that repr's text, shown as they are.
+pub const DECLARED_REPR: &str = "(declared repr)";
+
+/// An in-test `assert_eq` / `assert_ne` over a type with a declared repr
+/// somewhere inside (#4107). The frontend lowers it to the harness
+/// `assert(cond, msg)` with `msg` = `assert_eq[ (declared repr)]` +
+/// `\n  expected: <r>\n  found: <l>`, both rendered through the declared
+/// repr; the payload ends with the injected ` (at line N)`. When the type
+/// itself declares its repr the pair is never field-diffed: a field diff is
+/// the structural renderer, which that type opted out of.
+fn repr_assert(file: &str, payload: &[String]) -> Option<TestFailure> {
+    let head = payload.first()?.as_str();
+    let (op, own) = match head {
+        "assert_eq" => ("assert_eq", false),
+        "assert_ne" => ("assert_ne", false),
+        "assert_eq (declared repr)" => ("assert_eq", true),
+        "assert_ne (declared repr)" => ("assert_ne", true),
+        _ => return None,
+    };
+    let rest: Vec<&str> = payload[1..].iter().map(|l| l.as_str()).collect();
+    let e = rest.iter().position(|l| l.starts_with("  expected: "))?;
+    let v = rest.iter().position(|l| l.starts_with("  found: "))?;
+    if v < e {
+        return None;
+    }
+    let mut found = join_field(&rest[v..], "  found: ");
+    let mut line = None;
+    if let Some(cut) = found.rfind(" (at line ") {
+        line = site_line(&found[cut..]);
+        found.truncate(cut);
+    }
+    Some(TestFailure {
+        file: file.to_string(),
+        name: None,
+        line,
+        op: op.into(),
+        expected: Some(join_field(&rest[e..v], "  expected: ")),
+        found: Some(found),
+        message: if own { DECLARED_REPR.to_string() } else { String::new() },
+    })
 }
 
 /// `(op, message)` for a panic payload's first line. The site marker the
@@ -923,6 +971,23 @@ mod tests {
     fn nested_commas_do_not_split_items() {
         assert_eq!(split_top_level("[1, 2], [3]"), vec!["[1, 2]", "[3]"]);
         assert_eq!(split_top_level("\"a, b\", c"), vec!["\"a, b\"", "c"]);
+    }
+
+    #[test]
+    fn a_declared_repr_assert_parses_and_is_never_field_diffed() {
+        let payload: Vec<String> = ["assert_eq (declared repr)", "  expected: User { name: b }", "  found: User { name: a } (at line 7)"]
+            .iter().map(|s| s.to_string()).collect();
+        let f = classify("m.almd", &payload);
+        assert_eq!(f.op, "assert_eq");
+        assert_eq!(f.line, Some(7));
+        assert_eq!(f.expected.as_deref(), Some("User { name: b }"));
+        assert_eq!(f.found.as_deref(), Some("User { name: a }"));
+        assert_eq!(f.render(), "  at:   m.almd:7\n  expected: User { name: b }\n  found:    User { name: a }\n");
+        // A type with a declared repr only INSIDE it keeps the field diff,
+        // over text the declaration already rendered.
+        let nested: Vec<String> = ["assert_eq", "  expected: L { u: \"b\", pw: Secret(***) }", "  found: L { u: \"a\", pw: Secret(***) } (at line 3)"]
+            .iter().map(|s| s.to_string()).collect();
+        assert!(classify("m.almd", &nested).render().contains("diff: -expected +found"));
     }
 
     #[test]
