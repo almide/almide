@@ -14,10 +14,11 @@ only go DOWN:
               signature (arity, parameter names, types, effect)
   undeprecated  a function the redesign removes or renames that is still
               public without `@deprecated` (epoch 15 opens the window)
-  lang_wait   target functions whose target form needs a protocol feature
-              the language does not have yet (#4000) — a built-in type
-              conforming to a protocol (`list.sum[A: Numeric]`). Counted,
-              never failed: R-L0-37 makes the pyramid an assumed design.
+  lang_wait   unshipped target functions whose target form needs a protocol
+              feature (#4000) — a built-in type conforming to a protocol
+              (`list.sum[A: Numeric]`). Counted, never failed: R-L0-37 makes
+              the pyramid an assumed design. Once shipped, a function is
+              measured like any other.
 
 usage: check-stdlib-target.py [--list missing|shape|undeprecated|lang_wait] [--write] [--self-test]
 """
@@ -84,7 +85,9 @@ def measure(t, have):
         m = SIG.match(r['sig'])
         gen = (m['gen'] or '') if m else ''
         bounds = set(re.findall(r':\s*(\w+)', gen))
-        if bounds & LANG_WAIT:
+        # waiting on the language only while it is not shipped: a shipped
+        # protocol-generic function is measured like any other
+        if bounds & LANG_WAIT and key not in have:
             res['lang_wait'].append(f"{r['mod']}.{r['name']}  {r['sig']}"); continue
         if key not in have:
             res['missing'].append(f"{r['mod']}.{r['name']}  [{r['kind']}]  {r['sig']}"); continue

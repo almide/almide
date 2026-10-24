@@ -190,11 +190,6 @@ class = "legacy"
 names = 2
 
 [[site]]
-id = "crates/almide-frontend/src/canonicalize/protocols.rs::BUILTIN_PROTOCOLS::table"
-class = "legacy"
-names = 4
-
-[[site]]
 id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_ALLOC_CALLS::table"
 class = "legacy"
 names = 9
@@ -1196,3 +1191,9 @@ id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::FLOATING::table"
 class = "justified"
 names = 22
 why = "The columns of a family gate: the FloatingPoint requirements (protocol-view.md, R-sized-02/03/08/11) every fixed-width float must carry as a concrete function until a built-in type can conform to a protocol. The gate asserts every carrier x requirement cell exists; no codegen leg reads it."
+
+[[site]]
+id = "crates/almide-frontend/src/canonicalize/protocols.rs::OPERATOR_REQUIREMENTS::table"
+class = "justified"
+names = 5
+why = "The legacy BUILTIN_PROTOCOLS row (Numeric's add/sub/mul/div), moved and joined by rem for `%`: which requirement an operator desugars to is a fact about the operator syntax, the way Swift's `static func +` is, not a property of the stdlib functions. A primitive satisfies it with the operator itself and a declared type (BigInt) with the function its module defines under that name, so one pairing both the protocol declaration and the lowering read is the declaration."
