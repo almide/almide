@@ -28,6 +28,7 @@ mod almide_rt_sys_ffi {
             pub fn pthread_kill(thread: usize, sig: i32) -> i32;
             pub fn _exit(code: i32) -> !;
             pub fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+            pub fn kill(pid: i32, sig: i32) -> i32;
         }
     }
 
@@ -95,6 +96,20 @@ mod almide_rt_sys_ffi {
         // SAFETY: `raw` is a live, writable i32 for the whole call.
         let r = unsafe { c::waitpid(pid, &mut raw, WNOHANG | WUNTRACED) };
         (r == pid).then_some(raw)
+    }
+
+    /// `kill(pid, sig)` (#4125): `Err(errno)` on failure. The syscall itself,
+    /// so `process.kill` / `is_alive` never run a `kill` found on PATH. The
+    /// caller (process_core's `almide_proc_kill`) passes only pid > 0 and
+    /// 0 <= sig <= 31, so a process group or "every process" is never named.
+    #[cfg(unix)]
+    pub fn send_signal(pid: i32, sig: i32) -> Result<(), i32> {
+        // SAFETY: kill takes two ints and touches no memory of ours.
+        if unsafe { c::kill(pid, sig) } == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error().raw_os_error().unwrap_or(0))
+        }
     }
 
     /// The calling thread's CPU time in ns (CLOCK_THREAD_CPUTIME_ID), `None`
