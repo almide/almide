@@ -34,7 +34,7 @@ pub fn effect_value_diagnostics(ir: &IrProgram, file: &str) -> Vec<Diagnostic> {
             } else {
                 format!("pure function `{}`", v.function)
             };
-            let message = format!("{subject} runs an effect function through a function value");
+            let message = format!("{subject} runs an effect function it does not call by name");
             let hint = format!(
                 "A plain `fn` cannot run an `effect fn`, even one it receives as a value — a callback, a \
                  record field, a list element (ADR-0009 D2). Mark `{}` as `effect fn` if it is meant to \

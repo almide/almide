@@ -36,9 +36,9 @@ effect fn read_n_bytes(n: Int) -> List[Int] = _
 /// Low byte of each Int to stdout; unflushed.
 @intrinsic("almide_rt_io_write_bytes")
 @category("IO.stdout")
-fn write_bytes(data: List[Int]) -> Unit = _
+effect fn write_bytes(data: List[Int]) -> Unit = _
 
 /// Raw data to stdout; no newline.
 @intrinsic("almide_rt_io_write")
 @category("IO.stdout")
-fn write(data: Bytes) -> Unit = _
+effect fn write(data: Bytes) -> Unit = _

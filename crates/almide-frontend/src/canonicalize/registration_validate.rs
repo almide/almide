@@ -289,6 +289,10 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
                 let target = ImplTarget { name: *type_name, is_generic, ty: &type_ty };
                 if !is_generic_protocol {
                     validate_protocol_method_impl(env, diagnostics, &target, *proto_name, method_sig);
+                    // #4158: effect-ness and `mut` modes are part of the
+                    // signature on a non-generic protocol too — an `effect`
+                    // impl of a pure method let a pure bounded caller run it.
+                    validate_protocol_method_modes(env, diagnostics, &target, *proto_name, method_sig);
                     continue;
                 }
                 let applied = crate::types::ProtocolMethodSig {

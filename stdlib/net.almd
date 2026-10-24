@@ -37,7 +37,7 @@ effect fn tcp_close(stream: Int) -> Result[Unit, String] = _
 // ── Status ──
 /// False after tcp_close; a peer close is not seen.
 @intrinsic("almide_rt_net_tcp_is_open")
-fn tcp_is_open(stream: Int) -> Bool = _
+effect fn tcp_is_open(stream: Int) -> Bool = _
 
 // ── Timeout ──
 /// Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.

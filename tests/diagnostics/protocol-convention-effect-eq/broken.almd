@@ -1,0 +1,14 @@
+// #4158: `==` calls `Foo.eq` implicitly, so an `effect fn Foo.eq` made a
+// pure `a == b` write a file. The `Eq` convention declares `eq` pure.
+import fs
+
+type Foo: Eq = { n: Int }
+
+effect fn Foo.eq(a: Foo, b: Foo) -> Bool = {
+  fs.write("eq.txt", "x")!
+  a.n == b.n
+}
+
+fn same(a: Foo, b: Foo) -> Bool = a == b
+
+effect fn main() -> Unit = println("${same(Foo { n: 1 }, Foo { n: 1 })}")

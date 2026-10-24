@@ -142,6 +142,9 @@ fn scan_function(program: &IrProgram, ix: &Index<'_>, pools: &Pools, sh: &mut Sh
             let declared = declared_direct_effects(func).into_iter().fold(0, |m, c| m | graph::bit(c));
             if declared != 0 {
                 let label = format!("@extern {}", func.name);
+                // Categories only: a plain-`fn` `@extern` is the JS / native
+                // host's synchronous import, callable from a pure fn (#4159
+                // leaves its effect bit to a ruling; see ADR-0026's note).
                 scan.g.push(Edge::Const { to: info.own, cats: declared, sym: None, label: Some(label) });
             }
             // The effect bit (#4151): an `effect fn` runs effects by its

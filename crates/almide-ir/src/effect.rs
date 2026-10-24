@@ -639,6 +639,30 @@ mod classification_gate {
         assert_eq!(Effect::granted_by("Process"), None);
     }
 
+    /// #4159, the reverse of the Pure-module gate: a public plain `fn` of a
+    /// module classified `All(_)` would carry the module's host category but
+    /// be callable from a pure fn (E006 reads the `effect` marker). Each one
+    /// is an `effect fn`, or says with an empty `@category()` that it reaches
+    /// no host (`random.next_int` over a seeded state, `env.os`). And no
+    /// plain fn anywhere declares a host category.
+    #[test]
+    fn a_public_plain_fn_of_an_effect_module_reaches_no_host() {
+        for (m, row) in STDLIB_MODULE_EFFECTS {
+            if *m == "fan" { continue; }
+            for d in module_fns(m) {
+                let almide_lang::ast::Decl::Fn { visibility, .. } = d else { continue };
+                if fn_is_effect(d) { continue; }
+                let declared = declared_categories(d);
+                assert!(declared.as_ref().is_none_or(|c| c.is_empty()),
+                    "`{m}.{}` is a plain fn with a host category: make it `effect fn`", fn_name(d));
+                if matches!(row, ModuleEffects::All(_)) && *visibility == almide_lang::ast::Visibility::Public {
+                    assert!(declared.is_some(),
+                        "`{m}.{}` is a public plain fn of an `All(_)` module: make it `effect fn`, or declare `@category()` if it reaches no host", fn_name(d));
+                }
+            }
+        }
+    }
+
     /// Every `@category` in the stdlib names a leaf, sits in a classified
     /// module that is not `Pure`, and every `effect fn` of such a module has a
     /// category (an abort-only one has `Abort`).

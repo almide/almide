@@ -30,6 +30,7 @@ effect fn has_flag(name: String) -> Bool = {
   __flag_at(env.args(), "--" + name, short, 0)
 }
 
+@category()
 fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
   if i >= list.len(args) then false
   else {
@@ -59,6 +60,7 @@ effect fn option(name: String) -> String? = {
   }
 }
 
+@category()
 fn __find_prefixed(args: List[String], prefix: String, i: Int) -> String? =
   if i >= list.len(args) then none
   else if string.starts_with(list.get_or(args, i, ""), prefix) then list.get(args, i)
@@ -4283,6 +4285,7 @@ effect fn temp_dir() -> String = _
 
 /// Host OS: macos, linux, windows or unknown; "wasi" on wasm (C-189).
 @intrinsic("almide_rt_env_os")
+@category()
 fn os() -> String = _
 "#;
 pub const SRC_ENV_ARGS: &str = r#"
@@ -12851,12 +12854,12 @@ effect fn read_n_bytes(n: Int) -> List[Int] = _
 /// Low byte of each Int to stdout; unflushed.
 @intrinsic("almide_rt_io_write_bytes")
 @category("IO.stdout")
-fn write_bytes(data: List[Int]) -> Unit = _
+effect fn write_bytes(data: List[Int]) -> Unit = _
 
 /// Raw data to stdout; no newline.
 @intrinsic("almide_rt_io_write")
 @category("IO.stdout")
-fn write(data: Bytes) -> Unit = _
+effect fn write(data: Bytes) -> Unit = _
 "#;
 pub const SRC_IO_PRINT: &str = r#"
 
@@ -27673,7 +27676,7 @@ effect fn tcp_close(stream: Int) -> Result[Unit, String] = _
 
 /// False after tcp_close; a peer close is not seen.
 @intrinsic("almide_rt_net_tcp_is_open")
-fn tcp_is_open(stream: Int) -> Bool = _
+effect fn tcp_is_open(stream: Int) -> Bool = _
 
 
 /// Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
@@ -30269,12 +30272,12 @@ effect fn exec_attached(cmd: String, args: List[String]) -> Result[Int, String] 
 /// OS process ID of this program.
 @intrinsic("almide_rt_process_pid")
 @category("Env.read")
-fn pid() -> Int = _
+effect fn pid() -> Int = _
 
 /// Variable value, or none if unset.
 @intrinsic("almide_rt_process_env")
 @category("Env.read")
-fn env(key: String) -> String? = _
+effect fn env(key: String) -> String? = _
 
 /// Pid of cmd started in the background.
 @ordered
@@ -30289,11 +30292,11 @@ effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 /// Blocks ms milliseconds; negative is 0.
 @intrinsic("almide_rt_process_sleep")
 @category("Time")
-fn sleep(ms: Int) -> Unit = _
+effect fn sleep(ms: Int) -> Unit = _
 
 /// True while pid exists, zombies included.
 @intrinsic("almide_rt_process_is_alive")
-fn is_alive(pid: Int) -> Bool = _
+effect fn is_alive(pid: Int) -> Bool = _
 "#;
 pub const SRC_PROCESS_ARGS: &str = r#"
 
@@ -30504,6 +30507,7 @@ local fn rng_next64(rng: Rng) -> (Int, Rng) = match rng {
 }
 
 /// A generator whose stream is fixed by seed.
+@category()
 fn seeded(seed: Int) -> Rng = Rng(seed)
 
 
@@ -30525,6 +30529,7 @@ local fn rng_below(rng: Rng, span: Int) -> (Int, Rng) = {
 }
 
 /// An Int in [min, max] (both ends) and the next state; min, state unchanged, if max <= min.
+@category()
 fn next_int(rng: Rng, min: Int, max: Int) -> (Int, Rng) = if max <= min then (min, rng)
 else {
   let span = max - min + 1
@@ -30539,12 +30544,14 @@ else {
 }
 
 /// A Float in [0, 1) from the top 53 bits, and the next state.
+@category()
 fn next_float(rng: Rng) -> (Float, Rng) = {
   let (z, next) = rng_next64(rng)
   (float.from_int(rng_shr(z, 11)) * 1.1102230246251565e-16, next)
 }
 
 /// A uniformly chosen element (none, state unchanged, when xs is empty) and the next state.
+@category()
 fn next_choice[A](rng: Rng, xs: List[A]) -> (A?, Rng) = if list.is_empty(xs) then (none, rng)
 else {
   let (i, next) = next_int(rng, 0, list.len(xs) - 1)
@@ -30552,6 +30559,7 @@ else {
 }
 
 /// A uniform permutation of xs (Fisher-Yates) and the next state.
+@category()
 fn next_shuffle[A](rng: Rng, xs: List[A]) -> (List[A], Rng) = {
   var ys = xs
   var r = rng
