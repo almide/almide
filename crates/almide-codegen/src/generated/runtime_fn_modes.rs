@@ -659,6 +659,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_process_sleep" => &[false],
         "almide_rt_process_spawn" => &[false, false],
         "almide_rt_process_stdin_lines" => &[],
+        "almide_rt_random_bytes" => &[false],
         "almide_rt_random_choice" => &[false],
         "almide_rt_random_float" => &[],
         "almide_rt_random_int" => &[false, false],

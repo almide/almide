@@ -30,7 +30,7 @@ float.to_string  availability_pure_batch  floor: consumed inside a self-hosted b
 int.band  datetime_monotonic_ns  floor: consumed inside a self-hosted body
 int.bor  zlib_call_vs_user_namesake  floor: consumed inside a self-hosted body
 int.bshl  zlib_call_vs_user_namesake  floor: consumed inside a self-hosted body
-int.bshr  zlib_call_vs_user_namesake  floor: consumed inside a self-hosted body
+int.bshr  random_bytes  floor: consumed inside a self-hosted body
 int.bxor  zlib_call_vs_user_namesake  floor: consumed inside a self-hosted body
 int.from_int16  int_bit_family  floor: consumed inside a self-hosted body
 int.from_int32  checked_conversion_value_match  floor: consumed inside a self-hosted body

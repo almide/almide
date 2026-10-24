@@ -30334,22 +30334,26 @@ pub const SRC_RANDOM: &str = r#"
 
 
 
-/// Random Int in [min, max]; min if max <= min.
+/// Random Int in [min, max]; min if max <= min. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_int")
 effect fn int(min: Int, max: Int) -> Int = _
 
-/// Random Float in [0, 1); not crypto-grade.
+/// Random Float in [0, 1). Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_float")
 effect fn float() -> Float = _
 
-/// Random element of xs; none when empty.
+/// Random element of xs; none when empty. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_choice")
 effect fn choice[T](xs: List[T]) -> T? = _
 
-/// Random permutation of xs as a new list.
+/// Random permutation of xs as a new list. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_shuffle")
 @consume(xs)
 effect fn shuffle[T](xs: List[T]) -> List[T] = _
+
+/// n bytes from the OS cryptographic random source (CSPRNG); n < 0 aborts.
+@intrinsic("almide_rt_random_bytes")
+effect fn bytes(n: Int) -> Bytes = _
 
 
 
@@ -30434,6 +30438,46 @@ fn next_shuffle[A](rng: Rng, xs: List[A]) -> (List[A], Rng) = {
     i = i - 1
   }
   (ys, r)
+}
+"#;
+pub const SRC_RANDOM_BYTES: &str = r#"
+
+
+
+
+
+
+
+
+
+fn random_bytes(n: Int) -> Bytes = {
+  if n < 0 then prim.die(prim.handle("Error: random.bytes: negative length ${int.to_string(n)}\n")) else ()
+  let buf = prim.alloc_bytes(n)
+  let p = prim.handle(buf) + 12
+  var off = 0
+  while off + 256 <= n {
+    let _e = prim.random_get(p + off, 256)
+    off = off + 256
+  }
+  while off + 8 <= n {
+    let _e = prim.random_get(p + off, 8)
+    off = off + 8
+  }
+  if off < n then __rb_tail(p, off, n) else ()
+  buf
+}
+
+fn __rb_tail(p: Int, off: Int, n: Int) -> Unit = {
+  let scratch = prim.alloc_bytes(8)
+  let sp = prim.handle(scratch) + 12
+  let _e = prim.random_get(sp, 8)
+  var r = prim.load64(sp)
+  var i = off
+  while i < n {
+    prim.store8(p + i, int.band(r, 255))
+    r = int.bshr(r, 8)
+    i = i + 1
+  }
 }
 "#;
 pub const SRC_RANDOM_CHOICE: &str = r#"
@@ -42593,6 +42637,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "process_stdin_lines" => Some(SRC_PROCESS_STDIN_LINES),
         "process_wasm" => Some(SRC_PROCESS_WASM),
         "random" => Some(SRC_RANDOM),
+        "random_bytes" => Some(SRC_RANDOM_BYTES),
         "random_choice" => Some(SRC_RANDOM_CHOICE),
         "random_float" => Some(SRC_RANDOM_FLOAT),
         "random_int" => Some(SRC_RANDOM_INT),
