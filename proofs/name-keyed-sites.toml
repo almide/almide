@@ -747,7 +747,7 @@ names = 46
 [[site]]
 id = "crates/almide-types/src/self_host_registry.rs::self_host_runtime::table"
 class = "legacy"
-names = 1787
+names = 1783
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
@@ -1032,7 +1032,7 @@ names = 4
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_SUM::table"
 class = "legacy"
-names = 92
+names = 91
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_VERIFIED::table"
@@ -1052,7 +1052,7 @@ names = 6
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::HTTP_SERVE_SUM::table"
 class = "legacy"
-names = 6
+names = 5
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::MATH_VERIFIED::table"
@@ -1198,3 +1198,9 @@ id = "src/cli/fs_scope_twin.rs::rewrite::table"
 class = "justified"
 names = 4
 why = "These are Rust std::path::Path method names (exists / is_dir / is_file / is_symlink) rewritten in the native fs runtime source text to the scoped twin's descriptor-relative methods, not Almide stdlib functions: the list is the set of std calls the twin replaces, so it lives beside the textual rewrite that reads it."
+
+[[site]]
+id = "src/wasm_leg.rs::link_self_host::scan_expr::or-pattern"
+class = "justified"
+names = 3
+why = "A link-time dependency of the structural leg's lowering, not a property of the stdlib functions: value.object, value.to_camel_case and value.to_snake_case lower to code that calls the linked `__vu_fold_pairs` (C-401), which is reachable only through value.pick, so the linker has to be told to pull that surface in, beside the sibling float.to_string / string.from_bytes / testing.assert_contains rows of the same scan."
