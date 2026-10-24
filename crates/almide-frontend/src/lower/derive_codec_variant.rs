@@ -221,13 +221,11 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                     },
                     ty: type_ty.clone(), span: None, def_id: None,
                 };
-                IrExpr {
-                    kind: IrExprKind::Block {
-                        stmts,
-                        expr: Some(Box::new(IrExpr { kind: IrExprKind::ResultOk { expr: Box::new(ctor) }, ty: result_ty.clone(), span: None, def_id: None })),
-                    },
-                    ty: result_ty.clone(), span: None, def_id: None,
-                }
+                let bind_arr = stmts.remove(0);
+                let body = e_(IrExprKind::Block { stmts, expr: Some(Box::new(e_(IrExprKind::ResultOk { expr: Box::new(ctor) }, result_ty.clone()))) }, result_ty.clone());
+                let arr = e_(IrExprKind::Var { id: arr_var }, arr_ty.clone());
+                let guarded = tuple_arity_guard(arr, fields.len(), case.name.as_str(), &type_name, &result_ty, body);
+                e_(IrExprKind::Block { stmts: vec![bind_arr], expr: Some(Box::new(guarded)) }, result_ty.clone())
             }
             IrVariantKind::Record { fields } => {
                 // Payload is `{ "field": value, … }` (see variant encode). Decode each
