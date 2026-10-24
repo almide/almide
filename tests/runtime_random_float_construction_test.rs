@@ -14,7 +14,8 @@
 // quotient rounded to 1.0.
 //
 // So this test compiles the SHIPPED source text itself. `runtime/rs/src/random.rs`
-// is self-contained (`std::cell::Cell` and nothing else), which is what makes
+// is self-contained (`std::cell::Cell`, libc's entropy call, and the prelude's
+// `almide_abort`, stubbed below), which is what makes
 // the include legal here and not a general answer: most of runtime/rs resolves
 // only under the embedder's flat concatenation plus a synthesised prelude, so
 // including another module would not compile. Do not read this file as a
@@ -34,6 +35,11 @@ mod runtime_random {
         env!("CARGO_MANIFEST_DIR"),
         "/runtime/rs/src/random.rs"
     ));
+
+    // The emitted prelude's abort, which random.bytes calls on a negative n.
+    fn almide_abort(msg: impl std::fmt::Display) -> ! {
+        panic!("{msg}")
+    }
 
     // `almide_float_from_u64` is private in the shipped source and stays that
     // way — the emitted crate is one flat module, so a visibility change there
@@ -95,4 +101,27 @@ fn the_public_draw_stays_in_range() {
         let f = runtime_random::almide_rt_random_float();
         assert!((0.0..1.0).contains(&f), "random.float() returned {f}");
     }
+}
+
+/// `random.bytes` (C-394) reads the OS source in 256-byte chunks (getentropy's
+/// limit): the length is exact on both sides of a chunk boundary, the bytes
+/// past the first chunk are drawn too, and two draws differ.
+#[test]
+fn random_bytes_fills_every_chunk() {
+    for n in [0usize, 1, 255, 256, 257, 300, 1024] {
+        assert_eq!(runtime_random::almide_rt_random_bytes(n as i64).len(), n);
+    }
+    let a = runtime_random::almide_rt_random_bytes(600);
+    assert!(a[256..512].iter().any(|&b| b != 0), "second chunk never drawn");
+    assert!(a[512..].iter().any(|&b| b != 0), "third chunk never drawn");
+    assert_ne!(
+        runtime_random::almide_rt_random_bytes(32),
+        runtime_random::almide_rt_random_bytes(32)
+    );
+}
+
+#[test]
+#[should_panic(expected = "random.bytes: negative length -1")]
+fn random_bytes_refuses_a_negative_length() {
+    runtime_random::almide_rt_random_bytes(-1);
 }
