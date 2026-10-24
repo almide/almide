@@ -62,6 +62,15 @@ impl<'a> Interpreter<'a> {
             "result" => Self::eval_container_op_result,
             _ => return None,
         };
+        // The generic `list.sum` / `list.product` [A: Numeric] reached as an
+        // unmonomorphized `list.*` call: only the STATIC element type says
+        // which number type's fold answers it (a sized Int is a `Value::Int`
+        // too), so an element type outside Int / Float abstains.
+        let op: Op<'a> = match (module, func) {
+            ("list", "sum") => Self::numeric_list_fold(tys.as_deref())?,
+            ("list", "product") => Self::numeric_list_fold(tys.as_deref())?,
+            _ => op,
+        };
         // INSIDE the pool tier a heap value is its address, so a native op
         // over a real container would store or compare an ARGUMENT's address
         // (`map.set(acc, k, v)` with a String `k` a body just built): two
@@ -69,18 +78,6 @@ impl<'a> Interpreter<'a> {
         // `http.query_params` kept both `q`s of `?q=a&q=c`. Every argument is
         // read back under its STATIC type first, as `eval_hof` reads back its
         // receiver; one with no faithful read-back abstains.
-        // The generic `list.sum` / `list.product` [A: Numeric] reached as an
-        // unmonomorphized `list.*` call: only the STATIC element type says
-        // which number type's fold answers it (a sized Int is a `Value::Int`
-        // too), so an element type outside Int / Float abstains.
-        let op: Op<'a> = match (module, func) {
-            ("list", "sum" | "product") => match list_elem_ty(tys.as_deref()) {
-                Some(almide_lang::types::Ty::Int) => Self::eval_container_op_list_agg_int,
-                Some(almide_lang::types::Ty::Float) => Self::list_float_fold,
-                _ => return None,
-            },
-            _ => op,
-        };
         if self.pool_depth > 0 {
             match self.sync_container_args(args, tys.as_deref()) {
                 Ok(Some(synced)) => return op(self, func, &synced),
@@ -295,6 +292,19 @@ impl<'a> Interpreter<'a> {
             .map(|(a, b)| Value::tuple(vec![a.clone(), b.clone()]))
             .collect();
         Flow::val(Value::list(r))
+    }
+
+    /// The fold answering the generic `list.sum` / `list.product` for the
+    /// call's static element type, or none (abstain) outside Int / Float.
+    #[allow(clippy::type_complexity)]
+    fn numeric_list_fold(
+        tys: Option<&[almide_lang::types::Ty]>,
+    ) -> Option<fn(&mut Interpreter<'a>, &str, &[Value]) -> Option<Flow>> {
+        match list_elem_ty(tys)? {
+            almide_lang::types::Ty::Int => Some(Self::eval_container_op_list_agg_int),
+            almide_lang::types::Ty::Float => Some(Self::list_float_fold),
+            _ => None,
+        }
     }
 
     /// `list.sum` / `list.product` over `List[Int]`: the Int instances
