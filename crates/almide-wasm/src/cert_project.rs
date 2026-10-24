@@ -95,6 +95,10 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         1 | 4..=6 | 11..=14 | 17 | 18 | 22..=25 | 38..=42 | 51 | 52 | 61..=64 => &[FS_READ],
         2 | 3 | 7..=10 | 15 | 16 | 20 | 21 => &[FS_WRITE],
         19 => &[FS_READ, FS_WRITE],
+        // The rooted family's descriptor ops (#4084, fs_root.rs): read text,
+        // read bytes, list, exists read; write text and remove write.
+        120..=123 => &[FS_READ],
+        124 | 125 => &[FS_WRITE],
         26..=29 | 33 | 37 => &[ENV],
         30 | 73 => &[STDOUT],
         32 => &[ENTROPY],

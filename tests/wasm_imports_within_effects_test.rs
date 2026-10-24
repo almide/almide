@@ -49,31 +49,63 @@ const BASE: &[&str] = &["fd_write", "proc_exit", "clock_time_get"];
 /// category; an effect missing here allows nothing more, so a new category
 /// fails this gate until its row is written down.
 const BY_EFFECT: &[(&str, &[&str])] = &[
-    (
-        "IO",
-        &[
-            // stdin, files, directories, and the preopen walk that resolves a
-            // relative path (which reads the environment for the cwd).
-            "fd_read",
-            "fd_close",
-            "fd_filestat_get",
-            "fd_prestat_get",
-            "fd_prestat_dir_name",
-            "fd_readdir",
-            "path_open",
-            "path_filestat_get",
-            "path_create_directory",
-            "path_remove_directory",
-            "path_unlink_file",
-            "path_rename",
-            "environ_get",
-            "environ_sizes_get",
-        ],
-    ),
-    ("Env", &["environ_get", "environ_sizes_get", "args_get", "args_sizes_get"]),
+    // #4155 reports ADR-0026 D2 leaves. The file and stdin leaves each keep
+    // the whole call set the old `IO` row allowed: a program that reads one
+    // file links the fs service, so a per-leaf split here would only move
+    // the bound, not tighten it. Narrowing per leaf is a follow-up.
+    ("FS.read", FILE_AND_STDIN),
+    // `fs.create_temp_file` / `create_temp_dir` name the entry from the
+    // entropy source (#4113), so writing may draw random bytes.
+    ("FS.write", FILE_AND_STDIN_WITH_TEMP_NAMES),
+    ("IO.stdin", FILE_AND_STDIN),
+    // Console output and abort are [`BASE`]: they add nothing.
+    ("IO.stdout", &[]),
+    ("IO.stderr", &[]),
+    ("Abort", &[]),
+    ("Env.read", &["environ_get", "environ_sizes_get", "args_get", "args_sizes_get"]),
+    ("Env.write", &["environ_get", "environ_sizes_get", "args_get", "args_sizes_get"]),
     ("Rand", &["random_get"]),
     ("Time", &[]),
     ("Fan", &[]),
+];
+
+/// [`FILE_AND_STDIN`] plus the entropy a temp entry's name is drawn from.
+const FILE_AND_STDIN_WITH_TEMP_NAMES: &[&str] = &[
+    "fd_read",
+    "fd_close",
+    "fd_filestat_get",
+    "fd_prestat_get",
+    "fd_prestat_dir_name",
+    "fd_readdir",
+    "path_open",
+    "path_filestat_get",
+    "path_create_directory",
+    "path_remove_directory",
+    "path_unlink_file",
+    "path_rename",
+    "environ_get",
+    "environ_sizes_get",
+    "random_get",
+];
+
+/// The calls the old single `IO` category allowed: stdin, files,
+/// directories, and the preopen walk that resolves a relative path (which
+/// reads the environment for the cwd).
+const FILE_AND_STDIN: &[&str] = &[
+    "fd_read",
+    "fd_close",
+    "fd_filestat_get",
+    "fd_prestat_get",
+    "fd_prestat_dir_name",
+    "fd_readdir",
+    "path_open",
+    "path_filestat_get",
+    "path_create_directory",
+    "path_remove_directory",
+    "path_unlink_file",
+    "path_rename",
+    "environ_get",
+    "environ_sizes_get",
 ];
 
 /// The `cert_project::cap` ids any program's `fs_call` ops may reach:
@@ -82,14 +114,28 @@ const BASE_CAPS: &[u32] = &[cap::STDOUT, cap::CLOCK];
 
 /// The capability ids each effect adds to [`BASE_CAPS`], as [`BY_EFFECT`].
 const CAPS_BY_EFFECT: &[(&str, &[u32])] = &[
-    ("IO", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN]),
-    ("Env", &[cap::ENV]),
+    ("FS.read", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN]),
+    ("FS.write", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN]),
+    ("IO.stdin", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN]),
+    ("IO.stdout", &[]),
+    ("IO.stderr", &[]),
+    ("Abort", &[]),
+    ("Env.read", &[cap::ENV]),
+    ("Env.write", &[cap::ENV]),
     ("Rand", &[cap::ENTROPY]),
     ("Time", &[cap::CLOCK]),
-    ("Net", &[cap::NET]),
-    ("Process", &[cap::PROC]),
+    ("Net.fetch", &[cap::NET]),
+    ("Net.listen", &[cap::NET]),
+    ("Proc", &[cap::PROC]),
     ("Fan", &[]),
 ];
+
+/// Effects a program may have and still count as touching nothing: console
+/// output and abort (ADR-0022 lets a plain `fn` print), which [`BASE`] covers.
+const CONSOLE_ONLY: &[&str] = &["IO.stdout", "IO.stderr", "Abort"];
+
+/// The leaves that reach files or stdin: what the old `IO` category meant.
+const FILE_LEAVES: &[&str] = &["FS.read", "FS.write", "IO.stdin"];
 
 /// The file-system calls: what a program without `IO` must never import.
 const FILE_SYSTEM: &[&str] = &["path_open", "fd_prestat_get", "fd_readdir", "fd_filestat_get", "path_filestat_get"];
@@ -241,10 +287,10 @@ fn every_shipped_module_imports_only_what_its_effects_allow() {
                 }
             }
         }
-        if row.effects.is_empty() {
+        if row.effects.iter().all(|e| CONSOLE_ONLY.contains(&e.as_str())) {
             pure += 1;
         }
-        if row.effects.contains("IO") {
+        if FILE_LEAVES.iter().any(|l| row.effects.contains(*l)) {
             io += 1;
             if FILE_SYSTEM.iter().any(|c| row.imports.contains(*c)) {
                 io_with_fs += 1;
