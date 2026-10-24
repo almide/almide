@@ -1,14 +1,25 @@
 // random extern — Rust native implementations (no external crate)
-// int/float/choice/shuffle use a time-seeded xorshift (not for secrets);
-// random.bytes reads the OS CSPRNG (getrandom / getentropy).
+// int/float/choice/shuffle use a per-thread xorshift seeded from OS entropy
+// (#4122; not for secrets); random.bytes reads the OS CSPRNG (getrandom / getentropy).
 
 use std::cell::Cell;
 
+// The seed (#4122): std's `RandomState` draws its SipHash keys from the OS
+// CSPRNG (getrandom / getentropy / BCryptGenRandom) once per THREAD, and that
+// is the only std-only OS-entropy door without `unsafe` or a crate dependency
+// (the generated program has neither). Hashing the thread's id through those
+// keys keeps two threads apart even if their keys ever coincided. The former
+// seed — SystemTime nanos — handed every `fan` arm started in the same clock
+// tick the SAME stream. xorshift's all-zero state is a fixed point: `| 1`.
+fn almide_rng_seed() -> u64 {
+    use std::hash::{BuildHasher, Hash, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    std::thread::current().id().hash(&mut h);
+    h.finish() | 1
+}
+
 thread_local! {
-    static ALMIDE_RNG_STATE: Cell<u64> = Cell::new({
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-        t.as_nanos() as u64 ^ 0x517cc1b727220a95
-    });
+    static ALMIDE_RNG_STATE: Cell<u64> = Cell::new(almide_rng_seed());
 }
 
 fn next_u64() -> u64 {
@@ -121,6 +132,6 @@ pub fn almide_rt_random_bytes(n: i64) -> Vec<u8> {
 // The 53-bit construction's boundary cells are EXECUTED, but not from here:
 // tests/runtime_random_float_construction_test.rs `include!`s this file and
 // asserts them under `cargo test --workspace`. That works because this module
-// is self-contained (std::cell::Cell and nothing else); most of runtime/rs is
+// is self-contained (std alone); most of runtime/rs is
 // not, which is why the general rule stays "the oracle is spec/" — see
 // runtime/rs/README.md.
