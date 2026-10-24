@@ -517,7 +517,7 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
 }
 
 /// op 32 (`prim.random_get`, #4122): `n` bytes from the OS CSPRNG
-/// (getrandom(2) / getentropy(3) / BCryptGenRandom), the source the stock
+/// (getrandom(2) on Linux, getentropy(3) on macOS), the source the stock
 /// wasm leg's WASI `random_get` and native `random.*` draw from. A clock-seeded
 /// generator reseeded per call answered the SAME bytes to every call inside
 /// one clock tick. An OS entropy failure is a host fault, not a guest value:
