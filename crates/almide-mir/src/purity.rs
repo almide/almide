@@ -318,6 +318,21 @@ pub fn is_pure(module: &str, func: &str) -> bool {
     PURE_MODULES.contains(&module) || is_pure_fn_in_impure_module(module, func)
 }
 
+/// Whether bundled `module` declares a public (non-`local`) fn named `func`,
+/// read from its `.almd` source — the declaration is the one place the
+/// module's surface is written down.
+fn declares_public_fn(module: &str, func: &str) -> bool {
+    let Some(src) = almide_lang::stdlib_info::bundled_source(module) else {
+        return false;
+    };
+    src.lines().any(|line| {
+        let decl = line.strip_prefix("effect ").unwrap_or(line);
+        decl.strip_prefix("fn ").is_some_and(|rest| {
+            rest.strip_prefix(func).is_some_and(|tail| tail.starts_with(['(', '[']))
+        })
+    })
+}
+
 /// A genuinely-PURE function living inside an otherwise impure-plain module. `datetime` is walled
 /// as a whole because `now`/`monotonic_ns` read the wall clock, but its calendar arithmetic over a
 /// plain i64 Unix-seconds timestamp reaches NO host capability — admitting it is the refinement the
@@ -380,18 +395,21 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
         // / zlib_deflate.almd) reach no host capability, and the `effect fn`
         // spelling is the Result carrier, not an effect. The bounded decoders
         // (`inflate_max` / `decompress_max` / `gunzip_max`, #4020) are the same
-        // transforms with a caller-chosen output bound. The module is admitted
-        // whole, as `ffi` is, rather than by a list of its names: a list is a
-        // second copy of the surface, and the bounded decoders were missing
-        // from it. A future zlib fn that reaches a real capability is a host
-        // op, and `host_ops::classify` answers HostOp before it asks purity.
+        // transforms with a caller-chosen output bound. Admission is read from
+        // the module's own declarations (stdlib/zlib.almd) rather than from a
+        // list of its names here — a list is a second copy of the surface, and
+        // the bounded decoders were missing from it. A name zlib does not
+        // declare stays walled, and a future zlib fn that reaches a real
+        // capability is a host op, which `host_ops::classify` answers before
+        // it asks purity.
+        "zlib" => declares_public_fn("zlib", func),
         // `ffi` (R-ffi-01): `address` / `to_int` build an address as a value,
         // and `read` / `write` copy through one inside the program's own
         // memory (stdlib/ffi_bridge.almd over bytes_rawptr.almd: prim loads and stores, no host op).
         // The `effect fn` spelling of read/write marks memory outside Almide's
         // values (R-ffi-02), not a host capability; `--profile critical`
         // refuses the module wholesale (#4008).
-        "ffi" | "zlib" => true,
+        "ffi" => true,
         // Pure data codecs on the blanket-impure http module (the network fns stay
         // walled): url_decode is a percent-decoder (stdlib/http_url_decode.almd).
         //
@@ -448,6 +466,11 @@ mod tests {
         assert!(is_pure("list", "len"));
         assert!(is_pure("json", "parse"));
         assert!(is_pure("path", "join"));
+        // zlib is admitted by its own declarations: every declared fn, the
+        // bounded decoders included, and no undeclared name.
+        assert!(is_pure("zlib", "inflate"));
+        assert!(is_pure("zlib", "gunzip_max"));
+        assert!(!is_pure("zlib", "inflat"));
     }
 
     #[test]
