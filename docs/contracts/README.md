@@ -424,9 +424,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-386 | A record-form fan block is the record literal of its fields, run as parallel siblings | 0.68.0 | active | fixture | 2 |
 | C-387 | Identifiers are UAX #31 names held in NFC; compatibility characters are refused; a caseless name is type-side only by declaration; non-ASCII names run byte-identically on every leg | 0.68.0 | active | fixture | 1 |
 | C-388 | A bare call names the definition of its own scope, never a same-spelled fn of the entry program or another module | 0.68.0 | active | fixture | 2 |
-| C-389 | http.serve reads up to 64 connections at once and answers a request head not whole within 10 s with 408, so a slow client holds only its own connection | 0.69.0 | active | fixture | 0 |
-| C-390 | The zlib decoders bound their output: past the bound they stop with one err text on every leg | 0.69.0 | active | fixture | 1 |
-| C-391 | json.parse bounds nesting at 1000 levels with one err text on every leg | 0.69.0 | active | fixture | 1 |
-| C-392 | fs.open_root's family keeps every path inside its root: a path that leaves it by .., an absolute path or a symlink is refused with one message on every target | 0.69.0 | active | fixture | 1 |
-| C-393 | [permissions] fs bounds every fs call to the granted directories, symlinks resolved, with one refusal on native and the embedded wasm host | 0.69.0 | active | fixture | 0 |
+| C-394 | random.bytes draws n bytes from the platform CSPRNG: n = 0 is empty, a negative n aborts with one text on every leg | 0.69.0 | active | fixture | 2 |
 
