@@ -22,7 +22,7 @@ effect fn main() -> Unit = {
   for i in 0..<1000 {
     push_xs(xs, i)
   }
-  var b = bytes.new(0)
+  var b = bytes.zeros(0)
   for i in 0..<1000 {
     push_b(b, i)
   }

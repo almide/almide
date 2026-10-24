@@ -125,7 +125,7 @@ import os, subprocess, sys
 out, checker, exceptions_path, kgen = sys.argv[1:5]
 FN = {"ownership": "check_xc", "names": "check_names_cert", "caps": "check_caps_cert",
       "caps-transitive": "check_prog_cert", "call-modes": "check_modes_cert",
-      "bounds": "check_bounds_cert"}
+      "bounds": "check_bounds_cert", "init": "check_init_cert"}
 
 def parse(path):
     b = open(path, "rb").read()
@@ -213,7 +213,7 @@ for key in sorted(exceptions - rejected_seen):
 def lit(s):
     return '"' + s.replace('"', '""') + '"'
 with open(kgen, "w") as g:
-    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert.\n")
+    g.write("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert InitCert.\n")
     g.write("From Stdlib Require Import String List.\nImport ListNotations.\nOpen Scope string_scope.\n")
     LIMIT = 60000  # literal bytes per goal: bounds the kernel's peak term
     for prop, ws in accepts.items():
@@ -231,6 +231,19 @@ with open(kgen, "w") as g:
 
 for p, (a, t) in stats.items():
     print(f"  [{p}] {a}/{t} witness(es) accepted by the extracted checker and almide-verify")
+# #4005 coverage: how many index-operator accesses the bounds witnesses
+# record, and how many of them carry no check of their own token count
+# (elided by #3345 and re-derived by the checker). Only accepted witnesses.
+import re as _re
+toks = {k: 0 for k in "acws"}
+for w in accepts["bounds"]:
+    for t in _re.findall(r"[acws](?=\d)", w):
+        toks[t] += 1
+print(f"  [bounds] recorded: {toks['a']} read(s), {toks['w']} write(s), {toks['c']} emitted check(s), {toks['s']} kill(s), over {sum(1 for w in accepts['bounds'] if w.strip(';'))} non-empty witness(es)")
+# #4013 coverage: the construction sites the init witnesses record (list
+# literals today; every other allocation site records nothing).
+sites = sum(len([x for x in w.split(";") if x.strip()]) for w in accepts["init"])
+print(f"  [init] recorded: {sites} construction site(s), over {sum(1 for w in accepts['init'] if w.strip())} non-empty witness(es)")
 n = sum(1 for _ in open(os.path.join(out, "index")))
 print(f"  {fixtures_ok}/{n} fixture(s) accepted on every property; {len(rejects)} rejected witness(es), each named in the exception ledger")
 for m in fail[:20]:
@@ -301,8 +314,53 @@ else
   rm -f "$PGEN"; exit 1
 fi
 
+# BOUNDS / INIT POISON LEG (#4005, #4013): proofs/poisoned-certs/<property>/*.cert
+# are the witnesses the structural emitter writes with a bounds check or a
+# slot store lost — scripts/witness-reinject.sh <property> re-injects each
+# bug and pins its witness to
+# these files. Every verdict must REJECT each one, on every run.
+for prop in bounds init; do
+  case "$prop" in bounds) PFN=check_bounds_cert; PMOD=BoundsCert ;; init) PFN=check_init_cert; PMOD=InitCert ;; esac
+  echo "== $(printf %s "$prop" | tr a-z A-Z) POISON LEG: every lost-${prop} witness is REJECTED by all three verdicts =="
+  PPOISONED=("$ROOT"/proofs/poisoned-certs/$prop/*.cert)
+  if [ ! -e "${PPOISONED[0]}" ]; then
+    echo "STRUCTURAL WALL FAIL: proofs/poisoned-certs/$prop/ holds no certificate — the $prop poison leg would pass vacuously." >&2
+    exit 1
+  fi
+  PGEN="$(mktemp /tmp/KernelPoison_XXXXXX).v"
+  python3 - "$PMOD" "$PFN" "${PPOISONED[@]}" > "$PGEN" <<'PYEOF'
+import sys
+mod, fn = sys.argv[1], sys.argv[2]
+print("From AlmideTrust Require Import %s." % mod)
+print("From Stdlib Require Import String.")
+print("Open Scope string_scope.")
+for path in sys.argv[3:]:
+    print('Goal %s "%s" = false.' % (fn, open(path).read().replace('"', '""')))
+    print("Proof. vm_compute. reflexivity. Qed.")
+PYEOF
+  for cert in "${PPOISONED[@]}"; do
+    name="${cert#"$ROOT"/}"
+    set +e
+    ./checker "$prop" "$cert" >/dev/null 2>&1; XRC=$?
+    "$VERIFY" "$prop" "$cert" >/dev/null 2>&1; PRC=$?
+    set -e
+    if [ "$XRC" -ne 1 ] || [ "$PRC" -ne 1 ]; then
+      echo "STRUCTURAL WALL FAIL: $name was not rejected (extracted checker exit $XRC, almide-verify exit $PRC; want 1 and 1)." >&2
+      rm -f "$PGEN"; exit 1
+    fi
+    echo "  REJECT $name (extracted checker + almide-verify)"
+  done
+  if (cd "$ROOT/proofs" && "$COQC" -Q . AlmideTrust "$PGEN" >/dev/null 2>&1); then
+    echo "  KERNEL OK: the Rocq kernel rejects all ${#PPOISONED[@]} $prop poisoned certificate(s)"
+    rm -f "$PGEN" "${PGEN%.v}.vo" "${PGEN%.v}.vos" "${PGEN%.v}.vok" "${PGEN%.v}.glob"
+  else
+    echo "STRUCTURAL WALL FAIL: the KERNEL did not reject a $prop poisoned certificate ($PFN = false failed)." >&2
+    rm -f "$PGEN"; exit 1
+  fi
+done
+
 echo
 echo "STRUCTURAL WALL OK: over the $N certified spec/wasm_cross fixtures, every ownership, call-mode,"
-echo "bounds, name-totality, capability and call-graph witness of the structural build is accepted —"
+echo "bounds, init, name-totality, capability and call-graph witness of the structural build is accepted —"
 echo "the extracted checker, the Rocq kernel and almide-verify agreeing on every verdict — and"
 echo "every bundle names the SHA-256 of the file 'almide build --target wasm' shipped for it."

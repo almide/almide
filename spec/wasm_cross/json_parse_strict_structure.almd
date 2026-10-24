@@ -1,0 +1,72 @@
+// @contract: C-401
+// json.parse accepts exactly one RFC 8259 value between JSON whitespace and
+// refuses everything else with one err text per case on every leg
+// (almide/almide#4112). It used to read a document differently from the
+// parsers in front of it: a repeated key kept its FIRST value where
+// JavaScript, Go and Python keep the last, trailing data and a second value
+// were ignored, and `{x: 1}`, `[1,]`, `[1 2]` and Unicode whitespace were
+// accepted. A repeated key is refused (I-JSON, RFC 7493 §2.3), so no two
+// readers can pick different values for it.
+import json
+
+fn s(text: String) -> String = match json.parse(text) {
+  ok(v) => "ok " + json.stringify(v),
+  err(e) => "err " + e,
+}
+
+effect fn main() -> Unit = {
+  // Duplicate keys, at any depth; the err names the repeat's opening quote.
+  println(s('{"user":"alice","amount":1,"user":"admin"}'))
+  println(s('{"a":{"b":1,"b":2}}'))
+  println(s('[{"k":1},{"k":2}]'))
+  println(s('{"a":1,"\\u0061":2}'))
+  println(s('{"a":1,"A":2}'))
+  // Trailing data and a second top-level value.
+  println(s('{"user":"a","amount":1} garbage'))
+  println(s('[1,2] [3]'))
+  println(s('1 2'))
+  println(s('"a""b"'))
+  println(s('null,'))
+  println(s('  [1]  \r\n\t'))
+  // Unquoted keys and other non-string keys.
+  println(s('{x: 1}'))
+  println(s('{1: 1}'))
+  println(s('{,}'))
+  // Trailing commas; the err names the comma.
+  println(s('[1,]'))
+  println(s('{"a":1,}'))
+  println(s('[1, ]'))
+  println(s('[,1]'))
+  // Missing separators and colons.
+  println(s('[1 2]'))
+  println(s('{"a":1 "b":2}'))
+  println(s('{"a" 1}'))
+  println(s('{"a"}'))
+  // End of input inside a container.
+  println(s('[1,'))
+  println(s('{"a":'))
+  println(s('{"a"'))
+  println(s('{'))
+  // Whitespace is space, tab, LF and CR only.
+  println(s('[1,\u{0B}2]'))
+  println(s('\u{0C}1'))
+  println(s('\u{A0}1'))
+  println(s('1\u{3000}'))
+  println(s('\u{FEFF}1'))
+  // Numbers follow RFC 8259's grammar whole.
+  println(s('[0,-0,1.5,-1.5e10,2E-3,1e+2,10]'))
+  println(s('01'))
+  println(s('-01'))
+  println(s('1.'))
+  println(s('.5'))
+  println(s('1e'))
+  println(s('-'))
+  println(s('+1'))
+  println(s('1.5.2'))
+  println(s('[1-2]'))
+  println(s('0x10'))
+  // Literals are whole words.
+  println(s('truex'))
+  println(s('[nulll]'))
+  println(s('tru'))
+}

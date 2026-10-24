@@ -16,8 +16,8 @@
 #   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_interp_ledger interp_bridge_fallback_ledger
 
 bytes.len  bytes_string_window_domain  floor: consumed inside a self-hosted body
-bytes.new  zlib_call_vs_user_namesake  floor: consumed inside a self-hosted body
 bytes.to_list  fs_composition_family  floor: consumed inside a self-hosted body
+bytes.zeros  zlib_call_vs_user_namesake  floor: consumed inside a self-hosted body
 env.set  env_set_overlay  env.set: no lowered body
 env.sleep_ms  env_sleep_pause  env.sleep_ms: no lowered body
 float.from_float32  endian_explicit_import  floor: consumed inside a self-hosted body
@@ -30,7 +30,7 @@ float.to_string  availability_pure_batch  floor: consumed inside a self-hosted b
 int.band  datetime_monotonic_ns  floor: consumed inside a self-hosted body
 int.bor  zlib_call_vs_user_namesake  floor: consumed inside a self-hosted body
 int.bshl  zlib_call_vs_user_namesake  floor: consumed inside a self-hosted body
-int.bshr  zlib_call_vs_user_namesake  floor: consumed inside a self-hosted body
+int.bshr  random_bytes  floor: consumed inside a self-hosted body
 int.bxor  zlib_call_vs_user_namesake  floor: consumed inside a self-hosted body
 int.from_int16  int_bit_family  floor: consumed inside a self-hosted body
 int.from_int32  checked_conversion_value_match  floor: consumed inside a self-hosted body
@@ -52,7 +52,7 @@ string.drop  json_path_edges  floor: consumed inside a self-hosted body
 string.drop_end  json_number_unicode  floor: consumed inside a self-hosted body
 string.ends_with  availability_pure_batch  floor: consumed inside a self-hosted body
 string.index_of  datetime_parse_iso_strict  floor: consumed inside a self-hosted body
-string.len  bytes_f16_offset_overflow  floor: consumed inside a self-hosted body
+string.len  codec_decode_error_surface  floor: consumed inside a self-hosted body
 string.lines  fs_composition_family  floor: consumed inside a self-hosted body
 string.repeat  availability_pure_batch  floor: consumed inside a self-hosted body
 string.replace  availability_pure_batch  floor: consumed inside a self-hosted body

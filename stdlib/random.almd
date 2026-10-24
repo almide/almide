@@ -3,22 +3,26 @@
 // Migrated mechanically from `stdlib/defs/random.toml` (4 fns). All
 // are `effect` (non-deterministic); the runtime impls stay in
 // `runtime/rs/src/random.rs`.
-/// Random Int in [min, max]; min if max <= min.
+/// Random Int in [min, max]; min if max <= min. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_int")
 effect fn int(min: Int, max: Int) -> Int = _
 
-/// Random Float in [0, 1); not crypto-grade.
+/// Random Float in [0, 1). Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_float")
 effect fn float() -> Float = _
 
-/// Random element of xs; none when empty.
+/// Random element of xs; none when empty. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_choice")
 effect fn choice[T](xs: List[T]) -> T? = _
 
-/// Random permutation of xs as a new list.
+/// Random permutation of xs as a new list. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_shuffle")
 @consume(xs)
 effect fn shuffle[T](xs: List[T]) -> List[T] = _
+
+/// n bytes from the OS cryptographic random source (CSPRNG); n < 0 aborts.
+@intrinsic("almide_rt_random_bytes")
+effect fn bytes(n: Int) -> Bytes = _
 
 // ── Seeded generator (R-random-01) ──
 // Plain fns: a seeded stream reads nothing from the environment, so every
@@ -42,6 +46,7 @@ local fn rng_next64(rng: Rng) -> (Int, Rng) = match rng {
 }
 
 /// A generator whose stream is fixed by seed.
+@category
 fn seeded(seed: Int) -> Rng = Rng(seed)
 
 // Unsigned a < b over all 64 bits.
@@ -63,6 +68,7 @@ local fn rng_below(rng: Rng, span: Int) -> (Int, Rng) = {
 }
 
 /// An Int in [min, max] (both ends) and the next state; min, state unchanged, if max <= min.
+@category
 fn next_int(rng: Rng, min: Int, max: Int) -> (Int, Rng) = if max <= min then (min, rng)
 else {
   let span = max - min + 1
@@ -77,12 +83,14 @@ else {
 }
 
 /// A Float in [0, 1) from the top 53 bits, and the next state.
+@category
 fn next_float(rng: Rng) -> (Float, Rng) = {
   let (z, next) = rng_next64(rng)
   (float.from_int(rng_shr(z, 11)) * 1.1102230246251565e-16, next)
 }
 
 /// A uniformly chosen element (none, state unchanged, when xs is empty) and the next state.
+@category
 fn next_choice[A](rng: Rng, xs: List[A]) -> (A?, Rng) = if list.is_empty(xs) then (none, rng)
 else {
   let (i, next) = next_int(rng, 0, list.len(xs) - 1)
@@ -90,6 +98,7 @@ else {
 }
 
 /// A uniform permutation of xs (Fisher-Yates) and the next state.
+@category
 fn next_shuffle[A](rng: Rng, xs: List[A]) -> (List[A], Rng) = {
   var ys = xs
   var r = rng

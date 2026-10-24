@@ -1,0 +1,47 @@
+// @contract: C-401
+// No Value holds an object key twice, so json.stringify never writes one twice
+// (almide/almide#4112). value.object folds a pair list that repeats a key as
+// one upsert per pair — the key keeps the position of its first occurrence and
+// takes the value of its last, json.to_map's rule (C-380) — so value.field,
+// value.keys, value.stringify, json.stringify and json.stringify_pretty all
+// see one entry. Before, value.object kept both pairs: value.field read the
+// first, stringify wrote both, and a last-wins parser downstream read the
+// second. value.pick of a non-object is the empty object: an allowlist over a
+// value that is not an object lets nothing through, where it used to hand the
+// value back whole. value.omit of a non-object still answers it unchanged.
+import json
+
+effect fn main() -> Unit = {
+  let role = value.object([("role", value.str("user")), ("id", value.int(7)), ("role", value.str("admin"))])
+  println(json.stringify(role))
+  println(value.stringify(role))
+  println(json.stringify_pretty(role))
+  println("${value.keys(role)}")
+  println(value.as_string(value.field(role, "role") ?? value.null()) ?? "?")
+  // Many repeats, and a wide object past the pairwise check.
+  let wide = value.object(0..<40 |> list.map((i) => ("k${i % 20}", value.int(i))))
+  println("${list.len(value.keys(wide))} ${json.stringify(wide)}")
+  // A nested object folds too; the merged result stays one entry per key.
+  let nested = value.object([
+    ("a", role),
+    ("a", value.object([("x", value.int(1)), ("x", value.int(2))]))
+  ])
+  println(json.stringify(nested))
+  println(json.stringify(value.merge(role, value.object([("id", value.int(8)), ("id", value.int(9))]))))
+  // pick on a non-object: nothing passes; omit: unchanged.
+  for v in [
+    value.str("admin"),
+    value.int(1),
+    value.null(),
+    value.array([value.int(1)]),
+    role
+  ] {
+    println("pick ${json.stringify(value.pick(v, ["role"]))} omit ${json.stringify(value.omit(v, ["role"]))}")
+  }
+  // A parsed document already has unique keys; a parse of a repeat is refused.
+  println(json.stringify(json.parse("{\"a\":1,\"b\":2}") ?? value.null()))
+  match json.parse("{\"a\":1,\"a\":2}") {
+    ok(v) => println("ok " + json.stringify(v)),
+    err(e) => println("err " + e),
+  }
+}

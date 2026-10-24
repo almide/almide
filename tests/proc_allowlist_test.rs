@@ -72,7 +72,9 @@ fn a_command_the_list_cannot_check_is_refused_too() {
 #[test]
 fn a_listed_command_runs_on_both_targets_and_no_key_bounds_nothing() {
     let main = "  let out = process.exec(\"sh\", [\"-c\", \"printf listed\"])!\n  println(out)";
-    for proc_line in ["proc = [\"sh\"]", "allow = [\"IO\", \"Env\"]"] {
+    // `Proc` (#4155) is what admits the spawn; without a `proc` list the
+    // build warns that any command may start, and still runs it.
+    for proc_line in ["proc = [\"sh\"]", "allow = [\"IO\", \"Proc\"]"] {
         let td = tempfile::TempDir::new().unwrap();
         project(td.path(), proc_line, main);
         for extra in [&[][..], &["--target", "wasm"]] {
@@ -81,6 +83,9 @@ fn a_listed_command_runs_on_both_targets_and_no_key_bounds_nothing() {
             let o = almide(td.path(), &args);
             assert!(o.status.success(), "{proc_line} {args:?}:\n{}", text(&o));
             assert_eq!(String::from_utf8_lossy(&o.stdout), "listed\n", "{proc_line} {args:?}");
+            if proc_line.starts_with("allow") {
+                assert!(text(&o).contains("warning: [permissions].allow grants `Proc` with no `proc = [...]` command list"), "{}", text(&o));
+            }
         }
     }
 }

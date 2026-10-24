@@ -1,4 +1,4 @@
-// @contract: C-367, C-389
+// @contract: C-367, C-389, C-405, C-407
 // A SERVER fixture for what the shared server core answers ITSELF and how it
 // shapes a handler's answer (almide/almide#2823, #2826, #2822): no generic
 // runner executes it. The driver (tests/http_serve_cross_test.rs in
@@ -13,6 +13,12 @@
 // answer the same. It also holds one connection open sending its request
 // head byte by byte (almide/almide#4021, C-389): another client must be
 // answered at once, and the slow one `408` at the 10 s header deadline.
+// And it sends the header field lines RFC 9112 refuses (almide/almide#4112,
+// C-405): whitespace between a field name and its colon
+// (`Transfer-Encoding : chunked`), a line without a colon, and an obs-fold
+// continuation line. Each is `400` on both legs before the handler runs.
+// Every answer, the core's own included, carries `X-Content-Type-Options:
+// nosniff` unless the handler set the field (almide/almide#4134, C-407).
 // Usage: almide run http_serve_limits.almd [--target wasm] -- <port>
 import env
 import http

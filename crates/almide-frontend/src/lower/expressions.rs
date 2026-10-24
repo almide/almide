@@ -752,6 +752,8 @@ include!("expressions_block.rs");
 
 include!("expressions_access.rs");
 
+include!("expressions_requirement_ops.rs");
+
 include!("expressions_fan.rs");
 
 include!("expressions_fan_arms.rs");

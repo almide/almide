@@ -28,7 +28,7 @@ fn run_twice(f: () -> Unit) -> Unit = {
 }
 
 effect fn main() -> Unit = {
-  var h: H = { xs: [], s: "", m: [:], b: bytes.new(2), n: 0, inner: { ys: [] } }
+  var h: H = { xs: [], s: "", m: [:], b: bytes.zeros(2), n: 0, inner: { ys: [] } }
   // called once, per mutator
   let push_once = () => {
     list.push(h.xs, 1)
@@ -43,7 +43,7 @@ effect fn main() -> Unit = {
   }
   map_once()
   let bytes_once = () => {
-    bytes.set_u8(h.b, 1, 7)
+    bytes.put_u8(h.b, 1, 7)
   }
   bytes_once()
   let bump = () => {

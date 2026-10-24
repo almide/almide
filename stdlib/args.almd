@@ -29,6 +29,7 @@ effect fn has_flag(name: String) -> Bool = {
   __flag_at(env.args(), "--" + name, short, 0)
 }
 
+@category
 fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
   if i >= list.len(args) then false
   else {
@@ -58,6 +59,7 @@ effect fn option(name: String) -> String? = {
   }
 }
 
+@category
 fn __find_prefixed(args: List[String], prefix: String, i: Int) -> String? =
   if i >= list.len(args) then none
   else if string.starts_with(list.get_or(args, i, ""), prefix) then list.get(args, i)

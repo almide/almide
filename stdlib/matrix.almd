@@ -131,6 +131,10 @@ fn to_bytes_f64_le(m: Matrix) -> Bytes = _
 @intrinsic("almide_rt_matrix_to_bytes_f32_le")
 fn to_bytes_f32_le(m: Matrix) -> Bytes = _
 
+/// Row-major f16 LE, 2 bytes each (rounded to nearest even; overflow is inf).
+@intrinsic("almide_rt_matrix_to_bytes_f16_le")
+fn to_bytes_f16_le(m: Matrix) -> Bytes = _
+
 /// f16 LE rows x cols at offset; all 0 if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f16_le")
 fn from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _

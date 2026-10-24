@@ -312,16 +312,16 @@ fn the_stock_serve_export_answers_what_native_answers_under_wasmtime_serve() {
             String::from_utf8_lossy(w)
         );
     }
-    for (i, why) in REFUSED_AT {
+    for (i, _why) in REFUSED_AT {
         for (leg, raw) in [("native", &answers[*i].0), ("export", &answers[*i].1)] {
             let o = observe(raw).unwrap_or_else(|e| panic!("{leg} {i}: {e}"));
-            assert_eq!((o.status, String::from_utf8_lossy(&o.body).into_owned()), (500, format!("Internal error: {why}")), "{leg} {i}\n{log}");
+            assert_eq!((o.status, String::from_utf8_lossy(&o.body).into_owned()), (500, "Internal Server Error".to_string()), "{leg} {i}\n{log}");
         }
     }
     for (leg, raw) in [("native", &answers[FRAMED_AT].0), ("export", &answers[FRAMED_AT].1)] {
         let o = observe(raw).unwrap_or_else(|e| panic!("{leg}: {e}"));
         assert_eq!((o.status, o.body.as_slice()), (200, b"hello".as_slice()), "{leg}\n{log}");
-        assert_eq!(o.headers.keys().collect::<Vec<_>>(), ["x-kept"], "{leg}: {:?}", String::from_utf8_lossy(raw));
+        assert_eq!(o.headers.keys().collect::<Vec<_>>(), ["x-content-type-options", "x-kept"], "{leg}: {:?}", String::from_utf8_lossy(raw));
     }
     let refused = |raw: &[u8], status: u16, reason: &str| {
         let o = observe(raw).unwrap_or_else(|e| panic!("{e}: {:?}\n{log}", String::from_utf8_lossy(raw)));

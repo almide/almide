@@ -177,12 +177,12 @@ let add10 = (x) => add(x, 10)   // ✓ name the missing value with a lambda
 ```almide check
 fn incr(mut x: Int) -> Unit = { x = x + 1 }
 
-fn stamp(mut b: Bytes, v: Int) -> Unit = bytes.set_u8(b, 0, v)  // a helper that fills its caller's buffer
+fn stamp(mut b: Bytes, v: Int) -> Unit = bytes.put_u8(b, 0, v)  // a helper that fills its caller's buffer
 
 fn main() -> Unit = {
   var n = 5
   incr(n)          // n is now 6 -- mutated in place, not returned
-  var buf = bytes.new(4)   // `var`, not `let`: the writers take `mut b`
+  var buf = bytes.zeros(4)   // `var`, not `let`: the writers take `mut b`
   bytes.append_u8(buf, 7)
   stamp(buf, 9)
   println("${n} ${bytes.to_list(buf)}")
@@ -192,7 +192,7 @@ Caller must pass a `var` binding (`let`, a non-`mut` parameter or a temporary
 is E032). `mut` can be on any parameter, any position. This is how every
 in-place stdlib op works (`list.push`, `list.pop`, `list.clear`, `map.insert`,
 `map.delete`, `map.clear`, `string.push`, `string.clear`, and the whole `bytes` writer family — `push`, `append_*`,
-`set_*`, `write_*`, `fill`, `clear`, `copy_from`): the receiver is a `mut`
+`put_*`, `write_*`, `fill`, `clear`, `copy_from`): the receiver is a `mut`
 parameter, so a local buffer is a `var` and a helper that writes its caller's
 buffer declares `mut b: Bytes`. Value semantics otherwise: `let c = a` copies,
 and a callee cannot reach its caller's binding through a plain parameter.
@@ -496,7 +496,12 @@ http.serve(8080, (req) => {
 ```
 
 Calling an effect fn-typed VALUE is itself an effect call (`h(x)!` inside the
-HOF); doing it from a pure fn is E006. A plain `(A) -> B` slot still rejects
+HOF); doing it from a pure fn is E006. An effect fn passed as an argument —
+`list.map(xs, fs.read_text)`, `apply(fs.read_text, p)` — makes the call an
+effect call (a bare fn-type parameter is transparent), so from a pure fn it
+is E006 too. A pure fn that runs an effect fn it reached through a value — a
+record field, a list element, a closure an effect fn built — is E109: the
+effect bit rides the value, so mark the fn `effect fn` (#4151). A plain `(A) -> B` slot still rejects
 fallible lambdas (E005) — declare the slot `(A) -> B!` or `effect (A) -> B`.
 The bare arrow form is the canonical spelling; `almide fmt` normalizes the
 legacy `fn(A) -> B` to it.
@@ -903,14 +908,18 @@ effect fn main() -> Unit = {
 `effect fn main()` is auto-wrapped to return `Result<(), String>`. No need to write `ok(())` or `-> Result[...]`.
 Write `effect fn main()` only when `main` does a real effect (reads, files, network, `fan`, `!`); a `main` that only computes and prints is `fn main() -> Unit`.
 
-**Temp files**: never hardcode `/tmp` — it does not exist on Windows. Use
-`fs.temp_dir()` (platform-correct: `%TMP%` on Windows native; on wasm the
-Go/Python WASI rule `$TMPDIR` else `/tmp`, so it converges on the host's
-real temp dir) or `fs.create_temp_file(prefix)` / `fs.create_temp_dir(prefix)`:
+**Temp files**: create them with `fs.create_temp_file(prefix)` /
+`fs.create_temp_dir(prefix)` — never a fixed name under `fs.temp_dir()`.
+The temp dir is shared, so a fixed name is one another user can create
+first (as a symlink to your file). The create functions pick a random name,
+create it exclusively (an existing entry is never reused or followed) and
+make it private to you; they return the path. `fs.temp_dir()` is a
+location, not a safe name. Never hardcode `/tmp` either: it does not exist
+on Windows.
 
 ```almide
-let dir = fs.temp_dir()
-fs.write("${dir}/scratch.txt", data)!
+let path = fs.create_temp_file("report")!
+fs.write(path, data)!
 ```
 Command-line arguments are accessed via `process.args()` (not main parameters).
 
@@ -944,7 +953,7 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [option](stdlib/option.md) | Option type operations | auto-imported | 12 |
 | [json](stdlib/json.md) | JSON parsing and querying | `import json` | 29 |
 | [math](stdlib/math.md) | Mathematical functions | auto-imported | 21 |
-| [regex](stdlib/regex.md) | Regular expressions | `import regex` | 8 |
+| [regex](stdlib/regex.md) | Regular expressions over a compiled `Regex` (`regex.new(pat)` / `regex.compile(pat)`) | `import regex` | 16 |
 | [datetime](stdlib/datetime.md) | Date and time | auto-imported | 21 |
 | [compute](stdlib/compute.md) | Deterministic compute-time constructors (fan budgets) | auto (checker surface) | 6 |
 | [duration](stdlib/duration.md) | Wall-clock time constructors | auto (checker surface) | 6 |
@@ -957,7 +966,32 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [process](stdlib/process.md) | Process execution, env vars, signals | `import process` | 12 |
 | [io](stdlib/io.md) | Standard I/O | `import io` | 7 |
 | [http](stdlib/http.md) | HTTP client and server | `import http` | 23 |
-| [random](stdlib/random.md) | Random number generation | `import random` | 4 |
+| [random](stdlib/random.md) | Random number generation; for secrets use `random.bytes` | `import random` | 10 |
+
+### Regex: compile once, pass the `Regex` first
+
+Every `regex` operation takes a `Regex`, never a pattern string. `regex.new` takes
+a literal pattern (checked by `almide check`, E102; a refused one aborts);
+`regex.compile` takes one built at run time and answers `err(reason)`. A
+capture group that took no part is `none`.
+
+```almide check
+import regex
+
+fn main() -> Unit = {
+  let digits = regex.new("[0-9]+")
+  println(regex.find(digits, "order 66") ?? "none")
+  println(regex.find_all(digits, "1 22 333") |> list.join(","))
+  let date = regex.new("(\\d+)-(\\d+)(-x)?")
+  let groups = regex.captures(date, "2026-10") ?? []
+  println(groups |> list.map((g) => g ?? "-") |> list.join("|"))
+  match regex.compile("a(b") {
+    ok(_) => println("valid"),
+    err(reason) => println(reason),
+  }
+  println(regex.replace_with(digits, "a1b22", (cs) => "<${list.get_or(cs, 0, none) ?? ""}>"))
+}
+```
 
 ## JSON & the wire
 
@@ -1064,7 +1098,7 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 
 ## Naming conventions across stdlib
 
-- `bytes`: `read_<dtype>_le|be(b, pos)` for one value, `read_<dtype>_le_array(b, pos, count)` for bulk, `set_<dtype>_le(b, pos, val)` to overwrite, `append_<dtype>_le(b, val)` to grow. `<dtype>` ∈ `u8|u16|u32|i32|i64|f16|f32|f64`.
+- `bytes`: typed byte IO is one matrix — `get_<t>(b, pos) -> T?` reads at a position (none out of range), `next_<t>(b, pos) -> (T?, next_pos)` reads and advances (the position stays when nothing is read), `put_<t>(b, pos, x)` overwrites in place (a window outside the buffer aborts), `append_<t>(b, x)` grows; `get_<t>_array(b, pos, count) -> List[T]?` for bulk. Every type of 2+ bytes carries `_le` / `_be`; `<t>` ∈ `u8|i8|u16|i16|u32|i32|i64|f16|f32|f64|bool` (no u64: `get_i64_*` reads the same bits). `bytes.new()` is empty, `bytes.zeros(n)` is n zero bytes.
 - `matrix` holds the generic dense ops; the neural-network kernels (`gelu`, `softmax_rows`, attention, RoPE, norms, Q1_0/Q8_0, Qwen3 blocks) are package `almide/nnlib` and the OpenAI / Anthropic streaming clients package `almide/llm` since dialect epoch 14 (`import nnlib`, `nnlib.gelu(m)`).
 - `matrix`: row-shaped ops use `_rows` suffix (`slice_rows`, `gather_rows`); singular `_row` when an op consumes/produces *one* row (`linear_row`, `dot_row`, `broadcast_add_row`); column ops use `_cols` (`split_cols_even`, `concat_cols`).
 - `from_X` builds from another representation, `to_X` is its inverse (e.g. `from_bytes_f64_le` ↔ `to_bytes_f64_le`).
@@ -1090,6 +1124,7 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - `let err = f()` → **WRONG**. `ok`/`err`/`some`/`none` (and capitalized forms) are the built-in Result/Option constructors — reserved words. Rename the binding (`let msg = f()`), or backtick-escape to keep the name (`let `err` = f()`)
 - Nested `fn` inside a function → **WRONG**. All `fn` must be top-level. Use `let helper = (x) => ...` for local functions
 - `match x { ... pattern => expr }` with `...` → **WRONG**. No spread in patterns
+- `random.int(0, 255)` in a loop for a token, key or password → **WRONG**. `random.int` / `float` / `choice` / `shuffle` are not for secrets. For secrets use `random.bytes(n)`, the OS cryptographic source
 - `try f()` / `try! f()` / `f()?` for an effect call → **WRONG**. Write `f()!`. Almide's `!` is Swift's `try` (propagate), never `try!` (trap); `?` converts Result → Option
 - `async fn` / `await` → **WRONG**. Almide has no async/await. Use `fan { }` / `fan.map` / `fan.settle` / `fan.min(clock)` / `fan.bounded` / `fan.timeout`
 - `fan.race { … }` → **WRONG** (renamed in dialect epoch 14, E027). Write `fan.min(compute.ms(5)) { … }` — the clock argument is required and says what "least" is measured on

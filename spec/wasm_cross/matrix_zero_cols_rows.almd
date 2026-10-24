@@ -19,7 +19,7 @@ fn dims(m: Matrix) -> String = {
 }
 
 fn main() -> Unit = {
-  let f = bytes.new(8)
+  let f = bytes.zeros(8)
   println("zeros3x0: ${shape(matrix.zeros(3, 0))}")
   println("zeros1x-1: ${shape(matrix.zeros(1, -1))}")
   println("zeros0x3: ${shape(matrix.zeros(0, 3))}")
@@ -40,7 +40,7 @@ fn main() -> Unit = {
   println("zeros0x3 shape: ${dims(matrix.zeros(0, 3))}")
   println("f32 0x3: ${shape(matrix.from_bytes_f32_le(b3, 0, 0, 3))}")
   println("f32 0x3 off1: ${dims(matrix.from_bytes_f32_le(b3, 1, 0, 3))}")
-  println("f32 0x3 empty buf: ${dims(matrix.from_bytes_f32_le(bytes.new(0), 0, 0, 3))}")
+  println("f32 0x3 empty buf: ${dims(matrix.from_bytes_f32_le(bytes.zeros(0), 0, 0, 3))}")
   println("f16 0x3: ${shape(matrix.from_bytes_f16_le(b3, 0, 0, 3))}")
   println("f64 0x3 past-end: ${shape(matrix.from_bytes_f64_le(b3, 99, 0, 3))}")
   println("select none x3: ${shape(matrix.select_rows_f32(b3, 0, 3, []))}")

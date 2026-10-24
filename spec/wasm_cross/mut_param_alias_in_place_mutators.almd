@@ -37,9 +37,9 @@ fn index_list(mut xs: List[String]) -> Unit = {
 
 fn bytes_writes(mut b: Bytes) -> Unit = {
   let c = b
-  bytes.set_u8(b, 0, 9)
-  bytes.set_i16_be(b, 1, 1027)
-  bytes.set_f32_le(b, 4, 2.5)
+  bytes.put_u8(b, 0, 9)
+  bytes.put_i16_be(b, 1, 1027)
+  bytes.put_f32_le(b, 4, 2.5)
   bytes.set_uint16(b, 6, 772.to_uint16(), BigEndian)
   println("set c=${bytes.to_list(c)} b=${bytes.to_list(b)}")
 }
@@ -59,7 +59,7 @@ fn fields(mut h: Holder) -> Unit = {
   let kept = h.xs
   let kept_b = h.b
   list.push(h.xs, 9)
-  bytes.set_u8(h.b, 0, 7)
+  bytes.put_u8(h.b, 0, 7)
   println("field kept=${kept} xs=${h.xs} kept_b=${bytes.to_list(kept_b)} b=${bytes.to_list(h.b)}")
 }
 

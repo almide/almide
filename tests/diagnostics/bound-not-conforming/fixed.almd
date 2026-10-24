@@ -1,0 +1,3 @@
+// #4097: a type argument that does not conform to the bound is a check error
+// naming the bound — `from_wrapping` takes integers only.
+effect fn main() -> Unit = println("${int8.from_wrapping(int.from(1.5))}")

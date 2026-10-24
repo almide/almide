@@ -6,15 +6,15 @@ import matrix
 import bytes
 
 effect fn main() -> Unit = {
-  var f32d = bytes.new(32)
-  bytes.set_f32_le(f32d, 0, 1.5)
-  bytes.set_f32_le(f32d, 4, 2.5)
-  bytes.set_f32_le(f32d, 8, 0.0 - 3.0)
-  bytes.set_f32_le(f32d, 12, 4.0)
-  bytes.set_f32_le(f32d, 16, 5.0)
-  bytes.set_f32_le(f32d, 20, 6.5)
-  bytes.set_f32_le(f32d, 24, 7.0)
-  bytes.set_f32_le(f32d, 28, 8.0)
+  var f32d = bytes.zeros(32)
+  bytes.put_f32_le(f32d, 0, 1.5)
+  bytes.put_f32_le(f32d, 4, 2.5)
+  bytes.put_f32_le(f32d, 8, 0.0 - 3.0)
+  bytes.put_f32_le(f32d, 12, 4.0)
+  bytes.put_f32_le(f32d, 16, 5.0)
+  bytes.put_f32_le(f32d, 20, 6.5)
+  bytes.put_f32_le(f32d, 24, 7.0)
+  bytes.put_f32_le(f32d, 28, 8.0)
   let mf = matrix.select_rows_f32(f32d, 0, 2, [3, 0, 1])
   println("f32=${matrix.to_lists(mf)}")
 }

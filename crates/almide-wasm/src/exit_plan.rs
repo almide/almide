@@ -406,10 +406,9 @@ fn check_window(
 /// block must outlive every use of the pointer, exactly as under a `prim.*`
 /// body (bytes_rawptr.almd, which ffi_bridge.almd calls, computes these as
 /// `prim.handle(b) + 12`).
+/// One set with the shared IR's address-hold rule (almide_ir::addr_hold, #4153).
 pub(crate) fn is_raw_address_op(target: &almide_ir::CallTarget) -> bool {
-    matches!(target, almide_ir::CallTarget::Module { module, func, .. }
-        if (module.as_str() == "bytes" && matches!(func.as_str(), "data_ptr" | "as_ptr" | "as_mut_ptr"))
-            || (module.as_str() == "ffi" && func.as_str() == "address"))
+    almide_ir::addr_hold::is_address_op(target)
 }
 
 /// Does any call in `body` satisfy `hit`?

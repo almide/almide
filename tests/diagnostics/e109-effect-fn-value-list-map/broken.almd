@@ -1,0 +1,9 @@
+// E109 (#4151): a pure fn hands `fs.read_text` to `list.map` through a pipe.
+// The value is run inside the pure fn, so the file is read with no `effect`
+// on the signature. Before the effect bit rode fn values this printed the
+// file on both targets.
+import fs
+
+fn sneaky(paths: List[String]) -> List[Result[String, String]] = paths |> list.map(fs.read_text)
+
+effect fn main() -> Unit = println("${list.len(sneaky(["s.txt"]))}")

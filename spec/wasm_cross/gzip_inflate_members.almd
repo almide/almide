@@ -1647,7 +1647,7 @@ let gz_bytes = [
 
 fn main() -> Unit = {
   let inp = bytes.from_list(gz_bytes)
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   let code = gunzip(inp, out)
   println("${code},${bytes.len(out)}")
   println(bytes.to_string_lossy(out))

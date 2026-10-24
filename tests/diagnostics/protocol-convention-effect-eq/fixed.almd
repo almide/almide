@@ -1,0 +1,8 @@
+// `eq` is pure, as the convention declares it.
+type Foo: Eq = { n: Int }
+
+fn Foo.eq(a: Foo, b: Foo) -> Bool = a.n == b.n
+
+fn same(a: Foo, b: Foo) -> Bool = a == b
+
+fn main() -> Unit = println("${same(Foo { n: 1 }, Foo { n: 1 })}")

@@ -367,7 +367,7 @@ fn try_fold(expr: &IrExpr) -> Option<IrExpr> {
 
         // ── Unary on literals ──
         IrExprKind::UnOp { op, operand } => {
-            let folded_kind = try_fold_unop(*op, &operand.kind);
+            let folded_kind = try_fold_unop(*op, &operand.kind, &expr.ty);
             folded_kind.map(|kind| IrExpr { kind, ty: expr.ty.clone(), span: expr.span, def_id: None })
         }
 
@@ -494,8 +494,12 @@ fn fold_signed_binop(
         BinOp::AddInt => int(a.wrapping_add(b)),
         BinOp::SubInt => int(a.wrapping_sub(b)),
         BinOp::MulInt => int(a.wrapping_mul(b)),
-        BinOp::DivInt if b != 0 => int(a / b),
-        BinOp::ModInt if b != 0 => int(a % b),
+        // #4161: a divisor of -1 is never folded. `MIN / -1` and `MIN % -1`
+        // abort at run time on every width (C-002); folding them here either
+        // overflowed the compiler's own i64 (a panic) or wrapped a narrower
+        // width's MIN silently on native. Zero is left to run time likewise.
+        BinOp::DivInt if b != 0 && b != -1 => a.checked_div(b).and_then(int),
+        BinOp::ModInt if b != 0 && b != -1 => a.checked_rem(b).and_then(int),
         BinOp::Lt => bool_(a < b),
         BinOp::Lte => bool_(a <= b),
         BinOp::Gt => bool_(a > b),
@@ -552,9 +556,10 @@ fn try_fold_binop_bool(op: BinOp, a: bool, b: bool) -> Option<IrExprKind> {
 }
 
 /// Fold a `UnOp` whose operand is a literal, per-operator.
-fn try_fold_unop(op: UnOp, operand: &IrExprKind) -> Option<IrExprKind> {
+/// A sized integer's negation wraps at its width (#4163): `-(-128 as Int8)` is -128.
+fn try_fold_unop(op: UnOp, operand: &IrExprKind, ty: &almide_lang::types::Ty) -> Option<IrExprKind> {
     match (op, operand) {
-        (UnOp::NegInt,   IrExprKind::LitInt   { value }) => Some(IrExprKind::LitInt   { value: -value }),
+        (UnOp::NegInt,   IrExprKind::LitInt   { value }) => Some(IrExprKind::LitInt   { value: narrow_to_width(value.wrapping_neg(), ty) }),
         (UnOp::NegFloat, IrExprKind::LitFloat { value }) => Some(IrExprKind::LitFloat { value: -value }),
         (UnOp::Not,      IrExprKind::LitBool  { value }) => Some(IrExprKind::LitBool  { value: !value }),
         _ => None,
@@ -608,6 +613,21 @@ mod tests {
 
     fn lit_bool(v: bool) -> IrExpr {
         IrExpr { kind: IrExprKind::LitBool { value: v }, ty: Ty::Bool, span: None, def_id: None }
+    }
+
+    /// #4161: `MIN / -1` and `MIN % -1` stay unfolded on every width, so the
+    /// run-time C-002 abort decides them. Folding panicked the compiler on Int
+    /// (i64 overflow) and wrapped Int32/Int8 silently on native.
+    #[test]
+    fn a_minus_one_divisor_is_never_folded() {
+        for (min, ty) in [(i64::MIN, Ty::Int), (i64::from(i32::MIN), Ty::Int32), (i64::from(i8::MIN), Ty::Int8)] {
+            assert!(fold_signed_binop(BinOp::DivInt, min, -1, &ty).is_none(), "{ty:?} MIN / -1 folded");
+            assert!(fold_signed_binop(BinOp::ModInt, min, -1, &ty).is_none(), "{ty:?} MIN % -1 folded");
+        }
+        assert!(fold_signed_binop(BinOp::DivInt, 7, -1, &Ty::Int).is_none());
+        assert!(fold_signed_binop(BinOp::DivInt, 7, 0, &Ty::Int).is_none());
+        assert!(matches!(fold_signed_binop(BinOp::DivInt, 7, 2, &Ty::Int), Some(IrExprKind::LitInt { value: 3 })));
+        assert!(matches!(fold_signed_binop(BinOp::ModInt, -7, 2, &Ty::Int), Some(IrExprKind::LitInt { value: -1 })));
     }
 
     #[test]

@@ -5,23 +5,23 @@
 //!   `Vec<u8>` parameter type (E0308); the fold now names its accumulator type;
 //! - `list.min` / `max` / `sort` over `List[Bytes]` needed `Ord` on
 //!   `AlmideRcCow` (E0277); it now orders by the value, the same
-//!   lexicographic, prefix-first order `bytes.cmp` documents.
+//!   lexicographic, prefix-first order `bytes.compare` documents.
 //!
 //! Both were found by the inspection harness's parity campaign once it built
 //! `Bytes` values.
 use std::process::Command;
 
 const FOLD_ARG: &str = r#"effect fn main() -> Unit = {
-  println("${bytes.len(list.fold([1, 2], bytes.new(3), (acc, x) => acc))}")
+  println("${bytes.len(list.fold([1, 2], bytes.zeros(3), (acc, x) => acc))}")
   println("${matrix.rows(list.fold([1, 2], matrix.zeros(3, 1), (acc, x) => acc))}")
-  println("${bytes.len(list.fold([1, 2], bytes.new(3), (acc, x) => bytes.concat(acc, bytes.new(x))))}")
-  println("${bytes.eof(list.fold([true, false], bytes.from_list([100, 100]), (b, t) => bytes.from_list([1])), 7)}")
+  println("${bytes.len(list.fold([1, 2], bytes.zeros(3), (acc, x) => bytes.concat(acc, bytes.zeros(x))))}")
+  println("${bytes.is_eof(list.fold([true, false], bytes.from_list([100, 100]), (b, t) => bytes.from_list([1])), 7)}")
 }
 "#;
 
 const ORDER: &str = r#"effect fn main() -> Unit = {
   let xs = [bytes.from_list([2, 1]), bytes.from_list([2]), bytes.from_list([]), bytes.from_list([1, 255, 3]), bytes.from_list([2, 0, 9])]
-  println("${bytes.to_list(list.min(xs) ?? bytes.new(0))} ${bytes.to_list(list.max(xs) ?? bytes.new(0))}")
+  println("${bytes.to_list(list.min(xs) ?? bytes.zeros(0))} ${bytes.to_list(list.max(xs) ?? bytes.zeros(0))}")
   println("${list.sort(xs) |> list.map((b) => bytes.to_list(b))}")
   let ys: List[Bytes] = []
   println("${bytes.len(list.min(ys) ?? bytes.from_list([7, 7]))}")

@@ -459,6 +459,13 @@
                                          (i64.extend_i32_u (i32.load offset=8 (local.get $r)))))
     (i32.const 0))
 
+;; entropy for the temp ops' names (#4113): the shim's own op 32, which lowers
+  ;; wasi:random get-random-bytes and lands the bytes at ppos / plen.
+  (func $random_get (param $buf i32) (param $len i32) (result i32)
+    (drop (call $p3_fs_call (i32.const 32) (i32.const 0) (i32.const 0) (i32.const 0) (local.get $len)))
+    (memory.copy (local.get $buf) (global.get $ppos) (local.get $len))
+    (i32.const 0))
+
   (func $proc_exit (param $code i32)
     (call $p3_exit (i32.ne (local.get $code) (i32.const 0)))
     (unreachable))

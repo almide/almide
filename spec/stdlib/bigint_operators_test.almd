@@ -1,0 +1,58 @@
+// BigInt's operators (R-bigint-04): `+ - * / %` and unary `-` desugar to the
+// module's internal add/sub/mul/div/rem/neg, `< <= > >=` to compare. Division
+// rounds toward 0 and the remainder takes the dividend's sign, as Int's do.
+import bigint
+import testing
+
+fn b(s: String) -> BigInt = match bigint.parse(s) {
+  ok(x) => x,
+  err(e) => panic(e),
+}
+
+fn s(x: BigInt) -> String = bigint.to_string(x)
+
+test "arithmetic past Int" {
+  let a = b("123456789012345678901234567890")
+  let seven = bigint.from(7)
+  assert_eq(s(a + seven), "123456789012345678901234567897")
+  assert_eq(s(a - seven * seven), "123456789012345678901234567841")
+  assert_eq(s(a * a), "15241578753238836750495351562536198787501905199875019052100")
+  assert_eq(s(a / seven), "17636684144620811271604938270")
+  assert_eq(s(a % seven), "0")
+  assert_eq(s(-a), "-123456789012345678901234567890")
+  assert_eq(s(-(-a)), s(a))
+  assert_eq(s(bigint.from(int.max_value()) + bigint.from(1)), "9223372036854775808")
+}
+
+test "division toward zero, remainder with the dividend's sign" {
+  assert_eq(s(bigint.from(-7) / bigint.from(2)), "-3")
+  assert_eq(s(bigint.from(-7) % bigint.from(2)), "-1")
+  assert_eq(s(bigint.from(7) / bigint.from(-2)), "-3")
+  assert_eq(s(bigint.from(7) % bigint.from(-2)), "1")
+  testing.assert_aborts("division by zero", () => s(bigint.from(1) / bigint.from(0)))
+}
+
+test "comparison operators" {
+  let a = b("-100000000000000000000")
+  let c = b("99999999999999999999")
+  assert_eq(a < c, true)
+  assert_eq(a > c, false)
+  assert_eq(c >= c, true)
+  assert_eq(c <= a, false)
+  assert_eq(a == a + bigint.from(0), true)
+  assert_eq(a != c, true)
+}
+
+test "operators agree with Int where Int is exact" {
+  let pairs = [(17, 5), (-17, 5), (17, -5), (-17, -5), (0, 3)]
+  for (x, y) in pairs {
+    let bx = bigint.from(x)
+    let by = bigint.from(y)
+    assert_eq(int.from(bx + by), x + y)
+    assert_eq(int.from(bx - by), x - y)
+    assert_eq(int.from(bx * by), x * y)
+    assert_eq(int.from(bx / by), x / y)
+    assert_eq(int.from(bx % by), x % y)
+    assert_eq(bx < by, x < y)
+  }
+}

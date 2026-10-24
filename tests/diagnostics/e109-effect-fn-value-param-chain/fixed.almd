@@ -1,0 +1,13 @@
+// The caller of the transparent parameter is an `effect fn`.
+import fs
+
+type Reader = { read: (String) -> Result[String, String] }
+
+fn call_it(f: (String) -> Result[String, String]) -> Result[String, String] = f("s.txt")
+
+effect fn reads(r: Reader) -> Result[String, String] = call_it(r.read)
+
+effect fn main() -> Unit = {
+  let r = Reader { read: (p) => fs.read_text(p) }
+  println(reads(r) ?? "none")
+}

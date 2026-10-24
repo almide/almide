@@ -58,6 +58,7 @@
 pub const PURE_MODULES: &[&str] = &[
     "base64",
     "base64_encode",
+    "bigint",
     "bool",
     "bytes",
     "bytes_append_multi",

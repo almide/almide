@@ -239,10 +239,8 @@ impl ErrorSurfaceLint {
             EK::Binary { op, left, right } => {
                 self.check_binary_condition(cond, op.as_str(), left, right, err_binds)
             }
-            EK::Call { callee, args, .. } => {
-                if contains_call_on_err(callee, args, err_binds) {
-                    self.emit_e035(cond);
-                }
+            EK::Call { callee, args, .. } if contains_call_on_err(callee, args, err_binds) => {
+                self.emit_e035(cond);
             }
             _ => {}
         }

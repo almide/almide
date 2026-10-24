@@ -4,7 +4,7 @@
 import ffi
 
 test "address of an empty buffer is null on every target" {
-  assert_eq(ffi.to_int(ffi.address(bytes.new(0))), 0)
+  assert_eq(ffi.to_int(ffi.address(bytes.new())), 0)
   assert_eq(ffi.to_int(ffi.address(bytes.from_string(""))), 0)
 }
 
@@ -23,45 +23,45 @@ test "read copies len bytes from an address" {
 
 test "read through null or with len <= 0 is empty" {
   let b = bytes.from_string("abc")
-  assert_eq(bytes.len(ffi.read(ffi.address(bytes.new(0)), 3)), 0)
+  assert_eq(bytes.len(ffi.read(ffi.address(bytes.new()), 3)), 0)
   assert_eq(bytes.len(ffi.read(ffi.address(b), 0)), 0)
   assert_eq(bytes.len(ffi.read(ffi.address(b), -1)), 0)
 }
 
 test "write puts up to cap bytes at the address, address first" {
-  var dst = bytes.new(4)
+  var dst = bytes.zeros(4)
   let n = ffi.write(ffi.address(dst), bytes.from_list([1, 2, 3, 4]), 4)
   assert_eq(n, 4)
   assert_eq(bytes.to_list(dst), [1, 2, 3, 4])
 }
 
 test "write clamps to cap" {
-  var dst = bytes.new(4)
+  var dst = bytes.zeros(4)
   let n = ffi.write(ffi.address(dst), bytes.from_list([9, 9, 9, 9]), 2)
   assert_eq(n, 2)
   assert_eq(bytes.to_list(dst), [9, 9, 0, 0])
 }
 
 test "write clamps to the source length" {
-  var dst = bytes.new(4)
+  var dst = bytes.zeros(4)
   let n = ffi.write(ffi.address(dst), bytes.from_list([7]), 4)
   assert_eq(n, 1)
   assert_eq(bytes.to_list(dst), [7, 0, 0, 0])
 }
 
 test "write through null writes nothing" {
-  assert_eq(ffi.write(ffi.address(bytes.new(0)), bytes.from_string("abc"), 3), 0)
+  assert_eq(ffi.write(ffi.address(bytes.new()), bytes.from_string("abc"), 3), 0)
 }
 
 test "a negative cap is an unsigned capacity: the whole source" {
-  var dst = bytes.new(3)
+  var dst = bytes.zeros(3)
   let n = ffi.write(ffi.address(dst), bytes.from_list([5, 6, 7]), -1)
   assert_eq(n, 3)
   assert_eq(bytes.to_list(dst), [5, 6, 7])
 }
 
 test "read of a written region round-trips" {
-  var dst = bytes.new(5)
+  var dst = bytes.zeros(5)
   let _n = ffi.write(ffi.address(dst), bytes.from_string("hello"), 5)
   assert_eq(bytes.to_string(ffi.read(ffi.address(dst), 5)) ?? "", "hello")
 }

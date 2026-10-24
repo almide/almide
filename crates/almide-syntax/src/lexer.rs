@@ -492,6 +492,60 @@ pub fn validate_literal_escapes(raw: &str) -> Vec<EscapeIssue> {
     issues
 }
 
+// ── Bidirectional control characters (#4092, E101) ─────────────
+//
+// A raw U+202A..U+202E or U+2066..U+2069 makes the text a reviewer sees differ
+// from the text the compiler reads (Trojan Source, CVE-2021-42574). rustc denies
+// them in comments and literals; Almide refuses them anywhere in a source file.
+// Only the RAW character is refused: the escape `\u{202E}` in a string literal
+// is plain ASCII in the source and still decodes to the character.
+
+/// The Unicode name of a bidirectional control character, or `None` when `ch`
+/// is not one of the nine E101 refuses.
+pub fn bidi_control_name(ch: char) -> Option<&'static str> {
+    Some(match ch {
+        '\u{202A}' => "LEFT-TO-RIGHT EMBEDDING",
+        '\u{202B}' => "RIGHT-TO-LEFT EMBEDDING",
+        '\u{202C}' => "POP DIRECTIONAL FORMATTING",
+        '\u{202D}' => "LEFT-TO-RIGHT OVERRIDE",
+        '\u{202E}' => "RIGHT-TO-LEFT OVERRIDE",
+        '\u{2066}' => "LEFT-TO-RIGHT ISOLATE",
+        '\u{2067}' => "RIGHT-TO-LEFT ISOLATE",
+        '\u{2068}' => "FIRST STRONG ISOLATE",
+        '\u{2069}' => "POP DIRECTIONAL ISOLATE",
+        _ => return None,
+    })
+}
+
+/// One raw bidirectional control character found in a token's verbatim text,
+/// located the way `EscapeIssue` is: `line_offset` newlines past the token's
+/// first character, `col_offset` characters past the token's first character
+/// (line 0) or past the last newline (later lines).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BidiControl {
+    pub ch: char,
+    pub line_offset: usize,
+    pub col_offset: usize,
+}
+
+/// Every raw bidirectional control character in `text`.
+pub fn find_bidi_controls(text: &str) -> Vec<BidiControl> {
+    let mut found = Vec::new();
+    let (mut line, mut col) = (0, 0);
+    for ch in text.chars() {
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+            continue;
+        }
+        if bidi_control_name(ch).is_some() {
+            found.push(BidiControl { ch, line_offset: line, col_offset: col });
+        }
+        col += 1;
+    }
+    found
+}
+
 /// Walk one literal's characters, appending issues. `base_line`/`base_col`
 /// offset the reported position so a literal nested inside an interpolation
 /// hole still points at its own source position.
@@ -1096,6 +1150,26 @@ fn peek(chars: &[char], pos: usize) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // #4092 (E101): the nine bidi controls are found raw, located per line;
+    // their `\u{...}` escapes are ASCII and still decode to the character.
+    #[test]
+    fn bidi_controls_found_raw_and_escape_still_decodes() {
+        for c in ['\u{202A}', '\u{202B}', '\u{202C}', '\u{202D}', '\u{202E}', '\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}'] {
+            assert!(bidi_control_name(c).is_some(), "U+{:04X}", c as u32);
+        }
+        assert_eq!(bidi_control_name('\u{200F}'), None); // RLM is not an embedding/override/isolate
+        let found = find_bidi_controls("ab\u{202E}\ncd\u{2066}");
+        assert_eq!(
+            found,
+            vec![
+                BidiControl { ch: '\u{202E}', line_offset: 0, col_offset: 2 },
+                BidiControl { ch: '\u{2066}', line_offset: 1, col_offset: 2 },
+            ]
+        );
+        assert!(find_bidi_controls("\"a\\u{202E}b\"").is_empty());
+        assert_eq!(lex_string_value("let x = \"a\\u{202E}b\"\n"), "a\u{202E}b");
+    }
 
     // Regression (#1457): a backtick escape enclosing no identifier character
     // used to lex to a ZERO-LENGTH Ident. That token survived every later stage

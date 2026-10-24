@@ -1,0 +1,3 @@
+expects_code = "E102"
+expects_error = "invalid regex: pattern too large: more than 20000 states"
+hint_substring = "regex.compile"

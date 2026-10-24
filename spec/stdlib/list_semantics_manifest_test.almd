@@ -3,12 +3,12 @@
 // regenerates and diffs). Each case executes a manifest probe; a
 // failure here means the implementation drifted from the DECLARED
 // semantic dimension (#419 class).
-test "list.sum unit=value" {
-  assert_eq("${list.sum([1, 2, 3])}", "6")
+test "list.__sum_int unit=value" {
+  assert_eq("${list.__sum_int([1, 2, 3])}", "6")
 }
 
-test "list.product unit=value" {
-  assert_eq("${list.product([2, 3, 4])}", "24")
+test "list.__product_int unit=value" {
+  assert_eq("${list.__product_int([2, 3, 4])}", "24")
 }
 
 test "list.range unit=value" {

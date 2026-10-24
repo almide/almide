@@ -131,7 +131,7 @@ EOF
 fn f() -> Int = {
   var acc = 0
   for blk in 0..<$n {
-    var w = bytes.new(8)
+    var w = bytes.zeros(8)
     for i in 0..<8 { w = bytes.set(w, i, blk $op (i + 1)) }
     acc = acc + bytes.read_u8(w, 3) + bytes.read_u8(w, 7)
   }

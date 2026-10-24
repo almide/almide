@@ -37,11 +37,11 @@ fn appending_160k_values_completes_on_wasm() {
         ("bytes.append_f32_le(b, int.to_float(i))", 4),
         ("bytes.append_i64_be(b, i)", 8),
         ("bytes.write_u32_be(b, i)", 4),
-        ("bytes.write_bool(b, i % 2 == 0)", 1),
+        ("bytes.append_bool(b, i % 2 == 0)", 1),
         ("bytes.write_uint16(b, i, bytes.LittleEndian)", 2),
     ] {
         let src = format!(
-            "effect fn main() -> Unit = {{\n  var b = bytes.new(0)\n  for i in 0..<160000 {{ {call} }}\n  println(int.to_string(bytes.len(b)))\n}}\n"
+            "effect fn main() -> Unit = {{\n  var b = bytes.zeros(0)\n  for i in 0..<160000 {{ {call} }}\n  println(int.to_string(bytes.len(b)))\n}}\n"
         );
         let (ok, out, err) = run(&src, true);
         assert!(ok, "{call}: wasm run failed (quadratic growth ran out of memory before #3294):\n{err}");
@@ -55,7 +55,7 @@ const FAMILY: &str = r#"fn fill(mut p: Bytes) -> Unit = {
 }
 
 effect fn main() -> Unit = {
-  var b = bytes.new(0)
+  var b = bytes.zeros(0)
   bytes.append_u16_le(b, -2)
   bytes.append_u16_be(b, 65535)
   bytes.append_i16_le(b, -300)
@@ -76,8 +76,8 @@ effect fn main() -> Unit = {
   bytes.write_u32_be(b, 3735928559)
   bytes.write_i64_be(b, -5)
   bytes.write_f64_be(b, 3.0)
-  bytes.write_bool(b, true)
-  bytes.write_bool(b, false)
+  bytes.append_bool(b, true)
+  bytes.append_bool(b, false)
   bytes.write_string_be(b, "añb")
   bytes.write_uint16(b, 258, bytes.LittleEndian)
   bytes.write_uint16(b, 258, bytes.BigEndian)
@@ -88,10 +88,10 @@ effect fn main() -> Unit = {
   println(int.to_string(bytes.len(snap)))
   println(int.to_string(bytes.len(b)))
   println(bytes.to_list(b) |> list.map((x) => int.to_string(x)) |> list.join(","))
-  var big = bytes.new(3)
+  var big = bytes.zeros(3)
   for i in 0..<5000 { bytes.append_f64_le(big, int.to_float(i)) }
   println(int.to_string(bytes.len(big)))
-  println(float.to_string(bytes.read_f64_le(big, 3 + 8 * 4999)))
+  println(float.to_string(bytes.get_f64_le(big, 3 + 8 * 4999) ?? 0.0))
 }
 "#;
 

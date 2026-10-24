@@ -496,7 +496,7 @@ fn param_borrow(slot: usize, param: &IrParam, uses: &UseSites, scope: &Scope, bo
         return ParamBorrow::Own;
     }
     // Implicit mut for bundled bodies: when the body forwards this param into
-    // a callee slot that expects `RefMut` (`bytes.set_u16_le` et al), the
+    // a callee slot that expects `RefMut` (`bytes.put_u16_le` et al), the
     // caller's own param must also be `RefMut` — else the generated code
     // writes `&mut b` against a `b: &Vec<u8>` sig, which fails to borrow-check.
     if uses.of(param.var).any(|u| u.site == Site::Arg(SlotMode::Mut)) {

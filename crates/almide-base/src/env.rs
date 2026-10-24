@@ -90,6 +90,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_BUILD_PROVENANCE", Value, Ci, "read by `build.rs` at BUILD time: `release` makes `almide --version` say `(release)`, anything else (including unset) says `(dev)`. Set only by `.github/workflows/release.yml`, the one thing that builds from a tag, so a binary claiming to be a release had to come from there (#2384)"),
     sw("ALMIDE_BUILD_SHA", Value, Ci, "read by `build.rs` at BUILD time: the commit `almide --version` names beside the build kind, truncated to 9 characters. Passed in by `make install` and the release workflow rather than read from git in the build script, which would rebuild the root crate after every commit (#2384)"),
     sw("ALMIDE_CACHE_MAX_BYTES", Value, Tool, "the size bound of each native build cache — the `almide test` worker cache (`<temp>/almide-test/native`, least recently used worker dirs emptied first) and a build scratch dir's per-program binaries and objects (`<temp>/almide-run`): `4G` (default), `512M`, a byte count, or `0`/`off` for no bound (#2608)"),
+    sw("ALMIDE_CONTROL_BIN", Value, Harness, "an `almide` binary the security route tests (`tests/effect_value_laundering_test.rs`, `proc_category_test.rs`, `permissions_routes_test.rs`) run INSTEAD of the one under test — the negative control: a build without the check fails their assertions (#4151, #4155)"),
     sw("ALMIDE_CAPTURE_MOVE_OFF", Flag, Ablation, "make CaptureClone clone every capture again, as before #2231, instead of moving a value whose sole user is the closure — the ablation the ownership certifier's sensitivity test drives"),
     sw("ALMIDE_CERTIFY_OWNERSHIP", Value, Dbg, "run the native ownership certifier after the pass pipeline (#2231): `report` prints every violation, `fail` aborts the build on one, `off` skips it; unset = `fail` in a debug build, `off` in a release build"),
     sw("ALMIDE_COMPILER_STACK", Value, Tool, "stack size in bytes of the compiler driver thread (default 256 MiB); a deep input that overflows it is the regression test's subject"),
@@ -153,7 +154,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_INLINE_OFF", Flag, Ablation, "turn the structural leg's small scalar-fn inliner off (#2980): every call kept, for an A/B"),
     sw("ALMIDE_INSTALL", Value, Tool, "the directory `almide install` installs binaries into (overrides the default `~/.local/bin`)"),
     sw("ALMIDE_INTERP_SWEEP_THREADS", Value, Harness, "interp sweep thread count; 1 = serial (#2381)"),
-    sw("ALMIDE_IR_FAULT", Value, Harness, "inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary"),
+    sw("ALMIDE_IR_FAULT", Value, Route, "inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary (a release build honours it only with `--allow-switch ALMIDE_IR_FAULT`, #4129)"),
     sw("ALMIDE_KEEP_SCRATCH", Flag, Tool, "keep the `almide test` scratch build directory instead of deleting it"),
     sw("ALMIDE_LSP_TRACE", Flag, Dbg, "print every LSP request and response the language server handles"),
     sw("ALMIDE_MANIFEST_TREE_CHECK", Value, Ci, "the parity-manifest generators' stale-tree refusal (#2405, scripts/lib/oracle-header.sh): `strict` (default) refuses an ORACLE that is not `<Cargo.toml version> (dev…)`, is stamped with a commit other than HEAD, or is unstamped and older than the sources; a worktree behind its upstream; and an untracked spec/ fixture. `gate` keeps only the untracked-fixture check (scripts/check-parity-goldens.sh vouches for CI's artifact). `off` is the deliberate override"),
@@ -180,7 +181,6 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_PROBE_OUT", Value, Harness, "the file a charge-probed native program writes its `__ALMD_PROBE` meter line to; `almide run --time-report` sets it to a fresh temp path so the program's own stderr is never read as the reading (#3489). Unset = the line goes to stderr"),
     sw("ALMIDE_PROBE_SRC", Value, Harness, "the source file the heap probe compiles (unset = the probe is skipped)"),
     sw("ALMIDE_PROFILE", Flag, Dbg, "print per-pass and per-phase timings of the native pipeline"),
-    sw("ALMIDE_RC_TRAP_DOUBLE_FREE", Flag, Trap, "arm the structural leg's double-free trap: releasing a block already at rc 0 traps instead of wrapping"),
     sw("ALMIDE_REGION_DEBUG", Flag, Dbg, "print the region-window pass's decisions (native and structural leg)"),
     sw("ALMIDE_REGION_OFF", Flag, Ablation, "turn the region-window allocation pass off (native and structural leg)"),
     sw("ALMIDE_REGION_TRAP_STALE", Flag, Trap, "arm the native region prelude's stale-reference trap (#2200)"),
@@ -194,8 +194,8 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_SKIP_PASS", Value, Ablation, "skip the named optional passes (comma-separated) — a pass-dependency probe: output must not change"),
     sw("ALMIDE_SKIP_VERSION_CHECK", Flag, Gate, "skip the project's `almide` version requirement check"),
     sw("ALMIDE_STREAM_FUSION_OFF", Flag, Ablation, "turn the stream-fusion pass off"),
-    sw("ALMIDE_SURVIVE_OVERLAY", Value, Route, "set by `almide survive` on its child runs (#2147): every compiler read of this `.almd` path returns the text in `ALMIDE_SURVIVE_OVERLAY_TEXT` instead of the disk bytes, so a proposed edit is judged without being written"),
-    sw("ALMIDE_SURVIVE_OVERLAY_TEXT", Value, Route, "the file holding the proposed text for `ALMIDE_SURVIVE_OVERLAY`; set without it, the overlay refuses to run rather than read the disk file"),
+    sw("ALMIDE_SURVIVE_OVERLAY", Value, Harness, "RETIRED (#4129): no longer read. `almide survive` hands its overlay to a child run as `--survive-overlay` / `--survive-overlay-text` arguments, so an environment cannot make the compiler read other text than the disk file; kept registered so the regression test can set it and watch nothing change"),
+    sw("ALMIDE_SURVIVE_OVERLAY_TEXT", Value, Harness, "RETIRED (#4129) with `ALMIDE_SURVIVE_OVERLAY`: no longer read"),
     sw("ALMIDE_TCO_DEBUG", Flag, Dbg, "print the native tail-call loop rewrite decisions"),
     sw("ALMIDE_TEST_ABORT_PROBE", Flag, Runtime, "marks a native testing.assert_aborts child (ADR-0029) so `panic` takes the C-219 abort path there; set by the parent, never by hand"),
     sw("ALMIDE_TEST_LAX_WASM", Flag, Gate, "let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run"),
@@ -255,6 +255,9 @@ pub fn is_on(value: &std::ffi::OsStr) -> bool {
 pub fn flag(name: &str) -> bool {
     let sw = registered(name);
     let on = std::env::var_os(name).is_some_and(|v| is_on(&v));
+    if on && !honoured(sw) {
+        return false;
+    }
     if on {
         announce(sw);
     }
@@ -266,8 +269,106 @@ pub fn flag(name: &str) -> bool {
 pub fn var(name: &str) -> Option<String> {
     let sw = registered(name);
     let v = std::env::var(name).ok().filter(|v| !v.trim().is_empty())?;
+    if !honoured(sw) {
+        return None;
+    }
     announce(sw);
     Some(v)
+}
+
+/// The switch lock (#4129). An environment the developer does not control (a
+/// CI job's env, a repository's `.envrc`, a devcontainer, an editor task) must
+/// not make a shipped compiler build something other than the reviewed source
+/// or skip a check. So once [`lock`] runs — the release binary does it first
+/// thing, and `--lock-switches` does it in any build — an INHERITED switch
+/// whose scope [`Scope::changes_the_build`] is read as unset, unless the
+/// command line names it with `--allow-switch NAME`. A switch the tool arms on
+/// itself ([`arm`]) is its own decision and stays honoured.
+static LOCK: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// Switches the tool armed on itself (see [`arm`]).
+static ARMED: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+
+/// Lock the build-changing switches; `allowed` are the names the command line
+/// opted into. An allowed name that is not a build-changing switch is an error
+/// the caller reports (see [`check_allowed`]).
+pub fn lock(allowed: Vec<String>) {
+    let _ = LOCK.set(allowed);
+}
+
+/// Is the switch lock on?
+pub fn locked() -> bool {
+    LOCK.get().is_some()
+}
+
+/// Why `name` cannot be passed to `--allow-switch`, if it cannot.
+pub fn check_allowed(name: &str) -> Result<(), String> {
+    match switch(name) {
+        None => Err(format!("`{name}` is not a registered switch (`almide switches` lists them)")),
+        Some(sw) if !sw.scope.changes_the_build() => {
+            Err(format!("`{name}` is a {} switch, which is honoured without `--allow-switch`", sw.scope.label()))
+        }
+        Some(_) => Ok(()),
+    }
+}
+
+/// Set a switch on this process (and the children it spawns) as the TOOL's
+/// own decision — `almide test` arming `ALMIDE_NO_RTLIB` for its harness
+/// build, `--time-report` arming `ALMIDE_FUEL_PROBE`. Honoured under the lock.
+///
+/// # Safety
+/// The caller upholds [`std::env::set_var`]'s contract: no other thread reads
+/// or writes the environment concurrently.
+pub unsafe fn arm(name: &'static str, value: &str) {
+    registered(name);
+    unsafe { std::env::set_var(name, value) };
+    ARMED.lock().unwrap_or_else(|e| e.into_inner()).push(name);
+}
+
+/// The inherited build-changing switches that are on, whether or not the lock
+/// would honour them — what `--profile critical` refuses outright.
+pub fn inherited_build_switches() -> Vec<&'static str> {
+    SWITCHES
+        .iter()
+        .filter(|sw| sw.scope.changes_the_build())
+        .filter(|sw| was_inherited(sw.name) && !was_armed(sw.name))
+        .filter(|sw| match sw.kind {
+            Kind::Flag => std::env::var_os(sw.name).is_some_and(|v| is_on(&v)),
+            Kind::Value => std::env::var_os(sw.name).is_some_and(|v| !v.to_string_lossy().trim().is_empty()),
+        })
+        .map(|sw| sw.name)
+        .collect()
+}
+
+fn was_inherited(name: &str) -> bool {
+    INHERITED.get().map_or(true, |names| names.iter().any(|n| n == name))
+}
+
+fn was_armed(name: &str) -> bool {
+    ARMED.lock().unwrap_or_else(|e| e.into_inner()).contains(&name)
+}
+
+/// Does the lock let `sw` through? Says so once on stderr when it does not.
+fn honoured(sw: &'static Switch) -> bool {
+    let Some(allowed) = LOCK.get() else { return true };
+    if !sw.scope.changes_the_build() || !was_inherited(sw.name) || was_armed(sw.name) {
+        return true;
+    }
+    if allowed.iter().any(|a| a == sw.name) {
+        return true;
+    }
+    static SAID: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+    let mut said = SAID.lock().unwrap_or_else(|e| e.into_inner());
+    if !said.contains(&sw.name) {
+        said.push(sw.name);
+        eprintln!(
+            "[almide] {} is set but IGNORED: this compiler honours a {} switch from the environment only with `--allow-switch {}` (#4129)",
+            sw.name,
+            sw.scope.label(),
+            sw.name
+        );
+    }
+    false
 }
 
 fn registered(name: &str) -> &'static Switch {
@@ -314,6 +415,12 @@ fn announce(sw: &'static Switch) {
 }
 
 impl Scope {
+    /// Does a switch of this scope change what the compiler emits or which
+    /// check runs? Those are the ones the switch lock (#4129) holds back.
+    pub fn changes_the_build(self) -> bool {
+        matches!(self, Scope::Route | Scope::Gate | Scope::Ablation | Scope::Trap)
+    }
+
     /// The scope's name in the tables.
     pub fn label(self) -> &'static str {
         match self {

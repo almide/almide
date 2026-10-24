@@ -73,7 +73,7 @@ codegen-units = 1
     std::fs::write(src_dir.join("lib.rs"), &lib_code)
         .map_err(|e| format!("failed to write lib.rs: {}", e))?;
 
-    let mut cmd = std::process::Command::new("cargo");
+    let mut cmd = super::rustc_floor::cargo_command()?;
     inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("build").current_dir(project_dir).arg("--quiet");
     // The library is located under `project_dir/target` below; an inherited
@@ -275,7 +275,7 @@ fn run_cargo_build_and_locate_binary(project_dir: &std::path::Path, release: boo
     // though it were this build's.
     let _ = std::fs::remove_file(&bin_path);
 
-    let mut cmd = std::process::Command::new("cargo");
+    let mut cmd = super::rustc_floor::cargo_command()?;
     inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("build").current_dir(project_dir);
     // The binary is located under `project_dir/target` below; an inherited
@@ -603,7 +603,7 @@ fn render_cargo_json_errors(stdout: &str, stderr: &str, verbose: bool) -> String
 /// `cargo_build_test_with_native`'s tail.
 fn run_cargo_test_no_run_and_locate_binary(project_dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
     // Use `cargo test --no-run` to build the test binary without running it
-    let mut cmd = std::process::Command::new("cargo");
+    let mut cmd = super::rustc_floor::cargo_command()?;
     inject_almide_par_if_rayon(&mut cmd, project_dir);
     cmd.arg("test").arg("--no-run").arg("--quiet").arg("--message-format=json")
         .current_dir(project_dir);

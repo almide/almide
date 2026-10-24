@@ -289,7 +289,7 @@ fn highlight(src: List[Int], mut out: Bytes) -> Unit = {
 let sample = "SELECT name, COUNT(*) AS n FROM users u JOIN orders o ON u.id = o.uid\nWHERE u.email LIKE '%@example.com' AND o.total > 99.5 AND note = 'a&b <c> \"d\"'\nGROUP BY name HAVING n >= 2 ORDER BY n DESC LIMIT 10; -- trailing comment\n/* block\ncomment */ UPDATE t SET x = x''y'' WHERE k ISNULL;\n"
 
 fn main() -> Unit = {
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   highlight(string.to_bytes(sample), out)
   println(bytes.to_string_lossy(out))
 }

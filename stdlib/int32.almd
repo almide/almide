@@ -197,3 +197,75 @@ fn parse(s: String) -> Result[Int32, String] = match int.parse(s) {
   else ok(int.to_int32(n)),
   err(e) => err(e),
 }
+
+// ── Integer: radix text (R-sized-06) ──
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: Int32, radix: Int) -> String = int.to_string_radix(int.from_int32(x), radix)
+
+/// Int32 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -2147483648..2147483647.
+fn parse_radix(s: String, radix: Int) -> Result[Int32, String] = match int.parse_radix(s, radix) {
+  ok(n) => if n < -2147483648 then err("number too small to fit in target type")
+  else if n > 2147483647 then err("number too large to fit in target type")
+  else ok(int.to_int32(n)),
+  err(e) => err(e),
+}
+
+// ── The `from` family (R-L0-40): Int32 from any number. The source is any
+//    `Numeric` type; the body reads the source through the protocol's
+//    conversion pivots (`__int_exact`, `__trunc`, ...), which every numeric
+//    type defines below its own conversions. ──
+/// x as Int32, toward zero; NaN, an infinity or a value outside Int32 aborts.
+fn from[S: Numeric](x: S) -> Int32 = match x.__trunc().__int_exact() {
+  some(n) => int.to_int32_checked(n) ?? panic("int32.from: the value is not a number in the range of Int32"),
+  none => panic("int32.from: the value is not a number in the range of Int32"),
+}
+
+/// some(x as Int32) when Int32 holds x exactly, else none (a fraction, NaN, out of range).
+fn from_checked[S: Numeric](x: S) -> Int32? = match x.__int_exact() {
+  some(n) => int.to_int32_checked(n),
+  none => none,
+}
+
+/// x as Int32, toward zero, clamped to Int32's range; NaN is 0.
+fn from_saturating[S: Numeric](x: S) -> Int32 = int.to_int32_saturating(x.__int_sat())
+
+/// The low 32 bits of integer x as Int32 (two's complement).
+fn from_wrapping[S: Integer](x: S) -> Int32 = {
+  let u = int.wrap(x.__bits64(), 32)
+  int.to_int32(if u >= 2147483648 then u - 4294967296 else u)
+}
+
+// ── Numeric / Integer requirements: the conversion pivots the `<T>.from`
+//    family reads through a type variable, and the receiver-less sum and
+//    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
+fn __int_exact(x: Int32) -> Int? = some(int.from_int32(x))
+
+fn __uint64_exact(x: Int32) -> UInt64? = int.__uint64_exact(int.from_int32(x))
+
+fn __trunc(x: Int32) -> Int32 = x
+
+fn __int_sat(x: Int32) -> Int = int.from_int32(x)
+
+fn __uint64_sat(x: Int32) -> UInt64 = int.__uint64_sat(int.from_int32(x))
+
+fn __to_float(x: Int32) -> Float = int.to_float(int.from_int32(x))
+
+fn __to_float_exact(x: Int32) -> Float? = int.__to_float_exact(int.from_int32(x))
+
+fn __to_float32(x: Int32) -> Float32 = int.to_float32(int.from_int32(x))
+
+fn __to_float32_exact(x: Int32) -> Float32? = int.to_float32_checked(int.from_int32(x))
+
+fn __decimal_exact(x: Int32) -> String? = some(int.to_string(int.from_int32(x)))
+
+fn __bits64(x: Int32) -> Int = int.from_int32(x)
+
+fn __sum(xs: List[Int32]) -> Int32 = {
+  let zero: Int32 = 0
+  list.fold(xs, zero, (a, b) => a + b)
+}
+
+fn __product(xs: List[Int32]) -> Int32 = {
+  let one: Int32 = 1
+  list.fold(xs, one, (a, b) => a * b)
+}

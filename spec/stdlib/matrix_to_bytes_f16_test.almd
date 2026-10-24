@@ -1,0 +1,45 @@
+// matrix.to_bytes_f16_le: row-major IEEE half floats, each f64 rounded to
+// nearest even (no f32 double rounding), overflow to inf, NaN canonical 0x7E00.
+fn f16(x: Float) -> List[Int] = bytes.to_list(matrix.to_bytes_f16_le(matrix.from_lists([
+  [x]
+])))
+
+test "exact values and row-major order" {
+  assert_eq(
+    bytes.to_list(matrix.to_bytes_f16_le(matrix.from_lists([
+      [1.0, -2.0],
+      [0.5, 0.0]
+    ]))),
+    [
+      0,
+      60,
+      0,
+      192,
+      0,
+      56,
+      0,
+      0
+    ],
+  )
+  assert_eq(bytes.len(matrix.to_bytes_f16_le(matrix.from_lists([]))), 0)
+  assert_eq(f16(-0.0), [0, 128])
+}
+
+test "rounding to nearest even" {
+  assert_eq(f16(1.00048828125), [0, 60])
+  assert_eq(f16(1.000732421875), [1, 60])
+  assert_eq(f16(1.0009765625), [1, 60])
+  assert_eq(f16(65504.0), [255, 123])
+  assert_eq(f16(65519.99), [255, 123])
+}
+
+test "overflow, underflow, subnormals and NaN" {
+  assert_eq(f16(65520.0), [0, 124])
+  assert_eq(f16(-1.0e6), [0, 252])
+  assert_eq(f16(5.960464477539063e-8), [1, 0])
+  assert_eq(f16(2.98e-8), [0, 0])
+  assert_eq(f16(2.99e-8), [1, 0])
+  assert_eq(f16(1.0e-10), [0, 0])
+  assert_eq(f16(0.0 / 0.0), [0, 126])
+  assert_eq(f16(1.0 / 0.0), [0, 124])
+}

@@ -27,11 +27,11 @@ fn permissions_read_every_array_spelling() {
          proc = [\n  \"git\",\n  'cargo'\n]\n",
     )
     .expect("valid manifest");
-    assert_eq!(p.permissions, ["IO", "Net"]);
+    assert_eq!(p.permissions.as_deref(), Some(&["IO".to_string(), "Net".to_string()][..]));
     assert_eq!(p.proc_allow.as_deref(), Some(&["git".to_string(), "cargo".to_string()][..]));
 
     let p = parse("perm-empty", "[package]\nname = \"a\"\n\n[permissions]\nproc = [\n]\n").expect("valid manifest");
-    assert!(p.permissions.is_empty());
+    assert!(p.permissions.is_none(), "no `allow` key is unchecked, not an empty grant (#4101)");
     assert_eq!(p.proc_allow.as_deref(), Some(&[][..]), "an empty proc list allows no command; it is not absent");
 }
 

@@ -9,7 +9,7 @@
 fn main() -> Unit = {
   let xs = [10, 20]
   let m = ["a": 1]
-  var b = bytes.new(2)
+  var b = bytes.zeros(2)
   bytes.set_at(b, 0, 7)
   println("hits: ${list.get_or(xs, 1, 0)} ${map.get_or(m, "a", 0)} ${bytes.get_or(b, 0, 0)}")
   println("misses: ${list.get_or(xs, 9, -1)} ${map.get_or(m, "z", -1)} ${bytes.get_or(b, 9, -1)}")

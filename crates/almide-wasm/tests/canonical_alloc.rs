@@ -68,7 +68,7 @@ fn large_rounds(iters: u32) -> String {
         r#"fn probe() -> Int = {{
   var acc = 0
   for i in 0..<{iters} {{
-    let b = bytes.new(100000 + i % 2)
+    let b = bytes.zeros(100000 + i % 2)
     let s = "r" + int.to_string(i)
     acc = acc + bytes.len(b) + string.len(s)
   }}

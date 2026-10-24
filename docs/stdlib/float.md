@@ -236,7 +236,7 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (46 functions)
+## Signature index (59 functions)
 
 ```
 // Shortest round-trip digits, no exponent; 2.0 keeps .0.
@@ -297,7 +297,11 @@ float.clamp(n: Float, lo: Float, hi: Float) -> Float
 
 // 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
 // @since 0.5.13 or earlier
-float.sign(n: Float) -> Float
+float.sign(n: Float) -> Float   (deprecated — use float.signum)
+
+// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+// @since unreleased
+float.signum(x: Float) -> Float
 
 // True only for NaN (unequal to itself).
 // @since 0.6.0 or earlier
@@ -422,6 +426,54 @@ float.to_uint32_saturating(n: Float) -> UInt32
 // Truncates, clamps to 0..2^64-1; NaN gives 0.
 // @since 0.15.0 or earlier
 float.to_uint64_saturating(n: Float) -> UInt64
+
+// Round toward 0; -0.5 gives -0.0.
+// @since unreleased
+float.trunc(x: Float) -> Float
+
+// True unless x is inf, -inf or NaN.
+// @since unreleased
+float.is_finite(x: Float) -> Bool
+
+// base to the exp; NaN for a negative base with a fractional exp.
+// @since unreleased
+float.pow(base: Float, exp: Float) -> Float
+
+// -1, 0 or 1 in IEEE-754 total order: -0.0 < 0.0, NaN above inf and equal to itself.
+// @since unreleased
+float.compare(a: Float, b: Float) -> Int
+
+// Float whose IEEE-754 binary64 bits are bits; any NaN gives the one NaN.
+// @since unreleased
+float.from_bits(bits: Int) -> Float
+
+// Positive infinity.
+// @since unreleased
+float.infinity() -> Float
+
+// The one quiet NaN (bits 0x7ff8000000000000).
+// @since unreleased
+float.nan() -> Float
+
+// Gap between 1.0 and the next Float: 2^-52.
+// @since unreleased
+float.epsilon() -> Float
+
+// Largest finite Float, about 1.7976931348623157e308.
+// @since unreleased
+float.max_value() -> Float
+
+// Most negative finite Float (= -max_value()), not the smallest positive.
+// @since unreleased
+float.min_value() -> Float
+
+// x as the nearest Float (ties to even); NaN stays NaN.
+// @since unreleased
+float.from(x: S) -> Float
+
+// some(x as Float) when Float holds x exactly, else none (a rounded value, NaN).
+// @since unreleased
+float.from_checked(x: S) -> Option[Float]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

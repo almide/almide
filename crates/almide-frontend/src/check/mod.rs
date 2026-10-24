@@ -36,6 +36,7 @@ mod pure_attr;
 mod bang_error_channel;
 mod lambda_channel;
 mod intrinsic_authority;
+pub use intrinsic_authority::grant_stdlib_authority;
 mod extern_abi_check;
 mod prim_wrappers;
 mod exhaustiveness;
@@ -43,6 +44,7 @@ mod call_defaults;
 mod effect_isolation_cascade;
 mod qq_effect_bang;
 mod expect_effect;
+mod regex_runtime;
 
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
@@ -1492,11 +1494,13 @@ include!("interp_string_form.rs");
 include!("lint_error_surface.rs");
 include!("bounded.rs");
 include!("concurrent_reach_check.rs");
+include!("regex_literal_check.rs");
 include!("abort_site_check.rs");
 include!("scoped.rs");
 include!("scoped_walk.rs");
 include!("scoped_shape.rs");
 include!("module_inference.rs");
+include!("generic_scope.rs");
 
 /// What the file SPELLS that can mark an import used (#1783, #1853).
 /// Purely syntactic, so it is deterministic under the spine's checker

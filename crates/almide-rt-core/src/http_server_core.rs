@@ -513,8 +513,15 @@ fn http_server_line(
             return Err(too_long);
         }
         if done {
-            while matches!(line.last(), Some(b'\n' | b'\r')) {
-                line.pop();
+            // RFC 9112 §2.2 (C-405): a line ends in CRLF, and a CR anywhere
+            // else is refused — a bare LF or a bare CR is read differently by
+            // a proxy that accepts it.
+            if !line.ends_with(b"\r\n") {
+                return Err(HttpServerReject::Status(400));
+            }
+            line.truncate(line.len() - 2);
+            if line.contains(&b'\r') {
+                return Err(HttpServerReject::Status(400));
             }
             return Ok(String::from_utf8_lossy(&line).into_owned());
         }
@@ -618,8 +625,13 @@ impl HttpServerFraming {
     }
 }
 
-/// The header fields up to the empty line (a line without a colon is
-/// skipped but counts toward the cap), and the framing they declare.
+/// The header fields up to the empty line, read by RFC 9112 (ALS-R5, C-405,
+/// #4112): a line starting with space or tab (obs-fold, §5.2), a line without
+/// a colon, and a field name that is not a token — whitespace before the
+/// colon included (§5.1) — are each `400`. The core used to trim the name,
+/// skip a colon-less line and read a folded line as a new field, so a proxy in
+/// front and the program could disagree about what a request carried. The
+/// value is trimmed of optional whitespace (SP / HTAB) on both sides.
 fn http_server_read_headers(
     reader: &mut std::io::BufReader<std::net::TcpStream>,
     clock: HttpServerClock,
@@ -630,20 +642,28 @@ fn http_server_read_headers(
     let mut lines = 0usize;
     loop {
         let line = http_server_line(reader, clock, true, too_many())?;
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
+        if line.is_empty() {
             return Ok((headers, framing));
         }
         lines += 1;
         if lines > HTTP_SERVER_MAX_HEADERS {
             return Err(too_many());
         }
-        if let Some(idx) = trimmed.find(':') {
-            let key = trimmed[..idx].trim().to_string();
-            let val = trimmed[idx + 1..].trim().to_string();
-            framing.note(&key, &val)?;
-            headers.push((key, val));
+        if line.starts_with([' ', '\t']) {
+            return Err(HttpServerReject::Status(400));
         }
+        let Some(idx) = line.find(':') else {
+            return Err(HttpServerReject::Status(400));
+        };
+        let tchar = |b: u8| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b);
+        let name = &line[..idx];
+        if name.is_empty() || !name.bytes().all(tchar) {
+            return Err(HttpServerReject::Status(400));
+        }
+        let key = name.to_string();
+        let val = line[idx + 1..].trim_matches([' ', '\t']).to_string();
+        framing.note(&key, &val)?;
+        headers.push((key, val));
     }
 }
 
@@ -670,6 +690,55 @@ fn http_server_read_body(
     Ok(body)
 }
 
+/// The request line by RFC 9112 §3 (C-405, #4112): exactly three parts
+/// separated by single spaces — a token method, a target, and `HTTP/1.1` or
+/// `HTTP/1.0`. The target is origin-form (`/…`, no control character or
+/// DEL), or absolute-form `http://` / `https://` mapped to its origin-form
+/// path and query; asterisk-form and authority-form are refused. Answers
+/// (method, origin-form target, is HTTP/1.1), or None for a `400`.
+pub fn http_server_request_line(line: &str) -> Option<(String, String, bool)> {
+    let parts: Vec<&str> = line.split(' ').collect();
+    if parts.len() != 3 {
+        return None;
+    }
+    let (method, target, version) = (parts[0], parts[1], parts[2]);
+    let tchar = |b: u8| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b);
+    if method.is_empty() || !method.bytes().all(tchar) {
+        return None;
+    }
+    let http11 = match version {
+        "HTTP/1.1" => true,
+        "HTTP/1.0" => false,
+        _ => return None,
+    };
+    if target.is_empty() || target.bytes().any(|b| b <= 0x20 || b == 0x7f) {
+        return None;
+    }
+    let origin = if target.starts_with('/') {
+        target.to_string()
+    } else {
+        let lower = target.to_ascii_lowercase();
+        let rest = if lower.starts_with("http://") {
+            &target[7..]
+        } else if lower.starts_with("https://") {
+            &target[8..]
+        } else {
+            return None;
+        };
+        let cut = rest.find(['/', '?']).unwrap_or(rest.len());
+        if cut == 0 {
+            return None;
+        }
+        let tail = &rest[cut..];
+        if tail.starts_with('/') {
+            tail.to_string()
+        } else {
+            format!("/{tail}")
+        }
+    };
+    Some((method.to_string(), origin, http11))
+}
+
 /// The request on `stream`, accepted at `accepted`: its head under the header
 /// deadline, its body under the request timeout. Answers the request and the
 /// instant its response is due by.
@@ -682,13 +751,17 @@ fn http_server_read_request(
     let clone = stream.try_clone().map_err(|_| HttpServerReject::Drop)?;
     let mut reader = std::io::BufReader::new(clone);
     let first_line = http_server_line(&mut reader, head, false, HttpServerReject::Status(414))?;
-    let parts: Vec<&str> = first_line.split_whitespace().collect();
-    if parts.len() < 2 {
+    if first_line.is_empty() {
         return Err(HttpServerReject::Drop);
     }
-    let method = parts[0].to_string();
-    let path = parts[1].to_string();
+    let (method, path, http11) = http_server_request_line(&first_line).ok_or(HttpServerReject::Status(400))?;
     let (headers, framing) = http_server_read_headers(&mut reader, head)?;
+    // RFC 9112 §3.2: an HTTP/1.1 request carries exactly one Host field, and
+    // no request carries two.
+    let hosts = headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("host")).count();
+    if hosts > 1 || (http11 && hosts == 0) {
+        return Err(HttpServerReject::Status(400));
+    }
     let body = http_server_read_body(&mut reader, body_clock, limits.max_body_bytes, &framing)?;
     Ok(((method, path, String::from_utf8_lossy(&body).to_string(), headers), body_clock.at))
 }
@@ -798,6 +871,36 @@ pub fn http_server_bad_status(status: i64) -> Option<String> {
 /// `s` in double quotes for a refusal text: `\` and `"` escaped, and every
 /// control character (U+0000..=U+001F, U+007F..=U+009F) as `\u{hex}`, so
 /// the text is one printable line on every leg.
+// A handler's err never reaches the client (C-409, #4150, CWE-209): it can
+// carry paths, operands, errno text and whatever the program interpolated.
+// The client gets a fixed body naming the request's id; the full error goes
+// to stderr under the same id, quoted by `http_server_quote` so input in it
+// cannot forge a log line or emit a terminal escape. TODO(#4126): share that
+// issue's escaping function once it lands. The id is computed from the request
+// itself — 8 lowercase hex digits of the 32-bit FNV-1a of `method SP target LF
+// body`, `hash.fnv1a32`'s function — so every lane names the same request the
+// same way (a per-loop counter cannot: a stock `wasmtime serve` instance sees
+// one request). stdlib/http_serve.almd writes the same texts on the wasm legs.
+/// The request id the handler-error texts carry.
+pub fn http_server_request_id(method: &str, target: &str, body: &str) -> String {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in method.bytes().chain(std::iter::once(b' ')).chain(target.bytes()).chain(std::iter::once(b'\n')).chain(body.bytes()) {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(16_777_619);
+    }
+    format!("{h:08x}")
+}
+
+/// The 500 body for a handler err of the request `id` names.
+pub fn http_server_handler_error_body(id: &str) -> String {
+    format!("Internal Server Error (request {id})")
+}
+
+/// The stderr line for that err.
+pub fn http_server_handler_error_line(id: &str, err: &str) -> String {
+    format!("http.serve: request {id}: handler error: {}", http_server_quote(err))
+}
+
 pub fn http_server_quote(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
@@ -824,6 +927,7 @@ pub fn http_server_response_bytes(status: i64, headers: &[(String, String)], bod
 
 /// The response bytes: status line, the response's headers in order (a
 /// handler's `Connection` field dropped — the core owns the connection),
+/// `X-Content-Type-Options: nosniff` unless the response has that field,
 /// `Connection: close` (one response per connection; keep-alive is #2665),
 /// Content-Length, the body. A HEAD request, a 1xx, a 204 and a 304 get no
 /// body (RFC 9110 §6.4.1); 1xx and 204 get no Content-Length either
@@ -835,6 +939,11 @@ pub fn http_server_response_bytes_for(head: bool, status: i64, headers: &[(Strin
             continue;
         }
         out.push_str(&format!("{}: {}\r\n", k, v));
+    }
+    // A secure default (C-407, #4134): every response says
+    // `X-Content-Type-Options: nosniff` unless the handler set the field.
+    if !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("x-content-type-options")) {
+        out.push_str("X-Content-Type-Options: nosniff\r\n");
     }
     out.push_str("Connection: close\r\n");
     let informational = (100..200).contains(&status);
@@ -856,7 +965,7 @@ pub fn http_server_write(conn: HttpServerConn, status: i64, headers: &[(String, 
     let plain = [("Content-Type".to_string(), "text/plain".to_string())];
     if let Some(why) = headers.iter().find_map(|(k, v)| http_server_bad_header(k, v)).or_else(|| http_server_bad_status(status)) {
         eprintln!("http.serve: refused the response: {why}");
-        return http_server_send(conn, 500, &plain, &format!("Internal error: {why}"));
+        return http_server_send(conn, 500, &plain, "Internal Server Error");
     }
     if std::time::Instant::now() >= conn.deadline {
         return http_server_send(conn, 503, &plain, http_server_reason(503));

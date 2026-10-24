@@ -22,6 +22,10 @@ cut. At end of input it returns `""` — the same value it returns for an empty
 line, so it cannot tell the two apart; use `io.read_line_opt` when the loop
 has to stop at the end of input.
 
+The line's bytes are decoded as UTF-8; each invalid sequence becomes one
+`U+FFFD` (`�`), the same on every target (#4142). A read error ends the
+input, like end of file.
+
 ```almd check
 import io
 
@@ -73,7 +77,10 @@ Enter name: Alice
 
 ### `io.read_all() -> String`
 
-Read all of standard input as a single string
+Read all of standard input as a single string. The bytes are decoded as
+UTF-8; each invalid sequence becomes one `U+FFFD` (`�`), the same on every
+target (#4142). A read error ends the input: the bytes read before it are
+kept.
 
 ```almd check
 import io
@@ -149,7 +156,7 @@ effect fn main() -> Unit = {
 ## Signature index (8 functions)
 
 ```
-// Next stdin line, newline cut; "" at EOF too — read_line_opt tells them apart.
+// Next stdin line, newline cut, bad UTF-8 as U+FFFD; "" at EOF too — read_line_opt tells them apart.
 // @since 0.5.0 or earlier
 effect io.read_line() -> String
 
@@ -161,7 +168,7 @@ effect io.read_line_opt() -> Option[String]
 // @since 0.5.0 or earlier
 effect io.print(s: String) -> Unit
 
-// Rest of stdin as text; empty at EOF.
+// Rest of stdin as text, bad UTF-8 as U+FFFD; empty at EOF.
 // @since 0.5.0 or earlier
 effect io.read_all() -> String
 
@@ -175,11 +182,11 @@ effect io.read_n_bytes(n: Int) -> List[Int]
 
 // Low byte of each Int to stdout; unflushed.
 // @since 0.9.8 or earlier
-io.write_bytes(data: List[Int]) -> Unit
+effect io.write_bytes(data: List[Int]) -> Unit
 
 // Raw data to stdout; no newline.
 // @since 0.9.8 or earlier
-io.write(data: Bytes) -> Unit
+effect io.write(data: Bytes) -> Unit
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

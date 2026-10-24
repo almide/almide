@@ -209,8 +209,11 @@ impl Checker {
                 let does = OUTPUT_ABORT_BUILTINS.iter().find(|(n, _)| n == b).map_or("", |(_, d)| d);
                 Some((b.to_string(), does.to_string()))
             }
-            PurityCallee::Stdlib(m, f) => almide_ir::effect::stdlib_call_effect(m.as_str(), f.as_str())
-                .map(|e| (format!("{m}.{f}"), format!("has the {e} effect"))),
+            PurityCallee::Stdlib(m, f) => {
+                let cats = almide_ir::effect::stdlib_call_effect(m.as_str(), f.as_str());
+                let names: Vec<&str> = cats.iter().map(|e| e.name()).collect();
+                (!cats.is_empty()).then(|| (format!("{m}.{f}"), format!("has the {} effect", names.join(", "))))
+            }
             PurityCallee::User(k) if self.env.extern_fns.contains(k) => {
                 Some((k.to_string(), "is an `@extern` fn, whose body cannot be checked".to_string()))
             }

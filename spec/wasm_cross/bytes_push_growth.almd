@@ -1,7 +1,7 @@
 // @contract: C-325
 // bytes.push growth at scale (#1689).
 //
-// `bytes.new(0)` grown by 70,000 pushes — past the ~69k threshold where
+// `bytes.zeros(0)` grown by 70,000 pushes — past the ~69k threshold where
 // the old per-push copy-grow protocol died with `out of memory` on the
 // structural wasm leg (every push reallocated len+1 and never freed the
 // outgrown block: n pushes retained n²/2 bytes). The `$bytes_push`
@@ -11,7 +11,7 @@
 // old page boundary; the alias block pins the value-semantics snapshot
 // (an in-place fast-path push must never leak into a prior bind).
 fn main() -> Unit = {
-  var b = bytes.new(0)
+  var b = bytes.zeros(0)
   var i = 0
   while i < 70000 {
     bytes.push(b, int.band(i, 255))
@@ -21,7 +21,7 @@ fn main() -> Unit = {
     b,
     69999,
   ) ?? -1}")
-  var a = bytes.new(0)
+  var a = bytes.zeros(0)
   bytes.push(a, 1)
   var alias = a
   bytes.push(a, 2)

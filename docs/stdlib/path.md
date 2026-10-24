@@ -15,20 +15,30 @@ can demand a *validated* one in its signature instead of trusting a bare
 
 ### `path.from_string(s: String) -> Result[SafePath, String]`
 
-Validate a path and wrap it. Rejects anything containing a `..` segment.
+Validate a path and wrap it. Admits only a path that stays inside the
+directory it is later joined to: it must be relative (no leading `/` or `\`,
+no drive letter such as `C:`, no leading `~`), hold no NUL, and have no `..`
+segment when split on either separator — `..\..\x` is refused on every
+host. Percent-encoded forms such as `%2e%2e` are NOT decoded here: to the
+filesystem they are ordinary names; decode URL input before validating it.
+
+To use a validated name, join it onto the directory it belongs to with
+`path.join_within`, or open that directory with `fs.open_root` and read
+through the rooted `fs.root_*` calls, which also refuse a symlink that leads
+out of it.
 
 ```almd check
 import path
 import fs
 
-effect fn read_validated(user_input: String) -> String =
-  match path.from_string(user_input) {
-    ok(p) => fs.read_text(path.to_string(p))!,
+effect fn read_upload(name: String) -> String =
+  match path.join_within("uploads", name) {
+    ok(p) => fs.read_text(p)!,
     err(e) => err("rejected: " + e),
   }
 
 effect fn main() -> Unit = {
-  match read_validated("../etc/passwd") {
+  match read_upload("../etc/passwd") {
     ok(text) => println(text),
     err(e) => println(e),
   }
@@ -47,10 +57,33 @@ Unwrap back to the underlying string.
 
 ## Path components
 
+### `path.join_within(base: String, child: String) -> Result[String, String]`
+
+`path.join(base, child)` for a `child` that `path.from_string` admits, and
+`err("path traversal rejected: <child>")` for any other — an absolute child,
+a `..` on either separator, a `~`, a drive letter or a NUL — so the result
+always names a place under `base`.
+
+```almd run
+import path
+
+fn main() -> Unit = {
+  println(path.join_within("/srv/uploads", "a/b.txt") ?? "refused")
+  println(path.join_within("/srv/uploads", "/etc/passwd") ?? "refused")
+  println(path.join_within("/srv/uploads", "../../etc/passwd") ?? "refused")
+}
+```
+```output
+/srv/uploads/a/b.txt
+refused
+refused
+```
+
 ### `path.join(base: String, child: String) -> String`
 
 Join two segments with a single separator, whether or not `base` already ends
-in one.
+in one. An absolute `child` replaces `base`, and a `..` in `child` climbs out
+of it: for a child that crossed a trust boundary use `path.join_within`.
 
 ```almd run
 import path
@@ -173,10 +206,10 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (13 functions)
+## Signature index (14 functions)
 
 ```
-// SafePath of s; err if any segment is "..".
+// SafePath of s; err unless relative and inside.
 // @since 0.18.1 or earlier
 path.from_string(s: String) -> Result[SafePath, String]
 
@@ -191,6 +224,10 @@ path.to_string(p: SafePath) -> String
 // base/child; an absolute child replaces base.
 // @since 0.2.0 or earlier
 path.join(base: String, child: String) -> String
+
+// base/child; err if child could leave base.
+// @since unreleased
+path.join_within(base: String, child: String) -> Result[String, String]
 
 // p minus last segment; "" if no slash.
 // @since 0.2.0 or earlier

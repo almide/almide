@@ -28,7 +28,7 @@ fn dispatch_run(args: RunCmd) {
         // ops, and the run leg formats the probe line into the D5 dual-time
         // report instead of printing it raw.
         // SAFETY: single-threaded at this point (process entry, pre-dispatch).
-        unsafe { std::env::set_var("ALMIDE_FUEL_PROBE", "1") };
+        unsafe { almide_base::env::arm("ALMIDE_FUEL_PROBE", "1") };
     }
     // 0.29.0: v1-first verified wasm is the DEFAULT; `--no-verified` opts out.
     // 0.30.0 (#764 rung-5 complete): the v1 NATIVE trust-spine renderer is
@@ -119,6 +119,9 @@ fn dispatch_check(args: CheckCmd) {
         return;
     }
     let critical = critical_profile_grants(profile.as_deref(), &allow);
+    if critical.is_some() {
+        refuse_build_switches_under_critical();
+    }
     let wasm_target = check_wasm_target(target.as_deref());
     // #2165: the bare form inside a package judges EVERY entry under `src/`,
     // not the first one `resolve_file` happens to find. `--json` walks the
@@ -172,6 +175,20 @@ fn critical_profile_grants(profile: Option<&str>, allow: &[String]) -> Option<Ve
     }
 }
 
+/// #4129: `--profile critical` judges the program as written, so an inherited
+/// switch that changes what is compiled or which check runs is refused, not
+/// ignored — `--allow-switch` does not lift it.
+fn refuse_build_switches_under_critical() {
+    let on = almide_base::env::inherited_build_switches();
+    if !on.is_empty() {
+        eprintln!(
+            "error: --profile critical refuses a build-changing environment switch: {} (unset it; `almide switches` says what each does)",
+            on.join(", ")
+        );
+        std::process::exit(1);
+    }
+}
+
 /// `almide check --target`: `wasm` adds the wasm build route's verdicts;
 /// nothing else is accepted.
 fn check_wasm_target(target: Option<&str>) -> bool {
@@ -213,9 +230,11 @@ fn collect_almd(dir: &std::path::Path, out: &mut Vec<String>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        // A symlink is neither descended nor collected (#4140).
+        let Ok(kind) = entry.file_type() else { continue };
+        if kind.is_dir() {
             collect_almd(&path, out);
-        } else if path.extension().and_then(|e| e.to_str()) == Some("almd") {
+        } else if kind.is_file() && path.extension().and_then(|e| e.to_str()) == Some("almd") {
             out.push(path.to_string_lossy().replace('\\', "/"));
         }
     }
@@ -306,14 +325,77 @@ fn dispatch_fmt(files: Vec<String>, check: bool, json: bool, dry_run: bool, no_i
 /// The dependency is fetched BEFORE almide.toml is written, so a `--subdir`
 /// (#3381) or a tag the repository does not have leaves the manifest as it
 /// was rather than holding an entry no command can resolve.
-fn dispatch_add(pkg: String, git: Option<String>, tag: Option<String>, subdir: Option<String>) {
-    let subdir = subdir.map(|s| {
-        project::normalize_subdir(&s).unwrap_or_else(|why| {
-            err(&format!("invalid --subdir `{s}`: {why}"));
-            std::process::exit(1);
-        })
+/// `Commands::Add`'s fields, carried as one value into [`dispatch_add`].
+struct AddCmd {
+    pkg: String,
+    git: Option<String>,
+    tag: Option<String>,
+    subdir: Option<String>,
+    trust: Option<String>,
+    dry_run: bool,
+}
+
+/// `dispatch`'s `Commands::Add` arm (#4093). In order: resolve the spec to a
+/// source, check its owner against `[trust] owners` (and `--trust`), probe
+/// that the repository exists, fetch it, and only then write almide.toml and
+/// almide.lock. Any refusal or failure exits 1 and leaves both files as they
+/// were.
+fn dispatch_add(cmd: AddCmd) {
+    let fail = |msg: &str| -> ! {
+        err(msg);
+        std::process::exit(1);
+    };
+    let manifest = std::path::Path::new("almide.toml");
+    if !manifest.exists() {
+        fail("almide.toml not found. Run 'almide init' first.");
+    }
+    let proj = project::parse_toml(manifest).unwrap_or_else(|e| fail(&e));
+    let subdir = cmd.subdir.as_ref().map(|s| {
+        project::normalize_subdir(s).unwrap_or_else(|why| fail(&format!("invalid --subdir `{s}`: {why}")))
     });
-    let (name, git_url, tag) = project_fetch::resolve_add_target(pkg, git, tag, subdir.as_deref());
+    let retry = add_command_line(&cmd);
+    let (name, git_url, tag) = project_fetch::resolve_add_target(cmd.pkg, cmd.git, cmd.tag, subdir.as_deref());
+    let owner = crate::trust::source_owner(&git_url).unwrap_or_else(|e| fail(&format!("error: {e}")));
+    let granted = match (&cmd.trust, &owner) {
+        (Some(t), Some(o)) if crate::trust::owner_arg(t) == *o => true,
+        (Some(t), Some(o)) => fail(&format!(
+            "error: --trust {t} does not match the owner of {git_url} ({o})\n  \
+             hint: --trust must name the owner the source belongs to; check that this is the repository the user asked for"
+        )),
+        (Some(t), None) => fail(&format!("error: --trust {t}: {git_url} is on the local filesystem, which needs no trust")),
+        (None, _) => false,
+    };
+    let verdict = match &owner {
+        None => "a local source (no trust needed)".to_string(),
+        Some(o) if o == crate::trust::DEFAULT_TRUSTED_OWNER => format!("owner {o}, trusted by default"),
+        Some(o) if crate::trust::is_trusted(&proj.trust_owners, o) => format!("owner {o}, trusted by [trust] owners"),
+        Some(o) if granted => format!("owner {o}, trusted by --trust"),
+        Some(o) => format!("owner {o}, NOT trusted"),
+    };
+    err(&format!("Resolved {name} → {git_url} ({verdict})"));
+    if let Some(o) = owner.as_deref().filter(|o| !granted && !crate::trust::is_trusted(&proj.trust_owners, o)) {
+        fail(&crate::trust::add_refusal(&name, &git_url, o, &retry));
+    }
+    match project_fetch::probe_source(&git_url) {
+        Ok(()) => {}
+        Err(project_fetch::ProbeFailure::NotFound(detail)) => {
+            let hint = crate::trust::suggestion(&git_url).unwrap_or_else(|| {
+                format!("hint: no package under github.com/almide is close to `{name}`; check the name with the user")
+            });
+            fail(&format!(
+                "error: {git_url} does not exist (or is not visible to you)\n  git: {}\n  {hint}",
+                detail.lines().last().unwrap_or("")
+            ));
+        }
+        Err(project_fetch::ProbeFailure::Unreachable(detail)) => {
+            fail(&format!("error: could not reach {git_url}\n  git: {detail}"));
+        }
+    }
+    if cmd.dry_run {
+        let tag_part = tag.as_deref().map(|t| format!(" at {t}")).unwrap_or_default();
+        out(&format!("would add {name} = {git_url}{tag_part} ({verdict}); the repository exists; nothing written (--dry-run)"));
+        return;
+    }
     let dep = project::Dependency {
         name: name.clone(),
         git: git_url.clone(),
@@ -324,10 +406,78 @@ fn dispatch_add(pkg: String, git: Option<String>, tag: Option<String>, subdir: O
         subdir: subdir.clone(),
         declared_at: None,
     };
-    project_fetch::fetch_dep(&dep)
-        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
-    project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref(), subdir.as_deref())
-        .unwrap_or_else(|e| { err(&e.to_string()); std::process::exit(1); });
+    project_fetch::fetch_dep(&dep).unwrap_or_else(|e| fail(&e));
+    // Write the manifest (and the grant), then lock it the way a build
+    // would. Any failure puts both files back.
+    let lock = proj.root.join("almide.lock");
+    let saved_manifest = std::fs::read(manifest).ok();
+    let saved_lock = std::fs::read(&lock).ok();
+    let restore = || {
+        if let Some(bytes) = &saved_manifest {
+            let _ = std::fs::write(manifest, bytes);
+        }
+        match &saved_lock {
+            Some(bytes) => { let _ = std::fs::write(&lock, bytes); }
+            None => { let _ = std::fs::remove_file(&lock); }
+        }
+    };
+    let written = (|| -> Result<bool, String> {
+        let trusted_now = match (granted, owner.as_deref()) {
+            (true, Some(o)) => project::add_trust_owner(manifest, o)?,
+            _ => false,
+        };
+        project_fetch::add_dep_to_toml(&name, &git_url, tag.as_deref(), subdir.as_deref())?;
+        let updated = project::parse_toml(manifest)?;
+        project_fetch::fetch_all_deps(&updated)?;
+        Ok(trusted_now)
+    })();
+    match written {
+        Ok(trusted_now) => {
+            if trusted_now {
+                err(&format!("Trusted {} in almide.toml [trust] owners", owner.as_deref().unwrap_or("")));
+            }
+            err(&format!("Added {name} to almide.toml"));
+        }
+        Err(e) => {
+            restore();
+            fail(&format!("{e}\n  note: almide.toml and almide.lock are unchanged"));
+        }
+    }
+}
+
+/// The `almide add` command line `cmd` was, for the refusal's retry hint.
+fn add_command_line(cmd: &AddCmd) -> String {
+    let mut line = format!("almide add {}", cmd.pkg);
+    for (flag, value) in [("--git", &cmd.git), ("--tag", &cmd.tag), ("--subdir", &cmd.subdir)] {
+        if let Some(v) = value {
+            line.push_str(&format!(" {flag} {v}"));
+        }
+    }
+    line
+}
+
+/// `dispatch`'s `Commands::Trust` arm (#4093): add an owner to `[trust]
+/// owners`, for a dependency that no `almide add` brings (a transitive one,
+/// or a hand-written manifest line).
+fn dispatch_trust(owner: String) {
+    let manifest = std::path::Path::new("almide.toml");
+    if !manifest.exists() {
+        err("almide.toml not found. Run 'almide init' first.");
+        std::process::exit(1);
+    }
+    let owner = crate::trust::owner_arg(&owner);
+    if owner == crate::trust::DEFAULT_TRUSTED_OWNER {
+        err(&format!("{owner} is trusted by default; nothing to add"));
+        return;
+    }
+    match project::add_trust_owner(manifest, &owner) {
+        Ok(true) => err(&format!("Trusted {owner} in almide.toml [trust] owners")),
+        Ok(false) => err(&format!("{owner} is already in [trust] owners")),
+        Err(e) => {
+            err(&format!("error: {e}"));
+            std::process::exit(1);
+        }
+    }
 }
 
 /// `dispatch`'s `Commands::Update` arm (#1131): the sanctioned path FORWARD
@@ -358,26 +508,81 @@ fn dispatch_update(dep: Option<String>) {
 
 /// `dispatch`'s `Commands::Deps` arm. Extracted verbatim.
 fn dispatch_deps() {
-    if std::path::Path::new("almide.toml").exists() {
-        let proj = project::parse_toml(std::path::Path::new("almide.toml"))
-            .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
-        if proj.dependencies.is_empty() {
-            out(&format!("No dependencies"));
-        } else {
-            for dep in &proj.dependencies {
-                if let Some(ref path) = dep.path {
-                    out(&format!("{} = path {}", dep.name, path));
-                    continue;
-                }
-                let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
-                match &dep.subdir {
-                    Some(sub) => out(&format!("{} = {} ({}) subdir {}", dep.name, dep.git, ref_name, sub)),
-                    None => out(&format!("{} = {} ({})", dep.name, dep.git, ref_name)),
-                }
-            }
-        }
-    } else {
+    if !std::path::Path::new("almide.toml").exists() {
         err(&format!("No almide.toml found"));
+        return;
+    }
+    let proj = project::parse_toml(std::path::Path::new("almide.toml"))
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    if proj.dependencies.is_empty() {
+        out(&format!("No dependencies"));
+        return;
+    }
+    // #4093: each package with what it can reach and the native code it
+    // brings, so a dependency is judged before `almide build` runs its code.
+    let fetched = project_fetch::fetch_all_deps(&proj)
+        .unwrap_or_else(|e| { err(&format!("{}", e)); std::process::exit(1); });
+    let natives = crate::native_grant::survey(&proj, &fetched);
+    let caps = dependency_capabilities_report(&proj);
+    for dep in &proj.dependencies {
+        out(&dependency_source_line(dep));
+        if let Some(n) = natives.iter().find(|n| n.name == dep.name) {
+            print_dependency_details(n, caps.as_ref());
+        }
+    }
+    for n in natives.iter().filter(|n| !n.direct) {
+        out(&format!("{} (required by another dependency) = {}", n.name, n.package_dir.display()));
+        print_dependency_details(n, caps.as_ref());
+    }
+}
+
+/// `almide deps`'s first line for a declared dependency: where it comes from.
+fn dependency_source_line(dep: &project::Dependency) -> String {
+    if let Some(ref path) = dep.path {
+        return format!("{} = path {}", dep.name, path);
+    }
+    let ref_name = dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main");
+    match &dep.subdir {
+        Some(sub) => format!("{} = {} ({}) subdir {}", dep.name, dep.git, ref_name, sub),
+        None => format!("{} = {} ({})", dep.name, dep.git, ref_name),
+    }
+}
+
+/// The capability sets of every dependency package, measured over a program
+/// that imports the direct ones; `None` when they do not compile.
+fn dependency_capabilities_report(proj: &project::Project) -> Option<std::collections::HashMap<String, std::collections::BTreeSet<String>>> {
+    let dir = std::env::temp_dir().join(format!("almide-deps-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).ok()?;
+    let entry = dir.join("deps_entry.almd");
+    let imports: String = proj.dependencies.iter().map(|d| format!("import {}\n", d.name)).collect();
+    std::fs::write(&entry, imports).ok()?;
+    crate::SUPPRESS_WARNINGS.store(true, std::sync::atomic::Ordering::Relaxed);
+    let caps = crate::compile_driver::dependency_capabilities(&entry.to_string_lossy()).ok();
+    crate::SUPPRESS_WARNINGS.store(false, std::sync::atomic::Ordering::Relaxed);
+    let _ = std::fs::remove_dir_all(&dir);
+    caps
+}
+
+/// `almide deps`'s indented lines for one package: version, capabilities,
+/// native code and its grant.
+fn print_dependency_details(n: &crate::native_grant::DepNative, caps: Option<&std::collections::HashMap<String, std::collections::BTreeSet<String>>>) {
+    out(&format!("  version: {}", n.version));
+    let caps_text = match caps.map(|c| c.get(&n.name)) {
+        None => "unknown (the dependencies do not compile)".to_string(),
+        Some(None) => "unknown (no module of it is imported)".to_string(),
+        Some(Some(set)) if set.is_empty() => "none".to_string(),
+        Some(Some(set)) => set.iter().cloned().collect::<Vec<_>>().join(", "),
+    };
+    out(&format!("  capabilities: {}", caps_text));
+    if n.code.is_empty() {
+        out("  native code: none");
+    } else if n.granted {
+        out(&format!("  native code: {} (granted by [permissions].native)", n.code.describe()));
+    } else {
+        out(&format!(
+            "  native code: {} (NOT granted: build, run and test refuse it until [permissions].native names \"{}\")",
+            n.code.describe(), n.name
+        ));
     }
 }
 
@@ -440,7 +645,8 @@ fn dispatch_tooling(command: Commands) {
 fn dispatch_packages(command: Commands) {
     match command {
         Commands::Clean => cli::cmd_clean(),
-        Commands::Add { pkg, git, tag, subdir } => dispatch_add(pkg, git, tag, subdir),
+        Commands::Add { pkg, git, tag, subdir, trust, dry_run } => dispatch_add(AddCmd { pkg, git, tag, subdir, trust, dry_run }),
+        Commands::Trust { owner } => dispatch_trust(owner),
         Commands::Update { dep } => dispatch_update(dep),
         Commands::Deps => dispatch_deps(),
         Commands::DepPath { name } => dispatch_dep_path(name),
@@ -454,8 +660,8 @@ fn dispatch_packages(command: Commands) {
                 target.as_deref(),
             );
         }
-        Commands::SelfUpdate { version } => {
-            cli::cmd_self_update(version.as_deref());
+        Commands::SelfUpdate { version, skip_attestation } => {
+            cli::cmd_self_update(version.as_deref(), skip_attestation);
         }
         // `command`'s static type is the full `Commands` enum — Rust can't
         // narrow it to the variants `dispatch` and `dispatch_tooling` leave
@@ -495,7 +701,41 @@ fn refuse_invalid_manifest(command: &Commands) {
         err(&format!("error: {}", e));
         std::process::exit(1);
     }
+    refuse_older_compiler(command, path);
     report_manifest_warnings(command, path, &content);
+}
+
+/// #4172: the package's `almide = "X.Y.Z"` minimum holds on every command
+/// that checks or compiles it — not only the native build, whose compile
+/// driver was the one reader. A package pinning the release that carries a
+/// fix (a soundness or a permission fix) must not be built, checked or run
+/// by an older compiler on any target. Package management (`add`, `deps`,
+/// `update`, `install`) and `fmt` still run, so the pin can be read and
+/// changed.
+fn refuse_older_compiler(command: &Commands, path: &std::path::Path) {
+    let compiles = matches!(
+        command,
+        Commands::Run { .. }
+            | Commands::Bench { .. }
+            | Commands::Build { .. }
+            | Commands::Test { .. }
+            | Commands::Check { .. }
+            | Commands::Compile { .. }
+            | Commands::Fix { .. }
+            | Commands::Survive { .. }
+            | Commands::Apply { .. }
+            | Commands::SurviveTestLeg { .. }
+            | Commands::Emit { .. }
+            | Commands::Verify { .. }
+    );
+    if !compiles {
+        return;
+    }
+    let Ok(proj) = project::parse_toml(path) else { return };
+    if let Err(e) = project::check_compiler_version(&proj) {
+        err(&format!("error: {}", e));
+        std::process::exit(1);
+    }
 }
 
 /// A key the manifest writes and no reader reads (#3382) is a warning, once
@@ -518,13 +758,39 @@ fn report_manifest_warnings(command: &Commands, path: &std::path::Path, content:
     }
 }
 
+/// #4129: a release build locks the switches that change what is compiled or
+/// which check runs — an inherited one is ignored unless `--allow-switch`
+/// names it — and `almide survive`'s overlay arrives only as an argument.
+/// Before any switch is read.
+fn arm_switch_lock(cli: &crate::cli_args::Cli) {
+    for name in &cli.allow_switch {
+        if let Err(e) = almide_base::env::check_allowed(name) {
+            eprintln!("error: --allow-switch: {e}");
+            std::process::exit(1);
+        }
+    }
+    if cli.lock_switches || crate::cli_args::is_release_build() {
+        almide_base::env::lock(cli.allow_switch.clone());
+    }
+    if let (Some(target), Some(text)) = (&cli.survive_overlay, &cli.survive_overlay_text) {
+        almide::source_overlay::arm_from_args(target, text);
+    }
+}
+
 pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
+    arm_switch_lock(&cli);
     if cli.verbose {
         // Deep pipeline code reads the env var so verbosity needs no
         // plumbing through every call chain (same pattern as
         // ALMIDE_FUEL_PROBE above).
         // SAFETY: single-threaded at this point (process entry, pre-dispatch).
         unsafe { std::env::set_var("ALMIDE_VERBOSE", "1") };
+    }
+    for dir in &cli.stdlib_authority {
+        if let Err(e) = almide::check::grant_stdlib_authority(dir) {
+            err(&format!("error: {e}"));
+            std::process::exit(2);
+        }
     }
     let command = match cli.command {
         Some(cmd) => cmd,
@@ -534,15 +800,31 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
         }
     };
     refuse_invalid_manifest(&command);
+    // #4093: `--locked` holds for every fetch this process makes.
+    if matches!(command, Commands::Run { locked: true, .. } | Commands::Build { locked: true, .. } | Commands::Test { locked: true, .. }) {
+        project_fetch::set_locked_mode(true);
+    }
+    // #4093: a command that builds resolves the dependencies first, before
+    // anything is compiled and on every `--target`: an untrusted owner, a
+    // source changed under the lock, a `--locked` miss, and a dependency's
+    // ungranted native code (compiled and run by cargo, outside every
+    // `[permissions]` check) all stop it here.
+    if matches!(
+        command,
+        Commands::Run { .. } | Commands::Test { .. } | Commands::Bench { .. }
+            | Commands::Build { print_release_rustflags: false, .. }
+    ) {
+        cli::resolve_cwd_deps_or_exit();
+    }
     match command {
         Commands::Init => cli::cmd_init(),
-        Commands::Run { file, no_check, release, target, verified: _, no_verified, time_report, program_args } =>
+        Commands::Run { file, no_check, locked: _, release, target, verified: _, no_verified, time_report, program_args } =>
             dispatch_run(RunCmd { file, no_check, release, target, no_verified, time_report, program_args }),
         Commands::Bench { file, runs, target, program_args } => {
             let file = resolve_file(file);
             cli::cmd_bench(&file, runs, target.as_deref(), &program_args);
         }
-        Commands::Build { file, o, target, release, fast, target_cpu, print_release_rustflags, unchecked_index, no_check, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host, debug } => {
+        Commands::Build { file, o, target, release, fast, target_cpu, print_release_rustflags, unchecked_index, no_check, locked: _, repr_c, cdylib, emit_unverified, verified: _, no_verified, wasm_opt, component, heap_cap, host, debug } => {
             // `--print-release-rustflags` builds nothing, so it needs no source file.
             let file = if print_release_rustflags { file.unwrap_or_default() } else { resolve_file(file) };
             warn_no_verified_deprecated(no_verified);
@@ -568,7 +850,7 @@ pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
                 debug,
                 });
         }
-        Commands::Test { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output } => {
+        Commands::Test { file, run, no_check, locked: _, json, target, update_snapshots, ci, allow_no_tests, show_output } => {
             dispatch_test(TestArgs { file, run, no_check, json, target, update_snapshots, ci, allow_no_tests, show_output })
         }
         Commands::Check { file, deny_warnings, json, explain, effects, timings, stamp, profile, allow, target } => {

@@ -79,7 +79,8 @@ and serves as the cross-target oracle / executable spec.
   - the **incumbent WAT trust-spine** (`almide-mir` rendering WAT) is gone:
     #2752 removed its last route and #2761 deleted the renderer. `almide-mir`
     keeps MIR lowering (the native leg), the native renderers, and the
-    certificate witness producer (`almide verify --emit`).
+    MIR certificate witness producer (proofs/gate.sh, corpus-wall.sh;
+    `almide verify` judges the structural leg's bundle since #4011).
   Every `ALMIDE_*` switch the tree reads — the gate
   bypasses, the ablations, the trace channels — is one registry,
   `almide_base::env::SWITCHES` (`almide switches` lists it; `docs/specs/cli.md`
@@ -135,7 +136,7 @@ almide/                    Workspace root
 │   ├── almide-mir/        v1 Middle IR — single source of truth for ownership
 │   │                      and layout (Perceus). #![forbid(unsafe_code)].
 │   │                      MIR lowering + the native trust-spine renderer
-│   │                      + certificate witnesses (`almide verify --emit`).
+│   │                      + MIR certificate witnesses (proofs/gate.sh).
 │   │                      No wasm/WAT renderer since #2761.
 │   ├── almide-optimize/   Monomorphization, DCE, constant propagation,
 │   │                      stream fusion

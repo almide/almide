@@ -240,11 +240,11 @@ fn serve_ops_refuse_out_of_order_calls_and_a_bad_port() {
 /// (its reply carries unparsable cells).
 fn put_then_get(port: u16) -> std::io::Result<String> {
     let mut s = TcpStream::connect(("127.0.0.1", port))?;
-    s.write_all(b"PUT /x HTTP/1.1\r\nX-K: v\r\nContent-Length: 2\r\n\r\nhi")?;
+    s.write_all(b"PUT /x HTTP/1.1\r\nHost: a\r\nX-K: v\r\nContent-Length: 2\r\n\r\nhi")?;
     let mut resp = String::new();
     s.read_to_string(&mut resp)?;
     let mut s2 = TcpStream::connect(("127.0.0.1", port))?;
-    s2.write_all(b"GET / HTTP/1.1\r\n\r\n")?;
+    s2.write_all(b"GET / HTTP/1.1\r\nHost: a\r\n\r\n")?;
     Ok(resp)
 }
 
@@ -257,10 +257,10 @@ fn serve_ops_bind_take_a_request_and_reply() {
     let client = thread::spawn(move || put_then_get(port).expect("the client exchange"));
     let (ret, payload) = serve(&st, OP_SERVE_NEXT, "");
     assert_eq!(status(ret), 0);
-    assert_eq!(unframe(&payload), ["PUT", "/x", "hi", "X-K", "v", "Content-Length", "2"]);
+    assert_eq!(unframe(&payload), ["PUT", "/x", "hi", "Host", "a", "X-K", "v", "Content-Length", "2"]);
     let reply = [cell("201"), cell("made"), cell("X-R"), cell("1")].concat();
     assert_eq!(serve(&st, OP_SERVE_REPLY, &reply), (0, Vec::new()));
-    assert_eq!(join(client), "HTTP/1.1 201 Created\r\nX-R: 1\r\nConnection: close\r\nContent-Length: 4\r\n\r\nmade");
+    assert_eq!(join(client), "HTTP/1.1 201 Created\r\nX-R: 1\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 4\r\n\r\nmade");
     let (ret, _) = serve(&st, OP_SERVE_NEXT, "");
     assert_eq!(status(ret), 0);
     assert_eq!(text(serve(&st, OP_SERVE_REPLY, "nonsense")), (1, "bad cells".to_string()));

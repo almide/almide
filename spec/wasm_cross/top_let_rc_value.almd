@@ -14,7 +14,7 @@ type Packet = | Raw(Bytes) | Empty
 
 type Nest = { blob: Blob, tag: String }
 
-let EMPTY: Blob = { data: bytes.new(0), n: 0 }
+let EMPTY: Blob = { data: bytes.zeros(0), n: 0 }
 
 let RAW: Bytes = bytes.from_list([1, 2, 3])
 
@@ -58,5 +58,5 @@ effect fn main() -> Unit = {
     some(b) => println(int.to_string(bytes.len(b.data))),
     none => println("none"),
   }
-  println(int.to_string(bytes.len(map.get(BY_NAME, "a") ?? bytes.new(0))))
+  println(int.to_string(bytes.len(map.get(BY_NAME, "a") ?? bytes.zeros(0))))
 }

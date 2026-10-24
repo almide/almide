@@ -7,12 +7,13 @@
 # in every spelling:
 #
 #   runtime/rs/src/string.rs  ALMIDE_REPEAT_MAX_BYTES       1 << 31   bytes  x1
+#   runtime/rs/src/bytes.rs   ALMIDE_BYTES_REPEAT_MAX_BYTES 1 << 31   bytes  x1
 #   runtime/rs/src/list.rs    ALMIDE_LIST_REPEAT_MAX_ELEMS  (1<<31)/8 slots  x8
 #   runtime/rs/src/matrix.rs  ALMIDE_MATRIX_MAX_ELEMS       1 << 28   f64    x8
 #   stdlib/*.almd             a literal in a `prim.die` guard
 #
 # SCOPE, ratified A 2026-08-17: this family is the ONLY chosen cross-target
-# ceiling, kept because 0.57.0 released it. Plain allocations (bytes.new/pad,
+# ceiling, kept because 0.57.0 released it. Plain allocations (bytes.zeros/pad,
 # list.range, string.pad_*, the array readers) carry NO chosen cap — each leg
 # allocates to its own structural bound and takes C-197's abort beyond it, and a
 # widened cap that briefly shipped there was withdrawn (it cut 2-4 GiB work
@@ -23,7 +24,7 @@
 # WHY A GATE AND NOT A COMMENT
 # ----------------------------
 # Every one of these sites already carried a "keep in sync with X" comment. That
-# is the mechanism that was in place while `bytes.new(u32::MAX)` allocated 4 GiB
+# is the mechanism that was in place while `bytes.zeros(u32::MAX)` allocated 4 GiB
 # natively and aborted on wasm, and while sixteen array readers sat outside the
 # ceiling their own precedent defined. A comment asking a future reader to
 # remember is not a mechanism. This is the same lesson `proofs/domain-edges.toml`
@@ -57,6 +58,7 @@ def ev(expr):
 # ── 1. the named native constants, each converted to bytes ──────────────────
 NATIVE = [
     ("runtime/rs/src/string.rs", "ALMIDE_REPEAT_MAX_BYTES",      1),
+    ("runtime/rs/src/bytes.rs",  "ALMIDE_BYTES_REPEAT_MAX_BYTES", 1),
     ("runtime/rs/src/list.rs",   "ALMIDE_LIST_REPEAT_MAX_ELEMS", 8),
     ("runtime/rs/src/matrix.rs", "ALMIDE_MATRIX_MAX_ELEMS",      8),
 ]

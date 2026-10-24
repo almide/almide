@@ -15,7 +15,7 @@
 //!   codec error paths — and crashed on 2), so a body's helper calls are
 //!   answered over `Value`s here.
 //! - AT the boundary, the bridge answers only where the body abstains or does
-//!   not exist: `bytes.new` past the arena ceiling, the sized-numeric
+//!   not exist: `bytes.zeros` past the arena ceiling, the sized-numeric
 //!   `to_string` observers.
 //!
 //! Every arm here is one the spec/wasm_cross corpus REACHES on one of those
@@ -141,8 +141,8 @@ fn bytes_fn(func: &str, args: &[Value]) -> Option<Flow> {
         "len" => Flow::val(Value::Int(args.first()?.as_iter_items()?.len() as i64)),
         // C-197: an unsatisfiable size is the defined abort on every leg —
         // the infallible `vec![_; n]` panicked with a capacity overflow on
-        // `bytes.new(i64::MAX)` instead (fuzz seed 500705518626 index 711).
-        "new" => {
+        // `bytes.zeros(i64::MAX)` instead (fuzz seed 500705518626 index 711).
+        "zeros" => {
             let n = as_int(args.first())?.max(0) as usize;
             let mut v: Vec<Value> = Vec::new();
             if v.try_reserve_exact(n).is_err() {

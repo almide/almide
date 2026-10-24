@@ -669,7 +669,7 @@ impl Emitter<'_> {
     /// caller's own copy-on-write. The callee writes this buffer in place
     /// and the C-132 move-mode rewrite hands it back for the site to store,
     /// so the site is a mutation of THIS frame's var — and takes the same
-    /// rc-gated `$cow` a direct `bytes.set_u8(b, …)` here would: a shared
+    /// rc-gated `$cow` a direct `bytes.put_u8(b, …)` here would: a shared
     /// block copies and the var is repointed at the unique copy, so an alias
     /// bound BEFORE the call keeps its pre-write value (C-033), while an
     /// unaliased buffer (rc == 1, the ordinary case) is not copied at all.

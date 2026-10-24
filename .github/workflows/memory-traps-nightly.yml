@@ -1,0 +1,56 @@
+name: Memory trap controls (nightly)
+
+# #4023: each memory trap must turn a known bug into its abort. For each, a
+# fixed bug is re-injected into the compiler (proofs/fixtures/heap-check/
+# reinject/3538-*.patch for the wasm double-free trap, proofs/fixtures/
+# memory-traps/region-*.patch for the native region stale trap) and
+# scripts/check-memory-traps.sh controls requires the reproduction to exit
+# 1 (wasm `unreachable`, behind the stock build's proc_exit) / 101 (the
+# region trap's panic) — and, for the
+# region trap, to exit 0 with the right answer when unarmed, which is the
+# silence the per-PR armed run (ci-cross-target.yml, memory-traps) exists to
+# break. A patch that no longer applies fails the job too.
+
+on:
+  schedule:
+    # 06:05 UTC — after the checked-allocator nightly (05:40).
+    - cron: "5 6 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.96.0"
+
+permissions:
+  contents: read
+
+jobs:
+  controls:
+    name: Re-injected bugs end in their trap
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install wasmtime (the pin setup-test-leg uses)
+        run: |
+          VERSION=v49.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          for i in 1 2 3 4 5; do
+            curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+            echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+          done
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: Each re-injected bug ends in its trap's abort
+        run: bash scripts/check-memory-traps.sh controls

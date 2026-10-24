@@ -326,7 +326,7 @@ const F_STR_APPEND: u32 = 37;
 /// discipline — cap fast path in place, geometric grow on overflow, the
 /// outgrown block freed at rc==1. The old per-push `emit_copy_grow(b, 1)`
 /// reallocated len+1 EVERY push and never freed the outgrown block, so n
-/// pushes retained Σn ≈ n²/2 bytes — `bytes.new(0)` + 69k pushes OOM'd
+/// pushes retained Σn ≈ n²/2 bytes — `bytes.zeros(0)` + 69k pushes OOM'd
 /// where native and the incumbent complete (#1689).
 const F_BYTES_PUSH: u32 = 38;
 /// `$line_grow(cur, len)`: relocate the line-buffer region to a heap

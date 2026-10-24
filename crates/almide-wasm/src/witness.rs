@@ -632,6 +632,7 @@ pub fn start_collecting() {
     *sink().lock().expect("witness sink") = Some(Vec::new());
     crate::witness::modes::start();
     crate::witness::bounds::start();
+    crate::witness::init::start();
     crate::witness::decls::start();
 }
 
@@ -650,6 +651,19 @@ pub use bounds::take as take_bounds;
 /// The bounds witness sink (split for the file budget).
 #[path = "witness_bounds.rs"]
 pub(crate) mod bounds;
+
+/// The init witness of every emission pass (#4013, witness_init.rs):
+/// `(pass, sites)`, for `almide-verify init`.
+pub use init::take as take_init;
+
+/// The init witness sink (split for the file budget).
+#[path = "witness_init.rs"]
+pub(crate) mod init;
+
+/// The certificate bundle of one build's shipped pass (witness_bundle.rs):
+/// the one producer `almide verify` and the corpus sweep share.
+#[path = "witness_bundle.rs"]
+pub mod bundle;
 
 /// The per-pass declaration table the name and capability witnesses read
 /// (#2759, witness_decls.rs).

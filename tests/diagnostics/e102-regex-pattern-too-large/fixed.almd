@@ -1,0 +1,5 @@
+// The count written once: 40,000 a's are `a{40000}`, still past the limit;
+// match the repetition by its shape instead.
+import regex
+
+fn main() -> Unit = println("${regex.is_match(regex.new("^a+$"), "aaa")}")

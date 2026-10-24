@@ -20,9 +20,9 @@ read here is what the current compiler accepts.
   `uint8`, `uint16`, `uint32`, `uint64`, `float32`, `float64`) are also
   auto-imported for UFCS — e.g. `x.to_int64()` on `x: Int32` resolves to
   `int32.to_int64(x)`.
-  Everything else needs an explicit `import`: `args`, `base64`, `bytes`,
-  `env`, `fs`, `hash`, `hex`, `html`, `http`, `io`, `json`, `matrix`,
-  `net`, `path`, `process`, `random`, `regex`, `testing`, `zlib`.
+  Everything else needs an explicit `import`: `args`, `base64`, `bigint`,
+  `bytes`, `env`, `fs`, `hash`, `hex`, `html`, `http`, `io`, `json`,
+  `matrix`, `net`, `path`, `process`, `random`, `regex`, `testing`, `zlib`.
 - Not in the stdlib since dialect epoch 14: the neural-network kernels
   (`gelu`, `softmax_rows`, attention, RoPE, the row norms, Q1_0/Q8_0, the
   Qwen3 blocks) are package `almide/nnlib` (`import nnlib`, then `nnlib.gelu(m)`),
@@ -30,6 +30,13 @@ read here is what the current compiler accepts.
   (`import llm`, then `llm.openai_streaming_call(...)`); add one with
   `almide add almide/nnlib@v0.1.0`. The `mem` module and `bytes.heap_save` /
   `heap_restore` are gone: they did nothing under reference counting.
+- Dependencies come from `github.com/almide` unless the project's
+  `almide.toml` trusts another owner (`[trust] owners = ["github.com/alice"]`).
+  `almide add alice/lib` is refused; add `--trust github.com/alice` only when
+  the user asked for that exact repository. Never invent a repository name:
+  an invented name may be registered by an attacker. A dependency that brings
+  native code (`native/`, `[native-deps]`, `@extern`) also needs
+  `[permissions] native = ["lib"]` (#4093).
 - Null is spelled `T?` (shorthand for `Option[T]`, valid in every type
   position — the canonical spelling, `almide fmt` normalizes to it; ADR-0010).
   `?` binds to the preceding type atom, never across `->`: `(A) -> B?` is a fn
@@ -46,7 +53,10 @@ read here is what the current compiler accepts.
   (ADR-0021). In test blocks lambda-`!` stays unwrap. No `null`, no `throw`, no
   exceptions.
 - Effectful functions are written `effect fn f() -> T`. Pure functions
-  cannot call effect functions (checked, emits E006). Exception: `println`,
+  cannot call effect functions (checked, emits E006) — also not as a value:
+  passing one as an argument (`list.map(xs, fs.read_text)`) from a pure fn is
+  E006, and a pure fn that runs one it reached through a record field, a list
+  or a stored closure is E109. Exception: `println`,
   `eprintln`, `panic` and the `assert` family work in a pure fn (writes and
   aborts, never reads — ADR-0022), so a `main` that only prints is
   `fn main() -> Unit`; write `effect fn main()` when it reads or propagates.
@@ -259,6 +269,7 @@ fn isqrt(n: Int) -> Int = {
 | E004 | Arg count mismatch | Signature placeholder in try: shows `<name: Type>` |
 | E005 | Arg type mismatch | Often needs explicit conversion (`int.to_string(n)` etc) |
 | E006 | Pure fn calls effect fn | Mark the caller `effect fn`, and propagate the call's error with `!` (`f(x)!`) unless a `!` / `??` / `match` already consumes its Result |
+| E109 | Pure fn runs an effect fn reached as a value (field, list element, stored closure) | Mark the fn `effect fn`, or hand it a value that does no I/O |
 | E007/E008 | Fan block misuse | See `docs/specs/fan.md` |
 | E009 | Reassign immutable | `let` → `var` |
 | E010 | Non-exhaustive match | Add the missing arm(s) or `_ => ...` |
@@ -342,6 +353,8 @@ fn isqrt(n: Int) -> Int = {
 | E098 | The closure passed to `testing.assert_aborts` captures a local of the test (a `let`, `var`, `where` binding or outer lambda parameter), or is a fn value rather than a lambda written in the call — it runs in a child process or instance where the locals do not exist | Compute the value inside the closure, or make it a top-level `let` |
 | E099 | `testing.assert_aborts` outside a direct call in a test block — in a `fn`, `main` or a top-level `let`, used as a value, or inside another `assert_aborts` closure | Call it directly in the `test` block, once per abort |
 | E100 | Outside the memory-safety guarantee: an `ffi.*` call or a deprecated `bytes` raw-pointer call (`as_ptr`, `as_mut_ptr`, `data_ptr`, `from_raw_ptr`, `copy_to_ptr`) in a file without `import ffi`; under `--profile critical`, any of those or an `@extern` fn | Add `import ffi` to the file that reads or writes raw memory and use `ffi.address` / `ffi.read(p, n)` / `ffi.write(p, b, cap)` (read and write are effect fns); under critical, keep that code in a module not checked with `--profile critical` — no `--allow` grants it |
+| E101 | A raw bidirectional control character (U+202A–U+202E, U+2066–U+2069) anywhere in the source — a comment, string literal or heredoc (Trojan Source) | Delete it from a comment; in a literal write the escape `\u{202E}` |
+| E102 | A `regex.new` literal pattern the engine refuses — an unclosed group or class, nothing to repeat, a malformed `{…}`, a named group, lookaround, or more than 20,000 states — the same reason `regex.new` would abort with at run time | Fix the pattern (escape a literal `(`, `[`, `{` or `*` with `\\`, use a numbered group, shrink a large count), or build it with `regex.compile` and handle the err |
 | E420 | Function visibility violation (callee is private) | Make the callee public, or add a public shim |
 
 A rustc 4-digit code (`error[E0XXX]`) leaking through always indicates

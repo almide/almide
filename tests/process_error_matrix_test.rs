@@ -244,6 +244,7 @@ effect fn main() -> Unit = {
 /// - its stock-p1 `host-capability` row in proofs/target-availability.toml;
 /// - when it starts a child: a `[permissions] proc` row (src/cli/mod.rs) and
 ///   a spawn-failure row in [`rows`] above, which the two-leg test runs.
+///
 /// The pairs `exec`/`run` and `exec_in`/`run_in` are the capture-versus-
 /// terminal matrix; a cell missing on either axis fails here.
 #[test]

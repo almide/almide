@@ -1,4 +1,4 @@
-// @contract: C-368
+// @contract: C-368, C-404, C-406
 // #2588 — http.router / route / mount / wrap / new_request / param /
 // decode_json. A handler is a plain function from a request to a response,
 // and so are a router and a wrapped app, so a whole app is tested by calling
@@ -116,8 +116,7 @@ test "a request built in code answers every reader" {
   assert_eq(http.req_body(r), "payload")
   assert_eq(http.req_header(r, "x-token"), some("t1"))
   assert_eq(http.req_header(r, "X-Other"), none)
-  assert_eq(map.get(http.query_params(r), "k"), some("w"))
-  assert_eq(map.get(http.query_params(r), "e"), some(" x"))
+  assert_eq(http.query_params(r), ok([("k", "v"), ("k", "w"), ("e", " x")]))
   assert_eq(http.param(r, "id"), none)
 }
 
@@ -237,7 +236,7 @@ test "a malformed pattern is refused" {
 test "mount hands the rest of the path and the query to a sub-app" {
   let api = http.router([http.route("GET /items/{id}", echo)])!
   let root = http.router([http.mount("/api", api), http.route("GET /api/version", me)])!
-  assert_eq(call(root, "GET", "/api/items/a%2Fb?t=1")!, "200 /items/a%2Fb?t=1 -")
+  assert_eq(call(root, "GET", "/api/items/a%20b?t=1")!, "200 /items/a%20b?t=1 -")
   assert_eq(call(root, "GET", "/api/version")!, "200 me")
   assert_eq(call(root, "GET", "/api/nope")!, "404 Not Found")
 }
@@ -262,4 +261,65 @@ test "a middleware can answer without calling the handler" {
   assert_eq(call(h, "GET", "/users/1")!, "401 no token")
   let res = h(http.new_request("GET", "/users/1", "", ["Authorization": "t"]))!
   assert_eq(http.body(res), "user 1")
+}
+
+// C-406 (#4133, #4134): one canonical path for the router and the middleware
+// in front of it, and no parameter that decodes to a traversal.
+fn admin_guard(next: HttpHandler) -> HttpHandler = (r) => if string.starts_with(
+  http.req_path(r),
+  "/admin",
+) then http.response(
+  403,
+  "denied",
+)
+else next(r)!
+
+effect fn secret(req: HttpRequest) -> HttpResponse = http.response(200, "SECRET")
+
+effect fn file_of(req: HttpRequest) -> HttpResponse = http.response(
+  200,
+  "file=" + (http.param(req, "file") ?? "-"),
+)
+
+effect fn tail_of(req: HttpRequest) -> HttpResponse = http.response(
+  200,
+  "tail=" + (http.param(req, "rest") ?? "-"),
+)
+
+effect fn guarded() -> HttpHandler = http.wrap(
+  http.router([http.route("GET /admin/secret", secret), http.route("GET /static/{file}", file_of), http.route(
+    "GET /u/{file}",
+    file_of,
+  ), http.route("GET /t/{rest...}", tail_of)])!,
+  [admin_guard],
+)
+
+test "a path the guard reads differently from the router is a 400 (C-406)" {
+  let h = guarded()!
+  assert_eq(show(h(req("GET", "/admin/secret"))!), "403 denied")
+  for p in [
+    "//admin/secret",
+    "/%61dmin/secret",
+    "/./admin/secret",
+    "/x/../admin/secret",
+    "/static/../../etc/passwd",
+    "/static/%2e%2e/%2e%2e/etc/passwd",
+    "/a\\b",
+    "/x/%7E"
+  ] {
+    assert_eq(show(h(req("GET", p))!), "400 Bad Request: the path is not in canonical form")
+  }
+  assert_eq(show(h(req("GET", "/static/a.txt/"))!), "200 file=a.txt")
+  assert_eq(show(h(req("GET", "/static/a%20b.txt"))!), "200 file=a b.txt")
+}
+
+test "a parameter that decodes to a traversal, a slash or NUL is a 400 (C-406)" {
+  let h = guarded()!
+  for p in ["/u/..%2F..%2Fetc%2Fpasswd", "/static/a%2F..%2F..%2Fx", "/u/a%00b", "/u/a%5Cb", "/t/ok/a%2Fb"] {
+    assert_eq(
+      show(h(req("GET", p))!),
+      "400 Bad Request: a path parameter is a dot segment or holds a /, \\ or NUL",
+    )
+  }
+  assert_eq(show(h(req("GET", "/t/a/b/c"))!), "200 tail=a/b/c")
 }

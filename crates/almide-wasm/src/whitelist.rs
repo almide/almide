@@ -199,6 +199,10 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // scratch blocks only.
     "regex_is_match", "regex_full_match", "regex_find_all", "regex_replace",
     "regex_replace_first", "regex_split",
+    // the Regex surface's engine half (#3942): the validator and its abort
+    // (prim.die, as float clamp), the scan captures_all and replace_with
+    // read, index_of's code-point count — the same byte walks and scratch.
+    "regex_check", "regex_new", "regex_index_of", "regex_scan",
     // bytes_rawptr.almd / bytes_skip.almd (audited 2026-08-25):
     // raw-address bridge over load8/store8 on Bytes data regions
     // (len = bytes both legs), handle+12 = OUR PAYLOAD; the empty-buffer
@@ -221,8 +225,8 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // discipline and list/string/map surfaces as http_response; req_header /
     // param (Option ret) sit in the SUM tier below.
     "http_new_request", "http_req_method", "http_req_path", "http_req_body",
-    "http_query_params", "http_req_with_params", "http_req_with_path", "http_set_body",
-    // http_url_decode.almd (#2664): the decoder http_query_params already
+    "http_req_with_params", "http_req_with_path", "http_set_body",
+    // http_url_decode.almd (#2664): the lenient decoder http.url_decode, which
     // runs on this leg — read-only load8/load32 on the digest-shared string
     // payload, a prim-MEDIATED alloc_list of 8-byte Int slots (the
     // list_repeat class), string.from_bytes lowered by THIS emitter. The
@@ -234,6 +238,11 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // prim.random_get (the op-32 entropy boundary) + pure span math —
     // the VALUE is nondeterministic by contract (C-112 pins the range).
     "random_int",
+    // random_bytes.almd (C-394): the same op-32 boundary in literal 256- and
+    // 8-byte draws into a fresh n-byte Bytes, the tail by prim.store8 from an
+    // 8-byte scratch, a T6 prim.die on a negative n; C-394 pins the lengths
+    // and two draws differing, not the bytes.
+    "random_bytes",
     // json_path.almd, READ side only (audited 2026-08-25): the path rep
     // is a plain List[String]; get walks value.field / value.as_array /
     // list.get — all native arms here, no raw layout reads. set/remove
@@ -246,7 +255,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // zlib_inflate.almd / zlib_deflate.almd (#1700, audited 2026-09-01):
     // the C-326 gzip decoder promoted to stdlib plus the stored-block
     // encoder. Every Result is built via language-level ok()/err(); the
-    // buffers are bytes.new/bytes.push/bytes.get_or (public surface — the
+    // buffers are bytes.zeros/bytes.push/bytes.get_or (public surface — the
     // exact construction the C-326 fixture already runs byte-identical on
     // the structural leg); no prim access at all. Parity evidence:
     // spec/wasm_cross/zlib_selfhost.almd (known-answer decode + round
@@ -277,7 +286,6 @@ pub(crate) const HTTP_CALL_SUM: &[&str] = &[
 /// Option returns build through language-level constructors.
 pub(crate) const HTTP_SERVE_SUM: &[&str] = &[
     "http_serve", "http_req_method", "http_req_path", "http_req_body", "http_req_header",
-    "http_query_params",
 ];
 
 /// The subprocess family (#2589, ADR-0025, audited 2026-10-03):

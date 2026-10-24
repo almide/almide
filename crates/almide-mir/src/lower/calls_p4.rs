@@ -400,7 +400,8 @@ impl LowerCtx {
                         let zero = self.fresh_value();
                         self.ops.push(Op::ConstInt { dst: zero, value: 0 });
                         self.ops.push(Op::IntBinOp { dst, op: crate::IntOp::Sub, a: zero, b: x });
-                        Some(dst)
+                        // #4163: a sized int's negation wraps at its width, as binary `-` does.
+                        Some(self.wrap_to_declared_width(dst, &operand.ty))
                     }
                     // Float negation: the existing `f64.neg` prim (the i64-uniform value
                     // holds the f64 bits; the prim reinterprets around `f64.neg` — sign-bit

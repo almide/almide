@@ -22,29 +22,29 @@ fn main() -> Unit = {
   let a100 = string.repeat("a", 100)
   let bang = a100 + "!"
   // nested repetition: every split of the a's between the two loops
-  println(line("(a+)+$ miss", regex.is_match("(a+)+$", bang)))
-  println(line("(a+)+$ hit", regex.is_match("(a+)+$", a100)))
-  println(line("full (a+)+ miss", regex.full_match("(a+)+", bang)))
+  println(line("(a+)+$ miss", regex.is_match(regex.new("(a+)+$"), bang)))
+  println(line("(a+)+$ hit", regex.is_match(regex.new("(a+)+$"), a100)))
+  println(line("full (a+)+ miss", regex.is_full_match(regex.new("(a+)+"), bang)))
   // overlapping alternatives under a star: Fibonacci-many ways to cut the a's
-  println(line("(a|aa)*b", regex.is_match("(a|aa)*b", a100)))
-  println(line("(a|aa)*b hit", regex.is_match("(a|aa)*b", a100 + "b")))
+  println(line("(a|aa)*b", regex.is_match(regex.new("(a|aa)*b"), a100)))
+  println(line("(a|aa)*b hit", regex.is_match(regex.new("(a|aa)*b"), a100 + "b")))
   // an optional inside a plus: the same blow-up through an empty choice
-  println(line("^(a|a?)+$", regex.is_match("^(a|a?)+$", a100 + "b")))
+  println(line("^(a|a?)+$", regex.is_match(regex.new("^(a|a?)+$"), a100 + "b")))
   // the word-list shape behind many real advisories
-  println(line("(\\w+\\s?)+$", regex.is_match("(\\w+\\s?)+$", bang)))
+  println(line("(\\w+\\s?)+$", regex.is_match(regex.new("(\\w+\\s?)+$"), bang)))
   // the other operations go through the same VM
-  println(line("find", regex.find("(a|aa)*c", a100) == none))
-  println(line("replace", regex.replace("(a+)+b", bang, "x") == bang))
-  println(line("split", list.len(regex.split("(a+)+b", bang)) == 1))
+  println(line("find", regex.find(regex.new("(a|aa)*c"), a100) == none))
+  println(line("replace", regex.replace(regex.new("(a+)+b"), bang, "x") == bang))
+  println(line("split", list.len(regex.split(regex.new("(a+)+b"), bang)) == 1))
   // captures: the last instance of the repeated group, as the walk answered
-  match regex.captures("^(a+)+(!)$", bang) {
-    some(cs) => println("captures=${list.len(cs)} ${string.len(list.get_or(cs, 0, ""))} ${list.get_or(cs, 2, "")}"),
+  match regex.captures(regex.new("^(a+)+(!)$"), bang) {
+    some(cs) => println("captures=${list.len(cs)} ${string.len(list.get_or(cs, 0, none) ?? "")} ${list.get_or(cs, 2, none) ?? ""}"),
     none => println("captures=none"),
   }
   // the rule is the walk's, so a short input answers what it always did
-  println(line("short", regex.is_match("(a+)+$", "aaaa!")))
-  println(ostr(regex.find("(a|ab)(c|bcd)(d*)", "abcd")))
-  println(ostr(regex.captures("(a*)*b", "aaab") |> option.map((cs) => list.join(cs, ","))))
+  println(line("short", regex.is_match(regex.new("(a+)+$"), "aaaa!")))
+  println(ostr(regex.find(regex.new("(a|ab)(c|bcd)(d*)"), "abcd")))
+  println(ostr(regex.captures(regex.new("(a*)*b"), "aaab") |> option.map((cs) => list.join(cs |> list.map((c) => c ?? ""), ","))))
 }
 
 fn ostr(o: String?) -> String = match o {

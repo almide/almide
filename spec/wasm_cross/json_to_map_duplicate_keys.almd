@@ -1,7 +1,7 @@
 // @contract: C-380
 // json.to_map builds a Map, and a Map holds one entry per key (almide/almide#3700).
-// An object can repeat a key (value.object accepts it, and so does json.parse),
-// and the repeated key must not reach the map twice. It keeps the position of its
+// An object can repeat a key (value.object accepts it; json.parse refuses it,
+// C-401), and the repeated key must not reach the map twice. It keeps the position of its
 // first occurrence and takes the value of its last, as an upsert per field would.
 // A Str value is taken verbatim; any other value is its value.stringify text. A
 // non-object is none. Every later read of the map (len, get, iteration, equality)
@@ -36,7 +36,18 @@ fn main() -> Unit = {
       ("s", value.array([]))
     ]),
   )
-  show("parsed", json.parse("{\"k\":1,\"j\":\"two\",\"k\":{\"x\":3}}") ?? value.null())
+  show(
+    "built",
+    value.object([
+      ("k", value.int(1)),
+      ("j", value.str("two")),
+      ("k", value.object([("x", value.int(3))]))
+    ]),
+  )
+  match json.parse("{\"k\":1,\"j\":\"two\",\"k\":{\"x\":3}}") {
+    ok(v) => show("parsed", v),
+    err(e) => println("parsed err ${e}"),
+  }
   show("empty", value.object([]))
   show("not-object", value.array([value.int(1)]))
   let a = json.to_map(value.object([("k", value.int(1)), ("k", value.int(2))])) ?? map.new()

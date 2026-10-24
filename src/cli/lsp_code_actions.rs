@@ -181,8 +181,10 @@ fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) 
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let p = entry.path();
-            if p.is_dir() { collect_almd_files(&p, out); }
-            else if p.extension().map_or(false, |e| e == "almd") { out.push(p); }
+            // Symlinks are neither followed nor collected (#4140).
+            let Ok(kind) = entry.file_type() else { continue };
+            if kind.is_dir() { collect_almd_files(&p, out); }
+            else if kind.is_file() && p.extension().map_or(false, |e| e == "almd") { out.push(p); }
         }
     }
 }
@@ -321,11 +323,15 @@ fn find_project_toml(file_path: &str) -> Option<std::path::PathBuf> {
 }
 
 /// Dependency source dirs for the project owning `file_path`, cached per
-/// almide.toml. `allow_fetch` is true only on didOpen: `fetch_all_deps`
-/// shells out to git and writes almide.lock, which must never run on a
-/// keystroke (#927). With `allow_fetch` false a cache miss resolves to no
-/// deps instead of touching the network. A failed fetch caches the empty
-/// list, so one broken manifest cannot re-trigger fetch storms.
+/// almide.toml. The server NEVER fetches: dependencies resolve from what is
+/// already on disk (`resolve_cached_deps`: path dependencies and checkouts
+/// already in the cache), with no `git` run and no almide.lock write.
+/// Opening a file of an untrusted project is not consent to contact the
+/// hosts its manifest names or to write into its tree (#4128); `almide
+/// build` is the command that fetches. `allow_fetch` (true on didOpen)
+/// now only means "resolve on a cache miss"; with it false a miss resolves
+/// to no deps. A failed resolve caches the empty list, so one broken
+/// manifest cannot re-trigger resolve storms (#927).
 ///
 /// An entry is keyed on the CONTENT of `almide.toml` and `almide.lock`
 /// (#3097): it used to be kept for the life of the server, so adding,
@@ -344,7 +350,7 @@ fn project_deps_for(file_path: Option<&str>, cache: &mut DepCache, allow_fetch: 
         None => {}
     }
     let deps: Vec<(crate::project::PkgId, std::path::PathBuf)> = crate::project::parse_toml(&toml).ok()
-        .and_then(|proj| crate::project_fetch::fetch_all_deps(&proj).ok())
+        .and_then(|proj| crate::project_fetch::resolve_cached_deps(&proj).ok())
         .map(|deps| deps.into_iter().map(|fd| (fd.pkg_id, fd.source_dir)).collect())
         .unwrap_or_default();
     cache.insert(toml.clone(), (manifest_fingerprint(&toml), deps.clone()));

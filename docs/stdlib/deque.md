@@ -58,7 +58,7 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (58 functions)
+## Signature index (60 functions)
 
 ```
 // An empty deque.
@@ -292,6 +292,14 @@ deque.unique(d: Deque[A]) -> Deque[A]
 // The first element per distinct key f(x).
 // @since unreleased
 deque.unique_by(d: Deque[A], f: (A) -> K) -> Deque[A]
+
+// Sum of the elements; 0 when empty; integers wrap on overflow.
+// @since unreleased
+deque.sum(d: Deque[A]) -> A
+
+// Product of the elements; 1 when empty; integers wrap on overflow.
+// @since unreleased
+deque.product(d: Deque[A]) -> A
 ```
 
 ## Type index (1 types)

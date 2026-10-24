@@ -1,5 +1,8 @@
 //! ADR-0026 D1: an effect category set rides the fn value (#3243, #3268).
 //!
+//! Category names are ADR-0026 D2 leaves (#4155): a file read is `FS.read`,
+//! `println` is `IO.stdout`.
+//!
 //! A closure's categories are performed where it is CALLED, and the set moves
 //! with the value: through a bare fn-type parameter (transparent — the call
 //! site that hands the closure over is charged with it), a `let` local, a
@@ -61,8 +64,8 @@ fn a_parameter_carries_the_set_of_the_closure_each_call_site_passes() {
     let r = report("param", PARAM);
     assert_eq!(line_of(&r, "apply"), "apply  → {} + whatever f (arg 1) does", "{r}");
     assert_eq!(line_of(&r, "shout"), "shout  → {}", "{r}");
-    assert_eq!(line_of(&r, "read"), "read  → {IO} (effect fn)", "{r}");
-    assert_eq!(line_of(&r, "main"), "main  → {IO} (effect fn)", "{r}");
+    assert_eq!(line_of(&r, "read"), "read  → {FS.read} (effect fn)", "{r}");
+    assert_eq!(line_of(&r, "main"), "main  → {FS.read, IO.stdout} (effect fn)", "{r}");
 }
 
 /// (b) A local keeps the set of the closure bound to it; binding a closure
@@ -88,7 +91,7 @@ effect fn main() -> Unit = {
 #[test]
 fn a_local_keeps_the_set_of_the_closure_bound_to_it() {
     let r = report("local", LOCAL);
-    assert_eq!(line_of(&r, "called"), "called  → {IO} (effect fn)", "{r}");
+    assert_eq!(line_of(&r, "called"), "called  → {FS.read} (effect fn)", "{r}");
     assert_eq!(line_of(&r, "never_called"), "never_called  → {} (effect fn)", "{r}");
 }
 
@@ -108,8 +111,8 @@ effect fn main() -> Unit = {
 #[test]
 fn a_record_field_keeps_the_set_of_the_closure_stored_in_it() {
     let r = report("field", FIELD);
-    assert_eq!(line_of(&r, "call_box"), "call_box  → {IO}", "{r}");
-    assert_eq!(line_of(&r, "main"), "main  → {IO} (effect fn)", "{r}");
+    assert_eq!(line_of(&r, "call_box"), "call_box  → {FS.read}", "{r}");
+    assert_eq!(line_of(&r, "main"), "main  → {FS.read, IO.stdout} (effect fn)", "{r}");
 }
 
 /// (d) A returned closure keeps its set; the function that builds it
@@ -129,9 +132,9 @@ effect fn main() -> Unit = {
 #[test]
 fn a_returned_closure_keeps_its_set_and_is_charged_where_it_runs() {
     let r = report("return", RETURN);
-    assert_eq!(line_of(&r, "make"), "make  → {} (effect fn); returns a closure doing {IO}", "{r}");
+    assert_eq!(line_of(&r, "make"), "make  → {} (effect fn); returns a closure doing {FS.read}", "{r}");
     assert_eq!(line_of(&r, "use_it"), "use_it  → {} + whatever f (arg 1) does", "{r}");
-    assert_eq!(line_of(&r, "main"), "main  → {IO} (effect fn)", "{r}");
+    assert_eq!(line_of(&r, "main"), "main  → {FS.read, IO.stdout} (effect fn)", "{r}");
 }
 
 /// A HOF that hands its parameter to a stdlib HOF is transparent too.
@@ -152,7 +155,7 @@ fn a_parameter_handed_to_list_map_is_transparent() {
     let r = report("hof", HOF);
     assert_eq!(line_of(&r, "each"), "each  → {} + whatever f (arg 2) does", "{r}");
     assert_eq!(line_of(&r, "upper_all"), "upper_all  → {}", "{r}");
-    assert_eq!(line_of(&r, "main"), "main  → {IO} (effect fn)", "{r}");
+    assert_eq!(line_of(&r, "main"), "main  → {FS.read, IO.stdout} (effect fn)", "{r}");
 }
 
 /// A grant without IO refuses the function that RUNS the closure, and the
@@ -223,10 +226,10 @@ effect fn main() -> Unit = {
 #[test]
 fn a_closure_in_a_list_a_tuple_or_an_option_is_charged_where_it_runs() {
     let r = report("untracked", UNTRACKED);
-    assert_eq!(line_of(&r, "run_all"), "run_all  → {IO}", "{r}");
-    assert_eq!(line_of(&r, "call_pair"), "call_pair  → {IO}", "{r}");
+    assert_eq!(line_of(&r, "run_all"), "run_all  → {FS.read}", "{r}");
+    assert_eq!(line_of(&r, "call_pair"), "call_pair  → {FS.read}", "{r}");
     assert_eq!(line_of(&r, "pick"), "pick  → {} + whatever o (arg 1) does", "{r}");
-    assert_eq!(line_of(&r, "main"), "main  → {IO} (effect fn)", "{r}");
+    assert_eq!(line_of(&r, "main"), "main  → {FS.read, IO.stdout} (effect fn)", "{r}");
     let dir = project("untracked-perm", Some("\"Env\""), UNTRACKED);
     let (ok, stderr) = almide(&dir, &["check", "--effects", "main.almd"]);
     let _ = std::fs::remove_dir_all(&dir);

@@ -38,18 +38,18 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.MIRI_TOOLCHAIN }}
           components: miri, rust-src
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
 
@@ -67,7 +67,7 @@ jobs:
           ls spec/wasm_cross/*.almd | awk -v s=${{ matrix.shard }} '(NR - 1) % 4 == s' > /tmp/shard.txt
           xargs bash scripts/miri-generated.sh < /tmp/shard.txt 2>&1 | tee /tmp/miri.log
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: miri-shard-${{ matrix.shard }}
@@ -91,6 +91,69 @@ jobs:
             gh issue create --title "Miri nightly: undefined behaviour" --label miri --label A-runtime --body-file /tmp/body.md
           fi
 
+  miri-fan:
+    # #4007: the corpus above runs Miri with one reported CPU, so no fan offer
+    # ever has a helper and the fan gate's lifetime-erased borrow (list.rs,
+    # class fan-sync) is never crossed. This runs a fan program with four
+    # CPUs and the cost model off over several seeds, after a control (the
+    # caller not waiting for its helpers) that must come back UB.
+    name: Miri, fan gate with helpers
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.MIRI_TOOLCHAIN }}
+          components: miri, rust-src
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+
+      - name: Build the compiler (release)
+        run: cargo +${{ env.RUST_TOOLCHAIN }} build --release --bin almide
+
+      - name: Miri sysroot
+        run: cargo +${{ env.MIRI_TOOLCHAIN }} miri setup
+
+      - name: The fan gate under Miri, helpers on
+        env:
+          ALMIDE_BIN: ${{ github.workspace }}/target/release/almide
+          MIRI_SEEDS: "0..16"
+        run: |
+          set -o pipefail
+          bash scripts/miri-fan-gate.sh 2>&1 | tee /tmp/miri-fan.log
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: miri-fan
+          path: /tmp/miri-fan.log
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Post the red night to the open miri issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          { echo "Miri nightly is red (fan gate with helpers): $RUN_URL"; echo; echo '```'; grep -E '^(::error::|    |  )' /tmp/miri-fan.log | head -80 || true; echo '```'; } > /tmp/body.md
+          N="$(gh issue list --state open --label miri --json number -q '.[0].number' || true)"
+          if [ -n "$N" ]; then
+            gh issue comment "$N" --body-file /tmp/body.md
+          else
+            gh label create miri --color F9D0C4 --description "Miri over generated Rust: undefined behaviour findings (#4009)" 2>/dev/null || true
+            gh issue create --title "Miri nightly: undefined behaviour" --label miri --label A-runtime --body-file /tmp/body.md
+          fi
+
   asan:
     name: AddressSanitizer, shard ${{ matrix.shard }}/2
     runs-on: ubuntu-latest
@@ -100,17 +163,17 @@ jobs:
       matrix:
         shard: [0, 1]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.MIRI_TOOLCHAIN }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
 
@@ -124,9 +187,11 @@ jobs:
         run: |
           set -o pipefail
           ls spec/wasm_cross/*.almd | awk -v s=${{ matrix.shard }} '(NR - 1) % 2 == s' > /tmp/shard.txt
+          # #4007: the runtime's foreign calls (sys.rs) beyond what the corpus reaches.
+          [ ${{ matrix.shard }} = 0 ] && echo scripts/lib/sys-ffi-asan.almd >> /tmp/shard.txt
           xargs bash scripts/asan-generated.sh < /tmp/shard.txt 2>&1 | tee /tmp/asan.log
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: asan-shard-${{ matrix.shard }}

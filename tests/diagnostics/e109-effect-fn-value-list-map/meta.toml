@@ -1,0 +1,4 @@
+expects_code = "E109"
+expects_error = "pure function `sneaky` runs an effect function it does not call by name"
+hint_substring = "Mark `sneaky` as `effect fn`"
+expects_line_col = "7:72"

@@ -52,7 +52,7 @@ names = 6
 [[site]]
 id = "crates/almide-codegen/src/pass_concretize_types_call_ret.rs::resolve_list_poly_ret_ty_structural::or-pattern"
 class = "legacy"
-names = 10
+names = 9
 
 [[site]]
 id = "crates/almide-codegen/src/pass_concretize_types_signatures.rs::is_fold_like_call::or-pattern"
@@ -62,7 +62,7 @@ names = 2
 [[site]]
 id = "crates/almide-codegen/src/pass_lambda_type_lookup.rs::compute_stdlib_call_ret_inner::or-pattern"
 class = "legacy"
-names = 22
+names = 21
 
 [[site]]
 id = "crates/almide-codegen/src/pass_lambda_type_lookup.rs::resolve_call_target_module_method::or-chain"
@@ -102,7 +102,7 @@ names = 3
 [[site]]
 id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::compute_stdlib_call_ret_inner::or-pattern"
 class = "legacy"
-names = 22
+names = 21
 
 [[site]]
 id = "crates/almide-codegen/src/pass_lambda_type_resolve.rs::resolve_call_target_module_method::or-chain"
@@ -122,7 +122,7 @@ names = 16
 [[site]]
 id = "crates/almide-codegen/src/pass_matrix_shape_spec.rs::infer_shape::or-pattern"
 class = "legacy"
-names = 13
+names = 11
 
 [[site]]
 id = "crates/almide-codegen/src/pass_region_window.rs::SCALAR_MODULES::table"
@@ -188,11 +188,6 @@ names = 2
 id = "crates/almide-codegen/src/walker/runtime_owned.rs::TABLE::table"
 class = "legacy"
 names = 2
-
-[[site]]
-id = "crates/almide-frontend/src/canonicalize/protocols.rs::BUILTIN_PROTOCOLS::table"
-class = "legacy"
-names = 4
 
 [[site]]
 id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_ALLOC_CALLS::table"
@@ -272,7 +267,7 @@ names = 42
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::MODULE_DESCRIPTIONS::table"
 class = "legacy"
-names = 46
+names = 47
 
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::comparison_operator_of::or-pattern"
@@ -317,7 +312,7 @@ names = 2
 [[site]]
 id = "crates/almide-interp/src/dispatch.rs::is_hof::or-pattern"
 class = "legacy"
-names = 43
+names = 42
 
 [[site]]
 id = "crates/almide-interp/src/dispatch_heap.rs::heap_prim_alloc::or-pattern"
@@ -382,7 +377,7 @@ names = 8
 [[site]]
 id = "crates/almide-ir/src/effect.rs::STDLIB_MODULE_EFFECTS::table"
 class = "legacy"
-names = 46
+names = 47
 
 [[site]]
 id = "crates/almide-ir/src/fusion.rs::EFFECT_MODULES::table"
@@ -427,7 +422,7 @@ names = 12
 [[site]]
 id = "crates/almide-mir/src/host_ops.rs::WALLED::table"
 class = "legacy"
-names = 13
+names = 6
 
 [[site]]
 id = "crates/almide-mir/src/lower/binds_p2_c.rs::seed_call_module_heap_read_shape::or-pattern"
@@ -707,17 +702,17 @@ names = 9
 [[site]]
 id = "crates/almide-mir/src/purity.rs::PURE_MODULES::table"
 class = "legacy"
-names = 147
+names = 148
 
 [[site]]
 id = "crates/almide-mir/src/purity.rs::is_pure_fn_in_impure_module::or-pattern"
 class = "legacy"
-names = 57
+names = 55
 
 [[site]]
 id = "crates/almide-mir/src/render_native_shims.rs::SHIMS::table"
 class = "legacy"
-names = 26
+names = 25
 
 [[site]]
 id = "crates/almide-spine/src/s2.rs::fingerprint_decl::table"
@@ -737,7 +732,7 @@ names = 9
 [[site]]
 id = "crates/almide-types/src/self_host_fn_tables.rs::BYTES_CORE_FNS::table"
 class = "legacy"
-names = 99
+names = 95
 
 [[site]]
 id = "crates/almide-types/src/self_host_fn_tables.rs::BYTES_MUTATE_FNS::table"
@@ -752,17 +747,17 @@ names = 46
 [[site]]
 id = "crates/almide-types/src/self_host_registry.rs::self_host_runtime::table"
 class = "legacy"
-names = 1821
+names = 1783
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
 class = "legacy"
-names = 25
+names = 26
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::BUNDLED_MODULES::table"
 class = "legacy"
-names = 46
+names = 47
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::RUNTIME_BACKED_TYPES::table"
@@ -772,12 +767,12 @@ names = 2
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::STDLIB_MODULES::table"
 class = "legacy"
-names = 42
+names = 43
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::STDLIB_OWNED_TYPES::table"
 class = "legacy"
-names = 13
+names = 15
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::TIER1_ALWAYS_ACCESSIBLE::table"
@@ -847,22 +842,17 @@ names = 33
 [[site]]
 id = "crates/almide-wasm-run/src/wasi_p3_emit.rs::base_import_list::table"
 class = "legacy"
-names = 2
+names = 1
 
 [[site]]
 id = "crates/almide-wasm/src/bytes.rs::lower_bytes_call::or-pattern"
 class = "legacy"
-names = 20
+names = 19
 
 [[site]]
 id = "crates/almide-wasm/src/bytes_append.rs::shape::or-pattern"
 class = "legacy"
 names = 2
-
-[[site]]
-id = "crates/almide-wasm/src/bytes_rw.rs::lower_bytes_rw::or-pattern"
-class = "legacy"
-names = 32
 
 [[site]]
 id = "crates/almide-wasm/src/calls.rs::resolve_qualified::VERIFIED::table"
@@ -957,12 +947,12 @@ names = 4
 [[site]]
 id = "crates/almide-wasm/src/matrix.rs::lower_matrix_call::or-pattern"
 class = "legacy"
-names = 19
+names = 10
 
 [[site]]
 id = "crates/almide-wasm/src/matrix_ops.rs::lower_matrix_call_b::or-pattern"
 class = "legacy"
-names = 4
+names = 2
 
 [[site]]
 id = "crates/almide-wasm/src/matrix_ops.rs::lower_matrix_call_c::or-pattern"
@@ -1042,7 +1032,7 @@ names = 4
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_SUM::table"
 class = "legacy"
-names = 88
+names = 91
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_VERIFIED::table"
@@ -1062,7 +1052,7 @@ names = 6
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::HTTP_SERVE_SUM::table"
 class = "legacy"
-names = 6
+names = 5
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::MATH_VERIFIED::table"
@@ -1072,7 +1062,7 @@ names = 23
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::MATRIX_COMPOSITIONS::table"
 class = "legacy"
-names = 16
+names = 9
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::PROCESS_SUM::table"
@@ -1087,7 +1077,7 @@ names = 5
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::SCALAR_TEXT_VERIFIED::table"
 class = "legacy"
-names = 62
+names = 60
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::SIZED_CONVERT_SUM_BUILDERS::table"
@@ -1112,7 +1102,7 @@ names = 27
 [[site]]
 id = "crates/almide-wasm/src/witness_gate_callbacks.rs::is_self_hosted_hof::or-pattern"
 class = "legacy"
-names = 7
+names = 6
 
 [[site]]
 id = "src/cargo_cfg.rs::expr::or-pattern"
@@ -1164,14 +1154,20 @@ why = "A syntax table, not a property of stdlib functions: the C / Rust / Python
 [[site]]
 id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::INTEGERS::table"
 class = "justified"
-names = 8
-why = "The rows of a family gate, not a property of functions: the fixed-width integer carriers that conform to Integer and FixedWidthInteger (R-sized-10). The protocol pyramid is an assumed design the language cannot declare yet (R-L0-37), so the conformance list is the specification the gate checks the module interfaces against; no codegen leg reads it."
+names = 10
+why = "The rows of a family gate, not a property of functions: the integer carriers (int, the eight fixed-width types, bigint) that conform to Integer, and which of them are signed and fixed-width (R-sized-10, R-bigint-07). The protocol pyramid is an assumed design the language cannot declare yet (R-L0-37), so the conformance list is the specification the gate checks the module interfaces against; no codegen leg reads it."
 
 [[site]]
 id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::INTEGER::table"
 class = "justified"
-names = 28
+names = 20
 why = "The columns of a family gate, not a property of functions: the requirements of Integer and FixedWidthInteger (protocol-view.md, R-sized-02/08/10, R-int-11/12) that every fixed-width integer must carry as a concrete function until a built-in type can conform to a protocol. The gate asserts every carrier x requirement cell exists; no codegen leg reads it."
+
+[[site]]
+id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::FIXED_WIDTH::table"
+class = "justified"
+names = 11
+why = "The columns of a family gate: the FixedWidthInteger requirements (protocol-view.md, R-sized-10, R-int-12) that int and the eight fixed-width integers carry and bigint, having no width, does not. A specification the gate checks against the module interfaces; no codegen leg reads it."
 
 [[site]]
 id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::SIGNED::table"
@@ -1182,11 +1178,29 @@ why = "The columns of a family gate: the SignedInteger requirements (abs, sign; 
 [[site]]
 id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::FLOATS::table"
 class = "justified"
-names = 2
-why = "The rows of a family gate: the fixed-width floating-point carriers (float32, float64) that conform to FloatingPoint (R-sized-11). A specification the gate checks against the module interfaces; no codegen leg reads it."
+names = 3
+why = "The rows of a family gate: the floating-point carriers (float, float32, float64) that conform to FloatingPoint (R-sized-11, R-float-02/03/04). A specification the gate checks against the module interfaces; no codegen leg reads it."
 
 [[site]]
 id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::FLOATING::table"
 class = "justified"
-names = 21
+names = 22
 why = "The columns of a family gate: the FloatingPoint requirements (protocol-view.md, R-sized-02/03/08/11) every fixed-width float must carry as a concrete function until a built-in type can conform to a protocol. The gate asserts every carrier x requirement cell exists; no codegen leg reads it."
+
+[[site]]
+id = "crates/almide-frontend/src/canonicalize/protocols.rs::OPERATOR_REQUIREMENTS::table"
+class = "justified"
+names = 5
+why = "The legacy BUILTIN_PROTOCOLS row (Numeric's add/sub/mul/div), moved and joined by rem for `%`: which requirement an operator desugars to is a fact about the operator syntax, the way Swift's `static func +` is, not a property of the stdlib functions. A primitive satisfies it with the operator itself and a declared type (BigInt) with the function its module defines under that name, so one pairing both the protocol declaration and the lowering read is the declaration."
+
+[[site]]
+id = "src/cli/fs_scope_twin.rs::rewrite::table"
+class = "justified"
+names = 4
+why = "These are Rust std::path::Path method names (exists / is_dir / is_file / is_symlink) rewritten in the native fs runtime source text to the scoped twin's descriptor-relative methods, not Almide stdlib functions: the list is the set of std calls the twin replaces, so it lives beside the textual rewrite that reads it."
+
+[[site]]
+id = "src/wasm_leg.rs::link_self_host::scan_expr::or-pattern"
+class = "justified"
+names = 3
+why = "A link-time dependency of the structural leg's lowering, not a property of the stdlib functions: value.object, value.to_camel_case and value.to_snake_case lower to code that calls the linked `__vu_fold_pairs` (C-401), which is reachable only through value.pick, so the linker has to be told to pull that surface in, beside the sibling float.to_string / string.from_bytes / testing.assert_contains rows of the same scan."

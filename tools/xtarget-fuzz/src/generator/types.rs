@@ -48,7 +48,7 @@ pub enum GenType {
     /// A fixed-width number (`Int8` … `UInt64`, `Float32`, `Float64`), built
     /// from a small Int through its `int.to_<width>` conversion.
     Sized(&'static str),
-    /// `Bytes`, built with `bytes.from_list` (or `bytes.new(n)` when sized).
+    /// `Bytes`, built with `bytes.from_list` (or `bytes.zeros(n)` when sized).
     Bytes,
     /// `Matrix` (Float elements), built with `matrix.from_lists` (or
     /// `matrix.zeros(n, 2)` when sized).

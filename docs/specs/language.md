@@ -339,7 +339,12 @@ Attribute names with semantic meaning today:
   a declared export that does not lower both refuse the build (E082, naming
   the fns). テスト: `tests/wasm_export_attr_test.rs`,
   `tests/wasm_export_nonroot_test.rs`.
-- `@inline_rust("template")` — **bundled stdlib only**. Routes the
+- `@inline_rust("template")` — written by the stdlib, and by packages that
+  back a fn with Rust (the aes and sha1 packages do, with a `native/` module
+  behind the template). Outside the stdlib it is **native code** (#4100): it
+  counts as every effect category, like an `@extern` fn, and a dependency that
+  carries one needs the root's `[permissions] native` grant
+  ([package-system.md §6.4](./package-system.md)). Routes the
   Rust target's codegen for the annotated fn to an inline template,
   overriding the TOML-backed `arg_transforms` dispatch. `{param_name}`
   placeholders are replaced with the rendered Rust expression for the
@@ -351,7 +356,11 @@ Attribute names with semantic meaning today:
 `@intrinsic("almide_rt_…")` and `@wasm_intrinsic` are **stdlib only** by
 authority, not just by convention (#2152): the checker accepts them in the
 stdlib's own sources — the bundled stdlib copy, or a file under `stdlib/`
-named after one of its embedded sources — and rejects them anywhere else with
+whose text is exactly the embedded source of its name (#4100: identity, not
+layout; a package that copies the `stdlib/` layout is not the stdlib), or any
+source under a directory the invoker names with `--stdlib-authority <dir>` (a
+command-line flag for harnesses that build a modified stdlib copy; no manifest
+key or environment variable can grant it) — and rejects them anywhere else with
 E085 ("intrinsics live in the stdlib; wrap in an effect fn"). The `prim`
 module (the primitive floor the stdlib is written over) is held to the same
 authority (#3025): `prim.<fn>` and `import prim` outside the stdlib are E085,

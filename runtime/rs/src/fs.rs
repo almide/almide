@@ -26,6 +26,28 @@ fn io_err(call: &str, args: &str, e: std::io::Error) -> String {
     format!("{call}({args}): {}", fs_io_error_text(&e))
 }
 include!("../../../crates/almide-base/src/fs_errno_classified.rs");
+// The rooted family's calls (#4084, C-392): made by descriptor from the root
+// (openat2 RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS on Linux, an O_NOFOLLOW
+// segment walk elsewhere), so a symlink swapped in after the Almide-side
+// check is refused by the call itself. The core is shared with the embedded
+// wasm host (ops 120..=125). `at` is `<root>\0<rel>`: one operand, so the
+// wasm leg passes it through the one fs import unchanged, and the
+// `[permissions] fs` guard judges the root before it (src/cli/build.rs).
+include!("../../../crates/almide-rt-core/src/fs_beneath_core.rs");
+fn fs_root_err(call: &str, at: &str, e: FsBeneathError) -> String {
+    let (dir, rel) = fs_root_at(at);
+    match e {
+        FsBeneathError::Escape => FS_BENEATH_ESCAPE.to_string(),
+        FsBeneathError::Io(e) => io_err(call, &fs_q(&fs_beneath_joined(dir, rel)), e),
+    }
+}
+fn fs_root_at(at: &str) -> (&str, &str) { at.split_once('\0').unwrap_or((at, "")) }
+pub fn almide_rt_fs___root_read_text(at: &str) -> Result<AlmideString, AlmideString> { let (d, r) = fs_root_at(at); let __almide_v: Result<String, AlmideString> = fs_beneath_read_text(d, r).map_err(|e| fs_root_err("fs.read_text", at, e).into()); __almide_v.into_almide() }
+pub fn almide_rt_fs___root_read_bytes(at: &str) -> Result<Vec<u8>, AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_read(d, r).map_err(|e| fs_root_err("fs.read_bytes_raw", at, e).into()) }
+pub fn almide_rt_fs___root_list_dir(at: &str) -> Result<Vec<AlmideString>, AlmideString> { let (d, r) = fs_root_at(at); let __almide_v: Result<Vec<String>, AlmideString> = fs_beneath_list(d, r).map_err(|e| fs_root_err("fs.list_dir", at, e).into()); __almide_v.into_almide() }
+pub fn almide_rt_fs___root_exists(at: &str) -> Result<Vec<u8>, AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_exists(d, r).map(|e| if e { vec![1] } else { Vec::new() }).map_err(|e| fs_root_err("fs.exists", at, e).into()) }
+pub fn almide_rt_fs___root_write_text(at: &str, content: &str) -> Result<(), AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_write(d, r, content.as_bytes()).map_err(|e| fs_root_err("fs.write", at, e).into()) }
+pub fn almide_rt_fs___root_remove(at: &str) -> Result<(), AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_remove(d, r).map_err(|e| fs_root_err("fs.remove", at, e).into()) }
 // Source-shaped quoting, so the operand reads back as the writer spelled it.
 //
 // DELIBERATELY not Rust's `{:?}`. Four independent implementations have to emit
@@ -505,30 +527,16 @@ pub fn almide_rt_fs_stat(path: &str) -> Result<AlmideFileStat, AlmideString> {
 
 // Temp
 pub fn almide_rt_fs_temp_dir() -> AlmideString { let __almide_out: String = std::env::temp_dir().to_string_lossy().replace('\\', "/"); __almide_out.into() }
+// A new, uniquely named temp file (0o600) / directory (0o700) (#4113): the
+// name's random part is OS entropy, and the entry is created exclusively —
+// a name already taken (planted, a symlink included) is never followed or
+// reused, the next one is tried (almide-rt-core fs_temp_create).
 pub fn almide_rt_fs_create_temp_file(prefix: &str) -> Result<AlmideString, AlmideString> {
-    let __almide_v: Result<String, AlmideString> = {
-        let __almide_r: Result<String, String> = (|| {
-            let dir = std::env::temp_dir();
-            let name = format!("{}{}", prefix, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
-            let path = dir.join(&name);
-            std::fs::write(&path, "").map_err(|e| io_err("fs.create_temp_file", &fs_q(&path.to_string_lossy()), e))?;
-            Ok(path.to_string_lossy().replace('\\', "/"))
-        })();
-        __almide_r.map_err(Into::into)
-    };
+    let __almide_v: Result<String, AlmideString> = fs_temp_create(prefix, false).map_err(|(p, e)| io_err("fs.create_temp_file", &fs_q(&p), e).into());
     __almide_v.into_almide()
 }
 pub fn almide_rt_fs_create_temp_dir(prefix: &str) -> Result<AlmideString, AlmideString> {
-    let __almide_v: Result<String, AlmideString> = {
-        let __almide_r: Result<String, String> = (|| {
-            let dir = std::env::temp_dir();
-            let name = format!("{}{}", prefix, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
-            let path = dir.join(&name);
-            std::fs::create_dir_all(&path).map_err(|e| io_err("fs.create_temp_dir", &fs_q(&path.to_string_lossy()), e))?;
-            Ok(path.to_string_lossy().replace('\\', "/"))
-        })();
-        __almide_r.map_err(Into::into)
-    };
+    let __almide_v: Result<String, AlmideString> = fs_temp_create(prefix, true).map_err(|(p, e)| io_err("fs.create_temp_dir", &fs_q(&p), e).into());
     __almide_v.into_almide()
 }
 
@@ -546,13 +554,13 @@ pub fn almide_rt_fs_walk(dir: &str) -> Result<Vec<AlmideString>, AlmideString> {
     __almide_v.into_almide()
 }
 
+// A symlink is an entry, never a level (#4143): the descriptor walk of
+// almide-rt-core opens each directory from its parent with O_NOFOLLOW, so a
+// link to the outside lists nothing outside and a link loop cannot repeat.
 fn walk_recursive(dir: &Path, results: &mut Vec<String>) -> Result<(), String> {
-    for entry in std::fs::read_dir(dir).map_err(|e| io_err("fs.walk", &fs_q(&dir.to_string_lossy()), e))? {
-        let entry = entry.map_err(|e| io_err("fs.walk", &fs_q(&dir.to_string_lossy()), e))?;
-        let path = entry.path();
-        results.push(path.to_string_lossy().replace('\\', "/"));
-        if path.is_dir() { walk_recursive(&path, results)?; }
-    }
+    let d = dir.to_string_lossy();
+    let rels = fs_walk_nofollow(&d, None).map_err(|(rel, e)| io_err("fs.walk", &fs_q(&fs_walk_join(&d, &rel)), e))?;
+    results.extend(rels.iter().map(|r| fs_walk_join(&d, r).replace('\\', "/")));
     Ok(())
 }
 
@@ -606,16 +614,12 @@ pub fn almide_rt_fs_glob(pattern: &str) -> Result<Vec<AlmideString>, AlmideStrin
 // Collects every entry below `dir` as a `/`-joined path relative to the walk
 // root; `depth` is the count of levels still to visit (`Some(1)` = list `dir`
 // only), `None` unbounded.
+// The same no-follow walk as fs.walk (#4143): a symlinked directory is
+// matched as an entry and never descended.
 fn glob_walk(dir: &Path, rel_prefix: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), String> {
-    for entry in std::fs::read_dir(dir).map_err(|e| io_err("fs.glob", &fs_q(&dir.to_string_lossy()), e))? {
-        let entry = entry.map_err(|e| io_err("fs.glob", &fs_q(&dir.to_string_lossy()), e))?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let rel = if rel_prefix.is_empty() { name } else { format!("{}/{}", rel_prefix, name) };
-        let path = entry.path();
-        let descend = depth != Some(1) && path.is_dir();
-        out.push(rel.clone());
-        if descend { glob_walk(&path, &rel, depth.map(|d| d - 1), out)?; }
-    }
+    let d = dir.to_string_lossy();
+    let rels = fs_walk_nofollow(&d, depth).map_err(|(rel, e)| io_err("fs.glob", &fs_q(&fs_walk_join(&d, &rel)), e))?;
+    out.extend(rels.into_iter().map(|r| if rel_prefix.is_empty() { r } else { format!("{}/{}", rel_prefix, r) }));
     Ok(())
 }
 

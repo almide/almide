@@ -21,8 +21,14 @@ mod fan;
 /// manifest hashes stdout only).
 #[allow(dead_code)]
 pub struct RunResult {
+    /// The captured stdout as text — [`RunResult::stdout_bytes`] decoded
+    /// lossily, for the harness gates that compare text.
     pub stdout: String,
     pub stderr: String,
+    /// The captured stdout EXACTLY as the guest wrote it (C-399): a byte
+    /// writer's non-UTF-8 bytes are kept here, never replaced.
+    pub stdout_bytes: Vec<u8>,
+    pub stderr_bytes: Vec<u8>,
     pub exit: i32,
     /// The bump-heap watermark (exported `__heap` global) after the run:
     /// total bytes the module ever allocated plus the fixed base — the
@@ -84,8 +90,9 @@ impl std::fmt::Display for AllocCount {
 }
 
 struct Host {
-    out: Arc<Mutex<String>>,
-    err: Arc<Mutex<String>>,
+    /// The captured streams (C-399): raw bytes, as the guest wrote them.
+    out: Arc<Mutex<Vec<u8>>>,
+    err: Arc<Mutex<Vec<u8>>>,
     exit: Arc<Mutex<Option<i32>>>,
     /// The fs result parking buffer (host_read copies it to the guest).
     fs_buf: Arc<Mutex<Vec<u8>>>,
@@ -119,6 +126,31 @@ struct Host {
     /// The `testing.assert_aborts` site this instance was started to run
     /// (op 118, ADR-0029), or -1: the run's own instance runs its tests.
     abort_site: i64,
+    /// The `fs_call` ops this module was built with (#4102), or `None` when
+    /// they could not be read as constants. The in-process module imports
+    /// the whole gateway whatever its effects; an op outside this set traps,
+    /// so a miscompile cannot steer the gateway into a capability the program
+    /// never had.
+    allowed_ops: AllowedOps,
+}
+
+/// See [`Host::allowed_ops`].
+pub(crate) type AllowedOps = Option<Arc<std::collections::BTreeSet<i32>>>;
+
+/// The `fs_call` op set of `bytes` (#4102), shared by every instance of it.
+fn allowed_ops_of(bytes: &[u8]) -> anyhow::Result<AllowedOps> {
+    let ops = almide_wasm::cert_project::fs_call_ops(bytes).map_err(anyhow::Error::msg)?;
+    Ok(ops.map(Arc::new))
+}
+
+/// Refuse an `fs_call` op the module was not built with (#4102).
+fn op_allowed(host: &Host, op: i32) -> wasmtime::Result<()> {
+    match &host.allowed_ops {
+        Some(ok) if !ok.contains(&op) => Err(wasmtime::Error::msg(format!(
+            "almide.fs_call: op {op} is not one this module was built with"
+        ))),
+        _ => Ok(()),
+    }
 }
 
 /// Is the process's stdout a terminal (native flushes per write there).
@@ -128,42 +160,55 @@ fn stdout_is_terminal() -> bool {
 }
 
 /// Append program output: into the capture buffer, or — live — to the
-/// real stream with native's buffering rule.
-fn emit_out(host: &Host, text: &str) {
+/// real stream with native's buffering rule. The bytes go through exactly
+/// as the guest wrote them (C-399, #4138): `io.write` / `io.write_bytes`
+/// are byte writers, and a `String`'s bytes are written as native writes
+/// them — no UTF-8 decoding, so no U+FFFD substitution, on any path.
+fn emit_out(host: &Host, bytes: &[u8]) {
     match &host.live_out {
         Some(w) => {
             use std::io::Write as _;
             let mut w = w.lock().expect("live stdout");
-            let _ = w.write_all(text.as_bytes());
+            let _ = w.write_all(bytes);
             // Line-buffered, native's rule (#3417): a line end flushes on any
             // stdout, every write on a terminal.
-            if text.contains('\n') || stdout_is_terminal() {
+            if bytes.contains(&b'\n') || stdout_is_terminal() {
                 let _ = w.flush();
             }
         }
-        None => host.out.lock().expect("test harness invariant").push_str(text),
+        None => host.out.lock().expect("test harness invariant").extend_from_slice(bytes),
     }
 }
 
-fn emit_err_line(host: &Host, line: &str) {
-    *host.err_last.lock().expect("err last") = line.to_string();
+/// Write to the real stderr unbuffered, as native's `eprint!` does — but
+/// the bytes, not a decoded text.
+fn stderr_write(parts: &[&[u8]]) {
+    use std::io::Write as _;
+    let mut e = std::io::stderr().lock();
+    for p in parts {
+        let _ = e.write_all(p);
+    }
+}
+
+fn emit_err_line(host: &Host, line: &[u8]) {
+    *host.err_last.lock().expect("err last") = String::from_utf8_lossy(line).into_owned();
     if host.live_out.is_some() {
-        eprintln!("{line}");
+        stderr_write(&[line, b"\n"]);
     } else {
         let mut o = host.err.lock().expect("test harness invariant");
-        o.push_str(line);
-        o.push('\n');
+        o.extend_from_slice(line);
+        o.push(b'\n');
     }
 }
 
 /// Append to stderr verbatim — op 73, the newline-free twin of
 /// [`emit_err_line`].
-fn emit_err_raw(host: &Host, text: &str) {
-    *host.err_last.lock().expect("err last") = text.to_string();
+fn emit_err_raw(host: &Host, bytes: &[u8]) {
+    *host.err_last.lock().expect("err last") = String::from_utf8_lossy(bytes).into_owned();
     if host.live_out.is_some() {
-        eprint!("{text}");
+        stderr_write(&[bytes]);
     } else {
-        host.err.lock().expect("test harness invariant").push_str(text);
+        host.err.lock().expect("test harness invariant").extend_from_slice(bytes);
     }
 }
 
@@ -207,26 +252,42 @@ impl StdinSource {
 
 include!("host_fs.rs");
 
-fn append_line(
-    caller: &mut wasmtime::Caller<'_, Host>,
-    sink: fn(&Host) -> &Arc<Mutex<String>>,
-    ptr: i32,
-    len: i32,
-) {
-    let mem = caller
+/// The guest's exported memory — an error (a trap of the call), never a
+/// panic, for a module that exports none (#4135).
+pub(crate) fn guest_memory<T>(caller: &mut wasmtime::Caller<'_, T>) -> wasmtime::Result<wasmtime::Memory> {
+    caller
         .get_export("memory")
         .and_then(|e| e.into_memory())
-        .expect("exported memory");
-    let mut buf = vec![0u8; len as u32 as usize];
-    if let Err(e) = mem.read(&caller, ptr as u32 as usize, &mut buf) {
-        panic!("in-bounds read: {e:?} ptr={ptr} len={len} memsize={}", mem.data_size(&caller));
+        .ok_or_else(|| wasmtime::Error::msg("the module exports no memory"))
+}
+
+/// Copy the guest span `[ptr, ptr + len)` out of `mem` (both i32s read
+/// unsigned, the wasm32 address rule). The span is checked against the
+/// memory's CURRENT size BEFORE anything is allocated (#4135): a forged
+/// length can neither make the host reserve up to 4 GiB nor panic it — it is
+/// the guest's own out-of-bounds trap, `Error: wasm trap: out of bounds
+/// memory access`, exit 1, exactly what a guest load past the end gives.
+pub(crate) fn read_guest<T>(caller: &wasmtime::Caller<'_, T>, mem: wasmtime::Memory, ptr: i32, len: i32) -> wasmtime::Result<Vec<u8>> {
+    let data = mem.data(caller);
+    let start = ptr as u32 as usize;
+    match start.checked_add(len as u32 as usize) {
+        Some(end) if end <= data.len() => Ok(data[start..end].to_vec()),
+        _ => Err(wasmtime::Trap::MemoryOutOfBounds.into()),
     }
-    let text = String::from_utf8_lossy(&buf);
-    if std::ptr::eq(sink(caller.data()), &caller.data().err) {
-        emit_err_line(caller.data(), &text);
+}
+
+/// `println` / `eprintln`: the guest's bytes plus a line end, written as
+/// they are (a `String` is already UTF-8; nothing is decoded).
+fn append_line(caller: &mut wasmtime::Caller<'_, Host>, to_err: bool, ptr: i32, len: i32) -> wasmtime::Result<()> {
+    let mem = guest_memory(caller)?;
+    let mut line = read_guest(caller, mem, ptr, len)?;
+    if to_err {
+        emit_err_line(caller.data(), &line);
     } else {
-        emit_out(caller.data(), &format!("{text}\n"));
+        line.push(b'\n');
+        emit_out(caller.data(), &line);
     }
+    Ok(())
 }
 
 pub fn run_wasm(bytes: &[u8]) -> anyhow::Result<RunResult> {
@@ -382,7 +443,8 @@ fn run_wasm_src_here(
     cfg.async_stack_size(EMBEDDED_WASM_STACK + 1024 * 1024);
     let engine = wasmtime::Engine::new(&cfg)?;
     let module = wasmtime::Module::new(&engine, bytes)?;
-    run_compiled(&engine, &module, Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site: -1 })
+    let allowed_ops = allowed_ops_of(bytes)?;
+    run_compiled(&engine, &module, Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site: -1, allowed_ops })
 }
 
 /// How one instance of a compiled module is started: the run's own, or an
@@ -395,14 +457,16 @@ struct Launch<'a> {
     live: bool,
     /// The abort site this instance runs (op 118), or -1 for the tests.
     abort_site: i64,
+    /// The module's `fs_call` op set (#4102).
+    allowed_ops: AllowedOps,
 }
 
 /// Instantiate `module` once and run its `main` to completion.
 fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: Launch<'_>) -> anyhow::Result<RunResult> {
-    let Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site } = launch;
+    let Launch { stdin, max_memory_bytes, args, watchdog, live, abort_site, allowed_ops } = launch;
     let (engine, module) = (engine.clone(), module.clone());
-    let out = Arc::new(Mutex::new(String::new()));
-    let err = Arc::new(Mutex::new(String::new()));
+    let out = Arc::new(Mutex::new(Vec::new()));
+    let err = Arc::new(Mutex::new(Vec::new()));
     let exit = Arc::new(Mutex::new(None));
     let fs_buf = Arc::new(Mutex::new(Vec::new()));
     let stdin_buf = Arc::new(Mutex::new(stdin));
@@ -427,6 +491,7 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
             err_last: Arc::new(Mutex::new(String::new())),
             par: None,
             abort_site,
+            allowed_ops: allowed_ops.clone(),
         },
     );
     store.limiter(|h| &mut h.limits);
@@ -439,6 +504,7 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
         max_memory_bytes,
         ticked.clone(),
         args.to_vec(),
+        allowed_ops,
     )));
     let ticker = watchdog.map(|after| {
         store.set_epoch_deadline(1);
@@ -480,7 +546,7 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
             let named_die = is_unreachable_trap(e)
                 && store.data().err_last.lock().expect("err last").starts_with("Error: ");
             if !named_die {
-                emit_err_line(store.data(), trap_line(e).trim_end_matches('\n'));
+                emit_err_line(store.data(), trap_line(e).trim_end_matches('\n').as_bytes());
             }
             1
         }
@@ -521,9 +587,13 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
         }
         _ => None,
     };
+    let stdout_bytes = out.lock().expect("test harness invariant").clone();
+    let stderr_bytes = err.lock().expect("test harness invariant").clone();
     Ok(RunResult {
-        stdout: out.lock().expect("test harness invariant").clone(),
-        stderr: err.lock().expect("test harness invariant").clone(),
+        stdout: String::from_utf8_lossy(&stdout_bytes).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr_bytes).into_owned(),
+        stdout_bytes,
+        stderr_bytes,
         exit: exit_code,
         heap_end,
         alloc_count,
@@ -538,15 +608,15 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
     linker.func_wrap(
         "almide",
         "println",
-        |mut caller: wasmtime::Caller<'_, Host>, ptr: i32, len: i32| {
-            append_line(&mut caller, |h| &h.out, ptr, len);
+        |mut caller: wasmtime::Caller<'_, Host>, ptr: i32, len: i32| -> wasmtime::Result<()> {
+            append_line(&mut caller, false, ptr, len)
         },
     )?;
     linker.func_wrap(
         "almide",
         "eprintln",
-        |mut caller: wasmtime::Caller<'_, Host>, ptr: i32, len: i32| {
-            append_line(&mut caller, |h| &h.err, ptr, len);
+        |mut caller: wasmtime::Caller<'_, Host>, ptr: i32, len: i32| -> wasmtime::Result<()> {
+            append_line(&mut caller, true, ptr, len)
         },
     )?;
     // A fn item (not a closure): a return-type-annotated closure is not
@@ -572,6 +642,7 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
          b_ptr: i32,
          b_len: i32|
          -> wasmtime::Result<i64> {
+            op_allowed(caller.data(), op)?;
             // op 74 = the instance-parallel fan offer (#3003): the request
             // and the answer room are raw i64 slots, never text.
             if op == fan::OP_FAN_PAR {
@@ -648,12 +719,12 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
                 return Ok(now);
             }
             if op == 30 {
-                emit_out(caller.data(), &String::from_utf8_lossy(&b));
+                emit_out(caller.data(), &b);
                 return Ok(0);
             }
             // op 73 = raw stderr append (`panic`'s line, #2769): no newline.
             if op == 73 {
-                emit_err_raw(caller.data(), &String::from_utf8_lossy(&b));
+                emit_err_raw(caller.data(), &b);
                 return Ok(0);
             }
             // http.serve (#2650): the listener and the held connection
@@ -692,7 +763,10 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
             } else {
                 // `[permissions] fs` (#4022): a path outside the granted roots is
                 // refused before the host touches it, with native's bytes.
-                crate::host_fs_scope::refuse(op, &a, &b).unwrap_or_else(|| fs_dispatch(op, &a, &b))
+                // The op itself runs beneath the granted root (#4084); a
+                // symlink it meets there answers the same refusal.
+                crate::host_fs_scope::refuse(op, &a, &b)
+                    .unwrap_or_else(|| crate::host_fs_scope::refused_by_call(op, &a, &b, fs_dispatch(op, &a, &b)))
             };
             *caller.data().fs_buf.lock().expect("fs buf") = buf;
             Ok(ret)
@@ -730,11 +804,19 @@ fn abort_site_op(caller: &wasmtime::Caller<'_, Host>, op: i32, a_len: i32) -> i6
     let par = if caller.data().abort_site >= 0 { None } else { caller.data().par.clone() };
     let child = match par {
         Some(par) => {
-            let (engine, module, max_memory_bytes, args) = par.compiled();
+            let (engine, module, max_memory_bytes, args, allowed_ops) = par.compiled();
             std::thread::scope(|s| {
                 spawn_guest_thread(s, || {
                     let launch =
-                        Launch { stdin: StdinSource::Buf(Vec::new()), max_memory_bytes, args, watchdog: None, live: false, abort_site: i64::from(a_len) };
+                        Launch {
+                        stdin: StdinSource::Buf(Vec::new()),
+                        max_memory_bytes,
+                        args,
+                        watchdog: None,
+                        live: false,
+                        abort_site: i64::from(a_len),
+                        allowed_ops: allowed_ops.clone(),
+                    };
                     run_compiled(engine, module, launch)
                 })
                 .join()
@@ -877,5 +959,71 @@ mod tests {
         let r = run_wasm(&module(&[Instruction::Nop])).expect("engine runs the module");
         assert_eq!(r.exit, 0);
         assert_eq!(r.stderr, "");
+    }
+
+    /// A hand-made module that imports `almide.<name>` — `(i32, i32) -> ()`
+    /// for println/eprintln, `(i32 × 5) -> i64` for fs_call — with `data`
+    /// at address 16 of a one-page memory (exported only when `export_memory`),
+    /// and a `main` running `body`. The shapes compiler output never makes:
+    /// forged pointers and lengths.
+    fn calling(name: &str, data: &[u8], export_memory: bool, body: &[Instruction<'_>]) -> Vec<u8> {
+        use wasm_encoder::{ConstExpr, DataSection, EntityType, ImportSection, ValType};
+        let mut types = TypeSection::new();
+        types.ty().function([], []);
+        if name == "fs_call" {
+            types.ty().function([ValType::I32; 5], [ValType::I64]);
+        } else {
+            types.ty().function([ValType::I32; 2], []);
+        }
+        let mut imports = ImportSection::new();
+        imports.import("almide", name, EntityType::Function(1));
+        let mut funcs = FunctionSection::new();
+        funcs.function(0);
+        let mut mems = MemorySection::new();
+        mems.memory(MemoryType { minimum: 1, maximum: None, memory64: false, shared: false, page_size_log2: None });
+        let mut exports = ExportSection::new();
+        if export_memory {
+            exports.export("memory", ExportKind::Memory, 0);
+        }
+        exports.export("main", ExportKind::Func, 1);
+        let mut code = CodeSection::new();
+        let mut f = Function::new([]);
+        for op in body {
+            f.instruction(op);
+        }
+        f.instruction(&Instruction::End);
+        code.function(&f);
+        let mut datas = DataSection::new();
+        datas.active(0, &ConstExpr::i32_const(16), data.iter().copied());
+        let mut m = Module::new();
+        m.section(&types).section(&imports).section(&funcs).section(&mems).section(&exports).section(&code).section(&datas);
+        m.finish()
+    }
+
+    /// `[i32.const a ...]` then `call 0` (the import), dropping an fs_call's i64.
+    fn call0(args: &[i32], drop_result: bool) -> Vec<Instruction<'static>> {
+        let mut body: Vec<Instruction<'static>> = args.iter().map(|&a| Instruction::I32Const(a)).collect();
+        body.push(Instruction::Call(0));
+        if drop_result {
+            body.push(Instruction::Drop);
+        }
+        body
+    }
+
+    /// C-399 (#4138): op 30 — `io.write` / `io.write_bytes` — writes the
+    /// guest's bytes as they are. Not UTF-8 here: a lone 0xFF, a NUL, 0x80,
+    /// a PNG signature's 0x89 'P' 'N' 'G'; the lossy decode this replaced
+    /// wrote EF BF BD for each invalid byte.
+    #[test]
+    fn a_byte_write_reaches_stdout_byte_for_byte() {
+        let bytes = [0xFF, 0x00, 0x80, 0x89, b'P', b'N', b'G', 0xFF, 0xFE, b'\n'];
+        let body = call0(&[30, 0, 0, 16, bytes.len() as i32], true);
+        let r = run_wasm(&calling("fs_call", &bytes, true, &body)).expect("engine runs the module");
+        assert_eq!(r.exit, 0, "stderr: {}", r.stderr);
+        assert_eq!(r.stdout_bytes, bytes);
+        // the stderr twin (op 73) is the same rule
+        let body = call0(&[73, 0, 0, 16, bytes.len() as i32], true);
+        let r = run_wasm(&calling("fs_call", &bytes, true, &body)).expect("engine runs the module");
+        assert_eq!(r.stderr_bytes, bytes);
     }
 }

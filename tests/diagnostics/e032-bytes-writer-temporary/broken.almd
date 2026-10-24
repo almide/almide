@@ -3,6 +3,6 @@
 // temporary passed to `list.push`. Before #2466 the statement compiled and the
 // write was dropped with the temporary.
 fn main() -> Unit = {
-  bytes.append_u8(bytes.new(0), 7)
+  bytes.append_u8(bytes.zeros(0), 7)
   println("done")
 }

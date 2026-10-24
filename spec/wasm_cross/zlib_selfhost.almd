@@ -278,7 +278,7 @@ effect fn main() -> Unit = {
   println(if bytes.to_list(rt3) == bytes.to_list(data) then "gzip-rt-ok" else "gzip-rt-BAD")
   println(if bytes.to_list(rt4) == bytes.to_list(data) then "compress-level-rt-ok" else "compress-level-rt-BAD")
   println(if bytes.to_list(rt5) == bytes.to_list(data) then "deflate-level-rt-ok" else "deflate-level-rt-BAD")
-  match zlib.gunzip(bytes.new(0)) {
+  match zlib.gunzip(bytes.zeros(0)) {
     ok(b) => println("gunzip-empty-ok len=${bytes.len(b)}"),
     err(e) => println("gunzip-empty-err " + e),
   }

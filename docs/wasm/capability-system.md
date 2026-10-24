@@ -237,14 +237,16 @@ Process execution is the most dangerous capability. An agent with `Proc` can exe
 
 #### What the checker enforces today
 
-`Proc` is not yet its own effect: `pass_effect_inference` maps the `process`
-module to `Env`, so `[permissions] allow = ["Env"]` is what admits a process
-call. Within that grant, `[permissions] proc` lists the commands the family may
-start (#2589, [ADR-0025](../adr/0025-wasm-process-is-a-private-host-capability.md)):
+`Proc` is its own leaf (#4155, ADR-0026 D2): `[permissions] allow = ["Proc"]`
+admits a process call, and no other name implies it — `Env` was what admitted
+one before dialect epoch 15. Within that grant, `[permissions] proc` lists the
+commands the family may start (#2589,
+[ADR-0025](../adr/0025-wasm-process-is-a-private-host-capability.md)); a `Proc`
+grant without the list is a warning, and refused under `--profile critical`:
 
 ```toml
 [permissions]
-allow = ["IO", "Env"]
+allow = ["IO", "Proc"]
 proc = ["git", "cargo"]
 ```
 

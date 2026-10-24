@@ -80,9 +80,18 @@ impl Drop for LspClient {
 
 impl LspClient {
     fn start() -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_almide"))
-            .arg("lsp")
-            .env("ALMIDE_LSP_TRACE", "1")
+        Self::start_with_home(None)
+    }
+
+    /// `home` replaces `$HOME` for the server, so a test can watch the
+    /// dependency cache (`$HOME/.almide/cache`) without touching the real one.
+    fn start_with_home(home: Option<&Path>) -> Self {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
+        cmd.arg("lsp").env("ALMIDE_LSP_TRACE", "1");
+        if let Some(home) = home {
+            cmd.env("HOME", home);
+        }
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -656,6 +665,62 @@ fn lsp_didchange_never_fetches_or_writes_lock() {
     );
     c.shutdown();
     std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn lsp_didopen_never_fetches_or_writes_lock() {
+    // #4128: opening a file of a project must not clone the dependencies its
+    // manifest names or write almide.lock. The dependency here is a local git
+    // repository that a fetch WOULD clone successfully, so the old didOpen
+    // fetch is visible: a checkout under $HOME/.almide/cache and a lock file.
+    let root = std::env::temp_dir().join(format!("almide_lsp_didopen_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let repo = root.join("repo");
+    let home = root.join("home");
+    let app = root.join("app");
+    for d in [&repo.join("src"), &home, &app] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(repo.join("almide.toml"), "[package]\nname = \"dep\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(repo.join("src/mod.almd"), "fn f() -> Int = 1\n").unwrap();
+    let git = |args: &[&str]| {
+        let ok = Command::new("git")
+            .args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        assert!(ok, "git {args:?} failed");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "init"]);
+    git(&["tag", "v0.1.0"]);
+    std::fs::write(
+        app.join("almide.toml"),
+        format!(
+            "[package]\nname = \"lsp_didopen_probe\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = {{ git = \"file://{}\", tag = \"v0.1.0\" }}\n",
+            repo.display()
+        ),
+    )
+    .unwrap();
+    let file = app.join("main.almd");
+    std::fs::write(&file, "effect fn main() -> Unit = println(\"x\")\n").unwrap();
+    let uri = file_uri(&file);
+
+    let mut c = LspClient::start_with_home(Some(&home));
+    c.open_file(&uri, "effect fn main() -> Unit = println(\"x\")\n");
+    let _ = c.recv(); // publishDiagnostics for the opened file
+    let resp = c.hover(1, &uri, 0, 4);
+    assert!(resp.get("id").is_some(), "server must answer after didOpen");
+    c.shutdown();
+
+    assert!(!app.join("almide.lock").exists(), "didOpen must never write almide.lock");
+    let cache = home.join(".almide").join("cache");
+    let cloned = std::fs::read_dir(&cache).map(|mut d| d.next().is_some()).unwrap_or(false);
+    assert!(!cloned, "didOpen must never clone into the dependency cache ({})", cache.display());
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]

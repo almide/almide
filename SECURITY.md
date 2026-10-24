@@ -39,5 +39,16 @@ downloaded asset:
 gh attestation verify <asset> -R almide/almide
 ```
 
+The tools check this themselves (#4127):
+
+- `almide self-update` hashes the archive in-process, matches the checksum
+  line on the exact file name, stages in a fresh private directory, and
+  verifies the attestation with `gh attestation verify`. Without `gh` it
+  refuses; `--skip-attestation` installs on the checksum alone and says so.
+- `tools/install.sh` / `tools/install.ps1` refuse a missing or mismatched
+  checksum, and verify the attestation when `gh` is installed. Without `gh`
+  they print the command above, since a `curl | sh` install usually has no
+  `gh`.
+
 The qualification dossier attached to each release (`almide-dossier-*.md`)
 carries the trust-chain receipts for that tag; it is attested the same way.

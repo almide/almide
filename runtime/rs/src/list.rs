@@ -412,25 +412,8 @@ const ALMIDE_FAN_PROBE: u32 = u32::MAX;
 /// site parallel. Elsewhere: a monotonic wall clock.
 #[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
 fn almide_fan_cpu_ns() -> u64 {
-    #[repr(C)]
-    struct Timespec { sec: i64, nsec: i64 }
-    // `clockid_t` is `int` on Linux and an unsigned enum on macOS. Declaring
-    // it i32 on both passed the same bits, but a foreign signature that does
-    // not match the real one is UB, and Miri reports it (#4009).
-    #[cfg(target_os = "macos")]
-    type ClockId = u32;
-    #[cfg(not(target_os = "macos"))]
-    type ClockId = i32;
-    unsafe extern "C" {
-        fn clock_gettime(clock: ClockId, ts: *mut Timespec) -> i32;
-    }
-    // CLOCK_THREAD_CPUTIME_ID
-    const CLOCK: ClockId = if cfg!(target_os = "linux") { 3 } else { 16 };
-    let mut ts = Timespec { sec: 0, nsec: 0 };
-    if unsafe { clock_gettime(CLOCK, &mut ts) } != 0 {
-        return 0;
-    }
-    (ts.sec as u64).wrapping_mul(1_000_000_000).wrapping_add(ts.nsec as u64)
+    // CLOCK_THREAD_CPUTIME_ID, through sys.rs; 0 if it cannot be read.
+    almide_rt_sys_ffi::thread_cpu_ns().unwrap_or(0)
 }
 #[cfg(not(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64")))]
 fn almide_fan_cpu_ns() -> u64 {

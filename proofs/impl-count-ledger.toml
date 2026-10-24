@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 864  implementations = 2010
+# holes = 878  implementations = 2026
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -153,11 +153,11 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "chunks"
+name     = "__chunks"
 native   = 1
-emitter  = 1
+emitter  = 0
 selfhost = 1
-total    = 3
+total    = 2
 [[hole]]
 module   = "bytes"
 name     = "clear"
@@ -167,7 +167,7 @@ selfhost = 0
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "cmp"
+name     = "compare"
 native   = 1
 emitter  = 0
 selfhost = 0
@@ -216,7 +216,7 @@ selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "eof"
+name     = "is_eof"
 native   = 1
 emitter  = 0
 selfhost = 0
@@ -307,28 +307,28 @@ selfhost = 1
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "map_each"
+name     = "map"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "new"
-native   = 1
-emitter  = 1
-selfhost = 0
-total    = 2
-[[hole]]
-module   = "bytes"
-name     = "pad_left"
+name     = "zeros"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "pad_right"
+name     = "pad_start"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "bytes"
+name     = "pad_end"
 native   = 1
 emitter  = 0
 selfhost = 0
@@ -356,245 +356,245 @@ selfhost = 0
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_bool"
+name     = "__read_bool"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_bool_at"
+name     = "__read_bool_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_f16_le"
+name     = "__read_f16_le"
 native   = 1
 emitter  = 0
 selfhost = 3
 total    = 4
 [[hole]]
 module   = "bytes"
-name     = "read_f16_le_at"
+name     = "__read_f16_le_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_f16_le_array"
+name     = "__read_f16_le_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_f32_be"
+name     = "__read_f32_be"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_f32_be_array"
+name     = "__read_f32_be_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_f32_be_at"
+name     = "__read_f32_be_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_f32_le"
+name     = "__read_f32_le"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_f32_le_array"
+name     = "__read_f32_le_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_f32_le_at"
+name     = "__read_f32_le_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_f64_be"
+name     = "__read_f64_be"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_f64_be_array"
+name     = "__read_f64_be_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_f64_be_at"
+name     = "__read_f64_be_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_f64_le"
+name     = "__read_f64_le"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_f64_le_array"
+name     = "__read_f64_le_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_f64_le_at"
+name     = "__read_f64_le_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_i16_be"
+name     = "__read_i16_be"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_i16_be_at"
+name     = "__read_i16_be_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_i16_be_array"
+name     = "__read_i16_be_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_i16_le"
+name     = "__read_i16_le"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_i16_le_at"
+name     = "__read_i16_le_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_i16_le_array"
+name     = "__read_i16_le_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_i32_be"
+name     = "__read_i32_be"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_i32_be_array"
+name     = "__read_i32_be_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_i32_be_at"
+name     = "__read_i32_be_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_i32_le"
+name     = "__read_i32_le"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_i32_le_array"
+name     = "__read_i32_le_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_i32_le_at"
+name     = "__read_i32_le_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_i64_be"
+name     = "__read_i64_be"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_i64_be_array"
+name     = "__read_i64_be_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_i64_be_at"
+name     = "__read_i64_be_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_i64_le"
+name     = "__read_i64_le"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_i64_le_array"
+name     = "__read_i64_le_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_i64_le_at"
+name     = "__read_i64_le_at"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -629,84 +629,84 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_u16_be"
+name     = "__read_u16_be"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_u16_be_at"
+name     = "__read_u16_be_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_u16_be_array"
+name     = "__read_u16_be_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_u16_le"
+name     = "__read_u16_le"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_u16_le_array"
+name     = "__read_u16_le_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_u16_le_at"
+name     = "__read_u16_le_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_u32_be"
+name     = "__read_u32_be"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_u32_be_array"
+name     = "__read_u32_be_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_u32_be_at"
+name     = "__read_u32_be_at"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_u32_le"
+name     = "__read_u32_le"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "bytes"
-name     = "read_u32_le_array"
+name     = "__read_u32_le_array"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "read_u32_le_at"
+name     = "__read_u32_le_at"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -716,11 +716,11 @@ module   = "bytes"
 name     = "read_u8"
 native   = 1
 emitter  = 0
-selfhost = 1
-total    = 2
+selfhost = 0
+total    = 1
 [[hole]]
 module   = "bytes"
-name     = "read_u8_at"
+name     = "__read_u8_at"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -755,105 +755,105 @@ selfhost = 4
 total    = 7
 [[hole]]
 module   = "bytes"
-name     = "set_f32_be"
+name     = "__set_f32_be"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_f32_le"
+name     = "__set_f32_le"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_f64_be"
+name     = "__set_f64_be"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_f64_le"
+name     = "__set_f64_le"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_i16_be"
+name     = "__set_i16_be"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_i16_le"
+name     = "__set_i16_le"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_i32_be"
+name     = "__set_i32_be"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_i32_le"
+name     = "__set_i32_le"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_i64_be"
+name     = "__set_i64_be"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_i64_le"
+name     = "__set_i64_le"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_u16_be"
+name     = "__set_u16_be"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_u16_le"
+name     = "__set_u16_le"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_u32_be"
+name     = "__set_u32_be"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_u32_le"
+name     = "__set_u32_le"
 native   = 1
 emitter  = 0
 selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "set_u8"
+name     = "__set_u8"
 native   = 1
 emitter  = 0
 selfhost = 0
@@ -895,7 +895,7 @@ selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "take_at"
+name     = "__take_at"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -923,7 +923,7 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "bytes"
-name     = "write_bool"
+name     = "append_bool"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -1050,6 +1050,13 @@ total    = 2
 [[hole]]
 module   = "bytes"
 name     = "set_float32"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "bytes"
+name     = "__join"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -1790,6 +1797,48 @@ emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
+module   = "fs"
+name     = "__root_read_text"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "fs"
+name     = "__root_read_bytes"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "fs"
+name     = "__root_list_dir"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "fs"
+name     = "__root_exists"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "fs"
+name     = "__root_write_text"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
+module   = "fs"
+name     = "__root_remove"
+native   = 1
+emitter  = 0
+selfhost = 0
+total    = 1
+[[hole]]
 module   = "hash"
 name     = "fnv1a32"
 native   = 1
@@ -1946,13 +1995,6 @@ total    = 2
 [[hole]]
 module   = "http"
 name     = "req_header"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "http"
-name     = "query_params"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -2400,6 +2442,13 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "int"
+name     = "count_ones"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
 name     = "bit_reverse"
 native   = 1
 emitter  = 0
@@ -2415,6 +2464,13 @@ total    = 2
 [[hole]]
 module   = "int"
 name     = "bit_width"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "int"
+name     = "bit_length"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -2904,18 +2960,18 @@ selfhost = 2
 total    = 4
 [[hole]]
 module   = "list"
-name     = "sum"
+name     = "__sum_int"
 native   = 1
-emitter  = 1
+emitter  = 0
 selfhost = 1
-total    = 3
+total    = 2
 [[hole]]
 module   = "list"
-name     = "product"
+name     = "__product_int"
 native   = 1
-emitter  = 1
+emitter  = 0
 selfhost = 1
-total    = 3
+total    = 2
 [[hole]]
 module   = "list"
 name     = "first"
@@ -2946,11 +3002,11 @@ selfhost = 8
 total    = 9
 [[hole]]
 module   = "list"
-name     = "join"
+name     = "__join_string"
 native   = 1
-emitter  = 1
+emitter  = 0
 selfhost = 1
-total    = 3
+total    = 2
 [[hole]]
 module   = "list"
 name     = "map"
@@ -3724,6 +3780,13 @@ total    = 2
 [[hole]]
 module   = "matrix"
 name     = "to_bytes_f32_le"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "matrix"
+name     = "to_bytes_f16_le"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -5157,57 +5220,92 @@ emitter  = 1
 selfhost = 3
 total    = 5
 [[hole]]
-module   = "regex"
-name     = "is_match"
+module   = "random"
+name     = "bytes"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "regex"
-name     = "full_match"
+name     = "__check"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "regex"
-name     = "find"
+name     = "__new"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "__is_match"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "__full_match"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "__find"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "regex"
-name     = "find_all"
+name     = "__find_all"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "regex"
-name     = "replace"
+name     = "__index_of"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "__replace"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "regex"
-name     = "replace_first"
+name     = "__replace_first"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "regex"
-name     = "split"
+name     = "__split"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "regex"
-name     = "captures"
+name     = "__captures"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "__scan"
 native   = 1
 emitter  = 0
 selfhost = 1

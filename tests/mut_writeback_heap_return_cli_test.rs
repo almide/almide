@@ -51,7 +51,7 @@ fn program(ret_ty: &str, ret: &str, bind: &str, calls: u32) -> String {
 }}
 
 effect fn main() -> Unit = {{
-  var out = bytes.new(0)
+  var out = bytes.zeros(0)
   var acc = 0
   var i = 0
   while i < {calls} {{

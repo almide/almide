@@ -37,7 +37,7 @@ fn main() -> Unit = {
   println("str drop 2^62+1: " + list.join(list.drop(ss, p62 + 1), ","))
   println("str insert 2^62+1: " + list.join(list.insert(ss, p62 + 1, "z"), ","))
   // The soak shape: an empty Bytes list, taken whole, then mapped and joined.
-  let out = bytes.new(0)
+  let out = bytes.zeros(0)
   println("head=${out |> bytes.to_list |> list.take(max) |> list.map((x) => int.to_string(x)) |> list.join(",")}")
   // In-range counts are unchanged.
   println("take 2: " + fmt(list.take(xs, 2)) + " drop 2: " + fmt(list.drop(xs, 2)) + " insert 1: " + fmt(list.insert(xs, 1, 99)))

@@ -28,7 +28,7 @@ type R = { pair: (String, List[Int]) }
 
 type G = { inner: Inner, tag: String }
 
-var g: G = { inner: { xs: [], s: "", m: [:], b: bytes.new(0) }, tag: "g" }
+var g: G = { inner: { xs: [], s: "", m: [:], b: bytes.zeros(0) }, tag: "g" }
 
 fn push_xs(mut xs: List[Int], v: Int) -> Unit = {
   list.push(xs, v)
@@ -61,7 +61,7 @@ effect fn push_checked(mut xs: List[Int], v: Int) -> Int = {
   if v > 5 then err("too big: ${v}") else ok(v)
 }
 
-fn empty_inner() -> Inner = { xs: [], s: "", m: [:], b: bytes.new(0) }
+fn empty_inner() -> Inner = { xs: [], s: "", m: [:], b: bytes.zeros(0) }
 
 fn show_inner(i: Inner) -> String = "${i.xs} ${i.s} ${map.len(i.m)} ${bytes.len(i.b)}"
 
@@ -126,7 +126,7 @@ effect fn main() -> Unit = {
   let alias_tp_b = tp.1
   push_xs(tp.1.xs, 2)
   println("14 ${tp.1.xs} ${alias_tp.1.xs} ${alias_tp_b.xs}")
-  var ob: Outer = { inner: { xs: [1], s: "", m: [:], b: bytes.new(1) }, n: 0 }
+  var ob: Outer = { inner: { xs: [1], s: "", m: [:], b: bytes.zeros(1) }, n: 0 }
   let alias_ob = ob
   let alias_ob_b = ob.inner.b
   push_b(ob.inner.b, 7)

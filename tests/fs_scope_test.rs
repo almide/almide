@@ -28,6 +28,9 @@ effect fn main() -> Unit = {
   show("dir link", fs.root_read_text(root, "link/s.txt"))
   show("file link", fs.root_read_text(root, "flink"))
   show("link write", fs.root_write_text(root, "link/new.txt", "x") |> result.map((_) => "written"))
+  show("link list", fs.root_list_dir(root, "link") |> result.map((xs) => list.join(xs, ",")))
+  show("link exists", fs.root_exists(root, "flink") |> result.map((b) => "${b}"))
+  show("link remove", fs.root_remove(root, "flink") |> result.map((_) => "removed"))
   show("dotdot", fs.root_read_text(root, "sub/../../outside/s.txt"))
   show("plain outside", fs.read_text("../outside/s.txt"))
   show("plain link", fs.read_text("data/link/s.txt"))
@@ -82,6 +85,9 @@ fn a_symlink_inside_a_root_pointing_outside_is_refused_alike_on_both_targets() {
         "dir link: err fs: path escapes root: link/s.txt",
         "file link: err fs: path escapes root: flink",
         "link write: err fs: path escapes root: link/new.txt",
+        "link list: err fs: path escapes root: link",
+        "link exists: err fs: path escapes root: flink",
+        "link remove: err fs: path escapes root: flink",
         "dotdot: err fs: path escapes root: sub/../../outside/s.txt",
         // No `fs` key: the plain calls are not bounded, as before.
         "plain outside: ok secret",
@@ -92,6 +98,37 @@ fn a_symlink_inside_a_root_pointing_outside_is_refused_alike_on_both_targets() {
         assert!(native.lines().any(|l| l == line), "missing `{line}` in:\n{native}");
     }
     assert!(!proj.join("../outside/new.txt").exists(), "a rooted write went through the link");
+    assert!(proj.join("data/flink").is_symlink(), "a refused rooted remove took the link");
+}
+
+/// #4084: the stock-runtime artifact (`almide build --target wasm`, the p1 fs
+/// service) refuses the same symlinks with the same bytes: its walk opens
+/// each segment from the previous directory's descriptor with lookupflags 0.
+/// Needs the `wasmtime` CLI; without it the leg is reported and skipped.
+#[test]
+fn the_stock_wasm_artifact_refuses_rooted_symlinks_alike() {
+    let (_t, proj) = tree(None);
+    let native = run(&proj, &[]);
+    let o = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .args(["build", "main.almd", "--target", "wasm", "-o", "main.wasm"])
+        .current_dir(&proj)
+        .output()
+        .expect("spawn");
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let base = proj.parent().unwrap().to_str().unwrap().to_string();
+    let Ok(o) = Command::new("wasmtime")
+        .args(["run", "--dir", &format!("{base}::{base}"), "--env", &format!("ALMIDE_CWD={}", proj.display()), "main.wasm"])
+        .current_dir(&proj)
+        .output()
+    else {
+        eprintln!("SKIP: no wasmtime CLI on PATH");
+        return;
+    };
+    // The rooted lines only: a plain call through an absolute link is the
+    // stock runtime's own preopen bound (cap-std refuses it), not the root's.
+    let rooted = |s: &str| s.lines().filter(|l| !l.starts_with("plain ")).map(str::to_string).collect::<Vec<_>>();
+    let stock = String::from_utf8_lossy(&o.stdout).to_string();
+    assert_eq!(rooted(&stock), rooted(&native), "stderr: {}", String::from_utf8_lossy(&o.stderr));
 }
 
 #[test]
@@ -141,4 +178,184 @@ fn the_component_host_preopens_only_the_granted_roots() {
     let wasm = run(&proj, &["--target", "wasm"]);
     let lines: Vec<&str> = wasm.lines().collect();
     assert_eq!((lines[1], lines.last().copied()), ("hello", Some("false")), "{wasm}");
+}
+
+const SCOPED_TEST: &str = r#"import fs
+
+test "a path outside the scope is refused" {
+  assert_eq(fs.read_text("../outside/s.txt"), err("fs: \"../outside/s.txt\" is outside [permissions] fs"))
+  assert_eq(fs.read_text("data/link/s.txt"), err("fs: \"data/link/s.txt\" is outside [permissions] fs"))
+  assert(not fs.exists("../outside/s.txt"))
+}
+
+test "a path inside the scope is read" {
+  assert_eq(fs.read_text("data/sub/a.txt"), ok("hello\n"))
+}
+"#;
+
+fn test_run(dir: &Path, args: &[&str]) -> (bool, String) {
+    let o = Command::new(env!("CARGO_BIN_EXE_almide"))
+        .arg("test")
+        .arg("scoped_test.almd")
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("spawn");
+    (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)))
+}
+
+/// #4084: a test harness build has no `main`, and `[permissions] fs` used to
+/// hang on it — `almide test` ran unbounded. The scope is now resolved on the
+/// first fs call (native) and set for the test run (the embedded wasm host),
+/// so a test file is bounded like `almide run`, on both legs. Without the
+/// key the same file fails: the outside read succeeds.
+#[test]
+fn almide_test_is_bounded_by_permissions_fs_on_both_targets() {
+    let (_t, proj) = tree(Some("[package]\nname = \"scoped\"\n\n[permissions]\nfs = [\"./data\"]\n"));
+    std::fs::write(proj.join("scoped_test.almd"), SCOPED_TEST).expect("write");
+    for args in [&["--target", "native"][..], &["--target", "wasm"][..], &[][..]] {
+        let (ok, out) = test_run(&proj, args);
+        assert!(ok, "{args:?}: the scoped test file failed:\n{out}");
+    }
+    std::fs::remove_file(proj.join("almide.toml")).expect("rm manifest");
+    for args in [&["--target", "native"][..], &["--target", "wasm"][..]] {
+        let (ok, out) = test_run(&proj, args);
+        assert!(!ok, "{args:?}: without the key the outside read should succeed and the assertion fail:\n{out}");
+    }
+}
+
+const RACE: &str = r#"import fs
+
+effect fn main() -> Unit = {
+  let root = fs.open_root("data")!
+  var rooted_leaks = 0
+  var rooted_reads = 0
+  var checked_leaks = 0
+  for i in list.range(0, 3000) {
+    match fs.root_read_text(root, "sub/a.txt") {
+      ok(t) => if string.contains(t, "secret") then { rooted_leaks = rooted_leaks + 1 } else { rooted_reads = rooted_reads + 1 },
+      err(_) => (),
+    }
+    // The pre-#4084 shape: check for a symlink, then the plain call.
+    if not fs.is_symlink("data/sub") then {
+      match fs.read_text("data/sub/a.txt") {
+        ok(t) => if string.contains(t, "secret") then { checked_leaks = checked_leaks + 1 } else (),
+        err(_) => (),
+      }
+    } else ()
+  }
+  println("rooted leaks: ${rooted_leaks}")
+  println("rooted reads: ${rooted_reads}")
+  println("checked leaks: ${checked_leaks}")
+}
+"#;
+
+/// #4084: a thread flips `data/sub` between the directory and a symlink to
+/// the outside while the program reads `sub/a.txt` through its root, 3000
+/// times, on each target. The rooted call never answers the outside bytes:
+/// it holds each directory by descriptor and refuses a symlink it meets. The
+/// program also runs the pre-#4084 shape (an `is_symlink` check, then the
+/// plain read) and prints how often THAT leaked — printed, not asserted: it
+/// shows the flips landed inside the run, and depends on timing.
+/// tests/fs_beneath_core.rs (almide-rt-core) holds the deterministic
+/// version, with the swap placed between the walk's own steps.
+#[test]
+fn a_directory_flipped_to_a_symlink_during_rooted_reads_never_leaks_on_either_target() {
+    let (_t, proj) = tree(None);
+    let base = proj.parent().unwrap().to_path_buf();
+    std::fs::create_dir_all(base.join("outside/sub")).unwrap();
+    std::fs::write(base.join("outside/sub/a.txt"), "secret\n").unwrap();
+    std::fs::write(proj.join("main.almd"), RACE).unwrap();
+    for args in [&[][..], &["--target", "wasm"][..]] {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flipper = {
+            let (base, stop) = (base.clone(), stop.clone());
+            std::thread::spawn(move || {
+                let (sub, aside) = (base.join("proj/data/sub"), base.join("proj/data/sub.real"));
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    std::fs::rename(&sub, &aside).unwrap();
+                    std::os::unix::fs::symlink(base.join("outside/sub"), &sub).unwrap();
+                    std::fs::remove_file(&sub).unwrap();
+                    std::fs::rename(&aside, &sub).unwrap();
+                }
+            })
+        };
+        let out = run(&proj, args);
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        flipper.join().unwrap();
+        eprintln!("{args:?}:\n{out}");
+        assert!(out.lines().any(|l| l == "rooted leaks: 0"), "{args:?}: a rooted read followed the flipped symlink:\n{out}");
+    }
+}
+
+const SCOPED_RACE: &str = r#"import fs
+
+effect fn main() -> Unit = {
+  var leaks = 0
+  var reads = 0
+  var refused = 0
+  var missing = 0
+  for _ in list.range(0, 3000) {
+    match fs.read_text("data/sub/a.txt") {
+      ok(t) => if string.contains(t, "secret") then { leaks = leaks + 1 } else { reads = reads + 1 },
+      err(e) => if string.contains(e, "\"data/sub/a.txt\" is outside [permissions] fs") then { refused = refused + 1 } else { missing = missing + 1 },
+    }
+  }
+  println("scoped leaks: ${leaks}")
+  println("scoped reads: ${reads}")
+  println("scoped refused: ${refused}")
+  println("scoped mid-flip errors: ${missing}")
+}
+"#;
+
+/// #4084: under `[permissions] fs = ["./data"]`, a thread flips `data/sub`
+/// between the directory and a symlink to the outside while the program
+/// reads `data/sub/a.txt` with the PLAIN `fs.read_text`, 3000 times, on each
+/// target. The scope's check passes on the intact tree and the call then runs
+/// beneath `data`'s held descriptor, so the outside bytes are never answered:
+/// a flip that lands after the check is refused by the call itself (with the
+/// check's own refusal text). The test then runs the pre-#4084 guard shape
+/// in this process during the same flipping — resolve the path, check it is
+/// under `data`, then the plain read, 20000 times — and prints how often THAT leaked:
+/// printed, not asserted (it shows the window, and depends on timing).
+/// crates/almide-rt-core/tests/fs_scoped_core.rs holds the deterministic
+/// version, with the swap placed between the decision and the call.
+#[test]
+fn a_directory_flipped_to_a_symlink_under_permissions_fs_never_leaks_on_either_target() {
+    let (_t, proj) = tree(Some("[package]\nname = \"scoped\"\n\n[permissions]\nfs = [\"./data\"]\n"));
+    let base = proj.parent().unwrap().to_path_buf();
+    std::fs::create_dir_all(base.join("outside/sub")).unwrap();
+    std::fs::write(base.join("outside/sub/a.txt"), "secret\n").unwrap();
+    std::fs::write(proj.join("main.almd"), SCOPED_RACE).unwrap();
+    for args in [&[][..], &["--target", "wasm"][..]] {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flipper = {
+            let (base, stop) = (base.clone(), stop.clone());
+            std::thread::spawn(move || {
+                let (sub, aside) = (base.join("proj/data/sub"), base.join("proj/data/sub.real"));
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    std::fs::rename(&sub, &aside).unwrap();
+                    std::os::unix::fs::symlink(base.join("outside/sub"), &sub).unwrap();
+                    std::fs::remove_file(&sub).unwrap();
+                    std::fs::rename(&aside, &sub).unwrap();
+                }
+            })
+        };
+        let out = run(&proj, args);
+        // The pre-#4084 guard: decide on the path, then the plain call.
+        let (data, path) = (proj.join("data"), proj.join("data/sub/a.txt"));
+        let mut checked_leaks = 0;
+        for _ in 0..20_000 {
+            let inside = std::fs::canonicalize(&path).is_ok_and(|r| r.starts_with(&data));
+            if inside && std::fs::read_to_string(&path).is_ok_and(|t| t.contains("secret")) {
+                checked_leaks += 1;
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        flipper.join().unwrap();
+        eprintln!("{args:?}:\n{out}check-then-call leaks (control): {checked_leaks}");
+        assert!(out.lines().any(|l| l == "scoped leaks: 0"), "{args:?}: a scoped read followed the flipped symlink:\n{out}");
+        let n = |k: &str| out.lines().find_map(|l| l.strip_prefix(k)).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+        assert!(n("scoped reads: ") > 0 && n("scoped refused: ") > 0, "{args:?}: the flips did not land on both sides of the calls:\n{out}");
+    }
 }
