@@ -164,7 +164,7 @@ fn user_type_named_after_a_runtime_private_item_builds() {
     );
     assert_user_type_builds(
         "RxNode",
-        "import regex\ntype RxNode = { n: Int }\neffect fn main() -> Unit = {\n  let x = RxNode { n: 7 }\n  println(\"${x.n} ${regex.is_match(\"a+\", \"caab\")}\")\n}\n",
+        "import regex\ntype RxNode = { n: Int }\neffect fn main() -> Unit = {\n  let x = RxNode { n: 7 }\n  println(\"${x.n} ${regex.is_match(regex.new(\"a+\"), \"caab\")}\")\n}\n",
         "7 true\n",
     );
 }

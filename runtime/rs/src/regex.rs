@@ -26,6 +26,53 @@ struct AlmideRxPat {
     size: usize,     // the pattern's length in chars (the walk's step budget scales with it)
 }
 
+/// The flags of a leading flag group `(?i)`, `(?m)`, `(?im)`, ...: (its length
+/// in chars, multiline, case-insensitive). None when the pattern has none.
+fn rx_flag_group(chars: &[char]) -> Option<(usize, bool, bool)> {
+    if !chars.starts_with(&['(', '?']) {
+        return None;
+    }
+    let (mut i, mut m, mut ic) = (2, false, false);
+    while i < chars.len() && (chars[i] == 'i' || chars[i] == 'm') {
+        if chars[i] == 'm' { m = true } else { ic = true }
+        i += 1;
+    }
+    (i > 2 && i < chars.len() && chars[i] == ')').then_some((i + 1, m, ic))
+}
+
+/// `(?i)`: an ASCII letter matches either case. A literal letter becomes the
+/// class of both, and a class gains the other case of every letter in it
+/// (before a `^` negates it), so `c` matches when `c` or its other case is in
+/// the class — the self-hosted twin tests exactly that.
+fn rx_fold_case(alts: &mut [Vec<AlmideRxPiece>]) {
+    fn fold_ranges(ranges: &mut Vec<(char, char)>) {
+        let mut extra = Vec::new();
+        for &(lo, hi) in ranges.iter() {
+            for (a, z, d) in [('a', 'z', -32i32), ('A', 'Z', 32i32)] {
+                let (l, h) = (lo.max(a), hi.min(z));
+                if l <= h {
+                    let sh = |c: char| char::from_u32((c as i32 + d) as u32).unwrap_or(c);
+                    extra.push((sh(l), sh(h)));
+                }
+            }
+        }
+        ranges.extend(extra);
+    }
+    for seq in alts.iter_mut() {
+        for piece in seq.iter_mut() {
+            match &mut piece.node {
+                AlmideRxNode::Lit(c) if c.is_ascii_alphabetic() => {
+                    let (l, u) = (c.to_ascii_lowercase(), c.to_ascii_uppercase());
+                    piece.node = AlmideRxNode::Class(vec![(l, l), (u, u)], false);
+                }
+                AlmideRxNode::Class(ranges, _) => fold_ranges(ranges),
+                AlmideRxNode::Group(inner, _) => rx_fold_case(inner),
+                _ => {}
+            }
+        }
+    }
+}
+
 type AlmideRxCaps = Vec<Option<(usize, usize)>>;
 
 // ---- Parsing ----
@@ -34,11 +81,16 @@ fn rx_compile(pat: &str) -> AlmideRxPat {
     let chars: Vec<char> = pat.chars().collect();
     let mut pos = 0usize;
     let mut ncap = 0usize;
-    let multiline = chars.starts_with(&['(', '?', 'm', ')']);
-    if multiline {
-        pos = 4;
+    let (mut multiline, mut icase) = (false, false);
+    if let Some((len, m, ic)) = rx_flag_group(&chars) {
+        pos = len;
+        multiline = m;
+        icase = ic;
     }
-    let alts = rx_parse_alts(&chars, &mut pos, &mut ncap, false);
+    let mut alts = rx_parse_alts(&chars, &mut pos, &mut ncap, false);
+    if icase {
+        rx_fold_case(&mut alts);
+    }
     AlmideRxPat { alts, ncap, multiline, size: chars.len() }
 }
 
@@ -206,6 +258,305 @@ fn rx_parse_class(chars: &[char], pos: &mut usize) -> AlmideRxNode {
     }
     if *pos < chars.len() { *pos += 1; } // skip ]
     AlmideRxNode::Class(ranges, neg)
+}
+
+// ---- Validation (#3942, #4083) ----
+//
+// `regex.new` and `regex.compile` accept a pattern only when it is in the
+// syntax the engine reads (docs/stdlib/regex.md) and small enough: a pattern
+// the engine used to read leniently (`(` as an empty group, `a{` as a literal
+// brace, `(?P<n>a)` as a group of `P<n>a`) is refused with a reason, and so is
+// one whose Pike VM would have more than ALMIDE_RX_MAX_STATES states. The
+// self-hosted twin in stdlib/regex_engine.almd (__rx_check) walks the same
+// grammar in the same order and gives the same reason, byte for byte.
+
+/// The most states an accepted pattern may have: the expanded Pike VM
+/// program's instructions times its states per instruction (one more than the
+/// deepest nesting of groups that can match empty). Matching takes time at
+/// most proportional to this times the subject's length, so it bounds every
+/// call. Counted without expanding anything (rx_check).
+///
+/// Chosen by measurement (#4083): it is ALMIDE_RX_PIKE_STATES, so every
+/// accepted pattern runs on the expanded program's dense state table, and the
+/// worst case — every state live at every character, `a{0,9000}b` or
+/// `(a|aa){0,2400}b` on 100,000 `a`s — takes about 8 s native and 64 s on
+/// wasm. The largest pattern written in this repository and its downstream
+/// repositories has 132 states. At 100,000 the same worst case took 196-416 s
+/// native, on the counted program the larger patterns need.
+const ALMIDE_RX_MAX_STATES: u64 = 20_000;
+
+/// The deepest group nesting an accepted pattern may have (the parser and
+/// the checker recurse once per level).
+const ALMIDE_RX_MAX_NEST: usize = 250;
+
+/// A checked part of a pattern: its expanded instruction count (saturated
+/// past the state limit), whether it can match empty, and the deepest nesting
+/// of tracked groups in it.
+#[derive(Clone, Copy)]
+struct AlmideRxSize {
+    n: u64,
+    nullable: bool,
+    depth: u64,
+}
+
+fn rx_sat(x: u64) -> u64 {
+    x.min(ALMIDE_RX_MAX_STATES + 1)
+}
+
+/// The end (past `}`) of a well-formed `{n}`, `{n,}` or `{n,m}` at `start`,
+/// by its digits alone however large they are.
+fn rx_brace_end(chars: &[char], start: usize) -> Option<usize> {
+    let digits = |mut i: usize| {
+        while i < chars.len() && chars[i].is_ascii_digit() {
+            i += 1;
+        }
+        i
+    };
+    let d1 = digits(start + 1);
+    if d1 == start + 1 || d1 >= chars.len() {
+        return None;
+    }
+    if chars[d1] == '}' {
+        return Some(d1 + 1);
+    }
+    if chars[d1] != ',' {
+        return None;
+    }
+    let d2 = digits(d1 + 1);
+    (d2 < chars.len() && chars[d2] == '}').then_some(d2 + 1)
+}
+
+/// A count in a `{n,m}`, saturated so that it stays exact up to the limit.
+fn rx_count(chars: &[char], from: usize, to: usize) -> u64 {
+    chars[from..to].iter().fold(0u64, |acc, c| rx_sat(acc * 10 + (*c as u64 - '0' as u64)))
+}
+
+/// The pattern's reason to be refused, or None when it is accepted.
+fn rx_check(pat: &str) -> Option<String> {
+    match rx_states(pat) {
+        Err(reason) => Some(reason),
+        Ok(states) if states > ALMIDE_RX_MAX_STATES => Some(format!("pattern too large: more than {ALMIDE_RX_MAX_STATES} states")),
+        Ok(_) => None,
+    }
+}
+
+/// The pattern's state count (exact up to the limit, then the limit + 1), or
+/// its syntax error.
+fn rx_states(pat: &str) -> Result<u64, String> {
+    let chars: Vec<char> = pat.chars().collect();
+    let mut pos = rx_flag_group(&chars).map_or(0, |(len, _, _)| len);
+    let size = rx_check_alts(&chars, &mut pos, 0).map_err(|reason| reason.to_string())?;
+    if pos < chars.len() {
+        return Err("unmatched )".to_string());
+    }
+    Ok(rx_sat(size.n + 1) * (size.depth + 1))
+}
+
+fn rx_check_alts(chars: &[char], pos: &mut usize, nest: usize) -> Result<AlmideRxSize, std::borrow::Cow<'static, str>> {
+    let mut size = AlmideRxSize { n: 0, nullable: false, depth: 0 };
+    let mut arms = 0u64;
+    loop {
+        let seq = rx_check_seq(chars, pos, nest)?;
+        arms += 1;
+        size.n = rx_sat(size.n + seq.n);
+        size.nullable |= seq.nullable;
+        size.depth = size.depth.max(seq.depth);
+        if *pos < chars.len() && chars[*pos] == '|' {
+            *pos += 1;
+        } else {
+            break;
+        }
+    }
+    // a Split and a Jmp per arm but the last
+    size.n = rx_sat(size.n + 2 * (arms - 1));
+    Ok(size)
+}
+
+fn rx_check_seq(chars: &[char], pos: &mut usize, nest: usize) -> Result<AlmideRxSize, std::borrow::Cow<'static, str>> {
+    let mut size = AlmideRxSize { n: 0, nullable: true, depth: 0 };
+    while *pos < chars.len() && chars[*pos] != '|' && chars[*pos] != ')' {
+        let piece = rx_check_piece(chars, pos, nest)?;
+        size.n = rx_sat(size.n + piece.n);
+        size.nullable &= piece.nullable;
+        size.depth = size.depth.max(piece.depth);
+    }
+    Ok(size)
+}
+
+/// What follows `(?` at `at` (just past the `?`) inside a pattern: why it is
+/// refused. Only `(?:` is a group; flags are read at the pattern's start alone.
+fn rx_group_syntax(chars: &[char], at: usize) -> &'static str {
+    let next = chars.get(at).copied();
+    let after = chars.get(at + 1).copied();
+    match next {
+        Some('P') if after == Some('<') => "named groups are not supported",
+        Some('<') if after != Some('=') && after != Some('!') => "named groups are not supported",
+        Some('<') | Some('=') | Some('!') => "lookaround is not supported",
+        Some('i') | Some('m') => "flags are only supported at the start of the pattern",
+        _ => "unsupported group syntax",
+    }
+}
+
+fn rx_check_piece(chars: &[char], pos: &mut usize, nest: usize) -> Result<AlmideRxSize, std::borrow::Cow<'static, str>> {
+    // the atom: 0 = one character, 1 = zero-width, 2 = a group
+    let c = chars[*pos];
+    let mut kind = 0;
+    let mut body = AlmideRxSize { n: 0, nullable: false, depth: 0 };
+    let mut capturing = false;
+    match c {
+        '*' | '+' | '?' => return Err("nothing to repeat".into()),
+        '{' => {
+            return Err(if rx_brace_end(chars, *pos).is_some() { "nothing to repeat" } else { "malformed repetition" }.into());
+        }
+        '(' => {
+            *pos += 1;
+            if *pos < chars.len() && chars[*pos] == '?' {
+                if chars.get(*pos + 1) != Some(&':') {
+                    return Err(rx_group_syntax(chars, *pos + 1).into());
+                }
+                *pos += 2;
+            } else {
+                capturing = true;
+            }
+            if nest + 1 > ALMIDE_RX_MAX_NEST {
+                return Err(format!("groups nested deeper than {ALMIDE_RX_MAX_NEST}").into());
+            }
+            body = rx_check_alts(chars, pos, nest + 1)?;
+            if *pos >= chars.len() {
+                return Err("unclosed group".into());
+            }
+            *pos += 1;
+            kind = 2;
+        }
+        '[' => {
+            *pos += 1;
+            rx_check_class(chars, pos)?;
+        }
+        '\\' => {
+            if *pos + 1 >= chars.len() {
+                return Err("trailing backslash".into());
+            }
+            let e = chars[*pos + 1];
+            *pos += 2;
+            match e {
+                'b' | 'B' => kind = 1,
+                'd' | 'D' | 'w' | 'W' | 's' | 'S' | 'n' | 't' | 'r' => {}
+                _ if e.is_ascii_alphanumeric() => return Err(format!("unsupported escape \\{e}").into()),
+                _ => {}
+            }
+        }
+        '^' | '$' => {
+            *pos += 1;
+            kind = 1;
+        }
+        _ => *pos += 1,
+    }
+    let (mut min, mut max) = (1u64, Some(1u64));
+    if *pos < chars.len() {
+        let q = chars[*pos];
+        let mut quantified = true;
+        match q {
+            '*' => (min, max) = (0, None),
+            '+' => (min, max) = (1, None),
+            '?' => (min, max) = (0, Some(1)),
+            '{' => match rx_brace_end(chars, *pos) {
+                None => return Err("malformed repetition".into()),
+                Some(end) => {
+                    let consumed = end - *pos;
+                    let close = end - 1;
+                    let comma = chars[*pos..close].iter().position(|&c| c == ',').map(|i| *pos + i);
+                    min = rx_count(chars, *pos + 1, comma.unwrap_or(close));
+                    max = match comma {
+                        None => Some(min),
+                        Some(k) if k + 1 == close => None,
+                        Some(k) => Some(rx_count(chars, k + 1, close)),
+                    };
+                    if max.is_some_and(|m| min > m) {
+                        return Err("repetition minimum exceeds maximum".into());
+                    }
+                    *pos += consumed - 1;
+                }
+            },
+            _ => quantified = false,
+        }
+        if quantified {
+            *pos += 1;
+            if *pos < chars.len() && chars[*pos] == '?' {
+                *pos += 1;
+            }
+        }
+    }
+    Ok(match kind {
+        // a quantifier on a zero-width atom is read and ignored
+        1 => AlmideRxSize { n: 1, nullable: true, depth: 0 },
+        0 => {
+            let n = match max {
+                None => min + 3,
+                Some(m) => min + 2 * (m - min),
+            };
+            AlmideRxSize { n: rx_sat(n), nullable: min == 0, depth: 0 }
+        }
+        _ => {
+            // one copy per count (max, or min and then one that loops), each
+            // GStart? body GEnd, and a Split before each copy from min on
+            let copies = rx_sat(max.unwrap_or(min + 1));
+            let splits = match max {
+                None => 1,
+                Some(m) => m - min,
+            };
+            let per = body.n + 1 + capturing as u64;
+            let tracked = (min, max) != (1, Some(1)) && body.nullable;
+            AlmideRxSize {
+                n: rx_sat(copies * per + rx_sat(splits)),
+                nullable: min == 0 || body.nullable,
+                // a {0} repetition emits no copy, so the groups inside it
+                // add no nesting; the group itself still counts (the
+                // compiler raises its depth before it counts copies)
+                depth: if max == Some(0) { tracked as u64 } else { body.depth + tracked as u64 },
+            }
+        }
+    })
+}
+
+/// A class after its `[`: `pos` ends past its `]`.
+fn rx_check_class(chars: &[char], pos: &mut usize) -> Result<(), std::borrow::Cow<'static, str>> {
+    if *pos < chars.len() && chars[*pos] == '^' {
+        *pos += 1;
+    }
+    if *pos < chars.len() && chars[*pos] == ']' {
+        *pos += 1;
+    }
+    loop {
+        if *pos >= chars.len() {
+            return Err("unclosed character class".into());
+        }
+        let c = chars[*pos];
+        if c == ']' {
+            *pos += 1;
+            return Ok(());
+        }
+        if c == '\\' {
+            if *pos + 1 >= chars.len() {
+                return Err("unclosed character class".into());
+            }
+            let e = chars[*pos + 1];
+            *pos += 2;
+            match e {
+                'd' | 'w' | 's' | 'n' | 't' => {}
+                _ if e.is_ascii_alphanumeric() => return Err(format!("unsupported escape \\{e} in a class").into()),
+                _ => {}
+            }
+            continue;
+        }
+        *pos += 1;
+        if *pos + 1 < chars.len() && chars[*pos] == '-' && chars[*pos + 1] != ']' {
+            let hi = chars[*pos + 1];
+            if hi == '\\' || c > hi {
+                return Err("invalid class range".into());
+            }
+            *pos += 2;
+        }
+    }
 }
 
 // ---- Matching ----
@@ -602,7 +953,10 @@ fn rx_backtrack_find_at<'a>(vm: &mut AlmideRxVm<'a>, rx: &'a AlmideRxPat, start:
 // the bound the expansion had — with memory for the live threads only. The
 // self-hosted twin in stdlib/regex_engine.almd compiles the same programs and
 // runs the same VM, so the two legs still agree on every match, capture and
-// failure.
+// failure. Since #3942 the public API refuses a pattern past
+// ALMIDE_RX_MAX_STATES, which is this budget, so an accepted pattern always
+// runs expanded; the counted program is what the VM runs if that limit is
+// raised, and tests/regex_pike_differential_test.rs runs it on every pattern.
 
 /// The most (pc, d) states an expanded program may have before the pattern is
 /// compiled counted instead. Every ordinary pattern is far below it; what
@@ -1341,12 +1695,28 @@ struct AlmideRxCompiled {
     rx: AlmideRxPat,
     prog: Option<AlmideRxProg>,
     pikes: std::cell::RefCell<[Option<AlmideRxPike>; 2]>,
+    /// Why the pattern is refused (rx_check), or None. A refused pattern has
+    /// no program.
+    invalid: Option<String>,
 }
 
 fn rx_compiled(pat: &str) -> AlmideRxCompiled {
+    let invalid = rx_check(pat);
     let rx = rx_compile(pat);
-    let prog = rx_program(&rx);
-    AlmideRxCompiled { rx, prog, pikes: std::cell::RefCell::new([None, None]) }
+    let prog = if invalid.is_none() { rx_program(&rx) } else { None };
+    AlmideRxCompiled { rx, prog, pikes: std::cell::RefCell::new([None, None]), invalid }
+}
+
+/// The compiled pattern, which every public operation needs to be valid: a
+/// refused one aborts with `Error: invalid regex: <reason>` (C-395). The ops
+/// take a `Regex`, which only regex.new / regex.compile make, so this fires
+/// only for a record built by hand.
+fn rx_valid(pat: &str) -> std::rc::Rc<AlmideRxCompiled> {
+    let rx = rx_cached(pat);
+    if let Some(reason) = &rx.invalid {
+        almide_abort(format!("invalid regex: {reason}"));
+    }
+    rx
 }
 
 /// How many compiled patterns a thread keeps.
@@ -1476,30 +1846,85 @@ impl Drop for AlmideRxMatcher<'_> {
 }
 
 // ---- Public API ----
+//
+// The stdlib's `regex` module wraps these: its ops take a `Regex` and pass
+// its pattern here (stdlib/regex.almd).
+
+/// "" when `pat` is accepted, else why it is refused (regex.compile's err).
+pub fn almide_regex_check(pat: &str) -> AlmideString { let __almide_v: String = rx_cached(pat).invalid.clone().unwrap_or_default(); __almide_v.into_almide() }
+
+/// `pat` itself when it is accepted; aborts with `Error: invalid regex:
+/// <reason>` when not (regex.new, C-395).
+pub fn almide_regex_new(pat: &str) -> AlmideString { let __almide_v: String = { rx_valid(pat); pat.to_string() }; __almide_v.into_almide() }
+
+/// The code-point index where the leftmost match starts, or -1.
+pub fn almide_regex_index_of(pat: &str, s: &str) -> i64 {
+    let rx = rx_valid(pat);
+    let chars: Vec<char> = s.chars().collect();
+    let mut m = AlmideRxMatcher::new(&rx, &chars, false);
+    m.find_at(0).map_or(-1, |(start, _)| start as i64)
+}
+
+/// A capture, marked: "1" and its text when the group took part in the
+/// match, "0" when it did not (regex.captures reads it back as String?).
+fn rx_mark(chars: &[char], span: Option<(usize, usize)>) -> String {
+    match span {
+        Some((a, b)) => std::iter::once('1').chain(chars[a..b].iter().copied()).collect(),
+        None => "0".to_string(),
+    }
+}
+
+/// The matches the way split and replace walk them, with their groups:
+/// [groups + 1 as decimal, field, (whole, group 1, ...) marked as rx_mark
+/// does, field, ..., the trailing field]. A field is the text from the end of
+/// the previous match to the start of this one. `first` stops after one match
+/// (replace_first_with). regex.captures_all, replace_with and
+/// replace_first_with read it.
+pub fn almide_regex_scan(pat: &str, s: &str, first: bool) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
+    let rx = rx_valid(pat);
+    let chars: Vec<char> = s.chars().collect();
+    let mut vm = AlmideRxMatcher::new(&rx, &chars, true);
+    let mut out: Vec<String> = vec![(rx.rx.ncap + 1).to_string()];
+    let (mut last, mut scan) = (0usize, 0usize);
+    while scan <= chars.len() {
+        let Some((start, end)) = vm.find_at(scan) else { break };
+        out.push(chars[last..start].iter().collect());
+        out.push(rx_mark(&chars, Some((start, end))));
+        let caps = vm.caps().clone();
+        out.extend(caps.iter().map(|c| rx_mark(&chars, *c)));
+        last = end;
+        scan = if end > start { end } else { end + 1 };
+        if first {
+            break;
+        }
+    }
+    out.push(chars[last..].iter().collect());
+    out
+})(); __almide_v.into_almide() }
 
 pub fn almide_regex_is_match(pat: &str, s: &str) -> bool {
-    let rx = rx_cached(pat);
+    let rx = rx_valid(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut m = AlmideRxMatcher::new(&rx, &chars, false);
     m.is_match()
 }
 
 pub fn almide_regex_full_match(pat: &str, s: &str) -> bool {
-    let rx = rx_cached(pat);
+    let rx = rx_valid(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut m = AlmideRxMatcher::new(&rx, &chars, false);
     m.full_match()
 }
 
 pub fn almide_regex_find(pat: &str, s: &str) -> Option<AlmideString> { let __almide_v: Option<String> = (|| {
-    let rx = rx_cached(pat);
+    let rx = rx_valid(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut vm = AlmideRxMatcher::new(&rx, &chars, false);
     vm.find_at(0).map(|(start, end)| chars[start..end].iter().collect())
 })(); __almide_v.into_almide() }
 
 pub fn almide_regex_find_all(pat: &str, s: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
-    let rx = rx_cached(pat);
+    let rx = rx_valid(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut vm = AlmideRxMatcher::new(&rx, &chars, false);
     let mut results: Vec<String> = vec![];
@@ -1516,7 +1941,7 @@ pub fn almide_regex_find_all(pat: &str, s: &str) -> Vec<AlmideString> { let __al
 })(); __almide_v.into_almide() }
 
 pub fn almide_regex_replace(pat: &str, s: &str, rep: &str) -> AlmideString { let __almide_v: String = (|| {
-    let rx = rx_cached(pat);
+    let rx = rx_valid(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut vm = AlmideRxMatcher::new(&rx, &chars, false);
     let mut result = String::new();
@@ -1546,7 +1971,7 @@ pub fn almide_regex_replace(pat: &str, s: &str, rep: &str) -> AlmideString { let
 })(); __almide_v.into_almide() }
 
 pub fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> AlmideString { let __almide_v: String = (|| {
-    let rx = rx_cached(pat);
+    let rx = rx_valid(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut vm = AlmideRxMatcher::new(&rx, &chars, false);
     if let Some((start, end)) = vm.find_at(0) {
@@ -1576,7 +2001,7 @@ pub fn almide_regex_replace_first(pat: &str, s: &str, rep: &str) -> AlmideString
 /// treatment of an empty alternation arm (there the three disagree among
 /// themselves).
 pub fn almide_regex_split(pat: &str, s: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = (|| {
-    let rx = rx_cached(pat);
+    let rx = rx_valid(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut vm = AlmideRxMatcher::new(&rx, &chars, false);
     let mut results: Vec<String> = vec![];
@@ -1602,15 +2027,14 @@ pub fn almide_regex_split(pat: &str, s: &str) -> Vec<AlmideString> { let __almid
 /// capture" with "did not match" — with a full match at index 0 that case has a
 /// real answer, `some([whole])`.
 pub fn almide_regex_captures(pat: &str, s: &str) -> Option<Vec<AlmideString>> { let __almide_v: Option<Vec<String>> = (|| {
-    let rx = rx_cached(pat);
+    let rx = rx_valid(pat);
     let chars: Vec<char> = s.chars().collect();
     let mut vm = AlmideRxMatcher::new(&rx, &chars, true);
     let (mstart, mend) = vm.find_at(0)?;
-    let mut result = vec![chars[mstart..mend].iter().collect::<String>()];
-    result.extend(vm.caps().iter().map(|c| match c {
-        Some((start, end)) => chars[*start..*end].iter().collect(),
-        None => String::new(),
-    }));
+    // each marked as rx_mark does: regex.captures reads a group that took no
+    // part as none (R-regex-08)
+    let mut result = vec![rx_mark(&chars, Some((mstart, mend)))];
+    result.extend(vm.caps().iter().map(|c| rx_mark(&chars, *c)));
     Some(result)
 })(); __almide_v.into_almide() }
 

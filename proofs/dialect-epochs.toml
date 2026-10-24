@@ -1,5 +1,14 @@
 # =============================================================
 # DIALECT EPOCH LEDGER — what a `@dialect(N)` stamp means
+[[deprecation]]
+id = "regex-full-match-renamed"
+issue = 3942
+since_epoch = 15
+since = "0.69.0"
+removal_epoch = 16
+summary = "`regex.full_match` is `@deprecated` (E052) in favour of `regex.is_full_match` (R-regex-01): every other Bool question in the stdlib is spelled `is_*`. It takes a `Regex` like the rest of the module."
+removal = "`regex.full_match(re, s)` → `regex.is_full_match(re, s)`; `almide fix` renames it"
+
 # =============================================================
 # Almide's users are code generators. A model writes against whatever dialect
 # it learned, and the file records that dialect in a `@dialect(N)` stamp so the
@@ -233,6 +242,7 @@ breaks = [
   "`zlib.inflate`, `zlib.decompress` and `zlib.gunzip` return `err(\"zlib: output exceeds 268435456 bytes\")` for a stream whose output passes 256 MiB, where they used to decode it whole (R-zlib-04, #4020, C-390); a program that decodes more than 256 MiB at once writes `zlib.inflate_max(data, n)` / `decompress_max` / `gunzip_max` with its own bound",
   "`json.parse` returns `err(\"json: nesting deeper than 1000\")` for an array or object opened inside 1000 others, where it used to recurse until the stack ran out (R-json-04, #4020, C-391); a document nested more than 1000 deep cannot be parsed",
   "a program that runs as its p3 component on the embedded wasm host (`almide run --target wasm` of a program naming the full-response http family) has the working directory and the temp dir preopened instead of `/` (#4022): an fs path outside both now errs there; grant it with `[permissions] fs = [\"<dir>\", …]` in almide.toml, which preopens exactly the listed directories",
+  "the `regex` module takes a compiled `Regex` (R-regex-02, #3942, C-395): every operation's first argument is a `Regex` made by `regex.new(pat)` (a refused pattern aborts with `Error: invalid regex: <reason>`; a literal one is E102 at check time) or `regex.compile(pat) -> Result[Regex, String]`, so `regex.find(\"[0-9]+\", s)` is a type error whose hint is `regex.find(regex.new(\"[0-9]+\"), s)` and `almide fix` wraps a literal pattern; a pattern the engine read leniently is refused (`(`, `[`, `*`, `a{`, `a{2`, a named group `(?P<n>…)`), as is one past 20,000 states; `regex.captures` answers `List[String?]` with `none` for a group that took no part (R-regex-08), where it answered the empty string; `regex.replace` reads `rep` literally as before and `regex.replace_with` takes the function. Migrated here: 519 call sites in 24 spec/proof/bench files and 10 in Rust test generators; downstream repos call regex from no .almd file",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them

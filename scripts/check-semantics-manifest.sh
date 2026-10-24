@@ -98,6 +98,10 @@ for module in COVERED_MODULES:
         "// semantic dimension (#419 class).",
         "",
     ]
+    # A module that is not auto-imported declares `import = true` in its
+    # manifest table, and the generated test imports it.
+    if manifest[module].get("import"):
+        lines += [f"import {module}", ""]
     for e in manifest[module]["fn"]:
         probe, unit = e["probe"], e["index_unit"]
         expect = e["expect"].replace("\\", "\\\\").replace('"', '\\"')

@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 48 stdlib modules, 1472 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 48 stdlib modules, 1480 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -44,7 +44,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [path](#path) | 13 | 0 |
 | [process](#process) | 17 | 1 |
 | [random](#random) | 10 | 0 |
-| [regex](#regex) | 8 | 0 |
+| [regex](#regex) | 16 | 1 |
 | [result](#result) | 15 | 0 |
 | [set](#set) | 40 | 0 |
 | [string](#string) | 88 | 0 |
@@ -1325,14 +1325,22 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [regex.md](regex.md)
 
-- `regex.is_match(pat: String, s: String) -> Bool` — pat matches somewhere in s (unanchored).
-- `regex.full_match(pat: String, s: String) -> Bool` — pat matches the whole of s.
-- `regex.find(pat: String, s: String) -> Option[String]` — Leftmost match of pat in s, or none.
-- `regex.find_all(pat: String, s: String) -> List[String]` — All non-overlapping matches, in order.
-- `regex.replace(pat: String, s: String, rep: String) -> String` — All matches replaced by literal rep (no $1).
-- `regex.replace_first(pat: String, s: String, rep: String) -> String` — First match replaced by literal rep.
-- `regex.split(pat: String, s: String) -> List[String]` — Text between matches; [s] if no match.
-- `regex.captures(pat: String, s: String) -> Option[List[String]]` — [whole, group1, ...] of first match, or none.
+- `regex.new(pattern: String) -> Regex` — The Regex for `pattern`; aborts with `Error: invalid regex: <reason>` when it is refused.
+- `regex.compile(pattern: String) -> Result[Regex, String]` — The Regex for `pattern`, or err(reason) when it is refused.
+- `regex.is_match(re: Regex, s: String) -> Bool` — re matches somewhere in s.
+- `regex.is_full_match(re: Regex, s: String) -> Bool` — re matches the whole of s.
+- `regex.full_match(re: Regex, s: String) -> Bool   (deprecated — use regex.is_full_match)` — re matches the whole of s (renamed regex.is_full_match).
+- `regex.find(re: Regex, s: String) -> Option[String]` — Leftmost match of re in s, or none.
+- `regex.find_all(re: Regex, s: String) -> List[String]` — All non-overlapping matches, in order.
+- `regex.index_of(re: Regex, s: String) -> Option[Int]` — Code-point index where the leftmost match starts, or none.
+- `regex.replace(re: Regex, s: String, rep: String) -> String` — All matches replaced by literal rep (`$1` is not read).
+- `regex.replace_first(re: Regex, s: String, rep: String) -> String` — First match replaced by literal rep.
+- `regex.replace_with(re: Regex, s: String, f: (List[Option[String]]) -> String) -> String` — All matches replaced by f([whole, group1, ...]).
+- `regex.replace_first_with(re: Regex, s: String, f: (List[Option[String]]) -> String) -> String` — First match replaced by f([whole, group1, ...]).
+- `regex.split(re: Regex, s: String) -> List[String]` — Text between matches; [s] if no match.
+- `regex.captures(re: Regex, s: String) -> Option[List[Option[String]]]` — [whole, group1, ...] of the first match, or none; a group that took no part is none.
+- `regex.captures_all(re: Regex, s: String) -> List[List[Option[String]]]` — [whole, group1, ...] of every match, in order.
+- `regex.escape(s: String) -> String` — s with every regex metacharacter escaped, so it matches itself.
 
 ## result
 

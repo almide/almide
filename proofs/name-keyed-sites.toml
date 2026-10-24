@@ -777,7 +777,7 @@ names = 42
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::STDLIB_OWNED_TYPES::table"
 class = "legacy"
-names = 13
+names = 14
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::TIER1_ALWAYS_ACCESSIBLE::table"
@@ -1042,7 +1042,7 @@ names = 4
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_SUM::table"
 class = "legacy"
-names = 88
+names = 91
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_VERIFIED::table"

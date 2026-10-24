@@ -3282,7 +3282,19 @@ fn = []
 
 [regex]
 default_index_unit = "value"
-fn = []
+import = true
+
+[[regex.fn]]
+name = "index_of"
+index_unit = "codepoint"
+probe = 'regex.index_of(regex.new("[0-9]"), "café7")'
+expect = "some(4)"
+
+[[regex.fn]]
+name = "__index_of"
+index_unit = "codepoint"
+probe = 'regex.__index_of("[0-9]", "café7")'
+expect = "4"
 
 [bool]
 default_index_unit = "value"

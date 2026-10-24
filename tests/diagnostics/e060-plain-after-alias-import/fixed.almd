@@ -2,4 +2,4 @@
 // alias, so the later PLAIN import is the duplicate line.
 import regex as rx
 
-fn main() -> Unit = println(if rx.is_match("a", "a") and rx.is_match("b", "b") then "y" else "n")
+fn main() -> Unit = println(if rx.is_match(rx.new("a"), "a") and rx.is_match(rx.new("b"), "b") then "y" else "n")

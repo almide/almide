@@ -546,7 +546,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (crate::embedded::SRC_FAN_ANY, &[("fan_any", "fan.any_map"), ("fan_any_is", "fan.any_map_is"), ("fan_any_ss", "fan.any_map_ss"), ("fan_any_si", "fan.any_map_si"), ("fan_any_if", "fan.any_map_if"), ("fan_any_fi", "fan.any_map_fi"), ("fan_any_ff", "fan.any_map_ff"), ("fan_any_fs", "fan.any_map_fs"), ("fan_any_sf", "fan.any_map_sf")]),
         // The self-hosted regex ENGINE (Stage 1: is_match/full_match — v0's
         // runtime regex ported quirk-for-quirk; see stdlib/regex_engine.almd).
-        (crate::embedded::SRC_REGEX_ENGINE, &[("regex_is_match", "regex.is_match"), ("regex_full_match", "regex.full_match"), ("regex_find", "regex.find"), ("regex_find_all", "regex.find_all"), ("regex_replace", "regex.replace"), ("regex_replace_first", "regex.replace_first"), ("regex_split", "regex.split"), ("regex_captures", "regex.captures")]),
+        (crate::embedded::SRC_REGEX_ENGINE, &[("regex_check", "regex.__check"), ("regex_new", "regex.__new"), ("regex_is_match", "regex.__is_match"), ("regex_full_match", "regex.__full_match"), ("regex_find", "regex.__find"), ("regex_find_all", "regex.__find_all"), ("regex_index_of", "regex.__index_of"), ("regex_replace", "regex.__replace"), ("regex_replace_first", "regex.__replace_first"), ("regex_split", "regex.__split"), ("regex_captures", "regex.__captures"), ("regex_scan", "regex.__scan")]),
         (crate::embedded::SRC_LIST_TO_STRING, &[("list_to_string", "list.to_string")]),
         (crate::embedded::SRC_LIST_TO_STRING_LL, &[("list_to_string_ll", "list.to_string_ll"), ("list_to_string_llf", "list.to_string_llf")]),
         (crate::embedded::SRC_LIST_TO_STRING_B, &[("list_to_string_b", "list.to_string_b")]),

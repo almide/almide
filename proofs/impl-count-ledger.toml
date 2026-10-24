@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 864  implementations = 2010
+# holes = 869  implementations = 2020
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -5157,57 +5157,92 @@ emitter  = 1
 selfhost = 3
 total    = 5
 [[hole]]
-module   = "regex"
-name     = "is_match"
+module   = "random"
+name     = "bytes"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "regex"
-name     = "full_match"
+name     = "__check"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "regex"
-name     = "find"
+name     = "__new"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "__is_match"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "__full_match"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "__find"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "regex"
-name     = "find_all"
+name     = "__find_all"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "regex"
-name     = "replace"
+name     = "__index_of"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "__replace"
 native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "regex"
-name     = "replace_first"
+name     = "__replace_first"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "regex"
-name     = "split"
+name     = "__split"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "regex"
-name     = "captures"
+name     = "__captures"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "regex"
+name     = "__scan"
 native   = 1
 emitter  = 0
 selfhost = 1

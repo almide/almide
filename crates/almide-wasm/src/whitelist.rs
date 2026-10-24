@@ -199,6 +199,10 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // scratch blocks only.
     "regex_is_match", "regex_full_match", "regex_find_all", "regex_replace",
     "regex_replace_first", "regex_split",
+    // the Regex surface's engine half (#3942): the validator and its abort
+    // (prim.die, as float clamp), the scan captures_all and replace_with
+    // read, index_of's code-point count — the same byte walks and scratch.
+    "regex_check", "regex_new", "regex_index_of", "regex_scan",
     // bytes_rawptr.almd / bytes_skip.almd (audited 2026-08-25):
     // raw-address bridge over load8/store8 on Bytes data regions
     // (len = bytes both legs), handle+12 = OUR PAYLOAD; the empty-buffer

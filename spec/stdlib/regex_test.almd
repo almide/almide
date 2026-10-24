@@ -3,85 +3,85 @@ import regex
 
 // ── is_match ──
 test "regex.is_match" {
-  assert_eq(regex.is_match("[0-9]+", "abc123"), true)
-  assert_eq(regex.is_match("hello", "say hello world"), true)
-  assert_eq(regex.is_match("[0-9]+", "hello"), false)
-  assert_eq(regex.is_match("^hello", "say hello"), false)
+  assert_eq(regex.is_match(regex.new("[0-9]+"), "abc123"), true)
+  assert_eq(regex.is_match(regex.new("hello"), "say hello world"), true)
+  assert_eq(regex.is_match(regex.new("[0-9]+"), "hello"), false)
+  assert_eq(regex.is_match(regex.new("^hello"), "say hello"), false)
 }
 
 test "regex.is_match anchored" {
-  assert_eq(regex.is_match("^hello", "hello world"), true)
-  assert_eq(regex.is_match("world$", "hello world"), true)
+  assert_eq(regex.is_match(regex.new("^hello"), "hello world"), true)
+  assert_eq(regex.is_match(regex.new("world$"), "hello world"), true)
 }
 
 // ── full_match ──
 test "regex.full_match" {
-  assert_eq(regex.full_match("[0-9]+", "123"), true)
-  assert_eq(regex.full_match("[0-9]+", "abc123"), false)
-  assert_eq(regex.full_match("", ""), true)
+  assert_eq(regex.is_full_match(regex.new("[0-9]+"), "123"), true)
+  assert_eq(regex.is_full_match(regex.new("[0-9]+"), "abc123"), false)
+  assert_eq(regex.is_full_match(regex.new(""), ""), true)
 }
 
 // ── find ──
 test "regex.find match" {
-  assert_eq(regex.find("[0-9]+", "abc123def456"), some("123"))
-  assert_eq(regex.find("[a-z]+", "123abc456"), some("abc"))
+  assert_eq(regex.find(regex.new("[0-9]+"), "abc123def456"), some("123"))
+  assert_eq(regex.find(regex.new("[a-z]+"), "123abc456"), some("abc"))
 }
 
 test "regex.find no match" {
-  assert_eq(regex.find("[0-9]+", "hello"), none)
+  assert_eq(regex.find(regex.new("[0-9]+"), "hello"), none)
 }
 
 // ── find_all ──
 test "regex.find_all multiple" {
-  assert_eq(regex.find_all("[0-9]+", "a1b2c3"), ["1", "2", "3"])
+  assert_eq(regex.find_all(regex.new("[0-9]+"), "a1b2c3"), ["1", "2", "3"])
 }
 
 test "regex.find_all no matches" {
-  assert_eq(regex.find_all("[0-9]+", "abc"), [])
+  assert_eq(regex.find_all(regex.new("[0-9]+"), "abc"), [])
 }
 
 test "regex.find_all words" {
-  let words = regex.find_all("[a-z]+", "hello world foo")
+  let words = regex.find_all(regex.new("[a-z]+"), "hello world foo")
   assert_eq(list.len(words), 3)
   assert_eq(list.get_or(words, 0, ""), "hello")
 }
 
 // ── replace ──
 test "regex.replace all" {
-  assert_eq(regex.replace("[0-9]+", "a1b2c3", "X"), "aXbXcX")
-  assert_eq(regex.replace("[0-9]+", "hello", "X"), "hello")
+  assert_eq(regex.replace(regex.new("[0-9]+"), "a1b2c3", "X"), "aXbXcX")
+  assert_eq(regex.replace(regex.new("[0-9]+"), "hello", "X"), "hello")
 }
 
 test "regex.replace with empty string" {
-  assert_eq(regex.replace("[0-9]", "a1b2c3", ""), "abc")
+  assert_eq(regex.replace(regex.new("[0-9]"), "a1b2c3", ""), "abc")
 }
 
 // ── replace_first ──
 test "regex.replace_first" {
-  assert_eq(regex.replace_first("[0-9]+", "a1b2c3", "X"), "aXb2c3")
-  assert_eq(regex.replace_first("[0-9]+", "hello", "X"), "hello")
+  assert_eq(regex.replace_first(regex.new("[0-9]+"), "a1b2c3", "X"), "aXb2c3")
+  assert_eq(regex.replace_first(regex.new("[0-9]+"), "hello", "X"), "hello")
 }
 
 // ── split ──
 test "regex.split by pattern" {
-  assert_eq(regex.split("[,;]", "a,b;c"), ["a", "b", "c"])
-  assert_eq(regex.split(",", "hello"), ["hello"])
+  assert_eq(regex.split(regex.new("[,;]"), "a,b;c"), ["a", "b", "c"])
+  assert_eq(regex.split(regex.new(","), "hello"), ["hello"])
 }
 
 test "regex.split by whitespace" {
-  let parts = regex.split("\\s+", "hello   world  foo")
+  let parts = regex.split(regex.new("\\s+"), "hello   world  foo")
   assert_eq(parts, ["hello", "world", "foo"])
 }
 
 // ── captures ──
 test "regex.captures with groups" {
-  let cap = regex.captures("(\\w+)@(\\w+)", "user@host")
+  let cap = regex.captures(regex.new("(\\w+)@(\\w+)"), "user@host")
   assert_eq(option.is_some(cap), true)
-  assert_eq(regex.captures("(\\d+)-(\\d+)", "hello"), none)
+  assert_eq(regex.captures(regex.new("(\\d+)-(\\d+)"), "hello"), none)
 }
 
 test "regex.captures returns some for match" {
-  let cap = regex.captures("(\\d+)-(\\d+)", "abc-123-456")
+  let cap = regex.captures(regex.new("(\\d+)-(\\d+)"), "abc-123-456")
   assert_eq(cap.is_some(), true)
 }
 
@@ -89,155 +89,171 @@ test "regex.captures returns some for match" {
 // Index 0 is the WHOLE match, 1.. are the groups (#1432) — the shape every
 // mainstream regex API uses, and what docs/stdlib/regex.md always showed.
 test "regex.captures contents per lexical group" {
-  assert_eq(regex.captures("(\\d+)-(\\d+)", "12-34"), some(["12-34", "12", "34"]))
-  assert_eq(regex.captures("(a)(b)(c)", "abc"), some(["abc", "a", "b", "c"]))
-  assert_eq(regex.captures("(\\w+)@(\\w+)", "user@host"), some(["user@host", "user", "host"]))
+  assert_eq(
+    regex.captures(regex.new("(\\d+)-(\\d+)"), "12-34"),
+    some([some("12-34"), some("12"), some("34")]),
+  )
+  assert_eq(
+    regex.captures(regex.new("(a)(b)(c)"), "abc"),
+    some([some("abc"), some("a"), some("b"), some("c")]),
+  )
+  assert_eq(
+    regex.captures(regex.new("(\\w+)@(\\w+)"), "user@host"),
+    some([some("user@host"), some("user"), some("host")]),
+  )
 }
 
-test "regex.captures optional-miss is empty string" {
-  assert_eq(regex.captures("(x)?(y)", "y"), some(["y", "", "y"]))
-  assert_eq(regex.captures("(a)?b", "b"), some(["b", ""]))
+test "regex.captures optional-miss is none" {
+  assert_eq(regex.captures(regex.new("(x)?(y)"), "y"), some([some("y"), none, some("y")]))
+  assert_eq(regex.captures(regex.new("(a)?b"), "b"), some([some("b"), none]))
 }
 
 // `none` means exactly one thing: the pattern did not match. A group-less
 // pattern that DOES match answers its whole match (#1432) — before, the two
 // were indistinguishable.
 test "regex.captures none only when nothing matched" {
-  assert_eq(regex.captures("\\d+", "12"), some(["12"]))
-  assert_eq(regex.captures("\\d+", "abc"), none)
-  assert_eq(regex.captures("(\\d+)", "abc"), none)
+  assert_eq(regex.captures(regex.new("\\d+"), "12"), some([some("12")]))
+  assert_eq(regex.captures(regex.new("\\d+"), "abc"), none)
+  assert_eq(regex.captures(regex.new("(\\d+)"), "abc"), none)
 }
 
 // ── alternation (was entirely unsupported in wasm) ──
 test "regex.alternation" {
-  assert_eq(regex.is_match("a|b", "zzb"), true)
-  assert_eq(regex.is_match("foo|bar|baz", "xbazy"), true)
-  assert_eq(regex.find("(a|b)+", "qabbaq"), some("abba"))
-  assert_eq(regex.full_match("a|bb|ccc", "ccc"), true)
-  assert_eq(regex.find("gr(a|e)y", "grey"), some("grey"))
+  assert_eq(regex.is_match(regex.new("a|b"), "zzb"), true)
+  assert_eq(regex.is_match(regex.new("foo|bar|baz"), "xbazy"), true)
+  assert_eq(regex.find(regex.new("(a|b)+"), "qabbaq"), some("abba"))
+  assert_eq(regex.is_full_match(regex.new("a|bb|ccc"), "ccc"), true)
+  assert_eq(regex.find(regex.new("gr(a|e)y"), "grey"), some("grey"))
 }
 
 // ── escape atoms (negated + escaped literals) ──
 test "regex.escape atoms" {
-  assert_eq(regex.is_match("a\\+b", "a+b"), true)
-  assert_eq(regex.is_match("a\\+b", "aab"), false)
-  assert_eq(regex.find("\\D+", "ab123cd"), some("ab"))
-  assert_eq(regex.find("\\S+", "   word "), some("word"))
+  assert_eq(regex.is_match(regex.new("a\\+b"), "a+b"), true)
+  assert_eq(regex.is_match(regex.new("a\\+b"), "aab"), false)
+  assert_eq(regex.find(regex.new("\\D+"), "ab123cd"), some("ab"))
+  assert_eq(regex.find(regex.new("\\S+"), "   word "), some("word"))
 }
 
 // ── class internal escapes ──
 test "regex.class escapes" {
-  assert_eq(regex.find("[\\d]+", "xx42yy"), some("42"))
-  assert_eq(regex.is_match("[^\\d]", "5"), false)
-  assert_eq(regex.is_match("[^\\d]", "a"), true)
-  assert_eq(regex.find("[\\w]+", "@@abc@@"), some("abc"))
+  assert_eq(regex.find(regex.new("[\\d]+"), "xx42yy"), some("42"))
+  assert_eq(regex.is_match(regex.new("[^\\d]"), "5"), false)
+  assert_eq(regex.is_match(regex.new("[^\\d]"), "a"), true)
+  assert_eq(regex.find(regex.new("[\\w]+"), "@@abc@@"), some("abc"))
 }
 
 // ── multibyte (scalar-based; '.' matches one scalar, not one byte) ──
 test "regex.multibyte" {
-  assert_eq(regex.find(".", "日本語"), some("日"))
-  assert_eq(regex.find("..", "日本語"), some("日本"))
-  assert_eq(regex.is_match("本", "日本語"), true)
-  assert_eq(regex.find("[本語]+", "日本語!"), some("本語"))
+  assert_eq(regex.find(regex.new("."), "日本語"), some("日"))
+  assert_eq(regex.find(regex.new(".."), "日本語"), some("日本"))
+  assert_eq(regex.is_match(regex.new("本"), "日本語"), true)
+  assert_eq(regex.find(regex.new("[本語]+"), "日本語!"), some("本語"))
 }
 
 // ── empty alternation arms (an empty arm = empty Seq, matches length-0) ──
 // wasm previously dropped TRAILING empty arms.
 test "regex.empty alternation arms" {
-  assert_eq(regex.is_match("a|", "zzz"), true)
+  assert_eq(regex.is_match(regex.new("a|"), "zzz"), true)
   // trailing
-  assert_eq(regex.is_match("|a", "zzz"), true)
+  assert_eq(regex.is_match(regex.new("|a"), "zzz"), true)
   // leading
-  assert_eq(regex.is_match("a||b", "zzz"), true)
+  assert_eq(regex.is_match(regex.new("a||b"), "zzz"), true)
   // middle
-  assert_eq(regex.is_match("a|||", "zzz"), true)
+  assert_eq(regex.is_match(regex.new("a|||"), "zzz"), true)
   // triple
-  assert_eq(regex.find("a|", "bza"), some(""))
+  assert_eq(regex.find(regex.new("a|"), "bza"), some(""))
   // empty match at pos 0
-  assert_eq(regex.full_match("a|", ""), true)
+  assert_eq(regex.is_full_match(regex.new("a|"), ""), true)
   // Both slots are empty: the whole match is the empty match at position 0
   // (index 0), and the group captured it too (index 1).
-  assert_eq(regex.captures("(a|)", "b"), some(["", ""]))
-  assert_eq(regex.captures("(|a)", "b"), some(["", ""]))
+  assert_eq(regex.captures(regex.new("(a|)"), "b"), some([some(""), some("")]))
+  assert_eq(regex.captures(regex.new("(|a)"), "b"), some([some(""), some("")]))
 }
 
 // ── replace / replace_first over EMPTY matches at end-of-string ──
 // native used to panic indexing chars[len]; now guarded (and wasm matches).
 test "regex.replace over empty matches" {
-  assert_eq(regex.replace("x*", "ab", "-"), "-a-b-")
-  assert_eq(regex.replace("", "ab", "-"), "-a-b-")
-  assert_eq(regex.replace("a*", "aaa", "-"), "--")
-  assert_eq(regex.replace("a*", "bbb", "-"), "-b-b-b-")
-  assert_eq(regex.replace("b?", "abc", "-"), "-a--c-")
-  assert_eq(regex.replace("x*", "", "-"), "-")
-  assert_eq(regex.replace("x*", "本a", "-"), "-本-a-")
-  assert_eq(regex.replace_first("x*", "ab", "-"), "-ab")
-  assert_eq(regex.replace_first("a*", "aaa", "-"), "-")
+  assert_eq(regex.replace(regex.new("x*"), "ab", "-"), "-a-b-")
+  assert_eq(regex.replace(regex.new(""), "ab", "-"), "-a-b-")
+  assert_eq(regex.replace(regex.new("a*"), "aaa", "-"), "--")
+  assert_eq(regex.replace(regex.new("a*"), "bbb", "-"), "-b-b-b-")
+  assert_eq(regex.replace(regex.new("b?"), "abc", "-"), "-a--c-")
+  assert_eq(regex.replace(regex.new("x*"), "", "-"), "-")
+  assert_eq(regex.replace(regex.new("x*"), "本a", "-"), "-本-a-")
+  assert_eq(regex.replace_first(regex.new("x*"), "ab", "-"), "-ab")
+  assert_eq(regex.replace_first(regex.new("a*"), "aaa", "-"), "-")
 }
 
 // {n} / {n,} / {n,m} brace quantifiers (#845: previously lexed but silently
 // never matched). Malformed braces stay literal, matching the native engine.
 test "regex brace quantifiers" {
-  assert_eq(regex.is_match("\\d{3}", "abc123"), true)
-  assert_eq(regex.is_match("\\d{4}", "abc123"), false)
-  assert_eq(regex.full_match("\\d{3}", "123"), true)
-  assert_eq(regex.full_match("\\d{3}", "1234"), false)
-  assert_eq(regex.full_match("\\d{2,}", "12345"), true)
-  assert_eq(regex.full_match("\\d{6,}", "12345"), false)
-  assert_eq(regex.full_match("\\d{2,4}", "123"), true)
-  assert_eq(regex.full_match("\\d{2,4}", "12345"), false)
-  assert_eq(regex.find("a{2,3}", "caaaab"), some("aaa"))
+  assert_eq(regex.is_match(regex.new("\\d{3}"), "abc123"), true)
+  assert_eq(regex.is_match(regex.new("\\d{4}"), "abc123"), false)
+  assert_eq(regex.is_full_match(regex.new("\\d{3}"), "123"), true)
+  assert_eq(regex.is_full_match(regex.new("\\d{3}"), "1234"), false)
+  assert_eq(regex.is_full_match(regex.new("\\d{2,}"), "12345"), true)
+  assert_eq(regex.is_full_match(regex.new("\\d{6,}"), "12345"), false)
+  assert_eq(regex.is_full_match(regex.new("\\d{2,4}"), "123"), true)
+  assert_eq(regex.is_full_match(regex.new("\\d{2,4}"), "12345"), false)
+  assert_eq(regex.find(regex.new("a{2,3}"), "caaaab"), some("aaa"))
   assert_eq(
-    regex.captures("(\\d{4})-(\\d{2})-(\\d{2})", "on 2026-03-09."),
-    some(["2026-03-09", "2026", "03", "09"]),
+    regex.captures(regex.new("(\\d{4})-(\\d{2})-(\\d{2})"), "on 2026-03-09."),
+    some([some("2026-03-09"), some("2026"), some("03"), some("09")]),
   )
-  assert_eq(regex.replace("o{2}", "foo book", "0"), "f0 b0k")
-  assert_eq(regex.full_match("(ab){2}", "abab"), true)
-  assert_eq(regex.full_match("(ab){2}", "ab"), false)
-  assert_eq(regex.full_match("a{0,2}b", "aab"), true)
+  assert_eq(regex.replace(regex.new("o{2}"), "foo book", "0"), "f0 b0k")
+  assert_eq(regex.is_full_match(regex.new("(ab){2}"), "abab"), true)
+  assert_eq(regex.is_full_match(regex.new("(ab){2}"), "ab"), false)
+  assert_eq(regex.is_full_match(regex.new("a{0,2}b"), "aab"), true)
 }
 
-test "regex malformed braces stay literal" {
-  assert_eq(regex.full_match("a{x}", "a{x}"), true)
-  assert_eq(regex.full_match("a{,3}", "a{,3}"), true)
-  assert_eq(regex.is_match("a{2", "a{2"), true)
+test "regex malformed braces are refused" {
+  assert_eq(regex.compile("a{x}") |> result.is_err, true)
+  assert_eq(regex.compile("a{,3}") |> result.is_err, true)
+  assert_eq(regex.compile("a{2") |> result.is_err, true)
+  assert_eq(regex.is_full_match(regex.new("a\\{x\\}"), "a{x}"), true)
 }
 
 // ── backtracking, boundaries, flags, lazy (#1927) ──
 test "regex group backtracking" {
-  assert_eq(regex.is_match("^---- (.+) (stdout|stderr) ----$", "---- tests::a stdout ----"), true)
   assert_eq(
-    regex.captures("^---- (.+) (stdout|stderr) ----$", "---- tests::a stdout ----"),
-    some(["---- tests::a stdout ----", "tests::a", "stdout"]),
+    regex.is_match(regex.new("^---- (.+) (stdout|stderr) ----$"), "---- tests::a stdout ----"),
+    true,
   )
-  assert_eq(regex.is_match("(^| )go\\s+test( |$)", " go test ./... "), true)
-  assert_eq(regex.full_match("(a|ab)(c|bcd)", "abcd"), true)
-  assert_eq(regex.find("(a|ab)c", "abc"), some("abc"))
+  assert_eq(
+    regex.captures(regex.new("^---- (.+) (stdout|stderr) ----$"), "---- tests::a stdout ----"),
+    some([some("---- tests::a stdout ----"), some("tests::a"), some("stdout")]),
+  )
+  assert_eq(regex.is_match(regex.new("(^| )go\\s+test( |$)"), " go test ./... "), true)
+  assert_eq(regex.is_full_match(regex.new("(a|ab)(c|bcd)"), "abcd"), true)
+  assert_eq(regex.find(regex.new("(a|ab)c"), "abc"), some("abc"))
 }
 
 test "regex word boundary" {
-  assert_eq(regex.is_match("\\bgo\\s+test\\b", " go test ./... "), true)
-  assert_eq(regex.is_match("\\bgo", "ago"), false)
-  assert_eq(regex.is_match("\\Bgo", "ago"), true)
-  assert_eq(regex.find_all("\\b\\w", "ab cd_e f"), ["a", "c", "f"])
+  assert_eq(regex.is_match(regex.new("\\bgo\\s+test\\b"), " go test ./... "), true)
+  assert_eq(regex.is_match(regex.new("\\bgo"), "ago"), false)
+  assert_eq(regex.is_match(regex.new("\\Bgo"), "ago"), true)
+  assert_eq(regex.find_all(regex.new("\\b\\w"), "ab cd_e f"), ["a", "c", "f"])
 }
 
 test "regex multiline flag" {
-  assert_eq(regex.is_match("(?m)^--- FAIL", "x\n--- FAIL: T"), true)
-  assert_eq(regex.is_match("^--- FAIL", "x\n--- FAIL: T"), false)
-  assert_eq(regex.find_all("(?m)\\w+$", "ab\ncd\nef"), ["ab", "cd", "ef"])
+  assert_eq(regex.is_match(regex.new("(?m)^--- FAIL"), "x\n--- FAIL: T"), true)
+  assert_eq(regex.is_match(regex.new("^--- FAIL"), "x\n--- FAIL: T"), false)
+  assert_eq(regex.find_all(regex.new("(?m)\\w+$"), "ab\ncd\nef"), ["ab", "cd", "ef"])
 }
 
 test "regex non-capturing group" {
-  assert_eq(regex.captures("(?:x)(y)", "xy"), some(["xy", "y"]))
-  assert_eq(regex.replace("(?:ab)+", "ababab", "<>"), "<>")
+  assert_eq(regex.captures(regex.new("(?:x)(y)"), "xy"), some([some("xy"), some("y")]))
+  assert_eq(regex.replace(regex.new("(?:ab)+"), "ababab", "<>"), "<>")
 }
 
 test "regex lazy quantifiers" {
-  assert_eq(regex.find("a.*?b", "aXbYb"), some("aXb"))
-  assert_eq(regex.find("a.*b", "aXbYb"), some("aXbYb"))
-  assert_eq(regex.find("a+?", "aaa"), some("a"))
-  assert_eq(regex.find("a??b", "ab"), some("ab"))
-  assert_eq(regex.full_match("^---- (.+?) stdout ----$", "---- tests::a stdout ----"), true)
-  assert_eq(regex.replace("(?:ab)+?", "ababab", "<>"), "<><><>")
+  assert_eq(regex.find(regex.new("a.*?b"), "aXbYb"), some("aXb"))
+  assert_eq(regex.find(regex.new("a.*b"), "aXbYb"), some("aXbYb"))
+  assert_eq(regex.find(regex.new("a+?"), "aaa"), some("a"))
+  assert_eq(regex.find(regex.new("a??b"), "ab"), some("ab"))
+  assert_eq(
+    regex.is_full_match(regex.new("^---- (.+?) stdout ----$"), "---- tests::a stdout ----"),
+    true,
+  )
+  assert_eq(regex.replace(regex.new("(?:ab)+?"), "ababab", "<>"), "<><><>")
 }

@@ -29,6 +29,9 @@
 #[allow(dead_code, clippy::all, clippy::pedantic)]
 mod rt {
     pub type AlmideString = String;
+    fn almide_abort(msg: impl std::fmt::Display) -> ! {
+        panic!("{msg}")
+    }
     pub trait IntoAlmide<T> {
         fn into_almide(self) -> T;
     }
@@ -100,6 +103,16 @@ mod rt {
         Some(out)
     }
 
+    /// Why the public API refuses `pat` (C-395), or None.
+    pub fn check(pat: &str) -> Option<String> {
+        rx_check(pat)
+    }
+
+    /// The pattern's state count by the checker's count (no expansion).
+    pub fn counted_states(pat: &str) -> Option<u64> {
+        rx_states(pat).ok()
+    }
+
     /// The expanded program's state count, None past the budget (the
     /// pattern is then compiled counted).
     pub fn pike_states(pat: &str) -> Option<usize> {
@@ -122,8 +135,20 @@ mod rt {
         almide_regex_full_match(pat, s)
     }
 
-    pub fn pike_captures(pat: &str, s: &str) -> Option<Vec<String>> {
-        almide_regex_captures(pat, s)
+    /// captures through the public entry point, its marks read back
+    pub fn pike_captures(pat: &str, s: &str) -> Option<Vec<Option<String>>> {
+        almide_regex_captures(pat, s).map(|cs| cs.into_iter().map(|c| c.strip_prefix('1').map(str::to_string)).collect())
+    }
+
+    /// is_match on the COUNTED program, the VM from the first search: what
+    /// runs past the state limit if the limit is raised.
+    pub fn counted_is_match(pat: &str, s: &str) -> bool {
+        let mut c = rx_compiled(pat);
+        c.prog = rx_program_as(&c.rx, true);
+        let chars: Vec<char> = s.chars().collect();
+        let mut m = AlmideRxMatcher::new(&c, &chars, false);
+        m.vm.gave_up = true;
+        m.is_match()
     }
 
     pub fn find_all(pat: &str, s: &str) -> Vec<String> {
@@ -380,7 +405,7 @@ fn pathological_patterns_finish_on_long_input() {
     assert!(!rt::pike_is_match("^(a|a?)+$", &(a100k.clone() + "b")));
     assert!(!rt::pike_is_match("(\\w+\\s?)+$", &(a100k.clone() + "!")));
     let caps = rt::pike_captures("^(a+)+$", &a100k).expect("matches");
-    assert_eq!(caps[0].len(), 100_000);
+    assert_eq!(caps[0].as_deref().map(str::len), Some(100_000));
     let elapsed = started.elapsed();
     // Each line is ~100k steps of a handful of states: well under a second in
     // a debug build. The walk needs longer than the universe's age for any.
@@ -427,32 +452,97 @@ fn a_huge_count_stays_bounded() {
     assert!(insts < 20 && regs == 2, "a counted program is the size of the pattern: {insts} instructions, {regs} registers");
     let s = "a".repeat(2000);
     assert!(rt::pike_full_match("a{2000}", &s));
-    assert!(rt::pike_is_match("a{1000000}|a", &s));
-    assert!(!rt::pike_full_match("a{1000000}", &s));
+    // the public API refuses such a pattern (C-395)
+    assert_eq!(rt::check("a{1000000}|a").as_deref(), Some("pattern too large: more than 20000 states"));
+    assert_eq!(rt::check("((a){1000}){1000}").as_deref(), Some("pattern too large: more than 20000 states"));
 }
 
-/// #4083: a pattern past the expanded program's state budget used to be
-/// matched by the walk alone, with no step budget, so a shape that is
-/// exponential for the walk never finished: `^(a|a){0,30000}b` tries 2^n ways
-/// through n a's, and the walk was still on it after ten minutes. Compiled
-/// counted, these run on the VM like any other pattern, in time proportional
-/// to the states its threads are in times the input's length — here a handful,
-/// since each count is fixed by the position.
+/// C-395: the checker counts a pattern's states without expanding it, and the
+/// count IS the expanded program's (instructions times states per
+/// instruction), so the limit it enforces is the bound the VM runs under.
+/// Over every written pattern and the generated corpus, wherever the expanded
+/// program fits.
+#[test]
+fn the_counted_states_are_the_expanded_programs() {
+    let mut pats: Vec<String> = Vec::new();
+    let mut cases = Vec::new();
+    scrape(&repo().join("spec"), &mut cases);
+    scrape(&repo().join("proofs"), &mut cases);
+    pats.extend(cases.into_iter().map(|(p, _)| p));
+    let mut rng = Rng(0x4083_C395_0000_0001);
+    for _ in 0..20_000 {
+        pats.push(gen_pattern(&mut rng));
+    }
+    for (count, body) in [(2800, "(a|a)"), (300, "((a|a){10})"), (9000, "a"), (9999, "a"), (1000, "(a|a?)")] {
+        pats.push(format!("{body}{{0,{count}}}b"));
+        pats.push(format!("^{body}{{1,{count}}}$"));
+    }
+    let mut compared = 0;
+    for p in &pats {
+        let (Some(counted), Some(expanded)) = (rt::counted_states(p), rt::pike_states(p)) else { continue };
+        assert_eq!(counted, expanded as u64, "{p:?}: the checker counts {counted} states, the expanded program has {expanded}");
+        compared += 1;
+    }
+    assert!(compared > 10_000, "only {compared} patterns compared");
+}
+
+/// C-395 + #4083: every accepted pattern matches in time proportional to at
+/// most 20,000 states times the subject's length. Shapes exponential for the
+/// walk, at the limit, on 100,000 characters through the public API; and the
+/// nested pattern just past it is refused instead of run.
+///
+/// Negative control (recorded in docs/roadmap/active/security-by-construction.md
+/// row 9): with the limit check removed (ALMIDE_RX_MAX_STATES raised past
+/// it), `((a|aa){1,100}){1,30}b` — 20,001 states, the first refused — runs on
+/// the counted program with every state live at every character, and on
+/// 100,000 characters this test then took 25.7 s and 46.5 s in two release runs (70 s for
+/// the bare call in a benchmark): past its 10 s.
+#[test]
+fn patterns_at_the_state_limit_finish_on_long_input() {
+    let a100k = "a".repeat(100_000);
+    let rows = ["^(a|a){0,2800}b", "^((a|a){10}){1,300}b", "^(a|a?){3,1000}$", "^(a|a){2,2800}(a*)$"];
+    for pat in rows {
+        let states = rt::counted_states(pat).expect("well-formed");
+        assert!(states > 15_000 && states <= 20_000, "{pat} has {states} states; the rows are meant to sit at the limit");
+    }
+    let started = std::time::Instant::now();
+    assert!(!rt::pike_is_match("^(a|a){0,2800}b", &a100k));
+    assert!(rt::pike_is_match("^(a|a){0,2800}b", &(a100k[..2_000].to_string() + "b")));
+    assert!(!rt::pike_full_match("((a|a){10}){1,300}b", &(a100k.clone() + "!")));
+    assert!(!rt::pike_is_match("^(a|a?){3,1000}$", &(a100k.clone() + "b")));
+    let caps = rt::pike_captures("^(a|a){2,2800}(a*)$", &a100k[..20_000]).expect("matches");
+    assert_eq!(caps.iter().map(|c| c.as_deref().map_or(0, str::len)).collect::<Vec<_>>(), vec![20_000, 1, 17_200]);
+    // just past the limit: refused before it runs. With the limit removed it
+    // runs, and the time limit below is what fails (the negative control).
+    let nested = "((a|aa){1,100}){1,30}b";
+    match rt::check(nested) {
+        Some(reason) => assert_eq!(reason, "pattern too large: more than 20000 states"),
+        None => assert!(!rt::pike_is_match(nested, &a100k)),
+    }
+    let elapsed = started.elapsed();
+    // The rows take well under a second in a release build and a few in a
+    // debug one; without the limit the nested row alone takes 25-70 s.
+    assert!(elapsed.as_secs() < 10, "the rows at the limit took {elapsed:?}");
+}
+
+/// #4083: past the expanded program's state budget the VM runs a counted
+/// program, one copy of each repeated body and a counter per nesting level.
+/// The public API refuses such a pattern (C-395), so this is what runs if the
+/// limit is ever raised: shapes exponential for the walk, each count fixed by
+/// the position, on 100,000 characters.
 #[test]
 fn counted_patterns_finish_on_long_input() {
     let a100k = "a".repeat(100_000);
-    let rows = ["^(a|a){0,30000}b", "^((a|a)(a|a)){0,30000}b", "((a|a){10}){1,3000}b", "^(a|a?){3,25000}$", "^(a|a){2,30000}(a*)$"];
+    let rows = ["^(a|a){0,30000}b", "^((a|a)(a|a)){0,30000}b", "((a|a){10}){1,3000}b", "^(a|a?){3,25000}$"];
     for pat in rows {
         assert!(rt::pike_states(pat).is_none(), "{pat} is meant to be past the expanded program's budget");
     }
     let started = std::time::Instant::now();
-    assert!(!rt::pike_is_match("^(a|a){0,30000}b", &a100k));
-    assert!(rt::pike_is_match("^(a|a){0,30000}b", &(a100k[..20_000].to_string() + "b")));
-    assert!(!rt::pike_is_match("^((a|a)(a|a)){0,30000}b", &a100k));
-    assert!(!rt::pike_full_match("((a|a){10}){1,3000}b", &(a100k.clone() + "!")));
-    assert!(!rt::pike_is_match("^(a|a?){3,25000}$", &(a100k.clone() + "b")));
-    let caps = rt::pike_captures("^(a|a){2,30000}(a*)$", &a100k).expect("matches");
-    assert_eq!((caps[0].len(), caps[1].len(), caps[2].len()), (100_000, 1, 70_000));
+    assert!(!rt::counted_is_match("^(a|a){0,30000}b", &a100k));
+    assert!(rt::counted_is_match("^(a|a){0,30000}b", &(a100k[..20_000].to_string() + "b")));
+    assert!(!rt::counted_is_match("^((a|a)(a|a)){0,30000}b", &a100k));
+    assert!(!rt::counted_is_match("^((a|a){10}){1,3000}b", &(a100k.clone() + "!")));
+    assert!(!rt::counted_is_match("^(a|a?){3,25000}$", &(a100k.clone() + "b")));
     let elapsed = started.elapsed();
     // A handful of live states per character: well under a second in a
     // release build, a few in a debug one.
@@ -501,7 +591,7 @@ fn engine_copy(budget: &str, counted: bool) -> String {
         assert!(out.contains(cap), "the engine's state budget moved; update this test");
         out = out.replace(cap, "fn __rx_pike_states() -> Int = 0");
     }
-    for op in ["is_match", "full_match", "find_all", "find", "replace_first", "replace", "split", "captures"] {
+    for op in ["is_match", "full_match", "find_all", "find", "replace_first", "replace", "split", "captures", "check"] {
         let def = format!("fn regex_{op}(");
         assert!(out.contains(&def), "no {def} in the engine");
         out = out.replace(&def, &format!("fn rxt_{op}("));
@@ -526,31 +616,48 @@ fn nested_groups_agree_native_and_wasm() {
     let mut rng = Rng(seed);
     let n: usize = std::env::var("REGEX_PIKE_WASM_CASES").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
     let mut calls = Vec::new();
+    // Every generated pattern's verdict is compared (the public
+    // regex.compile against the engine's own checker: C-395's reasons), and
+    // an accepted one is run through every operation. `RX(p)` is
+    // `regex.new(p)` in the public program and `p` in the engine copy, whose
+    // entry points take the pattern itself.
     for _ in 0..n {
-        let pat = almd_lit(&gen_pattern(&mut rng));
+        let raw = gen_pattern(&mut rng);
+        let pat = almd_lit(&raw);
         let s = almd_lit(&gen_subject(&mut rng));
-        calls.push(format!("  println(olist(NS_captures({pat}, {s})))"));
-        calls.push(format!("  println(\"[\" + list.join(NS_find_all({pat}, {s}), \"|\") + \"]\")"));
-        calls.push(format!("  println(\"${{NS_full_match({pat}, {s})}} ${{NS_is_match({pat}, {s})}}\")"));
-        calls.push(format!("  println(\"[\" + list.join(NS_split({pat}, {s}), \"|\") + \"]\")"));
-        calls.push(format!("  println(NS_replace({pat}, {s}, \"<>\") + \" \" + NS_replace_first({pat}, {s}, \"<>\"))"));
-        calls.push(format!("  println(ostr(NS_find({pat}, {s})))"));
+        calls.push(format!("  println(reason(NS_check({pat})))"));
+        if rt::check(&raw).is_some() {
+            continue;
+        }
+        calls.push(format!("  println(olist(NS_captures(RX({pat}), {s})))"));
+        calls.push(format!("  println(\"[\" + list.join(NS_find_all(RX({pat}), {s}), \"|\") + \"]\")"));
+        calls.push(format!("  println(\"${{NS_full_match(RX({pat}), {s})}} ${{NS_is_match(RX({pat}), {s})}}\")"));
+        calls.push(format!("  println(\"[\" + list.join(NS_split(RX({pat}), {s}), \"|\") + \"]\")"));
+        calls.push(format!("  println(NS_replace(RX({pat}), {s}, \"<>\") + \" \" + NS_replace_first(RX({pat}), {s}, \"<>\"))"));
+        calls.push(format!("  println(ostr(NS_find(RX({pat}), {s})))"));
     }
-    let body = format!(
-        "fn olist(o: List[String]?) -> String = match o {{ some(xs) => \"[\" + list.join(xs, \"|\") + \"]\", none => \"NONE\" }}\n\n\
-         fn ostr(o: String?) -> String = match o {{ some(x) => \"<\" + x + \">\", none => \"NONE\" }}\n\n\
-         fn main() -> Unit = {{\n{}\n}}\n",
-        calls.join("\n")
+    let main = format!("fn ostr(o: String?) -> String = match o {{ some(x) => \"<\" + x + \">\", none => \"NONE\" }}\n\nfn main() -> Unit = {{\n{}\n}}\n", calls.join("\n"));
+    // the public API: a Regex, captures as String?, compile's Result
+    let public_body = format!(
+        "fn olist(o: List[String?]?) -> String = match o {{ some(xs) => \"[\" + list.join(xs |> list.map((x) => x ?? \"~\"), \"|\") + \"]\", none => \"NONE\" }}\n\n\
+         fn reason(r: Result[regex.Regex, String]) -> String = match r {{ ok(_) => \"OK\", err(e) => e }}\n\n{}",
+        main.replace("NS_check(", "regex.compile(").replace("NS_full_match(", "regex.is_full_match(").replace("RX(", "regex.new(").replace("NS_", "regex.")
+    );
+    // the engine copy: the pattern itself, captures marked "1"+text / "0", the check's reason ("" = OK)
+    let engine_body = format!(
+        "fn olist(o: List[String]?) -> String = match o {{ some(xs) => \"[\" + list.join(xs |> list.map((x) => if string.starts_with(x, \"1\") then string.drop(x, 1) else \"~\"), \"|\") + \"]\", none => \"NONE\" }}\n\n\
+         fn reason(r: String) -> String = if r == \"\" then \"OK\" else r\n\n{}",
+        main.replace("RX(", "(").replace("NS_", "rxt_")
     );
     let dir = tempfile::tempdir().expect("tempdir");
     let public = dir.path().join("public.almd");
-    std::fs::write(&public, format!("import regex\n\n{}", body.replace("NS_", "regex."))).expect("write");
+    std::fs::write(&public, format!("import regex\n\n{public_body}")).expect("write");
     let native = run(dir.path(), &["run", public.to_str().expect("path")]);
     for (budget, counted, engine) in [("0", false, "Pike VM"), ("0", true, "counted Pike VM"), ("0 - 1", false, "walk")] {
         let sub = dir.path().join(format!("{}/stdlib", engine.replace(' ', "_")));
         std::fs::create_dir_all(&sub).expect("mkdir");
         let copy = sub.join("regex_engine.almd");
-        std::fs::write(&copy, format!("{}\n{}", engine_copy(budget, counted), body.replace("NS_", "rxt_"))).expect("write");
+        std::fs::write(&copy, format!("{}\n{}", engine_copy(budget, counted), engine_body)).expect("write");
         let wasm = run(dir.path(), &["run", copy.to_str().expect("path"), "--target", "wasm"]);
         if native != wasm {
             let first = native
