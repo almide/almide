@@ -1,0 +1,2 @@
+expects_error = "method 'Src.load' is an `effect fn`, but protocol 'Loader' declares 'load' as a pure fn"
+hint_substring = "effect-ness is part of the method signature"

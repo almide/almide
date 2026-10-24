@@ -23,26 +23,31 @@ effect fn read_bytes(path: String) -> Result[List[Int], String] = _
 /// Overwrites or creates; err if no parent dir.
 @ordered
 @intrinsic("almide_rt_fs_write")
+@category("FS.write")
 effect fn write(path: String, content: String) -> Result[Unit, String] = _
 
 /// Writes low byte of each Int (-1 -> 255).
 @ordered
 @intrinsic("almide_rt_fs_write_bytes")
+@category("FS.write")
 effect fn write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = _
 
 /// Writes data verbatim, replacing the file.
 @ordered
 @intrinsic("almide_rt_fs_write_bytes_raw")
+@category("FS.write")
 effect fn write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Appends content; creates the file if missing.
 @ordered
 @intrinsic("almide_rt_fs_append")
+@category("FS.write")
 effect fn append(path: String, content: String) -> Result[Unit, String] = _
 
 /// Creates dir and parents; ok if it exists.
 @ordered
 @intrinsic("almide_rt_fs_mkdir_p")
+@category("FS.write")
 effect fn mkdir_p(path: String) -> Result[Unit, String] = _
 
 /// False if missing or a dangling symlink.
@@ -137,6 +142,7 @@ effect fn read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = _
 /// Deletes a file or empty dir; err if missing.
 @ordered
 @intrinsic("almide_rt_fs_remove")
+@category("FS.write")
 effect fn remove(path: String) -> Result[Unit, String] = _
 
 /// Sorted names (not paths); err if not a dir.
@@ -154,11 +160,13 @@ effect fn is_file(path: String) -> Bool = _
 /// Copies src to dst; overwrites dst.
 @ordered
 @intrinsic("almide_rt_fs_copy")
+@category("FS.read", "FS.write")
 effect fn copy(src: String, dst: String) -> Result[Unit, String] = _
 
 /// Moves src to dst; replaces an existing dst.
 @ordered
 @intrinsic("almide_rt_fs_rename")
+@category("FS.write")
 effect fn rename(src: String, dst: String) -> Result[Unit, String] = _
 
 /// Sorted paths below dir; links listed, not followed.
@@ -168,6 +176,7 @@ effect fn walk(dir: String) -> Result[List[String], String] = _
 /// Deletes a tree or file; err if missing.
 @ordered
 @intrinsic("almide_rt_fs_remove_all")
+@category("FS.write")
 effect fn remove_all(path: String) -> Result[Unit, String] = _
 
 /// Size in bytes; err if missing.
@@ -192,11 +201,13 @@ effect fn glob(pattern: String) -> Result[List[String], String] = _
 /// New private file, random name; its path.
 @ordered
 @intrinsic("almide_rt_fs_create_temp_file")
+@category("FS.write")
 effect fn create_temp_file(prefix: String) -> Result[String, String] = _
 
 /// New private dir, random name; its path.
 @ordered
 @intrinsic("almide_rt_fs_create_temp_dir")
+@category("FS.write")
 effect fn create_temp_dir(prefix: String) -> Result[String, String] = _
 
 /// True for a symlink, even a dangling one.
@@ -288,9 +299,11 @@ effect fn __root_list_dir(at: String) -> Result[List[String], String] = _
 effect fn __root_exists(at: String) -> Result[Bytes, String] = _
 
 @intrinsic("almide_rt_fs___root_write_text")
+@category("FS.write")
 effect fn __root_write_text(at: String, content: String) -> Result[Unit, String] = _
 
 @intrinsic("almide_rt_fs___root_remove")
+@category("FS.write")
 effect fn __root_remove(at: String) -> Result[Unit, String] = _
 
 /// read_text of path inside root; err if it escapes.
@@ -307,6 +320,7 @@ effect fn root_read_bytes(root: FsRoot, path: String) -> Result[Bytes, String] =
 
 /// write of content to path inside root; err if it escapes.
 @ordered
+@category("FS.write")
 effect fn root_write_text(root: FsRoot, path: String, content: String) -> Result[Unit, String] = __root_answer(
   __root_write_text(__root_at(root, path)!, content),
   path,
@@ -329,6 +343,7 @@ effect fn root_exists(root: FsRoot, path: String) -> Result[Bool, String] = matc
 
 /// remove of path inside root; err if it escapes.
 @ordered
+@category("FS.write")
 effect fn root_remove(root: FsRoot, path: String) -> Result[Unit, String] = __root_answer(
   __root_remove(__root_at(root, path)!),
   path,

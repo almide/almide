@@ -496,7 +496,12 @@ http.serve(8080, (req) => {
 ```
 
 Calling an effect fn-typed VALUE is itself an effect call (`h(x)!` inside the
-HOF); doing it from a pure fn is E006. A plain `(A) -> B` slot still rejects
+HOF); doing it from a pure fn is E006. An effect fn passed as an argument —
+`list.map(xs, fs.read_text)`, `apply(fs.read_text, p)` — makes the call an
+effect call (a bare fn-type parameter is transparent), so from a pure fn it
+is E006 too. A pure fn that runs an effect fn it reached through a value — a
+record field, a list element, a closure an effect fn built — is E109: the
+effect bit rides the value, so mark the fn `effect fn` (#4151). A plain `(A) -> B` slot still rejects
 fallible lambdas (E005) — declare the slot `(A) -> B!` or `effect (A) -> B`.
 The bare arrow form is the canonical spelling; `almide fmt` normalizes the
 legacy `fn(A) -> B` to it.

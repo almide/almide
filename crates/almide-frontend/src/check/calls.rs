@@ -580,6 +580,14 @@ impl Checker {
         }
     }
 
+    /// E006 for an `effect` protocol method reached through a protocol bound
+    /// (`x.save()` with `x: T, T: Saver`, #4158). `name` is `Protocol.method`.
+    pub(crate) fn check_effect_isolation_via_bound(&mut self, name: &str) {
+        if !self.env.can_call_effect {
+            self.report_effect_isolation(name, None);
+        }
+    }
+
     /// The E006 of [`Self::check_effect_isolation`]. `via` names the binding
     /// the effect fn `name` was reached through (#3274: `let g = rd; g(x)`).
     pub(crate) fn report_effect_isolation(&mut self, name: &str, via: Option<&str>) {

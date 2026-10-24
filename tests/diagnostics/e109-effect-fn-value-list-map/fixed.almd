@@ -1,0 +1,6 @@
+// The fn that runs the read says so: it is an `effect fn`.
+import fs
+
+effect fn reads(paths: List[String]) -> List[Result[String, String]] = paths |> list.map(fs.read_text)
+
+effect fn main() -> Unit = println("${list.len(reads(["s.txt"])!)}")

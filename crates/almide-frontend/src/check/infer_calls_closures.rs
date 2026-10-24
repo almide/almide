@@ -1159,12 +1159,23 @@ impl Checker {
     /// callee's parameter list when known.
     pub(crate) fn check_effect_fn_args(&mut self, args: &[ast::Expr], slot_params: Option<&[Ty]>) {
         for (i, a) in args.iter().enumerate() {
-            let ExprKind::Ident { name, .. } = &a.kind else { continue };
             let effect_slot = slot_params.and_then(|ps| ps.get(i))
                 .is_some_and(|pty| matches!(resolve_ty(pty, &self.uf), Ty::Fn { is_effect: true, .. }));
             if effect_slot {
                 continue;
             }
+            // #4151: a module path names the stdlib (or module) effect fn the
+            // same way a bare name does — `list.map(xs, fs.read_text)` from
+            // a pure fn is the bare-name case spelled with its module.
+            if matches!(a.kind, ExprKind::Member { .. } | ExprKind::Paren { .. }) {
+                if let Some(target) = self.effect_fn_value_target(a)
+                    && !self.env.can_call_effect
+                {
+                    self.report_effect_isolation(target.as_str(), None);
+                }
+                continue;
+            }
+            let ExprKind::Ident { name, .. } = &a.kind else { continue };
             // SHADOWING FIRST. `infer_expr_g2_ident` resolves an identifier
             // local → top-level `let` → const param → FUNCTION, so a name that
             // any of those bind is NOT a reference to the fn of that name.

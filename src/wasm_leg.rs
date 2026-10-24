@@ -214,6 +214,13 @@ pub(crate) fn lower_resolved(
         .filter(|name| sources.contains_key(name))
         .collect();
     almide_wasm::package_keys::rekey_package_modules(&mut ir, &package);
+    // E109 (#4151): the same gate every other route runs, before tests are
+    // synthesized and before the program is linked or emitted.
+    let refused = crate::effect_value_gate::effect_value_diagnostics(&ir, path);
+    if !refused.is_empty() {
+        let text: Vec<String> = refused.iter().map(|d| crate::diagnostic_render::display_with_source(d, source_text).to_string()).collect();
+        return Err(text.join("\n"));
+    }
     if let Some(run_filter) = tests {
         // The structural leg's in-test assert lowering (the frontend's
         // non-test abort form), then the shared runner synthesis.

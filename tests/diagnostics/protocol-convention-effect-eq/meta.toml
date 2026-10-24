@@ -1,0 +1,2 @@
+expects_error = "method 'Foo.eq' is an `effect fn`, but protocol 'Eq' declares 'eq' as a pure fn"
+hint_substring = "effect-ness is part of the method signature"

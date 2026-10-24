@@ -53,7 +53,10 @@ read here is what the current compiler accepts.
   (ADR-0021). In test blocks lambda-`!` stays unwrap. No `null`, no `throw`, no
   exceptions.
 - Effectful functions are written `effect fn f() -> T`. Pure functions
-  cannot call effect functions (checked, emits E006). Exception: `println`,
+  cannot call effect functions (checked, emits E006) — also not as a value:
+  passing one as an argument (`list.map(xs, fs.read_text)`) from a pure fn is
+  E006, and a pure fn that runs one it reached through a record field, a list
+  or a stored closure is E109. Exception: `println`,
   `eprintln`, `panic` and the `assert` family work in a pure fn (writes and
   aborts, never reads — ADR-0022), so a `main` that only prints is
   `fn main() -> Unit`; write `effect fn main()` when it reads or propagates.
@@ -266,6 +269,7 @@ fn isqrt(n: Int) -> Int = {
 | E004 | Arg count mismatch | Signature placeholder in try: shows `<name: Type>` |
 | E005 | Arg type mismatch | Often needs explicit conversion (`int.to_string(n)` etc) |
 | E006 | Pure fn calls effect fn | Mark the caller `effect fn`, and propagate the call's error with `!` (`f(x)!`) unless a `!` / `??` / `match` already consumes its Result |
+| E109 | Pure fn runs an effect fn reached as a value (field, list element, stored closure) | Mark the fn `effect fn`, or hand it a value that does no I/O |
 | E007/E008 | Fan block misuse | See `docs/specs/fan.md` |
 | E009 | Reassign immutable | `let` → `var` |
 | E010 | Non-exhaustive match | Add the missing arm(s) or `_ => ...` |

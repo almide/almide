@@ -1,0 +1,2 @@
+expects_error = "Time is not in [permissions].allow"
+hint_substring = "path: main → env.millis"

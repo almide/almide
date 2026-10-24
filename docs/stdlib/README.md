@@ -1124,8 +1124,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect io.read_all() -> String` — Rest of stdin as text; empty at EOF.
 - `effect io.read_byte() -> Int` — Next stdin byte 0..255, or -1 at EOF.
 - `effect io.read_n_bytes(n: Int) -> List[Int]` — Up to n stdin bytes; [] if n <= 0.
-- `io.write_bytes(data: List[Int]) -> Unit` — Low byte of each Int to stdout; unflushed.
-- `io.write(data: Bytes) -> Unit` — Raw data to stdout; no newline.
+- `effect io.write_bytes(data: List[Int]) -> Unit` — Low byte of each Int to stdout; unflushed.
+- `effect io.write(data: Bytes) -> Unit` — Raw data to stdout; no newline.
 
 ## json
 
@@ -1379,7 +1379,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect net.tcp_write(stream: Int, data: Bytes) -> Unit` — Sends all of data, flushed; err if closed.
 - `effect net.tcp_read_exact(stream: Int, len: Int) -> Bytes` — Exactly len bytes; err on early EOF, naming how many arrived.
 - `effect net.tcp_close(stream: Int) -> Unit` — Shuts down the stream; twice is ok.
-- `net.tcp_is_open(stream: Int) -> Bool` — False after tcp_close; a peer close is not seen.
+- `effect net.tcp_is_open(stream: Int) -> Bool` — False after tcp_close; a peer close is not seen.
 - `effect net.tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Bytes` — Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
 - `effect net.tcp_set_timeout(stream: Int, timeout_ms: Int) -> Unit` — Sets read/write timeout; <= 0 clears it.
 - `effect net.tcp_available(stream: Int) -> Int` — Bytes readable now, capped at 65536; 0 if none.
@@ -1453,12 +1453,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect process.run(cmd: String, args: List[String]) -> Int` — Run cmd on this terminal; exit code, -1 if signalled.
 - `effect process.run_in(dir: String, cmd: String, args: List[String]) -> Int` — run in dir; exit code, -1 if signalled.
 - `effect process.exec_attached(cmd: String, args: List[String]) -> Int   (deprecated — use process.run)` — Alias of process.run.
-- `process.pid() -> Int` — OS process ID of this program.
-- `process.env(key: String) -> Option[String]` — Variable value, or none if unset.
+- `effect process.pid() -> Int` — OS process ID of this program.
+- `effect process.env(key: String) -> Option[String]` — Variable value, or none if unset.
 - `effect process.spawn(cmd: String, args: List[String]) -> Int` — Pid of cmd started in the background.
 - `effect process.kill(pid: Int, signal: Int) -> Unit` — Sends signal to pid; err is kill's stderr.
-- `process.sleep(ms: Int) -> Unit` — Blocks ms milliseconds; negative is 0.
-- `process.is_alive(pid: Int) -> Bool` — True while pid exists, zombies included.
+- `effect process.sleep(ms: Int) -> Unit` — Blocks ms milliseconds; negative is 0.
+- `effect process.is_alive(pid: Int) -> Bool` — True while pid exists, zombies included.
 
 ## random
 

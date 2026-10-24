@@ -28,6 +28,7 @@ import json
 /// Serves 0.0.0.0:port forever; handler err is a 500.
 @intrinsic("almide_rt_http_serve")
 @concurrent(f)
+@category("Net.listen")
 effect fn serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit = _
 
 // ── Response builders ──
@@ -527,6 +528,7 @@ fn __not_allowed(hits: List[(HttpRoute, List[String])]) -> HttpResponse = {
   )
 }
 
+@category
 effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) -> HttpResponse = {
   let method = http.req_method(req)
   let path = __path_of(http.req_path(req))

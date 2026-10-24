@@ -1,57 +1,133 @@
 use std::collections::{HashMap, HashSet};
 
-/// Effect categories — mapped from stdlib module usage.
+/// Effect categories: the leaves of ADR-0026 D2's closed two-level hierarchy.
+/// Inference and `[permissions]` work in leaves; a manifest may grant a parent
+/// (`FS`, `Net`, `IO`, `Env`), which means the leaves listed under it in
+/// [`PARENTS`] — a leaf added later does not join a parent on its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Effect {
-    IO,
-    Net,
-    Env,
+    FsRead,
+    FsWrite,
+    NetFetch,
+    NetListen,
+    IoStdin,
+    IoStdout,
+    IoStderr,
+    EnvRead,
+    EnvWrite,
+    Proc,
     Time,
     Rand,
     Fan,
+    Abort,
 }
 
 impl std::fmt::Display for Effect {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Effect::IO => write!(f, "IO"),
-            Effect::Net => write!(f, "Net"),
-            Effect::Env => write!(f, "Env"),
-            Effect::Time => write!(f, "Time"),
-            Effect::Rand => write!(f, "Rand"),
-            Effect::Fan => write!(f, "Fan"),
-        }
+        f.write_str(self.name())
     }
 }
+
+/// The four parents of ADR-0026 D2 and their leaves. Every other leaf has no
+/// parent. `Proc` is under none: starting a program can reach every other
+/// capability through the program, so no grant implies it (#4155).
+pub const PARENTS: &[(&str, &[Effect])] = &[
+    ("FS", &[Effect::FsRead, Effect::FsWrite]),
+    ("Net", &[Effect::NetFetch, Effect::NetListen]),
+    ("IO", &[Effect::IoStdin, Effect::IoStdout, Effect::IoStderr]),
+    ("Env", &[Effect::EnvRead, Effect::EnvWrite]),
+];
 
 impl Effect {
-    /// Every category, in declaration order. This is the whole vocabulary of
-    /// `almide.toml [permissions].allow`: a name is valid there exactly when
-    /// it is the `Display` of one of these (#3247).
-    ///
-    /// It is also ⊤: what a call is assumed to do when nothing bounds it —
-    /// today, a call to an `@extern` fn (#3245). A foreign body is opaque to
-    /// inference and no bound can be declared on it yet (ADR-0027 §5), so
-    /// `[permissions].allow` passes it only when it allows every category.
-    pub const ALL: [Effect; 6] = [Effect::IO, Effect::Net, Effect::Env, Effect::Time, Effect::Rand, Effect::Fan];
+    /// Every leaf, in declaration order. It is also ⊤: what a call is assumed
+    /// to do when nothing bounds it — today, a call to an `@extern` fn (#3245).
+    /// A foreign body is opaque to inference and no bound can be declared on
+    /// it yet (ADR-0027 §5), so `[permissions].allow` passes it only when it
+    /// grants every leaf.
+    pub const ALL: [Effect; 14] = [
+        Effect::FsRead, Effect::FsWrite, Effect::NetFetch, Effect::NetListen,
+        Effect::IoStdin, Effect::IoStdout, Effect::IoStderr, Effect::EnvRead,
+        Effect::EnvWrite, Effect::Proc, Effect::Time, Effect::Rand, Effect::Fan,
+        Effect::Abort,
+    ];
 
-    /// The category a `[permissions].allow` name spells, or `None`.
+    /// The leaf's name as `[permissions].allow`, `--effects` and diagnostics
+    /// spell it: capitalised and dotted under a parent (`FS.write`), so it
+    /// cannot be spelled like a function name (ADR-0026 D4).
+    pub fn name(self) -> &'static str {
+        match self {
+            Effect::FsRead => "FS.read",
+            Effect::FsWrite => "FS.write",
+            Effect::NetFetch => "Net.fetch",
+            Effect::NetListen => "Net.listen",
+            Effect::IoStdin => "IO.stdin",
+            Effect::IoStdout => "IO.stdout",
+            Effect::IoStderr => "IO.stderr",
+            Effect::EnvRead => "Env.read",
+            Effect::EnvWrite => "Env.write",
+            Effect::Proc => "Proc",
+            Effect::Time => "Time",
+            Effect::Rand => "Rand",
+            Effect::Fan => "Fan",
+            Effect::Abort => "Abort",
+        }
+    }
+
+    /// The leaf a name spells, or `None`.
     pub fn from_name(name: &str) -> Option<Effect> {
-        Self::ALL.into_iter().find(|e| e.to_string() == name)
+        Self::ALL.into_iter().find(|e| e.name() == name)
+    }
+
+    /// The leaves a `[permissions].allow` name grants: a leaf grants itself, a
+    /// parent its leaves (#4155). `None` for any other name.
+    pub fn granted_by(name: &str) -> Option<Vec<Effect>> {
+        if let Some(e) = Self::from_name(name) {
+            return Some(vec![e]);
+        }
+        PARENTS.iter().find(|(p, _)| *p == name).map(|(_, leaves)| leaves.to_vec())
+    }
+
+    /// Every name a manifest may write: the parents, then the leaves.
+    pub fn grantable_names() -> Vec<&'static str> {
+        PARENTS.iter().map(|(p, _)| *p).chain(Self::ALL.iter().map(|e| e.name())).collect()
     }
 }
 
-/// How the calls into one stdlib module are classified.
+/// What the output and abort builtins carry (ADR-0026 D2: `panic` carries
+/// `Abort` and `IO.stderr` both). They are admissible in a plain `fn`
+/// (ADR-0022), so they never make a function `effect`; a manifest that
+/// grants neither still refuses them. A failing `assert*` writes its report
+/// to stderr and ends the program.
+pub const BUILTIN_EFFECTS: &[(&str, &[Effect])] = &[
+    ("println", &[Effect::IoStdout]),
+    ("eprintln", &[Effect::IoStderr]),
+    ("panic", &[Effect::Abort, Effect::IoStderr]),
+    ("assert", &[Effect::Abort, Effect::IoStderr]),
+    ("assert_eq", &[Effect::Abort, Effect::IoStderr]),
+    ("assert_ne", &[Effect::Abort, Effect::IoStderr]),
+];
+
+/// The categories of a call to the builtin `name`; empty for any other name.
+pub fn builtin_call_effects(name: &str) -> Vec<Effect> {
+    BUILTIN_EFFECTS.iter().find(|(n, _)| *n == name).map_or_else(Vec::new, |(_, e)| e.to_vec())
+}
+
+/// How the calls into one stdlib module are classified. A function may name
+/// its own categories with `@category("FS.write", …)` on its declaration,
+/// which replaces the module's default for that function (ADR-0026 D2:
+/// categories are per operation, not per module).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModuleEffects {
     /// No function of the module reaches the host.
     Pure,
-    /// Every function of the module carries the category.
-    All(Effect),
-    /// Exactly the module's `effect fn`s carry the category; its plain `fn`s
-    /// are pure. Read from the module's own source, so the classification of
-    /// a function is its `effect` marker and cannot drift from it.
-    EffectFns(Effect),
+    /// Every function of the module carries these categories unless it
+    /// declares its own.
+    All(&'static [Effect]),
+    /// The module's `effect fn`s carry these categories unless they declare
+    /// their own; its plain `fn`s are pure unless they declare some. Read from
+    /// the module's own source, so the classification of a function is its
+    /// `effect` marker and cannot drift from it.
+    EffectFns(&'static [Effect]),
 }
 
 /// THE classification of every stdlib module, by what its functions do to the
@@ -61,29 +137,36 @@ pub enum ModuleEffects {
 /// an unexplained `effect fn`, and an `@intrinsic` symbol whose classification
 /// disagrees with the function that declares it.
 ///
-/// Categories are today's six (`IO` = files and the standard streams). The
-/// per-operation registry ADR-0027 §6 proposes replaces this table; until
-/// then a mixed module is split by its `effect` markers (`EffectFns`), not by
-/// a hand list.
+/// A row is the module's default; a function whose operation differs says so
+/// with `@category(…)` in its own declaration (`fs.write` is `FS.write`,
+/// `process.args` `Env.read`), never in a list here (#4155).
 pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
-    // Files and the standard streams.
-    ("fs", ModuleEffects::All(Effect::IO)),
-    ("io", ModuleEffects::All(Effect::IO)),
+    // Files. A function that changes the file system declares `FS.write`.
+    ("fs", ModuleEffects::All(&[Effect::FsRead])),
+    // The standard streams: each function declares its stream.
+    ("io", ModuleEffects::All(&[Effect::IoStdin])),
     // The network. `http`'s plain fns are request/response builders and the
-    // router — values, not traffic.
-    ("http", ModuleEffects::EffectFns(Effect::Net)),
-    ("net", ModuleEffects::All(Effect::Net)),
-    // The process environment: variables, argv, the process table.
-    ("env", ModuleEffects::All(Effect::Env)),
-    ("process", ModuleEffects::All(Effect::Env)),
-    ("args", ModuleEffects::All(Effect::Env)),
+    // router — values, not traffic; `http.serve` declares `Net.listen`.
+    ("http", ModuleEffects::EffectFns(&[Effect::NetFetch])),
+    // Sockets: connecting is `Net.fetch`, listening and accepting
+    // `Net.listen` (declared on those fns). An operation on an open stream or
+    // a shared-memory region cannot tell which side opened it, so it carries
+    // both.
+    ("net", ModuleEffects::All(&[Effect::NetFetch, Effect::NetListen])),
+    // The process environment: variables and argv. `env.set` declares
+    // `Env.write`; the clock readers declare `Time`.
+    ("env", ModuleEffects::All(&[Effect::EnvRead])),
+    // Starting and signalling processes. The readers (`process.args`,
+    // `process.pid`) declare `Env.read`, `process.exit` `Abort`.
+    ("process", ModuleEffects::All(&[Effect::Proc])),
+    ("args", ModuleEffects::All(&[Effect::EnvRead])),
     // The clock: `datetime.now` / `monotonic_ns`; the calendar math is pure.
-    ("datetime", ModuleEffects::EffectFns(Effect::Time)),
+    ("datetime", ModuleEffects::EffectFns(&[Effect::Time])),
     // Entropy.
-    ("random", ModuleEffects::All(Effect::Rand)),
+    ("random", ModuleEffects::All(&[Effect::Rand])),
     // `fan` is a language form, not a stdlib module; `fan.map` and friends
     // lower to Module calls on it.
-    ("fan", ModuleEffects::All(Effect::Fan)),
+    ("fan", ModuleEffects::All(&[Effect::Fan])),
     // String and path/URL manipulation: no host access. `path` never touches
     // the file system and `url` never touches the network.
     ("path", ModuleEffects::Pure),
@@ -132,7 +215,8 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     ("uint64", ModuleEffects::Pure),
     ("float32", ModuleEffects::Pure),
     ("float64", ModuleEffects::Pure),
-    // Assertions: they abort, which is not a category (ADR-0022).
+    // Assertion helpers: a failing one aborts through the builtins it calls,
+    // which carry `Abort` themselves.
     ("testing", ModuleEffects::Pure),
     // The primitive floor is stdlib-internal (E085 outside it); its host ops
     // are classified at the public function that wraps them, so a stdlib
@@ -183,7 +267,31 @@ fn intrinsic_symbol(decl: &almide_lang::ast::Decl) -> Option<&str> {
     })
 }
 
-/// The category a call `module.func` carries, `None` for a pure call.
+/// The categories a declaration names with `@category("…", …)`, if it has
+/// the attribute. An unknown name is a stdlib bug the gate below refuses;
+/// here it is skipped.
+fn declared_categories(decl: &almide_lang::ast::Decl) -> Option<Vec<Effect>> {
+    let almide_lang::ast::Decl::Fn { attrs, .. } = decl else { return None };
+    let a = attrs.iter().find(|a| a.name.as_str() == "category")?;
+    Some(a.args.iter().filter_map(|x| match &x.value {
+        almide_lang::ast::AttrValue::String { value } => Effect::from_name(value),
+        _ => None,
+    }).collect())
+}
+
+/// The categories of one declared function of a classified module.
+fn decl_effects(row: ModuleEffects, decl: &almide_lang::ast::Decl) -> Vec<Effect> {
+    if let Some(own) = declared_categories(decl) {
+        return own;
+    }
+    match row {
+        ModuleEffects::Pure => Vec::new(),
+        ModuleEffects::All(e) => e.to_vec(),
+        ModuleEffects::EffectFns(e) => if fn_is_effect(decl) { e.to_vec() } else { Vec::new() },
+    }
+}
+
+/// The categories a call `module.func` carries, empty for a pure call.
 ///
 /// The function must be one the stdlib module declares: a call to a name the
 /// module's source does not declare is a USER module that shares the stdlib
@@ -191,44 +299,132 @@ fn intrinsic_symbol(decl: &almide_lang::ast::Decl) -> Option<&str> {
 /// call graph like any user fn's. (A user module that also reuses a stdlib
 /// function's name is classified as the stdlib function: an
 /// over-approximation, never a missed category.)
-pub fn stdlib_call_effect(module: &str, func: &str) -> Option<Effect> {
-    let row = module_effects(module)?;
+pub fn stdlib_call_effect(module: &str, func: &str) -> Vec<Effect> {
+    let Some(row) = module_effects(module) else { return Vec::new() };
     if row == ModuleEffects::Pure {
-        return None;
+        return Vec::new();
     }
     if module == "fan" {
         // A language form with no stdlib source.
-        return match row { ModuleEffects::All(e) | ModuleEffects::EffectFns(e) => Some(e), ModuleEffects::Pure => None };
+        return match row { ModuleEffects::All(e) | ModuleEffects::EffectFns(e) => e.to_vec(), ModuleEffects::Pure => Vec::new() };
     }
-    let decl = module_fns(module).find(|d| fn_name(d) == func)?;
-    match row {
-        ModuleEffects::Pure => None,
-        ModuleEffects::All(e) => Some(e),
-        ModuleEffects::EffectFns(e) => fn_is_effect(decl).then_some(e),
-    }
+    module_fns(module).find(|d| fn_name(d) == func).map_or_else(Vec::new, |d| decl_effects(row, d))
 }
 
-/// The category a runtime call (`almide_rt_<module>_<fn>`, the `@intrinsic`
-/// mangling; `http` / `json` / `regex` also use `almide_<module>_<fn>`) carries. The module is the longest table entry (or alias) the
-/// symbol's head names; for an `EffectFns` module the declaring function is
-/// found by its `@intrinsic` symbol, and an undeclared symbol fails closed.
-pub fn runtime_symbol_effect(symbol: &str) -> Option<Effect> {
-    let rest = symbol.strip_prefix("almide_rt_").or_else(|| symbol.strip_prefix("almide_"))?;
+/// The categories a runtime call (`almide_rt_<module>_<fn>`, the `@intrinsic`
+/// mangling; `http` / `json` / `regex` also use `almide_<module>_<fn>`)
+/// carries. The module is the longest table entry (or alias) the symbol's
+/// head names; the declaring function is found by its `@intrinsic` symbol,
+/// and an undeclared symbol fails closed to the module's whole default.
+pub fn runtime_symbol_effect(symbol: &str) -> Vec<Effect> {
+    let Some(rest) = symbol.strip_prefix("almide_rt_").or_else(|| symbol.strip_prefix("almide_")) else { return Vec::new() };
     let module = STDLIB_MODULE_EFFECTS
         .iter()
         .map(|(m, _)| (*m, *m))
         .chain(RUNTIME_PREFIX_ALIASES.iter().copied())
         .filter(|(prefix, _)| rest.strip_prefix(prefix).is_some_and(|r| r.starts_with('_')))
         .max_by_key(|(prefix, _)| prefix.len())
-        .map(|(_, m)| m)?;
-    match module_effects(module)? {
-        ModuleEffects::Pure => None,
-        ModuleEffects::All(e) => Some(e),
-        ModuleEffects::EffectFns(e) => {
-            let plain = module_fns(module).any(|d| intrinsic_symbol(d) == Some(symbol) && !fn_is_effect(d));
-            (!plain).then_some(e)
-        }
+        .map(|(_, m)| m);
+    let Some(row) = module.and_then(module_effects) else { return Vec::new() };
+    if row == ModuleEffects::Pure {
+        return Vec::new();
     }
+    let module = module.unwrap_or_default();
+    match module_fns(module).find(|d| intrinsic_symbol(d) == Some(symbol)) {
+        Some(d) => decl_effects(row, d),
+        None => match row {
+            ModuleEffects::All(e) | ModuleEffects::EffectFns(e) => e.to_vec(),
+            ModuleEffects::Pure => Vec::new(),
+        },
+    }
+}
+
+/// Is the stdlib function `module.func` declared `effect fn` (#4151)? Read
+/// from the module's own source, like [`stdlib_call_effect`]. This is the
+/// effect BIT, not a category: `zlib.compress` is an `effect fn` with no host
+/// access, and `path.join` is a plain fn. A name the module does not declare
+/// is not a stdlib function (a user module sharing the name), so `false`.
+///
+/// An `effect fn` whose result is `Never` and whose body is the runtime's
+/// (`process.exit`) only ends the program: that is ADR-0022's abort, which a
+/// plain `fn` may do (the lowered `assert` failure arm calls it), so it does
+/// not carry the bit. Read off the declaration, never a name list.
+pub fn stdlib_fn_is_effect(module: &str, func: &str) -> bool {
+    module_fns(module).any(|d| fn_name(d) == func && fn_is_effect(d) && !fn_only_aborts(d))
+}
+
+/// A bodyless (`= _`) declaration whose result type is `Never`: the runtime
+/// ends the program and nothing else (see [`stdlib_fn_is_effect`]).
+fn fn_only_aborts(decl: &almide_lang::ast::Decl) -> bool {
+    let almide_lang::ast::Decl::Fn { body, return_type: almide_lang::ast::TypeExpr::Simple { name }, .. } = decl else {
+        return false;
+    };
+    let bodyless = body.as_ref().is_none_or(|b| matches!(b.kind, almide_lang::ast::ExprKind::Hole));
+    bodyless && name.as_str() == "Never"
+}
+
+/// Is the runtime symbol `symbol` the `@intrinsic` of a stdlib `effect fn`
+/// (#4151)? Found by the declaring function's `@intrinsic` symbol, over
+/// every classified module.
+pub fn runtime_symbol_is_effect(symbol: &str) -> bool {
+    STDLIB_MODULE_EFFECTS
+        .iter()
+        .any(|(m, _)| module_fns(m).any(|d| intrinsic_symbol(d) == Some(symbol) && fn_is_effect(d) && !fn_only_aborts(d)))
+}
+
+/// What an unscanned stdlib function may do with one argument that holds a
+/// fn: run it, keep it (store it where something else reads it later), or
+/// both. Read off the declaration (#4151) so `check`, which does not lower the
+/// stdlib's bodies, follows a value as the build routes do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParamUse {
+    pub runs: bool,
+    pub keeps: bool,
+}
+
+/// [`ParamUse`] per parameter of the stdlib function `module.func`, or
+/// `None` for a name the module does not declare.
+///
+/// - A bodyless (`= _`) declaration runs its fn-typed parameters and keeps
+///   none of them (no `@intrinsic` stores a callback); any other parameter
+///   may be kept.
+/// - An Almide body is not read here: every parameter may be run and kept —
+///   except a parameter whose type is an explicit `effect (A) -> B` slot (or
+///   an alias of one) on a plain `fn`: the checker refuses that body a call
+///   of it (E006), so it can only keep it (`http.route`'s handler).
+pub fn stdlib_param_uses(module: &str, func: &str) -> Option<Vec<ParamUse>> {
+    use almide_lang::ast::{Decl, ExprKind, TypeExpr};
+    let decl = module_fns(module).find(|d| fn_name(d) == func)?;
+    let Decl::Fn { params, body, effect, .. } = decl else { return None };
+    let bodyless = body.as_ref().is_none_or(|b| matches!(b.kind, ExprKind::Hole));
+    let is_effect_fn = effect.unwrap_or(false);
+    let effect_slot = |t: &TypeExpr| match t {
+        TypeExpr::Fn { is_effect, .. } => *is_effect,
+        TypeExpr::Simple { name } => module_type_alias(module, name.as_str())
+            .is_some_and(|t| matches!(t, TypeExpr::Fn { is_effect: true, .. })),
+        _ => false,
+    };
+    Some(params.iter().map(|p| {
+        let fn_typed = matches!(p.ty, TypeExpr::Fn { .. }) || effect_slot(&p.ty);
+        match (bodyless, fn_typed) {
+            (true, true) => ParamUse { runs: true, keeps: false },
+            (true, false) => ParamUse { runs: false, keeps: true },
+            (false, _) if effect_slot(&p.ty) && !is_effect_fn => ParamUse { runs: false, keeps: true },
+            (false, _) => ParamUse { runs: true, keeps: true },
+        }
+    }).collect())
+}
+
+/// The target of `type name = …` in the stdlib module's own source.
+fn module_type_alias(module: &str, name: &str) -> Option<&'static almide_lang::ast::TypeExpr> {
+    almide_lang::stdlib_info::bundled_source(module)
+        .and_then(almide_lang::parse_cached)?
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            almide_lang::ast::Decl::Type { name: n, ty, .. } if n.as_str() == name => Some(ty),
+            _ => None,
+        })
 }
 
 /// Result of effect inference for a single function.
@@ -388,29 +584,110 @@ mod classification_gate {
         assert!(checked > 500, "only {checked} intrinsics checked — the source scan found nothing");
     }
 
-    /// The rows #3246 fixed.
+    /// The rows #3246 fixed, in ADR-0026 D2's leaves.
     #[test]
     fn the_rows_3246_fixed() {
-        assert_eq!(stdlib_call_effect("random", "int"), Some(Effect::Rand));
-        assert_eq!(runtime_symbol_effect("almide_rt_random_int"), Some(Effect::Rand));
-        assert_eq!(stdlib_call_effect("io", "read_line"), Some(Effect::IO));
-        assert_eq!(stdlib_call_effect("io", "write"), Some(Effect::IO));
-        assert_eq!(stdlib_call_effect("path", "join"), None);
-        assert_eq!(stdlib_call_effect("url", "parse"), None);
-        assert_eq!(stdlib_call_effect("datetime", "now"), Some(Effect::Time));
-        assert_eq!(stdlib_call_effect("datetime", "format"), None);
-        assert_eq!(runtime_symbol_effect("almide_rt_datetime_format"), None);
-        assert_eq!(stdlib_call_effect("http", "get"), Some(Effect::Net));
-        assert_eq!(stdlib_call_effect("http", "response"), None);
-        assert_eq!(stdlib_call_effect("list", "map"), None);
-        assert_eq!(stdlib_call_effect("not_a_module", "f"), None);
+        use Effect::*;
+        assert_eq!(stdlib_call_effect("random", "int"), vec![Rand]);
+        assert_eq!(runtime_symbol_effect("almide_rt_random_int"), vec![Rand]);
+        assert_eq!(stdlib_call_effect("io", "read_line"), vec![IoStdin]);
+        assert_eq!(stdlib_call_effect("io", "write"), vec![IoStdout]);
+        assert!(stdlib_call_effect("path", "join").is_empty());
+        assert!(stdlib_call_effect("url", "parse").is_empty());
+        assert_eq!(stdlib_call_effect("datetime", "now"), vec![Time]);
+        assert!(stdlib_call_effect("datetime", "format").is_empty());
+        assert!(runtime_symbol_effect("almide_rt_datetime_format").is_empty());
+        assert_eq!(stdlib_call_effect("http", "get"), vec![NetFetch]);
+        assert!(stdlib_call_effect("http", "response").is_empty());
+        assert!(stdlib_call_effect("list", "map").is_empty());
+        assert!(stdlib_call_effect("not_a_module", "f").is_empty());
         // #2223: a user module named like a stdlib module, calling a fn the
         // stdlib module does not declare, is not the stdlib module.
-        assert_eq!(stdlib_call_effect("net", "f"), None);
-        assert_eq!(stdlib_call_effect("random", "my_helper"), None);
-        assert_eq!(stdlib_call_effect("fan", "map"), Some(Effect::Fan));
-        assert_eq!(runtime_symbol_effect("almide_http_get"), Some(Effect::Net));
-        assert_eq!(runtime_symbol_effect("almide_regex_find"), None);
-        assert_eq!(runtime_symbol_effect("println"), None);
+        assert!(stdlib_call_effect("net", "f").is_empty());
+        assert!(stdlib_call_effect("random", "my_helper").is_empty());
+        assert_eq!(stdlib_call_effect("fan", "map"), vec![Fan]);
+        assert_eq!(runtime_symbol_effect("almide_http_get"), vec![NetFetch]);
+        assert!(runtime_symbol_effect("almide_regex_find").is_empty());
+        assert!(runtime_symbol_effect("println").is_empty());
+    }
+
+    /// #4155: starting a process is `Proc`, never `Env`; the environment
+    /// readers stay `Env.read`; files are `FS`, split read / write.
+    #[test]
+    fn the_leaves_4155_assigns() {
+        use Effect::*;
+        for f in ["exec", "exec_in", "exec_with_stdin", "exec_status", "exec_status_timeout", "run", "run_in", "exec_attached", "spawn", "kill", "is_alive"] {
+            assert_eq!(stdlib_call_effect("process", f), vec![Proc], "process.{f}");
+        }
+        for f in ["args", "pid", "env"] {
+            assert_eq!(stdlib_call_effect("process", f), vec![EnvRead], "process.{f}");
+        }
+        assert_eq!(stdlib_call_effect("process", "exit"), vec![Abort]);
+        assert_eq!(stdlib_call_effect("env", "get"), vec![EnvRead]);
+        assert_eq!(stdlib_call_effect("env", "set"), vec![EnvWrite]);
+        assert_eq!(stdlib_call_effect("fs", "read_text"), vec![FsRead]);
+        assert_eq!(stdlib_call_effect("fs", "remove_all"), vec![FsWrite]);
+        assert_eq!(stdlib_call_effect("fs", "copy"), vec![FsRead, FsWrite]);
+        assert_eq!(stdlib_call_effect("http", "serve"), vec![NetListen]);
+        assert_eq!(stdlib_call_effect("net", "tcp_connect"), vec![NetFetch]);
+        assert_eq!(stdlib_call_effect("net", "tcp_accept"), vec![NetListen]);
+        assert_eq!(stdlib_call_effect("io", "print"), vec![IoStdout]);
+        for parent in ["FS", "Net", "IO", "Env"] {
+            assert!(!Effect::granted_by(parent).unwrap().contains(&Proc), "{parent} must not grant Proc");
+        }
+        assert_eq!(Effect::granted_by("Env"), Some(vec![EnvRead, EnvWrite]));
+        assert_eq!(Effect::granted_by("Proc"), Some(vec![Proc]));
+        assert_eq!(Effect::granted_by("Process"), None);
+    }
+
+    /// #4159, the reverse of the Pure-module gate: a public plain `fn` of a
+    /// module classified `All(_)` would carry the module's host category but
+    /// be callable from a pure fn (E006 reads the `effect` marker). Each one
+    /// is an `effect fn`, or says with an empty `@category()` that it reaches
+    /// no host (`random.next_int` over a seeded state, `env.os`). And no
+    /// plain fn anywhere declares a host category.
+    #[test]
+    fn a_public_plain_fn_of_an_effect_module_reaches_no_host() {
+        for (m, row) in STDLIB_MODULE_EFFECTS {
+            if *m == "fan" { continue; }
+            for d in module_fns(m) {
+                let almide_lang::ast::Decl::Fn { visibility, .. } = d else { continue };
+                if fn_is_effect(d) { continue; }
+                let declared = declared_categories(d);
+                assert!(declared.as_ref().is_none_or(|c| c.is_empty()),
+                    "`{m}.{}` is a plain fn with a host category: make it `effect fn`", fn_name(d));
+                if matches!(row, ModuleEffects::All(_)) && *visibility == almide_lang::ast::Visibility::Public {
+                    assert!(declared.is_some(),
+                        "`{m}.{}` is a public plain fn of an `All(_)` module: make it `effect fn`, or declare `@category()` if it reaches no host", fn_name(d));
+                }
+            }
+        }
+    }
+
+    /// Every `@category` in the stdlib names a leaf, sits in a classified
+    /// module that is not `Pure`, and every `effect fn` of such a module has a
+    /// category (an abort-only one has `Abort`).
+    #[test]
+    fn every_declared_category_is_a_leaf_and_every_effect_fn_has_one() {
+        for (m, row) in STDLIB_MODULE_EFFECTS {
+            if *m == "fan" { continue; }
+            for d in module_fns(m) {
+                let almide_lang::ast::Decl::Fn { attrs, .. } = d else { continue };
+                if let Some(a) = attrs.iter().find(|a| a.name.as_str() == "category") {
+                    assert!(*row != ModuleEffects::Pure, "`{m}.{}` declares @category in a Pure module", fn_name(d));
+                    for x in &a.args {
+                        let almide_lang::ast::AttrValue::String { value } = &x.value else {
+                            panic!("`{m}.{}`: @category takes leaf names as strings", fn_name(d))
+                        };
+                        assert!(Effect::from_name(value).is_some(), "`{m}.{}`: @category(\"{value}\") is not a leaf", fn_name(d));
+                    }
+                }
+                // An explicit `@category()` says "none of its own" (a router
+                // dispatch only runs the handlers it is given).
+                if *row != ModuleEffects::Pure && fn_is_effect(d) && declared_categories(d).is_none() {
+                    assert!(!decl_effects(*row, d).is_empty(), "`{m}.{}` is an effect fn with no category", fn_name(d));
+                }
+            }
+        }
     }
 }

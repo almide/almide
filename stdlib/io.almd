@@ -15,6 +15,7 @@ effect fn read_line_opt() -> String? = _
 
 /// Writes s, no newline, then flushes.
 @intrinsic("almide_rt_io_print")
+@category("IO.stdout")
 effect fn print(s: String) -> Unit = _
 
 /// Rest of stdin as text; empty at EOF.
@@ -34,8 +35,10 @@ effect fn read_n_bytes(n: Int) -> List[Int] = _
 
 /// Low byte of each Int to stdout; unflushed.
 @intrinsic("almide_rt_io_write_bytes")
-fn write_bytes(data: List[Int]) -> Unit = _
+@category("IO.stdout")
+effect fn write_bytes(data: List[Int]) -> Unit = _
 
 /// Raw data to stdout; no newline.
 @intrinsic("almide_rt_io_write")
-fn write(data: Bytes) -> Unit = _
+@category("IO.stdout")
+effect fn write(data: Bytes) -> Unit = _

@@ -175,11 +175,11 @@ effect io.read_n_bytes(n: Int) -> List[Int]
 
 // Low byte of each Int to stdout; unflushed.
 // @since 0.9.8 or earlier
-io.write_bytes(data: List[Int]) -> Unit
+effect io.write_bytes(data: List[Int]) -> Unit
 
 // Raw data to stdout; no newline.
 // @since 0.9.8 or earlier
-io.write(data: Bytes) -> Unit
+effect io.write(data: Bytes) -> Unit
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

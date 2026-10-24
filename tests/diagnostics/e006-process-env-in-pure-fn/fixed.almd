@@ -1,0 +1,6 @@
+// The reader is an `effect fn`.
+import process
+
+effect fn home() -> String = process.env("HOME") ?? "none"
+
+effect fn main() -> Unit = println(home()!)

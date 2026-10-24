@@ -3,4 +3,4 @@ name = "permfx"
 version = "0.1.0"
 
 [permissions]
-allow = ["IO"]
+allow = ["FS", "IO"]

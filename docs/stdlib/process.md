@@ -317,11 +317,11 @@ effect process.exec_attached(cmd: String, args: List[String]) -> Int   (deprecat
 
 // OS process ID of this program.
 // @since 0.12.3 or earlier
-process.pid() -> Int
+effect process.pid() -> Int
 
 // Variable value, or none if unset.
 // @since 0.12.3 or earlier
-process.env(key: String) -> Option[String]
+effect process.env(key: String) -> Option[String]
 
 // Pid of cmd started in the background.
 // @since 0.12.3 or earlier
@@ -333,11 +333,11 @@ effect process.kill(pid: Int, signal: Int) -> Unit
 
 // Blocks ms milliseconds; negative is 0.
 // @since 0.20.0 or earlier
-process.sleep(ms: Int) -> Unit
+effect process.sleep(ms: Int) -> Unit
 
 // True while pid exists, zombies included.
 // @since 0.12.3 or earlier
-process.is_alive(pid: Int) -> Bool
+effect process.is_alive(pid: Int) -> Bool
 ```
 
 ## Type index (1 types)

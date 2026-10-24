@@ -30,7 +30,7 @@ fn maybe(mut out: Bytes, b: Int) -> Unit = match b {
   _ => one(out, b),
 }
 
-fn main() -> Unit = {
+effect fn main() -> Unit = {
   var a = bytes.zeros(0)
   esc_if(a, 65)
   esc_if(a, 38)
