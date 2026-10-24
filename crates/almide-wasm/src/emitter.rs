@@ -258,9 +258,6 @@ impl Emitter<'_> {
         self.hold_f64_depth -= 1;
     }
 
-
-
-
     /// xs[i]: bounds-checked element load. Out of bounds takes the exact
     /// native abort frame — `Error: index out of bounds` on stderr, exit 1
     /// (a bare trap here left stderr EMPTY, the cross-target divergence
@@ -354,8 +351,6 @@ impl Emitter<'_> {
             .unreachable();
     }
 
-
-
     /// A hold from the pool matching the slice type's wasm value type.
     pub(crate) fn hold_val(&mut self, ty: SliceTy) -> Result<u32, EmitError> {
         match ty.val_type() {
@@ -372,9 +367,6 @@ impl Emitter<'_> {
             _ => self.release_i32(),
         }
     }
-
-
-
 
     /// The WASM-level Result type of a Named callee (the IR `ty` on the
     /// call is the RAW ok type — the effect ABI is a backend layer), or
