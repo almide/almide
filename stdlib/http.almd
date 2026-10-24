@@ -528,7 +528,7 @@ fn __not_allowed(hits: List[(HttpRoute, List[String])]) -> HttpResponse = {
   )
 }
 
-@category()
+@category
 effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) -> HttpResponse = {
   let method = http.req_method(req)
   let path = __path_of(http.req_path(req))

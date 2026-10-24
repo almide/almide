@@ -42,7 +42,7 @@ local fn rng_next64(rng: Rng) -> (Int, Rng) = match rng {
 }
 
 /// A generator whose stream is fixed by seed.
-@category()
+@category
 fn seeded(seed: Int) -> Rng = Rng(seed)
 
 // Unsigned a < b over all 64 bits.
@@ -64,7 +64,7 @@ local fn rng_below(rng: Rng, span: Int) -> (Int, Rng) = {
 }
 
 /// An Int in [min, max] (both ends) and the next state; min, state unchanged, if max <= min.
-@category()
+@category
 fn next_int(rng: Rng, min: Int, max: Int) -> (Int, Rng) = if max <= min then (min, rng)
 else {
   let span = max - min + 1
@@ -79,14 +79,14 @@ else {
 }
 
 /// A Float in [0, 1) from the top 53 bits, and the next state.
-@category()
+@category
 fn next_float(rng: Rng) -> (Float, Rng) = {
   let (z, next) = rng_next64(rng)
   (float.from_int(rng_shr(z, 11)) * 1.1102230246251565e-16, next)
 }
 
 /// A uniformly chosen element (none, state unchanged, when xs is empty) and the next state.
-@category()
+@category
 fn next_choice[A](rng: Rng, xs: List[A]) -> (A?, Rng) = if list.is_empty(xs) then (none, rng)
 else {
   let (i, next) = next_int(rng, 0, list.len(xs) - 1)
@@ -94,7 +94,7 @@ else {
 }
 
 /// A uniform permutation of xs (Fisher-Yates) and the next state.
-@category()
+@category
 fn next_shuffle[A](rng: Rng, xs: List[A]) -> (List[A], Rng) = {
   var ys = xs
   var r = rng
