@@ -54,10 +54,14 @@ pub struct LowerCtx<'a> {
     lambda_id_counter: u32,
     /// Maps const param name → VarId for value parameter lowering.
     pub const_param_vars: HashMap<Sym, VarId>,
-    /// Definition table for cross-package resolution.
-    pub def_table: almide_ir::DefTable,
-    /// Maps qualified name (e.g. "snaidhm.web.gpu.STORAGE") → DefId.
-    pub def_map: HashMap<Sym, almide_ir::DefId>,
+    /// Definition table for cross-package resolution. Borrowed from the env
+    /// until this lowering allocates into it: a copy per `LowerCtx` was a copy
+    /// of the WHOLE program's table per module lowered, so lowering N modules
+    /// cost N x (all definitions) (#4187).
+    pub def_table: std::borrow::Cow<'a, almide_ir::DefTable>,
+    /// Maps qualified name (e.g. "snaidhm.web.gpu.STORAGE") → DefId. Borrowed
+    /// like `def_table`.
+    pub def_map: std::borrow::Cow<'a, HashMap<Sym, almide_ir::DefId>>,
     /// The module currently being lowered (its prefix), or None for the root
     /// program. Used to pin a struct-literal constructor to its qualified
     /// canonical name `mod.Type` (#433), mirroring `lower_type_decl`.
@@ -103,8 +107,8 @@ impl<'a> LowerCtx<'a> {
             protocol_bounds: HashMap::new(),
             lambda_id_counter: 0,
             const_param_vars: HashMap::new(),
-            def_table: env.def_table.clone(),
-            def_map: env.def_map.iter().map(|(k, v)| (*k, *v)).collect(),
+            def_table: std::borrow::Cow::Borrowed(&env.def_table),
+            def_map: std::borrow::Cow::Borrowed(&env.def_map),
             current_module: None,
             in_test: false,
             annotated_result_vars: std::collections::HashSet::new(),
@@ -364,11 +368,11 @@ fn register_cross_package_top_lets(ctx: &mut LowerCtx, env: &TypeEnv) {
             let module = &qual[..dot_pos];
             let name = &qual[dot_pos + 1..];
             let package = module.split('.').next().unwrap_or(module);
-            let def_id = ctx.def_table.alloc(
+            let def_id = ctx.def_table.to_mut().alloc(
                 sym(package), sym(module), sym(name),
                 almide_ir::DefKind::TopLet, ty.clone(),
             );
-            ctx.def_map.insert(*qual_name, def_id);
+            ctx.def_map.to_mut().insert(*qual_name, def_id);
         }
     }
 }
@@ -621,7 +625,11 @@ fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec
         }
     }
     functions.append(&mut ctx.synthesized_fns);
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default() };
+    // A module's lowering keeps no def table (`lower_module` takes its fns,
+    // types and top-lets and drops the rest), so only the root program pays
+    // for its own copy.
+    let def_table = if ctx.current_module.is_some() { Default::default() } else { ctx.def_table.into_owned() };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default() };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {
