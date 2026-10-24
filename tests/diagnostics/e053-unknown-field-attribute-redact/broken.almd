@@ -1,0 +1,4 @@
+// Another ecosystem's redaction attribute: Almide reads none, so it would hide nothing.
+type Login = { user: String, @redact password: String }
+
+fn main() -> Unit = println("ok")

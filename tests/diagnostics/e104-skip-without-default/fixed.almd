@@ -1,0 +1,4 @@
+// The fix: give the skipped field its default.
+type User: Codec = { name: String, @skip_decode is_admin: Bool = false }
+
+fn main() -> Unit = println("ok")

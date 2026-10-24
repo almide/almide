@@ -1,0 +1,4 @@
+// A skipped field is never read from input, so decode needs a default for it.
+type User: Codec = { name: String, @skip_decode is_admin: Bool }
+
+fn main() -> Unit = println("ok")
