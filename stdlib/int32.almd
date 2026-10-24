@@ -197,3 +197,15 @@ fn parse(s: String) -> Result[Int32, String] = match int.parse(s) {
   else ok(int.to_int32(n)),
   err(e) => err(e),
 }
+
+// ── Integer: radix text (R-sized-06) ──
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: Int32, radix: Int) -> String = int.to_string_radix(int.from_int32(x), radix)
+
+/// Int32 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -2147483648..2147483647.
+fn parse_radix(s: String, radix: Int) -> Result[Int32, String] = match int.parse_radix(s, radix) {
+  ok(n) => if n < -2147483648 then err("number too small to fit in target type")
+  else if n > 2147483647 then err("number too large to fit in target type")
+  else ok(int.to_int32(n)),
+  err(e) => err(e),
+}

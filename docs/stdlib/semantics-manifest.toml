@@ -1664,6 +1664,21 @@ index_unit = "bit-pattern"
 probe = 'float.to_bits(1.0)'
 expect = "4607182418800017408"
 
+[[float.fn]]
+name = "compare"
+index_unit = "value"
+probe = 'float.compare(0.0 * (0.0 - 1.0), 0.0)'
+expect = "-1"
+note = """
+The IEEE total order: -0.0 sorts below 0.0, where -0.0 < 0.0 is false.
+"""
+
+[[float.fn]]
+name = "from_bits"
+index_unit = "bit-pattern"
+probe = 'float.to_string(float.from_bits(4607182418800017408))'
+expect = "1.0"
+
 # index_unit vocabulary — io:
 #   byte-value — the Int is one byte 0–255, or -1 as the EOF sentinel
 #   byte-count — the Int counts bytes to read
@@ -1878,6 +1893,93 @@ name = "parse"
 index_unit = "value"
 probe = 'int.parse("-42") ?? 0'
 expect = "-42"
+
+[[int.fn]]
+name = "count_ones"
+index_unit = "count"
+probe = 'int.count_ones(255)'
+expect = "8"
+
+[[int.fn]]
+name = "bit_length"
+index_unit = "count"
+probe = 'int.bit_length(255)'
+expect = "8"
+
+[[int.fn]]
+name = "compare"
+index_unit = "value"
+probe = 'int.compare(0 - 5, 3)'
+expect = "-1"
+
+[[int.fn]]
+name = "sign"
+index_unit = "value"
+probe = 'int.sign(0 - 9)'
+expect = "-1"
+
+[[int.fn]]
+name = "pow"
+index_unit = "value"
+probe = 'int.pow(0 - 2, 3)'
+expect = "-8"
+
+[[int.fn]]
+name = "floor_div"
+index_unit = "value"
+probe = 'int.floor_div(0 - 7, 2)'
+expect = "-4"
+note = """
+Rounds toward -inf, not toward 0: -7 / 2 is -3, floor_div(-7, 2) is -4.
+"""
+
+[[int.fn]]
+name = "modulo"
+index_unit = "value"
+probe = 'int.modulo(0 - 7, 3)'
+expect = "2"
+note = """
+The remainder takes the sign of the divisor: -7 % 3 is -1, modulo(-7, 3) is 2.
+"""
+
+[[int.fn]]
+name = "wrap"
+index_unit = "count"
+probe = 'int.wrap(0 - 1, 8)'
+expect = "255"
+note = """
+The `bits` param is a WIDTH count: -1 kept to its low 8 bits is 255.
+"""
+
+[[int.fn]]
+name = "wrap_sub"
+index_unit = "value"
+probe = 'int.wrap_sub(int.min_value(), 1)'
+expect = "9223372036854775807"
+
+[[int.fn]]
+name = "bshr_logical"
+index_unit = "bit-pattern"
+probe = 'int.bshr_logical(0 - 1, 63)'
+expect = "1"
+note = """
+The shift fills with zeros: the 64-bit pattern of -1 shifted 63 leaves only the low bit.
+"""
+
+[[int.fn]]
+name = "to_string_radix"
+index_unit = "value"
+probe = 'int.to_string_radix(0 - 255, 16)'
+expect = "-ff"
+note = """
+Signed digits, not the bit pattern: to_hex(-255) is the 16-digit two's complement, to_string_radix(-255, 16) is -ff.
+"""
+
+[[int.fn]]
+name = "parse_radix"
+index_unit = "value"
+probe = 'int.parse_radix("-0xff", 16) ?? 0'
+expect = "-255"
 
 [[int.fn]]
 name = "from_hex"

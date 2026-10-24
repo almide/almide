@@ -18,3 +18,11 @@ test "float.to_fixed unit=count" {
 test "float.to_bits unit=bit-pattern" {
   assert_eq("${float.to_bits(1.0)}", "4607182418800017408")
 }
+
+test "float.compare unit=value" {
+  assert_eq("${float.compare(0.0 * (0.0 - 1.0), 0.0)}", "-1")
+}
+
+test "float.from_bits unit=bit-pattern" {
+  assert_eq("${float.to_string(float.from_bits(4607182418800017408))}", "1.0")
+}

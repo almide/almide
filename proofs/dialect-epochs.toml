@@ -252,4 +252,13 @@ removal_epoch = 16
 summary = "The five `bytes` raw-pointer functions are `@deprecated` (E052) in favour of the `ffi` module, which needs `import ffi` (R-ffi-01). `ffi.read` / `ffi.write` are effect fns (R-ffi-02) and `ffi.write` takes the address first (R-ffi-03)."
 removal = "`bytes.as_ptr(b)` / `bytes.as_mut_ptr(b)` → `ffi.address(b)`; `bytes.data_ptr(b)` → `ffi.to_int(ffi.address(b))` (0 for an empty b); `bytes.from_raw_ptr(p, n)` → `ffi.read(p, n)` from an effect fn; `bytes.copy_to_ptr(b, p, c)` → `ffi.write(p, b, c)` from an effect fn — each with `import ffi`"
 
+[[deprecation]]
+id = "numeric-renames-wave-2"
+issue = 3985
+since_epoch = 15
+since = "0.69.0"
+removal_epoch = 16
+summary = "Three numeric functions are `@deprecated` (E052) under a new name with the same signature and answers: `int.pop_count` → `int.count_ones` (R-int-07, #3985), `int.bit_width` → `int.bit_length` (R-int-11, #4004), and `float.sign` → `float.signum` (R-float-05, #3972), which frees `sign` for the 0-for-0 answer every other number type gives."
+removal = "`int.pop_count(n)` → `int.count_ones(n)`; `int.bit_width(n)` → `int.bit_length(n)`; `float.sign(x)` → `float.signum(x)` (still 1.0 for 0.0 and -1.0 for -0.0)"
+
 # ======================================================

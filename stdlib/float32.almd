@@ -133,3 +133,11 @@ fn max_value() -> Float32 = from_bits(2139095039)
 
 /// Most negative finite Float32 (= -max_value()), not the smallest positive.
 fn min_value() -> Float32 = from_bits(4286578687)
+
+// Read through float.parse and narrowed: correctly rounded except a decimal lying within
+// half a Float ulp of a Float32 midpoint, which the second rounding sends to the even side.
+/// Float32 from trimmed s, the grammar of float.parse; err on junk; overflow gives inf.
+fn parse(s: String) -> Result[Float32, String] = match float.parse(s) {
+  ok(f) => ok(float.to_float32(f)),
+  err(e) => err(e),
+}

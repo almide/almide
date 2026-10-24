@@ -206,3 +206,13 @@ fn parse(s: String) -> Result[Int64, String] = match int.parse(s) {
   ok(n) => ok(int.to_int64(n)),
   err(e) => err(e),
 }
+
+// ── Integer: radix text (R-sized-06) ──
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+fn to_string_radix(x: Int64, radix: Int) -> String = int.to_string_radix(int.from_int64(x), radix)
+
+/// Int64 from trimmed s in radix, the grammar of int.parse_radix; err on junk or overflow.
+fn parse_radix(s: String, radix: Int) -> Result[Int64, String] = match int.parse_radix(s, radix) {
+  ok(n) => ok(int.to_int64(n)),
+  err(e) => err(e),
+}

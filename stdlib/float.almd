@@ -75,8 +75,13 @@ fn max(a: Float, b: Float) -> Float = _
 fn clamp(n: Float, lo: Float, hi: Float) -> Float = _
 
 /// 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
+@deprecated(since=15, use="float.signum", note="signum keeps sign's answers, 1.0 for 0.0 included")
 @intrinsic("almide_rt_float_sign")
 fn sign(n: Float) -> Float = _
+
+/// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
+fn signum(x: Float) -> Float = if float.is_nan(x) then x
+else if float.to_bits(x) < 0 then -1.0 else 1.0
 
 // ── Classification ──
 /// True only for NaN (unequal to itself).
@@ -241,3 +246,41 @@ fn to_uint32_saturating(n: Float) -> UInt32 = float.to_uint32(n)
 
 /// Truncates, clamps to 0..2^64-1; NaN gives 0.
 fn to_uint64_saturating(n: Float) -> UInt64 = float.to_uint64(n)
+
+// ── FloatingPoint: rounding, classification, power, order (R-float-04, R-math-01, R-sized-02) ──
+/// Round toward 0; -0.5 gives -0.0.
+fn trunc(x: Float) -> Float = if x < 0.0 then float.ceil(x) else float.floor(x)
+
+/// True unless x is inf, -inf or NaN.
+fn is_finite(x: Float) -> Bool = not (float.is_nan(x) or float.is_infinite(x))
+
+/// base to the exp; NaN for a negative base with a fractional exp.
+fn pow(base: Float, exp: Float) -> Float = math.fpow(base, exp)
+
+/// -1, 0 or 1 in IEEE-754 total order: -0.0 < 0.0, NaN above inf and equal to itself.
+fn compare(a: Float, b: Float) -> Int = int.compare(order_key(a), order_key(b))
+
+// The bits read as a signed key whose Int order is the total order; to_bits has one NaN.
+local fn order_key(x: Float) -> Int = {
+  let bits = float.to_bits(x)
+  if bits < 0 then int.bxor(bits, int.max_value()) else bits
+}
+
+// ── FloatingPoint: bits and constants (R-float-02, R-float-03) ──
+/// Float whose IEEE-754 binary64 bits are bits; any NaN gives the one NaN.
+fn from_bits(bits: Int) -> Float = int.bits_to_float(bits)
+
+/// Positive infinity.
+fn infinity() -> Float = from_bits(9218868437227405312)
+
+/// The one quiet NaN (bits 0x7ff8000000000000).
+fn nan() -> Float = from_bits(9221120237041090560)
+
+/// Gap between 1.0 and the next Float: 2^-52.
+fn epsilon() -> Float = from_bits(4372995238176751616)
+
+/// Largest finite Float, about 1.7976931348623157e308.
+fn max_value() -> Float = from_bits(9218868437227405311)
+
+/// Most negative finite Float (= -max_value()), not the smallest positive.
+fn min_value() -> Float = from_bits(-4503599627370497)

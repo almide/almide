@@ -15,6 +15,54 @@ test "int.parse unit=value" {
   assert_eq("${int.parse("-42") ?? 0}", "-42")
 }
 
+test "int.count_ones unit=count" {
+  assert_eq("${int.count_ones(255)}", "8")
+}
+
+test "int.bit_length unit=count" {
+  assert_eq("${int.bit_length(255)}", "8")
+}
+
+test "int.compare unit=value" {
+  assert_eq("${int.compare(0 - 5, 3)}", "-1")
+}
+
+test "int.sign unit=value" {
+  assert_eq("${int.sign(0 - 9)}", "-1")
+}
+
+test "int.pow unit=value" {
+  assert_eq("${int.pow(0 - 2, 3)}", "-8")
+}
+
+test "int.floor_div unit=value" {
+  assert_eq("${int.floor_div(0 - 7, 2)}", "-4")
+}
+
+test "int.modulo unit=value" {
+  assert_eq("${int.modulo(0 - 7, 3)}", "2")
+}
+
+test "int.wrap unit=count" {
+  assert_eq("${int.wrap(0 - 1, 8)}", "255")
+}
+
+test "int.wrap_sub unit=value" {
+  assert_eq("${int.wrap_sub(int.min_value(), 1)}", "9223372036854775807")
+}
+
+test "int.bshr_logical unit=bit-pattern" {
+  assert_eq("${int.bshr_logical(0 - 1, 63)}", "1")
+}
+
+test "int.to_string_radix unit=value" {
+  assert_eq("${int.to_string_radix(0 - 255, 16)}", "-ff")
+}
+
+test "int.parse_radix unit=value" {
+  assert_eq("${int.parse_radix("-0xff", 16) ?? 0}", "-255")
+}
+
 test "int.from_hex unit=value" {
   assert_eq("${int.from_hex("ff") ?? 0}", "255")
 }

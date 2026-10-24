@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 48 stdlib modules, 1471 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 48 stdlib modules, 1511 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -19,8 +19,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [env](#env) | 9 | 0 |
 | [error](#error) | 3 | 0 |
 | [ffi](#ffi) | 4 | 0 |
-| [float](#float) | 46 | 0 |
-| [float32](#float32) | 30 | 0 |
+| [float](#float) | 57 | 0 |
+| [float32](#float32) | 31 | 0 |
 | [float64](#float64) | 31 | 0 |
 | [fs](#fs) | 41 | 1 |
 | [hash](#hash) | 12 | 0 |
@@ -28,11 +28,11 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 5 | 0 |
 | [http](#http) | 48 | 4 |
-| [int](#int) | 72 | 0 |
-| [int16](#int16) | 50 | 0 |
-| [int32](#int32) | 52 | 0 |
-| [int64](#int64) | 54 | 0 |
-| [int8](#int8) | 48 | 0 |
+| [int](#int) | 84 | 0 |
+| [int16](#int16) | 52 | 0 |
+| [int32](#int32) | 54 | 0 |
+| [int64](#int64) | 56 | 0 |
+| [int8](#int8) | 50 | 0 |
 | [io](#io) | 8 | 0 |
 | [json](#json) | 15 | 0 |
 | [list](#list) | 79 | 0 |
@@ -49,10 +49,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [set](#set) | 40 | 0 |
 | [string](#string) | 88 | 0 |
 | [testing](#testing) | 10 | 0 |
-| [uint16](#uint16) | 44 | 0 |
-| [uint32](#uint32) | 48 | 0 |
-| [uint64](#uint64) | 52 | 0 |
-| [uint8](#uint8) | 40 | 0 |
+| [uint16](#uint16) | 46 | 0 |
+| [uint32](#uint32) | 50 | 0 |
+| [uint64](#uint64) | 54 | 0 |
+| [uint8](#uint8) | 42 | 0 |
 | [url](#url) | 10 | 1 |
 | [value](#value) | 20 | 0 |
 | [zlib](#zlib) | 13 | 0 |
@@ -401,7 +401,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float.min(a: Float, b: Float) -> Float` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
 - `float.max(a: Float, b: Float) -> Float` — Greater; a NaN operand is ignored; 0.0 > -0.0.
 - `float.clamp(n: Float, lo: Float, hi: Float) -> Float` — n limited to lo..hi; lo > hi or a NaN bound aborts.
-- `float.sign(n: Float) -> Float` — 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
+- `float.sign(n: Float) -> Float   (deprecated — use float.signum)` — 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
+- `float.signum(x: Float) -> Float` — 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
 - `float.is_nan(n: Float) -> Bool` — True only for NaN (unequal to itself).
 - `float.is_infinite(n: Float) -> Bool` — True for inf and -inf; false for NaN.
 - `float.to_int8(n: Float) -> Int8` — Truncates toward 0, saturating; NaN gives 0.
@@ -433,6 +434,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float.to_uint16_saturating(n: Float) -> UInt16` — Truncates, clamps to 0..65535; NaN gives 0.
 - `float.to_uint32_saturating(n: Float) -> UInt32` — Truncates, clamps to 0..2^32-1; NaN gives 0.
 - `float.to_uint64_saturating(n: Float) -> UInt64` — Truncates, clamps to 0..2^64-1; NaN gives 0.
+- `float.trunc(x: Float) -> Float` — Round toward 0; -0.5 gives -0.0.
+- `float.is_finite(x: Float) -> Bool` — True unless x is inf, -inf or NaN.
+- `float.pow(base: Float, exp: Float) -> Float` — base to the exp; NaN for a negative base with a fractional exp.
+- `float.compare(a: Float, b: Float) -> Int` — -1, 0 or 1 in IEEE-754 total order: -0.0 < 0.0, NaN above inf and equal to itself.
+- `float.from_bits(bits: Int) -> Float` — Float whose IEEE-754 binary64 bits are bits; any NaN gives the one NaN.
+- `float.infinity() -> Float` — Positive infinity.
+- `float.nan() -> Float` — The one quiet NaN (bits 0x7ff8000000000000).
+- `float.epsilon() -> Float` — Gap between 1.0 and the next Float: 2^-52.
+- `float.max_value() -> Float` — Largest finite Float, about 1.7976931348623157e308.
+- `float.min_value() -> Float` — Most negative finite Float (= -max_value()), not the smallest positive.
 
 ## float32
 
@@ -468,6 +479,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float32.epsilon() -> Float32` — Gap between 1.0 and the next Float32: 2^-23.
 - `float32.max_value() -> Float32` — Largest finite Float32, about 3.4028235e38.
 - `float32.min_value() -> Float32` — Most negative finite Float32 (= -max_value()), not the smallest positive.
+- `float32.parse(s: String) -> Result[Float32, String]` — Float32 from trimmed s, the grammar of float.parse; err on junk; overflow gives inf.
 
 ## float64
 
@@ -685,10 +697,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int.bshr(a: Int, n: Int) -> Int` — Arithmetic (sign-filling) right shift; n mod 64.
 - `int.count_leading_zeros(n: Int) -> Int` — Leading zero bits of the 64-bit word; 64 for 0.
 - `int.count_trailing_zeros(n: Int) -> Int` — Trailing zero bits; 64 for 0.
-- `int.pop_count(n: Int) -> Int` — Number of set bits; 64 for -1.
+- `int.pop_count(n: Int) -> Int   (deprecated — use int.count_ones)` — Number of set bits; 64 for -1.
+- `int.count_ones(x: Int) -> Int` — Number of set bits; 64 for -1.
 - `int.bit_reverse(n: Int) -> Int` — The 64 bits in reverse order; 1 gives min_value.
 - `int.byte_swap(n: Int) -> Int` — The 8 bytes in reverse order (endian flip).
-- `int.bit_width(n: Int) -> Int` — Bits needed to hold n; 0 for 0, 64 if negative.
+- `int.bit_width(n: Int) -> Int   (deprecated — use int.bit_length)` — Bits needed to hold n; 0 for 0, 64 if negative.
+- `int.bit_length(x: Int) -> Int` — Bits needed to hold x; 0 for 0, 64 if negative.
 - `int.log2_floor(n: Int) -> Int` — Floor of log2(n); -1 when n <= 0.
 - `int.log2_ceil(n: Int) -> Int` — Ceiling of log2(n); 0 when n <= 1.
 - `int.next_power_of_two(n: Int) -> Int` — Least power of 2 >= n; 1 if n <= 1; min_value past 2^62.
@@ -736,6 +750,16 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int.from_uint64_saturating(n: UInt64) -> Int` — Clamps n to at most 2^63-1.
 - `int.min_value() -> Int` — Smallest Int: -2^63.
 - `int.max_value() -> Int` — Largest Int: 2^63-1.
+- `int.compare(a: Int, b: Int) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `int.sign(x: Int) -> Int` — -1, 0 or 1 by the sign of x; 0 for 0.
+- `int.pow(base: Int, exp: Int) -> Int` — base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
+- `int.floor_div(a: Int, b: Int) -> Int` — Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
+- `int.modulo(a: Int, b: Int) -> Int` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+- `int.wrap(x: Int, bits: Int) -> Int` — x mod 2^bits, non-negative when bits < 64; bits <= 0 aborts, bits >= 64 keeps x.
+- `int.wrap_sub(a: Int, b: Int) -> Int` — a - b wrapped to 64 bits.
+- `int.bshr_logical(a: Int, n: Int) -> Int` — Zero-filling right shift of the 64 bits; n is taken mod 64.
+- `int.to_string_radix(x: Int, radix: Int) -> String` — Signed digits of x in radix, lowercase; -255 in 16 is "-ff"; radix outside 2..36 aborts.
+- `int.parse_radix(s: String, radix: Int) -> Result[Int, String]` — Int from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2; err on junk or overflow; radix outside 2..36 aborts.
 
 ## int16
 
@@ -791,6 +815,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int16.rotate_right(a: Int16, n: Int) -> Int16` — The 16 bits of a rotated right by n; n is taken mod 16.
 - `int16.bit_length(x: Int16) -> Int` — Bits needed to hold x; 0 for 0, 16 if negative.
 - `int16.parse(s: String) -> Result[Int16, String]` — Decimal Int16 from trimmed s; err on junk or outside -32768..32767.
+- `int16.to_string_radix(x: Int16, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `int16.parse_radix(s: String, radix: Int) -> Result[Int16, String]` — Int16 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -32768..32767.
 
 ## int32
 
@@ -848,6 +874,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int32.rotate_right(a: Int32, n: Int) -> Int32` — The 32 bits of a rotated right by n; n is taken mod 32.
 - `int32.bit_length(x: Int32) -> Int` — Bits needed to hold x; 0 for 0, 32 if negative.
 - `int32.parse(s: String) -> Result[Int32, String]` — Decimal Int32 from trimmed s; err on junk or outside -2147483648..2147483647.
+- `int32.to_string_radix(x: Int32, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `int32.parse_radix(s: String, radix: Int) -> Result[Int32, String]` — Int32 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -2147483648..2147483647.
 
 ## int64
 
@@ -907,6 +935,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int64.rotate_right(a: Int64, n: Int) -> Int64` — The 64 bits of a rotated right by n; n is taken mod 64.
 - `int64.bit_length(x: Int64) -> Int` — Bits needed to hold x; 0 for 0, 64 if negative.
 - `int64.parse(s: String) -> Result[Int64, String]` — Decimal Int64 from trimmed s; err on junk or overflow.
+- `int64.to_string_radix(x: Int64, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `int64.parse_radix(s: String, radix: Int) -> Result[Int64, String]` — Int64 from trimmed s in radix, the grammar of int.parse_radix; err on junk or overflow.
 
 ## int8
 
@@ -960,6 +990,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int8.rotate_right(a: Int8, n: Int) -> Int8` — The 8 bits of a rotated right by n; n is taken mod 8.
 - `int8.bit_length(x: Int8) -> Int` — Bits needed to hold x; 0 for 0, 8 if negative.
 - `int8.parse(s: String) -> Result[Int8, String]` — Decimal Int8 from trimmed s; err on junk or outside -128..127.
+- `int8.to_string_radix(x: Int8, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `int8.parse_radix(s: String, radix: Int) -> Result[Int8, String]` — Int8 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -128..127.
 
 ## io
 
@@ -1554,6 +1586,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint16.rotate_right(a: UInt16, n: Int) -> UInt16` — The 16 bits of a rotated right by n; n is taken mod 16.
 - `uint16.bit_length(x: UInt16) -> Int` — Bits needed to hold x; 0 for 0.
 - `uint16.parse(s: String) -> Result[UInt16, String]` — Decimal UInt16 from trimmed s; err on junk, a sign of -, or above 65535.
+- `uint16.to_string_radix(x: UInt16, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `uint16.parse_radix(s: String, radix: Int) -> Result[UInt16, String]` — UInt16 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 65535.
 
 ## uint32
 
@@ -1607,6 +1641,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint32.rotate_right(a: UInt32, n: Int) -> UInt32` — The 32 bits of a rotated right by n; n is taken mod 32.
 - `uint32.bit_length(x: UInt32) -> Int` — Bits needed to hold x; 0 for 0.
 - `uint32.parse(s: String) -> Result[UInt32, String]` — Decimal UInt32 from trimmed s; err on junk, a sign of -, or above 4294967295.
+- `uint32.to_string_radix(x: UInt32, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `uint32.parse_radix(s: String, radix: Int) -> Result[UInt32, String]` — UInt32 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 4294967295.
 
 ## uint64
 
@@ -1664,6 +1700,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint64.rotate_right(a: UInt64, n: Int) -> UInt64` — The 64 bits of a rotated right by n; n is taken mod 64.
 - `uint64.bit_length(x: UInt64) -> Int` — Bits needed to hold x; 0 for 0.
 - `uint64.parse(s: String) -> Result[UInt64, String]` — Decimal UInt64 from trimmed s; err on junk, a sign of -, or above 2^64-1.
+- `uint64.to_string_radix(x: UInt64, radix: Int) -> String` — Digits of x in radix, lowercase, no sign; exact up to 2^64-1; radix outside 2..36 aborts.
+- `uint64.parse_radix(s: String, radix: Int) -> Result[UInt64, String]` — UInt64 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 2^64-1.
 
 ## uint8
 
@@ -1709,6 +1747,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint8.rotate_right(a: UInt8, n: Int) -> UInt8` — The 8 bits of a rotated right by n; n is taken mod 8.
 - `uint8.bit_length(x: UInt8) -> Int` — Bits needed to hold x; 0 for 0.
 - `uint8.parse(s: String) -> Result[UInt8, String]` — Decimal UInt8 from trimmed s; err on junk, a sign of -, or above 255.
+- `uint8.to_string_radix(x: UInt8, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `uint8.parse_radix(s: String, radix: Int) -> Result[UInt8, String]` — UInt8 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 255.
 
 ## url
 

@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (48 functions)
+## Signature index (50 functions)
 
 ```
 // Sign-extending widen; always exact.
@@ -255,6 +255,14 @@ int8.bit_length(x: Int8) -> Int
 // Decimal Int8 from trimmed s; err on junk or outside -128..127.
 // @since unreleased
 int8.parse(s: String) -> Result[Int8, String]
+
+// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+// @since unreleased
+int8.to_string_radix(x: Int8, radix: Int) -> String
+
+// Int8 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -128..127.
+// @since unreleased
+int8.parse_radix(s: String, radix: Int) -> Result[Int8, String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
