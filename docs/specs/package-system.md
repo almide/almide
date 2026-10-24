@@ -153,7 +153,7 @@ warning: unknown key `brnach` in dependency `foo` is ignored — it changes noth
 | top level | `[package]`, `[dependencies]`, `[native-deps]`, `[permissions]`, `[target]` |
 | `[package]` | `name`, `version`, `almide`; and `description`, `edition`, `license`, `repository`, which describe the package and are read by nothing (no warning) |
 | a `[dependencies]` entry (inline table, dotted keys or `[dependencies.<name>]`) | `git`, `tag`, `branch`, `version`, `path`, `subdir` |
-| `[permissions]` | `allow`, `proc` |
+| `[permissions]` | `allow`, `proc`, `native` |
 
 A dependency entry that is not a table, or names neither `git` nor `path`,
 declares nothing and is warned about the same way. `[native-deps]` entries are
@@ -290,6 +290,69 @@ declarations are written and Cargo merges them.
 
 Tests: `tests/manifest_toml_reader_test.rs`, `tests/native_deps_target_cfg_test.rs`,
 and the `cargo_build` unit tests.
+
+### 6.3 Native code from a dependency needs a grant: `[permissions] native`
+
+A dependency's native code is compiled and run by cargo during the build,
+before and outside every `[permissions]` check (#4093). It reaches the build
+three ways:
+
+- its `native/*.rs` modules, and the files in `native/` subdirectories, are
+  copied into the generated crate;
+- its `[native-deps]` and `[target.<platform>.native-deps]` crates are added
+  to the generated Cargo.toml, so their `build.rs` and proc macros run;
+- an `@extern(rust, "path", "fn")` fn is emitted as a call to `path::fn`, for
+  any Rust path (`std` included, with no `native/` at all), and an
+  `@extern(c, …)` fn links a C symbol.
+
+So `almide build`, `almide run`, `almide test` and `almide bench` refuse a
+dependency, direct or reached through another dependency, that brings any of
+these, unless the root `almide.toml` names it in `[permissions] native`. The
+refusal happens before anything is compiled, on every `--target` (the rule
+belongs to the dependency graph, like `[permissions]` itself, not to one
+target), and exits 1:
+
+```text
+error: dependency `nat` brings native code that ./almide.toml does not grant
+  nat 0.1.0 at ../nat
+  native code: native/natval.rs; [native-deps] itoa; @extern fn `number` (src/mod.almd:2)
+  note: native code is compiled and run by cargo during the build, before and outside every [permissions] check
+  hint: if you trust `nat`, grant it in ./almide.toml:
+    [permissions]
+    native = ["nat"]
+```
+
+```toml
+[permissions]
+native = ["nat"]
+```
+
+The grant names a package, not a version, and covers only that package:
+granting a direct dependency does not grant the native code of what it pulls
+in. Only the root manifest's grants count; a dependency's own
+`[permissions] native` is not read. The root package's own `native/`,
+`[native-deps]` and `@extern` fns need no grant.
+
+Every native build prints one line for each granted dependency that brings
+native code:
+
+```text
+note: building native code from `nat` (granted by [permissions].native): native/natval.rs; [native-deps] itoa; @extern fn `number` (src/mod.almd:2)
+```
+
+`almide deps` shows, for every dependency (direct, then the ones reached
+through them), its version, its capability set (the categories
+`[permissions].allow` is checked on, where an `@extern` fn counts as every
+category), the native code it brings and whether that code is granted:
+
+```text
+nat = path ../nat
+  version: 0.1.0
+  capabilities: Env, Fan, IO, Net, Rand, Time
+  native code: native/natval.rs; [native-deps] itoa; @extern fn `number` (src/mod.almd:2) (granted by [permissions].native)
+```
+
+Tests: `tests/native_grant_test.rs`.
 
 ## 7. Lock File
 

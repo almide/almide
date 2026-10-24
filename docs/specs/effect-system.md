@@ -580,6 +580,22 @@ report, so monomorphisation never sees them. No surface syntax is involved.
 
 Tests: `tests/effect_category_flow_test.rs`, `tests/effects_report_callbacks_test.rs`
 
+### Native code from dependencies: `native` (#4093)
+
+The categories above are inferred from Almide code. A dependency's native code
+(`native/*.rs`, `[native-deps]` crates and their `build.rs`, `@extern(rust|c)`
+fns) runs before and outside that inference, while cargo builds the program.
+`[permissions] native` lists the dependency packages allowed to bring it:
+
+```toml
+[permissions]
+native = ["nat"]
+```
+
+`build`, `run`, `test` and `bench` refuse an ungranted one on every target;
+the root package's own native code needs no grant
+([package-system.md §6.3](./package-system.md#63-native-code-from-a-dependency-needs-a-grant-permissions-native)).
+
 ### Design layers
 
 - **Layer 1** (implemented): `effect fn` vs `fn` -- the type checker enforces this

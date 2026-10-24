@@ -900,13 +900,25 @@ almide add almide-graphics/ceangal2@v0.1.0 --subdir ceangal  # リポジトリ�
 
 ### `almide deps`
 
-依存パッケージの一覧を表示。
+依存パッケージの一覧を表示。依存を取得し、各パッケージ(直接依存の後に、それらを通じて
+入る依存)について version、ケイパビリティ集合(`[permissions].allow` が検査するカテゴリ。
+`@extern` fn は全カテゴリ)、持ち込むネイティブコード(`native/`、`[native-deps]`、
+`@extern(rust|c)` fn)と、それが `[permissions].native` で許可されているかを表示する(#4093)。
+許可の無いネイティブコードを持つ依存は `build` / `run` / `test` / `bench` が拒否する
+(`docs/specs/package-system.md` §6.3)。
 
 ```bash
 almide deps
 # bindgen = https://github.com/almide/almide-bindgen (v0.1.0)
-# json = https://github.com/almide/json (main)
+#   version: 0.1.0
+#   capabilities: none
+#   native code: none
+# nat = path ../nat
+#   version: 0.1.0
+#   capabilities: Env, Fan, IO, Net, Rand, Time
+#   native code: native/natval.rs; @extern fn `number` (src/mod.almd:2) (granted by [permissions].native)
 # ceangal = https://github.com/almide-graphics/ceangal2 (v0.1.0) subdir ceangal
+#   ...
 ```
 
 ---
