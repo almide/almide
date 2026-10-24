@@ -27,6 +27,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
     ALL.get_or_init(|| with_declared(&[
         (crate::embedded::SRC_INT_TO_STRING, &[("int_to_string", "int.to_string")]),
         (crate::embedded::SRC_RANDOM_INT, &[("random_int", "random.int")]),
+        (crate::embedded::SRC_RANDOM_BYTES, &[("random_bytes", "random.bytes")]),
         (crate::embedded::SRC_RANDOM_FLOAT, &[("random_float", "random.float")]),
         (crate::embedded::SRC_RANDOM_CHOICE, &[("random_choice", "random.choice"), ("random_choice_str", "random.choice_str"), ("random_choice_pair", "random.choice_pair")]),
         (crate::embedded::SRC_RANDOM_SHUFFLE, &[("random_shuffle", "random.shuffle"), ("random_shuffle_str", "random.shuffle_str"), ("random_shuffle_pair", "random.shuffle_pair")]),
