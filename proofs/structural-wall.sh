@@ -301,6 +301,46 @@ else
   rm -f "$PGEN"; exit 1
 fi
 
+# BOUNDS POISON LEG (#4005): proofs/poisoned-certs/bounds/*.cert are the
+# bounds witnesses the structural emitter writes with a bounds check lost —
+# scripts/bounds-witness-reinject.sh re-injects each bug and pins its witness
+# to these files. Every verdict must REJECT each one, on every run.
+echo "== BOUNDS POISON LEG (#4005): every lost-check bounds witness is REJECTED by all three verdicts =="
+BPOISONED=("$ROOT"/proofs/poisoned-certs/bounds/*.cert)
+if [ ! -e "${BPOISONED[0]}" ]; then
+  echo "STRUCTURAL WALL FAIL: proofs/poisoned-certs/bounds/ holds no certificate — the bounds poison leg would pass vacuously." >&2
+  exit 1
+fi
+BGEN="$(mktemp /tmp/KernelBoundsPoison_XXXXXX).v"
+python3 - "${BPOISONED[@]}" > "$BGEN" <<'PYEOF'
+import sys
+print("From AlmideTrust Require Import BoundsCert.")
+print("From Stdlib Require Import String.")
+print("Open Scope string_scope.")
+for path in sys.argv[1:]:
+    print('Goal check_bounds_cert "%s" = false.' % open(path).read().replace('"', '""'))
+    print("Proof. vm_compute. reflexivity. Qed.")
+PYEOF
+for cert in "${BPOISONED[@]}"; do
+  name="${cert#"$ROOT"/}"
+  set +e
+  ./checker bounds "$cert" >/dev/null 2>&1; XRC=$?
+  "$VERIFY" bounds "$cert" >/dev/null 2>&1; PRC=$?
+  set -e
+  if [ "$XRC" -ne 1 ] || [ "$PRC" -ne 1 ]; then
+    echo "STRUCTURAL WALL FAIL: $name was not rejected (extracted checker exit $XRC, almide-verify exit $PRC; want 1 and 1)." >&2
+    rm -f "$BGEN"; exit 1
+  fi
+  echo "  REJECT $name (extracted checker + almide-verify)"
+done
+if (cd "$ROOT/proofs" && "$COQC" -Q . AlmideTrust "$BGEN" >/dev/null 2>&1); then
+  echo "  KERNEL OK: the Rocq kernel rejects all ${#BPOISONED[@]} bounds poisoned certificate(s)"
+  rm -f "$BGEN" "${BGEN%.v}.vo" "${BGEN%.v}.vos" "${BGEN%.v}.vok" "${BGEN%.v}.glob"
+else
+  echo "STRUCTURAL WALL FAIL: the KERNEL did not reject a bounds poisoned certificate (check_bounds_cert = false failed)." >&2
+  rm -f "$BGEN"; exit 1
+fi
+
 echo
 echo "STRUCTURAL WALL OK: over the $N certified spec/wasm_cross fixtures, every ownership, call-mode,"
 echo "bounds, name-totality, capability and call-graph witness of the structural build is accepted —"
