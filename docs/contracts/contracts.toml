@@ -5144,6 +5144,9 @@ evidence  = [
   { path = "spec/wasm_cross/fs_root_escape.almd", class = "fixture" },
   { path = "spec/stdlib/fs_root_test.almd", class = "fixture" },
   { path = "tests/fs_scope_test.rs", name = "a_symlink_inside_a_root_pointing_outside_is_refused_alike_on_both_targets", class = "fixture" },
+  { path = "tests/fs_scope_test.rs", name = "a_directory_flipped_to_a_symlink_during_rooted_reads_never_leaks_on_either_target", class = "fixture" },
+  { path = "tests/fs_scope_test.rs", name = "the_stock_wasm_artifact_refuses_rooted_symlinks_alike", class = "fixture" },
+  { path = "crates/almide-rt-core/tests/fs_beneath_core.rs", name = "a_dir_swapped_for_a_symlink_mid_walk_is_never_followed", class = "fixture" },
 ]
 
 [[contract]]
