@@ -7,61 +7,64 @@ pub fn almide_rt_json_stringify(v: &AlmideValue) -> AlmideString { almide_rt_val
 
 pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
     let __almide_r: Result<AlmideValue, String> = (|| {
-        // Byte-offset recursive descent (#1678). The first version collected the
-        // input into a `Vec<char>` — 4 bytes per char plus a full decode pass
-        // before the first token — and built every string one `push(char)` at a
-        // time. The self-hosted transcription (`stdlib/json_parse.almd`) had
-        // already moved to byte offsets; this brings the native oracle level with
-        // it. The accepted language and every lenient edge are UNCHANGED: an
-        // unterminated string yields what was read, an unknown escape consumes
-        // itself and writes nothing, `\u` advances four chars unconditionally, a
-        // lone surrogate is dropped, whitespace is `char::is_whitespace` (Unicode),
-        // and an error reports the CHAR index of the offending position (ALS-T3)
-        // — computed by one linear count at error time only.
+        // Byte-offset recursive descent (#1678) over RFC 8259 plus I-JSON
+        // (RFC 7493), STRICT (ALS-T3, C-087 / C-400 / C-401, #4111 / #4112):
+        // the whole text is one value between JSON whitespace (space, tab, LF,
+        // CR), and every departure is an err with one text per case — a lone
+        // surrogate, an unknown or short escape, a raw control character, a
+        // noncharacter, an unterminated string, a duplicate key, trailing data,
+        // an unquoted key, a trailing comma, a missing separator, a number
+        // outside the RFC grammar. Nothing is ever dropped: the parser used to
+        // delete a lone surrogate and an unknown escape, so `ad\ud800min`
+        // decoded to `admin`. An error reports the CHAR index of the offending
+        // position, computed by one linear count at error time only.
+        // stdlib/json_parse.almd is the self-hosted twin, clause for clause.
         //
         // Nesting is bounded (R-L0-47, R-json-04, #4020): an array or object
-        // opened inside 1000 others is `json: nesting deeper than 1000`, where
-        // it used to recurse until the stack overflowed. `depth` counts the
-        // containers around the value being parsed; stdlib/json_parse.almd
-        // checks at the same point with the same text.
-        let mut pos = 0usize;
-        #[inline]
-        fn char_len_at(t: &str, pos: usize) -> usize {
-            t[pos..].chars().next().map_or(0, |c| c.len_utf8())
+        // opened inside 1000 others is `json: nesting deeper than 1000`.
+        const JSON_MAX_DEPTH: usize = 1000;
+        fn at(what: &str, t: &str, pos: usize) -> String {
+            format!("{} at pos {}", what, t[..pos].chars().count())
         }
-        /// Advance one char (clamped at the end — the old parser overshot and every
-        /// later probe is `pos < len`, so the two are observably the same).
-        #[inline]
-        fn step_char(t: &str, pos: &mut usize) { if *pos < t.len() { *pos += char_len_at(t, *pos); } }
-        /// Advance up to `n` chars, clamped.
-        #[inline]
-        fn step_chars(t: &str, pos: &mut usize, n: usize) { for _ in 0..n { if *pos >= t.len() { break; } *pos += char_len_at(t, *pos); } }
         fn skip_ws(t: &str, pos: &mut usize) {
             let b = t.as_bytes();
-            while *pos < b.len() {
-                let c = b[*pos];
-                if c < 0x80 {
-                    if (c as char).is_whitespace() { *pos += 1; } else { break; }
+            while *pos < b.len() && matches!(b[*pos], b' ' | b'\t' | b'\n' | b'\r') { *pos += 1; }
+        }
+        /// I-JSON §2.1: U+FDD0..=U+FDEF and every U+xFFFE / U+xFFFF.
+        #[inline]
+        fn is_nonchar(cp: u32) -> bool { (0xFDD0..=0xFDEF).contains(&cp) || (cp & 0xFFFE) == 0xFFFE }
+        /// From `i`, the offset of the next `"` or `\` (or the end). A raw
+        /// control character or a raw noncharacter on the way is an err.
+        /// Noncharacters are three or four UTF-8 bytes led by 0xEF..=0xF4, so
+        /// only those lead bytes are decoded.
+        fn scan_plain(t: &str, mut i: usize) -> Result<usize, String> {
+            let b = t.as_bytes();
+            while i < b.len() {
+                let c = b[i];
+                if c == b'"' || c == b'\\' { return Ok(i); }
+                if c < 0x20 { return Err(at("json: control character in string", t, i)); }
+                if c >= 0xEF {
+                    let ch = t[i..].chars().next().unwrap_or('\0');
+                    if is_nonchar(ch as u32) { return Err(at("json: noncharacter", t, i)); }
+                    i += ch.len_utf8();
                 } else {
-                    match t[*pos..].chars().next() {
-                        Some(ch) if ch.is_whitespace() => *pos += ch.len_utf8(),
-                        _ => break,
-                    }
+                    i += 1;
                 }
             }
+            Ok(i)
         }
-        const JSON_MAX_DEPTH: usize = 1000;
         fn parse_value(t: &str, pos: &mut usize, depth: usize) -> Result<AlmideValue, String> {
             skip_ws(t, pos);
             let b = t.as_bytes();
             if *pos >= b.len() { return Err("unexpected end of input".into()); }
             match b[*pos] {
-                b'"' => parse_str_value(t, pos),
+                b'"' => parse_string(t, pos).map(AlmideValue::Str),
                 b'{' | b'[' if depth >= JSON_MAX_DEPTH => Err("json: nesting deeper than 1000".into()),
                 b'{' => parse_object(t, pos, depth + 1),
                 b'[' => parse_array(t, pos, depth + 1),
-                b't' | b'f' => parse_bool(t, pos),
-                b'n' => parse_null(t, pos),
+                b't' => parse_literal(t, pos, b"true", AlmideValue::Bool(true), "expected bool"),
+                b'f' => parse_literal(t, pos, b"false", AlmideValue::Bool(false), "expected bool"),
+                b'n' => parse_literal(t, pos, b"null", AlmideValue::Null, "expected null"),
                 c if c == b'-' || c.is_ascii_digit() => parse_number(t, pos),
                 _ => {
                     let ch = t[*pos..].chars().next().unwrap_or('\u{FFFD}');
@@ -69,127 +72,129 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
                 }
             }
         }
-        fn parse_string(t: &str, pos: &mut usize) -> Result<String, String> {
+        fn parse_literal(t: &str, pos: &mut usize, word: &[u8], v: AlmideValue, msg: &str) -> Result<AlmideValue, String> {
+            if t.as_bytes()[*pos..].starts_with(word) { *pos += word.len(); Ok(v) } else { Err(msg.into()) }
+        }
+        /// A string at its opening quote. The escape-free run becomes the
+        /// `AlmideString` straight from the input slice (#2157); anything with
+        /// an escape is decoded into a `String` first.
+        fn parse_string(t: &str, pos: &mut usize) -> Result<AlmideString, String> {
+            let open = *pos;
+            let start = open + 1;
+            let i = scan_plain(t, start)?;
             let b = t.as_bytes();
-            // Skip the opening quote — or whatever char is here: object keys are
-            // hunted through this path unconditionally (`{x: 1}`), as before.
-            step_char(t, pos);
-            let mut s = String::new();
-            loop {
-                // Fast path: copy the run up to the next quote or backslash as one
-                // slice. Both delimiters are ASCII, so the run ends on a char boundary.
-                let start = *pos;
-                while *pos < b.len() && b[*pos] != b'"' && b[*pos] != b'\\' { *pos += 1; }
-                if *pos > start { s.push_str(&t[start..*pos]); }
-                if *pos >= b.len() { return Ok(s); }
-                if b[*pos] == b'"' { *pos += 1; return Ok(s); }
-                *pos += 1; // past the backslash
-                parse_escape(t, pos, &mut s);
-            }
-        }
-        /// The escape after a backslash: a one-char escape, `\u` and four hex digits, an unknown
-        /// escape (consumed, writes nothing), or nothing at end of input.
-        fn parse_escape(t: &str, pos: &mut usize, s: &mut String) {
-            match t.as_bytes().get(*pos) {
-                Some(b'u') => { *pos += 1; parse_unicode_escape(t, pos, s); }
-                Some(&c) => match simple_escape(c) {
-                    Some(ch) => { s.push(ch); *pos += 1; }
-                    None => step_char(t, pos),
-                },
-                None => {}
-            }
-        }
-        fn simple_escape(c: u8) -> Option<char> {
-            Some(match c {
-                b'n' => '\n', b't' => '\t', b'r' => '\r', b'b' => '\u{0008}', b'f' => '\u{000c}',
-                b'"' => '"', b'\\' => '\\', b'/' => '/',
-                _ => return None,
-            })
-        }
-        /// Four chars of hex as a UTF-16 unit; a high surrogate (D800..=DBFF)
-        /// immediately followed by a "\uYYYY" low surrogate (DC00..=DFFF) joins
-        /// into one astral code point, matching serde_json and the wasm parser.
-        /// #651. The four chars are consumed whether or not they were hex.
-        fn parse_unicode_escape(t: &str, pos: &mut usize, s: &mut String) {
-            let b = t.as_bytes();
-            let hs = *pos;
-            step_chars(t, pos, 4);
-            let hex = &t[hs..*pos];
-            if hex.len() != 4 { return; }
-            let Ok(unit) = u32::from_str_radix(hex, 16) else { return };
-            let low_follows = b.get(*pos) == Some(&b'\\') && b.get(*pos + 1) == Some(&b'u');
-            if !(0xD800..=0xDBFF).contains(&unit) || !low_follows {
-                if let Some(ch) = char::from_u32(unit) { s.push(ch); }
-                return;
-            }
-            let ls = *pos + 2;
-            let mut le = ls;
-            step_chars(t, &mut le, 4);
-            let Ok(low) = u32::from_str_radix(&t[ls..le], 16) else { return };
-            if !(0xDC00..=0xDFFF).contains(&low) { return; }
-            let cp = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
-            if let Some(ch) = char::from_u32(cp) { s.push(ch); }
-            *pos += 6; // consumed "\uYYYY"
-        }
-        /// A string value: the escape-free run becomes the `AlmideString`
-        /// straight from the input slice (#2157) — one allocation, where the
-        /// general path builds a `String` and then copies it into a new block.
-        /// Anything with an escape takes the general path, as `parse_key` does.
-        fn parse_str_value(t: &str, pos: &mut usize) -> Result<AlmideValue, String> {
-            let b = t.as_bytes();
-            let start = *pos + 1;
-            let mut i = start;
-            while i < b.len() && b[i] != b'"' && b[i] != b'\\' { i += 1; }
-            if i < b.len() && b[i] == b'"' {
+            if i >= b.len() { return Err(at("json: unterminated string", t, open)); }
+            if b[i] == b'"' {
                 *pos = i + 1;
-                return Ok(AlmideValue::Str(AlmideString::from(&t[start..i])));
+                return Ok(AlmideString::from(&t[start..i]));
             }
-            parse_string(t, pos).map(|s| AlmideValue::Str(AlmideString::from(s)))
+            decode_string(t, pos, open, start, i).map(AlmideString::from)
         }
-        /// An object key: the escape-free run is interned straight from the input
-        /// slice (no `String` in between); anything with an escape takes the
-        /// general string path and is interned from its result.
+        /// An object key: the escape-free run is interned straight from the
+        /// input slice; anything with an escape is decoded and then interned.
         fn parse_key(t: &str, pos: &mut usize) -> Result<AlmideKey, String> {
+            let open = *pos;
+            let start = open + 1;
+            let i = scan_plain(t, start)?;
             let b = t.as_bytes();
-            let save = *pos;
-            step_char(t, pos);
-            let start = *pos;
-            let mut i = start;
-            while i < b.len() && b[i] != b'"' && b[i] != b'\\' { i += 1; }
-            if i < b.len() && b[i] == b'"' {
+            if i >= b.len() { return Err(at("json: unterminated string", t, open)); }
+            if b[i] == b'"' {
                 *pos = i + 1;
                 return Ok(almide_rt_intern_key(&t[start..i]));
             }
-            *pos = save;
-            parse_string(t, pos).map(|s| almide_rt_intern_key(&s))
+            decode_string(t, pos, open, start, i).map(|s| almide_rt_intern_key(&s))
         }
+        /// The general path: `[start, i)` is plain and `i` is at a backslash.
+        fn decode_string(t: &str, pos: &mut usize, open: usize, start: usize, mut i: usize) -> Result<String, String> {
+            let b = t.as_bytes();
+            let mut s = String::with_capacity(i - start + 8);
+            s.push_str(&t[start..i]);
+            loop {
+                if i >= b.len() { return Err(at("json: unterminated string", t, open)); }
+                if b[i] == b'"' { *pos = i + 1; return Ok(s); }
+                // b[i] is a backslash.
+                let Some(&e) = b.get(i + 1) else { return Err(at("json: unterminated string", t, open)) };
+                let simple = match e {
+                    b'"' => Some('"'), b'\\' => Some('\\'), b'/' => Some('/'),
+                    b'b' => Some('\u{0008}'), b'f' => Some('\u{000c}'),
+                    b'n' => Some('\n'), b'r' => Some('\r'), b't' => Some('\t'),
+                    _ => None,
+                };
+                if let Some(ch) = simple {
+                    s.push(ch);
+                    i += 2;
+                } else if e == b'u' {
+                    let cp = unicode_escape(t, i)?;
+                    s.push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                    i += if cp >= 0x10000 { 12 } else { 6 };
+                } else {
+                    return Err(at("json: unknown escape", t, i));
+                }
+                let j = scan_plain(t, i)?;
+                s.push_str(&t[i..j]);
+                i = j;
+            }
+        }
+        fn hex4(t: &str, p: usize) -> Option<u32> {
+            let h = t.as_bytes().get(p..p + 4)?;
+            if !h.iter().all(|c| c.is_ascii_hexdigit()) { return None; }
+            u32::from_str_radix(std::str::from_utf8(h).ok()?, 16).ok()
+        }
+        /// `\uXXXX` at `i` (the backslash): the code point, a high+low
+        /// surrogate pair joined (#651). A surrogate that is not such a pair
+        /// is a lone surrogate; a noncharacter is refused.
+        fn unicode_escape(t: &str, i: usize) -> Result<u32, String> {
+            let b = t.as_bytes();
+            let unit = hex4(t, i + 2).ok_or_else(|| at("json: invalid unicode escape", t, i))?;
+            let cp = if (0xD800..=0xDBFF).contains(&unit) {
+                let low = if b.get(i + 6) == Some(&b'\\') && b.get(i + 7) == Some(&b'u') { hex4(t, i + 8) } else { None };
+                match low {
+                    Some(lo) if (0xDC00..=0xDFFF).contains(&lo) => 0x10000 + ((unit - 0xD800) << 10) + (lo - 0xDC00),
+                    _ => return Err(at("json: lone surrogate", t, i)),
+                }
+            } else if (0xDC00..=0xDFFF).contains(&unit) {
+                return Err(at("json: lone surrogate", t, i));
+            } else {
+                unit
+            };
+            if is_nonchar(cp) { return Err(at("json: noncharacter", t, i)); }
+            Ok(cp)
+        }
+        fn digits(b: &[u8], mut p: usize) -> usize {
+            while p < b.len() && b[p].is_ascii_digit() { p += 1; }
+            p
+        }
+        /// The number token is the run of `0-9 + - . e E` from `pos`; it must
+        /// match `-? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)?` whole.
         fn parse_number(t: &str, pos: &mut usize) -> Result<AlmideValue, String> {
             let b = t.as_bytes();
             let start = *pos;
-            if b[*pos] == b'-' { *pos += 1; }
-            while *pos < b.len() && b[*pos].is_ascii_digit() { *pos += 1; }
+            let mut end = start;
+            while end < b.len() && matches!(b[end], b'0'..=b'9' | b'+' | b'-' | b'.' | b'e' | b'E') { end += 1; }
+            let bad = || Err(at("json: invalid number", t, start));
+            let mut q = if b[start] == b'-' { start + 1 } else { start };
+            let int_end = digits(b, q);
+            if int_end == q || (b[q] == b'0' && int_end > q + 1) { return bad(); }
+            q = int_end;
             let mut is_float = false;
-            if *pos < b.len() && b[*pos] == b'.' {
-                is_float = true; *pos += 1;
-                while *pos < b.len() && b[*pos].is_ascii_digit() { *pos += 1; }
+            if q < end && b[q] == b'.' {
+                let f = digits(b, q + 1);
+                if f == q + 1 { return bad(); }
+                q = f;
+                is_float = true;
             }
-            if *pos < b.len() && (b[*pos] == b'e' || b[*pos] == b'E') {
-                is_float = true; *pos += 1;
-                if *pos < b.len() && (b[*pos] == b'+' || b[*pos] == b'-') { *pos += 1; }
-                while *pos < b.len() && b[*pos].is_ascii_digit() { *pos += 1; }
+            if q < end && (b[q] == b'e' || b[q] == b'E') {
+                let s = if q + 1 < end && (b[q + 1] == b'+' || b[q + 1] == b'-') { q + 2 } else { q + 1 };
+                let e = digits(b, s);
+                if e == s { return bad(); }
+                q = e;
+                is_float = true;
             }
-            let s = &t[start..*pos];
+            if q != end { return bad(); }
+            *pos = end;
+            let s = &t[start..end];
             if is_float { s.parse::<f64>().map(AlmideValue::Float).map_err(|e| e.to_string()) }
             else { s.parse::<i64>().map(AlmideValue::Int).map_err(|e| e.to_string()) }
-        }
-        fn parse_bool(t: &str, pos: &mut usize) -> Result<AlmideValue, String> {
-            let rest = &t.as_bytes()[*pos..];
-            if rest.starts_with(b"true") { *pos += 4; Ok(AlmideValue::Bool(true)) }
-            else if rest.starts_with(b"false") { *pos += 5; Ok(AlmideValue::Bool(false)) }
-            else { Err("expected bool".into()) }
-        }
-        fn parse_null(t: &str, pos: &mut usize) -> Result<AlmideValue, String> {
-            if t.as_bytes()[*pos..].starts_with(b"null") { *pos += 4; Ok(AlmideValue::Null) } else { Err("expected null".into()) }
         }
         fn parse_array(t: &str, pos: &mut usize, depth: usize) -> Result<AlmideValue, String> {
             let b = t.as_bytes();
@@ -203,33 +208,72 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
             loop {
                 items.push(parse_value(t, pos, depth)?);
                 skip_ws(t, pos);
-                if *pos < b.len() && b[*pos] == b',' { *pos += 1; skip_ws(t, pos); } else { break; }
+                if *pos >= b.len() { return Err("unexpected end of input".into()); }
+                match b[*pos] {
+                    b']' => { *pos += 1; return Ok(AlmideValue::Array(items)); }
+                    b',' => {
+                        let comma = *pos;
+                        *pos += 1;
+                        skip_ws(t, pos);
+                        if *pos < b.len() && b[*pos] == b']' { return Err(at("json: trailing comma", t, comma)); }
+                    }
+                    _ => return Err(at("json: expected ',' or ']'", t, *pos)),
+                }
             }
-            skip_ws(t, pos);
-            if *pos < b.len() && b[*pos] == b']' { *pos += 1; }
-            Ok(AlmideValue::Array(items))
         }
+        /// A key the object already holds is refused where the repeat starts
+        /// (I-JSON §2.3). Small objects compare against the pairs read so far;
+        /// from 16 keys on, a set built once answers instead.
         fn parse_object(t: &str, pos: &mut usize, depth: usize) -> Result<AlmideValue, String> {
             let b = t.as_bytes();
             *pos += 1;
             skip_ws(t, pos);
-            let mut pairs = Vec::with_capacity(8);
+            let mut pairs: Vec<(AlmideKey, AlmideValue)> = Vec::with_capacity(8);
             if *pos < b.len() && b[*pos] == b'}' { *pos += 1; return Ok(AlmideValue::Object(pairs)); }
+            let mut seen: Option<std::collections::HashSet<String>> = None;
             loop {
-                skip_ws(t, pos);
+                if *pos >= b.len() { return Err("unexpected end of input".into()); }
+                if b[*pos] != b'"' { return Err(at("json: unquoted key", t, *pos)); }
+                let key_at = *pos;
                 let key = parse_key(t, pos)?;
+                let repeat = match &mut seen {
+                    Some(set) => !set.insert(key.to_string()),
+                    None => {
+                        let hit = pairs.iter().any(|(k, _)| *k == key);
+                        if !hit && pairs.len() >= 16 {
+                            let mut set: std::collections::HashSet<String> = pairs.iter().map(|(k, _)| k.to_string()).collect();
+                            set.insert(key.to_string());
+                            seen = Some(set);
+                        }
+                        hit
+                    }
+                };
+                if repeat { return Err(at("json: duplicate key", t, key_at)); }
                 skip_ws(t, pos);
-                if *pos < b.len() && b[*pos] == b':' { *pos += 1; }
+                if *pos >= b.len() { return Err("unexpected end of input".into()); }
+                if b[*pos] != b':' { return Err(at("json: expected ':'", t, *pos)); }
+                *pos += 1;
                 let val = parse_value(t, pos, depth)?;
                 pairs.push((key, val));
                 skip_ws(t, pos);
-                if *pos < b.len() && b[*pos] == b',' { *pos += 1; } else { break; }
+                if *pos >= b.len() { return Err("unexpected end of input".into()); }
+                match b[*pos] {
+                    b'}' => { *pos += 1; return Ok(AlmideValue::Object(pairs)); }
+                    b',' => {
+                        let comma = *pos;
+                        *pos += 1;
+                        skip_ws(t, pos);
+                        if *pos < b.len() && b[*pos] == b'}' { return Err(at("json: trailing comma", t, comma)); }
+                    }
+                    _ => return Err(at("json: expected ',' or '}'", t, *pos)),
+                }
             }
-            skip_ws(t, pos);
-            if *pos < b.len() && b[*pos] == b'}' { *pos += 1; }
-            Ok(AlmideValue::Object(pairs))
         }
-        parse_value(text, &mut pos, 0)
+        let mut pos = 0usize;
+        let v = parse_value(text, &mut pos, 0)?;
+        skip_ws(text, &mut pos);
+        if pos < text.len() { return Err(at("json: trailing data", text, pos)); }
+        Ok(v)
     })();
     __almide_r.map_err(Into::into)
 }
