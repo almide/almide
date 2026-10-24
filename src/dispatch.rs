@@ -650,7 +650,7 @@ fn dispatch_packages(command: Commands) {
         Commands::Update { dep } => dispatch_update(dep),
         Commands::Deps => dispatch_deps(),
         Commands::DepPath { name } => dispatch_dep_path(name),
-        Commands::Install { spec, tag, branch, name, bin_dir, target } => {
+        Commands::Install { spec, tag, branch, name, bin_dir, target, force } => {
             cli::cmd_install(
                 &spec,
                 tag.as_deref(),
@@ -658,6 +658,7 @@ fn dispatch_packages(command: Commands) {
                 name.as_deref(),
                 bin_dir.as_deref(),
                 target.as_deref(),
+                force,
             );
         }
         Commands::SelfUpdate { version, skip_attestation } => {

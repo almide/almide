@@ -432,6 +432,11 @@ pub(crate) enum Commands {
         /// Build target (default: native)
         #[arg(long)]
         target: Option<String>,
+        /// Replace an existing file at the destination that `almide install`
+        /// did not put there (#4183). Without it such a file is refused, so
+        /// a package named `git` or `almide` cannot silently replace a tool.
+        #[arg(long)]
+        force: bool,
     },
     /// Update almide to the latest version
     #[command(name = "self-update")]
