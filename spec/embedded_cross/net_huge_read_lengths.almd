@@ -1,0 +1,52 @@
+// @contract: C-416
+// A read's length is an upper bound, never an allocation size (#4123). Every
+// net read was handed a buffer of the program's `len` before reading, so
+// `len` = 2^62 ended the process with `memory allocation of … bytes failed`
+// (exit 134) on native and on the embedded host alike. Here each read with
+// len = 2^62 on a socket or shm file holding 16 bytes answers those bytes
+// (tcp_read_exact, whose peer then closes, answers its defined err), and the
+// program runs to its last line.
+import env
+import fs
+import net
+import random
+
+let huge = 4611686018427387904
+
+fn show(r: Result[Bytes, String]) -> String = match r {
+  ok(b) => "ok ${bytes.len(b)} [${bytes.to_string(b) ?? "<not utf-8>"}]",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  let sixteen = bytes.from_string("0123456789abcdef")
+  // tcp: one write of 16 bytes per read, on loopback.
+  let l = net.tcp_listen("127.0.0.1", 0)!
+  let c = net.tcp_connect("127.0.0.1", net.tcp_local_port(l)!)!
+  let s = net.tcp_accept(l)!
+  net.tcp_write(c, sixteen)!
+  println("tcp_read: ${show(net.tcp_read(s, huge))}")
+  net.tcp_write(c, sixteen)!
+  println("tcp_read_timeout: ${show(net.tcp_read_timeout(s, huge, 5000))}")
+  net.tcp_write(c, sixteen)!
+  net.tcp_close(c)!
+  println("tcp_read_exact: ${show(net.tcp_read_exact(s, huge))}")
+  net.tcp_close(s)!
+  net.tcp_close_listener(l)!
+  // A Unix-domain socket and a shared-memory file.
+  let path = "${env.temp_dir()}/almide-huge-${random.int(0, 999999999)}.sock"
+  let ul = net.unix_listen(path)!
+  let uc = net.unix_connect(path)!
+  let us = net.unix_accept(ul)!
+  net.unix_send(uc, sixteen, [])!
+  println("unix_recv: ${show(net.unix_recv(us, huge))}")
+  let m = net.shm_create(16)!
+  net.shm_write(m, 0, sixteen)!
+  println("shm_read: ${show(net.shm_read(m, 0, huge))}")
+  println("shm_read from 10: ${show(net.shm_read(m, 10, huge))}")
+  for fd in [m, us, uc, ul] {
+    net.unix_close(fd)!
+  }
+  fs.remove(path)!
+  println("done")
+}

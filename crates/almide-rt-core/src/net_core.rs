@@ -118,12 +118,16 @@ impl AlmideNetTables {
     pub fn tcp_read_exact(&mut self, h: i64, len: i64) -> Result<Vec<u8>, String> {
         let n = almide_net_len("tcp_read_exact", len)?;
         let s = self.stream(h)?;
-        let mut buf = vec![0u8; n];
-        let mut got = 0;
-        while got < n {
-            match std::io::Read::read(s, &mut buf[got..]) {
-                Ok(0) => return Err(net_err_short_read(got, len)),
-                Ok(k) => got += k,
+        // The answer grows with the bytes that arrive (#4123): `len` is the
+        // program's number, and allocating it up front aborted the process on
+        // a huge one before a single byte was read.
+        let mut chunk = vec![0u8; n.min(ALMIDE_NET_READ_CHUNK)];
+        let mut buf = Vec::new();
+        while buf.len() < n {
+            let want = (n - buf.len()).min(chunk.len());
+            match std::io::Read::read(s, &mut chunk[..want]) {
+                Ok(0) => return Err(net_err_short_read(buf.len(), len)),
+                Ok(k) => buf.extend_from_slice(&chunk[..k]),
                 Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
                 Err(e) => return Err(net_io_error_text("tcp_read_exact", &e)),
             }
@@ -197,7 +201,13 @@ impl AlmideNetTables {
     }
 }
 
-/// One `read` of at most `n` bytes; 0 bytes is EOF (or `n == 0`).
+/// The most one read takes into memory at a time (#4123): a read's buffer is
+/// never the program's `len` itself, which a huge `len` turned into an
+/// allocation failure that aborted the process.
+const ALMIDE_NET_READ_CHUNK: usize = 64 * 1024;
+
+/// One `read` of at most `n` bytes — at most 64 KiB of them, as a read may
+/// always answer fewer than asked; 0 bytes is EOF (or `n == 0`).
 /// A zero-length read answers empty WITHOUT the syscall: Linux's `recv` on
 /// a zero-length buffer waits for data where macOS returns at once, so
 /// `tcp_read(c, 0)` on an idle stream hung on Linux (#3679's CI).
@@ -205,7 +215,7 @@ fn almide_net_read_once(s: &mut std::net::TcpStream, n: usize, f: &str) -> Resul
     if n == 0 {
         return Ok(Vec::new());
     }
-    let mut buf = vec![0u8; n];
+    let mut buf = vec![0u8; n.min(ALMIDE_NET_READ_CHUNK)];
     loop {
         match std::io::Read::read(s, &mut buf) {
             Ok(k) => {
