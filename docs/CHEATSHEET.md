@@ -1070,6 +1070,35 @@ fn Event.decode(v: Value) -> Result[Event, String] = {
 Always pair a hand-written codec with a roundtrip test:
 `test "Event roundtrips" { assert_eq(Event.decode(Event.encode(C(Click{x:1,y:2}))), ok(C(Click{x:1,y:2}))) }`
 
+**Rule 5 — decode untrusted input into an INPUT type, then build the domain
+type.** A request body decoded straight into the domain type sets every field
+it names — `{"is_admin": true}` makes an admin (mass assignment). Declare a
+Codec type holding only what the client may set, decode into it with
+`T.decode_strict` (refuses unknown keys with `unknown key '<k>'`; plain
+`T.decode` ignores them), then construct the domain value in code:
+
+```almide check
+import json
+
+// Only what the client may set. `User` is not Codec at all, so a request
+// body can never be decoded into it — `is_admin` has no way in.
+type SignupInput: Codec = { name: String, email: String }
+type User = { name: String, email: String, is_admin: Bool }
+
+effect fn signup(body: String) -> User = {
+  let input = SignupInput.decode_strict(json.parse(body)!)!   // unknown keys → err
+  User { name: input.name, email: input.email, is_admin: false }
+}
+
+// A type that must be Codec both ways keeps input off a field with @skip_decode
+// (never read, still encoded) — it needs a default.
+type Account: Codec = { name: String, @skip_decode is_admin: Bool = false }
+```
+`@skip` keeps a field out of both `decode` and `encode`. Field attributes are
+exactly `@skip`, `@skip_decode` (and WGSL's `@builtin`/`@location`); serde- or
+pydantic-style spellings (`@serde(skip)`, `@json_ignore`, `@redact`) are the
+error E053, never silently ignored.
+
 Codec field types are `String`/`Int`/`Float`/`Bool`/`Value`, other Codec
 types, and any nesting of `Option`/`List` over those (`List[Option[Int]]`
 keeps element nulls; `Option[List[T]]` omits when none). Rejected at
