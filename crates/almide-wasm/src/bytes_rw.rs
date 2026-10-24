@@ -191,15 +191,19 @@ impl Emitter<'_> {
         self.lower_arg(index, Some(INT), ArgMode::Borrow)?;
         let ih = self.hold_i64()?;
         self.f.instructions().local_set(ih);
+        // #4005: a Bytes index is never a fact candidate (a loose slot).
+        let site = crate::witness::bounds::site(None);
         self.bytes_room(bh, ih, 1);
         let msg = self.pool.intern("index out of bounds");
         self.f.instructions().i32_eqz().if_(BlockType::Empty).i32_const(msg as i32);
+        crate::witness::bounds::check(site);
         self.emit_error_frame_abort();
         // #2755: out of bounds ABORTS — a recorded abort terminal on its arm.
         self.witness_abort_site();
         let mut i = self.f.instructions();
         i.end();
         i.local_get(bh).local_get(ih).i32_wrap_i64().i32_add().i64_load8_u(byte_k(0));
+        crate::witness::bounds::access(site, false);
         self.release_i64();
         self.release_i32();
         Ok(INT)
