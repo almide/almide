@@ -1,0 +1,108 @@
+// @contract: C-402, C-403
+// url.parse and url.resolve read a URL the way a browser does wherever the
+// two could disagree about where it points (almide/almide#4116). The input
+// is cleaned as the WHATWG URL parser cleans it (leading and trailing C0
+// control or space stripped, tab / LF / CR removed); what is left must start
+// with a scheme `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )` and `://`;
+// a backslash and any other control character are refused; a host holding
+// `%`, or a numeric host that is not four canonical decimal labels, is
+// refused; scheme and host are lowercased; and `.`/`..` segments, spelled
+// with `%2e` or not, are removed by one rule in parse and in resolve.
+// Before, `javascript:alert(1)//://good.com` parsed with host `good.com`,
+// `\\evil.com` resolved onto good.com, and `%2e%2e/` escaped no directory.
+import url
+
+fn show(r: Result[Url, String]) -> String = match r {
+  ok(u) => "ok ${url.to_string(u)} scheme=[${u.scheme}] host=[${u.host}] path=[${u.path}]",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  // Scheme: validated at the start, and followed by `://`.
+  for raw in [
+    "https:evil.com/?://good.com",
+    "javascript:alert(1)//://good.com",
+    "https:/\\/evil.com#://good.com",
+    "1http://good.com",
+    "ht tp://good.com",
+    "://good.com",
+    "no-colon-here",
+    "a+b-c.d://h/",
+    "HTTP://Good.COM/X",
+  ] {
+    println("parse ${raw} => ${show(url.parse(raw))}")
+  }
+  // Cleaning: leading/trailing C0 and space go, tab/LF/CR go anywhere,
+  // other controls and a backslash are refused.
+  println("parse lead-space => ${show(url.parse(" http://good.com"))}")
+  println("parse tab-nl => ${show(url.parse("\thttp://good.com\n"))}")
+  println("parse nul-tail => ${show(url.parse("http://good.com/\u{0}"))}")
+  println("parse inner-lf => ${show(url.parse("http://good.com/a\nX-Inj: 1"))}")
+  println("parse inner-cr-host => ${show(url.parse("http://go\rod.com/"))}")
+  println("parse inner-ctl => ${show(url.parse("http://good.com/a\u{1}b"))}")
+  println("parse del => ${show(url.parse("http://good.com/a\u{7F}b"))}")
+  println("parse backslash => ${show(url.parse("http:\\\\evil.com\\a"))}")
+  println("parse backslash-path => ${show(url.parse("http://good.com/a\\b"))}")
+  // Hosts: `%` refused, numeric hosts canonical or refused.
+  for raw in [
+    "http://evil.com%2fgood.com/",
+    "http://127.0.0.1/",
+    "http://0.0.0.0:80/",
+    "http://255.255.255.255/",
+    "http://0x7f.0.0.1/",
+    "http://127.1/",
+    "http://2130706433/",
+    "http://0177.0.0.1/",
+    "http://256.0.0.1/",
+    "http://1.2.3.4.5/",
+    "http://1.2.3.4./",
+    "http://example.123/",
+    "http://0x/",
+    "http://1.2.3.x/",
+    "http://v1.example.com/",
+  ] {
+    println("parse ${raw} => ${show(url.parse(raw))}")
+  }
+  // Dot segments in parse, plain and percent-encoded.
+  for raw in [
+    "http://good.com/%2e%2e/admin",
+    "http://good.com/a/%2E%2e/b",
+    "http://good.com/a/./b/../c",
+    "http://good.com/a/b/..",
+    "http://good.com/a/b/%2e",
+    "http://good.com/..",
+    "http://good.com/a//b",
+    "http://good.com/%2e%2f/x",
+    "http://good.com/a?x=/../y#/../z",
+  ] {
+    println("parse ${raw} => ${show(url.parse(raw))}")
+  }
+  // Resolve against one base: the same cleaning, the same dot rule.
+  match url.parse("http://good.com/files/pub/") {
+    ok(base) => for r in [
+      "\\\\evil.com",
+      "/\\evil.com",
+      " //evil.com",
+      "\t//evil.com",
+      "//evil.com",
+      "%2e%2e/%2e%2e/admin",
+      ".%2e/.%2e/admin",
+      "%2E./x",
+      "../../admin",
+      "a\tb/c",
+      "javascript:alert(1)//://good.com",
+      "HTTPS://Other.example/p",
+      "?q=1",
+      "#f",
+      "",
+      "./",
+    ] {
+      println("resolve ${r} => ${show(url.resolve(base, r))}")
+    },
+    err(e) => println("base err ${e}"),
+  }
+  match url.parse("http://good.com/files/pub/") {
+    ok(base) => println("resolve inner-ctl => ${show(url.resolve(base, "x\u{1}y"))}"),
+    err(e) => println("base err ${e}"),
+  }
+}
