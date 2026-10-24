@@ -25,7 +25,18 @@ aGVsbG8=
 
 ### `base64.decode(s: String) -> Result[Bytes, String]`
 
-Decode the standard alphabet. `err` on an invalid character or a bad length.
+Decode the standard alphabet (`+` `/`). Only the canonical padded form that
+`encode` emits is accepted, so one byte string has exactly one spelling (#4119):
+
+- the length must be a multiple of 4 — `"invalid base64 length: <n>"`;
+- at most two `=`, only at the end — `"invalid base64 padding"` for more;
+- every other character must be in the standard alphabet — a `-` or `_` (the
+  URL-safe pair), a `=` before the end, or any other byte is
+  `"invalid base64 character"`;
+- the bits the padding drops must be zero — `QR==` (which would also read as
+  `A`) is `"invalid base64 trailing bits"`.
+
+The checks run in that order; the first failure is the answer.
 
 ```almd run
 import base64
@@ -79,8 +90,23 @@ strip it: `string.replace(base64.encode_url(b), "=", "")`.
 
 ### `base64.decode_url(s: String) -> Result[Bytes, String]`
 
-Decode the URL-safe alphabet. Accepts input with or without padding, so it round-
-trips both `encode_url` and the unpadded JWT form.
+Decode the URL-safe alphabet (`-` `_`) under the same canonical rules as
+`decode`: padded, at most two `=`, zero trailing bits, and `+` or `/` is
+`"invalid base64 character"`. It round-trips `encode_url`. An unpadded segment
+(a JWT part, for instance) must have its padding restored first:
+
+```almd run
+import base64
+
+fn pad(s: String) -> String = s + string.repeat("=", (4 - string.len(s) % 4) % 4)
+
+effect fn main() -> Unit = {
+  println(bytes.to_string(base64.decode_url(pad("aGk_Pg"))!)!)
+}
+```
+```output
+hi?>
+```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
@@ -91,7 +117,7 @@ trips both `encode_url` and the unpadded JWT form.
 // @since 0.13.4 or earlier
 base64.encode(b: Bytes) -> String
 
-// Bytes from base64; padding optional; err if bad.
+// Bytes from padded canonical base64 (+ /); err otherwise.
 // @since 0.13.4 or earlier
 base64.decode(s: String) -> Result[Bytes, String]
 
@@ -99,7 +125,7 @@ base64.decode(s: String) -> Result[Bytes, String]
 // @since 0.13.4 or earlier
 base64.encode_url(b: Bytes) -> String
 
-// Same as decode; accepts either alphabet.
+// Bytes from padded canonical URL-safe base64 (- _); err otherwise.
 // @since 0.13.4 or earlier
 base64.decode_url(s: String) -> Result[Bytes, String]
 ```

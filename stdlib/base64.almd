@@ -1,9 +1,10 @@
 // base64 — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 2b).
 //
-// RFC 4648 Base64 encoding. Standard alphabet + `=` padding for the
-// canonical form; URL-safe variants use `-` / `_` with optional padding.
-// Decoders accept both padded and unpadded inputs and reject invalid
-// characters with `err`.
+// RFC 4648 Base64 encoding. Standard alphabet (`+` `/`) and URL-safe
+// alphabet (`-` `_`), both `=` padded. Each decoder accepts exactly the
+// canonical padded form its encoder emits — its own alphabet only, length a
+// multiple of 4, at most two `=`, zero bits under the padding — and answers
+// `err` for anything else (#4119), so one byte string has one spelling.
 //
 // Each fn routes the Rust target to the existing runtime in
 // `runtime/rs/src/base64.rs` via `@inline_rust(template)`. On WASM both
@@ -14,7 +15,7 @@
 @intrinsic("almide_rt_base64_encode")
 fn encode(b: Bytes) -> String = _
 
-/// Bytes from base64; padding optional; err if bad.
+/// Bytes from padded canonical base64 (+ /); err otherwise.
 @intrinsic("almide_rt_base64_decode")
 fn decode(s: String) -> Result[Bytes, String] = _
 
@@ -22,6 +23,6 @@ fn decode(s: String) -> Result[Bytes, String] = _
 @intrinsic("almide_rt_base64_encode_url")
 fn encode_url(b: Bytes) -> String = _
 
-/// Same as decode; accepts either alphabet.
+/// Bytes from padded canonical URL-safe base64 (- _); err otherwise.
 @intrinsic("almide_rt_base64_decode_url")
 fn decode_url(s: String) -> Result[Bytes, String] = _

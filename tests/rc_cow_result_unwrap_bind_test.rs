@@ -46,7 +46,7 @@ struct Row {
 
 const ROWS: &[Row] = &[
     Row { tag: "base64.decode", imports: &["base64"], call: "base64.decode(\"AQI=\")" },
-    Row { tag: "base64.decode_url", imports: &["base64"], call: "base64.decode_url(\"AQI\")" },
+    Row { tag: "base64.decode_url", imports: &["base64"], call: "base64.decode_url(\"AQI=\")" },
     Row { tag: "hex.decode", imports: &["hex"], call: "hex.decode(\"0102\")" },
     Row { tag: "fs.read_bytes_raw", imports: &["fs"], call: "fs.read_bytes_raw(\"/nonexistent/2497\")" },
     Row { tag: "http.get_bytes", imports: &["http"], call: "http.get_bytes(\"http://127.0.0.1:9/\")" },

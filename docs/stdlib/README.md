@@ -74,9 +74,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 [base64.md](base64.md)
 
 - `base64.encode(b: Bytes) -> String` — Standard base64 with + / and = padding.
-- `base64.decode(s: String) -> Result[Bytes, String]` — Bytes from base64; padding optional; err if bad.
+- `base64.decode(s: String) -> Result[Bytes, String]` — Bytes from padded canonical base64 (+ /); err otherwise.
 - `base64.encode_url(b: Bytes) -> String` — URL-safe base64 (- _), still = padded.
-- `base64.decode_url(s: String) -> Result[Bytes, String]` — Same as decode; accepts either alphabet.
+- `base64.decode_url(s: String) -> Result[Bytes, String]` — Bytes from padded canonical URL-safe base64 (- _); err otherwise.
 
 ## bool
 
