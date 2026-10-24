@@ -787,10 +787,10 @@ pub(crate) fn convert_option_unwraps_to_result(ctx: &mut LowerCtx, body: &mut Ir
                 guard: None,
                 body: IrExpr {
                     kind: IrExprKind::ResultOk {
-                        expr: Box::new(IrExpr { kind: IrExprKind::Var { id: v }, ty: payload_ty, span: span, def_id: None }),
+                        expr: Box::new(IrExpr { kind: IrExprKind::Var { id: v }, ty: payload_ty, span, def_id: None }),
                     },
                     ty: result_ty.clone(),
-                    span: span,
+                    span,
                     def_id: None,
                 },
             };
@@ -799,10 +799,10 @@ pub(crate) fn convert_option_unwraps_to_result(ctx: &mut LowerCtx, body: &mut Ir
                 guard: None,
                 body: IrExpr {
                     kind: IrExprKind::ResultErr {
-                        expr: Box::new(IrExpr { kind: IrExprKind::LitStr { value: "none".into() }, ty: Ty::String, span: span, def_id: None }),
+                        expr: Box::new(IrExpr { kind: IrExprKind::LitStr { value: "none".into() }, ty: Ty::String, span, def_id: None }),
                     },
                     ty: result_ty.clone(),
-                    span: span,
+                    span,
                     def_id: None,
                 },
             };
