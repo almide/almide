@@ -42,7 +42,14 @@ fn report_check_errors_or_exit(
 /// call `parse_file` itself so each caller keeps its own parse + any
 /// pre-resolve early-exit check (`cmd_check_effects`'s parse-error gate)
 /// at exactly its original point in the control flow.
-fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Program, source_text: &str, critical: Option<&[String]>) -> (Vec<diagnostic::Diagnostic>, check_mod::Checker) {
+#[allow(clippy::type_complexity)]
+fn resolve_and_typecheck_for_check(
+    file: &str,
+    program: &mut almide::ast::Program,
+    source_text: &str,
+    critical: Option<&[String]>,
+    lower_user_modules: bool,
+) -> (Vec<diagnostic::Diagnostic>, check_mod::Checker, Option<Vec<almide::ir::IrModule>>) {
     let dep_paths = super::dep_paths_from_cwd_toml();
 
     let mut resolved = resolve::resolve_imports_with_deps(file, program, &dep_paths)
@@ -83,9 +90,22 @@ fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Progra
     // invisible to every importer while `almide check` reported "No errors
     // found". Infer each user module here — the same step the build drivers
     // run — and report its errors against its own file before the entry's.
+    //
+    // With `lower_user_modules`, each module that has a user source file is
+    // also lowered right here, after its own inference — the order and the
+    // module IR the build produces — so the whole-program gates (E109,
+    // `[permissions]`) judge every user module without a second front end
+    // (#4187: re-running the build's front end tripled the 10k-line check).
+    // The bundled stdlib modules are inferred but not lowered: the gates read
+    // their declarations instead (`effect_flow`'s unscanned path).
+    if lower_user_modules {
+        crate::compile_driver::register_versioned_module_names(&mut checker, &resolved.modules);
+    }
     let sources = std::mem::take(&mut resolved.sources);
     let mut module_diags = Vec::new();
-    for (name, mod_prog, pkg_id, _) in &mut resolved.modules {
+    let mut lowered = Some(Vec::new());
+    for module in &mut resolved.modules {
+        let (name, mod_prog, pkg_id, _) = module;
         if almide::stdlib::is_stdlib_module(name) && !almide::stdlib::is_bundled_module(name) { continue; }
         let saved_self = checker.env.self_module_name;
         if let Some(pid) = pkg_id.as_ref() {
@@ -95,13 +115,66 @@ fn resolve_and_typecheck_for_check(file: &str, program: &mut almide::ast::Progra
             &mut checker, name, mod_prog, &sources, &mut module_diags,
         );
         checker.env.self_module_name = saved_self;
+        if lower_user_modules && sources.contains_key(module.0.as_str()) {
+            if let Some(out) = lowered.as_mut() {
+                match lower_quietly(&mut checker, module) {
+                    Some(m) => out.push(m),
+                    None => lowered = None,
+                }
+            }
+        }
     }
     if crate::compile_driver::report_module_diagnostics(&module_diags).is_err() {
         std::process::exit(1);
     }
     checker.type_map = entry_types;
 
-    (diagnostics, checker)
+    (diagnostics, checker, if lower_user_modules { lowered } else { Some(Vec::new()) })
+}
+
+/// One module's lowering for the check gates. A debug-build assertion in
+/// module lowering (`increment_use` on a `self.` module lowered from outside
+/// its package directory) must not turn a clean `check` into a crash: `None`
+/// makes the gates judge the entry's own IR, and the build route reports the
+/// defect.
+fn lower_quietly(
+    checker: &mut check_mod::Checker,
+    module: &(String, almide::ast::Program, Option<project::PkgId>, bool),
+) -> Option<almide::ir::IrModule> {
+    let hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let m = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::compile_driver::lower_inferred_user_module(checker, module, false).0
+    }))
+    .ok();
+    std::panic::set_hook(hook);
+    m
+}
+
+/// The program the whole-program gates judge: the entry's IR with the user
+/// modules lowered during the check (`None` when one could not be lowered —
+/// the entry alone, as before modules were judged).
+fn with_user_modules(mut ir: almide::ir::IrProgram, modules: Option<Vec<almide::ir::IrModule>>) -> almide::ir::IrProgram {
+    ir.modules.extend(modules.unwrap_or_default());
+    ir
+}
+
+/// E109 for `check`. The check-time program carries the user modules but not
+/// the bundled stdlib bodies, whose calls the flow reads from their
+/// declarations — every argument of a bodied stdlib fn both run and kept,
+/// which over-approximates what the body does. So a clean verdict here is the
+/// build's clean verdict, and only a refusal pays for the build's own front end
+/// (`whole_program_ir`, bundled modules lowered) to report exactly what the
+/// build would.
+fn effect_value_verdict(ir: &almide::ir::IrProgram, file: &str) -> Vec<diagnostic::Diagnostic> {
+    let fast = almide::effect_value_gate::effect_value_diagnostics(ir, file);
+    if fast.is_empty() {
+        return fast;
+    }
+    match crate::compile_driver::whole_program_ir(file) {
+        Some(whole) => almide::effect_value_gate::effect_value_diagnostics(&whole, file),
+        None => fast,
+    }
 }
 
 /// Render the `--timings` per-phase breakdown (#1311).
@@ -179,26 +252,22 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
     let total_timer = almide_base::profile::ProfileTimer::start(timings);
 
     let (mut program, source_text, parse_errors) = parse_file(file);
-    let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text, critical);
+    let (diagnostics, checker, user_modules) = resolve_and_typecheck_for_check(file, &mut program, &source_text, critical, true);
 
     // Lower to IR for unused variable analysis (only if no parse or type errors)
     let has_type_errors = diagnostics.iter().any(|d| d.level == diagnostic::Level::Error);
     let mut effect_value_errors = Vec::new();
-    // The gates below judge the whole program: check lowers only the entry,
-    // so with user modules the build's front end lowers them all (#4159
-    // audit — a module's function was never judged by `check`).
+    // The gates below judge the whole program: the entry and every user
+    // module, lowered during the check (#4159 audit — a module's function was
+    // never judged by `check`; #4187 — without a second front end).
     let mut whole_ir: Option<almide::ir::IrProgram> = None;
     let unused_warnings = if parse_errors.is_empty() && !has_type_errors {
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-        if !checker.env.user_modules.is_empty() {
-            whole_ir = crate::compile_driver::whole_program_ir(file);
-        }
-        // E109 (#4151): the same gate the build routes run.
-        effect_value_errors = almide::effect_value_gate::effect_value_diagnostics(whole_ir.as_ref().unwrap_or(&ir), file);
         let unused = almide::ir::collect_unused_var_warnings(&ir, file);
-        if whole_ir.is_none() {
-            whole_ir = Some(ir);
-        }
+        let ir = with_user_modules(ir, user_modules);
+        // E109 (#4151): the same gate the build routes run.
+        effect_value_errors = effect_value_verdict(&ir, file);
+        whole_ir = Some(ir);
         unused
     } else {
         Vec::new()
@@ -234,7 +303,15 @@ fn check_one(file: &str, deny_warnings: bool, timings: bool, stamp: bool, critic
             std::process::exit(1);
         }
         if proj.permissions.is_some() || proj.proc_allow.is_some() {
-            let ir = whole_ir.unwrap_or_else(|| almide::lower::lower_program(&program, &checker.env, &checker.type_map));
+            // The categories a bundled stdlib body charges are not bounded by
+            // its declaration the way E109's run/keep summary is, so the
+            // allowlist is judged on the program the build judges: the bundled
+            // modules lowered too. Only a project with a manifest pays it.
+            let ir = (!checker.env.user_modules.is_empty())
+                .then(|| crate::compile_driver::whole_program_ir(file))
+                .flatten()
+                .or(whole_ir)
+                .unwrap_or_else(|| almide::lower::lower_program(&program, &checker.env, &checker.type_map));
             if super::enforce_project_permissions(&ir, &proj).is_err() {
                 std::process::exit(1);
             }
@@ -361,7 +438,7 @@ fn check_json_one(file: &str, critical: Option<&[String]>) -> bool {
         }
         return false;
     };
-    let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text, critical);
+    let (diagnostics, checker, user_modules) = resolve_and_typecheck_for_check(file, &mut program, &source_text, critical, true);
 
     // Output each diagnostic as JSON (one per line)
     for d in &parse_errors {
@@ -379,15 +456,14 @@ fn check_json_one(file: &str, critical: Option<&[String]>) -> bool {
     let mut clean = parse_errors.is_empty() && !has_type_errors;
     if clean {
         let ir = almide::lower::lower_program(&program, &checker.env, &checker.type_map);
-        // E109 (#4151): the same gate the build routes run, over every
-        // module when there are user modules.
-        let whole = (!checker.env.user_modules.is_empty()).then(|| crate::compile_driver::whole_program_ir(file)).flatten();
-        let effect_value_errors = almide::effect_value_gate::effect_value_diagnostics(whole.as_ref().unwrap_or(&ir), file);
+        let unused = almide::ir::collect_unused_var_warnings(&ir, file);
+        // E109 (#4151): the same gate the build routes run, over the entry
+        // and every user module.
+        let effect_value_errors = effect_value_verdict(&with_user_modules(ir, user_modules), file);
         for d in &effect_value_errors {
             out(&format!("{}", crate::diagnostic_render::to_json(d)));
         }
         clean = effect_value_errors.is_empty();
-        let unused = almide::ir::collect_unused_var_warnings(&ir, file);
         for d in &unused {
             out(&format!("{}", crate::diagnostic_render::to_json(d)));
         }
@@ -452,7 +528,7 @@ pub fn cmd_check_effects(file: &str) {
         std::process::exit(1);
     }
 
-    let (diagnostics, checker) = resolve_and_typecheck_for_check(file, &mut program, &source_text, None);
+    let (diagnostics, checker, _) = resolve_and_typecheck_for_check(file, &mut program, &source_text, None, false);
 
     let errors: Vec<_> = diagnostics.iter()
         .filter(|d| d.level == diagnostic::Level::Error)

@@ -188,6 +188,30 @@ fn lower_one_user_module(
         checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
     }
     infer_module_capturing(checker, name, mod_prog, sources, module_diags);
+    checker.env.self_module_name = saved_self;
+    let (mod_ir_module, mod_ir_program) = lower_inferred_user_module(checker, module, true);
+    module_irs.insert(module.0.clone(), mod_ir_program.expect("asked for the module's program"));
+    if let Some(ir) = ir_program {
+        ir.modules.push(mod_ir_module);
+    }
+}
+
+/// Lower one user module whose body the checker has JUST inferred (its
+/// expression types are the latest in `checker.type_map`): the module IR the
+/// whole program carries, and — with `with_program` — the module lowered as a
+/// program, which the build keeps per module. `almide check` lowers each
+/// module here right after inferring it, so its gates judge the same module
+/// IR the build lowers without running the front end a second time (#4187).
+pub(crate) fn lower_inferred_user_module(
+    checker: &mut check::Checker,
+    module: &(String, ast::Program, Option<project::PkgId>, bool),
+    with_program: bool,
+) -> (almide::ir::IrModule, Option<almide::ir::IrProgram>) {
+    let (name, mod_prog, pkg_id, _) = module;
+    let saved_self = checker.env.self_module_name;
+    if let Some(pid) = pkg_id.as_ref() {
+        checker.env.self_module_name = Some(almide::intern::sym(&pid.name));
+    }
     let versioned = pkg_id.as_ref().map(|pid| {
         let base = pid.mod_name();
         if let Some(suffix) = name.strip_prefix(&pid.name) {
@@ -216,13 +240,10 @@ fn lower_one_user_module(
     // are consumed by `StdlibLoweringPass` to rewrite call sites
     // into `IrExprKind::InlineRust`. Fns without those attrs
     // (e.g. helpers like `split_at`) emit normally. No prune.
-    let mod_ir_program = almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map);
+    let mod_ir_program = with_program.then(|| almide::lower::lower_program(mod_prog, &checker.env, &checker.type_map));
     checker.env.import_table = saved_table;
     checker.env.self_module_name = saved_self;
-    module_irs.insert(name.clone(), mod_ir_program);
-    if let Some(ir) = ir_program {
-        ir.modules.push(mod_ir_module);
-    }
+    (mod_ir_module, mod_ir_program)
 }
 
 fn verify_ir_or_err(ir: &almide::ir::IrProgram) -> Result<(), String> {
