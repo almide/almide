@@ -18,8 +18,8 @@ fn load_dep_info_for_fmt() -> (Vec<String>, std::collections::HashMap<String, St
     // Discover submodules for each dependency by scanning cached source directories
     let mut submodules = std::collections::HashMap::new();
     for dep in &project.dependencies {
-        // Check cache dir: ~/.almide/cache/{name}/.src-{source}/{tag_or_commit}/.
-        // Rooted at THIS dependency's source (#2523) — the scan used to start at
+        // Check cache dir: ~/.almide/cache/.sources/<url pieces>/@/{tag_or_commit}/.
+        // Rooted at THIS dependency's source (#2523, #4093) — the scan used to start at
         // `{name}/` and take whatever was cached there first, so a same-named
         // package from another URL could name this one's submodules.
         let dep_cache = crate::project_fetch::dep_cache_root(dep);
