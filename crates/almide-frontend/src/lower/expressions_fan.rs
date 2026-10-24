@@ -781,16 +781,16 @@ pub(crate) fn convert_option_unwraps_to_result(ctx: &mut LowerCtx, body: &mut Ir
                 &mut **inner,
                 IrExpr { kind: IrExprKind::OptionNone, ty: inner_ty, span: span.clone(), def_id: None },
             );
-            let v = self.ctx.var_table.alloc(sym("__opt_v"), payload_ty.clone(), Mutability::Let, span.clone());
+            let v = self.ctx.var_table.alloc(sym("__opt_v"), payload_ty.clone(), Mutability::Let, span);
             let some_arm = IrMatchArm {
                 pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: v, ty: payload_ty.clone() }) },
                 guard: None,
                 body: IrExpr {
                     kind: IrExprKind::ResultOk {
-                        expr: Box::new(IrExpr { kind: IrExprKind::Var { id: v }, ty: payload_ty, span: span.clone(), def_id: None }),
+                        expr: Box::new(IrExpr { kind: IrExprKind::Var { id: v }, ty: payload_ty, span: span, def_id: None }),
                     },
                     ty: result_ty.clone(),
-                    span: span.clone(),
+                    span: span,
                     def_id: None,
                 },
             };
@@ -799,10 +799,10 @@ pub(crate) fn convert_option_unwraps_to_result(ctx: &mut LowerCtx, body: &mut Ir
                 guard: None,
                 body: IrExpr {
                     kind: IrExprKind::ResultErr {
-                        expr: Box::new(IrExpr { kind: IrExprKind::LitStr { value: "none".into() }, ty: Ty::String, span: span.clone(), def_id: None }),
+                        expr: Box::new(IrExpr { kind: IrExprKind::LitStr { value: "none".into() }, ty: Ty::String, span: span, def_id: None }),
                     },
                     ty: result_ty.clone(),
-                    span: span.clone(),
+                    span: span,
                     def_id: None,
                 },
             };
