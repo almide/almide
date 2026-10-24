@@ -13,7 +13,7 @@
 pub(crate) const SIZED_CONVERT_VERIFIED: &[&str] = &[
     "float64_to_int16", "float64_to_int32", "float64_to_int64", "float64_to_int8",
     "float64_to_string", "float64_to_uint16", "float64_to_uint32", "float64_to_uint64",
-    "float64_to_uint8", "float_to_float64", "float_to_int", "float_to_int16",
+    "float64_to_uint8", "float_to_float64", "float_to_int", "float_to_int_saturating", "float_to_int16",
     "float_to_int16_saturating", "float_to_int32", "float_to_int32_saturating",
     "float_to_int64", "float_to_int64_saturating", "float_to_int8", "float_to_int8_saturating",
     "float_to_uint16", "float_to_uint16_saturating", "float_to_uint32",
@@ -308,7 +308,8 @@ pub(crate) const MATH_VERIFIED: &[&str] = &[
 
 /// Option-returning members (the checked trio cells).
 pub(crate) const SIZED_CONVERT_SUM_BUILDERS: &[&str] = &[
-    "float_to_int16_checked", "float_to_int32_checked", "float_to_int64_checked",
+    "float_to_int_checked", "float_to_int16_checked", "float_to_int32_checked",
+    "float_to_int64_checked",
     "float_to_int8_checked", "float_to_uint16_checked", "float_to_uint32_checked",
     "float_to_uint64_checked", "float_to_uint8_checked", "int16_to_int8_checked",
     "int16_to_uint16_checked", "int16_to_uint32_checked", "int16_to_uint64_checked",

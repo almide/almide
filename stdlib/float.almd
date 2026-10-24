@@ -162,6 +162,11 @@ fn from_float64(n: Float64) -> Float = _
 // nearest to T::MAX rounds up to it) and `>` where T::MAX is exact.
 // `-0.0` passes as `some(0)` (C-307). The same rule, cell for cell, in
 // stdlib/float_checked.almd (the wasm legs).
+/// some iff n is an integer in -2^63..2^63-1; NaN and ±inf give none.
+fn to_int_checked(n: Float) -> Int? =
+  if float.is_nan(n) or float.is_infinite(n) or n < -9223372036854776000.0 or n >= 9223372036854776000.0 then none
+  else if float.floor(n) == n then some(float.to_int(n)) else none
+
 /// some iff n is an integer in -128..127.
 fn to_int8_checked(n: Float) -> Int8? =
   if float.is_nan(n) or float.is_infinite(n) or n < -128.0 or n > 127.0 then none
@@ -217,6 +222,9 @@ fn to_float32_checked(n: Float) -> Float32? = {
   else if float.is_infinite(n) then none
   else if back == n then some(f) else none
 }
+
+/// Truncates, clamps to Int range; NaN gives 0.
+fn to_int_saturating(n: Float) -> Int = float.to_int(n)
 
 /// Truncates, clamps to -128..127; NaN gives 0.
 fn to_int8_saturating(n: Float) -> Int8 = float.to_int8(n)

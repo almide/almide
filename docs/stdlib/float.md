@@ -28,6 +28,28 @@ fn main() -> Unit = {
 3
 ```
 
+`float.to_int` saturates: NaN gives `0` and a value past the `Int` range gives
+`Int` max or min, so a bad input is indistinguishable from a real one. Its
+twins say which one you mean — the conversion trio every lossy Float → integer
+conversion carries:
+
+- `float.to_int_checked(n: Float) -> Option[Int]` — `some` only when `n` is an
+  integer in the `Int` range; `none` for NaN, ±inf, a fractional part or out of
+  range.
+- `float.to_int_saturating(n: Float) -> Int` — the clamp, spelled explicitly
+  (the same value as `float.to_int`).
+
+```almd run
+fn main() -> Unit = {
+  println("${float.to_int_checked(12.0)} ${float.to_int_checked(12.9)} ${float.to_int_checked(1.0 / 0.0)}")
+  println("${float.to_int_saturating(-1.0 / 0.0)}")
+}
+```
+```output
+some(12) none none
+-9223372036854775808
+```
+
 ### `float.round(n: Float) -> Float`
 
 Round a float to the nearest integer value (as Float), halves away from zero
@@ -238,7 +260,7 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (46 functions)
+## Signature index (48 functions)
 
 ```
 // Shortest round-trip digits, no exponent; 2.0 keeps .0.
@@ -357,6 +379,10 @@ float.from_float32(n: Float32) -> Float
 // @since 0.15.0 or earlier
 float.from_float64(n: Float64) -> Float
 
+// some iff n is an integer in -2^63..2^63-1; NaN and ±inf give none.
+// @since unreleased
+float.to_int_checked(n: Float) -> Option[Int]
+
 // some iff n is an integer in -128..127.
 // @since 0.15.0 or earlier
 float.to_int8_checked(n: Float) -> Option[Int8]
@@ -392,6 +418,10 @@ float.to_uint64_checked(n: Float) -> Option[UInt64]
 // some if n is exact in Float32; NaN and ±inf give none.
 // @since 0.15.0 or earlier
 float.to_float32_checked(n: Float) -> Option[Float32]
+
+// Truncates, clamps to Int range; NaN gives 0.
+// @since unreleased
+float.to_int_saturating(n: Float) -> Int
 
 // Truncates, clamps to -128..127; NaN gives 0.
 // @since 0.15.0 or earlier
