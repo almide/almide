@@ -16,10 +16,14 @@ fn fail(msg: &str) -> ! {
 }
 
 fn main() {
-    let Some(rel) = std::env::args().nth(1) else { fail("usage: emit_call_modes <fixture-rel-path>") };
+    let Some(rel) = std::env::args().nth(1) else {
+        fail("usage: emit_call_modes <fixture-rel-path>")
+    };
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let text = std::fs::read_to_string(almide_corpus::resolve(&root, &rel)).unwrap_or_else(|e| fail(&format!("read {rel}: {e}")));
-    let ir = almide_spine::s5::lower_to_ir(&rel, &text).unwrap_or_else(|e| fail(&format!("front: {e}")));
+    let text = std::fs::read_to_string(almide_corpus::resolve(&root, &rel))
+        .unwrap_or_else(|e| fail(&format!("read {rel}: {e}")));
+    let ir =
+        almide_spine::s5::lower_to_ir(&rel, &text).unwrap_or_else(|e| fail(&format!("front: {e}")));
     almide_wasm::witness::start_collecting();
     let _ = almide_wasm::emit_program(&ir);
     let _ = almide_wasm::witness::take_by_pass();
