@@ -236,21 +236,9 @@ pub fn almide_http_req_header(req: &AlmideHttpRequest, key: &str) -> Option<Almi
     req.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.clone())
 })(); __almide_v.into_almide() }
 
-pub fn almide_http_query_params(req: &AlmideHttpRequest) -> AlmideMap<AlmideString, AlmideString> { let __almide_v: AlmideMap<String, String> = (|| {
-    let mut params = AlmideMap::new();
-    if let Some(q) = req.path.split('?').nth(1) {
-        for pair in q.split('&') {
-            let mut kv = pair.splitn(2, '=');
-            if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
-                params.insert(percent_decode(k), percent_decode(v));
-            }
-        }
-    }
-    params
-})(); __almide_v.into_almide() }
-
-/// Percent-decode a URL component for manual use (stdlib `http.url_decode`).
-/// Same rules as the query-param decoder: `+` → space, `%XX` → raw byte.
+/// Percent-decode a URL component for manual use (stdlib `http.url_decode`),
+/// leniently: `+` → space, `%XX` → raw byte. Not the query decoder —
+/// `http.query_params` is `url.parse_query` (C-404).
 pub fn almide_http_url_decode(s: &str) -> AlmideString { let __almide_v: String = (|| {
     percent_decode(s)
 })(); __almide_v.into_almide() }
@@ -591,10 +579,16 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     // time in the order requests arrive whole: the app is an `Rc` built on
     // this thread and stdout is this thread's buffer (ADR-0020 §5.5, #2665).
     let pool = http_server_pool(listener, HTTP_SERVER_DEFAULT_LIMITS);
+    // A handler err is a fixed 500 body naming the request's id, and the error
+    // itself goes to stderr under it (C-409, #4150).
     while let Some((conn, (method, path, body, headers))) = pool.next() {
+        let id = http_server_request_id(&method, &path, &body);
         let resp = match handler(AlmideHttpRequest { method, path, body, headers, params: Vec::new() }) {
             Ok(r) => r,
-            Err(e) => AlmideHttpResponse::new(500, format!("Internal error: {}", e)),
+            Err(e) => {
+                eprintln!("{}", http_server_handler_error_line(&id, &e));
+                AlmideHttpResponse::new(500, http_server_handler_error_body(&id))
+            }
         };
         let _ = http_server_write(conn, resp.status, &resp.headers, &resp.body);
     }

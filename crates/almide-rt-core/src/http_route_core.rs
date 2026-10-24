@@ -53,9 +53,21 @@ fn http_url_error(url: &str, why: &str) -> String {
 }
 
 /// Parse an http / https URL (#2821). `Err` names the URL and the problem.
+///
+/// Where a browser could read the URL as pointing somewhere else, the rules
+/// are url.parse's (ALS-T27, C-402, #4116): the text is cleaned as the
+/// WHATWG URL parser cleans it (leading and trailing C0 control or space
+/// stripped, tab / LF / CR removed); a backslash or another control
+/// character is refused — `http://allowed.example\@127.0.0.1/` would
+/// otherwise dial 127.0.0.1 where a WHATWG validator reads allowed.example;
+/// a numeric host that is not four canonical decimal labels (`127.1`,
+/// `0x7f.0.0.1`, `2130706433`) is refused, where the resolver would quietly
+/// dial its canonical form; and `.` / `..` path segments, `%2e` spellings
+/// included, are removed before the target is sent.
 pub fn http_parse_url(url: &str) -> Result<AlmideHttpUrl, String> {
     let bad = |why: String| http_url_error(url, &why);
-    let (https, rest) = http_url_scheme(url).map_err(bad)?;
+    let cleaned = http_url_clean(url).map_err(bad)?;
+    let (https, rest) = http_url_scheme(&cleaned).map_err(bad)?;
     let default_port: u16 = if https { 443 } else { 80 };
     let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let (authority, tail) = rest.split_at(auth_end);
@@ -73,6 +85,79 @@ pub fn http_parse_url(url: &str) -> Result<AlmideHttpUrl, String> {
     });
     let target = http_url_target(tail);
     Ok(AlmideHttpUrl { https, host, port, authority, target, userinfo, url: url.to_string() })
+}
+
+/// url.parse's cleaning (C-402): strip leading and trailing C0 control or
+/// space, remove tab / LF / CR, then refuse a backslash or a control
+/// character that is left.
+fn http_url_clean(url: &str) -> Result<String, String> {
+    let kept: String = url
+        .trim_matches(|c: char| (c as u32) <= 0x20)
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    if kept.chars().any(|c| (c as u32) < 0x20 || c as u32 == 0x7f) {
+        return Err("a control character is not allowed in a URL".to_string());
+    }
+    if kept.contains('\\') {
+        return Err("a backslash is not allowed in a URL".to_string());
+    }
+    Ok(kept)
+}
+
+/// url.parse's numeric-host rule (C-402): a host whose last label (one
+/// trailing empty label dropped) is all digits or `0x` and hex digits must
+/// be four decimal labels 0..=255 without leading zeros.
+fn http_url_ipv4_ok(host: &str) -> bool {
+    let mut labels: Vec<&str> = host.split('.').collect();
+    if labels.len() > 1 && labels.last() == Some(&"") {
+        labels.pop();
+    }
+    let last = labels.last().copied().unwrap_or("");
+    let digits = |l: &str| !l.is_empty() && l.bytes().all(|b| b.is_ascii_digit());
+    let numeric = digits(last)
+        || ((last.starts_with("0x") || last.starts_with("0X")) && last[2..].bytes().all(|b| b.is_ascii_hexdigit()));
+    if !numeric {
+        return true;
+    }
+    let all: Vec<&str> = host.split('.').collect();
+    all.len() == 4
+        && all.iter().all(|l| digits(l) && l.len() <= 3 && (l.len() == 1 || !l.starts_with('0')) && l.parse::<u16>().is_ok_and(|n| n <= 255))
+}
+
+/// url.parse's dot-segment rule (C-402): `.` and `%2e` are single-dot,
+/// `..`, `.%2e`, `%2e.` and `%2e%2e` double-dot (ASCII case-insensitive);
+/// a double-dot drops the segment before it, and either as the last segment
+/// leaves a trailing `/`.
+fn http_url_remove_dots(path: &str) -> String {
+    let Some(body) = path.strip_prefix('/') else {
+        return path.to_string();
+    };
+    let segs: Vec<&str> = body.split('/').collect();
+    let mut out: Vec<&str> = Vec::new();
+    for (i, seg) in segs.iter().enumerate() {
+        let last = i + 1 == segs.len();
+        let kind = match seg.to_ascii_lowercase().as_str() {
+            "." | "%2e" => 1,
+            ".." | ".%2e" | "%2e." | "%2e%2e" => 2,
+            _ => 0,
+        };
+        match kind {
+            2 => {
+                out.pop();
+                if last {
+                    out.push("");
+                }
+            }
+            1 => {
+                if last {
+                    out.push("");
+                }
+            }
+            _ => out.push(seg),
+        }
+    }
+    format!("/{}", out.join("/"))
 }
 
 /// The scheme (`true` for https) and what follows its `://`. `Err` is the
@@ -110,8 +195,8 @@ fn http_url_host(hostport: &str) -> Result<(String, Option<&str>), String> {
             Some((_, p)) if p.contains(':') => {
                 Err("an IPv6 address must be written in brackets, e.g. http://[::1]:8080/".to_string())
             }
-            Some((h, p)) => Ok((http_normalize_host(h)?, Some(p))),
-            None => Ok((http_normalize_host(hostport)?, None)),
+            Some((h, p)) => Ok((http_numeric_host_checked(http_normalize_host(h)?)?, Some(p))),
+            None => Ok((http_numeric_host_checked(http_normalize_host(hostport)?)?, None)),
         };
     };
     let close = v6.find(']').ok_or_else(|| "unterminated IPv6 address (missing \"]\")".to_string())?;
@@ -124,6 +209,14 @@ fn http_url_host(hostport: &str) -> Result<(String, Option<&str>), String> {
         None => return Err(format!("unexpected {} after the IPv6 address", http_quote(after))),
     };
     Ok((addr.to_string(), port))
+}
+
+fn http_numeric_host_checked(host: String) -> Result<String, String> {
+    if http_url_ipv4_ok(&host) {
+        Ok(host)
+    } else {
+        Err(format!("non-canonical IPv4 host {} (write it as four decimal numbers)", http_quote(&host)))
+    }
 }
 
 /// The port: 1..=65535, or the scheme's default when absent or empty.
@@ -145,7 +238,7 @@ fn http_url_target(tail: &str) -> String {
         Some((p, q)) => (p, Some(q)),
         None => (tail, None),
     };
-    let mut target = if path.is_empty() { "/".to_string() } else { http_percent_encode(path, false) };
+    let mut target = if path.is_empty() { "/".to_string() } else { http_percent_encode(&http_url_remove_dots(path), false) };
     if let Some(q) = query {
         target.push('?');
         target.push_str(&http_percent_encode(q, true));
