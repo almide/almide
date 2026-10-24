@@ -1,0 +1,35 @@
+// @contract: C-410
+// datetime.parse_iso refuses a year outside 0..=9999 (RFC 3339 §5.6
+// `date-fullyear = 4DIGIT`) with `year out of range: <y>`, checked before the
+// month, so it never answers ok with a wrapped instant (#4118). Before this
+// the calendar arithmetic overflowed: 292277026597-01-01 was
+// ok(-9223372036852412416) and 584554051223-01-01 was ok(-26982016), a day in
+// 1969. The rows are the issue's probes, the two edges of the range, a year
+// that is out of range together with every other field, and the to_iso
+// round trip at the top edge (to_iso of the first second of year 10000 is
+// refused, the last second of 9999 reads back).
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok(${n})",
+  err(e) => "err(${e})",
+}
+
+fn main() -> Unit = {
+  for s in [
+    "292277026596-12-04T15:30:07Z",
+    "292277026597-01-01T00:00:00Z",
+    "999999999999-01-01T00:00:00Z",
+    "584554051223-01-01T00:00:00Z",
+    "9223372036854775807-01-01T00:00:00Z",
+    "99999999999999999999-01-01T00:00:00Z",
+    "9999-12-31T23:59:59Z",
+    "9999-12-31T23:59:59-23:59",
+    "10000-01-01T00:00:00Z",
+    "10000-13-45T99:99:99Z",
+    "0000-01-01T00:00:00Z",
+    "0000-01-01T00:00:00+23:59",
+    datetime.to_iso(253402300799),
+    datetime.to_iso(253402300800)
+  ] {
+    println("${s} => ${show(datetime.parse_iso(s))}")
+  }
+}
