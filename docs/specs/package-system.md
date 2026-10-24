@@ -412,7 +412,10 @@ three ways:
   to the generated Cargo.toml, so their `build.rs` and proc macros run;
 - an `@extern(rust, "path", "fn")` fn is emitted as a call to `path::fn`, for
   any Rust path (`std` included, with no `native/` at all), and an
-  `@extern(c, …)` fn links a C symbol.
+  `@extern(c, …)` fn links a C symbol;
+- an `@inline_rust("…")` fn's template is spliced into the crate as Rust text
+  (#4100). `@intrinsic` / `@wasm_intrinsic`, which E085 refuses outside the
+  stdlib, are listed too if a package carries them.
 
 So `almide build`, `almide run`, `almide test` and `almide bench` refuse a
 dependency, direct or reached through another dependency, that brings any of
