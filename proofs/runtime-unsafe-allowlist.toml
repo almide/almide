@@ -1,18 +1,39 @@
-# Every `unsafe` the native runtime carries, per file (#4007). The language's memory
-# safety ends at these lines: the native leg trusts Rust's safe code, so each line here
-# is outside the guarantee. scripts/check-runtime-unsafe.sh counts the non-comment lines
-# holding the word `unsafe` and refuses any file whose count differs from its row — a new
-# `unsafe` needs a row and a reason, a removed one lowers the row in the same change.
+# Every `unsafe` in code the compiler puts into a native program, per file (#4007): the
+# runtime template (runtime/rs/src), the cores it includes (crates/almide-rt-core/src), and
+# the compiler-emitted code (crates/almide-codegen/src string templates, crates/almide-mir/src,
+# crates/almide-kernel/src, crates/almide-base/src/native_stack_guard.rs). The language's
+# memory safety ends at these lines: the native leg trusts Rust's safe code, so each line
+# here is outside the guarantee. scripts/check-runtime-unsafe.sh counts the lines that use
+# the keyword and refuses any file whose count differs from its row — a new `unsafe` needs
+# a row, a class and a reason; a removed one lowers the row in the same change.
 #
-# class: fan-sync (Almide values cross threads; Miri/loom are the plan), ffi-surface
-# (the raw-pointer stdlib surface, closed to ffi.read/ffi.write by R-L0-45),
-# c-call (a C / OS function; safe when its arguments are).
+# class (closed set; the gate refuses any other):
+#   os-ffi          a C / OS call std has no safe form of, in an FFI declaration module
+#                   (a safe wrapper per call; the module is the only file of its crate
+#                   that holds `unsafe`)
+#   blas-ffi        the system BLAS, same shape
+#   region-arena    the region allocator's raw arena (#4023)
+#   fan-sync        Almide values crossing fan threads through a lifetime-erased borrow
+#   ffi-surface     the raw-address stdlib surface a program calls itself (ffi.read/write)
+#   simd-intrinsic  std::arch SIMD under #[target_feature] (the matrix kernels)
+#   inline-asm      std::arch::asm!
+#   user-ffi        the glue of a program's own @extern(c) declaration
+#
+# Checks per class: os-ffi / fan-sync / region-arena / ffi-surface / user-ffi run in the
+# generated crates under Miri and AddressSanitizer (.github/workflows/miri-nightly.yml,
+# scripts/miri-generated.sh, scripts/asan-generated.sh, scripts/miri-fan-gate.sh).
+
+[[file]]
+path = "runtime/rs/src/sys.rs"
+count = 8
+class = "os-ffi"
+reason = "the runtime's ONE foreign-call module (#4007): signal / pthread_self / pthread_kill / _exit (http.serve's stop, process's SIGPIPE), waitpid(WNOHANG | WUNTRACED) (process.poll), clock_gettime(CLOCK_THREAD_CPUTIME_ID) (the fan clock), cblas_dgemm (blas-ffi, cfg(have_blas), which no build sets today) and SetConsoleCtrlHandler (Windows), each behind a safe wrapper whose arguments make the call sound. http.rs, list.rs, process.rs and matrix.rs call these and hold no unsafe"
 
 [[file]]
 path = "runtime/rs/src/list.rs"
-count = 8
+count = 6
 class = "fan-sync"
-reason = "the fan gate: a lifetime-erasing transmute of the take closure, one `unsafe impl Sync` (AlmideFanGate), raw parent pointers and the take-cell read (lines 680-989); plus clock_gettime (c-call) at 417/423. The fan blocks are Mutex cells since #4007, with no unsafe"
+reason = "the fan gate: a lifetime-erasing transmute of the take closure, one `unsafe impl Sync` (AlmideFanGate), raw parent pointers, the take-cell read and the slot reads (almide_fan_deal .. almide_fan_steal). kept: std::thread::scope in its place (no unsafe) measured 1.13-1.32x the pool's wall time on offers of fine and medium elements and 0.95-1.00x on coarse ones (mandelbrot, binarytrees, fanblock), Apple M-series 14 cores, 2026-10-24 (#4007). Checked under Miri with four CPUs and helpers on by scripts/miri-fan-gate.sh (miri-nightly.yml miri-fan), whose control drops the caller's wait and must come back UB"
 
 [[file]]
 path = "runtime/rs/src/bytes.rs"
@@ -27,28 +48,68 @@ class = "ffi-surface"
 reason = "from_raw_parts / copy_nonoverlapping behind ffi.read / ffi.write (R-ffi-01, #4042): the one place a program reads or writes a raw address; @memory_unsafe, refused under --profile critical (E100)"
 
 [[file]]
-path = "runtime/rs/src/http.rs"
-count = 12
-class = "c-call"
-reason = "signal handling for http.serve: pthread_self / pthread_kill / signal / _exit, and SetConsoleCtrlHandler on Windows"
-
-[[file]]
-path = "runtime/rs/src/process.rs"
-count = 3
-class = "c-call"
-reason = "SIGPIPE disposition and waitpid(WNOHANG | WUNTRACED) for process.poll"
-
-[[file]]
-path = "runtime/rs/src/matrix.rs"
-count = 1
-class = "c-call"
-reason = "cblas_dgemm: reads m*k and k*n and writes m*n f64 through raw pointers; the dimensions come from shape-checked matrices"
-
-
-
-
-[[file]]
 path = "crates/almide-rt-core/src/net_unix_sys.rs"
 count = 5
-class = "c-call"
+class = "os-ffi"
 reason = "SCM_RIGHTS descriptor passing (sendmsg / recvmsg / cmsg) and memfd for the unix module"
+
+
+[[file]]
+path = "crates/almide-base/src/native_stack_guard.rs"
+count = 12
+class = "os-ffi"
+reason = "the C-196 stack guard both native renders emit (module almide_stack_guard): sigaction, the faulting thread's stack bounds (pthread_get_stackaddr_np / pthread_get_stacksize_np on macOS), write(2) and _exit from the handler, the siginfo fault-address read and the chain to the previous handler"
+
+[[file]]
+path = "crates/almide-codegen/src/walker/mod.rs"
+count = 1
+class = "os-ffi"
+reason = "MAIN_SIGPIPE_PRELUDE: signal(SIGPIPE, SIG_DFL) at the top of every native main (#1950), cfg(not(miri))"
+
+[[file]]
+path = "crates/almide-codegen/src/prelude_region.rs"
+count = 9
+class = "region-arena"
+reason = "the region arena (UnsafeCell arena, raw header stamps, NonNull handles); owned by #4023"
+
+[[file]]
+path = "crates/almide-codegen/src/prelude_rem_body.rs"
+count = 1
+class = "inline-asm"
+reason = "almide_mulhs: one-operand imul on x86_64 (pure, nomem, nostack); the portable i128 form under Miri and elsewhere"
+
+[[file]]
+path = "crates/almide-codegen/src/walker/extern_c.rs"
+count = 1
+class = "user-ffi"
+reason = "the call glue of a program's own @extern(c) fn: the program declares the foreign signature"
+
+[[file]]
+path = "crates/almide-kernel/src/matmul.rs"
+count = 3
+class = "simd-intrinsic"
+reason = "the AVX / register-tiled matmul kernels and their call behind is_x86_feature_detected"
+
+[[file]]
+path = "crates/almide-kernel/src/scale.rs"
+count = 2
+class = "simd-intrinsic"
+reason = "scale_avx and its #[cfg(test)] bitwise check (the test block is stripped before emission)"
+
+[[file]]
+path = "crates/almide-kernel/src/transpose.rs"
+count = 7
+class = "simd-intrinsic"
+reason = "the AVX 8x8 f32 transpose and its five passes"
+
+[[file]]
+path = "crates/almide-kernel/src/transpose_f64.rs"
+count = 3
+class = "simd-intrinsic"
+reason = "the AVX 4x4 / 8x8 f64 transposes and their call behind feature detection"
+
+[[file]]
+path = "crates/almide-kernel/src/simd_wasm.rs"
+count = 4
+class = "simd-intrinsic"
+reason = "v128 load / store for the wasm32 simd128 build (a private module, not inlined into native programs)"
