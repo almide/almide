@@ -273,16 +273,18 @@ fn load_bundled_module(name: &str, source: &'static str, ctx: &mut ResolveCtx) -
         .ok_or_else(|| format!("parse error in bundled stdlib '{}'", name))?
         .clone();
 
-    // Recursively resolve this module's imports
+    // Recursively resolve this module's imports, in resolve_named_import's
+    // order: a module with a bundled Almide source is loaded even when its
+    // name is also a stdlib module, so a bundled module that calls another's
+    // Almide bodies (`http.query_params` → `url.parse_query`, C-404) links it
+    // whether or not the program imports it itself.
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
             let dep_name = &path[0];
-            if !stdlib::is_stdlib_module(dep_name) {
-                if let Some(dep_source) = stdlib::get_bundled_source(dep_name) {
-                    load_bundled_module(dep_name, dep_source, ctx)?;
-                } else {
-                    load_module(dep_name, ctx)?;
-                }
+            if let Some(dep_source) = stdlib::get_bundled_source(dep_name) {
+                load_bundled_module(dep_name, dep_source, ctx)?;
+            } else if !stdlib::is_stdlib_module(dep_name) {
+                load_module(dep_name, ctx)?;
             }
         }
     }
