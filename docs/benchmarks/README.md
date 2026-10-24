@@ -22,7 +22,7 @@ The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-i
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](../contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
 
 <!-- claims:generated:start — derived from docs/contracts/contracts.toml by scripts/gen-claims.sh; DO NOT EDIT between the markers -->
-> <!-- counts:generated:start (as of 2026-10-21) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+> <!-- counts:generated:start (as of 2026-10-24) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 > **Ledger: 388 contracts — 388 active, 0 flagged-for-revision.**
 > <!-- counts:generated:end -->
 >
@@ -107,11 +107,11 @@ Embedded wasm host (Perceus RC in linear memory) against the native binary, same
 The stamped totals behind the [project status](../status.md), and the mutation score of the gate net.
 
 <!-- stats:generated:start — derived from docs/stdlib/*.md, spec/, and docs/contracts/contracts.toml by scripts/gen-readme-stats.sh; DO NOT EDIT between the markers -->
-<!-- counts:generated:start (as of 2026-10-21) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
+<!-- counts:generated:start (as of 2026-10-24) — stamped totals from proofs/ledger-counts.toml; refreshed only by scripts/gen-ledger-counts.sh, never by a fixture/contract PR; DO NOT EDIT between the markers -->
 | Derived count | Value |
 |---|---|
-| Stdlib | 999 functions across 44 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
-| Tests | 514 `.almd` test files under `spec/` (`almide test spec/`) + the 388-contract cross-target ledger |
+| Stdlib | 1461 functions across 48 modules — self-hosted `.almd`, signature indexes regenerated from the compiler by `tools/gen-stdlib-doc-index.py` |
+| Tests | 537 `.almd` test files under `spec/` (`almide test spec/`) + the 388-contract cross-target ledger |
 <!-- counts:generated:end -->
 <!-- stats:generated:end -->
 
