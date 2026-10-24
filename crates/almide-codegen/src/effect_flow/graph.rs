@@ -37,6 +37,14 @@ pub(super) fn bit(e: Effect) -> u32 {
     1 << (e as u32)
 }
 
+/// The effect BIT (ADR-0009 D2), carried in the same mask as the categories
+/// but on a bit no [`Effect`] uses, so it rides fn values, fields, pools and
+/// call sites exactly as a category does (#4151). It is set where an
+/// `effect fn` runs: an `effect fn`'s own node, and a call of a stdlib
+/// `effect fn` the program does not scan. [`cats_of`] never yields it, so it
+/// is invisible to `--effects` and `[permissions]`.
+pub(super) const EFFECT_FN: u32 = 1 << 31;
+
 /// The categories of a mask, in declaration order.
 pub(super) fn cats_of(mask: u32) -> impl Iterator<Item = Effect> {
     Effect::ALL.into_iter().filter(move |e| mask & bit(*e) != 0)
@@ -83,6 +91,12 @@ pub(super) struct Graph {
     pub param_names: Vec<Vec<String>>,
     /// Display name of every function scope.
     pub fn_names: Vec<String>,
+    /// The source site each edge was generated at (parallel to `edges`;
+    /// shorter when a test pushes edges directly). A diagnostic anchors at
+    /// the site of the first edge on its path.
+    pub sites: Vec<Option<almide_base::span::Span>>,
+    /// The site edges pushed now are recorded at.
+    pub site: Option<almide_base::span::Span>,
 }
 
 impl Graph {
@@ -99,8 +113,15 @@ impl Graph {
 
     pub fn copy(&mut self, to: NodeId, from: NodeId) {
         if to != from {
-            self.edges.push(Edge::Copy { to, from });
+            self.push(Edge::Copy { to, from });
         }
+    }
+
+    /// Adds an edge, recorded at the current [`Graph::site`].
+    pub fn push(&mut self, e: Edge) {
+        self.sites.resize(self.edges.len(), None);
+        self.edges.push(e);
+        self.sites.push(self.site);
     }
 
     /// Solves every edge to the least fixpoint.

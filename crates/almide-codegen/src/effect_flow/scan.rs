@@ -18,19 +18,81 @@ use std::collections::{BTreeSet, HashMap};
 use almide_ir::*;
 use almide_ir::visit::{walk_expr, walk_pattern, walk_stmt, IrVisitor};
 use almide_lang::types::{Ty, TypeConstructorId};
-use super::graph::{bit, Edge, FnIx, Graph, NodeId};
+use super::graph::{bit, Edge, FnIx, Graph, NodeId, EFFECT_FN};
 use super::index::{Index, Pools};
 use almide_base::intern::Sym;
 use super::{module_to_effect, runtime_name_to_effect};
 
 /// A value of this type may be (or directly wrap) a fn: a fn type, a type
 /// variable or unknown (pre-monomorphisation generics), or an
-/// `Option`/`Result` of one (an `effect fn` returning a closure).
+/// `Option`/`Result` of one (an `effect fn` returning a closure). A type
+/// alias is its target (#4151: `type ReadFn = (String) -> …` held a fn the
+/// scan did not follow, so `r(p)` through an aliased parameter ran nothing).
 pub(super) fn may_hold_fn(ty: &Ty) -> bool {
     match ty {
         Ty::Fn { .. } | Ty::TypeVar(_) | Ty::Unknown => true,
         Ty::Applied(TypeConstructorId::Option | TypeConstructorId::Result, args) => args.first().is_some_and(may_hold_fn),
+        Ty::Named(..) => aliases::target(ty).is_some_and(|t| may_hold_fn(&t)),
         _ => false,
+    }
+}
+
+/// The type aliases of the program being solved, by declared name and by
+/// `module.name` (set for the duration of one solve).
+pub(super) mod aliases {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    use almide_ir::{IrProgram, IrTypeDeclKind};
+    use almide_lang::types::Ty;
+
+    thread_local! {
+        static TABLE: RefCell<HashMap<String, Ty>> = RefCell::new(HashMap::new());
+    }
+
+    /// Installs `program`'s aliases until the guard drops.
+    pub struct Scope;
+
+    impl Scope {
+        pub fn new(program: &IrProgram) -> Scope {
+            let mut table = HashMap::new();
+            let decls = program.type_decls.iter().map(|d| (None, d))
+                .chain(program.modules.iter().flat_map(|m| m.type_decls.iter().map(move |d| (Some(m.name), d))));
+            for (module, d) in decls {
+                if let IrTypeDeclKind::Alias { target } = &d.kind {
+                    table.insert(d.name.to_string(), target.clone());
+                    if let Some(m) = module {
+                        table.insert(format!("{}.{}", m, d.name), target.clone());
+                    }
+                }
+            }
+            TABLE.with(|t| *t.borrow_mut() = table);
+            Scope
+        }
+    }
+
+    impl Drop for Scope {
+        fn drop(&mut self) {
+            TABLE.with(|t| t.borrow_mut().clear());
+        }
+    }
+
+    /// The alias `ty` names, followed to a non-alias (bounded: a cycle is
+    /// refused by the checker, the bound only keeps this total).
+    pub fn target(ty: &Ty) -> Option<Ty> {
+        let mut cur = ty.clone();
+        let mut hops = 0;
+        while let Ty::Named(name, _) = &cur {
+            let next = TABLE.with(|t| {
+                let t = t.borrow();
+                t.get(name.as_str()).or_else(|| name.as_str().rsplit_once('.').and_then(|(_, n)| t.get(n))).cloned()
+            })?;
+            cur = next;
+            hops += 1;
+            if hops > 16 {
+                return None;
+            }
+        }
+        (hops > 0).then_some(cur)
     }
 }
 
@@ -93,8 +155,10 @@ impl Scan<'_, '_> {
             IrExprKind::Lambda { body, .. } => Some(self.lambda(body, e.span)),
             IrExprKind::Call { target, args, .. } | IrExprKind::TailCall { target, args } => self.call(target, args, e),
             IrExprKind::RuntimeCall { symbol, args } => {
+                self.g.site = e.span;
                 let label = format!("{} ({})", symbol, loc(e.span));
-                self.perform(runtime_name_to_effect(symbol), label);
+                self.perform(runtime_name_to_effect(symbol), label.clone());
+                self.perform_effect_fn(almide_ir::effect::runtime_symbol_is_effect(symbol), label);
                 self.opaque_call(args, &e.ty)
             }
             IrExprKind::If { cond, then, else_ } => {
@@ -111,7 +175,15 @@ impl Scan<'_, '_> {
             }
             IrExprKind::Member { object, field } | IrExprKind::OptionalChain { expr: object, field } => {
                 self.consume(object);
-                may_hold_fn(&e.ty).then(|| self.field(*field))
+                if !may_hold_fn(&e.ty) {
+                    return None;
+                }
+                // The field's own node, and the pool at the field's type: a
+                // generic body stores a type-variable value in a field
+                // without tracking it, and its caller pooled it there.
+                let f = Some(self.field(*field));
+                let p = self.untracked(&e.ty);
+                self.join(&[f, p])
             }
             IrExprKind::Unwrap { expr } | IrExprKind::Try { expr } | IrExprKind::ToOption { expr }
             | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, .. }
@@ -142,7 +214,7 @@ impl Scan<'_, '_> {
             IrExprKind::IterChain { source, steps, collector, .. } => self.iter_chain(source, steps, collector, &e.ty),
             _ => {
                 walk_expr(self, e);
-                may_hold_fn(&e.ty).then(|| self.pools.read(&e.ty))
+                self.untracked(&e.ty)
             }
         }
     }
@@ -158,7 +230,7 @@ impl Scan<'_, '_> {
         if let IterCollector::Fold { init, .. } = collector {
             self.consume(init);
         }
-        may_hold_fn(ty).then(|| self.pools.read(ty))
+        self.untracked(ty)
     }
 
     /// Evaluates `e` for what it performs; a fn value it yields escapes.
@@ -170,10 +242,29 @@ impl Scan<'_, '_> {
     /// A fn value leaves every tracked position: callers of untracked values
     /// of its arity are charged with it.
     pub fn escape(&mut self, v: Option<NodeId>, ty: &Ty) {
-        if let Some(v) = v {
-            let to = self.pools.write(ty);
-            self.g.edges.push(Edge::Concretize { to, from: v, scope: self.scope });
+        // A value whose type cannot hold a fn carries none (a user call's
+        // result node exists whatever it returns): pooling it at the
+        // wildcard charged every untracked call with it (#4151).
+        // A value typed by a bare type variable (inside a generic body) was
+        // pooled at its concrete type by the call site that passed it in
+        // (`Scan::user_call`); pooling it again at the wildcard made every
+        // signature's reads see every other's (#4151).
+        if let Some(v) = v.filter(|_| may_hold_fn(ty) && !super::index::is_bare_typevar(ty)) {
+            let to = self.pools.write(self.g, ty);
+            self.g.push(Edge::Concretize { to, from: v, scope: self.scope });
         }
+    }
+
+    /// The untracked fn values an expression of type `ty` may evaluate to:
+    /// the pool of its signature. A bare type variable reads nothing — a
+    /// generic body never calls such a value, and every concrete-typed place
+    /// it comes back out at reads the pool there (a call's result, a lambda
+    /// parameter, a field).
+    fn untracked(&mut self, ty: &Ty) -> Option<NodeId> {
+        if !may_hold_fn(ty) || super::index::is_bare_typevar(ty) {
+            return None;
+        }
+        Some(self.pools.read(self.g, ty))
     }
 
     /// The current performer runs the fn value `v`.
@@ -185,7 +276,15 @@ impl Scan<'_, '_> {
 
     fn perform(&mut self, cat: Option<almide_ir::effect::Effect>, label: String) {
         if let Some(c) = cat {
-            self.g.edges.push(Edge::Const { to: self.performer, cats: bit(c), sym: None, label: Some(label) });
+            self.g.push(Edge::Const { to: self.performer, cats: bit(c), sym: None, label: Some(label) });
+        }
+    }
+
+    /// The current performer runs a stdlib `effect fn` the program does not
+    /// scan: it carries the effect bit (#4151).
+    fn perform_effect_fn(&mut self, is_effect: bool, label: String) {
+        if is_effect {
+            self.g.push(Edge::Const { to: self.performer, cats: EFFECT_FN, sym: None, label: Some(label) });
         }
     }
 
@@ -231,16 +330,20 @@ impl Scan<'_, '_> {
         if let Some(&n) = self.locals.get(&id).or_else(|| self.ix.toplets[self.table].get(&id)) {
             return Some(n);
         }
-        may_hold_fn(ty).then(|| self.pools.read(ty))
+        self.untracked(ty)
     }
 
     /// The node `{arg i}` of the scope function.
+    pub fn sym_node(&mut self, i: usize) -> NodeId {
+        self.sym(i)
+    }
+
     fn sym(&mut self, i: usize) -> NodeId {
         if let Some(&n) = self.syms.get(&i) {
             return n;
         }
         let n = self.g.node(None);
-        self.g.edges.push(Edge::Const { to: n, cats: 0, sym: Some(i), label: None });
+        self.g.push(Edge::Const { to: n, cats: 0, sym: Some(i), label: None });
         self.syms.insert(i, n);
         n
     }
@@ -248,13 +351,24 @@ impl Scan<'_, '_> {
     fn fn_ref(&mut self, name: &str) -> Option<NodeId> {
         if let Some(f) = self.ix.resolve(self.table, name) {
             self.sh.taken.insert(f);
-            return Some(self.ix.fns[f].fn_val);
-        }
-        // A stdlib fn taken as a value: its module's category.
-        let cat = name.split_once('.').and_then(|(m, f)| module_to_effect(m, f)).or_else(|| runtime_name_to_effect(name));
-        cat.map(|c| {
+            let val = self.ix.fns[f].fn_val;
+            // A stdlib fn the program carries (bundled): its category rides
+            // the value too, as a call of it performs it (#4152).
+            let Some(c) = name.split_once('.').and_then(|(m, f)| module_to_effect(m, f)) else { return Some(val) };
             let n = self.g.node(None);
-            self.g.edges.push(Edge::Const { to: n, cats: bit(c), sym: None, label: Some(name.to_string()) });
+            self.g.copy(n, val);
+            self.g.push(Edge::Const { to: n, cats: bit(c), sym: None, label: Some(name.to_string()) });
+            return Some(n);
+        }
+        // A stdlib fn taken as a value: its module's category, and the
+        // effect bit when it is an `effect fn` (#4151).
+        let cat = name.split_once('.').and_then(|(m, f)| module_to_effect(m, f)).or_else(|| runtime_name_to_effect(name));
+        let effect = name.split_once('.').is_some_and(|(m, f)| almide_ir::effect::stdlib_fn_is_effect(m, f))
+            || almide_ir::effect::runtime_symbol_is_effect(name);
+        let cats = cat.map_or(0, bit) | if effect { EFFECT_FN } else { 0 };
+        (cats != 0).then(|| {
+            let n = self.g.node(None);
+            self.g.push(Edge::Const { to: n, cats, sym: None, label: Some(name.to_string()) });
             n
         })
     }
@@ -275,36 +389,59 @@ impl Scan<'_, '_> {
         match target {
             CallTarget::Named { name } => {
                 let vals: Vec<Option<NodeId>> = args.iter().map(|a| self.flow(a)).collect();
+                self.g.site = e.span;
                 if let Some(f) = self.ix.resolve(self.table, name) {
-                    return self.user_call(f, vals);
+                    return self.user_call(f, vals, args, e);
                 }
-                self.perform(runtime_name_to_effect(name), format!("{} ({})", name, loc(e.span)));
+                let label = format!("{} ({})", name, loc(e.span));
+                self.perform(runtime_name_to_effect(name), label.clone());
+                self.perform_effect_fn(almide_ir::effect::runtime_symbol_is_effect(name), label);
                 self.store_args(&vals, args);
-                may_hold_fn(&e.ty).then(|| self.pools.read(&e.ty))
+                self.untracked(&e.ty)
             }
             CallTarget::Module { module, func, .. } => {
                 let vals: Vec<Option<NodeId>> = args.iter().map(|a| self.flow(a)).collect();
+                self.g.site = e.span;
                 self.perform(module_to_effect(module, func), format!("{}.{} ({})", module, func, loc(e.span)));
                 if let Some(f) = self.ix.resolve(self.table, &format!("{module}.{func}")) {
-                    return self.user_call(f, vals);
+                    return self.user_call(f, vals, args, e);
+                }
+                // Unscanned: the stdlib declaration says whether it is an
+                // `effect fn` (a scanned one carries the bit on its own node).
+                let is_effect = almide_ir::effect::stdlib_fn_is_effect(module.as_str(), func.as_str());
+                self.perform_effect_fn(is_effect, format!("{}.{} ({})", module, func, loc(e.span)));
+                // What its declaration says it does with each fn argument.
+                if let Some(uses) = almide_ir::effect::stdlib_param_uses(module.as_str(), func.as_str()) {
+                    for (i, (v, a)) in vals.iter().zip(args).enumerate() {
+                        let u = uses.get(i).copied().unwrap_or(almide_ir::effect::ParamUse { runs: true, keeps: true });
+                        if u.runs {
+                            self.run(*v);
+                        }
+                        if u.keeps {
+                            self.escape(*v, &a.ty);
+                        }
+                    }
+                    return self.untracked(&e.ty);
                 }
                 self.opaque_call_vals(&vals, args, &e.ty)
             }
             CallTarget::Method { object, method } => {
                 let vals: Vec<Option<NodeId>> =
                     std::iter::once(object.as_ref()).chain(args.iter()).map(|a| self.flow(a)).collect();
-                if let Some(f) = self.ix.resolve(self.table, method) {
-                    return self.user_call(f, vals);
-                }
+                self.g.site = e.span;
                 let all: Vec<IrExpr> = std::iter::once((**object).clone()).chain(args.iter().cloned()).collect();
+                if let Some(f) = self.ix.resolve(self.table, method) {
+                    return self.user_call(f, vals, &all, e);
+                }
                 self.opaque_call_vals(&vals, &all, &e.ty)
             }
             CallTarget::Computed { callee } => {
                 let c = self.flow(callee);
+                self.g.site = e.span;
                 self.run(c);
                 let vals: Vec<Option<NodeId>> = args.iter().map(|a| self.flow(a)).collect();
                 self.store_args(&vals, args);
-                may_hold_fn(&e.ty).then(|| self.pools.read(&e.ty))
+                self.untracked(&e.ty)
             }
         }
     }
@@ -319,7 +456,7 @@ impl Scan<'_, '_> {
     fn opaque_call_vals(&mut self, vals: &[Option<NodeId>], args: &[IrExpr], ret: &Ty) -> Option<NodeId> {
         vals.iter().for_each(|&v| self.run(v));
         self.store_args(vals, args);
-        may_hold_fn(ret).then(|| self.pools.read(ret))
+        self.untracked(ret)
     }
 
     fn store_args(&mut self, vals: &[Option<NodeId>], args: &[IrExpr]) {
@@ -331,21 +468,57 @@ impl Scan<'_, '_> {
     /// A call of a scanned function `f`: what `f` performs with each of its
     /// parameter syms replaced by the argument's set, and what it returns
     /// likewise. Each argument is also recorded as received by `f`.
-    fn user_call(&mut self, f: FnIx, mut vals: Vec<Option<NodeId>>) -> Option<NodeId> {
+    fn user_call(&mut self, f: FnIx, mut vals: Vec<Option<NodeId>>, args: &[IrExpr], e: &IrExpr) -> Option<NodeId> {
+        if let Some(func) = self.ix.fns[f].func.filter(|func| super::is_foreign_bodied(func)) {
+            return self.foreign_call(f, func, vals, args, e);
+        }
+        // A value passed into a type-variable parameter is pooled here, at
+        // its concrete type; the generic body does not pool it (`escape`).
+        if let Some(func) = self.ix.fns[f].func {
+            for (i, (v, a)) in vals.iter().zip(args).enumerate() {
+                if func.params.get(i).is_some_and(|p| super::index::is_bare_typevar(&p.ty)) {
+                    self.escape(*v, &a.ty);
+                }
+            }
+        }
         let arity = self.g.param_in[f].len();
         vals.resize(arity.max(vals.len()), None);
         for (i, v) in vals.iter_mut().enumerate().take(arity) {
             match v {
-                Some(a) => self.g.edges.push(Edge::Concretize { to: self.g.param_in[f][i], from: *a, scope: self.scope }),
+                Some(a) => self.g.push(Edge::Concretize { to: self.g.param_in[f][i], from: *a, scope: self.scope }),
                 // A defaulted argument: whatever the parameter receives.
                 None => *v = Some(self.g.param_in[f][i]),
             }
         }
         let (own, ret) = (self.ix.fns[f].own, self.ix.fns[f].ret);
-        self.g.edges.push(Edge::Inst { to: self.performer, src: own, callee: f, args: vals.clone() });
+        self.g.push(Edge::Inst { to: self.performer, src: own, callee: f, args: vals.clone() });
         let t = self.g.node(None);
-        self.g.edges.push(Edge::Inst { to: t, src: ret, callee: f, args: vals });
+        self.g.push(Edge::Inst { to: t, src: ret, callee: f, args: vals });
+        // A generic result read back at the call's concrete type.
+        if self.ix.fns[f].func.is_some_and(|func| super::index::is_bare_typevar(&func.ret_ty))
+            && let Some(p) = self.untracked(&e.ty)
+        {
+            self.g.copy(t, p);
+        }
         Some(t)
+    }
+}
+
+impl Scan<'_, '_> {
+    /// A call of a foreign-bodied fn (`@intrinsic`, `= _`): what its summary
+    /// performs, instantiated with the arguments (the callbacks it runs);
+    /// every other argument that may hold a fn escapes at its own type, and
+    /// the result is read from the pools at the call's type (#4151, #4152).
+    fn foreign_call(&mut self, f: FnIx, func: &IrFunction, vals: Vec<Option<NodeId>>, args: &[IrExpr], e: &IrExpr) -> Option<NodeId> {
+        let own = self.ix.fns[f].own;
+        for (i, (v, a)) in vals.iter().zip(args).enumerate() {
+            let callback = func.params.get(i).is_some_and(|p| matches!(p.ty, Ty::Fn { .. }));
+            if !callback {
+                self.escape(*v, &a.ty);
+            }
+        }
+        self.g.push(Edge::Inst { to: self.performer, src: own, callee: f, args: vals });
+        self.untracked(&e.ty)
     }
 }
 
@@ -369,7 +542,7 @@ impl IrVisitor for Scan<'_, '_> {
                 let v = self.flow(value);
                 if let Some(v) = v {
                     let to = self.field(*field);
-                    self.g.edges.push(Edge::Concretize { to, from: v, scope: self.scope });
+                    self.g.push(Edge::Concretize { to, from: v, scope: self.scope });
                 }
             }
             IrStmtKind::Guard { cond, else_ } => {
@@ -395,7 +568,7 @@ pub(super) fn record_fields(scan: &mut Scan<'_, '_>, fields: &[(Sym, IrExpr)]) {
         let v = scan.flow(value);
         if let Some(v) = v {
             let to = scan.field(*name);
-            scan.g.edges.push(Edge::Concretize { to, from: v, scope: scan.scope });
+            scan.g.push(Edge::Concretize { to, from: v, scope: scan.scope });
         }
         // A pattern (`let { run } = b`, a variant case) reads it back untracked.
         scan.escape(v, &value.ty);

@@ -230,6 +230,94 @@ pub fn runtime_symbol_effect(symbol: &str) -> Option<Effect> {
     }
 }
 
+/// Is the stdlib function `module.func` declared `effect fn` (#4151)? Read
+/// from the module's own source, like [`stdlib_call_effect`]. This is the
+/// effect BIT, not a category: `zlib.compress` is an `effect fn` with no host
+/// access, and `path.join` is a plain fn. A name the module does not declare
+/// is not a stdlib function (a user module sharing the name), so `false`.
+///
+/// An `effect fn` whose result is `Never` and whose body is the runtime's
+/// (`process.exit`) only ends the program: that is ADR-0022's abort, which a
+/// plain `fn` may do (the lowered `assert` failure arm calls it), so it does
+/// not carry the bit. Read off the declaration, never a name list.
+pub fn stdlib_fn_is_effect(module: &str, func: &str) -> bool {
+    module_fns(module).any(|d| fn_name(d) == func && fn_is_effect(d) && !fn_only_aborts(d))
+}
+
+/// A bodyless (`= _`) declaration whose result type is `Never`: the runtime
+/// ends the program and nothing else (see [`stdlib_fn_is_effect`]).
+fn fn_only_aborts(decl: &almide_lang::ast::Decl) -> bool {
+    let almide_lang::ast::Decl::Fn { body, return_type: almide_lang::ast::TypeExpr::Simple { name }, .. } = decl else {
+        return false;
+    };
+    let bodyless = body.as_ref().is_none_or(|b| matches!(b.kind, almide_lang::ast::ExprKind::Hole));
+    bodyless && name.as_str() == "Never"
+}
+
+/// Is the runtime symbol `symbol` the `@intrinsic` of a stdlib `effect fn`
+/// (#4151)? Found by the declaring function's `@intrinsic` symbol, over
+/// every classified module.
+pub fn runtime_symbol_is_effect(symbol: &str) -> bool {
+    STDLIB_MODULE_EFFECTS
+        .iter()
+        .any(|(m, _)| module_fns(m).any(|d| intrinsic_symbol(d) == Some(symbol) && fn_is_effect(d) && !fn_only_aborts(d)))
+}
+
+/// What an unscanned stdlib function may do with one argument that holds a
+/// fn: run it, keep it (store it where something else reads it later), or
+/// both. Read off the declaration (#4151) so `check`, which does not lower the
+/// stdlib's bodies, follows a value as the build routes do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParamUse {
+    pub runs: bool,
+    pub keeps: bool,
+}
+
+/// [`ParamUse`] per parameter of the stdlib function `module.func`, or
+/// `None` for a name the module does not declare.
+///
+/// - A bodyless (`= _`) declaration runs its fn-typed parameters and keeps
+///   none of them (no `@intrinsic` stores a callback); any other parameter
+///   may be kept.
+/// - An Almide body is not read here: every parameter may be run and kept —
+///   except a parameter whose type is an explicit `effect (A) -> B` slot (or
+///   an alias of one) on a plain `fn`: the checker refuses that body a call
+///   of it (E006), so it can only keep it (`http.route`'s handler).
+pub fn stdlib_param_uses(module: &str, func: &str) -> Option<Vec<ParamUse>> {
+    use almide_lang::ast::{Decl, ExprKind, TypeExpr};
+    let decl = module_fns(module).find(|d| fn_name(d) == func)?;
+    let Decl::Fn { params, body, effect, .. } = decl else { return None };
+    let bodyless = body.as_ref().is_none_or(|b| matches!(b.kind, ExprKind::Hole));
+    let is_effect_fn = effect.unwrap_or(false);
+    let effect_slot = |t: &TypeExpr| match t {
+        TypeExpr::Fn { is_effect, .. } => *is_effect,
+        TypeExpr::Simple { name } => module_type_alias(module, name.as_str())
+            .is_some_and(|t| matches!(t, TypeExpr::Fn { is_effect: true, .. })),
+        _ => false,
+    };
+    Some(params.iter().map(|p| {
+        let fn_typed = matches!(p.ty, TypeExpr::Fn { .. }) || effect_slot(&p.ty);
+        match (bodyless, fn_typed) {
+            (true, true) => ParamUse { runs: true, keeps: false },
+            (true, false) => ParamUse { runs: false, keeps: true },
+            (false, _) if effect_slot(&p.ty) && !is_effect_fn => ParamUse { runs: false, keeps: true },
+            (false, _) => ParamUse { runs: true, keeps: true },
+        }
+    }).collect())
+}
+
+/// The target of `type name = …` in the stdlib module's own source.
+fn module_type_alias(module: &str, name: &str) -> Option<&'static almide_lang::ast::TypeExpr> {
+    almide_lang::stdlib_info::bundled_source(module)
+        .and_then(almide_lang::parse_cached)?
+        .decls
+        .iter()
+        .find_map(|d| match d {
+            almide_lang::ast::Decl::Type { name: n, ty, .. } if n.as_str() == name => Some(ty),
+            _ => None,
+        })
+}
+
 /// Result of effect inference for a single function.
 #[derive(Debug, Clone, Default)]
 pub struct FunctionEffects {
