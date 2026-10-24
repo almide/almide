@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 48 stdlib modules, 1511 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 49 stdlib modules, 1533 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -10,6 +10,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 |---|---:|---:|
 | [args](#args) | 7 | 0 |
 | [base64](#base64) | 4 | 0 |
+| [bigint](#bigint) | 22 | 1 |
 | [bool](#bool) | 3 | 0 |
 | [bytes](#bytes) | 146 | 1 |
 | [compute](#compute) | 7 | 0 |
@@ -77,6 +78,33 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `base64.decode(s: String) -> Result[Bytes, String]` — Bytes from base64; padding optional; err if bad.
 - `base64.encode_url(b: Bytes) -> String` — URL-safe base64 (- _), still = padded.
 - `base64.decode_url(s: String) -> Result[Bytes, String]` — Same as decode; accepts either alphabet.
+
+## bigint
+
+[bigint.md](bigint.md)
+
+- `bigint.parse(s: String) -> Result[BigInt, String]` — BigInt from trimmed decimal s with an optional + or -; err on junk.
+- `bigint.parse_radix(s: String, radix: Int) -> Result[BigInt, String]` — BigInt from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2; err on junk; radix outside 2..36 aborts.
+- `bigint.to_string(x: BigInt) -> String` — Decimal digits, with - when negative.
+- `bigint.to_string_radix(x: BigInt, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `bigint.compare(a: BigInt, b: BigInt) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
+- `bigint.min(a: BigInt, b: BigInt) -> BigInt` — Lesser of a and b.
+- `bigint.max(a: BigInt, b: BigInt) -> BigInt` — Greater of a and b.
+- `bigint.clamp(x: BigInt, lo: BigInt, hi: BigInt) -> BigInt` — x limited to lo..hi; aborts when lo > hi.
+- `bigint.abs(x: BigInt) -> BigInt` — Magnitude of x.
+- `bigint.sign(x: BigInt) -> Int` — -1, 0 or 1 by the sign of x; 0 for 0.
+- `bigint.is_even(x: BigInt) -> Bool` — True when x is a multiple of 2.
+- `bigint.is_odd(x: BigInt) -> Bool` — True when x is not a multiple of 2.
+- `bigint.floor_div(a: BigInt, b: BigInt) -> BigInt` — Quotient rounded toward -inf; b == 0 aborts.
+- `bigint.modulo(a: BigInt, b: BigInt) -> BigInt` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
+- `bigint.pow(base: BigInt, exp: Int) -> BigInt` — base raised to exp; exp < 0 aborts.
+- `bigint.bit_length(x: BigInt) -> Int` — Bits needed to hold the magnitude of x; 0 for 0.
+- `bigint.band(a: BigInt, b: BigInt) -> BigInt` — Bitwise AND.
+- `bigint.bor(a: BigInt, b: BigInt) -> BigInt` — Bitwise OR.
+- `bigint.bxor(a: BigInt, b: BigInt) -> BigInt` — Bitwise XOR.
+- `bigint.bnot(x: BigInt) -> BigInt` — Bitwise complement; equals -x - 1.
+- `bigint.bshl(a: BigInt, n: Int) -> BigInt` — a shifted left by n bits (a * 2^n); n < 0 aborts.
+- `bigint.bshr(a: BigInt, n: Int) -> BigInt` — a shifted right by n bits, rounding toward -inf (sign-filling); n < 0 aborts.
 
 ## bool
 
