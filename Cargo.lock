@@ -202,6 +202,7 @@ dependencies = [
  "almide-lang",
  "almide-optimize",
  "almide-str",
+ "sha2 0.11.1",
 ]
 
 [[package]]
