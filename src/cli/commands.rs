@@ -471,8 +471,8 @@ fn run_test_file_once(
             }
         }
     }
-    let worker_dir = std::env::temp_dir()
-        .join("almide-test")
+    let worker_dir = super::build_dir::cache_base()
+        .join("test")
         .join(file.replace(['/', '.'], "_"));
     match super::run::compile_to_binary(file, no_check, true, false, Some(&worker_dir)) {
         Ok(bin) => Ok(super::run::run_binary_captured(&bin, program_args)),

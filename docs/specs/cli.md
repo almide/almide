@@ -46,10 +46,20 @@ native バイナリに時間制限が無いのと同じく、`--target wasm` の
 プロセス単位の制限を自前で持つ。テスト: `tests/wasm_run_no_time_limit_test.rs`
 
 **native のビルドキャッシュ**(#2500): native ターゲットは生成 Rust を共有スクラッチ dir
-（`ALMIDE_RUN_PROJECT_DIR`、既定 `<temp>/almide-run`）でビルドし、生成コードの内容ハッシュを名前にした
+（`ALMIDE_RUN_PROJECT_DIR`、既定 `<cache base>/run`）でビルドし、生成コードの内容ハッシュを名前にした
 `target/<profile>/almide-<hash>` にバイナリを置く。同じ生成コードは `almide run` / `almide build`
 のどちらから来てもこの 1 本を再利用し、cargo を呼ばない。dir 内の書き込み（ビルド・退避・掃除）は
 すべて `.almide-build.lock` の下で直列化され、キャッシュヒットだけがロック無しで走る。
+
+- **置き場所**（#4180）: native のビルドキャッシュ（`run`、`build-cdylib`、ランタイムの rlib
+  `almide-rtlib-<key>`、`almide test` のワーカー `test/native`）は、すべて利用者ごとの非公開の土台
+  `<temp>/almide-<euid>` の下に置く。土台は mode 0700 で排他的に作る。すでにある場合は、実体の
+  ディレクトリで、実行中の利用者の持ち物で、グループと他人に権限が無いときだけ使う。それ以外は直さずに
+  拒否する（exit 1）。中身を他人が書いたかもしれないため。Linux の `/tmp` のような共有の temp で、
+  他人が先に作った dir に置いたバイナリが自分の権限で実行される穴を塞ぐ。
+- **ヒットの条件**（#4180）: ビルド時にバイナリの SHA-256 を `almide-<hash>.sha256` に記録し、
+  ヒットはその値とバイナリの中身が一致するときだけ。記録が無いか一致しなければ作り直す。
+  テスト: `tests/build_cache_private_test.rs`
 
 - **退避**: ヒットのたびにバイナリの mtime を更新し、7 日間使われなかった `almide-<hash>`
   （と `deps/` に残る同じ世代の `almide_out-*` オブジェクト）を、次のミス時にロックの下で削除する。

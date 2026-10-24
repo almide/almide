@@ -57,6 +57,7 @@ dependencies = [
  "fs2",
  "insta",
  "lasso",
+ "libc",
  "lsp-server",
  "lsp-types",
  "proptest",

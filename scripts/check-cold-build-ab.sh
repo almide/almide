@@ -60,7 +60,7 @@ if r.returncode != 0:
     sys.stderr.write(r.stderr.decode(errors="replace")[-2000:])
     print("FAIL")
 else:
-    print(f"{ms:.0f} {len(glob.glob(os.path.join(tmp, 'almide-rtlib-*')))}")
+    print(f"{ms:.0f} {len(glob.glob(os.path.join(tmp, 'almide-rtlib-*')) + glob.glob(os.path.join(tmp, 'almide-*', 'almide-rtlib-*')))}")
 PY
   rm -rf "$tmp"
 }

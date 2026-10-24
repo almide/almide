@@ -142,10 +142,13 @@ pub(crate) fn build_native_cached(
     let bin_path = project_dir.join("target").join(profile_dir).join(format!("almide-{}", code_hash));
 
     // The binary's NAME is its full content key and it lands via atomic rename
-    // (below), so bare existence is a complete, lock-free cache hit. The
-    // touch is what keeps a hit out of the age-based eviction (#2500).
-    if bin_path.exists() {
+    // (below). A hit is a binary whose bytes still hash to the digest recorded
+    // when it was built (#4180): existence alone would execute whatever sits
+    // under that name. The touch is what keeps a hit out of the age-based
+    // eviction (#2500).
+    if cached_binary_intact(&bin_path) {
         touch_used(&bin_path);
+        touch_used(&binary_digest_path(&bin_path));
         return Ok(bin_path);
     }
 
@@ -168,9 +171,11 @@ pub(crate) fn build_native_cached(
     let _flock = BuildDirLock::acquire(&project_dir)?;
 
     // Re-check the cache under the lock: another process/thread may have built
-    // this exact binary while we waited, making a rebuild redundant.
-    if bin_path.exists() {
+    // this exact binary while we waited, making a rebuild redundant. A binary
+    // whose digest is missing or wrong is rebuilt over (#4180).
+    if cached_binary_intact(&bin_path) {
         touch_used(&bin_path);
+        touch_used(&binary_digest_path(&bin_path));
         return Ok(bin_path);
     }
 
@@ -220,10 +225,45 @@ pub(crate) fn build_native_cached(
                 return Err(format!("failed to stage built binary {} -> {}: {}",
                     built_path.display(), bin_path.display(), e));
             }
+            record_binary_digest(&bin_path)?;
             Ok(bin_path)
         }
         Err(e) => Err(e),
     }
+}
+
+/// Where the content digest of a cached binary is kept (#4180).
+fn binary_digest_path(bin: &std::path::Path) -> std::path::PathBuf {
+    let mut name = bin.file_name().unwrap_or_default().to_os_string();
+    name.push(".sha256");
+    bin.with_file_name(name)
+}
+
+/// The lowercase hex SHA-256 of the file at `path`.
+fn file_sha256(path: &std::path::Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let bytes = std::fs::read(path).ok()?;
+    Some(Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// Is the cached binary at `bin` the one this compiler built there: present,
+/// with a recorded digest its bytes still hash to (#4180)?
+pub(crate) fn cached_binary_intact(bin: &std::path::Path) -> bool {
+    let Ok(want) = std::fs::read_to_string(binary_digest_path(bin)) else { return false };
+    file_sha256(bin).is_some_and(|got| got == want.trim())
+}
+
+/// Record the digest of the binary just installed at `bin`, through a staged
+/// file and a rename like the binary itself.
+fn record_binary_digest(bin: &std::path::Path) -> Result<(), String> {
+    let digest = file_sha256(bin).ok_or_else(|| format!("cannot read the built binary {}", bin.display()))?;
+    let path = binary_digest_path(bin);
+    let staged = path.with_extension(format!("stage-{}", std::process::id()));
+    std::fs::write(&staged, digest).map_err(|e| format!("cannot record the binary digest {}: {e}", staged.display()))?;
+    std::fs::rename(&staged, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&staged);
+        format!("cannot record the binary digest {}: {e}", path.display())
+    })
 }
 
 /// The launcher's own working directory, exported to the child as
