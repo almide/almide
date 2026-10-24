@@ -474,6 +474,7 @@ spec/wasm_cross/json_get_int_float.almd
 spec/wasm_cross/json_gltf_walk.almd
 spec/wasm_cross/json_many_keys.almd
 spec/wasm_cross/json_number_unicode.almd
+spec/wasm_cross/json_parse_depth_bound.almd
 spec/wasm_cross/json_parse_lenient_edges.almd
 spec/wasm_cross/json_path_edges.almd
 spec/wasm_cross/json_path_index_domain.almd
@@ -1049,6 +1050,7 @@ spec/wasm_cross/wide_function_body.almd
 spec/wasm_cross/witness_straightline.almd
 spec/wasm_cross/zip_view_shape.almd
 spec/wasm_cross/zlib_call_vs_user_namesake.almd
+spec/wasm_cross/zlib_output_bound.almd
 spec/wasm_cross/zlib_selfhost.almd
 spec/wasm_cross_pkg/main.almd
 spec/wasm_fail/effect_err_aborts_both_legs.almd

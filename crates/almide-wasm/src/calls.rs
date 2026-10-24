@@ -192,6 +192,29 @@ impl Emitter<'_> {
                 // module-fn simple-name index (intra-module calls arrive
                 // as Named after lower_module) — see `resolve_named_fn`.
                 let Some(i) = self.resolve_named_fn(name) else {
+                    // Inside the fs module's own Almide bodies (the rooted
+                    // family, #4022) a sibling host-op fn arrives as Named:
+                    // the same lowering `fs.<name>` takes from outside.
+                    // The call is re-dispatched as that module call on a pinned
+                    // node; its ownership mark moves back to this node.
+                    if self.cur_module == Some("fs") {
+                        let pinned = self.owned_call_marks.pin(IrExpr {
+                            kind: IrExprKind::Call {
+                                target: CallTarget::Module { module: almide_base::intern::sym("fs"), func: almide_base::intern::sym(name), def_id: None },
+                                args: Vec::new(),
+                                type_args: Vec::new(),
+                            },
+                            ty: almide_types::types::Ty::Unit,
+                            span: None,
+                            def_id: None,
+                        });
+                        let IrExprKind::Call { target: fs_target, .. } = &pinned.kind else { unreachable!("pinned call") };
+                        let out = self.lower_module_call(fs_target, args, tail, ret_hint)?;
+                        if self.owned_call_marks.is_target_marked(fs_target) {
+                            self.mark_owned_call(target);
+                        }
+                        return Ok(out);
+                    }
                     return unsup(&format!("call:{name}"));
                 };
                 let info = &self.table.infos[i];

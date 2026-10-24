@@ -190,11 +190,11 @@ fn memory_unsafe_surface_is_refused_under_critical() {
         ("`ffi.to_int`", "import ffi\n\nfn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  println(int.to_string(ffi.to_int(ffi.address(b))))\n}\n"),
         ("`ffi.read`", "import ffi\n\neffect fn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  let c = ffi.read(ffi.address(b), 3)\n  println(int.to_string(bytes.len(c)))\n}\n"),
         ("`ffi.write`", "import ffi\n\neffect fn main() -> Unit = {\n  var d = bytes.new(3)\n  let n = ffi.write(ffi.address(d), bytes.from_string(\"abc\"), 3)\n  println(int.to_string(n))\n}\n"),
-        ("`bytes.as_ptr`", "fn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  let p = bytes.as_ptr(b)\n  println(\"ok\")\n}\n"),
-        ("`bytes.as_mut_ptr`", "fn main() -> Unit = {\n  var b = bytes.from_string(\"abc\")\n  let p = bytes.as_mut_ptr(b)\n  println(\"ok\")\n}\n"),
-        ("`bytes.data_ptr`", "fn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  println(int.to_string(bytes.data_ptr(b)))\n}\n"),
-        ("`bytes.from_raw_ptr`", "fn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  let c = bytes.from_raw_ptr(bytes.as_ptr(b), 1000000)\n  println(int.to_string(bytes.len(c)))\n}\n"),
-        ("`bytes.copy_to_ptr`", "fn main() -> Unit = {\n  var d = bytes.new(3)\n  let n = bytes.copy_to_ptr(bytes.from_string(\"abc\"), bytes.as_mut_ptr(d), 3)\n  println(int.to_string(n))\n}\n"),
+        ("`bytes.as_ptr`", "import ffi\n\nfn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  let p = bytes.as_ptr(b)\n  println(\"ok\")\n}\n"),
+        ("`bytes.as_mut_ptr`", "import ffi\n\nfn main() -> Unit = {\n  var b = bytes.from_string(\"abc\")\n  let p = bytes.as_mut_ptr(b)\n  println(\"ok\")\n}\n"),
+        ("`bytes.data_ptr`", "import ffi\n\nfn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  println(int.to_string(bytes.data_ptr(b)))\n}\n"),
+        ("`bytes.from_raw_ptr`", "import ffi\n\nfn main() -> Unit = {\n  let b = bytes.from_string(\"abc\")\n  let c = bytes.from_raw_ptr(bytes.as_ptr(b), 1000000)\n  println(int.to_string(bytes.len(c)))\n}\n"),
+        ("`bytes.copy_to_ptr`", "import ffi\n\nfn main() -> Unit = {\n  var d = bytes.new(3)\n  let n = bytes.copy_to_ptr(bytes.from_string(\"abc\"), bytes.as_mut_ptr(d), 3)\n  println(int.to_string(n))\n}\n"),
         ("an `@extern` function", "@extern(rs, \"std::cmp\", \"max\")\nfn imax(a: Int, b: Int) -> Int\n\nfn main() -> Unit = println(int.to_string(imax(1, 2)))\n"),
     ];
     for (i, (what, src)) in cases.iter().enumerate() {

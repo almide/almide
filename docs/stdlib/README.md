@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 48 stdlib modules, 1461 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 48 stdlib modules, 1471 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -22,7 +22,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [float](#float) | 46 | 0 |
 | [float32](#float32) | 30 | 0 |
 | [float64](#float64) | 31 | 0 |
-| [fs](#fs) | 34 | 1 |
+| [fs](#fs) | 41 | 1 |
 | [hash](#hash) | 12 | 0 |
 | [heap](#heap) | 16 | 1 |
 | [hex](#hex) | 3 | 0 |
@@ -55,7 +55,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [uint8](#uint8) | 40 | 0 |
 | [url](#url) | 10 | 1 |
 | [value](#value) | 20 | 0 |
-| [zlib](#zlib) | 10 | 0 |
+| [zlib](#zlib) | 13 | 0 |
 
 ## args
 
@@ -543,6 +543,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect fs.is_symlink(path: String) -> Bool` — True for a symlink, even a dangling one.
 - `effect fs.modified_at(path: String) -> Int` — Mtime in Unix seconds; err if missing.
 - `effect fs.read_bytes_raw(path: String) -> Bytes` — Whole file as Bytes; err if missing.
+- `effect fs.open_root(dir: String) -> FsRoot` — dir as an FsRoot; err if dir is not a directory.
+- `effect fs.root_read_text(root: FsRoot, path: String) -> String` — read_text of path inside root; err if it escapes.
+- `effect fs.root_read_bytes(root: FsRoot, path: String) -> Bytes` — read_bytes_raw of path inside root; err if it escapes.
+- `effect fs.root_write_text(root: FsRoot, path: String, content: String) -> Unit` — write of content to path inside root; err if it escapes.
+- `effect fs.root_list_dir(root: FsRoot, path: String) -> List[String]` — list_dir of path inside root; err if it escapes.
+- `effect fs.root_exists(root: FsRoot, path: String) -> Bool` — exists of path inside root; err if it escapes.
+- `effect fs.root_remove(root: FsRoot, path: String) -> Unit` — remove of path inside root; err if it escapes.
 
 ## hash
 
@@ -971,7 +978,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [json.md](json.md)
 
-- `json.parse(text: String) -> Result[Value, String]` — Value or err; lenient, trailing text ignored.
+- `json.parse(text: String) -> Result[Value, String]` — Value or err; lenient, trailing text ignored; nesting over 1000 is err.
 - `json.stringify(v: Value) -> String` — Compact JSON; a Float 1.0 prints as 1, NaN/inf as null.
 - `json.stringify_pretty(j: Value) -> String` — JSON with 2-space indent; [] and {} inline, NaN/inf null.
 - `json.get_string(j: Value, key: String) -> Option[String]` — String at key; none if absent or non-string.
@@ -1749,11 +1756,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `effect zlib.compress(data: Bytes) -> Bytes` — Zlib-framed DEFLATE of data; bytes vary by target.
 - `effect zlib.compress_level(data: Bytes, level: Int) -> Bytes` — Like compress; level clamped to 0..9, unused on wasm.
-- `effect zlib.decompress(data: Bytes) -> Bytes` — Inflated zlib stream; err on corrupt input.
+- `effect zlib.decompress(data: Bytes) -> Bytes` — Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
+- `zlib.decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like decompress, output bound max_len bytes; max_len <= 0 aborts.
 - `effect zlib.deflate(data: Bytes) -> Bytes` — Raw DEFLATE, no header; bytes vary by target.
 - `effect zlib.deflate_level(data: Bytes, level: Int) -> Bytes` — Like deflate; level clamped to 0..9, unused on wasm.
-- `effect zlib.inflate(data: Bytes) -> Bytes` — Raw DEFLATE decoded; err on a corrupt stream.
+- `effect zlib.inflate(data: Bytes) -> Bytes` — Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
+- `zlib.inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like inflate, output bound max_len bytes; max_len <= 0 aborts.
 - `effect zlib.gzip(data: Bytes) -> Bytes` — RFC 1952 gzip of data; bytes vary by target.
-- `effect zlib.gunzip(data: Bytes) -> Bytes` — Gzip member decoded; err on bad header, CRC or empty input.
+- `effect zlib.gunzip(data: Bytes) -> Bytes` — Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
+- `zlib.gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 - `zlib.crc32(data: Bytes) -> Int` — CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
 - `zlib.adler32(data: Bytes) -> Int` — Adler-32 as an unsigned Int; 1 for empty data.

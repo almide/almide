@@ -50,6 +50,7 @@ impl Checker {
         if let ExprKind::Ident { name: mod_name, .. } = &object.kind {
             self.reject_dead_try_spelling(mod_name, field, object.id, object.span, None);
             self.reject_user_prim(mod_name, field, object.span);
+            self.reject_unopted_memory_unsafe_member(mod_name, field, object.span);
             // Every resolved branch below marks the import used (#3241): a
             // member taken as a VALUE (`let f = process.pid`, an argument, a
             // pipe RHS) is as much a use as a call, which marks on its own path.

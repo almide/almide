@@ -76,7 +76,7 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
     let mut rust_entries: Vec<_> = fs::read_dir(&rust_dir)?
         .collect::<io::Result<Vec<_>>>()?
         .into_iter()
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "rs"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "rs"))
         .filter(|e| e.file_name() != "lib.rs")
         .collect();
     rust_entries.sort_by_key(|e| e.file_name());
@@ -102,8 +102,20 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
         module_name(&e.path())
     }).collect::<io::Result<_>>()?;
 
+    // The `Almide*` types each module defines at top level: a module that
+    // names one (json.rs's `AlmideMap` in `almide_json_to_map`) depends on its
+    // definer as surely as on an `almide_rt_` fn. Before #4071 `map` was in
+    // every program, so the type edge never had to be stated.
+    let mut defined_types: Vec<(String, Vec<String>)> = Vec::new();
+    for entry in &rust_entries {
+        let stem = module_name(&entry.path())?;
+        let content = read_with_includes(&entry.path())?;
+        defined_types.push((stem, top_level_almide_types(&content)));
+    }
+
     rust_out.push_str("/// Inter-module runtime dependencies, auto-extracted from source.\n");
-    rust_out.push_str("/// If module A's source references `almide_rt_B_*`, A depends on B.\n");
+    rust_out.push_str("/// If module A's source references `almide_rt_B_*`, or names an `Almide*`\n");
+    rust_out.push_str("/// type B defines at top level, A depends on B.\n");
     rust_out.push_str("pub const RUNTIME_DEPS: &[(&str, &[&str])] = &[\n");
     for entry in &rust_entries {
         let stem = module_name(&entry.path())?;
@@ -112,7 +124,11 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
         for other in &module_names {
             if *other == stem { continue; }
             let prefix = format!("almide_rt_{}_", other);
-            if content.contains(&prefix) {
+            let names_a_type = defined_types
+                .iter()
+                .find(|(m, _)| m == other)
+                .is_some_and(|(_, tys)| tys.iter().any(|t| contains_ident(&content, t)));
+            if content.contains(&prefix) || names_a_type {
                 deps.push(other);
             }
         }
@@ -164,6 +180,54 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
 /// stripped — the runtime is built with `--test`, so the kernel's own
 /// `#[cfg(test)]` would otherwise run inside every spec. Extracted from
 /// `generate` (cog>25 decomposition).
+/// The `Almide*` names a runtime source defines at the start of a line
+/// (`pub struct` / `pub enum` / `pub type` / `pub trait`).
+fn top_level_almide_types(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .filter_map(|line| {
+            let rest = ["pub struct ", "pub enum ", "pub type ", "pub trait "]
+                .iter()
+                .find_map(|kw| line.strip_prefix(kw))?;
+            let end = rest.find(|c: char| !(c == '_' || c.is_ascii_alphanumeric())).unwrap_or(rest.len());
+            let name = &rest[..end];
+            name.starts_with("Almide").then(|| name.to_string())
+        })
+        .collect()
+}
+
+/// Whether `content`'s CODE (`//` comments dropped — a doc line mentioning
+/// another module's type is not a use of it) contains `name` as a whole
+/// identifier (not a prefix of a longer one: `AlmideMapKey` is not
+/// `AlmideMap`).
+fn contains_ident(content: &str, name: &str) -> bool {
+    let is_ident = |c: char| c == '_' || c.is_ascii_alphanumeric();
+    content.lines().map(strip_line_comment).any(|line| {
+        line.match_indices(name).any(|(i, _)| {
+            let before = line[..i].chars().next_back();
+            let after = line[i + name.len()..].chars().next();
+            !before.is_some_and(is_ident) && !after.is_some_and(is_ident)
+        })
+    })
+}
+
+/// `line` up to its `//` comment, a `//` inside a `"…"` literal kept.
+fn strip_line_comment(line: &str) -> &str {
+    let bytes = line.as_bytes();
+    let mut in_str = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' if in_str => i += 1,
+            b'"' => in_str = !in_str,
+            b'/' if !in_str && bytes.get(i + 1) == Some(&b'/') => return &line[..i],
+            _ => {}
+        }
+        i += 1;
+    }
+    line
+}
+
 fn build_kernel_inline(workspace_root: &Path) -> io::Result<String> {
     let kernel_dir = workspace_root.join("crates/almide-kernel/src");
     if !kernel_dir.exists() {
@@ -442,12 +506,12 @@ fn try_raw_fn_last_arg_helper_at(content: &str, cursor: usize, rel: usize) -> (u
     }
 
     // Last param's type is exactly one of those Fn generics.
-    if let Some(last) = split_top_level(params).last() {
-        if let Some(colon) = last.rfind(':') {
-            let ty = last[colon + 1..].trim();
-            if fn_generics.contains(&ty) {
-                return (new_cursor, Some(name));
-            }
+    if let Some(last) = split_top_level(params).last()
+        && let Some(colon) = last.rfind(':')
+    {
+        let ty = last[colon + 1..].trim();
+        if fn_generics.contains(&ty) {
+            return (new_cursor, Some(name));
         }
     }
     (new_cursor, None)

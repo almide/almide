@@ -27,6 +27,13 @@
 ///   `let e: Endian = BigEndian` names bytes.rs's `AlmideEndian` without
 ///   calling a `bytes.*` fn (`walker::runtime_owned::modules_spelled_in`).
 ///
+/// - the module whose source DEFINES an `Almide*` type the code names
+///   (`AlmideMap` in map.rs): a `Map[K, V]` in a signature renders as
+///   `AlmideMap<..>` with no `map.*` call anywhere. Before #4071 every
+///   auto-imported module was loaded into every program and so always in the
+///   call-driven set; loaded on reach, the type reference has to bring its
+///   definer itself. Read off the runtime sources (`runtime_type_owners`).
+///
 /// Identifier tokens only (#3486): a user string literal spelling
 /// `almide_rt_zlib_` or `AlmideHttpRequest` is not a reference.
 pub fn referenced_runtime_modules(user_code: &str) -> Vec<&'static str> {
@@ -42,7 +49,42 @@ pub fn referenced_runtime_modules(user_code: &str) -> Vec<&'static str> {
         })
         .collect();
     out.extend(crate::walker::runtime_owned::modules_spelled_in(&reserved));
+    let owners = runtime_type_owners();
+    out.extend(reserved.iter().filter_map(|id| owners.get(id).copied()));
     out
+}
+
+/// `Almide*` type name → the runtime module whose source defines it at top
+/// level (`pub struct` / `pub enum` / `pub type` / `pub trait`), derived once
+/// from the embedded runtime sources. A name defined by more than one module
+/// is left out: naming it does not say which module to splice.
+fn runtime_type_owners() -> &'static std::collections::HashMap<&'static str, &'static str> {
+    static CELL: std::sync::OnceLock<std::collections::HashMap<&'static str, &'static str>> =
+        std::sync::OnceLock::new();
+    CELL.get_or_init(|| {
+        let mut owners: std::collections::HashMap<&'static str, Option<&'static str>> =
+            std::collections::HashMap::new();
+        for (module, source) in crate::generated::rust_runtime::RUST_RUNTIME_MODULES {
+            for line in source.lines() {
+                let Some(rest) = ["pub struct ", "pub enum ", "pub type ", "pub trait "]
+                    .iter()
+                    .find_map(|kw| line.strip_prefix(kw))
+                else {
+                    continue;
+                };
+                let end = rest.find(|c: char| !(c == '_' || c.is_ascii_alphanumeric())).unwrap_or(rest.len());
+                let name = &rest[..end];
+                if !name.starts_with("Almide") {
+                    continue;
+                }
+                owners
+                    .entry(name)
+                    .and_modify(|m| if *m != Some(*module) { *m = None })
+                    .or_insert(Some(*module));
+            }
+        }
+        owners.into_iter().filter_map(|(n, m)| Some((n, m?))).collect()
+    })
 }
 
 /// Every identifier token of `code`, in order, outside literals and comments.

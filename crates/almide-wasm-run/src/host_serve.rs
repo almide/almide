@@ -23,16 +23,22 @@ use std::io::{BufWriter, Stdout, Write as _};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use almide_rt_core::http_server_core::{HttpServerConn, HttpServerWatch, http_server_signal, http_server_watch};
+use almide_rt_core::http_server_core::{
+    HTTP_SERVER_DEFAULT_LIMITS, HttpServerConn, HttpServerPool, HttpServerWatch, http_server_pool, http_server_signal, http_server_watch,
+};
 
 pub(crate) const OP_SERVE_BIND: i32 = 70;
 pub(crate) const OP_SERVE_NEXT: i32 = 71;
 pub(crate) const OP_SERVE_REPLY: i32 = 72;
 
-/// The run's listener and the connection whose response is pending.
+/// The run's connection pool and the connection whose response is pending.
+/// The pool (the shared core's, #4021) accepts and reads up to 64 connections
+/// at once under the 10 s request-head deadline, so a slow client holds one
+/// of its workers, never the guest: the guest still handles one request at a
+/// time, in the order requests arrive whole (C-367's one instance).
 #[derive(Default)]
 pub(crate) struct ServeState {
-    listener: Option<TcpListener>,
+    pool: Option<HttpServerPool>,
     pending: Option<HttpServerConn>,
     /// The shutdown watcher while the guest serves.
     watch: Option<HttpServerWatch>,
@@ -113,25 +119,25 @@ pub(crate) fn dispatch(
             match almide_rt_core::http_server_core::http_server_bind(port) {
                 Ok(l) => {
                     st.watch = live.map(|out| arm(&l, out.clone()));
-                    st.listener = Some(l);
+                    st.pool = Some(http_server_pool(l, HTTP_SERVER_DEFAULT_LIMITS));
                     (pack(0, 0), Vec::new())
                 }
                 Err(m) => err_s(m),
             }
         }
         OP_SERVE_NEXT => {
-            let Some(listener) = st.listener.as_ref() else {
+            let Some(pool) = st.pool.as_ref() else {
                 return err_s("http.serve: no listener bound".to_string());
             };
-            let Some((stream, (method, path, body, headers))) =
-                almide_rt_core::http_server_core::http_server_next(listener)
-            else {
-                // A shutdown signal: stop the watcher and close the listener
-                // (connections still queued are refused); the guest's loop
-                // ends on the empty answer, `http.serve` returns, and the run
-                // flushes stdout when main ends.
+            let Some((stream, (method, path, body, headers))) = pool.next() else {
+                // A shutdown signal: the pool's accept thread has closed the
+                // listener (connections still queued are refused); dropping
+                // the pool waits for the responses its workers still write,
+                // then the watcher stops. The guest's loop ends on the empty
+                // answer, `http.serve` returns, and the run flushes stdout
+                // when main ends.
+                st.pool = None;
                 st.watch = None;
-                st.listener = None;
                 return (pack(0, 0), Vec::new());
             };
             st.pending = Some(stream);

@@ -104,6 +104,10 @@ pub struct Project {
     /// `[permissions] proc = [...]` (#2589, ADR-0025): the commands the
     /// subprocess family may start. `None` (no key) = any command.
     pub proc_allow: Option<Vec<String>>,
+    /// `[permissions] fs = [...]` (#4022): the directories the program may
+    /// touch, anchored to [`Project::root`] when relative. `None` (no key) =
+    /// every path, as before; `[]` = none.
+    pub fs_allow: Option<Vec<String>>,
     /// Native Rust crate dependencies added to generated Cargo.toml.
     /// e.g., [("wasmtime", "42.0.0")]
     pub native_deps: Vec<NativeDep>,
@@ -406,6 +410,20 @@ fn project_root_from_toml_path(path: &Path) -> PathBuf {
     }
 }
 
+/// A `[permissions] fs` root as an absolute path (#4022): a relative one is
+/// the project's own directory, anchored to the manifest like a relative
+/// dependency path, so the scope does not move with the working directory
+/// the program is started from. Canonical when it exists.
+fn anchor_fs_root(root: &Path, dir: &str) -> String {
+    let joined = if Path::new(dir).is_absolute() { PathBuf::from(dir) } else { root.join(dir) };
+    let abs = if joined.is_absolute() {
+        joined
+    } else {
+        std::env::current_dir().map(|c| c.join(&joined)).unwrap_or(joined)
+    };
+    std::fs::canonicalize(&abs).unwrap_or(abs).to_string_lossy().into_owned()
+}
+
 /// A relative `path` dependency is relative to the directory of the
 /// `almide.toml` that declares it (the Cargo rule), never to the process
 /// working directory. Anchoring it here, where the manifest's own directory is
@@ -606,6 +624,7 @@ pub fn check_manifest(path: &Path, content: &str) -> Result<(), String> {
     check_manifest_duplicates(path, content)?;
     let manifest = read_manifest(path, content)?;
     manifest.permission_list(path, content, "proc")?;
+    manifest.permission_list(path, content, "fs")?;
     manifest.target_native_deps(path, content)?;
     manifest.dependencies(path, content)?;
     for (name, at) in manifest.permission_list(path, content, "allow")?.unwrap_or_default() {
@@ -637,7 +656,7 @@ pub const PACKAGE_METADATA_KEYS: &[&str] = &["description", "edition", "license"
 /// The keys one `[dependencies]` entry has.
 pub const DEPENDENCY_KEYS: &[&str] = &["git", "tag", "branch", "version", "path", "subdir"];
 /// The keys `[permissions]` has.
-pub const PERMISSION_KEYS: &[&str] = &["allow", "proc"];
+pub const PERMISSION_KEYS: &[&str] = &["allow", "proc", "fs"];
 /// The tables a `[target.<platform>]` table may hold (anything else is an
 /// error, not a warning — it was refused before #3382).
 pub const TARGET_PLATFORM_KEYS: &[&str] = &["native-deps"];
@@ -774,6 +793,9 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
     let proc_allow = names("proc")?;
 
     let root = project_root_from_toml_path(path);
+    // Relative roots are the project's own directories: anchored to the
+    // manifest, as relative dependency paths are.
+    let fs_allow = names("fs")?.map(|l| l.iter().map(|d| anchor_fs_root(&root, d)).collect());
     let deps = manifest.dependencies(path, &content)?;
     let mut native_deps: Vec<NativeDep> = manifest
         .entries_in_file_order("native-deps")
@@ -786,6 +808,7 @@ pub fn parse_toml(path: &Path) -> Result<Project, String> {
         dependencies: anchor_relative_dep_paths(deps, &root),
         permissions,
         proc_allow,
+        fs_allow,
         native_deps,
         root,
     })

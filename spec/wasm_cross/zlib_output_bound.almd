@@ -1,0 +1,153 @@
+// @contract: C-390
+// The zlib decoders bound their output (R-L0-47, R-zlib-04, #4020): a decode
+// whose output would pass the bound stops there and answers
+// `err("zlib: output exceeds <bound> bytes")` with the same text on every
+// leg — never the memory exhaustion a few KB of compression bomb used to
+// reach. `inflate` / `decompress` / `gunzip` bound at 268435456 bytes
+// (256 MiB; tests/zlib_output_bound_parity_test.rs decodes a compact bomb at
+// that bound and one past it on both legs); the `_max` forms take the bound
+// as an argument, so this fixture walks it across a 183-byte output: AT the
+// output's length is ok, ONE BELOW is the err. The vectors are fixed bytes
+// (Python zlib level 9, fixed Huffman with a 135-byte match), so both legs
+// decode the same input: a bound inside the match cuts it as one. A gzip
+// file's bound is on the sum of its members. A stored block cut off by the
+// end of input counts the bytes it holds before it reports truncation, the
+// order native's inflater stops in. A bound of 0 or less aborts (R-L0-33).
+import zlib
+
+fn show(r: Result[Bytes, String]) -> String = match r {
+  ok(b) => "ok ${bytes.len(b)} ${bytes.get_or(b, bytes.len(b) - 1, 0)}",
+  err(e) => "err ${e}",
+}
+
+fn raw() -> Bytes = bytes.from_list([
+  43,
+  201,
+  72,
+  85,
+  40,
+  44,
+  205,
+  76,
+  206,
+  86,
+  72,
+  42,
+  202,
+  47,
+  207,
+  83,
+  72,
+  203,
+  175,
+  80,
+  200,
+  42,
+  205,
+  45,
+  40,
+  86,
+  200,
+  47,
+  75,
+  45,
+  82,
+  40,
+  1,
+  74,
+  231,
+  36,
+  86,
+  85,
+  42,
+  164,
+  228,
+  167,
+  91,
+  131,
+  121,
+  131,
+  64,
+  177,
+  171,
+  159,
+  11,
+  0
+])
+
+fn zl() -> Bytes = bytes.concat(
+  bytes.concat(bytes.from_list([120, 218]), raw()),
+  bytes.from_list([6, 126, 66, 40]),
+)
+
+fn gz() -> Bytes = bytes.concat(
+  bytes.concat(
+    bytes.from_list([
+      31,
+      139,
+      8,
+      0,
+      0,
+      0,
+      0,
+      0,
+      2,
+      19
+    ]),
+    raw(),
+  ),
+  bytes.from_list([
+    166,
+    223,
+    224,
+    152,
+    183,
+    0,
+    0,
+    0
+  ]),
+)
+
+// A stored block that declares 100 bytes and holds 50.
+fn stored_cut() -> Bytes = bytes.concat(
+  bytes.from_list([1, 100, 0, 155, 255]),
+  bytes.repeat(bytes.from_list([7]), 50),
+)
+
+// The `_max` forms are plain `fn`s: callable from a pure function.
+fn bounded(f: String, b: Bytes, n: Int) -> String = match f {
+  "inflate" => show(zlib.inflate_max(b, n)),
+  "decompress" => show(zlib.decompress_max(b, n)),
+  _ => show(zlib.gunzip_max(b, n)),
+}
+
+effect fn main() -> Unit = {
+  for n in [
+    1,
+    45,
+    46,
+    47,
+    100,
+    181,
+    182,
+    183,
+    184,
+    1000000
+  ] {
+    println("inflate_max ${n}: " + bounded("inflate", raw(), n))
+    println("decompress_max ${n}: " + bounded("decompress", zl(), n))
+    println("gunzip_max ${n}: " + bounded("gunzip", gz(), n))
+  }
+  let two = bytes.concat(gz(), gz())
+  for n in [183, 365, 366, 367] {
+    println("gunzip_max two ${n}: " + bounded("gunzip", two, n))
+  }
+  for n in [49, 50, 51] {
+    println("inflate_max stored-cut ${n}: " + bounded("inflate", stored_cut(), n))
+  }
+  println("inflate: " + show(zlib.inflate(raw())))
+  println("decompress: " + show(zlib.decompress(zl())))
+  println("gunzip: " + show(zlib.gunzip(two)))
+  // A bound of 0 or less is the caller's contract violation: the abort, last.
+  println("inflate_max 0: " + bounded("inflate", raw(), 0))
+}

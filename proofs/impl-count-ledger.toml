@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 861  implementations = 2001
+# holes = 864  implementations = 2010
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -5994,6 +5994,13 @@ module   = "zlib"
 name     = "decompress"
 native   = 1
 emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "zlib"
+name     = "decompress_max"
+native   = 1
+emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
@@ -6015,6 +6022,13 @@ module   = "zlib"
 name     = "inflate"
 native   = 1
 emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "zlib"
+name     = "inflate_max"
+native   = 1
+emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
@@ -6027,6 +6041,13 @@ total    = 2
 [[hole]]
 module   = "zlib"
 name     = "gunzip"
+native   = 1
+emitter  = 0
+selfhost = 2
+total    = 3
+[[hole]]
+module   = "zlib"
+name     = "gunzip_max"
 native   = 1
 emitter  = 0
 selfhost = 1

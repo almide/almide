@@ -96,20 +96,26 @@ fn kill_group(child: &mut Child) {
     let _ = child.wait();
 }
 
-/// One request on a fresh connection; the answer is everything up to the
-/// server's close. Connection attempts retry while the server binds (its
-/// "ready" line is printed just before `http.serve`).
-fn ask(port: u16, raw: &[u8]) -> Vec<u8> {
+/// A connection to `port`, retried while the server binds (its "ready" line
+/// is printed just before `http.serve`).
+fn connect_when_bound(port: u16) -> TcpStream {
     let deadline = Instant::now() + Duration::from_secs(60);
-    let mut conn = loop {
+    loop {
         match TcpStream::connect(("127.0.0.1", port)) {
-            Ok(c) => break c,
+            Ok(c) => return c,
             Err(e) => {
                 assert!(Instant::now() < deadline, "server on {port} never accepted: {e}");
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
-    };
+    }
+}
+
+/// One request on a fresh connection; the answer is everything up to the
+/// server's close. Connection attempts retry while the server binds (its
+/// "ready" line is printed just before `http.serve`).
+fn ask(port: u16, raw: &[u8]) -> Vec<u8> {
+    let mut conn = connect_when_bound(port);
     conn.set_read_timeout(Some(Duration::from_secs(60))).expect("timeout");
     conn.write_all(raw).expect("send request");
     let mut out = Vec::new();
@@ -385,7 +391,7 @@ impl Leg {
 
 /// Sends `raw`, half-closes, and reads the answer to the server's close.
 fn ask_then_close(port: u16, raw: &[u8]) -> Vec<u8> {
-    let mut conn = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    let mut conn = connect_when_bound(port);
     conn.set_read_timeout(Some(Duration::from_secs(60))).expect("timeout");
     conn.write_all(raw).expect("send request");
     conn.shutdown(std::net::Shutdown::Write).expect("half-close");
@@ -533,6 +539,78 @@ fn a_bad_status_or_field_is_refused_and_the_handlers_framing_fields_are_dropped_
         assert_eq!(framed, "HTTP/1.1 200 OK\r\nX-Kept: 1\r\nConnection: close\r\nContent-Length: 5\r\n\r\nhello", "{leg}");
     }
     assert_eq!(line_multiset(&n_err), line_multiset(&w_err));
+}
+
+/// A client that sends `head` one byte every `gap` (stopping once the server
+/// has answered or after `give_up`), then reads the answer to the close.
+/// Answers the answer and how long after connecting it was whole. The
+/// client stops writing as soon as bytes arrive, so its own late bytes never
+/// turn the server's close into a reset that would discard the answer.
+fn trickle_head(port: u16, head: &[u8], gap: Duration, give_up: Duration) -> (Vec<u8>, Duration) {
+    let mut conn = connect_when_bound(port);
+    let started = Instant::now();
+    for b in head {
+        if started.elapsed() > give_up || conn.write_all(&[*b]).is_err() {
+            break;
+        }
+        std::thread::sleep(gap);
+        conn.set_nonblocking(true).expect("nonblocking");
+        let answered = !matches!(conn.peek(&mut [0u8; 1]), Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock);
+        conn.set_nonblocking(false).expect("blocking");
+        if answered {
+            break;
+        }
+    }
+    conn.set_read_timeout(Some(Duration::from_secs(60))).expect("timeout");
+    let mut out = Vec::new();
+    let _ = conn.read_to_end(&mut out);
+    (out, started.elapsed())
+}
+
+/// The slowloris shape (#4021): one client sends its request head one byte
+/// every 100 ms and never finishes it. A second client's request is answered
+/// at once, not after the slow one; the slow one is answered `408` once the
+/// 10 s request-head deadline has passed, and the handler never sees it.
+/// The two legs run at the same time (each takes the deadline's 10 s).
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_client_trickling_its_head_does_not_stall_the_next_client_and_is_answered_408_at_the_header_deadline_on_native_and_the_embedded_lane() {
+    let runs: Vec<_> = [false, true]
+        .into_iter()
+        .map(|wasm| {
+            std::thread::spawn(move || {
+                let leg = boot_limits(wasm);
+                let port = leg.port;
+                let head: Vec<u8> = b"GET /slow HTTP/1.1\r\nX-Pad: ".iter().copied().chain(std::iter::repeat_n(b'a', 400)).collect();
+                let slow = std::thread::spawn(move || trickle_head(port, &head, Duration::from_millis(100), Duration::from_secs(20)));
+                std::thread::sleep(Duration::from_millis(500));
+                let t = Instant::now();
+                let fast = ask(port, b"GET /fast HTTP/1.1\r\n\r\n");
+                let fast_took = t.elapsed();
+                let (slow, slow_took) = slow.join().expect("the slow client finished");
+                (fast, fast_took, slow, slow_took, leg.stop())
+            })
+        })
+        .collect();
+    let mut answers = Vec::new();
+    for (run, leg) in runs.into_iter().zip(["native", "wasm"]) {
+        let (fast, fast_took, slow, slow_took, err) = run.join().expect("the leg finished");
+        assert!(fast.ends_with(b"\r\n\r\nGET /fast "), "{leg}: {:?}", String::from_utf8_lossy(&fast));
+        assert!(fast_took < Duration::from_secs(2), "{leg}: the second client waited {fast_took:?} behind the slow one");
+        assert!(head_of(&slow).starts_with("HTTP/1.1 408 Request Timeout\r\n"), "{leg}: {:?}", String::from_utf8_lossy(&slow));
+        assert!(
+            slow_took >= Duration::from_millis(9_900) && slow_took < Duration::from_secs(15),
+            "{leg}: the slow client was answered after {slow_took:?}, not at the 10 s header deadline"
+        );
+        assert_eq!(line_multiset(&err), vec!["GET /fast"], "{leg}: {err:?}");
+        answers.push((fast, slow));
+    }
+    for i in 0..2 {
+        let (a, b) = if i == 0 { (&answers[0].0, &answers[1].0) } else { (&answers[0].1, &answers[1].1) };
+        if let Err(diff) = same_answer(a, b) {
+            panic!("answer {i} differs across the legs:\n{diff}");
+        }
+    }
 }
 
 /// The comparator itself, on constructed responses: it must reject every

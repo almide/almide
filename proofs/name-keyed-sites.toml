@@ -712,7 +712,7 @@ names = 147
 [[site]]
 id = "crates/almide-mir/src/purity.rs::is_pure_fn_in_impure_module::or-pattern"
 class = "legacy"
-names = 67
+names = 57
 
 [[site]]
 id = "crates/almide-mir/src/render_native_shims.rs::SHIMS::table"

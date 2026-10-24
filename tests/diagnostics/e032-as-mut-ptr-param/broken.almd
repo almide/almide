@@ -4,6 +4,8 @@
 // read only `mut b` and missed `@mutating`, so this compiled, and the targets
 // disagreed about whether the caller's `let` buffer changed: native wrote
 // through, wasm did not.
+import ffi
+
 fn poke(dst: Bytes, src: Bytes) -> Int = bytes.copy_to_ptr(src, bytes.as_mut_ptr(dst), 4)
 
 fn main() -> Unit = {

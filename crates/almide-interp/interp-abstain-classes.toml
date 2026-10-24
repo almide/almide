@@ -42,6 +42,12 @@ patterns = [
   # family is modeled; a load/store landing outside it is still the heap
   # boundary, one level in from `prim.handle`.
   "outside this heap's arena",
+  # The return-sync walk of a Value the arena holds (#4020, R-json-04):
+  # json_parse_depth_bound builds a 1000-deep Value to hit the nesting
+  # bound, and the walk that syncs a heap Value back into the interp's
+  # model does not follow a block that deep. Modeling the block heap is
+  # the interp-heap arc, the same boundary as prim.handle.
+  "capability: return sync: a Value-typed block",
 ]
 
 [[class]]
@@ -127,6 +133,11 @@ patterns = [
   # self_host_registry source, so the pool has no body; registering it is
   # dispatch glue.
   "capability: url.parse",
+  # fs.open_root (#4022, fs_root_escape): the rooted fs family is pure
+  # Almide in stdlib/fs.almd over `mod type FsRoot = String`, not a
+  # self_host_registry source, so the pool has no body while both backends
+  # serve it by newtype erasure — the html/url shape above, dispatch glue.
+  "capability: fs.open_root",
   # A Unit-returning bytes writer over a TEMPORARY receiver (#1849,
   # bytes_temp_receiver): inplace.rs models the family from the name for a
   # VARIABLE receiver (the write-back has a binding); a call-result receiver

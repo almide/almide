@@ -311,6 +311,7 @@ pub fn cmd_build(args: BuildArgs) {
         None => rs_code,
     };
     let rs_code = arm_alloc_count(rs_code);
+    let rs_code = inject_fs_scope(rs_code);
 
     // Load native deps from almide.toml (search in input file's directory, then
     // CWD). BOTH the cdylib and bin paths need them: a cdylib with a `native/*.rs`
@@ -420,6 +421,186 @@ pub(crate) fn alloc_count_armed() -> bool {
 /// `ALMIDE_ALLOC_COUNT` (#2228): inject the counting allocator when the lane is
 /// armed, taking the self-contained cargo path the same way `--heap-cap` does
 /// (see the comment there for why the rlib fast path cannot carry it).
+/// `[permissions] fs` (#4022) on native: the granted roots, set as the first
+/// statement of `main` (`almide_fs_scope_set`, runtime/rs/src/fs.rs), so every
+/// fs call of the run asks the scope before it touches a path. Only a program
+/// that reaches the fs runtime carries the call; a test harness build has no
+/// `main` and runs unscoped. The roots are absolute: the manifest anchored
+/// the relative ones to its own directory.
+///
+/// The check wraps the program's CALLS, not the runtime's fns: each
+/// `almide_rt_fs_<f>(..)` call of the user code becomes a guard macro around
+/// the same call, so the runtime source — and every inspection fingerprint
+/// over it — is the same with and without a scope. Which guard a fn takes is
+/// read off its runtime signature (a `bool` return answers false; `src, dst`
+/// checks both; `pattern` checks the glob's literal base; `prefix` checks the
+/// temp dir), never from a list of fn names. A program without the key is
+/// emitted unchanged.
+pub(crate) fn inject_fs_scope(rs_code: String) -> String {
+    let Some(roots) = almide_wasm_run::fs_scope() else { return rs_code };
+    if !rs_code.contains("almide_rt_fs_") || !rs_code.contains("\nfn main() {\n") {
+        return rs_code;
+    }
+    let guards = fs_runtime_guards();
+    // Only the user code is rewritten: with the runtime inlined, its own
+    // definitions and internal calls sit before the boundary marker.
+    let marker = almide::codegen::RT_BOUNDARY_MARKER;
+    let (head, user) = match rs_code.find(marker) {
+        Some(i) => rs_code.split_at(i + marker.len()),
+        None => ("", rs_code.as_str()),
+    };
+    let user = wrap_fs_calls(user, &guards);
+    let list: Vec<String> = roots.iter().map(|r| format!("{r:?}")).collect();
+    let user = user.replacen(
+        "\nfn main() {\n",
+        &format!("\nfn main() {{\n    let _ = __ALMIDE_FS_SCOPE.set([{}].iter().map(|r| fs_scope_root(r)).collect());\n", list.join(", ")),
+        1,
+    );
+    let prelude = format!("\n{}\n{FS_SCOPE_GUARDS}", almide_base::FS_SCOPE_SOURCE);
+    if head.is_empty() {
+        splice_after_inner_attrs(&user, &prelude)
+    } else {
+        format!("{head}{prelude}{user}")
+    }
+}
+
+/// The guard macros and the scope cell `inject_fs_scope` splices in.
+const FS_SCOPE_GUARDS: &str = r#"static __ALMIDE_FS_SCOPE: std::sync::OnceLock<Vec<std::path::PathBuf>> = std::sync::OnceLock::new();
+fn __almide_fs_scope_check(path: &str) -> Result<(), String> {
+    match __ALMIDE_FS_SCOPE.get() {
+        Some(roots) if !fs_scope_admits(path, roots) => Err(fs_scope_refusal(path)),
+        _ => Ok(()),
+    }
+}
+macro_rules! __almide_fs_path { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let __almide_p = $p; match __almide_fs_scope_check(&*__almide_p) { Ok(()) => ($f)(__almide_p $(, $a)*), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_bool { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; if __almide_fs_scope_check(&*__almide_p).is_ok() { ($f)(__almide_p) } else { false } }}; }
+macro_rules! __almide_fs_two { ($f:expr, $p:expr, $q:expr $(,)?) => {{ let (__almide_p, __almide_q) = ($p, $q); match __almide_fs_scope_check(&*__almide_p).and_then(|()| __almide_fs_scope_check(&*__almide_q)) { Ok(()) => ($f)(__almide_p, __almide_q), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_glob { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; match __almide_fs_scope_check(&fs_scope_glob_base(&*__almide_p)) { Ok(()) => ($f)(__almide_p), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_temp { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; match __almide_fs_scope_check(&std::env::temp_dir().to_string_lossy()) { Ok(()) => ($f)(__almide_p), Err(e) => Err(e.into()) } }}; }
+"#;
+
+/// Each public `almide_rt_fs_*` fn of the runtime with the guard macro its
+/// signature calls for (`None`: it takes no path).
+fn fs_runtime_guards() -> std::collections::HashMap<String, &'static str> {
+    let src = almide::codegen::generated::rust_runtime::RUST_RUNTIME_MODULES
+        .iter()
+        .find(|(m, _)| *m == "fs")
+        .map_or("", |(_, s)| *s);
+    let mut out = std::collections::HashMap::new();
+    for line in src.lines() {
+        let Some(rest) = line.strip_prefix("pub fn almide_rt_fs_") else { continue };
+        let name_len = rest.find(['<', '(']).unwrap_or(rest.len());
+        let name = format!("almide_rt_fs_{}", &rest[..name_len]);
+        let Some((params, ret)) = fs_signature(&rest[name_len..]) else { continue };
+        let guard = match params.as_slice() {
+            [] => continue,
+            [p, ..] if ret.starts_with("bool") && (p == "path" || p == "dir") => "__almide_fs_bool",
+            [s, d] if s == "src" && d == "dst" => "__almide_fs_two",
+            [p] if p == "pattern" => "__almide_fs_glob",
+            [p] if p == "prefix" => "__almide_fs_temp",
+            [p, ..] if p == "path" || p == "dir" => "__almide_fs_path",
+            _ => continue,
+        };
+        out.insert(name, guard);
+    }
+    out
+}
+
+/// The parameter names and the return text of a signature tail
+/// `<generics>(params) -> Ret {`.
+fn fs_signature(tail: &str) -> Option<(Vec<String>, String)> {
+    let mut depth = 0i32;
+    let mut start = None;
+    for (i, c) in tail.char_indices() {
+        match c {
+            '<' | '(' | '[' => {
+                if c == '(' && depth == 0 && start.is_none() {
+                    start = Some(i + 1);
+                }
+                depth += 1;
+            }
+            '>' if i > 0 && tail.as_bytes()[i - 1] == b'-' => {}
+            '>' | ')' | ']' => {
+                depth -= 1;
+                if c == ')' && depth == 0 && start.is_some() {
+                    let params = &tail[start?..i];
+                    let ret = tail[i + 1..].trim_start().strip_prefix("->").unwrap_or("").trim_start().to_string();
+                    let mut names = Vec::new();
+                    let (mut d, mut seg) = (0i32, String::new());
+                    for ch in params.chars() {
+                        match ch {
+                            '<' | '(' | '[' => d += 1,
+                            '>' | ')' | ']' => d -= 1,
+                            _ => {}
+                        }
+                        if ch == ',' && d == 0 {
+                            names.push(std::mem::take(&mut seg));
+                        } else {
+                            seg.push(ch);
+                        }
+                    }
+                    names.push(seg);
+                    let names = names
+                        .iter()
+                        .filter_map(|p| p.split(':').next().map(str::trim))
+                        .filter(|n| !n.is_empty())
+                        .map(str::to_string)
+                        .collect();
+                    return Some((names, ret));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `code` with every call `almide_rt_fs_<f>[::<..>](` whose fn has a guard
+/// rewritten to `<guard>!(almide_rt_fs_<f>[::<..>], `.
+fn wrap_fs_calls(code: &str, guards: &std::collections::HashMap<String, &'static str>) -> String {
+    const PREFIX: &str = "almide_rt_fs_";
+    let mut out = String::with_capacity(code.len() + 256);
+    let mut rest = code;
+    while let Some(i) = rest.find(PREFIX) {
+        let before = &rest[..i];
+        let after = &rest[i..];
+        let ident_len = after.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).unwrap_or(after.len());
+        let ident = &after[..ident_len];
+        let preceded_by_ident = before.chars().last().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+        // An optional turbofish, then the call's `(`.
+        let mut j = ident_len;
+        if after[j..].starts_with("::<") {
+            let mut depth = 0i32;
+            for (k, c) in after[j + 2..].char_indices() {
+                match c {
+                    '<' => depth += 1,
+                    '>' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            j = j + 2 + k + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        out.push_str(before);
+        match guards.get(ident) {
+            Some(g) if !preceded_by_ident && !before.ends_with("fn ") && after[j..].starts_with('(') => {
+                out.push_str(&format!("{g}!({}, ", &after[..j]));
+                rest = &after[j + 1..];
+            }
+            _ => {
+                out.push_str(ident);
+                rest = &after[ident_len..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 pub(crate) fn arm_alloc_count(rs_code: String) -> String {
     if !alloc_count_armed() {
         return rs_code;

@@ -1639,6 +1639,11 @@ impl Checker {
             ExprKind::Ident { .. } | ExprKind::Member { .. } => self.warn_if_deprecated(right),
             _ => {}
         }
+        match &right.kind {
+            ExprKind::Call { callee, .. } => self.reject_unopted_memory_unsafe_callee(callee),
+            ExprKind::Ident { .. } | ExprKind::Member { .. } => self.reject_unopted_memory_unsafe_callee(right),
+            _ => {}
+        }
         match &mut right.kind {
             ExprKind::Call { callee, args, .. } => {
                 // #1521: the pipe path inferred its args BARE, without #653's

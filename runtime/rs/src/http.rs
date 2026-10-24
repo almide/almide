@@ -585,15 +585,23 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     // request in flight is answered first.
     let signals = almide_http_signals_arm();
     let watch = http_server_watch(&listener, Box::new(almide_http_force_from_watcher));
-    while let Some((stream, (method, path, body, headers))) = http_server_next(&listener) {
+    // Connections are accepted, read and written by the pool's workers (64 in
+    // flight, a 10 s request-head deadline, #4021), so a slow client holds one
+    // worker and never this thread. The handler runs HERE, one request at a
+    // time in the order requests arrive whole: the app is an `Rc` built on
+    // this thread and stdout is this thread's buffer (ADR-0020 §5.5, #2665).
+    let pool = http_server_pool(listener, HTTP_SERVER_DEFAULT_LIMITS);
+    while let Some((conn, (method, path, body, headers))) = pool.next() {
         let resp = match handler(AlmideHttpRequest { method, path, body, headers, params: Vec::new() }) {
             Ok(r) => r,
             Err(e) => AlmideHttpResponse::new(500, format!("Internal error: {}", e)),
         };
-        let _ = http_server_write(stream, resp.status, &resp.headers, &resp.body);
+        let _ = http_server_write(conn, resp.status, &resp.headers, &resp.body);
     }
+    // The responses handed to workers are written before `serve` returns
+    // (the listener closed when the accept thread stopped).
+    drop(pool);
     drop(watch);
-    drop(listener);
     almide_http_signals_disarm(signals);
     // A second signal that raced the last response: the forced stop.
     if http_server_forced() {

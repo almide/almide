@@ -122,6 +122,7 @@ impl Checker {
         // call site, before any argument inference can bury it under a
         // cascade of type errors.
         self.warn_if_deprecated(callee);
+        self.reject_unopted_memory_unsafe_callee(callee);
         if let [argument] = args {
             self.reject_exit_literal(callee, argument);
         }
@@ -836,13 +837,22 @@ impl Checker {
                 almide_lang::stdlib_info::is_bundled_module(m) && !user_import
             })
             .unwrap_or(false);
+        // A bare call inside a bundled module's own body names its sibling:
+        // `fs.is_dir` written in fs.almd resolves to `is_dir` (#4022). A
+        // template-dispatched sibling returns its raw `T` there too, as it
+        // does from any other caller.
+        let bundled_sibling = !name.contains('.')
+            && self.in_bundled_module
+            && self.current_module_prefix.as_deref().is_some_and(|m| crate::bundled_sigs::bundled_effect_fn_is_template(m, name));
         // Single-condition decisions (MC/DC ledger): the && chain as its
         // short-circuit-order nested ifs, verbatim.
         if sig.is_effect {
             if !ret.is_result() {
                 if self.env.functions.contains_key(&sym(name)) {
                     if !is_bundled_stdlib_call {
-                        return Ty::result(ret, Ty::String);
+                        if !bundled_sibling {
+                            return Ty::result(ret, Ty::String);
+                        }
                     }
                     // Only a TEMPLATE-dispatched bundled effect fn
                     // (`@intrinsic`, `@inline_rust`, `@wasm_intrinsic`,

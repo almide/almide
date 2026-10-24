@@ -12,7 +12,7 @@
 9552	T5 Map	research/benchmark/perf/mapbuild/mapbuild.almd
 11449	T5 Map	research/benchmark/perf/wordfreq/wordfreq.almd
 11472	T5 Map	research/benchmark/perf/wordfreq/wordfreq_group.almd
-31558	T6 JSON	research/benchmark/perf/decode/decode.almd
-26734	T6 JSON	spec/wasm_cross/json_gltf_walk.almd
+31674	T6 JSON	research/benchmark/perf/decode/decode.almd
+26850	T6 JSON	spec/wasm_cross/json_gltf_walk.almd
 28162	T7 regex	spec/wasm_cross/regex_engine.almd
-188164	Σ	total
+188396	Σ	total

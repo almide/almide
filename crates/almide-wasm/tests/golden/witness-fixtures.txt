@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 954 of 954
+# certified: 957 of 957
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -262,6 +262,7 @@ spec/wasm_cross/fs_read_directory_errno.almd
 spec/wasm_cross/fs_read_lines.almd
 spec/wasm_cross/fs_read_text_utf8.almd
 spec/wasm_cross/fs_relative_path.almd
+spec/wasm_cross/fs_root_escape.almd
 spec/wasm_cross/fs_write_errno.almd
 spec/wasm_cross/fuel_bare_result.almd
 spec/wasm_cross/fuel_block_body.almd
@@ -378,6 +379,7 @@ spec/wasm_cross/json_get_int_float.almd
 spec/wasm_cross/json_gltf_walk.almd
 spec/wasm_cross/json_many_keys.almd
 spec/wasm_cross/json_number_unicode.almd
+spec/wasm_cross/json_parse_depth_bound.almd
 spec/wasm_cross/json_parse_lenient_edges.almd
 spec/wasm_cross/json_path_edges.almd
 spec/wasm_cross/json_path_index_domain.almd
@@ -955,4 +957,5 @@ spec/wasm_cross/wide_function_body.almd
 spec/wasm_cross/witness_straightline.almd
 spec/wasm_cross/zip_view_shape.almd
 spec/wasm_cross/zlib_call_vs_user_namesake.almd
+spec/wasm_cross/zlib_output_bound.almd
 spec/wasm_cross/zlib_selfhost.almd

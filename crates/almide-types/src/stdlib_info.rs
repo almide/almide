@@ -53,7 +53,9 @@ pub const TIER1_ALWAYS_ACCESSIBLE: &[&str] = &[
 /// Bundled modules that should be auto-imported (Tier 1 behavior).
 /// Tier-1 stdlib modules with no bundled-Almide content (option, result, etc.)
 /// are auto-imported via `TIER1_ALWAYS_ACCESSIBLE` above; this list is for
-/// bundled `.almd` modules that need resolve-time loading.
+/// bundled `.almd` modules that need resolve-time loading. Auto-import is a
+/// NAMING rule: a module here is loaded only when a loaded source reaches it
+/// (`almide_frontend::bundled_reach`, #4071), never into every program.
 pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
     "list", "int", "float", "bool",
     // Stdlib modules migrated from TOML to bundled `.almd` need
@@ -133,6 +135,7 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("http", "HttpMiddleware"),
     ("http", "HttpRoute"),
     ("fs", "FileStat"),
+    ("fs", "FsRoot"),
     ("html", "SafeHtml"),
     ("net", "TcpListener"),
     ("net", "TcpStream"),
@@ -539,6 +542,12 @@ pub fn is_memory_unsafe_stdlib_fn(module: &str, func: &str) -> bool {
     memory_unsafe_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
 }
 
+/// The import that opts a source file into the `@memory_unsafe` surface
+/// (#4043): outside the stdlib, a call to a `@memory_unsafe` fn is E100
+/// unless the calling file writes `import ffi`. Never auto-imported, so the
+/// import line is the one visible place a reader finds raw memory in a file.
+pub const MEMORY_UNSAFE_OPT_IN: &str = "ffi";
+
 /// The bundled stdlib fns an attribute `mark` (`"@ordered"`) annotates, by a
 /// text scan of the bundled sources (an attribute block, then the fn it
 /// annotates), with each fn's `@intrinsic` runtime symbol when it has one.
@@ -609,7 +618,7 @@ mod ordered_tests {
         assert!(!super::is_ordered_stdlib_fn("fs", "read_text"));
         assert!(!super::is_ordered_stdlib_fn("io", "print"));
         assert!(!super::is_ordered_runtime_symbol("almide_rt_env_get"));
-        assert_eq!(t.len(), 28, "{t:?}");
+        assert_eq!(t.len(), 30, "{t:?}");
     }
 
     #[test]
@@ -624,5 +633,15 @@ mod ordered_tests {
             ]
         );
         assert!(!super::is_memory_unsafe_stdlib_fn("bytes", "get"));
+    }
+
+    /// #4043: the opt-in is an import a file must WRITE — a module every file
+    /// sees without one would make the gate vacuous.
+    #[test]
+    fn the_memory_unsafe_opt_in_is_never_auto_imported() {
+        let m = super::MEMORY_UNSAFE_OPT_IN;
+        assert!(!super::TIER1_ALWAYS_ACCESSIBLE.contains(&m));
+        assert!(!super::AUTO_IMPORT_BUNDLED.contains(&m));
+        assert!(super::memory_unsafe_stdlib_fns().iter().any(|(module, _, _)| *module == m));
     }
 }

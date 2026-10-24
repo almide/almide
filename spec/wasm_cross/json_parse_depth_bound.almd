@@ -1,0 +1,39 @@
+// @contract: C-391
+// json.parse bounds nesting (R-L0-47, R-json-04, #4020): an array or object
+// opened inside 1000 others is `err("json: nesting deeper than 1000")` with
+// the same text on every leg, where the recursive descent used to run until
+// the stack overflowed (an abort, C-196). 1000 levels parse; 1001 do not,
+// whichever of `[` and `{` makes them, empty or not. The check sits where the
+// container opens, so an error earlier in the text is still the one reported,
+// and nothing past the 1001st opener is read.
+import json
+
+fn show(r: Result[Value, String]) -> String = match r {
+  ok(v) => "ok ${string.len(json.stringify(v))}",
+  err(e) => "err ${e}",
+}
+
+fn arrays(n: Int) -> String = string.repeat("[", n) + string.repeat("]", n)
+
+fn objects(n: Int) -> String = string.repeat("{\"a\":", n) + "1" + string.repeat("}", n)
+
+fn mixed(pairs: Int, tail: String) -> String = string.repeat("[{\"k\":", pairs) + tail + string.repeat(
+  "}]",
+  pairs,
+)
+
+effect fn main() -> Unit = {
+  println("arrays 1000: " + show(json.parse(arrays(1000))))
+  println("arrays 1001: " + show(json.parse(arrays(1001))))
+  println("objects 1000: " + show(json.parse(objects(1000))))
+  println("objects 1001: " + show(json.parse(objects(1001))))
+  println("mixed 1000: " + show(json.parse(mixed(500, "0"))))
+  println("mixed 1001 empty array: " + show(json.parse(mixed(500, "[]"))))
+  println("mixed 1001 empty object: " + show(json.parse(mixed(500, "{}"))))
+  println("inside 1000 then a scalar: " + show(json.parse("[" + arrays(999) + ", 7]")))
+  println("inside 1000 then 1001: " + show(json.parse("[" + arrays(999) + ", " + arrays(1000) + "]")))
+  println("earlier error wins: " + show(json.parse("[1, x, " + arrays(1001) + "]")))
+  println("unclosed 1000: " + show(json.parse(string.repeat("[", 1000))))
+  println("unclosed 1001: " + show(json.parse(string.repeat("[", 1001))))
+  println("unclosed 100000: " + show(json.parse(string.repeat("[", 100000))))
+}

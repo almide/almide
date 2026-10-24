@@ -149,9 +149,10 @@ fn response_of((status, fields, body): client::HttpRawResponse) -> Result<http::
 }
 
 /// Run a WASI 0.3 command component to completion with the run's real stdio,
-/// environment and program arguments, and the host filesystem preopened at
-/// `/` (the stock-p1 gate's `--dir=/`; the guest resolves relative paths
-/// against `ALMIDE_CWD`, the launcher's cwd, as native's child does). Answers the exit code.
+/// environment and program arguments, and the directories `[permissions] fs`
+/// grants preopened (the cwd and the temp dir without the key, #4022; the
+/// guest resolves relative paths against `ALMIDE_CWD`, the launcher's cwd,
+/// as native's child does). Answers the exit code.
 pub fn run_component(bytes: &[u8], args: &[String]) -> anyhow::Result<i32> {
     std::thread::scope(|s| {
         spawn_guest_thread(s, || run_component_here(bytes, args)).join().unwrap_or_else(|p| std::panic::resume_unwind(p))
@@ -170,7 +171,15 @@ fn run_component_here(bytes: &[u8], args: &[String]) -> anyhow::Result<i32> {
     wasmtime_wasi_http::p3::add_to_linker(&mut linker)?;
     let argv: Vec<&str> = std::iter::once("almide").chain(args.iter().map(String::as_str)).collect();
     let mut wasi = WasiCtx::builder();
-    wasi.inherit_stdio().inherit_env().args(&argv).preopened_dir("/", "/", FsPerms::ReadWrite)?;
+    wasi.inherit_stdio().inherit_env().args(&argv);
+    // #4022: the granted roots of `[permissions] fs`, or the cwd and the temp
+    // dir without the key — never the whole host filesystem at `/`. Each sits
+    // at its own host path, so an absolute path names the same file as native.
+    for dir in crate::host_fs_scope::preopens() {
+        if std::path::Path::new(&dir).is_dir() {
+            wasi.preopened_dir(&dir, &dir, FsPerms::ReadWrite)?;
+        }
+    }
     // The #874 cwd pin native's child gets too: an inherited PWD can be stale.
     if let Some(cwd) = std::env::current_dir().ok().and_then(|d| d.to_str().map(str::to_string)) {
         wasi.env("ALMIDE_CWD", &cwd);

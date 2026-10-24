@@ -367,7 +367,7 @@ Alice
 ## Signature index (15 functions)
 
 ```
-// Value or err; lenient, trailing text ignored.
+// Value or err; lenient, trailing text ignored; nesting over 1000 is err.
 // @since 0.5.0 or earlier
 json.parse(text: String) -> Result[Value, String]
 

@@ -62,7 +62,7 @@ Inverse of `gzip`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (10 functions)
+## Signature index (13 functions)
 
 ```
 // Zlib-framed DEFLATE of data; bytes vary by target.
@@ -73,9 +73,13 @@ effect zlib.compress(data: Bytes) -> Bytes
 // @since 0.20.0 or earlier
 effect zlib.compress_level(data: Bytes, level: Int) -> Bytes
 
-// Inflated zlib stream; err on corrupt input.
+// Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
 // @since 0.20.0 or earlier
 effect zlib.decompress(data: Bytes) -> Bytes
+
+// Like decompress, output bound max_len bytes; max_len <= 0 aborts.
+// @since unreleased
+zlib.decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String]
 
 // Raw DEFLATE, no header; bytes vary by target.
 // @since 0.20.0 or earlier
@@ -85,17 +89,25 @@ effect zlib.deflate(data: Bytes) -> Bytes
 // @since 0.20.0 or earlier
 effect zlib.deflate_level(data: Bytes, level: Int) -> Bytes
 
-// Raw DEFLATE decoded; err on a corrupt stream.
+// Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
 // @since 0.20.0 or earlier
 effect zlib.inflate(data: Bytes) -> Bytes
+
+// Like inflate, output bound max_len bytes; max_len <= 0 aborts.
+// @since unreleased
+zlib.inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String]
 
 // RFC 1952 gzip of data; bytes vary by target.
 // @since 0.20.0 or earlier
 effect zlib.gzip(data: Bytes) -> Bytes
 
-// Gzip member decoded; err on bad header, CRC or empty input.
+// Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
 // @since 0.20.0 or earlier
 effect zlib.gunzip(data: Bytes) -> Bytes
+
+// Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
+// @since unreleased
+zlib.gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String]
 
 // CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
 // @since 0.62.0

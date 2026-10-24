@@ -24,7 +24,14 @@ pub fn almide_rt_zlib_compress_level(data: &[u8], level: i64) -> Result<Vec<u8>,
 }
 
 pub fn almide_rt_zlib_decompress(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
-    zlib_decode(data).map_err(|e| format!("zlib.decompress: {}", e).into())
+    zlib_decode(data, ZLIB_DEFAULT_MAX).map_err(|e| zlib_decode_err("zlib.decompress", e))
+}
+
+/// `decompress` with the output bound `max_len` in place of the default 256 MiB
+/// (R-zlib-04); `max_len <= 0` aborts.
+pub fn almide_rt_zlib_decompress_max(data: &[u8], max_len: i64) -> Result<Vec<u8>, AlmideString> {
+    let max = zlib_checked_max("decompress_max", max_len);
+    zlib_decode(data, max).map_err(|e| zlib_decode_err("zlib.decompress", e))
 }
 
 // ── Deflate (raw, no header — used by Minecraft) ──
@@ -46,10 +53,19 @@ pub fn almide_rt_zlib_deflate_level(data: &[u8], level: i64) -> Result<Vec<u8>, 
 }
 
 pub fn almide_rt_zlib_inflate(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
+    zlib_inflate_capped(data, ZLIB_DEFAULT_MAX)
+}
+
+/// `inflate` with the output bound `max_len` (R-zlib-04); `max_len <= 0` aborts.
+pub fn almide_rt_zlib_inflate_max(data: &[u8], max_len: i64) -> Result<Vec<u8>, AlmideString> {
+    zlib_inflate_capped(data, zlib_checked_max("inflate_max", max_len))
+}
+
+fn zlib_inflate_capped(data: &[u8], max: u64) -> Result<Vec<u8>, AlmideString> {
     let mut out = Vec::new();
-    match zlib_raw_inflate(data, 0, &mut out) {
+    match zlib_raw_inflate(data, 0, &mut out, max) {
         Ok(_) => Ok(out),
-        Err(e) => Err(format!("zlib.inflate: {}", e).into()),
+        Err(e) => Err(zlib_decode_err("zlib.inflate", e)),
     }
 }
 
@@ -69,7 +85,13 @@ pub fn almide_rt_zlib_gzip(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
 /// Empty input is `unexpected end of file` on every leg (#2478): a gzip file
 /// has at least one member.
 pub fn almide_rt_zlib_gunzip(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
-    gzip_decode(data).map_err(|e| format!("zlib.gunzip: {}", e).into())
+    gzip_decode(data, ZLIB_DEFAULT_MAX).map_err(|e| zlib_decode_err("zlib.gunzip", e))
+}
+
+/// `gunzip` with the output bound `max_len` (R-zlib-04); `max_len <= 0` aborts.
+pub fn almide_rt_zlib_gunzip_max(data: &[u8], max_len: i64) -> Result<Vec<u8>, AlmideString> {
+    let max = zlib_checked_max("gunzip_max", max_len);
+    gzip_decode(data, max).map_err(|e| zlib_decode_err("zlib.gunzip", e))
 }
 
 // ── Decoding: one canonical failure set on every leg (C-331) ──
@@ -90,22 +112,71 @@ const ZLIB_CRC: &str = "crc mismatch";
 const ZLIB_SIZE: &str = "size mismatch";
 const ZLIB_ADLER: &str = "adler32 mismatch";
 
+// ── The output bound (R-L0-47, R-zlib-04, #4020) ──
+//
+// A decoder of untrusted input stops where its output would pass `max` bytes
+// and returns `zlib: output exceeds <max> bytes` — the whole text, without the
+// function's prefix, on every leg (stdlib/zlib_inflate.almd spells the same).
+// The inflater is stopped within one 32 KiB window past the bound however
+// small the input, so a few KB of compression bomb stop near 256 MiB instead
+// of exhausting memory. Across gzip members the bound is on the total.
+const ZLIB_DEFAULT_MAX: u64 = 268_435_456;
+
+/// The failure of a bounded decode: one of the canonical texts above, or the
+/// output bound that was passed.
+enum ZlibDecodeError {
+    Text(&'static str),
+    Exceeds(u64),
+}
+
+impl From<&'static str> for ZlibDecodeError {
+    fn from(e: &'static str) -> Self { ZlibDecodeError::Text(e) }
+}
+
+fn zlib_decode_err(func: &str, e: ZlibDecodeError) -> AlmideString {
+    match e {
+        ZlibDecodeError::Text(t) => format!("{}: {}", func, t).into(),
+        ZlibDecodeError::Exceeds(max) => format!("zlib: output exceeds {} bytes", max).into(),
+    }
+}
+
+/// A caller's bound: positive, or the call aborts the way the self-hosted
+/// body's `panic` does (R-L0-33: a count the caller can check before calling).
+fn zlib_checked_max(func: &str, max_len: i64) -> u64 {
+    if max_len <= 0 { almide_panic!("zlib.{}: max_len must be positive, got {}", func, max_len); }
+    max_len as u64
+}
+
 /// Inflate the raw DEFLATE stream at `data[start..]` onto `out`; Ok is the
 /// position of the first byte after it. A stream that needs bytes past the
-/// input is incomplete, one the inflater rejects is corrupt. A fresh inflater
-/// per stream: a distance reaching before `out`'s length at entry reads the
-/// empty window's zeros, as the self-hosted decoder does.
-fn zlib_raw_inflate(data: &[u8], start: usize, out: &mut Vec<u8>) -> Result<usize, &'static str> {
+/// input is incomplete, one the inflater rejects is corrupt, one whose output
+/// would take `out` past `max` bytes exceeds the bound. A fresh inflater per
+/// stream: a distance reaching before `out`'s length at entry reads the empty
+/// window's zeros, as the self-hosted decoder does.
+///
+/// The bound is judged in stream order, as the self-hosted decoder judges it
+/// symbol by symbol: the stream exceeds it when the bytes decoded before the
+/// stream ends, fails or runs out of input pass `max`. The inflater decodes
+/// up to one 32 KiB window ahead of the room it is handed and reports a
+/// failure it meets there at once, so it is handed a whole window of room on
+/// every call: then every byte it decoded before a failure has been delivered
+/// and counted, and `out` holds at most `max` + 32 KiB when the bound stops it.
+fn zlib_raw_inflate(data: &[u8], start: usize, out: &mut Vec<u8>, max: u64) -> Result<usize, ZlibDecodeError> {
     let input = data.get(start..).unwrap_or(&[]);
     let mut inf = Decompress::new(false);
+    let mut chunk = vec![0u8; 32 * 1024];
     loop {
         let (seen_in, seen_out) = (inf.total_in(), inf.total_out());
-        out.reserve(32 * 1024);
         let rest = &input[inf.total_in() as usize..];
-        match inf.decompress_vec(rest, out, FlushDecompress::None) {
-            Err(_) => return Err(ZLIB_CORRUPT),
+        let status = inf.decompress(rest, &mut chunk, FlushDecompress::None);
+        out.extend_from_slice(&chunk[..(inf.total_out() - seen_out) as usize]);
+        if out.len() as u64 > max {
+            return Err(ZlibDecodeError::Exceeds(max));
+        }
+        match status {
+            Err(_) => return Err(ZlibDecodeError::Text(ZLIB_CORRUPT)),
             Ok(Status::StreamEnd) => return Ok(start + inf.total_in() as usize),
-            Ok(_) if inf.total_in() == seen_in && inf.total_out() == seen_out => return Err(ZLIB_INCOMPLETE),
+            Ok(_) if inf.total_in() == seen_in && inf.total_out() == seen_out => return Err(ZlibDecodeError::Text(ZLIB_INCOMPLETE)),
             Ok(_) => {}
         }
     }
@@ -159,24 +230,24 @@ fn gzip_header_end(data: &[u8], pos: usize) -> Result<usize, &'static str> {
 }
 
 /// gzip members back to back, each checked against its CRC-32 and ISIZE.
-fn gzip_decode(data: &[u8]) -> Result<Vec<u8>, &'static str> {
+fn gzip_decode(data: &[u8], max: u64) -> Result<Vec<u8>, ZlibDecodeError> {
     if data.is_empty() {
-        return Err(ZLIB_EOF);
+        return Err(ZLIB_EOF.into());
     }
     let mut out = Vec::new();
     let mut pos = 0;
     while pos < data.len() {
         let start = gzip_header_end(data, pos)?;
         let member_start = out.len();
-        let after = zlib_raw_inflate(data, start, &mut out)?;
+        let after = zlib_raw_inflate(data, start, &mut out, max)?;
         if after + 8 > data.len() {
-            return Err(ZLIB_EOF);
+            return Err(ZLIB_EOF.into());
         }
         if zlib_crc32(&out[member_start..]) != zlib_u32_le(data, after) {
-            return Err(ZLIB_CRC);
+            return Err(ZLIB_CRC.into());
         }
         if (out.len() - member_start) as u32 != zlib_u32_le(data, after + 4) {
-            return Err(ZLIB_SIZE);
+            return Err(ZLIB_SIZE.into());
         }
         pos = after + 8;
     }
@@ -193,25 +264,25 @@ fn zlib_adler32(bytes: &[u8]) -> u32 {
 }
 
 /// The zlib container: CMF FLG, the DEFLATE stream, a big-endian Adler-32.
-fn zlib_decode(data: &[u8]) -> Result<Vec<u8>, &'static str> {
+fn zlib_decode(data: &[u8], max: u64) -> Result<Vec<u8>, ZlibDecodeError> {
     if data.len() < 2 {
-        return Err(ZLIB_EOF);
+        return Err(ZLIB_EOF.into());
     }
     let (cmf, flg) = (data[0], data[1]);
     if cmf & 15 != 8 || cmf >> 4 > 7 || (u32::from(cmf) * 256 + u32::from(flg)) % 31 != 0 {
-        return Err(ZLIB_BAD_ZLIB_HEADER);
+        return Err(ZLIB_BAD_ZLIB_HEADER.into());
     }
     if flg & 32 != 0 {
-        return Err(ZLIB_PRESET_DICT);
+        return Err(ZLIB_PRESET_DICT.into());
     }
     let mut out = Vec::new();
-    let after = zlib_raw_inflate(data, 2, &mut out)?;
+    let after = zlib_raw_inflate(data, 2, &mut out, max)?;
     if after + 4 > data.len() {
-        return Err(ZLIB_EOF);
+        return Err(ZLIB_EOF.into());
     }
     let stored = u32::from_be_bytes([data[after], data[after + 1], data[after + 2], data[after + 3]]);
     if zlib_adler32(&out) != stored {
-        return Err(ZLIB_ADLER);
+        return Err(ZLIB_ADLER.into());
     }
     Ok(out)
 }
