@@ -254,7 +254,9 @@ blocks, so a site's window may interleave with its elements' own events;
 `check_init_cert_sound` puts the byte parser inside the proof (driver mode
 `init`). The structural leg emits the `init` witness per build for every list
 literal (crates/almide-wasm/src/witness_init.rs) and proofs/structural-wall.sh
-judges it with the extracted checker, the kernel and almide-verify; every
+judges it with the extracted checker, the kernel and almide-verify (on the
+certified corpus, trust-spine run 40094443633: 2973 sites in 554 non-empty
+witnesses, all accepted); every
 other allocation site (records, variants, strings, the runtime's routines)
 records nothing yet, so `sited` — every allocation a recorded site — holds of
 a run only when all its allocations are list literals. TRUSTED: the recording
