@@ -197,7 +197,7 @@ impl Emitter<'_> {
                     // the same lowering `fs.<name>` takes from outside.
                     // The call is re-dispatched as that module call on a pinned
                     // node; its ownership mark moves back to this node.
-                    if self.cur_module.as_deref() == Some("fs") {
+                    if self.cur_module == Some("fs") {
                         let pinned = self.owned_call_marks.pin(IrExpr {
                             kind: IrExprKind::Call {
                                 target: CallTarget::Module { module: almide_base::intern::sym("fs"), func: almide_base::intern::sym(name), def_id: None },
