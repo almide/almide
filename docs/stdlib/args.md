@@ -29,10 +29,16 @@ effect fn main() -> Unit = {
 }
 ```
 
+`--` ends option parsing: flags and options are read only from the arguments
+before the first `--`, and every argument after it is positional, a leading
+`-` included — so a file named `-d` is passed safely as `-- -d`.
+
 ### `args.flag(name: String) -> Bool`
 
-True when either the long form `--name` or the short form `-n` (the first
-character of `name`) is present.
+True when `--name` is present (before `--`). No short form is derived from the
+name: `-d` is neither `--dry-run` nor `--delete`. A one-letter name also
+matches its short spelling, so a program declares a short form by reading it:
+`args.flag("dry-run")! or args.flag("n")!`. Same as `args.has_flag`.
 
 ```almd check
 import args
@@ -45,7 +51,8 @@ effect fn main() -> Unit = {
 ### `args.option(name: String) -> Option[String]`
 
 The value of `--name`, accepting both spellings — `--name=value` and
-`--name value`. `none` when the flag is absent or has no value after it.
+`--name value`, before `--`. `none` when the flag is absent or has no value
+after it.
 
 ```almd check
 import args
@@ -75,8 +82,9 @@ effect fn main() -> Unit = {
 
 ### `args.positional() -> List[String]`
 
-Arguments that are not flags, with argv[0] dropped. Note that this filters on a
-leading `-`, so a value supplied as `--name value` stays in the list.
+Arguments that are not flags, with argv[0] dropped, followed by every argument
+after `--`. Before `--` this filters on a leading `-`, so a value supplied as
+`--name value` stays in the list — write `--name=value` to keep it out.
 
 ```almd check
 import args
@@ -110,15 +118,15 @@ effect fn main() -> Unit = {
 // @since 0.2.0 or earlier
 effect args.raw() -> List[String]
 
-// True on --name or -<first letter of name>.
+// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
 // @since 0.2.0 or earlier
 effect args.flag(name: String) -> Bool
 
-// True on --name; a one-letter name also matches -name. No short form is derived.
+// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
 // @since unreleased
 effect args.has_flag(name: String) -> Bool
 
-// Value of --name=v or --name v; none if absent.
+// Value of --name=v or --name v before `--`; none if absent.
 // @since 0.2.0 or earlier
 effect args.option(name: String) -> Option[String]
 
@@ -126,7 +134,7 @@ effect args.option(name: String) -> Option[String]
 // @since 0.2.0 or earlier
 effect args.option_or(name: String, fallback: String) -> String
 
-// Args not starting with -; option values too.
+// Args before `--` not starting with -, then every arg after `--`; option values too.
 // @since 0.2.0 or earlier
 effect args.positional() -> List[String]
 
