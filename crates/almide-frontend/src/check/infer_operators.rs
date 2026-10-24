@@ -524,15 +524,7 @@ impl Checker {
         // works (deep structural). #652
         if matches!(op.as_str(), "<" | ">" | "<=" | ">=") {
             let lc = resolve_ty(lt, &self.uf);
-            let orderable = matches!(lc,
-                Ty::Int | Ty::Float | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
-                | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
-                | Ty::Float32 | Ty::Float64 | Ty::String | Ty::Bool
-                | Ty::Unknown | Ty::TypeVar(_) | Ty::Never)
-                // a declared type ordered by its protocol's `compare` (BigInt: Integer)
-                || matches!(&lc, Ty::Named(n, _) if crate::canonicalize::protocols::type_requires(
-                    &self.env, n.as_str(), crate::canonicalize::protocols::ORDER_REQUIREMENT));
-            if !orderable {
+            if !self.is_orderable_operand(&lc) {
                 self.emit(super::err(
                     format!("operator '{}' is not defined for {} — ordering applies to Int, Float, String, and Bool", op, lc.display()),
                     "Compare scalar fields explicitly, or use list.sort / list.min / list.max for ordered collections",
@@ -540,6 +532,19 @@ impl Checker {
             }
         }
         Ty::Bool
+    }
+
+    /// Does `< <= > >=` apply to an operand of resolved type `lc` (#652)? A
+    /// scalar orderable type, an unresolved one (reported elsewhere), or a
+    /// declared type ordered by its protocol's `compare` (BigInt: Integer).
+    fn is_orderable_operand(&self, lc: &Ty) -> bool {
+        matches!(lc,
+            Ty::Int | Ty::Float | Ty::Int8 | Ty::Int16 | Ty::Int32 | Ty::Int64
+            | Ty::UInt8 | Ty::UInt16 | Ty::UInt32 | Ty::UInt64
+            | Ty::Float32 | Ty::Float64 | Ty::String | Ty::Bool
+            | Ty::Unknown | Ty::TypeVar(_) | Ty::Never)
+            || matches!(lc, Ty::Named(n, _) if crate::canonicalize::protocols::type_requires(
+                &self.env, n.as_str(), crate::canonicalize::protocols::ORDER_REQUIREMENT))
     }
 
     /// `and`/`or` arm of [`Self::infer_expr_g2_binary`]. Verbatim text move.

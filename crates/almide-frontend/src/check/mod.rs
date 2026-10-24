@@ -1497,6 +1497,7 @@ include!("scoped.rs");
 include!("scoped_walk.rs");
 include!("scoped_shape.rs");
 include!("module_inference.rs");
+include!("generic_scope.rs");
 
 /// What the file SPELLS that can mark an import used (#1783, #1853).
 /// Purely syntactic, so it is deterministic under the spine's checker
