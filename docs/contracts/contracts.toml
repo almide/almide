@@ -5420,6 +5420,17 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-414"
+spec      = "ALS-T24"
+title     = "float.to_int_checked and float.to_int_saturating complete the Float to Int conversion trio"
+statement = "`float.to_int` has the two twins every lossy Float to integer conversion carries (#4145). `float.to_int_checked(x)` is `some` exactly when `x` is an integer in the 64-bit `Int` range, and `none` for NaN, +inf, -inf, a fractional part, and any value at or beyond 2^63 or below -2^63 (`to_int_checked(12.0) = some(12)`, `to_int_checked(-0.0) = some(0)`, `to_int_checked(-2^63) = some(-9223372036854775808)`, `to_int_checked(9223372036854774784.0) = some(9223372036854774784)`, `to_int_checked(12.9) = none`, `to_int_checked(2^63) = none`, `to_int_checked(1e300) = none`): the same rule as `float.to_int64_checked`. `float.to_int_saturating(x)` is `float.to_int(x)` spelled explicitly: truncation toward zero, clamping to `Int` min/max for out-of-range values and ±inf, and 0 for NaN. Both answer the same on native, wasm and the reference evaluator."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/float_to_int_trio.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-415"
 spec      = "ALS-R5"
 title     = "random.int, float, choice and shuffle draw from OS entropy on native and the embedded wasm lane: draws in one clock tick differ, and threads started together draw different streams"
