@@ -326,6 +326,7 @@ spec/wasm_cross/fan_map_nested_combinators.almd
 spec/wasm_cross/fan_map_parallel_scalar.almd
 spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
 spec/wasm_cross/fan_ordered_arms.almd
+spec/wasm_cross/fan_prefetch_fs.almd
 spec/wasm_cross/fan_pure_thunks.almd
 spec/wasm_cross/fan_race_mapper.almd
 spec/wasm_cross/fan_race_walled_program.almd
@@ -362,6 +363,8 @@ spec/wasm_cross/fold_family_source_before_init.almd
 spec/wasm_cross/fold_heap_acc.almd
 spec/wasm_cross/fold_init_rebinds_source.almd
 spec/wasm_cross/for_in_forms.almd
+spec/wasm_cross/fs_fallible_walker_call_head.almd
+spec/wasm_cross/fs_relative_path.almd
 spec/wasm_cross/fuel_bare_result.almd
 spec/wasm_cross/fuel_block_body.almd
 spec/wasm_cross/fuel_bounded_boundary.almd
@@ -435,6 +438,7 @@ spec/wasm_cross/heap_result_tuple_return.almd
 spec/wasm_cross/hex_two_module_link.almd
 spec/wasm_cross/hof_closure_string_tail.almd
 spec/wasm_cross/hof_fn_value_callbacks.almd
+spec/wasm_cross/host_floor_string_alloc.almd
 spec/wasm_cross/http_query_params_decoder.almd
 spec/wasm_cross/http_response_headers.almd
 spec/wasm_cross/i64_min_literal.almd
