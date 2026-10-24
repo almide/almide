@@ -28,7 +28,7 @@ fn dispatch_run(args: RunCmd) {
         // ops, and the run leg formats the probe line into the D5 dual-time
         // report instead of printing it raw.
         // SAFETY: single-threaded at this point (process entry, pre-dispatch).
-        unsafe { std::env::set_var("ALMIDE_FUEL_PROBE", "1") };
+        unsafe { almide_base::env::arm("ALMIDE_FUEL_PROBE", "1") };
     }
     // 0.29.0: v1-first verified wasm is the DEFAULT; `--no-verified` opts out.
     // 0.30.0 (#764 rung-5 complete): the v1 NATIVE trust-spine renderer is
@@ -119,6 +119,9 @@ fn dispatch_check(args: CheckCmd) {
         return;
     }
     let critical = critical_profile_grants(profile.as_deref(), &allow);
+    if critical.is_some() {
+        refuse_build_switches_under_critical();
+    }
     let wasm_target = check_wasm_target(target.as_deref());
     // #2165: the bare form inside a package judges EVERY entry under `src/`,
     // not the first one `resolve_file` happens to find. `--json` walks the
@@ -169,6 +172,20 @@ fn critical_profile_grants(profile: Option<&str>, allow: &[String]) -> Option<Ve
             eprintln!("error: unknown profile `{other}` — the only profile is `critical`");
             std::process::exit(1);
         }
+    }
+}
+
+/// #4129: `--profile critical` judges the program as written, so an inherited
+/// switch that changes what is compiled or which check runs is refused, not
+/// ignored — `--allow-switch` does not lift it.
+fn refuse_build_switches_under_critical() {
+    let on = almide_base::env::inherited_build_switches();
+    if !on.is_empty() {
+        eprintln!(
+            "error: --profile critical refuses a build-changing environment switch: {} (unset it; `almide switches` says what each does)",
+            on.join(", ")
+        );
+        std::process::exit(1);
     }
 }
 
@@ -518,7 +535,27 @@ fn report_manifest_warnings(command: &Commands, path: &std::path::Path, content:
     }
 }
 
+/// #4129: a release build locks the switches that change what is compiled or
+/// which check runs — an inherited one is ignored unless `--allow-switch`
+/// names it — and `almide survive`'s overlay arrives only as an argument.
+/// Before any switch is read.
+fn arm_switch_lock(cli: &crate::cli_args::Cli) {
+    for name in &cli.allow_switch {
+        if let Err(e) = almide_base::env::check_allowed(name) {
+            eprintln!("error: --allow-switch: {e}");
+            std::process::exit(1);
+        }
+    }
+    if cli.lock_switches || crate::cli_args::is_release_build() {
+        almide_base::env::lock(cli.allow_switch.clone());
+    }
+    if let (Some(target), Some(text)) = (&cli.survive_overlay, &cli.survive_overlay_text) {
+        almide::source_overlay::arm_from_args(target, text);
+    }
+}
+
 pub(crate) fn dispatch(cli: crate::cli_args::Cli) {
+    arm_switch_lock(&cli);
     if cli.verbose {
         // Deep pipeline code reads the env var so verbosity needs no
         // plumbing through every call chain (same pattern as
