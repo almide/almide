@@ -1801,6 +1801,15 @@
 |---|---|---|
 | `unwrap_or` | `r ?? d` | R-result-01 |
 
+## secret
+
+記録: [L2-secret.md](L2-secret.md)
+
+| 関数 | シグネチャ（リデザイン後） | 変化 | 案 |
+|---|---|---|---|
+| `new` | `fn secret.new[A](x: A) -> Secret[A]` | 新規 | R-secret-01 |
+| `reveal` | `fn secret.reveal[A](s: Secret[A]) -> A` | 新規 | R-secret-01 |
+
 ## set
 
 記録: [L2-set.md](L2-set.md)
