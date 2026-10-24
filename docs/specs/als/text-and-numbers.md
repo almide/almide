@@ -1,6 +1,6 @@
 # ALS §T — Text and Number Semantics (normative)
 
-> Last updated: 2026-10-18
+> Last updated: 2026-10-24
 
 > **Status**: normative. これらの節は実装から独立した**規範**であり、v0（native）と
 > v1（MIR/wasm）の両実装がこの節に適合する義務を負う。適合の証拠は
@@ -619,3 +619,24 @@ trap）、見出しのない exit 1 は不合格である。不合格は ALS-T18
 テスト: `spec/stdlib/coverage_assert_aborts_test.almd`、
 `spec/stdlib/testing_polarity_test.almd`、
 `spec/lang/assert_aborts_continues_test.almd`。Contracts: C-384。
+
+## ALS-T31 HMAC と定数時間比較
+
+`hash.hmac_sha256(key, b)`・`hash.hmac_sha512(key, b)` は SHA-256・SHA-512 上の
+HMAC（RFC 2104）で、**鍵が第一引数**である。ブロック長（64・128 バイト）より長い
+鍵は先にハッシュし、短い鍵はブロック長まで 0 で埋める。結果は 32・64 バイトで、
+`_hex` は同じ値の小文字 16 進（64・128 文字）。RFC 4231 のテストケース 1〜7 に
+両ダイジェストで一致する。`hash.is_valid_hmac_sha256(key, b, tag)`・
+`is_valid_hmac_sha512` は `tag` が計算した MAC と等しいときだけ true で、比較は
+`bytes.is_equal_constant_time` を通る。長さの違う tag は false。`_hex` の検証は
+tag を大小どちらの 16 進でも受け、奇数長・16 進でない文字・空文字列は abort
+せず false を返す。
+
+`bytes.is_equal_constant_time(a, b)`・`string.is_equal_constant_time(a, b)` は
+長さとバイト列が等しいときだけ true（String は UTF-8 のバイトを比べる）。長さ
+の違いは直ちに false（長さは公開情報）。長さが等しければ全バイト対を読み、
+`a[i] xor b[i]` の OR を走査後に一度だけ 0 と比べる。内容に依存する分岐・添字・
+脱出はない。
+
+テスト: `spec/wasm_cross/hash_hmac_rfc4231.almd`、
+`spec/wasm_cross/bytes_is_equal_constant_time.almd`。Contracts: C-420, C-421。

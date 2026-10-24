@@ -1,6 +1,6 @@
 # ALS — データ形式（Data Formats）
 
-> Last updated: 2026-08-27
+> Last updated: 2026-10-24
 
 JSON / 正規表現 / バイナリ形式の観測規範。参照方法は [strings.md](strings.md)
 冒頭と同じ。
@@ -51,7 +51,17 @@ default 付きフィールドは実値をそのまま出し、`Value` フィー�
 decode は宣言順にフィールドを walk して最初のエラーを返す: object 以外に
 `expected Object`、必須キーの欠落に `missing field '<key>'`、型不一致に
 Value variant 名を使う `expected Int` / `expected Float` / `expected Str` /
-`expected Bool`（C-084 の語彙）。未知キーは無視する。Option フィールドは
+`expected Bool`（C-084 の語彙）。未知キーは無視する。派生の
+`T.decode_strict`（レコード型のみ）はフィールドを読む前に object のキーを
+文書順に見て、decode されるフィールドの wire キーでない最初のキー `k` に
+`unknown key 'k'` を返し、無ければ `T.decode` と同じ結果を返す（C-427）。
+`@skip` のフィールドは decode も encode もされず、`@skip_decode` の
+フィールドは decode されず encode はされる。どちらも default を取り、その
+キーは未知キーとして扱う。default の無い skip フィールドは E104 で拒否
+する（C-426、`spec/wasm_cross/codec_field_skip_matrix.almd`）。
+`Secret[A]` のフィールドは `A` の wire 形から decode して包む。Secret を持つ
+型には `T.encode` を derive せず、`T.encode` の参照は E023 で拒否する（C-425、
+`spec/wasm_cross/secret_eq_and_decode.almd`）。Option フィールドは
 欠落も明示 null も `none` に畳むが、`Value?` は三状態（欠落 → `none`、
 明示 null → `some(null)`、値 → `some(v)`）。default 付きフィールドは欠落
 時に default 値を取る。`Float` フィールドは整数形 JSON 数値を f64 へ拡張
@@ -65,7 +75,7 @@ Value variant 名を使う `expected Int` / `expected Float` / `expected Str` /
 `spec/wasm_cross/codec_variant_roundtrip.almd`・
 `spec/wasm_cross/codec_extra_keys.almd`・
 `spec/wasm_cross/codec_float_int.almd` — が固定する。
-Contracts: C-084, C-085, C-087, C-095, C-098, C-103, C-209。
+Contracts: C-084, C-085, C-087, C-095, C-098, C-103, C-209, C-425, C-426, C-427。
 
 ## ALS-D7 バイト列ブリッジ
 
