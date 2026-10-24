@@ -94,7 +94,7 @@ fn the_ends_of_the_u64_range_are_exact() {
 }
 
 /// The public draw stays in range over a large sample. The generator is seeded
-/// from the clock, so this asserts the invariant, not a sequence.
+/// from OS entropy (#4122), so this asserts the invariant, not a sequence.
 #[test]
 fn the_public_draw_stays_in_range() {
     for _ in 0..100_000 {
