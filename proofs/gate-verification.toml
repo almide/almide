@@ -110,7 +110,7 @@
 # never reach, and a region bug that shows only in the unarmed layout (32 -> 34).
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "34"
+# uncompensated_blind_ceiling = "33"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -879,6 +879,16 @@ varies = "develop 703bbf298 + the Miri guards, aarch64-apple-darwin, nightly-202
 blind = "a memory error the corpus does not reach -> UNCOMPENSATED; an out-of-bounds access that lands inside another live allocation, past the redzone -> UNCOMPENSATED; the wasm leg -> UNCOMPENSATED"
 
 [[gate]]
+path = "scripts/miri-fan-gate.sh"
+reads = "scalar"
+wired_by = ".github/workflows/miri-nightly.yml"
+class = "NEGATIVE_TESTED"
+evidence = "#4007 landing (2026-10-24): every invocation first runs a control, the same generated crate with the fan caller's wait for its helpers removed (almide_fan_deal returns while a helper is inside its gate), and refuses to judge unless Miri reports it UB. Measured on aarch64-apple-darwin, nightly-2026-08-01: the control came back UB ('deallocating while item is strongly protected', in almide_fan_deal) on seeds 0..8 and on seed 0 alone, four runs out of four; the unbroken crate ran clean on seeds 0..8 with its output equal to the native run. The same broken crate under miri-generated.sh's flags (one reported CPU, cost model on) came back clean — that corpus never crosses the gate."
+measures = "whether Miri reports undefined behaviour in a fan program whose every offer is dealt to helper threads (four reported CPUs, ALMIDE_FAN_COST_OFF=1, the seeds of MIRI_SEEDS), plus the control's verdict and the output against the native run"
+varies = "landing (2026-10-24): control UB, program clean, output = native"
+blind = "an interleaving none of the seeds schedules -> UNCOMPENSATED (Miri explores one schedule per seed); a fan shape the program does not use (fan.race, fan.bounded, list.par_filter, the line-fold workers) -> UNCOMPENSATED; the wasm host's fan (host_fan.rs) -> UNCOMPENSATED"
+
+[[gate]]
 path = "scripts/miri-generated.sh"
 reads = "scalar"
 wired_by = ".github/workflows/miri-nightly.yml"
@@ -1534,10 +1544,10 @@ path = "scripts/check-runtime-unsafe.sh"
 reads = "scalar"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
-evidence = "landing (2026-10-23, #4007): 54 unsafe lines in 9 files under runtime/rs/src, runtime/rs/burn and crates/almide-rt-core/src, each file listed in proofs/runtime-unsafe-allowlist.toml with a class and a reason. --self-test copies the trees to a scratch root, expects the unforged copy to pass, appends an unsafe block to runtime/rs/src/int.rs (an unlisted file) and expects a refusal, then replaces it with a comment mentioning unsafe and expects a pass. A scan that reads zero unsafe lines exits 2 rather than reporting a clean runtime. #4023 (2026-10-24) extends the scope to the preludes the compiler emits into generated programs (crates/almide-codegen/src/prelude_*.rs): prelude_region.rs 9 lines and prelude_rem_body.rs 1 line got rows (43 lines in 9 files), and --self-test also appends one extra unsafe-bearing push_str line to the copied prelude_region.rs and expects a refusal."
-measures = "the per-file count of non-comment lines holding the word unsafe in the native runtime and in the compiler-emitted preludes (crates/almide-codegen/src/prelude_*.rs), against the allowlist"
-varies = "landing (2026-10-23): 55 -> 54 with the matrix_p2 align_to removal; #4023 (2026-10-24): 33 -> 43 when the emitted preludes came into scope"
-blind = "an unsafe operation reached through a dependency crate (rayon, the regex crate, std) is not counted, only this repo's own lines -> UNCOMPENSATED; whether each listed line is actually sound is not read, only that it is listed -> proofs/runtime-unsafe-allowlist.toml; unsafe the compiler emits from outside prelude_*.rs (walker/extern_c.rs's @extern \"C\" call wrapper, walker/mod.rs's SIGPIPE prelude) is not counted -> UNCOMPENSATED; an emitted line whose string literal holds a `//` before the word is dropped by the comment filter -> UNCOMPENSATED"
+evidence = "landing (2026-10-23, #4007): 54 unsafe lines in 9 files under runtime/rs/src, runtime/rs/burn and crates/almide-rt-core/src, each file listed in proofs/runtime-unsafe-allowlist.toml with a class and a reason. --self-test copies the trees to a scratch root, expects the unforged copy to pass, appends an unsafe block to runtime/rs/src/int.rs (an unlisted file) and expects a refusal, then replaces it with a comment mentioning unsafe and expects a pass. A scan that reads zero unsafe lines exits 2 rather than reporting a clean runtime. Scope extended (2026-10-24, #4007 step 7) to the code the compiler emits: crates/almide-codegen/src string templates (src/generated left out), crates/almide-mir/src, crates/almide-kernel/src and crates/almide-base/src/native_stack_guard.rs, counting only lines that USE the keyword (unsafe followed by a block, fn, impl, extern or trait), which reads the same 33 lines on develop b19d88caa's runtime trees as the old word count. --self-test now also forges an unsafe block inside a string template in walker/mod.rs and expects a refusal, and sets a row's class outside the closed set (os-ffi, blas-ffi, region-arena, fan-sync, ffi-surface, simd-intrinsic, inline-asm, user-ffi) and expects a refusal."
+measures = "the per-file count of lines using the keyword unsafe in the native runtime and in the compiler-emitted code, against the allowlist, and every row's class against the closed set"
+varies = "landing (2026-10-23): 55 -> 54 with the matrix_p2 align_to removal; 2026-10-24 (#4007): runtime trees 33 -> 23 (http/process/matrix and the fan clock into sys.rs, one os-ffi module), plus 43 emitted lines newly in scope = 66 in 15 files"
+blind = "an unsafe operation reached through a dependency crate (rayon, the regex crate, std) is not counted, only this repo's own lines -> UNCOMPENSATED; whether each listed line is actually sound is not read, only that it is listed -> proofs/runtime-unsafe-allowlist.toml"
 
 [[gate]]
 path = "scripts/check-memory-traps.sh"
