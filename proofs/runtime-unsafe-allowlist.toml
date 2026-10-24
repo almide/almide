@@ -27,7 +27,7 @@
 path = "runtime/rs/src/sys.rs"
 count = 8
 class = "os-ffi"
-reason = "the runtime's ONE foreign-call module (#4007): signal / pthread_self / pthread_kill / _exit (http.serve's stop, process's SIGPIPE), waitpid(WNOHANG | WUNTRACED) (process.poll), clock_gettime(CLOCK_THREAD_CPUTIME_ID) (the fan clock), cblas_dgemm (blas-ffi, cfg(have_blas), which no build sets today) and SetConsoleCtrlHandler (Windows), each behind a safe wrapper whose arguments make the call sound. http.rs, list.rs, process.rs and matrix.rs call these and hold no unsafe"
+reason = "the runtime's ONE foreign-call module (#4007): signal / pthread_self / pthread_kill / _exit (http.serve's stop, process's SIGPIPE), waitpid(WNOHANG | WUNTRACED) (process.poll), clock_gettime(CLOCK_THREAD_CPUTIME_ID) (the fan clock), cblas_dgemm (blas-ffi, cfg(have_blas), which no build sets today) and SetConsoleCtrlHandler (Windows), each behind a safe wrapper whose arguments make the call sound. http.rs, list.rs, process.rs and matrix.rs call these and hold no unsafe. Checked: thread_cpu_ns under Miri (the fan corpus, scripts/miri-fan-gate.sh) and ASan; set_signal and wait_exited_or_stopped under ASan (scripts/lib/sys-ffi-asan.almd in the asan job); thread_self / thread_kill / exit_now only by tests/http_serve_cross_test.rs (functional, no sanitizer); dgemm by nothing (no build sets have_blas); the Windows handler by nothing"
 
 [[file]]
 path = "runtime/rs/src/list.rs"
