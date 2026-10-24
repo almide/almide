@@ -367,7 +367,7 @@ fn try_fold(expr: &IrExpr) -> Option<IrExpr> {
 
         // ── Unary on literals ──
         IrExprKind::UnOp { op, operand } => {
-            let folded_kind = try_fold_unop(*op, &operand.kind);
+            let folded_kind = try_fold_unop(*op, &operand.kind, &expr.ty);
             folded_kind.map(|kind| IrExpr { kind, ty: expr.ty.clone(), span: expr.span, def_id: None })
         }
 
@@ -556,9 +556,10 @@ fn try_fold_binop_bool(op: BinOp, a: bool, b: bool) -> Option<IrExprKind> {
 }
 
 /// Fold a `UnOp` whose operand is a literal, per-operator.
-fn try_fold_unop(op: UnOp, operand: &IrExprKind) -> Option<IrExprKind> {
+/// A sized integer's negation wraps at its width (#4163): `-(-128 as Int8)` is -128.
+fn try_fold_unop(op: UnOp, operand: &IrExprKind, ty: &almide_lang::types::Ty) -> Option<IrExprKind> {
     match (op, operand) {
-        (UnOp::NegInt,   IrExprKind::LitInt   { value }) => Some(IrExprKind::LitInt   { value: -value }),
+        (UnOp::NegInt,   IrExprKind::LitInt   { value }) => Some(IrExprKind::LitInt   { value: narrow_to_width(value.wrapping_neg(), ty) }),
         (UnOp::NegFloat, IrExprKind::LitFloat { value }) => Some(IrExprKind::LitFloat { value: -value }),
         (UnOp::Not,      IrExprKind::LitBool  { value }) => Some(IrExprKind::LitBool  { value: !value }),
         _ => None,
