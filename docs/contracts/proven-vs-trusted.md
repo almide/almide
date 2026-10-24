@@ -25,7 +25,8 @@ Since v0.60.0 (#1599) there were two wasm legs. The boundary map below
 describes the **MIR certificate pipeline** — the pipeline the incumbent v1 leg
 shipped. Since #2752 no route reached that leg, and #2761 deleted its renderer,
 so **no shipped wasm byte comes from this pipeline**: its rows now describe what
-`almide verify --emit` witnesses over MIR, not a property re-checked on the
+proofs/gate.sh witnesses over MIR (since #4011 `almide verify` judges the
+structural leg's bundle instead), not a property re-checked on the
 bytes you run. The Coq theorems `WasmEncode.v` / `WasmExec.v` / `WasmRcDec.v`
 stand about a *modeled* runtime (the retired incumbent's).
 
