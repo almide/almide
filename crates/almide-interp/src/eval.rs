@@ -114,7 +114,13 @@ impl<'a> Interpreter<'a> {
             IrExprKind::BinOp { op, left, right } => self.eval_binop(*op, left, right, scope),
             IrExprKind::UnOp { op, operand } => {
                 let v = val!(self.eval_expr(operand, scope));
-                self.eval_unop(*op, v)
+                let flow = self.eval_unop(*op, v);
+                // #4163: a sized int's negation wraps at its width, as `0 - x` does.
+                if matches!(op, UnOp::NegInt) {
+                    Self::narrow_wrap_flow(flow, BinOp::SubInt, &operand.ty, &operand.ty)
+                } else {
+                    flow
+                }
             }
             _ => return None,
         })
