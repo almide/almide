@@ -79,10 +79,10 @@ fn a_granted_template_is_every_capability() {
     let o = almide(&dir, &root, &["run", "src/main.almd"]);
     let err = stderr(&o);
     assert_eq!(o.status.code(), Some(1), "a file-writing template passed allow = [\"Time\"]:\n{err}");
-    assert!(err.contains("capability violation") && err.contains("IO is not in [permissions].allow"), "{err}");
+    assert!(err.contains("capability violation") && err.contains("FS.write") && err.contains("not in [permissions].allow"), "{err}");
     assert!(!root.join("marker.txt").exists(), "the template ran past [permissions]");
     // Granted every category, it builds and does what it says.
-    let dir = app(&root, "\n[permissions]\nnative = [\"tpl\"]\nallow = [\"IO\", \"Net\", \"Env\", \"Time\", \"Rand\", \"Fan\"]\n");
+    let dir = app(&root, "\n[permissions]\nnative = [\"tpl\"]\nallow = [\"FS\", \"IO\", \"Net\", \"Env\", \"Proc\", \"Time\", \"Rand\", \"Fan\", \"Abort\"]\n");
     let o = almide(&dir, &root, &["run", "src/main.almd"]);
     assert!(o.status.success(), "{}", stderr(&o));
     assert_eq!(std::fs::read_to_string(root.join("marker.txt")).ok().as_deref(), Some("pwned"));

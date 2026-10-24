@@ -199,7 +199,7 @@ fn deps_lists_capabilities_native_code_and_grant() {
     let o = almide(&dir, &root, &["deps"]);
     let out = String::from_utf8_lossy(&o.stdout).into_owned();
     assert!(o.status.success(), "deps failed:\n{}", stderr(&o));
-    let every = "capabilities: Env, Fan, IO, Net, Rand, Time";
+    let every = "capabilities: Abort, Env.read, Env.write, FS.read, FS.write, Fan, IO.stderr, IO.stdin, IO.stdout, Net.fetch, Net.listen, Proc, Rand, Time";
     let expected = [
         "mid = path ../mid\n  version: 0.1.0\n".to_string(),
         format!("  {every}\n  native code: none\n"),

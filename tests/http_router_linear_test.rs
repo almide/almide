@@ -83,11 +83,11 @@ effect fn main() -> Unit = {
     "/m",
     "nostart",
     "/" + string.repeat("x", 5000),
-    "/users/" + string.repeat("%41", 3000),
-    "/users/" + string.repeat("%41", 3000) + "%4",
+    "/users/" + string.repeat("%20", 3000),
+    "/users/" + string.repeat("%20", 3000) + "%4",
     "/q" + string.repeat("/s", 4000),
-    "/files" + string.repeat("/s%41", 3000),
-    "/files" + string.repeat("/s%41", 3000) + "/%G0",
+    "/files" + string.repeat("/s%20", 3000),
+    "/files" + string.repeat("/s%20", 3000) + "/%G0",
     "/m" + string.repeat("/t", 3000) + "?z=1"
   ]
   for p in paths {
@@ -103,8 +103,8 @@ effect fn main() -> Unit = {
 
 const CORRECT_EXPECTED: &str = r#"
 9:/users/42 -> 200 user 2 42 
-14:/users/%41%62c -> 200 user 3 Abc 
-12:/users/a%2Fb -> 200 user 3 a/b 
+14:/users/%41%62c -> 400 Bad Request: the path is not in canonical form 
+12:/users/a%2Fb -> 400 Bad Request: a path parameter is a dot segment or holds a /, \ or NUL 
 10:/users/a+b -> 200 user 3 a+b 
 8:/users/% -> 400 Bad Request: malformed percent-encoding in the path 
 9:/users/%4 -> 400 Bad Request: malformed percent-encoding in the path 
@@ -118,11 +118,11 @@ const CORRECT_EXPECTED: &str = r#"
 10:/users/%あ1 -> 400 Bad Request: malformed percent-encoding in the path 
 11:/pair/1/x/2 -> 200 pair 1 2 
 11:/pair/1/y/2 -> 404 Not Found 
-19:/pair/%31/x/%32? -> 200 pair 1 2 
+19:/pair/%31/x/%32? -> 400 Bad Request: the path is not in canonical form 
 6:/files -> 200 file 0   
 7:/files/ -> 200 file 0   
 16:/files/a/b%20c/d -> 200 file 7 a/b c/d a/b c/d 
-12:/files/a//b/ -> 200 file 3 a/b a/b 
+12:/files/a//b/ -> 400 Bad Request: the path is not in canonical form 
 6:/a/b/c -> 200 deep 
 7:/a/b/c/ -> 200 deep 
 4:/a/b -> 404 Not Found 
@@ -131,11 +131,11 @@ const CORRECT_EXPECTED: &str = r#"
 2:/m -> 200 sub 1 / / 
 7:nostart -> 400 Bad Request: the request target must start with / 
 5001:/xxxxxxxxxxxxxxx -> 404 Not Found 
-9007:/users/%41%41%41 -> 200 user 3000 AAAAAAAAAAAA 
-9009:/users/%41%41%41 -> 400 Bad Request: malformed percent-encoding in the path 
+9007:/users/%20%20%20 -> 200 user 3000              
+9009:/users/%20%20%20 -> 400 Bad Request: malformed percent-encoding in the path 
 8002:/q/s/s/s/s/s/s/s -> 404 Not Found 
-15006:/files/s%41/s%41 -> 200 file 8999 sA/sA/sA/sA/ /sA/sA/sA/sA 
-15010:/files/s%41/s%41 -> 400 Bad Request: malformed percent-encoding in the path 
+15006:/files/s%20/s%20 -> 200 file 8999 s /s /s /s / /s /s /s /s  
+15010:/files/s%20/s%20 -> 400 Bad Request: malformed percent-encoding in the path 
 6006:/m/t/t/t/t/t/t/t -> 200 sub 6004 /t/t/t/t/t/t /t/t/t/t?z=1 
 HEAD 200 []
 DELETE 405 GET, HEAD, POST
@@ -162,9 +162,9 @@ effect fn main() -> Unit = {
   ])!
   let path = match kind {
     "long" => "/x" + string.repeat("a", n),
-    "esc" => "/users/" + string.repeat("%41", n),
+    "esc" => "/users/" + string.repeat("%20", n),
     "segs" => "/q" + string.repeat("/s", n),
-    "rest" => "/files" + string.repeat("/s%41", n),
+    "rest" => "/files" + string.repeat("/s%20", n),
     _ => "/",
   }
   let res = app(http.new_request("GET", path, "", map.new()))!
