@@ -1,0 +1,72 @@
+// @contract: C-413
+// float.parse is finite-only (#4121). A NaN or infinity spelling (nan, NaN,
+// +nan, -nan, inf, -inf, Infinity, INF, any case, either sign) answers
+// `invalid float literal`; a finite decimal literal that rounds past f64::MAX
+// answers `float literal out of range`, either sign; one that rounds to 0 stays
+// ok. The largest finite value and the boundary just below the rounding cut
+// (1.7976931348623158e308 rounds to f64::MAX) still parse. A NaN amount made
+// every comparison false, so `if amount > limit then reject` was skipped.
+// json.parse keeps reading an overflowing number as ±inf (it is unchanged).
+import json
+
+fn show(s: String) -> String = match float.parse(s) {
+  ok(v) => "ok(${float.to_string(v)})",
+  err(e) => "err(${e})",
+}
+
+fn is_max(s: String) -> String = match float.parse(s) {
+  ok(v) => if v == 1.7976931348623157e308 then "f64::MAX" else "other ${float.to_string(v)}",
+  err(e) => "err(${e})",
+}
+
+effect fn main() -> Unit = {
+  println(show("NaN"))
+  // err(invalid float literal)
+  println(show("nan"))
+  // err(invalid float literal)
+  println(show("+nan"))
+  // err(invalid float literal)
+  println(show("-nan"))
+  // err(invalid float literal)
+  println(show("inf"))
+  // err(invalid float literal)
+  println(show("-inf"))
+  // err(invalid float literal)
+  println(show("Infinity"))
+  // err(invalid float literal)
+  println(show(" INF "))
+  // err(invalid float literal)
+  println(show("1e400"))
+  // err(float literal out of range)
+  println(show("-1e400"))
+  // err(float literal out of range)
+  println(show("1.7976931348623159e308"))
+  // err(float literal out of range)
+  println(is_max("1.7976931348623158e308"))
+  // f64::MAX (rounds down to it)
+  println(is_max("1.7976931348623157e308"))
+  // f64::MAX
+  println(show("1e-400"))
+  // ok(0.0)
+  println(show("-1e-400"))
+  // ok(-0.0)
+  println(if (float.parse("5e-324") ?? 0.0) > 0.0 then "subnormal ok" else "subnormal lost")
+  // subnormal ok
+  println(show("2.5"))
+  // ok(2.5)
+  println(show(""))
+  // err(cannot parse float from empty string)
+  // The guard the issue names now refuses instead of silently passing.
+  let limit = 100.0
+  let verdict = match float.parse("NaN") {
+    ok(amount) => if amount > limit then "reject" else "accept",
+    err(_) => "refuse",
+  }
+  println(verdict)
+  // refuse
+  // json.parse is not float.parse: an overflowing number is still ±inf there.
+  match json.parse("[1e400, -1e400]") {
+    ok(v) => println("json ok ${json.stringify(v)}"),
+    err(e) => println("json err ${e}"),
+  }
+}
