@@ -97,13 +97,19 @@ jobs:
       - name: Every re-injected bug fails the checked-allocator gate
         run: bash scripts/wasm-checked-alloc-reinject.sh
 
-  bounds-reinject:
-    # #4005: each lost-bounds-check bug in proofs/fixtures/bounds-witness/reinject/
-    # is put back into the emitter and its bounds witness must be rejected,
-    # while the unpatched emitter's witness for the same program is accepted.
-    name: Re-injected lost bounds checks are rejected
+  witness-reinject:
+    # #4005 / #4013: each lost-instruction bug in
+    # proofs/fixtures/<property>-witness/reinject/ is put back into the
+    # emitter and its witness must be rejected, while the unpatched
+    # emitter's witness for the same program is accepted — a lost bounds
+    # check for `bounds`, a lost list-literal slot store for `init`.
+    name: Re-injected lost instructions are rejected (${{ matrix.property }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        property: [bounds, init]
     steps:
       - uses: actions/checkout@v7
 
@@ -115,5 +121,5 @@ jobs:
         with:
           shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
 
-      - name: Every re-injected lost check is rejected by the bounds witness's checker
-        run: bash scripts/bounds-witness-reinject.sh
+      - name: Every re-injected lost instruction is rejected by the witness's checker
+        run: bash scripts/witness-reinject.sh ${{ matrix.property }}
