@@ -1,0 +1,39 @@
+// random_bytes — SELF-HOSTED `random.bytes(n)` (C-394, #3938) over the WASI
+// entropy floor (prim.random_get): n bytes of host entropy written into a
+// fresh n-byte Bytes. prim.random_get takes a LITERAL length (the host stages
+// the draw in a fixed span, #2118), so the fill goes in 256-byte draws (the
+// chunk native's getentropy reads), then 8-byte draws, and the last n % 8
+// bytes come from one more 64-bit draw, a byte at a time. A negative n dies
+// in the ALS-T6 form before anything is drawn, the text the native runtime
+// aborts with. A PLAIN fn like random_int: reaching prim.random_get carries
+// Capability::Entropy, so a caller is caps-verified only if it declares it
+// (an `effect fn`).
+fn random_bytes(n: Int) -> Bytes = {
+  if n < 0 then prim.die(prim.handle("Error: random.bytes: negative length ${int.to_string(n)}\n")) else ()
+  let buf = prim.alloc_bytes(n)
+  let p = prim.handle(buf) + 12
+  var off = 0
+  while off + 256 <= n {
+    let _e = prim.random_get(p + off, 256)
+    off = off + 256
+  }
+  while off + 8 <= n {
+    let _e = prim.random_get(p + off, 8)
+    off = off + 8
+  }
+  if off < n then __rb_tail(p, off, n) else ()
+  buf
+}
+
+fn __rb_tail(p: Int, off: Int, n: Int) -> Unit = {
+  let scratch = prim.alloc_bytes(8)
+  let sp = prim.handle(scratch) + 12
+  let _e = prim.random_get(sp, 8)
+  var r = prim.load64(sp)
+  var i = off
+  while i < n {
+    prim.store8(p + i, int.band(r, 255))
+    r = int.bshr(r, 8)
+    i = i + 1
+  }
+}
