@@ -726,6 +726,11 @@ impl Checker {
                 let type_name = self.resolve_type_name_for_protocol(concrete_ty);
                 if let Some(type_name) = type_name {
                     for proto in proto_names {
+                        // An unknown protocol is reported once, at the bound
+                        // (`enter_generics`), not again at every call.
+                        if !self.env.protocols.contains_key(proto) {
+                            continue;
+                        }
                         let has_proto = self.env.type_protocols
                             .get(&type_name)
                             .map_or(false, |ps| ps.contains(proto));

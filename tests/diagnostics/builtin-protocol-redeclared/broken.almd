@@ -1,0 +1,9 @@
+// #4097: redeclaring a built-in protocol would keep the built-in
+// conformances while replacing the requirements.
+protocol Numeric {
+  fn twice(self) -> Self
+}
+
+fn double[S: Numeric](x: S) -> S = x.twice()
+
+effect fn main() -> Unit = println("${double(3)}")

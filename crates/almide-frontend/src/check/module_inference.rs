@@ -299,6 +299,26 @@ impl Checker {
             }
             if let Some(bounds) = &g.bounds {
                 if !bounds.is_empty() && !is_const {
+                    // #4097: a bound names a protocol, built in or declared. An
+                    // unknown name used to pass here and fail only at a call
+                    // site, as "Int does not implement Nonexistent".
+                    for (i, b) in bounds.iter().enumerate() {
+                        if !self.protocol_in_scope(b.as_str()) {
+                            let builtins: Vec<&str> = crate::canonicalize::protocols::BUILTIN_PROTOCOLS.iter().map(|p| p.name).collect();
+                            let mut d = crate::check::err(
+                                format!("unknown protocol '{}' in the bound of '{}'", b, g.name),
+                                format!("A bound names a protocol: a built-in one ({}), or one declared with `protocol {} {{ ... }}` here or in an imported module",
+                                    builtins.join(", "), b),
+                                format!("generic parameter {}", g.name));
+                            if let Some(sp) = g.bound_spans.get(i) {
+                                d.file = self.source_file.clone();
+                                d.line = Some(sp.line);
+                                d.col = Some(sp.col);
+                                if sp.end_col > sp.col { d.end_col = Some(sp.end_col); }
+                            }
+                            self.emit(d);
+                        }
+                    }
                     self.env.generic_protocol_bounds.insert(sym(&g.name), bounds.iter().map(|b| sym(b)).collect());
                 }
             }
@@ -315,6 +335,16 @@ impl Checker {
             }
         }
         shadowed
+    }
+
+    /// Is protocol `name` declared — built in, in this file, or by an import
+    /// (registered under its module-qualified name)?
+    fn protocol_in_scope(&self, name: &str) -> bool {
+        let bare = name.rsplit_once('.').map_or(name, |(_, b)| b);
+        let suffix = format!(".{}", bare);
+        self.env.protocols.contains_key(&sym(name))
+            || self.env.protocols.contains_key(&sym(bare))
+            || self.env.protocols.keys().any(|k| k.as_str().ends_with(suffix.as_str()))
     }
 
     /// Remove generic structural/protocol bounds and RESTORE the `env.types`
