@@ -1118,10 +1118,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [io.md](io.md)
 
-- `effect io.read_line() -> String` — Next stdin line, newline cut; "" at EOF too — read_line_opt tells them apart.
+- `effect io.read_line() -> String` — Next stdin line, newline cut, bad UTF-8 as U+FFFD; "" at EOF too — read_line_opt tells them apart.
 - `effect io.read_line_opt() -> Option[String]` — Next stdin line, newline cut; none at EOF, some("") for an empty line.
 - `effect io.print(s: String) -> Unit` — Writes s, no newline, then flushes.
-- `effect io.read_all() -> String` — Rest of stdin as text; empty at EOF.
+- `effect io.read_all() -> String` — Rest of stdin as text, bad UTF-8 as U+FFFD; empty at EOF.
 - `effect io.read_byte() -> Int` — Next stdin byte 0..255, or -1 at EOF.
 - `effect io.read_n_bytes(n: Int) -> List[Int]` — Up to n stdin bytes; [] if n <= 0.
 - `effect io.write_bytes(data: List[Int]) -> Unit` — Low byte of each Int to stdout; unflushed.

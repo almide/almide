@@ -156,7 +156,7 @@ effect fn main() -> Unit = {
 ## Signature index (8 functions)
 
 ```
-// Next stdin line, newline cut; "" at EOF too — read_line_opt tells them apart.
+// Next stdin line, newline cut, bad UTF-8 as U+FFFD; "" at EOF too — read_line_opt tells them apart.
 // @since 0.5.0 or earlier
 effect io.read_line() -> String
 
@@ -168,7 +168,7 @@ effect io.read_line_opt() -> Option[String]
 // @since 0.5.0 or earlier
 effect io.print(s: String) -> Unit
 
-// Rest of stdin as text; empty at EOF.
+// Rest of stdin as text, bad UTF-8 as U+FFFD; empty at EOF.
 // @since 0.5.0 or earlier
 effect io.read_all() -> String
 
