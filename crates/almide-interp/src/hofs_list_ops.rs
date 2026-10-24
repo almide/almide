@@ -69,6 +69,18 @@ impl<'a> Interpreter<'a> {
         // `http.query_params` kept both `q`s of `?q=a&q=c`. Every argument is
         // read back under its STATIC type first, as `eval_hof` reads back its
         // receiver; one with no faithful read-back abstains.
+        // The generic `list.sum` / `list.product` [A: Numeric] reached as an
+        // unmonomorphized `list.*` call: only the STATIC element type says
+        // which number type's fold answers it (a sized Int is a `Value::Int`
+        // too), so an element type outside Int / Float abstains.
+        let op: Op<'a> = match (module, func) {
+            ("list", "sum" | "product") => match list_elem_ty(tys.as_deref()) {
+                Some(almide_lang::types::Ty::Int) => Self::eval_container_op_list_agg_int,
+                Some(almide_lang::types::Ty::Float) => Self::list_float_fold,
+                _ => return None,
+            },
+            _ => op,
+        };
         if self.pool_depth > 0 {
             match self.sync_container_args(args, tys.as_deref()) {
                 Ok(Some(synced)) => return op(self, func, &synced),
@@ -283,6 +295,30 @@ impl<'a> Interpreter<'a> {
             .map(|(a, b)| Value::tuple(vec![a.clone(), b.clone()]))
             .collect();
         Flow::val(Value::list(r))
+    }
+
+    /// `list.sum` / `list.product` over `List[Int]`: the Int instances
+    /// `int.__sum` / `int.__product` answer with (wrapping, C-056).
+    fn eval_container_op_list_agg_int(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        match func {
+            "sum" => Some(self.list_sum(args)),
+            _ => Some(self.list_product(args)),
+        }
+    }
+
+    /// `list.sum` / `list.product` over `List[Float]`: `float.__sum` /
+    /// `float.__product`'s left fold from 0.0 / 1.0 (an empty list is the
+    /// Float identity, never the Int 0 the untyped `list_sum` would answer).
+    fn list_float_fold(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
+        let items = args.first().and_then(|v| v.as_iter_items())?;
+        let (init, step): (f64, fn(f64, f64) -> f64) =
+            if func == "sum" { (0.0, |a, b| a + b) } else { (1.0, |a, b| a * b) };
+        let mut acc = init;
+        for v in items.iter() {
+            let Value::Float(f) = v else { return None };
+            acc = step(acc, *f);
+        }
+        Some(Flow::val(Value::Float(acc)))
     }
 
     fn eval_container_op_list_agg(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
@@ -776,4 +812,13 @@ pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
             | ("bytes", "copy_from")
             | ("bytes", "copy_within")
     )
+}
+
+/// The element type of a call's first argument when it is statically a `List[T]`.
+fn list_elem_ty(tys: Option<&[almide_lang::types::Ty]>) -> Option<&almide_lang::types::Ty> {
+    use almide_lang::types::constructor::TypeConstructorId as C;
+    match tys?.first()? {
+        almide_lang::types::Ty::Applied(C::List, a) if a.len() == 1 => a.first(),
+        _ => None,
+    }
 }
