@@ -950,23 +950,29 @@ almide clean
 
 ### `almide verify`
 
-プログラムの flight-grade 証明書（ownership / names / caps / call-modes の witness）を、**独立版数の別バイナリ `almide-verify`** に再検査させる (#2152)。`almide verify` 自身は検査器を持たない subprocess shim で、`almide-verify` を **almide 実行ファイルの隣 → PATH** の順に探して起動し、標準入出力と終了コードをそのまま返す。見つからなければ **linked fallback は無く**、名前付きエラー `error[verifier-missing]` で終了コード 127。
+`almide build --target wasm` が出荷する wasm モジュールの証明書（ownership / call-modes / bounds / names / caps / caps-transitive の witness）を、**独立版数の別バイナリ `almide-verify`** に再検査させる (#2152, #4011)。`almide verify` 自身は検査器を持たない subprocess shim で、`almide-verify` を **almide 実行ファイルの隣 → PATH** の順に探して起動し、標準入出力と終了コードをそのまま返す。見つからなければ **linked fallback は無く**、名前付きエラー `error[verifier-missing]` で終了コード 127。
 
 ```bash
-almide verify app.almd                    # 証明書 bundle を生成し almide-verify bundle に渡す
-almide verify app.almd --emit app.bundle  # bundle をファイルに残す（almide-verify が無くても書く）
-almide verify ownership w.cert            # .almd 以外の引数は almide-verify にそのまま渡る
-almide-verify --version                   # 検査器自身の版数（コンパイラとは独立）
+almide build app.almd --target wasm               # app.wasm を書く
+almide verify app.almd                            # 証明書 bundle を生成し、app.wasm の SHA-256 に結びつけて almide-verify bundle に渡す
+almide verify app.almd --artifact out/app.wasm    # 結びつける成果物を明示する（無ければ・一致しなければエラー）
+almide verify app.almd --emit app.bundle          # bundle をファイルに残す（almide-verify が無くても書く）
+almide verify --mir app.almd --emit m.bundle      # MIR lowering の witness（coverage.sh 用、ビルドとは無関係）
+almide verify ownership w.cert                    # .almd 以外の引数は almide-verify にそのまま渡る
+almide-verify --version                           # 検査器自身の版数（コンパイラとは独立）
 ```
 
-- `almide` 側で走るのは **untrusted な producer** だけ（`almide_mir::pipeline::program_witnesses` がプログラムを MIR に下ろし、`crate::certificate` の witness を bundle に書く）。判定は常に `almide-verify`。
-- `almide-verify` はコンパイラの crate を一切リンクしない（`crates/almide-verify`、依存ゼロ）。各性質の判定は `proofs/` の Coq 検査器（`check_xc` / `check_names_cert` / `check_caps_cert` / `check_prog_cert` / `check_modes_cert`）の転写で、定理は持たない。抽出版検査器との一致は `proofs/gate.sh`（全行 + seeded ランダム差分）と `proofs/corpus-wall.sh`（コーパス全 witness）がゲートする。
-- lowering subset の外の関数は bundle に `uncertified` として名前つきで載る（黙って飛ばさない）。
-- `./almide.toml` の `[permissions].allow` があれば effect fn の宣言 capability をそれに絞る（caps witness が reject できるようになる）。
+- `almide` 側で走るのは **untrusted な producer** だけ。`almide build --target wasm` と同じ経路（structural leg）でプログラムをビルドし、そのビルドが emit 時に記録した witness を bundle に書く（`crates/almide-wasm/src/witness_bundle.rs`。CI の `proofs/structural-wall.sh` が判定する bundle と同じ producer）。判定は常に `almide-verify`。
+- **成果物への結びつけ**: `--artifact` の名指し、または `almide build` の既定出力（`app.almd` なら `app.wasm`）が在れば、そのバイト列がこのビルドの出すモジュールと一致することを確かめ、SHA-256 を bundle（version 2 の `artifact` 行）に書く。`almide-verify` はファイルから digest を計算し直し、不一致なら REJECT。一致しない（古い）ファイルは producer が拒否する（終了コード 1）。ファイルが無ければ version 1 の bundle（ビルドが出すモジュールについての判定）になり、その旨を note で出す。
+- `http.serve` などで component として出荷されるプログラムは対象外（終了コード 1、理由を表示）。対象はプレーンな `almide build --target wasm` が書く core module。
+- `almide-verify` はコンパイラの crate を一切リンクしない（`crates/almide-verify`、依存ゼロ）。各性質の判定は `proofs/` の Coq 検査器（`check_xc` / `check_names_cert` / `check_caps_cert` / `check_prog_cert` / `check_modes_cert` / `check_bounds_cert`）の転写で、定理は Rocq kernel が検査する。
+- witness を記録できなかった frame は bundle に `uncertified` として名前つきで載る（黙って飛ばさない）。
+- `./almide.toml` の `[permissions].allow` があれば `effect fn` の宣言 capability をそれに絞る（caps witness が reject できるようになる）。plain `fn` の上限は console 出力（ADR-0022）で、manifest では広がらない。
+- `almide verify --mir app.almd [--emit b]` は #4011 以前の挙動: MIR lowering の witness（関数ごとの ownership / names / caps と call-modes）を書く。#2761 以降 MIR から出荷される wasm バイトは無いので、これはビルドではなく MIR についての判定。残している理由は `proofs/coverage.sh` がこの経路で MIR の証明書 producer を駆動し、その coverage floor が ratchet だから（`--artifact` とは併用できない）。MIR の witness を判定する gate は `proofs/gate.sh` / `proofs/corpus-wall.sh`。
 
 `almide-verify` の終了コード: 0 = 全 witness ACCEPT（CERTIFIED）、1 = REJECT あり、または witness が 0 件、3 = 全 ACCEPT だが uncertified な関数あり（INCOMPLETE）、2 = 使い方の誤り・読めない入力・不正な bundle。
 
-テスト: `tests/verify_shim_test.rs`（shim の委譲・不在時の名前付きエラー・終了コード転送）、`crates/almide-verify/tests/coq_examples.rs`（Coq の全 `Example` と `build-checker.sh` の固定行）、`crates/almide-verify/tests/cli.rs`
+テスト: `tests/verify_shim_test.rs`（shim の委譲・不在時の名前付きエラー・終了コード転送・成果物への結びつけと古いファイルの拒否・manifest を超える capability の REJECT）、`crates/almide-verify/tests/coq_examples.rs`（Coq の全 `Example` と `build-checker.sh` の固定行）、`crates/almide-verify/tests/cli.rs`
 
 ---
 
