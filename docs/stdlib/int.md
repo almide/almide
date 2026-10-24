@@ -32,6 +32,8 @@ ff
 
 Parse a decimal string into an integer. Returns err if the string is not a valid integer.
 
+Only ASCII whitespace (space, tab, LF, CR, form feed) around the number is ignored. Any other whitespace, such as a no-break space (U+00A0), an ideographic space (U+3000) or a vertical tab, is an error: `int.parse("\u{A0}5")` is `err("invalid digit found in string")`. Call `string.trim` first if you want to accept Unicode whitespace.
+
 ```almd run
 fn main() -> Unit = {
   match int.parse("42") {
@@ -360,7 +362,7 @@ int.to_string(n: Int) -> String
 // @since 0.5.0 or earlier
 int.to_hex(n: Int) -> String
 
-// Decimal Int from trimmed s; err on junk or overflow.
+// Decimal Int from s trimmed of ASCII space/tab/LF/FF/CR; err on junk or overflow.
 // @since 0.5.0 or earlier
 int.parse(s: String) -> Result[Int, String]
 

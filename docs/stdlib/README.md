@@ -390,7 +390,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float.to_string(n: Float) -> String` — Shortest round-trip digits, no exponent; 2.0 keeps .0.
 - `float.to_int(n: Float) -> Int` — Truncates toward 0, saturating; NaN gives 0.
 - `float.from_int(n: Int) -> Float` — Nearest Float; may round when |n| > 2^53.
-- `float.parse(s: String) -> Result[Float, String]` — Float from trimmed s; takes 1e3, inf, NaN; err on junk.
+- `float.parse(s: String) -> Result[Float, String]` — Finite Float from s trimmed of ASCII space; err on junk, inf, NaN, overflow.
 - `float.to_fixed(n: Float, decimals: Int) -> String` — Fixed-point, ties to even; decimals outside 0..4096 abort.
 - `float.to_bits(f: Float) -> Int` — IEEE-754 bits as Int; any NaN gives the canonical NaN.
 - `float.sqrt(n: Float) -> Float` — Square root; NaN below 0, -0.0 stays -0.0.
@@ -503,7 +503,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float64.epsilon() -> Float64` — Gap between 1.0 and the next Float64: 2^-52.
 - `float64.max_value() -> Float64` — Largest finite Float64, about 1.7976931348623157e308.
 - `float64.min_value() -> Float64` — Most negative finite Float64 (= -max_value()), not the smallest positive.
-- `float64.parse(s: String) -> Result[Float64, String]` — Float64 from trimmed s, the grammar of float.parse; err on junk.
+- `float64.parse(s: String) -> Result[Float64, String]` — Float64 from ASCII-trimmed s, the grammar of float.parse; err on junk, inf, NaN.
 
 ## fs
 
@@ -666,7 +666,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `int.to_string(n: Int) -> String` — Decimal digits, with - when negative.
 - `int.to_hex(n: Int) -> String` — Lowercase hex, no 0x; -1 gives 16 f digits.
-- `int.parse(s: String) -> Result[Int, String]` — Decimal Int from trimmed s; err on junk or overflow.
+- `int.parse(s: String) -> Result[Int, String]` — Decimal Int from s trimmed of ASCII space/tab/LF/FF/CR; err on junk or overflow.
 - `int.from_hex(s: String) -> Result[Int, String]` — Hex, any case, 0x optional; err on junk or > 2^63-1.
 - `int.to_float(n: Int) -> Float` — Nearest Float; may round when |n| > 2^53.
 - `int.bits_to_float(bits: Int) -> Float` — Float whose IEEE-754 binary64 bits are bits.
@@ -790,7 +790,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int16.rotate_left(a: Int16, n: Int) -> Int16` — The 16 bits of a rotated left by n; n is taken mod 16.
 - `int16.rotate_right(a: Int16, n: Int) -> Int16` — The 16 bits of a rotated right by n; n is taken mod 16.
 - `int16.bit_length(x: Int16) -> Int` — Bits needed to hold x; 0 for 0, 16 if negative.
-- `int16.parse(s: String) -> Result[Int16, String]` — Decimal Int16 from trimmed s; err on junk or outside -32768..32767.
+- `int16.parse(s: String) -> Result[Int16, String]` — Decimal Int16 from ASCII-trimmed s; err on junk or outside -32768..32767.
 
 ## int32
 
@@ -847,7 +847,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int32.rotate_left(a: Int32, n: Int) -> Int32` — The 32 bits of a rotated left by n; n is taken mod 32.
 - `int32.rotate_right(a: Int32, n: Int) -> Int32` — The 32 bits of a rotated right by n; n is taken mod 32.
 - `int32.bit_length(x: Int32) -> Int` — Bits needed to hold x; 0 for 0, 32 if negative.
-- `int32.parse(s: String) -> Result[Int32, String]` — Decimal Int32 from trimmed s; err on junk or outside -2147483648..2147483647.
+- `int32.parse(s: String) -> Result[Int32, String]` — Decimal Int32 from ASCII-trimmed s; err on junk or outside -2147483648..2147483647.
 
 ## int64
 
@@ -906,7 +906,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int64.rotate_left(a: Int64, n: Int) -> Int64` — The 64 bits of a rotated left by n; n is taken mod 64.
 - `int64.rotate_right(a: Int64, n: Int) -> Int64` — The 64 bits of a rotated right by n; n is taken mod 64.
 - `int64.bit_length(x: Int64) -> Int` — Bits needed to hold x; 0 for 0, 64 if negative.
-- `int64.parse(s: String) -> Result[Int64, String]` — Decimal Int64 from trimmed s; err on junk or overflow.
+- `int64.parse(s: String) -> Result[Int64, String]` — Decimal Int64 from ASCII-trimmed s; err on junk or overflow.
 
 ## int8
 
@@ -959,7 +959,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int8.rotate_left(a: Int8, n: Int) -> Int8` — The 8 bits of a rotated left by n; n is taken mod 8.
 - `int8.rotate_right(a: Int8, n: Int) -> Int8` — The 8 bits of a rotated right by n; n is taken mod 8.
 - `int8.bit_length(x: Int8) -> Int` — Bits needed to hold x; 0 for 0, 8 if negative.
-- `int8.parse(s: String) -> Result[Int8, String]` — Decimal Int8 from trimmed s; err on junk or outside -128..127.
+- `int8.parse(s: String) -> Result[Int8, String]` — Decimal Int8 from ASCII-trimmed s; err on junk or outside -128..127.
 
 ## io
 
@@ -1415,9 +1415,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.byte_slice(s: String, start: Int, end: Int) -> Option[String]` — Byte range [start, end); none if bad or mid-char.
 - `string.pad_start(s: String, n: Int, ch: String) -> String` — Left-padded to n chars with ch; never truncates.
 - `string.to_bytes(s: String) -> List[Int]` — UTF-8 bytes of s as Ints 0..255.
-- `string.capitalize(s: String) -> String` — First char uppercased, rest untouched.
-- `string.to_upper(s: String) -> String` — Unicode uppercase; may lengthen s.
-- `string.to_lower(s: String) -> String` — Unicode lowercase, not just ASCII.
+- `string.capitalize(s: String) -> String` — First char uppercased as to_upper does, rest untouched.
+- `string.to_upper(s: String) -> String` — Unicode uppercase; never folds non-ASCII into ASCII; not for identity.
+- `string.to_lower(s: String) -> String` — Unicode lowercase; never folds non-ASCII into ASCII; not for identity.
 - `string.replace(s: String, from: String, to: String) -> String` — Every from replaced by to.
 - `string.get(s: String, i: Int) -> Option[String]` — Codepoint at i, or none if out of range.
 - `string.lines(s: String) -> List[String]` — Split on \n or \r\n; endings dropped.
@@ -1553,7 +1553,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint16.rotate_left(a: UInt16, n: Int) -> UInt16` — The 16 bits of a rotated left by n; n is taken mod 16.
 - `uint16.rotate_right(a: UInt16, n: Int) -> UInt16` — The 16 bits of a rotated right by n; n is taken mod 16.
 - `uint16.bit_length(x: UInt16) -> Int` — Bits needed to hold x; 0 for 0.
-- `uint16.parse(s: String) -> Result[UInt16, String]` — Decimal UInt16 from trimmed s; err on junk, a sign of -, or above 65535.
+- `uint16.parse(s: String) -> Result[UInt16, String]` — Decimal UInt16 from ASCII-trimmed s; err on junk, a sign of -, or above 65535.
 
 ## uint32
 
@@ -1606,7 +1606,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint32.rotate_left(a: UInt32, n: Int) -> UInt32` — The 32 bits of a rotated left by n; n is taken mod 32.
 - `uint32.rotate_right(a: UInt32, n: Int) -> UInt32` — The 32 bits of a rotated right by n; n is taken mod 32.
 - `uint32.bit_length(x: UInt32) -> Int` — Bits needed to hold x; 0 for 0.
-- `uint32.parse(s: String) -> Result[UInt32, String]` — Decimal UInt32 from trimmed s; err on junk, a sign of -, or above 4294967295.
+- `uint32.parse(s: String) -> Result[UInt32, String]` — Decimal UInt32 from ASCII-trimmed s; err on junk, a sign of -, or above 4294967295.
 
 ## uint64
 
@@ -1663,7 +1663,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint64.rotate_left(a: UInt64, n: Int) -> UInt64` — The 64 bits of a rotated left by n; n is taken mod 64.
 - `uint64.rotate_right(a: UInt64, n: Int) -> UInt64` — The 64 bits of a rotated right by n; n is taken mod 64.
 - `uint64.bit_length(x: UInt64) -> Int` — Bits needed to hold x; 0 for 0.
-- `uint64.parse(s: String) -> Result[UInt64, String]` — Decimal UInt64 from trimmed s; err on junk, a sign of -, or above 2^64-1.
+- `uint64.parse(s: String) -> Result[UInt64, String]` — Decimal UInt64 from ASCII-trimmed s; err on junk, a sign of -, or above 2^64-1.
 
 ## uint8
 
@@ -1708,7 +1708,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint8.rotate_left(a: UInt8, n: Int) -> UInt8` — The 8 bits of a rotated left by n; n is taken mod 8.
 - `uint8.rotate_right(a: UInt8, n: Int) -> UInt8` — The 8 bits of a rotated right by n; n is taken mod 8.
 - `uint8.bit_length(x: UInt8) -> Int` — Bits needed to hold x; 0 for 0.
-- `uint8.parse(s: String) -> Result[UInt8, String]` — Decimal UInt8 from trimmed s; err on junk, a sign of -, or above 255.
+- `uint8.parse(s: String) -> Result[UInt8, String]` — Decimal UInt8 from ASCII-trimmed s; err on junk, a sign of -, or above 255.
 
 ## url
 

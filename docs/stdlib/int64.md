@@ -269,7 +269,7 @@ int64.rotate_right(a: Int64, n: Int) -> Int64
 // @since unreleased
 int64.bit_length(x: Int64) -> Int
 
-// Decimal Int64 from trimmed s; err on junk or overflow.
+// Decimal Int64 from ASCII-trimmed s; err on junk or overflow.
 // @since unreleased
 int64.parse(s: String) -> Result[Int64, String]
 ```

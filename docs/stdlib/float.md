@@ -97,7 +97,9 @@ fn main() -> Unit = {
 
 ### `float.parse(s: String) -> Result[Float, String]`
 
-Parse a string into a float. Returns err if the string is not a valid number.
+Parse a string into a finite float. Returns err if the string is not a valid number.
+
+Only ASCII whitespace (space, tab, LF, CR, form feed) around the number is ignored; any other whitespace, such as a no-break space, is an error. The result is always finite: `"inf"`, `"Infinity"` and `"NaN"` in any case are `err("invalid float literal")`, and a number too large for a Float, such as `"1e400"`, is `err("float literal out of range")`. A number too small rounds to `0.0`. Many languages accept these spellings; Almide refuses them because a NaN makes every comparison false, so a check like `if amount > limit then reject` would let it through. Write `1.0 / 0.0` if you need an infinity.
 
 ```almd run
 fn show(r: Result[Float, String]) -> String = match r {
@@ -251,7 +253,7 @@ float.to_int(n: Float) -> Int
 // @since 0.5.0 or earlier
 float.from_int(n: Int) -> Float
 
-// Float from trimmed s; takes 1e3, inf, NaN; err on junk.
+// Finite Float from s trimmed of ASCII space; err on junk, inf, NaN, overflow.
 // @since 0.5.0 or earlier
 float.parse(s: String) -> Result[Float, String]
 

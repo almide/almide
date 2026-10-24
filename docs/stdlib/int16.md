@@ -260,7 +260,7 @@ int16.rotate_right(a: Int16, n: Int) -> Int16
 // @since unreleased
 int16.bit_length(x: Int16) -> Int
 
-// Decimal Int16 from trimmed s; err on junk or outside -32768..32767.
+// Decimal Int16 from ASCII-trimmed s; err on junk or outside -32768..32767.
 // @since unreleased
 int16.parse(s: String) -> Result[Int16, String]
 ```

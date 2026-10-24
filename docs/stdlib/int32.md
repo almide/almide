@@ -268,7 +268,7 @@ int32.rotate_right(a: Int32, n: Int) -> Int32
 // @since unreleased
 int32.bit_length(x: Int32) -> Int
 
-// Decimal Int32 from trimmed s; err on junk or outside -2147483648..2147483647.
+// Decimal Int32 from ASCII-trimmed s; err on junk or outside -2147483648..2147483647.
 // @since unreleased
 int32.parse(s: String) -> Result[Int32, String]
 ```
