@@ -35,7 +35,14 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
             ty: Ty::result(value_ty.clone(), Ty::String), span: None, def_id: None,
         };
 
-        let decode_expr = if is_option {
+        let decode_expr = if !crate::attr_vocab::codec_field_use(&f.attrs).decoded {
+            // `@skip` / `@skip_decode` (#4108): input never sets this field —
+            // a key naming it is treated like any unknown key. The default is
+            // required at declaration (E104), so it is always present here.
+            let mut default_expr = f.default.clone().unwrap_or(IrExpr { kind: IrExprKind::Unit, ty: f.ty.clone(), span: None, def_id: None });
+            if matches!(default_expr.ty, Ty::Unknown) { default_expr.ty = f.ty.clone(); }
+            default_expr
+        } else if is_option {
             let payload = IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None };
             if let Some(inline) = decode_option_field_inline(wk, payload.clone(), &key_name(f), &inner_ty, &value_ty) {
                 inline
@@ -174,7 +181,9 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
     // ignores the attribute, and a user-written decode never carries it.
     let codec_slots = almide_lang::ast::Attribute {
         name: sym("codec_slots"),
-        args: fields.iter().map(|f| almide_lang::ast::AttrArg {
+        // The ENCODED keys: a `@skip` field is not on the wire, so it holds
+        // no slot (the slot is a hint with a scan fallback either way).
+        args: fields.iter().filter(|f| crate::attr_vocab::codec_field_use(&f.attrs).encoded).map(|f| almide_lang::ast::AttrArg {
             name: None,
             value: almide_lang::ast::AttrValue::String { value: key_name(f) },
         }).collect(),
@@ -289,5 +298,70 @@ fn decode_field_value(get_field_expr: IrExpr, field_ty: &Ty, _value_ty: &Ty) -> 
             ty: Ty::result(field_ty.clone(), Ty::String), span: None, def_id: None,
         })},
         ty: field_ty.clone(), span: None, def_id: None,
+    }
+}
+
+/// Derived `fn T.decode_strict(v: Value) -> Result[T, String]` (#4108):
+/// `T.decode` that first refuses a key outside the record's DECODED fields
+/// (a `@skip`/`@skip_decode` field's key included). Built only from calls
+/// every leg already links:
+///
+///   match list.get(value.keys(value.omit(_v, [k0, k1, …])), 0) {
+///     some(k) => err("unknown key '" + k + "'"),
+///     none    => T.decode(_v),
+///   }
+///
+/// `value.omit` keeps document order, so the reported key is the FIRST
+/// unknown one; a non-object passes through `omit` and `keys` is `[]`, so
+/// `T.decode` reports the shape error itself. Shallow, like serde's
+/// `deny_unknown_fields`: a nested Codec field decodes with its own `decode`.
+pub(super) fn auto_derive_decode_strict(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
+    let type_name = wk.type_name.to_string();
+    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let result_ty = Ty::result(type_ty.clone(), Ty::String);
+    let var_v = wk.vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
+    let v = || e_(IrExprKind::Var { id: var_v }, value_ty.clone());
+    let allowed: Vec<IrExpr> = fields.iter()
+        .filter(|f| crate::attr_vocab::codec_field_use(&f.attrs).decoded)
+        .map(|f| e_(IrExprKind::LitStr { value: f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string()) }, Ty::String))
+        .collect();
+    let omitted = call_mod_("value", "omit", vec![v(), e_(IrExprKind::List { elements: allowed }, Ty::list(Ty::String))], value_ty.clone());
+    let keys = call_mod_("value", "keys", vec![omitted], Ty::list(Ty::String));
+    let first = call_mod_("list", "get", vec![keys, e_(IrExprKind::LitInt { value: 0 }, Ty::Int)], Ty::option(Ty::String));
+    let k = wk.vt.alloc(sym("_k"), Ty::String, Mutability::Let, None);
+    let msg = e_(IrExprKind::BinOp {
+        op: BinOp::ConcatStr,
+        left: Box::new(e_(IrExprKind::BinOp {
+            op: BinOp::ConcatStr,
+            left: Box::new(e_(IrExprKind::LitStr { value: "unknown key '".to_string() }, Ty::String)),
+            right: Box::new(e_(IrExprKind::Var { id: k }, Ty::String)),
+        }, Ty::String)),
+        right: Box::new(e_(IrExprKind::LitStr { value: "'".to_string() }, Ty::String)),
+    }, Ty::String);
+    let body = e_(IrExprKind::Match {
+        subject: Box::new(first),
+        arms: vec![
+            IrMatchArm {
+                pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: k, ty: Ty::String }) },
+                guard: None,
+                body: e_(IrExprKind::ResultErr { expr: Box::new(msg) }, result_ty.clone()),
+            },
+            IrMatchArm {
+                pattern: IrPattern::None,
+                guard: None,
+                body: call_named_(&format!("{}.decode", type_name), vec![v()], result_ty.clone()),
+            },
+        ],
+    }, result_ty.clone());
+    IrFunction {
+        name: sym(&format!("{}.decode_strict", type_name)),
+        params: vec![IrParam { var: var_v, ty: value_ty, name: sym("_v"), borrow: ParamBorrow::Own, is_mut: false, open_record: None, default: None, attrs: vec![] }],
+        ret_ty: result_ty,
+        body,
+        is_effect: false, is_test: false,
+        generics: None, extern_attrs: vec![], export_attrs: vec![], attrs: vec![], visibility: IrVisibility::Public,
+        doc: None, blank_lines_before: 0,
+        def_id: None,
+        mutated_params: vec![], module_origin: None, // fresh-fn: derived codec worker, no params carry mut
     }
 }
