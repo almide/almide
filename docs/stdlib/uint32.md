@@ -252,7 +252,7 @@ uint32.rotate_right(a: UInt32, n: Int) -> UInt32
 // @since unreleased
 uint32.bit_length(x: UInt32) -> Int
 
-// Decimal UInt32 from trimmed s; err on junk, a sign of -, or above 4294967295.
+// Decimal UInt32 from ASCII-trimmed s; err on junk, a sign of -, or above 4294967295.
 // @since unreleased
 uint32.parse(s: String) -> Result[UInt32, String]
 

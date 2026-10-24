@@ -220,7 +220,7 @@ uint8.rotate_right(a: UInt8, n: Int) -> UInt8
 // @since unreleased
 uint8.bit_length(x: UInt8) -> Int
 
-// Decimal UInt8 from trimmed s; err on junk, a sign of -, or above 255.
+// Decimal UInt8 from ASCII-trimmed s; err on junk, a sign of -, or above 255.
 // @since unreleased
 uint8.parse(s: String) -> Result[UInt8, String]
 

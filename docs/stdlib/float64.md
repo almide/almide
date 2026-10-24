@@ -165,7 +165,7 @@ float64.max_value() -> Float64
 // @since unreleased
 float64.min_value() -> Float64
 
-// Float64 from trimmed s, the grammar of float.parse; err on junk.
+// Float64 from ASCII-trimmed s, the grammar of float.parse; err on junk, inf, NaN.
 // @since unreleased
 float64.parse(s: String) -> Result[Float64, String]
 
