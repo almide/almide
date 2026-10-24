@@ -42,6 +42,29 @@ fn the_allowlist_refuses_a_command_outside_it_by_name() {
     set_allowlist(None);
 }
 
+/// #4125: kill / is_alive are bounded as the `kill` command — refused with
+/// the refused-spawn text (is_alive answers not-alive), lifted by listing it.
+#[test]
+fn the_allowlist_bounds_signalling_as_the_kill_command() {
+    let _g = SERIAL.lock().unwrap_or_else(|p| p.into_inner());
+    let me = std::process::id().to_string();
+    set_allowlist(Some(vec!["echo".to_string()]));
+    assert_eq!(
+        call(87, &me, "0", &|| {}).unwrap_err(),
+        "process.kill(\"kill\"): `kill` is not in [permissions] proc"
+    );
+    assert_eq!(call(88, &me, "", &|| {}).unwrap(), "0");
+    set_allowlist(Some(vec!["echo".to_string(), "kill".to_string()]));
+    assert_eq!(call(87, &me, "0", &|| {}).unwrap(), "");
+    assert_eq!(call(88, &me, "", &|| {}).unwrap(), "1");
+    set_allowlist(None);
+    assert_eq!(
+        call(87, "-1", "0", &|| {}).unwrap_err(),
+        "process.kill(-1, 0): pid must be in 1..=2147483647"
+    );
+    assert_eq!(call(88, "0", "", &|| {}).unwrap(), "0");
+}
+
 /// C-419 (#4126): a refused command is named with its control characters
 /// escaped, so it cannot forge a line of the error text.
 #[test]

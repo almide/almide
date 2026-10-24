@@ -219,12 +219,23 @@ pub fn almide_rt_process_env(key: &str) -> Option<AlmideString> { let __almide_v
 
 pub fn almide_rt_process_spawn(cmd: &str, args: &[AlmideString]) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { almide_proc_spawn(cmd, args) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_process_kill(pid: i64, signal: i64) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_proc_kill(pid, signal) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_process_kill(pid: i64, signal: i64) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { almide_proc_kill(pid, signal, almide_process_signal) })(); __almide_r.map_err(Into::into) }
 
 pub fn almide_rt_process_sleep(ms: i64) {
     std::thread::sleep(std::time::Duration::from_millis(ms.max(0) as u64));
 }
 
 pub fn almide_rt_process_is_alive(pid: i64) -> bool {
-    almide_proc_is_alive(pid)
+    almide_proc_is_alive(pid, almide_process_signal)
+}
+
+/// The core's signal syscall (#4125): kill(2) itself (sys.rs), never a `kill`
+/// looked up on PATH; Windows has none and uses the core's System32 tools.
+#[cfg(unix)]
+fn almide_process_signal(pid: i32, sig: i32) -> Result<(), i32> {
+    almide_rt_sys_ffi::send_signal(pid, sig)
+}
+#[cfg(windows)]
+fn almide_process_signal(pid: i32, sig: i32) -> Result<(), i32> {
+    almide_proc_signal_windows(pid, sig)
 }
