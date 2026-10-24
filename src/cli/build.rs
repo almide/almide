@@ -435,7 +435,7 @@ pub(crate) fn alloc_count_armed() -> bool {
 /// over it — is the same with and without a scope. Which guard a fn takes is
 /// read off its runtime signature (a `bool` return answers false; `src, dst`
 /// checks both; `pattern` checks the glob's literal base; `prefix` checks the
-/// temp dir), never from a list of fn names. A program without the key is
+/// temp dir; `at` checks a rooted call's root), never from a list of fn names. A program without the key is
 /// emitted unchanged.
 pub(crate) fn inject_fs_scope(rs_code: String) -> String {
     let Some(roots) = almide_wasm_run::fs_scope() else { return rs_code };
@@ -474,6 +474,7 @@ macro_rules! __almide_fs_path { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let
 macro_rules! __almide_fs_bool { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; if __almide_fs_scope_check(&*__almide_p).is_ok() { ($f)(__almide_p) } else { false } }}; }
 macro_rules! __almide_fs_two { ($f:expr, $p:expr, $q:expr $(,)?) => {{ let (__almide_p, __almide_q) = ($p, $q); match __almide_fs_scope_check(&*__almide_p).and_then(|()| __almide_fs_scope_check(&*__almide_q)) { Ok(()) => ($f)(__almide_p, __almide_q), Err(e) => Err(e.into()) } }}; }
 macro_rules! __almide_fs_glob { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; match __almide_fs_scope_check(&fs_scope_glob_base(&*__almide_p)) { Ok(()) => ($f)(__almide_p), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_root { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let __almide_p = $p; match __almide_fs_scope_check((&*__almide_p).split('\0').next().unwrap_or("")) { Ok(()) => ($f)(__almide_p $(, $a)*), Err(e) => Err(e.into()) } }}; }
 macro_rules! __almide_fs_temp { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; match __almide_fs_scope_check(&std::env::temp_dir().to_string_lossy()) { Ok(()) => ($f)(__almide_p), Err(e) => Err(e.into()) } }}; }
 "#;
 
@@ -496,6 +497,9 @@ fn fs_runtime_guards() -> std::collections::HashMap<String, &'static str> {
             [s, d] if s == "src" && d == "dst" => "__almide_fs_two",
             [p] if p == "pattern" => "__almide_fs_glob",
             [p] if p == "prefix" => "__almide_fs_temp",
+            // The rooted calls' `<root>\0<segments>` operand (#4084): the
+            // root is judged; the descriptor walk keeps the rest under it.
+            [p, ..] if p == "at" => "__almide_fs_root",
             [p, ..] if p == "path" || p == "dir" => "__almide_fs_path",
             _ => continue,
         };

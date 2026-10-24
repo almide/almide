@@ -7043,6 +7043,9 @@ effect fn read_bytes_raw(path: String) -> Result[Bytes, String] = _
 
 
 
+
+
+
 /// A directory that every root_* call stays inside; made by open_root.
 mod type FsRoot = String
 
@@ -7077,47 +7080,80 @@ local fn __root_segments(path: String) -> List[String]? =
   )
 
 
-local effect fn __root_has_symlink(dir: String, segs: List[String]) -> Bool = match list.first(segs) {
-  none => false,
-  some(seg) => {
-    let next = dir + "/" + seg
-    if fs.is_symlink(next) then true else __root_has_symlink(next, list.drop(segs, 1))
-  },
+
+local fn __root_at(root: FsRoot, path: String) -> Result[String, String] = match __root_segments(path) {
+  none => err("fs: path escapes root: " + path),
+  some(segs) => ok(__root_dir(root) + "\u{0}" + string.join(segs, "/")),
 }
 
 
-local effect fn __root_resolve(root: FsRoot, path: String) -> Result[String, String] = {
-  let dir = __root_dir(root)
-  match __root_segments(path) {
-    none => err("fs: path escapes root: " + path),
-    some(segs) => if __root_has_symlink(dir, segs) then err("fs: path escapes root: " + path)
-    else if list.len(segs) == 0 then ok(dir)
-    else ok(dir + "/" + string.join(segs, "/")),
-  }
+local fn __root_answer[A](r: Result[A, String], path: String) -> Result[A, String] = match r {
+  ok(v) => ok(v),
+  err(e) => if e == "fs: path escapes root" then err("fs: path escapes root: " + path) else err(e),
 }
+
+
+
+
+@intrinsic("almide_rt_fs___root_read_text")
+effect fn __root_read_text(at: String) -> Result[String, String] = _
+
+@intrinsic("almide_rt_fs___root_read_bytes")
+effect fn __root_read_bytes(at: String) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_fs___root_list_dir")
+effect fn __root_list_dir(at: String) -> Result[List[String], String] = _
+
+
+@intrinsic("almide_rt_fs___root_exists")
+effect fn __root_exists(at: String) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_fs___root_write_text")
+effect fn __root_write_text(at: String, content: String) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_fs___root_remove")
+effect fn __root_remove(at: String) -> Result[Unit, String] = _
 
 /// read_text of path inside root; err if it escapes.
-effect fn root_read_text(root: FsRoot, path: String) -> Result[String, String] = read_text(__root_resolve(root, path)!)
+effect fn root_read_text(root: FsRoot, path: String) -> Result[String, String] = __root_answer(
+  __root_read_text(__root_at(root, path)!),
+  path,
+)
 
 /// read_bytes_raw of path inside root; err if it escapes.
-effect fn root_read_bytes(root: FsRoot, path: String) -> Result[Bytes, String] = read_bytes_raw(__root_resolve(root, path)!)
+effect fn root_read_bytes(root: FsRoot, path: String) -> Result[Bytes, String] = __root_answer(
+  __root_read_bytes(__root_at(root, path)!),
+  path,
+)
 
 /// write of content to path inside root; err if it escapes.
 @ordered
-effect fn root_write_text(root: FsRoot, path: String, content: String) -> Result[Unit, String] = write(
-  __root_resolve(root, path)!,
-  content,
+effect fn root_write_text(root: FsRoot, path: String, content: String) -> Result[Unit, String] = __root_answer(
+  __root_write_text(__root_at(root, path)!, content),
+  path,
 )
 
 /// list_dir of path inside root; err if it escapes.
-effect fn root_list_dir(root: FsRoot, path: String) -> Result[List[String], String] = list_dir(__root_resolve(root, path)!)
+effect fn root_list_dir(root: FsRoot, path: String) -> Result[List[String], String] = __root_answer(
+  __root_list_dir(__root_at(root, path)!),
+  path,
+)
 
 /// exists of path inside root; err if it escapes.
-effect fn root_exists(root: FsRoot, path: String) -> Result[Bool, String] = ok(fs.exists(__root_resolve(root, path)!))
+effect fn root_exists(root: FsRoot, path: String) -> Result[Bool, String] = match __root_answer(
+  __root_exists(__root_at(root, path)!),
+  path,
+) {
+  ok(b) => ok(bytes.len(b) > 0),
+  err(e) => err(e),
+}
 
 /// remove of path inside root; err if it escapes.
 @ordered
-effect fn root_remove(root: FsRoot, path: String) -> Result[Unit, String] = remove(__root_resolve(root, path)!)
+effect fn root_remove(root: FsRoot, path: String) -> Result[Unit, String] = __root_answer(
+  __root_remove(__root_at(root, path)!),
+  path,
+)
 "#;
 pub const SRC_FS_APPEND: &str = r#"
 
