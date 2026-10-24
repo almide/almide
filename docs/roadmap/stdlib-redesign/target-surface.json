@@ -4573,6 +4573,18 @@
 "kind": "据え置き"
 },
 {
+"mod": "secret",
+"name": "new",
+"sig": "fn secret.new[A](x: A) -> Secret[A]",
+"kind": "追加"
+},
+{
+"mod": "secret",
+"name": "reveal",
+"sig": "fn secret.reveal[A](s: Secret[A]) -> A",
+"kind": "追加"
+},
+{
 "mod": "set",
 "name": "new",
 "sig": "fn set.new() -> Set[A]",

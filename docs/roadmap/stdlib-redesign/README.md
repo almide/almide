@@ -42,7 +42,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 ## モジュールのページ
 
-[args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
+[args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [secret](L2-secret.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
 ## 案の状態（全 356 件: ○ 291・× 61・保留 4）
 
@@ -350,6 +350,10 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-result-04](L2-result.md#r-result-04-抜けている役割の関数を足さない---不採用) | 抜けている役割の関数を足さない | × | — |
 | [R-result-05](L2-result.md#r-result-05-resultpartition-を-result-に残す---採用据え置き) | `result.partition` を result に残す | ○ | #3949 |
 | [R-result-06](L2-result.md#r-result-06-resultcollect-を戻す---不採用) | `result.collect` を戻す | × | なし |
+| [R-secret-01](L2-secret.md#r-secret-01-secretnew-と-secretreveal-を足す---採用) | `secret.new` と `secret.reveal` を足す | ○ | #4107 |
+| [R-secret-02](L2-secret.md#r-secret-02-表示は-secret宣言-1-か所---採用) | 表示は `Secret(***)`、宣言 1 か所 | ○ | #4107 |
+| [R-secret-03](L2-secret.md#r-secret-03--は定数時間string--bytes-以外は-e103---採用) | `==` は定数時間、String / Bytes 以外は E103 | ○ | #4107 |
+| [R-secret-04](L2-secret.md#r-secret-04-codec-は-decode-だけ導出encode-は-e023---採用) | Codec は decode だけ導出、encode は E023 | ○ | #4107 |
 | [R-set-01](L2-set.md#r-set-01-setcount-と-setfind-を足す---採用) | `set.count` と `set.find` を足す | ○ | #3901 |
 | [R-set-02](L2-set.md#r-set-02-setis_superset-を足す---不採用) | `set.is_superset` を足す | × | — |
 | [R-set-03](L2-set.md#r-set-03-setpartition-を足す---不採用) | `set.partition` を足す | × | — |
