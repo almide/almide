@@ -345,24 +345,32 @@ fn module_function_names(m: &str) -> std::collections::HashSet<String> {
 /// binary64 parse narrowed to binary32 rounds twice, so it needs a direct binary32
 /// reader first.
 fn check_numeric_protocol_matrix() -> Vec<String> {
-    const INTEGERS: &[(&str, bool)] = &[
-        ("int8", true), ("int16", true), ("int32", true), ("int64", true),
-        ("uint8", false), ("uint16", false), ("uint32", false), ("uint64", false),
+    // (module, signed, fixed width): `int` and the eight sized types are fixed width,
+    // `bigint` has no width (R-bigint-07: no bit counts, wrapping or rotation).
+    const INTEGERS: &[(&str, bool, bool)] = &[
+        ("int", true, true),
+        ("int8", true, true), ("int16", true, true), ("int32", true, true), ("int64", true, true),
+        ("uint8", false, true), ("uint16", false, true), ("uint32", false, true), ("uint64", false, true),
+        ("bigint", true, false),
     ];
-    // Integer (R-sized-02/08/10, R-int-11) and FixedWidthInteger (R-sized-10, R-int-12).
+    // Integer (R-sized-02/06/08/10, R-int-03/04/11, R-bigint-01/05/07).
     const INTEGER: &[&str] = &[
-        "compare", "min", "max", "clamp", "to_string", "min_value", "max_value",
-        "floor_div", "pow", "is_even", "is_odd",
+        "compare", "min", "max", "clamp", "to_string", "parse", "parse_radix", "to_string_radix",
+        "floor_div", "modulo", "pow", "is_even", "is_odd", "bit_length",
         "band", "bor", "bxor", "bnot", "bshl", "bshr",
+    ];
+    // FixedWidthInteger (R-sized-10, R-int-12).
+    const FIXED_WIDTH: &[&str] = &[
+        "min_value", "max_value",
         "count_leading_zeros", "count_trailing_zeros", "count_ones", "byte_swap",
-        "parse", "bit_length", "wrap_add", "wrap_sub", "wrap_mul", "rotate_left", "rotate_right",
+        "wrap_add", "wrap_sub", "wrap_mul", "rotate_left", "rotate_right",
     ];
     // SignedInteger (R-sized-10).
     const SIGNED: &[&str] = &["abs", "sign"];
-    // FloatingPoint (R-sized-02/03/08/11).
-    const FLOATS: &[&str] = &["float32", "float64"];
+    // FloatingPoint (R-sized-02/03/08/11, R-float-02/03/04/05).
+    const FLOATS: &[&str] = &["float", "float32", "float64"];
     const FLOATING: &[&str] = &[
-        "compare", "min", "max", "clamp", "to_string",
+        "compare", "min", "max", "clamp", "to_string", "parse",
         "is_nan", "is_infinite", "is_finite",
         "abs", "floor", "ceil", "round", "trunc", "signum",
         "to_bits", "from_bits", "infinity", "nan", "epsilon", "max_value", "min_value",
@@ -377,15 +385,14 @@ fn check_numeric_protocol_matrix() -> Vec<String> {
             }
         }
     };
-    for (m, signed) in INTEGERS {
+    for (m, signed, fixed) in INTEGERS {
         let mut names: Vec<&str> = INTEGER.to_vec();
         if *signed { names.extend_from_slice(SIGNED); }
+        if *fixed { names.extend_from_slice(FIXED_WIDTH); }
         require(m, &names);
     }
     for m in FLOATS {
-        let mut names: Vec<&str> = FLOATING.to_vec();
-        if *m == "float64" { names.push("parse"); }
-        require(m, &names);
+        require(m, FLOATING);
     }
     drifts
 }

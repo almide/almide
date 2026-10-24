@@ -1164,14 +1164,20 @@ why = "A syntax table, not a property of stdlib functions: the C / Rust / Python
 [[site]]
 id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::INTEGERS::table"
 class = "justified"
-names = 8
-why = "The rows of a family gate, not a property of functions: the fixed-width integer carriers that conform to Integer and FixedWidthInteger (R-sized-10). The protocol pyramid is an assumed design the language cannot declare yet (R-L0-37), so the conformance list is the specification the gate checks the module interfaces against; no codegen leg reads it."
+names = 10
+why = "The rows of a family gate, not a property of functions: the integer carriers (int, the eight fixed-width types, bigint) that conform to Integer, and which of them are signed and fixed-width (R-sized-10, R-bigint-07). The protocol pyramid is an assumed design the language cannot declare yet (R-L0-37), so the conformance list is the specification the gate checks the module interfaces against; no codegen leg reads it."
 
 [[site]]
 id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::INTEGER::table"
 class = "justified"
-names = 28
+names = 20
 why = "The columns of a family gate, not a property of functions: the requirements of Integer and FixedWidthInteger (protocol-view.md, R-sized-02/08/10, R-int-11/12) that every fixed-width integer must carry as a concrete function until a built-in type can conform to a protocol. The gate asserts every carrier x requirement cell exists; no codegen leg reads it."
+
+[[site]]
+id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::FIXED_WIDTH::table"
+class = "justified"
+names = 11
+why = "The columns of a family gate: the FixedWidthInteger requirements (protocol-view.md, R-sized-10, R-int-12) that int and the eight fixed-width integers carry and bigint, having no width, does not. A specification the gate checks against the module interfaces; no codegen leg reads it."
 
 [[site]]
 id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::SIGNED::table"
@@ -1182,11 +1188,11 @@ why = "The columns of a family gate: the SignedInteger requirements (abs, sign; 
 [[site]]
 id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::FLOATS::table"
 class = "justified"
-names = 2
-why = "The rows of a family gate: the fixed-width floating-point carriers (float32, float64) that conform to FloatingPoint (R-sized-11). A specification the gate checks against the module interfaces; no codegen leg reads it."
+names = 3
+why = "The rows of a family gate: the floating-point carriers (float, float32, float64) that conform to FloatingPoint (R-sized-11, R-float-02/03/04). A specification the gate checks against the module interfaces; no codegen leg reads it."
 
 [[site]]
 id = "src/cli/docs_gen.rs::check_numeric_protocol_matrix::FLOATING::table"
 class = "justified"
-names = 21
+names = 22
 why = "The columns of a family gate: the FloatingPoint requirements (protocol-view.md, R-sized-02/03/08/11) every fixed-width float must carry as a concrete function until a built-in type can conform to a protocol. The gate asserts every carrier x requirement cell exists; no codegen leg reads it."
