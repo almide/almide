@@ -65,6 +65,9 @@ pub enum GenType {
     /// A stdlib nominal type (`HttpResponse`, `SafeHtml`, …), built and
     /// observed through its module's pure functions ([`super::nominal`]).
     Nominal(&'static str),
+    /// `secret.Secret[inner]` (#4107): built with `secret.new`, observed
+    /// through `secret.reveal` — its own rendering is always `Secret(***)`.
+    Secret(Box<GenType>),
 }
 
 /// The fixed-width number types the value grammar builds.
@@ -139,6 +142,11 @@ impl GenType {
             GenType::Value => out.push_str("Value"),
             GenType::Endian => out.push_str("Endian"),
             GenType::Nominal(k) => out.push_str(k),
+            GenType::Secret(e) => {
+                out.push_str("Secret[");
+                e.render_into(out);
+                out.push(']');
+            }
         }
     }
 
@@ -219,6 +227,9 @@ impl GenType {
                 format!("match {v} {{ ok({x}) => ok({expr}), err({ev}) => {{\n    let {ev}o: {seen} = {eo}\n    err(\"${{{ev}o}}\")\n  }} }}"),
             ));
         }
+        if let GenType::Secret(e) = self {
+            return e.observe(&format!("secret.reveal({v})"), depth + 1);
+        }
         match self {
             GenType::Bytes => Some((String::new(), format!("bytes.to_list({v})"))),
             GenType::Matrix => Some((String::new(), format!("matrix.to_lists({v})"))),
@@ -249,7 +260,7 @@ impl GenType {
         match self {
             GenType::Nominal(k) => super::nominal::get(k).is_some_and(|n| n.observe_calls_effect),
             GenType::ResultNom(e, k) => e.observe_calls_effect() || GenType::Nominal(k).observe_calls_effect(),
-            GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) => e.observe_calls_effect(),
+            GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) | GenType::Secret(e) => e.observe_calls_effect(),
             GenType::Tuple2(a, b) => a.observe_calls_effect() || b.observe_calls_effect(),
             GenType::Tuple3(a, b, c) => a.observe_calls_effect() || b.observe_calls_effect() || c.observe_calls_effect(),
             _ => false,
@@ -261,7 +272,7 @@ impl GenType {
         match self {
             GenType::Nominal(k) => super::nominal::get(k).is_some_and(|n| n.refuses_var),
             GenType::ResultNom(e, k) => e.refuses_var() || GenType::Nominal(k).refuses_var(),
-            GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) => e.refuses_var(),
+            GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) | GenType::Secret(e) => e.refuses_var(),
             GenType::Tuple2(a, b) => a.refuses_var() || b.refuses_var(),
             GenType::Tuple3(a, b, c) => a.refuses_var() || b.refuses_var() || c.refuses_var(),
             _ => false,
@@ -281,6 +292,7 @@ impl GenType {
             GenType::Nominal(k) => (super::nominal::get(k)?.observed)(),
             GenType::List(e) => GenType::List(inner(e)?),
             GenType::Option(e) => GenType::Option(inner(e)?),
+            GenType::Secret(e) => return e.observed(),
             GenType::Result(e) | GenType::ResultNom(e, _) => GenType::Result(inner(e)?),
             GenType::Tuple2(a, b) => GenType::Tuple2(inner(a)?, inner(b)?),
             GenType::Tuple3(a, b, c) => GenType::Tuple3(inner(a)?, inner(b)?, inner(c)?),
@@ -307,6 +319,8 @@ impl GenType {
             GenType::Endian => false,
             // No string form of its own: observed through its readers.
             GenType::Nominal(_) | GenType::ResultNom(..) => false,
+            // Prints `Secret(***)`: observed through `secret.reveal`.
+            GenType::Secret(_) => false,
         }
     }
 
@@ -330,7 +344,8 @@ impl GenType {
             | GenType::Result(e)
             | GenType::ResultNom(e, _)
             | GenType::Map(e)
-            | GenType::Set(e) => {
+            | GenType::Set(e)
+            | GenType::Secret(e) => {
                 1 + e.depth()
             }
             GenType::Tuple2(a, b) => 1 + a.depth().max(b.depth()),
