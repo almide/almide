@@ -18,12 +18,16 @@ on:
     - cron: "0 5 * * 1" # Mondays 05:00 UTC
   workflow_dispatch:
 
+# #4094: the same read-only token the repository default gives, stated here so a
+# settings change cannot widen it. A job that needs more declares it itself.
+permissions: read-all
+
 jobs:
   grammar:
     name: Grammar mirror (tokens.toml vs lexer)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Compare the lexer inventory against almide-grammar tokens.toml
         run: bash scripts/check-downstream-grammar.sh
