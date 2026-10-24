@@ -37,6 +37,24 @@ NEEDS_IMPORT = {"json", "fs", "http", "env", "io", "random", "regex", "process",
                 "testing", "net", "zlib", "base64", "hash", "hex", "html", "path", "compute",
                 "url"}
 
+_MEMORY_UNSAFE = None
+MEMORY_UNSAFE_RX = re.compile(r"^@memory_unsafe\s*\n(?:@[^\n]*\n)*(?:effect )?fn (\w+)", re.M)
+
+
+def memory_unsafe_fns():
+    """(module, fn) for every `@memory_unsafe` declaration in stdlib/<module>.almd,
+    read from the declaration the checker reads."""
+    global _MEMORY_UNSAFE
+    if _MEMORY_UNSAFE is None:
+        _MEMORY_UNSAFE = set()
+        d = os.path.join(REPO, "stdlib")
+        for name in os.listdir(d):
+            if name.endswith(".almd"):
+                with open(os.path.join(d, name), encoding="utf-8") as fh:
+                    for fn in MEMORY_UNSAFE_RX.findall(fh.read()):
+                        _MEMORY_UNSAFE.add((name[:-5], fn))
+    return _MEMORY_UNSAFE
+
 # Type -> a literal that inhabits it. Reachability only needs the call to RENDER,
 # so an argument that would panic at runtime (an out-of-range index) is fine; an
 # argument that does not TYPE is not, and lands in UNPROBEABLE.
@@ -192,6 +210,10 @@ def programs(f, args):
     both statement positions. The verdict must describe the FUNCTION, not the
     wrapper, so every shape gets a turn (see classify)."""
     imp = f"import {f['module']}\n\n" if f["module"] in NEEDS_IMPORT else ""
+    # A `@memory_unsafe` fn is outside the memory-safety guarantee; a user file
+    # calls it only after the `import ffi` opt-in (E100, #4043).
+    if (f["module"], f["name"]) in memory_unsafe_fns() and f["module"] != "ffi":
+        imp = "import ffi\n\n" + imp
     scalar = {"int", "float", "string", "bool", "unit"}
     all_binds = "".join(f"  var a{i} = {a}\n" for i, (a, _) in enumerate(args))
     all_names = ", ".join(f"a{i}" for i in range(len(args)))
