@@ -75,7 +75,7 @@
 #                      every stamped row is to be re-inspected before each final
 #                      release for that (a manual GCE run: no credentials in CI)
 #
-# uninspected_ceiling = "902"
+# uninspected_ceiling = "906"
 
 
 [[fn]]
@@ -2246,31 +2246,18 @@ name = "fs.copy"
 sig = "effect (src: String, dst: String) -> Unit ! String"
 class = "effect"
 status = "uninspected"
+
 [[fn]]
 name = "fs.create_temp_dir"
 sig = "effect (prefix: String) -> String ! String"
 class = "effect"
-status = "inspected"
-impl = "fnv1a:597684b45d888056"
-stamp = "almide 0.68.0 (dev) at sec-4084b-perm-fd f6f08095121dd230a079aeff992c072f5b127155 (the #4084/#4143/#4113/#4146 fs branch, re-inspected after its implementation changed); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved where the function has a size parameter; wasm counts under the canonical allocator), 200 programs per fn; effect functions in the fixed world of ADR-0027 D2; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-25"
-order = "1"
-parity = "PASS: seed 1792863744, 200 programs; 200 program(s) call it, 145 of them clean on every leg; unique findings 0"
-complexity = "PASS: no size parameter — constant-size arguments only (the plain call is the parity campaign's)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+status = "uninspected"
 
 [[fn]]
 name = "fs.create_temp_file"
 sig = "effect (prefix: String) -> String ! String"
 class = "effect"
-status = "inspected"
-impl = "fnv1a:acb967da46d56ef1"
-stamp = "almide 0.68.0 (dev) at sec-4084b-perm-fd f6f08095121dd230a079aeff992c072f5b127155 (the #4084/#4143/#4113/#4146 fs branch, re-inspected after its implementation changed); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved where the function has a size parameter; wasm counts under the canonical allocator), 200 programs per fn; effect functions in the fixed world of ADR-0027 D2; GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-25"
-order = "1"
-parity = "PASS: seed 1792863634, 200 programs; 200 program(s) call it, 141 of them clean on every leg; unique findings 0"
-complexity = "PASS: no size parameter — constant-size arguments only (the plain call is the parity campaign's)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+status = "uninspected"
 [[fn]]
 name = "fs.exists"
 sig = "effect (path: String) -> Bool ! String"
