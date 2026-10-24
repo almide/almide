@@ -56,6 +56,13 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     let prefix = owner.as_deref();
     let user_shadow = shadows_stdlib_type(prefix, name);
 
+    // A bundled module's `mod type` record is opaque outside it (#4107).
+    if !matches!(visibility, ast::Visibility::Public)
+        && matches!(resolved, Ty::Record { .. })
+        && let Some(m) = defining_module.filter(|m| almide_lang::stdlib_info::is_bundled_module(m.as_str()))
+    {
+        env.opaque_records.insert(sym(name), m);
+    }
     resolved = register_type_decl_opaque_alias(env, identity, defining_module, resolved, &gnames, visibility);
     register_type_decl_variant_ctors(env, diagnostics, name, prefix, &mut resolved);
     register_type_decl_check_duplicate(env, diagnostics, name, prefix, &resolved);

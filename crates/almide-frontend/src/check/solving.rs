@@ -259,6 +259,11 @@ impl Checker {
     /// side, so the pair keeps its orientation (an open-row slot `{ name, .. }`
     /// is only satisfied as expected-vs-actual).
     fn unify_record_literal(&mut self, id: u32, other: Ty, literal_is_actual: bool) -> bool {
+        // A literal standing for an opaque record outside its module (#4107),
+        // reported where the literal first meets the nominal type.
+        if self.uf.resolve(id).is_none_or(super::types::is_structural_record) {
+            self.reject_foreign_opaque_record(&other, "build a literal of");
+        }
         let Some(existing) = self.uf.resolve(id).cloned() else {
             self.uf.bind(id, other);
             return true;

@@ -13,20 +13,15 @@ fn lower_expr_interp_string(ctx: &mut LowerCtx, expr: &ast::Expr, _ty: Ty, span:
             let ir_parts = parts.iter().map(|part| match part {
                 ast::StringPart::Lit { value } => IrStringPart::Lit { value: value.clone() },
                 ast::StringPart::Expr { expr } => {
-                    let mut ir_expr = lower_expr(ctx, expr);
-                    // Operator protocol: dispatch to an EXPLICIT user `repr` only.
-                    // An auto-derived `repr` is intentionally NOT used here — the
-                    // record/variant instead falls through to the codegen
-                    // `AlmideRepr` impl (the canonical literal form with quoted
-                    // strings), so an auto-derived and a plain record interpolate
-                    // byte-identically. An explicit `fn X.repr` still wins.
-                    if let Some(repr_fn) = ctx.find_explicit_convention_fn(&ir_expr.ty, "repr") {
-                        ir_expr = ctx.mk(IrExprKind::Call {
-                            target: CallTarget::Named { name: repr_fn },
-                            args: vec![ir_expr], type_args: vec![],
-                        }, Ty::String, None);
-                    }
-                    IrStringPart::Expr { expr: ir_expr }
+                    let ir_expr = lower_expr(ctx, expr);
+                    // Operator protocol: dispatch to an EXPLICIT `repr` only —
+                    // the value's own, or one declared on a type nested inside
+                    // it (#4107, `declared_repr.rs`). An auto-derived `repr` is
+                    // intentionally NOT used here — the record/variant instead
+                    // falls through to the codegen `AlmideRepr` impl (the
+                    // canonical literal form with quoted strings), so an
+                    // auto-derived and a plain record interpolate byte-identically.
+                    IrStringPart::Expr { expr: ctx.render_declared(ir_expr) }
                 }
             }).collect();
             ctx.mk(IrExprKind::StringInterp { parts: ir_parts }, Ty::String, span)
@@ -392,6 +387,16 @@ fn lower_expr_binary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             let left_ty = &left_ty;
             // Operator protocol: dispatch == / != to convention methods if available
             if op == "==" || op == "!=" {
+                // #4107: a Secret compares in constant time (R-secret-03).
+                if crate::secret_type::holds_secret(ctx.env, left_ty) {
+                    let (mut l, mut r) = (l, r);
+                    l.ty = left_ty.clone();
+                    r.ty = left_ty.clone();
+                    if let Some(eq) = ctx.lower_secret_eq(l, r, op == "!=") {
+                        return eq;
+                    }
+                    unreachable!("holds_secret was checked");
+                }
                 if let Some(eq_fn) = ctx.find_convention_fn(left_ty, "eq") {
                     let call = ctx.mk(IrExprKind::Call {
                         target: CallTarget::Named { name: eq_fn },

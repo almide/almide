@@ -906,6 +906,11 @@ fn set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit = 
 /// Writes value at offset; no-op out of range.
 @intrinsic("almide_rt_bytes_set_float32")
 fn set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit = _
+
+
+
+/// a and b are equal; stand-in.
+fn is_equal_constant_time(a: Bytes, b: Bytes) -> Bool = a == b
 "#;
 pub const SRC_BYTES_APPEND_MULTI: &str = r#"
 
@@ -33630,6 +33635,33 @@ fn result_to_string_ss(r: Result[String, String]) -> String = match r {
   err(e) => __rts_err(e),
 }
 "#;
+pub const SRC_SECRET: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// A value that prints as `Secret(***)` everywhere; `secret.reveal` reads it.
+mod type Secret[A] = { hidden: A }
+
+/// x wrapped so that every renderer prints it as `Secret(***)`.
+fn new[A](x: A) -> Secret[A] = { hidden: x }
+
+/// The value s wraps.
+fn reveal[A](s: Secret[A]) -> A = s.hidden
+
+/// `Secret(***)`, for every A: the one form every renderer prints.
+fn Secret.repr[A](s: Secret[A]) -> String = "Secret(***)"
+"#;
 pub const SRC_SET: &str = r#"
 
 
@@ -35599,6 +35631,11 @@ fn unique_by[K](s: String, f: (String) -> K) -> String = string.join(
   list.unique_by(string.chars(s), f),
   "",
 )
+
+
+
+/// a and b are equal; stand-in.
+fn is_equal_constant_time(a: String, b: String) -> Bool = a == b
 "#;
 pub const SRC_STRING_BYTE_SLICE: &str = r#"
 fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
@@ -42729,6 +42766,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "result_core" => Some(SRC_RESULT_CORE),
         "result_map" => Some(SRC_RESULT_MAP),
         "result_to_string" => Some(SRC_RESULT_TO_STRING),
+        "secret" => Some(SRC_SECRET),
         "set" => Some(SRC_SET),
         "set_core" => Some(SRC_SET_CORE),
         "set_str" => Some(SRC_SET_STR),

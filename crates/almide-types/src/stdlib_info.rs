@@ -8,6 +8,8 @@ pub const STDLIB_MODULES: &[&str] = &[
     "json", "http", "process", "math", "random", "regex", "io", "result",
     "option", "error", "datetime", "testing", "value", "set", "deque", "heap",
     "base64", "hex", "hash", "net", "url", "zlib",
+    // Never auto-imported: `import secret` is the opt-in (#4107).
+    "secret",
     // Sized numeric types (Stage 3 of the sized-numeric-types arc).
     // Each hosts UFCS conversion methods (`.to_int64()`,
     // `.to_float32()`, ...). Auto-imported alongside `int` / `float`
@@ -27,6 +29,10 @@ pub const BUNDLED_MODULES: &[&str] = &[
     // Raw addresses at the foreign-function boundary (R-ffi-01). Never
     // auto-imported: `import ffi` is the opt-in.
     "ffi",
+    // A value every renderer hides (#4107). Never auto-imported: a local
+    // named `secret` is common exactly where the module is used, so the
+    // `import secret` line is the visible opt-in.
+    "secret",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "float32", "float64",
@@ -142,6 +148,7 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("url", "Url"),
     ("deque", "Deque"),
     ("heap", "Heap"),
+    ("secret", "Secret"),
 ];
 
 /// The owning module of a stdlib-owned nominal type, by BARE name — `None`
@@ -240,6 +247,7 @@ fn bundled_source_core(name: &str) -> Option<&'static str> {
         "bytes" => Some(crate::embedded::SRC_BYTES),
         "error" => Some(crate::embedded::SRC_ERROR),
         "value" => Some(crate::embedded::SRC_VALUE),
+        "secret" => Some(crate::embedded::SRC_SECRET),
         _ => None,
     }
 }

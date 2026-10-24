@@ -314,14 +314,20 @@ fn desugar_assert_outside_test(
     ir_args: &[IrExpr],
     span: Option<ast::Span>,
 ) -> Option<IrExpr> {
-    if ctx.in_test {
-        return None;
-    }
     let CallTarget::Named { name } = target else { return None };
     let n = name.as_str();
     let is_assert = (matches!(n, "assert_eq" | "assert_ne") && ir_args.len() == 2)
         || (n == "assert" && !ir_args.is_empty());
     if !is_assert {
+        return None;
+    }
+    // Inside a test the harness forms report the assert — unless an operand's
+    // type declares its repr somewhere (#4107): the harness forms print the
+    // value structurally on every leg, so such an assert takes the abort form
+    // (as `assert_snapshot` does in tests) and prints through the declaration.
+    if ctx.in_test && !(matches!(n, "assert_eq" | "assert_ne")
+        && ir_args.iter().any(|a| ctx.holds_declared_repr(&a.ty, &mut Vec::new())))
+    {
         return None;
     }
     Some(desugar_assert_abort(ctx, n, ir_args.to_vec(), span))
@@ -628,8 +634,12 @@ fn desugar_assert_abort(
     span: Option<ast::Span>,
 ) -> IrExpr {
     let (mut stmts, vars) = bind_assert_operands(ctx, ir_args, span);
+    // #4107: a Secret operand compares in constant time (R-secret-03).
+    let secret_cmp = |ctx: &mut LowerCtx, negate: bool| {
+        ctx.lower_secret_eq(vars[0].clone(), vars[1].clone(), negate)
+    };
     let cond = match name {
-        "assert_eq" | "assert_snapshot" => ctx.mk(
+        "assert_eq" | "assert_snapshot" => secret_cmp(ctx, false).unwrap_or_else(|| ctx.mk(
             IrExprKind::BinOp {
                 op: BinOp::Eq,
                 left: Box::new(vars[0].clone()),
@@ -637,8 +647,8 @@ fn desugar_assert_abort(
             },
             Ty::Bool,
             span,
-        ),
-        "assert_ne" => ctx.mk(
+        )),
+        "assert_ne" => secret_cmp(ctx, true).unwrap_or_else(|| ctx.mk(
             IrExprKind::BinOp {
                 op: BinOp::Neq,
                 left: Box::new(vars[0].clone()),
@@ -646,7 +656,7 @@ fn desugar_assert_abort(
             },
             Ty::Bool,
             span,
-        ),
+        )),
         _ => vars[0].clone(),
     };
     // `  at: line <N>\n` — the assertion's own source line, baked in as a
@@ -659,9 +669,9 @@ fn desugar_assert_abort(
     let parts: Vec<IrStringPart> = match name {
         "assert_eq" => vec![
             IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: ") },
-            IrStringPart::Expr { expr: vars[1].clone() },
+            IrStringPart::Expr { expr: ctx.render_declared(vars[1].clone()) },
             IrStringPart::Lit { value: "\n  found: ".into() },
-            IrStringPart::Expr { expr: vars[0].clone() },
+            IrStringPart::Expr { expr: ctx.render_declared(vars[0].clone()) },
         ],
         // The snapshot block (#1314): same field order as assert_eq — `found`
         // LAST so the accept step can take it verbatim to the end of the
@@ -669,20 +679,20 @@ fn desugar_assert_abort(
         // coarse for a value that is about to be written back into source).
         "assert_snapshot" => vec![
             IrStringPart::Lit { value: format!("Error: snapshot mismatch{at}\n  expected: ") },
-            IrStringPart::Expr { expr: vars[1].clone() },
+            IrStringPart::Expr { expr: ctx.render_declared(vars[1].clone()) },
             IrStringPart::Lit { value: "\n  found: ".into() },
-            IrStringPart::Expr { expr: vars[0].clone() },
+            IrStringPart::Expr { expr: ctx.render_declared(vars[0].clone()) },
         ],
         "assert_ne" => vec![
             IrStringPart::Lit { value: format!("Error: assertion failed{at}\n  expected: != ") },
-            IrStringPart::Expr { expr: vars[0].clone() },
+            IrStringPart::Expr { expr: ctx.render_declared(vars[0].clone()) },
             IrStringPart::Lit { value: "\n  found: ".into() },
-            IrStringPart::Expr { expr: vars[0].clone() },
+            IrStringPart::Expr { expr: ctx.render_declared(vars[0].clone()) },
         ],
         _ if vars.len() >= 2 => {
             let mut p = vec![
                 IrStringPart::Lit { value: "Error: assertion failed: ".into() },
-                IrStringPart::Expr { expr: vars[1].clone() },
+                IrStringPart::Expr { expr: ctx.render_declared(vars[1].clone()) },
             ];
             if !at.is_empty() {
                 p.push(IrStringPart::Lit { value: at.clone() });
