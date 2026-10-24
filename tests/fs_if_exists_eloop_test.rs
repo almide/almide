@@ -68,7 +68,7 @@ fn a_symlink_loop_is_the_readers_err_not_absence_on_every_leg() {
     }
     assert!(native.lines().any(|l| l.starts_with("text file parent: err fs.read_text_if_exists(\"f.txt/x\"): ")), "{native}");
     assert!(native.lines().any(|l| l == "text missing: ok none"), "{native}");
-    assert!(native.lines().any(|l| l == "text present: ok some(hi)"), "{native}");
+    assert!(native.lines().any(|l| l == "text present: ok some(\"hi\")"), "{native}");
 
     let wasm = run(&dir, &["--target", "wasm"]);
     assert_eq!(wasm, native, "the embedded wasm host differs from native");
