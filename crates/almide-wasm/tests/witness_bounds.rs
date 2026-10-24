@@ -39,8 +39,10 @@ fn the_flip_elides_two_checks_and_the_checker_re_derives_them() {
     let all = bounds();
     let (_, w) = all.last().expect("a bounds witness for the shipped pass");
     // Two checked reads, two writes on the same slots with no check, then
-    // the assignments of lo and hi kill both slots.
-    assert_eq!(w, "c0 a0 c1 a1 w0 w1 s0 s1");
+    // the assignments of lo and hi kill both slots. The two reads in the
+    // `println` are no fact candidates (outside any loop): each has a fresh
+    // slot in the loose stretch, decided by its own check (#4005).
+    assert_eq!(w, "c0 a0 c1 a1 w0 w1 s0 s1;c0 a0 c1 a1");
     assert!(accepts(w), "the portable checker must accept {w:?}");
     // The drills: drop either check and an elided write is unjustified.
     for (drop, name) in [("c0 ", "the lo check"), ("c1 ", "the hi check")] {
@@ -48,5 +50,7 @@ fn the_flip_elides_two_checks_and_the_checker_re_derives_them() {
         assert!(!accepts(&forged), "without {name}, {forged:?} must be rejected");
     }
     // A kill moved before the writes: the facts no longer hold there.
-    assert!(!accepts("c0 a0 c1 a1 s0 w0 w1 s1"));
+    assert!(!accepts("c0 a0 c1 a1 s0 w0 w1 s1;c0 a0 c1 a1"));
+    // A loose access whose own check is missing.
+    assert!(!accepts(&w.replacen(";c0 ", ";", 1)));
 }
