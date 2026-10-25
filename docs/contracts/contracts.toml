@@ -5492,6 +5492,17 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-420"
+spec      = "ALS-R5"
+title     = "list.range_step lists every Int start + i * step strictly before end, with a count that does not wrap at the ends of Int"
+statement = "ALS-R5 (almide/almide#4197): `list.range_step(start, end, step)` answers start, start + step, start + 2 * step, ... — each value strictly below `end` when `step > 0` and strictly above it when `step < 0`, and only values that are Ints (the walk stops before a value would leave the Int range) — identically on native and wasm. `start` not before `end` in the step's direction answers `[]`; `step = 0` aborts with `list.range_step: step must not be 0`. The count is not `end - start` in Int arithmetic: for bounds of opposite sign that difference wraps (C-170), and before this contract `range_step(-9000000000000000000, 9000000000000000000, 1000000000000000000)` answered one element and `range_step(MIN, MAX, 2^62)` answered `[MIN]` on both legs, where the documented answers have 18 and 4. The fixture pins the extreme cells (MIN..MAX by 2^62 both ways, steps of MAX and MIN and -MAX, the last values below MAX and above MIN) and the ordinary and empty cells, byte-identical across native, wasm and the reference evaluator."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/list_range_step_extremes.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-422"
 spec      = "ALS-T31"
 title     = "hash.hmac_sha256/512 equal the RFC 4231 vectors on every leg, key first, and is_valid_ accepts exactly the right tag"
