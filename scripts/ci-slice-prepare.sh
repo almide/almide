@@ -19,5 +19,9 @@ out="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/almide-ci-touched.txt"
 unset ALMIDE_CI_TOUCHED
 ci_slice_touched "$out"
 echo "CI slice 1/$(ci_slice_k) (offset $(ci_slice_offset), seed ${ALMIDE_CI_SEED:-none}); the change touches $(grep -c . "$out" || true) file(s):"
-sed 's/^/  /' "$out" | head -200
+# head reads the file itself: `sed … | head` under pipefail fails a change of
+# more than 200 files, sed exiting 4 on the closed pipe.
+n=$(grep -c . "$out" || true)
+head -n 200 "$out" | sed 's/^/  /'
+[ "$n" -le 200 ] || echo "  … and $((n - 200)) more"
 [ -z "${GITHUB_ENV:-}" ] || echo "ALMIDE_CI_TOUCHED=$out" >> "$GITHUB_ENV"
