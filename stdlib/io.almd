@@ -119,16 +119,16 @@ effect fn __write_stdout(data: Bytes) -> Unit = _
 @category("IO.stderr")
 effect fn __write_stderr(data: Bytes) -> Unit = _
 
-effect fn __stdin_read(_h: Stdin, max: Int) -> Result[Bytes, String] = ok(__read_stdin_bytes(max))
+effect fn __stdin_read(_h: Stdin, max: Int) -> Result[Bytes, String] = ok(io.__read_stdin_bytes(max))
 
 @category("IO.stdout")
 effect fn __stdout_write(_h: Stdout, data: Bytes) -> Result[Unit, String] = {
-  __write_stdout(data)
+  io.__write_stdout(data)
   ok(())
 }
 
 @category("IO.stderr")
 effect fn __stderr_write(_h: Stderr, data: Bytes) -> Result[Unit, String] = {
-  __write_stderr(data)
+  io.__write_stderr(data)
   ok(())
 }

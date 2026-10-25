@@ -24,48 +24,48 @@ type IpAddr = | V4(Int, Int, Int, Int) | V6(List[Int])
 // ── TCP ──
 /// A stream connected to host:port; err if refused.
 @category("Net.fetch")
-effect fn tcp_connect(host: String, port: Int) -> Result[TcpStream, String] = ok(TcpStream(__os_tcp_connect(host, port)!))
+effect fn tcp_connect(host: String, port: Int) -> Result[TcpStream, String] = ok(TcpStream(net.__os_tcp_connect(host, port)!))
 
 /// False after io.close; a peer close is not seen.
-effect fn tcp_is_open(stream: TcpStream) -> Bool = __os_tcp_is_open(__tcp(stream))
+effect fn tcp_is_open(stream: TcpStream) -> Bool = net.__os_tcp_is_open(__tcp(stream))
 
 /// Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
-effect fn tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String] = __os_tcp_read_timeout(
+effect fn tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String] = net.__os_tcp_read_timeout(
   __tcp(stream),
   len,
   timeout_ms,
 )
 
 /// Sets read/write timeout; <= 0 clears it.
-effect fn tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Result[Unit, String] = __os_tcp_set_timeout(
+effect fn tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Result[Unit, String] = net.__os_tcp_set_timeout(
   __tcp(stream),
   timeout_ms,
 )
 
 /// Bytes readable now, capped at 65536; 0 if none.
-effect fn tcp_available(stream: TcpStream) -> Result[Int, String] = __os_tcp_available(__tcp(stream))
+effect fn tcp_available(stream: TcpStream) -> Result[Int, String] = net.__os_tcp_available(__tcp(stream))
 
 /// A listener bound to host:port; err if in use. Port 0 lets the OS choose.
 @category("Net.listen")
-effect fn tcp_listen(host: String, port: Int) -> Result[TcpListener, String] = ok(TcpListener(__os_tcp_listen(host, port)!))
+effect fn tcp_listen(host: String, port: Int) -> Result[TcpListener, String] = ok(TcpListener(net.__os_tcp_listen(host, port)!))
 
 /// The port a listener is bound to: the one the OS chose when it listened on port 0.
 @category("Net.listen")
-effect fn tcp_local_port(listener: TcpListener) -> Result[Int, String] = __os_tcp_local_port(__listener(listener))
+effect fn tcp_local_port(listener: TcpListener) -> Result[Int, String] = net.__os_tcp_local_port(__listener(listener))
 
 /// Blocks for the next client; its stream.
 @category("Net.listen")
-effect fn tcp_accept(listener: TcpListener) -> Result[TcpStream, String] = ok(TcpStream(__os_tcp_accept(__listener(listener))!))
+effect fn tcp_accept(listener: TcpListener) -> Result[TcpStream, String] = ok(TcpStream(net.__os_tcp_accept(__listener(listener))!))
 
 // ── UDP (R-net-02) ──
 /// A UDP socket bound to host:port; port 0 lets the OS choose.
-effect fn udp_bind(host: String, port: Int) -> Result[UdpSocket, String] = ok(UdpSocket(__os_udp_bind(host, port)!))
+effect fn udp_bind(host: String, port: Int) -> Result[UdpSocket, String] = ok(UdpSocket(net.__os_udp_bind(host, port)!))
 
 /// The port sock is bound to.
-effect fn udp_local_port(sock: UdpSocket) -> Result[Int, String] = __os_udp_local_port(__udp(sock))
+effect fn udp_local_port(sock: UdpSocket) -> Result[Int, String] = net.__os_udp_local_port(__udp(sock))
 
 /// Sends data as one datagram to host:port.
-effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Result[Unit, String] = __os_udp_send_to(
+effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Result[Unit, String] = net.__os_udp_send_to(
   __udp(sock),
   data,
   host,
@@ -74,7 +74,7 @@ effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> 
 
 /// Blocks for the next datagram: at most max bytes of it, and its sender.
 effect fn udp_recv_from(sock: UdpSocket, max: Int) -> Result[UdpPacket, String] = {
-  let (data, host, port) = __os_udp_recv_from(__udp(sock), max)!
+  let (data, host, port) = net.__os_udp_recv_from(__udp(sock), max)!
   ok(UdpPacket { data: data, host: host, port: port })
 }
 
@@ -82,7 +82,7 @@ effect fn udp_recv_from(sock: UdpSocket, max: Int) -> Result[UdpPacket, String] 
 /// The addresses host resolves to, each once; err if none.
 @category("Net.fetch")
 effect fn lookup_host(host: String) -> Result[List[IpAddr], String] = {
-  let texts = __os_lookup_host(host)!
+  let texts = net.__os_lookup_host(host)!
   ok(texts |> list.filter_map((t) => parse_ip(t)?))
 }
 
@@ -115,22 +115,22 @@ fn is_loopback(ip: IpAddr) -> Bool = match ip {
 }
 
 // ── The handles' I/O requirements (R-L0-44) ──
-effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = __os_tcp_read(
+effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = net.__os_tcp_read(
   __tcp(h),
   max,
 )
 
-effect fn __tcp_stream_write(h: TcpStream, data: Bytes) -> Result[Unit, String] = __os_tcp_write(
+effect fn __tcp_stream_write(h: TcpStream, data: Bytes) -> Result[Unit, String] = net.__os_tcp_write(
   __tcp(h),
   data,
 )
 
-effect fn __tcp_stream_close(h: TcpStream) -> Result[Unit, String] = __os_tcp_close(__tcp(h))
+effect fn __tcp_stream_close(h: TcpStream) -> Result[Unit, String] = net.__os_tcp_close(__tcp(h))
 
 @category("Net.listen")
-effect fn __tcp_listener_close(h: TcpListener) -> Result[Unit, String] = __os_tcp_close_listener(__listener(h))
+effect fn __tcp_listener_close(h: TcpListener) -> Result[Unit, String] = net.__os_tcp_close_listener(__listener(h))
 
-effect fn __udp_socket_close(h: UdpSocket) -> Result[Unit, String] = __os_udp_close(__udp(h))
+effect fn __udp_socket_close(h: UdpSocket) -> Result[Unit, String] = net.__os_udp_close(__udp(h))
 
 local fn __tcp(s: TcpStream) -> Int = match s {
   TcpStream(n) => n
