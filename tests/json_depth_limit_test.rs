@@ -89,46 +89,71 @@ fn set_path_refuses_past_the_parse_bound_on_both_legs() {
     }
 }
 
+/// The interp oracle runs the self-hosted json_path.almd body. It abstains
+/// on a Value hundreds of levels deep (its own walk limit, a resource
+/// abstention), so its vote is cast on the refusals — which build nothing
+/// deep — and on a shallow ok.
+const INTERP_SOURCE: &str = r#"import json
+
+fn path_of(d: Int) -> JsonPath = list.range(0, d) |> list.fold(json.root(), (acc, _i) => json.field(acc, "k"))
+
+fn show(r: Result[Value, String]) -> String = match r {
+  ok(v) => "ok ${json.stringify(v)}",
+  err(e) => "err ${e}",
+}
+
+effect fn main() -> Unit = {
+  let doc = json.parse("{\"a\": [1, 2]}")!
+  println(show(json.set_path(doc, path_of(3), value.int(1))))
+  println(show(json.set_path(doc, path_of(1001), value.int(1))))
+  println(show(json.set_path(doc, path_of(40000), value.int(1))))
+  println(show(json.set_path(doc, path_of(999), value.array([value.array([])]))))
+  println(show(json.set_path(doc, path_of(1000), value.object([]))))
+}
+"#;
+
+const INTERP_EXPECTED: &str = r#"ok {"a":[1,2],"k":{"k":{"k":1}}}
+err json: nesting deeper than 1000
+err json: nesting deeper than 1000
+err json: nesting deeper than 1000
+err json: nesting deeper than 1000
+"#;
+
 #[test]
-fn the_interp_oracle_abstains_or_agrees() {
-    let (_dir, file) = write_source();
+fn the_interp_oracle_agrees() {
+    let dir = tempfile::tempdir().expect("scratch");
+    let file = dir.path().join("json_depth_interp.almd");
+    std::fs::write(&file, INTERP_SOURCE).expect("write source");
+    for wasm in [false, true] {
+        assert_eq!(run(&file, wasm), INTERP_EXPECTED, "wasm={wasm}");
+    }
     let path = file.to_str().unwrap().to_string();
-    // the oracle's tree walk of a 1000-deep value needs more than a test
-    // thread's default stack
     let out = std::thread::Builder::new()
         .stack_size(512 << 20)
         .spawn(move || {
-            let ir = almide::wasm_leg::lower_to_ir(&path, SOURCE).expect("front");
+            let ir = almide::wasm_leg::lower_to_ir(&path, INTERP_SOURCE).expect("front");
             almide_interp::Interpreter::new(&ir).run_main()
         })
         .unwrap()
         .join()
         .unwrap();
-    // Today the oracle ABSTAINS on the JsonPath surface (`json.root` has no
-    // lowered body), so it casts no vote here; the day it gains one, its
-    // vote must be this one.
-    if let almide_interp::RunStatus::Unsupported(why) = &out.status {
-        assert!(why.starts_with("json."), "interp abstained for an unexpected reason: {why}");
-        return;
-    }
     assert_eq!(out.status, almide_interp::RunStatus::Ok, "interp: {}", out.stderr);
-    assert_eq!(out.stdout, EXPECTED, "interp: set_path's depth bound moved");
+    assert_eq!(out.stdout, INTERP_EXPECTED, "interp: set_path's depth bound moved");
 }
 
-/// The self-hosted bodies carry the bound as a literal; it must be the
-/// one declaration's value, and the err text the one declared text.
+/// The self-hosted bodies carry the bound as a literal (each self-hosted
+/// source links on its own, so json_parse.almd and json_path.almd each read
+/// it through one fn); both must be the one declaration's value, and the
+/// err text the one declared text.
 #[test]
 fn the_self_hosted_bound_is_the_declared_one() {
-    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/stdlib/json_parse.almd")).expect("json_parse.almd");
-    let decl = src.lines().find(|l| l.starts_with("fn __json_max_depth() -> Int = ")).expect("the __json_max_depth declaration");
-    let lit: usize = decl.rsplit(' ').next().unwrap().parse().expect("a literal bound");
-    assert_eq!(lit, JSON_MAX_DEPTH, "stdlib/json_parse.almd's bound drifted from crates/almide-base/src/json_limits.rs");
-    assert_eq!(json_depth_error(), "json: nesting deeper than 1000");
-    for (file, body) in [("json_parse.almd", src.as_str())] {
-        let bare = body.lines().filter(|l| !l.trim_start().starts_with("//") && !l.starts_with("fn __json_max_depth")).any(|l| l.contains("1000"));
-        assert!(!bare, "{file}: a second literal bound — read __json_max_depth()");
+    assert_eq!(json_depth_error(), format!("json: nesting deeper than {JSON_MAX_DEPTH}"));
+    for (file, decl) in [("json_parse.almd", "fn __json_max_depth() -> Int = "), ("json_path.almd", "fn __jpath_max_depth() -> Int = ")] {
+        let src = std::fs::read_to_string(format!("{}/stdlib/{file}", env!("CARGO_MANIFEST_DIR"))).expect("stdlib source");
+        let line = src.lines().find(|l| l.starts_with(decl)).unwrap_or_else(|| panic!("{file}: no `{decl}…` declaration"));
+        let lit: usize = line[decl.len()..].trim().parse().expect("a literal bound");
+        assert_eq!(lit, JSON_MAX_DEPTH, "{file}'s bound drifted from crates/almide-base/src/json_limits.rs");
+        let second = src.lines().filter(|l| !l.trim_start().starts_with("//") && !l.starts_with(decl)).any(|l| l.contains(&JSON_MAX_DEPTH.to_string()));
+        assert!(!second, "{file}: a second literal bound — read the declaring fn");
     }
-    let path = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/stdlib/json_path.almd")).expect("json_path.almd");
-    assert!(path.contains("__json_max_depth()"), "json_path.almd: set_path must read parse's bound");
-    assert!(!path.lines().filter(|l| !l.trim_start().starts_with("//")).any(|l| l.contains("1000")), "json_path.almd: a second literal bound");
 }
