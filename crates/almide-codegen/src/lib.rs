@@ -406,6 +406,16 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // else, and in a `fan` arm's own thread) the abort is unchanged.
     s.push_str(&format!("{vis}struct AlmideContained(pub String);\n"));
     s.push_str(&format!("thread_local! {{ {vis}static ALMIDE_CONTAIN: std::cell::Cell<bool> = const {{ std::cell::Cell::new(false) }}; }}\n"));
+    // The runtime tables a handler can open handles in (the process-wide net
+    // tables, #4199) register a hook here once per process (#4203). The serve
+    // loop calls every hook on its own thread with 0 before a handler, 1
+    // after it returns and 2 after it aborted: an abort closes what the
+    // handler opened and left open, since a table entry is not a value the
+    // unwind drops. What a handler opened is recorded per thread (the shared
+    // cores' request logs), so another thread's handles are never closed.
+    s.push_str(&format!("{vis}static ALMIDE_REQUEST_HOOKS: std::sync::Mutex<Vec<fn(u8)>> = std::sync::Mutex::new(Vec::new());\n"));
+    s.push_str(&format!("{vis}fn almide_request_hook(f: fn(u8)) {{ ALMIDE_REQUEST_HOOKS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(f) }}\n"));
+    s.push_str(&format!("{vis}fn almide_request_hooks(stage: u8) {{ let hs: Vec<fn(u8)> = ALMIDE_REQUEST_HOOKS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone(); for f in hs {{ f(stage) }} }}\n"));
     s.push_str(&format!("{vis}fn almide_contained_unwind(text: impl FnOnce() -> String) {{ if ALMIDE_CONTAIN.with(|c| c.get()) {{ std::panic::resume_unwind(Box::new(AlmideContained(text()))) }} }}\n"));
     s.push_str(&format!("{vis}fn almide_abort(msg: impl std::fmt::Display) -> ! {{ almide_contained_unwind(|| msg.to_string()); almide_fan_trap_wait(); static ALMIDE_ABORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_ABORTING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"Error: {{}}\\n\", msg)); }} almide_stdout_flush(); std::process::exit(1) }}\n"));
     // `panic(msg)` (#3118): the SAME once-guarded abort, spelled the way C-219
