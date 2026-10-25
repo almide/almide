@@ -394,9 +394,15 @@ fn requirement_target(key: &str, bindings: &HashMap<String, Ty>) -> Option<CallT
     let (tv_name, method_name) = key.split_once('.')?;
     let concrete_ty = bindings.get(tv_name)?;
     if let Some(module) = concrete_ty.owning_module() {
+        // A per-type requirement (`__self_close`, which several types of one
+        // module satisfy) names the type: `net.__tcp_listener_close`.
+        let func = match ty_to_name(concrete_ty) {
+            Some(n) => almide_lang::stdlib_info::requirement_fn_name(&n, method_name),
+            None => method_name.to_string(),
+        };
         return Some(CallTarget::Module {
             module: almide_base::intern::sym(module),
-            func: almide_base::intern::sym(method_name),
+            func: almide_base::intern::sym(&func),
             def_id: None,
         });
     }
