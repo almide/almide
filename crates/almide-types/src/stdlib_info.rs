@@ -665,15 +665,16 @@ mod ordered_tests {
         assert!(super::is_ordered_stdlib_fn("env", "set"));
         assert!(super::is_ordered_stdlib_fn("fs", "write"));
         assert!(super::is_ordered_stdlib_fn("io", "read_line"));
-        assert!(super::is_ordered_stdlib_fn("process", "spawn"));
+        assert!(super::is_ordered_stdlib_fn("process", "start"));
+        assert!(super::is_ordered_stdlib_fn("io", "read"));
         assert!(super::is_ordered_runtime_symbol("almide_rt_env_set"));
-        assert!(super::is_ordered_runtime_symbol("almide_rt_process_spawn"));
+        assert!(super::is_ordered_runtime_symbol("almide_rt_process___os_start"));
         // reads, output and the clock are not ordered (D3)
         assert!(!super::is_ordered_stdlib_fn("env", "get"));
         assert!(!super::is_ordered_stdlib_fn("fs", "read_text"));
         assert!(!super::is_ordered_stdlib_fn("io", "print"));
         assert!(!super::is_ordered_runtime_symbol("almide_rt_env_get"));
-        assert_eq!(t.len(), 30, "{t:?}");
+        assert_eq!(t.len(), 29, "{t:?}");
     }
 
     #[test]

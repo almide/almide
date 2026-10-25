@@ -43,9 +43,9 @@ effect fn main() -> Unit = {
   maybe(s, 69)
   maybe(s, 0)
   maybe(s, 70)
-  io.write(a)
-  io.write(m)
-  io.write(s)
+  io.write(io.stdout()!, a)!
+  io.write(io.stdout()!, m)!
+  io.write(io.stdout()!, s)!
   println("")
   println("${bytes.len(a)},${bytes.len(m)},${bytes.len(s)}")
 }

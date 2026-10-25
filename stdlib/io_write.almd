@@ -1,5 +1,5 @@
-// io_write — the SELF-HOSTED byte writers under `io.write(io.stdout(), data)` and
-// `io.write(io.stderr(), data)` (the leaves `io.__write_stdout` / `io.__write_stderr`, R-io-05),
+// io_write — the SELF-HOSTED byte writers under `io.write(io.stdout()!, data)` and
+// `io.write(io.stderr()!, data)` (the leaves `io.__write_stdout` / `io.__write_stderr`, R-io-05),
 // written in ALMIDE over the `prim` primitive floor. Sibling of io_print.almd: same single-iovec `fd_write`,
 // same preamble layout (NWRITTEN@0, IOVEC@8 {ptr,len}), and the SAME Capability::Stdout —
 // a stdout write is a stdout write, whether the payload is a String or raw bytes.
@@ -17,7 +17,7 @@ fn io_write(data: Bytes) -> Unit = {
   let _w = prim.fd_write(1, 8, 1, 0)
 }
 
-// The stderr twin under `io.write(io.stderr(), b)` and `io.eprint`'s bytes: the same
+// The stderr twin under `io.write(io.stderr()!, b)` and `io.eprint`'s bytes: the same
 // single-iovec write to fd 2 (the eprintln self-host's sink).
 @implements("io.__write_stderr")
 fn io_write_stderr(data: Bytes) -> Unit = {

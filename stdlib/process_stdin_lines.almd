@@ -1,5 +1,5 @@
 // process_stdin_lines — SELF-HOSTED `process.stdin_lines()` over the WASI stdin
-// floor (#3620): read fd 0 to EOF in 4096-byte chunks (io.read_n_bytes, which
+// floor (#3620): read fd 0 to EOF in 4096-byte chunks (prim.read_n_bytes, which
 // every wasm leg lowers on the shared stdin cursor; a 0-length chunk IS EOF)
 // into one Bytes buffer, then answer what native `BufRead::lines` answers: one
 // entry per `\n`-terminated line with exactly one trailing `\r` stripped, a
@@ -10,14 +10,13 @@
 // verdict, with native's text. Every Result is built by ok()/err() and no
 // block is touched raw: the file calls no prim op, so the wasm leg admits
 // it from the @implements declaration alone.
-import io
 
 @implements("process.stdin_lines")
 effect fn process_stdin_lines() -> Result[List[String], String] = {
   var buf = bytes.zeros(0)
   var n = 1
   while n > 0 {
-    let chunk = io.read_n_bytes(4096)
+    let chunk = prim.read_n_bytes(4096)
     n = list.len(chunk)
     for v in chunk {
       bytes.push(buf, v)
