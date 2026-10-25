@@ -1204,9 +1204,3 @@ id = "src/wasm_leg.rs::link_self_host::scan_expr::or-pattern"
 class = "justified"
 names = 3
 why = "A link-time dependency of the structural leg's lowering, not a property of the stdlib functions: value.object, value.to_camel_case and value.to_snake_case lower to code that calls the linked `__vu_fold_pairs` (C-401), which is reachable only through value.pick, so the linker has to be told to pull that surface in, beside the sibling float.to_string / string.from_bytes / testing.assert_contains rows of the same scan."
-
-[[site]]
-id = "crates/almide-wasm/src/map_remove.rs::tail_removes_of::walk::or-pattern"
-class = "justified"
-names = 2
-why = "A fact about the structural leg's lowering, not a property of the stdlib functions (#4208): map.remove and set.remove are the two calls whose emitter arms (try_map_remove_owned / try_set_remove_owned) can tombstone an entry in place through the key index, so the scan names the receivers those arms may hole. Both are already declared `@reuse` (the shared property); which of the @reuse ops this emitter can hole instead of shift is the emitter's own capability."

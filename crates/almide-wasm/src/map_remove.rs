@@ -117,11 +117,20 @@ pub(crate) fn tomb_vars_of(body: &IrExpr) -> HashSet<VarId> {
 /// (the rhs of `var = …`, or a fold body whose value rebinds the
 /// accumulator). Only those may leave holes (#4208): a remove anywhere else
 /// hands its result to a holder that does not settle.
+/// A receiver of the keyed-block representation: a Map or a Set block,
+/// the two kinds the key index (map_index.rs) and its holes cover. The
+/// property is read off the receiver's TYPE, so the scan names no module:
+/// a remove over any other collection keeps its own lowering.
+fn is_keyed_block(ty: &almide_types::types::Ty) -> bool {
+    use almide_types::types::TypeConstructorId as C;
+    matches!(ty, almide_types::types::Ty::Applied(C::Map | C::Set, _))
+}
+
 pub(crate) fn tail_removes_of(e: &IrExpr, var: VarId) -> Vec<*const IrExpr> {
     fn walk(e: &IrExpr, var: VarId, out: &mut Vec<*const IrExpr>) {
         match &e.kind {
-            IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
-                if matches!(module.as_str(), "map" | "set") && func.as_str() == "remove" && args.len() == 2 =>
+            IrExprKind::Call { target: CallTarget::Module { func, .. }, args, .. }
+                if func.as_str() == "remove" && args.len() == 2 && is_keyed_block(&args[0].ty) =>
             {
                 if matches!(args[0].kind, IrExprKind::Var { id } if id == var) {
                     out.push(&args[0] as *const IrExpr);
