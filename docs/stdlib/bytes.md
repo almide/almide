@@ -108,7 +108,7 @@ outside the memory-safety guarantee: each call is E100 in a file without
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (209 functions)
+## Signature index (210 functions)
 
 ```
 // Appends x rounded to f32, BE.
@@ -346,6 +346,13 @@ bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]
 // True if b begins with prefix, or prefix is empty.
 // @since 0.13.4 or earlier
 bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool
+
+// True if a and b hold the same bytes, in time that depends only on their
+// lengths: no early exit on the first differing byte. Use it to compare a
+// MAC, token or password hash; `==` returns at the first difference. A length
+// mismatch is false at once (lengths are public).
+// @since unreleased
+bytes.is_equal_constant_time(a: Bytes, b: Bytes) -> Bool
 
 // Each byte as an Int in 0..255.
 // @since 0.9.3 or earlier

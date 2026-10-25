@@ -112,6 +112,7 @@ call:bytes.index_of
 call:bytes.insert
 call:bytes.is_empty
 call:bytes.is_eof
+call:bytes.is_equal_constant_time
 call:bytes.is_valid_utf8
 call:bytes.len
 call:bytes.lines
@@ -284,6 +285,12 @@ call:fs.write_bytes
 call:fs.write_bytes_raw
 call:hash.fnv1a32
 call:hash.fnv1a32_bytes
+call:hash.hmac_sha256
+call:hash.hmac_sha256_hex
+call:hash.hmac_sha512
+call:hash.hmac_sha512_hex
+call:hash.is_valid_hmac_sha256
+call:hash.is_valid_hmac_sha512
 call:hash.sha256
 call:hash.sha256_hex
 call:hex.decode
@@ -612,6 +619,7 @@ call:option.__almd_mono9_to_result__Result_lInt_cString_r_cString
 call:option.filter
 call:option.flat_map
 call:option.flatten
+call:option.is_none
 call:option.is_some
 call:option.map
 call:option.or_else
@@ -659,6 +667,13 @@ call:result.to_err_option
 call:result.to_option
 call:result.unwrap_or
 call:result.unwrap_or_else
+call:secret.__almd_mono11_Secret.repr__Int
+call:secret.__almd_mono11_Secret.repr__String
+call:secret.__almd_mono3_new__Bytes
+call:secret.__almd_mono3_new__Int
+call:secret.__almd_mono3_new__String
+call:secret.__almd_mono6_reveal__Int
+call:secret.__almd_mono6_reveal__String
 call:set.__almd_mono14___fallible_all__Int_cString
 call:set.__almd_mono14___fallible_any__Int_cString
 call:set.__almd_mono14___fallible_map__Int_cInt_cString
@@ -714,6 +729,7 @@ call:string.is_alpha
 call:string.is_alphanumeric
 call:string.is_digit
 call:string.is_empty
+call:string.is_equal_constant_time
 call:string.is_lower
 call:string.is_upper
 call:string.is_whitespace
