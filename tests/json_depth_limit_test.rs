@@ -148,12 +148,20 @@ fn the_interp_oracle_agrees() {
 #[test]
 fn the_self_hosted_bound_is_the_declared_one() {
     assert_eq!(json_depth_error(), format!("json: nesting deeper than {JSON_MAX_DEPTH}"));
-    for (file, decl) in [("json_parse.almd", "fn __json_max_depth() -> Int = "), ("json_path.almd", "fn __jpath_max_depth() -> Int = ")] {
+    for (file, decl, text) in [
+        ("json_parse.almd", "fn __json_max_depth() -> Int = ", "fn __json_depth_error() -> String = "),
+        ("json_path.almd", "fn __jpath_max_depth() -> Int = ", "fn __jpath_depth_error() -> String = "),
+    ] {
         let src = std::fs::read_to_string(format!("{}/stdlib/{file}", env!("CARGO_MANIFEST_DIR"))).expect("stdlib source");
         let line = src.lines().find(|l| l.starts_with(decl)).unwrap_or_else(|| panic!("{file}: no `{decl}…` declaration"));
         let lit: usize = line[decl.len()..].trim().parse().expect("a literal bound");
         assert_eq!(lit, JSON_MAX_DEPTH, "{file}'s bound drifted from crates/almide-base/src/json_limits.rs");
-        let second = src.lines().filter(|l| !l.trim_start().starts_with("//") && !l.starts_with(decl)).any(|l| l.contains(&JSON_MAX_DEPTH.to_string()));
+        let tline = src.lines().find(|l| l.starts_with(text)).unwrap_or_else(|| panic!("{file}: no `{text}…` declaration"));
+        assert_eq!(tline[text.len()..].trim(), format!("{:?}", json_depth_error()), "{file}'s err text drifted from json_depth_error()");
+        let second = src
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//") && !l.starts_with(decl) && !l.starts_with(text))
+            .any(|l| l.contains(&JSON_MAX_DEPTH.to_string()));
         assert!(!second, "{file}: a second literal bound — read the declaring fn");
     }
 }
