@@ -687,7 +687,7 @@ names = 58
 [[site]]
 id = "crates/almide-mir/src/lower/tests_result_family.rs::every_registry_result_fn_is_in_the_materialized_set::NOT_YET::table"
 class = "legacy"
-names = 10
+names = 4
 
 [[site]]
 id = "crates/almide-mir/src/lower/tests_result_family.rs::the_merged_name_set_survives_the_historical_name_mangling_incidents::table"
@@ -742,7 +742,7 @@ names = 46
 [[site]]
 id = "crates/almide-types/src/self_host_registry.rs::self_host_runtime::table"
 class = "legacy"
-names = 1777
+names = 1766
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
@@ -907,7 +907,7 @@ names = 3
 [[site]]
 id = "crates/almide-wasm/src/fs_meta.rs::PROC_LEAVES::table"
 class = "legacy"
-names = 11
+names = 5
 
 [[site]]
 id = "crates/almide-wasm/src/fs_meta.rs::lower_fs_meta_call::or-pattern"
@@ -1042,7 +1042,7 @@ names = 24
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::HTTP_CALL_SUM::table"
 class = "legacy"
-names = 6
+names = 5
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::HTTP_SERVE_SUM::table"
@@ -1062,7 +1062,7 @@ names = 9
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::PROCESS_SUM::table"
 class = "legacy"
-names = 11
+names = 5
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::SCALAR_TEXT_SUM_BUILDERS::table"
@@ -1127,7 +1127,7 @@ names = 12
 [[site]]
 id = "src/cli/mod.rs::PROC_SPAWNING::table"
 class = "legacy"
-names = 9
+names = 4
 
 [[site]]
 id = "src/wasm_leg.rs::link_self_host::scan_expr::or-chain"
