@@ -343,3 +343,279 @@ pub fn almide_proc_signal_windows(pid: i32, sig: i32) -> Result<(), i32> {
         _ => Err(3),
     }
 }
+
+// ── The ProcessCommand family (R-process-02, -03, -05, -07) ──
+//
+// One record of settings — the program, its arguments, the working directory
+// ("" keeps this one), the text for its stdin ("" = none) and a deadline in
+// ms (0 = none) — and three ways to run it: `output` (wait for it, capture
+// everything), the `start` handle (poll / wait / stop / read_new_* /
+// child_pid) and `run` (on this terminal). A captured child runs in its own
+// process group, so a deadline or `stop` takes its whole tree; a deadline's
+// err is C-214's `exec timed out after <ms>ms`.
+
+/// A captured child and what it has written so far.
+pub struct AlmideProcChild {
+    child: std::process::Child,
+    out: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    err: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    pumps: Vec<std::thread::JoinHandle<()>>,
+    deadline: Option<std::time::Instant>,
+    timeout_ms: i64,
+    exited: Option<std::process::ExitStatus>,
+    done: Option<Result<(i64, String, String), String>>,
+    out_seen: usize,
+    err_seen: usize,
+    call: &'static str,
+    operand: String,
+}
+
+/// Copy `r` into `buf` until it ends, on a thread of its own, so a chatty
+/// child never blocks on a full pipe while the parent waits.
+fn almide_proc_pump<R: std::io::Read + Send + 'static>(
+    r: Option<R>,
+    buf: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let Some(mut r) = r else { return };
+        let mut chunk = [0u8; 8192];
+        loop {
+            match r.read(&mut chunk) {
+                Ok(0) => return,
+                Ok(n) => buf.lock().unwrap_or_else(|p| p.into_inner()).extend_from_slice(&chunk[..n]),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => return,
+            }
+        }
+    })
+}
+
+impl AlmideProcChild {
+    /// Start `cmd` captured. `stdin`'s text is written in full before this
+    /// returns (the caller ignores SIGPIPE around it: a child that exits
+    /// without reading makes the write fail, not the program end).
+    pub fn start(
+        call: &'static str,
+        cmd: &str,
+        args: &[impl AsRef<str>],
+        dir: &str,
+        stdin: &str,
+        timeout_ms: i64,
+    ) -> Result<AlmideProcChild, String> {
+        let mut command = std::process::Command::new(cmd);
+        command
+            .args(args.iter().map(|a| a.as_ref()))
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .stdin(if stdin.is_empty() { std::process::Stdio::null() } else { std::process::Stdio::piped() });
+        if !dir.is_empty() {
+            command.current_dir(dir);
+        }
+        #[cfg(unix)]
+        {
+            std::os::unix::process::CommandExt::process_group(&mut command, 0);
+        }
+        let operand = if dir.is_empty() { format!("{cmd:?}") } else { format!("{}, {}", almide_proc_q(dir), almide_proc_q(cmd)) };
+        let mut child = command.spawn().map_err(|e| almide_proc_call_err(call, &operand, e))?;
+        let out = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let err = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let pumps = vec![almide_proc_pump(child.stdout.take(), out.clone()), almide_proc_pump(child.stderr.take(), err.clone())];
+        if let Some(mut w) = child.stdin.take() {
+            let _ = std::io::Write::write_all(&mut w, stdin.as_bytes());
+        }
+        let deadline = (timeout_ms > 0).then(|| std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64));
+        Ok(AlmideProcChild {
+            child, out, err, pumps, deadline, timeout_ms,
+            exited: None, done: None, out_seen: 0, err_seen: 0, call, operand,
+        })
+    }
+
+    pub fn pid(&self) -> i64 {
+        self.child.id() as i64
+    }
+
+    fn text(buf: &std::sync::Mutex<Vec<u8>>) -> String {
+        String::from_utf8_lossy(&buf.lock().unwrap_or_else(|p| p.into_inner())).to_string()
+    }
+
+    fn finish_ok(&mut self, status: std::process::ExitStatus) {
+        for p in self.pumps.drain(..) {
+            let _ = p.join();
+        }
+        self.done = Some(Ok((status.code().unwrap_or(-1) as i64, Self::text(&self.out), Self::text(&self.err))));
+    }
+
+    /// One look, never blocking: the outcome once the child has exited and
+    /// both pipes have ended (#2065: a descendant may hold them past the
+    /// exit), or once the deadline passed.
+    pub fn step(&mut self, poll: fn(&mut std::process::Child) -> std::io::Result<AlmideChildPoll>) -> Option<Result<(i64, String, String), String>> {
+        if self.done.is_none() {
+            if self.exited.is_none() {
+                match poll(&mut self.child) {
+                    Ok(AlmideChildPoll::Running) => {}
+                    Ok(AlmideChildPoll::Exited(s)) => self.exited = Some(s),
+                    Ok(AlmideChildPoll::TerminalStop(sig)) => {
+                        almide_proc_stop_tree(&mut self.child);
+                        self.done = Some(Err(format!(
+                            "{}({}): the child was stopped by {sig}: it tried to use the terminal from a \
+                             background process group; run terminal programs with process.run",
+                            self.call, self.operand
+                        )));
+                    }
+                    Err(e) => {
+                        almide_proc_stop_tree(&mut self.child);
+                        self.done = Some(Err(almide_proc_call_err(self.call, &self.operand, e)));
+                    }
+                }
+            }
+            if self.done.is_none() {
+                if let (Some(s), true) = (self.exited, self.pumps.iter().all(|p| p.is_finished())) {
+                    self.finish_ok(s);
+                } else if self.deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+                    almide_proc_stop_tree(&mut self.child);
+                    self.done = Some(Err(format!("exec timed out after {}ms", self.timeout_ms)));
+                }
+            }
+        }
+        self.done.clone()
+    }
+
+    /// Block until `step` answers.
+    pub fn wait(&mut self, poll: fn(&mut std::process::Child) -> std::io::Result<AlmideChildPoll>) -> Result<(i64, String, String), String> {
+        loop {
+            if let Some(r) = self.step(poll) {
+                return r;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    /// SIGTERM to the child's group, `grace_ms` to exit, then SIGKILL; the
+    /// outcome, code -1 when a signal ended it. Calling it again (or after
+    /// the child ended) answers the same outcome.
+    pub fn stop(&mut self, grace_ms: i64) -> Result<(i64, String, String), String> {
+        if let Some(d) = &self.done {
+            return d.clone();
+        }
+        if self.exited.is_none() {
+            #[cfg(unix)]
+            {
+                let _ = std::process::Command::new("/bin/kill")
+                    .args(["-TERM", "--", &format!("-{}", self.child.id())])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            }
+            let until = std::time::Instant::now() + std::time::Duration::from_millis(grace_ms.max(0) as u64);
+            while self.exited.is_none() && std::time::Instant::now() < until {
+                if let Ok(Some(s)) = self.child.try_wait() {
+                    self.exited = Some(s);
+                } else {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }
+            if self.exited.is_none() {
+                almide_proc_stop_tree(&mut self.child);
+                self.exited = self.child.try_wait().ok().flatten();
+            }
+        }
+        // Pipes a stray descendant still holds are not waited for past 1 s.
+        let until = std::time::Instant::now() + std::time::Duration::from_millis(1000);
+        while !self.pumps.iter().all(|p| p.is_finished()) && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let code = self.exited.and_then(|s| s.code()).unwrap_or(-1) as i64;
+        if self.pumps.iter().all(|p| p.is_finished()) {
+            for p in self.pumps.drain(..) {
+                let _ = p.join();
+            }
+        }
+        let r = Ok((code, Self::text(&self.out), Self::text(&self.err)));
+        self.done = Some(r.clone());
+        r
+    }
+
+    /// The text written to stdout (`err` false) or stderr since the last
+    /// read; never blocks. A UTF-8 sequence cut by the read waits for its
+    /// rest; an invalid one is U+FFFD.
+    pub fn read_new(&mut self, err: bool) -> String {
+        let (buf, seen) = if err { (&self.err, &mut self.err_seen) } else { (&self.out, &mut self.out_seen) };
+        let b = buf.lock().unwrap_or_else(|p| p.into_inner());
+        let new = &b[*seen..];
+        let take = match std::str::from_utf8(new) {
+            Ok(_) => new.len(),
+            Err(e) if e.error_len().is_none() => e.valid_up_to(),
+            Err(_) => new.len(),
+        };
+        *seen += take;
+        String::from_utf8_lossy(&new[..take]).to_string()
+    }
+}
+
+/// `process.output`: run to the end, every exit code ok.
+pub fn almide_proc_output(
+    cmd: &str,
+    args: &[impl AsRef<str>],
+    dir: &str,
+    stdin: &str,
+    timeout_ms: i64,
+    poll: fn(&mut std::process::Child) -> std::io::Result<AlmideChildPoll>,
+) -> Result<(i64, String, String), String> {
+    AlmideProcChild::start("process.output", cmd, args, dir, stdin, timeout_ms)?.wait(poll)
+}
+
+/// `process.run`: the child shares this program's terminal (#2540) — its
+/// stdout and stderr, and its stdin unless `stdin` names text to pipe in —
+/// and stays in this process group, so a pager or an editor works. A
+/// deadline ends the child itself and answers C-214's err.
+pub fn almide_proc_run_cmd(cmd: &str, args: &[impl AsRef<str>], dir: &str, stdin: &str, timeout_ms: i64) -> Result<i64, String> {
+    let mut command = std::process::Command::new(cmd);
+    command.args(args.iter().map(|a| a.as_ref()));
+    if !dir.is_empty() {
+        command.current_dir(dir);
+    }
+    if !stdin.is_empty() {
+        command.stdin(std::process::Stdio::piped());
+    }
+    let operand = if dir.is_empty() { format!("{cmd:?}") } else { format!("{}, {}", almide_proc_q(dir), almide_proc_q(cmd)) };
+    let mut child = command.spawn().map_err(|e| almide_proc_call_err("process.run", &operand, e))?;
+    if let Some(mut w) = child.stdin.take() {
+        let _ = std::io::Write::write_all(&mut w, stdin.as_bytes());
+    }
+    let deadline = (timeout_ms > 0).then(|| std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms as u64));
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status.code().unwrap_or(-1) as i64),
+            Ok(None) => {}
+            Err(e) => return Err(almide_proc_call_err("process.run", &operand, e)),
+        }
+        if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("exec timed out after {}ms", timeout_ms));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+/// The children `process.start` made, by handle (their slot). Process-wide.
+pub fn almide_proc_handles() -> &'static std::sync::Mutex<Vec<Option<AlmideProcChild>>> {
+    static HANDLES: std::sync::OnceLock<std::sync::Mutex<Vec<Option<AlmideProcChild>>>> = std::sync::OnceLock::new();
+    HANDLES.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+/// Run `f` on the child behind handle `h`.
+pub fn almide_proc_with<R>(h: i64, f: impl FnOnce(&mut AlmideProcChild) -> R) -> Result<R, String> {
+    let mut t = almide_proc_handles().lock().unwrap_or_else(|p| p.into_inner());
+    let c = usize::try_from(h).ok().and_then(|i| t.get_mut(i)).and_then(|c| c.as_mut())
+        .ok_or_else(|| format!("invalid ProcessChild handle: {h}"))?;
+    Ok(f(c))
+}
+
+/// `process.start`: the new child's handle.
+pub fn almide_proc_start(cmd: &str, args: &[impl AsRef<str>], dir: &str, stdin: &str, timeout_ms: i64) -> Result<i64, String> {
+    let c = AlmideProcChild::start("process.start", cmd, args, dir, stdin, timeout_ms)?;
+    let mut t = almide_proc_handles().lock().unwrap_or_else(|p| p.into_inner());
+    t.push(Some(c));
+    Ok((t.len() - 1) as i64)
+}

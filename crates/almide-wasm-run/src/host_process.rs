@@ -125,10 +125,14 @@ pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String
             core::almide_proc_exec_status(a, &cells(b)?).map(status_text)
         }
         84 => {
-            let (ms, args) = head_and_args(b)?;
-            allowed("process.exec_status_timeout", a)?;
-            let ms: i64 = ms.parse().map_err(|_| "malformed process frame (bad timeout)".to_string())?;
-            core::almide_proc_exec_status_timeout(a, &args, ms, core::almide_proc_try_wait_poll).map(status_text)
+            let mut all = cells(b)?;
+            if all.len() < 3 {
+                return Err("malformed process frame (missing operand)".to_string());
+            }
+            let rest = all.split_off(3);
+            let ms: i64 = all[0].parse().map_err(|_| "malformed process frame (bad timeout)".to_string())?;
+            allowed("process.output", a)?;
+            core::almide_proc_output(a, &rest, &all[1], &all[2], ms, core::almide_proc_try_wait_poll).map(status_text)
         }
         85 => {
             allowed("process.run", a)?;
@@ -156,10 +160,15 @@ pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String
         }
         89 => Ok(std::process::id().to_string()),
         90 => {
-            let (cmd, args) = head_and_args(b)?;
-            allowed("process.run_in", &cmd)?;
+            let mut all = cells(b)?;
+            if all.len() < 3 {
+                return Err("malformed process frame (missing operand)".to_string());
+            }
+            let rest = all.split_off(3);
+            let ms: i64 = all[2].parse().map_err(|_| "malformed process frame (bad timeout)".to_string())?;
+            allowed("process.run", &all[0])?;
             flush();
-            core::almide_proc_run_in(a, &cmd, &args).map(|c| c.to_string())
+            core::almide_proc_run_cmd(&all[0], &rest, a, &all[1], ms).map(|c| c.to_string())
         }
         _ => Err(format!("unknown process op {op}")),
     }

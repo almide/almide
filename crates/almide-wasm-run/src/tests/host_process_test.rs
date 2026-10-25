@@ -190,7 +190,7 @@ fn the_wit_names_the_eleven_ops_in_host_op_order_and_the_call_shape() {
     let cases: Vec<&str> = e.cases.iter().map(|c| c.name.as_str()).collect();
     assert_eq!(
         cases,
-        ["exec", "exec-in", "exec-with-stdin", "exec-status", "exec-status-timeout", "run", "spawn", "kill", "is-alive", "pid", "run-in"]
+        ["exec", "exec-in", "exec-with-stdin", "exec-status", "output", "run", "spawn", "kill", "is-alive", "pid", "run-with"]
     );
     assert_eq!(super::OP_LAST - super::OP_FIRST + 1, cases.len() as i32);
     let call = &resolve.interfaces[iface].functions["call"];

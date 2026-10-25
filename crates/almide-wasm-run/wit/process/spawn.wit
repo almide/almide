@@ -34,14 +34,19 @@ interface spawn {
     /// a = dir, b = [cmd] ++ argv. ok = stdout; err = stderr or spawn error.
     exec-in,
     /// a = cmd, b = [input] ++ argv; input is piped to the child's stdin.
+    /// (exec-in, exec-with-stdin, exec-status, spawn and is-alive served the
+    /// surface `process.output` / `process.start` replaced; they keep their
+    /// cases so every later number holds.)
     exec-with-stdin,
     /// a = cmd, b = argv. ok = `<code>\n<stdout chars>\n<stdout><stderr>`,
     /// code -1 when the child was killed by a signal.
     exec-status,
-    /// a = cmd, b = [timeout-ms] ++ argv. ok as exec-status; err is exactly
+    /// a = cmd, b = [timeout-ms, dir, stdin] ++ argv (`process.output`,
+    /// R-process-02): dir "" keeps the host's, stdin "" gives the child none,
+    /// timeout-ms 0 is no deadline. ok as exec-status; err is exactly
     /// `exec timed out after <ms>ms` when the deadline fires (the child's
     /// process group is killed).
-    exec-status-timeout,
+    output,
     /// a = cmd, b = argv. The child shares the host's stdin/stdout/stderr;
     /// ok = the exit code in decimal, -1 when a signal ended the child.
     run,
@@ -55,9 +60,11 @@ interface spawn {
     is-alive,
     /// ok = the host process's pid in decimal.
     pid,
-    /// a = dir, b = [cmd] ++ argv. `run` with the child's working directory
-    /// set to dir (appended last, so the earlier cases keep their numbers).
-    run-in,
+    /// a = dir, b = [cmd, stdin, timeout-ms] ++ argv (`process.run`,
+    /// R-process-07): `run` with the child's working directory (dir "" keeps
+    /// the host's), stdin text piped in unless "", and a deadline unless 0
+    /// (appended last, so the earlier cases keep their numbers).
+    run-with,
   }
 
   /// Run one operation.

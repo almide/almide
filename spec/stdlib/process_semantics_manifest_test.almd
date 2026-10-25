@@ -3,31 +3,15 @@
 // regenerates and diffs). Each case executes a manifest probe; a
 // failure here means the implementation drifted from the DECLARED
 // semantic dimension (#419 class).
-test "process.exit unit=value" {
-  assert_eq("${1}", "1")
-}
-
 test "process.run unit=value" {
   assert_eq("${1}", "1")
 }
 
-test "process.run_in unit=value" {
+test "process.stop unit=millisecond" {
   assert_eq("${1}", "1")
 }
 
-test "process.exec_attached unit=value" {
-  assert_eq("${1}", "1")
-}
-
-test "process.exec_status_timeout unit=millisecond" {
-  assert_eq("${1}", "1")
-}
-
-test "process.pid unit=value" {
-  assert_eq("${1}", "1")
-}
-
-test "process.spawn unit=value" {
+test "process.child_pid unit=handle" {
   assert_eq("${1}", "1")
 }
 
@@ -35,10 +19,42 @@ test "process.kill unit=value" {
   assert_eq("${1}", "1")
 }
 
-test "process.sleep unit=millisecond" {
+test "process.exit unit=value" {
   assert_eq("${1}", "1")
 }
 
-test "process.is_alive unit=value" {
+test "process.pid unit=value" {
+  assert_eq("${1}", "1")
+}
+
+test "process.__os_output unit=millisecond" {
+  assert_eq("${1}", "1")
+}
+
+test "process.__os_run unit=millisecond" {
+  assert_eq("${1}", "1")
+}
+
+test "process.__os_start unit=millisecond" {
+  assert_eq("${1}", "1")
+}
+
+test "process.__os_poll unit=handle" {
+  assert_eq("${1}", "1")
+}
+
+test "process.__os_wait unit=handle" {
+  assert_eq("${1}", "1")
+}
+
+test "process.__os_stop unit=millisecond" {
+  assert_eq("${1}", "1")
+}
+
+test "process.__os_read_new unit=handle" {
+  assert_eq("${1}", "1")
+}
+
+test "process.__os_child_pid unit=handle" {
   assert_eq("${1}", "1")
 }
