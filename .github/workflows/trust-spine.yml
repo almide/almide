@@ -74,6 +74,16 @@ permissions:
   attestations: write
 
 env:
+  # The CI slice (owner decision 2026-10-25; scripts/lib/ci-slice.sh,
+  # crates/almide-corpus/src/ci_slice.rs): a PR or merge group whose base is
+  # not main judges a commit-rotated 1-in-8 slice of every corpus gate plus
+  # the fixtures the change touches; everything else — pushes to develop and
+  # main, tags, schedules, manual runs, PRs into main — runs the full corpus.
+  # Whole-corpus staleness / completeness checks run only on a full run, and a
+  # slice never rewrites a ledger. Job names do not change with it.
+  ALMIDE_CI_SLICE: ${{ ((github.event_name == 'pull_request' && github.base_ref != 'main') || (github.event_name == 'merge_group' && github.event.merge_group.base_ref != 'refs/heads/main')) && '8' || '1' }}
+  ALMIDE_CI_SEED: ${{ github.sha }}
+  ALMIDE_CI_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
   # Bump this suffix to force a clean rebuild of the opam (Rocq) cache.
   OPAM_CACHE_VERSION: v1
   OCAML_VERSION: "5.4.1"
@@ -191,12 +201,10 @@ jobs:
           cargo --version
 
       - name: make verify-trust (proof spine + axiom audit + PCC gate + tests)
-        # A PR certifies a commit-rotated 1-in-8 slice of the structural wall's
-        # fixtures (proofs/structural-wall.sh); every push (develop after a
-        # merge, main, a tag) and a manual run certify them all.
-        env:
-          STRUCTURAL_WALL_STRIDE: ${{ github.event_name == 'pull_request' && '8' || '1' }}
-          STRUCTURAL_WALL_SEED: ${{ github.sha }}
+        # A PR into develop certifies the CI slice of the structural wall's
+        # fixtures (ALMIDE_CI_SLICE, set at the top of this workflow); every
+        # push (develop after a merge, main, a tag), a manual run and a PR
+        # into main certify them all.
         run: |
           eval "$(opam env)"
           make verify-trust
