@@ -1,7 +1,7 @@
-//! `http.request_stream` (plain, no limits) on native and on the embedded
-//! lane (`almide run --target wasm`): the same `on_chunk` sequence, the same
-//! `Unit` result, the same transport error texts (ADR-0027 D8: a function no
-//! wasm leg serves is ported before it is inspected).
+//! A streamed body read through the call handle (`http.start`, then
+//! `read_new` until `poll` answers — R-http-01 retired the callback clients)
+//! on native and on the embedded lane (`almide run --target wasm`): the same
+//! piece sequence, the same outcome, the same transport error texts.
 //!
 //! The loopback server paces its writes (80 ms between pieces), so each piece
 //! reaches the client as its own arrival and the delivery sequence is the
@@ -10,9 +10,9 @@
 //!              inside the two-byte `é` — the split character is delivered
 //!              whole, with the next chunk;
 //!   /length    a `Content-Length` body in two writes;
-//!   /silent    a head-less socket that never answers, for the read timeout
-//!              (`ALMIDE_HTTP_TIMEOUT_SECS=1`), whose text is C-328's timeout
-//!              class on both legs.
+//!   /silent    a head-less socket that never answers, for the call's
+//!              `idle_ms` limit, whose text is the handle's limit error on
+//!              both legs.
 //! A closed port is C-328's connect class.
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -81,10 +81,35 @@ fn closed_port() -> u16 {
 
 fn program(port: u16, dead: u16) -> String {
     format!(
-        r#"import http
+        r#"import env
+import http
+
+effect fn said(tag: String, c: HttpCall) -> Unit = {{
+  let p = http.read_new(c)
+  if p == "" then () else println("${{tag}} chunk[${{p}}]")
+}}
+
+effect fn drain(tag: String, c: HttpCall) -> Result[Unit, String] = match http.poll(c) {{
+  none => {{
+    said(tag, c)!
+    env.sleep_ms(5)
+    drain(tag, c)
+  }},
+  some(r) => {{
+    said(tag, c)!
+    match r {{
+      ok(_) => ok(()),
+      err(e) => err(e),
+    }}
+  }},
+}}
 
 effect fn show(tag: String, url: String) -> Unit = {{
-  match http.request_stream("GET", url, "", map.new(), (c) => println("${{tag}} chunk[${{c}}]")) {{
+  let outcome = match http.start(http.new_request("GET", url, "", []), {{ total_ms: 0, idle_ms: 1000 }}) {{
+    ok(c) => drain(tag, c),
+    err(e) => err(e),
+  }}
+  match outcome {{
     ok(_) => println("${{tag}} ok"),
     err(e) => println("${{tag}} err ${{e}}"),
   }}
@@ -101,11 +126,11 @@ effect fn main() -> Unit = {{
     )
 }
 
-fn expected(port: u16, dead: u16) -> String {
+fn expected(_port: u16, dead: u16) -> String {
     format!(
         "chunked chunk[one ]\nchunked chunk[tw]\nchunked chunk[\u{e9}o three]\nchunked ok\n\
 length chunk[hello]\nlength chunk[ world]\nlength ok\n\
-silent err timed out waiting for \"http://127.0.0.1:{port}/silent\" (raise ALMIDE_HTTP_TIMEOUT_SECS; 0 = no timeout)\n\
+silent err request timeout: idle_ms 1000 exceeded\n\
 closed err could not connect to \"http://127.0.0.1:{dead}/x\" (connection refused or unreachable)\n\
 done\n"
     )
@@ -122,11 +147,11 @@ fn run(file: &Path, wasm: bool) -> (String, String, Option<i32>) {
 }
 
 #[test]
-fn plain_request_stream_delivers_the_same_chunks_and_errors_on_native_and_the_embedded_lane() {
+fn a_streamed_body_read_through_the_handle_is_the_same_on_native_and_the_embedded_lane() {
     let port = serve();
     let dead = closed_port();
     let dir = tempfile::tempdir().expect("tempdir");
-    let file = dir.path().join("request_stream.almd");
+    let file = dir.path().join("handle_stream.almd");
     std::fs::write(&file, program(port, dead)).expect("write");
     let want = expected(port, dead);
     let native = run(&file, false);

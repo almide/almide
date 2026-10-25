@@ -42,11 +42,11 @@ fn http_probe(pre: &str, call: &str) -> String {
 #[test]
 fn self_hosted_host_leaf_calls_leave_no_block_live_on_wasm() {
     let probes: Vec<(&str, String)> = vec![
-        ("request_inline_map", http_probe("", &format!("http.request(\"GET\", \"{URL}\", \"\", map.new())"))),
-        ("request_let_map", http_probe("  let h: Map[String, String] = map.new()\n", &format!("http.request(\"GET\", \"{URL}\", \"\", h)"))),
-        ("request_status", http_probe("", &format!("http.request_status(\"GET\", \"{URL}\", \"\", map.new())"))),
-        ("request_bytes", http_probe("", &format!("http.request_bytes(\"GET\", \"{URL}\", \"\", map.new())"))),
-        ("get_status", http_probe("", &format!("http.get_status(\"{URL}\")"))),
+        ("request_inline_headers", http_probe("", &format!("http.request(\"GET\", \"{URL}\", \"\", [])"))),
+        ("request_let_headers", http_probe("  let h: List[(String, String)] = [(\"x-a\", \"1\")]\n", &format!("http.request(\"GET\", \"{URL}\", \"\", h)"))),
+        ("send", http_probe("", &format!("http.send(http.new_request(\"GET\", \"{URL}\", \"\", []))"))),
+        ("request_bytes", http_probe("", &format!("http.request_bytes(\"GET\", \"{URL}\", \"\", [])"))),
+        ("get_response", http_probe("", &format!("http.get_response(\"{URL}\")"))),
         ("get_bytes", http_probe("", &format!("http.get_bytes(\"{URL}\")"))),
         (
             "process_exec",

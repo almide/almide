@@ -64,8 +64,8 @@ fn http_read_timeout_is_env_configurable() {
         format!(
             "import http\n\n\
              effect fn main() -> Unit = {{\n  \
-               var hs = map.new()\n  \
-               hs = map.set(hs, \"Content-Type\", \"application/json\")\n  \
+               var hs: List[(String, String)] = []\n  \
+               hs = hs + [(\"Content-Type\", \"application/json\")]\n  \
                match http.request(\"POST\", \"http://127.0.0.1:{port}/x\", \"{{}}\", hs) {{\n    \
                  ok(body) => println(\"ok: \" + string.take(body, 30)),\n    \
                  err(e) => println(\"err: \" + e),\n  }}\n}}\n"

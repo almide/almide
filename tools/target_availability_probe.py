@@ -108,7 +108,7 @@ NOMINAL = {
     "SafePath": ('path.trusted("x")', "path.trusted", "path"),
     "HttpResponse": ('http.response(200, "x")', "http.response", "http"),
     # The call handle (#2631): only `http.start` makes one.
-    "HttpCall": ('http.start("GET", "http://127.0.0.1:1/", "", [:], { total_ms: 1, idle_ms: 0 })!', "http.start", "http"),
+    "HttpCall": ('http.start(http.new_request("GET", "http://127.0.0.1:1/", "", []), { total_ms: 1, idle_ms: 0 })!', "http.start", "http"),
     # A route is built with `http.route` — its record fields are the parsed
     # pattern, never written by hand (#2588).
     "HttpRoute": ('http.route("/", (_r) => http.response(200, "x"))', "http.route", "http"),
@@ -247,7 +247,7 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
             # the accessor it measures.
             ctx.imports.add("http")
             ctx.ctors.add("http.new_request")
-            return 'http.new_request("GET", "/", "", [:])'
+            return 'http.new_request("GET", "/", "", [])'
         if name in NOMINAL:
             expr, ctor, imp = NOMINAL[name]
             ctx.ctors.add(ctor)

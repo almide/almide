@@ -112,7 +112,7 @@ fn user_types_named_http_call_and_http_limits_build_beside_the_handle() {
     // `http.start`) and its own of the same names.
     assert_user_type_builds(
         "HttpCall",
-        "import http\ntype HttpCall = { n: Int }\ntype HttpLimits = { n: Int }\neffect fn main() -> Unit = {\n  let x = HttpCall { n: 7 }\n  let y = HttpLimits { n: 8 }\n  let c = http.start(\"GET\", \"http://127.0.0.1:1/\", \"\", [:], { total_ms: 500, idle_ms: 0 })!\n  let r: Result[HttpResponse, String] = http.wait(c)\n  println(\"${x.n} ${y.n} ${match r { ok(_) => \"ok\", err(_) => \"err\" }}\")\n}\n",
+        "import http\ntype HttpCall = { n: Int }\ntype HttpLimits = { n: Int }\neffect fn main() -> Unit = {\n  let x = HttpCall { n: 7 }\n  let y = HttpLimits { n: 8 }\n  let c = http.start(http.new_request(\"GET\", \"http://127.0.0.1:1/\", \"\", []), { total_ms: 500, idle_ms: 0 })!\n  let r: Result[HttpResponse, String] = http.wait(c)\n  println(\"${x.n} ${y.n} ${match r { ok(_) => \"ok\", err(_) => \"err\" }}\")\n}\n",
         "7 8 err\n",
     );
 }

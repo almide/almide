@@ -1,15 +1,15 @@
 //! #2819 / #2822 / #2824 end to end: a BUILT Almide program (the generated
-//! project, its Cargo manifest with the trust-store crate, and the streaming
-//! client that lives in runtime/rs/src/http.rs rather than the shared core)
+//! project, its Cargo manifest with the trust-store crate, and the client
+//! wrappers in runtime/rs/src/http.rs over the shared core)
 //! run with `HTTP_PROXY` pointing at a local forward proxy.
 //!
 //! The proxy answers every request itself: a `100 Continue`, then a chunked
 //! body whose chunk carries an extension, holding the request line it
-//! received. So one run shows, per client shape (`get`, `request_stream`,
-//! `start` + `wait`), that the request went to the proxy in absolute-form and
-//! that the answer was read past the interim head and the extension. The
-//! last probe puts a CR/LF in a header value on the streaming path and
-//! expects the refusal, with nothing sent.
+//! received. So one run shows, per client shape (`get`, `send`, `start` +
+//! `wait`), that the request went to the proxy in absolute-form and that the
+//! answer was read past the interim head and the extension. The last probe
+//! puts a CR/LF in a header value on the call handle and expects the refusal,
+//! with nothing sent.
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::process::Command;
@@ -26,14 +26,14 @@ fn a_built_program_goes_through_http_proxy_on_every_client_shape() {
 
 effect fn main() -> Unit = {
   println("get:" + http.get("http://origin.invalid:8080/get?a=1")!)
-  var pieces: List[String] = []
-  http.request_stream("GET", "http://origin.invalid/stream", "", [:], (c: String) => list.push(pieces, c))!
-  println("stream:" + string.join(pieces, ""))
-  let call = http.start("GET", "http://origin.invalid/start", "", [:], { total_ms: 10000, idle_ms: 0 })!
+  println("send:" + http.body(http.send(http.new_request("GET", "http://origin.invalid/send", "", []))!))
+  let call = http.start(http.new_request("GET", "http://origin.invalid/start", "", []), { total_ms: 10000, idle_ms: 0 })!
   println("start:" + http.body(http.wait(call)!))
-  var dropped: List[String] = []
-  match http.request_stream("GET", "http://origin.invalid/x", "", ["X-A": "1\r\nX-B: 2"], (c: String) => list.push(dropped, c)) {
-    ok(_) => println("inject:unexpected-ok"),
+  match http.start(http.new_request("GET", "http://origin.invalid/x", "", [("X-A", "1\r\nX-B: 2")]), { total_ms: 10000, idle_ms: 0 }) {
+    ok(c) => match http.wait(c) {
+      ok(_) => println("inject:unexpected-ok"),
+      err(e) => println("inject:${e}"),
+    },
     err(e) => println("inject:${e}"),
   }
 }
@@ -96,7 +96,7 @@ effect fn main() -> Unit = {
     assert!(out.status.success(), "stdout:\n{stdout}\nstderr:\n{}", String::from_utf8_lossy(&out.stderr));
     let want = [
         "get:via:GET http://origin.invalid:8080/get?a=1 HTTP/1.1",
-        "stream:via:GET http://origin.invalid/stream HTTP/1.1",
+        "send:via:GET http://origin.invalid/send HTTP/1.1",
         "start:via:GET http://origin.invalid/start HTTP/1.1",
         "inject:invalid header value for \"X-A\": it contains CR, LF, NUL or another control character, which would split the request",
     ];
