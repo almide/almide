@@ -120,7 +120,8 @@ fn a_recursive_fan_under_a_process_limit_answers() {
         "build failed:\n{}",
         String::from_utf8_lossy(&b.stderr)
     );
-    let out = Command::new("bash") // dash, Ubuntu's sh, has no `ulimit -u`
+    // bash: dash, Ubuntu's sh, has no `ulimit -u`
+    let out = Command::new("bash")
         .arg("-c")
         .arg(format!("ulimit -u 512 && exec {}", bin.display()))
         .output()
