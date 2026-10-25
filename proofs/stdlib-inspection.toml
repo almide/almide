@@ -2327,6 +2327,7 @@ class = "effect"
 status = "uninspected"
 blocked = "implementation changed by the runtime-hardening batch (#4118, #4119, #4121, #4122, #4125, #4126, #4144, #4145): re-inspect on GCE"
 
+
 [[fn]]
 name = "fs.read_bytes"
 sig = "effect (path: String) -> List[Int] ! String"
