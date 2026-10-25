@@ -51,7 +51,7 @@ fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> H
   __flat(headers),
 )
 
-@intrinsic("almide_rt_http_with_headers")
+@intrinsic("almide_rt_http___with_headers")
 @borrow_ref(flat)
 fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
 
@@ -339,7 +339,7 @@ fn new_request(method: String, target: String, body: String, headers: List[(Stri
   __flat(headers),
 )
 
-@intrinsic("almide_rt_http_new_request")
+@intrinsic("almide_rt_http___new_request")
 @borrow_ref(flat)
 fn __new_request(method: String, target: String, body: String, flat: List[String]) -> HttpRequest = _
 
