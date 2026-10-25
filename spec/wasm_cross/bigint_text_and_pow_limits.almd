@@ -1,0 +1,31 @@
+// @contract: C-419
+// bigint's text limits at their boundaries, the same bytes on both legs (#4196): in a
+// radix that is not a power of two, 4300 digits parse and print, 4301 answer the fixed
+// err (leading zeros count, the sign does not); a power-of-two radix has no limit and
+// round-trips a 60,000-digit value; pow of 0, 1 and -1 by i64::MAX is computed, not refused.
+import bigint
+
+fn show(r: Result[BigInt, String]) -> String = match r {
+  ok(x) => "ok ${string.len(bigint.to_string_radix(bigint.abs(x), 16))} hex digits",
+  err(e) => "err ${e}",
+}
+
+fn main() -> Unit = {
+  let nines = string.repeat("9", 4300)
+  let x = bigint.parse("-" + nines) ?? bigint.from(0)
+  println("${string.len(bigint.to_string(x))} ${bigint.to_string(x) == "-" + nines}")
+  println(show(bigint.parse(string.repeat("7", 4301))))
+  println(show(bigint.parse("+" + string.repeat("0", 4301))))
+  println(show(bigint.parse_radix(string.repeat("z", 4301), 36)))
+  println(show(bigint.parse_radix(string.repeat("z", 4300), 36)))
+  println(show(bigint.parse(string.repeat("7", 4301) + "x")))
+  let h = bigint.parse_radix("-0x" + string.repeat("f7", 30000), 16) ?? bigint.from(0)
+  let t = bigint.to_string_radix(h, 16)
+  println("${string.len(t)} ${string.slice(t, 0, 5)} ${(bigint.parse_radix(t, 16) ?? bigint.from(0)) == h}")
+  let o = bigint.to_string_radix(h, 8)
+  println("${string.len(o)} ${(bigint.parse_radix(o, 8) ?? bigint.from(0)) == h}")
+  let p = bigint.pow(bigint.from(10), 4299)
+  println("${string.len(bigint.to_string(p))} ${string.len(bigint.to_string(bigint.pow(bigint.from(-10), 4299)))}")
+  let m = 9223372036854775807
+  println("${bigint.to_string(bigint.pow(bigint.from(0), m))} ${bigint.to_string(bigint.pow(bigint.from(1), m))} ${bigint.to_string(bigint.pow(bigint.from(-1), m))}")
+}
