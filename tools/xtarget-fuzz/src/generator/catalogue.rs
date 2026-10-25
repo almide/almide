@@ -382,6 +382,12 @@ pub fn imports_for(src: &str) -> String {
             out.push_str(&format!("import {module}\n"));
         }
     }
+    // The deprecated raw-pointer `bytes` spellings are outside the
+    // memory-safety guarantee: a file calling one must `import ffi` (E100).
+    let raw_ptr = ["bytes.as_ptr(", "bytes.as_mut_ptr(", "bytes.data_ptr(", "bytes.copy_to_ptr(", "bytes.from_raw_ptr("];
+    if raw_ptr.iter().any(|c| src.contains(c)) && !out.contains("import ffi\n") {
+        out.push_str("import ffi\n");
+    }
     out
 }
 
@@ -552,11 +558,16 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
         params,
         return_type,
         attrs,
+        visibility,
         ..
     } = decl
     else {
         return None;
     };
+    // A `local fn` / `mod fn` is not public surface either.
+    if !matches!(visibility, almide::ast::Visibility::Public) {
+        return None;
+    }
 
     // Effect functions only from the sandboxed modules: a clock, a socket or
     // a process is not reproducible across legs.
