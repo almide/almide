@@ -355,11 +355,6 @@ class = "legacy"
 names = 12
 
 [[site]]
-id = "crates/almide-interp/src/hofs_map_set_ops.rs::eval_container_op_map::or-pattern"
-class = "legacy"
-names = 2
-
-[[site]]
 id = "crates/almide-interp/src/hofs_map_set_ops.rs::eval_container_op_set::or-pattern"
 class = "legacy"
 names = 2
@@ -407,7 +402,7 @@ names = 8
 [[site]]
 id = "crates/almide-mir/src/coown_names.rs::COOWN_PRODUCERS::table"
 class = "legacy"
-names = 56
+names = 57
 
 [[site]]
 id = "crates/almide-mir/src/coown_names.rs::COOWN_SET_REPLACE::table"
@@ -702,12 +697,12 @@ names = 9
 [[site]]
 id = "crates/almide-mir/src/purity.rs::PURE_MODULES::table"
 class = "legacy"
-names = 148
+names = 149
 
 [[site]]
 id = "crates/almide-mir/src/purity.rs::is_pure_fn_in_impure_module::or-pattern"
 class = "legacy"
-names = 55
+names = 56
 
 [[site]]
 id = "crates/almide-mir/src/render_native_shims.rs::SHIMS::table"
@@ -807,7 +802,7 @@ names = 104
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_exclusive::table"
 class = "legacy"
-names = 4
+names = 5
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_sized_numeric::or-pattern"
@@ -1204,3 +1199,33 @@ id = "src/wasm_leg.rs::link_self_host::scan_expr::or-pattern"
 class = "justified"
 names = 3
 why = "A link-time dependency of the structural leg's lowering, not a property of the stdlib functions: value.object, value.to_camel_case and value.to_snake_case lower to code that calls the linked `__vu_fold_pairs` (C-401), which is reachable only through value.pick, so the linker has to be told to pull that surface in, beside the sibling float.to_string / string.from_bytes / testing.assert_contains rows of the same scan."
+
+[[site]]
+id = "crates/almide-codegen/src/walker/expressions.rs::render_expr_map_access::table"
+class = "justified"
+names = 2
+why = "Not a stdlib name list: `key` / `value` / `object` here are the field names of a map entry or tuple the Rust renderer spells out. The scan reads them as stdlib names only because value.key (and value.object) now exist (stdlib redesign wave 4A); no function property is keyed on them."
+
+[[site]]
+id = "crates/almide-codegen/src/walker/helpers.rs::render_type_field_fn::table"
+class = "justified"
+names = 2
+why = "Not a stdlib name list: `key` / `value` / `object` here are the field names of a map entry or tuple the Rust renderer spells out. The scan reads them as stdlib names only because value.key (and value.object) now exist (stdlib redesign wave 4A); no function property is keyed on them."
+
+[[site]]
+id = "crates/almide-codegen/src/walker/statements.rs::render_map_insert_form::table"
+class = "justified"
+names = 2
+why = "Not a stdlib name list: `key` / `value` / `object` here are the field names of a map entry or tuple the Rust renderer spells out. The scan reads them as stdlib names only because value.key (and value.object) now exist (stdlib redesign wave 4A); no function property is keyed on them."
+
+[[site]]
+id = "crates/almide-codegen/src/walker/statements_map_upsert.rs::try_render_map_upsert::table"
+class = "justified"
+names = 2
+why = "Not a stdlib name list: `key` / `value` / `object` here are the field names of a map entry or tuple the Rust renderer spells out. The scan reads them as stdlib names only because value.key (and value.object) now exist (stdlib redesign wave 4A); no function property is keyed on them."
+
+[[site]]
+id = "crates/almide-codegen/src/walker/types.rs::render_type_applied::table"
+class = "justified"
+names = 2
+why = "Not a stdlib name list: `key` / `value` / `object` here are the field names of a map entry or tuple the Rust renderer spells out. The scan reads them as stdlib names only because value.key (and value.object) now exist (stdlib redesign wave 4A); no function property is keyed on them."
