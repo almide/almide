@@ -36,9 +36,10 @@ const SITE_W: &str = "h12 w8 n2 r0 s0 s1";
 const SITE_A: &str = "1:2 1:5 1:8";
 
 #[test]
-fn a_site_whose_stores_fill_its_slots_is_accepted() {
-    let r = init(SITE, SITE_W, SITE_A).unwrap();
+fn a_site_whose_stores_fill_its_slots_is_accepted() -> Result<(), String> {
+    let r = init(SITE, SITE_W, SITE_A)?;
     assert_eq!((r.init_sites, r.init_stores), (1, 2));
+    Ok(())
 }
 
 #[test]
@@ -125,9 +126,10 @@ const FILL_W: &str = "h12 w8 v2 r0 f2 t8";
 const FILL_A: &str = "1:5 1:30";
 
 #[test]
-fn a_countdown_fill_is_accepted() {
-    let r = init(&fill(8), FILL_W, FILL_A).unwrap();
+fn a_countdown_fill_is_accepted() -> Result<(), String> {
+    let r = init(&fill(8), FILL_W, FILL_A)?;
     assert_eq!(r.fill_sites, 1);
+    Ok(())
 }
 
 #[test]
@@ -149,9 +151,10 @@ const READ: &str = "local.get 1 i64.const 3 i64.ge_u
   local.get 0 i64.load offset=12 drop";
 
 #[test]
-fn a_guarded_read_is_accepted() {
-    let r = bounds(READ, "c0 a0", "1:4 1:9").unwrap();
+fn a_guarded_read_is_accepted() -> Result<(), String> {
+    let r = bounds(READ, "c0 a0", "1:4 1:9")?;
     assert_eq!((r.bounds_checks, r.bounds_accesses), (1, 1));
+    Ok(())
 }
 
 #[test]
@@ -183,8 +186,9 @@ fn a_check_after_its_access_is_refused() {
 }
 
 #[test]
-fn a_kill_carries_no_anchor_and_an_unlocated_event_is_counted() {
-    let r = bounds(READ, "c0 a0 s0;c0 a0", "1:4 1:9 -;- -").unwrap();
+fn a_kill_carries_no_anchor_and_an_unlocated_event_is_counted() -> Result<(), String> {
+    let r = bounds(READ, "c0 a0 s0;c0 a0", "1:4 1:9 -;- -")?;
     assert_eq!(r.bounds_unlocated, 2);
     assert!(bounds(READ, "c0 a0 s0", "1:4 1:9 1:9").is_err());
+    Ok(())
 }

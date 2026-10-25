@@ -40,143 +40,11 @@
 //! is counted, not checked. TRUSTED: that `alloc <index>` names `$alloc`, the
 //! compare's operands (bounds), and the representation R (init).
 
-use wasmparser::{BlockType, Operator as Op, Parser, ValidPayload, Validator, WasmFeatures};
+use wasmparser::{BlockType, Operator as Op};
 
-/// One defined function's instructions, as the checker needs them.
-pub struct Body<'a> {
-    pub ops: Vec<Op<'a>>,
-    /// Control depth before each instruction (0 = the function's own frame).
-    pub depth: Vec<u32>,
-    /// For a store: the instruction that pushed its address operand, when
-    /// the provenance walk knows it.
-    pub addr: Vec<Option<usize>>,
-}
-
-/// Every defined function of `bytes`, validated, in position order.
-pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
-    let mut v = Validator::new_with_features(WasmFeatures::all());
-    let mut out = Vec::new();
-    for payload in Parser::new(0).parse_all(bytes) {
-        let payload = payload.map_err(|e| e.to_string())?;
-        if let ValidPayload::Func(func, body) = v.payload(&payload).map_err(|e| e.to_string())? {
-            let mut fv = func.into_validator(Default::default());
-            let mut br = body.get_binary_reader();
-            fv.read_locals(&mut br).map_err(|e| e.to_string())?;
-            let mut r = wasmparser::OperatorsReader::new(br);
-            let (mut ops, mut depth, mut addr) = (Vec::new(), Vec::new(), Vec::new());
-            let mut shadow: Vec<Option<usize>> = Vec::new();
-            let mut d = 0u32;
-            while !r.eof() {
-                let off = r.original_position();
-                let op = r.read().map_err(|e| e.to_string())?;
-                let i = ops.len();
-                let pre = fv.operand_stack_height() as usize;
-                let arity = op.operator_arity(&fv);
-                addr.push(if store_width(&op).is_some() && pre >= 2 {
-                    shadow.get(pre - 2).copied().flatten()
-                } else {
-                    None
-                });
-                depth.push(d);
-                fv.op(off, &op).map_err(|e| e.to_string())?;
-                let post = fv.operand_stack_height() as usize;
-                match arity {
-                    Some((k, m)) if pre >= k as usize => {
-                        let keep = (pre - k as usize).min(post);
-                        shadow.truncate(keep);
-                        // Pushed by this instruction (or, past a polymorphic
-                        // stack, re-derived by it): its own.
-                        while shadow.len() < post {
-                            shadow.push(Some(i));
-                        }
-                        let _ = m;
-                    }
-                    _ => {
-                        shadow.iter_mut().for_each(|s| *s = None);
-                        shadow.truncate(post);
-                        while shadow.len() < post {
-                            shadow.push(None);
-                        }
-                    }
-                }
-                match op {
-                    Op::Block { .. } | Op::Loop { .. } | Op::If { .. } | Op::TryTable { .. } => {
-                        d += 1
-                    }
-                    Op::End => d = d.saturating_sub(1),
-                    _ => {}
-                }
-                ops.push(op);
-            }
-            out.push(Body { ops, depth, addr });
-        }
-    }
-    Ok(out)
-}
-
-/// A store's width in bytes and its static offset.
-pub fn store_width(op: &Op<'_>) -> Option<(u32, u64)> {
-    Some(match op {
-        Op::I32Store { memarg } | Op::F32Store { memarg } | Op::I64Store32 { memarg } => {
-            (4, memarg.offset)
-        }
-        Op::I64Store { memarg } | Op::F64Store { memarg } => (8, memarg.offset),
-        Op::I32Store8 { memarg } | Op::I64Store8 { memarg } => (1, memarg.offset),
-        Op::I32Store16 { memarg } | Op::I64Store16 { memarg } => (2, memarg.offset),
-        Op::V128Store { memarg } => (16, memarg.offset),
-        _ => return None,
-    })
-}
-
-fn is_load(op: &Op<'_>) -> bool {
-    matches!(
-        op,
-        Op::I32Load { .. }
-            | Op::I64Load { .. }
-            | Op::F32Load { .. }
-            | Op::F64Load { .. }
-            | Op::I32Load8S { .. }
-            | Op::I32Load8U { .. }
-            | Op::I32Load16S { .. }
-            | Op::I32Load16U { .. }
-            | Op::I64Load8S { .. }
-            | Op::I64Load8U { .. }
-            | Op::I64Load16S { .. }
-            | Op::I64Load16U { .. }
-            | Op::I64Load32S { .. }
-            | Op::I64Load32U { .. }
-            | Op::V128Load { .. }
-    )
-}
-
-/// A branch's target depth (the frame it leaves to), or `Some(0)` for an
-/// exit of the whole function; `None` for an instruction that does not
-/// branch.
-fn branch_target(op: &Op<'_>, d: u32) -> Option<u32> {
-    match op {
-        Op::Br { relative_depth }
-        | Op::BrIf { relative_depth }
-        | Op::BrOnNull { relative_depth }
-        | Op::BrOnNonNull { relative_depth } => Some(d.saturating_sub(*relative_depth)),
-        Op::BrTable { targets } => {
-            let max = targets
-                .targets()
-                .filter_map(Result::ok)
-                .chain(std::iter::once(targets.default()))
-                .max()
-                .unwrap_or(0);
-            Some(d.saturating_sub(max))
-        }
-        Op::Return
-        | Op::ReturnCall { .. }
-        | Op::ReturnCallIndirect { .. }
-        | Op::ReturnCallRef { .. }
-        | Op::Throw { .. }
-        | Op::ThrowRef
-        | Op::Rethrow { .. } => Some(0),
-        _ => None,
-    }
-}
+mod decode;
+use decode::{branch_target, is_load};
+pub use decode::{decode, store_width, Body};
 
 /// A located event: a defined function's position and an instruction index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,6 +65,19 @@ fn parse_at(t: &str) -> Result<Option<At>, String> {
         (Ok(func), Ok(op)) => Ok(Some(At { func, op })),
         _ => Err(format!("anchor `{t}` is not position:ordinal")),
     }
+}
+
+/// A fill site's anchor row: header bytes `hdr`, element width `w`, the
+/// count local `k`, the counter local `l`, the cursor stride `s`, and the
+/// site (`a`) and fill (`f`) anchors.
+struct Fill {
+    hdr: u64,
+    w: u64,
+    k: u32,
+    l: u32,
+    s: u64,
+    a: At,
+    f: At,
 }
 
 /// What a check saw.
@@ -374,17 +255,8 @@ impl<'a> Ctx<'_, 'a> {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn fill_site(
-        &self,
-        hdr: u64,
-        w: u64,
-        k: u32,
-        l: u32,
-        s: u64,
-        a: At,
-        f: At,
-    ) -> Result<(), String> {
+    fn fill_site(&self, site: Fill) -> Result<(), String> {
+        let Fill { hdr, w, k, l, s, a, f } = site;
         let b = self.body(a)?;
         self.body(f)?;
         if f.func != a.func || a.op < 5 {
@@ -429,22 +301,8 @@ impl<'a> Ctx<'_, 'a> {
                 &|o| matches!(o, Op::I32Const { value } if *value == h_i),
                 &|o| matches!(o, Op::I32Add),
                 &|o| matches!(o, Op::LocalSet { .. }),
-                &|o| {
-                    matches!(
-                        o,
-                        Op::Block {
-                            blockty: BlockType::Empty
-                        }
-                    )
-                },
-                &|o| {
-                    matches!(
-                        o,
-                        Op::Loop {
-                            blockty: BlockType::Empty
-                        }
-                    )
-                },
+                &|o| matches!(o, Op::Block { blockty: BlockType::Empty }),
+                &|o| matches!(o, Op::Loop { blockty: BlockType::Empty }),
                 &|o| matches!(o, Op::LocalGet { local_index } if *local_index == l),
                 &|o| matches!(o, Op::I64Const { value: 0 }),
                 &|o| matches!(o, Op::I64LeS),
@@ -476,42 +334,51 @@ impl<'a> Ctx<'_, 'a> {
             ],
             "fill loop tail",
         )?;
-        let d_body = b.depth[body_from];
-        let mut stores = 0;
-        for j in body_from..tail {
-            let op = &b.ops[j];
-            if branch_target(op, b.depth[j]).is_some() {
-                return Err(format!("fill: the loop body branches at instruction {j}"));
-            }
-            if [bl, c, l, k].iter().any(|&x| Self::writes(op, x)) {
-                return Err(format!(
-                    "fill: the loop body writes the block, cursor or counter at instruction {j}"
-                ));
-            }
-            if let Some((sw, off)) = store_width(op) {
-                stores += 1;
-                if u64::from(sw) != w || off != 0 || b.depth[j] != d_body {
-                    return Err(format!("fill: the loop body's store is {op:?}"));
-                }
-                match b.addr[j] {
-                    Some(p)
-                        if p >= body_from
-                            && matches!(b.ops[p], Op::LocalGet { local_index } if local_index == c) =>
-                        {}
-                    _ => {
-                        return Err(
-                            "fill: the loop body's store is not addressed by the cursor".into()
-                        )
-                    }
-                }
-            }
-        }
+        let stores = Self::fill_body_stores(b, body_from..tail, [bl, c, l, k], w)?;
         if stores != 1 {
             return Err(format!(
                 "fill: the loop body holds {stores} stores, not one"
             ));
         }
         Ok(())
+    }
+
+    /// The fill loop's body (`body`): no branch, no write to the block,
+    /// cursor, counter or count local (`locals`, the cursor second), and
+    /// every store `w` bytes wide at offset 0, addressed by the cursor.
+    /// Answers how many stores it holds.
+    fn fill_body_stores(
+        b: &Body,
+        body: std::ops::Range<usize>,
+        locals: [u32; 4],
+        w: u64,
+    ) -> Result<usize, String> {
+        let (body_from, c) = (body.start, locals[1]);
+        let d_body = b.depth[body_from];
+        let mut stores = 0;
+        for j in body {
+            let op = &b.ops[j];
+            if branch_target(op, b.depth[j]).is_some() {
+                return Err(format!("fill: the loop body branches at instruction {j}"));
+            }
+            if locals.iter().any(|&x| Self::writes(op, x)) {
+                return Err(format!(
+                    "fill: the loop body writes the block, cursor or counter at instruction {j}"
+                ));
+            }
+            let Some((sw, off)) = store_width(op) else { continue };
+            stores += 1;
+            if u64::from(sw) != w || off != 0 || b.depth[j] != d_body {
+                return Err(format!("fill: the loop body's store is {op:?}"));
+            }
+            let by_cursor = b.addr[j].is_some_and(|p| {
+                p >= body_from && matches!(b.ops[p], Op::LocalGet { local_index } if local_index == c)
+            });
+            if !by_cursor {
+                return Err("fill: the loop body's store is not addressed by the cursor".into());
+            }
+        }
+        Ok(stores)
     }
 
     fn check_guard(&self, at: At) -> Result<(), String> {
@@ -632,7 +499,7 @@ pub fn check_init(
                 at(0).ok_or_else(|| what("unlocated site".into()))?,
                 at(1).ok_or_else(|| what("unlocated fill".into()))?,
             );
-            ctx.fill_site(h, w, k as u32, l as u32, s, a, f)
+            ctx.fill_site(Fill { hdr: h, w, k: k as u32, l: l as u32, s, a, f })
                 .map_err(what)?;
             rep.fill_sites += 1;
         } else {
