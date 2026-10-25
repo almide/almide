@@ -310,9 +310,12 @@ impl Refs {
 fn corpus_rows(root: &Path) -> Vec<String> {
     let manifest = std::fs::read_to_string(root.join("crates/almide-spine/tests/golden/spec-run-manifest.txt"))
         .expect("run manifest");
-    almide_corpus::manifest_rows(&manifest)
+    let rows: Vec<String> = almide_corpus::manifest_rows(&manifest)
         .map(|line| line.splitn(3, '\t').nth(2).expect("manifest row").to_string())
-        .collect()
+        .collect();
+    // The CI slice (ALMIDE_CI_SLICE): a PR into develop measures 1 in k rows
+    // plus the change's own; the full run measures every row.
+    almide_corpus::select(rows, "size_ratchet", |rel| rel.clone())
 }
 
 /// The child entry (#2309): with [`ALONE`] set, measure that one fixture in
@@ -483,6 +486,7 @@ fn hold_the_baseline(name: &str, form: &str, rows: &[(&str, Option<u64>)]) -> Op
     let bp = baseline_path(name);
     let total: u64 = rows.iter().filter_map(|(_, n)| *n).sum();
     if std::env::var("ALMIDE_UPDATE_SIZES").is_ok() {
+        almide_corpus::refuse_regen("size_ratchet");
         std::fs::write(&bp, render_ledger(rows)).expect("write baseline");
         println!("RATCHET sizes [{form}]: {} rows, {total} B — ledger regenerated", rows.len());
         return None;
@@ -490,6 +494,16 @@ fn hold_the_baseline(name: &str, form: &str, rows: &[(&str, Option<u64>)]) -> Op
     let text = std::fs::read_to_string(&bp)
         .unwrap_or_else(|_| panic!("golden/{name} — generate with ALMIDE_UPDATE_SIZES=1"));
     let mut pinned = parse_ledger(&text);
+    let full = almide_corpus::full_run();
+    if !full {
+        // A slice judges only the rows of the fixtures it measured; the
+        // ledger-wide total and the stale-row check are whole-corpus facts.
+        // The ledger-wide stale-row check is a whole-corpus fact; the
+        // aggregate floor below compares the same rows on both sides.
+        let ran: std::collections::BTreeSet<&str> = rows.iter().map(|(r, _)| *r).collect();
+        pinned.retain(|rel, _| ran.contains(rel));
+        println!("RATCHET sizes [{form}]: CI slice — {} row(s) judged against their pins; stale rows are judged on the full run", rows.len());
+    }
     let pinned_total: u64 = pinned.values().flatten().sum();
     if total * 2 < pinned_total {
         return Some(format!(
@@ -499,7 +513,9 @@ fn hold_the_baseline(name: &str, form: &str, rows: &[(&str, Option<u64>)]) -> Op
     }
     let mut offences: Vec<String> =
         rows.iter().filter_map(|(rel, n)| row_offence(rel, pinned.remove(rel), *n)).collect();
-    offences.extend(pinned.keys().map(|rel| format!("{rel}: in the ledger but not in the corpus")));
+    if full {
+        offences.extend(pinned.keys().map(|rel| format!("{rel}: in the ledger but not in the corpus")));
+    }
     if offences.is_empty() {
         println!("RATCHET sizes [{form}]: {} rows, {total} B, every row as pinned", rows.len());
         return None;

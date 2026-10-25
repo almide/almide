@@ -192,7 +192,11 @@ fn per_fixture_ratchets(pf: &PerFixture, update: bool) {
         return;
     }
     let gained: Vec<&String> = certified.difference(&listed).collect();
-    let gone: Vec<&String> = listed.iter().filter(|f| !pf.manifest.contains(*f)).collect();
+    // Under the CI slice the manifest seen is 1 in k rows: "left the
+    // manifest" and the decline histogram are whole-corpus facts, judged on
+    // the full run; a newly certified or a lost fixture is judged per fixture.
+    let full = almide_corpus::full_run();
+    let gone: Vec<&String> = if full { listed.iter().filter(|f| !pf.manifest.contains(*f)).collect() } else { Vec::new() };
     assert!(
         gained.is_empty() && gone.is_empty(),
         "golden/witness-fixtures.txt is behind: {} newly certified fixture(s), {} listed fixture(s) left the manifest \
@@ -202,6 +206,10 @@ fn per_fixture_ratchets(pf: &PerFixture, update: bool) {
         bullets("+", gained.iter().copied()),
         bullets("-", gone.iter().copied())
     );
+    if !full {
+        eprintln!("[witness-floor] CI slice: the decline histogram and the floor are judged on the full run");
+        return;
+    }
     let pinned_text = std::fs::read_to_string(declines_path())
         .expect("golden/witness-declines.txt — generate with ALMIDE_UPDATE_WITNESS_FLOOR=1");
     let pinned: Map<usize> = golden_rows(&pinned_text)
@@ -289,8 +297,9 @@ fn structural_witnesses_balance_and_hold_the_floor() {
     let mut modes_checked = 0usize;
     let dump = std::env::var("ALMIDE_WITNESS_DUMP").is_ok();
     let mut per_fixture = PerFixture::default();
-    for line in almide_corpus::manifest_rows(&manifest) {
-        let rel = line.splitn(3, '\t').nth(2).expect("manifest row");
+    let rows: Vec<&str> = almide_corpus::manifest_rows(&manifest).map(|line| line.splitn(3, '\t').nth(2).expect("manifest row")).collect();
+    let rows = almide_corpus::select(rows, "witness_floor", |rel| rel.to_string());
+    for rel in rows {
         per_fixture.note(rel);
         let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture readable");
         let Ok(ir) = almide_spine::s5::lower_to_ir(rel, &text) else { continue };
@@ -378,7 +387,13 @@ fn structural_witnesses_balance_and_hold_the_floor() {
 
     // #2754: the per-fixture set and the decline histogram.
     let update = std::env::var("ALMIDE_UPDATE_WITNESS_FLOOR").is_ok();
+    if update {
+        almide_corpus::refuse_regen("witness_floor");
+    }
     per_fixture_ratchets(&per_fixture, update);
+    if !almide_corpus::full_run() {
+        return;
+    }
     let fp = floor_path();
     if update {
         std::fs::write(&fp, format!("{witnessed}\n")).expect("write floor");

@@ -227,6 +227,12 @@ fn read_ledger() -> BTreeMap<String, u64> {
 fn stdlib_results_are_owned_by_their_binder() {
     let (rows, skipped) = rows();
     assert!(rows.len() >= 40, "the generated matrix collapsed ({} rows) — the signature index moved?", rows.len());
+    // The CI slice: 1 in k stdlib fns plus every fn of a module the change
+    // touches (the key's stem is the module's source file); the full run
+    // measures every row.
+    let rows = almide_corpus::select(rows, "native_result_ownership", |r| {
+        format!("stdlib/{}.almd#{}", r.module, r.name.rsplit_once('.').map_or(r.name.as_str(), |(_, f)| f))
+    });
     let known = read_ledger();
     let mut growing: BTreeMap<String, u64> = BTreeMap::new();
     let mut unmeasured = Vec::new();
@@ -256,6 +262,7 @@ fn stdlib_results_are_owned_by_their_binder() {
         eprintln!("[native-own] unmeasured {u}");
     }
     if std::env::var("ALMIDE_UPDATE_NATIVE_OWN").is_ok() {
+        almide_corpus::refuse_regen("native_result_ownership");
         let mut out = String::from(
             "# Stdlib fns whose bound result still grows the heap (B per call) — #2004 / #2005.\n# Shrink-only: a row may shrink or vanish, never grow or appear. ALMIDE_UPDATE_NATIVE_OWN=1 regenerates.\n",
         );
