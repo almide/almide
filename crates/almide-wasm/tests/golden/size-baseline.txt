@@ -495,7 +495,7 @@
 6078	spec/wasm_cross/map_fold_heap_acc_skv.almd
 4164	spec/wasm_cross/map_fold_heap_accumulator.almd
 7784	spec/wasm_cross/map_get_fallback_key_and_lazy.almd
-8130	spec/wasm_cross/map_index_order.almd
+8616	spec/wasm_cross/map_index_order.almd
 7080	spec/wasm_cross/map_index_released_with_block.almd
 8809	spec/wasm_cross/map_index_string_key_shapes.almd
 15624	spec/wasm_cross/map_insertion_order.almd
@@ -753,7 +753,7 @@
 2958	spec/wasm_cross/scoped_worker_in_and_out.almd
 4472	spec/wasm_cross/self_call_swapped_params.almd
 7949	spec/wasm_cross/set_entries_reclaim.almd
-9033	spec/wasm_cross/set_index_order.almd
+9486	spec/wasm_cross/set_index_order.almd
 10600	spec/wasm_cross/set_insertion_order.almd
 63003	spec/wasm_cross/sized_display_matrix.almd
 6913	spec/wasm_cross/sized_field_default_matrix.almd
