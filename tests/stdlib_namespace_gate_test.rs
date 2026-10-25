@@ -13,8 +13,9 @@
 //!    and none of the dropped alias names may ever reappear;
 //! 2. no intrinsic is reachable under two public names (the rule the window
 //!    existed to reach);
-//! 3. `value.get` never regrows — `get → Option` is the map/list convention,
-//!    and the Result accessor is `value.field`.
+//! 3. `value.get` is the `get → Option` convention of map and list
+//!    (R-value-07): it answers `Value?`, never a Result — the Result reads
+//!    are `as_<kind>`.
 //!
 //! The executable twin of rule 1 is `tests/diagnostics/retired-json-alias/`
 //! (a retired spelling must FAIL with E002) and
@@ -79,7 +80,6 @@ const DROPPED: &[&str] = &[
     "json.as_bool",
     "json.as_array",
     "json.get",
-    "value.get",
 ];
 
 /// Rule 1: json's surface is EXACTLY the format identity, and the dropped
@@ -146,15 +146,14 @@ fn no_intrinsic_is_reachable_under_two_names() {
     }
 }
 
-/// Rule 3: the value side never regrows a `get`-shaped Result accessor:
-/// `value.field` is the survivor, and `get → Option` is the map/list
-/// convention.
+/// Rule 3: `value.get` keeps the map/list `get → Option` shape (R-value-07):
+/// it may never regrow the Result accessor the window dropped.
 #[test]
-fn value_get_never_regrows() {
-    let has_get = surface_decls("value.almd").iter().any(|(n, _)| n == "get");
+fn value_get_is_the_option_read() {
+    let path = format!("{}/stdlib/value.almd", env!("CARGO_MANIFEST_DIR"));
+    let src = std::fs::read_to_string(&path).expect("stdlib/value.almd");
     assert!(
-        !has_get,
-        "value.get regrew — get→Option is the map/list convention; \
-         the Result accessor is value.field"
+        src.lines().any(|l| l.starts_with("fn get(v: Value, key: String) -> Value? =")),
+        "value.get must be `fn get(v: Value, key: String) -> Value?` — get→Option is the map/list convention"
     );
 }

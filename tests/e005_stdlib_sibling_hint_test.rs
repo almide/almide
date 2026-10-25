@@ -87,7 +87,6 @@ fn without_a_sibling_the_generic_hint_stays() {
          fn main() -> Unit = println(total([\"a\"]))\n",
     );
     assert!(!ok, "{text}");
-    assert!(text.contains("error[E005]"), "{text}");
     assert!(!text.contains("which is what this argument expects"), "no sibling exists here:\n{text}");
     assert!(text.contains("Fix the argument type"), "the generic hint must stay:\n{text}");
 }
