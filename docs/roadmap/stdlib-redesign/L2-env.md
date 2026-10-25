@@ -91,7 +91,7 @@
 |---|---|---|---|---|
 | `env.args` | `effect fn args() -> List[String]` | Rust `env::args` / Go `os.Args` / Python `sys.argv` / Elixir `System.argv`（argv[0] を除くのは Elixir・Kotlin・Deno） | 据え置き | R-env-01（ここに集める） |
 | `env.get` | `effect fn get(name: String) -> String?` | Rust `var` / Go `LookupEnv` / Python `environ.get` / OCaml `getenv_opt` / Elixir `get_env` | 据え置き | R-env-01、R-env-03 |
-| `env.set` | `effect fn set(name: String, value: String) -> Unit` | Rust `set_var` / Go `Setenv` / Elixir `put_env` | 据え置き | — |
+| `env.set` | `effect fn set(name: String, value: String) -> Unit` | Rust `set_var` / Go `Setenv` / Elixir `put_env` | 据え置き（空の名前、名前の `=` と NUL、値の NUL は err。#4200、C-421） | — |
 | `env.cwd` | `effect fn cwd() -> String` | Rust `current_dir` / Go `Getwd` / Python `getcwd` / OCaml `getcwd` | 据え置き | — |
 | `env.os` | `fn os() -> String` | Rust `consts::OS` / Go `GOOS` / OCaml `os_type` | 据え置き（target ごとの定数。C-189） | — |
 | `env.sleep_ms` | `effect fn sleep_ms(ms: Int) -> Unit` | Rust `thread::sleep` / Go `time.Sleep` / Python `time.sleep` / Elixir `Process.sleep` | 据え置き（説明文だけ直す） | R-env-01 |

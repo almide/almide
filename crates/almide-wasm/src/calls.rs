@@ -193,14 +193,15 @@ impl Emitter<'_> {
                 // as Named after lower_module) — see `resolve_named_fn`.
                 let Some(i) = self.resolve_named_fn(name) else {
                     // Inside the fs module's own Almide bodies (the rooted
-                    // family, #4022) a sibling host-op fn arrives as Named:
-                    // the same lowering `fs.<name>` takes from outside.
+                    // family, #4022) and env's (`env.set` over `__set`, #4200)
+                    // a sibling host-op fn arrives as Named: the same lowering
+                    // `<module>.<name>` takes from outside.
                     // The call is re-dispatched as that module call on a pinned
                     // node; its ownership mark moves back to this node.
-                    if self.cur_module == Some("fs") {
+                    if let Some(module) = self.cur_module.filter(|m| matches!(*m, "fs" | "env")) {
                         let pinned = self.owned_call_marks.pin(IrExpr {
                             kind: IrExprKind::Call {
-                                target: CallTarget::Module { module: almide_base::intern::sym("fs"), func: almide_base::intern::sym(name), def_id: None },
+                                target: CallTarget::Module { module: almide_base::intern::sym(module), func: almide_base::intern::sym(name), def_id: None },
                                 args: Vec::new(),
                                 type_args: Vec::new(),
                             },

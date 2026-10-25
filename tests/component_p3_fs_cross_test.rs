@@ -217,9 +217,9 @@ const ENV_OVER_HOST: &str = r#"import env
 
 effect fn main() -> Unit = {
   println(env.get("ENVSET_3223_HOST") ?? "unset")
-  env.set("ENVSET_3223_HOST", "guest")
+  env.set("ENVSET_3223_HOST", "guest")!
   println(env.get("ENVSET_3223_HOST") ?? "unset")
-  env.set("ENVSET_3223_HOST", "")
+  env.set("ENVSET_3223_HOST", "")!
   println("[${env.get("ENVSET_3223_HOST") ?? "unset"}]")
 }
 "#;
@@ -231,7 +231,7 @@ const ENV_LOG_GROWS: &str = r#"import env
 effect fn main() -> Unit = {
   let v = string.repeat("x", 1000)
   for k in list.range(0, 100) {
-    env.set("ENVSET_3223_K${k}", "${k}${v}")
+    env.set("ENVSET_3223_K${k}", "${k}${v}")!
   }
   println("${string.len(env.get("ENVSET_3223_K0") ?? "")}")
   println("${string.len(env.get("ENVSET_3223_K99") ?? "")}")

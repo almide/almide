@@ -1,5 +1,6 @@
 //! A Unit effect intrinsic bound to an annotated `let` (`let n: Unit =
-//! env.set(…)`) runs on both legs. The wasm leg represents these calls as
+//! io.print(…)`) runs on both legs; `env.set(…)!`, the ok value of a
+//! fallible set (#4200), binds the same way. The wasm leg represents these calls as
 //! a `Result[Unit, String]` carrier; in statement position the carrier was
 //! dropped, but a binding that wanted a Unit refused it with
 //! `wall: ty-mismatch:Result(..)-vs-Unit` while native ran the program.
@@ -10,7 +11,7 @@ const SOURCE: &str = r#"import env
 import io
 
 effect fn main() -> Unit = {
-  let a: Unit = env.set("XF_UNIT_LET", "set")
+  let a: Unit = env.set("XF_UNIT_LET", "set")!
   let b: Unit = io.print("printed ")
   let c: Unit = env.sleep_ms(0)
   println(env.get("XF_UNIT_LET") ?? "unset")

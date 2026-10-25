@@ -5682,11 +5682,34 @@ effect fn args() -> List[String] = _
 @intrinsic("almide_rt_env_get")
 effect fn get(name: String) -> String? = _
 
-/// Sets name for this process and later spawns.
+/// Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
 @ordered
-@intrinsic("almide_rt_env_set")
 @category("Env.write")
-effect fn set(name: String, value: String) -> Unit = _
+effect fn set(name: String, value: String) -> Result[Unit, String] = match __set_refusal(name, value) {
+  some(why) => err("env.set: " + why),
+  none => {
+    __set(name, value)
+    ok(())
+  },
+}
+
+
+
+
+
+
+local fn __set_refusal(name: String, value: String) -> String? =
+  if name == "" then some("empty name")
+  else if string.contains(name, "=") then some("name contains '='")
+  else if string.contains(name, "\u{0}") then some("name contains NUL")
+  else if string.contains(value, "\u{0}") then some("value contains NUL")
+  else none
+
+
+@ordered
+@intrinsic("almide_rt_env___set")
+@category("Env.write")
+effect fn __set(name: String, value: String) -> Unit = _
 
 /// Absolute current directory; err if unreadable.
 @intrinsic("almide_rt_env_cwd")

@@ -1,0 +1,23 @@
+// @contract: C-421
+// env.set refuses the four pairs no environment can hold — an empty name,
+// `=` in the name, NUL in the name, NUL in the value — with the same err on
+// every leg and stores nothing (#4200). Native's set_var panicked on all
+// four (exit 101) where the wasm overlay stored the pair. A valid pair next
+// to them still sets. Names are fixture-unique.
+import env
+
+effect fn try_set(label: String, name: String, value: String) -> String = match env.set(name, value) {
+  ok(_) => "${label}: ok",
+  err(e) => "${label}: ${e}",
+}
+
+effect fn main() -> Unit = {
+  println(try_set("empty name", "", "v")!)
+  println(try_set("eq in name", "ALMIDE_C421_EQ=B", "v")!)
+  println(try_set("nul in name", "ALMIDE_C421\u{0}N", "v")!)
+  println(try_set("nul in value", "ALMIDE_C421_NUL", "a\u{0}b")!)
+  println(env.get("ALMIDE_C421_EQ") ?? "unset")
+  println(env.get("ALMIDE_C421_NUL") ?? "unset")
+  println(try_set("valid", "ALMIDE_C421_OK", "v")!)
+  println(env.get("ALMIDE_C421_OK") ?? "unset")
+}

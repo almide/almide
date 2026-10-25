@@ -13,7 +13,7 @@ const BIG: &str = r#"import env
 
 effect fn main() -> Unit = {
   let big = string.repeat("x", 200000)
-  env.set("XF_BIG", big)
+  env.set("XF_BIG", big)!
   let got = env.get("XF_BIG") ?? ""
   println("big ${string.len(got)} ${got == big}")
 }
@@ -26,7 +26,7 @@ const OVERWRITE: &str = r#"import env
 effect fn main() -> Unit = {
   let pad = string.repeat("v", 96)
   for i in 0..<5000 {
-    env.set("XF_SAME", "${i + 1000}${pad}")
+    env.set("XF_SAME", "${i + 1000}${pad}")!
   }
   println("same ${env.get("XF_SAME") ?? "unset"}")
 }
@@ -38,9 +38,9 @@ const DISTINCT: &str = r#"import env
 effect fn main() -> Unit = {
   let pad = string.repeat("v", 96)
   for i in 0..<2000 {
-    env.set("XF_K${i}", "${i + 1000}${pad}")
+    env.set("XF_K${i}", "${i + 1000}${pad}")!
   }
-  env.set("XF_K7", "re-set")
+  env.set("XF_K7", "re-set")!
   println("k0 ${env.get("XF_K0") ?? "unset"}")
   println("k7 ${env.get("XF_K7") ?? "unset"}")
   println("k999 ${env.get("XF_K999") ?? "unset"}")

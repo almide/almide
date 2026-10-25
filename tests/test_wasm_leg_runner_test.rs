@@ -73,7 +73,7 @@ fn env_set_does_not_leak_from_one_run_into_the_next() {
         let (bytes, _) = almide_wasm::emit_program_with_ops(&ir).expect("emits on the wasm leg");
         almide_wasm_run::run_wasm_unbounded(&bytes).expect("the embedded host runs the module")
     };
-    let setter = "import env\ntest \"set\" {\n  env.set(\"ALMIDE_T3046_LEAK\", \"leaked\")\n  assert_eq(env.get(\"ALMIDE_T3046_LEAK\") ?? \"none\", \"leaked\")\n}\n";
+    let setter = "import env\ntest \"set\" {\n  env.set(\"ALMIDE_T3046_LEAK\", \"leaked\")!\n  assert_eq(env.get(\"ALMIDE_T3046_LEAK\") ?? \"none\", \"leaked\")\n}\n";
     let reader = "import env\ntest \"get\" { assert_eq(env.get(\"ALMIDE_T3046_LEAK\") ?? \"none\", \"none\") }\n";
     let first = run(setter);
     assert_eq!(first.exit, 0, "the setter sees its own value:\n{}{}", first.stdout, first.stderr);

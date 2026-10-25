@@ -12,7 +12,7 @@ effect fn reader(key: String) -> Result[String, String] = {
 }
 
 effect fn writer(key: String) -> Result[String, String] = {
-  env.set(key, "written")
+  env.set(key, "written")!
   ok("w")
 }
 

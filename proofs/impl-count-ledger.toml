@@ -1245,7 +1245,7 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "env"
-name     = "set"
+name     = "__set"
 native   = 1
 emitter  = 0
 selfhost = 0

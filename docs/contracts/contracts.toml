@@ -5503,6 +5503,17 @@ evidence  = [
 ]
 
 [[contract]]
+id        = "C-421"
+spec      = "ALS-R5"
+title     = "env.set refuses an empty name, `=` or NUL in the name and NUL in the value with the same err on every leg, and stores nothing"
+statement = "ALS-R5 (almide/almide#4200): `env.set(name, value)` returns `Result[Unit, String]`. It answers `err` and stores nothing, on native, the embedded wasm host and stock p1 / p3 artifacts alike, for exactly the pairs no process environment can hold, checked in this order: an empty name (`env.set: empty name`), a name containing `=` (`env.set: name contains '='`), a name containing NUL (`env.set: name contains NUL`), a value containing NUL (`env.set: value contains NUL`). The texts name no user data (C-418). Every other pair is `ok(())` and is observed by `env.get` as C-329 states. Before, native's `set_var` panicked on all four (exit 101) where the wasm overlay stored the pair; the check runs in `env.set`'s Almide body ahead of the host op, so every leg answers the same bytes by construction."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/env_set_refusal.almd", class = "fixture" },
+]
+
+[[contract]]
 id        = "C-422"
 spec      = "ALS-T31"
 title     = "hash.hmac_sha256/512 equal the RFC 4231 vectors on every leg, key first, and is_valid_ accepts exactly the right tag"

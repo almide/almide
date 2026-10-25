@@ -454,7 +454,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect env.unix_timestamp() -> Int` — Wall-clock seconds since the Unix epoch.
 - `effect env.args() -> List[String]` — Program arguments, argv[0] excluded.
 - `effect env.get(name: String) -> Option[String]` — Value of name, or none if unset.
-- `effect env.set(name: String, value: String) -> Unit` — Sets name for this process and later spawns.
+- `effect env.set(name: String, value: String) -> Unit` — Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
 - `effect env.cwd() -> String` — Absolute current directory; err if unreadable.
 - `effect env.millis() -> Int` — Wall-clock ms since the Unix epoch.
 - `effect env.sleep_ms(ms: Int) -> Unit` — Blocks ms milliseconds; a negative ms hangs.

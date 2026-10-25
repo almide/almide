@@ -456,6 +456,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-418 | a runtime error text escapes the control and bidi characters of the user data it embeds, with one rule and the same bytes on every leg | 0.69.0 | active | fixture | 1 |
 | C-419 | bigint text in a radix that is not a power of two is limited to 4300 digits with one fixed text, a power-of-two radix has no limit, and bigint.pow refuses a result sure to pass 30 * 2^28 bits before computing | 0.69.0 | active | fixture | 1 |
 | C-420 | list.range_step lists every Int start + i * step strictly before end, with a count that does not wrap at the ends of Int | 0.69.0 | active | fixture | 1 |
+| C-421 | env.set refuses an empty name, `=` or NUL in the name and NUL in the value with the same err on every leg, and stores nothing | 0.69.0 | active | fixture | 1 |
 | C-422 | hash.hmac_sha256/512 equal the RFC 4231 vectors on every leg, key first, and is_valid_ accepts exactly the right tag | 0.69.0 | active | fixture | 1 |
 | C-423 | bytes/string.is_equal_constant_time answer equality with no data-dependent branch | 0.69.0 | active | fixture | 1 |
 | C-424 | --profile critical refuses a call to an @insecure_digest fn (md5, sha1) with E100 | 0.69.0 | active | fixture | 0 |

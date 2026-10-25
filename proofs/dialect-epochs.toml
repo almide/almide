@@ -361,6 +361,7 @@ breaks = [
   "`bigint.to_string` / `bigint.to_string_radix` in a radix that is not a power of two abort with `integer string conversion exceeds the limit of 4300 digits` for a result of more than 4300 digits (#4196, C-419)",
   "`bigint.pow` aborts with `pow result too large` when `(bit_length(base) - 1) * exp >= 30 * 2^28`, before computing (#4196, C-419)",
   "`list.range_step(start, end, step)` whose `end - start` overflows Int (bounds of opposite sign) lists the whole span instead of a wrapped, truncated count: `range_step(MIN, MAX, 2^62)` is 4 elements, not `[MIN]` (#4197, C-420)",
+  "`env.set(name, value)` is fallible (#4200, C-421): it errs, and sets nothing, on an empty name (`env.set: empty name`), a name containing `=` or NUL, and a value containing NUL, where native panicked (exit 101) and wasm stored the pair; a bare `env.set(k, v)` statement is now E042 — write `env.set(k, v)!`",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
