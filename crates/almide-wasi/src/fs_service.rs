@@ -185,6 +185,17 @@ pub fn service_wat_ext(fsp: u32, ops: &[i32], extra_arms: &str) -> String {
             "    (if (i32.eq (local.get $e) (i32.const {wasi})) (then (return (i32.const {at}) (i32.const {len}))))\n"
         ));
     }
+    // The bounded reader's two refusals (#4201) under pseudo-errnos past
+    // every WASI code: `$read_fd` answers them, the texts are almide-base's.
+    for (code, text) in [
+        (1001, almide_base::fs_errno::FS_READ_NOT_REGULAR_TEXT),
+        (1002, almide_base::fs_errno::FS_READ_TOO_LARGE_TEXT),
+    ] {
+        let (at, len) = place(text.as_bytes());
+        tail.push_str(&format!(
+            "    (if (i32.eq (local.get $e) (i32.const {code})) (then (return (i32.const {at}) (i32.const {len}))))\n"
+        ));
+    }
     tail.push_str("    (i32.const 0) (i32.const 0))\n");
     tail.push_str("  (func $op_name (param $op i32) (result i32 i32)\n");
     let mut named: Vec<i32> = FS_SERVICE_OPS.iter().map(|(_, _, n)| *n).collect();
