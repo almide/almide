@@ -120,29 +120,41 @@ pub(crate) fn emit_kill(key: IdxKey, fns: IdxFns, build: u32) -> Function {
 /// (a hole's slot is a tombstone, and a re-inserted key sits at a later
 /// ordinal).
 ///
-/// Under an ordered index (#4104) the tree holds live entries only, so an
-/// Int entry is live when its key finds exactly this entry.
-fn emit_live(
-    i: &mut wasm_encoder::InstructionSink<'_>,
-    key: IdxKey,
-    (hash, ord_find): (u32, u32),
-    ix: (u32, u32),
-    (block, esz, p, koff): (u32, u32, u32, u32),
-    (ord, h, s): (u32, u32, u32),
-) {
-    let (v, mask) = ix;
+/// Under an ordered index (#4104) the answer was taken before anything
+/// moved and is read from byte `ord - 1` of `flags` (`emit_mark_live`).
+fn emit_live(i: &mut wasm_encoder::InstructionSink<'_>, key: IdxKey, hash: u32, ix: (u32, u32), (p, koff, flags): (u32, u32, u32), (ord, h, s): (u32, u32, u32)) {
+    let (_, mask) = ix;
     if key == IdxKey::Str {
         i.local_get(p).local_get(koff).i32_add().i32_load(w(0)).i32_const(0).i32_ne();
         return;
     }
     i.local_get(mask).i32_const(ORDERED).i32_eq().if_(BlockType::Result(ValType::I32));
-    i.local_get(v).local_get(block).local_get(esz).local_get(koff);
-    i.local_get(p).local_get(koff).i32_add();
-    load_key(i, key);
-    i.call(ord_find).local_get(p).i32_eq();
+    i.local_get(flags).local_get(ord).i32_add().i32_const(1).i32_sub();
+    i.i32_load8_u(MemArg { offset: 0, align: 0, memory_index: 0 });
     i.else_();
     emit_live_hashed(i, key, hash, ix, (p, koff), (ord, h, s));
     i.end();
+}
+
+/// Under an ordered index, an Int entry is live when its key finds exactly
+/// this entry in the tree. The tree's compares read the keys of the entries
+/// its nodes name, so they must all be asked before the compaction moves
+/// any: byte `j` of the fresh `flags` is 1 for a live entry `j`.
+fn emit_mark_live(i: &mut wasm_encoder::InstructionSink<'_>, key: IdxKey, ord_find: u32, (v, block, esz, koff): (u32, u32, u32, u32), (p, end, flags): (u32, u32, u32)) {
+    let at = MemArg { offset: 0, align: 0, memory_index: 0 };
+    i.local_get(block).i32_load(len_memarg()).local_get(esz).i32_div_u().i32_const(1).i32_add().call(F_ALLOC).local_set(flags);
+    i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(p).local_get(end).i32_ge_u().br_if(1);
+    i.local_get(flags);
+    i.local_get(p).local_get(block).i32_sub().i32_const(almide_layout::PAYLOAD as i32).i32_sub();
+    i.local_get(esz).i32_div_u().i32_add();
+    i.local_get(v).local_get(block).local_get(esz).local_get(koff);
+    i.local_get(p).local_get(koff).i32_add();
+    load_key(i, key);
+    i.call(ord_find).local_get(p).i32_eq().i32_store8(at);
+    i.local_get(p).local_get(esz).i32_add().local_set(p);
+    i.br(0).end().end();
 }
 
 /// The hash-index half of `emit_live` (Int keys).
@@ -169,10 +181,10 @@ fn emit_live_hashed(i: &mut wasm_encoder::InstructionSink<'_>, key: IdxKey, hash
 /// slots were released by their deletes, so nothing is released here.
 pub(crate) fn emit_settle(key: IdxKey, fns: IdxFns) -> Function {
     // params: 0=block, 1=esz, 2=koff, 3=force; locals: 4=v, 5=p, 6=end,
-    // 7=wr, 8=ord, 9=mask, 10=h, 11=s
+    // 7=wr, 8=ord, 9=mask, 10=h, 11=s, 12=flags
     let (block, esz, koff, force) = (0u32, 1u32, 2u32, 3u32);
-    let (v, p, end, wr, ord, mask, h, s) = (4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32);
-    let mut f = Function::new([(8, ValType::I32)]);
+    let (v, p, end, wr, ord, mask, h, s, flags) = (4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32, 12u32);
+    let mut f = Function::new([(9, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).call(fns.side_get).local_tee(v).i32_const(1).i32_le_u().if_(BlockType::Empty);
     i.local_get(block).return_();
@@ -186,12 +198,18 @@ pub(crate) fn emit_settle(key: IdxKey, fns: IdxFns) -> Function {
     i.local_get(block).return_();
     i.end();
     i.local_get(v).i32_load(w(almide_layout::PAYLOAD + 4)).local_set(mask);
-    i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_tee(p).local_tee(wr);
+    i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add();
     i.local_get(block).i32_load(len_memarg()).i32_add().local_set(end);
+    if key == IdxKey::Int {
+        i.local_get(mask).i32_const(ORDERED).i32_eq().if_(BlockType::Empty);
+        emit_mark_live(&mut i, key, fns.ord.find, (v, block, esz, koff), (p, end, flags));
+        i.end();
+    }
+    i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_tee(p).local_set(wr);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(p).local_get(end).i32_ge_u().br_if(1);
     i.local_get(ord).i32_const(1).i32_add().local_set(ord);
-    emit_live(&mut i, key, (fns.hash, fns.ord.find), (v, mask), (block, esz, p, koff), (ord, h, s));
+    emit_live(&mut i, key, fns.hash, (v, mask), (p, koff, flags), (ord, h, s));
     i.if_(BlockType::Empty);
     i.local_get(wr).local_get(p).i32_ne().if_(BlockType::Empty);
     i.local_get(wr).local_get(p).local_get(esz).memory_copy(0, 0);
@@ -203,6 +221,9 @@ pub(crate) fn emit_settle(key: IdxKey, fns: IdxFns) -> Function {
     i.local_get(block).local_get(wr).local_get(block).i32_sub().i32_const(almide_layout::PAYLOAD as i32).i32_sub();
     i.i32_store(len_memarg());
     i.local_get(v).call(F_FREE);
+    i.local_get(flags).if_(BlockType::Empty);
+    i.local_get(flags).call(F_FREE);
+    i.end();
     i.local_get(block).i32_const(1).call(fns.side_set).drop();
     i.local_get(block);
     i.end();
