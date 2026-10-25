@@ -640,4 +640,4 @@ tag は `hex.decode` で戻してから渡す（大小どちらの 16 進も受�
 脱出はない。
 
 テスト: `spec/wasm_cross/hash_hmac_rfc4231.almd`、
-`spec/wasm_cross/bytes_is_equal_constant_time.almd`。Contracts: C-420, C-421。
+`spec/wasm_cross/bytes_is_equal_constant_time.almd`。Contracts: C-422, C-423。

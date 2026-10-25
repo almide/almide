@@ -1,4 +1,4 @@
-// @contract: C-421
+// @contract: C-423
 // #4106: bytes.is_equal_constant_time / string.is_equal_constant_time answer
 // exactly what == answers — true iff same length and same bytes — on every
 // leg: equal, a difference at the first byte, at the last byte, a length

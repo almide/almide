@@ -79,7 +79,7 @@ e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 HMAC-SHA256 (RFC 2104) of `b` under `key` — **key first**. 32 bytes; the
 `_hex` cell gives 64 lowercase hex characters, and `hmac_sha512` /
 `hmac_sha512_hex` are the SHA-512 pair. Equal to the RFC 4231 vectors on
-both targets (C-420). Never build a MAC as `hash.sha256(key ++ msg)`: that
+both targets (C-422). Never build a MAC as `hash.sha256(key ++ msg)`: that
 is forgeable by length extension.
 
 ```almd run
@@ -96,7 +96,7 @@ fn main() -> Unit = {
 ### `hash.is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool`
 
 Verify a MAC: true iff `tag` is the HMAC-SHA256 of `b` under `key`, compared
-in constant time (C-421). This is the call for a webhook signature header — do
+in constant time (C-423). This is the call for a webhook signature header — do
 not compute the MAC and compare it with `==`, which returns at the first
 differing byte and leaks the MAC through timing. A header carries the tag as
 hex: decode it with `hex.decode` (either case). `?? bytes.from_list([])` turns

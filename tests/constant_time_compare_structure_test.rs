@@ -1,4 +1,4 @@
-//! #4106 structural constant-time gate (C-421). `bytes.is_equal_constant_time`
+//! #4106 structural constant-time gate (C-423). `bytes.is_equal_constant_time`
 //! / `string.is_equal_constant_time` promise no early exit on the first
 //! differing byte. The cross fixture only shows the ANSWER is right; this gate
 //! inspects the CODE both legs actually run, deterministically:

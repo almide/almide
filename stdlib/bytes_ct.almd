@@ -1,4 +1,4 @@
-// bytes_ct — SELF-HOSTED constant-time equality for wasm (#4106, C-421):
+// bytes_ct — SELF-HOSTED constant-time equality for wasm (#4106, C-423):
 // `bytes.is_equal_constant_time` and `string.is_equal_constant_time`. The
 // native leg is the runtime intrinsic (runtime/rs/src/{bytes,string}.rs).
 //

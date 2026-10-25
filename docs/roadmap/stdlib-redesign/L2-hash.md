@@ -100,7 +100,7 @@ MD5・SHA-1・SHA-512 は 7 言語（● と ◐）が持っています（[fact
 - 根拠の L0 規則: R-L0-09（Bool は `is_`）、R-L0-30（役割ごとに 1 つの引数名: `key`・`b`・`tag`）、規則 1（入力は `Bytes`）、R-hash-05（`_hex` は出力の符号化だけ）、R-L0-25（16 進の文字列からは `hex.decode`）、R-L0-01（`is_valid_` と `hex.decode` の組み合わせを、もう 1 つの綴りにしない）。
 - (a) Swift CryptoKit `HMAC<SHA256>.isValidAuthenticationCode`、Rust `Mac::verify_slice`（検証のセル）。Go `hmac.Equal`、Python `hmac.compare_digest`、Node `crypto.timingSafeEqual`（定数時間の比較）。
 - (d) 追加。md5・sha1 の E100 は `--profile critical` だけの拒否で、epoch 15 の breaks に記録します。
-- 契約: C-420（RFC 4231）、C-421（定数時間の比較）、C-422（E100）。
+- 契約: C-422（RFC 4231）、C-423（定数時間の比較）、C-424（E100）。
 - issue: #4106
 
 ## L3: 関数表

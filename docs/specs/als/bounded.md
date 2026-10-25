@@ -357,4 +357,4 @@ effect fn main() -> Unit = println("${sum_first([1, 2, 3]) ?? -1}")
 拒否する。拒否する集合は宣言（`stdlib/hash.almd` の属性）から導き、名前の一覧
 からは導かない。プロファイルなしで検査した同じプログラムは変わらない。
 
-テスト: `tests/diagnostics/e100-critical-insecure-digest/`。Contracts: C-422。
+テスト: `tests/diagnostics/e100-critical-insecure-digest/`。Contracts: C-424。

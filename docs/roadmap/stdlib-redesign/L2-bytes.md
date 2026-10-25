@@ -359,7 +359,7 @@
 - (a) Go `subtle.ConstantTimeCompare`、Python `hmac.compare_digest`、Node `crypto.timingSafeEqual`、Java `MessageDigest.isEqual`。
 - protocol（R-L0-37）: `String` と `Bytes` が同じ役割で持つので、`Text` の要件として 1 回だけ宣言します（[protocol-view](protocol-view.md) の `Text` の行。モジュールの関数は要件そのもの）。
 - 綴り（R-L0-00）: 多数派はありません（Go `ConstantTimeCompare`・`hmac.Equal`、Python `compare_digest`、Node `timingSafeEqual`、Erlang `hash_equals`、Rust `subtle` の `ct_eq`、Java `isEqual`）。`compare` は `Ord` の 3 値（R-L0-16）なので使わず、Bool の `is_`（R-L0-09）に「等しい」と「定数時間」をそのまま書きます。
-- (d) 追加。契約 C-421。issue: #4106（R-hash-06）
+- (d) 追加。契約 C-423。issue: #4106（R-hash-06）
 
 ## L3: 関数表
 

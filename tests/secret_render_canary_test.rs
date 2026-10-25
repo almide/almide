@@ -1,4 +1,4 @@
-//! #4107 canary gate (C-423): a canary planted in Secrets and in a field a
+//! #4107 canary gate (C-425): a canary planted in Secrets and in a field a
 //! user `T.repr` hides must never reach a byte of stdout or stderr, on the
 //! native leg, the wasm leg, the interpreter, and an `almide test` report.
 //!

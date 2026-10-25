@@ -1,4 +1,4 @@
-// @contract: C-420
+// @contract: C-422
 // #4106: HMAC-SHA256 / HMAC-SHA512 (RFC 2104) are byte-identical native ==
 // wasm and equal the RFC 4231 vectors, test cases 1-7: the short key (1), a
 // key shorter than the data (2), 0xaa/0xdd fill (3), a 25-byte counting key

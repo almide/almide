@@ -27,7 +27,7 @@ Option/Result・ネストした複合値は、要素ごとに再帰的に比較�
 `Secret[String]` と `Secret[Bytes]` の `==` は中身を定数時間で比べる（ALS-T31）。
 それ以外の `Secret[A]`、Secret を含む variant・Map・Set の `==` は検査時のエラー
 E103 で拒否する（`spec/wasm_cross/secret_eq_and_decode.almd`）。
-Contracts: C-015, C-424。
+Contracts: C-015, C-426。
 
 ## ALS-C4 範囲外アクセスの縮退規則
 
