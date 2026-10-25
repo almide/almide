@@ -363,7 +363,7 @@ const SHAPE_RECIPES: &[Recipe] = &[
         size: "b",
         args: &[("b", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 256))"), ("src_start", "0"), ("src_end", "2"), ("dst", "2")],
     },
-    Recipe { func: "bytes.copy_from", size: "dst", args: &[("src_off", "0")] },
+    Recipe { func: "bytes.copy_from", size: "b", args: &[("src_off", "0")] },
     // A pattern the sized "aéaé…" matches whole; the generic pattern was
     // the sized string and the subject 2 characters, so it never matched.
     Recipe { func: "regex.full_match", size: "s", args: &[("pat", "\"(aé)*\"")] },
@@ -617,7 +617,7 @@ impl Target {
         };
         // `{as_t}`: the conversion of an Int to the instantiated `T` (a
         // generic recipe's callback returns a T at Int and at String alike).
-        let as_t = match self.subst.get("T") {
+        let as_t = match self.subst.get("T").or_else(|| self.subst.get("A")) {
             Some(GenType::String) => "int.to_string",
             _ => "",
         };
