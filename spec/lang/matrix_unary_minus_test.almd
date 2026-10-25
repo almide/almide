@@ -1,0 +1,15 @@
+// Unary minus on a Matrix is matrix.neg (#3965): the checker accepted `-m`,
+// and lowering emitted NegInt, an IR verify ICE.
+
+test "unary minus negates every element" {
+  let a = matrix.from_lists([[1.0, -2.0], [3.0, 0.5]])
+  let n = -a
+  assert_eq(matrix.to_lists(n), [[-1.0, 2.0], [-3.0, -0.5]])
+  assert_eq(matrix.to_lists(n), matrix.to_lists(matrix.neg(a)))
+}
+
+test "unary minus composes with the matrix operators" {
+  let a = matrix.from_lists([[1.0, 2.0], [3.0, 4.0]])
+  assert_eq(matrix.to_lists(a + -a), [[0.0, 0.0], [0.0, 0.0]])
+  assert_eq(matrix.to_lists(-(-a)), matrix.to_lists(a))
+}
