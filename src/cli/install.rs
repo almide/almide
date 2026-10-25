@@ -36,11 +36,9 @@ pub fn cmd_install(
         std::process::exit(1);
     }
     // A `--name` is checked before anything is fetched (#4183).
-    if let Some(n) = name_override {
-        if let Err(e) = check_bin_name(n) {
-            err(&format!("error: --name {e}"));
-            std::process::exit(1);
-        }
+    if let Some(Err(e)) = name_override.map(check_bin_name) {
+        err(&format!("error: --name {e}"));
+        std::process::exit(1);
     }
     let src_dir = match resolve_source(spec, tag, branch) {
         Ok(p) => p,
