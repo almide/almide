@@ -1,44 +1,129 @@
-// io — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 4b).
+// io — the standard streams and the I/O protocols (R-L0-44, R-io-05).
+//
+// `Read`, `Write` and `Close` are built-in protocols: a handle that can be
+// read (`Stdin`, `net.TcpStream`, `unix.Fd`), written (`Stdout`, `Stderr`,
+// `net.TcpStream`, `unix.Fd`) or closed (`net.TcpStream`, `net.TcpListener`,
+// `net.UdpSocket`, `unix.Fd`). `read` / `read_exact` / `read_to_end` / `write`
+// / `close` are written ONCE here over them; each handle's own module
+// supplies its `__<type>_read` / `_write` / `_close`.
+//
+// The generic functions declare no category of their own (`@category()`): a
+// handle is the capability. Only the function that makes one reaches the host
+// for it — `io.stdin` (IO.stdin), `net.tcp_connect` (Net.fetch),
+// `unix.listen` (Net.listen) — and no handle can be forged: each is an opaque
+// `mod type`, built only inside its module.
 //
 // Every reader is an `effect fn`: a plain `fn` writes and aborts but never
-// reads (ADR-0022). `read_byte` / `read_n_bytes` were plain until #3248 and
-// let a plain fn read stdin. The two plain fns left are writes to stdout.
-/// Next stdin line, newline cut, bad UTF-8 as U+FFFD; "" at EOF too — read_line_opt tells them apart.
+// reads (ADR-0022). Requires `import io`.
+/// The standard input stream; a Read handle.
+mod type Stdin: Read = Int
+
+/// The standard output stream; a Write handle.
+mod type Stdout: Write = Int
+
+/// The standard error stream; a Write handle.
+mod type Stderr: Write = Int
+
+// ── Text shortcuts ──
+/// Next stdin line, newline cut, bad UTF-8 as U+FFFD; none at EOF, some("") for an empty line.
 @ordered
 @intrinsic("almide_rt_io_read_line")
-effect fn read_line() -> String = _
-
-/// Next stdin line, newline cut; none at EOF, some("") for an empty line.
-@ordered
-@intrinsic("almide_rt_io_read_line_opt")
-effect fn read_line_opt() -> String? = _
-
-/// Writes s, no newline, then flushes.
-@intrinsic("almide_rt_io_print")
-@category("IO.stdout")
-effect fn print(s: String) -> Unit = _
+effect fn read_line() -> String? = _
 
 /// Rest of stdin as text, bad UTF-8 as U+FFFD; empty at EOF.
 @ordered
 @intrinsic("almide_rt_io_read_all")
 effect fn read_all() -> String = _
 
-/// Next stdin byte 0..255, or -1 at EOF.
-@ordered
-@intrinsic("almide_rt_io_read_byte")
-effect fn read_byte() -> Int = _
-
-/// Up to n stdin bytes; [] if n <= 0.
-@ordered
-@intrinsic("almide_rt_io_read_n_bytes")
-effect fn read_n_bytes(n: Int) -> List[Int] = _
-
-/// Low byte of each Int to stdout; unflushed.
-@intrinsic("almide_rt_io_write_bytes")
+/// Writes s to stdout, no newline, then flushes.
+@intrinsic("almide_rt_io_print")
 @category("IO.stdout")
-effect fn write_bytes(data: List[Int]) -> Unit = _
+effect fn print(s: String) -> Unit = _
 
-/// Raw data to stdout; no newline.
+/// Writes s to stderr, no newline.
+@intrinsic("almide_rt_io_eprint")
+@category("IO.stderr")
+effect fn eprint(s: String) -> Unit = _
+
+// ── The stream handles ──
+/// Standard input, for io.read / read_exact / read_to_end.
+@category("IO.stdin")
+effect fn stdin() -> Stdin = Stdin(0)
+
+/// Standard output, for io.write.
+@category("IO.stdout")
+effect fn stdout() -> Stdout = Stdout(1)
+
+/// Standard error, for io.write.
+@category("IO.stderr")
+effect fn stderr() -> Stderr = Stderr(2)
+
+// ── Bytes over any handle ──
+/// Up to max bytes from h; empty once h has ended; err if max < 0.
+@category()
+effect fn read[H: Read](h: H, max: Int) -> Result[Bytes, String] =
+  if max < 0 then err("io.read: negative length ${max}") else h.__self_read(max)
+
+/// Exactly n bytes from h; err if h ends first, naming how many arrived.
+@category()
+effect fn read_exact[H: Read](h: H, n: Int) -> Result[Bytes, String] =
+  if n < 0 then err("io.read_exact: negative length ${n}") else __read_exact_from(h, n, 0, [])
+
+/// Every byte until h ends.
+@category()
+effect fn read_to_end[H: Read](h: H) -> Result[Bytes, String] = __read_to_end_from(h, [])
+
+/// Writes all of data to h.
+@category()
+effect fn write[H: Write](h: H, data: Bytes) -> Result[Unit, String] = h.__self_write(data)
+
+/// Closes h; closing twice is ok.
+@category()
+effect fn close[H: Close](h: H) -> Result[Unit, String] = h.__self_close()
+
+// One read of read_exact / read_to_end asks for at most 65536 bytes: a read
+// answers what has arrived, so the bound never shortens what they deliver, and
+// a huge `n` never sizes a buffer.
+effect fn __read_exact_from[H: Read](h: H, n: Int, got: Int, chunks: List[Bytes]) -> Result[Bytes, String] =
+  if got >= n then ok(list.join(chunks, bytes.new()))
+  else {
+    let left = n - got
+    let b = h.__self_read(if left > 65536 then 65536 else left)!
+    if bytes.len(b) == 0 then err("io.read_exact: the stream ended after ${got} of ${n} bytes")
+    else __read_exact_from(h, n, got + bytes.len(b), chunks + [b])
+  }
+
+effect fn __read_to_end_from[H: Read](h: H, chunks: List[Bytes]) -> Result[Bytes, String] = {
+  let b = h.__self_read(65536)!
+  if bytes.len(b) == 0 then ok(list.join(chunks, bytes.new())) else __read_to_end_from(h, chunks + [b])
+}
+
+// ── The streams' own requirements ──
+/// Up to max bytes of stdin; fewer only at its end.
+@ordered
+@intrinsic("almide_rt_io_read_bytes")
+effect fn __read_stdin_bytes(max: Int) -> Bytes = _
+
+/// data to stdout, unflushed; shares println's buffer, so order is program order.
 @intrinsic("almide_rt_io_write")
 @category("IO.stdout")
-effect fn write(data: Bytes) -> Unit = _
+effect fn __write_stdout(data: Bytes) -> Unit = _
+
+/// data to stderr, after flushing stdout.
+@intrinsic("almide_rt_io_write_stderr")
+@category("IO.stderr")
+effect fn __write_stderr(data: Bytes) -> Unit = _
+
+effect fn __stdin_read(_h: Stdin, max: Int) -> Result[Bytes, String] = ok(__read_stdin_bytes(max))
+
+@category("IO.stdout")
+effect fn __stdout_write(_h: Stdout, data: Bytes) -> Result[Unit, String] = {
+  __write_stdout(data)
+  ok(())
+}
+
+@category("IO.stderr")
+effect fn __stderr_write(_h: Stderr, data: Bytes) -> Result[Unit, String] = {
+  __write_stderr(data)
+  ok(())
+}

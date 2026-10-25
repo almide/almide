@@ -344,7 +344,10 @@ impl Emitter<'_> {
                 // The subprocess family (#2589) is self-hosted over the
                 // `__proc_*` leaves (stdlib/process_wasm.almd): the registry
                 // route, as http's non-host fns take it.
-                if module.as_str() == "process" {
+                // io's handle layer (R-L0-44: `io.read` / `io.write` over a
+                // handle, the streams' `__stdin_read` / `__stdout_write`) is
+                // Almide over the leaves above, and takes the same route.
+                if matches!(module.as_str(), "process" | "io") {
                     return self.lower_module_call_c(target, args, tail, ret_hint);
                 }
                 // `env.set` is written in Almide over its `__set` op (#4200):

@@ -1,6 +1,6 @@
 //! #2114: stdin lines grow through the existing owned-string accumulator.
 //! Stop only at LF/EOF; never consume a byte belonging to the next line.
-//! #2539: `read_line_opt` is the same walk, answering `none` at end of input.
+//! #2539: `io.read_line` answers `none` at end of input (R-io-01).
 use wasm_encoder::BlockType;
 
 use crate::emitter::Emitter;
@@ -8,13 +8,9 @@ use crate::work::Helper;
 use crate::*;
 
 impl Emitter<'_> {
-    pub(crate) fn io_read_line(&mut self) -> Result<(), EmitError> {
-        self.io_read_line_into(None)
-    }
-
-    /// #2539: the same line read, but `none` when not a single byte was
-    /// left — an empty line (just LF) is `some("")`, which `read_line`'s
-    /// bare String cannot say. `got` flips on the first byte taken.
+    /// #2539, R-io-01: `io.read_line` — `none` when not a single byte was
+    /// left; an empty line (just LF) is `some("")`. `got` flips on the
+    /// first byte taken.
     pub(crate) fn io_read_line_opt(&mut self) -> Result<(), EmitError> {
         let got = self.hold_i32()?;
         self.f.instructions().i32_const(0).local_set(got);
