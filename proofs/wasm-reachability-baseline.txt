@@ -34,7 +34,7 @@
 # process.* rows left — the subprocess family builds over almide:process/spawn,
 # ADR-0025, and process.env / process.sleep over host ops 26 / 36):
 #
-# UNPROBEABLE (113) — the sweep's OWN coverage hole, not a compiler
+# UNPROBEABLE (126) — the sweep's OWN coverage hole, not a compiler
 # verdict: the argument synthesizer has no literal for these parameter types
 # (Matrix, Value, Json, RawPtr, closures). Shrinking this list widens what
 # the ratchet can see, so it is listed and ratcheted too.
@@ -158,13 +158,26 @@ value.as_array :: UNPROBEABLE :: no candidate shape builds natively
 value.as_bool :: UNPROBEABLE :: no candidate shape builds natively
 value.as_float :: UNPROBEABLE :: no candidate shape builds natively
 value.as_int :: UNPROBEABLE :: no candidate shape builds natively
+value.as_object :: UNPROBEABLE :: no candidate shape builds natively
 value.as_string :: UNPROBEABLE :: no candidate shape builds natively
 value.field :: UNPROBEABLE :: no candidate shape builds natively
+value.get :: UNPROBEABLE :: no candidate shape builds natively
+value.get_array :: UNPROBEABLE :: no candidate shape builds natively
+value.get_bool :: UNPROBEABLE :: no candidate shape builds natively
+value.get_float :: UNPROBEABLE :: no candidate shape builds natively
+value.get_int :: UNPROBEABLE :: no candidate shape builds natively
+value.get_object :: UNPROBEABLE :: no candidate shape builds natively
+value.get_path :: UNPROBEABLE :: parameter type outside the synthesizer
+value.get_string :: UNPROBEABLE :: no candidate shape builds natively
+value.index :: UNPROBEABLE :: parameter type outside the synthesizer
+value.key :: UNPROBEABLE :: parameter type outside the synthesizer
 value.keys :: UNPROBEABLE :: no candidate shape builds natively
 value.merge :: UNPROBEABLE :: no candidate shape builds natively
 value.object :: UNPROBEABLE :: no candidate shape builds natively
 value.omit :: UNPROBEABLE :: no candidate shape builds natively
 value.pick :: UNPROBEABLE :: no candidate shape builds natively
+value.remove_path :: UNPROBEABLE :: parameter type outside the synthesizer
+value.set_path :: UNPROBEABLE :: parameter type outside the synthesizer
 value.stringify :: UNPROBEABLE :: no candidate shape builds natively
 value.to_camel_case :: UNPROBEABLE :: no candidate shape builds natively
 value.to_snake_case :: UNPROBEABLE :: no candidate shape builds natively
