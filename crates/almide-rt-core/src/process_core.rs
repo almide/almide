@@ -576,6 +576,37 @@ pub fn almide_proc_with<R>(h: i64, f: impl FnOnce(&mut AlmideProcChild) -> R) ->
     Ok(f(c))
 }
 
+/// The grace `almide_proc_stop_all_unwaited` gives each child between SIGTERM
+/// and SIGKILL — the 500 ms the stdlib docs show `process.stop` with.
+pub const ALMIDE_PROC_EXIT_GRACE_MS: i64 = 500;
+
+/// At program exit (#4214): stop every `process.start` child whose outcome is
+/// not recorded yet — neither waited on nor stopped — the way `process.stop`
+/// does (`AlmideProcChild::stop`, ALMIDE_PROC_EXIT_GRACE_MS), so no child the
+/// program started outlives it. A child already waited on or stopped is left
+/// alone. A poisoned table is still walked; a table another thread holds (a
+/// `wait` in a `fan` element) is waited for at most 1 s, then left — an exit
+/// never deadlocks on it.
+pub fn almide_proc_stop_all_unwaited() {
+    let m = almide_proc_handles();
+    let until = std::time::Instant::now() + std::time::Duration::from_millis(1000);
+    let mut t = loop {
+        match m.try_lock() {
+            Ok(g) => break g,
+            Err(std::sync::TryLockError::Poisoned(p)) => break p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) if std::time::Instant::now() < until => {
+                std::thread::sleep(std::time::Duration::from_millis(5))
+            }
+            Err(std::sync::TryLockError::WouldBlock) => return,
+        }
+    };
+    for c in t.iter_mut().flatten() {
+        if c.done.is_none() {
+            let _ = c.stop(ALMIDE_PROC_EXIT_GRACE_MS);
+        }
+    }
+}
+
 /// `process.start`: the new child's handle.
 pub fn almide_proc_start(cmd: &str, args: &[impl AsRef<str>], dir: &str, stdin: &str, timeout_ms: i64) -> Result<i64, String> {
     let c = AlmideProcChild::start("process.start", cmd, args, dir, stdin, timeout_ms)?;

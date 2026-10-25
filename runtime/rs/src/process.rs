@@ -57,9 +57,12 @@ pub fn almide_rt_process_exec(cmd: &str, args: &[AlmideString]) -> Result<Almide
 
 // Inside a `fan` element the exit waits for the elements below it, exactly as a
 // trap does (ADR-0024 D6): a failed assert outside a test lowers to
-// `eprintln` + `process.exit(1)`.
+// `eprintln` + `process.exit(1)`. Then the exit-time teardown main's return
+// runs too (#4214): every `process.start` child neither waited on nor stopped
+// is stopped before the exit status is reported.
 pub fn almide_rt_process_exit(code: i64) -> ! {
     almide_fan_trap_wait();
+    almide_at_exit_run();
     almide_stdout_flush();
     std::process::exit(code as i32);
 }
@@ -167,6 +170,9 @@ pub fn almide_rt_process___os_run(cmd: &str, args: &[AlmideString], dir: &str, s
 pub fn almide_rt_process___os_start(cmd: &str, args: &[AlmideString], dir: &str, stdin: &str, timeout_ms: i64) -> Result<i64, AlmideString> {
     let __almide_r: Result<i64, String> = (|| {
         almide_stdout_flush();
+        // #4214: from the first start on, every exit route stops the children
+        // still running (the prelude's one exit-time slot, set once).
+        let _ = ALMIDE_AT_EXIT.set(almide_proc_stop_all_unwaited);
         let _quiet = AlmideSigpipeIgnored::new();
         almide_proc_start(cmd, args, dir, stdin, timeout_ms)
     })();

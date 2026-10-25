@@ -380,13 +380,25 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("        { ALMIDE_STDOUT_LIVE.with(|c| c.set(true)); std::cell::RefCell::new(std::io::BufWriter::with_capacity(65536, std::io::stdout())) };\n}\n");
     s.push_str(&format!("{vis}fn almide_stdout_is_terminal() -> bool {{ static TTY: std::sync::OnceLock<bool> = std::sync::OnceLock::new(); *TTY.get_or_init(|| std::io::IsTerminal::is_terminal(&std::io::stdout())) }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_flush() {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let _ = std::io::Write::flush(&mut *buf.borrow_mut()); }}); }}\n"));
-    // The exit-time counterpart: flush, then give back the two allocations the
+    // The exit-time teardown a linked runtime module owns (#4214): `process`
+    // sets it the first time a child starts, to stop every `process.start`
+    // child neither waited on nor stopped, so no child outlives the program.
+    // The prelude names no module symbol — a program that never starts a
+    // child does not link `process` — and pays one load when the slot is
+    // empty. ONE slot: a second module with exit-time work makes it a list.
+    // Every native exit route runs it: main's return and main's effect error
+    // (the `fn main` wrapper's `almide_stdout_finish`, below) and
+    // `process.exit` (runtime/rs/src/process.rs).
+    s.push_str(&format!("{vis}static ALMIDE_AT_EXIT: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();\n"));
+    s.push_str(&format!("{vis}fn almide_at_exit_run() {{ if let Some(f) = ALMIDE_AT_EXIT.get() {{ f() }} }}\n"));
+    // The exit-time counterpart: the module teardown above, then flush, then
+    // give back the two allocations the
     // buffer and the panic hook hold — the 64 KiB buffer (swapped for a
     // zero-capacity writer; the main thread's thread-locals are never
     // destructed at process exit) and the hook's box (`take_hook` restores
     // the default) — so the allocation ledger sees a process that frees what
     // it allocated, not a leak by design.
-    s.push_str(&format!("{vis}fn almide_stdout_finish() {{ almide_stdout_flush(); ALMIDE_STDOUT_BUF.with(|buf| {{ let _ = std::mem::replace(&mut *buf.borrow_mut(), std::io::BufWriter::with_capacity(0, std::io::stdout())); }}); drop(std::panic::take_hook()); }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_finish() {{ almide_at_exit_run(); almide_stdout_flush(); ALMIDE_STDOUT_BUF.with(|buf| {{ let _ = std::mem::replace(&mut *buf.borrow_mut(), std::io::BufWriter::with_capacity(0, std::io::stdout())); }}); drop(std::panic::take_hook()); }}\n"));
     // The ONE runtime abort (#3022): `Error: <msg>\n` on stderr, then exit 1
     // (the §13 termination convention). Every abort the runtime and the
     // prelude macros raise goes through here, behind a process-wide once-guard:
