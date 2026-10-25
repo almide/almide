@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 864  implementations = 1988
+# holes = 859  implementations = 1966
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -1112,7 +1112,7 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "datetime"
-name     = "from_parts"
+name     = "__from_parts"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -1555,33 +1555,26 @@ total    = 3
 module   = "fs"
 name     = "read_bytes"
 native   = 1
-emitter  = 1
-selfhost = 4
-total    = 6
-[[hole]]
-module   = "fs"
-name     = "write"
-native   = 1
-emitter  = 0
-selfhost = 3
-total    = 4
-[[hole]]
-module   = "fs"
-name     = "write_bytes"
-native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "fs"
-name     = "write_bytes_raw"
+name     = "write_text"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "fs"
-name     = "append"
+name     = "write_bytes"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "append_text"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -1666,13 +1659,6 @@ total    = 2
 [[hole]]
 module   = "fs"
 name     = "read_lines_if_exists"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "fs"
-name     = "read_bytes_raw_if_exists"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -1789,13 +1775,6 @@ native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
-[[hole]]
-module   = "fs"
-name     = "read_bytes_raw"
-native   = 1
-emitter  = 0
-selfhost = 2
-total    = 3
 [[hole]]
 module   = "fs"
 name     = "__root_read_text"
@@ -3163,13 +3142,6 @@ selfhost = 2
 total    = 4
 [[hole]]
 module   = "list"
-name     = "binary_search"
-native   = 1
-emitter  = 1
-selfhost = 1
-total    = 3
-[[hole]]
-module   = "list"
 name     = "push"
 native   = 1
 emitter  = 0
@@ -3261,7 +3233,7 @@ selfhost = 5
 total    = 6
 [[hole]]
 module   = "map"
-name     = "entries"
+name     = "to_list"
 native   = 1
 emitter  = 0
 selfhost = 4
@@ -4832,15 +4804,15 @@ module   = "process"
 name     = "__os_output"
 native   = 1
 emitter  = 0
-selfhost = 1
-total    = 2
+selfhost = 0
+total    = 1
 [[hole]]
 module   = "process"
 name     = "__os_run"
 native   = 1
 emitter  = 0
-selfhost = 1
-total    = 2
+selfhost = 0
+total    = 1
 [[hole]]
 module   = "process"
 name     = "__os_start"
@@ -5375,11 +5347,11 @@ selfhost = 1
 total    = 3
 [[hole]]
 module   = "string"
-name     = "chars"
+name     = "to_list"
 native   = 1
-emitter  = 1
+emitter  = 0
 selfhost = 1
-total    = 3
+total    = 2
 [[hole]]
 module   = "string"
 name     = "index_of"
@@ -5445,14 +5417,14 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "string"
-name     = "codepoint"
+name     = "to_codepoint"
 native   = 1
-emitter  = 1
+emitter  = 0
 selfhost = 1
-total    = 3
+total    = 2
 [[hole]]
 module   = "string"
-name     = "from_codepoint"
+name     = "__from_codepoint"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -5480,7 +5452,7 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "string"
-name     = "count"
+name     = "count_matches"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -5614,20 +5586,6 @@ total    = 2
 [[hole]]
 module   = "testing"
 name     = "assert_approx"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "testing"
-name     = "assert_gt"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "testing"
-name     = "assert_lt"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -5935,7 +5893,7 @@ selfhost = 1
 total    = 3
 [[hole]]
 module   = "value"
-name     = "str"
+name     = "string"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -5971,6 +5929,13 @@ total    = 2
 [[hole]]
 module   = "value"
 name     = "keys"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "value"
+name     = "as_object"
 native   = 1
 emitter  = 0
 selfhost = 1

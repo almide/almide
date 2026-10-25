@@ -324,6 +324,11 @@ fn cell_user_bound(proto: &str) -> String {
         Some(almide_frontend::types::Ty::String) => "string.len(keep(\"z\"))",
         Some(almide_frontend::types::Ty::Float) => "float.to_int(keep(1.0))",
         Some(almide_frontend::types::Ty::Int) => "keep(1)",
+        // A protocol only stdlib NOMINAL types meet (`Read`, `Write`,
+        // `Close`, `HttpMessage`: each type answers by its own
+        // `__<type>_<verb>`) has no builtin conformer to instantiate: the
+        // bound alone is the reference the redeclaring module must not capture.
+        None => "0",
         other => panic!("{proto}: teach the cell a witness for conformer {other:?}"),
     };
     cell_user_with(&format!("fn keep[T: {proto}](x: T) -> T = x\n\n"), witness)

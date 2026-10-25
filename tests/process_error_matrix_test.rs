@@ -135,7 +135,14 @@ fn every_spawn_failure_names_its_call_and_operand() {
 fn the_family_members_are_distinguishable_from_each_other() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut seen: Vec<(String, String)> = Vec::new();
-    for (i, (call, _)) in rows().into_iter().enumerate() {
+    let mut heads: Vec<String> = Vec::new();
+    for (i, (call, head)) in rows().into_iter().enumerate() {
+        // One fn spelled with several ProcessCommand fields (`timeout_ms`,
+        // `stdin`) is ONE member: its rows share a head by design.
+        if heads.contains(&head) {
+            continue;
+        }
+        heads.push(head);
         let out = run(
             dir.path(),
             &format!("d{i}.almd"),
@@ -258,8 +265,8 @@ fn the_subprocess_family_has_every_cell() {
     // (fn, WIT case, `__proc_` leaf, the registry surface its impl serves)
     const SERVED: &[(&str, &str, &str, &str)] = &[
         ("exec", "exec", "exec", "process.exec"),
-        ("output", "output", "output", "process.__os_output"),
-        ("run", "run-with", "run_cmd", "process.__os_run"),
+        ("output", "output", "output", "__os_output"),
+        ("run", "run-with", "run_cmd", "__os_run"),
         ("kill", "kill", "kill", "process.kill"),
         ("pid", "pid", "pid", "process.pid"),
     ];
