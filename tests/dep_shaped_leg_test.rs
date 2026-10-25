@@ -573,6 +573,11 @@ fn every_multi_module_project_agrees_in_dependency_shape() {
         cases.len()
     );
     let skips = load_skips();
+    // The discovery floor above and the "no longer a corpus case" skip check
+    // below read every DISCOVERED case; the two-shape comparison judges every
+    // case on a full run and the CI slice (ALMIDE_CI_SLICE) of them otherwise.
+    let discovered: BTreeSet<String> = cases.iter().map(|c| c.id.clone()).collect();
+    let cases = almide_corpus::select(cases, "dep_shaped_leg", |c| c.id.clone());
 
     let results: Mutex<Vec<(String, Outcome, Outcome)>> = Mutex::new(Vec::new());
     let queue = Mutex::new(cases.iter());
@@ -590,7 +595,7 @@ fn every_multi_module_project_agrees_in_dependency_shape() {
     let mut results = results.into_inner().unwrap();
     results.sort_by(|a, b| a.0.cmp(&b.0));
 
-    let ids: BTreeSet<&str> = results.iter().map(|r| r.0.as_str()).collect();
+    let ids: BTreeSet<&str> = discovered.iter().map(String::as_str).collect();
     let mut failures = Vec::new();
     for (id, d, p) in &results {
         let agree = d == p;

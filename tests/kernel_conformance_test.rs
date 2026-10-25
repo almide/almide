@@ -127,6 +127,11 @@ fn kernel_conformance_corpus_matches_kernel_traces() {
         CORPUS_SIZE,
         "corpus program count drifted from Corpus.lean's corpusSize"
     );
+    // The exact count above is over the whole corpus; the runs judge every
+    // program on a full run and the CI slice (ALMIDE_CI_SLICE) otherwise.
+    let programs = almide_corpus::select(programs, "kernel_conformance", |p| {
+        p.strip_prefix(root).unwrap_or(p).to_string_lossy().into_owned()
+    });
     let mut wasm_checked = 0usize;
     let mut wasm_available = true;
     for path in &programs {

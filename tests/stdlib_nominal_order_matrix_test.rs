@@ -207,7 +207,13 @@ fn every_stdlib_nominal_type_is_refused_or_builds_on_both_legs() {
     );
 
     let dir = tempfile::tempdir().expect("scratch");
-    let cells = cells();
+    // Every cell on a full run; the CI slice (ALMIDE_CI_SLICE) of them
+    // otherwise, keyed by the cell's label. The two "the matrix is not
+    // malformed" floors below are over the whole matrix, so a slice (which may
+    // land only on refused cells) judges them only on a full run.
+    let cells = almide_corpus::select(cells(), "stdlib_nominal_order_matrix", |c| {
+        format!("tests/stdlib_nominal_order_matrix_test.rs#{}", c.label)
+    });
     // Check every cell on both targets, in parallel.
     let verdicts: Vec<(bool, bool)> = std::thread::scope(|s| {
         let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
@@ -235,8 +241,9 @@ fn every_stdlib_nominal_type_is_refused_or_builds_on_both_legs() {
 
     let accepted: Vec<&Cell> = cells.iter().zip(&verdicts).filter(|(_, v)| v.0).map(|(c, _)| c).collect();
     let wasm_ok: Vec<&Cell> = cells.iter().zip(&verdicts).filter(|(_, v)| v.1).map(|(c, _)| c).collect();
-    assert!(!accepted.is_empty(), "every cell refused — the probe programs are malformed");
-    assert!(!wasm_ok.is_empty(), "no cell passes `check --target wasm` — the cross-leg half compares nothing");
+    let full = almide_corpus::full_run();
+    assert!(!full || !accepted.is_empty(), "every cell refused — the probe programs are malformed");
+    assert!(!full || !wasm_ok.is_empty(), "no cell passes `check --target wasm` — the cross-leg half compares nothing");
 
     // Every check-accepted cell must build and run on native. Run them all as
     // one program. On failure, bisect to the cells rustc refused, so the
