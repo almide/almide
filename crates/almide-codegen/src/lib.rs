@@ -417,7 +417,15 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str(&format!("{vis}fn almide_request_hook(f: fn(u8)) {{ ALMIDE_REQUEST_HOOKS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(f) }}\n"));
     s.push_str(&format!("{vis}fn almide_request_hooks(stage: u8) {{ let hs: Vec<fn(u8)> = ALMIDE_REQUEST_HOOKS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone(); for f in hs {{ f(stage) }} }}\n"));
     s.push_str(&format!("{vis}fn almide_contained_unwind(text: impl FnOnce() -> String) {{ if ALMIDE_CONTAIN.with(|c| c.get()) {{ std::panic::resume_unwind(Box::new(AlmideContained(text()))) }} }}\n"));
-    s.push_str(&format!("{vis}fn almide_abort(msg: impl std::fmt::Display) -> ! {{ almide_contained_unwind(|| msg.to_string()); almide_fan_trap_wait(); static ALMIDE_ABORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_ABORTING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"Error: {{}}\\n\", msg)); }} almide_stdout_flush(); std::process::exit(1) }}\n"));
+    // Out of memory is never contained (row 1 of the security table): an
+    // allocation that failed part-way through a handler leaves the data it was
+    // building half made, and a server that answered 500 and kept serving
+    // would go on with it. So the out-of-memory sites call `almide_abort_oom`,
+    // which skips `almide_contained_unwind` and ends the process under
+    // ALMIDE_CONTAIN too. The kind is the call path, never the message text.
+    s.push_str(&format!("{vis}fn almide_abort(msg: impl std::fmt::Display) -> ! {{ almide_contained_unwind(|| msg.to_string()); almide_abort_exit(msg) }}\n"));
+    s.push_str(&format!("{vis}fn almide_abort_oom() -> ! {{ almide_abort_exit(\"out of memory\") }}\n"));
+    s.push_str(&format!("{vis}fn almide_abort_exit(msg: impl std::fmt::Display) -> ! {{ almide_fan_trap_wait(); static ALMIDE_ABORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_ABORTING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"Error: {{}}\\n\", msg)); }} almide_stdout_flush(); std::process::exit(1) }}\n"));
     // `panic(msg)` (#3118): the SAME once-guarded abort, spelled the way C-219
     // pins it on every leg — `PANIC: <msg>` on stderr with NO trailing newline,
     // exit 1 — never a raw Rust panic (exit 101 + the thread banner). A `--test`

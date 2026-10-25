@@ -490,10 +490,10 @@ template = "{expr}.clone()"
 # almide_rt_list_range's try_reserve discipline, inlined so the template has
 # no linkage dependency.
 [range_expr]
-template = "{{ let __almide_rs: i64 = {start}; let __almide_re: i64 = {end}; let __almide_rn = __almide_re.saturating_sub(__almide_rs).max(0) as usize; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() {{ almide_abort(\"out of memory\"); }} __almide_rv.extend(__almide_rs..__almide_re); __almide_rv }}"
+template = "{{ let __almide_rs: i64 = {start}; let __almide_re: i64 = {end}; let __almide_rn = __almide_re.saturating_sub(__almide_rs).max(0) as usize; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() {{ almide_abort_oom(); }} __almide_rv.extend(__almide_rs..__almide_re); __almide_rv }}"
 
 [range_inclusive]
-template = "{{ let __almide_rs: i64 = {start}; let __almide_re: i64 = {end}; let __almide_rn = if __almide_re >= __almide_rs {{ ((__almide_re as i128) - (__almide_rs as i128) + 1) as usize }} else {{ 0 }}; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() {{ almide_abort(\"out of memory\"); }} __almide_rv.extend(__almide_rs..=__almide_re); __almide_rv }}"
+template = "{{ let __almide_rs: i64 = {start}; let __almide_re: i64 = {end}; let __almide_rn = if __almide_re >= __almide_rs {{ ((__almide_re as i128) - (__almide_rs as i128) + 1) as usize }} else {{ 0 }}; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() {{ almide_abort_oom(); }} __almide_rv.extend(__almide_rs..=__almide_re); __almide_rv }}"
 
 [for_tuple_destructure]
 template = "({vars})"

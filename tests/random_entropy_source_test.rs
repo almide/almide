@@ -27,6 +27,12 @@ mod runtime_random {
     fn almide_abort(msg: impl std::fmt::Display) -> ! {
         panic!("{msg}")
     }
+
+    // ... and its out-of-memory abort, which random.bytes calls when the
+    // buffer cannot be reserved.
+    fn almide_abort_oom() -> ! {
+        panic!("out of memory")
+    }
 }
 
 fn source(rel: &str) -> String {

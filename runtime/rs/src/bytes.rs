@@ -91,7 +91,7 @@ pub fn almide_rt_bytes_join<B: std::ops::Deref<Target = Vec<u8>>>(xs: &[B], sep:
 fn alloc_elems_or_oom<T>(n: usize) -> Vec<T> {
     let mut v: Vec<T> = Vec::new();
     if v.try_reserve_exact(n).is_err() {
-        almide_abort("out of memory");
+        almide_abort_oom();
     }
     v
 }
@@ -99,7 +99,7 @@ fn alloc_elems_or_oom<T>(n: usize) -> Vec<T> {
 fn alloc_bytes_or_oom(n: usize) -> Vec<u8> {
     let mut v: Vec<u8> = Vec::new();
     if v.try_reserve_exact(n).is_err() {
-        almide_abort("out of memory");
+        almide_abort_oom();
     }
     v
 }
