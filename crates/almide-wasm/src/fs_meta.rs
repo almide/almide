@@ -98,6 +98,12 @@ pub(crate) const OP_HTTP_SERVE_REPLY: i32 = 72;
 /// and the guest runs the loop itself. A module naming this op exports its
 /// table and globals (assembly.rs) so the host can put the instance back.
 pub(crate) const OP_HTTP_SERVE_RUN: i32 = 75;
+/// A deliberate exit (#4203): `process.exit` sends this op, which answers
+/// nothing and reaches nothing, just before its exit import. The runtime's
+/// own aborts never send it, so a host that contains a handler abort (op 75)
+/// tells an abort from a program that printed `Error: …` and then exited 1.
+/// Every other host answers 0.
+pub(crate) const OP_EXIT_MARK: i32 = 76;
 /// fs.stat / fs.glob (#1423 stage 4): the two metadata surfaces the
 /// structural leg had no arm for. 38 answers the four FileStat fields as
 /// a 32-byte LE buffer (size, is_dir, is_file, modified — each an i64);

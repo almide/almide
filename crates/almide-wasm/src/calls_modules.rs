@@ -88,7 +88,13 @@ impl Emitter<'_> {
                         self.f.instructions().i32_const(1);
                     }
                 }
-                self.f.instructions().call(F_EXIT_IMPORT).unreachable();
+                // #4203: mark the exit as the program's own, after the code is
+                // evaluated (an abort inside it stays an abort).
+                self.note_host_op(crate::fs_meta::OP_EXIT_MARK);
+                let mut i = self.f.instructions();
+                i.i32_const(crate::fs_meta::OP_EXIT_MARK).i32_const(0).i32_const(0).i32_const(0).i32_const(0);
+                i.call(F_FS_CALL).drop();
+                i.call(F_EXIT_IMPORT).unreachable();
                 Ok(None)
             }
             CallTarget::Module { module, func, .. }

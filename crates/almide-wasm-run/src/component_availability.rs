@@ -13,7 +13,8 @@
 pub fn serves(op: i32, p3: bool) -> bool {
     // 74: the instance-parallel fan offer (#3003), answered "not served" by
     // both component shims — the guest then runs its chunks sequentially.
-    let common = matches!(op, 30..=32 | 34..=35 | 60 | 73 | 74);
+    // 76: a deliberate exit's mark (#4203), answered 0.
+    let common = matches!(op, 30..=32 | 34..=35 | 60 | 73 | 74 | 76);
     let extra = p3
         && (matches!(op, 26 | 29 | 36 | 37 | 40..=50 | 65)
             || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op));
