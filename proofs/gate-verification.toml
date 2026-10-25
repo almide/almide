@@ -1458,7 +1458,7 @@ reads = "scalar"
 wired_by = ".github/workflows/ci.yml"
 class = "NEGATIVE_TESTED"
 evidence = "#3032 (2026-10-01): a forged partials dir, spec/wasm_cross and the run manifest split two ways. --coverage exited 0 on the clean partition, and 1 for each of: one opt_parity fixture dropped, one run_parity fixture walked twice, the interp_ledger 1/2 list removed. The --merge mode was not forged"
-measures = "each sharded corpus gate's union of per-shard walked-fixture lists vs ls spec/wasm_cross (or the run manifest): missing, duplicated and extra names"
+measures = "each sharded corpus gate's union of per-shard walked-fixture lists vs ls spec/wasm_cross (or the run manifest) — the whole corpus on a full run, the ALMIDE_CI_SLICE slice of it (scripts/lib/ci-slice.sh) on a PR into develop: missing, duplicated and extra names"
 varies = "the corpus the union is judged against grew 834 -> 851 fixtures between the 2026-09-29 and 2026-09-30 stamps (7388663f0)"
 blind = "a shard that writes a fixture's name without running it: each list is the shard's own claim -> UNCOMPENSATED"
 
