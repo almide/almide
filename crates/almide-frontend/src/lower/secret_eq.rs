@@ -81,21 +81,23 @@ impl LowerCtx<'_> {
                 acc
             }
             Ty::Applied(TC::Option, args) if args.len() == 1 => {
+                // Nested single-subject matches (not a match over the
+                // `(a, b)` pair): the shape every leg's MIR rung lowers.
                 let t = &args[0];
                 let (x, y) = (self.var_table.alloc(sym("_x"), t.clone(), Mutability::Let, None), self.var_table.alloc(sym("_y"), t.clone(), Mutability::Let, None));
                 let both = self.secret_eq_expr(e_(IrExprKind::Var { id: x }, t.clone()), e_(IrExprKind::Var { id: y }, t.clone()), t);
-                let pair_ty = Ty::Tuple(vec![ty.clone(), ty.clone()]);
-                e_(IrExprKind::Match {
-                    subject: Box::new(e_(IrExprKind::Tuple { elements: vec![va.clone(), vb.clone()] }, pair_ty)),
-                    arms: vec![
-                        IrMatchArm { pattern: IrPattern::Tuple { elements: vec![
-                            IrPattern::Some { inner: Box::new(IrPattern::Bind { var: x, ty: t.clone() }) },
-                            IrPattern::Some { inner: Box::new(IrPattern::Bind { var: y, ty: t.clone() }) },
-                        ] }, guard: None, body: both },
-                        IrMatchArm { pattern: IrPattern::Tuple { elements: vec![IrPattern::None, IrPattern::None] }, guard: None, body: lit_bool(true) },
-                        IrMatchArm { pattern: IrPattern::Wildcard, guard: None, body: lit_bool(false) },
-                    ],
-                }, Ty::Bool)
+                let b_is_none = e_(IrExprKind::Call {
+                    target: CallTarget::Module { module: sym("option"), func: sym("is_none"), def_id: self.def_map.get(&sym("option.is_none")).copied() },
+                    args: vec![vb.clone()], type_args: vec![],
+                }, Ty::Bool);
+                let b_some = e_(IrExprKind::Match { subject: Box::new(vb.clone()), arms: vec![
+                    IrMatchArm { pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: y, ty: t.clone() }) }, guard: None, body: both },
+                    IrMatchArm { pattern: IrPattern::None, guard: None, body: lit_bool(false) },
+                ] }, Ty::Bool);
+                e_(IrExprKind::Match { subject: Box::new(va.clone()), arms: vec![
+                    IrMatchArm { pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: x, ty: t.clone() }) }, guard: None, body: b_some },
+                    IrMatchArm { pattern: IrPattern::None, guard: None, body: b_is_none },
+                ] }, Ty::Bool)
             }
             Ty::Applied(TC::Result, args) if args.len() == 2 => {
                 let (t, u) = (&args[0], &args[1]);
@@ -127,20 +129,35 @@ impl LowerCtx<'_> {
                     args: vec![x], type_args: vec![],
                 }, Ty::Int);
                 let same_len = e_(IrExprKind::BinOp { op: BinOp::Eq, left: Box::new(len(self, va.clone())), right: Box::new(len(self, vb.clone())) }, Ty::Bool);
-                let start = e_(IrExprKind::Call { target: CallTarget::Named { name: go }, args: vec![va.clone(), vb.clone(), e_(IrExprKind::LitInt { value: 0 }, Ty::Int)], type_args: vec![] }, Ty::Bool);
-                let (ga, gb, gi) = (
+                let n0 = len(self, va.clone());
+                let start = e_(IrExprKind::Call { target: CallTarget::Named { name: go }, args: vec![va.clone(), vb.clone(), e_(IrExprKind::LitInt { value: 0 }, Ty::Int), n0], type_args: vec![] }, Ty::Bool);
+                let (ga, gb, gi, gn) = (
                     self.var_table.alloc(sym("_a"), ty.clone(), Mutability::Let, None),
                     self.var_table.alloc(sym("_b"), ty.clone(), Mutability::Let, None),
                     self.var_table.alloc(sym("_i"), Ty::Int, Mutability::Let, None),
+                    self.var_table.alloc(sym("_n"), Ty::Int, Mutability::Let, None),
                 );
                 let var = |id: VarId, t: &Ty| e_(IrExprKind::Var { id }, t.clone());
                 let at = |l: VarId| e_(IrExprKind::IndexAccess { object: Box::new(var(l, ty)), index: Box::new(var(gi, &Ty::Int)) }, t.clone());
                 let el = self.secret_eq_expr(at(ga), at(gb), t);
                 let next_i = e_(IrExprKind::BinOp { op: BinOp::AddInt, left: Box::new(var(gi, &Ty::Int)), right: Box::new(e_(IrExprKind::LitInt { value: 1 }, Ty::Int)) }, Ty::Int);
-                let rec = e_(IrExprKind::Call { target: CallTarget::Named { name: go }, args: vec![var(ga, ty), var(gb, ty), next_i], type_args: vec![] }, Ty::Bool);
-                let cond = e_(IrExprKind::BinOp { op: BinOp::Lt, left: Box::new(var(gi, &Ty::Int)), right: Box::new(len(self, var(ga, ty))) }, Ty::Bool);
-                let go_body = e_(IrExprKind::If { cond: Box::new(cond), then: Box::new(and(el, rec)), else_: Box::new(lit_bool(true)) }, Ty::Bool);
-                extra.push(eq_fn(&self.var_table, go, vec![(ga, ty.clone()), (gb, ty.clone()), (gi, Ty::Int)], go_body));
+                let rec = e_(IrExprKind::Call { target: CallTarget::Named { name: go }, args: vec![var(ga, ty), var(gb, ty), next_i, var(gn, &Ty::Int)], type_args: vec![] }, Ty::Bool);
+                // The count is a parameter (`i < n` over two scalars, the
+                // condition the MIR rung resolves), and the element and the
+                // rest are bound before they are combined, so a mismatch
+                // never cuts the walk short.
+                let cond = e_(IrExprKind::BinOp { op: BinOp::Lt, left: Box::new(var(gi, &Ty::Int)), right: Box::new(var(gn, &Ty::Int)) }, Ty::Bool);
+                let (ge, gr) = (
+                    self.var_table.alloc(sym("_e"), Ty::Bool, Mutability::Let, None),
+                    self.var_table.alloc(sym("_r"), Ty::Bool, Mutability::Let, None),
+                );
+                let bind = |v: VarId, value: IrExpr| IrStmt { kind: IrStmtKind::Bind { var: v, mutability: Mutability::Let, ty: Ty::Bool, value }, span: None };
+                let step = e_(IrExprKind::Block {
+                    stmts: vec![bind(ge, el), bind(gr, rec)],
+                    expr: Some(Box::new(and(var(ge, &Ty::Bool), var(gr, &Ty::Bool)))),
+                }, Ty::Bool);
+                let go_body = e_(IrExprKind::If { cond: Box::new(cond), then: Box::new(step), else_: Box::new(lit_bool(true)) }, Ty::Bool);
+                extra.push(eq_fn(&self.var_table, go, vec![(ga, ty.clone()), (gb, ty.clone()), (gi, Ty::Int), (gn, Ty::Int)], go_body));
                 and(same_len, start)
             }
             Ty::Named(..) => match crate::secret_type::unfold_named(self.env, ty) {
