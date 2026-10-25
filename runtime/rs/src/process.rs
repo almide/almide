@@ -10,6 +10,9 @@
 // `fs.rs` carries the twin of this pair (its `io_err`); the subprocess
 // family's own copy is `almide_proc_call_err` in the shared core below, which
 // the embedded wasm host runs too (#2589).
+fn call_err(call: &str, args: &str, e: impl std::fmt::Display) -> String {
+    format!("{call}({args}): {e}")
+}
 // The quoting twin (`almide_proc_q`, plain quotes, no escape table — the
 // rule `fs` can reproduce in its hand-written WAT) lives in the shared core.
 
@@ -195,4 +198,31 @@ pub fn almide_rt_process___os_read_new(h: i64, which: i64) -> AlmideString {
 
 pub fn almide_rt_process___os_child_pid(h: i64) -> i64 {
     almide_proc_with(h, |c| c.pid()).unwrap_or(-1)
+}
+
+pub fn almide_rt_process_args() -> Vec<AlmideString> { let __almide_v: Vec<String> = { std::env::args().collect() }; __almide_v.into_almide() }
+
+pub fn almide_rt_process_stdin_lines() -> Result<Vec<AlmideString>, AlmideString> {
+    let __almide_v: Result<Vec<String>, AlmideString> = {
+        let __almide_r: Result<Vec<String>, String> = (|| {
+            almide_stdout_flush();
+            use std::io::BufRead;
+            std::io::stdin()
+                .lock()
+                .lines()
+                .collect::<Result<Vec<String>, _>>()
+                // No identifying operand — stdin is the one the writer did not name —
+                // so the call alone is what this can add, and it is still the
+                // difference between "which of my host calls failed" and errno alone.
+                .map_err(|e| call_err("process.stdin_lines", "", e))
+        })();
+        __almide_r.map_err(Into::into)
+    };
+    __almide_v.into_almide()
+}
+
+pub fn almide_rt_process_env(key: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { std::env::var(key).ok() }; __almide_v.into_almide() }
+
+pub fn almide_rt_process_sleep(ms: i64) {
+    std::thread::sleep(std::time::Duration::from_millis(ms.max(0) as u64));
 }
