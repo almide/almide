@@ -323,6 +323,10 @@ fn erase_newtypes_in_program_body(
 }
 
 pub fn erase_transparent_newtypes(program: &mut almide_ir::IrProgram) {
+    // While the runtime-backed nominal types are still visible, route their
+    // interpolations to the declared repr (see runtime_backed_interp.rs) —
+    // erasure below turns the self-hosted ones into their carrier.
+    rewrite_runtime_backed_interps(program);
     let map = build_newtype_substitution_map(program);
     if map.is_empty() {
         return;
