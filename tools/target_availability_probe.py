@@ -118,7 +118,9 @@ NOMINAL = {
     "Stdout": ("io.stdout()!", "io.stdout", "io"),
     "Stderr": ("io.stderr()!", "io.stderr", "io"),
     # The opaque socket and descriptor handles: only their opening calls make one.
-    "TcpListener": ('net.tcp_listen("127.0.0.1", 0)!', "net.tcp_listen", "net"),
+    # A CLOSED listener: an open one would block `tcp_accept` forever, where a
+    # closed one answers its err at once (an answered err is service).
+    "TcpListener": ('{ let l = net.tcp_listen("127.0.0.1", 0)!\n  io.close(l)!\n  l }', "net.tcp_listen", "net,io"),
     "TcpStream": ('net.tcp_connect("127.0.0.1", 1)!', "net.tcp_connect", "net"),
     "UdpSocket": ('net.udp_bind("127.0.0.1", 0)!', "net.udp_bind", "net"),
     "IpAddr": ('net.parse_ip("127.0.0.1")!', "net.parse_ip", "net"),
@@ -252,8 +254,9 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
         if name in NOMINAL:
             expr, ctor, imp = NOMINAL[name]
             ctx.ctors.add(ctor)
-            if imp:
-                ctx.imports.add(imp)
+            for m in (imp or "").split(","):
+                if m:
+                    ctx.imports.add(m)
             return expr
         if name in types:
             mod, kind = types[name]
