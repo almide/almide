@@ -227,7 +227,6 @@ impl NanoPass for IntrinsicLoweringPass {
                 program.modules[mi].top_lets[ti].value = val;
             }
         }
-        rw.current_module = None;
         PassResult { program, changed: true }
     }
 }
