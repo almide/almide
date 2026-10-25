@@ -7,8 +7,8 @@
 //! Before the fix the second request got an empty reply and every later
 //! client got "connection refused".
 //!
-//! Native leg only for now; the embedded wasm leg joins this test when it
-//! contains the abort the same way (C-367 byte-identity).
+//! Native leg only; tests/http_serve_cross_test.rs runs the same requests
+//! on native and the embedded wasm lane and compares them byte for byte.
 #![cfg(unix)]
 
 use std::io::{Read, Write};
