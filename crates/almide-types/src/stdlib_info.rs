@@ -610,6 +610,20 @@ pub fn is_insecure_digest_stdlib_fn(module: &str, func: &str) -> bool {
     insecure_digest_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
 }
 
+/// Every bundled stdlib fn declared `@signals_process` (#4125): it starts no
+/// child but signals or probes a pid, so `[permissions] proc` bounds it as the
+/// `kill` command it used to run. Derived from the one declaration site.
+pub fn signals_process_stdlib_fns() -> &'static [(&'static str, String, Option<String>)] {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<Vec<(&'static str, String, Option<String>)>> = OnceLock::new();
+    TABLE.get_or_init(|| marked_stdlib_fns("@signals_process"))
+}
+
+/// True if `module.func` is a `@signals_process` stdlib fn (#4125).
+pub fn is_signals_process_stdlib_fn(module: &str, func: &str) -> bool {
+    signals_process_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
+}
+
 /// The bundled stdlib fns an attribute `mark` (`"@ordered"`) annotates, by a
 /// text scan of the bundled sources (an attribute block, then the fn it
 /// annotates), with each fn's `@intrinsic` runtime symbol when it has one.
