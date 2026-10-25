@@ -82,10 +82,11 @@ temp_dir は非空かつ posix ホストでは絶対パス）が証明対象と�
 3 関数(env.os・env.temp_dir・fs.temp_dir — C-189)。第四の関数を
 除外に加えるには C-189 の statement とその fixture の改訂を要する。
 
-`process.exec_status` と `process.exec_status_timeout` の起動失敗は、
-操作名とコマンド名を含む err とする。接頭辞はそれぞれ
-`process.exec_status(<quoted cmd>): ` と
-`process.exec_status_timeout(<quoted cmd>, <timeout_ms>): ` とし、
+`process.output` と `process.start` の起動失敗は、
+操作名とコマンド名を含む err とする。接頭辞は
+`process.output(<quoted cmd>): `（`process.start` も同じ形）とし、
+作業ディレクトリ `dir` を指定したときは
+`process.output(<quoted dir>, <quoted cmd>): ` とする。
 続けてホストのエラー説明を付ける。コマンド名は二重引用符で囲み、内部の
 引用符・バックスラッシュ・制御文字をエスケープする。引数列は含めない。
 存在しない実行ファイルは起動失敗であり、タイムアウトと報告してはならない。

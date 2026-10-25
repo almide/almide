@@ -60,14 +60,17 @@ read here is what the current compiler accepts.
   `eprintln`, `panic` and the `assert` family work in a pure fn (writes and
   aborts, never reads — ADR-0022), so a `main` that only prints is
   `fn main() -> Unit`; write `effect fn main()` when it reads or propagates.
-  Every stdlib reader is an effect fn — `io.read_line`, `io.read_byte`,
-  `io.read_n_bytes`, `process.args`, `env.args`, and the `args` module's
+  Every stdlib reader is an effect fn — `io.read_line` (`String?`, none at
+  end of input), `io.read` / `io.read_exact` / `io.read_to_end` on a handle
+  such as `io.stdin()!`, `process.args`, `env.args`, and the `args` module's
   `args.flag` / `option` / `option_or` / `positional` / `positional_at` /
   `raw` — so reading stdin or argv needs an effect fn (dialect epoch 8).
   A user-declared effect fn is always fallible, so write `f()!` on every
   effect call — read the `!` like Swift `await` (it marks where the world is
   touched); it is Swift `try`, never `try!`. On a stdlib effect fn that cannot
-  fail the `!` is a no-op. An effect fn returning `Option[T]` (`args.option`,
+  fail the `!` is a no-op; the handle makers `io.stdin()` / `io.stdout()` /
+  `io.stderr()` and `uuid.v4()` / `uuid.v7()` yield a `Result` like a
+  user-declared one: `io.write(io.stdout()!, data)!`. An effect fn returning `Option[T]` (`args.option`,
   `args.positional_at`) takes the `!` before a default:
   `args.positional_at(0)! ?? "in.txt"` — `!` propagates the error, `??`
   defaults the none (without the `!`, `??` wants an `Option[T]`: E001).

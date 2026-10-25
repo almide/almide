@@ -49,7 +49,8 @@ Test: `spec/integration/modules/vis_effect_test.almd`
 Six builtins may be called from a pure `fn`: **`println`, `eprintln`,
 `panic`, `assert`, `assert_eq`, `assert_ne`**. The set is closed. Every other
 output path is a stdlib effect fn and stays E006 from a pure fn, including
-`io.print`, `io.write` and `io.write_bytes`.
+`io.print`, `io.eprint` and `io.write` (on `io.stdout()` or any other
+handle).
 
 1. **They write, or they abort. They never read.** `println` appends to stdout
    and `eprintln` to stderr. `panic` and a failing assert end the process
@@ -118,9 +119,12 @@ Tests: `tests/checker_test.rs` (`pure_fn_admits_output_and_abort_builtins`,
 ### 2.2 Stdlib readers are effect fns
 
 *Dialect epoch 8 (#3248).* `io.read_byte`, `io.read_n_bytes` and
-`process.args` read stdin or argv, and are `effect fn`s like `io.read_line`
+`process.args` read stdin or argv, and became `effect fn`s like `io.read_line`
 and `env.args`. They were plain `fn`s, so a pure fn could read the outside
-world through them; a call from a pure fn is now E006.
+world through them; a call from a pure fn is now E006. The byte readers have
+since been replaced by `io.read`, `io.read_exact` and `io.read_to_end` over a
+`Read` handle (`io.stdin()`, a `net.TcpStream`, a `unix.Fd`), which are
+`effect fn`s the same way.
 
 *Dialect epoch 13.* The `args` module's readers (`args.raw`, `args.flag`,
 `args.option`, `args.option_or`, `args.positional`, `args.positional_at`)
@@ -134,7 +138,10 @@ readers above, they have Almide bodies, so a call is typed
 ```almide check-fail=E006
 import io
 
-fn first_byte() -> Int = io.read_byte()
+fn first_byte(h: io.Stdin) -> Int = match io.read(h, 1) {
+  ok(b) => bytes.get(b, 0) ?? -1,
+  err(_) => -1,
+}
 ```
 
 ```almide check-fail=E006
@@ -143,8 +150,8 @@ import args
 fn verbose() -> Bool = args.flag("verbose")
 ```
 
-Tests: `tests/diagnostics/e006-io-read-byte-in-pure-fn/`,
-`tests/diagnostics/e006-io-read-n-bytes-in-pure-fn/`,
+Tests: `tests/diagnostics/e006-io-read-in-pure-fn/`,
+`tests/diagnostics/e006-io-read-exact-in-pure-fn/`,
 `tests/diagnostics/e006-process-args-in-pure-fn/`,
 `tests/diagnostics/e006-args-*-in-pure-fn/` (one per `args` reader).
 
