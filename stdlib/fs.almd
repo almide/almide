@@ -12,11 +12,17 @@
 /// Path metadata; modified is Unix seconds.
 type FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }
 
-/// Whole file as UTF-8; err if missing or not UTF-8.
+// The whole-file readers (read_text / read_bytes / read_lines /
+// read_bytes_raw and their _if_exists twins) read a REGULAR file of at most
+// 1 GiB (1073741824 bytes), on every leg (#4201, C-422): a device, FIFO or
+// socket errs `fs.<call>("<path>"): Not a regular file` without blocking, a
+// larger file errs `File too large (the read limit is 1073741824 bytes)`, a
+// directory keeps its EISDIR. A bigger file streams through fold_lines.
+/// Whole regular file (<= 1 GiB) as UTF-8; err if missing or not UTF-8.
 @intrinsic("almide_rt_fs_read_text")
 effect fn read_text(path: String) -> Result[String, String] = _
 
-/// Bytes as Ints 0..255; err if missing.
+/// Bytes as Ints 0..255; regular file <= 1 GiB; err if missing.
 @intrinsic("almide_rt_fs_read_bytes")
 effect fn read_bytes(path: String) -> Result[List[Int], String] = _
 
@@ -54,7 +60,7 @@ effect fn mkdir_p(path: String) -> Result[Unit, String] = _
 @intrinsic("almide_rt_fs_exists")
 effect fn exists(path: String) -> Bool = _
 
-/// CRLF-aware lines; a final newline adds no line.
+/// CRLF-aware lines of a regular file <= 1 GiB; a final newline adds no line.
 @intrinsic("almide_rt_fs_read_lines")
 effect fn read_lines(path: String) -> Result[List[String], String] = _
 
@@ -122,7 +128,8 @@ effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, Stri
 // modified_at) and directory ops (list_dir/walk/glob) keep their exists/
 // is_dir predicates, writes create, and remove/remove_all err on a missing
 // path on every leg (there is no rm -f form); those omissions are
-// intentional (tests/fs_if_exists_family_gate).
+// intentional (tests/fs_if_exists_family_gate). A FIFO, a device or a file
+// over 1 GiB is an err, never none (#4201, the plain readers' bound).
 /// Text, or none if missing; err if not UTF-8.
 @intrinsic("almide_rt_fs_read_text_if_exists")
 effect fn read_text_if_exists(path: String) -> Result[String?, String] = _
@@ -218,7 +225,7 @@ effect fn is_symlink(path: String) -> Bool = _
 @intrinsic("almide_rt_fs_modified_at")
 effect fn modified_at(path: String) -> Result[Int, String] = _
 
-/// Whole file as Bytes; err if missing.
+/// Whole regular file (<= 1 GiB) as Bytes; err if missing.
 @intrinsic("almide_rt_fs_read_bytes_raw")
 effect fn read_bytes_raw(path: String) -> Result[Bytes, String] = _
 
