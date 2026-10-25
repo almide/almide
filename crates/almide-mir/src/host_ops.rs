@@ -126,6 +126,8 @@ pub const HOST_OPS: &[HostOp] = &[
     op("env", "unix_timestamp", "almide_rt_env_unix_timestamp", CLOCK),
     op("env", "millis", "almide_rt_env_millis", CLOCK),
     op("env", "sleep_ms", "almide_rt_env_sleep_ms", CLOCK),
+    // ── process: argv[0]-inclusive arguments (every other process fn is walled) ──
+    op("process", "args", "almide_rt_process_args", ENV),
     // ── datetime: the two clock reads (the rest of the module is pure) ──
     op("datetime", "now", "almide_rt_datetime_now", CLOCK),
     op("datetime", "monotonic_ns", "almide_rt_datetime_monotonic_ns", CLOCK),

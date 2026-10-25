@@ -629,7 +629,9 @@ mod classification_gate {
         for f in ["exec", "output", "run", "start", "poll", "wait", "stop", "read_new_stdout", "child_pid", "kill"] {
             assert_eq!(stdlib_call_effect("process", f), vec![Proc], "process.{f}");
         }
-        assert_eq!(stdlib_call_effect("process", "pid"), vec![EnvRead]);
+        for f in ["args", "pid", "env"] {
+            assert_eq!(stdlib_call_effect("process", f), vec![EnvRead], "process.{f}");
+        }
         assert_eq!(stdlib_call_effect("uuid", "v4"), vec![Rand]);
         assert_eq!(stdlib_call_effect("uuid", "v7"), vec![Time, Rand]);
         assert!(stdlib_call_effect("uuid", "parse").is_empty());
