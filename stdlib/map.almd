@@ -69,10 +69,10 @@ fn merge[K, V](a: Map[K, V], b: Map[K, V]) -> Map[K, V] = _
 fn is_empty[K, V](m: Map[K, V]) -> Bool = _
 
 // ── construction ──
-/// Map of pairs; a repeated key takes the last value.
+/// Map of the pairs xs; a repeated key takes the last value.
 @intrinsic("almide_rt_map_from_entries")
-@consume(pairs)
-fn from_list[K, V](pairs: List[(K, V)]) -> Map[K, V] = _
+@consume(xs)
+fn from_list[K, V](xs: List[(K, V)]) -> Map[K, V] = _
 
 // ── closure-bearing (direct runtime dispatch — map has no IterChain) ──
 /// Same keys and order, values replaced by f(v).

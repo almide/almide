@@ -396,7 +396,7 @@ else query |> string.split("&") |> list.filter((part) => string.len(part) > 0) |
 // Example: url.build_query([("q", "a b"), ("lang", "ja")]) == "q=a%20b&lang=ja"
 // Example: url.build_query([]) == ""
 /// k=v joined by &, both sides percent-encoded.
-fn build_query(pairs: List[(String, String)]) -> String = pairs |> list.map(((k, v)) => encode_component(k) + "=" + encode_component(v)) |> list.join("&")
+fn build_query(xs: List[(String, String)]) -> String = xs |> list.map(((k, v)) => encode_component(k) + "=" + encode_component(v)) |> list.join("&")
 
 // Form encoding (application/x-www-form-urlencoded): a space is `+`, every
 // other character is escaped as encode_component escapes it.

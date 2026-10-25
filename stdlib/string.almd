@@ -40,9 +40,9 @@ fn len(s: String) -> Int = _
 @intrinsic("almide_rt_string_len")
 fn length(s: String) -> Int = _
 
-/// sub occurs in s; true for empty sub.
+/// needle occurs in s; true for empty needle.
 @intrinsic("almide_rt_string_contains")
-fn contains(s: String, sub: String) -> Bool = _
+fn contains(s: String, needle: String) -> Bool = _
 
 /// s begins with prefix; "" always matches.
 @intrinsic("almide_rt_string_starts_with")
@@ -61,9 +61,9 @@ fn slice(s: String, start: Int, end: Int = 9223372036854775807) -> String = _
 @intrinsic("almide_rt_string_byte_slice")
 fn byte_slice(s: String, start: Int, end: Int) -> String? = _
 
-/// Left-padded to n chars with ch; never truncates.
+/// Left-padded to n chars with fill; never truncates.
 @intrinsic("almide_rt_string_pad_left")
-fn pad_start(s: String, n: Int, ch: String) -> String = _
+fn pad_start(s: String, n: Int, fill: String) -> String = _
 
 /// UTF-8 bytes of s as Ints 0..255.
 @intrinsic("almide_rt_string_to_bytes")
@@ -141,9 +141,9 @@ fn codepoint(s: String) -> Int? = _
 @intrinsic("almide_rt_string_from_codepoint")
 fn from_codepoint(n: Int) -> String = _
 
-/// Right-padded to n chars with ch; never truncates.
+/// Right-padded to n chars with fill; never truncates.
 @intrinsic("almide_rt_string_pad_right")
-fn pad_end(s: String, n: Int, ch: String) -> String = _
+fn pad_end(s: String, n: Int, fill: String) -> String = _
 
 /// s without leading whitespace.
 @intrinsic("almide_rt_string_trim_start")
@@ -210,9 +210,9 @@ fn drop_end(s: String, n: Int) -> String = _
 fn run_length_encode(s: String) -> List[(String, Int)] = _
 
 // ── Mutable string operations ──
-/// Appends suffix to s in place.
+/// Appends x to s in place.
 @intrinsic("almide_rt_string_push")
-fn push(mut s: String, suffix: String) -> Unit = _
+fn push(mut s: String, x: String) -> Unit = _
 
 /// Empties s in place.
 @intrinsic("almide_rt_string_clear")

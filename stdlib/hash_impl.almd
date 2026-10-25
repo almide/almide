@@ -11,8 +11,8 @@ import prim
 fn __fnv_go(a: Int, n: Int, i: Int, h: Int) -> Int = if i >= n then h
 else __fnv_go(a, n, i + 1, prim.band(prim.bxor(h, prim.load8(a + i)) * 16777619, 4294967295))
 
-fn hash_fnv1a32(s: String) -> Int = {
-  let h = prim.handle(s)
+fn hash_fnv1a32(b: Bytes) -> Int = {
+  let h = prim.handle(b)
   __fnv_go(h + 12, prim.load32(h + 4), 0, 2166136261)
 }
 
@@ -263,8 +263,8 @@ else {
   __sha_hex_fill(dst, src, i + 1)
 }
 
-fn hash_sha256_hex(s: String) -> String = {
-  let h = prim.handle(s)
+fn hash_sha256_hex(b: Bytes) -> String = {
+  let h = prim.handle(b)
   let d = __sha256_digest(h + 12, prim.load32(h + 4))
   let out = prim.alloc_str(64)
   let _x = __sha_hex_fill(prim.handle(out) + 12, prim.handle(d) + 12, 0)
