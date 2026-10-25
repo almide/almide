@@ -381,7 +381,6 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
                 ("float_to_uint16_checked", "float.to_uint16_checked"),
                 ("float_to_uint32_checked", "float.to_uint32_checked"),
                 ("float_to_int64_checked", "float.to_int64_checked"),
-                ("float_to_int_checked", "float.to_int_checked"),
                 ("float_to_uint64_checked", "float.to_uint64_checked"),
             ],
         ),
@@ -657,7 +656,6 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (
             crate::embedded::SRC_FLOAT_SATURATING,
             &[
-                ("float_to_int_saturating", "float.to_int_saturating"),
                 ("float_to_int8_saturating", "float.to_int8_saturating"),
                 ("float_to_int16_saturating", "float.to_int16_saturating"),
                 ("float_to_int32_saturating", "float.to_int32_saturating"),

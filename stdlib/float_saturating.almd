@@ -2,6 +2,7 @@
 // plain forward to `float.to_intN` (the f64→iN `as` cast is ALREADY saturating in Rust: out-of-range
 // floats clamp to the type's min/max, NaN → 0), so the saturating variant IS the conversion. Each
 // forwards to the already-self-hosted `float.to_intN` (a 1:1 CallFn — no mir>ir issue); pure scalar.
+@implements("float.to_int_saturating")
 fn float_to_int_saturating(n: Float) -> Int = float.to_int(n)
 
 fn float_to_int8_saturating(n: Float) -> Int8 = float.to_int8(n)
