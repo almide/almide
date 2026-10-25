@@ -29,6 +29,9 @@ pub const BUNDLED_MODULES: &[&str] = &[
     // Raw addresses at the foreign-function boundary (R-ffi-01). Never
     // auto-imported: `import ffi` is the opt-in.
     "ffi",
+    // Unix-domain sockets and shared memory (R-unix-01, #3853) and RFC 9562
+    // identifiers (R-uuid-01). Never auto-imported.
+    "unix", "uuid",
     // Arbitrary-precision integers (R-L1-03). Never auto-imported: `import bigint`.
     "bigint",
     "int8", "int16", "int32", "int64",
@@ -141,10 +144,20 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("fs", "FileStat"),
     ("fs", "FsRoot"),
     ("html", "SafeHtml"),
+    ("io", "Stdin"),
+    ("io", "Stdout"),
+    ("io", "Stderr"),
     ("net", "TcpListener"),
     ("net", "TcpStream"),
+    ("net", "UdpSocket"),
+    ("net", "UdpPacket"),
+    ("net", "IpAddr"),
+    ("unix", "Fd"),
+    ("uuid", "Uuid"),
     ("path", "SafePath"),
     ("process", "ProcessStatus"),
+    ("process", "ProcessCommand"),
+    ("process", "ProcessChild"),
     ("random", "Rng"),
     ("regex", "Regex"),
     ("url", "Url"),
@@ -159,6 +172,39 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
 /// (the common case).
 pub fn stdlib_owned_type_owner(name: &str) -> Option<&'static str> {
     STDLIB_OWNED_TYPES.iter().find_map(|(module, ty)| (*ty == name).then_some(*module))
+}
+
+/// The marker a built-in protocol requirement's name starts with when one
+/// stdlib module declares SEVERAL types that satisfy it (`Close`: net's
+/// `TcpStream`, `TcpListener` and `UdpSocket`; `HttpMessage`: http's request
+/// and response). Such a requirement cannot be one module function of its own
+/// name, so it resolves per conforming type ([`requirement_fn_name`]). Every
+/// other requirement of a stdlib type is its module's function of the
+/// requirement's own name (`bigint.add`, `int8.__trunc`).
+pub const PER_TYPE_REQUIREMENT_PREFIX: &str = "__self_";
+
+/// The function of a stdlib type's module that satisfies the protocol
+/// requirement `method` for `type_name` (bare or module-qualified): for a
+/// per-type requirement `__<snake type>_<verb>` (`TcpStream` and `__self_read`
+/// → `__tcp_stream_read`, `HttpRequest` and `__self_header` →
+/// `__http_request_header`), else `method` itself. The one place the spelling
+/// is derived: the checker's conformance check, monomorphization and the
+/// conformance matrix gate all call it.
+pub fn requirement_fn_name(type_name: &str, method: &str) -> String {
+    let Some(verb) = method.strip_prefix(PER_TYPE_REQUIREMENT_PREFIX) else {
+        return method.to_string();
+    };
+    let bare = type_name.rsplit_once('.').map_or(type_name, |(_, b)| b);
+    let mut snake = String::new();
+    let mut prev_lower = false;
+    for c in bare.chars() {
+        if c.is_ascii_uppercase() && prev_lower {
+            snake.push('_');
+        }
+        prev_lower = c.is_ascii_lowercase() || c.is_ascii_digit();
+        snake.push(c.to_ascii_lowercase());
+    }
+    format!("__{}_{}", snake, verb)
 }
 
 /// Are `a` and `b` a stdlib-owned type's own BARE name and a USER scope's
@@ -301,6 +347,8 @@ fn bundled_source_sized_numeric(name: &str) -> Option<&'static str> {
         "net" => Some(crate::embedded::SRC_NET),
         "zlib" => Some(crate::embedded::SRC_ZLIB),
         "ffi" => Some(crate::embedded::SRC_FFI),
+        "unix" => Some(crate::embedded::SRC_UNIX),
+        "uuid" => Some(crate::embedded::SRC_UUID),
         "bigint" => Some(crate::embedded::SRC_BIGINT),
         // The v1 primitive floor (raw memory + fd_write). v1 maps `prim.*` to MIR
         // primitive ops by module name; the @intrinsic symbols are v0 placeholders.
@@ -641,6 +689,18 @@ mod ordered_tests {
             ]
         );
         assert!(!super::is_memory_unsafe_stdlib_fn("bytes", "get"));
+    }
+
+    /// A per-type requirement names its type in snake case; any other
+    /// requirement is the module function of its own name.
+    #[test]
+    fn a_per_type_requirement_names_its_type() {
+        assert_eq!(super::requirement_fn_name("TcpStream", "__self_read"), "__tcp_stream_read");
+        assert_eq!(super::requirement_fn_name("net.UdpSocket", "__self_close"), "__udp_socket_close");
+        assert_eq!(super::requirement_fn_name("HttpRequest", "__self_set_body_bytes"), "__http_request_set_body_bytes");
+        assert_eq!(super::requirement_fn_name("Fd", "__self_write"), "__fd_write");
+        assert_eq!(super::requirement_fn_name("BigInt", "add"), "add");
+        assert_eq!(super::requirement_fn_name("Int8", "__trunc"), "__trunc");
     }
 
     /// #4043: the opt-in is an import a file must WRITE — a module every file
