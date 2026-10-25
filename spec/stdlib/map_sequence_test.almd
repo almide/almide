@@ -1,7 +1,7 @@
 // The map additions of the stdlib redesign (wave 1): the sequence algorithms
 // over the entries (R-L0-42). A map is a sequence of (key, value) pairs in
 // insertion order, so every fn here gives what the same-named list fn gives on
-// `map.entries(m)`, and each callback takes one entry pair (R-map-09). Each fn
+// `map.to_list(m)`, and each callback takes one entry pair (R-map-09). Each fn
 // runs on Int and String values and meets the empty map.
 local fn by_value(a: (String, Int), b: (String, Int)) -> Int = if a.1 < b.1 then -1
 else if a.1 > b.1 then 1 else 0

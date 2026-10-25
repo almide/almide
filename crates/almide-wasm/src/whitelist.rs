@@ -267,7 +267,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
 
 /// The http call handle (#2633, audited 2026-09-26): stdlib/http_call.almd
 /// — language surface only (string interpolation and slicing, list.map/fold,
-/// map.entries, int.parse, `??`, ok()/err()/some()/none ctors, a callback
+/// map.to_list, int.parse, `??`, ok()/err()/some()/none ctors, a callback
 /// call); the only leaves are the op-53..=58 host calls this emitter lowers
 /// itself (calls.rs), and `HttpCall` is this emitter's own one-slot block.
 /// Result / Option returns and the Map headers param trip the coupled proxy;

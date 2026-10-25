@@ -145,14 +145,14 @@ fn is_map_str_int_list(t: &Ty) -> bool {
                 if b.len() == 1 && matches!(b[0], Ty::Int)))
 }
 
-/// `map.entries` / `map.from_list` over the skv repr (`Map[String, scalar]` —
+/// `map.to_list` / `map.from_list` over the skv repr (`Map[String, scalar]` —
 /// the tokenizer vocab): route to the skv self-hosts BEFORE the (key,value)
-/// repr table; the all-String repr keeps its existing `map.entries_str`.
+/// repr table; the all-String repr keeps its existing `map.to_list_str`.
 /// Other reprs wall (unregistered).
 fn map_skv_special_route(func: &str, arg_tys: &[Ty]) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
-    if func == "entries" && arg_tys.first().is_some_and(is_map_str_scalar_val) {
-        return Some("map.entries_skv".to_string());
+    if func == "to_list" && arg_tys.first().is_some_and(is_map_str_scalar_val) {
+        return Some("map.to_list_skv".to_string());
     }
     if func == "from_list" {
         if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
@@ -329,7 +329,7 @@ fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
             r.func,
             "new" | "set" | "remove" | "merge" | "update" | "upsert" | "filter" | "get"
                 | "get_or" | "keys" | "values" | "len" | "is_empty" | "contains" | "all"
-                | "any" | "count" | "fold" | "entries"
+                | "any" | "count" | "fold" | "to_list"
         ) {
             MapName::Suffix("_str")
         } else {
@@ -545,9 +545,9 @@ fn map_heap_val_named_and_typechange_route(r: MapRoute<'_>) -> Option<MapName> {
     {
         Some(MapName::Suffix("_srec"))
     }
-    // `map.entries` over the hval-TUPLE flavor (`Map[String, (Int, Int)]` —
+    // `map.to_list` over the hval-TUPLE flavor (`Map[String, (Int, Int)]` —
     // the C-039 tuple-valued map.map result): the typechange twin.
-    (true, true) if func == "entries" && arg_tys.first().is_some_and(is_map_str_scalar_tuple) => {
+    (true, true) if func == "to_list" && arg_tys.first().is_some_and(is_map_str_scalar_tuple) => {
         Some(MapName::Suffix("_hvalt"))
     }
     // TYPE-CHANGING `map.map` str → skv (`map.map(ms, (v) => string.len(v))`

@@ -422,7 +422,7 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         "find" | "partition" | "update" => vec!["list", "map"],
 
         // ── map-only ──
-        "keys" | "values" | "entries" | "merge"
+        "keys" | "values" | "merge"
         | "delete"
         => vec!["map"],
 
@@ -444,7 +444,7 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
 
         // ── option-only ──
         "is_some" | "is_none" | "to_result" | "or_else" => vec!["option"],
-        "to_list" => vec!["string", "set", "option"],
+        "to_list" => vec!["string", "map", "set", "option"],
 
         // ── result-only ──
         "map_err"

@@ -116,7 +116,7 @@ fn show[T](label: String, r: Result[T, String], f: (T) -> String) -> Unit = matc
 
 fn b(v: Bool) -> String = if v then "true" else "false"
 
-fn mi(m: Map[String, Int]) -> String = map.entries(m) |> list.map((e) => e.0 + "=" + int.to_string(e.1)) |> list.join(",")
+fn mi(m: Map[String, Int]) -> String = map.to_list(m) |> list.map((e) => e.0 + "=" + int.to_string(e.1)) |> list.join(",")
 
 fn si(s: Set[Int]) -> String = set.to_list(s) |> list.map((n) => int.to_string(n)) |> list.join(",")
 

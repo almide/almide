@@ -614,7 +614,7 @@ test "for...in with zip destructuring" {
 test "for...in with map entries destructuring" {
   let m = map.set(map.set(map.new(), "x", 1), "y", 2)
   var sum = 0
-  for (k, v) in map.entries(m) {
+  for (k, v) in map.to_list(m) {
     sum = sum + v
   }
   assert_eq(sum, 3)

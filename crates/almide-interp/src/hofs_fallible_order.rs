@@ -3,7 +3,7 @@
 // include!-spliced via `hofs_fallible.rs`. The list `_by` / `_with` cells of
 // sort / min / max / binary_search (R-list-06, -17, -19) in their fallible
 // form, and the set / map sequence cells (R-L0-42), which the stdlib bodies
-// write once over `set.to_list` / `map.entries` — so here too they hand the
+// write once over `set.to_list` / `map.to_list` — so here too they hand the
 // receiver's insertion-ordered vec to the list carrier. Each list body below
 // walks the same loop as its `stdlib/list.almd` carrier, so the callback sees
 // the same calls in the same order and the first err is the same one.

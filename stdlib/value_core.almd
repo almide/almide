@@ -1375,7 +1375,7 @@ fn __drop_value_tuple(t: (Value, Int)) -> Unit = {
 }
 
 // The (String, String) tuple-list counterpart of __svdrop_list / __drop_list_str_value (the
-// map.entries / render_attrs shape). At the list's last ref each tuple is freed at its OWN last ref
+// map.to_list / render_attrs shape). At the list's last ref each tuple is freed at its OWN last ref
 // (rc_dec BOTH String slots @ th+12 and @ th+20 — vs the (String,Value) version's __drop_value @20),
 // then the tuple block; then the list block. The per-tuple rc==1 guard makes a SHARED tuple (rc>1,
 // __list_concat_rc rc_inc'd) drop safely. prim-only ⇒ empty cert (a trusted free, leak-loop verified).
@@ -1401,7 +1401,7 @@ else {
   __ssdrop_list(xs, i + 1, n)
 }
 
-// map.entries over a Map[String,String] (the map_str module — interleaved 16-byte entries: key @
+// map.to_list over a Map[String,String] (the map_str module — interleaved 16-byte entries: key @
 // 12+i*16, value @ 12+i*16+8, both owned). Builds a List[(String,String)] of rc-SHARED (key, value)
 // tuples: `acc + [(k, v)]` Dup's each map String into the tuple's co-ref (the map keeps its own ref;
 // each tuple's drop rc_dec's them; balanced). The render_attrs source.

@@ -27,7 +27,7 @@ const SOURCE: &str = r#"effect fn main() -> Unit = {
   let mb = map.from_list(big)
   println("${map.len(mb)} ${map.get(mb, "k5") ?? -1} ${map.get(mb, "k19999") ?? -1}")
   var acc = 0
-  for (k, v) in map.entries(map.from_list([("z", 1), ("y", 2), ("x", 3)])) { acc = acc * 10 + v }
+  for (k, v) in map.to_list(map.from_list([("z", 1), ("y", 2), ("x", 3)])) { acc = acc * 10 + v }
   println("${acc}")
 }
 "#;

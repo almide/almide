@@ -396,7 +396,7 @@ impl Emitter<'_> {
                 }
                 Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(side)))))
             }
-            ("entries", [m]) => {
+            ("to_list", [m]) => {
                 let (kh, vh) = match self.lower_arg(m, None, ArgMode::Borrow)? {
                     SliceTy::Map(kh, vh) => (kh, vh),
                     other => return unsup(&format!("map-entries-of:{other:?}")),

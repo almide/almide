@@ -18,7 +18,7 @@ use std::process::Command;
 const ISSUE_2154_REPRO: &str = r#"
 effect fn main() -> Unit = {
   let counts = map.from_list([("pear", 2), ("fig", 3), ("apple", 2), ("date", 1)])
-  for (w, c) in list.sort_by(map.entries(counts), ((w, c)) => (0 - c, w)) {
+  for (w, c) in list.sort_by(map.to_list(counts), ((w, c)) => (0 - c, w)) {
     println("${w} ${c}")
   }
 }

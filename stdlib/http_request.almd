@@ -34,7 +34,7 @@ fn __hq_nh(req: List[String]) -> Int = int.parse(list.get(req, 3) ?? "0") ?? 0
 fn __hq_params_at(req: List[String]) -> Int = 4 + 2 * __hq_nh(req)
 
 fn http_new_request(method: String, target: String, body: String, headers: Map[String, String]) -> List[String] = {
-  let pairs = map.entries(headers) |> list.flat_map(((k, v)) => [k, v])
+  let pairs = map.to_list(headers) |> list.flat_map(((k, v)) => [k, v])
   [method, target, body, int.to_string(map.len(headers))] + pairs
 }
 
