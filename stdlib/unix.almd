@@ -29,20 +29,20 @@ effect fn listen(path: String) -> Result[Fd, String] = ok(Fd(unix.__os_listen(pa
 effect fn accept(listener: Fd) -> Result[Fd, String] = ok(Fd(unix.__os_accept(__raw(listener))!))
 
 /// Sends all of data, the descriptors fds riding with its first byte.
-effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Result[Unit, String] = unix.__os_send(
-  __raw(sock),
-  data,
-  fds |> list.map((f) => __raw(f)),
-)
+effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Result[Unit, String] = {
+  let raw = fds |> list.map((f) => __raw(f))
+  unix.__os_send(__raw(sock), data, raw)
+}
 
 /// Descriptors received on sock and not yet taken, oldest first.
 effect fn take_fds(sock: Fd) -> List[Fd] = unix.__os_take_fds(__raw(sock)) |> list.map((f) => Fd(f))
 
 /// The descriptors of xs readable within timeout_ms, in order; < 0 waits for one, 0 only checks.
-effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = ok(unix.__os_wait(
-  xs |> list.map((f) => __raw(f)),
-  timeout_ms,
-)! |> list.map((f) => Fd(f)))
+effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = {
+  let raw = xs |> list.map((f) => __raw(f))
+  let ready = unix.__os_wait(raw, timeout_ms)!
+  ok(ready |> list.map((f) => Fd(f)))
+}
 
 // ── Shared-memory files ──
 /// New zero-filled unnamed file of size bytes.
@@ -75,11 +75,10 @@ effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = ok(
 // One read of at most max bytes (65536 at most per read): empty once the peer closed.
 effect fn __fd_read(h: Fd, max: Int) -> Result[Bytes, String] = ok(unix.__os_recv(__raw(h), max)!)
 
-effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = unix.__os_send(
-  __raw(h),
-  data,
-  [],
-)
+effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = {
+  let no_fds: List[Int] = []
+  unix.__os_send(__raw(h), data, no_fds)
+}
 
 effect fn __fd_close(h: Fd) -> Result[Unit, String] = unix.__os_close(__raw(h))
 
