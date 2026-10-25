@@ -312,11 +312,12 @@ pub const SRC_BIGINT: &str = r#"
 type BigInt: Numeric, Integer = { neg: Bool, limbs: List[Int] }
 
 
-/// BigInt from trimmed decimal s with an optional + or -; err on junk.
+/// BigInt from trimmed decimal s with an optional + or -; err on junk or more than 4300 digits.
 fn parse(s: String) -> Result[BigInt, String] = parse_radix(s, 10)
 
 /// BigInt from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
-/// err on junk; radix outside 2..36 aborts.
+/// err on junk, and on more than 4300 digits in a radix that is not a power of two;
+/// radix outside 2..36 aborts.
 fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
   check_radix(radix)
   let bytes = string.to_bytes(string.trim(s))
@@ -328,20 +329,47 @@ fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
   }
 }
 
-/// Decimal digits, with - when negative.
+/// Decimal digits, with - when negative; more than 4300 digits aborts.
 fn to_string(x: BigInt) -> String = to_string_radix(x, 10)
 
-/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts, and so does
+/// a radix that is not a power of two when the text would pass 4300 digits.
 fn to_string_radix(x: BigInt, radix: Int) -> String = {
   check_radix(radix)
   let k = chunk_width(radix, 1, radix)
-  let chunks = radix_chunks(x.limbs, int.pow(radix, k), [])
-  let text = match chunks {
-    [] => "0",
-    [top, ..rest] => int.to_string_radix(top, radix) + (rest |> list.map((c) => string.pad_start(int.to_string_radix(c, radix), k, "0")) |> string.join("")),
+  let text = if is_pow2(radix) then chunk_text(
+    pow2_chunks(x.limbs, k * radix_bits(radix)),
+    radix,
+    k,
+  )
+  else {
+
+
+
+    if bit_length(x) > text_digit_limit() * int.bit_length(radix) then panic(text_limit_error())
+    else ()
+    let t = chunk_text(radix_chunks(x.limbs, int.pow(radix, k), []), radix, k)
+    if string.len(t) > text_digit_limit() then panic(text_limit_error()) else t
   }
   if x.neg then "-" + text else text
 }
+
+
+local fn chunk_text(chunks: List[Int], radix: Int, k: Int) -> String = match chunks {
+  [] => "0",
+  [top, ..rest] => int.to_string_radix(top, radix) + (rest |> list.map((c) => string.pad_start(int.to_string_radix(c, radix), k, "0")) |> string.join("")),
+}
+
+
+
+
+
+local fn text_digit_limit() -> Int = 4300
+
+local fn text_limit_error() -> String = "integer string conversion exceeds the limit of 4300 digits"
+
+
+local fn pow_bit_ceiling() -> Int = 8053063680
 
 
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -388,9 +416,14 @@ fn modulo(a: BigInt, b: BigInt) -> BigInt = {
   if list.is_empty(r.limbs) or a.neg == b.neg then r else add(r, b)
 }
 
-/// base raised to exp; exp < 0 aborts.
+/// base raised to exp; exp < 0 aborts, and so does a result sure to pass 30 * 2^28 bits.
 fn pow(base: BigInt, exp: Int) -> BigInt = if exp < 0 then panic("negative exponent")
+else if pow_too_large(bit_length(base) - 1, exp) then panic("pow result too large")
 else power(base, exp, small(1))
+
+
+
+local fn pow_too_large(k: Int, exp: Int) -> Bool = k > 0 and exp > (pow_bit_ceiling() - 1) / k
 
 /// Bits needed to hold the magnitude of x; 0 for 0.
 fn bit_length(x: BigInt) -> Int = match list.len(x.limbs) {
@@ -666,6 +699,11 @@ else 99
 local fn read_digits(digits: List[Int], radix: Int, neg: Bool) -> Result[BigInt, String] =
   if list.is_empty(digits) then err("invalid digit found in string")
   else if list.any(digits, (b) => digit_value(b) >= radix) then err("invalid digit found in string")
+  else if is_pow2(radix) then ok(make(
+    neg,
+    pow2_limbs(digits, radix_bits(radix), list.len(digits) - 1, 0, 0, []),
+  ))
+  else if list.len(digits) > text_digit_limit() then err(text_limit_error())
   else {
     let k = chunk_width(radix, 1, radix)
     ok(make(
@@ -685,6 +723,41 @@ local fn chunk_value(chunk: List[Int], radix: Int) -> List[Int] = {
   if v == 0 then []
   else [v]
 }
+
+
+local fn is_pow2(radix: Int) -> Bool = int.band(radix, radix - 1) == 0
+
+
+local fn radix_bits(radix: Int) -> Int = int.bit_length(radix) - 1
+
+
+
+local fn pow2_limbs(digits: List[Int], s: Int, i: Int, cur: Int, nbits: Int, acc: List[Int]) -> List[Int] =
+  if i < 0 then acc + [cur]
+  else {
+    let v = int.bor(cur, int.bshl(digit_value(limb(digits, i)), nbits))
+    if nbits + s >= 30 then pow2_limbs(
+      digits,
+      s,
+      i - 1,
+      int.bshr(v, 30),
+      nbits + s - 30,
+      acc + [int.band(v, limb_mask())],
+    )
+    else pow2_limbs(digits, s, i - 1, v, nbits + s, acc)
+  }
+
+
+local fn pow2_chunks(l: List[Int], w: Int) -> List[Int] = {
+  let n = (30 * list.len(l) + w - 1) / w
+  list.range(0, n) |> list.map((j) => bit_field(l, (n - 1 - j) * w, w)) |> list.drop_while((c) => c == 0)
+}
+
+
+local fn bit_field(l: List[Int], p: Int, w: Int) -> Int = int.band(
+  int.bor(int.bshr(limb(l, p / 30), p % 30), int.bshl(limb(l, p / 30 + 1), 30 - p % 30)),
+  int.bshl(1, w) - 1,
+)
 
 
 
@@ -16590,15 +16663,23 @@ fn unzip[A, B](xs: List[(A, B)]) -> (List[A], List[B]) = {
   (firsts, seconds)
 }
 
+
+
+
+
 /// start, start + step, ... before end; counts down for step < 0; step = 0 aborts.
 fn range_step(start: Int, end: Int, step: Int) -> List[Int] = {
   if step == 0 then panic("list.range_step: step must not be 0") else ()
-  let steps = if step > 0 then (if end > start then (end - start - 1) / step + 1 else 0)
-  else if start > end then (start - end - 1) / (0 - step) + 1
-  else 0
   var out: List[Int] = []
-  for i in 0..<steps {
-    list.push(out, start + i * step)
+  var x = start
+  var more = if step > 0 then start < end else start > end
+  while more {
+    list.push(out, x)
+    more = if step > 0 then x <= 9223372036854775807 - step and x + step < end
+    else x >= -9223372036854775807 - 1 - step and x + step > end
+    if more then {
+      x = x + step
+    } else ()
   }
   out
 }
@@ -38560,26 +38641,35 @@ else [55296 + (cp - 65536) / 1024, 56320 + (cp - 65536) % 1024]
 /// UTF-16 code units; a codepoint past U+FFFF is a surrogate pair.
 fn to_utf16(s: String) -> List[Int] = string.chars(s) |> list.flat_map((c) => utf16_units(string.codepoint(c) ?? 0))
 
-local fn utf16_decode(xs: List[Int], i: Int, acc: List[String]) -> Result[String, String] = match list.get(
-  xs,
-  i,
-) {
-  none => ok(string.join(list.reverse(acc), "")),
-  some(u) => if u < 0 or u > 65535 then err("string.from_utf16: code unit out of range at ${i}: ${u}")
-  else if u >= 55296 and u <= 56319 then match list.get(xs, i + 1) {
-    some(lo) => if lo >= 56320 and lo <= 57343 then utf16_decode(
-      xs,
-      i + 2,
-      [string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320))] + acc,
-    )
-    else err("string.from_utf16: unpaired surrogate at ${i}"),
-    none => err("string.from_utf16: unpaired surrogate at ${i}"),
-  } else if u >= 56320 and u <= 57343 then err("string.from_utf16: unpaired surrogate at ${i}")
-  else utf16_decode(xs, i + 1, [string.from_codepoint(u)] + acc),
-}
+
 
 /// String from UTF-16 code units; err on an unpaired surrogate or a unit outside 0..65535.
-fn from_utf16(xs: List[Int]) -> Result[String, String] = utf16_decode(xs, 0, [])
+fn from_utf16(xs: List[Int]) -> Result[String, String] = {
+  let n = list.len(xs)
+  var out: List[String] = []
+  var bad = ""
+  var i = 0
+  while i < n and bad == "" {
+    let u = list.get(xs, i) ?? 0
+    if u < 0 or u > 65535 then {
+      bad = "string.from_utf16: code unit out of range at ${i}: ${u}"
+    } else if u >= 55296 and u <= 56319 then {
+      let lo = list.get(xs, i + 1) ?? -1
+      if lo >= 56320 and lo <= 57343 then {
+        list.push(out, string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320)))
+        i = i + 2
+      } else {
+        bad = "string.from_utf16: unpaired surrogate at ${i}"
+      }
+    } else if u >= 56320 and u <= 57343 then {
+      bad = "string.from_utf16: unpaired surrogate at ${i}"
+    } else {
+      list.push(out, string.from_codepoint(u))
+      i = i + 1
+    }
+  }
+  if bad == "" then ok(string.join(out, "")) else err(bad)
+}
 
 /// The characters of s for which f is true.
 fn filter(s: String, f: (String) -> Bool) -> String = string.join(
@@ -38653,14 +38743,35 @@ fn sort(s: String) -> List[String] = list.sort(string.chars(s))
 /// The characters ordered by f's key; equal keys keep their order.
 fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.chars(s), f)
 
-local fn merge_with(xs: List[String], ys: List[String], cmp: (String, String) -> Int, i: Int, j: Int, acc: List[String]) -> List[String] = match (list.get(
-  xs,
-  i,
-), list.get(ys, j)) {
-  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, ys, cmp, i, j + 1, acc + [y])
-  else merge_with(xs, ys, cmp, i + 1, j, acc + [x]),
-  (some(_), none) => acc + list.drop(xs, i),
-  _ => acc + list.drop(ys, j),
+
+
+
+
+local fn merge_with(xs: List[String], ys: List[String], cmp: (String, String) -> Int) -> List[String] = {
+  var out: List[String] = []
+  var i = 0
+  var j = 0
+  for _ in 0..<(list.len(xs) + list.len(ys)) {
+    match (list.get(xs, i), list.get(ys, j)) {
+      (some(x), some(y)) => if cmp(y, x) < 0 then {
+        list.push(out, y)
+        j = j + 1
+      } else {
+        list.push(out, x)
+        i = i + 1
+      },
+      (some(x), none) => {
+        list.push(out, x)
+        i = i + 1
+      },
+      (none, some(y)) => {
+        list.push(out, y)
+        j = j + 1
+      },
+      (none, none) => (),
+    }
+  }
+  out
 }
 
 local fn merge_sort_with(xs: List[String], cmp: (String, String) -> Int) -> List[String] = {
@@ -38670,9 +38781,6 @@ local fn merge_sort_with(xs: List[String], cmp: (String, String) -> Int) -> List
     merge_sort_with(list.take(xs, n / 2), cmp),
     merge_sort_with(list.drop(xs, n / 2), cmp),
     cmp,
-    0,
-    0,
-    [],
   )
 }
 
@@ -43362,16 +43470,17 @@ fn decode_form(s: String) -> Result[String, String] = match decode_component(str
   err(e) => err(string.replace(e, "url.decode_component", "url.decode_form")),
 }
 
-fn __url_parse_pairs(parts: List[String], acc: List[(String, String)]) -> Result[List[(String, String)], String] = match list.first(parts) {
-  none => ok(list.reverse(acc)),
-  some(part) => {
-    let kv = __url_split_once(part, "=")
-    match (decode_form(kv.0), decode_form(kv.1)) {
-      (ok(k), ok(v)) => __url_parse_pairs(list.drop(parts, 1), [(k, v)] + acc),
-      (err(e), _) => err(string.replace(e, "url.decode_form", "url.parse_query")),
-      (_, err(e)) => err(string.replace(e, "url.decode_form", "url.parse_query")),
-    }
-  },
+
+
+
+
+fn __url_parse_pair(part: String) -> Result[(String, String), String] = {
+  let kv = __url_split_once(part, "=")
+  match (decode_form(kv.0), decode_form(kv.1)) {
+    (ok(k), ok(v)) => ok((k, v)),
+    (err(e), _) => err(string.replace(e, "url.decode_form", "url.parse_query")),
+    (_, err(e)) => err(string.replace(e, "url.decode_form", "url.parse_query")),
+  }
 }
 
 
@@ -43382,10 +43491,10 @@ fn __url_parse_pairs(parts: List[String], acc: List[(String, String)]) -> Result
 
 
 /// Decoded (k, v) pairs; bare key gets ""; err on a bad escape.
-fn parse_query(query: String) -> Result[List[(String, String)], String] = __url_parse_pairs(
-  string.split(query, "&") |> list.filter((part) => string.len(part) > 0),
-  [],
-)
+fn parse_query(query: String) -> Result[List[(String, String)], String] = {
+  let parts = string.split(query, "&") |> list.filter((part) => string.len(part) > 0)
+  ok(parts |> list.map((part) => __url_parse_pair(part)!)!)
+}
 
 
 fn __url_merge(base: Url, rel: String) -> String = if string.len(base.path) == 0 then "/" + rel
