@@ -1,0 +1,13 @@
+// #4097: redeclaring a built-in protocol would keep the built-in
+// conformances while replacing the requirements.
+protocol Twice {
+  fn twice(self) -> Self
+}
+
+type Pair: Twice = { a: Int }
+
+fn Pair.twice(self) -> Pair = { a: self.a * 2 }
+
+fn double[S: Twice](x: S) -> S = x.twice()
+
+effect fn main() -> Unit = println("${double(Pair { a: 3 }).a}")
