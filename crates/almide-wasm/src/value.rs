@@ -59,20 +59,7 @@ impl Emitter<'_> {
                 self.emit_value_box(VT_STR, Some(STR))?;
                 Some(Lowered::owned(SliceTy::Value))
             }
-            ("merge", [va, vb]) => {
-                let ti = self.types.tuple(vec![STR, SliceTy::Value]);
-                let def = self.types.tuple_def(ti);
-                let m = self.work.helper(Helper::ValueMerge {
-                    key_off: def.fields[0].1,
-                    val_off: def.fields[1].1,
-                });
-                // Borrowed: `$value_merge` takes its own credit on every
-                // block of either operand its result shares (#2010 item 5).
-                self.lower_arg(va, Some(SliceTy::Value), ArgMode::Borrow)?;
-                self.lower_arg(vb, Some(SliceTy::Value), ArgMode::Borrow)?;
-                self.f.instructions().call(m);
-                Some(Lowered::owned(SliceTy::Value))
-            }
+            ("merge", [va, vb]) => Some(Lowered::owned(self.lower_value_merge(va, vb)?)),
             // pick/omit: keep (drop) the named keys, kept pairs SHARED with
             // the source (native filter+clone of the pair vec — the pair
             // blocks themselves are never copied). Non-object passes through.
@@ -133,14 +120,48 @@ impl Emitter<'_> {
     }
 
     /// The pooled JSON/display fragment set.
-    /// pick/omit: keep (drop) the named keys, kept pairs SHARED with
-    /// the source (native filter+clone of the pair vec — the pair
-    /// blocks themselves are never copied). Non-object passes through.
+    /// merge: two Objects merge through the self-host `__vu_merge_pairs`
+    /// over their pair lists (#4207: one keyed index per call, O(|a| + |b|),
+    /// where the emitted scan per key of b was O(|a|·|b|)); any non-Object
+    /// operand yields b itself. Both operands are only READ (#2010 item 5).
+    fn lower_value_merge(&mut self, va: &IrExpr, vb: &IrExpr) -> Result<SliceTy, EmitError> {
+        let (merge, owned) = self.pairs_helper("__vu_merge_pairs", 2)?;
+        self.lower_arg(va, Some(SliceTy::Value), ArgMode::Borrow)?;
+        let ha = self.hold_i32()?;
+        self.f.instructions().local_set(ha);
+        self.lower_arg(vb, Some(SliceTy::Value), ArgMode::Borrow)?;
+        let hb = self.hold_i32()?;
+        self.f.instructions().local_set(hb);
+        let ho = self.hold_i32()?;
+        let mut i = self.f.instructions();
+        i.local_get(ha).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_const(VT_OBJECT).i32_ne();
+        i.local_get(hb).i32_load(slot_memarg(almide_layout::SUM_TAG)).i32_const(VT_OBJECT).i32_ne();
+        i.i32_or().if_(BlockType::Result(wasm_encoder::ValType::I32));
+        i.local_get(hb).call(F_INC);
+        i.local_get(hb);
+        i.else_();
+        for (k, h) in [ha, hb].into_iter().enumerate() {
+            pairs_arg(&mut i, h, owned[k]);
+        }
+        i.call(merge).local_set(ho);
+        box_object(&mut i, ho, ha);
+        i.end();
+        let _ = i;
+        for _ in 0..3 {
+            self.release_i32();
+        }
+        Ok(SliceTy::Value)
+    }
+
+    /// pick/omit: keep (drop) the named keys through the self-host
+    /// `__vu_pick_pairs` / `__vu_omit_pairs` (#4207: the key list hashed once,
+    /// O(n + k), where a scan of the key list per pair was O(n·k)).
+    /// Non-object: pick answers `{}` (C-401), omit passes it through.
     fn lower_value_pick_omit(&mut self, func: &str, v: &IrExpr, keys: &IrExpr) -> Result<SliceTy, EmitError> {
-        let keep_found = i32::from(func == "pick");
+        let pick = func == "pick";
+        let (sel, owned) = self.pairs_helper(if pick { "__vu_pick_pairs" } else { "__vu_omit_pairs" }, 2)?;
         // #2010 item 5: the source is only READ — every block the result
-        // shares with it (the kept pairs, a passed-through non-object)
-        // takes its own credit below.
+        // shares with it (a passed-through non-object) takes its own credit.
         self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
         let hv = self.hold_i32()?;
         self.f.instructions().local_set(hv);
@@ -150,64 +171,54 @@ impl Emitter<'_> {
         }
         let hk = self.hold_i32()?;
         self.f.instructions().local_set(hk);
-        let scan = self.scan_helper(STR)?;
-        let ti = self.types.tuple(vec![STR, SliceTy::Value]);
-        let key_off = self.types.tuple_def(ti).fields[0].1;
-        let hp = self.hold_i32()?;
         let ho = self.hold_i32()?;
-        let hw = self.hold_i32()?;
+        let hp = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_get(hv)
             .i32_load(slot_memarg(almide_layout::SUM_TAG))
             .i32_const(VT_OBJECT)
             .i32_ne()
             .if_(BlockType::Result(wasm_encoder::ValType::I32));
-        if keep_found == 1 {
+        if pick {
             // pick: a non-object has none of the keys, so it picks to the
             // empty object (C-401) — never the value back whole.
             i.i32_const(0).call(F_ALLOC).local_set(ho);
             i.local_get(ho).i32_const(0).i32_store(len_memarg());
-            i.i32_const(16).call(F_ALLOC).local_set(hp);
-            i.local_get(hp).i32_const(VT_OBJECT).i32_store(slot_memarg(almide_layout::SUM_TAG));
-            i.local_get(hp).local_get(ho).i32_store(slot_memarg(almide_layout::SUM_FIELD));
-            i.local_get(hp);
+            box_object(&mut i, ho, hp);
         } else {
             i.local_get(hv).call(F_INC);
             i.local_get(hv);
         }
         i.else_();
-        i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD)).local_set(hp);
-        i.local_get(hp).i32_load(len_memarg()).call(F_ALLOC).local_set(ho);
-        i.i32_const(0).local_set(hw);
-        i.i32_const(0).local_set(hv); // reuse: read cursor (bytes)
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hv).local_get(hp).i32_load(len_memarg()).i32_ge_u().br_if(1);
-        // pair handle → its key → membership scan
-        i.local_get(hk).i32_const(4).i32_const(0);
-        i.local_get(hp).local_get(hv).i32_add().i32_load(slot_memarg(0));
-        i.i32_load(slot_memarg(key_off));
-        i.call(scan).i32_const(0).i32_ne();
-        i.i32_const(keep_found).i32_eq().if_(BlockType::Empty);
-        i.local_get(hp).local_get(hv).i32_add().i32_load(slot_memarg(0)).call(F_INC);
-        i.local_get(ho).local_get(hw).i32_add();
-        i.local_get(hp).local_get(hv).i32_add().i32_load(slot_memarg(0));
-        i.i32_store(slot_memarg(0));
-        i.local_get(hw).i32_const(4).i32_add().local_set(hw);
-        i.end();
-        i.local_get(hv).i32_const(4).i32_add().local_set(hv);
-        i.br(0).end().end();
-        i.local_get(ho).local_get(hw).i32_store(len_memarg());
-        // box a fresh Object value
-        i.i32_const(16).call(F_ALLOC).local_set(hp);
-        i.local_get(hp).i32_const(VT_OBJECT).i32_store(slot_memarg(almide_layout::SUM_TAG));
-        i.local_get(hp).local_get(ho).i32_store(slot_memarg(almide_layout::SUM_FIELD));
-        i.local_get(hp);
+        pairs_arg(&mut i, hv, owned[0]);
+        i.local_get(hk);
+        if owned[1] {
+            i.local_get(hk).call(F_INC);
+        }
+        i.call(sel).local_set(ho);
+        box_object(&mut i, ho, hp);
         i.end();
         let _ = i;
-        for _ in 0..5 {
+        for _ in 0..4 {
             self.release_i32();
         }
         Ok(SliceTy::Value)
+    }
+
+    /// A linked self-host pair-list helper of `arity` list params: its wasm
+    /// index and which params the callee owns (an owned param is handed a
+    /// fresh credit, the callee's epilogue releases it).
+    fn pairs_helper(&mut self, name: &str, arity: usize) -> Result<(u32, Vec<bool>), EmitError> {
+        let Some(hi) = self.selfhost_helper(name) else {
+            return Err(EmitError::Unsupported(format!("value:unlinked:{name}")));
+        };
+        if let Some(r) = &self.table.infos[hi].refuse {
+            return Err(EmitError::Unsupported(format!("call-fn:{name}:{r}")));
+        }
+        self.calls.insert(hi);
+        let info = &self.table.infos[hi];
+        let owned = (0..arity).map(|k| info.param_owned.get(k).copied().unwrap_or(true)).collect();
+        Ok((info.wasm_index, owned))
     }
 
     /// `__vu_fold_pairs` (stdlib/value_utils.almd): the duplicate-key fold
@@ -777,4 +788,22 @@ impl Emitter<'_> {
 /// offset (the pairs-list walk) — `slot_memarg` would double-shift.
 fn raw_mem() -> wasm_encoder::MemArg {
     wasm_encoder::MemArg { offset: 0, align: 2, memory_index: 0 }
+}
+
+/// Push the pair list of the Object held in `h` as a helper argument, with a
+/// fresh credit when the callee owns the param.
+fn pairs_arg(i: &mut wasm_encoder::InstructionSink, h: u32, owned: bool) {
+    i.local_get(h).i32_load(slot_memarg(almide_layout::SUM_FIELD));
+    if owned {
+        i.local_get(h).i32_load(slot_memarg(almide_layout::SUM_FIELD)).call(F_INC);
+    }
+}
+
+/// Box the owned pair list in `pairs` as a fresh Object Value and leave it on
+/// the stack (`scratch` holds the box).
+fn box_object(i: &mut wasm_encoder::InstructionSink, pairs: u32, scratch: u32) {
+    i.i32_const(16).call(F_ALLOC).local_set(scratch);
+    i.local_get(scratch).i32_const(VT_OBJECT).i32_store(slot_memarg(almide_layout::SUM_TAG));
+    i.local_get(scratch).local_get(pairs).i32_store(slot_memarg(almide_layout::SUM_FIELD));
+    i.local_get(scratch);
 }

@@ -714,7 +714,9 @@ fn list_drop_end_value(xs: List[Value], n: Int) -> List[Value] = {
 // Otherwise → b. With a DUPLICATE key (value.object keeps them) the fold is v0's too (#2735): only the
 // FIRST of a's repeats is overridden, a key b repeats takes b's LAST value, and a new key b repeats is
 // appended once, at its first position. set_nested supplies the recursion (it merges a freshly-built
-// single-key nested object into root), so this stays one level. LEAK-FREE by the value_object/__vobj_fill discipline: the result
+// single-key nested object into root), so this stays one level. Every "which slot holds this key"
+// question is a binary search of a key index sorted once per call (#4207: O((|a| + |b|) log), where a
+// scan per key was O(|a|·|b|)). LEAK-FREE by the value_object/__vobj_fill discipline: the result
 // Object block is built DIRECTLY (prim.alloc_value) and every key/value handle written in is acquired
 // with EXACTLY ONE prim.rc_inc — never the over-counting tuple+list-concat+value.object chain (which
 // rc_inc'd a second time). a and b stay BORROWED; the result owns one fresh ref per slot, freed once by
@@ -728,51 +730,171 @@ fn list_tail_value(xs: List[Value]) -> List[Value] = {
   buf
 }
 
-fn __vmerge_bnew(a: Value, b: Value, j: Int, nb: Int, na: Int, acc: Int) -> Int =
-  if j >= nb then acc
-  else {
-    let bh = prim.handle(b)
-    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
-    let inc = if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then 1 else 0
-    __vmerge_bnew(a, b, j + 1, nb, na, acc + inc)
+// ── The key index (#4207) ── a STABLE merge sort of slot indices by key, so a
+// lookup is a binary search: merge / pick / omit cost O((n + m) log(n + m))
+// key comparisons where a scan per key cost O(n·m). The order is any total
+// order on the key bytes (length first, then bytes) — only equality is
+// observable, and the stable sort keeps equal keys in slot order, so the FIRST
+// and LAST slot of a key are the ends of its run. Keys are read as raw handles:
+// the key of slot i sits at `base + i * stride` (16 for an Object's pairs, 8
+// for a List[String]); a String handle holds its byte length @4, bytes @12.
+fn __vx_cmpb(pa: Int, pb: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let ca = prim.load8(pa + i)
+  let cb = prim.load8(pb + i)
+  if ca < cb then 0 - 1
+  else if ca > cb then 1
+  else __vx_cmpb(pa, pb, n, i + 1)
+}
+
+fn __vx_cmp(ka: Int, kb: Int) -> Int = {
+  let la = prim.load32(ka + 4)
+  let lb = prim.load32(kb + 4)
+  if la < lb then 0 - 1
+  else if la > lb then 1
+  else __vx_cmpb(ka + 12, kb + 12, la, 0)
+}
+
+fn __vx_key(base: Int, stride: Int, s: Int, p: Int) -> Int = prim.load64(base + prim.load64(s + p * 8) * stride)
+
+fn __vx_iota(dst: Int, n: Int, i: Int) -> Unit = if i >= n then ()
+else {
+  prim.store64(dst + i * 8, i)
+  __vx_iota(dst, n, i + 1)
+}
+
+fn __vx_merge(base: Int, stride: Int, src: Int, dst: Int, i: Int, iend: Int, j: Int, jend: Int, o: Int) -> Unit =
+  if i >= iend then {
+    if j >= jend then ()
+    else {
+      prim.store64(dst + o * 8, prim.load64(src + j * 8))
+      __vx_merge(base, stride, src, dst, i, iend, j + 1, jend, o + 1)
+    }
+  } else if j >= jend then {
+    prim.store64(dst + o * 8, prim.load64(src + i * 8))
+    __vx_merge(base, stride, src, dst, i + 1, iend, j, jend, o + 1)
+  } else if __vx_cmp(__vx_key(base, stride, src, i), __vx_key(base, stride, src, j)) <= 0 then {
+    prim.store64(dst + o * 8, prim.load64(src + i * 8))
+    __vx_merge(base, stride, src, dst, i + 1, iend, j, jend, o + 1)
+  } else {
+    prim.store64(dst + o * 8, prim.load64(src + j * 8))
+    __vx_merge(base, stride, src, dst, i, iend, j + 1, jend, o + 1)
   }
 
-fn __vmerge_fill_a(a: Value, b: Value, dst: Value, i: Int, na: Int, nb: Int) -> Unit =
+fn __vx_pass(base: Int, stride: Int, n: Int, src: Int, dst: Int, w: Int, lo: Int) -> Unit =
+  if lo >= n then ()
+  else {
+    let mid = if lo + w < n then lo + w else n
+    let hi = if lo + 2 * w < n then lo + 2 * w else n
+    __vx_merge(base, stride, src, dst, lo, mid, mid, hi, lo)
+    __vx_pass(base, stride, n, src, dst, w, lo + 2 * w)
+  }
+
+fn __vx_passes(base: Int, stride: Int, n: Int, src: Int, dst: Int, w: Int) -> Int =
+  if w >= n then src
+  else {
+    __vx_pass(base, stride, n, src, dst, w, 0)
+    __vx_passes(base, stride, n, dst, src, w * 2)
+  }
+
+// Sort the n slot indices into one of the two caller-owned n-slot buffers
+// (payload addresses ba / bb); the answer is the payload address holding them.
+fn __vx_sort(base: Int, stride: Int, n: Int, ba: Int, bb: Int) -> Int = {
+  __vx_iota(ba, n, 0)
+  __vx_passes(base, stride, n, ba, bb, 1)
+}
+
+// The first run position whose key is >= kh (lower) / > kh (upper).
+fn __vx_lower(base: Int, stride: Int, s: Int, kh: Int, lo: Int, hi: Int) -> Int =
+  if lo >= hi then lo
+  else {
+    let mid = (lo + hi) / 2
+    if __vx_cmp(__vx_key(base, stride, s, mid), kh) < 0 then __vx_lower(
+      base,
+      stride,
+      s,
+      kh,
+      mid + 1,
+      hi,
+    )
+    else __vx_lower(base, stride, s, kh, lo, mid)
+  }
+
+fn __vx_upper(base: Int, stride: Int, s: Int, kh: Int, lo: Int, hi: Int) -> Int =
+  if lo >= hi then lo
+  else {
+    let mid = (lo + hi) / 2
+    if __vx_cmp(__vx_key(base, stride, s, mid), kh) <= 0 then __vx_upper(
+      base,
+      stride,
+      s,
+      kh,
+      mid + 1,
+      hi,
+    )
+    else __vx_upper(base, stride, s, kh, lo, mid)
+  }
+
+// The FIRST slot holding kh, or -1.
+fn __vx_first(base: Int, stride: Int, s: Int, n: Int, kh: Int) -> Int = {
+  let p = __vx_lower(base, stride, s, kh, 0, n)
+  if p >= n then 0 - 1
+  else if __vx_cmp(__vx_key(base, stride, s, p), kh) == 0 then prim.load64(s + p * 8)
+  else 0 - 1
+}
+
+// The LAST slot holding kh, or -1.
+fn __vx_last(base: Int, stride: Int, s: Int, n: Int, kh: Int) -> Int = {
+  let p = __vx_upper(base, stride, s, kh, 0, n)
+  if p <= 0 then 0 - 1
+  else if __vx_cmp(__vx_key(base, stride, s, p - 1), kh) == 0 then prim.load64(s + (p - 1) * 8)
+  else 0 - 1
+}
+
+// value.merge's per-slot questions, each a binary search of a key index:
+// sa / sb are a's / b's slot indices sorted by key (payload addresses), ab / bb
+// the pair payloads (block + 12). b's slot j is APPENDED when its key is in no
+// slot of a and j is the first slot of b holding it.
+fn __vmerge_isnew(ab: Int, bb: Int, sa: Int, sb: Int, na: Int, nb: Int, j: Int) -> Bool = {
+  let bk = prim.load64(bb + (2 * j) * 8)
+  __vx_first(ab, 16, sa, na, bk) < 0 and __vx_first(bb, 16, sb, nb, bk) == j
+}
+
+fn __vmerge_bnew(ab: Int, bb: Int, sa: Int, sb: Int, na: Int, nb: Int, j: Int, acc: Int) -> Int =
+  if j >= nb then acc
+  else {
+    let inc = if __vmerge_isnew(ab, bb, sa, sb, na, nb, j) then 1 else 0
+    __vmerge_bnew(ab, bb, sa, sb, na, nb, j + 1, acc + inc)
+  }
+
+fn __vmerge_fill_a(ab: Int, bb: Int, sa: Int, sb: Int, na: Int, nb: Int, dst: Value, i: Int) -> Unit =
   if i >= na then ()
   else {
-    let ah = prim.handle(a)
     let dh = prim.handle(dst)
-    let key = prim.load64(ah + 12 + (2 * i) * 8)
-    let ak: String = prim.load_handle(ah + 12 + (2 * i) * 8)
-    // b first (#3642): a's prefix is scanned only for a key b has — O(|a|·|b|), not O(|a|²)
-    let last_b = __vobj_find_last(b, ak, nb)
-    let bidx = if last_b < 0 then last_b
-    else if __vobj_find(a, ak, 0, i) < 0 then last_b
+    let key = prim.load64(ab + (2 * i) * 8)
+    // the FIRST of a's slots holding the key takes b's LAST value for it
+    let bidx = if __vx_first(ab, 16, sa, na, key) == i then __vx_last(bb, 16, sb, nb, key)
     else 0 - 1
-    let val = if bidx < 0 then prim.load64(ah + 12 + (2 * i + 1) * 8) else prim.load64(prim.handle(b) + 12 + (2 * bidx + 1) * 8)
+    let val = if bidx < 0 then prim.load64(ab + (2 * i + 1) * 8) else prim.load64(bb + (2 * bidx + 1) * 8)
     prim.rc_inc(key)
     prim.rc_inc(val)
     prim.store64(dh + 12 + (2 * i) * 8, key)
     prim.store64(dh + 12 + (2 * i + 1) * 8, val)
-    __vmerge_fill_a(a, b, dst, i + 1, na, nb)
+    __vmerge_fill_a(ab, bb, sa, sb, na, nb, dst, i + 1)
   }
 
-fn __vmerge_app_b(a: Value, b: Value, dst: Value, j: Int, nb: Int, na: Int, w: Int) -> Unit =
+fn __vmerge_app_b(ab: Int, bb: Int, sa: Int, sb: Int, na: Int, nb: Int, dst: Value, j: Int, w: Int) -> Unit =
   if j >= nb then ()
-  else {
-    let bh = prim.handle(b)
-    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
-    if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then {
-      let dh = prim.handle(dst)
-      let kh = prim.load64(bh + 12 + (2 * j) * 8)
-      let vh = prim.load64(bh + 12 + (2 * __vobj_find_last(b, bk, nb) + 1) * 8)
-      prim.rc_inc(kh)
-      prim.rc_inc(vh)
-      prim.store64(dh + 12 + (2 * w) * 8, kh)
-      prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
-      __vmerge_app_b(a, b, dst, j + 1, nb, na, w + 1)
-    } else __vmerge_app_b(a, b, dst, j + 1, nb, na, w)
-  }
+  else if __vmerge_isnew(ab, bb, sa, sb, na, nb, j) then {
+    let dh = prim.handle(dst)
+    let kh = prim.load64(bb + (2 * j) * 8)
+    let vh = prim.load64(bb + (2 * __vx_last(bb, 16, sb, nb, kh) + 1) * 8)
+    prim.rc_inc(kh)
+    prim.rc_inc(vh)
+    prim.store64(dh + 12 + (2 * w) * 8, kh)
+    prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
+    __vmerge_app_b(ab, bb, sa, sb, na, nb, dst, j + 1, w + 1)
+  } else __vmerge_app_b(ab, bb, sa, sb, na, nb, dst, j + 1, w)
 
 fn value_merge(a: Value, b: Value) -> Value = {
   let ah = prim.handle(a)
@@ -780,13 +902,19 @@ fn value_merge(a: Value, b: Value) -> Value = {
   if prim.load32(ah + 4) == 6 and prim.load32(bh + 4) == 6 then {
     let na = prim.load32(ah + 8) / 2
     let nb = prim.load32(bh + 8) / 2
-    let total = na + __vmerge_bnew(a, b, 0, nb, na, 0)
+    let xa = prim.alloc_list(na)
+    let ya = prim.alloc_list(na)
+    let xb = prim.alloc_list(nb)
+    let yb = prim.alloc_list(nb)
+    let sa = __vx_sort(ah + 12, 16, na, prim.handle(xa) + 12, prim.handle(ya) + 12)
+    let sb = __vx_sort(bh + 12, 16, nb, prim.handle(xb) + 12, prim.handle(yb) + 12)
+    let total = na + __vmerge_bnew(ah + 12, bh + 12, sa, sb, na, nb, 0, 0)
     let dst = prim.alloc_value(2 * total)
     let dh = prim.handle(dst)
     prim.store32(dh + 4, 6)
     prim.store32(dh + 8, 2 * total)
-    __vmerge_fill_a(a, b, dst, 0, na, nb)
-    __vmerge_app_b(a, b, dst, 0, nb, na, na)
+    __vmerge_fill_a(ah + 12, bh + 12, sa, sb, na, nb, dst, 0)
+    __vmerge_app_b(ah + 12, bh + 12, sa, sb, na, nb, dst, 0, na)
     dst
   } else b
 }
@@ -803,16 +931,6 @@ else {
   let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
   if k == key then i
   else __vobj_find(v, key, i + 1, n)
-}
-
-// The LAST slot in [0, n) holding `key`, or -1. value.merge folds b's pairs in order, so for a key b
-// repeats the value that wins is the last one (#2735).
-fn __vobj_find_last(v: Value, key: String, n: Int) -> Int = if n <= 0 then 0 - 1
-else {
-  let h = prim.handle(v)
-  let k: String = prim.load_handle(h + 12 + (2 * (n - 1)) * 8)
-  if k == key then n - 1
-  else __vobj_find_last(v, key, n - 1)
 }
 
 // The Value-payload `??` (`value.get(o,k) ?? value.null()`): a Result[Value,String] unwrap, routed
