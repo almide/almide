@@ -35,8 +35,9 @@ trap 'rm -rf "$TMP"' EXIT
 ALMIDE_BIN="$BIN" python3 "$ROOT/tools/wasm_reachability_sweep.py" --json "$TMP/sweep.json" \
   >"$TMP/out.txt" 2>"$TMP/progress.txt" || { echo "::error::sweep failed" >&2; cat "$TMP/progress.txt" >&2; exit 1; }
 
+grep -E 'CI slice|full run' "$TMP/progress.txt" || true
 python3 - "$TMP/sweep.json" "$BASELINE" <<'PYEOF'
-import json, sys
+import json, os, sys
 rows = json.load(open(sys.argv[1]))
 listed = {}
 for line in open(sys.argv[2]):
@@ -55,7 +56,18 @@ if new:
     for k in new:
         print(f"  + {k} ({observed[k]})", file=sys.stderr)
     fail = 1
-stale = sorted(k for k in listed if k not in observed)
+# Under the CI slice (ALMIDE_CI_SLICE=k > 1) the sweep probed only the
+# selected fns: a baseline row is judged STALE only when its fn was probed.
+# The full run (develop, main, PRs into main) judges every row.
+sliced = int(os.environ.get("ALMIDE_CI_SLICE", "1") or "1") > 1
+probed_keys = {f"{r['module']}.{r['name']}" for r in rows}
+if sliced and not rows:
+    print("wasm-reachability: the sweep judged 0 fns — a vacuous run is not a pass", file=sys.stderr)
+    sys.exit(1)
+if sliced:
+    print(f"wasm-reachability: CI slice — {len(rows)} fn(s) probed; staleness judged for the "
+          f"{sum(1 for k in listed if k in probed_keys)} baseline row(s) among them, the rest on the full run")
+stale = sorted(k for k in listed if k not in observed and (not sliced or k in probed_keys))
 if stale:
     print("STALE baseline entr(ies) — these now build on wasm; prune them (the set only shrinks):", file=sys.stderr)
     for k in stale:

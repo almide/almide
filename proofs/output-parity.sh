@@ -69,6 +69,14 @@ WALLED="${OUTPUT_PARITY_WALLED:-$ROOT/proofs/output-parity-walled-baseline.txt}"
 # fails — the number here and the names in the ledger cannot drift apart.
 MAX_WALLED=0
 source "$ROOT/scripts/lib/determinism-walled.sh"
+# The CI slice (scripts/lib/ci-slice.sh): under ALMIDE_CI_SLICE=k > 1 (a PR into
+# develop) the sweep runs the commit-rotated 1-in-k slice of the spec files
+# plus the ones the change touches, and every verdict below — REGRESSION,
+# INCOMPLETE BASELINE, the wall ledger — is judged over those files only. A
+# baseline or ledger row outside the slice is judged on the full run, and
+# --update is refused (a slice would truncate the baseline).
+source "$ROOT/scripts/lib/ci-slice.sh"
+[ "${1:-}" != "--update" ] || ci_slice_refuse_regen output-parity
 TMP="${TMPDIR:-/tmp}/almide-output-parity.$$"
 mkdir -p "$TMP"
 to() { perl -e 'alarm shift @ARGV; exec @ARGV' "$@"; }   # macOS has no `timeout`
@@ -95,6 +103,11 @@ if [ ! -x "$ALM" ]; then
 fi
 
 cd "$ROOT"
+if ci_slice_active; then
+  find "$SPEC" -name '*.almd' | sort | ci_slice_filter output-parity > "$TMP/selected.txt" || exit 1
+else
+  find "$SPEC" -name '*.almd' | sort > "$TMP/selected.txt"
+fi
 
 : > "$TMP/matches.txt"
 : > "$TMP/walls.txt"
@@ -214,7 +227,7 @@ while IFS= read -r f <&3; do
     # render as wall), not just as runerr. Only the quiet re-run classifies.
     *)     suspects+=("$f:$VERDICT") ;;
   esac
-done 3< <(find "$SPEC" -name '*.almd' | sort)
+done 3< "$TMP/selected.txt"
 # Solo retry pass — the machine is quiet now (the sweep is over). This loop
 # iterates an ARRAY, so it cannot be truncated the way the sweep was; the
 # redirect is here because a stdin-reading fixture would otherwise block on the
@@ -245,7 +258,8 @@ echo "output-parity: match=$match wall=$wall MISMATCH=$mismatch RUNERR=$runerr H
 # MISMATCH=0 — 2026-08-16). The stdin isolation in run_one fixes THAT cause; this
 # catches the next one, whatever it is.
 seen=$((match + wall + mismatch + runerr + hang + xfail + v0fail + skip))
-corpus=$(find "$SPEC" -name '*.almd' | wc -l | tr -d ' ')
+corpus=$(wc -l < "$TMP/selected.txt" | tr -d ' ')
+if ci_slice_active && [ "$corpus" -eq 0 ]; then echo "::error::output-parity: the CI slice selected 0 files — a vacuous run is not a pass"; exit 1; fi
 if [ "$seen" -ne "$corpus" ]; then
   echo "::error::output-parity: classified $seen of $corpus files — the sweep did not finish."
   echo "  Every count above is PARTIAL, and the baseline diff would report the"
@@ -298,7 +312,7 @@ else
 fi
 { if [ -f "$BASELINE" ]; then cat "$BASELINE"; fi; cat "$TMP/ledger_rows.txt"; } | grep -v '^[[:space:]]*$' | LC_ALL=C sort -u > "$TMP/claim.txt"
 LC_ALL=C sort -u "$TMP/walls.txt" | LC_ALL=C comm -12 - "$TMP/claim.txt" > "$TMP/claim_walls.txt"
-check_walled_ledger "$WALLED" "$TMP/claim_walls.txt" "output-parity" || ledger_ok=0
+check_walled_ledger "$WALLED" "$TMP/claim_walls.txt" "output-parity" "$TMP/selected.txt" || ledger_ok=0
 if [ -f "$BASELINE" ]; then
   both="$(LC_ALL=C sort -u "$BASELINE" | LC_ALL=C comm -12 - "$TMP/ledger_rows.txt")"
   if [ -n "$both" ]; then
@@ -329,6 +343,11 @@ fi
 # under the same C collation into a temp before comparing — the committed file is
 # left untouched (regenerated canonically on the next --update).
 LC_ALL=C sort "$BASELINE" > "$TMP/baseline_sorted.txt"
+if ci_slice_active; then
+  LC_ALL=C sort -u "$TMP/selected.txt" | LC_ALL=C comm -12 "$TMP/baseline_sorted.txt" - > "$TMP/baseline_in_slice.txt"
+  echo "output-parity: CI slice — judging the $(wc -l < "$TMP/baseline_in_slice.txt" | tr -d ' ') of $(wc -l < "$TMP/baseline_sorted.txt" | tr -d ' ') baseline row(s) whose file ran; the full run judges every row"
+  mv "$TMP/baseline_in_slice.txt" "$TMP/baseline_sorted.txt"
+fi
 # REGRESSION = a baseline must-match file that is no longer matching.
 regressions="$(comm -23 "$TMP/baseline_sorted.txt" "$TMP/matches.txt")"
 gained="$(comm -13 "$TMP/baseline_sorted.txt" "$TMP/matches.txt")"
@@ -344,5 +363,5 @@ if [ -n "$gained" ]; then
   echo "::error::output-parity: INCOMPLETE BASELINE — $(echo "$gained" | wc -l | tr -d ' ') matching file(s) above have no row, so no later run compares them (#3198). Run --update and commit the rows."
   rm -rf "$TMP"; exit 1
 fi
-echo "output-parity: OK — all $(wc -l < "$BASELINE" | tr -d ' ') baseline files still byte-match v0."
+echo "output-parity: OK — all $(wc -l < "$TMP/baseline_sorted.txt" | tr -d ' ') baseline files still byte-match v0."
 rm -rf "$TMP"; exit 0

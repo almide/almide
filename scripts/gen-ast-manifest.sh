@@ -33,7 +33,13 @@ case "$ORACLE" in /*) ;; *) ORACLE="$PWD/$ORACLE" ;; esac
 # untracked fixture is refused HERE, before anything is truncated.
 refuse_stale_tree || exit $?
 
-OUT_DIR="crates/almide-syntax/tests/golden"
+# The CI slice (scripts/lib/ci-slice.sh): under ALMIDE_CI_SLICE=k > 1 only the
+# selected fixtures are regenerated, into GEN_MANIFEST_OUT_DIR (a scratch dir
+# scripts/check-parity-goldens.sh compares row by row) — never the committed
+# golden, which a slice would truncate to 1 in k rows.
+. scripts/lib/ci-slice.sh
+if ci_slice_active && [ -z "${GEN_MANIFEST_OUT_DIR:-}" ]; then ci_slice_refuse_regen "$(basename "$0")"; fi
+OUT_DIR="${GEN_MANIFEST_OUT_DIR:-crates/almide-syntax/tests/golden}"
 mkdir -p "$OUT_DIR"
 MANIFEST="$OUT_DIR/spec-ast-manifest.txt"
 EXCLUDED="$OUT_DIR/spec-ast-exclusions.txt"
@@ -61,7 +67,7 @@ for r in $ROOTS; do
       printf '%s\t%s\n' "$f" "${reason:-nonzero exit}" >> "$EXCLUDED"
       n_skip=$((n_skip + 1))
     fi
-  done <<< "$(cd "$r" && find spec -name '*.almd' | sort)"
+  done <<< "$(cd "$r" && find spec -name '*.almd' | sort | ci_slice_filter gen-ast-manifest)"
 done
 rm -f /tmp/ast-err.$$
 # One corpus order regardless of which root a file lives in (stable diffs).

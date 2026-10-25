@@ -18,7 +18,9 @@ check_walled_ledger() {
   grep -v '^[[:space:]]*#' "$ledger" | grep -v '^[[:space:]]*$' | sed 's/[[:space:]]*::.*$//' | LC_ALL=C sort -u > "$want"
   if [ -n "$selected" ] && [ "${ALMIDE_CI_SLICE:-1}" -gt 1 ] 2>/dev/null; then
     local sel; sel="$(mktemp)"
-    sed 's#.*/##' "$selected" | LC_ALL=C sort -u > "$sel"
+    # Rows name a fixture by basename (the determinism gates) or by path
+    # (output-parity): keep a row that matches either.
+    { cat "$selected"; sed 's#.*/##' "$selected"; } | LC_ALL=C sort -u > "$sel"
     LC_ALL=C comm -12 "$want" "$sel" > "$want.in"; mv "$want.in" "$want"; rm -f "$sel"
   fi
   local got; got="$(mktemp)"

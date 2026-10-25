@@ -30,6 +30,13 @@ cd "$(dirname "$0")/.."
 ROOT="$PWD"
 ALMIDE="${ALMIDE:-$ROOT/target/release/almide}"
 mode="${1:-spec}"
+# The CI slice (scripts/lib/ci-slice.sh): under ALMIDE_CI_SLICE=k > 1 (a PR into
+# develop) `spec` runs the commit-rotated 1-in-k slice of spec/'s test files
+# (plus the ones the change touches), one `almide test <file>` each, and
+# `fuzz` runs 1 in k of the programs from the same seeds (diff-fuzz at least
+# 20, xtarget-fuzz at least 30). The full run (develop, main, PRs into main,
+# the nightly) runs all of spec/ and every program.
+. scripts/lib/ci-slice.sh
 
 arm() { ALMIDE_REGION_TRAP_STALE=1 "$@"; }
 unarm() { env -u ALMIDE_REGION_TRAP_STALE "$@"; }
@@ -40,16 +47,37 @@ case "$mode" in
 spec)
   need_almide; need_wasmtime
   fail=0
+  if ci_slice_active; then
+    # The files `almide test spec/` would collect (a `test` block at a line
+    # start, no hidden directory), then the slice.
+    sel=$(mktemp)
+    find spec -name '*.almd' -not -path '*/.*' | LC_ALL=C sort | xargs grep -l '^test ' \
+      | ci_slice_filter memory-traps-spec > "$sel" || exit 2
+    n=$(wc -l < "$sel" | tr -d ' ')
+    [ "$n" -gt 0 ] || { echo "memory-traps: the CI slice selected 0 test files — a vacuous run is not a pass" >&2; exit 1; }
+    one() { # $1 = target, $2 = file
+      local o; o=$(ALMIDE_REGION_TRAP_STALE=1 "$ALMIDE" test "$2" --target "$1" 2>&1) && return 0
+      printf 'FAIL %s (--target %s):\n%s\n' "$2" "$1" "$o" | head -60; return 1
+    }
+    export -f one; export ALMIDE
+    for leg in rust wasm; do
+      echo "== spec/ CI slice ($n test files) on $leg, ALMIDE_REGION_TRAP_STALE=1"
+      xargs -P "$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)" -I{} bash -c 'one "$@"' _ "$leg" {} < "$sel" || fail=1
+    done
+    rm -f "$sel"
+  else
   echo "== spec/ on native, ALMIDE_REGION_TRAP_STALE=1"
   arm "$ALMIDE" test spec/ --target rust || fail=1
   echo "== spec/ on wasm (the double-free trap is in every build)"
   arm "$ALMIDE" test spec/ --target wasm || fail=1
+  fi
   [ $fail = 0 ] && echo "memory-traps: spec/ passes on both legs with both traps armed"
   exit $fail
   ;;
 fuzz)
   need_almide; need_wasmtime
   fail=0
+  FUZZ_COUNT="$(ci_slice_count "${FUZZ_COUNT:-300}" 30 xtarget-fuzz)" || exit 2
   echo "== proofs/diff-fuzz.sh, seed ${FUZZ_SEED:-4023}, ${DIFF_FUZZ_N:-150} programs, region trap armed"
   # diff-fuzz.sh stamps the PATH `almide` against the workspace build: put the
   # binary under test first so a stale installed one cannot stand in for it.
