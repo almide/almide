@@ -1207,6 +1207,13 @@ jobs:
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
       - name: Host-arch codegen determinism (wasm32-wasip1 vs native, byte-identical)
+        # The full corpus on a PR into main and a push to main (the releases);
+        # elsewhere every 8th fixture, rotated by the commit, plus the
+        # change's own fixtures (scripts/lib/determinism-select.sh).
+        env:
+          DETERMINISM_STRIDE: ${{ (github.base_ref == 'main' || github.ref == 'refs/heads/main') && '1' || '8' }}
+          DETERMINISM_SEED: ${{ github.sha }}
+          DETERMINISM_BASE: ${{ github.base_ref && format('origin/{0}', github.base_ref) || '' }}
         run: scripts/check-host-determinism.sh
 
   wasm-browser-determinism:
@@ -1299,6 +1306,13 @@ jobs:
           sudo mv wasmtime-*/wasmtime /usr/local/bin/
           wasmtime --version
       - name: Browser-ABI determinism (wasm32-unknown-unknown via node, no panic + byte-identical)
+        # The full corpus on a PR into main and a push to main (the releases);
+        # elsewhere every 8th fixture, rotated by the commit, plus the
+        # change's own fixtures (scripts/lib/determinism-select.sh).
+        env:
+          DETERMINISM_STRIDE: ${{ (github.base_ref == 'main' || github.ref == 'refs/heads/main') && '1' || '8' }}
+          DETERMINISM_SEED: ${{ github.sha }}
+          DETERMINISM_BASE: ${{ github.base_ref && format('origin/{0}', github.base_ref) || '' }}
         run: scripts/check-browser-determinism.sh
 
   # ═══════════════════════════════════════════════
