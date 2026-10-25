@@ -34,7 +34,7 @@ set.from_list([1, 2, 3])
 3
 ```
 
-### `set.insert(s: Set[A], value: A) -> Set[A]`
+### `set.insert(s: Set[A], x: A) -> Set[A]`
 
 Add a value to the set. Returns a new set.
 
@@ -51,7 +51,7 @@ set.from_list([1, 2, 3])
 set.from_list([1, 2, 3, 42])
 ```
 
-### `set.remove(s: Set[A], value: A) -> Set[A]`
+### `set.remove(s: Set[A], x: A) -> Set[A]`
 
 Remove a value from the set. Returns a new set.
 
@@ -68,7 +68,7 @@ set.from_list([1, 42])
 set.from_list([1])
 ```
 
-### `set.contains(s: Set[A], value: A) -> Bool`
+### `set.contains(s: Set[A], x: A) -> Bool`
 
 Check if a value is in the set.
 
