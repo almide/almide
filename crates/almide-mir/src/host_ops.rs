@@ -152,12 +152,10 @@ pub const HOST_OPS: &[HostOp] = &[
     // ── fs: reads ──
     op("fs", "read_text", "almide_rt_fs_read_text", READ).result(),
     op("fs", "read_bytes", "almide_rt_fs_read_bytes", READ).result(),
-    op("fs", "read_bytes_raw", "almide_rt_fs_read_bytes_raw", READ).result(),
     op("fs", "read_lines", "almide_rt_fs_read_lines", READ).result(),
     op("fs", "read_text_if_exists", "almide_rt_fs_read_text_if_exists", READ).result(),
     op("fs", "read_bytes_if_exists", "almide_rt_fs_read_bytes_if_exists", READ).result(),
     op("fs", "read_lines_if_exists", "almide_rt_fs_read_lines_if_exists", READ).result(),
-    op("fs", "read_bytes_raw_if_exists", "almide_rt_fs_read_bytes_raw_if_exists", READ).result(),
     op("fs", "list_dir", "almide_rt_fs_list_dir", READ).result(),
     op("fs", "exists", "almide_rt_fs_exists", READ),
     op("fs", "stat", "almide_rt_fs_stat", READ).result(),
@@ -184,16 +182,15 @@ pub const HOST_OPS: &[HostOp] = &[
     // `fs.temp_dir` is env.temp_dir's other spelling (C-189): an environment read.
     op("fs", "temp_dir", "almide_rt_fs_temp_dir", ENV),
     // ── fs: writes ──
-    op("fs", "write", "almide_rt_fs_write", WRITE).result(),
+    op("fs", "write_text", "almide_rt_fs_write", WRITE).result(),
     op("fs", "write_bytes", "almide_rt_fs_write_bytes", WRITE).result(),
-    op("fs", "write_bytes_raw", "almide_rt_fs_write_bytes_raw", WRITE).result(),
     op("fs", "mkdir_p", "almide_rt_fs_mkdir_p", WRITE).result(),
     op("fs", "remove_all", "almide_rt_fs_remove_all", WRITE).result(),
     op("fs", "__root_write_text", "almide_rt_fs___root_write_text", WRITE).result(),
     op("fs", "rename", "almide_rt_fs_rename", WRITE).result(),
     // Read-then-write compositions, and the unique-name creators (entropy suffix).
     op("fs", "copy", "almide_rt_fs_copy", READ_WRITE).result(),
-    op("fs", "append", "almide_rt_fs_append", READ_WRITE).result(),
+    op("fs", "append_text", "almide_rt_fs_append", READ_WRITE).result(),
     op("fs", "remove", "almide_rt_fs_remove", READ_WRITE).result(),
     op("fs", "__root_remove", "almide_rt_fs___root_remove", READ_WRITE).result(),
     op("fs", "create_temp_dir", "almide_rt_fs_create_temp_dir", WRITE_ENTROPY).result(),
@@ -372,7 +369,7 @@ mod tests {
         assert_eq!(host_op_for_call_name("random.choice_str").map(|o| o.func), Some("choice"));
         assert_eq!(host_op_for_call_name("fs.fold_lines_msi").map(|o| o.func), Some("fold_lines"));
         assert_eq!(host_op_for_call_name("fs.__fallible_fold_lines_x").map(|o| o.func), Some("__fallible_fold_lines"));
-        assert_eq!(host_op_for_call_name("fs.read_bytes_raw").map(|o| o.func), Some("read_bytes_raw"));
+        assert_eq!(host_op_for_call_name("fs.read_bytes").map(|o| o.func), Some("read_bytes"));
         assert_eq!(host_op_for_call_name("env.millis_x").map(|o| o.func), Some("millis"));
         // An unrouted row takes no typed suffix, and a pure fn never resolves.
         assert!(host_op_for_call_name("env.millis_str").is_none());

@@ -33,7 +33,7 @@ fn path_of(dir: String, n: Int) -> String = dir + "/f" + int.to_string(n) + ".tx
 
 // Width-n file of `n` payload bytes; returns n so the caller can `??` it.
 effect fn seed(dir: String, n: Int) -> Int = {
-  let _ = fs.write(path_of(dir, n), string.repeat("x", n))!
+  let _ = fs.write_text(path_of(dir, n), string.repeat("x", n))!
   n
 }
 

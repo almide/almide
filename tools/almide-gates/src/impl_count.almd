@@ -119,7 +119,7 @@ effect fn run(root: String, update: Bool) -> Verdict = {
     ],
     ok: false,
   } else if update then {
-    fs.write(path, ledger_text(current))!
+    fs.write_text(path, ledger_text(current))!
     Verdict {
       lines: ["impl-count: ledger rewritten — " + int.to_string(list.len(current)) + " holes, " + int.to_string(implementations(current)) + " implementations"],
       ok: true,

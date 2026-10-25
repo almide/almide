@@ -4,8 +4,8 @@ File system. import fs, effect.
 
 ### The `_if_exists` content readers — absence as a value
 
-`read_text_if_exists` / `read_bytes_if_exists` / `read_lines_if_exists` /
-`read_bytes_raw_if_exists` return `Result[Option[T], String]`:
+`read_text_if_exists` / `read_bytes_if_exists` / `read_lines_if_exists`
+return `Result[Option[T], String]`:
 `ok(none)` when the path (or a parent) does not exist, `ok(some(content))`
 when readable, `err(msg)` for real failures (permission, a directory at the
 path, IO). Race-free — the classification happens inside the one read
@@ -20,7 +20,7 @@ effect fn main() -> Unit = {
   let path = "${dir}/config.toml"
   let cfg = fs.read_text_if_exists(path)! ?? "default"
   println(cfg)
-  fs.write(path, "port = 8080")!
+  fs.write_text(path, "port = 8080")!
   println(fs.read_text_if_exists(path)! ?? "default")
   fs.remove_all(dir)!
 }
@@ -39,7 +39,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/config.toml", "port = 8080")!
+  fs.write_text("${dir}/config.toml", "port = 8080")!
   let text = fs.read_text("${dir}/config.toml")!
   println(text)
   fs.remove_all(dir)!
@@ -49,18 +49,18 @@ effect fn main() -> Unit = {
 port = 8080
 ```
 
-### `fs.read_bytes(path: String) -> Result[List[Int], String]`
+### `fs.read_bytes(path: String) -> Result[Bytes, String]`
 
-Read file contents as a list of bytes
+Read file contents as `Bytes`
 
 ```almd run
 import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write_bytes("${dir}/image.png", [137, 80, 78, 71])!
-  let bytes = fs.read_bytes("${dir}/image.png")!
-  println("${bytes}")
+  fs.write_bytes("${dir}/image.png", bytes.from_list([137, 80, 78, 71]))!
+  let data = fs.read_bytes("${dir}/image.png")!
+  println("${bytes.to_list(data)}")
   fs.remove_all(dir)!
 }
 ```
@@ -68,7 +68,7 @@ effect fn main() -> Unit = {
 [137, 80, 78, 71]
 ```
 
-### `fs.write(path: String, content: String) -> Result[Unit, String]`
+### `fs.write_text(path: String, content: String) -> Result[Unit, String]`
 
 Write a string to a file, creating or overwriting it
 
@@ -77,7 +77,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/output.txt", "hello")!
+  fs.write_text("${dir}/output.txt", "hello")!
   println(fs.read_text("${dir}/output.txt")!)
   fs.remove_all(dir)!
 }
@@ -86,17 +86,17 @@ effect fn main() -> Unit = {
 hello
 ```
 
-### `fs.write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String]`
+### `fs.write_bytes(path: String, data: Bytes) -> Result[Unit, String]`
 
-Write a list of bytes to a file
+Write `Bytes` to a file, creating or overwriting it
 
 ```almd run
 import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write_bytes("${dir}/out.bin", [0, 1, 2])!
-  println("${fs.read_bytes("${dir}/out.bin")!}")
+  fs.write_bytes("${dir}/out.bin", bytes.from_list([0, 1, 2]))!
+  println("${bytes.to_list(fs.read_bytes("${dir}/out.bin")!)}")
   fs.remove_all(dir)!
 }
 ```
@@ -104,7 +104,7 @@ effect fn main() -> Unit = {
 [0, 1, 2]
 ```
 
-### `fs.append(path: String, content: String) -> Result[Unit, String]`
+### `fs.append_text(path: String, content: String) -> Result[Unit, String]`
 
 Append a string to a file, creating it if it doesn't exist
 
@@ -114,14 +114,34 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   let log = "${dir}/log.txt"
-  fs.append(log, "first line\n")!
-  fs.append(log, "new line\n")!
+  fs.append_text(log, "first line\n")!
+  fs.append_text(log, "new line\n")!
   println("${fs.read_lines(log)!}")
   fs.remove_all(dir)!
 }
 ```
 ```output
 ["first line", "new line"]
+```
+
+### `fs.append_bytes(path: String, data: Bytes) -> Result[Unit, String]`
+
+Append `Bytes` to a file, creating it if it doesn't exist
+
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  let out = "${dir}/out.bin"
+  fs.append_bytes(out, bytes.from_list([1, 2]))!
+  fs.append_bytes(out, bytes.from_list([3]))!
+  println("${bytes.to_list(fs.read_bytes(out)!)}")
+  fs.remove_all(dir)!
+}
+```
+```output
+[1, 2, 3]
 ```
 
 ### `fs.mkdir_p(path: String) -> Result[Unit, String]`
@@ -151,7 +171,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/config.toml", "")!
+  fs.write_text("${dir}/config.toml", "")!
   println(if fs.exists("${dir}/config.toml") then "found" else "missing")
   println(if fs.exists("${dir}/other.toml") then "found" else "missing")
   fs.remove_all(dir)!
@@ -173,7 +193,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/data.csv", "a,1\nb,2\n")!
+  fs.write_text("${dir}/data.csv", "a,1\nb,2\n")!
   let lines = fs.read_lines("${dir}/data.csv")!
   println("${lines}")
   fs.remove_all(dir)!
@@ -196,7 +216,7 @@ fn parse_row(line: String) -> Int = int.parse(line) ?? 0
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/data.csv", "1\n2\n3\n")!
+  fs.write_text("${dir}/data.csv", "1\n2\n3\n")!
   let total = fs.fold_lines("${dir}/data.csv", 0, (acc, line) => acc + parse_row(line))!
   println(int.to_string(total))
   fs.remove_all(dir)!
@@ -222,11 +242,11 @@ fn add_row(acc: Int, line: String) -> Int! = {
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   let path = "${dir}/data.csv"
-  fs.write(path, "1\n2\n3\n")!
+  fs.write_text(path, "1\n2\n3\n")!
   let stats = fs.fold_lines(path, 0, (acc, line) => add_row(acc, line)!)!
   println(int.to_string(stats))
   // first err wins; later lines are never visited
-  fs.write(path, "1\noops\n3\n")!
+  fs.write_text(path, "1\noops\n3\n")!
   let failed = fs.fold_lines(path, 0, (acc, line) => add_row(acc, line)!)
   match failed {
     ok(n) => println(int.to_string(n)),
@@ -250,7 +270,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/data.csv", "a,1\nb,2\nc,3\n")!
+  fs.write_text("${dir}/data.csv", "a,1\nb,2\nc,3\n")!
   var count = 0
   fs.for_each_line("${dir}/data.csv", (line) => { count = count + 1 })!
   println(int.to_string(count))
@@ -274,7 +294,7 @@ effect fn emit(line: String) -> Unit = {
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   let path = "${dir}/data.csv"
-  fs.write(path, "one\ntwo\n")!
+  fs.write_text(path, "one\ntwo\n")!
   fs.for_each_line(path, (line) => emit(line)!)!
   fs.remove_all(dir)!
 }
@@ -297,7 +317,7 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   let path = "${dir}/data.csv"
-  fs.write(path, "a\nbb\nccc\n")!
+  fs.write_text(path, "a\nbb\nccc\n")!
   let part = fs.fold_lines_range(path, 0, 4096, 0, (acc, line) => acc + 1)!
   println(int.to_string(part))
   // a partition of [0, file_size) visits every line exactly once
@@ -324,7 +344,7 @@ fn combine(a: Int, b: Int) -> Int = a + b
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/data.csv", "a\nb\nc\nd\ne\n")!
+  fs.write_text("${dir}/data.csv", "a\nb\nc\nd\ne\n")!
   let partials = fs.fold_lines_chunked("${dir}/data.csv", 8, 0, step)!
   let stats = partials |> list.fold(0, (acc, m) => combine(acc, m))
   println(int.to_string(stats))
@@ -341,7 +361,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/temp.txt", "scratch")!
+  fs.write_text("${dir}/temp.txt", "scratch")!
   fs.remove("${dir}/temp.txt")!
   println("${fs.exists("${dir}/temp.txt")}")
   fs.remove_all(dir)!
@@ -361,8 +381,8 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   fs.mkdir_p("${dir}/src")!
-  fs.write("${dir}/src/main.almd", "")!
-  fs.write("${dir}/src/util.almd", "")!
+  fs.write_text("${dir}/src/main.almd", "")!
+  fs.write_text("${dir}/src/util.almd", "")!
   let entries = fs.list_dir("${dir}/src/")!
   println("${entries |> list.sort}")
   fs.remove_all(dir)!
@@ -382,7 +402,7 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   fs.mkdir_p("${dir}/src")!
-  fs.write("${dir}/readme.md", "")!
+  fs.write_text("${dir}/readme.md", "")!
   println(if fs.is_dir("${dir}/src") then "directory" else "not a directory")
   println(if fs.is_dir("${dir}/readme.md") then "directory" else "not a directory")
   fs.remove_all(dir)!
@@ -403,7 +423,7 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   fs.mkdir_p("${dir}/src")!
-  fs.write("${dir}/readme.md", "")!
+  fs.write_text("${dir}/readme.md", "")!
   println(if fs.is_file("${dir}/readme.md") then "file" else "not a file")
   println(if fs.is_file("${dir}/src") then "file" else "not a file")
   fs.remove_all(dir)!
@@ -423,7 +443,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/a.txt", "hello")!
+  fs.write_text("${dir}/a.txt", "hello")!
   fs.copy("${dir}/a.txt", "${dir}/b.txt")!
   println(fs.read_text("${dir}/b.txt")!)
   fs.remove_all(dir)!
@@ -442,7 +462,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/old.txt", "hello")!
+  fs.write_text("${dir}/old.txt", "hello")!
   fs.rename("${dir}/old.txt", "${dir}/new.txt")!
   println("${fs.exists("${dir}/old.txt")} ${fs.exists("${dir}/new.txt")}")
   fs.remove_all(dir)!
@@ -474,8 +494,8 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   fs.mkdir_p("${dir}/src/util")!
-  fs.write("${dir}/src/main.almd", "")!
-  fs.write("${dir}/src/util/io.almd", "")!
+  fs.write_text("${dir}/src/main.almd", "")!
+  fs.write_text("${dir}/src/util/io.almd", "")!
   let all_files = fs.walk("${dir}/src")!
   println("${all_files |> list.map((f) => string.replace(f, dir, "")) |> list.sort}")
   fs.remove_all(dir)!
@@ -495,7 +515,7 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   fs.mkdir_p("${dir}/build/obj")!
-  fs.write("${dir}/build/obj/main.o", "")!
+  fs.write_text("${dir}/build/obj/main.o", "")!
   fs.remove_all("${dir}/build/")!
   println("${fs.exists("${dir}/build")}")
   fs.remove_all(dir)!
@@ -514,7 +534,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write_bytes("${dir}/data.bin", [0, 1, 2, 3, 4])!
+  fs.write_bytes("${dir}/data.bin", bytes.from_list([0, 1, 2, 3, 4]))!
   let size = fs.file_size("${dir}/data.bin")!
   println(int.to_string(size))
   fs.remove_all(dir)!
@@ -549,7 +569,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/file.txt", "hello")!
+  fs.write_text("${dir}/file.txt", "hello")!
   let info = fs.stat("${dir}/file.txt")! // {size, is_dir, is_file, modified}
   println("${info.size} ${info.is_dir} ${info.is_file} ${info.modified > 0}")
   fs.remove_all(dir)!
@@ -623,7 +643,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/link", "a regular file, not a symlink")!
+  fs.write_text("${dir}/link", "a regular file, not a symlink")!
   println(if fs.is_symlink("${dir}/link") then "symlink" else "not a symlink")
   fs.remove_all(dir)!
 }
@@ -641,7 +661,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/file.txt", "hello")!
+  fs.write_text("${dir}/file.txt", "hello")!
   let ts = fs.modified_at("${dir}/file.txt")!
   println("${ts > 0}")
   fs.remove_all(dir)!

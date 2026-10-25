@@ -615,7 +615,7 @@ mod ordered_tests {
     fn the_ordered_table_is_the_d3_set() {
         let t = super::ordered_stdlib_fns();
         assert!(super::is_ordered_stdlib_fn("env", "set"));
-        assert!(super::is_ordered_stdlib_fn("fs", "write"));
+        assert!(super::is_ordered_stdlib_fn("fs", "write_text"));
         assert!(super::is_ordered_stdlib_fn("io", "read_line"));
         assert!(super::is_ordered_stdlib_fn("process", "spawn"));
         assert!(super::is_ordered_runtime_symbol("almide_rt_env_set"));

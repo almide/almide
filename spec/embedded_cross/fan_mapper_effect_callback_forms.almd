@@ -40,8 +40,8 @@ fn show(r: Result[String, String]) -> String = match r {
 
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("fanForms")!
-  fs.write(d + "/a.txt", "alpha")!
-  fs.write(d + "/b.txt", "beta")!
+  fs.write_text(d + "/a.txt", "alpha")!
+  fs.write_text(d + "/b.txt", "beta")!
   // #2122: the absent paths are fixed literals. They only ever have to not
   // exist, and the temp directory's name is a nanosecond stamp that reaches
   // stdout through the fs error — which made this fixture's output differ

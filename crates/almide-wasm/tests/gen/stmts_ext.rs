@@ -173,7 +173,7 @@ impl Gen {
         let (a, b) = (self.fresh(), self.fresh());
         let payload = format!("l{}\\nl{}\\nx{}", self.rng.below(100), self.rng.below(100), self.rng.below(1000));
         self.line(&format!("let {d} = fs.create_temp_dir(\"gfz\")!"));
-        self.line(&format!("let _w{a} = fs.write({d} + \"/a.txt\", \"{payload}\")!"));
+        self.line(&format!("let _w{a} = fs.write_text({d} + \"/a.txt\", \"{payload}\")!"));
         self.line(&format!("let {a} = fs.read_text({d} + \"/a.txt\")!"));
         self.line(&format!("println(\"len=\" + int.to_string(string.len({a})))"));
         self.line(&format!("let {b} = fs.read_lines({d} + \"/a.txt\")!"));

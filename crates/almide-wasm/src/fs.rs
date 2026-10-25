@@ -19,7 +19,6 @@ pub(crate) mod witness_walkers;
 
 const OP_READ_TEXT: i32 = 1;
 const OP_WRITE: i32 = 2;
-const OP_WRITE_BYTES: i32 = 3;
 const OP_EXISTS: i32 = 4;
 const OP_IS_DIR: i32 = 5;
 const OP_IS_FILE: i32 = 6;
@@ -30,8 +29,9 @@ const OP_CREATE_TEMP_DIR: i32 = 10;
 const OP_LIST_DIR: i32 = 11;
 const OP_READ_LINES: i32 = 12;
 const OP_READ_TEXT_IF_EXISTS: i32 = 13;
-const OP_READ_BYTES: i32 = 14;
-const OP_WRITE_BYTES_RAW: i32 = 15;
+// The Bytes writer (op 15); op 3, the List[Int] writer, has no caller since
+// `fs.write_bytes` takes Bytes (R-fs-01).
+const OP_WRITE_BYTES: i32 = 15;
 const OP_APPEND: i32 = 16;
 // #2090 — `fold_lines` / `for_each_line` are implemented on this leg as
 // read_lines + a walk, so they used to hand the host OP_READ_LINES. That was
@@ -63,22 +63,20 @@ impl Emitter<'_> {
                 self.fs_call_1(p, OP_CREATE_TEMP_DIR)?;
                 self.fs_result_string()?
             }
-            ("write", [p, c]) => {
+            ("write_text", [p, c]) => {
                 self.fs_call_str2(p, c, OP_WRITE)?;
                 self.fs_result_unit()?
             }
-            ("append", [p, c]) => {
+            ("append_text", [p, c]) => {
                 self.fs_call_str2(p, c, OP_APPEND)?;
                 self.fs_result_unit()?
             }
-            ("write_bytes", [p, xs]) => {
-                // b = the List[Int] payload (8-byte i64 LE slots; the
-                // host takes the low byte of each — native `x as u8`).
+            ("write_bytes", [p, bs]) => {
                 self.lower_arg(p, Some(STR), ArgMode::Borrow)?;
                 let hp = self.hold_i32()?;
                 self.f.instructions().local_set(hp);
-                match self.lower_arg(xs, None, ArgMode::Borrow)? {
-                    SliceTy::List(h) if self.types.el(h) == INT => {}
+                match self.lower_arg(bs, None, ArgMode::Borrow)? {
+                    SliceTy::Scalar(Scalar::Bytes) => {}
                     other => return unsup(&format!("fs-write-bytes-of:{other:?}")),
                 }
                 let hb = self.hold_i32()?;
@@ -87,30 +85,6 @@ impl Emitter<'_> {
                 self.note_host_op(OP_WRITE_BYTES);
                 let mut i = self.f.instructions();
                 i.i32_const(OP_WRITE_BYTES);
-                i.local_get(hp).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                i.local_get(hp).i32_load(len_memarg());
-                i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                i.local_get(hb).i32_load(len_memarg());
-                i.call(F_FS_CALL);
-                let _ = i;
-                self.release_i32();
-                self.release_i32();
-                self.fs_result_unit()?
-            }
-            ("write_bytes_raw", [p, bs]) => {
-                self.lower_arg(p, Some(STR), ArgMode::Borrow)?;
-                let hp = self.hold_i32()?;
-                self.f.instructions().local_set(hp);
-                match self.lower_arg(bs, None, ArgMode::Borrow)? {
-                    SliceTy::Scalar(Scalar::Bytes) => {}
-                    other => return unsup(&format!("fs-write-bytes-raw-of:{other:?}")),
-                }
-                let hb = self.hold_i32()?;
-                let mut i = self.f.instructions();
-                i.local_set(hb);
-                self.note_host_op(OP_WRITE_BYTES_RAW);
-                let mut i = self.f.instructions();
-                i.i32_const(OP_WRITE_BYTES_RAW);
                 i.local_get(hp).i32_const(almide_layout::PAYLOAD as i32).i32_add();
                 i.local_get(hp).i32_load(len_memarg());
                 i.local_get(hb).i32_const(almide_layout::PAYLOAD as i32).i32_add();
@@ -149,16 +123,6 @@ impl Emitter<'_> {
         Ok(Some(Some(Lowered::owned(out))))
     }
 
-
-    /// fs.read_bytes: raw host bytes → List[Int] (one i64 slot per byte).
-    fn lower_fs_read_bytes(&mut self, p: &IrExpr) -> Result<SliceTy, EmitError> {
-        self.fs_call_1(p, OP_READ_BYTES)?;
-        // The decode shared with the if-exists twin (fs_meta).
-        self.fs_decode_byte_list()?;
-        let ih = self.types.intern(INT);
-        let lh = self.types.intern(SliceTy::List(ih));
-        Ok(SliceTy::Result(lh, self.types.intern(STR)))
-    }
 
     /// path → fs_call(op, path, 0, 0): the i64 ret is on the stack.
     pub(crate) fn fs_call_1(&mut self, p: &IrExpr, op: i32) -> Result<(), EmitError> {
@@ -540,7 +504,6 @@ impl Emitter<'_> {
                 let oh = self.types.intern(SliceTy::Option(sh));
                 SliceTy::Result(oh, sh)
             }
-            ("read_bytes", [p]) => self.lower_fs_read_bytes(p)?,
             ("fold_lines", [p, init, cb]) => {
                 let (params, body) = self.hof_lambda(cb, 2)?;
                 let Some(acc_ty) = slice_ty_of(&init.ty, self.types) else {

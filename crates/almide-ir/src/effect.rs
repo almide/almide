@@ -138,7 +138,7 @@ pub enum ModuleEffects {
 /// disagrees with the function that declares it.
 ///
 /// A row is the module's default; a function whose operation differs says so
-/// with `@category(…)` in its own declaration (`fs.write` is `FS.write`,
+/// with `@category(…)` in its own declaration (`fs.write_text` is `FS.write`,
 /// `process.args` `Env.read`), never in a list here (#4155).
 pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     // Files. A function that changes the file system declares `FS.write`.

@@ -74,7 +74,7 @@ fn step(acc: Map[String, Stats], line: String) -> Map[String, Stats] =
   }
 
 effect fn generate(n: Int, path: String) -> Unit = {
-  fs.write(path, "")!
+  fs.write_text(path, "")!
   let names = STATIONS
   let n_stations = list.len(names)
   var seed = 42
@@ -86,11 +86,11 @@ effect fn generate(n: Int, path: String) -> Unit = {
     let t = (seed % 1999) - 999
     list.push(chunk, "${station};${fmt_tenths(t)}")
     if list.len(chunk) == CHUNK_LINES then {
-      fs.append(path, string.join(chunk, "\n") + "\n")!
+      fs.append_text(path, string.join(chunk, "\n") + "\n")!
       list.clear(chunk)
     } else ()
   }
-  if list.len(chunk) > 0 then fs.append(path, string.join(chunk, "\n") + "\n")!
+  if list.len(chunk) > 0 then fs.append_text(path, string.join(chunk, "\n") + "\n")!
   else ()
 }
 

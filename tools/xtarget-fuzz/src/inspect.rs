@@ -1309,7 +1309,7 @@ mod run_tests {
         assert!(!counted_calibrated_t(&d(1e3, 1e3)));
         assert!(counted_calibrated_t(&d(3e7, 0.0)));
         assert!(counted_calibrated_t(&d(1e3, 3e8)));
-        // fs.write at n = 20000 calibrated to k = 65536 on instructions and
+        // fs.write_text at n = 20000 calibrated to k = 65536 on instructions and
         // timed out at 60 s: its bytes go to the kernel.
         assert!(counted_calibrated_t(&Delta { instructions: 1e3, moved: 0.0, wall: Duration::from_secs(3), base_wall: Duration::ZERO }));
     }

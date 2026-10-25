@@ -27,7 +27,7 @@ effect fn visit(l: String) -> Result[Unit, String] = {
 
 effect fn probe(dir: String, name: String, s: String) -> Unit = {
   let p = dir + "/probe.txt"
-  fs.write(p, s)!
+  fs.write_text(p, s)!
   println(name)
   println("  lines   ${show(string.lines(s))}")
   println("  read    ${show(fs.read_lines(p)!)}")

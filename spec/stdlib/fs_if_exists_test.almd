@@ -1,7 +1,7 @@
 // @contract: C-215
 // The fs content-reader if_exists family (#1106 / ADR-0004 D4): absence is a
 // VALUE (ok(none)), not an error — the 3-behavior matrix (absent → ok(none),
-// present → ok(some(content)), directory-at-path → err) over all four
+// present → ok(some(content)), directory-at-path → err) over all three
 // content readers.
 import fs
 import testing
@@ -14,7 +14,6 @@ test "absent paths are ok(none) across the family" {
   testing.assert_none(fs.read_text_if_exists(missing)!)
   testing.assert_none(fs.read_bytes_if_exists(missing)!)
   testing.assert_none(fs.read_lines_if_exists(missing)!)
-  testing.assert_none(fs.read_bytes_raw_if_exists(missing)!)
   // missing PARENT directory is also absence, not an error
   testing.assert_none(fs.read_text_if_exists(d + "/no/such/dir/f.txt")!)
 }
@@ -22,10 +21,10 @@ test "absent paths are ok(none) across the family" {
 test "present paths are ok(some(content))" {
   let d = tmp()!
   let p = d + "/data.txt"
-  fs.write(p, "line1\nline2")!
+  fs.write_text(p, "line1\nline2")!
   assert_eq(fs.read_text_if_exists(p)! ?? "", "line1\nline2")
   assert_eq(list.len(fs.read_lines_if_exists(p)! ?? []), 2)
-  assert_eq(list.len(fs.read_bytes_if_exists(p)! ?? []), 11)
+  assert_eq(fs.read_bytes_if_exists(p)! |> option.map((b) => bytes.len(b)), some(11))
 }
 
 test "a directory at the path is a real error" {

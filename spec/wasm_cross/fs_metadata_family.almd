@@ -12,14 +12,14 @@ import env
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("qw")!
   let p = d + "/f.txt"
-  fs.write(p, "hello")!
+  fs.write_text(p, "hello")!
   let sz = fs.file_size(p)!
   println("size=${sz}")
   let m = fs.modified_at(p)!
   println("mt_pos=${m > 1700000000}")
   println("isd=${fs.is_dir(d)} isf=${fs.is_file(p)} isd_f=${fs.is_dir(p)} isf_d=${fs.is_file(d)} miss=${fs.is_file(d + "/nope")}")
-  fs.append(p, " world")!
-  fs.append(d + "/fresh.txt", "born")!
+  fs.append_text(p, " world")!
+  fs.append_text(d + "/fresh.txt", "born")!
   println("app=${fs.read_text(p)!} fresh=${fs.read_text(d + "/fresh.txt")!}")
   fs.copy(p, d + "/copy.txt")!
   println("copy=${fs.read_text(d + "/copy.txt")!}")

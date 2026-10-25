@@ -25,7 +25,7 @@ test "a string every fan arm copies is copied from each arm at once" {
 test "a chunked fold reads a captured string and a shared init from every worker" {
   let d = fs.create_temp_dir("thread-shared")!
   let p = d + "/lines.txt"
-  fs.write(p, list.range(0, 200) |> list.map((i) => "l${i}") |> list.join("\n"))!
+  fs.write_text(p, list.range(0, 200) |> list.map((i) => "l${i}") |> list.join("\n"))!
   let prefix = string.repeat(">", 3)
   let partials = fs.fold_lines_chunked(p, 4, [prefix], (acc, line) => acc + [prefix + line])!
   assert_eq(list.all(partials, (xs) => list.first(xs) == some(prefix)), true)
