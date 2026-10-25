@@ -284,7 +284,8 @@ impl Checker {
             // Accumulate generic bindings from this arg so later lambda params can be pinned. Lambdas contribute nothing new here.
             if let Some(sig) = call_sig {
                 if let Some((_, pty)) = sig.params.get(i) {
-                    crate::types::unify(pty, &resolve_ty(&aty, &self.uf), &mut bindings);
+                    let apart = self.caller_letters_apart_from(sig);
+                    Self::unify_apart(pty, &resolve_ty(&aty, &self.uf), &apart, &mut bindings);
                 }
             }
             tys.push(aty);
@@ -713,6 +714,7 @@ impl Checker {
         &mut self, name: &str, sig: &crate::types::FnSig, concrete_args: &[Ty], bindings: &mut HashMap<Sym, Ty>,
     ) -> Vec<bool> {
         let mut e005_fired: Vec<bool> = Vec::new();
+        let apart = self.caller_letters_apart_from(sig);
         for (i, ((pname, pty), aty)) in sig.params.iter().zip(concrete_args.iter()).enumerate() {
             // Point caret at the exact argument expression for E005
             let saved_span = self.current_span;
@@ -720,7 +722,7 @@ impl Checker {
                 self.current_span = Some(sp);
             }
             let site = ArgSite { fn_name: name, param_name: pname };
-            let fired = self.unify_call_arg(site, pty, aty, &sig.structural_bounds, bindings);
+            let fired = self.unify_call_arg(site, pty, aty, &sig.structural_bounds, &apart, bindings);
             if !fired { self.current_span = saved_span; }
             e005_fired.push(fired);
         }
