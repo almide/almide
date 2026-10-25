@@ -250,7 +250,7 @@ effect fn request_bytes(method: String, url: String, body: String, headers: List
   __flat(headers),
 )!)
 
-@intrinsic("almide_http_request_bytes")
+@intrinsic("almide_rt_http___request_bytes")
 @borrow_ref(flat)
 effect fn __request_bytes(method: String, url: String, body: String, flat: List[String]) -> Result[Bytes, String] = _
 

@@ -208,7 +208,7 @@ pub const HOST_OPS: &[HostOp] = &[
     op("http", "get_response", "almide_http_get_response", NET).result(),
     wrapper("http", "send", "__request_response", "almide_http_request_response", NET).result(),
     op("http", "get_bytes", "almide_http_get_bytes", NET).result(),
-    wrapper("http", "request_bytes", "__request_bytes", "almide_http_request_bytes", NET).result(),
+    wrapper("http", "request_bytes", "__request_bytes", "almide_rt_http___request_bytes", NET).result(),
     // The call handle (#2631): start and the four verbs over it.
     wrapper("http", "start", "__call_start", "almide_rt_http___call_start", NET).result(),
     op("http", "poll", "almide_http_call_poll", NET),
