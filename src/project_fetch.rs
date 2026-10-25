@@ -293,6 +293,16 @@ fn fetch_dep_at_commit(dep: &Dependency, commit: &str) -> Result<PathBuf, String
     if dir.exists() {
         return Ok(dir);
     }
+    // The checkout this run (or an earlier one) made at the dependency's own
+    // ref, when it sits at exactly the locked commit: the lock is written right
+    // after that fetch, so a second resolution in the same command (check's
+    // whole-program pass) would otherwise clone the same commit again.
+    if let Some(ref_name) = dep.tag.as_deref().or(dep.branch.as_deref()) {
+        let at_ref = dep_cache_root(dep).join(ref_name);
+        if at_ref.exists() && git_head_hash(&at_ref).ok().as_deref() == Some(commit) {
+            return Ok(at_ref);
+        }
+    }
     err(&format!("Fetching {} from {} (locked: {})", dep.name, dep.git, &commit[..8.min(commit.len())]));
     populate_cache_dir(&dir, |tmp| {
         let output = Command::new("git")

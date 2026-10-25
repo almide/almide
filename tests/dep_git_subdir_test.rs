@@ -152,11 +152,12 @@ fn two_subdir_packages_of_one_repository_resolve_lock_and_share_a_clone() {
         assert_eq!(e.ref_name, "v0.1.0");
     }
 
-    // The locked re-run: still one checkout for both (the commit-keyed one).
+    // The locked re-run: the ref checkout already sits at the locked commit, so
+    // it is reused; nothing is fetched and no second checkout appears.
     let out = almide(&proj, &home, &["check", "src/main.almd"]);
     assert!(out.status.success(), "the locked check should succeed:\n{}", stderr(&out));
-    assert!(stderr(&out).matches("Fetching").count() <= 1, "{}", stderr(&out));
-    assert_eq!(shared_checkouts(&home).len(), 2, "ref checkout + one commit checkout: {:?}", shared_checkouts(&home));
+    assert_eq!(stderr(&out).matches("Fetching").count(), 0, "{}", stderr(&out));
+    assert_eq!(shared_checkouts(&home).len(), 1, "the ref checkout, reused at the locked commit: {:?}", shared_checkouts(&home));
 
     // `dep-path` prints the package's own directory inside the clone.
     let out = almide(&proj, &home, &["dep-path", "snaidhm"]);
