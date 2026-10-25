@@ -1702,7 +1702,12 @@ struct AlmideRxCompiled {
 
 fn rx_compiled(pat: &str) -> AlmideRxCompiled {
     let invalid = rx_check(pat);
-    let rx = rx_compile(pat);
+    // rx_compile recurses per group with no depth limit of its own; a
+    // refused pattern (nested past ALMIDE_RX_MAX_NEST, say 50 000 deep) must
+    // never reach it, or regex.compile overflows the stack instead of
+    // returning its err (#4195). Every op aborts on `invalid` before
+    // reading `rx`, so the empty pattern stands in.
+    let rx = rx_compile(if invalid.is_none() { pat } else { "" });
     let prog = if invalid.is_none() { rx_program(&rx) } else { None };
     AlmideRxCompiled { rx, prog, pikes: std::cell::RefCell::new([None, None]), invalid }
 }
