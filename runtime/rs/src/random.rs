@@ -118,7 +118,7 @@ pub fn almide_rt_random_bytes(n: i64) -> Vec<u8> {
     }
     let mut v: Vec<u8> = Vec::new();
     if v.try_reserve_exact(n as usize).is_err() {
-        almide_abort("out of memory");
+        almide_abort_oom();
     }
     v.resize(n as usize, 0);
     for chunk in v.chunks_mut(256) {

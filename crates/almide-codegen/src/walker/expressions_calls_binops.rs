@@ -50,7 +50,7 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
     if let (true, Some((s, e))) = (reserved, &counted) {
         return format!(
             "{{ let __almide_rs: i64 = {s}; let __almide_re: i64 = {e}; let mut __almide_cv = Vec::new(); \
-             if __almide_cv.try_reserve_exact(__almide_re.saturating_sub(__almide_rs).max(0) as usize).is_err() {{ almide_abort(\"out of memory\"); }} \
+             if __almide_cv.try_reserve_exact(__almide_re.saturating_sub(__almide_rs).max(0) as usize).is_err() {{ almide_abort_oom(); }} \
              __almide_cv.extend({chain}); __almide_cv }}"
         );
     }

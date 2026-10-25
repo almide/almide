@@ -180,7 +180,7 @@ pub fn almide_rt_list_range(start: i64, end: i64) -> Vec<i64> {
     let count = end.saturating_sub(start).max(0) as usize;
     let mut v: Vec<i64> = Vec::new();
     if v.try_reserve_exact(count).is_err() {
-        almide_abort("out of memory");
+        almide_abort_oom();
     }
     v.extend(start..end);
     v

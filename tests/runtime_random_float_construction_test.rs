@@ -41,6 +41,12 @@ mod runtime_random {
         panic!("{msg}")
     }
 
+    // ... and its out-of-memory abort, which random.bytes calls when the
+    // buffer cannot be reserved.
+    fn almide_abort_oom() -> ! {
+        panic!("out of memory")
+    }
+
     // `almide_float_from_u64` is private in the shipped source and stays that
     // way — the emitted crate is one flat module, so a visibility change there
     // is a change to what ships. Inside this module the private item is in
