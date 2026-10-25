@@ -89,3 +89,15 @@ test "gunzip of empty input is an error" {
     err(e) => assert_eq(e, "zlib.gunzip: unexpected end of file"),
   }
 }
+
+// R-zlib-02: the decoders are plain fns, so a pure fn may call them.
+fn unpack_raw(b: Bytes) -> Result[Bytes, String] = zlib.inflate(b)
+
+fn decodes(b: Bytes) -> Bool = result.is_ok(zlib.gunzip(b)) or result.is_ok(zlib.decompress(b))
+
+test "zlib decoders are callable from a pure fn" {
+  let data = bytes.from_string("decoded without an effect")
+  assert(bytes.to_list(unpack_raw(zlib.deflate(data)!)!) == bytes.to_list(data), "pure inflate")
+  assert(decodes(zlib.gzip(data)!), "pure gunzip")
+  assert(not decodes(bytes.from_string("not a stream")), "pure decoders refuse garbage")
+}

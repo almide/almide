@@ -1,11 +1,13 @@
 # zlib
 
-DEFLATE compression in its three container formats. `import zlib`, `effect fn`.
+DEFLATE compression in its three container formats. `import zlib`.
 
-Every function is an `effect fn` returning `Bytes`, so calls sit in an
-`effect fn` and propagate failure with `?`. Compression itself is
-deterministic, but the calls are effectful because they go through the host
-zlib library rather than a self-hosted implementation.
+The decoders (`decompress`, `inflate`, `gunzip` and their `_max` forms) are
+plain fns returning `Result[Bytes, String]`: decoding is a pure transform whose
+output is byte-identical on both targets, so a pure fn may call them (R-zlib-02).
+The compressors stay `effect fn`s: native goes through the host zlib library,
+whose compressed bytes differ from the wasm legs', so their output is not a
+pure function of the input.
 
 **Both targets.** The wasm legs carry a self-hosted zlib (#1700, C-331 —
 `stdlib/zlib_inflate.almd` and `stdlib/zlib_deflate.almd`): every entry point
@@ -23,7 +25,7 @@ Three container formats share one DEFLATE core, and they are NOT interchangeable
 | raw DEFLATE (RFC 1951) | `deflate` | `inflate` |
 | gzip (RFC 1952) | `gzip` | `gunzip` |
 
-### `effect zlib.compress(data: Bytes) -> Bytes`
+### `effect zlib.compress(b: Bytes) -> Bytes`
 
 zlib container, default level.
 
@@ -31,32 +33,32 @@ zlib container, default level.
 effect fn pack(b: Bytes) -> Result[Bytes, String] = ok(zlib.compress(b))
 ```
 
-### `effect zlib.compress_level(data: Bytes, level: Int) -> Bytes`
+### `effect zlib.compress_level(b: Bytes, level: Int) -> Bytes`
 
 zlib container at an explicit level, 0 (store) to 9 (smallest).
 
-### `effect zlib.decompress(data: Bytes) -> Bytes`
+### `zlib.decompress(b: Bytes) -> Result[Bytes, String]`
 
 Inverse of `compress`.
 
-### `effect zlib.deflate(data: Bytes) -> Bytes`
+### `effect zlib.deflate(b: Bytes) -> Bytes`
 
 Raw DEFLATE — no header, no checksum. What you want when an outer format
 already frames the stream.
 
-### `effect zlib.deflate_level(data: Bytes, level: Int) -> Bytes`
+### `effect zlib.deflate_level(b: Bytes, level: Int) -> Bytes`
 
 Raw DEFLATE at an explicit level.
 
-### `effect zlib.inflate(data: Bytes) -> Bytes`
+### `zlib.inflate(b: Bytes) -> Result[Bytes, String]`
 
 Inverse of `deflate`.
 
-### `effect zlib.gzip(data: Bytes) -> Bytes`
+### `effect zlib.gzip(b: Bytes) -> Bytes`
 
 gzip container — the on-disk `.gz` format, and `Content-Encoding: gzip`.
 
-### `effect zlib.gunzip(data: Bytes) -> Bytes`
+### `zlib.gunzip(b: Bytes) -> Result[Bytes, String]`
 
 Inverse of `gzip`.
 
