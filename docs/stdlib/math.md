@@ -242,7 +242,10 @@ fn main() -> Unit = {
 
 ### `math.factorial(n: Int) -> Int`
 
-Return the factorial of a non-negative integer.
+Return the factorial of a non-negative integer (1 for n <= 1). The product wraps modulo 2^64
+like every Int product, so it is wrong past 20 and 0 for every n >= 66: from there on n!
+holds at least 64 factors of two (v2(66!) = 66 - popcount(66) = 64), and the answer comes
+back at once instead of after n multiplications.
 
 ```almd run
 fn main() -> Unit = {
@@ -311,7 +314,7 @@ math.e() -> Float
 // @since 0.5.0 or earlier
 math.exp(x: Float) -> Float
 
-// Product 1..n; 1 for n <= 0; wraps past 20.
+// Product 1..n; 1 for n <= 0; wraps past 20, 0 from 66 on.
 // @since 0.5.13 or earlier
 math.factorial(n: Int) -> Int
 

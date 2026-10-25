@@ -31,7 +31,14 @@ fn math_pow(base: Int, exp: Int) -> Int = {
 // matching v0's empty inclusive range). Wraps like v0's i64 product for large n.
 fn __fact(n: Int, acc: Int) -> Int = if n <= 1 then acc else __fact(n - 1, acc * n)
 
-fn math_factorial(n: Int) -> Int = __fact(n, 1)
+// #4212: the product is taken mod 2^64, so once n! holds 64 factors of two the
+// wrapped product is 0 and stays 0 (every later factor keeps the 2^64 divisor).
+// Legendre: v2(n!) = n - popcount(n), nondecreasing in n; v2(65!) = 65 - 2 = 63
+// and v2(66!) = 66 - 2 = 64. So 66 is the least n whose product is 0 mod 2^64,
+// and every n >= 66 answers 0 without looping n times (an input-chosen n of
+// 10^18 used to run for centuries). Same cut, same derivation, as the native
+// `almide_rt_math_factorial` (runtime/rs/src/math.rs).
+fn math_factorial(n: Int) -> Int = if n >= 66 then 0 else __fact(n, 1)
 
 // math.choose = C(n,k): 0 when k<0 or k>n, else C(n, min(k, n-k)) EXACTLY, reduced mod
 // 2^64 like every Int product (the true binomial whenever it fits in an Int). The same

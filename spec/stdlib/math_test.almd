@@ -141,3 +141,22 @@ test "math.choose is exact up to the Int bound and wraps past it" {
   assert_eq(math.choose(5, 6), 0)
   assert_eq(math.choose(5, -1), 0)
 }
+
+// #4212: factorial wraps mod 2^64, so it is 0 from the least n whose n! holds 64
+// factors of two, and answers that 0 without looping n times. The cut is derived
+// here, not copied: Legendre's v2(n!) = sum of n / 2^j.
+fn v2_factorial(n: Int) -> Int = if n < 2 then 0 else n / 2 + v2_factorial(n / 2)
+
+fn first_with_64_twos(n: Int) -> Int = if v2_factorial(n) >= 64 then n else first_with_64_twos(n + 1)
+
+test "math.factorial is 0 from the first n with 64 factors of two" {
+  let cut = first_with_64_twos(1)
+  assert_eq(cut, 66)
+  assert_eq(math.factorial(cut - 1), -9223372036854775807 - 1)
+  assert_eq(math.factorial(cut), 0)
+  assert_eq(math.factorial(cut + 1), 0)
+  assert_eq(math.factorial(1000000000000000000), 0)
+  assert_eq(math.factorial(9223372036854775807), 0)
+  assert_eq(math.factorial(20), 2432902008176640000)
+  assert_eq(math.factorial(-9223372036854775807 - 1), 1)
+}
