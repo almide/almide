@@ -2,17 +2,17 @@
 source: tests/ide_outline_snapshot_test.rs
 expression: "run_outline(&[\"@stdlib/string\"])"
 ---
+fn string.__from_codepoint(n: Int) -> String
 fn string.__join(xs: List[String], sep: String) -> String
 fn string.byte_len(s: String) -> Int
 fn string.byte_slice(s: String, start: Int, end: Int) -> Option[String]
 fn string.capitalize(s: String) -> String
-fn string.to_list(s: String) -> List[String]
 fn string.chunk(s: String, n: Int) -> List[String]
 fn string.clear(s: String) -> Unit
-fn string.to_codepoint(s: String) -> Option[Int]
 fn string.compare(a: String, b: String) -> Int
-fn string.contains(s: String, sub: String) -> Bool
-fn string.count_matches(s: String, sub: String) -> Int
+fn string.contains(s: String, needle: String) -> Bool
+fn string.count(s: String, f: fn(String) -> Bool) -> Int
+fn string.count_matches(s: String, needle: String) -> Int
 fn string.dedup(s: String) -> String
 fn string.drop(s: String, n: Int) -> String
 fn string.drop_end(s: String, n: Int) -> String
@@ -26,7 +26,7 @@ fn string.find_map[B](s: String, f: fn(String) -> Option[B]) -> Option[B]
 fn string.first(s: String) -> Option[String]
 fn string.fold[B](s: String, init: B, f: fn(B, String) -> B) -> B
 fn string.from_bytes(bytes: List[Int]) -> String
-fn string.from_codepoint(n: Int) -> String
+fn string.from_codepoint(n: Int) -> Option[String]
 fn string.from_list(xs: List[String]) -> String
 fn string.from_utf16(xs: List[Int]) -> Result[String, String]
 fn string.get(s: String, i: Int) -> Option[String]
@@ -56,11 +56,12 @@ fn string.min(s: String) -> Option[String]
 fn string.min_by[K](s: String, f: fn(String) -> K) -> Option[String]
 fn string.min_with(s: String, cmp: fn(String, String) -> Int) -> Option[String]
 fn string.new() -> String
-fn string.pad_end(s: String, n: Int, ch: String) -> String
-fn string.pad_start(s: String, n: Int, ch: String) -> String
+fn string.pad_end(s: String, n: Int, fill: String) -> String
+fn string.pad_start(s: String, n: Int, fill: String) -> String
 fn string.partition(s: String, f: fn(String) -> Bool) -> (List[String], List[String])
 fn string.pick_with(xs: List[String], i: Int, best: String, cmp: fn(String, String) -> Int, want_max: Bool) -> String
-fn string.push(s: String, suffix: String) -> Unit
+fn string.pop(s: String) -> Option[String]
+fn string.push(s: String, x: String) -> Unit
 fn string.reduce(s: String, f: fn(String, String) -> String) -> Option[String]
 fn string.remove_at(s: String, i: Int) -> String
 fn string.repeat(s: String, n: Int) -> String
@@ -83,6 +84,8 @@ fn string.take(s: String, n: Int) -> String
 fn string.take_end(s: String, n: Int) -> String
 fn string.take_while(s: String, f: fn(String) -> Bool) -> String
 fn string.to_bytes(s: String) -> List[Int]
+fn string.to_codepoint(s: String) -> Option[Int]
+fn string.to_list(s: String) -> List[String]
 fn string.to_lower(s: String) -> String
 fn string.to_upper(s: String) -> String
 fn string.to_utf16(s: String) -> List[Int]

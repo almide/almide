@@ -29,7 +29,7 @@
 66416	spec/wasm_cross/bang_in_record_literal_field.almd
 66832	spec/wasm_cross/base64_encode.almd
 66560	spec/wasm_cross/binary_operators.almd
-66192	spec/wasm_cross/binary_search_duplicate_keys.almd
+66336	spec/wasm_cross/binary_search_duplicate_keys.almd
 65680	spec/wasm_cross/binding_stmts.almd
 65920	spec/wasm_cross/block_line_collect.almd
 65920	spec/wasm_cross/bool_literal_tail.almd
@@ -131,7 +131,7 @@
 67264	spec/wasm_cross/ctor_scalar_call_payload.almd
 65856	spec/wasm_cross/ctor_turbofish_family.almd
 66176	spec/wasm_cross/ctor_var_copy_semantics.almd
-66608	spec/wasm_cross/datetime_format.almd
+66832	spec/wasm_cross/datetime_format.almd
 ~	spec/wasm_cross/datetime_monotonic_ns.almd
 68592	spec/wasm_cross/datetime_parse_iso_strict.almd
 67088	spec/wasm_cross/datetime_pre_epoch.almd
@@ -147,7 +147,7 @@
 77680	spec/wasm_cross/edge_float_formatting.almd
 66720	spec/wasm_cross/edge_int_boundaries.almd
 66112	spec/wasm_cross/edge_map_order.almd
-112832	spec/wasm_cross/edge_string_unicode.almd
+112912	spec/wasm_cross/edge_string_unicode.almd
 66256	spec/wasm_cross/effect_assign_unwrap.almd
 66128	spec/wasm_cross/effect_branch_keeps_result.almd
 70080	spec/wasm_cross/effect_call_arg_credit.almd
@@ -319,7 +319,7 @@
 65808	spec/wasm_cross/guard_statement.almd
 66480	spec/wasm_cross/guard_value_exit_in_loop.almd
 129808	spec/wasm_cross/gzip_inflate_members.almd
-68912	spec/wasm_cross/hash_digests.almd
+68976	spec/wasm_cross/hash_digests.almd
 65888	spec/wasm_cross/heap_result_err_interp.almd
 65872	spec/wasm_cross/heap_result_if_append.almd
 87104	spec/wasm_cross/heap_result_if_bind.almd
@@ -335,7 +335,7 @@
 66480	spec/wasm_cross/hof_closure_string_tail.almd
 87248	spec/wasm_cross/hof_fn_value_callbacks.almd
 ~	spec/wasm_cross/host_floor_string_alloc.almd
-68000	spec/wasm_cross/http_query_params_decoder.almd
+68016	spec/wasm_cross/http_query_params_decoder.almd
 67568	spec/wasm_cross/http_response_headers.almd
 65648	spec/wasm_cross/i64_min_literal.almd
 65776	spec/wasm_cross/if_block_forms.almd
@@ -380,13 +380,13 @@
 536528	spec/wasm_cross/json_many_keys.almd
 69904	spec/wasm_cross/json_number_unicode.almd
 450476	spec/wasm_cross/json_parse_depth_bound.almd
-68624	spec/wasm_cross/json_parse_lenient_edges.almd
+68640	spec/wasm_cross/json_parse_lenient_edges.almd
 68896	spec/wasm_cross/json_parse_strict_strings.almd
 69568	spec/wasm_cross/json_parse_strict_structure.almd
 72992	spec/wasm_cross/json_path_edges.almd
 70784	spec/wasm_cross/json_path_index_domain.almd
 69008	spec/wasm_cross/json_string_span.almd
-70064	spec/wasm_cross/json_stringify_control_chars.almd
+70096	spec/wasm_cross/json_stringify_control_chars.almd
 71168	spec/wasm_cross/json_stringify_nonfinite.almd
 68432	spec/wasm_cross/json_stringify_pretty.almd
 69312	spec/wasm_cross/json_to_map_duplicate_keys.almd
@@ -778,8 +778,8 @@
 67136	spec/wasm_cross/string_bidi_controls_literal.almd
 65840	spec/wasm_cross/string_bool_ordering.almd
 197664	spec/wasm_cross/string_byte_slice.almd
-112608	spec/wasm_cross/string_case_unicode.almd
-67312	spec/wasm_cross/string_codepoint.almd
+112656	spec/wasm_cross/string_case_unicode.almd
+67344	spec/wasm_cross/string_codepoint.almd
 66880	spec/wasm_cross/string_codepoint_index.almd
 69744	spec/wasm_cross/string_count_truncation.almd
 66288	spec/wasm_cross/string_empty_pattern.almd
@@ -799,7 +799,7 @@
 66208	spec/wasm_cross/string_rle.almd
 66736	spec/wasm_cross/string_split_rle_codepoint.almd
 86736	spec/wasm_cross/string_to_upper.almd
-67696	spec/wasm_cross/string_whitespace.almd
+67888	spec/wasm_cross/string_whitespace.almd
 66208	spec/wasm_cross/tail_bang_over_declared_result_callee.almd
 65888	spec/wasm_cross/tco_let_bound_if.almd
 66576	spec/wasm_cross/tco_map_acc_seed.almd
@@ -945,7 +945,7 @@
 66864	spec/wasm_cross/value_borrowed_constructors.almd
 70112	spec/wasm_cross/value_codec_matrix_temporaries_release.almd
 69792	spec/wasm_cross/value_deep_eq.almd
-66864	spec/wasm_cross/value_domain_arith.almd
+67088	spec/wasm_cross/value_domain_arith.almd
 66160	spec/wasm_cross/value_eq.almd
 70800	spec/wasm_cross/value_keys_non_object.almd
 67424	spec/wasm_cross/value_merge.almd
