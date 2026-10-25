@@ -181,6 +181,7 @@
 ~	spec/wasm_cross/env_get.almd
 ~	spec/wasm_cross/env_platform_reporting.almd
 ~	spec/wasm_cross/env_set_overlay.almd
+~	spec/wasm_cross/env_set_refusal.almd
 ~	spec/wasm_cross/env_sleep_pause.almd
 28	17	342	28	spec/wasm_cross/err_arm_takes_let_match_type.almd
 4	0	56	4	spec/wasm_cross/error_operators.almd

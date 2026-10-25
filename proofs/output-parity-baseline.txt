@@ -294,6 +294,7 @@ spec/wasm_cross/enumerate_unnameable_element.almd
 spec/wasm_cross/env_args.almd
 spec/wasm_cross/env_platform_reporting.almd
 spec/wasm_cross/env_set_overlay.almd
+spec/wasm_cross/env_set_refusal.almd
 spec/wasm_cross/env_sleep_pause.almd
 spec/wasm_cross/err_arm_takes_let_match_type.almd
 spec/wasm_cross/error_operators.almd
