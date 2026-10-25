@@ -252,26 +252,35 @@ else [55296 + (cp - 65536) / 1024, 56320 + (cp - 65536) % 1024]
 /// UTF-16 code units; a codepoint past U+FFFF is a surrogate pair.
 fn to_utf16(s: String) -> List[Int] = string.chars(s) |> list.flat_map((c) => utf16_units(string.codepoint(c) ?? 0))
 
-local fn utf16_decode(xs: List[Int], i: Int, acc: List[String]) -> Result[String, String] = match list.get(
-  xs,
-  i,
-) {
-  none => ok(string.join(list.reverse(acc), "")),
-  some(u) => if u < 0 or u > 65535 then err("string.from_utf16: code unit out of range at ${i}: ${u}")
-  else if u >= 55296 and u <= 56319 then match list.get(xs, i + 1) {
-    some(lo) => if lo >= 56320 and lo <= 57343 then utf16_decode(
-      xs,
-      i + 2,
-      [string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320))] + acc,
-    )
-    else err("string.from_utf16: unpaired surrogate at ${i}"),
-    none => err("string.from_utf16: unpaired surrogate at ${i}"),
-  } else if u >= 56320 and u <= 57343 then err("string.from_utf16: unpaired surrogate at ${i}")
-  else utf16_decode(xs, i + 1, [string.from_codepoint(u)] + acc),
-}
-
+// One pass that pushes each decoded character in place (#4196): the earlier
+// recursion prepended to its accumulator, a copy per unit — quadratic.
 /// String from UTF-16 code units; err on an unpaired surrogate or a unit outside 0..65535.
-fn from_utf16(xs: List[Int]) -> Result[String, String] = utf16_decode(xs, 0, [])
+fn from_utf16(xs: List[Int]) -> Result[String, String] = {
+  let n = list.len(xs)
+  var out: List[String] = []
+  var bad = ""
+  var i = 0
+  while i < n and bad == "" {
+    let u = list.get(xs, i) ?? 0
+    if u < 0 or u > 65535 then {
+      bad = "string.from_utf16: code unit out of range at ${i}: ${u}"
+    } else if u >= 55296 and u <= 56319 then {
+      let lo = list.get(xs, i + 1) ?? -1
+      if lo >= 56320 and lo <= 57343 then {
+        list.push(out, string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320)))
+        i = i + 2
+      } else {
+        bad = "string.from_utf16: unpaired surrogate at ${i}"
+      }
+    } else if u >= 56320 and u <= 57343 then {
+      bad = "string.from_utf16: unpaired surrogate at ${i}"
+    } else {
+      list.push(out, string.from_codepoint(u))
+      i = i + 1
+    }
+  }
+  if bad == "" then ok(string.join(out, "")) else err(bad)
+}
 
 /// The characters of s for which f is true.
 fn filter(s: String, f: (String) -> Bool) -> String = string.join(
@@ -345,33 +354,14 @@ fn sort(s: String) -> List[String] = list.sort(string.chars(s))
 /// The characters ordered by f's key; equal keys keep their order.
 fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.chars(s), f)
 
-local fn merge_with(xs: List[String], ys: List[String], cmp: (String, String) -> Int, i: Int, j: Int, acc: List[String]) -> List[String] = match (list.get(
-  xs,
-  i,
-), list.get(ys, j)) {
-  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, ys, cmp, i, j + 1, acc + [y])
-  else merge_with(xs, ys, cmp, i + 1, j, acc + [x]),
-  (some(_), none) => acc + list.drop(xs, i),
-  _ => acc + list.drop(ys, j),
-}
-
-local fn merge_sort_with(xs: List[String], cmp: (String, String) -> Int) -> List[String] = {
-  let n = list.len(xs)
-  if n <= 1 then xs
-  else merge_with(
-    merge_sort_with(list.take(xs, n / 2), cmp),
-    merge_sort_with(list.drop(xs, n / 2), cmp),
-    cmp,
-    0,
-    0,
-    [],
-  )
-}
-
+// list.sort_with's merge (#4196): the earlier String-only merge appended
+// `acc + [y]` per step, a full copy on wasm — quadratic. The adapter keeps
+// the old decision and call order: a right element goes first only when
+// cmp(right, left) < 0, so cmp still sees (right, left) once per comparison.
 /// The characters ordered by cmp (negative = first argument first); stable.
-fn sort_with(s: String, cmp: (String, String) -> Int) -> List[String] = merge_sort_with(
+fn sort_with(s: String, cmp: (String, String) -> Int) -> List[String] = list.sort_with(
   string.chars(s),
-  cmp,
+  (x, y) => if cmp(y, x) < 0 then 1 else 0,
 )
 
 /// The smallest character in codepoint order; none if empty.
