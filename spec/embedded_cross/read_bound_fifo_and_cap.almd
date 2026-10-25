@@ -1,0 +1,75 @@
+// @contract: C-422
+// #4201: what only a lane with `process` can set up — a FIFO with no writer
+// and a sparse file one byte past the 1 GiB read limit — read through the fs
+// whole-file readers. The FIFO must neither block the open nor be read: it
+// errs `Not a regular file` (the open is O_NONBLOCK and the opened
+// descriptor's fstat is what is judged). The sparse file errs `File too large`
+// from its stat, before a byte is read. Both on native and on the embedded
+// wasm host, byte for byte; the rooted reader answers the same for the FIFO.
+// `mkfifo` and `truncate` are on every CI image this lane runs on.
+import fs
+import process
+
+fn line(name: String, r: Result[Int, String], d: String) -> String = match r {
+  ok(n) => "${name}=ok(${n})",
+  err(m) => "${name}=err(${string.replace(m, d, "<TMP>")})",
+}
+
+effect fn main() -> Unit = {
+  let d = fs.create_temp_dir("readbound")!
+  let pipe = d + "/pipe"
+  let big = d + "/big.bin"
+  process.exec("mkfifo", [pipe])!
+  process.exec("truncate", ["-s", "1073741825", big])!
+  println(line(
+    "fifo_text",
+    match fs.read_text(pipe) {
+      ok(v) => ok(string.len(v)),
+      err(m) => err(m),
+    },
+    d,
+  ))
+  println(line(
+    "fifo_bytes_raw_if",
+    match fs.read_bytes_raw_if_exists(pipe) {
+      ok(o) => ok(bytes.len(o ?? bytes.from_list([]))),
+      err(m) => err(m),
+    },
+    d,
+  ))
+  let root = fs.open_root(d)!
+  println(line(
+    "fifo_root_text",
+    match fs.root_read_text(root, "pipe") {
+      ok(v) => ok(string.len(v)),
+      err(m) => err(m),
+    },
+    d,
+  ))
+  println(line(
+    "big_text",
+    match fs.read_text(big) {
+      ok(v) => ok(string.len(v)),
+      err(m) => err(m),
+    },
+    d,
+  ))
+  println(line(
+    "big_bytes",
+    match fs.read_bytes_raw(big) {
+      ok(b) => ok(bytes.len(b)),
+      err(m) => err(m),
+    },
+    d,
+  ))
+  println(line(
+    "big_lines_if",
+    match fs.read_lines_if_exists(big) {
+      ok(o) => ok(list.len(o ?? [])),
+      err(m) => err(m),
+    },
+    d,
+  ))
+  println("size=${fs.file_size(big)!}")
+  fs.remove_all(d)!
+}
