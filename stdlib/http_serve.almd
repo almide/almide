@@ -26,6 +26,15 @@ effect fn __http_serve_next() -> Result[List[String], String] = _
 
 effect fn __http_serve_reply(frame: String) -> Result[Unit, String] = _
 
+// Op 75 (#4203): run `step` (the serve loop) under the host's containment.
+// The embedded host calls `step` itself; a runtime abort inside a handler
+// unwinds only that call, the host answers the request with the C-409 500
+// and one `handler aborted` stderr line, puts the instance back to its
+// state at this call and calls `step` again. ok = the loop ran to its
+// shutdown there; err = no host containment (the stock export's shim), and
+// the guest runs the loop itself.
+effect fn __http_serve_run(step: effect () -> Unit) -> Result[Unit, String] = _
+
 fn __hs_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
 fn __hs_frame(resp: List[String]) -> String = resp |> list.map((c) => __hs_cell(c)) |> list.join("")
@@ -121,6 +130,15 @@ effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Uni
     ok(_) => (),
     err(e) => prim.die(prim.handle("Error: ${e}\n")),
   }
+  match __http_serve_run(() => __hs_loop(f)!) {
+    ok(_) => (),
+    err(_) => __hs_loop(f)!,
+  }
+}
+
+// The serve loop: one request at a time until the host answers `next` with
+// no request (a shutdown signal).
+effect fn __hs_loop(f: effect (List[String]) -> List[String]) -> Unit = {
   var serving = true
   while serving {
     let raw = __http_serve_next()!

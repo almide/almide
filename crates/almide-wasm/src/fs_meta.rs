@@ -91,6 +91,13 @@ pub(crate) const OP_HTTP_FRAMED_RESPONSE: i32 = 65;
 pub(crate) const OP_HTTP_SERVE_BIND: i32 = 70;
 pub(crate) const OP_HTTP_SERVE_NEXT: i32 = 71;
 pub(crate) const OP_HTTP_SERVE_REPLY: i32 = 72;
+/// The contained serve loop (#4203): the closure env of the guest's serve
+/// loop rides a_len (scalar, null a_ptr — the op-35 discipline). The
+/// embedded host calls the closure through the exported table and contains
+/// a handler abort to its request; a host without containment answers err
+/// and the guest runs the loop itself. A module naming this op exports its
+/// table and globals (assembly.rs) so the host can put the instance back.
+pub(crate) const OP_HTTP_SERVE_RUN: i32 = 75;
 /// fs.stat / fs.glob (#1423 stage 4): the two metadata surfaces the
 /// structural leg had no arm for. 38 answers the four FileStat fields as
 /// a 32-byte LE buffer (size, is_dir, is_file, modified — each an i64);
