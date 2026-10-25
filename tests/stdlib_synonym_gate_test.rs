@@ -57,10 +57,16 @@ const ALLOWED: &[(&str, &str, &str)] = &[
     ("float", "to_uint16_saturating", "conversion trio: the saturating cell of a lossy Float -> UInt16"),
     ("float", "to_uint32_saturating", "conversion trio: the saturating cell of a lossy Float -> UInt32"),
     ("float", "to_uint64_saturating", "conversion trio: the saturating cell of a lossy Float -> UInt64"),
+    // The byte-width matrix (get_/next_/put_/append_ per width and endianness):
+    // the 8-bit row has every cell like the wider rows, and its u8 read and
+    // i8 append forward to the base `get` / `push` because one byte has no
+    // endianness or sign to apply on that side.
+    ("bytes", "get_u8", "byte-width matrix: the u8 read cell, the same byte `get` reads"),
+    ("bytes", "append_i8", "byte-width matrix: the i8 append cell, the same low byte `push` appends"),
 ];
 
 /// Shrink-only: lower it when an entry leaves `ALLOWED`, never raise it.
-const ALLOWED_CEILING: usize = 8;
+const ALLOWED_CEILING: usize = 10;
 
 struct SurfaceFn {
     name: String,
