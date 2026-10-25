@@ -417,6 +417,19 @@ pub fn normalize_subdir(raw: &str) -> Result<String, String> {
 /// Validate that a package name is a valid Almide identifier (no hyphens).
 /// Like Go, the package name IS the import name — no implicit conversion.
 /// Extracted verbatim.
+/// A plain name: ASCII letters, digits and `_`, not starting with a digit.
+/// A package name is an import name, and `build`, `compile` and `install`
+/// also use it as a FILE name — so a name with a separator, `..`, a leading
+/// `.` or an absolute path would write outside the project (#4183, #4193).
+pub fn check_plain_name(name: &str) -> Result<(), String> {
+    let first_ok = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+    if first_ok && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        Ok(())
+    } else {
+        Err(format!("`{}` is not a plain name (letters, digits and `_`, not starting with a digit)", name.escape_debug()))
+    }
+}
+
 fn validate_package_name(name: &str) -> Result<(), String> {
     if name.contains('-') {
         return Err(format!(
