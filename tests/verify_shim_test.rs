@@ -196,16 +196,21 @@ fn a_real_program_is_judged_by_the_real_verifier() {
     assert!(out.contains("ACCEPT  call-modes") && out.contains("ACCEPT  bounds"), "{out}\n{}", text(&o.stderr));
     assert!(!out.contains("REJECT"), "{out}");
 
-    // A manifest that grants only `Rand`: main's console output reaches past
-    // what the effect fn may declare, so the capability witness — real
-    // source, real build — comes back through the shim as a REJECT, exit 1.
+    // A manifest that grants only `Rand`: main's console output is `IO.stdout`
+    // (#4155), past what the manifest allows, so the program is refused end to
+    // end, exit 1. Since #4155 the build route enforces `[permissions]` itself,
+    // so the refusal comes before the certifier runs; the shim's own
+    // REJECT pass-through is pinned by the leak witness above.
     std::fs::write(stage.dir.join("almide.toml"), "[package]\nname = \"m\"\nversion = \"0.1.0\"\n\n[permissions]\nallow = [\"Rand\"]\n")
         .expect("manifest");
     std::fs::write(stage.dir.join("app.almd"), "effect fn main() -> Unit = {\n  println(\"hi\")\n}\n").expect("source");
     let o = stage.verify(&["app.almd"]);
-    let out = text(&o.stdout);
-    assert_eq!(o.status.code(), Some(1), "{out}\n{}", text(&o.stderr));
-    assert!(out.contains("REJECT  caps") && out.contains("-> REJECTED"), "{out}");
+    let (out, err) = (text(&o.stdout), text(&o.stderr));
+    assert_eq!(o.status.code(), Some(1), "{out}\n{err}");
+    assert!(
+        err.contains("IO.stdout is not in [permissions].allow") || out.contains("REJECT  caps"),
+        "a too-small grant must be refused by the build or the certifier:\n{out}\n{err}"
+    );
 }
 
 #[test]
