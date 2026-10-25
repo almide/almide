@@ -4714,7 +4714,7 @@ fn __encode_list_bool(items: List[Bool]) -> Value = value.array(__el_bool(items,
 fn __el_string(items: List[String], n: Int, i: Int, acc: List[Value]) -> List[Value] =
   if i >= n then acc
   else __el_string(items, n, i + 1, acc + [
-    value.string(list.get(items, i) ?? "")
+    value.str(list.get(items, i) ?? "")
   ])
 
 fn __encode_list_string(items: List[String]) -> Value = value.array(__el_string(items, list.len(items), 0, []))
@@ -4735,7 +4735,7 @@ fn __encode_option_bool(v: Bool?) -> Value = match v {
 }
 
 fn __encode_option_string(v: String?) -> Value = match v {
-  some(x) => value.string(x),
+  some(x) => value.str(x),
   none => value.null(),
 }
 "#;
@@ -4774,30 +4774,9 @@ fn diff_seconds(a: Int, b: Int) -> Int = _
 @intrinsic("almide_rt_datetime_format")
 fn format(ts: Int, pattern: String) -> String = _
 
-
-
-
-/// UTC epoch secs of the parts; err naming the first part out of range.
-fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String] =
-  if m < 1 or m > 12 then err("month out of range: " + int.to_string(m))
-  else if d < 1 or d > __days_in_month(y, m) then err("day out of range: " + int.to_string(d))
-  else if h < 0 or h > 23 then err("hour out of range: " + int.to_string(h))
-  else if min < 0 or min > 59 then err("minute out of range: " + int.to_string(min))
-  else if s < 0 or s > 59 then err("second out of range: " + int.to_string(s))
-  else ok(datetime.__from_parts(y, m, d, h, min, s))
-
-local fn __days_in_month(y: Int, m: Int) -> Int = match m {
-  2 => if y % 4 == 0 and (y % 100 != 0 or y % 400 == 0) then 29 else 28,
-  4 => 30,
-  6 => 30,
-  9 => 30,
-  11 => 30,
-  _ => 31,
-}
-
-
-@intrinsic("almide_rt_datetime___from_parts")
-fn __from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = _
+/// UTC epoch secs; out-of-range fields roll over.
+@intrinsic("almide_rt_datetime_from_parts")
+fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = _
 
 /// Identity: seconds are already a timestamp.
 @intrinsic("almide_rt_datetime_from_unix")
@@ -5209,7 +5188,7 @@ fn __dpi_build(d: List[Int], tm: List[Int], off: Int) -> Result[Int, String] = {
   else if h < 0 or h > 23 then err("hour out of range: " + int.to_string(h))
   else if mi < 0 or mi > 59 then err("minute out of range: " + int.to_string(mi))
   else if s < 0 or s > 59 then err("second out of range: " + int.to_string(s))
-  else ok(datetime.__from_parts(y, mo, dd, h, mi, s) - off)
+  else ok(datetime.from_parts(y, mo, dd, h, mi, s) - off)
 }
 
 fn datetime_parse_iso(s: String) -> Result[Int, String] = {
@@ -8311,46 +8290,33 @@ type FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }
 @intrinsic("almide_rt_fs_read_text")
 effect fn read_text(path: String) -> Result[String, String] = _
 
-
-
-
-/// Whole file as Bytes; err if missing.
+/// Bytes as Ints 0..255; err if missing.
 @intrinsic("almide_rt_fs_read_bytes")
-effect fn read_bytes(path: String) -> Result[Bytes, String] = _
+effect fn read_bytes(path: String) -> Result[List[Int], String] = _
 
 /// Overwrites or creates; err if no parent dir.
 @ordered
 @intrinsic("almide_rt_fs_write")
 @category("FS.write")
-effect fn write_text(path: String, content: String) -> Result[Unit, String] = _
+effect fn write(path: String, content: String) -> Result[Unit, String] = _
 
-/// Writes data verbatim, replacing the file.
+/// Writes low byte of each Int (-1 -> 255).
 @ordered
 @intrinsic("almide_rt_fs_write_bytes")
 @category("FS.write")
-effect fn write_bytes(path: String, data: Bytes) -> Result[Unit, String] = _
+effect fn write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = _
+
+/// Writes data verbatim, replacing the file.
+@ordered
+@intrinsic("almide_rt_fs_write_bytes_raw")
+@category("FS.write")
+effect fn write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Appends content; creates the file if missing.
 @ordered
 @intrinsic("almide_rt_fs_append")
 @category("FS.write")
-effect fn append_text(path: String, content: String) -> Result[Unit, String] = _
-
-
-
-/// Appends data verbatim; creates the file if missing.
-@ordered
-@category("FS.write")
-effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = {
-  let old = if fs.exists(path) then __as_append(fs.read_bytes(path))!
-  else bytes.new()
-  __as_append(fs.write_bytes(path, bytes.concat(old, data)))
-}
-
-local fn __as_append[A](r: Result[A, String]) -> Result[A, String] = match r {
-  ok(x) => ok(x),
-  err(e) => err(["fs.read_bytes", "fs.write_bytes"] |> list.find((call) => string.starts_with(e, call)) |> option.map((call) => "fs.append_bytes" + string.drop(e, string.len(call))) ?? e),
-}
+effect fn append(path: String, content: String) -> Result[Unit, String] = _
 
 /// Creates dir and parents; ok if it exists.
 @ordered
@@ -8435,13 +8401,17 @@ effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, Stri
 @intrinsic("almide_rt_fs_read_text_if_exists")
 effect fn read_text_if_exists(path: String) -> Result[String?, String] = _
 
-/// File Bytes, or none if missing.
+/// Bytes as Ints, or none if missing.
 @intrinsic("almide_rt_fs_read_bytes_if_exists")
-effect fn read_bytes_if_exists(path: String) -> Result[Bytes?, String] = _
+effect fn read_bytes_if_exists(path: String) -> Result[List[Int]?, String] = _
 
 /// read_lines result, or none if missing.
 @intrinsic("almide_rt_fs_read_lines_if_exists")
 effect fn read_lines_if_exists(path: String) -> Result[List[String]?, String] = _
+
+/// File Bytes, or none if missing.
+@intrinsic("almide_rt_fs_read_bytes_raw_if_exists")
+effect fn read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = _
 
 /// Deletes a file or empty dir; err if missing.
 @ordered
@@ -8521,6 +8491,10 @@ effect fn is_symlink(path: String) -> Bool = _
 /// Mtime in Unix seconds; err if missing.
 @intrinsic("almide_rt_fs_modified_at")
 effect fn modified_at(path: String) -> Result[Int, String] = _
+
+/// Whole file as Bytes; err if missing.
+@intrinsic("almide_rt_fs_read_bytes_raw")
+effect fn read_bytes_raw(path: String) -> Result[Bytes, String] = _
 
 
 
@@ -8612,7 +8586,7 @@ effect fn root_read_text(root: FsRoot, path: String) -> Result[String, String] =
   path,
 )
 
-/// read_bytes of path inside root; err if it escapes.
+/// read_bytes_raw of path inside root; err if it escapes.
 effect fn root_read_bytes(root: FsRoot, path: String) -> Result[Bytes, String] = __root_answer(
   __root_read_bytes(__root_at(root, path)!),
   path,
@@ -8678,7 +8652,7 @@ fn __app_old(path: String) -> String = if prim.path_exists(path) then __app_read
 effect fn fs_append(path: String, content: String) -> Result[Unit, String] = {
   let old = __app_old(path)
   let joined = old + content
-  let w: Result[Unit, String] = prim.write_text_file_as(path, joined, "fs.append_text")
+  let w: Result[Unit, String] = prim.write_text_file_as(path, joined, "fs.append")
   let wh = prim.handle(w)
   if prim.load32(wh + 16) != 0 then {
     let m: String = prim.load_handle(wh + 12)
@@ -9411,18 +9385,50 @@ pub const SRC_FS_READ_BYTES: &str = r#"
 
 
 
-effect fn fs_read_bytes(path: String) -> Result[Bytes, String] = prim.read_bytes_file_as(
-  path,
-  "fs.read_bytes",
-)
+
+effect fn fs_read_bytes(path: String) -> Result[List[Int], String] = {
+  let r = prim.read_bytes_file(path)
+  match r {
+    ok(b) => ok(bytes.to_list(b)),
+    err(e) => err(e),
+  }
+}
 "#;
 pub const SRC_FS_READ_BYTES_IF_EXISTS: &str = r#"
 
 
 
-effect fn fs_read_bytes_if_exists(path: String) -> Result[Bytes?, String] = {
+
+effect fn fs_read_bytes_if_exists(path: String) -> Result[List[Int]?, String] = {
   if prim.path_exists(path) then {
     let r = prim.read_bytes_file_as(path, "fs.read_bytes_if_exists")
+    match r {
+      ok(b) => {
+        let xs = bytes.to_list(b)
+        ok(some(xs))
+      },
+      err(e) => err(e),
+    }
+  } else ok(none)
+}
+"#;
+pub const SRC_FS_READ_BYTES_RAW: &str = r#"
+
+
+
+
+effect fn fs_read_bytes_raw(path: String) -> Result[Bytes, String] = prim.read_bytes_file_as(
+  path,
+  "fs.read_bytes_raw",
+)
+"#;
+pub const SRC_FS_READ_BYTES_RAW_IF_EXISTS: &str = r#"
+
+
+
+effect fn fs_read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = {
+  if prim.path_exists(path) then {
+    let r = prim.read_bytes_file_as(path, "fs.read_bytes_raw_if_exists")
     match r {
       ok(b) => ok(some(b)),
       err(e) => err(e),
@@ -9835,6 +9841,32 @@ pub const SRC_FS_WRITE_BYTES: &str = r#"
 
 
 
+fn __wb_fill(dst: Int, xs: List[Int], n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let b = xs[i]
+  prim.store8(dst + i, int.band(b, 255))
+  __wb_fill(dst, xs, n, i + 1)
+}
+
+effect fn fs_write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = {
+  let n = list.len(bytes)
+  let s = prim.alloc_str(n)
+  let _f = __wb_fill(prim.handle(s) + 12, bytes, n, 0)
+  let w: Result[Unit, String] = prim.write_text_file_as(path, s, "fs.write_bytes")
+  let wh = prim.handle(w)
+  if prim.load32(wh + 16) != 0 then {
+    let m: String = prim.load_handle(wh + 12)
+    err(m)
+  } else ok(())
+}
+"#;
+pub const SRC_FS_WRITE_BYTES_RAW: &str = r#"
+
+
+
+
+
+
 fn __wbr_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let b = prim.load8(src + i)
@@ -9842,12 +9874,12 @@ else {
   __wbr_copy(dst, src, n, i + 1)
 }
 
-effect fn fs_write_bytes(path: String, data: Bytes) -> Result[Unit, String] = {
+effect fn fs_write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = {
   let h = prim.handle(data)
   let n = prim.load32(h + 4)
   let s = prim.alloc_str(n)
   let _c = __wbr_copy(prim.handle(s) + 12, h + 12, n, 0)
-  let w: Result[Unit, String] = prim.write_text_file_as(path, s, "fs.write_bytes")
+  let w: Result[Unit, String] = prim.write_text_file_as(path, s, "fs.write_bytes_raw")
   let wh = prim.handle(w)
   if prim.load32(wh + 16) != 0 then {
     let m: String = prim.load_handle(wh + 12)
@@ -9870,9 +9902,9 @@ pub const SRC_HASH: &str = r#"
 
 
 
-/// 32-bit FNV-1a of b, in 0..4294967295.
+/// 32-bit FNV-1a of s's UTF-8; non-negative Int.
 @intrinsic("almide_rt_hash_fnv1a32")
-fn fnv1a32(b: Bytes) -> Int = _
+fn fnv1a32(s: String) -> Int = _
 
 /// 32-bit FNV-1a of b, in 0..4294967295.
 @intrinsic("almide_rt_hash_fnv1a32_bytes")
@@ -9882,9 +9914,9 @@ fn fnv1a32_bytes(b: Bytes) -> Int = _
 @intrinsic("almide_rt_hash_sha256")
 fn sha256(b: Bytes) -> Bytes = _
 
-/// SHA-256 of b as 64 lowercase hex chars.
+/// SHA-256 of s's UTF-8, 64 lowercase hex chars.
 @intrinsic("almide_rt_hash_sha256_hex")
-fn sha256_hex(b: Bytes) -> String = _
+fn sha256_hex(s: String) -> String = _
 
 
 
@@ -10318,8 +10350,8 @@ import prim
 fn __fnv_go(a: Int, n: Int, i: Int, h: Int) -> Int = if i >= n then h
 else __fnv_go(a, n, i + 1, prim.band(prim.bxor(h, prim.load8(a + i)) * 16777619, 4294967295))
 
-fn hash_fnv1a32(b: Bytes) -> Int = {
-  let h = prim.handle(b)
+fn hash_fnv1a32(s: String) -> Int = {
+  let h = prim.handle(s)
   __fnv_go(h + 12, prim.load32(h + 4), 0, 2166136261)
 }
 
@@ -10570,8 +10602,8 @@ else {
   __sha_hex_fill(dst, src, i + 1)
 }
 
-fn hash_sha256_hex(b: Bytes) -> String = {
-  let h = prim.handle(b)
+fn hash_sha256_hex(s: String) -> String = {
+  let h = prim.handle(s)
   let d = __sha256_digest(h + 12, prim.load32(h + 4))
   let out = prim.alloc_str(64)
   let _x = __sha_hex_fill(prim.handle(out) + 12, prim.handle(d) + 12, 0)
@@ -11311,7 +11343,7 @@ fn __canonical(path: String) -> Bool = {
   let empty_inner = list.enumerate(segs) |> list.any(((i, s)) => s == "" and i + 1 < n)
   let dot = segs |> list.any((s) => s == "." or s == "..")
   let unreserved = string.split(path, "%") |> list.drop(1) |> list.any((p) => __encodes_unreserved(p))
-  let odd = string.to_list(path) |> list.any((c) => c == "\\" or (string.to_codepoint(c) ?? 0) < 32 or (string.to_codepoint(c) ?? 0) == 127)
+  let odd = string.chars(path) |> list.any((c) => c == "\\" or (string.codepoint(c) ?? 0) < 32 or (string.codepoint(c) ?? 0) == 127)
   not empty_inner and not dot and not unreserved and not odd
 }
 
@@ -11336,7 +11368,7 @@ fn __bad_binding(segs: List[String], parts: List[String]) -> Bool = {
 }
 
 fn __hex_pair(p: String) -> Bool = {
-  let cs = string.to_list(string.take(p, 2))
+  let cs = string.chars(string.take(p, 2))
   list.len(cs) == 2 and list.all(cs, __is_hex)
 }
 
@@ -11458,7 +11490,7 @@ else if __is_param(s) then __name_of(s) != "" and not string.contains(__name_of(
 )
 else not string.contains(s, "{") and not string.contains(s, "}")
 
-fn __method_ok(m: String) -> Bool = string.to_list(m) |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c))
+fn __method_ok(m: String) -> Bool = string.chars(m) |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c))
 
 fn __pattern_problems(r: HttpRoute) -> List[String] = {
   let last = list.len(r.segments) - 1
@@ -11586,7 +11618,7 @@ import http
 
 fn __hc_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __hc_frame(method: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> String = map.to_list(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
+fn __hc_frame(method: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
   "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
   (acc, cell) => acc + cell,
 )
@@ -11675,7 +11707,7 @@ effect fn __hc_stream_limited_impl(method: String, url: String, body: String, he
 
 
 
-fn __hc_classic_frame(method: String, body: String, headers: Map[String, String]) -> String = map.to_list(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
+fn __hc_classic_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
   "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell("classic")}${__hc_cell("classic")}",
   (acc, cell) => acc + cell,
 )
@@ -11709,7 +11741,7 @@ pub const SRC_HTTP_FRAMED: &str = r#"
 
 fn __http_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __http_frame(method: String, body: String, headers: Map[String, String]) -> String = map.to_list(headers) |> list.map(((k, v)) => "${__http_cell(k)}${__http_cell(v)}") |> list.fold(
+fn __http_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__http_cell(k)}${__http_cell(v)}") |> list.fold(
   "${__http_cell(method)}${__http_cell(body)}",
   (acc, cell) => acc + cell,
 )
@@ -11846,8 +11878,8 @@ else if __hq_fold(list.get(a, i) ?? "") != __hq_fold(list.get(b, i) ?? "") then 
 else __hq_ci_at(a, b, i + 1)
 
 fn __hq_ci_eq(x: String, y: String) -> Bool = {
-  let a = string.to_list(x)
-  let b = string.to_list(y)
+  let a = string.chars(x)
+  let b = string.chars(y)
   if list.len(a) != list.len(b) then false
   else __hq_ci_at(a, b, 0)
 }
@@ -11858,7 +11890,7 @@ fn __hq_nh(req: List[String]) -> Int = int.parse(list.get(req, 3) ?? "0") ?? 0
 fn __hq_params_at(req: List[String]) -> Int = 4 + 2 * __hq_nh(req)
 
 fn http_new_request(method: String, target: String, body: String, headers: Map[String, String]) -> List[String] = {
-  let pairs = map.to_list(headers) |> list.flat_map(((k, v)) => [k, v])
+  let pairs = map.entries(headers) |> list.flat_map(((k, v)) => [k, v])
   [method, target, body, int.to_string(map.len(headers))] + pairs
 }
 
@@ -11943,8 +11975,8 @@ else if __hr_fold(list.get(a, i) ?? "") != __hr_fold(list.get(b, i) ?? "") then 
 else __hr_ci_at(a, b, i + 1)
 
 fn __hr_ci_eq(x: String, y: String) -> Bool = {
-  let a = string.to_list(x)
-  let b = string.to_list(y)
+  let a = string.chars(x)
+  let b = string.chars(y)
   if list.len(a) != list.len(b) then false
   else __hr_ci_at(a, b, 0)
 }
@@ -12021,7 +12053,7 @@ fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[
 
 
 
-fn __hr_lower(s: String) -> String = string.to_list(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
+fn __hr_lower(s: String) -> String = string.chars(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
 
 
 
@@ -12089,7 +12121,7 @@ fn __hs_tchar(c: String) -> Bool = c != "" and string.contains(
   c,
 )
 
-fn __hs_cp(c: String) -> Int = string.to_codepoint(c) ?? 0
+fn __hs_cp(c: String) -> Int = string.codepoint(c) ?? 0
 
 
 
@@ -12099,13 +12131,13 @@ fn __hs_quote_char(c: String) -> String = match c {
   _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
 }
 
-fn __hs_quote(s: String) -> String = "\"" + (string.to_list(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
+fn __hs_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
 
 fn __hs_control(c: String) -> Bool = (__hs_cp(c) < 32 and c != "\t") or __hs_cp(c) == 127
 
 fn __hs_bad_header(k: String, v: String) -> String? =
-  if k == "" or not list.all(string.to_list(k), (c) => __hs_tchar(c)) then some("response header name ${__hs_quote(k)} is not a token")
-  else if list.any(string.to_list(v), (c) => __hs_control(c)) then some("response header ${k} has a control character in its value")
+  if k == "" or not list.all(string.chars(k), (c) => __hs_tchar(c)) then some("response header name ${__hs_quote(k)} is not a token")
+  else if list.any(string.chars(v), (c) => __hs_control(c)) then some("response header ${k} has a control character in its value")
   else none
 
 fn __hs_pairs(resp: List[String]) -> List[(String, String)] = list.range(
@@ -12146,7 +12178,7 @@ fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_
 
 
 fn __hs_request_id(raw: List[String]) -> String = string.pad_start(
-  int.to_hex(hash.fnv1a32(bytes.from_string((list.get(raw, 0) ?? "") + " " + (list.get(raw, 1) ?? "") + "\n" + (list.get(raw, 2) ?? "")))),
+  int.to_hex(hash.fnv1a32((list.get(raw, 0) ?? "") + " " + (list.get(raw, 1) ?? "") + "\n" + (list.get(raw, 2) ?? ""))),
   8,
   "0",
 )
@@ -14804,45 +14836,130 @@ pub const SRC_IO: &str = r#"
 
 
 
-/// Next stdin line, newline cut, bad UTF-8 as U+FFFD; "" at EOF too — read_line_opt tells them apart.
+
+
+
+
+
+
+
+
+
+
+
+
+/// The standard input stream; a Read handle.
+mod type Stdin: Read = Int
+
+/// The standard output stream; a Write handle.
+mod type Stdout: Write = Int
+
+/// The standard error stream; a Write handle.
+mod type Stderr: Write = Int
+
+
+/// Next stdin line, newline cut, bad UTF-8 as U+FFFD; none at EOF, some("") for an empty line.
 @ordered
 @intrinsic("almide_rt_io_read_line")
-effect fn read_line() -> String = _
-
-/// Next stdin line, newline cut; none at EOF, some("") for an empty line.
-@ordered
-@intrinsic("almide_rt_io_read_line_opt")
-effect fn read_line_opt() -> String? = _
-
-/// Writes s, no newline, then flushes.
-@intrinsic("almide_rt_io_print")
-@category("IO.stdout")
-effect fn print(s: String) -> Unit = _
+effect fn read_line() -> String? = _
 
 /// Rest of stdin as text, bad UTF-8 as U+FFFD; empty at EOF.
 @ordered
 @intrinsic("almide_rt_io_read_all")
 effect fn read_all() -> String = _
 
-/// Next stdin byte 0..255, or -1 at EOF.
-@ordered
-@intrinsic("almide_rt_io_read_byte")
-effect fn read_byte() -> Int = _
-
-/// Up to n stdin bytes; [] if n <= 0.
-@ordered
-@intrinsic("almide_rt_io_read_n_bytes")
-effect fn read_n_bytes(n: Int) -> List[Int] = _
-
-/// Low byte of each Int to stdout; unflushed.
-@intrinsic("almide_rt_io_write_bytes")
+/// Writes s to stdout, no newline, then flushes.
+@intrinsic("almide_rt_io_print")
 @category("IO.stdout")
-effect fn write_bytes(data: List[Int]) -> Unit = _
+effect fn print(s: String) -> Unit = _
 
-/// Raw data to stdout; no newline.
+/// Writes s to stderr, no newline.
+@intrinsic("almide_rt_io_eprint")
+@category("IO.stderr")
+effect fn eprint(s: String) -> Unit = _
+
+
+/// Standard input, for io.read / read_exact / read_to_end.
+@category("IO.stdin")
+effect fn stdin() -> Stdin = Stdin(0)
+
+/// Standard output, for io.write.
+@category("IO.stdout")
+effect fn stdout() -> Stdout = Stdout(1)
+
+/// Standard error, for io.write.
+@category("IO.stderr")
+effect fn stderr() -> Stderr = Stderr(2)
+
+
+/// Up to max bytes from h; empty once h has ended; err if max < 0.
+@category()
+effect fn read[H: Read](h: H, max: Int) -> Result[Bytes, String] =
+  if max < 0 then err("io.read: negative length ${max}") else h.__self_read(max)
+
+/// Exactly n bytes from h; err if h ends first, naming how many arrived.
+@category()
+effect fn read_exact[H: Read](h: H, n: Int) -> Result[Bytes, String] =
+  if n < 0 then err("io.read_exact: negative length ${n}") else __read_exact_from(h, n, 0, [])
+
+/// Every byte until h ends.
+@category()
+effect fn read_to_end[H: Read](h: H) -> Result[Bytes, String] = __read_to_end_from(h, [])
+
+/// Writes all of data to h.
+@category()
+effect fn write[H: Write](h: H, data: Bytes) -> Result[Unit, String] = h.__self_write(data)
+
+/// Closes h; closing twice is ok.
+@category()
+effect fn close[H: Close](h: H) -> Result[Unit, String] = h.__self_close()
+
+
+
+
+effect fn __read_exact_from[H: Read](h: H, n: Int, got: Int, chunks: List[Bytes]) -> Result[Bytes, String] =
+  if got >= n then ok(list.join(chunks, bytes.new()))
+  else {
+    let left = n - got
+    let b = h.__self_read(if left > 65536 then 65536 else left)!
+    if bytes.len(b) == 0 then err("io.read_exact: the stream ended after ${got} of ${n} bytes")
+    else __read_exact_from(h, n, got + bytes.len(b), chunks + [b])
+  }
+
+effect fn __read_to_end_from[H: Read](h: H, chunks: List[Bytes]) -> Result[Bytes, String] = {
+  let b = h.__self_read(65536)!
+  if bytes.len(b) == 0 then ok(list.join(chunks, bytes.new())) else __read_to_end_from(h, chunks + [b])
+}
+
+
+/// Up to max bytes of stdin; fewer only at its end.
+@ordered
+@intrinsic("almide_rt_io_read_bytes")
+effect fn __read_stdin_bytes(max: Int) -> Bytes = _
+
+/// data to stdout, unflushed; shares println's buffer, so order is program order.
 @intrinsic("almide_rt_io_write")
 @category("IO.stdout")
-effect fn write(data: Bytes) -> Unit = _
+effect fn __write_stdout(data: Bytes) -> Unit = _
+
+/// data to stderr, after flushing stdout.
+@intrinsic("almide_rt_io_write_stderr")
+@category("IO.stderr")
+effect fn __write_stderr(data: Bytes) -> Unit = _
+
+effect fn __stdin_read(_h: Stdin, max: Int) -> Result[Bytes, String] = ok(__read_stdin_bytes(max))
+
+@category("IO.stdout")
+effect fn __stdout_write(_h: Stdout, data: Bytes) -> Result[Unit, String] = {
+  __write_stdout(data)
+  ok(())
+}
+
+@category("IO.stderr")
+effect fn __stderr_write(_h: Stderr, data: Bytes) -> Result[Unit, String] = {
+  __write_stderr(data)
+  ok(())
+}
 "#;
 pub const SRC_IO_PRINT: &str = r#"
 
@@ -14893,32 +15010,6 @@ effect fn io_read_all() -> String = {
   }
   bytes.to_string_lossy(buf)
 }
-"#;
-pub const SRC_IO_READ_BYTE: &str = r#"
-
-
-
-
-
-
-effect fn io_read_byte() -> Int = {
-  let b = prim.read_n_bytes(1)
-  let h = prim.handle(b)
-  if prim.load32(h + 4) < 1 then 0 - 1 else prim.load8(h + 12)
-}
-"#;
-pub const SRC_IO_READ_LINE: &str = r#"
-
-
-
-
-
-
-
-
-
-
-effect fn io_read_line() -> String = prim.read_line()
 "#;
 pub const SRC_IO_READ_LINE_OPT: &str = r#"
 
@@ -14992,7 +15083,8 @@ else {
   if list.len(got) < want then got else got + __read_n_chunked(remaining - want)
 }
 
-effect fn io_read_n_bytes(n: Int) -> List[Int] = if n <= 0 then prim.read_n_bytes(0) else __read_n_chunked(n)
+@implements("io.__read_stdin_bytes")
+effect fn io_read_n_bytes(n: Int) -> Bytes = bytes.from_list(if n <= 0 then prim.read_n_bytes(0) else __read_n_chunked(n))
 "#;
 pub const SRC_IO_WRITE: &str = r#"
 
@@ -15014,23 +15106,14 @@ fn io_write(data: Bytes) -> Unit = {
 }
 
 
-fn __io_pack_bytes(dh: Int, sh: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  prim.store8(dh + 12 + i, prim.band(prim.load64(sh + 12 + i * 8), 255))
-  __io_pack_bytes(dh, sh, n, i + 1)
-}
 
-
-
-fn io_write_bytes(data: List[Int]) -> Unit = {
-  let sh = prim.handle(data)
-  let n = prim.load32(sh + 4)
-  let buf = prim.alloc_bytes(n)
-  let dh = prim.handle(buf)
-  let _p = __io_pack_bytes(dh, sh, n, 0)
-  prim.store32(8, dh + 12)
-  prim.store32(12, n)
-  let _w = prim.fd_write(1, 8, 1, 0)
+@implements("io.__write_stderr")
+fn io_write_stderr(data: Bytes) -> Unit = {
+  let h = prim.handle(data)
+  let len = prim.load32(h + 4)
+  prim.store32(8, h + 12)
+  prim.store32(12, len)
+  let _w = prim.fd_write(2, 8, 1, 0)
 }
 "#;
 pub const SRC_JSON: &str = r#"
@@ -15057,7 +15140,7 @@ fn stringify(v: Value) -> String = _
 
 /// JSON with 2-space indent; [] and {} inline, NaN/inf null.
 @intrinsic("almide_json_stringify_pretty")
-fn stringify_pretty(v: Value) -> String = _
+fn stringify_pretty(j: Value) -> String = _
 
 
 /// String at key; none if absent or non-string.
@@ -15188,45 +15271,6 @@ fn json_get_array(j: Value, key: String) -> List[Value]? = match value.field(j, 
   ok(v) => __r2o_arr(value.as_array(v)),
   err(_) => none,
 }
-
-
-
-
-
-
-fn __r2o_val(r: Result[Value, String]) -> Value? = match r {
-  ok(v) => some(v),
-  err(_) => none,
-}
-
-fn __r2o_obj(r: Result[List[(String, Value)], String]) -> List[(String, Value)]? = match r {
-  ok(ps) => some(ps),
-  err(_) => none,
-}
-
-@implements("value.get")
-fn value_get(v: Value, key: String) -> Value? = __r2o_val(value.field(v, key))
-
-@implements("value.get_string")
-fn value_get_string(v: Value, key: String) -> String? = json_get_string(v, key)
-
-@implements("value.get_int")
-fn value_get_int(v: Value, key: String) -> Int? = json_get_int(v, key)
-
-@implements("value.get_float")
-fn value_get_float(v: Value, key: String) -> Float? = json_get_float(v, key)
-
-@implements("value.get_bool")
-fn value_get_bool(v: Value, key: String) -> Bool? = json_get_bool(v, key)
-
-@implements("value.get_array")
-fn value_get_array(v: Value, key: String) -> List[Value]? = json_get_array(v, key)
-
-@implements("value.get_object")
-fn value_get_object(v: Value, key: String) -> List[(String, Value)]? = match value.field(v, key) {
-  ok(x) => __r2o_obj(value.as_object(x)),
-  err(_) => none,
-}
 "#;
 pub const SRC_JSON_PARSE: &str = r#"
 
@@ -15333,7 +15377,7 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
     if b == 34 then match __jp_string(base, len, q) {
       ok(r) => {
         let (s, np) = r
-        ok((value.string(s), np))
+        ok((value.str(s), np))
       },
       err(e) => err(e),
     } else if (b == 123 or b == 91) and depth >= 1000 then err("json: nesting deeper than 1000")
@@ -15361,7 +15405,7 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
     else {
       let (cp, _l) = __jp_cp(base, q)
       let cpos = __jp_charpos(base, q, 0, 0)
-      err("unexpected char '" + (string.from_codepoint(cp) ?? "") + "' at pos " + int.to_string(cpos))
+      err("unexpected char '" + string.from_codepoint(cp) + "' at pos " + int.to_string(cpos))
     }
   }
 }
@@ -15806,37 +15850,6 @@ fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Value? 
 
 
 
-@implements("value.root")
-fn value_path_root() -> List[String] = []
-
-@implements("value.key")
-fn value_path_key(p: List[String], name: String) -> List[String] = json_path_field(p, name)
-
-@implements("value.index")
-fn value_path_index(p: List[String], i: Int) -> List[String] =
-  if i < 0 then json_path_index(p, 9223372036854775807)
-  else json_path_index(p, i)
-
-@implements("value.get_path")
-fn value_get_path(v: Value, p: List[String]) -> Value? = json_path_get_go(v, p, 0)
-
-@implements("value.set_path")
-fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = ok(json_path_set_go(
-  v,
-  p,
-  0,
-  x,
-))
-
-@implements("value.remove_path")
-fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p, 0)
-
-
-
-
-
-
-
 
 
 
@@ -16041,10 +16054,10 @@ fn get[A](xs: List[A], i: Int) -> A? = _
 @intrinsic("almide_rt_list_get_or")
 fn get_or[A](xs: List[A], i: Int, default: A) -> A = _
 
-/// Copy with slot i = x; no-op if i out of range.
+/// Copy with slot i = val; no-op if i out of range.
 @intrinsic("almide_rt_list_set")
 @reuse(xs)
-fn set[A](xs: List[A], i: Int, x: A) -> List[A] = _
+fn set[A](xs: List[A], i: Int, val: A) -> List[A] = _
 
 /// Copy with i and j swapped; no-op if either OOB.
 @intrinsic("almide_rt_list_swap")
@@ -16080,7 +16093,7 @@ fn zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)] = _
 
 /// Inner lists concatenated in order.
 @intrinsic("almide_rt_list_flatten")
-fn flatten[A](xs: List[List[A]]) -> List[A] = _
+fn flatten[T](xss: List[List[T]]) -> List[T] = _
 
 
 
@@ -16264,19 +16277,19 @@ fn range(start: Int, end: Int) -> List[Int] = _
 @reuse(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
-/// Copy with x at i; i >= len or i < 0 appends.
+/// Copy with val at i; i >= len or i < 0 appends.
 @intrinsic("almide_rt_list_insert")
 @consume(xs)
-fn insert[A](xs: List[A], i: Int, x: A) -> List[A] = _
+fn insert[A](xs: List[A], i: Int, val: A) -> List[A] = _
 
 /// Copy without slot i; no-op if i out of range.
 @intrinsic("almide_rt_list_remove_at")
 @consume(xs)
 fn remove_at[A](xs: List[A], i: Int) -> List[A] = _
 
-/// n copies of x; [] for n <= 0.
+/// n copies of val; [] for n <= 0.
 @intrinsic("almide_rt_list_repeat")
-fn repeat[A](x: A, n: Int) -> List[A] = _
+fn repeat[A](val: A, n: Int) -> List[A] = _
 
 /// sep between adjacent elements.
 @intrinsic("almide_rt_list_intersperse")
@@ -16310,8 +16323,9 @@ fn shuffle[A](xs: List[A]) -> List[A] = _
 @intrinsic("almide_rt_list_window")
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
-/// Index of target in xs sorted ascending (list.sort's order), or none.
-fn binary_search[A](xs: List[A], target: A) -> Int? = list.binary_search_by(xs, target, (x) => x)
+/// Index of target in ascending xs, or none.
+@intrinsic("almide_rt_list_binary_search")
+fn binary_search(xs: List[Int], target: Int) -> Int? = _
 
 
 /// Appends x to xs in place.
@@ -16342,7 +16356,7 @@ fn bundled_probe(n: Int) -> Int = n + 1
 
 
 /// (take n, drop n); n past the end gives (xs, []).
-fn split_at[A](xs: List[A], n: Int) -> (List[A], List[A]) = (list.take(xs, n), list.drop(xs, n))
+fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), list.drop(xs, n))
 
 
 
@@ -16359,8 +16373,8 @@ fn split_at[A](xs: List[A], n: Int) -> (List[A], List[A]) = (list.take(xs, n), l
 
 
 /// [seed, f(seed), ...] of length n; [] if n <= 0.
-fn iterate[A](seed: A, f: (A) -> A, n: Int) -> List[A] = {
-  var out: List[A] = []
+fn iterate[T](seed: T, f: (T) -> T, n: Int) -> List[T] = {
+  var out: List[T] = []
   var x = seed
   for _ in 0..<n {
     list.push(out, x)
@@ -20214,6 +20228,38 @@ fn list_index_of(xs: List[Int], x: Int) -> Int? = {
   let idx = __idx_find(h, len, x, 0)
   if idx < 0 then __lio_none() else __lio_some(idx)
 }
+
+
+
+
+
+
+
+
+
+
+
+
+fn __bsearch(h: Int, target: Int, base: Int, size: Int) -> Int = if size > 1 then {
+  let half = size / 2
+  let mid = base + half
+  let e = prim.load64(h + 12 + mid * 8)
+  let nb = if e > target then base else mid
+  __bsearch(h, target, nb, size - half)
+} else {
+  let e = prim.load64(h + 12 + base * 8)
+  if e == target then base else -1
+}
+
+fn list_binary_search(xs: List[Int], target: Int) -> Int? = {
+  let h = prim.handle(xs)
+  let len = prim.load32(h + 4)
+  if len == 0 then __lio_none()
+  else {
+    let idx = __bsearch(h, target, 0, len)
+    if idx < 0 then __lio_none() else __lio_some(idx)
+  }
+}
 "#;
 pub const SRC_LIST_SORT: &str = r#"
 
@@ -22123,7 +22169,7 @@ fn len[K, V](m: Map[K, V]) -> Int = _
 /// (key, value) pairs in insertion order.
 @intrinsic("almide_rt_map_entries")
 @reuse(m)
-fn to_list[K, V](m: Map[K, V]) -> List[(K, V)] = _
+fn entries[K, V](m: Map[K, V]) -> List[(K, V)] = _
 
 /// a plus b's entries; b wins on shared keys.
 @intrinsic("almide_rt_map_merge")
@@ -22135,10 +22181,10 @@ fn merge[K, V](a: Map[K, V], b: Map[K, V]) -> Map[K, V] = _
 fn is_empty[K, V](m: Map[K, V]) -> Bool = _
 
 
-/// Map of the pairs xs; a repeated key takes the last value.
+/// Map of pairs; a repeated key takes the last value.
 @intrinsic("almide_rt_map_from_entries")
-@consume(xs)
-fn from_list[K, V](xs: List[(K, V)]) -> Map[K, V] = _
+@consume(pairs)
+fn from_list[K, V](pairs: List[(K, V)]) -> Map[K, V] = _
 
 
 /// Same keys and order, values replaced by f(v).
@@ -22203,79 +22249,79 @@ fn clear[K, V](mut m: Map[K, V]) -> Unit = _
 
 
 /// (index, (key, value)) pairs in insertion order, index from 0.
-fn enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))] = list.enumerate(map.to_list(m))
+fn enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))] = list.enumerate(map.entries(m))
 
 /// Entries paired with ys by position; stops at the shorter.
-fn zip[K, V, B](m: Map[K, V], ys: List[B]) -> List[((K, V), B)] = list.zip(map.to_list(m), ys)
+fn zip[K, V, B](m: Map[K, V], ys: List[B]) -> List[((K, V), B)] = list.zip(map.entries(m), ys)
 
 /// f over (entry, ys element) pairs; stops at the shorter.
 fn zip_with[K, V, B, C](m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C] = list.zip_with(
-  map.to_list(m),
+  map.entries(m),
   ys,
   f,
 )
 
 /// The somes f gives over the entries, in insertion order.
 fn filter_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> List[B] = list.filter_map(
-  map.to_list(m),
+  map.entries(m),
   f,
 )
 
 /// The first some f gives over the entries, or none; f is not called after the hit.
-fn find_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> B? = list.find_map(map.to_list(m), f)
+fn find_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> B? = list.find_map(map.entries(m), f)
 
 /// Left fold of the entries seeded by the first; none when empty.
 fn reduce[K, V](m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> (K, V)? = list.reduce(
-  map.to_list(m),
+  map.entries(m),
   f,
 )
 
 /// Running fold values over the entries, init excluded.
 fn scan[K, V, B](m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B] = list.scan(
-  map.to_list(m),
+  map.entries(m),
   init,
   f,
 )
 
 /// (entries where f holds, the rest), insertion order kept.
 fn partition[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)]) = list.partition(
-  map.to_list(m),
+  map.entries(m),
   f,
 )
 
 /// Key f(entry) -> entries; keys in first-seen order.
 fn group_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = list.group_by(
-  map.to_list(m),
+  map.entries(m),
   f,
 )
 
 /// Entries sorted by key f(entry), stable; f runs once per entry.
 fn sort_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)] = list.sort_by(
-  map.to_list(m),
+  map.entries(m),
   f,
 )
 
 /// Entries sorted by cmp, stable: negative puts a first.
 fn sort_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)] = list.sort_with(
-  map.to_list(m),
+  map.entries(m),
   cmp,
 )
 
 /// Entry with the least f(entry); the first on ties.
-fn min_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.to_list(m), f)
+fn min_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.entries(m), f)
 
 /// Entry with the greatest f(entry); the first on ties.
-fn max_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.to_list(m), f)
+fn max_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.entries(m), f)
 
 /// Least entry by cmp; the first on ties.
 fn min_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.min_with(
-  map.to_list(m),
+  map.entries(m),
   cmp,
 )
 
 /// Greatest entry by cmp; the first on ties.
 fn max_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.max_with(
-  map.to_list(m),
+  map.entries(m),
   cmp,
 )
 
@@ -22290,7 +22336,7 @@ fn __fallible_map[K, V, B, E](m: Map[K, V], f: (V) -> Result[B, E]) -> Result[Ma
   var out: List[(K, B)] = []
   var failed: E? = none
   var stop = false
-  for p in map.to_list(m) {
+  for p in map.entries(m) {
     if stop then ()
     else match f(p.1) {
       ok(b) => list.push(out, (p.0, b)),
@@ -22310,7 +22356,7 @@ fn __fallible_filter[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Res
   var out: List[(K, V)] = []
   var failed: E? = none
   var stop = false
-  for p in map.to_list(m) {
+  for p in map.entries(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(keep) => if keep then list.push(out, p) else (),
@@ -22330,7 +22376,7 @@ fn __fallible_fold[K, V, A, E](m: Map[K, V], init: A, f: (A, K, V) -> Result[A, 
   var acc = init
   var failed: E? = none
   var stop = false
-  for p in map.to_list(m) {
+  for p in map.entries(m) {
     if stop then ()
     else match f(acc, p.0, p.1) {
       ok(a) => {
@@ -22352,7 +22398,7 @@ fn __fallible_any[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result
   var hit = false
   var failed: E? = none
   var stop = false
-  for p in map.to_list(m) {
+  for p in map.entries(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(b) => if b then {
@@ -22375,7 +22421,7 @@ fn __fallible_all[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result
   var held = true
   var failed: E? = none
   var stop = false
-  for p in map.to_list(m) {
+  for p in map.entries(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(b) => if b then ()
@@ -22399,7 +22445,7 @@ fn __fallible_count[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Resu
   var n = 0
   var failed: E? = none
   var stop = false
-  for p in map.to_list(m) {
+  for p in map.entries(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(b) => if b then {
@@ -22420,7 +22466,7 @@ fn __fallible_count[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Resu
 
 
 fn __fallible_find[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[(K, V)?, E] = {
-  let es = map.to_list(m)
+  let es = map.entries(m)
   var hit_at = list.len(es)
   var i = 0
   var failed: E? = none
@@ -22476,69 +22522,69 @@ fn __fallible_upsert[K, V, E](m: Map[K, V], key: K, init: V, f: (V) -> Result[V,
 
 
 fn __fallible_zip_with[K, V, B, C, E](m: Map[K, V], ys: List[B], f: ((K, V), B) -> Result[C, E]) -> Result[List[C], E] = list.zip_with(
-  map.to_list(m),
+  map.entries(m),
   ys,
   (p, y) => f(p, y)!,
 )
 
 fn __fallible_filter_map[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B?, E]) -> Result[List[B], E] = list.filter_map(
-  map.to_list(m),
+  map.entries(m),
   (p) => f(p)!,
 )
 
 fn __fallible_find_map[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B?, E]) -> Result[B?, E] = list.find_map(
-  map.to_list(m),
+  map.entries(m),
   (p) => f(p)!,
 )
 
 fn __fallible_reduce[K, V, E](m: Map[K, V], f: ((K, V), (K, V)) -> Result[(K, V), E]) -> Result[(K, V)?, E] = list.reduce(
-  map.to_list(m),
+  map.entries(m),
   (a, b) => f(a, b)!,
 )
 
 fn __fallible_scan[K, V, B, E](m: Map[K, V], init: B, f: (B, (K, V)) -> Result[B, E]) -> Result[List[B], E] = list.scan(
-  map.to_list(m),
+  map.entries(m),
   init,
   (acc, p) => f(acc, p)!,
 )
 
 fn __fallible_partition[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -> Result[(List[(K, V)], List[(K, V)]), E] = list.partition(
-  map.to_list(m),
+  map.entries(m),
   (p) => f(p)!,
 )
 
 fn __fallible_group_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E] = list.group_by(
-  map.to_list(m),
+  map.entries(m),
   (p) => f(p)!,
 )
 
 fn __fallible_sort_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[List[(K, V)], E] = list.sort_by(
-  map.to_list(m),
+  map.entries(m),
   (p) => f(p)!,
 )
 
 fn __fallible_sort_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[List[(K, V)], E] = list.sort_with(
-  map.to_list(m),
+  map.entries(m),
   (a, b) => cmp(a, b)!,
 )
 
 fn __fallible_min_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.min_by(
-  map.to_list(m),
+  map.entries(m),
   (p) => f(p)!,
 )
 
 fn __fallible_max_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.max_by(
-  map.to_list(m),
+  map.entries(m),
   (p) => f(p)!,
 )
 
 fn __fallible_min_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[(K, V)?, E] = list.min_with(
-  map.to_list(m),
+  map.entries(m),
   (a, b) => cmp(a, b)!,
 )
 
 fn __fallible_max_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[(K, V)?, E] = list.max_with(
-  map.to_list(m),
+  map.entries(m),
   (a, b) => cmp(a, b)!,
 )
 "#;
@@ -28227,9 +28273,9 @@ fn shape(m: Matrix) -> (Int, Int) = _
 @intrinsic("almide_rt_matrix_transpose")
 fn transpose(m: Matrix) -> Matrix = _
 
-/// Matrix of the equal-length rows xs; [] is 0 x 0.
+/// Matrix of equal-length rows; [] is 0 x 0.
 @intrinsic("almide_rt_matrix_from_lists")
-fn from_lists(xs: List[List[Float]]) -> Matrix = _
+fn from_lists(rows: List[List[Float]]) -> Matrix = _
 
 
 
@@ -28315,9 +28361,9 @@ fn pow(m: Matrix, exp: Float) -> Matrix = _
 fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
 
 
-/// f32 LE rows x cols of b at offset; all 0 if b is short.
+/// f32 LE rows x cols at offset; all 0 if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f32_le")
-fn from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
 
 /// Row-major f64 LE, 8 bytes per element.
 @intrinsic("almide_rt_matrix_to_bytes_f64_le")
@@ -28331,13 +28377,13 @@ fn to_bytes_f32_le(m: Matrix) -> Bytes = _
 @intrinsic("almide_rt_matrix_to_bytes_f16_le")
 fn to_bytes_f16_le(m: Matrix) -> Bytes = _
 
-/// f16 LE rows x cols of b at offset; all 0 if b is short.
+/// f16 LE rows x cols at offset; all 0 if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f16_le")
-fn from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
 
-/// f64 LE rows x cols of b at offset; all 0 if b is short.
+/// f64 LE rows x cols at offset; all 0 if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f64_le")
-fn from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
 
 
 /// bias added to each row; cols cut to bias.
@@ -28350,7 +28396,7 @@ fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
 
 /// Side-by-side join; [] gives 0 x 0.
 @intrinsic("almide_rt_matrix_concat_cols_many")
-fn concat_cols(xs: List[Matrix]) -> Matrix = _
+fn concat_cols(matrices: List[Matrix]) -> Matrix = _
 
 /// Alias of matrix.concat_cols.
 @deprecated(since=5, use="matrix.concat_cols")
@@ -29803,132 +29849,261 @@ pub const SRC_NET: &str = r#"
 
 
 
-/// Opaque Int handle to a TCP connection.
-type TcpStream = Int
-
-/// Opaque Int handle to a listening socket.
-type TcpListener = Int
 
 
-/// Connected stream handle; err if refused.
-@intrinsic("almide_rt_net_tcp_connect")
+/// A connected TCP stream; Read, Write and Close.
+mod type TcpStream: Read, Write, Close = Int
+
+/// A listening TCP socket; Close.
+mod type TcpListener: Close = Int
+
+/// A bound UDP socket; Close.
+mod type UdpSocket: Close = Int
+
+/// One received datagram and where it came from.
+type UdpPacket = { data: Bytes, host: String, port: Int }
+
+/// An IP address: four octets, or eight 16-bit groups.
+type IpAddr = V4(Int, Int, Int, Int) | V6(List[Int])
+
+
+/// A stream connected to host:port; err if refused.
 @category("Net.fetch")
-effect fn tcp_connect(host: String, port: Int) -> Result[Int, String] = _
+effect fn tcp_connect(host: String, port: Int) -> Result[TcpStream, String] = ok(TcpStream(__os_tcp_connect(host, port)!))
 
-
-/// Up to len bytes; empty once the peer closed; err if len < 0.
-@intrinsic("almide_rt_net_tcp_read")
-effect fn tcp_read(stream: Int, len: Int) -> Result[Bytes, String] = _
-
-/// Sends all of data, flushed; err if closed.
-@intrinsic("almide_rt_net_tcp_write")
-effect fn tcp_write(stream: Int, data: Bytes) -> Result[Unit, String] = _
-
-/// Exactly len bytes; err on early EOF, naming how many arrived.
-@intrinsic("almide_rt_net_tcp_read_exact")
-effect fn tcp_read_exact(stream: Int, len: Int) -> Result[Bytes, String] = _
-
-
-/// Shuts down the stream; twice is ok.
-@intrinsic("almide_rt_net_tcp_close")
-effect fn tcp_close(stream: Int) -> Result[Unit, String] = _
-
-
-/// False after tcp_close; a peer close is not seen.
-@intrinsic("almide_rt_net_tcp_is_open")
-effect fn tcp_is_open(stream: Int) -> Bool = _
-
+/// False after io.close; a peer close is not seen.
+effect fn tcp_is_open(stream: TcpStream) -> Bool = __os_tcp_is_open(__tcp(stream))
 
 /// Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
-@intrinsic("almide_rt_net_tcp_read_timeout")
-effect fn tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = _
+effect fn tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String] = __os_tcp_read_timeout(
+  __tcp(stream),
+  len,
+  timeout_ms,
+)
 
 /// Sets read/write timeout; <= 0 clears it.
-@intrinsic("almide_rt_net_tcp_set_timeout")
-effect fn tcp_set_timeout(stream: Int, timeout_ms: Int) -> Result[Unit, String] = _
-
+effect fn tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Result[Unit, String] = __os_tcp_set_timeout(__tcp(stream), timeout_ms)
 
 /// Bytes readable now, capped at 65536; 0 if none.
-@intrinsic("almide_rt_net_tcp_available")
-effect fn tcp_available(stream: Int) -> Result[Int, String] = _
+effect fn tcp_available(stream: TcpStream) -> Result[Int, String] = __os_tcp_available(__tcp(stream))
 
-
-/// Listener bound to host:port; err if in use.
-@intrinsic("almide_rt_net_tcp_listen")
+/// A listener bound to host:port; err if in use. Port 0 lets the OS choose.
 @category("Net.listen")
-effect fn tcp_listen(host: String, port: Int) -> Result[Int, String] = _
+effect fn tcp_listen(host: String, port: Int) -> Result[TcpListener, String] = ok(TcpListener(__os_tcp_listen(host, port)!))
 
 /// The port a listener is bound to: the one the OS chose when it listened on port 0.
+@category("Net.listen")
+effect fn tcp_local_port(listener: TcpListener) -> Result[Int, String] = __os_tcp_local_port(__listener(listener))
+
+/// Blocks for the next client; its stream.
+@category("Net.listen")
+effect fn tcp_accept(listener: TcpListener) -> Result[TcpStream, String] = ok(TcpStream(__os_tcp_accept(__listener(listener))!))
+
+
+/// A UDP socket bound to host:port; port 0 lets the OS choose.
+effect fn udp_bind(host: String, port: Int) -> Result[UdpSocket, String] = ok(UdpSocket(__os_udp_bind(host, port)!))
+
+/// The port sock is bound to.
+effect fn udp_local_port(sock: UdpSocket) -> Result[Int, String] = __os_udp_local_port(__udp(sock))
+
+/// Sends data as one datagram to host:port.
+effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Result[Unit, String] = __os_udp_send_to(
+  __udp(sock),
+  data,
+  host,
+  port,
+)
+
+/// Blocks for the next datagram: at most max bytes of it, and its sender.
+effect fn udp_recv_from(sock: UdpSocket, max: Int) -> Result[UdpPacket, String] = {
+  let (data, host, port) = __os_udp_recv_from(__udp(sock), max)!
+  ok(UdpPacket { data: data, host: host, port: port })
+}
+
+
+/// The addresses host resolves to, each once; err if none.
+@category("Net.fetch")
+effect fn lookup_host(host: String) -> Result[List[IpAddr], String] = {
+  let texts = __os_lookup_host(host)!
+  ok(texts |> list.filter_map((t) => parse_ip(t)?))
+}
+
+/// The IP address s spells: dotted IPv4, or IPv6 (`::` and an IPv4 tail allowed).
+@category()
+fn parse_ip(s: String) -> Result[IpAddr, String] =
+  if string.contains(s, ":") then __parse_v6(s) else __parse_v4(s, s)
+
+/// ip as text: dotted IPv4, or the RFC 5952 short IPv6 form.
+@category()
+fn ip_to_string(ip: IpAddr) -> String = match ip {
+  V4(a, b, c, d) => "${a}.${b}.${c}.${d}",
+  V6(gs) => __v6_text(gs),
+}
+
+/// True for 127.0.0.0/8 and ::1.
+@category()
+fn is_loopback(ip: IpAddr) -> Bool = match ip {
+  V4(a, _, _, _) => a == 127,
+  V6(gs) => gs == [0, 0, 0, 0, 0, 0, 0, 1],
+}
+
+
+effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = __os_tcp_read(__tcp(h), max)
+
+effect fn __tcp_stream_write(h: TcpStream, data: Bytes) -> Result[Unit, String] = __os_tcp_write(__tcp(h), data)
+
+effect fn __tcp_stream_close(h: TcpStream) -> Result[Unit, String] = __os_tcp_close(__tcp(h))
+
+@category("Net.listen")
+effect fn __tcp_listener_close(h: TcpListener) -> Result[Unit, String] = __os_tcp_close_listener(__listener(h))
+
+effect fn __udp_socket_close(h: UdpSocket) -> Result[Unit, String] = __os_udp_close(__udp(h))
+
+local fn __tcp(s: TcpStream) -> Int = match s {
+  TcpStream(n) => n
+}
+
+local fn __listener(l: TcpListener) -> Int = match l {
+  TcpListener(n) => n
+}
+
+local fn __udp(u: UdpSocket) -> Int = match u {
+  UdpSocket(n) => n
+}
+
+
+local fn __octet(t: String) -> Int? =
+  if string.len(t) == 0 or string.len(t) > 3 or (string.len(t) > 1 and string.starts_with(t, "0")) then none
+  else match int.parse(t) {
+    ok(n) => if n >= 0 and n <= 255 and string.chars(t) |> list.all((c) => string.contains("0123456789", c)) then some(n) else none,
+    err(_) => none,
+  }
+
+local fn __parse_v4(t: String, whole: String) -> Result[IpAddr, String] = {
+  let parts = string.split(t, ".") |> list.map((p) => __octet(p))
+  match parts {
+    [some(a), some(b), some(c), some(d)] => ok(V4(a, b, c, d)),
+    _ => err("net.parse_ip: not an IP address: \"${whole}\""),
+  }
+}
+
+local fn __group(t: String) -> Int? =
+  if string.len(t) == 0 or string.len(t) > 4 then none
+  else if string.chars(string.to_lower(t)) |> list.all((c) => string.contains("0123456789abcdef", c)) then int.from_hex(t)?
+  else none
+
+
+
+local fn __v6_side(t: String) -> List[Int?] =
+  if t == "" then []
+  else {
+    let parts = string.split(t, ":")
+    let last = list.get(parts, list.len(parts) - 1) ?? ""
+    if string.contains(last, ".") then
+      match __parse_v4(last, last) {
+        ok(V4(a, b, c, d)) => (list.take(parts, list.len(parts) - 1) |> list.map((p) => __group(p))) + [some(a * 256 + b), some(c * 256 + d)],
+        _ => [none],
+      }
+    else parts |> list.map((p) => __group(p))
+  }
+
+local fn __parse_v6(s: String) -> Result[IpAddr, String] = {
+  let bad = err("net.parse_ip: not an IP address: \"${s}\"")
+  let halves = string.split(s, "::")
+  match halves {
+    [whole] => {
+      let gs = __v6_side(whole)
+      if list.len(gs) == 8 and gs |> list.all((g) => g != none) then ok(V6(gs |> list.filter_map((g) => g))) else bad
+    },
+    [head, tail] => {
+      let h = __v6_side(head)
+      let t = __v6_side(tail)
+      let n = list.len(h) + list.len(t)
+      if n > 7 or not (h + t |> list.all((g) => g != none)) then bad
+      else ok(V6((h |> list.filter_map((g) => g)) + list.repeat(0, 8 - n) + (t |> list.filter_map((g) => g))))
+    },
+    _ => bad,
+  }
+}
+
+
+
+local fn __v6_text(gs: List[Int]) -> String = {
+  let hex = gs |> list.map((g) => string.to_lower(int.to_hex(g)))
+  let (start, len) = __zero_run(gs, 0, -1, 0, -1, 0)
+  if len < 2 then string.join(hex, ":")
+  else string.join(list.take(hex, start), ":") + "::" + string.join(list.drop(hex, start + len), ":")
+}
+
+
+
+local fn __zero_run(gs: List[Int], i: Int, cs: Int, cl: Int, bs: Int, bl: Int) -> (Int, Int) =
+  if i >= list.len(gs) then (if cl > bl then (cs, cl) else (bs, bl))
+  else if (list.get(gs, i) ?? 1) == 0 then
+    (if cl == 0 then __zero_run(gs, i + 1, i, 1, bs, bl) else __zero_run(gs, i + 1, cs, cl + 1, bs, bl))
+  else if cl > bl then __zero_run(gs, i + 1, -1, 0, cs, cl)
+  else __zero_run(gs, i + 1, -1, 0, bs, bl)
+
+
+@intrinsic("almide_rt_net_tcp_connect")
+@category("Net.fetch")
+effect fn __os_tcp_connect(host: String, port: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net_tcp_read")
+effect fn __os_tcp_read(stream: Int, len: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_net_tcp_write")
+effect fn __os_tcp_write(stream: Int, data: Bytes) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net_tcp_close")
+effect fn __os_tcp_close(stream: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net_tcp_is_open")
+effect fn __os_tcp_is_open(stream: Int) -> Bool = _
+
+@intrinsic("almide_rt_net_tcp_read_timeout")
+effect fn __os_tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_net_tcp_set_timeout")
+effect fn __os_tcp_set_timeout(stream: Int, timeout_ms: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net_tcp_available")
+effect fn __os_tcp_available(stream: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net_tcp_listen")
+@category("Net.listen")
+effect fn __os_tcp_listen(host: String, port: Int) -> Result[Int, String] = _
+
 @intrinsic("almide_rt_net_tcp_local_port")
 @category("Net.listen")
-effect fn tcp_local_port(listener: Int) -> Result[Int, String] = _
+effect fn __os_tcp_local_port(listener: Int) -> Result[Int, String] = _
 
-/// Blocks for the next client; its stream handle.
 @intrinsic("almide_rt_net_tcp_accept")
 @category("Net.listen")
-effect fn tcp_accept(listener: Int) -> Result[Int, String] = _
+effect fn __os_tcp_accept(listener: Int) -> Result[Int, String] = _
 
-/// Stops listening; closing twice is ok.
 @intrinsic("almide_rt_net_tcp_close_listener")
 @category("Net.listen")
-effect fn tcp_close_listener(listener: Int) -> Result[Unit, String] = _
+effect fn __os_tcp_close_listener(listener: Int) -> Result[Unit, String] = _
 
+@intrinsic("almide_rt_net_udp_bind")
+effect fn __os_udp_bind(host: String, port: Int) -> Result[Int, String] = _
 
-/// Stream socket connected to the listener at path; its descriptor.
-@intrinsic("almide_rt_net_unix_connect")
+@intrinsic("almide_rt_net_udp_local_port")
+effect fn __os_udp_local_port(sock: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net_udp_send_to")
+effect fn __os_udp_send_to(sock: Int, data: Bytes, host: String, port: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net_udp_recv_from")
+effect fn __os_udp_recv_from(sock: Int, max: Int) -> Result[(Bytes, String, Int), String] = _
+
+@intrinsic("almide_rt_net_udp_close")
+effect fn __os_udp_close(sock: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net_lookup_host")
 @category("Net.fetch")
-effect fn unix_connect(path: String) -> Result[Int, String] = _
-
-/// Listener bound at path, which must not exist yet.
-@intrinsic("almide_rt_net_unix_listen")
-@category("Net.listen")
-effect fn unix_listen(path: String) -> Result[Int, String] = _
-
-/// Blocks for the next connection; its descriptor.
-@intrinsic("almide_rt_net_unix_accept")
-@category("Net.listen")
-effect fn unix_accept(listener: Int) -> Result[Int, String] = _
-
-/// Sends all of data, the descriptors fds riding with its first byte.
-@intrinsic("almide_rt_net_unix_send")
-effect fn unix_send(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = _
-
-/// Up to max bytes, blocking; empty once the peer closed.
-@intrinsic("almide_rt_net_unix_recv")
-effect fn unix_recv(sock: Int, max: Int) -> Result[Bytes, String] = _
-
-/// Descriptors received on sock and not yet taken, oldest first.
-@intrinsic("almide_rt_net_unix_take_fds")
-effect fn unix_take_fds(sock: Int) -> List[Int] = _
-
-/// True if fd is readable within timeout_ms; < 0 waits forever.
-@intrinsic("almide_rt_net_unix_poll")
-effect fn unix_poll(fd: Int, timeout_ms: Int) -> Result[Bool, String] = _
-
-/// The fds readable within timeout_ms, in order; < 0 waits for one.
-@intrinsic("almide_rt_net_unix_wait")
-effect fn unix_wait(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = _
-
-/// Closes a socket, listener or received descriptor.
-@intrinsic("almide_rt_net_unix_close")
-effect fn unix_close(fd: Int) -> Result[Unit, String] = _
-
-
-/// New zero-filled unnamed file of size bytes; its descriptor.
-@intrinsic("almide_rt_net_shm_create")
-effect fn shm_create(size: Int) -> Result[Int, String] = _
-
-/// Grows or shrinks the file fd to size bytes.
-@intrinsic("almide_rt_net_shm_resize")
-effect fn shm_resize(fd: Int, size: Int) -> Result[Unit, String] = _
-
-/// Writes data into fd at byte offset.
-@intrinsic("almide_rt_net_shm_write")
-effect fn shm_write(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = _
-
-/// Up to len bytes of fd from offset; fewer at its end.
-@intrinsic("almide_rt_net_shm_read")
-effect fn shm_read(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = _
+effect fn __os_lookup_host(host: String) -> Result[List[String], String] = _
 "#;
 pub const SRC_NET_WASM: &str = r#"
 
@@ -29950,8 +30125,6 @@ effect fn __net_connect(host: String, port: String) -> Result[String, String] = 
 
 effect fn __net_read(stream: String, len: String) -> Result[Bytes, String] = _
 
-effect fn __net_read_exact(stream: String, len: String) -> Result[Bytes, String] = _
-
 
 effect fn __net_read_timeout(stream: String, len_ms: String) -> Result[Bytes, String] = _
 
@@ -29971,209 +30144,77 @@ effect fn __net_local_port(listener: String, unused: String) -> Result[String, S
 
 fn __net_is_open(stream: String, unused: String) -> Result[String, String] = _
 
-@implements("net.tcp_listen")
+@implements("net.__os_tcp_listen")
 effect fn __net_tcp_listen_impl(host: String, port: Int) -> Result[Int, String] = {
   let t = __net_listen(host, int.to_string(port))!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_accept")
+@implements("net.__os_tcp_accept")
 effect fn __net_tcp_accept_impl(listener: Int) -> Result[Int, String] = {
   let t = __net_accept(int.to_string(listener), "")!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_connect")
+@implements("net.__os_tcp_connect")
 effect fn __net_tcp_connect_impl(host: String, port: Int) -> Result[Int, String] = {
   let t = __net_connect(host, int.to_string(port))!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_local_port")
+@implements("net.__os_tcp_local_port")
 effect fn __net_tcp_local_port_impl(listener: Int) -> Result[Int, String] = {
   let t = __net_local_port(int.to_string(listener), "")!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_read")
+@implements("net.__os_tcp_read")
 effect fn __net_tcp_read_impl(stream: Int, len: Int) -> Result[Bytes, String] = __net_read(
   int.to_string(stream),
   int.to_string(len),
 )
 
-@implements("net.tcp_read_exact")
-effect fn __net_tcp_read_exact_impl(stream: Int, len: Int) -> Result[Bytes, String] = __net_read_exact(
-  int.to_string(stream),
-  int.to_string(len),
-)
-
-@implements("net.tcp_read_timeout")
+@implements("net.__os_tcp_read_timeout")
 effect fn __net_tcp_read_timeout_impl(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = __net_read_timeout(
   int.to_string(stream),
   "${len}\n${timeout_ms}",
 )
 
-@implements("net.tcp_write")
+@implements("net.__os_tcp_write")
 effect fn __net_tcp_write_impl(stream: Int, data: Bytes) -> Result[Unit, String] = {
   let _ = __net_write(int.to_string(stream), data)!
   ok(())
 }
 
-@implements("net.tcp_available")
+@implements("net.__os_tcp_available")
 effect fn __net_tcp_available_impl(stream: Int) -> Result[Int, String] = {
   let t = __net_available(int.to_string(stream), "")!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_set_timeout")
+@implements("net.__os_tcp_set_timeout")
 effect fn __net_tcp_set_timeout_impl(stream: Int, timeout_ms: Int) -> Result[Unit, String] = {
   let _ = __net_set_timeout(int.to_string(stream), int.to_string(timeout_ms))!
   ok(())
 }
 
-@implements("net.tcp_close")
+@implements("net.__os_tcp_close")
 effect fn __net_tcp_close_impl(stream: Int) -> Result[Unit, String] = {
   let _ = __net_close(int.to_string(stream), "")!
   ok(())
 }
 
-@implements("net.tcp_close_listener")
+@implements("net.__os_tcp_close_listener")
 effect fn __net_tcp_close_listener_impl(listener: Int) -> Result[Unit, String] = {
   let _ = __net_close_listener(int.to_string(listener), "")!
   ok(())
 }
 
-@implements("net.tcp_is_open")
+@implements("net.__os_tcp_is_open")
 fn __net_tcp_is_open_impl(stream: Int) -> Bool = match __net_is_open(int.to_string(stream), "") {
   ok("1") => true,
   _ => false,
 }
-
-
-
-
-
-
-
-
-
-
-
-
-effect fn __unix_connect(path: String, unused: String) -> Result[String, String] = _
-
-effect fn __unix_listen(path: String, unused: String) -> Result[String, String] = _
-
-effect fn __unix_accept(listener: String, unused: String) -> Result[String, String] = _
-
-
-effect fn __unix_send(sock_fds: String, data: Bytes) -> Result[String, String] = _
-
-effect fn __unix_recv(sock: String, max: String) -> Result[Bytes, String] = _
-
-
-
-fn __unix_take_fds(sock: String, unused: String) -> Result[String, String] = _
-
-effect fn __unix_poll(fd: String, timeout_ms: String) -> Result[String, String] = _
-
-effect fn __unix_wait(fds: String, timeout_ms: String) -> Result[String, String] = _
-
-effect fn __unix_close(fd: String, unused: String) -> Result[String, String] = _
-
-effect fn __shm_create(size: String, unused: String) -> Result[String, String] = _
-
-effect fn __shm_resize(fd: String, size: String) -> Result[String, String] = _
-
-
-effect fn __shm_write(fd_offset: String, data: Bytes) -> Result[String, String] = _
-
-
-effect fn __shm_read(fd: String, offset_len: String) -> Result[Bytes, String] = _
-
-fn __net_fd_lines(fds: List[Int]) -> String = fds |> list.map((f) => int.to_string(f)) |> list.join("\n")
-
-fn __net_fd_list(t: String) -> List[Int] =
-  if t == "" then []
-  else string.split(t, "\n") |> list.map((x) => int.parse(x) ?? -1)
-
-@implements("net.unix_connect")
-effect fn __net_unix_connect_impl(path: String) -> Result[Int, String] = {
-  let t = __unix_connect(path, "")!
-  ok(int.parse(t) ?? -1)
-}
-
-@implements("net.unix_listen")
-effect fn __net_unix_listen_impl(path: String) -> Result[Int, String] = {
-  let t = __unix_listen(path, "")!
-  ok(int.parse(t) ?? -1)
-}
-
-@implements("net.unix_accept")
-effect fn __net_unix_accept_impl(listener: Int) -> Result[Int, String] = {
-  let t = __unix_accept(int.to_string(listener), "")!
-  ok(int.parse(t) ?? -1)
-}
-
-@implements("net.unix_send")
-effect fn __net_unix_send_impl(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = {
-  let _ = __unix_send(__net_fd_lines([sock] + fds), data)!
-  ok(())
-}
-
-@implements("net.unix_recv")
-effect fn __net_unix_recv_impl(sock: Int, max: Int) -> Result[Bytes, String] = __unix_recv(
-  int.to_string(sock),
-  int.to_string(max),
-)
-
-@implements("net.unix_take_fds")
-fn __net_unix_take_fds_impl(sock: Int) -> List[Int] = match __unix_take_fds(int.to_string(sock), "") {
-  ok(t) => __net_fd_list(t),
-  err(_) => [],
-}
-
-@implements("net.unix_poll")
-effect fn __net_unix_poll_impl(fd: Int, timeout_ms: Int) -> Result[Bool, String] = {
-  let t = __unix_poll(int.to_string(fd), int.to_string(timeout_ms))!
-  ok(t == "1")
-}
-
-@implements("net.unix_wait")
-effect fn __net_unix_wait_impl(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = {
-  let t = __unix_wait(__net_fd_lines(fds), int.to_string(timeout_ms))!
-  ok(__net_fd_list(t))
-}
-
-@implements("net.unix_close")
-effect fn __net_unix_close_impl(fd: Int) -> Result[Unit, String] = {
-  let _ = __unix_close(int.to_string(fd), "")!
-  ok(())
-}
-
-@implements("net.shm_create")
-effect fn __net_shm_create_impl(size: Int) -> Result[Int, String] = {
-  let t = __shm_create(int.to_string(size), "")!
-  ok(int.parse(t) ?? -1)
-}
-
-@implements("net.shm_resize")
-effect fn __net_shm_resize_impl(fd: Int, size: Int) -> Result[Unit, String] = {
-  let _ = __shm_resize(int.to_string(fd), int.to_string(size))!
-  ok(())
-}
-
-@implements("net.shm_write")
-effect fn __net_shm_write_impl(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = {
-  let _ = __shm_write("${fd}\n${offset}", data)!
-  ok(())
-}
-
-@implements("net.shm_read")
-effect fn __net_shm_read_impl(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = __shm_read(
-  int.to_string(fd),
-  "${offset}\n${len}",
-)
 "#;
 pub const SRC_OPTION: &str = r#"
 
@@ -30259,12 +30300,7 @@ fn to_list[A](o: A?) -> List[A] = _
 
 
 /// some(values) if no element is none, else none.
-fn collect[A](xs: List[A?]) -> List[A]? = __collect(xs)
-
-
-
-
-local fn __collect[T](xs: List[T?]) -> List[T]? =
+fn collect[T](xs: List[T?]) -> List[T]? =
   if list.any(xs, (o) => option.is_none(o)) then none
   else some(list.map(
     xs,
@@ -30275,7 +30311,7 @@ local fn __collect[T](xs: List[T?]) -> List[T]? =
   ))
 
 /// some of all f(x), or none; f runs on every x.
-fn collect_map[A, B](xs: List[A], f: (A) -> B?) -> List[B]? = option.collect(list.map(xs, f))
+fn collect_map[T, U](xs: List[T], f: (T) -> U?) -> List[U]? = option.collect(list.map(xs, f))
 
 
 
@@ -31716,22 +31752,22 @@ fn join(base: String, child: String) -> String = {
 fn join_within(base: String, child: String) -> Result[String, String] =
   if stays_inside(child) then ok(join(base, child)) else err("path traversal rejected: " + child)
 
-/// path minus last segment; "" if no slash.
-fn dirname(path: String) -> String = {
-  let parts = string.split(path, "/")
+/// p minus last segment; "" if no slash.
+fn dirname(p: String) -> String = {
+  let parts = string.split(p, "/")
   let n = list.len(parts)
   if n <= 1 then ""
   else {
     let parent_parts = list.take(parts, n - 1)
     let joined = string.join(parent_parts, "/")
 
-    if string.len(joined) == 0 and string.starts_with(path, "/") then "/" else joined
+    if string.len(joined) == 0 and string.starts_with(p, "/") then "/" else joined
   }
 }
 
-/// Last non-empty segment; "" for / or empty path.
-fn basename(path: String) -> String = {
-  let parts = string.split(path, "/")
+/// Last non-empty segment; "" for / or empty p.
+fn basename(p: String) -> String = {
+  let parts = string.split(p, "/")
   let filtered = list.filter(parts, (s) => string.len(s) > 0)
   match list.last(filtered) {
     some(name) => name,
@@ -31740,8 +31776,8 @@ fn basename(path: String) -> String = {
 }
 
 /// After basename's last dot; none if no dot or dotfile.
-fn extension(path: String) -> String? = {
-  let name = basename(path)
+fn extension(p: String) -> String? = {
+  let name = basename(p)
   let parts = string.split(name, ".")
   let n = list.len(parts)
 
@@ -31750,12 +31786,12 @@ fn extension(path: String) -> String? = {
   else if string.starts_with(name, ".") and n == 2 then none else list.last(parts)
 }
 
-/// True when path starts with /.
-fn is_absolute(path: String) -> Bool = string.starts_with(path, "/")
+/// True when p starts with /.
+fn is_absolute(p: String) -> Bool = string.starts_with(p, "/")
 
 /// Basename minus last extension; dotfiles as-is.
-fn stem(path: String) -> String = {
-  let name = basename(path)
+fn stem(p: String) -> String = {
+  let name = basename(p)
   let parts = string.split(name, ".")
   let n = list.len(parts)
 
@@ -31769,9 +31805,9 @@ fn stem(path: String) -> String = {
 }
 
 /// Resolves . and .. lexically; "" becomes ".".
-fn normalize(path: String) -> String = {
-  let absolute = string.starts_with(path, "/")
-  let segments = string.split(path, "/")
+fn normalize(p: String) -> String = {
+  let absolute = string.starts_with(p, "/")
+  let segments = string.split(p, "/")
 
   let cleaned = list.filter(segments, (s) => string.len(s) > 0 and s != ".")
 
@@ -33065,7 +33101,7 @@ fn captures(re: Regex, s: String) -> List[String?]? = regex.__captures(re.patter
 fn captures_all(re: Regex, s: String) -> List[List[String?]] = __matches(regex.__scan(re.pattern, s, false)) |> list.map((m) => m |> list.drop(1) |> list.map((c) => __unmark(c)))
 
 /// s with every regex metacharacter escaped, so it matches itself.
-fn escape(s: String) -> String = string.to_list(s) |> list.map((c) => if string.contains("\\.+*?()|[]{}^$", c) then "\\" + c else c) |> string.join("")
+fn escape(s: String) -> String = string.chars(s) |> list.map((c) => if string.contains("\\.+*?()|[]{}^$", c) then "\\" + c else c) |> string.join("")
 
 
 fn __unmark(c: String) -> String? = if string.starts_with(c, "1") then some(string.drop(c, 1)) else none
@@ -35583,8 +35619,8 @@ fn to_err_option[A, E](r: Result[A, E]) -> E? = _
 
 /// (ok values, err values), each in list order.
 @intrinsic("almide_rt_result_partition")
-@consume(xs)
-fn partition[A, E](xs: List[Result[A, E]]) -> (List[A], List[E]) = _
+@consume(rs)
+fn partition[T, E](rs: List[Result[T, E]]) -> (List[T], List[E]) = _
 
 
 
@@ -35621,9 +35657,9 @@ fn or_else[A, E, F](r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F] = m
   err(e) => f(e),
 }
 
-/// err(err_val) if f fails on ok; err kept.
-fn filter[A, E](r: Result[A, E], f: (A) -> Bool, err_val: E) -> Result[A, E] = match r {
-  ok(v) => if f(v) then ok(v) else err(err_val),
+/// err(err_val) if pred fails on ok; err kept.
+fn filter[A, E](r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E] = match r {
+  ok(v) => if pred(v) then ok(v) else err(err_val),
   err(e) => err(e),
 }
 "#;
@@ -36767,20 +36803,20 @@ fn new[A]() -> Set[A] = _
 @intrinsic("almide_rt_set_from_list")
 fn from_list[A](xs: List[A]) -> Set[A] = _
 
-/// Copy with x appended; unchanged if present.
+/// Copy with value appended; unchanged if present.
 @intrinsic("almide_rt_set_insert")
 @reuse(s)
-fn insert[A](s: Set[A], x: A) -> Set[A] = _
+fn insert[A](s: Set[A], value: A) -> Set[A] = _
 
-/// Copy without x; unchanged if absent.
+/// Copy without value; unchanged if absent.
 @intrinsic("almide_rt_set_remove")
 @reuse(s)
-fn remove[A](s: Set[A], x: A) -> Set[A] = _
+fn remove[A](s: Set[A], value: A) -> Set[A] = _
 
-/// true when x is a member.
+/// true when value is a member.
 @intrinsic("almide_rt_set_contains")
-@borrow_ref(x)
-fn contains[A](s: Set[A], x: A) -> Bool = _
+@borrow_ref(value)
+fn contains[A](s: Set[A], value: A) -> Bool = _
 
 /// Member count; 0 for an empty set.
 @intrinsic("almide_rt_set_len")
@@ -38314,9 +38350,9 @@ fn len(s: String) -> Int = _
 @intrinsic("almide_rt_string_len")
 fn length(s: String) -> Int = _
 
-/// needle occurs in s; true for empty needle.
+/// sub occurs in s; true for empty sub.
 @intrinsic("almide_rt_string_contains")
-fn contains(s: String, needle: String) -> Bool = _
+fn contains(s: String, sub: String) -> Bool = _
 
 /// s begins with prefix; "" always matches.
 @intrinsic("almide_rt_string_starts_with")
@@ -38335,9 +38371,9 @@ fn slice(s: String, start: Int, end: Int = 9223372036854775807) -> String = _
 @intrinsic("almide_rt_string_byte_slice")
 fn byte_slice(s: String, start: Int, end: Int) -> String? = _
 
-/// Left-padded to n chars with fill; never truncates.
+/// Left-padded to n chars with ch; never truncates.
 @intrinsic("almide_rt_string_pad_left")
-fn pad_start(s: String, n: Int, fill: String) -> String = _
+fn pad_start(s: String, n: Int, ch: String) -> String = _
 
 /// UTF-8 bytes of s as Ints 0..255.
 @intrinsic("almide_rt_string_to_bytes")
@@ -38369,7 +38405,7 @@ fn lines(s: String) -> List[String] = _
 
 /// Each codepoint as a one-char string.
 @intrinsic("almide_rt_string_chars")
-fn to_list(s: String) -> List[String] = _
+fn chars(s: String) -> List[String] = _
 
 /// Codepoint index of first needle, or none.
 @intrinsic("almide_rt_string_index_of")
@@ -38407,22 +38443,17 @@ fn is_upper(s: String) -> Bool = _
 @intrinsic("almide_rt_string_is_lower")
 fn is_lower(s: String) -> Bool = _
 
-/// Scalar value of s when s is exactly one codepoint; none otherwise.
+/// Scalar value of first char; none if s empty.
 @intrinsic("almide_rt_string_codepoint")
-fn to_codepoint(s: String) -> Int? = _
+fn codepoint(s: String) -> Int? = _
 
-/// One-char string of n; none if n is not a Unicode scalar value.
-fn from_codepoint(n: Int) -> String? =
-  if n < 0 or n > 1114111 or (n >= 55296 and n <= 57343) then none
-  else some(string.__from_codepoint(n))
+/// One-char string; "" if n is not a scalar.
+@intrinsic("almide_rt_string_from_codepoint")
+fn from_codepoint(n: Int) -> String = _
 
-
-@intrinsic("almide_rt_string___from_codepoint")
-fn __from_codepoint(n: Int) -> String = _
-
-/// Right-padded to n chars with fill; never truncates.
+/// Right-padded to n chars with ch; never truncates.
 @intrinsic("almide_rt_string_pad_right")
-fn pad_end(s: String, n: Int, fill: String) -> String = _
+fn pad_end(s: String, n: Int, ch: String) -> String = _
 
 /// s without leading whitespace.
 @intrinsic("almide_rt_string_trim_start")
@@ -38432,12 +38463,9 @@ fn trim_start(s: String) -> String = _
 @intrinsic("almide_rt_string_trim_end")
 fn trim_end(s: String) -> String = _
 
-/// Non-overlapping needle count; len+1 if needle empty.
-@intrinsic("almide_rt_string_count_matches")
-fn count_matches(s: String, needle: String) -> Int = _
-
-/// Number of characters for which f is true.
-fn count(s: String, f: (String) -> Bool) -> Int = list.count(string.to_list(s), f)
+/// Non-overlapping sub count; len+1 if sub empty.
+@intrinsic("almide_rt_string_count")
+fn count(s: String, sub: String) -> Int = _
 
 /// True only for ""; " " is not empty.
 @intrinsic("almide_rt_string_is_empty")
@@ -38492,18 +38520,9 @@ fn drop_end(s: String, n: Int) -> String = _
 fn run_length_encode(s: String) -> List[(String, Int)] = _
 
 
-/// Appends x to s in place.
+/// Appends suffix to s in place.
 @intrinsic("almide_rt_string_push")
-fn push(mut s: String, x: String) -> Unit = _
-
-/// Removes and returns the last character; none if s is empty.
-fn pop(mut s: String) -> String? = {
-  let popped = string.last(s)
-  if string.len(s) > 0 then {
-    s = string.drop_end(s, 1)
-  } else ()
-  popped
-}
+fn push(mut s: String, suffix: String) -> Unit = _
 
 /// Empties s in place.
 @intrinsic("almide_rt_string_clear")
@@ -38525,16 +38544,16 @@ else if cp < 2048 then 2
 else if cp < 65536 then 3 else 4
 
 /// UTF-8 byte count (string.len counts codepoints).
-fn byte_len(s: String) -> Int = string.to_list(s) |> list.fold(
+fn byte_len(s: String) -> Int = string.chars(s) |> list.fold(
   0,
-  (n, c) => n + utf8_width(string.to_codepoint(c) ?? 0),
+  (n, c) => n + utf8_width(string.codepoint(c) ?? 0),
 )
 
 local fn utf16_units(cp: Int) -> List[Int] = if cp < 65536 then [cp]
 else [55296 + (cp - 65536) / 1024, 56320 + (cp - 65536) % 1024]
 
 /// UTF-16 code units; a codepoint past U+FFFF is a surrogate pair.
-fn to_utf16(s: String) -> List[Int] = string.to_list(s) |> list.flat_map((c) => utf16_units(string.to_codepoint(c) ?? 0))
+fn to_utf16(s: String) -> List[Int] = string.chars(s) |> list.flat_map((c) => utf16_units(string.codepoint(c) ?? 0))
 
 local fn utf16_decode(xs: List[Int], i: Int, acc: List[String]) -> Result[String, String] = match list.get(
   xs,
@@ -38546,16 +38565,12 @@ local fn utf16_decode(xs: List[Int], i: Int, acc: List[String]) -> Result[String
     some(lo) => if lo >= 56320 and lo <= 57343 then utf16_decode(
       xs,
       i + 2,
-      [
-        (string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320)) ?? "")
-      ] + acc,
+      [string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320))] + acc,
     )
     else err("string.from_utf16: unpaired surrogate at ${i}"),
     none => err("string.from_utf16: unpaired surrogate at ${i}"),
   } else if u >= 56320 and u <= 57343 then err("string.from_utf16: unpaired surrogate at ${i}")
-  else utf16_decode(xs, i + 1, [
-    (string.from_codepoint(u) ?? "")
-  ] + acc),
+  else utf16_decode(xs, i + 1, [string.from_codepoint(u)] + acc),
 }
 
 /// String from UTF-16 code units; err on an unpaired surrogate or a unit outside 0..65535.
@@ -38563,12 +38578,12 @@ fn from_utf16(xs: List[Int]) -> Result[String, String] = utf16_decode(xs, 0, [])
 
 /// The characters of s for which f is true.
 fn filter(s: String, f: (String) -> Bool) -> String = string.join(
-  list.filter(string.to_list(s), f),
+  list.filter(string.chars(s), f),
   "",
 )
 
 /// f folded over the characters of s, left to right.
-fn fold[B](s: String, init: B, f: (B, String) -> B) -> B = list.fold(string.to_list(s), init, f)
+fn fold[B](s: String, init: B, f: (B, String) -> B) -> B = list.fold(string.chars(s), init, f)
 
 /// s with x inserted before character i; i outside 0..=len aborts.
 fn insert(s: String, i: Int, x: String) -> String = {
@@ -38591,51 +38606,47 @@ fn new() -> String = ""
 fn from_list(xs: List[String]) -> String = string.join(xs, "")
 
 /// (index, character) pairs from 0.
-fn enumerate(s: String) -> List[(Int, String)] = list.enumerate(string.to_list(s))
+fn enumerate(s: String) -> List[(Int, String)] = list.enumerate(string.chars(s))
 
 /// Characters paired with ys; stops at the shorter.
-fn zip[B](s: String, ys: List[B]) -> List[(String, B)] = list.zip(string.to_list(s), ys)
+fn zip[B](s: String, ys: List[B]) -> List[(String, B)] = list.zip(string.chars(s), ys)
 
 /// f over characters paired with ys; stops at the shorter.
 fn zip_with[B, C](s: String, ys: List[B], f: (String, B) -> C) -> List[C] = list.zip_with(
-  string.to_list(s),
+  string.chars(s),
   ys,
   f,
 )
 
 /// The some results of f over the characters, in order.
-fn filter_map[B](s: String, f: (String) -> B?) -> List[B] = list.filter_map(string.to_list(s), f)
+fn filter_map[B](s: String, f: (String) -> B?) -> List[B] = list.filter_map(string.chars(s), f)
 
 /// The first some result of f over the characters, or none.
-fn find_map[B](s: String, f: (String) -> B?) -> B? = list.find_map(string.to_list(s), f)
+fn find_map[B](s: String, f: (String) -> B?) -> B? = list.find_map(string.chars(s), f)
 
 /// f folded over the characters from the first; none if s is empty.
-fn reduce(s: String, f: (String, String) -> String) -> String? = list.reduce(string.to_list(s), f)
+fn reduce(s: String, f: (String, String) -> String) -> String? = list.reduce(string.chars(s), f)
 
 /// The running fold over the characters, init excluded.
-fn scan[B](s: String, init: B, f: (B, String) -> B) -> List[B] = list.scan(
-  string.to_list(s),
-  init,
-  f,
-)
+fn scan[B](s: String, init: B, f: (B, String) -> B) -> List[B] = list.scan(string.chars(s), init, f)
 
 /// (characters where f is true, the rest), each in order.
 fn partition(s: String, f: (String) -> Bool) -> (List[String], List[String]) = list.partition(
-  string.to_list(s),
+  string.chars(s),
   f,
 )
 
 /// Characters grouped by f's key, each group in order.
 fn group_by[B](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group_by(
-  string.to_list(s),
+  string.chars(s),
   f,
 )
 
 /// The characters in codepoint order.
-fn sort(s: String) -> List[String] = list.sort(string.to_list(s))
+fn sort(s: String) -> List[String] = list.sort(string.chars(s))
 
 /// The characters ordered by f's key; equal keys keep their order.
-fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.to_list(s), f)
+fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.chars(s), f)
 
 local fn merge_with(xs: List[String], ys: List[String], cmp: (String, String) -> Int, i: Int, j: Int, acc: List[String]) -> List[String] = match (list.get(
   xs,
@@ -38662,21 +38673,21 @@ local fn merge_sort_with(xs: List[String], cmp: (String, String) -> Int) -> List
 
 /// The characters ordered by cmp (negative = first argument first); stable.
 fn sort_with(s: String, cmp: (String, String) -> Int) -> List[String] = merge_sort_with(
-  string.to_list(s),
+  string.chars(s),
   cmp,
 )
 
 /// The smallest character in codepoint order; none if empty.
-fn min(s: String) -> String? = list.min(string.to_list(s))
+fn min(s: String) -> String? = list.min(string.chars(s))
 
 /// The largest character in codepoint order; none if empty.
-fn max(s: String) -> String? = list.max(string.to_list(s))
+fn max(s: String) -> String? = list.max(string.chars(s))
 
 /// The first character with the smallest key; none if empty.
-fn min_by[K](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.to_list(s), f))
+fn min_by[K](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.chars(s), f))
 
 /// The last character with the largest key; none if empty.
-fn max_by[K](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.to_list(s), f))
+fn max_by[K](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.chars(s), f))
 
 local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String) -> Int, want_max: Bool) -> String = match list.get(
   xs,
@@ -38692,40 +38703,40 @@ local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String)
 
 /// The first smallest character by cmp; none if empty.
 fn min_with(s: String, cmp: (String, String) -> Int) -> String? = match string.first(s) {
-  some(c) => some(pick_with(string.to_list(s), 1, c, cmp, false)),
+  some(c) => some(pick_with(string.chars(s), 1, c, cmp, false)),
   none => none,
 }
 
 /// The last largest character by cmp; none if empty.
 fn max_with(s: String, cmp: (String, String) -> Int) -> String? = match string.first(s) {
-  some(c) => some(pick_with(string.to_list(s), 1, c, cmp, true)),
+  some(c) => some(pick_with(string.chars(s), 1, c, cmp, true)),
   none => none,
 }
 
 /// Index of the first character where f is true, or none.
-fn find_index(s: String, f: (String) -> Bool) -> Int? = list.find_index(string.to_list(s), f)
+fn find_index(s: String, f: (String) -> Bool) -> Int? = list.find_index(string.chars(s), f)
 
 /// The longest prefix whose characters all satisfy f.
 fn take_while(s: String, f: (String) -> Bool) -> String = string.join(
-  list.take_while(string.to_list(s), f),
+  list.take_while(string.chars(s), f),
   "",
 )
 
 /// s after the longest prefix whose characters all satisfy f.
 fn drop_while(s: String, f: (String) -> Bool) -> String = string.join(
-  list.drop_while(string.to_list(s), f),
+  list.drop_while(string.chars(s), f),
   "",
 )
 
 /// Runs of n characters, the last may be shorter; n <= 0 aborts.
 fn chunk(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.chunk: size must be positive, got ${n}")
-  else list.chunk(string.to_list(s), n) |> list.map((cs) => string.join(cs, ""))
+  else list.chunk(string.chars(s), n) |> list.map((cs) => string.join(cs, ""))
 
 /// Every run of n consecutive characters; [] if n > len; n <= 0 aborts.
 fn window(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.window: size must be positive, got ${n}")
-  else list.window(string.to_list(s), n) |> list.map((cs) => string.join(cs, ""))
+  else list.window(string.chars(s), n) |> list.map((cs) => string.join(cs, ""))
 
 /// (first n characters, the rest); n past the end gives (s, ""); n < 0 aborts.
 fn split_at(s: String, n: Int) -> (String, String) =
@@ -38733,17 +38744,17 @@ fn split_at(s: String, n: Int) -> (String, String) =
   else (string.take(s, n), string.drop(s, n))
 
 /// s with each run of equal adjacent characters collapsed to one.
-fn dedup(s: String) -> String = string.join(list.dedup(string.to_list(s)), "")
+fn dedup(s: String) -> String = string.join(list.dedup(string.chars(s)), "")
 
 /// The characters of s with sep between each pair.
-fn intersperse(s: String, sep: String) -> String = string.join(string.to_list(s), sep)
+fn intersperse(s: String, sep: String) -> String = string.join(string.chars(s), sep)
 
 /// The first occurrence of each character, in order.
-fn unique(s: String) -> String = string.join(list.unique(string.to_list(s)), "")
+fn unique(s: String) -> String = string.join(list.unique(string.chars(s)), "")
 
 /// The first character of each key f gives, in order.
 fn unique_by[K](s: String, f: (String) -> K) -> String = string.join(
-  list.unique_by(string.to_list(s), f),
+  list.unique_by(string.chars(s), f),
   "",
 )
 
@@ -38989,16 +39000,10 @@ fn __sco_none() -> Int? = none
 
 fn __sco_some(i: Int) -> Int? = some(i)
 
-
-fn __scp_width(b0: Int) -> Int = if b0 < 128 then 1
-else if b0 < 224 then 2
-else if b0 < 240 then 3 else 4
-
 fn string_codepoint(s: String) -> Int? = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
-  let one = blen > 0 and blen == __scp_width(prim.load8(h + 12))
-  let cp = if one then __scp_decode(h + 12) else 0 - 1
+  let cp = if blen == 0 then 0 - 1 else __scp_decode(h + 12)
   if cp < 0 then __sco_none() else __sco_some(cp)
 }
 "#;
@@ -40149,7 +40154,7 @@ else {
 }
 
 fn string_run_length_encode(s: String) -> List[(String, Int)] = {
-  let cs = string.to_list(s)
+  let cs = string.chars(s)
   let ch = prim.handle(cs)
   let n = prim.load32(ch + 4)
   if n == 0 then {
@@ -41270,7 +41275,7 @@ pub const SRC_TESTING: &str = r#"
 
 
 /// Fails unless f, run alone in a child, aborts with text containing expected.
-fn assert_aborts[A](expected: String, f: () -> A) -> Unit = panic("testing.assert_aborts runs only as a direct call in a test block (E099)")
+fn assert_aborts[T](expected: String, f: () -> T) -> Unit = panic("testing.assert_aborts runs only as a direct call in a test block (E099)")
 
 
 
@@ -41341,35 +41346,33 @@ fn assert_contains(haystack: String, needle: String) -> Unit = _
 @intrinsic("almide_rt_test_assert_approx")
 fn assert_approx(a: Float, b: Float, tolerance: Float) -> Unit = _
 
-
-
-
-
 /// Fails unless a > b; equal fails.
-fn assert_gt[A](a: A, b: A) -> Unit = if a > b then () else panic("assert_gt failed")
+@intrinsic("almide_rt_test_assert_gt")
+fn assert_gt(a: Int, b: Int) -> Unit = _
 
 /// Fails unless a < b; equal fails.
-fn assert_lt[A](a: A, b: A) -> Unit = if a < b then () else panic("assert_lt failed")
+@intrinsic("almide_rt_test_assert_lt")
+fn assert_lt(a: Int, b: Int) -> Unit = _
 
-/// Fails when o is none.
+/// Fails when opt is none.
 @intrinsic("almide_rt_test_assert_some")
-@borrow_ref(o)
-fn assert_some[A](o: A?) -> Unit = _
+@borrow_ref(opt)
+fn assert_some[A](opt: A?) -> Unit = _
 
-/// Fails when r is an err.
+/// Fails when result is an err.
 @intrinsic("almide_rt_test_assert_ok")
-@borrow_ref(r)
-fn assert_ok[A, B](r: Result[A, B]) -> Unit = _
+@borrow_ref(result)
+fn assert_ok[A, B](result: Result[A, B]) -> Unit = _
 
-/// Fails when o is some.
+/// Fails when opt is some.
 @intrinsic("almide_rt_test_assert_none")
-@borrow_ref(o)
-fn assert_none[A](o: A?) -> Unit = _
+@borrow_ref(opt)
+fn assert_none[A](opt: A?) -> Unit = _
 
-/// Fails when r is ok.
+/// Fails when result is ok.
 @intrinsic("almide_rt_test_assert_err")
-@borrow_ref(r)
-fn assert_err[A, B](r: Result[A, B]) -> Unit = _
+@borrow_ref(result)
+fn assert_err[A, B](result: Result[A, B]) -> Unit = _
 
 
 
@@ -41394,6 +41397,10 @@ pub const SRC_TESTING_ASSERT: &str = r#"
 
 
 
+
+fn testing_assert_gt(a: Int, b: Int) -> Unit = if a > b then () else prim.die(prim.handle("assert_gt failed\n"))
+
+fn testing_assert_lt(a: Int, b: Int) -> Unit = if a < b then () else prim.die(prim.handle("assert_lt failed\n"))
 
 fn testing_assert_approx(a: Float, b: Float, epsilon: Float) -> Unit =
   if float.abs(a - b) < epsilon then () else prim.die(prim.handle("assert_approx failed\n"))
@@ -42911,6 +42918,238 @@ fn uint8_to_int8_saturating(x: UInt8) -> Int8 = {
   int.to_int8_saturating(i)
 }
 "#;
+pub const SRC_UNIX: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// An open descriptor: a socket, a listener, a received descriptor or a shared-memory file.
+mod type Fd: Read, Write, Close = Int
+
+
+/// Stream socket connected to the listener at path.
+@category("Net.fetch")
+effect fn connect(path: String) -> Result[Fd, String] = ok(Fd(__os_connect(path)!))
+
+/// Listener bound at path, which must not exist yet.
+@category("Net.listen")
+effect fn listen(path: String) -> Result[Fd, String] = ok(Fd(__os_listen(path)!))
+
+/// Blocks for the next connection on listener.
+@category("Net.listen")
+effect fn accept(listener: Fd) -> Result[Fd, String] = ok(Fd(__os_accept(__raw(listener))!))
+
+/// Sends all of data, the descriptors fds riding with its first byte.
+effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Result[Unit, String] =
+  __os_send(__raw(sock), data, fds |> list.map((f) => __raw(f)))
+
+/// Descriptors received on sock and not yet taken, oldest first.
+effect fn take_fds(sock: Fd) -> List[Fd] = __os_take_fds(__raw(sock)) |> list.map((f) => Fd(f))
+
+/// The descriptors of xs readable within timeout_ms, in order; < 0 waits for one, 0 only checks.
+effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = ok(
+  __os_wait(xs |> list.map((f) => __raw(f)), timeout_ms)! |> list.map((f) => Fd(f)),
+)
+
+
+/// New zero-filled unnamed file of size bytes.
+effect fn shm_create(size: Int) -> Result[Fd, String] = ok(Fd(__os_shm_create(size)!))
+
+/// Grows or shrinks the file fd to size bytes.
+effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = __os_shm_resize(__raw(fd), size)
+
+/// Writes data into fd at offset; a negative offset or a write past the end aborts (shm_resize first).
+effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = match __os_shm_write(__raw(fd), offset, data) {
+  ok(_) => ok(()),
+  err(e) => if string.starts_with(e, "unix.shm_write:") then panic(e) else err(e),
+}
+
+/// Up to len bytes of fd from offset; fewer at its end.
+effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = __os_shm_read(__raw(fd), offset, len)
+
+
+
+effect fn __fd_read(h: Fd, max: Int) -> Result[Bytes, String] = __os_recv(__raw(h), max)
+
+effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = __os_send(__raw(h), data, [])
+
+effect fn __fd_close(h: Fd) -> Result[Unit, String] = __os_close(__raw(h))
+
+local fn __raw(f: Fd) -> Int = match f {
+  Fd(n) => n
+}
+
+
+@intrinsic("almide_rt_unix_connect")
+@category("Net.fetch")
+effect fn __os_connect(path: String) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_unix_listen")
+@category("Net.listen")
+effect fn __os_listen(path: String) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_unix_accept")
+@category("Net.listen")
+effect fn __os_accept(listener: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_unix_send")
+effect fn __os_send(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_unix_recv")
+effect fn __os_recv(sock: Int, max: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_unix_take_fds")
+effect fn __os_take_fds(sock: Int) -> List[Int] = _
+
+@intrinsic("almide_rt_unix_wait")
+effect fn __os_wait(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = _
+
+@intrinsic("almide_rt_unix_close")
+effect fn __os_close(fd: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_unix_shm_create")
+effect fn __os_shm_create(size: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_unix_shm_resize")
+effect fn __os_shm_resize(fd: Int, size: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_unix_shm_write")
+effect fn __os_shm_write(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_unix_shm_read")
+effect fn __os_shm_read(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = _
+"#;
+pub const SRC_UNIX_WASM: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+effect fn __unix_connect(path: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_listen(path: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_accept(listener: String, unused: String) -> Result[String, String] = _
+
+
+effect fn __unix_send(sock_fds: String, data: Bytes) -> Result[String, String] = _
+
+effect fn __unix_recv(sock: String, max: String) -> Result[Bytes, String] = _
+
+
+
+fn __unix_take_fds(sock: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_wait(fds: String, timeout_ms: String) -> Result[String, String] = _
+
+effect fn __unix_close(fd: String, unused: String) -> Result[String, String] = _
+
+effect fn __shm_create(size: String, unused: String) -> Result[String, String] = _
+
+effect fn __shm_resize(fd: String, size: String) -> Result[String, String] = _
+
+
+effect fn __shm_write(fd_offset: String, data: Bytes) -> Result[String, String] = _
+
+
+effect fn __shm_read(fd: String, offset_len: String) -> Result[Bytes, String] = _
+
+fn __unix_fd_lines(fds: List[Int]) -> String = fds |> list.map((f) => int.to_string(f)) |> list.join("\n")
+
+fn __unix_fd_list(t: String) -> List[Int] =
+  if t == "" then []
+  else string.split(t, "\n") |> list.map((x) => int.parse(x) ?? -1)
+
+@implements("unix.__os_connect")
+effect fn __unix_impl_connect_impl(path: String) -> Result[Int, String] = {
+  let t = __unix_connect(path, "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_listen")
+effect fn __unix_impl_listen_impl(path: String) -> Result[Int, String] = {
+  let t = __unix_listen(path, "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_accept")
+effect fn __unix_impl_accept_impl(listener: Int) -> Result[Int, String] = {
+  let t = __unix_accept(int.to_string(listener), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_send")
+effect fn __unix_impl_send_impl(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = {
+  let _ = __unix_send(__unix_fd_lines([sock] + fds), data)!
+  ok(())
+}
+
+@implements("unix.__os_recv")
+effect fn __unix_impl_recv_impl(sock: Int, max: Int) -> Result[Bytes, String] = __unix_recv(
+  int.to_string(sock),
+  int.to_string(max),
+)
+
+@implements("unix.__os_take_fds")
+fn __unix_impl_take_fds_impl(sock: Int) -> List[Int] = match __unix_take_fds(int.to_string(sock), "") {
+  ok(t) => __unix_fd_list(t),
+  err(_) => [],
+}
+
+@implements("unix.__os_wait")
+effect fn __unix_impl_wait_impl(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = {
+  let t = __unix_wait(__unix_fd_lines(fds), int.to_string(timeout_ms))!
+  ok(__unix_fd_list(t))
+}
+
+@implements("unix.__os_close")
+effect fn __unix_impl_close_impl(fd: Int) -> Result[Unit, String] = {
+  let _ = __unix_close(int.to_string(fd), "")!
+  ok(())
+}
+
+@implements("unix.__os_shm_create")
+effect fn __unix_impl_shm_create_impl(size: Int) -> Result[Int, String] = {
+  let t = __shm_create(int.to_string(size), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_shm_resize")
+effect fn __unix_impl_shm_resize_impl(fd: Int, size: Int) -> Result[Unit, String] = {
+  let _ = __shm_resize(int.to_string(fd), int.to_string(size))!
+  ok(())
+}
+
+@implements("unix.__os_shm_write")
+effect fn __unix_impl_shm_write_impl(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = {
+  let _ = __shm_write("${fd}\n${offset}", data)!
+  ok(())
+}
+
+@implements("unix.__os_shm_read")
+effect fn __unix_impl_shm_read_impl(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = __shm_read(
+  int.to_string(fd),
+  "${offset}\n${len}",
+)
+"#;
 pub const SRC_URL: &str = r##"
 
 
@@ -42961,7 +43200,7 @@ fn __url_enc_cp(cp: Int) -> String = if cp < 128 then __url_enc_byte(cp)
 else if cp < 2048 then __url_enc_byte(192 + cp / 64) + __url_enc_byte(128 + cp % 64)
 else if cp < 65536 then __url_enc_byte(224 + cp / 4096) + __url_enc_byte(128 + (cp / 64) % 64) + __url_enc_byte(128 + cp % 64) else __url_enc_byte(240 + cp / 262144) + __url_enc_byte(128 + (cp / 4096) % 64) + __url_enc_byte(128 + (cp / 64) % 64) + __url_enc_byte(128 + cp % 64)
 
-fn __url_enc_char(c: String) -> String = match string.to_codepoint(c) {
+fn __url_enc_char(c: String) -> String = match string.codepoint(c) {
   some(cp) => if __url_is_unreserved(cp) then c else __url_enc_cp(cp),
   none => "",
 }
@@ -42973,9 +43212,9 @@ fn __url_enc_char(c: String) -> String = match string.to_codepoint(c) {
 
 
 /// All but A-Za-z0-9-._~ as UTF-8 %XX escapes.
-fn encode_component(s: String) -> String = s |> string.to_list |> list.map((c) => __url_enc_char(c)) |> list.join("")
+fn encode_component(s: String) -> String = s |> string.chars |> list.map((c) => __url_enc_char(c)) |> list.join("")
 
-fn __url_hex_val(c: String) -> Int? = match string.to_codepoint(c) {
+fn __url_hex_val(c: String) -> Int? = match string.codepoint(c) {
   some(cp) => if cp >= 48 and cp <= 57 then some(cp - 48)
   else if cp >= 65 and cp <= 70 then some(cp - 55)
   else if cp >= 97 and cp <= 102 then some(cp - 87) else none,
@@ -43019,19 +43258,14 @@ fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[Stri
   if p >= end then ok(acc)
   else {
     let b0 = __url_pbyte(cs, p)
-    if b0 >= 0 and b0 < 128 then __url_utf8_go(
-      cs,
-      p + 3,
-      end,
-      acc + (string.from_codepoint(b0) ?? ""),
-    )
+    if b0 >= 0 and b0 < 128 then __url_utf8_go(cs, p + 3, end, acc + string.from_codepoint(b0))
     else if b0 >= 194 and b0 <= 223 then {
       let b1 = __url_pbyte(cs, p + 3)
       if p + 6 <= end and __url_cont(b1) then __url_utf8_go(
         cs,
         p + 6,
         end,
-        acc + (string.from_codepoint((b0 - 192) * 64 + (b1 - 128)) ?? ""),
+        acc + string.from_codepoint((b0 - 192) * 64 + (b1 - 128)),
       )
       else err("url.decode_component: invalid UTF-8 in percent data")
     } else if b0 >= 224 and b0 <= 239 then {
@@ -43043,7 +43277,7 @@ fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[Stri
         cs,
         p + 9,
         end,
-        acc + (string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)) ?? ""),
+        acc + string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)),
       )
       else err("url.decode_component: invalid UTF-8 in percent data")
     } else if b0 >= 240 and b0 <= 244 then {
@@ -43056,7 +43290,7 @@ fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[Stri
         cs,
         p + 12,
         end,
-        acc + (string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)) ?? ""),
+        acc + string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)),
       )
       else err("url.decode_component: invalid UTF-8 in percent data")
     } else err("url.decode_component: invalid UTF-8 in percent data")
@@ -43087,7 +43321,7 @@ fn __url_dec_go(cs: List[String], i: Int, n: Int, acc: String) -> Result[String,
 
 /// Percent-decoded s; err on bad escape/UTF-8; + kept.
 fn decode_component(s: String) -> Result[String, String] = {
-  let cs = string.to_list(s)
+  let cs = string.chars(s)
   __url_dec_go(cs, 0, list.len(cs), "")
 }
 
@@ -43096,7 +43330,7 @@ fn decode_component(s: String) -> Result[String, String] = {
 
 fn __url_host_char(cp: Int) -> Bool = __url_is_unreserved(cp) or cp == 33 or cp == 36 or cp == 38 or cp == 39 or cp == 40 or cp == 41 or cp == 42 or cp == 43 or cp == 44 or cp == 59 or cp == 61
 
-fn __url_host_ok(host: String) -> Bool = host |> string.to_list |> list.all((c) => match string.to_codepoint(c) {
+fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) => match string.codepoint(c) {
   some(cp) => __url_host_char(cp),
   none => false,
 })
@@ -43105,7 +43339,7 @@ fn __url_host_ok(host: String) -> Bool = host |> string.to_list |> list.all((c) 
 
 
 
-fn __url_cp(c: String) -> Int = string.to_codepoint(c) ?? 0
+fn __url_cp(c: String) -> Int = string.codepoint(c) ?? 0
 
 fn __url_first_kept(cs: List[String], i: Int) -> Int =
   if i < list.len(cs) and __url_cp(list.get(cs, i) ?? "") <= 32 then __url_first_kept(cs, i + 1)
@@ -43116,7 +43350,7 @@ fn __url_last_kept(cs: List[String], i: Int) -> Int =
   else i
 
 fn __url_clean(s: String, who: String) -> Result[String, String] = {
-  let cs = string.to_list(s)
+  let cs = string.chars(s)
   let start = __url_first_kept(cs, 0)
   let end = __url_last_kept(cs, list.len(cs))
   let kept = cs |> list.take(end) |> list.drop(start) |> list.filter((c) => c != "\t" and c != "\n" and c != "\r")
@@ -43126,12 +43360,12 @@ fn __url_clean(s: String, who: String) -> Result[String, String] = {
 }
 
 
-fn __url_scheme_ok(t: String) -> Bool = string.len(t) > 0 and string.to_list(t) |> list.enumerate |> list.all(((j, c)) => {
+fn __url_scheme_ok(t: String) -> Bool = string.len(t) > 0 and string.chars(t) |> list.enumerate |> list.all(((j, c)) => {
   let cp = __url_cp(c)
   (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122) or (j > 0 and ((cp >= 48 and cp <= 57) or cp == 43 or cp == 45 or cp == 46))
 })
 
-fn __url_all_digits(t: String) -> Bool = string.len(t) > 0 and string.to_list(t) |> list.all((c) => __url_cp(c) >= 48 and __url_cp(c) <= 57)
+fn __url_all_digits(t: String) -> Bool = string.len(t) > 0 and string.chars(t) |> list.all((c) => __url_cp(c) >= 48 and __url_cp(c) <= 57)
 
 fn __url_hex_digit(c: String) -> Bool = match __url_hex_val(c) {
   some(_) => true,
@@ -43145,7 +43379,7 @@ fn __url_ends_in_number(host: String) -> Bool = {
   let n = list.len(labels)
   let last = if n > 1 and (list.get(labels, n - 1) ?? "") == "" then list.get(labels, n - 2) ?? ""
   else list.get(labels, n - 1) ?? ""
-  __url_all_digits(last) or ((string.starts_with(last, "0x") or string.starts_with(last, "0X")) and string.to_list(string.drop(last, 2)) |> list.all((c) => __url_hex_digit(c)))
+  __url_all_digits(last) or ((string.starts_with(last, "0x") or string.starts_with(last, "0X")) and string.chars(string.drop(last, 2)) |> list.all((c) => __url_hex_digit(c)))
 }
 
 
@@ -43314,14 +43548,14 @@ else query |> string.split("&") |> list.filter((part) => string.len(part) > 0) |
 
 
 /// k=v joined by &, both sides percent-encoded.
-fn build_query(xs: List[(String, String)]) -> String = xs |> list.map(((k, v)) => encode_component(k) + "=" + encode_component(v)) |> list.join("&")
+fn build_query(pairs: List[(String, String)]) -> String = pairs |> list.map(((k, v)) => encode_component(k) + "=" + encode_component(v)) |> list.join("&")
 
 
 
 
 
 /// Like encode_component, but a space becomes +.
-fn encode_form(s: String) -> String = s |> string.to_list |> list.map((c) => if c == " " then "+" else __url_enc_char(c)) |> list.join("")
+fn encode_form(s: String) -> String = s |> string.chars |> list.map((c) => if c == " " then "+" else __url_enc_char(c)) |> list.join("")
 
 
 
@@ -43400,19 +43634,19 @@ fn resolve(base: Url, ref: String) -> Result[Url, String] = match __url_clean(re
 }
 
 
-fn __url_t_pctend(s: String) -> Int = __url_pct_end(string.to_list(s), 1, string.len(s))
+fn __url_t_pctend(s: String) -> Int = __url_pct_end(string.chars(s), 1, string.len(s))
 
-fn __url_t_pbyte(s: String) -> Int = __url_pbyte(string.to_list(s), 0)
+fn __url_t_pbyte(s: String) -> Int = __url_pbyte(string.chars(s), 0)
 
-fn __url_t_utf8(s: String) -> String = match __url_utf8_go(string.to_list(s), 0, string.len(s), "") {
+fn __url_t_utf8(s: String) -> String = match __url_utf8_go(string.chars(s), 0, string.len(s), "") {
   ok(v) => v,
   err(e) => "E:" + e,
 }
 
-fn __url_t_fcp(b: Int) -> String = (string.from_codepoint(b) ?? "")
+fn __url_t_fcp(b: Int) -> String = string.from_codepoint(b)
 
 fn __url_t_dec_nopct(s: String) -> String = match __url_dec_go(
-  string.to_list(s),
+  string.chars(s),
   0,
   string.len(s),
   "",
@@ -43421,10 +43655,102 @@ fn __url_t_dec_nopct(s: String) -> String = match __url_dec_go(
   err(e) => "E:" + e,
 }
 "##;
-pub const SRC_VALUE: &str = r#"/// Wraps xs as an Array Value.
+pub const SRC_UUID: &str = r#"
+
+
+
+
+
+
+import hex
+import random
+
+/// A 128-bit identifier: 16 bytes, ordered from the first byte.
+mod type Uuid = Bytes
+
+/// A random (version 4) Uuid: 122 bits from the OS CSPRNG.
+@category("Rand")
+effect fn v4() -> Uuid = Uuid(__versioned(random.bytes(16), 4))
+
+/// A time-ordered (version 7) Uuid: Unix ms, a counter, random bits; each is greater than the last.
+@category("Time", "Rand")
+effect fn v7() -> Uuid = {
+  let t = __v7_stamp(datetime.now_ms())
+  let ms = int.bshr(t, 12)
+  let seq = int.band(t, 4095)
+  let head = bytes.from_list([
+    __octet(ms, 40),
+    __octet(ms, 32),
+    __octet(ms, 24),
+    __octet(ms, 16),
+    __octet(ms, 8),
+    __octet(ms, 0),
+    int.bshr(seq, 8),
+    int.band(seq, 255),
+  ])
+  Uuid(__versioned(bytes.concat(head, random.bytes(8)), 7))
+}
+
+/// The Uuid s spells: 8-4-4-4-12 hex digits, either case, optionally in {…} or after urn:uuid:.
+fn parse(s: String) -> Result[Uuid, String] = {
+  let body = __unwrapped(s)
+  let groups = string.split(body, "-")
+  let lens = groups |> list.map((g) => string.len(g))
+  if lens != [8, 4, 4, 4, 12] then err("uuid.parse: not an 8-4-4-4-12 UUID: \"${s}\"")
+  else match hex.decode(string.join(groups, "")) {
+    ok(b) => ok(Uuid(b)),
+    err(_) => err("uuid.parse: not an 8-4-4-4-12 UUID: \"${s}\""),
+  }
+}
+
+/// u as 8-4-4-4-12 lowercase hex digits.
+fn to_string(u: Uuid) -> String = {
+  let h = hex.encode(__bytes_of(u))
+  "${string.slice(h, 0, 8)}-${string.slice(h, 8, 12)}-${string.slice(h, 12, 16)}-${string.slice(h, 16, 20)}-${string.slice(h, 20, 32)}"
+}
+
+/// The Uuid of exactly 16 bytes b; err for any other length.
+fn from_bytes(b: Bytes) -> Result[Uuid, String] =
+  if bytes.len(b) == 16 then ok(Uuid(b)) else err("uuid.from_bytes: expected 16 bytes, got ${bytes.len(b)}")
+
+/// The 16 bytes of u.
+fn to_bytes(u: Uuid) -> Bytes = __bytes_of(u)
+
+/// Negative, zero or positive as a orders before, with or after b, byte by byte.
+fn compare(a: Uuid, b: Uuid) -> Int = bytes.compare(__bytes_of(a), __bytes_of(b))
+
+local fn __bytes_of(u: Uuid) -> Bytes = match u {
+  Uuid(b) => b
+}
+
+
+local fn __octet(n: Int, shift: Int) -> Int = int.band(int.bshr(n, shift), 255)
+
+
+
+local fn __versioned(b: Bytes, ver: Int) -> Bytes = {
+  let b6 = bytes.set(b, 6, int.bor(int.band(bytes.get(b, 6) ?? 0, 15), ver * 16))
+  bytes.set(b6, 8, int.bor(int.band(bytes.get(b6, 8) ?? 0, 63), 128))
+}
+
+
+local fn __unwrapped(s: String) -> String =
+  if string.starts_with(s, "{") and string.ends_with(s, "}") then string.slice(s, 1, string.len(s) - 1)
+  else if string.starts_with(string.to_lower(s), "urn:uuid:") then string.drop(s, 9)
+  else s
+
+
+
+
+
+@intrinsic("almide_rt_uuid___v7_stamp")
+@category("Time")
+effect fn __v7_stamp(ms: Int) -> Int = _
+"#;
+pub const SRC_VALUE: &str = r#"/// Wraps items as an Array Value.
 @intrinsic("almide_rt_value_array")
-@reuse(xs)
-fn array(xs: List[Value]) -> Value = _
+@reuse(items)
+fn array(items: List[Value]) -> Value = _
 
 /// Array items; err if v is another kind.
 @intrinsic("almide_rt_value_as_array")
@@ -43467,10 +43793,10 @@ fn merge(a: Value, b: Value) -> Value = _
 @intrinsic("almide_rt_value_null")
 fn null() -> Value = _
 
-/// Wraps the pairs xs as an Object; a repeated key keeps its first position, last value.
+/// Wraps pairs as an Object; a repeated key keeps its first position, last value.
 @intrinsic("almide_rt_value_object")
-@reuse(xs)
-fn object(xs: List[(String, Value)]) -> Value = _
+@reuse(pairs)
+fn object(pairs: List[(String, Value)]) -> Value = _
 
 /// v minus the listed keys; non-objects as-is.
 @intrinsic("almide_rt_value_omit")
@@ -43482,7 +43808,7 @@ fn pick(v: Value, keys: List[String]) -> Value = _
 
 /// Value holding the String s.
 @intrinsic("almide_rt_value_str")
-fn string(s: String) -> Value = _
+fn str(s: String) -> Value = _
 
 
 
@@ -43508,161 +43834,6 @@ fn field(v: Value, key: String) -> Result[Value, String] = _
 /// Object keys in order; [] for non-objects.
 @intrinsic("almide_rt_value_keys")
 fn keys(v: Value) -> List[String] = _
-
-/// Object pairs in order; err if v is another kind.
-@intrinsic("almide_rt_value_as_object")
-fn as_object(v: Value) -> Result[List[(String, Value)], String] = _
-
-
-
-
-
-
-/// Value at key; none if absent or v is not an Object.
-fn get(v: Value, key: String) -> Value? = result.to_option(value.field(v, key))
-
-/// String at key; none if absent or another kind.
-fn get_string(v: Value, key: String) -> String? = match value.get(v, key) {
-  some(x) => result.to_option(value.as_string(x)),
-  none => none,
-}
-
-/// Int at key; none if absent or not an Int (a Float is never truncated).
-fn get_int(v: Value, key: String) -> Int? = match value.get(v, key) {
-  some(x) => result.to_option(value.as_int(x)),
-  none => none,
-}
-
-/// Float at key (an Int widens); none if absent or another kind.
-fn get_float(v: Value, key: String) -> Float? = match value.get(v, key) {
-  some(x) => result.to_option(value.as_float(x)),
-  none => none,
-}
-
-/// Bool at key; none if absent or another kind.
-fn get_bool(v: Value, key: String) -> Bool? = match value.get(v, key) {
-  some(x) => result.to_option(value.as_bool(x)),
-  none => none,
-}
-
-/// Array items at key; none if absent or another kind.
-fn get_array(v: Value, key: String) -> List[Value]? = match value.get(v, key) {
-  some(x) => result.to_option(value.as_array(x)),
-  none => none,
-}
-
-/// Object pairs at key; none if absent or another kind.
-fn get_object(v: Value, key: String) -> List[(String, Value)]? = match value.get(v, key) {
-  some(x) => result.to_option(value.as_object(x)),
-  none => none,
-}
-
-
-
-
-
-
-
-/// A path into a Value: key and index steps from the root.
-mod type Path = List[(Bool, String, Int)]
-
-/// The empty path: the whole value.
-fn root() -> Path = Path([])
-
-/// p extended by the object key name.
-fn key(p: Path, name: String) -> Path = match p {
-  Path(steps) => Path(steps + [(true, name, 0)])
-}
-
-/// p extended by the array index i; a negative i is out of range.
-fn index(p: Path, i: Int) -> Path = match p {
-  Path(steps) => Path(steps + [(false, "", i)])
-}
-
-/// Value at p, or none if a step misses.
-fn get_path(v: Value, p: Path) -> Value? = match p {
-  Path(steps) => __get_steps(v, steps, 0)
-}
-
-/// v with x at p; missing keys are created, a missed index leaves v as is.
-fn set_path(v: Value, p: Path, x: Value) -> Result[Value, String] = match p {
-  Path(steps) => ok(__set_steps(v, steps, 0, x))
-}
-
-/// v minus the entry at p; unchanged if absent; null for the root.
-fn remove_path(v: Value, p: Path) -> Value = match p {
-  Path(steps) => __remove_steps(v, steps, 0)
-}
-
-local fn __step_at(v: Value, step: (Bool, String, Int)) -> Value? = match step {
-  (true, name, _) => value.get(v, name),
-  (false, _, i) => match value.as_array(v) {
-    ok(xs) => list.get(xs, i),
-    err(_) => none,
-  },
-}
-
-local fn __get_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> Value? = match list.get(
-  steps,
-  k,
-) {
-  none => some(v),
-  some(step) => match __step_at(v, step) {
-    some(child) => __get_steps(child, steps, k + 1),
-    none => none,
-  },
-}
-
-local fn __set_steps(v: Value, steps: List[(Bool, String, Int)], k: Int, x: Value) -> Value = match list.get(
-  steps,
-  k,
-) {
-  none => x,
-  some((true, name, _)) => match value.as_object(v) {
-    ok(pairs) => if list.any(pairs, ((pk, _)) => pk == name) then value.object(list.map(
-      pairs,
-      ((pk, pv)) => if pk == name then (pk, __set_steps(pv, steps, k + 1, x))
-      else (pk, pv),
-    ))
-    else value.object(pairs + [
-      (name, __set_steps(value.object([]), steps, k + 1, x))
-    ]),
-    err(_) => value.object([
-      (name, __set_steps(value.object([]), steps, k + 1, x))
-    ]),
-  },
-  some((false, _, i)) => match value.as_array(v) {
-    ok(xs) => match list.get(xs, i) {
-      some(child) => value.array(list.set(xs, i, __set_steps(child, steps, k + 1, x))),
-      none => v,
-    },
-    err(_) => v,
-  },
-}
-
-local fn __remove_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> Value = match list.get(
-  steps,
-  k,
-) {
-  none => value.null(),
-  some((true, name, _)) => match value.as_object(v) {
-    ok(pairs) => value.object(list.filter_map(
-      pairs,
-      ((pk, pv)) => if pk != name then some((pk, pv))
-      else if k + 1 >= list.len(steps) then none
-      else some((pk, __remove_steps(pv, steps, k + 1))),
-    )),
-    err(_) => v,
-  },
-  some((false, _, i)) => match value.as_array(v) {
-    ok(xs) => match list.get(xs, i) {
-      some(child) => if k + 1 >= list.len(steps) then value.array(list.remove_at(xs, i))
-      else value.array(list.set(xs, i, __remove_steps(child, steps, k + 1))),
-      none => v,
-    },
-    err(_) => v,
-  },
-}
 "#;
 pub const SRC_VALUE_CORE: &str = r#"
 
@@ -43955,25 +44126,6 @@ else {
 
 
 
-
-
-
-
-fn __vobj_pairs(v: Value, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
-  if i >= n then acc
-  else {
-    let h = prim.handle(v)
-    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
-    let x: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
-    __vobj_pairs(v, i + 1, n, acc + [(k, x)])
-  }
-
-fn value_as_object(v: Value) -> Result[List[(String, Value)], String] = {
-  let h = prim.handle(v)
-  let tag = prim.load32(h + 4)
-  if tag == 6 then ok(__vobj_pairs(v, 0, prim.load32(h + 8) / 2, []))
-  else err("expected Object, received " + __vkind(tag))
-}
 
 fn value_keys(v: Value) -> List[String] = if prim.load32(prim.handle(v) + 4) == 6 then {
   let h = prim.handle(v)
@@ -44741,7 +44893,7 @@ else {
 fn __jq_ctrl(s: String, c: Int) -> String = if c >= 32 then s
 else if c == 9 or c == 10 or c == 13 then __jq_ctrl(s, c + 1)
 else __jq_ctrl(
-  string.replace(s, (string.from_codepoint(c) ?? ""), "\\u00" + __jq_hex(c / 16) + __jq_hex(c % 16)),
+  string.replace(s, string.from_codepoint(c), "\\u00" + __jq_hex(c / 16) + __jq_hex(c % 16)),
   c + 1,
 )
 
@@ -45409,17 +45561,17 @@ pub const SRC_ZLIB: &str = r#"
 
 
 
-/// Zlib-framed DEFLATE of b; bytes vary by target.
+/// Zlib-framed DEFLATE of data; bytes vary by target.
 @intrinsic("almide_rt_zlib_compress")
-effect fn compress(b: Bytes) -> Result[Bytes, String] = _
+effect fn compress(data: Bytes) -> Result[Bytes, String] = _
 
 /// Like compress; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_compress_level")
-effect fn compress_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
+effect fn compress_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
 
 /// Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_decompress")
-fn decompress(b: Bytes) -> Result[Bytes, String] = _
+effect fn decompress(data: Bytes) -> Result[Bytes, String] = _
 
 /// Like decompress, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_decompress_max")
@@ -45428,24 +45580,24 @@ fn decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 /// Raw DEFLATE, no header; bytes vary by target.
 @intrinsic("almide_rt_zlib_deflate")
-effect fn deflate(b: Bytes) -> Result[Bytes, String] = _
+effect fn deflate(data: Bytes) -> Result[Bytes, String] = _
 
 /// Like deflate; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_deflate_level")
-effect fn deflate_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
+effect fn deflate_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
 
 /// Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_inflate")
-fn inflate(b: Bytes) -> Result[Bytes, String] = _
+effect fn inflate(data: Bytes) -> Result[Bytes, String] = _
 
 /// Like inflate, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_inflate_max")
 fn inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 
-/// RFC 1952 gzip of b; bytes vary by target.
+/// RFC 1952 gzip of data; bytes vary by target.
 @intrinsic("almide_rt_zlib_gzip")
-effect fn gzip(b: Bytes) -> Result[Bytes, String] = _
+effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
 
 
 
@@ -45456,7 +45608,7 @@ effect fn gzip(b: Bytes) -> Result[Bytes, String] = _
 
 /// Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_gunzip")
-fn gunzip(b: Bytes) -> Result[Bytes, String] = _
+effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _
 
 /// Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_gunzip_max")
@@ -46383,14 +46535,14 @@ fn zli_decompress(data: Bytes, limit: Int) -> Result[Bytes, String] = {
 }
 
 
-fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = zli_gunzip(data, zli_default_limit())
+effect fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = zli_gunzip(data, zli_default_limit())
 
-fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = zli_inflate(
+effect fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = zli_inflate(
   data,
   zli_default_limit(),
 )
 
-fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = zli_decompress(
+effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = zli_decompress(
   data,
   zli_default_limit(),
 )
@@ -46489,6 +46641,8 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "fs_modified_at" => Some(SRC_FS_MODIFIED_AT),
         "fs_read_bytes" => Some(SRC_FS_READ_BYTES),
         "fs_read_bytes_if_exists" => Some(SRC_FS_READ_BYTES_IF_EXISTS),
+        "fs_read_bytes_raw" => Some(SRC_FS_READ_BYTES_RAW),
+        "fs_read_bytes_raw_if_exists" => Some(SRC_FS_READ_BYTES_RAW_IF_EXISTS),
         "fs_read_lines" => Some(SRC_FS_READ_LINES),
         "fs_read_lines_if_exists" => Some(SRC_FS_READ_LINES_IF_EXISTS),
         "fs_read_text" => Some(SRC_FS_READ_TEXT),
@@ -46501,6 +46655,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "fs_walk" => Some(SRC_FS_WALK),
         "fs_write" => Some(SRC_FS_WRITE),
         "fs_write_bytes" => Some(SRC_FS_WRITE_BYTES),
+        "fs_write_bytes_raw" => Some(SRC_FS_WRITE_BYTES_RAW),
         "hash" => Some(SRC_HASH),
         "hash_impl" => Some(SRC_HASH_IMPL),
         "heap" => Some(SRC_HEAP),
@@ -46537,8 +46692,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "io" => Some(SRC_IO),
         "io_print" => Some(SRC_IO_PRINT),
         "io_read_all" => Some(SRC_IO_READ_ALL),
-        "io_read_byte" => Some(SRC_IO_READ_BYTE),
-        "io_read_line" => Some(SRC_IO_READ_LINE),
         "io_read_line_opt" => Some(SRC_IO_READ_LINE_OPT),
         "io_read_n_bytes" => Some(SRC_IO_READ_N_BYTES),
         "io_write" => Some(SRC_IO_WRITE),
@@ -46731,7 +46884,10 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "uint64_convert" => Some(SRC_UINT64_CONVERT),
         "uint8" => Some(SRC_UINT8),
         "uint8_convert" => Some(SRC_UINT8_CONVERT),
+        "unix" => Some(SRC_UNIX),
+        "unix_wasm" => Some(SRC_UNIX_WASM),
         "url" => Some(SRC_URL),
+        "uuid" => Some(SRC_UUID),
         "value" => Some(SRC_VALUE),
         "value_core" => Some(SRC_VALUE_CORE),
         "value_utils" => Some(SRC_VALUE_UTILS),

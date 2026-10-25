@@ -120,17 +120,13 @@ pub(crate) const OP_HTTP_CALL_DROP: i32 = 59;
 /// The leaf → op table, in WIT order.
 pub(crate) const PROC_LEAVES: &[(&str, i32)] = &[
     ("__proc_exec", 80),
-    ("__proc_exec_in", 81),
-    ("__proc_exec_with_stdin", 82),
-    ("__proc_exec_status", 83),
-    ("__proc_exec_status_timeout", 84),
-    ("__proc_run", 85),
-    ("__proc_spawn", 86),
+    // R-process-02: `output` took exec_status_timeout's op (the WIT case it
+    // renamed); 81..=83, 86 and 88 served the surface ProcessCommand replaced.
+    ("__proc_output", 84),
     ("__proc_kill", 87),
-    ("__proc_is_alive", 88),
     ("__proc_pid", 89),
-    // #3379: appended, so the earlier ops keep their numbers.
-    ("__proc_run_in", 90),
+    // R-process-07: `run` over its settings record took run_in's op.
+    ("__proc_run_cmd", 90),
 ];
 /// The tcp family (#3620, the net/tcp design step 2): ops 91..=103, one per
 /// `__net_*` leaf in stdlib/net_wasm.almd, two operands and an ok / err
