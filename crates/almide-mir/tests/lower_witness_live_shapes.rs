@@ -247,7 +247,7 @@ effect fn main() -> Unit = {
         shape: "env.set / env.sleep_ms as ordinary host calls (host_ops.rs, #2739)",
         src: r#"import env
 effect fn main() -> Unit = {
-  env.set("LIVE_SHAPE_KEY", "v")
+  env.set("LIVE_SHAPE_KEY", "v")!
   env.sleep_ms(0)!
   println(env.get("LIVE_SHAPE_KEY") ?? "unset")
 }

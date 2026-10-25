@@ -10,7 +10,14 @@ pub fn almide_rt_env_args() -> Vec<AlmideString> { let __almide_v: Vec<String> =
 
 pub fn almide_rt_env_get(name: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { std::env::var(name).ok() }; __almide_v.into_almide() }
 
-pub fn almide_rt_env_set(name: &str, value: &str) {
+// Reached only through `env.set`'s Almide body, which errs on the four pairs
+// set_var panics on (#4200: an empty name, `=` or NUL in the name, NUL in the
+// value). The guard below is the floor under that check, not the answer: a
+// pair the environment cannot hold is never handed to set_var.
+pub fn almide_rt_env___set(name: &str, value: &str) {
+    if name.is_empty() || name.contains('=') || name.contains('\0') || value.contains('\0') {
+        return;
+    }
     std::env::set_var(name, value);
 }
 

@@ -8,10 +8,10 @@
 import env
 
 effect fn main() -> Unit = {
-  env.set("ALMIDE_C329_KEY", "first")
-  env.set("ALMIDE_C329_KEY", "second")
+  env.set("ALMIDE_C329_KEY", "first")!
+  env.set("ALMIDE_C329_KEY", "second")!
   println(env.get("ALMIDE_C329_KEY") ?? "unset")
-  env.set("ALMIDE_C329_EMPTY", "")
+  env.set("ALMIDE_C329_EMPTY", "")!
   println("[${env.get("ALMIDE_C329_EMPTY") ?? "unset"}]")
   println(env.get("ALMIDE_C329_NEVER_SET") ?? "unset")
 }

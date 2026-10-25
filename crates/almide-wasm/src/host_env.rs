@@ -58,8 +58,10 @@ impl Emitter<'_> {
                 Some(Lowered::owned(SliceTy::Option(self.types.intern(STR))))
             }
             // Result[Unit, String]: the overlay set — key in a, value in
-            // b, the fs.write two-string convention (#1423 bucket C).
-            ("env", "set", [k, v]) => {
+            // b, the fs.write two-string convention (#1423 bucket C). It is
+            // `env.set`'s private op: the Almide body refuses an empty name,
+            // `=` or NUL in the name and NUL in the value first (#4200).
+            ("env", "__set", [k, v]) => {
                 self.fs_call_str2(k, v, crate::fs_meta::OP_ENV_SET)?;
                 Some(Lowered::owned(self.fs_result_unit()?))
             }
