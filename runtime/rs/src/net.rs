@@ -24,7 +24,46 @@ static ALMIDE_NET: std::sync::Mutex<AlmideNetTables> =
     std::sync::Mutex::new(AlmideNetTables { streams: Vec::new(), listeners: Vec::new() });
 
 fn almide_net<R>(f: impl FnOnce(&mut AlmideNetTables) -> R) -> R {
+    almide_net_request_sync();
     f(&mut ALMIDE_NET.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+}
+
+// #4203: a handler that aborts closes the handles it opened. The hook is
+// registered once per process, the first time any thread uses `net`; the
+// serve loop then begins, ends or aborts its own thread's record around each
+// handler. A table first used inside a handler — after the loop's begin ran
+// with no hook yet — starts this thread's record here: `ALMIDE_CONTAIN` is
+// set only on the serve loop's thread while a handler runs, so a `fan` arm's
+// thread never starts one.
+static ALMIDE_NET_HOOK: std::sync::Once = std::sync::Once::new();
+
+fn almide_net_request_sync() {
+    ALMIDE_NET_HOOK.call_once(|| almide_request_hook(almide_net_request));
+    if ALMIDE_CONTAIN.with(|c| c.get()) && !almide_net_request_active() {
+        almide_net_request_begin();
+        almide_unix_request_begin();
+    }
+}
+
+fn almide_net_request(stage: u8) {
+    match stage {
+        0 => {
+            almide_net_request_begin();
+            almide_unix_request_begin();
+        }
+        1 => {
+            let _ = almide_net_request_end();
+            let _ = almide_unix_request_end();
+        }
+        _ => {
+            let tcp = almide_net_request_end();
+            let unix = almide_unix_request_end();
+            ALMIDE_NET.lock().unwrap_or_else(std::sync::PoisonError::into_inner).close_opened(&tcp);
+            if let Some(t) = ALMIDE_NET_UNIX.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_mut() {
+                t.close_held(&unix);
+            }
+        }
+    }
 }
 
 /// Run `f` on stream `h` without holding the table lock: a scratch table
@@ -94,6 +133,7 @@ include!("../../../crates/almide-rt-core/src/net_unix_core.rs");
 static ALMIDE_NET_UNIX: std::sync::Mutex<Option<AlmideUnixTables>> = std::sync::Mutex::new(None);
 
 fn almide_net_unix<R>(f: impl FnOnce(&mut AlmideUnixTables) -> R) -> R {
+    almide_net_request_sync();
     let mut g = ALMIDE_NET_UNIX.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     f(g.get_or_insert_with(AlmideUnixTables::default))
 }

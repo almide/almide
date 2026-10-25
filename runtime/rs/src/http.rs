@@ -596,9 +596,12 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     while let Some((conn, (method, path, body, headers))) = pool.next() {
         let id = http_server_request_id(&method, &path, &body);
         let req = AlmideHttpRequest { method, path, body, headers, params: Vec::new() };
+        almide_request_hooks(0);
         ALMIDE_CONTAIN.with(|c| c.set(true));
         let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req)));
         ALMIDE_CONTAIN.with(|c| c.set(false));
+        // #4203: an abort closes the handles the handler opened and left open.
+        almide_request_hooks(if ran.is_err() { 2 } else { 1 });
         let resp = match ran {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {

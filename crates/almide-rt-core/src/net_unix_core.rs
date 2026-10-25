@@ -54,6 +54,31 @@ fn almide_unix_retry<T>(mut f: impl FnMut() -> std::io::Result<T>) -> std::io::R
     }
 }
 
+// The descriptors this thread came to hold while an `http.serve` handler
+// runs on it (#4203) — per thread, as for tcp (net_core.rs).
+thread_local! {
+    static ALMIDE_UNIX_REQUEST: std::cell::RefCell<Option<Vec<i64>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg_attr(not(unix), allow(dead_code))]
+fn almide_unix_note(fd: i64) {
+    ALMIDE_UNIX_REQUEST.with(|r| {
+        if let Some(log) = r.borrow_mut().as_mut() {
+            log.push(fd);
+        }
+    });
+}
+
+/// Start recording this thread's descriptors (a handler call begins).
+pub fn almide_unix_request_begin() {
+    ALMIDE_UNIX_REQUEST.with(|r| *r.borrow_mut() = Some(Vec::new()));
+}
+
+/// Stop recording; answers what this thread came to hold since the begin.
+pub fn almide_unix_request_end() -> Vec<i64> {
+    ALMIDE_UNIX_REQUEST.with(|r| r.borrow_mut().take().unwrap_or_default())
+}
+
 #[cfg(unix)]
 impl AlmideUnixTables {
     /// How many descriptors the table holds.
@@ -64,6 +89,20 @@ impl AlmideUnixTables {
     fn hold(&mut self, fd: std::os::fd::OwnedFd) -> i64 {
         let n = i64::from(std::os::fd::AsRawFd::as_raw_fd(&fd));
         self.held.insert(n, fd);
+        almide_unix_note(n);
+        n
+    }
+
+    /// Close each descriptor in `fds` the table still holds (#4203: what an
+    /// aborted handler came to hold and left open). Answers how many.
+    pub fn close_held(&mut self, fds: &[i64]) -> usize {
+        let mut n = 0;
+        for fd in fds {
+            if self.held.contains_key(fd) {
+                let _ = self.unix_close(*fd);
+                n += 1;
+            }
+        }
         n
     }
 
@@ -295,6 +334,7 @@ impl AlmideUnixTables {
         Err(format!("{call}: Unix-domain sockets and shared-memory files need a Unix platform"))
     }
     pub fn held(&self) -> usize { 0 }
+    pub fn close_held(&mut self, _: &[i64]) -> usize { 0 }
     pub fn unix_connect(&mut self, _: &str) -> Result<i64, String> { Self::unsupported("unix_connect") }
     pub fn unix_listen(&mut self, _: &str) -> Result<i64, String> { Self::unsupported("unix_listen") }
     pub fn unix_accept(&mut self, _: i64) -> Result<i64, String> { Self::unsupported("unix_accept") }

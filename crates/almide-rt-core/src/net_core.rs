@@ -23,8 +23,8 @@ pub struct AlmideNetTables {
     listeners: Vec<Option<std::net::TcpListener>>,
 }
 
-fn almide_net_slot<T>(v: &mut Vec<Option<T>>, x: T) -> i64 {
-    match v.iter().position(|s| s.is_none()) {
+fn almide_net_slot<T: AlmideNetSlotKind>(v: &mut Vec<Option<T>>, x: T) -> i64 {
+    let h = match v.iter().position(|s| s.is_none()) {
         Some(i) => {
             v[i] = Some(x);
             i as i64
@@ -33,7 +33,65 @@ fn almide_net_slot<T>(v: &mut Vec<Option<T>>, x: T) -> i64 {
             v.push(Some(x));
             (v.len() - 1) as i64
         }
+    };
+    almide_net_note(T::opened(h));
+    h
+}
+
+/// A handle an `http.serve` handler opened (#4203).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AlmideNetOpened {
+    Stream(i64),
+    Listener(i64),
+}
+
+/// Which table a slot belongs to.
+pub trait AlmideNetSlotKind {
+    fn opened(h: i64) -> AlmideNetOpened;
+}
+
+impl AlmideNetSlotKind for std::net::TcpStream {
+    fn opened(h: i64) -> AlmideNetOpened {
+        AlmideNetOpened::Stream(h)
     }
+}
+
+impl AlmideNetSlotKind for std::net::TcpListener {
+    fn opened(h: i64) -> AlmideNetOpened {
+        AlmideNetOpened::Listener(h)
+    }
+}
+
+// The handles opened on THIS thread while an `http.serve` handler runs on it
+// (#4203). The table is one per process (native, #4199) or per run
+// (embedded), but the record is per thread: a handler runs on the serve
+// loop's thread, so a `fan` arm's thread or another serve loop's opens are
+// never in it, and an abort closes only what its own handler opened.
+thread_local! {
+    static ALMIDE_NET_REQUEST: std::cell::RefCell<Option<Vec<AlmideNetOpened>>> = const { std::cell::RefCell::new(None) };
+}
+
+fn almide_net_note(o: AlmideNetOpened) {
+    ALMIDE_NET_REQUEST.with(|r| {
+        if let Some(log) = r.borrow_mut().as_mut() {
+            log.push(o);
+        }
+    });
+}
+
+/// Start recording this thread's opens (a handler call begins).
+pub fn almide_net_request_begin() {
+    ALMIDE_NET_REQUEST.with(|r| *r.borrow_mut() = Some(Vec::new()));
+}
+
+/// Whether this thread is recording.
+pub fn almide_net_request_active() -> bool {
+    ALMIDE_NET_REQUEST.with(|r| r.borrow().is_some())
+}
+
+/// Stop recording; answers what this thread opened since the begin.
+pub fn almide_net_request_end() -> Vec<AlmideNetOpened> {
+    ALMIDE_NET_REQUEST.with(|r| r.borrow_mut().take().unwrap_or_default())
 }
 
 /// The slot behind `h`: the invalid-handle err past the end (a negative
@@ -180,6 +238,25 @@ impl AlmideNetTables {
     }
 
     /// Closing a closed stream is ok; a handle never issued is not.
+    /// Close each handle in `opened` that is still open (#4203: what an
+    /// aborted handler opened and left open). Answers how many it closed.
+    pub fn close_opened(&mut self, opened: &[AlmideNetOpened]) -> usize {
+        let mut n = 0;
+        for o in opened {
+            let closed = match *o {
+                AlmideNetOpened::Stream(h) => self
+                    .streams
+                    .get_mut(h as usize)
+                    .and_then(Option::take)
+                    .map(|s| s.shutdown(std::net::Shutdown::Both))
+                    .is_some(),
+                AlmideNetOpened::Listener(h) => self.listeners.get_mut(h as usize).and_then(Option::take).is_some(),
+            };
+            n += usize::from(closed);
+        }
+        n
+    }
+
     pub fn tcp_close(&mut self, h: i64) -> Result<(), String> {
         let i = usize::try_from(h).ok().filter(|i| *i < self.streams.len())
             .ok_or_else(|| net_err_invalid_handle("TcpStream", h))?;
