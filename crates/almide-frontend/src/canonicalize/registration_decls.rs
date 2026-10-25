@@ -352,10 +352,21 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
                 }
             }
             DeclStep::Protocol(ast::Decl::Protocol { name, generics, methods, .. }) => {
-                // A protocol spelling a built-in's name is legal in a module (it
-                // registers under the module and leaves the bare built-in to the
-                // files that do not import it); refusing it in the entry file only
-                // is #4190.
+                // #4097 / #4190: the ENTRY file's declaration of a built-in
+                // protocol's name would replace the built-in's requirements
+                // while its conformances (`Int: Numeric`) stayed, so a bound on
+                // it accepted types without the declared methods. A module's
+                // declaration (prefixed, or its own unprefixed inference pass
+                // under `alias_owner_module`) stays legal.
+                let entry_file = prefix.is_none() && env.alias_owner_module.is_none();
+                if entry_file && super::protocols::builtin_protocol(name.as_str()).is_some() {
+                    diagnostics.push(err(
+                        format!("protocol '{}' is built in and cannot be redeclared", name),
+                        format!("Give the protocol another name, or bound on the built-in `{}` directly", name),
+                        format!("protocol {}", name),
+                    ));
+                    continue;
+                }
                 register_protocol_decl(env, name, generics, methods, prefix);
             }
             DeclStep::Protocol(_) => {}
