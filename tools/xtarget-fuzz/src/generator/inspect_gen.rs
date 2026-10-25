@@ -189,12 +189,6 @@ const SCATTERED_MAP: &str = "list.range(0, {n}) |> list.fold(map.new(), (m, i) =
 /// The present key of the map's `({i} * 7919 mod n)`-th entry.
 const SCATTERED_KEY: &str = "\"k${{i} * 7919 % {n} * 7919 % 1000003}\"";
 
-/// A response of n headers named `k` + the digits of `100000000 + i` least
-/// significant first: two names meet at a position independent of n.
-const FLAT_NAMED_RESPONSE: &str = "http.with_headers(200, \"aé\", (list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k\" + string.reverse(\"${100000000 + i}\"), \"v\"))))";
-/// The last of those names.
-const FLAT_LAST_NAME: &str = "\"k\" + string.reverse(\"${100000000 + {n} - 1}\")";
-
 /// n bytes with no short period, for the zlib codecs.
 const CODEC_BYTES: &str = "bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251))";
 
@@ -266,23 +260,9 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // (its keys are `k<100000000 + i>`), so the hit scans the whole object.
     Recipe { func: "value.field", size: "v", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
     Recipe { func: "json.get_int", size: "j", args: &[("key", "\"k${100000000 + {n} - 1}\"")] },
-    // The header lookups "none / empty if missing": the sized response and
-    // request carry n headers keyed the same way (nominal.rs).
-    Recipe { func: "http.get_header", size: "resp", args: &[("resp", FLAT_NAMED_RESPONSE), ("key", FLAT_LAST_NAME)] },
-    // header_values compares every name with the key: names whose digits run
-    // least significant first meet the key's at a position independent of n
-    // (see `{sized_flat}`); "k1000xxxxx" against the last key drifted the
-    // per-name cost on both legs (rms 8%, no class).
-    Recipe {
-        func: "http.header_values",
-        size: "resp",
-        args: &[("resp", FLAT_NAMED_RESPONSE), ("key", FLAT_LAST_NAME)],
-    },
-    Recipe {
-        func: "http.req_header",
-        size: "req",
-        args: &[("req", "http.new_request(\"GET\", \"/p/1\", \"aé\", (list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k\" + string.reverse(\"${100000000 + i}\"), \"v\"))))"), ("key", FLAT_LAST_NAME)],
-    },
+    // The header readers (`http.header` / `header_values`) are generic over
+    // `HttpMessage` (R-http-12): a protocol-bounded type variable is not in the
+    // generator's type universe yet, so they carry no recipe here.
     // The path lookups "none / err if the path is missing": the last key of
     // the sized object, so the hit walks it whole.
     Recipe { func: "json.get_path", size: "j", args: &[("path", "json.field(json.root(), \"k${100000000 + {n} - 1}\")")] },
@@ -307,9 +287,6 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // The Float32 constructors take their size as a row count.
     Recipe { func: "matrix.zeros_f32", size: "rows", args: &[("rows", "{n}"), ("cols", "2")] },
     Recipe { func: "matrix.ones_f32", size: "rows", args: &[("rows", "{n}"), ("cols", "2")] },
-    // Percent-escapes and `+` to decode, n of each: the generic "aéaé…" has
-    // nothing to decode.
-    Recipe { func: "http.url_decode", size: "s", args: &[("s", "string.repeat(\"a%C3%A9+\", {n})")] },
     // Deleting an absent key is a no-op. The plain call's per-iteration
     // step re-sets "k0" (see `vary`), so deleting "k0" hits on every call,
     // and the map holds "k0" from the start for the diamond.
@@ -684,7 +661,7 @@ impl Target {
         let inner: String = body.lines().map(|l| if l.is_empty() { "\n".to_string() } else { format!("  {l}\n") }).collect();
         let target = r.target.replace("{n}", &n.to_string());
         format!(
-            "effect fn main() -> Unit = {{\n  let h: HttpHandler = match http.router([http.route(\"{}\", (req) => {{\n{inner}  }})]) {{\n    ok(t) => t,\n    err(e) => panic(e),\n  }}\n  let res: HttpResponse = h(http.new_request(\"GET\", {target}, \"\", map.new()))!\n  if http.status_code(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered ${{http.status_code(res)}}\")\n{}}}\n",
+            "effect fn main() -> Unit = {{\n  let h: HttpHandler = match http.router([http.route(\"{}\", (req) => {{\n{inner}  }})]) {{\n    ok(t) => t,\n    err(e) => panic(e),\n  }}\n  let res: HttpResponse = h(http.new_request(\"GET\", {target}, \"\", []))!\n  if http.status(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered ${{http.status(res)}}\")\n{}}}\n",
             r.pattern,
             if print_body { "  println(http.body(res))\n" } else { "" }
         )
@@ -1581,8 +1558,8 @@ pub(crate) mod tests {
         for with_call in [true, false] {
             let direct = t.direct_program(1000, 4, with_call);
             assert!(direct.contains("  let h: HttpHandler = match http.router([http.route(\"GET /p/{id}\", (req) => {\n    let x: HttpRequest = req\n    let a1: String = \"id\"\n"), "{direct}");
-            assert!(direct.contains("h(http.new_request(\"GET\", \"/p/\" + string.repeat(\"a%C3%A9\", 1000), \"\", map.new()))!"), "{direct}");
-            assert!(direct.contains(&format!("if http.status_code(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered")), "{direct}");
+            assert!(direct.contains("h(http.new_request(\"GET\", \"/p/\" + string.repeat(\"a%C3%A9\", 1000), \"\", []))!"), "{direct}");
+            assert!(direct.contains(&format!("if http.status(res) == 200 then () else panic(\"{OFF_DOMAIN}: the router answered")), "{direct}");
             assert!(direct.contains("    http.response(200, \"${acc}\")\n  })]) {"), "{direct}");
             assert_eq!(direct.contains("let r: Option[String] = http.param(x, a1)"), with_call, "{direct}");
         }
@@ -1601,20 +1578,6 @@ pub(crate) mod tests {
         for r in SHAPE_RECIPES.iter().chain(super::effect_recipes::EFFECT_RECIPES) {
             let t = target(r.func);
             assert!(t.recipe.is_some() && (r.size.is_empty() || t.size_param.is_some()), "{}", r.func);
-        }
-    }
-
-    /// The streaming clients (ADR-0027 D8: ported, then inspected) are
-    /// probed over the fixture's `/chunked/{n}` route, sized by the url, with
-    /// a generated `on_chunk`.
-    #[test]
-    fn the_streaming_clients_stream_the_fixtures_chunked_route() {
-        for name in ["http.request_stream", "http.request_stream_with_limits"] {
-            let t = target(name);
-            assert!(t.recipe.is_some(), "{name} has no recipe");
-            let direct = t.direct_program(1000, 4, true);
-            assert!(direct.contains("/chunked/1000"), "{name}: {direct}");
-            assert!(direct.contains(&format!("{name}(a0, x, ")) && direct.contains("let a0: String = \"GET\""), "{name}: {direct}");
         }
     }
 

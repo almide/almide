@@ -154,7 +154,7 @@ pub const VERDICTS: &[Verdict] = &[
 ];
 
 /// A fresh call to the fixture, for a call that would disturb a shared one.
-const HTTP_CALL_OF_ITS_OWN: &str = "match http.start(\"GET\", \"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes/16\", \"\", map.new(), { total_ms: 0, idle_ms: 0 }) { ok(hc) => hc, err(he) => panic(he) }";
+const HTTP_CALL_OF_ITS_OWN: &str = "match http.start(http.new_request(\"GET\", \"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes/16\", \"\", []), { total_ms: 0, idle_ms: 0 }) { ok(hc) => hc, err(he) => panic(he) }";
 
 /// The O(1) form of a property checked inside a timed loop, where the full
 /// check's own cost (a membership scan, a per-element count) would be

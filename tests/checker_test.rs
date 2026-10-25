@@ -1150,13 +1150,13 @@ effect fn main() -> Unit = {
   http.serve(port, handle)!
   http.serve(port, (req) => http.response(200, greeting))!
   http.serve(port, (req) => {
-    let path = http.req_path(req)
+    let path = http.path(req)
     var n = 0
     n = n + string.len(path)
     http.response(200, "${path} ${n}")
   })!
   http.serve(port, (req) => {
-    let parts = string.split(http.req_path(req), "/") |> list.map((part) => "${part}${greeting}")
+    let parts = string.split(http.path(req), "/") |> list.map((part) => "${part}${greeting}")
     http.response(200, list.join(parts, ","))
   })!
 }

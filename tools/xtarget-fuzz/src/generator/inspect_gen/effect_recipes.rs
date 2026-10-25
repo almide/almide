@@ -150,47 +150,20 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     // HTTP against the fixture: a response of n bytes, or n bytes echoed.
     Recipe { func: "http.get", size: "url", args: &[("url", BYTES_URL)] },
     Recipe { func: "http.get_bytes", size: "url", args: &[("url", BYTES_URL)] },
-    Recipe { func: "http.get_status", size: "url", args: &[("url", BYTES_URL)] },
     Recipe { func: "http.get_response", size: "url", args: &[("url", BYTES_URL)] },
-    Recipe { func: "http.delete", size: "url", args: &[("url", BYTES_URL)] },
-    Recipe { func: "http.delete_response", size: "url", args: &[("url", BYTES_URL)] },
-    Recipe { func: "http.post", size: "body", args: &[("url", ECHO_URL), ("body", BODY)] },
-    Recipe { func: "http.post_response", size: "body", args: &[("url", ECHO_URL), ("body", BODY)] },
-    Recipe { func: "http.put", size: "body", args: &[("url", ECHO_URL), ("body", BODY)] },
-    Recipe { func: "http.put_response", size: "body", args: &[("url", ECHO_URL), ("body", BODY)] },
-    Recipe { func: "http.patch", size: "body", args: &[("url", ECHO_URL), ("body", BODY)] },
-    Recipe { func: "http.patch_response", size: "body", args: &[("url", ECHO_URL), ("body", BODY)] },
-    Recipe { func: "http.request", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[\"x-k\": \"v\"]")] },
-    Recipe { func: "http.request_bytes", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[\"x-k\": \"v\"]")] },
-    Recipe { func: "http.request_status", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[\"x-k\": \"v\"]")] },
-    Recipe { func: "http.request_response", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[\"x-k\": \"v\"]")] },
+    Recipe { func: "http.request", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[(\"x-k\", \"v\")]")] },
+    Recipe { func: "http.send", size: "body", args: &[("req", ECHO_REQUEST)] },
+    Recipe { func: "http.request_bytes", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[(\"x-k\", \"v\")]")] },
     // The call handle (#2631): start's cost is the exchange it begins,
     // which the probe's digest waits out (the echo of n bytes); poll answers
     // a call that has ended (its recipe waits first) with a copy of the n
     // bytes; read_new's first read of an ended call is its whole body, so
     // every step reads a fresh one; cancel ends a fresh call of its own.
-    Recipe {
-        func: "http.start",
-        size: "body",
-        args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[\"x-k\": \"v\"]"), ("limits", NO_LIMITS)],
-    },
+    Recipe { func: "http.start", size: "body", args: &[("req", ECHO_REQUEST), ("limits", NO_LIMITS)] },
     Recipe { func: "http.poll", size: "c", args: &[("c", ENDED_CALL)] },
     Recipe { func: "http.read_new", size: "c", args: &[("c", FRESH_ENDED_CALL)] },
     Recipe { func: "http.wait", size: "c", args: &[("c", CALL)] },
     Recipe { func: "http.cancel", size: "", args: &[("c", FRESH_CALL)] },
-    // The streaming clients over the fixture's `/chunked/{n}`: n chunks
-    // `c<i>\n`, each delivered to the generated `on_chunk` — plain
-    // request_stream (the call core's classic call) and its limited twin.
-    Recipe {
-        func: "http.request_stream",
-        size: "url",
-        args: &[("method", "\"GET\""), ("url", CHUNKED_URL), ("body", "\"\""), ("headers", "map.new()")],
-    },
-    Recipe {
-        func: "http.request_stream_with_limits",
-        size: "url",
-        args: &[("method", "\"GET\""), ("url", CHUNKED_URL), ("body", "\"\""), ("headers", "map.new()"), ("limits", NO_LIMITS)],
-    },
 ];
 
 /// Statements a probe's `main` runs first, for operands that must outlive
@@ -251,34 +224,35 @@ pub fn max_k(func: &str, effect: bool) -> Option<u64> {
 
 const SIZED_BYTES: &str = "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 251))";
 const BYTES_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes/{n}\"";
-const CHUNKED_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/chunked/{n}\"";
 const ECHO_URL: &str ="\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\"";
 const BODY: &str = "string.repeat(\"a\", {n})";
+/// A POST of n bytes to the fixture's echo, with one header.
+const ECHO_REQUEST: &str = "http.new_request(\"POST\", \"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\", string.repeat(\"a\", {n}), [(\"x-k\", \"v\")])";
 const NO_LIMITS: &str = "{ total_ms: 0, idle_ms: 0 }";
 
-/// `http.start("GET", <fixture>path, "", headers)` with no limits, an `err`
-/// stopping the probe (the fixture is always up).
+/// `http.start(http.new_request("GET", <fixture>path, "", headers))` with no
+/// limits, an `err` stopping the probe (the fixture is always up).
 macro_rules! call_of {
     ($path:literal, $headers:literal) => {
         concat!(
-            "match http.start(\"GET\", \"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"",
+            "match http.start(http.new_request(\"GET\", \"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"",
             $path,
             "\", \"\", ",
             $headers,
-            ", { total_ms: 0, idle_ms: 0 }) { ok(hc) => hc, err(he) => panic(he) }"
+            "), { total_ms: 0, idle_ms: 0 }) { ok(hc) => hc, err(he) => panic(he) }"
         )
     };
 }
 
 /// A call answering n bytes, in flight.
-const CALL: &str = call_of!("/bytes/{n}", "map.new()");
+const CALL: &str = call_of!("/bytes/{n}", "[]");
 /// A call answering n bytes, ended before the probe reads it.
-const ENDED_CALL: &str = concat!("{ let hc = ", call_of!("/bytes/{n}", "map.new()"), "\n  let _w: Result[HttpResponse, String] = http.wait(hc)\n  hc }");
+const ENDED_CALL: &str = concat!("{ let hc = ", call_of!("/bytes/{n}", "[]"), "\n  let _w: Result[HttpResponse, String] = http.wait(hc)\n  hc }");
 /// [`ENDED_CALL`], a new one every step (`{i}` names the step).
 const FRESH_ENDED_CALL: &str =
-    concat!("{ let hc = ", call_of!("/bytes/{n}", "[\"x-step\": \"${{i}}\"]"), "\n  let _w: Result[HttpResponse, String] = http.wait(hc)\n  hc }");
+    concat!("{ let hc = ", call_of!("/bytes/{n}", "[(\"x-step\", \"${{i}}\")]"), "\n  let _w: Result[HttpResponse, String] = http.wait(hc)\n  hc }");
 /// A call answering 16 bytes, a new one every step.
-const FRESH_CALL: &str = call_of!("/bytes/16", "[\"x-step\": \"${{i}}\"]");
+const FRESH_CALL: &str = call_of!("/bytes/16", "[(\"x-step\", \"${{i}}\")]");
 
 const ECHO: &str = "\"/bin/echo\"";
 /// n / 5 arguments: a captured run's pipe reads vary with the fork, and the
