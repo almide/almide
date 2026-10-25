@@ -59,6 +59,10 @@ test "string.from_codepoint unit=scalar" {
   assert_eq("${string.from_codepoint(233) ?? ""}", "é")
 }
 
+test "string.__from_codepoint unit=scalar" {
+  assert_eq("${string.__from_codepoint(233)}", "é")
+}
+
 test "string.count_matches unit=count" {
   assert_eq("${string.count_matches("ééa", "é")}", "2")
 }
