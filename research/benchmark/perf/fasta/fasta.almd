@@ -64,7 +64,7 @@ effect fn main() -> Unit = {
   var buf = bytes.zeros(64)
 
   // ONE: repeat ALU
-  io.write(bytes.from_string(">ONE Homo sapiens alu\n"))
+  io.write(io.stdout()!, bytes.from_string(">ONE Homo sapiens alu\n"))!
   var pos = 0
   var remaining = n * 2
   while remaining > 0 {
@@ -77,12 +77,12 @@ effect fn main() -> Unit = {
       i = i + 1
     }
     bytes.push(buf, newline)
-    io.write(buf)
+    io.write(io.stdout()!, buf)!
     remaining = remaining - line_len
   }
 
   // TWO: IUB ambiguity codes
-  io.write(bytes.from_string(">TWO IUB ambiguity codes\n"))
+  io.write(io.stdout()!, bytes.from_string(">TWO IUB ambiguity codes\n"))!
   remaining = n * 3
   while remaining > 0 {
     let line_len = if remaining < 60 then remaining else 60
@@ -95,12 +95,12 @@ effect fn main() -> Unit = {
       i = i + 1
     }
     bytes.push(buf, newline)
-    io.write(buf)
+    io.write(io.stdout()!, buf)!
     remaining = remaining - line_len
   }
 
   // THREE: Homo sapiens frequency
-  io.write(bytes.from_string(">THREE Homo sapiens frequency\n"))
+  io.write(io.stdout()!, bytes.from_string(">THREE Homo sapiens frequency\n"))!
   remaining = n * 5
   while remaining > 0 {
     let line_len = if remaining < 60 then remaining else 60
@@ -113,7 +113,7 @@ effect fn main() -> Unit = {
       i = i + 1
     }
     bytes.push(buf, newline)
-    io.write(buf)
+    io.write(io.stdout()!, buf)!
     remaining = remaining - line_len
   }
 }

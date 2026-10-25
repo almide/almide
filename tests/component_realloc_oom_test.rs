@@ -43,7 +43,7 @@ fn wasmtime_available() -> bool {
 const DRAIN: &str = r#"import io
 
 effect fn count(n: Int) -> Int = {
-  let line = io.read_line()!
+  let line = (io.read_line() ?? "")
   if string.len(line) == 0 then n else count(n + 1)!
 }
 

@@ -129,7 +129,7 @@ fn infallible_and_lambda_callees_keep_their_hints() {
         dir.path(),
         "import io\n\
          import fs\n\
-         fn line() -> String = io.read_line()\n\
+         fn line() -> String = (io.read_line() ?? \"\")\n\
          fn all() -> List[String] = list.map([\"a\"], (p) => fs.read_text(p))\n\
          effect fn main() -> Unit = println(\"x\")\n",
     );

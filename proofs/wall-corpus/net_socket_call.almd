@@ -6,9 +6,10 @@
 // rather than the emitter's unlinked-name wall. Graduates with a sockets story
 // (wasi p2 or a host op), never silently.
 import net
+import io
 
 effect fn main() -> Unit = {
   let s = net.tcp_connect("127.0.0.1", 1)!
-  net.tcp_write(s, bytes.from_string("ping"))!
-  net.tcp_close(s)!
+  io.write(s, bytes.from_string("ping"))!
+  io.close(s)!
 }

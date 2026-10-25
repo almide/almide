@@ -1,4 +1,4 @@
-//! `process.exec_with_stdin` to a child that exits without reading its input
+//! `process.output` with stdin text to a child that exits without reading its input
 //! answers on native, as on the embedded host, instead of killing the
 //! program.
 //!
@@ -8,14 +8,15 @@
 //! ended the whole program with no output. The embedded host, a Rust
 //! process that ignores SIGPIPE, answered err: C-ALS-R5's "answers what the
 //! native leg answers" did not hold. Found by the stdlib inspection's
-//! parity campaign (`xtarget-fuzz run --focus process.exec_with_stdin`).
+//! parity campaign (`xtarget-fuzz run --focus process.exec_with_stdin`, the
+//! predecessor of `process.output`'s `stdin` field).
 #![cfg(unix)]
 use std::process::Command;
 
 const PROBE: &str = r#"import process
 
 effect fn main() -> Unit = {
-  let r: Result[String, String] = process.exec_with_stdin("/bin/echo", ["x"], string.repeat("日本語", 100000))
+  let r = process.output(process.ProcessCommand { cmd: "/bin/echo", args: ["x"], stdin: string.repeat("日本語", 100000) })
   println("answered ${result.is_ok(r) or result.is_err(r)}")
 }
 "#;

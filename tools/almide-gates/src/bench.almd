@@ -35,11 +35,11 @@ effect fn bench(key: String, n: Int, pre: List[String], cmd: String, cmd_args: L
   var total = 0
   for _i in 0..<n {
     if list.len(pre) > 0 then {
-      let _ = process.exec_status(list.get_or(pre, 0, "true"), list.drop(pre, 1))
+      let _ = process.output(process.ProcessCommand { cmd: list.get_or(pre, 0, "true"), args: list.drop(pre, 1) })
       ()
     } else ()
     let t0 = datetime.monotonic_ns()
-    let _ = process.exec_status(cmd, cmd_args)
+    let _ = process.output(process.ProcessCommand { cmd: cmd, args: cmd_args })
     total = total + (datetime.monotonic_ns() - t0)
   }
   Row { key: key, ms: ns_to_ms_x10(total / n), n: n }
@@ -163,7 +163,7 @@ effect fn machine_class() -> String = sh("bash", ["scripts/lib/machine-class.sh"
 effect fn machine_key() -> String = sh("bash", ["scripts/lib/machine-class.sh", "--key"])!
 
 effect fn same_class(recorded: String) -> Bool = {
-  let st = process.exec_status("bash", ["scripts/lib/machine-class.sh", "--same", recorded])!
+  let st = process.output(process.ProcessCommand { cmd: "bash", args: ["scripts/lib/machine-class.sh", "--same", recorded] })!
   st.code == 0
 }
 

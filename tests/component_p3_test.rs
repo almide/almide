@@ -161,8 +161,8 @@ fn dir() -> PathBuf {
 const ECHO: &str = r#"import io
 
 effect fn main() -> Unit = {
-  let b = io.read_byte()
-  let l = io.read_line()!
+  let b = (bytes.get(io.read(io.stdin()!, 1)!, 0) ?? -1)
+  let l = (io.read_line() ?? "")
   let rest = io.read_all()
   eprintln("err-side")
   println("b=${b} l=${l} rest=${rest}")

@@ -99,7 +99,7 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "env.get", size: "", args: &[("name", "\"XF_GREETING\"")] },
     Recipe { func: "env.set", size: "value", args: &[("name", "\"XF_SET\""), ("value", "string.repeat(\"aé\", {n})")] },
     // Past the native 64 KiB stdout buffer at every size, so every size
-    // writes in one regime (as io.write's recipe).
+    // writes in one regime (as io.write's recipe did).
     Recipe { func: "io.print", size: "s", args: &[("s", "string.repeat(\"aé\", 4 * {n})")] },
     Recipe { func: "process.env", size: "", args: &[("key", "\"XF_GREETING\"")] },
     // Host-decided results (`verdicts.rs`): each probe checks the declared
@@ -110,37 +110,29 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "list.shuffle", size: "xs", args: &[("xs", "{sized}")] },
     Recipe { func: "fs.modified_at", size: "path", args: FILE_N },
     Recipe { func: "fs.stat", size: "path", args: FILE_N },
-    Recipe { func: "process.exec_status", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS_WIDE)] },
-    Recipe { func: "process.exec_status_timeout", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS_WIDE), ("timeout_ms", "10000")] },
     Recipe { func: "fs.create_temp_file", size: "", args: &[("prefix", "\"p\"")] },
     Recipe { func: "fs.create_temp_dir", size: "", args: &[("prefix", "\"p\"")] },
     Recipe { func: "env.sleep_ms", size: "", args: &[("ms", "0")] },
     // Processes from the fixed command set (ADR-0027 D4), on the embedded
-    // host: n / 10 arguments echoed back, or n / 10 lines through cat.
+    // host: n / 5 arguments echoed back.
     Recipe { func: "process.exec", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS_WIDE)] },
-    Recipe { func: "process.exec_in", size: "args", args: &[("dir", MADE_DIR), ("cmd", ECHO), ("args", ECHO_ARGS_WIDE)] },
-    Recipe { func: "process.exec_attached", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS)] },
-    Recipe { func: "process.run", size: "args", args: &[("cmd", ECHO), ("args", ECHO_ARGS)] },
-    Recipe { func: "process.run_in", size: "args", args: &[("dir", MADE_DIR), ("cmd", ECHO), ("args", ECHO_ARGS)] },
-    Recipe {
-        func: "process.exec_with_stdin",
-        size: "input",
-        args: &[("cmd", "\"/bin/cat\""), ("args", "[]"), ("input", "string.repeat(\"aé\\n\", {n} / 10)")],
-    },
-    Recipe { func: "process.spawn", size: "", args: &[("cmd", "\"/usr/bin/true\""), ("args", "[]")] },
     // A fresh child per step to signal.
     Recipe {
         func: "process.kill",
         size: "",
-        args: &[("pid", "match process.spawn(\"/bin/sleep\", [\"${{i} * 0 + 5}\"]) { ok(p) => p, err(_) => 2147483000 }"), ("signal", "15")],
+        args: &[
+            (
+                "pid",
+                "match process.start(process.ProcessCommand { cmd: \"/bin/sleep\", args: [\"${{i} * 0 + 5}\"] }) { ok(c) => process.child_pid(c) ?? 2147483000, err(_) => 2147483000 }",
+            ),
+            ("signal", "15"),
+        ],
     },
-    Recipe { func: "process.is_alive", size: "", args: &[("pid", "process.pid()")] },
     Recipe { func: "process.sleep", size: "", args: &[("ms", "0")] },
     // Judged by the exit it makes (ADR-0027 D4): a code no clean end of a
     // program makes, inside C-350's 0..=125. The literal is what every
     // probe must exit with (`Target::expected_exit`).
     Recipe { func: "process.exit", size: "", args: &[("code", "3")] },
-    Recipe { func: "io.read_n_bytes", size: "n", args: &[("n", "{n}")] },
     // Host addresses over a live buffer: the probe binds it before the loop.
     Recipe { func: "bytes.as_ptr", size: "b", args: &[("b", SIZED_BYTES)] },
     Recipe { func: "bytes.as_mut_ptr", size: "b", args: &[("b", SIZED_BYTES)] },
@@ -151,47 +143,10 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "ffi.to_int", size: "", args: &[("p", "ffi.address(live_buf)")] },
     Recipe { func: "ffi.read", size: "len", args: &[("ptr", "ffi.address(live_buf)"), ("len", "{n}")] },
     Recipe { func: "ffi.write", size: "b", args: &[("ptr", "ffi.address(live_buf)"), ("b", SIZED_BYTES), ("cap", "{n}")] },
-    // TCP against the loopback fixtures (ADR-0027 D5): a fresh socket per
-    // step where the call consumes or holds one, the sink for writes and the
-    // source for reads so neither side waits.
-    Recipe { func: "net.tcp_connect", size: "", args: &[("host", LOCALHOST), ("port", ECHO_PORT)] },
-    Recipe { func: "net.tcp_listen", size: "", args: &[("host", LOCALHOST), ("port", "0")] },
-    Recipe { func: "net.tcp_accept", size: "", args: &[("listener", PENDING_LISTENER)] },
-    Recipe { func: "net.tcp_close", size: "", args: &[("stream", FRESH_STREAM)] },
-    Recipe { func: "net.tcp_close_listener", size: "", args: &[("listener", FRESH_LISTENER)] },
-    Recipe { func: "net.tcp_local_port", size: "", args: &[("listener", LISTENER)] },
-    Recipe { func: "net.tcp_is_open", size: "", args: &[("stream", SINK_STREAM)] },
-    Recipe { func: "net.tcp_set_timeout", size: "", args: &[("stream", SINK_STREAM), ("timeout_ms", "1000")] },
-    Recipe { func: "net.tcp_write", size: "data", args: &[("stream", SINK_STREAM), ("data", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 251))")] },
-    // How much of the source has arrived bounds what a read returns, and
-    // that is the network's timing: a read no longer than one of the
-    // source's writes always fills, so its cost is fixed.
-    Recipe { func: "net.tcp_read", size: "", args: &[("stream", SOURCE_STREAM), ("len", "1024")] },
-    Recipe { func: "net.tcp_read_exact", size: "len", args: &[("stream", SOURCE_STREAM), ("len", "{n}")] },
-    Recipe { func: "net.tcp_read_timeout", size: "", args: &[("stream", SOURCE_STREAM), ("len", "1024"), ("timeout_ms", "1000")] },
-    Recipe { func: "net.tcp_available", size: "", args: &[("stream", SOURCE_STREAM)] },
-    // Unix sockets and shared-memory files (#3620): sockets in the sandbox
-    // (short relative names, removed first: a diamond's legs run in one
-    // project directory), the fixture's sink for sends. A fresh socket
-    // per step where the call takes or holds one; a socket a read takes from
-    // holds its bytes and its descriptor before the call, its peer closed.
-    Recipe { func: "net.unix_connect", size: "", args: &[("path", UNIX_SINK)] },
-    Recipe { func: "net.unix_listen", size: "", args: &[("path", "{ let _r: Result[Unit, String] = fs.remove(\"l${{i}}.sock\")\n  \"l${{i}}.sock\" }")] },
-    Recipe { func: "net.unix_accept", size: "", args: &[("listener", UNIX_PENDING_LISTENER)] },
-    Recipe { func: "net.unix_send", size: "data", args: &[("sock", UNIX_SINK_STREAM), ("data", SIZED_BYTES), ("fds", "[]")] },
-    Recipe { func: "net.unix_recv", size: "", args: &[("sock", UNIX_PENDING_SOCKET), ("max", "64")] },
-    Recipe { func: "net.unix_take_fds", size: "", args: &[("sock", UNIX_RECEIVED_SOCKET)] },
-    Recipe { func: "net.unix_poll", size: "", args: &[("fd", UNIX_READY_SOCKET), ("timeout_ms", "0")] },
-    Recipe { func: "net.unix_wait", size: "", args: &[("fds", "[net.unix_connect(env.get(\"XF_UNIX_SINK\") ?? \"\")!, net.shm_create(8)!]"), ("timeout_ms", "0")] },
-    Recipe { func: "net.unix_close", size: "", args: &[("fd", "net.shm_create({i} * 0 + 8)!")] },
-    Recipe { func: "net.shm_create", size: "", args: &[("size", "4096")] },
-    Recipe { func: "net.shm_resize", size: "", args: &[("fd", "net.shm_create(64)!"), ("size", "4096 + {i} % 2")] },
-    Recipe { func: "net.shm_write", size: "data", args: &[("fd", "net.shm_create(64)!"), ("offset", "0"), ("data", SIZED_BYTES)] },
-    Recipe {
-        func: "net.shm_read",
-        size: "len",
-        args: &[("fd", "{ let f = net.shm_create({n})!\n  net.shm_write(f, 0, bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 251)))!\n  f }"), ("offset", "0"), ("len", "{n}")],
-    },
+    // net's TCP calls and unix's sockets and shared-memory files take and
+    // return opaque handles (`net.TcpStream`, `unix.Fd`), and the stream
+    // operations on them are io's generic `read` / `write` / `close`: neither
+    // is in the generator's type universe yet, so none is catalogued here.
     // HTTP against the fixture: a response of n bytes, or n bytes echoed.
     Recipe { func: "http.get", size: "url", args: &[("url", BYTES_URL)] },
     Recipe { func: "http.get_bytes", size: "url", args: &[("url", BYTES_URL)] },
@@ -256,9 +211,7 @@ pub(super) fn prelude_for(func: &str, n: u64) -> Option<String> {
 /// the total is still k·n, so the marginal over k reads n per call).
 pub(super) fn stdin_for(func: &str, n: u64, k: u64) -> Option<(u64, u64)> {
     match func {
-        "io.read_line" | "io.read_line_opt" | "io.read_all" | "process.stdin_lines" => Some((n, k)),
-        "io.read_byte" => Some((0, k)),
-        "io.read_n_bytes" => Some((n.saturating_sub(1), k)),
+        "io.read_line" | "io.read_all" | "process.stdin_lines" => Some((n, k)),
         _ => None,
     }
 }
@@ -297,25 +250,6 @@ pub fn max_k(func: &str, effect: bool) -> Option<u64> {
 }
 
 const SIZED_BYTES: &str = "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 251))";
-const LOCALHOST: &str = "\"127.0.0.1\"";
-const ECHO_PORT: &str = "(int.parse(env.get(\"XF_TCP_PORT\") ?? \"0\") ?? 0)";
-const SINK_STREAM: &str = "net.tcp_connect(\"127.0.0.1\", int.parse(env.get(\"XF_SINK_PORT\") ?? \"0\") ?? 0)!";
-const SOURCE_STREAM: &str = "net.tcp_connect(\"127.0.0.1\", int.parse(env.get(\"XF_SOURCE_PORT\") ?? \"0\") ?? 0)!";
-const FRESH_STREAM: &str = "net.tcp_connect(\"127.0.0.1\", int.parse(env.get(\"XF_SINK_PORT\") ?? \"${{i} * 0}\") ?? 0)!";
-const LISTENER: &str = "net.tcp_listen(\"127.0.0.1\", 0)!";
-const FRESH_LISTENER: &str = "net.tcp_listen(\"127.0.0.1\", {i} * 0)!";
-const PENDING_LISTENER: &str = "{ let l = net.tcp_listen(\"127.0.0.1\", {i} * 0)!\n  let _c = net.tcp_connect(\"127.0.0.1\", net.tcp_local_port(l)!)!\n  l }";
-const UNIX_SINK: &str = "(env.get(\"XF_UNIX_SINK\") ?? \"\")";
-const UNIX_SINK_STREAM: &str = "net.unix_connect(env.get(\"XF_UNIX_SINK\") ?? \"\")!";
-/// A listener with one connection pending, a fresh one per step.
-const UNIX_PENDING_LISTENER: &str = "{ let _r: Result[Unit, String] = fs.remove(\"a${{i}}.sock\")\n  let l = net.unix_listen(\"a${{i}}.sock\")!\n  let _c = net.unix_connect(\"a${{i}}.sock\")!\n  l }";
-/// A socket holding 11 bytes, its peer closed, a fresh one per step.
-const UNIX_PENDING_SOCKET: &str = "{ let _r: Result[Unit, String] = fs.remove(\"r${{i}}.sock\")\n  let l = net.unix_listen(\"r${{i}}.sock\")!\n  let c = net.unix_connect(\"r${{i}}.sock\")!\n  let s = net.unix_accept(l)!\n  net.unix_send(c, bytes.from_string(\"hello world\"), [])!\n  net.unix_close(c)!\n  net.unix_close(l)!\n  s }";
-/// A socket whose one descriptor has arrived and not been taken, a fresh one
-/// per step.
-const UNIX_RECEIVED_SOCKET: &str = "{ let _r: Result[Unit, String] = fs.remove(\"t${{i}}.sock\")\n  let l = net.unix_listen(\"t${{i}}.sock\")!\n  let c = net.unix_connect(\"t${{i}}.sock\")!\n  let s = net.unix_accept(l)!\n  let f = net.shm_create(8)!\n  net.unix_send(c, bytes.from_string(\"x\"), [f])!\n  let _got = net.unix_recv(s, 8)!\n  net.unix_close(c)!\n  net.unix_close(l)!\n  net.unix_close(f)!\n  s }";
-/// A socket with bytes waiting, so a poll answers at once.
-const UNIX_READY_SOCKET: &str = "{ let _r: Result[Unit, String] = fs.remove(\"p.sock\")\n  let l = net.unix_listen(\"p.sock\")!\n  let c = net.unix_connect(\"p.sock\")!\n  let s = net.unix_accept(l)!\n  net.unix_send(c, bytes.from_string(\"x\"), [])!\n  s }";
 const BYTES_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/bytes/{n}\"";
 const CHUNKED_URL: &str = "\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/chunked/{n}\"";
 const ECHO_URL: &str ="\"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"/echo\"";
@@ -346,11 +280,7 @@ const FRESH_ENDED_CALL: &str =
 /// A call answering 16 bytes, a new one every step.
 const FRESH_CALL: &str = call_of!("/bytes/16", "[\"x-step\": \"${{i}}\"]");
 
-/// A directory the probe makes, so it exists in a diamond's project too.
-const MADE_DIR: &str = "{ fs.mkdir_p(\"pdir\")!\n  \"pdir\" }";
-
 const ECHO: &str = "\"/bin/echo\"";
-const ECHO_ARGS: &str = "list.range(0, {n} / 100) |> list.map((i) => \"aé\")";
 /// n / 5 arguments: a captured run's pipe reads vary with the fork, and the
 /// call's own work must stand above that noise (the rms bound is 3%). Not
 /// n / 10: native `Command` holds one small CString per argument, and once

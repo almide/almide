@@ -18,7 +18,7 @@ effect fn resolve_bin(env_var: String, name: String, fallback: String) -> String
   match env.get(env_var) {
     some(p) => p,
     none => {
-      let r = process.exec_status("which", [name]) ?? process.ProcessStatus { code: 1, stdout: "", stderr: "" }
+      let r = process.output(process.ProcessCommand { cmd: "which", args: [name] }) ?? process.ProcessStatus { code: 1, stdout: "", stderr: "" }
       if r.code == 0 then string.trim(r.stdout) else fallback
     },
   }
@@ -196,7 +196,7 @@ effect fn call_claude_code(model_id: String, system: String, user: String) -> Re
   let claude_bin = resolve_bin("CLAUDE_BIN", "claude", "claude")!
   let neutral = env.get("GRAMMAR_LAB_NEUTRAL_DIR") ?? "/tmp/grammar-lab-neutral"
   fs.mkdir_p(neutral)!
-  let r = process.exec_status("/bin/sh", ["-c", "cd \"$0\" && exec \"$@\"", neutral, claude_bin, "-p", "--model", model_id, "--append-system-prompt", system, "--output-format", "text", "--max-turns", "1", user])!
+  let r = process.output(process.ProcessCommand { cmd: "/bin/sh", args: ["-c", "cd \"$0\" && exec \"$@\"", neutral, claude_bin, "-p", "--model", model_id, "--append-system-prompt", system, "--output-format", "text", "--max-turns", "1", user] })!
   if r.code != 0 then err("claude-code failed: ${r.stderr}") else ok(r.stdout)
 }
 
@@ -404,10 +404,10 @@ effect fn evaluate(code: String, tag: String) -> Result[EvalResult, String] = {
   let path = "${dir}/${lane}_${kind}.almd"
   fs.write_text(path, code)!
   let bin = get_almide_bin()!
-  let check_r = process.exec_status(bin, ["check", path])!
+  let check_r = process.output(process.ProcessCommand { cmd: bin, args: ["check", path] })!
   if check_r.code != 0 then ok({ compiled: false, passed: false, output: check_r.stdout + check_r.stderr })
   else {
-    let test_r = process.exec_status("perl", ["-e", "alarm shift; exec @ARGV", "120", bin, "test", path])!
+    let test_r = process.output(process.ProcessCommand { cmd: "perl", args: ["-e", "alarm shift; exec @ARGV", "120", bin, "test", path] })!
     ok({ compiled: true, passed: test_r.code == 0, output: test_r.stdout + test_r.stderr })
   }
 }
