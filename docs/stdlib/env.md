@@ -90,9 +90,9 @@ effect fn main() -> Unit = {
 ### `env.sleep_ms(ms: Int) -> Unit`
 
 Sleep for the given number of milliseconds. A zero or negative duration is an
-elapsed one and returns at once, on every target (`process.sleep` and the
-`timeout_ms` parameters of `process.exec_status_timeout` / `net.tcp_read_timeout`
-follow the same rule).
+elapsed one and returns at once, on every target (`process.sleep` follows the
+same rule). A deadline is different: a `process.ProcessCommand`'s
+`timeout_ms` of `0` means no deadline at all.
 
 ```almd check
 import env
