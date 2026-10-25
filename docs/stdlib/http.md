@@ -696,7 +696,8 @@ URLs are split the way curl, Go and the WHATWG URL standard split them:
   without one, or with another scheme, is an error: it is never sent as
   plain HTTP by guesswork.
 - `user:password@` becomes `Authorization: Basic …`, unless you pass your
-  own `Authorization` header. The userinfo is never taken for the host.
+  own `Authorization` header. The userinfo is never taken for the host. A
+  WASI 0.3 component sends the same field value.
 - IPv6 hosts are bracketed: `http://[::1]:8080/`.
 - A port is 1–65535. An unreadable port is an error, never a silent 80.
 - An internationalised host is sent as punycode (`bücher.example` →
