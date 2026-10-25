@@ -365,14 +365,17 @@ fn stdlib_name_cell(module: &str, dir: &Path) {
 
 /// A builtin-protocol cell: `src/<proto>.almd` redeclaring `protocol <P>`,
 /// beside a `user.almd` that derives the builtin `P` (or, for a non-derivable
-/// one, bounds a generic on it — `cell_user_bound`).
+/// one, bounds a generic on it — `cell_user_bound`). Built-in protocol names
+/// are reserved in every module (#4190), so both legs must refuse the
+/// redeclaration the same way; the module declares nothing that conforms to
+/// it, so the refusal is the one diagnostic either leg reports.
 fn builtin_protocol_cell(proto: &str, dir: &Path) {
     let module = format!("{}_decl", proto.to_lowercase());
     write(&dir.join("almide.toml"), &format!("[package]\nname = \"{CELL_PKG}\"\nversion = \"0.1.0\"\n"));
     write(
         &dir.join("src").join(format!("{module}.almd")),
         &format!(
-            "protocol {proto} {{\n  fn ping(self) -> Int\n}}\n\ntype Q: {proto} = {{ v: Int }}\n\nfn Q.ping(self) -> Int = self.v\n\nfn get() -> Int = Q {{ v: 1 }}.ping()\n"
+            "protocol {proto} {{\n  fn ping(self) -> Int\n}}\n\nfn get() -> Int = 1\n"
         ),
     );
     let derivable = almide_frontend::canonicalize::protocols::builtin_protocol(proto).is_some_and(|p| p.derivable);
