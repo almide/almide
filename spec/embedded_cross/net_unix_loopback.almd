@@ -55,8 +55,10 @@ effect fn main() -> Unit = {
   let fds = unix.take_fds(s)!
   println("got ${text(got)} with ${list.len(fds)} descriptors")
   println("received are new ${list.all(fds, (f) => f != a and f != b)}")
-  let fa = list.get(fds, 0) ?? -1
-  let fb = list.get(fds, 1) ?? -1
+  // Two arrive on the success path; the senders' own stand in otherwise,
+  // so a short delivery still prints (and diverges) instead of aborting.
+  let fa = list.get(fds, 0) ?? a
+  let fb = list.get(fds, 1) ?? b
   println("first ${text(unix.shm_read(fa, 10, 6)!)}, second ${text(unix.shm_read(fb, 0, 6)!)}")
   unix.shm_write(fa, 0, bytes.from_string("back"))!
   println("seen by the sender ${text(unix.shm_read(a, 0, 4)!)}")
@@ -98,7 +100,7 @@ effect fn main() -> Unit = {
 }
 
 // Read until the peer's close; the total byte count.
-effect fn drain(s: Int, n: Int) -> Int = {
+effect fn drain(s: unix.Fd, n: Int) -> Int = {
   let chunk = io.read(s, 65536)!
   if bytes.len(chunk) == 0 then n
   else drain(s, n + bytes.len(chunk))!
