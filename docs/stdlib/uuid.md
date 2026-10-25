@@ -90,3 +90,39 @@ effect fn main() -> Unit = {
 Negative, zero or positive as `a` orders before, with or after `b`, comparing
 byte by byte from the first. For `v7` values this is the order they were made
 in.
+
+<!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
+
+## Signature index (7 functions)
+
+```
+// A random (version 4) Uuid: 122 bits from the OS CSPRNG.
+// @since unreleased
+effect uuid.v4() -> Uuid
+
+// A time-ordered (version 7) Uuid: Unix ms, a counter, random bits; each is greater than the last.
+// @since unreleased
+effect uuid.v7() -> Uuid
+
+// The Uuid s spells: 8-4-4-4-12 hex digits, either case, optionally in {…} or after urn:uuid:.
+// @since unreleased
+uuid.parse(s: String) -> Result[Uuid, String]
+
+// u as 8-4-4-4-12 lowercase hex digits.
+// @since unreleased
+uuid.to_string(u: Uuid) -> String
+
+// The Uuid of exactly 16 bytes b; err for any other length.
+// @since unreleased
+uuid.from_bytes(b: Bytes) -> Result[Uuid, String]
+
+// The 16 bytes of u.
+// @since unreleased
+uuid.to_bytes(u: Uuid) -> Bytes
+
+// Negative, zero or positive as a orders before, with or after b, byte by byte.
+// @since unreleased
+uuid.compare(a: Uuid, b: Uuid) -> Int
+```
+
+<!-- END GENERATED SIGNATURE INDEX -->

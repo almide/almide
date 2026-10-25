@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 49 stdlib modules, 1655 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 51 stdlib modules, 1654 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -28,22 +28,22 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [heap](#heap) | 16 | 1 |
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 5 | 0 |
-| [http](#http) | 48 | 4 |
+| [http](#http) | 36 | 4 |
 | [int](#int) | 88 | 0 |
 | [int16](#int16) | 56 | 0 |
 | [int32](#int32) | 58 | 0 |
 | [int64](#int64) | 60 | 0 |
 | [int8](#int8) | 54 | 0 |
-| [io](#io) | 8 | 0 |
+| [io](#io) | 12 | 0 |
 | [json](#json) | 15 | 0 |
 | [list](#list) | 79 | 0 |
 | [map](#map) | 40 | 0 |
 | [math](#math) | 35 | 0 |
 | [matrix](#matrix) | 49 | 0 |
-| [net](#net) | 26 | 2 |
+| [net](#net) | 16 | 2 |
 | [option](#option) | 14 | 0 |
 | [path](#path) | 14 | 0 |
-| [process](#process) | 17 | 1 |
+| [process](#process) | 17 | 2 |
 | [random](#random) | 10 | 0 |
 | [regex](#regex) | 16 | 1 |
 | [result](#result) | 15 | 0 |
@@ -54,7 +54,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [uint32](#uint32) | 54 | 0 |
 | [uint64](#uint64) | 58 | 0 |
 | [uint8](#uint8) | 46 | 0 |
+| [unix](#unix) | 10 | 0 |
 | [url](#url) | 10 | 1 |
+| [uuid](#uuid) | 7 | 0 |
 | [value](#value) | 20 | 0 |
 | [zlib](#zlib) | 13 | 0 |
 
@@ -724,54 +726,42 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [http.md](http.md)
 
-- `effect http.serve(port: Int, f: (HttpRequest) -> Result[HttpResponse, String]) -> Unit` — Serves 0.0.0.0:port forever; handler err is a 500.
+- `effect http.serve(port: Int, handler: (HttpRequest) -> Result[HttpResponse, String]) -> Unit` — Serves 0.0.0.0:port forever; handler err is a 500.
 - `http.response(status: Int, body: String) -> HttpResponse` — Reply with Content-Type text/plain.
 - `http.json(status: Int, body: String) -> HttpResponse` — Reply with Content-Type application/json.
-- `http.with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse` — Reply with headers as-is; no default Content-Type.
+- `http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse` — Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
 - `http.redirect(url: String) -> HttpResponse` — 302 with Location url and empty body.
-- `http.status(resp: HttpResponse, code: Int) -> HttpResponse` — resp with code set; not range-checked.
-- `http.body(resp: HttpResponse) -> String` — Payload text; lossy UTF-8 when fetched.
-- `http.set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse` — Case-insensitive upsert of header key.
-- `http.get_header(resp: HttpResponse, key: String) -> Option[String]` — First value for key, any case; none if absent.
-- `http.status_code(resp: HttpResponse) -> Int` — HTTP status; 0 if the status line was bad.
-- `http.headers(resp: HttpResponse) -> Map[String, String]` — Map by lowercased name; first value wins.
-- `http.header_values(resp: HttpResponse, key: String) -> List[String]` — Every value for key, wire order; [] if absent.
-- `http.req_method(req: HttpRequest) -> String` — Request method as sent, e.g.
-- `http.req_path(req: HttpRequest) -> String` — Request target, query string included.
-- `http.req_body(req: HttpRequest) -> String` — Body text; empty without a Content-Length.
-- `http.req_header(req: HttpRequest, key: String) -> Option[String]` — First value for key, any case; none if absent.
+- `http.set_status(resp: HttpResponse, code: Int) -> HttpResponse` — resp with code set; not range-checked.
+- `http.status(resp: HttpResponse) -> Int` — HTTP status code; 0 if the status line was bad.
+- `http.header(m: M, name: String) -> Option[String]` — First value of header name, any case; none if absent.
+- `http.header_values(m: M, name: String) -> List[String]` — Every value of header name, any case, in wire order; [] if absent.
+- `http.headers(m: M) -> List[(String, String)]` — Every header as (name, value), wire spelling and order, repeats kept.
+- `http.body(m: M) -> String` — Body text; a fetched body is decoded as lossy UTF-8.
+- `http.body_bytes(m: M) -> Bytes` — Body as bytes: the UTF-8 bytes of body(m).
+- `http.set_header(m: M, name: String, value: String) -> M` — m with header name set, any case: the first match replaced in place, else appended.
+- `http.set_body(m: M, body: String) -> M` — m with its body replaced.
+- `http.set_body_bytes(m: M, body: Bytes) -> M` — m with its body replaced by body, decoded as lossy UTF-8.
+- `http.method(req: HttpRequest) -> String`
+- `http.path(req: HttpRequest) -> String`
 - `http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]` — url.parse_query of the target after its first ?; pairs in order; err on a bad escape.
-- `http.url_decode(s: String) -> String` — + to space, %XX to byte; bad escapes kept.
 - `effect http.get(url: String) -> String` — Body even for a 404; err only on transport.
-- `effect http.post(url: String, body: String) -> String` — Reply body of a POST; JSON type by default.
-- `effect http.put(url: String, body: String) -> String` — Reply body of a PUT; JSON type by default.
-- `effect http.patch(url: String, body: String) -> String` — Reply body of a PATCH; JSON type by default.
-- `effect http.delete(url: String) -> String` — Reply body of a DELETE; any status is ok.
-- `effect http.request(method: String, url: String, body: String, headers: Map[String, String]) -> String` — Reply body for any method; any status is ok.
-- `effect http.get_status(url: String) -> (Int, String)` — (status, body); a 404 is ok, not err.
-- `effect http.request_status(method: String, url: String, body: String, headers: Map[String, String]) -> (Int, String)` — (status, body) for any method; 3xx not followed.
+- `effect http.request(method: String, url: String, body: String, headers: List[(String, String)]) -> String` — Reply body for any method; any status is ok.
 - `effect http.get_response(url: String) -> HttpResponse` — Whole reply, 404 included; redirects not followed.
-- `effect http.post_response(url: String, body: String) -> HttpResponse` — Whole reply to a POST; any status is ok.
-- `effect http.put_response(url: String, body: String) -> HttpResponse` — Whole reply to a PUT; any status is ok.
-- `effect http.patch_response(url: String, body: String) -> HttpResponse` — Whole reply to a PATCH; any status is ok.
-- `effect http.delete_response(url: String) -> HttpResponse` — Whole reply to a DELETE; any status is ok.
-- `effect http.request_response(method: String, url: String, body: String, headers: Map[String, String]) -> HttpResponse` — Whole reply for any method; 3xx not followed.
+- `effect http.send(req: HttpRequest) -> HttpResponse` — Sends req to the URL its target names; the whole reply, any status; redirects not followed.
 - `effect http.get_bytes(url: String) -> Bytes` — Raw body bytes, not UTF-8 decoded.
-- `effect http.request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Bytes` — Raw body bytes for any method and headers.
-- `effect http.request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Unit` — Body chunks to on_chunk; err on a non-2xx.
-- `effect http.start(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits) -> HttpCall` — Begins a request; returns at once with a handle.
+- `effect http.request_bytes(method: String, url: String, body: String, headers: List[(String, String)]) -> Bytes` — Raw body bytes for any method and headers.
+- `effect http.start(req: HttpRequest, limits: HttpLimits) -> HttpCall` — Begins sending req; returns at once with a handle.
 - `effect http.poll(c: HttpCall) -> Option[Result[HttpResponse, String]]` — Never blocks: none while running, then the result.
 - `effect http.read_new(c: HttpCall) -> String` — Body text since the last read_new; never blocks.
 - `effect http.wait(c: HttpCall) -> HttpResponse` — Blocks until the call ends; any status is ok.
 - `effect http.cancel(c: HttpCall) -> Unit` — Closes the connection; the call ends as err.
-- `effect http.request_stream_with_limits(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits, on_chunk: (String) -> Unit) -> Unit` — request_stream bounded by per-call limits.
-- `http.new_request(method: String, target: String, body: String, headers: Map[String, String]) -> HttpRequest` — Request built in code; target keeps its ?query.
+- `http.new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest` — Request built in code; target keeps its ?query (a full URL for send / start).
 - `http.param(req: HttpRequest, name: String) -> Option[String]` — Router-bound path parameter, decoded; none if unbound.
 - `http.route(pattern: String, handler: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` — "GET /users/{id}" to a route; no method = any.
 - `http.mount(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` — Sub-app under prefix: /api/x reaches it as /x.
 - `http.router(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]` — Route table as a handler; err on conflicting routes.
 - `http.wrap(handler: (HttpRequest) -> Result[HttpResponse, String], middleware: List[((HttpRequest) -> Result[HttpResponse, String]) -> (HttpRequest) -> Result[HttpResponse, String]]) -> (HttpRequest) -> Result[HttpResponse, String]` — Applies middleware; the first is the outermost.
-- `http.decode_json(req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse]` — JSON body through decode; err is a 400 response.
+- `http.decode_json(req: HttpRequest, decode: (Value) -> Result[A, String]) -> Result[A, HttpResponse]` — JSON body through decode; err is a 400 response.
 
 ## int
 
@@ -1118,14 +1108,18 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [io.md](io.md)
 
-- `effect io.read_line() -> String` — Next stdin line, newline cut, bad UTF-8 as U+FFFD; "" at EOF too — read_line_opt tells them apart.
-- `effect io.read_line_opt() -> Option[String]` — Next stdin line, newline cut; none at EOF, some("") for an empty line.
-- `effect io.print(s: String) -> Unit` — Writes s, no newline, then flushes.
+- `effect io.read_line() -> Option[String]` — Next stdin line, newline cut, bad UTF-8 as U+FFFD; none at EOF, some("") for an empty line.
 - `effect io.read_all() -> String` — Rest of stdin as text, bad UTF-8 as U+FFFD; empty at EOF.
-- `effect io.read_byte() -> Int` — Next stdin byte 0..255, or -1 at EOF.
-- `effect io.read_n_bytes(n: Int) -> List[Int]` — Up to n stdin bytes; [] if n <= 0.
-- `effect io.write_bytes(data: List[Int]) -> Unit` — Low byte of each Int to stdout; unflushed.
-- `effect io.write(data: Bytes) -> Unit` — Raw data to stdout; no newline.
+- `effect io.print(s: String) -> Unit` — Writes s to stdout, no newline, then flushes.
+- `effect io.eprint(s: String) -> Unit` — Writes s to stderr, no newline.
+- `effect io.stdin() -> Stdin` — Standard input, for io.read / read_exact / read_to_end.
+- `effect io.stdout() -> Stdout` — Standard output, for io.write.
+- `effect io.stderr() -> Stderr` — Standard error, for io.write.
+- `effect io.read(h: H, max: Int) -> Bytes` — Up to max bytes from h; empty once h has ended; err if max < 0.
+- `effect io.read_exact(h: H, n: Int) -> Bytes` — Exactly n bytes from h; err if h ends first, naming how many arrived.
+- `effect io.read_to_end(h: H) -> Bytes` — Every byte until h ends.
+- `effect io.write(h: H, data: Bytes) -> Unit` — Writes all of data to h.
+- `effect io.close(h: H) -> Unit` — Closes h; closing twice is ok.
 
 ## json
 
@@ -1374,32 +1368,22 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [net.md](net.md)
 
-- `effect net.tcp_connect(host: String, port: Int) -> Int` — Connected stream handle; err if refused.
-- `effect net.tcp_read(stream: Int, len: Int) -> Bytes` — Up to len bytes; empty once the peer closed; err if len < 0.
-- `effect net.tcp_write(stream: Int, data: Bytes) -> Unit` — Sends all of data, flushed; err if closed.
-- `effect net.tcp_read_exact(stream: Int, len: Int) -> Bytes` — Exactly len bytes; err on early EOF, naming how many arrived.
-- `effect net.tcp_close(stream: Int) -> Unit` — Shuts down the stream; twice is ok.
-- `effect net.tcp_is_open(stream: Int) -> Bool` — False after tcp_close; a peer close is not seen.
-- `effect net.tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Bytes` — Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
-- `effect net.tcp_set_timeout(stream: Int, timeout_ms: Int) -> Unit` — Sets read/write timeout; <= 0 clears it.
-- `effect net.tcp_available(stream: Int) -> Int` — Bytes readable now, capped at 65536; 0 if none.
-- `effect net.tcp_listen(host: String, port: Int) -> Int` — Listener bound to host:port; err if in use.
-- `effect net.tcp_local_port(listener: Int) -> Int` — The port a listener is bound to: the one the OS chose when it listened on port 0.
-- `effect net.tcp_accept(listener: Int) -> Int` — Blocks for the next client; its stream handle.
-- `effect net.tcp_close_listener(listener: Int) -> Unit` — Stops listening; closing twice is ok.
-- `effect net.unix_connect(path: String) -> Int` — Stream socket connected to the listener at path; its descriptor.
-- `effect net.unix_listen(path: String) -> Int` — Listener bound at path, which must not exist yet.
-- `effect net.unix_accept(listener: Int) -> Int` — Blocks for the next connection; its descriptor.
-- `effect net.unix_send(sock: Int, data: Bytes, fds: List[Int]) -> Unit` — Sends all of data, the descriptors fds riding with its first byte.
-- `effect net.unix_recv(sock: Int, max: Int) -> Bytes` — Up to max bytes, blocking; empty once the peer closed.
-- `effect net.unix_take_fds(sock: Int) -> List[Int]` — Descriptors received on sock and not yet taken, oldest first.
-- `effect net.unix_poll(fd: Int, timeout_ms: Int) -> Bool` — True if fd is readable within timeout_ms; < 0 waits forever.
-- `effect net.unix_wait(fds: List[Int], timeout_ms: Int) -> List[Int]` — The fds readable within timeout_ms, in order; < 0 waits for one.
-- `effect net.unix_close(fd: Int) -> Unit` — Closes a socket, listener or received descriptor.
-- `effect net.shm_create(size: Int) -> Int` — New zero-filled unnamed file of size bytes; its descriptor.
-- `effect net.shm_resize(fd: Int, size: Int) -> Unit` — Grows or shrinks the file fd to size bytes.
-- `effect net.shm_write(fd: Int, offset: Int, data: Bytes) -> Unit` — Writes data into fd at byte offset.
-- `effect net.shm_read(fd: Int, offset: Int, len: Int) -> Bytes` — Up to len bytes of fd from offset; fewer at its end.
+- `effect net.tcp_connect(host: String, port: Int) -> TcpStream` — A stream connected to host:port; err if refused.
+- `effect net.tcp_is_open(stream: TcpStream) -> Bool` — False after io.close; a peer close is not seen.
+- `effect net.tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Bytes` — Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
+- `effect net.tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Unit` — Sets read/write timeout; <= 0 clears it.
+- `effect net.tcp_available(stream: TcpStream) -> Int` — Bytes readable now, capped at 65536; 0 if none.
+- `effect net.tcp_listen(host: String, port: Int) -> TcpListener` — A listener bound to host:port; err if in use.
+- `effect net.tcp_local_port(listener: TcpListener) -> Int` — The port a listener is bound to: the one the OS chose when it listened on port 0.
+- `effect net.tcp_accept(listener: TcpListener) -> TcpStream` — Blocks for the next client; its stream.
+- `effect net.udp_bind(host: String, port: Int) -> UdpSocket` — A UDP socket bound to host:port; port 0 lets the OS choose.
+- `effect net.udp_local_port(sock: UdpSocket) -> Int` — The port sock is bound to.
+- `effect net.udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Unit` — Sends data as one datagram to host:port.
+- `effect net.udp_recv_from(sock: UdpSocket, max: Int) -> UdpPacket` — Blocks for the next datagram: at most max bytes of it, and its sender.
+- `effect net.lookup_host(host: String) -> List[IpAddr]` — The addresses host resolves to, each once; err if none.
+- `net.parse_ip(s: String) -> Result[IpAddr, String]` — The IP address s spells: dotted IPv4, or IPv6 (`::` and an IPv4 tail allowed).
+- `net.ip_to_string(ip: IpAddr) -> String` — ip as text: dotted IPv4, or the RFC 5952 short IPv6 form.
+- `net.is_loopback(ip: IpAddr) -> Bool` — True for 127.0.0.0/8 and ::1.
 
 ## option
 
@@ -1444,22 +1428,22 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 [process.md](process.md)
 
 - `effect process.exec(cmd: String, args: List[String]) -> String` — Stdout on exit 0; else err with stderr text.
+- `effect process.output(c: ProcessCommand) -> ProcessStatus` — Runs c to its end: any exit code is ok; err if it cannot start or passes its deadline.
+- `effect process.run(c: ProcessCommand) -> Int` — Runs c on this terminal (its stdin too, unless c.stdin is set); the exit code, -1 if signalled.
+- `effect process.start(c: ProcessCommand) -> ProcessChild` — Starts c in its own process group and returns at once; its output is captured.
+- `effect process.poll(c: ProcessChild) -> Option[Result[ProcessStatus, String]]` — Never blocks: none while c runs, then its outcome (err past its deadline).
+- `effect process.wait(c: ProcessChild) -> ProcessStatus` — Blocks until c ends; its outcome.
+- `effect process.stop(c: ProcessChild, grace_ms: Int) -> ProcessStatus` — SIGTERM to c's group, grace_ms to end, then SIGKILL; again after the end is the same outcome.
+- `effect process.read_new_stdout(c: ProcessChild) -> String` — What c wrote to stdout since the last read; never blocks.
+- `effect process.read_new_stderr(c: ProcessChild) -> String` — What c wrote to stderr since the last read; never blocks.
+- `effect process.child_pid(c: ProcessChild) -> Int` — The OS process id of c, for process.kill.
+- `effect process.kill(pid: Int, signal: Int) -> Unit` — Sends signal to pid; err is kill's stderr.
 - `effect process.exit(code: Int) -> Never` — Ends with code 0..=255; others abort, exit 1.
+- `effect process.pid() -> Int` — OS process ID of this program.
 - `effect process.args() -> List[String]` — Full argv, program name at index 0.
 - `effect process.stdin_lines() -> List[String]` — All stdin lines; err on non-UTF-8 input.
-- `effect process.exec_in(dir: String, cmd: String, args: List[String]) -> String` — exec in dir; err is stderr, maybe empty.
-- `effect process.exec_with_stdin(cmd: String, args: List[String], input: String) -> String` — exec with input piped in; err may be empty.
-- `effect process.exec_status(cmd: String, args: List[String]) -> ProcessStatus` — Code and output; code -1 if killed by signal.
-- `effect process.exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) -> ProcessStatus` — exec_status, but kills cmd and errs at timeout_ms.
-- `effect process.run(cmd: String, args: List[String]) -> Int` — Run cmd on this terminal; exit code, -1 if signalled.
-- `effect process.run_in(dir: String, cmd: String, args: List[String]) -> Int` — run in dir; exit code, -1 if signalled.
-- `effect process.exec_attached(cmd: String, args: List[String]) -> Int   (deprecated — use process.run)` — Alias of process.run.
-- `effect process.pid() -> Int` — OS process ID of this program.
 - `effect process.env(key: String) -> Option[String]` — Variable value, or none if unset.
-- `effect process.spawn(cmd: String, args: List[String]) -> Int` — Pid of cmd started in the background.
-- `effect process.kill(pid: Int, signal: Int) -> Unit` — Sends signal to pid; err is kill's stderr.
 - `effect process.sleep(ms: Int) -> Unit` — Blocks ms milliseconds; negative is 0.
-- `effect process.is_alive(pid: Int) -> Bool` — True while pid exists, zombies included.
 
 ## random
 
@@ -1900,6 +1884,21 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `uint8.from_saturating(x: S) -> UInt8` — x as UInt8, toward zero, clamped to UInt8's range; NaN is 0.
 - `uint8.from_wrapping(x: S) -> UInt8` — The low 8 bits of integer x as UInt8 (two's complement).
 
+## unix
+
+[unix.md](unix.md)
+
+- `effect unix.connect(path: String) -> Fd` — Stream socket connected to the listener at path.
+- `effect unix.listen(path: String) -> Fd` — Listener bound at path, which must not exist yet.
+- `effect unix.accept(listener: Fd) -> Fd` — Blocks for the next connection on listener.
+- `effect unix.write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Unit` — Sends all of data, the descriptors fds riding with its first byte.
+- `effect unix.take_fds(sock: Fd) -> List[Fd]` — Descriptors received on sock and not yet taken, oldest first.
+- `effect unix.select(xs: List[Fd], timeout_ms: Int) -> List[Fd]` — The descriptors of xs readable within timeout_ms, in order; < 0 waits for one, 0 only checks.
+- `effect unix.shm_create(size: Int) -> Fd` — New zero-filled unnamed file of size bytes.
+- `effect unix.shm_resize(fd: Fd, size: Int) -> Unit` — Grows or shrinks the file fd to size bytes.
+- `effect unix.shm_write(fd: Fd, offset: Int, data: Bytes) -> Unit` — Writes data into fd at offset; a negative offset or a write past the end aborts (shm_resize first).
+- `effect unix.shm_read(fd: Fd, offset: Int, len: Int) -> Bytes` — Up to len bytes of fd from offset; fewer at its end.
+
 ## url
 
 [url.md](url.md)
@@ -1914,6 +1913,18 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `url.decode_form(s: String) -> Result[String, String]` — + as space, then percent-decoded; err on bad escape/UTF-8.
 - `url.parse_query(query: String) -> Result[List[(String, String)], String]` — Decoded (k, v) pairs; bare key gets ""; err on a bad escape.
 - `url.resolve(base: Url, ref: String) -> Result[Url, String]` — ref cleaned as parse does, resolved against base (RFC 3986 5.2); err when the result is not a URL.
+
+## uuid
+
+[uuid.md](uuid.md)
+
+- `effect uuid.v4() -> Uuid` — A random (version 4) Uuid: 122 bits from the OS CSPRNG.
+- `effect uuid.v7() -> Uuid` — A time-ordered (version 7) Uuid: Unix ms, a counter, random bits; each is greater than the last.
+- `uuid.parse(s: String) -> Result[Uuid, String]` — The Uuid s spells: 8-4-4-4-12 hex digits, either case, optionally in {…} or after urn:uuid:.
+- `uuid.to_string(u: Uuid) -> String` — u as 8-4-4-4-12 lowercase hex digits.
+- `uuid.from_bytes(b: Bytes) -> Result[Uuid, String]` — The Uuid of exactly 16 bytes b; err for any other length.
+- `uuid.to_bytes(u: Uuid) -> Bytes` — The 16 bytes of u.
+- `uuid.compare(a: Uuid, b: Uuid) -> Int` — Negative, zero or positive as a orders before, with or after b, byte by byte.
 
 ## value
 
