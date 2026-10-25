@@ -410,9 +410,12 @@ fn enforce_effect_permissions(
 
     let mut violations = 0;
     for (name, fe) in entries {
-        let forbidden: Vec<_> = fe.transitive.iter()
+        let mut forbidden: Vec<_> = fe.transitive.iter()
             .filter(|e| !allowed.contains(e))
             .collect();
+        // `transitive` is a hash set: in its order the report (and the first
+        // `path:` line a reader takes) changed from run to run.
+        forbidden.sort_by_key(|e| e.to_string());
         if !forbidden.is_empty() {
             err(&format!(
                 "\nerror: capability violation in `{}`",
