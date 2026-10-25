@@ -33,9 +33,30 @@ fn diff_seconds(a: Int, b: Int) -> Int = _
 @intrinsic("almide_rt_datetime_format")
 fn format(ts: Int, pattern: String) -> String = _
 
-/// UTC epoch secs; out-of-range fields roll over.
+// from_parts refuses an out-of-range part by name with parse_iso's texts
+// (R-datetime-07), then asks the civil algorithm, which rolls nothing over
+// once every part is in range.
+/// UTC epoch secs of the parts; err naming the first part out of range.
+fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String] =
+  if m < 1 or m > 12 then err("month out of range: " + int.to_string(m))
+  else if d < 1 or d > __days_in_month(y, m) then err("day out of range: " + int.to_string(d))
+  else if h < 0 or h > 23 then err("hour out of range: " + int.to_string(h))
+  else if min < 0 or min > 59 then err("minute out of range: " + int.to_string(min))
+  else if s < 0 or s > 59 then err("second out of range: " + int.to_string(s))
+  else ok(datetime.__from_parts(y, m, d, h, min, s))
+
+local fn __days_in_month(y: Int, m: Int) -> Int = match m {
+  2 => if y % 4 == 0 and (y % 100 != 0 or y % 400 == 0) then 29 else 28,
+  4 => 30,
+  6 => 30,
+  9 => 30,
+  11 => 30,
+  _ => 31,
+}
+
+// The civil algorithm itself: out-of-range parts roll over.
 @intrinsic("almide_rt_datetime_from_parts")
-fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = _
+fn __from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = _
 
 /// Identity: seconds are already a timestamp.
 @intrinsic("almide_rt_datetime_from_unix")

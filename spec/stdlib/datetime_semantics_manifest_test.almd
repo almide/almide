@@ -32,7 +32,7 @@ test "datetime.format unit=second" {
 }
 
 test "datetime.from_parts unit=civil-field" {
-  assert_eq("${datetime.from_parts(2024, 1, 15, 12, 34, 56)}", "1705322096")
+  assert_eq("${datetime.from_parts(2024, 1, 15, 12, 34, 56) ?? 0}", "1705322096")
 }
 
 test "datetime.from_unix unit=second" {

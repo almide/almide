@@ -361,6 +361,7 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
                 | "day"
                 | "weekday"
                 | "from_parts"
+                | "__from_parts"
                 | "to_iso"
                 | "format"
                 | "parse_iso"

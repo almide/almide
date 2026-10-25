@@ -353,6 +353,7 @@ breaks = [
   "`string.from_codepoint(n)` returns `String?`: none for a negative n, a surrogate or a value past U+10FFFF, where it returned \"\". Write `string.from_codepoint(n) ?? \"\"` for the old answer, or match the none (R-string-14)",
   "`list.binary_search(xs, target)` takes any element type (R-list-15): the order is `list.sort`'s, and over a List[Int] it answers the same index as before",
   "`testing.assert_gt(a, b)` / `assert_lt(a, b)` take any ordered type, compared with `>` / `<` (R-testing-02); inside a test block a failure no longer prints the two Int operands",
+  "`datetime.from_parts(y, m, d, h, min, s)` returns `Result[Int, String]` and refuses a part out of range by name with `parse_iso`'s texts (`month out of range: 13`, `day out of range: 30`, `hour …`, `minute …`, `second …`), where it rolled the part over into the next field (R-datetime-07). Write `datetime.from_parts(…)!` in an effect fn or `?? fallback`; a program that relied on the roll-over computes the carry itself",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
