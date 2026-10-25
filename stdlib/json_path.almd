@@ -82,13 +82,20 @@ else {
 }
 
 // The value set_path builds nests its path's steps plus the new value's own
-// nesting deep; past json.parse's bound (stdlib/json_parse.almd
-// `__json_max_depth`) it is refused with parse's text (#4209), so a value
-// made here is one parse could have made and every recursive walk of it
-// stays bounded.
+// nesting deep; past json.parse's bound it is refused with parse's text
+// (#4209), so a value made here is one parse could have made and every
+// recursive walk of it stays bounded. A self-hosted source links on its own
+// (a private fn of stdlib/json_parse.almd is not callable from here), so the
+// bound is read through this file's `__jpath_max_depth`, which
+// tests/json_depth_limit_test.rs pins, with json_parse.almd's, to
+// crates/almide-base/src/json_limits.rs's JSON_MAX_DEPTH.
+fn __jpath_max_depth() -> Int = 1000
+
 fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = {
   let steps = list.len(path)
-  if steps > __json_max_depth() or __json_nests_past(nv, __json_max_depth() - steps) then err(__json_depth_error())
+  if steps > __jpath_max_depth() or __json_nests_past(nv, __jpath_max_depth() - steps) then err(
+    "json: nesting deeper than ${int.to_string(__jpath_max_depth())}",
+  )
   else ok(json_path_set_go(j, path, 0, nv))
 }
 
