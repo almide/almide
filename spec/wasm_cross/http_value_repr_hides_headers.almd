@@ -1,0 +1,43 @@
+// @contract: C-433
+// ALS-R8: an HttpRequest / HttpResponse interpolates as its declared repr —
+// method, path, body (status and body for a response), and the header COUNT —
+// bare and nested in a record field, a list element and an option payload,
+// byte-identically on native and wasm, and never shows a header value. #4204:
+// wasm printed the self-hosted carrier (`["GET", "/x", "", "2",
+// "Authorization", "Bearer …", …]`) wherever the value sat in a container,
+// and native's bare `${req}` failed in rustc (E0277). The body carries the
+// five nested-string escapes, so the repr's quoting is pinned too.
+import http
+
+type Wrap = { req: HttpRequest, resp: HttpResponse }
+
+fn leaks(t: String) -> Bool = [
+  "TOKXYZ-SECRET",
+  "sid=COOKIE-SECRET",
+  "sid=SETCOOKIE-SECRET",
+  "Bearer",
+  "Authorization",
+  "Set-Cookie"
+] |> list.any((s) => string.contains(t, s))
+
+effect fn main() -> Unit = {
+  let h = map.from_list([("Authorization", "Bearer TOKXYZ-SECRET"), ("Cookie", "sid=COOKIE-SECRET")])
+  let req = http.new_request("POST", "/login?next=%2F", "a\"b\\c\nd\re\tf", h)
+  let resp = http.with_headers(
+    401,
+    "denied",
+    map.from_list([("Set-Cookie", "sid=SETCOOKIE-SECRET"), ("X-A", "1"), ("X-B", "2")]),
+  )
+  let lines = [
+    "${req}",
+    "${resp}",
+    "${Wrap { req: req, resp: resp }}",
+    "${[req, req]}",
+    "${[resp]}",
+    "${some(req)}",
+    "${some(resp)}",
+    "${(req, 1)}"
+  ]
+  println(lines |> list.join("\n"))
+  println("leaked: ${lines |> list.any((l) => leaks(l))}")
+}
