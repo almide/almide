@@ -3,17 +3,17 @@
 // Supports zlib (with header), deflate (raw), and gzip formats.
 // Requires `import zlib`.
 // ── Zlib (with header) ──
-/// Zlib-framed DEFLATE of data; bytes vary by target.
+/// Zlib-framed DEFLATE of b; bytes vary by target.
 @intrinsic("almide_rt_zlib_compress")
-effect fn compress(data: Bytes) -> Result[Bytes, String] = _
+effect fn compress(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like compress; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_compress_level")
-effect fn compress_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
+effect fn compress_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
 /// Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_decompress")
-effect fn decompress(data: Bytes) -> Result[Bytes, String] = _
+fn decompress(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like decompress, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_decompress_max")
@@ -22,24 +22,24 @@ fn decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 // ── Deflate (raw, no header — used by Minecraft protocol) ──
 /// Raw DEFLATE, no header; bytes vary by target.
 @intrinsic("almide_rt_zlib_deflate")
-effect fn deflate(data: Bytes) -> Result[Bytes, String] = _
+effect fn deflate(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like deflate; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_deflate_level")
-effect fn deflate_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
+effect fn deflate_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
 /// Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_inflate")
-effect fn inflate(data: Bytes) -> Result[Bytes, String] = _
+fn inflate(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like inflate, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_inflate_max")
 fn inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 // ── Gzip ──
-/// RFC 1952 gzip of data; bytes vary by target.
+/// RFC 1952 gzip of b; bytes vary by target.
 @intrinsic("almide_rt_zlib_gzip")
-effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
+effect fn gzip(b: Bytes) -> Result[Bytes, String] = _
 
 // Empty input is `err("zlib.gunzip: unexpected end of file")` on every leg
 // (#2478): a gzip file has at least one member.
@@ -50,7 +50,7 @@ effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
 // err, never a memory exhaustion. The `_max` forms take the bound instead.
 /// Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_gunzip")
-effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _
+fn gunzip(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_gunzip_max")

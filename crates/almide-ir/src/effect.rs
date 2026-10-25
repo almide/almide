@@ -227,8 +227,7 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
 /// `effect fn`s in a `Pure` module, each with no host access. The gate refuses
 /// any other `effect fn` in a `Pure` module: a new one must be classified.
 pub const HOST_FREE_EFFECT_FNS: &[&str] = &[
-    "zlib.compress", "zlib.compress_level", "zlib.decompress", "zlib.deflate",
-    "zlib.deflate_level", "zlib.inflate", "zlib.gzip", "zlib.gunzip",
+    "zlib.compress", "zlib.compress_level", "zlib.deflate", "zlib.deflate_level", "zlib.gzip",
 ];
 
 /// Runtime-symbol prefixes that are not their module's name

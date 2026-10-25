@@ -22,7 +22,7 @@ fn stringify(v: Value) -> String = _
 
 /// JSON with 2-space indent; [] and {} inline, NaN/inf null.
 @intrinsic("almide_json_stringify_pretty")
-fn stringify_pretty(j: Value) -> String = _
+fn stringify_pretty(v: Value) -> String = _
 
 // ── key-based typed extraction ──
 /// String at key; none if absent or non-string.

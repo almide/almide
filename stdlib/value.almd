@@ -1,7 +1,7 @@
-/// Wraps items as an Array Value.
+/// Wraps xs as an Array Value.
 @intrinsic("almide_rt_value_array")
-@reuse(items)
-fn array(items: List[Value]) -> Value = _
+@reuse(xs)
+fn array(xs: List[Value]) -> Value = _
 
 /// Array items; err if v is another kind.
 @intrinsic("almide_rt_value_as_array")
@@ -44,10 +44,10 @@ fn merge(a: Value, b: Value) -> Value = _
 @intrinsic("almide_rt_value_null")
 fn null() -> Value = _
 
-/// Wraps pairs as an Object; a repeated key keeps its first position, last value.
+/// Wraps the pairs xs as an Object; a repeated key keeps its first position, last value.
 @intrinsic("almide_rt_value_object")
-@reuse(pairs)
-fn object(pairs: List[(String, Value)]) -> Value = _
+@reuse(xs)
+fn object(xs: List[(String, Value)]) -> Value = _
 
 /// v minus the listed keys; non-objects as-is.
 @intrinsic("almide_rt_value_omit")
