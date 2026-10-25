@@ -1186,14 +1186,35 @@ fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
 /// The bytes ordered by f's key; equal keys keep their order.
 fn sort_by[B](b: Bytes, f: (Int) -> B) -> List[Int] = list.sort_by(bytes.to_list(b), f)
 
-local fn merge_with(xs: List[Int], ys: List[Int], cmp: (Int, Int) -> Int, i: Int, j: Int, acc: List[Int]) -> List[Int] = match (list.get(
-  xs,
-  i,
-), list.get(ys, j)) {
-  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, ys, cmp, i, j + 1, acc + [y])
-  else merge_with(xs, ys, cmp, i + 1, j, acc + [x]),
-  (some(_), none) => acc + list.drop(xs, i),
-  _ => acc + list.drop(ys, j),
+// The stable merge, pushing into one output (#4196): the earlier merge
+// appended `acc + [y]` per step, a full copy on wasm, which made the sort
+// quadratic there. The decision and call order are unchanged: a right element
+// goes first only when cmp(right, left) < 0, one cmp call per comparison.
+local fn merge_with(xs: List[Int], ys: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
+  var out: List[Int] = []
+  var i = 0
+  var j = 0
+  for _ in 0..<(list.len(xs) + list.len(ys)) {
+    match (list.get(xs, i), list.get(ys, j)) {
+      (some(x), some(y)) => if cmp(y, x) < 0 then {
+        list.push(out, y)
+        j = j + 1
+      } else {
+        list.push(out, x)
+        i = i + 1
+      },
+      (some(x), none) => {
+        list.push(out, x)
+        i = i + 1
+      },
+      (none, some(y)) => {
+        list.push(out, y)
+        j = j + 1
+      },
+      (none, none) => (),
+    }
+  }
+  out
 }
 
 local fn merge_sort_with(xs: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
@@ -1203,9 +1224,6 @@ local fn merge_sort_with(xs: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
     merge_sort_with(list.take(xs, n / 2), cmp),
     merge_sort_with(list.drop(xs, n / 2), cmp),
     cmp,
-    0,
-    0,
-    [],
   )
 }
 
@@ -1277,39 +1295,18 @@ fn unique(b: Bytes) -> Bytes = bytes.from_list(list.unique(bytes.to_list(b)))
 /// The first byte of each key f gives, in order.
 fn unique_by[K](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
 
-// Does needle occur in xs at i?
-local fn matches_at(xs: List[Int], needle: List[Int], i: Int) -> Bool = list.slice(
-  xs,
-  i,
-  i + list.len(needle),
-) == needle
-
-// The first match at or after i, or -1.
-local fn find_from(xs: List[Int], needle: List[Int], i: Int) -> Int =
-  if i + list.len(needle) > list.len(xs) then -1
-  else if matches_at(xs, needle, i) then i
-  else find_from(xs, needle, i + 1)
-
-// The last match at or before i, or -1.
-local fn find_back(xs: List[Int], needle: List[Int], i: Int) -> Int =
-  if i < 0 then -1
-  else if matches_at(xs, needle, i) then i
-  else find_back(xs, needle, i - 1)
-
+// The searches below go through bytes.index_of and bytes.split, the one
+// linear-time substring search each target has (#4206): they used to compare
+// a `list.slice` window at every position, O(n·m) with a copy per probe.
 /// Byte index of the last needle, or none; an empty needle is found at len.
 fn last_index_of(b: Bytes, needle: Bytes) -> Int? = {
-  let xs = bytes.to_list(b)
-  let ns = bytes.to_list(needle)
-  let i = find_back(xs, ns, list.len(xs) - list.len(ns))
-  if i < 0 then none else some(i)
-}
-
-// Non-overlapping matches from i, left to right, each replaced by to.
-local fn replace_go(xs: List[Int], from: List[Int], to: List[Int], i: Int, limit: Int, acc: List[Int]) -> List[Int] = {
-  let j = if limit == 0 then -1
-  else find_from(xs, from, i)
-  if j < 0 then acc + list.drop(xs, i)
-  else replace_go(xs, from, to, j + list.len(from), limit - 1, acc + list.slice(xs, i, j) + to)
+  // The leftmost match in the reversed bytes is the rightmost one here.
+  let n = bytes.len(b)
+  let m = bytes.len(needle)
+  match bytes.index_of(bytes.reverse(b), bytes.reverse(needle)) {
+    some(i) => some(n - i - m),
+    none => none,
+  }
 }
 
 // An empty pattern matches before every byte and at the end (the string rule).
@@ -1318,21 +1315,36 @@ local fn replace_empty(xs: List[Int], to: List[Int], limit: Int) -> List[Int] =
   else to + xs
 
 /// b with every non-overlapping from replaced by to, left to right.
-fn replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes = {
-  let xs = bytes.to_list(b)
-  let fs = bytes.to_list(from)
-  let ts = bytes.to_list(to)
-  if list.is_empty(fs) then bytes.from_list(replace_empty(xs, ts, -1))
-  else bytes.from_list(replace_go(xs, fs, ts, 0, -1, []))
-}
+fn replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes =
+  if bytes.is_empty(from) then bytes.from_list(replace_empty(bytes.to_list(b), bytes.to_list(to), -1))
+  else {
+    // The pieces between the non-overlapping matches, written once each
+    // into a buffer sized up front, with `to` between them.
+    let pieces = bytes.split(b, from)
+    let tn = bytes.len(to)
+    var out = bytes.zeros(bytes.len(b) + (list.len(pieces) - 1) * (tn - bytes.len(from)))
+    var at = 0
+    var first = true
+    for piece in pieces {
+      if first then {
+        first = false
+      } else {
+        bytes.copy_from(out, to, at, 0, tn)
+        at = at + tn
+      }
+      bytes.copy_from(out, piece, at, 0, bytes.len(piece))
+      at = at + bytes.len(piece)
+    }
+    out
+  }
 
 /// b with the first from replaced by to.
-fn replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes = {
-  let xs = bytes.to_list(b)
-  let fs = bytes.to_list(from)
-  let ts = bytes.to_list(to)
-  if list.is_empty(fs) then bytes.from_list(replace_empty(xs, ts, 1))
-  else bytes.from_list(replace_go(xs, fs, ts, 0, 1, []))
+fn replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes = match bytes.index_of(b, from) {
+  some(i) => bytes.concat(
+    bytes.concat(bytes.slice(b, 0, i), to),
+    bytes.slice(b, i + bytes.len(from), bytes.len(b)),
+  ),
+  none => b,
 }
 
 /// b without prefix, or none when b does not start with it.
@@ -1345,12 +1357,6 @@ fn strip_suffix(b: Bytes, suffix: Bytes) -> Bytes? =
   if bytes.ends_with(b, suffix) then some(bytes.slice(b, 0, bytes.len(b) - bytes.len(suffix)))
   else none
 
-local fn count_go(xs: List[Int], needle: List[Int], i: Int, n: Int) -> Int = {
-  let j = find_from(xs, needle, i)
-  if j < 0 then n
-  else count_go(xs, needle, j + list.len(needle), n + 1)
-}
-
 /// Non-overlapping occurrences of needle; len + 1 for an empty needle.
 fn count_matches(b: Bytes, needle: Bytes) -> Int = if bytes.len(needle) == 0 then bytes.len(b) + 1
-else count_go(bytes.to_list(b), bytes.to_list(needle), 0, 0)
+else list.len(bytes.split(b, needle)) - 1
