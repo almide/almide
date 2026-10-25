@@ -55,7 +55,7 @@ local fn __days_in_month(y: Int, m: Int) -> Int = match m {
 }
 
 // The civil algorithm itself: out-of-range parts roll over.
-@intrinsic("almide_rt_datetime_from_parts")
+@intrinsic("almide_rt_datetime___from_parts")
 fn __from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = _
 
 /// Identity: seconds are already a timestamp.

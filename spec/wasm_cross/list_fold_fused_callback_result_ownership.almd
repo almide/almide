@@ -47,7 +47,11 @@
 // BOTH binaries.
 fn main() -> Unit = {
   // ---- the regression pin: fused, borrowed tail; each printed freed memory on 0.62.0 ----
-  let r_str: String = list.fold(list.filter(string.to_list("AB"), ((a) => true)), "X", ((n, y) => y))
+  let r_str: String = list.fold(
+    list.filter(string.to_list("AB"), ((a) => true)),
+    "X",
+    ((n, y) => y),
+  )
   println("borrow str  filter = ${r_str}")
   let r_li: List[Int] = list.fold(
     list.filter([
@@ -78,7 +82,11 @@ fn main() -> Unit = {
   }
   println("borrow res  filter = ${r_res_s}")
   let z: String = int.to_string(7)
-  let r_cap: String = list.fold(list.filter(string.to_list("AB"), ((a) => true)), "X", ((n, y) => z))
+  let r_cap: String = list.fold(
+    list.filter(string.to_list("AB"), ((a) => true)),
+    "X",
+    ((n, y) => z),
+  )
   println("borrow cap  filter = ${r_cap} / ${z}")
   let r_acc: String = list.fold(list.filter(string.to_list("AB"), ((a) => true)), z, ((n, y) => n))
   println("borrow acc  filter = ${r_acc} / ${z}")
@@ -98,7 +106,11 @@ fn main() -> Unit = {
     ((n, y) => y + [9]),
   )
   println("fresh  li   filter = ${f_li}")
-  let f_map: String = list.fold(list.map(string.to_list("AB"), ((c) => c + "!")), "X", ((n, y) => y))
+  let f_map: String = list.fold(
+    list.map(string.to_list("AB"), ((c) => c + "!")),
+    "X",
+    ((n, y) => y),
+  )
   println("fresh  elem map    = ${f_map}")
   // ---- scalar control: no block, no guard, the integer untouched ----
   let s: Int = list.fold(list.filter([1, 2, 3, 4], ((a) => a > 1)), 100, ((n, y) => n + y))
