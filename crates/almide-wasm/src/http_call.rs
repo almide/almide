@@ -76,6 +76,26 @@ impl Emitter<'_> {
                 self.fs_call_1(r, OP_HTTP_SERVE_REPLY)?;
                 self.fs_result_unit()?
             }
+            // The contained loop (#4203): the step closure's env pointer in
+            // the a_len slot; the host calls the closure itself.
+            ("__http_serve_run", [step]) => {
+                use crate::fs_meta::OP_HTTP_SERVE_RUN;
+                self.note_host_op(OP_HTTP_SERVE_RUN);
+                let got = self.lower_arg(step, None, ArgMode::Borrow)?;
+                if !matches!(got, SliceTy::Fn(_)) {
+                    return unsup("http-serve-run-step");
+                }
+                let env = self.hold_i32()?;
+                let mut i = self.f.instructions();
+                i.local_set(env);
+                i.i32_const(OP_HTTP_SERVE_RUN).i32_const(0);
+                i.local_get(env);
+                i.i32_const(0).i32_const(0);
+                i.call(F_FS_CALL);
+                let _ = i;
+                self.release_i32();
+                self.fs_result_unit()?
+            }
             // The http call handle's leaves (#2633), then the tcp family's
             // (#3620).
             _ => {

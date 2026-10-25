@@ -92,10 +92,11 @@ pub fn check(host_ops: &[i32], p3: bool) -> Result<(), String> {
 /// `op`: the p3 command shim's set without the filesystem — the service
 /// world imports no `wasi:filesystem`, which `wasmtime serve` does not link
 /// without a flag (#2659, measured on wasmtime 47) — plus `http.serve`'s
-/// own ops 70..=72, which the shim answers guest-side.
+/// own ops 70..=72 and 75 (the contained loop, #4203, answered "not
+/// served"), which the shim answers guest-side.
 pub fn serves_service(op: i32) -> bool {
     let fs = matches!(op, 40..=42) || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op);
-    matches!(op, 70..=72) || (!fs && serves(op, true))
+    matches!(op, 70..=72 | 75) || (!fs && serves(op, true))
 }
 
 /// [`check`] for the service shape: an op the export cannot answer is E081
