@@ -37,7 +37,7 @@ pub fn almide_rt_datetime_weekday(ts: i64) -> AlmideString {
     __almide_out.into()
 }
 
-pub fn almide_rt_datetime_from_parts(y: i64, m: i64, d: i64, h: i64, min: i64, s: i64) -> i64 {
+pub fn almide_rt_datetime___from_parts(y: i64, m: i64, d: i64, h: i64, min: i64, s: i64) -> i64 {
     almide_rt_epoch_from_civil(y, m, d) + h * 3600 + min * 60 + s
 }
 
@@ -110,7 +110,7 @@ pub fn almide_rt_datetime_parse_iso(s: &str) -> Result<i64, AlmideString> {
         if !(0..=23).contains(&h) { return Err(format!("hour out of range: {h}")); }
         if !(0..=59).contains(&mi) { return Err(format!("minute out of range: {mi}")); }
         if !(0..=59).contains(&sec) { return Err(format!("second out of range: {sec}")); }
-        Ok(almide_rt_datetime_from_parts(y, mo, dd, h, mi, sec) - offset)
+        Ok(almide_rt_datetime___from_parts(y, mo, dd, h, mi, sec) - offset)
     })();
     __almide_r.map_err(Into::into)
 }
