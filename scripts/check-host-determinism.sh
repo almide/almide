@@ -117,5 +117,5 @@ if [ "$rows" -ne "$MAX_WALLED" ]; then
   echo "::error::host-determinism: MAX_WALLED=$MAX_WALLED but $LEDGER has $rows rows — the ceiling and the named walls must move together"
   exit 1
 fi
-check_walled_ledger "$LEDGER" "$WORK/walled.txt" host-determinism || exit 1
+check_walled_ledger "$LEDGER" "$WORK/walled.txt" host-determinism "$WORK/selected.txt" || exit 1
 echo "host-architecture codegen determinism: $n/$corpus emitted fixtures byte-identical across x86-64 and wasm32 ($walled walled, ceiling $MAX_WALLED)"
