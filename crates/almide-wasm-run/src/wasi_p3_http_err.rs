@@ -164,24 +164,40 @@ struct HttpErrFns {
     num: u32,
 }
 
-/// `(src, len, dst) -> dst_end`: write `src[..len]` at `dst` quoted by
+/// `(src, len, dst, url) -> dst_end`: write `src[..len]` at `dst` quoted by
 /// `http_quote`'s rule — `"` and `\` escaped, `\t` `\r` `\n` `\0`, any
 /// other ASCII control or DEL as `\u{<lowercase hex>}`, every other byte
-/// copied — between double quotes.
+/// copied — between double quotes. With `url` nonzero the text is a URL and
+/// is quoted as `http_quote_url` quotes it: the span rt-core's
+/// `http_url_password_span` finds is written as `HTTP_URL_PASSWORD_MASK`.
 fn shim_http_quote() -> Function {
-    let (src, len, dst) = (0u32, 1u32, 2u32);
-    let (k, b) = (3u32, 4u32);
-    // Local 5 is `http_hex_digit`'s scratch.
-    let mut f = Function::new([(3, ValType::I32)]);
+    let (src, len, dst, url) = (0u32, 1u32, 2u32, 3u32);
+    let (k, b) = (4u32, 5u32);
+    // Local 6 is `http_hex_digit`'s scratch; 7..=9 the password span.
+    let (from, to, start) = (7u32, 8u32, 9u32);
+    let mut f = Function::new([(6, ValType::I32)]);
     let mut i = f.instructions();
     let put = |i: &mut wasm_encoder::InstructionSink<'_>, byte: i32| {
         i.local_get(dst).i32_const(byte).i32_store8(mem8(0));
         i.local_get(dst).i32_const(1).i32_add().local_set(dst);
     };
+    i.i32_const(-1).local_set(from);
+    i.local_get(url).if_(BlockType::Empty);
+    http_password_span(&mut i, (src, len), (k, b, start, to, from));
+    i.end();
     put(&mut i, '"' as i32);
     i.i32_const(0).local_set(k);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(k).local_get(len).i32_ge_u().br_if(1);
+    i.local_get(k).local_get(from).i32_eq().if_(BlockType::Empty);
+    for c in almide_rt_core::http_client_core::HTTP_URL_PASSWORD_MASK.bytes() {
+        put(&mut i, c as i32);
+    }
+    // Skip the password and spend the span: an empty one has `to == from`.
+    i.local_get(to).local_set(k);
+    i.i32_const(-1).local_set(from);
+    i.br(1);
+    i.end();
     i.local_get(src).local_get(k).i32_add().i32_load8_u(mem8(0)).local_set(b);
     i.block(BlockType::Empty);
     for (byte, esc) in [(b'"', b'"'), (b'\\', b'\\'), (b'\t', b't'), (b'\r', b'r'), (b'\n', b'n'), (0u8, b'0')] {
@@ -215,6 +231,64 @@ fn shim_http_quote() -> Function {
     f
 }
 
+/// `k` = the first index at or past `from` holding `/`, `?` or `#`, or `len`.
+fn http_scan_delims(i: &mut wasm_encoder::InstructionSink<'_>, (src, len): (u32, u32), (k, b, from): (u32, u32, u32)) {
+    i.local_get(from).local_set(k);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(k).local_get(len).i32_ge_u().br_if(1);
+    i.local_get(src).local_get(k).i32_add().i32_load8_u(mem8(0)).local_set(b);
+    i.local_get(b).i32_const('/' as i32).i32_eq();
+    i.local_get(b).i32_const('?' as i32).i32_eq().i32_or();
+    i.local_get(b).i32_const('#' as i32).i32_eq().i32_or();
+    i.br_if(1);
+    i.local_get(k).i32_const(1).i32_add().local_set(k);
+    i.br(0).end().end();
+}
+
+/// rt-core's `http_url_password_span` over `src[..len]`, step for step:
+/// `start` past a `//` at the first `/` `?` `#` (else 0), the authority's end at
+/// the next `/` `?` `#`, the last `@` before it, the first `:` before that.
+/// Sets `from` = the colon + 1 and `to` = the `@`; leaves `from` as it was
+/// (the caller's -1) when there is no `@` or no `:`.
+fn http_password_span(i: &mut wasm_encoder::InstructionSink<'_>, (src, len): (u32, u32), (k, b, start, to, from): (u32, u32, u32, u32, u32)) {
+    let byte = |i: &mut wasm_encoder::InstructionSink<'_>, at: u32| {
+        i.local_get(src).local_get(at).i32_add().i32_load8_u(mem8(0));
+    };
+    i.block(BlockType::Empty);
+    // k = the first `/` `?` `#`, or len.
+    i.i32_const(0).local_set(start);
+    http_scan_delims(i, (src, len), (k, b, start));
+    // start = k + 2 when `src[k..k+2]` is `//`.
+    i.local_get(k).i32_const(1).i32_add().local_get(len).i32_lt_u().if_(BlockType::Empty);
+    byte(i, k);
+    i.i32_const('/' as i32).i32_eq();
+    i.local_get(src).local_get(k).i32_add().i32_load8_u(mem8(1)).i32_const('/' as i32).i32_eq();
+    i.i32_and().if_(BlockType::Empty);
+    i.local_get(k).i32_const(2).i32_add().local_set(start);
+    i.end();
+    i.end();
+    // k = the authority's end.
+    http_scan_delims(i, (src, len), (k, b, start));
+    // to = the last `@` in [start, end); none leaves the span unset.
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(k).local_get(start).i32_le_u().br_if(2);
+    i.local_get(k).i32_const(1).i32_sub().local_set(k);
+    byte(i, k);
+    i.i32_const('@' as i32).i32_eq().br_if(1);
+    i.br(0).end().end();
+    i.local_get(k).local_set(to);
+    // from = past the first `:` in [start, to); none leaves it unset.
+    i.local_get(start).local_set(k);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(k).local_get(to).i32_ge_u().br_if(2);
+    byte(i, k);
+    i.i32_const(':' as i32).i32_eq().br_if(1);
+    i.local_get(k).i32_const(1).i32_add().local_set(k);
+    i.br(0).end().end();
+    i.local_get(k).i32_const(1).i32_add().local_set(from);
+    i.end();
+}
+
 /// Store the lowercase hex digit of `(b >> shift) & 15` at `dst`, advance.
 fn http_hex_digit(i: &mut wasm_encoder::InstructionSink<'_>, b: u32, shift: i32, dst: u32) {
     i.local_get(dst);
@@ -228,13 +302,16 @@ fn http_hex_digit(i: &mut wasm_encoder::InstructionSink<'_>, b: u32, shift: i32,
     i.local_get(dst).i32_const(1).i32_add().local_set(dst);
 }
 
-/// `(p1, p1n, q, qn, p2, p2n, r, rn, p3, p3n) -> i64`: the err answer of an
-/// fs_call op — `p1 ++ quote(q) ++ p2 ++ r ++ p3` in a fresh buffer, parked
-/// (`g_ppos` / `g_plen`), answered `pack(1, len)`. `qn < 0` quotes nothing.
+/// `(p1, p1n, q, qn, p2, p2n, r, rn, p3, p3n, url) -> i64`: the err answer
+/// of an fs_call op — `p1 ++ quote(q) ++ p2 ++ r ++ p3` in a fresh buffer,
+/// parked (`g_ppos` / `g_plen`), answered `pack(1, len)`. `qn < 0` quotes
+/// nothing; `url` nonzero quotes `q` as a URL (`$http_quote`'s flag). The
+/// mask fits the `6 * qn + 2` bound: a span exists only beside an `@`,
+/// which is one byte written against six reserved.
 fn shim_http_err(g: P3Globals, quote: u32) -> Function {
     let P3Globals { g_plen, g_ppos, f_alloc, .. } = g;
-    let (p1, p1n, q, qn, p2, p2n, r, rn, p3, p3n) = (0u32, 1, 2, 3, 4, 5, 6, 7, 8, 9);
-    let (buf, dst) = (10u32, 11u32);
+    let (p1, p1n, q, qn, p2, p2n, r, rn, p3, p3n, url) = (0u32, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+    let (buf, dst) = (11u32, 12u32);
     let mut f = Function::new([(2, ValType::I32)]);
     let mut i = f.instructions();
     i.i32_const(0).i32_const(0).i32_const(1);
@@ -250,7 +327,7 @@ fn shim_http_err(g: P3Globals, quote: u32) -> Function {
     };
     copy(&mut i, p1, p1n);
     i.local_get(qn).i32_const(0).i32_ge_s().if_(BlockType::Empty);
-    i.local_get(q).local_get(qn).local_get(dst).call(quote).local_set(dst);
+    i.local_get(q).local_get(qn).local_get(dst).local_get(url).call(quote).local_set(dst);
     i.end();
     copy(&mut i, p2, p2n);
     copy(&mut i, r, rn);
@@ -389,19 +466,41 @@ fn shim_http_env_num(g: P3Globals, f_env: u32) -> Function {
     f
 }
 
-/// Answer the err of `fns.err` from four pieces around the quoted URL
-/// (`a_ptr`, `a_len`) and a raw run (`r_ptr`, `r_len` locals, or none).
+/// What an err text quotes: the URL the program passed (redacted as
+/// `http_quote_url` redacts it) or a header name (quoted as is). Each
+/// call site says which, so a URL cannot reach the quote unredacted.
+#[derive(Clone, Copy)]
+enum Quoted {
+    /// (`ptr`, `len`) locals of the URL.
+    Url(u32, u32),
+    /// (`ptr`, `len`) locals of a header name.
+    Name(u32, u32),
+}
+
+impl Quoted {
+    /// Push `q, qn`; the flag is pushed by `push_flag` after the pieces.
+    fn push(self, i: &mut wasm_encoder::InstructionSink<'_>) {
+        let (Quoted::Url(p, n) | Quoted::Name(p, n)) = self;
+        i.local_get(p).local_get(n);
+    }
+    fn push_flag(self, i: &mut wasm_encoder::InstructionSink<'_>) {
+        i.i32_const(i32::from(matches!(self, Quoted::Url(..))));
+    }
+}
+
+/// Answer the err of `fns.err` from four pieces around the quoted operand
+/// and a raw run (`r_ptr`, `r_len` locals, or none).
 fn http_err_call(
     i: &mut wasm_encoder::InstructionSink<'_>,
     fns: HttpErrFns,
-    url: (u32, u32),
+    quoted: Quoted,
     p1: Piece,
     p2: Piece,
     raw: Option<(u32, u32)>,
     p3: Piece,
 ) {
     i.i32_const(p1.at).i32_const(p1.len);
-    i.local_get(url.0).local_get(url.1);
+    quoted.push(i);
     i.i32_const(p2.at).i32_const(p2.len);
     match raw {
         Some((rp, rn)) => {
@@ -412,6 +511,7 @@ fn http_err_call(
         }
     }
     i.i32_const(p3.at).i32_const(p3.len);
+    quoted.push_flag(i);
     i.call(fns.err).return_();
 }
 
@@ -423,6 +523,7 @@ fn http_err_entry(i: &mut wasm_encoder::InstructionSink<'_>, fns: HttpErrFns, ur
     for off in [8u64, 12, 16, 20, 24, 28] {
         i.local_get(entry).i32_load(mem(off));
     }
+    i.i32_const(1);
     i.call(fns.err).return_();
 }
 
@@ -521,7 +622,7 @@ fn http_url_scheme(
     i.select().i32_store8(mem8(0));
     i.local_get(k).i32_const(1).i32_add().local_set(k);
     i.br(0).end().end();
-    http_err_call(i, fns, (a_ptr, a_len), t.url_head, t.url_scheme[0], Some((low, colon)), t.url_scheme[1]);
+    http_err_call(i, fns, Quoted::Url(a_ptr, a_len), t.url_head, t.url_scheme[0], Some((low, colon)), t.url_scheme[1]);
     i.end();
     i.local_get(b).i32_const(2).i32_eq().if_(BlockType::Result(ValType::I32));
     i.i32_const(h.sch_https);
@@ -530,9 +631,9 @@ fn http_url_scheme(
     i.local_get(colon).i32_const(3).i32_add().local_set(rest);
     i.else_();
     i.local_get(b).if_(BlockType::Empty);
-    http_err_call(i, fns, (a_ptr, a_len), t.url_head, t.url_slashes[0], Some((a_ptr, colon)), t.url_slashes[1]);
+    http_err_call(i, fns, Quoted::Url(a_ptr, a_len), t.url_head, t.url_slashes[0], Some((a_ptr, colon)), t.url_slashes[1]);
     i.end();
-    http_err_call(i, fns, (a_ptr, a_len), t.url_head, t.url_no_scheme, None, Piece::default());
+    http_err_call(i, fns, Quoted::Url(a_ptr, a_len), t.url_head, t.url_no_scheme, None, Piece::default());
     i.end();
 }
 
@@ -562,7 +663,7 @@ fn http_check_headers(
     i.call(fns.check).local_set(n);
     for (code, [head, tail]) in t.hdr.iter().enumerate() {
         i.local_get(n).i32_const(code as i32 + 1).i32_eq().if_(BlockType::Empty);
-        http_err_call(i, fns, (key_ptr, key_len), *head, *tail, None, Piece::default());
+        http_err_call(i, fns, Quoted::Name(key_ptr, key_len), *head, *tail, None, Piece::default());
         i.end();
     }
     i.br(0).end().end();
@@ -582,7 +683,7 @@ fn http_send_err(i: &mut wasm_encoder::InstructionSink<'_>, park: u64, h: &HttpA
     i.i32_const(0).i32_const(0).i32_const(0).i32_const(-1).i32_const(0).i32_const(0);
     i.i32_const((opt + h.ec_opt_str) as i32).i32_load(mem(0));
     i.i32_const((opt + h.ec_opt_str) as i32).i32_load(mem(4));
-    i.i32_const(0).i32_const(0);
+    i.i32_const(0).i32_const(0).i32_const(0);
     i.call(fns.err).return_();
     i.end();
     i.local_get(ent).i32_const(EC_ENTRY).i32_mul().i32_const(t.ec_table).i32_add().local_set(ent);
