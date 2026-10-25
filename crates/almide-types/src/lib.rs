@@ -18,18 +18,19 @@ pub mod self_host_registry;
 /// bodies that name the stdlib function they implement, generated from the
 /// sources (`buildscript/implements.rs`) and committed (#3361).
 /// `self_host_registry::self_host_runtime()` serves `DECLARED` beside its
-/// hand-written table; `PRIM_FREE` names the declared bodies whose file never
-/// reaches `prim.`, which the wasm emitter admits without a list entry.
+/// hand-written table; `PRIM_FREE` names the declared bodies that never reach
+/// `prim.` (their own body or a same-file callee), which the wasm emitter
+/// admits without a list entry.
 pub mod implements {
     include!("generated/implements.rs");
 
-    /// Is `impl_fn` a declared body whose file never reaches `prim.`?
+    /// Is `impl_fn` a declared body that never reaches `prim.`?
     pub fn prim_free(impl_fn: &str) -> bool {
         PRIM_FREE.contains(&impl_fn)
     }
 
-    /// Is the stdlib call `module.func` implemented by a declared body whose
-    /// file never reaches `prim.`? Such a body builds every value, a Result
+    /// Is the stdlib call `module.func` implemented by a declared body that
+    /// never reaches `prim.`? Such a body builds every value, a Result
     /// included, through constructors the backends lower themselves.
     pub fn surface_prim_free(module: &str, func: &str) -> bool {
         DECLARED.iter().flat_map(|(_, pairs)| pairs.iter()).any(|(impl_fn, call)| {
