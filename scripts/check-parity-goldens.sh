@@ -55,6 +55,48 @@ done
 # the generators directly, or sets ALMIDE_MANIFEST_TREE_CHECK=strict.
 export ALMIDE_MANIFEST_TREE_CHECK="${ALMIDE_MANIFEST_TREE_CHECK:-gate}"
 
+# The CI slice (scripts/lib/ci-slice.sh, ALMIDE_CI_SLICE=k > 1, a PR into
+# develop): the generators regenerate only the selected fixtures, into a
+# scratch dir, and each regenerated row (manifest and exclusion) must equal
+# the committed row for the same fixture. Rows of unselected fixtures are not
+# judged, and a committed row with no fixture (or a fixture with no row) is
+# found by the full run, which regenerates the whole files in place as below.
+. scripts/lib/ci-slice.sh
+if ci_slice_active; then
+  scratch="$(mktemp -d)"; trap 'rm -rf "$scratch"' EXIT
+  fail=0; judged=0
+  # gen  committed-dir  manifest-stem  path-column
+  while read -r gen dir stem col; do
+    out="$scratch/$gen"; mkdir -p "$out"
+    if ! GEN_MANIFEST_OUT_DIR="$out" bash "scripts/$gen.sh"; then
+      echo "::error::scripts/$gen.sh failed"; fail=1; continue
+    fi
+    for kind in manifest:$col exclusions:1; do
+      k="${kind%%:*}"; c="${kind##*:}"
+      gen_f="$out/spec-$stem-$k.txt"; com_f="$dir/spec-$stem-$k.txt"
+      grep -v '^#' "$gen_f" | sed '/^$/d' | LC_ALL=C sort > "$scratch/got"
+      cut -f"$c" "$scratch/got" | LC_ALL=C sort -u > "$scratch/paths"
+      grep -v '^#' "$com_f" | sed '/^$/d' \
+        | awk -F'\t' -v c="$c" 'NR==FNR { want[$0] = 1; next } ($c in want)' "$scratch/paths" - \
+        | LC_ALL=C sort > "$scratch/want"
+      if ! diff -u "$scratch/want" "$scratch/got"; then
+        echo "::error::$com_f: the regenerated rows of the sliced fixtures differ from the committed ones (diff above: '-' committed, '+' the CLI's output)"
+        fail=1
+      fi
+      judged=$((judged + $(wc -l < "$scratch/got" | tr -d ' ')))
+    done
+  done <<'ROWS'
+gen-ast-manifest crates/almide-syntax/tests/golden ast 2
+gen-check-manifest crates/almide-spine/tests/golden check 3
+gen-run-manifest crates/almide-spine/tests/golden run 3
+ROWS
+  [ "$judged" -gt 0 ] || { echo "::error::parity-goldens: the slice judged 0 rows — a vacuous run is not a pass"; exit 1; }
+  [ "$fail" -eq 0 ] || exit 1
+  git diff --quiet -- $GOLDENS || { echo "::error::a sliced run wrote a committed golden"; exit 1; }
+  echo "parity-goldens OK (CI slice 1/$(ci_slice_k)): $judged regenerated row(s) equal the committed rows; the full run (develop, main, PRs into main) regenerates every row and checks no row is stale or missing"
+  exit 0
+fi
+
 rc=0
 for gen in gen-ast-manifest gen-check-manifest gen-run-manifest; do
   if ! bash "scripts/$gen.sh"; then

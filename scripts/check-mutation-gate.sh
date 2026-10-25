@@ -132,7 +132,10 @@ net_catches() {
   for s in $SUITES; do
     local args
     if [ "$s" = "lib" ]; then args=(--lib); else args=(--test "$s"); fi
-    if ! cargo test --release -p almide-wasm --locked "${args[@]}" >/dev/null 2>&1; then
+    # The NET always runs whole: under the CI slice the corpus suites would
+    # judge 1 in k fixtures, and a mutant only the rest kill would read as a
+    # SURVIVOR. The slice thins the mutants (below), never the net.
+    if ! env -u ALMIDE_CI_SLICE cargo test --release -p almide-wasm --locked "${args[@]}" >/dev/null 2>&1; then
       echo "$s"
       return 0
     fi
@@ -229,6 +232,17 @@ if ! git diff --quiet; then
   exit 2
 fi
 
+# The CI slice (scripts/lib/ci-slice.sh): under ALMIDE_CI_SLICE=k > 1 (a PR into
+# develop) every tier-1 mutant runs (in a function the diff changed, or its
+# patch changed) and tier 2 keeps a commit-rotated 1 in k (at least one). A PR
+# into main, and mutation-sweep.yml on develop, run the whole scope.
+. scripts/lib/ci-slice.sh
+if ci_slice_active && [ -n "$tier2" ]; then
+  t2_all=0; for _ in $tier2; do t2_all=$((t2_all + 1)); done
+  tier2=$(for p in $tier2; do echo "$p"; done | ci_slice_filter mutation-gate-tier2 | tr '\n' ' ')
+  t2_kept=0; for _ in $tier2; do t2_kept=$((t2_kept + 1)); done
+  echo "CI slice 1/$(ci_slice_k): tier 2 keeps $t2_kept of $t2_all mutant(s); every tier-1 mutant runs; the rest are judged by a PR into main and mutation-sweep on develop"
+fi
 ORDER="$tier1 $tier2"
 M=0; for _ in $ORDER; do M=$((M + 1)); done
 T1=0; for _ in $tier1; do T1=$((T1 + 1)); done
@@ -247,7 +261,7 @@ fi
 if [ "$M" -gt 0 ]; then
   build_args=(--lib)
   for s in $SUITES; do [ "$s" = "lib" ] || build_args+=(--test "$s"); done
-  if ! cargo test --release -p almide-wasm --locked "${build_args[@]}" --no-run >/dev/null 2>&1; then
+  if ! env -u ALMIDE_CI_SLICE cargo test --release -p almide-wasm --locked "${build_args[@]}" --no-run >/dev/null 2>&1; then
     echo "FAIL: the unmutated net does not build — no mutant verdict is meaningful" >&2
     exit 2
   fi
