@@ -34,7 +34,7 @@ effect fn main() -> Unit = {
   show("dotdot", fs.root_read_text(root, "sub/../../outside/s.txt"))
   show("plain outside", fs.read_text("../outside/s.txt"))
   show("plain link", fs.read_text("data/link/s.txt"))
-  show("plain dangling", fs.write("data/dangling", "x") |> result.map((_) => "written"))
+  show("plain dangling", fs.write_text("data/dangling", "x") |> result.map((_) => "written"))
   println("exists outside: ${fs.exists("../outside/s.txt")}")
   println("is_symlink link: ${fs.is_symlink("data/link")}")
 }

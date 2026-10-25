@@ -984,7 +984,7 @@ import http
 
 effect fn main() -> Unit = {
   let audio = http.get_bytes("https://tts.example.com/say.mp3")!
-  fs.write_bytes_raw("say.mp3", audio)!
+  fs.write_bytes("say.mp3", audio)!
 }
 ```
 

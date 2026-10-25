@@ -300,7 +300,7 @@ also started any command. D2 is implemented as written:
   lists. `Proc` is under no parent.
 - Per operation: a module's row in `STDLIB_MODULE_EFFECTS` is its default and
   a function whose operation differs declares `@category("FS.write")` on its
-  own declaration (`fs.write`, `env.set`, `http.serve`, `process.args`, …).
+  own declaration (`fs.write_text`, `env.set`, `http.serve`, `process.args`, …).
 - The output and abort builtins carry their leaves (`println` `IO.stdout`,
   `eprintln` `IO.stderr`, `panic` and a failing `assert*` `Abort` +
   `IO.stderr`, `process.exit` `Abort`): D2 says inference and `[permissions]`

@@ -1310,7 +1310,7 @@ effect fn create_once(path: String) -> Result[Unit, String] = {
     println("already exists")
     ok(())
   }
-  fs.write(path, "")!
+  fs.write_text(path, "")!
   ok(())
 }
 ```

@@ -30,8 +30,8 @@ effect fn main() -> Unit = {
     d,
   ))
   println(line(
-    "fifo_bytes_raw_if",
-    match fs.read_bytes_raw_if_exists(pipe) {
+    "fifo_bytes_if",
+    match fs.read_bytes_if_exists(pipe) {
       ok(o) => ok(bytes.len(o ?? bytes.from_list([]))),
       err(m) => err(m),
     },
@@ -56,7 +56,7 @@ effect fn main() -> Unit = {
   ))
   println(line(
     "big_bytes",
-    match fs.read_bytes_raw(big) {
+    match fs.read_bytes(big) {
       ok(b) => ok(bytes.len(b)),
       err(m) => err(m),
     },

@@ -23,7 +23,7 @@ effect fn main() -> Unit = {
   })!
   println("received ${list.len(lens)} one-byte messages ${list.all(lens, (n) => n == 1)}")
   let note = "${path}.txt"
-  fs.write(note, "still opens")!
+  fs.write_text(note, "still opens")!
   println("read_text after: ${fs.read_text(note)!}")
   fs.remove(note)!
   let taken = net.unix_take_fds(s)

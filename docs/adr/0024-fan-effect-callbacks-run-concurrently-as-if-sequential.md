@@ -183,7 +183,7 @@ class.
   (working name `@ordered`, spelled by the implementing PR, the way
   ADR-0020 leaves `@concurrent`). Initial set:
   - every `fs` function that creates, writes, appends, copies, renames or
-    removes (`fs.write*`, `fs.append`, `fs.copy`, `fs.rename`,
+    removes (`fs.write_*`, `fs.append_*`, `fs.copy`, `fs.rename`,
     `fs.remove*`, `fs.mkdir_p`, `fs.create_temp_*`);
   - every `kv` function (ADR-0020 §4; a read can observe a sibling's write);
   - every `io` read from stdin (which element gets which line depends on
@@ -210,7 +210,7 @@ note: this fan runs its elements one at a time
   --> src/sync.almd:12:3
    |
 12 |   fan.map(items, (it) => save(it))
-   |   ^^^^^^^ `save` writes a file (fs.write, src/store.almd:8),
+   |   ^^^^^^^ `save` writes a file (fs.write_text, src/store.almd:8),
    |           and another element could read it
 ```
 

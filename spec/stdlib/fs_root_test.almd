@@ -5,8 +5,8 @@ import fs
 effect fn scratch(tag: String) -> Result[String, String] = {
   let d = fs.create_temp_dir(tag)!
   fs.mkdir_p(d + "/root/sub")!
-  fs.write(d + "/root/sub/a.txt", "inside")!
-  fs.write(d + "/out.txt", "outside")!
+  fs.write_text(d + "/root/sub/a.txt", "inside")!
+  fs.write_text(d + "/out.txt", "outside")!
   ok(d)
 }
 

@@ -35,7 +35,7 @@ fn grow(m: Matrix, l: String) -> Matrix = matrix.from_lists([[(matrix.get(m, 0, 
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("chunked_rc_acc")!
   let p = d + "/lines.txt"
-  fs.write(p, "a\nbb\nccc\ndddd\neeeee\n")!
+  fs.write_text(p, "a\nbb\nccc\ndddd\neeeee\n")!
   let ms = fs.fold_lines_chunked(p, 2, matrix.from_lists([[0.5]]), grow)!
   println("matrix ${ms |> list.map((m) => matrix.get(m, 0, 0) ?? 0.0)}")
   let ms_id = fs.fold_lines_chunked(p, 3, matrix.from_lists([[1.0]]), (m, l) => m)!
@@ -57,7 +57,7 @@ effect fn main() -> Unit = {
   let ns = fs.fold_lines_chunked(p, 2, 0, (n, l) => n + string.len(l))!
   println("int ${ns}")
   let e = d + "/empty.txt"
-  fs.write(e, "")!
+  fs.write_text(e, "")!
   let parts = fs.fold_lines_chunked(e, 4, bytes.zeros(1), (b, l) => b)!
   println("empty ${list.len(parts)}")
   fs.remove_all(d)!

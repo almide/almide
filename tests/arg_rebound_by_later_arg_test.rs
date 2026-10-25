@@ -126,6 +126,6 @@ fn the_v1_walled_operand_shapes_see_the_old_value() {
 
 #[test]
 fn a_fold_lines_init_that_rebinds_the_path_reads_the_old_path() {
-    let src = "import fs\n\neffect fn main() -> Unit = {\n  fs.write(\"in.txt\", \"a\\nb\\n\")!\n  var p = \"in.txt\"\n  let r = fs.fold_lines(p, {\n    p = \"missing.txt\"\n    \"\"\n  }, (a, l) => a + l)!\n  println(\"${r} ${p}\")\n}\n";
+    let src = "import fs\n\neffect fn main() -> Unit = {\n  fs.write_text(\"in.txt\", \"a\\nb\\n\")!\n  var p = \"in.txt\"\n  let r = fs.fold_lines(p, {\n    p = \"missing.txt\"\n    \"\"\n  }, (a, l) => a + l)!\n  println(\"${r} ${p}\")\n}\n";
     assert_eq!(run_both("fold_lines", src), "ab missing.txt");
 }

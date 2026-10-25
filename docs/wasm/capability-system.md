@@ -39,7 +39,7 @@ Shorthand groups: `IO` = FS.read + FS.write + IO.stdin + IO.stdout + IO.stderr, 
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `fs.read_text(path)` | `(String) -> Result[String, String]` | Read file as UTF-8 string |
-| `fs.read_bytes(path)` | `(String) -> Result[List[Int], String]` | Read file as byte list |
+| `fs.read_bytes(path)` | `(String) -> Result[Bytes, String]` | Read file as Bytes |
 | `fs.read_lines(path)` | `(String) -> Result[List[String], String]` | Read file as list of lines |
 | `fs.exists(path)` | `(String) -> Bool` | Check if path exists |
 | `fs.is_dir(path)` | `(String) -> Bool` | Check if path is directory |
@@ -77,9 +77,10 @@ Shorthand groups: `IO` = FS.read + FS.write + IO.stdin + IO.stdout + IO.stderr, 
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `fs.write(path, content)` | `(String, String) -> Result[Unit, String]` | Write string to file |
-| `fs.write_bytes(path, bytes)` | `(String, List[Int]) -> Result[Unit, String]` | Write bytes to file |
-| `fs.append(path, content)` | `(String, String) -> Result[Unit, String]` | Append string to file |
+| `fs.write_text(path, content)` | `(String, String) -> Result[Unit, String]` | Write string to file |
+| `fs.write_bytes(path, data)` | `(String, Bytes) -> Result[Unit, String]` | Write bytes to file |
+| `fs.append_text(path, content)` | `(String, String) -> Result[Unit, String]` | Append string to file |
+| `fs.append_bytes(path, data)` | `(String, Bytes) -> Result[Unit, String]` | Append bytes to file |
 | `fs.mkdir_p(path)` | `(String) -> Result[Unit, String]` | Create directory tree |
 | `fs.remove(path)` | `(String) -> Result[Unit, String]` | Delete a file |
 | `fs.remove_all(path)` | `(String) -> Result[Unit, String]` | Recursively delete directory |
@@ -504,7 +505,7 @@ module_to_capabilities("datetime", "now")  -> {Time}
 module_to_capabilities("random", "int")    -> {Rand}
 ```
 
-The mapping is per-function, not per-module: `fs.read_text` requires `FS.read` while `fs.write` requires `FS.write`, even though both are in the `fs` module.
+The mapping is per-function, not per-module: `fs.read_text` requires `FS.read` while `fs.write_text` requires `FS.write`, even though both are in the `fs` module.
 
 **Step 2: Transitive closure via fixpoint iteration.**
 
@@ -532,12 +533,12 @@ for each function F in the program:
 
 ### Transitive Checking
 
-If function `A` calls function `B`, and `B` calls `fs.write`, then `A` transitively requires `FS.write`. The user does not need to annotate `A` -- the compiler infers it.
+If function `A` calls function `B`, and `B` calls `fs.write_text`, then `A` transitively requires `FS.write`. The user does not need to annotate `A` -- the compiler infers it.
 
 ```almide
 // This function directly requires FS.write
 effect fn save(path: String, data: String) -> Result[Unit, String] =
-  fs.write(path, data)
+  fs.write_text(path, data)
 
 // This function transitively requires FS.write (through save)
 effect fn process_and_save(input: String) -> Result[Unit, String] = {
@@ -549,7 +550,7 @@ effect fn process_and_save(input: String) -> Result[Unit, String] = {
 // Error on process_and_save, not just save
 ```
 
-The error message traces the full chain: `process_and_save -> save -> fs.write`.
+The error message traces the full chain: `process_and_save -> save -> fs.write_text`.
 
 ### Lambda and Closure Handling
 
@@ -626,10 +627,10 @@ Even with `FS.read` allowed, the agent can only read `/workspace`. WASI pre-open
 ### Error 1: Direct stdlib call violation
 
 ```
-error[E010]: capability violation: fs.write requires FS.write
+error[E010]: capability violation: fs.write_text requires FS.write
   --> agent.almd:12:3
    |
-12 |   fs.write("output.txt", result)
+12 |   fs.write_text("output.txt", result)
    |   ^^^^^^^^
    = note: [permissions] allows: FS.read, IO.stdout
    = hint: add "FS.write" to [permissions].allow in almide.toml
@@ -669,7 +670,7 @@ error[E010]: capability violation: dependency 'analytics' uses Proc
 error[E010]: 3 capability violations in agent.almd
   --> agent.almd
   |
-  | error 1/3: fs.write("out.txt", data) requires FS.write (line 15)
+  | error 1/3: fs.write_text("out.txt", data) requires FS.write (line 15)
   | error 2/3: http.get(api_url) requires Net.fetch (line 22)
   | error 3/3: random.int(1, 100) requires Rand (line 31)
   |

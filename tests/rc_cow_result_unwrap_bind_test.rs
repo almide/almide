@@ -48,7 +48,7 @@ const ROWS: &[Row] = &[
     Row { tag: "base64.decode", imports: &["base64"], call: "base64.decode(\"AQI=\")" },
     Row { tag: "base64.decode_url", imports: &["base64"], call: "base64.decode_url(\"AQI=\")" },
     Row { tag: "hex.decode", imports: &["hex"], call: "hex.decode(\"0102\")" },
-    Row { tag: "fs.read_bytes_raw", imports: &["fs"], call: "fs.read_bytes_raw(\"/nonexistent/2497\")" },
+    Row { tag: "fs.read_bytes", imports: &["fs"], call: "fs.read_bytes(\"/nonexistent/2497\")" },
     Row { tag: "http.get_bytes", imports: &["http"], call: "http.get_bytes(\"http://127.0.0.1:9/\")" },
     Row {
         tag: "http.request_bytes",
@@ -68,12 +68,12 @@ const ROWS: &[Row] = &[
     Row { tag: "zlib.gunzip", imports: &["zlib"], call: "zlib.gunzip(bytes.from_list([1, 2]))" },
 ];
 
-/// `fs.read_bytes_raw_if_exists` carries the Bytes one level deeper
+/// `fs.read_bytes_if_exists` carries the Bytes one level deeper
 /// (`Result[Bytes?, String]`) — the glue's Option arm.
 const OPTION_ROW: Row = Row {
-    tag: "fs.read_bytes_raw_if_exists",
+    tag: "fs.read_bytes_if_exists",
     imports: &["fs"],
-    call: "fs.read_bytes_raw_if_exists(\"/nonexistent/2497\")",
+    call: "fs.read_bytes_if_exists(\"/nonexistent/2497\")",
 };
 
 /// The program for a set of rows: every call bound through `!` in one

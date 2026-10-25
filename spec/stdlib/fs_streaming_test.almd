@@ -19,7 +19,7 @@ effect fn tmp() -> String = fs.create_temp_dir("streaming")!
 test "fold_lines folds every line in order" {
   let d = tmp()!
   let p = d + "/data.txt"
-  fs.write(p, "a\nbb\nccc\n")!
+  fs.write_text(p, "a\nbb\nccc\n")!
   assert_eq(fs.fold_lines(p, "", (acc, line) => acc + line)!, "abbccc")
   assert_eq(fs.fold_lines(p, 0, (acc, line) => acc + string.len(line))!, 6)
 }
@@ -27,7 +27,7 @@ test "fold_lines folds every line in order" {
 test "for_each_line visits every line, captured var mutation works" {
   let d = tmp()!
   let p = d + "/data.txt"
-  fs.write(p, "x\ny\nz\n")!
+  fs.write_text(p, "x\ny\nz\n")!
   var seen: List[String] = []
   fs.for_each_line(p, (line) => { list.push(seen, line) })!
   assert_eq(seen, ["x", "y", "z"])
@@ -36,7 +36,7 @@ test "for_each_line visits every line, captured var mutation works" {
 test "empty file folds to init with zero callback invocations" {
   let d = tmp()!
   let p = d + "/empty.txt"
-  fs.write(p, "")!
+  fs.write_text(p, "")!
   assert_eq(fs.fold_lines(p, 41, (acc, line) => acc + 1000)!, 41)
   var calls = 0
   fs.for_each_line(p, (line) => {
@@ -52,7 +52,7 @@ test "line semantics byte-match read_lines across edge shapes" {
   let shapes = ["a\nb\n", "a\nb", "a\r\nb\r\n", "a\n\nb", ""]
   for content in shapes {
     let p = d + "/shape.txt"
-    fs.write(p, content)!
+    fs.write_text(p, content)!
     let eager = fs.read_lines(p)!
     let streamed = fs.fold_lines(p, [], (acc, line) => acc + [line])!
     assert_eq(streamed, eager)
@@ -69,7 +69,7 @@ test "a missing file is the same err as read_lines" {
 test "fold_lines drives a Map accumulator (the aggregation shape)" {
   let d = tmp()!
   let p = d + "/kv.txt"
-  fs.write(p, "a;1\nb;2\na;3\n")!
+  fs.write_text(p, "a;1\nb;2\na;3\n")!
   let counts = fs.fold_lines(
     p,
     map.new(),
@@ -92,12 +92,12 @@ test "fold_lines drives a Map accumulator (the aggregation shape)" {
 // Each invocation appends its line to `log` BEFORE deciding, so the log is the
 // invocation trace: a form that kept calling after the err would show it.
 local effect fn traced_step(log: String, acc: Int, line: String) -> Int = {
-  fs.append(log, line + ";")!
+  fs.append_text(log, line + ";")!
   if line == "bad" then err("boom") else ok(acc + string.len(line))
 }
 
 local effect fn traced_note(log: String, line: String) -> Unit = {
-  fs.append(log, line + ";")!
+  fs.append_text(log, line + ";")!
   if line == "bad" then err("boom") else ok(())
 }
 
@@ -129,8 +129,8 @@ test "fold_lines with a fallible callback stops at the FIRST err" {
   let d = tmp()!
   let p = d + "/fold_firsterr.txt"
   let log = d + "/fold_firsterr.log"
-  fs.write(p, "a\nbb\nbad\nccc\ndddd\n")!
-  fs.write(log, "")!
+  fs.write_text(p, "a\nbb\nbad\nccc\ndddd\n")!
+  fs.write_text(log, "")!
   testing.assert_err(fold_traced(p, log))
   // The trace is the proof: `ccc` and `dddd` never reached the callback.
   assert_eq(fs.read_text(log)!, "a;bb;bad;")
@@ -140,8 +140,8 @@ test "for_each_line with a fallible callback stops at the FIRST err" {
   let d = tmp()!
   let p = d + "/each_firsterr.txt"
   let log = d + "/each_firsterr.log"
-  fs.write(p, "a\nbb\nbad\nccc\n")!
-  fs.write(log, "")!
+  fs.write_text(p, "a\nbb\nbad\nccc\n")!
+  fs.write_text(log, "")!
   testing.assert_err(each_traced(p, log))
   assert_eq(fs.read_text(log)!, "a;bb;bad;")
 }
@@ -150,8 +150,8 @@ test "a fallible callback that never errs folds every line" {
   let d = tmp()!
   let p = d + "/fold_allok.txt"
   let log = d + "/fold_allok.log"
-  fs.write(p, "a\nbb\nccc\n")!
-  fs.write(log, "")!
+  fs.write_text(p, "a\nbb\nccc\n")!
+  fs.write_text(log, "")!
   assert_eq(fold_traced(p, log), ok(6))
   assert_eq(fs.read_text(log)!, "a;bb;ccc;")
 }
@@ -160,8 +160,8 @@ test "an empty file runs a fallible callback zero times" {
   let d = tmp()!
   let p = d + "/fallible_empty.txt"
   let log = d + "/fallible_empty.log"
-  fs.write(p, "")!
-  fs.write(log, "")!
+  fs.write_text(p, "")!
+  fs.write_text(log, "")!
   assert_eq(fold_traced(p, log), ok(0))
   assert_eq(fs.read_text(log)!, "")
   each_traced(p, log)!
@@ -171,7 +171,7 @@ test "an empty file runs a fallible callback zero times" {
 test "a missing file errs before the fallible callback runs at all" {
   let d = tmp()!
   let log = d + "/fallible_missing.log"
-  fs.write(log, "")!
+  fs.write_text(log, "")!
   testing.assert_err(fold_traced(d + "/nope.txt", log))
   testing.assert_err(each_traced(d + "/nope.txt", log))
   assert_eq(fs.read_text(log)!, "")

@@ -27,9 +27,8 @@ fn show(label: String, r: Result[String, String]) -> Unit = match r {
 
 effect fn main() -> Unit = {
   show("text loop", fs.read_text_if_exists("lp/a") |> result.map((o) => "${o}"))
-  show("bytes loop", fs.read_bytes_if_exists("lp/a") |> result.map((o) => "${o}"))
+  show("bytes loop", fs.read_bytes_if_exists("lp/a") |> result.map((o) => match o { some(_) => "some", none => "none" }))
   show("lines loop", fs.read_lines_if_exists("lp/a") |> result.map((o) => "${o}"))
-  show("raw loop", fs.read_bytes_raw_if_exists("lp/a") |> result.map((o) => match o { some(_) => "some", none => "none" }))
   show("text file parent", fs.read_text_if_exists("f.txt/x") |> result.map((o) => "${o}"))
   show("text missing", fs.read_text_if_exists("nope/x") |> result.map((o) => "${o}"))
   show("text present", fs.read_text_if_exists("f.txt") |> result.map((o) => "${o}"))
@@ -61,7 +60,6 @@ fn a_symlink_loop_is_the_readers_err_not_absence_on_every_leg() {
         ("text loop", "fs.read_text_if_exists"),
         ("bytes loop", "fs.read_bytes_if_exists"),
         ("lines loop", "fs.read_lines_if_exists"),
-        ("raw loop", "fs.read_bytes_raw_if_exists"),
     ] {
         let head = format!("{label}: err {call}(\"lp/a\"): ");
         assert!(native.lines().any(|l| l.starts_with(&head)), "native: missing `{head}…` in:\n{native}");

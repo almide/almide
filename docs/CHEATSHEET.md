@@ -304,7 +304,7 @@ Absence is a value, not an error — never branch on the error text:
 ```almide
 let cfg = fs.read_text_if_exists(path)! ?? "default"
 //  ok(none) = absent (missing parents too) / err = permission, IO — real failures
-// family: read_text / read_bytes / read_lines / read_bytes_raw + _if_exists
+// family: read_text / read_bytes / read_lines + _if_exists
 ```
 
 ### Error-handling doctrine (ADR-0004)
@@ -919,7 +919,7 @@ on Windows.
 
 ```almide
 let path = fs.create_temp_file("report")!
-fs.write(path, data)!
+fs.write_text(path, data)!
 ```
 Command-line arguments are accessed via `process.args()` (not main parameters).
 

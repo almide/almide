@@ -1,4 +1,4 @@
-// fs_write — SELF-HOSTED `fs.write(path, content)` over the WASI file-WRITE floor
+// fs_write — SELF-HOSTED `fs.write_text(path, content)` over the WASI file-WRITE floor
 // (prim.write_text_file), the v1 trust-spine realization of the effectful `fs.write`.
 // Opens (creating + truncating) the file at `path` and writes `content`'s bytes, returning
 // `Ok(())` on success or `Err(message)` on a path_open error, matching native `fs.write`

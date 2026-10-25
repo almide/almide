@@ -6,8 +6,8 @@
 // which the composites patched over by string surgery after the fact — a patch
 // that could not know a two-path call's second operand (`fs.copy("src")`
 // where native says `fs.copy("src", "dst")`) and that several composites never
-// received at all (`fs.read_bytes_raw` answered as `fs.read_bytes`, `fs.walk`
-// as `fs.list_dir`, `fs.remove` as `fs.remove_all`). The floors now take the
+// received at all (`fs.walk` answered as `fs.list_dir`, `fs.remove` as
+// `fs.remove_all`). The floors now take the
 // call head as an argument, so this prints the FULL message for every
 // composite and pins it byte-for-byte against native, temp dir redacted.
 import fs
@@ -27,7 +27,7 @@ fn count(name: String, r: Result[Int, String], d: String) -> Unit = println(matc
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("callhead")!
   let f = d + "/f.txt"
-  fs.write(f, "one\ntwo\n")!
+  fs.write_text(f, "one\ntwo\n")!
   let dir = d + "/sub"
   fs.mkdir_p(dir)!
   let missing = d + "/nope"
@@ -55,13 +55,9 @@ effect fn main() -> Unit = {
     ok(_) => "read_bytes_if_exists=OK",
     err(m) => "read_bytes_if_exists=ERR[${redact(m, d)}]",
   })
-  println(match fs.read_bytes_raw(missing) {
-    ok(_) => "read_bytes_raw=OK",
-    err(m) => "read_bytes_raw=ERR[${redact(m, d)}]",
-  })
-  println(match fs.read_bytes_raw_if_exists(dir) {
-    ok(_) => "read_bytes_raw_if_exists=OK",
-    err(m) => "read_bytes_raw_if_exists=ERR[${redact(m, d)}]",
+  println(match fs.read_bytes(missing) {
+    ok(_) => "read_bytes=OK",
+    err(m) => "read_bytes=ERR[${redact(m, d)}]",
   })
   // The write floor: the composites, and both halves of the two-path fs.copy —
   // a missing source fails the read half, a directory destination the write
@@ -75,9 +71,8 @@ effect fn main() -> Unit = {
   count("fold_lines_range_dir_0_0", fs.fold_lines_range(dir, 0, 0, 0, (acc, line) => acc + 1), d)
   count("fold_lines_range_dir_5_5", fs.fold_lines_range(dir, 5, 5, 0, (acc, line) => acc + 1), d)
   count("fold_lines_range_dir_0_10", fs.fold_lines_range(dir, 0, 10, 0, (acc, line) => acc + 1), d)
-  unit("append_dir", fs.append(dir, "z"), d)
-  unit("write_bytes_dir", fs.write_bytes(dir, [1, 2]), d)
-  unit("write_bytes_raw_dir", fs.write_bytes_raw(dir, bytes.from_list([1, 2])), d)
+  unit("append_dir", fs.append_text(dir, "z"), d)
+  unit("write_bytes_dir", fs.write_bytes(dir, bytes.from_list([1, 2])), d)
   // The directory floors: list_dir through fs.walk, remove_all through fs.remove.
   println(match fs.walk(missing) {
     ok(_) => "walk=OK",
@@ -89,7 +84,7 @@ effect fn main() -> Unit = {
     ok(_) => "read_text=OK",
     err(m) => "read_text=ERR[${redact(m, d)}]",
   })
-  unit("write_dir", fs.write(dir, "z"), d)
+  unit("write_dir", fs.write_text(dir, "z"), d)
   println(match fs.list_dir(missing) {
     ok(_) => "list_dir=OK",
     err(m) => "list_dir=ERR[${redact(m, d)}]",

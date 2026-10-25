@@ -103,8 +103,8 @@ test "map first Err short-circuits in list order" {
 // ── effect-callback column: one row per mapper head, fs-backed ──
 test "map effect callback reaches fs" {
   let d = fs.create_temp_dir("fanMx")!
-  fs.write(d + "/a.txt", "alpha")!
-  fs.write(d + "/b.txt", "beta")!
+  fs.write_text(d + "/a.txt", "alpha")!
+  fs.write_text(d + "/b.txt", "beta")!
   assert_eq(fan.map([d + "/a.txt", d + "/b.txt"], (p) => fs.read_text(p)), ok(["alpha", "beta"]))
   assert_eq(fan.map([d + "/a.txt", d + "/b.txt"], read_one), ok(["alpha", "beta"]))
   // the FIRST err (list order) is the whole result — the missing file's
@@ -130,7 +130,7 @@ fn show(r: Result[String, String]) -> String = match r {
 
 test "settle effect callback reaches fs" {
   let d = fs.create_temp_dir("fanMx")!
-  fs.write(d + "/a.txt", "alpha")!
+  fs.write_text(d + "/a.txt", "alpha")!
   // EVERY element's Result, errs captured in list order
   let rs = fan.settle([d + "/gone.txt", d + "/a.txt"], (p) => fs.read_text(p)) |> list.map((r) => show(r))
   assert_eq(rs, ["err", "ok alpha"])

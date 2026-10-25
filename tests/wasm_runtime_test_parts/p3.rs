@@ -449,7 +449,7 @@ const PREOPEN_PROBE_SRC: &str = "import fs\n\
      \n\
      effect fn main() -> Unit = {\n\
      \x20 let p = env.args()[0]\n\
-     \x20 match fs.write(p, \"PREOPEN-MULTI\") {\n\
+     \x20 match fs.write_text(p, \"PREOPEN-MULTI\") {\n\
      \x20   ok(_) => println(\"write=OK\"),\n\
      \x20   err(e) => println(\"write=ERR[\" + e + \"]\"),\n\
      \x20 }\n\

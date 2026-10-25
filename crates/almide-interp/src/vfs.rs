@@ -36,7 +36,7 @@ fn parent_of(path: &str) -> Option<&str> {
 
 /// Overlay-key normalization: `.` segments and doubled slashes collapse, so
 /// `/tmp/./x` and `/tmp/x` name the SAME entry — the exact identity C-042's
-/// fixture pins (`fs.write(path)` then `fs.read_text` through the
+/// fixture pins (`fs.write_text(path)` then `fs.read_text` through the
 /// `./`-normalized spelling of the same path; the wasm leg's `$path_norm`
 /// makes the same collapse). Without this the read misses the overlay and
 /// falls back to the real fs — where a leftover from another leg's earlier
@@ -100,7 +100,7 @@ pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
 /// enforces natively.
 /// The content is BYTES: what `prim.write_text_file` really carries once a
 /// stdlib body has filled an `alloc_str` block byte by byte
-/// (`fs.write_bytes` / `fs.write_bytes_raw`) — a String arrives as its UTF-8.
+/// (`fs.write_bytes`) — a String arrives as its UTF-8.
 pub(crate) fn write_bytes(vfs: &mut Vfs, path: &str, content: &[u8]) -> Result<(), String> {
     let path = &normalize(path);
     if name_too_long(path) {

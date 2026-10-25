@@ -19,7 +19,7 @@ test "list.map lambda may call effect fns inside an effect fn" {
   // wasm test leg.
   let dir = fs.temp_dir()
   let path = "${dir}/almide_i1051_sym.txt"
-  fs.write(path, "x")!
+  fs.write_text(path, "x")!
   let n = count_readable([path, "almide_i1051_missing"])
   assert_eq(n!, 1)
 }

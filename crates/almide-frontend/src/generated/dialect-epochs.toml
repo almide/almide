@@ -386,6 +386,12 @@ breaks = [
   "`string.from_codepoint(n)` returns `String?`: none for a negative n, a surrogate or a value past U+10FFFF, where it returned \"\". Write `string.from_codepoint(n) ?? \"\"` for the old answer, or match the none (R-string-14)",
   "`list.binary_search(xs, target)` takes any element type (R-list-15): the order is `list.sort`'s, and over a List[Int] it answers the same index as before",
   "`testing.assert_gt(a, b)` / `assert_lt(a, b)` take any ordered type, compared with `>` / `<` (R-testing-02); inside a test block a failure no longer prints the two Int operands",
+  "`fs.write(path, content)` → rewrite as `fs.write_text(path, content)`: the same write, named for the matrix {read, write, append} x {text, bytes} (R-fs-05); its err head is `fs.write_text(\"<path>\")`",
+  "`fs.append(path, content)` → rewrite as `fs.append_text(path, content)`: the same append (R-fs-05); its err head is `fs.append_text(\"<path>\")`",
+  "`fs.read_bytes_raw(path)` → rewrite as `fs.read_bytes(path)`: the same Bytes, now under the plain name (R-fs-01); its err head is `fs.read_bytes(\"<path>\")`",
+  "`fs.read_bytes_raw_if_exists(path)` → rewrite as `fs.read_bytes_if_exists(path)`: the same `Bytes?` (R-fs-01)",
+  "`fs.write_bytes_raw(path, data)` → rewrite as `fs.write_bytes(path, data)`: the same write of a Bytes (R-fs-01); its err head is `fs.write_bytes(\"<path>\")`",
+  "`fs.read_bytes(path)` returns `Result[Bytes, String]` and `fs.read_bytes_if_exists(path)` `Result[Bytes?, String]` (were `List[Int]`), and `fs.write_bytes(path, data)` takes `Bytes` (was a `List[Int]` whose Ints were cut to their low byte, so -1 wrote 255) (R-fs-01): the old uses are E005. Wrap a list with `bytes.from_list(xs)` and read one back with `bytes.to_list(b)`",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them

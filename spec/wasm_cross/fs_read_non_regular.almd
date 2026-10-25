@@ -28,13 +28,6 @@ effect fn probe(p: String) -> Unit = {
   println(line(
     "read_bytes",
     match fs.read_bytes(p) {
-      ok(bs) => ok(list.len(bs)),
-      err(m) => err(m),
-    },
-  ))
-  println(line(
-    "read_bytes_raw",
-    match fs.read_bytes_raw(p) {
       ok(b) => ok(bytes.len(b)),
       err(m) => err(m),
     },
@@ -56,13 +49,6 @@ effect fn probe(p: String) -> Unit = {
   println(line(
     "read_bytes_if_exists",
     match fs.read_bytes_if_exists(p) {
-      ok(o) => ok(list.len(o ?? [])),
-      err(m) => err(m),
-    },
-  ))
-  println(line(
-    "read_bytes_raw_if_exists",
-    match fs.read_bytes_raw_if_exists(p) {
       ok(o) => ok(bytes.len(o ?? bytes.from_list([]))),
       err(m) => err(m),
     },
@@ -74,7 +60,7 @@ effect fn main() -> Unit = {
   probe("/dev/null")!
   let d = fs.create_temp_dir("nonregular")!
   let f = d + "/f.txt"
-  fs.write(f, "one\ntwo\n")!
+  fs.write_text(f, "one\ntwo\n")!
   println(line(
     "dir",
     match fs.read_text(d) {

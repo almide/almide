@@ -11,7 +11,7 @@ use super::Recipe;
 /// `in.txt`, n lines of "aé".
 macro_rules! file_of_n_lines {
     () => {
-        "{ fs.write(\"in.txt\", string.repeat(\"aé\\n\", {n}))!\n  \"in.txt\" }"
+        "{ fs.write_text(\"in.txt\", string.repeat(\"aé\\n\", {n}))!\n  \"in.txt\" }"
     };
 }
 
@@ -26,14 +26,14 @@ macro_rules! file_of_n_lines {
 /// class. From 2003 entries on every size is past that warm-up.
 macro_rules! dir_of_n_files {
     () => {
-        "{ fs.mkdir_p(\"d\")!\n  for j in list.range(0, {n} / 10 + 3) { fs.write(\"d/f${100000 + j}\", \"x\")! }\n  \"d\" }"
+        "{ fs.mkdir_p(\"d\")!\n  for j in list.range(0, {n} / 10 + 3) { fs.write_text(\"d/f${100000 + j}\", \"x\")! }\n  \"d\" }"
     };
 }
 
 /// A fresh one-byte file per step.
 macro_rules! fresh_file {
     ($stem:literal) => {
-        concat!("{ fs.write(\"", $stem, "${{i}}.txt\", \"x\")!\n  \"", $stem, "${{i}}.txt\" }")
+        concat!("{ fs.write_text(\"", $stem, "${{i}}.txt\", \"x\")!\n  \"", $stem, "${{i}}.txt\" }")
     };
 }
 
@@ -47,8 +47,6 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "fs.read_lines_if_exists", size: "path", args: FILE_N },
     Recipe { func: "fs.read_bytes", size: "path", args: FILE_N },
     Recipe { func: "fs.read_bytes_if_exists", size: "path", args: FILE_N },
-    Recipe { func: "fs.read_bytes_raw", size: "path", args: FILE_N },
-    Recipe { func: "fs.read_bytes_raw_if_exists", size: "path", args: FILE_N },
     Recipe { func: "fs.fold_lines", size: "path", args: FILE_N },
     Recipe { func: "fs.fold_lines_chunked", size: "path", args: &[("path", file_of_n_lines!()), ("workers", "2")] },
     Recipe { func: "fs.fold_lines_range", size: "path", args: &[("path", file_of_n_lines!()), ("start", "0"), ("end", "{n}")] },
@@ -66,17 +64,21 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "fs.walk", size: "dir", args: &[("dir", dir_of_n_files!())] },
     Recipe { func: "fs.glob", size: "pattern", args: &[("pattern", concat!("{ let d = ", dir_of_n_files!(), "\n  d + \"/*\" }"))] },
     // Writers of n bytes of content.
-    Recipe { func: "fs.write", size: "content", args: &[("path", "\"out.txt\""), ("content", "string.repeat(\"aé\\n\", {n})")] },
+    Recipe { func: "fs.write_text", size: "content", args: &[("path", "\"out.txt\""), ("content", "string.repeat(\"aé\\n\", {n})")] },
     // A whole number of the stock service's 64 KiB write slices at every
     // measured size (65536 bytes at n = 20000): one fd_write per slice, so
     // 4n bytes cost a + b·⌈4n / 65536⌉ — 2, 3, 5, 10, 20 host calls — and that
     // staircase read nlogn (GCE: 5.185e6 / 6.576e6 / 9.355e6 / 1.631e7 /
     // 3.021e7, exactly 9.5e3 + 5.4e3 per slice per call). Aligned, the series
     // is the per-slice (per-byte) cost.
-    Recipe { func: "fs.append", size: "content", args: &[("path", "\"out.txt\""), ("content", "string.repeat(\"aé\\n\", {n} * 4096 / 5000)")] },
-    Recipe { func: "fs.write_bytes", size: "bytes", args: &[("path", "\"out.bin\""), ("bytes", "list.range(0, {n}) |> list.map((i) => i % 256)")] },
+    Recipe { func: "fs.append_text", size: "content", args: &[("path", "\"out.txt\""), ("content", "string.repeat(\"aé\\n\", {n} * 4096 / 5000)")] },
     Recipe {
-        func: "fs.write_bytes_raw",
+        func: "fs.append_bytes",
+        size: "data",
+        args: &[("path", "\"out.bin\""), ("data", "bytes.from_list(list.range(0, {n} * 4096 / 5000) |> list.map((i) => i % 256))")],
+    },
+    Recipe {
+        func: "fs.write_bytes",
         size: "data",
         args: &[("path", "\"out.bin\""), ("data", "bytes.from_list(list.range(0, {n}) |> list.map((i) => i % 256))")],
     },
@@ -87,7 +89,7 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe {
         func: "fs.remove_all",
         size: "",
-        args: &[("path", "{ fs.mkdir_p(\"t${{i}}/a\")!\n  fs.write(\"t${{i}}/a/f\", \"x\")!\n  \"t${{i}}\" }")],
+        args: &[("path", "{ fs.mkdir_p(\"t${{i}}/a\")!\n  fs.write_text(\"t${{i}}/a/f\", \"x\")!\n  \"t${{i}}\" }")],
     },
     // argv and env (oracle/sandbox.rs ARGS / ENV).
     Recipe { func: "args.flag", size: "", args: &[("name", "\"flag\"")] },
@@ -289,7 +291,7 @@ pub fn max_k(func: &str, effect: bool) -> Option<u64> {
         // run-to-run jitter and the marginal read 0 at three of five sizes.
         Some(("http", _)) if effect => Some(256),
         // Each append grows the one file: 2k calls of n bytes at 16n.
-        Some(("fs", "append")) => Some(256),
+        Some(("fs", "append_text" | "append_bytes")) => Some(256),
         _ => None,
     }
 }

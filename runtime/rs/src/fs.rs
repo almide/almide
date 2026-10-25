@@ -43,10 +43,10 @@ fn fs_root_err(call: &str, at: &str, e: FsBeneathError) -> String {
 }
 fn fs_root_at(at: &str) -> (&str, &str) { at.split_once('\0').unwrap_or((at, "")) }
 pub fn almide_rt_fs___root_read_text(at: &str) -> Result<AlmideString, AlmideString> { let (d, r) = fs_root_at(at); let __almide_v: Result<String, AlmideString> = fs_beneath_read_text(d, r).map_err(|e| fs_root_err("fs.read_text", at, e).into()); __almide_v.into_almide() }
-pub fn almide_rt_fs___root_read_bytes(at: &str) -> Result<Vec<u8>, AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_read(d, r).map_err(|e| fs_root_err("fs.read_bytes_raw", at, e).into()) }
+pub fn almide_rt_fs___root_read_bytes(at: &str) -> Result<Vec<u8>, AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_read(d, r).map_err(|e| fs_root_err("fs.read_bytes", at, e).into()) }
 pub fn almide_rt_fs___root_list_dir(at: &str) -> Result<Vec<AlmideString>, AlmideString> { let (d, r) = fs_root_at(at); let __almide_v: Result<Vec<String>, AlmideString> = fs_beneath_list(d, r).map_err(|e| fs_root_err("fs.list_dir", at, e).into()); __almide_v.into_almide() }
 pub fn almide_rt_fs___root_exists(at: &str) -> Result<Vec<u8>, AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_exists(d, r).map(|e| if e { vec![1] } else { Vec::new() }).map_err(|e| fs_root_err("fs.exists", at, e).into()) }
-pub fn almide_rt_fs___root_write_text(at: &str, content: &str) -> Result<(), AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_write(d, r, content.as_bytes()).map_err(|e| fs_root_err("fs.write", at, e).into()) }
+pub fn almide_rt_fs___root_write_text(at: &str, content: &str) -> Result<(), AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_write(d, r, content.as_bytes()).map_err(|e| fs_root_err("fs.write_text", at, e).into()) }
 pub fn almide_rt_fs___root_remove(at: &str) -> Result<(), AlmideString> { let (d, r) = fs_root_at(at); fs_beneath_remove(d, r).map_err(|e| fs_root_err("fs.remove", at, e).into()) }
 // Source-shaped quoting, so the operand reads back as the writer spelled it —
 // with C-418's one exception (#4126): a control or bidi character is written
@@ -91,7 +91,7 @@ impl AlmideRepr for AlmideFileStat {
 // and at most FS_READ_MAX_BYTES (1 GiB) of it. The same reader serves the
 // embedded wasm host and, under `[permissions] fs`, opens beneath the grant.
 pub fn almide_rt_fs_read_text(path: &str) -> Result<AlmideString, AlmideString> { let __almide_v: Result<String, AlmideString> = { let __almide_r: Result<String, String> = (|| { almide_sfs::read_to_string_bounded(path).map_err(|e| io_err("fs.read_text", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }; __almide_v.into_almide() }
-pub fn almide_rt_fs_read_bytes(path: &str) -> Result<Vec<i64>, AlmideString> { let __almide_r: Result<Vec<i64>, String> = (|| { almide_sfs::read_bounded(path).map(|b| b.into_iter().map(|x| x as i64).collect()).map_err(|e| io_err("fs.read_bytes", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_fs_read_bytes(path: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { almide_sfs::read_bounded(path).map_err(|e| io_err("fs.read_bytes", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_fs_read_lines(path: &str) -> Result<Vec<AlmideString>, AlmideString> { let __almide_v: Result<Vec<String>, AlmideString> = { let __almide_r: Result<Vec<String>, String> = (|| { almide_sfs::read_to_string_bounded(path).map(|s| s.lines().map(|l| l.to_string()).collect()).map_err(|e| io_err("fs.read_lines", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }; __almide_v.into_almide() }
 
 // Streaming line readers: fold/each over a BufReader, never materializing the
@@ -381,10 +381,10 @@ pub fn almide_rt_fs_read_text_if_exists(path: &str) -> Result<Option<AlmideStrin
     };
     __almide_v.into_almide()
 }
-pub fn almide_rt_fs_read_bytes_if_exists(path: &str) -> Result<Option<Vec<i64>>, AlmideString> {
-    let __almide_r: Result<Option<Vec<i64>>, String> = (|| {
+pub fn almide_rt_fs_read_bytes_if_exists(path: &str) -> Result<Option<Vec<u8>>, AlmideString> {
+    let __almide_r: Result<Option<Vec<u8>>, String> = (|| {
         match almide_sfs::read_bounded(path) {
-            Ok(b) => Ok(Some(b.into_iter().map(|x| x as i64).collect())),
+            Ok(b) => Ok(Some(b)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(io_err("fs.read_bytes_if_exists", &fs_q(path), e)),
         }
@@ -404,31 +404,17 @@ pub fn almide_rt_fs_read_lines_if_exists(path: &str) -> Result<Option<Vec<Almide
     };
     __almide_v.into_almide()
 }
-pub fn almide_rt_fs_read_bytes_raw_if_exists(path: &str) -> Result<Option<Vec<u8>>, AlmideString> {
-    let __almide_r: Result<Option<Vec<u8>>, String> = (|| {
-        match almide_sfs::read_bounded(path) {
-            Ok(b) => Ok(Some(b)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(io_err("fs.read_bytes_raw_if_exists", &fs_q(path), e)),
-        }
-    })();
-    __almide_r.map_err(Into::into)
-}
-
 // Write
-pub fn almide_rt_fs_write(path: &str, content: &str) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::write(path, content).map_err(|e| io_err("fs.write", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
-pub fn almide_rt_fs_write_bytes(path: &str, bytes: &[i64]) -> Result<(), AlmideString> {
-    let __almide_r: Result<(), String> = (|| {
-        let data: Vec<u8> = bytes.iter().map(|&b| b as u8).collect();
-        std::fs::write(path, &data).map_err(|e| io_err("fs.write_bytes", &fs_q(path), e))
-    })();
-    __almide_r.map_err(Into::into)
-}
+pub fn almide_rt_fs_write(path: &str, content: &str) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::write(path, content).map_err(|e| io_err("fs.write_text", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_fs_write_bytes(path: &str, data: &Vec<u8>) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::write(path, data).map_err(|e| io_err("fs.write_bytes", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_fs_append(path: &str, content: &str) -> Result<(), AlmideString> {
+    almide_rt_fs_append_with("fs.append_text", path, content.as_bytes())
+}
+fn almide_rt_fs_append_with(call: &str, path: &str, data: &[u8]) -> Result<(), AlmideString> {
     let __almide_r: Result<(), String> = (|| {
         use std::io::Write;
-        let mut f = std::fs::OpenOptions::new().append(true).create(true).open(path).map_err(|e| io_err("fs.append", &fs_q(path), e))?;
-        f.write_all(content.as_bytes()).map_err(|e| io_err("fs.append", &fs_q(path), e))
+        let mut f = std::fs::OpenOptions::new().append(true).create(true).open(path).map_err(|e| io_err(call, &fs_q(path), e))?;
+        f.write_all(data).map_err(|e| io_err(call, &fs_q(path), e))
     })();
     __almide_r.map_err(Into::into)
 }
@@ -658,6 +644,4 @@ fn glob_star_match(pat: &str, seg: &str) -> bool {
     true
 }
 
-pub fn almide_rt_fs_read_bytes_raw(path: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { almide_sfs::read_bounded(path).map_err(|e| io_err("fs.read_bytes_raw", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
 
-pub fn almide_rt_fs_write_bytes_raw(path: &str, data: &Vec<u8>) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::write(path, data).map_err(|e| io_err("fs.write_bytes_raw", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }

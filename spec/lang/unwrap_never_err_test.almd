@@ -25,7 +25,7 @@ test "! still unwraps a can-err effect call" {
   // dir is for, and fs.remove would push this off the wasm test leg.
   let dir = fs.temp_dir()
   let path = "${dir}/almide_i1049_probe.txt"
-  fs.write(path, "abc")!
+  fs.write_text(path, "abc")!
   let s = fs.read_text(path)!
   assert_eq(string.len(s), 3)
 }

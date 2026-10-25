@@ -123,10 +123,10 @@ fn operation_label(op: i32) -> &'static str {
 
 fn operation_name(op: i32) -> &'static str {
     const NAMES: &[&str] = &[
-        "unknown operation", "fs.read_text", "fs.write", "fs.write_bytes",
+        "unknown operation", "fs.read_text", "fs.write_text", "fs.write_bytes",
         "fs.exists", "fs.is_dir", "fs.is_file", "fs.mkdir_p", "fs.remove",
         "fs.remove_all", "fs.create_temp_dir", "fs.list_dir", "fs.read_lines",
-        "fs.read_text_if_exists", "fs.read_bytes", "fs.write_bytes", "fs.append",
+        "fs.read_text_if_exists", "fs.read_bytes", "fs.write_bytes", "fs.append_text",
         "fs.file_size", "fs.modified_at", "fs.copy", "fs.rename",
         "fs.create_temp_file", "fs.is_symlink", "fs.walk", "fs.read_lines_if_exists",
         "fs.read_bytes_if_exists", "env.get", "env.os", "env.temp_dir",
@@ -145,7 +145,7 @@ fn operation_name(op: i32) -> &'static str {
             53..=59 => "the http call handle (http.start / poll / read_new / wait / cancel)",
             60 => "datetime.monotonic_ns",
             61 => "fs.fold_lines_range", 62 => "fs.fold_lines_chunked",
-            63 => "fs.read_bytes_raw", 64 => "fs.read_bytes_raw_if_exists",
+            63 => "fs.read_bytes", 64 => "fs.read_bytes_if_exists",
             73 => "panic",
             91..=103 => "the net core (net.tcp_*)",
             // Interim embedded-only ops (#3620): WASI has neither Unix-domain

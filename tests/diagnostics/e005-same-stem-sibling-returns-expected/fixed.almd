@@ -1,7 +1,6 @@
-import fs
-import hex
+fn at(i: Int?) -> Int = i ?? -1
 
-effect fn main() -> Unit = {
-  let b = fs.read_bytes_raw("Cargo.toml")!
-  println(hex.encode(bytes.slice(b, 0, 16)))
+fn main() -> Unit = {
+  let hit = list.find_index(["a", "b"], (s) => s == "b")
+  println(int.to_string(at(hit)))
 }

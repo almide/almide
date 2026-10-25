@@ -20,7 +20,7 @@ effect fn main() -> Unit = {
   let dir = "${fs.temp_dir()}/almide-c418-${process.pid()}"
   fs.mkdir_p(dir)!
   let marker = "${dir}/fake-kill-ran"
-  fs.write("${dir}/kill", "#!/bin/sh\necho ran > '${marker}'\nexit 0\n")!
+  fs.write_text("${dir}/kill", "#!/bin/sh\necho ran > '${marker}'\nexit 0\n")!
   let _ = process.exec("chmod", ["+x", "${dir}/kill"])!
   let old_path = env.get("PATH") ?? "/usr/bin:/bin"
   env.set("PATH", "${dir}:${old_path}")

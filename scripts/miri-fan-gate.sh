@@ -134,7 +134,7 @@ import fs
 
 effect fn main() -> Unit = {
   let text = list.range(0, 40) |> list.map((i) => "line " + int.to_string(i)) |> list.join("\n")
-  fs.write("fold.txt", text + "\n")!
+  fs.write_text("fold.txt", text + "\n")!
   let parts = fs.fold_lines_chunked("fold.txt", 4, 0, (acc, line) => acc + string.len(line))!
   println("parts=" + int.to_string(list.len(parts)) + " total=" + int.to_string(list.fold(parts, 0, (a, b) => a + b)))
 }

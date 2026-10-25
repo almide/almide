@@ -9,7 +9,7 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("heapck")!
   let p = dir + "/probe.txt"
-  fs.write(p, "temp root served")!
+  fs.write_text(p, "temp root served")!
   println(fs.read_text(p)!)
   fs.remove(p)!
   fs.remove(dir)!
