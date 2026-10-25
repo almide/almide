@@ -1,0 +1,97 @@
+// @contract: C-422
+// #4201: the fs whole-file readers read regular files only. `/dev/zero` is a
+// character device that never ends; before this every reader allocated from
+// it until the process was killed (native 7.28 GB, the embedded host 6.78 GB),
+// and the stock p1 service, sizing its read from the stat, answered ok("")
+// where native hung. `/dev/null` is a device too: it answered ok("") on every
+// leg and now errs alike. A directory keeps its EISDIR (C-215), and a regular
+// file beside them still reads, so the refusal cannot be "err on everything".
+import fs
+
+fn line(name: String, r: Result[Int, String]) -> String = match r {
+  ok(n) => "${name}=ok(${n})",
+  err(m) => "${name}=err(${m})",
+}
+
+effect fn probe(p: String) -> Unit = {
+  println(line("read_text", match fs.read_text(p) {
+    ok(v) => ok(string.len(v)),
+    err(m) => err(m),
+  }))
+  println(line(
+    "read_lines",
+    match fs.read_lines(p) {
+      ok(xs) => ok(list.len(xs)),
+      err(m) => err(m),
+    },
+  ))
+  println(line(
+    "read_bytes",
+    match fs.read_bytes(p) {
+      ok(bs) => ok(list.len(bs)),
+      err(m) => err(m),
+    },
+  ))
+  println(line(
+    "read_bytes_raw",
+    match fs.read_bytes_raw(p) {
+      ok(b) => ok(bytes.len(b)),
+      err(m) => err(m),
+    },
+  ))
+  println(line(
+    "read_text_if_exists",
+    match fs.read_text_if_exists(p) {
+      ok(o) => ok(string.len(o ?? "<none>")),
+      err(m) => err(m),
+    },
+  ))
+  println(line(
+    "read_lines_if_exists",
+    match fs.read_lines_if_exists(p) {
+      ok(o) => ok(list.len(o ?? [])),
+      err(m) => err(m),
+    },
+  ))
+  println(line(
+    "read_bytes_if_exists",
+    match fs.read_bytes_if_exists(p) {
+      ok(o) => ok(list.len(o ?? [])),
+      err(m) => err(m),
+    },
+  ))
+  println(line(
+    "read_bytes_raw_if_exists",
+    match fs.read_bytes_raw_if_exists(p) {
+      ok(o) => ok(bytes.len(o ?? bytes.from_list([]))),
+      err(m) => err(m),
+    },
+  ))
+}
+
+effect fn main() -> Unit = {
+  probe("/dev/zero")!
+  probe("/dev/null")!
+  let d = fs.create_temp_dir("nonregular")!
+  let f = d + "/f.txt"
+  fs.write(f, "one\ntwo\n")!
+  println(line(
+    "dir",
+    match fs.read_text(d) {
+      ok(v) => ok(string.len(v)),
+      err(m) => err(string.replace(m, d, "<TMP>")),
+    },
+  ))
+  println(line("file", match fs.read_text(f) {
+    ok(v) => ok(string.len(v)),
+    err(m) => err(m),
+  }))
+  println(line(
+    "file_lines_if",
+    match fs.read_lines_if_exists(f) {
+      ok(o) => ok(list.len(o ?? [])),
+      err(m) => err(m),
+    },
+  ))
+  fs.remove_all(d)!
+}
