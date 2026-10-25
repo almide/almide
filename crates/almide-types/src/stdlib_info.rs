@@ -117,6 +117,29 @@ pub fn runtime_backed_type_owner(name: &str) -> Option<&'static str> {
     })
 }
 
+/// The function that DISPLAYS a runtime-backed type (#4204):
+/// `<module>.__repr_<type_in_snake_case>` (`http.__repr_http_request`),
+/// derived from the type's `RUNTIME_BACKED_TYPES` row. The owner module
+/// declares it beside the type's other operations; native implements it as the
+/// runtime's `AlmideRepr` impl, and a self-hosted rep (`HttpRequest` is a
+/// `List[String]` on wasm) shows that same text only through it, never through
+/// the generic display of its carrier — the carrier holds what the repr hides
+/// (every header value). The wasm display engine calls it whenever the module
+/// declares and the self-host registry links one; `None` when `name` is not
+/// runtime-backed.
+pub fn runtime_backed_repr_surface(name: &str) -> Option<String> {
+    let owner = runtime_backed_type_owner(name)?;
+    let bare = name.rsplit_once('.').map(|(_, b)| b).unwrap_or(name);
+    let mut snake = String::new();
+    for (i, c) in bare.chars().enumerate() {
+        if c.is_ascii_uppercase() && i > 0 {
+            snake.push('_');
+        }
+        snake.push(c.to_ascii_lowercase());
+    }
+    Some(format!("{owner}.__repr_{snake}"))
+}
+
 /// Nominal type names a stdlib module OWNS, `(module, type name)`: the
 /// builtin dynamic `Value`, every `RUNTIME_BACKED_TYPES` row, and every
 /// `type` declared in a bundled module (`fs.FileStat`, `bytes.Endian`, …).
