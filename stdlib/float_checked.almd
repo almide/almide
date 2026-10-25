@@ -138,19 +138,16 @@ fn float_to_int64_checked(n: Float) -> Int64? = {
 }
 
 // Int (the default-width cell, #4145): the Int64 cell over `float.to_int` — the same bounds,
-// since Int is 64-bit.
+// since Int is 64-bit. Written without `prim.` (the bounds are exact f64 literals, 2^63 and
+// -2^63) so the declaration, not a name list, admits it.
+@implements("float.to_int_checked")
 fn float_to_int_checked(n: Float) -> Int? = {
   let nan = float.is_nan(n)
   let inf = float.is_infinite(n)
-  let p62 = prim.bshl(1, 62)
-  let f62 = prim.i2f(p62)
-  let two63 = prim.fadd(f62, f62)
-  let neg63 = prim.fneg(two63)
-  let lo = prim.flt(n, neg63)
-  let hi = prim.fge(n, two63)
+  let lo = n < -9223372036854775808.0
+  let hi = n >= 9223372036854775808.0
   let i = float.to_int(n)
-  let fl = prim.ffloor(n)
-  let rt = prim.feq(fl, n)
+  let rt = float.floor(n) == n
   if nan then none
   else if inf then none
   else if lo then none
