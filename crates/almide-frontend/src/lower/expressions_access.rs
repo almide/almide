@@ -371,6 +371,14 @@ fn lower_expr_unary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
                 if let Some(target) = requirement_call_target(ctx, &operand_ty, crate::canonicalize::protocols::NEG_REQUIREMENT) {
                     return ctx.mk(IrExprKind::Call { target, args: vec![o], type_args: vec![] }, ty, span);
                 }
+                // The checker admits `-m` on a Matrix; it is `matrix.neg(m)`,
+                // as `a - b` is the matrix subtraction (#3965). There is no
+                // matrix `UnOp`, and `NegInt` on a Matrix is an IR verify ICE.
+                if operand_ty == Ty::Matrix {
+                    let def_id = ctx.def_map.get(&sym("matrix.neg")).copied();
+                    let target = CallTarget::Module { module: sym("matrix"), func: sym("neg"), def_id };
+                    return ctx.mk(IrExprKind::Call { target, args: vec![o], type_args: vec![] }, Ty::Matrix, span);
+                }
             }
             let un_op = match (op.as_str(), &o.ty) {
                 ("not", _) => UnOp::Not,
