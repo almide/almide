@@ -138,8 +138,13 @@ fn is_lower(s: String) -> Bool = _
 fn to_codepoint(s: String) -> Int? = _
 
 /// One-char string of n; none if n is not a Unicode scalar value.
-@intrinsic("almide_rt_string_from_codepoint")
-fn from_codepoint(n: Int) -> String? = _
+fn from_codepoint(n: Int) -> String? =
+  if n < 0 or n > 1114111 or (n >= 55296 and n <= 57343) then none
+  else some(string.__from_codepoint(n))
+
+// The UTF-8 encoding of a scalar value n (from_codepoint checked it is one).
+@intrinsic("almide_rt_string___from_codepoint")
+fn __from_codepoint(n: Int) -> String = _
 
 /// Right-padded to n chars with fill; never truncates.
 @intrinsic("almide_rt_string_pad_right")
