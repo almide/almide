@@ -75,7 +75,7 @@ fn __dpi_build(d: List[Int], tm: List[Int], off: Int) -> Result[Int, String] = {
   else if h < 0 or h > 23 then err("hour out of range: " + int.to_string(h))
   else if mi < 0 or mi > 59 then err("minute out of range: " + int.to_string(mi))
   else if s < 0 or s > 59 then err("second out of range: " + int.to_string(s))
-  else ok(datetime.from_parts(y, mo, dd, h, mi, s) - off)
+  else ok(datetime.__from_parts(y, mo, dd, h, mi, s) - off)
 }
 
 fn datetime_parse_iso(s: String) -> Result[Int, String] = {
