@@ -292,7 +292,7 @@ t + 1 }` → 11、if アーム内ブロック → 9、両ターゲット同一)�
 (ALS-E7、`tests/unary_not_diag_test.rs` の補間側ケース)。
 
 テスト: `spec/wasm_cross/string_interpolation.almd`(契約 C-245)、
-`spec/wasm_cross/secret_never_rendered.almd`(契約 C-423)。
+`spec/wasm_cross/secret_never_rendered.almd`(契約 C-425)。
 
 ## ALS-E17 識別子(`ExprKind::Ident`)
 
@@ -591,7 +591,7 @@ C-094/C-126(`protocol_ufcs_inferred_lambda.almd`)が pin。test ブロックは
 
 テスト: `spec/wasm_cross/declaration_forms.almd`(契約 C-260)、
 `tests/diagnostics/e053-unknown-field-attribute-serde-skip/`・
-`tests/diagnostics/e053-unknown-field-attribute-redact/`(契約 C-428)。
+`tests/diagnostics/e053-unknown-field-attribute-redact/`(契約 C-430)。
 
 ## ALS-E3 浮動小数点リテラル(`ExprKind::Float`)— 部分節
 

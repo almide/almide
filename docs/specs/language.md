@@ -506,11 +506,11 @@ Result[T, String]`, and for a record type also `T.decode_strict(v: Value) ->
 Result[T, String]`. `T.decode` ignores keys it does not know;
 `T.decode_strict` first returns `err("unknown key '<k>'")` for the first key
 (in document order) that is not a decoded field's key, then decodes as
-`T.decode` does (C-427). A record field may carry `@skip` (neither decoded
+`T.decode` does (C-429). A record field may carry `@skip` (neither decoded
 nor encoded) or `@skip_decode` (never decoded, still encoded); both need a
 default, else E104, and the input's key for such a field is treated as an
-unknown key (C-426). A record field accepts only the attributes `@builtin`,
-`@location`, `@skip` and `@skip_decode`; any other is the error E053 (C-428).
+unknown key (C-428). A record field accepts only the attributes `@builtin`,
+`@location`, `@skip` and `@skip_decode`; any other is the error E053 (C-430).
 
 ```almide
 type User: Codec = {
