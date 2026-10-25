@@ -289,6 +289,17 @@ fn link_self_host(
         }
     }
 
+    fn demand_declared_reprs(t: &crate::types::Ty, out: &mut HashSet<String>) {
+        if let crate::types::Ty::Named(name, _) = t
+            && let Some(surface) = almide_types::stdlib_info::runtime_backed_repr_surface(name.as_str())
+        {
+            out.insert(surface);
+        }
+        for c in t.children() {
+            demand_declared_reprs(c, out);
+        }
+    }
+
     fn demand_requirement(key: &str, out: &mut HashSet<String>) {
         let Some((_, method)) = key.split_once('.') else { return };
         for (module, _, req) in crate::canonicalize::protocols::builtin_conformance_requirements() {
@@ -299,6 +310,11 @@ fn link_self_host(
     }
 
     fn scan_expr(e: &crate::ir::IrExpr, out: &mut HashSet<String>) {
+        // A value of a runtime-backed type displays through its declared repr
+        // (#4204) wherever it meets a display — bare, nested, or in an error
+        // message — so its mention is the demand (an unused splice is
+        // reachability-pruned).
+        demand_declared_reprs(&e.ty, out);
         match &e.kind {
             crate::ir::IrExprKind::Call { target, args, .. }
             | crate::ir::IrExprKind::TailCall { target, args, .. } => {
