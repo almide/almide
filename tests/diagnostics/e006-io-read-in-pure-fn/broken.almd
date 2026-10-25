@@ -1,6 +1,9 @@
 import io
 
-// #3248: io.read_byte reads stdin, so it is an effect fn — a plain fn cannot call it.
-fn first_byte() -> Int = io.read_byte()
+// #3248: io.read reads a handle (here stdin), so it is an effect fn — a plain fn cannot call it.
+fn first_byte(h: io.Stdin) -> Int = match io.read(h, 1) {
+  ok(b) => bytes.get(b, 0) ?? -1,
+  err(_) => -1,
+}
 
-effect fn main() -> Unit = println("${first_byte()}")
+effect fn main() -> Unit = println("${first_byte(io.stdin()!)}")

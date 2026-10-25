@@ -8,14 +8,14 @@ import process
 
 effect fn main() -> Unit = {
   // A child that exits without reading: the write meets EPIPE, not SIGPIPE.
-  let early = process.exec_with_stdin("true", [], string.repeat("x", 1048576))
+  let early = process.output(process.ProcessCommand { cmd: "true", args: [], stdin: string.repeat("x", 1048576) })
   println(match early {
     ok(_) => "early: returned",
     err(_) => "early: returned",
   })
-  let echoed = process.exec_with_stdin("cat", [], "hello")!
-  println("cat=" + echoed)
-  let st = process.exec_status_timeout("sh", ["-c", "exit 3"], 5000)!
+  let echoed = process.output(process.ProcessCommand { cmd: "cat", args: [], stdin: "hello" })!
+  println("cat=" + echoed.stdout)
+  let st = process.output(process.ProcessCommand { cmd: "sh", args: ["-c", "exit 3"], timeout_ms: 5000 })!
   println("code=" + int.to_string(st.code))
   let xs = fan.map(list.range(0, 64), (x) => ok(x * x))!
   println("fan=" + int.to_string(list.fold(xs, 0, (a, b) => a + b)))

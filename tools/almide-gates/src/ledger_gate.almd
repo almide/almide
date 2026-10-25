@@ -190,7 +190,7 @@ fn summary(n_contracts: Int, n_active: Int, n_flagged: Int, ceiling: Int, with_h
 // and running it with the output redirected to /dev/null is exactly how the drift this check
 // exists to catch happened in the first place.
 effect fn stale(cmd: String, cmd_args: List[String], committed: String) -> Bool = {
-  let st = process.exec_status(cmd, cmd_args) ?? process.ProcessStatus {
+  let st = process.output(process.ProcessCommand { cmd: cmd, args: cmd_args }) ?? process.ProcessStatus {
     code: 1,
     stdout: "",
     stderr: "",
@@ -200,7 +200,7 @@ effect fn stale(cmd: String, cmd_args: List[String], committed: String) -> Bool 
 }
 
 effect fn freshness_pass() -> List[String] = {
-  let claims = process.exec_status("bash", ["scripts/gen-claims.sh", "--check"]) ?? process.ProcessStatus {
+  let claims = process.output(process.ProcessCommand { cmd: "bash", args: ["scripts/gen-claims.sh", "--check"] }) ?? process.ProcessStatus {
     code: 1,
     stdout: "",
     stderr: "",
