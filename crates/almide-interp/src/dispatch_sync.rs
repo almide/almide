@@ -163,10 +163,16 @@ impl<'a> Interpreter<'a> {
     /// handle, 5 array of n Value handles with n at @8, 6 object of n
     /// (String, Value) pairs with the SLOT count 2n at @8). `None` (an
     /// abstain upstream) for a non-block address, an unknown tag, an
-    /// unreadable child, or a depth past the cap — never a guess.
+    /// unreadable child, or a depth past the cap — never a guess. The cap is
+    /// the JSON value domain's own bound (`almide_base::json_limits`, #4209):
+    /// every Value json.parse or json.set_path can make is walked, its
+    /// innermost scalar sitting at depth JSON_MAX_DEPTH; only a Value built
+    /// deeper through the infallible `value.array` / `value.object` abstains.
     fn dyn_node_of(&self, addr: u32, depth: u32) -> Option<crate::value::DynNode> {
         use crate::value::DynNode;
-        if depth > 512 || self.heap.kind(addr)? != crate::heap::BlockKind::Slots {
+        if depth as usize > almide_base::json_limits::JSON_MAX_DEPTH
+            || self.heap.kind(addr)? != crate::heap::BlockKind::Slots
+        {
             return None;
         }
         let tag = self.heap.block_len(addr)?;
