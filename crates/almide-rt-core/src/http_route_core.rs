@@ -49,7 +49,7 @@ impl AlmideHttpUrl {
 }
 
 fn http_url_error(url: &str, why: &str) -> String {
-    format!("{}{}: {}", HTTP_ERR_URL_HEAD, http_quote(url), why)
+    format!("{}{}: {}", HTTP_ERR_URL_HEAD, http_quote_url(url), why)
 }
 
 /// Parse an http / https URL (#2821). `Err` names the URL and the problem.

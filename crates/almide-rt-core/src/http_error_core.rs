@@ -136,16 +136,56 @@ pub fn http_quote(s: &str) -> String {
     out
 }
 
+/// What replaces the userinfo password wherever an error quotes a URL
+/// (C-328, #4205) — Go net/http's `stripPassword` token.
+pub const HTTP_URL_PASSWORD_MASK: &str = "***";
+
+/// The byte span `[from, to)` of `url`'s userinfo password, read on the raw
+/// text the program passed, the way `http_parse_url` splits it: the
+/// authority starts past a `//` standing at the first `/`, `?` or `#` (at
+/// the start of the text when none is a `//`) and ends at the next `/`, `?`
+/// or `#`; the userinfo is
+/// what precedes the authority's LAST `@`; the password is what follows the
+/// userinfo's FIRST `:` — possibly empty. `None` when the userinfo has no
+/// `:` (or there is no `@`). The query and fragment are never inside it.
+/// The p3 shim's `$http_quote` computes the same span (wasi_p3_http_err.rs).
+pub fn http_url_password_span(url: &str) -> Option<(usize, usize)> {
+    let start = match url.find(['/', '?', '#']) {
+        Some(s) if url[s..].starts_with("//") => s + 2,
+        _ => 0,
+    };
+    let end = url[start..].find(['/', '?', '#']).map_or(url.len(), |i| start + i);
+    let at = start + url[start..end].rfind('@')?;
+    let colon = start + url[start..at].find(':')?;
+    Some((colon + 1, at))
+}
+
+/// `url` with its userinfo password (if any) replaced by
+/// `HTTP_URL_PASSWORD_MASK`; every other byte is kept — the username,
+/// scheme, host, port, path, query and fragment.
+pub fn http_redact_url(url: &str) -> String {
+    match http_url_password_span(url) {
+        Some((from, to)) => format!("{}{}{}", &url[..from], HTTP_URL_PASSWORD_MASK, &url[to..]),
+        None => url.to_string(),
+    }
+}
+
+/// Quote a URL in an error text: `http_quote` of `http_redact_url`. Every
+/// error that names the URL the program passed quotes it through here.
+pub fn http_quote_url(url: &str) -> String {
+    http_quote(&http_redact_url(url))
+}
+
 /// The text of a transport failure of `class` on a request to `url`.
 pub fn http_error_text(class: HttpErrorClass, url: &str) -> String {
     let (head, tail) = http_error_parts(class);
-    format!("{}{}{}", head, http_quote(url), tail)
+    format!("{}{}{}", head, http_quote_url(url), tail)
 }
 
 /// The text of a response past the `max`-byte limit.
 pub fn http_too_large_text(url: &str, max: usize) -> String {
     let [head, mid, tail] = HTTP_ERR_TOO_LARGE;
-    format!("{}{}{}{}{}", head, http_quote(url), mid, max, tail)
+    format!("{}{}{}{}{}", head, http_quote_url(url), mid, max, tail)
 }
 
 /// An io error on an open connection: a timeout, or a broken exchange.
