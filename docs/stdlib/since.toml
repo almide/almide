@@ -423,6 +423,8 @@
 "float.to_int8" = "<=0.15.0"
 "float.to_int8_checked" = "<=0.15.0"
 "float.to_int8_saturating" = "<=0.15.0"
+"float.to_int_checked" = "unreleased"
+"float.to_int_saturating" = "unreleased"
 "float.to_string" = "<=0.5.0"
 "float.to_uint16" = "<=0.15.0"
 "float.to_uint16_checked" = "<=0.15.0"

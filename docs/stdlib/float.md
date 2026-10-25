@@ -260,7 +260,7 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (59 functions)
+## Signature index (61 functions)
 
 ```
 // Shortest round-trip digits, no exponent; 2.0 keeps .0.
