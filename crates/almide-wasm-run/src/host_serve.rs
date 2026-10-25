@@ -18,6 +18,9 @@
 //!   72 reply  a = `<len>\n<payload>` cells (status, body, k1, v1, …) —
 //!             the http_framed cell format — written to the held
 //!             connection, which then closes
+//!   75 run    a_len = the env of the guest's serve-loop closure: the host
+//!             calls it and contains a handler abort to its request
+//!             (#4203; host.rs `serve_contained`, [`abort_pending`])
 
 use std::io::{BufWriter, Stdout, Write as _};
 use std::net::TcpListener;
@@ -30,6 +33,7 @@ use almide_rt_core::http_server_core::{
 pub(crate) const OP_SERVE_BIND: i32 = 70;
 pub(crate) const OP_SERVE_NEXT: i32 = 71;
 pub(crate) const OP_SERVE_REPLY: i32 = 72;
+pub(crate) const OP_SERVE_RUN: i32 = 75;
 
 /// The run's connection pool and the connection whose response is pending.
 /// The pool (the shared core's, #4021) accepts and reads up to 64 connections
@@ -40,6 +44,8 @@ pub(crate) const OP_SERVE_REPLY: i32 = 72;
 pub(crate) struct ServeState {
     pool: Option<HttpServerPool>,
     pending: Option<HttpServerConn>,
+    /// The pending request's C-409 id (#4203): an abort answers it by name.
+    pending_id: String,
     /// The shutdown watcher while the guest serves.
     watch: Option<HttpServerWatch>,
 }
@@ -141,6 +147,7 @@ pub(crate) fn dispatch(
                 return (pack(0, 0), Vec::new());
             };
             st.pending = Some(stream);
+            st.pending_id = almide_rt_core::http_server_core::http_server_request_id(&method, &path, &body);
             let mut cells = vec![method, path, body];
             for (k, v) in headers {
                 cells.push(k);
@@ -164,4 +171,19 @@ pub(crate) fn dispatch(
             (pack(0, 0), Vec::new())
         }
     }
+}
+
+/// A runtime abort inside the handler of the pending request (#4203): answer
+/// it with the fixed C-409 500 native's serve loop sends, and give back the
+/// one stderr line naming the request and the abort. `None` when no request
+/// is pending — the abort is not a handler's, and stays the run's abort.
+pub(crate) fn abort_pending(state: &Mutex<ServeState>, abort: &str) -> Option<String> {
+    use almide_rt_core::http_server_core::{http_server_handler_abort_line, http_server_handler_error_body, http_server_write};
+    let mut st = state.lock().expect("serve state");
+    let conn = st.pending.take()?;
+    let id = std::mem::take(&mut st.pending_id);
+    drop(st);
+    let plain = [("Content-Type".to_string(), "text/plain".to_string())];
+    let _ = http_server_write(conn, 500, &plain, &http_server_handler_error_body(&id));
+    Some(http_server_handler_abort_line(&id, abort))
 }
