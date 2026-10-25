@@ -248,12 +248,13 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve): (u32, Opti
         i.end();
     }
 
-    // ops 70..=72 (`http.serve`'s loop): answered guest-side by the serve
-    // export's shim (#2659, wasi_p3_serve.rs).
+    // ops 70..=72 and 75 (`http.serve`'s loop): answered guest-side by the
+    // serve export's shim (#2659, #4203, wasi_p3_serve.rs).
     if let Some(s) = f_serve {
         i.local_get(op).i32_const(70).i32_ge_s();
         i.local_get(op).i32_const(72).i32_le_s();
-        i.i32_and().if_(BlockType::Empty);
+        i.i32_and();
+        i.local_get(op).i32_const(75).i32_eq().i32_or().if_(BlockType::Empty);
         for pidx in 0..5u32 {
             i.local_get(pidx);
         }

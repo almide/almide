@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 884  implementations = 2041
+# holes = 883  implementations = 2034
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -895,13 +895,6 @@ selfhost = 0
 total    = 1
 [[hole]]
 module   = "bytes"
-name     = "is_equal_constant_time"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "bytes"
 name     = "__take_at"
 native   = 1
 emitter  = 0
@@ -1252,7 +1245,7 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "env"
-name     = "__set"
+name     = "set"
 native   = 1
 emitter  = 0
 selfhost = 0
@@ -1353,8 +1346,8 @@ module   = "float"
 name     = "to_int"
 native   = 1
 emitter  = 0
-selfhost = 3
-total    = 4
+selfhost = 1
+total    = 2
 [[hole]]
 module   = "float"
 name     = "from_int"
@@ -2324,6 +2317,13 @@ total    = 0
 [[hole]]
 module   = "http"
 name     = "__http_serve_reply"
+native   = 0
+emitter  = 0
+selfhost = 0
+total    = 0
+[[hole]]
+module   = "http"
+name     = "__http_serve_run"
 native   = 0
 emitter  = 0
 selfhost = 0
@@ -5599,13 +5599,6 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "string"
-name     = "is_equal_constant_time"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "string"
 name     = "starts_with"
 native   = 1
 emitter  = 1
@@ -6042,9 +6035,9 @@ total    = 2
 module   = "value"
 name     = "merge"
 native   = 1
-emitter  = 1
+emitter  = 0
 selfhost = 1
-total    = 3
+total    = 2
 [[hole]]
 module   = "value"
 name     = "null"

@@ -137,6 +137,22 @@ struct Host {
     /// so a miscompile cannot steer the gateway into a capability the program
     /// never had.
     allowed_ops: AllowedOps,
+    /// The contained serve loop's stderr hold (#4203, op 75).
+    contain: Arc<Mutex<Contain>>,
+}
+
+/// While op 75 runs the guest's serve loop, an abort's own stderr write —
+/// the die line `Error: <msg>` (or `PANIC: <msg>`) before its `unreachable`,
+/// or `panic`'s raw `PANIC: <msg>` before its exit 1 — must not reach stderr
+/// when the abort is contained: native prints only the `handler aborted`
+/// line then. So a write that could be such a line is HELD, and released by
+/// the next host call or the loop's return; it is consumed only when the
+/// trap that follows it is that abort.
+#[derive(Default)]
+struct Contain {
+    active: bool,
+    /// The held write and whether it was a line (eprintln) or raw (op 73).
+    held: Option<(Vec<u8>, bool)>,
 }
 
 /// See [`Host::allowed_ops`].
@@ -230,6 +246,37 @@ fn stderr_write(parts: &[&[u8]]) {
 }
 
 fn emit_err_line(host: &Host, line: &[u8]) {
+    if hold_err(host, line, true) {
+        return;
+    }
+    emit_err_line_now(host, line);
+}
+
+/// Hold `bytes` when the contained loop runs and they could be an abort's
+/// line (#4203); otherwise release any held write first. True = held.
+fn hold_err(host: &Host, bytes: &[u8], line: bool) -> bool {
+    release_held(host);
+    let mut c = host.contain.lock().expect("contain");
+    let abort_shaped = bytes.starts_with(b"PANIC: ") || (line && bytes.starts_with(b"Error: "));
+    if c.active && abort_shaped {
+        *host.err_last.lock().expect("err last") = String::from_utf8_lossy(bytes).into_owned();
+        c.held = Some((bytes.to_vec(), line));
+        return true;
+    }
+    false
+}
+
+/// Write a held stderr write out: what followed it was not its abort.
+fn release_held(host: &Host) {
+    let held = host.contain.lock().expect("contain").held.take();
+    match held {
+        Some((b, true)) => emit_err_line_now(host, &b),
+        Some((b, false)) => emit_err_raw_now(host, &b),
+        None => {}
+    }
+}
+
+fn emit_err_line_now(host: &Host, line: &[u8]) {
     *host.err_last.lock().expect("err last") = String::from_utf8_lossy(line).into_owned();
     if host.live_out.is_some() {
         stderr_write(&[line, b"\n"]);
@@ -243,6 +290,13 @@ fn emit_err_line(host: &Host, line: &[u8]) {
 /// Append to stderr verbatim — op 73, the newline-free twin of
 /// [`emit_err_line`].
 fn emit_err_raw(host: &Host, bytes: &[u8]) {
+    if hold_err(host, bytes, false) {
+        return;
+    }
+    emit_err_raw_now(host, bytes);
+}
+
+fn emit_err_raw_now(host: &Host, bytes: &[u8]) {
     *host.err_last.lock().expect("err last") = String::from_utf8_lossy(bytes).into_owned();
     if host.live_out.is_some() {
         stderr_write(&[bytes]);
@@ -329,6 +383,7 @@ fn append_line(caller: &mut wasmtime::Caller<'_, Host>, to_err: bool, ptr: i32, 
     if to_err {
         emit_err_line(caller.data(), &line);
     } else {
+        release_held(caller.data());
         line.push(b'\n');
         emit_out(caller.data(), &line);
     }
@@ -536,6 +591,7 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
             par: None,
             abort_site,
             allowed_ops: allowed_ops.clone(),
+            contain: Arc::default(),
         },
     );
     store.limiter(|h| h as &mut dyn wasmtime::ResourceLimiter);
@@ -687,6 +743,12 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
          b_len: i32|
          -> wasmtime::Result<i64> {
             op_allowed(caller.data(), op)?;
+            release_held(caller.data());
+            // op 75 = the contained serve loop (#4203): the loop closure's
+            // env rides a_len (scalar, null a_ptr).
+            if op == crate::host_serve::OP_SERVE_RUN {
+                return serve_contained(&mut caller, a_len);
+            }
             // op 74 = the instance-parallel fan offer (#3003): the request
             // and the answer room are raw i64 slots, never text.
             if op == fan::OP_FAN_PAR {
@@ -877,6 +939,108 @@ fn abort_site_op(caller: &wasmtime::Caller<'_, Host>, op: i32, a_len: i32) -> i6
     let len = buf.len();
     *caller.data().fs_buf.lock().expect("fs buf") = buf;
     (len as i64) & 0xFFFF_FFFF
+}
+
+/// op 75 (#4203): run the guest's serve loop — the closure whose env block
+/// is `env` — so that a runtime abort inside a handler fails only its
+/// request: the request gets native's C-409 500, stderr gets native's one
+/// `handler aborted` line, and the loop is called again. Answers 0 when the
+/// loop returned (a shutdown), or `1 << 32` (err, "not served") for a module
+/// without the exports, and the guest then runs the loop itself.
+///
+/// State soundness. Before the first call the host copies the instance's
+/// whole linear memory and every mutable global (a module naming op 75
+/// exports its globals and table, assembly.rs). An abort unwinds only the
+/// call made here: wasmtime hands the trap back to this host function, and
+/// the guest frames below it (`http.serve`'s, `main`'s) are untouched, since
+/// a trap ends only the frames the trapping call pushed. The host then writes
+/// the copy back, so memory and globals are bit for bit what they were when
+/// `http.serve` called op 75: whatever the handler left half done (an
+/// allocator mid-update, a region window still open, refcounts raised and
+/// never lowered, a partly built line-buffer string) is gone rather than
+/// carried into the next request. Memory grown since is zeroed, as fresh
+/// pages are. The frames below hold only values that existed at the copy
+/// (the loop closure and the app), so they stay valid. That point is the
+/// state a fresh instance of the app would start serving from, and C-367's
+/// app is instance-closed (how many instances evaluate it is not
+/// observable), so a later request sees nothing of the aborted one but its
+/// effects on the world: output already written, files, sockets.
+///
+/// Only the two defined aborts are contained, the ones native's serve loop
+/// catches (`almide_abort`, `almide_panic_abort`): the line `Error: <m>`
+/// (or `PANIC: <m>`, or `panic`'s raw `PANIC: <m>`) written just before the
+/// call ends on its `unreachable` (the die convention) or its exit 1. Any
+/// other end of the call (another exit code, stack exhaustion, another
+/// trap, an abort outside a request) stays the run's, as on native.
+fn serve_contained(caller: &mut wasmtime::Caller<'_, Host>, env: i32) -> wasmtime::Result<i64> {
+    const NOT_SERVED: i64 = 1 << 32;
+    let mem = guest_memory(caller)?;
+    let Some(table) = caller.get_export("__almide_table").and_then(|e| e.into_table()) else {
+        return Ok(NOT_SERVED);
+    };
+    let mut globals = Vec::new();
+    for g in 0.. {
+        let Some(gl) = caller.get_export(&format!("__almide_g{g}")).and_then(|e| e.into_global()) else {
+            break;
+        };
+        if gl.ty(&*caller).mutability() == wasmtime::Mutability::Var {
+            let v = gl.get(&mut *caller);
+            globals.push((gl, v));
+        }
+    }
+    let mut slot = [0u8; 4];
+    mem.read(&*caller, (env as u32 as usize).saturating_add(almide_layout::PAYLOAD as usize), &mut slot)?;
+    let Some(func) = table.get(&mut *caller, u64::from(u32::from_le_bytes(slot))).and_then(|r| r.as_func().flatten().copied()) else {
+        return Ok(NOT_SERVED);
+    };
+    let snapshot = mem.data(&*caller).to_vec();
+    let serve = caller.data().serve.clone();
+    let mut results = vec![wasmtime::Val::I32(0); func.ty(&*caller).results().len()];
+    loop {
+        caller.data().contain.lock().expect("contain").active = true;
+        let ran = func.call(&mut *caller, &[wasmtime::Val::I32(env)], &mut results);
+        let held = {
+            let mut c = caller.data().contain.lock().expect("contain");
+            c.active = false;
+            c.held.take()
+        };
+        let put_back = |host: &Host, held: Option<(Vec<u8>, bool)>| match held {
+            Some((b, true)) => emit_err_line_now(host, &b),
+            Some((b, false)) => emit_err_raw_now(host, &b),
+            None => {}
+        };
+        let e = match ran {
+            Ok(()) => {
+                put_back(caller.data(), held);
+                return Ok(0);
+            }
+            Err(e) => e,
+        };
+        let exit = *caller.data().exit.lock().expect("exit");
+        // The abort's own end: its `unreachable` (the die convention) or
+        // its exit 1 (the emitter's guards and `panic`).
+        let ended = matches!(exit, Some(1)) || (exit.is_none() && is_unreachable_trap(&e));
+        let text = match &held {
+            Some((h, line)) if ended => match h.strip_prefix(b"Error: ").filter(|_| *line) {
+                Some(m) => Some(m.to_vec()),
+                None => h.starts_with(b"PANIC: ").then(|| h.clone()),
+            },
+            _ => None,
+        };
+        let line = text.and_then(|t| crate::host_serve::abort_pending(&serve, &String::from_utf8_lossy(&t)));
+        let Some(line) = line else {
+            put_back(caller.data(), held);
+            return Err(e);
+        };
+        *caller.data().exit.lock().expect("exit") = None;
+        emit_err_line_now(caller.data(), line.as_bytes());
+        let data = mem.data_mut(&mut *caller);
+        data[..snapshot.len()].copy_from_slice(&snapshot);
+        data[snapshot.len()..].fill(0);
+        for (g, v) in &globals {
+            g.set(&mut *caller, *v)?;
+        }
+    }
 }
 
 fn is_unreachable_trap(e: &wasmtime::Error) -> bool {

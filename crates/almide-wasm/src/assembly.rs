@@ -389,6 +389,16 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
     }
     // #2407: the counters, read by the host beside `__heap` (armed only).
     crate::alloc_count::export_globals(&mut exports, counters);
+    // #4203: a module running the contained serve loop (op 75) exports its
+    // table and every global, so the embedded host can call the loop's
+    // closure and put the instance back to its state at the call after a
+    // handler abort. A module without the op keeps its bytes.
+    if work.host_ops.borrow().contains(&crate::fs_meta::OP_HTTP_SERVE_RUN) {
+        exports.export("__almide_table", ExportKind::Table, 0);
+        for g in 0..globals.len() {
+            exports.export(&format!("__almide_g{g}"), ExportKind::Global, g);
+        }
+    }
     // #457: every clean-closure entry pub fn is host-callable.
     for (name, idx) in export_fns {
         exports.export(name, ExportKind::Func, *idx);
