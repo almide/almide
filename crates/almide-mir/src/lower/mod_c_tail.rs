@@ -537,6 +537,7 @@ mod tests;
 include!("drop_sources.rs");
 include!("repr_sources_d.rs");
 include!("newtype_erase.rs");
+include!("runtime_backed_interp.rs");
 include!("newtype_subst.rs");
 include!("record_defaults.rs");
 include!("desugar_guard.rs");
