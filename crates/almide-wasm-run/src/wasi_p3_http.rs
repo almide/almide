@@ -220,7 +220,7 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.call(I_HTTP_FIELDS_APPEND);
     i.i32_const((park + RET) as i32).i32_load8_u(mem8(0)).if_(BlockType::Empty);
     i.local_get(headers).call(I_HTTP_FIELDS_DROP);
-    http_err_call(&mut i, fns, (key_ptr, key_len), t.hdr[2][0], t.hdr[2][1], None, Piece::default());
+    http_err_call(&mut i, fns, Quoted::Name(key_ptr, key_len), t.hdr[2][0], t.hdr[2][1], None, Piece::default());
     i.end();
     i.end();
     i.br(0).end().end();
@@ -597,7 +597,7 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     http_decimal_i64(&mut i, (park + CLEN_BUF) as i32, lim, secs, key_len, cur);
     i.i32_const((park + CLEN_BUF) as i32).local_set(key_ptr);
     let [tl0, tl1, tl2] = t.too_large;
-    http_err_call(&mut i, fns, (a_ptr, a_len), tl0, tl1, Some((key_ptr, key_len)), tl2);
+    http_err_call(&mut i, fns, Quoted::Url(a_ptr, a_len), tl0, tl1, Some((key_ptr, key_len)), tl2);
     i.end();
     i.local_get(n).i32_const(15).i32_and().br_if(1);
     i.br(0).end().end();
