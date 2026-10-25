@@ -119,7 +119,9 @@ pub const HOST_OPS: &[HostOp] = &[
     // ── env: argv, the environment, the clock ──
     op("env", "args", "almide_rt_env_args", ENV),
     op("env", "get", "almide_rt_env_get", ENV),
-    op("env", "set", "almide_rt_env_set", ENV),
+    // `env.set` is an Almide body that refuses the pairs no environment holds
+    // (#4200) before it reaches its private op `__set`.
+    op("env", "__set", "almide_rt_env___set", ENV),
     // `env.cwd` reads PWD and `temp_dir` honours $TMPDIR: environment reads.
     op("env", "cwd", "almide_rt_env_cwd", ENV).result(),
     op("env", "temp_dir", "almide_rt_env_temp_dir", ENV),
@@ -349,7 +351,7 @@ mod tests {
         for name in ["env.millis", "env.unix_timestamp", "datetime.now", "datetime.monotonic_ns", "env.sleep_ms"] {
             assert_eq!(host_op_capabilities(name), &[Capability::Clock], "{name}");
         }
-        assert_eq!(host_op_capabilities("env.set"), &[Capability::CliArgs]);
+        assert_eq!(host_op_capabilities("env.__set"), &[Capability::CliArgs]);
         assert_eq!(host_op_capabilities("http.get"), &[Capability::Net]);
         assert_eq!(host_op_capabilities("fs.copy"), &[Capability::FsRead, Capability::FsWrite]);
     }
@@ -400,7 +402,7 @@ mod tests {
         let call = |name: &str| crate::Op::CallFn { dst: None, name: name.into(), args: Vec::new(), result: None };
         let f = crate::MirFunction {
             name: "f".into(),
-            ops: vec![call("http.get"), call("env.set"), call("datetime.now"), call("list.len")],
+            ops: vec![call("http.get"), call("env.__set"), call("datetime.now"), call("list.len")],
             declared_caps: vec![Capability::Stdout, Capability::CliArgs],
             ..Default::default()
         };

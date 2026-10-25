@@ -350,6 +350,6 @@ fn a_trap_in_a_parallel_list_map_is_the_lowest_index_one() {
 
 #[test]
 fn fan_arms_that_share_process_state_agree_across_targets() {
-    let src = "import env\neffect fn reader() -> Result[String, String] = {\n  env.sleep_ms(300)\n  ok(env.get(\"FAN_ACC_KEY\") ?? \"unset\")\n}\neffect fn writer() -> Result[String, String] = {\n  env.set(\"FAN_ACC_KEY\", \"written\")\n  ok(\"w\")\n}\neffect fn main() -> Unit = {\n  let (r, w) = fan { reader()!, writer()! }\n  println(\"${r} ${w}\")\n}\n";
+    let src = "import env\neffect fn reader() -> Result[String, String] = {\n  env.sleep_ms(300)\n  ok(env.get(\"FAN_ACC_KEY\") ?? \"unset\")\n}\neffect fn writer() -> Result[String, String] = {\n  env.set(\"FAN_ACC_KEY\", \"written\")!\n  ok(\"w\")\n}\neffect fn main() -> Unit = {\n  let (r, w) = fan { reader()!, writer()! }\n  println(\"${r} ${w}\")\n}\n";
     four_legs("env.almd", src, "unset w\n");
 }

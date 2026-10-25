@@ -323,6 +323,11 @@ impl Emitter<'_> {
                 if module.as_str() == "process" {
                     return self.lower_module_call_c(target, args, tail, ret_hint);
                 }
+                // `env.set` is written in Almide over its `__set` op (#4200):
+                // the linked route, as fs's rooted family takes it.
+                if module.as_str() == "env" {
+                    return self.lower_linked_call("env", func.as_str(), args, tail);
+                }
                 unsup(&format!("call:{module}.{func}"))
             }
             // datetime.now (#2703) and datetime.monotonic_ns are the two host

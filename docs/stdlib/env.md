@@ -46,13 +46,17 @@ effect fn main() -> Unit = {
 
 ### `env.set(name: String, value: String) -> Unit`
 
-Set an environment variable.
+Set an environment variable. Errs, and sets nothing, when the name is empty
+or contains `=` or NUL, or the value contains NUL — pairs no process
+environment can hold (C-421): `env.set: empty name`,
+`env.set: name contains '='`, `env.set: name contains NUL`,
+`env.set: value contains NUL`.
 
 ```almd check
 import env
 
 effect fn main() -> Unit = {
-  env.set("MY_VAR", "hello")
+  env.set("MY_VAR", "hello")!
   println(env.get("MY_VAR") ?? "unset")
 }
 ```
@@ -141,7 +145,7 @@ effect env.args() -> List[String]
 // @since 0.5.0 or earlier
 effect env.get(name: String) -> Option[String]
 
-// Sets name for this process and later spawns.
+// Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
 // @since 0.5.0 or earlier
 effect env.set(name: String, value: String) -> Unit
 
