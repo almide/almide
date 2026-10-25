@@ -1368,6 +1368,10 @@ impl Checker {
     /// Advisory name/signature comparison for computational stdlib functions.
     /// Bodies are not compared, so E015 carries no replacement edit (#2113).
     pub(crate) fn check_reimpl_lint(&mut self, program: &ast::Program) {
+        // A bundled module's own source declares the very fns the lint
+        // compares against: `fn encode(b: Bytes) -> String` in base64.almd IS
+        // `base64.encode`, not a reimplementation of it.
+        if self.in_bundled_module { return; }
         for decl in &program.decls {
             let ast::Decl::Fn { name, params, return_type, span, .. } = decl else { continue };
             let user_name = name.as_str();
