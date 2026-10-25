@@ -461,8 +461,12 @@ done <<< "$(grep -rhoE '(crates|runtime|stdlib|spec|tests|scripts|proofs)/[A-Za-
 # from the canonical ledger. The range is EMPTY (LO>HI skips the branch);
 # the machinery stays for any future canonical reservation. Contiguity now
 # binds across the whole ledger again.
-RESERVED_CANONICAL_LO=1
-RESERVED_CANONICAL_HI=0
+# 2026-10-25: C-410..C-421 are assigned in the canonical ledger (als #177,
+# #179 and the #4200 env.set contract) and land here with their own
+# implementation branches; C-422 (#4201) landed als-first beside them. The
+# hole dies when those branches merge — empty the range in the same merge.
+RESERVED_CANONICAL_LO=410
+RESERVED_CANONICAL_HI=421
 sorted_ids="$(printf '%s\n' "$ALL_IDS" | sort -u)"
 n_contracts="$(printf '%s\n' "$sorted_ids" | grep -c . || true)"
 maxnum="$(printf '%s\n' "$sorted_ids" | sed -E 's/^C-//' | sort -n | tail -1)"
