@@ -5364,3 +5364,15 @@ evidence  = [
   { path = "spec/serve_cross/http_serve_replay.almd", class = "fixture" },
   { path = "tests/http_serve_cross_test.rs", name = "http_serve_answers_the_same_status_headers_and_body_on_native_and_the_embedded_lane", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-432"
+spec      = "ALS-R5"
+title     = "a runtime abort inside an http.serve handler fails only that request: the fixed C-409 500, one stderr line, and the server keeps serving"
+statement = "ALS-R5 (almide/almide#4203): on a socket host (native, the embedded wasm lane) a runtime abort inside an `http.serve` handler call (an `Error: <text>` abort such as an out-of-bounds index or a division by zero, or `panic(msg)`, whose text is `PANIC: <msg>`) fails only the request that handler was answering. The client gets the same answer as a handler `err` (C-409): a `500` with `Content-Type: text/plain` and the fixed body `Internal Server Error (request <id>)`, the abort text never in the response. stderr gets exactly one line `http.serve: request <id>: handler aborted: <text quoted>`, quoted as C-409 quotes an err, and neither the abort's own `Error: ` / `PANIC: ` line nor a host panic banner. The server then serves the next request, and the exit code of the run is unaffected. Both legs answer and log byte-identically. The app is instance-closed (C-367), so what the aborted call computed is not observed by a later request; the embedded host restores the instance to its state when serving began. NOT covered: an abort outside a handler call (a bind failure stays C-367's abort); stack exhaustion (native's guard-page handler cannot unwind; it ends the run on both legs); `process.exit` in a handler (it exits the run); an allocation failure (the legs already differ there); a `fan` arm's own thread; on the export host (`wasmtime serve`) a trap or abort answers the host's own `500` and the instance is discarded (C-367). Evidence: spec/serve_cross/http_serve_abort.almd, a server fixture the implementation's driver starts on both legs and sends a served request, an out-of-bounds request, a served request, a `panic` request and a served request; each answer and the stderr transcript must match the statement and be byte-identical across the legs."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/serve_cross/http_serve_abort.almd", class = "fixture" },
+  { path = "tests/http_serve_cross_test.rs", name = "an_abort_in_the_handler_fails_only_its_request_on_native_and_the_embedded_lane", class = "fixture" },
+]
