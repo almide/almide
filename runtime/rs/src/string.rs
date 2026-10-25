@@ -79,7 +79,7 @@ pub fn almide_rt_string_char_at(s: &str, i: i64) -> Option<AlmideString> {
 pub fn almide_rt_string_char_count(s: &str) -> i64 { s.chars().count() as i64 }
 pub fn almide_rt_string_index_of(s: &str, sub: &str) -> Option<i64> { s.find(sub).map(|b| s[..b].chars().count() as i64) }
 pub fn almide_rt_string_last_index_of(s: &str, sub: &str) -> Option<i64> { s.rfind(sub).map(|b| s[..b].chars().count() as i64) }
-pub fn almide_rt_string_count(s: &str, sub: &str) -> i64 { s.matches(sub).count() as i64 }
+pub fn almide_rt_string_count_matches(s: &str, sub: &str) -> i64 { s.matches(sub).count() as i64 }
 pub fn almide_rt_string_lines(s: &str) -> Vec<AlmideString> { let __almide_v: Vec<String> = { s.lines().map(|l| l.to_string()).collect() }; __almide_v.into_almide() }
 pub fn almide_rt_string_is_empty(s: &str) -> bool { s.is_empty() }
 pub fn almide_rt_string_is_whitespace(s: &str) -> bool { s.chars().all(|c| c.is_whitespace()) }
