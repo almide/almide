@@ -49,7 +49,7 @@ fn query_params_keeps_every_pair_in_order() {
     assert_agrees_or_abstains(
         "import http\n\
          fn main() -> Unit = {\n\
-         \x20 let ps = http.query_params(http.new_request(\"GET\", \"/s?a=1&b=a%20b&a=3\", \"\", map.new())) ?? []\n\
+         \x20 let ps = http.query_params(http.new_request(\"GET\", \"/s?a=1&b=a%20b&a=3\", \"\", [])) ?? []\n\
          \x20 println(\"${ps}\")\n\
          }\n",
         "[(\"a\", \"1\"), (\"b\", \"a b\"), (\"a\", \"3\")]\n",

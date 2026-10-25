@@ -796,21 +796,21 @@ effect fn main() -> Unit = {{
     ok(b) => println("get:${{b}}"),
     err(e) => println("get-err:${{e}}"),
   }}
-  match http.post("http://{addr}/echo", "tiny body") {{
+  match http.request("POST", "http://{addr}/echo", "tiny body", []) {{
     ok(b) => println("post:${{b}}"),
     err(e) => println("post-err:${{e}}"),
   }}
   let chunk = string.repeat("abcdefgh", 32768)
   let body = chunk + chunk + chunk + chunk + chunk + chunk + chunk + chunk
-  match http.put("http://{addr}/echo", body) {{
+  match http.request("PUT", "http://{addr}/echo", body, []) {{
     ok(b) => println("put:${{b}}"),
     err(e) => println("put-err:${{e}}"),
   }}
-  match http.patch("http://{addr}/echo", "patch") {{
+  match http.request("PATCH", "http://{addr}/echo", "patch", []) {{
     ok(b) => println("patch:${{b}}"),
     err(e) => println("patch-err:${{e}}"),
   }}
-  match http.delete("http://{addr}/gone") {{
+  match http.request("DELETE", "http://{addr}/gone", "", []) {{
     ok(b) => println("del:${{b}}"),
     err(e) => println("del-err:${{e}}"),
   }}
@@ -876,8 +876,8 @@ effect fn main() -> Unit = {{
     ok(b) => println("get:${{b}}"),
     err(e) => println("get-err:${{e}}"),
   }}
-  match http.get_status("http://{addr}/late") {{
-    ok((c, t)) => println("gets:${{c}}:" + t),
+  match http.get_response("http://{addr}/late") {{
+    ok(r) => println("gets:${{http.status(r)}}:" + http.body(r)),
     err(e) => println("gets err:" + e),
   }}
 }}
@@ -905,13 +905,13 @@ effect fn main() -> Unit = {{
 }
 
 /// #1710 PR B, the framed family on the p3 component: `request` /
-/// `request_status` / `get_status` / `request_bytes` / `get_bytes` ride
-/// the same async-lowered exchange (ops 48..=50). The frame the guest
+/// `send` / `get_response` / `request_bytes` / `get_bytes` ride the same
+/// async-lowered exchange (ops 48, 50 and the response op 65). The frame the guest
 /// builds (stdlib/http_framed.almd: method, body, header cells with CHAR
 /// counts) is parsed in the shim; the method lands as the named variant
 /// case (or `other(string)`), the headers through `fields.append` (the
 /// echo server reflects `x-probe` into the body to prove they crossed),
-/// and `request_status` prefixes the decimal status the host lane prints.
+/// and `send` answers the status the host lane prints.
 #[test]
 fn p3_component_speaks_framed_http() {
     let addr = spawn_http_echo();
@@ -921,27 +921,27 @@ fn p3_component_speaks_framed_http() {
         r#"import http
 
 effect fn main() -> Unit = {{
-  match http.request("POST", "http://{addr}/echo", "héllo", ["x-probe": "p3"]) {{
+  match http.request("POST", "http://{addr}/echo", "héllo", [("x-probe", "p3")]) {{
     ok(t) => println("req:" + t),
     err(e) => println("req err:" + e),
   }}
-  match http.request_status("PUT", "http://{addr}/echo", string.repeat("x", 2048), map.new()) {{
-    ok((c, t)) => println("status:${{c}}:" + t),
+  match http.send(http.new_request("PUT", "http://{addr}/echo", string.repeat("x", 2048), [])) {{
+    ok(r) => println("status:${{http.status(r)}}:" + http.body(r)),
     err(e) => println("status err:" + e),
   }}
-  match http.get_status("http://{addr}/hello") {{
-    ok((c, t)) => println("gets:${{c}}:" + t),
+  match http.get_response("http://{addr}/hello") {{
+    ok(r) => println("gets:${{http.status(r)}}:" + http.body(r)),
     err(e) => println("gets err:" + e),
   }}
   match http.get_bytes("http://{addr}/hello") {{
     ok(b) => println("bytes:${{bytes.len(b)}}"),
     err(e) => println("bytes err:" + e),
   }}
-  match http.request_bytes("DELETE", "http://{addr}/gone", "", map.new()) {{
+  match http.request_bytes("DELETE", "http://{addr}/gone", "", []) {{
     ok(b) => println("rb:${{bytes.len(b)}}"),
     err(e) => println("rb err:" + e),
   }}
-  match http.request("PROPFIND", "http://{addr}/echo", "z", map.new()) {{
+  match http.request("PROPFIND", "http://{addr}/echo", "z", []) {{
     ok(t) => println("other:" + t),
     err(e) => println("other err:" + e),
   }}
@@ -972,7 +972,7 @@ effect fn main() -> Unit = {{
 /// string pointers) was written over the RET scratch where the trailers
 /// future's pending ok(none) buffer lived, and the NEXT exchange trapped
 /// (`failed to read result … unknown handle index <an address>`); the
-/// waitable set leaked per failed exchange; and a bare `get_status` as
+/// waitable set leaked per failed exchange; and a bare status read as
 /// the FIRST call trapped `index 3 is not a resource` — the status was
 /// read AFTER consume-body had taken the response by value. The program
 /// below is every one of those shapes in sequence against one echo.
@@ -991,16 +991,16 @@ fn p3_http_transport_error_leaves_the_next_exchange_intact() {
         r#"import http
 
 effect fn main() -> Unit = {{
-  match http.get_status("http://{addr}/hello") {{
-    ok((c, t)) => println("first:${{c}}:" + t),
+  match http.get_response("http://{addr}/hello") {{
+    ok(r) => println("first:${{http.status(r)}}:" + http.body(r)),
     err(e) => println("first err:" + e),
   }}
-  match http.request("POST", "http://{dead}/echo", "héllo", ["x-probe": "p3"]) {{
+  match http.request("POST", "http://{dead}/echo", "héllo", [("x-probe", "p3")]) {{
     ok(t) => println("dead:" + t),
     err(e) => println("dead err"),
   }}
-  match http.request_status("PUT", "http://{addr}/echo", string.repeat("x", 2048), ["x-probe": "again"]) {{
-    ok((c, t)) => println("after:${{c}}:" + t),
+  match http.send(http.new_request("PUT", "http://{addr}/echo", string.repeat("x", 2048), [("x-probe", "again")])) {{
+    ok(r) => println("after:${{http.status(r)}}:" + http.body(r)),
     err(e) => println("after err:" + e),
   }}
   match http.get("http://{dead}/hello") {{

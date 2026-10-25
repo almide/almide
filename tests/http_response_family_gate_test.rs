@@ -1,62 +1,80 @@
-//! #1791 family gate: the `*_response` twins exist for EXACTLY the
-//! verb-shaped http String clients. Every verb (`get` / `post` / `put` /
-//! `patch` / `delete` / `request`) has one `<verb>_response` twin with the
-//! SAME parameter list returning `Result[HttpResponse, String]`, and no
-//! twin grows outside the verb set — so the family's completeness rule
-//! (stdlib/http.almd comment) stays machine-enforced (CLAUDE.md: extended
-//! by matrix, never point-wise). The intentional omissions are pinned too:
-//! `get_status` / `get_bytes` / `request_bytes` are result-SHAPE variants,
-//! not verbs, and `request_stream` carries no response record.
+//! R-http-01 family gate: the one-shot http client is a 2×3 matrix, machine-
+//! checked so it cannot grow point-wise (CLAUDE.md: extended by matrix, never
+//! point-wise). The rows say how the request is named — by its URL alone (a
+//! GET) or in full — and the columns what is answered: the body text, the
+//! whole response, or the raw body bytes.
+//!
+//! |             | text      | response       | bytes           |
+//! |-------------|-----------|----------------|-----------------|
+//! | URL (GET)   | `get`     | `get_response` | `get_bytes`     |
+//! | any request | `request` | `send`         | `request_bytes` |
+//!
+//! `request` and `request_bytes` take `(method, url, body, headers)`; `send`
+//! takes a built `HttpRequest` (`new_request`), so a request with a bytes body
+//! is sent through it. The verb shortcuts (`post`, `put`, …) and the
+//! `*_response` / `*_status` twins are gone, and so are the callback streaming
+//! clients — the call handle (`start`) reads a body as it arrives.
 
 use almide_frontend::bundled_sigs;
 
-const VERBS: &[&str] = &["get", "post", "put", "patch", "delete", "request"];
+const TEXT: &str = "Result[String, String]";
+const RESPONSE: &str = "Result[HttpResponse, String]";
+const BYTES: &str = "Result[Bytes, String]";
 
-#[test]
-fn every_http_verb_has_its_response_twin_with_the_same_params() {
-    for verb in VERBS {
-        let body = bundled_sigs::lookup("http", verb)
-            .unwrap_or_else(|| panic!("http.{verb} is a verb cell of the String client family"));
-        assert_eq!(
-            body.ret.display(),
-            "Result[String, String]",
-            "http.{verb} must stay the body-only String client"
-        );
-        let twin_name = format!("{verb}_response");
-        let twin = bundled_sigs::lookup("http", &twin_name)
-            .unwrap_or_else(|| panic!("family cell missing: http.{twin_name} (the twin of http.{verb})"));
-        assert_eq!(
-            twin.ret.display(),
-            "Result[HttpResponse, String]",
-            "http.{twin_name} must return the response record"
-        );
-        assert_eq!(
-            body.params, twin.params,
-            "http.{twin_name} must take exactly http.{verb}'s parameters"
-        );
-        assert!(twin.is_effect, "http.{twin_name} is a network call — effect fn");
-    }
+/// The matrix: (fn, return).
+const CELLS: &[(&str, &str)] = &[
+    ("get", TEXT),
+    ("get_response", RESPONSE),
+    ("get_bytes", BYTES),
+    ("request", TEXT),
+    ("send", RESPONSE),
+    ("request_bytes", BYTES),
+];
+
+fn params(name: &str) -> Vec<(String, String)> {
+    let s = bundled_sigs::lookup("http", name).unwrap_or_else(|| panic!("family cell missing: http.{name}"));
+    s.params.iter().map(|(n, t)| (n.to_string(), t.display())).collect()
 }
 
 #[test]
-fn no_response_twin_grows_outside_the_verb_set() {
-    let twins: Vec<&str> = bundled_sigs::module_fn_names("http")
-        .into_iter()
-        .filter(|f| f.ends_with("_response"))
-        .collect();
-    assert_eq!(
-        twins.len(),
-        VERBS.len(),
-        "the *_response family changed size ({twins:?}) — update the family rule \
-         (stdlib/http.almd comment + this gate) in the same PR"
-    );
-    for twin in twins {
-        let verb = twin.strip_suffix("_response").unwrap();
-        assert!(VERBS.contains(&verb), "http.{twin} has no verb cell http.{verb}");
+fn every_cell_of_the_client_matrix_has_its_shape() {
+    for (name, ret) in CELLS {
+        let s = bundled_sigs::lookup("http", name).unwrap_or_else(|| panic!("family cell missing: http.{name}"));
+        assert_eq!(s.ret.display(), *ret, "http.{name} return");
+        assert!(s.is_effect, "http.{name} is a network call — effect fn");
     }
-    // The intentional omissions stay omitted: result-shape variants and the
-    // streaming client are not verbs.
-    for not_a_verb in ["get_status_response", "get_bytes_response", "request_bytes_response", "request_stream_response"] {
-        assert!(bundled_sigs::lookup("http", not_a_verb).is_none(), "http.{not_a_verb} is outside the family rule");
+    let url = vec![("url".to_string(), "String".to_string())];
+    for name in ["get", "get_response", "get_bytes"] {
+        assert_eq!(params(name), url, "http.{name} takes the URL alone");
+    }
+    let full = params("request");
+    let names: Vec<&str> = full.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["method", "url", "body", "headers"], "http.request's parameters");
+    assert_eq!(params("request_bytes"), full, "http.request_bytes takes exactly http.request's parameters");
+    // The header list is new_request's: one header shape across the module.
+    assert_eq!(full[3].1, params("new_request")[3].1, "request's headers are new_request's");
+    assert_eq!(params("send"), vec![("req".to_string(), "HttpRequest".to_string())], "http.send takes a built request");
+}
+
+#[test]
+fn no_client_grows_outside_the_matrix() {
+    let effect_clients: Vec<&str> = bundled_sigs::module_fn_names("http")
+        .into_iter()
+        .filter(|f| !f.starts_with("__"))
+        .filter(|f| {
+            let s = bundled_sigs::lookup("http", f).expect("listed");
+            s.is_effect && [TEXT, RESPONSE, BYTES].contains(&s.ret.display().as_str()) && !s.params.iter().any(|(_, t)| t.display() == "HttpCall")
+        })
+        .collect();
+    let mut want: Vec<&str> = CELLS.iter().map(|(n, _)| *n).collect();
+    want.sort_unstable();
+    let mut got = effect_clients.clone();
+    got.sort_unstable();
+    assert_eq!(got, want, "a one-shot client outside the 2×3 matrix — update the family rule (stdlib/http.almd comment + this gate) in the same PR");
+    for gone in [
+        "post", "put", "patch", "delete", "get_status", "request_status", "post_response", "put_response",
+        "patch_response", "delete_response", "request_response", "request_stream", "request_stream_with_limits",
+    ] {
+        assert!(bundled_sigs::lookup("http", gone).is_none(), "http.{gone} is outside the family rule");
     }
 }

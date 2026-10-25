@@ -1,8 +1,8 @@
-//! The full-response http client (`get_response` … `request_response`,
-//! #1791) on the stock WASI 0.3 component (ADR-0023 step 4): every verb must
-//! answer what native answers through the response accessors — the status,
-//! `get_header`, every value of a repeated field in order (`header_values`),
-//! the lowercased header set (`headers`) and the body — for a 200, a 404 and
+//! The full-response http client (`get_response` and `send`, #1791) on the
+//! stock WASI 0.3 component (ADR-0023 step 4): every method must answer what
+//! native answers through the response accessors — the status, `header`,
+//! every value of a repeated field in order (`header_values`), the lowercased
+//! set of `headers`' names and the body — for a 200, a 404 and
 //! an unfollowed 302, and the same err text for a closed port. That is C-328's
 //! p3 comparison: the header SET, lowercased, since wasi:http fields need not
 //! keep the wire spelling or the order across names. The set leaves out the
@@ -97,10 +97,10 @@ fn program(port: u16, dead: u16) -> String {
 fn show(tag: String, r: Result[http.HttpResponse, String]) -> String = match r {{
   ok(resp) => {{
     let cookies = http.header_values(resp, "SET-COOKIE") |> list.join(",")
-    let a = http.get_header(resp, "x-a") ?? "-"
-    let loc = http.get_header(resp, "location") ?? "-"
-    let keys = map.keys(http.headers(resp)) |> list.sort |> list.join(",")
-    "${{tag}} ${{int.to_string(http.status_code(resp))}} a=${{a}} loc=${{loc}} cookies=${{cookies}} keys=${{keys}} body=[${{http.body(resp)}}]"
+    let a = http.header(resp, "x-a") ?? "-"
+    let loc = http.header(resp, "location") ?? "-"
+    let keys = http.headers(resp) |> list.map(((k, _)) => string.to_lower(k)) |> list.fold([], (acc, k) => if list.contains(acc, k) then acc else acc + [k]) |> list.sort |> list.join(",")
+    "${{tag}} ${{int.to_string(http.status(resp))}} a=${{a}} loc=${{loc}} cookies=${{cookies}} keys=${{keys}} body=[${{http.body(resp)}}]"
   }},
   err(e) => "${{tag}} err: ${{e}}",
 }}
@@ -109,15 +109,15 @@ effect fn main() -> Unit = {{
   println(show("get", http.get_response("{base}/ok")))
   println(show("missing", http.get_response("{base}/missing")))
   println(show("redir", http.get_response("{base}/redir")))
-  println(show("post", http.post_response("{base}/echo", "p-body")))
-  println(show("put", http.put_response("{base}/echo", "u-body")))
-  println(show("patch", http.patch_response("{base}/echo", "")))
-  println(show("delete", http.delete_response("{base}/echo")))
-  println(show("request", http.request_response("OPTIONS", "{base}/echo", "r-body", map.from_list([("X-Echo", "λ v")]))))
+  println(show("post", http.send(http.new_request("POST", "{base}/echo", "p-body", []))))
+  println(show("put", http.send(http.new_request("PUT", "{base}/echo", "u-body", []))))
+  println(show("patch", http.send(http.new_request("PATCH", "{base}/echo", "", []))))
+  println(show("delete", http.send(http.new_request("DELETE", "{base}/echo", "", []))))
+  println(show("request", http.send(http.new_request("OPTIONS", "{base}/echo", "r-body", [("X-Echo", "λ v")]))))
   println(show("closed", http.get_response("http://127.0.0.1:{dead}/ok")))
-  // The plain client's empty PATCH (op 46): the same request framing as
-  // patch_response's — no content, not a chunked `0\r\n\r\n`.
-  match http.patch("{base}/echo", "") {{
+  // The text client's empty PATCH: the same request framing as send's —
+  // no content, not a chunked `0\r\n\r\n`.
+  match http.request("PATCH", "{base}/echo", "", []) {{
     ok(b) => println("plain-patch [${{b}}]"),
     err(e) => println("plain-patch err: ${{e}}"),
   }}

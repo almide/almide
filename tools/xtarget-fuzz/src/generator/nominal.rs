@@ -51,16 +51,12 @@ fn pair(a: GenType, b: GenType) -> GenType {
     GenType::Tuple2(Box::new(a), Box::new(b))
 }
 
-fn string_map() -> GenType {
-    GenType::Map(Box::new(GenType::String))
-}
-
-/// `http.start(method, <fixture>path, body, headers, no limits)`, an `err`
+/// `http.start(http.new_request(method, <fixture>path, body, headers), no limits)`, an `err`
 /// stopping the program (the fixture is always up).
 macro_rules! http_call {
     ($method:literal, $path:literal, $body:literal, $headers:literal) => {
         concat!(
-            "(match http.start(\"",
+            "(match http.start(http.new_request(\"",
             $method,
             "\", \"http://\" + (env.get(\"XF_HTTP\") ?? \"\") + \"",
             $path,
@@ -68,7 +64,7 @@ macro_rules! http_call {
             $body,
             "\", ",
             $headers,
-            ", { total_ms: 0, idle_ms: 0 }) { ok(hc) => hc, err(he) => panic(he) })"
+            "), { total_ms: 0, idle_ms: 0 }) { ok(hc) => hc, err(he) => panic(he) })"
         )
     };
 }
@@ -124,18 +120,18 @@ pub const NOMINALS: &[Nominal] = &[
     Nominal {
         name: "HttpResponse",
         module: "http",
-        small: "http.with_headers(200, \"aé\", [\"k\": \"v\"])",
-        sized: "http.with_headers(200, \"aé\", (list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${100000000 + i}\", \"v\"))))",
+        small: "http.with_headers(200, \"aé\", [(\"k\", \"v\")])",
+        sized: "http.with_headers(200, \"aé\", (list.range(0, {n}) |> list.map((i) => (\"k${100000000 + i}\", \"v\"))))",
         leaves: &[
             "http.response(200, \"ok\")",
-            "http.with_headers(404, \"aé\", [\"content-type\": \"text/plain\"])",
-            "http.with_headers(201, \"\", [\"x-a\": \"1\", \"X-B\": \"two\"])",
+            "http.with_headers(404, \"aé\", [(\"content-type\", \"text/plain\")])",
+            "http.with_headers(201, \"\", [(\"x-a\", \"1\"), (\"X-B\", \"two\")])",
             "http.json(500, \"{\\\"e\\\": 1}\")",
             "http.redirect(\"/next?a=1\")",
         ],
-        observe: "(http.status_code({v}), (http.body({v}), http.headers({v})))",
-        observed: || pair(GenType::Int, pair(string(), string_map())),
-        digest: "map.len(http.headers({v}))",
+        observe: "(http.status({v}), (http.body({v}), http.headers({v})))",
+        observed: || pair(GenType::Int, pair(string(), GenType::List(Box::new(pair(string(), string()))))),
+        digest: "list.len(http.headers({v}))",
         observe_calls_effect: false,
         refuses_var: false,
         in_flight: false,
@@ -143,17 +139,17 @@ pub const NOMINALS: &[Nominal] = &[
     Nominal {
         name: "HttpRequest",
         module: "http",
-        small: "http.new_request(\"GET\", \"/p/1?a=1\", \"aé\", [\"k\": \"v\"])",
-        sized: "http.new_request(\"GET\", \"/p/1?\" + (list.range(0, {n}) |> list.map((i) => \"q${100000000 + i}=v\") |> list.join(\"&\")), \"aé\", (list.range(0, {n}) |> list.fold(map.new(), (m, i) => map.set(m, \"k${100000000 + i}\", \"v\"))))",
+        small: "http.new_request(\"GET\", \"/p/1?a=1\", \"aé\", [(\"k\", \"v\")])",
+        sized: "http.new_request(\"GET\", \"/p/1?\" + (list.range(0, {n}) |> list.map((i) => \"q${100000000 + i}=v\") |> list.join(\"&\")), \"aé\", (list.range(0, {n}) |> list.map((i) => (\"k${100000000 + i}\", \"v\"))))",
         leaves: &[
-            "http.new_request(\"GET\", \"/\", \"\", map.new())",
-            "http.new_request(\"POST\", \"/users/42\", \"aé\", [\"content-type\": \"text/plain\"])",
-            "http.new_request(\"PUT\", \"/a/b?x=1&y=two\", \"\", [\"x-a\": \"1\", \"X-B\": \"two\"])",
-            "http.new_request(\"DELETE\", \"/s?q=a%20b&q=c&e=\", \"z\", map.new())",
+            "http.new_request(\"GET\", \"/\", \"\", [])",
+            "http.new_request(\"POST\", \"/users/42\", \"aé\", [(\"content-type\", \"text/plain\")])",
+            "http.new_request(\"PUT\", \"/a/b?x=1&y=two\", \"\", [(\"x-a\", \"1\"), (\"X-B\", \"two\")])",
+            "http.new_request(\"DELETE\", \"/s?q=a%20b&q=c&e=\", \"z\", [])",
             // A JSON body: `http.decode_json` reaches its decode callback.
-            "http.new_request(\"POST\", \"/j\", \"[1, \\\"aé\\\", {\\\"k\\\": null}]\", [\"content-type\": \"application/json\"])",
+            "http.new_request(\"POST\", \"/j\", \"[1, \\\"aé\\\", {\\\"k\\\": null}]\", [(\"content-type\", \"application/json\")])",
         ],
-        observe: "((http.req_method({v}), http.req_path({v})), (http.req_body({v}), http.query_params({v})))",
+        observe: "((http.method({v}), http.path({v})), (http.body({v}), http.query_params({v})))",
         observed: || pair(pair(string(), string()), pair(string(), GenType::Result(Box::new(GenType::List(Box::new(pair(string(), string()))))))),
         digest: "list.len(http.query_params({v}) ?? [])",
         observe_calls_effect: false,
@@ -251,16 +247,16 @@ pub const NOMINALS: &[Nominal] = &[
     Nominal {
         name: "HttpHandler",
         module: "http",
-        small: "((req) => http.response(200, http.req_path(req) + \"|\" + (http.param(req, \"id\") ?? \"-\")))",
-        sized: "((req) => http.response(200, http.req_path(req) + \"|\" + (http.param(req, \"id\") ?? \"-\")))",
+        small: "((req) => http.response(200, http.path(req) + \"|\" + (http.param(req, \"id\") ?? \"-\")))",
+        sized: "((req) => http.response(200, http.path(req) + \"|\" + (http.param(req, \"id\") ?? \"-\")))",
         leaves: &[
-            "((req) => http.response(200, http.req_path(req) + \"|\" + (http.param(req, \"id\") ?? \"-\")))",
-            "((req) => http.with_headers(201, http.req_body(req), [\"x-m\": http.req_method(req)]))",
+            "((req) => http.response(200, http.path(req) + \"|\" + (http.param(req, \"id\") ?? \"-\")))",
+            "((req) => http.with_headers(201, http.body(req), [(\"x-m\", http.method(req))]))",
             "((req) => http.redirect(\"/r\"))",
         ],
-        observe: "http.body({v}(http.new_request(\"POST\", \"/p/7?x=1\", \"b\", map.new()))!)",
+        observe: "http.body({v}(http.new_request(\"POST\", \"/p/7?x=1\", \"b\", []))!)",
         observed: string,
-        digest: "string.len(http.body({v}(http.new_request(\"POST\", \"/p/7?x=1\", \"b\", map.new()))!))",
+        digest: "string.len(http.body({v}(http.new_request(\"POST\", \"/p/7?x=1\", \"b\", []))!))",
         observe_calls_effect: true,
         refuses_var: true,
         in_flight: false,
@@ -275,11 +271,11 @@ pub const NOMINALS: &[Nominal] = &[
         leaves: &[
             "http.route(\"GET /p/{id}\", (req) => http.response(200, http.param(req, \"id\") ?? \"-\"))",
             "http.route(\"POST /p/{rest...}\", (req) => http.response(201, http.param(req, \"rest\") ?? \"-\"))",
-            "http.mount(\"/p\", (req) => http.response(202, http.req_path(req)))",
+            "http.mount(\"/p\", (req) => http.response(202, http.path(req)))",
         ],
-        observe: "(match http.router([{v}]) { ok(t) => http.body(t(http.new_request(\"GET\", \"/p/7\", \"\", map.new()))!), err(e) => e })",
+        observe: "(match http.router([{v}]) { ok(t) => http.body(t(http.new_request(\"GET\", \"/p/7\", \"\", []))!), err(e) => e })",
         observed: string,
-        digest: "string.len(match http.router([{v}]) { ok(t) => http.body(t(http.new_request(\"GET\", \"/p/7\", \"\", map.new()))!), err(e) => e })",
+        digest: "string.len(match http.router([{v}]) { ok(t) => http.body(t(http.new_request(\"GET\", \"/p/7\", \"\", []))!), err(e) => e })",
         observe_calls_effect: true,
         refuses_var: true,
         in_flight: false,
@@ -294,9 +290,9 @@ pub const NOMINALS: &[Nominal] = &[
         small: "((next) => next)",
         sized: "((next) => next)",
         leaves: &["((next) => next)", "((next) => http.wrap(next, []))"],
-        observe: "http.body(http.wrap((req) => http.response(200, \"base\"), [{v}])(http.new_request(\"GET\", \"/\", \"\", map.new()))!)",
+        observe: "http.body(http.wrap((req) => http.response(200, \"base\"), [{v}])(http.new_request(\"GET\", \"/\", \"\", []))!)",
         observed: string,
-        digest: "string.len(http.body(http.wrap((req) => http.response(200, \"base\"), [{v}])(http.new_request(\"GET\", \"/\", \"\", map.new()))!))",
+        digest: "string.len(http.body(http.wrap((req) => http.response(200, \"base\"), [{v}])(http.new_request(\"GET\", \"/\", \"\", []))!))",
         observe_calls_effect: true,
         refuses_var: true,
         in_flight: false,
@@ -331,17 +327,17 @@ pub const NOMINALS: &[Nominal] = &[
     Nominal {
         name: "HttpCall",
         module: "http",
-        small: http_call!("GET", "/chunked/3", "", "map.new()"),
-        sized: http_call!("GET", "/bytes/{n}", "", "map.new()"),
+        small: http_call!("GET", "/chunked/3", "", "[]"),
+        sized: http_call!("GET", "/bytes/{n}", "", "[]"),
         leaves: &[
-            http_call!("GET", "/chunked/3", "", "map.new()"),
-            http_call!("GET", "/bytes/16", "", "map.new()"),
-            http_call!("POST", "/echo", "aé", "[\"x-k\": \"v\"]"),
-            http_call!("GET", "/status/404", "", "map.new()"),
-            http_call!("GET", "/sse/2", "", "map.new()"),
-            http_call!("DELETE", "/missing", "", "map.new()"),
+            http_call!("GET", "/chunked/3", "", "[]"),
+            http_call!("GET", "/bytes/16", "", "[]"),
+            http_call!("POST", "/echo", "aé", "[(\"x-k\", \"v\")]"),
+            http_call!("GET", "/status/404", "", "[]"),
+            http_call!("GET", "/sse/2", "", "[]"),
+            http_call!("DELETE", "/missing", "", "[]"),
         ],
-        observe: "(match http.wait({v}) { ok(hr) => \"${http.status_code(hr)}|${http.body(hr)}\", err(he) => he })",
+        observe: "(match http.wait({v}) { ok(hr) => \"${http.status(hr)}|${http.body(hr)}\", err(he) => he })",
         observed: string,
         digest: "(match http.wait({v}) { ok(hr) => string.len(http.body(hr)), err(_) => 0 })",
         observe_calls_effect: true,

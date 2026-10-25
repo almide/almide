@@ -2,12 +2,12 @@
 //! `err`, not a silent `ok` (owner decision 2026-10-17, by cross-language
 //! comparison: Go's io.ErrUnexpectedEOF, Python requests' ChunkedEncodingError,
 //! curl's exit 18, reqwest's body-stream error and fetch's stream error all
-//! report a truncated body). Both streaming clients — plain `request_stream`
-//! and `request_stream_with_limits` — answer it on native and on the embedded
-//! lane (`almide run --target wasm`) with C-328's protocol class,
-//! `malformed or incomplete response from "<url>"`, the text the buffered
-//! client already gives a truncated response. What arrived before the cut is
-//! still delivered to `on_chunk` first.
+//! report a truncated body). A body read through the call handle
+//! (`http.start`, then `read_new` until `poll` answers) answers it on native
+//! and on the embedded lane (`almide run --target wasm`) with C-328's
+//! protocol class, `malformed or incomplete response from "<url>"`, the text
+//! the buffered client already gives a truncated response. What arrived
+//! before the cut is still read first.
 //!
 //! The loopback server answers:
 //!   /length    `Content-Length: 20`, 5 bytes, then closes;
@@ -59,7 +59,28 @@ fn serve() -> u16 {
 
 fn program(port: u16) -> String {
     format!(
-        r#"import http
+        r#"import env
+import http
+
+effect fn piece(tag: String, c: HttpCall) -> Unit = {{
+  let p = http.read_new(c)
+  if p == "" then () else println(tag + " chunk[" + p + "]")
+}}
+
+effect fn drain(tag: String, c: HttpCall) -> Result[Unit, String] = match http.poll(c) {{
+  none => {{
+    piece(tag, c)!
+    env.sleep_ms(5)
+    drain(tag, c)
+  }},
+  some(r) => {{
+    piece(tag, c)!
+    match r {{
+      ok(_) => ok(()),
+      err(e) => err(e),
+    }}
+  }},
+}}
 
 fn said(tag: String, r: Result[Unit, String]) -> Unit = match r {{
   ok(_) => println("${{tag}} ok"),
@@ -69,8 +90,8 @@ fn said(tag: String, r: Result[Unit, String]) -> Unit = match r {{
 effect fn main() -> Unit = {{
   for p in ["length", "chunked", "whole"] {{
     let url = "http://127.0.0.1:{port}/" + p
-    said("plain " + p, http.request_stream("GET", url, "", map.new(), (c) => println("plain " + p + " chunk[" + c + "]")))
-    said("limits " + p, http.request_stream_with_limits("GET", url, "", map.new(), {{ total_ms: 20000, idle_ms: 0 }}, (c) => println("limits " + p + " chunk[" + c + "]")))
+    let c = http.start(http.new_request("GET", url, "", []), {{ total_ms: 20000, idle_ms: 0 }})!
+    said("handle " + p, drain("handle " + p, c))
   }}
 }}
 "#
@@ -80,13 +101,11 @@ effect fn main() -> Unit = {{
 fn expected(port: u16) -> String {
     let mut out = String::new();
     for p in ["length", "chunked", "whole"] {
-        for tag in ["plain", "limits"] {
-            out.push_str(&format!("{tag} {p} chunk[hello]\n"));
-            if p == "whole" {
-                out.push_str(&format!("{tag} {p} ok\n"));
-            } else {
-                out.push_str(&format!("{tag} {p} err malformed or incomplete response from \"http://127.0.0.1:{port}/{p}\"\n"));
-            }
+        out.push_str(&format!("handle {p} chunk[hello]\n"));
+        if p == "whole" {
+            out.push_str(&format!("handle {p} ok\n"));
+        } else {
+            out.push_str(&format!("handle {p} err malformed or incomplete response from \"http://127.0.0.1:{port}/{p}\"\n"));
         }
     }
     out

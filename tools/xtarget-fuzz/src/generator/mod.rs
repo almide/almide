@@ -460,7 +460,7 @@ mod tests {
             if let Some(line) = g.source.lines().find(|l| l.contains("= http.decode_json(")) {
                 calls += 1;
                 assert!(line.contains(": Result[") && line.contains(", HttpResponse] = "), "{line}");
-                assert!(g.source.contains("err(e0) => {\n    let e0o: (Int, (String, Map[String, String])) = (http.status_code(e0), "), "{}", g.source);
+                assert!(g.source.contains("err(e0) => {\n    let e0o: (Int, (String, List[(String, String)])) = (http.status(e0), "), "{}", g.source);
             }
         }
         assert!(calls > 20, "only {calls} of 40 focused programs call http.decode_json");

@@ -53,7 +53,7 @@ const ROWS: &[Row] = &[
     Row {
         tag: "http.request_bytes",
         imports: &["http"],
-        call: "http.request_bytes(\"GET\", \"http://127.0.0.1:9/\", \"\", [:])",
+        call: "http.request_bytes(\"GET\", \"http://127.0.0.1:9/\", \"\", [])",
     },
     // The handle readers take an opaque handle, so the placeholder builds one.
     Row { tag: "io.read", imports: &["io", "net"], call: "io.read(net.tcp_connect(\"127.0.0.1\", 9)!, 1)" },

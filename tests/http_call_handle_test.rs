@@ -1,6 +1,6 @@
 //! #2631 / #2633: the HTTP call handle — per-call `total_ms` / `idle_ms`,
-//! `cancel`, a `poll` that never blocks, `read_new`, and the `_with_limits`
-//! streaming twins — against a loopback server this test runs, on BOTH legs:
+//! `cancel`, a `poll` that never blocks, `read_new`, and a body streamed
+//! through them — against a loopback server this test runs, on BOTH legs:
 //! the native binary and `almide run --target wasm` (the embedded host, which
 //! serves the handle with the same call core, crates/almide-rt-core). The
 //! server records, per connection, when it accepted and when it saw the
@@ -25,7 +25,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -255,7 +255,7 @@ import env
 effect fn base() -> String = "http://127.0.0.1:" + (env.get("PORT") ?? "0")
 
 fn show(r: Result[HttpResponse, String]) -> String = match r {
-  ok(resp) => int.to_string(http.status_code(resp)) + " " + http.body(resp),
+  ok(resp) => int.to_string(http.status(resp)) + " " + http.body(resp),
   err(e) => e,
 }
 
@@ -287,7 +287,7 @@ effect fn spin(c: HttpCall, turns: Int, got: String) -> (Int, String) = match ht
 }
 
 effect fn start_and_drop(url: String) -> Unit = {
-  let c = http.start("GET", url, "", [:], { total_ms: 0, idle_ms: 0 })!
+  let c = http.start(http.new_request("GET", url, "", []), { total_ms: 0, idle_ms: 0 })!
   env.sleep_ms(300)
   println("dropping: " + (if string.len(http.read_new(c)) > 0 then "read" else "nothing"))
 }
@@ -295,13 +295,13 @@ effect fn start_and_drop(url: String) -> Unit = {
 effect fn main() -> Unit = {
   let b = base()!
   // 1. total_ms is a wall clock: a stream that talks every 100 ms ends at it.
-  let c1 = http.start("GET", b + "/trickle?total", "", [:], { total_ms: 1000, idle_ms: 0 })!
+  let c1 = http.start(http.new_request("GET", b + "/trickle?total", "", []), { total_ms: 1000, idle_ms: 0 })!
   let r1: Result[HttpResponse, String] = http.wait(c1)
   println("total: " + show(r1))
   println("total-body: " + first_event(http.read_new(c1)))
 
   // 2. poll never blocks; cancel after ~1 s closes the stream for good.
-  let c2 = http.start("GET", b + "/trickle?cancel", "", [:], { total_ms: 0, idle_ms: 0 })!
+  let c2 = http.start(http.new_request("GET", b + "/trickle?cancel", "", []), { total_ms: 0, idle_ms: 0 })!
   println("cancel-before: " + polled(http.poll(c2)))
   let (turns, got) = spin(c2, 0, "")!
   http.cancel(c2)
@@ -314,35 +314,33 @@ effect fn main() -> Unit = {
 
   // 3. per-call limits beat a slow first byte; the process-wide default
   //    (ALMIDE_HTTP_TIMEOUT_SECS=1 here) does not apply to a call with limits.
-  let r3: Result[HttpResponse, String] = http.wait(http.start("GET", b + "/slow?roomy", "", [:], { total_ms: 4000, idle_ms: 4000 })!)
+  let r3: Result[HttpResponse, String] = http.wait(http.start(http.new_request("GET", b + "/slow?roomy", "", []), { total_ms: 4000, idle_ms: 4000 })!)
   println("slow-roomy: " + show(r3))
-  let r4: Result[HttpResponse, String] = http.wait(http.start("GET", b + "/slow?total", "", [:], { total_ms: 1000, idle_ms: 0 })!)
+  let r4: Result[HttpResponse, String] = http.wait(http.start(http.new_request("GET", b + "/slow?total", "", []), { total_ms: 1000, idle_ms: 0 })!)
   println("slow-total: " + show(r4))
-  let r5: Result[HttpResponse, String] = http.wait(http.start("GET", b + "/slow?idle", "", [:], { total_ms: 0, idle_ms: 500 })!)
+  let r5: Result[HttpResponse, String] = http.wait(http.start(http.new_request("GET", b + "/slow?idle", "", []), { total_ms: 0, idle_ms: 500 })!)
   println("slow-idle: " + show(r5))
 
   // 4. the whole response record, any status: the request_response answer.
-  let r7: Result[HttpResponse, String] = http.wait(http.start("GET", b + "/missing?record", "", [:], { total_ms: 2000, idle_ms: 0 })!)
+  let r7: Result[HttpResponse, String] = http.wait(http.start(http.new_request("GET", b + "/missing?record", "", []), { total_ms: 2000, idle_ms: 0 })!)
   println("record: " + show(r7) + " " + (match r7 { ok(resp) => string.join(http.header_values(resp, "x-kind"), ","), err(_) => "-" }))
 
   // 5. read_new holds a split character back until it is whole.
-  let c8 = http.start("GET", b + "/utf8?split", "", [:], { total_ms: 5000, idle_ms: 0 })!
+  let c8 = http.start(http.new_request("GET", b + "/utf8?split", "", []), { total_ms: 5000, idle_ms: 0 })!
   env.sleep_ms(200)
   let early = http.read_new(c8)
   let r8: Result[HttpResponse, String] = http.wait(c8)
   println("utf8: " + early + "|" + http.read_new(c8) + "|" + show(r8))
 
-  // 6. the streaming twin ends at its limit, with the chunks delivered; a
-  //    non-2xx is refused the request_stream way; a complete body is ok.
-  var chunks: List[String] = []
-  let r9: Result[Unit, String] = http.request_stream_with_limits("GET", b + "/trickle?stream", "", [:], { total_ms: 700, idle_ms: 0 }, (chunk: String) => list.push(chunks, chunk))
-  println("stream: " + (match r9 { ok(_) => "ok", err(e) => e }))
-  println("stream-first: " + first_event(string.join(chunks, "")))
-  let r10: Result[Unit, String] = http.request_stream_with_limits("GET", b + "/missing?stream", "", [:], { total_ms: 2000, idle_ms: 0 }, (_) => ())
-  println("stream-refused: " + (match r10 { ok(_) => "ok", err(e) => e }))
-  var whole: List[String] = []
-  let r11: Result[Unit, String] = http.request_stream_with_limits("GET", b + "/slow?stream", "", [:], { total_ms: 4000, idle_ms: 0 }, (chunk: String) => list.push(whole, chunk))
-  println("stream-whole: " + (match r11 { ok(_) => "ok", err(e) => e }) + " " + string.join(whole, ""))
+  // 6. a streamed body read as it arrives (read_new between polls — the
+  //    callback clients are gone, R-http-01): the limit ends the call with
+  //    the bytes delivered; a non-2xx is the response; a complete body is ok.
+  let c9 = http.start(http.new_request("GET", b + "/trickle?stream", "", []), { total_ms: 700, idle_ms: 0 })!
+  let (_, got9) = spin(c9, 0, "")!
+  println("stream: " + show(http.wait(c9)))
+  println("stream-first: " + first_event(got9 + http.read_new(c9)))
+  println("stream-404: " + show(http.wait(http.start(http.new_request("GET", b + "/missing?stream", "", []), { total_ms: 2000, idle_ms: 0 })!)))
+  println("stream-whole: " + show(http.wait(http.start(http.new_request("GET", b + "/slow?stream", "", []), { total_ms: 4000, idle_ms: 0 })!)))
 
   // 7. dropping the last copy of the handle cancels the call.
   start_and_drop(b + "/trickle?drop")!
@@ -350,8 +348,8 @@ effect fn main() -> Unit = {
   println("dropped: done")
 
   // 8. limits are validated; a transport failure is the call's err.
-  println("invalid: " + (match http.start("GET", b + "/missing?never", "", [:], { total_ms: -1, idle_ms: 0 }) { ok(_) => "ok", err(e) => e }))
-  println("refused: " + show(http.wait(http.start("GET", "http://127.0.0.1:1/", "", [:], { total_ms: 0, idle_ms: 0 })!)))
+  println("invalid: " + (match http.start(http.new_request("GET", b + "/missing?never", "", []), { total_ms: -1, idle_ms: 0 }) { ok(_) => "ok", err(e) => e }))
+  println("refused: " + show(http.wait(http.start(http.new_request("GET", "http://127.0.0.1:1/", "", []), { total_ms: 0, idle_ms: 0 })!)))
 }
 "#;
 
@@ -397,12 +395,12 @@ fn check_handle_leg(leg: Leg, out: &Output, server: &Server) -> String {
     // 5. a character split across arrivals is held back until whole
     assert_eq!(get("utf8"), "caf|é!|200 café!", "[{leg:?}]");
 
-    // 6. the streaming twin
+    // 6. a streamed body through the handle
     assert_eq!(get("stream"), "request timeout: total_ms 700 exceeded", "[{leg:?}]");
     assert_eq!(get("stream-first"), "data: 0", "[{leg:?}]");
     within("/trickle?stream", 600, 2500);
-    assert_eq!(get("stream-refused"), "HTTP 404: gone", "[{leg:?}]");
-    assert_eq!(get("stream-whole"), "ok hello", "[{leg:?}]");
+    assert_eq!(get("stream-404"), "404 gone", "[{leg:?}]");
+    assert_eq!(get("stream-whole"), "200 hello", "[{leg:?}]");
 
     // 7. drop = cancel: the server saw the close long before the program's
     //    1.5 s sleep after the drop ended
@@ -417,7 +415,7 @@ fn check_handle_leg(leg: Leg, out: &Output, server: &Server) -> String {
 }
 
 #[test]
-fn call_handle_limits_cancel_poll_and_the_streaming_twins() {
+fn call_handle_limits_cancel_poll_and_a_streamed_body() {
     let dir = tempfile::tempdir().unwrap();
     let mut seen: Vec<(Leg, String)> = Vec::new();
     for leg in [Leg::Native, Leg::Wasm] {
@@ -445,7 +443,7 @@ import env
 effect fn main() -> Unit = {
   let b = "http://127.0.0.1:" + (env.get("PORT") ?? "0")
   let t6 = env.millis()
-  let r6: Result[HttpResponse, String] = http.request_response("GET", b + "/slow?default", "", [:])
+  let r6: Result[HttpResponse, String] = http.send(http.new_request("GET", b + "/slow?default", "", []))
   println("slow-default: " + int.to_string(env.millis() - t6) + " " + (match r6 { ok(_) => "ok", err(e) => e }))
 }
 "#;
@@ -465,80 +463,19 @@ fn native_only_default_timeout() {
     assert!(rest.starts_with("timed out waiting for \"http://127.0.0.1:"), "{rest}");
 }
 
-const OLD_STREAM_PROGRAM: &str = r#"
-import http
-import env
-
-effect fn classic(url: String) -> String = match http.request_stream("GET", url, "", [:], (_) => ()) {
-  ok(_) => "ok",
-  err(e) => e,
-}
-
-effect fn limited(url: String) -> String = match http.wait(http.start("GET", url, "", [:], { total_ms: 1000, idle_ms: 0 })!) {
-  ok(_) => "ok",
-  err(e) => e,
-}
-
-effect fn main() -> Unit = {
-  let url = "http://127.0.0.1:" + (env.get("PORT") ?? "0") + "/trickle?" + (env.get("TAG") ?? "")
-  println(if env.get("LIMITED") == some("1") then limited(url)! else classic(url)!)
-}
-"#;
-
-/// A/B: the classic `request_stream` never returns on a stream that talks
-/// every 100 ms (its only bound is the between-bytes read timeout), while
-/// `start` → `wait` with `total_ms` returns at the limit.
-#[test]
-fn a_trickle_outlives_the_classic_stream_but_not_total_ms() {
-    let server = Server::start();
-    let dir = tempfile::tempdir().unwrap();
-    let app = prepare(dir.path(), "old_stream", OLD_STREAM_PROGRAM, Leg::Native);
-    let port = server.port.to_string();
-
-    let mut child = command(&app)
-        .env("PORT", &port)
-        .env("TAG", "classic")
-        .env("ALMIDE_HTTP_TIMEOUT_SECS", "1")
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    std::thread::sleep(Duration::from_secs(3));
-    let still_running = child.try_wait().unwrap().is_none();
-    let _ = child.kill();
-    let _ = child.wait();
-    assert!(still_running, "request_stream returned on a live trickle — the A leg no longer shows the hang");
-
-    let started = Instant::now();
-    let out = run(&app, &[("PORT", &port), ("TAG", "limited"), ("LIMITED", "1"), ("ALMIDE_HTTP_TIMEOUT_SECS", "1")]);
-    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "request timeout: total_ms 1000 exceeded");
-    assert!(started.elapsed() < Duration::from_secs(3), "{:?}", started.elapsed());
-    assert!(server.conn("/trickle?limited").closed.is_some());
-}
-
 /// The E081 verdict names what is not served: the stock artifact
-/// (`almide check --target wasm`, the build route) refuses the handle and the
-/// limited streaming twin built on it — stock WASI has no host for them. (The
-/// OpenAI / Anthropic twins this also pinned moved to package almide/llm at
-/// dialect epoch 14.)
+/// (`almide check --target wasm`, the build route) refuses the handle — stock
+/// WASI has no host for it.
 #[test]
 fn the_stock_route_keeps_its_e081() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("stock.almd");
     std::fs::write(
         &src,
-        "import http\n\neffect fn main() -> Unit = {\n  let c = http.start(\"GET\", \"http://127.0.0.1:1/\", \"\", [:], { total_ms: 0, idle_ms: 0 })!\n  http.cancel(c)\n}\n",
+        "import http\n\neffect fn main() -> Unit = {\n  let c = http.start(http.new_request(\"GET\", \"http://127.0.0.1:1/\", \"\", []), { total_ms: 0, idle_ms: 0 })!\n  http.cancel(c)\n}\n",
     )
     .unwrap();
     let checked = Command::new(almide()).arg("check").arg(&src).arg("--target").arg("wasm").output().unwrap();
     let stderr = String::from_utf8_lossy(&checked.stderr);
     assert!(!checked.status.success() && stderr.contains("error[E081]: `http.start`"), "{stderr}");
-    let twin = dir.path().join("twin.almd");
-    std::fs::write(
-        &twin,
-        "import http\n\neffect fn main() -> Unit = {\n  let r = http.request_stream_with_limits(\"GET\", \"http://127.0.0.1:1/\", \"\", [:], { total_ms: 1, idle_ms: 0 }, (_) => ())\n  println(match r { ok(_) => \"ok\", err(e) => e })\n}\n",
-    )
-    .unwrap();
-    let checked = Command::new(almide()).arg("check").arg(&twin).arg("--target").arg("wasm").output().unwrap();
-    let stderr = String::from_utf8_lossy(&checked.stderr);
-    assert!(!checked.status.success() && stderr.contains("error[E081]: `http.request_stream_with_limits`"), "{stderr}");
 }
