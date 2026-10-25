@@ -5364,3 +5364,14 @@ evidence  = [
   { path = "spec/serve_cross/http_serve_replay.almd", class = "fixture" },
   { path = "tests/http_serve_cross_test.rs", name = "http_serve_answers_the_same_status_headers_and_body_on_native_and_the_embedded_lane", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-433"
+spec      = "ALS-R8"
+title     = "An HttpRequest or HttpResponse interpolates as its declared repr, which counts the headers and never shows a header value, bare and nested, on both targets"
+statement = "`\"${req}\"` for an `HttpRequest` renders `HttpRequest { method: M, path: P, body: B, headers: N }` and `\"${resp}\"` for an `HttpResponse` renders `HttpResponse { status: S, body: B, headers: N }`, where M, P and B are the method, the target as `http.new_request` was given it (query string included) and the body in the nested-string form (double-quoted, with `\\\\`, `\\\"`, `\\n`, `\\r`, `\\t` escaped), S is the status in decimal and N is the number of header fields. The same text appears wherever the value is rendered: bare at the top of an interpolation, as a record field, as a list element, as an option payload and as a tuple element. No header name or value is part of the text, so interpolating a request that carries `Authorization` / `Cookie`, or a response that carries `Set-Cookie`, writes none of those values. The output is byte-identical on native, on the embedded wasm host and on a stock wasm runtime (#4204: wasm printed the self-hosted list carrier, every header value included, and native's bare `\"${req}\"` failed in rustc)."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/http_value_repr_hides_headers.almd", class = "fixture" },
+]
