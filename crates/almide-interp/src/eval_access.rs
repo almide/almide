@@ -349,6 +349,17 @@ impl<'a> Interpreter<'a> {
                 IrStringPart::Lit { value } => out.push_str(value),
                 IrStringPart::Expr { expr } => {
                     let v = val!(self.eval_expr(expr, scope));
+                    // A runtime-backed value shows its module's declared repr
+                    // at any depth (#4204): the self-hosted carrier holds what
+                    // the repr hides (every header value of an HttpRequest).
+                    let v = if self.mentions_declared_repr(&expr.ty) {
+                        match self.declared_repr_view(&v, &expr.ty) {
+                            Ok(view) => view,
+                            Err(flow) => return flow,
+                        }
+                    } else {
+                        v
+                    };
                     // A Float32 rides the widened f64 carrier but displays its
                     // own shortest binary32 digits, and a UInt64 rides the i64
                     // carrier but reads unsigned, top-level or nested (C-372,
