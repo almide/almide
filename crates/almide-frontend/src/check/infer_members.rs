@@ -44,6 +44,12 @@ impl Checker {
         let Ty::Named(n, _) = ty else { return };
         let bare = n.as_str().rsplit('.').next().unwrap_or(n.as_str());
         let Some(owner) = self.env.opaque_records.get(&sym(bare)).copied() else { return };
+        // Only the bundled module's own type: its bare key or `owner.T`. A user
+        // type of the same name (`m.Secret`, an in-package or dependency module
+        // named after the stdlib one) is that module's own record (#2843).
+        if n.as_str() != bare && n.as_str() != format!("{owner}.{bare}") {
+            return;
+        }
         if self.current_module_prefix.as_deref() == Some(owner.as_str()) {
             return;
         }
