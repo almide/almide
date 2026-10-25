@@ -1,0 +1,46 @@
+import uuid
+
+test "parse and to_string round trip, lowercase out, the wrapped forms in" {
+  let u = uuid.parse("0190F2A8-1D3B-7C4E-8A2B-123456789ABC")!
+  assert_eq(uuid.to_string(u), "0190f2a8-1d3b-7c4e-8a2b-123456789abc")
+  assert_eq(uuid.parse(uuid.to_string(u))!, u)
+  assert_eq(uuid.parse("{0190f2a8-1d3b-7c4e-8a2b-123456789abc}")!, u)
+  assert_eq(uuid.parse("urn:uuid:0190f2a8-1d3b-7c4e-8a2b-123456789abc")!, u)
+}
+
+test "parse refuses anything but 8-4-4-4-12 hex digits" {
+  assert(uuid.parse("0190f2a8-1d3b-7c4e-8a2b-123456789ab") |> result.is_err)
+  assert(uuid.parse("0190f2a81d3b7c4e8a2b123456789abc") |> result.is_err)
+  assert(uuid.parse("0190f2a8-1d3b-7c4e-8a2b-123456789abg") |> result.is_err)
+  assert(uuid.parse("") |> result.is_err)
+}
+
+test "from_bytes takes exactly 16 bytes and to_bytes gives them back" {
+  let b = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+  assert_eq(bytes.to_list(uuid.to_bytes(uuid.from_bytes(b)!)), bytes.to_list(b))
+  assert_eq(uuid.to_string(uuid.from_bytes(b)!), "01020304-0506-0708-090a-0b0c0d0e0f10")
+  match uuid.from_bytes(bytes.from_list([1, 2, 3])) {
+    ok(_) => assert(false),
+    err(e) => assert_eq(e, "uuid.from_bytes: expected 16 bytes, got 3"),
+  }
+}
+
+test "compare orders byte by byte from the first" {
+  let a = uuid.parse("00000000-0000-0000-0000-000000000001")!
+  let b = uuid.parse("00000000-0000-0000-0000-000000000002")!
+  let c = uuid.parse("10000000-0000-0000-0000-000000000000")!
+  assert(uuid.compare(a, b) < 0)
+  assert(uuid.compare(c, b) > 0)
+  assert_eq(uuid.compare(a, a), 0)
+}
+
+test "v4 carries version 4 and the RFC 9562 variant, and does not repeat" {
+  let us = list.range(0, 64) |> list.map((_) => uuid.v4())
+  for u in us {
+    let b = uuid.to_bytes(u)
+    assert_eq(int.bshr(bytes.get(b, 6) ?? 0, 4), 4)
+    assert_eq(int.bshr(bytes.get(b, 8) ?? 0, 6), 2)
+    assert_eq(string.slice(uuid.to_string(u), 14, 15), "4")
+  }
+  assert_eq(list.len(list.unique(us |> list.map((u) => uuid.to_string(u)))), 64)
+}
