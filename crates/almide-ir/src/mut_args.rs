@@ -82,6 +82,38 @@ pub fn stdlib_fn_has_almide_body(module: &str, func: &str) -> bool {
     })
 }
 
+/// Is `symbol` the runtime symbol some bundled stdlib fn DECLARES with
+/// `@intrinsic("symbol")`? Read from the declarations, so the answer is a
+/// property of the declaration, never of how the symbol happens to be spelled:
+/// a leaf `@intrinsic("almide_http_request_bytes")` is a runtime fn even once
+/// `http.request_bytes` has an Almide body (#4217).
+pub fn is_bundled_intrinsic_symbol(symbol: &str) -> bool {
+    static SYMBOLS: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
+    SYMBOLS
+        .get_or_init(|| {
+            let mut out = std::collections::HashSet::new();
+            for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+                let Some(program) = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached) else {
+                    continue;
+                };
+                for d in &program.decls {
+                    let Decl::Fn { attrs, .. } = d else { continue };
+                    let declared = attrs
+                        .iter()
+                        .filter(|a| a.name.as_str() == "intrinsic")
+                        .filter_map(|a| a.args.first())
+                        .filter_map(|a| match &a.value {
+                            AttrValue::String { value } => Some(value.to_string()),
+                            _ => None,
+                        });
+                    out.extend(declared);
+                }
+            }
+            out
+        })
+        .contains(symbol)
+}
+
 /// Every bundled stdlib fn that writes a param, as `(module, func, positions)`,
 /// enumerated from the declarations. The gates iterate this rather than a
 /// hand list, so a new `mut` fn is covered the day it is declared.
