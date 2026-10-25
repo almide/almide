@@ -1,2 +1,2 @@
 # The almide/als commit this tree's contract ledger is judged against
-e2ee7af77dba1fc035c2a2c0d9f842d19c279d85
+2528afc5bf987a878ad40b38547307fa0c02f053
