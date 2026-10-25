@@ -121,10 +121,36 @@ fn the_spec_fixtures_read_the_same_on_native_embedded_and_p3() {
     }
     let scratch = tempfile::tempdir().expect("tempdir");
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/embedded_cross");
-    for name in ["http_error_classes.almd", "http_header_refusal.almd"] {
+    for name in ["http_error_classes.almd", "http_header_refusal.almd", "http_url_redaction.almd"] {
         let out = assert_same(name, &three_legs(&dir.join(name), &[], scratch.path()));
         assert!(!out.contains("unexpected ok"), "{name}:\n{out}");
+        assert_no_password(name, &out);
     }
+}
+
+/// C-328 (#4205): the redaction fixtures spell every userinfo password
+/// `s3cret`; no error text may show it.
+fn assert_no_password(name: &str, out: &str) {
+    assert!(!out.contains("s3cret"), "{name}: a URL's password reached an error text:\n{out}");
+}
+
+#[test]
+fn a_dial_with_userinfo_hides_the_password_on_native_and_embedded() {
+    // The p3 shim sends the userinfo inside the authority (the host then
+    // fails to resolve it), so the connect class with userinfo is compared
+    // on the two lanes that strip it; http_url_redaction.almd covers p3.
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/embedded_cross/http_url_redaction_dial.almd");
+    let run = |extra: &[&str]| {
+        let mut c = Command::new(almide_bin());
+        c.arg("run").arg(&src).args(extra);
+        c
+    };
+    let native = observe(run(&[]), "almide run");
+    let embedded = observe(run(&["--target", "wasm"]), "almide run --target wasm");
+    assert_eq!(embedded, native, "the embedded leg differs from native");
+    assert!(native.0.contains(":***@"), "{}", native.0);
+    assert!(!native.0.contains("unexpected ok"), "{}", native.0);
+    assert_no_password("http_url_redaction_dial.almd", &native.0);
 }
 
 /// A listener that accepts and never answers: the stalled server.
