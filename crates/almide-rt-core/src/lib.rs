@@ -17,7 +17,8 @@
 //! declarations inside the shared sources, `use` lines at top level only
 //! (the splice assembler hoists and dedups them).
 //!
-//! C-418's escaper (almide-base's err_text.rs, #4126) is a bare name in the
+//! C-418's escaper (almide-base's err_text.rs, #4126; the committed snapshot in
+//! src/generated/, refreshed by build.rs inside a checkout, #3361) is a bare name in the
 //! cores that embed user data in an error text. In the generated crate one
 //! runtime module (runtime/rs/src/errtext.rs) defines it once; here each such
 //! core is an inline module that inlines the same file beside itself, so the
@@ -27,13 +28,13 @@ pub mod http_server_core;
 /// The subprocess family (#2589, ADR-0025): `runtime/rs/src/process.rs`
 /// includes it, the embedded host serves `almide:process/spawn` with it.
 pub mod process_core {
-    include!("../../almide-base/src/err_text.rs");
+    include!("generated/err_text.rs");
     include!("process_core.rs");
 }
 /// The tcp family (#3620): `runtime/rs/src/net.rs` includes it, the embedded
 /// host serves its net ops with it.
 pub mod net_core {
-    include!("../../almide-base/src/err_text.rs");
+    include!("generated/err_text.rs");
     include!("net_core.rs");
 }
 /// net's Unix-domain sockets and shared-memory files (#3620): the same two
@@ -41,7 +42,7 @@ pub mod net_core {
 /// 104..=116 with it. Its syscall module (net_unix_sys.rs, included) is the
 /// crate's one sanctioned `unsafe` site — see Cargo.toml's lints.
 pub mod net_unix_core {
-    include!("../../almide-base/src/err_text.rs");
+    include!("generated/err_text.rs");
     include!("net_unix_core.rs");
 }
 /// The rooted fs family by descriptor (#4084): `runtime/rs/src/fs.rs`
