@@ -20,7 +20,7 @@
 
 use super::LowerCtx;
 use crate::types::{Ty, TypeConstructorId as TC};
-use almide_lang::types::VariantPayload;
+use almide_lang::types::{VariantCase, VariantPayload};
 use almide_base::intern::{sym, Sym};
 use almide_ir::*;
 
@@ -170,96 +170,112 @@ impl LowerCtx<'_> {
         self.declared_repr_pending.push(name);
         let p = self.var_table.alloc(sym("_v"), ty.clone(), Mutability::Let, None);
         let pv = e_(IrExprKind::Var { id: p }, ty.clone());
-        let (params, body) = match ty {
+        let body = match ty {
             Ty::Applied(TC::List, a) if a.len() == 1 => return self.list_walker(name, ty, &a[0]),
             Ty::Applied(TC::Map, a) if a.len() == 2 => return self.map_walker(name, ty, &a[0], &a[1]),
-            Ty::Applied(TC::Option, a) if a.len() == 1 => {
-                let x = self.var_table.alloc(sym("_x"), a[0].clone(), Mutability::Let, None);
-                let inner = self.nested_render(e_(IrExprKind::Var { id: x }, a[0].clone()));
-                let body = e_(IrExprKind::Match { subject: Box::new(pv), arms: vec![
-                    IrMatchArm { pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: x, ty: a[0].clone() }) }, guard: None,
-                        body: interp(vec![lit("some("), IrStringPart::Expr { expr: inner }, lit(")")]) },
-                    IrMatchArm { pattern: IrPattern::None, guard: None, body: e_(IrExprKind::LitStr { value: "none".into() }, Ty::String) },
-                ] }, Ty::String);
-                (vec![(p, ty.clone())], body)
-            }
-            Ty::Applied(TC::Result, a) if a.len() == 2 => {
-                let x = self.var_table.alloc(sym("_x"), a[0].clone(), Mutability::Let, None);
-                let y = self.var_table.alloc(sym("_y"), a[1].clone(), Mutability::Let, None);
-                let rx = self.nested_render(e_(IrExprKind::Var { id: x }, a[0].clone()));
-                let ry = self.nested_render(e_(IrExprKind::Var { id: y }, a[1].clone()));
-                let body = e_(IrExprKind::Match { subject: Box::new(pv), arms: vec![
-                    IrMatchArm { pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: x, ty: a[0].clone() }) }, guard: None,
-                        body: interp(vec![lit("ok("), IrStringPart::Expr { expr: rx }, lit(")")]) },
-                    IrMatchArm { pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: y, ty: a[1].clone() }) }, guard: None,
-                        body: interp(vec![lit("err("), IrStringPart::Expr { expr: ry }, lit(")")]) },
-                ] }, Ty::String);
-                (vec![(p, ty.clone())], body)
-            }
-            Ty::Tuple(ts) => {
-                let mut parts = vec![lit("(")];
-                for (i, t) in ts.iter().enumerate() {
-                    if i > 0 { parts.push(lit(", ")); }
-                    let el = e_(IrExprKind::TupleIndex { object: Box::new(pv.clone()), index: i }, t.clone());
-                    parts.push(IrStringPart::Expr { expr: self.nested_render(el) });
-                }
-                parts.push(lit(")"));
-                (vec![(p, ty.clone())], interp(parts))
-            }
+            Ty::Applied(TC::Option, a) if a.len() == 1 => self.option_repr_body(pv, &a[0]),
+            Ty::Applied(TC::Result, a) if a.len() == 2 => self.result_repr_body(pv, &a[0], &a[1]),
+            Ty::Tuple(ts) => self.tuple_repr_body(&pv, ts),
             Ty::Named(n, _) => match self.unfold_named(ty) {
-                Some(Ty::Record { fields }) | Some(Ty::OpenRecord { fields }) => {
-                    let mut parts = vec![lit(&format!("{} {{ ", almide_ir::declared_type_name(n.as_str())))];
-                    for (i, (f, t)) in fields.iter().enumerate() {
-                        if i > 0 { parts.push(lit(", ")); }
-                        parts.push(lit(&format!("{}: ", f)));
-                        let el = e_(IrExprKind::Member { object: Box::new(pv.clone()), field: *f }, t.clone());
-                        parts.push(IrStringPart::Expr { expr: self.nested_render(el) });
-                    }
-                    parts.push(lit(" }"));
-                    (vec![(p, ty.clone())], interp(parts))
-                }
-                Some(Ty::Variant { cases, .. }) => {
-                    let mut arms = Vec::new();
-                    for c in &cases {
-                        let cname = c.name.to_string();
-                        let (pattern, body) = match &c.payload {
-                            VariantPayload::Unit => (IrPattern::Constructor { name: cname.clone(), args: vec![] }, e_(IrExprKind::LitStr { value: cname.clone() }, Ty::String)),
-                            VariantPayload::Tuple(ts) => {
-                                let mut pats = Vec::new();
-                                let mut parts = vec![lit(&format!("{cname}("))];
-                                for (i, t) in ts.iter().enumerate() {
-                                    let v = self.var_table.alloc(sym("_x"), t.clone(), Mutability::Let, None);
-                                    pats.push(IrPattern::Bind { var: v, ty: t.clone() });
-                                    if i > 0 { parts.push(lit(", ")); }
-                                    parts.push(IrStringPart::Expr { expr: self.nested_render(e_(IrExprKind::Var { id: v }, t.clone())) });
-                                }
-                                parts.push(lit(")"));
-                                (IrPattern::Constructor { name: cname.clone(), args: pats }, interp(parts))
-                            }
-                            VariantPayload::Record(fs) => {
-                                let mut pats = Vec::new();
-                                let mut parts = vec![lit(&format!("{cname} {{ "))];
-                                for (i, (f, t)) in fs.iter().enumerate() {
-                                    let v = self.var_table.alloc(*f, t.clone(), Mutability::Let, None);
-                                    pats.push(IrFieldPattern { name: f.to_string(), pattern: Some(IrPattern::Bind { var: v, ty: t.clone() }) });
-                                    if i > 0 { parts.push(lit(", ")); }
-                                    parts.push(lit(&format!("{}: ", f)));
-                                    parts.push(IrStringPart::Expr { expr: self.nested_render(e_(IrExprKind::Var { id: v }, t.clone())) });
-                                }
-                                parts.push(lit(" }"));
-                                (IrPattern::RecordPattern { name: cname.clone(), fields: pats, rest: false }, interp(parts))
-                            }
-                        };
-                        arms.push(IrMatchArm { pattern, guard: None, body });
-                    }
-                    (vec![(p, ty.clone())], e_(IrExprKind::Match { subject: Box::new(pv), arms }, Ty::String))
-                }
-                _ => (vec![(p, ty.clone())], interp(vec![IrStringPart::Expr { expr: pv }])),
+                Some(Ty::Record { fields }) | Some(Ty::OpenRecord { fields }) => self.record_repr_body(&pv, *n, &fields),
+                Some(Ty::Variant { cases, .. }) => self.variant_repr_body(pv, &cases),
+                _ => interp(vec![IrStringPart::Expr { expr: pv }]),
             },
-            _ => (vec![(p, ty.clone())], interp(vec![IrStringPart::Expr { expr: pv }])),
+            _ => interp(vec![IrStringPart::Expr { expr: pv }]),
         };
+        let params = vec![(p, ty.clone())];
         self.synthesized_fns.push(mk_fn(&self.var_table, name, params, body));
         name
+    }
+
+    /// `some(<inner>)` / `none`.
+    fn option_repr_body(&mut self, pv: IrExpr, a: &Ty) -> IrExpr {
+        let x = self.var_table.alloc(sym("_x"), a.clone(), Mutability::Let, None);
+        let inner = self.nested_render(e_(IrExprKind::Var { id: x }, a.clone()));
+        e_(IrExprKind::Match { subject: Box::new(pv), arms: vec![
+            IrMatchArm { pattern: IrPattern::Some { inner: Box::new(IrPattern::Bind { var: x, ty: a.clone() }) }, guard: None,
+                body: interp(vec![lit("some("), IrStringPart::Expr { expr: inner }, lit(")")]) },
+            IrMatchArm { pattern: IrPattern::None, guard: None, body: e_(IrExprKind::LitStr { value: "none".into() }, Ty::String) },
+        ] }, Ty::String)
+    }
+
+    /// `ok(<x>)` / `err(<y>)`.
+    fn result_repr_body(&mut self, pv: IrExpr, a: &Ty, b: &Ty) -> IrExpr {
+        let x = self.var_table.alloc(sym("_x"), a.clone(), Mutability::Let, None);
+        let y = self.var_table.alloc(sym("_y"), b.clone(), Mutability::Let, None);
+        let rx = self.nested_render(e_(IrExprKind::Var { id: x }, a.clone()));
+        let ry = self.nested_render(e_(IrExprKind::Var { id: y }, b.clone()));
+        e_(IrExprKind::Match { subject: Box::new(pv), arms: vec![
+            IrMatchArm { pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: x, ty: a.clone() }) }, guard: None,
+                body: interp(vec![lit("ok("), IrStringPart::Expr { expr: rx }, lit(")")]) },
+            IrMatchArm { pattern: IrPattern::Err { inner: Box::new(IrPattern::Bind { var: y, ty: b.clone() }) }, guard: None,
+                body: interp(vec![lit("err("), IrStringPart::Expr { expr: ry }, lit(")")]) },
+        ] }, Ty::String)
+    }
+
+    /// `(<e0>, <e1>, ...)`.
+    fn tuple_repr_body(&mut self, pv: &IrExpr, ts: &[Ty]) -> IrExpr {
+        let mut parts = vec![lit("(")];
+        for (i, t) in ts.iter().enumerate() {
+            if i > 0 { parts.push(lit(", ")); }
+            let el = e_(IrExprKind::TupleIndex { object: Box::new(pv.clone()), index: i }, t.clone());
+            parts.push(IrStringPart::Expr { expr: self.nested_render(el) });
+        }
+        parts.push(lit(")"));
+        interp(parts)
+    }
+
+    /// `Name { f: <v>, ... }`.
+    fn record_repr_body(&mut self, pv: &IrExpr, n: Sym, fields: &[(Sym, Ty)]) -> IrExpr {
+        let mut parts = vec![lit(&format!("{} {{ ", almide_ir::declared_type_name(n.as_str())))];
+        for (i, (f, t)) in fields.iter().enumerate() {
+            if i > 0 { parts.push(lit(", ")); }
+            parts.push(lit(&format!("{}: ", f)));
+            let el = e_(IrExprKind::Member { object: Box::new(pv.clone()), field: *f }, t.clone());
+            parts.push(IrStringPart::Expr { expr: self.nested_render(el) });
+        }
+        parts.push(lit(" }"));
+        interp(parts)
+    }
+
+    /// One match arm per case.
+    fn variant_repr_body(&mut self, pv: IrExpr, cases: &[VariantCase]) -> IrExpr {
+        let arms = cases.iter().map(|c| self.variant_repr_arm(c)).collect();
+        e_(IrExprKind::Match { subject: Box::new(pv), arms }, Ty::String)
+    }
+
+    /// `Case`, `Case(<x>, ...)` or `Case { f: <v>, ... }`.
+    fn variant_repr_arm(&mut self, c: &VariantCase) -> IrMatchArm {
+        let cname = c.name.to_string();
+        let (pattern, body) = match &c.payload {
+            VariantPayload::Unit => (IrPattern::Constructor { name: cname.clone(), args: vec![] }, e_(IrExprKind::LitStr { value: cname.clone() }, Ty::String)),
+            VariantPayload::Tuple(ts) => {
+                let mut pats = Vec::new();
+                let mut parts = vec![lit(&format!("{cname}("))];
+                for (i, t) in ts.iter().enumerate() {
+                    let v = self.var_table.alloc(sym("_x"), t.clone(), Mutability::Let, None);
+                    pats.push(IrPattern::Bind { var: v, ty: t.clone() });
+                    if i > 0 { parts.push(lit(", ")); }
+                    parts.push(IrStringPart::Expr { expr: self.nested_render(e_(IrExprKind::Var { id: v }, t.clone())) });
+                }
+                parts.push(lit(")"));
+                (IrPattern::Constructor { name: cname.clone(), args: pats }, interp(parts))
+            }
+            VariantPayload::Record(fs) => {
+                let mut pats = Vec::new();
+                let mut parts = vec![lit(&format!("{cname} {{ "))];
+                for (i, (f, t)) in fs.iter().enumerate() {
+                    let v = self.var_table.alloc(*f, t.clone(), Mutability::Let, None);
+                    pats.push(IrFieldPattern { name: f.to_string(), pattern: Some(IrPattern::Bind { var: v, ty: t.clone() }) });
+                    if i > 0 { parts.push(lit(", ")); }
+                    parts.push(lit(&format!("{}: ", f)));
+                    parts.push(IrStringPart::Expr { expr: self.nested_render(e_(IrExprKind::Var { id: v }, t.clone())) });
+                }
+                parts.push(lit(" }"));
+                (IrPattern::RecordPattern { name: cname.clone(), fields: pats, rest: false }, interp(parts))
+            }
+        };
+        IrMatchArm { pattern, guard: None, body }
     }
 
     /// `[a, b]`: an index-recursive `_go(xs, i, acc)` like the codec list

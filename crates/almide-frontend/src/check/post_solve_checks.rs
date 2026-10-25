@@ -73,17 +73,10 @@ impl Checker {
             let resolved = resolve_ty(&ty, &self.uf);
             if self.env.is_eq(&resolved) {
                 // #4107: a Secret compares only in constant time (R-secret-03).
-                if let Some(why) = crate::secret_type::secret_eq_refusal(&self.env, &resolved) {
+                if let Some(mut diag) = crate::secret_type::secret_eq_diagnostic(&self.env, &resolved, &what) {
                     if span.is_some_and(|s| !reported.insert((s.line, s.col))) {
                         continue;
                     }
-                    let mut diag = err(
-                        format!("{} cannot compare '{}': {}", what, resolved.display(), why),
-                        "Compare what the secrets hold, explicitly: `secret.reveal(a) == secret.reveal(b)`. \
-                         `==` on Secret[String] / Secret[Bytes] is constant time; a variant or map holding \
-                         a Secret compares by `match` / per key.".to_string(),
-                        what.clone(),
-                    ).with_code("E103");
                     if let Some(s) = span {
                         diag.line = Some(s.line);
                         diag.col = Some(s.col);

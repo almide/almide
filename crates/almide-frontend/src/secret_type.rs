@@ -124,3 +124,16 @@ pub fn secret_eq_refusal(env: &TypeEnv, ty: &Ty) -> Option<String> {
     }
     go(env, ty, &mut Vec::new())
 }
+
+/// The E103 diagnostic for `==` / `assert_eq` (`what`) on `ty`, or None when
+/// [`secret_eq_refusal`] lets it compare. The caller places the span.
+pub(crate) fn secret_eq_diagnostic(env: &TypeEnv, ty: &Ty, what: &str) -> Option<almide_base::diagnostic::Diagnostic> {
+    let why = secret_eq_refusal(env, ty)?;
+    Some(crate::check::err(
+        format!("{} cannot compare '{}': {}", what, ty.display(), why),
+        "Compare what the secrets hold, explicitly: `secret.reveal(a) == secret.reveal(b)`. \
+         `==` on Secret[String] / Secret[Bytes] is constant time; a variant or map holding \
+         a Secret compares by `match` / per key.",
+        what,
+    ).with_code("E103"))
+}

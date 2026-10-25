@@ -383,6 +383,55 @@ fn lower_expr_unary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
             ctx.mk(IrExprKind::UnOp { op: un_op, operand: Box::new(o) }, ty, span)
 }
 
+/// An operand's type, read from the VarTable when the lowered expr is a
+/// variable whose own type is still Unknown.
+fn operand_ty(ctx: &LowerCtx, e: &IrExpr) -> Ty {
+    match &e.kind {
+        IrExprKind::Var { id } if e.ty == Ty::Unknown => ctx.var_table.get(*id).ty.clone(),
+        _ => e.ty.clone(),
+    }
+}
+
+/// `==` / `!=` through the operator protocol: a Secret's constant-time
+/// compare (#4107, R-secret-03) or a convention `eq` fn. Hands the operands
+/// back when neither applies.
+fn lower_eq_protocol(
+    ctx: &mut LowerCtx, negate: bool, left_ty: &Ty, mut l: IrExpr, mut r: IrExpr, span: Option<crate::ast::Span>,
+) -> Result<IrExpr, (IrExpr, IrExpr)> {
+    if crate::secret_type::holds_secret(ctx.env, left_ty) {
+        l.ty = left_ty.clone();
+        r.ty = left_ty.clone();
+        let Some(eq) = ctx.lower_secret_eq(l, r, negate) else { unreachable!("holds_secret was checked") };
+        return Ok(eq);
+    }
+    let Some(eq_fn) = ctx.find_convention_fn(left_ty, "eq") else { return Err((l, r)) };
+    let call = ctx.mk(IrExprKind::Call {
+        target: CallTarget::Named { name: eq_fn },
+        args: vec![l, r], type_args: vec![],
+    }, Ty::Bool, span);
+    if negate {
+        return Ok(ctx.mk(IrExprKind::UnOp { op: UnOp::Not, operand: Box::new(call) }, Ty::Bool, span));
+    }
+    Ok(call)
+}
+
+/// ADR-0001 S3 time algebra, or a comparison of the erased i64s: an operand
+/// read from an annotated binding still carries the clock tag (#3752).
+fn lower_time_operands(
+    ctx: &mut LowerCtx, op: &str, (mut l, mut r): (IrExpr, IrExpr), l_time: bool, ty: Ty, span: Option<crate::ast::Span>,
+) -> IrExpr {
+    if let Some(out) = super::calls::lower_time_binop(ctx, op, l.clone(), r.clone(), l_time, span) {
+        return out;
+    }
+    for e in [&mut l, &mut r] {
+        if super::calls::is_time_ty(&e.ty) {
+            e.ty = Ty::Int;
+        }
+    }
+    let bin_op = binop_for(op, &Ty::Int, &Ty::Int);
+    ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span)
+}
+
 fn lower_expr_binary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>) -> IrExpr {
     let ast::ExprKind::Binary { op, left, right, .. } = &expr.kind else { unreachable!("lower_expr_binary called on the wrong ExprKind") };
             let mut l = lower_expr(ctx, left);
@@ -396,37 +445,15 @@ fn lower_expr_binary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             super::statements::coerce_literal_to_sized(&mut r, &l.ty, ctx.env);
             super::statements::coerce_literal_to_sized(&mut l, &r.ty, ctx.env);
             // Resolve operand types: if expr.ty is Unknown, try VarTable lookup
-            let left_ty = if l.ty == Ty::Unknown {
-                if let IrExprKind::Var { id } = &l.kind { ctx.var_table.get(*id).ty.clone() } else { l.ty.clone() }
-            } else { l.ty.clone() };
-            let left_ty = &left_ty;
+            let left_ty = &operand_ty(ctx, &l);
             // Operator protocol: dispatch == / != to convention methods if available
             if op == "==" || op == "!=" {
-                // #4107: a Secret compares in constant time (R-secret-03).
-                if crate::secret_type::holds_secret(ctx.env, left_ty) {
-                    let (mut l, mut r) = (l, r);
-                    l.ty = left_ty.clone();
-                    r.ty = left_ty.clone();
-                    if let Some(eq) = ctx.lower_secret_eq(l, r, op == "!=") {
-                        return eq;
-                    }
-                    unreachable!("holds_secret was checked");
-                }
-                if let Some(eq_fn) = ctx.find_convention_fn(left_ty, "eq") {
-                    let call = ctx.mk(IrExprKind::Call {
-                        target: CallTarget::Named { name: eq_fn },
-                        args: vec![l, r], type_args: vec![],
-                    }, Ty::Bool, span);
-                    if op == "!=" {
-                        return ctx.mk(IrExprKind::UnOp { op: UnOp::Not, operand: Box::new(call) }, Ty::Bool, span);
-                    }
-                    return call;
+                match lower_eq_protocol(ctx, op == "!=", left_ty, l, r, span) {
+                    Ok(eq) => return eq,
+                    Err((l2, r2)) => { l = l2; r = r2; }
                 }
             }
-            let right_ty = if r.ty == Ty::Unknown {
-                if let IrExprKind::Var { id } = &r.kind { ctx.var_table.get(*id).ty.clone() } else { r.ty.clone() }
-            } else { r.ty.clone() };
-            let right_ty = &right_ty;
+            let right_ty = &operand_ty(ctx, &r);
             // ADR-0001 S3: time-type algebra erases to guarded/saturating Int
             // forms (comparisons fall through — they erase to Int compares).
             // Side detection reads the CHECKER's types of the operand ASTs: a
@@ -435,20 +462,7 @@ fn lower_expr_binary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             let l_time = super::calls::is_time_ty(&ctx.expr_ty(left));
             let r_time = super::calls::is_time_ty(&ctx.expr_ty(right));
             if l_time || r_time {
-                if let Some(out) = super::calls::lower_time_binop(
-                    ctx, op.as_str(), l.clone(), r.clone(), l_time, span,
-                ) {
-                    return out;
-                }
-                // A comparison: an operand read from an annotated binding
-                // still carries the clock tag (#3752); compare the erased i64.
-                for e in [&mut l, &mut r] {
-                    if super::calls::is_time_ty(&e.ty) {
-                        e.ty = Ty::Int;
-                    }
-                }
-                let bin_op = binop_for(op.as_str(), &Ty::Int, &Ty::Int);
-                return ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span);
+                return lower_time_operands(ctx, op.as_str(), (l, r), l_time, ty, span);
             }
             if let Some(out) = lower_requirement_operator(ctx, op.as_str(), left_ty, (l.clone(), r.clone()), ty.clone(), span) {
                 return out;
