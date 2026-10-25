@@ -94,7 +94,9 @@ fn e015_does_not_recommend_host_calls_or_near_names() {
         "fn option(s: String) -> Option[String] = if s == \"\" then none else some(s)",
         "fn get(s: String) -> Option[String] = some(s)",
         "fn trims(s: String) -> String = s",
-        "fn decompress(data: Bytes) -> Result[Bytes, String] = ok(data)",
+        // An effect fn of the same shape is a host call, never a suggestion
+        // (zlib.decompress was this case until it became a plain fn).
+        "fn read_text(path: String) -> Result[String, String] = ok(path)",
     ] {
         let output = check(dir.path(), source);
         assert!(!output.contains("E015"), "{source}\n{output}");

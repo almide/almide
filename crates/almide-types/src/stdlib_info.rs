@@ -151,6 +151,7 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("deque", "Deque"),
     ("heap", "Heap"),
     ("bigint", "BigInt"),
+    ("value", "Path"),
 ];
 
 /// The owning module of a stdlib-owned nominal type, by BARE name — `None`
