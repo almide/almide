@@ -366,7 +366,6 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "bytes.copy_from", size: "b", args: &[("src_off", "0")] },
     // A pattern the sized "aéaé…" matches whole; the generic pattern was
     // the sized string and the subject 2 characters, so it never matched.
-    Recipe { func: "regex.full_match", size: "s", args: &[("pat", "\"(aé)*\"")] },
 ];
 
 /// The shape recipe of `func` (`module.fn`), for the synthesis campaign's
@@ -1494,7 +1493,6 @@ pub(crate) mod tests {
             "matrix.fma3",
             "bytes.copy_within",
             "bytes.copy_from",
-            "regex.full_match",
             // outside the model until a Result could carry a nominal error,
             // and until a probe could run inside a routed handler
             "http.decode_json",
