@@ -88,9 +88,16 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
     // records its counts, and `merge/N` sums the N partials and judges the
     // sums against the ceilings here, in the same assertions.
     const GATE: &str = "run_parity";
+    // ALMIDE_CI_SLICE (crates/almide-corpus/src/ci_slice.rs): the rows this
+    // run judges, taken before the shard — every row on a full run, the CI
+    // slice otherwise. The two ceilings are whole-manifest counts, so a sliced
+    // run (sharded, merged or not) judges only the per-fixture half; the full
+    // run judges the ceilings.
+    let selected: Vec<String> = almide_corpus::select(manifest.keys().cloned().collect(), GATE, |k| k.clone());
+    let full = almide_corpus::full_run();
     let shard = almide_corpus::corpus_shard();
     if let Some(almide_corpus::CorpusShard::Merge { n }) = shard {
-        let expected: Vec<String> = manifest.keys().cloned().collect();
+        let expected: Vec<String> = selected.clone();
         almide_corpus::assert_partials_cover(n, GATE, &expected);
         let mut sums: BTreeMap<String, usize> = BTreeMap::new();
         for lines in almide_corpus::read_partials(n, GATE, "counts") {
@@ -102,8 +109,13 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
         let count = |k: &str| *sums.get(k).unwrap_or_else(|| panic!("counts partial has no `{k}` row"));
         let (n_ok, n_unsupported, n_fuel, rows) =
             (count("identical"), count("unsupported"), count("fuel_exhausted"), count("rows"));
-        assert_eq!(rows, manifest.len(), "the {n} shards walked {rows} rows, the manifest has {}", manifest.len());
+        assert_eq!(rows, expected.len(), "the {n} shards walked {rows} rows, this run selected {} of the manifest's {}", expected.len(), manifest.len());
+        assert!(rows > 0, "the {n} shards judged no row");
         println!("run parity (merge of {n} shards): {n_ok} identical, {n_unsupported} unsupported-skipped, {n_fuel} fuel-exhausted over {rows} rows");
+        if !full {
+            println!("  CI slice: {rows} of {} rows — the ceilings ({BASELINE}) are judged on the full run", manifest.len());
+            return;
+        }
         assert!(
             n_unsupported <= max_unsupported,
             "unsupported count {n_unsupported} exceeds the shrink-only ceiling {max_unsupported} ({BASELINE})"
@@ -111,7 +123,9 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
         assert!(n_fuel <= max_fuel, "fuel-exhausted count {n_fuel} exceeds ceiling {max_fuel} ({BASELINE})");
         return;
     }
-    let mut rows: Vec<(&String, &(String, i32))> = manifest.iter().collect();
+    let keep: std::collections::BTreeSet<&String> = selected.iter().collect();
+    let mut rows: Vec<(&String, &(String, i32))> = manifest.iter().filter(|(rel, _)| keep.contains(rel)).collect();
+    assert!(!rows.is_empty() && rows.len() == selected.len(), "run_parity: {} row(s) to judge of {} selected", rows.len(), selected.len());
     if let Some(s) = shard {
         rows = s.apply(rows, GATE, |(rel, _)| stem_of(rel));
         let walked: Vec<String> = rows.iter().map(|(rel, _)| (*rel).clone()).collect();
@@ -196,15 +210,19 @@ fn wasm_cross_fixtures_run_identically_on_the_interpreter() {
         );
         return;
     }
-    assert!(
-        n_unsupported <= max_unsupported,
-        "unsupported count {n_unsupported} exceeds the shrink-only ceiling {max_unsupported} ({BASELINE})"
-    );
-    assert!(n_fuel <= max_fuel, "fuel-exhausted count {n_fuel} exceeds ceiling {max_fuel} ({BASELINE})");
+    if full {
+        assert!(
+            n_unsupported <= max_unsupported,
+            "unsupported count {n_unsupported} exceeds the shrink-only ceiling {max_unsupported} ({BASELINE})"
+        );
+        assert!(n_fuel <= max_fuel, "fuel-exhausted count {n_fuel} exceeds ceiling {max_fuel} ({BASELINE})");
+    } else {
+        println!("  CI slice: {} of {} rows — the ceilings ({BASELINE}) are judged on the full run", selected.len(), manifest.len());
+    }
     assert!(
         mismatches.is_empty(),
         "{} of {} fixtures diverge from the oracle run, first: {}",
-        mismatches.len(), manifest.len(), mismatches[0]
+        mismatches.len(), selected.len(), mismatches[0]
     );
 }
 
