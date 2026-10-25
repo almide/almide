@@ -7,27 +7,27 @@
 import http
 
 effect fn main() -> Unit = {
-  match http.request("POST", "http://127.0.0.1:1/x", "body", ["K": "v"]) {
+  match http.request("POST", "http://127.0.0.1:1/x", "body", [("K", "v")]) {
     ok(_) => println("request:unexpected-ok"),
     err(e) => println("request:${e}"),
   }
-  match http.request_status("GET", "http://127.0.0.1:1/", "", map.new()) {
-    ok(_) => println("rstatus:unexpected-ok"),
-    err(e) => println("rstatus:${e}"),
+  match http.send(http.new_request("GET", "http://127.0.0.1:1/", "", [])) {
+    ok(_) => println("send:unexpected-ok"),
+    err(e) => println("send:${e}"),
   }
-  match http.get_status("http://127.0.0.1:1/") {
-    ok(_) => println("gstatus:unexpected-ok"),
-    err(e) => println("gstatus:${e}"),
+  match http.get_response("http://127.0.0.1:1/") {
+    ok(_) => println("gresponse:unexpected-ok"),
+    err(e) => println("gresponse:${e}"),
   }
   match http.get_bytes("http://127.0.0.1:1/") {
     ok(_) => println("gbytes:unexpected-ok"),
     err(e) => println("gbytes:${e}"),
   }
-  match http.request_bytes("PUT", "http://127.0.0.1:1/", "12345", map.new()) {
+  match http.request_bytes("PUT", "http://127.0.0.1:1/", "12345", []) {
     ok(_) => println("rbytes:unexpected-ok"),
     err(e) => println("rbytes:${e}"),
   }
-  match http.get_status("not-a-url") {
+  match http.get_response("not-a-url") {
     ok(_) => println("badurl:unexpected-ok"),
     err(e) => println("badurl:${e}"),
   }
@@ -38,11 +38,11 @@ effect fn main() -> Unit = {
     ok(_) => println("scheme:unexpected-ok"),
     err(e) => println("scheme:${e}"),
   }
-  match http.get_status("http://127.0.0.1:99999/") {
+  match http.get_response("http://127.0.0.1:99999/") {
     ok(_) => println("port:unexpected-ok"),
     err(e) => println("port:${e}"),
   }
-  match http.request("GET", "http://127.0.0.1:1/x", "", ["X-A": "1\r\nX-B: 2"]) {
+  match http.request("GET", "http://127.0.0.1:1/x", "", [("X-A", "1\r\nX-B: 2")]) {
     ok(_) => println("inject:unexpected-ok"),
     err(e) => println("inject:${e}"),
   }

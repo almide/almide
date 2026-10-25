@@ -50,17 +50,18 @@ fn __hr_ci_eq(x: String, y: String) -> Bool = {
   else __hr_ci_at(a, b, 0)
 }
 
-// EXACTLY the given headers (no seeded Content-Type), in map order, a later
-// case-variant spelling upserting the earlier entry rather than appending a
-// shadowed duplicate: each field keeps the spelling and slot it was first
-// stored under and takes the LAST value given for it — __hr_set per entry,
-// through two lowercased-name indexes instead of a scan per entry (O(n²)).
-fn http_with_headers(status: Int, body: String, headers: Map[String, String]) -> List[String] = {
+// EXACTLY the given headers (no seeded Content-Type), flat [k1, v1, …] in
+// list order (R-http-09), a later case-variant spelling upserting the earlier
+// entry rather than appending a shadowed duplicate: each field keeps the
+// spelling and slot it was first stored under and takes the LAST value given
+// for it — __hr_set per entry, through two lowercased-name indexes instead of
+// a scan per entry (O(n²)).
+fn http_with_headers(status: Int, body: String, flat: List[String]) -> List[String] = {
   let st = int.to_string(status)
-  let named = map.keys(headers) |> list.enumerate |> list.map(((i, k)) => (i, __hr_lower(k), k))
+  let named = list.range(0, list.len(flat) / 2) |> list.map((i) => (i, __hr_lower(list.get(flat, 2 * i) ?? ""), list.get(flat, 2 * i) ?? ""))
   let last = named |> list.fold(
     map.new(),
-    (m, (_, low, k)) => map.set(m, low, map.get(headers, k) ?? ""),
+    (m, (i, low, _)) => map.set(m, low, list.get(flat, 2 * i + 1) ?? ""),
   )
   let first = named |> list.fold(
     map.new(),
@@ -124,18 +125,8 @@ fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[
 // uses, so the map key spelling agrees with native's to_ascii_lowercase.
 fn __hr_lower(s: String) -> String = string.chars(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
 
-// Lowercased-name map, FIRST value wins (the get_header rule). A fold, so
-// the map it builds is the fold's own and each insert lands in place: the
-// recursion it replaces took the map as a parameter and copied it on every
-// header, O(n²) in the header count.
-fn http_headers(resp: List[String]) -> Map[String, String] = list.range(0, (list.len(resp) - 2) / 2) |> list.fold(
-  map.new(),
-  (acc, j) => {
-    let k = __hr_lower(list.get(resp, 2 + 2 * j) ?? "")
-    if map.contains(acc, k) then acc
-    else map.set(acc, k, list.get(resp, 3 + 2 * j) ?? "")
-  },
-)
+// Every header flat, in slot order (the native Vec keeps wire order), repeats kept.
+fn http_headers_flat(resp: List[String]) -> List[String] = list.drop(resp, 2)
 
-// Router plumbing (#2588): HEAD answered by the GET route drops the body.
+// http.set_body; also the router's HEAD answer (#2588) drops the body.
 fn http_set_body(resp: List[String], body: String) -> List[String] = list.set(resp, 1, body)

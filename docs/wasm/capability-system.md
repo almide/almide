@@ -112,14 +112,15 @@ Shorthand groups: `IO` = FS.read + FS.write + IO.stdin + IO.stdout + IO.stderr, 
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `http.get(url)` | `(String) -> Result[String, String]` | HTTP GET |
-| `http.post(url, body)` | `(String, String) -> Result[String, String]` | HTTP POST |
-| `http.put(url, body)` | `(String, String) -> Result[String, String]` | HTTP PUT |
-| `http.patch(url, body)` | `(String, String) -> Result[String, String]` | HTTP PATCH |
-| `http.delete(url)` | `(String) -> Result[String, String]` | HTTP DELETE |
-| `http.request(method, url, body, headers)` | `(String, String, String, Map[String, String]) -> Result[String, String]` | Custom HTTP request |
+| `http.get(url)` | `(String) -> Result[String, String]` | HTTP GET, the body |
+| `http.request(method, url, body, headers)` | `(String, String, String, List[(String, String)]) -> Result[String, String]` | Any method (`"POST"`, `"PUT"`, `"PATCH"`, `"DELETE"`, ...), the body |
+| `http.get_response(url)` | `(String) -> Result[HttpResponse, String]` | HTTP GET, the whole response |
+| `http.send(req)` | `(HttpRequest) -> Result[HttpResponse, String]` | Sends a request built with `http.new_request`, the whole response |
+| `http.get_bytes(url)` | `(String) -> Result[Bytes, String]` | HTTP GET, the raw body bytes |
+| `http.request_bytes(method, url, body, headers)` | `(String, String, String, List[(String, String)]) -> Result[Bytes, String]` | Any method, the raw body bytes |
+| `http.start(req, limits)` | `(HttpRequest, HttpLimits) -> Result[HttpCall, String]` | Begins a request and returns a call handle at once |
 
-Note: Pure response builder functions (`http.response`, `http.json`, `http.redirect`, `http.with_headers`) and request accessor functions (`http.req_method`, `http.req_path`, `http.req_body`, `http.req_header`, `http.query_params`) do not require `Net.fetch` because they operate on in-memory data structures, not the network.
+Note: Pure response builder functions (`http.response`, `http.json`, `http.redirect`, `http.with_headers`) and request functions (`http.new_request`, `http.method`, `http.path`, `http.header`, `http.headers`, `http.body`, `http.query_params`) do not require `Net.fetch` because they operate on in-memory data structures, not the network.
 
 **WASI imports:**
 
@@ -141,7 +142,7 @@ Networking is not part of WASI snapshot preview 1. Almide uses a host-provided `
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `http.serve(port, handler)` | `(Int, (Request) -> Response) -> Unit` | Start HTTP server |
+| `http.serve(port, handler)` | `(Int, effect (HttpRequest) -> HttpResponse) -> Unit` | Start HTTP server |
 
 **WASI imports:**
 
@@ -639,7 +640,7 @@ error[E010]: capability violation: function 'deploy' transitively requires Net.f
 20 |   deploy(artifact_url)
    |   ^^^^^^
    |
-   = note: call chain: deploy -> upload -> http.post
+   = note: call chain: deploy -> upload -> http.request
    = note: [permissions] allows: FS.read, FS.write, IO.stdout
    = hint: add "Net.fetch" to [permissions].allow in almide.toml
 ```

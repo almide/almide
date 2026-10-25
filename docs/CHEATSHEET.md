@@ -482,7 +482,7 @@ In a pure fn the same lambda is an error. Exception: metered regions
 rejected there even inside an effect fn.
 
 **Effect fn-typed slots** (`effect (A) -> B`): a HOF can declare that its
-callback runs effects — `effect fn serve(port: Int, f: effect
+callback runs effects — `effect fn serve(port: Int, handler: effect
 (HttpRequest) -> HttpResponse) -> Unit`. A lambda checked against an
 `effect (…) -> …` slot gets full effect-fn body ergonomics: effect calls are
 permitted and `!` propagates (into the handler's own failure channel — a
@@ -970,7 +970,7 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [net](stdlib/net.md) | TCP, UDP, name lookup, IP addresses | `import net` | 16 |
 | [unix](stdlib/unix.md) | Unix-domain sockets, descriptor passing, shared memory | `import unix` | 10 |
 | [uuid](stdlib/uuid.md) | RFC 9562 UUIDs: v4, v7, parse, compare | `import uuid` | 7 |
-| [http](stdlib/http.md) | HTTP client and server | `import http` | 23 |
+| [http](stdlib/http.md) | HTTP client and server; `HttpRequest` and `HttpResponse` share `header` / `headers` / `body` / `set_header` / `set_body` | `import http` | 36 |
 | [random](stdlib/random.md) | Random number generation; for secrets use `random.bytes` | `import random` | 10 |
 
 ### Regex: compile once, pass the `Regex` first
@@ -1016,7 +1016,7 @@ type OtlpSpan: Codec = {
   parentSpanId: Option[String],  // none = key omitted (proto3 unset)
   startTimeUnixNano: String,
 }
-// send:    http.request("POST", url, json.stringify(OtlpSpan.encode(s)), headers)
+// send:    http.request("POST", url, json.stringify(OtlpSpan.encode(s)), [("Content-Type", "application/json")])!
 // receive: OtlpSpan.decode(json.parse(body) ?? value.null())
 ```
 Domain logic that wants Almide-shaped names defines its own type and maps in

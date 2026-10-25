@@ -9,14 +9,26 @@ so typed helpers over requests are writable:
 ```almd check
 import http
 
-fn handle(req: HttpRequest) -> http.HttpResponse = http.response(200, http.req_path(req))
+fn handle(req: HttpRequest) -> http.HttpResponse = http.response(200, http.path(req))
 
 effect fn main() -> Unit = {
   http.serve(3000, handle)
 }
 ```
 
-### `http.serve(port: Int, f: (HttpRequest) -> HttpResponse) -> Unit`
+Both types are an `HttpMessage`, so ONE function reads or writes the headers
+and body of either kind of message: `header`, `header_values`, `headers`,
+`body`, `body_bytes`, `set_header`, `set_body` and `set_body_bytes` take a
+request or a response and give back the same kind. A header list is
+`List[(String, String)]` everywhere — `with_headers`, `new_request`,
+`request`, `request_bytes` and what `headers` returns — in wire order, a
+repeated field kept.
+
+The client functions are `effect fn`s that return `Result`. Propagation is
+explicit (ADR-0008): write `http.send(req)!` in an effect fn, or handle the
+`Result` with `match` / `??`. A bare `http.get(url)` statement is E042.
+
+### `http.serve(port: Int, handler: effect (HttpRequest) -> HttpResponse) -> Unit`
 
 Start an HTTP server on the given port with a request handler
 
@@ -105,7 +117,7 @@ The router and any middleware in front of it read ONE canonical path (C-406,
 #4133): a path with an empty segment inside it (`//admin`), a `.` or `..`
 segment, a percent-encoded unreserved byte (`%61dmin`, `%2e`), a backslash or
 a control character is `400 Bad Request: the path is not in canonical form`.
-So a guard such as `string.starts_with(http.req_path(req), "/admin")` checks
+So a guard such as `string.starts_with(http.path(req), "/admin")` checks
 the same path the router dispatches on. A bound parameter that decodes to `.`
 or `..`, or holds `/` (`%2F`), `\` or NUL, is `400 Bad Request: a path
 parameter is a dot segment or holds a /, \ or NUL` (#4134), so
@@ -129,8 +141,8 @@ effect fn create_user(req: HttpRequest) -> HttpResponse = match http.decode_json
 fn server_header(next: HttpHandler) -> HttpHandler = (req) => http.set_header(next(req)!, "Server", "almide")
 
 effect fn show(app: HttpHandler, method: String, target: String, body: String) -> String = {
-  let res = app(http.new_request(method, target, body, [:]))!
-  "${http.status_code(res)} ${http.body(res)}"
+  let res = app(http.new_request(method, target, body, []))!
+  "${http.status(res)} ${http.body(res)}"
 }
 
 effect fn main() -> Unit = {
@@ -198,7 +210,7 @@ import http
 fn main() -> Unit = {
   let resp = http.response(200, "Hello!")
   println(http.body(resp))
-  println(http.get_header(resp, "Content-Type") ?? "none")
+  println(http.header(resp, "Content-Type") ?? "none")
 }
 ```
 ```output
@@ -218,7 +230,7 @@ fn main() -> Unit = {
   let data = value.object([("ok", value.bool(true))])
   let resp = http.json(200, json.stringify(data))
   println(http.body(resp))
-  println(http.get_header(resp, "Content-Type") ?? "none")
+  println(http.header(resp, "Content-Type") ?? "none")
 }
 ```
 ```output
@@ -226,20 +238,21 @@ fn main() -> Unit = {
 application/json
 ```
 
-### `http.with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse`
+### `http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse`
 
-Create a response with EXACTLY the given headers, in map order. Unlike
+Create a response with EXACTLY the given headers, in list order. Unlike
 `response` / `json` it seeds nothing — pass `"Content-Type"` yourself when you
-want one (ALS-R7, contract C-275).
+want one (ALS-R7, contract C-275). A name given twice, in any case, keeps its
+first spelling and its last value.
 
 ```almd run
 import http
 
 fn main() -> Unit = {
   let body = "<h1>Hello</h1>"
-  let resp = http.with_headers(200, body, ["Content-Type": "text/html"])
-  println(http.get_header(resp, "Content-Type") ?? "none")
-  println(http.get_header(resp, "X-Nope") ?? "none")
+  let resp = http.with_headers(200, body, [("Content-Type", "text/html")])
+  println(http.header(resp, "Content-Type") ?? "none")
+  println(http.header(resp, "X-Nope") ?? "none")
 }
 ```
 ```output
@@ -256,116 +269,91 @@ import http
 
 fn main() -> Unit = {
   let resp = http.redirect("/new-path")
-  println(http.get_header(resp, "Location") ?? "none")
+  println(http.header(resp, "Location") ?? "none")
 }
 ```
 ```output
 /new-path
 ```
 
-### `http.status(resp: HttpResponse, code: Int) -> HttpResponse`
+### `http.set_status(resp: HttpResponse, code: Int) -> HttpResponse`
 
-Set the status code on a response
+Set the status code on a response. The code is not range-checked here;
+`http.serve` refuses a status outside `200..=599` when it sends the response.
 
 ```almd run
 import http
 
 fn main() -> Unit = {
   let resp = http.response(200, "created")
-  let created = http.status(resp, 201)
-  println(http.body(created))
+  let created = http.set_status(resp, 201)
+  println("${http.status(created)} ${http.body(created)}")
 }
 ```
 ```output
-created
+201 created
 ```
 
-### `http.body(resp: HttpResponse) -> String`
+### `http.status(resp: HttpResponse) -> Int`
 
-Get the body string from a response
+Read the status code of a response — the getter twin of `http.set_status`.
+A fetched response whose status line could not be read is `0`.
 
 ```almd run
 import http
 
 fn main() -> Unit = {
-  let resp = http.response(200, "Hello!")
-  let text = http.body(resp)
-  println(text)
-}
-```
-```output
-Hello!
-```
-
-### `http.set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse`
-
-Set a header on a response. Field names are case-insensitive (RFC 9110 §5.1),
-so this replaces the existing field's value whatever spelling it was stored
-under — a response never carries two entries for one field name.
-
-```almd run
-import http
-
-fn main() -> Unit = {
-  let resp = http.response(200, "hi")
-  let tagged = http.set_header(resp, "X-Custom", "value")
-  println(http.get_header(tagged, "x-custom") ?? "none")
-}
-```
-```output
-value
-```
-
-### `http.get_header(resp: HttpResponse, key: String) -> Option[String]`
-
-Get a header value from a response; `none` when the field is absent. The
-lookup is case-insensitive, so `"content-type"` and `"Content-Type"` are the
-same field.
-
-```almd run
-import http
-
-fn main() -> Unit = {
-  let resp = http.response(200, "hi")
-  let ct = http.get_header(resp, "Content-Type")
-  println(ct ?? "none")
-  println(http.get_header(resp, "content-type") ?? "none")
-  println(http.get_header(resp, "X-Nope") ?? "none")
-}
-```
-```output
-text/plain
-text/plain
-none
-```
-
-### `http.status_code(resp: HttpResponse) -> Int`
-
-Read the status code of a response — the getter twin of `http.status`.
-
-```almd run
-import http
-
-fn main() -> Unit = {
-  let resp = http.status(http.response(200, "teapot"), 418)
-  println("${http.status_code(resp)}")
+  let resp = http.set_status(http.response(200, "teapot"), 418)
+  println("${http.status(resp)}")
 }
 ```
 ```output
 418
 ```
 
-### `http.header_values(resp: HttpResponse, key: String) -> List[String]`
+## Headers and body of either message
 
-EVERY value of one field, in order — the accessor for a field that repeats
-(`Set-Cookie`), where `get_header` answers only the first occurrence. The
+Every function in this section takes an `HttpRequest` or an `HttpResponse`
+(`[M: HttpMessage]`) and, for the writers, returns the same kind. A request
+built with `http.new_request` and a response built with `http.response` are
+read and changed with the same calls.
+
+### `http.header(m, name: String) -> Option[String]`
+
+The FIRST value of one header field; `none` when the field is absent. Field
+names are case-insensitive (RFC 9110 §5.1), so `"content-type"` and
+`"Content-Type"` are the same field.
+
+```almd run
+import http
+
+fn main() -> Unit = {
+  let resp = http.response(200, "hi")
+  println(http.header(resp, "Content-Type") ?? "none")
+  println(http.header(resp, "content-type") ?? "none")
+  println(http.header(resp, "X-Nope") ?? "none")
+  let req = http.new_request("GET", "/", "", [("Authorization", "Bearer t")])
+  println(http.header(req, "authorization") ?? "none")
+}
+```
+```output
+text/plain
+text/plain
+none
+Bearer t
+```
+
+### `http.header_values(m, name: String) -> List[String]`
+
+EVERY value of one field, in wire order — the accessor for a field that
+repeats (`Set-Cookie`), where `header` answers only the first occurrence. The
 lookup is case-insensitive; an absent field is `[]`.
 
 ```almd run
 import http
 
 fn main() -> Unit = {
-  let resp = http.with_headers(200, "", ["Set-Cookie": "a=1; HttpOnly"])
+  let resp = http.with_headers(200, "", [("Set-Cookie", "a=1; HttpOnly")])
   println("${http.header_values(resp, "set-cookie")}")
   println("${http.header_values(resp, "X-Nope")}")
 }
@@ -375,39 +363,153 @@ fn main() -> Unit = {
 []
 ```
 
-### `http.headers(resp: HttpResponse) -> Map[String, String]`
+### `http.headers(m) -> List[(String, String)]`
 
-All headers as a map keyed by the **lowercased** field name (RFC 9110 §5.1:
-field names are case-insensitive ASCII tokens). A repeated field keeps its
-**first** value — the rule `get_header` and `req_header` already apply — so a
-`Set-Cookie` list is read through `header_values`, never through this map.
+Every header as a `(name, value)` pair, with the name spelled as it was sent
+or set, in wire order, a repeated field kept once per occurrence. Nothing is
+lowercased or merged: look a field up with `header` / `header_values`, which
+ignore case.
 
 ```almd run
 import http
 
 fn main() -> Unit = {
-  let resp = http.with_headers(200, "", ["X-Frame-Options": "DENY", "Content-Type": "text/html"])
-  let hs = http.headers(resp)
-  println(map.get(hs, "x-frame-options") ?? "none")
-  println(map.get(hs, "X-Frame-Options") ?? "none")
-  println("${map.keys(hs)}")
+  let resp = http.with_headers(200, "", [("X-Frame-Options", "DENY"), ("Content-Type", "text/html")])
+  let lines = http.headers(resp) |> list.map(((k, v)) => "${k}: ${v}")
+  println(list.join(lines, "\n"))
 }
 ```
 ```output
-DENY
-none
-["x-frame-options", "content-type"]
+X-Frame-Options: DENY
+Content-Type: text/html
 ```
 
-### `http.req_method(req: HttpRequest) -> String`
+### `http.body(m) -> String`
 
-Get the HTTP method of a request (GET, POST, etc.)
+The body text. A body fetched by the client is decoded as lossy UTF-8.
+
+```almd run
+import http
+
+fn main() -> Unit = {
+  let resp = http.response(200, "Hello!")
+  println(http.body(resp))
+  let req = http.new_request("POST", "/items", "{\"n\":1}", [])
+  println(http.body(req))
+}
+```
+```output
+Hello!
+{"n":1}
+```
+
+### `http.body_bytes(m) -> Bytes`
+
+The body as `Bytes`: exactly the UTF-8 bytes of `http.body(m)`. A message
+body is held as text today, so this does not recover bytes a lossy decode
+replaced. For a binary download (an image, audio) use `http.get_bytes` /
+`http.request_bytes`, which return the raw body bytes.
+
+```almd run
+import http
+
+fn main() -> Unit = {
+  let resp = http.response(200, "héllo")
+  println("${bytes.len(http.body_bytes(resp))}")
+}
+```
+```output
+6
+```
+
+### `http.set_header(m, name: String, value: String) -> M`
+
+Set one header field. Field names are case-insensitive, so the FIRST field
+with that name, in any spelling, gets the new value in place (its spelling and
+position stay); when there is none, the field is appended. A message never
+gains a second entry this way.
+
+```almd run
+import http
+
+fn main() -> Unit = {
+  let resp = http.with_headers(200, "hi", [("Content-Type", "text/plain")])
+  let tagged = http.set_header(http.set_header(resp, "X-Custom", "value"), "content-type", "text/html")
+  let lines = http.headers(tagged) |> list.map(((k, v)) => "${k}: ${v}")
+  println(list.join(lines, "\n"))
+}
+```
+```output
+Content-Type: text/html
+X-Custom: value
+```
+
+### `http.set_body(m, body: String) -> M`
+
+Replace the body text; the headers stay as they are.
+
+```almd run
+import http
+
+fn main() -> Unit = {
+  let resp = http.set_body(http.response(200, "draft"), "final")
+  println(http.body(resp))
+}
+```
+```output
+final
+```
+
+### `http.set_body_bytes(m, body: Bytes) -> M`
+
+Replace the body with `Bytes`. A message body is held as text today, so the
+bytes are decoded as lossy UTF-8: a byte sequence that is not UTF-8 becomes
+U+FFFD and does not survive. Use it for text you hold as `Bytes`; it is not a
+lossless binary upload.
+
+```almd run
+import http
+
+fn main() -> Unit = {
+  let req = http.set_body_bytes(http.new_request("POST", "/echo", "", []), bytes.from_string("hi"))
+  println(http.body(req))
+}
+```
+```output
+hi
+```
+
+## Reading a request
+
+`http.new_request(method, target, body, headers)` builds a request in code —
+the way a test calls an app without a socket, and the way a request is built
+for `http.send` / `http.start`, where the target is the full URL.
+
+```almd run
+import http
+
+fn main() -> Unit = {
+  let req = http.new_request("POST", "/items?x=1", "hello", [("Content-Type", "text/plain")])
+  println(http.method(req))
+  println(http.path(req))
+  println(http.body(req))
+}
+```
+```output
+POST
+/items?x=1
+hello
+```
+
+### `http.method(req: HttpRequest) -> String`
+
+Get the HTTP method of a request as sent (GET, POST, etc.)
 
 ```almd check
 import http
 
 fn handle(req: HttpRequest) -> HttpResponse = {
-  let method = http.req_method(req)
+  let method = http.method(req)
   http.response(200, "method: ${method}")
 }
 
@@ -416,15 +518,16 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `http.req_path(req: HttpRequest) -> String`
+### `http.path(req: HttpRequest) -> String`
 
-Get the URL path of a request
+Get the request target, query string included (`/search?q=x`). For a request
+built to send, it is the full URL.
 
 ```almd check
 import http
 
 fn handle(req: HttpRequest) -> HttpResponse = {
-  let path = http.req_path(req)
+  let path = http.path(req)
   http.response(200, "path: ${path}")
 }
 
@@ -433,36 +536,14 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `http.req_body(req: HttpRequest) -> String`
-
-Get the body string of a request
+Headers and body of a request are read with the shared functions above:
 
 ```almd check
 import http
 
-fn handle(req: HttpRequest) -> HttpResponse = {
-  let body = http.req_body(req)
-  http.response(200, "received ${string.len(body)} chars")
-}
-
-effect fn main() -> Unit = {
-  http.serve(3000, handle)
-}
-```
-
-### `http.req_header(req: HttpRequest, key: String) -> Option[String]`
-
-Get a header value from a request
-
-```almd check
-import http
-
-fn handle(req: HttpRequest) -> HttpResponse = {
-  let auth = http.req_header(req, "Authorization")
-  match auth {
-    some(_) => http.response(200, "ok"),
-    none => http.response(401, "missing Authorization"),
-  }
+fn handle(req: HttpRequest) -> HttpResponse = match http.header(req, "Authorization") {
+  some(_) => http.response(200, "received ${string.len(http.body(req))} chars"),
+  none => http.response(401, "missing Authorization"),
 }
 
 effect fn main() -> Unit = {
@@ -495,22 +576,40 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `http.url_decode(s: String) -> String`
+### Decoding a form value
 
-Percent-decode a URL component (`%XX` → byte, `+` → space) leniently: a bad
-escape is kept and invalid UTF-8 becomes U+FFFD. It is not the query decoder —
-`query_params` and `url.parse_query` refuse what this keeps; prefer
-`url.decode_form` when the input may be malformed.
+`http` has no decoder of its own: `http.url_decode` was removed. Decode a
+form-encoded value (`+` a space, `%XX` a byte) with the `url` module, which
+refuses a bad escape or percent data that is not UTF-8 instead of keeping it.
+Fall back to the input when it may be malformed:
 
 ```almd check
-import http
+import url
 
 fn main() -> Unit = {
-  let q = http.url_decode("%E7%8C%AB") // "猫"
-  println(q)
-  println(http.url_decode("a+b%20c"))
+  println(url.decode_form("%E7%8C%AB") ?? "%E7%8C%AB") // "猫"
+  println(url.decode_form("a+b%20c") ?? "a+b%20c")
 }
 ```
+
+## Client
+
+Any complete response is `ok` — a 404 and a 3xx included; `err` is a
+transport failure only. Redirects are never followed: a 3xx and its
+`Location` header are the answer. The one-shot client is a two-by-three grid,
+plus the call handle:
+
+| | body text | whole response | raw body bytes |
+|---|---|---|---|
+| GET | `http.get(url)` | `http.get_response(url)` | `http.get_bytes(url)` |
+| any method, body and headers | `http.request(method, url, body, headers)` | `http.send(http.new_request(method, url, body, headers))` | `http.request_bytes(method, url, body, headers)` |
+| as a handle, with limits | | `http.start(req, limits)` — see [Per-call limits and cancellation](#per-call-limits-and-cancellation) | |
+
+There is no per-verb function: a POST is `http.request("POST", url, body,
+headers)`, and a POST whose status you need is
+`http.send(http.new_request("POST", url, body, headers))`, then
+`http.status(resp)` and `http.body(resp)`. A streamed body is read through the
+handle (`http.read_new` between `http.poll`s).
 
 ### `http.get(url: String) -> Result[String, String]`
 
@@ -535,23 +634,10 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `http.post(url: String, body: String) -> Result[String, String]`
+### `http.request(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[String, String]`
 
-Send an HTTP POST request with a body string
-
-```almd check
-import http
-
-effect fn main() -> Unit = {
-  let body = '{"name": "alice"}'
-  let resp = http.post("https://api.example.com", body)!
-  println(resp)
-}
-```
-
-### `http.put(url: String, body: String) -> Result[String, String]`
-
-Send an HTTP PUT request
+Send a request with any method, body and headers, and return the response
+body. Pass `""` for no body and `[]` for no extra headers.
 
 ```almd check
 import http
@@ -559,64 +645,20 @@ import http
 effect fn main() -> Unit = {
   let url = "https://api.example.com/items/1"
   let body = '{"name": "alice"}'
-  let resp = http.put(url, body)!
-  println(resp)
-}
-```
-
-### `http.patch(url: String, body: String) -> Result[String, String]`
-
-Send an HTTP PATCH request
-
-```almd check
-import http
-
-effect fn main() -> Unit = {
-  let url = "https://api.example.com/items/1"
-  let body = '{"name": "bob"}'
-  let resp = http.patch(url, body)!
-  println(resp)
-}
-```
-
-### `http.delete(url: String) -> Result[String, String]`
-
-Send an HTTP DELETE request
-
-```almd check
-import http
-
-effect fn main() -> Unit = {
-  let url = "https://api.example.com/items/1"
-  let resp = http.delete(url)!
-  println(resp)
-}
-```
-
-### `http.request(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String]`
-
-Send a custom HTTP request with method, URL, body, and headers
-
-```almd check
-import http
-
-effect fn main() -> Unit = {
-  let url = "https://api.example.com/items/1"
-  let body = '{"name": "alice"}'
-  let headers = ["Content-Type": "application/json", "User-Agent": "my-app"]
-  let resp = http.request("PUT", url, body, headers)!
-  println(resp)
+  let headers = [("Content-Type", "application/json"), ("User-Agent", "my-app")]
+  println(http.request("PUT", url, body, headers)!)
+  println(http.request("DELETE", url, "", [])!)
 }
 ```
 
 #### Read timeout (`ALMIDE_HTTP_TIMEOUT_SECS`)
 
 Every client call that takes no limits waits at most **30 seconds** for the
-server to answer (the SSE streaming client: 120 s between events). The
+server to answer. The
 `ALMIDE_HTTP_TIMEOUT_SECS` environment variable overrides that DEFAULT for
 all of them; `0` means **no timeout** — block until the server responds. It
-is the default only: a call that carries its own limits (`http.start`, the
-`*_with_limits` streaming clients) ignores it — see
+is the default only: a call that carries its own limits (`http.start`)
+ignores it — see
 [Per-call limits and cancellation](#per-call-limits-and-cancellation). The
 limit is between bytes, not for the whole call, so a server that keeps
 talking never trips it.
@@ -640,11 +682,10 @@ macOS, longer on Linux), with the same text.
 
 | | connect | between reads | whole call | response size |
 |---|---|---|---|---|
-| `get` / `request` / `*_status` / `*_bytes` / `*_response` | 30 s | 30 s | none | 1 GiB |
-| `request_stream`, the SSE helpers | 30 s | 120 s | none | none (streamed) |
-| `http.start`, the `*_with_limits` twins | `total_ms` | `idle_ms` | `total_ms` | none |
+| `get` / `request` / `get_response` / `send` / `get_bytes` / `request_bytes` | 30 s | 30 s | none | 1 GiB |
+| `http.start` | `total_ms` | `idle_ms` | `total_ms` | none |
 
-- The 30 s / 120 s defaults are `ALMIDE_HTTP_TIMEOUT_SECS` (`0` = none).
+- The 30 s defaults are `ALMIDE_HTTP_TIMEOUT_SECS` (`0` = none).
 - The size cap counts the response as received (head and framed body):
   `ALMIDE_HTTP_MAX_RESPONSE_BYTES` overrides it, `0` = no cap. Past it the
   call is `err("response from \"<url>\" is larger than N bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)")`.
@@ -718,8 +759,8 @@ Python, Go and Node refuse the same input.
 
 #### Proxies (#2819)
 
-Every client path (`get` … `request_bytes`, `*_response`, `request_stream`,
-the SSE helpers, `http.start`) reads the proxy variables the way curl and
+Every client path (`get`, `request`, `get_response`, `send`, `get_bytes`,
+`request_bytes`, `http.start`) reads the proxy variables the way curl and
 reqwest read them:
 
 - `https://` URLs use `HTTPS_PROXY` / `https_proxy`.
@@ -775,85 +816,32 @@ TLS handshake with "https://internal.example/" failed
   is an error (the protocol class, `malformed or incomplete response from
   "<url>"`), not an empty body.
 
-### `http.get_status(url: String) -> Result[(Int, String), String]`
+### The whole response — `get_response` and `send`
 
-Send a GET and return `(status_code, body)`. Unlike `http.get`, a non-2xx
-response is `Ok((code, body))` — a 404 does not become an `Err`. `Err` is
-reserved for transport failures (connection / TLS / timeout). Use this when a
-caller needs to branch on the numeric status rather than only body-or-error.
+`http.get_response(url)` and `http.send(req)` answer the whole `HttpResponse`
+instead of the body text. Both come from the same exchange in the runtime as
+`get` / `request`, so the shapes cannot drift: `get` is the `body` of
+`get_response`, and `request(method, url, body, headers)` is the `body` of
+`send(new_request(method, url, body, headers))`.
 
-```almd check
-import http
+What the response holds:
 
-effect fn main() -> Unit = {
-  let verdict = match http.get_status("https://example.com/x") {
-    Ok(pair) => if pair.0 == 404 then "missing" else "ok"
-    Err(e) => "network error: " + e
-  }
-  println(verdict)
-}
-```
-
-### `http.request_status(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String]`
-
-Like `http.request` but returns `(status_code, body)`, with the same status
-semantics as `http.get_status` (any complete response is `Ok`). Set custom
-headers (e.g. a `User-Agent`) via the `headers` map.
-
-```almd check
-import http
-
-effect fn main() -> Unit = {
-  let url = "https://example.com/x"
-  let r = http.request_status("GET", url, "", ["User-Agent": "my-app"])
-  match r {
-    ok(pair) => println("status ${pair.0}"),
-    err(e) => println("network error: " + e),
-  }
-}
-```
-
-### The `*_response` family — status, headers and body together
-
-Every verb-shaped String client has a `*_response` twin with the **same
-parameters** that answers the whole `HttpResponse` record instead of the body:
-
-| body only | full response |
-|---|---|
-| `http.get(url)` | `http.get_response(url)` |
-| `http.post(url, body)` | `http.post_response(url, body)` |
-| `http.put(url, body)` | `http.put_response(url, body)` |
-| `http.patch(url, body)` | `http.patch_response(url, body)` |
-| `http.delete(url)` | `http.delete_response(url)` |
-| `http.request(method, url, body, headers)` | `http.request_response(method, url, body, headers)` |
-
-**Family rule** (machine-checked by `tests/http_response_family_gate_test.rs`):
-each of `get` / `post` / `put` / `patch` / `delete` / `request` has exactly one
-`<verb>_response` twin, and nothing else grows one. The body-only fn is the
-`body` projection of its twin and `request_status` the `(status, body)`
-projection — all three shapes come from one exchange in the runtime, so they
-cannot drift. Intentional omissions: `get_status` / `get_bytes` /
-`request_bytes` are result-*shape* variants, not verbs (they get no twin), and
-`request_stream` carries no response record (its body goes chunk-wise to the
-callback).
-
-What the record holds:
-
-- `http.status_code(resp)` — **any** complete response is `Ok`: a 404 and a
-  3xx included. `Err` is a transport failure only (connection / TLS /
+- `http.status(resp)` — **any** complete response is `ok`: a 404 and a
+  3xx included. `err` is a transport failure only (connection / TLS /
   timeout).
 - **Redirects are never followed.** A 3xx arrives as-is with its `Location`
   header, so the response is always to the URL you passed — there is no
   separate "final URL".
 - Headers keep their wire spelling and a repeated field keeps **every**
-  occurrence: `http.get_header(resp, k)` answers the first, `http.header_values(resp, k)`
-  all of them, `http.headers(resp)` the lowercased-name map (first wins).
-- `http.body(resp)` — the transfer-decoded body text.
+  occurrence: `http.header(resp, k)` answers the first,
+  `http.header_values(resp, k)` all of them, `http.headers(resp)` every
+  `(name, value)` pair in wire order.
+- `http.body(resp)` — the transfer-decoded body text, lossy UTF-8.
 
-The twins are **native-only** today: the embedded wasm lane serves the
-body / status / bytes shapes through the framed ops (#1710 increment 3) and
-grows the response shape when the wasi:http port lands (#1710);
-`proofs/target-availability.toml` declares the legs.
+On wasm, `almide run --target wasm` and the WASI 0.3 component
+(`ALMIDE_COMPONENT_P3=1 --component`, run on wasmtime 46+ with `-S http`)
+serve the whole-response client; the default stock artifact refuses it at
+build. `proofs/target-availability.toml` declares the legs.
 
 ### `http.get_response(url: String) -> Result[HttpResponse, String]`
 
@@ -862,73 +850,56 @@ import http
 
 effect fn main() -> Unit = {
   let resp = http.get_response("https://example.com/")!
-  println("status ${http.status_code(resp)}")
-  println(http.get_header(resp, "strict-transport-security") ?? "no HSTS")
-  println(http.get_header(resp, "x-frame-options") ?? "no X-Frame-Options")
+  println("status ${http.status(resp)}")
+  println(http.header(resp, "strict-transport-security") ?? "no HSTS")
+  println(http.header(resp, "x-frame-options") ?? "no X-Frame-Options")
 }
 ```
 
-### `http.post_response(url: String, body: String) -> Result[HttpResponse, String]`
+### `http.send(req: HttpRequest) -> Result[HttpResponse, String]`
+
+Send a request built with `http.new_request`, whose target is the full URL,
+and return the whole response, any status. Redirects are not followed, so a
+redirect check reads the 3xx and its `Location` straight off the response:
 
 ```almd check
 import http
 
 effect fn main() -> Unit = {
-  let resp = http.post_response("https://api.example.com/login", '{"user": "alice"}')!
+  let req = http.new_request("GET", "http://example.com/old", "", [("User-Agent", "checker")])
+  let resp = http.send(req)!
+  let code = http.status(resp)
+  if code >= 300 and code < 400 then
+    println("redirects to ${http.header(resp, "location") ?? "?"}")
+  else
+    println("answers ${code} directly")
+}
+```
+
+Any method; read every value of a repeated field with `header_values`:
+
+```almd check
+import http
+
+effect fn main() -> Unit = {
+  let req = http.new_request("POST", "https://api.example.com/login", '{"user": "alice"}', [("Content-Type", "application/json")])
+  let resp = http.send(req)!
   for cookie in http.header_values(resp, "set-cookie") {
     println(cookie)
   }
 }
 ```
 
-### `http.put_response(url: String, body: String) -> Result[HttpResponse, String]`
+The request is a value, so it can be built up before it is sent:
 
 ```almd check
 import http
 
 effect fn main() -> Unit = {
-  let resp = http.put_response("https://api.example.com/items/1", '{"name": "alice"}')!
-  println("${http.status_code(resp) == 204}")
-}
-```
-
-### `http.patch_response(url: String, body: String) -> Result[HttpResponse, String]`
-
-```almd check
-import http
-
-effect fn main() -> Unit = {
-  let resp = http.patch_response("https://api.example.com/items/1", '{"name": "bob"}')!
-  println(http.body(resp))
-}
-```
-
-### `http.delete_response(url: String) -> Result[HttpResponse, String]`
-
-```almd check
-import http
-
-effect fn main() -> Unit = {
-  let resp = http.delete_response("https://api.example.com/items/1")!
-  println("${http.status_code(resp)}")
-}
-```
-
-### `http.request_response(method: String, url: String, body: String, headers: Map[String, String]) -> Result[HttpResponse, String]`
-
-The general form. A redirect check reads the 3xx and its `Location` straight
-off the record:
-
-```almd check
-import http
-
-effect fn main() -> Unit = {
-  let resp = http.request_response("GET", "http://example.com/old", "", ["User-Agent": "checker"])!
-  let code = http.status_code(resp)
-  if code >= 300 and code < 400 then
-    println("redirects to ${http.get_header(resp, "location") ?? "?"}")
-  else
-    println("answers ${code} directly")
+  let empty = http.new_request("PATCH", "https://api.example.com/items/1", "", [])
+  let req = http.set_body(http.set_header(empty, "Content-Type", "application/json"), '{"name": "bob"}')
+  let resp = http.send(req)!
+  println("${http.status(resp)} ${http.body(resp)}")
 }
 ```
 
@@ -936,7 +907,9 @@ effect fn main() -> Unit = {
 
 Send an HTTP GET and return the raw response body as `Bytes` (no UTF-8
 conversion), so binary payloads such as images or TTS audio survive intact.
-The `String` client corrupts non-UTF-8 bodies.
+The text client — `body` and `body_bytes` included — decodes the body as
+lossy UTF-8, so it corrupts a body that is not UTF-8; `get_bytes` and
+`request_bytes` are the lossless binary download path.
 
 ```almd check
 import fs
@@ -948,7 +921,7 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `http.request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String]`
+### `http.request_bytes(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[Bytes, String]`
 
 Like `http.request` but returns the raw response body as `Bytes`.
 
@@ -958,8 +931,7 @@ import http
 effect fn main() -> Unit = {
   let url = "https://api.example.com/render"
   let body = '{"text": "hello"}'
-  let headers = ["Content-Type": "application/json"]
-  let blob = http.request_bytes("POST", url, body, headers)!
+  let blob = http.request_bytes("POST", url, body, [("Content-Type", "application/json")])!
   println(int.to_string(bytes.len(blob)))
 }
 ```
@@ -973,11 +945,15 @@ second request.
 
 | | |
 |---|---|
-| `http.start(method, url, body, headers, limits) -> Result[HttpCall, String]` | begins the request and returns at once |
+| `http.start(req, limits) -> Result[HttpCall, String]` | begins sending `req` (built with `http.new_request`, target the full URL) and returns at once |
 | `http.poll(c) -> Option[Result[HttpResponse, String]]` | never blocks: `none` while the call runs, then its result |
 | `http.read_new(c) -> String` | never blocks: the body text that arrived since the previous `read_new` |
 | `http.wait(c) -> Result[HttpResponse, String]` | blocks until the call ends — never past its limits |
 | `http.cancel(c) -> Unit` | closes the connection; the call ends as `err("request cancelled")` |
+
+**Family rule** (machine-checked by `tests/http_call_family_gate_test.rs`):
+the handle has exactly these five verbs. A streamed body is read with
+`read_new` between `poll`s; there is no callback client.
 
 **Limits are per call.** `HttpLimits = { total_ms: Int, idle_ms: Int }`, both
 in milliseconds, `0` = no limit:
@@ -1010,11 +986,11 @@ already ended changes nothing, and calling it twice is fine. Dropping the last
 copy of the handle cancels the call too.
 
 **The answer is the whole response.** `wait` and `poll` answer like
-`http.request_response`: any complete response is `ok` — a 404 included —
-with its status, every header line and the whole body; `err` is a transport
-failure, a fired limit or a cancel. The body bytes `read_new` handed out are
-still in that response's body. A multibyte character split across two reads
-is held back until it is whole.
+`http.send`: any complete response is `ok` — a 404 included — with its
+status, every header line and the whole body; `err` is a transport failure, a
+fired limit or a cancel. The body bytes `read_new` handed out are still in
+that response's body. A multibyte character split across two reads is held
+back until it is whole.
 
 ```almd check
 import env
@@ -1025,7 +1001,7 @@ import io
 effect fn follow(c: HttpCall, started: Int) -> Result[String, String] = {
   io.print(http.read_new(c))
   match http.poll(c) {
-    some(ok(resp)) => ok("done: ${http.status_code(resp)}"),
+    some(ok(resp)) => ok("done: ${http.status(resp)}"),
     some(err(e)) => ok(e),
     none => if env.millis() - started > 3000 then {
       http.cancel(c)
@@ -1039,40 +1015,40 @@ effect fn follow(c: HttpCall, started: Int) -> Result[String, String] = {
 
 effect fn main() -> Unit = {
   let limits = { total_ms: 30 * 60 * 1000, idle_ms: 120 * 1000 }
-  let c = http.start("GET", "http://127.0.0.1:8080/events", "", [:], limits)!
+  let c = http.start(http.new_request("GET", "http://127.0.0.1:8080/events", "", []), limits)!
   println(follow(c, env.millis())!)
 }
 ```
 
-### The streaming client with limits
-
-`request_stream` has a `_with_limits` twin: the same parameters with
-`limits: HttpLimits` before the callback, the same answer, built on the handle
-— so a stream that keeps talking ends at `total_ms`, and one that stalls ends
-at `idle_ms`, each with the error that names it. The form without limits is
-unchanged. (The OpenAI and Anthropic streaming clients and their twins moved
-to package [almide/llm](https://github.com/almide/llm) at dialect epoch 14:
-`almide add almide/llm@v0.1.0`, `import llm`, then
-`llm.openai_streaming_call(...)` with the same arguments.)
+A streaming POST — an LLM endpoint that sends server-sent events — is the
+same loop over a request with a body and headers:
 
 ```almd check
 import http
 
 effect fn main() -> Unit = {
-  let limits = { total_ms: 10 * 60 * 1000, idle_ms: 2 * 60 * 1000 }
   let body = """{"model": "m", "stream": true, "messages": []}"""
-  http.request_stream_with_limits("POST", "http://127.0.0.1:8080/v1/chat/completions", body, ["Content-Type": "application/json"], limits, (chunk) => eprintln(chunk))!
+  let req = http.new_request("POST", "http://127.0.0.1:8080/v1/chat/completions", body, [("Content-Type", "application/json")])
+  let c = http.start(req, { total_ms: 10 * 60 * 1000, idle_ms: 2 * 60 * 1000 })!
+  let resp = http.wait(c)!
+  println("${http.status(resp)}")
+  println(http.body(resp))
 }
 ```
 
+(The OpenAI and Anthropic streaming clients moved to package
+[almide/llm](https://github.com/almide/llm) at dialect epoch 14:
+`almide add almide/llm@v0.1.0`, `import llm`, then
+`llm.openai_streaming_call(...)`.)
+
 On the wasm target, `almide run --target wasm` serves `start`, `poll`,
-`read_new`, `wait`, `cancel` and `request_stream_with_limits` with the same
-behaviour as native — the embedded host runs the native call core, so the
-limit and cancel errors are the same text, and dropping the last copy of a
-handle cancels its call there too. A standalone `.wasm` built with
-`almide build --target wasm` cannot carry them yet (there is no stock WASI
-host for an in-flight call), so `almide check --target wasm`, which checks
-the build route, still refuses them.
+`read_new`, `wait` and `cancel` with the same behaviour as native — the
+embedded host runs the native call core, so the limit and cancel errors are
+the same text, and dropping the last copy of a handle cancels its call there
+too. A standalone `.wasm` built with `almide build --target wasm` cannot
+carry them yet (there is no stock WASI host for an in-flight call), so
+`almide check --target wasm`, which checks the build route, still refuses
+them.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
@@ -1101,7 +1077,7 @@ http.redirect(url: String) -> HttpResponse
 
 // resp with code set; not range-checked.
 // @since 0.6.0 or earlier
-http.status(resp: HttpResponse, code: Int) -> HttpResponse
+http.set_status(resp: HttpResponse, code: Int) -> HttpResponse
 
 // Payload text; lossy UTF-8 when fetched.
 // @since 0.6.0 or earlier
@@ -1113,11 +1089,11 @@ http.set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse
 
 // First value for key, any case; none if absent.
 // @since 0.6.0 or earlier
-http.get_header(resp: HttpResponse, key: String) -> Option[String]
+http.header(resp: HttpResponse, key: String) -> Option[String]
 
 // HTTP status; 0 if the status line was bad.
 // @since 0.62.0
-http.status_code(resp: HttpResponse) -> Int
+http.status(resp: HttpResponse) -> Int
 
 // Map by lowercased name; first value wins.
 // @since 0.62.0
@@ -1129,19 +1105,19 @@ http.header_values(resp: HttpResponse, key: String) -> List[String]
 
 // Request method as sent, e.g. GET.
 // @since 0.6.0 or earlier
-http.req_method(req: HttpRequest) -> String
+http.method(req: HttpRequest) -> String
 
 // Request target, query string included.
 // @since 0.6.0 or earlier
-http.req_path(req: HttpRequest) -> String
+http.path(req: HttpRequest) -> String
 
 // Body text; empty without a Content-Length.
 // @since 0.6.0 or earlier
-http.req_body(req: HttpRequest) -> String
+http.body(req: HttpRequest) -> String
 
 // First value for key, any case; none if absent.
 // @since 0.6.0 or earlier
-http.req_header(req: HttpRequest, key: String) -> Option[String]
+http.header(req: HttpRequest, key: String) -> Option[String]
 
 // url.parse_query of the target after its first ?; pairs in order; err on a bad escape.
 // @since 0.6.0 or earlier
@@ -1157,19 +1133,19 @@ effect http.get(url: String) -> String
 
 // Reply body of a POST; JSON type by default.
 // @since 0.5.0 or earlier
-effect http.post(url: String, body: String) -> String
+effect http.request("POST", url: String, body: String, []) -> String
 
 // Reply body of a PUT; JSON type by default.
 // @since 0.6.0 or earlier
-effect http.put(url: String, body: String) -> String
+effect http.request("PUT", url: String, body: String, []) -> String
 
 // Reply body of a PATCH; JSON type by default.
 // @since 0.6.0 or earlier
-effect http.patch(url: String, body: String) -> String
+effect http.request("PATCH", url: String, body: String, []) -> String
 
 // Reply body of a DELETE; any status is ok.
 // @since 0.6.0 or earlier
-effect http.delete(url: String) -> String
+effect http.request("DELETE", url: String, "", []) -> String
 
 // Reply body for any method; any status is ok.
 // @since 0.5.0 or earlier
@@ -1189,23 +1165,23 @@ effect http.get_response(url: String) -> HttpResponse
 
 // Whole reply to a POST; any status is ok.
 // @since 0.62.0
-effect http.post_response(url: String, body: String) -> HttpResponse
+effect http.send(http.new_request("POST", url: String, body: String, [])) -> HttpResponse
 
 // Whole reply to a PUT; any status is ok.
 // @since 0.62.0
-effect http.put_response(url: String, body: String) -> HttpResponse
+effect http.send(http.new_request("PUT", url: String, body: String, [])) -> HttpResponse
 
 // Whole reply to a PATCH; any status is ok.
 // @since 0.62.0
-effect http.patch_response(url: String, body: String) -> HttpResponse
+effect http.send(http.new_request("PATCH", url: String, body: String, [])) -> HttpResponse
 
 // Whole reply to a DELETE; any status is ok.
 // @since 0.62.0
-effect http.delete_response(url: String) -> HttpResponse
+effect http.send(http.new_request("DELETE", url: String, "", [])) -> HttpResponse
 
 // Whole reply for any method; 3xx not followed.
 // @since 0.62.0
-effect http.request_response(method: String, url: String, body: String, headers: Map[String, String]) -> HttpResponse
+effect http.send(http.new_request(method: String, url: String, body: String, headers: Map[String, String])) -> HttpResponse
 
 // Raw body bytes, not UTF-8 decoded.
 // @since 0.27.7 or earlier
@@ -1221,7 +1197,7 @@ effect http.request_stream(method: String, url: String, body: String, headers: M
 
 // Begins a request; returns at once with a handle.
 // @since unreleased
-effect http.start(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits) -> HttpCall
+effect http.start(http.new_request(method: String, url: String, body: String, headers: Map[String, String]), limits: HttpLimits) -> HttpCall
 
 // Never blocks: none while running, then the result.
 // @since unreleased

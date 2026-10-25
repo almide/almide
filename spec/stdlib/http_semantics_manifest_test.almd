@@ -7,43 +7,36 @@ import http
 
 test "http.response unit=status-code" {
   let r = http.response(200, "hi")
-  assert_eq(
-    "${http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")}",
-    "hi text/plain",
-  )
+  assert_eq("${http.body(r) + " " + (http.header(r, "Content-Type") ?? "none")}", "hi text/plain")
 }
 
 test "http.json unit=status-code" {
   let r = http.json(201, "{}")
   assert_eq(
-    "${http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")}",
+    "${http.body(r) + " " + (http.header(r, "Content-Type") ?? "none")}",
     "{} application/json",
   )
 }
 
 test "http.with_headers unit=status-code" {
-  let r = http.with_headers(202, "wh", ["X-A": "1"])
-  assert_eq("${http.body(r) + " " + (http.get_header(r, "X-A") ?? "none")}", "wh 1")
+  let r = http.with_headers(202, "wh", [("X-A", "1")])
+  assert_eq("${http.body(r) + " " + (http.header(r, "X-A") ?? "none")}", "wh 1")
 }
 
-test "http.status unit=status-code" {
-  let r = http.status(http.response(200, "sb"), 404)
+test "http.__with_headers unit=status-code" {
+  assert_eq("${1}", "1")
+}
+
+test "http.set_status unit=status-code" {
+  let r = http.set_status(http.response(200, "sb"), 404)
   assert_eq(
-    "${http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")}",
-    "sb text/plain",
+    "${http.body(r) + " " + (http.header(r, "Content-Type") ?? "none") + " " + int.to_string(http.status(r))}",
+    "sb text/plain 404",
   )
 }
 
-test "http.status_code unit=status-code" {
-  assert_eq("${http.status_code(http.status(http.response(200, "sb"), 418))}", "418")
-}
-
-test "http.get_status unit=status-code" {
-  assert_eq("${1}", "1")
-}
-
-test "http.request_status unit=status-code" {
-  assert_eq("${1}", "1")
+test "http.status unit=status-code" {
+  assert_eq("${http.status(http.set_status(http.response(200, "sb"), 418))}", "418")
 }
 
 test "http.serve unit=port" {
@@ -51,9 +44,5 @@ test "http.serve unit=port" {
 }
 
 test "http.__call_start unit=millisecond" {
-  assert_eq("${1}", "1")
-}
-
-test "http.__request_stream_limited unit=millisecond" {
   assert_eq("${1}", "1")
 }

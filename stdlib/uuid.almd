@@ -29,7 +29,7 @@ effect fn v7() -> Uuid = {
     __octet(ms, 8),
     __octet(ms, 0),
     int.bshr(seq, 8),
-    int.band(seq, 255),
+    int.band(seq, 255)
   ])
   Uuid(__versioned(bytes.concat(head, random.bytes(8)), 7))
 }
@@ -49,12 +49,17 @@ fn parse(s: String) -> Result[Uuid, String] = {
 /// u as 8-4-4-4-12 lowercase hex digits.
 fn to_string(u: Uuid) -> String = {
   let h = hex.encode(__bytes_of(u))
-  "${string.slice(h, 0, 8)}-${string.slice(h, 8, 12)}-${string.slice(h, 12, 16)}-${string.slice(h, 16, 20)}-${string.slice(h, 20, 32)}"
+  "${string.slice(h, 0, 8)}-${string.slice(h, 8, 12)}-${string.slice(h, 12, 16)}-${string.slice(
+    h,
+    16,
+    20,
+  )}-${string.slice(h, 20, 32)}"
 }
 
 /// The Uuid of exactly 16 bytes b; err for any other length.
 fn from_bytes(b: Bytes) -> Result[Uuid, String] =
-  if bytes.len(b) == 16 then ok(Uuid(b)) else err("uuid.from_bytes: expected 16 bytes, got ${bytes.len(b)}")
+  if bytes.len(b) == 16 then ok(Uuid(b))
+  else err("uuid.from_bytes: expected 16 bytes, got ${bytes.len(b)}")
 
 /// The 16 bytes of u.
 fn to_bytes(u: Uuid) -> Bytes = __bytes_of(u)
@@ -78,7 +83,11 @@ local fn __versioned(b: Bytes, ver: Int) -> Bytes = {
 
 // The 8-4-4-4-12 form inside the accepted wrappers.
 local fn __unwrapped(s: String) -> String =
-  if string.starts_with(s, "{") and string.ends_with(s, "}") then string.slice(s, 1, string.len(s) - 1)
+  if string.starts_with(s, "{") and string.ends_with(s, "}") then string.slice(
+    s,
+    1,
+    string.len(s) - 1,
+  )
   else if string.starts_with(string.to_lower(s), "urn:uuid:") then string.drop(s, 9)
   else s
 
