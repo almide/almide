@@ -549,21 +549,46 @@
 
   ;; The whole file at a guest path: (bytes, len, errno). A directory is
   ;; EISDIR (31), classified from the stat, not from fd_read's host-specific
-  ;; errno (the incumbent's #1368 rule).
-  (func $read_all (param $p i32) (param $l i32) (result i32 i32 i32)
+  ;; errno (the incumbent's #1368 rule). `bounded` is the `fs.read_*`
+  ;; family's reader (#4201, almide-base fs_read_bounded.rs): anything the descriptor's stat calls neither a regular file nor
+  ;; a directory answers pseudo-errno 1001 (`Not a regular file`) and a size
+  ;; past 1 GiB pseudo-errno 1002 (`File too large ...`), the texts
+  ;; `$errno_text` spells after the WASI rows.
+  (func $read_all (param $p i32) (param $l i32) (param $bounded i32) (result i32 i32 i32)
     (local $fd i32) (local $rp i32) (local $rl i32)
     (call $resolve (local.get $p) (local.get $l)) (local.set $rl) (local.set $rp) (local.set $fd)
-    (call $read_fd (local.get $fd) (local.get $rp) (local.get $rl) (i32.const 1)))
+    (call $read_fd (local.get $fd) (local.get $rp) (local.get $rl) (i32.const 1) (local.get $bounded)))
 
   ;; `$read_all` of `rp` under `fd`, its last component followed when `follow`.
-  (func $read_fd (param $fd i32) (param $rp i32) (param $rl i32) (param $follow i32) (result i32 i32 i32)
+  (func $read_fd (param $fd i32) (param $rp i32) (param $rl i32) (param $follow i32) (param $bounded i32) (result i32 i32 i32)
     (local $e i32) (local $h i32)
     (local $sz i32) (local $buf i32) (local $got i32) (local $n i32)
+    ;; A bounded read stats the PATH first: wasmtime's p1 path_open ignores
+    ;; fdflags NONBLOCK and blocks on a FIFO with no writer (and the p2
+    ;; adapter honours it on the fd_read, answering EAGAIN for a regular
+    ;; file), so no fdflag is passed and a FIFO is refused before the open. The descriptor's own stat below
+    ;; judges again, so an entry swapped in after this stat is still refused
+    ;; (a FIFO swapped in between can only block the open, not grow memory).
+    (if (local.get $bounded)
+      (then
+        (if (i32.eqz (call $stat_at (local.get $fd) (local.get $rp) (local.get $rl) (local.get $follow)))
+          (then
+            ;; 7: an unfollowed symlink (a rooted read) — its open's own err.
+            (if (i32.and (i32.and (i32.ne (call $ftype) (i32.const 3)) (i32.ne (call $ftype) (i32.const 4)))
+                         (i32.ne (call $ftype) (i32.const 7)))
+              (then (return (i32.const 0) (i32.const 0) (i32.const 1001))))))))
     (local.set $e (call $path_open (local.get $fd) (local.get $follow) (local.get $rp) (local.get $rl)
                                    (i32.const 0) (i64.const 6) (i64.const 0) (i32.const 0) (global.get $fsp)))
     (if (local.get $e) (then (return (i32.const 0) (i32.const 0) (local.get $e))))
     (local.set $h (i32.load (global.get $fsp)))
     (local.set $e (call $fd_filestat_get (local.get $h) (i32.add (global.get $fsp) (i32.const 64))))
+    (if (i32.and (local.get $bounded) (i32.eqz (local.get $e)))
+      (then
+        (if (i32.and (i32.ne (call $ftype) (i32.const 3)) (i32.ne (call $ftype) (i32.const 4)))
+          (then (local.set $e (i32.const 1001)))
+          (else
+            (if (i64.gt_u (i64.load offset=96 (global.get $fsp)) (i64.const 1073741824))
+              (then (local.set $e (i32.const 1002))))))))
     (if (i32.eqz (local.get $e))
       (then
         (if (i32.eq (call $ftype) (i32.const 3))
@@ -666,7 +691,9 @@
   ;; answers ok-none on ENOENT (the *_if_exists twins, C-215).
   (func $read_text_as (param $op i32) (param $a i32) (param $al i32) (param $mode i32) (param $absent_none i32) (result i64)
     (local $p i32) (local $l i32) (local $e i32) (local $tp i32) (local $tl i32) (local $k i32)
-    (call $read_all (local.get $a) (local.get $al)) (local.set $e) (local.set $l) (local.set $p)
+    ;; The streaming walkers (51 / 52) stream natively: not the bounded reader.
+    (call $read_all (local.get $a) (local.get $al)
+                    (i32.and (i32.ne (local.get $op) (i32.const 51)) (i32.ne (local.get $op) (i32.const 52)))) (local.set $e) (local.set $l) (local.set $p)
     (if (local.get $e)
       (then
         (if (i32.and (local.get $absent_none) (i32.eq (local.get $e) (i32.const 44))) (then (return (call $none))))
@@ -727,7 +754,8 @@
 
   (func $read_bytes_as (param $op i32) (param $a i32) (param $al i32) (param $absent_none i32) (result i64)
     (local $p i32) (local $l i32) (local $e i32)
-    (call $read_all (local.get $a) (local.get $al)) (local.set $e) (local.set $l) (local.set $p)
+    ;; 61 (fold_lines_range) reads by range natively: not the bounded reader.
+    (call $read_all (local.get $a) (local.get $al) (i32.ne (local.get $op) (i32.const 61))) (local.set $e) (local.set $l) (local.set $p)
     (if (local.get $e)
       (then
         (if (i32.and (local.get $absent_none) (i32.eq (local.get $e) (i32.const 44))) (then (return (call $none))))
@@ -868,7 +896,7 @@
   ;; the message names both paths.
   (func $op_copy (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
     (local $p i32) (local $l i32) (local $e i32)
-    (call $read_all (local.get $a) (local.get $al)) (local.set $e) (local.set $l) (local.set $p)
+    (call $read_all (local.get $a) (local.get $al) (i32.const 0)) (local.set $e) (local.set $l) (local.set $p)
     (if (i32.eqz (local.get $e))
       (then (local.set $e (call $write_at (local.get $b) (local.get $bl) (local.get $p) (local.get $l)
                                           (i32.const 9) (i32.const 0)))))
@@ -1209,7 +1237,7 @@
     (call $root_walk (local.get $a) (local.get $al) (i32.const 0)) (local.set $e) (local.set $nl) (local.set $np) (local.set $fd)
     (if (i32.eqz (local.get $e))
       (then
-        (call $read_fd (local.get $fd) (local.get $np) (local.get $nl) (i32.const 0)) (local.set $e) (local.set $l) (local.set $p)
+        (call $read_fd (local.get $fd) (local.get $np) (local.get $nl) (i32.const 0) (i32.const 1)) (local.set $e) (local.set $l) (local.set $p)
         (if (local.get $e)
           (then (if (call $root_is_link (local.get $fd) (local.get $np) (local.get $nl)) (then (local.set $e (i32.const -2))))))
         (drop (call $fd_close (local.get $fd)))))
