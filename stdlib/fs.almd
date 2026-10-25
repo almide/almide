@@ -14,7 +14,7 @@ type FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }
 
 // The whole-file readers (read_text / read_bytes / read_lines /
 // read_bytes_raw and their _if_exists twins) read a REGULAR file of at most
-// 1 GiB (1073741824 bytes), on every leg (#4201, C-422): a device, FIFO or
+// 1 GiB (1073741824 bytes), on every leg (#4201, C-431): a device, FIFO or
 // socket errs `fs.<call>("<path>"): Not a regular file` without blocking, a
 // larger file errs `File too large (the read limit is 1073741824 bytes)`, a
 // directory keeps its EISDIR. A bigger file streams through fold_lines.
