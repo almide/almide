@@ -1568,7 +1568,7 @@ jobs:
         # blind (#976 class).
         run: |
           ALMIDE=/tmp/almide-bin/almide
-          f=$(find spec/lang -name '*_test.almd' | head -1)
+          f=$(find spec/lang -name '*_test.almd' -print -quit)
           [ -n "$f" ] || { echo "::error::no spec/lang test files found — the smoke test lost its corpus (#984)"; exit 1; }
           $ALMIDE "$f" --target rust > /dev/null
           echo "Rust emit OK"
