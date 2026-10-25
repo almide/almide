@@ -1476,6 +1476,10 @@ blind = "a downstream whose output changes while every command still exits 0 and
 # enumeration needs each one said out loud.
 
 [[not_a_gate]]
+path = "scripts/ci-slice-prepare.sh"
+reason = "resolves the CI slice's touched-file list once per job (fetches ALMIDE_CI_BASE, writes ALMIDE_CI_TOUCHED); it judges nothing — the sliced gates do, and it exits 1 only when a slice could not see the change's own files"
+
+[[not_a_gate]]
 path = "scripts/ci-test-shard.sh"
 reason = "lists the test targets per shard; the union check that decides is inline in ci.yml's coverage job"
 
