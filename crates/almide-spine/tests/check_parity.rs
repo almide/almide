@@ -23,6 +23,27 @@ fn sha(s: &str) -> String {
     Sha256::digest(s.as_bytes()).iter().map(|b| format!("{b:02x}")).collect::<String>()
 }
 
+/// The manifest rows this run judges (crates/almide-corpus/src/ci_slice.rs):
+/// every row on a full run, the CI slice plus the change's own fixtures under
+/// `ALMIDE_CI_SLICE`. Each row is a per-file hash comparison, sound on any
+/// subset; the whole-corpus checks (stale rows, the `> 900` floors) are full-run
+/// only.
+fn judged(manifest: BTreeMap<String, String>, gate: &str) -> BTreeMap<String, String> {
+    let keep: std::collections::BTreeSet<String> =
+        almide_corpus::select(manifest.keys().cloned().collect(), gate, |k| k.clone()).into_iter().collect();
+    manifest.into_iter().filter(|(k, _)| keep.contains(k)).collect()
+}
+
+/// The floor a full run holds the compared count to; a slice must still
+/// compare something.
+fn assert_compared(compared: usize, what: &str) {
+    if almide_corpus::full_run() {
+        assert!(compared > 900, "{what}: suspiciously few files compared ({compared}) — purity filter too broad?");
+    } else {
+        assert!(compared > 0, "{what}: the CI slice compared no file");
+    }
+}
+
 type Check = for<'db> fn(&'db dyn salsa::Database, almide_spine::SourceFile) -> &'db almide_spine::s3::CheckOutput;
 
 /// One file's check under the per-fixture limit (#3768), so a checker that
@@ -68,13 +89,22 @@ fn spec_corpus_check_matches_oracle_hashes() {
     }
 
     // Both roots of the corpus partition (see almide-corpus): one walker.
+    // Under the CI slice the partition is asked of the sliced files only, and
+    // staleness (a row with no file) waits for the full run.
     let files = almide_corpus::walk_spec(&root);
+    let slice = almide_corpus::ci_slice();
     for (rel, _) in &files {
+        if slice.is_some_and(|s| !s.keeps(rel)) {
+            continue;
+        }
         let in_m = manifest.contains_key(rel);
         let in_e = exclusions.contains_key(rel);
         assert!(in_m ^ in_e, "{rel}: must be in exactly one of manifest/exclusions");
     }
-    assert_eq!(files.len(), manifest.len() + exclusions.len(), "stale golden entries");
+    if slice.is_none() {
+        assert_eq!(files.len(), manifest.len() + exclusions.len(), "stale golden entries");
+    }
+    let manifest = judged(manifest, "check_parity");
 
     let mut db = Some(almide_spine::SpineDb::default());
     let mut purity_skipped = Vec::new();
@@ -115,7 +145,7 @@ fn spec_corpus_check_matches_oracle_hashes() {
         "{} of {compared} files diverge from oracle check output, first: {} (debug: ORACLE almide check {} --json)",
         mismatches.len(), mismatches[0], mismatches[0]
     );
-    assert!(compared > 900, "suspiciously few files compared ({compared}) — purity filter too broad?");
+    assert_compared(compared, "check parity");
 }
 
 /// The stage-2 variant (no #862 stdlib loop) must ALSO match the oracle
@@ -133,6 +163,7 @@ fn stage2_variant_matches_oracle_hashes() {
         let _rc = it.next().expect("test harness invariant");
         manifest.insert(it.next().expect("test harness invariant").to_string(), h);
     }
+    let manifest = judged(manifest, "check_parity");
     let mut db = Some(almide_spine::SpineDb::default());
     let mut compared = 0usize;
     let mut mismatches = Vec::new();
@@ -152,7 +183,7 @@ fn stage2_variant_matches_oracle_hashes() {
     }
     println!("stage2 parity: {compared} compared");
     assert!(mismatches.is_empty(), "{} of {compared} diverge without the #862 loop, first: {}", mismatches.len(), mismatches[0]);
-    assert!(compared > 900);
+    assert_compared(compared, "stage2 parity");
 }
 
 /// v3 (env template + split canonicalize) must also match byte-for-byte.
@@ -168,6 +199,7 @@ fn stage2_v3_template_matches_oracle_hashes() {
         let _rc = it.next().expect("test harness invariant");
         manifest.insert(it.next().expect("test harness invariant").to_string(), h);
     }
+    let manifest = judged(manifest, "check_parity");
     let mut db = Some(almide_spine::SpineDb::default());
     let mut compared = 0usize;
     let mut mismatches = Vec::new();
@@ -187,5 +219,5 @@ fn stage2_v3_template_matches_oracle_hashes() {
     }
     println!("stage2 v3 parity: {compared} compared");
     assert!(mismatches.is_empty(), "{} of {compared} diverge with the env template, first: {}", mismatches.len(), mismatches[0]);
-    assert!(compared > 900);
+    assert_compared(compared, "stage2 parity");
 }

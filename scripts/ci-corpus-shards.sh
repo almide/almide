@@ -30,11 +30,19 @@ CROSS_GATES="wasm_runtime_cross_target wasm_runtime_interp_oracle wasm_runtime_o
 MANIFEST_GATE="run_parity"
 MANIFEST="crates/almide-spine/tests/golden/spec-run-manifest.txt"
 
+# Under ALMIDE_CI_SLICE (a PR into develop) the gates walk the CI slice before
+# the shard, so the union must equal the SLICE of the corpus — selected here
+# by scripts/lib/ci-slice.sh over the same repo-relative keys the Rust twin
+# selects on (pinned to each other by almide-corpus's twin test) — never the
+# whole corpus. A full run expects every fixture, as before.
+. scripts/lib/ci-slice.sh
 expected_cross() {
-  ls spec/wasm_cross/*.almd | xargs -n1 basename | sed 's/\.almd$//' | LC_ALL=C sort
+  ls spec/wasm_cross/*.almd | LC_ALL=C sort | ci_slice_filter shard-coverage-cross \
+    | xargs -n1 basename | sed 's/\.almd$//' | LC_ALL=C sort
 }
 expected_manifest() {
-  grep -v '^[[:space:]]*#' "$MANIFEST" | grep -v '^[[:space:]]*$' | cut -f3 | LC_ALL=C sort
+  grep -v '^[[:space:]]*#' "$MANIFEST" | grep -v '^[[:space:]]*$' | cut -f3 | LC_ALL=C sort \
+    | ci_slice_filter shard-coverage-manifest | LC_ALL=C sort
 }
 
 # cover <gate> <dir> <N> <expected-file>
@@ -79,7 +87,7 @@ case "${1:-}" in
     for g in $CROSS_GATES; do cover "$g" "$dir" "$n" "$want_cross" || fail=1; done
     cover "$MANIFEST_GATE" "$dir" "$n" "$want_manifest" || fail=1
     [ "$fail" = 0 ] || exit 1
-    echo "corpus shard coverage OK: $(wc -l < "$want_cross" | tr -d ' ') fixtures × $(echo $CROSS_GATES | wc -w | tr -d ' ') gates and $(wc -l < "$want_manifest" | tr -d ' ') manifest rows, each walked by exactly one of $n shards"
+    echo "corpus shard coverage OK$(ci_slice_active && echo " (CI slice 1/$(ci_slice_k))"): $(wc -l < "$want_cross" | tr -d ' ') fixtures × $(echo $CROSS_GATES | wc -w | tr -d ' ') gates and $(wc -l < "$want_manifest" | tr -d ' ') manifest rows, each walked by exactly one of $n shards"
     ;;
   --merge)
     dir="$2"; n="$3"; archive="$4"
