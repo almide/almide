@@ -73,7 +73,7 @@ test "for loop with enumerate tuple destructure" {
 test "for (k, v) in map entries" {
   let m = map.set(map.set(map.new(), "x", 10), "y", 20)
   var sum = 0
-  for (k, v) in map.entries(m) {
+  for (k, v) in map.to_list(m) {
     sum = sum + v
   }
   assert_eq(sum, 30)

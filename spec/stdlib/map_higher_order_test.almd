@@ -109,15 +109,15 @@ test "map.update multiply" {
   assert_eq(map.get(m2, "x"), some(30))
 }
 
-test "map.entries returns pairs" {
+test "map.to_list returns pairs" {
   let m = ["b": 2, "a": 1, "c": 3]
-  let es = map.entries(m)
+  let es = map.to_list(m)
   assert_eq(list.len(es), 3)
 }
 
-test "map.entries on empty" {
+test "map.to_list on empty" {
   let m: Map[String, Int] = [:]
-  let es = map.entries(m)
+  let es = map.to_list(m)
   assert_eq(list.len(es), 0)
 }
 

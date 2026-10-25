@@ -90,7 +90,7 @@ fn is_flat_scalar_list_elem(elem_ty: &Ty) -> bool {
             if a.len() == 1 && !is_heap_ty(&a[0]))
 }
 
-/// A `(String, String)` TUPLE element (the `map.entries` shape) — `__list_concat_rc` rc-owns each
+/// A `(String, String)` TUPLE element (the `map.to_list` shape) — `__list_concat_rc` rc-owns each
 /// tuple, freed recursively by `Op::DropListStrStr` (per tuple: rc_dec BOTH String slots). The
 /// (String,String) counterpart of `str_value_elem`.
 /// Widened to (String, <flat block>) — String OR List[scalar] second slot (the

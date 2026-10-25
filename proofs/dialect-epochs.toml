@@ -360,6 +360,7 @@ breaks = [
   "`fs.read_bytes_raw_if_exists(path)` → rewrite as `fs.read_bytes_if_exists(path)`: the same `Bytes?` (R-fs-01)",
   "`fs.write_bytes_raw(path, data)` → rewrite as `fs.write_bytes(path, data)`: the same write of a Bytes (R-fs-01); its err head is `fs.write_bytes(\"<path>\")`",
   "`fs.read_bytes(path)` returns `Result[Bytes, String]` and `fs.read_bytes_if_exists(path)` `Result[Bytes?, String]` (were `List[Int]`), and `fs.write_bytes(path, data)` takes `Bytes` (was a `List[Int]` whose Ints were cut to their low byte, so -1 wrote 255) (R-fs-01): the old uses are E005. Wrap a list with `bytes.from_list(xs)` and read one back with `bytes.to_list(b)`",
+  "`map.entries(m)` → rewrite as `map.to_list(m)`: the same (key, value) pairs in insertion order, under the name every container uses for its elements as a list (R-map-07)",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them

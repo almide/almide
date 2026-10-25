@@ -57,7 +57,7 @@ fn len[K, V](m: Map[K, V]) -> Int = _
 /// (key, value) pairs in insertion order.
 @intrinsic("almide_rt_map_entries")
 @reuse(m)
-fn entries[K, V](m: Map[K, V]) -> List[(K, V)] = _
+fn to_list[K, V](m: Map[K, V]) -> List[(K, V)] = _
 
 /// a plus b's entries; b wins on shared keys.
 @intrinsic("almide_rt_map_merge")
@@ -133,83 +133,83 @@ fn clear[K, V](mut m: Map[K, V]) -> Unit = _
 
 // ── the sequence algorithms over the entries (R-L0-42, R-map-09) ──
 // A map is a sequence of (key, value) pairs in insertion order: each fn below
-// gives what the same-named `list` fn gives on `map.entries(m)`, and its
+// gives what the same-named `list` fn gives on `map.to_list(m)`, and its
 // callback takes one entry pair, so it is written `((k, v)) => ...`. A map has
 // no natural order of its own, so `sort` / `min` / `max` are not here.
 /// (index, (key, value)) pairs in insertion order, index from 0.
-fn enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))] = list.enumerate(map.entries(m))
+fn enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))] = list.enumerate(map.to_list(m))
 
 /// Entries paired with ys by position; stops at the shorter.
-fn zip[K, V, B](m: Map[K, V], ys: List[B]) -> List[((K, V), B)] = list.zip(map.entries(m), ys)
+fn zip[K, V, B](m: Map[K, V], ys: List[B]) -> List[((K, V), B)] = list.zip(map.to_list(m), ys)
 
 /// f over (entry, ys element) pairs; stops at the shorter.
 fn zip_with[K, V, B, C](m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C] = list.zip_with(
-  map.entries(m),
+  map.to_list(m),
   ys,
   f,
 )
 
 /// The somes f gives over the entries, in insertion order.
 fn filter_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> List[B] = list.filter_map(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// The first some f gives over the entries, or none; f is not called after the hit.
-fn find_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> B? = list.find_map(map.entries(m), f)
+fn find_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> B? = list.find_map(map.to_list(m), f)
 
 /// Left fold of the entries seeded by the first; none when empty.
 fn reduce[K, V](m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> (K, V)? = list.reduce(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// Running fold values over the entries, init excluded.
 fn scan[K, V, B](m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B] = list.scan(
-  map.entries(m),
+  map.to_list(m),
   init,
   f,
 )
 
 /// (entries where f holds, the rest), insertion order kept.
 fn partition[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)]) = list.partition(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// Key f(entry) -> entries; keys in first-seen order.
 fn group_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = list.group_by(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// Entries sorted by key f(entry), stable; f runs once per entry.
 fn sort_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)] = list.sort_by(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// Entries sorted by cmp, stable: negative puts a first.
 fn sort_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)] = list.sort_with(
-  map.entries(m),
+  map.to_list(m),
   cmp,
 )
 
 /// Entry with the least f(entry); the first on ties.
-fn min_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.entries(m), f)
+fn min_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.to_list(m), f)
 
 /// Entry with the greatest f(entry); the first on ties.
-fn max_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.entries(m), f)
+fn max_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.to_list(m), f)
 
 /// Least entry by cmp; the first on ties.
 fn min_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.min_with(
-  map.entries(m),
+  map.to_list(m),
   cmp,
 )
 
 /// Greatest entry by cmp; the first on ties.
 fn max_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.max_with(
-  map.entries(m),
+  map.to_list(m),
   cmp,
 )
 
@@ -224,7 +224,7 @@ fn __fallible_map[K, V, B, E](m: Map[K, V], f: (V) -> Result[B, E]) -> Result[Ma
   var out: List[(K, B)] = []
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.1) {
       ok(b) => list.push(out, (p.0, b)),
@@ -244,7 +244,7 @@ fn __fallible_filter[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Res
   var out: List[(K, V)] = []
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(keep) => if keep then list.push(out, p) else (),
@@ -264,7 +264,7 @@ fn __fallible_fold[K, V, A, E](m: Map[K, V], init: A, f: (A, K, V) -> Result[A, 
   var acc = init
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(acc, p.0, p.1) {
       ok(a) => {
@@ -286,7 +286,7 @@ fn __fallible_any[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result
   var hit = false
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(b) => if b then {
@@ -309,7 +309,7 @@ fn __fallible_all[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result
   var held = true
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(b) => if b then ()
@@ -333,7 +333,7 @@ fn __fallible_count[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Resu
   var n = 0
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(b) => if b then {
@@ -354,7 +354,7 @@ fn __fallible_count[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Resu
 // The hit is kept as an INDEX into the entries and read back, as
 // `list.__fallible_find` does.
 fn __fallible_find[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[(K, V)?, E] = {
-  let es = map.entries(m)
+  let es = map.to_list(m)
   var hit_at = list.len(es)
   var i = 0
   var failed: E? = none
@@ -410,68 +410,68 @@ fn __fallible_upsert[K, V, E](m: Map[K, V], key: K, init: V, f: (V) -> Result[V,
 // the same-named list fn with the callback's `!` — the list fn's own carrier,
 // so the first err stops the walk exactly as it does over the entry list.
 fn __fallible_zip_with[K, V, B, C, E](m: Map[K, V], ys: List[B], f: ((K, V), B) -> Result[C, E]) -> Result[List[C], E] = list.zip_with(
-  map.entries(m),
+  map.to_list(m),
   ys,
   (p, y) => f(p, y)!,
 )
 
 fn __fallible_filter_map[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B?, E]) -> Result[List[B], E] = list.filter_map(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_find_map[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B?, E]) -> Result[B?, E] = list.find_map(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_reduce[K, V, E](m: Map[K, V], f: ((K, V), (K, V)) -> Result[(K, V), E]) -> Result[(K, V)?, E] = list.reduce(
-  map.entries(m),
+  map.to_list(m),
   (a, b) => f(a, b)!,
 )
 
 fn __fallible_scan[K, V, B, E](m: Map[K, V], init: B, f: (B, (K, V)) -> Result[B, E]) -> Result[List[B], E] = list.scan(
-  map.entries(m),
+  map.to_list(m),
   init,
   (acc, p) => f(acc, p)!,
 )
 
 fn __fallible_partition[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -> Result[(List[(K, V)], List[(K, V)]), E] = list.partition(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_group_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E] = list.group_by(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_sort_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[List[(K, V)], E] = list.sort_by(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_sort_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[List[(K, V)], E] = list.sort_with(
-  map.entries(m),
+  map.to_list(m),
   (a, b) => cmp(a, b)!,
 )
 
 fn __fallible_min_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.min_by(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_max_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.max_by(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_min_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[(K, V)?, E] = list.min_with(
-  map.entries(m),
+  map.to_list(m),
   (a, b) => cmp(a, b)!,
 )
 
 fn __fallible_max_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[(K, V)?, E] = list.max_with(
-  map.entries(m),
+  map.to_list(m),
   (a, b) => cmp(a, b)!,
 )

@@ -885,7 +885,7 @@ Tuple destructuring in for:
 
 ```almide
 fn print_entries(m: Map[String, Int]) -> Unit = {
-  for (k, v) in map.entries(m) {
+  for (k, v) in map.to_list(m) {
     println("${k} = ${v}")
   }
 }

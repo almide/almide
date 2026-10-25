@@ -26,7 +26,7 @@ test "the one-probe update counts like the two-step fold" {
   }
   let want = count_two_step(ws)
   assert_eq(map.len(m), map.len(want))
-  assert_eq(map.entries(m), map.entries(want))
+  assert_eq(map.to_list(m), map.to_list(want))
 }
 
 test "the update reads a default variable and a step variable" {
@@ -37,7 +37,7 @@ test "the update reads a default variable and a step variable" {
   for w in ws {
     m[w] = step * 2 + map.get_or(m, w, start) - step
   }
-  for (w, c) in map.entries(count_two_step(ws)) {
+  for (w, c) in map.to_list(count_two_step(ws)) {
     assert_eq(map.get(m, w), some(10 + 3 * c))
   }
 }
@@ -70,10 +70,10 @@ test "group-and-count matches the groups' sizes" {
   let counts = ws |> list.group_by((w) => w) |> map.map((g) => list.len(g))
   let groups = list.group_by(ws, (w) => w)
   assert_eq(map.keys(counts), map.keys(groups))
-  for (w, g) in map.entries(groups) {
+  for (w, g) in map.to_list(groups) {
     assert_eq(map.get(counts, w), some(list.len(g)))
   }
-  assert_eq(map.entries(counts), map.entries(count_two_step(ws)))
+  assert_eq(map.to_list(counts), map.to_list(count_two_step(ws)))
 }
 
 test "group-and-count by a derived key" {
@@ -88,9 +88,9 @@ test "whole-map reads at the last use and before it agree" {
   let ws = draws(600)
   let a = count_two_step(ws)
   let b = count_two_step(ws)
-  let kept = map.entries(a)
+  let kept = map.to_list(a)
   let doubled = map.map(a, (c) => c * 2)
-  let moved_entries = map.entries(b)
+  let moved_entries = map.to_list(b)
   assert_eq(kept, moved_entries)
   assert_eq(map.keys(doubled), map.keys(count_two_step(ws)))
   assert_eq(map.values(doubled), map.values(count_two_step(ws)) |> list.map((c) => c * 2))
