@@ -11562,6 +11562,24 @@ fn __with_path(req: HttpRequest, target: String) -> HttpRequest = _
 @consume(resp)
 fn __set_body(resp: HttpResponse, body: String) -> HttpResponse = _
 
+
+
+
+
+
+
+@intrinsic("almide_http_req_repr")
+@borrow_ref(req)
+fn __http_request_repr(req: HttpRequest) -> String = _
+
+@intrinsic("almide_http_call_repr")
+@borrow_ref(c)
+fn __http_call_repr(c: HttpCall) -> String = _
+
+@intrinsic("almide_http_resp_repr")
+@borrow_ref(resp)
+fn __http_response_repr(resp: HttpResponse) -> String = _
+
 fn __path_of(target: String) -> String = match string.index_of(target, "?") {
   some(i) => string.take(target, i),
   none => target,
@@ -11983,6 +12001,11 @@ effect fn __hc_stream_classic_impl(method: String, url: String, body: String, he
   let c = __http_call_open(url, __hc_classic_frame(method, body, headers))!
   __hc_pump(c, on_chunk)
 }
+
+
+
+@implements("http.__http_call_repr")
+fn http_call_repr(c: HttpCall) -> String = "HttpCall"
 "#;
 pub const SRC_HTTP_FRAMED: &str = r#"
 
@@ -12194,6 +12217,40 @@ fn http_req_with_params(req: List[String], flat: List[String]) -> List[String] =
 }
 
 fn http_req_with_path(req: List[String], target: String) -> List[String] = list.set(req, 1, target)
+
+
+
+
+
+
+
+
+fn __hq_quote_char(c: String) -> String = match c {
+  "\\" => "\\\\",
+  "\"" => "\\\"",
+  "\n" => "\\n",
+  "\r" => "\\r",
+  "\t" => "\\t",
+  _ => c,
+}
+
+
+fn __hq_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hq_quote_char(c)) |> list.join("")) + "\""
+
+@implements("http.__http_request_repr")
+fn http_req_repr(req: List[String]) -> String = {
+  let method = __hq_quote(list.get(req, 0) ?? "")
+  let path = __hq_quote(list.get(req, 1) ?? "")
+  let body = __hq_quote(list.get(req, 2) ?? "")
+  "HttpRequest { method: ${method}, path: ${path}, body: ${body}, headers: ${__hq_nh(req)} }"
+}
+
+@implements("http.__http_response_repr")
+fn http_resp_repr(resp: List[String]) -> String = {
+  let status = list.get(resp, 0) ?? "0"
+  let body = __hq_quote(list.get(resp, 1) ?? "")
+  "HttpResponse { status: ${status}, body: ${body}, headers: ${(list.len(resp) - 2) / 2} }"
+}
 "#;
 pub const SRC_HTTP_RESPONSE: &str = r#"
 
@@ -15394,6 +15451,13 @@ fn field(path: JsonPath, name: String) -> JsonPath = _
 @intrinsic("almide_rt_json_index")
 fn index(path: JsonPath, i: Int) -> JsonPath = _
 
+
+
+
+@intrinsic("almide_rt_json_path_repr")
+@borrow_ref(path)
+fn __json_path_repr(path: JsonPath) -> String = _
+
 /// Value at path, or none if a step misses.
 @intrinsic("almide_json_get_path")
 @borrow_ref(path)
@@ -16240,6 +16304,16 @@ fn __tomap_fold(v: Value, i: Int, n: Int, acc: Map[String, String]) -> Map[Strin
 fn __tomap_text(x: Value) -> String =
   if prim.load32(prim.handle(x) + 4) == 4 then prim.load_str(prim.handle(x) + 12)
   else value.stringify(x)
+
+
+
+fn __jp_seg_repr(seg: String) -> String = match string.take(seg, 1) {
+  "i" => "[" + string.drop(seg, 1) + "]",
+  _ => "." + string.drop(seg, 1),
+}
+
+@implements("json.__json_path_repr")
+fn json_path_repr(path: List[String]) -> String = "$" + (path |> list.map((s) => __jp_seg_repr(s)) |> list.join(""))
 "#;
 pub const SRC_LIST: &str = r#"
 
