@@ -11,14 +11,58 @@ impl Checker {
         &mut self, site: ArgSite<'_>,
         param_ty: &Ty, arg_ty: &Ty,
         structural_bounds: &HashMap<Sym, Ty>,
+        apart: &[Sym],
         bindings: &mut HashMap<Sym, Ty>,
     ) -> bool {
         let ArgSite { fn_name: _, param_name: _ } = site;
         if let Ty::TypeVar(tv) = param_ty {
-            self.unify_call_arg_typevar(site, *tv, arg_ty, structural_bounds, bindings)
+            self.unify_call_arg_typevar(site, *tv, arg_ty, structural_bounds, apart, bindings)
         } else {
-            self.unify_call_arg_concrete(site, param_ty, arg_ty, bindings)
+            self.unify_call_arg_concrete(site, param_ty, arg_ty, apart, bindings)
         }
+    }
+
+    /// The caller's own type parameters that a call to `sig` must keep apart
+    /// from the callee's same-named ones (#4218). Inside `gather[A]`, the `A`
+    /// of an argument's type is the CALLER's `A`, and `option.is_none[A]`'s
+    /// `A` is another variable that only shares its spelling: unifying the two
+    /// by name made `A := A?` (and even `A := A`) fail the occurs check, so
+    /// the callee's parameter stayed unbound — E025 on `option.is_none(o)` —
+    /// where the same body over `T` checked. A call to the fn being checked
+    /// itself is left as it was: there the letters ARE the same variables.
+    pub(crate) fn caller_letters_apart_from(&self, sig: &crate::types::FnSig) -> Vec<Sym> {
+        let Some((key, letters)) = &self.current_fn else { return Vec::new() };
+        if letters.is_empty() || sig.generics.is_empty() {
+            return Vec::new();
+        }
+        let is_self = self.env.functions.get(key).is_some_and(|cur| {
+            cur.generics == sig.generics && cur.params == sig.params && cur.ret == sig.ret
+        });
+        if is_self {
+            return Vec::new();
+        }
+        letters.iter().copied().filter(|l| sig.generics.contains(l)).collect()
+    }
+
+    /// [`crate::types::unify`] of a callee's signature type against a
+    /// caller-side type with the caller's letters in `apart` renamed for the
+    /// match, then renamed back in the bindings: the callee's `A` binds to
+    /// the caller's `A?` as it binds to any other type.
+    pub(crate) fn unify_apart(sig_ty: &Ty, actual: &Ty, apart: &[Sym], bindings: &mut HashMap<Sym, Ty>) -> bool {
+        if apart.is_empty() {
+            return crate::types::unify(sig_ty, actual, bindings);
+        }
+        let outer = |g: &Sym| sym(&format!("{}\u{0}outer", g.as_str()));
+        let there: HashMap<Sym, Ty> = apart.iter().map(|g| (*g, Ty::TypeVar(outer(g)))).collect();
+        let back: HashMap<Sym, Ty> = apart.iter().map(|g| (outer(g), Ty::TypeVar(*g))).collect();
+        let renamed = crate::types::substitute(actual, &there);
+        // Bound values are caller-side types too: rename them for the
+        // consistency check, and back afterwards.
+        let mut scratch: HashMap<Sym, Ty> =
+            bindings.iter().map(|(k, v)| (*k, crate::types::substitute(v, &there))).collect();
+        let ok = crate::types::unify(sig_ty, &renamed, &mut scratch);
+        *bindings = scratch.into_iter().map(|(k, v)| (k, crate::types::substitute(&v, &back))).collect();
+        ok
     }
 
     // TypeVar-param path of `unify_call_arg`: bind to a structural bound
@@ -27,6 +71,7 @@ impl Checker {
     fn unify_call_arg_typevar(
         &mut self, site: ArgSite<'_>, tv: Sym, arg_ty: &Ty,
         structural_bounds: &HashMap<Sym, Ty>,
+        apart: &[Sym],
         bindings: &mut HashMap<Sym, Ty>,
     ) -> bool {
         let ArgSite { fn_name, param_name } = site;
@@ -43,7 +88,7 @@ impl Checker {
                 true
             }
         } else {
-            crate::types::unify(&Ty::TypeVar(tv), arg_ty, bindings);
+            Self::unify_apart(&Ty::TypeVar(tv), arg_ty, apart, bindings);
             false
         }
     }
@@ -53,9 +98,10 @@ impl Checker {
     // types differ.
     fn unify_call_arg_concrete(
         &mut self, site: ArgSite<'_>, param_ty: &Ty, arg_ty: &Ty,
+        apart: &[Sym],
         bindings: &mut HashMap<Sym, Ty>,
     ) -> bool {
-        crate::types::unify(param_ty, arg_ty, bindings);
+        Self::unify_apart(param_ty, arg_ty, apart, bindings);
         let expected = if bindings.is_empty() { param_ty.clone() } else { crate::types::substitute(param_ty, bindings) };
         let expected_resolved = self.env.resolve_named(&expected);
         let arg_resolved = self.env.resolve_named(arg_ty);
