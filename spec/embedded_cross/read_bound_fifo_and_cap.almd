@@ -1,4 +1,4 @@
-// @contract: C-422
+// @contract: C-431
 // #4201: what only a lane with `process` can set up — a FIFO with no writer
 // and a sparse file one byte past the 1 GiB read limit — read through the fs
 // whole-file readers. The FIFO must neither block the open nor be read: it

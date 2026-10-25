@@ -35,7 +35,7 @@ port = 8080
 `read_text` / `read_bytes` / `read_lines` / `read_bytes_raw` and their
 `_if_exists` twins read a **regular file** of at most **1 GiB**
 (1073741824 bytes), the same on native, the embedded wasm host and the stock
-WASI legs (contract C-422, #4201):
+WASI legs (contract C-431, #4201):
 
 - a character or block device, a FIFO or a socket (`/dev/zero`, `/dev/null`,
   a named pipe) errs `fs.read_text("/dev/zero"): Not a regular file`. The
