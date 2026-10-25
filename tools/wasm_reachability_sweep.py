@@ -116,6 +116,7 @@ NAMED_CANDIDATES = {
     "Endian": ["LittleEndian"],
     "Deque": ["deque.from_list([1, 2])"], "Heap": ["heap.from_list([1, 2])"],
     "BigInt": ['match bigint.parse("12") { ok(b) => b, err(e) => panic(e) }'],
+    "Regex": ['regex.new("a")'],
 }
 
 
