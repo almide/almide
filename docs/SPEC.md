@@ -734,7 +734,7 @@ for item in items {
   println(item)
 }
 
-for (k, v) in map.entries(config) {
+for (k, v) in map.to_list(config) {
   println(k + " = " + v)
 }
 

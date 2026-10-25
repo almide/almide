@@ -207,7 +207,7 @@ impl LowerCtx {
                 return self.lower_list_literal_heap_field(expr, elements);
             }
             // A `(<flat heap>, <flat heap>)` TUPLE element of a list literal (`[(k, v), …]` —
-            // the map.entries / str_str shape, `[Color{r,g,b}: "red"]`'s pairs): a fresh
+            // the map.to_list / str_str shape, `[Color{r,g,b}: "red"]`'s pairs): a fresh
             // owned tuple block (try_lower_tuple_construct), tracked so the list builder's
             // Consume + retain balances it. Widened from (String,String)/(String,List[
             // scalar]) to ANY pair of ONE-LEVEL-EXACT heap types (String, List[scalar], a

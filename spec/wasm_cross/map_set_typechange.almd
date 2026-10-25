@@ -10,22 +10,22 @@
 // f64, tuple) on both String and Int keys and must be byte-identical wasm==native.
 //
 // NO @xt-allow: this is a fixed invariant, not a tracked divergence.
-fn show_map_si(m: Map[String, Int]) -> String = map.entries(m) |> list.map((e) => {
+fn show_map_si(m: Map[String, Int]) -> String = map.to_list(m) |> list.map((e) => {
   let (k, v) = e
   k + "=" + int.to_string(v)
 }) |> list.join(",")
 
-fn show_map_ss(m: Map[String, String]) -> String = map.entries(m) |> list.map((e) => {
+fn show_map_ss(m: Map[String, String]) -> String = map.to_list(m) |> list.map((e) => {
   let (k, v) = e
   k + "=" + v
 }) |> list.join(",")
 
-fn show_map_sf(m: Map[String, Float]) -> String = map.entries(m) |> list.map((e) => {
+fn show_map_sf(m: Map[String, Float]) -> String = map.to_list(m) |> list.map((e) => {
   let (k, v) = e
   k + "=" + float.to_string(v)
 }) |> list.join(",")
 
-fn show_map_ii(m: Map[Int, Int]) -> String = map.entries(m) |> list.map((e) => {
+fn show_map_ii(m: Map[Int, Int]) -> String = map.to_list(m) |> list.map((e) => {
   let (k, v) = e
   int.to_string(k) + "=" + int.to_string(v)
 }) |> list.join(",")
@@ -42,7 +42,7 @@ fn main() -> Unit = {
   println(show_map_sf(map.map(mi, (v) => int.to_float(v) / 2.0)))
   // map.map: value -> tuple (i64 -> i32 ptr)
   let mt = map.map(mi, (v) => (v, v * v))
-  let tparts = map.entries(mt) |> list.map((e) => {
+  let tparts = map.to_list(mt) |> list.map((e) => {
     let (k, p) = e
     let (x, y) = p
     k + "=" + int.to_string(x) + ":" + int.to_string(y)

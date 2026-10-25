@@ -32,7 +32,7 @@ impl<'a> Interpreter<'a> {
             // the insertion-ordered entry list both backends share.
             "get_or" => Some(self.map_get_or(args)),
             "from_list" => Some(self.map_from_list(args)),
-            "entries" | "to_list" => Some(self.map_entries(args)),
+            "to_list" => Some(self.map_entries(args)),
             // v0's AlmideMap semantics exactly: remove keeps order, merge is
             // a's entries then b's upserted in (FIRST position, LAST value).
             "remove" => Some(self.map_remove(args)),
@@ -96,7 +96,7 @@ impl<'a> Interpreter<'a> {
             Some(Value::Map(e)) => Flow::val(Value::list(
                 e.iter().map(|(k, v)| Value::tuple(vec![k.clone(), v.clone()])).collect(),
             )),
-            _ => Flow::Abort("internal: map.entries on non-map".into()),
+            _ => Flow::Abort("internal: map.to_list on non-map".into()),
         }
     }
 

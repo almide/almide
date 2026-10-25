@@ -28,7 +28,7 @@ effect fn par_counts(path: String, workers: Int) -> Map[String, Int] = {
 }
 
 // NOT map.merge: counts must ADD on key collision, merge overwrites.
-fn combine(a: Map[String, Int], b: Map[String, Int]) -> Map[String, Int] = map.entries(b) |> list.fold(
+fn combine(a: Map[String, Int], b: Map[String, Int]) -> Map[String, Int] = map.to_list(b) |> list.fold(
   a,
   (acc, e) => {
     let (k, v) = e

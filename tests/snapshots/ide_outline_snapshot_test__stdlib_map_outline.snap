@@ -30,7 +30,7 @@ fn map.clear[K, V](m: Map[K, V]) -> Unit
 fn map.contains[K, V](m: Map[K, V], key: K) -> Bool
 fn map.count[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Int
 fn map.delete[K, V](m: Map[K, V], key: K) -> Unit
-fn map.entries[K, V](m: Map[K, V]) -> List[(K, V)]
+fn map.to_list[K, V](m: Map[K, V]) -> List[(K, V)]
 fn map.enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))]
 fn map.filter[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Map[K, V]
 fn map.filter_map[K, V, B](m: Map[K, V], f: fn((K, V)) -> Option[B]) -> List[B]

@@ -21,7 +21,7 @@
 // serves it over wasi:http (wasi_p3_http_resp.rs); no host serves it.
 fn __http_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __http_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__http_cell(k)}${__http_cell(v)}") |> list.fold(
+fn __http_frame(method: String, body: String, headers: Map[String, String]) -> String = map.to_list(headers) |> list.map(((k, v)) => "${__http_cell(k)}${__http_cell(v)}") |> list.fold(
   "${__http_cell(method)}${__http_cell(body)}",
   (acc, cell) => acc + cell,
 )

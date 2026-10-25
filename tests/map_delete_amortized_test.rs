@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 
 const SEMANTICS: &str = r#"type Holder = { snap: Map[String, Int], tag: Int }
 
-fn show(m: Map[String, Int]) -> String = map.entries(m) |> list.map(((k, v)) => "${k}=${v}") |> list.join(",")
+fn show(m: Map[String, Int]) -> String = map.to_list(m) |> list.map(((k, v)) => "${k}=${v}") |> list.join(",")
 
 fn showi(m: Map[Int, String]) -> String = map.fold(m, "", (acc, k, v) => acc + "${k}:${v};")
 
@@ -84,7 +84,7 @@ effect fn main() -> Unit = {
   println(show(m) |> string.split(",") |> list.drop(34) |> list.join(","))
   println("${map.keys(m) |> list.take(3)} ${map.len(m)}")
   // equality against a map built fresh, either order of construction
-  let fresh = map.entries(m) |> list.reverse |> map.from_list
+  let fresh = map.to_list(m) |> list.reverse |> map.from_list
   println("${m == fresh} ${m == alias} ${map.len(fresh)}")
   // display through interpolation after deletes
   var small: Map[String, Int] = map.from_list([("a", 1), ("b", 2), ("c", 3)])
@@ -116,7 +116,7 @@ effect fn main() -> Unit = {
     j = j + 1
   }
   println("${hits} ${map.len(big)} ${digest(big)} ${map.keys(big) |> list.take(6)} ${map.len(before)} ${digest(before)}")
-  let rebuilt = map.entries(big) |> map.from_list
+  let rebuilt = map.to_list(big) |> map.from_list
   println("${rebuilt == big} ${digest(rebuilt) == digest(big)} ${big == before}")
   // FIFO: delete the oldest, append a new one
   var q: Map[Int, Int] = list.range(0, 100) |> list.fold(map.new(), (acc4, i) => map.set(acc4, i, i))
@@ -167,7 +167,7 @@ effect fn main() -> Unit = {
     map.delete(lv, "L${i}")
     map.insert(lv, "N${i}", [i])
   }
-  println("${map.len(lv)} ${map.entries(lv) |> list.take(6)} ${map.get(lv, "N59")} ${map.get(lv, "L1")}")
+  println("${map.len(lv)} ${map.to_list(lv) |> list.take(6)} ${map.get(lv, "N59")} ${map.get(lv, "L1")}")
 }
 "#;
 

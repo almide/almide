@@ -43,7 +43,7 @@ effect fn main() -> Unit = {{
     let w = vocab[draw(i)]
     counts[w] = map.get_or(counts, w, 0) + 1
   }}
-  let top = map.entries(counts) |> list.sort_by(((w, c)) => (0 - c, w)) |> list.take(3)
+  let top = map.to_list(counts) |> list.sort_by(((w, c)) => (0 - c, w)) |> list.take(3)
   for (w, c) in top {{
     println(\"${{w}} ${{c}}\")
   }}
@@ -61,7 +61,7 @@ effect fn main() -> Unit = {{
     |> list.map((i) => vocab[draw(i)])
     |> list.group_by((w) => w)
     |> map.map((ws) => list.len(ws))
-  let top = map.entries(counts) |> list.sort_by(((w, c)) => (0 - c, w)) |> list.take(3)
+  let top = map.to_list(counts) |> list.sort_by(((w, c)) => (0 - c, w)) |> list.take(3)
   for (w, c) in top {{
     println(\"${{w}} ${{c}}\")
   }}
@@ -193,7 +193,7 @@ const MAP_OWNED: &str = "effect fn main() -> Unit = {\n  let a = [\"x\": 1, \"y\
 fn a_whole_map_read_at_its_last_use_moves_the_map() {
     let rust = emit("entries_owned.almd", &imperative(10));
     let body = main_body(&rust);
-    assert!(body.contains("almide_rt_map_entries_owned(counts)"), "`map.entries` at the map's last use copies it:\n{body}");
+    assert!(body.contains("almide_rt_map_entries_owned(counts)"), "`map.to_list` at the map's last use copies it:\n{body}");
     let rust = emit("map_owned.almd", MAP_OWNED);
     let body = main_body(&rust);
     assert!(body.contains("almide_rt_map_map_values_owned(a,"), "`map.map` at its source's last use copies it:\n{body}");

@@ -62,7 +62,7 @@ fn test_split_join_roundtrip() -> String = {
 
 fn test_map_entries_roundtrip() -> String = {
   let m1 = map.from_list([("a", 1), ("b", 2), ("c", 3)])
-  let es = map.entries(m1)
+  let es = map.to_list(m1)
   let m2 = map.from_list(es)
   let v = map.get(m2, "b") ?? -1
   int.to_string(list.len(es)) + " " + int.to_string(v)

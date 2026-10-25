@@ -3,7 +3,7 @@
 // Every line below reveals key/value ORDER (not just counts), so a regression to
 // hash-order iteration on either target would break the byte-for-byte comparison.
 fn show(label: String, m: Map[String, Int]) -> String = {
-  let parts = map.entries(m) |> list.map((e) => {
+  let parts = map.to_list(m) |> list.map((e) => {
     let (k, v) = e
     "${k}=${int.to_string(v)}"
   })
