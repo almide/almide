@@ -10980,13 +10980,12 @@ fn response(status: Int, body: String) -> HttpResponse = _
 fn json(status: Int, body: String) -> HttpResponse = _
 
 /// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
-fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = http.__with_headers(
-  status,
-  body,
-  __flat(headers),
-)
+fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = {
+  let flat = __flat(headers)
+  http.__with_headers(status, body, flat)
+}
 
-@intrinsic("almide_rt_http_with_headers")
+@intrinsic("almide_rt_http___with_headers")
 @borrow_ref(flat)
 fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
 
@@ -11179,14 +11178,14 @@ effect fn get_bytes(url: String) -> Result[Bytes, String] = _
 
 /// Raw body bytes for any method and headers.
 @category("Net.fetch")
-effect fn request_bytes(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[Bytes, String] = http.__request_bytes(
+effect fn request_bytes(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[Bytes, String] = ok(http.__request_bytes(
   method,
   url,
   body,
   __flat(headers),
-)
+)!)
 
-@intrinsic("almide_http_request_bytes")
+@intrinsic("almide_rt_http___request_bytes")
 @borrow_ref(flat)
 effect fn __request_bytes(method: String, url: String, body: String, flat: List[String]) -> Result[Bytes, String] = _
 
@@ -11267,14 +11266,12 @@ type HttpMiddleware = (HttpHandler) -> HttpHandler
 type HttpRoute = { method: String, pattern: String, segments: List[String], handler: HttpHandler }
 
 /// Request built in code; target keeps its ?query (a full URL for send / start).
-fn new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest = http.__new_request(
-  method,
-  target,
-  body,
-  __flat(headers),
-)
+fn new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest = {
+  let flat = __flat(headers)
+  http.__new_request(method, target, body, flat)
+}
 
-@intrinsic("almide_rt_http_new_request")
+@intrinsic("almide_rt_http___new_request")
 @borrow_ref(flat)
 fn __new_request(method: String, target: String, body: String, flat: List[String]) -> HttpRequest = _
 
@@ -11391,11 +11388,11 @@ fn __pattern_path(pattern: String) -> String = match string.index_of(pattern, " 
 @concurrent(handler)
 fn route(pattern: String, handler: HttpHandler) -> HttpRoute = {
   let p = string.trim(pattern)
-  let method = match string.index_of(p, " ") {
+  let verb = match string.index_of(p, " ") {
     some(i) => string.take(p, i),
     none => "",
   }
-  { method: method, pattern: p, segments: __parts(__pattern_path(p)), handler: handler }
+  { method: verb, pattern: p, segments: __parts(__pattern_path(p)), handler: handler }
 }
 
 /// Sub-app under prefix: /api/x reaches it as /x.
@@ -11519,27 +11516,27 @@ fn __not_allowed(hits: List[(HttpRoute, List[String])]) -> HttpResponse = {
 
 @category
 effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) -> HttpResponse = {
-  let method = http.method(req)
-  let path = __path_of(http.path(req))
-  if not string.starts_with(path, "/") then http.response(
+  let verb = http.method(req)
+  let target_path = __path_of(http.path(req))
+  if not string.starts_with(target_path, "/") then http.response(
     400,
     "Bad Request: the request target must start with /",
   )
-  else if __bad_escape(path) then http.response(
+  else if __bad_escape(target_path) then http.response(
     400,
     "Bad Request: malformed percent-encoding in the path",
   )
-  else if not __canonical(path) then http.response(
+  else if not __canonical(target_path) then http.response(
     400,
     "Bad Request: the path is not in canonical form",
   )
   else {
-    let exact = hits |> list.filter(((r, _)) => r.method == method or r.method == "")
-    let via_get = method == "HEAD" and list.is_empty(exact)
+    let exact = hits |> list.filter(((r, _)) => r.method == verb or r.method == "")
+    let via_get = verb == "HEAD" and list.is_empty(exact)
     let allowed = if via_get then hits |> list.filter(((r, _)) => r.method == "GET")
     else exact
     match allowed |> list.find(((a, _)) => list.all(allowed, ((b, _)) => __route_covers(a, b))) {
-      some((r, bound)) => if __bad_binding(r.segments, __parts(path)) then http.response(
+      some((r, bound)) => if __bad_binding(r.segments, __parts(target_path)) then http.response(
         400,
         "Bad Request: a path parameter is a dot segment or holds a /, \\ or NUL",
       )
@@ -14842,16 +14839,16 @@ effect fn __read_to_end_from[H: Read](h: H, chunks: List[Bytes]) -> Result[Bytes
 
 /// Up to max bytes of stdin; fewer only at its end.
 @ordered
-@intrinsic("almide_rt_io_read_bytes")
+@intrinsic("almide_rt_io___read_stdin_bytes")
 effect fn __read_stdin_bytes(max: Int) -> Bytes = _
 
 /// data to stdout, unflushed; shares println's buffer, so order is program order.
-@intrinsic("almide_rt_io_write")
+@intrinsic("almide_rt_io___write_stdout")
 @category("IO.stdout")
 effect fn __write_stdout(data: Bytes) -> Unit = _
 
 /// data to stderr, after flushing stdout.
-@intrinsic("almide_rt_io_write_stderr")
+@intrinsic("almide_rt_io___write_stderr")
 @category("IO.stderr")
 effect fn __write_stderr(data: Bytes) -> Unit = _
 
@@ -29783,11 +29780,11 @@ effect fn tcp_connect(host: String, port: Int) -> Result[TcpStream, String] = ok
 effect fn tcp_is_open(stream: TcpStream) -> Bool = net.__os_tcp_is_open(__tcp(stream))
 
 /// Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
-effect fn tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String] = net.__os_tcp_read_timeout(
+effect fn tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String] = ok(net.__os_tcp_read_timeout(
   __tcp(stream),
   len,
   timeout_ms,
-)
+)!)
 
 /// Sets read/write timeout; <= 0 clears it.
 effect fn tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Result[Unit, String] = net.__os_tcp_set_timeout(
@@ -29868,10 +29865,10 @@ fn is_loopback(ip: IpAddr) -> Bool = match ip {
 }
 
 
-effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = net.__os_tcp_read(
+effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = ok(net.__os_tcp_read(
   __tcp(h),
   max,
-)
+)!)
 
 effect fn __tcp_stream_write(h: TcpStream, data: Bytes) -> Result[Unit, String] = net.__os_tcp_write(
   __tcp(h),
@@ -29973,63 +29970,63 @@ local fn __zero_run(gs: List[Int], i: Int, cs: Int, cl: Int, bs: Int, bl: Int) -
   else __zero_run(gs, i + 1, -1, 0, bs, bl)
 
 
-@intrinsic("almide_rt_net_tcp_connect")
+@intrinsic("almide_rt_net___os_tcp_connect")
 @category("Net.fetch")
 effect fn __os_tcp_connect(host: String, port: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_tcp_read")
+@intrinsic("almide_rt_net___os_tcp_read")
 effect fn __os_tcp_read(stream: Int, len: Int) -> Result[Bytes, String] = _
 
-@intrinsic("almide_rt_net_tcp_write")
+@intrinsic("almide_rt_net___os_tcp_write")
 effect fn __os_tcp_write(stream: Int, data: Bytes) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_net_tcp_close")
+@intrinsic("almide_rt_net___os_tcp_close")
 effect fn __os_tcp_close(stream: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_net_tcp_is_open")
+@intrinsic("almide_rt_net___os_tcp_is_open")
 effect fn __os_tcp_is_open(stream: Int) -> Bool = _
 
-@intrinsic("almide_rt_net_tcp_read_timeout")
+@intrinsic("almide_rt_net___os_tcp_read_timeout")
 effect fn __os_tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = _
 
-@intrinsic("almide_rt_net_tcp_set_timeout")
+@intrinsic("almide_rt_net___os_tcp_set_timeout")
 effect fn __os_tcp_set_timeout(stream: Int, timeout_ms: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_net_tcp_available")
+@intrinsic("almide_rt_net___os_tcp_available")
 effect fn __os_tcp_available(stream: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_tcp_listen")
+@intrinsic("almide_rt_net___os_tcp_listen")
 @category("Net.listen")
 effect fn __os_tcp_listen(host: String, port: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_tcp_local_port")
+@intrinsic("almide_rt_net___os_tcp_local_port")
 @category("Net.listen")
 effect fn __os_tcp_local_port(listener: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_tcp_accept")
+@intrinsic("almide_rt_net___os_tcp_accept")
 @category("Net.listen")
 effect fn __os_tcp_accept(listener: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_tcp_close_listener")
+@intrinsic("almide_rt_net___os_tcp_close_listener")
 @category("Net.listen")
 effect fn __os_tcp_close_listener(listener: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_net_udp_bind")
+@intrinsic("almide_rt_net___os_udp_bind")
 effect fn __os_udp_bind(host: String, port: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_udp_local_port")
+@intrinsic("almide_rt_net___os_udp_local_port")
 effect fn __os_udp_local_port(sock: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_udp_send_to")
+@intrinsic("almide_rt_net___os_udp_send_to")
 effect fn __os_udp_send_to(sock: Int, data: Bytes, host: String, port: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_net_udp_recv_from")
+@intrinsic("almide_rt_net___os_udp_recv_from")
 effect fn __os_udp_recv_from(sock: Int, max: Int) -> Result[(Bytes, String, Int), String] = _
 
-@intrinsic("almide_rt_net_udp_close")
+@intrinsic("almide_rt_net___os_udp_close")
 effect fn __os_udp_close(sock: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_net_lookup_host")
+@intrinsic("almide_rt_net___os_lookup_host")
 @category("Net.fetch")
 effect fn __os_lookup_host(host: String) -> Result[List[String], String] = _
 "#;
@@ -42874,27 +42871,30 @@ effect fn listen(path: String) -> Result[Fd, String] = ok(Fd(unix.__os_listen(pa
 effect fn accept(listener: Fd) -> Result[Fd, String] = ok(Fd(unix.__os_accept(__raw(listener))!))
 
 /// Sends all of data, the descriptors fds riding with its first byte.
-effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Result[Unit, String] = unix.__os_send(
-  __raw(sock),
-  data,
-  fds |> list.map((f) => __raw(f)),
-)
+effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Result[Unit, String] = {
+  let raw = fds |> list.map((f) => __raw(f))
+  unix.__os_send(__raw(sock), data, raw)
+}
 
 /// Descriptors received on sock and not yet taken, oldest first.
 effect fn take_fds(sock: Fd) -> List[Fd] = unix.__os_take_fds(__raw(sock)) |> list.map((f) => Fd(f))
 
 /// The descriptors of xs readable within timeout_ms, in order; < 0 waits for one, 0 only checks.
-effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = ok(unix.__os_wait(
-  xs |> list.map((f) => __raw(f)),
-  timeout_ms,
-)! |> list.map((f) => Fd(f)))
+effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = {
+  let raw = xs |> list.map((f) => __raw(f))
+  let ready = unix.__os_wait(raw, timeout_ms)!
+  ok(ready |> list.map((f) => Fd(f)))
+}
 
 
 /// New zero-filled unnamed file of size bytes.
 effect fn shm_create(size: Int) -> Result[Fd, String] = ok(Fd(unix.__os_shm_create(size)!))
 
 /// Grows or shrinks the file fd to size bytes.
-effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = unix.__os_shm_resize(__raw(fd), size)
+effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = unix.__os_shm_resize(
+  __raw(fd),
+  size,
+)
 
 /// Writes data into fd at offset; a negative offset or a write past the end aborts (shm_resize first).
 effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = match unix.__os_shm_write(
@@ -42907,17 +42907,20 @@ effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = 
 }
 
 /// Up to len bytes of fd from offset; fewer at its end.
-effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = unix.__os_shm_read(
+effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = ok(unix.__os_shm_read(
   __raw(fd),
   offset,
   len,
-)
+)!)
 
 
 
-effect fn __fd_read(h: Fd, max: Int) -> Result[Bytes, String] = unix.__os_recv(__raw(h), max)
+effect fn __fd_read(h: Fd, max: Int) -> Result[Bytes, String] = ok(unix.__os_recv(__raw(h), max)!)
 
-effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = unix.__os_send(__raw(h), data, [])
+effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = {
+  let no_fds: List[Int] = []
+  unix.__os_send(__raw(h), data, no_fds)
+}
 
 effect fn __fd_close(h: Fd) -> Result[Unit, String] = unix.__os_close(__raw(h))
 
@@ -42926,43 +42929,43 @@ local fn __raw(f: Fd) -> Int = match f {
 }
 
 
-@intrinsic("almide_rt_unix_connect")
+@intrinsic("almide_rt_unix___os_connect")
 @category("Net.fetch")
 effect fn __os_connect(path: String) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_unix_listen")
+@intrinsic("almide_rt_unix___os_listen")
 @category("Net.listen")
 effect fn __os_listen(path: String) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_unix_accept")
+@intrinsic("almide_rt_unix___os_accept")
 @category("Net.listen")
 effect fn __os_accept(listener: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_unix_send")
+@intrinsic("almide_rt_unix___os_send")
 effect fn __os_send(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_unix_recv")
+@intrinsic("almide_rt_unix___os_recv")
 effect fn __os_recv(sock: Int, max: Int) -> Result[Bytes, String] = _
 
-@intrinsic("almide_rt_unix_take_fds")
+@intrinsic("almide_rt_unix___os_take_fds")
 effect fn __os_take_fds(sock: Int) -> List[Int] = _
 
-@intrinsic("almide_rt_unix_wait")
+@intrinsic("almide_rt_unix___os_wait")
 effect fn __os_wait(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = _
 
-@intrinsic("almide_rt_unix_close")
+@intrinsic("almide_rt_unix___os_close")
 effect fn __os_close(fd: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_unix_shm_create")
+@intrinsic("almide_rt_unix___os_shm_create")
 effect fn __os_shm_create(size: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_unix_shm_resize")
+@intrinsic("almide_rt_unix___os_shm_resize")
 effect fn __os_shm_resize(fd: Int, size: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_unix_shm_write")
+@intrinsic("almide_rt_unix___os_shm_write")
 effect fn __os_shm_write(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_unix_shm_read")
+@intrinsic("almide_rt_unix___os_shm_read")
 effect fn __os_shm_read(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = _
 "#;
 pub const SRC_UNIX_WASM: &str = r#"
