@@ -24,7 +24,7 @@ fn __mask_descriptor(line: String, name: String) -> String = match string.index_
   none => line,
   some(i) => {
     let rest = string.drop(line, i + 11)
-    let digits = string.chars(rest) |> list.take_while((ch) => string.contains("0123456789", ch)) |> list.len
+    let digits = string.to_list(rest) |> list.take_while((ch) => string.contains("0123456789", ch)) |> list.len
     string.take(line, i + 11) + name + string.drop(rest, digits)
   },
 }

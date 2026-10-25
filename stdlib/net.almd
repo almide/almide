@@ -148,7 +148,7 @@ local fn __udp(u: UdpSocket) -> Int = match u {
 local fn __octet(t: String) -> Int? =
   if string.len(t) == 0 or string.len(t) > 3 or (string.len(t) > 1 and string.starts_with(t, "0")) then none
   else match int.parse(t) {
-    ok(n) => if n >= 0 and n <= 255 and string.chars(t) |> list.all((c) => string.contains("0123456789", c)) then some(n) else none,
+    ok(n) => if n >= 0 and n <= 255 and string.to_list(t) |> list.all((c) => string.contains("0123456789", c)) then some(n) else none,
     err(_) => none,
   }
 
@@ -162,7 +162,7 @@ local fn __parse_v4(t: String, whole: String) -> Result[IpAddr, String] = {
 
 local fn __group(t: String) -> Int? =
   if string.len(t) == 0 or string.len(t) > 4 then none
-  else if string.chars(string.to_lower(t)) |> list.all((c) => string.contains("0123456789abcdef", c)) then int.from_hex(t)?
+  else if string.to_list(string.to_lower(t)) |> list.all((c) => string.contains("0123456789abcdef", c)) then int.from_hex(t)?
   else none
 
 // One side of a `::` (or the whole address without one) as its groups; an
