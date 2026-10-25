@@ -2085,14 +2085,35 @@ fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
 /// The bytes ordered by f's key; equal keys keep their order.
 fn sort_by[B](b: Bytes, f: (Int) -> B) -> List[Int] = list.sort_by(bytes.to_list(b), f)
 
-local fn merge_with(xs: List[Int], ys: List[Int], cmp: (Int, Int) -> Int, i: Int, j: Int, acc: List[Int]) -> List[Int] = match (list.get(
-  xs,
-  i,
-), list.get(ys, j)) {
-  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, ys, cmp, i, j + 1, acc + [y])
-  else merge_with(xs, ys, cmp, i + 1, j, acc + [x]),
-  (some(_), none) => acc + list.drop(xs, i),
-  _ => acc + list.drop(ys, j),
+
+
+
+
+local fn merge_with(xs: List[Int], ys: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
+  var out: List[Int] = []
+  var i = 0
+  var j = 0
+  for _ in 0..<(list.len(xs) + list.len(ys)) {
+    match (list.get(xs, i), list.get(ys, j)) {
+      (some(x), some(y)) => if cmp(y, x) < 0 then {
+        list.push(out, y)
+        j = j + 1
+      } else {
+        list.push(out, x)
+        i = i + 1
+      },
+      (some(x), none) => {
+        list.push(out, x)
+        i = i + 1
+      },
+      (none, some(y)) => {
+        list.push(out, y)
+        j = j + 1
+      },
+      (none, none) => (),
+    }
+  }
+  out
 }
 
 local fn merge_sort_with(xs: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
@@ -2102,9 +2123,6 @@ local fn merge_sort_with(xs: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
     merge_sort_with(list.take(xs, n / 2), cmp),
     merge_sort_with(list.drop(xs, n / 2), cmp),
     cmp,
-    0,
-    0,
-    [],
   )
 }
 
@@ -2177,38 +2195,17 @@ fn unique(b: Bytes) -> Bytes = bytes.from_list(list.unique(bytes.to_list(b)))
 fn unique_by[K](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
 
 
-local fn matches_at(xs: List[Int], needle: List[Int], i: Int) -> Bool = list.slice(
-  xs,
-  i,
-  i + list.len(needle),
-) == needle
 
-
-local fn find_from(xs: List[Int], needle: List[Int], i: Int) -> Int =
-  if i + list.len(needle) > list.len(xs) then -1
-  else if matches_at(xs, needle, i) then i
-  else find_from(xs, needle, i + 1)
-
-
-local fn find_back(xs: List[Int], needle: List[Int], i: Int) -> Int =
-  if i < 0 then -1
-  else if matches_at(xs, needle, i) then i
-  else find_back(xs, needle, i - 1)
 
 /// Byte index of the last needle, or none; an empty needle is found at len.
 fn last_index_of(b: Bytes, needle: Bytes) -> Int? = {
-  let xs = bytes.to_list(b)
-  let ns = bytes.to_list(needle)
-  let i = find_back(xs, ns, list.len(xs) - list.len(ns))
-  if i < 0 then none else some(i)
-}
 
-
-local fn replace_go(xs: List[Int], from: List[Int], to: List[Int], i: Int, limit: Int, acc: List[Int]) -> List[Int] = {
-  let j = if limit == 0 then -1
-  else find_from(xs, from, i)
-  if j < 0 then acc + list.drop(xs, i)
-  else replace_go(xs, from, to, j + list.len(from), limit - 1, acc + list.slice(xs, i, j) + to)
+  let n = bytes.len(b)
+  let m = bytes.len(needle)
+  match bytes.index_of(bytes.reverse(b), bytes.reverse(needle)) {
+    some(i) => some(n - i - m),
+    none => none,
+  }
 }
 
 
@@ -2217,21 +2214,36 @@ local fn replace_empty(xs: List[Int], to: List[Int], limit: Int) -> List[Int] =
   else to + xs
 
 /// b with every non-overlapping from replaced by to, left to right.
-fn replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes = {
-  let xs = bytes.to_list(b)
-  let fs = bytes.to_list(from)
-  let ts = bytes.to_list(to)
-  if list.is_empty(fs) then bytes.from_list(replace_empty(xs, ts, -1))
-  else bytes.from_list(replace_go(xs, fs, ts, 0, -1, []))
-}
+fn replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes =
+  if bytes.is_empty(from) then bytes.from_list(replace_empty(bytes.to_list(b), bytes.to_list(to), -1))
+  else {
+
+
+    let pieces = bytes.split(b, from)
+    let tn = bytes.len(to)
+    var out = bytes.zeros(bytes.len(b) + (list.len(pieces) - 1) * (tn - bytes.len(from)))
+    var at = 0
+    var first = true
+    for piece in pieces {
+      if first then {
+        first = false
+      } else {
+        bytes.copy_from(out, to, at, 0, tn)
+        at = at + tn
+      }
+      bytes.copy_from(out, piece, at, 0, bytes.len(piece))
+      at = at + bytes.len(piece)
+    }
+    out
+  }
 
 /// b with the first from replaced by to.
-fn replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes = {
-  let xs = bytes.to_list(b)
-  let fs = bytes.to_list(from)
-  let ts = bytes.to_list(to)
-  if list.is_empty(fs) then bytes.from_list(replace_empty(xs, ts, 1))
-  else bytes.from_list(replace_go(xs, fs, ts, 0, 1, []))
+fn replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes = match bytes.index_of(b, from) {
+  some(i) => bytes.concat(
+    bytes.concat(bytes.slice(b, 0, i), to),
+    bytes.slice(b, i + bytes.len(from), bytes.len(b)),
+  ),
+  none => b,
 }
 
 /// b without prefix, or none when b does not start with it.
@@ -2244,15 +2256,9 @@ fn strip_suffix(b: Bytes, suffix: Bytes) -> Bytes? =
   if bytes.ends_with(b, suffix) then some(bytes.slice(b, 0, bytes.len(b) - bytes.len(suffix)))
   else none
 
-local fn count_go(xs: List[Int], needle: List[Int], i: Int, n: Int) -> Int = {
-  let j = find_from(xs, needle, i)
-  if j < 0 then n
-  else count_go(xs, needle, j + list.len(needle), n + 1)
-}
-
 /// Non-overlapping occurrences of needle; len + 1 for an empty needle.
 fn count_matches(b: Bytes, needle: Bytes) -> Int = if bytes.len(needle) == 0 then bytes.len(b) + 1
-else count_go(bytes.to_list(b), bytes.to_list(needle), 0, 0)
+else list.len(bytes.split(b, needle)) - 1
 "#;
 pub const SRC_BYTES_APPEND_MULTI: &str = r#"
 
@@ -2858,11 +2864,106 @@ fn bytes_to_list(b: Bytes) -> List[Int] = {
 }
 
 
-fn __contains_at(pb: Int, pp: Int, bn: Int, pn: Int, i: Int) -> Bool = if i + pn > bn then false
+
+
+
+
+
+
+
+
+
+fn __bk_step(pp: Int, t: Int, k: Int, c: Int) -> Int =
+  if k > 0 and prim.load8(pp + k) != c then __bk_step(pp, t, prim.load64(t + (k - 1) * 8), c)
+  else if prim.load8(pp + k) == c then k + 1
+  else k
+
+fn __bk_fill(pp: Int, pn: Int, t: Int, q: Int, k: Int) -> Int = if q >= pn then 0
 else {
-  let eq = __byteq(pb + i, pp, pn, 0)
-  if eq then true
-  else __contains_at(pb, pp, bn, pn, i + 1)
+  let k1 = __bk_step(pp, t, k, prim.load8(pp + q))
+  prim.store64(t + q * 8, k1)
+  __bk_fill(pp, pn, t, q + 1, k1)
+}
+
+
+fn __bk_table(pp: Int, pn: Int, t: Int) -> Int = {
+  prim.store64(t, 0)
+  __bk_fill(pp, pn, t, 1, 0)
+}
+
+
+fn __bk_scan(pb: Int, bn: Int, pp: Int, pn: Int, t: Int, i: Int, k: Int) -> Int =
+  if bn - i < pn - k then 0 - 1
+  else {
+    let k1 = __bk_step(pp, t, k, prim.load8(pb + i))
+    if k1 == pn then i + 1 - pn
+    else __bk_scan(pb, bn, pp, pn, t, i + 1, k1)
+  }
+
+
+
+fn __bk_index(pb: Int, bn: Int, pp: Int, pn: Int) -> Int = if pn == 0 then 0
+else if pn > bn then 0 - 1
+else {
+  let tbl = prim.alloc_list(pn)
+  let t = prim.handle(tbl) + 12
+  let _t = __bk_table(pp, pn, t)
+  __bk_scan(pb, bn, pp, pn, t, 0, 0)
+}
+
+
+
+
+
+
+
+fn __bk_piece(bh: Int, start: Int, end: Int) -> Bytes = {
+  let n = end - start
+  let piece = prim.alloc_bytes(n)
+  let _x = __bytecopy(prim.handle(piece) + 12, bh + 12 + start, n, 0)
+  piece
+}
+
+fn __bk_count(bh: Int, blen: Int, seph: Int, seplen: Int, t: Int, from: Int, acc: Int) -> Int = {
+  let pos = __bk_scan(bh + 12, blen, seph + 12, seplen, t, from, 0)
+  if pos < 0 then acc
+  else __bk_count(bh, blen, seph, seplen, t, pos + seplen, acc + 1)
+}
+
+fn __bk_split_fill(lh: Int, bh: Int, blen: Int, seph: Int, seplen: Int, t: Int, from: Int, idx: Int) -> Int = {
+  let found = __bk_scan(bh + 12, blen, seph + 12, seplen, t, from, 0)
+  let pos = if found < 0 then blen else found
+  let piece = __bk_piece(bh, from, pos)
+  prim.store_str(lh + 12 + idx * 8, piece)
+  if found < 0 then idx + 1
+  else __bk_split_fill(lh, bh, blen, seph, seplen, t, pos + seplen, idx + 1)
+}
+
+fn __bk_split_whole(bh: Int, blen: Int) -> List[Bytes] = {
+  let result = prim.alloc_list_str(1)
+  let piece = __bk_piece(bh, 0, blen)
+  prim.store_str(prim.handle(result) + 12, piece)
+  result
+}
+
+fn __bk_split_general(bh: Int, blen: Int, seph: Int, seplen: Int) -> List[Bytes] = {
+  let tbl = prim.alloc_list(seplen)
+  let t = prim.handle(tbl) + 12
+  let _t = __bk_table(seph + 12, seplen, t)
+  let nseps = __bk_count(bh, blen, seph, seplen, t, 0, 0)
+  let result = prim.alloc_list_str(nseps + 1)
+  let _x = __bk_split_fill(prim.handle(result), bh, blen, seph, seplen, t, 0, 0)
+  result
+}
+
+@implements("bytes.split")
+fn bytes_split(b: Bytes, sep: Bytes) -> List[Bytes] = {
+  let bh = prim.handle(b)
+  let blen = prim.load32(bh + 4)
+  let seph = prim.handle(sep)
+  let seplen = prim.load32(seph + 4)
+  if seplen == 0 then __bk_split_whole(bh, blen)
+  else __bk_split_general(bh, blen, seph, seplen)
 }
 
 
@@ -2871,11 +2972,7 @@ fn bytes_contains(b: Bytes, pat: Bytes) -> Bool = {
   let pn = prim.load32(prim.handle(pat) + 4)
   let pb = prim.handle(b) + 12
   let pp = prim.handle(pat) + 12
-  if pn == 0 then true
-  else {
-    if pn > bn then false
-    else __contains_at(pb, pp, bn, pn, 0)
-  }
+  __bk_index(pb, bn, pp, pn) >= 0
 }
 
 
@@ -3289,21 +3386,12 @@ fn bytes_get(b: Bytes, i: Int) -> Int? = {
 }
 
 
-
-fn __b_idx_find(pb: Int, pp: Int, bn: Int, pn: Int, i: Int) -> Int = if i + pn > bn then -1
-else {
-  let eq = __byteq(pb + i, pp, pn, 0)
-  if eq then i
-  else __b_idx_find(pb, pp, bn, pn, i + 1)
-}
-
-
 fn bytes_index_of(b: Bytes, pat: Bytes) -> Int? = {
   let bn = prim.load32(prim.handle(b) + 4)
   let pn = prim.load32(prim.handle(pat) + 4)
   let pb = prim.handle(b) + 12
   let pp = prim.handle(pat) + 12
-  let idx = __b_idx_find(pb, pp, bn, pn, 0)
+  let idx = __bk_index(pb, bn, pp, pn)
   if idx < 0 then __byte_none() else __byte_some_idx(idx)
 }
 
@@ -4231,67 +4319,6 @@ fn __bsp_piece(h: Int, start: Int, end: Int) -> Bytes = {
   let piece = prim.alloc_bytes(n)
   let _x = __bsp_copy(prim.handle(piece) + 12, h + 12 + start, n, 0)
   piece
-}
-
-
-
-fn __bsp_sep_at(bh: Int, blen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool =
-  if j >= seplen then true
-  else if p + j >= blen then false
-  else {
-    let sb = prim.load8(bh + 12 + p + j)
-    let tb = prim.load8(seph + 12 + j)
-    if sb == tb then __bsp_sep_at(bh, blen, seph, seplen, p, j + 1)
-    else false
-  }
-
-
-fn __bsp_find(bh: Int, blen: Int, seph: Int, seplen: Int, from: Int) -> Int =
-  if from + seplen > blen then blen
-  else {
-    let hit = __bsp_sep_at(bh, blen, seph, seplen, from, 0)
-    if hit then from
-    else __bsp_find(bh, blen, seph, seplen, from + 1)
-  }
-
-fn __bsp_count(bh: Int, blen: Int, seph: Int, seplen: Int, from: Int, acc: Int) -> Int =
-  if from + seplen > blen then acc
-  else {
-    let pos = __bsp_find(bh, blen, seph, seplen, from)
-    if pos >= blen then acc
-    else __bsp_count(bh, blen, seph, seplen, pos + seplen, acc + 1)
-  }
-
-fn __bsp_fill(lh: Int, bh: Int, blen: Int, seph: Int, seplen: Int, from: Int, idx: Int) -> Int = {
-  let pos = __bsp_find(bh, blen, seph, seplen, from)
-  let piece = __bsp_piece(bh, from, pos)
-  prim.store_str(lh + 12 + idx * 8, piece)
-  if pos >= blen then idx + 1
-  else __bsp_fill(lh, bh, blen, seph, seplen, pos + seplen, idx + 1)
-}
-
-fn __bsp_whole(bh: Int, blen: Int) -> List[Bytes] = {
-  let result = prim.alloc_list_str(1)
-  let piece = __bsp_piece(bh, 0, blen)
-  prim.store_str(prim.handle(result) + 12, piece)
-  result
-}
-
-fn __bsp_general(bh: Int, blen: Int, seph: Int, seplen: Int) -> List[Bytes] = {
-  let nseps = __bsp_count(bh, blen, seph, seplen, 0, 0)
-  let count = nseps + 1
-  let result = prim.alloc_list_str(count)
-  let _x = __bsp_fill(prim.handle(result), bh, blen, seph, seplen, 0, 0)
-  result
-}
-
-fn bytes_split(b: Bytes, sep: Bytes) -> List[Bytes] = {
-  let bh = prim.handle(b)
-  let blen = prim.load32(bh + 4)
-  let seph = prim.handle(sep)
-  let seplen = prim.load32(seph + 4)
-  if seplen == 0 then __bsp_whole(bh, blen)
-  else __bsp_general(bh, blen, seph, seplen)
 }
 
 
@@ -15343,6 +15370,7 @@ fn index(path: JsonPath, i: Int) -> JsonPath = _
 fn get_path(j: Value, path: JsonPath) -> Value? = _
 
 /// j with value at path; missing keys created.
+@reuse(j)
 @intrinsic("almide_json_set_path")
 @borrow_ref(path)
 @consume(value)
@@ -26108,7 +26136,7 @@ fn e() -> Float = _
 @intrinsic("almide_rt_math_exp")
 fn exp(x: Float) -> Float = _
 
-/// Product 1..n; 1 for n <= 0; wraps past 20.
+/// Product 1..n; 1 for n <= 0; wraps past 20, 0 from 66 on.
 @intrinsic("almide_rt_math_factorial")
 fn factorial(n: Int) -> Int = _
 
@@ -27175,7 +27203,14 @@ fn math_pow(base: Int, exp: Int) -> Int = {
 
 fn __fact(n: Int, acc: Int) -> Int = if n <= 1 then acc else __fact(n - 1, acc * n)
 
-fn math_factorial(n: Int) -> Int = __fact(n, 1)
+
+
+
+
+
+
+
+fn math_factorial(n: Int) -> Int = if n >= 66 then 0 else __fact(n, 1)
 
 
 
@@ -31981,34 +32016,26 @@ fn stem(p: String) -> String = {
 /// Resolves . and .. lexically; "" becomes ".".
 fn normalize(p: String) -> String = {
   let absolute = string.starts_with(p, "/")
-  let segments = string.split(p, "/")
 
-  let cleaned = list.filter(segments, (s) => string.len(s) > 0 and s != ".")
 
-  let resolved = list.fold(
-    cleaned,
-    [],
-    (acc, seg) => {
-      if seg == ".." then {
-        let acc_len = list.len(acc)
-        if acc_len == 0 then {
 
-          if absolute then acc
-          else [".."] + acc
-        } else {
-          let top = match list.first(acc) {
-            some(v) => v,
-            none => "",
-          }
+  var stack: List[String] = []
+  for seg in string.split(p, "/") {
 
-          if top == ".." then [".."] + acc
-          else list.drop(acc, 1)
-        }
-      } else [seg] + acc
-    },
-  )
-  let ordered = list.reverse(resolved)
-  let joined = string.join(ordered, "/")
+    if string.len(seg) == 0 or seg == "." then ()
+    else if seg == ".." then {
+      match list.last(stack) {
+
+        none => if absolute then () else list.push(stack, ".."),
+
+        some(top) => if top == ".." then list.push(stack, "..")
+        else {
+          let _ = list.pop(stack)
+        },
+      }
+    } else list.push(stack, seg)
+  }
+  let joined = string.join(stack, "/")
   if absolute then "/" + joined
   else if string.len(joined) == 0 then "." else joined
 }
@@ -40121,171 +40148,6 @@ fn string_repeat(s: String, n: Int) -> String = {
   buf
 }
 "#;
-pub const SRC_STRING_REPLACE: &str = r#"
-
-
-
-
-
-fn __rep_eq(a: Int, b: Int, n: Int) -> Bool = if n <= 0 then true
-else {
-  let x = prim.load8(a)
-  let y = prim.load8(b)
-  if x == y then __rep_eq(a + 1, b + 1, n - 1)
-  else false
-}
-
-fn __rep_matches(pos: Int, send: Int, fbase: Int, flen: Int) -> Bool =
-  if pos + flen > send then false
-  else __rep_eq(pos, fbase, flen)
-
-fn __rep_count(pos: Int, send: Int, fbase: Int, flen: Int, acc: Int) -> Int =
-  if pos + flen > send then acc
-  else {
-    let m = __rep_eq(pos, fbase, flen)
-    if m then __rep_count(pos + flen, send, fbase, flen, acc + 1)
-    else __rep_count(pos + 1, send, fbase, flen, acc)
-  }
-
-fn __rep_copy(src: Int, dst: Int, n: Int) -> Int = if n <= 0 then 0
-else {
-  prim.store8(dst, prim.load8(src))
-  __rep_copy(src + 1, dst + 1, n - 1)
-}
-
-
-fn __rep_fill(spos: Int, send: Int, fbase: Int, flen: Int, tbase: Int, tlen: Int, dst: Int) -> Int =
-  if spos >= send then dst
-  else {
-    let m = __rep_matches(spos, send, fbase, flen)
-    if m then {
-      let _c = __rep_copy(tbase, dst, tlen)
-      __rep_fill(spos + flen, send, fbase, flen, tbase, tlen, dst + tlen)
-    } else {
-      prim.store8(dst, prim.load8(spos))
-      __rep_fill(spos + 1, send, fbase, flen, tbase, tlen, dst + 1)
-    }
-  }
-
-
-fn __rep_copy_str(s: String) -> String = {
-  let h = prim.handle(s)
-  let slen = prim.load32(h + 4)
-  let buf = prim.alloc_str(slen)
-  let _c = __rep_copy(h + 12, prim.handle(buf) + 12, slen)
-  buf
-}
-
-fn __rep_do(s: String, from: String, to: String) -> String = {
-  let h = prim.handle(s)
-  let slen = prim.load32(h + 4)
-  let fh = prim.handle(from)
-  let flen = prim.load32(fh + 4)
-  let th = prim.handle(to)
-  let tlen = prim.load32(th + 4)
-  let sbase = h + 12
-  let send = sbase + slen
-  let count = __rep_count(sbase, send, fh + 12, flen, 0)
-  let delta = tlen - flen
-  let rlen = slen + count * delta
-  let buf = prim.alloc_str(rlen)
-  let _x = __rep_fill(sbase, send, fh + 12, flen, th + 12, tlen, prim.handle(buf) + 12)
-  buf
-}
-
-
-
-
-
-fn __rep_cstart(p: Int) -> Bool = {
-  let b = prim.load8(p)
-  b < 128 or b >= 192
-}
-
-fn __rep_nchars(p: Int, send: Int, acc: Int) -> Int = if p >= send then acc
-else if __rep_cstart(p) then __rep_nchars(p + 1, send, acc + 1)
-else __rep_nchars(p + 1, send, acc)
-
-fn __rep_next_cs(p: Int, send: Int) -> Int = if p >= send then send
-else if __rep_cstart(p) then p else __rep_next_cs(p + 1, send)
-
-fn __rep_empty_fill(spos: Int, send: Int, tbase: Int, tlen: Int, dst: Int) -> Int =
-  if spos >= send then dst
-  else {
-    let nxt = __rep_next_cs(spos + 1, send)
-    let clen = nxt - spos
-    let _c = __rep_copy(spos, dst, clen)
-    let _t = __rep_copy(tbase, dst + clen, tlen)
-    __rep_empty_fill(nxt, send, tbase, tlen, dst + clen + tlen)
-  }
-
-fn __empty_replace(s: String, to: String) -> String = {
-  let h = prim.handle(s)
-  let slen = prim.load32(h + 4)
-  let sbase = h + 12
-  let send = sbase + slen
-  let th = prim.handle(to)
-  let tlen = prim.load32(th + 4)
-  let nchars = __rep_nchars(sbase, send, 0)
-  let rlen = (nchars + 1) * tlen + slen
-  let buf = prim.alloc_str(rlen)
-  let dbase = prim.handle(buf) + 12
-  let _lead = __rep_copy(th + 12, dbase, tlen)
-  let _x = __rep_empty_fill(sbase, send, th + 12, tlen, dbase + tlen)
-  buf
-}
-
-fn string_replace(s: String, from: String, to: String) -> String = {
-  let fh = prim.handle(from)
-  let flen = prim.load32(fh + 4)
-  if flen <= 0 then __empty_replace(s, to)
-  else __rep_do(s, from, to)
-}
-
-
-
-
-
-
-fn __repf_find(pos: Int, send: Int, fbase: Int, flen: Int) -> Int =
-  if pos + flen > send then send + 1
-  else {
-    let m = __rep_eq(pos, fbase, flen)
-    if m then pos
-    else __repf_find(pos + 1, send, fbase, flen)
-  }
-
-
-fn __repf_do(s: String, from: String, to: String, off: Int) -> String = {
-  let h = prim.handle(s)
-  let slen = prim.load32(h + 4)
-  let fh = prim.handle(from)
-  let flen = prim.load32(fh + 4)
-  let th = prim.handle(to)
-  let tlen = prim.load32(th + 4)
-  let sbase = h + 12
-  let rlen = slen - flen + tlen
-  let buf = prim.alloc_str(rlen)
-  let dbase = prim.handle(buf) + 12
-  let _c1 = __rep_copy(sbase, dbase, off)
-  let _c2 = __rep_copy(th + 12, dbase + off, tlen)
-  let rest = slen - off - flen
-  let _c3 = __rep_copy(sbase + off + flen, dbase + off + tlen, rest)
-  buf
-}
-
-fn string_replace_first(s: String, from: String, to: String) -> String = {
-  let h = prim.handle(s)
-  let slen = prim.load32(h + 4)
-  let fh = prim.handle(from)
-  let flen = prim.load32(fh + 4)
-  let sbase = h + 12
-  let send = sbase + slen
-  let fpos = __repf_find(sbase, send, fh + 12, flen)
-  if fpos > send then __rep_copy_str(s)
-  else __repf_do(s, from, to, fpos - sbase)
-}
-"#;
 pub const SRC_STRING_REVERSE: &str = r#"
 
 
@@ -40382,6 +40244,7 @@ pub const SRC_STRING_SEARCH: &str = r#"
 
 
 
+
 fn __byte_eq(a: Int, b: Int, n: Int) -> Bool = if n <= 0 then true
 else {
   let x = prim.load8(a)
@@ -40412,21 +40275,95 @@ fn string_ends_with(s: String, suffix: String) -> Bool = {
 }
 
 
-fn __contains_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Bool =
-  if pos + nlen > slen then false
+
+
+
+
+
+
+
+
+
+
+
+
+fn __sk_step(pa: Int, d: Int, t: Int, k: Int, c: Int) -> Int =
+  if k > 0 and prim.load8(pa + k * d) != c then __sk_step(pa, d, t, prim.load64(t + (k - 1) * 8), c)
+  else if prim.load8(pa + k * d) == c then k + 1
+  else k
+
+fn __sk_fill(pa: Int, d: Int, nlen: Int, t: Int, q: Int, k: Int) -> Int = if q >= nlen then 0
+else {
+  let k1 = __sk_step(pa, d, t, k, prim.load8(pa + q * d))
+  prim.store64(t + q * 8, k1)
+  __sk_fill(pa, d, nlen, t, q + 1, k1)
+}
+
+
+fn __sk_table(pa: Int, d: Int, nlen: Int, t: Int) -> Int = {
+  prim.store64(t, 0)
+  __sk_fill(pa, d, nlen, t, 1, 0)
+}
+
+
+fn __sk_scan(ha: Int, d: Int, slen: Int, pa: Int, nlen: Int, t: Int, i: Int, k: Int) -> Int =
+  if slen - i < nlen - k then 0 - 1
   else {
-    let m = __byte_eq(sbase + pos, nbase, nlen)
-    if m then true
-    else __contains_scan(sbase, slen, nbase, nlen, pos + 1)
+    let k1 = __sk_step(pa, d, t, k, prim.load8(ha + i * d))
+    if k1 == nlen then i + 1 - nlen
+    else __sk_scan(ha, d, slen, pa, nlen, t, i + 1, k1)
   }
+
+
+
+fn __sk_next(sbase: Int, slen: Int, nbase: Int, nlen: Int, t: Int, from: Int) -> Int = __sk_scan(
+  sbase,
+  1,
+  slen,
+  nbase,
+  nlen,
+  t,
+  from,
+  0,
+)
+
+
+
+fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 0 then 0
+else if nlen > slen then 0 - 1
+else {
+  let tbl = prim.alloc_list(nlen)
+  let t = prim.handle(tbl) + 12
+  let _t = __sk_table(nbase, 1, nlen, t)
+  __sk_next(sbase, slen, nbase, nlen, t, 0)
+}
+
+
+
+fn __rfind_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 0 then slen
+else if nlen > slen then 0 - 1
+else {
+  let tbl = prim.alloc_list(nlen)
+  let t = prim.handle(tbl) + 12
+  let _t = __sk_table(nbase + nlen - 1, 0 - 1, nlen, t)
+  let r = __sk_scan(sbase + slen - 1, 0 - 1, slen, nbase + nlen - 1, nlen, t, 0, 0)
+  if r < 0 then r else slen - r - nlen
+}
+
+
+
+fn __count_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, t: Int, from: Int, acc: Int) -> Int = {
+  let pos = __sk_next(sbase, slen, nbase, nlen, t, from)
+  if pos < 0 then acc
+  else __count_scan(sbase, slen, nbase, nlen, t, pos + nlen, acc + 1)
+}
 
 fn string_contains(s: String, needle: String) -> Bool = {
   let hs = prim.handle(s)
   let hn = prim.handle(needle)
   let slen = prim.load32(hs + 4)
   let nlen = prim.load32(hn + 4)
-  if nlen <= 0 then true
-  else __contains_scan(hs + 12, slen, hn + 12, nlen, 0)
+  __find_byte(hs + 12, slen, hn + 12, nlen) >= 0
 }
 
 
@@ -40442,15 +40379,13 @@ else {
   __cp_count(base + 1, n - 1, acc + step)
 }
 
-
-
-fn __count_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int, acc: Int) -> Int =
-  if pos + nlen > slen then acc
-  else {
-    let m = __byte_eq(sbase + pos, nbase, nlen)
-    if m then __count_scan(sbase, slen, nbase, nlen, pos + nlen, acc + 1)
-    else __count_scan(sbase, slen, nbase, nlen, pos + 1, acc)
-  }
+fn __count_nonempty(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen > slen then 0
+else {
+  let tbl = prim.alloc_list(nlen)
+  let t = prim.handle(tbl) + 12
+  let _t = __sk_table(nbase, 1, nlen, t)
+  __count_scan(sbase, slen, nbase, nlen, t, 0, 0)
+}
 
 fn string_count(s: String, needle: String) -> Int = {
   let hs = prim.handle(s)
@@ -40461,18 +40396,8 @@ fn string_count(s: String, needle: String) -> Int = {
     let c = __cp_count(hs + 12, slen, 0)
 
     c + 1
-  } else __count_scan(hs + 12, slen, hn + 12, nlen, 0, 0)
+  } else __count_nonempty(hs + 12, slen, hn + 12, nlen)
 }
-
-
-
-fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Int =
-  if pos + nlen > slen then -1
-  else {
-    let m = __byte_eq(sbase + pos, nbase, nlen)
-    if m then pos
-    else __find_byte(sbase, slen, nbase, nlen, pos + 1)
-  }
 
 
 
@@ -40489,18 +40414,8 @@ fn string_index_of(s: String, needle: String) -> Int? = {
   let hn = prim.handle(needle)
   let slen = prim.load32(hs + 4)
   let nlen = prim.load32(hn + 4)
-  let bpos = __find_byte(hs + 12, slen, hn + 12, nlen, 0)
+  let bpos = __find_byte(hs + 12, slen, hn + 12, nlen)
   if bpos < 0 then __io_none() else __io_at(hs + 12, bpos)
-}
-
-
-
-
-fn __rfind_byte(sbase: Int, nbase: Int, nlen: Int, pos: Int) -> Int = if pos < 0 then -1
-else {
-  let m = __byte_eq(sbase + pos, nbase, nlen)
-  if m then pos
-  else __rfind_byte(sbase, nbase, nlen, pos - 1)
 }
 
 fn string_last_index_of(s: String, needle: String) -> Int? = {
@@ -40508,8 +40423,248 @@ fn string_last_index_of(s: String, needle: String) -> Int? = {
   let hn = prim.handle(needle)
   let slen = prim.load32(hs + 4)
   let nlen = prim.load32(hn + 4)
-  let bpos = __rfind_byte(hs + 12, hn + 12, nlen, slen - nlen)
+  let bpos = __rfind_byte(hs + 12, slen, hn + 12, nlen)
   if bpos < 0 then __io_none() else __io_at(hs + 12, bpos)
+}
+
+
+
+
+
+
+fn __copy_bytes(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let b = prim.load8(src + i)
+  prim.store8(dst + i, b)
+  __copy_bytes(dst, src, n, i + 1)
+}
+
+
+fn __substr(sh: Int, start: Int, end: Int) -> String = {
+  let n = end - start
+  let piece = prim.alloc_str(n)
+  let _x = __copy_bytes(prim.handle(piece) + 12, sh + 12 + start, n, 0)
+  piece
+}
+
+
+fn __split_fill(lh: Int, sh: Int, slen: Int, seph: Int, seplen: Int, t: Int, from: Int, idx: Int) -> Int = {
+  let found = __sk_next(sh + 12, slen, seph + 12, seplen, t, from)
+  let pos = if found < 0 then slen else found
+  let piece = __substr(sh, from, pos)
+  prim.store_str(lh + 12 + idx * 8, piece)
+  if found < 0 then idx + 1
+  else __split_fill(lh, sh, slen, seph, seplen, t, pos + seplen, idx + 1)
+}
+
+fn __is_cstart(sh: Int, p: Int) -> Bool = {
+  let b = prim.load8(sh + 12 + p)
+  b < 128 or b >= 192
+}
+
+fn __count_chars(sh: Int, slen: Int, p: Int, acc: Int) -> Int = if p >= slen then acc
+else if __is_cstart(sh, p) then __count_chars(sh, slen, p + 1, acc + 1)
+else __count_chars(sh, slen, p + 1, acc)
+
+fn __next_cstart(sh: Int, slen: Int, p: Int) -> Int = if p >= slen then slen
+else if __is_cstart(sh, p) then p
+else __next_cstart(sh, slen, p + 1)
+
+fn __empty_split_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int) -> Int =
+  if from >= slen then idx
+  else {
+    let nxt = __next_cstart(sh, slen, from + 1)
+    let piece = __substr(sh, from, nxt)
+    prim.store_str(lh + 12 + idx * 8, piece)
+    __empty_split_fill(lh, sh, slen, nxt, idx + 1)
+  }
+
+fn __empty_split(s: String) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let nchars = __count_chars(sh, slen, 0, 0)
+  let result = prim.alloc_list_str(nchars + 2)
+  let rh = prim.handle(result)
+  let lead = __substr(sh, 0, 0)
+  prim.store_str(rh + 12, lead)
+  let _x = __empty_split_fill(rh, sh, slen, 0, 1)
+  let trail = __substr(sh, 0, 0)
+  prim.store_str(rh + 12 + (nchars + 1) * 8, trail)
+  result
+}
+
+fn __nonempty_split(s: String, seph: Int, seplen: Int) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let tbl = prim.alloc_list(seplen)
+  let t = prim.handle(tbl) + 12
+  let _t = __sk_table(seph + 12, 1, seplen, t)
+  let nseps = __count_scan(sh + 12, slen, seph + 12, seplen, t, 0, 0)
+  let result = prim.alloc_list_str(nseps + 1)
+  let _x = __split_fill(prim.handle(result), sh, slen, seph, seplen, t, 0, 0)
+  result
+}
+
+@implements("string.split")
+fn string_split(s: String, sep: String) -> List[String] = {
+  let seph = prim.handle(sep)
+  let seplen = prim.load32(seph + 4)
+  if seplen == 0 then __empty_split(s)
+  else __nonempty_split(s, seph, seplen)
+}
+
+
+
+
+
+
+fn __so_sub(s: String, start: Int, n: Int) -> String = {
+  let sh = prim.handle(s)
+  let out = prim.alloc_str(n)
+  let _x = __copy_bytes(prim.handle(out) + 12, sh + 12 + start, n, 0)
+  out
+}
+
+@implements("string.split_once")
+fn string_split_once(s: String, sep: String) -> (String, String)? = {
+  let sh = prim.handle(s)
+  let seph = prim.handle(sep)
+  let slen = prim.load32(sh + 4)
+  let seplen = prim.load32(seph + 4)
+  let pos = __find_byte(sh + 12, slen, seph + 12, seplen)
+  if pos < 0 then none
+  else some((__so_sub(s, 0, pos), __so_sub(s, pos + seplen, slen - pos - seplen)))
+}
+
+
+
+
+
+fn __rep_copy(src: Int, dst: Int, n: Int) -> Int = if n <= 0 then 0
+else {
+  prim.store8(dst, prim.load8(src))
+  __rep_copy(src + 1, dst + 1, n - 1)
+}
+
+
+
+fn __rep_fill(sbase: Int, slen: Int, fbase: Int, flen: Int, t: Int, tbase: Int, tlen: Int, from: Int, dst: Int) -> Int = {
+  let pos = __sk_next(sbase, slen, fbase, flen, t, from)
+  if pos < 0 then __rep_copy(sbase + from, dst, slen - from)
+  else {
+    let _c = __rep_copy(sbase + from, dst, pos - from)
+    let _t = __rep_copy(tbase, dst + pos - from, tlen)
+    __rep_fill(sbase, slen, fbase, flen, t, tbase, tlen, pos + flen, dst + pos - from + tlen)
+  }
+}
+
+fn __rep_do(s: String, from: String, to: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  let th = prim.handle(to)
+  let tlen = prim.load32(th + 4)
+  let tbl = prim.alloc_list(flen)
+  let t = prim.handle(tbl) + 12
+  let _t = __sk_table(fh + 12, 1, flen, t)
+  let count = __count_scan(h + 12, slen, fh + 12, flen, t, 0, 0)
+  let delta = tlen - flen
+  let rlen = slen + count * delta
+  let buf = prim.alloc_str(rlen)
+  let _x = __rep_fill(h + 12, slen, fh + 12, flen, t, th + 12, tlen, 0, prim.handle(buf) + 12)
+  buf
+}
+
+
+
+
+
+fn __rep_cstart(p: Int) -> Bool = {
+  let b = prim.load8(p)
+  b < 128 or b >= 192
+}
+
+fn __rep_nchars(p: Int, send: Int, acc: Int) -> Int = if p >= send then acc
+else if __rep_cstart(p) then __rep_nchars(p + 1, send, acc + 1)
+else __rep_nchars(p + 1, send, acc)
+
+fn __rep_next_cs(p: Int, send: Int) -> Int = if p >= send then send
+else if __rep_cstart(p) then p else __rep_next_cs(p + 1, send)
+
+fn __rep_empty_fill(spos: Int, send: Int, tbase: Int, tlen: Int, dst: Int) -> Int =
+  if spos >= send then dst
+  else {
+    let nxt = __rep_next_cs(spos + 1, send)
+    let clen = nxt - spos
+    let _c = __rep_copy(spos, dst, clen)
+    let _t = __rep_copy(tbase, dst + clen, tlen)
+    __rep_empty_fill(nxt, send, tbase, tlen, dst + clen + tlen)
+  }
+
+fn __empty_replace(s: String, to: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let sbase = h + 12
+  let send = sbase + slen
+  let th = prim.handle(to)
+  let tlen = prim.load32(th + 4)
+  let nchars = __rep_nchars(sbase, send, 0)
+  let rlen = (nchars + 1) * tlen + slen
+  let buf = prim.alloc_str(rlen)
+  let dbase = prim.handle(buf) + 12
+  let _lead = __rep_copy(th + 12, dbase, tlen)
+  let _x = __rep_empty_fill(sbase, send, th + 12, tlen, dbase + tlen)
+  buf
+}
+
+@implements("string.replace")
+fn string_replace(s: String, from: String, to: String) -> String = {
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  if flen <= 0 then __empty_replace(s, to)
+  else __rep_do(s, from, to)
+}
+
+
+fn __rep_copy_str(s: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let buf = prim.alloc_str(slen)
+  let _c = __rep_copy(h + 12, prim.handle(buf) + 12, slen)
+  buf
+}
+
+
+fn __repf_do(s: String, from: String, to: String, off: Int) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  let th = prim.handle(to)
+  let tlen = prim.load32(th + 4)
+  let sbase = h + 12
+  let rlen = slen - flen + tlen
+  let buf = prim.alloc_str(rlen)
+  let dbase = prim.handle(buf) + 12
+  let _c1 = __rep_copy(sbase, dbase, off)
+  let _c2 = __rep_copy(th + 12, dbase + off, tlen)
+  let rest = slen - off - flen
+  let _c3 = __rep_copy(sbase + off + flen, dbase + off + tlen, rest)
+  buf
+}
+
+
+
+@implements("string.replace_first")
+fn string_replace_first(s: String, from: String, to: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  let fpos = __find_byte(h + 12, slen, fh + 12, flen)
+  if fpos < 0 then __rep_copy_str(s)
+  else __repf_do(s, from, to, fpos)
 }
 "#;
 pub const SRC_STRING_SLICE: &str = r#"
@@ -40592,169 +40747,6 @@ fn string_slice2(s: String, start: Int) -> String = {
   let buf = prim.alloc_str(nbytes)
   let _e = __slice2_copy(byte_start, prim.handle(buf) + 12, nbytes)
   buf
-}
-"#;
-pub const SRC_STRING_SPLIT: &str = r#"
-
-
-
-
-
-
-fn __sep_at(sh: Int, slen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool =
-  if j >= seplen then true
-  else if p + j >= slen then false
-  else {
-    let sb = prim.load8(sh + 12 + p + j)
-    let tb = prim.load8(seph + 12 + j)
-    if sb == tb then __sep_at(sh, slen, seph, seplen, p, j + 1)
-    else false
-  }
-
-
-fn __find_sep(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int) -> Int =
-  if from + seplen > slen then slen
-  else {
-    let hit = __sep_at(sh, slen, seph, seplen, from, 0)
-    if hit then from
-    else __find_sep(sh, slen, seph, seplen, from + 1)
-  }
-
-fn __count_seps(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int, acc: Int) -> Int =
-  if from + seplen > slen then acc
-  else {
-    let pos = __find_sep(sh, slen, seph, seplen, from)
-    if pos >= slen then acc
-    else __count_seps(sh, slen, seph, seplen, pos + seplen, acc + 1)
-  }
-
-fn __copy_bytes(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let b = prim.load8(src + i)
-  prim.store8(dst + i, b)
-  __copy_bytes(dst, src, n, i + 1)
-}
-
-
-fn __substr(sh: Int, start: Int, end: Int) -> String = {
-  let n = end - start
-  let piece = prim.alloc_str(n)
-  let _x = __copy_bytes(prim.handle(piece) + 12, sh + 12 + start, n, 0)
-  piece
-}
-
-
-fn __split_fill(lh: Int, sh: Int, slen: Int, seph: Int, seplen: Int, from: Int, idx: Int) -> Int = {
-  let pos = __find_sep(sh, slen, seph, seplen, from)
-  let piece = __substr(sh, from, pos)
-  prim.store_str(lh + 12 + idx * 8, piece)
-  if pos >= slen then idx + 1
-  else __split_fill(lh, sh, slen, seph, seplen, pos + seplen, idx + 1)
-}
-
-fn __is_cstart(sh: Int, p: Int) -> Bool = {
-  let b = prim.load8(sh + 12 + p)
-  b < 128 or b >= 192
-}
-
-fn __count_chars(sh: Int, slen: Int, p: Int, acc: Int) -> Int = if p >= slen then acc
-else if __is_cstart(sh, p) then __count_chars(sh, slen, p + 1, acc + 1)
-else __count_chars(sh, slen, p + 1, acc)
-
-fn __next_cstart(sh: Int, slen: Int, p: Int) -> Int = if p >= slen then slen
-else if __is_cstart(sh, p) then p
-else __next_cstart(sh, slen, p + 1)
-
-fn __empty_split_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int) -> Int =
-  if from >= slen then idx
-  else {
-    let nxt = __next_cstart(sh, slen, from + 1)
-    let piece = __substr(sh, from, nxt)
-    prim.store_str(lh + 12 + idx * 8, piece)
-    __empty_split_fill(lh, sh, slen, nxt, idx + 1)
-  }
-
-fn __empty_split(s: String) -> List[String] = {
-  let sh = prim.handle(s)
-  let slen = prim.load32(sh + 4)
-  let nchars = __count_chars(sh, slen, 0, 0)
-  let result = prim.alloc_list_str(nchars + 2)
-  let rh = prim.handle(result)
-  let lead = __substr(sh, 0, 0)
-  prim.store_str(rh + 12, lead)
-  let _x = __empty_split_fill(rh, sh, slen, 0, 1)
-  let trail = __substr(sh, 0, 0)
-  prim.store_str(rh + 12 + (nchars + 1) * 8, trail)
-  result
-}
-
-fn __nonempty_split(s: String, seph: Int, seplen: Int) -> List[String] = {
-  let sh = prim.handle(s)
-  let slen = prim.load32(sh + 4)
-  let nseps = __count_seps(sh, slen, seph, seplen, 0, 0)
-  let count = nseps + 1
-  let result = prim.alloc_list_str(count)
-  let _x = __split_fill(prim.handle(result), sh, slen, seph, seplen, 0, 0)
-  result
-}
-
-fn string_split(s: String, sep: String) -> List[String] = {
-  let seph = prim.handle(sep)
-  let seplen = prim.load32(seph + 4)
-  if seplen == 0 then __empty_split(s)
-  else __nonempty_split(s, seph, seplen)
-}
-"#;
-pub const SRC_STRING_SPLIT_ONCE: &str = r#"
-
-
-
-
-
-
-fn __so_at(sh: Int, slen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool =
-  if j >= seplen then true
-  else if p + j >= slen then false
-  else {
-    let sb = prim.load8(sh + 12 + p + j)
-    let tb = prim.load8(seph + 12 + j)
-    if sb == tb then __so_at(sh, slen, seph, seplen, p, j + 1)
-    else false
-  }
-
-
-
-fn __so_find(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int) -> Int =
-  if from + seplen > slen then 0 - 1
-  else {
-    let hit = __so_at(sh, slen, seph, seplen, from, 0)
-    if hit then from
-    else __so_find(sh, slen, seph, seplen, from + 1)
-  }
-
-fn __so_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let b = prim.load8(src + i)
-  prim.store8(dst + i, b)
-  __so_copy(dst, src, n, i + 1)
-}
-
-
-fn __so_sub(s: String, start: Int, n: Int) -> String = {
-  let sh = prim.handle(s)
-  let out = prim.alloc_str(n)
-  let _x = __so_copy(prim.handle(out) + 12, sh + 12 + start, n, 0)
-  out
-}
-
-fn string_split_once(s: String, sep: String) -> (String, String)? = {
-  let sh = prim.handle(s)
-  let seph = prim.handle(sep)
-  let slen = prim.load32(sh + 4)
-  let seplen = prim.load32(seph + 4)
-  let pos = __so_find(sh, slen, seph, seplen, 0)
-  if pos < 0 then none
-  else some((__so_sub(s, 0, pos), __so_sub(s, pos + seplen, slen - pos - seplen)))
 }
 "#;
 pub const SRC_STRING_TAKE_DROP: &str = r#"
@@ -44463,6 +44455,8 @@ fn list_drop_end_value(xs: List[Value], n: Int) -> List[Value] = {
 
 
 
+
+
 fn list_tail_value(xs: List[Value]) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -44472,51 +44466,171 @@ fn list_tail_value(xs: List[Value]) -> List[Value] = {
   buf
 }
 
-fn __vmerge_bnew(a: Value, b: Value, j: Int, nb: Int, na: Int, acc: Int) -> Int =
-  if j >= nb then acc
-  else {
-    let bh = prim.handle(b)
-    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
-    let inc = if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then 1 else 0
-    __vmerge_bnew(a, b, j + 1, nb, na, acc + inc)
+
+
+
+
+
+
+
+
+fn __vx_cmpb(pa: Int, pb: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let ca = prim.load8(pa + i)
+  let cb = prim.load8(pb + i)
+  if ca < cb then 0 - 1
+  else if ca > cb then 1
+  else __vx_cmpb(pa, pb, n, i + 1)
+}
+
+fn __vx_cmp(ka: Int, kb: Int) -> Int = {
+  let la = prim.load32(ka + 4)
+  let lb = prim.load32(kb + 4)
+  if la < lb then 0 - 1
+  else if la > lb then 1
+  else __vx_cmpb(ka + 12, kb + 12, la, 0)
+}
+
+fn __vx_key(base: Int, stride: Int, s: Int, p: Int) -> Int = prim.load64(base + prim.load64(s + p * 8) * stride)
+
+fn __vx_iota(dst: Int, n: Int, i: Int) -> Unit = if i >= n then ()
+else {
+  prim.store64(dst + i * 8, i)
+  __vx_iota(dst, n, i + 1)
+}
+
+fn __vx_merge(base: Int, stride: Int, src: Int, dst: Int, i: Int, iend: Int, j: Int, jend: Int, o: Int) -> Unit =
+  if i >= iend then {
+    if j >= jend then ()
+    else {
+      prim.store64(dst + o * 8, prim.load64(src + j * 8))
+      __vx_merge(base, stride, src, dst, i, iend, j + 1, jend, o + 1)
+    }
+  } else if j >= jend then {
+    prim.store64(dst + o * 8, prim.load64(src + i * 8))
+    __vx_merge(base, stride, src, dst, i + 1, iend, j, jend, o + 1)
+  } else if __vx_cmp(__vx_key(base, stride, src, i), __vx_key(base, stride, src, j)) <= 0 then {
+    prim.store64(dst + o * 8, prim.load64(src + i * 8))
+    __vx_merge(base, stride, src, dst, i + 1, iend, j, jend, o + 1)
+  } else {
+    prim.store64(dst + o * 8, prim.load64(src + j * 8))
+    __vx_merge(base, stride, src, dst, i, iend, j + 1, jend, o + 1)
   }
 
-fn __vmerge_fill_a(a: Value, b: Value, dst: Value, i: Int, na: Int, nb: Int) -> Unit =
+fn __vx_pass(base: Int, stride: Int, n: Int, src: Int, dst: Int, w: Int, lo: Int) -> Unit =
+  if lo >= n then ()
+  else {
+    let mid = if lo + w < n then lo + w else n
+    let hi = if lo + 2 * w < n then lo + 2 * w else n
+    __vx_merge(base, stride, src, dst, lo, mid, mid, hi, lo)
+    __vx_pass(base, stride, n, src, dst, w, lo + 2 * w)
+  }
+
+fn __vx_passes(base: Int, stride: Int, n: Int, src: Int, dst: Int, w: Int) -> Int =
+  if w >= n then src
+  else {
+    __vx_pass(base, stride, n, src, dst, w, 0)
+    __vx_passes(base, stride, n, dst, src, w * 2)
+  }
+
+
+
+fn __vx_sort(base: Int, stride: Int, n: Int, ba: Int, bb: Int) -> Int = {
+  __vx_iota(ba, n, 0)
+  __vx_passes(base, stride, n, ba, bb, 1)
+}
+
+
+fn __vx_lower(base: Int, stride: Int, s: Int, kh: Int, lo: Int, hi: Int) -> Int =
+  if lo >= hi then lo
+  else {
+    let mid = (lo + hi) / 2
+    if __vx_cmp(__vx_key(base, stride, s, mid), kh) < 0 then __vx_lower(
+      base,
+      stride,
+      s,
+      kh,
+      mid + 1,
+      hi,
+    )
+    else __vx_lower(base, stride, s, kh, lo, mid)
+  }
+
+fn __vx_upper(base: Int, stride: Int, s: Int, kh: Int, lo: Int, hi: Int) -> Int =
+  if lo >= hi then lo
+  else {
+    let mid = (lo + hi) / 2
+    if __vx_cmp(__vx_key(base, stride, s, mid), kh) <= 0 then __vx_upper(
+      base,
+      stride,
+      s,
+      kh,
+      mid + 1,
+      hi,
+    )
+    else __vx_upper(base, stride, s, kh, lo, mid)
+  }
+
+
+fn __vx_first(base: Int, stride: Int, s: Int, n: Int, kh: Int) -> Int = {
+  let p = __vx_lower(base, stride, s, kh, 0, n)
+  if p >= n then 0 - 1
+  else if __vx_cmp(__vx_key(base, stride, s, p), kh) == 0 then prim.load64(s + p * 8)
+  else 0 - 1
+}
+
+
+fn __vx_last(base: Int, stride: Int, s: Int, n: Int, kh: Int) -> Int = {
+  let p = __vx_upper(base, stride, s, kh, 0, n)
+  if p <= 0 then 0 - 1
+  else if __vx_cmp(__vx_key(base, stride, s, p - 1), kh) == 0 then prim.load64(s + (p - 1) * 8)
+  else 0 - 1
+}
+
+
+
+
+
+fn __vmerge_isnew(ab: Int, bb: Int, sa: Int, sb: Int, na: Int, nb: Int, j: Int) -> Bool = {
+  let bk = prim.load64(bb + (2 * j) * 8)
+  __vx_first(ab, 16, sa, na, bk) < 0 and __vx_first(bb, 16, sb, nb, bk) == j
+}
+
+fn __vmerge_bnew(ab: Int, bb: Int, sa: Int, sb: Int, na: Int, nb: Int, j: Int, acc: Int) -> Int =
+  if j >= nb then acc
+  else {
+    let inc = if __vmerge_isnew(ab, bb, sa, sb, na, nb, j) then 1 else 0
+    __vmerge_bnew(ab, bb, sa, sb, na, nb, j + 1, acc + inc)
+  }
+
+fn __vmerge_fill_a(ab: Int, bb: Int, sa: Int, sb: Int, na: Int, nb: Int, dst: Value, i: Int) -> Unit =
   if i >= na then ()
   else {
-    let ah = prim.handle(a)
     let dh = prim.handle(dst)
-    let key = prim.load64(ah + 12 + (2 * i) * 8)
-    let ak: String = prim.load_handle(ah + 12 + (2 * i) * 8)
+    let key = prim.load64(ab + (2 * i) * 8)
 
-    let last_b = __vobj_find_last(b, ak, nb)
-    let bidx = if last_b < 0 then last_b
-    else if __vobj_find(a, ak, 0, i) < 0 then last_b
+    let bidx = if __vx_first(ab, 16, sa, na, key) == i then __vx_last(bb, 16, sb, nb, key)
     else 0 - 1
-    let val = if bidx < 0 then prim.load64(ah + 12 + (2 * i + 1) * 8) else prim.load64(prim.handle(b) + 12 + (2 * bidx + 1) * 8)
+    let val = if bidx < 0 then prim.load64(ab + (2 * i + 1) * 8) else prim.load64(bb + (2 * bidx + 1) * 8)
     prim.rc_inc(key)
     prim.rc_inc(val)
     prim.store64(dh + 12 + (2 * i) * 8, key)
     prim.store64(dh + 12 + (2 * i + 1) * 8, val)
-    __vmerge_fill_a(a, b, dst, i + 1, na, nb)
+    __vmerge_fill_a(ab, bb, sa, sb, na, nb, dst, i + 1)
   }
 
-fn __vmerge_app_b(a: Value, b: Value, dst: Value, j: Int, nb: Int, na: Int, w: Int) -> Unit =
+fn __vmerge_app_b(ab: Int, bb: Int, sa: Int, sb: Int, na: Int, nb: Int, dst: Value, j: Int, w: Int) -> Unit =
   if j >= nb then ()
-  else {
-    let bh = prim.handle(b)
-    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
-    if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then {
-      let dh = prim.handle(dst)
-      let kh = prim.load64(bh + 12 + (2 * j) * 8)
-      let vh = prim.load64(bh + 12 + (2 * __vobj_find_last(b, bk, nb) + 1) * 8)
-      prim.rc_inc(kh)
-      prim.rc_inc(vh)
-      prim.store64(dh + 12 + (2 * w) * 8, kh)
-      prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
-      __vmerge_app_b(a, b, dst, j + 1, nb, na, w + 1)
-    } else __vmerge_app_b(a, b, dst, j + 1, nb, na, w)
-  }
+  else if __vmerge_isnew(ab, bb, sa, sb, na, nb, j) then {
+    let dh = prim.handle(dst)
+    let kh = prim.load64(bb + (2 * j) * 8)
+    let vh = prim.load64(bb + (2 * __vx_last(bb, 16, sb, nb, kh) + 1) * 8)
+    prim.rc_inc(kh)
+    prim.rc_inc(vh)
+    prim.store64(dh + 12 + (2 * w) * 8, kh)
+    prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
+    __vmerge_app_b(ab, bb, sa, sb, na, nb, dst, j + 1, w + 1)
+  } else __vmerge_app_b(ab, bb, sa, sb, na, nb, dst, j + 1, w)
 
 fn value_merge(a: Value, b: Value) -> Value = {
   let ah = prim.handle(a)
@@ -44524,13 +44638,19 @@ fn value_merge(a: Value, b: Value) -> Value = {
   if prim.load32(ah + 4) == 6 and prim.load32(bh + 4) == 6 then {
     let na = prim.load32(ah + 8) / 2
     let nb = prim.load32(bh + 8) / 2
-    let total = na + __vmerge_bnew(a, b, 0, nb, na, 0)
+    let xa = prim.alloc_list(na)
+    let ya = prim.alloc_list(na)
+    let xb = prim.alloc_list(nb)
+    let yb = prim.alloc_list(nb)
+    let sa = __vx_sort(ah + 12, 16, na, prim.handle(xa) + 12, prim.handle(ya) + 12)
+    let sb = __vx_sort(bh + 12, 16, nb, prim.handle(xb) + 12, prim.handle(yb) + 12)
+    let total = na + __vmerge_bnew(ah + 12, bh + 12, sa, sb, na, nb, 0, 0)
     let dst = prim.alloc_value(2 * total)
     let dh = prim.handle(dst)
     prim.store32(dh + 4, 6)
     prim.store32(dh + 8, 2 * total)
-    __vmerge_fill_a(a, b, dst, 0, na, nb)
-    __vmerge_app_b(a, b, dst, 0, nb, na, na)
+    __vmerge_fill_a(ah + 12, bh + 12, sa, sb, na, nb, dst, 0)
+    __vmerge_app_b(ah + 12, bh + 12, sa, sb, na, nb, dst, 0, na)
     dst
   } else b
 }
@@ -44547,16 +44667,6 @@ else {
   let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
   if k == key then i
   else __vobj_find(v, key, i + 1, n)
-}
-
-
-
-fn __vobj_find_last(v: Value, key: String, n: Int) -> Int = if n <= 0 then 0 - 1
-else {
-  let h = prim.handle(v)
-  let k: String = prim.load_handle(h + 12 + (2 * (n - 1)) * 8)
-  if k == key then n - 1
-  else __vobj_find_last(v, key, n - 1)
 }
 
 
@@ -45217,52 +45327,50 @@ pub const SRC_VALUE_UTILS: &str = r#"
 
 
 
-fn __vu_has(keys: List[String], k: String, i: Int, n: Int) -> Bool = if i >= n then false
-else {
-  let e: String = prim.load_handle(prim.handle(keys) + 12 + i * 8)
-  if e == k then true
-  else __vu_has(keys, k, i + 1, n)
+
+fn __vu_keyset(keys: List[String]) -> Map[String, Int] = {
+  var named: Map[String, Int] = map.new()
+  for k in keys {
+    map.insert(named, k, 0)
+  }
+  named
+}
+
+fn __vu_has(named: Map[String, Int], vb: Int, i: Int) -> Bool = {
+  let k: String = prim.load_handle(vb + (2 * i) * 8)
+  map.contains(named, k)
 }
 
 
-fn __vu_count(v: Value, keys: List[String], want: Bool, i: Int, n: Int, nk: Int, acc: Int) -> Int =
+fn __vu_count(vb: Int, named: Map[String, Int], want: Bool, i: Int, n: Int, acc: Int) -> Int =
   if i >= n then acc
-  else {
-    let k: String = prim.load_handle(prim.handle(v) + 12 + (2 * i) * 8)
-    let hit = __vu_has(keys, k, 0, nk)
-    if hit == want then __vu_count(v, keys, want, i + 1, n, nk, acc + 1)
-    else __vu_count(v, keys, want, i + 1, n, nk, acc)
-  }
+  else if __vu_has(named, vb, i) == want then __vu_count(vb, named, want, i + 1, n, acc + 1)
+  else __vu_count(vb, named, want, i + 1, n, acc)
 
 
-fn __vu_fill(v: Value, keys: List[String], dst: Value, want: Bool, i: Int, n: Int, nk: Int, w: Int) -> Int =
+fn __vu_fill(vb: Int, named: Map[String, Int], dst: Value, want: Bool, i: Int, n: Int, w: Int) -> Int =
   if i >= n then w
-  else {
-    let h = prim.handle(v)
-    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
-    let hit = __vu_has(keys, k, 0, nk)
-    if hit == want then {
-      let dh = prim.handle(dst)
-      let kh = prim.load64(h + 12 + (2 * i) * 8)
-      let vh = prim.load64(h + 12 + (2 * i + 1) * 8)
-      prim.rc_inc(kh)
-      prim.rc_inc(vh)
-      prim.store64(dh + 12 + (2 * w) * 8, kh)
-      prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
-      __vu_fill(v, keys, dst, want, i + 1, n, nk, w + 1)
-    } else __vu_fill(v, keys, dst, want, i + 1, n, nk, w)
-  }
+  else if __vu_has(named, vb, i) == want then {
+    let dh = prim.handle(dst)
+    let kh = prim.load64(vb + (2 * i) * 8)
+    let vh = prim.load64(vb + (2 * i + 1) * 8)
+    prim.rc_inc(kh)
+    prim.rc_inc(vh)
+    prim.store64(dh + 12 + (2 * w) * 8, kh)
+    prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
+    __vu_fill(vb, named, dst, want, i + 1, n, w + 1)
+  } else __vu_fill(vb, named, dst, want, i + 1, n, w)
 
 fn __vu_sel(v: Value, keys: List[String], want: Bool) -> Value = {
   let h = prim.handle(v)
   let n = prim.load32(h + 8) / 2
-  let nk = prim.load32(prim.handle(keys) + 4)
-  let cnt = __vu_count(v, keys, want, 0, n, nk, 0)
+  let named = __vu_keyset(keys)
+  let cnt = __vu_count(h + 12, named, want, 0, n, 0)
   let dst = prim.alloc_value(2 * cnt)
   let dh = prim.handle(dst)
   prim.store32(dh + 4, 6)
   prim.store32(dh + 8, 2 * cnt)
-  let _w = __vu_fill(v, keys, dst, want, 0, n, nk, 0)
+  let _w = __vu_fill(h + 12, named, dst, want, 0, n, 0)
   dst
 }
 
@@ -45440,6 +45548,63 @@ fn __vu_fold_pairs(pairs: List[(String, Value)]) -> List[(String, Value)] =
     }
     list.zip(keys, vals)
   }
+
+
+
+
+
+
+
+
+fn __vu_merge_pairs(pa: List[(String, Value)], pb: List[(String, Value)]) -> List[(String, Value)] = {
+  var at: Map[String, Int] = map.new()
+  var keys: List[String] = []
+  var vals: List[Value] = []
+  for (k, v) in pa {
+    if not map.contains(at, k) then {
+      map.insert(at, k, list.len(keys))
+    } else ()
+    list.push(keys, k)
+    list.push(vals, v)
+  }
+  for (k, v) in pb {
+    match map.get(at, k) {
+      some(i) => {
+        vals = list.set(vals, i, v)
+      },
+      none => {
+        map.insert(at, k, list.len(keys))
+        list.push(keys, k)
+        list.push(vals, v)
+      },
+    }
+  }
+  list.zip(keys, vals)
+}
+
+fn __vu_select_pairs(pairs: List[(String, Value)], keys: List[String], want: Bool) -> List[(String, Value)] = {
+  var named: Map[String, Int] = map.new()
+  for k in keys {
+    map.insert(named, k, 0)
+  }
+  var out: List[(String, Value)] = []
+  for (k, v) in pairs {
+    if map.contains(named, k) == want then { list.push(out, (k, v)) } else ()
+  }
+  out
+}
+
+fn __vu_pick_pairs(pairs: List[(String, Value)], keys: List[String]) -> List[(String, Value)] = __vu_select_pairs(
+  pairs,
+  keys,
+  true,
+)
+
+fn __vu_omit_pairs(pairs: List[(String, Value)], keys: List[String]) -> List[(String, Value)] = __vu_select_pairs(
+  pairs,
+  keys,
+  false,
+)
 
 
 
@@ -46770,14 +46935,11 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "string_pad" => Some(SRC_STRING_PAD),
         "string_quote" => Some(SRC_STRING_QUOTE),
         "string_repeat" => Some(SRC_STRING_REPEAT),
-        "string_replace" => Some(SRC_STRING_REPLACE),
         "string_reverse" => Some(SRC_STRING_REVERSE),
         "string_rle" => Some(SRC_STRING_RLE),
         "string_search" => Some(SRC_STRING_SEARCH),
         "string_slice" => Some(SRC_STRING_SLICE),
         "string_slice2" => Some(SRC_STRING_SLICE2),
-        "string_split" => Some(SRC_STRING_SPLIT),
-        "string_split_once" => Some(SRC_STRING_SPLIT_ONCE),
         "string_take_drop" => Some(SRC_STRING_TAKE_DROP),
         "string_to_bytes" => Some(SRC_STRING_TO_BYTES),
         "string_to_int" => Some(SRC_STRING_TO_INT),
