@@ -16,7 +16,7 @@ use std::process::Command;
 const PROBE: &str = r#"import process
 
 effect fn main() -> Unit = {
-  let r = process.output(process.ProcessCommand { cmd: "/bin/echo", args: ["x"], stdin: string.repeat("日本語", 100000) })
+  let r: Result[process.ProcessStatus, String] = process.output(process.ProcessCommand { cmd: "/bin/echo", args: ["x"], stdin: string.repeat("日本語", 100000) })
   println("answered ${result.is_ok(r) or result.is_err(r)}")
 }
 "#;
