@@ -11,7 +11,7 @@ use super::Recipe;
 /// `in.txt`, n lines of "aé".
 macro_rules! file_of_n_lines {
     () => {
-        "{ fs.write(\"in.txt\", string.repeat(\"aé\\n\", {n}))!\n  \"in.txt\" }"
+        "{ fs.write_text(\"in.txt\", string.repeat(\"aé\\n\", {n}))!\n  \"in.txt\" }"
     };
 }
 
@@ -26,14 +26,14 @@ macro_rules! file_of_n_lines {
 /// class. From 2003 entries on every size is past that warm-up.
 macro_rules! dir_of_n_files {
     () => {
-        "{ fs.mkdir_p(\"d\")!\n  for j in list.range(0, {n} / 10 + 3) { fs.write(\"d/f${100000 + j}\", \"x\")! }\n  \"d\" }"
+        "{ fs.mkdir_p(\"d\")!\n  for j in list.range(0, {n} / 10 + 3) { fs.write_text(\"d/f${100000 + j}\", \"x\")! }\n  \"d\" }"
     };
 }
 
 /// A fresh one-byte file per step.
 macro_rules! fresh_file {
     ($stem:literal) => {
-        concat!("{ fs.write(\"", $stem, "${{i}}.txt\", \"x\")!\n  \"", $stem, "${{i}}.txt\" }")
+        concat!("{ fs.write_text(\"", $stem, "${{i}}.txt\", \"x\")!\n  \"", $stem, "${{i}}.txt\" }")
     };
 }
 
@@ -89,7 +89,7 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe {
         func: "fs.remove_all",
         size: "",
-        args: &[("path", "{ fs.mkdir_p(\"t${{i}}/a\")!\n  fs.write(\"t${{i}}/a/f\", \"x\")!\n  \"t${{i}}\" }")],
+        args: &[("path", "{ fs.mkdir_p(\"t${{i}}/a\")!\n  fs.write_text(\"t${{i}}/a/f\", \"x\")!\n  \"t${{i}}\" }")],
     },
     // argv and env (oracle/sandbox.rs ARGS / ENV).
     Recipe { func: "args.flag", size: "", args: &[("name", "\"flag\"")] },
