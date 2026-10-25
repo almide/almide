@@ -436,6 +436,7 @@ spec/wasm_cross/hof_closure_string_tail.almd
 spec/wasm_cross/hof_fn_value_callbacks.almd
 spec/wasm_cross/http_query_params_decoder.almd
 spec/wasm_cross/http_response_headers.almd
+spec/wasm_cross/http_value_repr_hides_headers.almd
 spec/wasm_cross/i64_min_literal.almd
 spec/wasm_cross/if_block_forms.almd
 spec/wasm_cross/if_let_forms.almd
