@@ -79,7 +79,7 @@ fn compile_refuses_a_package_name_that_is_a_path() {
     // control: a plain name compiles into target/compile
     let td = tempfile::tempdir().unwrap();
     let p = project(td.path(), "plainmod");
-    std::fs::rename(p.join("src/mod.almd"), p.join("src/plainmod.almd")).unwrap();
     let o = almide(&p, &["compile"]);
     assert!(o.status.success(), "{}", text(&o));
+    assert!(p.join("target/compile/plainmod.almdi").is_file(), "{}", text(&o));
 }
