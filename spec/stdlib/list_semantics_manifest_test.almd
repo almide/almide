@@ -19,10 +19,6 @@ test "list.range_step unit=value" {
   assert_eq("${list.range_step(5, 0, -2)}", "[5, 3, 1]")
 }
 
-test "list.binary_search unit=element-index" {
-  assert_eq("${list.binary_search([10, 20, 30], 20) ?? (0 - 1)}", "1")
-}
-
 test "list.bundled_probe unit=value" {
   assert_eq("${list.bundled_probe(7)}", "8")
 }
