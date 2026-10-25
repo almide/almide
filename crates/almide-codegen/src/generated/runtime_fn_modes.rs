@@ -390,6 +390,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_json_field" => &[false, false],
         "almide_rt_json_index" => &[false, false],
         "almide_rt_json_parse" => &[false],
+        "almide_rt_json_path_repr" => &[false],
         "almide_rt_json_root" => &[],
         "almide_rt_json_stringify" => &[false],
         "almide_rt_libm_atan" => &[false],
