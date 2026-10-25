@@ -48,15 +48,19 @@ fs.root_read_text :: UNPROBEABLE :: parameter type outside the synthesizer (FsRo
 fs.root_remove :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)
 fs.root_write_text :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)
 http.body :: UNPROBEABLE :: parameter type outside the synthesizer
+http.body_bytes :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 http.cancel :: UNPROBEABLE :: parameter type outside the synthesizer
 http.decode_json :: UNPROBEABLE :: parameter type outside the synthesizer
 http.get :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.get needs a declared capability not in this brick
 http.get_bytes :: UNPROBEABLE :: no candidate shape builds natively
 http.get_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
+http.header :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 http.header_values :: UNPROBEABLE :: parameter type outside the synthesizer
 http.headers :: UNPROBEABLE :: parameter type outside the synthesizer
+http.method :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 http.mount :: UNPROBEABLE :: parameter type outside the synthesizer
 http.param :: UNPROBEABLE :: parameter type outside the synthesizer
+http.path :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 http.poll :: UNPROBEABLE :: parameter type outside the synthesizer
 http.query_params :: UNPROBEABLE :: parameter type outside the synthesizer
 http.read_new :: UNPROBEABLE :: parameter type outside the synthesizer
@@ -64,12 +68,21 @@ http.request :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effe
 http.request_bytes :: UNPROBEABLE :: no candidate shape builds natively
 http.route :: UNPROBEABLE :: parameter type outside the synthesizer
 http.router :: UNPROBEABLE :: parameter type outside the synthesizer
+http.send :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 http.serve :: UNPROBEABLE :: parameter type outside the synthesizer
+http.set_body :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+http.set_body_bytes :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 http.set_header :: UNPROBEABLE :: parameter type outside the synthesizer
+http.set_status :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 http.start :: UNPROBEABLE :: parameter type outside the synthesizer
 http.status :: UNPROBEABLE :: parameter type outside the synthesizer
 http.wait :: UNPROBEABLE :: parameter type outside the synthesizer
 http.wrap :: UNPROBEABLE :: parameter type outside the synthesizer
+io.close :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+io.read :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+io.read_exact :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+io.read_to_end :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+io.write :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 json.field :: UNPROBEABLE :: parameter type outside the synthesizer
 json.get_array :: UNPROBEABLE :: no candidate shape builds natively
 json.get_bool :: UNPROBEABLE :: no candidate shape builds natively
@@ -87,6 +100,9 @@ matrix.mul_f32 :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_t :: UNPROBEABLE :: parameter type outside the synthesizer
 matrix.mul_f32_t_scaled :: UNPROBEABLE :: parameter type outside the synthesizer
+net.ip_to_string :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+net.is_loopback :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+net.lookup_host :: HOST_CAPABILITY :: native-only: no wasm leg serves UDP or name resolution (proofs/target-availability.toml)
 net.tcp_accept :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_accept needs a declared capability not in this brick
 net.tcp_available :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_available needs a declared capability not in this brick
 net.tcp_connect :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_connect needs a declared capability not in this brick
@@ -95,6 +111,19 @@ net.tcp_listen :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: ef
 net.tcp_local_port :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_local_port needs a declared capability not in this brick
 net.tcp_read_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_timeout needs a declared capability not in this brick
 net.tcp_set_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_set_timeout needs a declared capability not in this brick
+net.udp_bind :: HOST_CAPABILITY :: native-only: no wasm leg serves UDP or name resolution (proofs/target-availability.toml)
+net.udp_local_port :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+net.udp_recv_from :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+net.udp_send_to :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.child_pid :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.output :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.poll :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.read_new_stderr :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.read_new_stdout :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.run :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.start :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.stop :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.wait :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
 random.next_choice :: UNPROBEABLE :: parameter type outside the synthesizer
 random.next_float :: UNPROBEABLE :: parameter type outside the synthesizer
 random.next_int :: UNPROBEABLE :: parameter type outside the synthesizer
