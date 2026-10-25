@@ -15262,7 +15262,9 @@ pub const SRC_JSON_PARSE: &str = r#"
 
 fn __json_max_depth() -> Int = 1000
 
-fn __json_depth_error() -> String = "json: nesting deeper than ${int.to_string(__json_max_depth())}"
+
+
+fn __json_depth_error() -> String = "json: nesting deeper than 1000"
 
 fn json_parse(text: String) -> Result[Value, String] = {
   let h = prim.handle(text)
@@ -15844,11 +15846,12 @@ fn __jpath_max_depth() -> Int = 1000
 
 fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = {
   let steps = list.len(path)
-  if steps > __jpath_max_depth() or __json_nests_past(nv, __jpath_max_depth() - steps) then err(
-    "json: nesting deeper than ${int.to_string(__jpath_max_depth())}",
-  )
+  if steps > __jpath_max_depth() or __json_nests_past(nv, __jpath_max_depth() - steps) then err(__jpath_depth_error())
   else ok(json_path_set_go(j, path, 0, nv))
 }
+
+
+fn __jpath_depth_error() -> String = "json: nesting deeper than 1000"
 
 
 
