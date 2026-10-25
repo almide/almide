@@ -1,0 +1,24 @@
+// @contract: C-328
+// The userinfo password in the connect class (#4205): a closed port, so the
+// text names the URL with the password read as `***` (an empty one too),
+// a user name with no `:` kept, and the query and fragment verbatim —
+// byte-identical on native and the embedded lane (tests/embedded_cross_test.rs;
+// tests/http_error_class_cross_test.rs also refuses output holding the
+// password). The stock p3 lane is http_url_redaction.almd's: its shim hands
+// the userinfo to the host as part of the authority, which then fails to
+// resolve, so a dial with userinfo is not compared there.
+import http
+
+fn show(tag: String, r: Result[String, String]) -> Unit = {
+  match r {
+    ok(_) => println("${tag}: unexpected ok"),
+    err(e) => println("${tag}: ${e}"),
+  }
+}
+
+effect fn main() -> Unit = {
+  show("password", http.get("http://alice:s3cret@127.0.0.1:9/p?token=abc123&x=1#frag"))
+  show("user-only", http.get("http://alice@127.0.0.1:9/p?token=abc123"))
+  show("empty-password", http.get("http://alice:@127.0.0.1:9/p"))
+  show("framed", http.request("PUT", "http://alice:s3cret@127.0.0.1:9/x", "y", ["X-Ok": "fine"]))
+}
