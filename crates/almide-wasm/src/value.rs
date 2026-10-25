@@ -585,6 +585,16 @@ impl Emitter<'_> {
                 self.emit_value_unbox(VT_ARRAY, lv, "expected Array")?;
                 Some(Lowered::owned(SliceTy::Result(self.types.intern(lv), self.types.intern(STR))))
             }
+            // as_object (#4220): an Object's payload IS its (String, Value)
+            // pairs list (the `object` ctor boxes it), so the Ok payload is a
+            // share of that list — as_array's unbox at the pair element type.
+            ("as_object", [v]) => {
+                self.lower_arg(v, Some(SliceTy::Value), ArgMode::Borrow)?;
+                let ti = self.types.tuple(vec![STR, SliceTy::Value]);
+                let lp = SliceTy::List(self.types.intern(SliceTy::Tuple(ti)));
+                self.emit_value_unbox(VT_OBJECT, lp, "expected Object")?;
+                Some(Lowered::owned(SliceTy::Result(self.types.intern(lp), self.types.intern(STR))))
+            }
             // #658: a JSON number has no int/float split — an Int Value
             // widens to a valid Float.
             ("as_float", [v]) => {
