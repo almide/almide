@@ -7,6 +7,17 @@ test "float.to_int unit=value" {
   assert_eq("${float.to_int(0.0 - 3.9)}", "-3")
 }
 
+test "float.to_int_checked unit=value" {
+  assert_eq(
+    "${"${float.to_int_checked(0.0 - 3.0)} ${float.to_int_checked(0.0 - 3.9)}"}",
+    "some(-3) none",
+  )
+}
+
+test "float.to_int_saturating unit=value" {
+  assert_eq("${float.to_int_saturating(0.0 - 3.9)}", "-3")
+}
+
 test "float.from_int unit=value" {
   assert_eq("${float.from_int(2)}", "2")
 }
