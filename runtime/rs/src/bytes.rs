@@ -376,17 +376,14 @@ pub fn almide_rt_bytes_split(b: &Vec<u8>, sep: &Vec<u8>) -> Vec<Vec<u8>> {
     if sep.is_empty() {
         return vec![b.clone()];
     }
+    // Non-overlapping, left to right: each search resumes where the last
+    // separator ended, so the whole split is one linear pass (#4206).
+    let fail = almide_bytes_kmp_table(sep);
     let mut out: Vec<Vec<u8>> = Vec::new();
     let mut start = 0usize;
-    let mut i = 0usize;
-    while i + sep.len() <= b.len() {
-        if &b[i..i + sep.len()] == sep.as_slice() {
-            out.push(b[start..i].to_vec());
-            i += sep.len();
-            start = i;
-        } else {
-            i += 1;
-        }
+    while let Some(i) = almide_bytes_kmp_find(b, sep, &fail, start) {
+        out.push(b[start..i].to_vec());
+        start = i + sep.len();
     }
     out.push(b[start..].to_vec());
     out
@@ -409,16 +406,58 @@ pub fn almide_rt_bytes_lines(b: &Vec<u8>) -> Vec<Vec<u8>> {
 
 // ── Search & comparison ──
 
+// Substring search is Knuth–Morris–Pratt (#4206): the window-by-window
+// compare it replaced re-read up to `pat.len()` bytes at every position, so
+// a haystack of `a`s and a needle of `a`s ending in `b` took O(n·m) — 23 s at
+// n = 1.6M. With the failure table the haystack index never moves back, so a
+// search is O(n + m) whatever the input. The wasm leg runs the same algorithm
+// (stdlib/bytes_core.almd, crates/almide-wasm/src/kmp.rs).
+
+/// `fail[q]`: the length of the longest proper prefix of `pat[..=q]` that is
+/// also its suffix. `pat` is non-empty.
+fn almide_bytes_kmp_table(pat: &[u8]) -> Vec<usize> {
+    let mut fail = vec![0usize; pat.len()];
+    let mut k = 0usize;
+    for q in 1..pat.len() {
+        while k > 0 && pat[k] != pat[q] {
+            k = fail[k - 1];
+        }
+        if pat[k] == pat[q] {
+            k += 1;
+        }
+        fail[q] = k;
+    }
+    fail
+}
+
+/// The first index `>= from` where non-empty `pat` occurs in `hay`.
+fn almide_bytes_kmp_find(hay: &[u8], pat: &[u8], fail: &[usize], from: usize) -> Option<usize> {
+    let mut k = 0usize;
+    let mut i = from;
+    while i < hay.len() && hay.len() - i >= pat.len() - k {
+        let c = hay[i];
+        while k > 0 && pat[k] != c {
+            k = fail[k - 1];
+        }
+        if pat[k] == c {
+            k += 1;
+        }
+        i += 1;
+        if k == pat.len() {
+            return Some(i - pat.len());
+        }
+    }
+    None
+}
+
 pub fn almide_rt_bytes_contains(b: &Vec<u8>, pat: &Vec<u8>) -> bool {
-    if pat.is_empty() { return true; }
-    if pat.len() > b.len() { return false; }
-    b.windows(pat.len()).any(|w| w == pat.as_slice())
+    almide_rt_bytes_index_of(b, pat).is_some()
 }
 
 pub fn almide_rt_bytes_index_of(b: &Vec<u8>, pat: &Vec<u8>) -> Option<i64> {
     if pat.is_empty() { return Some(0); }
     if pat.len() > b.len() { return None; }
-    b.windows(pat.len()).position(|w| w == pat.as_slice()).map(|i| i as i64)
+    almide_bytes_kmp_find(b, pat, &almide_bytes_kmp_table(pat), 0).map(|i| i as i64)
 }
 
 pub fn almide_rt_bytes_starts_with(b: &Vec<u8>, prefix: &Vec<u8>) -> bool {
