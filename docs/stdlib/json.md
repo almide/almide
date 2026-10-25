@@ -332,7 +332,7 @@ none
 
 ### `json.set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String]`
 
-Set a value at a JSON path. Infallible: a missing object key is created, an index past the end of an array leaves the document unchanged, and a field step through a non-object value replaces that value with an object holding the field.
+Set a value at a JSON path: a missing object key is created, an index past the end of an array leaves the document unchanged, and a field step through a non-object value replaces that value with an object holding the field. The one err is depth: when the path's steps plus the new value's own nesting pass 1000 (the bound `json.parse` has), the result is `err("json: nesting deeper than 1000")`, so every value `set_path` builds can be parsed back.
 
 ```almd run
 import json
@@ -459,7 +459,7 @@ json.index(path: JsonPath, i: Int) -> JsonPath
 // @since 0.5.13 or earlier
 json.get_path(j: Value, path: JsonPath) -> Option[Value]
 
-// j with value at path; missing keys created.
+// j with value at path; missing keys created; err if nested past 1000.
 // @since 0.5.13 or earlier
 json.set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String]
 
