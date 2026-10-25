@@ -1,0 +1,91 @@
+// uuid — RFC 9562 identifiers (R-uuid-01, #3934): the random version 4 and
+// the time-ordered version 7, the 8-4-4-4-12 text form and the 16 raw bytes.
+// Requires `import uuid`.
+//
+// A Uuid is its 16 bytes and orders byte by byte from the first (`compare`),
+// which for v7 is the order they were made in. It is an opaque `mod type`:
+// only this module builds one, so every Uuid holds exactly 16 bytes.
+import hex
+import random
+
+/// A 128-bit identifier: 16 bytes, ordered from the first byte.
+mod type Uuid = Bytes
+
+/// A random (version 4) Uuid: 122 bits from the OS CSPRNG.
+@category("Rand")
+effect fn v4() -> Uuid = Uuid(__versioned(random.bytes(16), 4))
+
+/// A time-ordered (version 7) Uuid: Unix ms, a counter, random bits; each is greater than the last.
+@category("Time", "Rand")
+effect fn v7() -> Uuid = {
+  let t = __v7_stamp(datetime.now_ms())
+  let ms = int.bshr(t, 12)
+  let seq = int.band(t, 4095)
+  let head = bytes.from_list([
+    __octet(ms, 40),
+    __octet(ms, 32),
+    __octet(ms, 24),
+    __octet(ms, 16),
+    __octet(ms, 8),
+    __octet(ms, 0),
+    int.bshr(seq, 8),
+    int.band(seq, 255),
+  ])
+  Uuid(__versioned(bytes.concat(head, random.bytes(8)), 7))
+}
+
+/// The Uuid s spells: 8-4-4-4-12 hex digits, either case, optionally in {…} or after urn:uuid:.
+fn parse(s: String) -> Result[Uuid, String] = {
+  let body = __unwrapped(s)
+  let groups = string.split(body, "-")
+  let lens = groups |> list.map((g) => string.len(g))
+  if lens != [8, 4, 4, 4, 12] then err("uuid.parse: not an 8-4-4-4-12 UUID: \"${s}\"")
+  else match hex.decode(string.join(groups, "")) {
+    ok(b) => ok(Uuid(b)),
+    err(_) => err("uuid.parse: not an 8-4-4-4-12 UUID: \"${s}\""),
+  }
+}
+
+/// u as 8-4-4-4-12 lowercase hex digits.
+fn to_string(u: Uuid) -> String = {
+  let h = hex.encode(__bytes_of(u))
+  "${string.slice(h, 0, 8)}-${string.slice(h, 8, 12)}-${string.slice(h, 12, 16)}-${string.slice(h, 16, 20)}-${string.slice(h, 20, 32)}"
+}
+
+/// The Uuid of exactly 16 bytes b; err for any other length.
+fn from_bytes(b: Bytes) -> Result[Uuid, String] =
+  if bytes.len(b) == 16 then ok(Uuid(b)) else err("uuid.from_bytes: expected 16 bytes, got ${bytes.len(b)}")
+
+/// The 16 bytes of u.
+fn to_bytes(u: Uuid) -> Bytes = __bytes_of(u)
+
+/// Negative, zero or positive as a orders before, with or after b, byte by byte.
+fn compare(a: Uuid, b: Uuid) -> Int = bytes.compare(__bytes_of(a), __bytes_of(b))
+
+local fn __bytes_of(u: Uuid) -> Bytes = match u {
+  Uuid(b) => b
+}
+
+// Byte `shift / 8` of an Int counted from the low end.
+local fn __octet(n: Int, shift: Int) -> Int = int.band(int.bshr(n, shift), 255)
+
+// b with the version `ver` in the high nibble of byte 6 and the RFC 9562
+// variant `10` in the top two bits of byte 8.
+local fn __versioned(b: Bytes, ver: Int) -> Bytes = {
+  let b6 = bytes.set(b, 6, int.bor(int.band(bytes.get(b, 6) ?? 0, 15), ver * 16))
+  bytes.set(b6, 8, int.bor(int.band(bytes.get(b6, 8) ?? 0, 63), 128))
+}
+
+// The 8-4-4-4-12 form inside the accepted wrappers.
+local fn __unwrapped(s: String) -> String =
+  if string.starts_with(s, "{") and string.ends_with(s, "}") then string.slice(s, 1, string.len(s) - 1)
+  else if string.starts_with(string.to_lower(s), "urn:uuid:") then string.drop(s, 9)
+  else s
+
+// ms * 4096 + a 12-bit counter, strictly increasing over the process: the
+// counter restarts at 0 in each new millisecond and, past 4095, carries into
+// the next one (RFC 9562 §6.2 method 1), so two v7 made in one millisecond
+// still order as they were made.
+@intrinsic("almide_rt_uuid___v7_stamp")
+@category("Time")
+effect fn __v7_stamp(ms: Int) -> Int = _
