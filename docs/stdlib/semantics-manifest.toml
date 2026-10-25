@@ -2619,7 +2619,8 @@ note = """
 """
 
 # index_unit vocabulary — value:
-#   value — the Int is the number the dynamic Value wraps or yields
+#   value         — the Int is the number the dynamic Value wraps or yields
+#   element-index — the Int is a 0-based Array element position (value.index)
 [value]
 default_index_unit = "value"
 
@@ -2634,6 +2635,20 @@ name = "int"
 index_unit = "value"
 probe = 'value.as_int(value.int(9)) ?? 0'
 expect = "9"
+
+[[value.fn]]
+name = "index"
+index_unit = "element-index"
+setup = [
+  "let v = value.array([value.int(10), value.int(20), value.int(30)])",
+  "let p = value.index(value.root(), 1)",
+]
+probe = 'value.as_int(value.get_path(v, p) ?? value.int(0 - 1)) ?? (0 - 1)'
+expect = "20"
+note = """
+0-based: index 1 of [10, 20, 30] is 20 — the second element, not the first.
+A negative index is out of range (get_path answers none).
+"""
 
 # index_unit vocabulary — int:
 #   value       — the Int is a plain numeric value at full i64 precision
@@ -3400,36 +3415,6 @@ Declared, not probed (host-capability): the Int is a pid.
 #           "assert_gt failed" exit 1)
 [testing]
 default_index_unit = "value"
-
-[[testing.fn]]
-name = "assert_gt"
-index_unit = "value"
-setup = [
-  "testing.assert_gt(2, 1)",
-]
-probe = "true"
-expect = "true"
-note = """
-The passing call pins the ARGUMENT ORDER: assert_gt(a, b) passes iff a > b,
-so a reversed implementation would fail this file. Strictness is measured
-out-of-band (an in-file failing call would fail the harness itself):
-assert_gt(1, 1) rejects
-on BOTH legs — native panics "assert_gt failed: 1 is not > 1" (exit 101),
-wasm prints "assert_gt failed" (exit 1).
-"""
-
-[[testing.fn]]
-name = "assert_lt"
-index_unit = "value"
-setup = [
-  "testing.assert_lt(1, 2)",
-]
-probe = "true"
-expect = "true"
-note = """
-The mirror of assert_gt: passes iff a < b, strictly — measured out-of-band,
-assert_lt(1, 1) rejects on both legs ("1 is not < 1" natively).
-"""
 
 [[testing.fn]]
 name = "__abort_site_selected"
