@@ -332,6 +332,11 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve): (u32, Opti
     i.i64_const(0).return_();
     i.end();
 
+    // op 76: a deliberate exit's mark (#4203): answered 0.
+    i.local_get(op).i32_const(76).i32_eq().if_(BlockType::Empty);
+    i.i64_const(0).return_();
+    i.end();
+
     // ── The filesystem (#3140): the spliced service ───────────────────
     // Every fs op but the fan prefetch triple goes to the p1 fs service,
     // spliced over its p3 adapter — the same code the stock-p1 artifact
