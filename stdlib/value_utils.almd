@@ -7,53 +7,56 @@
 // a FRESH transformed key (owned, moved via store_str) and co-own the value only.
 // Key transforms are ASCII-only (native's to_ascii_uppercase/lowercase): byte-level
 // processing is char-exact because UTF-8 continuation bytes never land in A-Z/a-z.
-// keys ∋ k — linear scan of the List[String] block (the __vobj_find shape).
-fn __vu_has(keys: List[String], k: String, i: Int, n: Int) -> Bool = if i >= n then false
-else {
-  let e: String = prim.load_handle(prim.handle(keys) + 12 + i * 8)
-  if e == k then true
-  else __vu_has(keys, k, i + 1, n)
-}
+// keys ∋ k — a binary search of the key list sorted once per call (#4207, the
+// value_core __vx_* key index): O((n + k) log k), where a scan of `keys` per
+// field was O(n·k). kb is the key list's payload, sk its sorted index.
+fn __vu_has(kb: Int, sk: Int, nk: Int, k: Int) -> Bool = __vx_first(kb, 8, sk, nk, k) >= 0
 
 // Count the pairs whose membership matches `want` (true = pick, false = omit).
-fn __vu_count(v: Value, keys: List[String], want: Bool, i: Int, n: Int, nk: Int, acc: Int) -> Int =
+fn __vu_count(vb: Int, kb: Int, sk: Int, want: Bool, i: Int, n: Int, nk: Int, acc: Int) -> Int =
   if i >= n then acc
-  else {
-    let k: String = prim.load_handle(prim.handle(v) + 12 + (2 * i) * 8)
-    let hit = __vu_has(keys, k, 0, nk)
-    if hit == want then __vu_count(v, keys, want, i + 1, n, nk, acc + 1)
-    else __vu_count(v, keys, want, i + 1, n, nk, acc)
-  }
+  else if __vu_has(kb, sk, nk, prim.load64(vb + (2 * i) * 8)) == want then __vu_count(
+    vb,
+    kb,
+    sk,
+    want,
+    i + 1,
+    n,
+    nk,
+    acc + 1,
+  )
+  else __vu_count(vb, kb, sk, want, i + 1, n, nk, acc)
 
 // Fill the kept pairs in object order, co-owning key AND value (rc_inc both).
-fn __vu_fill(v: Value, keys: List[String], dst: Value, want: Bool, i: Int, n: Int, nk: Int, w: Int) -> Int =
+fn __vu_fill(vb: Int, kb: Int, sk: Int, dst: Value, want: Bool, i: Int, n: Int, nk: Int, w: Int) -> Int =
   if i >= n then w
   else {
-    let h = prim.handle(v)
-    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
-    let hit = __vu_has(keys, k, 0, nk)
-    if hit == want then {
+    let kh = prim.load64(vb + (2 * i) * 8)
+    if __vu_has(kb, sk, nk, kh) == want then {
       let dh = prim.handle(dst)
-      let kh = prim.load64(h + 12 + (2 * i) * 8)
-      let vh = prim.load64(h + 12 + (2 * i + 1) * 8)
+      let vh = prim.load64(vb + (2 * i + 1) * 8)
       prim.rc_inc(kh)
       prim.rc_inc(vh)
       prim.store64(dh + 12 + (2 * w) * 8, kh)
       prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
-      __vu_fill(v, keys, dst, want, i + 1, n, nk, w + 1)
-    } else __vu_fill(v, keys, dst, want, i + 1, n, nk, w)
+      __vu_fill(vb, kb, sk, dst, want, i + 1, n, nk, w + 1)
+    } else __vu_fill(vb, kb, sk, dst, want, i + 1, n, nk, w)
   }
 
 fn __vu_sel(v: Value, keys: List[String], want: Bool) -> Value = {
   let h = prim.handle(v)
   let n = prim.load32(h + 8) / 2
-  let nk = prim.load32(prim.handle(keys) + 4)
-  let cnt = __vu_count(v, keys, want, 0, n, nk, 0)
+  let kh = prim.handle(keys)
+  let nk = prim.load32(kh + 4)
+  let xk = prim.alloc_list(nk)
+  let yk = prim.alloc_list(nk)
+  let sk = __vx_sort(kh + 12, 8, nk, prim.handle(xk) + 12, prim.handle(yk) + 12)
+  let cnt = __vu_count(h + 12, kh + 12, sk, want, 0, n, nk, 0)
   let dst = prim.alloc_value(2 * cnt)
   let dh = prim.handle(dst)
   prim.store32(dh + 4, 6)
   prim.store32(dh + 8, 2 * cnt)
-  let _w = __vu_fill(v, keys, dst, want, 0, n, nk, 0)
+  let _w = __vu_fill(h + 12, kh + 12, sk, dst, want, 0, n, nk, 0)
   dst
 }
 
@@ -231,6 +234,63 @@ fn __vu_fold_pairs(pairs: List[(String, Value)]) -> List[(String, Value)] =
     }
     list.zip(keys, vals)
   }
+
+// The STRUCTURAL wasm leg's value.merge / pick / omit (#4207): its emitter
+// (crates/almide-wasm/src/value.rs) hands these the Objects' pair lists, so
+// the key index is the keyed Map (a hash index past 16 entries) and each call
+// is O(|a| + |b|) / O(n + k), where the emitter's scans were O(|a|·|b|) /
+// O(n·k). merge is the fold v0 does: a's pairs in order, a key b has takes
+// b's LAST value in the FIRST slot holding it, b's new keys appended once at
+// their first position.
+fn __vu_merge_pairs(pa: List[(String, Value)], pb: List[(String, Value)]) -> List[(String, Value)] = {
+  var at: Map[String, Int] = map.new()
+  var keys: List[String] = []
+  var vals: List[Value] = []
+  for (k, v) in pa {
+    if not map.contains(at, k) then {
+      map.insert(at, k, list.len(keys))
+    } else ()
+    list.push(keys, k)
+    list.push(vals, v)
+  }
+  for (k, v) in pb {
+    match map.get(at, k) {
+      some(i) => {
+        vals = list.set(vals, i, v)
+      },
+      none => {
+        map.insert(at, k, list.len(keys))
+        list.push(keys, k)
+        list.push(vals, v)
+      },
+    }
+  }
+  list.zip(keys, vals)
+}
+
+fn __vu_select_pairs(pairs: List[(String, Value)], keys: List[String], want: Bool) -> List[(String, Value)] = {
+  var named: Map[String, Int] = map.new()
+  for k in keys {
+    map.insert(named, k, 0)
+  }
+  var out: List[(String, Value)] = []
+  for (k, v) in pairs {
+    if map.contains(named, k) == want then { list.push(out, (k, v)) } else ()
+  }
+  out
+}
+
+fn __vu_pick_pairs(pairs: List[(String, Value)], keys: List[String]) -> List[(String, Value)] = __vu_select_pairs(
+  pairs,
+  keys,
+  true,
+)
+
+fn __vu_omit_pairs(pairs: List[(String, Value)], keys: List[String]) -> List[(String, Value)] = __vu_select_pairs(
+  pairs,
+  keys,
+  false,
+)
 
 // Two keys that rename to one (`a_b` and `aB` under camelCase) are folded by
 // value.object's upsert (C-401): first position, last value, as natively.

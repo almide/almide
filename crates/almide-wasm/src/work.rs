@@ -54,10 +54,6 @@ pub(crate) enum Helper {
     /// (recursive): tags must match, Float is IEEE ==, Array/Object
     /// compare element/pair-wise IN ORDER (the oracle's value_eq).
     ValueEq { key_off: u32, val_off: u32 },
-    /// `$value_merge(a, b) -> i32` — object merge: A's keys in order
-    /// (B's value wins on a shared key), then B's new keys in B order;
-    /// any non-Object operand yields b (the oracle's value_merge).
-    ValueMerge { key_off: u32, val_off: u32 },
     /// `$utf8_lossy(bytes) -> str` — String::from_utf8_lossy verbatim:
     /// Table 3-7 well-formed ranges, one U+FFFD per MAXIMAL invalid
     /// subpart (the WHATWG replacement walk).

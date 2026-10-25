@@ -495,9 +495,6 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
         *key_off,
         *val_off,
     ),
-    Helper::ValueMerge { key_off, val_off } => {
-        value_helpers::emit_value_merge_helper(*key_off, *val_off)
-    }
     Helper::ValueKeys => value_helpers::emit_value_keys_helper(),
     Helper::StringSplit => value_helpers::emit_string_split_helper(),
     Helper::ScanF64 => runtime::emit_scan_f64(),
