@@ -1,0 +1,37 @@
+// process_stdin_lines — SELF-HOSTED `process.stdin_lines()` over the WASI stdin
+// floor (#3620): read fd 0 to EOF in 4096-byte chunks (io.read_n_bytes, which
+// every wasm leg lowers on the shared stdin cursor; a 0-length chunk IS EOF)
+// into one Bytes buffer, then answer what native `BufRead::lines` answers: one
+// entry per `\n`-terminated line with exactly one trailing `\r` stripped, a
+// final unterminated line kept verbatim, and no entry for the empty tail after
+// a final `\n`. Native fails the whole call on the first line that is not
+// UTF-8; a stream is valid UTF-8 iff every line is (the `\n` byte never sits
+// inside a multi-byte sequence), so one check over the buffer gives the same
+// verdict, with native's text. Every Result is built by ok()/err() and no
+// block is touched raw: the file calls no prim op, so the wasm leg admits
+// it from the @implements declaration alone.
+import io
+
+@implements("process.stdin_lines")
+effect fn process_stdin_lines() -> Result[List[String], String] = {
+  var buf = bytes.zeros(0)
+  var n = 1
+  while n > 0 {
+    let chunk = io.read_n_bytes(4096)
+    n = list.len(chunk)
+    for v in chunk {
+      bytes.push(buf, v)
+    }
+  }
+  if not bytes.is_valid_utf8(buf) then err("process.stdin_lines(): stream did not contain valid UTF-8")
+  else {
+    // Every part but the last was cut at a `\n`; the last is the tail after
+    // the final `\n` — empty (no entry) or an unterminated line, which native
+    // keeps verbatim, a trailing `\r` included.
+    let parts = string.split(bytes.to_string_lossy(buf), "\n")
+    let cut = list.len(parts) - 1
+    let terminated = list.take(parts, cut) |> list.map((l) => string.strip_suffix(l, "\r") ?? l)
+    let tail = list.drop(parts, cut)
+    ok(if tail == [""] then terminated else terminated + tail)
+  }
+}
