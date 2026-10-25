@@ -98,7 +98,7 @@ fn main() -> Unit = {
 /usr/bin
 ```
 
-### `path.dirname(p: String) -> String`
+### `path.dirname(path: String) -> String`
 
 Everything before the last separator.
 
@@ -113,7 +113,7 @@ fn main() -> Unit = {
 /usr/bin
 ```
 
-### `path.basename(p: String) -> String`
+### `path.basename(path: String) -> String`
 
 Everything after the last separator.
 
@@ -128,7 +128,7 @@ fn main() -> Unit = {
 node
 ```
 
-### `path.stem(p: String) -> String`
+### `path.stem(path: String) -> String`
 
 The basename with its extension removed.
 
@@ -143,7 +143,7 @@ fn main() -> Unit = {
 report.tar
 ```
 
-### `path.extension(p: String) -> Option[String]`
+### `path.extension(path: String) -> Option[String]`
 
 The extension WITHOUT the dot, or `none` when there is none. A leading-dot
 filename (`.gitignore`) has no extension.
@@ -170,7 +170,7 @@ none
 some("bak")
 ```
 
-### `path.is_absolute(p: String) -> Bool`
+### `path.is_absolute(path: String) -> Bool`
 
 True when the path starts at the filesystem root.
 
@@ -187,7 +187,7 @@ true
 false
 ```
 
-### `path.normalize(p: String) -> String`
+### `path.normalize(path: String) -> String`
 
 Collapse `.` segments, resolve `..` against the preceding segment, and squeeze
 repeated separators. Purely lexical — no symlink resolution, no filesystem

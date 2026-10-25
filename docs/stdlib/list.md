@@ -41,7 +41,7 @@ fn main() -> Unit = {
 0
 ```
 
-### `list.set(xs: List[A], i: Int, val: A) -> List[A]`
+### `list.set(xs: List[A], i: Int, x: A) -> List[A]`
 
 Return a new list with the element at index i replaced.
 
@@ -140,7 +140,7 @@ fn main() -> Unit = {
 [(1, "a"), (2, "b")]
 ```
 
-### `list.flatten(xss: List[List[T]]) -> List[T]`
+### `list.flatten(xs: List[List[A]]) -> List[A]`
 
 Flatten a list of lists into a single list.
 
@@ -545,7 +545,7 @@ fn main() -> Unit = {
 [2, 3, 4]
 ```
 
-### `list.insert(xs: List[A], i: Int, val: A) -> List[A]`
+### `list.insert(xs: List[A], i: Int, x: A) -> List[A]`
 
 Insert an element at index i, shifting elements right.
 
@@ -597,7 +597,7 @@ fn main() -> Unit = {
 [1, 20, 3]
 ```
 
-### `list.repeat(val: A, n: Int) -> List[A]`
+### `list.repeat(x: A, n: Int) -> List[A]`
 
 Create a list with a value repeated n times.
 
