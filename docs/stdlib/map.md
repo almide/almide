@@ -142,12 +142,12 @@ fn main() -> Unit = {
 3
 ```
 
-### `map.entries(m: Map[K, V]) -> List[(K, V)]`
+### `map.to_list(m: Map[K, V]) -> List[(K, V)]`
 
 Get all key-value pairs as a list of tuples, in insertion order.
 
 ```almd
-map.entries(m)
+map.to_list(m)
 ```
 
 ### `map.merge(a: Map[K, V], b: Map[K, V]) -> Map[K, V]`
@@ -407,7 +407,7 @@ map.len(m: Map[K, V]) -> Int
 
 // (key, value) pairs in insertion order.
 // @since 0.5.0 or earlier
-map.entries(m: Map[K, V]) -> List[(K, V)]
+map.to_list(m: Map[K, V]) -> List[(K, V)]
 
 // a plus b's entries; b wins on shared keys.
 // @since 0.5.0 or earlier

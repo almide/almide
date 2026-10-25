@@ -39,7 +39,7 @@ effect fn main() -> Unit = {
   }
   let vocab = list.range(0, vocab_size) |> list.map(word_of)
   let counts = list.range(0, n) |> list.map((i) => vocab[draw(i)]) |> list.group_by((w) => w) |> map.map((ws) => list.len(ws))
-  let top = map.entries(counts) |> list.sort_by(((w, c)) => (0 - c, w)) |> list.take(10)
+  let top = map.to_list(counts) |> list.sort_by(((w, c)) => (0 - c, w)) |> list.take(10)
   for (w, c) in top {
     println("${w} ${c}")
   }

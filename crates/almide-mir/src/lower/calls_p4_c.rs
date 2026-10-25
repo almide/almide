@@ -139,7 +139,7 @@ impl LowerCtx {
             return;
         }
         if crate::lower::is_list_str_str_ty(ty) {
-            // `List[(String,String)]` (map.entries) arg temp — DropListStrStr frees each tuple's
+            // `List[(String,String)]` (map.to_list) arg temp — DropListStrStr frees each tuple's
             // two Strings; the flat heap_elem_lists fallback would leak them.
             self.value_drops.entry(dst).or_default().str_str_elems = true;
             return;

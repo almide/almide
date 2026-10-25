@@ -282,7 +282,7 @@ test "list swap" {
 
 test "map entries" {
   let m = map.set(map.set(map.new(), "a", 1), "b", 2)
-  let entries = map.entries(m)
+  let entries = map.to_list(m)
   // Map order is not guaranteed, just check length
   assert_eq(list.len(entries), 2)
 }

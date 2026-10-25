@@ -340,7 +340,7 @@ fn map_eq_skv(a: Map[String, Int], b: Map[String, Int]) -> Bool = {
   else __skv_eqm_at(ah, an, bh, bn, 0)
 }
 
-// map.entries over the skv layout — List[(String, scalar)] pairs in insertion order.
+// map.to_list over the skv layout — List[(String, scalar)] pairs in insertion order.
 // Each pair CO-OWNS its key (rc_inc — the call-site DropListStrInt releases it) and
 // copies the scalar value.
 fn __skv_entries_fill(dh: Int, sh: Int, entries: Int, i: Int) -> Int = if i >= entries then 0

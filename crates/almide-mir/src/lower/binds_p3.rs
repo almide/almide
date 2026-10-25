@@ -1,6 +1,6 @@
 /// The element's drop kind for `try_lower_record_list_literal_as`'s list-literal builder: a
 /// recursive-drop record (`$__drop_list_<R>`), a `(String,String)` tuple (`Op::DropListStrStr` —
-/// the map.entries / `[(k,v), …]` literal shape), OR an Option/Result CTOR element (`[some(1),
+/// the map.to_list / `[(k,v), …]` literal shape), OR an Option/Result CTOR element (`[some(1),
 /// none]`, `[ok(1), err("x")]` — the collect-test shapes): a Flat class (scalar payload — the
 /// per-element `rc_dec` of `DropListStr` is exact) or a LenLoop class (owned handle slots — the
 /// generated `$__drop_list_lenlist`). Moved to module scope (was function-local) so

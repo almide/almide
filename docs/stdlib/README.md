@@ -1244,7 +1244,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `map.keys(m: Map[K, V]) -> List[K]` — Every key, in insertion order.
 - `map.values(m: Map[K, V]) -> List[V]` — Every value, in key insertion order.
 - `map.len(m: Map[K, V]) -> Int` — Entry count; 0 for an empty map.
-- `map.entries(m: Map[K, V]) -> List[(K, V)]` — (key, value) pairs in insertion order.
+- `map.to_list(m: Map[K, V]) -> List[(K, V)]` — (key, value) pairs in insertion order.
 - `map.merge(a: Map[K, V], b: Map[K, V]) -> Map[K, V]` — a plus b's entries; b wins on shared keys.
 - `map.is_empty(m: Map[K, V]) -> Bool` — true iff m has no entries.
 - `map.from_list(pairs: List[(K, V)]) -> Map[K, V]` — Map of pairs; a repeated key takes the last value.

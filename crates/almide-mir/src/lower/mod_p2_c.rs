@@ -484,7 +484,7 @@ pub(crate) fn is_opt_list_str_ty(ty: &Ty) -> bool {
             Ty::Applied(TypeConstructorId::List, b) if b.len() == 1 && matches!(b[0], Ty::String)))
 }
 
-/// A `List[(String, String)]` — the `map.entries` / render_attrs shape. Each element is an owned
+/// A `List[(String, String)]` — the `map.to_list` / render_attrs shape. Each element is an owned
 /// (String, String) TUPLE; its scope-end drop must be [`Op::DropListStrStr`] (per tuple: rc_dec BOTH
 /// String slots, then the tuple, then the list). The flat `DropListStr` (`heap_elem_lists`) would
 /// rc_dec only the tuple HANDLE — freeing the tuple block but LEAKING its two Strings (a render loop
@@ -492,7 +492,7 @@ pub(crate) fn is_opt_list_str_ty(ty: &Ty) -> bool {
 pub(crate) fn is_list_str_str_ty(ty: &Ty) -> bool {
     use almide_lang::types::constructor::TypeConstructorId;
     // BOTH pair sides must be single FLAT blocks — a String, a List[scalar] row
-    // (list.zip_rc over matrix rows), or an all-scalar TUPLE (map.entries over the
+    // (list.zip_rc over matrix rows), or an all-scalar TUPLE (map.to_list over the
     // hval-tuple flavor, C-039) — so DropListStrStr's two per-slot rc_decs are each
     // a FULL free. A rich payload (List[heap], record, Value) stays out (would leak).
     let flat = |t: &Ty| {

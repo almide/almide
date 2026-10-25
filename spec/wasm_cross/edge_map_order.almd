@@ -17,7 +17,7 @@ fn main() -> Unit = {
   println(int.to_string(map.len(m)))
   let lines = map.fold(m, [], (acc, k, v) => acc + ["${k}=${int.to_string(v)}"])
   println(list.join(lines, ","))
-  let ent = map.entries(m)
+  let ent = map.to_list(m)
   println(int.to_string(list.len(ent)))
   println(int.to_string(map.get_or(m, "k3", 0 - 1)))
   println(int.to_string(map.get_or(m, "nope", 0 - 1)))

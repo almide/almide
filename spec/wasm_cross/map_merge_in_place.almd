@@ -10,7 +10,7 @@ type Holder = { snap: Map[String, String], tag: Int }
 
 fn small(i: Int) -> Map[String, String] = map.from_list([("k${i % 5}", "v${i}"), ("n${i}", "w${i}")])
 
-fn show(m: Map[String, String]) -> String = map.entries(m) |> list.map(((k, v)) => "${k}=${v}") |> list.join(",")
+fn show(m: Map[String, String]) -> String = map.to_list(m) |> list.map(((k, v)) => "${k}=${v}") |> list.join(",")
 
 fn go(m: Map[String, String], i: Int, k: Int) -> Map[String, String] = if i >= k then m
 else go(map.merge(m, small(i)), i + 1, k)
