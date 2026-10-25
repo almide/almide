@@ -150,14 +150,14 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "http.get_bytes", size: "url", args: &[("url", BYTES_URL)] },
     Recipe { func: "http.get_response", size: "url", args: &[("url", BYTES_URL)] },
     Recipe { func: "http.request", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[(\"x-k\", \"v\")]")] },
-    Recipe { func: "http.send", size: "body", args: &[("req", ECHO_REQUEST)] },
+    Recipe { func: "http.send", size: "req", args: &[("req", ECHO_REQUEST)] },
     Recipe { func: "http.request_bytes", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[(\"x-k\", \"v\")]")] },
     // The call handle (#2631): start's cost is the exchange it begins,
     // which the probe's digest waits out (the echo of n bytes); poll answers
     // a call that has ended (its recipe waits first) with a copy of the n
     // bytes; read_new's first read of an ended call is its whole body, so
     // every step reads a fresh one; cancel ends a fresh call of its own.
-    Recipe { func: "http.start", size: "body", args: &[("req", ECHO_REQUEST), ("limits", NO_LIMITS)] },
+    Recipe { func: "http.start", size: "req", args: &[("req", ECHO_REQUEST), ("limits", NO_LIMITS)] },
     Recipe { func: "http.poll", size: "c", args: &[("c", ENDED_CALL)] },
     Recipe { func: "http.read_new", size: "c", args: &[("c", FRESH_ENDED_CALL)] },
     Recipe { func: "http.wait", size: "c", args: &[("c", CALL)] },
