@@ -476,20 +476,24 @@ fn binop_arith(op: &str, left_ty: &Ty, right_ty: &Ty) -> Option<BinOp> {
         ("*", Ty::Matrix, Ty::Float) | ("*", Ty::Float, Ty::Matrix) => BinOp::ScaleMatrix,
         ("*", Ty::Matrix, Ty::Int) | ("*", Ty::Int, Ty::Matrix) => BinOp::ScaleMatrix,
         // Float dispatch covers canonical `Float` plus the sized
-        // `Float32`. Any other numeric type (Int / Int8 ... /
-        // UInt64) takes the Int path. The *width* of the
+        // `Float32` and `Float64` (#4055: `Float64` fell to the Int
+        // arm). Any other numeric type (Int / Int8 ... / UInt64)
+        // takes the Int path. The *width* of the
         // arithmetic op (i32_add vs i64_add vs f32_add vs
         // f64_add) is resolved at WASM emit time from the
         // operand's valtype; Rust codegen emits plain `a + b`
         // and lets rustc pick.
         ("+", Ty::Float, _) | ("+", _, Ty::Float)
-        | ("+", Ty::Float32, _) | ("+", _, Ty::Float32) => BinOp::AddFloat,
+        | ("+", Ty::Float32, _) | ("+", _, Ty::Float32)
+        | ("+", Ty::Float64, _) | ("+", _, Ty::Float64) => BinOp::AddFloat,
         ("+", _, _) => BinOp::AddInt,
         ("-", Ty::Float, _) | ("-", _, Ty::Float)
-        | ("-", Ty::Float32, _) | ("-", _, Ty::Float32) => BinOp::SubFloat,
+        | ("-", Ty::Float32, _) | ("-", _, Ty::Float32)
+        | ("-", Ty::Float64, _) | ("-", _, Ty::Float64) => BinOp::SubFloat,
         ("-", _, _) => BinOp::SubInt,
         ("*", Ty::Float, _) | ("*", _, Ty::Float)
-        | ("*", Ty::Float32, _) | ("*", _, Ty::Float32) => BinOp::MulFloat,
+        | ("*", Ty::Float32, _) | ("*", _, Ty::Float32)
+        | ("*", Ty::Float64, _) | ("*", _, Ty::Float64) => BinOp::MulFloat,
         _ => return None,
     })
 }
@@ -503,13 +507,16 @@ fn binop_other(op: &str, left_ty: &Ty, right_ty: &Ty) -> Option<BinOp> {
     Some(match (op, left_ty, right_ty) {
         ("*", _, _) => BinOp::MulInt,
         ("/", Ty::Float, _) | ("/", _, Ty::Float)
-        | ("/", Ty::Float32, _) | ("/", _, Ty::Float32) => BinOp::DivFloat,
+        | ("/", Ty::Float32, _) | ("/", _, Ty::Float32)
+        | ("/", Ty::Float64, _) | ("/", _, Ty::Float64) => BinOp::DivFloat,
         ("/", _, _) => BinOp::DivInt,
         ("%", Ty::Float, _) | ("%", _, Ty::Float)
-        | ("%", Ty::Float32, _) | ("%", _, Ty::Float32) => BinOp::ModFloat,
+        | ("%", Ty::Float32, _) | ("%", _, Ty::Float32)
+        | ("%", Ty::Float64, _) | ("%", _, Ty::Float64) => BinOp::ModFloat,
         ("%", _, _) => BinOp::ModInt,
         ("^", Ty::Float, _) | ("^", _, Ty::Float)
-        | ("^", Ty::Float32, _) | ("^", _, Ty::Float32) => BinOp::PowFloat,
+        | ("^", Ty::Float32, _) | ("^", _, Ty::Float32)
+        | ("^", Ty::Float64, _) | ("^", _, Ty::Float64) => BinOp::PowFloat,
         ("^", _, _) => BinOp::PowInt,
         ("==", _, _) => BinOp::Eq, ("!=", _, _) => BinOp::Neq,
         ("<", _, _) => BinOp::Lt, (">", _, _) => BinOp::Gt,
