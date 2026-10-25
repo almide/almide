@@ -4714,7 +4714,7 @@ fn __encode_list_bool(items: List[Bool]) -> Value = value.array(__el_bool(items,
 fn __el_string(items: List[String], n: Int, i: Int, acc: List[Value]) -> List[Value] =
   if i >= n then acc
   else __el_string(items, n, i + 1, acc + [
-    value.str(list.get(items, i) ?? "")
+    value.string(list.get(items, i) ?? "")
   ])
 
 fn __encode_list_string(items: List[String]) -> Value = value.array(__el_string(items, list.len(items), 0, []))
@@ -4735,7 +4735,7 @@ fn __encode_option_bool(v: Bool?) -> Value = match v {
 }
 
 fn __encode_option_string(v: String?) -> Value = match v {
-  some(x) => value.str(x),
+  some(x) => value.string(x),
   none => value.null(),
 }
 "#;
@@ -4774,9 +4774,30 @@ fn diff_seconds(a: Int, b: Int) -> Int = _
 @intrinsic("almide_rt_datetime_format")
 fn format(ts: Int, pattern: String) -> String = _
 
-/// UTC epoch secs; out-of-range fields roll over.
-@intrinsic("almide_rt_datetime_from_parts")
-fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = _
+
+
+
+/// UTC epoch secs of the parts; err naming the first part out of range.
+fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String] =
+  if m < 1 or m > 12 then err("month out of range: " + int.to_string(m))
+  else if d < 1 or d > __days_in_month(y, m) then err("day out of range: " + int.to_string(d))
+  else if h < 0 or h > 23 then err("hour out of range: " + int.to_string(h))
+  else if min < 0 or min > 59 then err("minute out of range: " + int.to_string(min))
+  else if s < 0 or s > 59 then err("second out of range: " + int.to_string(s))
+  else ok(datetime.__from_parts(y, m, d, h, min, s))
+
+local fn __days_in_month(y: Int, m: Int) -> Int = match m {
+  2 => if y % 4 == 0 and (y % 100 != 0 or y % 400 == 0) then 29 else 28,
+  4 => 30,
+  6 => 30,
+  9 => 30,
+  11 => 30,
+  _ => 31,
+}
+
+
+@intrinsic("almide_rt_datetime___from_parts")
+fn __from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = _
 
 /// Identity: seconds are already a timestamp.
 @intrinsic("almide_rt_datetime_from_unix")
@@ -5188,7 +5209,7 @@ fn __dpi_build(d: List[Int], tm: List[Int], off: Int) -> Result[Int, String] = {
   else if h < 0 or h > 23 then err("hour out of range: " + int.to_string(h))
   else if mi < 0 or mi > 59 then err("minute out of range: " + int.to_string(mi))
   else if s < 0 or s > 59 then err("second out of range: " + int.to_string(s))
-  else ok(datetime.from_parts(y, mo, dd, h, mi, s) - off)
+  else ok(datetime.__from_parts(y, mo, dd, h, mi, s) - off)
 }
 
 fn datetime_parse_iso(s: String) -> Result[Int, String] = {
@@ -8290,33 +8311,46 @@ type FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }
 @intrinsic("almide_rt_fs_read_text")
 effect fn read_text(path: String) -> Result[String, String] = _
 
-/// Bytes as Ints 0..255; err if missing.
+
+
+
+/// Whole file as Bytes; err if missing.
 @intrinsic("almide_rt_fs_read_bytes")
-effect fn read_bytes(path: String) -> Result[List[Int], String] = _
+effect fn read_bytes(path: String) -> Result[Bytes, String] = _
 
 /// Overwrites or creates; err if no parent dir.
 @ordered
 @intrinsic("almide_rt_fs_write")
 @category("FS.write")
-effect fn write(path: String, content: String) -> Result[Unit, String] = _
-
-/// Writes low byte of each Int (-1 -> 255).
-@ordered
-@intrinsic("almide_rt_fs_write_bytes")
-@category("FS.write")
-effect fn write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = _
+effect fn write_text(path: String, content: String) -> Result[Unit, String] = _
 
 /// Writes data verbatim, replacing the file.
 @ordered
-@intrinsic("almide_rt_fs_write_bytes_raw")
+@intrinsic("almide_rt_fs_write_bytes")
 @category("FS.write")
-effect fn write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = _
+effect fn write_bytes(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Appends content; creates the file if missing.
 @ordered
 @intrinsic("almide_rt_fs_append")
 @category("FS.write")
-effect fn append(path: String, content: String) -> Result[Unit, String] = _
+effect fn append_text(path: String, content: String) -> Result[Unit, String] = _
+
+
+
+/// Appends data verbatim; creates the file if missing.
+@ordered
+@category("FS.write")
+effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = {
+  let old = if fs.exists(path) then __as_append(fs.read_bytes(path))!
+  else bytes.new()
+  __as_append(fs.write_bytes(path, bytes.concat(old, data)))
+}
+
+local fn __as_append[A](r: Result[A, String]) -> Result[A, String] = match r {
+  ok(x) => ok(x),
+  err(e) => err(["fs.read_bytes", "fs.write_bytes"] |> list.find((call) => string.starts_with(e, call)) |> option.map((call) => "fs.append_bytes" + string.drop(e, string.len(call))) ?? e),
+}
 
 /// Creates dir and parents; ok if it exists.
 @ordered
@@ -8401,17 +8435,13 @@ effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, Stri
 @intrinsic("almide_rt_fs_read_text_if_exists")
 effect fn read_text_if_exists(path: String) -> Result[String?, String] = _
 
-/// Bytes as Ints, or none if missing.
+/// File Bytes, or none if missing.
 @intrinsic("almide_rt_fs_read_bytes_if_exists")
-effect fn read_bytes_if_exists(path: String) -> Result[List[Int]?, String] = _
+effect fn read_bytes_if_exists(path: String) -> Result[Bytes?, String] = _
 
 /// read_lines result, or none if missing.
 @intrinsic("almide_rt_fs_read_lines_if_exists")
 effect fn read_lines_if_exists(path: String) -> Result[List[String]?, String] = _
-
-/// File Bytes, or none if missing.
-@intrinsic("almide_rt_fs_read_bytes_raw_if_exists")
-effect fn read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = _
 
 /// Deletes a file or empty dir; err if missing.
 @ordered
@@ -8491,10 +8521,6 @@ effect fn is_symlink(path: String) -> Bool = _
 /// Mtime in Unix seconds; err if missing.
 @intrinsic("almide_rt_fs_modified_at")
 effect fn modified_at(path: String) -> Result[Int, String] = _
-
-/// Whole file as Bytes; err if missing.
-@intrinsic("almide_rt_fs_read_bytes_raw")
-effect fn read_bytes_raw(path: String) -> Result[Bytes, String] = _
 
 
 
@@ -8586,7 +8612,7 @@ effect fn root_read_text(root: FsRoot, path: String) -> Result[String, String] =
   path,
 )
 
-/// read_bytes_raw of path inside root; err if it escapes.
+/// read_bytes of path inside root; err if it escapes.
 effect fn root_read_bytes(root: FsRoot, path: String) -> Result[Bytes, String] = __root_answer(
   __root_read_bytes(__root_at(root, path)!),
   path,
@@ -8652,7 +8678,7 @@ fn __app_old(path: String) -> String = if prim.path_exists(path) then __app_read
 effect fn fs_append(path: String, content: String) -> Result[Unit, String] = {
   let old = __app_old(path)
   let joined = old + content
-  let w: Result[Unit, String] = prim.write_text_file_as(path, joined, "fs.append")
+  let w: Result[Unit, String] = prim.write_text_file_as(path, joined, "fs.append_text")
   let wh = prim.handle(w)
   if prim.load32(wh + 16) != 0 then {
     let m: String = prim.load_handle(wh + 12)
@@ -9385,50 +9411,18 @@ pub const SRC_FS_READ_BYTES: &str = r#"
 
 
 
-
-effect fn fs_read_bytes(path: String) -> Result[List[Int], String] = {
-  let r = prim.read_bytes_file(path)
-  match r {
-    ok(b) => ok(bytes.to_list(b)),
-    err(e) => err(e),
-  }
-}
+effect fn fs_read_bytes(path: String) -> Result[Bytes, String] = prim.read_bytes_file_as(
+  path,
+  "fs.read_bytes",
+)
 "#;
 pub const SRC_FS_READ_BYTES_IF_EXISTS: &str = r#"
 
 
 
-
-effect fn fs_read_bytes_if_exists(path: String) -> Result[List[Int]?, String] = {
+effect fn fs_read_bytes_if_exists(path: String) -> Result[Bytes?, String] = {
   if prim.path_exists(path) then {
     let r = prim.read_bytes_file_as(path, "fs.read_bytes_if_exists")
-    match r {
-      ok(b) => {
-        let xs = bytes.to_list(b)
-        ok(some(xs))
-      },
-      err(e) => err(e),
-    }
-  } else ok(none)
-}
-"#;
-pub const SRC_FS_READ_BYTES_RAW: &str = r#"
-
-
-
-
-effect fn fs_read_bytes_raw(path: String) -> Result[Bytes, String] = prim.read_bytes_file_as(
-  path,
-  "fs.read_bytes_raw",
-)
-"#;
-pub const SRC_FS_READ_BYTES_RAW_IF_EXISTS: &str = r#"
-
-
-
-effect fn fs_read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = {
-  if prim.path_exists(path) then {
-    let r = prim.read_bytes_file_as(path, "fs.read_bytes_raw_if_exists")
     match r {
       ok(b) => ok(some(b)),
       err(e) => err(e),
@@ -9841,32 +9835,6 @@ pub const SRC_FS_WRITE_BYTES: &str = r#"
 
 
 
-fn __wb_fill(dst: Int, xs: List[Int], n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let b = xs[i]
-  prim.store8(dst + i, int.band(b, 255))
-  __wb_fill(dst, xs, n, i + 1)
-}
-
-effect fn fs_write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = {
-  let n = list.len(bytes)
-  let s = prim.alloc_str(n)
-  let _f = __wb_fill(prim.handle(s) + 12, bytes, n, 0)
-  let w: Result[Unit, String] = prim.write_text_file_as(path, s, "fs.write_bytes")
-  let wh = prim.handle(w)
-  if prim.load32(wh + 16) != 0 then {
-    let m: String = prim.load_handle(wh + 12)
-    err(m)
-  } else ok(())
-}
-"#;
-pub const SRC_FS_WRITE_BYTES_RAW: &str = r#"
-
-
-
-
-
-
 fn __wbr_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let b = prim.load8(src + i)
@@ -9874,12 +9842,12 @@ else {
   __wbr_copy(dst, src, n, i + 1)
 }
 
-effect fn fs_write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = {
+effect fn fs_write_bytes(path: String, data: Bytes) -> Result[Unit, String] = {
   let h = prim.handle(data)
   let n = prim.load32(h + 4)
   let s = prim.alloc_str(n)
   let _c = __wbr_copy(prim.handle(s) + 12, h + 12, n, 0)
-  let w: Result[Unit, String] = prim.write_text_file_as(path, s, "fs.write_bytes_raw")
+  let w: Result[Unit, String] = prim.write_text_file_as(path, s, "fs.write_bytes")
   let wh = prim.handle(w)
   if prim.load32(wh + 16) != 0 then {
     let m: String = prim.load_handle(wh + 12)
@@ -9902,9 +9870,9 @@ pub const SRC_HASH: &str = r#"
 
 
 
-/// 32-bit FNV-1a of s's UTF-8; non-negative Int.
+/// 32-bit FNV-1a of b, in 0..4294967295.
 @intrinsic("almide_rt_hash_fnv1a32")
-fn fnv1a32(s: String) -> Int = _
+fn fnv1a32(b: Bytes) -> Int = _
 
 /// 32-bit FNV-1a of b, in 0..4294967295.
 @intrinsic("almide_rt_hash_fnv1a32_bytes")
@@ -9914,9 +9882,9 @@ fn fnv1a32_bytes(b: Bytes) -> Int = _
 @intrinsic("almide_rt_hash_sha256")
 fn sha256(b: Bytes) -> Bytes = _
 
-/// SHA-256 of s's UTF-8, 64 lowercase hex chars.
+/// SHA-256 of b as 64 lowercase hex chars.
 @intrinsic("almide_rt_hash_sha256_hex")
-fn sha256_hex(s: String) -> String = _
+fn sha256_hex(b: Bytes) -> String = _
 
 
 
@@ -10350,8 +10318,8 @@ import prim
 fn __fnv_go(a: Int, n: Int, i: Int, h: Int) -> Int = if i >= n then h
 else __fnv_go(a, n, i + 1, prim.band(prim.bxor(h, prim.load8(a + i)) * 16777619, 4294967295))
 
-fn hash_fnv1a32(s: String) -> Int = {
-  let h = prim.handle(s)
+fn hash_fnv1a32(b: Bytes) -> Int = {
+  let h = prim.handle(b)
   __fnv_go(h + 12, prim.load32(h + 4), 0, 2166136261)
 }
 
@@ -10602,8 +10570,8 @@ else {
   __sha_hex_fill(dst, src, i + 1)
 }
 
-fn hash_sha256_hex(s: String) -> String = {
-  let h = prim.handle(s)
+fn hash_sha256_hex(b: Bytes) -> String = {
+  let h = prim.handle(b)
   let d = __sha256_digest(h + 12, prim.load32(h + 4))
   let out = prim.alloc_str(64)
   let _x = __sha_hex_fill(prim.handle(out) + 12, prim.handle(d) + 12, 0)
@@ -11343,7 +11311,7 @@ fn __canonical(path: String) -> Bool = {
   let empty_inner = list.enumerate(segs) |> list.any(((i, s)) => s == "" and i + 1 < n)
   let dot = segs |> list.any((s) => s == "." or s == "..")
   let unreserved = string.split(path, "%") |> list.drop(1) |> list.any((p) => __encodes_unreserved(p))
-  let odd = string.chars(path) |> list.any((c) => c == "\\" or (string.codepoint(c) ?? 0) < 32 or (string.codepoint(c) ?? 0) == 127)
+  let odd = string.to_list(path) |> list.any((c) => c == "\\" or (string.to_codepoint(c) ?? 0) < 32 or (string.to_codepoint(c) ?? 0) == 127)
   not empty_inner and not dot and not unreserved and not odd
 }
 
@@ -11368,7 +11336,7 @@ fn __bad_binding(segs: List[String], parts: List[String]) -> Bool = {
 }
 
 fn __hex_pair(p: String) -> Bool = {
-  let cs = string.chars(string.take(p, 2))
+  let cs = string.to_list(string.take(p, 2))
   list.len(cs) == 2 and list.all(cs, __is_hex)
 }
 
@@ -11490,7 +11458,7 @@ else if __is_param(s) then __name_of(s) != "" and not string.contains(__name_of(
 )
 else not string.contains(s, "{") and not string.contains(s, "}")
 
-fn __method_ok(m: String) -> Bool = string.chars(m) |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c))
+fn __method_ok(m: String) -> Bool = string.to_list(m) |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c))
 
 fn __pattern_problems(r: HttpRoute) -> List[String] = {
   let last = list.len(r.segments) - 1
@@ -11618,7 +11586,7 @@ import http
 
 fn __hc_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __hc_frame(method: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
+fn __hc_frame(method: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> String = map.to_list(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
   "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
   (acc, cell) => acc + cell,
 )
@@ -11707,7 +11675,7 @@ effect fn __hc_stream_limited_impl(method: String, url: String, body: String, he
 
 
 
-fn __hc_classic_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
+fn __hc_classic_frame(method: String, body: String, headers: Map[String, String]) -> String = map.to_list(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
   "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell("classic")}${__hc_cell("classic")}",
   (acc, cell) => acc + cell,
 )
@@ -11741,7 +11709,7 @@ pub const SRC_HTTP_FRAMED: &str = r#"
 
 fn __http_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __http_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__http_cell(k)}${__http_cell(v)}") |> list.fold(
+fn __http_frame(method: String, body: String, headers: Map[String, String]) -> String = map.to_list(headers) |> list.map(((k, v)) => "${__http_cell(k)}${__http_cell(v)}") |> list.fold(
   "${__http_cell(method)}${__http_cell(body)}",
   (acc, cell) => acc + cell,
 )
@@ -11878,8 +11846,8 @@ else if __hq_fold(list.get(a, i) ?? "") != __hq_fold(list.get(b, i) ?? "") then 
 else __hq_ci_at(a, b, i + 1)
 
 fn __hq_ci_eq(x: String, y: String) -> Bool = {
-  let a = string.chars(x)
-  let b = string.chars(y)
+  let a = string.to_list(x)
+  let b = string.to_list(y)
   if list.len(a) != list.len(b) then false
   else __hq_ci_at(a, b, 0)
 }
@@ -11890,7 +11858,7 @@ fn __hq_nh(req: List[String]) -> Int = int.parse(list.get(req, 3) ?? "0") ?? 0
 fn __hq_params_at(req: List[String]) -> Int = 4 + 2 * __hq_nh(req)
 
 fn http_new_request(method: String, target: String, body: String, headers: Map[String, String]) -> List[String] = {
-  let pairs = map.entries(headers) |> list.flat_map(((k, v)) => [k, v])
+  let pairs = map.to_list(headers) |> list.flat_map(((k, v)) => [k, v])
   [method, target, body, int.to_string(map.len(headers))] + pairs
 }
 
@@ -11975,8 +11943,8 @@ else if __hr_fold(list.get(a, i) ?? "") != __hr_fold(list.get(b, i) ?? "") then 
 else __hr_ci_at(a, b, i + 1)
 
 fn __hr_ci_eq(x: String, y: String) -> Bool = {
-  let a = string.chars(x)
-  let b = string.chars(y)
+  let a = string.to_list(x)
+  let b = string.to_list(y)
   if list.len(a) != list.len(b) then false
   else __hr_ci_at(a, b, 0)
 }
@@ -12053,7 +12021,7 @@ fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[
 
 
 
-fn __hr_lower(s: String) -> String = string.chars(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
+fn __hr_lower(s: String) -> String = string.to_list(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
 
 
 
@@ -12121,7 +12089,7 @@ fn __hs_tchar(c: String) -> Bool = c != "" and string.contains(
   c,
 )
 
-fn __hs_cp(c: String) -> Int = string.codepoint(c) ?? 0
+fn __hs_cp(c: String) -> Int = string.to_codepoint(c) ?? 0
 
 
 
@@ -12131,13 +12099,13 @@ fn __hs_quote_char(c: String) -> String = match c {
   _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
 }
 
-fn __hs_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
+fn __hs_quote(s: String) -> String = "\"" + (string.to_list(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
 
 fn __hs_control(c: String) -> Bool = (__hs_cp(c) < 32 and c != "\t") or __hs_cp(c) == 127
 
 fn __hs_bad_header(k: String, v: String) -> String? =
-  if k == "" or not list.all(string.chars(k), (c) => __hs_tchar(c)) then some("response header name ${__hs_quote(k)} is not a token")
-  else if list.any(string.chars(v), (c) => __hs_control(c)) then some("response header ${k} has a control character in its value")
+  if k == "" or not list.all(string.to_list(k), (c) => __hs_tchar(c)) then some("response header name ${__hs_quote(k)} is not a token")
+  else if list.any(string.to_list(v), (c) => __hs_control(c)) then some("response header ${k} has a control character in its value")
   else none
 
 fn __hs_pairs(resp: List[String]) -> List[(String, String)] = list.range(
@@ -12178,7 +12146,7 @@ fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_
 
 
 fn __hs_request_id(raw: List[String]) -> String = string.pad_start(
-  int.to_hex(hash.fnv1a32((list.get(raw, 0) ?? "") + " " + (list.get(raw, 1) ?? "") + "\n" + (list.get(raw, 2) ?? ""))),
+  int.to_hex(hash.fnv1a32(bytes.from_string((list.get(raw, 0) ?? "") + " " + (list.get(raw, 1) ?? "") + "\n" + (list.get(raw, 2) ?? "")))),
   8,
   "0",
 )
@@ -15089,7 +15057,7 @@ fn stringify(v: Value) -> String = _
 
 /// JSON with 2-space indent; [] and {} inline, NaN/inf null.
 @intrinsic("almide_json_stringify_pretty")
-fn stringify_pretty(j: Value) -> String = _
+fn stringify_pretty(v: Value) -> String = _
 
 
 /// String at key; none if absent or non-string.
@@ -15326,7 +15294,7 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
     if b == 34 then match __jp_string(base, len, q) {
       ok(r) => {
         let (s, np) = r
-        ok((value.str(s), np))
+        ok((value.string(s), np))
       },
       err(e) => err(e),
     } else if (b == 123 or b == 91) and depth >= 1000 then err("json: nesting deeper than 1000")
@@ -15354,7 +15322,7 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
     else {
       let (cp, _l) = __jp_cp(base, q)
       let cpos = __jp_charpos(base, q, 0, 0)
-      err("unexpected char '" + string.from_codepoint(cp) + "' at pos " + int.to_string(cpos))
+      err("unexpected char '" + (string.from_codepoint(cp) ?? "") + "' at pos " + int.to_string(cpos))
     }
   }
 }
@@ -16003,10 +15971,10 @@ fn get[A](xs: List[A], i: Int) -> A? = _
 @intrinsic("almide_rt_list_get_or")
 fn get_or[A](xs: List[A], i: Int, default: A) -> A = _
 
-/// Copy with slot i = val; no-op if i out of range.
+/// Copy with slot i = x; no-op if i out of range.
 @intrinsic("almide_rt_list_set")
 @reuse(xs)
-fn set[A](xs: List[A], i: Int, val: A) -> List[A] = _
+fn set[A](xs: List[A], i: Int, x: A) -> List[A] = _
 
 /// Copy with i and j swapped; no-op if either OOB.
 @intrinsic("almide_rt_list_swap")
@@ -16042,7 +16010,7 @@ fn zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)] = _
 
 /// Inner lists concatenated in order.
 @intrinsic("almide_rt_list_flatten")
-fn flatten[T](xss: List[List[T]]) -> List[T] = _
+fn flatten[A](xs: List[List[A]]) -> List[A] = _
 
 
 
@@ -16226,19 +16194,19 @@ fn range(start: Int, end: Int) -> List[Int] = _
 @reuse(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
-/// Copy with val at i; i >= len or i < 0 appends.
+/// Copy with x at i; i >= len or i < 0 appends.
 @intrinsic("almide_rt_list_insert")
 @consume(xs)
-fn insert[A](xs: List[A], i: Int, val: A) -> List[A] = _
+fn insert[A](xs: List[A], i: Int, x: A) -> List[A] = _
 
 /// Copy without slot i; no-op if i out of range.
 @intrinsic("almide_rt_list_remove_at")
 @consume(xs)
 fn remove_at[A](xs: List[A], i: Int) -> List[A] = _
 
-/// n copies of val; [] for n <= 0.
+/// n copies of x; [] for n <= 0.
 @intrinsic("almide_rt_list_repeat")
-fn repeat[A](val: A, n: Int) -> List[A] = _
+fn repeat[A](x: A, n: Int) -> List[A] = _
 
 /// sep between adjacent elements.
 @intrinsic("almide_rt_list_intersperse")
@@ -16272,9 +16240,8 @@ fn shuffle[A](xs: List[A]) -> List[A] = _
 @intrinsic("almide_rt_list_window")
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
-/// Index of target in ascending xs, or none.
-@intrinsic("almide_rt_list_binary_search")
-fn binary_search(xs: List[Int], target: Int) -> Int? = _
+/// Index of target in xs sorted ascending (list.sort's order), or none.
+fn binary_search[A](xs: List[A], target: A) -> Int? = list.binary_search_by(xs, target, (x) => x)
 
 
 /// Appends x to xs in place.
@@ -16305,7 +16272,7 @@ fn bundled_probe(n: Int) -> Int = n + 1
 
 
 /// (take n, drop n); n past the end gives (xs, []).
-fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), list.drop(xs, n))
+fn split_at[A](xs: List[A], n: Int) -> (List[A], List[A]) = (list.take(xs, n), list.drop(xs, n))
 
 
 
@@ -16322,8 +16289,8 @@ fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), l
 
 
 /// [seed, f(seed), ...] of length n; [] if n <= 0.
-fn iterate[T](seed: T, f: (T) -> T, n: Int) -> List[T] = {
-  var out: List[T] = []
+fn iterate[A](seed: A, f: (A) -> A, n: Int) -> List[A] = {
+  var out: List[A] = []
   var x = seed
   for _ in 0..<n {
     list.push(out, x)
@@ -20177,38 +20144,6 @@ fn list_index_of(xs: List[Int], x: Int) -> Int? = {
   let idx = __idx_find(h, len, x, 0)
   if idx < 0 then __lio_none() else __lio_some(idx)
 }
-
-
-
-
-
-
-
-
-
-
-
-
-fn __bsearch(h: Int, target: Int, base: Int, size: Int) -> Int = if size > 1 then {
-  let half = size / 2
-  let mid = base + half
-  let e = prim.load64(h + 12 + mid * 8)
-  let nb = if e > target then base else mid
-  __bsearch(h, target, nb, size - half)
-} else {
-  let e = prim.load64(h + 12 + base * 8)
-  if e == target then base else -1
-}
-
-fn list_binary_search(xs: List[Int], target: Int) -> Int? = {
-  let h = prim.handle(xs)
-  let len = prim.load32(h + 4)
-  if len == 0 then __lio_none()
-  else {
-    let idx = __bsearch(h, target, 0, len)
-    if idx < 0 then __lio_none() else __lio_some(idx)
-  }
-}
 "#;
 pub const SRC_LIST_SORT: &str = r#"
 
@@ -22118,7 +22053,7 @@ fn len[K, V](m: Map[K, V]) -> Int = _
 /// (key, value) pairs in insertion order.
 @intrinsic("almide_rt_map_entries")
 @reuse(m)
-fn entries[K, V](m: Map[K, V]) -> List[(K, V)] = _
+fn to_list[K, V](m: Map[K, V]) -> List[(K, V)] = _
 
 /// a plus b's entries; b wins on shared keys.
 @intrinsic("almide_rt_map_merge")
@@ -22130,10 +22065,10 @@ fn merge[K, V](a: Map[K, V], b: Map[K, V]) -> Map[K, V] = _
 fn is_empty[K, V](m: Map[K, V]) -> Bool = _
 
 
-/// Map of pairs; a repeated key takes the last value.
+/// Map of the pairs xs; a repeated key takes the last value.
 @intrinsic("almide_rt_map_from_entries")
-@consume(pairs)
-fn from_list[K, V](pairs: List[(K, V)]) -> Map[K, V] = _
+@consume(xs)
+fn from_list[K, V](xs: List[(K, V)]) -> Map[K, V] = _
 
 
 /// Same keys and order, values replaced by f(v).
@@ -22198,79 +22133,79 @@ fn clear[K, V](mut m: Map[K, V]) -> Unit = _
 
 
 /// (index, (key, value)) pairs in insertion order, index from 0.
-fn enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))] = list.enumerate(map.entries(m))
+fn enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))] = list.enumerate(map.to_list(m))
 
 /// Entries paired with ys by position; stops at the shorter.
-fn zip[K, V, B](m: Map[K, V], ys: List[B]) -> List[((K, V), B)] = list.zip(map.entries(m), ys)
+fn zip[K, V, B](m: Map[K, V], ys: List[B]) -> List[((K, V), B)] = list.zip(map.to_list(m), ys)
 
 /// f over (entry, ys element) pairs; stops at the shorter.
 fn zip_with[K, V, B, C](m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C] = list.zip_with(
-  map.entries(m),
+  map.to_list(m),
   ys,
   f,
 )
 
 /// The somes f gives over the entries, in insertion order.
 fn filter_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> List[B] = list.filter_map(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// The first some f gives over the entries, or none; f is not called after the hit.
-fn find_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> B? = list.find_map(map.entries(m), f)
+fn find_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> B? = list.find_map(map.to_list(m), f)
 
 /// Left fold of the entries seeded by the first; none when empty.
 fn reduce[K, V](m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> (K, V)? = list.reduce(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// Running fold values over the entries, init excluded.
 fn scan[K, V, B](m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B] = list.scan(
-  map.entries(m),
+  map.to_list(m),
   init,
   f,
 )
 
 /// (entries where f holds, the rest), insertion order kept.
 fn partition[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)]) = list.partition(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// Key f(entry) -> entries; keys in first-seen order.
 fn group_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = list.group_by(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// Entries sorted by key f(entry), stable; f runs once per entry.
 fn sort_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)] = list.sort_by(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// Entries sorted by cmp, stable: negative puts a first.
 fn sort_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)] = list.sort_with(
-  map.entries(m),
+  map.to_list(m),
   cmp,
 )
 
 /// Entry with the least f(entry); the first on ties.
-fn min_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.entries(m), f)
+fn min_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.to_list(m), f)
 
 /// Entry with the greatest f(entry); the first on ties.
-fn max_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.entries(m), f)
+fn max_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.to_list(m), f)
 
 /// Least entry by cmp; the first on ties.
 fn min_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.min_with(
-  map.entries(m),
+  map.to_list(m),
   cmp,
 )
 
 /// Greatest entry by cmp; the first on ties.
 fn max_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.max_with(
-  map.entries(m),
+  map.to_list(m),
   cmp,
 )
 
@@ -22285,7 +22220,7 @@ fn __fallible_map[K, V, B, E](m: Map[K, V], f: (V) -> Result[B, E]) -> Result[Ma
   var out: List[(K, B)] = []
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.1) {
       ok(b) => list.push(out, (p.0, b)),
@@ -22305,7 +22240,7 @@ fn __fallible_filter[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Res
   var out: List[(K, V)] = []
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(keep) => if keep then list.push(out, p) else (),
@@ -22325,7 +22260,7 @@ fn __fallible_fold[K, V, A, E](m: Map[K, V], init: A, f: (A, K, V) -> Result[A, 
   var acc = init
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(acc, p.0, p.1) {
       ok(a) => {
@@ -22347,7 +22282,7 @@ fn __fallible_any[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result
   var hit = false
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(b) => if b then {
@@ -22370,7 +22305,7 @@ fn __fallible_all[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result
   var held = true
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(b) => if b then ()
@@ -22394,7 +22329,7 @@ fn __fallible_count[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Resu
   var n = 0
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(b) => if b then {
@@ -22415,7 +22350,7 @@ fn __fallible_count[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Resu
 
 
 fn __fallible_find[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[(K, V)?, E] = {
-  let es = map.entries(m)
+  let es = map.to_list(m)
   var hit_at = list.len(es)
   var i = 0
   var failed: E? = none
@@ -22471,69 +22406,69 @@ fn __fallible_upsert[K, V, E](m: Map[K, V], key: K, init: V, f: (V) -> Result[V,
 
 
 fn __fallible_zip_with[K, V, B, C, E](m: Map[K, V], ys: List[B], f: ((K, V), B) -> Result[C, E]) -> Result[List[C], E] = list.zip_with(
-  map.entries(m),
+  map.to_list(m),
   ys,
   (p, y) => f(p, y)!,
 )
 
 fn __fallible_filter_map[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B?, E]) -> Result[List[B], E] = list.filter_map(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_find_map[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B?, E]) -> Result[B?, E] = list.find_map(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_reduce[K, V, E](m: Map[K, V], f: ((K, V), (K, V)) -> Result[(K, V), E]) -> Result[(K, V)?, E] = list.reduce(
-  map.entries(m),
+  map.to_list(m),
   (a, b) => f(a, b)!,
 )
 
 fn __fallible_scan[K, V, B, E](m: Map[K, V], init: B, f: (B, (K, V)) -> Result[B, E]) -> Result[List[B], E] = list.scan(
-  map.entries(m),
+  map.to_list(m),
   init,
   (acc, p) => f(acc, p)!,
 )
 
 fn __fallible_partition[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -> Result[(List[(K, V)], List[(K, V)]), E] = list.partition(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_group_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E] = list.group_by(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_sort_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[List[(K, V)], E] = list.sort_by(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_sort_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[List[(K, V)], E] = list.sort_with(
-  map.entries(m),
+  map.to_list(m),
   (a, b) => cmp(a, b)!,
 )
 
 fn __fallible_min_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.min_by(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_max_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.max_by(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_min_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[(K, V)?, E] = list.min_with(
-  map.entries(m),
+  map.to_list(m),
   (a, b) => cmp(a, b)!,
 )
 
 fn __fallible_max_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[(K, V)?, E] = list.max_with(
-  map.entries(m),
+  map.to_list(m),
   (a, b) => cmp(a, b)!,
 )
 "#;
@@ -28222,9 +28157,9 @@ fn shape(m: Matrix) -> (Int, Int) = _
 @intrinsic("almide_rt_matrix_transpose")
 fn transpose(m: Matrix) -> Matrix = _
 
-/// Matrix of equal-length rows; [] is 0 x 0.
+/// Matrix of the equal-length rows xs; [] is 0 x 0.
 @intrinsic("almide_rt_matrix_from_lists")
-fn from_lists(rows: List[List[Float]]) -> Matrix = _
+fn from_lists(xs: List[List[Float]]) -> Matrix = _
 
 
 
@@ -28310,9 +28245,9 @@ fn pow(m: Matrix, exp: Float) -> Matrix = _
 fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
 
 
-/// f32 LE rows x cols at offset; all 0 if data short.
+/// f32 LE rows x cols of b at offset; all 0 if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f32_le")
-fn from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
 
 /// Row-major f64 LE, 8 bytes per element.
 @intrinsic("almide_rt_matrix_to_bytes_f64_le")
@@ -28326,13 +28261,13 @@ fn to_bytes_f32_le(m: Matrix) -> Bytes = _
 @intrinsic("almide_rt_matrix_to_bytes_f16_le")
 fn to_bytes_f16_le(m: Matrix) -> Bytes = _
 
-/// f16 LE rows x cols at offset; all 0 if data short.
+/// f16 LE rows x cols of b at offset; all 0 if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f16_le")
-fn from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
 
-/// f64 LE rows x cols at offset; all 0 if data short.
+/// f64 LE rows x cols of b at offset; all 0 if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f64_le")
-fn from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
 
 
 /// bias added to each row; cols cut to bias.
@@ -28345,7 +28280,7 @@ fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
 
 /// Side-by-side join; [] gives 0 x 0.
 @intrinsic("almide_rt_matrix_concat_cols_many")
-fn concat_cols(matrices: List[Matrix]) -> Matrix = _
+fn concat_cols(xs: List[Matrix]) -> Matrix = _
 
 /// Alias of matrix.concat_cols.
 @deprecated(since=5, use="matrix.concat_cols")
@@ -30254,7 +30189,12 @@ fn to_list[A](o: A?) -> List[A] = _
 
 
 /// some(values) if no element is none, else none.
-fn collect[T](xs: List[T?]) -> List[T]? =
+fn collect[A](xs: List[A?]) -> List[A]? = __collect(xs)
+
+
+
+
+local fn __collect[T](xs: List[T?]) -> List[T]? =
   if list.any(xs, (o) => option.is_none(o)) then none
   else some(list.map(
     xs,
@@ -30265,7 +30205,7 @@ fn collect[T](xs: List[T?]) -> List[T]? =
   ))
 
 /// some of all f(x), or none; f runs on every x.
-fn collect_map[T, U](xs: List[T], f: (T) -> U?) -> List[U]? = option.collect(list.map(xs, f))
+fn collect_map[A, B](xs: List[A], f: (A) -> B?) -> List[B]? = option.collect(list.map(xs, f))
 
 
 
@@ -31706,22 +31646,22 @@ fn join(base: String, child: String) -> String = {
 fn join_within(base: String, child: String) -> Result[String, String] =
   if stays_inside(child) then ok(join(base, child)) else err("path traversal rejected: " + child)
 
-/// p minus last segment; "" if no slash.
-fn dirname(p: String) -> String = {
-  let parts = string.split(p, "/")
+/// path minus last segment; "" if no slash.
+fn dirname(path: String) -> String = {
+  let parts = string.split(path, "/")
   let n = list.len(parts)
   if n <= 1 then ""
   else {
     let parent_parts = list.take(parts, n - 1)
     let joined = string.join(parent_parts, "/")
 
-    if string.len(joined) == 0 and string.starts_with(p, "/") then "/" else joined
+    if string.len(joined) == 0 and string.starts_with(path, "/") then "/" else joined
   }
 }
 
-/// Last non-empty segment; "" for / or empty p.
-fn basename(p: String) -> String = {
-  let parts = string.split(p, "/")
+/// Last non-empty segment; "" for / or empty path.
+fn basename(path: String) -> String = {
+  let parts = string.split(path, "/")
   let filtered = list.filter(parts, (s) => string.len(s) > 0)
   match list.last(filtered) {
     some(name) => name,
@@ -31730,8 +31670,8 @@ fn basename(p: String) -> String = {
 }
 
 /// After basename's last dot; none if no dot or dotfile.
-fn extension(p: String) -> String? = {
-  let name = basename(p)
+fn extension(path: String) -> String? = {
+  let name = basename(path)
   let parts = string.split(name, ".")
   let n = list.len(parts)
 
@@ -31740,12 +31680,12 @@ fn extension(p: String) -> String? = {
   else if string.starts_with(name, ".") and n == 2 then none else list.last(parts)
 }
 
-/// True when p starts with /.
-fn is_absolute(p: String) -> Bool = string.starts_with(p, "/")
+/// True when path starts with /.
+fn is_absolute(path: String) -> Bool = string.starts_with(path, "/")
 
 /// Basename minus last extension; dotfiles as-is.
-fn stem(p: String) -> String = {
-  let name = basename(p)
+fn stem(path: String) -> String = {
+  let name = basename(path)
   let parts = string.split(name, ".")
   let n = list.len(parts)
 
@@ -31759,9 +31699,9 @@ fn stem(p: String) -> String = {
 }
 
 /// Resolves . and .. lexically; "" becomes ".".
-fn normalize(p: String) -> String = {
-  let absolute = string.starts_with(p, "/")
-  let segments = string.split(p, "/")
+fn normalize(path: String) -> String = {
+  let absolute = string.starts_with(path, "/")
+  let segments = string.split(path, "/")
 
   let cleaned = list.filter(segments, (s) => string.len(s) > 0 and s != ".")
 
@@ -33055,7 +32995,7 @@ fn captures(re: Regex, s: String) -> List[String?]? = regex.__captures(re.patter
 fn captures_all(re: Regex, s: String) -> List[List[String?]] = __matches(regex.__scan(re.pattern, s, false)) |> list.map((m) => m |> list.drop(1) |> list.map((c) => __unmark(c)))
 
 /// s with every regex metacharacter escaped, so it matches itself.
-fn escape(s: String) -> String = string.chars(s) |> list.map((c) => if string.contains("\\.+*?()|[]{}^$", c) then "\\" + c else c) |> string.join("")
+fn escape(s: String) -> String = string.to_list(s) |> list.map((c) => if string.contains("\\.+*?()|[]{}^$", c) then "\\" + c else c) |> string.join("")
 
 
 fn __unmark(c: String) -> String? = if string.starts_with(c, "1") then some(string.drop(c, 1)) else none
@@ -35573,8 +35513,8 @@ fn to_err_option[A, E](r: Result[A, E]) -> E? = _
 
 /// (ok values, err values), each in list order.
 @intrinsic("almide_rt_result_partition")
-@consume(rs)
-fn partition[T, E](rs: List[Result[T, E]]) -> (List[T], List[E]) = _
+@consume(xs)
+fn partition[A, E](xs: List[Result[A, E]]) -> (List[A], List[E]) = _
 
 
 
@@ -35611,9 +35551,9 @@ fn or_else[A, E, F](r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F] = m
   err(e) => f(e),
 }
 
-/// err(err_val) if pred fails on ok; err kept.
-fn filter[A, E](r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E] = match r {
-  ok(v) => if pred(v) then ok(v) else err(err_val),
+/// err(err_val) if f fails on ok; err kept.
+fn filter[A, E](r: Result[A, E], f: (A) -> Bool, err_val: E) -> Result[A, E] = match r {
+  ok(v) => if f(v) then ok(v) else err(err_val),
   err(e) => err(e),
 }
 "#;
@@ -36757,20 +36697,20 @@ fn new[A]() -> Set[A] = _
 @intrinsic("almide_rt_set_from_list")
 fn from_list[A](xs: List[A]) -> Set[A] = _
 
-/// Copy with value appended; unchanged if present.
+/// Copy with x appended; unchanged if present.
 @intrinsic("almide_rt_set_insert")
 @reuse(s)
-fn insert[A](s: Set[A], value: A) -> Set[A] = _
+fn insert[A](s: Set[A], x: A) -> Set[A] = _
 
-/// Copy without value; unchanged if absent.
+/// Copy without x; unchanged if absent.
 @intrinsic("almide_rt_set_remove")
 @reuse(s)
-fn remove[A](s: Set[A], value: A) -> Set[A] = _
+fn remove[A](s: Set[A], x: A) -> Set[A] = _
 
-/// true when value is a member.
+/// true when x is a member.
 @intrinsic("almide_rt_set_contains")
-@borrow_ref(value)
-fn contains[A](s: Set[A], value: A) -> Bool = _
+@borrow_ref(x)
+fn contains[A](s: Set[A], x: A) -> Bool = _
 
 /// Member count; 0 for an empty set.
 @intrinsic("almide_rt_set_len")
@@ -38304,9 +38244,9 @@ fn len(s: String) -> Int = _
 @intrinsic("almide_rt_string_len")
 fn length(s: String) -> Int = _
 
-/// sub occurs in s; true for empty sub.
+/// needle occurs in s; true for empty needle.
 @intrinsic("almide_rt_string_contains")
-fn contains(s: String, sub: String) -> Bool = _
+fn contains(s: String, needle: String) -> Bool = _
 
 /// s begins with prefix; "" always matches.
 @intrinsic("almide_rt_string_starts_with")
@@ -38325,9 +38265,9 @@ fn slice(s: String, start: Int, end: Int = 9223372036854775807) -> String = _
 @intrinsic("almide_rt_string_byte_slice")
 fn byte_slice(s: String, start: Int, end: Int) -> String? = _
 
-/// Left-padded to n chars with ch; never truncates.
+/// Left-padded to n chars with fill; never truncates.
 @intrinsic("almide_rt_string_pad_left")
-fn pad_start(s: String, n: Int, ch: String) -> String = _
+fn pad_start(s: String, n: Int, fill: String) -> String = _
 
 /// UTF-8 bytes of s as Ints 0..255.
 @intrinsic("almide_rt_string_to_bytes")
@@ -38359,7 +38299,7 @@ fn lines(s: String) -> List[String] = _
 
 /// Each codepoint as a one-char string.
 @intrinsic("almide_rt_string_chars")
-fn chars(s: String) -> List[String] = _
+fn to_list(s: String) -> List[String] = _
 
 /// Codepoint index of first needle, or none.
 @intrinsic("almide_rt_string_index_of")
@@ -38397,17 +38337,22 @@ fn is_upper(s: String) -> Bool = _
 @intrinsic("almide_rt_string_is_lower")
 fn is_lower(s: String) -> Bool = _
 
-/// Scalar value of first char; none if s empty.
+/// Scalar value of s when s is exactly one codepoint; none otherwise.
 @intrinsic("almide_rt_string_codepoint")
-fn codepoint(s: String) -> Int? = _
+fn to_codepoint(s: String) -> Int? = _
 
-/// One-char string; "" if n is not a scalar.
-@intrinsic("almide_rt_string_from_codepoint")
-fn from_codepoint(n: Int) -> String = _
+/// One-char string of n; none if n is not a Unicode scalar value.
+fn from_codepoint(n: Int) -> String? =
+  if n < 0 or n > 1114111 or (n >= 55296 and n <= 57343) then none
+  else some(string.__from_codepoint(n))
 
-/// Right-padded to n chars with ch; never truncates.
+
+@intrinsic("almide_rt_string___from_codepoint")
+fn __from_codepoint(n: Int) -> String = _
+
+/// Right-padded to n chars with fill; never truncates.
 @intrinsic("almide_rt_string_pad_right")
-fn pad_end(s: String, n: Int, ch: String) -> String = _
+fn pad_end(s: String, n: Int, fill: String) -> String = _
 
 /// s without leading whitespace.
 @intrinsic("almide_rt_string_trim_start")
@@ -38417,9 +38362,12 @@ fn trim_start(s: String) -> String = _
 @intrinsic("almide_rt_string_trim_end")
 fn trim_end(s: String) -> String = _
 
-/// Non-overlapping sub count; len+1 if sub empty.
-@intrinsic("almide_rt_string_count")
-fn count(s: String, sub: String) -> Int = _
+/// Non-overlapping needle count; len+1 if needle empty.
+@intrinsic("almide_rt_string_count_matches")
+fn count_matches(s: String, needle: String) -> Int = _
+
+/// Number of characters for which f is true.
+fn count(s: String, f: (String) -> Bool) -> Int = list.count(string.to_list(s), f)
 
 /// True only for ""; " " is not empty.
 @intrinsic("almide_rt_string_is_empty")
@@ -38474,9 +38422,18 @@ fn drop_end(s: String, n: Int) -> String = _
 fn run_length_encode(s: String) -> List[(String, Int)] = _
 
 
-/// Appends suffix to s in place.
+/// Appends x to s in place.
 @intrinsic("almide_rt_string_push")
-fn push(mut s: String, suffix: String) -> Unit = _
+fn push(mut s: String, x: String) -> Unit = _
+
+/// Removes and returns the last character; none if s is empty.
+fn pop(mut s: String) -> String? = {
+  let popped = string.last(s)
+  if string.len(s) > 0 then {
+    s = string.drop_end(s, 1)
+  } else ()
+  popped
+}
 
 /// Empties s in place.
 @intrinsic("almide_rt_string_clear")
@@ -38498,16 +38455,16 @@ else if cp < 2048 then 2
 else if cp < 65536 then 3 else 4
 
 /// UTF-8 byte count (string.len counts codepoints).
-fn byte_len(s: String) -> Int = string.chars(s) |> list.fold(
+fn byte_len(s: String) -> Int = string.to_list(s) |> list.fold(
   0,
-  (n, c) => n + utf8_width(string.codepoint(c) ?? 0),
+  (n, c) => n + utf8_width(string.to_codepoint(c) ?? 0),
 )
 
 local fn utf16_units(cp: Int) -> List[Int] = if cp < 65536 then [cp]
 else [55296 + (cp - 65536) / 1024, 56320 + (cp - 65536) % 1024]
 
 /// UTF-16 code units; a codepoint past U+FFFF is a surrogate pair.
-fn to_utf16(s: String) -> List[Int] = string.chars(s) |> list.flat_map((c) => utf16_units(string.codepoint(c) ?? 0))
+fn to_utf16(s: String) -> List[Int] = string.to_list(s) |> list.flat_map((c) => utf16_units(string.to_codepoint(c) ?? 0))
 
 local fn utf16_decode(xs: List[Int], i: Int, acc: List[String]) -> Result[String, String] = match list.get(
   xs,
@@ -38519,12 +38476,16 @@ local fn utf16_decode(xs: List[Int], i: Int, acc: List[String]) -> Result[String
     some(lo) => if lo >= 56320 and lo <= 57343 then utf16_decode(
       xs,
       i + 2,
-      [string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320))] + acc,
+      [
+        (string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320)) ?? "")
+      ] + acc,
     )
     else err("string.from_utf16: unpaired surrogate at ${i}"),
     none => err("string.from_utf16: unpaired surrogate at ${i}"),
   } else if u >= 56320 and u <= 57343 then err("string.from_utf16: unpaired surrogate at ${i}")
-  else utf16_decode(xs, i + 1, [string.from_codepoint(u)] + acc),
+  else utf16_decode(xs, i + 1, [
+    (string.from_codepoint(u) ?? "")
+  ] + acc),
 }
 
 /// String from UTF-16 code units; err on an unpaired surrogate or a unit outside 0..65535.
@@ -38532,12 +38493,12 @@ fn from_utf16(xs: List[Int]) -> Result[String, String] = utf16_decode(xs, 0, [])
 
 /// The characters of s for which f is true.
 fn filter(s: String, f: (String) -> Bool) -> String = string.join(
-  list.filter(string.chars(s), f),
+  list.filter(string.to_list(s), f),
   "",
 )
 
 /// f folded over the characters of s, left to right.
-fn fold[B](s: String, init: B, f: (B, String) -> B) -> B = list.fold(string.chars(s), init, f)
+fn fold[B](s: String, init: B, f: (B, String) -> B) -> B = list.fold(string.to_list(s), init, f)
 
 /// s with x inserted before character i; i outside 0..=len aborts.
 fn insert(s: String, i: Int, x: String) -> String = {
@@ -38560,47 +38521,51 @@ fn new() -> String = ""
 fn from_list(xs: List[String]) -> String = string.join(xs, "")
 
 /// (index, character) pairs from 0.
-fn enumerate(s: String) -> List[(Int, String)] = list.enumerate(string.chars(s))
+fn enumerate(s: String) -> List[(Int, String)] = list.enumerate(string.to_list(s))
 
 /// Characters paired with ys; stops at the shorter.
-fn zip[B](s: String, ys: List[B]) -> List[(String, B)] = list.zip(string.chars(s), ys)
+fn zip[B](s: String, ys: List[B]) -> List[(String, B)] = list.zip(string.to_list(s), ys)
 
 /// f over characters paired with ys; stops at the shorter.
 fn zip_with[B, C](s: String, ys: List[B], f: (String, B) -> C) -> List[C] = list.zip_with(
-  string.chars(s),
+  string.to_list(s),
   ys,
   f,
 )
 
 /// The some results of f over the characters, in order.
-fn filter_map[B](s: String, f: (String) -> B?) -> List[B] = list.filter_map(string.chars(s), f)
+fn filter_map[B](s: String, f: (String) -> B?) -> List[B] = list.filter_map(string.to_list(s), f)
 
 /// The first some result of f over the characters, or none.
-fn find_map[B](s: String, f: (String) -> B?) -> B? = list.find_map(string.chars(s), f)
+fn find_map[B](s: String, f: (String) -> B?) -> B? = list.find_map(string.to_list(s), f)
 
 /// f folded over the characters from the first; none if s is empty.
-fn reduce(s: String, f: (String, String) -> String) -> String? = list.reduce(string.chars(s), f)
+fn reduce(s: String, f: (String, String) -> String) -> String? = list.reduce(string.to_list(s), f)
 
 /// The running fold over the characters, init excluded.
-fn scan[B](s: String, init: B, f: (B, String) -> B) -> List[B] = list.scan(string.chars(s), init, f)
+fn scan[B](s: String, init: B, f: (B, String) -> B) -> List[B] = list.scan(
+  string.to_list(s),
+  init,
+  f,
+)
 
 /// (characters where f is true, the rest), each in order.
 fn partition(s: String, f: (String) -> Bool) -> (List[String], List[String]) = list.partition(
-  string.chars(s),
+  string.to_list(s),
   f,
 )
 
 /// Characters grouped by f's key, each group in order.
 fn group_by[B](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group_by(
-  string.chars(s),
+  string.to_list(s),
   f,
 )
 
 /// The characters in codepoint order.
-fn sort(s: String) -> List[String] = list.sort(string.chars(s))
+fn sort(s: String) -> List[String] = list.sort(string.to_list(s))
 
 /// The characters ordered by f's key; equal keys keep their order.
-fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.chars(s), f)
+fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.to_list(s), f)
 
 local fn merge_with(xs: List[String], ys: List[String], cmp: (String, String) -> Int, i: Int, j: Int, acc: List[String]) -> List[String] = match (list.get(
   xs,
@@ -38627,21 +38592,21 @@ local fn merge_sort_with(xs: List[String], cmp: (String, String) -> Int) -> List
 
 /// The characters ordered by cmp (negative = first argument first); stable.
 fn sort_with(s: String, cmp: (String, String) -> Int) -> List[String] = merge_sort_with(
-  string.chars(s),
+  string.to_list(s),
   cmp,
 )
 
 /// The smallest character in codepoint order; none if empty.
-fn min(s: String) -> String? = list.min(string.chars(s))
+fn min(s: String) -> String? = list.min(string.to_list(s))
 
 /// The largest character in codepoint order; none if empty.
-fn max(s: String) -> String? = list.max(string.chars(s))
+fn max(s: String) -> String? = list.max(string.to_list(s))
 
 /// The first character with the smallest key; none if empty.
-fn min_by[K](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.chars(s), f))
+fn min_by[K](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.to_list(s), f))
 
 /// The last character with the largest key; none if empty.
-fn max_by[K](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.chars(s), f))
+fn max_by[K](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.to_list(s), f))
 
 local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String) -> Int, want_max: Bool) -> String = match list.get(
   xs,
@@ -38657,40 +38622,40 @@ local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String)
 
 /// The first smallest character by cmp; none if empty.
 fn min_with(s: String, cmp: (String, String) -> Int) -> String? = match string.first(s) {
-  some(c) => some(pick_with(string.chars(s), 1, c, cmp, false)),
+  some(c) => some(pick_with(string.to_list(s), 1, c, cmp, false)),
   none => none,
 }
 
 /// The last largest character by cmp; none if empty.
 fn max_with(s: String, cmp: (String, String) -> Int) -> String? = match string.first(s) {
-  some(c) => some(pick_with(string.chars(s), 1, c, cmp, true)),
+  some(c) => some(pick_with(string.to_list(s), 1, c, cmp, true)),
   none => none,
 }
 
 /// Index of the first character where f is true, or none.
-fn find_index(s: String, f: (String) -> Bool) -> Int? = list.find_index(string.chars(s), f)
+fn find_index(s: String, f: (String) -> Bool) -> Int? = list.find_index(string.to_list(s), f)
 
 /// The longest prefix whose characters all satisfy f.
 fn take_while(s: String, f: (String) -> Bool) -> String = string.join(
-  list.take_while(string.chars(s), f),
+  list.take_while(string.to_list(s), f),
   "",
 )
 
 /// s after the longest prefix whose characters all satisfy f.
 fn drop_while(s: String, f: (String) -> Bool) -> String = string.join(
-  list.drop_while(string.chars(s), f),
+  list.drop_while(string.to_list(s), f),
   "",
 )
 
 /// Runs of n characters, the last may be shorter; n <= 0 aborts.
 fn chunk(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.chunk: size must be positive, got ${n}")
-  else list.chunk(string.chars(s), n) |> list.map((cs) => string.join(cs, ""))
+  else list.chunk(string.to_list(s), n) |> list.map((cs) => string.join(cs, ""))
 
 /// Every run of n consecutive characters; [] if n > len; n <= 0 aborts.
 fn window(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.window: size must be positive, got ${n}")
-  else list.window(string.chars(s), n) |> list.map((cs) => string.join(cs, ""))
+  else list.window(string.to_list(s), n) |> list.map((cs) => string.join(cs, ""))
 
 /// (first n characters, the rest); n past the end gives (s, ""); n < 0 aborts.
 fn split_at(s: String, n: Int) -> (String, String) =
@@ -38698,17 +38663,17 @@ fn split_at(s: String, n: Int) -> (String, String) =
   else (string.take(s, n), string.drop(s, n))
 
 /// s with each run of equal adjacent characters collapsed to one.
-fn dedup(s: String) -> String = string.join(list.dedup(string.chars(s)), "")
+fn dedup(s: String) -> String = string.join(list.dedup(string.to_list(s)), "")
 
 /// The characters of s with sep between each pair.
-fn intersperse(s: String, sep: String) -> String = string.join(string.chars(s), sep)
+fn intersperse(s: String, sep: String) -> String = string.join(string.to_list(s), sep)
 
 /// The first occurrence of each character, in order.
-fn unique(s: String) -> String = string.join(list.unique(string.chars(s)), "")
+fn unique(s: String) -> String = string.join(list.unique(string.to_list(s)), "")
 
 /// The first character of each key f gives, in order.
 fn unique_by[K](s: String, f: (String) -> K) -> String = string.join(
-  list.unique_by(string.chars(s), f),
+  list.unique_by(string.to_list(s), f),
   "",
 )
 
@@ -38954,10 +38919,16 @@ fn __sco_none() -> Int? = none
 
 fn __sco_some(i: Int) -> Int? = some(i)
 
+
+fn __scp_width(b0: Int) -> Int = if b0 < 128 then 1
+else if b0 < 224 then 2
+else if b0 < 240 then 3 else 4
+
 fn string_codepoint(s: String) -> Int? = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
-  let cp = if blen == 0 then 0 - 1 else __scp_decode(h + 12)
+  let one = blen > 0 and blen == __scp_width(prim.load8(h + 12))
+  let cp = if one then __scp_decode(h + 12) else 0 - 1
   if cp < 0 then __sco_none() else __sco_some(cp)
 }
 "#;
@@ -40108,7 +40079,7 @@ else {
 }
 
 fn string_run_length_encode(s: String) -> List[(String, Int)] = {
-  let cs = string.chars(s)
+  let cs = string.to_list(s)
   let ch = prim.handle(cs)
   let n = prim.load32(ch + 4)
   if n == 0 then {
@@ -41229,7 +41200,7 @@ pub const SRC_TESTING: &str = r#"
 
 
 /// Fails unless f, run alone in a child, aborts with text containing expected.
-fn assert_aborts[T](expected: String, f: () -> T) -> Unit = panic("testing.assert_aborts runs only as a direct call in a test block (E099)")
+fn assert_aborts[A](expected: String, f: () -> A) -> Unit = panic("testing.assert_aborts runs only as a direct call in a test block (E099)")
 
 
 
@@ -41300,33 +41271,35 @@ fn assert_contains(haystack: String, needle: String) -> Unit = _
 @intrinsic("almide_rt_test_assert_approx")
 fn assert_approx(a: Float, b: Float, tolerance: Float) -> Unit = _
 
+
+
+
+
 /// Fails unless a > b; equal fails.
-@intrinsic("almide_rt_test_assert_gt")
-fn assert_gt(a: Int, b: Int) -> Unit = _
+fn assert_gt[A](a: A, b: A) -> Unit = if a > b then () else panic("assert_gt failed")
 
 /// Fails unless a < b; equal fails.
-@intrinsic("almide_rt_test_assert_lt")
-fn assert_lt(a: Int, b: Int) -> Unit = _
+fn assert_lt[A](a: A, b: A) -> Unit = if a < b then () else panic("assert_lt failed")
 
-/// Fails when opt is none.
+/// Fails when o is none.
 @intrinsic("almide_rt_test_assert_some")
-@borrow_ref(opt)
-fn assert_some[A](opt: A?) -> Unit = _
+@borrow_ref(o)
+fn assert_some[A](o: A?) -> Unit = _
 
-/// Fails when result is an err.
+/// Fails when r is an err.
 @intrinsic("almide_rt_test_assert_ok")
-@borrow_ref(result)
-fn assert_ok[A, B](result: Result[A, B]) -> Unit = _
+@borrow_ref(r)
+fn assert_ok[A, B](r: Result[A, B]) -> Unit = _
 
-/// Fails when opt is some.
+/// Fails when o is some.
 @intrinsic("almide_rt_test_assert_none")
-@borrow_ref(opt)
-fn assert_none[A](opt: A?) -> Unit = _
+@borrow_ref(o)
+fn assert_none[A](o: A?) -> Unit = _
 
-/// Fails when result is ok.
+/// Fails when r is ok.
 @intrinsic("almide_rt_test_assert_err")
-@borrow_ref(result)
-fn assert_err[A, B](result: Result[A, B]) -> Unit = _
+@borrow_ref(r)
+fn assert_err[A, B](r: Result[A, B]) -> Unit = _
 
 
 
@@ -41351,10 +41324,6 @@ pub const SRC_TESTING_ASSERT: &str = r#"
 
 
 
-
-fn testing_assert_gt(a: Int, b: Int) -> Unit = if a > b then () else prim.die(prim.handle("assert_gt failed\n"))
-
-fn testing_assert_lt(a: Int, b: Int) -> Unit = if a < b then () else prim.die(prim.handle("assert_lt failed\n"))
 
 fn testing_assert_approx(a: Float, b: Float, epsilon: Float) -> Unit =
   if float.abs(a - b) < epsilon then () else prim.die(prim.handle("assert_approx failed\n"))
@@ -42922,7 +42891,7 @@ fn __url_enc_cp(cp: Int) -> String = if cp < 128 then __url_enc_byte(cp)
 else if cp < 2048 then __url_enc_byte(192 + cp / 64) + __url_enc_byte(128 + cp % 64)
 else if cp < 65536 then __url_enc_byte(224 + cp / 4096) + __url_enc_byte(128 + (cp / 64) % 64) + __url_enc_byte(128 + cp % 64) else __url_enc_byte(240 + cp / 262144) + __url_enc_byte(128 + (cp / 4096) % 64) + __url_enc_byte(128 + (cp / 64) % 64) + __url_enc_byte(128 + cp % 64)
 
-fn __url_enc_char(c: String) -> String = match string.codepoint(c) {
+fn __url_enc_char(c: String) -> String = match string.to_codepoint(c) {
   some(cp) => if __url_is_unreserved(cp) then c else __url_enc_cp(cp),
   none => "",
 }
@@ -42934,9 +42903,9 @@ fn __url_enc_char(c: String) -> String = match string.codepoint(c) {
 
 
 /// All but A-Za-z0-9-._~ as UTF-8 %XX escapes.
-fn encode_component(s: String) -> String = s |> string.chars |> list.map((c) => __url_enc_char(c)) |> list.join("")
+fn encode_component(s: String) -> String = s |> string.to_list |> list.map((c) => __url_enc_char(c)) |> list.join("")
 
-fn __url_hex_val(c: String) -> Int? = match string.codepoint(c) {
+fn __url_hex_val(c: String) -> Int? = match string.to_codepoint(c) {
   some(cp) => if cp >= 48 and cp <= 57 then some(cp - 48)
   else if cp >= 65 and cp <= 70 then some(cp - 55)
   else if cp >= 97 and cp <= 102 then some(cp - 87) else none,
@@ -42980,14 +42949,19 @@ fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[Stri
   if p >= end then ok(acc)
   else {
     let b0 = __url_pbyte(cs, p)
-    if b0 >= 0 and b0 < 128 then __url_utf8_go(cs, p + 3, end, acc + string.from_codepoint(b0))
+    if b0 >= 0 and b0 < 128 then __url_utf8_go(
+      cs,
+      p + 3,
+      end,
+      acc + (string.from_codepoint(b0) ?? ""),
+    )
     else if b0 >= 194 and b0 <= 223 then {
       let b1 = __url_pbyte(cs, p + 3)
       if p + 6 <= end and __url_cont(b1) then __url_utf8_go(
         cs,
         p + 6,
         end,
-        acc + string.from_codepoint((b0 - 192) * 64 + (b1 - 128)),
+        acc + (string.from_codepoint((b0 - 192) * 64 + (b1 - 128)) ?? ""),
       )
       else err("url.decode_component: invalid UTF-8 in percent data")
     } else if b0 >= 224 and b0 <= 239 then {
@@ -42999,7 +42973,7 @@ fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[Stri
         cs,
         p + 9,
         end,
-        acc + string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)),
+        acc + (string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)) ?? ""),
       )
       else err("url.decode_component: invalid UTF-8 in percent data")
     } else if b0 >= 240 and b0 <= 244 then {
@@ -43012,7 +42986,7 @@ fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[Stri
         cs,
         p + 12,
         end,
-        acc + string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)),
+        acc + (string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)) ?? ""),
       )
       else err("url.decode_component: invalid UTF-8 in percent data")
     } else err("url.decode_component: invalid UTF-8 in percent data")
@@ -43043,7 +43017,7 @@ fn __url_dec_go(cs: List[String], i: Int, n: Int, acc: String) -> Result[String,
 
 /// Percent-decoded s; err on bad escape/UTF-8; + kept.
 fn decode_component(s: String) -> Result[String, String] = {
-  let cs = string.chars(s)
+  let cs = string.to_list(s)
   __url_dec_go(cs, 0, list.len(cs), "")
 }
 
@@ -43052,7 +43026,7 @@ fn decode_component(s: String) -> Result[String, String] = {
 
 fn __url_host_char(cp: Int) -> Bool = __url_is_unreserved(cp) or cp == 33 or cp == 36 or cp == 38 or cp == 39 or cp == 40 or cp == 41 or cp == 42 or cp == 43 or cp == 44 or cp == 59 or cp == 61
 
-fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) => match string.codepoint(c) {
+fn __url_host_ok(host: String) -> Bool = host |> string.to_list |> list.all((c) => match string.to_codepoint(c) {
   some(cp) => __url_host_char(cp),
   none => false,
 })
@@ -43061,7 +43035,7 @@ fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) =>
 
 
 
-fn __url_cp(c: String) -> Int = string.codepoint(c) ?? 0
+fn __url_cp(c: String) -> Int = string.to_codepoint(c) ?? 0
 
 fn __url_first_kept(cs: List[String], i: Int) -> Int =
   if i < list.len(cs) and __url_cp(list.get(cs, i) ?? "") <= 32 then __url_first_kept(cs, i + 1)
@@ -43072,7 +43046,7 @@ fn __url_last_kept(cs: List[String], i: Int) -> Int =
   else i
 
 fn __url_clean(s: String, who: String) -> Result[String, String] = {
-  let cs = string.chars(s)
+  let cs = string.to_list(s)
   let start = __url_first_kept(cs, 0)
   let end = __url_last_kept(cs, list.len(cs))
   let kept = cs |> list.take(end) |> list.drop(start) |> list.filter((c) => c != "\t" and c != "\n" and c != "\r")
@@ -43082,12 +43056,12 @@ fn __url_clean(s: String, who: String) -> Result[String, String] = {
 }
 
 
-fn __url_scheme_ok(t: String) -> Bool = string.len(t) > 0 and string.chars(t) |> list.enumerate |> list.all(((j, c)) => {
+fn __url_scheme_ok(t: String) -> Bool = string.len(t) > 0 and string.to_list(t) |> list.enumerate |> list.all(((j, c)) => {
   let cp = __url_cp(c)
   (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122) or (j > 0 and ((cp >= 48 and cp <= 57) or cp == 43 or cp == 45 or cp == 46))
 })
 
-fn __url_all_digits(t: String) -> Bool = string.len(t) > 0 and string.chars(t) |> list.all((c) => __url_cp(c) >= 48 and __url_cp(c) <= 57)
+fn __url_all_digits(t: String) -> Bool = string.len(t) > 0 and string.to_list(t) |> list.all((c) => __url_cp(c) >= 48 and __url_cp(c) <= 57)
 
 fn __url_hex_digit(c: String) -> Bool = match __url_hex_val(c) {
   some(_) => true,
@@ -43101,7 +43075,7 @@ fn __url_ends_in_number(host: String) -> Bool = {
   let n = list.len(labels)
   let last = if n > 1 and (list.get(labels, n - 1) ?? "") == "" then list.get(labels, n - 2) ?? ""
   else list.get(labels, n - 1) ?? ""
-  __url_all_digits(last) or ((string.starts_with(last, "0x") or string.starts_with(last, "0X")) and string.chars(string.drop(last, 2)) |> list.all((c) => __url_hex_digit(c)))
+  __url_all_digits(last) or ((string.starts_with(last, "0x") or string.starts_with(last, "0X")) and string.to_list(string.drop(last, 2)) |> list.all((c) => __url_hex_digit(c)))
 }
 
 
@@ -43270,14 +43244,14 @@ else query |> string.split("&") |> list.filter((part) => string.len(part) > 0) |
 
 
 /// k=v joined by &, both sides percent-encoded.
-fn build_query(pairs: List[(String, String)]) -> String = pairs |> list.map(((k, v)) => encode_component(k) + "=" + encode_component(v)) |> list.join("&")
+fn build_query(xs: List[(String, String)]) -> String = xs |> list.map(((k, v)) => encode_component(k) + "=" + encode_component(v)) |> list.join("&")
 
 
 
 
 
 /// Like encode_component, but a space becomes +.
-fn encode_form(s: String) -> String = s |> string.chars |> list.map((c) => if c == " " then "+" else __url_enc_char(c)) |> list.join("")
+fn encode_form(s: String) -> String = s |> string.to_list |> list.map((c) => if c == " " then "+" else __url_enc_char(c)) |> list.join("")
 
 
 
@@ -43356,19 +43330,19 @@ fn resolve(base: Url, ref: String) -> Result[Url, String] = match __url_clean(re
 }
 
 
-fn __url_t_pctend(s: String) -> Int = __url_pct_end(string.chars(s), 1, string.len(s))
+fn __url_t_pctend(s: String) -> Int = __url_pct_end(string.to_list(s), 1, string.len(s))
 
-fn __url_t_pbyte(s: String) -> Int = __url_pbyte(string.chars(s), 0)
+fn __url_t_pbyte(s: String) -> Int = __url_pbyte(string.to_list(s), 0)
 
-fn __url_t_utf8(s: String) -> String = match __url_utf8_go(string.chars(s), 0, string.len(s), "") {
+fn __url_t_utf8(s: String) -> String = match __url_utf8_go(string.to_list(s), 0, string.len(s), "") {
   ok(v) => v,
   err(e) => "E:" + e,
 }
 
-fn __url_t_fcp(b: Int) -> String = string.from_codepoint(b)
+fn __url_t_fcp(b: Int) -> String = (string.from_codepoint(b) ?? "")
 
 fn __url_t_dec_nopct(s: String) -> String = match __url_dec_go(
-  string.chars(s),
+  string.to_list(s),
   0,
   string.len(s),
   "",
@@ -43377,10 +43351,10 @@ fn __url_t_dec_nopct(s: String) -> String = match __url_dec_go(
   err(e) => "E:" + e,
 }
 "##;
-pub const SRC_VALUE: &str = r#"/// Wraps items as an Array Value.
+pub const SRC_VALUE: &str = r#"/// Wraps xs as an Array Value.
 @intrinsic("almide_rt_value_array")
-@reuse(items)
-fn array(items: List[Value]) -> Value = _
+@reuse(xs)
+fn array(xs: List[Value]) -> Value = _
 
 /// Array items; err if v is another kind.
 @intrinsic("almide_rt_value_as_array")
@@ -43423,10 +43397,10 @@ fn merge(a: Value, b: Value) -> Value = _
 @intrinsic("almide_rt_value_null")
 fn null() -> Value = _
 
-/// Wraps pairs as an Object; a repeated key keeps its first position, last value.
+/// Wraps the pairs xs as an Object; a repeated key keeps its first position, last value.
 @intrinsic("almide_rt_value_object")
-@reuse(pairs)
-fn object(pairs: List[(String, Value)]) -> Value = _
+@reuse(xs)
+fn object(xs: List[(String, Value)]) -> Value = _
 
 /// v minus the listed keys; non-objects as-is.
 @intrinsic("almide_rt_value_omit")
@@ -43438,7 +43412,7 @@ fn pick(v: Value, keys: List[String]) -> Value = _
 
 /// Value holding the String s.
 @intrinsic("almide_rt_value_str")
-fn str(s: String) -> Value = _
+fn string(s: String) -> Value = _
 
 
 
@@ -43464,6 +43438,161 @@ fn field(v: Value, key: String) -> Result[Value, String] = _
 /// Object keys in order; [] for non-objects.
 @intrinsic("almide_rt_value_keys")
 fn keys(v: Value) -> List[String] = _
+
+/// Object pairs in order; err if v is another kind.
+@intrinsic("almide_rt_value_as_object")
+fn as_object(v: Value) -> Result[List[(String, Value)], String] = _
+
+
+
+
+
+
+/// Value at key; none if absent or v is not an Object.
+fn get(v: Value, key: String) -> Value? = result.to_option(value.field(v, key))
+
+/// String at key; none if absent or another kind.
+fn get_string(v: Value, key: String) -> String? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_string(x)),
+  none => none,
+}
+
+/// Int at key; none if absent or not an Int (a Float is never truncated).
+fn get_int(v: Value, key: String) -> Int? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_int(x)),
+  none => none,
+}
+
+/// Float at key (an Int widens); none if absent or another kind.
+fn get_float(v: Value, key: String) -> Float? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_float(x)),
+  none => none,
+}
+
+/// Bool at key; none if absent or another kind.
+fn get_bool(v: Value, key: String) -> Bool? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_bool(x)),
+  none => none,
+}
+
+/// Array items at key; none if absent or another kind.
+fn get_array(v: Value, key: String) -> List[Value]? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_array(x)),
+  none => none,
+}
+
+/// Object pairs at key; none if absent or another kind.
+fn get_object(v: Value, key: String) -> List[(String, Value)]? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_object(x)),
+  none => none,
+}
+
+
+
+
+
+
+
+/// A path into a Value: key and index steps from the root.
+mod type Path = List[(Bool, String, Int)]
+
+/// The empty path: the whole value.
+fn root() -> Path = Path([])
+
+/// p extended by the object key name.
+fn key(p: Path, name: String) -> Path = match p {
+  Path(steps) => Path(steps + [(true, name, 0)])
+}
+
+/// p extended by the array index i; a negative i is out of range.
+fn index(p: Path, i: Int) -> Path = match p {
+  Path(steps) => Path(steps + [(false, "", i)])
+}
+
+/// Value at p, or none if a step misses.
+fn get_path(v: Value, p: Path) -> Value? = match p {
+  Path(steps) => __get_steps(v, steps, 0)
+}
+
+/// v with x at p; missing keys are created, a missed index leaves v as is.
+fn set_path(v: Value, p: Path, x: Value) -> Result[Value, String] = match p {
+  Path(steps) => ok(__set_steps(v, steps, 0, x))
+}
+
+/// v minus the entry at p; unchanged if absent; null for the root.
+fn remove_path(v: Value, p: Path) -> Value = match p {
+  Path(steps) => __remove_steps(v, steps, 0)
+}
+
+local fn __step_at(v: Value, step: (Bool, String, Int)) -> Value? = match step {
+  (true, name, _) => value.get(v, name),
+  (false, _, i) => match value.as_array(v) {
+    ok(xs) => list.get(xs, i),
+    err(_) => none,
+  },
+}
+
+local fn __get_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> Value? = match list.get(
+  steps,
+  k,
+) {
+  none => some(v),
+  some(step) => match __step_at(v, step) {
+    some(child) => __get_steps(child, steps, k + 1),
+    none => none,
+  },
+}
+
+local fn __set_steps(v: Value, steps: List[(Bool, String, Int)], k: Int, x: Value) -> Value = match list.get(
+  steps,
+  k,
+) {
+  none => x,
+  some((true, name, _)) => match value.as_object(v) {
+    ok(pairs) => if list.any(pairs, ((pk, _)) => pk == name) then value.object(list.map(
+      pairs,
+      ((pk, pv)) => if pk == name then (pk, __set_steps(pv, steps, k + 1, x))
+      else (pk, pv),
+    ))
+    else value.object(pairs + [
+      (name, __set_steps(value.object([]), steps, k + 1, x))
+    ]),
+    err(_) => value.object([
+      (name, __set_steps(value.object([]), steps, k + 1, x))
+    ]),
+  },
+  some((false, _, i)) => match value.as_array(v) {
+    ok(xs) => match list.get(xs, i) {
+      some(child) => value.array(list.set(xs, i, __set_steps(child, steps, k + 1, x))),
+      none => v,
+    },
+    err(_) => v,
+  },
+}
+
+local fn __remove_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> Value = match list.get(
+  steps,
+  k,
+) {
+  none => value.null(),
+  some((true, name, _)) => match value.as_object(v) {
+    ok(pairs) => value.object(list.filter_map(
+      pairs,
+      ((pk, pv)) => if pk != name then some((pk, pv))
+      else if k + 1 >= list.len(steps) then none
+      else some((pk, __remove_steps(pv, steps, k + 1))),
+    )),
+    err(_) => v,
+  },
+  some((false, _, i)) => match value.as_array(v) {
+    ok(xs) => match list.get(xs, i) {
+      some(child) => if k + 1 >= list.len(steps) then value.array(list.remove_at(xs, i))
+      else value.array(list.set(xs, i, __remove_steps(child, steps, k + 1))),
+      none => v,
+    },
+    err(_) => v,
+  },
+}
 "#;
 pub const SRC_VALUE_CORE: &str = r#"
 
@@ -43756,6 +43885,25 @@ else {
 
 
 
+
+
+
+
+fn __vobj_pairs(v: Value, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let x: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+    __vobj_pairs(v, i + 1, n, acc + [(k, x)])
+  }
+
+fn value_as_object(v: Value) -> Result[List[(String, Value)], String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  if tag == 6 then ok(__vobj_pairs(v, 0, prim.load32(h + 8) / 2, []))
+  else err("expected Object, received " + __vkind(tag))
+}
 
 fn value_keys(v: Value) -> List[String] = if prim.load32(prim.handle(v) + 4) == 6 then {
   let h = prim.handle(v)
@@ -44523,7 +44671,7 @@ else {
 fn __jq_ctrl(s: String, c: Int) -> String = if c >= 32 then s
 else if c == 9 or c == 10 or c == 13 then __jq_ctrl(s, c + 1)
 else __jq_ctrl(
-  string.replace(s, string.from_codepoint(c), "\\u00" + __jq_hex(c / 16) + __jq_hex(c % 16)),
+  string.replace(s, (string.from_codepoint(c) ?? ""), "\\u00" + __jq_hex(c / 16) + __jq_hex(c % 16)),
   c + 1,
 )
 
@@ -45191,17 +45339,17 @@ pub const SRC_ZLIB: &str = r#"
 
 
 
-/// Zlib-framed DEFLATE of data; bytes vary by target.
+/// Zlib-framed DEFLATE of b; bytes vary by target.
 @intrinsic("almide_rt_zlib_compress")
-effect fn compress(data: Bytes) -> Result[Bytes, String] = _
+effect fn compress(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like compress; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_compress_level")
-effect fn compress_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
+effect fn compress_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
 /// Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_decompress")
-effect fn decompress(data: Bytes) -> Result[Bytes, String] = _
+fn decompress(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like decompress, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_decompress_max")
@@ -45210,24 +45358,24 @@ fn decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 /// Raw DEFLATE, no header; bytes vary by target.
 @intrinsic("almide_rt_zlib_deflate")
-effect fn deflate(data: Bytes) -> Result[Bytes, String] = _
+effect fn deflate(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like deflate; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_deflate_level")
-effect fn deflate_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
+effect fn deflate_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
 /// Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_inflate")
-effect fn inflate(data: Bytes) -> Result[Bytes, String] = _
+fn inflate(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like inflate, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_inflate_max")
 fn inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 
-/// RFC 1952 gzip of data; bytes vary by target.
+/// RFC 1952 gzip of b; bytes vary by target.
 @intrinsic("almide_rt_zlib_gzip")
-effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
+effect fn gzip(b: Bytes) -> Result[Bytes, String] = _
 
 
 
@@ -45238,7 +45386,7 @@ effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
 
 /// Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_gunzip")
-effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _
+fn gunzip(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_gunzip_max")
@@ -46165,14 +46313,14 @@ fn zli_decompress(data: Bytes, limit: Int) -> Result[Bytes, String] = {
 }
 
 
-effect fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = zli_gunzip(data, zli_default_limit())
+fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = zli_gunzip(data, zli_default_limit())
 
-effect fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = zli_inflate(
+fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = zli_inflate(
   data,
   zli_default_limit(),
 )
 
-effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = zli_decompress(
+fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = zli_decompress(
   data,
   zli_default_limit(),
 )
@@ -46271,8 +46419,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "fs_modified_at" => Some(SRC_FS_MODIFIED_AT),
         "fs_read_bytes" => Some(SRC_FS_READ_BYTES),
         "fs_read_bytes_if_exists" => Some(SRC_FS_READ_BYTES_IF_EXISTS),
-        "fs_read_bytes_raw" => Some(SRC_FS_READ_BYTES_RAW),
-        "fs_read_bytes_raw_if_exists" => Some(SRC_FS_READ_BYTES_RAW_IF_EXISTS),
         "fs_read_lines" => Some(SRC_FS_READ_LINES),
         "fs_read_lines_if_exists" => Some(SRC_FS_READ_LINES_IF_EXISTS),
         "fs_read_text" => Some(SRC_FS_READ_TEXT),
@@ -46285,7 +46431,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "fs_walk" => Some(SRC_FS_WALK),
         "fs_write" => Some(SRC_FS_WRITE),
         "fs_write_bytes" => Some(SRC_FS_WRITE_BYTES),
-        "fs_write_bytes_raw" => Some(SRC_FS_WRITE_BYTES_RAW),
         "hash" => Some(SRC_HASH),
         "hash_impl" => Some(SRC_HASH_IMPL),
         "heap" => Some(SRC_HEAP),
