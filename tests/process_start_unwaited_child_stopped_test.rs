@@ -1,0 +1,114 @@
+//! #4214: when a program exits, every child it started with `process.start`
+//! and has neither waited on nor stopped is stopped the way `process.stop`
+//! stops it, before the exit status is reported — on each exit route: main
+//! returns, `process.exit`, and an effect error ending main. A child already
+//! waited on or stopped is left as it was, and the exit is neither delayed
+//! to the child's own end nor turned into an error.
+//!
+//! Each program prints the pid of a `sleep 30` it started and leaves running;
+//! after `almide run` returns, that pid must no longer exist.
+#![cfg(unix)]
+use std::process::Command;
+use std::time::{Duration, Instant};
+
+/// `ALMIDE_BIN` runs the cells against another build (A/B); the default is
+/// this workspace's binary.
+fn almide() -> String {
+    std::env::var("ALMIDE_BIN").unwrap_or_else(|_| env!("CARGO_BIN_EXE_almide").to_string())
+}
+
+/// `(stdout, stderr without the `[almide]` banner lines, exit code, wall time)`.
+fn run(source: &str) -> (String, String, Option<i32>, Duration) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("exit_children.almd");
+    std::fs::write(&file, source).expect("write source");
+    let start = Instant::now();
+    let out = Command::new(almide()).arg("run").arg(&file).output().expect("run almide");
+    let elapsed = start.elapsed();
+    let stderr: String = String::from_utf8_lossy(&out.stderr)
+        .lines()
+        .filter(|l| !l.starts_with("[almide]"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    (String::from_utf8_lossy(&out.stdout).into_owned(), stderr, out.status.code(), elapsed)
+}
+
+/// Whether a process `pid` exists (`kill -0`, the shell builtin).
+fn alive(pid: i64) -> bool {
+    Command::new("sh")
+        .arg("-c")
+        .arg(format!("kill -0 {pid} 2>/dev/null"))
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// The pid on the stdout line `<tag> <pid>`.
+fn pid_of(stdout: &str, tag: &str) -> i64 {
+    stdout
+        .lines()
+        .find_map(|l| l.strip_prefix(tag).and_then(|r| r.strip_prefix(' ')))
+        .and_then(|p| p.trim().parse().ok())
+        .unwrap_or_else(|| panic!("no `{tag} <pid>` line in stdout:\n{stdout}"))
+}
+
+/// Assert `pid` is gone. A child killed past its grace may still be a zombie
+/// for a moment after its parent ended (init reaps it), so look for a while.
+fn assert_gone(pid: i64, what: &str) {
+    let until = Instant::now() + Duration::from_secs(5);
+    while alive(pid) {
+        if Instant::now() >= until {
+            let _ = Command::new("sh").arg("-c").arg(format!("kill -9 {pid} 2>/dev/null")).status();
+            panic!("{what}: the unwaited child {pid} outlived the program");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+const SLEEPER: &str = r#"process.ProcessCommand { cmd: "sleep", args: ["30"] }"#;
+
+#[test]
+fn an_unwaited_child_is_stopped_when_main_returns() {
+    let (stdout, stderr, code, elapsed) = run(&format!(
+        "import process\n\neffect fn main() -> Unit = {{\n  let c = process.start({SLEEPER})!\n  println(\"child \" + int.to_string(process.child_pid(c)!))\n}}\n"
+    ));
+    assert_eq!(code, Some(0), "stdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(stderr, "");
+    assert_gone(pid_of(&stdout, "child"), "main returns");
+    assert!(elapsed < Duration::from_secs(20), "the exit waited for the child: {elapsed:?}");
+}
+
+#[test]
+fn an_unwaited_child_is_stopped_by_process_exit() {
+    let (stdout, stderr, code, elapsed) = run(&format!(
+        "import process\n\neffect fn main() -> Unit = {{\n  let c = process.start({SLEEPER})!\n  println(\"child \" + int.to_string(process.child_pid(c)!))\n  process.exit(3)\n}}\n"
+    ));
+    assert_eq!(code, Some(3), "stdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(stderr, "");
+    assert_gone(pid_of(&stdout, "child"), "process.exit");
+    assert!(elapsed < Duration::from_secs(20), "the exit waited for the child: {elapsed:?}");
+}
+
+#[test]
+fn an_unwaited_child_is_stopped_when_an_effect_error_ends_main() {
+    let (stdout, stderr, code, elapsed) = run(&format!(
+        "import process\n\neffect fn fail() -> Int = err(\"boom\")\n\neffect fn main() -> Unit = {{\n  let c = process.start({SLEEPER})!\n  println(\"child \" + int.to_string(process.child_pid(c)!))\n  let n = fail()!\n  println(int.to_string(n))\n}}\n"
+    ));
+    assert_eq!(code, Some(1), "stdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(stderr, "Error: boom\n");
+    assert_gone(pid_of(&stdout, "child"), "effect error");
+    assert!(elapsed < Duration::from_secs(20), "the exit waited for the child: {elapsed:?}");
+}
+
+#[test]
+fn children_already_waited_on_or_stopped_are_left_alone() {
+    let (stdout, stderr, code, _) = run(&format!(
+        "import process\n\neffect fn main() -> Unit = {{\n  let done = process.start(process.ProcessCommand {{ cmd: \"sh\", args: [\"-c\", \"exit 4\"] }})!\n  println(\"waited \" + int.to_string(process.wait(done)!.code))\n  let stopped = process.start({SLEEPER})!\n  println(\"stopped \" + int.to_string(process.child_pid(stopped)!))\n  let st = process.stop(stopped, 200)!\n  println(\"stop code \" + int.to_string(st.code))\n  let c = process.start({SLEEPER})!\n  println(\"child \" + int.to_string(process.child_pid(c)!))\n}}\n"
+    ));
+    assert_eq!(code, Some(0), "stdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(stderr, "");
+    assert_eq!(pid_of(&stdout, "waited"), 4, "{stdout}");
+    assert_eq!(pid_of(&stdout, "stop code"), -1, "{stdout}");
+    assert_gone(pid_of(&stdout, "stopped"), "an explicitly stopped child");
+    assert_gone(pid_of(&stdout, "child"), "main returns after a wait and a stop");
+}
