@@ -83,8 +83,10 @@ A runtime abort inside the handler — an out-of-bounds index, a division by
 zero, `panic(msg)` — fails only that request (C-432, #4203). The client gets
 the same `500` and fixed body as for an `err`, and stderr gets one line
 `http.serve: request <id>: handler aborted: "<text>"` (`PANIC: <msg>` for a
-`panic`). The server keeps serving the next request. Stack exhaustion and
-`process.exit` still end the program.
+`panic`). Sockets, unix descriptors and http calls the handler opened and
+did not close are closed with it. The server keeps serving the next request.
+Stack exhaustion and `process.exit` still end the program, even after the
+handler printed an `Error: ` line itself.
 
 **On wasm** (C-367): `almide run app.almd --target wasm` serves the same
 program on the embedded host. One instance handles every request, one at a
