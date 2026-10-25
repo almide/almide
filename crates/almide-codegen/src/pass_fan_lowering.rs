@@ -208,9 +208,9 @@ impl<'a> OrderedReach<'a> {
                         // The stdlib's own `@ordered` mark first: a bodied
                         // stdlib fn (`env.set` over `__set`, #4200) can sit
                         // in the program's modules, and its mark is the answer.
-                        if almide_lang::stdlib_info::is_ordered_stdlib_fn(module.as_str(), func.as_str()) {
-                            self.hit = true;
-                        } else if self.reach.modules.contains(module) && self.reach.fn_reaches_ordered(Some(*module), *func) {
+                        if almide_lang::stdlib_info::is_ordered_stdlib_fn(module.as_str(), func.as_str())
+                            || (self.reach.modules.contains(module) && self.reach.fn_reaches_ordered(Some(*module), *func))
+                        {
                             self.hit = true;
                         }
                     }

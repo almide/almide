@@ -65,10 +65,11 @@ impl LowerCtx<'_> {
     pub(super) fn convention_call_target(&self, key: Sym) -> CallTarget {
         let k = key.as_str();
         let mut segs = k.splitn(2, '.');
-        if let (Some(m), Some(rest)) = (segs.next(), segs.next()) {
-            if almide_lang::stdlib_info::is_bundled_module(m) && rest.contains('.') {
-                return CallTarget::Module { module: sym(m), func: sym(rest), def_id: None };
-            }
+        if let (Some(m), Some(rest)) = (segs.next(), segs.next())
+            && almide_lang::stdlib_info::is_bundled_module(m)
+            && rest.contains('.')
+        {
+            return CallTarget::Module { module: sym(m), func: sym(rest), def_id: None };
         }
         CallTarget::Named { name: key }
     }

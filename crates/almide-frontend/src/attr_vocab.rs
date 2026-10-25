@@ -258,20 +258,20 @@ pub fn check_field_attrs(field: &ast::FieldType, diagnostics: &mut Vec<Diagnosti
         if let Some(s) = &attr.span { diag.line = Some(s.line); diag.col = Some(s.col); }
         diagnostics.push(diag);
     }
-    if field.default.is_none() {
-        if let Some(attr) = field.attrs.iter().find(|a| CODEC_FIELD_SKIPS.iter().any(|(n, _)| *n == a.name.as_str())) {
-            let name = attr.name.as_str();
-            let mut diag = Diagnostic::error(
-                format!("field '{}' is `@{name}` but has no default", field.name),
-                format!(
-                    "A skipped field is never read from input, so `T.decode` needs a value for it. Give it one: `@{name} {}: <Type> = <default>`.",
-                    field.name
-                ),
-                format!("@{name} {}", field.name),
-            ).with_code("E104");
-            if let Some(s) = &attr.span { diag.line = Some(s.line); diag.col = Some(s.col); }
-            diagnostics.push(diag);
-        }
+    if field.default.is_none()
+        && let Some(attr) = field.attrs.iter().find(|a| CODEC_FIELD_SKIPS.iter().any(|(n, _)| *n == a.name.as_str()))
+    {
+        let name = attr.name.as_str();
+        let mut diag = Diagnostic::error(
+            format!("field '{}' is `@{name}` but has no default", field.name),
+            format!(
+                "A skipped field is never read from input, so `T.decode` needs a value for it. Give it one: `@{name} {}: <Type> = <default>`.",
+                field.name
+            ),
+            format!("@{name} {}", field.name),
+        ).with_code("E104");
+        if let Some(s) = &attr.span { diag.line = Some(s.line); diag.col = Some(s.col); }
+        diagnostics.push(diag);
     }
 }
 
@@ -326,7 +326,7 @@ mod tests {
     fn an_unknown_attribute_warns() {
         let d = diags(&["totally_made_up_thing"]);
         assert_eq!(d.len(), 1);
-        assert_eq!(d[0].code.as_deref(), Some("E053"));
+        assert_eq!(d[0].code, Some("E053"));
     }
 
     /// The case this exists for: one transposed letter in a deprecation,
@@ -392,7 +392,7 @@ mod tests {
         ] {
             let d = field_diags(named(n, args), true);
             assert_eq!(d.len(), 1, "@{n}");
-            assert_eq!(d[0].code.as_deref(), Some("E053"));
+            assert_eq!(d[0].code, Some("E053"));
             assert!(matches!(d[0].level, almide_base::diagnostic::Level::Error), "@{n} must be an error");
             assert!(d[0].hint.contains(want), "@{n}: hint was {}", d[0].hint);
         }
@@ -403,7 +403,7 @@ mod tests {
         for (n, _) in CODEC_FIELD_SKIPS {
             let d = field_diags(named(n, &[]), false);
             assert_eq!(d.len(), 1);
-            assert_eq!(d[0].code.as_deref(), Some("E104"));
+            assert_eq!(d[0].code, Some("E104"));
             assert!(field_diags(named(n, &[]), true).is_empty());
         }
     }

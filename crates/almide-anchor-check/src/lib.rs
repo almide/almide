@@ -78,7 +78,7 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Body<'_>>, String> {
                     None
                 });
                 depth.push(d);
-                fv.op(off as u64, &op).map_err(|e| e.to_string())?;
+                fv.op(off, &op).map_err(|e| e.to_string())?;
                 let post = fv.operand_stack_height() as usize;
                 match arity {
                     Some((k, m)) if pre >= k as usize => {

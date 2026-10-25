@@ -230,15 +230,15 @@ fn validate_secret_codec_field(
     let DeriveSite { type_name, proto } = site;
     let is_variant = matches!(env.types.get(&type_name), Some(Ty::Variant { .. }));
     if let Some(payload) = crate::secret_type::secret_payload(field_ty).filter(|_| !is_variant) {
-        if let Some((offender, hint)) = codec_field_shape_error(payload) {
-            if reported.insert((type_name, proto, sym(&offender))) {
-                diagnostics.push(err(
-                    format!("type '{}' derives 'Codec' but field '{}' is a Secret of {}, which the Codec derive cannot decode",
-                        type_name, field_name, offender),
-                    hint,
-                    format!("type {} : Codec", type_name),
-                ).with_code("E023"));
-            }
+        if let Some((offender, hint)) = codec_field_shape_error(payload)
+            && reported.insert((type_name, proto, sym(&offender)))
+        {
+            diagnostics.push(err(
+                format!("type '{}' derives 'Codec' but field '{}' is a Secret of {}, which the Codec derive cannot decode",
+                    type_name, field_name, offender),
+                hint,
+                format!("type {} : Codec", type_name),
+            ).with_code("E023"));
         }
         return true;
     }

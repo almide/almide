@@ -109,9 +109,13 @@ fn main() {
     let _ = std::io::stdout().write_all(out.as_bytes());
 }
 
+/// What [`produce`] hands back: the witness records, the uncertified
+/// rows, the shipped stock-WASI bytes and the anchor file.
+type Produced = (Vec<Record>, Vec<(String, String)>, Vec<u8>, String);
+
 /// Build `rel` through the product route and collect every witness, with
 /// the stock-WASI bytes the witnesses describe (witness_bundle.rs).
-fn produce(rel: &str, text: &str) -> (Vec<Record>, Vec<(String, String)>, Vec<u8>, String) {
+fn produce(rel: &str, text: &str) -> Produced {
     use almide::wasm_route::{render_wasm_routed, ModuleSource, RouteOptions};
     almide_wasm::witness::start_collecting();
     let opts = RouteOptions { library: true, ..RouteOptions::default() };

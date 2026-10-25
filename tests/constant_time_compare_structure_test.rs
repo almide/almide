@@ -427,11 +427,11 @@ fn native_findings(body: &[&str]) -> Vec<String> {
     let mut defs: HashMap<String, (bool, Vec<String>)> = HashMap::new();
     for l in body {
         let t = l.trim();
-        if let Some((lhs, rhs)) = t.split_once(" = ") {
-            if lhs.starts_with('%') {
-                let src = rhs.starts_with("load i8") || rhs.starts_with("load volatile i8");
-                defs.insert(lhs.to_string(), (src, ssa_names(rhs)));
-            }
+        if let Some((lhs, rhs)) = t.split_once(" = ")
+            && lhs.starts_with('%')
+        {
+            let src = rhs.starts_with("load i8") || rhs.starts_with("load volatile i8");
+            defs.insert(lhs.to_string(), (src, ssa_names(rhs)));
         }
     }
     loop {

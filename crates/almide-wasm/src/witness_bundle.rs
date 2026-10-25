@@ -188,8 +188,11 @@ fn align(emitted: &[u8], shipped: &[u8]) -> Result<Vec<usize>, String> {
     Ok(out)
 }
 
+/// A defined body's bytes and its instructions' end offsets.
+type Body = (Vec<u8>, Vec<usize>);
+
 /// Each defined body's bytes and its instructions' end offsets.
-fn bodies(bytes: &[u8]) -> Result<Vec<(Vec<u8>, Vec<usize>)>, String> {
+fn bodies(bytes: &[u8]) -> Result<Vec<Body>, String> {
     let mut out = Vec::new();
     for payload in wasmparser::Parser::new(0).parse_all(bytes) {
         if let wasmparser::Payload::CodeSectionEntry(body) = payload.map_err(|e| e.to_string())? {
