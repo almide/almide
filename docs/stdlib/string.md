@@ -645,7 +645,7 @@ hel
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (88 functions)
+## Signature index (90 functions)
 
 ```
 // s without leading/trailing whitespace.
@@ -672,9 +672,9 @@ string.len(s: String) -> Int
 // @since 0.19.2 or earlier
 string.length(s: String) -> Int   (deprecated — use string.len)
 
-// sub occurs in s; true for empty sub.
+// needle occurs in s; true for empty needle.
 // @since 0.6.0 or earlier
-string.contains(s: String, sub: String) -> Bool
+string.contains(s: String, needle: String) -> Bool
 
 // s begins with prefix; "" always matches.
 // @since 0.6.0 or earlier
@@ -692,9 +692,9 @@ string.slice(s: String, start: Int, end: Int) -> String
 // @since 0.63.0
 string.byte_slice(s: String, start: Int, end: Int) -> Option[String]
 
-// Left-padded to n chars with ch; never truncates.
+// Left-padded to n chars with fill; never truncates.
 // @since 0.6.1 or earlier
-string.pad_start(s: String, n: Int, ch: String) -> String
+string.pad_start(s: String, n: Int, fill: String) -> String
 
 // UTF-8 bytes of s as Ints 0..255.
 // @since 0.5.0 or earlier
@@ -764,17 +764,17 @@ string.is_upper(s: String) -> Bool
 // @since 0.6.0 or earlier
 string.is_lower(s: String) -> Bool
 
-// Scalar value of first char; none if s empty.
+// Scalar value of s when s is exactly one codepoint; none otherwise.
 // @since 0.6.0 or earlier
 string.to_codepoint(s: String) -> Option[Int]
 
-// One-char string; "" if n is not a scalar.
+// One-char string of n; none if n is not a Unicode scalar value.
 // @since 0.6.0 or earlier
-(string.from_codepoint(n: Int) ?? "") -> String
+string.from_codepoint(n: Int) -> Option[String]
 
-// Right-padded to n chars with ch; never truncates.
+// Right-padded to n chars with fill; never truncates.
 // @since 0.6.1 or earlier
-string.pad_end(s: String, n: Int, ch: String) -> String
+string.pad_end(s: String, n: Int, fill: String) -> String
 
 // s without leading whitespace.
 // @since 0.5.0 or earlier
@@ -784,9 +784,13 @@ string.trim_start(s: String) -> String
 // @since 0.5.0 or earlier
 string.trim_end(s: String) -> String
 
-// Non-overlapping sub count; len+1 if sub empty.
+// Non-overlapping needle count; len+1 if needle empty.
+// @since unreleased
+string.count_matches(s: String, needle: String) -> Int
+
+// Number of characters for which f is true.
 // @since 0.5.0 or earlier
-string.count_matches(s: String, sub: String) -> Int
+string.count(s: String, f: (String) -> Bool) -> Int
 
 // True only for ""; " " is not empty.
 // @since 0.6.0 or earlier
@@ -840,9 +844,13 @@ string.drop_end(s: String, n: Int) -> String
 // @since 0.14.6 or earlier
 string.run_length_encode(s: String) -> List[(String, Int)]
 
-// Appends suffix to s in place.
+// Appends x to s in place.
 // @since 0.23.3 or earlier
-string.push(mut s: String, suffix: String) -> Unit
+string.push(mut s: String, x: String) -> Unit
+
+// Removes and returns the last character; none if s is empty.
+// @since unreleased
+string.pop(mut s: String) -> Option[String]
 
 // Empties s in place.
 // @since 0.23.3 or earlier

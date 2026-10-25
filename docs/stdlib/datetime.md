@@ -366,9 +366,9 @@ datetime.diff_seconds(a: Int, b: Int) -> Int
 // @since 0.6.0 or earlier
 datetime.format(ts: Int, pattern: String) -> String
 
-// UTC epoch secs; out-of-range fields roll over.
+// UTC epoch secs of the parts; err naming the first part out of range.
 // @since 0.6.0 or earlier
-datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int
+datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String]
 
 // Identity: seconds are already a timestamp.
 // @since 0.6.0 or earlier

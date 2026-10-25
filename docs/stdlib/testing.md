@@ -138,7 +138,7 @@ every target (contract C-336).
 ```
 // Fails unless f, run alone in a child, aborts with text containing expected.
 // @since 0.68.0
-testing.assert_aborts(expected: String, f: () -> T) -> Unit
+testing.assert_aborts(expected: String, f: () -> A) -> Unit
 
 // Fails unless needle is in haystack; "" passes.
 // @since 0.6.0 or earlier
@@ -150,27 +150,27 @@ testing.assert_approx(a: Float, b: Float, tolerance: Float) -> Unit
 
 // Fails unless a > b; equal fails.
 // @since 0.6.0 or earlier
-testing.assert_gt(a: Int, b: Int) -> Unit
+testing.assert_gt(a: A, b: A) -> Unit
 
 // Fails unless a < b; equal fails.
 // @since 0.6.0 or earlier
-testing.assert_lt(a: Int, b: Int) -> Unit
+testing.assert_lt(a: A, b: A) -> Unit
 
-// Fails when opt is none.
+// Fails when o is none.
 // @since 0.6.0 or earlier
-testing.assert_some(opt: Option[A]) -> Unit
+testing.assert_some(o: Option[A]) -> Unit
 
-// Fails when result is an err.
+// Fails when r is an err.
 // @since 0.6.0 or earlier
-testing.assert_ok(result: Result[A, B]) -> Unit
+testing.assert_ok(r: Result[A, B]) -> Unit
 
-// Fails when opt is some.
+// Fails when o is some.
 // @since 0.54.0
-testing.assert_none(opt: Option[A]) -> Unit
+testing.assert_none(o: Option[A]) -> Unit
 
-// Fails when result is ok.
+// Fails when r is ok.
 // @since 0.54.0
-testing.assert_err(result: Result[A, B]) -> Unit
+testing.assert_err(r: Result[A, B]) -> Unit
 
 // Fails unless actual == expected; --update-snapshots rewrites.
 // @since 0.62.0

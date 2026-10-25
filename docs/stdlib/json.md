@@ -421,7 +421,7 @@ json.stringify(v: Value) -> String
 
 // JSON with 2-space indent; [] and {} inline, NaN/inf null.
 // @since 0.5.0 or earlier
-json.stringify_pretty(j: Value) -> String
+json.stringify_pretty(v: Value) -> String
 
 // String at key; none if absent or non-string.
 // @since 0.5.0 or earlier
