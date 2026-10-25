@@ -49,7 +49,11 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
     let func = crate::lower::base_stdlib_fn_name(func);
     matches!(
         (module, func),
-        ("value", "as_string") | ("result", "zip") | ("value", "as_array") | ("value", "get")
+        ("value", "as_string") | ("result", "zip") | ("value", "as_array")
+            // value.as_object — Result[List[(String, Value)], String] from the ok()/err()
+            // ctors (value_core.almd), as_array's shape. (value.get is the pure
+            // Option read over value.field, not a Result.)
+            | ("value", "as_object")
             // `json.parse` is the SELF-HOSTED recursive-descent parser
             // (stdlib/json_parse.almd): its `Result[Value, String]` is built by the
             // ordinary Almide ok()/err() ctors = the materialize_result_str layout
