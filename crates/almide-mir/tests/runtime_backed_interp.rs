@@ -62,3 +62,13 @@ fn a_list_literal_of_runtime_backed_interpolations_lowers() {
         assert_eq!(calls(&ops, carrier), 0, "the carrier was displayed via {carrier}:\n{ops:#?}");
     }
 }
+
+/// A RECURSIVE record that mentions no runtime-backed type keeps its own
+/// display route: the pass must not read the recursion as "mentions one"
+/// (a depth cap did, and walled `spec/wasm_cross/compound_repr_recursive_interp.almd`).
+#[test]
+fn a_recursive_record_without_a_runtime_backed_field_is_left_alone() {
+    let src = "type RNode = { val: Int, kids: List[RNode] }\n\neffect fn main() -> Unit = {\n  let n: RNode = { val: 1, kids: [] }\n  println(\"${n}\")\n}\n";
+    let ops = main_ops(src);
+    assert_eq!(calls(&ops, "compound.to_string"), 0, "routed to the runtime-backed wall:\n{ops:#?}");
+}

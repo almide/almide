@@ -65,13 +65,13 @@ impl almide_ir::visit_mut::IrMutVisitor for RbInterp<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
         almide_ir::visit_mut::walk_expr_mut(self, e);
         let IrExprKind::StringInterp { parts } = &mut e.kind else { return };
-        if !parts.iter().any(|p| matches!(p, IrStringPart::Expr { expr } if self.mentions_rb(&expr.ty, 0))) {
+        if !parts.iter().any(|p| matches!(p, IrStringPart::Expr { expr } if self.mentions_rb(&expr.ty, &mut Vec::new()))) {
             return;
         }
         let old = std::mem::take(parts);
         for p in old {
             match p {
-                IrStringPart::Expr { expr } if self.mentions_rb(&expr.ty, 0) => {
+                IrStringPart::Expr { expr } if self.mentions_rb(&expr.ty, &mut Vec::new()) => {
                     match self.top_part(&expr) {
                         Some(mut flat) => parts.append(&mut flat),
                         None => parts.push(IrStringPart::Expr {
@@ -87,23 +87,28 @@ impl almide_ir::visit_mut::IrMutVisitor for RbInterp<'_> {
 
 impl RbInterp<'_> {
     /// Does `ty` mention a runtime-backed type anywhere (through containers and
-    /// declared record fields)? `depth` bounds a recursive record declaration.
-    fn mentions_rb(&self, ty: &Ty, depth: usize) -> bool {
-        if depth > 16 {
-            return true; // conservative: route to the honest wall
-        }
+    /// declared record fields)? `seen` holds the record declarations already on
+    /// the path: a recursive record (`kids: List[Node]`) adds nothing on re-entry,
+    /// so it mentions one only if some non-recursive field does.
+    fn mentions_rb(&self, ty: &Ty, seen: &mut Vec<String>) -> bool {
         match ty {
             Ty::Named(name, args) => {
-                rb_repr(ty).is_some()
-                    || args.iter().any(|a| self.mentions_rb(a, depth + 1))
-                    || self
-                        .records
-                        .get(name.as_str())
-                        .is_some_and(|fs| fs.iter().any(|(_, t)| self.mentions_rb(t, depth + 1)))
+                if rb_repr(ty).is_some() || args.iter().any(|a| self.mentions_rb(a, seen)) {
+                    return true;
+                }
+                let key = name.as_str().to_string();
+                if seen.contains(&key) {
+                    return false;
+                }
+                let Some(fs) = self.records.get(&key) else { return false };
+                seen.push(key);
+                let hit = fs.iter().any(|(_, t)| self.mentions_rb(t, seen));
+                seen.pop();
+                hit
             }
-            Ty::Applied(_, args) | Ty::Tuple(args) => args.iter().any(|a| self.mentions_rb(a, depth + 1)),
+            Ty::Applied(_, args) | Ty::Tuple(args) => args.iter().any(|a| self.mentions_rb(a, seen)),
             Ty::Record { fields } | Ty::OpenRecord { fields } => {
-                fields.iter().any(|(_, t)| self.mentions_rb(t, depth + 1))
+                fields.iter().any(|(_, t)| self.mentions_rb(t, seen))
             }
             _ => false,
         }
