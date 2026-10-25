@@ -122,7 +122,7 @@ fn almide_net_unix_io<R>(fds: &[i64], f: impl FnOnce(&mut AlmideUnixTables) -> R
             }
         }
         for (n, q) in std::mem::take(&mut scratch.received) {
-            t.received.entry(n).or_default().extend(q);
+            t.absorb_received(n, q);
         }
     });
     r

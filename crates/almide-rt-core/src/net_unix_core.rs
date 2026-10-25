@@ -165,6 +165,24 @@ impl AlmideUnixTables {
         self.received.remove(&sock).map(Vec::from).unwrap_or_default()
     }
 
+    /// Queue on `sock` the descriptors another table received for it, under
+    /// the same bound `unix_recv` keeps (#4124): at most `MAX_FDS` wait
+    /// untaken, and each one past that is closed here (its held entry is
+    /// dropped), never queued. A host that runs a call on a scratch table and
+    /// merges the result back (#4199) merges through this, so the scratch
+    /// table's empty backlog cannot lift the bound.
+    pub fn absorb_received(&mut self, sock: i64, fds: impl IntoIterator<Item = i64>) {
+        let waiting = self.received.get(&sock).map_or(0, |q| q.len());
+        let mut fds = fds.into_iter();
+        let keep: Vec<i64> = fds.by_ref().take(almide_unix_sys::MAX_FDS.saturating_sub(waiting)).collect();
+        for n in fds {
+            self.held.remove(&n);
+        }
+        if !keep.is_empty() {
+            self.received.entry(sock).or_default().extend(keep);
+        }
+    }
+
     /// Whether `fd` has something to read (data, a connection, or the peer's
     /// close) within `timeout_ms` milliseconds; 0 checks without waiting, a
     /// negative timeout waits as long as it takes.
