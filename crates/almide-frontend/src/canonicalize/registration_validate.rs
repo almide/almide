@@ -205,7 +205,6 @@ fn validate_derive_field_support(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic
         }
     }
 }
-/// Per-field derive-support check for a single (type, protocol, field) triple: the Codec-unsupported-container check, plus recursively requiring every leaf nominal in the field's type to derive the same protocol. `reported` dedupes diagnostics across (type, protocol, leaf) triples seen by earlier fields/protocols/types in the caller's loop nest. Verbatim text move out of [`validate_derive_field_support`].
 /// The (type, protocol) pair a field-recursive derive check is running for.
 ///
 /// Both are `Sym`, so as adjacent positional parameters they could be
@@ -216,6 +215,48 @@ struct DeriveSite {
     proto: Sym,
 }
 
+/// #4107 (R-secret-04): a `Secret[A]` FIELD decodes from A's wire form and
+/// is never encoded; A follows the ordinary field grammar (Secret[Bytes]
+/// is the Bytes E023). A Secret anywhere else in the field type has no
+/// wire form at all.
+///
+/// Returns true when the field holds a Secret (diagnosed here or accepted), so
+/// the ordinary field grammar does not judge it again.
+fn validate_secret_codec_field(
+    env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>,
+    reported: &mut std::collections::HashSet<(Sym, Sym, Sym)>,
+    site: DeriveSite, field_name: &str, field_ty: &Ty,
+) -> bool {
+    let DeriveSite { type_name, proto } = site;
+    let is_variant = matches!(env.types.get(&type_name), Some(Ty::Variant { .. }));
+    if let Some(payload) = crate::secret_type::secret_payload(field_ty).filter(|_| !is_variant) {
+        if let Some((offender, hint)) = codec_field_shape_error(payload) {
+            if reported.insert((type_name, proto, sym(&offender))) {
+                diagnostics.push(err(
+                    format!("type '{}' derives 'Codec' but field '{}' is a Secret of {}, which the Codec derive cannot decode",
+                        type_name, field_name, offender),
+                    hint,
+                    format!("type {} : Codec", type_name),
+                ).with_code("E023"));
+            }
+        }
+        return true;
+    }
+    if secret_outside_codec_types(env, field_ty) {
+        if reported.insert((type_name, proto, sym("<nested-secret>"))) {
+            diagnostics.push(err(
+                format!("type '{}' derives 'Codec' but field '{}' holds a Secret inside '{}', which the Codec derive cannot decode",
+                    type_name, field_name, field_ty.display()),
+                "A Codec record decodes a Secret only as a field's own type (`password: Secret[String]`). Decode the inner shape into its own Codec type with Secret fields, or hand-write Type.decode.".to_string(),
+                format!("type {} : Codec", type_name),
+            ).with_code("E023"));
+        }
+        return true;
+    }
+    false
+}
+
+/// Per-field derive-support check for a single (type, protocol, field) triple: the Codec-unsupported-container check, plus recursively requiring every leaf nominal in the field's type to derive the same protocol. `reported` dedupes diagnostics across (type, protocol, leaf) triples seen by earlier fields/protocols/types in the caller's loop nest. Verbatim text move out of [`validate_derive_field_support`].
 fn validate_derive_field(
     env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>,
     reported: &mut std::collections::HashSet<(Sym, Sym, Sym)>,
@@ -226,36 +267,9 @@ fn validate_derive_field(
     // two could be passed from different protocols at the call site. One name,
     // derived here.
     let p = proto.as_str();
-    // #4107 (R-secret-04): a `Secret[A]` FIELD decodes from A's wire form and
-    // is never encoded; A follows the ordinary field grammar (Secret[Bytes]
-    // is the Bytes E023). A Secret anywhere else in the field type has no
-    // wire form at all.
-    if p == "Codec" {
-        let is_variant = matches!(env.types.get(&type_name), Some(Ty::Variant { .. }));
-        if let Some(payload) = crate::secret_type::secret_payload(field_ty).filter(|_| !is_variant) {
-            if let Some((offender, hint)) = codec_field_shape_error(payload) {
-                if reported.insert((type_name, proto, sym(&offender))) {
-                    diagnostics.push(err(
-                        format!("type '{}' derives 'Codec' but field '{}' is a Secret of {}, which the Codec derive cannot decode",
-                            type_name, field_name, offender),
-                        hint,
-                        format!("type {} : Codec", type_name),
-                    ).with_code("E023"));
-                }
-            }
-            return;
-        }
-        if secret_outside_codec_types(env, field_ty) {
-            if reported.insert((type_name, proto, sym("<nested-secret>"))) {
-                diagnostics.push(err(
-                    format!("type '{}' derives 'Codec' but field '{}' holds a Secret inside '{}', which the Codec derive cannot decode",
-                        type_name, field_name, field_ty.display()),
-                    "A Codec record decodes a Secret only as a field's own type (`password: Secret[String]`). Decode the inner shape into its own Codec type with Secret fields, or hand-write Type.decode.".to_string(),
-                    format!("type {} : Codec", type_name),
-                ).with_code("E023"));
-            }
-            return;
-        }
+    // #4107 (R-secret-04): a Secret field is judged by its own rule.
+    if p == "Codec" && validate_secret_codec_field(env, diagnostics, reported, site, field_name, field_ty) {
+        return;
     }
     // #655: the Codec derive has no Map/Set arm — reject such a field here rather than emitting invalid Rust / silent-wrong wasm. Same E023 family (a field that cannot satisfy Codec).
     if p == "Codec" {
