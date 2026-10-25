@@ -30,6 +30,27 @@ default
 port = 8080
 ```
 
+### The whole-file readers read regular files of at most 1 GiB
+
+`read_text` / `read_bytes` / `read_lines` / `read_bytes_raw` and their
+`_if_exists` twins read a **regular file** of at most **1 GiB**
+(1073741824 bytes), the same on native, the embedded wasm host and the stock
+WASI legs (contract C-422, #4201):
+
+- a character or block device, a FIFO or a socket (`/dev/zero`, `/dev/null`,
+  a named pipe) errs `fs.read_text("/dev/zero"): Not a regular file`. The
+  open does not block on a FIFO with no writer, and the opened descriptor is
+  what is judged, so a file swapped in after a check cannot slip past;
+- a larger file errs `fs.read_bytes("big.bin"): File too large (the read
+  limit is 1073741824 bytes)` — from its size before a byte is read, and from
+  the bytes actually read when the size under-reports;
+- a directory keeps its own `Is a directory (os error 21)`.
+
+The `_if_exists` twins answer these as `err`, never `ok(none)`. To walk a
+file larger than the limit, stream it with `fs.fold_lines` /
+`fs.for_each_line`. Reading standard input is `io.read_all`, not
+`fs.read_text("/dev/stdin")`.
+
 ### `fs.read_text(path: String) -> Result[String, String]`
 
 Read file contents as a UTF-8 string
@@ -656,11 +677,11 @@ true
 ## Signature index (41 functions)
 
 ```
-// Whole file as UTF-8; err if missing or not UTF-8.
+// Whole regular file (<= 1 GiB) as UTF-8; err if missing or not UTF-8.
 // @since 0.5.0 or earlier
 effect fs.read_text(path: String) -> String
 
-// Bytes as Ints 0..255; err if missing.
+// Bytes as Ints 0..255; regular file <= 1 GiB; err if missing.
 // @since 0.5.0 or earlier
 effect fs.read_bytes(path: String) -> List[Int]
 
@@ -688,7 +709,7 @@ effect fs.mkdir_p(path: String) -> Unit
 // @since 0.6.0 or earlier
 effect fs.exists(path: String) -> Bool
 
-// CRLF-aware lines; a final newline adds no line.
+// CRLF-aware lines of a regular file <= 1 GiB; a final newline adds no line.
 // @since 0.5.0 or earlier
 effect fs.read_lines(path: String) -> List[String]
 
@@ -788,7 +809,7 @@ effect fs.is_symlink(path: String) -> Bool
 // @since 0.6.0 or earlier
 effect fs.modified_at(path: String) -> Int
 
-// Whole file as Bytes; err if missing.
+// Whole regular file (<= 1 GiB) as Bytes; err if missing.
 // @since 0.13.4 or earlier
 effect fs.read_bytes_raw(path: String) -> Bytes
 

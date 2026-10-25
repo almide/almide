@@ -622,15 +622,15 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [fs.md](fs.md)
 
-- `effect fs.read_text(path: String) -> String` — Whole file as UTF-8; err if missing or not UTF-8.
-- `effect fs.read_bytes(path: String) -> List[Int]` — Bytes as Ints 0..255; err if missing.
+- `effect fs.read_text(path: String) -> String` — Whole regular file (<= 1 GiB) as UTF-8; err if missing or not UTF-8.
+- `effect fs.read_bytes(path: String) -> List[Int]` — Bytes as Ints 0..255; regular file <= 1 GiB; err if missing.
 - `effect fs.write(path: String, content: String) -> Unit` — Overwrites or creates; err if no parent dir.
 - `effect fs.write_bytes(path: String, bytes: List[Int]) -> Unit` — Writes low byte of each Int (-1 -> 255).
 - `effect fs.write_bytes_raw(path: String, data: Bytes) -> Unit` — Writes data verbatim, replacing the file.
 - `effect fs.append(path: String, content: String) -> Unit` — Appends content; creates the file if missing.
 - `effect fs.mkdir_p(path: String) -> Unit` — Creates dir and parents; ok if it exists.
 - `effect fs.exists(path: String) -> Bool` — False if missing or a dangling symlink.
-- `effect fs.read_lines(path: String) -> List[String]` — CRLF-aware lines; a final newline adds no line.
+- `effect fs.read_lines(path: String) -> List[String]` — CRLF-aware lines of a regular file <= 1 GiB; a final newline adds no line.
 - `effect fs.fold_lines(path: String, init: A, f: (A, String) -> A) -> A` — Streamed fold over lines; err if missing.
 - `effect fs.for_each_line(path: String, f: (String) -> Unit) -> Unit` — Calls f per line, streamed; may err mid-file.
 - `effect fs.fold_lines_range(path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A` — Folds lines starting in bytes [start, end).
@@ -655,7 +655,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect fs.create_temp_dir(prefix: String) -> String` — New private dir, random name; its path.
 - `effect fs.is_symlink(path: String) -> Bool` — True for a symlink, even a dangling one.
 - `effect fs.modified_at(path: String) -> Int` — Mtime in Unix seconds; err if missing.
-- `effect fs.read_bytes_raw(path: String) -> Bytes` — Whole file as Bytes; err if missing.
+- `effect fs.read_bytes_raw(path: String) -> Bytes` — Whole regular file (<= 1 GiB) as Bytes; err if missing.
 - `effect fs.open_root(dir: String) -> FsRoot` — dir as an FsRoot; err if dir is not a directory.
 - `effect fs.root_read_text(root: FsRoot, path: String) -> String` — read_text of path inside root; err if it escapes.
 - `effect fs.root_read_bytes(root: FsRoot, path: String) -> Bytes` — read_bytes_raw of path inside root; err if it escapes.

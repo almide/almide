@@ -8286,11 +8286,17 @@ pub const SRC_FS: &str = r#"
 /// Path metadata; modified is Unix seconds.
 type FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }
 
-/// Whole file as UTF-8; err if missing or not UTF-8.
+
+
+
+
+
+
+/// Whole regular file (<= 1 GiB) as UTF-8; err if missing or not UTF-8.
 @intrinsic("almide_rt_fs_read_text")
 effect fn read_text(path: String) -> Result[String, String] = _
 
-/// Bytes as Ints 0..255; err if missing.
+/// Bytes as Ints 0..255; regular file <= 1 GiB; err if missing.
 @intrinsic("almide_rt_fs_read_bytes")
 effect fn read_bytes(path: String) -> Result[List[Int], String] = _
 
@@ -8328,7 +8334,7 @@ effect fn mkdir_p(path: String) -> Result[Unit, String] = _
 @intrinsic("almide_rt_fs_exists")
 effect fn exists(path: String) -> Bool = _
 
-/// CRLF-aware lines; a final newline adds no line.
+/// CRLF-aware lines of a regular file <= 1 GiB; a final newline adds no line.
 @intrinsic("almide_rt_fs_read_lines")
 effect fn read_lines(path: String) -> Result[List[String], String] = _
 
@@ -8389,6 +8395,7 @@ effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A
 @concurrent(f)
 @intrinsic("almide_rt_fs_fold_lines_chunked")
 effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String] = _
+
 
 
 
@@ -8492,7 +8499,7 @@ effect fn is_symlink(path: String) -> Bool = _
 @intrinsic("almide_rt_fs_modified_at")
 effect fn modified_at(path: String) -> Result[Int, String] = _
 
-/// Whole file as Bytes; err if missing.
+/// Whole regular file (<= 1 GiB) as Bytes; err if missing.
 @intrinsic("almide_rt_fs_read_bytes_raw")
 effect fn read_bytes_raw(path: String) -> Result[Bytes, String] = _
 
