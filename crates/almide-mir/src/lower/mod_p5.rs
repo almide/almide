@@ -130,6 +130,8 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // `json.set_path` / `value.field` — Result[Value, String] built by the
             // ok()/err() ctors (json_path.almd, value_core.almd), json.parse's shape.
             | ("json", "set_path")
+            // value.set_path — the same json_path walk under its value name (#4220).
+            | ("value", "set_path")
             | ("value", "field")
             // The zlib family — Result[Bytes, String] from the ok()/err() ctors
             // (zlib_deflate.almd, zlib_inflate.almd), fs.read_bytes_raw's shape.

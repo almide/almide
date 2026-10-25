@@ -27,6 +27,15 @@ fn seed_selfhost_newtype_reps(
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
         );
     }
+    // Path — value.Path's self-host rep is json_path.almd's List[String] of
+    // segments (#4220); value.almd's own List[(Bool, String, Int)] body is the
+    // native one, and the two never meet (Path is opaque outside value).
+    if !declared.contains("Path") {
+        map.insert(
+            "Path".to_string(),
+            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
+        );
+    }
     // HttpResponse — the self-host rep is `[status, body, k1, v1, …]`
     // (stdlib/http_response.almd, the same List[String] discipline).
     if !declared.contains("HttpResponse") {
