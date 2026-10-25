@@ -1079,6 +1079,19 @@ fn render_runtime_call_arg_owned(ctx: &RenderContext, symbol: &almide_base::inte
     {
         return format!("(&*{})", render_expr(ctx, inner));
     }
+    // A Bytes/Matrix result of an ALMIDE-BODIED stdlib fn unwrapped in place
+    // (`bytes.len(unix.shm_read(f, 0, 2)!)`): the callee returns the mapped
+    // `AlmideRcCow`, and `&(call)?` hands the `?` match the raw param type as
+    // its expectation (E0308 on the arm). `*` checks its operand with no
+    // expectation, so `&*` deref-coerces exactly as a reference would.
+    if let IrExprKind::Borrow { expr: inner, as_str: false, mutable: false } = &a.kind
+        && let IrExprKind::Unwrap { expr: call } | IrExprKind::Try { expr: call } = &inner.kind
+        && let IrExprKind::RuntimeCall { symbol: callee, .. } = &call.kind
+        && !rc_cow_symbol_is_native_runtime(callee.as_str())
+        && matches!(inner.ty, Ty::Bytes | Ty::Matrix | Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Matrix, _))
+    {
+        return format!("(&*{})", render_expr(ctx, inner));
+    }
     // #617: a concrete container-of-raw runtime param cannot deref-coerce
     // through AlmideRcCow ELEMENTS — clone them out at this (rare) boundary. The
     // closure param is EXPLICITLY typed: the producer side may itself be
