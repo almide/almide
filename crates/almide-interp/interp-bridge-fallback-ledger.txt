@@ -16,7 +16,6 @@
 #   ALMIDE_UPDATE_INTERP_LEDGER=1 cargo test --test wasm_runtime_interp_ledger interp_bridge_fallback_ledger
 
 bytes.len  bytes_string_window_domain  floor: consumed inside a self-hosted body
-bytes.to_list  fs_composition_family  floor: consumed inside a self-hosted body
 bytes.zeros  zlib_call_vs_user_namesake  floor: consumed inside a self-hosted body
 env.set  env_set_overlay  env.set: no lowered body
 env.sleep_ms  env_sleep_pause  env.sleep_ms: no lowered body
@@ -46,7 +45,6 @@ int.to_string  availability_pure_batch  floor: consumed inside a self-hosted bod
 math.fpow  matrix_pow_libm  floor: consumed inside a self-hosted body
 math.log  math_log_gamma  floor: consumed inside a self-hosted body
 math.sin  math_log_gamma_negative  floor: consumed inside a self-hosted body
-string.to_list  http_response_headers  floor: consumed inside a self-hosted body
 string.contains  fs_glob_segments  floor: consumed inside a self-hosted body
 string.drop  json_path_edges  floor: consumed inside a self-hosted body
 string.drop_end  json_number_unicode  floor: consumed inside a self-hosted body
@@ -60,5 +58,6 @@ string.slice  codec_decode_error_surface  floor: consumed inside a self-hosted b
 string.split  datetime_parse_iso_strict  floor: consumed inside a self-hosted body
 string.starts_with  codec_decode_error_surface  floor: consumed inside a self-hosted body
 string.take  json_path_edges  floor: consumed inside a self-hosted body
+string.to_list  http_response_headers  floor: consumed inside a self-hosted body
 string.to_upper  string_case_unicode  floor: consumed inside a self-hosted body
 string.trim  ctor_scalar_call_payload  floor: consumed inside a self-hosted body
