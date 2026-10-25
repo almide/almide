@@ -268,6 +268,20 @@ Comparing two tokens yourself: `string.is_equal_constant_time(a, b)` /
 `bytes.is_equal_constant_time(a, b)`. `hash.md5` / `hash.sha1` are for
 compatibility only; `--profile critical` refuses them (E100).
 
+### Secrets: `random.bytes`, never `random.int`
+
+A token, key, password, nonce or session id comes from `random.bytes(n)`:
+the operating system's cryptographic source on every target. `random.int` /
+`float` / `choice` / `shuffle` are a fast per-thread generator and are not
+for secrets: never build one from `random.int(0, 255)` in a loop.
+
+```almide check
+import hex
+import random
+
+effect fn new_session_token() -> String = hex.encode(random.bytes(32))
+```
+
 ### Operators, not comparison functions
 
 Almide uses operators for comparison and equality. There is no
