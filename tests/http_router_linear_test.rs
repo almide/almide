@@ -1,7 +1,7 @@
 //! The http router's per-request work was O(L²) in the request path length L
 //! (stdlib inspection, 2026-10-16): native took 0.29 s user for a 404 at
 //! 40k characters and 4.7 s at 160k, so one long request tied up a server.
-//! `__bad_escape` recursed over `string.chars(path)` with `list.drop(cs, 1)`
+//! `__bad_escape` recursed over `string.to_list(path)` with `list.drop(cs, 1)`
 //! — a copy of the rest of the path per character — and `__bind_into`
 //! dropped one segment off the request's parts per step the same way.
 //!

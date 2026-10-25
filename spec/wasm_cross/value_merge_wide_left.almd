@@ -9,7 +9,7 @@ fn wide(n: Int) -> Value = value.object(list.range(0, n) |> list.map((i) => if i
 
 effect fn main() -> Unit = {
   let a = wide(2000)
-  let b = value.object([("dup", value.str("b1")), ("fresh", value.int(1)), ("k1999", value.bool(true)), ("dup", value.str("b2")), ("fresh", value.int(2))])
+  let b = value.object([("dup", value.string("b1")), ("fresh", value.int(1)), ("k1999", value.bool(true)), ("dup", value.string("b2")), ("fresh", value.int(2))])
   let r = value.merge(a, b)
   let ks = value.keys(r)
   println("${list.len(value.keys(a))} ${list.len(ks)}")

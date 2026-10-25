@@ -281,31 +281,14 @@ pub(crate) fn float_lit_bits(value: f64, ty: &Ty) -> i64 {
 /// A CONST-foldable module-global initializer → its direct `Init` (NO runtime call), else `None`.
 /// Admits exactly the compile-time-known heap constants the module-global materialization emits as
 /// data: a string literal, an all-int-literal `List[Int]`, and `bytes.from_list([int literals])`.
-/// Anything COMPUTED (a `string.from_codepoint(..)` / user call) returns `None` and keeps walling —
+/// Anything COMPUTED (a stdlib or user call) returns `None` and keeps walling —
 /// materializing it would inject a `CallFn` the gate's IR-side `count_ir_calls` cannot see (mir>ir).
-// Pure guards, no recursion — named so the two Module-call arms of
-// `const_global_init` below read as one condition instead of three inlined
-// clauses each (same "extract the boolean, keep the shape" refactor as the
-// guard predicates in `lower/binds_p4_b_b.rs`).
-fn is_string_from_codepoint_call(module: &str, func: &str, arg_count: usize) -> bool {
-    module == "string" && func == "from_codepoint" && arg_count == 1
-}
+// A pure guard, no recursion — named so the Module-call arm of
+// `const_global_init` below reads as one condition instead of three inlined
+// clauses (same "extract the boolean, keep the shape" refactor as the guard
+// predicates in `lower/binds_p4_b_b.rs`).
 fn is_bytes_from_list_call(module: &str, func: &str, arg_count: usize) -> bool {
     module == "bytes" && func == "from_list" && arg_count == 1
-}
-
-/// `string.from_codepoint(<int literal>)` (`let NL = string.from_codepoint(10)` —
-/// the stringify-escape test globals) CONST-FOLDS to its one-char string at
-/// lowering time: zero calls injected, so the count gate stays exact. An invalid
-/// codepoint keeps walling (never a wrong byte).
-fn const_fold_string_from_codepoint(args: &[IrExpr]) -> Option<crate::Init> {
-    let IrExprKind::LitInt { value } = &args[0].kind else {
-        return None;
-    };
-    u32::try_from(*value)
-        .ok()
-        .and_then(char::from_u32)
-        .map(|c| crate::Init::Str(c.to_string()))
 }
 
 fn const_fold_bytes_from_list(args: &[IrExpr]) -> Option<crate::Init> {
@@ -334,13 +317,6 @@ fn const_global_init(init: &IrExpr) -> Option<crate::Init> {
                 })
                 .collect();
             ints.map(crate::Init::IntList)
-        }
-        IrExprKind::Call {
-            target: CallTarget::Module { module, func, .. },
-            args,
-            ..
-        } if is_string_from_codepoint_call(module.as_str(), func.as_str(), args.len()) => {
-            const_fold_string_from_codepoint(args)
         }
         IrExprKind::Call {
             target: CallTarget::Module { module, func, .. },

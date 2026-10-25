@@ -11,7 +11,7 @@ import json
 type O: Codec = { oi: Int? = none, of: Float? = none, req: String }
 
 effect fn main() -> Unit = {
-  println("int=${value.int(2)} flt=${value.float(2.5)} arr=${value.array([value.float(0.25), value.str("s")])}")
+  println("int=${value.int(2)} flt=${value.float(2.5)} arr=${value.array([value.float(0.25), value.string("s")])}")
   println(json.stringify(value.object([("ratio", value.float(1.5)), ("n", value.int(3))])))
   let missing = O.decode(json.parse("{\"req\": \"r\"}")!)!
   println(json.stringify(O.encode(missing)))

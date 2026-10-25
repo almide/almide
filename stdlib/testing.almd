@@ -78,13 +78,15 @@ fn assert_contains(haystack: String, needle: String) -> Unit = _
 @intrinsic("almide_rt_test_assert_approx")
 fn assert_approx(a: Float, b: Float, tolerance: Float) -> Unit = _
 
+// assert_gt / assert_lt take any ordered type (R-testing-02): the order is
+// `>` / `<`'s, so Int, Float, String and the clocks all compare as they do
+// in an expression. Outside a test block the frontend desugars a direct call
+// to the T18 abort block (calls_testing_assert.rs), the same on every leg.
 /// Fails unless a > b; equal fails.
-@intrinsic("almide_rt_test_assert_gt")
-fn assert_gt(a: Int, b: Int) -> Unit = _
+fn assert_gt[A](a: A, b: A) -> Unit = if a > b then () else panic("assert_gt failed")
 
 /// Fails unless a < b; equal fails.
-@intrinsic("almide_rt_test_assert_lt")
-fn assert_lt(a: Int, b: Int) -> Unit = _
+fn assert_lt[A](a: A, b: A) -> Unit = if a < b then () else panic("assert_lt failed")
 
 /// Fails when o is none.
 @intrinsic("almide_rt_test_assert_some")

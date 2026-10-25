@@ -8,13 +8,13 @@ type User: Codec = { name: String, tags: List[String] }
 
 test "a string put into a Value comes back unchanged" {
   let s = string.repeat("ab", 3)
-  let v = value.str(s)
+  let v = value.string(s)
   assert_eq(value.as_string(v), ok("ababab"))
 }
 
 test "a Value payload does not follow a later push on its source" {
   var s = "base"
-  let v = value.str(s)
+  let v = value.string(s)
   string.push(s, "-more")
   assert_eq(s, "base-more")
   assert_eq(value.as_string(v), ok("base"))
@@ -35,6 +35,6 @@ test "a derived decode and encode round-trips string fields" {
 
 test "one string shared by many Values keeps every copy equal" {
   let s = string.repeat("z", 64)
-  let vs = list.range(0, 100) |> list.map((i) => value.str(s))
+  let vs = list.range(0, 100) |> list.map((i) => value.string(s))
   assert_eq(list.all(vs, (v) => value.as_string(v) == ok(s)), true)
 }

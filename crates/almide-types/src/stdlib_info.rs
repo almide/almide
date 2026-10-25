@@ -355,10 +355,10 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         | "starts_with" | "ends_with"
         | "to_bytes" | "to_upper" | "to_lower" | "capitalize"
         | "replace" | "lines"
-        | "chars" | "repeat" | "from_bytes"
+        | "repeat" | "from_bytes"
         | "is_digit" | "is_alpha" | "is_alphanumeric"
         | "is_whitespace" | "is_upper" | "is_lower"
-        | "codepoint" | "from_codepoint"
+        | "to_codepoint" | "from_codepoint"
         | "pad_end" | "trim_start" | "trim_end"
         | "strip_prefix" | "strip_suffix"
         | "replace_first" | "last_index_of" => vec!["string"],
@@ -404,7 +404,7 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
 
         // ── option-only ──
         "is_some" | "is_none" | "to_result" | "or_else" => vec!["option"],
-        "to_list" => vec!["set", "option"],
+        "to_list" => vec!["string", "set", "option"],
 
         // ── result-only ──
         "map_err"

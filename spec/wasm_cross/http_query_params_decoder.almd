@@ -41,7 +41,7 @@ effect fn main() -> Unit = {
   }
   // %00 decodes to U+0000 (valid UTF-8), shown by code point.
   match http.query_params(http.new_request("GET", "/p?k=%00", "", map.new())) {
-    ok(ps) => println("/p?k=%00 => ok ${list.len(ps)} ${ps |> list.map(((_, v)) => string.codepoint(v) ?? -1)}"),
+    ok(ps) => println("/p?k=%00 => ok ${list.len(ps)} ${ps |> list.map(((_, v)) => string.to_codepoint(v) ?? -1)}"),
     err(e) => println("/p?k=%00 => err ${e}"),
   }
   // The same text through url.parse_query: the same pairs, the same reasons.

@@ -460,8 +460,10 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(SliceTy::Tuple(ti))))))
     }
 
-    /// First char's codepoint (native `chars().next()`): "" → none.
-    /// The lead byte classes the width; continuations add 6 bits.
+    /// The codepoint of a ONE-codepoint string (R-string-14): "" and two or
+    /// more codepoints → none. The lead byte classes the width; the string is
+    /// one codepoint exactly when its byte length is that width;
+    /// continuations add 6 bits.
     pub(crate) fn lower_string_codepoint(
         &mut self,
         s: &IrExpr,
@@ -483,6 +485,11 @@ impl Emitter<'_> {
         i.local_get(hcp).i32_const(0xE0).i32_ge_u().i32_add();
         i.local_get(hcp).i32_const(0xF0).i32_ge_u().i32_add();
         i.local_set(hw);
+        // more bytes than the lead's width: two or more codepoints → none
+        i.local_get(hs).i32_load(len_memarg()).local_get(hw).i32_ne();
+        i.if_(BlockType::Result(ValType::I32));
+        i.i32_const(0);
+        i.else_();
         // lead mask: w=1 keeps all 7 bits; w>1 masks 0xFF >> (w+1)
         i.local_get(hcp);
         i.i32_const(0xFF);
@@ -503,6 +510,7 @@ impl Emitter<'_> {
         i.local_get(hcp).i64_extend_i32_u();
         i.i64_store(slot_memarg(almide_layout::OPTION_FIELD));
         i.local_get(hk);
+        i.end();
         i.end();
         let _ = i;
         for _ in 0..4 {

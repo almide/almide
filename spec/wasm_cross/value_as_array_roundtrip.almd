@@ -14,7 +14,7 @@ fn comp_int(v: Value) -> Int = match value.as_array(v) {
 
 fn main() -> Unit = {
   println(int.to_string(arr_len(value.array([value.int(7), value.int(8), value.int(9)]))))
-  println(int.to_string(arr_len(value.str("hello"))))
+  println(int.to_string(arr_len(value.string("hello"))))
   println(int.to_string(arr_len(value.array([]))))
   println(int.to_string(comp_int(value.array([value.int(1)]))))
   println(int.to_string(comp_int(value.int(42))))

@@ -10,7 +10,7 @@ impl LowerCtx {
         let faithful = self.check_call_module_faithful(module.as_str(), func.as_str(), args)?;
         self.seed_call_module_heap_read_shape(dst, ty, module.as_str(), func.as_str(), faithful);
         self.seed_call_module_heap_drop_route(dst, ty);
-        // A `Value` result (value.str/int/… or a Value-returning combinator) drops via the
+        // A `Value` result (value.string/int/… or a Value-returning combinator) drops via the
         // runtime-tag-dispatched DropValue (a heap-payload Value owns one handle).
         if crate::lower::is_value_ty(ty) {
             self.value_handles.insert(dst);

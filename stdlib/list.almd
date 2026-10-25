@@ -296,9 +296,8 @@ fn shuffle[A](xs: List[A]) -> List[A] = _
 @intrinsic("almide_rt_list_window")
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
-/// Index of target in ascending xs, or none.
-@intrinsic("almide_rt_list_binary_search")
-fn binary_search(xs: List[Int], target: Int) -> Int? = _
+/// Index of target in xs sorted ascending (list.sort's order), or none.
+fn binary_search[A](xs: List[A], target: A) -> Int? = binary_search_by(xs, target, (x) => x)
 
 // ── mutable (in-place) ──
 /// Appends x to xs in place.

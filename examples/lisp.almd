@@ -24,7 +24,7 @@ fn is_number(t: String) -> Bool = {
   let head = string.slice(t, 0, 1)
   let rest = string.slice(t, 1, string.len(t))
   if head == "-" and string.len(t) > 1 then is_number(rest)
-  else string.chars(t) |> list.all((c) => string.is_digit(c))
+  else string.to_list(t) |> list.all((c) => string.is_digit(c))
 }
 
 // ── Parser: tokens → Value tree ─────────────────────────────────────────
@@ -32,7 +32,7 @@ fn is_number(t: String) -> Bool = {
 // parenthesized form a Value array. `parse_list` walks tokens from `i` until
 // the matching ")" and returns the next index alongside the collected forms.
 fn atom(t: String) -> Value = if is_number(t) then value.int(int.parse(t) ?? 0)
-else value.str(t)
+else value.string(t)
 
 fn parse_one(toks: List[String], i: Int) -> (Value, Int) = {
   let t = list.get_or(toks, i, ")")
@@ -101,7 +101,7 @@ fn scope_get(env: Value, name: String, genv: Value) -> Value = match scope_chain
   ok(v) => v,
   err(_) => match value.field(genv, name) {
     ok(v) => v,
-    err(_) => value.str(name),
+    err(_) => value.string(name),
   },
 }
 
@@ -156,7 +156,7 @@ fn eval_form(items: List[Value], env: Value, genv: Value) -> Value = {
       ok(ps) => ps,
       err(_) => [],
     }
-    value.array([value.str("#closure"), value.array(params), list_get_or_v(items, 2), env])
+    value.array([value.string("#closure"), value.array(params), list_get_or_v(items, 2), env])
   } else if is_sym(head, "let") then {
     // (let ((name expr)...) body)
     let binds = match value.as_array(list_get_or_v(items, 1)) {
@@ -194,8 +194,8 @@ fn apply(f: Value, args: List[Value], genv: Value) -> Value = match value.as_str
       let body = list_get_or_v(parts, 2)
       let cenv = list_get_or_v(parts, 3)
       eval(body, scope_child(cenv, params, args), genv)
-    } else value.str("#not-a-function"),
-    err(_) => value.str("#not-a-function"),
+    } else value.string("#not-a-function"),
+    err(_) => value.string("#not-a-function"),
   },
 }
 
@@ -235,7 +235,7 @@ fn builtin(name: String, args: List[Value]) -> Value = {
       },
       err(_) => value.array([]),
     },
-    _ => value.str("#unbound:" + name),
+    _ => value.string("#unbound:" + name),
   }
 }
 

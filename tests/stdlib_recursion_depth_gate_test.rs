@@ -7,7 +7,7 @@
 //! leg (wasmtime's stack is far smaller than native's 8 MB), which makes it a
 //! cross-target divergence as well as a crash:
 //!
-//! - #2291 `string.index_of` / `string.count(s, "")`: `__cp_count` was
+//! - #2291 `string.index_of` / `string.count_matches(s, "")`: `__cp_count` was
 //!   `step + __cp_count(..)`, one frame per byte of the prefix — wasm trapped
 //!   past ~16 KB while native answered.
 //! - #2306 `list.iterate` and the fallible carriers behind

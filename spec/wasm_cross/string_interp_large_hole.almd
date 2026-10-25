@@ -16,7 +16,7 @@ import json
 
 fn hole(n: Int) -> String = string.pad_end("x", n, "y")
 
-fn checksum(s: String) -> Int = string.count(s, "y") * 7 + string.len(s)
+fn checksum(s: String) -> Int = string.count_matches(s, "y") * 7 + string.len(s)
 
 fn report(label: String, s: String) -> Unit = println("${label}: len=${string.len(s)} head=${string.take(s, 8)} tail=${string.take_end(s, 8)} sum=${checksum(s)}")
 
@@ -33,7 +33,7 @@ fn main() -> Unit = {
   // the statement-position println of the original repro
   println("stmt=${hole(65537)}|")
   // the JSON quoting writer over a large string
-  let v = value.object([("k", value.str(hole(70000)))])
+  let v = value.object([("k", value.string(hole(70000)))])
   report("json", json.stringify(v))
   // small builds after the relocation
   println("after: ${1 + 2} ${true} ${"ok"}")

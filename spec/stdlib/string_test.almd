@@ -188,12 +188,12 @@ test "string.lines single line" {
 }
 
 // ── chars ──
-test "string.chars multiple" {
-  assert_eq(string.chars("hello"), ["h", "e", "l", "l", "o"])
+test "string.to_list multiple" {
+  assert_eq(string.to_list("hello"), ["h", "e", "l", "l", "o"])
 }
 
-test "string.chars single char" {
-  assert_eq(string.chars("a"), ["a"])
+test "string.to_list single char" {
+  assert_eq(string.to_list("a"), ["a"])
 }
 
 // ── index_of ──
@@ -278,16 +278,16 @@ test "string.trim_end no whitespace" {
 
 // ── count ──
 test "string.count multiple matches" {
-  assert_eq(string.count("banana", "a"), 3)
+  assert_eq(string.count_matches("banana", "a"), 3)
 }
 
 test "string.count no matches" {
-  assert_eq(string.count("hello", "x"), 0)
+  assert_eq(string.count_matches("hello", "x"), 0)
 }
 
 test "string.count empty substring" {
   // empty substring: count is len+1
-  let c = string.count("abc", "")
+  let c = string.count_matches("abc", "")
   assert(c >= 0)
 }
 

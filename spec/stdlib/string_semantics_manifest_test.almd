@@ -51,16 +51,20 @@ test "string.repeat unit=count" {
   assert_eq("${string.repeat("é", 2)}", "éé")
 }
 
-test "string.codepoint unit=scalar" {
-  assert_eq("${string.codepoint("é") ?? -1}", "233")
+test "string.to_codepoint unit=scalar" {
+  assert_eq("${string.to_codepoint("é") ?? -1}", "233")
 }
 
 test "string.from_codepoint unit=scalar" {
-  assert_eq("${string.from_codepoint(233)}", "é")
+  assert_eq("${string.from_codepoint(233) ?? ""}", "é")
+}
+
+test "string.count_matches unit=count" {
+  assert_eq("${string.count_matches("ééa", "é")}", "2")
 }
 
 test "string.count unit=count" {
-  assert_eq("${string.count("ééa", "é")}", "2")
+  assert_eq("${string.count("ééa", (c) => c == "é")}", "2")
 }
 
 test "string.take unit=codepoint" {

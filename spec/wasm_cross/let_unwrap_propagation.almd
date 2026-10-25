@@ -10,7 +10,7 @@ effect fn first_str(v: Value) -> Result[String, String] = {
 }
 
 effect fn main() -> Unit = {
-  match first_str(value.str("hi")) {
+  match first_str(value.string("hi")) {
     ok(s) => println(s),
     err(e) => println("E:" + e),
   }

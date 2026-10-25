@@ -155,10 +155,10 @@ effect fn run_trial(ctx: Ctx, variant: Variant, task: Task, trial: Int) -> Resul
     (evaluate(gate_source(ctx, variant, task, code_2), "${tag}_2_gate")!, evaluate("${code_2}\n\n${task.hidden}", "${tag}_2_hidden")!)
   } else (gate_1, hidden_1)
   ok(value.object([
-    ("experiment", value.str(ctx.experiment)),
-    ("model", value.str(ctx.model_name)),
-    ("variant", value.str(variant.name)),
-    ("task", value.str(task.name)),
+    ("experiment", value.string(ctx.experiment)),
+    ("model", value.string(ctx.model_name)),
+    ("variant", value.string(variant.name)),
+    ("task", value.string(task.name)),
     ("trial", value.int(trial)),
     ("compiled_1", value.bool(gate_1.compiled)),
     ("gate_1", value.bool(gate_1.passed)),
@@ -210,8 +210,8 @@ fn strip_blocks(code: String) -> String = {
     let t = string.trim(line)
     let starts = not skipping and (string.starts_with(t, "test ") or string.starts_with(t, "law "))
     if starts or skipping then {
-      let opens = string.chars(line) |> list.filter((c) => c == "{") |> list.len
-      let closes = string.chars(line) |> list.filter((c) => c == "}") |> list.len
+      let opens = string.to_list(line) |> list.filter((c) => c == "{") |> list.len
+      let closes = string.to_list(line) |> list.filter((c) => c == "}") |> list.len
       depth = (if starts then 0 else depth) + opens - closes
       skipping = depth > 0
     } else {

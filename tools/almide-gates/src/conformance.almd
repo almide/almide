@@ -21,8 +21,8 @@ fn zero_pad(s: String, width: Int) -> String = if string.len(s) >= width then s 
 fn als_sort_key(spec: String) -> String = {
   let body = if string.starts_with(spec, "ALS-") then string.slice(spec, 4, string.len(spec))
   else spec
-  // `string.filter` does not exist; go through `string.chars` and the list combinators.
-  let cs = string.chars(body)
+  // `string.filter` does not exist; go through `string.to_list` and the list combinators.
+  let cs = string.to_list(body)
   let letters = cs |> list.filter((c) => not string.is_digit(c)) |> list.join("")
   let digits = cs |> list.filter((c) => string.is_digit(c)) |> list.join("")
   letters + zero_pad(digits, 3)

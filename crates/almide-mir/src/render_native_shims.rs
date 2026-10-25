@@ -77,9 +77,6 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("string.take", &[NTy::Str, NTy::I64],
             Some(NTy::Str),
             "fn rt_string_take(s: &str, n: i64) -> AlmideString { AlmideString::from(s.chars().take(n as usize).collect::<String>()) }"),
-    ("string.from_codepoint", &[NTy::I64],
-            Some(NTy::Str),
-            "fn rt_string_from_codepoint(cp: i64) -> AlmideString { AlmideString::from(<u32 as std::convert::TryFrom<i64>>::try_from(cp).ok().and_then(char::from_u32).map(|c| c.to_string()).unwrap_or_default()) }"),
     // A NaN maps to the one canonical quiet-NaN pattern (almide_rt_float_to_bits).
     ("float.to_bits", &[NTy::F64],
             Some(NTy::I64),

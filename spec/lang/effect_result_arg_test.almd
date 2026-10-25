@@ -6,7 +6,7 @@
 // declares Result — without that, the callee read the raw block's payload slots
 // as a Result (yaml's `unwrap(parse("name: Alice"))` returned "" on wasm while
 // native said "Alice").
-effect fn mk() -> Value = value.object([("name", value.str("Alice"))])
+effect fn mk() -> Value = value.object([("name", value.string("Alice"))])
 
 fn unwrap_or_null(r: Result[Value, String]) -> Value = match r {
   ok(v) => v,
@@ -36,7 +36,7 @@ test "never-err effect call with a String payload" {
 // arm machinery), so both the ok path and the propagated-err path hand the
 // caller a real Result block — the old hybrid ABI returned raw `T` on ok paths
 // and OOB-crashed the scope-end drop.
-effect fn mk_v(flag: Bool) -> Value = if flag then value.object([("name", value.str("Alice"))])
+effect fn mk_v(flag: Bool) -> Value = if flag then value.object([("name", value.string("Alice"))])
 else {
   let n = int.parse("zz")!
   value.int(n)

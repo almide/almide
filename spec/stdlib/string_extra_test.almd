@@ -31,8 +31,8 @@ test "string.replace all occurrences" {
   assert_eq(string.replace("foo bar foo", "foo", "baz"), "baz bar baz")
 }
 
-test "string.chars empty string" {
-  assert_eq(string.chars(""), [])
+test "string.to_list empty string" {
+  assert_eq(string.to_list(""), [])
 }
 
 test "string.is_empty true and false" {

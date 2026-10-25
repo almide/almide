@@ -270,7 +270,7 @@ test "list flat_map" {
 
 test "string chars and join" {
   let s = "hello"
-  let chars = string.chars(s)
+  let chars = string.to_list(s)
   assert_eq(chars, ["h", "e", "l", "l", "o"])
   let rejoined = string.join(chars, "-")
   assert_eq(rejoined, "h-e-l-l-o")

@@ -38,7 +38,7 @@ Extract a Bool from a Value. Returns err if not a Bool.
 
 Extract a List[Value] from a Value. Returns err if not an Array.
 
-### `value.str(s: String) -> Value`
+### `value.string(s: String) -> Value`
 
 Create a Value from a String.
 
@@ -60,7 +60,7 @@ Create a Value object from a list of key-value pairs. No object holds a key
 twice (C-401, #4112): a key the list repeats keeps the position of its first
 occurrence and the value of its last, the rule `json.to_map` uses (C-380), so
 `value.field`, `value.keys` and every serializer see one entry —
-`json.stringify(value.object([("role", value.str("user")), ("role", value.str("admin"))]))`
+`json.stringify(value.object([("role", value.string("user")), ("role", value.string("admin"))]))`
 is `{"role":"admin"}`, never a document with `role` twice.
 
 ### `value.array(items: List[Value]) -> Value`
@@ -162,7 +162,7 @@ value.pick(v: Value, keys: List[String]) -> Value
 
 // Value holding the String s.
 // @since 0.6.0 or earlier
-value.str(s: String) -> Value
+value.string(s: String) -> Value
 
 // Compact JSON; NaN/inf print as null.
 // @since 0.6.0 or earlier

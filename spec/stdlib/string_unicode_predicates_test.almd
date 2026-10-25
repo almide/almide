@@ -111,12 +111,12 @@ test "multibyte string is not simultaneously upper and lower" {
 
 // ── count / last_index_of with empty pattern ──
 test "count with empty pattern is char count plus one" {
-  assert_eq(string.count("", ""), 1)
-  assert_eq(string.count("abc", ""), 4)
-  assert_eq(string.count("日本", ""), 3)
+  assert_eq(string.count_matches("", ""), 1)
+  assert_eq(string.count_matches("abc", ""), 4)
+  assert_eq(string.count_matches("日本", ""), 3)
   // 2 codepoints + 1
   // 3 codepoints + 1
-  assert_eq(string.count("a日b", ""), 4)
+  assert_eq(string.count_matches("a日b", ""), 4)
 }
 
 test "last_index_of with empty pattern is codepoint count" {
@@ -132,7 +132,7 @@ test "last_index_of with empty pattern is codepoint count" {
 }
 
 test "count and last_index_of unaffected for non-empty pattern" {
-  assert_eq(string.count("ababab", "ab"), 3)
+  assert_eq(string.count_matches("ababab", "ab"), 3)
   assert_eq(string.last_index_of("ababab", "ab"), some(4))
   assert_eq(string.last_index_of("abc", "z"), none)
 }

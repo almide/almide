@@ -13,13 +13,13 @@ effect fn main() -> Unit = {
   let ascii = string.repeat("x", 1000000) + "NEEDLE" + string.repeat("y", 3)
   println("ascii_index_of=" + int.to_string(string.index_of(ascii, "NEEDLE") ?? -1))
   println("ascii_last_index_of=" + int.to_string(string.last_index_of(ascii, "NEEDLE") ?? -1))
-  println("ascii_count_empty=" + int.to_string(string.count(ascii, "")))
+  println("ascii_count_empty=" + int.to_string(string.count_matches(ascii, "")))
   let mixed = string.repeat("é", 300000) + string.repeat("あ", 200000) + string.repeat("😀", 100000) + "NEEDLE"
   println("mixed_len=" + int.to_string(string.len(mixed)))
   println("mixed_index_of=" + int.to_string(string.index_of(mixed, "NEEDLE") ?? -1))
   println("mixed_index_of_emoji=" + int.to_string(string.index_of(mixed, "😀") ?? -1))
   println("mixed_last_index_of_empty=" + int.to_string(string.last_index_of(mixed, "") ?? -1))
-  println("mixed_count_empty=" + int.to_string(string.count(mixed, "")))
+  println("mixed_count_empty=" + int.to_string(string.count_matches(mixed, "")))
   println("pad_start_len=" + int.to_string(string.len(string.pad_start(mixed, 600010, "-"))))
   println("pad_end_len=" + int.to_string(string.len(string.pad_end(ascii, 1000019, "é"))))
 }

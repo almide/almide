@@ -175,7 +175,7 @@ effect fn main() -> Unit = {
   let header = ["a", "b"]
   let pairs = header |> list.enumerate |> list.map((entry) => {
     let (i, key) = entry
-    (key, value.str(list.get_or(row, i, "")))
+    (key, value.string(list.get_or(row, i, "")))
   })
   println(value.stringify(value.object(pairs)))
   let strs = ["p", "q"]
