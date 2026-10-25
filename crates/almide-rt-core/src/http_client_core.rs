@@ -224,10 +224,14 @@ pub fn decode_chunked_bytes(body: &[u8]) -> Result<Vec<u8>, String> {
             return Ok(result);
         }
         let data_start = line_end + 2;
-        match data_start.checked_add(size) {
-            Some(data_end) if data_end + 2 <= body.len() && &body[data_end..data_end + 2] == b"\r\n" => {
+        // Both additions are checked: a size line near usize::MAX makes
+        // `data_end + 2` overflow, which used to panic (or wrap to an
+        // inverted slice) on a server-chosen chunk size instead of erring.
+        let data_end = data_start.checked_add(size);
+        match data_end.and_then(|e| Some((e, e.checked_add(2)?))) {
+            Some((data_end, crlf_end)) if crlf_end <= body.len() && &body[data_end..crlf_end] == b"\r\n" => {
                 result.extend_from_slice(&body[data_start..data_end]);
-                pos = data_end + 2;
+                pos = crlf_end;
             }
             _ => return Err(incomplete()),
         }
