@@ -104,8 +104,8 @@ test "while with accumulator" {
 // ── do block guard with non-unit ok value ──
 effect fn hamming_distance(a: String, b: String) -> Result[Int, String] = {
   guard string.len(a) == string.len(b) else err("strands must be same length")
-  let chars_a = string.chars(a)
-  let chars_b = string.chars(b)
+  let chars_a = string.to_list(a)
+  let chars_b = string.to_list(b)
   let len = list.len(chars_a)
   var count = 0
   var i = 0

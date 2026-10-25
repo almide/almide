@@ -14,8 +14,8 @@ effect fn main() -> Unit = {
     value.int(3)
   ]
   println(value.stringify(value.array(list.update(xs, 0, (v) => value.int(9)))))
-  println(value.stringify(value.array(list.update(xs, 0 - 1, (v) => value.str("BAD")))))
-  println(value.stringify(value.array(list.update(xs, 9, (v) => value.str("BAD")))))
+  println(value.stringify(value.array(list.update(xs, 0 - 1, (v) => value.string("BAD")))))
+  println(value.stringify(value.array(list.update(xs, 9, (v) => value.string("BAD")))))
   println(value.stringify(value.array(list.update(xs, 1, (v) => v))))
   println(value.stringify(value.array(list.update(xs, 1, (v) => value.array([value.int(7)])))))
   println(value.stringify(value.array(list.update(xs, 0, (v) => value.int((value.as_int(v) ?? 0) + 100)))))

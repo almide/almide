@@ -12,7 +12,7 @@
 import json
 
 effect fn main() -> Unit = {
-  let role = value.object([("role", value.str("user")), ("id", value.int(7)), ("role", value.str("admin"))])
+  let role = value.object([("role", value.string("user")), ("id", value.int(7)), ("role", value.string("admin"))])
   println(json.stringify(role))
   println(value.stringify(role))
   println(json.stringify_pretty(role))
@@ -30,7 +30,7 @@ effect fn main() -> Unit = {
   println(json.stringify(value.merge(role, value.object([("id", value.int(8)), ("id", value.int(9))]))))
   // pick on a non-object: nothing passes; omit: unchanged.
   for v in [
-    value.str("admin"),
+    value.string("admin"),
     value.int(1),
     value.null(),
     value.array([value.int(1)]),

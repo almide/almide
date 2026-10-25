@@ -121,7 +121,6 @@ impl<'a> Interpreter<'a> {
             "last" => Some(self.list_last(args)),
             "get" => Some(self.list_get(args)),
             "get_or" => Some(self.list_get_or(args)),
-            "binary_search" => Some(self.list_binary_search(args)),
             "contains" => Some(self.list_contains(args)),
             // First index of an equal element — `PartialEq` equality, the same
             // relation `contains` uses (measured against native on the corpus;
@@ -513,27 +512,6 @@ impl<'a> Interpreter<'a> {
                 },
             },
             None => Flow::Abort("internal: list.last on non-list".into()),
-        }
-    }
-
-    // The native oracle IS Rust std's branchless binary_search (C-159: the
-    // duplicate-key index is pinned to it on both backends), so the third
-    // vote calls it directly on the extracted i64s.
-    fn list_binary_search(&mut self, args: &[Value]) -> Flow {
-        match (args.first().and_then(|v| v.as_iter_items()), args.get(1)) {
-            (Some(items), Some(Value::Int(target))) => {
-                let xs: Option<Vec<i64>> = items
-                    .iter()
-                    .map(|v| if let Value::Int(n) = v { Some(*n) } else { None })
-                    .collect();
-                match xs {
-                    Some(xs) => Flow::val(Value::Option(
-                        xs.binary_search(target).ok().map(|i| Box::new(Value::Int(i as i64))),
-                    )),
-                    None => Flow::Unsupported("list.binary_search non-Int elements".into()),
-                }
-            }
-            _ => Flow::Abort("internal: list.binary_search bad args".into()),
         }
     }
 

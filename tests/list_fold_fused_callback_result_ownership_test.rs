@@ -30,7 +30,7 @@ use std::process::Command;
 /// wasm printed a space (0x20) where native printed `B`.
 const BORROWED_STR_FILTER: &str = r#"
 fn main() -> Unit = {
-  let r: String = list.fold(list.filter(string.chars("AB"), ((a) => true)), "X", ((n, y) => y))
+  let r: String = list.fold(list.filter(string.to_list("AB"), ((a) => true)), "X", ((n, y) => y))
   println("r = ${r}")
 }
 "#;
@@ -40,12 +40,12 @@ fn main() -> Unit = {
 /// pins that the fix is on the path, not on `filter`.
 const BORROWED_STR_MAP: &str = r#"
 fn main() -> Unit = {
-  let r: String = list.fold(list.map(string.chars("AB"), ((c) => c)), "X", ((n, y) => y))
+  let r: String = list.fold(list.map(string.to_list("AB"), ((c) => c)), "X", ((n, y) => y))
   println("r = ${r}")
 }
 "#;
 
-/// Borrowed tail, `List[Int]` element: not a `string.chars` property. Before
+/// Borrowed tail, `List[Int]` element: not a `string.to_list` property. Before
 /// the guard, wasm printed `[65888]` for `[2]`.
 const BORROWED_LIST_INT_FILTER: &str = r#"
 fn main() -> Unit = {
@@ -58,7 +58,7 @@ fn main() -> Unit = {
 /// guard and must stay correct after it.
 const FRESH_STR_FILTER: &str = r#"
 fn main() -> Unit = {
-  let r: String = list.fold(list.filter(string.chars("AB"), ((a) => true)), "X", ((n, y) => y + ""))
+  let r: String = list.fold(list.filter(string.to_list("AB"), ((a) => true)), "X", ((n, y) => y + ""))
   println("r = ${r}")
 }
 "#;
@@ -75,7 +75,7 @@ fn main() -> Unit = {
 /// leak at worst, never a dangle. The observable must be unchanged.
 const FRESH_ELEM_MAP: &str = r#"
 fn main() -> Unit = {
-  let r: String = list.fold(list.map(string.chars("AB"), ((c) => c + "!")), "X", ((n, y) => y))
+  let r: String = list.fold(list.map(string.to_list("AB"), ((c) => c + "!")), "X", ((n, y) => y))
   println("r = ${r}")
 }
 "#;
@@ -85,7 +85,7 @@ fn main() -> Unit = {
 const LONG_CHAIN: &str = r#"
 fn main() -> Unit = {
   let s: String = string.repeat("abcdefgh", 512)
-  let r: String = list.fold(list.filter(string.chars(s), ((a) => a != "c")), "", ((n, y) => n + y))
+  let r: String = list.fold(list.filter(string.to_list(s), ((a) => a != "c")), "", ((n, y) => n + y))
   println("${string.len(r)} ${string.slice(r, string.len(r) - 1, string.len(r))}")
 }
 "#;

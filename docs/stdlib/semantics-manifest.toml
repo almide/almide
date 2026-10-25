@@ -155,21 +155,27 @@ probe = 'string.repeat("é", 2)'
 expect = "éé"
 
 [[string.fn]]
-name = "codepoint"
+name = "to_codepoint"
 index_unit = "scalar"
-probe = 'string.codepoint("é") ?? -1'
+probe = 'string.to_codepoint("é") ?? -1'
 expect = "233"
 
 [[string.fn]]
 name = "from_codepoint"
 index_unit = "scalar"
-probe = 'string.from_codepoint(233)'
+probe = 'string.from_codepoint(233) ?? ""'
 expect = "é"
+
+[[string.fn]]
+name = "count_matches"
+index_unit = "count"
+probe = 'string.count_matches("ééa", "é")'
+expect = "2"
 
 [[string.fn]]
 name = "count"
 index_unit = "count"
-probe = 'string.count("ééa", "é")'
+probe = 'string.count("ééa", (c) => c == "é")'
 expect = "2"
 
 [[string.fn]]

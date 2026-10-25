@@ -25,7 +25,7 @@ fn arr() -> Value = json.parse("[10, 20, 30]") ?? value.null()
 
 fn show(label: String, i: Int) -> Unit = {
   let p = json.index(json.root(), i)
-  let g = json.get_path(arr(), p) ?? value.str("none")
+  let g = json.get_path(arr(), p) ?? value.string("none")
   let s = json.set_path(arr(), p, value.int(99)) ?? value.null()
   let r = json.remove_path(arr(), p)
   println("${label} get=${json.stringify(g)} set=${json.stringify(s)} rm=${json.stringify(r)}")
@@ -72,11 +72,11 @@ fn main() -> Unit = {
   // prologue, so both spellings exercise it.
   let doc = json.parse("{\"xs\": [1, 2, 3], \"n\": 7}") ?? value.null()
   let deep = json.index(json.field(json.root(), "xs"), -9223372036854775807)
-  println("deep-get: ${json.stringify(json.get_path(doc, deep) ?? value.str("none"))}")
+  println("deep-get: ${json.stringify(json.get_path(doc, deep) ?? value.string("none"))}")
   println("deep-set: ${json.stringify(json.set_path(doc, deep, value.int(99)) ?? value.null())}")
   println("deep-rm: ${json.stringify(json.remove_path(doc, deep))}")
   let inr = json.index(json.field(json.root(), "xs"), 1)
-  println("deep-ok-get: ${json.stringify(json.get_path(doc, inr) ?? value.str("none"))}")
+  println("deep-ok-get: ${json.stringify(json.get_path(doc, inr) ?? value.string("none"))}")
   println("deep-ok-set: ${json.stringify(json.set_path(doc, inr, value.int(99)) ?? value.null())}")
   println("deep-ok-rm: ${json.stringify(json.remove_path(doc, inr))}")
   // An index step over a NON-array passes the node through on every leg; the

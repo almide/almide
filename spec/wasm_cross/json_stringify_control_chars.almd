@@ -10,13 +10,13 @@
 import json
 
 fn probe(c: Int) -> String = {
-  let s = "a" + string.from_codepoint(c) + "b"
-  let doc = value.object([(s, value.str(s))])
+  let s = "a" + (string.from_codepoint(c) ?? "") + "b"
+  let doc = value.object([(s, value.string(s))])
   let text = json.stringify(doc)
   let pretty = json.stringify_pretty(doc)
   let back = json.parse(text) ?? value.null()
   let back_pretty = json.parse(pretty) ?? value.null()
-  "${c} ${text} ${value.stringify(value.str(s))} ${back == doc} ${back_pretty == doc}"
+  "${c} ${text} ${value.stringify(value.string(s))} ${back == doc} ${back_pretty == doc}"
 }
 
 fn main() -> Unit = {
@@ -27,8 +27,8 @@ fn main() -> Unit = {
   println(probe(92))
   println(probe(127))
   // the whole range in one string, compact and pretty
-  let all = list.range(0, 32) |> list.map((c) => string.from_codepoint(c)) |> list.join("")
-  let doc = value.array([value.str(all)])
+  let all = list.range(0, 32) |> list.map((c) => (string.from_codepoint(c) ?? "")) |> list.join("")
+  let doc = value.array([value.string(all)])
   println(json.stringify(doc))
   println(json.stringify_pretty(doc))
   let round = (json.parse(json.stringify(doc)) ?? value.null()) == doc

@@ -9,7 +9,7 @@ effect fn main() -> Unit = {
   while i < 5000 {
     let o = value.object([
       ("k", value.int(1)),
-      ("m", value.str("x")),
+      ("m", value.string("x")),
       ("n", value.array([value.int(2), value.int(3)]))
     ])
     i = i + 1

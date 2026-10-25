@@ -1391,7 +1391,7 @@ impl Checker {
         }
     }
 }
-/// Whether a string is a plain dotted identifier (e.g. `list.len`) safe to drop into a copy-pasteable `try:` snippet as `fn(...)`. Rejects aliases that are free-text hints (e.g. `"xs + [x]"`, `"string.chars + list.all"`).
+/// Whether a string is a plain dotted identifier (e.g. `list.len`) safe to drop into a copy-pasteable `try:` snippet as `fn(...)`. Rejects aliases that are free-text hints (e.g. `"xs + [x]"`, `"string.to_list + list.all"`).
 fn is_clean_fn_name(s: &str) -> bool {
     // Single-condition decisions (MC/DC ledger, #566): each guard is its
     // own early return, same short-circuit order.

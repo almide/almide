@@ -34,9 +34,9 @@ fn show(p: P[String]) -> String = match p {
 }
 
 fn main() -> Unit = {
-  println(show(call_it(value.str("hi"), "a", str_s())))
+  println(show(call_it(value.string("hi"), "a", str_s())))
   println(call_q("b", bang_q()))
-  println(show(call_any(value.str("yo"), "c", str_s())))
+  println(show(call_any(value.string("yo"), "c", str_s())))
   let bad: S[String] = S { name: "n", run: (v, p) => Bad(7) }
   println(show(call_it(value.int(1), "d", bad)))
 }

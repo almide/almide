@@ -3,7 +3,7 @@
 // The Ok tuple's slot0 is a dynamic Value (can nest an Array/Object), freed RECURSIVELY via
 // value_core's $__drop_value_tuple (Op::DropResultValueInt) — a flat DropListStr would leak it.
 fn parse_v(p: Int) -> Result[(Value, Int), String] = if p < 0 then err("neg")
-else ok((value.array([value.int(p), value.str("k")]), p + 1))
+else ok((value.array([value.int(p), value.string("k")]), p + 1))
 
 effect fn main() -> Unit = {
   match parse_v(7) {

@@ -21,6 +21,7 @@
 //! it is its abort-site pair, the embedded host's ops 117 / 118.
 
 use almide_ir::IrExpr;
+use almide_types::types::Ty;
 use wasm_encoder::BlockType;
 
 use crate::emitter::Emitter;
@@ -39,7 +40,9 @@ impl Emitter<'_> {
         }
         // Leaves the PASS condition (i32 0/1) on the stack.
         let msg = match (func, args) {
-            ("assert_gt" | "assert_lt", [a, b]) => {
+            // Int operands compare inline; any other ordered type links the
+            // generic body in stdlib/testing.almd.
+            ("assert_gt" | "assert_lt", [a, b]) if a.ty == Ty::Int && b.ty == Ty::Int => {
                 self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
                 self.lower_arg(b, Some(INT), ArgMode::Borrow)?;
                 let mut i = self.f.instructions();

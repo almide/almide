@@ -1,4 +1,4 @@
 fn main() -> Unit = {
-  let xs = [value.int(2), value.str("a")]
+  let xs = [value.int(2), value.string("a")]
   println("${list.len(list.sort_by(xs, (v) => value.stringify(v)))}")
 }

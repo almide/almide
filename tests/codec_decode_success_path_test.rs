@@ -57,7 +57,7 @@ fn body_of(rust: &str, name: &str) -> String {
 const SRC: &str = "type Address: Codec = { city: String, zip: String }\n\
     type User: Codec = { id: Int, name: String, tags: List[String], address: Address, homes: List[Address] }\n\
     fn main() -> Unit = {\n\
-      let v = value.object([(\"id\", value.int(1)), (\"name\", value.str(\"a\")), (\"tags\", value.array([])), (\"address\", value.object([(\"city\", value.str(\"t\")), (\"zip\", value.str(\"z\"))])), (\"homes\", value.array([]))])\n\
+      let v = value.object([(\"id\", value.int(1)), (\"name\", value.string(\"a\")), (\"tags\", value.array([])), (\"address\", value.object([(\"city\", value.string(\"t\")), (\"zip\", value.string(\"z\"))])), (\"homes\", value.array([]))])\n\
       match User.decode(v) { ok(u) => println(u.name), err(e) => println(e) }\n\
     }\n";
 
@@ -113,10 +113,10 @@ fn the_error_text_is_unchanged() {
         type User: Codec = { id: Int, name: String, address: Address }\n\
         fn show(v: Value) -> String = match User.decode(v) { ok(u) => u.name, err(e) => e }\n\
         fn main() -> Unit = {\n\
-          println(show(value.object([(\"id\", value.str(\"x\")), (\"name\", value.str(\"a\")), (\"address\", value.object([]))])))\n\
-          println(show(value.object([(\"id\", value.int(1)), (\"name\", value.str(\"a\")), (\"address\", value.object([(\"city\", value.int(3))]))])))\n\
-          println(show(value.object([(\"id\", value.int(1)), (\"name\", value.str(\"a\")), (\"address\", value.object([(\"city\", value.str(\"c\"))]))])))\n\
-          println(show(value.object([(\"id\", value.int(1)), (\"name\", value.str(\"a\")), (\"address\", value.object([(\"city\", value.str(\"c\")), (\"zip\", value.str(\"z\"))]))])))\n\
+          println(show(value.object([(\"id\", value.string(\"x\")), (\"name\", value.string(\"a\")), (\"address\", value.object([]))])))\n\
+          println(show(value.object([(\"id\", value.int(1)), (\"name\", value.string(\"a\")), (\"address\", value.object([(\"city\", value.int(3))]))])))\n\
+          println(show(value.object([(\"id\", value.int(1)), (\"name\", value.string(\"a\")), (\"address\", value.object([(\"city\", value.string(\"c\"))]))])))\n\
+          println(show(value.object([(\"id\", value.int(1)), (\"name\", value.string(\"a\")), (\"address\", value.object([(\"city\", value.string(\"c\")), (\"zip\", value.string(\"z\"))]))])))\n\
         }\n";
     let dir = std::env::temp_dir().join(format!("almide-decode-frame-text-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

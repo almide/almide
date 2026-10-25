@@ -141,7 +141,7 @@ impl LowerCtx {
             Ty::Applied(TypeConstructorId::List, a)
                 if a.len() == 1 && self.aggregate_field_tys(&a[0])
                     .and_then(|(_, tys)| layout::scalar_slots(&tys)).is_some());
-        // A `List[Value]` (`[value.int(1), value.str("a")]`) — its slots hold OWNED dynamic Values,
+        // A `List[Value]` (`[value.int(1), value.string("a")]`) — its slots hold OWNED dynamic Values,
         // each freed RECURSIVELY at scope end via `Op::DropListValue` (`$__drop_value` per element),
         // so a Str/Array element's nested payload is reclaimed. Elements are fresh-owned ctor CALLS
         // (Module `value.*` / a Named `Value`-returning fn) or a tracked Value Var (Dup'd).

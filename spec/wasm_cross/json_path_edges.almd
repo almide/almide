@@ -69,7 +69,7 @@ fn main() -> Unit = {
     json.set_path(
       deep,
       json.field(json.index(json.field(json.root(), "xs"), -1), "k"),
-      value.str("Z"),
+      value.string("Z"),
     ),
   )
   // ...{"k":"Z"}
@@ -109,7 +109,7 @@ fn main() -> Unit = {
   //    fresh object and seeds nested/absent descents with `{}`. WASM previously
   //    returned Err("path error: expected object").
   let int42 = value.int(42)
-  let strv = value.str("hi")
+  let strv = value.string("hi")
   // Field over a non-object ROOT, nested + final, for every scalar kind:
   p_set(
     "av_int_nest",

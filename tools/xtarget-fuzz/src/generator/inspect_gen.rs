@@ -118,8 +118,7 @@ impl Domain {
             }
         };
         // A numeral is what the number type's own module prints it as
-        // (`int.to_string`, `float.to_string`); `string.from_codepoint` also
-        // makes a String from an Int, but a character, not a numeral.
+        // (`int.to_string`, `float.to_string`), not a character.
         let numeral = *x == GenType::String && matches!((&payload, producer.module), (GenType::Int, "int") | (GenType::Float, "float"));
         Some(Domain::Inverse { producer: format!("{}.{}", producer.module, producer.func), payload, numeral })
     }
@@ -1148,7 +1147,7 @@ fn small(t: &GenType) -> String {
         GenType::Sized(name) => GenType::sized_literal(name, "2"),
         GenType::Bytes => "bytes.from_list([1, 2])".into(),
         GenType::Matrix => "matrix.from_lists([[1.5, 2.0], [0.5, 3.0]])".into(),
-        GenType::Value => "value.object([(\"a\", value.int(1)), (\"snake_case\", value.str(\"x\"))])".into(),
+        GenType::Value => "value.object([(\"a\", value.int(1)), (\"snake_case\", value.string(\"x\"))])".into(),
         GenType::Endian => "BigEndian".into(),
         GenType::Set(e) => format!("set.from_list([{}])", small(e)),
         GenType::Nominal(k) => nominal::get(k).map_or_else(|| "()".into(), |d| d.small.to_string()),
@@ -1430,7 +1429,7 @@ pub(crate) mod tests {
             ("int.parse", "string.repeat(\"0\", 1000) + int.to_string(2)"),
             ("int.from_hex", "string.repeat(\"0\", 1000) + int.to_hex(2)"),
             ("float.parse", "string.repeat(\"0\", 1000) + float.to_string(1.5)"),
-            ("value.as_string", "value.str(string.repeat(\"aé\", 1000))"),
+            ("value.as_string", "value.string(string.repeat(\"aé\", 1000))"),
             ("value.as_array", "value.array(list.range(0, 1000) |> list.map((i) => "),
             ("url.decode_component", "url.encode_component(string.repeat(\"aé\", 1000))"),
         ] {
@@ -1448,10 +1447,6 @@ pub(crate) mod tests {
             assert!(t.in_domain() && t.size_param.is_none(), "{name}");
             assert!(t.direct_program(1000, 4, true).contains(&format!("  let a0: Value = {want}\n")), "{name}");
         }
-        // `string.from_codepoint` makes a String from an Int, but a
-        // character: it is not padded like a numeral.
-        let t = target("string.codepoint");
-        assert!(t.direct_program(1000, 4, true).contains("  let a0: String = string.from_codepoint(2)\n"));
     }
 
     /// #3671: a function whose input is in-domain (a recipe or a derived

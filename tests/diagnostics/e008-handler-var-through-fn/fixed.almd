@@ -3,7 +3,7 @@ import http
 
 effect fn count(path: String) -> Int = {
   var n = 0
-  for _ in string.chars(path) {
+  for _ in string.to_list(path) {
     n = n + 1
   }
   n

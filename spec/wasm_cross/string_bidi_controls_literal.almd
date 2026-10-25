@@ -6,7 +6,7 @@
 // position is covered: a plain literal, an interpolation's literal pieces, a
 // match pattern, and a heredoc. Output is the code points in decimal, so it
 // stays ASCII.
-fn codes(s: String) -> String = string.chars(s) |> list.map((c) => int.to_string(string.codepoint(c) ?? -1)) |> list.join(",")
+fn codes(s: String) -> String = string.to_list(s) |> list.map((c) => int.to_string(string.to_codepoint(c) ?? -1)) |> list.join(",")
 
 fn classify(s: String) -> String = match s {
   "\u{202A}" => "LRE",
@@ -46,7 +46,7 @@ effect fn main() -> Unit = {
     \u{202D}ok\u{202C}
     """
   println("heredoc=${codes(doc)}")
-  for c in string.chars("a\u{2067}b\u{2069}c") {
+  for c in string.to_list("a\u{2067}b\u{2069}c") {
     println("char=${codes(c)}")
   }
 }

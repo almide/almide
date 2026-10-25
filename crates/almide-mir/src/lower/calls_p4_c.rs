@@ -241,7 +241,7 @@ impl LowerCtx {
         if repr.is_heap() {
             self.live_heap_handles.push(dst);
             self.seed_call_arg_heap_drop_route(dst, ty);
-            // A `Value` call-argument temp (`f(value.array([…]))`, `f(value.str(s))`) drops via the
+            // A `Value` call-argument temp (`f(value.array([…]))`, `f(value.string(s))`) drops via the
             // runtime-tag-dispatched `Op::DropValue` (recursive — an Array frees its element Values, a
             // Str its String), NOT a flat `Op::Drop` (which would leak the nested payload). Without
             // this a tag-5 Array / tag-4 Str passed as an argument leaks at the call-site scope end.

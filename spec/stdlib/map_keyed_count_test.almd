@@ -7,7 +7,7 @@
 // unfused spelling gives — on both legs.
 fn word(i: Int) -> String = {
   let len = i % 21
-  let letters = list.range(0, len) |> list.map((j) => string.from_codepoint(97 + (i * 7 + j * 3) % 26))
+  let letters = list.range(0, len) |> list.map((j) => (string.from_codepoint(97 + (i * 7 + j * 3) % 26) ?? ""))
   list.join(letters, "")
 }
 

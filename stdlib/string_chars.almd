@@ -1,4 +1,4 @@
-// string_chars — SELF-HOSTED `string.chars` for v1 over the prim floor + Machinery 2. Each
+// string_chars — SELF-HOSTED `string.to_list` for v1 over the prim floor + Machinery 2. Each
 // Unicode codepoint becomes a fresh 1-char owned String; the result List[String] owns them
 // (freed recursively on DropListStr). The codepoint count = string.len; each codepoint's byte
 // length comes from its UTF-8 LEAD byte (1: <0x80, 2: <0xE0, 3: <0xF0, else 4). Source borrowed.

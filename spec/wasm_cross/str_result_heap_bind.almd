@@ -17,9 +17,9 @@ fn unwrap_or_dash(v: Value) -> String = match value.as_string(v) {
 }
 
 fn main() -> Unit = {
-  println(describe(value.str("hello")))
+  println(describe(value.string("hello")))
   println(describe(value.int(42)))
-  println(describe(value.str("")))
-  println(unwrap_or_dash(value.str("world")))
+  println(describe(value.string("")))
+  println(unwrap_or_dash(value.string("world")))
   println(unwrap_or_dash(value.bool(true)))
 }

@@ -14,8 +14,8 @@ import json
 
 fn record(i: Int) -> Value = value.object([
   ("id", value.int(i)),
-  ("name", value.str("user_${i}")),
-  ("tags", value.array([value.str("t${i % 7}"), value.str("t${i % 11}")])),
+  ("name", value.string("user_${i}")),
+  ("tags", value.array([value.string("t${i % 7}"), value.string("t${i % 11}")])),
   ("meta", value.object([("score", value.int((i * 37) % 1000)), ("active", value.bool(i % 2 == 0))]))
 ])
 

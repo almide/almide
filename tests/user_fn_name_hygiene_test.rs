@@ -39,9 +39,9 @@ type Q = { f: Int }
 
 fn __lambda_main_0(x: Int) -> Int = x * 1000
 
-fn __encode_list_int(xs: List[Int]) -> Value = value.str("user")
+fn __encode_list_int(xs: List[Int]) -> Value = value.string("user")
 
-fn __encode_list_Inner(xs: List[Inner]) -> Value = value.str("user")
+fn __encode_list_Inner(xs: List[Inner]) -> Value = value.string("user")
 
 fn __encode_twice(x: Int) -> Int = x * 2
 

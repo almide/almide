@@ -103,7 +103,7 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
     if b == 34 then match __jp_string(base, len, q) {
       ok(r) => {
         let (s, np) = r
-        ok((value.str(s), np))
+        ok((value.string(s), np))
       },
       err(e) => err(e),
     } else if (b == 123 or b == 91) and depth >= 1000 then err("json: nesting deeper than 1000")
@@ -131,7 +131,7 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
     else {
       let (cp, _l) = __jp_cp(base, q)
       let cpos = __jp_charpos(base, q, 0, 0)
-      err("unexpected char '" + string.from_codepoint(cp) + "' at pos " + int.to_string(cpos))
+      err("unexpected char '" + (string.from_codepoint(cp) ?? "") + "' at pos " + int.to_string(cpos))
     }
   }
 }

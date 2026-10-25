@@ -36,7 +36,7 @@ impl Emitter<'_> {
             }
             ("get" | "__join_string" | "find" | "find_index" | "contains" | "index_of" | "intersperse"
             | "zip" | "map" | "filter" | "any" | "all" | "count" | "take_while"
-            | "drop_while" | "reduce" | "flat_map" | "filter_map" | "binary_search"
+            | "drop_while" | "reduce" | "flat_map" | "filter_map"
             | "window" | "unique_by" | "group_by" | "partition", [a, b]) => {
                 self.lower_list_pair_named(func, a, b)
             }
@@ -758,7 +758,6 @@ impl Emitter<'_> {
             "drop_while" => self.lower_list_drop_while(a, b),
             "reduce" => self.lower_list_reduce(a, b),
             "flat_map" => self.lower_list_flat_map(a, b),
-            "binary_search" => self.lower_list_binary_search(a, b),
             "window" => self.lower_list_window(a, b),
             "unique_by" => self.lower_list_unique_by(a, b),
             "group_by" => self.lower_list_group_by(a, b),
