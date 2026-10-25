@@ -75,6 +75,13 @@ fn host_err(e: std::io::Error) -> String {
     almide_base::fs_errno::fs_io_error_text(&e)
 }
 
+/// The real-fs fallback read: native's bounded reader (#4201) — a regular
+/// file only, at most `FS_READ_MAX_BYTES` — so a fixture naming `/dev/zero`
+/// or a FIFO answers native's err instead of hanging the in-process leg.
+fn host_read(path: &str) -> std::io::Result<Vec<u8>> {
+    almide_base::fs_errno::fs_read_bounded_path(std::path::Path::new(path), almide_base::fs_errno::FS_READ_MAX_BYTES)
+}
+
 /// `prim.read_text_file` — overlay first, then a READ-ONLY real-fs fallback.
 pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
     let path = &normalize(path);
@@ -84,7 +91,7 @@ pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
         Some(VfsEntry::File(content)) => String::from_utf8(content.clone())
             .map_err(|_| almide_base::fs_errno::INVALID_UTF8_TEXT.to_string()),
         Some(VfsEntry::Dir) => Err(EISDIR.to_string()),
-        None => std::fs::read_to_string(path).map_err(host_err),
+        None => host_read(path).and_then(almide_base::fs_errno::fs_read_bounded_text).map_err(host_err),
     }
 }
 
@@ -203,7 +210,7 @@ pub(crate) fn read_bytes(vfs: &Vfs, path: &str) -> Result<Vec<u8>, String> {
     match vfs.get(path.as_str()) {
         Some(VfsEntry::File(content)) => Ok(content.clone()),
         Some(VfsEntry::Dir) => Err(EISDIR.to_string()),
-        None => std::fs::read(path).map_err(host_err),
+        None => host_read(path).map_err(host_err),
     }
 }
 

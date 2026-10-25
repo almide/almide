@@ -162,6 +162,11 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
         "cargo:rerun-if-changed={}",
         workspace_root.join("crates/almide-base/src/fs_errno_classified.rs").display()
     );
+    // ... and, through rt-core's fs_scoped_core.rs, its bounded reader (#4201).
+    println!(
+        "cargo:rerun-if-changed={}",
+        workspace_root.join("crates/almide-base/src/fs_read_bounded.rs").display()
+    );
     Ok(())
 }
 

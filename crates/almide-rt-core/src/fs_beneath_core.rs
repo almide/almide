@@ -132,7 +132,7 @@ pub fn fs_beneath_remove(dir: &str, rel: &str) -> Result<(), FsBeneathError> {
 pub fn fs_beneath_read_with(dir: &str, rel: &str, walk_only: bool, hook: &mut dyn FnMut(usize)) -> Result<Vec<u8>, FsBeneathError> {
     let segs = fs_beneath_segments(rel)?;
     let Some((last, parents)) = segs.split_last() else {
-        return almide_sfs::read(dir).map_err(FsBeneathError::Io);
+        return almide_sfs::read_bounded(dir).map_err(FsBeneathError::Io);
     };
     fs_beneath_imp::read(dir, parents, last, walk_only, hook)
 }
@@ -204,10 +204,10 @@ mod fs_beneath_imp {
 
     pub fn read(dir: &str, parents: &[&str], last: &str, walk_only: bool, hook: &mut dyn FnMut(usize)) -> Result<Vec<u8>, FsBeneathError> {
         let p = parent(dir, parents, walk_only, hook)?;
-        let fd = super::almide_fs_beneath_sys::open_at(std::os::fd::AsFd::as_fd(&p), last, super::almide_fs_beneath_sys::Open::Read).map_err(|e| classify(&p, last, e))?;
-        let mut out = Vec::new();
-        std::io::Read::read_to_end(&mut std::fs::File::from(fd), &mut out).map_err(FsBeneathError::Io)?;
-        Ok(out)
+        // `Meta` is the O_NONBLOCK read-only open: a FIFO does not block it,
+        // and the bounded read refuses it by its descriptor (#4201).
+        let fd = super::almide_fs_beneath_sys::open_at(std::os::fd::AsFd::as_fd(&p), last, super::almide_fs_beneath_sys::Open::Meta).map_err(|e| classify(&p, last, e))?;
+        super::fs_read_bounded_file(&mut std::fs::File::from(fd), super::FS_READ_MAX_BYTES).map_err(FsBeneathError::Io)
     }
 
     pub fn write(dir: &str, parents: &[&str], last: &str, data: &[u8]) -> Result<(), FsBeneathError> {
@@ -275,7 +275,7 @@ mod fs_beneath_imp {
     pub fn read(dir: &str, parents: &[&str], last: &str, _walk_only: bool, hook: &mut dyn FnMut(usize)) -> Result<Vec<u8>, FsBeneathError> {
         let p = checked(dir, &all(parents, last))?;
         hook(parents.len());
-        std::fs::read(p).map_err(FsBeneathError::Io)
+        super::fs_read_bounded_path(&p, super::FS_READ_MAX_BYTES).map_err(FsBeneathError::Io)
     }
 
     pub fn write(dir: &str, parents: &[&str], last: &str, data: &[u8]) -> Result<(), FsBeneathError> {
