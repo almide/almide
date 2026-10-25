@@ -5,9 +5,9 @@ Non-cryptographic digests and SHA-256. `import hash`.
 Pure — no capability, byte-identical on both targets (C-299). The wasm leg is
 fully self-hosted; no new intrinsic.
 
-### `hash.fnv1a32(s: String) -> Int`
+### `hash.fnv1a32(b: Bytes) -> Int`
 
-FNV-1a over the string's UTF-8 bytes — the **32-bit** variant (offset basis
+FNV-1a over the bytes — the **32-bit** variant (offset basis
 2166136261, prime 16777619), returned as a non-negative Int in `0..2^32`.
 32-bit on purpose: every step masks to 32 bits, so the arithmetic is exact in
 i64 on both targets. Use it for cache keys, dedup, and bucketing — never for
@@ -17,8 +17,8 @@ integrity or security.
 import hash
 
 fn main() -> Unit = {
-  println("${hash.fnv1a32("")}")
-  println("${hash.fnv1a32("foobar")}")
+  println("${hash.fnv1a32(bytes.from_string(""))}")
+  println("${hash.fnv1a32(bytes.from_string("foobar"))}")
 }
 ```
 ```output
@@ -58,16 +58,16 @@ fn main() -> Unit = {
 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
 ```
 
-### `hash.sha256_hex(s: String) -> String`
+### `hash.sha256_hex(b: Bytes) -> String`
 
-SHA-256 of the string's UTF-8 bytes as 64 lowercase hex characters — the
-common one-call form.
+SHA-256 of the bytes as 64 lowercase hex characters — the common one-call
+form. A string is hashed through its UTF-8: `hash.sha256_hex(bytes.from_string(s))`.
 
 ```almd run
 import hash
 
 fn main() -> Unit = {
-  println(hash.sha256_hex(""))
+  println(hash.sha256_hex(bytes.from_string("")))
 }
 ```
 ```output
