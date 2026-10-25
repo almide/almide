@@ -138,9 +138,9 @@ Out of scope, deliberately: TLS, AEAD, signatures and asymmetric crypto
 ## Signature index (18 functions)
 
 ```
-// 32-bit FNV-1a of s's UTF-8; non-negative Int.
+// 32-bit FNV-1a of b, in 0..4294967295.
 // @since 0.58.0 or earlier
-hash.fnv1a32(s: String) -> Int
+hash.fnv1a32(b: Bytes) -> Int
 
 // 32-bit FNV-1a of b, in 0..4294967295.
 // @since 0.58.0 or earlier
@@ -150,9 +150,9 @@ hash.fnv1a32_bytes(b: Bytes) -> Int
 // @since 0.2.2 or earlier
 hash.sha256(b: Bytes) -> Bytes
 
-// SHA-256 of s's UTF-8, 64 lowercase hex chars.
+// SHA-256 of b as 64 lowercase hex chars.
 // @since 0.58.0 or earlier
-hash.sha256_hex(s: String) -> String
+hash.sha256_hex(b: Bytes) -> String
 
 // CRC-32 (IEEE, reflected) as an unsigned Int; 0 for empty b.
 // @since unreleased

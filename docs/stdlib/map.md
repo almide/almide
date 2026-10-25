@@ -417,9 +417,9 @@ map.merge(a: Map[K, V], b: Map[K, V]) -> Map[K, V]
 // @since 0.6.0 or earlier
 map.is_empty(m: Map[K, V]) -> Bool
 
-// Map of pairs; a repeated key takes the last value.
+// Map of the pairs xs; a repeated key takes the last value.
 // @since 0.5.0 or earlier
-map.from_list(pairs: List[(K, V)]) -> Map[K, V]
+map.from_list(xs: List[(K, V)]) -> Map[K, V]
 
 // Same keys and order, values replaced by f(v).
 // @since 0.6.1 or earlier

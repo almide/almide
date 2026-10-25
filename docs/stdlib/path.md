@@ -230,29 +230,29 @@ path.join(base: String, child: String) -> String
 // @since unreleased
 path.join_within(base: String, child: String) -> Result[String, String]
 
-// p minus last segment; "" if no slash.
+// path minus last segment; "" if no slash.
 // @since 0.2.0 or earlier
-path.dirname(p: String) -> String
+path.dirname(path: String) -> String
 
-// Last non-empty segment; "" for / or empty p.
+// Last non-empty segment; "" for / or empty path.
 // @since 0.2.0 or earlier
-path.basename(p: String) -> String
+path.basename(path: String) -> String
 
 // After basename's last dot; none if no dot or dotfile.
 // @since 0.2.0 or earlier
-path.extension(p: String) -> Option[String]
+path.extension(path: String) -> Option[String]
 
-// True when p starts with /.
+// True when path starts with /.
 // @since 0.2.0 or earlier
-path.is_absolute(p: String) -> Bool
+path.is_absolute(path: String) -> Bool
 
 // Basename minus last extension; dotfiles as-is.
 // @since 0.3.0 or earlier
-path.stem(p: String) -> String
+path.stem(path: String) -> String
 
 // Resolves . and .. lexically; "" becomes ".".
 // @since 0.3.0 or earlier
-path.normalize(p: String) -> String
+path.normalize(path: String) -> String
 
 // Segments of normalize(path), led by "/" when absolute; ["."] for "" or ".".
 // @since unreleased

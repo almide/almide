@@ -866,9 +866,9 @@ list.get(xs: List[A], i: Int) -> Option[A]
 // @since 0.5.0 or earlier
 list.get_or(xs: List[A], i: Int, default: A) -> A
 
-// Copy with slot i = val; no-op if i out of range.
+// Copy with slot i = x; no-op if i out of range.
 // @since 0.5.0 or earlier
-list.set(xs: List[A], i: Int, val: A) -> List[A]
+list.set(xs: List[A], i: Int, x: A) -> List[A]
 
 // Copy with i and j swapped; no-op if either OOB.
 // @since 0.5.0 or earlier
@@ -896,7 +896,7 @@ list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]
 
 // Inner lists concatenated in order.
 // @since 0.5.0 or earlier
-list.flatten(xss: List[List[T]]) -> List[T]
+list.flatten(xs: List[List[A]]) -> List[A]
 
 // First n elements; all if n >= len, [] if n < 0.
 // @since 0.5.0 or earlier
@@ -1042,17 +1042,17 @@ list.range(start: Int, end: Int) -> List[Int]
 // @since 0.5.0 or earlier
 list.slice(xs: List[A], start: Int, end: Int) -> List[A]
 
-// Copy with val at i; i >= len or i < 0 appends.
+// Copy with x at i; i >= len or i < 0 appends.
 // @since 0.5.0 or earlier
-list.insert(xs: List[A], i: Int, val: A) -> List[A]
+list.insert(xs: List[A], i: Int, x: A) -> List[A]
 
 // Copy without slot i; no-op if i out of range.
 // @since 0.5.0 or earlier
 list.remove_at(xs: List[A], i: Int) -> List[A]
 
-// n copies of val; [] for n <= 0.
+// n copies of x; [] for n <= 0.
 // @since 0.5.0 or earlier
-list.repeat(val: A, n: Int) -> List[A]
+list.repeat(x: A, n: Int) -> List[A]
 
 // sep between adjacent elements.
 // @since 0.5.0 or earlier
@@ -1082,9 +1082,9 @@ list.shuffle(xs: List[A]) -> List[A]
 // @since 0.7.0 or earlier
 list.window(xs: List[A], n: Int) -> List[List[A]]
 
-// Index of target in ascending xs, or none.
+// Index of target in xs sorted ascending (list.sort's order), or none.
 // @since 0.14.6 or earlier
-list.binary_search(xs: List[Int], target: Int) -> Option[Int]
+list.binary_search(xs: List[A], target: A) -> Option[Int]
 
 // Appends x to xs in place.
 // @since 0.9.3 or earlier
@@ -1108,11 +1108,11 @@ list.bundled_probe(n: Int) -> Int
 
 // (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
 // @since 0.14.6 or earlier
-list.split_at(xs: List[T], n: Int) -> (List[T], List[T])
+list.split_at(xs: List[A], n: Int) -> (List[A], List[A])
 
 // [seed, f(seed), ...] of length n; [] if n <= 0.
 // @since 0.14.6 or earlier
-list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]
+list.iterate(seed: A, f: (A) -> A, n: Int) -> List[A]
 
 // The first some that f gives, or none; f is not called after the hit.
 // @since unreleased
