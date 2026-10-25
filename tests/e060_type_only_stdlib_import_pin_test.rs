@@ -55,18 +55,54 @@ fn explicit_import_owned_types() -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+/// How many type parameters `module`'s `ty` takes, read off its `type`
+/// declaration in the bundled source (`type Secret[A] = …` → 1). A
+/// runtime-backed row has no declaration and takes none.
+fn owned_type_arity(module: &str, ty: &str) -> usize {
+    let Some(source) = almide::stdlib_info::bundled_source(module) else { return 0 };
+    let program = almide_lang::parse_cached(source).unwrap_or_else(|| panic!("bundled {module} parses"));
+    program
+        .decls
+        .iter()
+        .find_map(|decl| match decl {
+            almide::ast::Decl::Type { name, generics, .. } if name.as_str() == ty => {
+                Some(generics.as_ref().map_or(0, |g| g.len()))
+            }
+            _ => None,
+        })
+        .unwrap_or(0)
+}
+
+/// `ty` applied to `Int` once per declared type parameter (`Secret[Int]`),
+/// bare when it takes none — the spelling a signature must write.
+fn applied(module: &str, ty: &str) -> String {
+    match owned_type_arity(module, ty) {
+        0 => ty.to_string(),
+        n => format!("{ty}[{}]", vec!["Int"; n].join(", ")),
+    }
+}
+
 #[test]
 fn signature_only_use_of_every_owned_type_is_a_use() {
     let cells = explicit_import_owned_types();
     assert!(cells.len() >= 11, "the owned-type table shrank: {cells:?}");
     for (module, ty) in cells {
+        let t = applied(module, ty);
         assert_no_e060(
-            &format!("{module}'s {ty} in a signature"),
+            &format!("{module}'s {t} in a signature"),
             &format!(
-                "import {module}\n\nfn keep(x: {ty}) -> {ty} = x\n\nfn main() -> Unit = println(\"ok\")\n"
+                "import {module}\n\nfn keep(x: {t}) -> {t} = x\n\nfn main() -> Unit = println(\"ok\")\n"
             ),
         );
     }
+}
+
+#[test]
+fn a_generic_owned_type_is_spelled_with_its_arguments() {
+    // The arity comes from the declaration, so the matrix above spells a
+    // generic owned type applied, never bare (E093).
+    assert_eq!(applied("secret", "Secret"), "Secret[Int]");
+    assert_eq!(applied("http", "HttpRequest"), "HttpRequest");
 }
 
 #[test]
