@@ -165,3 +165,24 @@ fn the_self_hosted_bound_is_the_declared_one() {
         assert!(!second, "{file}: a second literal bound — read the declaring fn");
     }
 }
+
+/// The C-433 fixture builds no Value deeper than the bound, so the interp
+/// oracle walks every one of its values (its Value walk is capped by the
+/// same JSON_MAX_DEPTH) and must print what native prints.
+#[test]
+fn the_interp_oracle_runs_the_contract_fixture() {
+    let file = concat!(env!("CARGO_MANIFEST_DIR"), "/spec/wasm_cross/json_set_path_depth_bound.almd");
+    let src = std::fs::read_to_string(file).expect("fixture");
+    let native = run(std::path::Path::new(file), false);
+    let out = std::thread::Builder::new()
+        .stack_size(512 << 20)
+        .spawn(move || {
+            let ir = almide::wasm_leg::lower_to_ir(file, &src).expect("front");
+            almide_interp::Interpreter::new(&ir).run_main()
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    assert_eq!(out.status, almide_interp::RunStatus::Ok, "interp: {}", out.stderr);
+    assert_eq!(out.stdout, native, "interp vs native on the C-433 fixture");
+}

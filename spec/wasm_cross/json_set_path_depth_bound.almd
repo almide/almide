@@ -6,7 +6,9 @@
 // value, which parse then refused and whose every recursive walk (stringify,
 // `==`, the drop) ran out of stack. A path of 1000 steps over a scalar is ok,
 // 1001 is not; an empty container counts as a level; the new value's depth
-// adds to the path's; an ok result always parses back.
+// adds to the path's; an ok result always parses back. No value here is
+// built deeper than 1000, so every leg — the interp oracle included — walks
+// each one.
 import json
 
 fn path_of(d: Int) -> JsonPath = list.range(0, d) |> list.fold(
@@ -32,7 +34,7 @@ effect fn main() -> Unit = {
   println("path 1000 + []: " + show(json.set_path(doc, path_of(1000), value.array([]))))
   println("path 1000 + {}: " + show(json.set_path(doc, path_of(1000), value.object([]))))
   println("root + 1000 deep: " + show(json.set_path(doc, json.root(), nest(1000))))
-  println("root + 1001 deep: " + show(json.set_path(doc, json.root(), nest(1001))))
+  println("path 1 + 1000 deep: " + show(json.set_path(doc, path_of(1), nest(1000))))
   println("path 500 + 500 deep: " + show(json.set_path(doc, path_of(500), nest(500))))
   println("path 500 + 501 deep: " + show(json.set_path(doc, path_of(500), nest(501))))
   println("deep entry first: " + show(json.set_path(doc, path_of(500), value.object([("x", nest(499)), ("y", value.int(2))]))))
