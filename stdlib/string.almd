@@ -219,11 +219,11 @@ fn push(mut s: String, x: String) -> Unit = _
 
 /// Removes and returns the last character; none if s is empty.
 fn pop(mut s: String) -> String? = {
-  let last = string.last(s)
+  let popped = string.last(s)
   if string.len(s) > 0 then {
     s = string.drop_end(s, 1)
   } else ()
-  last
+  popped
 }
 
 /// Empties s in place.
