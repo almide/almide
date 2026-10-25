@@ -374,8 +374,16 @@ fn http_percent_decode_bytes(s: &str) -> Vec<u8> {
 }
 
 /// Standard base64 with padding (RFC 4648) — the Basic credential encoding.
+/// The base64 alphabet (RFC 4648 §4) the Basic credentials are written in;
+/// the p3 shim lays the same table out as data (wasi_p3_http_err.rs).
+pub const HTTP_BASE64_ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+/// The field a URL's userinfo is sent in, unless the caller sent one (any case).
+pub const HTTP_AUTHORIZATION: &str = "Authorization";
+/// The head of its value: `Basic <base64 of user:password>` (RFC 7617).
+pub const HTTP_BASIC_SCHEME: &str = "Basic ";
+
 fn http_base64(input: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const T: &[u8; 64] = HTTP_BASE64_ALPHABET;
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     for chunk in input.chunks(3) {
         let n = chunk.iter().enumerate().fold(0u32, |acc, (i, &b)| acc | (b as u32) << (16 - 8 * i));
@@ -394,7 +402,7 @@ fn http_basic_credentials(user: &[u8], pass: &[u8]) -> String {
     let mut cred = user.to_vec();
     cred.push(b':');
     cred.extend_from_slice(pass);
-    format!("Basic {}", http_base64(&cred))
+    format!("{}{}", HTTP_BASIC_SCHEME, http_base64(&cred))
 }
 
 // ── The request head (#2822, client half) ──
@@ -475,8 +483,8 @@ pub fn http_request_bytes(
         req.push_str(&format!("Host: {}\r\n", u.authority));
     }
     req.push_str("Connection: close\r\n");
-    if let (Some((user, pass)), false) = (&u.userinfo, has("authorization")) {
-        req.push_str(&format!("Authorization: {}\r\n", http_basic_credentials(user, pass)));
+    if let (Some((user, pass)), false) = (&u.userinfo, has(HTTP_AUTHORIZATION)) {
+        req.push_str(&format!("{}: {}\r\n", HTTP_AUTHORIZATION, http_basic_credentials(user, pass)));
     }
     if let (Some(auth), false) = (&route.proxy_auth, has("proxy-authorization")) {
         req.push_str(&format!("Proxy-Authorization: {}\r\n", auth));

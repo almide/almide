@@ -131,7 +131,10 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
         (5, ValType::I32),
         (2, ValType::I64),
         (10, ValType::I32),
+        (10, ValType::I32),
     ]);
+    // The URL's userinfo (wasi_p3_http_auth.rs).
+    let al = AuthLocals { ui_ptr: 60, ui_len: 61, j: 62, b: 63, v: 64, w: 65, dec: 66, dlen: 67, enc: 68, flag: 69 };
     let mut i = f.instructions();
     // ── ops 48..=50: parse the http_framed cell frame in `b` ──
     // `<len>\n<payload>` cells with CHAR-count lengths (string.len
@@ -176,6 +179,8 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.local_get(k).i32_const(1).i32_add().local_set(k);
     i.br(0).end().end();
     i.local_get(k).local_get(rest).i32_sub().local_set(auth_len);
+    // rt-core never sends the userinfo in the authority (C-328).
+    http_strip_userinfo(&mut i, (auth_ptr, auth_len), al);
     i.local_get(k).local_get(a_len).i32_lt_u().if_(BlockType::Empty);
     i.local_get(a_ptr).local_get(k).i32_add().local_set(path_ptr);
     i.local_get(a_len).local_get(k).i32_sub().local_set(path_len);
@@ -190,6 +195,10 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
 
     // ── empty fields; trailers future written ok(none) up front ──
     i.call(I_HTTP_FIELDS_NEW).local_set(headers);
+    // The userinfo as rt-core sends it, ahead of the caller's fields (its
+    // writer's order): `Authorization: Basic …` unless the caller sent one.
+    http_caller_sends_authorization(&mut i, t, op, (hdr_ptr, frame_end), (cur, cell_len, tmp, digit), al);
+    http_append_authorization(&mut i, t, (park, f_alloc, headers), al);
     // The framed family's headers: key/value cells appended in frame order
     // (the host lane's parse_http_frame order, so the wire carries the
     // same header sequence on both lanes). The checks above passed every

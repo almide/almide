@@ -43,6 +43,12 @@ struct HttpErrTexts {
     ec_table: i32,
     /// The entry an unusable request line answers with.
     ec_uri_invalid: i32,
+    /// The URL's userinfo as rt-core sends it: the field name, its
+    /// lowercase (the caller's-copy check), `Basic `, the base64 alphabet.
+    auth_name: Piece,
+    auth_lower: Piece,
+    basic: Piece,
+    b64: i32,
 }
 
 impl HttpErrTexts {
@@ -107,6 +113,10 @@ impl HttpErrTexts {
             }
         }
         let ec_table = put(&table).at;
+        let auth_name = put(hc::HTTP_AUTHORIZATION.as_bytes());
+        let auth_lower = put(hc::HTTP_AUTHORIZATION.to_ascii_lowercase().as_bytes());
+        let basic = put(hc::HTTP_BASIC_SCHEME.as_bytes());
+        let b64 = put(hc::HTTP_BASE64_ALPHABET).at;
         let uri = h.ec_names.iter().position(|n| n == "HTTP-request-URI-invalid").expect("wasi:http names the case");
         assert!(blob.len() as u64 <= PARK_SPAN - HTTP_TEXT, "the http texts overrun the park span");
         HttpErrTexts {
@@ -124,6 +134,10 @@ impl HttpErrTexts {
             forbidden,
             ec_table,
             ec_uri_invalid: ec_table + uri as i32 * EC_ENTRY,
+            auth_name,
+            auth_lower,
+            basic,
+            b64,
         }
     }
 }

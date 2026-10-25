@@ -379,6 +379,7 @@ include!("wasi_p3_http_resp.rs");
 
 // Its error classes, texts and helper functions (ADR-0023 step 2).
 include!("wasi_p3_http_err.rs");
+include!("wasi_p3_http_auth.rs");
 
 /// Canonical-ABI facts the http shim stores through (#1710 PR B) — DERIVED
 /// from the vendored WIT at emit time, never hand-counted (the fs_abi
