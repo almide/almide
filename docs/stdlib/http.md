@@ -658,7 +658,14 @@ Every client failure is put in a class, and each class has one text. The
 text names the URL the program passed (quoted, with `\"`, `\\`, `\t`, `\r`,
 `\n`, `\0` and `\u{..}` escapes) and never an OS error number, so the same
 failure reads the same natively, on `almide run --target wasm`, and in a
-WASI 0.3 component on a stock runtime (`wasmtime run -S http=y`):
+WASI 0.3 component on a stock runtime (`wasmtime run -S http=y`).
+
+The userinfo password never appears: everything between the userinfo's
+first `:` and its `@` reads `***`, an empty password included, as Go's
+net/http prints it (`http://alice:s3cret@host/p` reads
+`"http://alice:***@host/p"`). The user name, host, port, path, query and
+fragment are quoted as written, so a credential in the query string reaches
+the text. Send credentials in a header instead (CWE-598).
 
 | class | text |
 |---|---|
