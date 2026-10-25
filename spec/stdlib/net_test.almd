@@ -18,9 +18,9 @@ test "tcp loopback: listen, connect, write, read, close" {
 test "tcp_is_open returns false after close" {
   let server = net.tcp_listen("127.0.0.1", 0)!
   let client = net.tcp_connect("127.0.0.1", net.tcp_local_port(server)!)!
-  assert_eq(net.tcp_is_open(client), true)
+  assert_eq(net.tcp_is_open(client)!, true)
   io.close(client)!
-  assert_eq(net.tcp_is_open(client), false)
+  assert_eq(net.tcp_is_open(client)!, false)
   io.close(server)!
 }
 

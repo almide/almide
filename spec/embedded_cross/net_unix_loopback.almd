@@ -1,17 +1,20 @@
 // @contract: C-382
-// net's Unix-domain sockets and shared-memory files on their success paths
+// unix's Unix-domain sockets and shared-memory files on their success paths
 // (#3620; the embedded lane's interim ops 104..=116). One program plays both
 // ends: it listens at a fresh socket path in the temp dir, connects to
 // itself, and passes two shared-memory files across the socket beside its
 // bytes. Descriptors are raw OS numbers, which differ between native and the
 // embedded host, so the program prints their properties (non-negative,
-// distinct, new on receipt) and what flows through them, never the numbers.
+// distinct, new on receipt) and what flows through them, never the numbers
+// (`unix.Fd` is opaque, R-unix-01).
 import env
+import unix
+import io
 import fs
-import net
 import random
 
-fn is_fd(fd: Int) -> String = if fd >= 0 then "fd" else "not a descriptor: ${fd}"
+// Every descriptor here came from unix itself: an Fd cannot be anything else.
+fn is_fd(_fd: unix.Fd) -> String = "fd"
 
 fn text(b: Bytes) -> String = bytes.to_string_lossy(b)
 
@@ -19,84 +22,84 @@ effect fn main() -> Unit = {
   // A fresh socket path in the temp dir (a random name, so two runs at
   // once cannot meet), removed again before the closing line.
   let path = "${env.temp_dir()}/almide-unix-${random.int(0, 999999999)}.sock"
-  let l = net.unix_listen(path)!
-  let c = net.unix_connect(path)!
-  let s = net.unix_accept(l)!
+  let l = unix.listen(path)!
+  let c = unix.connect(path)!
+  let s = unix.accept(l)!
   println("listen ${is_fd(l)}, connect ${is_fd(c)}, accept ${is_fd(s)}, distinct ${l != c and c != s and l != s}")
-  println("idle ${net.unix_poll(s, 0)!}")
+  println("idle ${(unix.select([s], 0) |> result.map((xs) => list.len(xs) > 0))!}")
   // Shared-memory files: created zero-filled, resized, written and read at offsets.
-  let a = net.shm_create(64)!
-  let b = net.shm_create(0)!
+  let a = unix.shm_create(64)!
+  let b = unix.shm_create(0)!
   println("shm ${is_fd(a)} ${is_fd(b)} distinct ${a != b and a != s}")
-  net.shm_resize(b, 8)!
-  net.shm_write(a, 10, bytes.from_string("shared"))!
-  net.shm_write(b, 0, bytes.from_string("second"))!
-  let zeros = net.shm_read(a, 0, 10)!
+  unix.shm_resize(b, 8)!
+  unix.shm_write(a, 10, bytes.from_string("shared"))!
+  unix.shm_write(b, 0, bytes.from_string("second"))!
+  let zeros = unix.shm_read(a, 0, 10)!
   println("zero-filled ${bytes.len(zeros)} ${list.all(bytes.to_list(zeros), (x) => x == 0)}")
-  println("read ${text(net.shm_read(a, 10, 6)!)}, at the end ${bytes.len(net.shm_read(a, 60, 10)!)}, past it ${bytes.len(net.shm_read(a, 100, 4)!)}")
-  println("resized ${bytes.len(net.shm_read(b, 0, 100)!)}")
+  println("read ${text(unix.shm_read(a, 10, 6)!)}, at the end ${bytes.len(unix.shm_read(a, 60, 10)!)}, past it ${bytes.len(unix.shm_read(a, 100, 4)!)}")
+  println("resized ${bytes.len(unix.shm_read(b, 0, 100)!)}")
   // Bytes with descriptors riding on the first one.
-  net.unix_send(c, bytes.from_string("hello"), [a, b])!
-  println("ready ${net.unix_poll(s, 1000)!}")
-  let other = net.unix_connect(path)!
-  let peer = net.unix_accept(l)!
-  let ready = net.unix_wait([peer, s, c], 1000)!
+  unix.write_fds(c, bytes.from_string("hello"), [a, b])!
+  println("ready ${(unix.select([s], 1000) |> result.map((xs) => list.len(xs) > 0))!}")
+  let other = unix.connect(path)!
+  let peer = unix.accept(l)!
+  let ready = unix.select([peer, s, c], 1000)!
   println("wait ${list.len(ready)} ${if list.get(ready, 0) == some(s) then "s" else "other"}")
-  println("wait none ${list.len(net.unix_wait([peer, c], 0)!)}")
-  println("wait empty ${list.len(net.unix_wait([], 0)!)}")
-  println("listener ready ${net.unix_poll(l, 0)!}")
-  net.unix_close(other)!
-  println("peer sees the close ${net.unix_poll(peer, 1000)!} ${bytes.len(net.unix_recv(peer, 8)!)}")
-  net.unix_close(peer)!
-  let got = net.unix_recv(s, 100)!
-  let fds = net.unix_take_fds(s)
+  println("wait none ${list.len(unix.select([peer, c], 0)!)}")
+  println("wait empty ${list.len(unix.select([], 0)!)}")
+  println("listener ready ${(unix.select([l], 0) |> result.map((xs) => list.len(xs) > 0))!}")
+  io.close(other)!
+  println("peer sees the close ${(unix.select([peer], 1000) |> result.map((xs) => list.len(xs) > 0))!} ${bytes.len(io.read(peer, 8)!)}")
+  io.close(peer)!
+  let got = io.read(s, 100)!
+  let fds = unix.take_fds(s)!
   println("got ${text(got)} with ${list.len(fds)} descriptors")
-  println("received are new ${list.all(fds, (f) => f >= 0 and f != a and f != b)}")
+  println("received are new ${list.all(fds, (f) => f != a and f != b)}")
   let fa = list.get(fds, 0) ?? -1
   let fb = list.get(fds, 1) ?? -1
-  println("first ${text(net.shm_read(fa, 10, 6)!)}, second ${text(net.shm_read(fb, 0, 6)!)}")
-  net.shm_write(fa, 0, bytes.from_string("back"))!
-  println("seen by the sender ${text(net.shm_read(a, 0, 4)!)}")
-  net.shm_resize(fa, 4096)!
-  println("size seen by the sender ${bytes.len(net.shm_read(a, 0, 10000)!)}")
-  println("taken once ${list.len(net.unix_take_fds(s))}")
+  println("first ${text(unix.shm_read(fa, 10, 6)!)}, second ${text(unix.shm_read(fb, 0, 6)!)}")
+  unix.shm_write(fa, 0, bytes.from_string("back"))!
+  println("seen by the sender ${text(unix.shm_read(a, 0, 4)!)}")
+  unix.shm_resize(fa, 4096)!
+  println("size seen by the sender ${bytes.len(unix.shm_read(a, 0, 10000)!)}")
+  println("taken once ${list.len(unix.take_fds(s)!)}")
   // A descriptor this side received travels on, and plain bytes carry none.
-  net.unix_send(s, bytes.from_string("echo"), [fb])!
-  let echo = net.unix_recv(c, 100)!
-  let back = net.unix_take_fds(c)
+  unix.write_fds(s, bytes.from_string("echo"), [fb])!
+  let echo = io.read(c, 100)!
+  let back = unix.take_fds(c)!
   println("echo ${text(echo)} with ${list.len(back)}")
-  net.unix_send(c, bytes.from_string("plain"), [])!
-  println("plain ${text(net.unix_recv(s, 100)!)} with ${list.len(net.unix_take_fds(s))}")
-  net.unix_send(c, bytes.from_string(""), [])!
-  println("empty send ready ${net.unix_poll(s, 0)!}")
+  unix.write_fds(c, bytes.from_string("plain"), [])!
+  println("plain ${text(io.read(s, 100)!)} with ${list.len(unix.take_fds(s)!)}")
+  unix.write_fds(c, bytes.from_string(""), [])!
+  println("empty send ready ${(unix.select([s], 0) |> result.map((xs) => list.len(xs) > 0))!}")
   // A larger message (inside the smallest platform socket buffer, 8 KiB on
   // macOS, so one thread can send it all before reading) arrives whole
   // across reads.
   let big = bytes.repeat(bytes.from_string("0123456789"), 600)
-  net.unix_send(c, big, [])!
-  let first = net.unix_recv(s, 100)!
+  unix.write_fds(c, big, [])!
+  let first = io.read(s, 100)!
   println("big ${bytes.len(big)} first read nonempty ${bytes.len(first) > 0}")
-  net.unix_close(c)!
+  io.close(c)!
   let drained = drain(s, bytes.len(first))!
   println("drained ${drained}")
-  println("closed ${net.unix_poll(s, 1000)!} ${bytes.len(net.unix_recv(s, 10)!)}")
+  println("closed ${(unix.select([s], 1000) |> result.map((xs) => list.len(xs) > 0))!} ${bytes.len(io.read(s, 10)!)}")
   for f in back {
-    net.unix_close(f)!
+    io.close(f)!
   }
   for f in fds {
-    net.unix_close(f)!
+    io.close(f)!
   }
-  net.unix_close(a)!
-  net.unix_close(b)!
-  net.unix_close(s)!
-  net.unix_close(l)!
+  io.close(a)!
+  io.close(b)!
+  io.close(s)!
+  io.close(l)!
   fs.remove(path)!
   println("done")
 }
 
 // Read until the peer's close; the total byte count.
 effect fn drain(s: Int, n: Int) -> Int = {
-  let chunk = net.unix_recv(s, 65536)!
+  let chunk = io.read(s, 65536)!
   if bytes.len(chunk) == 0 then n
   else drain(s, n + bytes.len(chunk))!
 }

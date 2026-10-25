@@ -35,7 +35,7 @@ test "compare orders byte by byte from the first" {
 }
 
 test "v4 carries version 4 and the RFC 9562 variant, and does not repeat" {
-  let us = list.range(0, 64) |> list.map((_) => uuid.v4())
+  let us = list.range(0, 64) |> list.map((_) => uuid.v4()!)!
   for u in us {
     let b = uuid.to_bytes(u)
     assert_eq(int.bshr(bytes.get(b, 6) ?? 0, 4), 4)

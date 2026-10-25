@@ -12,8 +12,8 @@ import io
 
 effect fn main() -> Unit = {
   println("begin")
-  io.write_bytes(list.range(0, 256))
-  io.write(bytes.from_list([
+  io.write(io.stdout()!, bytes.from_list(list.range(0, 256)))!
+  io.write(io.stdout()!, bytes.from_list([
     255,
     0,
     128,
@@ -24,7 +24,7 @@ effect fn main() -> Unit = {
     255,
     254,
     10
-  ]))
-  io.write_bytes([256 + 65, -1, 10])
+  ]))!
+  io.write(io.stdout()!, bytes.from_list([256 + 65, -1, 10]))!
   println("end")
 }

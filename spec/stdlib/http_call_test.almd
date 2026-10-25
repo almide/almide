@@ -19,6 +19,7 @@
 // throwaway connection until the listener is up, so `start` never races the
 // bind.
 import env
+import io
 import http
 import net
 
@@ -27,7 +28,7 @@ effect fn ready(port: Int, left: Int) -> Result[Unit, String] = match net.tcp_co
   port,
 ) {
   ok(probe) => {
-    net.tcp_close(probe)!
+    io.close(probe)!
     ok(())
   },
   err(e) => if left == 0 then err(e)
@@ -39,12 +40,12 @@ effect fn ready(port: Int, left: Int) -> Result[Unit, String] = match net.tcp_co
 
 // Listen, answer the readiness probe, accept the real client and read its
 // request: the real client's stream.
-effect fn accept_real(port: Int) -> Result[(Int, Int), String] = {
+effect fn accept_real(port: Int) -> Result[(net.TcpListener, net.TcpStream), String] = {
   let server = net.tcp_listen("127.0.0.1", port)!
   let probe = net.tcp_accept(server)!
-  net.tcp_close(probe)!
+  io.close(probe)!
   let peer = net.tcp_accept(server)!
-  let _ = net.tcp_read(peer, 4096)!
+  let _ = io.read(peer, 4096)!
   ok((server, peer))
 }
 
@@ -52,7 +53,7 @@ effect fn accept_real(port: Int) -> Result[(Int, Int), String] = {
 // says so. A read that errs is a quiet 50 ms or a reset (the answer to an
 // event written after the close); a second, short read tells them apart — a
 // live connection times out again, a reset one answers end-of-stream.
-effect fn peer_closed(peer: Int) -> Result[Bool, String] = match net.tcp_read_timeout(peer, 64, 50) {
+effect fn peer_closed(peer: net.TcpStream) -> Result[Bool, String] = match net.tcp_read_timeout(peer, 64, 50) {
   ok(b) => ok(bytes.len(b) == 0),
   err(_) => match net.tcp_read_timeout(peer, 64, 1) {
     ok(b) => ok(bytes.len(b) == 0),
@@ -62,39 +63,36 @@ effect fn peer_closed(peer: Int) -> Result[Bool, String] = match net.tcp_read_ti
 
 // Talk every 50 ms until the client closes; the number of events it took.
 // A client that never closes ends the arm with an err after 200 events.
-effect fn trickle(peer: Int, i: Int) -> Result[Int, String] =
+effect fn trickle(peer: net.TcpStream, i: Int) -> Result[Int, String] =
   if i >= 200 then err("the client never closed the connection")
   else if peer_closed(peer)! then ok(i)
   else {
-    net.tcp_write(peer, bytes.from_string("data: ${i}\n\n"))!
+    io.write(peer, bytes.from_string("data: ${i}\n\n"))!
     trickle(peer, i + 1)
   }
 
 effect fn trickle_server(port: Int) -> Result[Int, String] = {
   let (server, peer) = accept_real(port)!
-  net.tcp_write(
-    peer,
-    bytes.from_string("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"),
-  )!
+  io.write(peer, bytes.from_string("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"))!
   let n = trickle(peer, 0)!
-  net.tcp_close(peer)!
-  net.tcp_close_listener(server)!
+  io.close(peer)!
+  io.close(server)!
   ok(n)
 }
 
 effect fn silent_server(port: Int) -> Result[Unit, String] = {
   let (server, peer) = accept_real(port)!
   env.sleep_ms(2000)
-  net.tcp_close(peer)!
-  net.tcp_close_listener(server)!
+  io.close(peer)!
+  io.close(server)!
   ok(())
 }
 
 effect fn answer_server(port: Int, reply: String) -> Result[Unit, String] = {
   let (server, peer) = accept_real(port)!
-  net.tcp_write(peer, bytes.from_string(reply))!
-  net.tcp_close(peer)!
-  net.tcp_close_listener(server)!
+  io.write(peer, bytes.from_string(reply))!
+  io.close(peer)!
+  io.close(server)!
   ok(())
 }
 

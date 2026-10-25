@@ -1,23 +1,23 @@
 import process
 
-test "process.exec_status returns a ProcessStatus on success" {
-  let s = process.exec_status("echo", ["hi"])!
+test "process.output returns a ProcessStatus on success" {
+  let s = process.output(process.ProcessCommand { cmd: "echo", args: ["hi"] })!
   assert_eq(s.code, 0)
   assert(string.contains(s.stdout, "hi"))
 }
 
-test "process.exec_status on failing command returns non-zero code" {
+test "process.output on failing command returns non-zero code" {
   // `false` is a POSIX command that always exits 1
   let is_win = (process.env("OS") ?? "") == "Windows_NT"
   if not is_win then {
-    let s = process.exec_status("false", [])!
+    let s = process.output(process.ProcessCommand { cmd: "false", args: [] })!
     assert(s.code != 0)
   } else {
   }
 }
 
-test "process.exec_status on nonexistent command returns err" {
-  let r = process.exec_status("nonexistent_command_xyz_12345", [])
+test "process.output on nonexistent command returns err" {
+  let r = process.output(process.ProcessCommand { cmd: "nonexistent_command_xyz_12345", args: [] })
   match r {
     ok(_) => assert(false),
     err(msg) => assert(string.len(msg) > 0),

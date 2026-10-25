@@ -13,7 +13,7 @@
 import process
 
 test "a fast child completes under a generous bound" {
-  match process.exec_status_timeout("perl", ["-e", 'print "hi"'], 30000) {
+  match process.output(process.ProcessCommand { cmd: "perl", args: ["-e", 'print "hi"'], timeout_ms: 30000 }) {
     ok(st) => {
       assert_eq(st.code, 0)
       assert_eq(st.stdout, "hi")
@@ -26,7 +26,7 @@ test "a fast child completes under a generous bound" {
 }
 
 test "the deadline kills a hung child with the pinned err value" {
-  match process.exec_status_timeout("perl", ["-e", "sleep 5"], 100) {
+  match process.output(process.ProcessCommand { cmd: "perl", args: ["-e", "sleep 5"], timeout_ms: 100 }) {
     ok(_) => assert(false),
     err(e) => assert_eq(e, "exec timed out after 100ms"),
   }
@@ -35,22 +35,22 @@ test "the deadline kills a hung child with the pinned err value" {
 test "a chatty child cannot deadlock the drain" {
   // ~1MB of output — far past any pipe buffer; the reader threads must drain
   // it while the parent polls, or this hangs into the 30s bound.
-  match process.exec_status_timeout("perl", ["-e", 'print "x" x 1000000'], 30000) {
+  match process.output(process.ProcessCommand { cmd: "perl", args: ["-e", 'print "x" x 1000000'], timeout_ms: 30000 }) {
     ok(st) => assert_eq(string.len(st.stdout), 1000000),
     err(_) => assert(false),
   }
 }
 
 test "a missing binary is the exec error, not a timeout" {
-  match process.exec_status_timeout("almide-no-such-binary-1040", [], 1000) {
+  match process.output(process.ProcessCommand { cmd: "almide-no-such-binary-1040", args: [], timeout_ms: 1000 }) {
     ok(_) => assert(false),
-    err(e) => assert(string.starts_with(e, 'process.exec_status_timeout("almide-no-such-binary-1040", 1000): ')),
+    err(e) => assert(string.starts_with(e, 'process.output("almide-no-such-binary-1040"): ')),
   }
 }
 
 test "the non-timeout twin names the missing command" {
-  match process.exec_status("almide-no-such-binary-1040", []) {
+  match process.output(process.ProcessCommand { cmd: "almide-no-such-binary-1040", args: [] }) {
     ok(_) => assert(false),
-    err(e) => assert(string.starts_with(e, 'process.exec_status("almide-no-such-binary-1040"): ')),
+    err(e) => assert(string.starts_with(e, 'process.output("almide-no-such-binary-1040"): ')),
   }
 }
