@@ -7,56 +7,51 @@
 // a FRESH transformed key (owned, moved via store_str) and co-own the value only.
 // Key transforms are ASCII-only (native's to_ascii_uppercase/lowercase): byte-level
 // processing is char-exact because UTF-8 continuation bytes never land in A-Z/a-z.
-// keys ∋ k — a binary search of the key list sorted once per call (#4207, the
-// value_core __vx_* key index): O((n + k) log k), where a scan of `keys` per
-// field was O(n·k). kb is the key list's payload, sk its sorted index.
-fn __vu_has(kb: Int, sk: Int, nk: Int, k: Int) -> Bool = __vx_first(kb, 8, sk, nk, k) >= 0
+// keys ∋ k — a lookup in the key list hashed once per call (#4207): O(n + k),
+// where a scan of `keys` per field was O(n·k). vb is the Object's pair payload.
+fn __vu_keyset(keys: List[String]) -> Map[String, Int] = {
+  var named: Map[String, Int] = map.new()
+  for k in keys {
+    map.insert(named, k, 0)
+  }
+  named
+}
+
+fn __vu_has(named: Map[String, Int], vb: Int, i: Int) -> Bool = {
+  let k: String = prim.load_handle(vb + (2 * i) * 8)
+  map.contains(named, k)
+}
 
 // Count the pairs whose membership matches `want` (true = pick, false = omit).
-fn __vu_count(vb: Int, kb: Int, sk: Int, want: Bool, i: Int, n: Int, nk: Int, acc: Int) -> Int =
+fn __vu_count(vb: Int, named: Map[String, Int], want: Bool, i: Int, n: Int, acc: Int) -> Int =
   if i >= n then acc
-  else if __vu_has(kb, sk, nk, prim.load64(vb + (2 * i) * 8)) == want then __vu_count(
-    vb,
-    kb,
-    sk,
-    want,
-    i + 1,
-    n,
-    nk,
-    acc + 1,
-  )
-  else __vu_count(vb, kb, sk, want, i + 1, n, nk, acc)
+  else if __vu_has(named, vb, i) == want then __vu_count(vb, named, want, i + 1, n, acc + 1)
+  else __vu_count(vb, named, want, i + 1, n, acc)
 
 // Fill the kept pairs in object order, co-owning key AND value (rc_inc both).
-fn __vu_fill(vb: Int, kb: Int, sk: Int, dst: Value, want: Bool, i: Int, n: Int, nk: Int, w: Int) -> Int =
+fn __vu_fill(vb: Int, named: Map[String, Int], dst: Value, want: Bool, i: Int, n: Int, w: Int) -> Int =
   if i >= n then w
-  else {
+  else if __vu_has(named, vb, i) == want then {
+    let dh = prim.handle(dst)
     let kh = prim.load64(vb + (2 * i) * 8)
-    if __vu_has(kb, sk, nk, kh) == want then {
-      let dh = prim.handle(dst)
-      let vh = prim.load64(vb + (2 * i + 1) * 8)
-      prim.rc_inc(kh)
-      prim.rc_inc(vh)
-      prim.store64(dh + 12 + (2 * w) * 8, kh)
-      prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
-      __vu_fill(vb, kb, sk, dst, want, i + 1, n, nk, w + 1)
-    } else __vu_fill(vb, kb, sk, dst, want, i + 1, n, nk, w)
-  }
+    let vh = prim.load64(vb + (2 * i + 1) * 8)
+    prim.rc_inc(kh)
+    prim.rc_inc(vh)
+    prim.store64(dh + 12 + (2 * w) * 8, kh)
+    prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
+    __vu_fill(vb, named, dst, want, i + 1, n, w + 1)
+  } else __vu_fill(vb, named, dst, want, i + 1, n, w)
 
 fn __vu_sel(v: Value, keys: List[String], want: Bool) -> Value = {
   let h = prim.handle(v)
   let n = prim.load32(h + 8) / 2
-  let kh = prim.handle(keys)
-  let nk = prim.load32(kh + 4)
-  let xk = prim.alloc_list(nk)
-  let yk = prim.alloc_list(nk)
-  let sk = __vx_sort(kh + 12, 8, nk, prim.handle(xk) + 12, prim.handle(yk) + 12)
-  let cnt = __vu_count(h + 12, kh + 12, sk, want, 0, n, nk, 0)
+  let named = __vu_keyset(keys)
+  let cnt = __vu_count(h + 12, named, want, 0, n, 0)
   let dst = prim.alloc_value(2 * cnt)
   let dh = prim.handle(dst)
   prim.store32(dh + 4, 6)
   prim.store32(dh + 8, 2 * cnt)
-  let _w = __vu_fill(h + 12, kh + 12, sk, dst, want, 0, n, nk, 0)
+  let _w = __vu_fill(h + 12, named, dst, want, 0, n, 0)
   dst
 }
 
