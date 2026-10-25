@@ -161,7 +161,7 @@ fn trim_start(s: String) -> String = _
 fn trim_end(s: String) -> String = _
 
 /// Non-overlapping needle count; len+1 if needle empty.
-@intrinsic("almide_rt_string_count")
+@intrinsic("almide_rt_string_count_matches")
 fn count_matches(s: String, needle: String) -> Int = _
 
 /// Number of characters for which f is true.
