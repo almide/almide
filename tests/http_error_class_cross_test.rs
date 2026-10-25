@@ -184,7 +184,7 @@ fn show(tag: String, r: Result[String, String]) -> Unit = {{
 effect fn main() -> Unit = {{
   show("timeout", http.get("http://127.0.0.1:{stall}/slow"))
   show("too-large", http.get("http://127.0.0.1:{big}/big"))
-  show("too-large-framed", http.request("GET", "http://127.0.0.1:{big}/big", "", ["X-Ok": "1"]))
+  show("too-large-framed", http.request("GET", "http://127.0.0.1:{big}/big", "", [("X-Ok", "1")]))
   show("tls", http.get("https://127.0.0.1:{plain}/"))
 }}
 "#

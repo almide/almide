@@ -446,14 +446,14 @@ mod availability_tests {
     #[test]
     fn native_only_functions_are_left_out_of_the_catalogue() {
         let unavailable = wasm_unavailable(TARGET_AVAILABILITY);
-        assert!(unavailable.contains("http.request_stream"));
+        assert!(unavailable.contains("http.start"));
         let cat = build();
         // A row the embedded host serves stays, its wasm leg run there.
         let unserved = |n: &String| unavailable.contains(n) && !embedded_only().contains(n);
         assert!(!cat.iter().any(|s| unserved(&format!("{}.{}", s.module, s.func))));
-        // Every unavailable row is stock-p1 only since the structural leg
-        // admitted `http.request_stream`, its last wall: so the row stays.
-        assert!(cat.iter().any(|s| s.module == "http" && s.func == "request_stream"), "a row the embedded host serves stays");
+        // `http.start` walls only the stock artifact (stock-p1): the embedded
+        // host serves the call handle, so the row stays.
+        assert!(cat.iter().any(|s| s.module == "http" && s.func == "start"), "a row the embedded host serves stays");
         assert!(cat.iter().any(|s| s.module == "matrix" && s.func == "dot_row"), "a served matrix fn stays");
     }
 
