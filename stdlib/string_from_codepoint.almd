@@ -1,7 +1,7 @@
-// string_from_codepoint — SELF-HOSTED `string.from_codepoint(cp) -> String?` for v1 over
-// the prim floor. Native = `char::from_u32(cp).map(to_string)`: some(the UTF-8 encoding)
-// of a Unicode scalar value, none for an invalid codepoint (negative, a surrogate
-// D800..DFFF, or > 10FFFF). The byte length and the byte fill live in SCALAR
+// string_from_codepoint — SELF-HOSTED `string.__from_codepoint(cp) -> String` for v1 over
+// the prim floor: the UTF-8 encoding of a Unicode scalar value, "" for an invalid one
+// (negative, a surrogate D800..DFFF, or > 10FFFF). The public `string.from_codepoint`
+// answers none for those before it asks (stdlib/string.almd). The byte length and the byte fill live in SCALAR
 // helpers, so from_codepoint keeps a plain heap tail (alloc_str once, no heap-result if).
 // `|` is replaced by `+` (the continuation/lead bits never overlap), so no prim.bor.
 fn __cp_nbytes(cp: Int) -> Int = if cp < 0 then 0
@@ -45,15 +45,10 @@ fn __cp_fill(d: Int, cp: Int, nb: Int) -> Int = if nb == 1 then {
   0
 } else 0
 
-// The one-char string of a valid cp (nb > 0 bytes) as a fresh owned String.
-fn __cp_string(cp: Int, nb: Int) -> String = {
+fn string_from_codepoint(cp: Int) -> String = {
+  let nb = __cp_nbytes(cp)
   let buf = prim.alloc_str(nb)
   let d = prim.handle(buf) + 12
   let _f = __cp_fill(d, cp, nb)
   buf
-}
-
-fn string_from_codepoint(cp: Int) -> String? = {
-  let nb = __cp_nbytes(cp)
-  if nb == 0 then none else some(__cp_string(cp, nb))
 }
