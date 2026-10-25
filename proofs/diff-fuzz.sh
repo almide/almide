@@ -34,6 +34,12 @@ source "$ROOT/proofs/lib/stamp.sh"
 stamp_toolchain "$ROOT" || exit 1
 
 N="${1:-120}"
+# The CI slice (scripts/lib/ci-slice.sh): under ALMIDE_CI_SLICE=k > 1 (a PR into
+# develop) 1 in k of the N programs (at least 20) from the same seed — a strict
+# prefix of the full run's programs; the full run (develop, main, PRs into
+# main, the nightly) generates all N.
+source "$ROOT/scripts/lib/ci-slice.sh"
+N="$(ci_slice_count "$N" 20 diff-fuzz)" || exit 2
 SEED="${2:-${EPOCHSECONDS:-$(date +%s)}}"
 
 command -v wasmtime >/dev/null || { echo "diff-fuzz: wasmtime not found — SKIP"; exit 0; }

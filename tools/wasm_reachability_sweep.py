@@ -324,12 +324,29 @@ def classify_at(f, args, tv):
     return ("UNPROBEABLE", "no candidate shape builds natively"), any_checked
 
 
+def ci_slice(fns):
+    """The CI slice (scripts/lib/ci-slice.sh): under ALMIDE_CI_SLICE=k > 1 keep
+    the commit-rotated 1-in-k fns plus every fn of a module file the change
+    touches. Key: `stdlib/<module>.almd#<fn>`, so a change to
+    stdlib/<module>.almd touches each of its fns. Full run: every fn."""
+    if int(os.environ.get("ALMIDE_CI_SLICE", "1") or "1") <= 1:
+        return fns
+    keys = [f"stdlib/{f['module']}.almd#{f['name']}" for f in fns]
+    rc = subprocess.run(["bash", "-c", ". scripts/lib/ci-slice.sh && ci_slice_filter wasm-reachability"],
+                        input="".join(k + "\n" for k in keys), capture_output=True, text=True, cwd=REPO)
+    sys.stderr.write(rc.stderr)
+    if rc.returncode != 0:
+        sys.exit("wasm-reachability: the CI slice selection failed")
+    keep = set(rc.stdout.split())
+    return [f for f, k in zip(fns, keys) if k in keep]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--modules", nargs="*", help="limit to these modules")
     ap.add_argument("--json", help="write the raw result rows here")
     a = ap.parse_args()
-    fns = surface(set(a.modules) if a.modules else None)
+    fns = ci_slice(surface(set(a.modules) if a.modules else None))
     rows, counts = [], {"PARITY": 0, "GAP": 0, "UNPROBEABLE": 0}
     for i, f in enumerate(fns, 1):
         verdict, why = classify(f)
