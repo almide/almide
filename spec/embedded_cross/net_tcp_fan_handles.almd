@@ -1,0 +1,64 @@
+// @contract: C-377
+// net tcp handles under `fan` (#4199): the two handle tables are the
+// program's, not a thread's. `main` dials its own listener (the connection
+// completes against the listen backlog), then one arm accepts it on `main`'s
+// listener while a sibling arm opens a listener of its own; no arm waits on
+// another, so the transcript is the same whether the arms run in parallel
+// (native) or in turn. The streams and listeners the arms open stay valid in
+// `main` after the fan, distinct from every handle `main` holds, and carry the
+// bytes of the connection they were opened for. Native runs each arm on its
+// own thread, and its tables were per thread: a handle from `main` was invalid
+// in an arm, and an arm's socket came back as a number that named one of
+// `main`'s. Which arm takes the lower free slot can race, so handle numbers
+// are printed only as predicates. Payloads stay far below 8 KiB.
+import net
+
+effect fn serve_once(listener: Int) -> Int = {
+  let s = net.tcp_accept(listener)!
+  let got = net.tcp_read_exact(s, 5)!
+  net.tcp_write(s, bytes.from_string("echo:" + (bytes.to_string(got) ?? "?")))!
+  s
+}
+
+effect fn listen_in_arm() -> Int = net.tcp_listen("127.0.0.1", 0)!
+
+effect fn port_in_arm(listener: Int) -> Int = net.tcp_local_port(listener)!
+
+effect fn main() -> Unit = {
+  let l = net.tcp_listen("127.0.0.1", 0)!
+  let port = net.tcp_local_port(l)!
+  let cli = net.tcp_connect("127.0.0.1", port)!
+  net.tcp_write(cli, bytes.from_string("hello"))!
+  // main's listener is accepted on in an arm; a sibling arm listens.
+  let (srv, side) = fan {
+    serve_once(l)
+    listen_in_arm()
+  }
+  println("arm stream distinct from main's: ${srv != cli}")
+  println("arm listener distinct from main's: ${side != l}")
+  println("both open in main: ${net.tcp_is_open(srv) and net.tcp_is_open(cli)}")
+  let reply = net.tcp_read_exact(cli, 10)!
+  println("client reads in main: ${bytes.to_string(reply) ?? "?"}")
+  // A handle from main answers the same in an arm.
+  let (seen, again) = fan {
+    port_in_arm(l)
+    port_in_arm(l)
+  }
+  println("arm sees main's listener: ${seen == port and again == port}")
+  // Listeners an arm opens stay live in main, each its own socket.
+  let (a, b) = fan {
+    listen_in_arm()
+    listen_in_arm()
+  }
+  let pa = net.tcp_local_port(a)!
+  let pb = net.tcp_local_port(b)!
+  println("arm listeners distinct from main's: ${a != l and b != l and a != b}")
+  println("arm listener ports distinct: ${pa != pb and pa != port and pb != port}")
+  net.tcp_close_listener(side)!
+  net.tcp_close(srv)!
+  net.tcp_close(cli)!
+  net.tcp_close_listener(a)!
+  net.tcp_close_listener(b)!
+  net.tcp_close_listener(l)!
+  println("done")
+}
