@@ -537,8 +537,8 @@ impl P3Types {
         // request-options setters: (self, option<duration> as (disc, u64), retptr).
         let t_opt_set = type_index(types, &[ValType::I32, ValType::I32, ValType::I64, ValType::I32], &[]);
         // The http error helpers: $http_quote, $http_err, $http_hdr_check, $http_env_num.
-        let t_quote = type_index(types, &[ValType::I32; 3], &[ValType::I32]);
-        let t_herr = type_index(types, &[ValType::I32; 10], &[ValType::I64]);
+        let t_quote = type_index(types, &[ValType::I32; 4], &[ValType::I32]);
+        let t_herr = type_index(types, &[ValType::I32; 11], &[ValType::I64]);
         let t_hcheck = type_index(types, &[ValType::I32; 4], &[ValType::I32]);
         let t_hnum = type_index(types, &[ValType::I32, ValType::I32, ValType::I64], &[ValType::I64]);
         P3Types { exit: t_exit, call: t_call, new: t_new, rw: t_rw, fut_read: t_fut_read, drop: t_drop, retptr: t_retptr, random: t_random, print: t_print, fs: t_fs, hread: t_hread, realloc: t_realloc, status: t_status, callback: t_callback, open: t_open, stat: t_stat, rvs: t_rvs, aopen: t_aopen, wvs: t_wvs, avs: t_avs, pathop: t_pathop, ws_new: t_ws_new, ws_join: t_ws_join, ws_wait: t_ws_wait, set4: t_set4, set5: t_set5, consume: t_consume, append: t_append, wait: t_wait, opt_set: t_opt_set, quote: t_quote, herr: t_herr, hcheck: t_hcheck, hnum: t_hnum }
