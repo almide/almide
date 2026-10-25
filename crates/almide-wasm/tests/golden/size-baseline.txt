@@ -258,6 +258,7 @@
 5484	spec/wasm_cross/fs_read_bytes_raw_call_head.almd
 9420	spec/wasm_cross/fs_read_directory_errno.almd
 5643	spec/wasm_cross/fs_read_lines.almd
+8777	spec/wasm_cross/fs_read_non_regular.almd
 8387	spec/wasm_cross/fs_read_text_utf8.almd
 2646	spec/wasm_cross/fs_relative_path.almd
 9888	spec/wasm_cross/fs_root_escape.almd
