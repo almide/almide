@@ -167,6 +167,16 @@ probe = 'string.from_codepoint(233) ?? ""'
 expect = "é"
 
 [[string.fn]]
+name = "__from_codepoint"
+index_unit = "scalar"
+probe = 'string.__from_codepoint(233)'
+expect = "é"
+note = """
+The UTF-8 encoder under from_codepoint, which answers none for a non-scalar
+before asking: same unit, the codepoint itself.
+"""
+
+[[string.fn]]
 name = "count_matches"
 index_unit = "count"
 probe = 'string.count_matches("ééa", "é")'
