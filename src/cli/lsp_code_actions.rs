@@ -362,8 +362,8 @@ fn project_deps_for(file_path: Option<&str>, cache: &mut DepCache, allow_fetch: 
 fn manifest_fingerprint(toml: &std::path::Path) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    std::fs::read(toml).ok().hash(&mut h);
-    std::fs::read(toml.with_file_name("almide.lock")).ok().hash(&mut h);
+    crate::project::read_project_file_bytes(toml).ok().hash(&mut h);
+    crate::project::read_project_file_bytes(&toml.with_file_name("almide.lock")).ok().hash(&mut h);
     h.finish()
 }
 
