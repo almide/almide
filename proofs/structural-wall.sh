@@ -58,6 +58,22 @@ HASHES="$ROOT/proofs/structural-artifacts.sha256"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
+# The full certified list on a release (a push to main, a tag, a manual run,
+# or a push to develop after a merge). On a PR, STRUCTURAL_WALL_STRIDE=k keeps
+# every k-th fixture, the offset rotated by the commit (STRUCTURAL_WALL_SEED),
+# so consecutive PRs certify different slices. A slice judges exceptions only
+# for the fixtures it ran and does not rewrite the artifact digest file.
+STRIDE="${STRUCTURAL_WALL_STRIDE:-1}"
+grep -v -E '^(#|$)' "$FIXTURES" > "$OUT/listed"
+if [ "$STRIDE" -gt 1 ] 2>/dev/null; then
+  seed="$(printf '%s' "${STRUCTURAL_WALL_SEED:-0}" | tr -cd '0-9a-fA-F' | cut -c1-7)"
+  off=$(( 16#${seed:-0} % STRIDE ))
+  awk -v s="$STRIDE" -v o="$off" '(NR - 1) % s == o' "$OUT/listed" > "$OUT/selected"
+  echo "== slice: $(wc -l < "$OUT/selected" | tr -d ' ') of $(wc -l < "$OUT/listed" | tr -d ' ') certified fixtures (every ${STRIDE}th from offset $off); a release runs them all =="
+  HASHES="$OUT/structural-artifacts.sha256"
+else
+  cp "$OUT/listed" "$OUT/selected"
+fi
 echo "== build each certified fixture (almide build --target wasm) and produce its bundle =="
 N=0
 {
@@ -91,8 +107,9 @@ while IFS= read -r f; do
     exit 1
   fi
   printf '%s  %s\n' "$sum" "$f" >> "$HASHES.tmp"
-done < "$FIXTURES"
+done < "$OUT/selected"
 [ "$N" -gt 0 ] || { echo "STRUCTURAL WALL FAIL: no certified fixture listed in $FIXTURES" >&2; exit 1; }
+[ "$N" -eq "$(wc -l < "$OUT/selected" | tr -d ' ')" ] || { echo "STRUCTURAL WALL FAIL: built $N of the selected fixtures — the scan went blind" >&2; exit 1; }
 mv "$HASHES.tmp" "$HASHES"
 echo "  $N fixture bundle(s); artifact digests in proofs/structural-artifacts.sha256"
 
@@ -207,7 +224,8 @@ for row in open(os.path.join(out, "index")):
     fixtures_ok += all_ok
     if all_ok and vrc != "0":
         fail.append(f"{fx}: every witness accepts, but almide-verify's bundle outcome is exit {vrc}")
-for key in sorted(exceptions - rejected_seen):
+ran = {row.rstrip("\n").split("\t")[1] for row in open(os.path.join(out, "index"))}
+for key in sorted(k for k in exceptions - rejected_seen if k[0] in ran):
     fail.append("STALE exception (no witness of that name rejects — remove the row): " + "\t".join(key))
 
 def lit(s):

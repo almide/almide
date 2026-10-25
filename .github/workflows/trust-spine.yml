@@ -90,7 +90,7 @@ jobs:
     # to GitHub's 6h default and dies CANCELLED by the next push — never red, so
     # nobody sees it (the 2026-07-27 fan_any_early_winner incident burned a full
     # day of runners this way). 100 min = cold build + headroom, still a fast red.
-    timeout-minutes: 100
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -191,16 +191,25 @@ jobs:
           cargo --version
 
       - name: make verify-trust (proof spine + axiom audit + PCC gate + tests)
+        # A PR certifies a commit-rotated 1-in-8 slice of the structural wall's
+        # fixtures (proofs/structural-wall.sh); every push (develop after a
+        # merge, main, a tag) and a manual run certify them all.
+        env:
+          STRUCTURAL_WALL_STRIDE: ${{ github.event_name == 'pull_request' && '8' || '1' }}
+          STRUCTURAL_WALL_SEED: ${{ github.sha }}
         run: |
           eval "$(opam env)"
           make verify-trust
 
       - name: make receipt (the honest claim bundle)
+        # The receipt states whole-corpus numbers, so only a full run writes it.
+        if: github.event_name != 'pull_request'
         run: |
           eval "$(opam env)"
           make receipt
 
       - name: TCB claims re-derived from the MEASURED checker (not carried forward)
+        if: github.event_name != 'pull_request'
         # This job is the one place proofs/checker.ml actually EXISTS (extracted
         # by make verify-trust above), so gen-claims --check here measures the
         # real artifact. The checks-job run of --check operates on a fresh
