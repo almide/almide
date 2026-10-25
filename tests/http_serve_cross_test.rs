@@ -368,9 +368,13 @@ struct Leg {
 }
 
 fn boot_limits(wasm: bool) -> Leg {
+    boot_at(&limits_fixture(), wasm)
+}
+
+fn boot_at(fixture: &Path, wasm: bool) -> Leg {
     let port = free_port();
     let mut c = Command::new(almide_bin());
-    c.arg("run").arg(limits_fixture());
+    c.arg("run").arg(fixture);
     if wasm {
         c.args(["--target", "wasm"]);
     }
@@ -900,4 +904,61 @@ fn a_sigint_to_the_almide_run_group_drains_once_and_is_not_a_forced_stop() {
     assert_eq!(out, "listening\nhit /hello\nhit /nap\nstopped\n");
     assert_eq!(code, Some(0), "almide run's exit code");
     assert!(!group_alive(pgid), "a process of the run outlived `almide run`");
+}
+
+// ── A runtime abort inside the handler (#4203) ──
+//
+// `spec/serve_cross/http_serve_abort.almd` indexes a 3-element list by the
+// request body's length and panics on the body `P`. An abort fails only its
+// request on both legs: the fixed C-409 500, one stderr line naming the
+// request and the abort, and the next request is served.
+
+fn abort_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/serve_cross/http_serve_abort.almd")
+}
+
+fn post(body: &str) -> Vec<u8> {
+    format!("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: {}\r\n\r\n{}", body.len(), body).into_bytes()
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn an_abort_in_the_handler_fails_only_its_request_on_native_and_the_embedded_lane() {
+    const BODIES: [&str; 5] = ["X", "XXXXX", "X", "P", "X"];
+    let run = |wasm: bool| {
+        let mut leg = boot_at(&abort_fixture(), wasm);
+        let answers: Vec<Vec<u8>> = BODIES.iter().map(|b| ask(leg.port, &post(b))).collect();
+        let alive = leg.child.try_wait().expect("try_wait").is_none();
+        (answers, alive, leg.stop())
+    };
+    let (native, n_alive, n_err) = run(false);
+    let (wasm, w_alive, w_err) = run(true);
+    for (leg, answers, alive, err) in [("native", &native, n_alive, &n_err), ("wasm", &wasm, w_alive, &w_err)] {
+        let text: Vec<String> = answers.iter().map(|a| String::from_utf8_lossy(a).into_owned()).collect();
+        for i in [0, 2, 4] {
+            assert!(text[i].starts_with("HTTP/1.1 200 ") && text[i].ends_with("\r\n\r\nval=20"), "{leg} answer {i}: {:?}", text[i]);
+        }
+        for (i, id) in [(1, "254cfecc"), (3, "b533f7a4")] {
+            assert!(
+                text[i].starts_with("HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n")
+                    && text[i].ends_with(&format!("\r\n\r\nInternal Server Error (request {id})")),
+                "{leg} answer {i}: {:?}",
+                text[i]
+            );
+            assert!(!text[i].contains("bounds") && !text[i].contains("boom"), "{leg}: the abort text reached the client: {:?}", text[i]);
+        }
+        assert!(alive, "{leg}: the server ended");
+        assert_eq!(
+            err.lines().collect::<Vec<_>>(),
+            [
+                "http.serve: request 254cfecc: handler aborted: \"index out of bounds\"",
+                "http.serve: request b533f7a4: handler aborted: \"PANIC: boom \\\"quoted\\\"\"",
+            ],
+            "{leg}: stderr after the ready line"
+        );
+    }
+    for (i, (n, w)) in native.iter().zip(&wasm).enumerate() {
+        assert_eq!(n, w, "answer {i} differs byte for byte across the legs");
+    }
+    assert_eq!(n_err, w_err, "the stderr transcripts differ");
 }
