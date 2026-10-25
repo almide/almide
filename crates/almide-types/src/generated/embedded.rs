@@ -15188,6 +15188,45 @@ fn json_get_array(j: Value, key: String) -> List[Value]? = match value.field(j, 
   ok(v) => __r2o_arr(value.as_array(v)),
   err(_) => none,
 }
+
+
+
+
+
+
+fn __r2o_val(r: Result[Value, String]) -> Value? = match r {
+  ok(v) => some(v),
+  err(_) => none,
+}
+
+fn __r2o_obj(r: Result[List[(String, Value)], String]) -> List[(String, Value)]? = match r {
+  ok(ps) => some(ps),
+  err(_) => none,
+}
+
+@implements("value.get")
+fn value_get(v: Value, key: String) -> Value? = __r2o_val(value.field(v, key))
+
+@implements("value.get_string")
+fn value_get_string(v: Value, key: String) -> String? = json_get_string(v, key)
+
+@implements("value.get_int")
+fn value_get_int(v: Value, key: String) -> Int? = json_get_int(v, key)
+
+@implements("value.get_float")
+fn value_get_float(v: Value, key: String) -> Float? = json_get_float(v, key)
+
+@implements("value.get_bool")
+fn value_get_bool(v: Value, key: String) -> Bool? = json_get_bool(v, key)
+
+@implements("value.get_array")
+fn value_get_array(v: Value, key: String) -> List[Value]? = json_get_array(v, key)
+
+@implements("value.get_object")
+fn value_get_object(v: Value, key: String) -> List[(String, Value)]? = match value.field(v, key) {
+  ok(x) => __r2o_obj(value.as_object(x)),
+  err(_) => none,
+}
 "#;
 pub const SRC_JSON_PARSE: &str = r#"
 
@@ -15760,6 +15799,37 @@ fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Value? 
   },
   err(_) => none,
 }
+
+
+
+
+
+
+
+@implements("value.root")
+fn value_path_root() -> List[String] = []
+
+@implements("value.key")
+fn value_path_key(p: List[String], name: String) -> List[String] = json_path_field(p, name)
+
+@implements("value.index")
+fn value_path_index(p: List[String], i: Int) -> List[String] =
+  if i < 0 then json_path_index(p, 9223372036854775807)
+  else json_path_index(p, i)
+
+@implements("value.get_path")
+fn value_get_path(v: Value, p: List[String]) -> Value? = json_path_get_go(v, p, 0)
+
+@implements("value.set_path")
+fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = ok(json_path_set_go(
+  v,
+  p,
+  0,
+  x,
+))
+
+@implements("value.remove_path")
+fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p, 0)
 
 
 
