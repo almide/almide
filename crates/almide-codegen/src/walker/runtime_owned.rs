@@ -154,10 +154,14 @@ pub(crate) fn modules_spelled_in(idents: &[&str]) -> Vec<&'static str> {
 /// value routes through `almide_repr` whether or not the bundled decl
 /// reached the program: under the auto-import it never does, so the
 /// decl-driven `repr_named_types` set left the walker on the `Display` path
-/// and the runtime enum has none (E0277, #1829). The undeclared names
-/// (`Value`, the http/json handles) keep their `Display` route untouched.
+/// and the runtime enum has none (E0277, #1829). The undeclared names route
+/// the same way (#4204): `AlmideHttpRequest` / `AlmideHttpResponse` /
+/// `AlmideHttpCall` have no `Display`, so a bare `${req}` was an E0277 after
+/// a green `almide check`, and `Value` / `JsonPath` print their `Display`
+/// text through the repr anyway. Every entry carries the impl — the test
+/// below holds the table to it.
 pub(crate) fn has_runtime_repr(almd: &str) -> bool {
-    TABLE.iter().any(|e| e.almd == almd && e.twin.is_some())
+    TABLE.iter().any(|e| e.almd == almd)
 }
 
 #[cfg(test)]
