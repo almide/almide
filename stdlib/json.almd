@@ -66,7 +66,7 @@ fn index(path: JsonPath, i: Int) -> JsonPath = _
 @borrow_ref(path)
 fn get_path(j: Value, path: JsonPath) -> Value? = _
 
-/// j with value at path; missing keys created.
+/// j with value at path; missing keys created; err if nested past 1000.
 @intrinsic("almide_json_set_path")
 @borrow_ref(path)
 @consume(value)
