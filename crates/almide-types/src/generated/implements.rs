@@ -2,6 +2,7 @@
 
 pub const DECLARED: &[(&str, &[(&str, &str)])] = &[
     (crate::embedded::SRC_BYTES_CORE, &[("bytes_split", "bytes.split")]),
+    (crate::embedded::SRC_BYTES_CT, &[("bytes_is_equal_constant_time", "bytes.is_equal_constant_time"), ("string_is_equal_constant_time", "string.is_equal_constant_time")]),
     (crate::embedded::SRC_BYTES_RAWPTR, &[("ffi_to_int", "ffi.to_int")]),
     (crate::embedded::SRC_FFI_BRIDGE, &[("ffi_address", "ffi.address"), ("ffi_read", "ffi.read"), ("ffi_write", "ffi.write")]),
     (crate::embedded::SRC_HTTP_CALL, &[("__hc_stream_classic_impl", "http.request_stream"), ("http_call_repr", "http.__http_call_repr")]),
@@ -18,6 +19,8 @@ pub const DECLARED: &[(&str, &[(&str, &str)])] = &[
 
 /// The declared impl fns that never reach `prim.`, through their own body or a same-file callee.
 pub const PRIM_FREE: &[&str] = &[
+    "bytes_is_equal_constant_time",
+    "string_is_equal_constant_time",
     "ffi_address",
     "ffi_read",
     "ffi_write",
