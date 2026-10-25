@@ -309,6 +309,7 @@ pub const PURE_MODULES: &[&str] = &[
     "value",
     "value_core",
     "value_utils",
+    "zlib_inflate",
 ];
 
 /// Is `module` a provably-pure stdlib data module (reaches no host capability)?
