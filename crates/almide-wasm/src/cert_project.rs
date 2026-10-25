@@ -434,6 +434,16 @@ pub fn fs_call_ops(bytes: &[u8]) -> Result<Option<BTreeSet<i32>>, String> {
     Ok(Some(out))
 }
 
+/// The `almide.fs_call` op constants the module `bytes` shows: [`fs_call_ops`]
+/// with a site whose op is not a visible constant adding NOTHING, rather than
+/// voiding the set. The embedded host's allow-list (row 19 of the security
+/// table): a computed op fails closed, reaching only an op some other site
+/// names, where `None` used to leave the module with no list at all.
+pub fn fs_call_ops_visible(bytes: &[u8]) -> Result<BTreeSet<i32>, String> {
+    let m = decode(bytes)?;
+    Ok(m.bodies.iter().flat_map(|b| b.fs_ops.iter()).flatten().copied().collect())
+}
+
 /// The capability witnesses of the structural module `decls.bytes`:
 /// `(flat, graph)` — one `declared|reach` witness per source-declared
 /// function, and the `declared|direct|callees` call graph of every defined
@@ -783,5 +793,9 @@ mod tests {
             i.local_get(0);
         });
         assert_eq!(fs_call_ops(&computed).unwrap(), None, "an op the stack does not show cannot be bounded");
+        // Row 19: the host's list keeps the visible constants and drops the
+        // computed site, so it fails closed instead of vanishing.
+        assert_eq!(fs_call_ops_visible(&constant).unwrap(), [35].into());
+        assert_eq!(fs_call_ops_visible(&computed).unwrap(), BTreeSet::new());
     }
 }

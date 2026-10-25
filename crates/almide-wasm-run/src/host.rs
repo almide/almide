@@ -131,11 +131,13 @@ struct Host {
     /// The `testing.assert_aborts` site this instance was started to run
     /// (op 118, ADR-0029), or -1: the run's own instance runs its tests.
     abort_site: i64,
-    /// The `fs_call` ops this module was built with (#4102), or `None` when
-    /// they could not be read as constants. The in-process module imports
-    /// the whole gateway whatever its effects; an op outside this set traps,
-    /// so a miscompile cannot steer the gateway into a capability the program
-    /// never had.
+    /// The `fs_call` ops this module was built with (#4102): the constant op
+    /// of every call site. The in-process module imports the whole gateway
+    /// whatever its effects; an op outside this set traps, so a miscompile
+    /// cannot steer the gateway into a capability the program never had. A
+    /// site whose op is not a visible constant adds nothing: the list fails
+    /// closed there (row 19), so such a site reaches only an op another site
+    /// names. There is no module without a list.
     allowed_ops: AllowedOps,
     /// The contained serve loop's stderr hold (#4203, op 75).
     contain: Arc<Mutex<Contain>>,
@@ -195,22 +197,21 @@ fn request_handles(host: &Host, h: Handles) -> usize {
 }
 
 /// See [`Host::allowed_ops`].
-pub(crate) type AllowedOps = Option<Arc<std::collections::BTreeSet<i32>>>;
+pub(crate) type AllowedOps = Arc<std::collections::BTreeSet<i32>>;
 
-/// The `fs_call` op set of `bytes` (#4102), shared by every instance of it.
+/// The `fs_call` op set of `bytes` (#4102), shared by every instance of it:
+/// the visible constants only, so a computed op fails closed (row 19).
 fn allowed_ops_of(bytes: &[u8]) -> anyhow::Result<AllowedOps> {
-    let ops = almide_wasm::cert_project::fs_call_ops(bytes).map_err(anyhow::Error::msg)?;
-    Ok(ops.map(Arc::new))
+    let ops = almide_wasm::cert_project::fs_call_ops_visible(bytes).map_err(anyhow::Error::msg)?;
+    Ok(Arc::new(ops))
 }
 
 /// Refuse an `fs_call` op the module was not built with (#4102).
 fn op_allowed(host: &Host, op: i32) -> wasmtime::Result<()> {
-    match &host.allowed_ops {
-        Some(ok) if !ok.contains(&op) => Err(wasmtime::Error::msg(format!(
-            "almide.fs_call: op {op} is not one this module was built with"
-        ))),
-        _ => Ok(()),
+    if host.allowed_ops.contains(&op) {
+        return Ok(());
     }
+    Err(wasmtime::Error::msg(format!("almide.fs_call: op {op} is not one this module was built with")))
 }
 
 /// Record that a growth of `host`'s memory was refused (see [`Contain::oom`]).
@@ -1334,6 +1335,51 @@ mod tests {
             let r = run_wasm(&calling(name, b"x", true, &body)).expect("engine runs the module");
             assert_eq!((r.exit, r.stderr.as_str()), (1, oob), "{name} {body:?}");
         }
+    }
+
+    /// `[i32.const 29, i32.const 1, i32.add]` then `b`'s span: an op-30 call
+    /// (`io.write` of `len` bytes at 16) whose op the operand stack does not
+    /// show as a constant.
+    fn computed_op_30(len: i32) -> Vec<Instruction<'static>> {
+        vec![
+            Instruction::I32Const(29),
+            Instruction::I32Const(1),
+            Instruction::I32Add,
+            Instruction::I32Const(0),
+            Instruction::I32Const(0),
+            Instruction::I32Const(16),
+            Instruction::I32Const(len),
+            Instruction::Call(0),
+            Instruction::Drop,
+        ]
+    }
+
+    /// Row 19 (#4102): the host serves only the `fs_call` ops the module was
+    /// built with. This module's one constant op is 73 (a stderr write); its
+    /// second site computes op 30, a stdout write the set does not hold, and
+    /// the call traps before anything reaches stdout. Negative control: with
+    /// `op_allowed` answering `Ok(())` the write lands and the run exits 0.
+    #[test]
+    fn an_op_outside_the_modules_set_traps() {
+        let mut body = call0(&[73, 0, 0, 16, 1], true);
+        body.extend(computed_op_30(1));
+        let r = run_wasm(&calling("fs_call", b"x", true, &body)).expect("engine runs the module");
+        assert_eq!(r.exit, 1, "stdout: {:?} stderr: {:?}", r.stdout, r.stderr);
+        assert_eq!(r.stdout, "", "the refused op wrote");
+        assert!(r.stderr.starts_with('x'), "the allowed op 73 ran first: {:?}", r.stderr);
+        assert!(r.stderr.contains("almide.fs_call: op 30 is not one this module was built with"), "{:?}", r.stderr);
+    }
+
+    /// Row 19: a module whose only `fs_call` op is not a visible constant
+    /// gets the empty list, never no list — it fails closed. Negative
+    /// control: with `allowed_ops_of` back on `fs_call_ops`' `None` (no list),
+    /// op 30 is served and the run exits 0 with `x` on stdout.
+    #[test]
+    fn a_module_whose_op_is_not_a_constant_fails_closed() {
+        let r = run_wasm(&calling("fs_call", b"x", true, &computed_op_30(1))).expect("engine runs the module");
+        assert_eq!(r.exit, 1, "stdout: {:?} stderr: {:?}", r.stdout, r.stderr);
+        assert_eq!(r.stdout, "", "a computed op was served");
+        assert!(r.stderr.contains("almide.fs_call: op 30 is not one this module was built with"), "{:?}", r.stderr);
     }
 
     /// A module that exports no memory and calls a host op that reads it is
