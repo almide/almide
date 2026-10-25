@@ -8,28 +8,28 @@
 // mode now comes from the runtime signature itself (`runtime_fn_modes`),
 // so a read-only helper stays a shared borrow no matter what it returns.
 //
-// The `for x in xs { io.write(x) }` shape is the mandelbrot bench repro:
+// The `for x in xs { io.write(io.stdout()!, x)! }` shape is the mandelbrot bench repro:
 // the loop pattern binding is immutable, so a `&mut` on it cannot compile.
 // Every write here is zero-length, so the tests emit no stdout of their own.
 import io
 
 test "read-only Unit intrinsic borrows a let-bound Bytes immutably" {
   let empty = bytes.new()
-  io.write(empty)
+  io.write(io.stdout()!, empty)!
   assert_eq(bytes.len(empty), 0)
 }
 
 test "read-only Unit intrinsic borrows a for-loop binding immutably" {
   let chunks = list.map([0, 0], (n) => bytes.zeros(n))
   for chunk in chunks {
-    io.write(chunk)
+    io.write(io.stdout()!, chunk)!
   }
   assert_eq(list.len(chunks), 2)
 }
 
 test "read-only Unit intrinsic over List[Int] leaves the list readable" {
   let payload: List[Int] = []
-  io.write_bytes(payload)
+  io.write(io.stdout()!, bytes.from_list(payload))!
   assert_eq(list.len(payload), 0)
 }
 

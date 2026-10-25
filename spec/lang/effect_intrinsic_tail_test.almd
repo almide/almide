@@ -11,7 +11,7 @@
 // compiling (it is emitted, not eliminated).
 //
 // The counterpart (#758): a tail call to a BARE-VALUE @intrinsic effect fn
-// (`io.print -> Unit`, `io.read_line -> String`) must NOT be exempted — its
+// (`io.print -> Unit`, `io.read_line -> String?`) must NOT be exempted — its
 // runtime returns a plain value, not a Result, so the tail still needs an
 // `Ok(...)`. Exempting it (the exemption set formerly held every intrinsic
 // effect fn regardless of runtime return type) emitted a bare `()`/value tail
@@ -30,7 +30,7 @@ effect fn _print_tail() -> Unit = {
   io.print(s)
 }
 
-effect fn _read_tail() -> String = io.read_line()
+effect fn _read_tail() -> String? = io.read_line()
 
 test "effect-fn tail call to an intrinsic effect fn compiles" {
   assert_eq(1, 1)

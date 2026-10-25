@@ -2,9 +2,9 @@
 import uuid
 
 test "v7 carries version 7 and the variant, its time is now, and each is greater than the last" {
-  let t0 = datetime.now_ms()
-  let us = list.range(0, 200) |> list.map((_) => uuid.v7())
-  let t1 = datetime.now_ms()
+  let t0 = datetime.now_ms()!
+  let us = list.range(0, 200) |> list.map((_) => uuid.v7()!)!
+  let t1 = datetime.now_ms()!
   for u in us {
     let b = uuid.to_bytes(u)
     assert_eq(int.bshr(bytes.get(b, 6) ?? 0, 4), 7)

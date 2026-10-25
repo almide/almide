@@ -1,6 +1,6 @@
 // @contract: C-161
 // The three NON-bytes count families the integer-domain matrix still had open —
-// `list.range`, `string.pad_start`/`pad_end`, `io.read_n_bytes` — 19 cells, all of
+// `list.range`, `string.pad_start`/`pad_end`, `io.read` on stdin — 19 cells, all of
 // them a count that sized an allocation without being checked first.
 //
 // 1. list.range. `end - start` IS the count, and for a span like (i64::MIN, 3) that
@@ -52,12 +52,15 @@ effect fn main() -> Unit = {
   println("p_ok=" + string.pad_start("a", 4, "x"))
   println("p_mb=" + string.pad_end("a", 4, "あ"))
   println("p_neg=" + string.pad_start("ab", 0 - 5, "x"))
-  // ── io.read_n_bytes: stdin is empty under `almide test`, so every count agrees at 0.
-  // What is pinned here is that a huge or negative count does not abort and does not
-  // truncate into a different count.
-  println("io_neg=" + int.to_string(list.len(io.read_n_bytes(0 - 1))))
-  println("io_max=" + int.to_string(list.len(io.read_n_bytes(9223372036854775807))))
-  println("io_2p32=" + int.to_string(list.len(io.read_n_bytes(4294967296))))
+  // ── io.read on stdin: stdin is empty under `almide test`, so every count agrees at 0.
+  // What is pinned here is that a huge count does not abort and does not truncate into
+  // a different count, and that a negative count is the named err on both legs.
+  println("io_neg=" + (match io.read(io.stdin()!, 0 - 1) {
+    ok(b) => int.to_string(bytes.len(b)),
+    err(e) => e,
+  }))
+  println("io_max=" + int.to_string(bytes.len(io.read(io.stdin()!, 9223372036854775807)!)))
+  println("io_2p32=" + int.to_string(bytes.len(io.read(io.stdin()!, 4294967296)!)))
   // ── the abort, last, so every value above is observed first. This span exceeds
   // BOTH legs' structural bounds, so the C-197 abort is portable for it.
   println("r_wide=" + int.to_string(list.len(list.range(0 - 9223372036854775807 - 1, 3))))
