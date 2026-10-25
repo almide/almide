@@ -76,7 +76,8 @@
 #                      release for that (a manual GCE run: no credentials in CI)
 #
 # (2026-10-25, stdlib redesign wave 4B: the io, net, unix, process, http and uuid surface was replaced in place, so its rows restart uninspected — 906 -> 940.)
-# uninspected_ceiling = "985"
+# (2026-10-26, waves 4A and 4B combined on one branch: 4A raised 906 -> 985 for value, string, map, fs and env, 4B adds its own replaced rows on top — 1010 measured on GCE.)
+# uninspected_ceiling = "1010"
 
 
 [[fn]]
@@ -2824,20 +2825,12 @@ parity = "PASS: seed 1792435285, 200 programs; 200 program(s) call it, 175 of th
 complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=256..512 6.226e7/1.237e8/2.466e8/4.923e8/9.839e8 fit n (rms 0.0%) moved 1.537e7/3.073e7/6.145e7/1.229e8/2.458e8B fit n (rms 0.0%) wall 0.005/0.005/0.015/0.030/0.066s wasm k=1024..2048 2.293e7/2.294e7/2.294e7/2.294e7/2.294e7 fit 1 (rms 0.0%) moved 3.272e4/3.277e4/3.277e4/3.282e4/3.267e4B fit 1 (rms 0.0%) wall 0.000/0.000/0.000/0.005/0.000s (order n ok)"
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
+
 [[fn]]
 name = "http.route"
 sig = "(pattern: String, handler: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute"
 class = "pure"
-status = "inspected"
-impl = "fnv1a:e5b66591e4e77a8d"
-stamp = "almide 0.68.0 (dev) at insp-0680b 07588809b (insp-0680 plus the fixed +qNaN a stdlib function manufactures #3846, the canonical allocator's O(1) large-block release #3849, the http client's retried interrupted read #3857, the table-driven zlib.crc32 #3848, and the counted judge's k bounded by the projected wall of its longest run #3859); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-20; codopsy: every workspace crate A at the same sha"
-order = "n"
-parity = "PASS: seed 1792434720, 200 programs; 200 program(s) call it, 21 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=4096..8192 4.575e7/4.575e7/4.575e7/4.575e7/4.575e7 fit 1 (rms 0.0%) moved 2.179e6/2.179e6/2.179e6/2.179e6/2.179e6B fit 1 (rms 0.0%) wall 0.005/0.000/0.005/0.005/0.004s wasm k=4096..8192 4.964e7/4.964e7/4.963e7/4.963e7/4.963e7 fit 1 (rms 0.0%) moved 7.046e5/7.044e5/7.045e5/7.045e5/7.046e5B fit 1 (rms 0.0%) wall 0.005/0.005/0.000/0.005/0.000s (order n ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-
-
+status = "uninspected"
 [[fn]]
 name = "http.router"
 sig = "(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]"
@@ -14324,4 +14317,142 @@ status = "uninspected"
 name = "uuid.v7"
 sig = "effect () -> Uuid ! String"
 class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.append_bytes"
+sig = "effect (path: String, data: Bytes) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.append_text"
+sig = "effect (path: String, content: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "fs.write_text"
+sig = "effect (path: String, content: String) -> Unit ! String"
+class = "effect"
+status = "uninspected"
+
+[[fn]]
+name = "map.to_list"
+sig = "(m: Map[K, V]) -> List[(K, V)]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.count_matches"
+sig = "(s: String, needle: String) -> Int"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.pop"
+sig = "(s: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.to_codepoint"
+sig = "(s: String) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "string.to_list"
+sig = "(s: String) -> List[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.as_object"
+sig = "(v: Value) -> Result[List[(String, Value)], String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.get"
+sig = "(v: Value, key: String) -> Option[Value]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.get_array"
+sig = "(v: Value, key: String) -> Option[List[Value]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.get_bool"
+sig = "(v: Value, key: String) -> Option[Bool]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.get_float"
+sig = "(v: Value, key: String) -> Option[Float]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.get_int"
+sig = "(v: Value, key: String) -> Option[Int]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.get_object"
+sig = "(v: Value, key: String) -> Option[List[(String, Value)]]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.get_path"
+sig = "(v: Value, p: Path) -> Option[Value]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.get_string"
+sig = "(v: Value, key: String) -> Option[String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.index"
+sig = "(p: Path, i: Int) -> Path"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.key"
+sig = "(p: Path, name: String) -> Path"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.remove_path"
+sig = "(v: Value, p: Path) -> Value"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.root"
+sig = "() -> Path"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.set_path"
+sig = "(v: Value, p: Path, x: Value) -> Result[Value, String]"
+class = "pure"
+status = "uninspected"
+
+[[fn]]
+name = "value.string"
+sig = "(s: String) -> Value"
+class = "pure"
 status = "uninspected"

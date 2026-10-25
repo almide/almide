@@ -123,7 +123,7 @@
 3	2	21	3	spec/wasm_cross/const_fold_nonfinite_float.almd
 9	2	49	9	spec/wasm_cross/container_alias_return.almd
 1	0	32	1	spec/wasm_cross/control_flow.almd
-29	15	239	19	spec/wasm_cross/count_domain_nonbytes.almd
+32	11	387	14	spec/wasm_cross/count_domain_nonbytes.almd
 12	7	54	12	spec/wasm_cross/cross_dep_accumulator.almd
 22	3	1252	22	spec/wasm_cross/cross_module_spread.almd
 28	12	316	28	spec/wasm_cross/ctor_fn_value.almd
@@ -336,7 +336,7 @@
 64	48	651	64	spec/wasm_cross/hof_fn_value_callbacks.almd
 ~	spec/wasm_cross/host_floor_string_alloc.almd
 1041	996	7809	1041	spec/wasm_cross/http_query_params_decoder.almd
-1423	1368	7022	1423	spec/wasm_cross/http_response_headers.almd
+1428	1372	6990	1428	spec/wasm_cross/http_response_headers.almd
 0	0	0	0	spec/wasm_cross/i64_min_literal.almd
 0	0	0	0	spec/wasm_cross/if_block_forms.almd
 1	0	8	1	spec/wasm_cross/if_let_forms.almd
@@ -373,8 +373,8 @@
 5	2	73	5	spec/wasm_cross/interp_effect_unwrap_arg.almd
 14	9	197	14	spec/wasm_cross/interp_mut_call_part_order.almd
 10	3	124	10	spec/wasm_cross/interp_operand_order.almd
-7	3	90	7	spec/wasm_cross/io_write_ordering.almd
-6	0	2421	6	spec/wasm_cross/io_write_raw_bytes.almd
+15	4	218	15	spec/wasm_cross/io_write_ordering.almd
+12	1	2517	12	spec/wasm_cross/io_write_raw_bytes.almd
 151	110	1813	151	spec/wasm_cross/json_get_int_float.almd
 6172	4826	70922	6172	spec/wasm_cross/json_gltf_walk.almd
 78695	72660	2379456	78695	spec/wasm_cross/json_many_keys.almd
@@ -563,7 +563,7 @@
 18	8	176	18	spec/wasm_cross/mut_map_param.almd
 170	71	75134	170	spec/wasm_cross/mut_param_alias_cow.almd
 43	24	1265	43	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
-3	0	0	3	spec/wasm_cross/mut_param_branch_forward.almd
+9	0	96	9	spec/wasm_cross/mut_param_branch_forward.almd
 10109	10101	163552	10109	spec/wasm_cross/mut_param_call_chain.almd
 266	221	2830	266	spec/wasm_cross/mut_param_cell_tail_capture_read.almd
 107	84	1051	107	spec/wasm_cross/mut_param_cell_tail_capture_write.almd
@@ -778,7 +778,7 @@
 225	193	1517	225	spec/wasm_cross/string_bidi_controls_literal.almd
 0	0	0	0	spec/wasm_cross/string_bool_ordering.almd
 18	10	120062	18	spec/wasm_cross/string_byte_slice.almd
-122	113	2040	122	spec/wasm_cross/string_case_unicode.almd
+118	112	2024	118	spec/wasm_cross/string_case_unicode.almd
 278	249	2178	278	spec/wasm_cross/string_codepoint.almd
 43	17	328	43	spec/wasm_cross/string_codepoint_index.almd
 123	40	1663	123	spec/wasm_cross/string_count_truncation.almd

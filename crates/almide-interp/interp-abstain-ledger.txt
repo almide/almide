@@ -36,14 +36,15 @@ bytes_f16_offset_overflow  out-of-interp-scope capability: bytes.get_f16_le: no 
 bytes_param_writeback  out-of-interp-scope capability: bytes.get_f32_le: no lowered body
 bytes_rawptr  out-of-interp-scope capability: prim.int_to_ptr: no lowered body
 bytes_set_on_record_field  out-of-interp-scope capability: bytes.get_f64_le: no lowered body
-count_domain_nonbytes  out-of-interp-scope capability: prim.read_n_bytes: no lowered body
+count_domain_nonbytes  out-of-interp-scope capability: io.stdin: no lowered body
 datetime_format  out-of-interp-scope capability: datetime.from_parts: no lowered body
 edge_string_unicode  out-of-interp-scope capability: string.from_codepoint: no lowered body
 effect_tco_err_rewrap  interp fuel/recursion budget exhausted
 fs_root_escape  out-of-interp-scope capability: fs.open_root: no lowered body
-http_query_params_decoder  out-of-interp-scope capability: http.query_params: no lowered body
-io_write_ordering  out-of-interp-scope capability: prim.fd_write: no lowered body
-io_write_raw_bytes  out-of-interp-scope capability: prim.fd_write: no lowered body
+http_query_params_decoder  out-of-interp-scope capability: http.new_request: no lowered body
+http_response_headers  out-of-interp-scope capability: http.with_headers: no lowered body
+io_write_ordering  out-of-interp-scope capability: io.stdout: no lowered body
+io_write_raw_bytes  out-of-interp-scope capability: io.stdout: no lowered body
 json_parse_depth_bound  out-of-interp-scope capability: return sync: a Value-typed block at 44038 cannot be walked (unknown tag or unreadable child)
 json_parse_lenient_edges  out-of-interp-scope capability: string.from_codepoint: no lowered body
 json_parse_strict_strings  out-of-interp-scope capability: string.from_codepoint: no lowered body
@@ -53,7 +54,7 @@ json_stringify_control_chars  out-of-interp-scope capability: string.from_codepo
 list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list(268435456) beyond the interp arena ceiling
 loop_effect_match_stmt  out-of-interp-scope capability: prim.fd_write: no lowered body
 matrix_fma_ieee_specials  out-of-interp-scope capability: prim.handle of a container holding a NaN float (NaN bits are arch-conditional — #1403; a bit-compare vote would be a guess)
-mut_param_branch_forward  out-of-interp-scope capability: prim.fd_write: no lowered body
+mut_param_branch_forward  out-of-interp-scope capability: io.stdout: no lowered body
 mutable_global_bytes_arena  out-of-interp-scope capability: bytes.get_f32_le: no lowered body
 nan_canonical_bytes_write  out-of-interp-scope capability: bytes.get_i64_le: no lowered body
 negative_offset_and_width_totality  out-of-interp-scope capability: bytes.get_f16_le: no lowered body
@@ -71,7 +72,7 @@ regex_size_cap  out-of-interp-scope capability: regex.compile: no lowered body
 scalar_if_arm_effects  out-of-interp-scope capability: bytes.get_i32_le: no lowered body
 set_entries_reclaim  out-of-interp-scope capability: prim.handle of a container holding a String element, where the impl the interp RESOLVED declares element type Int — a public container fn resolves to its scalar core by name (the _str/_skv/_hval choice is a MIR pass the interp does not run), so this is that resolution and not the program's type; materializing anyway would compare heap values as raw i64 slots
 set_index_order  out-of-interp-scope capability: prim.load64 outside this heap's arena — the backends read real memory here, so a guessed value would be a wrong vote
-string_case_unicode  out-of-interp-scope capability: string.from_codepoint: no lowered body
+stdlib_type_shadow  out-of-interp-scope capability: http.body: no lowered body
 string_codepoint  out-of-interp-scope capability: string.from_codepoint: no lowered body
 string_from_bytes  out-of-interp-scope capability: prim.load64 outside this heap's arena — the backends read real memory here, so a guessed value would be a wrong vote
 string_whitespace  out-of-interp-scope capability: string.from_codepoint: no lowered body

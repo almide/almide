@@ -233,7 +233,7 @@ call:float32.to_float64
 call:float32.to_string
 call:fs.__fallible_fold_lines
 call:fs.__fallible_for_each_line
-call:fs.append
+call:fs.append_text
 call:fs.copy
 call:fs.create_temp_dir
 call:fs.create_temp_file
@@ -253,8 +253,6 @@ call:fs.modified_at
 call:fs.open_root
 call:fs.read_bytes
 call:fs.read_bytes_if_exists
-call:fs.read_bytes_raw
-call:fs.read_bytes_raw_if_exists
 call:fs.read_lines
 call:fs.read_lines_if_exists
 call:fs.read_text
@@ -269,9 +267,8 @@ call:fs.root_remove
 call:fs.root_write_text
 call:fs.temp_dir
 call:fs.walk
-call:fs.write
 call:fs.write_bytes
-call:fs.write_bytes_raw
+call:fs.write_text
 call:hash.fnv1a32
 call:hash.fnv1a32_bytes
 call:hash.sha256
@@ -284,15 +281,15 @@ call:html.empty
 call:html.escape
 call:html.raw
 call:html.to_string
-call:http.body
-call:http.get_header
+call:http.__almd_mono10_set_header___nHttpResponse
+call:http.__almd_mono4_body___nHttpResponse
+call:http.__almd_mono6_header___nHttpResponse
 call:http.json
 call:http.new_request
 call:http.query_params
 call:http.redirect
 call:http.response
-call:http.set_header
-call:http.status
+call:http.set_status
 call:http.with_headers
 call:int.abs
 call:int.band
@@ -355,10 +352,11 @@ call:int64.to_int8_checked
 call:int8.to_float32
 call:int8.to_int64
 call:int8.to_string
+call:io.__almd_mono4_read___nStdin
+call:io.__almd_mono5_write___nStdout
 call:io.print
-call:io.read_n_bytes
-call:io.write
-call:io.write_bytes
+call:io.stdin
+call:io.stdout
 call:json.field
 call:json.get_array
 call:json.get_float
@@ -373,6 +371,7 @@ call:json.set_path
 call:json.stringify
 call:json.stringify_pretty
 call:json.to_map
+call:list.__almd_mono13_binary_search__Int
 call:list.__almd_mono14___fallible_all__Int_cString
 call:list.__almd_mono14___fallible_any__Int_cString
 call:list.__almd_mono14___fallible_map__Int_cInt_cString
@@ -434,7 +433,6 @@ call:list.__almd_mono8_find_map__Int_cString
 call:list.__almd_mono8_find_map__String_cString
 call:list.all
 call:list.any
-call:list.binary_search
 call:list.chunk
 call:list.clear
 call:list.contains
@@ -512,7 +510,6 @@ call:map.__almd_mono21___fallible_filter_map__Int_cString_cString_cInt
 call:map.clear
 call:map.contains
 call:map.delete
-call:map.entries
 call:map.filter
 call:map.find
 call:map.fold
@@ -527,6 +524,7 @@ call:map.merge
 call:map.new
 call:map.remove
 call:map.set
+call:map.to_list
 call:map.update
 call:map.upsert
 call:map.values
@@ -685,11 +683,9 @@ call:set.to_list
 call:set.union
 call:string.byte_slice
 call:string.capitalize
-call:string.chars
 call:string.clear
-call:string.codepoint
 call:string.contains
-call:string.count
+call:string.count_matches
 call:string.drop
 call:string.drop_end
 call:string.ends_with
@@ -726,6 +722,8 @@ call:string.strip_suffix
 call:string.take
 call:string.take_end
 call:string.to_bytes
+call:string.to_codepoint
+call:string.to_list
 call:string.to_lower
 call:string.to_upper
 call:string.trim
@@ -766,7 +764,7 @@ call:value.null
 call:value.object
 call:value.omit
 call:value.pick
-call:value.str
+call:value.string
 call:value.stringify
 call:value.to_camel_case
 call:value.to_snake_case
