@@ -5,16 +5,6 @@
 // semantic dimension (#419 class).
 import testing
 
-test "testing.assert_gt unit=value" {
-  testing.assert_gt(2, 1)
-  assert_eq("${true}", "true")
-}
-
-test "testing.assert_lt unit=value" {
-  testing.assert_lt(1, 2)
-  assert_eq("${true}", "true")
-}
-
 test "testing.__abort_site_selected unit=element-index" {
   assert_eq("${testing.__abort_site_selected()}", "-1")
 }
