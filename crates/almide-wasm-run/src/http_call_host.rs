@@ -30,6 +30,34 @@ use almide_rt_core::http_client_core as core;
 pub(crate) struct HttpCalls {
     next: u32,
     live: HashMap<u32, Arc<core::AlmideHttpCallShared>>,
+    /// While an `http.serve` handler runs (#4203): the first id it can open.
+    request: Option<u32>,
+}
+
+impl HttpCalls {
+    /// A handler call starts (#4203).
+    pub(crate) fn request_begin(&mut self) {
+        self.request = Some(self.next + 1);
+    }
+
+    /// The handler returned.
+    pub(crate) fn request_end(&mut self) {
+        self.request = None;
+    }
+
+    /// The handler aborted (#4203): cancel and forget every call it started
+    /// that is still live — native's `Drop` cancels them as the abort
+    /// unwinds; here the guest's drop glue (op 59) never runs.
+    pub(crate) fn request_abort(&mut self) -> usize {
+        let Some(first) = self.request.take() else { return 0 };
+        let ids: Vec<u32> = self.live.keys().copied().filter(|id| *id >= first).collect();
+        for id in &ids {
+            if let Some(sh) = self.live.remove(id) {
+                sh.cancel();
+            }
+        }
+        ids.len()
+    }
 }
 
 impl Drop for HttpCalls {

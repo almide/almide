@@ -37,6 +37,24 @@ pub(crate) struct NetRun {
     unix: AlmideUnixTables,
 }
 
+impl NetRun {
+    /// An `http.serve` handler call starts / returns / aborts (#4203): the
+    /// shared cores record what it opens and close it on an abort.
+    pub(crate) fn request_begin(&mut self) {
+        self.tcp.request_begin();
+        self.unix.request_begin();
+    }
+
+    pub(crate) fn request_end(&mut self) {
+        self.tcp.request_end();
+        self.unix.request_end();
+    }
+
+    pub(crate) fn request_abort(&mut self) -> usize {
+        self.tcp.request_abort() + self.unix.request_abort()
+    }
+}
+
 fn int(s: &str) -> Result<i64, String> {
     s.trim().parse().map_err(|_| format!("malformed net operand {s:?}"))
 }

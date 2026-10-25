@@ -35,6 +35,10 @@ pub struct AlmideUnixTables {
     held: std::collections::BTreeMap<i64, std::os::fd::OwnedFd>,
     #[cfg(unix)]
     received: std::collections::BTreeMap<i64, std::collections::VecDeque<i64>>,
+    /// While an `http.serve` handler runs (#4203): every descriptor it came to
+    /// hold, so an abort that fails the request closes them.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    request: Option<Vec<i64>>,
 }
 
 #[cfg(unix)]
@@ -63,6 +67,32 @@ impl AlmideUnixTables {
     fn hold(&mut self, fd: std::os::fd::OwnedFd) -> i64 {
         let n = i64::from(std::os::fd::AsRawFd::as_raw_fd(&fd));
         self.held.insert(n, fd);
+        if let Some(log) = self.request.as_mut() {
+            log.push(n);
+        }
+        n
+    }
+
+    /// A handler call starts (#4203): record what it comes to hold.
+    pub fn request_begin(&mut self) {
+        self.request = Some(Vec::new());
+    }
+
+    /// The handler returned: stop recording.
+    pub fn request_end(&mut self) {
+        self.request = None;
+    }
+
+    /// The handler aborted (#4203): close every descriptor it came to hold
+    /// and has not closed, and stop recording. Answers how many it closed.
+    pub fn request_abort(&mut self) -> usize {
+        let mut n = 0;
+        for fd in self.request.take().unwrap_or_default() {
+            if self.held.contains_key(&fd) {
+                let _ = self.unix_close(fd);
+                n += 1;
+            }
+        }
         n
     }
 
@@ -280,6 +310,9 @@ impl AlmideUnixTables {
         Err(format!("{call}: Unix-domain sockets and shared-memory files need a Unix platform"))
     }
     pub fn held(&self) -> usize { 0 }
+    pub fn request_begin(&mut self) {}
+    pub fn request_end(&mut self) {}
+    pub fn request_abort(&mut self) -> usize { 0 }
     pub fn unix_connect(&mut self, _: &str) -> Result<i64, String> { Self::unsupported("unix_connect") }
     pub fn unix_listen(&mut self, _: &str) -> Result<i64, String> { Self::unsupported("unix_listen") }
     pub fn unix_accept(&mut self, _: i64) -> Result<i64, String> { Self::unsupported("unix_accept") }
