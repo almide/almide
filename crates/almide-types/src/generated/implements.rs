@@ -16,7 +16,7 @@ pub const DECLARED: &[(&str, &[(&str, &str)])] = &[
     (crate::embedded::SRC_ZLIB_INFLATE, &[("zlib_gunzip_max", "zlib.gunzip_max"), ("zlib_inflate_max", "zlib.inflate_max"), ("zlib_decompress_max", "zlib.decompress_max")]),
 ];
 
-/// The declared impl fns whose file never reaches `prim.`.
+/// The declared impl fns that never reach `prim.`, through their own body or a same-file callee.
 pub const PRIM_FREE: &[&str] = &[
     "ffi_address",
     "ffi_read",
@@ -36,6 +36,7 @@ pub const PRIM_FREE: &[&str] = &[
     "__delete_response_impl",
     "http_req_repr",
     "http_resp_repr",
+    "json_path_repr",
     "__matrix_concat_rows",
     "__matrix_zip_with",
     "__matrix_to_bytes_f16_le",
