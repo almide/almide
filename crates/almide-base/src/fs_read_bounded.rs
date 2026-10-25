@@ -84,20 +84,25 @@ pub fn fs_read_bounded_file(f: &mut std::fs::File, cap: u64) -> std::io::Result<
 
 /// O_NONBLOCK where the platform's value is known; 0 elsewhere (the open
 /// then blocks on a FIFO as before, and the fstat still refuses it once a
-/// writer arrives).
-#[cfg(all(target_os = "linux", not(any(target_arch = "mips", target_arch = "mips64", target_arch = "sparc", target_arch = "sparc64"))))]
+/// writer arrives). 0 under Miri too, whose `open` shim refuses flags it does
+/// not model: the generated crates the miri-generated sweep interprets keep
+/// running their fs reads (a FIFO is not among its fixtures).
+#[cfg(all(not(miri), target_os = "linux", not(any(target_arch = "mips", target_arch = "mips64", target_arch = "sparc", target_arch = "sparc64"))))]
 pub const FS_READ_O_NONBLOCK: i32 = 0o4000;
-#[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "dragonfly"))]
+#[cfg(all(not(miri), any(target_os = "macos", target_os = "ios", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd", target_os = "dragonfly")))]
 pub const FS_READ_O_NONBLOCK: i32 = 0x4;
-#[cfg(not(any(
-    all(target_os = "linux", not(any(target_arch = "mips", target_arch = "mips64", target_arch = "sparc", target_arch = "sparc64"))),
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "freebsd",
-    target_os = "netbsd",
-    target_os = "openbsd",
-    target_os = "dragonfly"
-)))]
+#[cfg(any(
+    miri,
+    not(any(
+        all(target_os = "linux", not(any(target_arch = "mips", target_arch = "mips64", target_arch = "sparc", target_arch = "sparc64"))),
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))
+))]
 pub const FS_READ_O_NONBLOCK: i32 = 0;
 
 /// The read-only open of `p` the bounded reader makes: O_NONBLOCK, so a FIFO
