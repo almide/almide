@@ -261,7 +261,7 @@ impl Interpreter<'_> {
     }
 
     /// Does `ty` hold a runtime-backed value whose module declares its repr
-    /// (`http.__repr_http_request`, #4204) anywhere a display would reach it?
+    /// (`http.__http_request_repr`, #4204) anywhere a display would reach it?
     pub(crate) fn mentions_declared_repr(&self, ty: &Ty) -> bool {
         let program = self.program;
         mentions(program, ty, 0, &|t| declared_repr_of(program, t).is_some())

@@ -316,7 +316,10 @@ pub const PURE_MODULES: &[&str] = &[
 /// admission is module-granular because the impure-plain modules are walled in
 /// full (see the module doc).
 pub fn is_pure(module: &str, func: &str) -> bool {
-    PURE_MODULES.contains(&module) || is_pure_fn_in_impure_module(module, func)
+    PURE_MODULES.contains(&module)
+        || is_pure_fn_in_impure_module(module, func)
+        // A runtime-backed type's declared repr (#4204), derived from its row.
+        || almide_lang::stdlib_info::is_runtime_backed_repr(module, func)
 }
 
 /// Whether bundled `module` declares a public (non-`local`) fn named `func`,
