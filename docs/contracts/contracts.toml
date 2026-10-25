@@ -5475,3 +5475,16 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/fs_error_path_escape.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-419"
+spec      = "ALS-T6"
+title     = "bigint text in a radix that is not a power of two is limited to 4300 digits with one fixed text, a power-of-two radix has no limit, and bigint.pow refuses a result sure to pass 30 * 2^28 bits before computing"
+statement = "ALS-T6 (almide/almide#4196): conversion between a BigInt and text in a radix that is not a power of two costs time quadratic in the digit count, so it is limited to 4300 digits (Python's default int/str limit, CVE-2020-10735). `bigint.parse(s)` / `bigint.parse_radix(s, r)` with r not a power of two answer `err(\"integer string conversion exceeds the limit of 4300 digits\")` when the digits after the trim, the sign and the radix prefix number more than 4300 — leading zeros count, the sign does not; empty text and an invalid digit keep their own errs and take precedence. `bigint.to_string(x)` / `bigint.to_string_radix(x, r)` with r not a power of two abort with that same text, in bigint's panic form (`PANIC: <msg>`, exit 1, nothing more on stdout), when the text's digits (the sign not counted) would number more than 4300; a magnitude of 2^(4300 * int.bit_length(r)) or more is refused before any conversion. Radix 2, 4, 8, 16 and 32 have no limit on either side and convert in time linear in the digit count. `bigint.pow(base, exp)` with exp >= 0 aborts with `pow result too large` (same panic form) before computing when (bigint.bit_length(base) - 1) * exp >= 30 * 2^28 = 8053063680, the 2^28-limb list ceiling bshl meets; 0, 1 and -1 are never refused. The bytes are identical on native, stock wasm and the reference evaluator."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/bigint_text_and_pow_limits.almd", class = "fixture" },
+  { path = "spec/wasm_fail/bigint_to_string_limit_aborts.almd", class = "fixture" },
+  { path = "spec/wasm_fail/bigint_pow_ceiling_aborts.almd", class = "fixture" },
+]
