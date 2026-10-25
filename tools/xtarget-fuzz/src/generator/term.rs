@@ -269,7 +269,7 @@ fn net_int_arg(sig: &Signature, name: &str) -> Option<String> {
     // listener with a connection already pending: a read or an accept
     // against nothing would wait forever.
     let stream = format!(
-        "(match net.tcp_connect(\"127.0.0.1\", {tcp_port}) {{ ok(s) => {{ let _w: Result[Unit, String] = net.tcp_write(s, bytes.from_string(\"hello world\"))\n s }}, err(_) => -1 }})"
+        "(match net.tcp_connect(\"127.0.0.1\", {tcp_port}) {{ ok(s) => {{ let _w: Result[Unit, String] = io.write(s, bytes.from_string(\"hello world\"))\n s }}, err(_) => -1 }})"
     );
     let listener = "(match net.tcp_listen(\"127.0.0.1\", 0) { ok(l) => { let _c: Result[Int, String] = net.tcp_connect(\"127.0.0.1\", net.tcp_local_port(l) ?? 0)\n l }, err(_) => -1 })".to_string();
     match (sig.module, sig.func.as_str(), name) {

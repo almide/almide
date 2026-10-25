@@ -1,11 +1,11 @@
-//! `io.read_line_opt` tells the end of input from an empty line (#2539).
+//! `io.read_line` tells the end of input from an empty line (#2539).
 //!
-//! `io.read_line` answers "" both for a line that was only a newline and at
-//! end of input, so an interactive loop that skips empty lines never sees the
-//! end — it spins on "" forever. `read_line_opt` answers `none` at the end and
-//! `some("")` for the empty line. The issue's input (`a`, an empty line, `b`
-//! with no trailing newline) must read the same on native and on the wasm
-//! leg, and it must compose with the rest of the stdin family on one cursor.
+//! The incumbent String reader answered "" both for a line that was only a
+//! newline and at end of input, so an interactive loop that skips empty lines
+//! never saw the end — it spun on "" forever. `io.read_line` answers `none` at
+//! the end and `some("")` for the empty line. The issue's input (`a`, an empty
+//! line, `b` with no trailing newline) must read the same on native and on the
+//! wasm leg, and it must compose with the rest of the stdin family on one cursor.
 //!
 //! Stdin-reading programs cannot live in the spec suites (the harness does not
 //! pipe per-file stdin), so this Command-with-stdin test is the executable
@@ -32,24 +32,24 @@ fn show(l: Option[String]) -> String = match l {
 effect fn main() -> Unit = {
   var i = 0
   while i < 5 {
-    println(int.to_string(i) + ": " + show(io.read_line_opt()))
+    println(int.to_string(i) + ": " + show(io.read_line()))
     i = i + 1
   }
 }
 "#;
 
-/// One cursor: the Option reader, the String reader and the byte reader take
-/// turns; CR is cut like read_line cuts it; a multibyte line survives.
+/// One cursor: the line reader (with and without a fallback) and the byte
+/// reader `io.read(io.stdin()!, 1)` take turns; CR is cut; a multibyte line survives.
 const MIXED: &str = r#"import io
 
 effect fn main() -> Unit = {
-  let a = io.read_line_opt() ?? "NONE"
-  let b = io.read_line()
-  let c = io.read_byte()
-  let d = io.read_line_opt() ?? "NONE"
-  let e = io.read_line_opt() ?? "NONE"
-  let f = io.read_line_opt() ?? "NONE"
-  let g = io.read_line_opt() ?? "NONE"
+  let a = io.read_line() ?? "NONE"
+  let b = (io.read_line() ?? "")
+  let c = (bytes.get(io.read(io.stdin()!, 1)!, 0) ?? -1)
+  let d = io.read_line() ?? "NONE"
+  let e = io.read_line() ?? "NONE"
+  let f = io.read_line() ?? "NONE"
+  let g = io.read_line() ?? "NONE"
   println("[${a}] [${b}] ${int.to_string(c)} [${d}] [${e}] [${f}] [${g}]")
 }
 "#;
@@ -106,7 +106,7 @@ fn empty_stdin_is_none_from_the_first_read() {
 }
 
 #[test]
-fn read_line_opt_shares_the_stdin_cursor_with_the_rest_of_the_family() {
+fn read_line_shares_the_stdin_cursor_with_the_rest_of_the_family() {
     let expected = "[one] [two] 88 [three] [] [日本語] [NONE]\n";
     for leg in legs() {
         assert_eq!(run(MIXED, leg, "one\ntwo\nXthree\r\n\r\n日本語\r\r\n"), expected, "{}", leg.0);

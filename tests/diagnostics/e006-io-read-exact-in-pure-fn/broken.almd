@@ -1,6 +1,9 @@
 import io
 
-// #3248: io.read_n_bytes reads stdin, so it is an effect fn.
-fn header() -> List[Int] = io.read_n_bytes(4)
+// #3248: io.read_exact reads a handle (here stdin), so it is an effect fn.
+fn header(h: io.Stdin) -> List[Int] = match io.read_exact(h, 4) {
+  ok(b) => bytes.to_list(b),
+  err(_) => [],
+}
 
-effect fn main() -> Unit = println("${list.len(header())}")
+effect fn main() -> Unit = println("${list.len(header(io.stdin()!))}")

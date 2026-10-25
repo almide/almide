@@ -35,9 +35,9 @@ fn wasmtime_available() -> bool {
 const PROGRAM: &str = r#"import io
 
 effect fn main() -> Unit = {
-  let a = io.read_line()
-  let b = io.read_line_opt() ?? "NONE"
-  let c = io.read_line()
+  let a = (io.read_line() ?? "")
+  let b = io.read_line() ?? "NONE"
+  let c = (io.read_line() ?? "")
   let rest = io.read_all()
   println("[${a}] [${b}] [${c}] [${rest}] ${int.to_string(string.len(a))} ${int.to_string(string.len(rest))}")
 }

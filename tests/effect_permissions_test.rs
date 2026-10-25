@@ -39,7 +39,7 @@ fn check(allow: &[&str], main: &str, extra: &[&str]) -> (bool, String) {
 }
 
 const RANDOM: &str = "import random\n\neffect fn main() -> Unit = {\n  let n = random.int(1, 6)!\n  println(\"${n}\")\n}\n";
-const STDIN: &str = "import io\n\neffect fn main() -> Unit = println(io.read_line())\n";
+const STDIN: &str = "import io\n\neffect fn main() -> Unit = println((io.read_line() ?? \"\"))\n";
 const PATH_URL: &str = "import path\nimport url\n\nfn main() -> Unit = {\n  println(path.join(\"a\", \"b\"))\n  println(url.encode_component(\"a b\"))\n}\n";
 const EXTERN: &str = "@extern(rust, \"host\", \"push\")\nfn push(x: Int) -> Unit\n\nfn main() -> Unit = push(1)\n";
 const CALENDAR: &str = "fn main() -> Unit = println(datetime.to_iso(0))\n";

@@ -107,7 +107,7 @@ pub const NOMINALS: &[Nominal] = &[
         refuses_var: false,
         in_flight: false,
     },
-    // `process.exec_status`'s record, from the fixed command set (ADR-0027 D4).
+    // `process.output`'s record, from the fixed command set (ADR-0027 D4).
     Nominal {
         name: "ProcessStatus",
         module: "process",

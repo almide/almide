@@ -1,4 +1,4 @@
-//! `io.read_n_bytes(n)` answers min(n, what stdin has) on every leg (C-161's
+//! `bytes.to_list(io.read(io.stdin()!, n)!)` answers min(n, what stdin has) on every leg (C-161's
 //! 2026-08-17 correction: no cap). The stock artifact's op-35 shim
 //! (`crates/almide-wasi/src/wasi_shims.rs`) made ONE `fd_read` of at most
 //! 4096 bytes per call, so a call asking for 20000 bytes of a 5 MB stream
@@ -23,15 +23,15 @@ effect fn main() -> Unit = {
   var total = 0
   var i = 0
   while i < 64 {
-    let r: List[Int] = io.read_n_bytes(20000)
+    let r: List[Int] = bytes.to_list(io.read(io.stdin()!, 20000)!)
     total = total + list.len(r)
     i = i + 1
   }
-  let big: List[Int] = io.read_n_bytes(1000000)
+  let big: List[Int] = bytes.to_list(io.read(io.stdin()!, 1000000)!)
   let newlines = list.len(big |> list.filter((b) => b == 10))
-  let rest: List[Int] = io.read_n_bytes(100000000)
+  let rest: List[Int] = bytes.to_list(io.read(io.stdin()!, 100000000)!)
   let last = list.last(rest) ?? -1
-  let tail: List[Int] = io.read_n_bytes(10)
+  let tail: List[Int] = bytes.to_list(io.read(io.stdin()!, 10)!)
   println("${total} ${list.len(big)} ${newlines} ${list.len(rest)} ${last} ${list.len(tail)}")
 }
 "#;

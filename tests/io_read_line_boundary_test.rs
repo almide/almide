@@ -24,9 +24,9 @@ fn read_line_has_no_fixed_byte_cap_on_native_core_or_component() {
     let source = dir.path().join("lines.almd");
     std::fs::write(&source, r#"import io
 effect fn main() -> Unit = {
-  println(io.read_line())
-  println(io.read_line())
-  println(int.to_string(io.read_byte()))
+  println((io.read_line() ?? ""))
+  println((io.read_line() ?? ""))
+  println(int.to_string((bytes.get(io.read(io.stdin()!, 1)!, 0) ?? -1)))
   println(io.read_all())
 }
 "#).expect("source");

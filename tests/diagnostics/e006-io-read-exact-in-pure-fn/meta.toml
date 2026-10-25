@@ -1,2 +1,2 @@
 expects_code = "E006"
-expects_error = "cannot call effect function 'io.read_n_bytes' from a pure function"
+expects_error = "cannot call effect function 'io.read_exact' from a pure function"

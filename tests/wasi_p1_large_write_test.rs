@@ -39,7 +39,7 @@ import io
 effect fn main() -> Unit = {{
   let s = string.pad_start("wide", {N}, " ")
   println(s)
-  io.write(bytes.from_string(s))
+  io.write(io.stdout()!, bytes.from_string(s))!
   fs.write_text("big.txt", s)!
   let t = fs.read_text("big.txt")!
   println("")

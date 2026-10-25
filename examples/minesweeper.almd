@@ -178,7 +178,7 @@ effect fn main() -> Unit = {
     let remaining = 10 - flags
     println("Mines: ${int.to_string(remaining)} remaining | Turn: ${int.to_string(turn_count)}")
     io.print("> ")
-    let input = io.read_line()
+    let input = (io.read_line() ?? "")
     match parse_input(input) {
       err(msg) => { println(msg) },
       ok(cmd) => {

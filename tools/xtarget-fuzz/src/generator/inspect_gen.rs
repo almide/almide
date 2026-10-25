@@ -361,12 +361,10 @@ const SHAPE_RECIPES: &[Recipe] = &[
     Recipe { func: "zlib.decompress", size: "data", args: &[("data", "zlib.compress(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
     Recipe { func: "zlib.inflate", size: "data", args: &[("data", "zlib.deflate(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
     Recipe { func: "zlib.gunzip", size: "data", args: &[("data", "zlib.gzip(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
-    // Native stdout is a 64 KiB BufWriter: a shorter write is copied into it,
-    // a longer one goes straight to the kernel, where neither meter counts it.
-    // n bytes straddled the capacity (moved n per call to 40000, then 0), so
-    // the writes are 4n bytes: every size is past it, in one regime.
-    Recipe { func: "io.write", size: "data", args: &[("data", "bytes.from_list(list.range(0, 4 * {n}) |> list.map((i) => 97 + i % 26))")] },
-    Recipe { func: "io.write_bytes", size: "data", args: &[("data", "list.range(0, 4 * {n}) |> list.map((i) => 97 + i % 26)")] },
+    // `io.write` is generic over its handle (`H: Write`) now, outside the
+    // generator's type universe, so it has no recipe until the generator
+    // builds handles; its last recipe wrote 4n bytes so every size was past
+    // native stdout's 64 KiB BufWriter, in one regime.
     // zip / zip_with stop at the shorter list: against the generic 2-element
     // partner the result had 2 elements whatever n was, so the order measured
     // was the truncation's. The partner takes the sized one's length.

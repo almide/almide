@@ -197,8 +197,8 @@ cr-mid range=3,3 chunked=4,4
 const PROBE_STDIN: &str = r#"import io
 
 effect fn main() -> Unit = {
-  let a = io.read_line()
-  let b = io.read_line_opt() ?? "<none>"
+  let a = (io.read_line() ?? "")
+  let b = io.read_line() ?? "<none>"
   println("${string.len(a)} ${string.len(b)}")
 }
 "#;
