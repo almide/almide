@@ -563,15 +563,23 @@ fn unzip[A, B](xs: List[(A, B)]) -> (List[A], List[B]) = {
   (firsts, seconds)
 }
 
+// Walks the values instead of computing a count: `end - start` overflows Int
+// for bounds of opposite sign (#4197), and the count it gave was truncated.
+// A next value is taken only when `x + step` stays inside Int (the guard
+// `x <= MAX - step` / `x >= MIN - step` cannot itself overflow) and before end.
 /// start, start + step, ... before end; counts down for step < 0; step = 0 aborts.
 fn range_step(start: Int, end: Int, step: Int) -> List[Int] = {
   if step == 0 then panic("list.range_step: step must not be 0") else ()
-  let steps = if step > 0 then (if end > start then (end - start - 1) / step + 1 else 0)
-  else if start > end then (start - end - 1) / (0 - step) + 1
-  else 0
   var out: List[Int] = []
-  for i in 0..<steps {
-    list.push(out, start + i * step)
+  var x = start
+  var more = if step > 0 then start < end else start > end
+  while more {
+    list.push(out, x)
+    more = if step > 0 then x <= 9223372036854775807 - step and x + step < end
+    else x >= -9223372036854775807 - 1 - step and x + step > end
+    if more then {
+      x = x + step
+    } else ()
   }
   out
 }
