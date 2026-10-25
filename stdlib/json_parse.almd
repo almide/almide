@@ -34,6 +34,13 @@
 //     opened inside 1000 others is `json: nesting deeper than 1000`, checked
 //     where the oracle checks it. `depth` counts the containers around the
 //     value being parsed.
+// The bound is crates/almide-base/src/json_limits.rs's JSON_MAX_DEPTH; this
+// is its self-hosted reading (tests/json_depth_limit_test.rs pins the two),
+// shared with json.set_path's bound (#4209, stdlib/json_path.almd).
+fn __json_max_depth() -> Int = 1000
+
+fn __json_depth_error() -> String = "json: nesting deeper than ${int.to_string(__json_max_depth())}"
+
 fn json_parse(text: String) -> Result[Value, String] = {
   let h = prim.handle(text)
   let blen = prim.load32(h + 4)
@@ -106,7 +113,7 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
         ok((value.str(s), np))
       },
       err(e) => err(e),
-    } else if (b == 123 or b == 91) and depth >= 1000 then err("json: nesting deeper than 1000")
+    } else if (b == 123 or b == 91) and depth >= __json_max_depth() then err(__json_depth_error())
     else if b == 123 then {
       let q2 = __jp_ws(base, len, q + 1)
       if q2 < len and prim.load8(base + q2) == 125 then {

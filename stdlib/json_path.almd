@@ -50,8 +50,8 @@ fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Value? 
 }
 
 // ── set_path / remove_path — byte-matching native set_at_steps / remove_at_steps ──
-// (runtime/rs/src/json.rs, the C-090 oracle). Both are INFALLIBLE (set_path's Result is
-// always ok). A Field step over an Object rewrites EVERY entry whose key matches — the
+// (runtime/rs/src/json.rs, the C-090 oracle). remove_path is INFALLIBLE; set_path's Result
+// is err only past the nesting bound (#4209). A Field step over an Object rewrites EVERY entry whose key matches — the
 // walks go by SLOT index (key @ h+12+(2i)*8, value @ +8), not by key lookup, so duplicate
 // keys transform each entry exactly like native's entries map. Over a non-object, set
 // AUTOVIVIFIES: the whole node is replaced by a fresh single-key object, and descents are
@@ -81,12 +81,35 @@ else {
   else __jp_has(j, key, i + 1, n)
 }
 
-fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = ok(json_path_set_go(
-  j,
-  path,
-  0,
-  nv,
-))
+// The value set_path builds nests its path's steps plus the new value's own
+// nesting deep; past json.parse's bound (stdlib/json_parse.almd
+// `__json_max_depth`) it is refused with parse's text (#4209), so a value
+// made here is one parse could have made and every recursive walk of it
+// stays bounded.
+fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = {
+  let steps = list.len(path)
+  if steps > __json_max_depth() or __json_nests_past(nv, __json_max_depth() - steps) then err(__json_depth_error())
+  else ok(json_path_set_go(j, path, 0, nv))
+}
+
+// `v` holds containers nested more than `budget` deep (tag 5 = array, 6 =
+// object); recurses at most `budget + 1` levels whatever `v` holds.
+fn __json_nests_past(v: Value, budget: Int) -> Bool = {
+  let tag = prim.load32(prim.handle(v) + 4)
+  if tag != 5 and tag != 6 then false
+  else if budget == 0 then true
+  else if tag == 5 then __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8), 1)
+  else __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8) / 2, 2)
+}
+
+// Slot `i * stride + stride - 1` is an element (stride 1) or an entry's
+// value (stride 2: key, value).
+fn __jnp_items(v: Value, budget: Int, i: Int, n: Int, stride: Int) -> Bool = if i >= n then false
+else {
+  let ev: Value = prim.load_handle(prim.handle(v) + 12 + (i * stride + stride - 1) * 8)
+  if __json_nests_past(ev, budget) then true
+  else __jnp_items(v, budget, i + 1, n, stride)
+}
 
 fn json_path_set_go(j: Value, path: List[String], k: Int, nv: Value) -> Value =
   if k >= list.len(path) then nv
