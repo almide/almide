@@ -101,6 +101,7 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 
 mod bytes;
 mod bytes_append;
+mod kmp;
 mod fan_par;
 pub mod decline_site;
 mod imports;
