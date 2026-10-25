@@ -35,6 +35,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (crate::embedded::SRC_ENV_GET, &[("env_get", "env.get")]),
         (crate::embedded::SRC_ZLIB_INFLATE, &[("zlib_gunzip", "zlib.gunzip"), ("zlib_inflate", "zlib.inflate"), ("zlib_decompress", "zlib.decompress")]),
         (crate::embedded::SRC_ZLIB_DEFLATE, &[("zlib_deflate", "zlib.deflate"), ("zlib_deflate_level", "zlib.deflate_level"), ("zlib_compress", "zlib.compress"), ("zlib_compress_level", "zlib.compress_level"), ("zlib_gzip", "zlib.gzip")]),
+        (crate::embedded::SRC_PROCESS_ARGS, &[("process_args", "process.args")]),
         (crate::embedded::SRC_ENV_OS, &[("env_os", "env.os")]),
         (crate::embedded::SRC_ENV_TEMP_DIR, &[("env_temp_dir", "env.temp_dir")]),
         (crate::embedded::SRC_FS_TEMP_DIR, &[("fs_temp_dir", "fs.temp_dir")]),

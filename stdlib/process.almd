@@ -10,8 +10,8 @@
 //
 // Write the record with its type name so the defaulted fields can be left
 // out: `process.ProcessCommand { cmd: "git", args: ["status"], dir: "repo" }`.
-// argv, the environment, sleeping and stdin are `env`'s and `io`'s
-// (R-process-01). Every runtime body is runtime/rs/src/process.rs over the
+// argv, the environment, sleeping and stdin belong to `env` and `io`
+// (R-process-01); the four twins here stay until their contracts move. Every runtime body is runtime/rs/src/process.rs over the
 // shared core crates/almide-rt-core/src/process_core.rs.
 /// Exit code plus captured stdout and stderr; code -1 if a signal ended the child.
 type ProcessStatus = { code: Int, stdout: String, stderr: String }
@@ -81,6 +81,30 @@ effect fn exit(code: Int) -> Never = _
 @intrinsic("almide_rt_process_pid")
 @category("Env.read")
 effect fn pid() -> Int = _
+
+// ── Kept until their judge contracts move (C-096 and the stdin_lines and
+// process.env / sleep rows): the redesign gives these to `env` and `io`
+// (R-process-01) ──
+/// Full argv, program name at index 0.
+@intrinsic("almide_rt_process_args")
+@category("Env.read")
+effect fn args() -> List[String] = _
+
+/// All stdin lines; err on non-UTF-8 input.
+@ordered
+@intrinsic("almide_rt_process_stdin_lines")
+@category("IO.stdin")
+effect fn stdin_lines() -> Result[List[String], String] = _
+
+/// Variable value, or none if unset.
+@intrinsic("almide_rt_process_env")
+@category("Env.read")
+effect fn env(key: String) -> String? = _
+
+/// Blocks ms milliseconds; negative is 0.
+@intrinsic("almide_rt_process_sleep")
+@category("Time")
+effect fn sleep(ms: Int) -> Unit = _
 
 local fn __child(c: ProcessChild) -> Int = match c {
   ProcessChild(h) => h

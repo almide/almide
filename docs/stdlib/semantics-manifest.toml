@@ -3387,6 +3387,16 @@ OS pid, strictly positive on every supported host.
 """
 
 [[process.fn]]
+name = "sleep"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (a sleeping probe is flaky by construction): ms is
+MILLISECONDS — process.sleep(1000) is one second.
+"""
+
+[[process.fn]]
 name = "__os_output"
 index_unit = "millisecond"
 probe = "1"

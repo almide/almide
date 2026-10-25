@@ -22,8 +22,9 @@ impl Emitter<'_> {
         args: &[IrExpr],
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (module, func, args) {
-            // Option[String]: status 2 = unset → none.
-            ("env", "get", [name]) => {
+            // Option[String]: status 2 = unset → none. `process.env` is the
+            // same read under the process module's name (#2589).
+            ("env", "get", [name]) | ("process", "env", [name]) => {
                 self.fs_call_1(name, OP_ENV_GET)?;
                 let hret = self.hold_i64()?;
                 let mut i = self.f.instructions();
@@ -118,14 +119,14 @@ impl Emitter<'_> {
                 self.fs_take_text()?;
                 Some(Lowered::owned(STR))
             }
-            ("env", "args", []) => {
+            ("env" | "process", "args", []) => {
                 // Frames arrive [argv0, args...] on every host (#1716):
                 // the embedded host names itself, a stock p1 runtime
                 // passes the module path. env.args is native argv[1..]
                 // (the FIRST frame drops — its fresh block frees);
                 // process.args is the FULL argv (C-096, argv0 kept).
                 self.fs_call_0(OP_ARGS)?;
-                Some(Lowered::owned(self.frames_to_string_list(true)?))
+                Some(Lowered::owned(self.frames_to_string_list(module == "env")?))
             }
             // stdin read-to-end (#1598's io half): chunks off the shared
             // cursor, appended into the owned-string accumulator (#2116 —
@@ -231,6 +232,12 @@ impl Emitter<'_> {
                 let uh = self.types.intern(SliceTy::Unit);
                 let sh = self.types.intern(STR);
                 Some(Lowered::owned(SliceTy::Result(uh, sh)))
+            }
+            // `process.sleep` is a plain fn returning Unit (no carrier): the
+            // same host sleep, nothing on the stack (#2589).
+            ("process", "sleep", [ms]) => {
+                self.sleep_ms(ms)?;
+                None
             }
             // n <= 0 → empty; else up to n stdin bytes (harness: none), the
             // staged block itself being the Bytes answer (`io.read(io.stdin(), n)`).
