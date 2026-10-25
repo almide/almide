@@ -22,7 +22,7 @@ import http
 import io
 
 effect fn _serve_demo() -> Unit = {
-  http.serve(8080, (req) => http.response(200, http.req_path(req)))
+  http.serve(8080, (req) => http.response(200, http.path(req)))
 }
 
 effect fn _print_tail() -> Unit = {

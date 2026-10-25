@@ -26,10 +26,13 @@ effect fn main() -> Unit = {
   println(show(process.exec("almide-no-such-binary-2589", [])))
   println(show_status(process.output(process.ProcessCommand { cmd: "sh", args: ["-c", "pwd"], dir: "/" })))
   println(show_status(process.output(process.ProcessCommand { cmd: "cat", args: [], stdin: "piped héllo" })))
-  println(show_status(process.output(process.ProcessCommand { cmd: "sh", args: [
-    "-c",
-    "printf 'wörld\\n2'; printf e >&2; exit 5"
-  ] })))
+  println(show_status(process.output(process.ProcessCommand {
+    cmd: "sh",
+    args: [
+      "-c",
+      "printf 'wörld\\n2'; printf e >&2; exit 5"
+    ],
+  })))
   println(show_status(process.output(process.ProcessCommand { cmd: "almide-no-such-binary-2589", args: [] })))
   println(show_status(process.output(process.ProcessCommand { cmd: "sh", args: ["-c", "printf fast"], timeout_ms: 30000 })))
   println(show_status(process.output(process.ProcessCommand { cmd: "sleep", args: ["5"], timeout_ms: 100 })))
@@ -38,7 +41,11 @@ effect fn main() -> Unit = {
     err(e) => println("run err ${e}"),
   }
   // The exit code is 9 only when the child's working directory is `/`.
-  match process.run(process.ProcessCommand { cmd: "sh", args: ["-c", "test \"$(pwd)\" = / && exit 9; exit 1"], dir: "/" }) {
+  match process.run(process.ProcessCommand {
+    cmd: "sh",
+    args: ["-c", "test \"$(pwd)\" = / && exit 9; exit 1"],
+    dir: "/",
+  }) {
     ok(code) => println("run_in code=${code}"),
     err(e) => println("run_in err ${e}"),
   }

@@ -121,7 +121,7 @@ const BOUNDED_PURE_MODULES: &[&str] = &[
 /// registry module, so `bounded_tables_name_real_modules` admits them by name.
 /// `prim` is the raw-memory floor; nothing bounded may reach it directly.
 const BOUNDED_DENIED_MODULES: &[&str] = &[
-    "env", "fs", "http", "net", "process", "random", "zlib", "datetime", "args",
+    "env", "fs", "http", "net", "unix", "process", "random", "uuid", "zlib", "datetime", "args",
     "testing", "fan", "compute", "duration", "prim", "ffi",
 ];
 
@@ -158,10 +158,10 @@ fn memory_unsafe_err(msg: &str, fn_name: &str, span: Option<BSpan>) -> Diagnosti
 /// component-model async mapping gives its arms a bounded-cost story (#1628).
 pub const CAPABILITY_GRANTS: &[(&str, &[&str])] = &[
     ("IO", &["io", "fs"]),
-    ("Net", &["http", "net"]),
+    ("Net", &["http", "net", "unix"]),
     ("Env", &["env", "args"]),
     ("Time", &["datetime", "duration"]),
-    ("Rand", &["random"]),
+    ("Rand", &["random", "uuid"]),
     ("Process", &["process"]),
 ];
 

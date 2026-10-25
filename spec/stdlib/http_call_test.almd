@@ -53,7 +53,11 @@ effect fn accept_real(port: Int) -> Result[(net.TcpListener, net.TcpStream), Str
 // says so. A read that errs is a quiet 50 ms or a reset (the answer to an
 // event written after the close); a second, short read tells them apart — a
 // live connection times out again, a reset one answers end-of-stream.
-effect fn peer_closed(peer: net.TcpStream) -> Result[Bool, String] = match net.tcp_read_timeout(peer, 64, 50) {
+effect fn peer_closed(peer: net.TcpStream) -> Result[Bool, String] = match net.tcp_read_timeout(
+  peer,
+  64,
+  50,
+) {
   ok(b) => ok(bytes.len(b) == 0),
   err(_) => match net.tcp_read_timeout(peer, 64, 1) {
     ok(b) => ok(bytes.len(b) == 0),
@@ -97,7 +101,7 @@ effect fn answer_server(port: Int, reply: String) -> Result[Unit, String] = {
 }
 
 fn outcome(r: Result[HttpResponse, String]) -> String = match r {
-  ok(resp) => "${http.status_code(resp)} ${http.body(resp)}",
+  ok(resp) => "${http.status(resp)} ${http.body(resp)}",
   err(e) => e,
 }
 
@@ -109,10 +113,7 @@ fn polled(p: Result[HttpResponse, String]?) -> String = match p {
 effect fn wait_with(port: Int, total_ms: Int, idle_ms: Int) -> Result[String, String] = {
   ready(port, 200)!
   let c = http.start(
-    "GET",
-    "http://127.0.0.1:${port}/",
-    "",
-    [:],
+    http.new_request("GET", "http://127.0.0.1:${port}/", "", []),
     { total_ms: total_ms, idle_ms: idle_ms },
   )!
   ok(outcome(http.wait(c)))
@@ -130,7 +131,10 @@ effect fn gather(c: HttpCall, rounds: Int, acc: String) -> Result[String, String
 
 effect fn cancel_client(port: Int) -> Result[(String, String, String, String), String] = {
   ready(port, 200)!
-  let c = http.start("GET", "http://127.0.0.1:${port}/", "", [:], { total_ms: 0, idle_ms: 0 })!
+  let c = http.start(
+    http.new_request("GET", "http://127.0.0.1:${port}/", "", []),
+    { total_ms: 0, idle_ms: 0 },
+  )!
   let before = polled(http.poll(c))
   let seen = gather(c, 5, "")!
   http.cancel(c)
@@ -178,7 +182,10 @@ test "wait answers the whole response, any status" {
 }
 
 test "a limit below zero is refused at start" {
-  let r = http.start("GET", "http://127.0.0.1:1/", "", [:], { total_ms: 0, idle_ms: -1 })
+  let r = http.start(
+    http.new_request("GET", "http://127.0.0.1:1/", "", []),
+    { total_ms: 0, idle_ms: -1 },
+  )
   match r {
     ok(_) => assert(false),
     err(e) => assert(string.starts_with(e, "invalid limits: ")),

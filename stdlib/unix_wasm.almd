@@ -79,7 +79,10 @@ effect fn __unix_impl_recv_impl(sock: Int, max: Int) -> Result[Bytes, String] = 
 )
 
 @implements("unix.__os_take_fds")
-fn __unix_impl_take_fds_impl(sock: Int) -> List[Int] = match __unix_take_fds(int.to_string(sock), "") {
+fn __unix_impl_take_fds_impl(sock: Int) -> List[Int] = match __unix_take_fds(
+  int.to_string(sock),
+  "",
+) {
   ok(t) => __unix_fd_list(t),
   err(_) => [],
 }

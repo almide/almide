@@ -19,7 +19,7 @@ mod type UdpSocket: Close = Int
 type UdpPacket = { data: Bytes, host: String, port: Int }
 
 /// An IP address: four octets, or eight 16-bit groups.
-type IpAddr = V4(Int, Int, Int, Int) | V6(List[Int])
+type IpAddr = | V4(Int, Int, Int, Int) | V6(List[Int])
 
 // ── TCP ──
 /// A stream connected to host:port; err if refused.
@@ -37,7 +37,10 @@ effect fn tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Resu
 )
 
 /// Sets read/write timeout; <= 0 clears it.
-effect fn tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Result[Unit, String] = __os_tcp_set_timeout(__tcp(stream), timeout_ms)
+effect fn tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Result[Unit, String] = __os_tcp_set_timeout(
+  __tcp(stream),
+  timeout_ms,
+)
 
 /// Bytes readable now, capped at 65536; 0 if none.
 effect fn tcp_available(stream: TcpStream) -> Result[Int, String] = __os_tcp_available(__tcp(stream))
@@ -84,28 +87,43 @@ effect fn lookup_host(host: String) -> Result[List[IpAddr], String] = {
 }
 
 /// The IP address s spells: dotted IPv4, or IPv6 (`::` and an IPv4 tail allowed).
-@category()
+@category
 fn parse_ip(s: String) -> Result[IpAddr, String] =
   if string.contains(s, ":") then __parse_v6(s) else __parse_v4(s, s)
 
 /// ip as text: dotted IPv4, or the RFC 5952 short IPv6 form.
-@category()
+@category
 fn ip_to_string(ip: IpAddr) -> String = match ip {
   V4(a, b, c, d) => "${a}.${b}.${c}.${d}",
   V6(gs) => __v6_text(gs),
 }
 
 /// True for 127.0.0.0/8 and ::1.
-@category()
+@category
 fn is_loopback(ip: IpAddr) -> Bool = match ip {
   V4(a, _, _, _) => a == 127,
-  V6(gs) => gs == [0, 0, 0, 0, 0, 0, 0, 1],
+  V6(gs) => gs == [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1
+  ],
 }
 
 // ── The handles' I/O requirements (R-L0-44) ──
-effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = __os_tcp_read(__tcp(h), max)
+effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = __os_tcp_read(
+  __tcp(h),
+  max,
+)
 
-effect fn __tcp_stream_write(h: TcpStream, data: Bytes) -> Result[Unit, String] = __os_tcp_write(__tcp(h), data)
+effect fn __tcp_stream_write(h: TcpStream, data: Bytes) -> Result[Unit, String] = __os_tcp_write(
+  __tcp(h),
+  data,
+)
 
 effect fn __tcp_stream_close(h: TcpStream) -> Result[Unit, String] = __os_tcp_close(__tcp(h))
 
@@ -154,12 +172,10 @@ local fn __v6_side(t: String) -> List[Int?] =
   else {
     let parts = string.split(t, ":")
     let last = list.get(parts, list.len(parts) - 1) ?? ""
-    if string.contains(last, ".") then
-      match __parse_v4(last, last) {
-        ok(V4(a, b, c, d)) => (list.take(parts, list.len(parts) - 1) |> list.map((p) => __group(p))) + [some(a * 256 + b), some(c * 256 + d)],
-        _ => [none],
-      }
-    else parts |> list.map((p) => __group(p))
+    if string.contains(last, ".") then match __parse_v4(last, last) {
+      ok(V4(a, b, c, d)) => (list.take(parts, list.len(parts) - 1) |> list.map((p) => __group(p))) + [some(a * 256 + b), some(c * 256 + d)],
+      _ => [none],
+    } else parts |> list.map((p) => __group(p))
   }
 
 local fn __parse_v6(s: String) -> Result[IpAddr, String] = {
@@ -168,7 +184,8 @@ local fn __parse_v6(s: String) -> Result[IpAddr, String] = {
   match halves {
     [whole] => {
       let gs = __v6_side(whole)
-      if list.len(gs) == 8 and gs |> list.all((g) => g != none) then ok(V6(gs |> list.filter_map((g) => g))) else bad
+      if list.len(gs) == 8 and gs |> list.all((g) => g != none) then ok(V6(gs |> list.filter_map((g) => g)))
+      else bad
     },
     [head, tail] => {
       let h = __v6_side(head)
@@ -187,15 +204,18 @@ local fn __v6_text(gs: List[Int]) -> String = {
   let hex = gs |> list.map((g) => string.to_lower(int.to_hex(g)))
   let (start, len) = __zero_run(gs, 0, -1, 0, -1, 0)
   if len < 2 then string.join(hex, ":")
-  else string.join(list.take(hex, start), ":") + "::" + string.join(list.drop(hex, start + len), ":")
+  else string.join(list.take(hex, start), ":") + "::" + string.join(
+    list.drop(hex, start + len),
+    ":",
+  )
 }
 
 // The longest zero run as (start, length): i the position, (cs, cl) the
 // current run, (bs, bl) the best so far.
 local fn __zero_run(gs: List[Int], i: Int, cs: Int, cl: Int, bs: Int, bl: Int) -> (Int, Int) =
   if i >= list.len(gs) then (if cl > bl then (cs, cl) else (bs, bl))
-  else if (list.get(gs, i) ?? 1) == 0 then
-    (if cl == 0 then __zero_run(gs, i + 1, i, 1, bs, bl) else __zero_run(gs, i + 1, cs, cl + 1, bs, bl))
+  else if (list.get(gs, i) ?? 1) == 0 then (if cl == 0 then __zero_run(gs, i + 1, i, 1, bs, bl)
+  else __zero_run(gs, i + 1, cs, cl + 1, bs, bl))
   else if cl > bl then __zero_run(gs, i + 1, -1, 0, cs, cl)
   else __zero_run(gs, i + 1, -1, 0, bs, bl)
 

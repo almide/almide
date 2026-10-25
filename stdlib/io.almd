@@ -61,27 +61,28 @@ effect fn stderr() -> Stderr = Stderr(2)
 // ── Bytes over any handle ──
 /// Up to max bytes from h; empty once h has ended; err if max < 0.
 @ordered
-@category()
+@category
 effect fn read[H: Read](h: H, max: Int) -> Result[Bytes, String] =
   if max < 0 then err("io.read: negative length ${max}") else h.__self_read(max)
 
 /// Exactly n bytes from h; err if h ends first, naming how many arrived.
 @ordered
-@category()
+@category
 effect fn read_exact[H: Read](h: H, n: Int) -> Result[Bytes, String] =
-  if n < 0 then err("io.read_exact: negative length ${n}") else __read_exact_from(h, n, 0, [])
+  if n < 0 then err("io.read_exact: negative length ${n}")
+  else __read_exact_from(h, n, 0, [])
 
 /// Every byte until h ends.
 @ordered
-@category()
+@category
 effect fn read_to_end[H: Read](h: H) -> Result[Bytes, String] = __read_to_end_from(h, [])
 
 /// Writes all of data to h.
-@category()
+@category
 effect fn write[H: Write](h: H, data: Bytes) -> Result[Unit, String] = h.__self_write(data)
 
 /// Closes h; closing twice is ok.
-@category()
+@category
 effect fn close[H: Close](h: H) -> Result[Unit, String] = h.__self_close()
 
 // One read of read_exact / read_to_end asks for at most 65536 bytes: a read
@@ -98,7 +99,8 @@ effect fn __read_exact_from[H: Read](h: H, n: Int, got: Int, chunks: List[Bytes]
 
 effect fn __read_to_end_from[H: Read](h: H, chunks: List[Bytes]) -> Result[Bytes, String] = {
   let b = h.__self_read(65536)!
-  if bytes.len(b) == 0 then ok(list.join(chunks, bytes.new())) else __read_to_end_from(h, chunks + [b])
+  if bytes.len(b) == 0 then ok(list.join(chunks, bytes.new()))
+  else __read_to_end_from(h, chunks + [b])
 }
 
 // ── The streams' own requirements ──

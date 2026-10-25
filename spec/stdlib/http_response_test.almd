@@ -7,7 +7,7 @@ test "http.response creates plain text response" {
 
 test "http.json creates json response" {
   let resp = http.json(200, '{"ok":true}')
-  let ct = http.get_header(resp, "Content-Type")
+  let ct = http.header(resp, "Content-Type")
   match ct {
     some(v) => assert_eq(v, "application/json"),
     none => assert(false),
@@ -17,7 +17,7 @@ test "http.json creates json response" {
 test "http.set_header overwrites existing header" {
   let resp = http.response(200, "hi")
   let updated = http.set_header(resp, "Content-Type", "text/html")
-  let ct = http.get_header(updated, "Content-Type")
+  let ct = http.header(updated, "Content-Type")
   match ct {
     some(v) => assert_eq(v, "text/html"),
     none => assert(false),
@@ -26,39 +26,39 @@ test "http.set_header overwrites existing header" {
 
 test "http.redirect creates redirect response" {
   let resp = http.redirect("/new-path")
-  let loc = http.get_header(resp, "Location")
+  let loc = http.header(resp, "Location")
   match loc {
     some(v) => assert_eq(v, "/new-path"),
     none => assert(false),
   }
 }
 
-test "http.status changes status code" {
+test "http.set_status changes the status code" {
   let resp = http.response(200, "hi")
-  let updated = http.status(resp, 201)
+  let updated = http.set_status(resp, 201)
   assert_eq(http.body(updated), "hi")
 }
 
-test "http.status rebind leaves an earlier alias at its old status" {
-  var x = http.with_headers(200, "hi", map.new() |> map.set("X-K", "v"))
+test "http.set_status rebind leaves an earlier alias at its old status" {
+  var x = http.with_headers(200, "hi", [("X-K", "v")])
   let old = x
-  x = http.status(x, 201)
+  x = http.set_status(x, 201)
   var i = 0
   while i < 3 {
     let before = x
-    x = http.status(x, 300 + i)
-    assert_eq(http.status_code(before), if i == 0 then 201 else 299 + i)
+    x = http.set_status(x, 300 + i)
+    assert_eq(http.status(before), if i == 0 then 201 else 299 + i)
     i = i + 1
   }
-  assert_eq(http.status_code(old), 200)
-  assert_eq(http.status_code(x), 302)
-  assert_eq(http.get_header(x, "X-K"), some("v"))
+  assert_eq(http.status(old), 200)
+  assert_eq(http.status(x), 302)
+  assert_eq(http.header(x, "X-K"), some("v"))
 }
 
 test "http.with_headers creates response with custom headers" {
-  let headers = map.new() |> map.set("X-Custom", "value") |> map.set("Content-Type", "text/html")
+  let headers = [("X-Custom", "value"), ("Content-Type", "text/html")]
   let resp = http.with_headers(200, "hi", headers)
-  let ct = http.get_header(resp, "Content-Type")
+  let ct = http.header(resp, "Content-Type")
   match ct {
     some(v) => assert_eq(v, "text/html"),
     none => assert(false),
@@ -67,20 +67,45 @@ test "http.with_headers creates response with custom headers" {
 
 // ALS-R8 / C-275 — the three header rulings, asserted on the native leg too.
 test "http.with_headers seeds nothing the caller did not pass" {
-  let resp = http.with_headers(200, "hi", map.new() |> map.set("X-A", "1"))
-  assert_eq(http.get_header(resp, "Content-Type") ?? "none", "none")
-  assert_eq(http.get_header(resp, "X-A") ?? "none", "1")
+  let resp = http.with_headers(200, "hi", [("X-A", "1")])
+  assert_eq(http.header(resp, "Content-Type") ?? "none", "none")
+  assert_eq(http.header(resp, "X-A") ?? "none", "1")
 }
 
 test "http header names are case-insensitive" {
   let resp = http.response(200, "hi")
-  assert_eq(http.get_header(resp, "content-type") ?? "none", "text/plain")
-  assert_eq(http.get_header(resp, "CONTENT-TYPE") ?? "none", "text/plain")
-  assert_eq(http.get_header(resp, "X-Nope") ?? "none", "none")
+  assert_eq(http.header(resp, "content-type") ?? "none", "text/plain")
+  assert_eq(http.header(resp, "CONTENT-TYPE") ?? "none", "text/plain")
+  assert_eq(http.header(resp, "X-Nope") ?? "none", "none")
 }
 
 test "http.set_header round-trips under any spelling" {
   let resp = http.set_header(http.response(200, "hi"), "content-type", "text/html")
-  assert_eq(http.get_header(resp, "content-type") ?? "none", "text/html")
-  assert_eq(http.get_header(resp, "Content-Type") ?? "none", "text/html")
+  assert_eq(http.header(resp, "content-type") ?? "none", "text/html")
+  assert_eq(http.header(resp, "Content-Type") ?? "none", "text/html")
+}
+
+test "http.headers lists every header in order, repeats kept" {
+  let resp = http.with_headers(200, "hi", [("X-A", "1"), ("X-B", "2")]) |> http.set_header(
+    "x-a",
+    "3",
+  )
+  assert_eq(http.headers(resp), [("X-A", "3"), ("X-B", "2")])
+}
+
+test "body_bytes and set_body_bytes carry the body as bytes" {
+  let resp = http.set_body_bytes(http.response(200, ""), bytes.from_string("héllo"))
+  assert_eq(http.body(resp), "héllo")
+  assert_eq(bytes.to_list(http.body_bytes(resp)), bytes.to_list(bytes.from_string("héllo")))
+}
+
+test "a request reads and replaces headers and body through the same functions" {
+  let req = http.new_request("POST", "/p", "a", [("Accept", "x"), ("accept", "y")])
+  assert_eq(http.header(req, "ACCEPT"), some("x"))
+  assert_eq(http.header_values(req, "accept"), ["x", "y"])
+  let req2 = req |> http.set_header("Accept", "z") |> http.set_header("X-New", "1") |> http.set_body("b")
+  assert_eq(http.headers(req2), [("Accept", "z"), ("accept", "y"), ("X-New", "1")])
+  assert_eq(http.body(req2), "b")
+  assert_eq(http.method(req2), "POST")
+  assert_eq(http.path(req2), "/p")
 }
