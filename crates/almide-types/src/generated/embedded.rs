@@ -14836,45 +14836,130 @@ pub const SRC_IO: &str = r#"
 
 
 
-/// Next stdin line, newline cut, bad UTF-8 as U+FFFD; "" at EOF too — read_line_opt tells them apart.
+
+
+
+
+
+
+
+
+
+
+
+
+/// The standard input stream; a Read handle.
+mod type Stdin: Read = Int
+
+/// The standard output stream; a Write handle.
+mod type Stdout: Write = Int
+
+/// The standard error stream; a Write handle.
+mod type Stderr: Write = Int
+
+
+/// Next stdin line, newline cut, bad UTF-8 as U+FFFD; none at EOF, some("") for an empty line.
 @ordered
 @intrinsic("almide_rt_io_read_line")
-effect fn read_line() -> String = _
-
-/// Next stdin line, newline cut; none at EOF, some("") for an empty line.
-@ordered
-@intrinsic("almide_rt_io_read_line_opt")
-effect fn read_line_opt() -> String? = _
-
-/// Writes s, no newline, then flushes.
-@intrinsic("almide_rt_io_print")
-@category("IO.stdout")
-effect fn print(s: String) -> Unit = _
+effect fn read_line() -> String? = _
 
 /// Rest of stdin as text, bad UTF-8 as U+FFFD; empty at EOF.
 @ordered
 @intrinsic("almide_rt_io_read_all")
 effect fn read_all() -> String = _
 
-/// Next stdin byte 0..255, or -1 at EOF.
-@ordered
-@intrinsic("almide_rt_io_read_byte")
-effect fn read_byte() -> Int = _
-
-/// Up to n stdin bytes; [] if n <= 0.
-@ordered
-@intrinsic("almide_rt_io_read_n_bytes")
-effect fn read_n_bytes(n: Int) -> List[Int] = _
-
-/// Low byte of each Int to stdout; unflushed.
-@intrinsic("almide_rt_io_write_bytes")
+/// Writes s to stdout, no newline, then flushes.
+@intrinsic("almide_rt_io_print")
 @category("IO.stdout")
-effect fn write_bytes(data: List[Int]) -> Unit = _
+effect fn print(s: String) -> Unit = _
 
-/// Raw data to stdout; no newline.
+/// Writes s to stderr, no newline.
+@intrinsic("almide_rt_io_eprint")
+@category("IO.stderr")
+effect fn eprint(s: String) -> Unit = _
+
+
+/// Standard input, for io.read / read_exact / read_to_end.
+@category("IO.stdin")
+effect fn stdin() -> Stdin = Stdin(0)
+
+/// Standard output, for io.write.
+@category("IO.stdout")
+effect fn stdout() -> Stdout = Stdout(1)
+
+/// Standard error, for io.write.
+@category("IO.stderr")
+effect fn stderr() -> Stderr = Stderr(2)
+
+
+/// Up to max bytes from h; empty once h has ended; err if max < 0.
+@category()
+effect fn read[H: Read](h: H, max: Int) -> Result[Bytes, String] =
+  if max < 0 then err("io.read: negative length ${max}") else h.__self_read(max)
+
+/// Exactly n bytes from h; err if h ends first, naming how many arrived.
+@category()
+effect fn read_exact[H: Read](h: H, n: Int) -> Result[Bytes, String] =
+  if n < 0 then err("io.read_exact: negative length ${n}") else __read_exact_from(h, n, 0, [])
+
+/// Every byte until h ends.
+@category()
+effect fn read_to_end[H: Read](h: H) -> Result[Bytes, String] = __read_to_end_from(h, [])
+
+/// Writes all of data to h.
+@category()
+effect fn write[H: Write](h: H, data: Bytes) -> Result[Unit, String] = h.__self_write(data)
+
+/// Closes h; closing twice is ok.
+@category()
+effect fn close[H: Close](h: H) -> Result[Unit, String] = h.__self_close()
+
+
+
+
+effect fn __read_exact_from[H: Read](h: H, n: Int, got: Int, chunks: List[Bytes]) -> Result[Bytes, String] =
+  if got >= n then ok(list.join(chunks, bytes.new()))
+  else {
+    let left = n - got
+    let b = h.__self_read(if left > 65536 then 65536 else left)!
+    if bytes.len(b) == 0 then err("io.read_exact: the stream ended after ${got} of ${n} bytes")
+    else __read_exact_from(h, n, got + bytes.len(b), chunks + [b])
+  }
+
+effect fn __read_to_end_from[H: Read](h: H, chunks: List[Bytes]) -> Result[Bytes, String] = {
+  let b = h.__self_read(65536)!
+  if bytes.len(b) == 0 then ok(list.join(chunks, bytes.new())) else __read_to_end_from(h, chunks + [b])
+}
+
+
+/// Up to max bytes of stdin; fewer only at its end.
+@ordered
+@intrinsic("almide_rt_io_read_bytes")
+effect fn __read_stdin_bytes(max: Int) -> Bytes = _
+
+/// data to stdout, unflushed; shares println's buffer, so order is program order.
 @intrinsic("almide_rt_io_write")
 @category("IO.stdout")
-effect fn write(data: Bytes) -> Unit = _
+effect fn __write_stdout(data: Bytes) -> Unit = _
+
+/// data to stderr, after flushing stdout.
+@intrinsic("almide_rt_io_write_stderr")
+@category("IO.stderr")
+effect fn __write_stderr(data: Bytes) -> Unit = _
+
+effect fn __stdin_read(_h: Stdin, max: Int) -> Result[Bytes, String] = ok(__read_stdin_bytes(max))
+
+@category("IO.stdout")
+effect fn __stdout_write(_h: Stdout, data: Bytes) -> Result[Unit, String] = {
+  __write_stdout(data)
+  ok(())
+}
+
+@category("IO.stderr")
+effect fn __stderr_write(_h: Stderr, data: Bytes) -> Result[Unit, String] = {
+  __write_stderr(data)
+  ok(())
+}
 "#;
 pub const SRC_IO_PRINT: &str = r#"
 
@@ -14925,32 +15010,6 @@ effect fn io_read_all() -> String = {
   }
   bytes.to_string_lossy(buf)
 }
-"#;
-pub const SRC_IO_READ_BYTE: &str = r#"
-
-
-
-
-
-
-effect fn io_read_byte() -> Int = {
-  let b = prim.read_n_bytes(1)
-  let h = prim.handle(b)
-  if prim.load32(h + 4) < 1 then 0 - 1 else prim.load8(h + 12)
-}
-"#;
-pub const SRC_IO_READ_LINE: &str = r#"
-
-
-
-
-
-
-
-
-
-
-effect fn io_read_line() -> String = prim.read_line()
 "#;
 pub const SRC_IO_READ_LINE_OPT: &str = r#"
 
@@ -15024,7 +15083,8 @@ else {
   if list.len(got) < want then got else got + __read_n_chunked(remaining - want)
 }
 
-effect fn io_read_n_bytes(n: Int) -> List[Int] = if n <= 0 then prim.read_n_bytes(0) else __read_n_chunked(n)
+@implements("io.__read_stdin_bytes")
+effect fn io_read_n_bytes(n: Int) -> Bytes = bytes.from_list(if n <= 0 then prim.read_n_bytes(0) else __read_n_chunked(n))
 "#;
 pub const SRC_IO_WRITE: &str = r#"
 
@@ -15046,23 +15106,14 @@ fn io_write(data: Bytes) -> Unit = {
 }
 
 
-fn __io_pack_bytes(dh: Int, sh: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  prim.store8(dh + 12 + i, prim.band(prim.load64(sh + 12 + i * 8), 255))
-  __io_pack_bytes(dh, sh, n, i + 1)
-}
 
-
-
-fn io_write_bytes(data: List[Int]) -> Unit = {
-  let sh = prim.handle(data)
-  let n = prim.load32(sh + 4)
-  let buf = prim.alloc_bytes(n)
-  let dh = prim.handle(buf)
-  let _p = __io_pack_bytes(dh, sh, n, 0)
-  prim.store32(8, dh + 12)
-  prim.store32(12, n)
-  let _w = prim.fd_write(1, 8, 1, 0)
+@implements("io.__write_stderr")
+fn io_write_stderr(data: Bytes) -> Unit = {
+  let h = prim.handle(data)
+  let len = prim.load32(h + 4)
+  prim.store32(8, h + 12)
+  prim.store32(12, len)
+  let _w = prim.fd_write(2, 8, 1, 0)
 }
 "#;
 pub const SRC_JSON: &str = r#"
@@ -29798,132 +29849,261 @@ pub const SRC_NET: &str = r#"
 
 
 
-/// Opaque Int handle to a TCP connection.
-type TcpStream = Int
-
-/// Opaque Int handle to a listening socket.
-type TcpListener = Int
 
 
-/// Connected stream handle; err if refused.
-@intrinsic("almide_rt_net_tcp_connect")
+/// A connected TCP stream; Read, Write and Close.
+mod type TcpStream: Read, Write, Close = Int
+
+/// A listening TCP socket; Close.
+mod type TcpListener: Close = Int
+
+/// A bound UDP socket; Close.
+mod type UdpSocket: Close = Int
+
+/// One received datagram and where it came from.
+type UdpPacket = { data: Bytes, host: String, port: Int }
+
+/// An IP address: four octets, or eight 16-bit groups.
+type IpAddr = V4(Int, Int, Int, Int) | V6(List[Int])
+
+
+/// A stream connected to host:port; err if refused.
 @category("Net.fetch")
-effect fn tcp_connect(host: String, port: Int) -> Result[Int, String] = _
+effect fn tcp_connect(host: String, port: Int) -> Result[TcpStream, String] = ok(TcpStream(__os_tcp_connect(host, port)!))
 
-
-/// Up to len bytes; empty once the peer closed; err if len < 0.
-@intrinsic("almide_rt_net_tcp_read")
-effect fn tcp_read(stream: Int, len: Int) -> Result[Bytes, String] = _
-
-/// Sends all of data, flushed; err if closed.
-@intrinsic("almide_rt_net_tcp_write")
-effect fn tcp_write(stream: Int, data: Bytes) -> Result[Unit, String] = _
-
-/// Exactly len bytes; err on early EOF, naming how many arrived.
-@intrinsic("almide_rt_net_tcp_read_exact")
-effect fn tcp_read_exact(stream: Int, len: Int) -> Result[Bytes, String] = _
-
-
-/// Shuts down the stream; twice is ok.
-@intrinsic("almide_rt_net_tcp_close")
-effect fn tcp_close(stream: Int) -> Result[Unit, String] = _
-
-
-/// False after tcp_close; a peer close is not seen.
-@intrinsic("almide_rt_net_tcp_is_open")
-effect fn tcp_is_open(stream: Int) -> Bool = _
-
+/// False after io.close; a peer close is not seen.
+effect fn tcp_is_open(stream: TcpStream) -> Bool = __os_tcp_is_open(__tcp(stream))
 
 /// Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
-@intrinsic("almide_rt_net_tcp_read_timeout")
-effect fn tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = _
+effect fn tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String] = __os_tcp_read_timeout(
+  __tcp(stream),
+  len,
+  timeout_ms,
+)
 
 /// Sets read/write timeout; <= 0 clears it.
-@intrinsic("almide_rt_net_tcp_set_timeout")
-effect fn tcp_set_timeout(stream: Int, timeout_ms: Int) -> Result[Unit, String] = _
-
+effect fn tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Result[Unit, String] = __os_tcp_set_timeout(__tcp(stream), timeout_ms)
 
 /// Bytes readable now, capped at 65536; 0 if none.
-@intrinsic("almide_rt_net_tcp_available")
-effect fn tcp_available(stream: Int) -> Result[Int, String] = _
+effect fn tcp_available(stream: TcpStream) -> Result[Int, String] = __os_tcp_available(__tcp(stream))
 
-
-/// Listener bound to host:port; err if in use.
-@intrinsic("almide_rt_net_tcp_listen")
+/// A listener bound to host:port; err if in use. Port 0 lets the OS choose.
 @category("Net.listen")
-effect fn tcp_listen(host: String, port: Int) -> Result[Int, String] = _
+effect fn tcp_listen(host: String, port: Int) -> Result[TcpListener, String] = ok(TcpListener(__os_tcp_listen(host, port)!))
 
 /// The port a listener is bound to: the one the OS chose when it listened on port 0.
+@category("Net.listen")
+effect fn tcp_local_port(listener: TcpListener) -> Result[Int, String] = __os_tcp_local_port(__listener(listener))
+
+/// Blocks for the next client; its stream.
+@category("Net.listen")
+effect fn tcp_accept(listener: TcpListener) -> Result[TcpStream, String] = ok(TcpStream(__os_tcp_accept(__listener(listener))!))
+
+
+/// A UDP socket bound to host:port; port 0 lets the OS choose.
+effect fn udp_bind(host: String, port: Int) -> Result[UdpSocket, String] = ok(UdpSocket(__os_udp_bind(host, port)!))
+
+/// The port sock is bound to.
+effect fn udp_local_port(sock: UdpSocket) -> Result[Int, String] = __os_udp_local_port(__udp(sock))
+
+/// Sends data as one datagram to host:port.
+effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Result[Unit, String] = __os_udp_send_to(
+  __udp(sock),
+  data,
+  host,
+  port,
+)
+
+/// Blocks for the next datagram: at most max bytes of it, and its sender.
+effect fn udp_recv_from(sock: UdpSocket, max: Int) -> Result[UdpPacket, String] = {
+  let (data, host, port) = __os_udp_recv_from(__udp(sock), max)!
+  ok(UdpPacket { data: data, host: host, port: port })
+}
+
+
+/// The addresses host resolves to, each once; err if none.
+@category("Net.fetch")
+effect fn lookup_host(host: String) -> Result[List[IpAddr], String] = {
+  let texts = __os_lookup_host(host)!
+  ok(texts |> list.filter_map((t) => parse_ip(t)?))
+}
+
+/// The IP address s spells: dotted IPv4, or IPv6 (`::` and an IPv4 tail allowed).
+@category()
+fn parse_ip(s: String) -> Result[IpAddr, String] =
+  if string.contains(s, ":") then __parse_v6(s) else __parse_v4(s, s)
+
+/// ip as text: dotted IPv4, or the RFC 5952 short IPv6 form.
+@category()
+fn ip_to_string(ip: IpAddr) -> String = match ip {
+  V4(a, b, c, d) => "${a}.${b}.${c}.${d}",
+  V6(gs) => __v6_text(gs),
+}
+
+/// True for 127.0.0.0/8 and ::1.
+@category()
+fn is_loopback(ip: IpAddr) -> Bool = match ip {
+  V4(a, _, _, _) => a == 127,
+  V6(gs) => gs == [0, 0, 0, 0, 0, 0, 0, 1],
+}
+
+
+effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = __os_tcp_read(__tcp(h), max)
+
+effect fn __tcp_stream_write(h: TcpStream, data: Bytes) -> Result[Unit, String] = __os_tcp_write(__tcp(h), data)
+
+effect fn __tcp_stream_close(h: TcpStream) -> Result[Unit, String] = __os_tcp_close(__tcp(h))
+
+@category("Net.listen")
+effect fn __tcp_listener_close(h: TcpListener) -> Result[Unit, String] = __os_tcp_close_listener(__listener(h))
+
+effect fn __udp_socket_close(h: UdpSocket) -> Result[Unit, String] = __os_udp_close(__udp(h))
+
+local fn __tcp(s: TcpStream) -> Int = match s {
+  TcpStream(n) => n
+}
+
+local fn __listener(l: TcpListener) -> Int = match l {
+  TcpListener(n) => n
+}
+
+local fn __udp(u: UdpSocket) -> Int = match u {
+  UdpSocket(n) => n
+}
+
+
+local fn __octet(t: String) -> Int? =
+  if string.len(t) == 0 or string.len(t) > 3 or (string.len(t) > 1 and string.starts_with(t, "0")) then none
+  else match int.parse(t) {
+    ok(n) => if n >= 0 and n <= 255 and string.chars(t) |> list.all((c) => string.contains("0123456789", c)) then some(n) else none,
+    err(_) => none,
+  }
+
+local fn __parse_v4(t: String, whole: String) -> Result[IpAddr, String] = {
+  let parts = string.split(t, ".") |> list.map((p) => __octet(p))
+  match parts {
+    [some(a), some(b), some(c), some(d)] => ok(V4(a, b, c, d)),
+    _ => err("net.parse_ip: not an IP address: \"${whole}\""),
+  }
+}
+
+local fn __group(t: String) -> Int? =
+  if string.len(t) == 0 or string.len(t) > 4 then none
+  else if string.chars(string.to_lower(t)) |> list.all((c) => string.contains("0123456789abcdef", c)) then int.from_hex(t)?
+  else none
+
+
+
+local fn __v6_side(t: String) -> List[Int?] =
+  if t == "" then []
+  else {
+    let parts = string.split(t, ":")
+    let last = list.get(parts, list.len(parts) - 1) ?? ""
+    if string.contains(last, ".") then
+      match __parse_v4(last, last) {
+        ok(V4(a, b, c, d)) => (list.take(parts, list.len(parts) - 1) |> list.map((p) => __group(p))) + [some(a * 256 + b), some(c * 256 + d)],
+        _ => [none],
+      }
+    else parts |> list.map((p) => __group(p))
+  }
+
+local fn __parse_v6(s: String) -> Result[IpAddr, String] = {
+  let bad = err("net.parse_ip: not an IP address: \"${s}\"")
+  let halves = string.split(s, "::")
+  match halves {
+    [whole] => {
+      let gs = __v6_side(whole)
+      if list.len(gs) == 8 and gs |> list.all((g) => g != none) then ok(V6(gs |> list.filter_map((g) => g))) else bad
+    },
+    [head, tail] => {
+      let h = __v6_side(head)
+      let t = __v6_side(tail)
+      let n = list.len(h) + list.len(t)
+      if n > 7 or not (h + t |> list.all((g) => g != none)) then bad
+      else ok(V6((h |> list.filter_map((g) => g)) + list.repeat(0, 8 - n) + (t |> list.filter_map((g) => g))))
+    },
+    _ => bad,
+  }
+}
+
+
+
+local fn __v6_text(gs: List[Int]) -> String = {
+  let hex = gs |> list.map((g) => string.to_lower(int.to_hex(g)))
+  let (start, len) = __zero_run(gs, 0, -1, 0, -1, 0)
+  if len < 2 then string.join(hex, ":")
+  else string.join(list.take(hex, start), ":") + "::" + string.join(list.drop(hex, start + len), ":")
+}
+
+
+
+local fn __zero_run(gs: List[Int], i: Int, cs: Int, cl: Int, bs: Int, bl: Int) -> (Int, Int) =
+  if i >= list.len(gs) then (if cl > bl then (cs, cl) else (bs, bl))
+  else if (list.get(gs, i) ?? 1) == 0 then
+    (if cl == 0 then __zero_run(gs, i + 1, i, 1, bs, bl) else __zero_run(gs, i + 1, cs, cl + 1, bs, bl))
+  else if cl > bl then __zero_run(gs, i + 1, -1, 0, cs, cl)
+  else __zero_run(gs, i + 1, -1, 0, bs, bl)
+
+
+@intrinsic("almide_rt_net_tcp_connect")
+@category("Net.fetch")
+effect fn __os_tcp_connect(host: String, port: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net_tcp_read")
+effect fn __os_tcp_read(stream: Int, len: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_net_tcp_write")
+effect fn __os_tcp_write(stream: Int, data: Bytes) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net_tcp_close")
+effect fn __os_tcp_close(stream: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net_tcp_is_open")
+effect fn __os_tcp_is_open(stream: Int) -> Bool = _
+
+@intrinsic("almide_rt_net_tcp_read_timeout")
+effect fn __os_tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_net_tcp_set_timeout")
+effect fn __os_tcp_set_timeout(stream: Int, timeout_ms: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net_tcp_available")
+effect fn __os_tcp_available(stream: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net_tcp_listen")
+@category("Net.listen")
+effect fn __os_tcp_listen(host: String, port: Int) -> Result[Int, String] = _
+
 @intrinsic("almide_rt_net_tcp_local_port")
 @category("Net.listen")
-effect fn tcp_local_port(listener: Int) -> Result[Int, String] = _
+effect fn __os_tcp_local_port(listener: Int) -> Result[Int, String] = _
 
-/// Blocks for the next client; its stream handle.
 @intrinsic("almide_rt_net_tcp_accept")
 @category("Net.listen")
-effect fn tcp_accept(listener: Int) -> Result[Int, String] = _
+effect fn __os_tcp_accept(listener: Int) -> Result[Int, String] = _
 
-/// Stops listening; closing twice is ok.
 @intrinsic("almide_rt_net_tcp_close_listener")
 @category("Net.listen")
-effect fn tcp_close_listener(listener: Int) -> Result[Unit, String] = _
+effect fn __os_tcp_close_listener(listener: Int) -> Result[Unit, String] = _
 
+@intrinsic("almide_rt_net_udp_bind")
+effect fn __os_udp_bind(host: String, port: Int) -> Result[Int, String] = _
 
-/// Stream socket connected to the listener at path; its descriptor.
-@intrinsic("almide_rt_net_unix_connect")
+@intrinsic("almide_rt_net_udp_local_port")
+effect fn __os_udp_local_port(sock: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net_udp_send_to")
+effect fn __os_udp_send_to(sock: Int, data: Bytes, host: String, port: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net_udp_recv_from")
+effect fn __os_udp_recv_from(sock: Int, max: Int) -> Result[(Bytes, String, Int), String] = _
+
+@intrinsic("almide_rt_net_udp_close")
+effect fn __os_udp_close(sock: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net_lookup_host")
 @category("Net.fetch")
-effect fn unix_connect(path: String) -> Result[Int, String] = _
-
-/// Listener bound at path, which must not exist yet.
-@intrinsic("almide_rt_net_unix_listen")
-@category("Net.listen")
-effect fn unix_listen(path: String) -> Result[Int, String] = _
-
-/// Blocks for the next connection; its descriptor.
-@intrinsic("almide_rt_net_unix_accept")
-@category("Net.listen")
-effect fn unix_accept(listener: Int) -> Result[Int, String] = _
-
-/// Sends all of data, the descriptors fds riding with its first byte.
-@intrinsic("almide_rt_net_unix_send")
-effect fn unix_send(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = _
-
-/// Up to max bytes, blocking; empty once the peer closed.
-@intrinsic("almide_rt_net_unix_recv")
-effect fn unix_recv(sock: Int, max: Int) -> Result[Bytes, String] = _
-
-/// Descriptors received on sock and not yet taken, oldest first.
-@intrinsic("almide_rt_net_unix_take_fds")
-effect fn unix_take_fds(sock: Int) -> List[Int] = _
-
-/// True if fd is readable within timeout_ms; < 0 waits forever.
-@intrinsic("almide_rt_net_unix_poll")
-effect fn unix_poll(fd: Int, timeout_ms: Int) -> Result[Bool, String] = _
-
-/// The fds readable within timeout_ms, in order; < 0 waits for one.
-@intrinsic("almide_rt_net_unix_wait")
-effect fn unix_wait(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = _
-
-/// Closes a socket, listener or received descriptor.
-@intrinsic("almide_rt_net_unix_close")
-effect fn unix_close(fd: Int) -> Result[Unit, String] = _
-
-
-/// New zero-filled unnamed file of size bytes; its descriptor.
-@intrinsic("almide_rt_net_shm_create")
-effect fn shm_create(size: Int) -> Result[Int, String] = _
-
-/// Grows or shrinks the file fd to size bytes.
-@intrinsic("almide_rt_net_shm_resize")
-effect fn shm_resize(fd: Int, size: Int) -> Result[Unit, String] = _
-
-/// Writes data into fd at byte offset.
-@intrinsic("almide_rt_net_shm_write")
-effect fn shm_write(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = _
-
-/// Up to len bytes of fd from offset; fewer at its end.
-@intrinsic("almide_rt_net_shm_read")
-effect fn shm_read(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = _
+effect fn __os_lookup_host(host: String) -> Result[List[String], String] = _
 "#;
 pub const SRC_NET_WASM: &str = r#"
 
@@ -29945,8 +30125,6 @@ effect fn __net_connect(host: String, port: String) -> Result[String, String] = 
 
 effect fn __net_read(stream: String, len: String) -> Result[Bytes, String] = _
 
-effect fn __net_read_exact(stream: String, len: String) -> Result[Bytes, String] = _
-
 
 effect fn __net_read_timeout(stream: String, len_ms: String) -> Result[Bytes, String] = _
 
@@ -29966,209 +30144,77 @@ effect fn __net_local_port(listener: String, unused: String) -> Result[String, S
 
 fn __net_is_open(stream: String, unused: String) -> Result[String, String] = _
 
-@implements("net.tcp_listen")
+@implements("net.__os_tcp_listen")
 effect fn __net_tcp_listen_impl(host: String, port: Int) -> Result[Int, String] = {
   let t = __net_listen(host, int.to_string(port))!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_accept")
+@implements("net.__os_tcp_accept")
 effect fn __net_tcp_accept_impl(listener: Int) -> Result[Int, String] = {
   let t = __net_accept(int.to_string(listener), "")!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_connect")
+@implements("net.__os_tcp_connect")
 effect fn __net_tcp_connect_impl(host: String, port: Int) -> Result[Int, String] = {
   let t = __net_connect(host, int.to_string(port))!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_local_port")
+@implements("net.__os_tcp_local_port")
 effect fn __net_tcp_local_port_impl(listener: Int) -> Result[Int, String] = {
   let t = __net_local_port(int.to_string(listener), "")!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_read")
+@implements("net.__os_tcp_read")
 effect fn __net_tcp_read_impl(stream: Int, len: Int) -> Result[Bytes, String] = __net_read(
   int.to_string(stream),
   int.to_string(len),
 )
 
-@implements("net.tcp_read_exact")
-effect fn __net_tcp_read_exact_impl(stream: Int, len: Int) -> Result[Bytes, String] = __net_read_exact(
-  int.to_string(stream),
-  int.to_string(len),
-)
-
-@implements("net.tcp_read_timeout")
+@implements("net.__os_tcp_read_timeout")
 effect fn __net_tcp_read_timeout_impl(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = __net_read_timeout(
   int.to_string(stream),
   "${len}\n${timeout_ms}",
 )
 
-@implements("net.tcp_write")
+@implements("net.__os_tcp_write")
 effect fn __net_tcp_write_impl(stream: Int, data: Bytes) -> Result[Unit, String] = {
   let _ = __net_write(int.to_string(stream), data)!
   ok(())
 }
 
-@implements("net.tcp_available")
+@implements("net.__os_tcp_available")
 effect fn __net_tcp_available_impl(stream: Int) -> Result[Int, String] = {
   let t = __net_available(int.to_string(stream), "")!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_set_timeout")
+@implements("net.__os_tcp_set_timeout")
 effect fn __net_tcp_set_timeout_impl(stream: Int, timeout_ms: Int) -> Result[Unit, String] = {
   let _ = __net_set_timeout(int.to_string(stream), int.to_string(timeout_ms))!
   ok(())
 }
 
-@implements("net.tcp_close")
+@implements("net.__os_tcp_close")
 effect fn __net_tcp_close_impl(stream: Int) -> Result[Unit, String] = {
   let _ = __net_close(int.to_string(stream), "")!
   ok(())
 }
 
-@implements("net.tcp_close_listener")
+@implements("net.__os_tcp_close_listener")
 effect fn __net_tcp_close_listener_impl(listener: Int) -> Result[Unit, String] = {
   let _ = __net_close_listener(int.to_string(listener), "")!
   ok(())
 }
 
-@implements("net.tcp_is_open")
+@implements("net.__os_tcp_is_open")
 fn __net_tcp_is_open_impl(stream: Int) -> Bool = match __net_is_open(int.to_string(stream), "") {
   ok("1") => true,
   _ => false,
 }
-
-
-
-
-
-
-
-
-
-
-
-
-effect fn __unix_connect(path: String, unused: String) -> Result[String, String] = _
-
-effect fn __unix_listen(path: String, unused: String) -> Result[String, String] = _
-
-effect fn __unix_accept(listener: String, unused: String) -> Result[String, String] = _
-
-
-effect fn __unix_send(sock_fds: String, data: Bytes) -> Result[String, String] = _
-
-effect fn __unix_recv(sock: String, max: String) -> Result[Bytes, String] = _
-
-
-
-fn __unix_take_fds(sock: String, unused: String) -> Result[String, String] = _
-
-effect fn __unix_poll(fd: String, timeout_ms: String) -> Result[String, String] = _
-
-effect fn __unix_wait(fds: String, timeout_ms: String) -> Result[String, String] = _
-
-effect fn __unix_close(fd: String, unused: String) -> Result[String, String] = _
-
-effect fn __shm_create(size: String, unused: String) -> Result[String, String] = _
-
-effect fn __shm_resize(fd: String, size: String) -> Result[String, String] = _
-
-
-effect fn __shm_write(fd_offset: String, data: Bytes) -> Result[String, String] = _
-
-
-effect fn __shm_read(fd: String, offset_len: String) -> Result[Bytes, String] = _
-
-fn __net_fd_lines(fds: List[Int]) -> String = fds |> list.map((f) => int.to_string(f)) |> list.join("\n")
-
-fn __net_fd_list(t: String) -> List[Int] =
-  if t == "" then []
-  else string.split(t, "\n") |> list.map((x) => int.parse(x) ?? -1)
-
-@implements("net.unix_connect")
-effect fn __net_unix_connect_impl(path: String) -> Result[Int, String] = {
-  let t = __unix_connect(path, "")!
-  ok(int.parse(t) ?? -1)
-}
-
-@implements("net.unix_listen")
-effect fn __net_unix_listen_impl(path: String) -> Result[Int, String] = {
-  let t = __unix_listen(path, "")!
-  ok(int.parse(t) ?? -1)
-}
-
-@implements("net.unix_accept")
-effect fn __net_unix_accept_impl(listener: Int) -> Result[Int, String] = {
-  let t = __unix_accept(int.to_string(listener), "")!
-  ok(int.parse(t) ?? -1)
-}
-
-@implements("net.unix_send")
-effect fn __net_unix_send_impl(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = {
-  let _ = __unix_send(__net_fd_lines([sock] + fds), data)!
-  ok(())
-}
-
-@implements("net.unix_recv")
-effect fn __net_unix_recv_impl(sock: Int, max: Int) -> Result[Bytes, String] = __unix_recv(
-  int.to_string(sock),
-  int.to_string(max),
-)
-
-@implements("net.unix_take_fds")
-fn __net_unix_take_fds_impl(sock: Int) -> List[Int] = match __unix_take_fds(int.to_string(sock), "") {
-  ok(t) => __net_fd_list(t),
-  err(_) => [],
-}
-
-@implements("net.unix_poll")
-effect fn __net_unix_poll_impl(fd: Int, timeout_ms: Int) -> Result[Bool, String] = {
-  let t = __unix_poll(int.to_string(fd), int.to_string(timeout_ms))!
-  ok(t == "1")
-}
-
-@implements("net.unix_wait")
-effect fn __net_unix_wait_impl(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = {
-  let t = __unix_wait(__net_fd_lines(fds), int.to_string(timeout_ms))!
-  ok(__net_fd_list(t))
-}
-
-@implements("net.unix_close")
-effect fn __net_unix_close_impl(fd: Int) -> Result[Unit, String] = {
-  let _ = __unix_close(int.to_string(fd), "")!
-  ok(())
-}
-
-@implements("net.shm_create")
-effect fn __net_shm_create_impl(size: Int) -> Result[Int, String] = {
-  let t = __shm_create(int.to_string(size), "")!
-  ok(int.parse(t) ?? -1)
-}
-
-@implements("net.shm_resize")
-effect fn __net_shm_resize_impl(fd: Int, size: Int) -> Result[Unit, String] = {
-  let _ = __shm_resize(int.to_string(fd), int.to_string(size))!
-  ok(())
-}
-
-@implements("net.shm_write")
-effect fn __net_shm_write_impl(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = {
-  let _ = __shm_write("${fd}\n${offset}", data)!
-  ok(())
-}
-
-@implements("net.shm_read")
-effect fn __net_shm_read_impl(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = __shm_read(
-  int.to_string(fd),
-  "${offset}\n${len}",
-)
 "#;
 pub const SRC_OPTION: &str = r#"
 
@@ -42872,6 +42918,238 @@ fn uint8_to_int8_saturating(x: UInt8) -> Int8 = {
   int.to_int8_saturating(i)
 }
 "#;
+pub const SRC_UNIX: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// An open descriptor: a socket, a listener, a received descriptor or a shared-memory file.
+mod type Fd: Read, Write, Close = Int
+
+
+/// Stream socket connected to the listener at path.
+@category("Net.fetch")
+effect fn connect(path: String) -> Result[Fd, String] = ok(Fd(__os_connect(path)!))
+
+/// Listener bound at path, which must not exist yet.
+@category("Net.listen")
+effect fn listen(path: String) -> Result[Fd, String] = ok(Fd(__os_listen(path)!))
+
+/// Blocks for the next connection on listener.
+@category("Net.listen")
+effect fn accept(listener: Fd) -> Result[Fd, String] = ok(Fd(__os_accept(__raw(listener))!))
+
+/// Sends all of data, the descriptors fds riding with its first byte.
+effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Result[Unit, String] =
+  __os_send(__raw(sock), data, fds |> list.map((f) => __raw(f)))
+
+/// Descriptors received on sock and not yet taken, oldest first.
+effect fn take_fds(sock: Fd) -> List[Fd] = __os_take_fds(__raw(sock)) |> list.map((f) => Fd(f))
+
+/// The descriptors of xs readable within timeout_ms, in order; < 0 waits for one, 0 only checks.
+effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = ok(
+  __os_wait(xs |> list.map((f) => __raw(f)), timeout_ms)! |> list.map((f) => Fd(f)),
+)
+
+
+/// New zero-filled unnamed file of size bytes.
+effect fn shm_create(size: Int) -> Result[Fd, String] = ok(Fd(__os_shm_create(size)!))
+
+/// Grows or shrinks the file fd to size bytes.
+effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = __os_shm_resize(__raw(fd), size)
+
+/// Writes data into fd at offset; a negative offset or a write past the end aborts (shm_resize first).
+effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = match __os_shm_write(__raw(fd), offset, data) {
+  ok(_) => ok(()),
+  err(e) => if string.starts_with(e, "unix.shm_write:") then panic(e) else err(e),
+}
+
+/// Up to len bytes of fd from offset; fewer at its end.
+effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = __os_shm_read(__raw(fd), offset, len)
+
+
+
+effect fn __fd_read(h: Fd, max: Int) -> Result[Bytes, String] = __os_recv(__raw(h), max)
+
+effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = __os_send(__raw(h), data, [])
+
+effect fn __fd_close(h: Fd) -> Result[Unit, String] = __os_close(__raw(h))
+
+local fn __raw(f: Fd) -> Int = match f {
+  Fd(n) => n
+}
+
+
+@intrinsic("almide_rt_unix_connect")
+@category("Net.fetch")
+effect fn __os_connect(path: String) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_unix_listen")
+@category("Net.listen")
+effect fn __os_listen(path: String) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_unix_accept")
+@category("Net.listen")
+effect fn __os_accept(listener: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_unix_send")
+effect fn __os_send(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_unix_recv")
+effect fn __os_recv(sock: Int, max: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_unix_take_fds")
+effect fn __os_take_fds(sock: Int) -> List[Int] = _
+
+@intrinsic("almide_rt_unix_wait")
+effect fn __os_wait(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = _
+
+@intrinsic("almide_rt_unix_close")
+effect fn __os_close(fd: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_unix_shm_create")
+effect fn __os_shm_create(size: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_unix_shm_resize")
+effect fn __os_shm_resize(fd: Int, size: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_unix_shm_write")
+effect fn __os_shm_write(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_unix_shm_read")
+effect fn __os_shm_read(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = _
+"#;
+pub const SRC_UNIX_WASM: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+effect fn __unix_connect(path: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_listen(path: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_accept(listener: String, unused: String) -> Result[String, String] = _
+
+
+effect fn __unix_send(sock_fds: String, data: Bytes) -> Result[String, String] = _
+
+effect fn __unix_recv(sock: String, max: String) -> Result[Bytes, String] = _
+
+
+
+fn __unix_take_fds(sock: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_wait(fds: String, timeout_ms: String) -> Result[String, String] = _
+
+effect fn __unix_close(fd: String, unused: String) -> Result[String, String] = _
+
+effect fn __shm_create(size: String, unused: String) -> Result[String, String] = _
+
+effect fn __shm_resize(fd: String, size: String) -> Result[String, String] = _
+
+
+effect fn __shm_write(fd_offset: String, data: Bytes) -> Result[String, String] = _
+
+
+effect fn __shm_read(fd: String, offset_len: String) -> Result[Bytes, String] = _
+
+fn __unix_fd_lines(fds: List[Int]) -> String = fds |> list.map((f) => int.to_string(f)) |> list.join("\n")
+
+fn __unix_fd_list(t: String) -> List[Int] =
+  if t == "" then []
+  else string.split(t, "\n") |> list.map((x) => int.parse(x) ?? -1)
+
+@implements("unix.__os_connect")
+effect fn __unix_impl_connect_impl(path: String) -> Result[Int, String] = {
+  let t = __unix_connect(path, "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_listen")
+effect fn __unix_impl_listen_impl(path: String) -> Result[Int, String] = {
+  let t = __unix_listen(path, "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_accept")
+effect fn __unix_impl_accept_impl(listener: Int) -> Result[Int, String] = {
+  let t = __unix_accept(int.to_string(listener), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_send")
+effect fn __unix_impl_send_impl(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = {
+  let _ = __unix_send(__unix_fd_lines([sock] + fds), data)!
+  ok(())
+}
+
+@implements("unix.__os_recv")
+effect fn __unix_impl_recv_impl(sock: Int, max: Int) -> Result[Bytes, String] = __unix_recv(
+  int.to_string(sock),
+  int.to_string(max),
+)
+
+@implements("unix.__os_take_fds")
+fn __unix_impl_take_fds_impl(sock: Int) -> List[Int] = match __unix_take_fds(int.to_string(sock), "") {
+  ok(t) => __unix_fd_list(t),
+  err(_) => [],
+}
+
+@implements("unix.__os_wait")
+effect fn __unix_impl_wait_impl(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = {
+  let t = __unix_wait(__unix_fd_lines(fds), int.to_string(timeout_ms))!
+  ok(__unix_fd_list(t))
+}
+
+@implements("unix.__os_close")
+effect fn __unix_impl_close_impl(fd: Int) -> Result[Unit, String] = {
+  let _ = __unix_close(int.to_string(fd), "")!
+  ok(())
+}
+
+@implements("unix.__os_shm_create")
+effect fn __unix_impl_shm_create_impl(size: Int) -> Result[Int, String] = {
+  let t = __shm_create(int.to_string(size), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_shm_resize")
+effect fn __unix_impl_shm_resize_impl(fd: Int, size: Int) -> Result[Unit, String] = {
+  let _ = __shm_resize(int.to_string(fd), int.to_string(size))!
+  ok(())
+}
+
+@implements("unix.__os_shm_write")
+effect fn __unix_impl_shm_write_impl(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = {
+  let _ = __shm_write("${fd}\n${offset}", data)!
+  ok(())
+}
+
+@implements("unix.__os_shm_read")
+effect fn __unix_impl_shm_read_impl(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = __shm_read(
+  int.to_string(fd),
+  "${offset}\n${len}",
+)
+"#;
 pub const SRC_URL: &str = r##"
 
 
@@ -43377,6 +43655,98 @@ fn __url_t_dec_nopct(s: String) -> String = match __url_dec_go(
   err(e) => "E:" + e,
 }
 "##;
+pub const SRC_UUID: &str = r#"
+
+
+
+
+
+
+import hex
+import random
+
+/// A 128-bit identifier: 16 bytes, ordered from the first byte.
+mod type Uuid = Bytes
+
+/// A random (version 4) Uuid: 122 bits from the OS CSPRNG.
+@category("Rand")
+effect fn v4() -> Uuid = Uuid(__versioned(random.bytes(16), 4))
+
+/// A time-ordered (version 7) Uuid: Unix ms, a counter, random bits; each is greater than the last.
+@category("Time", "Rand")
+effect fn v7() -> Uuid = {
+  let t = __v7_stamp(datetime.now_ms())
+  let ms = int.bshr(t, 12)
+  let seq = int.band(t, 4095)
+  let head = bytes.from_list([
+    __octet(ms, 40),
+    __octet(ms, 32),
+    __octet(ms, 24),
+    __octet(ms, 16),
+    __octet(ms, 8),
+    __octet(ms, 0),
+    int.bshr(seq, 8),
+    int.band(seq, 255),
+  ])
+  Uuid(__versioned(bytes.concat(head, random.bytes(8)), 7))
+}
+
+/// The Uuid s spells: 8-4-4-4-12 hex digits, either case, optionally in {…} or after urn:uuid:.
+fn parse(s: String) -> Result[Uuid, String] = {
+  let body = __unwrapped(s)
+  let groups = string.split(body, "-")
+  let lens = groups |> list.map((g) => string.len(g))
+  if lens != [8, 4, 4, 4, 12] then err("uuid.parse: not an 8-4-4-4-12 UUID: \"${s}\"")
+  else match hex.decode(string.join(groups, "")) {
+    ok(b) => ok(Uuid(b)),
+    err(_) => err("uuid.parse: not an 8-4-4-4-12 UUID: \"${s}\""),
+  }
+}
+
+/// u as 8-4-4-4-12 lowercase hex digits.
+fn to_string(u: Uuid) -> String = {
+  let h = hex.encode(__bytes_of(u))
+  "${string.slice(h, 0, 8)}-${string.slice(h, 8, 12)}-${string.slice(h, 12, 16)}-${string.slice(h, 16, 20)}-${string.slice(h, 20, 32)}"
+}
+
+/// The Uuid of exactly 16 bytes b; err for any other length.
+fn from_bytes(b: Bytes) -> Result[Uuid, String] =
+  if bytes.len(b) == 16 then ok(Uuid(b)) else err("uuid.from_bytes: expected 16 bytes, got ${bytes.len(b)}")
+
+/// The 16 bytes of u.
+fn to_bytes(u: Uuid) -> Bytes = __bytes_of(u)
+
+/// Negative, zero or positive as a orders before, with or after b, byte by byte.
+fn compare(a: Uuid, b: Uuid) -> Int = bytes.compare(__bytes_of(a), __bytes_of(b))
+
+local fn __bytes_of(u: Uuid) -> Bytes = match u {
+  Uuid(b) => b
+}
+
+
+local fn __octet(n: Int, shift: Int) -> Int = int.band(int.bshr(n, shift), 255)
+
+
+
+local fn __versioned(b: Bytes, ver: Int) -> Bytes = {
+  let b6 = bytes.set(b, 6, int.bor(int.band(bytes.get(b, 6) ?? 0, 15), ver * 16))
+  bytes.set(b6, 8, int.bor(int.band(bytes.get(b6, 8) ?? 0, 63), 128))
+}
+
+
+local fn __unwrapped(s: String) -> String =
+  if string.starts_with(s, "{") and string.ends_with(s, "}") then string.slice(s, 1, string.len(s) - 1)
+  else if string.starts_with(string.to_lower(s), "urn:uuid:") then string.drop(s, 9)
+  else s
+
+
+
+
+
+@intrinsic("almide_rt_uuid___v7_stamp")
+@category("Time")
+effect fn __v7_stamp(ms: Int) -> Int = _
+"#;
 pub const SRC_VALUE: &str = r#"/// Wraps items as an Array Value.
 @intrinsic("almide_rt_value_array")
 @reuse(items)
@@ -46322,8 +46692,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "io" => Some(SRC_IO),
         "io_print" => Some(SRC_IO_PRINT),
         "io_read_all" => Some(SRC_IO_READ_ALL),
-        "io_read_byte" => Some(SRC_IO_READ_BYTE),
-        "io_read_line" => Some(SRC_IO_READ_LINE),
         "io_read_line_opt" => Some(SRC_IO_READ_LINE_OPT),
         "io_read_n_bytes" => Some(SRC_IO_READ_N_BYTES),
         "io_write" => Some(SRC_IO_WRITE),
@@ -46516,7 +46884,10 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "uint64_convert" => Some(SRC_UINT64_CONVERT),
         "uint8" => Some(SRC_UINT8),
         "uint8_convert" => Some(SRC_UINT8_CONVERT),
+        "unix" => Some(SRC_UNIX),
+        "unix_wasm" => Some(SRC_UNIX_WASM),
         "url" => Some(SRC_URL),
+        "uuid" => Some(SRC_UUID),
         "value" => Some(SRC_VALUE),
         "value_core" => Some(SRC_VALUE_CORE),
         "value_utils" => Some(SRC_VALUE_UTILS),

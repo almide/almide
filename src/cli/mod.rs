@@ -163,19 +163,38 @@ pub fn proc_grant_without_list(proj: &crate::project::Project, refuse: bool) -> 
     Ok(())
 }
 
-/// The subprocess fns that START a child, with the index of the argument
-/// that names the command (#2589).
-const PROC_SPAWNING: &[(&str, usize)] = &[
-    ("exec", 0),
-    ("exec_in", 1),
-    ("exec_with_stdin", 0),
-    ("exec_status", 0),
-    ("exec_status_timeout", 0),
-    ("run", 0),
-    ("run_in", 1),
-    ("exec_attached", 0),
-    ("spawn", 0),
+/// The subprocess fns that START a child, with how the call names its
+/// command (#2589): `exec`'s first argument, or the `cmd` field of the
+/// `ProcessCommand` record `output` / `run` / `start` take (R-process-02).
+const PROC_SPAWNING: &[(&str, ProcCommandAt)] = &[
+    ("exec", ProcCommandAt::Arg),
+    ("output", ProcCommandAt::RecordCmd),
+    ("run", ProcCommandAt::RecordCmd),
+    ("start", ProcCommandAt::RecordCmd),
 ];
+
+#[derive(Clone, Copy)]
+enum ProcCommandAt {
+    /// The first argument is the command.
+    Arg,
+    /// The first argument is a `ProcessCommand`; its `cmd` field is the command.
+    RecordCmd,
+}
+
+/// The command literal a spawning call names, if it names one.
+fn proc_command_literal(at: ProcCommandAt, args: &[almide::ir::IrExpr]) -> Option<&str> {
+    use almide::ir::IrExprKind;
+    let first = &args.first()?.kind;
+    let cmd = match (at, first) {
+        (ProcCommandAt::Arg, k) => k,
+        (ProcCommandAt::RecordCmd, IrExprKind::Record { fields, .. }) => &fields.iter().find(|(n, _)| n.as_str() == "cmd")?.1.kind,
+        (ProcCommandAt::RecordCmd, _) => return None,
+    };
+    match cmd {
+        IrExprKind::LitStr { value } => Some(value.as_str()),
+        _ => None,
+    }
+}
 
 /// `[permissions] proc` (#2589, ADR-0025), statically: every call that starts
 /// a child must name its command as a string literal on the list. A command
@@ -197,13 +216,14 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
                 {
                     if let Some(&(_, at)) = PROC_SPAWNING.iter().find(|(f, _)| *f == func.as_str()) {
                         let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
-                        match args.get(at).map(|a| &a.kind) {
-                            Some(IrExprKind::LitStr { value }) if self.allow.iter().any(|c| c == value) => {}
-                            Some(IrExprKind::LitStr { value }) => {
+                        match proc_command_literal(at, args) {
+                            Some(value) if self.allow.iter().any(|c| c == value) => {}
+                            Some(value) => {
                                 self.bad.push(format!("process.{func}(\"{value}\"){line}: `{value}` is not in [permissions] proc"))
                             }
-                            _ => self.bad.push(format!(
-                                "process.{func}{line}: the command is not a string literal, so [permissions] proc cannot check it"
+                            None => self.bad.push(format!(
+                                "process.{func}{line}: the command is not a string literal{}, so [permissions] proc cannot check it",
+                                if matches!(at, ProcCommandAt::RecordCmd) { " in a `process.ProcessCommand { cmd: \"…\", … }` written at the call" } else { "" }
                             )),
                         }
                     }
