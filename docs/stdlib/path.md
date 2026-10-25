@@ -191,7 +191,8 @@ false
 
 Collapse `.` segments, resolve `..` against the preceding segment, and squeeze
 repeated separators. Purely lexical — no symlink resolution, no filesystem
-access, so it can differ from the OS's answer when symlinks are involved.
+access, so it can differ from the OS's answer when symlinks are involved. Its cost is
+linear in the length of the path.
 
 ```almd run
 import path

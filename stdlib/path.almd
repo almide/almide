@@ -119,34 +119,26 @@ fn stem(p: String) -> String = {
 /// Resolves . and .. lexically; "" becomes ".".
 fn normalize(p: String) -> String = {
   let absolute = string.starts_with(p, "/")
-  let segments = string.split(p, "/")
-  // Filter out empty segments (from //) and "." segments
-  let cleaned = list.filter(segments, (s) => string.len(s) > 0 and s != ".")
-  // Fold left, building a reversed list of resolved segments
-  let resolved = list.fold(
-    cleaned,
-    [],
-    (acc, seg) => {
-      if seg == ".." then {
-        let acc_len = list.len(acc)
-        if acc_len == 0 then {
-          // Nothing to pop — keep ".." only if relative
-          if absolute then acc
-          else [".."] + acc
-        } else {
-          let top = match list.first(acc) {
-            some(v) => v,
-            none => "",
-          }
-          // Can't pop past ".."
-          if top == ".." then [".."] + acc
-          else list.drop(acc, 1)
-        }
-      } else [seg] + acc
-    },
-  )
-  let ordered = list.reverse(resolved)
-  let joined = string.join(ordered, "/")
+  // The resolved segments, as a stack pushed and popped at its END: each segment
+  // costs O(1), so the walk is linear in the path (#4211 — the old fold prepended
+  // `[seg] + acc` and dropped with `list.drop`, a full copy per segment).
+  var stack: List[String] = []
+  for seg in string.split(p, "/") {
+    // Empty segments (from //) and "." resolve to nothing.
+    if string.len(seg) == 0 or seg == "." then ()
+    else if seg == ".." then {
+      match list.last(stack) {
+        // Nothing to pop: keep ".." only if relative.
+        none => if absolute then () else list.push(stack, ".."),
+        // Can't pop past "..".
+        some(top) => if top == ".." then list.push(stack, "..")
+        else {
+          let _ = list.pop(stack)
+        },
+      }
+    } else list.push(stack, seg)
+  }
+  let joined = string.join(stack, "/")
   if absolute then "/" + joined
   else if string.len(joined) == 0 then "." else joined
 }

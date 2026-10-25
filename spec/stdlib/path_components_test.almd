@@ -47,3 +47,17 @@ test "with_extension leaves a path without a file name alone" {
   assert_eq(path.with_extension("/", "txt"), "/")
   assert_eq(path.with_extension("a/..", "txt"), "a/..")
 }
+
+// #4211: normalize resolves on a stack popped at its end; these are the shapes the
+// old prepend-and-drop fold answered, kept byte for byte.
+test "normalize keeps every leading-dotdot and root shape" {
+  assert_eq(path.normalize(""), ".")
+  assert_eq(path.normalize("/"), "/")
+  assert_eq(path.normalize("//./"), "/")
+  assert_eq(path.normalize("../../a"), "../../a")
+  assert_eq(path.normalize("/../a"), "/a")
+  assert_eq(path.normalize("a/../.."), "..")
+  assert_eq(path.normalize("a/b/../../../c/./d/"), "../c/d")
+  assert_eq(path.normalize("./"), ".")
+  assert_eq(path.normalize(string.repeat("a/", 50000) + string.repeat("../", 50000) + "z"), "z")
+}
