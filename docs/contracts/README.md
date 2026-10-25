@@ -456,4 +456,13 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-418 | a runtime error text escapes the control and bidi characters of the user data it embeds, with one rule and the same bytes on every leg | 0.69.0 | active | fixture | 1 |
 | C-419 | bigint text in a radix that is not a power of two is limited to 4300 digits with one fixed text, a power-of-two radix has no limit, and bigint.pow refuses a result sure to pass 30 * 2^28 bits before computing | 0.69.0 | active | fixture | 1 |
 | C-420 | list.range_step lists every Int start + i * step strictly before end, with a count that does not wrap at the ends of Int | 0.69.0 | active | fixture | 1 |
+| C-422 | hash.hmac_sha256/512 equal the RFC 4231 vectors on every leg, key first, and is_valid_ accepts exactly the right tag | 0.69.0 | active | fixture | 1 |
+| C-423 | bytes/string.is_equal_constant_time answer equality with no data-dependent branch | 0.69.0 | active | fixture | 1 |
+| C-424 | --profile critical refuses a call to an @insecure_digest fn (md5, sha1) with E100 | 0.69.0 | active | fixture | 0 |
+| C-425 | A value prints through its type's declared repr wherever it is rendered; a Secret prints Secret(***) on every path | 0.69.0 | active | fixture | 1 |
+| C-426 | == on Secret[String] and Secret[Bytes] compares the revealed values; any other Secret, and a variant or map holding one, is E103 | 0.69.0 | active | fixture | 1 |
+| C-427 | A Codec record decodes a Secret field from its value's wire form and derives no encode (E023) | 0.69.0 | active | fixture | 1 |
+| C-428 | A `@skip` record field is neither decoded nor encoded and a `@skip_decode` field is never decoded but still encoded; both need a default | 0.69.0 | active | fixture | 1 |
+| C-429 | A derived `T.decode_strict` refuses the first key outside the record's decoded fields with `unknown key '<k>'`; `T.decode` stays lenient | 0.69.0 | active | fixture | 1 |
+| C-430 | An attribute on a record field that the compiler does not read is a check error (E053); the field vocabulary is @builtin, @location, @skip, @skip_decode | 0.69.0 | active | fixture | 0 |
 
