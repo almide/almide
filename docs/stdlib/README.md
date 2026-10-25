@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 49 stdlib modules, 1657 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 50 stdlib modules, 1667 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -12,7 +12,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [base64](#base64) | 4 | 0 |
 | [bigint](#bigint) | 24 | 1 |
 | [bool](#bool) | 3 | 0 |
-| [bytes](#bytes) | 209 | 1 |
+| [bytes](#bytes) | 210 | 1 |
 | [compute](#compute) | 7 | 0 |
 | [datetime](#datetime) | 23 | 0 |
 | [deque](#deque) | 60 | 1 |
@@ -24,7 +24,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [float32](#float32) | 33 | 0 |
 | [float64](#float64) | 33 | 0 |
 | [fs](#fs) | 41 | 1 |
-| [hash](#hash) | 12 | 0 |
+| [hash](#hash) | 18 | 0 |
 | [heap](#heap) | 16 | 1 |
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 5 | 0 |
@@ -47,8 +47,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [random](#random) | 10 | 0 |
 | [regex](#regex) | 16 | 1 |
 | [result](#result) | 15 | 0 |
+| [secret](#secret) | 2 | 0 |
 | [set](#set) | 42 | 0 |
-| [string](#string) | 88 | 0 |
+| [string](#string) | 89 | 0 |
 | [testing](#testing) | 10 | 0 |
 | [uint16](#uint16) | 50 | 0 |
 | [uint32](#uint32) | 54 | 0 |
@@ -179,6 +180,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` — Copy of start..end capped at len; empty if start >= end.
 - `bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]` — Pieces between sep matches; [b] for an empty sep.
 - `bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool` — True if b begins with prefix, or prefix is empty.
+- `bytes.is_equal_constant_time(a: Bytes, b: Bytes) -> Bool` — True if a and b hold the same bytes, in time that depends only on their lengths: no early exit on the first differing byte.
 - `bytes.to_list(b: Bytes) -> List[Int]` — Each byte as an Int in 0..255.
 - `bytes.to_string(b: Bytes) -> Result[String, String]` — UTF-8 decode; err "invalid UTF-8: ..." if bad.
 - `bytes.to_string_lossy(b: Bytes) -> String` — UTF-8 decode; invalid sequences become U+FFFD.
@@ -682,6 +684,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `hash.sha1_hex(b: Bytes) -> String` — SHA-1 of b as 40 lowercase hex chars.
 - `hash.sha512(b: Bytes) -> Bytes` — 64-byte SHA-512 digest of b.
 - `hash.sha512_hex(b: Bytes) -> String` — SHA-512 of b as 128 lowercase hex chars.
+- `hash.hmac_sha256(key: Bytes, b: Bytes) -> Bytes` — 32-byte HMAC-SHA256 of b under key (RFC 2104); key first.
+- `hash.hmac_sha256_hex(key: Bytes, b: Bytes) -> String` — HMAC-SHA256 of b under key as 64 lowercase hex chars.
+- `hash.hmac_sha512(key: Bytes, b: Bytes) -> Bytes` — 64-byte HMAC-SHA512 of b under key (RFC 2104); key first.
+- `hash.hmac_sha512_hex(key: Bytes, b: Bytes) -> String` — HMAC-SHA512 of b under key as 128 lowercase hex chars.
+- `hash.is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool` — True if tag is the HMAC-SHA256 of b under key, compared in constant time.
+- `hash.is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool` — True if tag is the HMAC-SHA512 of b under key, compared in constant time.
 
 ## heap
 
@@ -1519,6 +1527,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `result.or_else(r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F]` — r when ok, else f(e); f runs only on err.
 - `result.filter(r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E]` — err(err_val) if pred fails on ok; err kept.
 
+## secret
+
+[secret.md](secret.md)
+
+- `secret.new(x: A) -> Secret[A]` — x wrapped so that every renderer prints it as `Secret(***)`.
+- `secret.reveal(s: Secret[A]) -> A` — The value s wraps.
+
 ## set
 
 [set.md](set.md)
@@ -1577,6 +1592,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.len(s: String) -> Int` — Codepoint count (not bytes).
 - `string.length(s: String) -> Int   (deprecated — use string.len)` — Alias of string.len.
 - `string.contains(s: String, sub: String) -> Bool` — sub occurs in s; true for empty sub.
+- `string.is_equal_constant_time(a: String, b: String) -> Bool` — True if a and b hold the same UTF-8 bytes, in time that depends only on their lengths: no early exit on the first differing byte.
 - `string.starts_with(s: String, prefix: String) -> Bool` — s begins with prefix; "" always matches.
 - `string.ends_with(s: String, suffix: String) -> Bool` — s ends with suffix; "" always matches.
 - `string.slice(s: String, start: Int, end: Int) -> String` — Codepoints [start, end), clamped to s.
