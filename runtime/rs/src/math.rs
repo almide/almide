@@ -114,8 +114,14 @@ pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 {
 #[inline(always)] pub fn almide_rt_math_fpow(base: f64, exp: f64) -> f64 { almide_rt_libm_pow(base, exp) }
 
 // Factorial / combinatorics
+// #4212: the product wraps mod 2^64, so once n! holds 64 factors of two it is 0 and
+// stays 0. Legendre: v2(n!) = n - popcount(n), nondecreasing in n; v2(65!) = 63 and
+// v2(66!) = 64, so every n >= 66 answers 0 at once instead of looping n times (an
+// input-chosen n of 10^18 ran for centuries). The self-host `math_factorial`
+// (stdlib/math_int.almd) makes the same cut.
 pub fn almide_rt_math_factorial(n: i64) -> i64 {
-    (1..=n).product()
+    if n >= 66 { return 0; }
+    (1..=n).fold(1i64, |acc, x| acc.wrapping_mul(x))
 }
 // C(n, k) EXACTLY, reduced mod 2^64 the way every Int product is (C-170, C-056): the
 // true binomial whenever it fits in an Int, and its two's-complement wrap when it does

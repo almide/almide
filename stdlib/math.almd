@@ -34,7 +34,7 @@ fn e() -> Float = _
 @intrinsic("almide_rt_math_exp")
 fn exp(x: Float) -> Float = _
 
-/// Product 1..n; 1 for n <= 0; wraps past 20.
+/// Product 1..n; 1 for n <= 0; wraps past 20, 0 from 66 on.
 @intrinsic("almide_rt_math_factorial")
 fn factorial(n: Int) -> Int = _
 
