@@ -410,8 +410,8 @@ fn dispatch_add(cmd: AddCmd) {
     // Write the manifest (and the grant), then lock it the way a build
     // would. Any failure puts both files back.
     let lock = proj.root.join("almide.lock");
-    let saved_manifest = std::fs::read(manifest).ok();
-    let saved_lock = std::fs::read(&lock).ok();
+    let saved_manifest = project::read_project_file_bytes(manifest).ok();
+    let saved_lock = project::read_project_file_bytes(&lock).ok();
     let restore = || {
         if let Some(bytes) = &saved_manifest {
             let _ = std::fs::write(manifest, bytes);
@@ -697,7 +697,18 @@ fn refuse_invalid_manifest(command: &Commands) {
         return;
     }
     let path = std::path::Path::new("almide.toml");
-    let Ok(content) = std::fs::read_to_string(path) else { return };
+    if !path.exists() {
+        return;
+    }
+    // Bounded and regular-file only (#4194): a manifest linked to /dev/zero
+    // is refused here, on every command, instead of read until memory runs out.
+    let content = match project::read_project_file(path) {
+        Ok(c) => c,
+        Err(e) => {
+            err(&format!("error: {}", e));
+            std::process::exit(1);
+        }
+    };
     if let Err(e) = project::check_manifest(path, &content) {
         err(&format!("error: {}", e));
         std::process::exit(1);
