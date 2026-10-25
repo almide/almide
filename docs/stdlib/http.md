@@ -86,7 +86,10 @@ the same `500` and fixed body as for an `err`, and stderr gets one line
 `panic`). Sockets, unix descriptors and http calls the handler opened and
 did not close are closed with it. The server keeps serving the next request.
 Stack exhaustion and `process.exit` still end the program, even after the
-handler printed an `Error: ` line itself.
+handler printed an `Error: ` line itself. Running out of memory does too: an
+allocation the handler cannot get ends the program with `Error: out of memory`
+and exit code 1 (C-197), and that request gets no answer, since what the
+handler was building is left half made.
 
 **On wasm** (C-367): `almide run app.almd --target wasm` serves the same
 program on the embedded host. One instance handles every request, one at a

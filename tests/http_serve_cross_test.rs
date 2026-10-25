@@ -988,7 +988,7 @@ fn leg_exit_within(leg: &mut Leg, secs: u64) -> Option<i32> {
         }
         if Instant::now() >= deadline {
             kill_group(&mut leg.child);
-            panic!("wasm={}: the server was still running {secs} s after `process.exit(1)`", leg.wasm);
+            panic!("wasm={}: the server was still running {secs} s after the request that ends it", leg.wasm);
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -1102,4 +1102,110 @@ fn a_run_of_handler_aborts_does_not_grow_the_embedded_servers_memory() {
     let large = serve_peak_rss(240).expect("the second measurement");
     eprintln!("peak RSS: {} MB at 40 aborts, {} MB at 240", small >> 20, large >> 20);
     assert!(large < small * 2, "6x the aborts took {} MB of peak RSS against {} MB", large >> 20, small >> 20);
+}
+
+// ── Out of memory inside the handler is never contained (row 1) ──
+//
+// `spec/serve_cross/http_serve_oom.almd` serves `X`, contains the
+// out-of-bounds abort of `XXXXX`, and on `O` builds lists until an allocation
+// is refused. An allocation that fails part-way through a handler leaves what
+// it was building half made, so it is never contained (row 1 of the security
+// table, C-434): the run ends with C-197's line and exit 1 on both legs, and
+// `O` gets no answer. Natively the built binary runs under `ulimit -v` — 1 GiB
+// of address space, glibc held to two arenas so the limit is spent on the
+// lists, not on per-thread arenas — where the first 1.6 GB list is refused;
+// the embedded lane's store refuses the growth past its 4 GiB.
+//
+// Negative control: with the native out-of-memory sites back on the
+// containable `almide_abort` (or the embedded host's `!oom` dropped from
+// `serve_contained`'s `ended`), `O` is answered with the fixed 500 and the
+// server keeps running, and this test fails on that leg.
+
+#[cfg(target_os = "linux")]
+fn oom_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/serve_cross/http_serve_oom.almd")
+}
+
+/// The native binary of the out-of-memory fixture, built once per test process.
+#[cfg(target_os = "linux")]
+fn oom_binary() -> PathBuf {
+    static BIN: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BIN.get_or_init(|| {
+        let bin = scratch("oom-bin").join("http_serve_oom");
+        let out = Command::new(almide_bin())
+            .arg("build")
+            .arg(oom_fixture())
+            .arg("-o")
+            .arg(&bin)
+            .stdin(Stdio::null())
+            .output()
+            .expect("almide build runs");
+        assert!(out.status.success(), "almide build failed: {}", String::from_utf8_lossy(&out.stderr));
+        bin
+    })
+    .clone()
+}
+
+/// A leg of the out-of-memory fixture: natively the built binary under a
+/// 1 GiB address-space limit, on the embedded lane `almide run --target wasm`.
+#[cfg(target_os = "linux")]
+fn boot_oom(wasm: bool) -> Leg {
+    let port = free_port();
+    let mut c = if wasm {
+        let mut c = Command::new(almide_bin());
+        c.arg("run").arg(oom_fixture()).args(["--target", "wasm", "--"]).arg(port.to_string());
+        c
+    } else {
+        // bash, as tests/fan_spawn_failure_test.rs runs its `ulimit -u`.
+        let mut c = Command::new("bash");
+        c.arg("-c").arg("ulimit -v 1048576 && exec \"$0\" \"$1\"").arg(oom_binary()).arg(port.to_string());
+        c.env("MALLOC_ARENA_MAX", "2");
+        c
+    };
+    c.process_group(0).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = c.spawn().expect("the server runs");
+    let mut err = BufReader::new(child.stderr.take().expect("stderr piped"));
+    let mut first = String::new();
+    err.read_line(&mut first).expect("read the ready line");
+    if first != "ready\n" {
+        let mut rest = String::new();
+        let _ = err.read_to_string(&mut rest);
+        kill_group(&mut child);
+        panic!("wasm={wasm}: expected the ready line, got {first:?}{rest}");
+    }
+    Leg { child, port, err, wasm }
+}
+
+#[cfg(target_os = "linux")]
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn out_of_memory_in_the_handler_ends_the_run_on_native_and_the_embedded_lane() {
+    let run = |wasm: bool| {
+        let mut leg = boot_oom(wasm);
+        let served = ask(leg.port, &post("X"));
+        let aborted = ask(leg.port, &post("XXXXX"));
+        let oom = ask_lossy(leg.port, &post("O"));
+        let code = leg_exit_within(&mut leg, 120);
+        let mut rest = String::new();
+        let _ = leg.err.read_to_string(&mut rest);
+        (served, aborted, oom, code, rest)
+    };
+    let (n_served, n_aborted, n_oom, n_code, n_err) = run(false);
+    let (w_served, w_aborted, w_oom, w_code, w_err) = run(true);
+    for (leg, served, aborted, oom, code, err) in [
+        ("native", &n_served, &n_aborted, &n_oom, n_code, &n_err),
+        ("wasm", &w_served, &w_aborted, &w_oom, w_code, &w_err),
+    ] {
+        assert!(served.ends_with(b"\r\n\r\nval=20"), "{leg}: {:?}", String::from_utf8_lossy(served));
+        // Control: an abort that is not out of memory is still contained.
+        assert!(aborted.starts_with(b"HTTP/1.1 500 "), "{leg}: {:?}", String::from_utf8_lossy(aborted));
+        assert!(oom.is_empty(), "{leg}: the out-of-memory request was answered: {:?}", String::from_utf8_lossy(oom));
+        assert_eq!(code, Some(1), "{leg}: the exit code");
+        assert_eq!(
+            err.lines().collect::<Vec<_>>(),
+            ["http.serve: request 254cfecc: handler aborted: \"index out of bounds\"", "Error: out of memory"],
+            "{leg}: stderr after the ready line"
+        );
+    }
+    assert_eq!(n_err, w_err, "the stderr transcripts differ");
 }
