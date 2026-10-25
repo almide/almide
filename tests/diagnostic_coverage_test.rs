@@ -276,6 +276,12 @@ fn every_mechanical_verdict_emits_a_machine_applicable_repair_that_round_trips()
     let mut backlog: Vec<String> = Vec::new();
     let mut broken_round_trips: Vec<String> = Vec::new();
     let mut proven: Vec<String> = Vec::new();
+    // Every mechanical code on a full run; the CI slice (ALMIDE_CI_SLICE) of
+    // the codes, keyed by the code's doc, otherwise. A selected code is judged
+    // over ALL its families, so the backlog verdict stays per code.
+    let mechanical = almide_corpus::select(mechanical.into_iter().collect::<Vec<_>>(), "diagnostic_coverage::mechanical_round_trip", |c| {
+        format!("docs/diagnostics/{c}.md")
+    });
     for code in &mechanical {
         let prefix = format!("{}-", code.to_ascii_lowercase());
         let mut families: Vec<PathBuf> = std::fs::read_dir(&fixtures).expect("read tests/diagnostics")
