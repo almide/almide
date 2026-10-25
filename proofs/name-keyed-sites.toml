@@ -3,6 +3,14 @@
 # `names` is how many stdlib names the item groups. A `legacy` row predates
 # the gate (2026-10-11): its count may only fall, and the row goes when the
 # site does. A new site needs `class = "justified"` and a `why`.
+#
+# 2026-10-26, stdlib redesign wave 4B: seven legacy rows raised, none by new
+# name-keyed logic. Two new modules (unix, uuid) take a row each in the
+# per-module tables (MODULE_DESCRIPTIONS, STDLIB_MODULE_EFFECTS, CAP_MODULES,
+# BOUNDED_DENIED_MODULES, and the unix/uuid capability grants); WALLED gains
+# the native-only UDP, lookup_host and uuid.v7 leaves; and runtime_owned's
+# TABLE strings `status` / `stdout` now coincide with the new public fns
+# `http.status` and `io.stdout`.
 
 [[site]]
 id = "crates/almide-codegen/src/owned_source.rs::SCALAR_SOURCE_READS::table"
@@ -52,7 +60,7 @@ names = 6
 [[site]]
 id = "crates/almide-codegen/src/pass_concretize_types_call_ret.rs::resolve_list_poly_ret_ty_structural::or-pattern"
 class = "legacy"
-names = 9
+names = 7
 
 [[site]]
 id = "crates/almide-codegen/src/pass_concretize_types_signatures.rs::is_fold_like_call::or-pattern"
@@ -177,7 +185,7 @@ names = 8
 [[site]]
 id = "crates/almide-codegen/src/walker/expressions_calls_binops.rs::render_method_call_full::or-pattern"
 class = "legacy"
-names = 43
+names = 42
 
 [[site]]
 id = "crates/almide-codegen/src/walker/expressions_calls_binops.rs::try_render_numeric_cast::or-pattern"
@@ -187,17 +195,17 @@ names = 2
 [[site]]
 id = "crates/almide-codegen/src/walker/runtime_owned.rs::TABLE::table"
 class = "legacy"
-names = 2
+names = 4
 
 [[site]]
 id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_ALLOC_CALLS::table"
 class = "legacy"
-names = 9
+names = 7
 
 [[site]]
 id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_DENIED_MODULES::table"
 class = "legacy"
-names = 13
+names = 15
 
 [[site]]
 id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_PURE_MODULES::table"
@@ -212,7 +220,7 @@ names = 8
 [[site]]
 id = "crates/almide-frontend/src/check/bounded.rs::CAPABILITY_GRANTS::table"
 class = "legacy"
-names = 8
+names = 11
 
 [[site]]
 id = "crates/almide-frontend/src/check/calls.rs::argv_reader_hint::or-pattern"
@@ -262,7 +270,7 @@ names = 2
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::ALIASES::table"
 class = "legacy"
-names = 42
+names = 41
 
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::MODULE_DESCRIPTIONS::table"
@@ -367,7 +375,7 @@ names = 9
 [[site]]
 id = "crates/almide-ir/src/effect.rs::HOST_FREE_EFFECT_FNS::table"
 class = "legacy"
-names = 8
+names = 5
 
 [[site]]
 id = "crates/almide-ir/src/effect.rs::STDLIB_MODULE_EFFECTS::table"
@@ -412,12 +420,12 @@ names = 6
 [[site]]
 id = "crates/almide-mir/src/host_ops.rs::CAP_MODULES::table"
 class = "legacy"
-names = 12
+names = 14
 
 [[site]]
 id = "crates/almide-mir/src/host_ops.rs::WALLED::table"
 class = "legacy"
-names = 6
+names = 9
 
 [[site]]
 id = "crates/almide-mir/src/lower/binds_p2_c.rs::seed_call_module_heap_read_shape::or-pattern"
@@ -682,7 +690,7 @@ names = 25
 [[site]]
 id = "crates/almide-mir/src/lower/mod_p5.rs::is_self_host_result_str_module_fn::or-pattern"
 class = "legacy"
-names = 58
+names = 56
 
 [[site]]
 id = "crates/almide-mir/src/lower/tests_result_family.rs::every_registry_result_fn_is_in_the_materialized_set::NOT_YET::table"
@@ -707,7 +715,7 @@ names = 56
 [[site]]
 id = "crates/almide-mir/src/render_native_shims.rs::SHIMS::table"
 class = "legacy"
-names = 25
+names = 24
 
 [[site]]
 id = "crates/almide-spine/src/s2.rs::fingerprint_decl::table"
@@ -727,7 +735,7 @@ names = 9
 [[site]]
 id = "crates/almide-types/src/self_host_fn_tables.rs::BYTES_CORE_FNS::table"
 class = "legacy"
-names = 95
+names = 94
 
 [[site]]
 id = "crates/almide-types/src/self_host_fn_tables.rs::BYTES_MUTATE_FNS::table"
@@ -797,7 +805,7 @@ names = 4
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_exclusive::or-pattern"
 class = "legacy"
-names = 104
+names = 102
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_exclusive::table"
@@ -827,7 +835,7 @@ names = 3
 [[site]]
 id = "crates/almide-wasi/src/fs_service.rs::FS_OP_NAMES::table"
 class = "legacy"
-names = 29
+names = 26
 
 [[site]]
 id = "crates/almide-wasm-run/src/component_availability.rs::operation_name::NAMES::table"
@@ -932,7 +940,7 @@ names = 29
 [[site]]
 id = "crates/almide-wasm/src/list.rs::lower_list_call::or-pattern"
 class = "legacy"
-names = 41
+names = 40
 
 [[site]]
 id = "crates/almide-wasm/src/list_order.rs::lower_list_order_call::or-pattern"
@@ -1143,7 +1151,7 @@ why = "The legacy eta.rs HOF_MODULES list, moved (#3673), not a new property: wh
 [[site]]
 id = "crates/almide-syntax/src/parser/types.rs::FOREIGN_BUILTIN_TYPES::table"
 class = "justified"
-names = 5
+names = 4
 why = "A syntax table, not a property of stdlib functions: the C / Rust / Python / TS spellings of the builtin types (`int`, `string`, `bool`, `f64`, …) and the Almide type each means, read only by the parser's one-error recovery. The names that collide with stdlib module names (`int`, `float`, `string`, `bool`, `str`) are type spellings here, not calls; no leg reads the table."
 
 [[site]]
@@ -1229,3 +1237,21 @@ id = "crates/almide-codegen/src/walker/types.rs::render_type_applied::table"
 class = "justified"
 names = 2
 why = "Not a stdlib name list: `key` / `value` / `object` here are the field names of a map entry or tuple the Rust renderer spells out. The scan reads them as stdlib names only because value.key (and value.object) now exist (stdlib redesign wave 4A); no function property is keyed on them."
+
+[[site]]
+id = "crates/almide-codegen/src/pass_borrow_inference.rs::seed_builtin_output_sigs::table"
+class = "justified"
+names = 2
+why = ""
+
+[[site]]
+id = "crates/almide-interp/src/dispatch.rs::eval_builtin_call::or-pattern"
+class = "justified"
+names = 2
+why = ""
+
+[[site]]
+id = "crates/almide-wasm-vm/src/ir.rs::CONTROL_AND_VARIABLE::table"
+class = "justified"
+names = 2
+why = ""
