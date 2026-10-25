@@ -11296,6 +11296,20 @@ fn __with_path(req: HttpRequest, target: String) -> HttpRequest = _
 @consume(resp)
 fn __set_body(resp: HttpResponse, body: String) -> HttpResponse = _
 
+
+
+
+
+
+
+@intrinsic("almide_http_req_repr")
+@borrow_ref(req)
+fn __repr_http_request(req: HttpRequest) -> String = _
+
+@intrinsic("almide_http_resp_repr")
+@borrow_ref(resp)
+fn __repr_http_response(resp: HttpResponse) -> String = _
+
 fn __path_of(target: String) -> String = match string.index_of(target, "?") {
   some(i) => string.take(target, i),
   none => target,
@@ -11928,6 +11942,40 @@ fn http_req_with_params(req: List[String], flat: List[String]) -> List[String] =
 }
 
 fn http_req_with_path(req: List[String], target: String) -> List[String] = list.set(req, 1, target)
+
+
+
+
+
+
+
+
+fn __hq_quote_char(c: String) -> String = match c {
+  "\\" => "\\\\",
+  "\"" => "\\\"",
+  "\n" => "\\n",
+  "\r" => "\\r",
+  "\t" => "\\t",
+  _ => c,
+}
+
+
+fn __hq_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hq_quote_char(c)) |> list.join("")) + "\""
+
+@implements("http.__repr_http_request")
+fn http_req_repr(req: List[String]) -> String = {
+  let method = __hq_quote(list.get(req, 0) ?? "")
+  let path = __hq_quote(list.get(req, 1) ?? "")
+  let body = __hq_quote(list.get(req, 2) ?? "")
+  "HttpRequest { method: ${method}, path: ${path}, body: ${body}, headers: ${__hq_nh(req)} }"
+}
+
+@implements("http.__repr_http_response")
+fn http_resp_repr(resp: List[String]) -> String = {
+  let status = list.get(resp, 0) ?? "0"
+  let body = __hq_quote(list.get(resp, 1) ?? "")
+  "HttpResponse { status: ${status}, body: ${body}, headers: ${(list.len(resp) - 2) / 2} }"
+}
 "#;
 pub const SRC_HTTP_RESPONSE: &str = r#"
 
