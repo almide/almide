@@ -48,7 +48,10 @@ fn corpus_burn_up() {
     let mut front_skipped = 0usize;
     let mut total = 0usize;
 
-    for line in almide_corpus::manifest_rows(&manifest) {
+    let rows = almide_corpus::select(almide_corpus::manifest_rows(&manifest).collect::<Vec<_>>(), "backend_parity", |line| {
+        line.splitn(3, '\t').nth(2).expect("manifest row").to_string()
+    });
+    for line in rows {
         let mut it = line.splitn(3, '\t');
         let want_hash = it.next().expect("test harness invariant");
         let want_exit: i32 = it.next().expect("test harness invariant").parse().expect("test harness invariant");
@@ -100,8 +103,11 @@ fn corpus_burn_up() {
         divergent.len(),
         &divergent[..divergent.len().min(5)]
     );
+    // The grow-only floor counts the whole corpus; the CI slice asserts only
+    // that it judged something.
+    let floor = if almide_corpus::full_run() { SUPPORTED_FLOOR } else { 1 };
     assert!(
-        supported >= SUPPORTED_FLOOR,
+        supported >= floor,
         "supported count {supported} fell below the grow-only floor {SUPPORTED_FLOOR}"
     );
 }
