@@ -30,11 +30,11 @@ effect fn tcp_connect(host: String, port: Int) -> Result[TcpStream, String] = ok
 effect fn tcp_is_open(stream: TcpStream) -> Bool = net.__os_tcp_is_open(__tcp(stream))
 
 /// Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
-effect fn tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String] = net.__os_tcp_read_timeout(
+effect fn tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String] = ok(net.__os_tcp_read_timeout(
   __tcp(stream),
   len,
   timeout_ms,
-)
+)!)
 
 /// Sets read/write timeout; <= 0 clears it.
 effect fn tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Result[Unit, String] = net.__os_tcp_set_timeout(
@@ -115,10 +115,10 @@ fn is_loopback(ip: IpAddr) -> Bool = match ip {
 }
 
 // ── The handles' I/O requirements (R-L0-44) ──
-effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = net.__os_tcp_read(
+effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = ok(net.__os_tcp_read(
   __tcp(h),
   max,
-)
+)!)
 
 effect fn __tcp_stream_write(h: TcpStream, data: Bytes) -> Result[Unit, String] = net.__os_tcp_write(
   __tcp(h),

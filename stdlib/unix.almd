@@ -65,15 +65,15 @@ effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = 
 }
 
 /// Up to len bytes of fd from offset; fewer at its end.
-effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = unix.__os_shm_read(
+effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = ok(unix.__os_shm_read(
   __raw(fd),
   offset,
   len,
-)
+)!)
 
 // ── The descriptor's I/O requirements (R-L0-44) ──
 // One read of at most max bytes (65536 at most per read): empty once the peer closed.
-effect fn __fd_read(h: Fd, max: Int) -> Result[Bytes, String] = unix.__os_recv(__raw(h), max)
+effect fn __fd_read(h: Fd, max: Int) -> Result[Bytes, String] = ok(unix.__os_recv(__raw(h), max)!)
 
 effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = unix.__os_send(
   __raw(h),
