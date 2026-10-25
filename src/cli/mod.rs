@@ -178,11 +178,10 @@ const PROC_SPAWNING: &[(&str, usize)] = &[
     ("spawn", 0),
 ];
 
-/// The subprocess fns that SIGNAL or probe a pid (#4125): they start no
-/// child, but they reach processes, so `[permissions] proc` bounds them as the
-/// command they used to run — `kill` must be on the list. The embedded host
-/// applies the same rule at run time (host_process.rs, ops 87 / 88).
-const PROC_SIGNALLING: &[&str] = &["kill", "is_alive"];
+/// The command a `@signals_process` stdlib fn (#4125: it starts no child but
+/// signals or probes a pid) is bounded as by `[permissions] proc` — the one
+/// it used to run. The embedded host applies the same rule at run time
+/// (host_process.rs, ops 87 / 88).
 const PROC_SIGNAL_COMMAND: &str = "kill";
 
 /// `[permissions] proc` (#2589, ADR-0025), statically: every call that starts
@@ -203,7 +202,9 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
                 IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
                     if module.as_str() == "process" =>
                 {
-                    if PROC_SIGNALLING.contains(&func.as_str()) && !self.allow.iter().any(|c| c == PROC_SIGNAL_COMMAND) {
+                    if almide_types::stdlib_info::is_signals_process_stdlib_fn("process", func.as_str())
+                        && !self.allow.iter().any(|c| c == PROC_SIGNAL_COMMAND)
+                    {
                         let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
                         self.bad.push(format!(
                             "process.{func}(\"{PROC_SIGNAL_COMMAND}\"){line}: `{PROC_SIGNAL_COMMAND}` is not in [permissions] proc"
@@ -227,7 +228,7 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
                     if let Some(f) = n.strip_prefix("process.").filter(|f| PROC_SPAWNING.iter().any(|(p, _)| p == f)) {
                         self.bad.push(format!("process.{f} passed as a value: [permissions] proc cannot check its command"));
                     }
-                    if let Some(f) = n.strip_prefix("process.").filter(|f| PROC_SIGNALLING.contains(f)) {
+                    if let Some(f) = n.strip_prefix("process.").filter(|f| almide_types::stdlib_info::is_signals_process_stdlib_fn("process", f)) {
                         if !self.allow.iter().any(|c| c == PROC_SIGNAL_COMMAND) {
                             self.bad.push(format!(
                                 "process.{f} passed as a value: `{PROC_SIGNAL_COMMAND}` is not in [permissions] proc"
