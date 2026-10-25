@@ -242,6 +242,14 @@ fn shim_fs_call(
         i.end();
     }
 
+    // op 76: a deliberate exit's mark (#4203) — only a host that contains a
+    // handler abort reads it; here it answers 0.
+    if has(76) {
+        i.local_get(op).i32_const(76).i32_eq().if_(BlockType::Empty);
+        i.i64_const(0).return_();
+        i.end();
+    }
+
     // Everything else: the defined refusal.
     refuse(&mut i, park, MSG, UNSUPPORTED_MSG.len());
     i.end();
