@@ -639,6 +639,7 @@ fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Funct
     Helper::JsonPathRemove => {
         json_path_helpers::emit_json_path_remove_helper(work.helper_base.get(), helper_snapshot)
     }
+    Helper::JsonNestsPast => json_path_helpers::emit_json_nests_past_helper(work.helper_base.get(), helper_snapshot),
     Helper::ScanDeep { key } => match work.scan_bodies.borrow_mut().remove(key) {
         Some(work::DisplayBuild::Built(f)) => f,
         _ => {

@@ -8,6 +8,7 @@ pub mod profile;
 pub mod fs_errno;
 /// C-418's one escaper for user data in runtime error texts (#4126).
 pub mod err_text;
+pub mod json_limits;
 pub mod native_stack_guard;
 pub mod rust_lit;
 

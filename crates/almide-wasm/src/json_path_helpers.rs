@@ -451,3 +451,47 @@ pub(crate) fn emit_json_path_remove_helper(helper_base: u32, helpers: &[Helper])
     i.end();
     f
 }
+
+/// `$jv_nests_past(v, budget) -> i32` (#4209): 1 when Value `v` holds
+/// containers nested more than `budget` deep — an array or object at
+/// budget 0 is one level too many, else any element / entry value past
+/// `budget - 1`. Recurses at most `budget + 1` frames whatever `v` holds
+/// (json.set_path calls it with at most JSON_MAX_DEPTH), so it cannot
+/// exhaust the stack on the deep value it is there to refuse.
+pub(crate) fn emit_json_nests_past_helper(helper_base: u32, helpers: &[Helper]) -> Function {
+    let self_idx = helper_base
+        + helpers
+            .iter()
+            .position(|h| matches!(h, Helper::JsonNestsPast))
+            .expect("registered") as u32;
+    let (v, budget) = (0u32, 1u32);
+    let (tag, list, cur, item) = (2u32, 3u32, 4u32, 5u32);
+    let m_tag = slot_memarg(almide_layout::SUM_TAG);
+    let m_pay = slot_memarg(almide_layout::SUM_FIELD);
+    let mut f = Function::new([(4, ValType::I32)]);
+    let mut i = f.instructions();
+    i.local_get(v).i32_load(m_tag).local_tee(tag).i32_const(VT_ARRAY).i32_ne();
+    i.local_get(tag).i32_const(VT_OBJECT).i32_ne().i32_and().if_(BlockType::Empty);
+    i.i32_const(0).return_();
+    i.end();
+    i.local_get(budget).i32_eqz().if_(BlockType::Empty);
+    i.i32_const(1).return_();
+    i.end();
+    i.local_get(v).i32_load(m_pay).local_set(list);
+    i.i32_const(0).local_set(cur);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(cur).local_get(list).i32_load(len_memarg()).i32_ge_u().br_if(1);
+    // an element, or an entry pair's value (key@0 / val@4)
+    i.local_get(list).local_get(cur).i32_add().i32_load(slot_memarg(0)).local_set(item);
+    i.local_get(tag).i32_const(VT_OBJECT).i32_eq().if_(BlockType::Empty);
+    i.local_get(item).i32_load(slot_memarg(4)).local_set(item);
+    i.end();
+    i.local_get(item).local_get(budget).i32_const(1).i32_sub().call(self_idx).if_(BlockType::Empty);
+    i.i32_const(1).return_();
+    i.end();
+    i.local_get(cur).i32_const(4).i32_add().local_set(cur);
+    i.br(0).end().end();
+    i.i32_const(0);
+    i.end();
+    f
+}
