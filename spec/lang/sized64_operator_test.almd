@@ -1,20 +1,29 @@
 // The arithmetic operators on Int64 and Float64 (#4055): the checker accepted
 // them, and lowering then stopped with an IR verify ICE.
-
 fn add(a: Int64, b: Int64) -> Int64 = a + b
+
 fn sub(a: Int64, b: Int64) -> Int64 = a - b
+
 fn mul(a: Int64, b: Int64) -> Int64 = a * b
+
 fn div(a: Int64, b: Int64) -> Int64 = a / b
+
 fn rem(a: Int64, b: Int64) -> Int64 = a % b
+
 fn neg(a: Int64) -> Int64 = -a
 
 fn fadd(a: Float64, b: Float64) -> Float64 = a + b
+
 fn fsub(a: Float64, b: Float64) -> Float64 = a - b
+
 fn fmul(a: Float64, b: Float64) -> Float64 = a * b
+
 fn fdiv(a: Float64, b: Float64) -> Float64 = a / b
+
 fn fneg(a: Float64) -> Float64 = -a
 
 fn i(n: Int) -> Int64 = int.to_int64(n)
+
 fn f(x: Float) -> Float64 = float.to_float64(x)
 
 test "Int64 arithmetic operators" {
