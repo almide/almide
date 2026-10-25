@@ -45,7 +45,7 @@ fn response(status: Int, body: String) -> HttpResponse = _
 fn json(status: Int, body: String) -> HttpResponse = _
 
 /// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
-fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = __with_headers(
+fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = http.__with_headers(
   status,
   body,
   __flat(headers),
@@ -107,7 +107,7 @@ fn __http_response_header(m: HttpResponse, name: String) -> String? = _
 @borrow_ref(m)
 fn __http_response_header_values(m: HttpResponse, name: String) -> List[String] = _
 
-fn __http_response_headers(m: HttpResponse) -> List[(String, String)] = __pairs(__http_response_headers_flat(m))
+fn __http_response_headers(m: HttpResponse) -> List[(String, String)] = __pairs(http.__http_response_headers_flat(m))
 
 @intrinsic("almide_http_headers_flat")
 @borrow_ref(m)
@@ -117,7 +117,7 @@ fn __http_response_headers_flat(m: HttpResponse) -> List[String] = _
 @borrow_ref(m)
 fn __http_response_body(m: HttpResponse) -> String = _
 
-fn __http_response_body_bytes(m: HttpResponse) -> Bytes = bytes.from_string(__http_response_body(m))
+fn __http_response_body_bytes(m: HttpResponse) -> Bytes = bytes.from_string(http.__http_response_body(m))
 
 @intrinsic("almide_http_set_header")
 @consume(m)
@@ -127,7 +127,7 @@ fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> H
 @consume(m)
 fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = _
 
-fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = __http_response_set_body(
+fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = http.__http_response_set_body(
   m,
   bytes.to_string_lossy(body),
 )
@@ -141,7 +141,7 @@ fn __http_request_header(m: HttpRequest, name: String) -> String? = _
 @borrow_ref(m)
 fn __http_request_header_values(m: HttpRequest, name: String) -> List[String] = _
 
-fn __http_request_headers(m: HttpRequest) -> List[(String, String)] = __pairs(__http_request_headers_flat(m))
+fn __http_request_headers(m: HttpRequest) -> List[(String, String)] = __pairs(http.__http_request_headers_flat(m))
 
 @intrinsic("almide_http_req_headers_flat")
 @borrow_ref(m)
@@ -151,7 +151,7 @@ fn __http_request_headers_flat(m: HttpRequest) -> List[String] = _
 @borrow_ref(m)
 fn __http_request_body(m: HttpRequest) -> String = _
 
-fn __http_request_body_bytes(m: HttpRequest) -> Bytes = bytes.from_string(__http_request_body(m))
+fn __http_request_body_bytes(m: HttpRequest) -> Bytes = bytes.from_string(http.__http_request_body(m))
 
 @intrinsic("almide_http_req_set_header")
 @consume(m)
@@ -161,7 +161,7 @@ fn __http_request_set_header(m: HttpRequest, name: String, value: String) -> Htt
 @consume(m)
 fn __http_request_set_body(m: HttpRequest, body: String) -> HttpRequest = _
 
-fn __http_request_set_body_bytes(m: HttpRequest, body: Bytes) -> HttpRequest = __http_request_set_body(
+fn __http_request_set_body_bytes(m: HttpRequest, body: Bytes) -> HttpRequest = http.__http_request_set_body(
   m,
   bytes.to_string_lossy(body),
 )
@@ -207,7 +207,7 @@ effect fn get(url: String) -> Result[String, String] = _
 
 /// Reply body for any method; any status is ok.
 @category("Net.fetch")
-effect fn request(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[String, String] = __request(
+effect fn request(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[String, String] = http.__request(
   method,
   url,
   body,
@@ -224,11 +224,11 @@ effect fn get_response(url: String) -> Result[HttpResponse, String] = _
 
 /// Sends req to the URL its target names; the whole reply, any status; redirects not followed.
 @category("Net.fetch")
-effect fn send(req: HttpRequest) -> Result[HttpResponse, String] = __request_response(
+effect fn send(req: HttpRequest) -> Result[HttpResponse, String] = http.__request_response(
   http.method(req),
   http.path(req),
-  __http_request_body(req),
-  __http_request_headers_flat(req),
+  http.__http_request_body(req),
+  http.__http_request_headers_flat(req),
 )
 
 @intrinsic("almide_http_request_response")
@@ -244,7 +244,7 @@ effect fn get_bytes(url: String) -> Result[Bytes, String] = _
 
 /// Raw body bytes for any method and headers.
 @category("Net.fetch")
-effect fn request_bytes(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[Bytes, String] = __request_bytes(
+effect fn request_bytes(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[Bytes, String] = http.__request_bytes(
   method,
   url,
   body,
@@ -279,8 +279,8 @@ type HttpLimits = { total_ms: Int, idle_ms: Int }
 effect fn start(req: HttpRequest, limits: HttpLimits) -> Result[HttpCall, String] = __call_start(
   http.method(req),
   http.path(req),
-  __http_request_body(req),
-  __http_request_headers_flat(req),
+  http.__http_request_body(req),
+  http.__http_request_headers_flat(req),
   limits.total_ms,
   limits.idle_ms,
 )
@@ -332,7 +332,7 @@ type HttpMiddleware = (HttpHandler) -> HttpHandler
 type HttpRoute = { method: String, pattern: String, segments: List[String], handler: HttpHandler }
 
 /// Request built in code; target keeps its ?query (a full URL for send / start).
-fn new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest = __new_request(
+fn new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest = http.__new_request(
   method,
   target,
   body,
