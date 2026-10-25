@@ -31695,7 +31695,10 @@ fn join(base: String, child: String) -> String = {
   else {
     let b = if string.ends_with(base, "/") then string.slice(base, 0, string.len(base) - 1)
     else base
-    if string.len(b) == 0 then child else b + "/" + child
+
+    if string.len(b) > 0 then b + "/" + child
+    else if string.starts_with(base, "/") then "/" + child
+    else child
   }
 }
 
