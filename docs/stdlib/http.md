@@ -1052,12 +1052,12 @@ them.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (48 functions)
+## Signature index (36 functions)
 
 ```
 // Serves 0.0.0.0:port forever; handler err is a 500.
 // @since 0.5.0 or earlier
-effect http.serve(port: Int, f: (HttpRequest) -> Result[HttpResponse, String]) -> Unit
+effect http.serve(port: Int, handler: (HttpRequest) -> Result[HttpResponse, String]) -> Unit
 
 // Reply with Content-Type text/plain.
 // @since 0.5.0 or earlier
@@ -1067,121 +1067,79 @@ http.response(status: Int, body: String) -> HttpResponse
 // @since 0.5.0 or earlier
 http.json(status: Int, body: String) -> HttpResponse
 
-// Reply with headers as-is; no default Content-Type.
+// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
 // @since 0.5.0 or earlier
-http.with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse
+http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse
 
 // 302 with Location url and empty body.
 // @since 0.6.0 or earlier
 http.redirect(url: String) -> HttpResponse
 
 // resp with code set; not range-checked.
-// @since 0.6.0 or earlier
+// @since unreleased
 http.set_status(resp: HttpResponse, code: Int) -> HttpResponse
 
-// Payload text; lossy UTF-8 when fetched.
+// HTTP status code; 0 if the status line was bad.
 // @since 0.6.0 or earlier
-http.body(resp: HttpResponse) -> String
-
-// Case-insensitive upsert of header key.
-// @since 0.6.0 or earlier
-http.set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse
-
-// First value for key, any case; none if absent.
-// @since 0.6.0 or earlier
-http.header(resp: HttpResponse, key: String) -> Option[String]
-
-// HTTP status; 0 if the status line was bad.
-// @since 0.62.0
 http.status(resp: HttpResponse) -> Int
 
-// Map by lowercased name; first value wins.
-// @since 0.62.0
-http.headers(resp: HttpResponse) -> Map[String, String]
+// First value of header name, any case; none if absent.
+// @since unreleased
+http.header(m: M, name: String) -> Option[String]
 
-// Every value for key, wire order; [] if absent.
+// Every value of header name, any case, in wire order; [] if absent.
 // @since 0.62.0
-http.header_values(resp: HttpResponse, key: String) -> List[String]
+http.header_values(m: M, name: String) -> List[String]
 
-// Request method as sent, e.g. GET.
+// Every header as (name, value), wire spelling and order, repeats kept.
+// @since 0.62.0
+http.headers(m: M) -> List[(String, String)]
+
+// Body text; a fetched body is decoded as lossy UTF-8.
 // @since 0.6.0 or earlier
+http.body(m: M) -> String
+
+// Body as bytes: the UTF-8 bytes of body(m).
+// @since unreleased
+http.body_bytes(m: M) -> Bytes
+
+// m with header name set, any case: the first match replaced in place, else appended.
+// @since 0.6.0 or earlier
+http.set_header(m: M, name: String, value: String) -> M
+
+// m with its body replaced.
+// @since unreleased
+http.set_body(m: M, body: String) -> M
+
+// m with its body replaced by body, decoded as lossy UTF-8.
+// @since unreleased
+http.set_body_bytes(m: M, body: Bytes) -> M
+
+// @since unreleased
 http.method(req: HttpRequest) -> String
 
-// Request target, query string included.
-// @since 0.6.0 or earlier
+// @since unreleased
 http.path(req: HttpRequest) -> String
-
-// Body text; empty without a Content-Length.
-// @since 0.6.0 or earlier
-http.body(req: HttpRequest) -> String
-
-// First value for key, any case; none if absent.
-// @since 0.6.0 or earlier
-http.header(req: HttpRequest, key: String) -> Option[String]
 
 // url.parse_query of the target after its first ?; pairs in order; err on a bad escape.
 // @since 0.6.0 or earlier
 http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]
 
-// + to space, %XX to byte; bad escapes kept.
-// @since 0.27.7 or earlier
-http.url_decode(s: String) -> String
-
 // Body even for a 404; err only on transport.
 // @since 0.5.0 or earlier
 effect http.get(url: String) -> String
 
-// Reply body of a POST; JSON type by default.
-// @since 0.5.0 or earlier
-effect http.request("POST", url: String, body: String, []) -> String
-
-// Reply body of a PUT; JSON type by default.
-// @since 0.6.0 or earlier
-effect http.request("PUT", url: String, body: String, []) -> String
-
-// Reply body of a PATCH; JSON type by default.
-// @since 0.6.0 or earlier
-effect http.request("PATCH", url: String, body: String, []) -> String
-
-// Reply body of a DELETE; any status is ok.
-// @since 0.6.0 or earlier
-effect http.request("DELETE", url: String, "", []) -> String
-
 // Reply body for any method; any status is ok.
 // @since 0.5.0 or earlier
-effect http.request(method: String, url: String, body: String, headers: Map[String, String]) -> String
-
-// (status, body); a 404 is ok, not err.
-// @since 0.61.0
-effect http.get_status(url: String) -> (Int, String)
-
-// (status, body) for any method; 3xx not followed.
-// @since 0.61.0
-effect http.request_status(method: String, url: String, body: String, headers: Map[String, String]) -> (Int, String)
+effect http.request(method: String, url: String, body: String, headers: List[(String, String)]) -> String
 
 // Whole reply, 404 included; redirects not followed.
 // @since 0.62.0
 effect http.get_response(url: String) -> HttpResponse
 
-// Whole reply to a POST; any status is ok.
-// @since 0.62.0
-effect http.send(http.new_request("POST", url: String, body: String, [])) -> HttpResponse
-
-// Whole reply to a PUT; any status is ok.
-// @since 0.62.0
-effect http.send(http.new_request("PUT", url: String, body: String, [])) -> HttpResponse
-
-// Whole reply to a PATCH; any status is ok.
-// @since 0.62.0
-effect http.send(http.new_request("PATCH", url: String, body: String, [])) -> HttpResponse
-
-// Whole reply to a DELETE; any status is ok.
-// @since 0.62.0
-effect http.send(http.new_request("DELETE", url: String, "", [])) -> HttpResponse
-
-// Whole reply for any method; 3xx not followed.
-// @since 0.62.0
-effect http.send(http.new_request(method: String, url: String, body: String, headers: Map[String, String])) -> HttpResponse
+// Sends req to the URL its target names; the whole reply, any status; redirects not followed.
+// @since unreleased
+effect http.send(req: HttpRequest) -> HttpResponse
 
 // Raw body bytes, not UTF-8 decoded.
 // @since 0.27.7 or earlier
@@ -1189,15 +1147,11 @@ effect http.get_bytes(url: String) -> Bytes
 
 // Raw body bytes for any method and headers.
 // @since 0.27.7 or earlier
-effect http.request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Bytes
+effect http.request_bytes(method: String, url: String, body: String, headers: List[(String, String)]) -> Bytes
 
-// Body chunks to on_chunk; err on a non-2xx.
-// @since 0.15.1 or earlier
-effect http.request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Unit
-
-// Begins a request; returns at once with a handle.
+// Begins sending req; returns at once with a handle.
 // @since unreleased
-effect http.start(http.new_request(method: String, url: String, body: String, headers: Map[String, String]), limits: HttpLimits) -> HttpCall
+effect http.start(req: HttpRequest, limits: HttpLimits) -> HttpCall
 
 // Never blocks: none while running, then the result.
 // @since unreleased
@@ -1215,13 +1169,9 @@ effect http.wait(c: HttpCall) -> HttpResponse
 // @since unreleased
 effect http.cancel(c: HttpCall) -> Unit
 
-// request_stream bounded by per-call limits.
+// Request built in code; target keeps its ?query (a full URL for send / start).
 // @since unreleased
-effect http.request_stream_with_limits(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits, on_chunk: (String) -> Unit) -> Unit
-
-// Request built in code; target keeps its ?query.
-// @since unreleased
-http.new_request(method: String, target: String, body: String, headers: Map[String, String]) -> HttpRequest
+http.new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest
 
 // Router-bound path parameter, decoded; none if unbound.
 // @since unreleased
@@ -1245,7 +1195,7 @@ http.wrap(handler: (HttpRequest) -> Result[HttpResponse, String], middleware: Li
 
 // JSON body through decode; err is a 400 response.
 // @since unreleased
-http.decode_json(req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse]
+http.decode_json(req: HttpRequest, decode: (Value) -> Result[A, String]) -> Result[A, HttpResponse]
 ```
 
 ## Type index (4 types)

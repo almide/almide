@@ -212,124 +212,84 @@ loopback
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (26 functions)
+## Signature index (16 functions)
 
 ```
-// Connected stream handle; err if refused.
+// A stream connected to host:port; err if refused.
 // @since 0.20.0 or earlier
-effect net.tcp_connect(host: String, port: Int) -> Int
+effect net.tcp_connect(host: String, port: Int) -> TcpStream
 
-// Up to len bytes; empty once the peer closed; err if len < 0.
+// False after io.close; a peer close is not seen.
 // @since 0.20.0 or earlier
-effect net.tcp_read(stream: Int, len: Int) -> Bytes
-
-// Sends all of data, flushed; err if closed.
-// @since 0.20.0 or earlier
-effect net.tcp_write(stream: Int, data: Bytes) -> Unit
-
-// Exactly len bytes; err on early EOF, naming how many arrived.
-// @since 0.20.0 or earlier
-effect net.tcp_read_exact(stream: Int, len: Int) -> Bytes
-
-// Shuts down the stream; twice is ok.
-// @since 0.20.0 or earlier
-effect net.tcp_close(stream: Int) -> Unit
-
-// False after tcp_close; a peer close is not seen.
-// @since 0.20.0 or earlier
-effect net.tcp_is_open(stream: Int) -> Bool
+effect net.tcp_is_open(stream: TcpStream) -> Bool
 
 // Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
 // @since 0.20.0 or earlier
-effect net.tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Bytes
+effect net.tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Bytes
 
 // Sets read/write timeout; <= 0 clears it.
 // @since 0.20.0 or earlier
-effect net.tcp_set_timeout(stream: Int, timeout_ms: Int) -> Unit
+effect net.tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Unit
 
 // Bytes readable now, capped at 65536; 0 if none.
 // @since 0.20.0 or earlier
-effect net.tcp_available(stream: Int) -> Int
+effect net.tcp_available(stream: TcpStream) -> Int
 
-// Listener bound to host:port; err if in use.
+// A listener bound to host:port; err if in use. Port 0 lets the OS choose.
 // @since 0.20.0 or earlier
-effect net.tcp_listen(host: String, port: Int) -> Int
+effect net.tcp_listen(host: String, port: Int) -> TcpListener
 
 // The port a listener is bound to: the one the OS chose when it listened on port 0.
 // @since unreleased
-effect net.tcp_local_port(listener: Int) -> Int
+effect net.tcp_local_port(listener: TcpListener) -> Int
 
-// Blocks for the next client; its stream handle.
+// Blocks for the next client; its stream.
 // @since 0.20.0 or earlier
-effect net.tcp_accept(listener: Int) -> Int
+effect net.tcp_accept(listener: TcpListener) -> TcpStream
 
-// Stops listening; closing twice is ok.
-// @since 0.20.0 or earlier
-effect net.tcp_close_listener(listener: Int) -> Unit
-
-// Stream socket connected to the listener at path; its descriptor.
+// A UDP socket bound to host:port; port 0 lets the OS choose.
 // @since unreleased
-effect net.unix_connect(path: String) -> Int
+effect net.udp_bind(host: String, port: Int) -> UdpSocket
 
-// Listener bound at path, which must not exist yet.
+// The port sock is bound to.
 // @since unreleased
-effect net.unix_listen(path: String) -> Int
+effect net.udp_local_port(sock: UdpSocket) -> Int
 
-// Blocks for the next connection; its descriptor.
+// Sends data as one datagram to host:port.
 // @since unreleased
-effect net.unix_accept(listener: Int) -> Int
+effect net.udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Unit
 
-// Sends all of data, the descriptors fds riding with its first byte.
+// Blocks for the next datagram: at most max bytes of it, and its sender.
 // @since unreleased
-effect net.unix_send(sock: Int, data: Bytes, fds: List[Int]) -> Unit
+effect net.udp_recv_from(sock: UdpSocket, max: Int) -> UdpPacket
 
-// Up to max bytes, blocking; empty once the peer closed.
+// The addresses host resolves to, each once; err if none.
 // @since unreleased
-effect net.unix_recv(sock: Int, max: Int) -> Bytes
+effect net.lookup_host(host: String) -> List[IpAddr]
 
-// Descriptors received on sock and not yet taken, oldest first.
+// The IP address s spells: dotted IPv4, or IPv6 (`::` and an IPv4 tail allowed).
 // @since unreleased
-effect net.unix_take_fds(sock: Int) -> List[Int]
+net.parse_ip(s: String) -> Result[IpAddr, String]
 
-// True if fd is readable within timeout_ms; < 0 waits forever.
+// ip as text: dotted IPv4, or the RFC 5952 short IPv6 form.
 // @since unreleased
-effect net.unix_poll(fd: Int, timeout_ms: Int) -> Bool
+net.ip_to_string(ip: IpAddr) -> String
 
-// The fds readable within timeout_ms, in order; < 0 waits for one.
+// True for 127.0.0.0/8 and ::1.
 // @since unreleased
-effect net.unix_wait(fds: List[Int], timeout_ms: Int) -> List[Int]
-
-// Closes a socket, listener or received descriptor.
-// @since unreleased
-effect net.unix_close(fd: Int) -> Unit
-
-// New zero-filled unnamed file of size bytes; its descriptor.
-// @since unreleased
-effect net.shm_create(size: Int) -> Int
-
-// Grows or shrinks the file fd to size bytes.
-// @since unreleased
-effect net.shm_resize(fd: Int, size: Int) -> Unit
-
-// Writes data into fd at byte offset.
-// @since unreleased
-effect net.shm_write(fd: Int, offset: Int, data: Bytes) -> Unit
-
-// Up to len bytes of fd from offset; fewer at its end.
-// @since unreleased
-effect net.shm_read(fd: Int, offset: Int, len: Int) -> Bytes
+net.is_loopback(ip: IpAddr) -> Bool
 ```
 
 ## Type index (2 types)
 
 ```
-// Opaque Int handle to a TCP connection.
-// @since 0.20.0 or earlier
-type net.TcpStream = Int
+// One received datagram and where it came from.
+// @since unreleased
+type net.UdpPacket = { data: Bytes, host: String, port: Int }
 
-// Opaque Int handle to a listening socket.
-// @since 0.20.0 or earlier
-type net.TcpListener = Int
+// An IP address: four octets, or eight 16-bit groups.
+// @since unreleased
+type net.IpAddr = V4(Int, Int, Int, Int) | V6(List[Int])
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
