@@ -13,20 +13,20 @@ fn new[A]() -> Set[A] = _
 @intrinsic("almide_rt_set_from_list")
 fn from_list[A](xs: List[A]) -> Set[A] = _
 
-/// Copy with value appended; unchanged if present.
+/// Copy with x appended; unchanged if present.
 @intrinsic("almide_rt_set_insert")
 @reuse(s)
-fn insert[A](s: Set[A], value: A) -> Set[A] = _
+fn insert[A](s: Set[A], x: A) -> Set[A] = _
 
-/// Copy without value; unchanged if absent.
+/// Copy without x; unchanged if absent.
 @intrinsic("almide_rt_set_remove")
 @reuse(s)
-fn remove[A](s: Set[A], value: A) -> Set[A] = _
+fn remove[A](s: Set[A], x: A) -> Set[A] = _
 
-/// true when value is a member.
+/// true when x is a member.
 @intrinsic("almide_rt_set_contains")
-@borrow_ref(value)
-fn contains[A](s: Set[A], value: A) -> Bool = _
+@borrow_ref(x)
+fn contains[A](s: Set[A], x: A) -> Bool = _
 
 /// Member count; 0 for an empty set.
 @intrinsic("almide_rt_set_len")

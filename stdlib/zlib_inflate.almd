@@ -711,14 +711,14 @@ fn zli_decompress(data: Bytes, limit: Int) -> Result[Bytes, String] = {
 }
 
 // ── The stdlib entry points ──
-effect fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = zli_gunzip(data, zli_default_limit())
+fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = zli_gunzip(data, zli_default_limit())
 
-effect fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = zli_inflate(
+fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = zli_inflate(
   data,
   zli_default_limit(),
 )
 
-effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = zli_decompress(
+fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = zli_decompress(
   data,
   zli_default_limit(),
 )
