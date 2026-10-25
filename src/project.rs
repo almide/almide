@@ -162,6 +162,128 @@ fn line_of(content: &str, offset: usize) -> usize {
     content.as_bytes()[..offset.min(content.len())].iter().filter(|&&b| b == b'\n').count() + 1
 }
 
+/// The byte offset each line of `content` starts at, so N lookups cost one
+/// scan plus N binary searches. `line_of` per warning rescanned the file from
+/// its start, and a manifest of N unknown tables took O(N²) (#4194).
+struct LineStarts(Vec<usize>);
+
+impl LineStarts {
+    fn new(content: &str) -> Self {
+        let mut starts = vec![0];
+        starts.extend(content.bytes().enumerate().filter(|&(_, b)| b == b'\n').map(|(i, _)| i + 1));
+        LineStarts(starts)
+    }
+
+    /// Equal to [`line_of`] at every offset.
+    fn line(&self, offset: usize) -> usize {
+        self.0.partition_point(|&start| start <= offset)
+    }
+}
+
+/// The most bytes read from `almide.toml` or `almide.lock` (#4194): 1 MiB.
+/// A real manifest is a few hundred bytes to a few KB, and a lock line is
+/// about 200 bytes, so 1 MiB holds a lock of several thousand dependencies —
+/// far past any real project — while a file linked to `/dev/zero` or a
+/// generated multi-gigabyte one stops here instead of exhausting memory.
+pub const PROJECT_FILE_MAX_BYTES: u64 = 1 << 20;
+
+/// The bytes of `almide.toml` / `almide.lock` at `path`, refused unless it is
+/// a regular file (a symlink to one is followed) of at most
+/// [`PROJECT_FILE_MAX_BYTES`]. A repository can commit either as a symlink to
+/// `/dev/zero`, a FIFO or a device; reading one unbounded took the machine's
+/// memory (#4194). The length is checked before reading and the read itself
+/// is bounded, so a file that grows in between is refused as well.
+pub fn read_project_file_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let failed = |e: std::io::Error| format!("Failed to read {}: {}", path.display(), e);
+    let too_big = || {
+        format!(
+            "{} is larger than {} bytes, which no manifest or lock file is\n  hint: replace it with the real file",
+            path.display(),
+            PROJECT_FILE_MAX_BYTES
+        )
+    };
+    let meta = std::fs::metadata(path).map_err(failed)?;
+    if !meta.is_file() {
+        return Err(format!(
+            "{} is not a regular file — it is read only when it is one (a symlink to a regular file is followed)\n  hint: replace it with the real file",
+            path.display()
+        ));
+    }
+    if meta.len() > PROJECT_FILE_MAX_BYTES {
+        return Err(too_big());
+    }
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    std::fs::File::open(path).map_err(failed)?.take(PROJECT_FILE_MAX_BYTES + 1).read_to_end(&mut bytes).map_err(failed)?;
+    if bytes.len() as u64 > PROJECT_FILE_MAX_BYTES {
+        return Err(too_big());
+    }
+    Ok(bytes)
+}
+
+/// [`read_project_file_bytes`] as UTF-8 text.
+pub fn read_project_file(path: &Path) -> Result<String, String> {
+    String::from_utf8(read_project_file_bytes(path)?)
+        .map_err(|e| format!("Failed to read {}: stream did not contain valid UTF-8 ({e})", path.display()))
+}
+
+/// Manifest text as it may be printed: every control and bidi character
+/// escaped (the one escaper for printed user data, `almide_base::err_text`). A key or value
+/// from a cloned repository is never written to a terminal raw (#4126).
+fn shown(s: &str) -> String {
+    almide_base::err_text::almide_rt_errtext_escape(s)
+}
+
+/// [`shown`] line by line: for a multi-line message (a TOML error quoting
+/// its source line) whose own line breaks are layout.
+fn shown_lines(s: &str) -> String {
+    s.split('\n').map(shown).collect::<Vec<_>>().join("\n")
+}
+
+/// Refuse a manifest whose keys, or whose strings that name a package or a
+/// dependency, hold a control or bidi character (#4126): every one of them is
+/// printed by some command (`Built …`, `Fetching … from …`), and none can be
+/// written meaningfully with one. Other string values (a `description`)
+/// may hold a newline or a tab. Every other such character is refused.
+fn refuse_control_text(path: &Path, content: &str, table: &toml::de::DeTable<'_>, trail: &[&str]) -> Result<(), String> {
+    let bad = |s: &str, strict: bool| {
+        s.chars().any(|c| almide_base::err_text::almide_rt_errtext_is_escaped(c) && (strict || !matches!(c, '\n' | '\t' | '\r')))
+    };
+    for (key, value) in table {
+        let k: &str = key.get_ref().as_ref();
+        let refuse = |at: usize, what: &str| {
+            Err(located(
+                path,
+                content,
+                at,
+                &format!("{what} `{}` holds a control or bidi character\n  hint: delete it; almide.toml prints these strings", shown(k)),
+            ))
+        };
+        if bad(k, true) {
+            return refuse(key.span().start, "key");
+        }
+        let mut here: Vec<&str> = trail.to_vec();
+        here.push(k);
+        let strict = here.first() == Some(&"dependencies")
+            || (here.first() == Some(&"package") && matches!(k, "name" | "version" | "almide"));
+        match value.get_ref() {
+            toml::de::DeValue::String(v) if bad(v, strict) => return refuse(value.span().start, "the value of"),
+            toml::de::DeValue::Table(t) => refuse_control_text(path, content, t, &here)?,
+            toml::de::DeValue::Array(items) => {
+                for item in items {
+                    match item.get_ref() {
+                        toml::de::DeValue::String(v) if bad(v, strict) => return refuse(item.span().start, "an entry of"),
+                        toml::de::DeValue::Table(t) => refuse_control_text(path, content, t, &here)?,
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// `path:line: message`, the line found from a byte offset.
 fn located(path: &Path, content: &str, offset: usize, message: &str) -> String {
     format!("{}:{}: {message}", path.display(), line_of(content, offset))
@@ -172,7 +294,7 @@ fn read_manifest<'i>(path: &Path, content: &'i str) -> Result<Manifest<'i>, Stri
     let not_toml = |e: toml::de::Error| {
         let message = format!(
             "{}\n  hint: almide.toml is read as TOML — fix this line; every command reads the manifest",
-            e.message().trim()
+            shown(e.message().trim())
         );
         match e.span() {
             Some(s) => located(path, content, s.start, &message),
@@ -181,6 +303,7 @@ fn read_manifest<'i>(path: &Path, content: &'i str) -> Result<Manifest<'i>, Stri
     };
     let values: toml::Table = toml::from_str(content).map_err(not_toml)?;
     let spans = toml::de::DeTable::parse(content).map_err(not_toml)?.into_inner();
+    refuse_control_text(path, content, &spans, &[])?;
     Ok(Manifest { values, spans })
 }
 
@@ -258,10 +381,15 @@ impl Manifest<'_> {
     /// on its line — #3381).
     fn dependencies(&self, path: &Path, content: &str) -> Result<Vec<Dependency>, String> {
         let spans = spanned_entry(&self.spans, "dependencies").and_then(|t| t.get_ref().as_table());
+        // One index and one line table for the whole section: a lookup per
+        // entry was O(N) each, so N dependencies cost O(N²) (#4194).
+        let by_name: std::collections::HashMap<&str, &SpannedValue<'_>> =
+            spans.map(|t| t.iter().map(|(k, v)| (k.get_ref().as_ref(), v)).collect()).unwrap_or_default();
+        let lines = LineStarts::new(content);
         let mut out = Vec::new();
         for (name, value) in self.entries_in_file_order("dependencies") {
-            let entry = spans.and_then(|t| spanned_entry(t, &name));
-            if let Some(dep) = dependency_from(name, &value, entry, path, content)? {
+            let entry = by_name.get(name.as_str()).copied();
+            if let Some(dep) = dependency_from(name, &value, entry, path, content, &lines)? {
                 out.push(dep);
             }
         }
@@ -321,6 +449,7 @@ fn dependency_from(
     entry: Option<&SpannedValue<'_>>,
     path: &Path,
     content: &str,
+    lines: &LineStarts,
 ) -> Result<Option<Dependency>, String> {
     let Some(table) = value.as_table() else { return Ok(None) };
     let field = |k: &str| {
@@ -341,7 +470,7 @@ fn dependency_from(
             .and_then(|t| spanned_entry(t, key))
             .map_or(entry.span().start, |v| v.span().start)
     };
-    let declared_at = Some(format!("{}:{}", path.display(), line_of(content, offset_of("git"))));
+    let declared_at = Some(format!("{}:{}", path.display(), lines.line(offset_of("git"))));
     let subdir = match table.get("subdir") {
         None => None,
         Some(raw) => {
@@ -581,9 +710,9 @@ pub fn check_manifest_duplicates(path: &Path, content: &str) -> Result<(), Strin
     Err(match dup.key {
         Some(key) => {
             let what = if dup.table == "dependencies" {
-                format!("dependency `{key}` is declared twice in [dependencies]")
+                format!("dependency `{}` is declared twice in [dependencies]", shown(&key))
             } else {
-                format!("key `{key}` is declared twice in [{}]", dup.table)
+                format!("key `{}` is declared twice in [{}]", shown(&key), shown(&dup.table))
             };
             format!(
                 "{at}: {what} (first at line {first})\n  \
@@ -620,7 +749,8 @@ pub fn unknown_capability_message(name: &str, site: &str, grantable: &[&str]) ->
         None => "write one of the capabilities above, or delete this name".to_string(),
     };
     format!(
-        "unknown capability `{name}` in {site} — grantable capabilities are {}\n  hint: {hint}",
+        "unknown capability `{}` in {site} — grantable capabilities are {}\n  hint: {hint}",
+        shown(name),
         grantable.join(", ")
     )
 }
@@ -738,10 +868,10 @@ fn within_one_edit(a: &str, b: &str) -> bool {
 }
 
 /// A warning located at byte `offset` of the manifest.
-fn manifest_warning(path: &Path, content: &str, offset: usize, message: String, hint: String) -> Diagnostic {
+fn manifest_warning(path: &Path, lines: &LineStarts, offset: usize, message: String, hint: String) -> Diagnostic {
     let mut d = Diagnostic::warning(message, hint, String::new());
     d.file = Some(path.display().to_string());
-    d.line = Some(line_of(content, offset));
+    d.line = Some(lines.line(offset));
     d
 }
 
@@ -749,7 +879,7 @@ fn manifest_warning(path: &Path, content: &str, offset: usize, message: String, 
 /// `site` names the table as a reader would; `what` is `key` or `table`.
 fn unknown_key_warnings(
     path: &Path,
-    content: &str,
+    lines: &LineStarts,
     table: &toml::de::DeTable<'_>,
     site: &str,
     what: &str,
@@ -761,6 +891,9 @@ fn unknown_key_warnings(
         .map(|(k, _)| (k.span().start, k.get_ref().to_string()))
         .collect();
     unknown.sort();
+    if unknown.is_empty() {
+        return Vec::new();
+    }
     let list = accepted.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>().join(", ");
     unknown
         .into_iter()
@@ -769,8 +902,8 @@ fn unknown_key_warnings(
                 Some(k) => format!("did you mean `{k}`? The {what}s {site} accepts are {list}"),
                 None => format!("delete it, or write one of the {what}s {site} accepts: {list}"),
             };
-            let message = format!("unknown {what} `{key}` in {site} is ignored — it changes nothing");
-            manifest_warning(path, content, at, message, hint)
+            let message = format!("unknown {what} `{}` in {site} is ignored — it changes nothing", shown(&key));
+            manifest_warning(path, lines, at, message, hint)
         })
         .collect()
 }
@@ -787,27 +920,29 @@ fn unknown_key_warnings(
 /// comes from [`check_manifest`]. A warning never fails a command.
 pub fn manifest_warnings(path: &Path, content: &str) -> Vec<Diagnostic> {
     let Ok(manifest) = read_manifest(path, content) else { return Vec::new() };
-    let mut out = unknown_key_warnings(path, content, &manifest.spans, "almide.toml", "table", TOP_LEVEL_KEYS);
+    let lines = LineStarts::new(content);
+    let lines = &lines;
+    let mut out = unknown_key_warnings(path, lines, &manifest.spans, "almide.toml", "table", TOP_LEVEL_KEYS);
     let sub = |name: &str| spanned_entry(&manifest.spans, name).and_then(|t| t.get_ref().as_table());
     if let Some(t) = sub("package") {
         let known: Vec<&str> = PACKAGE_KEYS.iter().chain(PACKAGE_METADATA_KEYS).copied().collect();
-        out.extend(unknown_key_warnings(path, content, t, "[package]", "key", &known));
+        out.extend(unknown_key_warnings(path, lines, t, "[package]", "key", &known));
     }
     if let Some(t) = sub("permissions") {
-        out.extend(unknown_key_warnings(path, content, t, "[permissions]", "key", PERMISSION_KEYS));
+        out.extend(unknown_key_warnings(path, lines, t, "[permissions]", "key", PERMISSION_KEYS));
     }
     if let Some(t) = sub("trust") {
-        out.extend(unknown_key_warnings(path, content, t, "[trust]", "key", TRUST_KEYS));
+        out.extend(unknown_key_warnings(path, lines, t, "[trust]", "key", TRUST_KEYS));
     }
     let Some(deps) = sub("dependencies") else { return out };
     let mut entries: Vec<_> = deps.iter().collect();
     entries.sort_by_key(|(k, _)| k.span().start);
     for (name, entry) in entries {
-        let name = name.get_ref().as_ref();
+        let name = shown(name.get_ref().as_ref());
         let ignored = |why: &str| {
             manifest_warning(
                 path,
-                content,
+                lines,
                 entry.span().start,
                 format!("dependency `{name}` is ignored — {why}"),
                 format!(
@@ -819,7 +954,7 @@ pub fn manifest_warnings(path: &Path, content: &str) -> Vec<Diagnostic> {
             out.push(ignored("an entry is a table naming `git` or `path`"));
             continue;
         };
-        out.extend(unknown_key_warnings(path, content, t, &format!("dependency `{name}`"), "key", DEPENDENCY_KEYS));
+        out.extend(unknown_key_warnings(path, lines, t, &format!("dependency `{name}`"), "key", DEPENDENCY_KEYS));
         if spanned_entry(t, "git").is_none() && spanned_entry(t, "path").is_none() {
             out.push(ignored("it names neither `git` nor `path`"));
         }
@@ -830,13 +965,12 @@ pub fn manifest_warnings(path: &Path, content: &str) -> Vec<Diagnostic> {
 /// `[package].name` of the manifest at `path`, read as TOML and not otherwise
 /// validated; `None` when there is no readable manifest or no name.
 pub fn manifest_package_name(path: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = read_project_file(path).ok()?;
     read_manifest(path, &content).ok()?.package_field("name").filter(|n| !n.is_empty())
 }
 
 pub fn parse_toml(path: &Path) -> Result<Project, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    let content = read_project_file(path)?;
     check_manifest_duplicates(path, &content)?;
     let manifest = read_manifest(path, &content)?;
 
@@ -942,15 +1076,14 @@ pub struct LockedDep {
 /// the network (#1465). The one-entry-per-line shape — the property that keeps
 /// lock merges conflict-friendly — is untouched; only the reader changed.
 pub fn parse_lock_file(path: &Path) -> Result<Vec<LockedDep>, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+    let content = read_project_file(path)?;
     // A lock written by a compiler that accepted a duplicated dependency in
     // almide.toml holds the same entry twice (#2583). The `toml` crate refuses
     // that as a bare "duplicate key"; say which lines and what to do instead.
     if let Some(dup) = find_duplicate_key(&content, None) {
         let what = match &dup.key {
-            Some(key) => format!("lock entry `{key}` appears twice"),
-            None => format!("table [{}] appears twice", dup.table),
+            Some(key) => format!("lock entry `{}` appears twice", shown(key)),
+            None => format!("table [{}] appears twice", shown(&dup.table)),
         };
         return Err(format!(
             "{}:{}: {what} (first at line {first}) — almide.lock is generated, and an older \
@@ -965,9 +1098,14 @@ pub fn parse_lock_file(path: &Path) -> Result<Vec<LockedDep>, String> {
             lock = path.display(),
         ));
     }
+    // Every string of the lock is printed by some command (`Fetching …
+    // (locked: <commit>)`), so a control or bidi character is refused (#4126).
+    if let Ok(spans) = toml::de::DeTable::parse(&content) {
+        refuse_control_text(path, &content, spans.get_ref(), &["dependencies"])?;
+    }
     let table: toml::Table = content
         .parse()
-        .map_err(|e| format!("{} is not valid TOML: {}", path.display(), e))?;
+        .map_err(|e: toml::de::Error| format!("{} is not valid TOML: {}", path.display(), shown_lines(&e.to_string())))?;
     let mut locked = Vec::new();
     for (name, val) in table {
         let entry = val.as_table().ok_or_else(|| {
@@ -1037,7 +1175,7 @@ pub fn write_lock_file(path: &Path, locked: &[LockedDep]) -> Result<(), String> 
 /// so a manifest this cannot edit cleanly is left untouched with an error.
 pub fn add_trust_owner(path: &Path, owner: &str) -> Result<bool, String> {
     crate::trust::validate_owner_entry(owner)?;
-    let content = std::fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+    let content = read_project_file(path)?;
     let current = parse_toml(path)?;
     if current.trust_owners.iter().any(|o| o.eq_ignore_ascii_case(owner)) {
         return Ok(false);
