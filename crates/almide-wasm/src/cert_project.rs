@@ -104,7 +104,7 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         32 => &[ENTROPY],
         34 | 36 | 60 => &[CLOCK],
         35 => &[STDIN],
-        43..=50 | 53..=59 | 65 | 70..=72 => &[NET],
+        43..=50 | 53..=59 | 65 | 70..=72 | 75 => &[NET],
         80..=90 => &[PROC],
         // testing.assert_aborts's site pair (ADR-0029, #3792): op 117 runs a
         // site on a fresh instance — a child, the native leg's re-exec — and
@@ -118,6 +118,9 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         // that function's, and the not-served fallback calls the same
         // function from this frame, so the call graph already counts it.
         74 => &[],
+        // A deliberate exit's mark (#4203): it answers nothing and reaches
+        // nothing; the exit that follows is the exit import's.
+        76 => &[],
         _ => &[SENTINEL],
     }
 }
