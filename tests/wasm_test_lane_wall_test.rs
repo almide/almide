@@ -187,7 +187,7 @@ fn the_wall_register_lists_exactly_the_specs_that_wall() {
     let registered: std::collections::BTreeSet<&str> = TEST_LANE_WALLS
         .iter()
         .map(|(f, _)| *f)
-        .filter(|f| selected.as_ref().is_none_or(|sel| sel.iter().any(|s| s.as_str() == **f)))
+        .filter(|f| selected.as_ref().is_none_or(|sel| sel.iter().any(|s| s.as_str() == *f)))
         .collect();
 
     let new: Vec<&&str> = observed.difference(&registered).collect();
