@@ -101,12 +101,12 @@ a Float prints in its shortest form without a trailing `.0`, and a non-finite Fl
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (20 functions)
+## Signature index (34 functions)
 
 ```
-// Wraps items as an Array Value.
+// Wraps xs as an Array Value.
 // @since 0.6.0 or earlier
-value.array(items: List[Value]) -> Value
+value.array(xs: List[Value]) -> Value
 
 // Array items; err if v is another kind.
 // @since 0.6.0 or earlier
@@ -148,9 +148,9 @@ value.merge(a: Value, b: Value) -> Value
 // @since 0.6.0 or earlier
 value.null() -> Value
 
-// Wraps pairs as an Object; a repeated key keeps its first position, last value.
+// Wraps the pairs xs as an Object; a repeated key keeps its first position, last value.
 // @since 0.6.0 or earlier
-value.object(pairs: List[(String, Value)]) -> Value
+value.object(xs: List[(String, Value)]) -> Value
 
 // v minus the listed keys; non-objects as-is.
 // @since 0.6.0 or earlier
@@ -183,6 +183,62 @@ value.field(v: Value, key: String) -> Result[Value, String]
 // Object keys in order; [] for non-objects.
 // @since 0.26.0 or earlier
 value.keys(v: Value) -> List[String]
+
+// Object pairs in order; err if v is another kind.
+// @since unreleased
+value.as_object(v: Value) -> Result[List[(String, Value)], String]
+
+// Value at key; none if absent or v is not an Object.
+// @since unreleased
+value.get(v: Value, key: String) -> Option[Value]
+
+// String at key; none if absent or another kind.
+// @since unreleased
+value.get_string(v: Value, key: String) -> Option[String]
+
+// Int at key; none if absent or not an Int (a Float is never truncated).
+// @since unreleased
+value.get_int(v: Value, key: String) -> Option[Int]
+
+// Float at key (an Int widens); none if absent or another kind.
+// @since unreleased
+value.get_float(v: Value, key: String) -> Option[Float]
+
+// Bool at key; none if absent or another kind.
+// @since unreleased
+value.get_bool(v: Value, key: String) -> Option[Bool]
+
+// Array items at key; none if absent or another kind.
+// @since unreleased
+value.get_array(v: Value, key: String) -> Option[List[Value]]
+
+// Object pairs at key; none if absent or another kind.
+// @since unreleased
+value.get_object(v: Value, key: String) -> Option[List[(String, Value)]]
+
+// The empty path: the whole value.
+// @since unreleased
+value.root() -> Path
+
+// p extended by the object key name.
+// @since unreleased
+value.key(p: Path, name: String) -> Path
+
+// p extended by the array index i; a negative i is out of range.
+// @since unreleased
+value.index(p: Path, i: Int) -> Path
+
+// Value at p, or none if a step misses.
+// @since unreleased
+value.get_path(v: Value, p: Path) -> Option[Value]
+
+// v with x at p; missing keys are created, a missed index leaves v as is.
+// @since unreleased
+value.set_path(v: Value, p: Path, x: Value) -> Result[Value, String]
+
+// v minus the entry at p; unchanged if absent; null for the root.
+// @since unreleased
+value.remove_path(v: Value, p: Path) -> Value
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

@@ -673,32 +673,32 @@ true
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (41 functions)
+## Signature index (39 functions)
 
 ```
 // Whole file as UTF-8; err if missing or not UTF-8.
 // @since 0.5.0 or earlier
 effect fs.read_text(path: String) -> String
 
-// Bytes as Ints 0..255; err if missing.
+// Whole file as Bytes; err if missing.
 // @since 0.5.0 or earlier
-effect fs.read_bytes(path: String) -> List[Int]
+effect fs.read_bytes(path: String) -> Bytes
 
 // Overwrites or creates; err if no parent dir.
-// @since 0.5.0 or earlier
-effect fs.write(path: String, content: String) -> Unit
-
-// Writes low byte of each Int (-1 -> 255).
-// @since 0.5.0 or earlier
-effect fs.write_bytes(path: String, bytes: List[Int]) -> Unit
+// @since unreleased
+effect fs.write_text(path: String, content: String) -> Unit
 
 // Writes data verbatim, replacing the file.
-// @since 0.13.4 or earlier
-effect fs.write_bytes_raw(path: String, data: Bytes) -> Unit
+// @since 0.5.0 or earlier
+effect fs.write_bytes(path: String, data: Bytes) -> Unit
 
 // Appends content; creates the file if missing.
-// @since 0.5.0 or earlier
-effect fs.append(path: String, content: String) -> Unit
+// @since unreleased
+effect fs.append_text(path: String, content: String) -> Unit
+
+// Appends data verbatim; creates the file if missing.
+// @since unreleased
+effect fs.append_bytes(path: String, data: Bytes) -> Unit
 
 // Creates dir and parents; ok if it exists.
 // @since 0.5.0 or earlier
@@ -732,17 +732,13 @@ effect fs.fold_lines_chunked(path: String, workers: Int, init: A, f: (A, String)
 // @since 0.54.0
 effect fs.read_text_if_exists(path: String) -> Option[String]
 
-// Bytes as Ints, or none if missing.
+// File Bytes, or none if missing.
 // @since 0.54.0
-effect fs.read_bytes_if_exists(path: String) -> Option[List[Int]]
+effect fs.read_bytes_if_exists(path: String) -> Option[Bytes]
 
 // read_lines result, or none if missing.
 // @since 0.54.0
 effect fs.read_lines_if_exists(path: String) -> Option[List[String]]
-
-// File Bytes, or none if missing.
-// @since 0.54.0
-effect fs.read_bytes_raw_if_exists(path: String) -> Option[Bytes]
 
 // Deletes a file or empty dir; err if missing.
 // @since 0.5.0 or earlier
@@ -808,10 +804,6 @@ effect fs.is_symlink(path: String) -> Bool
 // @since 0.6.0 or earlier
 effect fs.modified_at(path: String) -> Int
 
-// Whole file as Bytes; err if missing.
-// @since 0.13.4 or earlier
-effect fs.read_bytes_raw(path: String) -> Bytes
-
 // dir as an FsRoot; err if dir is not a directory.
 // @since unreleased
 effect fs.open_root(dir: String) -> FsRoot
@@ -820,7 +812,7 @@ effect fs.open_root(dir: String) -> FsRoot
 // @since unreleased
 effect fs.root_read_text(root: FsRoot, path: String) -> String
 
-// read_bytes_raw of path inside root; err if it escapes.
+// read_bytes of path inside root; err if it escapes.
 // @since unreleased
 effect fs.root_read_bytes(root: FsRoot, path: String) -> Bytes
 

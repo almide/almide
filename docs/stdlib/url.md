@@ -138,7 +138,7 @@ url.query_pairs(query: String) -> List[(String, String)]
 
 // k=v joined by &, both sides percent-encoded.
 // @since 0.60.0 or earlier
-url.build_query(pairs: List[(String, String)]) -> String
+url.build_query(xs: List[(String, String)]) -> String
 
 // Like encode_component, but a space becomes +.
 // @since unreleased
