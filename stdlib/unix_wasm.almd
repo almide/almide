@@ -1,0 +1,121 @@
+// unix_wasm — the WASM lowering of unix (R-unix-01; #3620's unix-socket and
+// shm family, moved out of net_wasm with the module). Native keeps its direct
+// intrinsics (runtime/rs/src/unix.rs); this file only ever links on the wasm
+// legs through the self-host registry.
+//
+// INTERIM host ops 104..=116, one per leaf below, served by the embedded host
+// with native's own core (crates/almide-rt-core/src/net_unix_core.rs), so the
+// bytes, the descriptors received and every err text agree with native by
+// construction. Descriptors are the host's raw OS numbers, as native returns.
+// WASI has neither Unix-domain sockets nor shared memory, so a stock artifact
+// refuses them at build (E081). These leaves retire when ADR-0023 step 7 runs
+// the embedded lane as the p3 component (docs/roadmap/active/net-unix-shm-embedded.md).
+//
+// Operands are decimal text: a descriptor list is one number per line; a
+// leaf that sends bytes (`__unix_send`, `__shm_write`) carries them in b.
+effect fn __unix_connect(path: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_listen(path: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_accept(listener: String, unused: String) -> Result[String, String] = _
+
+// `sock_fds` is the socket, then each descriptor to send, one per line.
+effect fn __unix_send(sock_fds: String, data: Bytes) -> Result[String, String] = _
+
+effect fn __unix_recv(sock: String, max: String) -> Result[Bytes, String] = _
+
+// `unix.__take_fds` answers its List as is, never an err, so its impl returns
+// the raw type at the call site and keeps a plain leaf, as `tcp_is_open` does.
+fn __unix_take_fds(sock: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_wait(fds: String, timeout_ms: String) -> Result[String, String] = _
+
+effect fn __unix_close(fd: String, unused: String) -> Result[String, String] = _
+
+effect fn __shm_create(size: String, unused: String) -> Result[String, String] = _
+
+effect fn __shm_resize(fd: String, size: String) -> Result[String, String] = _
+
+// `fd_offset` is `<fd>\n<offset>`.
+effect fn __shm_write(fd_offset: String, data: Bytes) -> Result[String, String] = _
+
+// `offset_len` is `<offset>\n<len>`.
+effect fn __shm_read(fd: String, offset_len: String) -> Result[Bytes, String] = _
+
+fn __unix_fd_lines(fds: List[Int]) -> String = fds |> list.map((f) => int.to_string(f)) |> list.join("\n")
+
+fn __unix_fd_list(t: String) -> List[Int] =
+  if t == "" then []
+  else string.split(t, "\n") |> list.map((x) => int.parse(x) ?? -1)
+
+@implements("unix.__os_connect")
+effect fn __unix_impl_connect_impl(path: String) -> Result[Int, String] = {
+  let t = __unix_connect(path, "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_listen")
+effect fn __unix_impl_listen_impl(path: String) -> Result[Int, String] = {
+  let t = __unix_listen(path, "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_accept")
+effect fn __unix_impl_accept_impl(listener: Int) -> Result[Int, String] = {
+  let t = __unix_accept(int.to_string(listener), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_send")
+effect fn __unix_impl_send_impl(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = {
+  let _ = __unix_send(__unix_fd_lines([sock] + fds), data)!
+  ok(())
+}
+
+@implements("unix.__os_recv")
+effect fn __unix_impl_recv_impl(sock: Int, max: Int) -> Result[Bytes, String] = __unix_recv(
+  int.to_string(sock),
+  int.to_string(max),
+)
+
+@implements("unix.__os_take_fds")
+fn __unix_impl_take_fds_impl(sock: Int) -> List[Int] = match __unix_take_fds(int.to_string(sock), "") {
+  ok(t) => __unix_fd_list(t),
+  err(_) => [],
+}
+
+@implements("unix.__os_wait")
+effect fn __unix_impl_wait_impl(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = {
+  let t = __unix_wait(__unix_fd_lines(fds), int.to_string(timeout_ms))!
+  ok(__unix_fd_list(t))
+}
+
+@implements("unix.__os_close")
+effect fn __unix_impl_close_impl(fd: Int) -> Result[Unit, String] = {
+  let _ = __unix_close(int.to_string(fd), "")!
+  ok(())
+}
+
+@implements("unix.__os_shm_create")
+effect fn __unix_impl_shm_create_impl(size: Int) -> Result[Int, String] = {
+  let t = __shm_create(int.to_string(size), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_shm_resize")
+effect fn __unix_impl_shm_resize_impl(fd: Int, size: Int) -> Result[Unit, String] = {
+  let _ = __shm_resize(int.to_string(fd), int.to_string(size))!
+  ok(())
+}
+
+@implements("unix.__os_shm_write")
+effect fn __unix_impl_shm_write_impl(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = {
+  let _ = __shm_write("${fd}\n${offset}", data)!
+  ok(())
+}
+
+@implements("unix.__os_shm_read")
+effect fn __unix_impl_shm_read_impl(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = __shm_read(
+  int.to_string(fd),
+  "${offset}\n${len}",
+)
