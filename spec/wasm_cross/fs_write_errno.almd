@@ -1,6 +1,6 @@
 // @contract: C-273
 // The fs WRITE-side floors answer a failure with the SAME native std::io Display
-// text on both legs: fs.write onto a directory / through a file component,
+// text on both legs: fs.write_text onto a directory / through a file component,
 // fs.mkdir_p through a file component and ONTO a plain file (#2206: the wasm
 // legs answered Ok for the latter), fs.remove_all of a missing path,
 // fs.list_dir of a plain file and of a missing path, fs.rename of a missing
@@ -27,13 +27,13 @@ fn redact(msg: String, dir: String) -> String = string.replace(msg, dir, "<TMP>"
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("wer")!
   let f = d + "/f.txt"
-  fs.write(f, "hi")!
-  let w_dir = fs.write(d, "x")
+  fs.write_text(f, "hi")!
+  let w_dir = fs.write_text(d, "x")
   match w_dir {
     ok(_) => println("write_dir=OK"),
     err(e) => println("write_dir=ERR[${redact(e, d)}]"),
   }
-  let w_thru = fs.write(f + "/x.txt", "x")
+  let w_thru = fs.write_text(f + "/x.txt", "x")
   match w_thru {
     ok(_) => println("write_thru_file=OK"),
     err(e) => println("write_thru_file=ERR[${redact(e, d)}]"),
@@ -71,10 +71,10 @@ effect fn main() -> Unit = {
   // the write_all loop: a body far past any single-iteration assumption, and the
   // zero-length edge that never enters the loop at all.
   let big = rep("0123456789abcdef", 800)
-  fs.write(d + "/big.txt", big)!
+  fs.write_text(d + "/big.txt", big)!
   let back = fs.read_text(d + "/big.txt")!
   println("big_len=${string.len(back)} same=${back == big}")
-  fs.write(d + "/empty.txt", "")!
+  fs.write_text(d + "/empty.txt", "")!
   println("empty_len=${string.len(fs.read_text(d + "/empty.txt")!)}")
   fs.remove_all(d)!
 }

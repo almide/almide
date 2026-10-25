@@ -300,13 +300,13 @@ const FS_ERRNO_TABLE: &str = r#"import fs
 
 effect fn main() -> Unit = {
   println(match fs.read_text("f.txt/x") { ok(v) => "ok(${v})", err(m) => m })
-  println(match fs.write("f.txt/y", "z") { ok(_) => "ok", err(m) => m })
+  println(match fs.write_text("f.txt/y", "z") { ok(_) => "ok", err(m) => m })
   println(match fs.mkdir_p("f.txt") { ok(_) => "ok", err(m) => m })
   println(match fs.mkdir_p("f.txt") { ok(_) => "ok", err(m) => m })
   println(match fs.mkdir_p("adir") { ok(_) => "ok", err(m) => m })
   println(match fs.mkdir_p("f.txt/sub") { ok(_) => "ok", err(m) => m })
   println(match fs.read_text("nope.txt") { ok(v) => "ok(${v})", err(m) => m })
-  println(match fs.write("adir", "z") { ok(_) => "ok", err(m) => m })
+  println(match fs.write_text("adir", "z") { ok(_) => "ok", err(m) => m })
 }
 "#;
 
@@ -526,17 +526,17 @@ const FS_WRITE: &str = r#"import fs
 
 effect fn main() -> Unit = {
   let _ = fs.mkdir_p("wtmp/deep/nest")!
-  let _ = fs.write("wtmp/deep/nest/x.txt", "written-body")!
-  let _ = fs.append("wtmp/deep/nest/x.txt", "+tail")!
+  let _ = fs.write_text("wtmp/deep/nest/x.txt", "written-body")!
+  let _ = fs.append_text("wtmp/deep/nest/x.txt", "+tail")!
   println(fs.read_text("wtmp/deep/nest/x.txt")!)
-  let _ = fs.write_bytes("wtmp/deep/nest/b.bin", [72, 73, 10])!
+  let _ = fs.write_bytes("wtmp/deep/nest/b.bin", bytes.from_list([72, 73, 10]))!
   println(fs.read_text("wtmp/deep/nest/b.bin")!)
   let _ = fs.remove("wtmp/deep/nest/x.txt")!
   let _ = fs.remove("wtmp/deep/nest/b.bin")!
   let _ = fs.remove("wtmp/deep/nest")!
   let _ = fs.remove_all("wtmp/deep")!
   println(if fs.exists("wtmp/deep") then "BAD-still-there" else "cleaned")
-  match fs.write("wtmp/deep/nope.txt", "x") {
+  match fs.write_text("wtmp/deep/nope.txt", "x") {
     ok(_)  => println("BAD-ghost-dir"),
     err(m) => println("werr=${m}"),
   }
@@ -567,7 +567,7 @@ fn p3_component_writes_the_filesystem() {
 HI
 
 cleaned
-werr=fs.write(\"wtmp/deep/nope.txt\"): No such file or directory (os error 2)
+werr=fs.write_text(\"wtmp/deep/nope.txt\"): No such file or directory (os error 2)
 ",
         "fs write surface diverged (stderr: {err})"
     );
@@ -1054,13 +1054,13 @@ fn p3_component_spells_the_fs_errno_table() {
     };
     let expected = [
         format!("fs.read_text(\"f.txt/x\"): {}", ENOTDIR.text),
-        format!("fs.write(\"f.txt/y\"): {}", ENOTDIR.text),
+        format!("fs.write_text(\"f.txt/y\"): {}", ENOTDIR.text),
         format!("fs.mkdir_p(\"f.txt\"): {}", EEXIST.text),
         format!("fs.mkdir_p(\"f.txt\"): {}", EEXIST.text),
         "ok".to_string(),
         format!("fs.mkdir_p(\"f.txt/sub\"): {}", ENOTDIR.text),
         format!("fs.read_text(\"nope.txt\"): {}", ENOENT.text),
-        format!("fs.write(\"adir\"): {}", EISDIR.text),
+        format!("fs.write_text(\"adir\"): {}", EISDIR.text),
     ]
     .join("\n")
         + "\n";
@@ -1121,7 +1121,7 @@ fn p3_components_need_no_feature_flag() {
             r#"import fs
 
 effect fn main() -> Unit = {
-  fs.write("out.txt", fs.read_text("in.txt")! + " copied")!
+  fs.write_text("out.txt", fs.read_text("in.txt")! + " copied")!
   println(fs.read_text("out.txt")!)
 }
 "#

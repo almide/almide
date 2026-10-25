@@ -68,7 +68,7 @@ impl<'a> Interpreter<'a> {
         let call = match func {
             "read_text_file" => "fs.read_text",
             "read_bytes_file" => "fs.read_bytes",
-            "write_text_file" => "fs.write",
+            "write_text_file" => "fs.write_text",
             "read_dir" => "fs.list_dir",
             "rename" => "fs.rename",
             "make_dir" => "fs.mkdir_p",

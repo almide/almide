@@ -137,7 +137,7 @@ effect fn run(root: String, update: Bool) -> Verdict = {
     lines: (bad |> list.map((b) => "::error::certified-leaks: " + b)) + ["certified-leaks: FAILED — " + int.to_string(list.len(bad)) + " finding(s) against " + path],
     ok: false,
   } else if update then {
-    fs.write(path, ledger_text(derived))!
+    fs.write_text(path, ledger_text(derived))!
     Verdict {
       lines: notice + ["certified-leaks: ledger rewritten — " + int.to_string(list.len(derived)) + " certified fixture(s) still leak"],
       ok: true,

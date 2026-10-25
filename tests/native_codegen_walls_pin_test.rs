@@ -162,7 +162,7 @@ fn moving_a_value_inside_a_borrowing_interpolation_clones() {
     assert_native_builds("interp_move", INTERP_MOVE_SOURCE, INTERP_MOVE_STDOUT);
     assert_native_builds(
         "interp_move_file_stat",
-        "import fs\nfn kind(m: FileStat) -> String = match m { FileStat { is_dir, .. } => if is_dir then \"dir\" else \"file\" }\neffect fn main() -> Unit = {\n  let p = \"/tmp/almd_1829_interp_move_pin.txt\"\n  fs.write(p, \"abc\")!\n  let m = fs.stat(p)!\n  println(\"${m.size} ${m.is_file} ${kind(m)}\")\n}\n",
+        "import fs\nfn kind(m: FileStat) -> String = match m { FileStat { is_dir, .. } => if is_dir then \"dir\" else \"file\" }\neffect fn main() -> Unit = {\n  let p = \"/tmp/almd_1829_interp_move_pin.txt\"\n  fs.write_text(p, \"abc\")!\n  let m = fs.stat(p)!\n  println(\"${m.size} ${m.is_file} ${kind(m)}\")\n}\n",
         "3 true file\n",
     );
 }

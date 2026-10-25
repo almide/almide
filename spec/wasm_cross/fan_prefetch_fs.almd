@@ -35,9 +35,9 @@ effect fn read_all(paths: List[String]) -> Result[List[String], String] = fan.ma
 effect fn main() -> Unit = {
   let dir = "almide_xt_fanpf_tmp"
   let _ = fs.mkdir_p(dir)!
-  let _ = fs.write("almide_xt_fanpf_tmp/a.txt", "alpha")!
-  let _ = fs.write("almide_xt_fanpf_tmp/b.txt", "bravo")!
-  let _ = fs.write("almide_xt_fanpf_tmp/c.txt", "charlie")!
+  let _ = fs.write_text("almide_xt_fanpf_tmp/a.txt", "alpha")!
+  let _ = fs.write_text("almide_xt_fanpf_tmp/b.txt", "bravo")!
+  let _ = fs.write_text("almide_xt_fanpf_tmp/c.txt", "charlie")!
   // Happy path: three prefetched reads, list-order results.
   match read_all(["almide_xt_fanpf_tmp/a.txt", "almide_xt_fanpf_tmp/b.txt", "almide_xt_fanpf_tmp/c.txt"]) {
     ok(texts) => println(texts |> list.join("|")),

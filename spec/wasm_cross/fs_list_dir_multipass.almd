@@ -43,10 +43,10 @@ fn short_name(i: Int, namelen: Int) -> String = string.pad_end(
 effect fn probe(label: String, n: Int, namelen: Int, extralen: Int) -> Unit = {
   let d = fs.create_temp_dir("ld")!
   for i in 0..<n {
-    fs.write(d + "/" + short_name(i, namelen), "")!
+    fs.write_text(d + "/" + short_name(i, namelen), "")!
   }
   for _k in 0..<(if extralen > 0 then 1 else 0) {
-    fs.write(d + "/" + string.pad_end("z", extralen, "z"), "")!
+    fs.write_text(d + "/" + string.pad_end("z", extralen, "z"), "")!
   }
   let names = fs.list_dir(d)!
   let got = list.len(names)

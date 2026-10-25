@@ -25,11 +25,11 @@ effect fn show(label: String, d: String, pattern: String) -> Unit = println("${l
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("glob1805")!
   fs.mkdir_p(d + "/sub/deep")!
-  fs.write(d + "/rows.txt", "r")!
-  fs.write(d + "/notes.md", "n")!
-  fs.write(d + "/sub/x.txt", "x")!
-  fs.write(d + "/sub/.hidden.txt", "h")!
-  fs.write(d + "/sub/deep/y.txt", "y")!
+  fs.write_text(d + "/rows.txt", "r")!
+  fs.write_text(d + "/notes.md", "n")!
+  fs.write_text(d + "/sub/x.txt", "x")!
+  fs.write_text(d + "/sub/.hidden.txt", "h")!
+  fs.write_text(d + "/sub/deep/y.txt", "y")!
   show("star_in_dir", d, "/sub/*.txt")!
   show("dstar_under_dir", d, "/sub/**/*.txt")!
   show("star_top", d, "/*.txt")!

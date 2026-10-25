@@ -76,11 +76,8 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // `env.cwd` — Result[String, String] over the PWD read (env_cwd.almd),
             // the same ok()-ctor cap-as-tag layout.
             | ("env", "cwd")
-            // `fs.read_bytes_raw` — the raw-bytes twin (same cap-as-tag Result block; the Ok
-            // payload is Bytes instead of String).
-            | ("fs", "read_bytes_raw")
-            // `fs.read_bytes` — the List[Int]-expanded sibling (the self-host re-wraps the
-            // prim's Result in the SAME materialize_result_str layout via ok()/err() ctors).
+            // `fs.read_bytes` — the Bytes twin of fs.read_text (same cap-as-tag Result block;
+            // the Ok payload is Bytes instead of String).
             | ("fs", "read_bytes")
             // `fs.list_dir` returns the cap-as-tag `Result[List[String], String]` ($read_dir builds
             // it in the same `materialize_result_str` layout — payload @12 a List[String], tag @16).
@@ -108,7 +105,6 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // family (a heap Option payload in the cap-as-tag wrapper).
             | ("fs", "read_lines_if_exists")
             | ("fs", "read_bytes_if_exists")
-            | ("fs", "read_bytes_raw_if_exists")
             // `fs.fold_lines` / `fs.fold_lines_chunked` (the msi twins,
             // fs_fold_lines.almd) build their Results with the ordinary
             // ok()/err() ctors = the same cap-as-tag layout (payload @12,
@@ -158,7 +154,7 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // MISREAD the Ok len-0 block AND linearize both arms, a silent miscompile printing both).
             // The Ok arm has NO @12 payload (Unit), so `ok(_)` discards a null handle (never used);
             // the flat DropListStr frees nothing on Ok, the @12 msg on Err — exact for both arms.
-            | ("fs", "write")
+            | ("fs", "write_text")
             // `fs.mkdir_p` returns the SAME cap-as-tag `Result[Unit, String]` shape as fs.write
             // ($make_dir builds it identically — Ok with len@4=0 + @12=0 + tag@16=0, Err with
             // len@4=1 + @12=msg + tag@16=1). So a `match`/`!` over it reads tag @16, exactly like
@@ -168,8 +164,8 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // identical cap-as-tag Result[Unit, String]: Ok len@4=0 + tag@16=0, Err with
             // @12=msg + tag@16=1), so a `match`/`!` reads tag @16 like fs.write.
             | ("fs", "rename")
-            // `fs.copy` / `fs.append` / `fs.remove` / `fs.write_bytes` /
-            // `fs.write_bytes_raw` — Result[Unit, String] built by the ok(())/err(m)
+            // `fs.copy` / `fs.append_text` / `fs.remove` / `fs.write_bytes` /
+            // `fs.append_bytes` — Result[Unit, String] built by the ok(())/err(m)
             // CTORS (fs_copy.almd et al). Since result-family-from-type Phase 1 the
             // ctor blocks are BYTE-IDENTICAL to the prim family above: Ok was always
             // len@4=0 + @12=0 + tag@16=0 (`materialize_result_ok` with a Unit payload),
@@ -179,10 +175,10 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // silent wrong-branch recorded here before this arc). One type, one layout:
             // the last name-keyed layout collision in the system is gone.
             | ("fs", "copy")
-            | ("fs", "append")
+            | ("fs", "append_text")
+            | ("fs", "append_bytes")
             | ("fs", "remove")
             | ("fs", "write_bytes")
-            | ("fs", "write_bytes_raw")
             // `fs.remove_all` returns the SAME cap-as-tag `Result[Unit, String]` shape as fs.write
             // ($remove_all builds it identically — Ok with len@4=0 + @12=0 + tag@16=0, Err with
             // len@4=1 + @12=msg + tag@16=1). So a `match`/`!` over it reads tag @16, exactly like

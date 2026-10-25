@@ -1,11 +1,12 @@
 // @contract: C-215
-// #2890 — the Bytes-typed readers name THEMSELVES in an error. The structural
-// wasm leg served `fs.read_bytes_raw` / `fs.read_bytes_raw_if_exists` through
-// the host ops of `fs.read_bytes` / `fs.read_bytes_if_exists`, and the host
-// spells a message from the op's call name (#2090), so the wasm build said
-// `fs.read_bytes(...)` where native says `fs.read_bytes_raw(...)`. Each call
-// now has its own op (63 / 64). Both failure kinds per call — a missing path
-// and a directory — plus the success cells, temp dir redacted.
+// #2890 — the Bytes-typed fs calls name THEMSELVES in an error. The structural
+// wasm leg once served one reader through another reader's host op, and the
+// host spells a message from the op's call name (#2090), so the wasm build
+// named the op where native named the call. `fs.read_bytes`,
+// `fs.read_bytes_if_exists` and `fs.write_bytes` each spell their own head
+// (R-fs-01 folded the old `_raw` spellings into them). Both failure kinds per
+// call — a missing path and a directory — plus the success cells, temp dir
+// redacted.
 import fs
 
 fn redact(msg: String, dir: String) -> String = string.replace(msg, dir, "<TMP>")
@@ -21,16 +22,24 @@ fn raw_opt(name: String, r: Result[Bytes?, String], d: String) -> Unit = println
   err(m) => "${name}=ERR[${redact(m, d)}]",
 })
 
+fn unit(name: String, r: Result[Unit, String], d: String) -> Unit = println(match r {
+  ok(_) => "${name}=OK",
+  err(m) => "${name}=ERR[${redact(m, d)}]",
+})
+
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("rawhead")!
   let f = d + "/f.bin"
-  fs.write(f, "abc")!
+  fs.write_text(f, "abc")!
   fs.mkdir_p(d + "/sub")!
-  raw("read_bytes_raw(file)", fs.read_bytes_raw(f), d)
-  raw("read_bytes_raw(missing)", fs.read_bytes_raw(d + "/nope"), d)
-  raw("read_bytes_raw(dir)", fs.read_bytes_raw(d + "/sub"), d)
-  raw_opt("read_bytes_raw_if_exists(file)", fs.read_bytes_raw_if_exists(f), d)
-  raw_opt("read_bytes_raw_if_exists(missing)", fs.read_bytes_raw_if_exists(d + "/nope"), d)
-  raw_opt("read_bytes_raw_if_exists(dir)", fs.read_bytes_raw_if_exists(d + "/sub"), d)
+  raw("read_bytes(file)", fs.read_bytes(f), d)
+  raw("read_bytes(missing)", fs.read_bytes(d + "/nope"), d)
+  raw("read_bytes(dir)", fs.read_bytes(d + "/sub"), d)
+  raw_opt("read_bytes_if_exists(file)", fs.read_bytes_if_exists(f), d)
+  raw_opt("read_bytes_if_exists(missing)", fs.read_bytes_if_exists(d + "/nope"), d)
+  raw_opt("read_bytes_if_exists(dir)", fs.read_bytes_if_exists(d + "/sub"), d)
+  unit("write_bytes(file)", fs.write_bytes(d + "/w.bin", bytes.from_list([1, 2])), d)
+  unit("write_bytes(missing parent)", fs.write_bytes(d + "/no/w.bin", bytes.from_list([1])), d)
+  unit("write_bytes(dir)", fs.write_bytes(d + "/sub", bytes.from_list([1])), d)
   fs.remove_all(d)!
 }

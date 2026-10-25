@@ -271,13 +271,13 @@ impl Checker {
     /// #2097: the mismatched argument is a DIRECT stdlib call (optionally
     /// `!`-unwrapped), and that call's module has a same-stem sibling whose
     /// return type — seen through the same unwrap — is the expected type.
-    /// `fs.read_bytes` returns `List[Int]`, `fs.read_bytes_raw` returns
-    /// `Bytes`, four lines apart; nothing in the first name suggests the
-    /// second exists, and "Fix the argument type" was the only hint.
+    /// `list.find` answers the element, `list.find_index` its position;
+    /// nothing in the first name says the second exists, and "Fix the
+    /// argument type" was the only hint.
     ///
     /// Returns the hint and the argument text with the callee renamed. A
-    /// lookup, not a guess: the sibling must share the stem (`read_bytes` /
-    /// `read_bytes_raw`), take the same number of arguments, and return the
+    /// lookup, not a guess: the sibling must share the stem (`find` /
+    /// `find_index`), take the same number of arguments, and return the
     /// expected type exactly. Anything else keeps today's wording.
     fn stdlib_sibling_rewrite(&self, tys: MismatchTys<'_>) -> Option<(String, String)> {
         let is_ident = |s: &str| {

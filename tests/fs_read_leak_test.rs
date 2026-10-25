@@ -3,7 +3,7 @@
 //! path, and prints what native prints (#3677).
 //!
 //! `fs.read_bytes` and `fs.read_bytes_if_exists` pulled the file into a
-//! staging block, decoded it into the returned `List[Int]`, and never
+//! staging block, decoded it into the returned value, and never
 //! released the staging block: one leaked block per successful read.
 //! `fs.stat` did the same with its 32-byte stat buffer. The same defect as
 //! #3629 (`io.read_n_bytes`) and #3631 (`io.read_byte`).
@@ -52,16 +52,11 @@ fn fs_reads_leave_no_block_live_on_wasm() {
         ("read_lines_if_exists_ok", "fs.read_lines_if_exists(\"sub/f.txt\")".into(), opt_len),
         ("read_lines_if_exists_none", "fs.read_lines_if_exists(\"nope\")".into(), opt_len),
         ("read_lines_if_exists_err", "fs.read_lines_if_exists(\"sub\")".into(), opt_len),
-        ("read_bytes_ok", "fs.read_bytes(\"sub/f.txt\")".into(), len),
-        ("read_bytes_err", "fs.read_bytes(\"nope\")".into(), len),
-        ("read_bytes_if_exists_ok", "fs.read_bytes_if_exists(\"sub/f.txt\")".into(), opt_len),
-        ("read_bytes_if_exists_none", "fs.read_bytes_if_exists(\"nope\")".into(), opt_len),
-        ("read_bytes_if_exists_err", "fs.read_bytes_if_exists(\"sub\")".into(), opt_len),
-        ("read_bytes_raw_ok", "fs.read_bytes_raw(\"sub/f.txt\")".into(), blen),
-        ("read_bytes_raw_err", "fs.read_bytes_raw(\"nope\")".into(), blen),
-        ("read_bytes_raw_if_exists_ok", "fs.read_bytes_raw_if_exists(\"sub/f.txt\")".into(), opt_blen),
-        ("read_bytes_raw_if_exists_none", "fs.read_bytes_raw_if_exists(\"nope\")".into(), opt_blen),
-        ("read_bytes_raw_if_exists_err", "fs.read_bytes_raw_if_exists(\"sub\")".into(), opt_blen),
+        ("read_bytes_ok", "fs.read_bytes(\"sub/f.txt\")".into(), blen),
+        ("read_bytes_err", "fs.read_bytes(\"nope\")".into(), blen),
+        ("read_bytes_if_exists_ok", "fs.read_bytes_if_exists(\"sub/f.txt\")".into(), opt_blen),
+        ("read_bytes_if_exists_none", "fs.read_bytes_if_exists(\"nope\")".into(), opt_blen),
+        ("read_bytes_if_exists_err", "fs.read_bytes_if_exists(\"sub\")".into(), opt_blen),
         ("stat_ok", "fs.stat(\"sub/f.txt\")".into(), "int.to_string(v.size)"),
         ("stat_err", "fs.stat(\"nope\")".into(), "int.to_string(v.size)"),
     ];

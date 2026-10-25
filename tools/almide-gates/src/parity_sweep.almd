@@ -343,7 +343,7 @@ effect fn sweep(root: String, alm: String, baseline_path: String, update: Bool) 
     ok: false,
   } else if update then {
     let text = if list.len(matches) == 0 then "" else list.join(matches, "\n") + "\n"
-    fs.write(baseline_path, text)!
+    fs.write_text(baseline_path, text)!
     Sweep {
       lines: [summary] + classes + ledger.lines + ["output-parity: baseline updated -> " + baseline_path + " (" + int.to_string(list.len(matches)) + " files)"],
       matches: matches,
