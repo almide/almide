@@ -115,7 +115,6 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
     ("result_to_string.almd", "__rts_fill_neg", "__rts_fill_neg", DIGITS),
     ("set_to_string.almd", "__sts_fill_digits", "__sts_fill_digits", DIGITS),
     ("set_to_string.almd", "__sts_fill_neg", "__sts_fill_neg", DIGITS),
-    ("string.almd", "merge_sort_with", "merge_sort_with", HALVING),
     ("value_core.almd", "__varr_eq", "value_eq", VALUE_NESTING),
     ("value_core.almd", "__vobj_eq", "value_eq", VALUE_NESTING),
     ("value_core.almd", "__drop_value", "__vdrop_arr", VALUE_NESTING),
