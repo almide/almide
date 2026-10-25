@@ -1175,9 +1175,11 @@ http.set_body(m: M, body: String) -> M
 // @since unreleased
 http.set_body_bytes(m: M, body: Bytes) -> M
 
+// Request method as sent, e.g. GET.
 // @since unreleased
 http.method(req: HttpRequest) -> String
 
+// Request target, query string included (a full URL for a request built to send).
 // @since unreleased
 http.path(req: HttpRequest) -> String
 

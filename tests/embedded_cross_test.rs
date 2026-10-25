@@ -61,8 +61,8 @@ fn embedded_lane_fixtures_match_native_byte_for_byte() {
                 path.file_name().expect("name").to_string_lossy(),
                 native.status.code(),
                 wasm.status.code(),
-                String::from_utf8_lossy(&native.stdout).lines().next().unwrap_or(""),
-                String::from_utf8_lossy(&wasm.stdout).lines().next().unwrap_or(""),
+                first_difference(&native.stdout, &wasm.stdout).0,
+                first_difference(&native.stdout, &wasm.stdout).1,
             ));
         }
         checked += 1;
@@ -74,4 +74,18 @@ fn embedded_lane_fixtures_match_native_byte_for_byte() {
         diverged.len(),
         diverged.join("\n")
     );
+}
+
+/// The first line on which two outputs differ (a missing line reads as
+/// `<end>`), so a divergence past line 1 names itself.
+fn first_difference(a: &[u8], b: &[u8]) -> (String, String) {
+    let (a, b) = (String::from_utf8_lossy(a), String::from_utf8_lossy(b));
+    let (mut la, mut lb) = (a.lines(), b.lines());
+    loop {
+        match (la.next(), lb.next()) {
+            (Some(x), Some(y)) if x == y => continue,
+            (None, None) => return (String::new(), String::new()),
+            (x, y) => return (x.unwrap_or("<end>").to_string(), y.unwrap_or("<end>").to_string()),
+        }
+    }
 }

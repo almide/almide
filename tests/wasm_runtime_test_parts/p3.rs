@@ -402,7 +402,7 @@ fn dead_local_native_only_intrinsic_does_not_break_wasm_build() {
     let src = dir.path().join("dead.almd");
     std::fs::write(
         &src,
-        "import net\n\nlocal effect fn dead(h: String) -> Int = net.tcp_connect(h, 1)!\n\
+        "import net\n\nlocal effect fn dead(h: String) -> Int = list.len(net.lookup_host(h)!)\n\
          fn main() -> Unit = println(\"ok\")\n",
     )
     .unwrap();

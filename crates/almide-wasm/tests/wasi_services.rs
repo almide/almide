@@ -268,12 +268,12 @@ fn process_program_ships_the_private_spawn_import_and_cabi_realloc() {
     const PROC: &str = r#"import process
 
 effect fn main() -> Unit = {
-  let s = process.exec_status("sh", ["-c", "printf hi"])!
+  let s = process.output(process.ProcessCommand { cmd: "sh", args: ["-c", "printf hi"] })!
   println(s.stdout)
 }
 "#;
     let (wasm, host_ops) = artifact("proc.almd", PROC);
-    assert!(host_ops.contains(&83), "exec_status is op 83: {host_ops:?}");
+    assert!(host_ops.contains(&84), "output is op 84: {host_ops:?}");
     assert!(P1Services::from_ops(&host_ops).proc);
     let mut imports = Vec::new();
     let mut exports = Vec::new();

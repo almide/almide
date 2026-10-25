@@ -108,10 +108,10 @@ let r = "hello".split(" ").reverse()  // chaining works too
 ```
 AUTO-IMPORTED (no import needed):
   string: len trim split join lines contains starts_with ends_with replace
-          index_of slice to_upper to_lower chars pad_start pad_end
+          index_of slice to_upper to_lower to_list pad_start pad_end
   list:   len get get_or first last map flat_map filter find fold enumerate
           zip sort sort_by reverse any all take drop unique join sum
-  map:    new get set contains remove keys values entries from_list merge len
+  map:    new get set contains remove keys values to_list from_list merge len
   set:    new insert contains remove union intersection len
   int:    to_string parse abs min max clamp to_hex from_hex
   float:  to_string from_int abs min max round floor ceil
@@ -119,9 +119,9 @@ AUTO-IMPORTED (no import needed):
   datetime, error, value, option, result, bytes — also auto-imported
 
 IMPORT REQUIRED (effectful / platform / opt-in):
-  import fs      — read_text write read_lines append exists mkdir_p remove list_dir
+  import fs      — read_text write_text read_lines append_text exists mkdir_p remove list_dir
   import env     — get set args cwd os millis unix_timestamp sleep_ms temp_dir
-  import process — exec exec_status
+  import process — exec output run
   import io      — read_line print read_all
   import json    — parse stringify stringify_pretty field index get_path get_string get_int get_bool get_float get_array to_map
   import random  — int float shuffle

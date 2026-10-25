@@ -35,7 +35,7 @@ effect fn handle(req: HttpRequest) -> HttpResponse = {
       ],
     ),
     "/query" => http.json(200, "\"${render_query(req)}\""),
-    "/teapot" => http.response(200, "short and stout") |> http.status(418) |> http.set_header(
+    "/teapot" => http.response(200, "short and stout") |> http.set_status(418) |> http.set_header(
       "x-kind",
       "teapot",
     ),

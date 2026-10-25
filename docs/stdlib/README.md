@@ -58,7 +58,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [unix](#unix) | 10 | 0 |
 | [url](#url) | 10 | 1 |
 | [uuid](#uuid) | 7 | 0 |
-| [value](#value) | 20 | 0 |
+| [value](#value) | 34 | 0 |
 | [zlib](#zlib) | 13 | 0 |
 
 ## args
@@ -642,9 +642,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect fs.fold_lines_range(path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> A` — Folds lines starting in bytes [start, end).
 - `effect fs.fold_lines_chunked(path: String, workers: Int, init: A, f: (A, String) -> A) -> List[A]` — Parallel chunk partials, in order; [] if empty.
 - `effect fs.read_text_if_exists(path: String) -> Option[String]` — Text, or none if missing; err if not UTF-8.
-- `effect fs.read_bytes_if_exists(path: String) -> Option[List[Int]]` — Bytes as Ints, or none if missing.
+- `effect fs.read_bytes_if_exists(path: String) -> Option[Bytes]` — File Bytes, or none if missing.
 - `effect fs.read_lines_if_exists(path: String) -> Option[List[String]]` — read_lines result, or none if missing.
-- `effect fs.read_bytes_raw_if_exists(path: String) -> Option[Bytes]` — File Bytes, or none if missing.
 - `effect fs.remove(path: String) -> Unit` — Deletes a file or empty dir; err if missing.
 - `effect fs.list_dir(path: String) -> List[String]` — Sorted names (not paths); err if not a dir.
 - `effect fs.is_dir(path: String) -> Bool` — True for a dir; follows symlinks.
@@ -664,7 +663,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect fs.read_bytes_raw(path: String) -> Bytes` — Whole regular file (<= 1 GiB) as Bytes; err if missing.
 - `effect fs.open_root(dir: String) -> FsRoot` — dir as an FsRoot; err if dir is not a directory.
 - `effect fs.root_read_text(root: FsRoot, path: String) -> String` — read_text of path inside root; err if it escapes.
-- `effect fs.root_read_bytes(root: FsRoot, path: String) -> Bytes` — read_bytes_raw of path inside root; err if it escapes.
+- `effect fs.root_read_bytes(root: FsRoot, path: String) -> Bytes` — read_bytes of path inside root; err if it escapes.
 - `effect fs.root_write_text(root: FsRoot, path: String, content: String) -> Unit` — write of content to path inside root; err if it escapes.
 - `effect fs.root_list_dir(root: FsRoot, path: String) -> List[String]` — list_dir of path inside root; err if it escapes.
 - `effect fs.root_exists(root: FsRoot, path: String) -> Bool` — exists of path inside root; err if it escapes.
@@ -674,10 +673,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [hash.md](hash.md)
 
-- `hash.fnv1a32(s: String) -> Int` — 32-bit FNV-1a of s's UTF-8; non-negative Int.
+- `hash.fnv1a32(b: Bytes) -> Int` — 32-bit FNV-1a of b, in 0..4294967295.
 - `hash.fnv1a32_bytes(b: Bytes) -> Int` — 32-bit FNV-1a of b, in 0..4294967295.
 - `hash.sha256(b: Bytes) -> Bytes` — 32-byte SHA-256 digest of b.
-- `hash.sha256_hex(s: String) -> String` — SHA-256 of s's UTF-8, 64 lowercase hex chars.
+- `hash.sha256_hex(b: Bytes) -> String` — SHA-256 of b as 64 lowercase hex chars.
 - `hash.crc32(b: Bytes) -> Int` — CRC-32 (IEEE, reflected) as an unsigned Int; 0 for empty b.
 - `hash.adler32(b: Bytes) -> Int` — Adler-32 as an unsigned Int; 1 for empty b.
 - `hash.md5(b: Bytes) -> Bytes` — 16-byte MD5 digest of b.
@@ -751,8 +750,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `http.set_header(m: M, name: String, value: String) -> M` — m with header name set, any case: the first match replaced in place, else appended.
 - `http.set_body(m: M, body: String) -> M` — m with its body replaced.
 - `http.set_body_bytes(m: M, body: Bytes) -> M` — m with its body replaced by body, decoded as lossy UTF-8.
-- `http.method(req: HttpRequest) -> String`
-- `http.path(req: HttpRequest) -> String`
+- `http.method(req: HttpRequest) -> String` — Request method as sent, e.g.
+- `http.path(req: HttpRequest) -> String` — Request target, query string included (a full URL for a request built to send).
 - `http.query_params(req: HttpRequest) -> Result[List[(String, String)], String]` — url.parse_query of the target after its first ?; pairs in order; err on a bad escape.
 - `effect http.get(url: String) -> String` — Body even for a 404; err only on transport.
 - `effect http.request(method: String, url: String, body: String, headers: List[(String, String)]) -> String` — Reply body for any method; any status is ok.
@@ -1137,7 +1136,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `json.parse(text: String) -> Result[Value, String]` — Value or err; lenient, trailing text ignored; nesting over 1000 is err.
 - `json.stringify(v: Value) -> String` — Compact JSON; a Float 1.0 prints as 1, NaN/inf as null.
-- `json.stringify_pretty(j: Value) -> String` — JSON with 2-space indent; [] and {} inline, NaN/inf null.
+- `json.stringify_pretty(v: Value) -> String` — JSON with 2-space indent; [] and {} inline, NaN/inf null.
 - `json.get_string(j: Value, key: String) -> Option[String]` — String at key; none if absent or non-string.
 - `json.get_int(j: Value, key: String) -> Option[Int]` — Int at key; none if absent or not an Int (a Float is never truncated).
 - `json.get_float(j: Value, key: String) -> Option[Float]` — Float at key (Int widens); none if absent.
@@ -1159,7 +1158,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.length(xs: List[A]) -> Int   (deprecated — use list.len)` — Alias of list.len.
 - `list.get(xs: List[A], i: Int) -> Option[A]` — Element at index i, or none when out of range.
 - `list.get_or(xs: List[A], i: Int, default: A) -> A` — Element at i, or default when out of range.
-- `list.set(xs: List[A], i: Int, val: A) -> List[A]` — Copy with slot i = val; no-op if i out of range.
+- `list.set(xs: List[A], i: Int, x: A) -> List[A]` — Copy with slot i = x; no-op if i out of range.
 - `list.swap(xs: List[A], i: Int, j: Int) -> List[A]` — Copy with i and j swapped; no-op if either OOB.
 - `list.sort(xs: List[A]) -> List[A]` — Ascending copy; Floats in IEEE totalOrder.
 - `list.reverse(xs: List[A]) -> List[A]` — Elements in reverse order.
@@ -1205,7 +1204,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.slice(xs: List[A], start: Int, end: Int) -> List[A]` — Indices start..<end, each clamped to 0..len; [] if start >= end.
 - `list.insert(xs: List[A], i: Int, val: A) -> List[A]` — Copy with val at i; i >= len or i < 0 appends.
 - `list.remove_at(xs: List[A], i: Int) -> List[A]` — Copy without slot i; no-op if i out of range.
-- `list.repeat(val: A, n: Int) -> List[A]` — n copies of val; [] for n <= 0.
+- `list.repeat(x: A, n: Int) -> List[A]` — n copies of x; [] for n <= 0.
 - `list.intersperse(xs: List[A], sep: A) -> List[A]` — sep between adjacent elements.
 - `list.windows(xs: List[A], n: Int) -> List[List[A]]` — All n-long runs; [] if n > len; n <= 0 aborts.
 - `list.dedup(xs: List[A]) -> List[A]` — Adjacent equal runs collapsed; not global.
@@ -1248,10 +1247,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `map.keys(m: Map[K, V]) -> List[K]` — Every key, in insertion order.
 - `map.values(m: Map[K, V]) -> List[V]` — Every value, in key insertion order.
 - `map.len(m: Map[K, V]) -> Int` — Entry count; 0 for an empty map.
-- `map.entries(m: Map[K, V]) -> List[(K, V)]` — (key, value) pairs in insertion order.
+- `map.to_list(m: Map[K, V]) -> List[(K, V)]` — (key, value) pairs in insertion order.
 - `map.merge(a: Map[K, V], b: Map[K, V]) -> Map[K, V]` — a plus b's entries; b wins on shared keys.
 - `map.is_empty(m: Map[K, V]) -> Bool` — true iff m has no entries.
-- `map.from_list(pairs: List[(K, V)]) -> Map[K, V]` — Map of pairs; a repeated key takes the last value.
+- `map.from_list(xs: List[(K, V)]) -> Map[K, V]` — Map of the pairs xs; a repeated key takes the last value.
 - `map.map(m: Map[K, V], f: (V) -> B) -> Map[K, B]` — Same keys and order, values replaced by f(v).
 - `map.filter(m: Map[K, V], f: (K, V) -> Bool) -> Map[K, V]` — Entries where f(k, v) holds, order kept.
 - `map.fold(m: Map[K, V], init: A, f: (A, K, V) -> A) -> A` — Folds f(acc, k, v) in insertion order.
@@ -1328,7 +1327,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `matrix.ones(rows: Int, cols: Int) -> Matrix` — rows x cols of 1.0; negatives clamp to 0.
 - `matrix.shape(m: Matrix) -> (Int, Int)` — (rows, cols); (0, 0) with no rows.
 - `matrix.transpose(m: Matrix) -> Matrix` — cols x rows copy; r x 0 becomes 0 x 0.
-- `matrix.from_lists(rows: List[List[Float]]) -> Matrix` — Matrix of equal-length rows; [] is 0 x 0.
+- `matrix.from_lists(xs: List[List[Float]]) -> Matrix` — Matrix of the equal-length rows xs; [] is 0 x 0.
 - `matrix.select_rows(m: Matrix, row_ids: List[Int]) -> Matrix` — Rows at row_ids; id < 0 is row 0, past end zeros.
 - `matrix.append_rows(base: Matrix, extra: Matrix) -> Matrix` — base rows then extra; empty side gives other.
 - `matrix.linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix` — x times f32 LE W^T.
@@ -1355,7 +1354,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `matrix.from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f64 LE rows x cols at offset; none if data short.
 - `matrix.broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix` — bias added to each row; cols cut to bias.
 - `matrix.split_cols_even(m: Matrix, n: Int) -> List[Matrix]` — n slices cols/n wide, remainder dropped; [] if n = 0.
-- `matrix.concat_cols(matrices: List[Matrix]) -> Matrix` — Side-by-side join; [] gives 0 x 0.
+- `matrix.concat_cols(xs: List[Matrix]) -> Matrix` — Side-by-side join; [] gives 0 x 0.
 - `matrix.concat_cols_many(matrices: List[Matrix]) -> Matrix   (deprecated — use matrix.concat_cols)` — Alias of matrix.concat_cols.
 - `matrix.linear_row(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix` — x W^T + bias; empty x or W gives 0 x 0.
 - `matrix.linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix` — x W^T; empty x or W gives 0 x 0.
@@ -1411,8 +1410,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `option.zip(a: Option[A], b: Option[B]) -> Option[(A, B)]` — some((x, y)) when both are some, else none.
 - `option.or_else(o: Option[A], f: () -> Option[A]) -> Option[A]` — o when some, else f(); f runs only for none.
 - `option.to_list(o: Option[A]) -> List[A]` — [v] for some(v), [] for none.
-- `option.collect(xs: List[Option[T]]) -> Option[List[T]]` — some(values) if no element is none, else none.
-- `option.collect_map(xs: List[T], f: (T) -> Option[U]) -> Option[List[U]]` — some of all f(x), or none; f runs on every x.
+- `option.collect(xs: List[Option[A]]) -> Option[List[A]]` — some(values) if no element is none, else none.
+- `option.collect_map(xs: List[A], f: (A) -> Option[B]) -> Option[List[B]]` — some of all f(x), or none; f runs on every x.
 
 ## path
 
@@ -1423,12 +1422,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `path.to_string(p: SafePath) -> String` — Path text inside p, unchanged.
 - `path.join(base: String, child: String) -> String` — base/child; an absolute child replaces base.
 - `path.join_within(base: String, child: String) -> Result[String, String]` — base/child; err if child could leave base.
-- `path.dirname(p: String) -> String` — p minus last segment; "" if no slash.
-- `path.basename(p: String) -> String` — Last non-empty segment; "" for / or empty p.
-- `path.extension(p: String) -> Option[String]` — After basename's last dot; none if no dot or dotfile.
-- `path.is_absolute(p: String) -> Bool` — True when p starts with /.
-- `path.stem(p: String) -> String` — Basename minus last extension; dotfiles as-is.
-- `path.normalize(p: String) -> String` — Resolves .
+- `path.dirname(path: String) -> String` — path minus last segment; "" if no slash.
+- `path.basename(path: String) -> String` — Last non-empty segment; "" for / or empty path.
+- `path.extension(path: String) -> Option[String]` — After basename's last dot; none if no dot or dotfile.
+- `path.is_absolute(path: String) -> Bool` — True when path starts with /.
+- `path.stem(path: String) -> String` — Basename minus last extension; dotfiles as-is.
+- `path.normalize(path: String) -> String` — Resolves .
 - `path.components(path: String) -> List[String]` — Segments of normalize(path), led by "/" when absolute; ["."] for "" or ".".
 - `path.relative_to(path: String, base: String) -> Option[String]` — path relative to base, lexically; "." when equal; none when not under base.
 - `path.with_extension(path: String, ext: String) -> String` — path with its last extension replaced by ext; "" removes it; unchanged without a file name.
@@ -1507,12 +1506,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `result.is_err(r: Result[A, E]) -> Bool` — true for err(_), false for ok(_).
 - `result.to_option(r: Result[A, E]) -> Option[A]` — some(v) for ok(v); none for err, e dropped.
 - `result.to_err_option(r: Result[A, E]) -> Option[E]` — some(e) for err(e); none for ok.
-- `result.partition(rs: List[Result[T, E]]) -> (List[T], List[E])` — (ok values, err values), each in list order.
+- `result.partition(xs: List[Result[A, E]]) -> (List[A], List[E])` — (ok values, err values), each in list order.
 - `result.flatten(r: Result[Result[A, E], E]) -> Result[A, E]` — Inner result of ok(inner); outer err kept.
 - `result.to_list(r: Result[A, E]) -> List[A]` — [v] for ok(v), [] for err.
 - `result.zip(a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]` — ok((x, y)) if both ok, else the first err.
 - `result.or_else(r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F]` — r when ok, else f(e); f runs only on err.
-- `result.filter(r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E]` — err(err_val) if pred fails on ok; err kept.
+- `result.filter(r: Result[A, E], f: (A) -> Bool, err_val: E) -> Result[A, E]` — err(err_val) if f fails on ok; err kept.
 
 ## secret
 
@@ -1527,9 +1526,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `set.new() -> Set[A]` — An empty Set[A].
 - `set.from_list(xs: List[A]) -> Set[A]` — Distinct elements of xs in first-seen order.
-- `set.insert(s: Set[A], value: A) -> Set[A]` — Copy with value appended; unchanged if present.
-- `set.remove(s: Set[A], value: A) -> Set[A]` — Copy without value; unchanged if absent.
-- `set.contains(s: Set[A], value: A) -> Bool` — true when value is a member.
+- `set.insert(s: Set[A], x: A) -> Set[A]` — Copy with x appended; unchanged if present.
+- `set.remove(s: Set[A], x: A) -> Set[A]` — Copy without x; unchanged if absent.
+- `set.contains(s: Set[A], x: A) -> Bool` — true when x is a member.
 - `set.len(s: Set[A]) -> Int` — Member count; 0 for an empty set.
 - `set.is_empty(s: Set[A]) -> Bool` — true iff s has no members.
 - `set.to_list(s: Set[A]) -> List[A]` — Members in insertion order.
@@ -1584,7 +1583,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.ends_with(s: String, suffix: String) -> Bool` — s ends with suffix; "" always matches.
 - `string.slice(s: String, start: Int, end: Int) -> String` — Codepoints [start, end), clamped to s.
 - `string.byte_slice(s: String, start: Int, end: Int) -> Option[String]` — Byte range [start, end); none if bad or mid-char.
-- `string.pad_start(s: String, n: Int, ch: String) -> String` — Left-padded to n chars with ch; never truncates.
+- `string.pad_start(s: String, n: Int, fill: String) -> String` — Left-padded to n chars with fill; never truncates.
 - `string.to_bytes(s: String) -> List[Int]` — UTF-8 bytes of s as Ints 0..255.
 - `string.capitalize(s: String) -> String` — First char uppercased as to_upper does, rest untouched.
 - `string.to_upper(s: String) -> String` — Unicode uppercase; never folds non-ASCII into ASCII; not for identity.
@@ -1592,7 +1591,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.replace(s: String, from: String, to: String) -> String` — Every from replaced by to.
 - `string.get(s: String, i: Int) -> Option[String]` — Codepoint at i, or none if out of range.
 - `string.lines(s: String) -> List[String]` — Split on \n or \r\n; endings dropped.
-- `string.chars(s: String) -> List[String]` — Each codepoint as a one-char string.
+- `string.to_list(s: String) -> List[String]` — Each codepoint as a one-char string.
 - `string.index_of(s: String, needle: String) -> Option[Int]` — Codepoint index of first needle, or none.
 - `string.repeat(s: String, n: Int) -> String` — s repeated n times; empty for n <= 0.
 - `string.from_bytes(bytes: List[Int]) -> String` — Lossy UTF-8 decode; bad sequences become U+FFFD.
@@ -1602,12 +1601,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.is_whitespace(s: String) -> Bool` — All whitespace; true for empty s.
 - `string.is_upper(s: String) -> Bool` — Has letters, all uppercase; others ignored.
 - `string.is_lower(s: String) -> Bool` — Has letters, all lowercase; others ignored.
-- `string.codepoint(s: String) -> Option[Int]` — Scalar value of first char; none if s empty.
-- `string.from_codepoint(n: Int) -> String` — One-char string; "" if n is not a scalar.
-- `string.pad_end(s: String, n: Int, ch: String) -> String` — Right-padded to n chars with ch; never truncates.
+- `string.to_codepoint(s: String) -> Option[Int]` — Scalar value of s when s is exactly one codepoint; none otherwise.
+- `string.from_codepoint(n: Int) -> Option[String]` — One-char string of n; none if n is not a Unicode scalar value.
+- `string.pad_end(s: String, n: Int, fill: String) -> String` — Right-padded to n chars with fill; never truncates.
 - `string.trim_start(s: String) -> String` — s without leading whitespace.
 - `string.trim_end(s: String) -> String` — s without trailing whitespace.
-- `string.count(s: String, sub: String) -> Int` — Non-overlapping sub count; len+1 if sub empty.
+- `string.count_matches(s: String, needle: String) -> Int` — Non-overlapping needle count; len+1 if needle empty.
+- `string.count(s: String, f: (String) -> Bool) -> Int` — Number of characters for which f is true.
 - `string.is_empty(s: String) -> Bool` — True only for ""; " " is not empty.
 - `string.reverse(s: String) -> String` — Codepoints reversed; not grapheme-aware.
 - `string.strip_prefix(s: String, prefix: String) -> Option[String]` — s without prefix, or none if s lacks it.
@@ -1621,7 +1621,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.drop(s: String, n: Int) -> String` — s minus first n codepoints; s if n < 0.
 - `string.drop_end(s: String, n: Int) -> String` — s minus last n codepoints; s if n < 0.
 - `string.run_length_encode(s: String) -> List[(String, Int)]` — (char, count) per run of equal codepoints.
-- `string.push(mut s: String, suffix: String) -> Unit` — Appends suffix to s in place.
+- `string.push(mut s: String, x: String) -> Unit` — Appends x to s in place.
+- `string.pop(mut s: String) -> Option[String]` — Removes and returns the last character; none if s is empty.
 - `string.clear(mut s: String) -> Unit` — Empties s in place.
 - `string.compare(a: String, b: String) -> Int` — Negative if a sorts before b, 0 if equal, positive after; codepoint order.
 - `string.byte_len(s: String) -> Int` — UTF-8 byte count (string.len counts codepoints).
@@ -1666,15 +1667,15 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [testing.md](testing.md)
 
-- `testing.assert_aborts(expected: String, f: () -> T) -> Unit` — Fails unless f, run alone in a child, aborts with text containing expected.
+- `testing.assert_aborts(expected: String, f: () -> A) -> Unit` — Fails unless f, run alone in a child, aborts with text containing expected.
 - `testing.assert_contains(haystack: String, needle: String) -> Unit` — Fails unless needle is in haystack; "" passes.
 - `testing.assert_approx(a: Float, b: Float, tolerance: Float) -> Unit` — Fails unless abs(a - b) < tolerance (strict).
-- `testing.assert_gt(a: Int, b: Int) -> Unit` — Fails unless a > b; equal fails.
-- `testing.assert_lt(a: Int, b: Int) -> Unit` — Fails unless a < b; equal fails.
-- `testing.assert_some(opt: Option[A]) -> Unit` — Fails when opt is none.
-- `testing.assert_ok(result: Result[A, B]) -> Unit` — Fails when result is an err.
-- `testing.assert_none(opt: Option[A]) -> Unit` — Fails when opt is some.
-- `testing.assert_err(result: Result[A, B]) -> Unit` — Fails when result is ok.
+- `testing.assert_gt(a: A, b: A) -> Unit` — Fails unless a > b; equal fails.
+- `testing.assert_lt(a: A, b: A) -> Unit` — Fails unless a < b; equal fails.
+- `testing.assert_some(o: Option[A]) -> Unit` — Fails when o is none.
+- `testing.assert_ok(r: Result[A, B]) -> Unit` — Fails when r is an err.
+- `testing.assert_none(o: Option[A]) -> Unit` — Fails when o is some.
+- `testing.assert_err(r: Result[A, B]) -> Unit` — Fails when r is ok.
 - `testing.assert_snapshot(actual: String, expected: String) -> Unit` — Fails unless actual == expected; --update-snapshots rewrites.
 
 ## uint16
@@ -1929,7 +1930,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `url.parse(s: String) -> Result[Url, String]` — Url from s, cleaned as WHATWG does; err on a bad scheme, host or port, a backslash or control char, userinfo, IPv6.
 - `url.to_string(u: Url) -> String` — URL text of u; empty query/fragment omitted.
 - `url.query_pairs(query: String) -> List[(String, String)]` — Undecoded (k, v) pairs; bare key gets "".
-- `url.build_query(pairs: List[(String, String)]) -> String` — k=v joined by &, both sides percent-encoded.
+- `url.build_query(xs: List[(String, String)]) -> String` — k=v joined by &, both sides percent-encoded.
 - `url.encode_form(s: String) -> String` — Like encode_component, but a space becomes +.
 - `url.decode_form(s: String) -> Result[String, String]` — + as space, then percent-decoded; err on bad escape/UTF-8.
 - `url.parse_query(query: String) -> Result[List[(String, String)], String]` — Decoded (k, v) pairs; bare key gets ""; err on a bad escape.
@@ -1951,7 +1952,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [value.md](value.md)
 
-- `value.array(items: List[Value]) -> Value` — Wraps items as an Array Value.
+- `value.array(xs: List[Value]) -> Value` — Wraps xs as an Array Value.
 - `value.as_array(v: Value) -> Result[List[Value], String]` — Array items; err if v is another kind.
 - `value.as_bool(v: Value) -> Result[Bool, String]` — Bool payload; err otherwise (no truthiness).
 - `value.as_float(v: Value) -> Result[Float, String]` — Float payload (Int widens); err otherwise.
@@ -1962,30 +1963,44 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `value.int(n: Int) -> Value` — Value holding the Int n.
 - `value.merge(a: Value, b: Value) -> Value` — Shallow merge, b's keys win; b if not both objects.
 - `value.null() -> Value` — The JSON null Value.
-- `value.object(pairs: List[(String, Value)]) -> Value` — Wraps pairs as an Object; a repeated key keeps its first position, last value.
+- `value.object(xs: List[(String, Value)]) -> Value` — Wraps the pairs xs as an Object; a repeated key keeps its first position, last value.
 - `value.omit(v: Value, keys: List[String]) -> Value` — v minus the listed keys; non-objects as-is.
 - `value.pick(v: Value, keys: List[String]) -> Value` — Only the listed keys of v; a non-object picks to {}.
-- `value.str(s: String) -> Value` — Value holding the String s.
+- `value.string(s: String) -> Value` — Value holding the String s.
 - `value.stringify(v: Value) -> String` — Compact JSON; NaN/inf print as null.
 - `value.to_camel_case(v: Value) -> Value` — Top-level keys to camelCase; nested untouched.
 - `value.to_snake_case(v: Value) -> Value` — Top-level keys to snake_case; userID -> user_i_d.
 - `value.field(v: Value, key: String) -> Result[Value, String]` — Value at key; err if missing or v not an Object.
 - `value.keys(v: Value) -> List[String]` — Object keys in order; [] for non-objects.
+- `value.as_object(v: Value) -> Result[List[(String, Value)], String]` — Object pairs in order; err if v is another kind.
+- `value.get(v: Value, key: String) -> Option[Value]` — Value at key; none if absent or v is not an Object.
+- `value.get_string(v: Value, key: String) -> Option[String]` — String at key; none if absent or another kind.
+- `value.get_int(v: Value, key: String) -> Option[Int]` — Int at key; none if absent or not an Int (a Float is never truncated).
+- `value.get_float(v: Value, key: String) -> Option[Float]` — Float at key (an Int widens); none if absent or another kind.
+- `value.get_bool(v: Value, key: String) -> Option[Bool]` — Bool at key; none if absent or another kind.
+- `value.get_array(v: Value, key: String) -> Option[List[Value]]` — Array items at key; none if absent or another kind.
+- `value.get_object(v: Value, key: String) -> Option[List[(String, Value)]]` — Object pairs at key; none if absent or another kind.
+- `value.root() -> Path` — The empty path: the whole value.
+- `value.key(p: Path, name: String) -> Path` — p extended by the object key name.
+- `value.index(p: Path, i: Int) -> Path` — p extended by the array index i; a negative i is out of range.
+- `value.get_path(v: Value, p: Path) -> Option[Value]` — Value at p, or none if a step misses.
+- `value.set_path(v: Value, p: Path, x: Value) -> Result[Value, String]` — v with x at p; missing keys are created, a missed index leaves v as is.
+- `value.remove_path(v: Value, p: Path) -> Value` — v minus the entry at p; unchanged if absent; null for the root.
 
 ## zlib
 
 [zlib.md](zlib.md)
 
-- `effect zlib.compress(data: Bytes) -> Bytes` — Zlib-framed DEFLATE of data; bytes vary by target.
-- `effect zlib.compress_level(data: Bytes, level: Int) -> Bytes` — Like compress; level clamped to 0..9, unused on wasm.
-- `effect zlib.decompress(data: Bytes) -> Bytes` — Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
+- `effect zlib.compress(b: Bytes) -> Bytes` — Zlib-framed DEFLATE of b; bytes vary by target.
+- `effect zlib.compress_level(b: Bytes, level: Int) -> Bytes` — Like compress; level clamped to 0..9, unused on wasm.
+- `zlib.decompress(b: Bytes) -> Result[Bytes, String]` — Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
 - `zlib.decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like decompress, output bound max_len bytes; max_len <= 0 aborts.
-- `effect zlib.deflate(data: Bytes) -> Bytes` — Raw DEFLATE, no header; bytes vary by target.
-- `effect zlib.deflate_level(data: Bytes, level: Int) -> Bytes` — Like deflate; level clamped to 0..9, unused on wasm.
-- `effect zlib.inflate(data: Bytes) -> Bytes` — Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
+- `effect zlib.deflate(b: Bytes) -> Bytes` — Raw DEFLATE, no header; bytes vary by target.
+- `effect zlib.deflate_level(b: Bytes, level: Int) -> Bytes` — Like deflate; level clamped to 0..9, unused on wasm.
+- `zlib.inflate(b: Bytes) -> Result[Bytes, String]` — Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
 - `zlib.inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like inflate, output bound max_len bytes; max_len <= 0 aborts.
-- `effect zlib.gzip(data: Bytes) -> Bytes` — RFC 1952 gzip of data; bytes vary by target.
-- `effect zlib.gunzip(data: Bytes) -> Bytes` — Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
+- `effect zlib.gzip(b: Bytes) -> Bytes` — RFC 1952 gzip of b; bytes vary by target.
+- `zlib.gunzip(b: Bytes) -> Result[Bytes, String]` — Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
 - `zlib.gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 - `zlib.crc32(data: Bytes) -> Int` — CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
 - `zlib.adler32(data: Bytes) -> Int` — Adler-32 as an unsigned Int; 1 for empty data.
