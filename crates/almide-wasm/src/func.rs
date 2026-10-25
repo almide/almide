@@ -398,6 +398,7 @@ pub(crate) fn lower_fn(
             cells: &cell_vars,
             tomb_vars: &tomb_vars,
             raw_map_read: false,
+            tomb_tail: Default::default(),
             moves: Default::default(),
             region_repair: region_saved_var.and_then(|v| {
                 let saved = locals.get(&v)?.0;

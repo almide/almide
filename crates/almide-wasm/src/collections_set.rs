@@ -448,7 +448,12 @@ impl Emitter<'_> {
     /// element afterwards — `insert` stores it (Retain), `contains` and
     /// `remove` only compare (Borrow).
     fn set_scan(&mut self, s: &IrExpr, x: &IrExpr, x_mode: ArgMode) -> Result<(u32, u32, u32, SliceTy), EmitError> {
-        let e = match self.lower_arg(s, None, ArgMode::Borrow)? {
+        self.set_scan_raw(s, x, x_mode, false)
+    }
+
+    /// [`Self::set_scan`]; `raw` reads a tombstone var without settling it.
+    fn set_scan_raw(&mut self, s: &IrExpr, x: &IrExpr, x_mode: ArgMode, raw: bool) -> Result<(u32, u32, u32, SliceTy), EmitError> {
+        let e = match self.lower_map_receiver(s, raw)? {
             SliceTy::Set(h) => self.types.el(h),
             other => return unsup(&format!("set-op-of:{other:?}")),
         };
@@ -488,25 +493,31 @@ impl Emitter<'_> {
                 self.f.instructions().i32_const(0).call(F_ALLOC);
                 Ok(Some(Lowered::owned(ty)))
             }
+            // A tombstone var (#4208) is read raw: its holes are subtracted.
             ("len", [s]) => {
-                let e = match self.lower_arg(s, None, ArgMode::Borrow)? {
+                let holed = self.tomb_receiver(s);
+                let e = match self.lower_map_receiver(s, holed)? {
                     SliceTy::Set(h) => self.types.el(h),
                     other => return unsup(&format!("set-op-of:{other:?}")),
                 };
-                self.f
-                    .instructions()
-                    .i32_load(len_memarg())
-                    .i32_const(e.slot_size() as i32)
-                    .i32_div_u()
-                    .i64_extend_i32_u();
+                self.emit_map_live_count(e.slot_size(), holed)?;
+                self.f.instructions().i64_extend_i32_u();
                 Ok(Some(Lowered::scalar(INT)))
             }
-            // #1423 stage 4: is_empty = the len slot at zero (stride-free).
+            // #1423 stage 4: is_empty = the len slot at zero (stride-free);
+            // a tombstone var's holes count as empty.
             ("is_empty", [s]) => {
-                if !matches!(self.lower_arg(s, None, ArgMode::Borrow)?, SliceTy::Set(..)) {
+                let holed = self.tomb_receiver(s);
+                let SliceTy::Set(h) = self.lower_map_receiver(s, holed)? else {
                     return unsup("set-op-of:non-set");
+                };
+                if holed {
+                    let e = self.types.el(h);
+                    self.emit_map_live_count(e.slot_size(), true)?;
+                    self.f.instructions().i32_eqz();
+                } else {
+                    self.f.instructions().i32_load(len_memarg()).i32_eqz();
                 }
-                self.f.instructions().i32_load(len_memarg()).i32_eqz();
                 Ok(Some(Lowered::scalar(BOOL)))
             }
             ("to_list", [s]) => {
@@ -524,8 +535,9 @@ impl Emitter<'_> {
                 self.f.instructions().call(copy);
                 Ok(Some(Lowered::owned(lt)))
             }
+            // a pure probe reads a tombstone var raw: the index steps over holes
             ("contains", [s, x]) => {
-                let (_sh, _xh, eh, e) = self.set_scan(s, x, ArgMode::Borrow)?;
+                let (_sh, _xh, eh, e) = self.set_scan_raw(s, x, ArgMode::Borrow, true)?;
                 self.f.instructions().local_get(eh).i32_const(0).i32_ne();
                 self.release_i32(); // eh
                 self.release_for(e);

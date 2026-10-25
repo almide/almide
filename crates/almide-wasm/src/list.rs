@@ -667,7 +667,16 @@ impl Emitter<'_> {
         self.loop_src_load(src);
         self.f.instructions().local_set(x_p);
         self.witness_callback_open(cb, Some(acc_p));
-        self.lower_fold_body(cb, body, b)?;
+        // #4208: a body ending in `map.remove(acc, k)` holes the
+        // accumulator's block; the fold's result settles it below.
+        let acc_var = match &cb.kind {
+            IrExprKind::Lambda { params, .. } => params.first().map(|(v, _)| *v),
+            _ => None,
+        };
+        match acc_var {
+            Some(acc) => self.with_tomb_tail(acc, body, |em| em.lower_fold_body(cb, body, b))?,
+            None => self.lower_fold_body(cb, body, b)?,
+        }
         // The accumulator OWNS one credit on every step: a borrowed body
         // result (a captured var, the accumulator itself) takes its share,
         // and the previous accumulator is released before the rebind
@@ -681,6 +690,9 @@ impl Emitter<'_> {
         self.witness_loop_close();
         self.loop_src_step(src);
         self.f.instructions().local_get(acc_p);
+        if let Some(acc) = acc_var {
+            self.settle_tomb_read(&acc, b);
+        }
         self.loop_src_close(src);
         Ok(Some(Lowered::owned(b)))
     }
