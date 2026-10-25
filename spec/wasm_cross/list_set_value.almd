@@ -10,5 +10,5 @@ effect fn main() -> Unit = {
   ]
   let updated = list.set(items, 1, value.array([value.int(7), value.int(8)]))
   println(value.stringify(value.array(updated)))
-  println(value.stringify(value.array(list.set(items, 0, value.str("x")))))
+  println(value.stringify(value.array(list.set(items, 0, value.string("x")))))
 }

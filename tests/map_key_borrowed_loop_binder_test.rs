@@ -13,7 +13,7 @@ use std::process::Command;
 
 const PROGRAM: &str = r#"fn count_chars(s: String) -> Map[String, Int] = {
   var counts: Map[String, Int] = map.new()
-  for c in string.chars(s) {
+  for c in string.to_list(s) {
     counts = map.set(counts, c, (map.get(counts, c) ?? 0) + 1)
   }
   counts

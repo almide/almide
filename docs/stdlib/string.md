@@ -233,13 +233,13 @@ fn main() -> Unit = {
 ["a", "b", "c"]
 ```
 
-### `string.chars(s: String) -> List[String]`
+### `string.to_list(s: String) -> List[String]`
 
 Split a string into individual characters.
 
 ```almd run
 fn main() -> Unit = {
-  println("${string.chars("abc")}")
+  println("${string.to_list("abc")}")
 }
 ```
 ```output
@@ -370,7 +370,7 @@ fn main() -> Unit = {
 true
 ```
 
-### `string.codepoint(s: String) -> Option[Int]`
+### `string.to_codepoint(s: String) -> Option[Int]`
 
 Return the Unicode codepoint of the first character, or none for empty string.
 
@@ -381,8 +381,8 @@ fn show(o: Option[Int]) -> String = match o {
 }
 
 fn main() -> Unit = {
-  println(show(string.codepoint("A")))
-  println(show(string.codepoint("")))
+  println(show(string.to_codepoint("A")))
+  println(show(string.to_codepoint("")))
 }
 ```
 ```output
@@ -390,13 +390,14 @@ some(65)
 none
 ```
 
-### `string.from_codepoint(n: Int) -> String`
+### `string.from_codepoint(n: Int) -> String?`
 
-Create a single-character string from a Unicode codepoint.
+Create a single-character string from a Unicode codepoint; none when n is
+not a Unicode scalar value (negative, a surrogate, or past U+10FFFF).
 
 ```almd run
 fn main() -> Unit = {
-  println(string.from_codepoint(65))
+  println(string.from_codepoint(65) ?? "")
 }
 ```
 ```output
@@ -442,13 +443,13 @@ fn main() -> Unit = {
 hello
 ```
 
-### `string.count(s: String, sub: String) -> Int`
+### `string.count_matches(s: String, sub: String) -> Int`
 
 Count occurrences of a substring.
 
 ```almd run
 fn main() -> Unit = {
-  println(int.to_string(string.count("banana", "an")))
+  println(int.to_string(string.count_matches("banana", "an")))
 }
 ```
 ```output
@@ -736,7 +737,7 @@ string.lines(s: String) -> List[String]
 
 // Each codepoint as a one-char string.
 // @since 0.5.0 or earlier
-string.chars(s: String) -> List[String]
+string.to_list(s: String) -> List[String]
 
 // Codepoint index of first needle, or none.
 // @since 0.5.0 or earlier
@@ -776,11 +777,11 @@ string.is_lower(s: String) -> Bool
 
 // Scalar value of first char; none if s empty.
 // @since 0.6.0 or earlier
-string.codepoint(s: String) -> Option[Int]
+string.to_codepoint(s: String) -> Option[Int]
 
 // One-char string; "" if n is not a scalar.
 // @since 0.6.0 or earlier
-string.from_codepoint(n: Int) -> String
+(string.from_codepoint(n: Int) ?? "") -> String
 
 // Right-padded to n chars with ch; never truncates.
 // @since 0.6.1 or earlier
@@ -796,7 +797,7 @@ string.trim_end(s: String) -> String
 
 // Non-overlapping sub count; len+1 if sub empty.
 // @since 0.5.0 or earlier
-string.count(s: String, sub: String) -> Int
+string.count_matches(s: String, sub: String) -> Int
 
 // True only for ""; " " is not empty.
 // @since 0.6.0 or earlier

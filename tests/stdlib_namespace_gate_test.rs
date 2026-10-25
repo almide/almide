@@ -118,7 +118,7 @@ fn json_surface_is_exactly_the_format_identity() {
     }
     // The survivors must all exist, or a dropped alias lost its operation.
     for survivor in [
-        "value.null", "value.object", "value.array", "value.keys", "value.str",
+        "value.null", "value.object", "value.array", "value.keys", "value.string",
         "value.int", "value.bool", "value.float", "value.as_string", "value.as_int",
         "value.as_float", "value.as_bool", "value.as_array", "value.field",
     ] {

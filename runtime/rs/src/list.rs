@@ -1274,6 +1274,3 @@ pub fn almide_rt_list_clear<A>(xs: &mut Vec<A>) { xs.clear(); }
 
 // ── Algorithmic primitives (Phase 3 stdlib expansion) ──
 
-pub fn almide_rt_list_binary_search(xs: &[i64], target: i64) -> Option<i64> {
-    xs.binary_search(&target).ok().map(|i| i as i64)
-}

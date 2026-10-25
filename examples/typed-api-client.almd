@@ -51,7 +51,7 @@ test "User codec roundtrip" {
 }
 
 test "User decode from json.object" {
-  let v = value.object([("id", value.int(1)), ("name", value.str("Alice")), ("email", value.str("alice@test.com"))])
+  let v = value.object([("id", value.int(1)), ("name", value.string("Alice")), ("email", value.string("alice@test.com"))])
   match User.decode(v) {
     ok(u) => assert_eq(u.name, "Alice"),
     err(_) => assert(false),

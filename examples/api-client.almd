@@ -32,8 +32,8 @@ fn Post.from_json(v: Value) -> Post? = {
 
 fn User.to_json(u: User) -> String = json.stringify(value.object([
   ("id", value.int(u.id)),
-  ("name", value.str(u.name)),
-  ("email", value.str(u.email))
+  ("name", value.string(u.name)),
+  ("email", value.string(u.email))
 ]))
 
 // ── API helpers ──
@@ -44,7 +44,7 @@ effect fn api_get(base_url: String, path: String) -> Result[Value, String] = {
 
 // ── Tests ──
 test "User.from_json parses valid" {
-  let v = value.object([("id", value.int(1)), ("name", value.str("Alice")), ("email", value.str("alice@example.com"))])
+  let v = value.object([("id", value.int(1)), ("name", value.string("Alice")), ("email", value.string("alice@example.com"))])
   match User.from_json(v) {
     some(u) => {
       assert_eq(u.name, "Alice")
@@ -61,7 +61,7 @@ test "User.from_json rejects invalid" {
 }
 
 test "Post.from_json parses valid" {
-  let v = value.object([("id", value.int(42)), ("title", value.str("Hello")), ("body", value.str("World")), ("user_id", value.int(1))])
+  let v = value.object([("id", value.int(42)), ("title", value.string("Hello")), ("body", value.string("World")), ("user_id", value.int(1))])
   match Post.from_json(v) {
     some(p) => {
       assert_eq(p.title, "Hello")

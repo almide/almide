@@ -523,7 +523,7 @@ impl Checker {
         let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str()).to_string();
         self.emit(super::err(
             format!("type '{}' holds a Secret, so the Codec derive does not derive '{}.encode'", bare, bare),
-            "A Secret is decoded, never written out. Build the Value by hand and reveal the field you mean to send: `value.object([(\"user\", value.str(x.user)), (\"password\", value.str(secret.reveal(x.password)))])`".to_string(),
+            "A Secret is decoded, never written out. Build the Value by hand and reveal the field you mean to send: `value.object([(\"user\", value.string(x.user)), (\"password\", value.string(secret.reveal(x.password)))])`".to_string(),
             format!("{}.encode", bare),
         ).with_code("E023"));
         true

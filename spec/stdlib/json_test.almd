@@ -1,9 +1,9 @@
 // json_test — JSON module tests
 import json
 
-// ── value.str / json.stringify ──
+// ── value.string / json.stringify ──
 test "json from_string and stringify" {
-  let v = value.str("hello")
+  let v = value.string("hello")
   let s = json.stringify(v)
   assert_eq(s.contains("hello"), true)
 }
@@ -36,7 +36,7 @@ test "json from_bool false" {
 // NOTE: value.null() has no runtime — skipped
 // ── json.object ──
 test "json object simple" {
-  let v = value.object([("name", value.str("Alice"))])
+  let v = value.object([("name", value.string("Alice"))])
   let s = json.stringify(v)
   assert_eq(s.contains("name"), true)
   assert_eq(s.contains("Alice"), true)
@@ -91,7 +91,7 @@ test "json object field accessible via stringify" {
 
 // ── json.parse and roundtrip ──
 test "json roundtrip object" {
-  let original = value.object([("a", value.int(1)), ("b", value.str("two"))])
+  let original = value.object([("a", value.int(1)), ("b", value.string("two"))])
   let text = json.stringify(original)
   match json.parse(text) {
     ok(parsed) => {

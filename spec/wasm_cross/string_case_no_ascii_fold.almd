@@ -7,7 +7,7 @@
 // in each direction (upper: U+00DF U+0131 U+0149 U+017F U+01F0 U+1E96..U+1E9A
 // U+FB00..U+FB06; lower: U+0130 U+212A), capitalize's head, and that Final_Sigma
 // still reads the held-back Kelvin sign as a cased neighbour.
-fn cps(s: String) -> String = string.chars(s) |> list.map((c) => int.to_hex(string.codepoint(c) ?? 0)) |> list.join(" ")
+fn cps(s: String) -> String = string.to_list(s) |> list.map((c) => int.to_hex(string.to_codepoint(c) ?? 0)) |> list.join(" ")
 
 effect fn main() -> Unit = {
   // The issue's probes: a check on the raw name and on the mapped name agree.

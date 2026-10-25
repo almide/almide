@@ -100,7 +100,7 @@ fn string_search_src(n: usize) -> String {
         r#"fn main() -> Unit = {{
   let hay = string.repeat("a", {n})
   let adv = string.repeat("a", {h}) + "b"
-  println("${{string.index_of(hay, adv)}} ${{string.contains(hay, adv)}} ${{string.count(hay, adv)}} ${{list.len(string.split(hay, adv))}} ${{string.last_index_of(hay, adv)}} ${{string.last_index_of(hay, string.repeat("a", {h}))}}")
+  println("${{string.index_of(hay, adv)}} ${{string.contains(hay, adv)}} ${{string.count_matches(hay, adv)}} ${{list.len(string.split(hay, adv))}} ${{string.last_index_of(hay, adv)}} ${{string.last_index_of(hay, string.repeat("a", {h}))}}")
   match string.split_once(hay, adv) {{
     some((a, b)) => println(a + b),
     none => println("none"),
@@ -273,7 +273,7 @@ fn main() -> Unit = {{
     let hb = bytes.from_string(h)
     for p in xs {{
       let pb = bytes.from_string(p)
-      println("${{h}}/${{p}} ${{string.index_of(h, p)}} ${{string.last_index_of(h, p)}} ${{string.contains(h, p)}} ${{string.count(h, p)}} ${{string.split(h, p)}} ${{string.split_once(h, p)}} ${{so(h, p)}} ${{string.replace(h, p, "X")}} ${{string.replace_first(h, p, "YZ")}}")
+      println("${{h}}/${{p}} ${{string.index_of(h, p)}} ${{string.last_index_of(h, p)}} ${{string.contains(h, p)}} ${{string.count_matches(h, p)}} ${{string.split(h, p)}} ${{string.split_once(h, p)}} ${{so(h, p)}} ${{string.replace(h, p, "X")}} ${{string.replace_first(h, p, "YZ")}}")
       let parts = bytes.split(hb, pb) |> list.map((x) => s(x))
       println("${{bytes.index_of(hb, pb)}} ${{bytes.last_index_of(hb, pb)}} ${{bytes.contains(hb, pb)}} ${{bytes.count_matches(hb, pb)}} ${{parts}} ${{s(bytes.replace(hb, pb, bytes.from_string("X")))}} ${{s(bytes.replace_first(hb, pb, bytes.from_string("YZ")))}}")
     }}

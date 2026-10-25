@@ -14,8 +14,8 @@ fn shown[T](r: Result[T, String]) -> String = match r {
   err(e) => "err " + e,
 }
 
-fn raw_control(t: String) -> Bool = string.chars(t) |> list.any((c) => {
-  let n = string.codepoint(c) ?? 0
+fn raw_control(t: String) -> Bool = string.to_list(t) |> list.any((c) => {
+  let n = string.to_codepoint(c) ?? 0
   n < 32 or (n >= 127 and n <= 159) or n == 8238
 })
 

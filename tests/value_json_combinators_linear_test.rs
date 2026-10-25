@@ -55,7 +55,7 @@ fn merge_src(n: usize) -> String {
 fn main() -> Unit = {{
   let m = value.merge(obj("a", {n}), obj("b", {n}))
   println(ends(value.keys(m), {n}))
-  let o = value.merge(obj("k", {n}), value.object(list.range(0, {half}) |> list.map((i) => ("k${{i * 2}}", value.str("v")))))
+  let o = value.merge(obj("k", {n}), value.object(list.range(0, {half}) |> list.map((i) => ("k${{i * 2}}", value.string("v")))))
   println("${{ends(value.keys(o), {half})}} ${{value.stringify(value.pick(o, ["k0", "k1", "k2"]))}}")
 }}
 "#
@@ -121,7 +121,7 @@ effect fn main() -> Unit = {{
   for i in 0..<{n} {{
     acc = json.set_path(acc, json.field(json.root(), "k${{i}}"), value.int(i))!
   }}
-  acc = json.set_path(acc, json.field(json.root(), "k0"), value.str("again"))!
+  acc = json.set_path(acc, json.field(json.root(), "k0"), value.string("again"))!
   let ks = value.keys(acc)
   println("${{list.len(ks)}} ${{list.first(ks) ?? "-"}} ${{list.last(ks) ?? "-"}} ${{value.stringify(value.pick(acc, ["k0", "k1"]))}}")
 }}
@@ -141,7 +141,7 @@ effect fn main() -> Unit = {{
   for i in 0..<{n} {{
     acc = json.set_path(acc, json.index(json.root(), i), value.int(i + 1))!
   }}
-  acc = json.set_path(acc, json.index(json.root(), -1), value.str("last"))!
+  acc = json.set_path(acc, json.index(json.root(), -1), value.string("last"))!
   let xs = value.as_array(acc) ?? []
   println("${{list.len(xs)}} ${{value.stringify(list.first(xs) ?? value.null())}} ${{value.stringify(list.get(xs, {n} - 2) ?? value.null())}} ${{value.stringify(list.last(xs) ?? value.null())}}")
 }}

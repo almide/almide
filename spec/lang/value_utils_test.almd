@@ -34,7 +34,7 @@ test "value.merge" {
 }
 
 test "value.to_camel_case" {
-  let v = value.object([("user_name", value.str("Alice")), ("created_at", value.str("2024"))])
+  let v = value.object([("user_name", value.string("Alice")), ("created_at", value.string("2024"))])
   let camel = value.to_camel_case(v)
   let text = json.stringify(camel)
   println(text)
@@ -43,7 +43,7 @@ test "value.to_camel_case" {
 }
 
 test "value.to_snake_case" {
-  let v = value.object([("userName", value.str("Alice")), ("createdAt", value.str("2024"))])
+  let v = value.object([("userName", value.string("Alice")), ("createdAt", value.string("2024"))])
   let snake = value.to_snake_case(v)
   let text = json.stringify(snake)
   println(text)

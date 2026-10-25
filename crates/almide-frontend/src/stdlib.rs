@@ -185,11 +185,11 @@ const ALIASES: &[(&str, &str, &str)] = &[
     ("float", "from_string", "float.parse"),
     ("float", "from_str", "float.parse"),
     // char code
-    ("string", "char_code", "string.codepoint"),
-    ("string", "char_code_at", "string.codepoint"),
-    ("string", "code_at", "string.codepoint"),
-    ("string", "char_at_code", "string.codepoint"),
-    ("string", "ord", "string.codepoint"),
+    ("string", "char_code", "string.to_codepoint"),
+    ("string", "char_code_at", "string.to_codepoint"),
+    ("string", "code_at", "string.to_codepoint"),
+    ("string", "char_at_code", "string.to_codepoint"),
+    ("string", "ord", "string.to_codepoint"),
     // case conversion
     ("string", "to_lowercase", "string.to_lower"),
     ("string", "lowercase", "string.to_lower"),
@@ -210,7 +210,7 @@ const ALIASES: &[(&str, &str, &str)] = &[
     ("string", "includes", "string.contains"),
     ("string", "has", "string.contains"),
     ("string", "index", "string.index_of"),
-    ("string", "all", "string.chars + list.all"),
+    ("string", "all", "string.to_list + list.all"),
     // Common LLM hallucinations from MSR testing
     ("string", "get_char", "string.get"),
     ("string", "charAt", "string.get"),

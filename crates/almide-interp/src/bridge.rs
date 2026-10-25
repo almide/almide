@@ -670,7 +670,7 @@ fn string_fn_structural(func: &str, args: &[Value]) -> Option<Flow> {
                 .map(|l| Value::str(l.to_string()))
                 .collect(),
         )),
-        "chars" => Flow::val(Value::list(
+        "to_list" => Flow::val(Value::list(
             as_str(args.first())?
                 .chars()
                 .map(|c| Value::str(c.to_string()))

@@ -22,8 +22,8 @@ else if __hq_fold(list.get(a, i) ?? "") != __hq_fold(list.get(b, i) ?? "") then 
 else __hq_ci_at(a, b, i + 1)
 
 fn __hq_ci_eq(x: String, y: String) -> Bool = {
-  let a = string.chars(x)
-  let b = string.chars(y)
+  let a = string.to_list(x)
+  let b = string.to_list(y)
   if list.len(a) != list.len(b) then false
   else __hq_ci_at(a, b, 0)
 }
@@ -90,7 +90,7 @@ fn __hq_quote_char(c: String) -> String = match c {
 }
 
 // A String in a nested position: native's `almide_repr_str` (five escapes).
-fn __hq_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hq_quote_char(c)) |> list.join("")) + "\""
+fn __hq_quote(s: String) -> String = "\"" + (string.to_list(s) |> list.map((c) => __hq_quote_char(c)) |> list.join("")) + "\""
 
 @implements("http.__http_request_repr")
 fn http_req_repr(req: List[String]) -> String = {

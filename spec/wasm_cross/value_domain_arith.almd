@@ -56,11 +56,11 @@ fn main() -> Unit = {
   println("ch_max=" + int.to_string(math.choose(9223372036854775807, 2)))
   println("ch_2p32=" + int.to_string(math.choose(4294967296, 2)))
   // from_codepoint: valid, the surrogate hole, the last codepoint, and past it.
-  println("cp_a=[" + string.from_codepoint(65) + "]")
-  println("cp_jp=[" + string.from_codepoint(12354) + "]")
-  println("cp_surrogate=[" + string.from_codepoint(55296) + "]")
-  println("cp_last=" + int.to_string(string.len(string.from_codepoint(1114111))))
-  println("cp_past=[" + string.from_codepoint(1114112) + "]")
-  println("cp_2p32=[" + string.from_codepoint(4294967296) + "]")
-  println("cp_min=[" + string.from_codepoint(0 - 9223372036854775807 - 1) + "]")
+  println("cp_a=[" + (string.from_codepoint(65) ?? "") + "]")
+  println("cp_jp=[" + (string.from_codepoint(12354) ?? "") + "]")
+  println("cp_surrogate=[" + (string.from_codepoint(55296) ?? "") + "]")
+  println("cp_last=" + int.to_string(string.len((string.from_codepoint(1114111) ?? ""))))
+  println("cp_past=[" + (string.from_codepoint(1114112) ?? "") + "]")
+  println("cp_2p32=[" + (string.from_codepoint(4294967296) ?? "") + "]")
+  println("cp_min=[" + (string.from_codepoint(0 - 9223372036854775807 - 1) ?? "") + "]")
 }

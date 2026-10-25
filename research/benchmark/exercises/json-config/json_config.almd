@@ -1,10 +1,10 @@
 import json
 
 test "parse and get string" {
-  let j = json.parse('{"name": "Alice", "age": 30}');
+  let j = json.parse('{"name": "Alice", "age": 30}')
   match j {
     ok(v) => {
-      assert_eq(json.get_string(v, "name"), some("Alice"));
+      assert_eq(json.get_string(v, "name"), some("Alice"))
       assert_eq(json.get_int(v, "age"), some(30))
     },
     err(_) => assert(false),
@@ -74,7 +74,7 @@ test "stringify pretty" {
 }
 
 test "builder shortcuts" {
-  let v = value.object([("name", value.str("Alice")), ("age", value.int(30))]);
-  assert_eq(json.get_string(v, "name"), some("Alice"));
+  let v = value.object([("name", value.string("Alice")), ("age", value.int(30))])
+  assert_eq(json.get_string(v, "name"), some("Alice"))
   assert_eq(json.get_int(v, "age"), some(30))
 }

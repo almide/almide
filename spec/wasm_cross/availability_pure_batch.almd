@@ -53,7 +53,7 @@ fn main() -> Unit = {
   println(path.to_string(path.trusted("../x")))
   // value.to_camel_case: shallow, ASCII, native's flag walk
   let snake = value.object([
-    ("user_name", value.str("Alice")),
+    ("user_name", value.string("Alice")),
     ("created_at", value.int(2024)),
     ("already", value.bool(true)),
     ("_lead", value.null()),
@@ -71,7 +71,7 @@ fn main() -> Unit = {
   println(json.stringify(value.to_camel_case(value.object([]))))
   // value.to_snake_case: an uppercase past byte 0 gains `_`, lowers
   let camel = value.object([
-    ("userName", value.str("Alice")),
+    ("userName", value.string("Alice")),
     ("createdAt", value.int(2024)),
     ("already", value.bool(true)),
     ("HTTPCode", value.int(200)),
@@ -80,7 +80,7 @@ fn main() -> Unit = {
     ("outerKey", value.object([("innerKey", value.int(4))]))
   ])
   println(json.stringify(value.to_snake_case(camel)))
-  println(json.stringify(value.to_snake_case(value.str("Keep"))))
+  println(json.stringify(value.to_snake_case(value.string("Keep"))))
   // the source objects are untouched by the rename
   println(json.stringify(snake))
   println(json.stringify(camel))

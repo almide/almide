@@ -20,7 +20,7 @@ Contracts: C-016。
 
 ## ALS-S2 空パターンの検索規則
 
-`string.count("")` は**コードポイント数 + 1** を返す（Rust `str::matches` の空
+`string.count_matches("")` は**コードポイント数 + 1** を返す（Rust `str::matches` の空
 パターン意味論）。`last_index_of` は最後の一致の**コードポイント位置**を返し、
 空パターンでは `len`（末尾位置）を返す。`index_of("")` は 0。
 Contracts: C-017。

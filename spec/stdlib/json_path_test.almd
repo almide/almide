@@ -10,7 +10,7 @@ test "json.root creates path" {
 }
 
 test "json.field creates field path" {
-  let obj = value.object([("name", value.str("Alice"))])
+  let obj = value.object([("name", value.string("Alice"))])
   let p = json.field(json.root(), "name")
   let v = json.get_path(obj, p)
   assert_eq(option.is_some(v), true)
@@ -21,7 +21,7 @@ test "json.field creates field path" {
 }
 
 test "json.field missing key returns none" {
-  let obj = value.object([("name", value.str("Alice"))])
+  let obj = value.object([("name", value.string("Alice"))])
   let p = json.field(json.root(), "age")
   let v = json.get_path(obj, p)
   assert_eq(option.is_none(v), true)
@@ -40,7 +40,7 @@ test "json.field nested path" {
 }
 
 test "json.index on array" {
-  let arr = value.array([value.str("a"), value.str("b"), value.str("c")])
+  let arr = value.array([value.string("a"), value.string("b"), value.string("c")])
   let p = json.index(json.root(), 1)
   let v = json.get_path(arr, p)
   assert_eq(option.is_some(v), true)
@@ -72,9 +72,9 @@ test "json.field then index" {
 
 // ── json.set_path ──
 test "json.set_path simple field" {
-  let obj = value.object([("name", value.str("Alice"))])
+  let obj = value.object([("name", value.string("Alice"))])
   let p = json.field(json.root(), "name")
-  match json.set_path(obj, p, value.str("Bob")) {
+  match json.set_path(obj, p, value.string("Bob")) {
     ok(result) => {
       let name = value.field(result, "name")?
       match name {

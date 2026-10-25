@@ -35,7 +35,7 @@ use almide::ast::ExprKind;
 
 /// The synonym vocabularies of rule 4. `count` is deliberately absent: it is
 /// count-by-predicate (`list.count(xs, f)`) or count-of-occurrences
-/// (`string.count(s, sub)`) wherever it appears, never an element count.
+/// (`string.count_matches(s, sub)`) wherever it appears, never an element count.
 const SYNONYM_VOCABULARIES: &[&[&str]] = &[&["len", "length", "size"]];
 
 /// Modules that are not user surface.

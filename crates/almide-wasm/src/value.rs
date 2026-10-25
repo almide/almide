@@ -54,7 +54,7 @@ impl Emitter<'_> {
                 self.emit_value_box(VT_FLOAT, Some(FLOAT))?;
                 Some(Lowered::owned(SliceTy::Value))
             }
-            ("str", [s]) => {
+            ("string", [s]) => {
                 self.lower_arg(s, Some(STR), ArgMode::Retain)?;
                 self.emit_value_box(VT_STR, Some(STR))?;
                 Some(Lowered::owned(SliceTy::Value))

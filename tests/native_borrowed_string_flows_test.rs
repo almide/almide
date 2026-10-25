@@ -15,7 +15,7 @@ use std::process::Command;
 
 const PROGRAM: &str = r#"fn has_digit(s: String) -> Bool = {
   var out = false
-  for c in string.chars(s) {
+  for c in string.to_list(s) {
     let hit = c >= "0" and c <= "9"
     if hit then { out = true } else ()
   }
@@ -60,7 +60,7 @@ fn keep_list(xs: List[Int]) -> List[Int] = {
 
 fn first_upper(s: String) -> String = {
   var found = ""
-  for c in string.chars(s) {
+  for c in string.to_list(s) {
     if found == "" and c >= "A" and c <= "Z" then { found = c } else ()
   }
   found

@@ -5,7 +5,7 @@ use crate::types::{Ty, TypeConstructorId};
 use almide_base::intern::sym;
 
 /// Auto-derive Codec encode: `fn T.encode(t: T) -> Value`
-/// Generates: `value.object([("field1", value.str(t.field1)), ...] + <conditional Option chunks>)`
+/// Generates: `value.object([("field1", value.string(t.field1)), ...] + <conditional Option chunks>)`
 pub(super) fn auto_derive_encode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
     let type_name = wk.type_name.to_string();
     let var = wk.vt.alloc(sym("_v"), type_ty.clone(), Mutability::Let, None);
@@ -135,7 +135,7 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
         return field_expr.clone();
     }
     let (module, func) = match field_ty {
-        Ty::String => ("value", "str"),
+        Ty::String => ("value", "string"),
         Ty::Int => ("value", "int"),
         Ty::Float => ("value", "float"),
         Ty::Bool => ("value", "bool"),
@@ -189,8 +189,8 @@ fn encode_field_value(field_expr: &IrExpr, field_ty: &Ty, value_ty: &Ty) -> IrEx
                     ty: value_ty.clone(), span: None, def_id: None,
                 };
             }
-            // Fallback: value.str(to_string(field))
-            ("value", "str")
+            // Fallback: value.string(to_string(field))
+            ("value", "string")
         }
     };
     IrExpr {

@@ -48,7 +48,7 @@ fn __url_enc_cp(cp: Int) -> String = if cp < 128 then __url_enc_byte(cp)
 else if cp < 2048 then __url_enc_byte(192 + cp / 64) + __url_enc_byte(128 + cp % 64)
 else if cp < 65536 then __url_enc_byte(224 + cp / 4096) + __url_enc_byte(128 + (cp / 64) % 64) + __url_enc_byte(128 + cp % 64) else __url_enc_byte(240 + cp / 262144) + __url_enc_byte(128 + (cp / 4096) % 64) + __url_enc_byte(128 + (cp / 64) % 64) + __url_enc_byte(128 + cp % 64)
 
-fn __url_enc_char(c: String) -> String = match string.codepoint(c) {
+fn __url_enc_char(c: String) -> String = match string.to_codepoint(c) {
   some(cp) => if __url_is_unreserved(cp) then c else __url_enc_cp(cp),
   none => "",
 }
@@ -60,9 +60,9 @@ fn __url_enc_char(c: String) -> String = match string.codepoint(c) {
 // Example: url.encode_component("a b") == "a%20b"
 // Example: url.encode_component("A-z_.~09") == "A-z_.~09"
 /// All but A-Za-z0-9-._~ as UTF-8 %XX escapes.
-fn encode_component(s: String) -> String = s |> string.chars |> list.map((c) => __url_enc_char(c)) |> list.join("")
+fn encode_component(s: String) -> String = s |> string.to_list |> list.map((c) => __url_enc_char(c)) |> list.join("")
 
-fn __url_hex_val(c: String) -> Int? = match string.codepoint(c) {
+fn __url_hex_val(c: String) -> Int? = match string.to_codepoint(c) {
   some(cp) => if cp >= 48 and cp <= 57 then some(cp - 48)
   else if cp >= 65 and cp <= 70 then some(cp - 55)
   else if cp >= 97 and cp <= 102 then some(cp - 87) else none,
@@ -106,14 +106,19 @@ fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[Stri
   if p >= end then ok(acc)
   else {
     let b0 = __url_pbyte(cs, p)
-    if b0 >= 0 and b0 < 128 then __url_utf8_go(cs, p + 3, end, acc + string.from_codepoint(b0))
+    if b0 >= 0 and b0 < 128 then __url_utf8_go(
+      cs,
+      p + 3,
+      end,
+      acc + (string.from_codepoint(b0) ?? ""),
+    )
     else if b0 >= 194 and b0 <= 223 then {
       let b1 = __url_pbyte(cs, p + 3)
       if p + 6 <= end and __url_cont(b1) then __url_utf8_go(
         cs,
         p + 6,
         end,
-        acc + string.from_codepoint((b0 - 192) * 64 + (b1 - 128)),
+        acc + (string.from_codepoint((b0 - 192) * 64 + (b1 - 128)) ?? ""),
       )
       else err("url.decode_component: invalid UTF-8 in percent data")
     } else if b0 >= 224 and b0 <= 239 then {
@@ -125,7 +130,7 @@ fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[Stri
         cs,
         p + 9,
         end,
-        acc + string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)),
+        acc + (string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)) ?? ""),
       )
       else err("url.decode_component: invalid UTF-8 in percent data")
     } else if b0 >= 240 and b0 <= 244 then {
@@ -138,7 +143,7 @@ fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[Stri
         cs,
         p + 12,
         end,
-        acc + string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)),
+        acc + (string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)) ?? ""),
       )
       else err("url.decode_component: invalid UTF-8 in percent data")
     } else err("url.decode_component: invalid UTF-8 in percent data")
@@ -169,7 +174,7 @@ fn __url_dec_go(cs: List[String], i: Int, n: Int, acc: String) -> Result[String,
 // Example: match url.decode_component(url.encode_component("日本語 ok~")) { ok(v) => v == "日本語 ok~", err(_) => false }
 /// Percent-decoded s; err on bad escape/UTF-8; + kept.
 fn decode_component(s: String) -> Result[String, String] = {
-  let cs = string.chars(s)
+  let cs = string.to_list(s)
   __url_dec_go(cs, 0, list.len(cs), "")
 }
 
@@ -178,7 +183,7 @@ fn decode_component(s: String) -> Result[String, String] = {
 // `evil.com%2fgood.com` would be read as two different things.
 fn __url_host_char(cp: Int) -> Bool = __url_is_unreserved(cp) or cp == 33 or cp == 36 or cp == 38 or cp == 39 or cp == 40 or cp == 41 or cp == 42 or cp == 43 or cp == 44 or cp == 59 or cp == 61
 
-fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) => match string.codepoint(c) {
+fn __url_host_ok(host: String) -> Bool = host |> string.to_list |> list.all((c) => match string.to_codepoint(c) {
   some(cp) => __url_host_char(cp),
   none => false,
 })
@@ -187,7 +192,7 @@ fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) =>
 // stripped, every tab / LF / CR removed. What is left may hold no other
 // control character and no backslash (WHATWG reads `\` as `/` in http(s);
 // refusing it keeps every reader on one URL).
-fn __url_cp(c: String) -> Int = string.codepoint(c) ?? 0
+fn __url_cp(c: String) -> Int = string.to_codepoint(c) ?? 0
 
 fn __url_first_kept(cs: List[String], i: Int) -> Int =
   if i < list.len(cs) and __url_cp(list.get(cs, i) ?? "") <= 32 then __url_first_kept(cs, i + 1)
@@ -198,7 +203,7 @@ fn __url_last_kept(cs: List[String], i: Int) -> Int =
   else i
 
 fn __url_clean(s: String, who: String) -> Result[String, String] = {
-  let cs = string.chars(s)
+  let cs = string.to_list(s)
   let start = __url_first_kept(cs, 0)
   let end = __url_last_kept(cs, list.len(cs))
   let kept = cs |> list.take(end) |> list.drop(start) |> list.filter((c) => c != "\t" and c != "\n" and c != "\r")
@@ -208,12 +213,12 @@ fn __url_clean(s: String, who: String) -> Result[String, String] = {
 }
 
 // A scheme is ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ).
-fn __url_scheme_ok(t: String) -> Bool = string.len(t) > 0 and string.chars(t) |> list.enumerate |> list.all(((j, c)) => {
+fn __url_scheme_ok(t: String) -> Bool = string.len(t) > 0 and string.to_list(t) |> list.enumerate |> list.all(((j, c)) => {
   let cp = __url_cp(c)
   (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122) or (j > 0 and ((cp >= 48 and cp <= 57) or cp == 43 or cp == 45 or cp == 46))
 })
 
-fn __url_all_digits(t: String) -> Bool = string.len(t) > 0 and string.chars(t) |> list.all((c) => __url_cp(c) >= 48 and __url_cp(c) <= 57)
+fn __url_all_digits(t: String) -> Bool = string.len(t) > 0 and string.to_list(t) |> list.all((c) => __url_cp(c) >= 48 and __url_cp(c) <= 57)
 
 fn __url_hex_digit(c: String) -> Bool = match __url_hex_val(c) {
   some(_) => true,
@@ -227,7 +232,7 @@ fn __url_ends_in_number(host: String) -> Bool = {
   let n = list.len(labels)
   let last = if n > 1 and (list.get(labels, n - 1) ?? "") == "" then list.get(labels, n - 2) ?? ""
   else list.get(labels, n - 1) ?? ""
-  __url_all_digits(last) or ((string.starts_with(last, "0x") or string.starts_with(last, "0X")) and string.chars(string.drop(last, 2)) |> list.all((c) => __url_hex_digit(c)))
+  __url_all_digits(last) or ((string.starts_with(last, "0x") or string.starts_with(last, "0X")) and string.to_list(string.drop(last, 2)) |> list.all((c) => __url_hex_digit(c)))
 }
 
 // Four decimal labels, each `0` or a non-zero-led number up to 255.
@@ -403,7 +408,7 @@ fn build_query(xs: List[(String, String)]) -> String = xs |> list.map(((k, v)) =
 // See also: url.decode_form (the inverse), url.encode_component.
 // Example: url.encode_form("a b+c") == "a+b%2Bc"
 /// Like encode_component, but a space becomes +.
-fn encode_form(s: String) -> String = s |> string.chars |> list.map((c) => if c == " " then "+" else __url_enc_char(c)) |> list.join("")
+fn encode_form(s: String) -> String = s |> string.to_list |> list.map((c) => if c == " " then "+" else __url_enc_char(c)) |> list.join("")
 
 // Form decoding: `+` becomes a space, then the decode_component rules apply.
 // See also: url.encode_form (the inverse), url.decode_component.
@@ -483,19 +488,19 @@ fn resolve(base: Url, ref: String) -> Result[Url, String] = match __url_clean(re
 }
 
 // TEMP probes
-fn __url_t_pctend(s: String) -> Int = __url_pct_end(string.chars(s), 1, string.len(s))
+fn __url_t_pctend(s: String) -> Int = __url_pct_end(string.to_list(s), 1, string.len(s))
 
-fn __url_t_pbyte(s: String) -> Int = __url_pbyte(string.chars(s), 0)
+fn __url_t_pbyte(s: String) -> Int = __url_pbyte(string.to_list(s), 0)
 
-fn __url_t_utf8(s: String) -> String = match __url_utf8_go(string.chars(s), 0, string.len(s), "") {
+fn __url_t_utf8(s: String) -> String = match __url_utf8_go(string.to_list(s), 0, string.len(s), "") {
   ok(v) => v,
   err(e) => "E:" + e,
 }
 
-fn __url_t_fcp(b: Int) -> String = string.from_codepoint(b)
+fn __url_t_fcp(b: Int) -> String = (string.from_codepoint(b) ?? "")
 
 fn __url_t_dec_nopct(s: String) -> String = match __url_dec_go(
-  string.chars(s),
+  string.to_list(s),
   0,
   string.len(s),
   "",

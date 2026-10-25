@@ -162,9 +162,9 @@ test "string trim_start and trim_end" {
 }
 
 test "string count" {
-  assert_eq(string.count("banana", "a"), 3)
-  assert_eq(string.count("hello", "l"), 2)
-  assert_eq(string.count("hello", "z"), 0)
+  assert_eq(string.count_matches("banana", "a"), 3)
+  assert_eq(string.count_matches("hello", "l"), 2)
+  assert_eq(string.count_matches("hello", "z"), 0)
 }
 
 test "string lines" {
@@ -173,8 +173,8 @@ test "string lines" {
 }
 
 test "string chars" {
-  assert_eq(string.chars("abc"), ["a", "b", "c"])
-  assert_eq(string.chars(""), [])
+  assert_eq(string.to_list("abc"), ["a", "b", "c"])
+  assert_eq(string.to_list(""), [])
 }
 
 test "string replace multiple occurrences" {

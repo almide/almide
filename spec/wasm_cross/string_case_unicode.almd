@@ -72,8 +72,8 @@ effect fn main() -> Unit = {
   println(string.capitalize(""))
   // (empty)
   // ── Astral plane (Deseret, has case mappings) via from_codepoint ──
-  println(string.to_lower(string.from_codepoint(66560)))
+  println(string.to_lower((string.from_codepoint(66560) ?? "")))
   // 𐐀 U+10400 -> 𐐨 U+10428
   // 𐐨 U+10428 -> 𐐀 U+10400
-  println(string.to_upper(string.from_codepoint(66600)))
+  println(string.to_upper((string.from_codepoint(66600) ?? "")))
 }

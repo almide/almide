@@ -7,29 +7,29 @@
 // runtime now routes all of them through __is_unicode_ws (oracle-derived from
 // char::is_whitespace). string.len is BYTE length, so this asserts on byte counts.
 effect fn main() -> Unit = {
-  let nbsp = string.from_codepoint(160)
+  let nbsp = (string.from_codepoint(160) ?? "")
   // U+00A0
-  let thin = string.from_codepoint(8201)
+  let thin = (string.from_codepoint(8201) ?? "")
   // U+2009 THIN SPACE
-  let ideo = string.from_codepoint(12288)
+  let ideo = (string.from_codepoint(12288) ?? "")
   // U+3000 IDEOGRAPHIC SPACE
-  let ensp = string.from_codepoint(8194)
+  let ensp = (string.from_codepoint(8194) ?? "")
   // U+2002 EN SPACE
-  let nel = string.from_codepoint(133)
+  let nel = (string.from_codepoint(133) ?? "")
   // U+0085 NEL
-  let ogh = string.from_codepoint(5760)
+  let ogh = (string.from_codepoint(5760) ?? "")
   // U+1680 OGHAM SPACE MARK
-  let nnbsp = string.from_codepoint(8239)
+  let nnbsp = (string.from_codepoint(8239) ?? "")
   // U+202F NARROW NO-BREAK SPACE
-  let mmsp = string.from_codepoint(8287)
+  let mmsp = (string.from_codepoint(8287) ?? "")
   // U+205F MEDIUM MATHEMATICAL SPACE
-  let lsep = string.from_codepoint(8232)
+  let lsep = (string.from_codepoint(8232) ?? "")
   // U+2028 LINE SEPARATOR
-  let vt = string.from_codepoint(11)
+  let vt = (string.from_codepoint(11) ?? "")
   // U+000B (whitespace)
-  let ff = string.from_codepoint(12)
+  let ff = (string.from_codepoint(12) ?? "")
   // U+000C (whitespace)
-  let zwsp = string.from_codepoint(8203)
+  let zwsp = (string.from_codepoint(8203) ?? "")
   // U+200B (NOT whitespace)
   // trim strips Unicode whitespace on both ends; interior is preserved.
   println("[" + string.trim(nbsp + thin + "a b" + ideo + nel) + "]")

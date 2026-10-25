@@ -1054,8 +1054,8 @@ type Scroll: Codec = { dy: Int }
 type Event = | C(Click) | S(Scroll)
 
 fn Event.encode(e: Event) -> Value = match e {
-  C(c) => value.merge(Click.encode(c), value.object([("type", value.str("click"))])),
-  S(s) => value.merge(Scroll.encode(s), value.object([("type", value.str("scroll"))])),
+  C(c) => value.merge(Click.encode(c), value.object([("type", value.string("click"))])),
+  S(s) => value.merge(Scroll.encode(s), value.object([("type", value.string("scroll"))])),
 }
 fn Event.decode(v: Value) -> Result[Event, String] = {
   let tag = value.as_string(value.field(v, "type")!)!

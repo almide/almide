@@ -42,10 +42,10 @@ impl Emitter<'_> {
                 self.lower_string_pad(s, w, p, func.as_str() == "pad_start")
             }
             ("lines", [s]) => self.lower_string_lines(s),
-            ("chars", [s]) => self.lower_string_chars(s),
+            ("to_list", [s]) => self.lower_string_chars(s),
             ("capitalize", [s]) => self.lower_string_capitalize(s),
             ("run_length_encode", [s]) => self.lower_string_rle(s),
-            ("codepoint", [s]) => self.lower_string_codepoint(s),
+            ("to_codepoint", [s]) => self.lower_string_codepoint(s),
             ("reverse", [s]) => self.lower_string_reverse(s),
             ("first" | "last", [s]) => self.lower_string_first_last(func == "last", s),
             ("get", [s, i]) => self.lower_string_get(s, i),

@@ -166,6 +166,15 @@ pub fn almide_rt_value_as_float(v: &AlmideValue) -> Result<f64, AlmideString> {
 }
 pub fn almide_rt_value_as_bool(v: &AlmideValue) -> Result<bool, AlmideString> { let __almide_r: Result<bool, String> = (|| { match v { AlmideValue::Bool(b) => Ok(*b), _ => Err(format!("expected Bool, received {}", almide_rt_value_kind(v))) } })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_value_as_array(v: &AlmideValue) -> Result<Vec<AlmideValue>, AlmideString> { let __almide_r: Result<Vec<AlmideValue>, String> = (|| { match v { AlmideValue::Array(a) => Ok(a.clone()), _ => Err(format!("expected Array, received {}", almide_rt_value_kind(v))) } })(); __almide_r.map_err(Into::into) }
+/// `value.as_object` (R-value-02): the Object's pairs in order, the `as_array`
+/// family's Object cell; any other kind is the same `expected Object` err
+/// `value.field` gives.
+pub fn almide_rt_value_as_object(v: &AlmideValue) -> Result<Vec<(AlmideString, AlmideValue)>, AlmideString> {
+    match v {
+        AlmideValue::Object(pairs) => Ok(pairs.iter().map(|(k, x)| (AlmideString::from(k.as_ref()), x.clone())).collect()),
+        _ => Err(AlmideString::from(format!("expected Object, received {}", almide_rt_value_kind(v)))),
+    }
+}
 /// The `@reuse` twin (#2157): a Value at its last use hands its items over
 /// instead of having every element (each a whole subtree) cloned out of it.
 pub fn almide_rt_value_as_array_owned(v: AlmideValue) -> Result<Vec<AlmideValue>, AlmideString> {

@@ -253,7 +253,7 @@ fn positive(n: Int) -> Bool =
 
 #[test]
 fn e002_freetext_alias_suppresses_try_snippet() {
-    // `string.all` aliases to "string.chars + list.all" — a free-text
+    // `string.all` aliases to "string.to_list + list.all" — a free-text
     // composition, not a bare fn name. try: must be suppressed rather
     // than splice the free-text blob into `X(...)`.
     let p = write_tmp("try_e002_freetext.almd", r#"
@@ -264,7 +264,7 @@ fn main() -> Bool = {
     let (ok, out) = check(&p);
     assert!(!ok);
     assert!(out.contains("error[E002]"), "out:\n{}", out);
-    assert!(out.contains("Did you mean `string.chars + list.all`"), "hint missing\n{}", out);
+    assert!(out.contains("Did you mean `string.to_list + list.all`"), "hint missing\n{}", out);
     assert!(!out.contains("try:"), "try: must be suppressed for free-text alias\n{}", out);
 }
 
