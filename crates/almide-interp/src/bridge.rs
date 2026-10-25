@@ -92,7 +92,31 @@ pub(crate) fn env_overlay_get(name: &str) -> Option<String> {
 /// the same here as on the targets.
 fn env_fn(func: &str, args: &[Value]) -> Option<Flow> {
     match (func, args) {
+        // `env.set` (C-421, #4200): the pairs no environment holds are an err
+        // and store nothing — the rule restated here, independently of the
+        // Almide body the backends run, so the third oracle checks it.
         ("set", [Value::Str(name), Value::Str(value)]) => {
+            let why = if name.is_empty() {
+                Some("empty name")
+            } else if name.contains('=') {
+                Some("name contains '='")
+            } else if name.contains('\0') {
+                Some("name contains NUL")
+            } else if value.contains('\0') {
+                Some("value contains NUL")
+            } else {
+                None
+            };
+            Some(Flow::val(match why {
+                Some(why) => Value::Result(Err(Box::new(Value::str(format!("env.set: {why}"))))),
+                None => {
+                    ENV_OVERLAY.with(|o| o.borrow_mut().insert(name.to_string(), value.to_string()));
+                    Value::Result(Ok(Box::new(Value::Unit)))
+                }
+            }))
+        }
+        // `env.set`'s private op, reached through its body.
+        ("__set", [Value::Str(name), Value::Str(value)]) => {
             ENV_OVERLAY.with(|o| o.borrow_mut().insert(name.to_string(), value.to_string()));
             Some(Flow::val(Value::Unit))
         }
@@ -668,7 +692,7 @@ mod env_overlay_tests {
     fn env_set_stays_inside_the_interpreter() {
         let key = "INTERP_ENV_OVERLAY_PROBE";
         reset_env_overlay();
-        env_fn("set", &[Value::str(key.to_string()), Value::str("written".to_string())]);
+        env_fn("__set", &[Value::str(key.to_string()), Value::str("written".to_string())]);
         assert_eq!(std::env::var(key).ok(), None, "env.set leaked into the host process");
         assert_eq!(env_overlay_get(key), Some("written".to_string()));
         reset_env_overlay();
