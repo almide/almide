@@ -101,6 +101,32 @@ test "range_step counts up, counts down, and is half-open like range" {
   assert_eq(list.range_step(0, 5, -1), [])
 }
 
+test "range_step lists the whole span at the ends of Int (#4197)" {
+  let mn = int.min_value()
+  let mx = int.max_value()
+  assert_eq(
+    list.len(list.range_step(-9000000000000000000, 9000000000000000000, 1000000000000000000)),
+    18,
+  )
+  assert_eq(
+    list.range_step(mn, mx, 4611686018427387904),
+    [mn, -4611686018427387904, 0, 4611686018427387904],
+  )
+  assert_eq(
+    list.range_step(mx, mn, -4611686018427387904),
+    [mx, 4611686018427387903, -1, -4611686018427387905],
+  )
+  assert_eq(list.range_step(mn, mx, mx), [mn, -1, mx - 1])
+  assert_eq(list.range_step(mx, mn, mn), [mx, -1])
+  assert_eq(list.range_step(mx, mn, mn + 1), [mx, 0, mn + 1])
+  assert_eq(list.range_step(mx - 6, mx, 3), [mx - 6, mx - 3])
+  assert_eq(list.range_step(mx - 7, mx, 3), [mx - 7, mx - 4, mx - 1])
+  assert_eq(list.range_step(mn + 7, mn, -3), [mn + 7, mn + 4, mn + 1])
+  assert_eq(list.range_step(mx - 1, mx, 1), [mx - 1])
+  assert_eq(list.range_step(mx, mn, 1), [])
+  assert_eq(list.range_step(mn, mx, -1), [])
+}
+
 test "range_step aborts on a zero step" {
   testing.assert_aborts("step must not be 0", () => list.range_step(0, 5, 0))
 }
