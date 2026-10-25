@@ -3267,16 +3267,6 @@ expect = "24"
 default_index_unit = "value"
 
 [[process.fn]]
-name = "exit"
-index_unit = "value"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (exiting would end the harness): the Int is the process
-EXIT CODE, observable to the parent — 0 is success by convention.
-"""
-
-[[process.fn]]
 name = "run"
 index_unit = "value"
 probe = "1"
@@ -3287,53 +3277,21 @@ when a signal killed it — the same reading as ProcessStatus.code (#2540, #3379
 """
 
 [[process.fn]]
-name = "run_in"
-index_unit = "value"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): the Int is the child's EXIT CODE, or -1
-when a signal killed it, as `run` (#3379).
-"""
-
-[[process.fn]]
-name = "exec_attached"
-index_unit = "value"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): the deprecated alias of `run` — the Int
-is the child's EXIT CODE, or -1 when a signal killed it (#2540, #3379).
-"""
-
-[[process.fn]]
-name = "exec_status_timeout"
+name = "stop"
 index_unit = "millisecond"
 probe = "1"
 expect = "1"
 note = """
-Declared, not probed (host-capability): timeout_ms is MILLISECONDS — the
-second/millisecond confusion is the #419-class trap this row exists for.
+Declared, not probed (host-capability): `stop(c: ProcessChild, grace_ms: Int) -> Result[ProcessStatus, String]`.
 """
 
 [[process.fn]]
-name = "pid"
-index_unit = "value"
+name = "child_pid"
+index_unit = "handle"
 probe = "1"
 expect = "1"
 note = """
-Declared, not probed (host-capability): the Int is the calling process's own
-OS pid, strictly positive on every supported host.
-"""
-
-[[process.fn]]
-name = "spawn"
-index_unit = "value"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): the Ok Int is the CHILD's pid — the
-handle kill/is_alive consume.
+Declared, not probed (host-capability): `child_pid(c: ProcessChild) -> Int`.
 """
 
 [[process.fn]]
@@ -3347,29 +3305,97 @@ POSIX signal NUMBER (9 = SIGKILL, 15 = SIGTERM) — not an exit code.
 """
 
 [[process.fn]]
-name = "sleep"
-index_unit = "millisecond"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (a sleeping probe is flaky by construction): ms is
-MILLISECONDS — process.sleep(1000) is one second.
-"""
-
-[[process.fn]]
-name = "is_alive"
+name = "exit"
 index_unit = "value"
 probe = "1"
 expect = "1"
 note = """
-Declared, not probed (host-capability): the Int is a pid.
+Declared, not probed (exiting would end the harness): the Int is the process
+EXIT CODE, observable to the parent — 0 is success by convention.
 """
 
-# index_unit vocabulary — testing:
-#   value — the Int is a compared MAGNITUDE, and the comparison is STRICT
-#           (measured 2026-08-13: assert_gt(1, 1) and assert_lt(1, 1) both
-#           fail — native "assert_gt failed: 1 is not > 1" exit 101, wasm
-#           "assert_gt failed" exit 1)
+[[process.fn]]
+name = "pid"
+index_unit = "value"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): the Int is the calling process's own
+OS pid, strictly positive on every supported host.
+"""
+
+[[process.fn]]
+name = "__os_output"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): `__os_output(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[ProcessStatus, String]`.
+"""
+
+[[process.fn]]
+name = "__os_run"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): `__os_run(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String]`.
+"""
+
+[[process.fn]]
+name = "__os_start"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): `__os_start(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String]`.
+"""
+
+[[process.fn]]
+name = "__os_poll"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): `__os_poll(h: Int) -> Result[Bool, String]`.
+"""
+
+[[process.fn]]
+name = "__os_wait"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): `__os_wait(h: Int) -> Result[ProcessStatus, String]`.
+"""
+
+[[process.fn]]
+name = "__os_stop"
+index_unit = "millisecond"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): `__os_stop(h: Int, grace_ms: Int) -> Result[ProcessStatus, String]`.
+"""
+
+[[process.fn]]
+name = "__os_read_new"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): `__os_read_new(h: Int, which: Int) -> String`.
+"""
+
+[[process.fn]]
+name = "__os_child_pid"
+index_unit = "handle"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed (host-capability): `__os_child_pid(h: Int) -> Int`.
+"""
+
 [testing]
 default_index_unit = "value"
 
