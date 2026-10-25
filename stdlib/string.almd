@@ -347,14 +347,51 @@ fn sort(s: String) -> List[String] = list.sort(string.chars(s))
 /// The characters ordered by f's key; equal keys keep their order.
 fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.chars(s), f)
 
-// list.sort_with's merge (#4196): the earlier String-only merge appended
-// `acc + [y]` per step, a full copy on wasm — quadratic. The adapter keeps
-// the old decision and call order: a right element goes first only when
-// cmp(right, left) < 0, so cmp still sees (right, left) once per comparison.
+// The stable merge, pushing into one output (#4196): the earlier merge
+// appended `acc + [y]` per step, a full copy on wasm, which made the sort
+// quadratic there. The decision and call order are unchanged: a right element
+// goes first only when cmp(right, left) < 0, one cmp call per comparison.
+local fn merge_with(xs: List[String], ys: List[String], cmp: (String, String) -> Int) -> List[String] = {
+  var out: List[String] = []
+  var i = 0
+  var j = 0
+  for _ in 0..<(list.len(xs) + list.len(ys)) {
+    match (list.get(xs, i), list.get(ys, j)) {
+      (some(x), some(y)) => if cmp(y, x) < 0 then {
+        list.push(out, y)
+        j = j + 1
+      } else {
+        list.push(out, x)
+        i = i + 1
+      },
+      (some(x), none) => {
+        list.push(out, x)
+        i = i + 1
+      },
+      (none, some(y)) => {
+        list.push(out, y)
+        j = j + 1
+      },
+      (none, none) => (),
+    }
+  }
+  out
+}
+
+local fn merge_sort_with(xs: List[String], cmp: (String, String) -> Int) -> List[String] = {
+  let n = list.len(xs)
+  if n <= 1 then xs
+  else merge_with(
+    merge_sort_with(list.take(xs, n / 2), cmp),
+    merge_sort_with(list.drop(xs, n / 2), cmp),
+    cmp,
+  )
+}
+
 /// The characters ordered by cmp (negative = first argument first); stable.
-fn sort_with(s: String, cmp: (String, String) -> Int) -> List[String] = list.sort_with(
+fn sort_with(s: String, cmp: (String, String) -> Int) -> List[String] = merge_sort_with(
   string.chars(s),
-  (x, y) => if cmp(y, x) < 0 then 1 else 0,
+  cmp,
 )
 
 /// The smallest character in codepoint order; none if empty.
