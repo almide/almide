@@ -111,6 +111,19 @@ fn collect_cases() -> Vec<PathBuf> {
     cases
 }
 
+/// The cases a heavy test judges on this run: every case on a full run, the
+/// CI slice (`ALMIDE_CI_SLICE`, crates/almide-corpus/src/ci_slice.rs) plus the
+/// cases the change touches otherwise. The floors over the WHOLE population
+/// (`MACHINE_APPLICABLE_FIXTURE_FLOOR`, `REPAIR_GREP_FLOOR`, the non-vacuous
+/// E002 count) are whole-corpus counts, judged only on a full run.
+fn judged_cases(gate: &str) -> Vec<PathBuf> {
+    let cases = collect_cases();
+    assert!(!cases.is_empty(), "no fixtures found under tests/diagnostics/");
+    almide_corpus::select(cases, gate, |c| {
+        format!("tests/diagnostics/{}", c.file_name().unwrap_or_default().to_string_lossy())
+    })
+}
+
 fn run_check(file: &Path) -> (bool, String, String) {
     run_check_target(file, None)
 }
@@ -187,7 +200,7 @@ fn every_case_has_broken_and_fixed_pair() {
 
 #[test]
 fn broken_files_produce_expected_diagnostics() {
-    let cases = collect_cases();
+    let cases = judged_cases("diagnostic_harness::broken_files_produce_expected_diagnostics");
     for case in &cases {
         let broken = case.join("broken.almd");
         let meta = parse_meta(&case.join("meta.toml"));
@@ -249,7 +262,7 @@ fn broken_files_produce_expected_diagnostics() {
 /// every diagnostic a broken file produces must carry a non-empty hint.
 #[test]
 fn every_diagnostic_carries_a_hint() {
-    let cases = collect_cases();
+    let cases = judged_cases("diagnostic_harness::every_diagnostic_carries_a_hint");
     let mut offenders = Vec::new();
     for case in &cases {
         let diags = run_check_json(&case.join("broken.almd"));
@@ -273,7 +286,7 @@ fn every_diagnostic_carries_a_hint() {
 
 #[test]
 fn fixed_files_compile_cleanly() {
-    let cases = collect_cases();
+    let cases = judged_cases("diagnostic_harness::fixed_files_compile_cleanly");
     for case in &cases {
         let (success, stdout, stderr) = check_case(case, "fixed");
         assert!(
@@ -441,7 +454,7 @@ fn try_snippets_with_replace_span_apply_cleanly() {
     // source compile. Until per-diagnostic migrations in Phase 3 land,
     // this loop may be a no-op — that's fine; it's the regression
     // gate for when migrations do arrive.
-    let cases = collect_cases();
+    let cases = judged_cases("diagnostic_harness::try_snippets_with_replace_span_apply_cleanly");
     for case in &cases {
         let broken = case.join("broken.almd");
         let fixed = case.join("fixed.almd");
@@ -511,7 +524,7 @@ fn try_snippets_with_replace_span_apply_cleanly() {
 #[test]
 fn e002_underlines_the_span_it_offers_to_replace() {
     let mut checked = 0usize;
-    for case in &collect_cases() {
+    for case in &judged_cases("diagnostic_harness::e002_underlines_the_span_it_offers_to_replace") {
         let broken = case.join("broken.almd");
         for d in run_check_json(&broken) {
             if d.code.as_deref() != Some("E002") { continue; }
@@ -524,7 +537,7 @@ fn e002_underlines_the_span_it_offers_to_replace() {
             checked += 1;
         }
     }
-    assert!(checked > 0, "no E002 fixture carried a replacement span — this test went vacuous");
+    assert!(checked > 0 || !almide_corpus::full_run(), "no E002 fixture carried a replacement span — this test went vacuous");
 }
 
 /// #1312 ratchet. `almide fix` applies `machine-applicable` fix-its and
@@ -538,7 +551,7 @@ const MACHINE_APPLICABLE_FIXTURE_FLOOR: usize = 27;
 
 #[test]
 fn machine_applicable_fixits_stay_populated() {
-    let cases = collect_cases();
+    let cases = judged_cases("diagnostic_harness::machine_applicable_fixits_stay_populated");
     let mut machine: Vec<String> = Vec::new();
     for case in &cases {
         for d in run_check_json(&case.join("broken.almd")) {
@@ -570,7 +583,7 @@ fn machine_applicable_fixits_stay_populated() {
         unpromised
     );
     assert!(
-        machine.len() >= MACHINE_APPLICABLE_FIXTURE_FLOOR,
+        !almide_corpus::full_run() || machine.len() >= MACHINE_APPLICABLE_FIXTURE_FLOOR,
         "machine-applicable fix-its dropped to {} (floor {}): {:?}",
         machine.len(), MACHINE_APPLICABLE_FIXTURE_FLOOR, machine
     );
@@ -593,7 +606,7 @@ const REPAIR_GREP_FLOOR: usize = 10;
 fn repair_grep_needles_appear_in_the_diagnostic() {
     let mut checked = 0usize;
     let mut misses: Vec<String> = Vec::new();
-    for case in &collect_cases() {
+    for case in &judged_cases("diagnostic_harness::repair_grep_needles_appear_in_the_diagnostic") {
         let Ok(grep) = std::fs::read_to_string(case.join("repair.grep")) else { continue };
         checked += 1;
         let meta = parse_meta(&case.join("meta.toml"));
@@ -628,7 +641,7 @@ fn repair_grep_needles_appear_in_the_diagnostic() {
     }
     assert!(misses.is_empty(), "repair.grep needles missing:\n{}", misses.join("\n"));
     assert!(
-        checked >= REPAIR_GREP_FLOOR,
+        !almide_corpus::full_run() || checked >= REPAIR_GREP_FLOOR,
         "only {} case(s) carry repair.grep (floor {})",
         checked, REPAIR_GREP_FLOOR
     );

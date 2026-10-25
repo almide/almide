@@ -119,8 +119,16 @@ fn every_severity_matches_what_the_binary_emits() {
     let mut seen = 0usize;
     let mut wrong: BTreeSet<String> = BTreeSet::new();
     let dir = root().join("tests/diagnostics");
-    for entry in std::fs::read_dir(&dir).expect("tests/diagnostics").flatten() {
-        let broken = entry.path().join("broken.almd");
+    let mut cases: Vec<PathBuf> = std::fs::read_dir(&dir).expect("tests/diagnostics").flatten().map(|e| e.path()).collect();
+    cases.sort();
+    // Every case on a full run; the CI slice (ALMIDE_CI_SLICE) otherwise. The
+    // `seen > 500` non-vacuity floor counts the whole corpus, so it is judged
+    // on a full run only; a slice still has to see one coded diagnostic.
+    let cases = almide_corpus::select(cases, "explain_list::every_severity_matches_what_the_binary_emits", |c| {
+        format!("tests/diagnostics/{}", c.file_name().unwrap_or_default().to_string_lossy())
+    });
+    for case in &cases {
+        let broken = case.join("broken.almd");
         if !broken.exists() { continue; }
         let out = Command::new(env!("CARGO_BIN_EXE_almide"))
             .args(["check", "--json"])
@@ -139,6 +147,7 @@ fn every_severity_matches_what_the_binary_emits() {
             }
         }
     }
-    assert!(seen > 500, "only {seen} coded diagnostics across the fixtures — the scan went vacuous");
+    let floor = if almide_corpus::full_run() { 500 } else { 0 };
+    assert!(seen > floor, "only {seen} coded diagnostics across the fixtures — the scan went vacuous");
     assert!(wrong.is_empty(), "docs/diagnostics/codes.toml severity drifted:\n{}", wrong.into_iter().collect::<Vec<_>>().join("\n"));
 }

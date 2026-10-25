@@ -161,20 +161,34 @@ const TEST_LANE_WALLS: &[(&str, &str)] = &[];
 #[test]
 fn the_wall_register_lists_exactly_the_specs_that_wall() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let out = Command::new(almide_bin())
-        .args(["test", "spec/", "--target", "wasm"])
-        .current_dir(root)
-        .output()
-        .expect("run the lane");
-    let report =
-        String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
+    // A full run walks the lane over `spec/` in one invocation, as before. Under
+    // the CI slice (ALMIDE_CI_SLICE) the lane runs file by file over the slice
+    // of the files it would discover, and the register is judged both ways
+    // only for those files: a row outside the slice is not "no longer walls".
+    let selected: Option<Vec<String>> = (!almide_corpus::full_run()).then(|| {
+        almide_corpus::select(lane_test_files(&root.join("spec"), root), "wasm_test_lane_wall", |f| f.clone())
+    });
+    let report = match &selected {
+        None => {
+            let out = Command::new(almide_bin())
+                .args(["test", "spec/", "--target", "wasm"])
+                .current_dir(root)
+                .output()
+                .expect("run the lane");
+            String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr)
+        }
+        Some(files) => run_lane_per_file(root, files),
+    };
     let observed: std::collections::BTreeSet<&str> = report
         .lines()
         .filter_map(|l| l.strip_prefix("WALL "))
         .filter_map(|l| l.split_whitespace().next())
         .collect();
-    let registered: std::collections::BTreeSet<&str> =
-        TEST_LANE_WALLS.iter().map(|(f, _)| *f).collect();
+    let registered: std::collections::BTreeSet<&str> = TEST_LANE_WALLS
+        .iter()
+        .map(|(f, _)| *f)
+        .filter(|f| selected.as_ref().is_none_or(|sel| sel.iter().any(|s| s.as_str() == **f)))
+        .collect();
 
     let new: Vec<&&str> = observed.difference(&registered).collect();
     assert!(
@@ -203,6 +217,65 @@ fn the_wall_register_lists_exactly_the_specs_that_wall() {
              be one or the other (#812)"
         );
     }
+}
+
+/// The files `almide test spec/` discovers (src/cli/mod.rs,
+/// `collect_test_files`: an `.almd` holding a `test` block, hidden / `target`
+/// / `node_modules` directories and directory symlinks skipped), as
+/// repo-relative paths, sorted — the list the CI slice selects from.
+fn lane_test_files(dir: &std::path::Path, root: &std::path::Path) -> Vec<String> {
+    fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<String>) {
+        let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.starts_with('.') || name == "target" || name == "node_modules" {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for e in entries.flatten() {
+            let p = e.path();
+            let link = e.file_type().is_ok_and(|t| t.is_symlink());
+            if p.is_dir() {
+                if !link {
+                    walk(&p, root, out);
+                }
+            } else if p.extension().is_some_and(|x| x == "almd") {
+                let text = std::fs::read_to_string(&p).unwrap_or_default();
+                if text.contains("\ntest ") || text.starts_with("test ") {
+                    out.push(p.strip_prefix(root).expect("under root").to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, root, &mut out);
+    out.sort();
+    out
+}
+
+/// `almide test <file> --target wasm` over each file, in parallel, the reports
+/// concatenated in file order.
+fn run_lane_per_file(root: &std::path::Path, files: &[String]) -> String {
+    let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
+    let chunk = files.len().div_ceil(workers).max(1);
+    std::thread::scope(|s| {
+        let handles: Vec<_> = files
+            .chunks(chunk)
+            .map(|part| {
+                s.spawn(move || {
+                    part.iter()
+                        .map(|f| {
+                            let out = Command::new(almide_bin())
+                                .args(["test", f.as_str(), "--target", "wasm"])
+                                .current_dir(root)
+                                .output()
+                                .expect("run the lane");
+                            String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr)
+                        })
+                        .collect::<String>()
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().expect("lane worker")).collect()
+    })
 }
 
 #[test]
