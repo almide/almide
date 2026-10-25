@@ -1,8 +1,9 @@
-// string_search — SELF-HOSTED byte-search string predicates for v1 over the prim floor:
-// `string.starts_with` / `string.ends_with` / `string.contains`. All are pure BYTE scans
-// (no allocation) sharing one `__byte_eq` comparison — byte-level matching is string-level
-// because every affix/needle is itself a complete valid UTF-8 String (UTF-8 is self-
-// synchronizing). Reads only — args borrowed. Cert-untouching (no heap Alloc).
+// string_search — SELF-HOSTED byte-search string functions for v1 over the prim floor:
+// `string.starts_with` / `ends_with` / `contains` / `count` / `index_of` / `last_index_of` /
+// `split` / `split_once` / `replace` / `replace_first`. Matching is at the BYTE level, which is
+// string-level because every affix/needle is itself a complete valid UTF-8 String (UTF-8 is
+// self-synchronizing), so every piece stays valid UTF-8. Args are borrowed; a piece or result
+// is a FRESH owned String (prim.alloc_str).
 // True iff the `n` bytes at address `a` equal the `n` bytes at address `b`.
 fn __byte_eq(a: Int, b: Int, n: Int) -> Bool = if n <= 0 then true
 else {
@@ -33,22 +34,96 @@ fn string_ends_with(s: String, suffix: String) -> Bool = {
   else __byte_eq(hs + 12 + (slen - plen), hp + 12, plen)
 }
 
-// Scan each start position; at each, byte-compare `nlen` bytes against the needle.
-fn __contains_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Bool =
-  if pos + nlen > slen then false
+// ── Substring search: Knuth–Morris–Pratt (#4206) ─────────────────────────────────────────────
+// Every search below goes through this one linear search. The position-by-position compare it
+// replaced re-read up to nlen bytes at every start, O(slen·nlen): a haystack of `a`s and a
+// needle of `a`s ending in `b` took 4.6 s at 200,000 bytes on wasm, where native's str::find
+// (Two-Way) takes no measurable time. The failure table `t` (nlen i64 slots, slot q = the
+// longest proper border of needle[0..=q]) lets the haystack index only move forward, so one
+// search is O(slen + nlen), and the non-overlapping scans (count, split, replace) resume where
+// the last match ended with the same table, so they are one forward walk too.
+// The needle's byte j sits at `pa + j * d` and the haystack's byte i at `ha + i * d`: d = 1
+// searches forward, d = -1 searches the reversed strings from their last bytes, whose first
+// match is the last match of the originals (last_index_of).
+// The border length after reading byte c in state k: fall back through the table while the next
+// needle byte differs, then extend by one on a match.
+fn __sk_step(pa: Int, d: Int, t: Int, k: Int, c: Int) -> Int =
+  if k > 0 and prim.load8(pa + k * d) != c then __sk_step(pa, d, t, prim.load64(t + (k - 1) * 8), c)
+  else if prim.load8(pa + k * d) == c then k + 1
+  else k
+
+fn __sk_fill(pa: Int, d: Int, nlen: Int, t: Int, q: Int, k: Int) -> Int = if q >= nlen then 0
+else {
+  let k1 = __sk_step(pa, d, t, k, prim.load8(pa + q * d))
+  prim.store64(t + q * 8, k1)
+  __sk_fill(pa, d, nlen, t, q + 1, k1)
+}
+
+// Fill the table at t for the nlen-byte (nlen >= 1) needle read from pa in direction d.
+fn __sk_table(pa: Int, d: Int, nlen: Int, t: Int) -> Int = {
+  prim.store64(t, 0)
+  __sk_fill(pa, d, nlen, t, 1, 0)
+}
+
+// The first match start at or after i (state k), or -1 once the rest cannot hold one.
+fn __sk_scan(ha: Int, d: Int, slen: Int, pa: Int, nlen: Int, t: Int, i: Int, k: Int) -> Int =
+  if slen - i < nlen - k then 0 - 1
   else {
-    let m = __byte_eq(sbase + pos, nbase, nlen)
-    if m then true
-    else __contains_scan(sbase, slen, nbase, nlen, pos + 1)
+    let k1 = __sk_step(pa, d, t, k, prim.load8(ha + i * d))
+    if k1 == nlen then i + 1 - nlen
+    else __sk_scan(ha, d, slen, pa, nlen, t, i + 1, k1)
   }
+
+// The first forward match start at or after `from` of the nlen-byte (nlen >= 1) needle at
+// nbase in the slen-byte haystack at sbase, given its forward table t; -1 if none.
+fn __sk_next(sbase: Int, slen: Int, nbase: Int, nlen: Int, t: Int, from: Int) -> Int = __sk_scan(
+  sbase,
+  1,
+  slen,
+  nbase,
+  nlen,
+  t,
+  from,
+  0,
+)
+
+// BYTE position of the first needle match, or -1 (the empty needle matches at 0). The table is
+// a scratch list dropped at scope end.
+fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 0 then 0
+else if nlen > slen then 0 - 1
+else {
+  let tbl = prim.alloc_list(nlen)
+  let t = prim.handle(tbl) + 12
+  let _t = __sk_table(nbase, 1, nlen, t)
+  __sk_next(sbase, slen, nbase, nlen, t, 0)
+}
+
+// BYTE position of the LAST needle match, or -1 (the empty needle matches at `slen`, v0
+// rfind("") = Some(len)): the first match of the reversed needle in the reversed haystack.
+fn __rfind_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 0 then slen
+else if nlen > slen then 0 - 1
+else {
+  let tbl = prim.alloc_list(nlen)
+  let t = prim.handle(tbl) + 12
+  let _t = __sk_table(nbase + nlen - 1, 0 - 1, nlen, t)
+  let r = __sk_scan(sbase + slen - 1, 0 - 1, slen, nbase + nlen - 1, nlen, t, 0, 0)
+  if r < 0 then r else slen - r - nlen
+}
+
+// Count NON-OVERLAPPING needle matches from `from`, resuming past each match (v0 semantics:
+// `s.matches(needle).count()`).
+fn __count_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, t: Int, from: Int, acc: Int) -> Int = {
+  let pos = __sk_next(sbase, slen, nbase, nlen, t, from)
+  if pos < 0 then acc
+  else __count_scan(sbase, slen, nbase, nlen, t, pos + nlen, acc + 1)
+}
 
 fn string_contains(s: String, needle: String) -> Bool = {
   let hs = prim.handle(s)
   let hn = prim.handle(needle)
   let slen = prim.load32(hs + 4)
   let nlen = prim.load32(hn + 4)
-  if nlen <= 0 then true
-  else __contains_scan(hs + 12, slen, hn + 12, nlen, 0)
+  __find_byte(hs + 12, slen, hn + 12, nlen) >= 0
 }
 
 // Count codepoints (UTF-8 start bytes, i.e. bytes whose top bits are NOT 10xxxxxx) in the
@@ -64,15 +139,13 @@ else {
   __cp_count(base + 1, n - 1, acc + step)
 }
 
-// Count NON-OVERLAPPING needle matches from `pos`, skipping past each match (v0 semantics:
-// `s.matches(needle).count()`).
-fn __count_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int, acc: Int) -> Int =
-  if pos + nlen > slen then acc
-  else {
-    let m = __byte_eq(sbase + pos, nbase, nlen)
-    if m then __count_scan(sbase, slen, nbase, nlen, pos + nlen, acc + 1)
-    else __count_scan(sbase, slen, nbase, nlen, pos + 1, acc)
-  }
+fn __count_nonempty(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen > slen then 0
+else {
+  let tbl = prim.alloc_list(nlen)
+  let t = prim.handle(tbl) + 12
+  let _t = __sk_table(nbase, 1, nlen, t)
+  __count_scan(sbase, slen, nbase, nlen, t, 0, 0)
+}
 
 fn string_count(s: String, needle: String) -> Int = {
   let hs = prim.handle(s)
@@ -83,18 +156,8 @@ fn string_count(s: String, needle: String) -> Int = {
     let c = __cp_count(hs + 12, slen, 0)
     // empty needle matches at each char boundary
     c + 1
-  } else __count_scan(hs + 12, slen, hn + 12, nlen, 0, 0)
+  } else __count_nonempty(hs + 12, slen, hn + 12, nlen)
 }
-
-// BYTE position of the first needle match from `pos`, or -1 if none (the empty needle
-// matches at 0). Reuses __byte_eq.
-fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Int =
-  if pos + nlen > slen then -1
-  else {
-    let m = __byte_eq(sbase + pos, nbase, nlen)
-    if m then pos
-    else __find_byte(sbase, slen, nbase, nlen, pos + 1)
-  }
 
 // The Option result is built in TAIL position by these helpers (so a `match` over
 // string.index_of's result executes via the materialized-Option layout). __io_at converts
@@ -111,18 +174,8 @@ fn string_index_of(s: String, needle: String) -> Int? = {
   let hn = prim.handle(needle)
   let slen = prim.load32(hs + 4)
   let nlen = prim.load32(hn + 4)
-  let bpos = __find_byte(hs + 12, slen, hn + 12, nlen, 0)
+  let bpos = __find_byte(hs + 12, slen, hn + 12, nlen)
   if bpos < 0 then __io_none() else __io_at(hs + 12, bpos)
-}
-
-// BYTE position of the LAST needle match at or before `pos`, or -1 if none — scan
-// backward from the last possible start. The empty needle matches at `slen` (v0
-// rfind("") = Some(len)). Reuses __byte_eq.
-fn __rfind_byte(sbase: Int, nbase: Int, nlen: Int, pos: Int) -> Int = if pos < 0 then -1
-else {
-  let m = __byte_eq(sbase + pos, nbase, nlen)
-  if m then pos
-  else __rfind_byte(sbase, nbase, nlen, pos - 1)
 }
 
 fn string_last_index_of(s: String, needle: String) -> Int? = {
@@ -130,6 +183,246 @@ fn string_last_index_of(s: String, needle: String) -> Int? = {
   let hn = prim.handle(needle)
   let slen = prim.load32(hs + 4)
   let nlen = prim.load32(hn + 4)
-  let bpos = __rfind_byte(hs + 12, hn + 12, nlen, slen - nlen)
+  let bpos = __rfind_byte(hs + 12, slen, hn + 12, nlen)
   if bpos < 0 then __io_none() else __io_at(hs + 12, bpos)
+}
+
+// ── split ──────────────────────────────────────────────────────────────────────────────────
+// s.split(sep) = the pieces between each occurrence of sep (Rust semantics: empty pieces
+// kept, count = #separators + 1). Each piece is a FRESH owned String copied out and MOVED
+// into the result via prim.store_str (Machinery 2, the nested-ownership List[String]); the
+// result list owns them and frees them recursively on its DropListStr.
+fn __copy_bytes(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let b = prim.load8(src + i)
+  prim.store8(dst + i, b)
+  __copy_bytes(dst, src, n, i + 1)
+}
+
+// A FRESH owned String = s[start .. end] (byte range).
+fn __substr(sh: Int, start: Int, end: Int) -> String = {
+  let n = end - start
+  let piece = prim.alloc_str(n)
+  let _x = __copy_bytes(prim.handle(piece) + 12, sh + 12 + start, n, 0)
+  piece
+}
+
+// Fill the result list: each piece is the span up to the next separator; store + consume it.
+fn __split_fill(lh: Int, sh: Int, slen: Int, seph: Int, seplen: Int, t: Int, from: Int, idx: Int) -> Int = {
+  let found = __sk_next(sh + 12, slen, seph + 12, seplen, t, from)
+  let pos = if found < 0 then slen else found
+  let piece = __substr(sh, from, pos)
+  prim.store_str(lh + 12 + idx * 8, piece)
+  if found < 0 then idx + 1
+  else __split_fill(lh, sh, slen, seph, seplen, t, pos + seplen, idx + 1)
+}
+
+fn __is_cstart(sh: Int, p: Int) -> Bool = {
+  let b = prim.load8(sh + 12 + p)
+  b < 128 or b >= 192
+}
+
+fn __count_chars(sh: Int, slen: Int, p: Int, acc: Int) -> Int = if p >= slen then acc
+else if __is_cstart(sh, p) then __count_chars(sh, slen, p + 1, acc + 1)
+else __count_chars(sh, slen, p + 1, acc)
+
+fn __next_cstart(sh: Int, slen: Int, p: Int) -> Int = if p >= slen then slen
+else if __is_cstart(sh, p) then p
+else __next_cstart(sh, slen, p + 1)
+
+fn __empty_split_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int) -> Int =
+  if from >= slen then idx
+  else {
+    let nxt = __next_cstart(sh, slen, from + 1)
+    let piece = __substr(sh, from, nxt)
+    prim.store_str(lh + 12 + idx * 8, piece)
+    __empty_split_fill(lh, sh, slen, nxt, idx + 1)
+  }
+
+fn __empty_split(s: String) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let nchars = __count_chars(sh, slen, 0, 0)
+  let result = prim.alloc_list_str(nchars + 2)
+  let rh = prim.handle(result)
+  let lead = __substr(sh, 0, 0)
+  prim.store_str(rh + 12, lead)
+  let _x = __empty_split_fill(rh, sh, slen, 0, 1)
+  let trail = __substr(sh, 0, 0)
+  prim.store_str(rh + 12 + (nchars + 1) * 8, trail)
+  result
+}
+
+fn __nonempty_split(s: String, seph: Int, seplen: Int) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let tbl = prim.alloc_list(seplen)
+  let t = prim.handle(tbl) + 12
+  let _t = __sk_table(seph + 12, 1, seplen, t)
+  let nseps = __count_scan(sh + 12, slen, seph + 12, seplen, t, 0, 0)
+  let result = prim.alloc_list_str(nseps + 1)
+  let _x = __split_fill(prim.handle(result), sh, slen, seph, seplen, t, 0, 0)
+  result
+}
+
+@implements("string.split")
+fn string_split(s: String, sep: String) -> List[String] = {
+  let seph = prim.handle(sep)
+  let seplen = prim.load32(seph + 4)
+  if seplen == 0 then __empty_split(s)
+  else __nonempty_split(s, seph, seplen)
+}
+
+// ── split_once ─────────────────────────────────────────────────────────────────────────────
+// s.split_once(sep) = Some((before, after)) at the FIRST occurrence of sep, None when sep is
+// absent (Rust semantics: an empty sep matches at position 0, so the result is Some(("", s))
+// — including Some(("", "")) for the empty source).
+// A FRESH owned String = s[start .. start+n] (byte range).
+fn __so_sub(s: String, start: Int, n: Int) -> String = {
+  let sh = prim.handle(s)
+  let out = prim.alloc_str(n)
+  let _x = __copy_bytes(prim.handle(out) + 12, sh + 12 + start, n, 0)
+  out
+}
+
+@implements("string.split_once")
+fn string_split_once(s: String, sep: String) -> (String, String)? = {
+  let sh = prim.handle(s)
+  let seph = prim.handle(sep)
+  let slen = prim.load32(sh + 4)
+  let seplen = prim.load32(seph + 4)
+  let pos = __find_byte(sh + 12, slen, seph + 12, seplen)
+  if pos < 0 then none
+  else some((__so_sub(s, 0, pos), __so_sub(s, pos + seplen, slen - pos - seplen)))
+}
+
+// ── replace / replace_first ────────────────────────────────────────────────────────────────
+// Replace every non-overlapping occurrence of `from` with `to`, building a new String via
+// prim.alloc_str. The result length is computed up front (slen + count*(tolen-fromlen)). Cert-
+// untouching (DynStr Alloc = i, like trim/slice/reverse).
+fn __rep_copy(src: Int, dst: Int, n: Int) -> Int = if n <= 0 then 0
+else {
+  prim.store8(dst, prim.load8(src))
+  __rep_copy(src + 1, dst + 1, n - 1)
+}
+
+// Write s[from ..] into `dst`, each `from` match replaced by `to`: the span before the next
+// match, then `to`, resuming past the match.
+fn __rep_fill(sbase: Int, slen: Int, fbase: Int, flen: Int, t: Int, tbase: Int, tlen: Int, from: Int, dst: Int) -> Int = {
+  let pos = __sk_next(sbase, slen, fbase, flen, t, from)
+  if pos < 0 then __rep_copy(sbase + from, dst, slen - from)
+  else {
+    let _c = __rep_copy(sbase + from, dst, pos - from)
+    let _t = __rep_copy(tbase, dst + pos - from, tlen)
+    __rep_fill(sbase, slen, fbase, flen, t, tbase, tlen, pos + flen, dst + pos - from + tlen)
+  }
+}
+
+fn __rep_do(s: String, from: String, to: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  let th = prim.handle(to)
+  let tlen = prim.load32(th + 4)
+  let tbl = prim.alloc_list(flen)
+  let t = prim.handle(tbl) + 12
+  let _t = __sk_table(fh + 12, 1, flen, t)
+  let count = __count_scan(h + 12, slen, fh + 12, flen, t, 0, 0)
+  let delta = tlen - flen
+  let rlen = slen + count * delta
+  let buf = prim.alloc_str(rlen)
+  let _x = __rep_fill(h + 12, slen, fh + 12, flen, t, th + 12, tlen, 0, prim.handle(buf) + 12)
+  buf
+}
+
+// EMPTY `from`: Rust inserts `to` at every char boundary — "abc".replace("","-") = "-a-b-c-",
+// "".replace("","-") = "-", "a".replace("","-") = "-a-". So write a leading `to`, then for each
+// CHAR emit (char ++ to). A char starts at a non-UTF-8-continuation byte (b<128 or b>=192), so
+// multibyte chars stay whole. Addresses (not indices) like the rest of this section.
+fn __rep_cstart(p: Int) -> Bool = {
+  let b = prim.load8(p)
+  b < 128 or b >= 192
+}
+
+fn __rep_nchars(p: Int, send: Int, acc: Int) -> Int = if p >= send then acc
+else if __rep_cstart(p) then __rep_nchars(p + 1, send, acc + 1)
+else __rep_nchars(p + 1, send, acc)
+
+fn __rep_next_cs(p: Int, send: Int) -> Int = if p >= send then send
+else if __rep_cstart(p) then p else __rep_next_cs(p + 1, send)
+
+fn __rep_empty_fill(spos: Int, send: Int, tbase: Int, tlen: Int, dst: Int) -> Int =
+  if spos >= send then dst
+  else {
+    let nxt = __rep_next_cs(spos + 1, send)
+    let clen = nxt - spos
+    let _c = __rep_copy(spos, dst, clen)
+    let _t = __rep_copy(tbase, dst + clen, tlen)
+    __rep_empty_fill(nxt, send, tbase, tlen, dst + clen + tlen)
+  }
+
+fn __empty_replace(s: String, to: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let sbase = h + 12
+  let send = sbase + slen
+  let th = prim.handle(to)
+  let tlen = prim.load32(th + 4)
+  let nchars = __rep_nchars(sbase, send, 0)
+  let rlen = (nchars + 1) * tlen + slen
+  let buf = prim.alloc_str(rlen)
+  let dbase = prim.handle(buf) + 12
+  let _lead = __rep_copy(th + 12, dbase, tlen)
+  let _x = __rep_empty_fill(sbase, send, th + 12, tlen, dbase + tlen)
+  buf
+}
+
+@implements("string.replace")
+fn string_replace(s: String, from: String, to: String) -> String = {
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  if flen <= 0 then __empty_replace(s, to)
+  else __rep_do(s, from, to)
+}
+
+// Copy `s` into a fresh owned String (no match).
+fn __rep_copy_str(s: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let buf = prim.alloc_str(slen)
+  let _c = __rep_copy(h + 12, prim.handle(buf) + 12, slen)
+  buf
+}
+
+// Build s[0..off] ++ to ++ s[off+flen..] (the match at byte offset `off`).
+fn __repf_do(s: String, from: String, to: String, off: Int) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  let th = prim.handle(to)
+  let tlen = prim.load32(th + 4)
+  let sbase = h + 12
+  let rlen = slen - flen + tlen
+  let buf = prim.alloc_str(rlen)
+  let dbase = prim.handle(buf) + 12
+  let _c1 = __rep_copy(sbase, dbase, off)
+  let _c2 = __rep_copy(th + 12, dbase + off, tlen)
+  let rest = slen - off - flen
+  let _c3 = __rep_copy(sbase + off + flen, dbase + off + tlen, rest)
+  buf
+}
+
+// An EMPTY needle matches at 0, also in the empty haystack (Rust's oracle:
+// `"".replacen("", "X", 1)` == "X").
+@implements("string.replace_first")
+fn string_replace_first(s: String, from: String, to: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  let fpos = __find_byte(h + 12, slen, fh + 12, flen)
+  if fpos < 0 then __rep_copy_str(s)
+  else __repf_do(s, from, to, fpos)
 }
