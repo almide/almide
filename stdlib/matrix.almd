@@ -31,9 +31,9 @@ fn shape(m: Matrix) -> (Int, Int) = _
 @intrinsic("almide_rt_matrix_transpose")
 fn transpose(m: Matrix) -> Matrix = _
 
-/// Matrix of equal-length rows; [] is 0 x 0.
+/// Matrix of the equal-length rows xs; [] is 0 x 0.
 @intrinsic("almide_rt_matrix_from_lists")
-fn from_lists(rows: List[List[Float]]) -> Matrix = _
+fn from_lists(xs: List[List[Float]]) -> Matrix = _
 
 // Gather a subset of rows from a matrix by index. Returns a new matrix
 // of shape (row_ids.len, original_cols). Avoids `to_lists` round-trips
@@ -154,7 +154,7 @@ fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
 
 /// Side-by-side join; [] gives 0 x 0.
 @intrinsic("almide_rt_matrix_concat_cols_many")
-fn concat_cols(matrices: List[Matrix]) -> Matrix = _
+fn concat_cols(xs: List[Matrix]) -> Matrix = _
 
 /// Alias of matrix.concat_cols.
 @deprecated(since=5, use="matrix.concat_cols")

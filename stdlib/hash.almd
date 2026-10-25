@@ -13,9 +13,9 @@
 // Templates route the Rust target to `runtime/rs/src/hash.rs`; on WASM all
 // four are SELF-HOSTED in `stdlib/hash_impl.almd`, registered in
 // `crates/almide-types/src/self_host_registry.rs`.
-/// 32-bit FNV-1a of s's UTF-8; non-negative Int.
+/// 32-bit FNV-1a of b, in 0..4294967295.
 @intrinsic("almide_rt_hash_fnv1a32")
-fn fnv1a32(s: String) -> Int = _
+fn fnv1a32(b: Bytes) -> Int = _
 
 /// 32-bit FNV-1a of b, in 0..4294967295.
 @intrinsic("almide_rt_hash_fnv1a32_bytes")
@@ -25,9 +25,9 @@ fn fnv1a32_bytes(b: Bytes) -> Int = _
 @intrinsic("almide_rt_hash_sha256")
 fn sha256(b: Bytes) -> Bytes = _
 
-/// SHA-256 of s's UTF-8, 64 lowercase hex chars.
+/// SHA-256 of b as 64 lowercase hex chars.
 @intrinsic("almide_rt_hash_sha256_hex")
-fn sha256_hex(s: String) -> String = _
+fn sha256_hex(b: Bytes) -> String = _
 
 // ── Checksums and the other digests (R-hash-02, R-hash-03) ──
 // Pure Almide on every target, so native and wasm run the same code. 32-bit

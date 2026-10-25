@@ -27,10 +27,10 @@ fn get[A](xs: List[A], i: Int) -> A? = _
 @intrinsic("almide_rt_list_get_or")
 fn get_or[A](xs: List[A], i: Int, default: A) -> A = _
 
-/// Copy with slot i = val; no-op if i out of range.
+/// Copy with slot i = x; no-op if i out of range.
 @intrinsic("almide_rt_list_set")
 @reuse(xs)
-fn set[A](xs: List[A], i: Int, val: A) -> List[A] = _
+fn set[A](xs: List[A], i: Int, x: A) -> List[A] = _
 
 /// Copy with i and j swapped; no-op if either OOB.
 @intrinsic("almide_rt_list_swap")
@@ -66,7 +66,7 @@ fn zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)] = _
 // E0505 (differential fuzz).
 /// Inner lists concatenated in order.
 @intrinsic("almide_rt_list_flatten")
-fn flatten[T](xss: List[List[T]]) -> List[T] = _
+fn flatten[A](xs: List[List[A]]) -> List[A] = _
 
 // The range ops (take / drop / slice / take_end / drop_end / take_while /
 // drop_while / find …) borrow their source and copy only what they return:
@@ -250,19 +250,19 @@ fn range(start: Int, end: Int) -> List[Int] = _
 @reuse(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
-/// Copy with val at i; i >= len or i < 0 appends.
+/// Copy with x at i; i >= len or i < 0 appends.
 @intrinsic("almide_rt_list_insert")
 @consume(xs)
-fn insert[A](xs: List[A], i: Int, val: A) -> List[A] = _
+fn insert[A](xs: List[A], i: Int, x: A) -> List[A] = _
 
 /// Copy without slot i; no-op if i out of range.
 @intrinsic("almide_rt_list_remove_at")
 @consume(xs)
 fn remove_at[A](xs: List[A], i: Int) -> List[A] = _
 
-/// n copies of val; [] for n <= 0.
+/// n copies of x; [] for n <= 0.
 @intrinsic("almide_rt_list_repeat")
-fn repeat[A](val: A, n: Int) -> List[A] = _
+fn repeat[A](x: A, n: Int) -> List[A] = _
 
 /// sep between adjacent elements.
 @intrinsic("almide_rt_list_intersperse")
@@ -329,7 +329,7 @@ fn bundled_probe(n: Int) -> Int = n + 1
 // Split a list at index `n`. Equivalent to `(list.take(xs, n), list.drop(xs, n))`.
 // Demonstrates bundled-Almide calling existing stdlib fns.
 /// (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
-fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), list.drop(xs, n))
+fn split_at[A](xs: List[A], n: Int) -> (List[A], List[A]) = (list.take(xs, n), list.drop(xs, n))
 
 // Build [seed, f(seed), f(f(seed)), ...] of length `n`. `f` runs exactly `n`
 // times: the last result is computed and dropped, as the recursive form did.
@@ -346,8 +346,8 @@ fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), l
 // it is the spelling this body already holds its constant stack with, and
 // swapping it would move the allocation ledger to buy nothing.
 /// [seed, f(seed), ...] of length n; [] if n <= 0.
-fn iterate[T](seed: T, f: (T) -> T, n: Int) -> List[T] = {
-  var out: List[T] = []
+fn iterate[A](seed: A, f: (A) -> A, n: Int) -> List[A] = {
+  var out: List[A] = []
   var x = seed
   for _ in 0..<n {
     list.push(out, x)

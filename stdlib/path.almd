@@ -63,22 +63,22 @@ fn join(base: String, child: String) -> String = {
 fn join_within(base: String, child: String) -> Result[String, String] =
   if stays_inside(child) then ok(join(base, child)) else err("path traversal rejected: " + child)
 
-/// p minus last segment; "" if no slash.
-fn dirname(p: String) -> String = {
-  let parts = string.split(p, "/")
+/// path minus last segment; "" if no slash.
+fn dirname(path: String) -> String = {
+  let parts = string.split(path, "/")
   let n = list.len(parts)
   if n <= 1 then ""
   else {
     let parent_parts = list.take(parts, n - 1)
     let joined = string.join(parent_parts, "/")
     // Preserve root "/" for absolute paths
-    if string.len(joined) == 0 and string.starts_with(p, "/") then "/" else joined
+    if string.len(joined) == 0 and string.starts_with(path, "/") then "/" else joined
   }
 }
 
-/// Last non-empty segment; "" for / or empty p.
-fn basename(p: String) -> String = {
-  let parts = string.split(p, "/")
+/// Last non-empty segment; "" for / or empty path.
+fn basename(path: String) -> String = {
+  let parts = string.split(path, "/")
   let filtered = list.filter(parts, (s) => string.len(s) > 0)
   match list.last(filtered) {
     some(name) => name,
@@ -87,8 +87,8 @@ fn basename(p: String) -> String = {
 }
 
 /// After basename's last dot; none if no dot or dotfile.
-fn extension(p: String) -> String? = {
-  let name = basename(p)
+fn extension(path: String) -> String? = {
+  let name = basename(path)
   let parts = string.split(name, ".")
   let n = list.len(parts)
   // A leading dot names a hidden file, not an extension: `.gitignore` has
@@ -97,12 +97,12 @@ fn extension(p: String) -> String? = {
   else if string.starts_with(name, ".") and n == 2 then none else list.last(parts)
 }
 
-/// True when p starts with /.
-fn is_absolute(p: String) -> Bool = string.starts_with(p, "/")
+/// True when path starts with /.
+fn is_absolute(path: String) -> Bool = string.starts_with(path, "/")
 
 /// Basename minus last extension; dotfiles as-is.
-fn stem(p: String) -> String = {
-  let name = basename(p)
+fn stem(path: String) -> String = {
+  let name = basename(path)
   let parts = string.split(name, ".")
   let n = list.len(parts)
   // No dot, or only a leading dot (e.g. ".hidden") → return as-is
@@ -116,13 +116,13 @@ fn stem(p: String) -> String = {
 }
 
 /// Resolves . and .. lexically; "" becomes ".".
-fn normalize(p: String) -> String = {
-  let absolute = string.starts_with(p, "/")
+fn normalize(path: String) -> String = {
+  let absolute = string.starts_with(path, "/")
   // The resolved segments, as a stack pushed and popped at its END: each segment
   // costs O(1), so the walk is linear in the path (#4211 — the old fold prepended
   // `[seg] + acc` and dropped with `list.drop`, a full copy per segment).
   var stack: List[String] = []
-  for seg in string.split(p, "/") {
+  for seg in string.split(path, "/") {
     // Empty segments (from //) and "." resolve to nothing.
     if string.len(seg) == 0 or seg == "." then ()
     else if seg == ".." then {

@@ -110,13 +110,13 @@ fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_
 // body `Internal Server Error (request <id>)` and stderr gets `http.serve:
 // request <id>: handler error: <the err, quoted>` — the core's
 // http_server_handler_error_body / _line texts. The id is 8 lowercase hex
-// digits of hash.fnv1a32(method + " " + target + "\n" + body), the core's
+// digits of hash.fnv1a32(bytes.from_string(method + " " + target + "\n" + body)), the core's
 // http_server_request_id, so a stock export instance that sees one request
 // names it as native does. A refused response is the fixed body
 // `Internal Server Error`. TODO(#4126): share that issue's escaping once it
 // lands.
 fn __hs_request_id(raw: List[String]) -> String = string.pad_start(
-  int.to_hex(hash.fnv1a32((list.get(raw, 0) ?? "") + " " + (list.get(raw, 1) ?? "") + "\n" + (list.get(raw, 2) ?? ""))),
+  int.to_hex(hash.fnv1a32(bytes.from_string((list.get(raw, 0) ?? "") + " " + (list.get(raw, 1) ?? "") + "\n" + (list.get(raw, 2) ?? "")))),
   8,
   "0",
 )
