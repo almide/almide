@@ -279,6 +279,14 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
                 | "get_string" | "get_int" | "get_float" | "get_bool" | "get_array"
                 | "get_path"
         ),
+        // value.get / get_<kind> / get_path are self-hosted (json_get_typed.almd,
+        // json_path.almd; #4220) with the same some()/none ctors as their json
+        // siblings — a materialized Option, so a `match`/`??` over one EXECUTES.
+        "value" => matches!(
+            func,
+            "get" | "get_string" | "get_int" | "get_float" | "get_bool" | "get_array" | "get_object"
+                | "get_path"
+        ),
         _ => false,
     }
 }
