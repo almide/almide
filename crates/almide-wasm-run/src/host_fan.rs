@@ -629,6 +629,7 @@ fn instantiate(ctx: &ParCtx) -> anyhow::Result<Worker> {
         par: None,
         abort_site: -1,
         allowed_ops: ctx.allowed_ops.clone(),
+        contain: Arc::default(),
     };
     let mut store = wasmtime::Store::new(&ctx.engine, host);
     store.limiter(|h| h as &mut dyn wasmtime::ResourceLimiter);
