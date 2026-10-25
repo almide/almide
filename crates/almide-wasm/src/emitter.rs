@@ -143,6 +143,10 @@ pub(crate) struct Emitter<'a> {
     /// their block unless `raw_map_read` (a keyed read through the index).
     pub(crate) tomb_vars: &'a std::collections::HashSet<VarId>,
     pub(crate) raw_map_read: bool,
+    /// #4208: the receiver nodes (by address) of the functional removes
+    /// being lowered in tail position of their var's rebind or fold step
+    /// (`map_remove::tail_removes_of`) — only these may leave holes.
+    pub(crate) tomb_tail: std::collections::HashSet<usize>,
     /// #3104 / #3337: what the statement being lowered may MOVE
     /// (writeback_move.rs) — set by the block walk, taken by the assign
     /// (the temp) and by the call site (the vars handed to `mut` params).
