@@ -437,6 +437,9 @@ impl AlmideRepr for AlmideHttpCall {
     fn almide_repr(&self) -> String { "HttpCall".to_string() }
 }
 
+// `http.__http_call_repr` (#4204): a call in flight shows only its type name.
+pub fn almide_http_call_repr(c: &AlmideHttpCall) -> AlmideString { c.almide_repr().into_almide() }
+
 impl PartialEq for AlmideHttpCall {
     fn eq(&self, other: &Self) -> bool {
         std::sync::Arc::ptr_eq(&self.inner, &other.inner)

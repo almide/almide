@@ -61,6 +61,13 @@ fn field(path: JsonPath, name: String) -> JsonPath = _
 @intrinsic("almide_rt_json_index")
 fn index(path: JsonPath, i: Int) -> JsonPath = _
 
+// The declared repr of a JsonPath (#4204): `$`, then `.name` for each field
+// step and `[i]` for each index step, on every leg. Named after the
+// runtime-backed row (`stdlib_info::runtime_backed_repr_surface`).
+@intrinsic("almide_rt_json_path_repr")
+@borrow_ref(path)
+fn __json_path_repr(path: JsonPath) -> String = _
+
 /// Value at path, or none if a step misses.
 @intrinsic("almide_json_get_path")
 @borrow_ref(path)

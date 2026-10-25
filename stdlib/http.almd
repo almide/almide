@@ -371,6 +371,10 @@ fn __set_body(resp: HttpResponse, body: String) -> HttpResponse = _
 @borrow_ref(req)
 fn __http_request_repr(req: HttpRequest) -> String = _
 
+@intrinsic("almide_http_call_repr")
+@borrow_ref(c)
+fn __http_call_repr(c: HttpCall) -> String = _
+
 @intrinsic("almide_http_resp_repr")
 @borrow_ref(resp)
 fn __http_response_repr(resp: HttpResponse) -> String = _
