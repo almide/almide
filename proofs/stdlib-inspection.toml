@@ -2223,12 +2223,6 @@ diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
 
 [[fn]]
-name = "fs.append"
-sig = "effect (path: String, content: String) -> Unit ! String"
-class = "effect"
-status = "uninspected"
-
-[[fn]]
 name = "fs.copy"
 sig = "effect (src: String, dst: String) -> Unit ! String"
 class = "effect"
@@ -2393,32 +2387,6 @@ sig = "effect (path: String) -> Option[Bytes] ! String"
 class = "effect"
 status = "uninspected"
 [[fn]]
-name = "fs.read_bytes_raw"
-sig = "effect (path: String) -> Bytes ! String"
-class = "effect"
-status = "inspected"
-impl = "fnv1a:4e5841abb4154603"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "n"
-parity = "PASS: seed 1792398886, 200 programs; 200 program(s) call it, 181 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16384..32768 2.025e7/1.974e7/1.986e7/1.986e7/1.986e7 fit 1 (rms 0.0%) moved 9.830e4/9.830e4/9.830e4/9.830e4/9.830e4B fit 1 (rms 0.0%) wall 0.061/0.091/0.162/0.309/1.062s wasm k=64..128 4.245e7/8.355e7/1.657e8/3.303e8/6.593e8 fit n (rms 0.0%) moved 1.033e7/2.057e7/4.105e7/8.201e7/1.639e8B fit n (rms 0.0%) wall 0.010/0.015/0.020/0.046/0.096s (order n ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-
-[[fn]]
-name = "fs.read_bytes_raw_if_exists"
-sig = "effect (path: String) -> Option[Bytes] ! String"
-class = "effect"
-status = "inspected"
-impl = "fnv1a:4fa44e99db449da8"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "n"
-parity = "PASS: seed 1792399268, 200 programs; 200 program(s) call it, 172 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16384..32768 2.025e7/1.974e7/1.986e7/1.986e7/1.986e7 fit 1 (rms 0.0%) moved 9.830e4/9.830e4/9.830e4/9.830e4/9.830e4B fit 1 (rms 0.0%) wall 0.061/0.096/0.162/0.309/1.017s wasm k=64..128 4.246e7/8.355e7/1.657e8/3.303e8/6.593e8 fit n (rms 0.0%) moved 1.033e7/2.057e7/4.105e7/8.201e7/1.639e8B fit n (rms 0.0%) wall 0.005/0.010/0.025/0.051/0.101s (order n ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-
-[[fn]]
 name = "fs.read_lines"
 sig = "effect (path: String) -> List[String] ! String"
 class = "effect"
@@ -2522,24 +2490,10 @@ class = "effect"
 status = "uninspected"
 
 [[fn]]
-name = "fs.write"
-sig = "effect (path: String, content: String) -> Unit ! String"
-class = "effect"
-status = "uninspected"
-
-
-[[fn]]
 name = "fs.write_bytes"
 sig = "effect (path: String, data: Bytes) -> Unit ! String"
 class = "effect"
 status = "uninspected"
-[[fn]]
-name = "fs.write_bytes_raw"
-sig = "effect (path: String, data: Bytes) -> Unit ! String"
-class = "effect"
-status = "uninspected"
-
-
 [[fn]]
 name = "hash.fnv1a32"
 sig = "(b: Bytes) -> Int"
@@ -6085,19 +6039,6 @@ alloc = "PASS: [vars=Int] call live=0 || [vars=String] call live=0"
 diamond = "PASS: [vars=Int] direct = via left = via right on both legs (2 line(s) each) || [vars=String] direct = via left = via right on both legs (2 line(s) each)"
 
 [[fn]]
-name = "map.entries"
-sig = "(m: Map[K, V]) -> List[(K, V)]"
-class = "pure"
-status = "inspected"
-impl = "fnv1a:7fa97941320cdabd"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "n; rebind (loop, tail, fold) 1"
-parity = "PASS: seed 1792424999, 200 programs; 200 program(s) call it, 173 of them clean on every leg; unique findings 0"
-complexity = "PASS: [vars=Int] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 7.454e7/1.488e8/2.973e8/5.943e8/1.188e9 fit n (rms 0.0%) moved 0.000e0/0.000e0/3.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.015/0.020/0.046/0.091/0.192s wasm k=16..32 6.242e7/1.248e8/2.496e8/4.992e8/9.985e8 fit n (rms 0.0%) moved 9.600e1/2.000e0/0.000e0/4.800e1/2.000e0B fit 1 (rms 0.0%) wall 0.005/0.020/0.035/0.066/0.137s (order n ok) || [vars=String] call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 3.530e7/7.050e7/1.409e8/2.817e8/5.633e8 fit n (rms 0.0%) moved 4.672e3/4.675e3/4.672e3/4.672e3/4.675e3B fit 1 (rms 0.0%) wall 0.005/0.010/0.015/0.035/0.071s wasm k=16..32 7.620e7/1.524e8/3.047e8/6.093e8/1.219e9 fit n (rms 0.0%) moved 4.000e0/1.020e2/5.200e1/4.000e0/1.020e2B fit 1 (rms 0.0%) wall 0.010/0.020/0.035/0.071/0.143s (order n ok)"
-alloc = "PASS: [vars=Int] call live=0 || [vars=String] call live=0"
-diamond = "PASS: [vars=Int] direct = via left = via right on both legs (1 line(s) each) || [vars=String] direct = via left = via right on both legs (1 line(s) each)"
-
-[[fn]]
 name = "map.filter"
 sig = "(m: Map[K, V], f: (K, V) -> Bool) -> Map[K, V]"
 class = "pure"
@@ -8314,18 +8255,6 @@ complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) 
 alloc = "PASS: call live=0, loop live=0, tail live=0, fold live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 [[fn]]
-name = "string.chars"
-sig = "(s: String) -> List[String]"
-class = "pure"
-status = "inspected"
-impl = "fnv1a:e1efe5df568fd235"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "n; rebind (loop, tail, fold) n"
-parity = "PASS: seed 1792412316, 200 programs; 200 program(s) call it, 179 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1..2 3.088e7/6.176e7/1.235e8/2.470e8/4.941e8 fit n (rms 0.0%) moved 1.200e5/2.400e5/4.800e5/9.600e5/1.920e6B fit n (rms 0.0%) wall 0.005/0.005/0.010/0.025/0.045s wasm k=4..8 4.309e7/8.617e7/1.723e8/3.446e8/6.892e8 fit n (rms 0.0%) moved 1.288e6/2.576e6/5.153e6/1.031e7/2.061e7B fit n (rms 0.0%) wall 0.005/0.010/0.020/0.040/0.076s (order n ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-[[fn]]
 name = "string.clear"
 sig = "(s: String) -> Unit"
 class = "pure"
@@ -8337,20 +8266,6 @@ parity = "PASS: seed 1792409822, 200 programs; 200 program(s) call it, 180 of th
 complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=1048576..2097152 4.928e7/4.928e7/4.928e7/4.928e7/4.928e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.005/0.005s wasm k=262144..524288 3.274e7/3.274e7/3.273e7/3.274e7/3.273e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/9.600e1/0.000e0/1.920e2B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.000/0.005s (order 1 ok)"
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (2 line(s) each)"
-[[fn]]
-name = "string.codepoint"
-sig = "(s: String) -> Option[Int]"
-class = "pure"
-status = "inspected"
-impl = "fnv1a:e3bd2e76d0da297b"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "1; rebind (loop, tail, fold) 1"
-parity = "PASS: seed 1792410937, 200 programs; 200 program(s) call it, 180 of them clean on every leg; unique findings 0"
-complexity = "PASS: no size parameter — constant-size arguments only (the plain call is the parity campaign's)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-
-
 [[fn]]
 name = "string.contains"
 sig = "(s: String, needle: String) -> Bool"
@@ -10150,20 +10065,6 @@ parity = "PASS: seed 1792414984, 200 programs; 200 program(s) call it, 176 of th
 complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=64..128 7.685e7/1.536e8/3.072e8/6.144e8/1.229e9 fit n (rms 0.0%) moved 1.280e2/1.280e2/1.280e2/1.280e2/1.280e2B fit 1 (rms 0.0%) wall 0.005/0.015/0.030/0.061/0.122s wasm k=16..32 3.778e7/7.554e7/1.511e8/3.021e8/6.042e8 fit n (rms 0.0%) moved 5.200e1/5.200e1/1.480e2/0.000e0/4.000e0B fit 1 (rms 0.0%) wall 0.000/0.005/0.010/0.015/0.035s (order n ok); loop meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=65536..131072 4.587e7/4.587e7/4.588e7/4.588e7/4.588e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.000/0.005/0.010s wasm k=65536..131072 3.425e7/3.424e7/3.424e7/3.424e7/3.425e7 fit 1 (rms 0.0%) moved 4.800e1/0.000e0/4.800e1/4.800e1/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.005/0.005s (order n ok); tail meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=65536..131072 4.574e7/4.574e7/4.574e7/4.574e7/4.575e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.005/0.005s wasm k=65536..131072 3.434e7/3.434e7/3.434e7/3.434e7/3.434e7 fit 1 (rms 0.0%) moved 0.000e0/9.600e1/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.000/0.005/0.005s (order n ok); fold meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=65536..131072 4.614e7/4.614e7/4.614e7/4.614e7/4.614e7 fit 1 (rms 0.0%) moved 0.000e0/0.000e0/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.000/0.005/0.005/0.010s wasm k=65536..131072 3.453e7/3.455e7/3.454e7/3.454e7/3.454e7 fit 1 (rms 0.0%) moved 0.000e0/4.800e1/0.000e0/0.000e0/0.000e0B fit 1 (rms 0.0%) wall 0.005/0.005/0.005/0.000/0.005s (order n ok)"
 alloc = "PASS: call live=0, loop live=0, tail live=0, fold live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-
-[[fn]]
-name = "value.str"
-sig = "(s: String) -> Value"
-class = "pure"
-status = "inspected"
-impl = "fnv1a:aa5743c2bca59a16"
-stamp = "almide 0.68.0 (dev) at insp-0680 d6b80c19b (develop 302e0d120 plus the inspection fingerprint covering each function's wasm emitter arm, #3796; the pre-release re-inspection of every stamped row); xtarget-fuzz inspect at the same sha (counted judge: instructions:u + bytes moved, marginal k..2k with k calibrated on each leg, n..16n; wasm counts under the canonical allocator ALMIDE_WASM_CANONICAL_ALLOC, no free-list reuse), 200 programs per fn; every type variable measured at Int AND at String; effect functions in the fixed world of ADR-0027 D2 (every probe on every leg in a fresh sandbox, host-decided results compared as verdict lines, process from a fixed command set, net and http against loopback fixtures); GCE c4-standard-4 (INTEL XEON PLATINUM 8581C, 4 vCPU, PMU architectural, one fn at a time per VM, asia-northeast1-b), Ubuntu 24.04, rustc 1.99.1, wasmtime 49.0.1; 2026-10-19; codopsy: no crate code changed by this inspection"
-order = "n"
-parity = "PASS: seed 1792416205, 200 programs; 200 program(s) call it, 178 of them clean on every leg; unique findings 0"
-complexity = "PASS: call meter=instructions:u+bytes-moved alloc=canonical(wasm) n=20000..320000 native k=16..32 2.759e7/5.511e7/1.102e8/2.203e8/4.406e8 fit n (rms 0.0%) moved 2.880e6/5.760e6/1.152e7/2.304e7/4.608e7B fit n (rms 0.0%) wall 0.005/0.005/0.010/0.025/0.051s wasm k=16..32 4.289e7/8.578e7/1.715e8/3.431e8/6.861e8 fit n (rms 0.0%) moved 9.599e5/1.920e6/3.840e6/7.680e6/1.536e7B fit n (rms 0.0%) wall 0.005/0.010/0.015/0.030/0.056s (order n ok)"
-alloc = "PASS: call live=0"
-diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
-
 
 [[fn]]
 name = "value.stringify"
