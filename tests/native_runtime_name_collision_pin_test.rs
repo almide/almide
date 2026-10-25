@@ -191,7 +191,7 @@ fn runtime_twins_keep_their_repr_equality_and_patterns() {
     // only NAMES `Endian` never splices bytes.rs, and under the auto-import
     // the bundled decl never reaches the program so `${e}` has no repr route
     // — both pre-existing walls on either side of this change.)
-    let source = "import bytes\nimport fs\nimport process\nfn kind(m: FileStat) -> String = match m { FileStat { is_dir, .. } => if is_dir then \"dir\" else \"file\" }\neffect fn main() -> Unit = {\n  let p = \"/tmp/almd_1821_twin_repr_pin.txt\"\n  fs.write(p, \"abc\")!\n  let m = fs.stat(p)!\n  println(\"${m.size} ${m.is_file} ${m == m}\")\n  println(kind(m))\n  let s = process.exec_status(\"true\", [])!\n  println(\"${s.code} ${s} ${s == s}\")\n  let e: Endian = BigEndian\n  println(\"${e} ${e == LittleEndian} ${bytes.len(bytes.zeros(0))}\")\n}\n";
+    let source = "import bytes\nimport fs\nimport process\nfn kind(m: FileStat) -> String = match m { FileStat { is_dir, .. } => if is_dir then \"dir\" else \"file\" }\neffect fn main() -> Unit = {\n  let p = \"/tmp/almd_1821_twin_repr_pin.txt\"\n  fs.write(p, \"abc\")!\n  let m = fs.stat(p)!\n  println(\"${m.size} ${m.is_file} ${m == m}\")\n  println(kind(m))\n  let s = process.output(process.ProcessCommand { cmd: \"true\", args: [] })!\n  println(\"${s.code} ${s} ${s == s}\")\n  let e: Endian = BigEndian\n  println(\"${e} ${e == LittleEndian} ${bytes.len(bytes.zeros(0))}\")\n}\n";
     let (ok, stdout, stderr) = run_inline("twins", source);
     assert!(ok, "the twin program must build on the inline native path:\n{stderr}");
     assert_eq!(

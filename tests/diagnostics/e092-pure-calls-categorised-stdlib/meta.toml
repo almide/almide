@@ -1,2 +1,2 @@
 expects_code = "E092"
-expects_error = "calls `io.write`, which has the IO.stdout effect"
+expects_error = "calls `io.print`, which has the IO.stdout effect"

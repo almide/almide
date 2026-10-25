@@ -73,13 +73,10 @@ pub const VERDICTS: &[Verdict] = &[
     Verdict { func: "fs.temp_dir", holds: "string.len(v) > 0", canon: "\"tmp\"", domain: &[] },
     Verdict { func: "fs.create_temp_file", holds: "string.contains(v, {prefix})", canon: "{prefix}", domain: &[] },
     Verdict { func: "fs.create_temp_dir", holds: "string.contains(v, {prefix})", canon: "{prefix}", domain: &[] },
-    Verdict { func: "process.is_alive", holds: "v or {pid} != process.pid()", canon: "false", domain: &[] },
     // Unit results: nothing to check but that the call returns, with a
     // short, non-negative wait.
     Verdict { func: "env.sleep_ms", holds: "true", canon: "()", domain: &[("ms", "int.abs({ms}) % 5")] },
     Verdict { func: "process.sleep", holds: "true", canon: "()", domain: &[("ms", "int.abs({ms}) % 5")] },
-    // A child's pid; the fixed command set exits at once.
-    Verdict { func: "process.spawn", holds: "v > 0", canon: "0", domain: &[] },
     // A signal reaches only a child of this program's own: a generated pid
     // could name any process on the host. Past every pid_max, the fallback
     // fails with ESRCH.
@@ -88,51 +85,16 @@ pub const VERDICTS: &[Verdict] = &[
         holds: "true",
         canon: "()",
         domain: &[
-            ("pid", "match process.spawn(\"/bin/sleep\", [\"1\"]) { ok(p) => p, err(_) => 2147483000 }"),
+            (
+                "pid",
+                "match process.start(process.ProcessCommand { cmd: \"/bin/sleep\", args: [\"1\"] }) { ok(c) => process.child_pid(c) ?? 2147483000, err(_) => 2147483000 }",
+            ),
             ("signal", "int.abs({signal}) % 2 * 6 + 9"),
         ],
     },
-    // How much of the echo has arrived is the network's timing.
-    Verdict { func: "net.tcp_read", holds: "bytes.len(v) <= {len} or {len} < 0", canon: "bytes.from_list([])", domain: &[] },
-    // A timeout the echo can beat on any host: a 1 ms one races it.
-    Verdict {
-        func: "net.tcp_read_timeout",
-        holds: "bytes.len(v) <= {len} or {len} < 0",
-        canon: "bytes.from_list([])",
-        domain: &[("timeout_ms", "1000 + int.abs({timeout_ms}) % 1000")],
-    },
-    // A socket's handle counts the sockets opened before it: two paths that
-    // each open one see different handles. The value the program goes on
-    // with is the handle itself (the legs number them alike).
-    Verdict { func: "net.tcp_connect", holds: "v >= 0", canon: "v", domain: &[] },
-    Verdict { func: "net.tcp_listen", holds: "v >= 0", canon: "v", domain: &[] },
-    Verdict { func: "net.tcp_accept", holds: "v >= 0", canon: "v", domain: &[] },
-    // The OS picks a listener's ephemeral port.
-    Verdict { func: "net.tcp_local_port", holds: "v > 0 and v < 65536", canon: "0", domain: &[] },
-    Verdict { func: "net.tcp_available", holds: "v >= 0", canon: "0", domain: &[] },
-    // Exactly len of the 11 echoed bytes: never more than arrive.
-    Verdict { func: "net.tcp_read_exact", holds: "bytes.len(v) == {len}", canon: "v", domain: &[("len", "int.abs({len}) % 12")] },
-    // net's Unix sockets and shared-memory files (#3620): a descriptor is the
-    // OS's lowest free number, and the legs do not start from the same free
-    // numbers (on Linux the embedded host holds one more descriptor than a
-    // native program; C-382 leaves raw numbers to the host). The program goes
-    // on with 0, which every leg refuses alike (C-383's held-descriptor rule).
-    Verdict { func: "net.unix_connect", holds: "v >= 0", canon: "0", domain: &[] },
-    Verdict { func: "net.unix_listen", holds: "v >= 0", canon: "0", domain: &[] },
-    Verdict { func: "net.unix_accept", holds: "v >= 0", canon: "0", domain: &[] },
-    Verdict { func: "net.shm_create", holds: "v >= 0", canon: "0", domain: &[] },
-    // The descriptors that arrived: new ones, so numbered by what is open.
-    Verdict { func: "net.unix_take_fds", holds: "list.all(v, (f) => f >= 0)", canon: "list.map(v, (f) => 0)", domain: &[] },
-    // A wait never blocks for long: a sink stream never becomes readable,
-    // so a generated timeout would hold the run that long (a negative one
-    // forever).
-    Verdict { func: "net.unix_poll", holds: "true", canon: "v", domain: &[("timeout_ms", "({timeout_ms} % 50 + 50) % 50")] },
-    Verdict {
-        func: "net.unix_wait",
-        holds: "list.all(v, (f) => list.contains({fds}, f))",
-        canon: "list.map(v, (f) => 0)",
-        domain: &[("timeout_ms", "({timeout_ms} % 50 + 50) % 50")],
-    },
+    // net's and unix's calls take and return opaque handles (`net.TcpStream`,
+    // `unix.Fd`), outside the generator's type universe: none is catalogued,
+    // so none has a verdict until the generator builds handles.
     // A buffer's address reads back the buffer while it lives (checked on
     // its first byte: the probe's check stays O(1)); a generated program goes
     // on with null, so it never holds an address past its buffer.

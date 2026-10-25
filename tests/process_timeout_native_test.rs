@@ -17,7 +17,7 @@ effect fn main() -> Unit = {
   let args = env.args()
   let script = args[0]
   let timeout = if args[1] == "fast" then 30000 else 100
-  match process.exec_status_timeout("sh", ["-c", script], timeout) {
+  match process.output(process.ProcessCommand { cmd: "sh", args: ["-c", script], timeout_ms: timeout }) {
     ok(st) => println("ok ${st.code}: ${st.stdout}"),
     err(e) => println(e),
   }

@@ -1,17 +1,21 @@
 //! The tcp family on native answers from the shared core (#3620, the net/tcp
 //! design §4): every failure is the class of the failure, never the
 //! platform's errno text; a negative length is an err, not a panic; a short
-//! `read_exact` names how many bytes came; `read_timeout` refuses a timeout
+//! `io.read_exact` names how many bytes came (the negative-length and
+//! short-read texts are io's, shared by every stream); `read_timeout` refuses a timeout
 //! that is not positive and puts the stream's own timeout back; a listener
 //! on port 0 reports the port the OS chose. The embedded and p3 legs reuse
-//! these texts, so this pins the side they copy.
+//! these texts, so this pins the side they copy. The handles are opaque
+//! (`net.TcpStream`, `net.TcpListener`), so neither their numbering nor a
+//! handle that was never issued can be written here any more.
 use std::process::Command;
 use std::time::Duration;
 
 #[path = "support/capped_run.rs"]
 mod capped_run;
 
-const PROGRAM: &str = r#"import net
+const PROGRAM: &str = r#"import io
+import net
 
 fn show(label: String, r: Result[Bytes, String]) -> String =
   match r {
@@ -25,24 +29,22 @@ effect fn main() -> Unit = {
   println("port>0: ${port > 0}")
   let c = net.tcp_connect("127.0.0.1", port)!
   let p = net.tcp_accept(l)!
-  println("handles: ${l} ${c} ${p}")
-  println(show("negative", net.tcp_read(c, -1)))
-  println(show("negative exact", net.tcp_read_exact(c, -3)))
+  println(show("negative", io.read(c, -1)))
+  println(show("negative exact", io.read_exact(c, -3)))
   println(show("zero ms", net.tcp_read_timeout(c, 4, 0)))
   println(show("minus ms", net.tcp_read_timeout(c, 4, -5)))
   println(show("read_timeout", net.tcp_read_timeout(c, 4, 30)))
   net.tcp_set_timeout(c, 40)!
   println(show("read_timeout again", net.tcp_read_timeout(c, 4, 20)))
-  println(show("own timeout back", net.tcp_read(c, 4)))
-  net.tcp_write(p, bytes.from_string("abc"))!
-  net.tcp_close(p)!
-  println(show("short exact", net.tcp_read_exact(c, 5)))
-  println(show("eof", net.tcp_read(c, 4)))
-  net.tcp_close(c)!
-  net.tcp_close(c)!
-  println(show("closed", net.tcp_read(c, 4)))
-  println(show("never issued", net.tcp_read(7, 4)))
-  net.tcp_close_listener(l)!
+  println(show("own timeout back", io.read(c, 4)))
+  io.write(p, bytes.from_string("abc"))!
+  io.close(p)!
+  println(show("short exact", io.read_exact(c, 5)))
+  println(show("eof", io.read(c, 4)))
+  io.close(c)!
+  io.close(c)!
+  println(show("closed", io.read(c, 4)))
+  io.close(l)!
   match net.tcp_connect("127.0.0.1", port) {
     ok(_) => println("refused: ok"),
     err(e) => println("refused: ${e}"),
@@ -73,18 +75,16 @@ fn native_tcp_answers_from_the_shared_core() {
     let port = stdout.lines().find_map(|l| l.strip_prefix("refused: tcp_connect(127.0.0.1:")).and_then(|r| r.split(')').next()).unwrap_or("?").to_string();
     let expected = [
         "port>0: true".to_string(),
-        "handles: 0 0 1".to_string(),
-        "negative: err tcp_read: negative length -1".to_string(),
-        "negative exact: err tcp_read_exact: negative length -3".to_string(),
+        "negative: err io.read: negative length -1".to_string(),
+        "negative exact: err io.read_exact: negative length -3".to_string(),
         "zero ms: err tcp_read_timeout: timeout must be positive (got 0 ms)".to_string(),
         "minus ms: err tcp_read_timeout: timeout must be positive (got -5 ms)".to_string(),
         "read_timeout: err tcp_read_timeout: timed out".to_string(),
         "read_timeout again: err tcp_read_timeout: timed out".to_string(),
         "own timeout back: err tcp_read: timed out".to_string(),
-        "short exact: err tcp_read_exact: connection closed after 3 of 5 bytes".to_string(),
+        "short exact: err io.read_exact: the stream ended after 3 of 5 bytes".to_string(),
         "eof: ok 0".to_string(),
         "closed: err TcpStream handle 0 is closed".to_string(),
-        "never issued: err invalid TcpStream handle: 7".to_string(),
         format!("refused: tcp_connect(127.0.0.1:{port}): connection refused"),
         "range: tcp_connect(127.0.0.1:70000): port out of range 0..=65535".to_string(),
         "closed listener: TcpListener handle 0 is closed".to_string(),

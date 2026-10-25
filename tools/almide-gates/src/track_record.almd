@@ -78,7 +78,7 @@ let record_marker = "fuzz-night: "
 // `gh api ... 2>/dev/null || true` — a request that fails (an expired per-job log, a 404)
 // reads as EMPTY on the bash side, never as an error, and the scorer decides what empty means.
 effect fn gh_api(path: String) -> String = {
-  let st = process.exec_status("gh", ["api", path]) ?? process.ProcessStatus {
+  let st = process.output(process.ProcessCommand { cmd: "gh", args: ["api", path] }) ?? process.ProcessStatus {
     code: 1,
     stdout: "",
     stderr: "",
