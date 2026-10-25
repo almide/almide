@@ -552,6 +552,9 @@ fn set_at_steps_owned(j: AlmideValue, steps: &[AlmidePathStep], value: &AlmideVa
             }
             other => other,
         },
+    }
+}
+
 /// `v` holds containers nested more than `budget` deep. Recurses at most
 /// `budget + 1` frames whatever `v` holds.
 fn json_nests_past(v: &AlmideValue, budget: usize) -> bool {
