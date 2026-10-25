@@ -121,7 +121,7 @@ fn the_spec_fixtures_read_the_same_on_native_embedded_and_p3() {
     }
     let scratch = tempfile::tempdir().expect("tempdir");
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/embedded_cross");
-    for name in ["http_error_classes.almd", "http_header_refusal.almd", "http_url_redaction.almd"] {
+    for name in ["http_error_classes.almd", "http_header_refusal.almd", "http_url_redaction.almd", "http_url_redaction_dial.almd"] {
         let out = assert_same(name, &three_legs(&dir.join(name), &[], scratch.path()));
         assert!(!out.contains("unexpected ok"), "{name}:\n{out}");
         assert_no_password(name, &out);
@@ -132,25 +132,6 @@ fn the_spec_fixtures_read_the_same_on_native_embedded_and_p3() {
 /// `s3cret`; no error text may show it.
 fn assert_no_password(name: &str, out: &str) {
     assert!(!out.contains("s3cret"), "{name}: a URL's password reached an error text:\n{out}");
-}
-
-#[test]
-fn a_dial_with_userinfo_hides_the_password_on_native_and_embedded() {
-    // The p3 shim sends the userinfo inside the authority (the host then
-    // fails to resolve it), so the connect class with userinfo is compared
-    // on the two lanes that strip it; http_url_redaction.almd covers p3.
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/embedded_cross/http_url_redaction_dial.almd");
-    let run = |extra: &[&str]| {
-        let mut c = Command::new(almide_bin());
-        c.arg("run").arg(&src).args(extra);
-        c
-    };
-    let native = observe(run(&[]), "almide run");
-    let embedded = observe(run(&["--target", "wasm"]), "almide run --target wasm");
-    assert_eq!(embedded, native, "the embedded leg differs from native");
-    assert!(native.0.contains(":***@"), "{}", native.0);
-    assert!(!native.0.contains("unexpected ok"), "{}", native.0);
-    assert_no_password("http_url_redaction_dial.almd", &native.0);
 }
 
 /// A listener that accepts and never answers: the stalled server.
@@ -224,6 +205,91 @@ effect fn main() -> Unit = {{
          too-large: response from \"http://127.0.0.1:{big}/big\" is larger than 1000 bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)\n\
          too-large-framed: response from \"http://127.0.0.1:{big}/big\" is larger than 1000 bytes (raise ALMIDE_HTTP_MAX_RESPONSE_BYTES; 0 = no limit)\n\
          tls: TLS handshake with \"https://127.0.0.1:{plain}/\" failed\n"
+    );
+    assert_eq!(out, want);
+}
+
+/// A listener that answers each request with the `Host` and every
+/// `Authorization` field it received (`|`-joined), and the target.
+fn auth_echo() -> u16 {
+    let l = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = l.local_addr().expect("addr").port();
+    std::thread::spawn(move || {
+        for mut s in l.incoming().flatten() {
+            std::thread::spawn(move || {
+                let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 4096];
+                while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match s.read(&mut chunk) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                    }
+                }
+                let head = String::from_utf8_lossy(&buf).to_string();
+                let field = |name: &str| -> Vec<String> {
+                    head.lines()
+                        .filter_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_string()))
+                        .collect()
+                };
+                let target = head.split_whitespace().nth(1).unwrap_or("").to_string();
+                let body = format!("host={} auth={} target={target}", field("host").join("|"), field("authorization").join("|"));
+                let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes());
+            });
+        }
+    });
+    port
+}
+
+#[test]
+fn a_url_userinfo_is_sent_as_basic_credentials_on_native_embedded_and_p3() {
+    // C-328 (#4205): the userinfo never reaches the authority a lane dials;
+    // rt-core sends it as `Authorization: Basic` (percent-decoded, `user:`
+    // without a `:`) unless the caller sent one, and the p3 shim sends the
+    // same field value — so the host, the credentials and the target agree.
+    if !wasmtime_runs_p3() {
+        return;
+    }
+    let port = auth_echo();
+    let scratch = tempfile::tempdir().expect("tempdir");
+    let src = scratch.path().join("userinfo.almd");
+    std::fs::write(
+        &src,
+        format!(
+            r#"import http
+
+fn show(tag: String, r: Result[String, String]) -> Unit = {{
+  match r {{
+    ok(b) => println("${{tag}}: ${{b}}"),
+    err(e) => println("${{tag}}: err ${{e}}"),
+  }}
+}}
+
+effect fn main() -> Unit = {{
+  show("password", http.get("http://alice:s3cret@127.0.0.1:{port}/p?token=abc"))
+  show("user-only", http.get("http://alice@127.0.0.1:{port}/p"))
+  show("empty-password", http.get("http://alice:@127.0.0.1:{port}/p"))
+  show("empty-userinfo", http.get("http://@127.0.0.1:{port}/p"))
+  show("encoded", http.get("http://al%40ce:p%3Ass%zz:x@127.0.0.1:{port}/p"))
+  show("long", http.get("http://abcdefghijklmnopqrstuvwxyz:0123456789@127.0.0.1:{port}/"))
+  show("caller-auth", http.request("GET", "http://alice:s3cret@127.0.0.1:{port}/p", "", ["authorization": "Bearer t"]))
+  show("framed", http.request("GET", "http://bob:pw@127.0.0.1:{port}/p", "", ["X-Ok": "1"]))
+}}
+"#
+        ),
+    )
+    .expect("write program");
+    let out = assert_same("userinfo", &three_legs(&src, &[], scratch.path()));
+    let h = format!("127.0.0.1:{port}");
+    let want = format!(
+        "password: host={h} auth=Basic YWxpY2U6czNjcmV0 target=/p?token=abc\n\
+         user-only: host={h} auth=Basic YWxpY2U6 target=/p\n\
+         empty-password: host={h} auth=Basic YWxpY2U6 target=/p\n\
+         empty-userinfo: host={h} auth= target=/p\n\
+         encoded: host={h} auth=Basic YWxAY2U6cDpzcyV6ejp4 target=/p\n\
+         long: host={h} auth=Basic YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo6MDEyMzQ1Njc4OQ== target=/\n\
+         caller-auth: host={h} auth=Bearer t target=/p\n\
+         framed: host={h} auth=Basic Ym9iOnB3 target=/p\n"
     );
     assert_eq!(out, want);
 }
