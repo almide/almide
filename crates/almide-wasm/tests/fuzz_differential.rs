@@ -756,28 +756,15 @@ fn differential_fuzz_fixed_seed_range() {
     let explicit: Option<u64> = std::env::var("ALMIDE_FUZZ_ITERS").ok().and_then(|v| v.parse().ok());
     let base: u64 =
         std::env::var("ALMIDE_FUZZ_BASE").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-    // The CI slice (ALMIDE_CI_SLICE=k): of the fixed 0..200 range, the seeds
-    // `offset, offset + k, …` — 25 of 200 at k = 8, a different residue class
-    // per commit, so k consecutive commits cover the whole range. The full
-    // run (and any explicit ALMIDE_FUZZ_ITERS) runs every seed of the range.
+    // CI slice (ALMIDE_CI_SLICE=k): seeds offset, offset+k, … of 0..200 (25 at k=8, rotated per commit); full run = all.
     let seeds: Vec<u64> = match (explicit, almide_corpus::ci_slice()) {
-        (None, Some(s)) => {
-            let picked: Vec<u64> = (0..200u64).filter(|i| i % s.k == s.offset).map(|i| base + i).collect();
-            println!("fuzz: CI slice 1/{} runs {} of the 200 fixed seeds (residue {}); the full run runs all 200", s.k, picked.len(), s.offset);
-            picked
-        }
+        (None, Some(s)) => (0..200u64).filter(|i| i % s.k == s.offset).map(|i| base + i).collect(),
         (n, _) => (base..base + n.unwrap_or(200)).collect(),
     };
     let iters = seeds.len() as u64;
     assert!(iters > 0, "no seed selected");
-    let mut tally = Tally {
-        checker_rejected: 0,
-        emit_refused: 0,
-        abort_class: 0,
-        oracle_abstained: 0,
-        host_compared: 0,
-        compared: 0,
-    };
+    println!("fuzz: {iters} seed(s) of the fixed range (ALMIDE_CI_SLICE={})", almide_corpus::ci_slice().map_or(1, |s| s.k));
+    let mut tally = Tally { checker_rejected: 0, emit_refused: 0, abort_class: 0, oracle_abstained: 0, host_compared: 0, compared: 0 };
     let mut findings: Vec<String> = Vec::new();
     for seed in seeds {
         if let Err(f) = run_seed(seed, &mut tally) {
