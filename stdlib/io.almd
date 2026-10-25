@@ -106,16 +106,16 @@ effect fn __read_to_end_from[H: Read](h: H, chunks: List[Bytes]) -> Result[Bytes
 // ── The streams' own requirements ──
 /// Up to max bytes of stdin; fewer only at its end.
 @ordered
-@intrinsic("almide_rt_io_read_bytes")
+@intrinsic("almide_rt_io___read_stdin_bytes")
 effect fn __read_stdin_bytes(max: Int) -> Bytes = _
 
 /// data to stdout, unflushed; shares println's buffer, so order is program order.
-@intrinsic("almide_rt_io_write")
+@intrinsic("almide_rt_io___write_stdout")
 @category("IO.stdout")
 effect fn __write_stdout(data: Bytes) -> Unit = _
 
 /// data to stderr, after flushing stdout.
-@intrinsic("almide_rt_io_write_stderr")
+@intrinsic("almide_rt_io___write_stderr")
 @category("IO.stderr")
 effect fn __write_stderr(data: Bytes) -> Unit = _
 

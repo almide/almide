@@ -88,41 +88,41 @@ local fn __raw(f: Fd) -> Int = match f {
 }
 
 // ── The runtime leaves (the descriptor's raw OS number) ──
-@intrinsic("almide_rt_unix_connect")
+@intrinsic("almide_rt_unix___os_connect")
 @category("Net.fetch")
 effect fn __os_connect(path: String) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_unix_listen")
+@intrinsic("almide_rt_unix___os_listen")
 @category("Net.listen")
 effect fn __os_listen(path: String) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_unix_accept")
+@intrinsic("almide_rt_unix___os_accept")
 @category("Net.listen")
 effect fn __os_accept(listener: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_unix_send")
+@intrinsic("almide_rt_unix___os_send")
 effect fn __os_send(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_unix_recv")
+@intrinsic("almide_rt_unix___os_recv")
 effect fn __os_recv(sock: Int, max: Int) -> Result[Bytes, String] = _
 
-@intrinsic("almide_rt_unix_take_fds")
+@intrinsic("almide_rt_unix___os_take_fds")
 effect fn __os_take_fds(sock: Int) -> List[Int] = _
 
-@intrinsic("almide_rt_unix_wait")
+@intrinsic("almide_rt_unix___os_wait")
 effect fn __os_wait(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = _
 
-@intrinsic("almide_rt_unix_close")
+@intrinsic("almide_rt_unix___os_close")
 effect fn __os_close(fd: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_unix_shm_create")
+@intrinsic("almide_rt_unix___os_shm_create")
 effect fn __os_shm_create(size: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_unix_shm_resize")
+@intrinsic("almide_rt_unix___os_shm_resize")
 effect fn __os_shm_resize(fd: Int, size: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_unix_shm_write")
+@intrinsic("almide_rt_unix___os_shm_write")
 effect fn __os_shm_write(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_unix_shm_read")
+@intrinsic("almide_rt_unix___os_shm_read")
 effect fn __os_shm_read(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = _

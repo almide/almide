@@ -356,7 +356,7 @@ fn write_runtime_fn_modes(rust_entries: &[fs::DirEntry], out_dir: &Path) -> io::
 /// This is the GROUND TRUTH for `BorrowInferencePass`'s intrinsic seeding.
 /// Before it existed, an `@intrinsic` fn returning `Unit` was ASSUMED to
 /// mutate its first heap argument in place, which emitted `&mut x` against
-/// read-only helpers like `almide_rt_io_write(data: &Vec<u8>)` → E0596 in
+/// read-only helpers like `almide_rt_io___write_stdout(data: &Vec<u8>)` → E0596 in
 /// generated Rust (#803). A generic parameter (`x: T`) is not a reference at
 /// all, so it records `false`.
 fn extract_runtime_param_mutability(content: &str) -> Vec<(String, Vec<bool>)> {
