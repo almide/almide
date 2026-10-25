@@ -490,6 +490,7 @@ spec/wasm_cross/json_parse_strict_strings.almd
 spec/wasm_cross/json_parse_strict_structure.almd
 spec/wasm_cross/json_path_edges.almd
 spec/wasm_cross/json_path_index_domain.almd
+spec/wasm_cross/json_set_path_depth_bound.almd
 spec/wasm_cross/json_string_span.almd
 spec/wasm_cross/json_stringify_control_chars.almd
 spec/wasm_cross/json_stringify_nonfinite.almd
