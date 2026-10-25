@@ -85,25 +85,52 @@ fn a_package_module_declaring_a_builtin_named_type_does_not_hide_the_builtin() {
     }
 }
 
-/// A dependency module that redeclares a built-in protocol's name leaves the
-/// bare built-in spelling to the files that do not import it.
+/// A dependency `dep` whose module `proto` declares `protocol <name>` with a
+/// `ping` method, and whose module `user` conforms a type to the built-in
+/// `<builtin>` and compares two values.
+fn protocol_project(root: &Path, name: &str, builtin: &str) -> std::path::PathBuf {
+    let dep = root.join("dep");
+    let app = root.join("app");
+    write(&dep.join("almide.toml"), "[package]\nname = \"dep\"\nversion = \"0.1.0\"\n");
+    write(
+        &dep.join("src").join("proto.almd"),
+        &format!("protocol {name} {{\n  fn ping(self) -> Int\n}}\n\ntype Q: {name} = {{ v: Int }}\n\nfn Q.ping(self) -> Int = self.v\n\nfn get() -> Int = Q {{ v: 1 }}.ping()\n"),
+    );
+    write(&dep.join("src").join("user.almd"), &format!("type C: {builtin} = Red | Green\n\nfn same(a: C, b: C) -> Bool = a == b\n"));
+    write(&dep.join("src").join("mod.almd"), "import self.proto\nimport self.user\n\nfn run() -> String = int.to_string(proto.get())\n");
+    write(&app.join("almide.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n");
+    write(&app.join("src").join("main.almd"), "import dep\n\neffect fn main() -> Unit = {\n  println(dep.run())\n}\n");
+    app
+}
+
+/// Built-in protocol names are reserved in every module (#4190). Protocols
+/// are keyed by bare name, so a dependency module's `protocol Eq` (or
+/// `Integer`) replaced the built-in's requirements for every module: another
+/// module's `type C: Eq` was then checked against the redeclaration's
+/// `ping`. The declaration is refused by name, in a dependency module as in
+/// the entry file (tests/diagnostics/builtin-protocol-redeclared).
 #[test]
-fn a_dependency_module_redeclaring_a_builtin_protocol_does_not_hide_the_builtin() {
-    for proto in ["Eq", "Repr", "Ord", "Hash", "Codec"] {
+fn a_dependency_module_redeclaring_a_builtin_protocol_is_refused() {
+    for proto in ["Eq", "Repr", "Ord", "Hash", "Codec", "Numeric", "Integer", "Text"] {
         let root = tempfile::tempdir().expect("tempdir");
-        let dep = root.path().join("dep");
-        let app = root.path().join("app");
-        write(&dep.join("almide.toml"), "[package]\nname = \"dep\"\nversion = \"0.1.0\"\n");
-        write(
-            &dep.join("src").join("proto.almd"),
-            &format!("protocol {proto} {{\n  fn ping(self) -> Int\n}}\n\ntype Q: {proto} = {{ v: Int }}\n\nfn Q.ping(self) -> Int = self.v\n\nfn get() -> Int = Q {{ v: 1 }}.ping()\n"),
-        );
-        write(&dep.join("src").join("user.almd"), &format!("type C: {proto} = Red | Green\n\nfn same(a: C, b: C) -> Bool = a == b\n"));
-        write(&dep.join("src").join("mod.almd"), "import self.proto\nimport self.user\n\nfn run() -> String = int.to_string(proto.get())\n");
-        write(&app.join("almide.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = { path = \"../dep\" }\n");
-        write(&app.join("src").join("main.almd"), "import dep\n\neffect fn main() -> Unit = {\n  println(dep.run())\n}\n");
+        let app = protocol_project(root.path(), proto, "Eq");
         let (ok, out) = run(&app);
-        assert!(ok && out.trim_end().ends_with('1'), "built-in protocol `{proto}` in a dependency redeclaring it:\n{out}");
+        assert!(
+            !ok && out.contains(&format!("protocol '{proto}' is built in and cannot be redeclared")),
+            "built-in protocol `{proto}` redeclared in a dependency module must be refused:\n{out}"
+        );
+    }
+}
+
+/// The control: the same dependency with its protocol under its own name
+/// runs, and the sibling module's built-in conformance is untouched.
+#[test]
+fn a_dependency_module_protocol_under_its_own_name_leaves_the_builtin_conformance() {
+    for builtin in ["Eq", "Repr", "Ord", "Hash", "Codec"] {
+        let root = tempfile::tempdir().expect("tempdir");
+        let app = protocol_project(root.path(), "Ping", builtin);
+        let (ok, out) = run(&app);
+        assert!(ok && out.trim_end().ends_with('1'), "built-in protocol `{builtin}` beside a dependency's `protocol Ping`:\n{out}");
     }
 }
 
