@@ -415,16 +415,17 @@ fn decode_form(s: String) -> Result[String, String] = match decode_component(str
   err(e) => err(string.replace(e, "url.decode_component", "url.decode_form")),
 }
 
-fn __url_parse_pairs(parts: List[String], acc: List[(String, String)]) -> Result[List[(String, String)], String] = match list.first(parts) {
-  none => ok(list.reverse(acc)),
-  some(part) => {
-    let kv = __url_split_once(part, "=")
-    match (decode_form(kv.0), decode_form(kv.1)) {
-      (ok(k), ok(v)) => __url_parse_pairs(list.drop(parts, 1), [(k, v)] + acc),
-      (err(e), _) => err(string.replace(e, "url.decode_form", "url.parse_query")),
-      (_, err(e)) => err(string.replace(e, "url.decode_form", "url.parse_query")),
-    }
-  },
+// One pair, decoded. parse_query maps it over the segments with the fallible
+// list.map (first err wins, ADR-0006), so the walk is linear (#4196): the
+// earlier recursion copied the remaining segments (`list.drop(parts, 1)`) and
+// prepended to its accumulator at every step — quadratic in the pair count.
+fn __url_parse_pair(part: String) -> Result[(String, String), String] = {
+  let kv = __url_split_once(part, "=")
+  match (decode_form(kv.0), decode_form(kv.1)) {
+    (ok(k), ok(v)) => ok((k, v)),
+    (err(e), _) => err(string.replace(e, "url.decode_form", "url.parse_query")),
+    (_, err(e)) => err(string.replace(e, "url.decode_form", "url.parse_query")),
+  }
 }
 
 // Split a query string into key/value pairs and decode both sides with the
@@ -435,10 +436,10 @@ fn __url_parse_pairs(parts: List[String], acc: List[(String, String)]) -> Result
 // Example: match url.parse_query("") { ok(ps) => ps == [], err(_) => false }
 // Example: match url.parse_query("x=%zz") { ok(_) => false, err(_) => true }
 /// Decoded (k, v) pairs; bare key gets ""; err on a bad escape.
-fn parse_query(query: String) -> Result[List[(String, String)], String] = __url_parse_pairs(
-  string.split(query, "&") |> list.filter((part) => string.len(part) > 0),
-  [],
-)
+fn parse_query(query: String) -> Result[List[(String, String)], String] = {
+  let parts = string.split(query, "&") |> list.filter((part) => string.len(part) > 0)
+  ok(parts |> list.map((part) => __url_parse_pair(part)!)!)
+}
 
 // RFC 3986 5.2.3: a relative path merged onto the base path.
 fn __url_merge(base: Url, rel: String) -> String = if string.len(base.path) == 0 then "/" + rel
