@@ -196,16 +196,21 @@ impl<'a> OrderedReach<'a> {
                         }
                     }
                     (Some(CallTarget::Named { name }), _) | (_, IrExprKind::FnRef { name }) => {
-                        if self.reach.fn_reaches_ordered(self.module, *name) {
+                        // A bodied stdlib fn is called by its runtime name
+                        // here (`almide_rt_env_set`, #4200).
+                        if almide_lang::stdlib_info::is_ordered_runtime_symbol(name.as_str())
+                            || self.reach.fn_reaches_ordered(self.module, *name)
+                        {
                             self.hit = true;
                         }
                     }
                     (Some(CallTarget::Module { module, func, .. }), _) => {
-                        if self.reach.modules.contains(module) {
-                            if self.reach.fn_reaches_ordered(Some(*module), *func) {
-                                self.hit = true;
-                            }
-                        } else if almide_lang::stdlib_info::is_ordered_stdlib_fn(module.as_str(), func.as_str()) {
+                        // The stdlib's own `@ordered` mark first: a bodied
+                        // stdlib fn (`env.set` over `__set`, #4200) can sit
+                        // in the program's modules, and its mark is the answer.
+                        if almide_lang::stdlib_info::is_ordered_stdlib_fn(module.as_str(), func.as_str()) {
+                            self.hit = true;
+                        } else if self.reach.modules.contains(module) && self.reach.fn_reaches_ordered(Some(*module), *func) {
                             self.hit = true;
                         }
                     }

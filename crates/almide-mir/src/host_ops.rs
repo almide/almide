@@ -121,6 +121,7 @@ pub const HOST_OPS: &[HostOp] = &[
     op("env", "get", "almide_rt_env_get", ENV),
     // `env.set` is an Almide body that refuses the pairs no environment holds
     // (#4200) before it reaches its private op `__set`.
+    wrapper("env", "set", "__set", "almide_rt_env___set", ENV).result(),
     op("env", "__set", "almide_rt_env___set", ENV),
     // `env.cwd` reads PWD and `temp_dir` honours $TMPDIR: environment reads.
     op("env", "cwd", "almide_rt_env_cwd", ENV).result(),
