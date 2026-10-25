@@ -13,36 +13,21 @@ import env
 /// Same as env.args; argv[0] excluded.
 effect fn raw() -> List[String] = env.args()
 
-/// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
-effect fn flag(name: String) -> Bool = __has(__options(env.args()), name)
-
-/// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
-effect fn has_flag(name: String) -> Bool = __has(__options(env.args()), name)
+/// True on --name or -<first letter of name>.
+effect fn flag(name: String) -> Bool = {
 
 
 
 
 
-fn __has(args: List[String], name: String) -> Bool = {
+  __flag_at(env.args(), "--" + name, "-" + string.slice(name, 0, 1), 0)
+}
 
-
+/// True on --name; a one-letter name also matches -name. No short form is derived.
+effect fn has_flag(name: String) -> Bool = {
 
   let short = if string.len(name) == 1 then "-" + name else "--" + name
-  __flag_at(args, "--" + name, short, 0)
-}
-
-
-
-
-fn __options(args: List[String]) -> List[String] = match list.index_of(args, "--") {
-  some(i) => list.take(args, i),
-  none => args,
-}
-
-
-fn __operands(args: List[String]) -> List[String] = match list.index_of(args, "--") {
-  some(i) => list.drop(args, i + 1),
-  none => [],
+  __flag_at(env.args(), "--" + name, short, 0)
 }
 
 @category
@@ -56,9 +41,9 @@ fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
     else __flag_at(args, long, short, i + 1)
   }
 
-/// Value of --name=v or --name v before `--`; none if absent.
+/// Value of --name=v or --name v; none if absent.
 effect fn option(name: String) -> String? = {
-  let args = __options(env.args())
+  let args = env.args()
   let long = "--" + name
   let eq_prefix = long + "="
 
@@ -87,17 +72,13 @@ effect fn option_or(name: String, fallback: String) -> String = match option(nam
   none => fallback,
 }
 
-/// Args before `--` not starting with -, then every arg after `--`; option values too.
-effect fn positional() -> List[String] = __positional(env.args())
+/// Args not starting with -; option values too.
+effect fn positional() -> List[String] = {
 
 
 
-
-
-fn __positional(args: List[String]) -> List[String] = list.filter(
-  __options(args),
-  (a) => not string.starts_with(a, "-"),
-) + __operands(args)
+  list.filter(env.args(), (a) => not string.starts_with(a, "-"))
+}
 
 /// i-th positional arg; none if out of range.
 effect fn positional_at(i: Int) -> String? = list.get(positional()!, i)
@@ -114,12 +95,11 @@ pub const SRC_BASE64: &str = r#"
 
 
 
-
 /// Standard base64 with + / and = padding.
 @intrinsic("almide_rt_base64_encode")
 fn encode(b: Bytes) -> String = _
 
-/// Bytes from padded canonical base64 (+ /); err otherwise.
+/// Bytes from base64; padding optional; err if bad.
 @intrinsic("almide_rt_base64_decode")
 fn decode(s: String) -> Result[Bytes, String] = _
 
@@ -127,7 +107,7 @@ fn decode(s: String) -> Result[Bytes, String] = _
 @intrinsic("almide_rt_base64_encode_url")
 fn encode_url(b: Bytes) -> String = _
 
-/// Bytes from padded canonical URL-safe base64 (- _); err otherwise.
+/// Same as decode; accepts either alphabet.
 @intrinsic("almide_rt_base64_decode_url")
 fn decode_url(s: String) -> Result[Bytes, String] = _
 "#;
@@ -210,89 +190,68 @@ fn base64_encode_url(b: Bytes) -> String = {
 
 
 
-
-
-
-
-
-
-
-fn __b64d_val(c: Int, c62: Int, c63: Int) -> Int = if c >= 65 and c <= 90 then c - 65
+fn __b64d_val(c: Int) -> Int = if c >= 65 and c <= 90 then c - 65
 else if c >= 97 and c <= 122 then c - 71
 else if c >= 48 and c <= 57 then c + 4
-else if c == c62 then 62
-else if c == c63 then 63 else 0 - 1
+else if c == 43 or c == 45 then 62
+else if c == 47 or c == 95 then 63 else 0 - 1
 
+fn __b64d_strip(p: Int, end: Int) -> Int =
+  if end > 0 and prim.load8(p + end - 1) == 61 then __b64d_strip(
+    p,
+    end - 1,
+  )
+  else end
 
-fn __b64d_pads(p: Int, end: Int, acc: Int) -> Int =
-  if end > 0 and prim.load8(p + end - 1) == 61 then __b64d_pads(p, end - 1, acc + 1)
-  else acc
+fn __b64d_scan(p: Int, n: Int, i: Int) -> Bool = if i >= n then true
+else if __b64d_val(prim.load8(p + i)) < 0 then false
+else __b64d_scan(p, n, i + 1)
 
-fn __b64d_scan(p: Int, n: Int, i: Int, c62: Int, c63: Int) -> Bool = if i >= n then true
-else if __b64d_val(prim.load8(p + i), c62, c63) < 0 then false
-else __b64d_scan(p, n, i + 1, c62, c63)
+fn __b64d_chunks(dst: Int, src: Int, chunks: Int, i: Int) -> Int = if i >= chunks then 0
+else {
+  let a = __b64d_val(prim.load8(src + i * 4))
+  let b = __b64d_val(prim.load8(src + i * 4 + 1))
+  let c = __b64d_val(prim.load8(src + i * 4 + 2))
+  let d = __b64d_val(prim.load8(src + i * 4 + 3))
+  prim.store8(dst + i * 3, a * 4 + b / 16)
+  prim.store8(dst + i * 3 + 1, prim.band(b * 16, 255) + c / 4)
+  prim.store8(dst + i * 3 + 2, prim.band(c * 64, 255) + d)
+  __b64d_chunks(dst, src, chunks, i + 1)
+}
 
-fn __b64d_chunks(dst: Int, src: Int, chunks: Int, i: Int, c62: Int, c63: Int) -> Int =
-  if i >= chunks then 0
-  else {
-    let a = __b64d_val(prim.load8(src + i * 4), c62, c63)
-    let b = __b64d_val(prim.load8(src + i * 4 + 1), c62, c63)
-    let c = __b64d_val(prim.load8(src + i * 4 + 2), c62, c63)
-    let d = __b64d_val(prim.load8(src + i * 4 + 3), c62, c63)
-    prim.store8(dst + i * 3, a * 4 + b / 16)
-    prim.store8(dst + i * 3 + 1, prim.band(b * 16, 255) + c / 4)
-    prim.store8(dst + i * 3 + 2, prim.band(c * 64, 255) + d)
-    __b64d_chunks(dst, src, chunks, i + 1, c62, c63)
-  }
-
-fn __b64d_rem(dst: Int, src: Int, rem: Int, c62: Int, c63: Int) -> Int = if rem == 2 then {
-  let a = __b64d_val(prim.load8(src), c62, c63)
-  let b = __b64d_val(prim.load8(src + 1), c62, c63)
+fn __b64d_rem(dst: Int, src: Int, rem: Int) -> Int = if rem == 2 then {
+  let a = __b64d_val(prim.load8(src))
+  let b = __b64d_val(prim.load8(src + 1))
   prim.store8(dst, a * 4 + b / 16)
   0
 } else if rem == 3 then {
-  let a = __b64d_val(prim.load8(src), c62, c63)
-  let b = __b64d_val(prim.load8(src + 1), c62, c63)
-  let c = __b64d_val(prim.load8(src + 2), c62, c63)
+  let a = __b64d_val(prim.load8(src))
+  let b = __b64d_val(prim.load8(src + 1))
+  let c = __b64d_val(prim.load8(src + 2))
   prim.store8(dst, a * 4 + b / 16)
   prim.store8(dst + 1, prim.band(b * 16, 255) + c / 4)
   0
 } else 0
 
-
-fn __b64d_dropped(pads: Int) -> Int = match pads {
-  1 => 3,
-  2 => 15,
-  _ => 0,
-}
-
-fn __b64d_decode(s: String, c62: Int, c63: Int) -> Result[Bytes, String] = {
+fn base64_decode(s: String) -> Result[Bytes, String] = {
   let sh = prim.handle(s)
   let n = prim.load32(sh + 4)
-  let pads = __b64d_pads(sh + 12, n, 0)
-  let end = n - pads
-  if n % 4 != 0 then err("invalid base64 length: " + int.to_string(n))
-  else if pads > 2 then err("invalid base64 padding")
-  else if __b64d_scan(sh + 12, end, 0, c62, c63) == false then err("invalid base64 character")
-  else if end > 0 and prim.band(
-    __b64d_val(prim.load8(sh + 12 + end - 1), c62, c63),
-    __b64d_dropped(pads),
-  ) != 0 then err("invalid base64 trailing bits")
+  let end = __b64d_strip(sh + 12, n)
+  if end % 4 == 1 then err("invalid base64 length: " + int.to_string(n))
+  else if __b64d_scan(sh + 12, end, 0) == false then err("invalid base64 character")
   else {
     let chunks = end / 4
     let rem = end % 4
     let extra = if rem == 2 then 1
     else if rem == 3 then 2 else 0
     let out = prim.alloc_bytes(chunks * 3 + extra)
-    let _c = __b64d_chunks(prim.handle(out) + 12, sh + 12, chunks, 0, c62, c63)
-    let _r = __b64d_rem(prim.handle(out) + 12 + chunks * 3, sh + 12 + chunks * 4, rem, c62, c63)
+    let _c = __b64d_chunks(prim.handle(out) + 12, sh + 12, chunks, 0)
+    let _r = __b64d_rem(prim.handle(out) + 12 + chunks * 3, sh + 12 + chunks * 4, rem)
     ok(out)
   }
 }
 
-fn base64_decode(s: String) -> Result[Bytes, String] = __b64d_decode(s, 43, 47)
-
-fn base64_decode_url(s: String) -> Result[Bytes, String] = __b64d_decode(s, 45, 95)
+fn base64_decode_url(s: String) -> Result[Bytes, String] = base64_decode(s)
 "#;
 pub const SRC_BIGINT: &str = r#"
 
@@ -312,12 +271,11 @@ pub const SRC_BIGINT: &str = r#"
 type BigInt: Numeric, Integer = { neg: Bool, limbs: List[Int] }
 
 
-/// BigInt from trimmed decimal s with an optional + or -; err on junk or more than 4300 digits.
+/// BigInt from trimmed decimal s with an optional + or -; err on junk.
 fn parse(s: String) -> Result[BigInt, String] = parse_radix(s, 10)
 
 /// BigInt from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
-/// err on junk, and on more than 4300 digits in a radix that is not a power of two;
-/// radix outside 2..36 aborts.
+/// err on junk; radix outside 2..36 aborts.
 fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
   check_radix(radix)
   let bytes = string.to_bytes(string.trim(s))
@@ -329,47 +287,20 @@ fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
   }
 }
 
-/// Decimal digits, with - when negative; more than 4300 digits aborts.
+/// Decimal digits, with - when negative.
 fn to_string(x: BigInt) -> String = to_string_radix(x, 10)
 
-/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts, and so does
-/// a radix that is not a power of two when the text would pass 4300 digits.
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
 fn to_string_radix(x: BigInt, radix: Int) -> String = {
   check_radix(radix)
   let k = chunk_width(radix, 1, radix)
-  let text = if is_pow2(radix) then chunk_text(
-    pow2_chunks(x.limbs, k * radix_bits(radix)),
-    radix,
-    k,
-  )
-  else {
-
-
-
-    if bit_length(x) > text_digit_limit() * int.bit_length(radix) then panic(text_limit_error())
-    else ()
-    let t = chunk_text(radix_chunks(x.limbs, int.pow(radix, k), []), radix, k)
-    if string.len(t) > text_digit_limit() then panic(text_limit_error()) else t
+  let chunks = radix_chunks(x.limbs, int.pow(radix, k), [])
+  let text = match chunks {
+    [] => "0",
+    [top, ..rest] => int.to_string_radix(top, radix) + (rest |> list.map((c) => string.pad_start(int.to_string_radix(c, radix), k, "0")) |> string.join("")),
   }
   if x.neg then "-" + text else text
 }
-
-
-local fn chunk_text(chunks: List[Int], radix: Int, k: Int) -> String = match chunks {
-  [] => "0",
-  [top, ..rest] => int.to_string_radix(top, radix) + (rest |> list.map((c) => string.pad_start(int.to_string_radix(c, radix), k, "0")) |> string.join("")),
-}
-
-
-
-
-
-local fn text_digit_limit() -> Int = 4300
-
-local fn text_limit_error() -> String = "integer string conversion exceeds the limit of 4300 digits"
-
-
-local fn pow_bit_ceiling() -> Int = 8053063680
 
 
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -416,14 +347,9 @@ fn modulo(a: BigInt, b: BigInt) -> BigInt = {
   if list.is_empty(r.limbs) or a.neg == b.neg then r else add(r, b)
 }
 
-/// base raised to exp; exp < 0 aborts, and so does a result sure to pass 30 * 2^28 bits.
+/// base raised to exp; exp < 0 aborts.
 fn pow(base: BigInt, exp: Int) -> BigInt = if exp < 0 then panic("negative exponent")
-else if pow_too_large(bit_length(base) - 1, exp) then panic("pow result too large")
 else power(base, exp, small(1))
-
-
-
-local fn pow_too_large(k: Int, exp: Int) -> Bool = k > 0 and exp > (pow_bit_ceiling() - 1) / k
 
 /// Bits needed to hold the magnitude of x; 0 for 0.
 fn bit_length(x: BigInt) -> Int = match list.len(x.limbs) {
@@ -699,11 +625,6 @@ else 99
 local fn read_digits(digits: List[Int], radix: Int, neg: Bool) -> Result[BigInt, String] =
   if list.is_empty(digits) then err("invalid digit found in string")
   else if list.any(digits, (b) => digit_value(b) >= radix) then err("invalid digit found in string")
-  else if is_pow2(radix) then ok(make(
-    neg,
-    pow2_limbs(digits, radix_bits(radix), list.len(digits) - 1, 0, 0, []),
-  ))
-  else if list.len(digits) > text_digit_limit() then err(text_limit_error())
   else {
     let k = chunk_width(radix, 1, radix)
     ok(make(
@@ -723,41 +644,6 @@ local fn chunk_value(chunk: List[Int], radix: Int) -> List[Int] = {
   if v == 0 then []
   else [v]
 }
-
-
-local fn is_pow2(radix: Int) -> Bool = int.band(radix, radix - 1) == 0
-
-
-local fn radix_bits(radix: Int) -> Int = int.bit_length(radix) - 1
-
-
-
-local fn pow2_limbs(digits: List[Int], s: Int, i: Int, cur: Int, nbits: Int, acc: List[Int]) -> List[Int] =
-  if i < 0 then acc + [cur]
-  else {
-    let v = int.bor(cur, int.bshl(digit_value(limb(digits, i)), nbits))
-    if nbits + s >= 30 then pow2_limbs(
-      digits,
-      s,
-      i - 1,
-      int.bshr(v, 30),
-      nbits + s - 30,
-      acc + [int.band(v, limb_mask())],
-    )
-    else pow2_limbs(digits, s, i - 1, v, nbits + s, acc)
-  }
-
-
-local fn pow2_chunks(l: List[Int], w: Int) -> List[Int] = {
-  let n = (30 * list.len(l) + w - 1) / w
-  list.range(0, n) |> list.map((j) => bit_field(l, (n - 1 - j) * w, w)) |> list.drop_while((c) => c == 0)
-}
-
-
-local fn bit_field(l: List[Int], p: Int, w: Int) -> Int = int.band(
-  int.bor(int.bshr(limb(l, p / 30), p % 30), int.bshl(limb(l, p / 30 + 1), 30 - p % 30)),
-  int.bshl(1, w) - 1,
-)
 
 
 
@@ -1400,13 +1286,6 @@ fn split(b: Bytes, sep: Bytes) -> List[Bytes] = _
 /// True if b begins with prefix, or prefix is empty.
 @intrinsic("almide_rt_bytes_starts_with")
 fn starts_with(b: Bytes, prefix: Bytes) -> Bool = _
-
-/// True if a and b hold the same bytes, in time that depends only on their
-/// lengths: no early exit on the first differing byte. Use it to compare a
-/// MAC, token or password hash; `==` returns at the first difference. A length
-/// mismatch is false at once (lengths are public).
-@intrinsic("almide_rt_bytes_is_equal_constant_time")
-fn is_equal_constant_time(a: Bytes, b: Bytes) -> Bool = _
 
 /// (pos+n, n-byte copy); (pos, none) if out of range.
 @intrinsic("almide_rt_bytes_take_at")
@@ -2085,35 +1964,14 @@ fn sort(b: Bytes) -> List[Int] = list.sort(bytes.to_list(b))
 /// The bytes ordered by f's key; equal keys keep their order.
 fn sort_by[B](b: Bytes, f: (Int) -> B) -> List[Int] = list.sort_by(bytes.to_list(b), f)
 
-
-
-
-
-local fn merge_with(xs: List[Int], ys: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
-  var out: List[Int] = []
-  var i = 0
-  var j = 0
-  for _ in 0..<(list.len(xs) + list.len(ys)) {
-    match (list.get(xs, i), list.get(ys, j)) {
-      (some(x), some(y)) => if cmp(y, x) < 0 then {
-        list.push(out, y)
-        j = j + 1
-      } else {
-        list.push(out, x)
-        i = i + 1
-      },
-      (some(x), none) => {
-        list.push(out, x)
-        i = i + 1
-      },
-      (none, some(y)) => {
-        list.push(out, y)
-        j = j + 1
-      },
-      (none, none) => (),
-    }
-  }
-  out
+local fn merge_with(xs: List[Int], ys: List[Int], cmp: (Int, Int) -> Int, i: Int, j: Int, acc: List[Int]) -> List[Int] = match (list.get(
+  xs,
+  i,
+), list.get(ys, j)) {
+  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, ys, cmp, i, j + 1, acc + [y])
+  else merge_with(xs, ys, cmp, i + 1, j, acc + [x]),
+  (some(_), none) => acc + list.drop(xs, i),
+  _ => acc + list.drop(ys, j),
 }
 
 local fn merge_sort_with(xs: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
@@ -2123,6 +1981,9 @@ local fn merge_sort_with(xs: List[Int], cmp: (Int, Int) -> Int) -> List[Int] = {
     merge_sort_with(list.take(xs, n / 2), cmp),
     merge_sort_with(list.drop(xs, n / 2), cmp),
     cmp,
+    0,
+    0,
+    [],
   )
 }
 
@@ -2195,17 +2056,38 @@ fn unique(b: Bytes) -> Bytes = bytes.from_list(list.unique(bytes.to_list(b)))
 fn unique_by[K](b: Bytes, f: (Int) -> K) -> Bytes = bytes.from_list(list.unique_by(bytes.to_list(b), f))
 
 
+local fn matches_at(xs: List[Int], needle: List[Int], i: Int) -> Bool = list.slice(
+  xs,
+  i,
+  i + list.len(needle),
+) == needle
 
+
+local fn find_from(xs: List[Int], needle: List[Int], i: Int) -> Int =
+  if i + list.len(needle) > list.len(xs) then -1
+  else if matches_at(xs, needle, i) then i
+  else find_from(xs, needle, i + 1)
+
+
+local fn find_back(xs: List[Int], needle: List[Int], i: Int) -> Int =
+  if i < 0 then -1
+  else if matches_at(xs, needle, i) then i
+  else find_back(xs, needle, i - 1)
 
 /// Byte index of the last needle, or none; an empty needle is found at len.
 fn last_index_of(b: Bytes, needle: Bytes) -> Int? = {
+  let xs = bytes.to_list(b)
+  let ns = bytes.to_list(needle)
+  let i = find_back(xs, ns, list.len(xs) - list.len(ns))
+  if i < 0 then none else some(i)
+}
 
-  let n = bytes.len(b)
-  let m = bytes.len(needle)
-  match bytes.index_of(bytes.reverse(b), bytes.reverse(needle)) {
-    some(i) => some(n - i - m),
-    none => none,
-  }
+
+local fn replace_go(xs: List[Int], from: List[Int], to: List[Int], i: Int, limit: Int, acc: List[Int]) -> List[Int] = {
+  let j = if limit == 0 then -1
+  else find_from(xs, from, i)
+  if j < 0 then acc + list.drop(xs, i)
+  else replace_go(xs, from, to, j + list.len(from), limit - 1, acc + list.slice(xs, i, j) + to)
 }
 
 
@@ -2214,36 +2096,21 @@ local fn replace_empty(xs: List[Int], to: List[Int], limit: Int) -> List[Int] =
   else to + xs
 
 /// b with every non-overlapping from replaced by to, left to right.
-fn replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes =
-  if bytes.is_empty(from) then bytes.from_list(replace_empty(bytes.to_list(b), bytes.to_list(to), -1))
-  else {
-
-
-    let pieces = bytes.split(b, from)
-    let tn = bytes.len(to)
-    var out = bytes.zeros(bytes.len(b) + (list.len(pieces) - 1) * (tn - bytes.len(from)))
-    var at = 0
-    var first = true
-    for piece in pieces {
-      if first then {
-        first = false
-      } else {
-        bytes.copy_from(out, to, at, 0, tn)
-        at = at + tn
-      }
-      bytes.copy_from(out, piece, at, 0, bytes.len(piece))
-      at = at + bytes.len(piece)
-    }
-    out
-  }
+fn replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes = {
+  let xs = bytes.to_list(b)
+  let fs = bytes.to_list(from)
+  let ts = bytes.to_list(to)
+  if list.is_empty(fs) then bytes.from_list(replace_empty(xs, ts, -1))
+  else bytes.from_list(replace_go(xs, fs, ts, 0, -1, []))
+}
 
 /// b with the first from replaced by to.
-fn replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes = match bytes.index_of(b, from) {
-  some(i) => bytes.concat(
-    bytes.concat(bytes.slice(b, 0, i), to),
-    bytes.slice(b, i + bytes.len(from), bytes.len(b)),
-  ),
-  none => b,
+fn replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes = {
+  let xs = bytes.to_list(b)
+  let fs = bytes.to_list(from)
+  let ts = bytes.to_list(to)
+  if list.is_empty(fs) then bytes.from_list(replace_empty(xs, ts, 1))
+  else bytes.from_list(replace_go(xs, fs, ts, 0, 1, []))
 }
 
 /// b without prefix, or none when b does not start with it.
@@ -2256,9 +2123,15 @@ fn strip_suffix(b: Bytes, suffix: Bytes) -> Bytes? =
   if bytes.ends_with(b, suffix) then some(bytes.slice(b, 0, bytes.len(b) - bytes.len(suffix)))
   else none
 
+local fn count_go(xs: List[Int], needle: List[Int], i: Int, n: Int) -> Int = {
+  let j = find_from(xs, needle, i)
+  if j < 0 then n
+  else count_go(xs, needle, j + list.len(needle), n + 1)
+}
+
 /// Non-overlapping occurrences of needle; len + 1 for an empty needle.
 fn count_matches(b: Bytes, needle: Bytes) -> Int = if bytes.len(needle) == 0 then bytes.len(b) + 1
-else list.len(bytes.split(b, needle)) - 1
+else count_go(bytes.to_list(b), bytes.to_list(needle), 0, 0)
 "#;
 pub const SRC_BYTES_APPEND_MULTI: &str = r#"
 
@@ -2864,106 +2737,11 @@ fn bytes_to_list(b: Bytes) -> List[Int] = {
 }
 
 
-
-
-
-
-
-
-
-
-
-fn __bk_step(pp: Int, t: Int, k: Int, c: Int) -> Int =
-  if k > 0 and prim.load8(pp + k) != c then __bk_step(pp, t, prim.load64(t + (k - 1) * 8), c)
-  else if prim.load8(pp + k) == c then k + 1
-  else k
-
-fn __bk_fill(pp: Int, pn: Int, t: Int, q: Int, k: Int) -> Int = if q >= pn then 0
+fn __contains_at(pb: Int, pp: Int, bn: Int, pn: Int, i: Int) -> Bool = if i + pn > bn then false
 else {
-  let k1 = __bk_step(pp, t, k, prim.load8(pp + q))
-  prim.store64(t + q * 8, k1)
-  __bk_fill(pp, pn, t, q + 1, k1)
-}
-
-
-fn __bk_table(pp: Int, pn: Int, t: Int) -> Int = {
-  prim.store64(t, 0)
-  __bk_fill(pp, pn, t, 1, 0)
-}
-
-
-fn __bk_scan(pb: Int, bn: Int, pp: Int, pn: Int, t: Int, i: Int, k: Int) -> Int =
-  if bn - i < pn - k then 0 - 1
-  else {
-    let k1 = __bk_step(pp, t, k, prim.load8(pb + i))
-    if k1 == pn then i + 1 - pn
-    else __bk_scan(pb, bn, pp, pn, t, i + 1, k1)
-  }
-
-
-
-fn __bk_index(pb: Int, bn: Int, pp: Int, pn: Int) -> Int = if pn == 0 then 0
-else if pn > bn then 0 - 1
-else {
-  let tbl = prim.alloc_list(pn)
-  let t = prim.handle(tbl) + 12
-  let _t = __bk_table(pp, pn, t)
-  __bk_scan(pb, bn, pp, pn, t, 0, 0)
-}
-
-
-
-
-
-
-
-fn __bk_piece(bh: Int, start: Int, end: Int) -> Bytes = {
-  let n = end - start
-  let piece = prim.alloc_bytes(n)
-  let _x = __bytecopy(prim.handle(piece) + 12, bh + 12 + start, n, 0)
-  piece
-}
-
-fn __bk_count(bh: Int, blen: Int, seph: Int, seplen: Int, t: Int, from: Int, acc: Int) -> Int = {
-  let pos = __bk_scan(bh + 12, blen, seph + 12, seplen, t, from, 0)
-  if pos < 0 then acc
-  else __bk_count(bh, blen, seph, seplen, t, pos + seplen, acc + 1)
-}
-
-fn __bk_split_fill(lh: Int, bh: Int, blen: Int, seph: Int, seplen: Int, t: Int, from: Int, idx: Int) -> Int = {
-  let found = __bk_scan(bh + 12, blen, seph + 12, seplen, t, from, 0)
-  let pos = if found < 0 then blen else found
-  let piece = __bk_piece(bh, from, pos)
-  prim.store_str(lh + 12 + idx * 8, piece)
-  if found < 0 then idx + 1
-  else __bk_split_fill(lh, bh, blen, seph, seplen, t, pos + seplen, idx + 1)
-}
-
-fn __bk_split_whole(bh: Int, blen: Int) -> List[Bytes] = {
-  let result = prim.alloc_list_str(1)
-  let piece = __bk_piece(bh, 0, blen)
-  prim.store_str(prim.handle(result) + 12, piece)
-  result
-}
-
-fn __bk_split_general(bh: Int, blen: Int, seph: Int, seplen: Int) -> List[Bytes] = {
-  let tbl = prim.alloc_list(seplen)
-  let t = prim.handle(tbl) + 12
-  let _t = __bk_table(seph + 12, seplen, t)
-  let nseps = __bk_count(bh, blen, seph, seplen, t, 0, 0)
-  let result = prim.alloc_list_str(nseps + 1)
-  let _x = __bk_split_fill(prim.handle(result), bh, blen, seph, seplen, t, 0, 0)
-  result
-}
-
-@implements("bytes.split")
-fn bytes_split(b: Bytes, sep: Bytes) -> List[Bytes] = {
-  let bh = prim.handle(b)
-  let blen = prim.load32(bh + 4)
-  let seph = prim.handle(sep)
-  let seplen = prim.load32(seph + 4)
-  if seplen == 0 then __bk_split_whole(bh, blen)
-  else __bk_split_general(bh, blen, seph, seplen)
+  let eq = __byteq(pb + i, pp, pn, 0)
+  if eq then true
+  else __contains_at(pb, pp, bn, pn, i + 1)
 }
 
 
@@ -2972,7 +2750,11 @@ fn bytes_contains(b: Bytes, pat: Bytes) -> Bool = {
   let pn = prim.load32(prim.handle(pat) + 4)
   let pb = prim.handle(b) + 12
   let pp = prim.handle(pat) + 12
-  __bk_index(pb, bn, pp, pn) >= 0
+  if pn == 0 then true
+  else {
+    if pn > bn then false
+    else __contains_at(pb, pp, bn, pn, 0)
+  }
 }
 
 
@@ -3386,12 +3168,21 @@ fn bytes_get(b: Bytes, i: Int) -> Int? = {
 }
 
 
+
+fn __b_idx_find(pb: Int, pp: Int, bn: Int, pn: Int, i: Int) -> Int = if i + pn > bn then -1
+else {
+  let eq = __byteq(pb + i, pp, pn, 0)
+  if eq then i
+  else __b_idx_find(pb, pp, bn, pn, i + 1)
+}
+
+
 fn bytes_index_of(b: Bytes, pat: Bytes) -> Int? = {
   let bn = prim.load32(prim.handle(b) + 4)
   let pn = prim.load32(prim.handle(pat) + 4)
   let pb = prim.handle(b) + 12
   let pp = prim.handle(pat) + 12
-  let idx = __bk_index(pb, bn, pp, pn)
+  let idx = __b_idx_find(pb, pp, bn, pn, 0)
   if idx < 0 then __byte_none() else __byte_some_idx(idx)
 }
 
@@ -3608,39 +3399,6 @@ fn bytes_map_each(b: Bytes, f: (Int) -> Int) -> Bytes = {
   let _x = __bme_fill(prim.handle(out) + 12, h + 12, f, n, 0)
   out
 }
-"#;
-pub const SRC_BYTES_CT: &str = r#"
-
-
-
-
-
-
-
-
-
-
-fn __bct_acc(a: Bytes, b: Bytes, n: Int, i: Int, acc: Int) -> Int =
-  if i >= n then acc
-  else __bct_acc(
-    a,
-    b,
-    n,
-    i + 1,
-    int.bor(acc, int.bxor(bytes.get_or(a, i, 0), bytes.get_or(b, i, 0))),
-  )
-
-@implements("bytes.is_equal_constant_time")
-fn bytes_is_equal_constant_time(a: Bytes, b: Bytes) -> Bool =
-  if bytes.len(a) != bytes.len(b) then false
-  else __bct_acc(a, b, bytes.len(a), 0, 0) == 0
-
-
-@implements("string.is_equal_constant_time")
-fn string_is_equal_constant_time(a: String, b: String) -> Bool = bytes_is_equal_constant_time(
-  bytes.from_string(a),
-  bytes.from_string(b),
-)
 "#;
 pub const SRC_BYTES_CURSOR: &str = r#"
 
@@ -4319,6 +4077,67 @@ fn __bsp_piece(h: Int, start: Int, end: Int) -> Bytes = {
   let piece = prim.alloc_bytes(n)
   let _x = __bsp_copy(prim.handle(piece) + 12, h + 12 + start, n, 0)
   piece
+}
+
+
+
+fn __bsp_sep_at(bh: Int, blen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool =
+  if j >= seplen then true
+  else if p + j >= blen then false
+  else {
+    let sb = prim.load8(bh + 12 + p + j)
+    let tb = prim.load8(seph + 12 + j)
+    if sb == tb then __bsp_sep_at(bh, blen, seph, seplen, p, j + 1)
+    else false
+  }
+
+
+fn __bsp_find(bh: Int, blen: Int, seph: Int, seplen: Int, from: Int) -> Int =
+  if from + seplen > blen then blen
+  else {
+    let hit = __bsp_sep_at(bh, blen, seph, seplen, from, 0)
+    if hit then from
+    else __bsp_find(bh, blen, seph, seplen, from + 1)
+  }
+
+fn __bsp_count(bh: Int, blen: Int, seph: Int, seplen: Int, from: Int, acc: Int) -> Int =
+  if from + seplen > blen then acc
+  else {
+    let pos = __bsp_find(bh, blen, seph, seplen, from)
+    if pos >= blen then acc
+    else __bsp_count(bh, blen, seph, seplen, pos + seplen, acc + 1)
+  }
+
+fn __bsp_fill(lh: Int, bh: Int, blen: Int, seph: Int, seplen: Int, from: Int, idx: Int) -> Int = {
+  let pos = __bsp_find(bh, blen, seph, seplen, from)
+  let piece = __bsp_piece(bh, from, pos)
+  prim.store_str(lh + 12 + idx * 8, piece)
+  if pos >= blen then idx + 1
+  else __bsp_fill(lh, bh, blen, seph, seplen, pos + seplen, idx + 1)
+}
+
+fn __bsp_whole(bh: Int, blen: Int) -> List[Bytes] = {
+  let result = prim.alloc_list_str(1)
+  let piece = __bsp_piece(bh, 0, blen)
+  prim.store_str(prim.handle(result) + 12, piece)
+  result
+}
+
+fn __bsp_general(bh: Int, blen: Int, seph: Int, seplen: Int) -> List[Bytes] = {
+  let nseps = __bsp_count(bh, blen, seph, seplen, 0, 0)
+  let count = nseps + 1
+  let result = prim.alloc_list_str(count)
+  let _x = __bsp_fill(prim.handle(result), bh, blen, seph, seplen, 0, 0)
+  result
+}
+
+fn bytes_split(b: Bytes, sep: Bytes) -> List[Bytes] = {
+  let bh = prim.handle(b)
+  let blen = prim.load32(bh + 4)
+  let seph = prim.handle(sep)
+  let seplen = prim.load32(seph + 4)
+  if seplen == 0 then __bsp_whole(bh, blen)
+  else __bsp_general(bh, blen, seph, seplen)
 }
 
 
@@ -5003,7 +4822,7 @@ effect fn monotonic_ns() -> Int = _
 @intrinsic("almide_rt_datetime_now_ms")
 effect fn now_ms() -> Int = _
 
-/// Epoch secs of YYYY-MM-DDTHH:MM:SSZ, year 0..=9999; fractions err.
+/// Epoch secs of YYYY-MM-DDTHH:MM:SSZ; fractions err.
 @intrinsic("almide_rt_datetime_parse_iso")
 fn parse_iso(s: String) -> Result[Int, String] = _
 
@@ -5312,7 +5131,6 @@ pub const SRC_DATETIME_PARSE_ISO: &str = r#"
 
 
 
-
 fn __dpi_field(s: String) -> Int? = if string.is_digit(s) then match int.parse(s) {
   ok(v) => some(v),
   err(_) => none,
@@ -5365,8 +5183,7 @@ fn __dpi_build(d: List[Int], tm: List[Int], off: Int) -> Result[Int, String] = {
   let h = list.get(tm, 0) ?? 0
   let mi = list.get(tm, 1) ?? 0
   let s = list.get(tm, 2) ?? 0
-  if y < 0 or y > 9999 then err("year out of range: " + int.to_string(y))
-  else if mo < 1 or mo > 12 then err("month out of range: " + int.to_string(mo))
+  if mo < 1 or mo > 12 then err("month out of range: " + int.to_string(mo))
   else if dd < 1 or dd > __dpi_days_in_month(y, mo) then err("day out of range: " + int.to_string(dd))
   else if h < 0 or h > 23 then err("hour out of range: " + int.to_string(h))
   else if mi < 0 or mi > 59 then err("minute out of range: " + int.to_string(mi))
@@ -5682,34 +5499,11 @@ effect fn args() -> List[String] = _
 @intrinsic("almide_rt_env_get")
 effect fn get(name: String) -> String? = _
 
-/// Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
+/// Sets name for this process and later spawns.
 @ordered
+@intrinsic("almide_rt_env_set")
 @category("Env.write")
-effect fn set(name: String, value: String) -> Result[Unit, String] = match __set_refusal(name, value) {
-  some(why) => err("env.set: " + why),
-  none => {
-    __set(name, value)
-    ok(())
-  },
-}
-
-
-
-
-
-
-local fn __set_refusal(name: String, value: String) -> String? =
-  if name == "" then some("empty name")
-  else if string.contains(name, "=") then some("name contains '='")
-  else if string.contains(name, "\u{0}") then some("name contains NUL")
-  else if string.contains(value, "\u{0}") then some("value contains NUL")
-  else none
-
-
-@ordered
-@intrinsic("almide_rt_env___set")
-@category("Env.write")
-effect fn __set(name: String, value: String) -> Unit = _
+effect fn set(name: String, value: String) -> Unit = _
 
 /// Absolute current directory; err if unreadable.
 @intrinsic("almide_rt_env_cwd")
@@ -6316,7 +6110,7 @@ fn to_int(n: Float) -> Int = _
 @intrinsic("almide_rt_float_from_int")
 fn from_int(n: Int) -> Float = _
 
-/// Finite Float from s trimmed of ASCII space; err on junk, inf, NaN, overflow.
+/// Float from trimmed s; takes 1e3, inf, NaN; err on junk.
 @intrinsic("almide_rt_float_parse")
 fn parse(s: String) -> Result[Float, String] = _
 
@@ -6457,11 +6251,6 @@ fn from_float64(n: Float64) -> Float = _
 
 
 
-/// some iff n is an integer in -2^63..2^63-1; NaN and ±inf give none.
-fn to_int_checked(n: Float) -> Int? =
-  if float.is_nan(n) or float.is_infinite(n) or n < -9223372036854776000.0 or n >= 9223372036854776000.0 then none
-  else if float.floor(n) == n then some(float.to_int(n)) else none
-
 /// some iff n is an integer in -128..127.
 fn to_int8_checked(n: Float) -> Int8? =
   if float.is_nan(n) or float.is_infinite(n) or n < -128.0 or n > 127.0 then none
@@ -6517,9 +6306,6 @@ fn to_float32_checked(n: Float) -> Float32? = {
   else if float.is_infinite(n) then none
   else if back == n then some(f) else none
 }
-
-/// Truncates, clamps to Int range; NaN gives 0.
-fn to_int_saturating(n: Float) -> Int = float.to_int(n)
 
 /// Truncates, clamps to -128..127; NaN gives 0.
 fn to_int8_saturating(n: Float) -> Int8 = float.to_int8(n)
@@ -7019,7 +6805,7 @@ fn max_value() -> Float64 = from_bits(9218868437227405311)
 /// Most negative finite Float64 (= -max_value()), not the smallest positive.
 fn min_value() -> Float64 = from_bits(-4503599627370497)
 
-/// Float64 from ASCII-trimmed s, the grammar of float.parse; err on junk, inf, NaN.
+/// Float64 from trimmed s, the grammar of float.parse; err on junk.
 fn parse(s: String) -> Result[Float64, String] = match float.parse(s) {
   ok(f) => ok(float.to_float64(f)),
   err(e) => err(e),
@@ -7269,27 +7055,6 @@ fn float_to_int64_checked(n: Float) -> Int64? = {
   let lo = prim.flt(n, neg63)
   let hi = prim.fge(n, two63)
   let i = float.to_int64(n)
-  let fl = prim.ffloor(n)
-  let rt = prim.feq(fl, n)
-  if nan then none
-  else if inf then none
-  else if lo then none
-  else if hi then none
-  else if rt then some(i) else none
-}
-
-
-
-fn float_to_int_checked(n: Float) -> Int? = {
-  let nan = float.is_nan(n)
-  let inf = float.is_infinite(n)
-  let p62 = prim.bshl(1, 62)
-  let f62 = prim.i2f(p62)
-  let two63 = prim.fadd(f62, f62)
-  let neg63 = prim.fneg(two63)
-  let lo = prim.flt(n, neg63)
-  let hi = prim.fge(n, two63)
-  let i = float.to_int(n)
   let fl = prim.ffloor(n)
   let rt = prim.feq(fl, n)
   if nan then none
@@ -7612,11 +7377,14 @@ pub const SRC_FLOAT_PARSE: &str = r#"
 
 
 
-
 fn __fp_isdigit(b: Int) -> Bool = b >= 48 and b <= 57
 
+fn __fp_isspace(b: Int) -> Bool = b == 32 or b == 9
 
-fn __fp_isspace(b: Int) -> Bool = b == 32 or b == 9 or b == 10 or b == 12 or b == 13
+
+fn __fp_lc(b: Int) -> Int = if b >= 65 and b <= 90 then b + 32 else b
+
+fn __fp_eqci(addr: Int, c: Int) -> Bool = __fp_lc(prim.load8(addr)) == c
 
 fn __fp_skip_sp(addr: Int, end: Int) -> Int =
   if addr < end and __fp_isspace(prim.load8(addr)) then __fp_skip_sp(
@@ -7897,7 +7665,10 @@ fn __fp_slow(p0: Int, i_end: Int, f_start: Int, f_end: Int, ex: Int, neg: Bool) 
 }
 
 
-fn float_parse(s: String) -> Result[Float, String] = __fp_raw(s)
+fn float_parse(s: String) -> Result[Float, String] = {
+  let t = string.trim(s)
+  __fp_raw(t)
+}
 
 fn __fp_raw(s: String) -> Result[Float, String] = {
   let h = prim.handle(s)
@@ -7907,6 +7678,24 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
   let en = __fp_skip_sp_end(st, base + blen)
   let neg = st < en and prim.load8(st) == 45
   let p0 = if st < en and (prim.load8(st) == 45 or prim.load8(st) == 43) then st + 1 else st
+
+
+
+
+
+
+  let tlen = en - p0
+  let is_inf = (tlen == 3 and __fp_eqci(p0, 105) and __fp_eqci(p0 + 1, 110) and __fp_eqci(
+    p0 + 2,
+    102,
+  )) or (tlen == 8 and __fp_eqci(p0, 105) and __fp_eqci(p0 + 1, 110) and __fp_eqci(p0 + 2, 102) and __fp_eqci(
+    p0 + 3,
+    105,
+  ) and __fp_eqci(p0 + 4, 110) and __fp_eqci(p0 + 5, 105) and __fp_eqci(p0 + 6, 116) and __fp_eqci(
+    p0 + 7,
+    121,
+  ))
+  let is_nan = tlen == 3 and __fp_eqci(p0, 110) and __fp_eqci(p0 + 1, 97) and __fp_eqci(p0 + 2, 110)
 
   let i_end = __fp_scan_digits(p0, en)
   let icnt = i_end - p0
@@ -7931,7 +7720,11 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
   let got_digit = icnt + fcnt > 0
   let consumed_all = e_end >= en
   let ok_form = got_digit and (e_cnt > 0) and consumed_all
-  if not ok_form then (if en <= st then err("cannot parse float from empty string") else err("invalid float literal"))
+  if is_inf then {
+    let infv = prim.i2f(1) / prim.i2f(0)
+    if neg then ok(0.0 - infv) else ok(infv)
+  } else if is_nan then ok(prim.ffrombits(0x7FF8000000000000))
+  else if not ok_form then (if en <= st then err("cannot parse float from empty string") else err("invalid float literal"))
   else {
     let net = exp - fcnt
     let pos_net = if net >= 0 then net else 0 - net
@@ -7945,12 +7738,7 @@ fn __fp_raw(s: String) -> Result[Float, String] = {
 
       let v = if neg then -1.0 * scaled else scaled
       ok(v)
-    } else {
-
-      let v = __fp_slow(p0, i_end, f_start, f_end, exp, neg)
-      let mag = if v < 0.0 then 0.0 - v else v
-      if mag > 1.7976931348623157e308 then err("float literal out of range") else ok(v)
-    }
+    } else ok(__fp_slow(p0, i_end, f_start, f_end, exp, neg))
   }
 }
 "#;
@@ -7988,8 +7776,6 @@ fn float_round(x: Float) -> Float = {
 pub const SRC_FLOAT_SATURATING: &str = r#"
 
 
-
-fn float_to_int_saturating(n: Float) -> Int = float.to_int(n)
 
 fn float_to_int8_saturating(n: Float) -> Int8 = float.to_int8(n)
 
@@ -8500,17 +8286,11 @@ pub const SRC_FS: &str = r#"
 /// Path metadata; modified is Unix seconds.
 type FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }
 
-
-
-
-
-
-
-/// Whole regular file (<= 1 GiB) as UTF-8; err if missing or not UTF-8.
+/// Whole file as UTF-8; err if missing or not UTF-8.
 @intrinsic("almide_rt_fs_read_text")
 effect fn read_text(path: String) -> Result[String, String] = _
 
-/// Bytes as Ints 0..255; regular file <= 1 GiB; err if missing.
+/// Bytes as Ints 0..255; err if missing.
 @intrinsic("almide_rt_fs_read_bytes")
 effect fn read_bytes(path: String) -> Result[List[Int], String] = _
 
@@ -8548,7 +8328,7 @@ effect fn mkdir_p(path: String) -> Result[Unit, String] = _
 @intrinsic("almide_rt_fs_exists")
 effect fn exists(path: String) -> Bool = _
 
-/// CRLF-aware lines of a regular file <= 1 GiB; a final newline adds no line.
+/// CRLF-aware lines; a final newline adds no line.
 @intrinsic("almide_rt_fs_read_lines")
 effect fn read_lines(path: String) -> Result[List[String], String] = _
 
@@ -8609,7 +8389,6 @@ effect fn fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A
 @concurrent(f)
 @intrinsic("almide_rt_fs_fold_lines_chunked")
 effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String] = _
-
 
 
 
@@ -8713,7 +8492,7 @@ effect fn is_symlink(path: String) -> Bool = _
 @intrinsic("almide_rt_fs_modified_at")
 effect fn modified_at(path: String) -> Result[Int, String] = _
 
-/// Whole regular file (<= 1 GiB) as Bytes; err if missing.
+/// Whole file as Bytes; err if missing.
 @intrinsic("almide_rt_fs_read_bytes_raw")
 effect fn read_bytes_raw(path: String) -> Result[Bytes, String] = _
 
@@ -10131,7 +9910,7 @@ fn fnv1a32(s: String) -> Int = _
 @intrinsic("almide_rt_hash_fnv1a32_bytes")
 fn fnv1a32_bytes(b: Bytes) -> Int = _
 
-/// 32-byte SHA-256 digest of b. Not a MAC: sha256(key ++ msg) is forgeable by length extension; use hash.hmac_sha256 / hash.is_valid_hmac_sha256.
+/// 32-byte SHA-256 digest of b.
 @intrinsic("almide_rt_hash_sha256")
 fn sha256(b: Bytes) -> Bytes = _
 
@@ -10311,7 +10090,6 @@ local fn h_md5_s(i: Int) -> Int = {
 }
 
 /// 16-byte MD5 digest of b. For compatibility only: MD5 is broken, never use it for security.
-@insecure_digest
 fn md5(b: Bytes) -> Bytes = {
   let m = h_pad(b, 64, 8, false)
   let k = h_md5_k()
@@ -10350,11 +10128,9 @@ fn md5(b: Bytes) -> Bytes = {
 }
 
 /// MD5 of b as 32 lowercase hex chars. For compatibility only, never for security.
-@insecure_digest
 fn md5_hex(b: Bytes) -> String = h_hex(md5(b))
 
 /// 20-byte SHA-1 digest of b. For compatibility only: SHA-1 is broken, never use it for security.
-@insecure_digest
 fn sha1(b: Bytes) -> Bytes = {
   let m = h_pad(b, 64, 8, true)
   var h0 = 1732584193
@@ -10403,7 +10179,6 @@ fn sha1(b: Bytes) -> Bytes = {
 }
 
 /// SHA-1 of b as 40 lowercase hex chars. For compatibility only, never for security.
-@insecure_digest
 fn sha1_hex(b: Bytes) -> String = h_hex(sha1(b))
 
 local fn h_sha512_k() -> List[Int] = [
@@ -10489,7 +10264,7 @@ local fn h_sha512_k() -> List[Int] = [
   7801388544844847127
 ]
 
-/// 64-byte SHA-512 digest of b. Not a MAC: sha512(key ++ msg) is forgeable by length extension; use hash.hmac_sha512 / hash.is_valid_hmac_sha512.
+/// 64-byte SHA-512 digest of b.
 fn sha512(b: Bytes) -> Bytes = {
   let m = h_pad(b, 128, 16, true)
   let k = h_sha512_k()
@@ -10561,47 +10336,6 @@ fn sha512(b: Bytes) -> Bytes = {
 
 /// SHA-512 of b as 128 lowercase hex chars.
 fn sha512_hex(b: Bytes) -> String = h_hex(sha512(b))
-
-
-
-
-
-
-
-local fn h_digest(b: Bytes, wide: Bool) -> Bytes = if wide then hash.sha512(b) else hash.sha256(b)
-
-local fn h_hmac(key: Bytes, b: Bytes, wide: Bool) -> Bytes = {
-  let block = if wide then 128 else 64
-  let k0 = if bytes.len(key) > block then h_digest(key, wide) else key
-  let k = bytes.to_list(k0) + list.repeat(0, block - bytes.len(k0))
-  let ipad = k |> list.map((x) => int.bxor(x, 54)) |> bytes.from_list
-  let opad = k |> list.map((x) => int.bxor(x, 92)) |> bytes.from_list
-  h_digest(bytes.concat(opad, h_digest(bytes.concat(ipad, b), wide)), wide)
-}
-
-/// 32-byte HMAC-SHA256 of b under key (RFC 2104); key first.
-fn hmac_sha256(key: Bytes, b: Bytes) -> Bytes = h_hmac(key, b, false)
-
-/// HMAC-SHA256 of b under key as 64 lowercase hex chars.
-fn hmac_sha256_hex(key: Bytes, b: Bytes) -> String = h_hex(hmac_sha256(key, b))
-
-/// 64-byte HMAC-SHA512 of b under key (RFC 2104); key first.
-fn hmac_sha512(key: Bytes, b: Bytes) -> Bytes = h_hmac(key, b, true)
-
-/// HMAC-SHA512 of b under key as 128 lowercase hex chars.
-fn hmac_sha512_hex(key: Bytes, b: Bytes) -> String = h_hex(hmac_sha512(key, b))
-
-/// True if tag is the HMAC-SHA256 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha256(key, b, hex.decode(sig) ?? bytes.from_list([])).
-fn is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool = bytes.is_equal_constant_time(
-  hmac_sha256(key, b),
-  tag,
-)
-
-/// True if tag is the HMAC-SHA512 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha512(key, b, hex.decode(sig) ?? bytes.from_list([])).
-fn is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool = bytes.is_equal_constant_time(
-  hmac_sha512(key, b),
-  tag,
-)
 "#;
 pub const SRC_HASH_IMPL: &str = r#"
 
@@ -11562,24 +11296,6 @@ fn __with_path(req: HttpRequest, target: String) -> HttpRequest = _
 @consume(resp)
 fn __set_body(resp: HttpResponse, body: String) -> HttpResponse = _
 
-
-
-
-
-
-
-@intrinsic("almide_http_req_repr")
-@borrow_ref(req)
-fn __http_request_repr(req: HttpRequest) -> String = _
-
-@intrinsic("almide_http_call_repr")
-@borrow_ref(c)
-fn __http_call_repr(c: HttpCall) -> String = _
-
-@intrinsic("almide_http_resp_repr")
-@borrow_ref(resp)
-fn __http_response_repr(resp: HttpResponse) -> String = _
-
 fn __path_of(target: String) -> String = match string.index_of(target, "?") {
   some(i) => string.take(target, i),
   none => target,
@@ -12001,11 +11717,6 @@ effect fn __hc_stream_classic_impl(method: String, url: String, body: String, he
   let c = __http_call_open(url, __hc_classic_frame(method, body, headers))!
   __hc_pump(c, on_chunk)
 }
-
-
-
-@implements("http.__http_call_repr")
-fn http_call_repr(c: HttpCall) -> String = "HttpCall"
 "#;
 pub const SRC_HTTP_FRAMED: &str = r#"
 
@@ -12217,40 +11928,6 @@ fn http_req_with_params(req: List[String], flat: List[String]) -> List[String] =
 }
 
 fn http_req_with_path(req: List[String], target: String) -> List[String] = list.set(req, 1, target)
-
-
-
-
-
-
-
-
-fn __hq_quote_char(c: String) -> String = match c {
-  "\\" => "\\\\",
-  "\"" => "\\\"",
-  "\n" => "\\n",
-  "\r" => "\\r",
-  "\t" => "\\t",
-  _ => c,
-}
-
-
-fn __hq_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hq_quote_char(c)) |> list.join("")) + "\""
-
-@implements("http.__http_request_repr")
-fn http_req_repr(req: List[String]) -> String = {
-  let method = __hq_quote(list.get(req, 0) ?? "")
-  let path = __hq_quote(list.get(req, 1) ?? "")
-  let body = __hq_quote(list.get(req, 2) ?? "")
-  "HttpRequest { method: ${method}, path: ${path}, body: ${body}, headers: ${__hq_nh(req)} }"
-}
-
-@implements("http.__http_response_repr")
-fn http_resp_repr(resp: List[String]) -> String = {
-  let status = list.get(resp, 0) ?? "0"
-  let body = __hq_quote(list.get(resp, 1) ?? "")
-  "HttpResponse { status: ${status}, body: ${body}, headers: ${(list.len(resp) - 2) / 2} }"
-}
 "#;
 pub const SRC_HTTP_RESPONSE: &str = r#"
 
@@ -12617,7 +12294,7 @@ fn to_string(n: Int) -> String = _
 @intrinsic("almide_rt_int_to_hex")
 fn to_hex(n: Int) -> String = _
 
-/// Decimal Int from s trimmed of ASCII space/tab/LF/FF/CR; err on junk or overflow.
+/// Decimal Int from trimmed s; err on junk or overflow.
 @intrinsic("almide_rt_int_parse")
 fn parse(s: String) -> Result[Int, String] = _
 
@@ -13292,7 +12969,7 @@ local fn rotate_count(n: Int) -> Int = {
 /// Bits needed to hold x; 0 for 0, 16 if negative.
 fn bit_length(x: Int16) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int16(x), 65535))
 
-/// Decimal Int16 from ASCII-trimmed s; err on junk or outside -32768..32767.
+/// Decimal Int16 from trimmed s; err on junk or outside -32768..32767.
 fn parse(s: String) -> Result[Int16, String] = match int.parse(s) {
   ok(n) => if n < -32768 then err("number too small to fit in target type")
   else if n > 32767 then err("number too large to fit in target type")
@@ -13668,7 +13345,7 @@ local fn rotate_count(n: Int) -> Int = {
 /// Bits needed to hold x; 0 for 0, 32 if negative.
 fn bit_length(x: Int32) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int32(x), 4294967295))
 
-/// Decimal Int32 from ASCII-trimmed s; err on junk or outside -2147483648..2147483647.
+/// Decimal Int32 from trimmed s; err on junk or outside -2147483648..2147483647.
 fn parse(s: String) -> Result[Int32, String] = match int.parse(s) {
   ok(n) => if n < -2147483648 then err("number too small to fit in target type")
   else if n > 2147483647 then err("number too large to fit in target type")
@@ -14065,7 +13742,7 @@ local fn rotate_count(n: Int) -> Int = {
 /// Bits needed to hold x; 0 for 0, 64 if negative.
 fn bit_length(x: Int64) -> Int = 64 - int.count_leading_zeros(int.from_int64(x))
 
-/// Decimal Int64 from ASCII-trimmed s; err on junk or overflow.
+/// Decimal Int64 from trimmed s; err on junk or overflow.
 fn parse(s: String) -> Result[Int64, String] = match int.parse(s) {
   ok(n) => ok(int.to_int64(n)),
   err(e) => err(e),
@@ -14445,7 +14122,7 @@ local fn rotate_count(n: Int) -> Int = {
 /// Bits needed to hold x; 0 for 0, 8 if negative.
 fn bit_length(x: Int8) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int8(x), 255))
 
-/// Decimal Int8 from ASCII-trimmed s; err on junk or outside -128..127.
+/// Decimal Int8 from trimmed s; err on junk or outside -128..127.
 fn parse(s: String) -> Result[Int8, String] = match int.parse(s) {
   ok(n) => if n < -128 then err("number too small to fit in target type")
   else if n > 127 then err("number too large to fit in target type")
@@ -15451,20 +15128,12 @@ fn field(path: JsonPath, name: String) -> JsonPath = _
 @intrinsic("almide_rt_json_index")
 fn index(path: JsonPath, i: Int) -> JsonPath = _
 
-
-
-
-@intrinsic("almide_rt_json_path_repr")
-@borrow_ref(path)
-fn __json_path_repr(path: JsonPath) -> String = _
-
 /// Value at path, or none if a step misses.
 @intrinsic("almide_json_get_path")
 @borrow_ref(path)
 fn get_path(j: Value, path: JsonPath) -> Value? = _
 
-/// j with value at path; missing keys created.
-@reuse(j)
+/// j with value at path; missing keys created; err if nested past 1000.
 @intrinsic("almide_json_set_path")
 @borrow_ref(path)
 @consume(value)
@@ -15588,6 +15257,15 @@ pub const SRC_JSON_PARSE: &str = r#"
 
 
 
+
+
+
+fn __json_max_depth() -> Int = 1000
+
+
+
+fn __json_depth_error() -> String = "json: nesting deeper than 1000"
+
 fn json_parse(text: String) -> Result[Value, String] = {
   let h = prim.handle(text)
   let blen = prim.load32(h + 4)
@@ -15660,7 +15338,7 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
         ok((value.str(s), np))
       },
       err(e) => err(e),
-    } else if (b == 123 or b == 91) and depth >= 1000 then err("json: nesting deeper than 1000")
+    } else if (b == 123 or b == 91) and depth >= __json_max_depth() then err(__json_depth_error())
     else if b == 123 then {
       let q2 = __jp_ws(base, len, q + 1)
       if q2 < len and prim.load8(base + q2) == 125 then {
@@ -16156,12 +15834,43 @@ else {
   else __jp_has(j, key, i + 1, n)
 }
 
-fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = ok(json_path_set_go(
-  j,
-  path,
-  0,
-  nv,
-))
+
+
+
+
+
+
+
+
+fn __jpath_max_depth() -> Int = 1000
+
+fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = {
+  let steps = list.len(path)
+  if steps > __jpath_max_depth() or __json_nests_past(nv, __jpath_max_depth() - steps) then err(__jpath_depth_error())
+  else ok(json_path_set_go(j, path, 0, nv))
+}
+
+
+fn __jpath_depth_error() -> String = "json: nesting deeper than 1000"
+
+
+
+fn __json_nests_past(v: Value, budget: Int) -> Bool = {
+  let tag = prim.load32(prim.handle(v) + 4)
+  if tag != 5 and tag != 6 then false
+  else if budget == 0 then true
+  else if tag == 5 then __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8), 1)
+  else __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8) / 2, 2)
+}
+
+
+
+fn __jnp_items(v: Value, budget: Int, i: Int, n: Int, stride: Int) -> Bool = if i >= n then false
+else {
+  let ev: Value = prim.load_handle(prim.handle(v) + 12 + (i * stride + stride - 1) * 8)
+  if __json_nests_past(ev, budget) then true
+  else __jnp_items(v, budget, i + 1, n, stride)
+}
 
 fn json_path_set_go(j: Value, path: List[String], k: Int, nv: Value) -> Value =
   if k >= list.len(path) then nv
@@ -16304,16 +16013,6 @@ fn __tomap_fold(v: Value, i: Int, n: Int, acc: Map[String, String]) -> Map[Strin
 fn __tomap_text(x: Value) -> String =
   if prim.load32(prim.handle(x) + 4) == 4 then prim.load_str(prim.handle(x) + 12)
   else value.stringify(x)
-
-
-
-fn __jp_seg_repr(seg: String) -> String = match string.take(seg, 1) {
-  "i" => "[" + string.drop(seg, 1) + "]",
-  _ => "." + string.drop(seg, 1),
-}
-
-@implements("json.__json_path_repr")
-fn json_path_repr(path: List[String]) -> String = "$" + (path |> list.map((s) => __jp_seg_repr(s)) |> list.join(""))
 "#;
 pub const SRC_LIST: &str = r#"
 
@@ -16880,23 +16579,15 @@ fn unzip[A, B](xs: List[(A, B)]) -> (List[A], List[B]) = {
   (firsts, seconds)
 }
 
-
-
-
-
 /// start, start + step, ... before end; counts down for step < 0; step = 0 aborts.
 fn range_step(start: Int, end: Int, step: Int) -> List[Int] = {
   if step == 0 then panic("list.range_step: step must not be 0") else ()
+  let steps = if step > 0 then (if end > start then (end - start - 1) / step + 1 else 0)
+  else if start > end then (start - end - 1) / (0 - step) + 1
+  else 0
   var out: List[Int] = []
-  var x = start
-  var more = if step > 0 then start < end else start > end
-  while more {
-    list.push(out, x)
-    more = if step > 0 then x <= 9223372036854775807 - step and x + step < end
-    else x >= -9223372036854775807 - 1 - step and x + step > end
-    if more then {
-      x = x + step
-    } else ()
+  for i in 0..<steps {
+    list.push(out, start + i * step)
   }
   out
 }
@@ -26240,7 +25931,7 @@ fn e() -> Float = _
 @intrinsic("almide_rt_math_exp")
 fn exp(x: Float) -> Float = _
 
-/// Product 1..n; 1 for n <= 0; wraps past 20, 0 from 66 on.
+/// Product 1..n; 1 for n <= 0; wraps past 20.
 @intrinsic("almide_rt_math_factorial")
 fn factorial(n: Int) -> Int = _
 
@@ -27307,14 +26998,7 @@ fn math_pow(base: Int, exp: Int) -> Int = {
 
 fn __fact(n: Int, acc: Int) -> Int = if n <= 1 then acc else __fact(n - 1, acc * n)
 
-
-
-
-
-
-
-
-fn math_factorial(n: Int) -> Int = if n >= 66 then 0 else __fact(n, 1)
+fn math_factorial(n: Int) -> Int = __fact(n, 1)
 
 
 
@@ -32051,10 +31735,7 @@ fn join(base: String, child: String) -> String = {
   else {
     let b = if string.ends_with(base, "/") then string.slice(base, 0, string.len(base) - 1)
     else base
-
-    if string.len(b) > 0 then b + "/" + child
-    else if string.starts_with(base, "/") then "/" + child
-    else child
+    if string.len(b) == 0 then child else b + "/" + child
   }
 }
 
@@ -32120,26 +31801,34 @@ fn stem(p: String) -> String = {
 /// Resolves . and .. lexically; "" becomes ".".
 fn normalize(p: String) -> String = {
   let absolute = string.starts_with(p, "/")
+  let segments = string.split(p, "/")
 
+  let cleaned = list.filter(segments, (s) => string.len(s) > 0 and s != ".")
 
+  let resolved = list.fold(
+    cleaned,
+    [],
+    (acc, seg) => {
+      if seg == ".." then {
+        let acc_len = list.len(acc)
+        if acc_len == 0 then {
 
-  var stack: List[String] = []
-  for seg in string.split(p, "/") {
+          if absolute then acc
+          else [".."] + acc
+        } else {
+          let top = match list.first(acc) {
+            some(v) => v,
+            none => "",
+          }
 
-    if string.len(seg) == 0 or seg == "." then ()
-    else if seg == ".." then {
-      match list.last(stack) {
-
-        none => if absolute then () else list.push(stack, ".."),
-
-        some(top) => if top == ".." then list.push(stack, "..")
-        else {
-          let _ = list.pop(stack)
-        },
-      }
-    } else list.push(stack, seg)
-  }
-  let joined = string.join(stack, "/")
+          if top == ".." then [".."] + acc
+          else list.drop(acc, 1)
+        }
+      } else [seg] + acc
+    },
+  )
+  let ordered = list.reverse(resolved)
+  let joined = string.join(ordered, "/")
   if absolute then "/" + joined
   else if string.len(joined) == 0 then "." else joined
 }
@@ -32828,7 +32517,7 @@ effect fn env(key: String) -> String? = _
 @intrinsic("almide_rt_process_spawn")
 effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _
 
-/// Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
+/// Sends signal to pid; err is kill's stderr.
 @ordered
 @intrinsic("almide_rt_process_kill")
 effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
@@ -32838,7 +32527,7 @@ effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 @category("Time")
 effect fn sleep(ms: Int) -> Unit = _
 
-/// True while pid exists; false for a pid <= 0.
+/// True while pid exists, zombies included.
 @intrinsic("almide_rt_process_is_alive")
 effect fn is_alive(pid: Int) -> Bool = _
 "#;
@@ -38659,13 +38348,6 @@ fn length(s: String) -> Int = _
 @intrinsic("almide_rt_string_contains")
 fn contains(s: String, sub: String) -> Bool = _
 
-/// True if a and b hold the same UTF-8 bytes, in time that depends only on
-/// their lengths: no early exit on the first differing byte. Use it to compare
-/// a token or signature header; `==` returns at the first difference. A length
-/// mismatch is false at once (lengths are public).
-@intrinsic("almide_rt_string_is_equal_constant_time")
-fn is_equal_constant_time(a: String, b: String) -> Bool = _
-
 /// s begins with prefix; "" always matches.
 @intrinsic("almide_rt_string_starts_with")
 fn starts_with(s: String, prefix: String) -> Bool = _
@@ -38691,15 +38373,15 @@ fn pad_start(s: String, n: Int, ch: String) -> String = _
 @intrinsic("almide_rt_string_to_bytes")
 fn to_bytes(s: String) -> List[Int] = _
 
-/// First char uppercased as to_upper does, rest untouched.
+/// First char uppercased, rest untouched.
 @intrinsic("almide_rt_string_capitalize")
 fn capitalize(s: String) -> String = _
 
-/// Unicode uppercase; never folds non-ASCII into ASCII; not for identity.
+/// Unicode uppercase; may lengthen s.
 @intrinsic("almide_rt_string_to_upper")
 fn to_upper(s: String) -> String = _
 
-/// Unicode lowercase; never folds non-ASCII into ASCII; not for identity.
+/// Unicode lowercase, not just ASCII.
 @intrinsic("almide_rt_string_to_lower")
 fn to_lower(s: String) -> String = _
 
@@ -38867,35 +38549,26 @@ else [55296 + (cp - 65536) / 1024, 56320 + (cp - 65536) % 1024]
 /// UTF-16 code units; a codepoint past U+FFFF is a surrogate pair.
 fn to_utf16(s: String) -> List[Int] = string.chars(s) |> list.flat_map((c) => utf16_units(string.codepoint(c) ?? 0))
 
-
+local fn utf16_decode(xs: List[Int], i: Int, acc: List[String]) -> Result[String, String] = match list.get(
+  xs,
+  i,
+) {
+  none => ok(string.join(list.reverse(acc), "")),
+  some(u) => if u < 0 or u > 65535 then err("string.from_utf16: code unit out of range at ${i}: ${u}")
+  else if u >= 55296 and u <= 56319 then match list.get(xs, i + 1) {
+    some(lo) => if lo >= 56320 and lo <= 57343 then utf16_decode(
+      xs,
+      i + 2,
+      [string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320))] + acc,
+    )
+    else err("string.from_utf16: unpaired surrogate at ${i}"),
+    none => err("string.from_utf16: unpaired surrogate at ${i}"),
+  } else if u >= 56320 and u <= 57343 then err("string.from_utf16: unpaired surrogate at ${i}")
+  else utf16_decode(xs, i + 1, [string.from_codepoint(u)] + acc),
+}
 
 /// String from UTF-16 code units; err on an unpaired surrogate or a unit outside 0..65535.
-fn from_utf16(xs: List[Int]) -> Result[String, String] = {
-  let n = list.len(xs)
-  var out: List[String] = []
-  var bad = ""
-  var i = 0
-  while i < n and bad == "" {
-    let u = list.get(xs, i) ?? 0
-    if u < 0 or u > 65535 then {
-      bad = "string.from_utf16: code unit out of range at ${i}: ${u}"
-    } else if u >= 55296 and u <= 56319 then {
-      let lo = list.get(xs, i + 1) ?? -1
-      if lo >= 56320 and lo <= 57343 then {
-        list.push(out, string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320)))
-        i = i + 2
-      } else {
-        bad = "string.from_utf16: unpaired surrogate at ${i}"
-      }
-    } else if u >= 56320 and u <= 57343 then {
-      bad = "string.from_utf16: unpaired surrogate at ${i}"
-    } else {
-      list.push(out, string.from_codepoint(u))
-      i = i + 1
-    }
-  }
-  if bad == "" then ok(string.join(out, "")) else err(bad)
-}
+fn from_utf16(xs: List[Int]) -> Result[String, String] = utf16_decode(xs, 0, [])
 
 /// The characters of s for which f is true.
 fn filter(s: String, f: (String) -> Bool) -> String = string.join(
@@ -38969,35 +38642,14 @@ fn sort(s: String) -> List[String] = list.sort(string.chars(s))
 /// The characters ordered by f's key; equal keys keep their order.
 fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.chars(s), f)
 
-
-
-
-
-local fn merge_with(xs: List[String], ys: List[String], cmp: (String, String) -> Int) -> List[String] = {
-  var out: List[String] = []
-  var i = 0
-  var j = 0
-  for _ in 0..<(list.len(xs) + list.len(ys)) {
-    match (list.get(xs, i), list.get(ys, j)) {
-      (some(x), some(y)) => if cmp(y, x) < 0 then {
-        list.push(out, y)
-        j = j + 1
-      } else {
-        list.push(out, x)
-        i = i + 1
-      },
-      (some(x), none) => {
-        list.push(out, x)
-        i = i + 1
-      },
-      (none, some(y)) => {
-        list.push(out, y)
-        j = j + 1
-      },
-      (none, none) => (),
-    }
-  }
-  out
+local fn merge_with(xs: List[String], ys: List[String], cmp: (String, String) -> Int, i: Int, j: Int, acc: List[String]) -> List[String] = match (list.get(
+  xs,
+  i,
+), list.get(ys, j)) {
+  (some(x), some(y)) => if cmp(y, x) < 0 then merge_with(xs, ys, cmp, i, j + 1, acc + [y])
+  else merge_with(xs, ys, cmp, i + 1, j, acc + [x]),
+  (some(_), none) => acc + list.drop(xs, i),
+  _ => acc + list.drop(ys, j),
 }
 
 local fn merge_sort_with(xs: List[String], cmp: (String, String) -> Int) -> List[String] = {
@@ -39007,6 +38659,9 @@ local fn merge_sort_with(xs: List[String], cmp: (String, String) -> Int) -> List
     merge_sort_with(list.take(xs, n / 2), cmp),
     merge_sort_with(list.drop(xs, n / 2), cmp),
     cmp,
+    0,
+    0,
+    [],
   )
 }
 
@@ -40252,6 +39907,171 @@ fn string_repeat(s: String, n: Int) -> String = {
   buf
 }
 "#;
+pub const SRC_STRING_REPLACE: &str = r#"
+
+
+
+
+
+fn __rep_eq(a: Int, b: Int, n: Int) -> Bool = if n <= 0 then true
+else {
+  let x = prim.load8(a)
+  let y = prim.load8(b)
+  if x == y then __rep_eq(a + 1, b + 1, n - 1)
+  else false
+}
+
+fn __rep_matches(pos: Int, send: Int, fbase: Int, flen: Int) -> Bool =
+  if pos + flen > send then false
+  else __rep_eq(pos, fbase, flen)
+
+fn __rep_count(pos: Int, send: Int, fbase: Int, flen: Int, acc: Int) -> Int =
+  if pos + flen > send then acc
+  else {
+    let m = __rep_eq(pos, fbase, flen)
+    if m then __rep_count(pos + flen, send, fbase, flen, acc + 1)
+    else __rep_count(pos + 1, send, fbase, flen, acc)
+  }
+
+fn __rep_copy(src: Int, dst: Int, n: Int) -> Int = if n <= 0 then 0
+else {
+  prim.store8(dst, prim.load8(src))
+  __rep_copy(src + 1, dst + 1, n - 1)
+}
+
+
+fn __rep_fill(spos: Int, send: Int, fbase: Int, flen: Int, tbase: Int, tlen: Int, dst: Int) -> Int =
+  if spos >= send then dst
+  else {
+    let m = __rep_matches(spos, send, fbase, flen)
+    if m then {
+      let _c = __rep_copy(tbase, dst, tlen)
+      __rep_fill(spos + flen, send, fbase, flen, tbase, tlen, dst + tlen)
+    } else {
+      prim.store8(dst, prim.load8(spos))
+      __rep_fill(spos + 1, send, fbase, flen, tbase, tlen, dst + 1)
+    }
+  }
+
+
+fn __rep_copy_str(s: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let buf = prim.alloc_str(slen)
+  let _c = __rep_copy(h + 12, prim.handle(buf) + 12, slen)
+  buf
+}
+
+fn __rep_do(s: String, from: String, to: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  let th = prim.handle(to)
+  let tlen = prim.load32(th + 4)
+  let sbase = h + 12
+  let send = sbase + slen
+  let count = __rep_count(sbase, send, fh + 12, flen, 0)
+  let delta = tlen - flen
+  let rlen = slen + count * delta
+  let buf = prim.alloc_str(rlen)
+  let _x = __rep_fill(sbase, send, fh + 12, flen, th + 12, tlen, prim.handle(buf) + 12)
+  buf
+}
+
+
+
+
+
+fn __rep_cstart(p: Int) -> Bool = {
+  let b = prim.load8(p)
+  b < 128 or b >= 192
+}
+
+fn __rep_nchars(p: Int, send: Int, acc: Int) -> Int = if p >= send then acc
+else if __rep_cstart(p) then __rep_nchars(p + 1, send, acc + 1)
+else __rep_nchars(p + 1, send, acc)
+
+fn __rep_next_cs(p: Int, send: Int) -> Int = if p >= send then send
+else if __rep_cstart(p) then p else __rep_next_cs(p + 1, send)
+
+fn __rep_empty_fill(spos: Int, send: Int, tbase: Int, tlen: Int, dst: Int) -> Int =
+  if spos >= send then dst
+  else {
+    let nxt = __rep_next_cs(spos + 1, send)
+    let clen = nxt - spos
+    let _c = __rep_copy(spos, dst, clen)
+    let _t = __rep_copy(tbase, dst + clen, tlen)
+    __rep_empty_fill(nxt, send, tbase, tlen, dst + clen + tlen)
+  }
+
+fn __empty_replace(s: String, to: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let sbase = h + 12
+  let send = sbase + slen
+  let th = prim.handle(to)
+  let tlen = prim.load32(th + 4)
+  let nchars = __rep_nchars(sbase, send, 0)
+  let rlen = (nchars + 1) * tlen + slen
+  let buf = prim.alloc_str(rlen)
+  let dbase = prim.handle(buf) + 12
+  let _lead = __rep_copy(th + 12, dbase, tlen)
+  let _x = __rep_empty_fill(sbase, send, th + 12, tlen, dbase + tlen)
+  buf
+}
+
+fn string_replace(s: String, from: String, to: String) -> String = {
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  if flen <= 0 then __empty_replace(s, to)
+  else __rep_do(s, from, to)
+}
+
+
+
+
+
+
+fn __repf_find(pos: Int, send: Int, fbase: Int, flen: Int) -> Int =
+  if pos + flen > send then send + 1
+  else {
+    let m = __rep_eq(pos, fbase, flen)
+    if m then pos
+    else __repf_find(pos + 1, send, fbase, flen)
+  }
+
+
+fn __repf_do(s: String, from: String, to: String, off: Int) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  let th = prim.handle(to)
+  let tlen = prim.load32(th + 4)
+  let sbase = h + 12
+  let rlen = slen - flen + tlen
+  let buf = prim.alloc_str(rlen)
+  let dbase = prim.handle(buf) + 12
+  let _c1 = __rep_copy(sbase, dbase, off)
+  let _c2 = __rep_copy(th + 12, dbase + off, tlen)
+  let rest = slen - off - flen
+  let _c3 = __rep_copy(sbase + off + flen, dbase + off + tlen, rest)
+  buf
+}
+
+fn string_replace_first(s: String, from: String, to: String) -> String = {
+  let h = prim.handle(s)
+  let slen = prim.load32(h + 4)
+  let fh = prim.handle(from)
+  let flen = prim.load32(fh + 4)
+  let sbase = h + 12
+  let send = sbase + slen
+  let fpos = __repf_find(sbase, send, fh + 12, flen)
+  if fpos > send then __rep_copy_str(s)
+  else __repf_do(s, from, to, fpos - sbase)
+}
+"#;
 pub const SRC_STRING_REVERSE: &str = r#"
 
 
@@ -40348,7 +40168,6 @@ pub const SRC_STRING_SEARCH: &str = r#"
 
 
 
-
 fn __byte_eq(a: Int, b: Int, n: Int) -> Bool = if n <= 0 then true
 else {
   let x = prim.load8(a)
@@ -40379,95 +40198,21 @@ fn string_ends_with(s: String, suffix: String) -> Bool = {
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-fn __sk_step(pa: Int, d: Int, t: Int, k: Int, c: Int) -> Int =
-  if k > 0 and prim.load8(pa + k * d) != c then __sk_step(pa, d, t, prim.load64(t + (k - 1) * 8), c)
-  else if prim.load8(pa + k * d) == c then k + 1
-  else k
-
-fn __sk_fill(pa: Int, d: Int, nlen: Int, t: Int, q: Int, k: Int) -> Int = if q >= nlen then 0
-else {
-  let k1 = __sk_step(pa, d, t, k, prim.load8(pa + q * d))
-  prim.store64(t + q * 8, k1)
-  __sk_fill(pa, d, nlen, t, q + 1, k1)
-}
-
-
-fn __sk_table(pa: Int, d: Int, nlen: Int, t: Int) -> Int = {
-  prim.store64(t, 0)
-  __sk_fill(pa, d, nlen, t, 1, 0)
-}
-
-
-fn __sk_scan(ha: Int, d: Int, slen: Int, pa: Int, nlen: Int, t: Int, i: Int, k: Int) -> Int =
-  if slen - i < nlen - k then 0 - 1
+fn __contains_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Bool =
+  if pos + nlen > slen then false
   else {
-    let k1 = __sk_step(pa, d, t, k, prim.load8(ha + i * d))
-    if k1 == nlen then i + 1 - nlen
-    else __sk_scan(ha, d, slen, pa, nlen, t, i + 1, k1)
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then true
+    else __contains_scan(sbase, slen, nbase, nlen, pos + 1)
   }
-
-
-
-fn __sk_next(sbase: Int, slen: Int, nbase: Int, nlen: Int, t: Int, from: Int) -> Int = __sk_scan(
-  sbase,
-  1,
-  slen,
-  nbase,
-  nlen,
-  t,
-  from,
-  0,
-)
-
-
-
-fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 0 then 0
-else if nlen > slen then 0 - 1
-else {
-  let tbl = prim.alloc_list(nlen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(nbase, 1, nlen, t)
-  __sk_next(sbase, slen, nbase, nlen, t, 0)
-}
-
-
-
-fn __rfind_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen <= 0 then slen
-else if nlen > slen then 0 - 1
-else {
-  let tbl = prim.alloc_list(nlen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(nbase + nlen - 1, 0 - 1, nlen, t)
-  let r = __sk_scan(sbase + slen - 1, 0 - 1, slen, nbase + nlen - 1, nlen, t, 0, 0)
-  if r < 0 then r else slen - r - nlen
-}
-
-
-
-fn __count_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, t: Int, from: Int, acc: Int) -> Int = {
-  let pos = __sk_next(sbase, slen, nbase, nlen, t, from)
-  if pos < 0 then acc
-  else __count_scan(sbase, slen, nbase, nlen, t, pos + nlen, acc + 1)
-}
 
 fn string_contains(s: String, needle: String) -> Bool = {
   let hs = prim.handle(s)
   let hn = prim.handle(needle)
   let slen = prim.load32(hs + 4)
   let nlen = prim.load32(hn + 4)
-  __find_byte(hs + 12, slen, hn + 12, nlen) >= 0
+  if nlen <= 0 then true
+  else __contains_scan(hs + 12, slen, hn + 12, nlen, 0)
 }
 
 
@@ -40483,13 +40228,15 @@ else {
   __cp_count(base + 1, n - 1, acc + step)
 }
 
-fn __count_nonempty(sbase: Int, slen: Int, nbase: Int, nlen: Int) -> Int = if nlen > slen then 0
-else {
-  let tbl = prim.alloc_list(nlen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(nbase, 1, nlen, t)
-  __count_scan(sbase, slen, nbase, nlen, t, 0, 0)
-}
+
+
+fn __count_scan(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int, acc: Int) -> Int =
+  if pos + nlen > slen then acc
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then __count_scan(sbase, slen, nbase, nlen, pos + nlen, acc + 1)
+    else __count_scan(sbase, slen, nbase, nlen, pos + 1, acc)
+  }
 
 fn string_count(s: String, needle: String) -> Int = {
   let hs = prim.handle(s)
@@ -40500,8 +40247,18 @@ fn string_count(s: String, needle: String) -> Int = {
     let c = __cp_count(hs + 12, slen, 0)
 
     c + 1
-  } else __count_nonempty(hs + 12, slen, hn + 12, nlen)
+  } else __count_scan(hs + 12, slen, hn + 12, nlen, 0, 0)
 }
+
+
+
+fn __find_byte(sbase: Int, slen: Int, nbase: Int, nlen: Int, pos: Int) -> Int =
+  if pos + nlen > slen then -1
+  else {
+    let m = __byte_eq(sbase + pos, nbase, nlen)
+    if m then pos
+    else __find_byte(sbase, slen, nbase, nlen, pos + 1)
+  }
 
 
 
@@ -40518,8 +40275,18 @@ fn string_index_of(s: String, needle: String) -> Int? = {
   let hn = prim.handle(needle)
   let slen = prim.load32(hs + 4)
   let nlen = prim.load32(hn + 4)
-  let bpos = __find_byte(hs + 12, slen, hn + 12, nlen)
+  let bpos = __find_byte(hs + 12, slen, hn + 12, nlen, 0)
   if bpos < 0 then __io_none() else __io_at(hs + 12, bpos)
+}
+
+
+
+
+fn __rfind_byte(sbase: Int, nbase: Int, nlen: Int, pos: Int) -> Int = if pos < 0 then -1
+else {
+  let m = __byte_eq(sbase + pos, nbase, nlen)
+  if m then pos
+  else __rfind_byte(sbase, nbase, nlen, pos - 1)
 }
 
 fn string_last_index_of(s: String, needle: String) -> Int? = {
@@ -40527,248 +40294,8 @@ fn string_last_index_of(s: String, needle: String) -> Int? = {
   let hn = prim.handle(needle)
   let slen = prim.load32(hs + 4)
   let nlen = prim.load32(hn + 4)
-  let bpos = __rfind_byte(hs + 12, slen, hn + 12, nlen)
+  let bpos = __rfind_byte(hs + 12, hn + 12, nlen, slen - nlen)
   if bpos < 0 then __io_none() else __io_at(hs + 12, bpos)
-}
-
-
-
-
-
-
-fn __copy_bytes(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let b = prim.load8(src + i)
-  prim.store8(dst + i, b)
-  __copy_bytes(dst, src, n, i + 1)
-}
-
-
-fn __substr(sh: Int, start: Int, end: Int) -> String = {
-  let n = end - start
-  let piece = prim.alloc_str(n)
-  let _x = __copy_bytes(prim.handle(piece) + 12, sh + 12 + start, n, 0)
-  piece
-}
-
-
-fn __split_fill(lh: Int, sh: Int, slen: Int, seph: Int, seplen: Int, t: Int, from: Int, idx: Int) -> Int = {
-  let found = __sk_next(sh + 12, slen, seph + 12, seplen, t, from)
-  let pos = if found < 0 then slen else found
-  let piece = __substr(sh, from, pos)
-  prim.store_str(lh + 12 + idx * 8, piece)
-  if found < 0 then idx + 1
-  else __split_fill(lh, sh, slen, seph, seplen, t, pos + seplen, idx + 1)
-}
-
-fn __is_cstart(sh: Int, p: Int) -> Bool = {
-  let b = prim.load8(sh + 12 + p)
-  b < 128 or b >= 192
-}
-
-fn __count_chars(sh: Int, slen: Int, p: Int, acc: Int) -> Int = if p >= slen then acc
-else if __is_cstart(sh, p) then __count_chars(sh, slen, p + 1, acc + 1)
-else __count_chars(sh, slen, p + 1, acc)
-
-fn __next_cstart(sh: Int, slen: Int, p: Int) -> Int = if p >= slen then slen
-else if __is_cstart(sh, p) then p
-else __next_cstart(sh, slen, p + 1)
-
-fn __empty_split_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int) -> Int =
-  if from >= slen then idx
-  else {
-    let nxt = __next_cstart(sh, slen, from + 1)
-    let piece = __substr(sh, from, nxt)
-    prim.store_str(lh + 12 + idx * 8, piece)
-    __empty_split_fill(lh, sh, slen, nxt, idx + 1)
-  }
-
-fn __empty_split(s: String) -> List[String] = {
-  let sh = prim.handle(s)
-  let slen = prim.load32(sh + 4)
-  let nchars = __count_chars(sh, slen, 0, 0)
-  let result = prim.alloc_list_str(nchars + 2)
-  let rh = prim.handle(result)
-  let lead = __substr(sh, 0, 0)
-  prim.store_str(rh + 12, lead)
-  let _x = __empty_split_fill(rh, sh, slen, 0, 1)
-  let trail = __substr(sh, 0, 0)
-  prim.store_str(rh + 12 + (nchars + 1) * 8, trail)
-  result
-}
-
-fn __nonempty_split(s: String, seph: Int, seplen: Int) -> List[String] = {
-  let sh = prim.handle(s)
-  let slen = prim.load32(sh + 4)
-  let tbl = prim.alloc_list(seplen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(seph + 12, 1, seplen, t)
-  let nseps = __count_scan(sh + 12, slen, seph + 12, seplen, t, 0, 0)
-  let result = prim.alloc_list_str(nseps + 1)
-  let _x = __split_fill(prim.handle(result), sh, slen, seph, seplen, t, 0, 0)
-  result
-}
-
-@implements("string.split")
-fn string_split(s: String, sep: String) -> List[String] = {
-  let seph = prim.handle(sep)
-  let seplen = prim.load32(seph + 4)
-  if seplen == 0 then __empty_split(s)
-  else __nonempty_split(s, seph, seplen)
-}
-
-
-
-
-
-
-fn __so_sub(s: String, start: Int, n: Int) -> String = {
-  let sh = prim.handle(s)
-  let out = prim.alloc_str(n)
-  let _x = __copy_bytes(prim.handle(out) + 12, sh + 12 + start, n, 0)
-  out
-}
-
-@implements("string.split_once")
-fn string_split_once(s: String, sep: String) -> (String, String)? = {
-  let sh = prim.handle(s)
-  let seph = prim.handle(sep)
-  let slen = prim.load32(sh + 4)
-  let seplen = prim.load32(seph + 4)
-  let pos = __find_byte(sh + 12, slen, seph + 12, seplen)
-  if pos < 0 then none
-  else some((__so_sub(s, 0, pos), __so_sub(s, pos + seplen, slen - pos - seplen)))
-}
-
-
-
-
-
-fn __rep_copy(src: Int, dst: Int, n: Int) -> Int = if n <= 0 then 0
-else {
-  prim.store8(dst, prim.load8(src))
-  __rep_copy(src + 1, dst + 1, n - 1)
-}
-
-
-
-fn __rep_fill(sbase: Int, slen: Int, fbase: Int, flen: Int, t: Int, tbase: Int, tlen: Int, from: Int, dst: Int) -> Int = {
-  let pos = __sk_next(sbase, slen, fbase, flen, t, from)
-  if pos < 0 then __rep_copy(sbase + from, dst, slen - from)
-  else {
-    let _c = __rep_copy(sbase + from, dst, pos - from)
-    let _t = __rep_copy(tbase, dst + pos - from, tlen)
-    __rep_fill(sbase, slen, fbase, flen, t, tbase, tlen, pos + flen, dst + pos - from + tlen)
-  }
-}
-
-fn __rep_do(s: String, from: String, to: String) -> String = {
-  let h = prim.handle(s)
-  let slen = prim.load32(h + 4)
-  let fh = prim.handle(from)
-  let flen = prim.load32(fh + 4)
-  let th = prim.handle(to)
-  let tlen = prim.load32(th + 4)
-  let tbl = prim.alloc_list(flen)
-  let t = prim.handle(tbl) + 12
-  let _t = __sk_table(fh + 12, 1, flen, t)
-  let count = __count_scan(h + 12, slen, fh + 12, flen, t, 0, 0)
-  let delta = tlen - flen
-  let rlen = slen + count * delta
-  let buf = prim.alloc_str(rlen)
-  let _x = __rep_fill(h + 12, slen, fh + 12, flen, t, th + 12, tlen, 0, prim.handle(buf) + 12)
-  buf
-}
-
-
-
-
-
-fn __rep_cstart(p: Int) -> Bool = {
-  let b = prim.load8(p)
-  b < 128 or b >= 192
-}
-
-fn __rep_nchars(p: Int, send: Int, acc: Int) -> Int = if p >= send then acc
-else if __rep_cstart(p) then __rep_nchars(p + 1, send, acc + 1)
-else __rep_nchars(p + 1, send, acc)
-
-fn __rep_next_cs(p: Int, send: Int) -> Int = if p >= send then send
-else if __rep_cstart(p) then p else __rep_next_cs(p + 1, send)
-
-fn __rep_empty_fill(spos: Int, send: Int, tbase: Int, tlen: Int, dst: Int) -> Int =
-  if spos >= send then dst
-  else {
-    let nxt = __rep_next_cs(spos + 1, send)
-    let clen = nxt - spos
-    let _c = __rep_copy(spos, dst, clen)
-    let _t = __rep_copy(tbase, dst + clen, tlen)
-    __rep_empty_fill(nxt, send, tbase, tlen, dst + clen + tlen)
-  }
-
-fn __empty_replace(s: String, to: String) -> String = {
-  let h = prim.handle(s)
-  let slen = prim.load32(h + 4)
-  let sbase = h + 12
-  let send = sbase + slen
-  let th = prim.handle(to)
-  let tlen = prim.load32(th + 4)
-  let nchars = __rep_nchars(sbase, send, 0)
-  let rlen = (nchars + 1) * tlen + slen
-  let buf = prim.alloc_str(rlen)
-  let dbase = prim.handle(buf) + 12
-  let _lead = __rep_copy(th + 12, dbase, tlen)
-  let _x = __rep_empty_fill(sbase, send, th + 12, tlen, dbase + tlen)
-  buf
-}
-
-@implements("string.replace")
-fn string_replace(s: String, from: String, to: String) -> String = {
-  let fh = prim.handle(from)
-  let flen = prim.load32(fh + 4)
-  if flen <= 0 then __empty_replace(s, to)
-  else __rep_do(s, from, to)
-}
-
-
-fn __rep_copy_str(s: String) -> String = {
-  let h = prim.handle(s)
-  let slen = prim.load32(h + 4)
-  let buf = prim.alloc_str(slen)
-  let _c = __rep_copy(h + 12, prim.handle(buf) + 12, slen)
-  buf
-}
-
-
-fn __repf_do(s: String, from: String, to: String, off: Int) -> String = {
-  let h = prim.handle(s)
-  let slen = prim.load32(h + 4)
-  let fh = prim.handle(from)
-  let flen = prim.load32(fh + 4)
-  let th = prim.handle(to)
-  let tlen = prim.load32(th + 4)
-  let sbase = h + 12
-  let rlen = slen - flen + tlen
-  let buf = prim.alloc_str(rlen)
-  let dbase = prim.handle(buf) + 12
-  let _c1 = __rep_copy(sbase, dbase, off)
-  let _c2 = __rep_copy(th + 12, dbase + off, tlen)
-  let rest = slen - off - flen
-  let _c3 = __rep_copy(sbase + off + flen, dbase + off + tlen, rest)
-  buf
-}
-
-
-
-@implements("string.replace_first")
-fn string_replace_first(s: String, from: String, to: String) -> String = {
-  let h = prim.handle(s)
-  let slen = prim.load32(h + 4)
-  let fh = prim.handle(from)
-  let flen = prim.load32(fh + 4)
-  let fpos = __find_byte(h + 12, slen, fh + 12, flen)
-  if fpos < 0 then __rep_copy_str(s)
-  else __repf_do(s, from, to, fpos)
 }
 "#;
 pub const SRC_STRING_SLICE: &str = r#"
@@ -40851,6 +40378,169 @@ fn string_slice2(s: String, start: Int) -> String = {
   let buf = prim.alloc_str(nbytes)
   let _e = __slice2_copy(byte_start, prim.handle(buf) + 12, nbytes)
   buf
+}
+"#;
+pub const SRC_STRING_SPLIT: &str = r#"
+
+
+
+
+
+
+fn __sep_at(sh: Int, slen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool =
+  if j >= seplen then true
+  else if p + j >= slen then false
+  else {
+    let sb = prim.load8(sh + 12 + p + j)
+    let tb = prim.load8(seph + 12 + j)
+    if sb == tb then __sep_at(sh, slen, seph, seplen, p, j + 1)
+    else false
+  }
+
+
+fn __find_sep(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int) -> Int =
+  if from + seplen > slen then slen
+  else {
+    let hit = __sep_at(sh, slen, seph, seplen, from, 0)
+    if hit then from
+    else __find_sep(sh, slen, seph, seplen, from + 1)
+  }
+
+fn __count_seps(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int, acc: Int) -> Int =
+  if from + seplen > slen then acc
+  else {
+    let pos = __find_sep(sh, slen, seph, seplen, from)
+    if pos >= slen then acc
+    else __count_seps(sh, slen, seph, seplen, pos + seplen, acc + 1)
+  }
+
+fn __copy_bytes(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let b = prim.load8(src + i)
+  prim.store8(dst + i, b)
+  __copy_bytes(dst, src, n, i + 1)
+}
+
+
+fn __substr(sh: Int, start: Int, end: Int) -> String = {
+  let n = end - start
+  let piece = prim.alloc_str(n)
+  let _x = __copy_bytes(prim.handle(piece) + 12, sh + 12 + start, n, 0)
+  piece
+}
+
+
+fn __split_fill(lh: Int, sh: Int, slen: Int, seph: Int, seplen: Int, from: Int, idx: Int) -> Int = {
+  let pos = __find_sep(sh, slen, seph, seplen, from)
+  let piece = __substr(sh, from, pos)
+  prim.store_str(lh + 12 + idx * 8, piece)
+  if pos >= slen then idx + 1
+  else __split_fill(lh, sh, slen, seph, seplen, pos + seplen, idx + 1)
+}
+
+fn __is_cstart(sh: Int, p: Int) -> Bool = {
+  let b = prim.load8(sh + 12 + p)
+  b < 128 or b >= 192
+}
+
+fn __count_chars(sh: Int, slen: Int, p: Int, acc: Int) -> Int = if p >= slen then acc
+else if __is_cstart(sh, p) then __count_chars(sh, slen, p + 1, acc + 1)
+else __count_chars(sh, slen, p + 1, acc)
+
+fn __next_cstart(sh: Int, slen: Int, p: Int) -> Int = if p >= slen then slen
+else if __is_cstart(sh, p) then p
+else __next_cstart(sh, slen, p + 1)
+
+fn __empty_split_fill(lh: Int, sh: Int, slen: Int, from: Int, idx: Int) -> Int =
+  if from >= slen then idx
+  else {
+    let nxt = __next_cstart(sh, slen, from + 1)
+    let piece = __substr(sh, from, nxt)
+    prim.store_str(lh + 12 + idx * 8, piece)
+    __empty_split_fill(lh, sh, slen, nxt, idx + 1)
+  }
+
+fn __empty_split(s: String) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let nchars = __count_chars(sh, slen, 0, 0)
+  let result = prim.alloc_list_str(nchars + 2)
+  let rh = prim.handle(result)
+  let lead = __substr(sh, 0, 0)
+  prim.store_str(rh + 12, lead)
+  let _x = __empty_split_fill(rh, sh, slen, 0, 1)
+  let trail = __substr(sh, 0, 0)
+  prim.store_str(rh + 12 + (nchars + 1) * 8, trail)
+  result
+}
+
+fn __nonempty_split(s: String, seph: Int, seplen: Int) -> List[String] = {
+  let sh = prim.handle(s)
+  let slen = prim.load32(sh + 4)
+  let nseps = __count_seps(sh, slen, seph, seplen, 0, 0)
+  let count = nseps + 1
+  let result = prim.alloc_list_str(count)
+  let _x = __split_fill(prim.handle(result), sh, slen, seph, seplen, 0, 0)
+  result
+}
+
+fn string_split(s: String, sep: String) -> List[String] = {
+  let seph = prim.handle(sep)
+  let seplen = prim.load32(seph + 4)
+  if seplen == 0 then __empty_split(s)
+  else __nonempty_split(s, seph, seplen)
+}
+"#;
+pub const SRC_STRING_SPLIT_ONCE: &str = r#"
+
+
+
+
+
+
+fn __so_at(sh: Int, slen: Int, seph: Int, seplen: Int, p: Int, j: Int) -> Bool =
+  if j >= seplen then true
+  else if p + j >= slen then false
+  else {
+    let sb = prim.load8(sh + 12 + p + j)
+    let tb = prim.load8(seph + 12 + j)
+    if sb == tb then __so_at(sh, slen, seph, seplen, p, j + 1)
+    else false
+  }
+
+
+
+fn __so_find(sh: Int, slen: Int, seph: Int, seplen: Int, from: Int) -> Int =
+  if from + seplen > slen then 0 - 1
+  else {
+    let hit = __so_at(sh, slen, seph, seplen, from, 0)
+    if hit then from
+    else __so_find(sh, slen, seph, seplen, from + 1)
+  }
+
+fn __so_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  let b = prim.load8(src + i)
+  prim.store8(dst + i, b)
+  __so_copy(dst, src, n, i + 1)
+}
+
+
+fn __so_sub(s: String, start: Int, n: Int) -> String = {
+  let sh = prim.handle(s)
+  let out = prim.alloc_str(n)
+  let _x = __so_copy(prim.handle(out) + 12, sh + 12 + start, n, 0)
+  out
+}
+
+fn string_split_once(s: String, sep: String) -> (String, String)? = {
+  let sh = prim.handle(s)
+  let seph = prim.handle(sep)
+  let slen = prim.load32(sh + 4)
+  let seplen = prim.load32(seph + 4)
+  let pos = __so_find(sh, slen, seph, seplen, 0)
+  if pos < 0 then none
+  else some((__so_sub(s, 0, pos), __so_sub(s, pos + seplen, slen - pos - seplen)))
 }
 "#;
 pub const SRC_STRING_TAKE_DROP: &str = r#"
@@ -40987,7 +40677,6 @@ pub const SRC_STRING_TO_INT: &str = r#"
 
 
 
-
 fn __sti_ws(b: Int) -> Bool = if b == 32 then true
 else if b < 9 then false
 else if b <= 13 then true else false
@@ -41052,17 +40741,13 @@ else {
 }
 
 
-fn __sti_aws(b: Int) -> Bool = b == 32 or b == 9 or b == 10 or b == 12 or b == 13
 
-fn __sti_atrim_s(data: Int, pos: Int, end: Int) -> Int =
-  if pos < end and __sti_aws(prim.load8(data + pos)) then __sti_atrim_s(data, pos + 1, end)
-  else pos
 
-fn __sti_atrim_e(data: Int, start: Int, end: Int) -> Int =
-  if end > start and __sti_aws(prim.load8(data + end - 1)) then __sti_atrim_e(data, start, end - 1)
-  else end
-
-fn string_to_int(s: String) -> Result[Int, String] = __sti_raw(s)
+fn string_to_int(s: String) -> Result[Int, String] = if __sti_bare(s) then __sti_raw(s)
+else {
+  let t = string.trim(s)
+  __sti_raw(t)
+}
 
 
 
@@ -41083,8 +40768,8 @@ fn __sti_raw(s: String) -> Result[Int, String] = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
   let data = h + 12
-  let ts = __sti_atrim_s(data, 0, blen)
-  let te = __sti_atrim_e(data, ts, blen)
+  let ts = __sti_trim_s(data, 0, blen)
+  let te = __sti_trim_e(data, blen)
   let empty = ts >= te
   let b0 = if empty then 48 else prim.load8(data + ts)
   let neg = b0 == 45
@@ -41201,8 +40886,6 @@ fn __hex_raw(s: String) -> Result[Int, String] = {
 }
 "#;
 pub const SRC_STRING_TO_LOWER: &str = r#"
-
-
 
 
 
@@ -41346,8 +41029,8 @@ fn __to_lower_fwd(p: Int, end: Int, ch: Int, cn: Int, ih: Int, inn: Int) -> Bool
   }
 
 fn string_to_lower(s: String) -> String = {
-  let tbl = "00004100006100004200006200004300006300004400006400004500006500004600006600004700006700004800006800004900006900004A00006A00004B00006B00004C00006C00004D00006D00004E00006E00004F00006F00005000007000005100007100005200007200005300007300005400007400005500007500005600007600005700007700005800007800005900007900005A00007A0000C00000E00000C10000E10000C20000E20000C30000E30000C40000E40000C50000E50000C60000E60000C70000E70000C80000E80000C90000E90000CA0000EA0000CB0000EB0000CC0000EC0000CD0000ED0000CE0000EE0000CF0000EF0000D00000F00000D10000F10000D20000F20000D30000F30000D40000F40000D50000F50000D60000F60000D80000F80000D90000F90000DA0000FA0000DB0000FB0000DC0000FC0000DD0000FD0000DE0000FE00010000010100010200010300010400010500010600010700010800010900010A00010B00010C00010D00010E00010F00011000011100011200011300011400011500011600011700011800011900011A00011B00011C00011D00011E00011F00012000012100012200012300012400012500012600012700012800012900012A00012B00012C00012D00012E00012F00013200013300013400013500013600013700013900013A00013B00013C00013D00013E00013F00014000014100014200014300014400014500014600014700014800014A00014B00014C00014D00014E00014F00015000015100015200015300015400015500015600015700015800015900015A00015B00015C00015D00015E00015F00016000016100016200016300016400016500016600016700016800016900016A00016B00016C00016D00016E00016F0001700001710001720001730001740001750001760001770001780000FF00017900017A00017B00017C00017D00017E00018100025300018200018300018400018500018600025400018700018800018900025600018A00025700018B00018C00018E0001DD00018F00025900019000025B00019100019200019300026000019400026300019600026900019700026800019800019900019C00026F00019D00027200019F0002750001A00001A10001A20001A30001A40001A50001A60002800001A70001A80001A90002830001AC0001AD0001AE0002880001AF0001B00001B100028A0001B200028B0001B30001B40001B50001B60001B70002920001B80001B90001BC0001BD0001C40001C60001C50001C60001C70001C90001C80001C90001CA0001CC0001CB0001CC0001CD0001CE0001CF0001D00001D10001D20001D30001D40001D50001D60001D70001D80001D90001DA0001DB0001DC0001DE0001DF0001E00001E10001E20001E30001E40001E50001E60001E70001E80001E90001EA0001EB0001EC0001ED0001EE0001EF0001F10001F30001F20001F30001F40001F50001F60001950001F70001BF0001F80001F90001FA0001FB0001FC0001FD0001FE0001FF00020000020100020200020300020400020500020600020700020800020900020A00020B00020C00020D00020E00020F00021000021100021200021300021400021500021600021700021800021900021A00021B00021C00021D00021E00021F00022000019E00022200022300022400022500022600022700022800022900022A00022B00022C00022D00022E00022F00023000023100023200023300023A002C6500023B00023C00023D00019A00023E002C6600024100024200024300018000024400028900024500028C00024600024700024800024900024A00024B00024C00024D00024E00024F00037000037100037200037300037600037700037F0003F30003860003AC0003880003AD0003890003AE00038A0003AF00038C0003CC00038E0003CD00038F0003CE0003910003B10003920003B20003930003B30003940003B40003950003B50003960003B60003970003B70003980003B80003990003B900039A0003BA00039B0003BB00039C0003BC00039D0003BD00039E0003BE00039F0003BF0003A00003C00003A10003C10003A30003C30003A40003C40003A50003C50003A60003C60003A70003C70003A80003C80003A90003C90003AA0003CA0003AB0003CB0003CF0003D70003D80003D90003DA0003DB0003DC0003DD0003DE0003DF0003E00003E10003E20003E30003E40003E50003E60003E70003E80003E90003EA0003EB0003EC0003ED0003EE0003EF0003F40003B80003F70003F80003F90003F20003FA0003FB0003FD00037B0003FE00037C0003FF00037D00040000045000040100045100040200045200040300045300040400045400040500045500040600045600040700045700040800045800040900045900040A00045A00040B00045B00040C00045C00040D00045D00040E00045E00040F00045F00041000043000041100043100041200043200041300043300041400043400041500043500041600043600041700043700041800043800041900043900041A00043A00041B00043B00041C00043C00041D00043D00041E00043E00041F00043F00042000044000042100044100042200044200042300044300042400044400042500044500042600044600042700044700042800044800042900044900042A00044A00042B00044B00042C00044C00042D00044D00042E00044E00042F00044F00046000046100046200046300046400046500046600046700046800046900046A00046B00046C00046D00046E00046F00047000047100047200047300047400047500047600047700047800047900047A00047B00047C00047D00047E00047F00048000048100048A00048B00048C00048D00048E00048F00049000049100049200049300049400049500049600049700049800049900049A00049B00049C00049D00049E00049F0004A00004A10004A20004A30004A40004A50004A60004A70004A80004A90004AA0004AB0004AC0004AD0004AE0004AF0004B00004B10004B20004B30004B40004B50004B60004B70004B80004B90004BA0004BB0004BC0004BD0004BE0004BF0004C00004CF0004C10004C20004C30004C40004C50004C60004C70004C80004C90004CA0004CB0004CC0004CD0004CE0004D00004D10004D20004D30004D40004D50004D60004D70004D80004D90004DA0004DB0004DC0004DD0004DE0004DF0004E00004E10004E20004E30004E40004E50004E60004E70004E80004E90004EA0004EB0004EC0004ED0004EE0004EF0004F00004F10004F20004F30004F40004F50004F60004F70004F80004F90004FA0004FB0004FC0004FD0004FE0004FF00050000050100050200050300050400050500050600050700050800050900050A00050B00050C00050D00050E00050F00051000051100051200051300051400051500051600051700051800051900051A00051B00051C00051D00051E00051F00052000052100052200052300052400052500052600052700052800052900052A00052B00052C00052D00052E00052F00053100056100053200056200053300056300053400056400053500056500053600056600053700056700053800056800053900056900053A00056A00053B00056B00053C00056C00053D00056D00053E00056E00053F00056F00054000057000054100057100054200057200054300057300054400057400054500057500054600057600054700057700054800057800054900057900054A00057A00054B00057B00054C00057C00054D00057D00054E00057E00054F00057F0005500005800005510005810005520005820005530005830005540005840005550005850005560005860010A0002D000010A1002D010010A2002D020010A3002D030010A4002D040010A5002D050010A6002D060010A7002D070010A8002D080010A9002D090010AA002D0A0010AB002D0B0010AC002D0C0010AD002D0D0010AE002D0E0010AF002D0F0010B0002D100010B1002D110010B2002D120010B3002D130010B4002D140010B5002D150010B6002D160010B7002D170010B8002D180010B9002D190010BA002D1A0010BB002D1B0010BC002D1C0010BD002D1D0010BE002D1E0010BF002D1F0010C0002D200010C1002D210010C2002D220010C3002D230010C4002D240010C5002D250010C7002D270010CD002D2D0013A000AB700013A100AB710013A200AB720013A300AB730013A400AB740013A500AB750013A600AB760013A700AB770013A800AB780013A900AB790013AA00AB7A0013AB00AB7B0013AC00AB7C0013AD00AB7D0013AE00AB7E0013AF00AB7F0013B000AB800013B100AB810013B200AB820013B300AB830013B400AB840013B500AB850013B600AB860013B700AB870013B800AB880013B900AB890013BA00AB8A0013BB00AB8B0013BC00AB8C0013BD00AB8D0013BE00AB8E0013BF00AB8F0013C000AB900013C100AB910013C200AB920013C300AB930013C400AB940013C500AB950013C600AB960013C700AB970013C800AB980013C900AB990013CA00AB9A0013CB00AB9B0013CC00AB9C0013CD00AB9D0013CE00AB9E0013CF00AB9F0013D000ABA00013D100ABA10013D200ABA20013D300ABA30013D400ABA40013D500ABA50013D600ABA60013D700ABA70013D800ABA80013D900ABA90013DA00ABAA0013DB00ABAB0013DC00ABAC0013DD00ABAD0013DE00ABAE0013DF00ABAF0013E000ABB00013E100ABB10013E200ABB20013E300ABB30013E400ABB40013E500ABB50013E600ABB60013E700ABB70013E800ABB80013E900ABB90013EA00ABBA0013EB00ABBB0013EC00ABBC0013ED00ABBD0013EE00ABBE0013EF00ABBF0013F00013F80013F10013F90013F20013FA0013F30013FB0013F40013FC0013F50013FD001C89001C8A001C900010D0001C910010D1001C920010D2001C930010D3001C940010D4001C950010D5001C960010D6001C970010D7001C980010D8001C990010D9001C9A0010DA001C9B0010DB001C9C0010DC001C9D0010DD001C9E0010DE001C9F0010DF001CA00010E0001CA10010E1001CA20010E2001CA30010E3001CA40010E4001CA50010E5001CA60010E6001CA70010E7001CA80010E8001CA90010E9001CAA0010EA001CAB0010EB001CAC0010EC001CAD0010ED001CAE0010EE001CAF0010EF001CB00010F0001CB10010F1001CB20010F2001CB30010F3001CB40010F4001CB50010F5001CB60010F6001CB70010F7001CB80010F8001CB90010F9001CBA0010FA001CBD0010FD001CBE0010FE001CBF0010FF001E00001E01001E02001E03001E04001E05001E06001E07001E08001E09001E0A001E0B001E0C001E0D001E0E001E0F001E10001E11001E12001E13001E14001E15001E16001E17001E18001E19001E1A001E1B001E1C001E1D001E1E001E1F001E20001E21001E22001E23001E24001E25001E26001E27001E28001E29001E2A001E2B001E2C001E2D001E2E001E2F001E30001E31001E32001E33001E34001E35001E36001E37001E38001E39001E3A001E3B001E3C001E3D001E3E001E3F001E40001E41001E42001E43001E44001E45001E46001E47001E48001E49001E4A001E4B001E4C001E4D001E4E001E4F001E50001E51001E52001E53001E54001E55001E56001E57001E58001E59001E5A001E5B001E5C001E5D001E5E001E5F001E60001E61001E62001E63001E64001E65001E66001E67001E68001E69001E6A001E6B001E6C001E6D001E6E001E6F001E70001E71001E72001E73001E74001E75001E76001E77001E78001E79001E7A001E7B001E7C001E7D001E7E001E7F001E80001E81001E82001E83001E84001E85001E86001E87001E88001E89001E8A001E8B001E8C001E8D001E8E001E8F001E90001E91001E92001E93001E94001E95001E9E0000DF001EA0001EA1001EA2001EA3001EA4001EA5001EA6001EA7001EA8001EA9001EAA001EAB001EAC001EAD001EAE001EAF001EB0001EB1001EB2001EB3001EB4001EB5001EB6001EB7001EB8001EB9001EBA001EBB001EBC001EBD001EBE001EBF001EC0001EC1001EC2001EC3001EC4001EC5001EC6001EC7001EC8001EC9001ECA001ECB001ECC001ECD001ECE001ECF001ED0001ED1001ED2001ED3001ED4001ED5001ED6001ED7001ED8001ED9001EDA001EDB001EDC001EDD001EDE001EDF001EE0001EE1001EE2001EE3001EE4001EE5001EE6001EE7001EE8001EE9001EEA001EEB001EEC001EED001EEE001EEF001EF0001EF1001EF2001EF3001EF4001EF5001EF6001EF7001EF8001EF9001EFA001EFB001EFC001EFD001EFE001EFF001F08001F00001F09001F01001F0A001F02001F0B001F03001F0C001F04001F0D001F05001F0E001F06001F0F001F07001F18001F10001F19001F11001F1A001F12001F1B001F13001F1C001F14001F1D001F15001F28001F20001F29001F21001F2A001F22001F2B001F23001F2C001F24001F2D001F25001F2E001F26001F2F001F27001F38001F30001F39001F31001F3A001F32001F3B001F33001F3C001F34001F3D001F35001F3E001F36001F3F001F37001F48001F40001F49001F41001F4A001F42001F4B001F43001F4C001F44001F4D001F45001F59001F51001F5B001F53001F5D001F55001F5F001F57001F68001F60001F69001F61001F6A001F62001F6B001F63001F6C001F64001F6D001F65001F6E001F66001F6F001F67001F88001F80001F89001F81001F8A001F82001F8B001F83001F8C001F84001F8D001F85001F8E001F86001F8F001F87001F98001F90001F99001F91001F9A001F92001F9B001F93001F9C001F94001F9D001F95001F9E001F96001F9F001F97001FA8001FA0001FA9001FA1001FAA001FA2001FAB001FA3001FAC001FA4001FAD001FA5001FAE001FA6001FAF001FA7001FB8001FB0001FB9001FB1001FBA001F70001FBB001F71001FBC001FB3001FC8001F72001FC9001F73001FCA001F74001FCB001F75001FCC001FC3001FD8001FD0001FD9001FD1001FDA001F76001FDB001F77001FE8001FE0001FE9001FE1001FEA001F7A001FEB001F7B001FEC001FE5001FF8001F78001FF9001F79001FFA001F7C001FFB001F7D001FFC001FF30021260003C900212B0000E500213200214E00216000217000216100217100216200217200216300217300216400217400216500217500216600217600216700217700216800217800216900217900216A00217A00216B00217B00216C00217C00216D00217D00216E00217E00216F00217F0021830021840024B60024D00024B70024D10024B80024D20024B90024D30024BA0024D40024BB0024D50024BC0024D60024BD0024D70024BE0024D80024BF0024D90024C00024DA0024C10024DB0024C20024DC0024C30024DD0024C40024DE0024C50024DF0024C60024E00024C70024E10024C80024E20024C90024E30024CA0024E40024CB0024E50024CC0024E60024CD0024E70024CE0024E80024CF0024E9002C00002C30002C01002C31002C02002C32002C03002C33002C04002C34002C05002C35002C06002C36002C07002C37002C08002C38002C09002C39002C0A002C3A002C0B002C3B002C0C002C3C002C0D002C3D002C0E002C3E002C0F002C3F002C10002C40002C11002C41002C12002C42002C13002C43002C14002C44002C15002C45002C16002C46002C17002C47002C18002C48002C19002C49002C1A002C4A002C1B002C4B002C1C002C4C002C1D002C4D002C1E002C4E002C1F002C4F002C20002C50002C21002C51002C22002C52002C23002C53002C24002C54002C25002C55002C26002C56002C27002C57002C28002C58002C29002C59002C2A002C5A002C2B002C5B002C2C002C5C002C2D002C5D002C2E002C5E002C2F002C5F002C60002C61002C6200026B002C63001D7D002C6400027D002C67002C68002C69002C6A002C6B002C6C002C6D000251002C6E000271002C6F000250002C70000252002C72002C73002C75002C76002C7E00023F002C7F000240002C80002C81002C82002C83002C84002C85002C86002C87002C88002C89002C8A002C8B002C8C002C8D002C8E002C8F002C90002C91002C92002C93002C94002C95002C96002C97002C98002C99002C9A002C9B002C9C002C9D002C9E002C9F002CA0002CA1002CA2002CA3002CA4002CA5002CA6002CA7002CA8002CA9002CAA002CAB002CAC002CAD002CAE002CAF002CB0002CB1002CB2002CB3002CB4002CB5002CB6002CB7002CB8002CB9002CBA002CBB002CBC002CBD002CBE002CBF002CC0002CC1002CC2002CC3002CC4002CC5002CC6002CC7002CC8002CC9002CCA002CCB002CCC002CCD002CCE002CCF002CD0002CD1002CD2002CD3002CD4002CD5002CD6002CD7002CD8002CD9002CDA002CDB002CDC002CDD002CDE002CDF002CE0002CE1002CE2002CE3002CEB002CEC002CED002CEE002CF2002CF300A64000A64100A64200A64300A64400A64500A64600A64700A64800A64900A64A00A64B00A64C00A64D00A64E00A64F00A65000A65100A65200A65300A65400A65500A65600A65700A65800A65900A65A00A65B00A65C00A65D00A65E00A65F00A66000A66100A66200A66300A66400A66500A66600A66700A66800A66900A66A00A66B00A66C00A66D00A68000A68100A68200A68300A68400A68500A68600A68700A68800A68900A68A00A68B00A68C00A68D00A68E00A68F00A69000A69100A69200A69300A69400A69500A69600A69700A69800A69900A69A00A69B00A72200A72300A72400A72500A72600A72700A72800A72900A72A00A72B00A72C00A72D00A72E00A72F00A73200A73300A73400A73500A73600A73700A73800A73900A73A00A73B00A73C00A73D00A73E00A73F00A74000A74100A74200A74300A74400A74500A74600A74700A74800A74900A74A00A74B00A74C00A74D00A74E00A74F00A75000A75100A75200A75300A75400A75500A75600A75700A75800A75900A75A00A75B00A75C00A75D00A75E00A75F00A76000A76100A76200A76300A76400A76500A76600A76700A76800A76900A76A00A76B00A76C00A76D00A76E00A76F00A77900A77A00A77B00A77C00A77D001D7900A77E00A77F00A78000A78100A78200A78300A78400A78500A78600A78700A78B00A78C00A78D00026500A79000A79100A79200A79300A79600A79700A79800A79900A79A00A79B00A79C00A79D00A79E00A79F00A7A000A7A100A7A200A7A300A7A400A7A500A7A600A7A700A7A800A7A900A7AA00026600A7AB00025C00A7AC00026100A7AD00026C00A7AE00026A00A7B000029E00A7B100028700A7B200029D00A7B300AB5300A7B400A7B500A7B600A7B700A7B800A7B900A7BA00A7BB00A7BC00A7BD00A7BE00A7BF00A7C000A7C100A7C200A7C300A7C400A79400A7C500028200A7C6001D8E00A7C700A7C800A7C900A7CA00A7CB00026400A7CC00A7CD00A7CE00A7CF00A7D000A7D100A7D200A7D300A7D400A7D500A7D600A7D700A7D800A7D900A7DA00A7DB00A7DC00019B00A7F500A7F600FF2100FF4100FF2200FF4200FF2300FF4300FF2400FF4400FF2500FF4500FF2600FF4600FF2700FF4700FF2800FF4800FF2900FF4900FF2A00FF4A00FF2B00FF4B00FF2C00FF4C00FF2D00FF4D00FF2E00FF4E00FF2F00FF4F00FF3000FF5000FF3100FF5100FF3200FF5200FF3300FF5300FF3400FF5400FF3500FF5500FF3600FF5600FF3700FF5700FF3800FF5800FF3900FF5900FF3A00FF5A01040001042801040101042901040201042A01040301042B01040401042C01040501042D01040601042E01040701042F01040801043001040901043101040A01043201040B01043301040C01043401040D01043501040E01043601040F01043701041001043801041101043901041201043A01041301043B01041401043C01041501043D01041601043E01041701043F01041801044001041901044101041A01044201041B01044301041C01044401041D01044501041E01044601041F01044701042001044801042101044901042201044A01042301044B01042401044C01042501044D01042601044E01042701044F0104B00104D80104B10104D90104B20104DA0104B30104DB0104B40104DC0104B50104DD0104B60104DE0104B70104DF0104B80104E00104B90104E10104BA0104E20104BB0104E30104BC0104E40104BD0104E50104BE0104E60104BF0104E70104C00104E80104C10104E90104C20104EA0104C30104EB0104C40104EC0104C50104ED0104C60104EE0104C70104EF0104C80104F00104C90104F10104CA0104F20104CB0104F30104CC0104F40104CD0104F50104CE0104F60104CF0104F70104D00104F80104D10104F90104D20104FA0104D30104FB01057001059701057101059801057201059901057301059A01057401059B01057501059C01057601059D01057701059E01057801059F0105790105A001057A0105A101057C0105A301057D0105A401057E0105A501057F0105A60105800105A70105810105A80105820105A90105830105AA0105840105AB0105850105AC0105860105AD0105870105AE0105880105AF0105890105B001058A0105B101058C0105B301058D0105B401058E0105B501058F0105B60105900105B70105910105B80105920105B90105940105BB0105950105BC010C80010CC0010C81010CC1010C82010CC2010C83010CC3010C84010CC4010C85010CC5010C86010CC6010C87010CC7010C88010CC8010C89010CC9010C8A010CCA010C8B010CCB010C8C010CCC010C8D010CCD010C8E010CCE010C8F010CCF010C90010CD0010C91010CD1010C92010CD2010C93010CD3010C94010CD4010C95010CD5010C96010CD6010C97010CD7010C98010CD8010C99010CD9010C9A010CDA010C9B010CDB010C9C010CDC010C9D010CDD010C9E010CDE010C9F010CDF010CA0010CE0010CA1010CE1010CA2010CE2010CA3010CE3010CA4010CE4010CA5010CE5010CA6010CE6010CA7010CE7010CA8010CE8010CA9010CE9010CAA010CEA010CAB010CEB010CAC010CEC010CAD010CED010CAE010CEE010CAF010CEF010CB0010CF0010CB1010CF1010CB2010CF2010D50010D70010D51010D71010D52010D72010D53010D73010D54010D74010D55010D75010D56010D76010D57010D77010D58010D78010D59010D79010D5A010D7A010D5B010D7B010D5C010D7C010D5D010D7D010D5E010D7E010D5F010D7F010D60010D80010D61010D81010D62010D82010D63010D83010D64010D84010D65010D850118A00118C00118A10118C10118A20118C20118A30118C30118A40118C40118A50118C50118A60118C60118A70118C70118A80118C80118A90118C90118AA0118CA0118AB0118CB0118AC0118CC0118AD0118CD0118AE0118CE0118AF0118CF0118B00118D00118B10118D10118B20118D20118B30118D30118B40118D40118B50118D50118B60118D60118B70118D70118B80118D80118B90118D90118BA0118DA0118BB0118DB0118BC0118DC0118BD0118DD0118BE0118DE0118BF0118DF016E40016E60016E41016E61016E42016E62016E43016E63016E44016E64016E45016E65016E46016E66016E47016E67016E48016E68016E49016E69016E4A016E6A016E4B016E6B016E4C016E6C016E4D016E6D016E4E016E6E016E4F016E6F016E50016E70016E51016E71016E52016E72016E53016E73016E54016E74016E55016E75016E56016E76016E57016E77016E58016E78016E59016E79016E5A016E7A016E5B016E7B016E5C016E7C016E5D016E7D016E5E016E7E016E5F016E7F016EA0016EBB016EA1016EBC016EA2016EBD016EA3016EBE016EA4016EBF016EA5016EC0016EA6016EC1016EA7016EC2016EA8016EC3016EA9016EC4016EAA016EC5016EAB016EC6016EAC016EC7016EAD016EC8016EAE016EC9016EAF016ECA016EB0016ECB016EB1016ECC016EB2016ECD016EB3016ECE016EB4016ECF016EB5016ED0016EB6016ED1016EB7016ED2016EB8016ED301E90001E92201E90101E92301E90201E92401E90301E92501E90401E92601E90501E92701E90601E92801E90701E92901E90801E92A01E90901E92B01E90A01E92C01E90B01E92D01E90C01E92E01E90D01E92F01E90E01E93001E90F01E93101E91001E93201E91101E93301E91201E93401E91301E93501E91401E93601E91501E93701E91601E93801E91701E93901E91801E93A01E91901E93B01E91A01E93C01E91B01E93D01E91C01E93E01E91D01E93F01E91E01E94001E91F01E94101E92001E94201E92101E943"
-  let sp = ""
+  let tbl = "00004100006100004200006200004300006300004400006400004500006500004600006600004700006700004800006800004900006900004A00006A00004B00006B00004C00006C00004D00006D00004E00006E00004F00006F00005000007000005100007100005200007200005300007300005400007400005500007500005600007600005700007700005800007800005900007900005A00007A0000C00000E00000C10000E10000C20000E20000C30000E30000C40000E40000C50000E50000C60000E60000C70000E70000C80000E80000C90000E90000CA0000EA0000CB0000EB0000CC0000EC0000CD0000ED0000CE0000EE0000CF0000EF0000D00000F00000D10000F10000D20000F20000D30000F30000D40000F40000D50000F50000D60000F60000D80000F80000D90000F90000DA0000FA0000DB0000FB0000DC0000FC0000DD0000FD0000DE0000FE00010000010100010200010300010400010500010600010700010800010900010A00010B00010C00010D00010E00010F00011000011100011200011300011400011500011600011700011800011900011A00011B00011C00011D00011E00011F00012000012100012200012300012400012500012600012700012800012900012A00012B00012C00012D00012E00012F000130F0000000013200013300013400013500013600013700013900013A00013B00013C00013D00013E00013F00014000014100014200014300014400014500014600014700014800014A00014B00014C00014D00014E00014F00015000015100015200015300015400015500015600015700015800015900015A00015B00015C00015D00015E00015F00016000016100016200016300016400016500016600016700016800016900016A00016B00016C00016D00016E00016F0001700001710001720001730001740001750001760001770001780000FF00017900017A00017B00017C00017D00017E00018100025300018200018300018400018500018600025400018700018800018900025600018A00025700018B00018C00018E0001DD00018F00025900019000025B00019100019200019300026000019400026300019600026900019700026800019800019900019C00026F00019D00027200019F0002750001A00001A10001A20001A30001A40001A50001A60002800001A70001A80001A90002830001AC0001AD0001AE0002880001AF0001B00001B100028A0001B200028B0001B30001B40001B50001B60001B70002920001B80001B90001BC0001BD0001C40001C60001C50001C60001C70001C90001C80001C90001CA0001CC0001CB0001CC0001CD0001CE0001CF0001D00001D10001D20001D30001D40001D50001D60001D70001D80001D90001DA0001DB0001DC0001DE0001DF0001E00001E10001E20001E30001E40001E50001E60001E70001E80001E90001EA0001EB0001EC0001ED0001EE0001EF0001F10001F30001F20001F30001F40001F50001F60001950001F70001BF0001F80001F90001FA0001FB0001FC0001FD0001FE0001FF00020000020100020200020300020400020500020600020700020800020900020A00020B00020C00020D00020E00020F00021000021100021200021300021400021500021600021700021800021900021A00021B00021C00021D00021E00021F00022000019E00022200022300022400022500022600022700022800022900022A00022B00022C00022D00022E00022F00023000023100023200023300023A002C6500023B00023C00023D00019A00023E002C6600024100024200024300018000024400028900024500028C00024600024700024800024900024A00024B00024C00024D00024E00024F00037000037100037200037300037600037700037F0003F30003860003AC0003880003AD0003890003AE00038A0003AF00038C0003CC00038E0003CD00038F0003CE0003910003B10003920003B20003930003B30003940003B40003950003B50003960003B60003970003B70003980003B80003990003B900039A0003BA00039B0003BB00039C0003BC00039D0003BD00039E0003BE00039F0003BF0003A00003C00003A10003C10003A30003C30003A40003C40003A50003C50003A60003C60003A70003C70003A80003C80003A90003C90003AA0003CA0003AB0003CB0003CF0003D70003D80003D90003DA0003DB0003DC0003DD0003DE0003DF0003E00003E10003E20003E30003E40003E50003E60003E70003E80003E90003EA0003EB0003EC0003ED0003EE0003EF0003F40003B80003F70003F80003F90003F20003FA0003FB0003FD00037B0003FE00037C0003FF00037D00040000045000040100045100040200045200040300045300040400045400040500045500040600045600040700045700040800045800040900045900040A00045A00040B00045B00040C00045C00040D00045D00040E00045E00040F00045F00041000043000041100043100041200043200041300043300041400043400041500043500041600043600041700043700041800043800041900043900041A00043A00041B00043B00041C00043C00041D00043D00041E00043E00041F00043F00042000044000042100044100042200044200042300044300042400044400042500044500042600044600042700044700042800044800042900044900042A00044A00042B00044B00042C00044C00042D00044D00042E00044E00042F00044F00046000046100046200046300046400046500046600046700046800046900046A00046B00046C00046D00046E00046F00047000047100047200047300047400047500047600047700047800047900047A00047B00047C00047D00047E00047F00048000048100048A00048B00048C00048D00048E00048F00049000049100049200049300049400049500049600049700049800049900049A00049B00049C00049D00049E00049F0004A00004A10004A20004A30004A40004A50004A60004A70004A80004A90004AA0004AB0004AC0004AD0004AE0004AF0004B00004B10004B20004B30004B40004B50004B60004B70004B80004B90004BA0004BB0004BC0004BD0004BE0004BF0004C00004CF0004C10004C20004C30004C40004C50004C60004C70004C80004C90004CA0004CB0004CC0004CD0004CE0004D00004D10004D20004D30004D40004D50004D60004D70004D80004D90004DA0004DB0004DC0004DD0004DE0004DF0004E00004E10004E20004E30004E40004E50004E60004E70004E80004E90004EA0004EB0004EC0004ED0004EE0004EF0004F00004F10004F20004F30004F40004F50004F60004F70004F80004F90004FA0004FB0004FC0004FD0004FE0004FF00050000050100050200050300050400050500050600050700050800050900050A00050B00050C00050D00050E00050F00051000051100051200051300051400051500051600051700051800051900051A00051B00051C00051D00051E00051F00052000052100052200052300052400052500052600052700052800052900052A00052B00052C00052D00052E00052F00053100056100053200056200053300056300053400056400053500056500053600056600053700056700053800056800053900056900053A00056A00053B00056B00053C00056C00053D00056D00053E00056E00053F00056F00054000057000054100057100054200057200054300057300054400057400054500057500054600057600054700057700054800057800054900057900054A00057A00054B00057B00054C00057C00054D00057D00054E00057E00054F00057F0005500005800005510005810005520005820005530005830005540005840005550005850005560005860010A0002D000010A1002D010010A2002D020010A3002D030010A4002D040010A5002D050010A6002D060010A7002D070010A8002D080010A9002D090010AA002D0A0010AB002D0B0010AC002D0C0010AD002D0D0010AE002D0E0010AF002D0F0010B0002D100010B1002D110010B2002D120010B3002D130010B4002D140010B5002D150010B6002D160010B7002D170010B8002D180010B9002D190010BA002D1A0010BB002D1B0010BC002D1C0010BD002D1D0010BE002D1E0010BF002D1F0010C0002D200010C1002D210010C2002D220010C3002D230010C4002D240010C5002D250010C7002D270010CD002D2D0013A000AB700013A100AB710013A200AB720013A300AB730013A400AB740013A500AB750013A600AB760013A700AB770013A800AB780013A900AB790013AA00AB7A0013AB00AB7B0013AC00AB7C0013AD00AB7D0013AE00AB7E0013AF00AB7F0013B000AB800013B100AB810013B200AB820013B300AB830013B400AB840013B500AB850013B600AB860013B700AB870013B800AB880013B900AB890013BA00AB8A0013BB00AB8B0013BC00AB8C0013BD00AB8D0013BE00AB8E0013BF00AB8F0013C000AB900013C100AB910013C200AB920013C300AB930013C400AB940013C500AB950013C600AB960013C700AB970013C800AB980013C900AB990013CA00AB9A0013CB00AB9B0013CC00AB9C0013CD00AB9D0013CE00AB9E0013CF00AB9F0013D000ABA00013D100ABA10013D200ABA20013D300ABA30013D400ABA40013D500ABA50013D600ABA60013D700ABA70013D800ABA80013D900ABA90013DA00ABAA0013DB00ABAB0013DC00ABAC0013DD00ABAD0013DE00ABAE0013DF00ABAF0013E000ABB00013E100ABB10013E200ABB20013E300ABB30013E400ABB40013E500ABB50013E600ABB60013E700ABB70013E800ABB80013E900ABB90013EA00ABBA0013EB00ABBB0013EC00ABBC0013ED00ABBD0013EE00ABBE0013EF00ABBF0013F00013F80013F10013F90013F20013FA0013F30013FB0013F40013FC0013F50013FD001C89001C8A001C900010D0001C910010D1001C920010D2001C930010D3001C940010D4001C950010D5001C960010D6001C970010D7001C980010D8001C990010D9001C9A0010DA001C9B0010DB001C9C0010DC001C9D0010DD001C9E0010DE001C9F0010DF001CA00010E0001CA10010E1001CA20010E2001CA30010E3001CA40010E4001CA50010E5001CA60010E6001CA70010E7001CA80010E8001CA90010E9001CAA0010EA001CAB0010EB001CAC0010EC001CAD0010ED001CAE0010EE001CAF0010EF001CB00010F0001CB10010F1001CB20010F2001CB30010F3001CB40010F4001CB50010F5001CB60010F6001CB70010F7001CB80010F8001CB90010F9001CBA0010FA001CBD0010FD001CBE0010FE001CBF0010FF001E00001E01001E02001E03001E04001E05001E06001E07001E08001E09001E0A001E0B001E0C001E0D001E0E001E0F001E10001E11001E12001E13001E14001E15001E16001E17001E18001E19001E1A001E1B001E1C001E1D001E1E001E1F001E20001E21001E22001E23001E24001E25001E26001E27001E28001E29001E2A001E2B001E2C001E2D001E2E001E2F001E30001E31001E32001E33001E34001E35001E36001E37001E38001E39001E3A001E3B001E3C001E3D001E3E001E3F001E40001E41001E42001E43001E44001E45001E46001E47001E48001E49001E4A001E4B001E4C001E4D001E4E001E4F001E50001E51001E52001E53001E54001E55001E56001E57001E58001E59001E5A001E5B001E5C001E5D001E5E001E5F001E60001E61001E62001E63001E64001E65001E66001E67001E68001E69001E6A001E6B001E6C001E6D001E6E001E6F001E70001E71001E72001E73001E74001E75001E76001E77001E78001E79001E7A001E7B001E7C001E7D001E7E001E7F001E80001E81001E82001E83001E84001E85001E86001E87001E88001E89001E8A001E8B001E8C001E8D001E8E001E8F001E90001E91001E92001E93001E94001E95001E9E0000DF001EA0001EA1001EA2001EA3001EA4001EA5001EA6001EA7001EA8001EA9001EAA001EAB001EAC001EAD001EAE001EAF001EB0001EB1001EB2001EB3001EB4001EB5001EB6001EB7001EB8001EB9001EBA001EBB001EBC001EBD001EBE001EBF001EC0001EC1001EC2001EC3001EC4001EC5001EC6001EC7001EC8001EC9001ECA001ECB001ECC001ECD001ECE001ECF001ED0001ED1001ED2001ED3001ED4001ED5001ED6001ED7001ED8001ED9001EDA001EDB001EDC001EDD001EDE001EDF001EE0001EE1001EE2001EE3001EE4001EE5001EE6001EE7001EE8001EE9001EEA001EEB001EEC001EED001EEE001EEF001EF0001EF1001EF2001EF3001EF4001EF5001EF6001EF7001EF8001EF9001EFA001EFB001EFC001EFD001EFE001EFF001F08001F00001F09001F01001F0A001F02001F0B001F03001F0C001F04001F0D001F05001F0E001F06001F0F001F07001F18001F10001F19001F11001F1A001F12001F1B001F13001F1C001F14001F1D001F15001F28001F20001F29001F21001F2A001F22001F2B001F23001F2C001F24001F2D001F25001F2E001F26001F2F001F27001F38001F30001F39001F31001F3A001F32001F3B001F33001F3C001F34001F3D001F35001F3E001F36001F3F001F37001F48001F40001F49001F41001F4A001F42001F4B001F43001F4C001F44001F4D001F45001F59001F51001F5B001F53001F5D001F55001F5F001F57001F68001F60001F69001F61001F6A001F62001F6B001F63001F6C001F64001F6D001F65001F6E001F66001F6F001F67001F88001F80001F89001F81001F8A001F82001F8B001F83001F8C001F84001F8D001F85001F8E001F86001F8F001F87001F98001F90001F99001F91001F9A001F92001F9B001F93001F9C001F94001F9D001F95001F9E001F96001F9F001F97001FA8001FA0001FA9001FA1001FAA001FA2001FAB001FA3001FAC001FA4001FAD001FA5001FAE001FA6001FAF001FA7001FB8001FB0001FB9001FB1001FBA001F70001FBB001F71001FBC001FB3001FC8001F72001FC9001F73001FCA001F74001FCB001F75001FCC001FC3001FD8001FD0001FD9001FD1001FDA001F76001FDB001F77001FE8001FE0001FE9001FE1001FEA001F7A001FEB001F7B001FEC001FE5001FF8001F78001FF9001F79001FFA001F7C001FFB001F7D001FFC001FF30021260003C900212A00006B00212B0000E500213200214E00216000217000216100217100216200217200216300217300216400217400216500217500216600217600216700217700216800217800216900217900216A00217A00216B00217B00216C00217C00216D00217D00216E00217E00216F00217F0021830021840024B60024D00024B70024D10024B80024D20024B90024D30024BA0024D40024BB0024D50024BC0024D60024BD0024D70024BE0024D80024BF0024D90024C00024DA0024C10024DB0024C20024DC0024C30024DD0024C40024DE0024C50024DF0024C60024E00024C70024E10024C80024E20024C90024E30024CA0024E40024CB0024E50024CC0024E60024CD0024E70024CE0024E80024CF0024E9002C00002C30002C01002C31002C02002C32002C03002C33002C04002C34002C05002C35002C06002C36002C07002C37002C08002C38002C09002C39002C0A002C3A002C0B002C3B002C0C002C3C002C0D002C3D002C0E002C3E002C0F002C3F002C10002C40002C11002C41002C12002C42002C13002C43002C14002C44002C15002C45002C16002C46002C17002C47002C18002C48002C19002C49002C1A002C4A002C1B002C4B002C1C002C4C002C1D002C4D002C1E002C4E002C1F002C4F002C20002C50002C21002C51002C22002C52002C23002C53002C24002C54002C25002C55002C26002C56002C27002C57002C28002C58002C29002C59002C2A002C5A002C2B002C5B002C2C002C5C002C2D002C5D002C2E002C5E002C2F002C5F002C60002C61002C6200026B002C63001D7D002C6400027D002C67002C68002C69002C6A002C6B002C6C002C6D000251002C6E000271002C6F000250002C70000252002C72002C73002C75002C76002C7E00023F002C7F000240002C80002C81002C82002C83002C84002C85002C86002C87002C88002C89002C8A002C8B002C8C002C8D002C8E002C8F002C90002C91002C92002C93002C94002C95002C96002C97002C98002C99002C9A002C9B002C9C002C9D002C9E002C9F002CA0002CA1002CA2002CA3002CA4002CA5002CA6002CA7002CA8002CA9002CAA002CAB002CAC002CAD002CAE002CAF002CB0002CB1002CB2002CB3002CB4002CB5002CB6002CB7002CB8002CB9002CBA002CBB002CBC002CBD002CBE002CBF002CC0002CC1002CC2002CC3002CC4002CC5002CC6002CC7002CC8002CC9002CCA002CCB002CCC002CCD002CCE002CCF002CD0002CD1002CD2002CD3002CD4002CD5002CD6002CD7002CD8002CD9002CDA002CDB002CDC002CDD002CDE002CDF002CE0002CE1002CE2002CE3002CEB002CEC002CED002CEE002CF2002CF300A64000A64100A64200A64300A64400A64500A64600A64700A64800A64900A64A00A64B00A64C00A64D00A64E00A64F00A65000A65100A65200A65300A65400A65500A65600A65700A65800A65900A65A00A65B00A65C00A65D00A65E00A65F00A66000A66100A66200A66300A66400A66500A66600A66700A66800A66900A66A00A66B00A66C00A66D00A68000A68100A68200A68300A68400A68500A68600A68700A68800A68900A68A00A68B00A68C00A68D00A68E00A68F00A69000A69100A69200A69300A69400A69500A69600A69700A69800A69900A69A00A69B00A72200A72300A72400A72500A72600A72700A72800A72900A72A00A72B00A72C00A72D00A72E00A72F00A73200A73300A73400A73500A73600A73700A73800A73900A73A00A73B00A73C00A73D00A73E00A73F00A74000A74100A74200A74300A74400A74500A74600A74700A74800A74900A74A00A74B00A74C00A74D00A74E00A74F00A75000A75100A75200A75300A75400A75500A75600A75700A75800A75900A75A00A75B00A75C00A75D00A75E00A75F00A76000A76100A76200A76300A76400A76500A76600A76700A76800A76900A76A00A76B00A76C00A76D00A76E00A76F00A77900A77A00A77B00A77C00A77D001D7900A77E00A77F00A78000A78100A78200A78300A78400A78500A78600A78700A78B00A78C00A78D00026500A79000A79100A79200A79300A79600A79700A79800A79900A79A00A79B00A79C00A79D00A79E00A79F00A7A000A7A100A7A200A7A300A7A400A7A500A7A600A7A700A7A800A7A900A7AA00026600A7AB00025C00A7AC00026100A7AD00026C00A7AE00026A00A7B000029E00A7B100028700A7B200029D00A7B300AB5300A7B400A7B500A7B600A7B700A7B800A7B900A7BA00A7BB00A7BC00A7BD00A7BE00A7BF00A7C000A7C100A7C200A7C300A7C400A79400A7C500028200A7C6001D8E00A7C700A7C800A7C900A7CA00A7CB00026400A7CC00A7CD00A7CE00A7CF00A7D000A7D100A7D200A7D300A7D400A7D500A7D600A7D700A7D800A7D900A7DA00A7DB00A7DC00019B00A7F500A7F600FF2100FF4100FF2200FF4200FF2300FF4300FF2400FF4400FF2500FF4500FF2600FF4600FF2700FF4700FF2800FF4800FF2900FF4900FF2A00FF4A00FF2B00FF4B00FF2C00FF4C00FF2D00FF4D00FF2E00FF4E00FF2F00FF4F00FF3000FF5000FF3100FF5100FF3200FF5200FF3300FF5300FF3400FF5400FF3500FF5500FF3600FF5600FF3700FF5700FF3800FF5800FF3900FF5900FF3A00FF5A01040001042801040101042901040201042A01040301042B01040401042C01040501042D01040601042E01040701042F01040801043001040901043101040A01043201040B01043301040C01043401040D01043501040E01043601040F01043701041001043801041101043901041201043A01041301043B01041401043C01041501043D01041601043E01041701043F01041801044001041901044101041A01044201041B01044301041C01044401041D01044501041E01044601041F01044701042001044801042101044901042201044A01042301044B01042401044C01042501044D01042601044E01042701044F0104B00104D80104B10104D90104B20104DA0104B30104DB0104B40104DC0104B50104DD0104B60104DE0104B70104DF0104B80104E00104B90104E10104BA0104E20104BB0104E30104BC0104E40104BD0104E50104BE0104E60104BF0104E70104C00104E80104C10104E90104C20104EA0104C30104EB0104C40104EC0104C50104ED0104C60104EE0104C70104EF0104C80104F00104C90104F10104CA0104F20104CB0104F30104CC0104F40104CD0104F50104CE0104F60104CF0104F70104D00104F80104D10104F90104D20104FA0104D30104FB01057001059701057101059801057201059901057301059A01057401059B01057501059C01057601059D01057701059E01057801059F0105790105A001057A0105A101057C0105A301057D0105A401057E0105A501057F0105A60105800105A70105810105A80105820105A90105830105AA0105840105AB0105850105AC0105860105AD0105870105AE0105880105AF0105890105B001058A0105B101058C0105B301058D0105B401058E0105B501058F0105B60105900105B70105910105B80105920105B90105940105BB0105950105BC010C80010CC0010C81010CC1010C82010CC2010C83010CC3010C84010CC4010C85010CC5010C86010CC6010C87010CC7010C88010CC8010C89010CC9010C8A010CCA010C8B010CCB010C8C010CCC010C8D010CCD010C8E010CCE010C8F010CCF010C90010CD0010C91010CD1010C92010CD2010C93010CD3010C94010CD4010C95010CD5010C96010CD6010C97010CD7010C98010CD8010C99010CD9010C9A010CDA010C9B010CDB010C9C010CDC010C9D010CDD010C9E010CDE010C9F010CDF010CA0010CE0010CA1010CE1010CA2010CE2010CA3010CE3010CA4010CE4010CA5010CE5010CA6010CE6010CA7010CE7010CA8010CE8010CA9010CE9010CAA010CEA010CAB010CEB010CAC010CEC010CAD010CED010CAE010CEE010CAF010CEF010CB0010CF0010CB1010CF1010CB2010CF2010D50010D70010D51010D71010D52010D72010D53010D73010D54010D74010D55010D75010D56010D76010D57010D77010D58010D78010D59010D79010D5A010D7A010D5B010D7B010D5C010D7C010D5D010D7D010D5E010D7E010D5F010D7F010D60010D80010D61010D81010D62010D82010D63010D83010D64010D84010D65010D850118A00118C00118A10118C10118A20118C20118A30118C30118A40118C40118A50118C50118A60118C60118A70118C70118A80118C80118A90118C90118AA0118CA0118AB0118CB0118AC0118CC0118AD0118CD0118AE0118CE0118AF0118CF0118B00118D00118B10118D10118B20118D20118B30118D30118B40118D40118B50118D50118B60118D60118B70118D70118B80118D80118B90118D90118BA0118DA0118BB0118DB0118BC0118DC0118BD0118DD0118BE0118DE0118BF0118DF016E40016E60016E41016E61016E42016E62016E43016E63016E44016E64016E45016E65016E46016E66016E47016E67016E48016E68016E49016E69016E4A016E6A016E4B016E6B016E4C016E6C016E4D016E6D016E4E016E6E016E4F016E6F016E50016E70016E51016E71016E52016E72016E53016E73016E54016E74016E55016E75016E56016E76016E57016E77016E58016E78016E59016E79016E5A016E7A016E5B016E7B016E5C016E7C016E5D016E7D016E5E016E7E016E5F016E7F016EA0016EBB016EA1016EBC016EA2016EBD016EA3016EBE016EA4016EBF016EA5016EC0016EA6016EC1016EA7016EC2016EA8016EC3016EA9016EC4016EAA016EC5016EAB016EC6016EAC016EC7016EAD016EC8016EAE016EC9016EAF016ECA016EB0016ECB016EB1016ECC016EB2016ECD016EB3016ECE016EB4016ECF016EB5016ED0016EB6016ED1016EB7016ED2016EB8016ED301E90001E92201E90101E92301E90201E92401E90301E92501E90401E92601E90501E92701E90601E92801E90701E92901E90801E92A01E90901E92B01E90A01E92C01E90B01E92D01E90C01E92E01E90D01E92F01E90E01E93001E90F01E93101E91001E93201E91101E93301E91201E93401E91301E93501E91401E93601E91501E93701E91601E93801E91701E93901E91801E93A01E91901E93B01E91A01E93C01E91B01E93D01E91C01E93E01E91D01E93F01E91E01E94001E91F01E94101E92001E94201E92101E943"
+  let sp = "000069000307000000"
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
   let buf = prim.alloc_str(blen * 3 + 8)
@@ -41357,7 +41040,7 @@ fn string_to_lower(s: String) -> String = {
     h + 12,
     h + 12 + blen,
     prim.handle(tbl) + 12,
-    1486,
+    1488,
     prim.handle(sp) + 12,
     prim.handle(buf) + 12,
     0,
@@ -41370,8 +41053,6 @@ fn string_to_lower(s: String) -> String = {
 }
 "#;
 pub const SRC_STRING_TO_UPPER: &str = r#"
-
-
 
 
 
@@ -41458,8 +41139,8 @@ fn __to_upper_walk(p: Int, end: Int, th: Int, nent: Int, sh: Int, dh: Int, o: In
   }
 
 fn string_to_upper(s: String) -> String = {
-  let tbl = "00006100004100006200004200006300004300006400004400006500004500006600004600006700004700006800004800006900004900006A00004A00006B00004B00006C00004C00006D00004D00006E00004E00006F00004F00007000005000007100005100007200005200007300005300007400005400007500005500007600005600007700005700007800005800007900005900007A00005A0000B500039C0000E00000C00000E10000C10000E20000C20000E30000C30000E40000C40000E50000C50000E60000C60000E70000C70000E80000C80000E90000C90000EA0000CA0000EB0000CB0000EC0000CC0000ED0000CD0000EE0000CE0000EF0000CF0000F00000D00000F10000D10000F20000D20000F30000D30000F40000D40000F50000D50000F60000D60000F80000D80000F90000D90000FA0000DA0000FB0000DB0000FC0000DC0000FD0000DD0000FE0000DE0000FF00017800010100010000010300010200010500010400010700010600010900010800010B00010A00010D00010C00010F00010E00011100011000011300011200011500011400011700011600011900011800011B00011A00011D00011C00011F00011E00012100012000012300012200012500012400012700012600012900012800012B00012A00012D00012C00012F00012E00013300013200013500013400013700013600013A00013900013C00013B00013E00013D00014000013F00014200014100014400014300014600014500014800014700014B00014A00014D00014C00014F00014E00015100015000015300015200015500015400015700015600015900015800015B00015A00015D00015C00015F00015E00016100016000016300016200016500016400016700016600016900016800016B00016A00016D00016C00016F00016E00017100017000017300017200017500017400017700017600017A00017900017C00017B00017E00017D00018000024300018300018200018500018400018800018700018C00018B0001920001910001950001F600019900019800019A00023D00019B00A7DC00019E0002200001A10001A00001A30001A20001A50001A40001A80001A70001AD0001AC0001B00001AF0001B40001B30001B60001B50001B90001B80001BD0001BC0001BF0001F70001C50001C40001C60001C40001C80001C70001C90001C70001CB0001CA0001CC0001CA0001CE0001CD0001D00001CF0001D20001D10001D40001D30001D60001D50001D80001D70001DA0001D90001DC0001DB0001DD00018E0001DF0001DE0001E10001E00001E30001E20001E50001E40001E70001E60001E90001E80001EB0001EA0001ED0001EC0001EF0001EE0001F20001F10001F30001F10001F50001F40001F90001F80001FB0001FA0001FD0001FC0001FF0001FE00020100020000020300020200020500020400020700020600020900020800020B00020A00020D00020C00020F00020E00021100021000021300021200021500021400021700021600021900021800021B00021A00021D00021C00021F00021E00022300022200022500022400022700022600022900022800022B00022A00022D00022C00022F00022E00023100023000023300023200023C00023B00023F002C7E000240002C7F00024200024100024700024600024900024800024B00024A00024D00024C00024F00024E000250002C6F000251002C6D000252002C7000025300018100025400018600025600018900025700018A00025900018F00025B00019000025C00A7AB00026000019300026100A7AC00026300019400026400A7CB00026500A78D00026600A7AA00026800019700026900019600026A00A7AE00026B002C6200026C00A7AD00026F00019C000271002C6E00027200019D00027500019F00027D002C640002800001A600028200A7C50002830001A900028700A7B10002880001AE00028900024400028A0001B100028B0001B200028C0002450002920001B700029D00A7B200029E00A7B000034500039900037100037000037300037200037700037600037B0003FD00037C0003FE00037D0003FF000390F000000003AC0003860003AD0003880003AE0003890003AF00038A0003B0F000010003B10003910003B20003920003B30003930003B40003940003B50003950003B60003960003B70003970003B80003980003B90003990003BA00039A0003BB00039B0003BC00039C0003BD00039D0003BE00039E0003BF00039F0003C00003A00003C10003A10003C20003A30003C30003A30003C40003A40003C50003A50003C60003A60003C70003A70003C80003A80003C90003A90003CA0003AA0003CB0003AB0003CC00038C0003CD00038E0003CE00038F0003D00003920003D10003980003D50003A60003D60003A00003D70003CF0003D90003D80003DB0003DA0003DD0003DC0003DF0003DE0003E10003E00003E30003E20003E50003E40003E70003E60003E90003E80003EB0003EA0003ED0003EC0003EF0003EE0003F000039A0003F10003A10003F20003F90003F300037F0003F50003950003F80003F70003FB0003FA00043000041000043100041100043200041200043300041300043400041400043500041500043600041600043700041700043800041800043900041900043A00041A00043B00041B00043C00041C00043D00041D00043E00041E00043F00041F00044000042000044100042100044200042200044300042300044400042400044500042500044600042600044700042700044800042800044900042900044A00042A00044B00042B00044C00042C00044D00042D00044E00042E00044F00042F00045000040000045100040100045200040200045300040300045400040400045500040500045600040600045700040700045800040800045900040900045A00040A00045B00040B00045C00040C00045D00040D00045E00040E00045F00040F00046100046000046300046200046500046400046700046600046900046800046B00046A00046D00046C00046F00046E00047100047000047300047200047500047400047700047600047900047800047B00047A00047D00047C00047F00047E00048100048000048B00048A00048D00048C00048F00048E00049100049000049300049200049500049400049700049600049900049800049B00049A00049D00049C00049F00049E0004A10004A00004A30004A20004A50004A40004A70004A60004A90004A80004AB0004AA0004AD0004AC0004AF0004AE0004B10004B00004B30004B20004B50004B40004B70004B60004B90004B80004BB0004BA0004BD0004BC0004BF0004BE0004C20004C10004C40004C30004C60004C50004C80004C70004CA0004C90004CC0004CB0004CE0004CD0004CF0004C00004D10004D00004D30004D20004D50004D40004D70004D60004D90004D80004DB0004DA0004DD0004DC0004DF0004DE0004E10004E00004E30004E20004E50004E40004E70004E60004E90004E80004EB0004EA0004ED0004EC0004EF0004EE0004F10004F00004F30004F20004F50004F40004F70004F60004F90004F80004FB0004FA0004FD0004FC0004FF0004FE00050100050000050300050200050500050400050700050600050900050800050B00050A00050D00050C00050F00050E00051100051000051300051200051500051400051700051600051900051800051B00051A00051D00051C00051F00051E00052100052000052300052200052500052400052700052600052900052800052B00052A00052D00052C00052F00052E00056100053100056200053200056300053300056400053400056500053500056600053600056700053700056800053800056900053900056A00053A00056B00053B00056C00053C00056D00053D00056E00053E00056F00053F00057000054000057100054100057200054200057300054300057400054400057500054500057600054600057700054700057800054800057900054900057A00054A00057B00054B00057C00054C00057D00054D00057E00054E00057F00054F000580000550000581000551000582000552000583000553000584000554000585000555000586000556000587F000020010D0001C900010D1001C910010D2001C920010D3001C930010D4001C940010D5001C950010D6001C960010D7001C970010D8001C980010D9001C990010DA001C9A0010DB001C9B0010DC001C9C0010DD001C9D0010DE001C9E0010DF001C9F0010E0001CA00010E1001CA10010E2001CA20010E3001CA30010E4001CA40010E5001CA50010E6001CA60010E7001CA70010E8001CA80010E9001CA90010EA001CAA0010EB001CAB0010EC001CAC0010ED001CAD0010EE001CAE0010EF001CAF0010F0001CB00010F1001CB10010F2001CB20010F3001CB30010F4001CB40010F5001CB50010F6001CB60010F7001CB70010F8001CB80010F9001CB90010FA001CBA0010FD001CBD0010FE001CBE0010FF001CBF0013F80013F00013F90013F10013FA0013F20013FB0013F30013FC0013F40013FD0013F5001C80000412001C81000414001C8200041E001C83000421001C84000422001C85000422001C8600042A001C87000462001C8800A64A001C8A001C89001D7900A77D001D7D002C63001D8E00A7C6001E01001E00001E03001E02001E05001E04001E07001E06001E09001E08001E0B001E0A001E0D001E0C001E0F001E0E001E11001E10001E13001E12001E15001E14001E17001E16001E19001E18001E1B001E1A001E1D001E1C001E1F001E1E001E21001E20001E23001E22001E25001E24001E27001E26001E29001E28001E2B001E2A001E2D001E2C001E2F001E2E001E31001E30001E33001E32001E35001E34001E37001E36001E39001E38001E3B001E3A001E3D001E3C001E3F001E3E001E41001E40001E43001E42001E45001E44001E47001E46001E49001E48001E4B001E4A001E4D001E4C001E4F001E4E001E51001E50001E53001E52001E55001E54001E57001E56001E59001E58001E5B001E5A001E5D001E5C001E5F001E5E001E61001E60001E63001E62001E65001E64001E67001E66001E69001E68001E6B001E6A001E6D001E6C001E6F001E6E001E71001E70001E73001E72001E75001E74001E77001E76001E79001E78001E7B001E7A001E7D001E7C001E7F001E7E001E81001E80001E83001E82001E85001E84001E87001E86001E89001E88001E8B001E8A001E8D001E8C001E8F001E8E001E91001E90001E93001E92001E95001E94001E9B001E60001EA1001EA0001EA3001EA2001EA5001EA4001EA7001EA6001EA9001EA8001EAB001EAA001EAD001EAC001EAF001EAE001EB1001EB0001EB3001EB2001EB5001EB4001EB7001EB6001EB9001EB8001EBB001EBA001EBD001EBC001EBF001EBE001EC1001EC0001EC3001EC2001EC5001EC4001EC7001EC6001EC9001EC8001ECB001ECA001ECD001ECC001ECF001ECE001ED1001ED0001ED3001ED2001ED5001ED4001ED7001ED6001ED9001ED8001EDB001EDA001EDD001EDC001EDF001EDE001EE1001EE0001EE3001EE2001EE5001EE4001EE7001EE6001EE9001EE8001EEB001EEA001EED001EEC001EEF001EEE001EF1001EF0001EF3001EF2001EF5001EF4001EF7001EF6001EF9001EF8001EFB001EFA001EFD001EFC001EFF001EFE001F00001F08001F01001F09001F02001F0A001F03001F0B001F04001F0C001F05001F0D001F06001F0E001F07001F0F001F10001F18001F11001F19001F12001F1A001F13001F1B001F14001F1C001F15001F1D001F20001F28001F21001F29001F22001F2A001F23001F2B001F24001F2C001F25001F2D001F26001F2E001F27001F2F001F30001F38001F31001F39001F32001F3A001F33001F3B001F34001F3C001F35001F3D001F36001F3E001F37001F3F001F40001F48001F41001F49001F42001F4A001F43001F4B001F44001F4C001F45001F4D001F50F00003001F51001F59001F52F00004001F53001F5B001F54F00005001F55001F5D001F56F00006001F57001F5F001F60001F68001F61001F69001F62001F6A001F63001F6B001F64001F6C001F65001F6D001F66001F6E001F67001F6F001F70001FBA001F71001FBB001F72001FC8001F73001FC9001F74001FCA001F75001FCB001F76001FDA001F77001FDB001F78001FF8001F79001FF9001F7A001FEA001F7B001FEB001F7C001FFA001F7D001FFB001F80F00007001F81F00008001F82F00009001F83F0000A001F84F0000B001F85F0000C001F86F0000D001F87F0000E001F88F0000F001F89F00010001F8AF00011001F8BF00012001F8CF00013001F8DF00014001F8EF00015001F8FF00016001F90F00017001F91F00018001F92F00019001F93F0001A001F94F0001B001F95F0001C001F96F0001D001F97F0001E001F98F0001F001F99F00020001F9AF00021001F9BF00022001F9CF00023001F9DF00024001F9EF00025001F9FF00026001FA0F00027001FA1F00028001FA2F00029001FA3F0002A001FA4F0002B001FA5F0002C001FA6F0002D001FA7F0002E001FA8F0002F001FA9F00030001FAAF00031001FABF00032001FACF00033001FADF00034001FAEF00035001FAFF00036001FB0001FB8001FB1001FB9001FB2F00037001FB3F00038001FB4F00039001FB6F0003A001FB7F0003B001FBCF0003C001FBE000399001FC2F0003D001FC3F0003E001FC4F0003F001FC6F00040001FC7F00041001FCCF00042001FD0001FD8001FD1001FD9001FD2F00043001FD3F00044001FD6F00045001FD7F00046001FE0001FE8001FE1001FE9001FE2F00047001FE3F00048001FE4F00049001FE5001FEC001FE6F0004A001FE7F0004B001FF2F0004C001FF3F0004D001FF4F0004E001FF6F0004F001FF7F00050001FFCF0005100214E00213200217000216000217100216100217200216200217300216300217400216400217500216500217600216600217700216700217800216800217900216900217A00216A00217B00216B00217C00216C00217D00216D00217E00216E00217F00216F0021840021830024D00024B60024D10024B70024D20024B80024D30024B90024D40024BA0024D50024BB0024D60024BC0024D70024BD0024D80024BE0024D90024BF0024DA0024C00024DB0024C10024DC0024C20024DD0024C30024DE0024C40024DF0024C50024E00024C60024E10024C70024E20024C80024E30024C90024E40024CA0024E50024CB0024E60024CC0024E70024CD0024E80024CE0024E90024CF002C30002C00002C31002C01002C32002C02002C33002C03002C34002C04002C35002C05002C36002C06002C37002C07002C38002C08002C39002C09002C3A002C0A002C3B002C0B002C3C002C0C002C3D002C0D002C3E002C0E002C3F002C0F002C40002C10002C41002C11002C42002C12002C43002C13002C44002C14002C45002C15002C46002C16002C47002C17002C48002C18002C49002C19002C4A002C1A002C4B002C1B002C4C002C1C002C4D002C1D002C4E002C1E002C4F002C1F002C50002C20002C51002C21002C52002C22002C53002C23002C54002C24002C55002C25002C56002C26002C57002C27002C58002C28002C59002C29002C5A002C2A002C5B002C2B002C5C002C2C002C5D002C2D002C5E002C2E002C5F002C2F002C61002C60002C6500023A002C6600023E002C68002C67002C6A002C69002C6C002C6B002C73002C72002C76002C75002C81002C80002C83002C82002C85002C84002C87002C86002C89002C88002C8B002C8A002C8D002C8C002C8F002C8E002C91002C90002C93002C92002C95002C94002C97002C96002C99002C98002C9B002C9A002C9D002C9C002C9F002C9E002CA1002CA0002CA3002CA2002CA5002CA4002CA7002CA6002CA9002CA8002CAB002CAA002CAD002CAC002CAF002CAE002CB1002CB0002CB3002CB2002CB5002CB4002CB7002CB6002CB9002CB8002CBB002CBA002CBD002CBC002CBF002CBE002CC1002CC0002CC3002CC2002CC5002CC4002CC7002CC6002CC9002CC8002CCB002CCA002CCD002CCC002CCF002CCE002CD1002CD0002CD3002CD2002CD5002CD4002CD7002CD6002CD9002CD8002CDB002CDA002CDD002CDC002CDF002CDE002CE1002CE0002CE3002CE2002CEC002CEB002CEE002CED002CF3002CF2002D000010A0002D010010A1002D020010A2002D030010A3002D040010A4002D050010A5002D060010A6002D070010A7002D080010A8002D090010A9002D0A0010AA002D0B0010AB002D0C0010AC002D0D0010AD002D0E0010AE002D0F0010AF002D100010B0002D110010B1002D120010B2002D130010B3002D140010B4002D150010B5002D160010B6002D170010B7002D180010B8002D190010B9002D1A0010BA002D1B0010BB002D1C0010BC002D1D0010BD002D1E0010BE002D1F0010BF002D200010C0002D210010C1002D220010C2002D230010C3002D240010C4002D250010C5002D270010C7002D2D0010CD00A64100A64000A64300A64200A64500A64400A64700A64600A64900A64800A64B00A64A00A64D00A64C00A64F00A64E00A65100A65000A65300A65200A65500A65400A65700A65600A65900A65800A65B00A65A00A65D00A65C00A65F00A65E00A66100A66000A66300A66200A66500A66400A66700A66600A66900A66800A66B00A66A00A66D00A66C00A68100A68000A68300A68200A68500A68400A68700A68600A68900A68800A68B00A68A00A68D00A68C00A68F00A68E00A69100A69000A69300A69200A69500A69400A69700A69600A69900A69800A69B00A69A00A72300A72200A72500A72400A72700A72600A72900A72800A72B00A72A00A72D00A72C00A72F00A72E00A73300A73200A73500A73400A73700A73600A73900A73800A73B00A73A00A73D00A73C00A73F00A73E00A74100A74000A74300A74200A74500A74400A74700A74600A74900A74800A74B00A74A00A74D00A74C00A74F00A74E00A75100A75000A75300A75200A75500A75400A75700A75600A75900A75800A75B00A75A00A75D00A75C00A75F00A75E00A76100A76000A76300A76200A76500A76400A76700A76600A76900A76800A76B00A76A00A76D00A76C00A76F00A76E00A77A00A77900A77C00A77B00A77F00A77E00A78100A78000A78300A78200A78500A78400A78700A78600A78C00A78B00A79100A79000A79300A79200A79400A7C400A79700A79600A79900A79800A79B00A79A00A79D00A79C00A79F00A79E00A7A100A7A000A7A300A7A200A7A500A7A400A7A700A7A600A7A900A7A800A7B500A7B400A7B700A7B600A7B900A7B800A7BB00A7BA00A7BD00A7BC00A7BF00A7BE00A7C100A7C000A7C300A7C200A7C800A7C700A7CA00A7C900A7CD00A7CC00A7CF00A7CE00A7D100A7D000A7D300A7D200A7D500A7D400A7D700A7D600A7D900A7D800A7DB00A7DA00A7F600A7F500AB5300A7B300AB700013A000AB710013A100AB720013A200AB730013A300AB740013A400AB750013A500AB760013A600AB770013A700AB780013A800AB790013A900AB7A0013AA00AB7B0013AB00AB7C0013AC00AB7D0013AD00AB7E0013AE00AB7F0013AF00AB800013B000AB810013B100AB820013B200AB830013B300AB840013B400AB850013B500AB860013B600AB870013B700AB880013B800AB890013B900AB8A0013BA00AB8B0013BB00AB8C0013BC00AB8D0013BD00AB8E0013BE00AB8F0013BF00AB900013C000AB910013C100AB920013C200AB930013C300AB940013C400AB950013C500AB960013C600AB970013C700AB980013C800AB990013C900AB9A0013CA00AB9B0013CB00AB9C0013CC00AB9D0013CD00AB9E0013CE00AB9F0013CF00ABA00013D000ABA10013D100ABA20013D200ABA30013D300ABA40013D400ABA50013D500ABA60013D600ABA70013D700ABA80013D800ABA90013D900ABAA0013DA00ABAB0013DB00ABAC0013DC00ABAD0013DD00ABAE0013DE00ABAF0013DF00ABB00013E000ABB10013E100ABB20013E200ABB30013E300ABB40013E400ABB50013E500ABB60013E600ABB70013E700ABB80013E800ABB90013E900ABBA0013EA00ABBB0013EB00ABBC0013EC00ABBD0013ED00ABBE0013EE00ABBF0013EF00FB13F0005200FB14F0005300FB15F0005400FB16F0005500FB17F0005600FF4100FF2100FF4200FF2200FF4300FF2300FF4400FF2400FF4500FF2500FF4600FF2600FF4700FF2700FF4800FF2800FF4900FF2900FF4A00FF2A00FF4B00FF2B00FF4C00FF2C00FF4D00FF2D00FF4E00FF2E00FF4F00FF2F00FF5000FF3000FF5100FF3100FF5200FF3200FF5300FF3300FF5400FF3400FF5500FF3500FF5600FF3600FF5700FF3700FF5800FF3800FF5900FF3900FF5A00FF3A01042801040001042901040101042A01040201042B01040301042C01040401042D01040501042E01040601042F01040701043001040801043101040901043201040A01043301040B01043401040C01043501040D01043601040E01043701040F01043801041001043901041101043A01041201043B01041301043C01041401043D01041501043E01041601043F01041701044001041801044101041901044201041A01044301041B01044401041C01044501041D01044601041E01044701041F01044801042001044901042101044A01042201044B01042301044C01042401044D01042501044E01042601044F0104270104D80104B00104D90104B10104DA0104B20104DB0104B30104DC0104B40104DD0104B50104DE0104B60104DF0104B70104E00104B80104E10104B90104E20104BA0104E30104BB0104E40104BC0104E50104BD0104E60104BE0104E70104BF0104E80104C00104E90104C10104EA0104C20104EB0104C30104EC0104C40104ED0104C50104EE0104C60104EF0104C70104F00104C80104F10104C90104F20104CA0104F30104CB0104F40104CC0104F50104CD0104F60104CE0104F70104CF0104F80104D00104F90104D10104FA0104D20104FB0104D301059701057001059801057101059901057201059A01057301059B01057401059C01057501059D01057601059E01057701059F0105780105A00105790105A101057A0105A301057C0105A401057D0105A501057E0105A601057F0105A70105800105A80105810105A90105820105AA0105830105AB0105840105AC0105850105AD0105860105AE0105870105AF0105880105B00105890105B101058A0105B301058C0105B401058D0105B501058E0105B601058F0105B70105900105B80105910105B90105920105BB0105940105BC010595010CC0010C80010CC1010C81010CC2010C82010CC3010C83010CC4010C84010CC5010C85010CC6010C86010CC7010C87010CC8010C88010CC9010C89010CCA010C8A010CCB010C8B010CCC010C8C010CCD010C8D010CCE010C8E010CCF010C8F010CD0010C90010CD1010C91010CD2010C92010CD3010C93010CD4010C94010CD5010C95010CD6010C96010CD7010C97010CD8010C98010CD9010C99010CDA010C9A010CDB010C9B010CDC010C9C010CDD010C9D010CDE010C9E010CDF010C9F010CE0010CA0010CE1010CA1010CE2010CA2010CE3010CA3010CE4010CA4010CE5010CA5010CE6010CA6010CE7010CA7010CE8010CA8010CE9010CA9010CEA010CAA010CEB010CAB010CEC010CAC010CED010CAD010CEE010CAE010CEF010CAF010CF0010CB0010CF1010CB1010CF2010CB2010D70010D50010D71010D51010D72010D52010D73010D53010D74010D54010D75010D55010D76010D56010D77010D57010D78010D58010D79010D59010D7A010D5A010D7B010D5B010D7C010D5C010D7D010D5D010D7E010D5E010D7F010D5F010D80010D60010D81010D61010D82010D62010D83010D63010D84010D64010D85010D650118C00118A00118C10118A10118C20118A20118C30118A30118C40118A40118C50118A50118C60118A60118C70118A70118C80118A80118C90118A90118CA0118AA0118CB0118AB0118CC0118AC0118CD0118AD0118CE0118AE0118CF0118AF0118D00118B00118D10118B10118D20118B20118D30118B30118D40118B40118D50118B50118D60118B60118D70118B70118D80118B80118D90118B90118DA0118BA0118DB0118BB0118DC0118BC0118DD0118BD0118DE0118BE0118DF0118BF016E60016E40016E61016E41016E62016E42016E63016E43016E64016E44016E65016E45016E66016E46016E67016E47016E68016E48016E69016E49016E6A016E4A016E6B016E4B016E6C016E4C016E6D016E4D016E6E016E4E016E6F016E4F016E70016E50016E71016E51016E72016E52016E73016E53016E74016E54016E75016E55016E76016E56016E77016E57016E78016E58016E79016E59016E7A016E5A016E7B016E5B016E7C016E5C016E7D016E5D016E7E016E5E016E7F016E5F016EBB016EA0016EBC016EA1016EBD016EA2016EBE016EA3016EBF016EA4016EC0016EA5016EC1016EA6016EC2016EA7016EC3016EA8016EC4016EA9016EC5016EAA016EC6016EAB016EC7016EAC016EC8016EAD016EC9016EAE016ECA016EAF016ECB016EB0016ECC016EB1016ECD016EB2016ECE016EB3016ECF016EB4016ED0016EB5016ED1016EB6016ED2016EB7016ED3016EB801E92201E90001E92301E90101E92401E90201E92501E90301E92601E90401E92701E90501E92801E90601E92901E90701E92A01E90801E92B01E90901E92C01E90A01E92D01E90B01E92E01E90C01E92F01E90D01E93001E90E01E93101E90F01E93201E91001E93301E91101E93401E91201E93501E91301E93601E91401E93701E91501E93801E91601E93901E91701E93A01E91801E93B01E91901E93C01E91A01E93D01E91B01E93E01E91C01E93F01E91D01E94001E91E01E94101E91F01E94201E92001E94301E921"
-  let sp = "0003990003080003010003A50003080003010005350005520000000003A50003130000000003A50003130003000003A50003130003010003A5000313000342001F08000399000000001F09000399000000001F0A000399000000001F0B000399000000001F0C000399000000001F0D000399000000001F0E000399000000001F0F000399000000001F08000399000000001F09000399000000001F0A000399000000001F0B000399000000001F0C000399000000001F0D000399000000001F0E000399000000001F0F000399000000001F28000399000000001F29000399000000001F2A000399000000001F2B000399000000001F2C000399000000001F2D000399000000001F2E000399000000001F2F000399000000001F28000399000000001F29000399000000001F2A000399000000001F2B000399000000001F2C000399000000001F2D000399000000001F2E000399000000001F2F000399000000001F68000399000000001F69000399000000001F6A000399000000001F6B000399000000001F6C000399000000001F6D000399000000001F6E000399000000001F6F000399000000001F68000399000000001F69000399000000001F6A000399000000001F6B000399000000001F6C000399000000001F6D000399000000001F6E000399000000001F6F000399000000001FBA000399000000000391000399000000000386000399000000000391000342000000000391000342000399000391000399000000001FCA0003990000000003970003990000000003890003990000000003970003420000000003970003420003990003970003990000000003990003080003000003990003080003010003990003420000000003990003080003420003A50003080003000003A50003080003010003A10003130000000003A50003420000000003A5000308000342001FFA0003990000000003A900039900000000038F0003990000000003A90003420000000003A90003420003990003A900039900000000054400054600000000054400053500000000054400053B00000000054E00054600000000054400053D000000"
+  let tbl = "00006100004100006200004200006300004300006400004400006500004500006600004600006700004700006800004800006900004900006A00004A00006B00004B00006C00004C00006D00004D00006E00004E00006F00004F00007000005000007100005100007200005200007300005300007400005400007500005500007600005600007700005700007800005800007900005900007A00005A0000B500039C0000DFF000000000E00000C00000E10000C10000E20000C20000E30000C30000E40000C40000E50000C50000E60000C60000E70000C70000E80000C80000E90000C90000EA0000CA0000EB0000CB0000EC0000CC0000ED0000CD0000EE0000CE0000EF0000CF0000F00000D00000F10000D10000F20000D20000F30000D30000F40000D40000F50000D50000F60000D60000F80000D80000F90000D90000FA0000DA0000FB0000DB0000FC0000DC0000FD0000DD0000FE0000DE0000FF00017800010100010000010300010200010500010400010700010600010900010800010B00010A00010D00010C00010F00010E00011100011000011300011200011500011400011700011600011900011800011B00011A00011D00011C00011F00011E00012100012000012300012200012500012400012700012600012900012800012B00012A00012D00012C00012F00012E00013100004900013300013200013500013400013700013600013A00013900013C00013B00013E00013D00014000013F000142000141000144000143000146000145000148000147000149F0000100014B00014A00014D00014C00014F00014E00015100015000015300015200015500015400015700015600015900015800015B00015A00015D00015C00015F00015E00016100016000016300016200016500016400016700016600016900016800016B00016A00016D00016C00016F00016E00017100017000017300017200017500017400017700017600017A00017900017C00017B00017E00017D00017F00005300018000024300018300018200018500018400018800018700018C00018B0001920001910001950001F600019900019800019A00023D00019B00A7DC00019E0002200001A10001A00001A30001A20001A50001A40001A80001A70001AD0001AC0001B00001AF0001B40001B30001B60001B50001B90001B80001BD0001BC0001BF0001F70001C50001C40001C60001C40001C80001C70001C90001C70001CB0001CA0001CC0001CA0001CE0001CD0001D00001CF0001D20001D10001D40001D30001D60001D50001D80001D70001DA0001D90001DC0001DB0001DD00018E0001DF0001DE0001E10001E00001E30001E20001E50001E40001E70001E60001E90001E80001EB0001EA0001ED0001EC0001EF0001EE0001F0F000020001F20001F10001F30001F10001F50001F40001F90001F80001FB0001FA0001FD0001FC0001FF0001FE00020100020000020300020200020500020400020700020600020900020800020B00020A00020D00020C00020F00020E00021100021000021300021200021500021400021700021600021900021800021B00021A00021D00021C00021F00021E00022300022200022500022400022700022600022900022800022B00022A00022D00022C00022F00022E00023100023000023300023200023C00023B00023F002C7E000240002C7F00024200024100024700024600024900024800024B00024A00024D00024C00024F00024E000250002C6F000251002C6D000252002C7000025300018100025400018600025600018900025700018A00025900018F00025B00019000025C00A7AB00026000019300026100A7AC00026300019400026400A7CB00026500A78D00026600A7AA00026800019700026900019600026A00A7AE00026B002C6200026C00A7AD00026F00019C000271002C6E00027200019D00027500019F00027D002C640002800001A600028200A7C50002830001A900028700A7B10002880001AE00028900024400028A0001B100028B0001B200028C0002450002920001B700029D00A7B200029E00A7B000034500039900037100037000037300037200037700037600037B0003FD00037C0003FE00037D0003FF000390F000030003AC0003860003AD0003880003AE0003890003AF00038A0003B0F000040003B10003910003B20003920003B30003930003B40003940003B50003950003B60003960003B70003970003B80003980003B90003990003BA00039A0003BB00039B0003BC00039C0003BD00039D0003BE00039E0003BF00039F0003C00003A00003C10003A10003C20003A30003C30003A30003C40003A40003C50003A50003C60003A60003C70003A70003C80003A80003C90003A90003CA0003AA0003CB0003AB0003CC00038C0003CD00038E0003CE00038F0003D00003920003D10003980003D50003A60003D60003A00003D70003CF0003D90003D80003DB0003DA0003DD0003DC0003DF0003DE0003E10003E00003E30003E20003E50003E40003E70003E60003E90003E80003EB0003EA0003ED0003EC0003EF0003EE0003F000039A0003F10003A10003F20003F90003F300037F0003F50003950003F80003F70003FB0003FA00043000041000043100041100043200041200043300041300043400041400043500041500043600041600043700041700043800041800043900041900043A00041A00043B00041B00043C00041C00043D00041D00043E00041E00043F00041F00044000042000044100042100044200042200044300042300044400042400044500042500044600042600044700042700044800042800044900042900044A00042A00044B00042B00044C00042C00044D00042D00044E00042E00044F00042F00045000040000045100040100045200040200045300040300045400040400045500040500045600040600045700040700045800040800045900040900045A00040A00045B00040B00045C00040C00045D00040D00045E00040E00045F00040F00046100046000046300046200046500046400046700046600046900046800046B00046A00046D00046C00046F00046E00047100047000047300047200047500047400047700047600047900047800047B00047A00047D00047C00047F00047E00048100048000048B00048A00048D00048C00048F00048E00049100049000049300049200049500049400049700049600049900049800049B00049A00049D00049C00049F00049E0004A10004A00004A30004A20004A50004A40004A70004A60004A90004A80004AB0004AA0004AD0004AC0004AF0004AE0004B10004B00004B30004B20004B50004B40004B70004B60004B90004B80004BB0004BA0004BD0004BC0004BF0004BE0004C20004C10004C40004C30004C60004C50004C80004C70004CA0004C90004CC0004CB0004CE0004CD0004CF0004C00004D10004D00004D30004D20004D50004D40004D70004D60004D90004D80004DB0004DA0004DD0004DC0004DF0004DE0004E10004E00004E30004E20004E50004E40004E70004E60004E90004E80004EB0004EA0004ED0004EC0004EF0004EE0004F10004F00004F30004F20004F50004F40004F70004F60004F90004F80004FB0004FA0004FD0004FC0004FF0004FE00050100050000050300050200050500050400050700050600050900050800050B00050A00050D00050C00050F00050E00051100051000051300051200051500051400051700051600051900051800051B00051A00051D00051C00051F00051E00052100052000052300052200052500052400052700052600052900052800052B00052A00052D00052C00052F00052E00056100053100056200053200056300053300056400053400056500053500056600053600056700053700056800053800056900053900056A00053A00056B00053B00056C00053C00056D00053D00056E00053E00056F00053F00057000054000057100054100057200054200057300054300057400054400057500054500057600054600057700054700057800054800057900054900057A00054A00057B00054B00057C00054C00057D00054D00057E00054E00057F00054F000580000550000581000551000582000552000583000553000584000554000585000555000586000556000587F000050010D0001C900010D1001C910010D2001C920010D3001C930010D4001C940010D5001C950010D6001C960010D7001C970010D8001C980010D9001C990010DA001C9A0010DB001C9B0010DC001C9C0010DD001C9D0010DE001C9E0010DF001C9F0010E0001CA00010E1001CA10010E2001CA20010E3001CA30010E4001CA40010E5001CA50010E6001CA60010E7001CA70010E8001CA80010E9001CA90010EA001CAA0010EB001CAB0010EC001CAC0010ED001CAD0010EE001CAE0010EF001CAF0010F0001CB00010F1001CB10010F2001CB20010F3001CB30010F4001CB40010F5001CB50010F6001CB60010F7001CB70010F8001CB80010F9001CB90010FA001CBA0010FD001CBD0010FE001CBE0010FF001CBF0013F80013F00013F90013F10013FA0013F20013FB0013F30013FC0013F40013FD0013F5001C80000412001C81000414001C8200041E001C83000421001C84000422001C85000422001C8600042A001C87000462001C8800A64A001C8A001C89001D7900A77D001D7D002C63001D8E00A7C6001E01001E00001E03001E02001E05001E04001E07001E06001E09001E08001E0B001E0A001E0D001E0C001E0F001E0E001E11001E10001E13001E12001E15001E14001E17001E16001E19001E18001E1B001E1A001E1D001E1C001E1F001E1E001E21001E20001E23001E22001E25001E24001E27001E26001E29001E28001E2B001E2A001E2D001E2C001E2F001E2E001E31001E30001E33001E32001E35001E34001E37001E36001E39001E38001E3B001E3A001E3D001E3C001E3F001E3E001E41001E40001E43001E42001E45001E44001E47001E46001E49001E48001E4B001E4A001E4D001E4C001E4F001E4E001E51001E50001E53001E52001E55001E54001E57001E56001E59001E58001E5B001E5A001E5D001E5C001E5F001E5E001E61001E60001E63001E62001E65001E64001E67001E66001E69001E68001E6B001E6A001E6D001E6C001E6F001E6E001E71001E70001E73001E72001E75001E74001E77001E76001E79001E78001E7B001E7A001E7D001E7C001E7F001E7E001E81001E80001E83001E82001E85001E84001E87001E86001E89001E88001E8B001E8A001E8D001E8C001E8F001E8E001E91001E90001E93001E92001E95001E94001E96F00006001E97F00007001E98F00008001E99F00009001E9AF0000A001E9B001E60001EA1001EA0001EA3001EA2001EA5001EA4001EA7001EA6001EA9001EA8001EAB001EAA001EAD001EAC001EAF001EAE001EB1001EB0001EB3001EB2001EB5001EB4001EB7001EB6001EB9001EB8001EBB001EBA001EBD001EBC001EBF001EBE001EC1001EC0001EC3001EC2001EC5001EC4001EC7001EC6001EC9001EC8001ECB001ECA001ECD001ECC001ECF001ECE001ED1001ED0001ED3001ED2001ED5001ED4001ED7001ED6001ED9001ED8001EDB001EDA001EDD001EDC001EDF001EDE001EE1001EE0001EE3001EE2001EE5001EE4001EE7001EE6001EE9001EE8001EEB001EEA001EED001EEC001EEF001EEE001EF1001EF0001EF3001EF2001EF5001EF4001EF7001EF6001EF9001EF8001EFB001EFA001EFD001EFC001EFF001EFE001F00001F08001F01001F09001F02001F0A001F03001F0B001F04001F0C001F05001F0D001F06001F0E001F07001F0F001F10001F18001F11001F19001F12001F1A001F13001F1B001F14001F1C001F15001F1D001F20001F28001F21001F29001F22001F2A001F23001F2B001F24001F2C001F25001F2D001F26001F2E001F27001F2F001F30001F38001F31001F39001F32001F3A001F33001F3B001F34001F3C001F35001F3D001F36001F3E001F37001F3F001F40001F48001F41001F49001F42001F4A001F43001F4B001F44001F4C001F45001F4D001F50F0000B001F51001F59001F52F0000C001F53001F5B001F54F0000D001F55001F5D001F56F0000E001F57001F5F001F60001F68001F61001F69001F62001F6A001F63001F6B001F64001F6C001F65001F6D001F66001F6E001F67001F6F001F70001FBA001F71001FBB001F72001FC8001F73001FC9001F74001FCA001F75001FCB001F76001FDA001F77001FDB001F78001FF8001F79001FF9001F7A001FEA001F7B001FEB001F7C001FFA001F7D001FFB001F80F0000F001F81F00010001F82F00011001F83F00012001F84F00013001F85F00014001F86F00015001F87F00016001F88F00017001F89F00018001F8AF00019001F8BF0001A001F8CF0001B001F8DF0001C001F8EF0001D001F8FF0001E001F90F0001F001F91F00020001F92F00021001F93F00022001F94F00023001F95F00024001F96F00025001F97F00026001F98F00027001F99F00028001F9AF00029001F9BF0002A001F9CF0002B001F9DF0002C001F9EF0002D001F9FF0002E001FA0F0002F001FA1F00030001FA2F00031001FA3F00032001FA4F00033001FA5F00034001FA6F00035001FA7F00036001FA8F00037001FA9F00038001FAAF00039001FABF0003A001FACF0003B001FADF0003C001FAEF0003D001FAFF0003E001FB0001FB8001FB1001FB9001FB2F0003F001FB3F00040001FB4F00041001FB6F00042001FB7F00043001FBCF00044001FBE000399001FC2F00045001FC3F00046001FC4F00047001FC6F00048001FC7F00049001FCCF0004A001FD0001FD8001FD1001FD9001FD2F0004B001FD3F0004C001FD6F0004D001FD7F0004E001FE0001FE8001FE1001FE9001FE2F0004F001FE3F00050001FE4F00051001FE5001FEC001FE6F00052001FE7F00053001FF2F00054001FF3F00055001FF4F00056001FF6F00057001FF7F00058001FFCF0005900214E00213200217000216000217100216100217200216200217300216300217400216400217500216500217600216600217700216700217800216800217900216900217A00216A00217B00216B00217C00216C00217D00216D00217E00216E00217F00216F0021840021830024D00024B60024D10024B70024D20024B80024D30024B90024D40024BA0024D50024BB0024D60024BC0024D70024BD0024D80024BE0024D90024BF0024DA0024C00024DB0024C10024DC0024C20024DD0024C30024DE0024C40024DF0024C50024E00024C60024E10024C70024E20024C80024E30024C90024E40024CA0024E50024CB0024E60024CC0024E70024CD0024E80024CE0024E90024CF002C30002C00002C31002C01002C32002C02002C33002C03002C34002C04002C35002C05002C36002C06002C37002C07002C38002C08002C39002C09002C3A002C0A002C3B002C0B002C3C002C0C002C3D002C0D002C3E002C0E002C3F002C0F002C40002C10002C41002C11002C42002C12002C43002C13002C44002C14002C45002C15002C46002C16002C47002C17002C48002C18002C49002C19002C4A002C1A002C4B002C1B002C4C002C1C002C4D002C1D002C4E002C1E002C4F002C1F002C50002C20002C51002C21002C52002C22002C53002C23002C54002C24002C55002C25002C56002C26002C57002C27002C58002C28002C59002C29002C5A002C2A002C5B002C2B002C5C002C2C002C5D002C2D002C5E002C2E002C5F002C2F002C61002C60002C6500023A002C6600023E002C68002C67002C6A002C69002C6C002C6B002C73002C72002C76002C75002C81002C80002C83002C82002C85002C84002C87002C86002C89002C88002C8B002C8A002C8D002C8C002C8F002C8E002C91002C90002C93002C92002C95002C94002C97002C96002C99002C98002C9B002C9A002C9D002C9C002C9F002C9E002CA1002CA0002CA3002CA2002CA5002CA4002CA7002CA6002CA9002CA8002CAB002CAA002CAD002CAC002CAF002CAE002CB1002CB0002CB3002CB2002CB5002CB4002CB7002CB6002CB9002CB8002CBB002CBA002CBD002CBC002CBF002CBE002CC1002CC0002CC3002CC2002CC5002CC4002CC7002CC6002CC9002CC8002CCB002CCA002CCD002CCC002CCF002CCE002CD1002CD0002CD3002CD2002CD5002CD4002CD7002CD6002CD9002CD8002CDB002CDA002CDD002CDC002CDF002CDE002CE1002CE0002CE3002CE2002CEC002CEB002CEE002CED002CF3002CF2002D000010A0002D010010A1002D020010A2002D030010A3002D040010A4002D050010A5002D060010A6002D070010A7002D080010A8002D090010A9002D0A0010AA002D0B0010AB002D0C0010AC002D0D0010AD002D0E0010AE002D0F0010AF002D100010B0002D110010B1002D120010B2002D130010B3002D140010B4002D150010B5002D160010B6002D170010B7002D180010B8002D190010B9002D1A0010BA002D1B0010BB002D1C0010BC002D1D0010BD002D1E0010BE002D1F0010BF002D200010C0002D210010C1002D220010C2002D230010C3002D240010C4002D250010C5002D270010C7002D2D0010CD00A64100A64000A64300A64200A64500A64400A64700A64600A64900A64800A64B00A64A00A64D00A64C00A64F00A64E00A65100A65000A65300A65200A65500A65400A65700A65600A65900A65800A65B00A65A00A65D00A65C00A65F00A65E00A66100A66000A66300A66200A66500A66400A66700A66600A66900A66800A66B00A66A00A66D00A66C00A68100A68000A68300A68200A68500A68400A68700A68600A68900A68800A68B00A68A00A68D00A68C00A68F00A68E00A69100A69000A69300A69200A69500A69400A69700A69600A69900A69800A69B00A69A00A72300A72200A72500A72400A72700A72600A72900A72800A72B00A72A00A72D00A72C00A72F00A72E00A73300A73200A73500A73400A73700A73600A73900A73800A73B00A73A00A73D00A73C00A73F00A73E00A74100A74000A74300A74200A74500A74400A74700A74600A74900A74800A74B00A74A00A74D00A74C00A74F00A74E00A75100A75000A75300A75200A75500A75400A75700A75600A75900A75800A75B00A75A00A75D00A75C00A75F00A75E00A76100A76000A76300A76200A76500A76400A76700A76600A76900A76800A76B00A76A00A76D00A76C00A76F00A76E00A77A00A77900A77C00A77B00A77F00A77E00A78100A78000A78300A78200A78500A78400A78700A78600A78C00A78B00A79100A79000A79300A79200A79400A7C400A79700A79600A79900A79800A79B00A79A00A79D00A79C00A79F00A79E00A7A100A7A000A7A300A7A200A7A500A7A400A7A700A7A600A7A900A7A800A7B500A7B400A7B700A7B600A7B900A7B800A7BB00A7BA00A7BD00A7BC00A7BF00A7BE00A7C100A7C000A7C300A7C200A7C800A7C700A7CA00A7C900A7CD00A7CC00A7CF00A7CE00A7D100A7D000A7D300A7D200A7D500A7D400A7D700A7D600A7D900A7D800A7DB00A7DA00A7F600A7F500AB5300A7B300AB700013A000AB710013A100AB720013A200AB730013A300AB740013A400AB750013A500AB760013A600AB770013A700AB780013A800AB790013A900AB7A0013AA00AB7B0013AB00AB7C0013AC00AB7D0013AD00AB7E0013AE00AB7F0013AF00AB800013B000AB810013B100AB820013B200AB830013B300AB840013B400AB850013B500AB860013B600AB870013B700AB880013B800AB890013B900AB8A0013BA00AB8B0013BB00AB8C0013BC00AB8D0013BD00AB8E0013BE00AB8F0013BF00AB900013C000AB910013C100AB920013C200AB930013C300AB940013C400AB950013C500AB960013C600AB970013C700AB980013C800AB990013C900AB9A0013CA00AB9B0013CB00AB9C0013CC00AB9D0013CD00AB9E0013CE00AB9F0013CF00ABA00013D000ABA10013D100ABA20013D200ABA30013D300ABA40013D400ABA50013D500ABA60013D600ABA70013D700ABA80013D800ABA90013D900ABAA0013DA00ABAB0013DB00ABAC0013DC00ABAD0013DD00ABAE0013DE00ABAF0013DF00ABB00013E000ABB10013E100ABB20013E200ABB30013E300ABB40013E400ABB50013E500ABB60013E600ABB70013E700ABB80013E800ABB90013E900ABBA0013EA00ABBB0013EB00ABBC0013EC00ABBD0013ED00ABBE0013EE00ABBF0013EF00FB00F0005A00FB01F0005B00FB02F0005C00FB03F0005D00FB04F0005E00FB05F0005F00FB06F0006000FB13F0006100FB14F0006200FB15F0006300FB16F0006400FB17F0006500FF4100FF2100FF4200FF2200FF4300FF2300FF4400FF2400FF4500FF2500FF4600FF2600FF4700FF2700FF4800FF2800FF4900FF2900FF4A00FF2A00FF4B00FF2B00FF4C00FF2C00FF4D00FF2D00FF4E00FF2E00FF4F00FF2F00FF5000FF3000FF5100FF3100FF5200FF3200FF5300FF3300FF5400FF3400FF5500FF3500FF5600FF3600FF5700FF3700FF5800FF3800FF5900FF3900FF5A00FF3A01042801040001042901040101042A01040201042B01040301042C01040401042D01040501042E01040601042F01040701043001040801043101040901043201040A01043301040B01043401040C01043501040D01043601040E01043701040F01043801041001043901041101043A01041201043B01041301043C01041401043D01041501043E01041601043F01041701044001041801044101041901044201041A01044301041B01044401041C01044501041D01044601041E01044701041F01044801042001044901042101044A01042201044B01042301044C01042401044D01042501044E01042601044F0104270104D80104B00104D90104B10104DA0104B20104DB0104B30104DC0104B40104DD0104B50104DE0104B60104DF0104B70104E00104B80104E10104B90104E20104BA0104E30104BB0104E40104BC0104E50104BD0104E60104BE0104E70104BF0104E80104C00104E90104C10104EA0104C20104EB0104C30104EC0104C40104ED0104C50104EE0104C60104EF0104C70104F00104C80104F10104C90104F20104CA0104F30104CB0104F40104CC0104F50104CD0104F60104CE0104F70104CF0104F80104D00104F90104D10104FA0104D20104FB0104D301059701057001059801057101059901057201059A01057301059B01057401059C01057501059D01057601059E01057701059F0105780105A00105790105A101057A0105A301057C0105A401057D0105A501057E0105A601057F0105A70105800105A80105810105A90105820105AA0105830105AB0105840105AC0105850105AD0105860105AE0105870105AF0105880105B00105890105B101058A0105B301058C0105B401058D0105B501058E0105B601058F0105B70105900105B80105910105B90105920105BB0105940105BC010595010CC0010C80010CC1010C81010CC2010C82010CC3010C83010CC4010C84010CC5010C85010CC6010C86010CC7010C87010CC8010C88010CC9010C89010CCA010C8A010CCB010C8B010CCC010C8C010CCD010C8D010CCE010C8E010CCF010C8F010CD0010C90010CD1010C91010CD2010C92010CD3010C93010CD4010C94010CD5010C95010CD6010C96010CD7010C97010CD8010C98010CD9010C99010CDA010C9A010CDB010C9B010CDC010C9C010CDD010C9D010CDE010C9E010CDF010C9F010CE0010CA0010CE1010CA1010CE2010CA2010CE3010CA3010CE4010CA4010CE5010CA5010CE6010CA6010CE7010CA7010CE8010CA8010CE9010CA9010CEA010CAA010CEB010CAB010CEC010CAC010CED010CAD010CEE010CAE010CEF010CAF010CF0010CB0010CF1010CB1010CF2010CB2010D70010D50010D71010D51010D72010D52010D73010D53010D74010D54010D75010D55010D76010D56010D77010D57010D78010D58010D79010D59010D7A010D5A010D7B010D5B010D7C010D5C010D7D010D5D010D7E010D5E010D7F010D5F010D80010D60010D81010D61010D82010D62010D83010D63010D84010D64010D85010D650118C00118A00118C10118A10118C20118A20118C30118A30118C40118A40118C50118A50118C60118A60118C70118A70118C80118A80118C90118A90118CA0118AA0118CB0118AB0118CC0118AC0118CD0118AD0118CE0118AE0118CF0118AF0118D00118B00118D10118B10118D20118B20118D30118B30118D40118B40118D50118B50118D60118B60118D70118B70118D80118B80118D90118B90118DA0118BA0118DB0118BB0118DC0118BC0118DD0118BD0118DE0118BE0118DF0118BF016E60016E40016E61016E41016E62016E42016E63016E43016E64016E44016E65016E45016E66016E46016E67016E47016E68016E48016E69016E49016E6A016E4A016E6B016E4B016E6C016E4C016E6D016E4D016E6E016E4E016E6F016E4F016E70016E50016E71016E51016E72016E52016E73016E53016E74016E54016E75016E55016E76016E56016E77016E57016E78016E58016E79016E59016E7A016E5A016E7B016E5B016E7C016E5C016E7D016E5D016E7E016E5E016E7F016E5F016EBB016EA0016EBC016EA1016EBD016EA2016EBE016EA3016EBF016EA4016EC0016EA5016EC1016EA6016EC2016EA7016EC3016EA8016EC4016EA9016EC5016EAA016EC6016EAB016EC7016EAC016EC8016EAD016EC9016EAE016ECA016EAF016ECB016EB0016ECC016EB1016ECD016EB2016ECE016EB3016ECF016EB4016ED0016EB5016ED1016EB6016ED2016EB7016ED3016EB801E92201E90001E92301E90101E92401E90201E92501E90301E92601E90401E92701E90501E92801E90601E92901E90701E92A01E90801E92B01E90901E92C01E90A01E92D01E90B01E92E01E90C01E92F01E90D01E93001E90E01E93101E90F01E93201E91001E93301E91101E93401E91201E93501E91301E93601E91401E93701E91501E93801E91601E93901E91701E93A01E91801E93B01E91901E93C01E91A01E93D01E91B01E93E01E91C01E93F01E91D01E94001E91E01E94101E91F01E94201E92001E94301E921"
+  let sp = "0000530000530000000002BC00004E00000000004A00030C0000000003990003080003010003A500030800030100053500055200000000004800033100000000005400030800000000005700030A00000000005900030A0000000000410002BE0000000003A50003130000000003A50003130003000003A50003130003010003A5000313000342001F08000399000000001F09000399000000001F0A000399000000001F0B000399000000001F0C000399000000001F0D000399000000001F0E000399000000001F0F000399000000001F08000399000000001F09000399000000001F0A000399000000001F0B000399000000001F0C000399000000001F0D000399000000001F0E000399000000001F0F000399000000001F28000399000000001F29000399000000001F2A000399000000001F2B000399000000001F2C000399000000001F2D000399000000001F2E000399000000001F2F000399000000001F28000399000000001F29000399000000001F2A000399000000001F2B000399000000001F2C000399000000001F2D000399000000001F2E000399000000001F2F000399000000001F68000399000000001F69000399000000001F6A000399000000001F6B000399000000001F6C000399000000001F6D000399000000001F6E000399000000001F6F000399000000001F68000399000000001F69000399000000001F6A000399000000001F6B000399000000001F6C000399000000001F6D000399000000001F6E000399000000001F6F000399000000001FBA000399000000000391000399000000000386000399000000000391000342000000000391000342000399000391000399000000001FCA0003990000000003970003990000000003890003990000000003970003420000000003970003420003990003970003990000000003990003080003000003990003080003010003990003420000000003990003080003420003A50003080003000003A50003080003010003A10003130000000003A50003420000000003A5000308000342001FFA0003990000000003A900039900000000038F0003990000000003A90003420000000003A90003420003990003A900039900000000004600004600000000004600004900000000004600004C00000000004600004600004900004600004600004C00005300005400000000005300005400000000054400054600000000054400053500000000054400053B00000000054E00054600000000054400053D000000"
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
   let buf = prim.alloc_str(blen * 3 + 8)
@@ -41467,7 +41148,7 @@ fn string_to_upper(s: String) -> String = {
     h + 12,
     h + 12 + blen,
     prim.handle(tbl) + 12,
-    1563,
+    1580,
     prim.handle(sp) + 12,
     prim.handle(buf) + 12,
     0,
@@ -41921,7 +41602,7 @@ local fn rotate_count(n: Int) -> Int = {
 /// Bits needed to hold x; 0 for 0.
 fn bit_length(x: UInt16) -> Int = 64 - int.count_leading_zeros(int.from_uint16(x))
 
-/// Decimal UInt16 from ASCII-trimmed s; err on junk, a sign of -, or above 65535.
+/// Decimal UInt16 from trimmed s; err on junk, a sign of -, or above 65535.
 fn parse(s: String) -> Result[UInt16, String] =
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
   else match int.parse(s) {
@@ -42253,7 +41934,7 @@ local fn rotate_count(n: Int) -> Int = {
 /// Bits needed to hold x; 0 for 0.
 fn bit_length(x: UInt32) -> Int = 64 - int.count_leading_zeros(int.from_uint32(x))
 
-/// Decimal UInt32 from ASCII-trimmed s; err on junk, a sign of -, or above 4294967295.
+/// Decimal UInt32 from trimmed s; err on junk, a sign of -, or above 4294967295.
 fn parse(s: String) -> Result[UInt32, String] =
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
   else match int.parse(s) {
@@ -42654,9 +42335,9 @@ local fn rotate_count(n: Int) -> Int = {
 /// Bits needed to hold x; 0 for 0.
 fn bit_length(x: UInt64) -> Int = 64 - int.count_leading_zeros(int.from_uint64(x))
 
-/// Decimal UInt64 from ASCII-trimmed s; err on junk, a sign of -, or above 2^64-1.
+/// Decimal UInt64 from trimmed s; err on junk, a sign of -, or above 2^64-1.
 fn parse(s: String) -> Result[UInt64, String] = {
-  let t = trim_ascii_ws(s)
+  let t = string.trim(s)
   if string.starts_with(t, "-") then err("invalid digit found in string")
   else match int.parse(t) {
     ok(n) => ok(int.to_uint64(n)),
@@ -42779,19 +42460,6 @@ fn __sum(xs: List[UInt64]) -> UInt64 = {
 fn __product(xs: List[UInt64]) -> UInt64 = {
   let one: UInt64 = 1
   list.fold(xs, one, (a, b) => a * b)
-}
-
-
-local fn is_ascii_ws(c: String) -> Bool = match c {
-  " " | "\t" | "\n" | "\r" => true,
-  _ => c == string.from_codepoint(12),
-}
-
-local fn trim_ascii_ws(s: String) -> String = {
-  let n = string.len(s)
-  if n > 0 and is_ascii_ws(string.take(s, 1)) then trim_ascii_ws(string.drop(s, 1))
-  else if n > 0 and is_ascii_ws(string.slice(s, n - 1, n)) then trim_ascii_ws(string.take(s, n - 1))
-  else s
 }
 "#;
 pub const SRC_UINT64_CONVERT: &str = r#"
@@ -43101,7 +42769,7 @@ local fn rotate_count(n: Int) -> Int = {
 /// Bits needed to hold x; 0 for 0.
 fn bit_length(x: UInt8) -> Int = 64 - int.count_leading_zeros(int.from_uint8(x))
 
-/// Decimal UInt8 from ASCII-trimmed s; err on junk, a sign of -, or above 255.
+/// Decimal UInt8 from trimmed s; err on junk, a sign of -, or above 255.
 fn parse(s: String) -> Result[UInt8, String] =
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
   else match int.parse(s) {
@@ -43661,17 +43329,16 @@ fn decode_form(s: String) -> Result[String, String] = match decode_component(str
   err(e) => err(string.replace(e, "url.decode_component", "url.decode_form")),
 }
 
-
-
-
-
-fn __url_parse_pair(part: String) -> Result[(String, String), String] = {
-  let kv = __url_split_once(part, "=")
-  match (decode_form(kv.0), decode_form(kv.1)) {
-    (ok(k), ok(v)) => ok((k, v)),
-    (err(e), _) => err(string.replace(e, "url.decode_form", "url.parse_query")),
-    (_, err(e)) => err(string.replace(e, "url.decode_form", "url.parse_query")),
-  }
+fn __url_parse_pairs(parts: List[String], acc: List[(String, String)]) -> Result[List[(String, String)], String] = match list.first(parts) {
+  none => ok(list.reverse(acc)),
+  some(part) => {
+    let kv = __url_split_once(part, "=")
+    match (decode_form(kv.0), decode_form(kv.1)) {
+      (ok(k), ok(v)) => __url_parse_pairs(list.drop(parts, 1), [(k, v)] + acc),
+      (err(e), _) => err(string.replace(e, "url.decode_form", "url.parse_query")),
+      (_, err(e)) => err(string.replace(e, "url.decode_form", "url.parse_query")),
+    }
+  },
 }
 
 
@@ -43682,10 +43349,10 @@ fn __url_parse_pair(part: String) -> Result[(String, String), String] = {
 
 
 /// Decoded (k, v) pairs; bare key gets ""; err on a bad escape.
-fn parse_query(query: String) -> Result[List[(String, String)], String] = {
-  let parts = string.split(query, "&") |> list.filter((part) => string.len(part) > 0)
-  ok(parts |> list.map((part) => __url_parse_pair(part)!)!)
-}
+fn parse_query(query: String) -> Result[List[(String, String)], String] = __url_parse_pairs(
+  string.split(query, "&") |> list.filter((part) => string.len(part) > 0),
+  [],
+)
 
 
 fn __url_merge(base: Url, rel: String) -> String = if string.len(base.path) == 0 then "/" + rel
@@ -44559,8 +44226,6 @@ fn list_drop_end_value(xs: List[Value], n: Int) -> List[Value] = {
 
 
 
-
-
 fn list_tail_value(xs: List[Value]) -> List[Value] = {
   let h = prim.handle(xs)
   let n = prim.load32(h + 4)
@@ -44570,171 +44235,51 @@ fn list_tail_value(xs: List[Value]) -> List[Value] = {
   buf
 }
 
-
-
-
-
-
-
-
-
-fn __vx_cmpb(pa: Int, pb: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let ca = prim.load8(pa + i)
-  let cb = prim.load8(pb + i)
-  if ca < cb then 0 - 1
-  else if ca > cb then 1
-  else __vx_cmpb(pa, pb, n, i + 1)
-}
-
-fn __vx_cmp(ka: Int, kb: Int) -> Int = {
-  let la = prim.load32(ka + 4)
-  let lb = prim.load32(kb + 4)
-  if la < lb then 0 - 1
-  else if la > lb then 1
-  else __vx_cmpb(ka + 12, kb + 12, la, 0)
-}
-
-fn __vx_key(base: Int, stride: Int, s: Int, p: Int) -> Int = prim.load64(base + prim.load64(s + p * 8) * stride)
-
-fn __vx_iota(dst: Int, n: Int, i: Int) -> Unit = if i >= n then ()
-else {
-  prim.store64(dst + i * 8, i)
-  __vx_iota(dst, n, i + 1)
-}
-
-fn __vx_merge(base: Int, stride: Int, src: Int, dst: Int, i: Int, iend: Int, j: Int, jend: Int, o: Int) -> Unit =
-  if i >= iend then {
-    if j >= jend then ()
-    else {
-      prim.store64(dst + o * 8, prim.load64(src + j * 8))
-      __vx_merge(base, stride, src, dst, i, iend, j + 1, jend, o + 1)
-    }
-  } else if j >= jend then {
-    prim.store64(dst + o * 8, prim.load64(src + i * 8))
-    __vx_merge(base, stride, src, dst, i + 1, iend, j, jend, o + 1)
-  } else if __vx_cmp(__vx_key(base, stride, src, i), __vx_key(base, stride, src, j)) <= 0 then {
-    prim.store64(dst + o * 8, prim.load64(src + i * 8))
-    __vx_merge(base, stride, src, dst, i + 1, iend, j, jend, o + 1)
-  } else {
-    prim.store64(dst + o * 8, prim.load64(src + j * 8))
-    __vx_merge(base, stride, src, dst, i, iend, j + 1, jend, o + 1)
-  }
-
-fn __vx_pass(base: Int, stride: Int, n: Int, src: Int, dst: Int, w: Int, lo: Int) -> Unit =
-  if lo >= n then ()
-  else {
-    let mid = if lo + w < n then lo + w else n
-    let hi = if lo + 2 * w < n then lo + 2 * w else n
-    __vx_merge(base, stride, src, dst, lo, mid, mid, hi, lo)
-    __vx_pass(base, stride, n, src, dst, w, lo + 2 * w)
-  }
-
-fn __vx_passes(base: Int, stride: Int, n: Int, src: Int, dst: Int, w: Int) -> Int =
-  if w >= n then src
-  else {
-    __vx_pass(base, stride, n, src, dst, w, 0)
-    __vx_passes(base, stride, n, dst, src, w * 2)
-  }
-
-
-
-fn __vx_sort(base: Int, stride: Int, n: Int, ba: Int, bb: Int) -> Int = {
-  __vx_iota(ba, n, 0)
-  __vx_passes(base, stride, n, ba, bb, 1)
-}
-
-
-fn __vx_lower(base: Int, stride: Int, s: Int, kh: Int, lo: Int, hi: Int) -> Int =
-  if lo >= hi then lo
-  else {
-    let mid = (lo + hi) / 2
-    if __vx_cmp(__vx_key(base, stride, s, mid), kh) < 0 then __vx_lower(
-      base,
-      stride,
-      s,
-      kh,
-      mid + 1,
-      hi,
-    )
-    else __vx_lower(base, stride, s, kh, lo, mid)
-  }
-
-fn __vx_upper(base: Int, stride: Int, s: Int, kh: Int, lo: Int, hi: Int) -> Int =
-  if lo >= hi then lo
-  else {
-    let mid = (lo + hi) / 2
-    if __vx_cmp(__vx_key(base, stride, s, mid), kh) <= 0 then __vx_upper(
-      base,
-      stride,
-      s,
-      kh,
-      mid + 1,
-      hi,
-    )
-    else __vx_upper(base, stride, s, kh, lo, mid)
-  }
-
-
-fn __vx_first(base: Int, stride: Int, s: Int, n: Int, kh: Int) -> Int = {
-  let p = __vx_lower(base, stride, s, kh, 0, n)
-  if p >= n then 0 - 1
-  else if __vx_cmp(__vx_key(base, stride, s, p), kh) == 0 then prim.load64(s + p * 8)
-  else 0 - 1
-}
-
-
-fn __vx_last(base: Int, stride: Int, s: Int, n: Int, kh: Int) -> Int = {
-  let p = __vx_upper(base, stride, s, kh, 0, n)
-  if p <= 0 then 0 - 1
-  else if __vx_cmp(__vx_key(base, stride, s, p - 1), kh) == 0 then prim.load64(s + (p - 1) * 8)
-  else 0 - 1
-}
-
-
-
-
-
-fn __vmerge_isnew(ab: Int, bb: Int, sa: Int, sb: Int, na: Int, nb: Int, j: Int) -> Bool = {
-  let bk = prim.load64(bb + (2 * j) * 8)
-  __vx_first(ab, 16, sa, na, bk) < 0 and __vx_first(bb, 16, sb, nb, bk) == j
-}
-
-fn __vmerge_bnew(ab: Int, bb: Int, sa: Int, sb: Int, na: Int, nb: Int, j: Int, acc: Int) -> Int =
+fn __vmerge_bnew(a: Value, b: Value, j: Int, nb: Int, na: Int, acc: Int) -> Int =
   if j >= nb then acc
   else {
-    let inc = if __vmerge_isnew(ab, bb, sa, sb, na, nb, j) then 1 else 0
-    __vmerge_bnew(ab, bb, sa, sb, na, nb, j + 1, acc + inc)
+    let bh = prim.handle(b)
+    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
+    let inc = if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then 1 else 0
+    __vmerge_bnew(a, b, j + 1, nb, na, acc + inc)
   }
 
-fn __vmerge_fill_a(ab: Int, bb: Int, sa: Int, sb: Int, na: Int, nb: Int, dst: Value, i: Int) -> Unit =
+fn __vmerge_fill_a(a: Value, b: Value, dst: Value, i: Int, na: Int, nb: Int) -> Unit =
   if i >= na then ()
   else {
+    let ah = prim.handle(a)
     let dh = prim.handle(dst)
-    let key = prim.load64(ab + (2 * i) * 8)
+    let key = prim.load64(ah + 12 + (2 * i) * 8)
+    let ak: String = prim.load_handle(ah + 12 + (2 * i) * 8)
 
-    let bidx = if __vx_first(ab, 16, sa, na, key) == i then __vx_last(bb, 16, sb, nb, key)
+    let last_b = __vobj_find_last(b, ak, nb)
+    let bidx = if last_b < 0 then last_b
+    else if __vobj_find(a, ak, 0, i) < 0 then last_b
     else 0 - 1
-    let val = if bidx < 0 then prim.load64(ab + (2 * i + 1) * 8) else prim.load64(bb + (2 * bidx + 1) * 8)
+    let val = if bidx < 0 then prim.load64(ah + 12 + (2 * i + 1) * 8) else prim.load64(prim.handle(b) + 12 + (2 * bidx + 1) * 8)
     prim.rc_inc(key)
     prim.rc_inc(val)
     prim.store64(dh + 12 + (2 * i) * 8, key)
     prim.store64(dh + 12 + (2 * i + 1) * 8, val)
-    __vmerge_fill_a(ab, bb, sa, sb, na, nb, dst, i + 1)
+    __vmerge_fill_a(a, b, dst, i + 1, na, nb)
   }
 
-fn __vmerge_app_b(ab: Int, bb: Int, sa: Int, sb: Int, na: Int, nb: Int, dst: Value, j: Int, w: Int) -> Unit =
+fn __vmerge_app_b(a: Value, b: Value, dst: Value, j: Int, nb: Int, na: Int, w: Int) -> Unit =
   if j >= nb then ()
-  else if __vmerge_isnew(ab, bb, sa, sb, na, nb, j) then {
-    let dh = prim.handle(dst)
-    let kh = prim.load64(bb + (2 * j) * 8)
-    let vh = prim.load64(bb + (2 * __vx_last(bb, 16, sb, nb, kh) + 1) * 8)
-    prim.rc_inc(kh)
-    prim.rc_inc(vh)
-    prim.store64(dh + 12 + (2 * w) * 8, kh)
-    prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
-    __vmerge_app_b(ab, bb, sa, sb, na, nb, dst, j + 1, w + 1)
-  } else __vmerge_app_b(ab, bb, sa, sb, na, nb, dst, j + 1, w)
+  else {
+    let bh = prim.handle(b)
+    let bk: String = prim.load_handle(bh + 12 + (2 * j) * 8)
+    if __vobj_find(a, bk, 0, na) < 0 and __vobj_find(b, bk, 0, j) < 0 then {
+      let dh = prim.handle(dst)
+      let kh = prim.load64(bh + 12 + (2 * j) * 8)
+      let vh = prim.load64(bh + 12 + (2 * __vobj_find_last(b, bk, nb) + 1) * 8)
+      prim.rc_inc(kh)
+      prim.rc_inc(vh)
+      prim.store64(dh + 12 + (2 * w) * 8, kh)
+      prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
+      __vmerge_app_b(a, b, dst, j + 1, nb, na, w + 1)
+    } else __vmerge_app_b(a, b, dst, j + 1, nb, na, w)
+  }
 
 fn value_merge(a: Value, b: Value) -> Value = {
   let ah = prim.handle(a)
@@ -44742,19 +44287,13 @@ fn value_merge(a: Value, b: Value) -> Value = {
   if prim.load32(ah + 4) == 6 and prim.load32(bh + 4) == 6 then {
     let na = prim.load32(ah + 8) / 2
     let nb = prim.load32(bh + 8) / 2
-    let xa = prim.alloc_list(na)
-    let ya = prim.alloc_list(na)
-    let xb = prim.alloc_list(nb)
-    let yb = prim.alloc_list(nb)
-    let sa = __vx_sort(ah + 12, 16, na, prim.handle(xa) + 12, prim.handle(ya) + 12)
-    let sb = __vx_sort(bh + 12, 16, nb, prim.handle(xb) + 12, prim.handle(yb) + 12)
-    let total = na + __vmerge_bnew(ah + 12, bh + 12, sa, sb, na, nb, 0, 0)
+    let total = na + __vmerge_bnew(a, b, 0, nb, na, 0)
     let dst = prim.alloc_value(2 * total)
     let dh = prim.handle(dst)
     prim.store32(dh + 4, 6)
     prim.store32(dh + 8, 2 * total)
-    __vmerge_fill_a(ah + 12, bh + 12, sa, sb, na, nb, dst, 0)
-    __vmerge_app_b(ah + 12, bh + 12, sa, sb, na, nb, dst, 0, na)
+    __vmerge_fill_a(a, b, dst, 0, na, nb)
+    __vmerge_app_b(a, b, dst, 0, nb, na, na)
     dst
   } else b
 }
@@ -44771,6 +44310,16 @@ else {
   let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
   if k == key then i
   else __vobj_find(v, key, i + 1, n)
+}
+
+
+
+fn __vobj_find_last(v: Value, key: String, n: Int) -> Int = if n <= 0 then 0 - 1
+else {
+  let h = prim.handle(v)
+  let k: String = prim.load_handle(h + 12 + (2 * (n - 1)) * 8)
+  if k == key then n - 1
+  else __vobj_find_last(v, key, n - 1)
 }
 
 
@@ -45431,50 +44980,52 @@ pub const SRC_VALUE_UTILS: &str = r#"
 
 
 
-
-fn __vu_keyset(keys: List[String]) -> Map[String, Int] = {
-  var named: Map[String, Int] = map.new()
-  for k in keys {
-    map.insert(named, k, 0)
-  }
-  named
-}
-
-fn __vu_has(named: Map[String, Int], vb: Int, i: Int) -> Bool = {
-  let k: String = prim.load_handle(vb + (2 * i) * 8)
-  map.contains(named, k)
+fn __vu_has(keys: List[String], k: String, i: Int, n: Int) -> Bool = if i >= n then false
+else {
+  let e: String = prim.load_handle(prim.handle(keys) + 12 + i * 8)
+  if e == k then true
+  else __vu_has(keys, k, i + 1, n)
 }
 
 
-fn __vu_count(vb: Int, named: Map[String, Int], want: Bool, i: Int, n: Int, acc: Int) -> Int =
+fn __vu_count(v: Value, keys: List[String], want: Bool, i: Int, n: Int, nk: Int, acc: Int) -> Int =
   if i >= n then acc
-  else if __vu_has(named, vb, i) == want then __vu_count(vb, named, want, i + 1, n, acc + 1)
-  else __vu_count(vb, named, want, i + 1, n, acc)
+  else {
+    let k: String = prim.load_handle(prim.handle(v) + 12 + (2 * i) * 8)
+    let hit = __vu_has(keys, k, 0, nk)
+    if hit == want then __vu_count(v, keys, want, i + 1, n, nk, acc + 1)
+    else __vu_count(v, keys, want, i + 1, n, nk, acc)
+  }
 
 
-fn __vu_fill(vb: Int, named: Map[String, Int], dst: Value, want: Bool, i: Int, n: Int, w: Int) -> Int =
+fn __vu_fill(v: Value, keys: List[String], dst: Value, want: Bool, i: Int, n: Int, nk: Int, w: Int) -> Int =
   if i >= n then w
-  else if __vu_has(named, vb, i) == want then {
-    let dh = prim.handle(dst)
-    let kh = prim.load64(vb + (2 * i) * 8)
-    let vh = prim.load64(vb + (2 * i + 1) * 8)
-    prim.rc_inc(kh)
-    prim.rc_inc(vh)
-    prim.store64(dh + 12 + (2 * w) * 8, kh)
-    prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
-    __vu_fill(vb, named, dst, want, i + 1, n, w + 1)
-  } else __vu_fill(vb, named, dst, want, i + 1, n, w)
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let hit = __vu_has(keys, k, 0, nk)
+    if hit == want then {
+      let dh = prim.handle(dst)
+      let kh = prim.load64(h + 12 + (2 * i) * 8)
+      let vh = prim.load64(h + 12 + (2 * i + 1) * 8)
+      prim.rc_inc(kh)
+      prim.rc_inc(vh)
+      prim.store64(dh + 12 + (2 * w) * 8, kh)
+      prim.store64(dh + 12 + (2 * w + 1) * 8, vh)
+      __vu_fill(v, keys, dst, want, i + 1, n, nk, w + 1)
+    } else __vu_fill(v, keys, dst, want, i + 1, n, nk, w)
+  }
 
 fn __vu_sel(v: Value, keys: List[String], want: Bool) -> Value = {
   let h = prim.handle(v)
   let n = prim.load32(h + 8) / 2
-  let named = __vu_keyset(keys)
-  let cnt = __vu_count(h + 12, named, want, 0, n, 0)
+  let nk = prim.load32(prim.handle(keys) + 4)
+  let cnt = __vu_count(v, keys, want, 0, n, nk, 0)
   let dst = prim.alloc_value(2 * cnt)
   let dh = prim.handle(dst)
   prim.store32(dh + 4, 6)
   prim.store32(dh + 8, 2 * cnt)
-  let _w = __vu_fill(h + 12, named, dst, want, 0, n, 0)
+  let _w = __vu_fill(v, keys, dst, want, 0, n, nk, 0)
   dst
 }
 
@@ -45652,63 +45203,6 @@ fn __vu_fold_pairs(pairs: List[(String, Value)]) -> List[(String, Value)] =
     }
     list.zip(keys, vals)
   }
-
-
-
-
-
-
-
-
-fn __vu_merge_pairs(pa: List[(String, Value)], pb: List[(String, Value)]) -> List[(String, Value)] = {
-  var at: Map[String, Int] = map.new()
-  var keys: List[String] = []
-  var vals: List[Value] = []
-  for (k, v) in pa {
-    if not map.contains(at, k) then {
-      map.insert(at, k, list.len(keys))
-    } else ()
-    list.push(keys, k)
-    list.push(vals, v)
-  }
-  for (k, v) in pb {
-    match map.get(at, k) {
-      some(i) => {
-        vals = list.set(vals, i, v)
-      },
-      none => {
-        map.insert(at, k, list.len(keys))
-        list.push(keys, k)
-        list.push(vals, v)
-      },
-    }
-  }
-  list.zip(keys, vals)
-}
-
-fn __vu_select_pairs(pairs: List[(String, Value)], keys: List[String], want: Bool) -> List[(String, Value)] = {
-  var named: Map[String, Int] = map.new()
-  for k in keys {
-    map.insert(named, k, 0)
-  }
-  var out: List[(String, Value)] = []
-  for (k, v) in pairs {
-    if map.contains(named, k) == want then { list.push(out, (k, v)) } else ()
-  }
-  out
-}
-
-fn __vu_pick_pairs(pairs: List[(String, Value)], keys: List[String]) -> List[(String, Value)] = __vu_select_pairs(
-  pairs,
-  keys,
-  true,
-)
-
-fn __vu_omit_pairs(pairs: List[(String, Value)], keys: List[String]) -> List[(String, Value)] = __vu_select_pairs(
-  pairs,
-  keys,
-  false,
-)
 
 
 
@@ -46754,7 +46248,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "bytes_append_multi" => Some(SRC_BYTES_APPEND_MULTI),
         "bytes_array" => Some(SRC_BYTES_ARRAY),
         "bytes_core" => Some(SRC_BYTES_CORE),
-        "bytes_ct" => Some(SRC_BYTES_CT),
         "bytes_cursor" => Some(SRC_BYTES_CURSOR),
         "bytes_f16" => Some(SRC_BYTES_F16),
         "bytes_lenprefix" => Some(SRC_BYTES_LENPREFIX),
@@ -47039,11 +46532,14 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "string_pad" => Some(SRC_STRING_PAD),
         "string_quote" => Some(SRC_STRING_QUOTE),
         "string_repeat" => Some(SRC_STRING_REPEAT),
+        "string_replace" => Some(SRC_STRING_REPLACE),
         "string_reverse" => Some(SRC_STRING_REVERSE),
         "string_rle" => Some(SRC_STRING_RLE),
         "string_search" => Some(SRC_STRING_SEARCH),
         "string_slice" => Some(SRC_STRING_SLICE),
         "string_slice2" => Some(SRC_STRING_SLICE2),
+        "string_split" => Some(SRC_STRING_SPLIT),
+        "string_split_once" => Some(SRC_STRING_SPLIT_ONCE),
         "string_take_drop" => Some(SRC_STRING_TAKE_DROP),
         "string_to_bytes" => Some(SRC_STRING_TO_BYTES),
         "string_to_int" => Some(SRC_STRING_TO_INT),
