@@ -156,6 +156,12 @@ struct Contain {
     /// `process.exit` sent its mark (op 76): the call ends by a deliberate
     /// exit, which is never contained.
     exit_marked: bool,
+    /// A linear-memory growth of this store was refused while the call ran
+    /// (the store limiter below): the call is running out of memory, which
+    /// is never contained (row 1 of the security table, C-434). The guest's
+    /// allocator answers the refused `memory.grow` with C-197's abort, so the
+    /// kind is read from the refusal itself, never from the abort's text.
+    oom: bool,
 }
 
 /// `process.exit`'s mark (crates/almide-wasm fs_meta.rs `OP_EXIT_MARK`).
@@ -207,6 +213,11 @@ fn op_allowed(host: &Host, op: i32) -> wasmtime::Result<()> {
     }
 }
 
+/// Record that a growth of `host`'s memory was refused (see [`Contain::oom`]).
+fn mark_oom(host: &Host) {
+    host.contain.lock().expect("contain").oom = true;
+}
+
 /// Is the process's stdout a terminal (native flushes per write there).
 fn stdout_is_terminal() -> bool {
     use std::io::IsTerminal as _;
@@ -219,6 +230,7 @@ fn stdout_is_terminal() -> bool {
 impl wasmtime::ResourceLimiter for Host {
     fn memory_growing(&mut self, current: usize, desired: usize, maximum: Option<usize>) -> wasmtime::Result<bool> {
         if maximum.is_some_and(|m| desired > m) {
+            mark_oom(self);
             return Ok(false);
         }
         let delta = desired.saturating_sub(current);
@@ -227,17 +239,22 @@ impl wasmtime::ResourceLimiter for Host {
         }
         // The run's own instance takes back what its idle pooled fan
         // workers hold before it is refused: alone, it reaches the whole cap.
-        match &self.par {
+        let granted = match &self.par {
             Some(par) => {
                 par.release_pool();
-                Ok(self.meter.reserve(delta))
+                self.meter.reserve(delta)
             }
-            None => Ok(false),
+            None => false,
+        };
+        if !granted {
+            mark_oom(self);
         }
+        Ok(granted)
     }
 
     fn memory_grow_failed(&mut self, _error: wasmtime::Error) -> wasmtime::Result<()> {
         self.meter.undo_last();
+        mark_oom(self);
         Ok(())
     }
 
@@ -1053,12 +1070,13 @@ fn serve_contained(caller: &mut wasmtime::Caller<'_, Host>, env: i32) -> wasmtim
             let mut c = caller.data().contain.lock().expect("contain");
             c.active = true;
             c.exit_marked = false;
+            c.oom = false;
         }
         let ran = func.call(&mut *caller, &[wasmtime::Val::I32(env)], &mut results);
-        let (held, exit_marked) = {
+        let (held, exit_marked, oom) = {
             let mut c = caller.data().contain.lock().expect("contain");
             c.active = false;
-            (c.held.take(), c.exit_marked)
+            (c.held.take(), c.exit_marked, c.oom)
         };
         let put_back = |host: &Host, held: Option<(Vec<u8>, bool)>| match held {
             Some((b, true)) => emit_err_line_now(host, &b),
@@ -1075,7 +1093,8 @@ fn serve_contained(caller: &mut wasmtime::Caller<'_, Host>, env: i32) -> wasmtim
         let exit = *caller.data().exit.lock().expect("exit");
         // The abort's own end: its `unreachable` (the die convention) or
         // its exit 1 (the emitter's guards and `panic`).
-        let ended = !exit_marked && (matches!(exit, Some(1)) || (exit.is_none() && is_unreachable_trap(&e)));
+        // An out-of-memory end is never contained: its growth was refused.
+        let ended = !exit_marked && !oom && (matches!(exit, Some(1)) || (exit.is_none() && is_unreachable_trap(&e)));
         let text = match &held {
             Some((h, line)) if ended => match h.strip_prefix(b"Error: ").filter(|_| *line) {
                 Some(m) => Some(m.to_vec()),
