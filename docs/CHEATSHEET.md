@@ -211,7 +211,7 @@ A user-declared effect fn is **always fallible**: a call yields
 `Result[T, String]`, even when the body cannot fail. `-> T` is the canonical
 spelling — the `effect` already says it can fail.
 
-A pure `fn` may still call `println`, `eprintln`, `panic` and `assert` / `assert_eq` / `assert_ne`: they write or abort, never read, and do not make the fn `effect` (ADR-0022). Every other effect (`fs`, `env`, `io.*`, `http`, `fan`, …) from a pure fn is E006. The stdlib readers are effect fns too: `io.read_byte`, `io.read_n_bytes`, `process.args` and the `args` readers (`args.flag`, `args.option`, `args.option_or`, `args.positional`, `args.positional_at`, `args.raw`) read stdin or argv, so they need an `effect fn` caller like `io.read_line` and `env.args` do (dialect epoch 8; a pure fn calling one is E006). The ones returning `String?` (`args.option`, `args.positional_at`) take `!` before a default — `args.positional_at(0)! ?? "in.txt"`: `!` propagates the error, `??` defaults the none (#3522).
+A pure `fn` may still call `println`, `eprintln`, `panic` and `assert` / `assert_eq` / `assert_ne`: they write or abort, never read, and do not make the fn `effect` (ADR-0022). Every other effect (`fs`, `env`, `io.*`, `http`, `fan`, …) from a pure fn is E006. The stdlib readers are effect fns too: `io.read` / `io.read_exact` / `io.read_to_end` on `io.stdin()!`, `process.args` and the `args` readers (`args.flag`, `args.option`, `args.option_or`, `args.positional`, `args.positional_at`, `args.raw`) read stdin or argv, so they need an `effect fn` caller like `io.read_line` and `env.args` do (dialect epoch 8; a pure fn calling one is E006). The ones returning `String?` (`args.option`, `args.positional_at`) take `!` before a default — `args.positional_at(0)! ?? "in.txt"`: `!` propagates the error, `??` defaults the none (#3522).
 
 Read the `!` on an effect call like Swift's `await`: it marks the point where
 the world is touched, whether or not this particular call can fail (Almide has
@@ -222,6 +222,7 @@ it propagates the error to the enclosing fn and never traps.
 |---|---|
 | a user-declared effect fn, or a stdlib one that can fail (`fs.read_text`, …) | `f()!` to propagate · `let _ = f()` to discard on purpose · or `match` on `ok`/`err`. A bare `let x = f()` is E041, a bare statement `f()` is E042 |
 | a stdlib effect fn that cannot fail (`random.int`, `io.read_line`, `fs.exists`, …) | the value is plain; a `!` on it is a harmless no-op |
+| a stdlib effect fn written in Almide that returns a plain value (`io.stdin()`, `io.stdout()`, `uuid.v4()`, `process.child_pid(c)`, …) | like a user-declared one, a call yields a `Result`: write `!` — `io.write(io.stdout()!, data)!` |
 
 The one rule that is always right: **write `!` on every effect call.** You never
 need to know whether a stdlib effect fn can fail to append it.
@@ -887,13 +888,14 @@ All six are callable from a pure `fn` — output and aborts do not need `effect`
 ```almide check
 import io                                     // io is NOT auto-imported
 effect fn main() -> Unit = {
-  let line = io.read_line()                   // plain String — it cannot fail, so NOT a Result (`!` is a no-op, `?` is E034)
+  let line = io.read_line() ?? ""             // String? — none at end of input; it cannot fail, so NOT a Result
   let n = int.parse(string.trim(line)) ?? 0   // int.parse(s) -> Result[Int, String]
   println(int.to_string(n))
 }
 ```
-`io.read_line()` reads one stdin line with the trailing newline stripped, returns `""` on EOF,
-and requires an `effect fn` caller. `int.parse` / `float.parse` return `Result` — unwrap with
+`io.read_line()` reads one stdin line with the trailing newline stripped and returns
+`String?`: `none` at end of input, `some("")` for an empty line. It requires an `effect fn`
+caller. For bytes, read a handle: `io.read(io.stdin()!, n)!`, `io.read_to_end(io.stdin()!)!`. `int.parse` / `float.parse` return `Result` — unwrap with
 `??`, `!` (effect fn), or `?`. There is no `int.from_string`.
 
 ## Entry point
@@ -963,8 +965,11 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [error](stdlib/error.md) | Error construction | auto-imported | 3 |
 | [fs](stdlib/fs.md) | File system | `import fs` | 24 |
 | [env](stdlib/env.md) | Environment and system | `import env` | 9 |
-| [process](stdlib/process.md) | Process execution, env vars, signals | `import process` | 12 |
-| [io](stdlib/io.md) | Standard I/O | `import io` | 7 |
+| [process](stdlib/process.md) | Child processes (`process.ProcessCommand` + `output` / `run` / `start`), exit, signals | `import process` | 17 |
+| [io](stdlib/io.md) | Standard streams; `read` / `write` / `close` over any handle | `import io` | 12 |
+| [net](stdlib/net.md) | TCP, UDP, name lookup, IP addresses | `import net` | 16 |
+| [unix](stdlib/unix.md) | Unix-domain sockets, descriptor passing, shared memory | `import unix` | 10 |
+| [uuid](stdlib/uuid.md) | RFC 9562 UUIDs: v4, v7, parse, compare | `import uuid` | 7 |
 | [http](stdlib/http.md) | HTTP client and server | `import http` | 23 |
 | [random](stdlib/random.md) | Random number generation; for secrets use `random.bytes` | `import random` | 10 |
 
@@ -1135,6 +1140,14 @@ fn types, Result) — wrap those in a named Codec type or convert at the boundar
 - `compute.msec(5)` / `compute.sec(5)` / `compute.m(5)` → **WRONG**. The unit set is closed: `ns / us / ms / s / min / h`
 - `100ms` / `5s` as a literal → **WRONG**. There are no time literals. Write `compute.ms(100)` / `duration.s(5)`
 - `let list = [1, 2]` then `list.len(list)` → **WRONG**. A local binding shadows the module of the same name in member position too, so this reads as the LOCAL's `len` method with the receiver as its first argument, and the one you wrote as a second (E004). Do not name a binding after a module you still need — `list`, `string`, `map`, `set` are the ones that get written by accident. Two fixes, both accepted: rename the binding (`let xs = [1, 2]`, then `list.len(xs)`), or drop the argument and call the method on the local — `list.len()` prints `2`, because the shadowed name IS the local. The auto-imported modules shadow SILENTLY: there is no import statement to report as unused, so nothing warns you
+- `io.read_line_opt()` → **WRONG** (removed). `io.read_line()` itself returns `String?`: `none` at end of input
+- `io.read_byte()` / `io.read_n_bytes(n)` / `io.write_bytes(xs)` / `io.write(data)` → **WRONG** (removed). Bytes go through a handle: `io.read(io.stdin()!, 1)!`, `io.read_exact(io.stdin()!, n)!`, `io.write(io.stdout()!, data)!` (`data: Bytes`)
+- `net.tcp_read(s, n)` / `net.tcp_read_exact` / `net.tcp_write` / `net.tcp_close` / `net.tcp_close_listener` → **WRONG** (removed). A `net.TcpStream` is an io handle: `io.read(s, n)!`, `io.read_exact(s, n)!`, `io.write(s, data)!`, `io.close(s)!` — `import io` beside `import net`
+- `net.unix_connect` / `net.unix_send` / `net.shm_create` / … → **WRONG** (moved). `import unix`: `unix.connect`, `unix.write_fds`, `unix.select` (was `unix_wait`), `unix.shm_create`; bytes via `io.read` / `io.write` / `io.close` on the `unix.Fd`
+- `process.exec_status` / `exec_status_timeout` / `exec_in` / `exec_with_stdin` → **WRONG** (removed). One record: `process.output(process.ProcessCommand { cmd: "git", args: ["status"], dir: "repo", stdin: "", timeout_ms: 5000 })!` → `{code, stdout, stderr}`; write the type name so `dir` / `stdin` / `timeout_ms` can be left out
+- `process.run(cmd, args)` / `process.run_in(dir, cmd, args)` / `process.exec_attached` → **WRONG**. `process.run(process.ProcessCommand { cmd: "cargo", args: ["build"] })!` returns the exit code
+- `process.spawn(cmd, args)` / `process.is_alive(pid)` → **WRONG** (removed). `let c = process.start(process.ProcessCommand { cmd, args })!`, then `process.poll(c)!` (`none` while running), `process.wait(c)!`, `process.stop(c, 500)!`, `process.child_pid(c)!`
+- `process.exec("sh", ["-c", "git status | head"])` to get a shell → avoid. Programs take argv lists: `process.exec("git", ["status"])!`, and do the piping in Almide
 
 ## Complete example
 ```almide check
