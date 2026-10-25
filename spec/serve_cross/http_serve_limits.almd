@@ -24,28 +24,23 @@ import env
 import http
 
 effect fn handle(req: HttpRequest) -> HttpResponse = {
-  let path = http.req_path(req)
-  eprintln("${http.req_method(req)} ${path}")
+  let path = http.path(req)
+  eprintln("${http.method(req)} ${path}")
   match path {
-    "/split" => http.with_headers(200, "split", ["X-A": "1\r\nSet-Cookie: evil=1"]),
+    "/split" => http.with_headers(200, "split", [("X-A", "1\r\nSet-Cookie: evil=1")]),
     "/429" => http.response(429, "slow down"),
     "/503" => http.response(503, "later"),
     "/s42" => http.response(42, "x"),
     "/s103" => http.response(103, "x"),
     "/s600" => http.response(600, "x"),
-    "/hname" => http.with_headers(200, "x", ["a b": "v"]),
-    "/hctl" => http.with_headers(200, "x", ["X-C": "a\u{1}b"]),
+    "/hname" => http.with_headers(200, "x", [("a b", "v")]),
+    "/hctl" => http.with_headers(200, "x", [("X-C", "a\u{1}b")]),
     "/hframe" => http.with_headers(
       200,
       "hello",
-      [
-        "Content-Length": "99",
-        "Transfer-Encoding": "chunked",
-        "Keep-Alive": "timeout=5",
-        "X-Kept": "1"
-      ],
+      [("Content-Length", "99"), ("Transfer-Encoding", "chunked"), ("Keep-Alive", "timeout=5"), ("X-Kept", "1")],
     ),
-    _ => http.response(200, "${http.req_method(req)} ${path} ${http.req_body(req)}"),
+    _ => http.response(200, "${http.method(req)} ${path} ${http.body(req)}"),
   }
 }
 

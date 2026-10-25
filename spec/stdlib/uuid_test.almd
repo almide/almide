@@ -16,7 +16,24 @@ test "parse refuses anything but 8-4-4-4-12 hex digits" {
 }
 
 test "from_bytes takes exactly 16 bytes and to_bytes gives them back" {
-  let b = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+  let b = bytes.from_list([
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16
+  ])
   assert_eq(bytes.to_list(uuid.to_bytes(uuid.from_bytes(b)!)), bytes.to_list(b))
   assert_eq(uuid.to_string(uuid.from_bytes(b)!), "01020304-0506-0708-090a-0b0c0d0e0f10")
   match uuid.from_bytes(bytes.from_list([1, 2, 3])) {

@@ -11,7 +11,7 @@ fn extend(p: JsonPath, k: String) -> json.JsonPath = json.field(p, k)
 
 test "HttpResponse is annotatable in a typed helper" {
   let r = tag(http.response(200, "body"))
-  assert_eq(http.get_header(r, "x-t") ?? "", "1")
+  assert_eq(http.header(r, "x-t") ?? "", "1")
   assert_eq(http.body(r), "body")
 }
 

@@ -110,7 +110,6 @@ pub const PURE_MODULES: &[&str] = &[
     "html",
     "http_request",
     "http_response",
-    "http_url_decode",
     "int",
     "int16",
     "int16_convert",
@@ -413,48 +412,54 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
         // values (R-ffi-02), not a host capability; `--profile critical`
         // refuses the module wholesale (#4008).
         "ffi" => true,
-        // Pure data codecs on the blanket-impure http module (the network fns stay
-        // walled): url_decode is a percent-decoder (stdlib/http_url_decode.almd).
-        //
-        // #2588: the request rep (stdlib/http_request.almd — List[String]
-        // data, like the response rep) and the router layer over it
-        // (stdlib/http.almd). The router's construction and dispatch are
-        // pure; a HANDLER's own capabilities are counted transitively through
-        // the closure it holds, exactly like a list.map callback. `serve`
-        // (the listener) stays walled.
-        "http" => matches!(
-            func,
-            "new_request"
-                | "req_method"
-                | "req_path"
-                | "req_body"
-                | "req_header"
-                | "query_params"
-                | "param"
-                | "query"
-                | "queries"
-                | "route"
-                | "router"
-                | "mount"
-                | "wrap"
-                | "recover"
-                | "logger"
-                | "__with_params"
-                | "__with_path"
-                | "__set_body"
-                | "url_decode"
-                | "response"
-                | "json"
-                | "redirect"
-                | "with_headers"
-                | "status"
-                | "body"
-                | "set_header"
-                | "get_header"
-                | "status_code"
-                | "headers"
-                | "header_values"
-        ),
+        // Pure data on the blanket-impure http module (the network fns stay
+        // walled): the response and request reps (stdlib/http_response.almd,
+        // stdlib/http_request.almd — List[String] data), the HttpMessage
+        // accessors over them and their per-type requirements (R-http-12),
+        // and the router layer (stdlib/http.almd, #2588). The router's
+        // construction and dispatch are pure; a HANDLER's own capabilities
+        // are counted transitively through the closure it holds, exactly
+        // like a list.map callback. `serve` (the listener) stays walled.
+        "http" => {
+            func.starts_with("__http_request_")
+                || func.starts_with("__http_response_")
+                || matches!(
+                    func,
+                    "new_request"
+                        | "__new_request"
+                        | "method"
+                        | "path"
+                        | "query_params"
+                        | "param"
+                        | "query"
+                        | "queries"
+                        | "route"
+                        | "router"
+                        | "mount"
+                        | "wrap"
+                        | "recover"
+                        | "logger"
+                        | "__with_params"
+                        | "__with_path"
+                        | "__flat"
+                        | "__pairs"
+                        | "response"
+                        | "json"
+                        | "redirect"
+                        | "with_headers"
+                        | "__with_headers"
+                        | "set_status"
+                        | "status"
+                        | "header"
+                        | "header_values"
+                        | "headers"
+                        | "body"
+                        | "body_bytes"
+                        | "set_header"
+                        | "set_body"
+                        | "set_body_bytes"
+                )
+        }
         _ => false,
     }
 }

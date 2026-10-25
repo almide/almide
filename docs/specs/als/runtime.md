@@ -107,8 +107,8 @@ wasm ターゲットでは、埋め込みホスト（`almide run --target wasm` 
 （`--component`）としてのビルドは E081 で拒否する。
 テスト: `spec/embedded_cross/process_spawn_family.almd`
 
-`http.start(method, url, body, headers, limits)` は、要求を始めてすぐに呼び出し
-ハンドル（`HttpCall`）を返す。上限は呼び出しごとに `limits = { total_ms,
+`http.start(http.new_request(method, url, body, headers), limits)` は、
+要求を始めてすぐに呼び出しハンドル（`HttpCall`）を返す。上限は呼び出しごとに `limits = { total_ms,
 idle_ms }`（ミリ秒、0 は上限なし）で渡す。`total_ms` は `start` から測る壁時計で、
 接続・最初の 1 バイトまでの待ち・本文をすべて含む。`idle_ms` はバイトが届く間隔の
 上限で、最初の 1 バイトまでの待ちも含む。発火した上限は、自分の名前を示す err
@@ -121,7 +121,7 @@ err `request cancelled` で終わらせて接続を閉じる。以後 `read_new`
 返し、サーバーは接続が閉じたことを観測する。上限が発火するかどうかはホストの性質で
 ある（C-214 と同じ規律）。固定するのは、発火したときの err の形である。wasm
 ターゲットでは、埋め込みホスト（`almide run --target wasm`）が `start`・`poll`・
-`read_new`・`wait`・`cancel` と `request_stream_with_limits` を native と同じ
+`read_new`・`wait`・`cancel` を native と同じ
 観測で提供する。err の文字列、`cancel` で接続が閉じること、ハンドルの最後の写しを
 捨てると呼び出しが取り消されることも同じである。単体の成果物
 （`almide build --target wasm`）はこの族を持てず、`almide check --target wasm` は
@@ -129,7 +129,7 @@ E081 で拒否する。OpenAI と Anthropic のストリーミングクライア
 dialect epoch 14 でパッケージ almide/llm に移った（C-270）。
 テスト: `spec/stdlib/http_call_test.almd`、`spec/embedded_cross/http_call_handle_errs.almd`
 
-`http.serve(port, f)` は埋め込み wasm レーン（`almide run --target wasm`）でも
+`http.serve(port, handler)` は埋め込み wasm レーン（`almide run --target wasm`）でも
 native と同じ意味で動く。1 回の実行のすべての要求を 1 つのインスタンスが、受理順に
 1 件ずつ処理する。main は 1 回だけ走り、native と同じく `http.serve` を呼ぶ。
 ホストは `0.0.0.0:<port>` に bind し、解析済みの要求を 1 件ずつゲストに渡す。
@@ -147,8 +147,8 @@ native と同じ意味で動く。1 回の実行のすべての要求を 1 つ�
 フレーミングであり、本文はフレーミングを外して比べる）。理由句は規範に含まない。
 HTTP/2 と HTTP/3 は理由句を持たず（RFC 9113 §8.3.2、RFC 9114 §4.3.2）、ホストの
 HTTP ライブラリは自分の理由句を書く（native コアは `418 OK`、hyper は
-`418 I'm a teapot`。almide/almide#2659 の試作で測定）。`req_method`・`req_path`・
-`req_body`・`req_header`（最初の一致、ASCII 大小無視）・`query_params`（最初の
+`418 I'm a teapot`。almide/almide#2659 の試作で測定）。`method`・`path`・
+`body`・`header`（最初の一致、ASCII 大小無視）・`query_params`（最初の
 `?` 以降を `&` で分け、各組を最初の `=` で分け、`=` の無い組は捨て、`+` と `%XX`
 を復号し、後のキーが勝つ）は同じ値を返す。ハンドラの `err(m)` は本文
 `Internal error: <m>`、`Content-Type: text/plain` の `500` になる。export ホスト
@@ -264,19 +264,19 @@ Contracts: C-274。
 ## ALS-R8 HTTP レスポンスヘッダの規範
 
 `http` のレスポンス構築族（`response` / `json` / `redirect` / `with_headers` /
-`status` / `body` / `set_header` / `get_header`）は**ネットワークに触れない純
+`set_status` / `body` / `set_header` / `header`）は**ネットワークに触れない純
 データ操作**で、両ターゲットで走る。ヘッダ名の規範は3つ:
 
 - **フィールド名は大小文字を区別しない**（RFC 9110 §5.1）。畳み込みは
   **ASCII のみ**（フィールド名は `token` であり、v0 の
   `eq_ignore_ascii_case` と一致させる — Unicode の `string.to_lower` を
-  使ってはならない）。`get_header` は最初の一致を返し、無ければ none。
+  使ってはならない）。`header` は最初の一致を返し、無ければ none。
 - **1つのフィールド名につきエントリは高々1つ。** 書き込み（`set_header`・
   `with_headers`）は大小文字を無視して既存エントリの**値をその場で上書き**
   し（名前の綴りは最初に格納されたものを保つ・位置も動かない）、無ければ
-  末尾に追加する。ゆえに `get_header(set_header(r, k, v), k') == some(v)`
+  末尾に追加する。ゆえに `header(set_header(r, k, v), k') == some(v)`
   は `k` と `k'` が ASCII 大小文字違いなら常に成り立つ。
-- **`with_headers` は渡された Map そのもの**（map 順）を返し、
+- **`with_headers` は渡されたリストそのもの**（リスト順）を返し、
   `Content-Type` を勝手に**播かない**。既定の Content-Type は、名前を与える
   手段が他にない `response`（`text/plain`）と `json`
   （`application/json`）だけが持つ。`redirect` は `Location` のみを持つ。
@@ -287,9 +287,10 @@ Contracts: C-274。
 ハンドラは `HttpRequest` を受けて `HttpResponse` を返す関数
 （`HttpHandler = effect (HttpRequest) -> HttpResponse`）であり、ルーターと
 ミドルウェアを掛けたアプリもまたハンドラである。`http.new_request(method,
-target, body, headers)` はソケットなしでリクエストを作り、読み取り族
-（`req_method` / `req_path` / `req_body` / `req_header` / `query_params` /
-`param`）はそれに対して両ターゲットで同じ値を返す。`req_path` は target を
+target, body, headers)`（`headers` は `List[(String, String)]`）はソケットなしで
+リクエストを作り、読み取り族
+（`method` / `path` / `body` / `header` / `query_params` /
+`param`）はそれに対して両ターゲットで同じ値を返す。`path` は target を
 クエリ文字列ごと返す。ルーティングは両ターゲットで同じ結果になる:
 
 - ルートは `"METHOD /path"`（メソッド省略は全メソッド）で、`{name}` は 1

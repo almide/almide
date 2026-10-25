@@ -200,42 +200,21 @@ pub const HOST_OPS: &[HostOp] = &[
     op("fs", "__root_remove", "almide_rt_fs___root_remove", READ_WRITE).result(),
     op("fs", "create_temp_dir", "almide_rt_fs_create_temp_dir", WRITE_ENTROPY).result(),
     op("fs", "create_temp_file", "almide_rt_fs_create_temp_file", WRITE_ENTROPY).result(),
-    // ── http: the String client, one row per verb ──
+    // ── http: the client (R-http-01) — get / request answer the body text,
+    // get_response / send the whole response, get_bytes / request_bytes the
+    // raw body; the header-taking forms call their flat-header leaf ──
     op("http", "get", "almide_http_get", NET).result(),
-    op("http", "post", "almide_http_post", NET).result(),
-    op("http", "put", "almide_http_put", NET).result(),
-    op("http", "patch", "almide_http_patch", NET).result(),
-    op("http", "delete", "almide_http_delete", NET).result(),
-    op("http", "request", "almide_http_request", NET).result(),
-    // The result-shape variants: (status, body) and the raw body bytes.
-    op("http", "get_status", "almide_http_get_status", NET).result(),
-    op("http", "request_status", "almide_http_request_status", NET).result(),
-    op("http", "get_bytes", "almide_http_get_bytes", NET).result(),
-    op("http", "request_bytes", "almide_http_request_bytes", NET).result(),
-    // The whole-response twins (#1791).
+    wrapper("http", "request", "__request", "almide_http_request", NET).result(),
     op("http", "get_response", "almide_http_get_response", NET).result(),
-    op("http", "post_response", "almide_http_post_response", NET).result(),
-    op("http", "put_response", "almide_http_put_response", NET).result(),
-    op("http", "patch_response", "almide_http_patch_response", NET).result(),
-    op("http", "delete_response", "almide_http_delete_response", NET).result(),
-    op("http", "request_response", "almide_http_request_response", NET).result(),
-    // The call handle (#2631): start, the four verbs over it, and the
-    // streaming clients built on it — the limited twin, and plain
-    // request_stream as the handle's classic call (no limits named).
+    wrapper("http", "send", "__request_response", "almide_http_request_response", NET).result(),
+    op("http", "get_bytes", "almide_http_get_bytes", NET).result(),
+    wrapper("http", "request_bytes", "__request_bytes", "almide_http_request_bytes", NET).result(),
+    // The call handle (#2631): start and the four verbs over it.
     wrapper("http", "start", "__call_start", "almide_rt_http___call_start", NET).result(),
     op("http", "poll", "almide_http_call_poll", NET),
     op("http", "read_new", "almide_http_call_read_new", NET),
     op("http", "wait", "almide_http_call_wait", NET).result(),
     op("http", "cancel", "almide_http_call_cancel", NET),
-    wrapper(
-        "http",
-        "request_stream_with_limits",
-        "__request_stream_limited",
-        "almide_rt_http___request_stream_limited",
-        NET,
-    )
-    .result(),
-    op("http", "request_stream", "almide_http_request_stream", NET).result(),
     // ── testing: assert_aborts's site pair (ADR-0029, #3792), test builds only ──
     // The child run starts a child — a re-exec of the native test binary, a
     // fresh instance on the embedded host (op 117) — so it counts Process. The
@@ -260,7 +239,9 @@ pub const WALLED: &[(&str, &str, &str)] = &[
     ("process", "*", "child processes, signals and the exit / sleep / pid / env family: native-only; `exit` lowers as the ProcExit prim; stdin_lines runs on wasm through a self-host body, outside this subset"),
     ("http", "serve", "the listener: native-only, and its handler is a closure the host invokes"),
     ("http", "__call_start", "reached only through its wrapper row `http.start`"),
-    ("http", "__request_stream_limited", "reached only through its wrapper row `http.request_stream_with_limits`"),
+    ("http", "__request", "reached only through its wrapper row `http.request`"),
+    ("http", "__request_response", "reached only through its wrapper row `http.send`"),
+    ("http", "__request_bytes", "reached only through its wrapper row `http.request_bytes`"),
 ];
 
 /// The typed-twin suffixes a ROUTED row's call name can carry
@@ -379,7 +360,7 @@ mod tests {
         assert_eq!(host_op_for_call_name("env.millis_x").map(|o| o.func), Some("millis"));
         // An unrouted row takes no typed suffix, and a pure fn never resolves.
         assert!(host_op_for_call_name("env.millis_str").is_none());
-        assert!(host_op_for_call_name("http.get_header").is_none());
+        assert!(host_op_for_call_name("http.header").is_none());
         assert!(host_op_for_call_name("list.map").is_none());
     }
 
@@ -392,7 +373,7 @@ mod tests {
         // Host ops, pure fns and non-capability modules are accounted for.
         assert!(!is_uncounted_host_call("env.millis"));
         assert!(!is_uncounted_host_call("datetime.add_days"));
-        assert!(!is_uncounted_host_call("http.get_header"));
+        assert!(!is_uncounted_host_call("http.header"));
         assert!(!is_uncounted_host_call("list.map"));
     }
 

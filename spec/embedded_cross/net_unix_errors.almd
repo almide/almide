@@ -17,7 +17,10 @@ import random
 fn masked(e: String, path: String) -> String = string.replace(e, path, "<path>")
 
 // `descriptor <n> ` → `descriptor <name> `: the number is the OS's.
-fn __mask_descriptor(line: String, name: String) -> String = match string.index_of(line, "descriptor ") {
+fn __mask_descriptor(line: String, name: String) -> String = match string.index_of(
+  line,
+  "descriptor ",
+) {
   none => line,
   some(i) => {
     let rest = string.drop(line, i + 11)

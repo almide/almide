@@ -12,7 +12,7 @@ import env
 import http
 
 effect fn handle(req: HttpRequest) -> HttpResponse = {
-  let path = http.req_path(req)
+  let path = http.path(req)
   println("hit ${path}")
   match path {
     "/nap" => env.sleep_ms(1000),
