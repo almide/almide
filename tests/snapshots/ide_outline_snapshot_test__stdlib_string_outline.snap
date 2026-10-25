@@ -51,7 +51,7 @@ fn string.max(s: String) -> Option[String]
 fn string.max_by[K](s: String, f: fn(String) -> K) -> Option[String]
 fn string.max_with(s: String, cmp: fn(String, String) -> Int) -> Option[String]
 fn string.merge_sort_with(xs: List[String], cmp: fn(String, String) -> Int) -> List[String]
-fn string.merge_with(xs: List[String], ys: List[String], cmp: fn(String, String) -> Int, i: Int, j: Int, acc: List[String]) -> List[String]
+fn string.merge_with(xs: List[String], ys: List[String], cmp: fn(String, String) -> Int) -> List[String]
 fn string.min(s: String) -> Option[String]
 fn string.min_by[K](s: String, f: fn(String) -> K) -> Option[String]
 fn string.min_with(s: String, cmp: fn(String, String) -> Int) -> Option[String]
@@ -91,7 +91,6 @@ fn string.trim_end(s: String) -> String
 fn string.trim_start(s: String) -> String
 fn string.unique(s: String) -> String
 fn string.unique_by[K](s: String, f: fn(String) -> K) -> String
-fn string.utf16_decode(xs: List[Int], i: Int, acc: List[String]) -> Result[String, String]
 fn string.utf16_units(cp: Int) -> List[Int]
 fn string.utf8_width(cp: Int) -> Int
 fn string.window(s: String, n: Int) -> List[String]
