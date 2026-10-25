@@ -10963,9 +10963,9 @@ import url
 
 /// Serves 0.0.0.0:port forever; handler err is a 500.
 @intrinsic("almide_rt_http_serve")
-@concurrent(f)
+@concurrent(handler)
 @category("Net.listen")
-effect fn serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit = _
+effect fn serve(port: Int, handler: effect (HttpRequest) -> HttpResponse) -> Unit = _
 
 
 /// Reply with Content-Type text/plain.
@@ -10975,16 +10975,20 @@ fn response(status: Int, body: String) -> HttpResponse = _
 
 
 
-
-
 /// Reply with Content-Type application/json.
 @intrinsic("almide_rt_http_json")
 fn json(status: Int, body: String) -> HttpResponse = _
 
-/// Reply with headers as-is; no default Content-Type.
+/// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
+fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = http.__with_headers(
+  status,
+  body,
+  __flat(headers),
+)
+
 @intrinsic("almide_rt_http_with_headers")
-@borrow_ref(headers)
-fn with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse = _
+@borrow_ref(flat)
+fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
 
 /// 302 with Location url and empty body.
 @intrinsic("almide_rt_http_redirect")
@@ -10994,65 +10998,124 @@ fn redirect(url: String) -> HttpResponse = _
 /// resp with code set; not range-checked.
 @intrinsic("almide_http_set_status")
 @consume(resp)
-fn status(resp: HttpResponse, code: Int) -> HttpResponse = _
+fn set_status(resp: HttpResponse, code: Int) -> HttpResponse = _
 
-/// Payload text; lossy UTF-8 when fetched.
-@intrinsic("almide_http_get_body")
-@borrow_ref(resp)
-fn body(resp: HttpResponse) -> String = _
-
-/// Case-insensitive upsert of header key.
-@intrinsic("almide_http_set_header")
-@consume(resp)
-fn set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse = _
-
-/// First value for key, any case; none if absent.
-@intrinsic("almide_http_get_header")
-@borrow_ref(resp)
-fn get_header(resp: HttpResponse, key: String) -> String? = _
-
-
-
-
-
-
-
-/// HTTP status; 0 if the status line was bad.
+/// HTTP status code; 0 if the status line was bad.
 @intrinsic("almide_http_status_code")
 @borrow_ref(resp)
-fn status_code(resp: HttpResponse) -> Int = _
+fn status(resp: HttpResponse) -> Int = _
 
-/// Map by lowercased name; first value wins.
-@intrinsic("almide_http_headers")
-@borrow_ref(resp)
-fn headers(resp: HttpResponse) -> Map[String, String] = _
 
-/// Every value for key, wire order; [] if absent.
+/// First value of header name, any case; none if absent.
+fn header[M: HttpMessage](m: M, name: String) -> String? = m.__self_header(name)
+
+/// Every value of header name, any case, in wire order; [] if absent.
+fn header_values[M: HttpMessage](m: M, name: String) -> List[String] = m.__self_header_values(name)
+
+/// Every header as (name, value), wire spelling and order, repeats kept.
+fn headers[M: HttpMessage](m: M) -> List[(String, String)] = m.__self_headers()
+
+/// Body text; a fetched body is decoded as lossy UTF-8.
+fn body[M: HttpMessage](m: M) -> String = m.__self_body()
+
+/// Body as bytes: the UTF-8 bytes of body(m).
+fn body_bytes[M: HttpMessage](m: M) -> Bytes = m.__self_body_bytes()
+
+/// m with header name set, any case: the first match replaced in place, else appended.
+fn set_header[M: HttpMessage](m: M, name: String, value: String) -> M = m.__self_set_header(
+  name,
+  value,
+)
+
+/// m with its body replaced.
+fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
+
+/// m with its body replaced by body, decoded as lossy UTF-8.
+fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M = m.__self_set_body_bytes(body)
+
+
+@intrinsic("almide_http_get_header")
+@borrow_ref(m)
+fn __http_response_header(m: HttpResponse, name: String) -> String? = _
+
 @intrinsic("almide_http_header_values")
-@borrow_ref(resp)
-fn header_values(resp: HttpResponse, key: String) -> List[String] = _
+@borrow_ref(m)
+fn __http_response_header_values(m: HttpResponse, name: String) -> List[String] = _
+
+fn __http_response_headers(m: HttpResponse) -> List[(String, String)] = __pairs(http.__http_response_headers_flat(m))
+
+@intrinsic("almide_http_headers_flat")
+@borrow_ref(m)
+fn __http_response_headers_flat(m: HttpResponse) -> List[String] = _
+
+@intrinsic("almide_http_get_body")
+@borrow_ref(m)
+fn __http_response_body(m: HttpResponse) -> String = _
+
+fn __http_response_body_bytes(m: HttpResponse) -> Bytes = bytes.from_string(http.__http_response_body(m))
+
+@intrinsic("almide_http_set_header")
+@consume(m)
+fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> HttpResponse = _
+
+@intrinsic("almide_http_set_body")
+@consume(m)
+fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = _
+
+fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = http.__http_response_set_body(
+  m,
+  bytes.to_string_lossy(body),
+)
+
+
+@intrinsic("almide_http_req_header")
+@borrow_ref(m)
+fn __http_request_header(m: HttpRequest, name: String) -> String? = _
+
+@intrinsic("almide_http_req_header_values")
+@borrow_ref(m)
+fn __http_request_header_values(m: HttpRequest, name: String) -> List[String] = _
+
+fn __http_request_headers(m: HttpRequest) -> List[(String, String)] = __pairs(http.__http_request_headers_flat(m))
+
+@intrinsic("almide_http_req_headers_flat")
+@borrow_ref(m)
+fn __http_request_headers_flat(m: HttpRequest) -> List[String] = _
+
+@intrinsic("almide_http_req_body")
+@borrow_ref(m)
+fn __http_request_body(m: HttpRequest) -> String = _
+
+fn __http_request_body_bytes(m: HttpRequest) -> Bytes = bytes.from_string(http.__http_request_body(m))
+
+@intrinsic("almide_http_req_set_header")
+@consume(m)
+fn __http_request_set_header(m: HttpRequest, name: String, value: String) -> HttpRequest = _
+
+@intrinsic("almide_http_req_set_body")
+@consume(m)
+fn __http_request_set_body(m: HttpRequest, body: String) -> HttpRequest = _
+
+fn __http_request_set_body_bytes(m: HttpRequest, body: Bytes) -> HttpRequest = http.__http_request_set_body(
+  m,
+  bytes.to_string_lossy(body),
+)
+
+
+fn __flat(xs: List[(String, String)]) -> List[String] = xs |> list.flat_map(((k, v)) => [k, v])
+
+fn __pairs(flat: List[String]) -> List[(String, String)] = list.range(0, list.len(flat) / 2) |> list.map((i) => (list.get(flat, 2 * i) ?? "", list.get(flat, 2 * i + 1) ?? ""))
 
 
 /// Request method as sent, e.g. GET.
 @intrinsic("almide_http_req_method")
 @borrow_ref(req)
-fn req_method(req: HttpRequest) -> String = _
+fn method(req: HttpRequest) -> String = _
 
-/// Request target, query string included.
+/// Request target, query string included (a full URL for a request built to send).
 @intrinsic("almide_http_req_path")
 @borrow_ref(req)
-fn req_path(req: HttpRequest) -> String = _
-
-/// Body text; empty without a Content-Length.
-@intrinsic("almide_http_req_body")
-@borrow_ref(req)
-fn req_body(req: HttpRequest) -> String = _
-
-/// First value for key, any case; none if absent.
-@intrinsic("almide_http_req_header")
-@borrow_ref(req)
-fn req_header(req: HttpRequest, key: String) -> String? = _
-
+fn path(req: HttpRequest) -> String = _
 
 
 
@@ -11062,7 +11125,7 @@ fn req_header(req: HttpRequest, key: String) -> String? = _
 
 
 /// url.parse_query of the target after its first ?; pairs in order; err on a bad escape.
-fn query_params(req: HttpRequest) -> Result[List[(String, String)], String] = match url.parse_query(__query_of(http.req_path(req))) {
+fn query_params(req: HttpRequest) -> Result[List[(String, String)], String] = match url.parse_query(__query_of(http.path(req))) {
   ok(ps) => ok(ps),
   err(e) => err(string.replace(e, "url.parse_query", "http.query_params")),
 }
@@ -11070,90 +11133,42 @@ fn query_params(req: HttpRequest) -> Result[List[(String, String)], String] = ma
 
 
 
-/// + to space, %XX to byte; bad escapes kept.
-@intrinsic("almide_http_url_decode")
-fn url_decode(s: String) -> String = _
+
 
 
 /// Body even for a 404; err only on transport.
 @intrinsic("almide_http_get")
 effect fn get(url: String) -> Result[String, String] = _
 
-/// Reply body of a POST; JSON type by default.
-@intrinsic("almide_http_post")
-effect fn post(url: String, body: String) -> Result[String, String] = _
-
-/// Reply body of a PUT; JSON type by default.
-@intrinsic("almide_http_put")
-effect fn put(url: String, body: String) -> Result[String, String] = _
-
-/// Reply body of a PATCH; JSON type by default.
-@intrinsic("almide_http_patch")
-effect fn patch(url: String, body: String) -> Result[String, String] = _
-
-/// Reply body of a DELETE; any status is ok.
-@intrinsic("almide_http_delete")
-effect fn delete(url: String) -> Result[String, String] = _
-
 /// Reply body for any method; any status is ok.
+@category("Net.fetch")
+effect fn request(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[String, String] = http.__request(
+  method,
+  url,
+  body,
+  __flat(headers),
+)
+
 @intrinsic("almide_http_request")
-@borrow_ref(headers)
-effect fn request(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = _
-
-
-
-
-
-/// (status, body); a 404 is ok, not err.
-@intrinsic("almide_http_get_status")
-effect fn get_status(url: String) -> Result[(Int, String), String] = _
-
-/// (status, body) for any method; 3xx not followed.
-@intrinsic("almide_http_request_status")
-@borrow_ref(headers)
-effect fn request_status(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String] = _
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+@borrow_ref(flat)
+effect fn __request(method: String, url: String, body: String, flat: List[String]) -> Result[String, String] = _
 
 /// Whole reply, 404 included; redirects not followed.
 @intrinsic("almide_http_get_response")
 effect fn get_response(url: String) -> Result[HttpResponse, String] = _
 
-/// Whole reply to a POST; any status is ok.
-@intrinsic("almide_http_post_response")
-effect fn post_response(url: String, body: String) -> Result[HttpResponse, String] = _
+/// Sends req to the URL its target names; the whole reply, any status; redirects not followed.
+@category("Net.fetch")
+effect fn send(req: HttpRequest) -> Result[HttpResponse, String] = http.__request_response(
+  http.method(req),
+  http.path(req),
+  http.__http_request_body(req),
+  http.__http_request_headers_flat(req),
+)
 
-/// Whole reply to a PUT; any status is ok.
-@intrinsic("almide_http_put_response")
-effect fn put_response(url: String, body: String) -> Result[HttpResponse, String] = _
-
-/// Whole reply to a PATCH; any status is ok.
-@intrinsic("almide_http_patch_response")
-effect fn patch_response(url: String, body: String) -> Result[HttpResponse, String] = _
-
-/// Whole reply to a DELETE; any status is ok.
-@intrinsic("almide_http_delete_response")
-effect fn delete_response(url: String) -> Result[HttpResponse, String] = _
-
-/// Whole reply for any method; 3xx not followed.
 @intrinsic("almide_http_request_response")
-@borrow_ref(headers)
-effect fn request_response(method: String, url: String, body: String, headers: Map[String, String]) -> Result[HttpResponse, String] = _
+@borrow_ref(flat)
+effect fn __request_response(method: String, url: String, body: String, flat: List[String]) -> Result[HttpResponse, String] = _
 
 
 
@@ -11163,25 +11178,17 @@ effect fn request_response(method: String, url: String, body: String, headers: M
 effect fn get_bytes(url: String) -> Result[Bytes, String] = _
 
 /// Raw body bytes for any method and headers.
+@category("Net.fetch")
+effect fn request_bytes(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[Bytes, String] = http.__request_bytes(
+  method,
+  url,
+  body,
+  __flat(headers),
+)
+
 @intrinsic("almide_http_request_bytes")
-@borrow_ref(headers)
-effect fn request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String] = _
-
-
-
-
-
-/// Body chunks to on_chunk; err on a non-2xx.
-@intrinsic("almide_http_request_stream")
-@borrow_ref(headers)
-effect fn request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Result[Unit, String] = _
-
-
-
-
-
-
-
+@borrow_ref(flat)
+effect fn __request_bytes(method: String, url: String, body: String, flat: List[String]) -> Result[Bytes, String] = _
 
 
 
@@ -11202,19 +11209,20 @@ effect fn request_stream(method: String, url: String, body: String, headers: Map
 /// Per-call limits in ms; 0 = no limit.
 type HttpLimits = { total_ms: Int, idle_ms: Int }
 
-/// Begins a request; returns at once with a handle.
-effect fn start(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits) -> Result[HttpCall, String] = __call_start(
-  method,
-  url,
-  body,
-  headers,
+/// Begins sending req; returns at once with a handle.
+@category("Net.fetch")
+effect fn start(req: HttpRequest, limits: HttpLimits) -> Result[HttpCall, String] = __call_start(
+  http.method(req),
+  http.path(req),
+  http.__http_request_body(req),
+  http.__http_request_headers_flat(req),
   limits.total_ms,
   limits.idle_ms,
 )
 
 @intrinsic("almide_rt_http___call_start")
-@borrow_ref(headers)
-effect fn __call_start(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
+@borrow_ref(flat)
+effect fn __call_start(method: String, url: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
 
 /// Never blocks: none while running, then the result.
 @intrinsic("almide_http_call_poll")
@@ -11235,21 +11243,6 @@ effect fn wait(c: HttpCall) -> Result[HttpResponse, String] = _
 @intrinsic("almide_http_call_cancel")
 @borrow_ref(c)
 effect fn cancel(c: HttpCall) -> Unit = _
-
-/// request_stream bounded by per-call limits.
-effect fn request_stream_with_limits(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits, on_chunk: (String) -> Unit) -> Result[Unit, String] = __request_stream_limited(
-  method,
-  url,
-  body,
-  headers,
-  limits.total_ms,
-  limits.idle_ms,
-  on_chunk,
-)
-
-@intrinsic("almide_rt_http___request_stream_limited")
-@borrow_ref(headers)
-effect fn __request_stream_limited(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int, on_chunk: (String) -> Unit) -> Result[Unit, String] = _
 
 
 
@@ -11273,10 +11266,17 @@ type HttpMiddleware = (HttpHandler) -> HttpHandler
 /// Route table row; build it with route or mount.
 type HttpRoute = { method: String, pattern: String, segments: List[String], handler: HttpHandler }
 
-/// Request built in code; target keeps its ?query.
+/// Request built in code; target keeps its ?query (a full URL for send / start).
+fn new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest = http.__new_request(
+  method,
+  target,
+  body,
+  __flat(headers),
+)
+
 @intrinsic("almide_rt_http_new_request")
-@borrow_ref(headers)
-fn new_request(method: String, target: String, body: String, headers: Map[String, String]) -> HttpRequest = _
+@borrow_ref(flat)
+fn __new_request(method: String, target: String, body: String, flat: List[String]) -> HttpRequest = _
 
 /// Router-bound path parameter, decoded; none if unbound.
 @intrinsic("almide_http_param")
@@ -11292,10 +11292,6 @@ fn __with_params(req: HttpRequest, flat: List[String]) -> HttpRequest = _
 @consume(req)
 fn __with_path(req: HttpRequest, target: String) -> HttpRequest = _
 
-@intrinsic("almide_http_set_body")
-@consume(resp)
-fn __set_body(resp: HttpResponse, body: String) -> HttpResponse = _
-
 fn __path_of(target: String) -> String = match string.index_of(target, "?") {
   some(i) => string.take(target, i),
   none => target,
@@ -11310,7 +11306,7 @@ fn __query_of(target: String) -> String = match string.index_of(target, "?") {
 fn __parts(path: String) -> List[String] = string.split(path, "/") |> list.filter((s) => s != "")
 
 
-fn __decode_part(s: String) -> String = http.url_decode(string.replace(s, "+", "%2B"))
+fn __decode_part(s: String) -> String = url.decode_form(string.replace(s, "+", "%2B")) ?? s
 
 fn __is_hex(c: String) -> Bool = c != "" and string.contains("0123456789abcdefABCDEF", c)
 
@@ -11412,7 +11408,7 @@ fn mount(prefix: String, sub: HttpHandler) -> HttpRoute = {
 
 
 fn __mounted(sub: HttpHandler) -> HttpHandler = (req) => {
-  let q = __query_of(http.req_path(req))
+  let q = __query_of(http.path(req))
   let rest = http.param(req, "") ?? ""
   sub(http.__with_path(req, "/" + rest + (if q == "" then "" else "?" + q)))!
 }
@@ -11523,8 +11519,8 @@ fn __not_allowed(hits: List[(HttpRoute, List[String])]) -> HttpResponse = {
 
 @category
 effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) -> HttpResponse = {
-  let method = http.req_method(req)
-  let path = __path_of(http.req_path(req))
+  let method = http.method(req)
+  let path = __path_of(http.path(req))
   if not string.starts_with(path, "/") then http.response(
     400,
     "Bad Request: the request target must start with /",
@@ -11549,7 +11545,7 @@ effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) ->
       )
       else {
         let res = r.handler(http.__with_params(req, bound))!
-        if via_get then http.__set_body(res, "") else res
+        if via_get then http.__http_response_set_body(res, "") else res
       },
       none => if list.is_empty(hits) then http.response(404, "Not Found") else __not_allowed(hits),
     }
@@ -11559,7 +11555,7 @@ effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) ->
 
 
 fn __table(routes: List[HttpRoute]) -> HttpHandler = (req) => {
-  let parts = __parts(__path_of(http.req_path(req)))
+  let parts = __parts(__path_of(http.path(req)))
   let hits = routes |> list.filter_map((r) => __bind(r.segments, parts) |> option.map((bound) => (r, bound)))
   __dispatch(hits, req)!
 }
@@ -11587,7 +11583,7 @@ fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
 fn __apply(mw: HttpMiddleware, inner: HttpHandler) -> HttpHandler = mw(inner)
 
 /// JSON body through decode; err is a 400 response.
-fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
+fn decode_json[A](req: HttpRequest, decode: (Value) -> Result[A, String]) -> Result[A, HttpResponse] = match json.parse(http.__http_request_body(req)) {
   ok(v) => match decode(v) {
     ok(x) => ok(x),
     err(e) => err(http.response(400, "Bad Request: " + e)),
@@ -11618,7 +11614,10 @@ import http
 
 fn __hc_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __hc_frame(method: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
+fn __hc_frame(method: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> String = list.take(
+  flat,
+  2 * (list.len(flat) / 2),
+) |> list.map((c) => __hc_cell(c)) |> list.fold(
   "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
   (acc, cell) => acc + cell,
 )
@@ -11643,9 +11642,9 @@ effect fn __http_call_cancel_raw(c: HttpCall) -> Result[String, String] = _
 effect fn __http_call_step_raw(c: HttpCall) -> Result[String, String] = _
 
 
-effect fn __hc_start_impl(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = __http_call_open(
+effect fn __hc_start_impl(method: String, url: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = __http_call_open(
   url,
-  __hc_frame(method, body, headers, total_ms, idle_ms),
+  __hc_frame(method, body, flat, total_ms, idle_ms),
 )
 
 
@@ -11666,56 +11665,6 @@ fn __hc_read_new_impl(c: HttpCall) -> String = __http_call_read_raw(c) ?? ""
 effect fn __hc_cancel_impl(c: HttpCall) -> Unit = {
   let _ = __http_call_cancel_raw(c)
   ()
-}
-
-
-
-
-
-fn __hc_step_piece(s: String) -> String = {
-  let rest = string.drop(s, 1)
-  let cut = string.index_of(rest, "\n") ?? 0
-  let n = int.parse(string.take(rest, cut)) ?? 0
-  string.slice(rest, cut + 1, cut + 1 + n)
-}
-
-fn __hc_step_error(s: String) -> String = {
-  let rest = string.drop(s, 1)
-  let cut = string.index_of(rest, "\n") ?? 0
-  let n = int.parse(string.take(rest, cut)) ?? 0
-  string.drop(rest, cut + 1 + n)
-}
-
-effect fn __hc_pump(c: HttpCall, on_chunk: (String) -> Unit) -> Result[Unit, String] = {
-  let s = __http_call_step_raw(c) ?? "o0\n"
-  let piece = __hc_step_piece(s)
-  if string.len(piece) > 0 then on_chunk(piece) else ()
-  match string.take(s, 1) {
-    "c" => __hc_pump(c, on_chunk),
-    "x" => err(__hc_step_error(s)),
-    _ => ok(()),
-  }
-}
-
-
-effect fn __hc_stream_limited_impl(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int, on_chunk: (String) -> Unit) -> Result[Unit, String] = {
-  let c = __hc_start_impl(method, url, body, headers, total_ms, idle_ms)!
-  __hc_pump(c, on_chunk)
-}
-
-
-
-
-
-fn __hc_classic_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
-  "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell("classic")}${__hc_cell("classic")}",
-  (acc, cell) => acc + cell,
-)
-
-@implements("http.request_stream")
-effect fn __hc_stream_classic_impl(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Result[Unit, String] = {
-  let c = __http_call_open(url, __hc_classic_frame(method, body, headers))!
-  __hc_pump(c, on_chunk)
 }
 "#;
 pub const SRC_HTTP_FRAMED: &str = r#"
@@ -11739,9 +11688,13 @@ pub const SRC_HTTP_FRAMED: &str = r#"
 
 
 
+
 fn __http_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __http_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__http_cell(k)}${__http_cell(v)}") |> list.fold(
+fn __http_frame(method: String, body: String, flat: List[String]) -> String = list.take(
+  flat,
+  2 * (list.len(flat) / 2),
+) |> list.map((c) => __http_cell(c)) |> list.fold(
   "${__http_cell(method)}${__http_cell(body)}",
   (acc, cell) => acc + cell,
 )
@@ -11752,31 +11705,16 @@ effect fn __http_framed_status(url: String, frame: String) -> Result[String, Str
 
 effect fn __http_framed_bytes(url: String, frame: String) -> Result[Bytes, String] = _
 
-@implements("http.request")
-effect fn __request_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = __http_framed_text(
+@implements("http.__request")
+effect fn __request_impl(method: String, url: String, body: String, flat: List[String]) -> Result[String, String] = __http_framed_text(
   url,
-  __http_frame(method, body, headers),
+  __http_frame(method, body, flat),
 )
 
-@implements("http.request_status")
-effect fn __request_status_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String] = {
-  let f = __http_framed_status(url, __http_frame(method, body, headers))!
-  let cut = string.index_of(f, "\n") ?? 0
-  ok((int.parse(string.take(f, cut)) ?? 0, string.drop(f, cut + 1)))
-}
-
-@implements("http.get_status")
-effect fn __get_status_impl(url: String) -> Result[(Int, String), String] = __request_status_impl(
-  "GET",
+@implements("http.__request_bytes")
+effect fn __request_bytes_impl(method: String, url: String, body: String, flat: List[String]) -> Result[Bytes, String] = __http_framed_bytes(
   url,
-  "",
-  map.new(),
-)
-
-@implements("http.request_bytes")
-effect fn __request_bytes_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String] = __http_framed_bytes(
-  url,
-  __http_frame(method, body, headers),
+  __http_frame(method, body, flat),
 )
 
 @implements("http.get_bytes")
@@ -11784,7 +11722,7 @@ effect fn __get_bytes_impl(url: String) -> Result[Bytes, String] = __request_byt
   "GET",
   url,
   "",
-  map.new(),
+  [],
 )
 
 effect fn __http_framed_response(url: String, frame: String) -> Result[String, String] = _
@@ -11803,9 +11741,9 @@ else {
   __http_cells(rest, acc + [cell])
 }
 
-@implements("http.request_response")
-effect fn __request_response_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[List[String], String] = {
-  let f = __http_framed_response(url, __http_frame(method, body, headers))!
+@implements("http.__request_response")
+effect fn __request_response_impl(method: String, url: String, body: String, flat: List[String]) -> Result[List[String], String] = {
+  let f = __http_framed_response(url, __http_frame(method, body, flat))!
   let c1 = string.index_of(f, "\n") ?? 0
   let after_code = string.drop(f, c1 + 1)
   let c2 = string.index_of(after_code, "\n") ?? 0
@@ -11819,39 +11757,7 @@ effect fn __get_response_impl(url: String) -> Result[List[String], String] = __r
   "GET",
   url,
   "",
-  map.new(),
-)
-
-@implements("http.post_response")
-effect fn __post_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
-  "POST",
-  url,
-  body,
-  map.new(),
-)
-
-@implements("http.put_response")
-effect fn __put_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
-  "PUT",
-  url,
-  body,
-  map.new(),
-)
-
-@implements("http.patch_response")
-effect fn __patch_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
-  "PATCH",
-  url,
-  body,
-  map.new(),
-)
-
-@implements("http.delete_response")
-effect fn __delete_response_impl(url: String) -> Result[List[String], String] = __request_response_impl(
-  "DELETE",
-  url,
-  "",
-  map.new(),
+  [],
 )
 "#;
 pub const SRC_HTTP_REQUEST: &str = r#"
@@ -11889,9 +11795,11 @@ fn __hq_nh(req: List[String]) -> Int = int.parse(list.get(req, 3) ?? "0") ?? 0
 
 fn __hq_params_at(req: List[String]) -> Int = 4 + 2 * __hq_nh(req)
 
-fn http_new_request(method: String, target: String, body: String, headers: Map[String, String]) -> List[String] = {
-  let pairs = map.entries(headers) |> list.flat_map(((k, v)) => [k, v])
-  [method, target, body, int.to_string(map.len(headers))] + pairs
+
+
+fn http_new_request(method: String, target: String, body: String, flat: List[String]) -> List[String] = {
+  let n = list.len(flat) / 2
+  [method, target, body, int.to_string(n)] + list.take(flat, 2 * n)
 }
 
 fn http_req_method(req: List[String]) -> String = list.get(req, 0) ?? ""
@@ -11910,6 +11818,53 @@ fn http_req_header(req: List[String], key: String) -> String? = __hq_find(
   __hq_params_at(req),
   key,
 )
+
+fn __hq_all(req: List[String], i: Int, end: Int, key: String, acc: List[String]) -> List[String] =
+  if i >= end then acc
+  else if __hq_ci_eq(list.get(req, i) ?? "", key) then __hq_all(
+    req,
+    i + 2,
+    end,
+    key,
+    acc + [
+      list.get(req, i + 1) ?? ""
+    ],
+  )
+  else __hq_all(req, i + 2, end, key, acc)
+
+fn http_req_header_values(req: List[String], key: String) -> List[String] = __hq_all(
+  req,
+  4,
+  __hq_params_at(req),
+  key,
+  [],
+)
+
+fn http_req_headers_flat(req: List[String]) -> List[String] = list.take(
+  list.drop(req, 4),
+  2 * __hq_nh(req),
+)
+
+
+
+fn __hq_set(req: List[String], i: Int, end: Int, key: String, value: String) -> List[String] =
+  if i >= end then list.set(
+    list.take(req, end) + [key, value] + list.drop(req, end),
+    3,
+    int.to_string(__hq_nh(req) + 1),
+  )
+  else if __hq_ci_eq(list.get(req, i) ?? "", key) then list.set(req, i + 1, value)
+  else __hq_set(req, i + 2, end, key, value)
+
+fn http_req_set_header(req: List[String], key: String, value: String) -> List[String] = __hq_set(
+  req,
+  4,
+  __hq_params_at(req),
+  key,
+  value,
+)
+
+fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(req, 2, body)
 
 fn __hq_param(req: List[String], i: Int, name: String) -> String? = if i >= list.len(req) then none
 else if (list.get(req, i) ?? "") == name then list.get(req, i + 1)
@@ -11986,12 +11941,13 @@ fn __hr_ci_eq(x: String, y: String) -> Bool = {
 
 
 
-fn http_with_headers(status: Int, body: String, headers: Map[String, String]) -> List[String] = {
+
+fn http_with_headers(status: Int, body: String, flat: List[String]) -> List[String] = {
   let st = int.to_string(status)
-  let named = map.keys(headers) |> list.enumerate |> list.map(((i, k)) => (i, __hr_lower(k), k))
+  let named = list.range(0, list.len(flat) / 2) |> list.map((i) => (i, __hr_lower(list.get(flat, 2 * i) ?? ""), list.get(flat, 2 * i) ?? ""))
   let last = named |> list.fold(
     map.new(),
-    (m, (_, low, k)) => map.set(m, low, map.get(headers, k) ?? ""),
+    (m, (i, low, _)) => map.set(m, low, list.get(flat, 2 * i + 1) ?? ""),
   )
   let first = named |> list.fold(
     map.new(),
@@ -12056,17 +12012,7 @@ fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[
 fn __hr_lower(s: String) -> String = string.chars(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
 
 
-
-
-
-fn http_headers(resp: List[String]) -> Map[String, String] = list.range(0, (list.len(resp) - 2) / 2) |> list.fold(
-  map.new(),
-  (acc, j) => {
-    let k = __hr_lower(list.get(resp, 2 + 2 * j) ?? "")
-    if map.contains(acc, k) then acc
-    else map.set(acc, k, list.get(resp, 3 + 2 * j) ?? "")
-  },
-)
+fn http_headers_flat(resp: List[String]) -> List[String] = list.drop(resp, 2)
 
 
 fn http_set_body(resp: List[String], body: String) -> List[String] = list.set(resp, 1, body)
@@ -12219,49 +12165,6 @@ effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Uni
       __http_serve_reply(__hs_frame(__hs_shaped(answer)))!
     }
   }
-}
-"#;
-pub const SRC_HTTP_URL_DECODE: &str = r#"
-
-
-
-
-
-
-
-
-fn __ud_hex(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
-else if b >= 97 and b <= 102 then b - 87
-else if b >= 65 and b <= 70 then b - 55 else 0 - 1
-
-
-fn __ud_step(d: Int, n: Int, i: Int) -> Int = {
-  let b = prim.load8(d + i)
-  if b == 43 then 1 * 256 + 32
-  else if b == 37 and i + 2 < n then {
-    let hi = __ud_hex(prim.load8(d + i + 1))
-    let lo = __ud_hex(prim.load8(d + i + 2))
-    if hi >= 0 and lo >= 0 then 3 * 256 + hi * 16 + lo else 1 * 256 + 37
-  } else 1 * 256 + b
-}
-
-fn __ud_count(d: Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else __ud_count(d, n, i + __ud_step(d, n, i) / 256, acc + 1)
-
-fn __ud_fill(lh: Int, d: Int, n: Int, i: Int, o: Int) -> Int = if i >= n then o
-else {
-  let st = __ud_step(d, n, i)
-  prim.store64(lh + 12 + o * 8, st - st / 256 * 256)
-  __ud_fill(lh, d, n, i + st / 256, o + 1)
-}
-
-fn http_url_decode(s: String) -> String = {
-  let h = prim.handle(s)
-  let n = prim.load32(h + 4)
-  let m = __ud_count(h + 12, n, 0, 0)
-  let buf = prim.alloc_list(m)
-  let _x = __ud_fill(prim.handle(buf), h + 12, n, 0, 0)
-  string.from_bytes(buf)
 }
 "#;
 pub const SRC_INT: &str = r#"
@@ -14893,25 +14796,29 @@ effect fn stderr() -> Stderr = Stderr(2)
 
 
 /// Up to max bytes from h; empty once h has ended; err if max < 0.
-@category()
+@ordered
+@category
 effect fn read[H: Read](h: H, max: Int) -> Result[Bytes, String] =
   if max < 0 then err("io.read: negative length ${max}") else h.__self_read(max)
 
 /// Exactly n bytes from h; err if h ends first, naming how many arrived.
-@category()
+@ordered
+@category
 effect fn read_exact[H: Read](h: H, n: Int) -> Result[Bytes, String] =
-  if n < 0 then err("io.read_exact: negative length ${n}") else __read_exact_from(h, n, 0, [])
+  if n < 0 then err("io.read_exact: negative length ${n}")
+  else __read_exact_from(h, n, 0, [])
 
 /// Every byte until h ends.
-@category()
+@ordered
+@category
 effect fn read_to_end[H: Read](h: H) -> Result[Bytes, String] = __read_to_end_from(h, [])
 
 /// Writes all of data to h.
-@category()
+@category
 effect fn write[H: Write](h: H, data: Bytes) -> Result[Unit, String] = h.__self_write(data)
 
 /// Closes h; closing twice is ok.
-@category()
+@category
 effect fn close[H: Close](h: H) -> Result[Unit, String] = h.__self_close()
 
 
@@ -14928,7 +14835,8 @@ effect fn __read_exact_from[H: Read](h: H, n: Int, got: Int, chunks: List[Bytes]
 
 effect fn __read_to_end_from[H: Read](h: H, chunks: List[Bytes]) -> Result[Bytes, String] = {
   let b = h.__self_read(65536)!
-  if bytes.len(b) == 0 then ok(list.join(chunks, bytes.new())) else __read_to_end_from(h, chunks + [b])
+  if bytes.len(b) == 0 then ok(list.join(chunks, bytes.new()))
+  else __read_to_end_from(h, chunks + [b])
 }
 
 
@@ -14947,17 +14855,17 @@ effect fn __write_stdout(data: Bytes) -> Unit = _
 @category("IO.stderr")
 effect fn __write_stderr(data: Bytes) -> Unit = _
 
-effect fn __stdin_read(_h: Stdin, max: Int) -> Result[Bytes, String] = ok(__read_stdin_bytes(max))
+effect fn __stdin_read(_h: Stdin, max: Int) -> Result[Bytes, String] = ok(io.__read_stdin_bytes(max))
 
 @category("IO.stdout")
 effect fn __stdout_write(_h: Stdout, data: Bytes) -> Result[Unit, String] = {
-  __write_stdout(data)
+  io.__write_stdout(data)
   ok(())
 }
 
 @category("IO.stderr")
 effect fn __stderr_write(_h: Stderr, data: Bytes) -> Result[Unit, String] = {
-  __write_stderr(data)
+  io.__write_stderr(data)
   ok(())
 }
 "#;
@@ -29864,50 +29772,53 @@ mod type UdpSocket: Close = Int
 type UdpPacket = { data: Bytes, host: String, port: Int }
 
 /// An IP address: four octets, or eight 16-bit groups.
-type IpAddr = V4(Int, Int, Int, Int) | V6(List[Int])
+type IpAddr = | V4(Int, Int, Int, Int) | V6(List[Int])
 
 
 /// A stream connected to host:port; err if refused.
 @category("Net.fetch")
-effect fn tcp_connect(host: String, port: Int) -> Result[TcpStream, String] = ok(TcpStream(__os_tcp_connect(host, port)!))
+effect fn tcp_connect(host: String, port: Int) -> Result[TcpStream, String] = ok(TcpStream(net.__os_tcp_connect(host, port)!))
 
 /// False after io.close; a peer close is not seen.
-effect fn tcp_is_open(stream: TcpStream) -> Bool = __os_tcp_is_open(__tcp(stream))
+effect fn tcp_is_open(stream: TcpStream) -> Bool = net.__os_tcp_is_open(__tcp(stream))
 
 /// Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
-effect fn tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String] = __os_tcp_read_timeout(
+effect fn tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String] = net.__os_tcp_read_timeout(
   __tcp(stream),
   len,
   timeout_ms,
 )
 
 /// Sets read/write timeout; <= 0 clears it.
-effect fn tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Result[Unit, String] = __os_tcp_set_timeout(__tcp(stream), timeout_ms)
+effect fn tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Result[Unit, String] = net.__os_tcp_set_timeout(
+  __tcp(stream),
+  timeout_ms,
+)
 
 /// Bytes readable now, capped at 65536; 0 if none.
-effect fn tcp_available(stream: TcpStream) -> Result[Int, String] = __os_tcp_available(__tcp(stream))
+effect fn tcp_available(stream: TcpStream) -> Result[Int, String] = net.__os_tcp_available(__tcp(stream))
 
 /// A listener bound to host:port; err if in use. Port 0 lets the OS choose.
 @category("Net.listen")
-effect fn tcp_listen(host: String, port: Int) -> Result[TcpListener, String] = ok(TcpListener(__os_tcp_listen(host, port)!))
+effect fn tcp_listen(host: String, port: Int) -> Result[TcpListener, String] = ok(TcpListener(net.__os_tcp_listen(host, port)!))
 
 /// The port a listener is bound to: the one the OS chose when it listened on port 0.
 @category("Net.listen")
-effect fn tcp_local_port(listener: TcpListener) -> Result[Int, String] = __os_tcp_local_port(__listener(listener))
+effect fn tcp_local_port(listener: TcpListener) -> Result[Int, String] = net.__os_tcp_local_port(__listener(listener))
 
 /// Blocks for the next client; its stream.
 @category("Net.listen")
-effect fn tcp_accept(listener: TcpListener) -> Result[TcpStream, String] = ok(TcpStream(__os_tcp_accept(__listener(listener))!))
+effect fn tcp_accept(listener: TcpListener) -> Result[TcpStream, String] = ok(TcpStream(net.__os_tcp_accept(__listener(listener))!))
 
 
 /// A UDP socket bound to host:port; port 0 lets the OS choose.
-effect fn udp_bind(host: String, port: Int) -> Result[UdpSocket, String] = ok(UdpSocket(__os_udp_bind(host, port)!))
+effect fn udp_bind(host: String, port: Int) -> Result[UdpSocket, String] = ok(UdpSocket(net.__os_udp_bind(host, port)!))
 
 /// The port sock is bound to.
-effect fn udp_local_port(sock: UdpSocket) -> Result[Int, String] = __os_udp_local_port(__udp(sock))
+effect fn udp_local_port(sock: UdpSocket) -> Result[Int, String] = net.__os_udp_local_port(__udp(sock))
 
 /// Sends data as one datagram to host:port.
-effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Result[Unit, String] = __os_udp_send_to(
+effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Result[Unit, String] = net.__os_udp_send_to(
   __udp(sock),
   data,
   host,
@@ -29916,7 +29827,7 @@ effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> 
 
 /// Blocks for the next datagram: at most max bytes of it, and its sender.
 effect fn udp_recv_from(sock: UdpSocket, max: Int) -> Result[UdpPacket, String] = {
-  let (data, host, port) = __os_udp_recv_from(__udp(sock), max)!
+  let (data, host, port) = net.__os_udp_recv_from(__udp(sock), max)!
   ok(UdpPacket { data: data, host: host, port: port })
 }
 
@@ -29924,40 +29835,55 @@ effect fn udp_recv_from(sock: UdpSocket, max: Int) -> Result[UdpPacket, String] 
 /// The addresses host resolves to, each once; err if none.
 @category("Net.fetch")
 effect fn lookup_host(host: String) -> Result[List[IpAddr], String] = {
-  let texts = __os_lookup_host(host)!
+  let texts = net.__os_lookup_host(host)!
   ok(texts |> list.filter_map((t) => parse_ip(t)?))
 }
 
 /// The IP address s spells: dotted IPv4, or IPv6 (`::` and an IPv4 tail allowed).
-@category()
+@category
 fn parse_ip(s: String) -> Result[IpAddr, String] =
   if string.contains(s, ":") then __parse_v6(s) else __parse_v4(s, s)
 
 /// ip as text: dotted IPv4, or the RFC 5952 short IPv6 form.
-@category()
+@category
 fn ip_to_string(ip: IpAddr) -> String = match ip {
   V4(a, b, c, d) => "${a}.${b}.${c}.${d}",
   V6(gs) => __v6_text(gs),
 }
 
 /// True for 127.0.0.0/8 and ::1.
-@category()
+@category
 fn is_loopback(ip: IpAddr) -> Bool = match ip {
   V4(a, _, _, _) => a == 127,
-  V6(gs) => gs == [0, 0, 0, 0, 0, 0, 0, 1],
+  V6(gs) => gs == [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1
+  ],
 }
 
 
-effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = __os_tcp_read(__tcp(h), max)
+effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = net.__os_tcp_read(
+  __tcp(h),
+  max,
+)
 
-effect fn __tcp_stream_write(h: TcpStream, data: Bytes) -> Result[Unit, String] = __os_tcp_write(__tcp(h), data)
+effect fn __tcp_stream_write(h: TcpStream, data: Bytes) -> Result[Unit, String] = net.__os_tcp_write(
+  __tcp(h),
+  data,
+)
 
-effect fn __tcp_stream_close(h: TcpStream) -> Result[Unit, String] = __os_tcp_close(__tcp(h))
+effect fn __tcp_stream_close(h: TcpStream) -> Result[Unit, String] = net.__os_tcp_close(__tcp(h))
 
 @category("Net.listen")
-effect fn __tcp_listener_close(h: TcpListener) -> Result[Unit, String] = __os_tcp_close_listener(__listener(h))
+effect fn __tcp_listener_close(h: TcpListener) -> Result[Unit, String] = net.__os_tcp_close_listener(__listener(h))
 
-effect fn __udp_socket_close(h: UdpSocket) -> Result[Unit, String] = __os_udp_close(__udp(h))
+effect fn __udp_socket_close(h: UdpSocket) -> Result[Unit, String] = net.__os_udp_close(__udp(h))
 
 local fn __tcp(s: TcpStream) -> Int = match s {
   TcpStream(n) => n
@@ -29999,12 +29925,10 @@ local fn __v6_side(t: String) -> List[Int?] =
   else {
     let parts = string.split(t, ":")
     let last = list.get(parts, list.len(parts) - 1) ?? ""
-    if string.contains(last, ".") then
-      match __parse_v4(last, last) {
-        ok(V4(a, b, c, d)) => (list.take(parts, list.len(parts) - 1) |> list.map((p) => __group(p))) + [some(a * 256 + b), some(c * 256 + d)],
-        _ => [none],
-      }
-    else parts |> list.map((p) => __group(p))
+    if string.contains(last, ".") then match __parse_v4(last, last) {
+      ok(V4(a, b, c, d)) => (list.take(parts, list.len(parts) - 1) |> list.map((p) => __group(p))) + [some(a * 256 + b), some(c * 256 + d)],
+      _ => [none],
+    } else parts |> list.map((p) => __group(p))
   }
 
 local fn __parse_v6(s: String) -> Result[IpAddr, String] = {
@@ -30013,7 +29937,8 @@ local fn __parse_v6(s: String) -> Result[IpAddr, String] = {
   match halves {
     [whole] => {
       let gs = __v6_side(whole)
-      if list.len(gs) == 8 and gs |> list.all((g) => g != none) then ok(V6(gs |> list.filter_map((g) => g))) else bad
+      if list.len(gs) == 8 and gs |> list.all((g) => g != none) then ok(V6(gs |> list.filter_map((g) => g)))
+      else bad
     },
     [head, tail] => {
       let h = __v6_side(head)
@@ -30032,15 +29957,18 @@ local fn __v6_text(gs: List[Int]) -> String = {
   let hex = gs |> list.map((g) => string.to_lower(int.to_hex(g)))
   let (start, len) = __zero_run(gs, 0, -1, 0, -1, 0)
   if len < 2 then string.join(hex, ":")
-  else string.join(list.take(hex, start), ":") + "::" + string.join(list.drop(hex, start + len), ":")
+  else string.join(list.take(hex, start), ":") + "::" + string.join(
+    list.drop(hex, start + len),
+    ":",
+  )
 }
 
 
 
 local fn __zero_run(gs: List[Int], i: Int, cs: Int, cl: Int, bs: Int, bl: Int) -> (Int, Int) =
   if i >= list.len(gs) then (if cl > bl then (cs, cl) else (bs, bl))
-  else if (list.get(gs, i) ?? 1) == 0 then
-    (if cl == 0 then __zero_run(gs, i + 1, i, 1, bs, bl) else __zero_run(gs, i + 1, cs, cl + 1, bs, bl))
+  else if (list.get(gs, i) ?? 1) == 0 then (if cl == 0 then __zero_run(gs, i + 1, i, 1, bs, bl)
+  else __zero_run(gs, i + 1, cs, cl + 1, bs, bl))
   else if cl > bl then __zero_run(gs, i + 1, -1, 0, cs, cl)
   else __zero_run(gs, i + 1, -1, 0, bs, bl)
 
@@ -32428,18 +32356,98 @@ pub const SRC_PROCESS: &str = r#"
 
 
 
-/// Exit code plus captured stdout and stderr.
+
+
+
+
+
+
+
+
+
+/// Exit code plus captured stdout and stderr; code -1 if a signal ended the child.
 type ProcessStatus = { code: Int, stdout: String, stderr: String }
+
+/// A child's settings: dir "" keeps this one, stdin "" gives it none, timeout_ms 0 means no deadline.
+type ProcessCommand = { cmd: String, args: List[String], dir: String = "", stdin: String = "", timeout_ms: Int = 0 }
+
+/// A running child from process.start.
+mod type ProcessChild = Int
 
 /// Stdout on exit 0; else err with stderr text.
 @ordered
 @intrinsic("almide_rt_process_exec")
 effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _
 
+/// Runs c to its end: any exit code is ok; err if it cannot start or passes its deadline.
+@ordered
+effect fn output(c: ProcessCommand) -> Result[ProcessStatus, String] = __os_output(
+  c.cmd,
+  c.args,
+  c.dir,
+  c.stdin,
+  c.timeout_ms,
+)
+
+/// Runs c on this terminal (its stdin too, unless c.stdin is set); the exit code, -1 if signalled.
+@ordered
+effect fn run(c: ProcessCommand) -> Result[Int, String] = __os_run(
+  c.cmd,
+  c.args,
+  c.dir,
+  c.stdin,
+  c.timeout_ms,
+)
+
+/// Starts c in its own process group and returns at once; its output is captured.
+@ordered
+effect fn start(c: ProcessCommand) -> Result[ProcessChild, String] = ok(ProcessChild(__os_start(c.cmd, c.args, c.dir, c.stdin, c.timeout_ms)!))
+
+/// Never blocks: none while c runs, then its outcome (err past its deadline).
+effect fn poll(c: ProcessChild) -> Result[ProcessStatus, String]? = match __os_poll(__child(c)) {
+  ok(true) => match __os_wait(__child(c)) {
+    ok(s) => some(ok(s)),
+    err(e) => some(err(e)),
+  },
+  ok(false) => none,
+  err(e) => some(err(e)),
+}
+
+/// Blocks until c ends; its outcome.
+effect fn wait(c: ProcessChild) -> Result[ProcessStatus, String] = __os_wait(__child(c))
+
+/// SIGTERM to c's group, grace_ms to end, then SIGKILL; again after the end is the same outcome.
+effect fn stop(c: ProcessChild, grace_ms: Int) -> Result[ProcessStatus, String] = __os_stop(
+  __child(c),
+  grace_ms,
+)
+
+/// What c wrote to stdout since the last read; never blocks.
+effect fn read_new_stdout(c: ProcessChild) -> String = __os_read_new(__child(c), 1)
+
+/// What c wrote to stderr since the last read; never blocks.
+effect fn read_new_stderr(c: ProcessChild) -> String = __os_read_new(__child(c), 2)
+
+/// The OS process id of c, for process.kill.
+effect fn child_pid(c: ProcessChild) -> Int = __os_child_pid(__child(c))
+
+/// Sends signal to pid; err is kill's stderr.
+@ordered
+@intrinsic("almide_rt_process_kill")
+effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
+
 /// Ends with code 0..=255; others abort, exit 1.
 @intrinsic("almide_rt_process_exit")
 @category("Abort")
 effect fn exit(code: Int) -> Never = _
+
+/// OS process ID of this program.
+@intrinsic("almide_rt_process_pid")
+@category("Env.read")
+effect fn pid() -> Int = _
+
+
+
 
 /// Full argv, program name at index 0.
 @intrinsic("almide_rt_process_args")
@@ -32452,90 +32460,47 @@ effect fn args() -> List[String] = _
 @category("IO.stdin")
 effect fn stdin_lines() -> Result[List[String], String] = _
 
-/// exec in dir; err is stderr, maybe empty.
-@ordered
-@intrinsic("almide_rt_process_exec_in")
-effect fn exec_in(dir: String, cmd: String, args: List[String]) -> Result[String, String] = _
-
-/// exec with input piped in; err may be empty.
-@ordered
-@intrinsic("almide_rt_process_exec_with_stdin")
-effect fn exec_with_stdin(cmd: String, args: List[String], input: String) -> Result[String, String] = _
-
-
-
-
-/// Code and output; code -1 if killed by signal. Child stdin is null.
-@ordered
-@intrinsic("almide_rt_process_exec_status")
-effect fn exec_status(cmd: String, args: List[String]) -> Result[ProcessStatus, String] = _
-
-
-
-
-
-
-
-
-
-
-
-
-/// exec_status, but kills cmd and errs at timeout_ms.
-@ordered
-@intrinsic("almide_rt_process_exec_status_timeout")
-effect fn exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) -> Result[ProcessStatus, String] = _
-
-
-
-
-
-
-
-/// Run cmd on this terminal; exit code, -1 if signalled.
-@ordered
-@intrinsic("almide_rt_process_run")
-effect fn run(cmd: String, args: List[String]) -> Result[Int, String] = _
-
-/// run in dir; exit code, -1 if signalled.
-@ordered
-@intrinsic("almide_rt_process_run_in")
-effect fn run_in(dir: String, cmd: String, args: List[String]) -> Result[Int, String] = _
-
-/// Alias of process.run.
-@ordered
-@deprecated(since=10, use="process.run")
-@intrinsic("almide_rt_process_run")
-effect fn exec_attached(cmd: String, args: List[String]) -> Result[Int, String] = _
-
-/// OS process ID of this program.
-@intrinsic("almide_rt_process_pid")
-@category("Env.read")
-effect fn pid() -> Int = _
-
 /// Variable value, or none if unset.
 @intrinsic("almide_rt_process_env")
 @category("Env.read")
 effect fn env(key: String) -> String? = _
-
-/// Pid of cmd started in the background.
-@ordered
-@intrinsic("almide_rt_process_spawn")
-effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _
-
-/// Sends signal to pid; err is kill's stderr.
-@ordered
-@intrinsic("almide_rt_process_kill")
-effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 
 /// Blocks ms milliseconds; negative is 0.
 @intrinsic("almide_rt_process_sleep")
 @category("Time")
 effect fn sleep(ms: Int) -> Unit = _
 
-/// True while pid exists, zombies included.
-@intrinsic("almide_rt_process_is_alive")
-effect fn is_alive(pid: Int) -> Bool = _
+local fn __child(c: ProcessChild) -> Int = match c {
+  ProcessChild(h) => h
+}
+
+
+@ordered
+@intrinsic("almide_rt_process___os_output")
+effect fn __os_output(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[ProcessStatus, String] = _
+
+@ordered
+@intrinsic("almide_rt_process___os_run")
+effect fn __os_run(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
+
+@ordered
+@intrinsic("almide_rt_process___os_start")
+effect fn __os_start(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_process___os_poll")
+effect fn __os_poll(h: Int) -> Result[Bool, String] = _
+
+@intrinsic("almide_rt_process___os_wait")
+effect fn __os_wait(h: Int) -> Result[ProcessStatus, String] = _
+
+@intrinsic("almide_rt_process___os_stop")
+effect fn __os_stop(h: Int, grace_ms: Int) -> Result[ProcessStatus, String] = _
+
+@intrinsic("almide_rt_process___os_read_new")
+effect fn __os_read_new(h: Int, which: Int) -> String = _
+
+@intrinsic("almide_rt_process___os_child_pid")
+effect fn __os_child_pid(h: Int) -> Int = _
 "#;
 pub const SRC_PROCESS_ARGS: &str = r#"
 
@@ -32558,6 +32523,7 @@ pub const SRC_PROCESS_STDIN_LINES: &str = r#"
 
 
 
+
 import io
 
 @implements("process.stdin_lines")
@@ -32565,9 +32531,9 @@ effect fn process_stdin_lines() -> Result[List[String], String] = {
   var buf = bytes.zeros(0)
   var n = 1
   while n > 0 {
-    let chunk = io.read_n_bytes(4096)
-    n = list.len(chunk)
-    for v in chunk {
+    let chunk = io.__read_stdin_bytes(4096)
+    n = bytes.len(chunk)
+    for v in bytes.to_list(chunk) {
       bytes.push(buf, v)
     }
   }
@@ -32612,26 +32578,15 @@ fn __proc_argv(args: List[String]) -> String = args |> list.map((a) => __proc_ce
 
 effect fn __proc_exec(cmd: String, argv: String) -> Result[String, String] = _
 
-effect fn __proc_exec_in(dir: String, argv: String) -> Result[String, String] = _
 
-effect fn __proc_exec_with_stdin(cmd: String, argv: String) -> Result[String, String] = _
+effect fn __proc_output(cmd: String, argv: String) -> Result[String, String] = _
 
-effect fn __proc_exec_status(cmd: String, argv: String) -> Result[String, String] = _
 
-effect fn __proc_exec_status_timeout(cmd: String, argv: String) -> Result[String, String] = _
-
-effect fn __proc_run(cmd: String, argv: String) -> Result[String, String] = _
-
-effect fn __proc_run_in(dir: String, argv: String) -> Result[String, String] = _
-
-effect fn __proc_spawn(cmd: String, argv: String) -> Result[String, String] = _
+effect fn __proc_run_cmd(dir: String, argv: String) -> Result[String, String] = _
 
 effect fn __proc_kill(pid: String, signal: String) -> Result[String, String] = _
 
 
-
-
-fn __proc_is_alive(pid: String, unused: String) -> Result[String, String] = _
 
 fn __proc_pid(unused: String, unused2: String) -> Result[String, String] = _
 
@@ -32655,49 +32610,19 @@ effect fn __process_exec_impl(cmd: String, args: List[String]) -> Result[String,
   __proc_argv(args),
 )
 
-effect fn __process_exec_in_impl(dir: String, cmd: String, args: List[String]) -> Result[String, String] = __proc_exec_in(
-  dir,
-  __proc_argv([cmd] + args),
-)
-
-effect fn __process_exec_with_stdin_impl(cmd: String, args: List[String], input: String) -> Result[String, String] = __proc_exec_with_stdin(
-  cmd,
-  __proc_argv([input] + args),
-)
-
-effect fn __process_exec_status_impl(cmd: String, args: List[String]) -> Result[ProcessStatus, String] = {
-  let f = __proc_exec_status(cmd, __proc_argv(args))!
+effect fn __process_output_impl(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[ProcessStatus, String] = {
+  let f = __proc_output(cmd, __proc_argv([int.to_string(timeout_ms), dir, stdin] + args))!
   ok(__proc_status(f))
 }
 
-effect fn __process_exec_status_timeout_impl(cmd: String, args: List[String], timeout_ms: Int) -> Result[ProcessStatus, String] = {
-  let f = __proc_exec_status_timeout(cmd, __proc_argv([int.to_string(timeout_ms)] + args))!
-  ok(__proc_status(f))
-}
-
-effect fn __process_run_impl(cmd: String, args: List[String]) -> Result[Int, String] = {
-  let code = __proc_run(cmd, __proc_argv(args))!
+effect fn __process_run_impl(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = {
+  let code = __proc_run_cmd(dir, __proc_argv([cmd, stdin, int.to_string(timeout_ms)] + args))!
   ok(int.parse(code) ?? -1)
-}
-
-effect fn __process_run_in_impl(dir: String, cmd: String, args: List[String]) -> Result[Int, String] = {
-  let code = __proc_run_in(dir, __proc_argv([cmd] + args))!
-  ok(int.parse(code) ?? -1)
-}
-
-effect fn __process_spawn_impl(cmd: String, args: List[String]) -> Result[Int, String] = {
-  let pid = __proc_spawn(cmd, __proc_argv(args))!
-  ok(int.parse(pid) ?? -1)
 }
 
 effect fn __process_kill_impl(pid: Int, signal: Int) -> Result[Unit, String] = {
   let _ = __proc_kill(int.to_string(pid), int.to_string(signal))!
   ok(())
-}
-
-fn __process_is_alive_impl(pid: Int) -> Bool = match __proc_is_alive(int.to_string(pid), "") {
-  ok("1") => true,
-  _ => false,
 }
 
 fn __process_pid_impl() -> Int = match __proc_pid("", "") {
@@ -42938,51 +42863,63 @@ mod type Fd: Read, Write, Close = Int
 
 /// Stream socket connected to the listener at path.
 @category("Net.fetch")
-effect fn connect(path: String) -> Result[Fd, String] = ok(Fd(__os_connect(path)!))
+effect fn connect(path: String) -> Result[Fd, String] = ok(Fd(unix.__os_connect(path)!))
 
 /// Listener bound at path, which must not exist yet.
 @category("Net.listen")
-effect fn listen(path: String) -> Result[Fd, String] = ok(Fd(__os_listen(path)!))
+effect fn listen(path: String) -> Result[Fd, String] = ok(Fd(unix.__os_listen(path)!))
 
 /// Blocks for the next connection on listener.
 @category("Net.listen")
-effect fn accept(listener: Fd) -> Result[Fd, String] = ok(Fd(__os_accept(__raw(listener))!))
+effect fn accept(listener: Fd) -> Result[Fd, String] = ok(Fd(unix.__os_accept(__raw(listener))!))
 
 /// Sends all of data, the descriptors fds riding with its first byte.
-effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Result[Unit, String] =
-  __os_send(__raw(sock), data, fds |> list.map((f) => __raw(f)))
+effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Result[Unit, String] = unix.__os_send(
+  __raw(sock),
+  data,
+  fds |> list.map((f) => __raw(f)),
+)
 
 /// Descriptors received on sock and not yet taken, oldest first.
-effect fn take_fds(sock: Fd) -> List[Fd] = __os_take_fds(__raw(sock)) |> list.map((f) => Fd(f))
+effect fn take_fds(sock: Fd) -> List[Fd] = unix.__os_take_fds(__raw(sock)) |> list.map((f) => Fd(f))
 
 /// The descriptors of xs readable within timeout_ms, in order; < 0 waits for one, 0 only checks.
-effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = ok(
-  __os_wait(xs |> list.map((f) => __raw(f)), timeout_ms)! |> list.map((f) => Fd(f)),
-)
+effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = ok(unix.__os_wait(
+  xs |> list.map((f) => __raw(f)),
+  timeout_ms,
+)! |> list.map((f) => Fd(f)))
 
 
 /// New zero-filled unnamed file of size bytes.
-effect fn shm_create(size: Int) -> Result[Fd, String] = ok(Fd(__os_shm_create(size)!))
+effect fn shm_create(size: Int) -> Result[Fd, String] = ok(Fd(unix.__os_shm_create(size)!))
 
 /// Grows or shrinks the file fd to size bytes.
-effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = __os_shm_resize(__raw(fd), size)
+effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = unix.__os_shm_resize(__raw(fd), size)
 
 /// Writes data into fd at offset; a negative offset or a write past the end aborts (shm_resize first).
-effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = match __os_shm_write(__raw(fd), offset, data) {
+effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = match unix.__os_shm_write(
+  __raw(fd),
+  offset,
+  data,
+) {
   ok(_) => ok(()),
   err(e) => if string.starts_with(e, "unix.shm_write:") then panic(e) else err(e),
 }
 
 /// Up to len bytes of fd from offset; fewer at its end.
-effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = __os_shm_read(__raw(fd), offset, len)
+effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = unix.__os_shm_read(
+  __raw(fd),
+  offset,
+  len,
+)
 
 
 
-effect fn __fd_read(h: Fd, max: Int) -> Result[Bytes, String] = __os_recv(__raw(h), max)
+effect fn __fd_read(h: Fd, max: Int) -> Result[Bytes, String] = unix.__os_recv(__raw(h), max)
 
-effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = __os_send(__raw(h), data, [])
+effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = unix.__os_send(__raw(h), data, [])
 
-effect fn __fd_close(h: Fd) -> Result[Unit, String] = __os_close(__raw(h))
+effect fn __fd_close(h: Fd) -> Result[Unit, String] = unix.__os_close(__raw(h))
 
 local fn __raw(f: Fd) -> Int = match f {
   Fd(n) => n
@@ -43109,7 +43046,10 @@ effect fn __unix_impl_recv_impl(sock: Int, max: Int) -> Result[Bytes, String] = 
 )
 
 @implements("unix.__os_take_fds")
-fn __unix_impl_take_fds_impl(sock: Int) -> List[Int] = match __unix_take_fds(int.to_string(sock), "") {
+fn __unix_impl_take_fds_impl(sock: Int) -> List[Int] = match __unix_take_fds(
+  int.to_string(sock),
+  "",
+) {
   ok(t) => __unix_fd_list(t),
   err(_) => [],
 }
@@ -43686,7 +43626,7 @@ effect fn v7() -> Uuid = {
     __octet(ms, 8),
     __octet(ms, 0),
     int.bshr(seq, 8),
-    int.band(seq, 255),
+    int.band(seq, 255)
   ])
   Uuid(__versioned(bytes.concat(head, random.bytes(8)), 7))
 }
@@ -43706,12 +43646,17 @@ fn parse(s: String) -> Result[Uuid, String] = {
 /// u as 8-4-4-4-12 lowercase hex digits.
 fn to_string(u: Uuid) -> String = {
   let h = hex.encode(__bytes_of(u))
-  "${string.slice(h, 0, 8)}-${string.slice(h, 8, 12)}-${string.slice(h, 12, 16)}-${string.slice(h, 16, 20)}-${string.slice(h, 20, 32)}"
+  "${string.slice(h, 0, 8)}-${string.slice(h, 8, 12)}-${string.slice(h, 12, 16)}-${string.slice(
+    h,
+    16,
+    20,
+  )}-${string.slice(h, 20, 32)}"
 }
 
 /// The Uuid of exactly 16 bytes b; err for any other length.
 fn from_bytes(b: Bytes) -> Result[Uuid, String] =
-  if bytes.len(b) == 16 then ok(Uuid(b)) else err("uuid.from_bytes: expected 16 bytes, got ${bytes.len(b)}")
+  if bytes.len(b) == 16 then ok(Uuid(b))
+  else err("uuid.from_bytes: expected 16 bytes, got ${bytes.len(b)}")
 
 /// The 16 bytes of u.
 fn to_bytes(u: Uuid) -> Bytes = __bytes_of(u)
@@ -43735,7 +43680,11 @@ local fn __versioned(b: Bytes, ver: Int) -> Bytes = {
 
 
 local fn __unwrapped(s: String) -> String =
-  if string.starts_with(s, "{") and string.ends_with(s, "}") then string.slice(s, 1, string.len(s) - 1)
+  if string.starts_with(s, "{") and string.ends_with(s, "}") then string.slice(
+    s,
+    1,
+    string.len(s) - 1,
+  )
   else if string.starts_with(string.to_lower(s), "urn:uuid:") then string.drop(s, 9)
   else s
 
@@ -46668,7 +46617,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "http_request" => Some(SRC_HTTP_REQUEST),
         "http_response" => Some(SRC_HTTP_RESPONSE),
         "http_serve" => Some(SRC_HTTP_SERVE),
-        "http_url_decode" => Some(SRC_HTTP_URL_DECODE),
         "int" => Some(SRC_INT),
         "int16" => Some(SRC_INT16),
         "int16_convert" => Some(SRC_INT16_CONVERT),
