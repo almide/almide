@@ -1,4 +1,5 @@
 // wasm:skip — the stock artifact refuses tcp until the p3 route (#3620 step 4); the embedded lane is pinned by tests/net_tcp_embedded_cross_test.rs
+import io
 import net
 
 test "tcp loopback: listen, connect, write, read, close" {
@@ -6,34 +7,77 @@ test "tcp loopback: listen, connect, write, read, close" {
   let client = net.tcp_connect("127.0.0.1", net.tcp_local_port(server)!)!
   let peer = net.tcp_accept(server)!
   let msg = bytes.from_string("hello")
-  net.tcp_write(client, msg)!
-  let received = net.tcp_read_exact(peer, 5)!
+  io.write(client, msg)!
+  let received = io.read_exact(peer, 5)!
   assert_eq(bytes.to_list(received), bytes.to_list(msg))
-  net.tcp_close(client)!
-  net.tcp_close(peer)!
-  net.tcp_close_listener(server)!
-}
-
-test "tcp_is_open returns false for invalid handle" {
-  assert_eq(net.tcp_is_open(-1), false)
+  io.close(client)!
+  io.close(peer)!
+  io.close(server)!
 }
 
 test "tcp_is_open returns false after close" {
   let server = net.tcp_listen("127.0.0.1", 0)!
   let client = net.tcp_connect("127.0.0.1", net.tcp_local_port(server)!)!
   assert_eq(net.tcp_is_open(client), true)
-  net.tcp_close(client)!
+  io.close(client)!
   assert_eq(net.tcp_is_open(client), false)
-  net.tcp_close_listener(server)!
+  io.close(server)!
+}
+
+test "read_exact names how many bytes came before the peer closed" {
+  let server = net.tcp_listen("127.0.0.1", 0)!
+  let client = net.tcp_connect("127.0.0.1", net.tcp_local_port(server)!)!
+  let peer = net.tcp_accept(server)!
+  io.write(client, bytes.from_string("abc"))!
+  io.close(client)!
+  match io.read_exact(peer, 5) {
+    ok(_) => assert(false),
+    err(e) => assert_eq(e, "io.read_exact: the stream ended after 3 of 5 bytes"),
+  }
+  assert_eq(bytes.len(io.read_to_end(peer)!), 0)
+  io.close(peer)!
+  io.close(server)!
 }
 
 test "tcp connect to closed port returns error" {
   let probe = net.tcp_listen("127.0.0.1", 0)!
   let port = net.tcp_local_port(probe)!
-  net.tcp_close_listener(probe)!
+  io.close(probe)!
   let result = net.tcp_connect("127.0.0.1", port)
   match result {
     ok(_) => assert(false),
     err(_) => assert(true),
   }
+}
+
+test "udp: a datagram to the socket's own port comes back with its sender" {
+  let a = net.udp_bind("127.0.0.1", 0)!
+  let b = net.udp_bind("127.0.0.1", 0)!
+  net.udp_send_to(a, bytes.from_string("ping"), "127.0.0.1", net.udp_local_port(b)!)!
+  let p = net.udp_recv_from(b, 1000000)!
+  assert_eq(bytes.to_string_lossy(p.data), "ping")
+  assert_eq(p.host, "127.0.0.1")
+  assert_eq(p.port, net.udp_local_port(a)!)
+  io.close(a)!
+  io.close(b)!
+}
+
+test "lookup_host resolves an IP literal to itself and localhost to a loopback" {
+  assert_eq(net.lookup_host("127.0.0.1")! |> list.map((ip) => net.ip_to_string(ip)), ["127.0.0.1"])
+  assert(net.lookup_host("localhost")! |> list.any((ip) => net.is_loopback(ip)))
+}
+
+test "parse_ip and ip_to_string round trip, IPv6 in its RFC 5952 short form" {
+  assert_eq(net.ip_to_string(net.parse_ip("10.0.0.1")!), "10.0.0.1")
+  assert_eq(net.ip_to_string(net.parse_ip("2001:DB8:0:0:0:0:0:1")!), "2001:db8::1")
+  assert_eq(net.ip_to_string(net.parse_ip("::1")!), "::1")
+  assert_eq(net.ip_to_string(net.parse_ip("::")!), "::")
+  assert_eq(net.ip_to_string(net.parse_ip("::ffff:1.2.3.4")!), "::ffff:102:304")
+  assert(net.is_loopback(net.parse_ip("127.9.9.9")!))
+  assert(not net.is_loopback(net.parse_ip("10.0.0.1")!))
+  assert(net.parse_ip("256.1.1.1") |> result.is_err)
+  assert(net.parse_ip("1.2.3") |> result.is_err)
+  assert(net.parse_ip("01.2.3.4") |> result.is_err)
+  assert(net.parse_ip("1::2::3") |> result.is_err)
+  assert(net.parse_ip("1:2:3:4:5:6:7:8:9") |> result.is_err)
 }

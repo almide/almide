@@ -21,6 +21,7 @@ include!("net_error_core.rs");
 pub struct AlmideNetTables {
     streams: Vec<Option<std::net::TcpStream>>,
     listeners: Vec<Option<std::net::TcpListener>>,
+    udps: Vec<Option<std::net::UdpSocket>>,
 }
 
 fn almide_net_slot<T>(v: &mut Vec<Option<T>>, x: T) -> i64 {
@@ -195,6 +196,74 @@ impl AlmideNetTables {
     pub fn tcp_is_open(&self, h: i64) -> bool {
         usize::try_from(h).ok().and_then(|i| self.streams.get(i)).is_some_and(|s| s.is_some())
     }
+
+    // ── UDP (R-net-02): its own table, counting from 0 like the tcp ones ──
+
+    fn udp(&mut self, h: i64) -> Result<&mut std::net::UdpSocket, String> {
+        almide_net_get(&mut self.udps, "UdpSocket", h)
+    }
+
+    pub fn udp_bind(&mut self, host: &str, port: i64) -> Result<i64, String> {
+        let u = almide_net_each("udp_bind", host, port, |a| std::net::UdpSocket::bind(a))?;
+        Ok(almide_net_slot(&mut self.udps, u))
+    }
+
+    pub fn udp_local_port(&mut self, h: i64) -> Result<i64, String> {
+        let a = self.udp(h)?.local_addr().map_err(|e| net_io_error_text("udp_local_port", &e))?;
+        Ok(a.port() as i64)
+    }
+
+    /// One datagram; err unless all of `data` went out in it.
+    pub fn udp_send_to(&mut self, h: i64, data: &[u8], host: &str, port: i64) -> Result<(), String> {
+        let addrs = almide_net_resolve("udp_send_to", host, port)?;
+        let u = self.udp(h)?;
+        let sent = u.send_to(data, addrs[0]).map_err(|e| net_io_error_text("udp_send_to", &e))?;
+        if sent != data.len() {
+            return Err(format!("udp_send_to: sent {sent} of {} bytes", data.len()));
+        }
+        Ok(())
+    }
+
+    /// The next datagram, at most `max` bytes of it (the rest is dropped, as
+    /// the OS does), and the sender's address and port. A huge `max` sizes no
+    /// buffer: a datagram is at most 65535 bytes.
+    pub fn udp_recv_from(&mut self, h: i64, max: i64) -> Result<(Vec<u8>, String, i64), String> {
+        let n = almide_net_len("udp_recv_from", max)?;
+        let u = self.udp(h)?;
+        let mut buf = vec![0u8; n.min(65535)];
+        loop {
+            match u.recv_from(&mut buf) {
+                Ok((k, from)) => {
+                    buf.truncate(k);
+                    return Ok((buf, from.ip().to_string(), from.port() as i64));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(net_io_error_text("udp_recv_from", &e)),
+            }
+        }
+    }
+
+    /// Closing a closed socket is ok; a handle never issued is not.
+    pub fn udp_close(&mut self, h: i64) -> Result<(), String> {
+        let i = usize::try_from(h).ok().filter(|i| *i < self.udps.len())
+            .ok_or_else(|| net_err_invalid_handle("UdpSocket", h))?;
+        self.udps[i].take();
+        Ok(())
+    }
+}
+
+/// The addresses `host` resolves to, in the resolver's order, each once; an
+/// IP literal is itself. Err when there are none.
+pub fn almide_net_lookup_host(host: &str) -> Result<Vec<String>, String> {
+    let addrs = almide_net_resolve("lookup_host", host, 0)?;
+    let mut out: Vec<String> = Vec::new();
+    for a in addrs {
+        let ip = a.ip().to_string();
+        if !out.contains(&ip) {
+            out.push(ip);
+        }
+    }
+    Ok(out)
 }
 
 /// One `read` of at most `n` bytes; 0 bytes is EOF (or `n == 0`).
@@ -205,7 +274,9 @@ fn almide_net_read_once(s: &mut std::net::TcpStream, n: usize, f: &str) -> Resul
     if n == 0 {
         return Ok(Vec::new());
     }
-    let mut buf = vec![0u8; n];
+    // One read answers what has arrived, so a huge `n` sizes no buffer: at
+    // most 64 KiB per read (io.read_exact / read_to_end loop over reads).
+    let mut buf = vec![0u8; n.min(1 << 16)];
     loop {
         match std::io::Read::read(s, &mut buf) {
             Ok(k) => {

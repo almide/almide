@@ -140,7 +140,10 @@ impl AlmideUnixTables {
     /// closed. Descriptors that came with them wait for `unix_take_fds`.
     pub fn unix_recv(&mut self, sock: i64, max: i64) -> Result<Vec<u8>, String> {
         let sock = self.check("unix_recv", sock)?;
-        let mut buf = vec![0u8; max.max(0) as usize];
+        // One read answers what has arrived, so a huge `max` sizes no buffer:
+        // at most 64 KiB per read, the bound io.read_exact / read_to_end
+        // already loop over.
+        let mut buf = vec![0u8; max.clamp(0, 1 << 16) as usize];
         let s = self.borrow(sock);
         let (n, fds) = almide_unix_retry(|| almide_unix_sys::recv(&s, &mut buf)).map_err(|e| format!("unix_recv: {e}"))?;
         let got: Vec<i64> = fds.into_iter().map(|f| self.hold(f)).collect();
@@ -215,14 +218,28 @@ impl AlmideUnixTables {
             .map_err(|e| format!("shm_resize: {e}"))
     }
 
-    /// Write `data` into the shared-memory file `fd` at byte `offset`.
+    /// Write `data` into the shared-memory file `fd` at byte `offset`, inside
+    /// its current size. A negative offset or a write past the end is the
+    /// `unix.shm_write:` refusal, which `unix.shm_write` turns into an abort
+    /// (an out-of-range write is a program error, R-unix-01); growing the file
+    /// is `shm_resize`'s job.
     pub fn shm_write(&mut self, fd: i64, offset: i64, data: &[u8]) -> Result<(), String> {
         self.check("shm_write", fd)?;
         if offset < 0 {
-            return Err(format!("shm_write: negative offset {offset}"));
+            return Err(format!("unix.shm_write: negative offset {offset}"));
         }
-        self.with_as("shm_write", fd, |f: &std::fs::File| std::os::unix::fs::FileExt::write_all_at(f, data, offset as u64))?
-            .map_err(|e| format!("shm_write: {e}"))
+        self.with_as("shm_write", fd, |f: &std::fs::File| {
+            let size = f.metadata()?.len();
+            let end = (offset as u64).checked_add(data.len() as u64);
+            if end.is_none_or(|e| e > size) {
+                return Ok(Err(format!(
+                    "unix.shm_write: {} bytes at offset {offset} run past the end of the {size}-byte file",
+                    data.len()
+                )));
+            }
+            std::os::unix::fs::FileExt::write_all_at(f, data, offset as u64).map(Ok)
+        })?
+            .map_err(|e| format!("shm_write: {e}"))?
     }
 
     /// Up to `len` bytes of the file `fd` from byte `offset` (fewer at its end).
@@ -261,6 +278,8 @@ fn almide_shm_open() -> std::io::Result<std::fs::File> {
 
 #[cfg(unix)]
 fn almide_shm_read_at(f: &std::fs::File, offset: u64, len: usize) -> std::io::Result<Vec<u8>> {
+    // Never more than the file holds past `offset`: a huge `len` sizes no buffer.
+    let len = (len as u64).min(f.metadata()?.len().saturating_sub(offset)) as usize;
     let mut buf = vec![0u8; len];
     let mut got = 0usize;
     while got < buf.len() {
