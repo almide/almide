@@ -1,8 +1,8 @@
 //! env / io / process host surfaces over the fs_call boundary — the
 //! ops live in fs_meta.rs; this file is the guest-side dispatch.
-//! `io.write`/`write_bytes` append RAW to the same stdout sink println
-//! uses (PROGRAM order is the contract); `io.read_n_bytes` reads up to
-//! n stdin bytes (n <= 0 is the empty list, no allocation).
+//! `io.write(io.stdout(), b)` appends RAW to the same stdout sink println
+//! uses (PROGRAM order is the contract); `io.read(io.stdin(), n)` reads up
+//! to n stdin bytes (n <= 0 is the empty Bytes, no allocation).
 
 use almide_ir::IrExpr;
 use wasm_encoder::BlockType;
@@ -138,35 +138,6 @@ impl Emitter<'_> {
                 self.io_read_all()?;
                 Some(Lowered::owned(STR))
             }
-            // One byte off the stdin CURSOR (op 35): parked len 0 = EOF
-            // -> -1, else the byte zero-extended — the native intrinsic's
-            // exact contract, and the read composes with read_line /
-            // read_n_bytes on the same cursor.
-            ("io", "read_byte", []) => {
-                self.fs_call_stdin_take(1)?;
-                let hret = self.hold_i64()?;
-                let hb = self.hold_i32()?;
-                let mut i = self.f.instructions();
-                i.local_set(hret);
-                i.local_get(hret).i64_const(0xFFFF_FFFF).i64_and().i64_eqz();
-                i.if_(BlockType::Result(wasm_encoder::ValType::I64));
-                i.i64_const(-1);
-                i.else_();
-                i.i32_const(1).call(F_ALLOC).local_set(hb);
-                i.local_get(hb)
-                    .i32_const(almide_layout::PAYLOAD as i32)
-                    .i32_add()
-                    .call(F_HOST_READ);
-                i.local_get(hb).i64_load8_u(crate::bytes::byte_k(0));
-                // The staging block is this arm's own: the byte is on the
-                // stack now, so the block goes.
-                i.local_get(hb).call(F_DEC_FLAT);
-                i.end();
-                let _ = i;
-                self.release_i32();
-                self.release_i64();
-                Some(Lowered::scalar(INT))
-            }
             // The wall-clock trio (#2703): op 34 answers RAW epoch nanos
             // (no status packing; a pre-epoch host clock reads 0, native's
             // `unwrap_or_default`), truncated to the unit native's
@@ -193,26 +164,34 @@ impl Emitter<'_> {
                 self.fs_call_0(crate::fs_meta::OP_MONO_NOW)?;
                 Some(Lowered::scalar(INT))
             }
+            // none at end of input, some("") for an empty line (R-io-01).
             ("io", "read_line", []) => {
-                self.io_read_line()?;
-                Some(Lowered::owned(STR))
-            }
-            ("io", "read_line_opt", []) => {
                 self.io_read_line_opt()?;
                 Some(Lowered::owned(SliceTy::Option(self.types.intern(STR))))
             }
-            ("io", "write", [b]) => {
+            // The streams' write leaves under `io.write(io.stdout(), b)` /
+            // `io.write(io.stderr(), b)`: op 30 / op 73, the payload verbatim.
+            ("io", "__write_stdout", [b]) => {
                 self.lower_arg(b, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
                 self.io_stdout_raw()?;
+                None
+            }
+            ("io", "__write_stderr", [b]) => {
+                self.lower_arg(b, Some(SliceTy::Scalar(Scalar::Bytes)), ArgMode::Borrow)?;
+                self.io_raw(crate::fs_meta::OP_STDERR_RAW)?;
                 None
             }
             // String bytes to the same raw sink (print is write minus the
             // Bytes spelling — Strings share the len=bytes layout), then
             // the always-ok unit carrier: print has no failure channel,
             // but the effect ABI still hands the caller a Result block.
-            ("io", "print", [s]) => {
+            ("io", "print", [s]) | ("io", "eprint", [s]) => {
                 self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
-                self.io_stdout_raw()?;
+                if func == "eprint" {
+                    self.io_raw(crate::fs_meta::OP_STDERR_RAW)?;
+                } else {
+                    self.io_stdout_raw()?;
+                }
                 let hb = self.hold_i32()?;
                 {
                     let mut i = self.f.instructions();
@@ -258,43 +237,9 @@ impl Emitter<'_> {
                 self.sleep_ms(ms)?;
                 None
             }
-            // List[Int] → low bytes, then the same raw sink.
-            ("io", "write_bytes", [xs]) => {
-                match self.lower_arg(xs, None, ArgMode::Borrow)? {
-                    SliceTy::List(h) if self.types.el(h) == INT => {}
-                    other => return unsup(&format!("io-write-bytes-of:{other:?}")),
-                }
-                let hl = self.hold_i32()?;
-                let hb = self.hold_i32()?;
-                let hk = self.hold_i32()?;
-                let hn = self.hold_i32()?;
-                let mut i = self.f.instructions();
-                i.local_set(hl);
-                i.local_get(hl).i32_load(len_memarg()).i32_const(3).i32_shr_u().local_set(hn);
-                i.local_get(hn).call(F_ALLOC).local_set(hb);
-                i.i32_const(0).local_set(hk);
-                i.block(BlockType::Empty).loop_(BlockType::Empty);
-                i.local_get(hk).local_get(hn).i32_ge_u().br_if(1);
-                i.local_get(hb).local_get(hk).i32_add();
-                i.local_get(hl).local_get(hk).i32_const(3).i32_shl().i32_add();
-                i.i64_load(slot_memarg(0)).i32_wrap_i64();
-                i.i32_store8(crate::bytes::byte_k(0));
-                i.local_get(hk).i32_const(1).i32_add().local_set(hk);
-                i.br(0).end().end();
-                // The byte buffer is this arm's own temporary: the sink
-                // reads it, then it goes (#2977 — it outlived every call).
-                i.local_get(hb).local_get(hb);
-                let _ = i;
-                for _ in 0..4 {
-                    self.release_i32();
-                }
-                self.io_stdout_raw()?;
-                self.f.instructions().call(F_DEC_FLAT);
-                None
-            }
-            // n <= 0 → []; else read up to n stdin bytes (harness: none)
-            // and decode one i64 slot per byte.
-            ("io", "read_n_bytes", [n]) => {
+            // n <= 0 → empty; else up to n stdin bytes (harness: none), the
+            // staged block itself being the Bytes answer (`io.read(io.stdin(), n)`).
+            ("io", "__read_stdin_bytes", [n]) => {
                 self.lower_arg(n, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
                 let mut i = self.f.instructions();
@@ -327,8 +272,6 @@ impl Emitter<'_> {
                 let hret = self.hold_i64()?;
                 let hraw = self.hold_i32()?;
                 let hlen = self.hold_i32()?;
-                let hout = self.hold_i32()?;
-                let hk = self.hold_i32()?;
                 let mut i = self.f.instructions();
                 i.local_set(hret);
                 i.local_get(hret).i64_const(0xFFFF_FFFF).i64_and().i32_wrap_i64().local_set(hlen);
@@ -338,17 +281,15 @@ impl Emitter<'_> {
                     .i32_add()
                     .call(F_HOST_READ);
                 let _ = i;
-                self.emit_decode_staged_bytes(hraw, hlen, hout, hk);
                 let mut i = self.f.instructions();
-                i.local_get(hout);
+                i.local_get(hraw);
                 i.end();
                 let _ = i;
-                for _ in 0..4 {
-                    self.release_i32();
-                }
+                self.release_i32();
+                self.release_i32();
                 self.release_i64();
                 self.release_i64();
-                Some(Lowered::owned(SliceTy::List(self.types.intern(INT))))
+                Some(Lowered::owned(SliceTy::Scalar(Scalar::Bytes)))
             }
             _ => return Ok(None),
         };
