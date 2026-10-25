@@ -92,3 +92,43 @@ test "bit_length and the two's-complement bitwise functions" {
   assert_eq(s(bigint.bshr(p70, 65)), "32")
   testing.assert_aborts("shift count must not be negative", () => bigint.bshl(b("1"), -1))
 }
+
+// #4196: text in a radix that is not a power of two costs time quadratic in its length, so it
+// is limited to 4300 digits (Python's default limit); a power-of-two radix converts in linear
+// time and has no limit; pow refuses a result sure to pass 30 * 2^28 bits before computing.
+test "decimal text is limited to 4300 digits; a power-of-two radix is not" {
+  let limit = "integer string conversion exceeds the limit of 4300 digits"
+  let nines = string.repeat("9", 4300)
+  assert_eq(s(b(nines)), nines)
+  assert_eq(s(b("-" + nines)), "-" + nines)
+  assert_eq(bigint.parse(string.repeat("7", 4301)), err(limit))
+  assert_eq(bigint.parse("-" + string.repeat("0", 4301)), err(limit))
+  assert_eq(bigint.parse_radix(string.repeat("z", 4301), 36), err(limit))
+  assert_eq(bigint.parse(string.repeat("7", 4300) + "x"), err("invalid digit found in string"))
+  testing.assert_aborts(limit, () => s(bigint.pow(b("10"), 4300)))
+  testing.assert_aborts(limit, () => bigint.to_string_radix(bigint.pow(b("3"), 4300), 3))
+  testing.assert_aborts(limit, () => s(bigint.bshl(b("-1"), 100000)))
+  assert_eq(s(bigint.pow(b("10"), 4299)), "1" + string.repeat("0", 4299))
+  let big = bigint.bshl(b("5"), 200000) + b("1")
+  for r in [2, 4, 8, 16, 32] {
+    let t = bigint.to_string_radix(b("0") - big, r)
+    assert(string.starts_with(t, "-"))
+    assert_eq(bigint.parse_radix(t, r), ok(b("0") - big))
+  }
+  assert_eq(string.len(bigint.to_string_radix(big, 16)), 50001)
+  assert_eq(bigint.parse_radix("0x" + string.repeat("0", 9000) + "1F", 16), ok(b("31")))
+}
+
+test "pow refuses a result sure to pass 30 * 2^28 bits" {
+  assert_eq(s(bigint.pow(b("1"), 9223372036854775807)), "1")
+  assert_eq(s(bigint.pow(b("-1"), 9223372036854775807)), "-1")
+  assert_eq(s(bigint.pow(b("-1"), 9223372036854775806)), "1")
+  assert_eq(s(bigint.pow(b("0"), 9223372036854775807)), "0")
+  testing.assert_aborts("pow result too large", () => bigint.pow(b("2"), 8053063680))
+  testing.assert_aborts("pow result too large", () => bigint.pow(b("-4"), 4026531840))
+  testing.assert_aborts("pow result too large", () => bigint.pow(b("7"), 9223372036854775807))
+  testing.assert_aborts(
+    "pow result too large",
+    () => bigint.pow(bigint.bshl(b("1"), 15728640), 512),
+  )
+}
