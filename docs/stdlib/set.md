@@ -309,17 +309,17 @@ set.new() -> Set[A]
 // @since 0.8.0 or earlier
 set.from_list(xs: List[A]) -> Set[A]
 
-// Copy with value appended; unchanged if present.
+// Copy with x appended; unchanged if present.
 // @since 0.8.0 or earlier
-set.insert(s: Set[A], value: A) -> Set[A]
+set.insert(s: Set[A], x: A) -> Set[A]
 
-// Copy without value; unchanged if absent.
+// Copy without x; unchanged if absent.
 // @since 0.8.0 or earlier
-set.remove(s: Set[A], value: A) -> Set[A]
+set.remove(s: Set[A], x: A) -> Set[A]
 
-// true when value is a member.
+// true when x is a member.
 // @since 0.8.0 or earlier
-set.contains(s: Set[A], value: A) -> Bool
+set.contains(s: Set[A], x: A) -> Bool
 
 // Member count; 0 for an empty set.
 // @since 0.8.0 or earlier

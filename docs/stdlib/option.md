@@ -268,11 +268,11 @@ option.to_list(o: Option[A]) -> List[A]
 
 // some(values) if no element is none, else none.
 // @since 0.15.0 or earlier
-option.collect(xs: List[Option[T]]) -> Option[List[T]]
+option.collect(xs: List[Option[A]]) -> Option[List[A]]
 
 // some of all f(x), or none; f runs on every x.
 // @since 0.15.0 or earlier
-option.collect_map(xs: List[T], f: (T) -> Option[U]) -> Option[List[U]]
+option.collect_map(xs: List[A], f: (A) -> Option[B]) -> Option[List[B]]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

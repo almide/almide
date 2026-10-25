@@ -167,9 +167,9 @@ matrix.shape(m: Matrix) -> (Int, Int)
 // @since 0.9.3 or earlier
 matrix.transpose(m: Matrix) -> Matrix
 
-// Matrix of equal-length rows; [] is 0 x 0.
+// Matrix of the equal-length rows xs; [] is 0 x 0.
 // @since 0.9.3 or earlier
-matrix.from_lists(rows: List[List[Float]]) -> Matrix
+matrix.from_lists(xs: List[List[Float]]) -> Matrix
 
 // Rows at row_ids; id < 0 is row 0, past end zeros.
 // @since 0.15.1 or earlier
@@ -243,9 +243,9 @@ matrix.pow(m: Matrix, exp: Float) -> Matrix
 // @since 0.9.3 or earlier
 matrix.map(m: Matrix, f: (Float) -> Float) -> Matrix
 
-// f32 LE rows x cols at offset; all 0 if data short.
+// f32 LE rows x cols of b at offset; all 0 if b is short.
 // @since 0.13.4 or earlier
-matrix.from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix
+matrix.from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix
 
 // Row-major f64 LE, 8 bytes per element.
 // @since 0.13.4 or earlier
@@ -259,13 +259,13 @@ matrix.to_bytes_f32_le(m: Matrix) -> Bytes
 // @since unreleased
 matrix.to_bytes_f16_le(m: Matrix) -> Bytes
 
-// f16 LE rows x cols at offset; all 0 if data short.
+// f16 LE rows x cols of b at offset; all 0 if b is short.
 // @since 0.13.4 or earlier
-matrix.from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix
+matrix.from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix
 
-// f64 LE rows x cols at offset; all 0 if data short.
+// f64 LE rows x cols of b at offset; all 0 if b is short.
 // @since 0.13.4 or earlier
-matrix.from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix
+matrix.from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix
 
 // bias added to each row; cols cut to bias.
 // @since 0.13.4 or earlier
@@ -277,7 +277,7 @@ matrix.split_cols_even(m: Matrix, n: Int) -> List[Matrix]
 
 // Side-by-side join; [] gives 0 x 0.
 // @since 0.13.4 or earlier
-matrix.concat_cols(matrices: List[Matrix]) -> Matrix
+matrix.concat_cols(xs: List[Matrix]) -> Matrix
 
 // Alias of matrix.concat_cols.
 // @since 0.13.4 or earlier

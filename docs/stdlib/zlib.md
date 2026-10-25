@@ -67,17 +67,17 @@ Inverse of `gzip`.
 ## Signature index (13 functions)
 
 ```
-// Zlib-framed DEFLATE of data; bytes vary by target.
+// Zlib-framed DEFLATE of b; bytes vary by target.
 // @since 0.20.0 or earlier
-effect zlib.compress(data: Bytes) -> Bytes
+effect zlib.compress(b: Bytes) -> Bytes
 
 // Like compress; level clamped to 0..9, unused on wasm.
 // @since 0.20.0 or earlier
-effect zlib.compress_level(data: Bytes, level: Int) -> Bytes
+effect zlib.compress_level(b: Bytes, level: Int) -> Bytes
 
 // Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
 // @since 0.20.0 or earlier
-effect zlib.decompress(data: Bytes) -> Bytes
+zlib.decompress(b: Bytes) -> Result[Bytes, String]
 
 // Like decompress, output bound max_len bytes; max_len <= 0 aborts.
 // @since unreleased
@@ -85,27 +85,27 @@ zlib.decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String]
 
 // Raw DEFLATE, no header; bytes vary by target.
 // @since 0.20.0 or earlier
-effect zlib.deflate(data: Bytes) -> Bytes
+effect zlib.deflate(b: Bytes) -> Bytes
 
 // Like deflate; level clamped to 0..9, unused on wasm.
 // @since 0.20.0 or earlier
-effect zlib.deflate_level(data: Bytes, level: Int) -> Bytes
+effect zlib.deflate_level(b: Bytes, level: Int) -> Bytes
 
 // Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
 // @since 0.20.0 or earlier
-effect zlib.inflate(data: Bytes) -> Bytes
+zlib.inflate(b: Bytes) -> Result[Bytes, String]
 
 // Like inflate, output bound max_len bytes; max_len <= 0 aborts.
 // @since unreleased
 zlib.inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String]
 
-// RFC 1952 gzip of data; bytes vary by target.
+// RFC 1952 gzip of b; bytes vary by target.
 // @since 0.20.0 or earlier
-effect zlib.gzip(data: Bytes) -> Bytes
+effect zlib.gzip(b: Bytes) -> Bytes
 
 // Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
 // @since 0.20.0 or earlier
-effect zlib.gunzip(data: Bytes) -> Bytes
+zlib.gunzip(b: Bytes) -> Result[Bytes, String]
 
 // Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 // @since unreleased
