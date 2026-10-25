@@ -249,6 +249,9 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // are REJECTED: their pair walks read the incumbent's inline-pairs
     // Value layout (tag@h+4, count@h+8) — see PORT-MATRIX.
     "json_path_root", "json_path_field", "json_path_index", "json_path_get",
+    // The declared repr (#4204, audited 2026-10-25): list.map / list.join
+    // and string.take / string.drop over the same List[String], no prim.
+    "json_path_repr",
     "http_get_header", "http_req_header", "http_param",
     // regex_engine.almd Option returners (same audit).
     "regex_find", "regex_captures",

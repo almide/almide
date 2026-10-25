@@ -120,3 +120,8 @@ effect fn __hc_stream_classic_impl(method: String, url: String, body: String, he
   let c = __http_call_open(url, __hc_classic_frame(method, body, headers))!
   __hc_pump(c, on_chunk)
 }
+
+// The declared repr (#4204): a call in flight is a handle with no value to
+// show — native's `AlmideRepr` prints the type name, never the host call id.
+@implements("http.__http_call_repr")
+fn http_call_repr(c: HttpCall) -> String = "HttpCall"

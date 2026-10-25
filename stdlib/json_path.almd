@@ -229,3 +229,13 @@ fn __tomap_fold(v: Value, i: Int, n: Int, acc: Map[String, String]) -> Map[Strin
 fn __tomap_text(x: Value) -> String =
   if prim.load32(prim.handle(x) + 4) == 4 then prim.load_str(prim.handle(x) + 12)
   else value.stringify(x)
+
+// The declared repr (#4204): native's `Display` of its JsonPath enum — `$`,
+// then `.name` per field step and `[i]` per index step.
+fn __jp_seg_repr(seg: String) -> String = match string.take(seg, 1) {
+  "i" => "[" + string.drop(seg, 1) + "]",
+  _ => "." + string.drop(seg, 1),
+}
+
+@implements("json.__json_path_repr")
+fn json_path_repr(path: List[String]) -> String = "$" + (path |> list.map((s) => __jp_seg_repr(s)) |> list.join(""))

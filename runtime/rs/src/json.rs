@@ -426,6 +426,10 @@ impl AlmideRepr for AlmideJsonPath {
     fn almide_repr(&self) -> String { self.to_string() }
 }
 
+// `json.__json_path_repr` (#4204): the declared repr is this impl; the wasm
+// legs' self-hosted twin prints the same text.
+pub fn almide_rt_json_path_repr(path: &AlmideJsonPath) -> AlmideString { path.almide_repr().into_almide() }
+
 // Wrapper functions for stdlib codegen (json.root(), json.field(), json.index())
 pub fn almide_rt_json_root() -> AlmideJsonPath { AlmideJsonPath::JpRoot }
 pub fn almide_rt_json_field(path: AlmideJsonPath, name: &str) -> AlmideJsonPath { AlmideJsonPath::JpField(std::boxed::Box::new(path), name.to_string()) }
