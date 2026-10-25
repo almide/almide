@@ -47,9 +47,9 @@ effect fn append_text(path: String, content: String) -> Result[Unit, String] = _
 @ordered
 @category("FS.write")
 effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = {
-  let old = if exists(path) then __as_append(read_bytes(path))!
+  let old = if fs.exists(path) then __as_append(fs.read_bytes(path))!
   else bytes.new()
-  __as_append(write_bytes(path, old + data))
+  __as_append(fs.write_bytes(path, old + data))
 }
 
 local fn __as_append[A](r: Result[A, String]) -> Result[A, String] = match r {
