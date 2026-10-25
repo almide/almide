@@ -119,7 +119,7 @@ fn pow(m: Matrix, exp: Float) -> Matrix = _
 fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
 
 // ── bytes serialisation ──
-/// f32 LE rows x cols at offset; none if data short.
+/// f32 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f32_le")
 fn from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
@@ -135,11 +135,11 @@ fn to_bytes_f32_le(m: Matrix) -> Bytes = _
 @intrinsic("almide_rt_matrix_to_bytes_f16_le")
 fn to_bytes_f16_le(m: Matrix) -> Bytes = _
 
-/// f16 LE rows x cols at offset; none if data short.
+/// f16 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f16_le")
 fn from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
-/// f64 LE rows x cols at offset; none if data short.
+/// f64 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f64_le")
 fn from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
