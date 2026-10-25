@@ -589,12 +589,30 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     let pool = http_server_pool(listener, HTTP_SERVER_DEFAULT_LIMITS);
     // A handler err is a fixed 500 body naming the request's id, and the error
     // itself goes to stderr under it (C-409, #4150).
+    // A runtime abort inside the handler is contained to its request (#4203):
+    // ALMIDE_CONTAIN makes the abort unwind instead of exiting, and the same
+    // fixed 500 answers it, so one request reaching an out-of-bounds index or
+    // a division by zero no longer ends the server.
     while let Some((conn, (method, path, body, headers))) = pool.next() {
         let id = http_server_request_id(&method, &path, &body);
-        let resp = match handler(AlmideHttpRequest { method, path, body, headers, params: Vec::new() }) {
-            Ok(r) => r,
-            Err(e) => {
+        let req = AlmideHttpRequest { method, path, body, headers, params: Vec::new() };
+        ALMIDE_CONTAIN.with(|c| c.set(true));
+        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(req)));
+        ALMIDE_CONTAIN.with(|c| c.set(false));
+        let resp = match ran {
+            Ok(Ok(r)) => r,
+            Ok(Err(e)) => {
                 eprintln!("{}", http_server_handler_error_line(&id, &e));
+                AlmideHttpResponse::new(500, http_server_handler_error_body(&id))
+            }
+            Err(payload) => {
+                let text = payload
+                    .downcast_ref::<AlmideContained>()
+                    .map(|c| c.0.clone())
+                    .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "panic".to_string());
+                eprintln!("{}", http_server_handler_abort_line(&id, &text));
                 AlmideHttpResponse::new(500, http_server_handler_error_body(&id))
             }
         };
