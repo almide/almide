@@ -18,41 +18,41 @@ mod type Fd: Read, Write, Close = Int
 // ── Sockets ──
 /// Stream socket connected to the listener at path.
 @category("Net.fetch")
-effect fn connect(path: String) -> Result[Fd, String] = ok(Fd(__os_connect(path)!))
+effect fn connect(path: String) -> Result[Fd, String] = ok(Fd(unix.__os_connect(path)!))
 
 /// Listener bound at path, which must not exist yet.
 @category("Net.listen")
-effect fn listen(path: String) -> Result[Fd, String] = ok(Fd(__os_listen(path)!))
+effect fn listen(path: String) -> Result[Fd, String] = ok(Fd(unix.__os_listen(path)!))
 
 /// Blocks for the next connection on listener.
 @category("Net.listen")
-effect fn accept(listener: Fd) -> Result[Fd, String] = ok(Fd(__os_accept(__raw(listener))!))
+effect fn accept(listener: Fd) -> Result[Fd, String] = ok(Fd(unix.__os_accept(__raw(listener))!))
 
 /// Sends all of data, the descriptors fds riding with its first byte.
-effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Result[Unit, String] = __os_send(
+effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Result[Unit, String] = unix.__os_send(
   __raw(sock),
   data,
   fds |> list.map((f) => __raw(f)),
 )
 
 /// Descriptors received on sock and not yet taken, oldest first.
-effect fn take_fds(sock: Fd) -> List[Fd] = __os_take_fds(__raw(sock)) |> list.map((f) => Fd(f))
+effect fn take_fds(sock: Fd) -> List[Fd] = unix.__os_take_fds(__raw(sock)) |> list.map((f) => Fd(f))
 
 /// The descriptors of xs readable within timeout_ms, in order; < 0 waits for one, 0 only checks.
-effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = ok(__os_wait(
+effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = ok(unix.__os_wait(
   xs |> list.map((f) => __raw(f)),
   timeout_ms,
 )! |> list.map((f) => Fd(f)))
 
 // ── Shared-memory files ──
 /// New zero-filled unnamed file of size bytes.
-effect fn shm_create(size: Int) -> Result[Fd, String] = ok(Fd(__os_shm_create(size)!))
+effect fn shm_create(size: Int) -> Result[Fd, String] = ok(Fd(unix.__os_shm_create(size)!))
 
 /// Grows or shrinks the file fd to size bytes.
-effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = __os_shm_resize(__raw(fd), size)
+effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = unix.__os_shm_resize(__raw(fd), size)
 
 /// Writes data into fd at offset; a negative offset or a write past the end aborts (shm_resize first).
-effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = match __os_shm_write(
+effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = match unix.__os_shm_write(
   __raw(fd),
   offset,
   data,
@@ -62,7 +62,7 @@ effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = 
 }
 
 /// Up to len bytes of fd from offset; fewer at its end.
-effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = __os_shm_read(
+effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = unix.__os_shm_read(
   __raw(fd),
   offset,
   len,
@@ -70,11 +70,11 @@ effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = __o
 
 // ── The descriptor's I/O requirements (R-L0-44) ──
 // One read of at most max bytes (65536 at most per read): empty once the peer closed.
-effect fn __fd_read(h: Fd, max: Int) -> Result[Bytes, String] = __os_recv(__raw(h), max)
+effect fn __fd_read(h: Fd, max: Int) -> Result[Bytes, String] = unix.__os_recv(__raw(h), max)
 
-effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = __os_send(__raw(h), data, [])
+effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = unix.__os_send(__raw(h), data, [])
 
-effect fn __fd_close(h: Fd) -> Result[Unit, String] = __os_close(__raw(h))
+effect fn __fd_close(h: Fd) -> Result[Unit, String] = unix.__os_close(__raw(h))
 
 local fn __raw(f: Fd) -> Int = match f {
   Fd(n) => n

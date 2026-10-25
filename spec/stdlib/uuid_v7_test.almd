@@ -3,7 +3,12 @@ import uuid
 
 test "v7 carries version 7 and the variant, its time is now, and each is greater than the last" {
   let t0 = datetime.now_ms()!
-  let us = list.range(0, 200) |> list.map((_) => uuid.v7()!)!
+  var us: List[uuid.Uuid] = []
+  for _ in list.range(0, 200) {
+    us = us + [
+      uuid.v7()!
+    ]
+  }
   let t1 = datetime.now_ms()!
   for u in us {
     let b = uuid.to_bytes(u)
