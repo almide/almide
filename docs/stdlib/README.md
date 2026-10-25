@@ -1288,7 +1288,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `math.cos(x: Float) -> Float` — Cosine of x radians; NaN for infinite x.
 - `math.e() -> Float` — Euler's number, 2.718281828459045.
 - `math.exp(x: Float) -> Float` — e to the x; overflows to inf above ~709.78.
-- `math.factorial(n: Int) -> Int` — Product 1..n; 1 for n <= 0; wraps past 20.
+- `math.factorial(n: Int) -> Int` — Product 1..n; 1 for n <= 0; wraps past 20, 0 from 66 on.
 - `math.fmax(a: Float, b: Float) -> Float` — Greater; a NaN operand is ignored; 0.0 > -0.0.
 - `math.fmin(a: Float, b: Float) -> Float` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
 - `math.fpow(base: Float, exp: Float) -> Float` — base to the exp; NaN for negative base, fractional exp.
