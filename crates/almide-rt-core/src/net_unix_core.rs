@@ -296,9 +296,12 @@ impl AlmideUnixTables {
             return Err(format!("unix.shm_write: negative offset {offset}"));
         }
         self.with_as("shm_write", fd, |f: &std::fs::File| {
-            let size = f.metadata()?.len();
+            // The bound is a shared-memory FILE's size; any other descriptor
+            // (a socket) is left to the OS, which refuses the write.
+            let meta = f.metadata()?;
+            let size = meta.len();
             let end = (offset as u64).checked_add(data.len() as u64);
-            if end.is_none_or(|e| e > size) {
+            if meta.is_file() && end.is_none_or(|e| e > size) {
                 return Ok(Err(format!(
                     "unix.shm_write: {} bytes at offset {offset} run past the end of the {size}-byte file",
                     data.len()

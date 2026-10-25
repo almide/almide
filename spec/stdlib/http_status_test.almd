@@ -15,6 +15,7 @@
 // external network; the status-code unit is declared out-of-band in
 // docs/stdlib/semantics-manifest.toml.
 import env
+import io
 import http
 import net
 
@@ -55,10 +56,10 @@ test "request_response to a closed local port is a transport err" {
 effect fn answer_once(port: Int, reply: String) -> Result[Unit, String] = {
   let server = net.tcp_listen("127.0.0.1", port)!
   let peer = net.tcp_accept(server)!
-  let _ = net.tcp_read(peer, 4096)!
-  net.tcp_write(peer, bytes.from_string(reply))!
-  net.tcp_close(peer)!
-  net.tcp_close_listener(server)!
+  let _ = io.read(peer, 4096)!
+  io.write(peer, bytes.from_string(reply))!
+  io.close(peer)!
+  io.close(server)!
   ok(())
 }
 
