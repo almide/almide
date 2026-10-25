@@ -7280,15 +7280,18 @@ fn float_to_int64_checked(n: Float) -> Int64? = {
 
 
 
-
-@implements("float.to_int_checked")
 fn float_to_int_checked(n: Float) -> Int? = {
   let nan = float.is_nan(n)
   let inf = float.is_infinite(n)
-  let lo = n < -9223372036854775808.0
-  let hi = n >= 9223372036854775808.0
+  let p62 = prim.bshl(1, 62)
+  let f62 = prim.i2f(p62)
+  let two63 = prim.fadd(f62, f62)
+  let neg63 = prim.fneg(two63)
+  let lo = prim.flt(n, neg63)
+  let hi = prim.fge(n, two63)
   let i = float.to_int(n)
-  let rt = float.floor(n) == n
+  let fl = prim.ffloor(n)
+  let rt = prim.feq(fl, n)
   if nan then none
   else if inf then none
   else if lo then none
@@ -7986,7 +7989,6 @@ pub const SRC_FLOAT_SATURATING: &str = r#"
 
 
 
-@implements("float.to_int_saturating")
 fn float_to_int_saturating(n: Float) -> Int = float.to_int(n)
 
 fn float_to_int8_saturating(n: Float) -> Int8 = float.to_int8(n)
@@ -32886,7 +32888,6 @@ effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _
 
 /// Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
 @ordered
-@signals_process
 @intrinsic("almide_rt_process_kill")
 effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 
@@ -32896,7 +32897,6 @@ effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 effect fn sleep(ms: Int) -> Unit = _
 
 /// True while pid exists; false for a pid <= 0.
-@signals_process
 @intrinsic("almide_rt_process_is_alive")
 effect fn is_alive(pid: Int) -> Bool = _
 "#;
