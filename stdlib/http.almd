@@ -361,6 +361,20 @@ fn __with_path(req: HttpRequest, target: String) -> HttpRequest = _
 @consume(resp)
 fn __set_body(resp: HttpResponse, body: String) -> HttpResponse = _
 
+// The declared reprs of the two value types (#4204, after #2647): what
+// `${req}` / `${resp}` shows, bare or nested in a record, list or option, on
+// every leg. The headers are COUNTED, never listed — a logged request does not
+// carry its Authorization / Cookie values. Named after the runtime-backed row
+// (`stdlib_info::runtime_backed_repr_surface`), so the display engine finds
+// them from the type, not from a list.
+@intrinsic("almide_http_req_repr")
+@borrow_ref(req)
+fn __repr_http_request(req: HttpRequest) -> String = _
+
+@intrinsic("almide_http_resp_repr")
+@borrow_ref(resp)
+fn __repr_http_response(resp: HttpResponse) -> String = _
+
 fn __path_of(target: String) -> String = match string.index_of(target, "?") {
   some(i) => string.take(target, i),
   none => target,
