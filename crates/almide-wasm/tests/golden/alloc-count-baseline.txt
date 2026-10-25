@@ -747,6 +747,7 @@
 7	2	83	7	spec/wasm_cross/result_uoe_float.almd
 12	1	138	12	spec/wasm_cross/result_value_int_tuple.almd
 6	0	83	6	spec/wasm_cross/result_wall_escalations.almd
+637	577	8080	637	spec/wasm_cross/runtime_backed_value_repr.almd
 5	2	36	5	spec/wasm_cross/scalar_if_arm_effects.almd
 9	1	93	9	spec/wasm_cross/scan_heap_acc.almd
 2070	30	41548	2070	spec/wasm_cross/scoped_region_value.almd
