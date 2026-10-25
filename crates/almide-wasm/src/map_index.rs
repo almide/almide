@@ -311,12 +311,8 @@ pub(crate) fn load_key(i: &mut wasm_encoder::InstructionSink<'_>, key: IdxKey) {
 
 /// Probe `index` for an EMPTY slot starting at `h` (masked); leaves the
 /// slot's absolute address in `q`.
-pub(crate) fn probe_empty(i: &mut wasm_encoder::InstructionSink<'_>, index: u32, mask: u32, h: u32, q: u32) {
-    probe_empty_counted(i, index, mask, h, q, None);
-}
-
-/// `probe_empty` that also counts its steps into `steps` (reset first), so
-/// the caller can see a flood (#4104, map_ordered.rs).
+/// With `steps`, it also counts its steps there (reset first), so the
+/// caller can see a flood (#4104, map_ordered.rs).
 pub(crate) fn probe_empty_counted(
     i: &mut wasm_encoder::InstructionSink<'_>,
     index: u32,
