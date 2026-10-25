@@ -2,8 +2,11 @@
 
 pub const DECLARED: &[(&str, &[(&str, &str)])] = &[
     (crate::embedded::SRC_BYTES_CORE, &[("bytes_split", "bytes.split")]),
+    (crate::embedded::SRC_BYTES_CT, &[("bytes_is_equal_constant_time", "bytes.is_equal_constant_time"), ("string_is_equal_constant_time", "string.is_equal_constant_time")]),
     (crate::embedded::SRC_BYTES_RAWPTR, &[("ffi_to_int", "ffi.to_int")]),
     (crate::embedded::SRC_FFI_BRIDGE, &[("ffi_address", "ffi.address"), ("ffi_read", "ffi.read"), ("ffi_write", "ffi.write")]),
+    (crate::embedded::SRC_FLOAT_CHECKED, &[("float_to_int_checked", "float.to_int_checked")]),
+    (crate::embedded::SRC_FLOAT_SATURATING, &[("float_to_int_saturating", "float.to_int_saturating")]),
     (crate::embedded::SRC_HTTP_CALL, &[("__hc_stream_classic_impl", "http.request_stream"), ("http_call_repr", "http.__http_call_repr")]),
     (crate::embedded::SRC_HTTP_FRAMED, &[("__request_impl", "http.request"), ("__request_status_impl", "http.request_status"), ("__get_status_impl", "http.get_status"), ("__request_bytes_impl", "http.request_bytes"), ("__get_bytes_impl", "http.get_bytes"), ("__request_response_impl", "http.request_response"), ("__get_response_impl", "http.get_response"), ("__post_response_impl", "http.post_response"), ("__put_response_impl", "http.put_response"), ("__patch_response_impl", "http.patch_response"), ("__delete_response_impl", "http.delete_response")]),
     (crate::embedded::SRC_HTTP_REQUEST, &[("http_req_repr", "http.__http_request_repr"), ("http_resp_repr", "http.__http_response_repr")]),
@@ -18,9 +21,13 @@ pub const DECLARED: &[(&str, &[(&str, &str)])] = &[
 
 /// The declared impl fns that never reach `prim.`, through their own body or a same-file callee.
 pub const PRIM_FREE: &[&str] = &[
+    "bytes_is_equal_constant_time",
+    "string_is_equal_constant_time",
     "ffi_address",
     "ffi_read",
     "ffi_write",
+    "float_to_int_checked",
+    "float_to_int_saturating",
     "__hc_stream_classic_impl",
     "http_call_repr",
     "__request_impl",
