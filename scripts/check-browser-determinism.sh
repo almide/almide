@@ -125,7 +125,7 @@ if [ "$rows" -ne "$MAX_WALLED" ]; then
   echo "::error::browser-determinism: MAX_WALLED=$MAX_WALLED but $LEDGER has $rows rows — the ceiling and the named walls must move together"
   exit 1
 fi
-check_walled_ledger "$LEDGER" "$WORK/walled.txt" browser-determinism || exit 1
+check_walled_ledger "$LEDGER" "$WORK/walled.txt" browser-determinism "$WORK/selected.txt" || exit 1
 corpus=$(wc -l < "$WORK/selected.txt" | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ "$((n + walled))" -ne "$corpus" ]; then
   echo "::error::browser-determinism: compared $n + skipped $walled of $corpus fixtures in $FIXTURE_DIR — the scan went blind (#985)"

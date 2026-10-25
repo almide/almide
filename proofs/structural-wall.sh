@@ -58,21 +58,17 @@ HASHES="$ROOT/proofs/structural-artifacts.sha256"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
-# The full certified list on a release (a push to main, a tag, a manual run,
-# or a push to develop after a merge). On a PR, STRUCTURAL_WALL_STRIDE=k keeps
-# every k-th fixture, the offset rotated by the commit (STRUCTURAL_WALL_SEED),
-# so consecutive PRs certify different slices. A slice judges exceptions only
-# for the fixtures it ran and does not rewrite the artifact digest file.
-STRIDE="${STRUCTURAL_WALL_STRIDE:-1}"
+# The full certified list on a full run (a push to develop or main, a tag, a
+# manual run, a PR into main). Under ALMIDE_CI_SLICE=k (a PR into develop) the
+# commit-rotated 1-in-k slice plus the fixtures the change touches
+# (scripts/lib/ci-slice.sh), so consecutive PRs certify different slices. A
+# slice judges exceptions only for the fixtures it ran and does not rewrite
+# the artifact digest file.
+. "$ROOT/scripts/lib/ci-slice.sh"
 grep -v -E '^(#|$)' "$FIXTURES" > "$OUT/listed"
-if [ "$STRIDE" -gt 1 ] 2>/dev/null; then
-  seed="$(printf '%s' "${STRUCTURAL_WALL_SEED:-0}" | tr -cd '0-9a-fA-F' | cut -c1-7)"
-  off=$(( 16#${seed:-0} % STRIDE ))
-  awk -v s="$STRIDE" -v o="$off" '(NR - 1) % s == o' "$OUT/listed" > "$OUT/selected"
-  echo "== slice: $(wc -l < "$OUT/selected" | tr -d ' ') of $(wc -l < "$OUT/listed" | tr -d ' ') certified fixtures (every ${STRIDE}th from offset $off); a release runs them all =="
+(cd "$ROOT" && ci_slice_filter structural-wall < "$OUT/listed") > "$OUT/selected"
+if ci_slice_active; then
   HASHES="$OUT/structural-artifacts.sha256"
-else
-  cp "$OUT/listed" "$OUT/selected"
 fi
 echo "== build each certified fixture (almide build --target wasm) and produce its bundle =="
 N=0
