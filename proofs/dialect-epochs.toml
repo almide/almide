@@ -357,6 +357,10 @@ breaks = [
   "runtime error texts escape the control and bidi characters of an embedded path, command or host (`\\n`, `\\u{1b}`, …); `process.exec_status`, `exec_status_timeout` and `run` no longer escape `\"` and `\\` in the command (#4126, C-418)",
   "`args.flag(name)` no longer answers to `-<first letter of name>`: only `--name` sets it (a one-letter name also `-n`); keep a short form by reading it, `args.flag(\"dry-run\")! or args.flag(\"n\")!` (#4144)",
   "`--` ends option parsing in the `args` readers: `args.flag`, `args.has_flag`, `args.option` and `args.option_or` ignore every argument after the first `--`, and `args.positional()` / `args.positional_at` include every argument after it, a leading `-` included (#4144)",
+  "`bigint.parse` / `bigint.parse_radix` in a radix that is not a power of two answer `err(\"integer string conversion exceeds the limit of 4300 digits\")` for more than 4300 digits, where they used to parse (#4196, C-419)",
+  "`bigint.to_string` / `bigint.to_string_radix` in a radix that is not a power of two abort with `integer string conversion exceeds the limit of 4300 digits` for a result of more than 4300 digits (#4196, C-419)",
+  "`bigint.pow` aborts with `pow result too large` when `(bit_length(base) - 1) * exp >= 30 * 2^28`, before computing (#4196, C-419)",
+  "`list.range_step(start, end, step)` whose `end - start` overflows Int (bounds of opposite sign) lists the whole span instead of a wrapped, truncated count: `range_step(MIN, MAX, 2^62)` is 4 elements, not `[MIN]` (#4197, C-420)",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
