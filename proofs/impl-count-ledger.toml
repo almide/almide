@@ -2204,14 +2204,14 @@ selfhost = 1
 total    = 2
 [[hole]]
 module   = "http"
-name     = "__repr_http_request"
+name     = "__http_request_repr"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "http"
-name     = "__repr_http_response"
+name     = "__http_response_repr"
 native   = 1
 emitter  = 0
 selfhost = 1

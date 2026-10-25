@@ -228,7 +228,7 @@ impl AlmideRepr for AlmideHttpRequest {
     }
 }
 
-// `http.__repr_http_request` / `__repr_http_response` (#4204): the declared
+// `http.__http_request_repr` / `__http_response_repr` (#4204): the declared
 // reprs are these impls; the wasm legs' self-hosted twins print the same text.
 pub fn almide_http_req_repr(req: &AlmideHttpRequest) -> AlmideString { req.almide_repr().into_almide() }
 pub fn almide_http_resp_repr(resp: &AlmideHttpResponse) -> AlmideString { resp.almide_repr().into_almide() }

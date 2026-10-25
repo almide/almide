@@ -369,11 +369,11 @@ fn __set_body(resp: HttpResponse, body: String) -> HttpResponse = _
 // them from the type, not from a list.
 @intrinsic("almide_http_req_repr")
 @borrow_ref(req)
-fn __repr_http_request(req: HttpRequest) -> String = _
+fn __http_request_repr(req: HttpRequest) -> String = _
 
 @intrinsic("almide_http_resp_repr")
 @borrow_ref(resp)
-fn __repr_http_response(resp: HttpResponse) -> String = _
+fn __http_response_repr(resp: HttpResponse) -> String = _
 
 fn __path_of(target: String) -> String = match string.index_of(target, "?") {
   some(i) => string.take(target, i),

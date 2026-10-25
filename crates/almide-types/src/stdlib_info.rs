@@ -118,7 +118,7 @@ pub fn runtime_backed_type_owner(name: &str) -> Option<&'static str> {
 }
 
 /// The function that DISPLAYS a runtime-backed type (#4204):
-/// `<module>.__repr_<type_in_snake_case>` (`http.__repr_http_request`),
+/// `<module>.__<type_in_snake_case>_repr` (`http.__http_request_repr`),
 /// derived from the type's `RUNTIME_BACKED_TYPES` row. The owner module
 /// declares it beside the type's other operations; native implements it as the
 /// runtime's `AlmideRepr` impl, and a self-hosted rep (`HttpRequest` is a
@@ -137,7 +137,16 @@ pub fn runtime_backed_repr_surface(name: &str) -> Option<String> {
         }
         snake.push(c.to_ascii_lowercase());
     }
-    Some(format!("{owner}.__repr_{snake}"))
+    Some(format!("{owner}.__{snake}_repr"))
+}
+
+/// Is `module.func` the declared repr of one of `module`'s runtime-backed
+/// types ([`runtime_backed_repr_surface`])? A repr reads its value and builds
+/// text: it is pure whatever module declares it.
+pub fn is_runtime_backed_repr(module: &str, func: &str) -> bool {
+    RUNTIME_BACKED_TYPES.iter().any(|(m, ty)| {
+        *m == module && runtime_backed_repr_surface(ty).is_some_and(|s| s.split_once('.').map(|(_, f)| f) == Some(func))
+    })
 }
 
 /// Nominal type names a stdlib module OWNS, `(module, type name)`: the
