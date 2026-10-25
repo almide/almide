@@ -81,7 +81,7 @@ pub const ALMIDE_IO_READ_CHUNK_BYTES: i64 = 1 << 26;
 // real defect was only ever `n` too large to REPRESENT at the i32 host boundary
 // (i64::MAX truncated to -1 and read nothing), and the self-host twin now solves that
 // by looping over 2^26 chunks instead of asking the floor for the whole span at once.
-pub fn almide_rt_io_read_bytes(n: i64) -> Vec<u8> {
+pub fn almide_rt_io___read_stdin_bytes(n: i64) -> Vec<u8> {
     use std::io::Read;
     almide_stdout_flush();
     if n <= 0 { return Vec::new(); }
@@ -120,13 +120,13 @@ pub fn almide_rt_io_read_bytes(n: i64) -> Vec<u8> {
 // Byte writes share the buffer with `println` (#2245), so they interleave in
 // PROGRAM order without a flush per call (the C-162 fixture pins the order on
 // both legs); a terminal still sees each write as it happens.
-pub fn almide_rt_io_write(data: &Vec<u8>) {
+pub fn almide_rt_io___write_stdout(data: &Vec<u8>) {
     almide_stdout_write_bytes(data);
 }
 
 // stderr is unbuffered: stdout is flushed first so the two streams keep
 // program order on a terminal, as `eprintln` does.
-pub fn almide_rt_io_write_stderr(data: &Vec<u8>) {
+pub fn almide_rt_io___write_stderr(data: &Vec<u8>) {
     almide_stdout_flush();
     let _ = std::io::stderr().write_all(data);
 }

@@ -152,11 +152,11 @@ pub const HOST_OPS: &[HostOp] = &[
     op("io", "eprint", "almide_rt_io_eprint", OUT),
     // The streams' leaves under `io.write(io.stdout() | io.stderr(), b)` and
     // `io.read(io.stdin(), n)` (R-io-05).
-    op("io", "__write_stdout", "almide_rt_io_write", OUT),
-    op("io", "__write_stderr", "almide_rt_io_write_stderr", OUT),
+    op("io", "__write_stdout", "almide_rt_io___write_stdout", OUT),
+    op("io", "__write_stderr", "almide_rt_io___write_stderr", OUT),
     op("io", "read_line", "almide_rt_io_read_line", IN),
     op("io", "read_all", "almide_rt_io_read_all", IN),
-    op("io", "__read_stdin_bytes", "almide_rt_io_read_bytes", IN),
+    op("io", "__read_stdin_bytes", "almide_rt_io___read_stdin_bytes", IN),
     // ── fs: reads ──
     op("fs", "read_text", "almide_rt_fs_read_text", READ).result(),
     op("fs", "read_bytes", "almide_rt_fs_read_bytes", READ).result(),

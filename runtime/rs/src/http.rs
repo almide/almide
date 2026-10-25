@@ -41,7 +41,7 @@ impl AlmideHttpResponse {
     /// EXACTLY the caller's headers — no seeded `Content-Type` (#1352). Entries
     /// are upserted in map order, so the list carries at most one entry per
     /// case-insensitive field name. Delegates to the same helper the
-    /// `almide_rt_http_with_headers` intrinsic uses, so the struct API and the
+    /// `almide_rt_http___with_headers` intrinsic uses, so the struct API and the
     /// intrinsic cannot drift apart again — they used to disagree, this one
     /// REPLACING the header list while the intrinsic seeded-then-upserted.
     pub fn with_headers(status: i64, body: String, headers: &[(String, String)]) -> Self {
@@ -107,7 +107,7 @@ pub fn almide_rt_http_json(status: i64, body: &str) -> AlmideHttpResponse {
     AlmideHttpResponse::json(status, body.to_string())
 }
 
-pub fn almide_rt_http_with_headers(status: i64, body: &str, flat: &[AlmideString]) -> AlmideHttpResponse {
+pub fn almide_rt_http___with_headers(status: i64, body: &str, flat: &[AlmideString]) -> AlmideHttpResponse {
     AlmideHttpResponse::from_headers(status, body.to_string(), &header_pairs(flat))
 }
 
@@ -180,7 +180,7 @@ pub struct AlmideHttpRequest {
 /// `http.new_request` (#2588): a request built in code, so a handler or a
 /// router can be exercised without a socket. `target` is the request-target
 /// as it appears on the wire — path plus any `?query`.
-pub fn almide_rt_http_new_request(method: &str, target: &str, body: &str, flat: &[AlmideString]) -> AlmideHttpRequest {
+pub fn almide_rt_http___new_request(method: &str, target: &str, body: &str, flat: &[AlmideString]) -> AlmideHttpRequest {
     AlmideHttpRequest {
         method: method.to_string(),
         path: target.to_string(),
