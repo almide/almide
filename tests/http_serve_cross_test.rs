@@ -750,7 +750,33 @@ fn serve_to_file(wasm: bool, what: &str) -> Served {
 fn launch_to_file(what: &str) -> Served {
     let mut c = Command::new(almide_bin());
     c.arg("run").arg(shutdown_fixture()).arg("--");
+    // The launch a terminal makes: SIGINT at its default disposition. An
+    // ignored SIGINT is inherited across fork and exec, and `http.serve`
+    // keeps a signal it was started with ignored (a non-interactive `&`, a
+    // `nohup`) ignored — so a test process started with SIGINT ignored
+    // (#4213: under `cargo test` on a Linux CI runner) handed that to the
+    // server, and the group's Ctrl-C below was never seen.
+    // SAFETY: `signal` is async-signal-safe and touches no Rust state.
+    unsafe {
+        c.pre_exec(|| {
+            sig_default(SIGINT);
+            Ok(())
+        });
+    }
     serve_cmd_to_file(c, false, what)
+}
+
+const SIGINT: i32 = 2;
+
+/// Reset `sig` to its default disposition (`SIG_DFL` is 0 on every Unix).
+fn sig_default(sig: i32) {
+    unsafe extern "C" {
+        fn signal(sig: i32, handler: usize) -> usize;
+    }
+    // SAFETY: SIG_DFL is a valid disposition for every catchable signal.
+    unsafe {
+        signal(sig, 0);
+    }
 }
 
 fn serve_cmd_to_file(mut c: Command, wasm: bool, what: &str) -> Served {
