@@ -1,0 +1,16 @@
+import fs
+
+// The harness sandbox control (scripts/wasm-checked-alloc.sh): a program that
+// makes its own temp dir, as the corpus's fs fixtures do, must RUN under the
+// harness. Without a temp root the stock runtime refuses `fs.create_temp_dir`
+// in BOTH builds, the two refusals differ only in the random name, and every
+// fs fixture is a DIFF that checks nothing (#4224: since #4113 the temp dir
+// is an exclusive create that no longer makes a missing parent).
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("heapck")!
+  let p = dir + "/probe.txt"
+  fs.write(p, "temp root served")!
+  println(fs.read_text(p)!)
+  fs.remove(p)!
+  fs.remove(dir)!
+}
