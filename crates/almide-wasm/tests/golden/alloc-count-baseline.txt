@@ -29,6 +29,7 @@
 28	10	332	28	spec/wasm_cross/bang_in_record_literal_field.almd
 145	129	3433	145	spec/wasm_cross/base64_decode_canonical.almd
 187	162	1522	187	spec/wasm_cross/base64_encode.almd
+2902241	2892265	83048212	2902241	spec/wasm_cross/bigint_text_and_pow_limits.almd
 4	0	52	4	spec/wasm_cross/binary_operators.almd
 22	13	354	22	spec/wasm_cross/binary_search_duplicate_keys.almd
 0	0	0	0	spec/wasm_cross/binding_stmts.almd
@@ -340,7 +341,7 @@
 60	46	582	60	spec/wasm_cross/hof_closure_string_tail.almd
 64	48	651	64	spec/wasm_cross/hof_fn_value_callbacks.almd
 ~	spec/wasm_cross/host_floor_string_alloc.almd
-1037	993	7793	1037	spec/wasm_cross/http_query_params_decoder.almd
+1026	982	8169	1026	spec/wasm_cross/http_query_params_decoder.almd
 1423	1368	7022	1423	spec/wasm_cross/http_response_headers.almd
 0	0	0	0	spec/wasm_cross/i64_min_literal.almd
 0	0	0	0	spec/wasm_cross/if_block_forms.almd
@@ -465,6 +466,7 @@
 9060	9020	8165397	9060	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 18	10	164	18	spec/wasm_cross/list_product_overflow.almd
 36	21	250	36	spec/wasm_cross/list_push_on_record_field.almd
+118	88	2501	118	spec/wasm_cross/list_range_step_extremes.almd
 634	616	2955	634	spec/wasm_cross/list_reduce_fused_fold_release.almd
 7	0	68	7	spec/wasm_cross/list_remove_at_oob.almd
 4	1	2147483672	4	spec/wasm_cross/list_repeat_size_ceiling.almd
@@ -977,6 +979,8 @@
 429	371	74389	429	spec/wasm_cross/zlib_call_vs_user_namesake.almd
 18108	18064	1026953	18089	spec/wasm_cross/zlib_output_bound.almd
 4275	4208	342160	4275	spec/wasm_cross/zlib_selfhost.almd
+9	3	103	7	spec/wasm_fail/bigint_pow_ceiling_aborts.almd
+576365	575842	15507112	576362	spec/wasm_fail/bigint_to_string_limit_aborts.almd
 2	0	52	0	spec/wasm_fail/effect_err_aborts_both_legs.almd
 2	0	52	0	spec/wasm_fail/int_parse_err_propagates.almd
 9	3	112	5	spec/wasm_fail/matrix_concat_cols_rows_aborts.almd

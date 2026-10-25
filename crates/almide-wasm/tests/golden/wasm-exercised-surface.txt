@@ -29,6 +29,14 @@ call:base64.decode
 call:base64.decode_url
 call:base64.encode
 call:base64.encode_url
+call:bigint.__almd_mono4_from__Int
+call:bigint.abs
+call:bigint.bit_length
+call:bigint.parse
+call:bigint.parse_radix
+call:bigint.pow
+call:bigint.to_string
+call:bigint.to_string_radix
 call:bytes.__read_f16_le_array
 call:bytes.__read_f32_be
 call:bytes.__read_f32_le
@@ -469,6 +477,7 @@ call:list.min
 call:list.pop
 call:list.push
 call:list.range
+call:list.range_step
 call:list.reduce
 call:list.remove_at
 call:list.repeat

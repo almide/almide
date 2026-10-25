@@ -29,6 +29,7 @@
 5727	spec/wasm_cross/bang_in_record_literal_field.almd
 5108	spec/wasm_cross/base64_decode_canonical.almd
 3313	spec/wasm_cross/base64_encode.almd
+14977	spec/wasm_cross/bigint_text_and_pow_limits.almd
 5362	spec/wasm_cross/binary_operators.almd
 4057	spec/wasm_cross/binary_search_duplicate_keys.almd
 1114	spec/wasm_cross/binding_stmts.almd
@@ -340,7 +341,7 @@
 2979	spec/wasm_cross/hof_closure_string_tail.almd
 28188	spec/wasm_cross/hof_fn_value_callbacks.almd
 4862	spec/wasm_cross/host_floor_string_alloc.almd
-14015	spec/wasm_cross/http_query_params_decoder.almd
+14311	spec/wasm_cross/http_query_params_decoder.almd
 13812	spec/wasm_cross/http_response_headers.almd
 743	spec/wasm_cross/i64_min_literal.almd
 1226	spec/wasm_cross/if_block_forms.almd
@@ -465,6 +466,7 @@
 10282	spec/wasm_cross/list_pop_map_insert_on_record_field.almd
 2482	spec/wasm_cross/list_product_overflow.almd
 7266	spec/wasm_cross/list_push_on_record_field.almd
+3467	spec/wasm_cross/list_range_step_extremes.almd
 26082	spec/wasm_cross/list_reduce_fused_fold_release.almd
 2218	spec/wasm_cross/list_remove_at_oob.almd
 2179	spec/wasm_cross/list_repeat_size_ceiling.almd
@@ -977,6 +979,8 @@
 25443	spec/wasm_cross/zlib_call_vs_user_namesake.almd
 20935	spec/wasm_cross/zlib_output_bound.almd
 26583	spec/wasm_cross/zlib_selfhost.almd
+9073	spec/wasm_fail/bigint_pow_ceiling_aborts.almd
+12795	spec/wasm_fail/bigint_to_string_limit_aborts.almd
 3329	spec/wasm_fail/effect_err_aborts_both_legs.almd
 3494	spec/wasm_fail/int_parse_err_propagates.almd
 3230	spec/wasm_fail/matrix_concat_cols_rows_aborts.almd
