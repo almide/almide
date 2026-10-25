@@ -634,6 +634,7 @@ fn build_helper_body(
             cells: &empty_cells,
             tomb_vars: &empty_cells,
             raw_map_read: false,
+            tomb_tail: Default::default(),
             moves: Default::default(),
             region_repair: None,
             loop_ctl: None,

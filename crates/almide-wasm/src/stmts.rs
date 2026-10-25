@@ -695,7 +695,8 @@ impl Emitter<'_> {
                 // retired (stage 2c-ii: records made the mut_port cell hit it).
                 // #3406: `var` dies at a consuming rhs over it (dying_move.rs).
                 self.note_dying(value, Some(*var), true);
-                self.lower(value, Some(declared))?;
+                // #4208: a tail `map.remove(var, k)` of a tombstone var holes
+                self.with_tomb_tail(*var, value, |em| em.lower(value, Some(declared)))?;
                 self.note_dying(value, Some(*var), false);
                 // RC-5: same share discipline as Bind — except a MOVED
                 // temp (#3104), whose one credit becomes the var's.
