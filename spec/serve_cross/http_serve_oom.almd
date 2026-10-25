@@ -1,0 +1,36 @@
+// @contract: C-434
+// A SERVER fixture for running out of memory inside an `http.serve` handler
+// (row 1 of almide/almide's security table): no generic runner executes it.
+// The driver (tests/http_serve_cross_test.rs in almide/almide) starts it
+// natively under a 1 GiB address-space limit and on the embedded lane (4 GiB),
+// waits for the "ready" line on stderr, and sends POST bodies. A 1-byte body
+// is served (`val=20`); a 5-byte body indexes the 3-element list out of
+// bounds, an abort that is contained (the fixed 500). `O` builds three lists
+// of 200 000 000 Ints (1.6 GB each), so an allocation is refused on both legs.
+// Out of memory is never contained: the run ends with `Error: out of memory`
+// and exit 1, as it would outside a handler, and `O` gets no answer. Each leg
+// must answer the same.
+// Usage: almide run http_serve_oom.almd [--target wasm] -- <port>
+import env
+import http
+
+effect fn handle(req: HttpRequest) -> HttpResponse = {
+  let body = http.req_body(req)
+  let xs = [10, 20, 30]
+  match body {
+    "O" => {
+      let a = list.range(0, 200000000)
+      let b = list.range(1, 200000001)
+      let c = list.range(2, 200000002)
+      let all = [a, b, c]
+      http.response(200, "built ${list.len(all)} ${all[2][5]}")
+    },
+    _ => http.response(200, "val=" + int.to_string(xs[string.len(body)])),
+  }
+}
+
+effect fn main() -> Unit = {
+  let port = env.args() |> list.get(0) ?? "0"
+  eprintln("ready")
+  http.serve(int.parse(port) ?? 0, (req) => handle(req)!)!
+}
