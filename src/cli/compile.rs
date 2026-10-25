@@ -93,6 +93,12 @@ fn resolve_module_name(module: Option<&str>) -> String {
     } else {
         // Project mode: use package name from almide.toml or directory name
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
+            // The name becomes `target/compile/<name>.almdi` and the read
+            // path `src/<name>.almd`: only a plain name may (#4193).
+            if let Err(e) = project::check_plain_name(&proj.package.name) {
+                eprintln!("error: refusing almide.toml's [package] name as a module file name: {e}");
+                std::process::exit(1);
+            }
             proj.package.name.clone()
         } else {
             std::env::current_dir()

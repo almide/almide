@@ -258,13 +258,7 @@ fn resolve_source(
 /// joined onto the bin dir, so a `/`, `\\`, `..` or an absolute path would
 /// put the file somewhere else.
 fn check_bin_name(name: &str) -> Result<(), String> {
-    let mut chars = name.chars();
-    let first_ok = chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
-    if first_ok && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        Ok(())
-    } else {
-        Err(format!("`{name}` is not a plain name (letters, digits and `_`, not starting with a digit)"))
-    }
+    crate::project::check_plain_name(name)
 }
 
 /// The record of what `almide install` put in a bin dir (#4183), one name
