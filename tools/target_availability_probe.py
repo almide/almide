@@ -65,8 +65,9 @@ EXPLICIT_IMPORT = {
     "path", "html", "duration", "net", "zlib", "unix", "uuid",
 }
 # docs/stdlib pages that document CHECKER surface (clock constructors), not
-# a module interface — tools/gen-stdlib-doc-index.py's own exclusion.
-DOC_EXCLUDED = {"compute", "duration"}
+# a module interface — tools/gen-stdlib-doc-index.py's own exclusion — and the
+# generated index page README.md.
+DOC_EXCLUDED = {"compute", "duration", "README"}
 # Registered modules with no public page by design: the v1 primitive floor.
 INTERNAL_MODULES = {"prim"}
 

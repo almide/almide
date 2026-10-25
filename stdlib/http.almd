@@ -45,11 +45,10 @@ fn response(status: Int, body: String) -> HttpResponse = _
 fn json(status: Int, body: String) -> HttpResponse = _
 
 /// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
-fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = http.__with_headers(
-  status,
-  body,
-  __flat(headers),
-)
+fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = {
+  let flat = __flat(headers)
+  http.__with_headers(status, body, flat)
+}
 
 @intrinsic("almide_rt_http___with_headers")
 @borrow_ref(flat)
@@ -244,12 +243,12 @@ effect fn get_bytes(url: String) -> Result[Bytes, String] = _
 
 /// Raw body bytes for any method and headers.
 @category("Net.fetch")
-effect fn request_bytes(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[Bytes, String] = http.__request_bytes(
+effect fn request_bytes(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[Bytes, String] = ok(http.__request_bytes(
   method,
   url,
   body,
   __flat(headers),
-)
+)!)
 
 @intrinsic("almide_http_request_bytes")
 @borrow_ref(flat)
@@ -332,12 +331,10 @@ type HttpMiddleware = (HttpHandler) -> HttpHandler
 type HttpRoute = { method: String, pattern: String, segments: List[String], handler: HttpHandler }
 
 /// Request built in code; target keeps its ?query (a full URL for send / start).
-fn new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest = http.__new_request(
-  method,
-  target,
-  body,
-  __flat(headers),
-)
+fn new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest = {
+  let flat = __flat(headers)
+  http.__new_request(method, target, body, flat)
+}
 
 @intrinsic("almide_rt_http___new_request")
 @borrow_ref(flat)
