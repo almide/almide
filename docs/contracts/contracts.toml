@@ -5364,3 +5364,14 @@ evidence  = [
   { path = "spec/serve_cross/http_serve_replay.almd", class = "fixture" },
   { path = "tests/http_serve_cross_test.rs", name = "http_serve_answers_the_same_status_headers_and_body_on_native_and_the_embedded_lane", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-433"
+spec      = "ALS-D1"
+title     = "json.set_path refuses to build a value nested deeper than json.parse accepts, with parse's err text, on every leg"
+statement = "ALS-D1 (almide/almide#4209): the value `json.set_path(j, path, v)` builds nests the path's steps plus `v`'s own container nesting (a scalar is 0, an array or object one more than its deepest element or entry value, an empty one 1). When that sum passes 1000 — the bound `json.parse` holds (ALS-T3, C-391) — the answer is `err(\"json: nesting deeper than 1000\")`, parse's own text, on every leg; at 1000 or below it is `ok` as before (C-031). Every step counts, an index step that leaves the node unchanged included, so the check needs neither `j` nor a walk of the path: a path of 1000 steps over a scalar is ok, 1001 steps is err, 1000 steps over an empty array or object is err, `v` nested 501 deep under 500 steps is err whichever entry of an object holds the deep part. Before, set_path had no bound: a dotted key expanded into a path built a value 40000 deep, which `json.parse` then refused and whose every recursive walk (stringify, `==`, the drop, set_path itself) ran out of stack — `Error: stack overflow` natively, `call stack exhausted` on a stock wasm runtime past about 5000. The bound is the one JSON value domain bound however a value is made by the fallible JSON functions; `value.array` / `value.object` take no err and are outside this contract."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/json_set_path_depth_bound.almd", class = "fixture" },
+]
