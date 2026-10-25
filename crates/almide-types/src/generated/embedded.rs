@@ -15133,7 +15133,7 @@ fn index(path: JsonPath, i: Int) -> JsonPath = _
 @borrow_ref(path)
 fn get_path(j: Value, path: JsonPath) -> Value? = _
 
-/// j with value at path; missing keys created.
+/// j with value at path; missing keys created; err if nested past 1000.
 @intrinsic("almide_json_set_path")
 @borrow_ref(path)
 @consume(value)
@@ -15257,6 +15257,13 @@ pub const SRC_JSON_PARSE: &str = r#"
 
 
 
+
+
+
+fn __json_max_depth() -> Int = 1000
+
+fn __json_depth_error() -> String = "json: nesting deeper than ${int.to_string(__json_max_depth())}"
+
 fn json_parse(text: String) -> Result[Value, String] = {
   let h = prim.handle(text)
   let blen = prim.load32(h + 4)
@@ -15329,7 +15336,7 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
         ok((value.str(s), np))
       },
       err(e) => err(e),
-    } else if (b == 123 or b == 91) and depth >= 1000 then err("json: nesting deeper than 1000")
+    } else if (b == 123 or b == 91) and depth >= __json_max_depth() then err(__json_depth_error())
     else if b == 123 then {
       let q2 = __jp_ws(base, len, q + 1)
       if q2 < len and prim.load8(base + q2) == 125 then {
@@ -15825,12 +15832,35 @@ else {
   else __jp_has(j, key, i + 1, n)
 }
 
-fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = ok(json_path_set_go(
-  j,
-  path,
-  0,
-  nv,
-))
+
+
+
+
+
+fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = {
+  let steps = list.len(path)
+  if steps > __json_max_depth() or __json_nests_past(nv, __json_max_depth() - steps) then err(__json_depth_error())
+  else ok(json_path_set_go(j, path, 0, nv))
+}
+
+
+
+fn __json_nests_past(v: Value, budget: Int) -> Bool = {
+  let tag = prim.load32(prim.handle(v) + 4)
+  if tag != 5 and tag != 6 then false
+  else if budget == 0 then true
+  else if tag == 5 then __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8), 1)
+  else __jnp_items(v, budget - 1, 0, prim.load32(prim.handle(v) + 8) / 2, 2)
+}
+
+
+
+fn __jnp_items(v: Value, budget: Int, i: Int, n: Int, stride: Int) -> Bool = if i >= n then false
+else {
+  let ev: Value = prim.load_handle(prim.handle(v) + 12 + (i * stride + stride - 1) * 8)
+  if __json_nests_past(ev, budget) then true
+  else __jnp_items(v, budget, i + 1, n, stride)
+}
 
 fn json_path_set_go(j: Value, path: List[String], k: Int, nv: Value) -> Value =
   if k >= list.len(path) then nv
