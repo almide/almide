@@ -340,7 +340,7 @@
 66480	spec/wasm_cross/hof_closure_string_tail.almd
 86768	spec/wasm_cross/hof_fn_value_callbacks.almd
 ~	spec/wasm_cross/host_floor_string_alloc.almd
-68000	spec/wasm_cross/http_query_params_decoder.almd
+68032	spec/wasm_cross/http_query_params_decoder.almd
 67568	spec/wasm_cross/http_response_headers.almd
 65648	spec/wasm_cross/i64_min_literal.almd
 65776	spec/wasm_cross/if_block_forms.almd
