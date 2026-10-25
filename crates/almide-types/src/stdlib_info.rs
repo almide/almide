@@ -606,7 +606,11 @@ pub fn is_ordered_stdlib_fn(module: &str, func: &str) -> bool {
 /// True if the runtime symbol (`almide_rt_env___set`) is the intrinsic of an
 /// `@ordered` stdlib fn — the shape a lowered stdlib call has in codegen.
 pub fn is_ordered_runtime_symbol(symbol: &str) -> bool {
-    ordered_stdlib_fns().iter().any(|(_, _, i)| i.as_deref() == Some(symbol))
+    // An intrinsic answers by its symbol; a bodied stdlib fn (`env.set` over
+    // `__set`, #4200) by the `almide_rt_<module>_<fn>` name codegen gives it.
+    ordered_stdlib_fns()
+        .iter()
+        .any(|(m, f, i)| i.as_deref() == Some(symbol) || (i.is_none() && symbol == format!("almide_rt_{m}_{f}")))
 }
 
 #[cfg(test)]
@@ -619,13 +623,14 @@ mod ordered_tests {
         assert!(super::is_ordered_stdlib_fn("io", "read_line"));
         assert!(super::is_ordered_stdlib_fn("process", "spawn"));
         assert!(super::is_ordered_runtime_symbol("almide_rt_env___set"));
+        assert!(super::is_ordered_runtime_symbol("almide_rt_env_set"), "env.set's bodied wrapper");
         assert!(super::is_ordered_runtime_symbol("almide_rt_process_spawn"));
         // reads, output and the clock are not ordered (D3)
         assert!(!super::is_ordered_stdlib_fn("env", "get"));
         assert!(!super::is_ordered_stdlib_fn("fs", "read_text"));
         assert!(!super::is_ordered_stdlib_fn("io", "print"));
         assert!(!super::is_ordered_runtime_symbol("almide_rt_env_get"));
-        assert_eq!(t.len(), 30, "{t:?}");
+        assert_eq!(t.len(), 31, "{t:?}");
     }
 
     #[test]
