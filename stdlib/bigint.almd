@@ -16,11 +16,12 @@
 type BigInt: Numeric, Integer = { neg: Bool, limbs: List[Int] }
 
 // ── text (R-bigint-01) ──
-/// BigInt from trimmed decimal s with an optional + or -; err on junk.
+/// BigInt from trimmed decimal s with an optional + or -; err on junk or more than 4300 digits.
 fn parse(s: String) -> Result[BigInt, String] = parse_radix(s, 10)
 
 /// BigInt from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
-/// err on junk; radix outside 2..36 aborts.
+/// err on junk, and on more than 4300 digits in a radix that is not a power of two;
+/// radix outside 2..36 aborts.
 fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
   check_radix(radix)
   let bytes = string.to_bytes(string.trim(s))
@@ -32,20 +33,47 @@ fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
   }
 }
 
-/// Decimal digits, with - when negative.
+/// Decimal digits, with - when negative; more than 4300 digits aborts.
 fn to_string(x: BigInt) -> String = to_string_radix(x, 10)
 
-/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+/// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts, and so does
+/// a radix that is not a power of two when the text would pass 4300 digits.
 fn to_string_radix(x: BigInt, radix: Int) -> String = {
   check_radix(radix)
   let k = chunk_width(radix, 1, radix)
-  let chunks = radix_chunks(x.limbs, int.pow(radix, k), [])
-  let text = match chunks {
-    [] => "0",
-    [top, ..rest] => int.to_string_radix(top, radix) + (rest |> list.map((c) => string.pad_start(int.to_string_radix(c, radix), k, "0")) |> string.join("")),
+  let text = if is_pow2(radix) then chunk_text(
+    pow2_chunks(x.limbs, k * radix_bits(radix)),
+    radix,
+    k,
+  )
+  else {
+    // A magnitude of at least 2^(limit * bit_length(radix)) has more than `limit` digits, so
+    // it is refused before any division; below that the text is at most 1.3 * limit digits
+    // long, and its exact length decides.
+    if bit_length(x) > text_digit_limit() * int.bit_length(radix) then panic(text_limit_error())
+    else ()
+    let t = chunk_text(radix_chunks(x.limbs, int.pow(radix, k), []), radix, k)
+    if string.len(t) > text_digit_limit() then panic(text_limit_error()) else t
   }
   if x.neg then "-" + text else text
 }
+
+// The chunks of k digits each, most significant first, as one text.
+local fn chunk_text(chunks: List[Int], radix: Int, k: Int) -> String = match chunks {
+  [] => "0",
+  [top, ..rest] => int.to_string_radix(top, radix) + (rest |> list.map((c) => string.pad_start(int.to_string_radix(c, radix), k, "0")) |> string.join("")),
+}
+
+// ── the conversion limits (#4196) ──
+// Decimal (any radix that is not a power of two) text costs time quadratic in its length
+// on both sides, so it is limited to 4300 digits, Python's default limit
+// (CVE-2020-10735). A power-of-two radix converts in linear time and has no limit.
+local fn text_digit_limit() -> Int = 4300
+
+local fn text_limit_error() -> String = "integer string conversion exceeds the limit of 4300 digits"
+
+// 30 * 2^28: 2^28 limbs, the list ceiling `bshl` meets in `list.repeat` (2^31 bytes).
+local fn pow_bit_ceiling() -> Int = 8053063680
 
 // ── Integer: order, sign, division, power (R-bigint-01, R-bigint-05) ──
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -92,9 +120,14 @@ fn modulo(a: BigInt, b: BigInt) -> BigInt = {
   if list.is_empty(r.limbs) or a.neg == b.neg then r else add(r, b)
 }
 
-/// base raised to exp; exp < 0 aborts.
+/// base raised to exp; exp < 0 aborts, and so does a result sure to pass 30 * 2^28 bits.
 fn pow(base: BigInt, exp: Int) -> BigInt = if exp < 0 then panic("negative exponent")
+else if pow_too_large(bit_length(base) - 1, exp) then panic("pow result too large")
 else power(base, exp, small(1))
+
+// |base| >= 2^k makes base^exp at least 2^(k * exp): refused once k * exp reaches the
+// ceiling, computed without the product that overflows. 0, 1 and -1 (k <= 0) never are.
+local fn pow_too_large(k: Int, exp: Int) -> Bool = k > 0 and exp > (pow_bit_ceiling() - 1) / k
 
 /// Bits needed to hold the magnitude of x; 0 for 0.
 fn bit_length(x: BigInt) -> Int = match list.len(x.limbs) {
@@ -370,6 +403,11 @@ else 99
 local fn read_digits(digits: List[Int], radix: Int, neg: Bool) -> Result[BigInt, String] =
   if list.is_empty(digits) then err("invalid digit found in string")
   else if list.any(digits, (b) => digit_value(b) >= radix) then err("invalid digit found in string")
+  else if is_pow2(radix) then ok(make(
+    neg,
+    pow2_limbs(digits, radix_bits(radix), list.len(digits) - 1, 0, 0, []),
+  ))
+  else if list.len(digits) > text_digit_limit() then err(text_limit_error())
   else {
     let k = chunk_width(radix, 1, radix)
     ok(make(
@@ -389,6 +427,41 @@ local fn chunk_value(chunk: List[Int], radix: Int) -> List[Int] = {
   if v == 0 then []
   else [v]
 }
+
+// ── power-of-two radix text: bits moved straight between digits and limbs, linear time ──
+local fn is_pow2(radix: Int) -> Bool = int.band(radix, radix - 1) == 0
+
+// Bits per digit of a power-of-two radix.
+local fn radix_bits(radix: Int) -> Int = int.bit_length(radix) - 1
+
+// The limbs of the digits, read from the last (least significant) digit at index i
+// upward; cur holds the nbits < 30 bits not yet in a limb.
+local fn pow2_limbs(digits: List[Int], s: Int, i: Int, cur: Int, nbits: Int, acc: List[Int]) -> List[Int] =
+  if i < 0 then acc + [cur]
+  else {
+    let v = int.bor(cur, int.bshl(digit_value(limb(digits, i)), nbits))
+    if nbits + s >= 30 then pow2_limbs(
+      digits,
+      s,
+      i - 1,
+      int.bshr(v, 30),
+      nbits + s - 30,
+      acc + [int.band(v, limb_mask())],
+    )
+    else pow2_limbs(digits, s, i - 1, v, nbits + s, acc)
+  }
+
+// The magnitude in chunks of w <= 30 bits, most significant first.
+local fn pow2_chunks(l: List[Int], w: Int) -> List[Int] = {
+  let n = (30 * list.len(l) + w - 1) / w
+  list.range(0, n) |> list.map((j) => bit_field(l, (n - 1 - j) * w, w)) |> list.drop_while((c) => c == 0)
+}
+
+// The w <= 30 bits of the magnitude starting at bit p.
+local fn bit_field(l: List[Int], p: Int, w: Int) -> Int = int.band(
+  int.bor(int.bshr(limb(l, p / 30), p % 30), int.bshl(limb(l, p / 30 + 1), 30 - p % 30)),
+  int.bshl(1, w) - 1,
+)
 
 // ── The `from` family (R-L0-40): BigInt from any number. The source is any
 //    `Numeric` type; the body reads the source through the protocol's
