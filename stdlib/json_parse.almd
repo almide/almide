@@ -39,7 +39,9 @@
 // shared with json.set_path's bound (#4209, stdlib/json_path.almd).
 fn __json_max_depth() -> Int = 1000
 
-fn __json_depth_error() -> String = "json: nesting deeper than ${int.to_string(__json_max_depth())}"
+// The err text, spelled out (a runtime int.to_string costs every JSON
+// program its formatting code); the test pins it to json_depth_error().
+fn __json_depth_error() -> String = "json: nesting deeper than 1000"
 
 fn json_parse(text: String) -> Result[Value, String] = {
   let h = prim.handle(text)
