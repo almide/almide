@@ -41,6 +41,10 @@
 // `mod almide_sfs` is the facade both consumers name.
 
 include!("fs_scope.rs");
+// The bounded, regular-file-only whole-file read (#4201) `almide_sfs::read_bounded`
+// makes, shared with almide-base (whose fs_errno spells its texts for the wasm
+// renderers).
+include!("../../almide-base/src/fs_read_bounded.rs");
 
 /// The marker a scoped call's refusal carries in its io error text. Each
 /// consumer replaces any error holding it with [`fs_scope_refusal`] of the
@@ -601,6 +605,39 @@ pub mod almide_sfs {
         let mut out = String::new();
         std::io::Read::read_to_string(&mut File::open(p)?, &mut out)?;
         Ok(out)
+    }
+
+    /// The whole-file read the `fs.read_*` family makes (#4201): a regular
+    /// file only (a device, FIFO or socket errs `Not a regular file`, a
+    /// directory its read's EISDIR), at most `FS_READ_MAX_BYTES`. The entry is
+    /// opened O_NONBLOCK and judged by its descriptor's fstat; scoped, the
+    /// open is the scope's no-follow descriptor walk.
+    pub fn read_bounded<P: AsRef<std::path::Path>>(p: P) -> std::io::Result<Vec<u8>> {
+        match scope() {
+            None => super::fs_read_bounded_path(p.as_ref(), super::FS_READ_MAX_BYTES),
+            Some(sc) => super::fs_read_bounded_file(&mut open_bounded(&sc, p.as_ref())?, super::FS_READ_MAX_BYTES),
+        }
+    }
+
+    /// [`read_bounded`] as UTF-8 text (`read_to_string`'s invalid-UTF-8 error).
+    pub fn read_to_string_bounded<P: AsRef<std::path::Path>>(p: P) -> std::io::Result<String> {
+        read_bounded(p).and_then(super::fs_read_bounded_text)
+    }
+
+    /// The scoped read-only open the bounded reader makes: `Meta` is the
+    /// O_NONBLOCK read-only open of the last segment, never through a link.
+    #[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
+    fn open_bounded(sc: &Scoped, p: &std::path::Path) -> std::io::Result<std::fs::File> {
+        sc.open(&s(p), super::almide_fs_beneath_sys::Open::Meta)
+    }
+
+    #[cfg(not(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64")))]
+    fn open_bounded(sc: &Scoped, p: &std::path::Path) -> std::io::Result<std::fs::File> {
+        let mut o = std::fs::OpenOptions::new();
+        o.read(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::custom_flags(&mut o, super::FS_READ_O_NONBLOCK);
+        sc.open_with(&s(p), &o)
     }
 
     pub fn write<P: AsRef<std::path::Path>, C: AsRef<[u8]>>(p: P, data: C) -> std::io::Result<()> {

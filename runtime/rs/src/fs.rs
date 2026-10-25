@@ -87,10 +87,14 @@ impl AlmideRepr for AlmideFileStat {
     }
 }
 
-// Read
-pub fn almide_rt_fs_read_text(path: &str) -> Result<AlmideString, AlmideString> { let __almide_v: Result<String, AlmideString> = { let __almide_r: Result<String, String> = (|| { std::fs::read_to_string(path).map_err(|e| io_err("fs.read_text", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }; __almide_v.into_almide() }
-pub fn almide_rt_fs_read_bytes(path: &str) -> Result<Vec<i64>, AlmideString> { let __almide_r: Result<Vec<i64>, String> = (|| { std::fs::read(path).map(|b| b.into_iter().map(|x| x as i64).collect()).map_err(|e| io_err("fs.read_bytes", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
-pub fn almide_rt_fs_read_lines(path: &str) -> Result<Vec<AlmideString>, AlmideString> { let __almide_v: Result<Vec<String>, AlmideString> = { let __almide_r: Result<Vec<String>, String> = (|| { std::fs::read_to_string(path).map(|s| s.lines().map(|l| l.to_string()).collect()).map_err(|e| io_err("fs.read_lines", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }; __almide_v.into_almide() }
+// Read. Every whole-file reader is `almide_sfs::read_bounded` (#4201,
+// almide-base fs_read_bounded.rs): a regular file only — `/dev/zero`, a FIFO
+// or a socket errs `Not a regular file`, never blocks or streams forever —
+// and at most FS_READ_MAX_BYTES (1 GiB) of it. The same reader serves the
+// embedded wasm host and, under `[permissions] fs`, opens beneath the grant.
+pub fn almide_rt_fs_read_text(path: &str) -> Result<AlmideString, AlmideString> { let __almide_v: Result<String, AlmideString> = { let __almide_r: Result<String, String> = (|| { almide_sfs::read_to_string_bounded(path).map_err(|e| io_err("fs.read_text", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }; __almide_v.into_almide() }
+pub fn almide_rt_fs_read_bytes(path: &str) -> Result<Vec<i64>, AlmideString> { let __almide_r: Result<Vec<i64>, String> = (|| { almide_sfs::read_bounded(path).map(|b| b.into_iter().map(|x| x as i64).collect()).map_err(|e| io_err("fs.read_bytes", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_fs_read_lines(path: &str) -> Result<Vec<AlmideString>, AlmideString> { let __almide_v: Result<Vec<String>, AlmideString> = { let __almide_r: Result<Vec<String>, String> = (|| { almide_sfs::read_to_string_bounded(path).map(|s| s.lines().map(|l| l.to_string()).collect()).map_err(|e| io_err("fs.read_lines", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }; __almide_v.into_almide() }
 
 // Streaming line readers: fold/each over a BufReader, never materializing the
 // file — peak memory is O(longest line), not O(file). Line semantics MUST
@@ -363,7 +367,7 @@ pub fn almide_rt_fs_for_each_line_effect(path: &str, f: std::rc::Rc<dyn Fn(Almid
 pub fn almide_rt_fs_read_text_if_exists(path: &str) -> Result<Option<AlmideString>, AlmideString> {
     let __almide_v: Result<Option<String>, AlmideString> = {
         let __almide_r: Result<Option<String>, String> = (|| {
-            match std::fs::read_to_string(path) {
+            match almide_sfs::read_to_string_bounded(path) {
                 Ok(s) => Ok(Some(s)),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
                 Err(e) => Err(io_err("fs.read_text_if_exists", &fs_q(path), e)),
@@ -375,7 +379,7 @@ pub fn almide_rt_fs_read_text_if_exists(path: &str) -> Result<Option<AlmideStrin
 }
 pub fn almide_rt_fs_read_bytes_if_exists(path: &str) -> Result<Option<Vec<i64>>, AlmideString> {
     let __almide_r: Result<Option<Vec<i64>>, String> = (|| {
-        match std::fs::read(path) {
+        match almide_sfs::read_bounded(path) {
             Ok(b) => Ok(Some(b.into_iter().map(|x| x as i64).collect())),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(io_err("fs.read_bytes_if_exists", &fs_q(path), e)),
@@ -386,7 +390,7 @@ pub fn almide_rt_fs_read_bytes_if_exists(path: &str) -> Result<Option<Vec<i64>>,
 pub fn almide_rt_fs_read_lines_if_exists(path: &str) -> Result<Option<Vec<AlmideString>>, AlmideString> {
     let __almide_v: Result<Option<Vec<String>>, AlmideString> = {
         let __almide_r: Result<Option<Vec<String>>, String> = (|| {
-            match std::fs::read_to_string(path) {
+            match almide_sfs::read_to_string_bounded(path) {
                 Ok(s) => Ok(Some(s.lines().map(|l| l.to_string()).collect())),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
                 Err(e) => Err(io_err("fs.read_lines_if_exists", &fs_q(path), e)),
@@ -398,7 +402,7 @@ pub fn almide_rt_fs_read_lines_if_exists(path: &str) -> Result<Option<Vec<Almide
 }
 pub fn almide_rt_fs_read_bytes_raw_if_exists(path: &str) -> Result<Option<Vec<u8>>, AlmideString> {
     let __almide_r: Result<Option<Vec<u8>>, String> = (|| {
-        match std::fs::read(path) {
+        match almide_sfs::read_bounded(path) {
             Ok(b) => Ok(Some(b)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(io_err("fs.read_bytes_raw_if_exists", &fs_q(path), e)),
@@ -650,6 +654,6 @@ fn glob_star_match(pat: &str, seg: &str) -> bool {
     true
 }
 
-pub fn almide_rt_fs_read_bytes_raw(path: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { std::fs::read(path).map_err(|e| io_err("fs.read_bytes_raw", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
+pub fn almide_rt_fs_read_bytes_raw(path: &str) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| { almide_sfs::read_bounded(path).map_err(|e| io_err("fs.read_bytes_raw", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
 
 pub fn almide_rt_fs_write_bytes_raw(path: &str, data: &Vec<u8>) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::write(path, data).map_err(|e| io_err("fs.write_bytes_raw", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }

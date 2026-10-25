@@ -195,7 +195,7 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
         // raw-BYTES reader, and routing them there fed the guest bytes where it
         // decodes length-prefixed frames — `fs.fold_lines` then summed an empty
         // walk and answered 0 instead of 6, silently.
-        12 => match sfs::read_to_string(a) {
+        12 => match sfs::read_to_string_bounded(a) {
             Ok(t) => {
                 let lines: Vec<String> = t.lines().map(str::to_string).collect();
                 let buf = frames(&lines);
@@ -210,12 +210,12 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
         // Absence is the READ's own NotFound, as native classifies it
         // (C-215): an `exists` pre-check read a symlink loop (ELOOP) or a
         // file parent (ENOTDIR) as absent where native errs (#4154).
-        13 => match sfs::read_to_string(a) {
+        13 => match sfs::read_to_string_bounded(a) {
             Ok(t) => ok_text(t),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (pack(2, 0), Vec::new()),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
-        _ => match sfs::read(a) {
+        _ => match sfs::read_bounded(a) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
@@ -242,7 +242,7 @@ fn fs_dispatch_meta(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         24 => fs_read_lines(a),
         // 64 is `read_bytes_raw_if_exists`: op 25's body under its own name
         // (#2890).
-        25 | 64 => match sfs::read(a) {
+        25 | 64 => match sfs::read_bounded(a) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (pack(2, 0), Vec::new()),
             Err(e) => fs_err(io_err(fs_op_name(op), &q(a), e)),
@@ -322,7 +322,7 @@ fn fs_stat(op: i32, a: &str) -> (i64, Vec<u8>) {
 
 /// op 24: read a text file as framed lines (none-class on NotFound).
 fn fs_read_lines(path: &str) -> (i64, Vec<u8>) {
-    match sfs::read_to_string(path) {
+    match sfs::read_to_string_bounded(path) {
         Ok(t) => {
             let lines: Vec<String> = t.lines().map(str::to_string).collect();
             let buf = frames(&lines);
@@ -669,7 +669,7 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
     match op {
-        1 => match sfs::read_to_string(a) {
+        1 => match sfs::read_to_string_bounded(a) {
             Ok(t) => ok_text(t),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
