@@ -49,7 +49,10 @@ effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = ok
 effect fn shm_create(size: Int) -> Result[Fd, String] = ok(Fd(unix.__os_shm_create(size)!))
 
 /// Grows or shrinks the file fd to size bytes.
-effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = unix.__os_shm_resize(__raw(fd), size)
+effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = unix.__os_shm_resize(
+  __raw(fd),
+  size,
+)
 
 /// Writes data into fd at offset; a negative offset or a write past the end aborts (shm_resize first).
 effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = match unix.__os_shm_write(
@@ -72,7 +75,11 @@ effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = uni
 // One read of at most max bytes (65536 at most per read): empty once the peer closed.
 effect fn __fd_read(h: Fd, max: Int) -> Result[Bytes, String] = unix.__os_recv(__raw(h), max)
 
-effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = unix.__os_send(__raw(h), data, [])
+effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = unix.__os_send(
+  __raw(h),
+  data,
+  [],
+)
 
 effect fn __fd_close(h: Fd) -> Result[Unit, String] = unix.__os_close(__raw(h))
 
