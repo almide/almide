@@ -21,6 +21,9 @@ include!("net_error_core.rs");
 pub struct AlmideNetTables {
     streams: Vec<Option<std::net::TcpStream>>,
     listeners: Vec<Option<std::net::TcpListener>>,
+    /// While an `http.serve` handler runs (#4203): every handle it opened,
+    /// `(is_listener, slot)`, so an abort that fails the request closes them.
+    request: Option<Vec<(bool, usize)>>,
 }
 
 fn almide_net_slot<T>(v: &mut Vec<Option<T>>, x: T) -> i64 {
@@ -88,14 +91,49 @@ impl AlmideNetTables {
         almide_net_get(&mut self.listeners, "TcpListener", h)
     }
 
+    /// A handler call starts (#4203): record what it opens from here on.
+    pub fn request_begin(&mut self) {
+        self.request = Some(Vec::new());
+    }
+
+    /// The handler returned: stop recording.
+    pub fn request_end(&mut self) {
+        self.request = None;
+    }
+
+    /// The handler aborted (#4203): close every handle it opened and has not
+    /// closed, as native unwinding would drop a value that owned it, and stop
+    /// recording. Answers how many it closed.
+    pub fn request_abort(&mut self) -> usize {
+        let mut n = 0;
+        for (listener, i) in self.request.take().unwrap_or_default() {
+            let closed = if listener {
+                self.listeners.get_mut(i).and_then(Option::take).is_some()
+            } else {
+                self.streams.get_mut(i).and_then(Option::take).map(|s| s.shutdown(std::net::Shutdown::Both)).is_some()
+            };
+            n += usize::from(closed);
+        }
+        n
+    }
+
+    fn opened(&mut self, listener: bool, h: i64) -> i64 {
+        if let Some(log) = self.request.as_mut() {
+            log.push((listener, h as usize));
+        }
+        h
+    }
+
     pub fn tcp_connect(&mut self, host: &str, port: i64) -> Result<i64, String> {
         let s = almide_net_each("tcp_connect", host, port, |a| std::net::TcpStream::connect(a))?;
-        Ok(almide_net_slot(&mut self.streams, s))
+        let h = almide_net_slot(&mut self.streams, s);
+        Ok(self.opened(false, h))
     }
 
     pub fn tcp_listen(&mut self, host: &str, port: i64) -> Result<i64, String> {
         let l = almide_net_each("tcp_listen", host, port, |a| std::net::TcpListener::bind(a))?;
-        Ok(almide_net_slot(&mut self.listeners, l))
+        let h = almide_net_slot(&mut self.listeners, l);
+        Ok(self.opened(true, h))
     }
 
     pub fn tcp_local_port(&mut self, h: i64) -> Result<i64, String> {
@@ -106,7 +144,8 @@ impl AlmideNetTables {
 
     pub fn tcp_accept(&mut self, h: i64) -> Result<i64, String> {
         let (s, _) = self.listener(h)?.accept().map_err(|e| net_io_error_text("tcp_accept", &e))?;
-        Ok(almide_net_slot(&mut self.streams, s))
+        let h = almide_net_slot(&mut self.streams, s);
+        Ok(self.opened(false, h))
     }
 
     pub fn tcp_read(&mut self, h: i64, len: i64) -> Result<Vec<u8>, String> {

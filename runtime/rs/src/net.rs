@@ -11,7 +11,26 @@
 include!("../../../crates/almide-rt-core/src/net_core.rs");
 
 thread_local! {
-    static ALMIDE_NET: std::cell::RefCell<AlmideNetTables> = std::cell::RefCell::new(AlmideNetTables::default());
+    static ALMIDE_NET: std::cell::RefCell<AlmideNetTables> = {
+        // #4203: the serve loop's request hook; a table first used inside a
+        // handler records from its birth.
+        almide_request_hook(almide_net_request);
+        let mut t = AlmideNetTables::default();
+        if ALMIDE_CONTAIN.with(|c| c.get()) {
+            t.request_begin();
+        }
+        std::cell::RefCell::new(t)
+    };
+}
+
+fn almide_net_request(stage: u8) {
+    almide_net(|t| match stage {
+        0 => t.request_begin(),
+        1 => t.request_end(),
+        _ => {
+            t.request_abort();
+        }
+    })
 }
 
 fn almide_net<R>(f: impl FnOnce(&mut AlmideNetTables) -> R) -> R {
@@ -60,7 +79,24 @@ pub fn almide_rt_net_tcp_set_timeout(handle: i64, timeout_ms: i64) -> Result<(),
 include!("../../../crates/almide-rt-core/src/net_unix_core.rs");
 
 thread_local! {
-    static ALMIDE_NET_UNIX: std::cell::RefCell<AlmideUnixTables> = std::cell::RefCell::new(AlmideUnixTables::default());
+    static ALMIDE_NET_UNIX: std::cell::RefCell<AlmideUnixTables> = {
+        almide_request_hook(almide_net_unix_request);
+        let mut t = AlmideUnixTables::default();
+        if ALMIDE_CONTAIN.with(|c| c.get()) {
+            t.request_begin();
+        }
+        std::cell::RefCell::new(t)
+    };
+}
+
+fn almide_net_unix_request(stage: u8) {
+    almide_net_unix(|t| match stage {
+        0 => t.request_begin(),
+        1 => t.request_end(),
+        _ => {
+            t.request_abort();
+        }
+    })
 }
 
 fn almide_net_unix<R>(f: impl FnOnce(&mut AlmideUnixTables) -> R) -> R {
