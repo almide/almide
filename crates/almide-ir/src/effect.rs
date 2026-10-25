@@ -153,6 +153,13 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     // a shared-memory region cannot tell which side opened it, so it carries
     // both.
     ("net", ModuleEffects::All(&[Effect::NetFetch, Effect::NetListen])),
+    // Unix-domain sockets and shared memory (R-unix-01): connecting is
+    // `Net.fetch`, listening and accepting `Net.listen`, as in `net`; an
+    // operation on an open descriptor carries both.
+    ("unix", ModuleEffects::All(&[Effect::NetFetch, Effect::NetListen])),
+    // `uuid.v4` draws entropy; `v7` reads the clock too (declared there).
+    // parse / to_string / the byte conversions / compare are pure.
+    ("uuid", ModuleEffects::EffectFns(&[Effect::Rand])),
     // The process environment: variables and argv. `env.set` declares
     // `Env.write`; the clock readers declare `Time`.
     ("env", ModuleEffects::All(&[Effect::EnvRead])),

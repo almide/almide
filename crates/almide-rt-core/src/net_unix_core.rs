@@ -74,6 +74,11 @@ pub fn almide_unix_request_begin() {
     ALMIDE_UNIX_REQUEST.with(|r| *r.borrow_mut() = Some(Vec::new()));
 }
 
+/// Whether this thread is recording.
+pub fn almide_unix_request_active() -> bool {
+    ALMIDE_UNIX_REQUEST.with(|r| r.borrow().is_some())
+}
+
 /// Stop recording; answers what this thread came to hold since the begin.
 pub fn almide_unix_request_end() -> Vec<i64> {
     ALMIDE_UNIX_REQUEST.with(|r| r.borrow_mut().take().unwrap_or_default())
@@ -280,14 +285,28 @@ impl AlmideUnixTables {
             .map_err(|e| format!("shm_resize: {e}"))
     }
 
-    /// Write `data` into the shared-memory file `fd` at byte `offset`.
+    /// Write `data` into the shared-memory file `fd` at byte `offset`, inside
+    /// its current size. A negative offset or a write past the end is the
+    /// `unix.shm_write:` refusal, which `unix.shm_write` turns into an abort
+    /// (an out-of-range write is a program error, R-unix-01); growing the file
+    /// is `shm_resize`'s job.
     pub fn shm_write(&mut self, fd: i64, offset: i64, data: &[u8]) -> Result<(), String> {
         self.check("shm_write", fd)?;
         if offset < 0 {
-            return Err(format!("shm_write: negative offset {offset}"));
+            return Err(format!("unix.shm_write: negative offset {offset}"));
         }
-        self.with_as("shm_write", fd, |f: &std::fs::File| std::os::unix::fs::FileExt::write_all_at(f, data, offset as u64))?
-            .map_err(|e| format!("shm_write: {e}"))
+        self.with_as("shm_write", fd, |f: &std::fs::File| {
+            let size = f.metadata()?.len();
+            let end = (offset as u64).checked_add(data.len() as u64);
+            if end.is_none_or(|e| e > size) {
+                return Ok(Err(format!(
+                    "unix.shm_write: {} bytes at offset {offset} run past the end of the {size}-byte file",
+                    data.len()
+                )));
+            }
+            std::os::unix::fs::FileExt::write_all_at(f, data, offset as u64).map(Ok)
+        })?
+            .map_err(|e| format!("shm_write: {e}"))?
     }
 
     /// Up to `len` bytes of the file `fd` from byte `offset` (fewer at its end).

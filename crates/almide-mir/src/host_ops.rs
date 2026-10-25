@@ -143,15 +143,20 @@ pub const HOST_OPS: &[HostOp] = &[
     op("random", "shuffle", "almide_rt_random_shuffle", ENTROPY).routed().by_value(&[0]),
     // `random.bytes` (C-394): the OS CSPRNG on native, `random_get` on wasm.
     op("random", "bytes", "almide_rt_random_bytes", ENTROPY),
+    // `uuid.v7`'s process-wide stamp: the clock it was handed, made strictly
+    // increasing by the runtime's last-stamp cell.
+    op("uuid", "__v7_stamp", "almide_rt_uuid___v7_stamp", CLOCK),
     // ── io ──
     op("io", "print", "almide_rt_io_print", OUT),
-    op("io", "write", "almide_rt_io_write", OUT),
-    op("io", "write_bytes", "almide_rt_io_write_bytes", OUT),
+    // stderr rides the output capability, as the eprintln self-host does.
+    op("io", "eprint", "almide_rt_io_eprint", OUT),
+    // The streams' leaves under `io.write(io.stdout() | io.stderr(), b)` and
+    // `io.read(io.stdin(), n)` (R-io-05).
+    op("io", "__write_stdout", "almide_rt_io_write", OUT),
+    op("io", "__write_stderr", "almide_rt_io_write_stderr", OUT),
     op("io", "read_line", "almide_rt_io_read_line", IN),
-    op("io", "read_line_opt", "almide_rt_io_read_line_opt", IN),
     op("io", "read_all", "almide_rt_io_read_all", IN),
-    op("io", "read_byte", "almide_rt_io_read_byte", IN),
-    op("io", "read_n_bytes", "almide_rt_io_read_n_bytes", IN),
+    op("io", "__read_stdin_bytes", "almide_rt_io_read_bytes", IN),
     // ── fs: reads ──
     op("fs", "read_text", "almide_rt_fs_read_text", READ).result(),
     op("fs", "read_bytes", "almide_rt_fs_read_bytes", READ).result(),
@@ -247,13 +252,14 @@ pub const HOST_OPS: &[HostOp] = &[
 /// the audited matrix; a stdlib module outside this list must be wholly pure
 /// (`crate::purity::PURE_MODULES` — the contract test checks the partition).
 pub const CAP_MODULES: &[&str] =
-    &["args", "datetime", "env", "ffi", "fs", "http", "io", "net", "process", "random", "testing", "zlib"];
+    &["args", "datetime", "env", "ffi", "fs", "http", "io", "net", "process", "random", "testing", "unix", "uuid", "zlib"];
 
 /// The capability-module intrinsics that are NEITHER a host op NOR pure: they
 /// are refused by the lowering outright, so they never reach a certificate.
 /// `"*"` covers the rest of a module (a row or a pure admission still wins).
 pub const WALLED: &[(&str, &str, &str)] = &[
     ("net", "*", "sockets, unix sockets and shared memory: native-only, no WASI floor (the native-FFI class)"),
+    ("unix", "*", "unix sockets and shared memory: native-only, no WASI floor (the native-FFI class)"),
     ("process", "*", "child processes, signals and the exit / sleep / pid / env family: native-only; `exit` lowers as the ProcExit prim; stdin_lines runs on wasm through a self-host body, outside this subset"),
     ("http", "serve", "the listener: native-only, and its handler is a closure the host invokes"),
     ("http", "__call_start", "reached only through its wrapper row `http.start`"),
