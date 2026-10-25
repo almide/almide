@@ -371,7 +371,10 @@ impl Emitter<'_> {
                 if let Some(out) = self.lower_value_call(func.as_str(), args)? {
                     return Ok(out);
                 }
-                unsup(&format!("call:value.{func}"))
+                // A value fn written in Almide (the Option readers and the Path
+                // family, #4220) takes the linked route, as fs's rooted family
+                // does; one with neither walls as `call:value.<func>` there.
+                self.lower_linked_call("value", func.as_str(), args, tail)
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "bytes" => {
                 self.lower_bytes_call(func.as_str(), args)
