@@ -100,7 +100,7 @@
 
 wasm_budget_bytes = 1073741824
 count = 67
-skip_count = 148
+skip_count = 168
 
 [[divergence]]
 cell   = "bytes.new:len:i32_max"
@@ -521,6 +521,26 @@ slot   = "fs.fold_lines_range(start)"
 reason = "unbuildable: no VALUES entry for parameter type `(Int, String) -> Int`"
 
 [[skip]]
+slot   = "http.body(m)"
+reason = "probe does not type-check: exit 1"
+
+[[skip]]
+slot   = "http.body_bytes(m)"
+reason = "probe does not type-check: exit 1"
+
+[[skip]]
+slot   = "http.header(m)"
+reason = "probe does not type-check: exit 1"
+
+[[skip]]
+slot   = "http.header_values(m)"
+reason = "probe does not type-check: exit 1"
+
+[[skip]]
+slot   = "http.headers(m)"
+reason = "unrenderable: no RENDER entry for return type `List[(String, String)]`"
+
+[[skip]]
 slot   = "http.json(status)"
 reason = "unrenderable: no RENDER entry for return type `HttpResponse`"
 
@@ -533,12 +553,124 @@ slot   = "http.serve(port)"
 reason = "unbuildable: no VALUES entry for parameter type `effect (HttpRequest) -> HttpResponse`"
 
 [[skip]]
-slot   = "http.status(code)"
+slot   = "http.set_body(m)"
+reason = "probe does not type-check: exit 1"
+
+[[skip]]
+slot   = "http.set_body_bytes(m)"
+reason = "probe does not type-check: exit 1"
+
+[[skip]]
+slot   = "http.set_header(m)"
+reason = "probe does not type-check: exit 1"
+
+[[skip]]
+slot   = "http.set_status(code)"
 reason = "unbuildable: no VALUES entry for parameter type `HttpResponse`"
 
 [[skip]]
 slot   = "http.with_headers(status)"
-reason = "unbuildable: no VALUES entry for parameter type `Map[String, String]`"
+reason = "unbuildable: no VALUES entry for parameter type `List[(String, String)]`"
+
+[[skip]]
+slot   = "io.close(h)"
+reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
+
+[[skip]]
+slot   = "io.read(h)"
+reason = "probe does not type-check: exit 1"
+
+[[skip]]
+slot   = "io.read(max)"
+reason = "probe does not type-check: exit 1"
+
+[[skip]]
+slot   = "io.read_exact(h)"
+reason = "probe does not type-check: exit 1"
+
+[[skip]]
+slot   = "io.read_exact(n)"
+reason = "probe does not type-check: exit 1"
+
+[[skip]]
+slot   = "io.read_to_end(h)"
+reason = "probe does not type-check: exit 1"
+
+[[skip]]
+slot   = "io.write(h)"
+reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
+
+[[skip]]
+slot   = "net.tcp_connect(port)"
+reason = "unrenderable: no RENDER entry for return type `Result[TcpStream, String]`"
+
+[[skip]]
+slot   = "net.tcp_listen(port)"
+reason = "unrenderable: no RENDER entry for return type `Result[TcpListener, String]`"
+
+[[skip]]
+slot   = "net.tcp_read_timeout(len)"
+reason = "unbuildable: no VALUES entry for parameter type `TcpStream`"
+
+[[skip]]
+slot   = "net.tcp_read_timeout(timeout_ms)"
+reason = "unbuildable: no VALUES entry for parameter type `TcpStream`"
+
+[[skip]]
+slot   = "net.tcp_set_timeout(timeout_ms)"
+reason = "unbuildable: no VALUES entry for parameter type `TcpStream`"
+
+[[skip]]
+slot   = "net.udp_bind(port)"
+reason = "unrenderable: no RENDER entry for return type `Result[UdpSocket, String]`"
+
+[[skip]]
+slot   = "net.udp_recv_from(max)"
+reason = "unbuildable: no VALUES entry for parameter type `UdpSocket`"
+
+[[skip]]
+slot   = "net.udp_send_to(port)"
+reason = "unbuildable: no VALUES entry for parameter type `UdpSocket`"
+
+[[skip]]
+slot   = "process.exit(code)"
+reason = "unrenderable: no RENDER entry for return type `Never`"
+
+[[skip]]
+slot   = "process.kill(pid)"
+reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
+
+[[skip]]
+slot   = "process.kill(signal)"
+reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
+
+[[skip]]
+slot   = "process.stop(grace_ms)"
+reason = "unbuildable: no VALUES entry for parameter type `ProcessChild`"
+
+[[skip]]
+slot   = "unix.select(timeout_ms)"
+reason = "unbuildable: no VALUES entry for parameter type `List[Fd]`"
+
+[[skip]]
+slot   = "unix.shm_create(size)"
+reason = "unrenderable: no RENDER entry for return type `Result[Fd, String]`"
+
+[[skip]]
+slot   = "unix.shm_read(len)"
+reason = "unbuildable: no VALUES entry for parameter type `Fd`"
+
+[[skip]]
+slot   = "unix.shm_read(offset)"
+reason = "unbuildable: no VALUES entry for parameter type `Fd`"
+
+[[skip]]
+slot   = "unix.shm_resize(size)"
+reason = "unbuildable: no VALUES entry for parameter type `Fd`"
+
+[[skip]]
+slot   = "unix.shm_write(offset)"
+reason = "unbuildable: no VALUES entry for parameter type `Fd`"
 
 [[skip]]
 slot   = "int.to_float32(n)"
@@ -853,42 +985,6 @@ slot   = "matrix.zeros_f32(rows)"
 reason = "unrenderable: no RENDER entry for return type `Matrix[Float32]`"
 
 [[skip]]
-slot   = "net.tcp_accept(listener)"
-reason = "probe does not type-check: error[E010]: non-exhaustive match: missing _"
-
-[[skip]]
-slot   = "net.tcp_available(stream)"
-reason = "probe does not type-check: error[E010]: non-exhaustive match: missing _"
-
-[[skip]]
-slot   = "net.tcp_close(stream)"
-reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
-
-[[skip]]
-slot   = "net.tcp_close_listener(listener)"
-reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
-
-[[skip]]
-slot   = "net.tcp_connect(port)"
-reason = "probe does not type-check: error[E010]: non-exhaustive match: missing _"
-
-[[skip]]
-slot   = "net.tcp_listen(port)"
-reason = "probe does not type-check: error[E010]: non-exhaustive match: missing _"
-
-[[skip]]
-slot   = "net.tcp_set_timeout(stream)"
-reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
-
-[[skip]]
-slot   = "net.tcp_set_timeout(timeout_ms)"
-reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
-
-[[skip]]
-slot   = "net.tcp_write(stream)"
-reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
-
-[[skip]]
 slot   = "prim.alloc_list_str(n)"
 reason = "probe does not type-check: error[E025]: cannot infer a concrete type for this expression (type List[?0])"
 
@@ -923,22 +1019,6 @@ reason = "unrenderable: no RENDER entry for return type `Float32`"
 [[skip]]
 slot   = "prim.int_to_ptr(a)"
 reason = "unrenderable: no RENDER entry for return type `RawPtr`"
-
-[[skip]]
-slot   = "process.exec_status_timeout(timeout_ms)"
-reason = "unrenderable: no RENDER entry for return type `Result[ProcessStatus, String]`"
-
-[[skip]]
-slot   = "process.exit(code)"
-reason = "unrenderable: no RENDER entry for return type `Never`"
-
-[[skip]]
-slot   = "process.kill(pid)"
-reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
-
-[[skip]]
-slot   = "process.kill(signal)"
-reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
 
 [[skip]]
 slot   = "result.filter(err_val)"
