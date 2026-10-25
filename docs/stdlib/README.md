@@ -83,10 +83,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [bigint.md](bigint.md)
 
-- `bigint.parse(s: String) -> Result[BigInt, String]` — BigInt from trimmed decimal s with an optional + or -; err on junk.
-- `bigint.parse_radix(s: String, radix: Int) -> Result[BigInt, String]` — BigInt from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2; err on junk; radix outside 2..36 aborts.
-- `bigint.to_string(x: BigInt) -> String` — Decimal digits, with - when negative.
-- `bigint.to_string_radix(x: BigInt, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+- `bigint.parse(s: String) -> Result[BigInt, String]` — BigInt from trimmed decimal s with an optional + or -; err on junk or more than 4300 digits.
+- `bigint.parse_radix(s: String, radix: Int) -> Result[BigInt, String]` — BigInt from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2; err on junk, and on more than 4300 digits in a radix that is not a power of two; radix outside 2..36 aborts.
+- `bigint.to_string(x: BigInt) -> String` — Decimal digits, with - when negative; more than 4300 digits aborts.
+- `bigint.to_string_radix(x: BigInt, radix: Int) -> String` — Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts, and so does a radix that is not a power of two when the text would pass 4300 digits.
 - `bigint.compare(a: BigInt, b: BigInt) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
 - `bigint.min(a: BigInt, b: BigInt) -> BigInt` — Lesser of a and b.
 - `bigint.max(a: BigInt, b: BigInt) -> BigInt` — Greater of a and b.
@@ -97,7 +97,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `bigint.is_odd(x: BigInt) -> Bool` — True when x is not a multiple of 2.
 - `bigint.floor_div(a: BigInt, b: BigInt) -> BigInt` — Quotient rounded toward -inf; b == 0 aborts.
 - `bigint.modulo(a: BigInt, b: BigInt) -> BigInt` — Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
-- `bigint.pow(base: BigInt, exp: Int) -> BigInt` — base raised to exp; exp < 0 aborts.
+- `bigint.pow(base: BigInt, exp: Int) -> BigInt` — base raised to exp; exp < 0 aborts, and so does a result sure to pass 30 * 2^28 bits.
 - `bigint.bit_length(x: BigInt) -> Int` — Bits needed to hold the magnitude of x; 0 for 0.
 - `bigint.band(a: BigInt, b: BigInt) -> BigInt` — Bitwise AND.
 - `bigint.bor(a: BigInt, b: BigInt) -> BigInt` — Bitwise OR.
