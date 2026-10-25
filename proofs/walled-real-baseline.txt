@@ -332,3 +332,4 @@ spec/stdlib/regex_test.almd :: __test_almd_0022_regex.empty alternation arms  # 
 spec/stdlib/regex_test.almd :: __test_almd_0024_regex brace quantifiers  # #4189
 spec/stdlib/regex_test.almd :: __test_almd_0026_regex group backtracking  # #4189
 spec/stdlib/regex_test.almd :: __test_almd_0029_regex non-capturing group  # #4189
+spec/stdlib/value_readers_test.almd :: __test_almd_0000_value.get and the get_<kind> family answer an Option  # #4189
