@@ -194,3 +194,26 @@ test "string.get in bounds" {
 test "string.get out of bounds" {
   assert_eq(string.get("hello", 10), none)
 }
+
+test "string.to_codepoint is some only for one codepoint" {
+  assert_eq(string.to_codepoint("é"), some(233))
+  assert_eq(string.to_codepoint("ab"), none)
+}
+
+test "string.from_codepoint is none past the scalar range" {
+  assert_eq(string.from_codepoint(55296), none)
+  assert_eq(string.from_codepoint(1114112), none)
+}
+
+test "string.count counts characters, count_matches counts a needle" {
+  assert_eq(string.count("banana", (c) => c == "a"), 3)
+  assert_eq(string.count_matches("banana", "an"), 2)
+}
+
+test "string.pop removes the last character" {
+  var s = "hé"
+  assert_eq(string.pop(s), some("é"))
+  assert_eq(s, "h")
+  var e = ""
+  assert_eq(string.pop(e), none)
+}
