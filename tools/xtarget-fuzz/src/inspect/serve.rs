@@ -500,7 +500,7 @@ mod tests {
         assert_eq!(*lines.last().unwrap(), "exit 0");
         assert!(lines[2].starts_with("#2 POST /echo -> HTTP/1.1 200 [content-type: text/plain; charset=utf-8; x-content-type-options: nosniff; x-token: abc] body=POST /echo [] \\xe6\\x97\\xa5"), "{}", lines[2]);
         assert!(lines[3].starts_with("#3 PUT /a/b -> HTTP/1.1 418 [content-type: text/plain; x-content-type-options: nosniff; x-kind: teapot] body=a\\xef\\xbf\\xbdb"), "{}", lines[3]);
-        assert!(lines[7].starts_with("#7 GET /missing -> HTTP/1.1 500 [content-type: text/plain; x-content-type-options: nosniff] body=Internal error: no route /missing"), "{}", lines[7]);
+        assert!(lines[7].starts_with("#7 GET /missing -> HTTP/1.1 500 [content-type: text/plain; x-content-type-options: nosniff] body=Internal Server Error (request "), "{}", lines[7]);
     }
 
     #[test]
