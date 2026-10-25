@@ -15837,9 +15837,16 @@ else {
 
 
 
+
+
+
+fn __jpath_max_depth() -> Int = 1000
+
 fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = {
   let steps = list.len(path)
-  if steps > __json_max_depth() or __json_nests_past(nv, __json_max_depth() - steps) then err(__json_depth_error())
+  if steps > __jpath_max_depth() or __json_nests_past(nv, __jpath_max_depth() - steps) then err(
+    "json: nesting deeper than ${int.to_string(__jpath_max_depth())}",
+  )
   else ok(json_path_set_go(j, path, 0, nv))
 }
 
