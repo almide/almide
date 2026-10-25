@@ -421,9 +421,53 @@ effect fn main() -> Unit = {
 // @since 0.5.0 or earlier
 effect process.exec(cmd: String, args: List[String]) -> String
 
+// Runs c to its end: any exit code is ok; err if it cannot start or passes its deadline.
+// @since unreleased
+effect process.output(c: ProcessCommand) -> ProcessStatus
+
+// Runs c on this terminal (its stdin too, unless c.stdin is set); the exit code, -1 if signalled.
+// @since unreleased
+effect process.run(c: ProcessCommand) -> Int
+
+// Starts c in its own process group and returns at once; its output is captured.
+// @since unreleased
+effect process.start(c: ProcessCommand) -> ProcessChild
+
+// Never blocks: none while c runs, then its outcome (err past its deadline).
+// @since unreleased
+effect process.poll(c: ProcessChild) -> Option[Result[ProcessStatus, String]]
+
+// Blocks until c ends; its outcome.
+// @since unreleased
+effect process.wait(c: ProcessChild) -> ProcessStatus
+
+// SIGTERM to c's group, grace_ms to end, then SIGKILL; again after the end is the same outcome.
+// @since unreleased
+effect process.stop(c: ProcessChild, grace_ms: Int) -> ProcessStatus
+
+// What c wrote to stdout since the last read; never blocks.
+// @since unreleased
+effect process.read_new_stdout(c: ProcessChild) -> String
+
+// What c wrote to stderr since the last read; never blocks.
+// @since unreleased
+effect process.read_new_stderr(c: ProcessChild) -> String
+
+// The OS process id of c, for process.kill.
+// @since unreleased
+effect process.child_pid(c: ProcessChild) -> Int
+
+// Sends signal to pid; err is kill's stderr.
+// @since 0.12.3 or earlier
+effect process.kill(pid: Int, signal: Int) -> Unit
+
 // Ends with code 0..=255; others abort, exit 1.
 // @since 0.5.0 or earlier
 effect process.exit(code: Int) -> Never
+
+// OS process ID of this program.
+// @since 0.12.3 or earlier
+effect process.pid() -> Int
 
 // Full argv, program name at index 0.
 // @since 0.10.3 or earlier
@@ -432,38 +476,6 @@ effect process.args() -> List[String]
 // All stdin lines; err on non-UTF-8 input.
 // @since 0.5.0 or earlier
 effect process.stdin_lines() -> List[String]
-
-// exec in dir; err is stderr, maybe empty.
-// @since 0.5.0 or earlier
-effect process.exec_in(dir: String, cmd: String, args: List[String]) -> String
-
-// exec with input piped in; err may be empty.
-// @since 0.5.0 or earlier
-effect process.exec_with_stdin(cmd: String, args: List[String], input: String) -> String
-
-// Code and output; code -1 if killed by signal. Child stdin is null.
-// @since 0.5.0 or earlier
-effect process.exec_status(cmd: String, args: List[String]) -> ProcessStatus
-
-// exec_status, but kills cmd and errs at timeout_ms.
-// @since 0.53.6
-effect process.exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) -> ProcessStatus
-
-// Run cmd on this terminal; exit code, -1 if signalled.
-// @since unreleased
-effect process.run(cmd: String, args: List[String]) -> Int
-
-// run in dir; exit code, -1 if signalled.
-// @since unreleased
-effect process.run_in(dir: String, cmd: String, args: List[String]) -> Int
-
-// Alias of process.run.
-// @since 0.63.0
-effect process.exec_attached(cmd: String, args: List[String]) -> Int   (deprecated — use process.run)
-
-// OS process ID of this program.
-// @since 0.12.3 or earlier
-effect process.pid() -> Int
 
 // Variable value, or none if unset.
 // @since 0.12.3 or earlier
@@ -486,12 +498,16 @@ effect process.sleep(ms: Int) -> Unit
 effect process.is_alive(pid: Int) -> Bool
 ```
 
-## Type index (1 types)
+## Type index (2 types)
 
 ```
-// Exit code plus captured stdout and stderr.
+// Exit code plus captured stdout and stderr; code -1 if a signal ended the child.
 // @since 0.15.0 or earlier
 type process.ProcessStatus = { code: Int, stdout: String, stderr: String }
+
+// A child's settings: dir "" keeps this one, stdin "" gives it none, timeout_ms 0 means no deadline.
+// @since unreleased
+type process.ProcessCommand = { cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int }
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

@@ -224,40 +224,56 @@ effect fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (8 functions)
+## Signature index (12 functions)
 
 ```
-// Next stdin line, newline cut, bad UTF-8 as U+FFFD; "" at EOF too — read_line_opt tells them apart.
+// Next stdin line, newline cut, bad UTF-8 as U+FFFD; none at EOF, some("") for an empty line.
 // @since 0.5.0 or earlier
-effect io.read_line() -> String
-
-// Next stdin line, newline cut; none at EOF, some("") for an empty line.
-// @since unreleased
-effect io.read_line_opt() -> Option[String]
-
-// Writes s, no newline, then flushes.
-// @since 0.5.0 or earlier
-effect io.print(s: String) -> Unit
+effect io.read_line() -> Option[String]
 
 // Rest of stdin as text, bad UTF-8 as U+FFFD; empty at EOF.
 // @since 0.5.0 or earlier
 effect io.read_all() -> String
 
-// Next stdin byte 0..255, or -1 at EOF.
-// @since 0.12.1 or earlier
-effect io.read_byte() -> Int
+// Writes s to stdout, no newline, then flushes.
+// @since 0.5.0 or earlier
+effect io.print(s: String) -> Unit
 
-// Up to n stdin bytes; [] if n <= 0.
-// @since 0.12.1 or earlier
-effect io.read_n_bytes(n: Int) -> List[Int]
+// Writes s to stderr, no newline.
+// @since unreleased
+effect io.eprint(s: String) -> Unit
 
-// Low byte of each Int to stdout; unflushed.
+// Standard input, for io.read / read_exact / read_to_end.
+// @since unreleased
+effect io.stdin() -> Stdin
+
+// Standard output, for io.write.
+// @since unreleased
+effect io.stdout() -> Stdout
+
+// Standard error, for io.write.
+// @since unreleased
+effect io.stderr() -> Stderr
+
+// Up to max bytes from h; empty once h has ended; err if max < 0.
+// @since unreleased
+effect io.read(h: H, max: Int) -> Bytes
+
+// Exactly n bytes from h; err if h ends first, naming how many arrived.
+// @since unreleased
+effect io.read_exact(h: H, n: Int) -> Bytes
+
+// Every byte until h ends.
+// @since unreleased
+effect io.read_to_end(h: H) -> Bytes
+
+// Writes all of data to h.
 // @since 0.9.8 or earlier
-effect io.write_bytes(data: List[Int]) -> Unit
+effect io.write(h: H, data: Bytes) -> Unit
 
-// Raw data to stdout; no newline.
-// @since 0.9.8 or earlier
-effect io.write(data: Bytes) -> Unit
+// Closes h; closing twice is ok.
+// @since unreleased
+effect io.close(h: H) -> Unit
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
