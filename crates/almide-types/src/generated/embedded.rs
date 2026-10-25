@@ -12420,6 +12420,15 @@ effect fn __http_serve_next() -> Result[List[String], String] = _
 
 effect fn __http_serve_reply(frame: String) -> Result[Unit, String] = _
 
+
+
+
+
+
+
+
+effect fn __http_serve_run(step: effect () -> Unit) -> Result[Unit, String] = _
+
 fn __hs_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
 fn __hs_frame(resp: List[String]) -> String = resp |> list.map((c) => __hs_cell(c)) |> list.join("")
@@ -12515,6 +12524,15 @@ effect fn http_serve(port: Int, f: effect (List[String]) -> List[String]) -> Uni
     ok(_) => (),
     err(e) => prim.die(prim.handle("Error: ${e}\n")),
   }
+  match __http_serve_run(() => __hs_loop(f)!) {
+    ok(_) => (),
+    err(_) => __hs_loop(f)!,
+  }
+}
+
+
+
+effect fn __hs_loop(f: effect (List[String]) -> List[String]) -> Unit = {
   var serving = true
   while serving {
     let raw = __http_serve_next()!
