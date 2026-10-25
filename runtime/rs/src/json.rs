@@ -1,6 +1,10 @@
 // json extern — JSON parse, stringify, and AlmideValue query/manipulation
 // AlmideValue type is defined in value.rs (included before this file)
 
+// The nesting bound (#4020 / #4209): JSON_MAX_DEPTH and json_depth_error(),
+// declared once for every leg.
+include!("../../../crates/almide-base/src/json_limits.rs");
+
 // ── Parse + Stringify ──
 
 pub fn almide_rt_json_stringify(v: &AlmideValue) -> AlmideString { almide_rt_value_stringify(v) }
@@ -21,8 +25,8 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
         // stdlib/json_parse.almd is the self-hosted twin, clause for clause.
         //
         // Nesting is bounded (R-L0-47, R-json-04, #4020): an array or object
-        // opened inside 1000 others is `json: nesting deeper than 1000`.
-        const JSON_MAX_DEPTH: usize = 1000;
+        // opened inside JSON_MAX_DEPTH (1000) others is
+        // `json: nesting deeper than 1000`.
         fn at(what: &str, t: &str, pos: usize) -> String {
             format!("{} at pos {}", what, t[..pos].chars().count())
         }
@@ -59,7 +63,7 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
             if *pos >= b.len() { return Err("unexpected end of input".into()); }
             match b[*pos] {
                 b'"' => parse_string(t, pos).map(AlmideValue::Str),
-                b'{' | b'[' if depth >= JSON_MAX_DEPTH => Err("json: nesting deeper than 1000".into()),
+                b'{' | b'[' if depth >= JSON_MAX_DEPTH => Err(json_depth_error()),
                 b'{' => parse_object(t, pos, depth + 1),
                 b'[' => parse_array(t, pos, depth + 1),
                 b't' => parse_literal(t, pos, b"true", AlmideValue::Bool(true), "expected bool"),
@@ -481,8 +485,24 @@ pub fn almide_json_get_path(j: &AlmideValue, path: &AlmideJsonPath) -> Option<Al
 
 pub fn almide_json_set_path(j: &AlmideValue, path: &AlmideJsonPath, value: AlmideValue) -> Result<AlmideValue, AlmideString> { let __almide_r: Result<AlmideValue, String> = (|| {
     let steps = resolve_path(path);
+    // #4209: the value set_path builds nests its path's steps plus the new
+    // value's own nesting deep; past parse's bound it is refused, so a
+    // value made here is one `json.parse` could have made.
+    if steps.len() > JSON_MAX_DEPTH || json_nests_past(&value, JSON_MAX_DEPTH - steps.len()) {
+        return Err(json_depth_error());
+    }
     Ok(set_at_steps(j, &steps, &value))
 })(); __almide_r.map_err(Into::into) }
+
+/// `v` holds containers nested more than `budget` deep. Recurses at most
+/// `budget + 1` frames whatever `v` holds.
+fn json_nests_past(v: &AlmideValue, budget: usize) -> bool {
+    match v {
+        AlmideValue::Array(items) => budget == 0 || items.iter().any(|x| json_nests_past(x, budget - 1)),
+        AlmideValue::Object(entries) => budget == 0 || entries.iter().any(|(_, x)| json_nests_past(x, budget - 1)),
+        _ => false,
+    }
+}
 
 pub fn almide_json_remove_path(j: &AlmideValue, path: &AlmideJsonPath) -> AlmideValue {
     let steps = resolve_path(path);

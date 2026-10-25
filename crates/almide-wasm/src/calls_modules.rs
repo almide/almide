@@ -172,25 +172,43 @@ impl Emitter<'_> {
                 // value and takes its own credit on every block it shares.
                 let vdec = self.dec_fn_of(SliceTy::Value);
                 let h = self.work.helper(crate::work::Helper::JsonPathSet { vdec });
+                let deep = self.work.helper(crate::work::Helper::JsonNestsPast);
+                let (hj, hp, hn) = (self.hold_i32()?, self.hold_i32()?, self.hold_i32()?);
                 self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
+                self.f.instructions().local_set(hj);
                 self.lower_arg(&args[1], None, ArgMode::Borrow)?;
-                self.f.instructions().i32_const(0);
+                self.f.instructions().local_set(hp);
                 self.lower_arg(&args[2], Some(SliceTy::Value), ArgMode::Borrow)?;
-                self.f.instructions().call(h);
-                // ok(v) — the surface is Result[Value, String], always ok.
-                let hv = self.tmp_i32_local;
+                self.f.instructions().local_set(hn);
+                // #4209: the value built nests the path's steps plus the new
+                // value's own nesting deep; past parse's bound it is
+                // `err(json_depth_error())` — one declaration, every leg.
+                let max = almide_base::json_limits::JSON_MAX_DEPTH as i32;
+                let msg = self.pool.intern(&almide_base::json_limits::json_depth_error());
+                let (tag, field) = (slot_memarg(almide_layout::SUM_TAG), slot_memarg(almide_layout::SUM_FIELD));
+                let scr = self.scr_i32_local;
                 let mut i = self.f.instructions();
-                i.local_set(hv);
-                i.i32_const(16)
-                    .call(F_ALLOC)
-                    .local_tee(self.scr_i32_local)
-                    .i32_const(0)
-                    .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                i.local_get(self.scr_i32_local)
-                    .local_get(hv)
-                    .i32_store(slot_memarg(almide_layout::SUM_FIELD));
-                i.local_get(self.scr_i32_local);
+                // steps = the path list's slot count
+                i.local_get(hp).i32_load(len_memarg()).i32_const(2).i32_shr_u().local_tee(scr);
+                i.i32_const(max).i32_gt_u().if_(BlockType::Result(ValType::I32));
+                i.i32_const(1);
+                i.else_();
+                i.local_get(hn).i32_const(max).local_get(scr).i32_sub().call(deep);
+                i.end();
+                i.if_(BlockType::Result(ValType::I32));
+                i.i32_const(16).call(F_ALLOC).local_tee(scr).i32_const(1).i32_store(tag);
+                i.local_get(scr).i32_const(msg as i32).i32_store(field);
+                i.local_get(scr);
+                i.else_();
+                i.local_get(hj).local_get(hp).i32_const(0).local_get(hn).call(h).local_set(hj);
+                i.i32_const(16).call(F_ALLOC).local_tee(scr).i32_const(0).i32_store(tag);
+                i.local_get(scr).local_get(hj).i32_store(field);
+                i.local_get(scr);
+                i.end();
                 let _ = i;
+                self.release_i32();
+                self.release_i32();
+                self.release_i32();
                 let vh = self.types.intern(SliceTy::Value);
                 Ok(Some(Lowered::owned(SliceTy::Result(vh, self.types.intern(STR)))))
             }
