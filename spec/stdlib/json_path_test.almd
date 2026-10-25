@@ -182,3 +182,49 @@ test "json.remove_path missing key is noop" {
   assert_eq(list.len(ks), 1)
   assert_eq(list.contains(ks, "a"), true)
 }
+
+fn deep_path(d: Int) -> JsonPath = list.range(0, d) |> list.fold(
+  json.root(),
+  (acc, _i) => json.field(acc, "k"),
+)
+
+fn deep_array(d: Int) -> Value = list.range(0, d) |> list.fold(
+  value.int(1),
+  (acc, _i) => value.array([acc]),
+)
+
+test "json.set_path builds up to parse's nesting bound (#4209)" {
+  let doc = value.object([])
+  match json.set_path(doc, deep_path(1000), value.int(1)) {
+    ok(v) => assert_eq(json.parse(json.stringify(v)) |> result.is_ok, true),
+    err(e) => assert(false, e),
+  }
+  match json.set_path(doc, deep_path(600), deep_array(400)) {
+    ok(v) => assert_eq(json.parse(json.stringify(v)) |> result.is_ok, true),
+    err(e) => assert(false, e),
+  }
+}
+
+test "json.set_path refuses a value nested past 1000 with parse's text (#4209)" {
+  let doc = value.object([])
+  assert_eq(
+    json.set_path(doc, deep_path(1001), value.int(1)),
+    err("json: nesting deeper than 1000"),
+  )
+  assert_eq(
+    json.set_path(doc, deep_path(1000), value.array([])),
+    err("json: nesting deeper than 1000"),
+  )
+  assert_eq(
+    json.set_path(doc, deep_path(600), deep_array(401)),
+    err("json: nesting deeper than 1000"),
+  )
+  assert_eq(
+    json.set_path(doc, json.root(), deep_array(1001)),
+    err("json: nesting deeper than 1000"),
+  )
+  assert_eq(
+    json.set_path(doc, deep_path(50000), value.int(1)),
+    err("json: nesting deeper than 1000"),
+  )
+}
