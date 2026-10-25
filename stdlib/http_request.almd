@@ -33,9 +33,11 @@ fn __hq_nh(req: List[String]) -> Int = int.parse(list.get(req, 3) ?? "0") ?? 0
 // First slot past the header pairs — where the bound params start.
 fn __hq_params_at(req: List[String]) -> Int = 4 + 2 * __hq_nh(req)
 
-fn http_new_request(method: String, target: String, body: String, headers: Map[String, String]) -> List[String] = {
-  let pairs = map.to_list(headers) |> list.flat_map(((k, v)) => [k, v])
-  [method, target, body, int.to_string(map.len(headers))] + pairs
+// The headers arrive flat, [k1, v1, …] in list order (R-http-09); an odd
+// trailing name is dropped, as native's pairing does.
+fn http_new_request(method: String, target: String, body: String, flat: List[String]) -> List[String] = {
+  let n = list.len(flat) / 2
+  [method, target, body, int.to_string(n)] + list.take(flat, 2 * n)
 }
 
 fn http_req_method(req: List[String]) -> String = list.get(req, 0) ?? ""
@@ -54,6 +56,53 @@ fn http_req_header(req: List[String], key: String) -> String? = __hq_find(
   __hq_params_at(req),
   key,
 )
+
+fn __hq_all(req: List[String], i: Int, end: Int, key: String, acc: List[String]) -> List[String] =
+  if i >= end then acc
+  else if __hq_ci_eq(list.get(req, i) ?? "", key) then __hq_all(
+    req,
+    i + 2,
+    end,
+    key,
+    acc + [
+      list.get(req, i + 1) ?? ""
+    ],
+  )
+  else __hq_all(req, i + 2, end, key, acc)
+
+fn http_req_header_values(req: List[String], key: String) -> List[String] = __hq_all(
+  req,
+  4,
+  __hq_params_at(req),
+  key,
+  [],
+)
+
+fn http_req_headers_flat(req: List[String]) -> List[String] = list.take(
+  list.drop(req, 4),
+  2 * __hq_nh(req),
+)
+
+// Upsert, the response's rule: the first match's value replaced in place,
+// else the pair appended after the last header and the count raised.
+fn __hq_set(req: List[String], i: Int, end: Int, key: String, value: String) -> List[String] =
+  if i >= end then list.set(
+    list.take(req, end) + [key, value] + list.drop(req, end),
+    3,
+    int.to_string(__hq_nh(req) + 1),
+  )
+  else if __hq_ci_eq(list.get(req, i) ?? "", key) then list.set(req, i + 1, value)
+  else __hq_set(req, i + 2, end, key, value)
+
+fn http_req_set_header(req: List[String], key: String, value: String) -> List[String] = __hq_set(
+  req,
+  4,
+  __hq_params_at(req),
+  key,
+  value,
+)
+
+fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(req, 2, body)
 
 fn __hq_param(req: List[String], i: Int, name: String) -> String? = if i >= list.len(req) then none
 else if (list.get(req, i) ?? "") == name then list.get(req, i + 1)

@@ -735,7 +735,7 @@ impl Emitter<'_> {
         let mut no_transfer = false;
         let param_mut = crate::cells::linked_param_mut(module, func, args.len(), &self.table.infos[i].param_mut);
         // The same move-in as the Named arm (#3337 / #3406): `x =
-        // http.status(x, c)` hands the dying `x` to the self-hosted
+        // http.set_status(x, c)` hands the dying `x` to the self-hosted
         // implementation's owned param, so its `@reuse` op meets rc 1.
         let move_in = self.take_move_in(args, true, tail && Some(index) != self.self_index);
         let mut moved_in = Vec::new();

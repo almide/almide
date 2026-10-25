@@ -15,13 +15,16 @@
 // (http_call.rs): open 53 / state 54 / wait and result 55 / read 56 /
 // cancel 57 / step 58 (the drop glue's 59 has no leaf). The start frame
 // reuses http_framed's decimal CHAR-length cells — method, body, total_ms, idle_ms, then each
-// header key and value in map order — parsed by the host with the same char
+// header key and value in list order — parsed by the host with the same char
 // arithmetic.
 import http
 
 fn __hc_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __hc_frame(method: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> String = map.to_list(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
+fn __hc_frame(method: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> String = list.take(
+  flat,
+  2 * (list.len(flat) / 2),
+) |> list.map((c) => __hc_cell(c)) |> list.fold(
   "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
   (acc, cell) => acc + cell,
 )
@@ -46,9 +49,9 @@ effect fn __http_call_cancel_raw(c: HttpCall) -> Result[String, String] = _
 effect fn __http_call_step_raw(c: HttpCall) -> Result[String, String] = _
 
 // `http.start`'s private `__call_start` (the limits record already spread).
-effect fn __hc_start_impl(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = __http_call_open(
+effect fn __hc_start_impl(method: String, url: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = __http_call_open(
   url,
-  __hc_frame(method, body, headers, total_ms, idle_ms),
+  __hc_frame(method, body, flat, total_ms, idle_ms),
 )
 
 // The response rides as `[status, body, k1, v1, …]` — HttpResponse's own
@@ -69,56 +72,6 @@ fn __hc_read_new_impl(c: HttpCall) -> String = __http_call_read_raw(c) ?? ""
 effect fn __hc_cancel_impl(c: HttpCall) -> Unit = {
   let _ = __http_call_cancel_raw(c)
   ()
-}
-
-// One streaming turn, answered by the host as `<tag><cell piece>[<err>]`:
-// tag `c` = more to come, `o` = ended ok, `x` = ended with the error text
-// that follows the piece. The piece is delivered before the ending, as
-// native delivers it.
-fn __hc_step_piece(s: String) -> String = {
-  let rest = string.drop(s, 1)
-  let cut = string.index_of(rest, "\n") ?? 0
-  let n = int.parse(string.take(rest, cut)) ?? 0
-  string.slice(rest, cut + 1, cut + 1 + n)
-}
-
-fn __hc_step_error(s: String) -> String = {
-  let rest = string.drop(s, 1)
-  let cut = string.index_of(rest, "\n") ?? 0
-  let n = int.parse(string.take(rest, cut)) ?? 0
-  string.drop(rest, cut + 1 + n)
-}
-
-effect fn __hc_pump(c: HttpCall, on_chunk: (String) -> Unit) -> Result[Unit, String] = {
-  let s = __http_call_step_raw(c) ?? "o0\n"
-  let piece = __hc_step_piece(s)
-  if string.len(piece) > 0 then on_chunk(piece) else ()
-  match string.take(s, 1) {
-    "c" => __hc_pump(c, on_chunk),
-    "x" => err(__hc_step_error(s)),
-    _ => ok(()),
-  }
-}
-
-// `request_stream_with_limits`'s private `__request_stream_limited`.
-effect fn __hc_stream_limited_impl(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int, on_chunk: (String) -> Unit) -> Result[Unit, String] = {
-  let c = __hc_start_impl(method, url, body, headers, total_ms, idle_ms)!
-  __hc_pump(c, on_chunk)
-}
-
-// Plain `request_stream`: the call core's CLASSIC call — no limits named, the
-// client read timeout (ALMIDE_HTTP_TIMEOUT_SECS) between arrivals, as on
-// native, which runs the same core (http_call_core.rs). Both limit cells
-// read `classic`, which no Int limit can spell.
-fn __hc_classic_frame(method: String, body: String, headers: Map[String, String]) -> String = map.to_list(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
-  "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell("classic")}${__hc_cell("classic")}",
-  (acc, cell) => acc + cell,
-)
-
-@implements("http.request_stream")
-effect fn __hc_stream_classic_impl(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Result[Unit, String] = {
-  let c = __http_call_open(url, __hc_classic_frame(method, body, headers))!
-  __hc_pump(c, on_chunk)
 }
 
 // The declared repr (#4204): a call in flight is a handle with no value to

@@ -20,18 +20,18 @@ fn render_query(req: HttpRequest) -> String = match http.query_params(req) {
 }
 
 effect fn handle(req: HttpRequest) -> HttpResponse = {
-  let method = http.req_method(req)
-  let path = http.req_path(req)
+  let method = http.method(req)
+  let path = http.path(req)
   let route = string.split(path, "?") |> list.get(0) ?? path
   eprintln("${method} ${path}")
   match route {
     "/hello" => http.response(200, "hello"),
     "/echo" => http.with_headers(
       201,
-      "${method} ${http.req_body(req)}",
+      "${method} ${http.body(req)}",
       [
-        "X-Echo": http.req_header(req, "x-token") ?? "none",
-        "Content-Type": "text/plain; charset=utf-8"
+        ("X-Echo", http.header(req, "x-token") ?? "none"),
+        ("Content-Type", "text/plain; charset=utf-8")
       ],
     ),
     "/query" => http.json(200, "\"${render_query(req)}\""),

@@ -28,14 +28,14 @@ effect fn serve_file(req: HttpRequest) -> HttpResponse = http.response(
 
 effect fn any_health(req: HttpRequest) -> HttpResponse = http.response(
   200,
-  "health " + http.req_method(req),
+  "health " + http.method(req),
 )
 
 effect fn get_health(req: HttpRequest) -> HttpResponse = http.response(200, "get health")
 
 effect fn echo(req: HttpRequest) -> HttpResponse = http.response(
   200,
-  http.req_path(req) + " " + (http.param(req, "org") ?? "-"),
+  http.path(req) + " " + (http.param(req, "org") ?? "-"),
 )
 
 effect fn boom(req: HttpRequest) -> HttpResponse = {
@@ -57,9 +57,9 @@ effect fn app() -> HttpHandler = http.router([
 // is the host shell; a test is a plain call on the same value (#2696).
 let site = http.router([http.route("GET /users/{id}", get_user), http.route("POST /users", create_user)])
 
-fn req(method: String, target: String) -> HttpRequest = http.new_request(method, target, "", [:])
+fn req(method: String, target: String) -> HttpRequest = http.new_request(method, target, "", [])
 
-fn show(res: HttpResponse) -> String = "${http.status_code(res)} ${http.body(res)}"
+fn show(res: HttpResponse) -> String = "${http.status(res)} ${http.body(res)}"
 
 // Each helper binds the response before reading it: the argument-position
 // form `show(h(r)!)` traps on wasm today (#2658).
@@ -69,11 +69,11 @@ effect fn call(h: HttpHandler, method: String, target: String) -> String = {
 }
 
 effect fn call_body(h: HttpHandler, method: String, target: String, body: String) -> String = {
-  let res = h(http.new_request(method, target, body, [:]))!
+  let res = h(http.new_request(method, target, body, []))!
   show(res)
 }
 
-fn header_or_none(res: HttpResponse, name: String) -> String = http.get_header(res, name) ?? "(none)"
+fn header_or_none(res: HttpResponse, name: String) -> String = http.header(res, name) ?? "(none)"
 
 effect fn header_of(h: HttpHandler, method: String, target: String, name: String) -> String = {
   let res = h(req(method, target))!
@@ -87,16 +87,16 @@ effect fn fails(h: HttpHandler, target: String) -> Bool = match h(req("GET", tar
 
 fn tag(next: HttpHandler) -> HttpHandler = (r) => {
   let res = next(r)!
-  http.set_header(res, "X-Trail", (http.get_header(res, "X-Trail") ?? "") + "a")
+  http.set_header(res, "X-Trail", (http.header(res, "X-Trail") ?? "") + "a")
 }
 
 fn tag_b(next: HttpHandler) -> HttpHandler = (r) => {
   let res = next(r)!
-  http.set_header(res, "X-Trail", (http.get_header(res, "X-Trail") ?? "") + "b")
+  http.set_header(res, "X-Trail", (http.header(res, "X-Trail") ?? "") + "b")
 }
 
 // A middleware that answers without calling the handler it wraps.
-fn deny(next: HttpHandler) -> HttpHandler = (r) => if http.req_header(r, "authorization") == none then http.response(
+fn deny(next: HttpHandler) -> HttpHandler = (r) => if http.header(r, "authorization") == none then http.response(
   401,
   "no token",
 )
@@ -108,21 +108,21 @@ effect fn refusal(routes: List[HttpRoute]) -> String = match http.router(routes)
 }
 
 test "a request built in code answers every reader" {
-  let r = http.new_request("PUT", "/a/b?k=v&k=w&e=%20x", "payload", ["X-Token": "t1"])
-  assert_eq(http.req_method(r), "PUT")
-  assert_eq(http.req_path(r), "/a/b?k=v&k=w&e=%20x")
-  assert_eq(http.req_body(r), "payload")
-  assert_eq(http.req_header(r, "x-token"), some("t1"))
-  assert_eq(http.req_header(r, "X-Other"), none)
+  let r = http.new_request("PUT", "/a/b?k=v&k=w&e=%20x", "payload", [("X-Token", "t1")])
+  assert_eq(http.method(r), "PUT")
+  assert_eq(http.path(r), "/a/b?k=v&k=w&e=%20x")
+  assert_eq(http.body(r), "payload")
+  assert_eq(http.header(r, "x-token"), some("t1"))
+  assert_eq(http.header(r, "X-Other"), none)
   assert_eq(http.query_params(r), ok([("k", "v"), ("k", "w"), ("e", " x")]))
   assert_eq(http.param(r, "id"), none)
 }
 
 test "an app bound at the top level is tested by calling it" {
   let h = site!
-  let res = h(http.new_request("GET", "/users/42", "", [:]))!
+  let res = h(http.new_request("GET", "/users/42", "", []))!
   assert_eq(show(res), "200 user 42")
-  let made = h(http.new_request("POST", "/users", "{\"name\":\"ann\",\"age\":3}", [:]))!
+  let made = h(http.new_request("POST", "/users", "{\"name\":\"ann\",\"age\":3}", []))!
   assert_eq(show(made), "201 ann:3")
   assert_eq(show(h(req("GET", "/nope"))!), "404 Not Found")
 }
@@ -254,23 +254,23 @@ test "a mount's own parameters stay visible to the sub-app" {
 test "middleware composes, the first in the list outermost" {
   let h = http.wrap(app()!, [tag, tag_b])
   let res = h(req("GET", "/users/1"))!
-  assert_eq(http.get_header(res, "X-Trail"), some("ba"))
+  assert_eq(http.header(res, "X-Trail"), some("ba"))
   assert_eq(http.body(res), "user 1")
   let bare = http.wrap(app()!, [])
-  assert_eq(http.get_header(bare(req("GET", "/users/1"))!, "X-Trail"), none)
+  assert_eq(http.header(bare(req("GET", "/users/1"))!, "X-Trail"), none)
 }
 
 test "a middleware can answer without calling the handler" {
   let h = http.wrap(app()!, [deny])
   assert_eq(call(h, "GET", "/users/1")!, "401 no token")
-  let res = h(http.new_request("GET", "/users/1", "", ["Authorization": "t"]))!
+  let res = h(http.new_request("GET", "/users/1", "", [("Authorization", "t")]))!
   assert_eq(http.body(res), "user 1")
 }
 
 // C-406 (#4133, #4134): one canonical path for the router and the middleware
 // in front of it, and no parameter that decodes to a traversal.
 fn admin_guard(next: HttpHandler) -> HttpHandler = (r) => if string.starts_with(
-  http.req_path(r),
+  http.path(r),
   "/admin",
 ) then http.response(
   403,

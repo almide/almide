@@ -57,9 +57,13 @@ PRIM_CONSUMERS="crates/almide-wasm/src crates/almide-interp/src crates/almide-mi
 # Floor ops no consumer lowers. Their only arm was the MIR floor #3025
 # deleted, which no product leg reached: each leg serves the public calls
 # over them (io.print / eprintln over fd_write, list.group_by over
-# alloc_map_kv) directly, never through the self-host body. Shrink-only: an
-# op leaves this list the day a consumer lowers it, and the gate says so.
-UNLOWERED_PRIM_OPS="alloc_map_kv fd_write"
+# alloc_map_kv, io.read_all / read_line / the stdin read leaf
+# `io.__read_stdin_bytes` over read_n_bytes) directly, never through the
+# self-host body. read_n_bytes joined when io.read_n_bytes left the surface
+# (R-io-05): that fn's host arm was the only place its name was spelled.
+# Shrink-only: an op leaves this list the day a consumer lowers it, and the
+# gate says so.
+UNLOWERED_PRIM_OPS="alloc_map_kv fd_write read_n_bytes"
 missing=""
 while IFS= read -r tgt; do
   [ -n "$tgt" ] || continue

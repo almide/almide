@@ -10,7 +10,7 @@
 import http
 import url
 
-fn q(target: String) -> String = match http.query_params(http.new_request("GET", target, "", map.new())) {
+fn q(target: String) -> String = match http.query_params(http.new_request("GET", target, "", [])) {
   ok(ps) => "ok " + (ps |> list.map(((k, v)) => "[${k}]=[${v}]") |> list.join(" ")),
   err(e) => "err " + e,
 }
@@ -40,7 +40,7 @@ effect fn main() -> Unit = {
     println("${target} => ${q(target)}")
   }
   // %00 decodes to U+0000 (valid UTF-8), shown by code point.
-  match http.query_params(http.new_request("GET", "/p?k=%00", "", map.new())) {
+  match http.query_params(http.new_request("GET", "/p?k=%00", "", [])) {
     ok(ps) => println("/p?k=%00 => ok ${list.len(ps)} ${ps |> list.map(((_, v)) => string.to_codepoint(v) ?? -1)}"),
     err(e) => println("/p?k=%00 => err ${e}"),
   }

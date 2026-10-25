@@ -3747,7 +3747,7 @@ index_unit = "status-code"
 setup = [
   'let r = http.response(200, "hi")',
 ]
-probe = 'http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")'
+probe = 'http.body(r) + " " + (http.header(r, "Content-Type") ?? "none")'
 expect = "hi text/plain"
 note = """
 Pins the ARGUMENT ORDER, which is the whole trap: status first, body second.
@@ -3761,7 +3761,7 @@ index_unit = "status-code"
 setup = [
   'let r = http.json(201, "{}")',
 ]
-probe = 'http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")'
+probe = 'http.body(r) + " " + (http.header(r, "Content-Type") ?? "none")'
 expect = "{} application/json"
 note = """
 The same (status, body) order as response — the ONLY difference is the seeded
@@ -3773,9 +3773,9 @@ Content-Type, so a caller who picks json for the header gets no other change.
 name = "with_headers"
 index_unit = "status-code"
 setup = [
-  'let r = http.with_headers(202, "wh", ["X-A": "1"])',
+  'let r = http.with_headers(202, "wh", [("X-A", "1")])',
 ]
-probe = 'http.body(r) + " " + (http.get_header(r, "X-A") ?? "none")'
+probe = 'http.body(r) + " " + (http.header(r, "X-A") ?? "none")'
 expect = "wh 1"
 note = """
 (status, body, headers) — the Int stays FIRST even with a third parameter.
@@ -3785,61 +3785,42 @@ agreement, never a bug.
 """
 
 [[http.fn]]
-name = "status"
+name = "__with_headers"
+index_unit = "status-code"
+probe = "1"
+expect = "1"
+note = """
+Declared, not probed: the private leaf behind with_headers, which the
+with_headers probe above runs — the same (status, body) order, the header
+list crossing flat as [k1, v1, …] (R-http-09). The Int is the status.
+"""
+
+[[http.fn]]
+name = "set_status"
 index_unit = "status-code"
 setup = [
-  'let r = http.status(http.response(200, "sb"), 404)',
+  'let r = http.set_status(http.response(200, "sb"), 404)',
 ]
-probe = 'http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")'
-expect = "sb text/plain"
+probe = 'http.body(r) + " " + (http.header(r, "Content-Type") ?? "none") + " " + int.to_string(http.status(r))'
+expect = "sb text/plain 404"
 note = """
-The order INVERTS here — status(resp, code), response first — and the Int is
-still a status code. The Almide surface exposes no status GETTER, so in-file
-the probe can only pin that overwriting the code leaves body and headers
-untouched. The code itself reaching the wire is measured out-of-band on the
-native leg (2026-08-13): a serve handler returning
-status(response(200, "teapot"), 418) answers `HTTP/1.1 418 OK` with body
-"teapot" — the 418 is the status LINE, and an unmapped code keeps the "OK"
-reason text.
+The order INVERTS here — set_status(resp, code), response first — and the Int
+is still a status code; overwriting it leaves body and headers untouched. The
+code itself reaching the wire is measured out-of-band on the native leg
+(2026-08-13): a serve handler returning set_status(response(200, "teapot"),
+418) answers `HTTP/1.1 418 OK` with body "teapot" — the 418 is the status
+LINE, and an unmapped code keeps the "OK" reason text.
 """
 
 [[http.fn]]
-name = "status_code"
+name = "status"
 index_unit = "status-code"
-probe = 'http.status_code(http.status(http.response(200, "sb"), 418))'
+probe = 'http.status(http.set_status(http.response(200, "sb"), 418))'
 expect = "418"
 note = """
-The status GETTER (#1791) — the read twin of status(resp, code), so the code
-written by status is read back by status_code: the same 3-digit unit, in the
-same slot of the record the *_response client family fills from the wire.
-"""
-
-[[http.fn]]
-name = "get_status"
-index_unit = "status-code"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed: the Int in the return tuple `(status, body)` is the HTTP
-STATUS CODE of the response — the same unit as response/json/with_headers
-above, read back instead of written. A calling probe would hit the network
-and push this generated file off the wasm leg (the client is HOST_CAPABILITY,
-proofs/wasm-fallback-baseline.txt). Measured out-of-band on the native leg
-(2026-08-30): get_status("https://registry.npmjs.org/react") is (200, body)
-and a missing package is (404, body) — any complete response is Ok; Err is
-transport-only.
-"""
-
-[[http.fn]]
-name = "request_status"
-index_unit = "status-code"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed, same unit and same out-of-band measurement as
-get_status above: the Int is the response STATUS CODE in `(status, body)`.
-The general form of get_status (method + body + headers), mirroring how
-request generalizes get.
+The status GETTER (#1791, R-http-08) — the read twin of set_status, so the
+code written by set_status is read back by status: the same 3-digit unit, in
+the same slot of the record get_response / send fill from the wire.
 """
 
 [[http.fn]]
@@ -3865,20 +3846,6 @@ probe = "1"
 expect = "1"
 note = """
 Declared, not probed: the private intrinsic behind http.start, whose two
-trailing Ints are HttpLimits.total_ms and .idle_ms, both MILLISECONDS, 0 = no
-limit. A calling probe would dial the network and push this generated file off
-the wasm leg. Measured by tests/http_call_handle_test.rs against a loopback
-server (2026-09-25): total_ms 1000 ends a call at ~1000 ms and idle_ms 500 a
-silent one at ~500 ms (C-366).
-"""
-
-[[http.fn]]
-name = "__request_stream_limited"
-index_unit = "millisecond"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed: the private intrinsic behind http.request_stream_with_limits, whose two
 trailing Ints are HttpLimits.total_ms and .idle_ms, both MILLISECONDS, 0 = no
 limit. A calling probe would dial the network and push this generated file off
 the wasm leg. Measured by tests/http_call_handle_test.rs against a loopback

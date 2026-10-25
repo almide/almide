@@ -29,17 +29,27 @@ effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _
 
 /// Runs c to its end: any exit code is ok; err if it cannot start or passes its deadline.
 @ordered
-effect fn output(c: ProcessCommand) -> Result[ProcessStatus, String] = __os_output(c.cmd, c.args, c.dir, c.stdin, c.timeout_ms)
+effect fn output(c: ProcessCommand) -> Result[ProcessStatus, String] = __os_output(
+  c.cmd,
+  c.args,
+  c.dir,
+  c.stdin,
+  c.timeout_ms,
+)
 
 /// Runs c on this terminal (its stdin too, unless c.stdin is set); the exit code, -1 if signalled.
 @ordered
-effect fn run(c: ProcessCommand) -> Result[Int, String] = __os_run(c.cmd, c.args, c.dir, c.stdin, c.timeout_ms)
+effect fn run(c: ProcessCommand) -> Result[Int, String] = __os_run(
+  c.cmd,
+  c.args,
+  c.dir,
+  c.stdin,
+  c.timeout_ms,
+)
 
 /// Starts c in its own process group and returns at once; its output is captured.
 @ordered
-effect fn start(c: ProcessCommand) -> Result[ProcessChild, String] = ok(
-  ProcessChild(__os_start(c.cmd, c.args, c.dir, c.stdin, c.timeout_ms)!),
-)
+effect fn start(c: ProcessCommand) -> Result[ProcessChild, String] = ok(ProcessChild(__os_start(c.cmd, c.args, c.dir, c.stdin, c.timeout_ms)!))
 
 /// Never blocks: none while c runs, then its outcome (err past its deadline).
 effect fn poll(c: ProcessChild) -> Result[ProcessStatus, String]? = match __os_poll(__child(c)) {
@@ -55,7 +65,10 @@ effect fn poll(c: ProcessChild) -> Result[ProcessStatus, String]? = match __os_p
 effect fn wait(c: ProcessChild) -> Result[ProcessStatus, String] = __os_wait(__child(c))
 
 /// SIGTERM to c's group, grace_ms to end, then SIGKILL; again after the end is the same outcome.
-effect fn stop(c: ProcessChild, grace_ms: Int) -> Result[ProcessStatus, String] = __os_stop(__child(c), grace_ms)
+effect fn stop(c: ProcessChild, grace_ms: Int) -> Result[ProcessStatus, String] = __os_stop(
+  __child(c),
+  grace_ms,
+)
 
 /// What c wrote to stdout since the last read; never blocks.
 effect fn read_new_stdout(c: ProcessChild) -> String = __os_read_new(__child(c), 1)

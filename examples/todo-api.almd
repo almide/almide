@@ -13,11 +13,11 @@ effect fn main() -> Unit = {
   http.serve(
     3000,
     (req) => {
-      let method = http.req_method(req)
-      let path = http.req_path(req)
+      let method = http.method(req)
+      let path = http.path(req)
       if path == "/hello" then http.json(200, '{"message": "Hello from Almide!"}')
       else if method == "POST" and path == "/greet" then {
-        let body = http.req_body(req)
+        let body = http.body(req)
         let name = match json.parse(body) {
           ok(v) => option.unwrap_or(json.get_string(v, "name"), "world"),
           _ => "world",

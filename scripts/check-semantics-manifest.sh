@@ -57,7 +57,7 @@ for module in COVERED_MODULES:
     entries = {e["name"]: e for e in manifest[module]["fn"]}
     src = open(f"stdlib/{module}.almd").read()
     int_fns = []
-    for m in re.finditer(r'^(?:pub )?(?:effect )?fn (\w+)\(([^)]*)\)\s*->\s*([^=]+)=', src, re.M):
+    for m in re.finditer(r'^(?:pub )?(?:effect )?fn (\w+)\(((?:[^()]|\([^()]*\))*)\)\s*->\s*([^=]+)=', src, re.M):
         name, params, ret = m.group(1), m.group(2), m.group(3)
         if re.search(r'\bInt\b', params) or re.search(r'\bInt\b', ret):
             int_fns.append(name)
