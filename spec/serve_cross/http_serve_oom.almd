@@ -23,7 +23,7 @@ effect fn handle(req: HttpRequest) -> HttpResponse = {
       let b = list.range(1, 200000001)
       let c = list.range(2, 200000002)
       let all = [a, b, c]
-      http.response(200, "built ${list.len(all)} ${all[2][5]}")
+      http.response(200, "built ${all[0][5] + all[1][5] + all[2][5]}")
     },
     _ => http.response(200, "val=" + int.to_string(xs[string.len(body)])),
   }
