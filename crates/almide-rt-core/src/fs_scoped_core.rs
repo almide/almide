@@ -43,8 +43,8 @@
 include!("fs_scope.rs");
 // The bounded, regular-file-only whole-file read (#4201) `almide_sfs::read_bounded`
 // makes, shared with almide-base (whose fs_errno spells its texts for the wasm
-// renderers).
-include!("../../almide-base/src/fs_read_bounded.rs");
+// renderers); the committed snapshot in src/generated/ (build.rs, #3361).
+include!("generated/fs_read_bounded.rs");
 
 /// The marker a scoped call's refusal carries in its io error text. Each
 /// consumer replaces any error holding it with [`fs_scope_refusal`] of the
