@@ -302,9 +302,9 @@ fn link_self_host(
 
     fn demand_requirement(key: &str, out: &mut HashSet<String>) {
         let Some((_, method)) = key.split_once('.') else { return };
-        for (module, _, req) in crate::canonicalize::protocols::builtin_conformance_requirements() {
-            if req == method {
-                out.insert(format!("{module}.{method}"));
+        for r in crate::canonicalize::protocols::builtin_conformance_requirements() {
+            if r.requirement == method {
+                out.insert(format!("{}.{}", r.module, r.function));
             }
         }
     }

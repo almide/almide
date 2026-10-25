@@ -360,12 +360,12 @@ fn check_bytes_io_matrix() -> Vec<String> {
 fn check_builtin_conformance_matrix() -> Vec<String> {
     let mut seen: std::collections::HashMap<&str, std::collections::HashSet<String>> = std::collections::HashMap::new();
     let mut drifts = Vec::new();
-    for (module, proto, method) in almide::canonicalize::protocols::builtin_conformance_requirements() {
-        let names = seen.entry(module).or_insert_with(|| module_function_names(module));
-        if !names.contains(&method) {
+    for r in almide::canonicalize::protocols::builtin_conformance_requirements() {
+        let names = seen.entry(r.module).or_insert_with(|| module_function_names(r.module));
+        if !names.contains(&r.function) {
             drifts.push(format!(
                 "built-in conformance: `{}` conforms to {} but does not define `{}.{}`",
-                module, proto, module, method
+                r.module, r.protocol, r.module, r.function
             ));
         }
     }
