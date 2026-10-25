@@ -304,10 +304,10 @@ pub fn almide_http_request_response(method: &str, url: &str, body: &str, headers
 // audio — e.g. TTS mp3/wav) survive byte-identical.
 
 pub fn almide_http_get_bytes(url: &str) -> Result<Vec<u8>, AlmideString> {
-    almide_http_request_bytes("GET", url, "", &[])
+    almide_rt_http___request_bytes("GET", url, "", &[])
 }
 
-pub fn almide_http_request_bytes(method: &str, url: &str, body: &str, headers: &[AlmideString]) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| {
+pub fn almide_rt_http___request_bytes(method: &str, url: &str, body: &str, headers: &[AlmideString]) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| {
     request_bytes(method, url, body, &header_pairs(headers))
 })(); __almide_r.map_err(Into::into) }
 
