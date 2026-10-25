@@ -41,8 +41,16 @@ fn every_stdlib_example_evaluates_to_true() {
         examples.len()
     );
 
+    // ALMIDE_CI_SLICE (crates/almide-corpus/src/ci_slice.rs): a PR into
+    // develop runs the examples of the sliced stdlib files plus every file the
+    // change touches; the full run evaluates all of them. The floor above is
+    // over the extracted set, so it holds on either run. `i` stays the index
+    // in the whole list, so a program's name does not depend on the slice.
+    let total = examples.len();
+    let examples: Vec<(usize, (String, String, String))> =
+        almide_corpus::select(examples.into_iter().enumerate().collect(), "stdlib_examples", |(_, (_, file, _))| format!("stdlib/{file}.almd"));
     let mut failures = Vec::new();
-    for (i, (module, file, expr)) in examples.iter().enumerate() {
+    for (i, (module, file, expr)) in examples.iter().map(|(i, e)| (*i, e)) {
         let import_line = if NEEDS_IMPORT.contains(&module.as_str()) {
             format!("import {module}\n\n")
         } else {
@@ -73,7 +81,7 @@ fn every_stdlib_example_evaluates_to_true() {
         examples.len(),
         failures.join("\n")
     );
-    println!("stdlib examples: {} evaluated true", examples.len());
+    println!("stdlib examples: {} of {total} evaluated true", examples.len());
 }
 
 /// Path is a red herring in run_file only for diagnostics attribution; make
