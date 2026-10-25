@@ -60,6 +60,8 @@ pub const P1_SERVED_OPS: &[i32] = &[
     // The instance-parallel fan offer (#3003): answered "not served" (0), so
     // the guest's sequential path runs — byte-identical to the embedded host.
     74,
+    // A deliberate exit's mark (#4203): answered 0, nothing to do here.
+    76,
     // The subprocess family (#2589, ADR-0025): forwarded to the private
     // `almide:process/spawn` import, which a stock runtime refuses at load.
     80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90,

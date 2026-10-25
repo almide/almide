@@ -425,6 +425,11 @@ fn shim_fs_call(
     i.i64_const(0).return_();
     i.end();
 
+    // op 76: a deliberate exit's mark (#4203): answered 0.
+    i.local_get(op).i32_const(76).i32_eq().if_(BlockType::Empty);
+    i.i64_const(0).return_();
+    i.end();
+
     // Everything else: the defined refusal — the message on stderr, exit 1.
     load_handle(&mut i, g_stderr, I_GET_STDERR);
     i.i32_const((park + MSG) as i32);
