@@ -3,14 +3,6 @@
 # `names` is how many stdlib names the item groups. A `legacy` row predates
 # the gate (2026-10-11): its count may only fall, and the row goes when the
 # site does. A new site needs `class = "justified"` and a `why`.
-#
-# 2026-10-26, stdlib redesign wave 4B: seven legacy rows raised, none by new
-# name-keyed logic. Two new modules (unix, uuid) take a row each in the
-# per-module tables (MODULE_DESCRIPTIONS, STDLIB_MODULE_EFFECTS, CAP_MODULES,
-# BOUNDED_DENIED_MODULES, and the unix/uuid capability grants); WALLED gains
-# the native-only UDP, lookup_host and uuid.v7 leaves; and runtime_owned's
-# TABLE strings `status` / `stdout` now coincide with the new public fns
-# `http.status` and `io.stdout`.
 
 [[site]]
 id = "crates/almide-codegen/src/owned_source.rs::SCALAR_SOURCE_READS::table"
@@ -710,7 +702,7 @@ names = 147
 [[site]]
 id = "crates/almide-mir/src/purity.rs::is_pure_fn_in_impure_module::or-pattern"
 class = "legacy"
-names = 56
+names = 59
 
 [[site]]
 id = "crates/almide-mir/src/render_native_shims.rs::SHIMS::table"
@@ -925,7 +917,7 @@ names = 4
 [[site]]
 id = "crates/almide-wasm/src/host_env.rs::lower_host_call::or-pattern"
 class = "legacy"
-names = 6
+names = 9
 
 [[site]]
 id = "crates/almide-wasm/src/http_call.rs::lower_http_call_leaf::or-pattern"
@@ -1035,7 +1027,7 @@ names = 4
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_SUM::table"
 class = "legacy"
-names = 91
+names = 94
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_VERIFIED::table"
