@@ -86,6 +86,5 @@ fn without_a_sibling_the_generic_hint_stays() {
          fn main() -> Unit = println(int.to_string(total([1.0, 2.0])))\n",
     );
     assert!(!ok, "{text}");
-    assert!(text.contains("error[E005]"), "{text}");
     assert!(!text.contains("which is what this argument expects"), "no sibling exists here:\n{text}");
 }

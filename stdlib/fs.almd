@@ -49,7 +49,7 @@ effect fn append_text(path: String, content: String) -> Result[Unit, String] = _
 effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = {
   let old = if fs.exists(path) then __as_append(fs.read_bytes(path))!
   else bytes.new()
-  __as_append(fs.write_bytes(path, old + data))
+  __as_append(fs.write_bytes(path, bytes.concat(old, data)))
 }
 
 local fn __as_append[A](r: Result[A, String]) -> Result[A, String] = match r {
