@@ -177,7 +177,8 @@
 2061	spec/wasm_cross/env_args.almd
 2546	spec/wasm_cross/env_get.almd
 2142	spec/wasm_cross/env_platform_reporting.almd
-2571	spec/wasm_cross/env_set_overlay.almd
+3631	spec/wasm_cross/env_set_overlay.almd
+4204	spec/wasm_cross/env_set_refusal.almd
 1808	spec/wasm_cross/env_sleep_pause.almd
 3828	spec/wasm_cross/err_arm_takes_let_match_type.almd
 2098	spec/wasm_cross/error_operators.almd
@@ -209,7 +210,7 @@
 6412	spec/wasm_cross/fan_map_nested_combinators.almd
 8881	spec/wasm_cross/fan_map_parallel_scalar.almd
 2842	spec/wasm_cross/fan_map_worker_abort_keeps_stdout.almd
-3007	spec/wasm_cross/fan_ordered_arms.almd
+3960	spec/wasm_cross/fan_ordered_arms.almd
 4636	spec/wasm_cross/fan_prefetch_fs.almd
 3063	spec/wasm_cross/fan_pure_thunks.almd
 5870	spec/wasm_cross/fan_race_mapper.almd
