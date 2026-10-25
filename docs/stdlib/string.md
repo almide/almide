@@ -59,7 +59,7 @@ fn main() -> Unit = {
 5
 ```
 
-### `string.contains(s: String, sub: String) -> Bool`
+### `string.contains(s: String, needle: String) -> Bool`
 
 Check if a string contains a substring.
 
@@ -118,7 +118,7 @@ fn main() -> Unit = {
 ell
 ```
 
-### `string.pad_start(s: String, n: Int, ch: String) -> String`
+### `string.pad_start(s: String, n: Int, fill: String) -> String`
 
 Pad a string on the left to reach a target length.
 
@@ -400,7 +400,7 @@ fn main() -> Unit = {
 A
 ```
 
-### `string.pad_end(s: String, n: Int, ch: String) -> String`
+### `string.pad_end(s: String, n: Int, fill: String) -> String`
 
 Pad a string on the right to reach a target length.
 
