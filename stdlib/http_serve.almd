@@ -48,7 +48,7 @@ fn __hs_tchar(c: String) -> Bool = c != "" and string.contains(
   c,
 )
 
-fn __hs_cp(c: String) -> Int = string.codepoint(c) ?? 0
+fn __hs_cp(c: String) -> Int = string.to_codepoint(c) ?? 0
 
 // The core's `http_server_quote`: `\` and `"` escaped, a control character
 // (U+0000..=U+001F, U+007F..=U+009F) as `\u{hex}`.
@@ -58,13 +58,13 @@ fn __hs_quote_char(c: String) -> String = match c {
   _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
 }
 
-fn __hs_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
+fn __hs_quote(s: String) -> String = "\"" + (string.to_list(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
 
 fn __hs_control(c: String) -> Bool = (__hs_cp(c) < 32 and c != "\t") or __hs_cp(c) == 127
 
 fn __hs_bad_header(k: String, v: String) -> String? =
-  if k == "" or not list.all(string.chars(k), (c) => __hs_tchar(c)) then some("response header name ${__hs_quote(k)} is not a token")
-  else if list.any(string.chars(v), (c) => __hs_control(c)) then some("response header ${k} has a control character in its value")
+  if k == "" or not list.all(string.to_list(k), (c) => __hs_tchar(c)) then some("response header name ${__hs_quote(k)} is not a token")
+  else if list.any(string.to_list(v), (c) => __hs_control(c)) then some("response header ${k} has a control character in its value")
   else none
 
 fn __hs_pairs(resp: List[String]) -> List[(String, String)] = list.range(

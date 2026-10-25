@@ -1587,7 +1587,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.replace(s: String, from: String, to: String) -> String` — Every from replaced by to.
 - `string.get(s: String, i: Int) -> Option[String]` — Codepoint at i, or none if out of range.
 - `string.lines(s: String) -> List[String]` — Split on \n or \r\n; endings dropped.
-- `string.chars(s: String) -> List[String]` — Each codepoint as a one-char string.
+- `string.to_list(s: String) -> List[String]` — Each codepoint as a one-char string.
 - `string.index_of(s: String, needle: String) -> Option[Int]` — Codepoint index of first needle, or none.
 - `string.repeat(s: String, n: Int) -> String` — s repeated n times; empty for n <= 0.
 - `string.from_bytes(bytes: List[Int]) -> String` — Lossy UTF-8 decode; bad sequences become U+FFFD.
@@ -1597,12 +1597,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.is_whitespace(s: String) -> Bool` — All whitespace; true for empty s.
 - `string.is_upper(s: String) -> Bool` — Has letters, all uppercase; others ignored.
 - `string.is_lower(s: String) -> Bool` — Has letters, all lowercase; others ignored.
-- `string.codepoint(s: String) -> Option[Int]` — Scalar value of first char; none if s empty.
+- `string.to_codepoint(s: String) -> Option[Int]` — Scalar value of first char; none if s empty.
 - `string.from_codepoint(n: Int) -> String` — One-char string; "" if n is not a scalar.
 - `string.pad_end(s: String, n: Int, ch: String) -> String` — Right-padded to n chars with ch; never truncates.
 - `string.trim_start(s: String) -> String` — s without leading whitespace.
 - `string.trim_end(s: String) -> String` — s without trailing whitespace.
-- `string.count(s: String, sub: String) -> Int` — Non-overlapping sub count; len+1 if sub empty.
+- `string.count_matches(s: String, sub: String) -> Int` — Non-overlapping sub count; len+1 if sub empty.
 - `string.is_empty(s: String) -> Bool` — True only for ""; " " is not empty.
 - `string.reverse(s: String) -> String` — Codepoints reversed; not grapheme-aware.
 - `string.strip_prefix(s: String, prefix: String) -> Option[String]` — s without prefix, or none if s lacks it.

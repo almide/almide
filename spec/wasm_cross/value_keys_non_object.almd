@@ -37,18 +37,18 @@ fn main() -> Unit = {
   show("int-wide", value.int(4000000000))
   show("int-min", value.int(-9223372036854775807))
   show("float", value.float(1.5))
-  show("str", value.str("hi"))
-  show("str-long", value.str("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+  show("str", value.string("hi"))
+  show("str-long", value.string("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
   show("array", value.array([value.int(1), value.int(2)]))
   // Through a dirty heap: Null's unwritten slot now aliases a dead string.
   show("dirty-null", dirty(() => value.null()))
   show("dirty-int", dirty(() => value.int(4000000000)))
-  show("dirty-str", dirty(() => value.str("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")))
+  show("dirty-str", dirty(() => value.string("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")))
   // A failed parse taken by `??` is the shape the fuzzer found.
   show("parse-failed", json.parse("nope") ?? value.null())
   // The object path is unchanged: keys in insertion order, the source still
   // live after the keys are bound.
-  let obj = value.object([("a", value.int(1)), ("b", value.str("two")), ("c", value.null())])
+  let obj = value.object([("a", value.int(1)), ("b", value.string("two")), ("c", value.null())])
   let ks = value.keys(obj)
   println("object: ${ks |> list.join(",")}")
   println("object-len: ${list.len(ks)}")
@@ -81,7 +81,7 @@ fn main() -> Unit = {
     ("bool", value.bool(true)),
     ("int", value.int(4000000000)),
     ("float", value.float(1.5)),
-    ("str", value.str("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+    ("str", value.string("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
     ("array", value.array([value.int(1)])),
     ("object", value.object([("a", value.int(1))]))
   ]

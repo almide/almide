@@ -408,7 +408,7 @@ fn __canonical(path: String) -> Bool = {
   let empty_inner = list.enumerate(segs) |> list.any(((i, s)) => s == "" and i + 1 < n)
   let dot = segs |> list.any((s) => s == "." or s == "..")
   let unreserved = string.split(path, "%") |> list.drop(1) |> list.any((p) => __encodes_unreserved(p))
-  let odd = string.chars(path) |> list.any((c) => c == "\\" or (string.codepoint(c) ?? 0) < 32 or (string.codepoint(c) ?? 0) == 127)
+  let odd = string.to_list(path) |> list.any((c) => c == "\\" or (string.to_codepoint(c) ?? 0) < 32 or (string.to_codepoint(c) ?? 0) == 127)
   not empty_inner and not dot and not unreserved and not odd
 }
 
@@ -433,7 +433,7 @@ fn __bad_binding(segs: List[String], parts: List[String]) -> Bool = {
 }
 
 fn __hex_pair(p: String) -> Bool = {
-  let cs = string.chars(string.take(p, 2))
+  let cs = string.to_list(string.take(p, 2))
   list.len(cs) == 2 and list.all(cs, __is_hex)
 }
 
@@ -555,7 +555,7 @@ else if __is_param(s) then __name_of(s) != "" and not string.contains(__name_of(
 )
 else not string.contains(s, "{") and not string.contains(s, "}")
 
-fn __method_ok(m: String) -> Bool = string.chars(m) |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c))
+fn __method_ok(m: String) -> Bool = string.to_list(m) |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c))
 
 fn __pattern_problems(r: HttpRoute) -> List[String] = {
   let last = list.len(r.segments) - 1

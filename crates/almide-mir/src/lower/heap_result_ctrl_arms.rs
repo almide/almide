@@ -365,7 +365,7 @@ impl LowerCtx {
     ///
     /// A NESTED `match` arm (`match int.parse(c) { ok(n) => value.int(n), err(_) =>
     /// match float.parse(c) { … } }` — try_decimal; `if … then match int.from_hex(..) {
-    /// ok(n) => value.int(n), err(_) => value.str(raw) } else …` — parse_number's then-arm).
+    /// ok(n) => value.int(n), err(_) => value.string(raw) } else …` — parse_number's then-arm).
     /// Recurse through the SAME machinery the tail-position `match` uses: a variant subject
     /// runs the proven `try_lower_variant_value_match` (subject-drop-before-arms over a
     /// scalar payload, then a heap-result-`if` skeleton), an Int-literal subject desugars

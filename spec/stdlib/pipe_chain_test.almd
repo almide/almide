@@ -22,7 +22,7 @@ test "pipe: string split then map then join" {
 }
 
 test "pipe: string to chars then reverse then join" {
-  let result = "hello" |> string.chars() |> list.reverse() |> string.join("")
+  let result = "hello" |> string.to_list() |> list.reverse() |> string.join("")
   assert_eq(result, "olleh")
 }
 

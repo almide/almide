@@ -3,7 +3,7 @@
 The JSON **format**: parsing and printing of `Value` trees. import json.
 
 The data model itself lives on `value.*` (auto-imported) — constructors
-(`value.null` / `value.int` / `value.str` / `value.object` / …) and
+(`value.null` / `value.int` / `value.string` / `value.object` / …) and
 accessors (`value.as_*` / `value.field` / `value.keys`) — see
 [value.md](./value.md). The old `json.*` spellings of those operations were retired aliases —
 dropped after their one-release E040 deprecation window; the migration map
@@ -357,7 +357,7 @@ import json
 
 fn main() -> Unit = {
   let j = json.parse("{\"name\": \"Alice\"}") ?? value.null()
-  match json.set_path(j, json.field(json.root(), "name"), value.str("Bob")) {
+  match json.set_path(j, json.field(json.root(), "name"), value.string("Bob")) {
     ok(v) => println(json.stringify(v)),
     err(e) => println("error: ${e}"),
   }
@@ -482,7 +482,7 @@ v0.53.4). A retired spelling is an ordinary E002 undefined-function error now.
 | retired | survivor |
 |---|---|
 | `json.null` / `json.object` / `json.array` / `json.keys` | `value.null` / `value.object` / `value.array` / `value.keys` |
-| `json.from_string` / `json.from_int` / `json.from_bool` / `json.from_float` | `value.str` / `value.int` / `value.bool` / `value.float` |
+| `json.from_string` / `json.from_int` / `json.from_bool` / `json.from_float` | `value.string` / `value.int` / `value.bool` / `value.float` |
 | `json.as_string` … `json.as_array` (returned `Option`) | `value.as_string(v)?` … `value.as_array(v)?` — `?` converts the `Result` to the same `Option` |
 | `json.get(j, k)` (returned `Option`) | `value.field(j, k)?` |
 | `value.get(j, k)` | `value.field(j, k)` |

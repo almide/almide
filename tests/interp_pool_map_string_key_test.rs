@@ -26,7 +26,7 @@ fn assert_agrees_or_abstains(source: &str, expected: &str) {
 fn a_pool_body_keeps_one_entry_per_repeated_string_key() {
     assert_agrees_or_abstains(
         "fn main() -> Unit = {\n\
-         \x20 let v = value.object([(\"q\", value.str(\"a\")), (\"q\", value.str(\"c\"))])\n\
+         \x20 let v = value.object([(\"q\", value.string(\"a\")), (\"q\", value.string(\"c\"))])\n\
          \x20 println(\"${value.keys(v)} ${value.stringify(v)}\")\n\
          }\n",
         "[\"q\"] {\"q\":\"c\"}\n",
@@ -37,7 +37,7 @@ fn a_pool_body_keeps_one_entry_per_repeated_string_key() {
 fn a_pool_body_keeps_distinct_string_keys_apart() {
     assert_agrees_or_abstains(
         "fn main() -> Unit = {\n\
-         \x20 let w = value.object([(\"a\", value.int(1)), (\"b\", value.str(\"a b\")), (\"a\", value.int(3))])\n\
+         \x20 let w = value.object([(\"a\", value.int(1)), (\"b\", value.string(\"a b\")), (\"a\", value.int(3))])\n\
          \x20 println(\"${value.keys(w)} ${value.stringify(w)}\")\n\
          }\n",
         "[\"a\", \"b\"] {\"a\":3,\"b\":\"a b\"}\n",

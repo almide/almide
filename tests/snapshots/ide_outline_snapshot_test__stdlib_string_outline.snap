@@ -6,13 +6,13 @@ fn string.__join(xs: List[String], sep: String) -> String
 fn string.byte_len(s: String) -> Int
 fn string.byte_slice(s: String, start: Int, end: Int) -> Option[String]
 fn string.capitalize(s: String) -> String
-fn string.chars(s: String) -> List[String]
+fn string.to_list(s: String) -> List[String]
 fn string.chunk(s: String, n: Int) -> List[String]
 fn string.clear(s: String) -> Unit
-fn string.codepoint(s: String) -> Option[Int]
+fn string.to_codepoint(s: String) -> Option[Int]
 fn string.compare(a: String, b: String) -> Int
 fn string.contains(s: String, sub: String) -> Bool
-fn string.count(s: String, sub: String) -> Int
+fn string.count_matches(s: String, sub: String) -> Int
 fn string.dedup(s: String) -> String
 fn string.drop(s: String, n: Int) -> String
 fn string.drop_end(s: String, n: Int) -> String

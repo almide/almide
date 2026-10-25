@@ -7,8 +7,8 @@ test "value.int" {
   assert_eq(s, "42")
 }
 
-test "value.str" {
-  let v = value.str("hello")
+test "value.string" {
+  let v = value.string("hello")
   let s = value.stringify(v)
   assert_eq(s.contains("hello"), true)
 }
@@ -42,7 +42,7 @@ test "value.array" {
 }
 
 test "value.object" {
-  let v = value.object([("name", value.str("Alice"))])
+  let v = value.object([("name", value.string("Alice"))])
   let s = value.stringify(v)
   assert_eq(s.contains("Alice"), true)
 }

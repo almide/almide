@@ -1,7 +1,7 @@
 
 /// Recurse the heap-branch desugar INTO an `if`/`match` arm and a block TAIL. After a let-bound
 /// duplication the body becomes `Block{prefix; if c then {<nested branch>} else {…}}`, whose arm
-/// blocks may still hide a call-arg `if` (`(value.str(if…), end)`) or another let-bound branch (the
+/// blocks may still hide a call-arg `if` (`(value.string(if…), end)`) or another let-bound branch (the
 /// block_scalar two-`if` shape). Normalizing those HERE — inside the SHARED `desugar_heap_branches`
 /// both `lower_body_into` and the `count_ir_calls` caps gate call — keeps the duplicated calls 1:1
 /// (mir == ir); doing it lowering-side only (in `lower_heap_result_arm`) would double-count.
@@ -492,7 +492,7 @@ pub fn desugar_let_bound_heap_branch(body: &IrExpr) -> Option<IrExpr> {
     // heap let-bound `if`/`match`.
     // BOUNDED-DUPLICATION: the continuation is copied into BOTH arms, so each remaining heap let-bound
     // `if`/`match` in `rest` doubles the leaf-arm count as the fixpoint resolves them one at a time. A
-    // FEW are fine (block_scalar = 2: `let joined = if…; let tmp = if…(value.str arg, ANF-lifted)`), so
+    // FEW are fine (block_scalar = 2: `let joined = if…; let tmp = if…(value.string arg, ANF-lifted)`), so
     // allow up to 3 (≤ 2^4 = 16 leaves) and refuse beyond that to keep the duplication bounded. The
     // wasm-bindgen `generate_esm` shape stacks 4 top-level optional-list `if`s (matrix/bytes/import_shim/
     // shim_noop, each `if cond then [LITERALS] else []`); the FIRST sees rest = 3, so the old `> 2` gate

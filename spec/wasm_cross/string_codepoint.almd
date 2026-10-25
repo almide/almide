@@ -7,9 +7,9 @@ fn report(s: String) -> Unit = {
   println("-- ${s} --")
   println("len=${int.to_string(string.len(s))}")
   // BYTE length
-  println("nchars=${int.to_string(list.len(string.chars(s)))}")
+  println("nchars=${int.to_string(list.len(string.to_list(s)))}")
   println("reverse=${string.reverse(s)}")
-  println("chars=${list.join(string.chars(s), "|")}")
+  println("chars=${list.join(string.to_list(s), "|")}")
   println("take2=${string.take(s, 2)}")
   println("drop2=${string.drop(s, 2)}")
   println("take_end2=${string.take_end(s, 2)}")
@@ -25,7 +25,7 @@ fn report(s: String) -> Unit = {
   // `pad.chars().next().unwrap_or(' ')`. The v0 arm returned a width-0 unit,
   // silently making the pad a no-op (fuzz seed-1784416403485348966, 3 findings).
   println("pad_empty=[${string.pad_start("Ⅷ", 5, "")}][${string.pad_end("İ", 2, "")}]")
-  println("codepoint=${int.to_string(string.codepoint(s) ?? -1)}")
+  println("codepoint=${int.to_string(string.to_codepoint(string.get(s, 0) ?? "") ?? -1)}")
 }
 
 fn main() -> Unit = {
@@ -53,9 +53,9 @@ fn main() -> Unit = {
     55296
   ]
   for c in cps {
-    let enc = string.from_codepoint(c)
+    let enc = (string.from_codepoint(c) ?? "")
     // round-trip the valid ones back through codepoint for a stable check
-    let back = string.codepoint(enc) ?? -1
+    let back = string.to_codepoint(enc) ?? -1
     println("from_cp ${int.to_string(c)} -> [${enc}] back=${int.to_string(back)} bytes=${int.to_string(string.len(enc))}")
   }
   // Negative n: native casts `n as usize` (a negative i64 -> huge), so take/take_end

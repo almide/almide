@@ -95,7 +95,7 @@ fn __vf_fromint(raw: Int) -> Result[Float, String] = {
   ok(f)
 }
 
-// value.str — a heap-payload Value (tag 4 = Str). The Value OWNS a fresh DEEP COPY of `s` stored
+// value.string — a heap-payload Value (tag 4 = Str). The Value OWNS a fresh DEEP COPY of `s` stored
 // (consumed) into the +12 payload slot via prim.store_str; the runtime-tag-dispatched DropValue
 // frees it when the Value is released. (value.as_string is deferred — it returns Result[String,
 // String], a heap-Ok-payload Result the current len-as-tag Result layout doesn't yet reclaim.)
@@ -290,6 +290,25 @@ else {
 // abstained rather than voting. The same missing tag test is what let the
 // wasm helper walk arbitrary memory. Guarded, all three legs answer [] for
 // the same reason instead of three different ones.
+// value.as_object (R-value-02) — the Object's (key, value) pairs in slot order, each handle
+// SHALLOW-COPIED into its `acc + [(k, x)]` tuple (the __jps_pairs discipline of json_path.almd);
+// any other tag is the `expected Object` err value.field gives.
+fn __vobj_pairs(v: Value, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let x: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+    __vobj_pairs(v, i + 1, n, acc + [(k, x)])
+  }
+
+fn value_as_object(v: Value) -> Result[List[(String, Value)], String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  if tag == 6 then ok(__vobj_pairs(v, 0, prim.load32(h + 8) / 2, []))
+  else err("expected Object, received " + __vkind(tag))
+}
+
 fn value_keys(v: Value) -> List[String] = if prim.load32(prim.handle(v) + 4) == 6 then {
   let h = prim.handle(v)
   let n = prim.load32(h + 8) / 2
@@ -1056,7 +1075,7 @@ else {
 fn __jq_ctrl(s: String, c: Int) -> String = if c >= 32 then s
 else if c == 9 or c == 10 or c == 13 then __jq_ctrl(s, c + 1)
 else __jq_ctrl(
-  string.replace(s, string.from_codepoint(c), "\\u00" + __jq_hex(c / 16) + __jq_hex(c % 16)),
+  string.replace(s, (string.from_codepoint(c) ?? ""), "\\u00" + __jq_hex(c / 16) + __jq_hex(c % 16)),
   c + 1,
 )
 

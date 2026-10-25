@@ -3,7 +3,7 @@
 // with NO UTF-8 check, so `fs.read_text` on a non-UTF-8 file returned ok(<raw bytes>)
 // on wasm where native (std::fs::read_to_string) returns
 // err("stream did not contain valid UTF-8") — and the invalid String then trapped in
-// rc_dec downstream (string.chars). A silent wrong Result branch, then a crash.
+// rc_dec downstream (string.to_list). A silent wrong Result branch, then a crash.
 //
 // This pins the text readers (read_text / read_lines / read_text_if_exists) against
 // invalid, truncated, surrogate and overlong byte sequences — the exact table Rust's

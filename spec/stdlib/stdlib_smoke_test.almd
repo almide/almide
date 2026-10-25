@@ -320,19 +320,19 @@ test "hash deterministic" {
 // ============================================================
 // hash function (cross-platform safe, within JS safe integer range)
 // ============================================================
-test "string.chars basic" {
-  assert_eq(string.chars("abc"), ["a", "b", "c"])
+test "string.to_list basic" {
+  assert_eq(string.to_list("abc"), ["a", "b", "c"])
 }
 
-test "string.chars empty" {
-  assert_eq(string.chars(""), [])
+test "string.to_list empty" {
+  assert_eq(string.to_list(""), [])
 }
 
 // ============================================================
-// string.chars
+// string.to_list
 // ============================================================
-test "string.chars single" {
-  assert_eq(string.chars("x"), ["x"])
+test "string.to_list single" {
+  assert_eq(string.to_list("x"), ["x"])
 }
 
 test "string.index_of found" {
@@ -441,7 +441,7 @@ test "string.is_whitespace false" {
 // string.is_whitespace
 // ============================================================
 test "string UFCS chars" {
-  assert_eq("abc".chars(), ["a", "b", "c"])
+  assert_eq("abc".to_list(), ["a", "b", "c"])
 }
 
 test "string UFCS is_digit" {

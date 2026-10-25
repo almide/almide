@@ -42,7 +42,7 @@ const STRING_MEMBER_REWRITES: &[MemberRewrite] = &[
     MemberRewrite { field: "length", fn_name: "string.len",      args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
     MemberRewrite { field: "len",    fn_name: "string.len",      args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
     MemberRewrite { field: "size",   fn_name: "string.len",      args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
-    MemberRewrite { field: "chars",  fn_name: "string.to_chars", args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
+    MemberRewrite { field: "chars",  fn_name: "string.to_list",  args_tpl: "({0})", display_suffix: "", applicability: Applicability::MachineApplicable },
 ];
 
 impl Checker {

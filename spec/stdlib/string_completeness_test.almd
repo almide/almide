@@ -12,15 +12,15 @@ test "string.reverse single char" {
 }
 
 test "string.count occurrences" {
-  assert_eq(string.count("banana", "an"), 2)
+  assert_eq(string.count_matches("banana", "an"), 2)
 }
 
 test "string.count no match" {
-  assert_eq(string.count("hello", "xyz"), 0)
+  assert_eq(string.count_matches("hello", "xyz"), 0)
 }
 
 test "string.count empty substring" {
-  let n = string.count("abc", "")
+  let n = string.count_matches("abc", "")
   assert(n >= 0)
 }
 
@@ -144,16 +144,16 @@ test "string.is_lower false" {
   assert(not string.is_lower("Abc"))
 }
 
-test "string.codepoint on A" {
-  assert_eq(string.codepoint("A"), some(65))
+test "string.to_codepoint on A" {
+  assert_eq(string.to_codepoint("A"), some(65))
 }
 
-test "string.codepoint on empty" {
-  assert_eq(string.codepoint(""), none)
+test "string.to_codepoint on empty" {
+  assert_eq(string.to_codepoint(""), none)
 }
 
 test "string.from_codepoint 65" {
-  assert_eq(string.from_codepoint(65), "A")
+  assert_eq(string.from_codepoint(65), some("A"))
 }
 
 test "string.to_bytes and from_bytes roundtrip" {

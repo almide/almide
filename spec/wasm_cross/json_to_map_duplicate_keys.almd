@@ -24,12 +24,12 @@ fn main() -> Unit = {
   show("twice", value.object([("k", value.int(1)), ("k", value.int(2))]))
   show(
     "first-position",
-    value.object([("a", value.str("x")), ("b", value.bool(true)), ("a", value.str("y"))]),
+    value.object([("a", value.string("x")), ("b", value.bool(true)), ("a", value.string("y"))]),
   )
   show(
     "mixed",
     value.object([
-      ("s", value.str("plain")),
+      ("s", value.string("plain")),
       ("n", value.null()),
       ("f", value.float(1.5)),
       ("arr", value.array([value.int(1)])),
@@ -40,7 +40,7 @@ fn main() -> Unit = {
     "built",
     value.object([
       ("k", value.int(1)),
-      ("j", value.str("two")),
+      ("j", value.string("two")),
       ("k", value.object([("x", value.int(3))]))
     ]),
   )

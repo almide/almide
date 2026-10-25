@@ -1,6 +1,6 @@
 // string_rle — SELF-HOSTED `string.run_length_encode`: CHAR-level runs (Unicode —
 // "ééa" → [("é", 2), ("a", 1)]), transcribing native runtime/rs/src/string.rs (chars()
-// walk, adjacent-equal extends the last run). Built over `string.chars` (the registered
+// walk, adjacent-equal extends the last run). Built over `string.to_list` (the registered
 // per-char list); each run's char is DEEP-COPIED into its (String, Int) pair (the
 // map.entries_skv pair-block discipline: 2-slot block, slot 0 owns the String, slot 1
 // the i64 count; the pair MOVES into the outer slot; the outer drops per-pair via the
@@ -36,7 +36,7 @@ else {
 }
 
 fn string_run_length_encode(s: String) -> List[(String, Int)] = {
-  let cs = string.chars(s)
+  let cs = string.to_list(s)
   let ch = prim.handle(cs)
   let n = prim.load32(ch + 4)
   if n == 0 then {

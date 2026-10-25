@@ -48,7 +48,7 @@ fn emitted(source: &str, tag: &str) -> String {
 const SRC: &str = "type Address: Codec = { city: String }\n\
     type User: Codec = { name: String, tags: List[String], address: Address, homes: List[Address], alt: Address? }\n\
     fn main() -> Unit = {\n\
-      let v = value.object([(\"name\", value.str(\"a\")), (\"tags\", value.array([])), (\"address\", value.object([(\"city\", value.str(\"t\"))])), (\"homes\", value.array([]))])\n\
+      let v = value.object([(\"name\", value.string(\"a\")), (\"tags\", value.array([])), (\"address\", value.object([(\"city\", value.string(\"t\"))])), (\"homes\", value.array([]))])\n\
       match User.decode(v) { ok(u) => println(u.name), err(e) => println(e) }\n\
     }\n";
 
@@ -127,7 +127,7 @@ const OPT_MATRIX_SRC: &str = "type WithDefault: Codec = { city: String, zip: Str
     type Plain: Codec = { city: String }\n\
     type Rec: Codec = { name: String, a: WithDefault?, b: Plain?, c: List[Int]?, d: Int?, tag: String = \"t\", xs: List[Int] = [] }\n\
     fn main() -> Unit = {\n\
-      let v = value.object([(\"name\", value.str(\"a\"))])\n\
+      let v = value.object([(\"name\", value.string(\"a\"))])\n\
       match Rec.decode(v) { ok(r) => println(r.name), err(e) => println(e) }\n\
     }\n";
 

@@ -2,7 +2,7 @@
 //! droppable value produced by a call or born in the expression (a
 //! literal list, an interpolation, an inner concat) and consumed directly
 //! by a binary op, a `for … in`, a `match`, an index, or an interpolation
-//! (`xs + [4]`, `a + b + c`, `for c in string.chars(s)`) had no owner.
+//! (`xs + [4]`, `a + b + c`, `for c in string.to_list(s)`) had no owner.
 //! The consumer reads the block and never spends its credit, so every
 //! such temporary stayed at rc 1 forever.
 //!

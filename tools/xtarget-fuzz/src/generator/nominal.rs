@@ -224,7 +224,7 @@ pub const NOMINALS: &[Nominal] = &[
             "json.index(json.field(json.root(), \"a\"), 1)",
             "json.index(json.root(), 0)",
         ],
-        observe: "option.map(json.get_path(value.object([(\"a\", value.array([value.int(1), value.str(\"x\")]))]), {v}), (jp) => value.stringify(jp))",
+        observe: "option.map(json.get_path(value.object([(\"a\", value.array([value.int(1), value.string(\"x\")]))]), {v}), (jp) => value.stringify(jp))",
         observed: || GenType::Option(Box::new(GenType::String)),
         digest: "(if option.is_some(json.get_path(value.object([(\"a\", value.int(1))]), {v})) then 1 else 0)",
         observe_calls_effect: false,

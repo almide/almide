@@ -458,7 +458,7 @@ fn value_literal(b: &mut Builder, depth: u32) -> String {
     match *b.rng.pick(kinds) {
         0 => format!("value.int({})", b.rng.pick(pools::INT_POOL)),
         1 => format!("value.float({})", render_float_literal(*b.rng.pick(pools::FLOAT_POOL))),
-        2 => format!("value.str({})", render_string_literal(b.rng.pick(pools::STRING_POOL))),
+        2 => format!("value.string({})", render_string_literal(b.rng.pick(pools::STRING_POOL))),
         3 => format!("value.bool({})", b.rng.pick(pools::BOOL_POOL)),
         4 => "value.null()".to_string(),
         5 => {
