@@ -3,10 +3,11 @@
 
 /// An object key (#1679). The keys of every document a program parses come
 /// from a small fixed vocabulary — the field names of its types — so they are
-/// interned: the first sighting leaks one `&'static str`, every later one is
-/// a pointer copy. `Cow` keeps the fallback honest: past the intern cap, or on
-/// a slot collision, a key is an ordinary owned `String`. Clone of an
-/// interned key is free, no refcount, and the type stays `Send`.
+/// interned: the first sighting fills one slot of a fixed table, every later
+/// one is a pointer copy. `Cow` keeps the fallback honest: a key too long to
+/// intern, or one whose slot holds another key, is an ordinary owned
+/// `String`. Clone of an interned key is free, no refcount, and the type
+/// stays `Send`.
 pub type AlmideKey = std::borrow::Cow<'static, str>;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -21,13 +22,19 @@ pub enum AlmideValue {
 }
 
 const ALMIDE_KEY_SLOTS: usize = 1024;
-const ALMIDE_KEY_LEAK_CAP: usize = 4096;
-thread_local! {
-    /// Direct-mapped key table: one probe, one byte compare, no hashing
-    /// machinery. A collision does not evict — the newcomer stays owned.
-    static ALMIDE_KEY_TABLE: std::cell::RefCell<(Vec<Option<&'static str>>, usize)> =
-        std::cell::RefCell::new((vec![None; ALMIDE_KEY_SLOTS], 0));
-}
+/// A key longer than this is never interned: field names are short, and the
+/// bound keeps the table's whole footprint at most 1024 × 128 bytes.
+const ALMIDE_KEY_INTERN_MAX_LEN: usize = 128;
+/// Direct-mapped key table, ONE for the process (#4202): one probe, one byte
+/// compare, no hashing machinery. A slot is filled once and never evicted —
+/// a collision leaves the newcomer owned. It was per thread, with a leaked
+/// allocation per new key, so every `fan` arm and `fs.fold_lines_chunked`
+/// worker (a fresh thread each call) leaked up to its own table's worth of
+/// keys of any length: RSS grew with every call. Now the whole process holds
+/// at most `ALMIDE_KEY_SLOTS` keys of at most `ALMIDE_KEY_INTERN_MAX_LEN`
+/// bytes, and nothing is leaked.
+static ALMIDE_KEY_TABLE: [std::sync::OnceLock<Box<str>>; ALMIDE_KEY_SLOTS] =
+    [const { std::sync::OnceLock::new() }; ALMIDE_KEY_SLOTS];
 
 #[inline]
 fn almide_rt_key_slot(k: &str) -> usize {
@@ -36,25 +43,14 @@ fn almide_rt_key_slot(k: &str) -> usize {
     (h >> 32) as usize % ALMIDE_KEY_SLOTS
 }
 
-/// Intern `k` as an object key: a pointer copy when it has been seen, one
-/// leaked allocation the first time (bounded by `ALMIDE_KEY_LEAK_CAP`), an owned
-/// `String` otherwise.
+/// Intern `k` as an object key: a pointer copy when its slot holds it (the
+/// first key to reach an empty slot fills it), an owned `String` otherwise.
 pub(crate) fn almide_rt_intern_key(k: &str) -> AlmideKey {
-    ALMIDE_KEY_TABLE.with(|t| {
-        let mut t = t.borrow_mut();
-        let slot = almide_rt_key_slot(k);
-        match t.0[slot] {
-            Some(hit) if hit == k => AlmideKey::Borrowed(hit),
-            Some(_) => AlmideKey::Owned(k.to_string()),
-            None if t.1 < ALMIDE_KEY_LEAK_CAP => {
-                let leaked: &'static str = std::boxed::Box::leak(k.to_string().into_boxed_str());
-                t.0[slot] = Some(leaked);
-                t.1 += 1;
-                AlmideKey::Borrowed(leaked)
-            }
-            None => AlmideKey::Owned(k.to_string()),
-        }
-    })
+    if k.len() > ALMIDE_KEY_INTERN_MAX_LEN {
+        return AlmideKey::Owned(k.to_string());
+    }
+    let held: &'static str = ALMIDE_KEY_TABLE[almide_rt_key_slot(k)].get_or_init(|| k.into());
+    if held == k { AlmideKey::Borrowed(held) } else { AlmideKey::Owned(k.to_string()) }
 }
 
 // ── Construction ──
