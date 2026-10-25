@@ -220,62 +220,62 @@ local fn __zero_run(gs: List[Int], i: Int, cs: Int, cl: Int, bs: Int, bl: Int) -
   else __zero_run(gs, i + 1, -1, 0, bs, bl)
 
 // ── The runtime leaves (handles as the core's table indices) ──
-@intrinsic("almide_rt_net_tcp_connect")
+@intrinsic("almide_rt_net___os_tcp_connect")
 @category("Net.fetch")
 effect fn __os_tcp_connect(host: String, port: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_tcp_read")
+@intrinsic("almide_rt_net___os_tcp_read")
 effect fn __os_tcp_read(stream: Int, len: Int) -> Result[Bytes, String] = _
 
-@intrinsic("almide_rt_net_tcp_write")
+@intrinsic("almide_rt_net___os_tcp_write")
 effect fn __os_tcp_write(stream: Int, data: Bytes) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_net_tcp_close")
+@intrinsic("almide_rt_net___os_tcp_close")
 effect fn __os_tcp_close(stream: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_net_tcp_is_open")
+@intrinsic("almide_rt_net___os_tcp_is_open")
 effect fn __os_tcp_is_open(stream: Int) -> Bool = _
 
-@intrinsic("almide_rt_net_tcp_read_timeout")
+@intrinsic("almide_rt_net___os_tcp_read_timeout")
 effect fn __os_tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = _
 
-@intrinsic("almide_rt_net_tcp_set_timeout")
+@intrinsic("almide_rt_net___os_tcp_set_timeout")
 effect fn __os_tcp_set_timeout(stream: Int, timeout_ms: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_net_tcp_available")
+@intrinsic("almide_rt_net___os_tcp_available")
 effect fn __os_tcp_available(stream: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_tcp_listen")
+@intrinsic("almide_rt_net___os_tcp_listen")
 @category("Net.listen")
 effect fn __os_tcp_listen(host: String, port: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_tcp_local_port")
+@intrinsic("almide_rt_net___os_tcp_local_port")
 @category("Net.listen")
 effect fn __os_tcp_local_port(listener: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_tcp_accept")
+@intrinsic("almide_rt_net___os_tcp_accept")
 @category("Net.listen")
 effect fn __os_tcp_accept(listener: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_tcp_close_listener")
+@intrinsic("almide_rt_net___os_tcp_close_listener")
 @category("Net.listen")
 effect fn __os_tcp_close_listener(listener: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_net_udp_bind")
+@intrinsic("almide_rt_net___os_udp_bind")
 effect fn __os_udp_bind(host: String, port: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_udp_local_port")
+@intrinsic("almide_rt_net___os_udp_local_port")
 effect fn __os_udp_local_port(sock: Int) -> Result[Int, String] = _
 
-@intrinsic("almide_rt_net_udp_send_to")
+@intrinsic("almide_rt_net___os_udp_send_to")
 effect fn __os_udp_send_to(sock: Int, data: Bytes, host: String, port: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_net_udp_recv_from")
+@intrinsic("almide_rt_net___os_udp_recv_from")
 effect fn __os_udp_recv_from(sock: Int, max: Int) -> Result[(Bytes, String, Int), String] = _
 
-@intrinsic("almide_rt_net_udp_close")
+@intrinsic("almide_rt_net___os_udp_close")
 effect fn __os_udp_close(sock: Int) -> Result[Unit, String] = _
 
-@intrinsic("almide_rt_net_lookup_host")
+@intrinsic("almide_rt_net___os_lookup_host")
 @category("Net.fetch")
 effect fn __os_lookup_host(host: String) -> Result[List[String], String] = _
