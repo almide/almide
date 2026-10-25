@@ -309,8 +309,8 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
             crate::embedded::SRC_PROCESS_WASM,
             &[
                 ("__process_exec_impl", "process.exec"),
-                ("__process_output_impl", "process.__os_output"),
-                ("__process_run_impl", "process.__os_run"),
+                ("__process_output_impl", "__os_output"),
+                ("__process_run_impl", "__os_run"),
                 ("__process_kill_impl", "process.kill"),
                 ("__process_pid_impl", "process.pid"),
             ],
