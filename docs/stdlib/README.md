@@ -1145,7 +1145,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `json.field(path: JsonPath, name: String) -> JsonPath` — path extended by object key name.
 - `json.index(path: JsonPath, i: Int) -> JsonPath` — path plus index i; negative i counts from end.
 - `json.get_path(j: Value, path: JsonPath) -> Option[Value]` — Value at path, or none if a step misses.
-- `json.set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String]` — j with value at path; missing keys created.
+- `json.set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String]` — j with value at path; missing keys created; err if nested past 1000.
 - `json.remove_path(j: Value, path: JsonPath) -> Value` — j minus the entry at path; unchanged if absent.
 - `json.to_map(j: Value) -> Option[Map[String, String]]` — Object as key->string map (non-strings as JSON).
 
