@@ -676,7 +676,7 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         ),
         (
             crate::embedded::SRC_STRING_FROM_CODEPOINT,
-            &[("string_from_codepoint", "string.from_codepoint")],
+            &[("string_from_codepoint", "string.__from_codepoint")],
         ),
         (
             crate::embedded::SRC_STRING_CODEPOINT,
