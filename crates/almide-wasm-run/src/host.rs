@@ -153,6 +153,39 @@ struct Contain {
     active: bool,
     /// The held write and whether it was a line (eprintln) or raw (op 73).
     held: Option<(Vec<u8>, bool)>,
+    /// `process.exit` sent its mark (op 76): the call ends by a deliberate
+    /// exit, which is never contained.
+    exit_marked: bool,
+}
+
+/// `process.exit`'s mark (crates/almide-wasm fs_meta.rs `OP_EXIT_MARK`).
+const OP_EXIT_MARK: i32 = 76;
+
+enum Handles {
+    Begin,
+    End,
+    Abort,
+}
+
+/// The handles an `http.serve` handler opens (#4203): recorded from the
+/// request's hand-out to its reply, and closed if its handler aborts — the
+/// tcp and unix tables and the http calls.
+fn request_handles(host: &Host, h: Handles) -> usize {
+    let mut net = host.net.lock().expect("net");
+    let mut calls = host.calls.lock().expect("calls");
+    match h {
+        Handles::Begin => {
+            net.request_begin();
+            calls.request_begin();
+            0
+        }
+        Handles::End => {
+            net.request_end();
+            calls.request_end();
+            0
+        }
+        Handles::Abort => net.request_abort() + calls.request_abort(),
+    }
 }
 
 /// See [`Host::allowed_ops`].
@@ -749,6 +782,12 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
             if op == crate::host_serve::OP_SERVE_RUN {
                 return serve_contained(&mut caller, a_len);
             }
+            // op 76 = `process.exit`'s mark (#4203): the exit that follows is
+            // the program's own, never a contained abort.
+            if op == OP_EXIT_MARK {
+                caller.data().contain.lock().expect("contain").exit_marked = true;
+                return Ok(0);
+            }
             // op 74 = the instance-parallel fan offer (#3003): the request
             // and the answer room are raw i64 slots, never text.
             if op == fan::OP_FAN_PAR {
@@ -836,6 +875,13 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
             // live in the run's own state — one per run, like native's.
             if (crate::host_serve::OP_SERVE_BIND..=crate::host_serve::OP_SERVE_REPLY).contains(&op) {
                 let (ret, buf) = crate::host_serve::dispatch(&caller.data().serve, caller.data().live_out.as_ref(), op, &a, frames, parse_http_frame);
+                // #4203: a request handed out starts its handler's handle
+                // record; its reply ends it.
+                if op == crate::host_serve::OP_SERVE_NEXT && !buf.is_empty() {
+                    request_handles(caller.data(), Handles::Begin);
+                } else if op == crate::host_serve::OP_SERVE_REPLY {
+                    request_handles(caller.data(), Handles::End);
+                }
                 *caller.data().fs_buf.lock().expect("fs buf") = buf;
                 return Ok(ret);
             }
@@ -969,9 +1015,15 @@ fn abort_site_op(caller: &wasmtime::Caller<'_, Host>, op: i32, a_len: i32) -> i6
 /// Only the two defined aborts are contained, the ones native's serve loop
 /// catches (`almide_abort`, `almide_panic_abort`): the line `Error: <m>`
 /// (or `PANIC: <m>`, or `panic`'s raw `PANIC: <m>`) written just before the
-/// call ends on its `unreachable` (the die convention) or its exit 1. Any
-/// other end of the call (another exit code, stack exhaustion, another
-/// trap, an abort outside a request) stays the run's, as on native.
+/// call ends on its `unreachable` (the die convention) or its exit 1. A
+/// `process.exit` sends its own mark (op 76) before its exit import, so a
+/// program that prints `Error: x` and then calls `process.exit(1)` is told
+/// apart exactly: it ends the run, as on native. Any other end of the call
+/// (another exit code, stack exhaustion, another trap, an abort outside a
+/// request) stays the run's too. A contained abort also closes the tcp
+/// sockets, unix descriptors and http calls the aborted handler opened and
+/// left open (`request_handles`) — native's unwinding drops what owned
+/// them; the guest's own drop paths were rolled back with its state.
 fn serve_contained(caller: &mut wasmtime::Caller<'_, Host>, env: i32) -> wasmtime::Result<i64> {
     const NOT_SERVED: i64 = 1 << 32;
     let mem = guest_memory(caller)?;
@@ -997,12 +1049,16 @@ fn serve_contained(caller: &mut wasmtime::Caller<'_, Host>, env: i32) -> wasmtim
     let serve = caller.data().serve.clone();
     let mut results = vec![wasmtime::Val::I32(0); func.ty(&*caller).results().len()];
     loop {
-        caller.data().contain.lock().expect("contain").active = true;
+        {
+            let mut c = caller.data().contain.lock().expect("contain");
+            c.active = true;
+            c.exit_marked = false;
+        }
         let ran = func.call(&mut *caller, &[wasmtime::Val::I32(env)], &mut results);
-        let held = {
+        let (held, exit_marked) = {
             let mut c = caller.data().contain.lock().expect("contain");
             c.active = false;
-            c.held.take()
+            (c.held.take(), c.exit_marked)
         };
         let put_back = |host: &Host, held: Option<(Vec<u8>, bool)>| match held {
             Some((b, true)) => emit_err_line_now(host, &b),
@@ -1019,7 +1075,7 @@ fn serve_contained(caller: &mut wasmtime::Caller<'_, Host>, env: i32) -> wasmtim
         let exit = *caller.data().exit.lock().expect("exit");
         // The abort's own end: its `unreachable` (the die convention) or
         // its exit 1 (the emitter's guards and `panic`).
-        let ended = matches!(exit, Some(1)) || (exit.is_none() && is_unreachable_trap(&e));
+        let ended = !exit_marked && (matches!(exit, Some(1)) || (exit.is_none() && is_unreachable_trap(&e)));
         let text = match &held {
             Some((h, line)) if ended => match h.strip_prefix(b"Error: ").filter(|_| *line) {
                 Some(m) => Some(m.to_vec()),
@@ -1033,6 +1089,7 @@ fn serve_contained(caller: &mut wasmtime::Caller<'_, Host>, env: i32) -> wasmtim
             return Err(e);
         };
         *caller.data().exit.lock().expect("exit") = None;
+        request_handles(caller.data(), Handles::Abort);
         emit_err_line_now(caller.data(), line.as_bytes());
         let data = mem.data_mut(&mut *caller);
         data[..snapshot.len()].copy_from_slice(&snapshot);
