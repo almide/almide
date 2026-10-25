@@ -469,7 +469,7 @@ mod tests {
             let (module, func) = f.split_once('.').unwrap();
             assert_eq!(module, "http", "{f}: only http's declarations are read here");
             let sig = HTTP.lines().find(|l| l.starts_with(&format!("effect fn {func}("))).unwrap_or_else(|| panic!("{f}: not declared in stdlib/http.almd"));
-            assert_eq!(sig, format!("effect fn {func}(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit = _"), "{f}");
+            assert_eq!(sig, format!("effect fn {func}(port: Int, handler: effect (HttpRequest) -> HttpResponse) -> Unit = _"), "{f}");
         }
     }
 
@@ -498,9 +498,9 @@ mod tests {
         assert_eq!(lines.len(), Plan::Script.requests().len() + 1, "{}", s.transcript);
         assert!(drv::verdicts_hold(&s.transcript), "{}", s.transcript);
         assert_eq!(*lines.last().unwrap(), "exit 0");
-        assert!(lines[2].starts_with("#2 POST /echo -> HTTP/1.1 200 [content-type: text/plain; charset=utf-8; x-token: abc] body=POST /echo [] \\xe6\\x97\\xa5"), "{}", lines[2]);
-        assert!(lines[3].starts_with("#3 PUT /a/b -> HTTP/1.1 418 [content-type: text/plain; x-kind: teapot] body=a\\xef\\xbf\\xbdb"), "{}", lines[3]);
-        assert!(lines[7].starts_with("#7 GET /missing -> HTTP/1.1 500 [content-type: text/plain] body=Internal error: no route /missing"), "{}", lines[7]);
+        assert!(lines[2].starts_with("#2 POST /echo -> HTTP/1.1 200 [content-type: text/plain; charset=utf-8; x-content-type-options: nosniff; x-token: abc] body=POST /echo [] \\xe6\\x97\\xa5"), "{}", lines[2]);
+        assert!(lines[3].starts_with("#3 PUT /a/b -> HTTP/1.1 418 [content-type: text/plain; x-content-type-options: nosniff; x-kind: teapot] body=a\\xef\\xbf\\xbdb"), "{}", lines[3]);
+        assert!(lines[7].starts_with("#7 GET /missing -> HTTP/1.1 500 [content-type: text/plain; x-content-type-options: nosniff] body=Internal error: no route /missing"), "{}", lines[7]);
     }
 
     #[test]
