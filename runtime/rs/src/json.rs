@@ -492,6 +492,50 @@ pub fn almide_json_set_path(j: &AlmideValue, path: &AlmideJsonPath, value: Almid
     Ok(set_at_steps(j, &steps, &value))
 })(); __almide_r.map_err(Into::into) }
 
+/// The `@reuse(j)` twin (#4207): a document at its last use is updated IN
+/// PLACE — only the path is walked, every untouched sibling stays where it is
+/// — where the borrowing form clones the whole document per call, so a fold of
+/// n `set_path` calls was quadratic in copies. Same answer as `set_at_steps`.
+pub fn almide_json_set_path_owned(j: AlmideValue, path: &AlmideJsonPath, value: AlmideValue) -> Result<AlmideValue, AlmideString> {
+    let steps = resolve_path(path);
+    Ok(set_at_steps_owned(j, &steps, &value))
+}
+
+fn set_at_steps_owned(j: AlmideValue, steps: &[AlmidePathStep], value: &AlmideValue) -> AlmideValue {
+    if steps.is_empty() { return value.clone(); }
+    match &steps[0] {
+        AlmidePathStep::Field(key) => match j {
+            AlmideValue::Object(mut entries) => {
+                let rest = &steps[1..];
+                let mut hit = false;
+                for (k, v) in entries.iter_mut() {
+                    if k.as_ref() == key.as_str() {
+                        hit = true;
+                        let old = std::mem::replace(v, AlmideValue::Null);
+                        *v = set_at_steps_owned(old, rest, value);
+                    }
+                }
+                if !hit {
+                    entries.push((almide_rt_intern_key(key), set_at_steps_owned(AlmideValue::Object(vec![]), rest, value)));
+                }
+                AlmideValue::Object(entries)
+            }
+            _ => AlmideValue::Object(vec![(almide_rt_intern_key(key), set_at_steps_owned(AlmideValue::Object(vec![]), &steps[1..], value))]),
+        },
+        AlmidePathStep::Index(i) => match j {
+            AlmideValue::Array(mut items) => {
+                let idx = if *i < 0 { items.len() as i64 + *i } else { *i } as usize;
+                if idx < items.len() {
+                    let old = std::mem::replace(&mut items[idx], AlmideValue::Null);
+                    items[idx] = set_at_steps_owned(old, &steps[1..], value);
+                }
+                AlmideValue::Array(items)
+            }
+            other => other,
+        },
+    }
+}
+
 pub fn almide_json_remove_path(j: &AlmideValue, path: &AlmideJsonPath) -> AlmideValue {
     let steps = resolve_path(path);
     remove_at_steps(j, &steps)

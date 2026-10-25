@@ -67,6 +67,7 @@ fn index(path: JsonPath, i: Int) -> JsonPath = _
 fn get_path(j: Value, path: JsonPath) -> Value? = _
 
 /// j with value at path; missing keys created.
+@reuse(j)
 @intrinsic("almide_json_set_path")
 @borrow_ref(path)
 @consume(value)
