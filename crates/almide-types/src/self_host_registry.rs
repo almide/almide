@@ -340,8 +340,6 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (crate::embedded::SRC_UINT64_CONVERT, &[("uint64_to_int8", "uint64.to_int8"), ("uint64_to_int16", "uint64.to_int16"), ("uint64_to_int32", "uint64.to_int32"), ("uint64_to_int64", "uint64.to_int64"), ("uint64_to_uint8", "uint64.to_uint8"), ("uint64_to_uint16", "uint64.to_uint16"), ("uint64_to_uint32", "uint64.to_uint32"), ("uint64_to_float32", "uint64.to_float32"), ("uint64_to_float64", "uint64.to_float64"), ("uint64_to_string", "uint64.to_string"), ("uint64_to_int8_checked", "uint64.to_int8_checked"), ("uint64_to_int8_saturating", "uint64.to_int8_saturating"), ("uint64_to_int16_checked", "uint64.to_int16_checked"), ("uint64_to_int16_saturating", "uint64.to_int16_saturating"), ("uint64_to_int32_checked", "uint64.to_int32_checked"), ("uint64_to_int32_saturating", "uint64.to_int32_saturating"), ("uint64_to_int64_checked", "uint64.to_int64_checked"), ("uint64_to_int64_saturating", "uint64.to_int64_saturating"), ("uint64_to_uint8_checked", "uint64.to_uint8_checked"), ("uint64_to_uint8_saturating", "uint64.to_uint8_saturating"), ("uint64_to_uint16_checked", "uint64.to_uint16_checked"), ("uint64_to_uint16_saturating", "uint64.to_uint16_saturating"), ("uint64_to_uint32_checked", "uint64.to_uint32_checked"), ("uint64_to_uint32_saturating", "uint64.to_uint32_saturating"), ("int_from_uint64_checked", "int.from_uint64_checked"), ("int_from_uint64_saturating", "int.from_uint64_saturating")]),
         (crate::embedded::SRC_INT64_CONVERT, &[("int64_to_string", "int64.to_string"), ("int64_to_int8", "int64.to_int8"), ("int64_to_int16", "int64.to_int16"), ("int64_to_int32", "int64.to_int32"), ("int64_to_uint8", "int64.to_uint8"), ("int64_to_uint16", "int64.to_uint16"), ("int64_to_uint32", "int64.to_uint32"), ("int64_to_uint64", "int64.to_uint64"), ("int64_to_float32", "int64.to_float32"), ("int64_to_float64", "int64.to_float64"), ("int64_to_int8_checked", "int64.to_int8_checked"), ("int64_to_int8_saturating", "int64.to_int8_saturating"), ("int64_to_int16_checked", "int64.to_int16_checked"), ("int64_to_int16_saturating", "int64.to_int16_saturating"), ("int64_to_int32_checked", "int64.to_int32_checked"), ("int64_to_int32_saturating", "int64.to_int32_saturating"), ("int64_to_uint8_checked", "int64.to_uint8_checked"), ("int64_to_uint8_saturating", "int64.to_uint8_saturating"), ("int64_to_uint16_checked", "int64.to_uint16_checked"), ("int64_to_uint16_saturating", "int64.to_uint16_saturating"), ("int64_to_uint32_checked", "int64.to_uint32_checked"), ("int64_to_uint32_saturating", "int64.to_uint32_saturating"), ("int64_to_uint64_checked", "int64.to_uint64_checked"), ("int64_to_uint64_saturating", "int64.to_uint64_saturating")]),
         (crate::embedded::SRC_FLOAT64_CONVERT, &[("float64_to_string", "float64.to_string"), ("float64_to_int8", "float64.to_int8"), ("float64_to_int16", "float64.to_int16"), ("float64_to_int32", "float64.to_int32"), ("float64_to_int64", "float64.to_int64"), ("float64_to_uint8", "float64.to_uint8"), ("float64_to_uint16", "float64.to_uint16"), ("float64_to_uint32", "float64.to_uint32"), ("float64_to_uint64", "float64.to_uint64"), ("float64_to_float32", "float64.to_float32")]),
-        (crate::embedded::SRC_STRING_SPLIT, &[("string_split", "string.split")]),
-        (crate::embedded::SRC_STRING_SPLIT_ONCE, &[("string_split_once", "string.split_once")]),
         (crate::embedded::SRC_STRING_CHARS, &[("string_chars", "string.chars")]),
         (crate::embedded::SRC_STRING_LINES, &[("string_lines", "string.lines")]),
         (crate::embedded::SRC_STRING_JOIN, &[("string_join", "string.join"), ("list_join", "list.__join_string")]),
@@ -390,7 +388,6 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
         (
             crate::embedded::SRC_BYTES_SPLIT,
             &[
-                ("bytes_split", "bytes.split"),
                 ("bytes_lines", "bytes.lines"),
                 ("bytes_chunks", "bytes.__chunks"),
             ],
@@ -727,13 +724,6 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
             ],
         ),
         (crate::embedded::SRC_STRING_REVERSE, &[("string_reverse", "string.reverse")]),
-        (
-            crate::embedded::SRC_STRING_REPLACE,
-            &[
-                ("string_replace", "string.replace"),
-                ("string_replace_first", "string.replace_first"),
-            ],
-        ),
         (
             crate::embedded::SRC_STRING_PAD,
             &[("string_pad_start", "string.pad_start"), ("string_pad_end", "string.pad_end")],
