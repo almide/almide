@@ -104,6 +104,8 @@ UNMODELED = {
 # and the module to import.
 NOMINAL = {
     "Value": ("value.int(0)", "value.int", None),
+    # value's path (R-value, wave 4A): built from `value.root()` by key/index.
+    "Path": ("value.root()", "value.root", None),
     "JsonPath": ("json.root()", "json.root", "json"),
     "SafeHtml": ("html.empty()", "html.empty", "html"),
     "SafePath": ('path.trusted("x")', "path.trusted", "path"),
@@ -494,6 +496,10 @@ def synth(mod, f, params, ret, types, variant, shape=0):
         body = f"{body}\n  println(\"p\")"
     if mod in EXPLICIT_IMPORT:
         ctx.imports.add(mod)
+    # The raw-pointer `bytes` spellings sit outside the memory-safety
+    # guarantee: a file calling one must `import ffi` (E100).
+    if any(f"bytes.{p}(" in body for p in ("as_ptr", "as_mut_ptr", "data_ptr", "copy_to_ptr", "from_raw_ptr")):
+        ctx.imports.add("ffi")
     imp = "".join(f"import {m}\n" for m in sorted(ctx.imports))
     imp = imp + "\n" if imp else ""
     return f"{imp}effect fn main() -> Unit = {{\n{body}\n}}\n", ctx

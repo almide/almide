@@ -38,7 +38,7 @@ effect fn main() -> Unit = {
     ok(_) => println("scheme:unexpected-ok"),
     err(e) => println("scheme:${e}"),
   }
-  match http.get_response("http://127.0.0.1:99999/") {
+  match http.get_bytes("http://127.0.0.1:99999/") {
     ok(_) => println("port:unexpected-ok"),
     err(e) => println("port:${e}"),
   }

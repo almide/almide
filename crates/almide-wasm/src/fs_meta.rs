@@ -480,26 +480,6 @@ impl Emitter<'_> {
         let oh = self.types.intern(SliceTy::Option(inner));
         Ok(SliceTy::Result(oh, self.types.intern(STR)))
     }
-
-    /// The one decode of a host-staged byte block (`hraw`, `hlen` bytes)
-    /// into a fresh `List[Int]` in `hout`, one i64 slot per byte. The
-    /// staging block is the caller's own scratch: once decoded it goes
-    /// (#3629, #3677 — each copy of this loop had to remember it apart).
-    pub(crate) fn emit_decode_staged_bytes(&mut self, hraw: u32, hlen: u32, hout: u32, hk: u32) {
-        let mut i = self.f.instructions();
-        i.local_get(hlen).i32_const(3).i32_shl().call(F_ALLOC).local_set(hout);
-        i.i32_const(0).local_set(hk);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hk).local_get(hlen).i32_ge_u().br_if(1);
-        i.local_get(hout).local_get(hk).i32_const(3).i32_shl().i32_add();
-        i.local_get(hraw).local_get(hk).i32_add();
-        i.i64_load8_u(crate::bytes::byte_k(0));
-        i.i64_store(slot_memarg(0));
-        i.local_get(hk).i32_const(1).i32_add().local_set(hk);
-        i.br(0).end().end();
-        i.local_get(hraw).call(F_DEC_FLAT);
-    }
-
 }
 
 /// Does the callback body still carry a propagation marker? The frontend
