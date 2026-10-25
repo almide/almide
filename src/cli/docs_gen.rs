@@ -500,8 +500,10 @@ fn check_numeric_conversion_matrix() -> Vec<String> {
     let mut drifts = Vec::new();
     let mut surface: std::collections::HashMap<&str, std::collections::HashSet<String>> =
         std::collections::HashMap::new();
-    for m in CARRIERS.iter().map(|c| c.0).chain(["int", "float"]) {
-        surface.insert(m, module_function_names(m));
+    // Read exactly the modules the expectations name, so a new row's module
+    // is never a second list to keep in step.
+    for (m, _) in expect_present.iter().chain(&expect_absent) {
+        surface.entry(*m).or_insert_with(|| module_function_names(m));
     }
     for (m, f) in &expect_present {
         if !surface[m].contains(f) {
