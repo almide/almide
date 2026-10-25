@@ -263,6 +263,7 @@ spec/wasm_cross/fs_preopen_resolve.almd
 spec/wasm_cross/fs_read_bytes_raw_call_head.almd
 spec/wasm_cross/fs_read_directory_errno.almd
 spec/wasm_cross/fs_read_lines.almd
+spec/wasm_cross/fs_read_non_regular.almd
 spec/wasm_cross/fs_read_text_utf8.almd
 spec/wasm_cross/fs_relative_path.almd
 spec/wasm_cross/fs_root_escape.almd
