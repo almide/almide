@@ -1,4 +1,4 @@
-//! C-418 (#4126): the escaper every leg's error text runs. The escape set is
+//! #4126: the escaper every leg's error text runs. The escape set is
 //! exactly C0, DEL, C1 and the bidi controls; every other character, quote
 //! and backslash included, is kept.
 use almide_base::err_text::{

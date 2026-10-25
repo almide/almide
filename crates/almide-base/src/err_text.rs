@@ -1,4 +1,4 @@
-// err_text (C-418, #4126): the ONE escaper for user data a runtime error text
+// err_text (#4126): the ONE escaper for user data a runtime error text
 // embeds — a path, a command, a socket path, a host name. Without it a path
 // holding `\n` forges a second log line and one holding ESC drives the
 // reader's terminal.
@@ -24,7 +24,7 @@
 // lib.rs. Splice discipline: no `crate::` paths, no `mod`, no `use` lines,
 // every name prefixed `almide_rt_errtext_`.
 
-/// True for a character C-418 escapes in an error text.
+/// True for a character this module escapes in an error text.
 pub fn almide_rt_errtext_is_escaped(c: char) -> bool {
     matches!(
         c as u32,
@@ -32,7 +32,7 @@ pub fn almide_rt_errtext_is_escaped(c: char) -> bool {
     )
 }
 
-/// `s` with every C-418 character escaped (see the file header).
+/// `s` with every such character escaped (see the file header).
 pub fn almide_rt_errtext_escape(s: &str) -> String {
     if !s.chars().any(almide_rt_errtext_is_escaped) {
         return s.to_string();
