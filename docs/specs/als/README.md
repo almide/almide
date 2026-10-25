@@ -42,7 +42,7 @@
 | [ALS-D1](./data-formats.md#als-d1-json-パス操作) | JSON パス操作 | C-031 |
 | [ALS-D2](./data-formats.md#als-d2-value-の-json-テキスト表現) | Value の JSON テキスト表現 | C-060, C-356 |
 | [ALS-D3](./data-formats.md#als-d3-異種ネスト文書の走査) | 異種ネスト文書の走査 | C-063 |
-| [ALS-D4](./data-formats.md#als-d4-正規表現エンジン) | 正規表現エンジン | C-032, C-160, C-285, C-347 |
+| [ALS-D4](./data-formats.md#als-d4-正規表現エンジン) | 正規表現エンジン | C-032, C-160, C-285, C-347, C-395 |
 | [ALS-D5](./data-formats.md#als-d5-半精度浮動小数のデコード) | 半精度浮動小数のデコード | C-037 |
 | [ALS-D6](./data-formats.md#als-d6-codec-と-json-デコード) | Codec と JSON デコード | C-084, C-085, C-095, C-098, C-103, C-209, C-211, C-216, C-217, C-357, C-427, C-428, C-429 |
 | [ALS-D7](./data-formats.md#als-d7-バイト列ブリッジ) | バイト列ブリッジ | C-062, C-090, C-376 |
@@ -117,10 +117,10 @@
 | [ALS-R2](./runtime.md#als-r2-補間の表示形) | 補間の表示形 | C-008, C-009, C-010, C-011, C-222 |
 | [ALS-R3](./runtime.md#als-r3-fan-並行コンビネータの決定性) | fan 並行コンビネータの決定性 | C-004, C-005, C-006, C-199, C-321, C-349, C-386 |
 | [ALS-R4](./runtime.md#als-r4-非有限浮動小数の定数表示) | 非有限浮動小数の定数表示 | C-012 |
-| [ALS-R5](./runtime.md#als-r5-プロセス環境) | プロセス環境 | C-096, C-112, C-118, C-133, C-189, C-214, C-215, C-290, C-327, C-330, C-328, C-329, C-331, C-366, C-367, C-370, C-374, C-375, C-377, C-378, C-379, C-382, C-383, C-385 |
-| [ALS-R6](./runtime.md#als-r6-ファイルシステムのパス解決) | ファイルシステムのパス解決 | C-042, C-137, C-220, C-225, C-227, C-228, C-229, C-230, C-270, C-272, C-273, C-278, C-282, C-283, C-284 |
+| [ALS-R5](./runtime.md#als-r5-プロセス環境) | プロセス環境 | C-096, C-112, C-118, C-133, C-189, C-214, C-215, C-290, C-327, C-330, C-328, C-329, C-331, C-366, C-367, C-370, C-374, C-375, C-377, C-378, C-379, C-382, C-383, C-385, C-389, C-390, C-394, C-404, C-405, C-407, C-408, C-409 |
+| [ALS-R6](./runtime.md#als-r6-ファイルシステムのパス解決) | ファイルシステムのパス解決 | C-042, C-137, C-220, C-225, C-227, C-228, C-229, C-230, C-270, C-272, C-273, C-278, C-282, C-283, C-284, C-392, C-393, C-396, C-397, C-398 |
 | [ALS-R7](./runtime.md#als-r7-ストリーミング行走査の可謬コールバック) | ストリーミング行走査の可謬コールバック | C-274, C-335 |
-| [ALS-R8](./runtime.md#als-r8-http-レスポンスヘッダの規範) | HTTP レスポンスヘッダの規範 | C-275, C-368 |
+| [ALS-R8](./runtime.md#als-r8-http-レスポンスヘッダの規範) | HTTP レスポンスヘッダの規範 | C-275, C-368, C-406 |
 | [ALS-R9](./runtime.md#als-r9-プロセス終了コードの値域) | プロセス終了コードの値域 | C-350, C-351 |
 
 ## semantics.md — 15 section(s)
@@ -160,9 +160,9 @@
 |----|---------|-----------|
 | [ALS-T1](./text-and-numbers.md#als-t1-stringtrim) | `string.trim` | C-021, C-294 |
 | [ALS-T2](./text-and-numbers.md#als-t2-floatparse) | `float.parse` | C-024, C-210, C-300, C-301 |
-| [ALS-T3](./text-and-numbers.md#als-t3-jsonparse) | `json.parse` | C-087, C-298, C-299 |
+| [ALS-T3](./text-and-numbers.md#als-t3-jsonparse) | `json.parse` | C-087, C-298, C-299, C-391, C-400, C-401 |
 | [ALS-T4](./text-and-numbers.md#als-t4-listchunk--listwindows) | `list.chunk` / `list.windows` | C-129, C-171 |
-| [ALS-T5](./text-and-numbers.md#als-t5-stringto_upper--stringto_lower) | `string.to_upper` / `string.to_lower` | C-020, C-162 |
+| [ALS-T5](./text-and-numbers.md#als-t5-stringto_upper--stringto_lower) | `string.to_upper` / `string.to_lower` | C-020, C-162, C-399 |
 | [ALS-T6](./text-and-numbers.md#als-t6-整数演算の終了規約（termination-convention）) | 整数演算の終了規約（termination convention） | C-001, C-002, C-047, C-067, C-154, C-155, C-161, C-169, C-184, C-196, C-197, C-198, C-200, C-219, C-353 |
 | [ALS-T7](./text-and-numbers.md#als-t7-トップレベル-let-の評価時機) | トップレベル let の評価時機 | C-007, C-077, C-111 |
 | [ALS-T8](./text-and-numbers.md#als-t8-整数パースの文法とエラー規範) | 整数パースの文法とエラー規範 | C-028, C-029 |
@@ -184,7 +184,7 @@
 | [ALS-T24](./text-and-numbers.md#als-t24-float-→-int-変換) | Float → Int 変換 | C-307, C-338, C-341 |
 | [ALS-T25](./text-and-numbers.md#als-t25-matrix-の超越計算と積の順序) | matrix の超越計算と積の順序 | C-223 |
 | [ALS-T26](./text-and-numbers.md#als-t26-datetime-の暦フィールドと-parse_iso-の文法) | datetime の暦フィールドと parse_iso の文法 | C-359, C-360 |
-| [ALS-T27](./text-and-numbers.md#als-t27-urlparse-の-authority-規範) | url.parse の authority 規範 | C-361 |
+| [ALS-T27](./text-and-numbers.md#als-t27-urlparse-の-authority-規範) | url.parse の authority 規範 | C-361, C-402, C-403 |
 | [ALS-T28](./text-and-numbers.md#als-t28-float32-演算の-binary32-丸め) | Float32 演算の binary32 丸め | C-371 |
 | [ALS-T29](./text-and-numbers.md#als-t29-float32-の表示) | Float32 の表示 | C-372 |
 | [ALS-T30](./text-and-numbers.md#als-t30-testingassert_aborts-—-子で走る-abort-表明) | testing.assert_aborts — 子で走る abort 表明 | C-384 |
