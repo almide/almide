@@ -25,13 +25,13 @@ fn show(r: Result[Unit, String]) -> String = match r {
 
 effect fn main() -> Unit = {
   fs.mkdir_p("full/sub")!
-  fs.write("full/sub/f.txt", "x")!
+  fs.write_text("full/sub/f.txt", "x")!
   fs.mkdir_p("other")!
-  fs.write("other/g.txt", "y")!
+  fs.write_text("other/g.txt", "y")!
   println(show(fs.remove("full")))
   println(show(fs.rename("other", "full")))
   let long = string.repeat("n", 300)
-  println(show(fs.write(long, "z")))
+  println(show(fs.write_text(long, "z")))
   println(match fs.read_text(long) { ok(v) => "ok(${v})", err(m) => m })
   println(show(fs.mkdir_p("full/" + long)))
 }
@@ -42,7 +42,7 @@ fn expected() -> String {
     [
         "fs.remove(\"full\"): Directory not empty".to_string(),
         "fs.rename(\"other\", \"full\"): Directory not empty".to_string(),
-        format!("fs.write(\"{long}\"): File name too long"),
+        format!("fs.write_text(\"{long}\"): File name too long"),
         format!("fs.read_text(\"{long}\"): File name too long"),
         format!("fs.mkdir_p(\"full/{long}\"): File name too long"),
     ]

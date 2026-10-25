@@ -33,7 +33,7 @@ effect fn crawl_module(mod_name: String, save: Bool) -> Unit = {
   let output = process.exec("node", ["-e", introspect_script(), mod_name])
   if save then {
     fs.mkdir_p(DATA_DIR)
-    fs.write("${DATA_DIR}/${mod_name}.json", output)
+    fs.write_text("${DATA_DIR}/${mod_name}.json", output)
     println("Saved: ${DATA_DIR}/${mod_name}.json")
   } else {
     println(string.trim(output))

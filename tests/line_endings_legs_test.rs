@@ -30,7 +30,7 @@ effect fn show_line(l: String) -> Result[Unit, String] = {
 
 effect fn probe(name: String, s: String) -> Unit = {
   let p = "probe.txt"
-  fs.write(p, s)!
+  fs.write_text(p, s)!
   println(name)
   println("  lines     " + lens(string.lines(s)))
   println("  split     " + lens(string.split(s, "\n")))
@@ -164,7 +164,7 @@ const PROBE_PARTITIONED: &str = r#"import fs
 
 effect fn probe(name: String, s: String) -> Unit = {
   let p = "probe.txt"
-  fs.write(p, s)!
+  fs.write_text(p, s)!
   let r = fs.fold_lines_range(p, 0, 1000, [], (acc, l) => acc + [int.to_string(string.len(l))])!
   let c = fs.fold_lines_chunked(p, 2, 0, (acc, l) => acc * 100 + string.len(l) + 1)!
   println(name + " range=" + list.join(r, ",") + " chunked=" + (c |> list.map((x) => int.to_string(x)) |> list.join(",")))

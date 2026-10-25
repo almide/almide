@@ -3,7 +3,7 @@
 # definitions in crates/almide-wasm/src, `<mod>.<fn>[_shape]` rows in
 # self_host_registry.rs), re-derived by scripts/lib/impl-count-enumerate.py.
 # Gated by tools/almide-gates impl-count: a total may not grow without its row.
-# holes = 878  implementations = 2026
+# holes = 875  implementations = 2013
 [[hole]]
 module   = "base64"
 name     = "encode"
@@ -1555,33 +1555,26 @@ total    = 3
 module   = "fs"
 name     = "read_bytes"
 native   = 1
-emitter  = 1
-selfhost = 4
-total    = 6
-[[hole]]
-module   = "fs"
-name     = "write"
-native   = 1
-emitter  = 0
-selfhost = 3
-total    = 4
-[[hole]]
-module   = "fs"
-name     = "write_bytes"
-native   = 1
 emitter  = 0
 selfhost = 2
 total    = 3
 [[hole]]
 module   = "fs"
-name     = "write_bytes_raw"
+name     = "write_text"
 native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
 [[hole]]
 module   = "fs"
-name     = "append"
+name     = "write_bytes"
+native   = 1
+emitter  = 0
+selfhost = 1
+total    = 2
+[[hole]]
+module   = "fs"
+name     = "append_text"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -1666,13 +1659,6 @@ total    = 2
 [[hole]]
 module   = "fs"
 name     = "read_lines_if_exists"
-native   = 1
-emitter  = 0
-selfhost = 1
-total    = 2
-[[hole]]
-module   = "fs"
-name     = "read_bytes_raw_if_exists"
 native   = 1
 emitter  = 0
 selfhost = 1
@@ -1789,13 +1775,6 @@ native   = 1
 emitter  = 0
 selfhost = 1
 total    = 2
-[[hole]]
-module   = "fs"
-name     = "read_bytes_raw"
-native   = 1
-emitter  = 0
-selfhost = 2
-total    = 3
 [[hole]]
 module   = "fs"
 name     = "__root_read_text"

@@ -9,7 +9,7 @@ protocol Saver {
 
 type Src: Saver = { path: String }
 
-effect fn Src.save(a: Src) -> Unit = fs.write(a.path, "pure fn wrote this")!
+effect fn Src.save(a: Src) -> Unit = fs.write_text(a.path, "pure fn wrote this")!
 
 fn use_it[T: Saver](x: T) -> Int = {
   let _ = x.save()

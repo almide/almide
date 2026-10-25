@@ -39,7 +39,7 @@ effect fn through_param(p: String, step: (Int, String) -> Int) -> Int = {
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("fold_range_let_fn")!
   let p = d + "/lines.txt"
-  fs.write(p, "a\nbb\nccc\ndddd\neeeee\n")!
+  fs.write_text(p, "a\nbb\nccc\ndddd\neeeee\n")!
   let f = (acc: Int, line: String) => acc + string.len(line)
   println("int-var ${fs.fold_lines_range(p, 0, 9, 0, f)!}")
   let g = longest

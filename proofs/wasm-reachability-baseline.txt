@@ -18,7 +18,7 @@
 #                       (sockets, subprocess spawn, a native zlib binding).
 #                       Out of wasm scope BY DESIGN until the WASI story changes.
 #   COMPILER_FRONTIER — WASI CAN do it and the compiler cannot yet. This is the
-#                       DEBT: `fs.write` is self-hosted and reaches parity while
+#                       DEBT: `fs.write_text` is self-hosted and reaches parity while
 #                       `fs.write_bytes` right next to it does not.
 #
 # The class is a human judgment recorded here; the GATE enforces the SET.

@@ -160,12 +160,12 @@ effect fn main() -> Unit = {
   let d = fs.create_temp_dir("almide_p3_large")!
   let p = d + "/big.txt"
   let s = string.repeat("0123456789abcdef", 40000)
-  fs.write(p, s)!
+  fs.write_text(p, s)!
   let t = fs.read_text(p)!
   println("len=${string.len(t)} same=${t == s}")
-  fs.append(p, s)!
+  fs.append_text(p, s)!
   println("size=${fs.file_size(p)!}")
-  println("bytes=${list.len(fs.read_bytes(p)!)}")
+  println("bytes=${bytes.len(fs.read_bytes(p)!)}")
   fs.copy(p, d + "/c.txt")!
   println("copy=${fs.file_size(d + "/c.txt")!}")
   let parts = fan.map([p, d + "/c.txt"], (q) => fs.read_text(q)!)!

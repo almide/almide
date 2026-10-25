@@ -60,7 +60,7 @@ fn the_merged_name_set_survives_the_historical_name_mangling_incidents() {
     assert!(is_self_host_materialized_result_fn("fs", "__fallible_fold_lines"));
     // The Phase-1 moved family: ctor-built Result[Unit, String] producers are
     // materialized (their layout now byte-matches the prim family's).
-    for f in ["copy", "append", "remove", "write_bytes", "write_bytes_raw", "write", "mkdir_p", "rename", "remove_all"] {
+    for f in ["copy", "append_text", "append_bytes", "remove", "write_bytes", "write_text", "mkdir_p", "rename", "remove_all"] {
         assert!(is_self_host_materialized_result_fn("fs", f), "fs.{f} must be in the merged set");
     }
     // Non-members stay out (the set still gates "materialized at all").

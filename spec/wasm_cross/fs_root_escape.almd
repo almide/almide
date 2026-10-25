@@ -16,8 +16,8 @@ fn show(label: String, r: Result[String, String]) -> Unit = match r {
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("root_escape")!
   fs.mkdir_p(d + "/data/sub")!
-  fs.write(d + "/data/sub/a.txt", "inside")!
-  fs.write(d + "/secret.txt", "outside")!
+  fs.write_text(d + "/data/sub/a.txt", "inside")!
+  fs.write_text(d + "/secret.txt", "outside")!
   let root = fs.open_root(d + "/data")!
   show("nested", fs.root_read_text(root, "sub/a.txt"))
   show("dot segments", fs.root_read_text(root, "./sub/../sub/a.txt"))

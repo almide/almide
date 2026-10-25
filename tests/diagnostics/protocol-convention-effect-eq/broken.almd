@@ -5,7 +5,7 @@ import fs
 type Foo: Eq = { n: Int }
 
 effect fn Foo.eq(a: Foo, b: Foo) -> Bool = {
-  fs.write("eq.txt", "x")!
+  fs.write_text("eq.txt", "x")!
   a.n == b.n
 }
 

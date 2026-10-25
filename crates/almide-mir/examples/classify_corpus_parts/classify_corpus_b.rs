@@ -141,7 +141,6 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                     "read_text_if_exists"
                         | "read_bytes_if_exists"
                         | "read_lines_if_exists"
-                        | "read_bytes_raw_if_exists"
                         // No wasm form exists for the unique-temp creators
                         // (fs.temp_dir self-hosts, but the mkstemp-style
                         // unique creation has no WASI prim) — the same

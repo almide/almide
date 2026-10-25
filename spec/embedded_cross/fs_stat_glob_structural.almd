@@ -27,11 +27,11 @@ fn show_glob(dir: String, r: Result[List[String], String]) -> String = match r {
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("almide-stat-glob")!
-  fs.write(dir + "/a.txt", "alpha")!
-  fs.write(dir + "/b.txt", "beta!!")!
+  fs.write_text(dir + "/a.txt", "alpha")!
+  fs.write_text(dir + "/b.txt", "beta!!")!
   fs.mkdir_p(dir + "/sub/deep")!
-  fs.write(dir + "/sub/c.txt", "c")!
-  fs.write(dir + "/sub/deep/d.md", "# d")!
+  fs.write_text(dir + "/sub/c.txt", "c")!
+  fs.write_text(dir + "/sub/deep/d.md", "# d")!
   println("stat.file " + show_stat(dir, fs.stat(dir + "/b.txt")))
   println("stat.dir " + show_stat(dir, fs.stat(dir + "/sub")))
   println("stat.missing " + show_stat(dir, fs.stat(dir + "/nope.txt")))

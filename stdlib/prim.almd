@@ -224,7 +224,7 @@ fn read_text_file(path: String) -> Result[String, String] = _
 
 // Raw-bytes twin of read_text_file — the SAME WASI path_open/fd_read floor and the
 // same cap-as-tag Result block; only the Ok payload TYPE differs (Bytes, no UTF-8
-// claim). Backs the self-hosted `fs.read_bytes_raw`. Capability::FsRead.
+// claim). Backs the self-hosted `fs.read_bytes`. Capability::FsRead.
 @intrinsic("almide_rt_prim_read_bytes_file")
 fn read_bytes_file(path: String) -> Result[Bytes, String] = _
 
@@ -269,13 +269,13 @@ fn read_dir_as(path: String, call: String) -> Result[List[String], String] = _
 // truncating) the file at `path` (preopen-relative, leading '/' stripped — the same
 // resolution read_text_file uses) and writes `content`'s bytes, returning a fresh OWNED
 // `Result[Unit, String]`: `Ok(())` on success, `Err(message)` on a path_open error. Reached
-// only by the self-hosted `fs.write` (fs_write.almd) in the v1 trust-spine wasm backend; the
+// only by the self-hosted `fs.write_text` (fs_write.almd) in the v1 trust-spine wasm backend; the
 // render emits the WASI path_open/fd_write + Result-build sequence. No native runtime impl —
-// the native target uses fs.write's own @intrinsic.
+// the native target uses fs.write_text's own @intrinsic.
 @intrinsic("almide_rt_prim_write_text_file")
 fn write_text_file(path: String, content: String) -> Result[Unit, String] = _
 
-// The write floor's call-head twins (#2206): `fs.append`, `fs.write_bytes`,
+// The write floor's call-head twins (#2206): `fs.append_text`, `fs.write_bytes`,
 // `fs.create_temp_file` and fs.copy's write half all reach `write_text_file`, and
 // native names each of them. See `read_text_file_as`.
 @intrinsic("almide_rt_prim_write_text_file_as")

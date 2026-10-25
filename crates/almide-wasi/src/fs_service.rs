@@ -69,9 +69,8 @@ pub const FS_SERVICE_OPS: &[(i32, &str, i32)] = &[
     // 62: fold_lines_chunked's size probe — op 17's body under its name.
     (61, "op_read_bytes", 61),
     (62, "op_file_size", 62),
-    // 63/64: the Bytes-typed readers, ops 14/25's bodies under the writer's
-    // call name (#2890 — sharing 14/25 said `fs.read_bytes` where native
-    // says `fs.read_bytes_raw`).
+    // 63/64: the Bytes-typed readers `fs.read_bytes` / `_if_exists`, ops
+    // 14/25's bodies under their own op (#2890).
     (63, "op_read_bytes", 63),
     (64, "op_read_bytes_if_exists", 64),
     // 120..=125: the rooted family by descriptor (#4084) — a walk from the
@@ -94,7 +93,7 @@ pub fn serves(op: i32) -> bool {
 /// host spells its messages from this table too.
 const FS_OP_NAMES: &[(i32, &str)] = &[
     (1, "fs.read_text"),
-    (2, "fs.write"),
+    (2, "fs.write_text"),
     (3, "fs.write_bytes"),
     (7, "fs.mkdir_p"),
     (8, "fs.remove"),
@@ -104,8 +103,8 @@ const FS_OP_NAMES: &[(i32, &str)] = &[
     (12, "fs.read_lines"),
     (13, "fs.read_text_if_exists"),
     (14, "fs.read_bytes"),
-    (15, "fs.write_bytes_raw"),
-    (16, "fs.append"),
+    (15, "fs.write_bytes"),
+    (16, "fs.append_text"),
     (17, "fs.file_size"),
     (18, "fs.modified_at"),
     (19, "fs.copy"),
@@ -120,15 +119,15 @@ const FS_OP_NAMES: &[(i32, &str)] = &[
     (52, "fs.for_each_line"),
     (61, "fs.fold_lines_range"),
     (62, "fs.fold_lines_chunked"),
-    (63, "fs.read_bytes_raw"),
-    (64, "fs.read_bytes_raw_if_exists"),
+    (63, "fs.read_bytes"),
+    (64, "fs.read_bytes_if_exists"),
     // 120..=125: the rooted family's descriptor ops (#4084), each under the
     // PLAIN call whose answer it gives on `<root>/<segments>` (123, exists,
     // answers no io error, so it needs no name).
     (120, "fs.read_text"),
-    (121, "fs.read_bytes_raw"),
+    (121, "fs.read_bytes"),
     (122, "fs.list_dir"),
-    (124, "fs.write"),
+    (124, "fs.write_text"),
     (125, "fs.remove"),
 ];
 

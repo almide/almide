@@ -122,7 +122,7 @@ effect fn run_experiment() -> Result[Unit, String] = {
   fs.mkdir_p("results")!
   let suffix = if task_filter == "" then "" else "_${task_filter}"
   let results_path = "results/${experiment}_${stamp}${suffix}.json"
-  fs.write(results_path, json.stringify_pretty(value.array(all_results)))!
+  fs.write_text(results_path, json.stringify_pretty(value.array(all_results)))!
   println("")
   println("Results written to ${results_path}")
   print_summary(all_results)!
@@ -172,9 +172,9 @@ effect fn run_trial(ctx: Ctx, variant: Variant, task: Task, trial: Int) -> Resul
 effect fn attempt(ctx: Ctx, variant: Variant, system: String, user: String, tag: String) -> Result[String, String] = {
   let response = call_claude_code(ctx.model_id, system, user)!
   let code = strip_blocks(extract_code(response))
-  fs.write("${tag}_raw.almd", code)!
+  fs.write_text("${tag}_raw.almd", code)!
   let compilable = transpile(code, variant.transpile_mode)
-  fs.write("${tag}_compiled.almd", compilable)!
+  fs.write_text("${tag}_compiled.almd", compilable)!
   ok(compilable)
 }
 
@@ -396,13 +396,13 @@ type EvalResult = { compiled: Bool, passed: Bool, output: String }
 // after 7 days (#2608), so a path per attempt fills the disk. The attempt is kept under its
 // tag for the record, but it is checked from one fixed path per lane and kind.
 effect fn evaluate(code: String, tag: String) -> Result[EvalResult, String] = {
-  fs.write("${tag}.almd", code)!
+  fs.write_text("${tag}.almd", code)!
   let lane = env.get("GRAMMAR_LAB_LANE") ?? "main"
   let kind = if string.ends_with(tag, "_hidden") then "hidden" else "gate"
   let dir = "/tmp/grammar-lab-eval"
   fs.mkdir_p(dir)!
   let path = "${dir}/${lane}_${kind}.almd"
-  fs.write(path, code)!
+  fs.write_text(path, code)!
   let bin = get_almide_bin()!
   let check_r = process.exec_status(bin, ["check", path])!
   if check_r.code != 0 then ok({ compiled: false, passed: false, output: check_r.stdout + check_r.stderr })
