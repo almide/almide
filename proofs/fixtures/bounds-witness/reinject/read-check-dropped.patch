@@ -1,10 +1,10 @@
 diff --git a/crates/almide-wasm/src/emitter.rs b/crates/almide-wasm/src/emitter.rs
-index 137b2d4a9..97fdcc019 100644
+index c9c943da0..473a23c23 100644
 --- a/crates/almide-wasm/src/emitter.rs
 +++ b/crates/almide-wasm/src/emitter.rs
-@@ -292,7 +292,8 @@ impl Emitter<'_> {
-         // #4005: the witness records the check where it is emitted and the
-         // read where it is emitted (witness_bounds.rs).
+@@ -288,7 +288,8 @@ impl Emitter<'_> {
+         let idx = self.hold_i64()?;
+         // #4005: the witness records the check and the read where emitted.
          let site = self.bounds_site(list_var, index);
 -        if known {
 +        // RE-INJECTED (#4005 drill): every read is taken as already checked.
