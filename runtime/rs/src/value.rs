@@ -362,7 +362,10 @@ pub fn almide_rt_value_keys(v: &AlmideValue) -> Vec<AlmideString> {
 pub fn almide_rt_value_pick(v: &AlmideValue, keys: &[AlmideString]) -> AlmideValue {
     match v {
         AlmideValue::Object(pairs) => {
-            AlmideValue::Object(pairs.iter().filter(|(k, _)| keys.iter().any(|x| x.as_str() == k.as_ref())).cloned().collect())
+            // One hash set of the key list (#4207): O(n + k), not a scan of
+            // `keys` per field.
+            let want: std::collections::HashSet<&str> = keys.iter().map(|x| x.as_str()).collect();
+            AlmideValue::Object(pairs.iter().filter(|(k, _)| want.contains(k.as_ref())).cloned().collect())
         }
         _ => AlmideValue::Object(Vec::new()),
     }
@@ -382,15 +385,26 @@ pub fn almide_rt_value_rename_keys(v: &AlmideValue, f: impl Fn(AlmideString) -> 
 pub fn almide_rt_value_merge(a: &AlmideValue, b: &AlmideValue) -> AlmideValue {
     match (a, b) {
         (AlmideValue::Object(pa), AlmideValue::Object(pb)) => {
-            let mut pa = pa.clone();
+            // The FIRST slot holding each key, built once (#4207): O(|a| + |b|)
+            // where a scan of the growing result per key of b was O(|a|·|b|).
+            // The fold is unchanged — a key of b overrides the first of a's
+            // repeats in place, a new key is appended at its first position
+            // and later repeats in b override that slot, so b's last value wins.
+            let mut out = pa.clone();
+            let mut at: std::collections::HashMap<&str, usize> = std::collections::HashMap::with_capacity(pa.len() + pb.len());
+            for (i, (k, _)) in pa.iter().enumerate() {
+                at.entry(k.as_ref()).or_insert(i);
+            }
             for (k, v) in pb {
-                if let Some(pos) = pa.iter().position(|(ek, _)| ek == k) {
-                    pa[pos] = (k.clone(), v.clone());
-                } else {
-                    pa.push((k.clone(), v.clone()));
+                match at.get(k.as_ref()) {
+                    Some(&pos) => out[pos] = (k.clone(), v.clone()),
+                    None => {
+                        at.insert(k.as_ref(), out.len());
+                        out.push((k.clone(), v.clone()));
+                    }
                 }
             }
-            AlmideValue::Object(pa)
+            AlmideValue::Object(out)
         }
         (_, b) => b.clone(),
     }
@@ -400,7 +414,8 @@ pub fn almide_rt_value_merge(a: &AlmideValue, b: &AlmideValue) -> AlmideValue {
 pub fn almide_rt_value_omit(v: &AlmideValue, keys: &[AlmideString]) -> AlmideValue {
     match v {
         AlmideValue::Object(pairs) => {
-            AlmideValue::Object(pairs.iter().filter(|(k, _)| !keys.iter().any(|x| x.as_str() == k.as_ref())).cloned().collect())
+            let drop: std::collections::HashSet<&str> = keys.iter().map(|x| x.as_str()).collect();
+            AlmideValue::Object(pairs.iter().filter(|(k, _)| !drop.contains(k.as_ref())).cloned().collect())
         }
         other => other.clone(),
     }
