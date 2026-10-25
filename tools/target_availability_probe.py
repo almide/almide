@@ -62,7 +62,7 @@ LEGS = ("structural", "stock-p1", "embedded")
 EXPLICIT_IMPORT = {
     "json", "fs", "http", "env", "io", "random", "regex", "process",
     "testing", "url", "args", "base64", "compute", "hash", "hex",
-    "path", "html", "duration", "net", "zlib",
+    "path", "html", "duration", "net", "zlib", "unix", "uuid",
 }
 # docs/stdlib pages that document CHECKER surface (clock constructors), not
 # a module interface — tools/gen-stdlib-doc-index.py's own exclusion.
@@ -112,6 +112,18 @@ NOMINAL = {
     # A route is built with `http.route` — its record fields are the parsed
     # pattern, never written by hand (#2588).
     "HttpRoute": ('http.route("/", (_r) => http.response(200, "x"))', "http.route", "http"),
+    # The stream handles (R-io-05): only io's three constructors make one.
+    "Stdin": ("io.stdin()!", "io.stdin", "io"),
+    "Stdout": ("io.stdout()!", "io.stdout", "io"),
+    "Stderr": ("io.stderr()!", "io.stderr", "io"),
+    # The opaque socket and descriptor handles: only their opening calls make one.
+    "TcpListener": ('net.tcp_listen("127.0.0.1", 0)!', "net.tcp_listen", "net"),
+    "TcpStream": ('net.tcp_connect("127.0.0.1", 1)!', "net.tcp_connect", "net"),
+    "UdpSocket": ('net.udp_bind("127.0.0.1", 0)!', "net.udp_bind", "net"),
+    "IpAddr": ('net.parse_ip("127.0.0.1")!', "net.parse_ip", "net"),
+    "Fd": ("unix.shm_create(8)!", "unix.shm_create", "unix"),
+    "Uuid": ('uuid.parse("00000000-0000-0000-0000-000000000000")!', "uuid.parse", "uuid"),
+    "ProcessChild": ('process.start(process.ProcessCommand { cmd: "true", args: [] })!', "process.start", "process"),
 }
 BYTES8 = "bytes.from_list([0, 0, 0, 0, 0, 0, 0, 0])"
 
@@ -299,10 +311,48 @@ def enumerate_surface():
     return sigs, types
 
 
+# Protocol-bounded type variables (`[H: Read]`, `[M: HttpMessage]`): the
+# interface JSON names the variable but not its bound, so the probe pins each
+# to one conformer. Keyed "mod.fn" -> {variable: type node}.
+STDIN = {"kind": "named", "name": "Stdin"}
+STDOUT = {"kind": "named", "name": "Stdout"}
+TCP_LISTENER = {"kind": "named", "name": "TcpListener"}
+HTTP_RESPONSE = {"kind": "named", "name": "HttpResponse"}
+BOUNDED_TVARS = {
+    "io.read": {"H": STDIN},
+    "io.read_exact": {"H": STDIN},
+    "io.read_to_end": {"H": STDIN},
+    "io.write": {"H": STDOUT},
+    "io.close": {"H": TCP_LISTENER},
+    **{f"http.{n}": {"M": HTTP_RESPONSE} for n in (
+        "header", "header_values", "headers", "body", "body_bytes",
+        "set_header", "set_body", "set_body_bytes")},
+}
+
+
+def pin_tvars(t, table):
+    """t with each type variable named in table replaced by its conformer."""
+    if not table or not isinstance(t, dict):
+        return t
+    if t.get("kind") == "type_var" and t.get("name") in table:
+        return table[t["name"]]
+    out = dict(t)
+    for key in ("inner", "ok", "err", "key", "value", "return"):
+        if key in out:
+            out[key] = pin_tvars(out[key], table)
+    for key in ("params", "elements", "args"):
+        if key in out:
+            out[key] = [pin_tvars(x, table) for x in out[key]]
+    return out
+
+
 def resolve_unknowns(mod, f):
     """Substitute the UNMODELED table into a fn record; raise on a new cell."""
     key = f"{mod}.{f['name']}"
     table = UNMODELED.get(key, {})
+    bounded = BOUNDED_TVARS.get(key, {})
+    f = dict(f, params=[dict(p, type=pin_tvars(p["type"], bounded)) for p in f.get("params", [])],
+             **({"return": pin_tvars(f["return"], bounded)} if "return" in f else {}))
     params = []
     for p in f.get("params", []):
         t = p["type"]
