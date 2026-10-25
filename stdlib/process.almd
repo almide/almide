@@ -101,6 +101,7 @@ effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _
 
 /// Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
 @ordered
+@signals_process
 @intrinsic("almide_rt_process_kill")
 effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 
@@ -110,5 +111,6 @@ effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 effect fn sleep(ms: Int) -> Unit = _
 
 /// True while pid exists; false for a pid <= 0.
+@signals_process
 @intrinsic("almide_rt_process_is_alive")
 effect fn is_alive(pid: Int) -> Bool = _

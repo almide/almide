@@ -54,6 +54,9 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // A digest that is broken for security (md5, sha1; #4106): `--profile
     // critical` refuses a call (E100); crates/almide-types `insecure_digest_stdlib_fns`
     "insecure_digest",
+    // Signals or probes a pid (#4125): `[permissions] proc` bounds it as the
+    // `kill` command; crates/almide-types `signals_process_stdlib_fns`
+    "signals_process",
     // Scheduling and placement
     "schedule",
     "location",
