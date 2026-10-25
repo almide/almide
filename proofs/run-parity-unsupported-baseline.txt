@@ -61,6 +61,14 @@
 # loop_effect_match_stmt and mut_param_branch_forward). Solo run on this tree:
 # 960 identical, 17 unsupported, 3 fuel-exhausted, 0 diverge.
 #
+# 2026-10-25 (#4209): unsupported 17 -> 18 for the new json_set_path_depth_bound
+# fixture (C-434): it builds Values 1000 levels deep, which the interpreter's
+# Value walk abstains on ("return sync: a Value-typed block ... cannot be
+# walked") — a resource abstention, not a vote. The refusals themselves are
+# voted by tests/json_depth_limit_test.rs `the_interp_oracle_agrees` on shallow
+# inputs. Solo run on this tree: 960 identical, 18 unsupported, 3
+# fuel-exhausted, 0 diverge.
+#
 # name<TAB>value
-unsupported	17
+unsupported	18
 fuel_exhausted	3
