@@ -42,6 +42,7 @@ http_query_params_decoder  out-of-interp-scope capability: http.query_params: no
 io_write_ordering  out-of-interp-scope capability: prim.fd_write: no lowered body
 io_write_raw_bytes  out-of-interp-scope capability: prim.fd_write: no lowered body
 json_parse_depth_bound  out-of-interp-scope capability: return sync: a Value-typed block at 44038 cannot be walked (unknown tag or unreadable child)
+json_set_path_depth_bound  out-of-interp-scope capability: return sync: a Value-typed block at 65987 cannot be walked (unknown tag or unreadable child)
 list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list(268435456) beyond the interp arena ceiling
 loop_effect_match_stmt  out-of-interp-scope capability: prim.fd_write: no lowered body
 matrix_fma_ieee_specials  out-of-interp-scope capability: prim.handle of a container holding a NaN float (NaN bits are arch-conditional — #1403; a bit-compare vote would be a guess)
