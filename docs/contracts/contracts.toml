@@ -4852,11 +4852,10 @@ status    = "active"
 evidence  = [
   { path = "spec/stdlib/http_call_test.almd", class = "fixture" },
   { path = "spec/embedded_cross/http_call_handle_errs.almd", class = "fixture" },
-  { path = "tests/http_call_handle_test.rs", name = "call_handle_limits_cancel_poll_and_the_streaming_twins", class = "fixture" },
+  { path = "tests/http_call_handle_test.rs", name = "call_handle_limits_cancel_poll_and_a_streamed_body", class = "fixture" },
   { path = "tests/http_call_handle_test.rs", name = "native_only_default_timeout", class = "fixture" },
-  { path = "tests/http_call_handle_test.rs", name = "a_trickle_outlives_the_classic_stream_but_not_total_ms", class = "fixture" },
   { path = "tests/http_call_handle_test.rs", name = "the_stock_route_keeps_its_e081", class = "fixture" },
-  { path = "tests/http_call_family_gate_test.rs", name = "every_streaming_client_has_one_with_limits_twin", class = "fixture" },
+  { path = "tests/http_call_family_gate_test.rs", name = "the_handle_has_exactly_its_five_verbs", class = "fixture" },
 ]
 [[contract]]
 id        = "C-367"
@@ -5075,7 +5074,7 @@ evidence  = [
   { path = "spec/embedded_cross/http_request_framing.almd", class = "fixture" },
   { path = "tests/http_request_framing_cross_test.rs", name = "a_caller_content_length_is_dropped_on_native_and_the_embedded_lane", class = "fixture" },
   { path = "tests/http_request_framing_cross_test.rs", name = "a_caller_content_length_is_dropped_on_the_p3_component", class = "fixture" },
-  { path = "tests/http_request_framing_cross_test.rs", name = "a_caller_content_length_is_dropped_by_the_streaming_client", class = "fixture" },
+  { path = "tests/http_request_framing_cross_test.rs", name = "a_caller_content_length_is_dropped_by_the_call_handle", class = "fixture" },
 ]
 
 # ── FAN RECORD FORM: THE RECORD LITERAL OF ITS FIELDS, RUN AS SIBLINGS ─

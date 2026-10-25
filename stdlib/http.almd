@@ -474,11 +474,11 @@ fn __pattern_path(pattern: String) -> String = match string.index_of(pattern, " 
 @concurrent(handler)
 fn route(pattern: String, handler: HttpHandler) -> HttpRoute = {
   let p = string.trim(pattern)
-  let method = match string.index_of(p, " ") {
+  let verb = match string.index_of(p, " ") {
     some(i) => string.take(p, i),
     none => "",
   }
-  { method: method, pattern: p, segments: __parts(__pattern_path(p)), handler: handler }
+  { method: verb, pattern: p, segments: __parts(__pattern_path(p)), handler: handler }
 }
 
 /// Sub-app under prefix: /api/x reaches it as /x.
@@ -602,27 +602,27 @@ fn __not_allowed(hits: List[(HttpRoute, List[String])]) -> HttpResponse = {
 
 @category
 effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) -> HttpResponse = {
-  let method = http.method(req)
-  let path = __path_of(http.path(req))
-  if not string.starts_with(path, "/") then http.response(
+  let verb = http.method(req)
+  let target_path = __path_of(http.path(req))
+  if not string.starts_with(target_path, "/") then http.response(
     400,
     "Bad Request: the request target must start with /",
   )
-  else if __bad_escape(path) then http.response(
+  else if __bad_escape(target_path) then http.response(
     400,
     "Bad Request: malformed percent-encoding in the path",
   )
-  else if not __canonical(path) then http.response(
+  else if not __canonical(target_path) then http.response(
     400,
     "Bad Request: the path is not in canonical form",
   )
   else {
-    let exact = hits |> list.filter(((r, _)) => r.method == method or r.method == "")
-    let via_get = method == "HEAD" and list.is_empty(exact)
+    let exact = hits |> list.filter(((r, _)) => r.method == verb or r.method == "")
+    let via_get = verb == "HEAD" and list.is_empty(exact)
     let allowed = if via_get then hits |> list.filter(((r, _)) => r.method == "GET")
     else exact
     match allowed |> list.find(((a, _)) => list.all(allowed, ((b, _)) => __route_covers(a, b))) {
-      some((r, bound)) => if __bad_binding(r.segments, __parts(path)) then http.response(
+      some((r, bound)) => if __bad_binding(r.segments, __parts(target_path)) then http.response(
         400,
         "Bad Request: a path parameter is a dot segment or holds a /, \\ or NUL",
       )
