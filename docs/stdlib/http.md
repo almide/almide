@@ -80,7 +80,7 @@ the error by the id the client reports. If the port cannot be bound, the
 program stops with `Error: bind failed: <reason>` and exit code 1.
 
 A runtime abort inside the handler — an out-of-bounds index, a division by
-zero, `panic(msg)` — fails only that request (C-433, #4203). The client gets
+zero, `panic(msg)` — fails only that request (C-434, #4203). The client gets
 the same `500` and fixed body as for an `err`, and stderr gets one line
 `http.serve: request <id>: handler aborted: "<text>"` (`PANIC: <msg>` for a
 `panic`). Sockets, unix descriptors and http calls the handler opened and
