@@ -14,13 +14,13 @@
 import io
 
 test "read-only Unit intrinsic borrows a let-bound Bytes immutably" {
-  let empty = bytes.new(0)
+  let empty = bytes.new()
   io.write(empty)
   assert_eq(bytes.len(empty), 0)
 }
 
 test "read-only Unit intrinsic borrows a for-loop binding immutably" {
-  let chunks = list.map([0, 0], (n) => bytes.new(n))
+  let chunks = list.map([0, 0], (n) => bytes.zeros(n))
   for chunk in chunks {
     io.write(chunk)
   }

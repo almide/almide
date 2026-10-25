@@ -1,0 +1,14 @@
+// E109 (#4151): `main` (an effect fn) stores `fs.read_text` in a record
+// field and hands the record to a pure fn, which calls the field. Nothing at
+// the call site names an effect fn, so E006 cannot see it; the effect bit
+// rides the field (ADR-0026 D1: a stored value keeps its set).
+import fs
+
+type Reader = { read: (String) -> Result[String, String] }
+
+fn pure_looking(r: Reader) -> Result[String, String] = (r.read)("s.txt")
+
+effect fn main() -> Unit = {
+  let r = Reader { read: fs.read_text }
+  println(pure_looking(r) ?? "none")
+}

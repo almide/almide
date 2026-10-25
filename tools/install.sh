@@ -69,22 +69,47 @@ curl -fsSL "$CHECKSUM_URL" -o "${TMP}/checksums.sha256"
 
 echo "Verifying checksum..."
 cd "$TMP"
-EXPECTED="$(grep "$ARCHIVE" checksums.sha256 | cut -d' ' -f1)"
+# Match the file-name field exactly (an optional leading `*` is the binary
+# marker), never a substring: a `.sig` / `.sbom` line for the same archive
+# must not supply the hash (#4127).
+EXPECTED="$(awk -v a="$ARCHIVE" '{ n = $2; sub(/^\*/, "", n) } NF == 2 && n == a { print tolower($1); exit }' checksums.sha256)"
+if [ -z "$EXPECTED" ]; then
+  echo "error: no checksum listed for ${ARCHIVE}" >&2
+  exit 1
+fi
 
+# Fail closed (#4127): no hash tool means no install. This used to warn and
+# install the archive unverified.
 if command -v sha256sum >/dev/null 2>&1; then
   ACTUAL="$(sha256sum "$ARCHIVE" | cut -d' ' -f1)"
 elif command -v shasum >/dev/null 2>&1; then
   ACTUAL="$(shasum -a 256 "$ARCHIVE" | cut -d' ' -f1)"
 else
-  echo "warning: could not verify checksum (sha256sum/shasum not found)" >&2
-  ACTUAL="$EXPECTED"
+  echo "error: could not verify checksum (sha256sum/shasum not found); refusing to install" >&2
+  exit 1
 fi
+ACTUAL="$(printf '%s' "$ACTUAL" | tr 'A-F' 'a-f')"
 
 if [ "$EXPECTED" != "$ACTUAL" ]; then
   echo "error: checksum mismatch" >&2
   echo "       expected: $EXPECTED" >&2
   echo "       got:      $ACTUAL" >&2
   exit 1
+fi
+
+# --- Verify origin ---
+# The checksum came from the same place as the archive: integrity, not origin
+# (#4127). Every release asset carries a Sigstore attestation (#1534); verify
+# it when the GitHub CLI is here, and say how to otherwise.
+if command -v gh >/dev/null 2>&1; then
+  echo "Verifying the release attestation..."
+  if ! gh attestation verify "$ARCHIVE" -R "$REPO" >/dev/null; then
+    echo "error: the release attestation did not verify; refusing to install" >&2
+    exit 1
+  fi
+else
+  echo "note: gh not found, so the release attestation was not verified (the checksum proves integrity, not origin)" >&2
+  echo "      to verify: gh attestation verify ${ARCHIVE} -R ${REPO}" >&2
 fi
 
 # --- Install ---

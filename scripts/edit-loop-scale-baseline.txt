@@ -56,7 +56,18 @@ slope 0.781
 #   under it): 3.500 x 2.026 = 7.090. The #4078 CI reading it was set from,
 #   3.035 x 2.026 = 6.149, sits inside the band. Re-anchor from CI readings if
 #   the first develop jobs after this land sit past half the band.
-ratio 7.090
+# ratio moved 7.090 -> 18.81 (2026-10-25, integration #4182): NOT a ladder
+#   artifact — the 10k rung's check got 3.4x slower. The effect-values batch
+#   (#4151: E109 through fn values, `check` judging user modules and running
+#   whole-program lowering) put lowering into every `almide check`: on the
+#   10,621-line rung the `other` phase went 18.7ms -> 146.2ms and `check`
+#   44.3ms -> 104.4ms, and the rung now front-ends 359 sources (226 before).
+#   Same M4 Pro, back to back, 20 interleaved runs each, load 5.8-8.1:
+#     batch-sec-ffi 7e4b7fdb2 (pre-#4151)  floor 15.9ms  10k 85.1ms   ratio 5.356
+#     batch-all-1025 (this integration)    floor 20.2ms  10k 287.1ms  ratio 14.211
+#   factor 2.653; anchor 7.090 x 2.653 = 18.81. Accepted to land the
+#   integration, recorded as a cost to win back (ADR-0030), not excused.
+ratio 18.81
 #
 # ── PER-PHASE ANCHORS (#1311) ────────────────────────────────────────────────
 # The same ladder, checked with `almide check --timings`, splits the front end
@@ -121,13 +132,18 @@ ratio 7.090
 #     develop 0e53ddba6 job 113947299701 0.1340 0.1436 0.7224 (OVER 0.1333)
 # Three readings, not the 45-job window above: re-anchor again from a wider
 # window if the band proves tight.
-share_lex 0.1290
+# 2026-10-25 (integration #4182): share_lex/parse/check moved 0.1290/0.1386/
+# 0.7324 -> 0.1118/0.1150/0.7692 — the check-phase cost `ratio` above records
+# (#4151) shifts the zero-sum split toward check. Same A/B as `ratio`:
+#   batch-sec-ffi 0.1085/0.1377/0.7538 -> batch-all-1025 0.0940/0.1143/0.7917
+#   (factors 0.867/0.830/1.050 applied to the CI anchors).
+share_lex 0.1118
 #     share_parse  0.1334 0.1339 0.1341 0.1347 0.1363 0.1369 0.1371 0.1378
 #                  median 0.1355, 3.2% spread (2026-08-14, M4 Pro)
-share_parse 0.1386
+share_parse 0.1150
 #     share_check  0.7268 0.7269 0.7280 0.7290 0.7349 0.7351 0.7352 0.7352
 #                  median 0.7320, 1.2% spread (2026-08-14, M4 Pro)
-share_check 0.7324
+share_check 0.7692
 # slope_check — `slope` localized to the phase that owns it. The aggregate reads
 #   1.15; the split shows lex 1.00 and parse 1.03 flat and the checker carrying
 #   all of the superlinearity. Anchoring it separately means a checker going

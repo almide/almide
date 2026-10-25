@@ -403,6 +403,7 @@ fn render_fn_body_str(fn_ctx: &RenderContext, func: &IrFunction) -> String {
         IrExprKind::Block { stmts, expr } => {
             let mut parts: Vec<String> = stmts.iter()
                 .map(|s| terminate_stmt(fn_ctx, render_stmt_fn(fn_ctx, s)))
+                .filter(|s| !s.is_empty())
                 .collect();
             if let Some(e) = expr {
                 let mut expr_str = render_expr_fn(fn_ctx, e);

@@ -7,9 +7,11 @@
 //! commands with the overlay armed: every compiler read of FILE's source
 //! returns the proposed text instead of the disk bytes; every other file is
 //! read from disk. The overlay is armed either in-process ([`set`]) or, for a
-//! child `almide` process, through two registered switches —
-//! `ALMIDE_SURVIVE_OVERLAY` (the path whose reads are replaced) and
-//! `ALMIDE_SURVIVE_OVERLAY_TEXT` (a file outside the tree holding the text).
+//! child `almide` process, through two hidden arguments ([`arm_from_args`]) —
+//! `--survive-overlay` (the path whose reads are replaced) and
+//! `--survive-overlay-text` (a file outside the tree holding the text). It was
+//! two environment variables until #4129: an environment the developer does
+//! not control could then make any build compile other text than the file.
 //!
 //! **Every source read goes through [`read_to_string`].** A read that bypassed
 //! it would judge the before-text on the after-leg and report a stale verdict
@@ -33,25 +35,22 @@ struct Overlay {
 
 fn slot() -> &'static RwLock<Option<Overlay>> {
     static SLOT: OnceLock<RwLock<Option<Overlay>>> = OnceLock::new();
-    SLOT.get_or_init(|| RwLock::new(from_env()))
+    SLOT.get_or_init(|| RwLock::new(None))
 }
 
-/// The overlay a parent `almide survive` armed for this child process.
+/// Arm the overlay a parent `almide survive` handed this child process as
+/// `--survive-overlay PATH --survive-overlay-text FILE` (#4129: an argument,
+/// never the environment, so only the process that spawned the run can make it
+/// compile other text than the disk file).
 ///
-/// Both switches or neither: a target without readable text is a broken
-/// hand-off, and reading the disk file instead would silently judge the wrong
-/// program — so it aborts rather than guessing.
-fn from_env() -> Option<Overlay> {
-    let target = almide_base::env::var("ALMIDE_SURVIVE_OVERLAY")?;
-    let text_path = almide_base::env::var("ALMIDE_SURVIVE_OVERLAY_TEXT").unwrap_or_else(|| {
-        eprintln!("ALMIDE_SURVIVE_OVERLAY is set but ALMIDE_SURVIVE_OVERLAY_TEXT is not — refusing to read the disk file in its place");
+/// Unreadable text is a broken hand-off, and reading the disk file instead
+/// would silently judge the wrong program — so it aborts rather than guessing.
+pub fn arm_from_args(target: &str, text_path: &str) {
+    let text = std::fs::read_to_string(text_path).unwrap_or_else(|e| {
+        eprintln!("--survive-overlay-text: cannot read {}: {}", text_path, e);
         std::process::exit(2);
     });
-    let text = std::fs::read_to_string(&text_path).unwrap_or_else(|e| {
-        eprintln!("ALMIDE_SURVIVE_OVERLAY_TEXT: cannot read {}: {}", text_path, e);
-        std::process::exit(2);
-    });
-    Some(Overlay { target: canonical(Path::new(&target)), text })
+    set(Path::new(target), text);
 }
 
 /// The canonical spelling of `path`; the lexical absolute path when the file

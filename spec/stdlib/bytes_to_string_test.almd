@@ -16,7 +16,7 @@ test "to_string round-trip with UTF-8" {
 }
 
 test "to_string fails on invalid UTF-8" {
-  var b = bytes.new(0)
+  var b = bytes.new()
   bytes.append_u8(b, 0xFF)
   bytes.append_u8(b, 0xFE)
   match bytes.to_string(b) {
@@ -26,7 +26,7 @@ test "to_string fails on invalid UTF-8" {
 }
 
 test "to_string_lossy replaces invalid bytes" {
-  var b = bytes.new(0)
+  var b = bytes.new()
   bytes.append_u8(b, 0x68)
   // 'h'
   bytes.append_u8(b, 0xFF)
@@ -50,12 +50,12 @@ test "is_valid_utf8 true for multibyte" {
 }
 
 test "is_valid_utf8 false on invalid sequences" {
-  var b = bytes.new(0)
+  var b = bytes.new()
   bytes.append_u8(b, 0xFF)
   assert_eq(bytes.is_valid_utf8(b), false)
 }
 
 test "is_valid_utf8 true on empty" {
-  let b = bytes.new(0)
+  let b = bytes.new()
   assert_eq(bytes.is_valid_utf8(b), true)
 }

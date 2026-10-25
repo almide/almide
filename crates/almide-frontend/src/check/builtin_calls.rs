@@ -4,31 +4,9 @@ use crate::types::{Ty, TypeConstructorId};
 use super::types::resolve_ty;
 use super::Checker;
 
-/// Map a built-in type to its stdlib UFCS module name.
+/// Map a built-in type to its stdlib UFCS module name — the one table on `Ty`.
 pub(crate) fn builtin_module_for_type(ty: &Ty) -> Option<&'static str> {
-    match ty {
-        Ty::Applied(TypeConstructorId::List, _) => Some("list"),
-        Ty::Applied(TypeConstructorId::Map, _) => Some("map"),
-        Ty::Applied(TypeConstructorId::Set, _) => Some("set"),
-        Ty::String => Some("string"),
-        Ty::Int => Some("int"),
-        Ty::Float => Some("float"),
-        // Sized numeric types (Stage 3 of the sized-numeric-types arc).
-        // Each has its own bundled module for UFCS conversion methods.
-        Ty::Int8 => Some("int8"),
-        Ty::Int16 => Some("int16"),
-        Ty::Int32 => Some("int32"),
-        Ty::Int64 => Some("int64"),
-        Ty::UInt8 => Some("uint8"),
-        Ty::UInt16 => Some("uint16"),
-        Ty::UInt32 => Some("uint32"),
-        Ty::UInt64 => Some("uint64"),
-        Ty::Float32 => Some("float32"),
-        Ty::Float64 => Some("float64"),
-        Ty::Applied(TypeConstructorId::Result, _) => Some("result"),
-        Ty::Applied(TypeConstructorId::Option, _) => Some("option"),
-        _ => None,
-    }
+    ty.stdlib_module()
 }
 
 /// Check if an argument type mismatches a parameter slot.

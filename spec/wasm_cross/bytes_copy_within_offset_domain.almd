@@ -75,7 +75,7 @@ fn main() -> Unit = {
   bytes.copy_within(one, 0, 1, 1)
   bytes.copy_within(one, 0, 1, 0)
   println("one len=${bytes.len(one)} ${bytes.to_list(one)}")
-  var empty = bytes.new(0)
+  var empty = bytes.zeros(0)
   bytes.copy_within(empty, 0, 1, 0)
   bytes.copy_within(empty, 0, 0, -1)
   println("empty len=${bytes.len(empty)} ${bytes.to_list(empty)}")

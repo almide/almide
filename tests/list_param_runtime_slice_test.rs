@@ -10,12 +10,12 @@ use std::process::Command;
 const SOURCE: &str = r#"import io
 import random
 
-fn emit(xs: List[Int]) -> Unit = io.write_bytes(xs)
+effect fn emit(xs: List[Int]) -> Unit = io.write_bytes(xs)
 
 effect fn pick(xs: List[String]) -> String? = random.choice(xs)
 
 effect fn main() -> Unit = {
-  emit([72, 105, 10])
+  emit([72, 105, 10])!
   let one = pick(["only"])!
   println("${one}")
 }

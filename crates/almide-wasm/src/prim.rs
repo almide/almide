@@ -424,11 +424,11 @@ impl Emitter<'_> {
 
 impl Emitter<'_> {
     /// The prim allocators' size judgment, in i64 BEFORE the i32 wrap
-    /// (the `bytes.new` / `bytes.repeat` shape, C-197): an element count
+    /// (the `bytes.zeros` / `bytes.repeat` shape, C-197): an element count
     /// whose byte total lies past the structural bound is the defined
     /// `Error: out of memory` abort, never a wrapped small request that
     /// the allocator satisfies and the element stores then overrun
-    /// (#1908's sibling: `bytes.read_f16_le_array(b, 0, i64::MAX)` wrapped
+    /// (#1908's sibling: `(bytes.get_f16_le_array(b, 0, i64::MAX) ?? [])` wrapped
     /// `n * 8` to a small size and trapped out of bounds on the first
     /// store past it, where native died in the C-197 form). The count is
     /// on the stack (i64) and stays there.

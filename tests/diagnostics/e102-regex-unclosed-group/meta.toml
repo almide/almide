@@ -1,0 +1,3 @@
+expects_code = "E102"
+expects_error = "invalid regex: unclosed group"
+hint_substring = "regex.compile"

@@ -14,15 +14,18 @@ effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _
 
 /// Ends with code 0..=255; others abort, exit 1.
 @intrinsic("almide_rt_process_exit")
+@category("Abort")
 effect fn exit(code: Int) -> Never = _
 
 /// Full argv, program name at index 0.
 @intrinsic("almide_rt_process_args")
+@category("Env.read")
 effect fn args() -> List[String] = _
 
 /// All stdin lines; err on non-UTF-8 input.
 @ordered
 @intrinsic("almide_rt_process_stdin_lines")
+@category("IO.stdin")
 effect fn stdin_lines() -> Result[List[String], String] = _
 
 /// exec in dir; err is stderr, maybe empty.
@@ -83,11 +86,13 @@ effect fn exec_attached(cmd: String, args: List[String]) -> Result[Int, String] 
 
 /// OS process ID of this program.
 @intrinsic("almide_rt_process_pid")
-fn pid() -> Int = _
+@category("Env.read")
+effect fn pid() -> Int = _
 
 /// Variable value, or none if unset.
 @intrinsic("almide_rt_process_env")
-fn env(key: String) -> String? = _
+@category("Env.read")
+effect fn env(key: String) -> String? = _
 
 /// Pid of cmd started in the background.
 @ordered
@@ -101,8 +106,9 @@ effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 
 /// Blocks ms milliseconds; negative is 0.
 @intrinsic("almide_rt_process_sleep")
-fn sleep(ms: Int) -> Unit = _
+@category("Time")
+effect fn sleep(ms: Int) -> Unit = _
 
 /// True while pid exists, zombies included.
 @intrinsic("almide_rt_process_is_alive")
-fn is_alive(pid: Int) -> Bool = _
+effect fn is_alive(pid: Int) -> Bool = _

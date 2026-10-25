@@ -12,12 +12,14 @@
 
 use std::collections::{HashMap, VecDeque};
 use almide_ir::effect::Effect;
-use super::graph::{bit, Edge, Graph, NodeId};
+use super::graph::{bit, Edge, Graph, NodeId, EFFECT_FN};
 
 struct Hop {
     /// The node one step closer to the operation; `None` at the operation.
     next: Option<NodeId>,
     label: Option<String>,
+    /// The edge this step goes along.
+    edge: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -30,7 +32,13 @@ enum Role {
 }
 
 pub(super) struct Paths {
+    /// One search per bit: every [`Effect::ALL`] category, in order, then
+    /// the effect bit ([`EFFECT_FN`], #4151).
     per_cat: Vec<HashMap<NodeId, Hop>>,
+}
+
+fn searched_bits() -> impl Iterator<Item = u32> {
+    Effect::ALL.iter().map(|&c| bit(c)).chain(std::iter::once(EFFECT_FN))
 }
 
 /// Longest path rendered; a longer one is cut with `…`.
@@ -61,13 +69,26 @@ impl Paths {
                 }
             }
         }
-        let per_cat = Effect::ALL.iter().map(|&c| search(g, &out, bit(c))).collect();
+        let per_cat = searched_bits().map(|b| search(g, &out, b)).collect();
         Paths { per_cat }
     }
 
     /// `main → use_it → f (arg 1 of use_it) → closure (line 4:42 in make) → fs.read_text (line 4:51)`.
     pub fn render(&self, g: &Graph, start: NodeId, c: Effect) -> Option<String> {
-        let parents = &self.per_cat[Effect::ALL.iter().position(|&e| e == c)?];
+        self.render_bit(g, start, bit(c))
+    }
+
+    /// The first step from `start` toward the operation that set `b`: the
+    /// edge's source site, where a diagnostic anchors.
+    pub fn first_site(&self, g: &Graph, start: NodeId, b: u32) -> Option<almide_base::span::Span> {
+        let parents = &self.per_cat[searched_bits().position(|x| x == b)?];
+        let hop = parents.get(&start)?;
+        g.sites.get(hop.edge).copied().flatten()
+    }
+
+    /// [`Paths::render`] for one bit of the mask (a category or the effect bit).
+    pub fn render_bit(&self, g: &Graph, start: NodeId, b: u32) -> Option<String> {
+        let parents = &self.per_cat[searched_bits().position(|x| x == b)?];
         let mut steps = Steps::default();
         steps.push(g.nodes[start].label.as_deref());
         let mut n = start;
@@ -111,12 +132,12 @@ impl Steps {
 fn search(g: &Graph, out: &[Vec<(usize, Role)>], c: u32) -> HashMap<NodeId, Hop> {
     let mut parent: HashMap<NodeId, Hop> = HashMap::new();
     let mut queue = VecDeque::new();
-    for e in &g.edges {
+    for (ei, e) in g.edges.iter().enumerate() {
         if let Edge::Const { to, cats, label, .. } = e
             && cats & c != 0
             && !parent.contains_key(to)
         {
-            parent.insert(*to, Hop { next: None, label: label.clone() });
+            parent.insert(*to, Hop { next: None, label: label.clone(), edge: ei });
             queue.push_back(*to);
         }
     }
@@ -127,7 +148,7 @@ fn search(g: &Graph, out: &[Vec<(usize, Role)>], c: u32) -> HashMap<NodeId, Hop>
                 continue;
             }
             let Some(label) = hop_label(g, &g.edges[ei], role) else { continue };
-            parent.insert(to, Hop { next: Some(n), label });
+            parent.insert(to, Hop { next: Some(n), label, edge: ei });
             queue.push_back(to);
         }
     }

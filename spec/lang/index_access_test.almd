@@ -23,7 +23,7 @@ test "bytes index read" {
 }
 
 test "bytes index write" {
-  var buf: Bytes = bytes.new(4)
+  var buf: Bytes = bytes.zeros(4)
   buf[0] = 0xFF
   buf[2] = 0x42
   assert_eq(buf[0], 0xFF)

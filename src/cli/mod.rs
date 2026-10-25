@@ -3,6 +3,7 @@
 mod run;
 mod build_dir;
 pub(crate) mod build;
+mod fs_scope_twin;
 mod build_wasm;
 mod wasm_compile;
 mod bench;
@@ -36,6 +37,7 @@ mod survive_edit;
 mod survive_legs;
 mod docs_gen;
 mod cargo_build;
+pub(crate) mod rustc_floor;
 mod cargo_ice;
 mod cargo_toml;
 mod crate_inputs;
@@ -82,7 +84,13 @@ pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> 
     let ir_after = result.program;
 
     // Report in name order so the same program prints the same report on every run and route.
-    let mut functions: Vec<_> = ir_after.effect_map.functions.iter().collect();
+    // A stdlib function is judged where the program uses it: its set is
+    // charged to every caller. Judging it as a root refused a program for the
+    // `panic` inside an unused `list.range_step` (#4155: `Abort` is a leaf).
+    let is_stdlib_fn = |name: &str| {
+        name.split_once('.').is_some_and(|(m, _)| almide::stdlib::is_stdlib_module(m) || almide::stdlib::is_bundled_module(m))
+    };
+    let mut functions: Vec<_> = ir_after.effect_map.functions.iter().filter(|(n, _)| !is_stdlib_fn(n)).collect();
     functions.sort_by(|a, b| a.0.cmp(b.0));
     let mut violations = 0;
     for (name, fe) in functions {
@@ -98,6 +106,9 @@ pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> 
                 if let Some(path) = fe.paths.get(*e) {
                     err(&format!("  path: {path}"));
                 }
+                if let Some(note) = epoch15_category_note(**e, &allowed) {
+                    err(&format!("  note: {note}"));
+                }
             }
             violations += 1;
         }
@@ -105,6 +116,49 @@ pub fn check_permissions(ir: &almide::ir::IrProgram, permissions: &[String]) -> 
     if violations > 0 {
         err(&format!("\n{} capability violation(s)", violations));
         return Err(format!("{} capability violation(s)", violations));
+    }
+    Ok(())
+}
+
+/// What a manifest written before dialect epoch 15 meant by a name that now
+/// means less (#4155, ADR-0026 D2): `IO` was files and the standard streams
+/// and is the streams only, `Env` admitted starting a process and no longer
+/// does. Said once per refused leaf the old name would have covered.
+pub(crate) fn epoch15_category_note(
+    e: almide::ir::effect::Effect,
+    allowed: &std::collections::HashSet<almide::ir::effect::Effect>,
+) -> Option<&'static str> {
+    use almide::ir::effect::Effect;
+    match e {
+        Effect::FsRead | Effect::FsWrite if allowed.contains(&Effect::IoStdout) => Some(
+            "files are `FS` (`FS.read`, `FS.write`) since dialect epoch 15; `IO` is the standard streams only",
+        ),
+        Effect::Proc if allowed.contains(&Effect::EnvRead) => Some(
+            "starting a process is `Proc` since dialect epoch 15 — `Env` no longer grants it, because a started \
+             command can reach every other capability",
+        ),
+        _ => None,
+    }
+}
+
+/// `[permissions].allow` granting `Proc` with no `proc = [...]` command list
+/// (#4155): the program may start any command, and through it reach every
+/// other capability. A warning on every route; refused when `refuse` (the
+/// `--profile critical` check).
+pub fn proc_grant_without_list(proj: &crate::project::Project, refuse: bool) -> Result<(), String> {
+    let Some(allow) = &proj.permissions else { return Ok(()) };
+    let Ok(allowed) = crate::project::allowed_effects(allow) else { return Ok(()) };
+    if !allowed.contains(&almide::ir::effect::Effect::Proc) || proj.proc_allow.is_some() {
+        return Ok(());
+    }
+    let level = if refuse { "error" } else { "warning" };
+    err(&format!(
+        "{level}: [permissions].allow grants `Proc` with no `proc = [...]` command list: the program may start \
+         any command, and a started command can reach every other capability"
+    ));
+    err("  hint: list the commands it may start — `proc = [\"git\"]` under [permissions] (ADR-0025)");
+    if refuse {
+        return Err("`Proc` granted without a `proc` list under --profile critical".to_string());
     }
     Ok(())
 }
@@ -193,10 +247,61 @@ pub fn enforce_project_permissions(ir: &almide::ir::IrProgram, proj: &crate::pro
     // embedded wasm host checks every fs op and preopens only these roots, and
     // the native build embeds them in `main` (`build::inject_fs_scope`).
     almide_wasm_run::set_fs_scope(proj.fs_allow.clone());
-    if !proj.permissions.is_empty() {
-        check_permissions(ir, &proj.permissions)?;
+    // An absent `allow` is unchecked; an explicit `allow = []` allows no
+    // capability at all (#4101).
+    if let Some(allow) = &proj.permissions {
+        check_permissions(ir, allow)?;
+        proc_grant_without_list(proj, false)?;
     }
     enforce_proc_allowlist(ir, proj.proc_allow.as_deref())
+}
+
+/// `[permissions] native` (#4093): `Err` with the refusal when a fetched
+/// dependency of `proj` brings native code the manifest does not grant.
+/// With `announce`, a native build names each granted dependency that brings
+/// native code, once per package per process (a test run builds many files).
+pub(crate) fn enforce_native_grants(
+    proj: &crate::project::Project,
+    fetched: &[crate::project::FetchedDep],
+    announce: bool,
+) -> Result<(), String> {
+    let deps = crate::native_grant::survey(proj, fetched);
+    if let Some(refusal) = crate::native_grant::refusal(proj, &deps) {
+        return Err(refusal);
+    }
+    if announce {
+        static ANNOUNCED: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+        let mut seen = ANNOUNCED.lock().unwrap_or_else(|p| p.into_inner());
+        if !seen.contains(&proj.root) {
+            seen.push(proj.root.clone());
+            for line in crate::native_grant::granted_lines(&deps) {
+                err(&line);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Resolve `./almide.toml`'s dependencies before a command that builds runs
+/// (#4093): a fetch error (an untrusted owner, a source changed under the
+/// lock, a `--locked` miss, a missing repository) and an ungranted native
+/// dependency ([`enforce_native_grants`]) are printed and exit 1. Several
+/// build routes read the dependencies with errors swallowed (the wasm test
+/// lane resolved against an empty set), so the refusal is made once, here,
+/// for every route. A manifest that does not parse is left to the command.
+pub(crate) fn resolve_cwd_deps_or_exit() {
+    let Some(proj) = crate::compile_driver::cwd_project() else { return };
+    if proj.dependencies.is_empty() {
+        return;
+    }
+    let fetched = crate::project_fetch::fetch_all_deps(&proj).unwrap_or_else(|e| {
+        err(&e);
+        std::process::exit(1);
+    });
+    if let Err(refusal) = enforce_native_grants(&proj, &fetched, false) {
+        err(&refusal);
+        std::process::exit(1);
+    }
 }
 
 pub fn enforce_proc_allowlist(ir: &almide::ir::IrProgram, allow: Option<&[String]>) -> Result<(), String> {
@@ -407,9 +512,12 @@ pub(crate) fn load_native_build_config(file: &str) -> (Vec<crate::project::Nativ
 }
 
 /// `collect_test_files`'s per-entry body: recurse into subdirectories, or
-/// check a `.almd` file for a `test` block. Extracted verbatim.
+/// check a `.almd` file for a `test` block. A symlinked directory is not
+/// descended (#4140): a link loop would collect the same files at every
+/// level, and a link out would run tests from outside the tree.
 fn collect_test_files_entry(path: &std::path::Path, files: &mut Vec<String>) {
-    if path.is_dir() {
+    let is_link = std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    if path.is_dir() && !is_link {
         files.extend(collect_test_files(path));
     } else if path.extension().map(|e| e == "almd").unwrap_or(false) {
         // Check if file contains a test block
@@ -431,6 +539,9 @@ fn collect_test_files(dir: &std::path::Path) -> Vec<String> {
     }
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.filter_map(|e| e.ok()) {
+            if entry.file_type().is_ok_and(|t| t.is_symlink()) && entry.path().is_dir() {
+                continue;
+            }
             collect_test_files_entry(&entry.path(), &mut files);
         }
     }

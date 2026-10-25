@@ -41,13 +41,13 @@ jobs:
         # unmeasured, and the ledger header says so.
         module: [bytes, list, string, datetime, io, math, json, value]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
 
@@ -59,7 +59,7 @@ jobs:
       # host's ceiling is the runner's free memory, and six parallel jobs are
       # exactly the pressure that turned an `i32_max` verdict into a coin.
       - name: Cache wasmtime tarball
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: wasmtime-v49.0.1-x86_64-linux.tar.xz
           key: wasmtime-v49.0.1-x86_64-linux

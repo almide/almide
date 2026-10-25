@@ -448,7 +448,7 @@ impl Emitter<'_> {
     /// Var's object is shared and moves out (`am`); a non-Var borrowed
     /// tail (a native arm's View) declines; anything else is poison.
     pub(crate) fn witness_tail_var(&mut self, tail: &almide_ir::IrExpr) {
-        let src = self.witness_src_local(tail);
+        let src = self.witness_tail_src(tail);
         let view = crate::witness_unwrap::is_extraction_view(tail);
         let Some(w) = self.witness.as_mut() else { return };
         // After a `return_call` (a tail `f(x)!` seen through, C-069) the

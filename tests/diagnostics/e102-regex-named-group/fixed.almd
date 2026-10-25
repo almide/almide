@@ -1,0 +1,4 @@
+// Groups are numbered: captures gives [whole, group1, ...].
+import regex
+
+fn main() -> Unit = println("${regex.find(regex.new("(\\d{4})"), "in 2026")}")

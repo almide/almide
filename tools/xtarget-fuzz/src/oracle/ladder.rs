@@ -1085,7 +1085,7 @@ mod resource_class_tests {
     fn the_2382_reproducer_is_a_skip() {
         // seed 563158060951 index 1451 on develop 5d8568272: native allocated
         // 2 GB, ran on, aborted at the fixture's own `clamp` panic (exit 1,
-        // 91 B of stdout); wasm died at `bytes.new(2147483647)` with the
+        // 91 B of stdout); wasm died at `bytes.zeros(2147483647)` with the
         // defined OOM line (exit 1, 0 B). Both abort, for DIFFERENT reasons,
         // and wasm's empty stdout contradicts nothing — a resource skip.
         let native_stdout = "x".repeat(91);

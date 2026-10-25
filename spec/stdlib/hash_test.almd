@@ -22,7 +22,7 @@ test "sha256 NIST vectors" {
 
 test "sha256 bytes form agrees with the hex form" {
   assert_eq(hex.encode(hash.sha256(bytes.from_string("abc"))), hash.sha256_hex("abc"))
-  assert_eq(bytes.len(hash.sha256(bytes.new(0))), 32)
+  assert_eq(bytes.len(hash.sha256(bytes.new())), 32)
 }
 
 test "sha256 padding edges" {

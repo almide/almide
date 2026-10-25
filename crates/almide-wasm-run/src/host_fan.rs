@@ -120,6 +120,9 @@ pub(super) struct ParCtx {
     /// sequential run meets its own deadline).
     ticked: Option<Arc<AtomicBool>>,
     args: Vec<String>,
+    /// The run module's `fs_call` op set (#4102): a chunk instance is held
+    /// to the same ops as the run's own.
+    allowed_ops: super::AllowedOps,
     pool: Mutex<Vec<Worker>>,
     crew: Mutex<Crew>,
     /// Per site: the last measured compute time per element (ns).
@@ -132,14 +135,15 @@ impl ParCtx {
         max_memory_bytes: Option<usize>,
         ticked: Option<Arc<AtomicBool>>,
         args: Vec<String>,
+        allowed_ops: super::AllowedOps,
     ) -> Self {
-        ParCtx { engine, module, linker, max_memory_bytes, ticked, args, pool: Mutex::new(Vec::new()), crew: Mutex::default(), history: Mutex::default() }
+        ParCtx { engine, module, linker, max_memory_bytes, ticked, args, allowed_ops, pool: Mutex::new(Vec::new()), crew: Mutex::default(), history: Mutex::default() }
     }
 
     /// The run's compiled module and bounds — what an abort-site child
     /// (`testing.assert_aborts`, ADR-0029) is started from.
-    pub(super) fn compiled(&self) -> (&wasmtime::Engine, &wasmtime::Module, Option<usize>, &[String]) {
-        (&self.engine, &self.module, self.max_memory_bytes, &self.args)
+    pub(super) fn compiled(&self) -> (&wasmtime::Engine, &wasmtime::Module, Option<usize>, &[String], &super::AllowedOps) {
+        (&self.engine, &self.module, self.max_memory_bytes, &self.args, &self.allowed_ops)
     }
 }
 
@@ -420,7 +424,7 @@ fn take(ctx: &ParCtx, k: usize) -> Vec<Worker> {
 /// left that a later chunk could notice (the reset invariant).
 fn reusable(w: &Worker) -> bool {
     let h = w.store.data();
-    let quiet = |m: &Arc<Mutex<String>>| m.lock().is_ok_and(|s| s.is_empty());
+    let quiet = |m: &Arc<Mutex<Vec<u8>>>| m.lock().is_ok_and(|s| s.is_empty());
     let exited = h.exit.lock().map_or(true, |e| e.is_some());
     !exited && quiet(&h.out) && quiet(&h.err) && w.memory.data_size(&w.store) <= RESET_BYTES
 }
@@ -606,6 +610,7 @@ fn instantiate(ctx: &ParCtx) -> anyhow::Result<Worker> {
         err_last: Arc::default(),
         par: None,
         abort_site: -1,
+        allowed_ops: ctx.allowed_ops.clone(),
     };
     let mut store = wasmtime::Store::new(&ctx.engine, host);
     store.limiter(|h| &mut h.limits);

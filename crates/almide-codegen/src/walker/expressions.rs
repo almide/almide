@@ -12,7 +12,7 @@ use super::helpers::{template_or, terminate_stmt, indent_lines, render_body_cont
 /// Render a statement list. Peephole patterns are detected at IR level
 /// by PeepholePass; this just renders the resulting IR nodes.
 fn render_stmts(ctx: &RenderContext, stmts: &[IrStmt]) -> Vec<String> {
-    stmts.iter().map(|s| render_stmt(ctx, s)).collect()
+    stmts.iter().map(|s| render_stmt(ctx, s)).filter(|s| !s.trim().is_empty()).collect()
 }
 
 /// Render an expression ensuring an owned value (not AlmideRcCow wrapper).

@@ -143,7 +143,8 @@ struct ServeTexts {
     /// One (ptr, len) pair per `method` case, in discriminant order.
     method_table: i32,
     /// The answers native's server core gives a request it refuses: the
-    /// status, its reason as the body, `Content-Type: text/plain` — as cells.
+    /// status, its reason as the body, `Content-Type: text/plain` and the
+    /// core's `X-Content-Type-Options: nosniff` default (C-407) — as cells.
     r413: ServePiece,
     r414: ServePiece,
     r431: ServePiece,
@@ -172,7 +173,7 @@ impl ServeTexts {
         }
         let cells = |status: i64| -> Vec<u8> {
             let reason = http_server_reason(status);
-            [status.to_string().as_str(), reason, "Content-Type", "text/plain"]
+            [status.to_string().as_str(), reason, "Content-Type", "text/plain", "X-Content-Type-Options", "nosniff"]
                 .iter()
                 .map(|c| format!("{}\n{c}", c.chars().count()))
                 .collect::<String>()

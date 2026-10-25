@@ -236,21 +236,9 @@ pub fn almide_http_req_header(req: &AlmideHttpRequest, key: &str) -> Option<Almi
     req.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v.clone())
 })(); __almide_v.into_almide() }
 
-pub fn almide_http_query_params(req: &AlmideHttpRequest) -> AlmideMap<AlmideString, AlmideString> { let __almide_v: AlmideMap<String, String> = (|| {
-    let mut params = AlmideMap::new();
-    if let Some(q) = req.path.split('?').nth(1) {
-        for pair in q.split('&') {
-            let mut kv = pair.splitn(2, '=');
-            if let (Some(k), Some(v)) = (kv.next(), kv.next()) {
-                params.insert(percent_decode(k), percent_decode(v));
-            }
-        }
-    }
-    params
-})(); __almide_v.into_almide() }
-
-/// Percent-decode a URL component for manual use (stdlib `http.url_decode`).
-/// Same rules as the query-param decoder: `+` → space, `%XX` → raw byte.
+/// Percent-decode a URL component for manual use (stdlib `http.url_decode`),
+/// leniently: `+` → space, `%XX` → raw byte. Not the query decoder —
+/// `http.query_params` is `url.parse_query` (C-404).
 pub fn almide_http_url_decode(s: &str) -> AlmideString { let __almide_v: String = (|| {
     percent_decode(s)
 })(); __almide_v.into_almide() }
@@ -591,10 +579,16 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
     // time in the order requests arrive whole: the app is an `Rc` built on
     // this thread and stdout is this thread's buffer (ADR-0020 §5.5, #2665).
     let pool = http_server_pool(listener, HTTP_SERVER_DEFAULT_LIMITS);
+    // A handler err is a fixed 500 body naming the request's id, and the error
+    // itself goes to stderr under it (C-409, #4150).
     while let Some((conn, (method, path, body, headers))) = pool.next() {
+        let id = http_server_request_id(&method, &path, &body);
         let resp = match handler(AlmideHttpRequest { method, path, body, headers, params: Vec::new() }) {
             Ok(r) => r,
-            Err(e) => AlmideHttpResponse::new(500, format!("Internal error: {}", e)),
+            Err(e) => {
+                eprintln!("{}", http_server_handler_error_line(&id, &e));
+                AlmideHttpResponse::new(500, http_server_handler_error_body(&id))
+            }
         };
         let _ = http_server_write(conn, resp.status, &resp.headers, &resp.body);
     }
@@ -634,19 +628,8 @@ pub fn almide_http_serve(port: i64, handler: std::rc::Rc<dyn Fn(AlmideHttpReques
 // from the watcher WITHOUT flushing, since no other thread can reach the
 // serving thread's buffer — until §5.5's shared buffer.
 
-#[cfg(unix)]
-mod almide_http_signal_ffi {
-    extern "C" {
-        pub fn signal(sig: i32, handler: usize) -> usize;
-        pub fn pthread_self() -> usize;
-        pub fn pthread_kill(thread: usize, sig: i32) -> i32;
-        pub fn _exit(code: i32) -> !;
-    }
-    // POSIX values, identical on Linux and macOS / BSD.
-    pub const SIGINT: i32 = 2;
-    pub const SIGTERM: i32 = 15;
-    pub const SIG_IGN: usize = 1;
-}
+// The C calls (signal / pthread_self / pthread_kill / _exit, and
+// SetConsoleCtrlHandler on Windows) are sys.rs's `almide_rt_sys_ffi`.
 
 /// The thread serving (pthread_t), where the forced stop must run.
 #[cfg(unix)]
@@ -657,10 +640,10 @@ static ALMIDE_HTTP_SERVE_THREAD: std::sync::atomic::AtomicUsize = std::sync::ato
 /// stop always runs where the buffer is.
 #[cfg(unix)]
 extern "C" fn almide_http_on_signal(sig: i32) {
-    use almide_http_signal_ffi as ffi;
+    use almide_rt_sys_ffi as ffi;
     let serving = ALMIDE_HTTP_SERVE_THREAD.load(std::sync::atomic::Ordering::SeqCst);
-    if unsafe { ffi::pthread_self() } != serving {
-        unsafe { ffi::pthread_kill(serving, sig) };
+    if ffi::thread_self() != serving {
+        ffi::thread_kill(serving, sig);
         return;
     }
     if http_server_signal() >= 2 {
@@ -683,32 +666,30 @@ fn almide_http_force_here() {
         })
         .unwrap_or(true);
     if flushed {
-        unsafe { almide_http_signal_ffi::_exit(1) }
+        almide_rt_sys_ffi::exit_now(1)
     }
 }
 
 #[cfg(unix)]
 fn almide_http_force_from_watcher() {
     let serving = ALMIDE_HTTP_SERVE_THREAD.load(std::sync::atomic::Ordering::SeqCst);
-    unsafe {
-        almide_http_signal_ffi::pthread_kill(serving, almide_http_signal_ffi::SIGTERM);
-    }
+    almide_rt_sys_ffi::thread_kill(serving, almide_rt_sys_ffi::SIGTERM);
 }
 
 /// Install the handler for SIGTERM and SIGINT; answers the dispositions to
 /// restore. A signal the process was started with IGNORED (SIGINT under a
 /// non-interactive shell's `&`, a `nohup`) stays ignored.
 #[cfg(unix)]
-fn almide_http_signals_arm() -> [(i32, usize); 2] {
-    use almide_http_signal_ffi as ffi;
+fn almide_http_signals_arm() -> [(i32, almide_rt_sys_ffi::Disposition); 2] {
+    use almide_rt_sys_ffi as ffi;
     // Touch the buffer here, so the handler never runs its lazy init.
     ALMIDE_STDOUT_BUF.with(|_| ());
-    ALMIDE_HTTP_SERVE_THREAD.store(unsafe { ffi::pthread_self() }, std::sync::atomic::Ordering::SeqCst);
-    let handler = almide_http_on_signal as extern "C" fn(i32) as usize;
+    ALMIDE_HTTP_SERVE_THREAD.store(ffi::thread_self(), std::sync::atomic::Ordering::SeqCst);
+    let handler = ffi::Disposition::handler(almide_http_on_signal);
     [ffi::SIGTERM, ffi::SIGINT].map(|sig| {
-        let prev = unsafe { ffi::signal(sig, handler) };
-        if prev == ffi::SIG_IGN {
-            unsafe { ffi::signal(sig, ffi::SIG_IGN) };
+        let prev = ffi::set_signal(sig, handler);
+        if prev == ffi::Disposition::IGNORE {
+            ffi::set_signal(sig, ffi::Disposition::IGNORE);
         }
         (sig, prev)
     })
@@ -720,30 +701,20 @@ fn almide_http_signals_arm() -> [(i32, usize); 2] {
 /// ends and the handler passes signals to it: there the signals do again
 /// what they did before `serve`.
 #[cfg(unix)]
-fn almide_http_signals_disarm(prev: [(i32, usize); 2]) {
+fn almide_http_signals_disarm(prev: [(i32, almide_rt_sys_ffi::Disposition); 2]) {
     if std::thread::current().name() == Some("main") {
         return;
     }
     for (sig, disposition) in prev {
-        unsafe { almide_http_signal_ffi::signal(sig, disposition) };
+        almide_rt_sys_ffi::set_signal(sig, disposition);
     }
 }
 
+// CTRL_C_EVENT = 0, CTRL_BREAK_EVENT = 1.
 #[cfg(windows)]
-mod almide_http_signal_ffi {
-    pub type Handler = unsafe extern "system" fn(u32) -> i32;
-    #[link(name = "kernel32")]
-    extern "system" {
-        pub fn SetConsoleCtrlHandler(handler: Option<Handler>, add: i32) -> i32;
-    }
-    pub const CTRL_C_EVENT: u32 = 0;
-    pub const CTRL_BREAK_EVENT: u32 = 1;
-}
-
-#[cfg(windows)]
-unsafe extern "system" fn almide_http_on_ctrl(event: u32) -> i32 {
+extern "system" fn almide_http_on_ctrl(event: u32) -> i32 {
     match event {
-        almide_http_signal_ffi::CTRL_C_EVENT | almide_http_signal_ffi::CTRL_BREAK_EVENT => {
+        0 | 1 => {
             http_server_signal();
             1
         }
@@ -758,12 +729,12 @@ fn almide_http_force_from_watcher() {
 
 #[cfg(windows)]
 fn almide_http_signals_arm() {
-    unsafe { almide_http_signal_ffi::SetConsoleCtrlHandler(Some(almide_http_on_ctrl), 1) };
+    almide_rt_sys_ffi::set_console_ctrl_handler(almide_http_on_ctrl, true);
 }
 
 #[cfg(windows)]
 fn almide_http_signals_disarm(_: ()) {
-    unsafe { almide_http_signal_ffi::SetConsoleCtrlHandler(Some(almide_http_on_ctrl), 0) };
+    almide_rt_sys_ffi::set_console_ctrl_handler(almide_http_on_ctrl, false);
 }
 
 #[cfg(not(any(unix, windows)))]

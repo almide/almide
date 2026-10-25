@@ -318,7 +318,9 @@ fn build_interface(file: &str) -> Result<almide::interface::ModuleInterface, Str
     let (mut program, source_text, _parse_errors) = parse_file(file);
     let dep_paths: Vec<(project::PkgId, std::path::PathBuf)> = if std::path::Path::new("almide.toml").exists() {
         if let Ok(proj) = project::parse_toml(std::path::Path::new("almide.toml")) {
-            project_fetch::fetch_all_deps(&proj)
+            // Cache-only: interface extraction never fetches or writes the
+            // lock (#4128). `almide build` is the command that fetches.
+            project_fetch::resolve_cached_deps(&proj)
                 .unwrap_or_else(|_| vec![])
                 .into_iter()
                 .map(|fd| (fd.pkg_id, fd.source_dir))

@@ -610,7 +610,7 @@ fn build_unwrap_match(
             kind: IrExprKind::Call {
                 target: almide_ir::CallTarget::Module {
                     module: almide_lang::intern::sym("list"),
-                    func: almide_lang::intern::sym("join"),
+                    func: almide_lang::intern::sym("__join_string"),
                     def_id: None,
                 },
                 args: vec![

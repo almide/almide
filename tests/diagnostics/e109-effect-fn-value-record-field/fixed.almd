@@ -1,0 +1,11 @@
+// The fn that calls the field is an `effect fn`.
+import fs
+
+type Reader = { read: (String) -> Result[String, String] }
+
+effect fn reads(r: Reader) -> Result[String, String] = (r.read)("s.txt")
+
+effect fn main() -> Unit = {
+  let r = Reader { read: fs.read_text }
+  println(reads(r) ?? "none")
+}

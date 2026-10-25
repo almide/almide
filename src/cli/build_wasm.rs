@@ -67,7 +67,7 @@ pub(super) struct WasmBuild<'a> {
 /// Direct WASM emit: parse → check → lower → optimize → monomorphize → emit WASM binary.
 pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     let file = req.file;
-    let default_output = format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"));
+    let default_output = default_wasm_output(file);
     let output = req.output.unwrap_or(&default_output);
     // `--host js` (#2265): the compiler writes the JS host next to the
     // module. The module exports its allocator + release under the guard,
@@ -104,6 +104,23 @@ pub(super) fn cmd_build_wasm_direct(req: &WasmBuild) {
     // optional `wasm-opt` rewrite below, never from the pre-opt module.
     let host_from_shipped = |shipped: &[u8]| if js_host { write_js_host(output, file, shipped, &surface) } else { String::new() };
     report_built(output, &bytes, shape.leg(), req.wasm_opt, host_from_shipped, &super::build::guarantee_note(&outside_guarantee));
+}
+
+/// The core module a plain `almide build --target wasm` writes for this
+/// render (no `--component`), or — when the program ships as a component
+/// (an `http.serve` export) — the leg it ships on, as the refusal. `almide
+/// verify` pins the certificate to exactly these bytes.
+pub(super) fn shipped_core_module(file: &str, bytes: &[u8], host_ops: &[i32]) -> Result<Vec<u8>, &'static str> {
+    let shape = WasmPackage::decide(host_ops, false);
+    if shape.component {
+        return Err(shape.leg());
+    }
+    Ok(shape.package(file, bytes, host_ops))
+}
+
+/// The file `almide build <file> --target wasm` writes without `-o`.
+pub(super) fn default_wasm_output(file: &str) -> String {
+    format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"))
 }
 
 /// Refuse the two host-op shapes no requested packaging can carry, before

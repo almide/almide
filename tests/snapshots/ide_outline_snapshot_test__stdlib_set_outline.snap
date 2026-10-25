@@ -51,12 +51,14 @@ fn set.min_by[A, K](s: Set[A], f: fn(A) -> K) -> Option[A]
 fn set.min_with[A](s: Set[A], cmp: fn(A, A) -> Int) -> Option[A]
 fn set.new[A]() -> Set[A]
 fn set.partition[A](s: Set[A], f: fn(A) -> Bool) -> (List[A], List[A])
+fn set.product[A](s: Set[A]) -> A
 fn set.reduce[A](s: Set[A], f: fn(A, A) -> A) -> Option[A]
 fn set.remove[A](s: Set[A], value: A) -> Set[A]
 fn set.scan[A, B](s: Set[A], init: B, f: fn(B, A) -> B) -> List[B]
 fn set.sort[A](s: Set[A]) -> List[A]
 fn set.sort_by[A, B](s: Set[A], f: fn(A) -> B) -> List[A]
 fn set.sort_with[A](s: Set[A], cmp: fn(A, A) -> Int) -> List[A]
+fn set.sum[A](s: Set[A]) -> A
 fn set.symmetric_difference[A](a: Set[A], b: Set[A]) -> Set[A]
 fn set.to_list[A](s: Set[A]) -> List[A]
 fn set.union[A](a: Set[A], b: Set[A]) -> Set[A]

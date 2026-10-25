@@ -68,6 +68,7 @@ use std::borrow::Cow;
 
 use almide_base::intern::{sym, Sym};
 use almide_ir::*;
+use almide_lang::types::Ty;
 
 use super::pass::{NanoPass, PassResult, Target};
 use super::pass_rust_lowering::rewrite_tail_list_to_array;
@@ -519,6 +520,13 @@ impl<'a> Fuser<'a> {
         let (op, args) = match &expr.kind {
             IrExprKind::RuntimeCall { symbol, args } => (symbol.as_str().strip_prefix("almide_rt_list_")?, args),
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. } if self.find_map_twins.contains(name) => ("find_map", args),
+            // `list.sum`'s mono instance (`list.sum[Int]`) is a named call to
+            // the renamed self-hosted fn; only the generic-`sum` arm reads one.
+            IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
+                if name.as_str().strip_prefix("almide_rt_list_").is_some_and(|f| mono_base_or_self(f) == "sum") =>
+            {
+                (name.as_str().strip_prefix("almide_rt_list_")?, args)
+            }
             _ => return None,
         };
         let single = match op {
@@ -529,6 +537,19 @@ impl<'a> Fuser<'a> {
             "fold" if args.len() == 3 => self.single_stage(expr, op)?,
             "take" if args.len() == 2 => return self.take(expr),
             "sum" | "sum_float" | "len" if args.len() == 1 => return self.reducer(expr, op),
+            // `list.sum` is generic over `Numeric` (`A.__sum`), so a call
+            // reaches here as its mono instance. Int's `__sum` is the wrapping
+            // left fold from 0 the `Sum` collector renders, so it fuses exactly
+            // as the Int-only `sum` did. Float's does not: its fold starts at
+            // `0.0`, and the collector's `Iterator::sum::<f64>` starts at `-0.0`
+            // (an empty sum prints `-0` natively, `0` on wasm). A sized
+            // integer's `__sum` checks its width. Both keep the instance.
+            _ if args.len() == 1 && mono_base_or_self(op) == "sum" => {
+                return match &expr.ty {
+                    Ty::Int => self.reducer(expr, "sum"),
+                    _ => None,
+                };
+            }
             _ => return None,
         };
         Some(self.merge(single))
@@ -605,7 +626,7 @@ impl<'a> Fuser<'a> {
     /// `Len` collector. Same elements, same order, one fewer `Vec` — no
     /// purity condition.
     fn reducer(&self, expr: &IrExpr, op: &str) -> Option<IrExpr> {
-        let IrExprKind::RuntimeCall { args, .. } = &expr.kind else { return None };
+        let (IrExprKind::RuntimeCall { args, .. } | IrExprKind::Call { args, .. }) = &expr.kind else { return None };
         // A source adapter over the inner chain runs AFTER its steps, so it is
         // appended rather than dropped: `list.len` happens to be invariant
         // under `enumerate` and `sum` is not typeable over its pairs, but a
@@ -679,7 +700,6 @@ impl<'a> Fuser<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use almide_lang::types::Ty;
 
     fn function(name: &str, callee: Option<&str>) -> IrFunction {
         let kind = callee.map_or(IrExprKind::LitInt { value: 1 }, |name| IrExprKind::Call {

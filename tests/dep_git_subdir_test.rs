@@ -87,17 +87,27 @@ fn stderr(o: &Output) -> String {
     String::from_utf8_lossy(&o.stderr).to_string()
 }
 
-/// The checkout directories under the shared clone root(s).
+/// The checkout directories under the source-keyed clone roots: the
+/// children of every `@` directory below `~/.almide/cache/.sources` (#4093).
 fn shared_checkouts(home: &Path) -> Vec<PathBuf> {
-    let repos = home.join(".almide").join("cache").join(".repos");
-    let mut out = Vec::new();
-    for src in std::fs::read_dir(&repos).map(|r| r.flatten().collect::<Vec<_>>()).unwrap_or_default() {
-        for co in std::fs::read_dir(src.path()).map(|r| r.flatten().collect::<Vec<_>>()).unwrap_or_default() {
-            if !co.file_name().to_string_lossy().starts_with('.') {
-                out.push(co.path());
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        for e in std::fs::read_dir(dir).map(|r| r.flatten().collect::<Vec<_>>()).unwrap_or_default() {
+            if !e.path().is_dir() {
+                continue;
+            }
+            if e.file_name() == "@" {
+                for co in std::fs::read_dir(e.path()).map(|r| r.flatten().collect::<Vec<_>>()).unwrap_or_default() {
+                    if !co.file_name().to_string_lossy().starts_with('.') {
+                        out.push(co.path());
+                    }
+                }
+            } else {
+                walk(&e.path(), out);
             }
         }
     }
+    let mut out = Vec::new();
+    walk(&home.join(".almide").join("cache").join(".sources"), &mut out);
     out
 }
 
@@ -142,11 +152,12 @@ fn two_subdir_packages_of_one_repository_resolve_lock_and_share_a_clone() {
         assert_eq!(e.ref_name, "v0.1.0");
     }
 
-    // The locked re-run: still one checkout for both (the commit-keyed one).
+    // The locked re-run: the ref checkout already sits at the locked commit, so
+    // it is reused; nothing is fetched and no second checkout appears.
     let out = almide(&proj, &home, &["check", "src/main.almd"]);
     assert!(out.status.success(), "the locked check should succeed:\n{}", stderr(&out));
-    assert!(stderr(&out).matches("Fetching").count() <= 1, "{}", stderr(&out));
-    assert_eq!(shared_checkouts(&home).len(), 2, "ref checkout + one commit checkout: {:?}", shared_checkouts(&home));
+    assert_eq!(stderr(&out).matches("Fetching").count(), 0, "{}", stderr(&out));
+    assert_eq!(shared_checkouts(&home).len(), 1, "the ref checkout, reused at the locked commit: {:?}", shared_checkouts(&home));
 
     // `dep-path` prints the package's own directory inside the clone.
     let out = almide(&proj, &home, &["dep-path", "snaidhm"]);

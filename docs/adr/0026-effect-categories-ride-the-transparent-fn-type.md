@@ -261,3 +261,88 @@ error[E0xx]: `validate` may write files, but its bound is {FS.read}
 - Internal: #3238, `crates/almide-ir/src/effect.rs`,
   `crates/almide-codegen/src/pass_effect_inference.rs`,
   `src/cli/mod.rs::check_permissions`, `docs/wasm/capability-system.md`
+
+## Implementation note — categories through stdlib callbacks and fn values (#4152, 2026-10-25)
+
+D1's sets did not survive a stdlib higher-order call: an `@intrinsic`
+function (`list.map`, `= _`) was scanned as an empty body, so
+`list.map(paths, fs.read_text)` charged `IO` to no one and a manifest
+allowing only `Time` built and read the file (#4152). Now:
+
+- A bodyless stdlib function runs each fn-typed argument (the call site is
+  charged, as D1's transparent parameter) and keeps none — checked against
+  every `@intrinsic` HOF in `stdlib/`: none stores a callback in what it
+  returns. A value it receives in a type-variable parameter is pooled at the
+  argument's concrete type, and its result is read from the pools at the
+  call's type. `almide check`, which does not lower stdlib bodies, reads the
+  same facts off the declaration (`effect::stdlib_param_uses`).
+- A stdlib fn taken as a value carries its category (`fs.read_text` → `IO`)
+  and, for an `effect fn`, the effect bit (ADR-0009, E109).
+- Escaped values are pooled per signature (aliases expanded, an `effect`
+  slot in its carrier form) instead of per arity, and a generic body does
+  not re-pool a type-variable value; a read whose type leaves the signature
+  open reads every pool it could alias. This is what keeps a pure middleware
+  chain over `(Handler) -> Handler` from being charged with every handler.
+- The category of a stdlib function is charged at its uses, not on its
+  declaration, so `[permissions]` does not judge an unused bodyless
+  declaration.
+
+§Open is unchanged: the six-category vocabulary, a declared bound's syntax,
+the plain-fn bound and manifest versioning are not decided here.
+
+## Implementation note — D2's leaves (#4155, 2026-10-25)
+
+`process` was classified `Env`, so a manifest granting `Env` to read `$HOME`
+also started any command. D2 is implemented as written:
+
+- `Effect` is the fourteen leaves; `[permissions].allow` takes a leaf or one
+  of the four parents (`FS`, `Net`, `IO`, `Env`), which grants the leaves it
+  lists. `Proc` is under no parent.
+- Per operation: a module's row in `STDLIB_MODULE_EFFECTS` is its default and
+  a function whose operation differs declares `@category("FS.write")` on its
+  own declaration (`fs.write`, `env.set`, `http.serve`, `process.args`, …).
+- The output and abort builtins carry their leaves (`println` `IO.stdout`,
+  `eprintln` `IO.stderr`, `panic` and a failing `assert*` `Abort` +
+  `IO.stderr`, `process.exit` `Abort`): D2 says inference and `[permissions]`
+  work in leaves, and §Open's "plain fn bound" is about a declared bound, not
+  about what a manifest grants.
+- `[permissions]` judges the program's own functions (entry and user
+  modules); a stdlib function is judged through the callers it is charged to,
+  so an unused `panic` inside `list.range_step` refuses nothing.
+
+Choices where D2 or §Open is silent, taken on the conservative side:
+
+1. **An operation on an open socket or a shared-memory region** (`net.tcp_read`,
+   `unix_send`, `shm_write`, …) carries `Net.fetch` and `Net.listen` both: the
+   handle does not say which side opened it.
+2. **`Proc` without a `proc = [...]` list** is a warning on every route and
+   an error under `--profile critical`.
+3. **The old names keep parsing** (`IO`, `Env`, `Net` are parents) but mean
+   less; a refused leaf the old meaning covered prints a migration note. A
+   dialect-epoch-15 break records it.
+4. **Not changed here (§Open, one vocabulary):** `--profile critical --allow`
+   still takes `IO, Net, Env, Time, Rand, Process`.
+
+## Implementation note — dispatch, plain host fns, routes (#4158, #4159, 2026-10-25)
+
+- **Protocol dispatch (#4158).** An `effect` protocol method called through
+  a bound is E006 from a pure fn, and an implementation's effect-ness must
+  match its protocol's declaration on every protocol, including the
+  conventions `==` and the derives call implicitly. So a pure caller never
+  dispatches into an effect impl, and the sets need no dispatch edge.
+- **Plain host fns (#4159).** The plain `fn`s that act on the host became
+  `effect fn`s; a gate refuses a public plain fn in an `All(_)` module unless
+  it declares `@category()` (it reaches no host: `random`'s seeded
+  generator, `env.os`), and refuses a host category on any plain fn.
+  `env.millis` / `unix_timestamp` / `sleep_ms` are `Time`.
+- **Not changed — a plain-`fn` `@extern` (#4159, needs a ruling).** It still
+  carries every category (⊤) for `[permissions]`, but neither E006 nor the
+  effect bit treats its call as an effect: the JS host's synchronous imports
+  (`spec/wasm_host_js`) are plain `@extern` fns called from pure fns whose
+  exported wrappers the host calls as plain values, and making those calls
+  effects changes that export ABI. The conservative alternatives — refuse a
+  plain `@extern`, or treat its call as an effect — are both breaking for
+  that model, and ADR-0027 §5 (bounds on externs) is where it belongs.
+- **Routes.** `[permissions]` come from the entry file's project (the
+  nearest `almide.toml` at or above it), `check` judges every user module,
+  and both `almide test` lanes and `emit` apply them.

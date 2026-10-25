@@ -15,6 +15,9 @@ mod fs_fallible;
 /// The fallible `fs.fold_lines`, split out for the file budget.
 #[path = "fs_fold.rs"]
 mod fs_fold;
+/// The rooted family's descriptor calls (#4084).
+#[path = "fs_root.rs"]
+pub(crate) mod fs_root;
 
 pub(crate) const OP_FILE_SIZE: i32 = 17;
 pub(crate) const OP_MODIFIED_AT: i32 = 18;
@@ -252,7 +255,7 @@ impl Emitter<'_> {
             (f, [p, cb]) if almide_ir::mono_base_or_self(f).starts_with("__fallible_for_each_line") => {
                 self.lower_fs_fallible_for_each(p, cb)?
             }
-            _ => return Ok(None),
+            _ => return self.lower_fs_root_call(func, args),
         };
         Ok(Some(Some(Lowered::owned(out))))
     }

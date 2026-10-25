@@ -34,13 +34,13 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
 
@@ -72,13 +72,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
 
@@ -96,3 +96,30 @@ jobs:
 
       - name: Every re-injected bug fails the checked-allocator gate
         run: bash scripts/wasm-checked-alloc-reinject.sh
+
+  witness-reinject:
+    # #4005 / #4013: each lost-instruction bug in
+    # proofs/fixtures/<property>-witness/reinject/ is put back into the
+    # emitter and its witness must be rejected, while the unpatched
+    # emitter's witness for the same program is accepted — a lost bounds
+    # check for `bounds`, a lost list-literal slot store for `init`.
+    name: Re-injected lost instructions are rejected (${{ matrix.property }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        property: [bounds, init]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+
+      - name: Every re-injected lost instruction is rejected by the witness's checker
+        run: bash scripts/witness-reinject.sh ${{ matrix.property }}

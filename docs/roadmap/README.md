@@ -150,7 +150,7 @@
 | [Supervision & Actors](on-hold/supervision-and-actors.md) | Erlang-style actors, supervisors, and typed channels as stdlib modules |
 | [WASM Exception Handling](on-hold/wasm-exception-handling.md) | WASM native exception handling (try_table/throw) for zero-cost effect fn error propagation |
 | [WASM HTTP Client](on-hold/wasm-http-client.md) | Current wasm HTTP lanes and their target-availability authority |
-| [Web Framework](on-hold/web-framework.md) | First-party Hono-like web framework with template and Codec integration |
+| [Web Framework](on-hold/web-framework.md) | Hono-like web framework as an external package over stdlib http, with template and Codec integration |
 
 ## Done
 

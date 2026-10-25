@@ -1,0 +1,2 @@
+expects_error = "unknown protocol 'Numerik'"
+hint_substring = "Numeric"

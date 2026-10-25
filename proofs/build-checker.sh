@@ -21,6 +21,8 @@ echo "== compile + extract the proven checker =="
 "$COQC" -Q . AlmideTrust MemorySafe.v >/dev/null
 "$COQC" -Q . AlmideTrust SpatialCert.v >/dev/null
 "$COQC" -Q . AlmideTrust BoundsCert.v >/dev/null
+"$COQC" -Q . AlmideTrust Certified.v >/dev/null
+"$COQC" -Q . AlmideTrust InitCert.v >/dev/null
 "$COQC" -Q . AlmideTrust Extract.v >/dev/null
 
 echo "== link the runnable checker (extracted check_cert, parser internalized) =="
@@ -122,6 +124,23 @@ runb $GATE_TMP/bounds_flip.cert 0
 runb $GATE_TMP/bounds_stale.cert 1
 runb $GATE_TMP/bounds_cross.cert 1
 runb $GATE_TMP/bounds_junk.cert 1
+
+# INIT witness (#4013): `;`-separated construction sites, each `h H w W n N r R`
+# then the stored slots `s I`. accept ⟹ every site's window leaves its block
+# initialized over its whole extent (check_init_cert_sound).
+printf 'h12 w8 n3 r0 s0 s1 s2' > $GATE_TMP/init_literal.cert  # a three-element list literal, every slot stored → ACCEPT
+printf 'h12 w8 n3 r0 s0 s2'    > $GATE_TMP/init_missing.cert  # slot 1 never stored → REJECT
+printf 'h12 w8 n2 r0 s0 s1 s2' > $GATE_TMP/init_past.cert     # a store past the last slot → REJECT
+printf 'h12 w8 n1 r0 s0 x'     > $GATE_TMP/init_junk.cert     # malformed tail → REJECT
+runi() { # path expected_exit  (init mode)
+  set +e; ./checker init "$1" >$GATE_TMP/checker.out 2>&1; local rc=$?; set -e
+  if [ "$rc" -eq "$2" ]; then echo "ok   $(basename "$1"): $(cat $GATE_TMP/checker.out) (exit $rc)";
+  else echo "FAIL $(basename "$1"): got exit $rc want $2 ($(cat $GATE_TMP/checker.out))"; exit 1; fi
+}
+runi $GATE_TMP/init_literal.cert 0
+runi $GATE_TMP/init_missing.cert 1
+runi $GATE_TMP/init_past.cert 1
+runi $GATE_TMP/init_junk.cert 1
 
 echo
 echo "CHECKER OK: the kernel-proven check accepts the balanced certificate and"

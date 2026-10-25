@@ -1,0 +1,16 @@
+// #4158: effect-ness is part of a protocol method's signature on a
+// non-generic protocol too. An `effect` impl of the pure `load` let a pure
+// `[T: Loader]` caller read a file.
+import fs
+
+protocol Loader {
+  fn load(a: Self) -> String
+}
+
+type Src: Loader = { path: String }
+
+effect fn Src.load(a: Src) -> String = fs.read_text(a.path)!
+
+fn use_it[T: Loader](x: T) -> String = x.load()
+
+effect fn main() -> Unit = println(use_it(Src { path: "s.txt" }))

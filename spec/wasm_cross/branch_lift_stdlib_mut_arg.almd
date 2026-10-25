@@ -36,7 +36,7 @@ fn arm_writes() -> Unit = {
   var acc: List[String] = []
   var seen: Map[String, Int] = [:]
   var buf = ""
-  var raw = bytes.new(0)
+  var raw = bytes.zeros(0)
   for i in 0..<4 {
     let label = if i % 2 == 0 then {
       list.push(acc, "e${i}")

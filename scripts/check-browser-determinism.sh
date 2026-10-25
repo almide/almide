@@ -21,6 +21,7 @@ NATIVE_HARNESS="tools/wasmgen-harness"
 UU_HARNESS="tools/wasmgen-harness-uu"
 LEDGER="${DETERMINISM_WALLED_LEDGER:-proofs/determinism-walled-baseline.txt}"
 source scripts/lib/determinism-walled.sh
+source scripts/lib/determinism-select.sh
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
 # In CI a missing tool is a FAILURE, not a skip (#985): the invoking job
@@ -69,7 +70,8 @@ fail=0; n=0
 MAX_WALLED=0
 walled=0
 : > "$WORK/walled.txt"
-for fix in "$FIXTURE_DIR"/*.almd; do
+determinism_select "$FIXTURE_DIR" "$WORK/selected.txt"
+while read -r fix <&3; do
   [ -e "$fix" ] || continue
   name="$(basename "$fix")"
   "$NATIVE_BIN" "$fix" "$WORK/native.wasm" 2>"$WORK/native.err"; nrc=$?
@@ -105,7 +107,7 @@ for fix in "$FIXTURE_DIR"/*.almd; do
     fail=1
   fi
   n=$((n+1))
-done
+done 3< "$WORK/selected.txt"
 
 echo "----"
 if [ "$fail" -ne 0 ]; then
@@ -124,7 +126,7 @@ if [ "$rows" -ne "$MAX_WALLED" ]; then
   exit 1
 fi
 check_walled_ledger "$LEDGER" "$WORK/walled.txt" browser-determinism || exit 1
-corpus=$(ls "$FIXTURE_DIR"/*.almd 2>/dev/null | wc -l | tr -d ' ')
+corpus=$(wc -l < "$WORK/selected.txt" | tr -d ' ')
 if [ "$corpus" -eq 0 ] || [ "$((n + walled))" -ne "$corpus" ]; then
   echo "::error::browser-determinism: compared $n + skipped $walled of $corpus fixtures in $FIXTURE_DIR — the scan went blind (#985)"
   exit 1

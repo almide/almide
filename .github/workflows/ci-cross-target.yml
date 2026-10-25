@@ -28,20 +28,24 @@ env:
   # profile (#1006) — it only bloats the caches. Opt out.
   CARGO_INCREMENTAL: "0"
 
+# #4094: the same read-only token the repository default gives, stated here so a
+# settings change cannot widen it. A job that needs more declares it itself.
+permissions: read-all
+
 jobs:
   cross-target:
     name: Cross-Target (Rust vs WASM)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
 
       # Dependencies only (see ci.yml `build`): rust-cache prunes the
       # workspace's own artifacts on save; develop writes, PRs read.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: cross-target-${{ env.RUST_TOOLCHAIN }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
@@ -51,7 +55,7 @@ jobs:
         run: cargo build --release
 
       - name: Cache wasmtime tarball
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: wasmtime-v49.0.1-x86_64-linux.tar.xz
           key: wasmtime-v49.0.1-x86_64-linux
@@ -149,3 +153,60 @@ jobs:
           # a missing tool is a hard failure (#978: the PATH-lookup skip made this gate a no-op on
           # every run it ever had); the oracle resolves to ./target/release/almide built above.
           bash proofs/output-parity.sh
+
+  # #4023: the native region arena's stale-handle trap (ALMIDE_REGION_TRAP_STALE)
+  # ships OFF — measured +30% on binarytrees and +52% on treealloc, the rows the
+  # region window exists for — so this job is where it runs: all of spec/ on
+  # both legs and a fixed-seed differential fuzz (proofs/diff-fuzz.sh plus one
+  # xtarget-fuzz campaign) with it armed. A wrong region-pure verdict reads a
+  # rewound arena slot; armed, that read panics (exit 101), so it fails the PR
+  # instead of shipping silent. The wasm leg's double-free trap needs no
+  # switch: it is in every build since #4023. The re-injection controls that
+  # show each trap fires are nightly (memory-traps-nightly.yml).
+  memory-traps:
+    name: Memory traps armed (spec/ + differential fuzz)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: cross-target-${{ env.RUST_TOOLCHAIN }}
+          save-if: false
+          cache-on-failure: true
+          workspaces: |
+            .
+            tools/xtarget-fuzz
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Cache wasmtime tarball
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: wasmtime-v49.0.1-x86_64-linux.tar.xz
+          key: wasmtime-v49.0.1-x86_64-linux
+      - name: Install wasmtime
+        run: |
+          VERSION=v49.0.1
+          TARBALL="wasmtime-${VERSION}-x86_64-linux.tar.xz"
+          if [ ! -s "$TARBALL" ]; then
+            for i in 1 2 3 4 5; do
+              curl -fLO "https://github.com/bytecodealliance/wasmtime/releases/download/${VERSION}/${TARBALL}" && break
+              echo "wasmtime download failed (rate-limit?), retry ${i}/5"; sleep 15; rm -f "$TARBALL"
+            done
+          fi
+          tar -xf "$TARBALL"
+          sudo mv wasmtime-*/wasmtime /usr/local/bin/
+          wasmtime --version
+
+      - name: spec/ on both legs, region trap armed
+        run: bash scripts/check-memory-traps.sh spec
+
+      - name: Differential fuzz, region trap armed
+        run: bash scripts/check-memory-traps.sh fuzz

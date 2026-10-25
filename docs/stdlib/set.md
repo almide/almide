@@ -298,7 +298,7 @@ false
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (40 functions)
+## Signature index (42 functions)
 
 ```
 // An empty Set[A].
@@ -460,6 +460,14 @@ set.min_with(s: Set[A], cmp: (A, A) -> Int) -> Option[A]
 // Greatest member by cmp; the first on ties.
 // @since unreleased
 set.max_with(s: Set[A], cmp: (A, A) -> Int) -> Option[A]
+
+// Sum of the elements; 0 when empty; integers wrap on overflow.
+// @since unreleased
+set.sum(s: Set[A]) -> A
+
+// Product of the elements; 1 when empty; integers wrap on overflow.
+// @since unreleased
+set.product(s: Set[A]) -> A
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

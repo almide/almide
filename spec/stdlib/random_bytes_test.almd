@@ -1,0 +1,41 @@
+// random.bytes (#3938): n bytes from the OS CSPRNG. The bytes are
+// nondeterministic, so these tests pin what is fixed: the length on both
+// sides of the 256-byte chunk and of the 8-byte draw, the empty draw at
+// n = 0, two draws differing, and the abort on a negative n. The
+// cross-target evidence is spec/wasm_cross/random_bytes.almd (C-394).
+import random
+import testing
+
+effect fn lens(ns: List[Int]) -> List[Int] = ns |> list.map((n) => bytes.len(random.bytes(n)))
+
+effect fn two_draws_differ(n: Int) -> Bool = random.bytes(n) != random.bytes(n)
+
+effect fn negative() -> Int = bytes.len(random.bytes(-3))
+
+test "random.bytes has the asked length" {
+  let ns = [
+    0,
+    1,
+    7,
+    8,
+    9,
+    255,
+    256,
+    257,
+    300,
+    1000
+  ]
+  assert_eq(lens(ns), ok(ns))
+}
+
+test "random.bytes(0) is empty" {
+  assert_eq(lens([0]), ok([0]))
+}
+
+test "two 32-byte draws differ" {
+  assert_eq(two_draws_differ(32), ok(true))
+}
+
+test "random.bytes with a negative n aborts" {
+  testing.assert_aborts("random.bytes: negative length -3", () => negative())
+}

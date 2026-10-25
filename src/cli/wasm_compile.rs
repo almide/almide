@@ -139,7 +139,7 @@ fn typecheck_wasm_program(file: &str, source_text: &str, program: &mut almide::a
 /// module names, lower the entry program, lower each resolved user module
 /// (bundled stdlib included so `@inline_rust` fns reach the bundled-dispatch
 /// path), link, optimize, and monomorphize. Extracted verbatim.
-fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules) -> Result<almide::ir::IrProgram, ()> {
+fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::Checker, resolved: &mut resolve::ResolvedModules, entry: (&str, &str)) -> Result<almide::ir::IrProgram, ()> {
     // Pre-register versioned names before root lowering
     almide::wasm_leg::register_versioned_module_names(checker, &resolved.modules);
     let mut ir_program = almide::lower::lower_program(program, &checker.env, &checker.type_map);
@@ -161,8 +161,8 @@ fn lower_and_link_wasm_ir(program: &almide::ast::Program, checker: &mut check::C
     // gate judges this route exactly as it does the native build, on the same
     // post-optimize, pre-mono IR. This route's integrity check is
     // `verify_wasm_ir`, after the link.
-    let proj = crate::compile_driver::cwd_project();
-    crate::compile_driver::optimize_gate_and_link(&mut ir_program, proj.as_ref(), |_| Ok(())).map_err(|_| ())?;
+    let proj = project::permissions_project_for(entry.0).or_else(crate::compile_driver::cwd_project);
+    crate::compile_driver::optimize_gate_and_link(&mut ir_program, proj.as_ref(), entry, |_| Ok(())).map_err(|_| ())?;
 
     Ok(ir_program)
 }
@@ -506,7 +506,7 @@ pub(crate) fn compile_to_wasm_bytes_surfaced(file: &str, allow_unverified: bool,
     // same resolver) and hands the FRESH un-inferred programs to whichever
     // leg renders — the capture that used to live here (#782).
     let mut checker = typecheck_wasm_program(file, &source_text, &mut program, &resolved)?;
-    let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved)?;
+    let mut ir_program = lower_and_link_wasm_ir(&program, &mut checker, &mut resolved, (file, &source_text))?;
     // #4008: the entry and every user module are checked by now.
     let outside_guarantee = std::mem::take(&mut checker.outside_guarantee);
     verify_wasm_ir(&ir_program)?;

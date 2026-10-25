@@ -44,9 +44,12 @@ fn edges() -> List[Int] = [
 fn main() -> Unit = {
   let abcde = b("abcde")
   // cmp: lexicographic, a prefix is the smaller, -1/0/1
-  println("cmp ${bytes.cmp(abcde, abcde)} ${bytes.cmp(b("abc"), abcde)} ${bytes.cmp(abcde, b("abc"))}")
-  println("cmp ${bytes.cmp(b("abd"), abcde)} ${bytes.cmp(b(""), b(""))} ${bytes.cmp(b(""), b("a"))}")
-  println("cmp ${bytes.cmp(bytes.from_list([255]), bytes.from_list([1]))} ${bytes.cmp(
+  println("cmp ${bytes.compare(abcde, abcde)} ${bytes.compare(b("abc"), abcde)} ${bytes.compare(
+    abcde,
+    b("abc"),
+  )}")
+  println("cmp ${bytes.compare(b("abd"), abcde)} ${bytes.compare(b(""), b(""))} ${bytes.compare(b(""), b("a"))}")
+  println("cmp ${bytes.compare(bytes.from_list([255]), bytes.from_list([1]))} ${bytes.compare(
     bytes.from_list([0]),
     bytes.from_list([]),
   )}")
@@ -66,12 +69,16 @@ fn main() -> Unit = {
     b("abcdef"),
   )} ${bytes.ends_with(abcde, b("d"))} ${bytes.ends_with(b(""), b("a"))}")
   // is_empty / is_valid_utf8: overlong, surrogate, truncated, > U+10FFFF
-  println("is_empty ${bytes.is_empty(b(""))} ${bytes.is_empty(abcde)} ${bytes.is_empty(bytes.new(0))} ${bytes.is_empty(bytes.new(1))}")
+  println("is_empty ${bytes.is_empty(b(""))} ${bytes.is_empty(abcde)} ${bytes.is_empty(bytes.zeros(0))} ${bytes.is_empty(bytes.zeros(1))}")
   println("utf8 ${bytes.is_valid_utf8(b(""))} ${bytes.is_valid_utf8(b("héllo"))} ${bytes.is_valid_utf8(bytes.from_list([255]))} ${bytes.is_valid_utf8(bytes.from_list([192, 128]))} ${bytes.is_valid_utf8(bytes.from_list([237, 160, 128]))}")
   println("utf8 ${bytes.is_valid_utf8(bytes.from_list([226, 130]))} ${bytes.is_valid_utf8(bytes.from_list([244, 144, 128, 128]))} ${bytes.is_valid_utf8(bytes.from_list([240, 144, 128, 128]))} ${bytes.is_valid_utf8(bytes.from_list([224, 160, 128]))} ${bytes.is_valid_utf8(bytes.from_list([224, 128, 128]))}")
   // eof / skip / insert / remove_at over every edge position
   for e in edges() {
-    println("pos ${e} eof=${bytes.eof(abcde, e)} skip=${bytes.skip(abcde, 2, e)} skip0=${bytes.skip(abcde, e, 1)}")
+    println("pos ${e} eof=${bytes.is_eof(abcde, e)} skip=${bytes.skip(abcde, 2, e)} skip0=${bytes.skip(
+      abcde,
+      e,
+      1,
+    )}")
     show("insert ${e}", bytes.insert(abcde, e, 120))
     show("remove_at ${e}", bytes.remove_at(abcde, e))
   }
@@ -79,7 +86,7 @@ fn main() -> Unit = {
   for v in edges() {
     show("insert_val ${v}", bytes.insert(b("ab"), 1, v))
   }
-  println("eof_empty ${bytes.eof(b(""), 0)} ${bytes.eof(b(""), -1)} skip_empty ${bytes.skip(b(""), 0, 3)}")
+  println("eof_empty ${bytes.is_eof(b(""), 0)} ${bytes.is_eof(b(""), -1)} skip_empty ${bytes.skip(b(""), 0, 3)}")
   // reverse / xor (min length) / map_each (low byte of the callback)
   show("reverse", bytes.reverse(abcde))
   show("reverse", bytes.reverse(b("")))
@@ -87,11 +94,11 @@ fn main() -> Unit = {
   show("xor", bytes.xor(bytes.from_list([255, 15, 1]), bytes.from_list([15, 255])))
   show("xor", bytes.xor(b(""), abcde))
   show("xor", bytes.xor(abcde, abcde))
-  show("map_each", bytes.map_each(bytes.from_list([1, 2, 3]), (x) => x * 100))
-  show("map_each", bytes.map_each(bytes.from_list([1, 2, 3]), (x) => 0 - x))
-  show("map_each", bytes.map_each(b(""), (x) => x + 1))
-  show("map_each", bytes.map_each(bytes.from_list([200]), (x) => 9223372036854775807))
-  show("map_each", bytes.map_each(bytes.from_list([200]), (x) => -9223372036854775808))
+  show("map_each", bytes.map(bytes.from_list([1, 2, 3]), (x) => x * 100))
+  show("map_each", bytes.map(bytes.from_list([1, 2, 3]), (x) => 0 - x))
+  show("map_each", bytes.map(b(""), (x) => x + 1))
+  show("map_each", bytes.map(bytes.from_list([200]), (x) => 9223372036854775807))
+  show("map_each", bytes.map(bytes.from_list([200]), (x) => -9223372036854775808))
   // split: empty sep = [copy]; the tail piece is always pushed
   show_list("split", bytes.split(b("a,b,,c,"), b(",")))
   show_list("split", bytes.split(b(",a"), b(",")))

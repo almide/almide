@@ -1,5 +1,5 @@
 fn main() -> Unit = {
-  var b = bytes.new(0)
+  var b = bytes.zeros(0)
   bytes.append_u8(b, 7)
   println("done ${bytes.len(b)}")
 }

@@ -241,7 +241,7 @@ const BOUNDED_SIZED_CTORS: &[(&str, &[usize])] = &[
     ("list.with_capacity", &[0]),
     ("list.range", &[0, 1]),
     ("list.repeat", &[1]),
-    ("bytes.new", &[0]),
+    ("bytes.zeros", &[0]),
     ("bytes.repeat", &[1]),
     ("string.pad_start", &[1]),
     ("string.pad_end", &[1]),

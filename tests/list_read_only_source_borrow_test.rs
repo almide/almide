@@ -65,6 +65,31 @@ const MAY_CONSUME: &[&str] = &[
     "insert", "remove_at", "update",
 ];
 
+/// Each call of list.`op` in `code` as (callee with its `(`, first argument):
+/// the runtime fn `almide_rt_list_<op>(`, or the monomorphized instance
+/// `almide_rt_list___almd_mono<N>_<op>__<T>(` of a protocol-generic op
+/// (`list.join[T: Text]` reaches its intrinsic through that instance).
+fn call_sites<'a>(code: &'a str, op: &str) -> Vec<(&'a str, &'a str)> {
+    let mut out = Vec::new();
+    let direct = format!("almide_rt_list_{op}(");
+    for (i, _) in code.match_indices(&direct) {
+        let end = i + direct.len();
+        out.push((&code[i..end], code[end..].split([',', ')']).next().unwrap()));
+    }
+    let mono = "almide_rt_list___almd_mono";
+    for (i, _) in code.match_indices(mono) {
+        let rest = &code[i + mono.len()..];
+        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+        if digits == 0 || !rest[digits..].starts_with(&format!("_{op}__")) {
+            continue;
+        }
+        let Some(paren) = rest.find('(') else { continue };
+        let end = i + mono.len() + paren + 1;
+        out.push((&code[i..end], code[end..].split([',', ')']).next().unwrap()));
+    }
+    out
+}
+
 fn root() -> &'static str {
     env!("CARGO_MANIFEST_DIR")
 }
@@ -164,16 +189,15 @@ fn range_ops_emit_a_borrow_of_a_used_afterwards_source() {
         assert!(!user.contains(whole), "a range op copies its whole source on native: `{whole}` (#3397)\n{user}");
     }
     for &(op, _) in RANGE_OPS {
-        let call = format!("almide_rt_list_{op}(");
-        let calls = user.match_indices(&call).count();
+        let sites = call_sites(&user, op);
         // A fusable op may become an iterator chain over the source instead
         // (no runtime call — the chain borrows); every other op is a call.
         assert!(
-            calls >= 2 || (calls == 0 && FUSED.contains(&op)),
-            "list.{op}: expected one runtime call in `probe` and one in `__almide_main`, found {calls}"
+            sites.len() >= 2 || (sites.is_empty() && FUSED.contains(&op)),
+            "list.{op}: expected one runtime call in `probe` and one in `__almide_main`, found {}",
+            sites.len()
         );
-        for (i, _) in user.match_indices(&call) {
-            let arg = user[i + call.len()..].split([',', ')']).next().unwrap();
+        for (call, arg) in sites {
             assert!(
                 !arg.contains(".clone(") && !arg.contains(".to_vec(") && !arg.contains(".to_owned("),
                 "list.{op} clones its source on native: `{call}{arg}` (#3397)"

@@ -354,3 +354,10 @@ fn __fallible_max_with[A, E](s: Set[A], cmp: (A, A) -> Result[Int, E]) -> Result
   set.to_list(s),
   (a, b) => cmp(a, b)!,
 )
+
+// ── Numeric folds (R-L0-42): the element type's own sum and product ──
+/// Sum of the elements; 0 when empty; integers wrap on overflow.
+fn sum[A: Numeric](s: Set[A]) -> A = A.__sum(set.to_list(s))
+
+/// Product of the elements; 1 when empty; integers wrap on overflow.
+fn product[A: Numeric](s: Set[A]) -> A = A.__product(set.to_list(s))

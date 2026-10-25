@@ -1,0 +1,32 @@
+// @contract: C-395
+// #4083: a pattern's Pike VM program may have at most 20,000 states, counted
+// over the pattern without expanding it — its instructions, a counted
+// repetition contributing one copy of its body per count, times one more than
+// the deepest nesting of repeated groups that can match empty. Every accepted
+// pattern therefore matches in time at most proportional to 20,000 times the
+// subject's length. Past the limit `regex.compile` answers err and
+// `regex.new` aborts; nested counts multiply, so a 17-character pattern can
+// be refused. A Regex record written by hand is checked by every operation,
+// so it cannot carry a refused pattern past the limit either.
+import regex
+
+fn reason(p: String) -> String = match regex.compile(p) {
+  ok(_) => "OK",
+  err(e) => e,
+}
+
+fn main() -> Unit = {
+  // 2 states per optional `a`, then `b` and the final match: 20,000 exactly
+  println("a{0,9999}b => ${reason("a{0,9999}" + "b")}")
+  println("a{0,10000}b => ${reason("a{0,10000}" + "b")}")
+  // nested counts multiply: 200 copies of a body of 200 copies
+  println("((a){200}){200} => ${reason("((a){200})" + "{200}")}")
+  // a group that can match empty doubles the states per instruction
+  println("((a?){2}){5000} => ${reason("((a?){2})" + "{5000}")}")
+  println("(a{1000}){1000}x => ${reason("(a{1000})" + "{1000}x")}")
+  let edge = regex.new("a{0,9999}" + "b")
+  println("at the limit: ${regex.is_match(edge, string.repeat("a", 50) + "b")}")
+  // a record built by hand: the operation re-checks and aborts
+  let forged: regex.Regex = { pattern: "((a){200})" + "{200}" }
+  println("unreached ${regex.is_match(forged, "a")}")
+}

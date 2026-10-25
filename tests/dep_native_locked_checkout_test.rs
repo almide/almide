@@ -69,7 +69,7 @@ fn a_locked_git_dependency_builds_its_natives_from_the_locked_commit() {
     let url = format!("file://{}", repo.display());
     write(
         root.join("app/almide.toml"),
-        &format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nnat = {{ git = \"{url}\" }}\n"),
+        &format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nnat = {{ git = \"{url}\" }}\n\n[permissions]\nnative = [\"nat\"]\n"),
     );
     write(
         root.join("app/src/main.almd"),

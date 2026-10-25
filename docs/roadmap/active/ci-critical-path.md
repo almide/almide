@@ -189,7 +189,7 @@ The five steps share nothing but the release target dir:
 
 - A. `cargo test --release -p almide-wasm -p almide-wasm-run -p almide-spine -p almide-syntax -p almide-corpus -p almide-layout` — 679 s.
 - B. `cargo test --release --test embedded_cross_test --test module_type_repr_test --test wasm_vm_parity_test` — 436 s (root crate release-test compile + run).
-- C. `ALMIDE_RC_TRAP_DOUBLE_FREE=1 cargo test --release -p almide-wasm --test backend_parity --test gauntlet` — 76 s (rides A's compile).
+- C. (gone since #4023) the double-free trap sweep re-ran `backend_parity` and `gauntlet` with the trap armed — 76 s. The trap is in every wasm build now, so A runs under it.
 - D. `scripts/check-target-availability.sh` — 426 s, needs only the downloaded binary, no cargo.
 - E. `scripts/check-wasm-runtime-ratio.sh` — 25 s, binary only.
 

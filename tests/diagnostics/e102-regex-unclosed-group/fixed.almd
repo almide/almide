@@ -1,0 +1,4 @@
+// The group closed.
+import regex
+
+fn main() -> Unit = println("${regex.is_match(regex.new("(a|b)"), "abc")}")

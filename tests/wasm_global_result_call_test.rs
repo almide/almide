@@ -9,7 +9,7 @@ use std::process::Command;
 const SOURCE: &str = r#"var arena = bytes.from_list([1, 2, 3])
 
 fn nx(b: Bytes, pos: Int) -> (Int?, Int) = {
-  let (next, v) = bytes.read_u16_le_at(b, pos)
+  let (v, next) = bytes.next_u16_le(b, pos)
   (v, next)
 }
 

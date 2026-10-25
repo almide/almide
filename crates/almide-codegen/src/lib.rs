@@ -461,7 +461,12 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str(&format!("{macro_attr}macro_rules! almide_index_set {{ ($xs:expr, $i:expr, $v:expr) => {{{{ let __i = $i as i64; if __i < 0 || (__i as u64) >= $xs.len() as u64 {{ $crate::almide_abort(\"index out of bounds\"); }} $xs[__i as usize] = $v; }}}}; }}\n"));
     // AlmideRcCow<T>: COW value type. Clone = Rc::clone (O(1)), mutation = Rc::make_mut (COW).
     // Inspired by Swift's value type semantics.
-    s.push_str(&format!("{vis}struct AlmideRcCow<T>({vis}std::rc::Rc<T>);\n"));
+    // The type is `pub` in every mode: `Bytes` and `Matrix` are this type, and
+    // a self-hosted stdlib fn over one is emitted `pub fn` — a private struct
+    // in its signature is rustc's `private_interfaces` warning in every
+    // single-file program that reaches the module (`list.join[T: Text]` pulls
+    // in `bytes`, its other conformer).
+    s.push_str(&format!("pub struct AlmideRcCow<T>({vis}std::rc::Rc<T>);\n"));
     s.push_str("impl<T: std::fmt::Debug> std::fmt::Debug for AlmideRcCow<T> { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.0.fmt(f) } }\n");
     s.push_str("impl<T: Clone> Clone for AlmideRcCow<T> { fn clone(&self) -> Self { AlmideRcCow(std::rc::Rc::clone(&self.0)) } }\n");
     s.push_str("impl<T: PartialEq> PartialEq for AlmideRcCow<T> { fn eq(&self, other: &Self) -> bool { *self.0 == *other.0 } }\n");

@@ -3,4 +3,4 @@
 import regex as rx
 import regex
 
-fn main() -> Unit = println(if rx.is_match("a", "a") and regex.is_match("b", "b") then "y" else "n")
+fn main() -> Unit = println(if rx.is_match(rx.new("a"), "a") and regex.is_match(regex.new("b"), "b") then "y" else "n")

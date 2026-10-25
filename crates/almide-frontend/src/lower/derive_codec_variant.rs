@@ -221,13 +221,11 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                     },
                     ty: type_ty.clone(), span: None, def_id: None,
                 };
-                IrExpr {
-                    kind: IrExprKind::Block {
-                        stmts,
-                        expr: Some(Box::new(IrExpr { kind: IrExprKind::ResultOk { expr: Box::new(ctor) }, ty: result_ty.clone(), span: None, def_id: None })),
-                    },
-                    ty: result_ty.clone(), span: None, def_id: None,
-                }
+                let bind_arr = stmts.remove(0);
+                let body = e_(IrExprKind::Block { stmts, expr: Some(Box::new(e_(IrExprKind::ResultOk { expr: Box::new(ctor) }, result_ty.clone()))) }, result_ty.clone());
+                let arr = e_(IrExprKind::Var { id: arr_var }, arr_ty.clone());
+                let guarded = tuple_arity_guard(arr, fields.len(), case.name.as_str(), &type_name, &result_ty, body);
+                e_(IrExprKind::Block { stmts: vec![bind_arr], expr: Some(Box::new(guarded)) }, result_ty.clone())
             }
             IrVariantKind::Record { fields } => {
                 // Payload is `{ "field": value, … }` (see variant encode). Decode each
@@ -599,6 +597,12 @@ pub(super) fn derive_container_helpers(
         },
         value_ty.clone(),
     );
+    // #4165: the element's error carries its index (`at cmds[0]`), exactly as
+    // native's `almide_rt_value_decode_list` frames it — a call into the
+    // `T.__list_dec_at` worker below, not an inline match (a `Try { match … }`
+    // in bind position is outside the structural leg's lowering subset).
+    let res_t = Ty::result(t.clone(), Ty::String);
+    let at_name = format!("{}.__list_dec_at", type_name);
     let bind_x = IrStmt {
         kind: IrStmtKind::Bind {
             var: x_d,
@@ -607,9 +611,12 @@ pub(super) fn derive_container_helpers(
             value: e(
                 IrExprKind::Try {
                     expr: Box::new(call_named(
-                        &decode_name,
-                        vec![elem_d],
-                        Ty::result(t.clone(), Ty::String),
+                        &at_name,
+                        vec![
+                            call_named(&decode_name, vec![elem_d], res_t.clone()),
+                            evar(i_d, &Ty::Int),
+                        ],
+                        res_t.clone(),
                     )),
                 },
                 t.clone(),
@@ -617,6 +624,46 @@ pub(super) fn derive_container_helpers(
         },
         span: None,
     };
+    // T.__list_dec_at(r, i) = match r { ok(_) => r, err(e) => err(__err_at_index(e, i)) }
+    // (the ok arm passes the param through — an Option-payload result ctor
+    // would wall the v1 spine, see derive_codec's err_at_index_worker).
+    let r_at = vt.alloc(sym("_r"), res_t.clone(), Mutability::Let, None);
+    let i_at = vt.alloc(sym("_i"), Ty::Int, Mutability::Let, None);
+    let e_at = vt.alloc(sym("_we"), Ty::String, Mutability::Let, None);
+    let f_dec_at = mk_fn(
+        &at_name,
+        vec![(r_at, "_r", res_t.clone()), (i_at, "_i", Ty::Int)],
+        res_t.clone(),
+        e(
+            IrExprKind::Match {
+                subject: Box::new(evar(r_at, &res_t)),
+                arms: vec![
+                    IrMatchArm {
+                        pattern: IrPattern::Ok { inner: Box::new(IrPattern::Wildcard) },
+                        guard: None,
+                        body: evar(r_at, &res_t),
+                    },
+                    IrMatchArm {
+                        pattern: IrPattern::Err {
+                            inner: Box::new(IrPattern::Bind { var: e_at, ty: Ty::String }),
+                        },
+                        guard: None,
+                        body: e(
+                            IrExprKind::ResultErr {
+                                expr: Box::new(call_named(
+                                    "__err_at_index",
+                                    vec![evar(e_at, &Ty::String), evar(i_at, &Ty::Int)],
+                                    Ty::String,
+                                )),
+                            },
+                            res_t.clone(),
+                        ),
+                    },
+                ],
+            },
+            res_t.clone(),
+        ),
+    );
     let appended_d = e(
         IrExprKind::BinOp {
             op: BinOp::ConcatList,
@@ -794,5 +841,5 @@ pub(super) fn derive_container_helpers(
         ),
     );
 
-    vec![f_enc_list, f_enc_go, f_dec_list, f_dec_go, f_enc_opt, f_dec_opt]
+    vec![f_enc_list, f_enc_go, f_dec_list, f_dec_go, f_dec_at, f_enc_opt, f_dec_opt]
 }

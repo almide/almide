@@ -2,7 +2,7 @@
 // The four bytes allocators' PORTABLE cells: negative pads are the input
 // unchanged, in-range allocations answer, and `chunks` computes its count
 // without the `(total + size - 1)` rounding trick, whose sum overflows for a
-// large `size` — `bytes.chunks(b, i64::MAX)` is ONE chunk, not a wrapped count
+// large `size` — `bytes.chunk(b, i64::MAX)` is ONE chunk, not a wrapped count
 // (the identical ceiling-division defect `list.chunk` had).
 //
 // What is deliberately NOT here (ratified A, 2026-08-17): an over-bound
@@ -19,16 +19,16 @@ import bytes
 fn main() -> Unit = {
   let b = bytes.from_list([1, 2])
   // Negative target: the input, unchanged. Was an allocation abort on native.
-  println("pad_neg=" + int.to_string(bytes.len(bytes.pad_left(b, 0 - 1, 9))))
-  println("pad_min=" + int.to_string(bytes.len(bytes.pad_right(b, 0 - 9223372036854775807, 9))))
+  println("pad_neg=" + int.to_string(bytes.len(bytes.pad_start(b, 0 - 1, 9))))
+  println("pad_min=" + int.to_string(bytes.len(bytes.pad_end(b, 0 - 9223372036854775807, 9))))
   // In range: the pad still happens.
-  println("pad_ok=" + int.to_string(bytes.len(bytes.pad_right(b, 5, 9))))
+  println("pad_ok=" + int.to_string(bytes.len(bytes.pad_end(b, 5, 9))))
   // new: in range answers, over the ceiling is C-197's abort.
-  println("new_ok=" + int.to_string(bytes.len(bytes.new(8))))
+  println("new_ok=" + int.to_string(bytes.len(bytes.zeros(8))))
   // repeat: the ceiling is on the PRODUCT, tested by division — `blen * n` is
   // the multiplication that overflows, so a guard computed from it tests nothing.
   println("rep_ok=" + int.to_string(bytes.len(bytes.repeat(b, 3))))
   // chunks: a size past the buffer is ONE chunk, not a wrapped count.
-  println("chunks_max=" + int.to_string(list.len(bytes.chunks(bytes.from_list([1, 2, 3]), 9223372036854775807))))
-  println("chunks_ok=" + int.to_string(list.len(bytes.chunks(bytes.from_list([1, 2, 3]), 2))))
+  println("chunks_max=" + int.to_string(list.len(bytes.chunk(bytes.from_list([1, 2, 3]), 9223372036854775807))))
+  println("chunks_ok=" + int.to_string(list.len(bytes.chunk(bytes.from_list([1, 2, 3]), 2))))
 }

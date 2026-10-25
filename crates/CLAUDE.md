@@ -30,7 +30,8 @@ almide-frontend       Type checker, constraint solver, AST→IR lowering
 almide-optimize       Monomorphization, DCE, constant propagation
 almide-codegen        Nanopass pipeline, TOML templates, walker（WGSL は on-hold — attribute パースのみ）
 almide-mir            v1 Middle IR: ownership/layout SoT, MIR lowering + native renderers +
-                      certificate witnesses (`almide verify --emit`); no WASM/WAT
+                      certificate witnesses (proofs/gate.sh; `almide verify` judges the
+                      structural leg's since #4011); no WASM/WAT
                       renderer since #2761
 almide-interp         Pre-codegen IR tree-walker — 3rd cross-target oracle / executable spec
 almide-tools          Formatter, module interface (.almdi). NOT the LSP — that

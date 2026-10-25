@@ -61,6 +61,9 @@ pub(crate) fn shape(func: &str) -> Option<(u32, Bits, Order)> {
             _ => return None,
         })
     };
+    if func == "append_bool" {
+        return Some((1, Bits::Bool, Order::Be));
+    }
     if let Some(rest) = func.strip_prefix("append_") {
         let (stem, order) = match (rest.strip_suffix("_le"), rest.strip_suffix("_be")) {
             (Some(s), _) => (s, Order::Le),
@@ -72,7 +75,6 @@ pub(crate) fn shape(func: &str) -> Option<(u32, Bits, Order)> {
     }
     Some(match func {
         "write_u8" => (1, Bits::Int, Order::Be),
-        "write_bool" => (1, Bits::Bool, Order::Be),
         "write_u16_be" => (2, Bits::Int, Order::Be),
         "write_u32_be" => (4, Bits::Int, Order::Be),
         "write_i64_be" => (8, Bits::Int, Order::Be),
@@ -266,7 +268,7 @@ mod tests {
         // C-210 (#3658): the cursor and typed float writers canonicalize too.
         assert_eq!(shape("write_f64_be").map(|s| s.1), Some(Bits::F64Canon));
         assert_eq!(shape("write_float32").map(|s| s.1), Some(Bits::F32Canon));
-        for (f, k) in [("write_u8", 1), ("write_bool", 1), ("write_u16_be", 2), ("write_u32_be", 4), ("write_i64_be", 8), ("write_f64_be", 8)] {
+        for (f, k) in [("write_u8", 1), ("append_bool", 1), ("write_u16_be", 2), ("write_u32_be", 4), ("write_i64_be", 8), ("write_f64_be", 8)] {
             assert_eq!(shape(f).map(|s| (s.0, s.2)), Some((k, Order::Be)), "{f}");
         }
         for (f, k) in [("write_uint16", 2), ("write_uint32", 4), ("write_int32", 4), ("write_float32", 4)] {

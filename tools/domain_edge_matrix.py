@@ -7,7 +7,7 @@ A room test written `pos + N <= len`, or a chunk count written `(total + n - 1) 
 defeated by its own arithmetic: the sum wraps, the comparison passes, the store or the
 allocation goes ahead. The shape has recurred in this repo five times, each fixed
 point-wise, returning at whichever END nobody measured (#1408 at the negative end, the
-SAME line at the positive end, `list.chunk`, `bytes.chunks`).
+SAME line at the positive end, `list.chunk`, `bytes.chunk`).
 
 The differential fuzzer cannot close it, and the reason is written down in its own source.
 `tools/xtarget-fuzz/src/generator/term.rs:363-365`:
@@ -20,8 +20,8 @@ The differential fuzzer cannot close it, and the reason is written down in its o
 That decision is CORRECT — feeding `u32::MAX` to `repeat` manufactures an out-of-memory
 "hang" that is noise, not a finding. But it draws the blind spot exactly over the
 parameters the room guards read. It predicts which siblings are reachable and which are
-not: `pos` is not in the name list, so `bytes.set_f32_le` was found; `size` is, so
-`bytes.chunks` never could be.
+not: `pos` is not in the name list, so `bytes.put_f32_le` was found; `size` is, so
+`bytes.chunk` never could be.
 
 So this is a SEPARATE instrument, not a fuzzer change. The fuzzer keeps its small-count
 rule. Here the extremes are fed deliberately, exhaustively, and the expectation is

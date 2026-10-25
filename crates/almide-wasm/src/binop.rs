@@ -32,7 +32,7 @@ pub(crate) fn is_uint64(t: &Ty) -> bool {
 impl Emitter<'_> {
     /// Re-wrap the i64 on the stack to the operands' declared narrow
     /// width (no-op when neither operand is narrow).
-    fn emit_narrow_wrap(&mut self, lt: &Ty, rt: &Ty) {
+    pub(crate) fn emit_narrow_wrap(&mut self, lt: &Ty, rt: &Ty) {
         let Some((bits, signed)) = narrow_width(lt).or_else(|| narrow_width(rt)) else {
             return;
         };

@@ -30,6 +30,7 @@ almide run app.almd -- arg1 arg2        # ファイル指定 + プログラム�
 |---|---|
 | `--target rust\|wasm` | 実行ターゲット。`rust`（既定、ネイティブバイナリ）または `wasm`（v1 trust-spine が直接 WASM を生成し `wasmtime` CLI で実行。rustc 不要）。両ターゲットは同一の観測可能挙動（stdout/stderr/exit）を出す（クロスターゲット等価性保証）。`wasm` には PATH に `wasmtime` が必要 |
 | `--no-check` | 型チェックをスキップ |
+| `--locked` | `almide.lock` に無い依存のフェッチと、ロックを変える解決を拒否し、ロックを書かない(#4093)。CI 向け |
 | `--release` | 最適化ビルド。opt-level=3、fat LTO、codegen-units=1。ターゲットが x86_64 なら **`x86-64-v3`（AVX2・FMA。Intel は 2013 年の Haswell 以降、AMD は 2017 年の Zen 以降）に合わせて調整する**（#3604）。実測（spectralnorm、実行時の `n`）では汎用 → v3 が AMD Zen3 で 87.8 → 67.2 ms、Intel Xeon 8581C で 57.1 → 45.4 ms。`native` は Zen3 で 109.8 ms と逆に遅く、一度既定にして取り消した（#3727 → #3734）。AVX2 を持たない CPU では `SIGILL` で落ちるので、そこに配るなら `--target-cpu portable`。aarch64 などほかのターゲットは汎用のまま |
 
 `almide` 自身のフラグ（`--target` / `--no-check` / `--release`）は `--` の前で解釈され、`--` 以降はそのままプログラムに渡る（`cargo run` と同じ規約）。プログラム内で `env.args()` を呼ぶと `--` 以降の引数が `List[String]` で返る。
@@ -134,6 +135,7 @@ almide build --release --target-cpu portable -o app  # AVX2 の無い CPU にも
 | `--fast` | `--release` と同じ（互換のために残す） |
 | `--unchecked-index` | 配列の境界チェックを無効化（unsafe） |
 | `--no-check` | 型チェックをスキップ |
+| `--locked` | `almide.lock` に無い依存のフェッチと、ロックを変える解決を拒否し、ロックを書かない(#4093)。CI 向け |
 | `--repr-c` | struct/enum に `#[repr(C)]` を付与（C ABI 互換） |
 | `--cdylib` | 共有ライブラリ（`.so` / `.dylib` / `.dll`）を生成。`-o` 省略時はカレントディレクトリの `lib<名前>.<拡張子>`（Windows は `<名前>.dll`）。Cargo の crate 名は `-o` ではなくパッケージ名（`almide.toml` の `[package].name`、無ければエントリファイル名）から作る（#3349） |
 
@@ -149,6 +151,17 @@ almide build --release --target-cpu portable -o app  # AVX2 の無い CPU にも
 出力ファイル名のデフォルト:
 - `almide.toml` があれば `[package] name`
 - なければソースファイル名から `.almd` を除いた名前
+
+#### rustc の下限（#4110）
+
+ネイティブビルド（`almide run` / `build` / `test` / `bench`、cdylib と install の経路）は、
+rustc や cargo を起動する前に `rustc --version`（PATH の rustc と、設定されていれば `$RUSTC`）を読み、
+**rustc 1.96.0** 未満なら何もビルドせず終了コード 1 で拒否する。エラーには見つかった版、必要な版、
+直し方（`rustup update`）が出る。下限は `src/cli/rustc_floor.rs` の `MIN_RUSTC` 一か所に書かれ、
+max(1.77.2, CI が生成コードを検証する `RUST_TOOLCHAIN`) である。1.77.2 は CVE-2024-24576
+（Windows の `Command` が `.bat` / `.cmd` への引数を cmd.exe で無害化しなかった）の修正版で、
+古い rustc で作ったバイナリでは `process.exec` 経由のシェル注入が再び開く。
+`--target wasm`（直接 emit）は rustc を使わないので対象外。
 
 ---
 
@@ -170,6 +183,7 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 |---|---|
 | `-r, --run <pattern>` | テスト名のパターンフィルタ(下記) |
 | `--no-check` | 型チェックをスキップ |
+| `--locked` | `almide.lock` に無い依存のフェッチと、ロックを変える解決を拒否し、ロックを書かない(#4093)。CI 向け |
 | `--json` | JSON 形式で結果出力 |
 | `--target wasm` | wasm レグだけで実行（native fallback なし） |
 | `--update-snapshots` | `testing.assert_snapshot` の不一致を受理し、呼び出し側の期待値リテラルをソース内で書き換える(`ALMIDE_UPDATE_SNAPSHOTS=1` でも同じ) |
@@ -715,7 +729,9 @@ git diff src/calc.almd | almide survive src/calc.almd --with - --json
   `// @contract: C-NNN` を持つ到達ファイル（native と `--target wasm` の stdout と
   exit code のバイト一致）
 - **メモリ上で当てる仕組み**: 各レッグは子 `almide` プロセスで、編集後側だけ
-  `ALMIDE_SURVIVE_OVERLAY` / `ALMIDE_SURVIVE_OVERLAY_TEXT` を渡す。コンパイラの
+  隠し引数 `--survive-overlay <PATH> --survive-overlay-text <FILE>` を渡す（#4129 で
+  環境変数から引数に移した。環境変数だと、開発者が管理していない環境がどのビルドにも
+  ディスク上と違うテキストをコンパイルさせられたため）。コンパイラの
   `.almd` 読み取りはすべて `almide::source_overlay::read_to_string` を通り、対象
   ファイルの読み取りだけが提案テキストを返す。提案テキストはツリーの外（システムの
   一時ディレクトリ）に置く
@@ -860,42 +876,81 @@ almide update            # tag 固定でない全依存
 - 変更した entry だけを書き換え、他の pin はバイト単位で不変。
 - 前進時は当該 ref のキャッシュディレクトリを破棄し、次のフェッチで再取得させる。
 - `git ls-remote` 1 回で解決(clone しない)。
+- ネットワークに触れる前に所有者を `[trust] owners` と照合する(#4093)。
+- `almide.toml` の `git` がロックと違う依存(ソース変更)は、tag 固定でも古い pin を捨てて新しいソースから
+  ロックし直す。ビルドはソース変更を拒否し、本コマンドを案内する([package-system.md §6.3](./package-system.md))。
 
 出力は `name <old12> -> <new12>`(初回ロックは `name -> <new12>`)。
 
 ### `almide add`
 
-依存パッケージを追加。`almide.toml` の `[dependencies]` に書き込み、即フェッチ。
+依存パッケージを追加する。順序は「解決 → 所有者の信頼確認 → 存在確認(`git ls-remote`)→ フェッチ →
+`almide.toml` と `almide.lock` の書き込み」(#4093)。拒否・失敗はすべて終了コード 1 で、両ファイルを一切変えない。
 
 ```bash
-almide add bindgen                      # github.com/almide/bindgen
-almide add almide/almide-bindgen        # github.com/almide/almide-bindgen
-almide add user/repo@v0.1.0             # バージョン指定
-almide add --git https://example.com/repo.git --tag v1.0 mylib
-almide add almide-graphics/ceangal2@v0.1.0 --subdir ceangal  # リポジトリ内のサブディレクトリにあるパッケージ
+almide add bindgen                      # github.com/almide/almide-bindgen(パッケージ一覧のスナップショットで解決)
+almide add almide/almide-bindgen        # 同上(パッケージ名 bindgen)
+almide add user/repo@v0.1.0 --trust github.com/user   # github.com/almide 以外の所有者は --trust が要る
+almide add --git https://example.com/team/repo.git --tag v1.0 --trust example.com/team mylib
+almide add almide-graphics/ceangal2@v0.1.0 --subdir ceangal --trust almide-graphics  # サブディレクトリのパッケージ
+almide add user/repo --dry-run          # 解決・信頼判定・存在確認だけを表示し、何も書かない
 ```
 
+| フラグ | 意味 |
+|---|---|
+| `--trust <owner>` | ソースの所有者(`host/owner`、github.com なら `owner` だけでも可)を信頼し `[trust] owners` に書く。解決した所有者と一致しなければエラー |
+| `--dry-run` | 解決結果・信頼判定・存在確認を表示して終了。フェッチも書き込みもしない(拒否される追加なら終了コード 1) |
+
+`--yes` / `--force` や、すべてを信頼する環境変数は存在しない。所有者を書いた許可だけが通る
+([package-system.md §6.3](./package-system.md))。存在しないリポジトリは not found として報告し、近い
+almide パッケージがあれば実行できる `did you mean \`almide add <x>\`` を添える(提案だけで置き換えない)。
+
 短縮記法:
-- `almide add name` → `https://github.com/almide/{name}`
+- `almide add name` → github.com/almide の `name` パッケージ(パッケージ名とリポジトリ名が違う場合は
+  埋め込みスナップショット `src/almide_packages.txt` で引く。無ければ `https://github.com/almide/{name}`)
 - `almide add user/repo` → `https://github.com/{user}/{repo}`
 - `@v0.1.0` → `tag = "v0.1.0"`
 - `--subdir <dir>` → `subdir = "<dir>"`(#3381、[package-system.md §6.1](./package-system.md))。パッケージ名は
   subdir の最後の要素(`--git` 指定時は第 1 引数)。
 
-フェッチと検査(subdir の存在・`almide.toml` の package name が依存名と一致)が通ってから
-`almide.toml` に書き込む。失敗時はマニフェストを変更しない。
+フェッチと検査(subdir の存在・`almide.toml` の package name が依存名と一致・推移的依存の所有者)が
+通ってから `almide.toml` と `almide.lock` に書き込む。失敗時は両方を元に戻す。
+
+---
+
+### `almide trust`
+
+所有者を `almide.toml` の `[trust] owners` に加える(#4093)。`almide add` を経ない依存(推移的依存、
+手書きのマニフェスト行)が拒否されたとき、その拒否メッセージが示す 1 手。
+
+```bash
+almide trust github.com/bob     # [trust] owners = ["github.com/bob"]
+almide trust bob                # github.com/bob と同じ
+```
 
 ---
 
 ### `almide deps`
 
-依存パッケージの一覧を表示。
+依存パッケージの一覧を表示。依存を取得し、各パッケージ(直接依存の後に、それらを通じて
+入る依存)について version、ケイパビリティ集合(`[permissions].allow` が検査するカテゴリ。
+`@extern` fn は全カテゴリ)、持ち込むネイティブコード(`native/`、`[native-deps]`、
+`@extern(rust|c)` fn)と、それが `[permissions].native` で許可されているかを表示する(#4093)。
+許可の無いネイティブコードを持つ依存は `build` / `run` / `test` / `bench` が拒否する
+(`docs/specs/package-system.md` §6.4)。
 
 ```bash
 almide deps
 # bindgen = https://github.com/almide/almide-bindgen (v0.1.0)
-# json = https://github.com/almide/json (main)
+#   version: 0.1.0
+#   capabilities: none
+#   native code: none
+# nat = path ../nat
+#   version: 0.1.0
+#   capabilities: Env, Fan, IO, Net, Rand, Time
+#   native code: native/natval.rs; @extern fn `number` (src/mod.almd:2) (granted by [permissions].native)
 # ceangal = https://github.com/almide-graphics/ceangal2 (v0.1.0) subdir ceangal
+#   ...
 ```
 
 ---
@@ -950,23 +1005,29 @@ almide clean
 
 ### `almide verify`
 
-プログラムの flight-grade 証明書（ownership / names / caps / call-modes の witness）を、**独立版数の別バイナリ `almide-verify`** に再検査させる (#2152)。`almide verify` 自身は検査器を持たない subprocess shim で、`almide-verify` を **almide 実行ファイルの隣 → PATH** の順に探して起動し、標準入出力と終了コードをそのまま返す。見つからなければ **linked fallback は無く**、名前付きエラー `error[verifier-missing]` で終了コード 127。
+`almide build --target wasm` が出荷する wasm モジュールの証明書（ownership / call-modes / bounds / names / caps / caps-transitive の witness）を、**独立版数の別バイナリ `almide-verify`** に再検査させる (#2152, #4011)。`almide verify` 自身は検査器を持たない subprocess shim で、`almide-verify` を **almide 実行ファイルの隣 → PATH** の順に探して起動し、標準入出力と終了コードをそのまま返す。見つからなければ **linked fallback は無く**、名前付きエラー `error[verifier-missing]` で終了コード 127。
 
 ```bash
-almide verify app.almd                    # 証明書 bundle を生成し almide-verify bundle に渡す
-almide verify app.almd --emit app.bundle  # bundle をファイルに残す（almide-verify が無くても書く）
-almide verify ownership w.cert            # .almd 以外の引数は almide-verify にそのまま渡る
-almide-verify --version                   # 検査器自身の版数（コンパイラとは独立）
+almide build app.almd --target wasm               # app.wasm を書く
+almide verify app.almd                            # 証明書 bundle を生成し、app.wasm の SHA-256 に結びつけて almide-verify bundle に渡す
+almide verify app.almd --artifact out/app.wasm    # 結びつける成果物を明示する（無ければ・一致しなければエラー）
+almide verify app.almd --emit app.bundle          # bundle をファイルに残す（almide-verify が無くても書く）
+almide verify --mir app.almd --emit m.bundle      # MIR lowering の witness（coverage.sh 用、ビルドとは無関係）
+almide verify ownership w.cert                    # .almd 以外の引数は almide-verify にそのまま渡る
+almide-verify --version                           # 検査器自身の版数（コンパイラとは独立）
 ```
 
-- `almide` 側で走るのは **untrusted な producer** だけ（`almide_mir::pipeline::program_witnesses` がプログラムを MIR に下ろし、`crate::certificate` の witness を bundle に書く）。判定は常に `almide-verify`。
-- `almide-verify` はコンパイラの crate を一切リンクしない（`crates/almide-verify`、依存ゼロ）。各性質の判定は `proofs/` の Coq 検査器（`check_xc` / `check_names_cert` / `check_caps_cert` / `check_prog_cert` / `check_modes_cert`）の転写で、定理は持たない。抽出版検査器との一致は `proofs/gate.sh`（全行 + seeded ランダム差分）と `proofs/corpus-wall.sh`（コーパス全 witness）がゲートする。
-- lowering subset の外の関数は bundle に `uncertified` として名前つきで載る（黙って飛ばさない）。
-- `./almide.toml` の `[permissions].allow` があれば effect fn の宣言 capability をそれに絞る（caps witness が reject できるようになる）。
+- `almide` 側で走るのは **untrusted な producer** だけ。`almide build --target wasm` と同じ経路（structural leg）でプログラムをビルドし、そのビルドが emit 時に記録した witness を bundle に書く（`crates/almide-wasm/src/witness_bundle.rs`。CI の `proofs/structural-wall.sh` が判定する bundle と同じ producer）。判定は常に `almide-verify`。
+- **成果物への結びつけ**: `--artifact` の名指し、または `almide build` の既定出力（`app.almd` なら `app.wasm`）が在れば、そのバイト列がこのビルドの出すモジュールと一致することを確かめ、SHA-256 を bundle（version 2 の `artifact` 行）に書く。`almide-verify` はファイルから digest を計算し直し、不一致なら REJECT。一致しない（古い）ファイルは producer が拒否する（終了コード 1）。ファイルが無ければ version 1 の bundle（ビルドが出すモジュールについての判定）になり、その旨を note で出す。
+- `http.serve` などで component として出荷されるプログラムは対象外（終了コード 1、理由を表示）。対象はプレーンな `almide build --target wasm` が書く core module。
+- `almide-verify` はコンパイラの crate を一切リンクしない（`crates/almide-verify`、依存ゼロ）。各性質の判定は `proofs/` の Coq 検査器（`check_xc` / `check_names_cert` / `check_caps_cert` / `check_prog_cert` / `check_modes_cert` / `check_bounds_cert`）の転写で、定理は Rocq kernel が検査する。
+- witness を記録できなかった frame は bundle に `uncertified` として名前つきで載る（黙って飛ばさない）。
+- `./almide.toml` の `[permissions].allow` があれば `effect fn` の宣言 capability をそれに絞る（caps witness が reject できるようになる）。plain `fn` の上限は console 出力（ADR-0022）で、manifest では広がらない。
+- `almide verify --mir app.almd [--emit b]` は #4011 以前の挙動: MIR lowering の witness（関数ごとの ownership / names / caps と call-modes）を書く。#2761 以降 MIR から出荷される wasm バイトは無いので、これはビルドではなく MIR についての判定。残している理由は `proofs/coverage.sh` がこの経路で MIR の証明書 producer を駆動し、その coverage floor が ratchet だから（`--artifact` とは併用できない）。MIR の witness を判定する gate は `proofs/gate.sh` / `proofs/corpus-wall.sh`。
 
 `almide-verify` の終了コード: 0 = 全 witness ACCEPT（CERTIFIED）、1 = REJECT あり、または witness が 0 件、3 = 全 ACCEPT だが uncertified な関数あり（INCOMPLETE）、2 = 使い方の誤り・読めない入力・不正な bundle。
 
-テスト: `tests/verify_shim_test.rs`（shim の委譲・不在時の名前付きエラー・終了コード転送）、`crates/almide-verify/tests/coq_examples.rs`（Coq の全 `Example` と `build-checker.sh` の固定行）、`crates/almide-verify/tests/cli.rs`
+テスト: `tests/verify_shim_test.rs`（shim の委譲・不在時の名前付きエラー・終了コード転送・成果物への結びつけと古いファイルの拒否・manifest を超える capability の REJECT）、`crates/almide-verify/tests/coq_examples.rs`（Coq の全 `Example` と `build-checker.sh` の固定行）、`crates/almide-verify/tests/cli.rs`
 
 ---
 
@@ -1013,6 +1074,16 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 - 種別 `route`（実行するレッグを強制する）と `gate`（既定の検査を迂回する）のスイッチが ON のときは、
   そのプロセスで最初に読まれた時点で stderr に 1 行（`[almide] ALMIDE_X is set: …`）が出る。
   強制されたルートで出た verdict は、そう名乗る。
+- **スイッチ錠**（#4129）: 種別 `route` / `gate` / `ablation` / `trap` は「何をコンパイルするか・どの検査を走らせるか」を
+  変える。リリースビルド（`almide --version` が `(release…)` と名乗るもの）は、こうしたスイッチを環境から
+  受け継いでも無視し、stderr に `[almide] ALMIDE_X is set but IGNORED: …` と 1 行出す。効かせるには
+  コマンドラインで `--allow-switch ALMIDE_X` と名指しする（複数回可）。CI、`.envrc`、devcontainer、
+  エディタのタスクなど、開発者が管理していない環境が、レビューしたものと別のソースをコンパイルさせたり
+  検査を飛ばさせたりできないようにするため。ツールが自分で立てるスイッチ（`almide test` の
+  `ALMIDE_NO_RTLIB`、`--time-report` の `ALMIDE_FUEL_PROBE`）は錠の対象外。開発ビルドは従来どおり
+  環境を読み、隠しフラグ `--lock-switches` でリリースと同じ錠をかけられる。
+- `--profile critical` は、こうしたスイッチが環境から 1 つでも ON で渡ると、`--allow-switch` の有無に
+  関係なく拒否する（exit 1）。
 - `harness` はテストハーネス（`tests/`, `crates/*/tests`, `tools/`）が読むフック、`ci` はワークフローと
   `scripts/` だけが使うもの、`runtime` はコンパイルされたプログラム自身が実行時に読むもの。
 
@@ -1035,6 +1106,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_COMPILER_STACK=value` | tool | stack size in bytes of the compiler driver thread (default 256 MiB); a deep input that overflows it is the regression test's subject |
 | `ALMIDE_COMPONENT_ADAPTER` | route | route `--component` through the preview1 adapter instead of the direct component emission |
 | `ALMIDE_COMPONENT_P3` | route | emit a WASI 0.3 component (stdio over component-model streams, the async canonical ABI) under `--component`; runs on a stock wasmtime 46+ with no feature flag (`wasmtime run app.wasm`, `-S http` for an http client — ADR-0023 step 1) |
+| `ALMIDE_CONTROL_BIN=value` | harness | an `almide` binary the security route tests (`tests/effect_value_laundering_test.rs`, `proc_category_test.rs`, `permissions_routes_test.rs`) run INSTEAD of the one under test — the negative control: a build without the check fails their assertions (#4151, #4155) |
 | `ALMIDE_CORPUS_FILTER=value` | harness | substring filter over the fixture paths the 3-way oracle test evaluates |
 | `ALMIDE_CORPUS_SHARD=value` | harness | `k/N` (1-based) walks the k-th modulo slice of the SORTED spec/wasm_cross corpus in the six corpus giants (#2381), read after the sort; `merge/N` reads the N shards' partials from `ALMIDE_CORPUS_SHARD_DIR` and judges the whole-corpus ceilings and the name-keyed bridge ledger; unset = the unsharded gate |
 | `ALMIDE_CORPUS_SHARD_DIR=value` | harness | directory where a sharded corpus gate writes its walked-fixture list and its partial counts / bridge names, and where `merge/N` reads them; unset = a local slice that writes nothing |
@@ -1093,7 +1165,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_INLINE_OFF` | ablation | turn the structural leg's small scalar-fn inliner off (#2980): every call kept, for an A/B |
 | `ALMIDE_INSTALL=value` | tool | the directory `almide install` installs binaries into (overrides the default `~/.local/bin`) |
 | `ALMIDE_INTERP_SWEEP_THREADS=value` | harness | interp sweep thread count; 1 = serial (#2381) |
-| `ALMIDE_IR_FAULT=value` | harness | inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary |
+| `ALMIDE_IR_FAULT=value` | route | inject an IR violation after the named optimiser pass, so the per-pass verifier can be watched turning red in the release binary (a release build honours it only with `--allow-switch ALMIDE_IR_FAULT`, #4129) |
 | `ALMIDE_KEEP_SCRATCH` | tool | keep the `almide test` scratch build directory instead of deleting it |
 | `ALMIDE_LSP_TRACE` | debug | print every LSP request and response the language server handles |
 | `ALMIDE_MANIFEST_TREE_CHECK=value` | ci | the parity-manifest generators' stale-tree refusal (#2405, scripts/lib/oracle-header.sh): `strict` (default) refuses an ORACLE that is not `<Cargo.toml version> (dev…)`, is stamped with a commit other than HEAD, or is unstamped and older than the sources; a worktree behind its upstream; and an untracked spec/ fixture. `gate` keeps only the untracked-fixture check (scripts/check-parity-goldens.sh vouches for CI's artifact). `off` is the deliberate override |
@@ -1120,7 +1192,6 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_PROBE_OUT=value` | harness | the file a charge-probed native program writes its `__ALMD_PROBE` meter line to; `almide run --time-report` sets it to a fresh temp path so the program's own stderr is never read as the reading (#3489). Unset = the line goes to stderr |
 | `ALMIDE_PROBE_SRC=value` | harness | the source file the heap probe compiles (unset = the probe is skipped) |
 | `ALMIDE_PROFILE` | debug | print per-pass and per-phase timings of the native pipeline |
-| `ALMIDE_RC_TRAP_DOUBLE_FREE` | trap | arm the structural leg's double-free trap: releasing a block already at rc 0 traps instead of wrapping |
 | `ALMIDE_REGION_DEBUG` | debug | print the region-window pass's decisions (native and structural leg) |
 | `ALMIDE_REGION_OFF` | ablation | turn the region-window allocation pass off (native and structural leg) |
 | `ALMIDE_REGION_TRAP_STALE` | trap | arm the native region prelude's stale-reference trap (#2200) |
@@ -1134,8 +1205,8 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_SKIP_PASS=value` | ablation | skip the named optional passes (comma-separated) — a pass-dependency probe: output must not change |
 | `ALMIDE_SKIP_VERSION_CHECK` | gate | skip the project's `almide` version requirement check |
 | `ALMIDE_STREAM_FUSION_OFF` | ablation | turn the stream-fusion pass off |
-| `ALMIDE_SURVIVE_OVERLAY=value` | route | set by `almide survive` on its child runs (#2147): every compiler read of this `.almd` path returns the text in `ALMIDE_SURVIVE_OVERLAY_TEXT` instead of the disk bytes, so a proposed edit is judged without being written |
-| `ALMIDE_SURVIVE_OVERLAY_TEXT=value` | route | the file holding the proposed text for `ALMIDE_SURVIVE_OVERLAY`; set without it, the overlay refuses to run rather than read the disk file |
+| `ALMIDE_SURVIVE_OVERLAY=value` | harness | RETIRED (#4129): no longer read. `almide survive` hands its overlay to a child run as `--survive-overlay` / `--survive-overlay-text` arguments, so an environment cannot make the compiler read other text than the disk file; kept registered so the regression test can set it and watch nothing change |
+| `ALMIDE_SURVIVE_OVERLAY_TEXT=value` | harness | RETIRED (#4129) with `ALMIDE_SURVIVE_OVERLAY`: no longer read |
 | `ALMIDE_TCO_DEBUG` | debug | print the native tail-call loop rewrite decisions |
 | `ALMIDE_TEST_ABORT_PROBE` | runtime | marks a native testing.assert_aborts child (ADR-0029) so `panic` takes the C-219 abort path there; set by the parent, never by hand |
 | `ALMIDE_TEST_LAX_WASM` | gate | let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run |

@@ -29,7 +29,7 @@ effect fn main() -> Unit = {
     Anon => println("anon"),
   }
   println("${set.len(set_go(set.new(), depth))}")
-  println("${bytes.len(bytes_go(bytes.new(8), depth))}")
+  println("${bytes.len(bytes_go(bytes.zeros(8), depth))}")
 }
 "#;
 

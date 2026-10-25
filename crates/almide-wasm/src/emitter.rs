@@ -258,9 +258,6 @@ impl Emitter<'_> {
         self.hold_f64_depth -= 1;
     }
 
-
-
-
     /// xs[i]: bounds-checked element load. Out of bounds takes the exact
     /// native abort frame — `Error: index out of bounds` on stderr, exit 1
     /// (a bare trap here left stderr EMPTY, the cross-target divergence
@@ -289,37 +286,36 @@ impl Emitter<'_> {
         self.f.instructions().local_set(hold);
         self.lower(index, Some(INT))?;
         let idx = self.hold_i64()?;
+        // #4005: the witness records the check and the read where emitted.
+        let site = self.bounds_site(list_var, index);
         if known {
             self.f.instructions().local_set(idx);
         } else {
             self.f.instructions().local_tee(idx);
-            self.emit_read_bounds_check(hold, hoisted, stride);
+            self.emit_read_bounds_check(hold, hoisted, stride, site);
         }
         if let Some(id) = list_var {
-            self.bounds_note(id, index, !known, false);
+            self.bounds_note(id, index, !known);
         }
         let off = self.emit_elem_addr(list_var, hold, idx, index, i64::from(stride))?;
         self.load_slot_off(elem, off);
+        crate::witness::bounds::access(site, false);
         self.release_i64();
         self.release_i32();
         Ok(elem)
     }
 
     /// The read's bounds check of the index on the stack (consumed).
-    fn emit_read_bounds_check(&mut self, hold: u32, hoisted: Option<u32>, stride: u32) {
+    fn emit_read_bounds_check(&mut self, hold: u32, hoisted: Option<u32>, stride: u32, site: Option<crate::witness::bounds::Site>) {
         let msg = self.pool.intern("index out of bounds");
-        // ONE UNSIGNED compare (#2319): `idx >=u count` is exactly
-        // `idx < 0 || idx >= count` — a negative i64 index reads as a value
-        // above every possible count — and the count is unsigned anyway. The
-        // two-signed-compares-and-or form cost 7 % of spectralnorm's inner
-        // loop, where this check runs once per element read.
+        // ONE UNSIGNED compare (#2319): `idx >=u count` is `idx < 0 || idx >= count`
+        // (a negative i64 reads above any count); two signed compares cost 7 % of
+        // spectralnorm's inner loop.
         {
             let mut i = self.f.instructions();
             match hoisted {
                 // The count came from the local a loop loaded it into.
-                Some(count) => {
-                    i.local_get(count);
-                }
+                Some(count) => { i.local_get(count); }
                 None => {
                     i.local_get(hold).i32_load(len_memarg()).i32_const(stride as i32).i32_div_u();
                     i.i64_extend_i32_u();
@@ -329,8 +325,8 @@ impl Emitter<'_> {
             i.if_(BlockType::Empty);
             i.i32_const(msg as i32);
         }
-        // #2755: out of bounds ABORTS the process — a recorded abort
-        // terminal on its own arm (data_unwrap.rs `abort_frame`).
+        crate::witness::bounds::check(site);
+        // #2755: out of bounds ABORTS — a recorded abort terminal on its own arm.
         self.witness_branch_open();
         self.witness_branch_arm();
         self.abort_frame();
@@ -355,8 +351,6 @@ impl Emitter<'_> {
             .unreachable();
     }
 
-
-
     /// A hold from the pool matching the slice type's wasm value type.
     pub(crate) fn hold_val(&mut self, ty: SliceTy) -> Result<u32, EmitError> {
         match ty.val_type() {
@@ -373,9 +367,6 @@ impl Emitter<'_> {
             _ => self.release_i32(),
         }
     }
-
-
-
 
     /// The WASM-level Result type of a Named callee (the IR `ty` on the
     /// call is the RAW ok type — the effect ABI is a backend layer), or
@@ -572,6 +563,8 @@ impl Emitter<'_> {
                     self.f.instructions().i64_const(0);
                     self.lower(operand, Some(INT))?;
                     self.f.instructions().i64_sub();
+                    // #4163: a sized int's negation wraps at its width, as binary `-` does.
+                    self.emit_narrow_wrap(&e.ty, &operand.ty);
                     INT
                 }
                 UnOp::Not => {
@@ -650,8 +643,8 @@ impl Emitter<'_> {
             // local (kept live across element lowering — the pool makes
             // nesting safe by construction).
             IrExprKind::List { elements } => {
-                let (hty, elem) = match want.map_or_else(|| self.infer(e), Ok)? {
-                    SliceTy::List(h) => (SliceTy::List(h), self.types.el(h)),
+                let (hty, elem, h) = match want.map_or_else(|| self.infer(e), Ok)? {
+                    SliceTy::List(h) => (SliceTy::List(h), self.types.el(h), h),
                     other => return unsup(&format!("ty-mismatch:list-vs-{other:?}")),
                 };
                 let stride = elem.slot_size();
@@ -661,12 +654,15 @@ impl Emitter<'_> {
                     .i32_const((elements.len() as u32 * stride) as i32)
                     .call(F_ALLOC)
                     .local_set(hold);
+                // #4013: a construction site; each slot is recorded as its store is emitted.
+                let site = crate::witness::init::site(almide_layout::PAYLOAD, stride, elements.len(), h.index() as u32);
                 for (i, el) in elements.iter().enumerate() {
                     self.f.instructions().local_get(hold);
                     self.lower(el, Some(elem))?;
                     self.rc_share_guard(el, elem);
                     self.witness_store(el, elem);
                     self.store_ty_slot(elem, i as u32 * stride);
+                    crate::witness::init::store(site, i);
                 }
                 self.f.instructions().local_get(hold);
                 self.release_i32();

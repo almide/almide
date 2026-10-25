@@ -1,0 +1,12 @@
+// #4023 control for the wasm double-free trap. With #3538 re-injected
+// (proofs/fixtures/heap-check/reinject/3538-payload-copy-without-credit.patch:
+// option.zip copies each payload into the tuple without its share), the
+// tuple's release frees both strings and the let-bound inputs then release
+// them again — no allocation in between, so each block is still at rc 0.
+// Before #4023 that exited 0 with the right output; the trap exits 1.
+fn main() -> Unit = {
+  let a = some("left" + int.to_string(1))
+  let b = some("right" + int.to_string(2))
+  let z = option.zip(a, b)
+  println("${z}")
+}

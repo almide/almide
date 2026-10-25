@@ -20,3 +20,9 @@ test "random.next_int unit=value" {
   let collapsed = random.next_int(random.seeded(7), 9, 3).0
   assert_eq("${r >= 1 and r <= 6 and collapsed == 9}", "true")
 }
+
+test "random.bytes unit=byte-count" {
+  let b = random.bytes(13)
+  let e = random.bytes(0)
+  assert_eq("${bytes.len(b) == 13 and bytes.len(e) == 0}", "true")
+}

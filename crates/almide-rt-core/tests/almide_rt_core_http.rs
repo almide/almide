@@ -190,6 +190,124 @@ fn a_chunk_size_line_split_mid_line_waits_for_the_rest() {
     join(h);
 }
 
+/// C-408 (#4137): the buffered client refuses a response that ended before
+/// its framing did, with the call-handle client's text, and both shapes agree
+/// on every case; a whole response in the same shapes is still answered.
+#[test]
+fn the_buffered_client_refuses_an_incomplete_response_as_the_call_client_does() {
+    let cases: [&[u8]; 5] = [
+        b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nabc",
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhel",
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n",
+        b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n",
+        b"just some text with no head",
+    ];
+    for raw in cases {
+        let (url, h) = pieces_peer(vec![raw.to_vec()]);
+        let got = client::request("GET", &url, "", &[]);
+        join(h);
+        assert_eq!(got, Err(format!("malformed or incomplete response from \"{url}\"")), "{:?}", String::from_utf8_lossy(raw));
+        let (url, h) = pieces_peer(vec![raw.to_vec()]);
+        let sh = start(&url, 0, 0);
+        assert!(client::http_call_wait(&sh).is_err(), "the call client answered {:?}", String::from_utf8_lossy(raw));
+        join(h);
+    }
+    for (raw, want) in [
+        (&b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabcdef"[..], "abc"),
+        (&b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n"[..], "hello"),
+        (&b"HTTP/1.1 200 OK\r\n\r\nuntil close"[..], "until close"),
+        (&b"HTTP/1.1 204 No Content\r\nContent-Length: 9\r\n\r\n"[..], ""),
+    ] {
+        let (url, h) = pieces_peer(vec![raw.to_vec()]);
+        assert_eq!(client::request("GET", &url, "", &[]).as_deref(), Ok(want));
+        join(h);
+    }
+}
+
+/// C-405 (#4112, RFC 9112 §2.2 / §3 / §3.2): a malformed request line, a
+/// non-origin target, a bare LF or CR, and a missing or repeated Host are 400
+/// before the handler runs; an absolute-form target reaches it as origin-form.
+#[test]
+fn a_malformed_request_line_or_host_is_400() {
+    for head in [
+        &b"GET  /x HTTP/1.1\r\nHost: a\r\n\r\n"[..],
+        &b"GET /x HTTP/1.1 extra\r\nHost: a\r\n\r\n"[..],
+        &b"GET\t/x HTTP/1.1\r\nHost: a\r\n\r\n"[..],
+        &b"G(T /x HTTP/1.1\r\nHost: a\r\n\r\n"[..],
+        &b"GET /x HTTP/9.9\r\nHost: a\r\n\r\n"[..],
+        &b"GET /x\r\nHost: a\r\n\r\n"[..],
+        &b"GET /a\x00b HTTP/1.1\r\nHost: a\r\n\r\n"[..],
+        &b"OPTIONS * HTTP/1.1\r\nHost: a\r\n\r\n"[..],
+        &b"CONNECT 127.0.0.1:22 HTTP/1.1\r\nHost: a\r\n\r\n"[..],
+        &b"GET /x HTTP/1.1\r\n\r\n"[..],
+        &b"GET /x HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n"[..],
+        &b"GET /x HTTP/1.1\r\nHost : a\r\n\r\n"[..],
+        &b"GET /x HTTP/1.1\nHost: a\n\n"[..],
+        &b"GET /x HTTP/1.1\r\nHost: a\rX: 1\r\n\r\n"[..],
+    ] {
+        let resp = exchange(head, false, server::HTTP_SERVER_DEFAULT_LIMITS, |_, r| panic!("the handler saw {r:?}"));
+        assert_eq!(status_line(&resp), "HTTP/1.1 400 Bad Request", "{:?}", String::from_utf8_lossy(head));
+    }
+    for (head, want) in [
+        (&b"GET http://evil.example/p?q=1 HTTP/1.1\r\nHost: a\r\n\r\n"[..], "/p?q=1"),
+        (&b"GET HTTPS://evil.example HTTP/1.1\r\nHost: a\r\n\r\n"[..], "/"),
+        (&b"GET http://evil.example?x HTTP/1.1\r\nHost: a\r\n\r\n"[..], "/?x"),
+        (&b"GET /x HTTP/1.0\r\n\r\n"[..], "/x"),
+    ] {
+        let resp = exchange(head, false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, (_, path, _, _)| {
+            server::http_server_write(conn, 200, &[], &path).expect("written")
+        });
+        assert!(resp.ends_with(&format!("\r\n\r\n{want}")), "{resp:?}");
+    }
+}
+
+/// C-407 (#4134): every response carries `X-Content-Type-Options: nosniff`
+/// after the handler's fields, unless the handler set that field.
+#[test]
+fn the_response_carries_nosniff_unless_the_handler_set_it() {
+    let plain = String::from_utf8(server::http_server_response_bytes(200, &[("X-A".into(), "1".into())], "x")).expect("utf8");
+    assert_eq!(plain, "HTTP/1.1 200 OK\r\nX-A: 1\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 1\r\n\r\nx");
+    let own = String::from_utf8(server::http_server_response_bytes(200, &[("x-content-type-options".into(), "other".into())], "")).expect("utf8");
+    assert_eq!(own, "HTTP/1.1 200 OK\r\nx-content-type-options: other\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+}
+
+/// C-402 (#4116): the client's URL splitter applies url.parse's rules where
+/// a browser could read the URL as pointing somewhere else.
+#[test]
+fn the_client_url_splitter_follows_url_parse_where_a_browser_could_disagree() {
+    for bad in [
+        "http://allowed.example\\@127.0.0.1:9/x",
+        "http://a.example/x\u{1}y",
+        "http://127.1/",
+        "http://0x7f.0.0.1/",
+        "http://2130706433/",
+        "http://0177.0.0.1/",
+        "http://256.0.0.1/",
+        "http://1.2.3.4.5/",
+    ] {
+        assert!(client::http_parse_url(bad).is_err(), "{bad:?} was accepted");
+    }
+    let u = client::http_parse_url(" \thttp://Good.example/a/%2e%2e/b/./c?q=/../x\n").expect("parses");
+    assert_eq!((u.host.as_str(), u.target.as_str()), ("good.example", "/b/c?q=/../x"));
+    let u = client::http_parse_url("http://127.0.0.1:8/a/..").expect("parses");
+    assert_eq!((u.host.as_str(), u.target.as_str()), ("127.0.0.1", "/"));
+}
+
+/// C-408: a response head that is not whole within HTTP_MAX_HEAD_BYTES is
+/// refused on the buffered path, as the call path refuses it.
+#[test]
+fn the_buffered_client_caps_the_response_head() {
+    let mut head = b"HTTP/1.1 200 OK\r\n".to_vec();
+    while head.len() <= (1 << 20) + 64 {
+        head.extend_from_slice(b"x: y\r\n");
+    }
+    head.extend_from_slice(b"Content-Length: 0\r\n\r\n");
+    let (url, h) = pieces_peer(vec![head]);
+    let got = client::request("GET", &url, "", &[]);
+    join(h);
+    assert_eq!(got, Err(format!("malformed or incomplete response from \"{url}\"")));
+}
+
 #[test]
 fn a_body_framed_by_the_close_ends_with_the_close() {
     let (url, h) = pieces_peer(vec![b"HTTP/1.1 200 OK\r\n\r\nuntil".to_vec(), b" close".to_vec()]);
@@ -261,7 +379,7 @@ fn an_interrupted_read_is_retried_by_the_buffered_client() {
     let url = "http://127.0.0.1:1/status/404";
     let got = client::read_response_tolerant(&mut Interrupting::new(&INTERRUPTED_PIECES), url, None).expect("answered");
     assert_eq!(got, INTERRUPTED_PIECES.concat());
-    let raw = client::http_exchange_raw(&mut Interrupting::new(&INTERRUPTED_PIECES), url, b"GET / HTTP/1.1\r\n\r\n").expect("answered");
+    let raw = client::http_exchange_raw(&mut Interrupting::new(&INTERRUPTED_PIECES), url, b"GET / HTTP/1.1\r\nHost: a\r\n\r\n").expect("answered");
     assert_eq!(raw, INTERRUPTED_PIECES.concat());
 }
 
@@ -449,7 +567,7 @@ fn the_response_bytes_carry_the_registered_reason_and_close_the_connection() {
     ];
     for (status, reason) in table {
         let out = text(server::http_server_response_bytes(status, &[], ""));
-        assert_eq!(out, format!("HTTP/1.1 {status} {reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"));
+        assert_eq!(out, format!("HTTP/1.1 {status} {reason}\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"));
     }
     let headers = vec![
         ("Content-Type".to_string(), "text/plain".to_string()),
@@ -457,17 +575,17 @@ fn the_response_bytes_carry_the_registered_reason_and_close_the_connection() {
         ("X-B".to_string(), "2".to_string()),
     ];
     let out = text(server::http_server_response_bytes(200, &headers, "héllo"));
-    assert_eq!(out, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nX-B: 2\r\nConnection: close\r\nContent-Length: 6\r\n\r\nhéllo");
+    assert_eq!(out, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nX-B: 2\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 6\r\n\r\nhéllo");
 }
 
 #[test]
 fn head_204_and_304_carry_no_body() {
     let head = text(server::http_server_response_bytes_for(true, 200, &[], "hello"));
-    assert_eq!(head, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 5\r\n\r\n");
+    assert_eq!(head, "HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 5\r\n\r\n");
     let no_content = text(server::http_server_response_bytes(204, &[], "x"));
-    assert_eq!(no_content, "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+    assert_eq!(no_content, "HTTP/1.1 204 No Content\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n");
     let not_modified = text(server::http_server_response_bytes(304, &[], "x"));
-    assert_eq!(not_modified, "HTTP/1.1 304 Not Modified\r\nConnection: close\r\nContent-Length: 1\r\n\r\n");
+    assert_eq!(not_modified, "HTTP/1.1 304 Not Modified\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 1\r\n\r\n");
 }
 
 #[test]
@@ -522,7 +640,7 @@ fn exchange(
         let mut resp = Vec::new();
         let _ = s.read_to_end(&mut resp);
         // The core answered: a second connection proves it keeps serving.
-        let second = fetch(port, b"GET /next HTTP/1.1\r\n\r\n").expect("the second request is answered");
+        let second = fetch(port, b"GET /next HTTP/1.1\r\nHost: a\r\n\r\n").expect("the second request is answered");
         (String::from_utf8_lossy(&resp).into_owned(), second)
     });
     let (conn, req) = server::http_server_next_with(&listener, &limits).expect("no shutdown signal in this test");
@@ -555,7 +673,7 @@ fn a_huge_content_length_is_413_without_allocating_it() {
     );
     assert_eq!(status_line(&resp), "HTTP/1.1 413 Content Too Large");
     let past_u64 = exchange(
-        b"POST /x HTTP/1.1\r\nContent-Length: 999999999999999999999999\r\n\r\n",
+        b"POST /x HTTP/1.1\r\nHost: a\r\nContent-Length: 999999999999999999999999\r\n\r\n",
         false,
         server::HTTP_SERVER_DEFAULT_LIMITS,
         |_, r| panic!("the handler saw {r:?}"),
@@ -566,21 +684,21 @@ fn a_huge_content_length_is_413_without_allocating_it() {
 #[test]
 fn a_short_body_is_400_and_a_stalled_one_is_503() {
     let cut = exchange(
-        b"POST /x HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc",
+        b"POST /x HTTP/1.1\r\nHost: a\r\nContent-Length: 10\r\n\r\nabc",
         true,
         server::HTTP_SERVER_DEFAULT_LIMITS,
         |_, r| panic!("the handler saw {r:?}"),
     );
     assert_eq!(status_line(&cut), "HTTP/1.1 400 Bad Request");
     let limits = server::HttpServerLimits { max_body_bytes: 1 << 20, request_timeout_ms: 300, ..server::HTTP_SERVER_DEFAULT_LIMITS };
-    let stalled = exchange(b"POST /x HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc", false, limits, |_, r| panic!("the handler saw {r:?}"));
+    let stalled = exchange(b"POST /x HTTP/1.1\r\nHost: a\r\nContent-Length: 10\r\n\r\nabc", false, limits, |_, r| panic!("the handler saw {r:?}"));
     assert_eq!(status_line(&stalled), "HTTP/1.1 503 Service Unavailable");
 }
 
 #[test]
 fn a_response_after_the_request_timeout_is_503() {
     let limits = server::HttpServerLimits { max_body_bytes: 1 << 20, request_timeout_ms: 200, ..server::HTTP_SERVER_DEFAULT_LIMITS };
-    let resp = exchange(b"GET /slow HTTP/1.1\r\n\r\n", false, limits, |conn, _| {
+    let resp = exchange(b"GET /slow HTTP/1.1\r\nHost: a\r\n\r\n", false, limits, |conn, _| {
         thread::sleep(Duration::from_millis(400));
         server::http_server_write(conn, 200, &[], "late").expect("written");
     });
@@ -591,7 +709,7 @@ fn a_response_after_the_request_timeout_is_503() {
 #[test]
 fn a_chunked_body_is_decoded_and_bounded() {
     let resp = exchange(
-        b"POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n2;ext=1\r\nhe\r\n3\r\nllo\r\n0\r\nX-Trailer: t\r\n\r\n",
+        b"POST /x HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n2;ext=1\r\nhe\r\n3\r\nllo\r\n0\r\nX-Trailer: t\r\n\r\n",
         false,
         server::HTTP_SERVER_DEFAULT_LIMITS,
         |conn, (method, _, body, _)| server::http_server_write(conn, 200, &[], &format!("{method} {body}")).expect("written"),
@@ -599,21 +717,21 @@ fn a_chunked_body_is_decoded_and_bounded() {
     assert!(resp.ends_with("\r\n\r\nPOST hello"), "{resp:?}");
     let limits = server::HttpServerLimits { max_body_bytes: 4, request_timeout_ms: 30_000, ..server::HTTP_SERVER_DEFAULT_LIMITS };
     let over = exchange(
-        b"POST /x HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n",
+        b"POST /x HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n",
         false,
         limits,
         |_, r| panic!("the handler saw {r:?}"),
     );
     assert_eq!(status_line(&over), "HTTP/1.1 413 Content Too Large");
     let gzip = exchange(
-        b"POST /x HTTP/1.1\r\nTransfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n",
+        b"POST /x HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n",
         false,
         server::HTTP_SERVER_DEFAULT_LIMITS,
         |_, r| panic!("the handler saw {r:?}"),
     );
     assert_eq!(status_line(&gzip), "HTTP/1.1 501 Not Implemented");
     let both = exchange(
-        b"POST /x HTTP/1.1\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+        b"POST /x HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
         false,
         server::HTTP_SERVER_DEFAULT_LIMITS,
         |_, r| panic!("the handler saw {r:?}"),
@@ -621,21 +739,47 @@ fn a_chunked_body_is_decoded_and_bounded() {
     assert_eq!(status_line(&both), "HTTP/1.1 400 Bad Request");
 }
 
+/// RFC 9112 §5.1 / §5.2 (C-405, #4112): whitespace before a header colon, a
+/// line without a colon and an obs-fold line are each 400 before the handler
+/// runs; a well-formed head with optional whitespace around the value is read.
+#[test]
+fn malformed_header_field_lines_are_400() {
+    for head in [
+        &b"POST /x HTTP/1.1\r\nHost: a\r\nTransfer-Encoding : chunked\r\n\r\n0\r\n\r\n"[..],
+        &b"GET /x HTTP/1.1\r\nHost: a\r\nno colon here\r\n\r\n"[..],
+        &b"GET /x HTTP/1.1\r\nHost: a\r\nX-A: 1\r\n folded: 2\r\n\r\n"[..],
+        &b"GET /x HTTP/1.1\r\nHost: a\r\nX-A: 1\r\n\tfolded\r\n\r\n"[..],
+        &b"GET /x HTTP/1.1\r\nHost: a\r\nX-A: 1\r\n   \r\n\r\n"[..],
+        &b"GET /x HTTP/1.1\r\nHost: a\r\n: empty-name\r\n\r\n"[..],
+        &b"GET /x HTTP/1.1\r\nHost: a\r\nX A: 1\r\n\r\n"[..],
+    ] {
+        let resp = exchange(head, false, server::HTTP_SERVER_DEFAULT_LIMITS, |_, r| panic!("the handler saw {r:?}"));
+        assert_eq!(status_line(&resp), "HTTP/1.1 400 Bad Request", "{:?}", String::from_utf8_lossy(head));
+    }
+    let ok = exchange(
+        b"GET /x HTTP/1.1\r\nHost: a\r\nX-A:\t 1 \t\r\nX-B:2\r\n\r\n",
+        false,
+        server::HTTP_SERVER_DEFAULT_LIMITS,
+        |conn, (_, _, _, headers)| server::http_server_write(conn, 200, &[], &format!("{headers:?}")).expect("written"),
+    );
+    assert!(ok.ends_with(r#"[("Host", "a"), ("X-A", "1"), ("X-B", "2")]"#), "{ok:?}");
+}
+
 #[test]
 fn header_lines_are_bounded_in_length_and_count() {
     static LONG: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-    let long = LONG.get_or_init(|| format!("GET /x HTTP/1.1\r\nX-Long: {}\r\n\r\n", "a".repeat(10_000)).into_bytes());
+    let long = LONG.get_or_init(|| format!("GET /x HTTP/1.1\r\nHost: a\r\nX-Long: {}\r\n\r\n", "a".repeat(10_000)).into_bytes());
     let resp = exchange(long, false, server::HTTP_SERVER_DEFAULT_LIMITS, |_, r| panic!("the handler saw {r:?}"));
     assert_eq!(status_line(&resp), "HTTP/1.1 431 Request Header Fields Too Large");
     static MANY: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-    let many = MANY.get_or_init(|| format!("GET /x HTTP/1.1\r\n{}\r\n", "X-H: 1\r\n".repeat(101)).into_bytes());
+    let many = MANY.get_or_init(|| format!("GET /x HTTP/1.1\r\nHost: a\r\n{}\r\n", "X-H: 1\r\n".repeat(101)).into_bytes());
     let resp = exchange(many, false, server::HTTP_SERVER_DEFAULT_LIMITS, |_, r| panic!("the handler saw {r:?}"));
     assert_eq!(status_line(&resp), "HTTP/1.1 431 Request Header Fields Too Large");
 }
 
 #[test]
 fn a_crlf_header_is_refused_with_500() {
-    let resp = exchange(b"GET /x HTTP/1.1\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, _| {
+    let resp = exchange(b"GET /x HTTP/1.1\r\nHost: a\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, _| {
         let evil = [("X-A".to_string(), "1\r\nSet-Cookie: evil=1".to_string())];
         server::http_server_write(conn, 200, &evil, "x").expect("written");
     });
@@ -682,20 +826,20 @@ fn the_handlers_framing_fields_are_dropped() {
         ("X-B".to_string(), "2".to_string()),
     ];
     let out = text(server::http_server_response_bytes(200, &headers, "hello"));
-    assert_eq!(out, "HTTP/1.1 200 OK\r\nX-B: 2\r\nConnection: close\r\nContent-Length: 5\r\n\r\nhello");
+    assert_eq!(out, "HTTP/1.1 200 OK\r\nX-B: 2\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 5\r\n\r\nhello");
 }
 
 #[test]
 fn a_bad_status_or_control_value_is_answered_500_with_the_reason() {
-    let resp = exchange(b"GET /x HTTP/1.1\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, _| {
+    let resp = exchange(b"GET /x HTTP/1.1\r\nHost: a\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, _| {
         server::http_server_write(conn, 103, &[], "x").expect("written");
     });
     assert_eq!(status_line(&resp), "HTTP/1.1 500 Internal Server Error");
-    assert!(resp.ends_with("\r\n\r\nInternal error: response status 103 is not a final status code"), "{resp:?}");
-    let resp = exchange(b"GET /x HTTP/1.1\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, _| {
+    assert!(resp.ends_with("\r\n\r\nInternal Server Error"), "{resp:?}");
+    let resp = exchange(b"GET /x HTTP/1.1\r\nHost: a\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, _| {
         server::http_server_write(conn, 200, &[("a b".to_string(), "v".to_string())], "x").expect("written");
     });
-    assert!(resp.ends_with("\r\n\r\nInternal error: response header name \"a b\" is not a token"), "{resp:?}");
+    assert!(resp.ends_with("\r\n\r\nInternal Server Error"), "{resp:?}");
 }
 
 #[test]
@@ -703,13 +847,14 @@ fn the_server_skips_an_unparsable_request_and_answers_the_next() {
     let listener = server::http_server_bind(0).expect("bind");
     let port = port_of(&listener);
     let client = thread::spawn(move || {
-        // First connection: a request line with no target — dropped unanswered.
+        // First connection: a request line with no target — a 400 the core
+        // answers itself (C-405, RFC 9112 §3).
         let mut bad = connect_send(port, b"GARBAGE\r\n\r\n").expect("the client reaches the server");
         let mut rest = Vec::new();
         let _ = bad.read_to_end(&mut rest);
-        assert!(rest.is_empty(), "an unparsable request gets no answer");
+        assert!(rest.starts_with(b"HTTP/1.1 400 Bad Request\r\n"), "{:?}", String::from_utf8_lossy(&rest));
         // Second connection: a request with headers and a body.
-        fetch(port, b"POST /echo?x=1 HTTP/1.1\r\nHost: t\r\nno colon here\r\ncontent-length: 4\r\nX-K:  v \r\n\r\nping")
+        fetch(port, b"POST /echo?x=1 HTTP/1.1\r\nHost: t\r\ncontent-length: 4\r\nX-K:  v \r\n\r\nping")
             .expect("the second connection is answered")
     });
     let (stream, (method, target, body, headers)) = server::http_server_next(&listener).expect("no shutdown signal in this test");
@@ -723,17 +868,17 @@ fn the_server_skips_an_unparsable_request_and_answers_the_next() {
         ]
     );
     server::http_server_write(stream, 404, &[("X-R".to_string(), "1".to_string())], "nope").expect("written");
-    assert_eq!(join(client), "HTTP/1.1 404 Not Found\r\nX-R: 1\r\nConnection: close\r\nContent-Length: 4\r\n\r\nnope");
+    assert_eq!(join(client), "HTTP/1.1 404 Not Found\r\nX-R: 1\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 4\r\n\r\nnope");
 }
 
 #[test]
 fn a_request_without_a_body_reads_as_empty_and_a_garbled_length_is_400() {
-    let resp = exchange(b"GET / HTTP/1.1\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, (method, target, body, _)| {
+    let resp = exchange(b"GET / HTTP/1.1\r\nHost: a\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |conn, (method, target, body, _)| {
         assert_eq!((method.as_str(), target.as_str(), body.as_str()), ("GET", "/", ""));
         server::http_server_write(conn, 200, &[], "").expect("written");
     });
-    assert_eq!(resp, "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
-    let nan = exchange(b"GET / HTTP/1.1\r\nContent-Length: nan\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |_, r| {
+    assert_eq!(resp, "HTTP/1.1 200 OK\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+    let nan = exchange(b"GET / HTTP/1.1\r\nHost: a\r\nContent-Length: nan\r\n\r\n", false, server::HTTP_SERVER_DEFAULT_LIMITS, |_, r| {
         panic!("the handler saw {r:?}")
     });
     assert_eq!(status_line(&nan), "HTTP/1.1 400 Bad Request");
@@ -789,7 +934,7 @@ fn a_client_trickling_its_head_does_not_hold_up_the_next_client() {
     let slow = trickle(port, b"GET /slow HTTP/1.1\r\nHost: a\r\nX-A: 1\r\n\r\n", Duration::from_millis(50));
     thread::sleep(Duration::from_millis(200));
     let started = std::time::Instant::now();
-    let fast = fetch(port, b"GET /fast HTTP/1.1\r\n\r\n").expect("the second client is answered");
+    let fast = fetch(port, b"GET /fast HTTP/1.1\r\nHost: a\r\n\r\n").expect("the second client is answered");
     let took = started.elapsed();
     assert!(fast.ends_with("\r\n\r\n/fast"), "{fast:?}");
     assert!(took < Duration::from_secs(1), "the second client waited {took:?} behind the slow one");
@@ -823,7 +968,7 @@ fn a_head_not_whole_by_the_header_deadline_is_408_and_a_silent_client_is_closed_
     assert_eq!(status_line(&resp), "HTTP/1.1 408 Request Timeout");
     // A stalled body is still the request timeout's 503, not a 408.
     let limits = server::HttpServerLimits { header_timeout_ms: 200, request_timeout_ms: 400, ..server::HTTP_SERVER_DEFAULT_LIMITS };
-    let resp = exchange(b"POST /x HTTP/1.1\r\nContent-Length: 10\r\n\r\nabc", false, limits, |_, r| panic!("the handler saw {r:?}"));
+    let resp = exchange(b"POST /x HTTP/1.1\r\nHost: a\r\nContent-Length: 10\r\n\r\nabc", false, limits, |_, r| panic!("the handler saw {r:?}"));
     assert_eq!(status_line(&resp), "HTTP/1.1 503 Service Unavailable");
 }
 
@@ -838,7 +983,7 @@ fn at_max_in_flight_the_pool_stops_accepting_until_a_connection_closes() {
     let held: Vec<TcpStream> = (0..2).map(|_| TcpStream::connect(("127.0.0.1", port)).expect("connect")).collect();
     thread::sleep(Duration::from_millis(100));
     let started = std::time::Instant::now();
-    let third = fetch(port, b"GET /third HTTP/1.1\r\n\r\n").expect("the third client is answered");
+    let third = fetch(port, b"GET /third HTTP/1.1\r\nHost: a\r\n\r\n").expect("the third client is answered");
     let took = started.elapsed();
     assert!(third.ends_with("\r\n\r\n/third"), "{third:?}");
     assert!(took >= Duration::from_millis(300), "the third connection was read at {took:?}, past the bound of 2");

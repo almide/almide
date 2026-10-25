@@ -70,6 +70,7 @@ kernel_verify() { # checker-mode witness-file expected_exit(0=true|1=false)
     caps-transitive) fn="check_prog_cert" ;;
     call-modes)      fn="check_modes_cert" ;;
     bounds)          fn="check_bounds_cert" ;;
+    init)            fn="check_init_cert" ;;
     *) echo "kernel_verify: unknown checker mode $mode" >&2; return 2 ;;
   esac
   if [ "$expect" -eq 0 ]; then want=true; else want=false; fi
@@ -78,7 +79,7 @@ kernel_verify() { # checker-mode witness-file expected_exit(0=true|1=false)
 import sys
 w = open(sys.argv[1]).read()
 lit = '"' + w.replace('"', '""') + '"'
-print("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert.")
+print("From AlmideTrust Require Import OwnershipChecker NameTotality CapabilityBound CapabilityReach CallModes BoundsCert InitCert.")
 print("From Stdlib Require Import String.")
 print("Open Scope string_scope.")
 print("Goal %s %s = %s." % (sys.argv[2], lit, sys.argv[3]))
@@ -743,15 +744,17 @@ tamper_fixture "$GI" main '16s/^ibabdd$/ibabd/' "#2755 bound if"
 
 # ── #2755: `list.group_by`'s inlined key callback. One activation per
 # element: an owned key is born, released when its group is present and
-# moved into the new entry when absent (`{id|im}`, line 93 of the fixture's
-# `main`); the absent arm's first group list is born into the entry
+# moved into the new entry when absent (`{id|im}`, the only such line of the
+# fixture's `main`); the absent arm's first group list is born into the entry
 # (`{|im}`), and a handle element is shared into its group on both arms.
-# Drill: the present arm's key never released.
+# Drill: the present arm's key never released. Keyed on the line's text, not
+# its number, which moves whenever an earlier statement's witness grows (93
+# -> 96 at #4182); the drill fails if the line is gone (nothing changes).
 echo
 echo "== structural leg, group_by key  ⊳  proven checker (#2755) =="
 GB=spec/wasm_cross/map_insertion_order.almd
 run_structural "$GB" main 0
-tamper_fixture "$GB" main '93s/^{id|im}$/{i|im}/' "#2755 group_by key"
+tamper_fixture "$GB" main 's/^{id|im}$/{i|im}/' "#2755 group_by key"
 
 # ── #2755: an instance-parallel `fan.map` chunk (`fan.__par_K`, fan_par.rs) is
 # a branch site on the host's answer: the served arm copies the answer room

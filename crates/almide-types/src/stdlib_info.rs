@@ -8,6 +8,8 @@ pub const STDLIB_MODULES: &[&str] = &[
     "json", "http", "process", "math", "random", "regex", "io", "result",
     "option", "error", "datetime", "testing", "value", "set", "deque", "heap",
     "base64", "hex", "hash", "net", "url", "zlib",
+    // Arbitrary-precision integers (R-L1-03). Never auto-imported: `import bigint`.
+    "bigint",
     // Sized numeric types (Stage 3 of the sized-numeric-types arc).
     // Each hosts UFCS conversion methods (`.to_int64()`,
     // `.to_float32()`, ...). Auto-imported alongside `int` / `float`
@@ -27,6 +29,8 @@ pub const BUNDLED_MODULES: &[&str] = &[
     // Raw addresses at the foreign-function boundary (R-ffi-01). Never
     // auto-imported: `import ffi` is the opt-in.
     "ffi",
+    // Arbitrary-precision integers (R-L1-03). Never auto-imported: `import bigint`.
+    "bigint",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "float32", "float64",
@@ -57,7 +61,7 @@ pub const TIER1_ALWAYS_ACCESSIBLE: &[&str] = &[
 /// NAMING rule: a module here is loaded only when a loaded source reaches it
 /// (`almide_frontend::bundled_reach`, #4071), never into every program.
 pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
-    "list", "int", "float", "bool",
+    "list", "int", "float", "bool", "bytes",
     // Stdlib modules migrated from TOML to bundled `.almd` need
     // auto-import so their signatures and dispatch reach every file
     // without requiring a redundant `import <name>`. The set mirrors
@@ -142,9 +146,11 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("path", "SafePath"),
     ("process", "ProcessStatus"),
     ("random", "Rng"),
+    ("regex", "Regex"),
     ("url", "Url"),
     ("deque", "Deque"),
     ("heap", "Heap"),
+    ("bigint", "BigInt"),
 ];
 
 /// The owning module of a stdlib-owned nominal type, by BARE name — `None`
@@ -294,6 +300,7 @@ fn bundled_source_sized_numeric(name: &str) -> Option<&'static str> {
         "net" => Some(crate::embedded::SRC_NET),
         "zlib" => Some(crate::embedded::SRC_ZLIB),
         "ffi" => Some(crate::embedded::SRC_FFI),
+        "bigint" => Some(crate::embedded::SRC_BIGINT),
         // The v1 primitive floor (raw memory + fd_write). v1 maps `prim.*` to MIR
         // primitive ops by module name; the @intrinsic symbols are v0 placeholders.
         "prim" => Some(crate::embedded::SRC_PRIM),

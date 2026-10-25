@@ -352,6 +352,10 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
                 }
             }
             DeclStep::Protocol(ast::Decl::Protocol { name, generics, methods, .. }) => {
+                // A protocol spelling a built-in's name is legal in a module (it
+                // registers under the module and leaves the bare built-in to the
+                // files that do not import it); refusing it in the entry file only
+                // is #4190.
                 register_protocol_decl(env, name, generics, methods, prefix);
             }
             DeclStep::Protocol(_) => {}

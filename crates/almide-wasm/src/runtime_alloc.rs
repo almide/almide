@@ -268,16 +268,17 @@ pub(crate) fn emit_dec_flat() -> Function {
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    // Diagnostic knob (`ALMIDE_RC_TRAP_DOUBLE_FREE=1`, emit time): a dec
-    // of a block already at rc 0 — a freed block — traps instead of
+    // The double-free trap (#4023, on in every build): a dec of a block
+    // already at rc 0 — a freed block — hits `unreachable` instead of
     // wrapping to 0xFFFF_FFFF and silently keeping a dangling block
-    // alive. Off by default: the proof-transcribed runtime tree (the
-    // hash below) is the shipped one.
-    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
-        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
-        i.unreachable();
-        i.end();
-    }
+    // alive. Measured at +0.0% instructions / +0.3% cycles (median over
+    // the perf suite's wasm rows) and +0.8% bytes over spec/wasm_cross.
+    // proofs/StructuralRuntime.v transcribes this tree with the trap
+    // (`dec_body`'s `SIf (EEq ETmp (EC (-1))) STrap`), so the shipped
+    // tree is the proven one.
+    i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     i.local_get(block).call(F_FREE);
@@ -287,7 +288,7 @@ pub(crate) fn emit_dec_flat() -> Function {
 }
 
 /// `$drop_list(block)` — `$dec_flat` for a List of heap HANDLES (#2010
-/// stage 2b): the same heap-floor guard and trap knob; at rc 0 every
+/// stage 2b): the same heap-floor guard and double-free trap; at rc 0 every
 /// element handle (a 4-byte slot) is released through `elem_dec` before
 /// the spine is freed.
 pub(crate) fn emit_drop_list(elem_dec: u32) -> Function {
@@ -300,11 +301,9 @@ pub(crate) fn emit_drop_list(elem_dec: u32) -> Function {
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
-        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
-        i.unreachable();
-        i.end();
-    }
+    i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
@@ -322,7 +321,7 @@ pub(crate) fn emit_drop_list(elem_dec: u32) -> Function {
 
 /// `$drop_<shape>(block)` — the typed drop of a block with handle slots
 /// at fixed payload offsets (#2010 stage 2c): `$dec_flat`'s guard and
-/// trap knob; at rc 0 every `(offset, dec_fn)` slot is released, then
+/// double-free trap; at rc 0 every `(offset, dec_fn)` slot is released, then
 /// the block freed. `tagged` names a tag word and per-tag slot tables
 /// (a Result: tag 0 = Ok payload, 1 = Err payload, both at SUM_FIELD).
 pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u32, Vec<(u32, u32)>)>)>) -> Function {
@@ -335,11 +334,9 @@ pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u3
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
-        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
-        i.unreachable();
-        i.end();
-    }
+    i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     for &(off, dec) in slots {
@@ -361,7 +358,7 @@ pub(crate) fn emit_drop_shape(slots: &[(u32, u32)], tagged: Option<(u32, Vec<(u3
     f
 }
 
-/// `$drop_http_call(block)` (#2633): `$dec_flat`'s guard and trap knob; at
+/// `$drop_http_call(block)` (#2633): `$dec_flat`'s guard and double-free trap; at
 /// rc 0 the call id (the block's one i64 slot) goes to the host as op 59 —
 /// cancel and forget, the native handle's `Drop` — before the block is
 /// freed. The op's i64 answer carries nothing and is dropped.
@@ -375,11 +372,9 @@ pub(crate) fn emit_drop_http_call() -> Function {
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
-        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
-        i.unreachable();
-        i.end();
-    }
+    i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     i.i32_const(crate::fs_meta::OP_HTTP_CALL_DROP);
@@ -406,11 +401,9 @@ pub(crate) fn emit_drop_map_spine(side_clear: u32) -> Function {
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
-        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
-        i.unreachable();
-        i.end();
-    }
+    i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     i.global_get(G_MAPIDX).if_(BlockType::Empty);
@@ -424,7 +417,7 @@ pub(crate) fn emit_drop_map_spine(side_clear: u32) -> Function {
 
 /// `$drop_entries(block)` — the typed drop of a Map / Set with handle
 /// slots in its entries (#2010, Map stage b): `$dec_flat`'s guard and
-/// trap knob; at rc 0 every entry's `(offset, dec_fn)` slots are
+/// double-free trap; at rc 0 every entry's `(offset, dec_fn)` slots are
 /// released in insertion order, the index side-table entry cleared, and
 /// the entries array freed.
 pub(crate) fn emit_drop_entries(stride: u32, slots: [Option<(u32, u32)>; 2], side_clear: u32) -> Function {
@@ -437,11 +430,9 @@ pub(crate) fn emit_drop_entries(stride: u32, slots: [Option<(u32, u32)>; 2], sid
     i.return_();
     i.end();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_sub().local_set(rc);
-    if almide_base::env::flag("ALMIDE_RC_TRAP_DOUBLE_FREE") {
-        i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
-        i.unreachable();
-        i.end();
-    }
+    i.local_get(rc).i32_const(-1).i32_eq().if_(BlockType::Empty);
+    i.unreachable();
+    i.end();
     i.local_get(block).local_get(rc).i32_store(word(almide_layout::RC.offset));
     i.local_get(rc).i32_eqz().if_(BlockType::Empty);
     i.local_get(block).i32_const(almide_layout::PAYLOAD as i32).i32_add().local_set(p);
@@ -700,11 +691,13 @@ mod tests {
         // the immediate's value is not part of the transcription.
         body_bytes(&super::emit_alloc(0, None, false)).hash(&mut h);
         let got = h.finish();
-        // Recorded at the StructuralRuntime.v landing. A mismatch means
-        // the emitted trees moved: update proofs/StructuralRuntime.v to
-        // the new trees (re-proving what changed), then this constant.
+        // Recorded at the StructuralRuntime.v landing; moved by #4023
+        // ($dec_flat's double-free sentinel, dec_body's
+        // `SIf (EEq ETmp (EC (-1))) STrap`). A mismatch means the emitted
+        // trees moved: update proofs/StructuralRuntime.v to the new trees
+        // (re-proving what changed), then this constant.
         assert_eq!(
-            got, 0xe367ec7ac138a3d8,
+            got, 0xc6a7af758f38cfcd,
             "runtime tree bytes drifted from the proofs/StructuralRuntime.v transcription (got {got:#x})"
         );
     }

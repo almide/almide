@@ -61,7 +61,7 @@ effect fn main() -> Unit = {
   let newline = 10
 
   // Reusable buffer
-  var buf = bytes.new(64)
+  var buf = bytes.zeros(64)
 
   // ONE: repeat ALU
   io.write(bytes.from_string(">ONE Homo sapiens alu\n"))

@@ -43,8 +43,17 @@ try {
 
     Write-Host "Verifying checksum..."
     $Checksums = Get-Content "$Tmp\checksums.sha256"
-    $Line = $Checksums | Where-Object { $_ -match [regex]::Escape($Archive) }
-    $Expected = ($Line -split '\s+')[0].ToLower()
+    # Match the file-name field exactly (optional leading `*`), never a
+    # substring: a `.sig` / `.sbom` line must not supply the hash (#4127).
+    $Expected = $null
+    foreach ($L in $Checksums) {
+        $F = $L.Trim() -split '\s+'
+        if ($F.Count -eq 2 -and $F[1].TrimStart('*') -eq $Archive) { $Expected = $F[0].ToLower(); break }
+    }
+    if (-not $Expected) {
+        Write-Host "error: no checksum listed for $Archive" -ForegroundColor Red
+        exit 1
+    }
     $Actual = (Get-FileHash "$Tmp\$Archive" -Algorithm SHA256).Hash.ToLower()
 
     if ($Expected -ne $Actual) {
@@ -52,6 +61,22 @@ try {
         Write-Host "       expected: $Expected"
         Write-Host "       got:      $Actual"
         exit 1
+    }
+
+    # --- Verify origin ---
+    # The checksum came from the same place as the archive: integrity, not
+    # origin (#4127). Verify the release's Sigstore attestation (#1534) when
+    # the GitHub CLI is here.
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        Write-Host "Verifying the release attestation..."
+        & gh attestation verify "$Tmp\$Archive" -R $Repo | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "error: the release attestation did not verify; refusing to install" -ForegroundColor Red
+            exit 1
+        }
+    } else {
+        Write-Host "note: gh not found, so the release attestation was not verified (the checksum proves integrity, not origin)"
+        Write-Host "      to verify: gh attestation verify $Archive -R $Repo"
     }
 
     # --- Install ---

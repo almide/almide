@@ -61,7 +61,7 @@ machine-enforced by the numeric-matrix gate in `almide docs-gen --check` (#956).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (48 functions)
+## Signature index (54 functions)
 
 ```
 // Sign-extending widen; always exact.
@@ -255,6 +255,30 @@ int8.bit_length(x: Int8) -> Int
 // Decimal Int8 from trimmed s; err on junk or outside -128..127.
 // @since unreleased
 int8.parse(s: String) -> Result[Int8, String]
+
+// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+// @since unreleased
+int8.to_string_radix(x: Int8, radix: Int) -> String
+
+// Int8 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -128..127.
+// @since unreleased
+int8.parse_radix(s: String, radix: Int) -> Result[Int8, String]
+
+// x as Int8, toward zero; NaN, an infinity or a value outside Int8 aborts.
+// @since unreleased
+int8.from(x: S) -> Int8
+
+// some(x as Int8) when Int8 holds x exactly, else none (a fraction, NaN, out of range).
+// @since unreleased
+int8.from_checked(x: S) -> Option[Int8]
+
+// x as Int8, toward zero, clamped to Int8's range; NaN is 0.
+// @since unreleased
+int8.from_saturating(x: S) -> Int8
+
+// The low 8 bits of integer x as Int8 (two's complement).
+// @since unreleased
+int8.from_wrapping(x: S) -> Int8
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

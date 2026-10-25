@@ -273,16 +273,18 @@ fn load_bundled_module(name: &str, source: &'static str, ctx: &mut ResolveCtx) -
         .ok_or_else(|| format!("parse error in bundled stdlib '{}'", name))?
         .clone();
 
-    // Recursively resolve this module's imports
+    // Recursively resolve this module's imports, in resolve_named_import's
+    // order: a module with a bundled Almide source is loaded even when its
+    // name is also a stdlib module, so a bundled module that calls another's
+    // Almide bodies (`http.query_params` → `url.parse_query`, C-404) links it
+    // whether or not the program imports it itself.
     for import in &program.imports {
         if let ast::Decl::Import { path, .. } = import {
             let dep_name = &path[0];
-            if !stdlib::is_stdlib_module(dep_name) {
-                if let Some(dep_source) = stdlib::get_bundled_source(dep_name) {
-                    load_bundled_module(dep_name, dep_source, ctx)?;
-                } else {
-                    load_module(dep_name, ctx)?;
-                }
+            if let Some(dep_source) = stdlib::get_bundled_source(dep_name) {
+                load_bundled_module(dep_name, dep_source, ctx)?;
+            } else if !stdlib::is_stdlib_module(dep_name) {
+                load_module(dep_name, ctx)?;
             }
         }
     }
@@ -755,10 +757,19 @@ fn find_module_file(name: &str, base_dir: &Path, dep_paths: &[(project::PkgId, P
     if let Some(hint) = almide_frontend::removed_spellings::removed_module_hint(name) {
         return Err(format!("module '{name}' not found\n  hint: {hint}"));
     }
+    // #4109: a near stdlib module, dependency or almide package first. The
+    // hint a writer acts on must not point at `almide add <guessed name>`,
+    // the first step of installing a typo-squatted package.
+    let deps: Vec<&str> = dep_paths.iter().map(|(p, _)| p.name.as_str()).collect();
+    let hint = crate::trust::import_hint(name, &deps).unwrap_or_else(|| {
+        format!(
+            "Create {name}.almd in the same directory. If `{name}` is a package you already trust, add it to [dependencies] in almide.toml; do not add a package whose name you guessed"
+        )
+    });
     Err(format!(
-        "module '{}' not found\n  searched: {}\n  hint: Create {}.almd in the same directory, or add to [dependencies] in almide.toml",
+        "module '{}' not found\n  searched: {}\n  hint: {}",
         name,
         local_candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", "),
-        name,
+        hint,
     ))
 }

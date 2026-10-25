@@ -33,64 +33,67 @@ fn dep_ref_name(dep: &Dependency) -> &str {
     dep.tag.as_deref().or(dep.branch.as_deref()).unwrap_or("main")
 }
 
-/// A stable 64-bit digest of a source URL, as 16 hex digits.
-///
-/// FNV-1a written out here rather than `DefaultHasher`: this value is a
-/// directory name that has to still be found after a toolchain upgrade, and
-/// `DefaultHasher`'s output is explicitly not guaranteed stable across Rust
-/// releases — an unstable key would silently orphan every cached checkout on
-/// a compiler bump.
-///
-/// THE RESIDUE: #2523's aliasing is closed structurally everywhere except
-/// here. Two URLs that collide in 64 bits share a cache directory and alias
-/// again, exactly as name-keyed paths did. That is a ~2⁻⁶⁴ accident rather
-/// than a spelling anyone can choose — which is why a hash is acceptable at
-/// all — but it is a probability, not an impossibility. Widen the digest
-/// before trusting this with anything that must not collide.
-fn source_key(git: &str) -> String {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in git.as_bytes() {
-        h ^= *b as u64;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+/// One component of a cache path for one piece of a source URL, encoded so
+/// that the encoding is injective and every result is a plain directory
+/// name: `a-z`, `0-9`, `-`, `_` and a non-leading `.` stay as written; every
+/// other byte (an uppercase letter included, so a case-insensitive
+/// filesystem cannot fold two sources together) becomes `%XX`. An empty
+/// piece is `%`, which no other piece encodes to. A piece too long for one
+/// directory name is split over several, each but the last marked `%+`
+/// (a spelling no encoded piece can start with).
+fn encode_cache_component(piece: &str, out: &mut PathBuf) {
+    let mut enc = String::new();
+    for (i, b) in piece.bytes().enumerate() {
+        match b {
+            b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' => enc.push(b as char),
+            b'.' if i > 0 => enc.push('.'),
+            _ => enc.push_str(&format!("%{:02X}", b)),
+        }
     }
-    format!("{:016x}", h)
+    if enc.is_empty() {
+        enc.push('%');
+    }
+    const MAX: usize = 180;
+    while enc.len() > MAX {
+        // Never split inside a `%XX` escape.
+        let mut cut = MAX;
+        while enc.as_bytes()[cut - 1] == b'%' || enc.as_bytes()[cut - 2] == b'%' {
+            cut -= 1;
+        }
+        out.push(format!("%+{}", &enc[..cut]));
+        enc = enc[cut..].to_string();
+    }
+    out.push(enc);
 }
 
-/// Where one dependency's checkouts live: `~/.almide/cache/<name>/.src-<key>/`,
-/// with the per-ref and per-commit directories underneath.
+/// Where the checkouts of one SOURCE live (#4093):
+/// `~/.almide/cache/.sources/<scheme>/<host>/<owner>/<repo>/@/`, with the
+/// per-ref and per-commit directories underneath. Every piece of the URL is
+/// one or more directory levels ([`encode_cache_component`]), and `@`
+/// (which no encoded piece can be) closes the URL, so the path is an
+/// injective function of the URL as written: two sources never share a
+/// directory, whatever their package names.
 ///
-/// The SOURCE is part of the key. Before #2523 the layout was
-/// `<name>/<ref>`, so two repositories that publish a package of the same
-/// name at the same tag aliased: the first one fetched answered for the
-/// second, and the lock then recorded the second URL beside a commit only the
-/// first repository has — a triple no machine but this one can resolve.
+/// The key is the source alone, never the package name: a package named
+/// `svg` fetched from `github.com/evil/svg` cannot answer for
+/// `github.com/almide/svg`. The layout before this one hashed the URL into
+/// 64 bits (FNV-1a, #2523), which separated honest sources but is not
+/// collision resistant: a URL chosen to collide with a trusted one would have
+/// shared its directory. Directories of the older layouts
+/// (`<name>/<ref>`, `<name>/.src-<hash>/`, `.repos/.src-<hash>/`) are never
+/// read again; they are inert until `almide clean`.
 ///
-/// Two structural choices here, both about collisions:
-///
-/// * the URL is hashed VERBATIM, so `https://host/p` and `https://host/p.git`
-///   get separate directories. A redundant clone is all a spelling difference
-///   can cost; aliasing two sources costs a wrong build.
-/// * the component starts with a dot, which `git check-ref-format` forbids at
-///   the start of any ref component. So no legal tag or branch can ever be
-///   spelled like this level, and a pre-#2523 `<name>/<ref>` directory cannot
-///   be mistaken for a source key. Old entries MISS and are re-fetched under
-///   the new key; they are inert, not reused, because a stale hit here is the
-///   whole bug. They cost disk until `almide clean`.
-///
-/// A dependency with a `subdir` (#3381) is one package of a repository that
-/// may hold several, so its clone is keyed by the SOURCE alone:
-/// `~/.almide/cache/.repos/.src-<key>/`. Two packages of one repository at
-/// one ref (or locked commit) then resolve to the same checkout directory —
-/// one fetch — and each reads its own `subdir` inside it. `.repos` starts
-/// with a dot, which no package name (an identifier) can, so it never
-/// aliases a `<name>/` directory. A dependency without `subdir` keeps the
-/// name-keyed layout above, so no existing cache entry is orphaned.
+/// A `subdir` dependency (#3381) is one package of a repository that may
+/// hold several, so it shares its repository's checkout and reads its own
+/// directory inside it, as before.
 pub fn dep_cache_root(dep: &Dependency) -> PathBuf {
-    let source = format!(".src-{}", source_key(&dep.git));
-    match dep.subdir {
-        Some(_) => cache_dir().join(".repos").join(source),
-        None => cache_dir().join(&dep.name).join(source),
+    let mut dir = cache_dir().join(".sources");
+    let (scheme, rest) = dep.git.split_once("://").unwrap_or(("", dep.git.as_str()));
+    encode_cache_component(scheme, &mut dir);
+    for piece in rest.split('/') {
+        encode_cache_component(piece, &mut dir);
     }
+    dir.join("@")
 }
 
 /// The package directory a dependency names inside its checkout: the
@@ -206,6 +209,38 @@ fn packages_in(checkout: &Path) -> Vec<String> {
     found
 }
 
+thread_local! {
+    /// Set while [`resolve_cached_deps`] runs: no clone and no lock write.
+    static OFFLINE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn offline() -> bool {
+    OFFLINE.with(|o| o.get())
+}
+
+/// Restores the previous offline state when dropped.
+struct OfflineGuard(bool);
+
+impl Drop for OfflineGuard {
+    fn drop(&mut self) {
+        OFFLINE.with(|o| o.set(self.0));
+    }
+}
+
+/// The project's dependencies, resolved from what is already on disk: path
+/// dependencies and checkouts already in the cache. It never runs `git` to
+/// fetch, and never writes `almide.lock`. A dependency that is not cached
+/// yet is an error naming the command that fetches it.
+///
+/// For tools that look at a project without being asked to build it — the
+/// LSP opening a file, `almide ide` — so that an untrusted project cannot
+/// choose which hosts this machine contacts, or write into its own tree,
+/// before anything is run (#4128).
+pub fn resolve_cached_deps(project: &Project) -> Result<Vec<FetchedDep>, String> {
+    let _restore = OfflineGuard(OFFLINE.with(|o| o.replace(true)));
+    fetch_all_deps(project)
+}
+
 /// Populate cache dir `dir` atomically: run `clone` against a fresh sibling
 /// temp dir, then rename it into place. Callers may race — `almide test`
 /// compiles test files on parallel threads and every thread resolves deps,
@@ -218,6 +253,12 @@ fn packages_in(checkout: &Path) -> Vec<String> {
 fn populate_cache_dir(dir: &Path, clone: impl FnOnce(&Path) -> Result<(), String>) -> Result<(), String> {
     if dir.exists() {
         return Ok(());
+    }
+    if offline() {
+        return Err(format!(
+            "dependency not fetched yet ({}); run `almide build` in the project to fetch it",
+            dir.display()
+        ));
     }
     let parent = dir.parent().ok_or_else(|| "cache dir has no parent".to_string())?;
     std::fs::create_dir_all(parent)
@@ -251,6 +292,16 @@ fn fetch_dep_at_commit(dep: &Dependency, commit: &str) -> Result<PathBuf, String
     let dir = dep_cache_root(dep).join(&commit[..12.min(commit.len())]);
     if dir.exists() {
         return Ok(dir);
+    }
+    // The checkout this run (or an earlier one) made at the dependency's own
+    // ref, when it sits at exactly the locked commit: the lock is written right
+    // after that fetch, so a second resolution in the same command (check's
+    // whole-program pass) would otherwise clone the same commit again.
+    if let Some(ref_name) = dep.tag.as_deref().or(dep.branch.as_deref()) {
+        let at_ref = dep_cache_root(dep).join(ref_name);
+        if at_ref.exists() && git_head_hash(&at_ref).ok().as_deref() == Some(commit) {
+            return Ok(at_ref);
+        }
     }
     err(&format!("Fetching {} from {} (locked: {})", dep.name, dep.git, &commit[..8.min(commit.len())]));
     populate_cache_dir(&dir, |tmp| {
@@ -368,8 +419,16 @@ pub fn update_lock_file(
     resolved: &[Resolution],
     fetched: &[FetchedDep],
 ) -> Result<(), String> {
-    let lock_path = project_root.join("almide.lock");
-    let lock_path = lock_path.as_path();
+    let locked = resolved_lock_entries(deps, resolved, fetched);
+    if !locked.is_empty() {
+        write_lock_file(&project_root.join("almide.lock"), &locked)?;
+    }
+    Ok(())
+}
+
+/// The entries [`update_lock_file`] writes: one per direct git dependency,
+/// the `(git, ref, commit)` MVS selected for it.
+fn resolved_lock_entries(deps: &[Dependency], resolved: &[Resolution], fetched: &[FetchedDep]) -> Vec<LockedDep> {
     let mut locked = Vec::new();
     for dep in deps {
         let ref_name = dep_ref_name(dep);
@@ -401,10 +460,7 @@ pub fn update_lock_file(
             });
         }
     }
-    if !locked.is_empty() {
-        write_lock_file(lock_path, &locked)?;
-    }
-    Ok(())
+    locked
 }
 
 fn resolve_dep_version(dep: &Dependency) -> String {
@@ -443,22 +499,99 @@ pub fn fetch_all_deps(project: &Project) -> Result<Vec<FetchedDep>, String> {
         Vec::new()
     };
 
-    let mut fetched: Vec<FetchedDep> = Vec::new();
-    let mut visited = std::collections::HashSet::new();
-    // What each dependency RESOLVED to, recorded as the walk fetches it.
-    // `fetched` cannot answer this: it is the flattened graph, its entries
-    // carry the package's own declared name rather than the manifest key,
-    // and nothing in them names a source or a ref (#2529).
-    let mut resolved: Vec<Resolution> = Vec::new();
-    fetch_deps_recursive(&project.dependencies, &locked, &mut fetched, &mut visited, &mut resolved)?;
+    let locked_mode = locked_mode();
+    if locked_mode {
+        refuse_unlocked_direct_deps(project, &locked)?;
+    }
 
-    // Update lock file if it doesn't exist or deps changed
+    let mut walk = Walk {
+        locked: &locked,
+        trusted: &project.trust_owners,
+        fetched: Vec::new(),
+        visited: std::collections::HashSet::new(),
+        resolved: Vec::new(),
+    };
+    walk.deps(&project.dependencies, &[])?;
+    let Walk { fetched, resolved, .. } = walk;
+    refuse_changed_sources(project, &locked, &resolved)?;
+
     if !project.dependencies.is_empty() {
-        let _ = update_lock_file(&project.root, &project.dependencies, &resolved, &fetched);
+        if locked_mode {
+            let would_write = resolved_lock_entries(&project.dependencies, &resolved, &fetched);
+            if !would_write.is_empty() && would_write != locked {
+                return Err("error: --locked: almide.lock does not match what the dependencies resolve to, and --locked writes no lock\n  \
+                     hint: run the command without --locked to update almide.lock, review the diff, and commit it"
+                    .to_string());
+            }
+        } else if !offline() {
+            // Update lock file if it doesn't exist or deps changed. A
+            // cache-only resolve (`resolve_cached_deps`) never writes it (#4128).
+            let _ = update_lock_file(&project.root, &project.dependencies, &resolved, &fetched);
+        }
     }
 
     Ok(fetched)
 }
+
+static LOCKED_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// `--locked` (#4093): every fetch must be satisfied by `almide.lock`, and
+/// the lock is never written. Set once from the command line, before
+/// anything fetches.
+pub fn set_locked_mode(on: bool) {
+    LOCKED_MODE.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn locked_mode() -> bool {
+    LOCKED_MODE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// `--locked`, before any network access: every direct git dependency has a
+/// lock entry for its name, source and ref.
+fn refuse_unlocked_direct_deps(project: &Project, locked: &[LockedDep]) -> Result<(), String> {
+    let missing: Vec<String> = project
+        .dependencies
+        .iter()
+        .filter(|d| d.path.is_none())
+        .filter(|d| !locked.iter().any(|l| l.name == d.name && l.git == d.git && l.ref_name == dep_ref_name(d)))
+        .map(|d| format!("`{}` ({} {})", d.name, d.git, dep_ref_name(d)))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "error: --locked: not in almide.lock: {}\n  \
+         note: --locked fetches nothing the lock does not name, and writes no lock\n  \
+         hint: run the command once without --locked to lock it, review the almide.lock diff, and commit it",
+        missing.join(", ")
+    ))
+}
+
+/// A direct dependency whose lock entry names another source than the
+/// manifest does (#4093): the manifest's `git` changed under a lock. It used
+/// to be re-resolved silently from the new source; now the change has to be
+/// asked for with `almide update <name>`.
+///
+/// Judged after the walk, so a lock entry that names another source because
+/// MVS selected a same-named package raised by a transitive requirement
+/// (#2532) — a source the walk did fetch — is not mistaken for a change.
+fn refuse_changed_sources(project: &Project, locked: &[LockedDep], resolved: &[Resolution]) -> Result<(), String> {
+    for dep in project.dependencies.iter().filter(|d| d.path.is_none()) {
+        let Some(entry) = locked.iter().find(|l| l.name == dep.name) else { continue };
+        if entry.git == dep.git || resolved.iter().any(|r| r.lock.git == entry.git) {
+            continue;
+        }
+        return Err(format!(
+            "error: `{name}` is locked to {old} but almide.toml now says {new}\n  \
+             hint: if the change is intended, run `almide update {name}` to re-lock it from the new source",
+            name = dep.name,
+            old = entry.git,
+            new = dep.git,
+        ));
+    }
+    Ok(())
+}
+
 
 /// After fetching a dependency at `path`, read its own `almide.toml` (if
 /// any) for its declared package name, src dir, and transitive deps —
@@ -496,13 +629,49 @@ fn semver_of(v: &str) -> semver::Version {
 /// versions, not selected ones — Go's algorithm). The previous body
 /// short-circuited on the first `PkgId` sighting, so the resolved graph
 /// depended on declaration order (#1458).
-fn fetch_one_dep_recursive(
-    dep: &Dependency,
-    locked: &[LockedDep],
-    fetched: &mut Vec<FetchedDep>,
-    visited: &mut std::collections::HashSet<String>,
-    resolved: &mut Vec<Resolution>,
-) -> Result<(), String> {
+/// The dependency walk's state: the lock, the root's `[trust] owners`, and
+/// what the walk has fetched so far.
+struct Walk<'a> {
+    locked: &'a [LockedDep],
+    /// The ROOT manifest's `[trust] owners` (#4093). A dependency's own
+    /// `[trust]` is never consulted.
+    trusted: &'a [String],
+    fetched: Vec<FetchedDep>,
+    visited: std::collections::HashSet<String>,
+    /// What each dependency RESOLVED to, recorded as the walk fetches it.
+    /// `fetched` cannot answer this: it is the flattened graph, its entries
+    /// carry the package's own declared name rather than the manifest key,
+    /// and nothing in them names a source or a ref (#2529).
+    resolved: Vec<Resolution>,
+}
+
+impl Walk<'_> {
+    /// `deps`, required through `chain` (the dependency names from the root).
+    fn deps(&mut self, deps: &[Dependency], chain: &[String]) -> Result<(), String> {
+        for dep in deps {
+            let mut chain = chain.to_vec();
+            chain.push(dep.name.clone());
+            // #4093: the owner is checked before anything is fetched, for a
+            // direct, transitive or locked dependency alike (a lock is not a
+            // grant).
+            if dep.path.is_none() {
+                match crate::trust::source_owner(&dep.git) {
+                    Err(e) => return Err(format!("error: dependency `{}`: {e}", dep.name)),
+                    Ok(Some(owner)) if !crate::trust::is_trusted(self.trusted, &owner) => {
+                        return Err(crate::trust::fetch_refusal(&chain, &dep.git, &owner));
+                    }
+                    Ok(_) => {}
+                }
+            }
+            fetch_one_dep_recursive(dep, self, &chain)?;
+        }
+        Ok(())
+    }
+}
+
+fn fetch_one_dep_recursive(dep: &Dependency, walk: &mut Walk, chain: &[String]) -> Result<(), String> {
+    let locked = walk.locked;
+    let (fetched, visited, resolved) = (&mut walk.fetched, &mut walk.visited, &mut walk.resolved);
     let version_str = resolve_dep_version(dep);
     let pkg_id = PkgId::from_version_str(&dep.name, &version_str);
 
@@ -597,25 +766,19 @@ fn fetch_one_dep_recursive(
     }
 
     if !transitive_deps.is_empty() {
-        fetch_deps_recursive(&transitive_deps, locked, fetched, visited, resolved)?;
-    }
-    Ok(())
-}
-
-fn fetch_deps_recursive(
-    deps: &[Dependency],
-    locked: &[LockedDep],
-    fetched: &mut Vec<FetchedDep>,
-    visited: &mut std::collections::HashSet<String>,
-    resolved: &mut Vec<Resolution>,
-) -> Result<(), String> {
-    for dep in deps {
-        fetch_one_dep_recursive(dep, locked, fetched, visited, resolved)?;
+        walk.deps(&transitive_deps, chain)?;
     }
     Ok(())
 }
 
 /// Resolve a short package specifier to a full git URL and optional tag.
+///
+/// A one-part name is a package under github.com/almide, looked up in the
+/// embedded package snapshot (`crate::trust::almide_repo_for`, #4093)
+/// because a package's name and its repository's name differ: `bindgen` is
+/// `github.com/almide/almide-bindgen`. A name the snapshot does not list
+/// resolves to `github.com/almide/<name>`. `almide/<repo>` names the package
+/// the snapshot gives that repository.
 pub fn resolve_package_spec(spec: &str) -> (String, String, Option<String>) {
     let (path, tag) = if let Some(pos) = spec.rfind('@') {
         (&spec[..pos], Some(spec[pos + 1..].to_string()))
@@ -626,7 +789,12 @@ pub fn resolve_package_spec(spec: &str) -> (String, String, Option<String>) {
     let parts: Vec<&str> = path.split('/').collect();
     let (git_url, name) = match parts.len() {
         1 => {
-            (format!("https://github.com/almide/{}", parts[0]), parts[0].to_string())
+            let (name, repo) = crate::trust::almide_repo_for(parts[0]);
+            (format!("https://github.com/almide/{}", repo), name.to_string())
+        }
+        2 if parts[0] == "almide" => {
+            let (name, repo) = crate::trust::almide_repo_for(parts[1]);
+            (format!("https://github.com/almide/{}", repo), name.to_string())
         }
         2 => {
             (format!("https://github.com/{}/{}", parts[0], parts[1]), parts[1].to_string())
@@ -704,7 +872,6 @@ pub fn add_dep_to_toml(name: &str, git: &str, tag: Option<&str>, subdir: Option<
     std::fs::write(toml_path, content)
         .map_err(|e| format!("Failed to write almide.toml: {}", e))?;
 
-    err(&format!("Added {} to almide.toml", name));
     Ok(())
 }
 
@@ -736,8 +903,30 @@ pub fn update_locked_deps(project: &Project, only: Option<&str>) -> Result<Vec<(
         None => project.dependencies.iter().collect(),
     };
     let mut changed = Vec::new();
+    let mut relock = Vec::new();
     for dep in targets {
         let ref_name = dep_ref_name(dep);
+        if dep.path.is_some() {
+            continue;
+        }
+        // #4093: `update` reaches the network too, so it checks the owner
+        // first, like every fetch.
+        match crate::trust::source_owner(&dep.git) {
+            Err(e) => return Err(format!("error: dependency `{}`: {e}", dep.name)),
+            Ok(Some(owner)) if !crate::trust::is_trusted(&project.trust_owners, &owner) => {
+                return Err(crate::trust::fetch_refusal(std::slice::from_ref(&dep.name), &dep.git, &owner));
+            }
+            Ok(_) => {}
+        }
+        // The manifest's source changed under the lock: drop the old pin and
+        // re-lock from the new source below, tag or not (the tag rule keeps a
+        // pin from MOVING, and a pin to another repository is no pin of this
+        // one).
+        if let Some(pos) = locked.iter().position(|l| l.name == dep.name && l.git != dep.git) {
+            let old = locked.remove(pos);
+            relock.push((dep.name.clone(), old.commit));
+            continue;
+        }
         // A tag pins by definition — advancing it would silently change what
         // the manifest asked for. Only floating refs (branches, the default
         // `main`) move.
@@ -773,10 +962,59 @@ pub fn update_locked_deps(project: &Project, only: Option<&str>) -> Result<Vec<(
         }
         changed.push((dep.name.clone(), before.unwrap_or_default(), head));
     }
-    if !changed.is_empty() {
+    if !changed.is_empty() || !relock.is_empty() {
         write_lock_file(&lock_path, &locked)?;
     }
+    if !relock.is_empty() {
+        // Resolve the new sources and write their pins, as a build would.
+        fetch_all_deps(project)?;
+        let fresh = parse_lock_file(&lock_path)?;
+        for (name, before) in relock {
+            let after = fresh.iter().find(|l| l.name == name).map(|l| l.commit.clone()).unwrap_or_default();
+            changed.push((name, before, after));
+        }
+    }
     Ok(changed)
+}
+
+/// Why [`probe_source`] could not list a repository.
+#[derive(Debug)]
+pub enum ProbeFailure {
+    /// The repository does not exist (or is private to someone else): the
+    /// host said so.
+    NotFound(String),
+    /// Anything else — no network, a host that did not answer.
+    Unreachable(String),
+}
+
+/// Does the repository at `url` exist? One `git ls-remote`, no clone, with
+/// git's terminal prompts off: GitHub answers a missing repository with an
+/// authentication request, which an interactive git would turn into a
+/// password prompt (#4093).
+pub fn probe_source(url: &str) -> Result<(), ProbeFailure> {
+    let out = Command::new("git")
+        .args(["ls-remote", "--heads", "--tags", url])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map_err(|e| ProbeFailure::Unreachable(format!("failed to run git: {e}")))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let lower = stderr.to_ascii_lowercase();
+    let not_found = [
+        "repository not found",
+        "not found",
+        "could not read username",
+        "does not appear to be a git repository",
+        "does not exist",
+        "no such file or directory",
+    ];
+    if not_found.iter().any(|p| lower.contains(p)) {
+        Err(ProbeFailure::NotFound(stderr))
+    } else {
+        Err(ProbeFailure::Unreachable(stderr))
+    }
 }
 
 /// The remote's current commit for `ref_name` — read WITHOUT cloning
@@ -822,48 +1060,55 @@ mod tests {
         }
     }
 
-    /// The source key is a cache DIRECTORY name, so it is part of the on-disk
-    /// format: if it moves, every cached checkout on every machine is orphaned
-    /// silently. Pinned literally so that only a deliberate edit can move it.
+    /// The cache path is the source URL itself, piece by piece (#4093), so
+    /// it is part of the on-disk format: pinned literally.
     #[test]
-    fn the_source_key_is_pinned_to_its_url() {
-        // Canonical FNV-1a-64 of the URL, and the bare offset basis for the
-        // empty string — both cross-checked against the reference algorithm,
-        // not merely against what this function happens to return.
-        assert_eq!(source_key("https://github.com/almide/almai"), "278da929d4245976");
-        assert_eq!(source_key(""), "cbf29ce484222325");
+    fn the_cache_root_spells_the_source() {
+        let root = dep_cache_root(&dep("svg", "https://github.com/almide/svg", None));
+        assert_eq!(root, cache_dir().join(".sources/https/github.com/almide/svg/@"));
+        let upper = dep_cache_root(&dep("svg", "https://github.com/Almide/svg.git", None));
+        assert_eq!(upper, cache_dir().join(".sources/https/github.com/%41lmide/svg.git/@"));
     }
 
-    /// #2523: the source is part of the key, so a package NAME cannot put two
-    /// repositories in one directory.
+    /// #2523, #4093: a package NAME cannot put two repositories in one
+    /// directory, and no two spellings of a URL alias.
     #[test]
     fn two_sources_sharing_a_name_get_separate_cache_roots() {
-        let a = dep_cache_root(&dep("fizz", "https://github.com/one/fizz", Some("v0.2.2")));
-        let b = dep_cache_root(&dep("fizz", "https://github.com/two/fizz", Some("v0.2.2")));
-        assert_ne!(a, b, "same name, different source: the checkouts must not share a root");
-        // Hashed verbatim: a `.git` suffix is a different spelling, and paying
-        // for a second clone is the safe direction to err in.
-        let bare = dep_cache_root(&dep("fizz", "https://github.com/one/fizz", None));
-        let dotgit = dep_cache_root(&dep("fizz", "https://github.com/one/fizz.git", None));
-        assert_ne!(bare, dotgit);
+        let root = |git: &str| dep_cache_root(&dep("fizz", git, Some("v0.2.2")));
+        let urls = [
+            "https://github.com/one/fizz",
+            "https://github.com/two/fizz",
+            "https://github.com/one/fizz.git",
+            "https://github.com/One/fizz",
+            "https://github.com/one/fizz/@",
+            "https://github.com/one/fizz/",
+            "https://github.com/one/.fizz",
+            "https://github.com/one/%2Efizz",
+            "file:///tmp/one/fizz",
+            "/tmp/one/fizz",
+        ];
+        for (i, a) in urls.iter().enumerate() {
+            for b in &urls[i + 1..] {
+                assert_ne!(root(a), root(b), "{a} and {b} share a cache root");
+            }
+        }
+        // The package name is not part of it.
+        assert_eq!(dep_cache_root(&dep("a", urls[0], None)), dep_cache_root(&dep("b", urls[0], None)));
     }
 
-    /// The pre-#2523 layout put the ref where the source key now sits. A git
-    /// ref component may not begin with `.` (`git check-ref-format`), so an
-    /// old `<name>/<ref>` directory can never be read as a source key: old
-    /// entries miss and are re-fetched rather than answering for a URL they
-    /// were not cloned from.
+    /// A long piece is split over several directory levels and stays
+    /// distinct from the same text with a `/` in it.
     #[test]
-    fn the_source_component_cannot_be_spelled_by_any_git_ref() {
-        let root = dep_cache_root(&dep("fizz", "https://github.com/one/fizz", None));
-        let leaf = root.file_name().expect("source component").to_string_lossy().into_owned();
-        assert!(leaf.starts_with('.'), "source component `{leaf}` must be unspellable as a ref");
-        assert_eq!(root.parent().and_then(|p| p.file_name()).unwrap(), "fizz");
+    fn a_long_url_piece_splits_without_aliasing() {
+        let long = "x".repeat(400);
+        let a = dep_cache_root(&dep("x", &format!("https://h.example/o/{long}"), None));
+        let b = dep_cache_root(&dep("x", &format!("https://h.example/o/{}/{}", &long[..180], &long[180..]), None));
+        assert_ne!(a, b);
+        assert!(a.components().all(|c| c.as_os_str().len() <= 200));
     }
 
     /// #3381: two packages of one repository share ONE clone root (one fetch
-    /// per ref), whatever their names; a dependency without `subdir` keeps
-    /// its name-keyed root, so existing cache entries stay valid.
+    /// per ref), whatever their names.
     #[test]
     fn subdir_packages_of_one_repository_share_a_clone_root() {
         let with = |name: &str, sub: &str| Dependency {
@@ -874,16 +1119,15 @@ mod tests {
         let b = dep_cache_root(&with("snaidhm", "snaidhm"));
         assert_eq!(a, b, "two subdirs of one repository must share the clone");
         let plain = dep_cache_root(&dep("ceangal", "https://github.com/almide-graphics/ceangal2", Some("v0.1.0")));
-        assert_ne!(a, plain);
-        assert_eq!(plain.parent().and_then(|p| p.file_name()).unwrap(), "ceangal");
+        assert_eq!(a, plain, "the source alone keys the checkout (#4093)");
         // Another repository still gets its own root.
         let other = dep_cache_root(&Dependency {
             subdir: Some("ceangal".into()),
             ..dep("ceangal", "https://github.com/someone/else", Some("v0.1.0"))
         });
         assert_ne!(a, other);
-        // The shared level starts with a dot: no package name can spell it.
-        assert!(a.parent().unwrap().file_name().unwrap().to_string_lossy().starts_with('.'));
+        // `@` closes the URL: no encoded URL piece can spell it.
+        assert_eq!(a.file_name().unwrap(), "@");
     }
 
     #[test]
@@ -914,6 +1158,47 @@ mod tests {
         // `--git` keeps the first argument as the name.
         let (name, _, _) = resolve_add_target("cg".into(), Some("file:///r".into()), None, Some("ceangal"));
         assert_eq!(name, "cg");
+    }
+
+    /// #4128: a cache-only resolve of a git dependency that is not cached
+    /// fails without cloning and without writing almide.lock; path
+    /// dependencies still resolve.
+    #[test]
+    fn resolve_cached_deps_never_fetches_or_writes_the_lock() {
+        let root = std::env::temp_dir().join(format!("almide-offline-unit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let app = root.join("app");
+        let local = root.join("local");
+        std::fs::create_dir_all(app.join("src")).unwrap();
+        std::fs::create_dir_all(local.join("src")).unwrap();
+        std::fs::write(local.join("almide.toml"), "[package]\nname = \"local\"\nversion = \"0.1.0\"\n").unwrap();
+        std::fs::write(local.join("src/mod.almd"), "fn f() -> Int = 1\n").unwrap();
+        // A git source no cache entry exists for: a never-created local path.
+        let git = format!("file://{}", root.join("no-such-repo").display());
+        std::fs::write(
+            app.join("almide.toml"),
+            format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nlocal = {{ path = \"{}\" }}\nremote = {{ git = \"{git}\", tag = \"v0.1.0\" }}\n", local.display()),
+        )
+        .unwrap();
+        let project = parse_toml(&app.join("almide.toml")).unwrap();
+
+        let err = resolve_cached_deps(&project).unwrap_err();
+        assert!(err.contains("not fetched yet"), "{err}");
+        assert!(!app.join("almide.lock").exists(), "a cache-only resolve wrote almide.lock");
+        // The guard is restored: offline mode does not leak past the call.
+        assert!(!offline());
+
+        // Path-only projects still resolve offline.
+        std::fs::write(
+            app.join("almide.toml"),
+            format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nlocal = {{ path = \"{}\" }}\n", local.display()),
+        )
+        .unwrap();
+        let project = parse_toml(&app.join("almide.toml")).unwrap();
+        let deps = resolve_cached_deps(&project).unwrap();
+        assert_eq!(deps.len(), 1);
+        assert!(!app.join("almide.lock").exists(), "a cache-only resolve wrote almide.lock");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// #3381: the checks the fetch makes on a `subdir` — a package

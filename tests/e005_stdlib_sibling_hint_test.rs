@@ -78,13 +78,15 @@ fn a_param_shadowing_a_let_in_the_same_fn_drops_the_origin() {
 
 #[test]
 fn without_a_sibling_the_generic_hint_stays() {
-    // `list.sum` has no Float form: a conversion, not a rename, so no
-    // sibling is claimed and the wording is what it was.
+    // `list.len` has no String form: a conversion, not a rename, so no
+    // sibling is claimed and the wording is what it was. (`list.sum` served
+    // here until it became generic over `Numeric` and stopped mismatching.)
     let (ok, text) = check(
-        "fn total(xs: List[Float]) -> Int = list.sum(xs)\n\
-         fn main() -> Unit = println(int.to_string(total([1.0, 2.0])))\n",
+        "fn total(xs: List[String]) -> String = string.trim(list.len(xs))\n\
+         fn main() -> Unit = println(total([\"a\"]))\n",
     );
     assert!(!ok, "{text}");
     assert!(text.contains("error[E005]"), "{text}");
     assert!(!text.contains("which is what this argument expects"), "no sibling exists here:\n{text}");
+    assert!(text.contains("Fix the argument type"), "the generic hint must stay:\n{text}");
 }

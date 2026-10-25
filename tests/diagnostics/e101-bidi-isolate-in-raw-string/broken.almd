@@ -1,0 +1,2 @@
+// E101 variant: an RLI in a raw string — no escape layer, still refused.
+fn main() -> Unit = println(r"price: ⁧100⁩ USD")

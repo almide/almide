@@ -56,7 +56,12 @@ Create a Value from a Bool.
 
 ### `value.object(pairs: List[(String, Value)]) -> Value`
 
-Create a Value object from a list of key-value pairs.
+Create a Value object from a list of key-value pairs. No object holds a key
+twice (C-401, #4112): a key the list repeats keeps the position of its first
+occurrence and the value of its last, the rule `json.to_map` uses (C-380), so
+`value.field`, `value.keys` and every serializer see one entry —
+`json.stringify(value.object([("role", value.str("user")), ("role", value.str("admin"))]))`
+is `{"role":"admin"}`, never a document with `role` twice.
 
 ### `value.array(items: List[Value]) -> Value`
 
@@ -68,7 +73,9 @@ Create a null Value.
 
 ### `value.pick(v: Value, keys: List[String]) -> Value`
 
-Pick specific keys from an Object, discarding the rest.
+Pick specific keys from an Object, discarding the rest. A value that is not
+an object has none of the keys, so it picks to `{}` (C-401): an allowlist over
+a value that is not an object lets nothing through.
 
 ### `value.omit(v: Value, keys: List[String]) -> Value`
 
@@ -141,7 +148,7 @@ value.merge(a: Value, b: Value) -> Value
 // @since 0.6.0 or earlier
 value.null() -> Value
 
-// Wraps pairs as an Object; duplicate keys kept.
+// Wraps pairs as an Object; a repeated key keeps its first position, last value.
 // @since 0.6.0 or earlier
 value.object(pairs: List[(String, Value)]) -> Value
 
@@ -149,7 +156,7 @@ value.object(pairs: List[(String, Value)]) -> Value
 // @since 0.6.0 or earlier
 value.omit(v: Value, keys: List[String]) -> Value
 
-// Only the listed keys of v; non-objects as-is.
+// Only the listed keys of v; a non-object picks to {}.
 // @since 0.6.0 or earlier
 value.pick(v: Value, keys: List[String]) -> Value
 

@@ -68,3 +68,28 @@ fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix
   if matrix.cols(rows_probe) + matrix.cols(cols_probe) < 0 then a
   else matrix.from_lists(__matrix_zip_rows(matrix.to_lists(a), matrix.to_lists(b), f, 0, []))
 }
+
+// to_bytes_f16_le: native (matrix_p2.rs almide_f64_to_f16_bits) rounds each
+// f64 straight to IEEE half, to nearest even, overflow to +-inf, a NaN to the
+// canonical 0x7E00 — the integer steps of `bytes.__f16_bits`, which every
+// bytes f16 writer shares, prim-free.
+fn __matrix_f16_bits(x: Float) -> Int = bytes.__f16_bits(x)
+
+fn __matrix_f16_row(row: List[Float], i: Int, acc: List[Int]) -> List[Int] = match list.get(row, i) {
+  some(x) => {
+    let h = __matrix_f16_bits(x)
+    __matrix_f16_row(row, i + 1, acc + [int.band(h, 255), int.bshr(h, 8)])
+  },
+  none => acc,
+}
+
+fn __matrix_f16_rows(rows: List[List[Float]], i: Int, acc: List[Int]) -> List[Int] = match list.get(
+  rows,
+  i,
+) {
+  some(row) => __matrix_f16_rows(rows, i + 1, __matrix_f16_row(row, 0, acc)),
+  none => acc,
+}
+
+@implements("matrix.to_bytes_f16_le")
+fn __matrix_to_bytes_f16_le(m: Matrix) -> Bytes = bytes.from_list(__matrix_f16_rows(matrix.to_lists(m), 0, []))

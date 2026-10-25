@@ -1,6 +1,6 @@
-//! The structural leg's BOUNDS witness (#4005) — what makes #3345's elided
-//! checks something the proven checker re-derives instead of an analysis it
-//! trusts.
+//! The structural leg's BOUNDS witness (#4005) — what makes every index
+//! operator access's bounds check something the proven checker re-derives
+//! instead of an analysis it trusts.
 //!
 //! bounds_facts.rs skips the check of `xs[i + c]` when an earlier check of
 //! the same key decided it in the same straight-line stretch. This sink
@@ -20,12 +20,26 @@
 //! now enforces. An `s` goes to EVERY open stretch, so a stretch suspended by
 //! a nested loop body still sees the body's assignments.
 //!
+//! EVERY ACCESS IS RECORDED: every `xs[i]` read and `xs[i] = v` store of a
+//! list, and every `b[i]` read and store of a Bytes value. An access that is
+//! not a fact candidate (no open fact set, no hoisted count, a non-affine
+//! index, a cell or a global) gets a FRESH slot in the pass's LOOSE stretch,
+//! so it is accepted only if its own check precedes it. The two halves of an
+//! access are recorded where their instructions are emitted, not where the
+//! elision is decided: `c` by the routine that emits the compare
+//! (`emit_read_bounds_check`, the store route's compare, the Bytes room
+//! test), `a` / `w` right after the load or store. An emitter that drops a
+//! check therefore leaves a bare `a` / `w`, which the checker rejects
+//! (scripts/witness-reinject.sh bounds re-injects such bugs and requires the
+//! rejection).
+//!
 //! TRUSTED, as for the ownership witness: that these events are the
-//! accesses the bytes contain — an `a` / `w` at every access whose check was
-//! elided, an `s` at every change of a variable a key names — and that the
-//! hoisted count is the list's count (len_hoist.rs). Checks of keys that are
-//! not fact candidates (no hoisted count, or a non-affine index) are emitted
-//! immediately before their access and are not recorded.
+//! accesses the bytes contain — that the recording calls sit next to the
+//! instructions they describe, an `s` at every change of a variable a key
+//! names — and that the hoisted count is the list's count (len_hoist.rs).
+//! Element accesses that do not go through the index operator (a `for`
+//! loop's element reads, stdlib `list.get`, the runtime's own routines) are
+//! not recorded.
 
 use std::sync::Mutex;
 
@@ -42,8 +56,21 @@ struct Stretch {
 struct State {
     pass: usize,
     open: Vec<Stretch>,
+    /// The pass's non-candidate accesses, one fresh slot each.
+    loose: Stretch,
     stretches: Vec<String>,
     done: Vec<(usize, String)>,
+    /// A site outlived its stretch: the witness is made unparseable, so it
+    /// is rejected rather than read short.
+    broken: bool,
+}
+
+/// Where one access's events go: an open stretch (by depth) or the loose
+/// stretch (`None`), and the slot there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Site {
+    depth: Option<usize>,
+    slot: usize,
 }
 
 fn state() -> &'static Mutex<Option<State>> {
@@ -83,25 +110,53 @@ impl State {
         while !self.open.is_empty() {
             self.close_one();
         }
+        let loose = std::mem::take(&mut self.loose);
+        if !loose.text.is_empty() {
+            self.stretches.push(loose.text.trim_end().to_string());
+        }
+        if std::mem::take(&mut self.broken) {
+            self.stretches.push("x".to_string());
+        }
         let stretches = std::mem::take(&mut self.stretches);
         if !stretches.is_empty() {
             self.done.push((self.pass, stretches.join(";")));
         }
     }
 
-    fn access(&mut self, k: Key, checked: bool, write: bool) {
-        let Some(st) = self.open.last_mut() else { return };
-        let n = match st.slots.iter().position(|&x| x == k) {
-            Some(n) => n,
-            None => {
-                st.slots.push(k);
-                st.slots.len() - 1
+    fn site(&mut self, k: Option<Key>) -> Site {
+        match (k, self.open.len()) {
+            (Some(k), n) if n > 0 => {
+                let st = &mut self.open[n - 1];
+                let slot = st.slots.iter().position(|&x| x == k).unwrap_or_else(|| {
+                    st.slots.push(k);
+                    st.slots.len() - 1
+                });
+                Site { depth: Some(n - 1), slot }
             }
-        };
-        if checked {
-            st.text.push_str(&format!("c{n} "));
+            _ => {
+                // A fresh slot: no key, so no kill names it and no earlier
+                // check can decide it.
+                self.loose.slots.push((u32::MAX, u32::MAX, 0));
+                Site { depth: None, slot: self.loose.slots.len() - 1 }
+            }
         }
-        st.text.push_str(&format!("{}{n} ", if write { 'w' } else { 'a' }));
+    }
+
+    fn text_of(&mut self, site: Site) -> Option<&mut String> {
+        match site.depth {
+            None => Some(&mut self.loose.text),
+            Some(d) if d < self.open.len() => Some(&mut self.open[d].text),
+            Some(_) => {
+                self.broken = true;
+                None
+            }
+        }
+    }
+
+    fn push(&mut self, site: Site, tag: char) {
+        if let Some(t) = self.text_of(site) {
+            t.push_str(&format!("{tag}{} ", site.slot));
+        }
     }
 
     fn kill(&mut self, v: u32) {
@@ -125,10 +180,25 @@ pub(crate) fn close() {
     with(State::close_one);
 }
 
-/// An access to key `k` in the innermost stretch: `checked` when its check
-/// was emitted here, `write` for a store.
-pub(crate) fn access(k: Key, checked: bool, write: bool) {
-    with(|s| s.access(k, checked, write));
+/// The slot an access to key `k` (or, `None`, a non-candidate access) is
+/// recorded under; `None` when no sweep collects.
+pub(crate) fn site(k: Option<Key>) -> Option<Site> {
+    let mut g = state().lock().expect("bounds sink");
+    g.as_mut().map(|s| s.site(k))
+}
+
+/// The compare guarding `site`'s access was just emitted.
+pub(crate) fn check(site: Option<Site>) {
+    if let Some(site) = site {
+        with(|s| s.push(site, 'c'));
+    }
+}
+
+/// `site`'s element was just loaded (`write` false) or stored.
+pub(crate) fn access(site: Option<Site>, write: bool) {
+    if let Some(site) = site {
+        with(|s| s.push(site, if write { 'w' } else { 'a' }));
+    }
 }
 
 /// Variable `v` changed: every slot of every open stretch that names it.
@@ -160,10 +230,13 @@ mod tests {
     fn the_flip_records_two_checks_and_four_accesses() {
         let w = run(|s| {
             s.open.push(Stretch::default());
-            s.access((1, 2, 0), true, false);
-            s.access((1, 3, 0), true, false);
-            s.access((1, 2, 0), false, true);
-            s.access((1, 3, 0), false, true);
+            let (lo, hi) = (s.site(Some((1, 2, 0))), s.site(Some((1, 3, 0))));
+            s.push(lo, 'c');
+            s.push(lo, 'a');
+            s.push(hi, 'c');
+            s.push(hi, 'a');
+            s.push(lo, 'w');
+            s.push(hi, 'w');
             s.close_one();
         });
         assert_eq!(w, "c0 a0 c1 a1 w0 w1");
@@ -173,9 +246,13 @@ mod tests {
     fn an_assignment_kills_every_slot_naming_the_variable_in_every_open_stretch() {
         let w = run(|s| {
             s.open.push(Stretch::default());
-            s.access((1, 2, 0), true, false);
+            let a = s.site(Some((1, 2, 0)));
+            s.push(a, 'c');
+            s.push(a, 'a');
             s.open.push(Stretch::default());
-            s.access((5, 2, 1), true, false);
+            let b = s.site(Some((5, 2, 1)));
+            s.push(b, 'c');
+            s.push(b, 'a');
             s.kill(2);
             s.close_one();
             s.close_one();
@@ -192,5 +269,29 @@ mod tests {
             }),
             ""
         );
+    }
+
+    #[test]
+    fn a_non_candidate_access_gets_a_fresh_loose_slot() {
+        let w = run(|s| {
+            let a = s.site(None);
+            s.push(a, 'c');
+            s.push(a, 'a');
+            let b = s.site(None);
+            s.push(b, 'w');
+        });
+        // The second access's check is missing: the checker must reject.
+        assert_eq!(w, "c0 a0 w1");
+    }
+
+    #[test]
+    fn a_site_that_outlives_its_stretch_breaks_the_witness() {
+        let w = run(|s| {
+            s.open.push(Stretch::default());
+            let a = s.site(Some((1, 2, 0)));
+            s.close_one();
+            s.push(a, 'a');
+        });
+        assert_eq!(w, "x");
     }
 }

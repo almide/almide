@@ -1,0 +1,50 @@
+// @contract: C-404
+// http.query_params is url.parse_query applied to the request target after
+// its FIRST `?`: one decoder, defined once, the same answer on every leg
+// (almide/almide#4117). Native cut the query at the second `?` while wasm
+// kept it, and both decoded by rules of their own: a bad escape passed
+// through, invalid UTF-8 became U+FFFD, a bare key was dropped and a
+// repeated key kept only its last value. Now every pair is kept in order
+// (a repeated key twice), a bare key has the value "", `+` is a space, and
+// a bad escape or invalid UTF-8 is an err naming http.query_params.
+import http
+import url
+
+fn q(target: String) -> String = match http.query_params(http.new_request("GET", target, "", map.new())) {
+  ok(ps) => "ok " + (ps |> list.map(((k, v)) => "[${k}]=[${v}]") |> list.join(" ")),
+  err(e) => "err " + e,
+}
+
+fn pq(text: String) -> String = match url.parse_query(text) {
+  ok(ps) => "ok " + (ps |> list.map(((k, v)) => "[${k}]=[${v}]") |> list.join(" ")),
+  err(e) => "err " + e,
+}
+
+effect fn main() -> Unit = {
+  for target in [
+    "/p?a=1?b=2",
+    "/p?role=user&role=admin",
+    "/p?q=a+b&lang=ja",
+    "/p?flag&x=1",
+    "/p?a=&=b",
+    "/p?&&a=1&&",
+    "/p?k=%E6%97%A5%20x",
+    "/p?k=%ff%c0%af",
+    "/p?k=%2",
+    "/p?k=%zz",
+    "/p?%41=1",
+    "/p",
+    "/p?",
+    "/p?a=1#frag"
+  ] {
+    println("${target} => ${q(target)}")
+  }
+  // %00 decodes to U+0000 (valid UTF-8), shown by code point.
+  match http.query_params(http.new_request("GET", "/p?k=%00", "", map.new())) {
+    ok(ps) => println("/p?k=%00 => ok ${list.len(ps)} ${ps |> list.map(((_, v)) => string.codepoint(v) ?? -1)}"),
+    err(e) => println("/p?k=%00 => err ${e}"),
+  }
+  // The same text through url.parse_query: the same pairs, the same reasons.
+  println("parse_query a=1?b=2 => ${pq("a=1?b=2")}")
+  println("parse_query k=%ff => ${pq("k=%ff")}")
+}

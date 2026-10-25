@@ -42,7 +42,7 @@ index below.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (31 functions)
+## Signature index (33 functions)
 
 ```
 // Truncates toward 0, saturating; NaN gives 0.
@@ -168,6 +168,14 @@ float64.min_value() -> Float64
 // Float64 from trimmed s, the grammar of float.parse; err on junk.
 // @since unreleased
 float64.parse(s: String) -> Result[Float64, String]
+
+// x as the nearest Float64 (ties to even); NaN stays NaN.
+// @since unreleased
+float64.from(x: S) -> Float64
+
+// some(x as Float64) when Float64 holds x exactly, else none (a rounded value, NaN).
+// @since unreleased
+float64.from_checked(x: S) -> Option[Float64]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

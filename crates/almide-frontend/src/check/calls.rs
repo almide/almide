@@ -580,6 +580,14 @@ impl Checker {
         }
     }
 
+    /// E006 for an `effect` protocol method reached through a protocol bound
+    /// (`x.save()` with `x: T, T: Saver`, #4158). `name` is `Protocol.method`.
+    pub(crate) fn check_effect_isolation_via_bound(&mut self, name: &str) {
+        if !self.env.can_call_effect {
+            self.report_effect_isolation(name, None);
+        }
+    }
+
     /// The E006 of [`Self::check_effect_isolation`]. `via` names the binding
     /// the effect fn `name` was reached through (#3274: `let g = rd; g(x)`).
     pub(crate) fn report_effect_isolation(&mut self, name: &str, via: Option<&str>) {
@@ -726,6 +734,11 @@ impl Checker {
                 let type_name = self.resolve_type_name_for_protocol(concrete_ty);
                 if let Some(type_name) = type_name {
                     for proto in proto_names {
+                        // An unknown protocol is reported once, at the bound
+                        // (`enter_generics`), not again at every call.
+                        if !self.env.protocols.contains_key(proto) {
+                            continue;
+                        }
                         let has_proto = self.env.type_protocols
                             .get(&type_name)
                             .map_or(false, |ps| ps.contains(proto));
@@ -737,10 +750,38 @@ impl Checker {
                                 format!("call to {}()", name)));
                         }
                     }
+                } else {
+                    self.check_structural_protocol_bound(name, sig, *tv_name, proto_names, concrete_ty, bindings);
                 }
             }
         }
         self.check_protocol_bound_args(name, sig, bindings);
+    }
+
+    /// A container, tuple or function type has no conformance-table name, but
+    /// it is still concrete: it never conforms to a non-derivable built-in
+    /// protocol (`Numeric`, `Integer`, `Text`), whose conformers are listed
+    /// primitives only. Without this, `list.join(xs: List[Option[Int]], ..)`
+    /// or `list.product([[1.0]])` passed the checker and reached codegen
+    /// with an unresolvable `T.__join` / `A.__product` dispatch.
+    fn check_structural_protocol_bound(&mut self, name: &str, sig: &crate::types::FnSig, tv_name: Sym, proto_names: &[Sym], concrete_ty: &Ty, bindings: &HashMap<Sym, Ty>) {
+        let concrete = resolve_ty(concrete_ty, &self.uf);
+        if !matches!(concrete, Ty::Applied(..) | Ty::Tuple(_) | Ty::Fn { .. }) {
+            return;
+        }
+        for proto in proto_names {
+            let non_derivable_builtin = crate::canonicalize::protocols::builtin_protocol(proto.as_str())
+                .is_some_and(|p| !p.derivable);
+            if !non_derivable_builtin || !self.env.protocols.contains_key(proto) {
+                continue;
+            }
+            let applied = self.display_applied_bound(sig, tv_name, *proto, bindings);
+            let shown = concrete.display();
+            self.emit(super::err(
+                format!("type '{}' does not implement protocol '{}'", shown, applied),
+                format!("'{}' is satisfied only by the types that declare it; pass a value of such a type (for example by mapping each element first)", applied),
+                format!("call to {}()", name)));
+        }
     }
     /// `Repository[User]` for the bound `(tv, proto)` of `sig`, with the
     /// call's bindings substituted — the bare name when the bound is not

@@ -279,7 +279,7 @@ fn the_manifest_reader_refuses_every_duplicate_it_reads() {
          [permissions]\nallow = [\n  \"IO\",\n  \"a=b\",\n  \"a=b\",\n]\n",
     );
     assert!(ok.is_ok(), "{:?}", ok.err());
-    assert_eq!(ok.unwrap().permissions, ["IO", "a=b", "a=b"], "the multi-line array reads whole (#3253)");
+    assert_eq!(ok.unwrap().permissions.unwrap(), ["IO", "a=b", "a=b"], "the multi-line array reads whole (#3253)");
 
     // A table the reader never reads is still TOML: since the manifest is read
     // by the `toml` crate (#3253), a key repeated there is refused on its line

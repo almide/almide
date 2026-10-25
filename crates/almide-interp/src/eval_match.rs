@@ -349,7 +349,7 @@ impl<'a> Interpreter<'a> {
     /// from this gate exactly as it was missing from the renderers' (C-180's
     /// pow amendment): `Int32 999997 ^ 2` had the interpreter dissenting from
     /// a correct two-target consensus with the un-narrowed 999994000009.
-    fn narrow_wrap_flow(flow: Flow, op: BinOp, lt: &Ty, rt: &Ty) -> Flow {
+    pub(crate) fn narrow_wrap_flow(flow: Flow, op: BinOp, lt: &Ty, rt: &Ty) -> Flow {
         use BinOp::*;
         if !matches!(op, AddInt | SubInt | MulInt | PowInt) {
             return flow;

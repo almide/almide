@@ -305,7 +305,7 @@ pub fn cmd_build(args: BuildArgs) {
             // SAFETY: the whole CLI runs sequentially on the one `almide-main`
             // worker thread and no other thread is alive to read the
             // environment concurrently.
-            unsafe { std::env::set_var("ALMIDE_NO_RTLIB", "1") };
+            unsafe { almide_base::env::arm("ALMIDE_NO_RTLIB", "1") };
             inject_heap_cap(&rs_code, n)
         }
         None => rs_code,
@@ -421,27 +421,39 @@ pub(crate) fn alloc_count_armed() -> bool {
 /// `ALMIDE_ALLOC_COUNT` (#2228): inject the counting allocator when the lane is
 /// armed, taking the self-contained cargo path the same way `--heap-cap` does
 /// (see the comment there for why the rlib fast path cannot carry it).
-/// `[permissions] fs` (#4022) on native: the granted roots, set as the first
-/// statement of `main` (`almide_fs_scope_set`, runtime/rs/src/fs.rs), so every
-/// fs call of the run asks the scope before it touches a path. Only a program
-/// that reaches the fs runtime carries the call; a test harness build has no
-/// `main` and runs unscoped. The roots are absolute: the manifest anchored
+/// `[permissions] fs` (#4022) on native: the granted roots, baked into the
+/// program as a constant and resolved on the first fs call (a `OnceLock`), so
+/// every fs call asks the scope before it touches a path. Nothing hangs on
+/// `main`: a test harness build (`almide test`, which has none) is bounded
+/// exactly like `almide run` (#4084). Only a program that reaches the fs
+/// runtime carries the check. The roots are absolute: the manifest anchored
 /// the relative ones to its own directory.
 ///
 /// The check wraps the program's CALLS, not the runtime's fns: each
 /// `almide_rt_fs_<f>(..)` call of the user code becomes a guard macro around
-/// the same call, so the runtime source — and every inspection fingerprint
-/// over it — is the same with and without a scope. Which guard a fn takes is
-/// read off its runtime signature (a `bool` return answers false; `src, dst`
-/// checks both; `pattern` checks the glob's literal base; `prefix` checks the
-/// temp dir), never from a list of fn names. A program without the key is
-/// emitted unchanged.
+/// the scoped twin of the same fn, so the runtime source — and every
+/// inspection fingerprint over it — is the same with and without a scope.
+/// Which guard a fn takes is read off its runtime signature (a `bool` return
+/// answers false; `src, dst` checks both; `pattern` checks the glob's literal
+/// base; `prefix` checks the temp dir; `at` checks a rooted call's root),
+/// never from a list of fn names. A program without the key is emitted
+/// unchanged.
+///
+/// The check decides; the call is made beneath the root (#4084). The twin
+/// (fs_scope_twin.rs) is the runtime's fs functions with their `std::fs`
+/// calls spelled through `almide_sfs`, which walks from the granted root's
+/// held descriptor without following a symlink; the rooted calls open their
+/// root the same way. A symlink swapped in after the check is refused by the
+/// call, and the guard answers it with the check's own refusal text.
 pub(crate) fn inject_fs_scope(rs_code: String) -> String {
     let Some(roots) = almide_wasm_run::fs_scope() else { return rs_code };
-    if !rs_code.contains("almide_rt_fs_") || !rs_code.contains("\nfn main() {\n") {
+    if !rs_code.contains("almide_rt_fs_") {
         return rs_code;
     }
     let guards = fs_runtime_guards();
+    let entries: std::collections::BTreeSet<String> =
+        guards.iter().filter(|(_, g)| **g != "__almide_fs_root").map(|(n, _)| n.clone()).collect();
+    let (twin, twinned) = super::fs_scope_twin::scoped_twin(fs_runtime_source(), &entries);
     // Only the user code is rewritten: with the runtime inlined, its own
     // definitions and internal calls sit before the boundary marker.
     let marker = almide::codegen::RT_BOUNDARY_MARKER;
@@ -449,14 +461,9 @@ pub(crate) fn inject_fs_scope(rs_code: String) -> String {
         Some(i) => rs_code.split_at(i + marker.len()),
         None => ("", rs_code.as_str()),
     };
-    let user = wrap_fs_calls(user, &guards);
+    let user = wrap_fs_calls(user, &guards, &twinned);
     let list: Vec<String> = roots.iter().map(|r| format!("{r:?}")).collect();
-    let user = user.replacen(
-        "\nfn main() {\n",
-        &format!("\nfn main() {{\n    let _ = __ALMIDE_FS_SCOPE.set([{}].iter().map(|r| fs_scope_root(r)).collect());\n", list.join(", ")),
-        1,
-    );
-    let prelude = format!("\n{}\n{FS_SCOPE_GUARDS}", almide_base::FS_SCOPE_SOURCE);
+    let prelude = format!("\nconst __ALMIDE_FS_SCOPE_ROOTS: &[&str] = &[{}];\n{FS_SCOPE_GUARDS}{twin}", list.join(", "));
     if head.is_empty() {
         splice_after_inner_attrs(&user, &prelude)
     } else {
@@ -464,28 +471,37 @@ pub(crate) fn inject_fs_scope(rs_code: String) -> String {
     }
 }
 
-/// The guard macros and the scope cell `inject_fs_scope` splices in.
-const FS_SCOPE_GUARDS: &str = r#"static __ALMIDE_FS_SCOPE: std::sync::OnceLock<Vec<std::path::PathBuf>> = std::sync::OnceLock::new();
+/// The guard macros and the scope cell `inject_fs_scope` splices in. The
+/// scope's own items (`fs_scope_*`, `fs_scoped_*`, `almide_sfs`) are the
+/// runtime's: fs.rs includes them through almide-rt-core fs_beneath_core.rs.
+const FS_SCOPE_GUARDS: &str = r#"static __ALMIDE_FS_SCOPE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 fn __almide_fs_scope_check(path: &str) -> Result<(), String> {
-    match __ALMIDE_FS_SCOPE.get() {
-        Some(roots) if !fs_scope_admits(path, roots) => Err(fs_scope_refusal(path)),
-        _ => Ok(()),
-    }
+    __ALMIDE_FS_SCOPE.get_or_init(|| {
+        let raw: Vec<String> = __ALMIDE_FS_SCOPE_ROOTS.iter().map(|r| r.to_string()).collect();
+        fs_scoped_install(Some(&raw));
+    });
+    if fs_scoped_admits(path) { Ok(()) } else { Err(fs_scope_refusal(path)) }
 }
-macro_rules! __almide_fs_path { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let __almide_p = $p; match __almide_fs_scope_check(&*__almide_p) { Ok(()) => ($f)(__almide_p $(, $a)*), Err(e) => Err(e.into()) } }}; }
+fn __almide_fs_fix<T, E: std::ops::Deref<Target = str> + From<String>>(r: Result<T, E>, path: &str) -> Result<T, E> {
+    match r { Err(e) if fs_scoped_refused_in(&e) => Err(E::from(fs_scope_refusal(path))), r => r }
+}
+macro_rules! __almide_fs_path { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let __almide_p = $p; let __almide_s = String::from(&*__almide_p); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p $(, $a)*), &__almide_s), Err(e) => Err(e.into()) } }}; }
 macro_rules! __almide_fs_bool { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; if __almide_fs_scope_check(&*__almide_p).is_ok() { ($f)(__almide_p) } else { false } }}; }
-macro_rules! __almide_fs_two { ($f:expr, $p:expr, $q:expr $(,)?) => {{ let (__almide_p, __almide_q) = ($p, $q); match __almide_fs_scope_check(&*__almide_p).and_then(|()| __almide_fs_scope_check(&*__almide_q)) { Ok(()) => ($f)(__almide_p, __almide_q), Err(e) => Err(e.into()) } }}; }
-macro_rules! __almide_fs_glob { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; match __almide_fs_scope_check(&fs_scope_glob_base(&*__almide_p)) { Ok(()) => ($f)(__almide_p), Err(e) => Err(e.into()) } }}; }
-macro_rules! __almide_fs_temp { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; match __almide_fs_scope_check(&std::env::temp_dir().to_string_lossy()) { Ok(()) => ($f)(__almide_p), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_two { ($f:expr, $p:expr, $q:expr $(,)?) => {{ let (__almide_p, __almide_q) = ($p, $q); let __almide_s = String::from(&*__almide_p); match __almide_fs_scope_check(&__almide_s).and_then(|()| __almide_fs_scope_check(&*__almide_q)) { Ok(()) => __almide_fs_fix(($f)(__almide_p, __almide_q), &__almide_s), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_glob { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; let __almide_s = fs_scope_glob_base(&*__almide_p); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p), &__almide_s), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_root { ($f:expr, $p:expr $(, $a:expr)* $(,)?) => {{ let __almide_p = $p; let __almide_s = String::from((&*__almide_p).split('\0').next().unwrap_or("")); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p $(, $a)*), &__almide_s), Err(e) => Err(e.into()) } }}; }
+macro_rules! __almide_fs_temp { ($f:expr, $p:expr $(,)?) => {{ let __almide_p = $p; let __almide_s = std::env::temp_dir().to_string_lossy().into_owned(); match __almide_fs_scope_check(&__almide_s) { Ok(()) => __almide_fs_fix(($f)(__almide_p), &__almide_s), Err(e) => Err(e.into()) } }}; }
 "#;
+
+/// The fs runtime module's embedded source (includes inlined).
+pub(crate) fn fs_runtime_source() -> &'static str {
+    almide::codegen::generated::rust_runtime::RUST_RUNTIME_MODULES.iter().find(|(m, _)| *m == "fs").map_or("", |(_, s)| *s)
+}
 
 /// Each public `almide_rt_fs_*` fn of the runtime with the guard macro its
 /// signature calls for (`None`: it takes no path).
-fn fs_runtime_guards() -> std::collections::HashMap<String, &'static str> {
-    let src = almide::codegen::generated::rust_runtime::RUST_RUNTIME_MODULES
-        .iter()
-        .find(|(m, _)| *m == "fs")
-        .map_or("", |(_, s)| *s);
+pub(crate) fn fs_runtime_guards() -> std::collections::HashMap<String, &'static str> {
+    let src = fs_runtime_source();
     let mut out = std::collections::HashMap::new();
     for line in src.lines() {
         let Some(rest) = line.strip_prefix("pub fn almide_rt_fs_") else { continue };
@@ -498,6 +514,9 @@ fn fs_runtime_guards() -> std::collections::HashMap<String, &'static str> {
             [s, d] if s == "src" && d == "dst" => "__almide_fs_two",
             [p] if p == "pattern" => "__almide_fs_glob",
             [p] if p == "prefix" => "__almide_fs_temp",
+            // The rooted calls' `<root>\0<segments>` operand (#4084): the
+            // root is judged; the descriptor walk keeps the rest under it.
+            [p, ..] if p == "at" => "__almide_fs_root",
             [p, ..] if p == "path" || p == "dir" => "__almide_fs_path",
             _ => continue,
         };
@@ -556,8 +575,9 @@ fn fs_signature(tail: &str) -> Option<(Vec<String>, String)> {
 }
 
 /// `code` with every call `almide_rt_fs_<f>[::<..>](` whose fn has a guard
-/// rewritten to `<guard>!(almide_rt_fs_<f>[::<..>], `.
-fn wrap_fs_calls(code: &str, guards: &std::collections::HashMap<String, &'static str>) -> String {
+/// rewritten to `<guard>!(almide_rt_fs_<f>[::<..>], ` — the twin's
+/// `__almide_scoped_fs::almide_rt_fs_<f>` when `twinned` holds it.
+fn wrap_fs_calls(code: &str, guards: &std::collections::HashMap<String, &'static str>, twinned: &std::collections::BTreeSet<String>) -> String {
     const PREFIX: &str = "almide_rt_fs_";
     let mut out = String::with_capacity(code.len() + 256);
     let mut rest = code;
@@ -588,7 +608,8 @@ fn wrap_fs_calls(code: &str, guards: &std::collections::HashMap<String, &'static
         out.push_str(before);
         match guards.get(ident) {
             Some(g) if !preceded_by_ident && !before.ends_with("fn ") && after[j..].starts_with('(') => {
-                out.push_str(&format!("{g}!({}, ", &after[..j]));
+                let twin = if twinned.contains(ident) { format!("{}::", super::fs_scope_twin::TWIN_MOD) } else { String::new() };
+                out.push_str(&format!("{g}!({twin}{}, ", &after[..j]));
                 rest = &after[j + 1..];
             }
             _ => {
@@ -607,7 +628,7 @@ pub(crate) fn arm_alloc_count(rs_code: String) -> String {
     }
     // SAFETY: the whole CLI runs sequentially on the one `almide-main` worker
     // thread and no other thread is alive to read the environment concurrently.
-    unsafe { std::env::set_var("ALMIDE_NO_RTLIB", "1") };
+    unsafe { almide_base::env::arm("ALMIDE_NO_RTLIB", "1") };
     inject_alloc_count(&rs_code)
 }
 

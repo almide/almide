@@ -147,6 +147,7 @@
 
 - いま: `fn query_params(req: HttpRequest) -> Map[String, String]` は、`?tag=a&tag=b` の 2 つめを捨てます。同じクエリを読む `url.parse_query` は `List[(String, String)]` で、重複と順序を保ちます。
 - 案: `fn query_params(req: HttpRequest) -> List[(String, String)]`。中身は `url.parse_query` と同じ規則で復号します。
+- 追記（2026-10-24、#4117・C-404）: `url.parse_query` と同じ一つの復号器を使うので、不正なエスケープと不正な UTF-8 は err になります。戻り値は `Result[List[(String, String)], String]` です。
 - (a) Go `r.URL.Query()`（多値）、Python `parse_qsl`、JS `URLSearchParams.getAll`。
 - (d) 意味変更（型エラーで気づく）。1 つだけ欲しいときは `list.find(ps, ((k, _)) => k == "tag")`。
 - issue: #3976
@@ -226,7 +227,7 @@
 | `http.req_header` | `fn req_header(req: HttpRequest, key: String) -> String?` | Go `r.Header.Get` | 撤去 → `http.header` | R-http-12 |
 | `http.req_header_values` | `fn req_header_values(req: HttpRequest, key: String) -> List[String]`（案） | Go `r.Header.Values` | 追加しない（R-http-12 の `http.header_values` に一本化） | R-http-12 |
 | `http.req_headers` | `fn req_headers(req: HttpRequest) -> List[(String, String)]`（案） | JS `req.headers` | 追加しない（R-http-12 の `http.headers` に一本化） | R-http-12 |
-| `http.query_params` | `fn query_params(req: HttpRequest) -> List[(String, String)]` | Go `r.URL.Query()` | 意味変更（`List[(String, String)]` を返す） | R-http-10 |
+| `http.query_params` | `fn query_params(req: HttpRequest) -> Result[List[(String, String)], String]` | Go `r.URL.Query()` | 意味変更（`List[(String, String)]` を返す） | R-http-10 |
 | `http.url_decode` | `fn url_decode(s: String) -> String` | Go `QueryUnescape` / Python `unquote_plus` | 撤去 → `url.decode_form(s) ?? s` | R-http-04 |
 | `http.get` | `effect fn get(url: String) -> String` | Go `http.Get` / reqwest `get` / Python `urlopen` | 据え置き | R-http-01 |
 | `http.get_response` | `effect fn get_response(url: String) -> HttpResponse` | JS `fetch(u)` / Ktor `client.get(u)` | 据え置き | R-http-01 |

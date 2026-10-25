@@ -3,4 +3,4 @@ import io
 @pure
 fn greeting() -> Bytes = bytes.from_string("hi")
 
-fn main() -> Unit = io.write(greeting())
+effect fn main() -> Unit = io.write(greeting())

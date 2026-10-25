@@ -27,17 +27,21 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
+# #4094: the same read-only token the repository default gives, stated here so a
+# settings change cannot widen it. A job that needs more declares it itself.
+permissions: read-all
+
 jobs:
   lane:
     name: Generated Rust builds under the Ferrocene pin (1.95.0)
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v7
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build the almide binary (workspace toolchain)
         run: cargo build --release
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: "1.95.0"
       - name: Corpus compiles under the pin
