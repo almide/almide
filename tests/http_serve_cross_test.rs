@@ -372,13 +372,18 @@ fn boot_limits(wasm: bool) -> Leg {
 }
 
 fn boot_at(fixture: &Path, wasm: bool) -> Leg {
+    boot_with(fixture, wasm, &[])
+}
+
+/// [`boot_at`] with program arguments after the port.
+fn boot_with(fixture: &Path, wasm: bool, extra: &[String]) -> Leg {
     let port = free_port();
     let mut c = Command::new(almide_bin());
     c.arg("run").arg(fixture);
     if wasm {
         c.args(["--target", "wasm"]);
     }
-    c.arg("--").arg(port.to_string());
+    c.arg("--").arg(port.to_string()).args(extra);
     c.process_group(0).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     let mut child = c.spawn().expect("almide runs");
     let mut err = BufReader::new(child.stderr.take().expect("stderr piped"));
@@ -961,4 +966,140 @@ fn an_abort_in_the_handler_fails_only_its_request_on_native_and_the_embedded_lan
         assert_eq!(n, w, "answer {i} differs byte for byte across the legs");
     }
     assert_eq!(n_err, w_err, "the stderr transcripts differ");
+}
+
+/// A request whose server may end while answering: whatever arrived, an
+/// empty answer when the connection failed or was reset.
+fn ask_lossy(port: u16, raw: &[u8]) -> Vec<u8> {
+    let mut conn = connect_when_bound(port);
+    let _ = conn.set_read_timeout(Some(Duration::from_secs(60)));
+    let _ = conn.write_all(raw);
+    let mut out = Vec::new();
+    let _ = conn.read_to_end(&mut out);
+    out
+}
+
+/// The leg's exit code within `secs`, or a failed test.
+fn leg_exit_within(leg: &mut Leg, secs: u64) -> Option<i32> {
+    let deadline = Instant::now() + Duration::from_secs(secs);
+    loop {
+        if let Some(status) = leg.child.try_wait().expect("poll the server") {
+            return status.code();
+        }
+        if Instant::now() >= deadline {
+            kill_group(&mut leg.child);
+            panic!("wasm={}: the server was still running {secs} s after `process.exit(1)`", leg.wasm);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_program_that_prints_an_error_line_and_exits_1_in_its_handler_is_not_contained_on_native_and_the_embedded_lane() {
+    // `E` prints `Error: x` itself and calls `process.exit(1)`: the bytes of
+    // an abort, but the program's own exit, so it ends the server on both legs.
+    let run = |wasm: bool| {
+        let mut leg = boot_at(&abort_fixture(), wasm);
+        let served = ask(leg.port, &post("X"));
+        let _ = ask_lossy(leg.port, &post("E"));
+        let code = leg_exit_within(&mut leg, 20);
+        let mut rest = String::new();
+        let _ = leg.err.read_to_string(&mut rest);
+        (served, code, rest)
+    };
+    let (n_served, n_code, n_err) = run(false);
+    let (w_served, w_code, w_err) = run(true);
+    for (leg, served, code, err) in [("native", &n_served, n_code, &n_err), ("wasm", &w_served, w_code, &w_err)] {
+        assert!(served.ends_with(b"\r\n\r\nval=20"), "{leg}: {:?}", String::from_utf8_lossy(served));
+        assert_eq!(code, Some(1), "{leg}: the exit code");
+        assert_eq!(err.as_str(), "Error: x\n", "{leg}: stderr after the ready line");
+    }
+    assert_eq!(n_err, w_err);
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn an_abort_closes_the_socket_its_handler_opened_on_native_and_the_embedded_lane() {
+    // `L` listens on one fixed port and then aborts. Each abort must close
+    // that listener, or the next `L` cannot listen there again (its handler
+    // would answer an err instead of aborting) — a leaked descriptor per
+    // abort, which a client could repeat until the server ran out of them.
+    const N: usize = 8;
+    let run = |wasm: bool| {
+        let held = free_port();
+        let leg = boot_with(&abort_fixture(), wasm, &[held.to_string()]);
+        let answers: Vec<Vec<u8>> = (0..N).map(|_| ask(leg.port, &post("L"))).collect();
+        let served = ask(leg.port, &post("X"));
+        (answers, served, leg.stop())
+    };
+    let (native, n_served, n_err) = run(false);
+    let (wasm, w_served, w_err) = run(true);
+    for (leg, answers, served, err) in [("native", &native, &n_served, &n_err), ("wasm", &wasm, &w_served, &w_err)] {
+        for a in answers.iter() {
+            assert!(a.ends_with(b"\r\n\r\nInternal Server Error (request b933fdf0)"), "{leg}: {:?}", String::from_utf8_lossy(a));
+        }
+        assert!(served.ends_with(b"\r\n\r\nval=20"), "{leg}: {:?}", String::from_utf8_lossy(served));
+        let aborted = err.lines().filter(|l| *l == "http.serve: request b933fdf0: handler aborted: \"index out of bounds\"").count();
+        assert_eq!(aborted, N, "{leg}: every `L` must abort, none may fail to listen:\n{err}");
+    }
+    for (i, (n, w)) in native.iter().zip(&wasm).enumerate() {
+        assert_eq!(n, w, "answer {i} differs across the legs");
+    }
+    assert_eq!(n_err, w_err, "the stderr transcripts differ");
+}
+
+/// Peak RSS in bytes of an embedded-lane server that answers `aborts`
+/// requests of `B` (each builds a 50 000-element list and then aborts) and
+/// then stops on SIGTERM; None when no `time` can report it.
+fn serve_peak_rss(aborts: usize) -> Option<u64> {
+    let (flag, key, scale) = if cfg!(target_os = "macos") {
+        ("-l", "maximum resident set size", 1)
+    } else {
+        ("-v", "Maximum resident set size (kbytes):", 1024)
+    };
+    if !Path::new("/usr/bin/time").exists() {
+        return None;
+    }
+    let port = free_port();
+    let mut time = Command::new("/usr/bin/time")
+        .arg(flag)
+        .arg(almide_bin())
+        .arg("run")
+        .arg(abort_fixture())
+        .args(["--target", "wasm", "--"])
+        .arg(port.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run /usr/bin/time");
+    for _ in 0..aborts {
+        let a = ask(port, &post("B"));
+        assert!(a.starts_with(b"HTTP/1.1 500 "), "{:?}", String::from_utf8_lossy(&a));
+    }
+    // SIGTERM to the server (time's child): it drains and returns from serve.
+    let kids = Command::new("pgrep").arg("-P").arg(time.id().to_string()).output().expect("pgrep");
+    let server = String::from_utf8_lossy(&kids.stdout).trim().to_string();
+    assert!(signal(&server, "-TERM"), "could not signal the server {server:?}");
+    let out = time.wait_with_output().expect("wait for /usr/bin/time");
+    let err = String::from_utf8_lossy(&out.stderr);
+    let line = err.lines().find(|l| l.contains(key))?;
+    let n: u64 = line.split_whitespace().find_map(|w| w.parse().ok())?;
+    Some(n * scale)
+}
+
+#[cfg_attr(debug_assertions, ignore = "serve-cross net is release-only (CI: release-shape job)")]
+#[test]
+fn a_run_of_handler_aborts_does_not_grow_the_embedded_servers_memory() {
+    // A contained abort puts the instance back to its state when serving
+    // began, so what the aborted handler allocated is taken back: six times
+    // the aborts must not cost anything like six times the memory.
+    let Some(small) = serve_peak_rss(40) else {
+        eprintln!("no /usr/bin/time that reports peak RSS here; nothing measured");
+        return;
+    };
+    let large = serve_peak_rss(240).expect("the second measurement");
+    eprintln!("peak RSS: {} MB at 40 aborts, {} MB at 240", small >> 20, large >> 20);
+    assert!(large < small * 2, "6x the aborts took {} MB of peak RSS against {} MB", large >> 20, small >> 20);
 }
