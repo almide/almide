@@ -820,7 +820,15 @@ pub(super) fn rc_cow_raw_type(ty_str: &str) -> String {
 /// `Result[Bytes, String]` of `http.get_bytes` reached a `let` binding raw —
 /// `let mut b: AlmideRcCow<Vec<u8>> = (almide_http_get_bytes(u))?;`, rustc
 /// E0308 after a green `check`, while every `almide_rt_` sibling glued).
+///
+/// A symbol some bundled fn declares `@intrinsic` is a runtime fn by its
+/// declaration, whatever its spelling coincides with: `almide_regex_find` is
+/// the runtime leaf even though `regex.find` (whose name the spelling decodes
+/// to) has an Almide body (#4217).
 fn rc_cow_symbol_is_native_runtime(symbol: &str) -> bool {
+    if almide_ir::mut_args::is_bundled_intrinsic_symbol(symbol) {
+        return true;
+    }
     let Some(rest) = symbol.strip_prefix("almide_") else {
         return false;
     };
@@ -1207,6 +1215,57 @@ fn ty_needs_repr(ctx: &RenderContext, ty: &Ty) -> bool {
         // Everything else (scalars, String, Bool, Unit, Fn, Unknown, …) stays on
         // the Display path.
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod runtime_symbol_declaration_tests {
+    use almide_lang::ast::Decl;
+
+    /// #4217: a symbol a bundled fn declares `@intrinsic` is a runtime fn by
+    /// that declaration. `almide_regex_find` decodes to `regex.find`, which
+    /// has an Almide body — classifying by the spelling called the runtime
+    /// leaf user code, and a `Bytes` result of such a leaf got no glue.
+    #[test]
+    fn a_declared_intrinsic_is_native_whatever_its_spelling_decodes_to() {
+        assert!(
+            almide_ir::mut_args::stdlib_fn_has_almide_body("regex", "find"),
+            "the precondition moved: regex.find no longer has an Almide body"
+        );
+        assert!(almide_ir::mut_args::is_bundled_intrinsic_symbol("almide_regex_find"));
+        assert!(super::rc_cow_symbol_is_native_runtime("almide_regex_find"));
+    }
+
+    /// #4217 (duplicate definition): a runtime symbol equal to the mangled
+    /// name `almide_rt_<module>_<fn>` of a non-generic Almide-bodied bundled
+    /// fn is defined twice in the generated crate (E0428) — once by the
+    /// runtime, once by the rendered body. Read from the declarations, so a
+    /// new leaf that collides is refused here rather than by rustc.
+    #[test]
+    fn no_intrinsic_symbol_is_the_mangled_name_of_an_almide_bodied_fn() {
+        let mut collisions = Vec::new();
+        for &module in almide_lang::stdlib_info::BUNDLED_MODULES {
+            let Some(program) = almide_lang::stdlib_info::bundled_source(module).and_then(almide_lang::parse_cached) else {
+                continue;
+            };
+            let ident = almide_base::names::module_ident(module);
+            for d in &program.decls {
+                let Decl::Fn { name, attrs, generics, .. } = d else { continue };
+                let intrinsic = attrs.iter().any(|a| a.name.as_str() == "intrinsic");
+                let generic = generics.as_ref().is_some_and(|g| !g.is_empty());
+                if intrinsic || generic {
+                    continue;
+                }
+                let mangled = format!("almide_rt_{}_{}", ident, name.as_str());
+                if almide_ir::mut_args::is_bundled_intrinsic_symbol(&mangled) {
+                    collisions.push(format!("{module}.{}", name.as_str()));
+                }
+            }
+        }
+        assert!(
+            collisions.is_empty(),
+            "an @intrinsic symbol equals the mangled name of these Almide-bodied fns: {collisions:?} — name the leaf `almide_rt_<module>___<leaf>`"
+        );
     }
 }
 
