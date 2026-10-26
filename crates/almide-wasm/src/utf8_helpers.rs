@@ -267,3 +267,102 @@ pub(crate) fn emit_utf8_lossy_helper() -> Function {
     i.end();
     f
 }
+
+/// `$err_text(str) -> str` — C-418's escaper (#4126), the wasm twin of
+/// almide-base's err_text.rs for the error texts this emitter builds itself
+/// (`value.field`'s key, `error.context`'s label): TAB, CR, LF and NUL read
+/// `\t` `\r` `\n` `\0`; every other C0 control and DEL reads `\u{<hex>}`; the
+/// multi-byte characters the rule escapes (C1 and the bidi controls) read
+/// `\u{<hex>}` too — that set is the rule's own predicate run over the code
+/// points at emit time, not a copy of it. Every other byte is copied. The
+/// result is always a FRESH block (the caller releases it), over-allocated
+/// 6n (the widest growth: one byte to `\u{1b}`) with its len patched.
+pub(crate) fn emit_err_text_helper() -> Function {
+    let (s, n, out, k, w, b) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
+    let pay = almide_layout::PAYLOAD as i32;
+    let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
+    let mut f = Function::new([(5, ValType::I32)]);
+    let mut i = f.instructions();
+    let put = |i: &mut wasm_encoder::InstructionSink<'_>, c: u8| {
+        i.local_get(w).i32_const(c as i32).i32_store8(byte);
+        i.local_get(w).i32_const(1).i32_add().local_set(w);
+    };
+    // One lowercase hex digit of `b >> shift`, written at `w`.
+    let hex = |i: &mut wasm_encoder::InstructionSink<'_>, shift: i32| {
+        i.local_get(w);
+        i.local_get(b).i32_const(shift).i32_shr_u().i32_const(15).i32_and();
+        i.local_get(b).i32_const(shift).i32_shr_u().i32_const(15).i32_and().i32_const(10).i32_lt_u();
+        i.if_(BlockType::Result(ValType::I32)).i32_const('0' as i32).else_().i32_const('a' as i32 - 10).end();
+        i.i32_add().i32_store8(byte);
+        i.local_get(w).i32_const(1).i32_add().local_set(w);
+    };
+    i.local_get(s).i32_load(len_memarg()).local_set(n);
+    i.local_get(n).i32_const(6).i32_mul().call(F_ALLOC).local_set(out);
+    i.local_get(out).i32_const(pay).i32_add().local_set(w);
+    i.i32_const(0).local_set(k);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(k).local_get(n).i32_ge_u().br_if(1);
+    i.local_get(s).i32_const(pay).i32_add().local_get(k).i32_add().i32_load8_u(byte).local_set(b);
+    i.block(BlockType::Empty);
+    // Inside a case's `if`: if = 0, the per-byte block = 1, the loop = 2.
+    for (c, esc) in [(b'\t', b't'), (b'\r', b'r'), (b'\n', b'n'), (0u8, b'0')] {
+        i.local_get(b).i32_const(c as i32).i32_eq().if_(BlockType::Empty);
+        put(&mut i, b'\\');
+        put(&mut i, esc);
+        i.local_get(k).i32_const(1).i32_add().local_set(k);
+        i.br(2);
+        i.end();
+    }
+    i.local_get(b).i32_const(0x20).i32_lt_u();
+    i.local_get(b).i32_const(0x7f).i32_eq();
+    i.i32_or().if_(BlockType::Empty);
+    for c in *b"\\u{" {
+        put(&mut i, c);
+    }
+    i.local_get(b).i32_const(16).i32_ge_u().if_(BlockType::Empty);
+    hex(&mut i, 4);
+    i.end();
+    hex(&mut i, 0);
+    put(&mut i, b'}');
+    i.local_get(k).i32_const(1).i32_add().local_set(k);
+    i.br(2);
+    i.end();
+    // The multi-byte members of the set, matched as their UTF-8 bytes
+    // (depth from inside the two ifs: 3 = the loop).
+    for cp in 0x80u32..=0xffff {
+        let Some(ch) = char::from_u32(cp) else { continue };
+        if !almide_base::err_text::almide_rt_errtext_is_escaped(ch) {
+            continue;
+        }
+        let mut buf = [0u8; 4];
+        let seq = ch.encode_utf8(&mut buf).as_bytes().to_vec();
+        let m = seq.len() as i32;
+        i.local_get(k).i32_const(m).i32_add().local_get(n).i32_le_u().if_(BlockType::Empty);
+        i.i32_const(1);
+        for (j, sb) in seq.iter().enumerate() {
+            i.local_get(s).i32_const(pay).i32_add().local_get(k).i32_add();
+            i.i32_load8_u(MemArg { offset: j as u64, align: 0, memory_index: 0 });
+            i.i32_const(*sb as i32).i32_eq().i32_and();
+        }
+        i.if_(BlockType::Empty);
+        for c in format!("\\u{{{cp:x}}}").bytes() {
+            put(&mut i, c);
+        }
+        i.local_get(k).i32_const(m).i32_add().local_set(k);
+        i.br(3);
+        i.end();
+        i.end();
+    }
+    // Any other byte: copied.
+    i.local_get(w).local_get(b).i32_store8(byte);
+    i.local_get(w).i32_const(1).i32_add().local_set(w);
+    i.local_get(k).i32_const(1).i32_add().local_set(k);
+    i.end();
+    i.br(0).end().end();
+    i.local_get(out);
+    i.local_get(w).local_get(out).i32_const(pay).i32_add().i32_sub();
+    i.i32_store(len_memarg());
+    i.local_get(out);
+    i.end();
+    f
+}

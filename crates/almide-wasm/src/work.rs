@@ -58,6 +58,9 @@ pub(crate) enum Helper {
     /// Table 3-7 well-formed ranges, one U+FFFD per MAXIMAL invalid
     /// subpart (the WHATWG replacement walk).
     Utf8Lossy,
+    /// `$err_text(str) -> str` — C-418's escaper (#4126) for the error texts
+    /// the emitter builds itself; always a fresh block.
+    ErrText,
     /// `$named_<op>_<ti>(a, b) -> i32` — the runtime-recursive body of a
     /// type-directed walk over a RECURSIVE Named type (the DisplayNamed
     /// doctrine for `==` and for the total order). Both ops have the same
