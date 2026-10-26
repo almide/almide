@@ -71,8 +71,14 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
 
     // Record-field attributes (#4108): the field vocabulary (E053, an error)
     // and a skip attribute's required default (E104).
+    // An input type (`: Decode`, not `Encode`) skips no field (row 22 R4).
+    let input_type = deriving.as_ref()
+        .is_some_and(|d| super::protocols::codec_directions(d) == (false, true));
     for field in crate::attr_vocab::declared_fields(ty) {
         crate::attr_vocab::check_field_attrs(field, &mut env.attr_diagnostics);
+        if input_type {
+            crate::attr_vocab::check_input_type_field_skips(name, field, &mut env.attr_diagnostics);
+        }
     }
 
     if let Some(derives) = deriving {
@@ -523,12 +529,17 @@ fn register_decl_type(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
         } else {
             vec![sym(name), sym(&type_key)]
         };
+        // A composition conforms to its parts too: `: Codec` is also
+        // `Encode` and `Decode` (C-435), so a `[T: Decode]` bound takes it and
+        // an input sink sees that it is also sent out (E110).
         for d in derives {
-            for key in protocol_keys.iter().copied() {
-                env.type_protocols
-                    .entry(key)
-                    .or_insert_with(std::collections::HashSet::new)
-                    .insert(sym(d));
+            for p in super::protocols::protocol_closure(d.as_str()) {
+                for key in protocol_keys.iter().copied() {
+                    env.type_protocols
+                        .entry(key)
+                        .or_insert_with(std::collections::HashSet::new)
+                        .insert(sym(p));
+                }
             }
         }
         register_conformance_args(env, diagnostics, decl, prefix, &protocol_keys);
