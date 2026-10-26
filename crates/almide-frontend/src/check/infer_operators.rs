@@ -360,15 +360,40 @@ impl Checker {
         }
     }
 
+    /// The operators a Matrix operand admits, each lowered to one matrix
+    /// operation on every leg: `+ - * /` between two Matrix values
+    /// (elementwise, `*` the matrix product) and `*` with an Int or Float
+    /// scale on either side (R-matrix-14). Anything else — `m / 2.0`,
+    /// `m + 1`, `%`, `^` — has no matrix operation behind it and is refused
+    /// here rather than reaching lowering as a scalar `BinOp` on a Matrix
+    /// (an IR verify ICE). An operand still being inferred is let through.
+    pub(super) fn check_matrix_operands(&mut self, op: &str, lc: &Ty, rc: &Ty) -> Ty {
+        let pending = |t: &Ty| matches!(t, Ty::Unknown | Ty::TypeVar(_) | Ty::Never);
+        let scale = |t: &Ty| matches!(t, Ty::Int | Ty::Float) || pending(t);
+        let both = (*lc == Ty::Matrix || pending(lc)) && (*rc == Ty::Matrix || pending(rc));
+        let ok = match op {
+            "+" | "-" | "/" => both,
+            "*" => both || (*lc == Ty::Matrix && scale(rc)) || (scale(lc) && *rc == Ty::Matrix),
+            _ => false,
+        };
+        if !ok {
+            self.emit(super::err(
+                format!("operator '{}' is not defined for {} and {}", op, lc.display(), rc.display()),
+                "A Matrix takes `+`, `-`, `*` and `/` with another Matrix (elementwise; `*` is the matrix product) \
+                 and `*` with an Int or Float scale; for anything else map the elements (`matrix.map(m, (x) => x / 2.0)`)",
+                format!("operator {}", op)));
+        }
+        Ty::Matrix
+    }
+
     /// `-`/`*`/`/`/`%`/`^` arm of [`Self::infer_expr_g2_binary`]: Matrix
     /// arithmetic, numeric-operand and mixed-sized-width diagnostics, and
     /// same-width/Float-promotion result-type resolution. Verbatim text move.
     fn infer_binop_arith(&mut self, op: &Sym, lt: &Ty, rt: &Ty, left: &ast::Expr, right: &ast::Expr) -> Ty {
         let lc = resolve_ty(lt, &self.uf);
         let rc = resolve_ty(rt, &self.uf);
-        // Matrix operators: *, +, - on Matrix types
         if lc == Ty::Matrix || rc == Ty::Matrix {
-            Ty::Matrix
+            self.check_matrix_operands(op.as_str(), &lc, &rc)
         } else {
             // Sized Numeric Types (Stage 1c): same-width
             // arithmetic accepts every sized numeric variant.
