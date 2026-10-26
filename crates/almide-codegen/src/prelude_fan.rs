@@ -31,8 +31,8 @@
 //! upward while holding the child's lock cannot deadlock.
 //!
 //! An arm starts through `almide_fan_spawn` (#4141): on a thread of its own
-//! while fewer than `ALMIDE_FAN_ARM_THREADS_PER_CPU` × CPUs arm threads are
-//! live, else — or when the OS refuses the thread — INLINE on the thread that
+//! while fewer than `ALMIDE_FAN_ARM_THREADS_PER_CPU` × CPUs (one per CPU, at
+//! most `ALMIDE_FAN_THREADS`) arm and line-fold threads are live, else — or when the OS refuses the thread — INLINE on the thread that
 //! reached it, before the next arm starts. That is the sequential evaluation
 //! the threaded form reproduces, so the observation does not change; only the
 //! overlap is given up. `Scope::spawn` panicked instead (exit 101 with a std
@@ -118,7 +118,10 @@ VIS enum AlmideFanArm<'s, T> { Spawned(std::thread::ScopedJoinHandle<'s, T>), Ra
 static ALMIDE_FAN_ARM_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 fn almide_fan_arm_threads_max() -> usize {
     static MAX: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *MAX.get_or_init(|| std::thread::available_parallelism().map_or(1, |n| n.get()).saturating_mul(ALMIDE_FAN_ARM_THREADS_PER_CPU))
+    *MAX.get_or_init(|| {
+        let cap = std::env::var("ALMIDE_FAN_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&n| n > 0).unwrap_or(usize::MAX);
+        std::thread::available_parallelism().map_or(1, |n| n.get()).saturating_mul(ALMIDE_FAN_ARM_THREADS_PER_CPU).min(cap).max(1)
+    })
 }
 struct AlmideFanArmSlot;
 impl Drop for AlmideFanArmSlot { fn drop(&mut self) { ALMIDE_FAN_ARM_THREADS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); } }
@@ -146,12 +149,17 @@ VIS fn almide_fan_spawn<'s, 'e, T: Send + 's, F: FnOnce() -> T + Send + 's>(s: &
 VIS fn almide_fan_take<T>(arm: AlmideFanArm<'_, T>) -> T { match arm { AlmideFanArm::Spawned(h) => almide_fan_join(h), AlmideFanArm::Ran(v) => v } }
 "#;
 
-/// Live `fan { }` arm threads per available CPU before a further arm runs
-/// inline on the thread that reached it (#4141). An arm's thread mostly waits —
-/// on its own nested fan's joins, or on I/O — so the bound is well above the
-/// CPU count; it only stops a recursive fan from multiplying threads without
-/// end (2^depth) and starving the user's other processes of their quota.
-const ALMIDE_FAN_ARM_THREADS_PER_CPU: usize = 64;
+/// Live worker threads per available CPU that `fan { }` arms and the
+/// line-fold workers (`fs.fold_lines_chunked`) share before a further one runs
+/// inline on the thread that reached it (#4141): one, so the threads they start
+/// are a pool bounded by `available_parallelism` (and by `ALMIDE_FAN_THREADS`,
+/// the lever the `list.par_*` pool reads too). A recursive fan of depth d asked
+/// for 2^d threads; an arm that gets no thread is the sequential evaluation
+/// (ADR-0024 D1), so only the overlap is given up — including for arms that
+/// wait on I/O, which overlap at most one per CPU.
+/// tests/fan_spawn_failure_test.rs counts the live threads of a deep fan
+/// against this bound.
+const ALMIDE_FAN_ARM_THREADS_PER_CPU: usize = 1;
 
 /// The fan timeline prelude as emitted into a program (`vis` is `pub ` for
 /// the `almide_rt` rlib, empty for an inline main).
