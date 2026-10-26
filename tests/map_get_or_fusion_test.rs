@@ -1,9 +1,6 @@
-//! `map.get(m, k) ?? d` fuses into one `map_get_or(m, &k, d)` call only when
-//! evaluating `d` early, inside the call, is unobservable (#3409).
-//!
-//! The fusion (`try_fuse_map_get_or` in pass_peephole.rs) runs after clone
-//! insertion and turns the lazy fallback into an eager sibling argument. Two
-//! things go wrong when `d` is not inert:
+//! `map.get(m, k) ?? d` keeps its fallback lazy (#3409). The former fusion
+//! into one eager `map_get_or(m, &k, d)` call (retired with `map.get_or`)
+//! went wrong in two ways when `d` was not inert:
 //!
 //! - **ownership**: `map.get(m, key) ?? key` became `map_get_or(m, &key, key)`,
 //!   the key borrowed and moved in one argument list — rustc E0505. Unfused,
@@ -11,10 +8,6 @@
 //! - **laziness**: `??` evaluates its fallback only on `none`
 //!   (docs/specs/language.md), but the fused call evaluated
 //!   `map.get(m, "a") ?? noisy("a")` on a hit too.
-//!
-//! So only a literal, or a variable the lookup's arguments do not mention
-//! (or a `Copy` scalar), fuses. The positive cell pins that the common
-//! `?? 0` / `?? ""` shape keeps the fusion.
 //!
 //! Skips cleanly when the `almide` binary is unavailable (CI builds it in the
 //! build step; locally run `cargo build --release` first).
@@ -91,16 +84,6 @@ fn body<'a>(rust: &'a str, name: &str) -> &'a str {
     let rest = &rust[start..];
     let end = rest.find("\n}").map(|i| i + 2).unwrap_or(rest.len());
     &rest[..end]
-}
-
-#[test]
-fn an_inert_fallback_still_fuses() {
-    if !tool_available() { return; }
-    let rust = emitted();
-    for name in ["lit", "other_var", "int_key"] {
-        let b = body(&rust, name);
-        assert!(b.contains("almide_rt_map_get_or("), "`{name}` has an inert fallback and must fuse:\n{b}");
-    }
 }
 
 #[test]

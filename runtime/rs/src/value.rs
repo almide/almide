@@ -63,8 +63,8 @@ pub fn almide_rt_value_array(items: &[AlmideValue]) -> AlmideValue { AlmideValue
 pub fn almide_rt_value_object(pairs: &[(AlmideString, AlmideValue)]) -> AlmideValue { AlmideValue::Object(almide_rt_object_upsert(pairs.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect())) }
 /// No Object holds a key twice (C-401, #4112): a pair list that repeats a key
 /// is folded as one upsert per pair — the key keeps the POSITION of its first
-/// occurrence and takes the VALUE of its last, the `json.to_map` rule (C-380,
-/// ALS-C1). So every reader of the Object (`field`, `keys`, `stringify`,
+/// occurrence and takes the VALUE of its last, the C-380 rule
+/// (ALS-C1). So every reader of the Object (`field`, `keys`, `stringify`,
 /// `to_map`) sees one entry, and `json.stringify` never writes a key twice.
 /// Small lists compare pairwise; from 16 pairs an index answers.
 pub(crate) fn almide_rt_object_upsert(pairs: Vec<(AlmideKey, AlmideValue)>) -> Vec<(AlmideKey, AlmideValue)> {
@@ -168,7 +168,7 @@ pub fn almide_rt_value_as_bool(v: &AlmideValue) -> Result<bool, AlmideString> { 
 pub fn almide_rt_value_as_array(v: &AlmideValue) -> Result<Vec<AlmideValue>, AlmideString> { let __almide_r: Result<Vec<AlmideValue>, String> = (|| { match v { AlmideValue::Array(a) => Ok(a.clone()), _ => Err(format!("expected Array, received {}", almide_rt_value_kind(v))) } })(); __almide_r.map_err(Into::into) }
 /// `value.as_object` (R-value-02): the Object's pairs in order, the `as_array`
 /// family's Object cell; any other kind is the same `expected Object` err
-/// `value.field` gives.
+/// `value.__field` gives.
 pub fn almide_rt_value_as_object(v: &AlmideValue) -> Result<Vec<(AlmideString, AlmideValue)>, AlmideString> {
     match v {
         AlmideValue::Object(pairs) => Ok(pairs.iter().map(|(k, x)| (AlmideString::from(k.as_ref()), x.clone())).collect()),
@@ -351,7 +351,7 @@ pub fn almide_rt___decode_default_list_bool(v: &AlmideValue, key: AlmideString, 
 // ── AlmideValue utilities ──
 
 /// Object keys in insertion order. Lives in the `value` runtime (not reusing
-/// `almide_json_keys`) so a program that uses `value.keys` but never `json` still
+/// `almide_json_keys`) so a program that uses `value.__keys` but never `json` still
 /// links — the native runtime is included per-module, so a cross-module reference
 /// would be undefined on a value-only program (#416 native-link fix).
 pub fn almide_rt_value_keys(v: &AlmideValue) -> Vec<AlmideString> {
@@ -377,16 +377,6 @@ pub fn almide_rt_value_pick(v: &AlmideValue, keys: &[AlmideString]) -> AlmideVal
             AlmideValue::Object(pairs.iter().filter(|(k, _)| want.contains(k.as_ref())).cloned().collect())
         }
         _ => AlmideValue::Object(Vec::new()),
-    }
-}
-
-/// Rename keys in an Object using a transform function.
-pub fn almide_rt_value_rename_keys(v: &AlmideValue, f: impl Fn(AlmideString) -> AlmideString) -> AlmideValue {
-    match v {
-        AlmideValue::Object(pairs) => {
-            AlmideValue::Object(almide_rt_object_upsert(pairs.iter().map(|(k, v)| (almide_rt_intern_key(&f(AlmideString::from(k.to_string()))), v.clone())).collect()))
-        }
-        other => other.clone(),
     }
 }
 

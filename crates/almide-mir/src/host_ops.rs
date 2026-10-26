@@ -24,7 +24,7 @@
 //! `tests/host_ops_contract.rs` derives the intrinsic list from
 //! `stdlib/<module>.almd` and fails on an unclassified cell, so a new
 //! capability-bearing intrinsic cannot ride in as capability-free — the
-//! #3302 class (`env.millis` / `datetime.now` read the clock while counting
+//! #3302 class (`datetime.now_ms` / `datetime.now` read the clock while counting
 //! nothing on the native classifier). The same test holds every row to its
 //! stdlib `@intrinsic` and its `runtime/rs/src` signature (no `&mut`, no owned
 //! heap parameter outside [`HostOp::by_value`], no returned reference), and

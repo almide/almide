@@ -475,7 +475,7 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // two reasons that were both live divergences (#895):
     //   * PRECEDENCE — `-3i64.pow(2)` parses as `-(3.pow(2))` == -9, because Rust
     //     binds method calls tighter than unary minus. The wasm leg (which routes
-    //     `^` to `math.pow`) said 9. The same trap was already fixed for Float `^`
+    //     `^` to `math.__pow`) said 9. The same trap was already fixed for Float `^`
     //     by giving it a call form; Int kept the operator form and kept the bug.
     //   * NEGATIVE EXPONENT — `exp as u32` wrapped a `-1` into 4294967295 and
     //     computed garbage, where wasm aborts. `^` is TOTAL like `/` and `%`

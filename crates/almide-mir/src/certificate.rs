@@ -308,7 +308,7 @@ fn prim_floor_capability(kind: &crate::PrimKind) -> Option<Capability> {
         // random.int's floor.
         P::RandomGet => Capability::Entropy,
         // env.args / env.get.
-        P::ArgsGetList | P::ArgsGetListFull | P::EnvGet => Capability::CliArgs,
+        P::ArgsGetList | P::EnvGet => Capability::CliArgs,
         // fs.read_text / fs.list_dir / fs.exists / fs.stat / fs.is_symlink.
         P::ReadTextFile | P::ReadBytesFile | P::ReadDir | P::PathExists | P::PathFilestat
         | P::PathFilestatNoFollow => Capability::FsRead,

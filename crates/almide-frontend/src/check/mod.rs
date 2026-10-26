@@ -854,7 +854,7 @@ impl Checker {
         // canonical `Int`, while lowering had already stamped the whole
         // literal-only tree Int8. The checker then said `i64` over an `i8`
         // expression and the generated Rust would not build (the
-        // `self_hosted_float_convert` shape: `let nm = 0 - float.to_int8(f)`).
+        // `self_hosted_float_convert` shape: `let nm = 0 - int8.from(f)`).
         // Same rule as the peer join below — the sized member wins.
         if is_literal_numeric_ast(canon_expr) {
             return Some(sized.clone());

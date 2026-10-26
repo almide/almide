@@ -362,7 +362,7 @@ impl LowerCtx {
             }
         }
 
-        // A TUPLE element (`List[(String, String)]` — the url.query_pairs
+        // A TUPLE element (`List[(String, String)]` — the url.parse_query
         // assertion shape): a tuple is an anonymous record, so the same
         // synthesized per-element helper serves, keyed by a deterministic
         // spelling of its slot types. A slot the engine cannot compare fails

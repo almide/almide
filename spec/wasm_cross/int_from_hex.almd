@@ -1,10 +1,11 @@
 // @contract: C-028
 // Cross-target differential fixture: hex parsing through `int.parse_radix(s, 16)`
-// (the hex-only parser left the stdlib in dialect epoch 15; unlike it,
-// `parse_radix` does not skip a leading `0x`). The inputs are the old
-// fixture's quirk set — `0x` prefixes in both cases and repeated, an
-// underscore, surrounding whitespace, signs before and after a prefix, empty
-// input, the i64 rails — and both legs must answer the same `ok` / err text.
+// (the hex-only parser left the stdlib in dialect epoch 15). The input is
+// trimmed, takes one optional sign, then one optional `0x` / `0X`, then hex
+// digits. The inputs are the old fixture's quirk set — `0x` prefixes in both
+// cases and repeated, an underscore, surrounding whitespace, signs before and
+// after a prefix, empty input, the i64 rails — and both legs must answer the
+// same `ok` / err text.
 fn show(label: String, r: Result[Int, String]) -> Unit = {
   match r {
     ok(v) => println(label + " ok:" + int.to_string(v)),

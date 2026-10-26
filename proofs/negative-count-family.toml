@@ -76,11 +76,6 @@ class = "size"
 probe = 'show_ll(list.chunk([1, 2, 3], N))'
 
 [[cell]]
-slot = "list.windows.n"
-class = "size"
-probe = 'show_ll(list.windows([1, 2, 3], N))'
-
-[[cell]]
 slot = "list.window.n"
 class = "size"
 probe = 'show_ll(list.window([1, 2, 3], N))'
@@ -191,21 +186,6 @@ class = "count"
 probe = 'show_b(bytes.pad_end(bytes.from_list([1, 2]), N, 9))'
 
 [[cell]]
-slot = "bytes.read_string_at.len"
-class = "count"
-probe = 'bytes.read_string_at(bytes.from_string("abc"), 0, N)'
-
-[[cell]]
-slot = "bytes.read_length_prefixed_strings_le.count"
-class = "count"
-probe = 'list.join(bytes.read_length_prefixed_strings_le(bytes.from_list([1, 0, 0, 0, 97]), 0, N), ",")'
-
-[[cell]]
-slot = "bytes.skip_length_prefixed_le.count"
-class = "count"
-probe = 'int.to_string(bytes.skip_length_prefixed_le(bytes.from_list([1, 0, 0, 0, 97]), 0, N))'
-
-[[cell]]
 slot = "bytes.copy_from.len"
 class = "count"
 probe = 'show_b(copy_from_probe(N))'
@@ -251,41 +231,6 @@ class = "count"
 probe = 'show_m(matrix.ones(2, N))'
 
 [[cell]]
-slot = "matrix.zeros_f32.rows"
-class = "count"
-probe = 'show_shape(matrix.shape(matrix.zeros_f32(N, 2)))'
-
-[[cell]]
-slot = "matrix.zeros_f32.cols"
-class = "count"
-probe = 'show_shape(matrix.shape(matrix.zeros_f32(2, N)))'
-
-[[cell]]
-slot = "matrix.ones_f32.rows"
-class = "count"
-probe = 'show_shape(matrix.shape(matrix.ones_f32(N, 2)))'
-
-[[cell]]
-slot = "matrix.ones_f32.cols"
-class = "count"
-probe = 'show_shape(matrix.shape(matrix.ones_f32(2, N)))'
-
-[[cell]]
-slot = "matrix.conv1d.kernel"
-class = "count"
-probe = 'show_m(matrix.conv1d(matrix.ones(4, 1), matrix.zeros(1, 0), [0.5], N, 1, 0))'
-
-[[cell]]
-slot = "matrix.conv1d.padding"
-class = "count"
-probe = 'show_m(matrix.conv1d(matrix.ones(4, 1), matrix.ones(1, 2), [0.5], 2, 1, N))'
-
-[[cell]]
-slot = "matrix.conv1d.stride"
-class = "size"
-probe = 'show_m(matrix.conv1d(matrix.ones(4, 1), matrix.ones(1, 2), [0.5], 2, N, 0))'
-
-[[cell]]
 slot = "matrix.split_cols_even.n"
 class = "count"
 probe = 'int.to_string(list.len(matrix.split_cols_even(matrix.ones(2, 4), N)))'
@@ -304,7 +249,6 @@ probe = 'show_m(matrix.slice_rows(matrix.ones(3, 1), 0, N))'
 # index: an element index: out of range (a negative one included) is none, the default, a no-op or an append, never a clamp to 0
 index = [
   "list.get.i",
-  "list.get_or.i",
   "list.set.i",
   "list.swap.i",
   "list.swap.j",
@@ -315,9 +259,7 @@ index = [
   "string.insert.i",
   "string.remove_at.i",
   "bytes.get.i",
-  "bytes.get_or.i",
   "bytes.insert.i",
-  "bytes.set_at.i",
   "bytes.remove_at.i",
   "bytes.set.i",
   "matrix.get.row",
@@ -333,22 +275,8 @@ position = [
   "bytes.copy_within.src_start",
   "bytes.copy_within.src_end",
   "bytes.copy_within.dst",
-  "bytes.read_length_prefixed_strings_le.pos",
-  "bytes.read_string_at.pos",
-  "bytes.read_string_be.pos",
-  "bytes.read_string_be_at.pos",
-  "bytes.read_u8.pos",
   "bytes.skip.pos",
   "bytes.skip.n",
-  "bytes.skip_length_prefixed_le.pos",
-  "bytes.read_uint16.offset",
-  "bytes.read_uint32.offset",
-  "bytes.read_int32.offset",
-  "bytes.read_float32.offset",
-  "bytes.set_uint16.offset",
-  "bytes.set_uint32.offset",
-  "bytes.set_int32.offset",
-  "bytes.set_float32.offset",
   "bytes.get_u8.pos",
   "bytes.next_u8.pos",
   "bytes.put_u8.pos",
@@ -423,8 +351,6 @@ position = [
   "bytes.put_f16_le.pos",
   "bytes.put_f16_be.pos",
   "bytes.next_bytes.pos",
-  "matrix.linear_f32_row_no_bias.w_offset",
-  "matrix.select_rows_f32.offset",
   "matrix.from_bytes_f32_le.offset",
   "matrix.from_bytes_f16_le.offset",
   "matrix.from_bytes_f64_le.offset",
@@ -433,7 +359,6 @@ position = [
 value = [
   "list.range.start",
   "list.range.end",
-  "list.bundled_probe.n",
   "list.range_step.start",
   "list.range_step.end",
   "list.range_step.step",
@@ -450,16 +375,11 @@ value = [
   "bytes.append_u32_le.x",
   "bytes.append_u8.x",
   "bytes.fill.x",
-  "bytes.get_or.default",
   "bytes.insert.x",
   "bytes.pad_start.fill",
   "bytes.pad_end.fill",
   "bytes.push.x",
-  "bytes.set_at.val",
   "bytes.set.x",
-  "bytes.write_i64_be.val",
-  "bytes.write_u32_be.val",
-  "bytes.write_u8.val",
   "bytes.put_u8.x",
   "bytes.put_i8.x",
   "bytes.append_i8.x",
@@ -504,9 +424,6 @@ raw_memory = [
 ]
 # shape-read: a matrix shape or offset that describes data already in a byte buffer; a shape the data cannot fill is zero-filled or refused, as documented
 shape_read = [
-  "matrix.linear_f32_row_no_bias.w_rows",
-  "matrix.linear_f32_row_no_bias.w_cols",
-  "matrix.select_rows_f32.cols",
   "matrix.from_bytes_f32_le.rows",
   "matrix.from_bytes_f32_le.cols",
   "matrix.from_bytes_f16_le.rows",

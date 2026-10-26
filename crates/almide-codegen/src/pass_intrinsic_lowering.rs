@@ -129,9 +129,9 @@ impl NanoPass for IntrinsicLoweringPass {
                         //      equals the frontend's mangled name.
                         //   2. Mangled-name match — the frontend mangled
                         //      `(module, func)` doesn't equal the
-                        //      `@intrinsic` value (e.g. `int.from_hex`
-                        //      mangles to `almide_rt_int_from_hex` but the
-                        //      attribute names `almide_rt_int_parse_hex`).
+                        //      `@intrinsic` value (e.g. `m.f` mangles
+                        //      to `almide_rt_m_f` but the attribute names
+                        //      another symbol).
                         //      Decode the mangled prefix to (module, func)
                         //      and look that up in `map`, so the
                         //      attribute's symbol wins.

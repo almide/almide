@@ -124,7 +124,7 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             | ("value", "set_path")
             | ("value", "__field")
             // The zlib family — Result[Bytes, String] from the ok()/err() ctors
-            // (zlib_deflate.almd, zlib_inflate.almd), fs.read_bytes_raw's shape.
+            // (zlib_deflate.almd, zlib_inflate.almd), fs.read_bytes's shape.
             | ("zlib", "deflate")
             | ("zlib", "deflate_level")
             | ("zlib", "compress")
@@ -316,7 +316,7 @@ pub(crate) fn result_family(ty: &Ty) -> ResultFamily {
 /// layout, the same promise a user callee's return makes. Only the rows whose
 /// declaration returns a `Result` (`HostOp::returns_result`, checked against
 /// the stdlib by the contract test) — an Option- or scalar-returning host op
-/// (`random.choice`, `env.millis`) must not be read as a Result block.
+/// (`random.choice`, `datetime.now_ms`) must not be read as a Result block.
 ///
 /// A body declared with `@implements` whose file never reaches `prim.` is a
 /// member too (#3620): it builds its Result through the ok()/err() ctors, the

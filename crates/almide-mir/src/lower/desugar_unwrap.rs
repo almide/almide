@@ -502,7 +502,7 @@ fn build_main_die(msg: IrExpr, body: &IrExpr) -> IrExpr {
 }
 
 /// The OPTION-subject fail/continue match of [`build_unwrap_match`]
-/// (`int.to_int8_checked(v)!` — the sized_conversion family): the fail arm is
+/// (`int8.from_checked(v)!` — the sized_conversion family): the fail arm is
 /// `none => err("none")` (v0's unwrap-of-none message, oracle: `Error: none`,
 /// exit 1) — or the propagated `none` itself in an Option-returning pure fn
 /// (#1067), or main's die line — and the continuation binds under the SOME

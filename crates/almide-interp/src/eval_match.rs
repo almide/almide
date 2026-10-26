@@ -290,7 +290,7 @@ impl<'a> Interpreter<'a> {
         // is that i32.div_s in disguise: it computed 128 and voted `exit=0
         // stdout=128` against a correct two-target abort consensus, the first
         // dissent the stdlib-pool coverage surfaced (int8_div_overflow began
-        // voting the moment `int.from_int8` gained a body).
+        // voting the moment `int.__from_int8` gained a body).
         if let Some(flow) = Self::narrow_div_overflow(op, &l, &r, &left.ty, &right.ty) {
             return flow;
         }
@@ -533,7 +533,7 @@ fn float2(l: Value, r: Value, f: impl FnOnce(f64, f64) -> f64) -> Flow {
 }
 
 /// Integer `^`, step for step with `almide_pow!` (native) and the wasm
-/// `math.pow` loop: exponentiation by squaring with wrapping multiply over the
+/// `math.__pow` loop: exponentiation by squaring with wrapping multiply over the
 /// full i64 exponent. `None` means a NEGATIVE exponent, which has no integer
 /// result and aborts on every target (#895).
 fn int_pow(base: i64, exp: i64) -> Option<i64> {
@@ -597,7 +597,7 @@ fn apply_binop_int(op: BinOp, l: Value, r: Value) -> Flow {
 /// The f64 operators.
 ///
 /// The float `**` / `^` OPERATOR is the same vendored-musl-libm transcendental
-/// the MODULE path (`math.pow`, bridge.rs) already abstains on: both backends
+/// the MODULE path (`math.__pow`, bridge.rs) already abstains on: both backends
 /// route it through the vendored pow, Rust's `f64::powf` calls the PLATFORM
 /// libm, and the two differ in the last ULP. The module path returned
 /// `Unsupported` (an honest skip) while this operator arm silently voted with

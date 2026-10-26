@@ -20,8 +20,8 @@
 //! in the one option.map lowering.
 //!
 //! 3. A Matrix operator is the `matrix` module call native renders it as:
-//! `a * b` → `matrix.mul(a, b)`, `a + b` / `a - b` → `matrix.add` /
-//! `matrix.sub`, and `m * k` / `k * m` → `matrix.scale(m, k)` with the
+//! `a * b` → `matrix.__mul(a, b)`, `a + b` / `a - b` → `matrix.__add` /
+//! `matrix.__sub`, and `m * k` / `k * m` → `matrix.scale(m, k)` with the
 //! Matrix first (an Int `k` is converted, as native's `as f64`). The
 //! incumbent makes the same rewrite (almide-mir `matrix_binop_rewrite`).
 //!

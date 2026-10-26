@@ -1,7 +1,6 @@
 //! The in-place map delete (#3640), `map.set`'s window (map_inplace.rs)
-//! applied to removal. `map.delete(m, k)` on a var the frame owns, and the
-//! functional `map.remove(m, k)` over a receiver whose credit the op holds
-//! (an owned temporary, or a dying var: the rebind `m = map.remove(m, k)`
+//! applied to removal. The functional `map.remove(m, k)` over a receiver
+//! whose credit the op holds (an owned temporary, or a dying var: the rebind `m = map.remove(m, k)`
 //! in a loop, a self tail call, a fold callback — `@reuse(m)` on the
 //! declaration), used to copy the whole map on every call, an absent key
 //! included. Now the same judge decides:
@@ -14,7 +13,7 @@
 //!   entries shift down one (insertion order kept, as native's
 //!   `Vec::remove`), `len` drops by one entry and an indexed block's index
 //!   is retired (map_index.rs invariant 3). That shift is O(n), so the
-//!   `map.delete` of a TOMBSTONE var (below) leaves a hole instead.
+//!   remove on a TOMBSTONE var (below) leaves a hole instead.
 //! * **present key, shared** (an alias, a holder, a pool static) — the
 //!   functional copy without the entry, and the op's credit on the shared
 //!   original goes: every other holder keeps the pre-delete map (C-033).
@@ -23,14 +22,14 @@
 //!
 //! # Tombstone vars (#3691)
 //!
-//! The `map.delete(m, k)` of a local `m` with an indexed key class (Int or
+//! The `m = map.remove(m, k)` of a local `m` with an indexed key class (Int or
 //! String) past the index threshold tombstones the entry instead of
 //! shifting (map_index.rs "Holes": `$mapidx_kill`, then `$mapidx_settle`
 //! compacts once the holes outnumber the live entries) — native's
 //! `AlmideMap::remove` holes the same way, so a delete is amortized O(1) on
 //! both legs. The holes must not reach anything that walks the block, so
 //! they stay inside the var: `tomb_vars_of` names, per frame, every var a
-//! `map.delete` receives, and each read of one SETTLES the block (compacts
+//! tail remove rebinds, and each read of one SETTLES the block (compacts
 //! it, a no-op without holes) before the value goes anywhere — the read
 //! hook in emitter.rs and the `mut`-param pass (`emit_read_mut_var_cow`).
 //! Only the reads that look through the index read it raw: `get`,

@@ -188,11 +188,3 @@ fn list_drop_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   buf
 }
 
-fn list_tail_heapelem(xs: List[Value]) -> List[Value] = {
-  let h = prim.handle(xs)
-  let n = prim.load32(h + 4)
-  let newlen = if n > 0 then n - 1 else 0
-  let buf: List[Value] = prim.alloc_list_str(newlen)
-  let _c = __lsh_copy(h + 12 + 8, prim.handle(buf) + 12, newlen, 0)
-  buf
-}

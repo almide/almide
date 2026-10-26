@@ -428,10 +428,11 @@ Hello!
 
 ### `http.body_bytes(m) -> Bytes`
 
-The body as `Bytes`: exactly the UTF-8 bytes of `http.body(m)`. A message
-body is held as text today, so this does not recover bytes a lossy decode
-replaced; a body that is not UTF-8 (an image, audio) is not recovered
-byte for byte.
+The body as `Bytes`. For a response the client fetched (`get_response`,
+`send`, the `*_response` family) these are the bytes the server sent, byte
+for byte, so a body that is not UTF-8 (an image, audio) survives; `http.body`
+is their lossy UTF-8 decoding. For a message built in code they are the UTF-8
+bytes of `http.body(m)`.
 
 ```almd run
 import http
@@ -1123,7 +1124,7 @@ http.headers(m: M) -> List[(String, String)]
 // @since 0.6.0 or earlier
 http.body(m: M) -> String
 
-// Body as bytes: the UTF-8 bytes of body(m).
+// Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
 // @since unreleased
 http.body_bytes(m: M) -> Bytes
 

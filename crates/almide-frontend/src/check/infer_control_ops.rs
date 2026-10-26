@@ -352,7 +352,7 @@ impl Checker {
         expect: Option<&super::types::TailExpect>,
     ) -> MatchArmTypes {
         // If ANY arm is an explicit `ok(..)`/`err(..)` ctor, this match PRODUCES a Result (it
-        // re-wraps — base64 decode's `match bs { ok(b) => ok(string.from_bytes(b)), err(e) =>
+        // re-wraps — base64 decode's `match bs { ok(b) => ok(bytes.to_string_lossy(b)), err(e) =>
         // err(e) }`), so NO arm is auto-unwrapped: every arm keeps its Result type and the
         // match types as Result, not its OK type. (Auto-unwrapping only the effect-call arms
         // while a ctor arm stayed Result mismatched — `Result[(String,Int),String]` vs

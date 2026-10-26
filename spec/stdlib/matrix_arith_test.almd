@@ -36,7 +36,7 @@ test "neg flips signs" {
     [1.0, -2.0],
     [3.0, 0.0]
   ])
-  let n = matrix.scale(a, -1.0)
+  let n = -a
   assert_eq(matrix.get(n, 0, 0), some(-1.0))
   assert_eq(matrix.get(n, 0, 1), some(2.0))
   assert_eq(matrix.get(n, 1, 0), some(-3.0))

@@ -509,7 +509,7 @@ pub fn cmd_run(args: RunArgs) {
 /// paths by preopening the host root (`--dir=/`). Windows has no "/" to
 /// preopen: the guest gets the CWD (relative fs paths keep working) plus the
 /// host's real temp dir mapped at the WASI `/tmp` convention, with `TMPDIR`
-/// steering `fs.temp_dir`/`env.temp_dir` there (the guest-side rule is
+/// steering `fs.temp_dir` there (the guest-side rule is
 /// `$TMPDIR ?? "/tmp"`, C-189 — the explicit `--env` wins over inherit-env,
 /// which on Windows would carry no TMPDIR at all). Shared by `cmd_run_wasm`
 /// and the wasm test harness so both legs see one filesystem contract.

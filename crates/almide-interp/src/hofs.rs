@@ -47,7 +47,7 @@ impl<'a> Interpreter<'a> {
         }
         // INSIDE the pool tier a heap value is its address (`pool_depth`), so
         // a VALUE-level body — an `m |> list.map(..)` composition —
-        // handed a block a HEAP-level body built (`matrix.mul`'s, in the
+        // handed a block a HEAP-level body built (`matrix.__mul`'s, in the
         // `matrix_fused` compositions) would iterate an Int. A HOF only
         // reads its receiver, so it is read back under the receiver's STATIC
         // type here, the same read-back the pool boundary performs; what the

@@ -196,8 +196,7 @@ effect fn walk(dir: String) -> Result[List[String], String] = _
 effect fn remove_all(path: String) -> Result[Unit, String] = _
 
 // Effect fn: the answer is a host read (`$TMPDIR` / GetTempPath), not a
-// constant — the bare-`fn` spelling was a misdeclaration (env.temp_dir was
-// always declared effect).
+// constant — the bare-`fn` spelling was a misdeclaration.
 /// Host temp dir; a location, not a safe name.
 @intrinsic("almide_rt_fs_temp_dir")
 effect fn temp_dir() -> String = _

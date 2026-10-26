@@ -98,7 +98,7 @@ impl LowerCtx {
             // LOOP-REASSIGNED (`var iv = state.iv` then `iv = concat(iv, …)` in a `for`/`while` — the
             // aes cfb8 shape): this is the PROVEN loop-carried slot `[Inc; Loop[FDec;FInc]; MoveOut]`
             // (OwnershipLoop.v). The owned `Dup` here is the slot's initial acquire; the in-loop
-            // `bytes.concat` heap-result feeds the slot (`certificate.rs loop_carried_slots`), and the
+            // `bytes.__concat` heap-result feeds the slot (`certificate.rs loop_carried_slots`), and the
             // cert recognizes this Dup-into-a-slot as the slot's `i` (not a bare `a`) so the stream
             // folds to the proven `i(id)m`. (Previously walled as "unproven coordination" — it is in
             // fact the proven Loop cert; the wall only kept the lowering from reaching the slot
@@ -496,7 +496,7 @@ impl LowerCtx {
             // A Unit-typed call tail is an EFFECT call (e.g. `println(s)`): lower it
             // through the STATEMENT dispatcher — the same one-dispatcher discipline
             // as the branch arm-tail — so the functional-rebind group (list.push /
-            // map.insert / bytes.push / clear) fires here too. A lifted LAMBDA whose
+            // bytes.push / clear) fires here too. A lifted LAMBDA whose
             // body is `{ list.push(g, 7) }` reaches its push as this unit TAIL; the
             // direct lower_effect_call bypassed the rebind and emitted a bare
             // unlinked `list.push` (the closure-over-global wall class).

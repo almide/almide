@@ -100,7 +100,7 @@
 
 wasm_budget_bytes = 1073741824
 count = 67
-skip_count = 168
+skip_count = 117
 
 [[divergence]]
 cell   = "bytes.new:len:i32_max"
@@ -409,10 +409,6 @@ slot   = "bytes.read_f64_le_at(pos)"
 reason = "unrenderable: no RENDER entry for return type `(Int, Float?)`"
 
 [[skip]]
-slot   = "bytes.read_float32(offset)"
-reason = "unbuildable: no VALUES entry for parameter type `Endian`"
-
-[[skip]]
 slot   = "bytes.read_i16_be_at(pos)"
 reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
 
@@ -437,14 +433,6 @@ slot   = "bytes.read_i64_le_at(pos)"
 reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
 
 [[skip]]
-slot   = "bytes.read_int32(offset)"
-reason = "unbuildable: no VALUES entry for parameter type `Endian`"
-
-[[skip]]
-slot   = "bytes.read_string_be_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, String?)`"
-
-[[skip]]
 slot   = "bytes.read_u16_be_at(pos)"
 reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
 
@@ -463,30 +451,6 @@ reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
 [[skip]]
 slot   = "bytes.read_u8_at(pos)"
 reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
-
-[[skip]]
-slot   = "bytes.read_uint16(offset)"
-reason = "unbuildable: no VALUES entry for parameter type `Endian`"
-
-[[skip]]
-slot   = "bytes.read_uint32(offset)"
-reason = "unbuildable: no VALUES entry for parameter type `Endian`"
-
-[[skip]]
-slot   = "bytes.set_float32(offset)"
-reason = "unbuildable: no VALUES entry for parameter type `Float32`"
-
-[[skip]]
-slot   = "bytes.set_int32(offset)"
-reason = "unbuildable: no VALUES entry for parameter type `Int32`"
-
-[[skip]]
-slot   = "bytes.set_uint16(offset)"
-reason = "unbuildable: no VALUES entry for parameter type `UInt16`"
-
-[[skip]]
-slot   = "bytes.set_uint32(offset)"
-reason = "unbuildable: no VALUES entry for parameter type `UInt32`"
 
 [[skip]]
 slot   = "bytes.take_at(n)"
@@ -673,106 +637,6 @@ slot   = "unix.shm_write(offset)"
 reason = "unbuildable: no VALUES entry for parameter type `Fd`"
 
 [[skip]]
-slot   = "int.to_float32(n)"
-reason = "unrenderable: no RENDER entry for return type `Float32`"
-
-[[skip]]
-slot   = "int.to_float32_checked(n)"
-reason = "unrenderable: no RENDER entry for return type `Float32?`"
-
-[[skip]]
-slot   = "int.to_float64(n)"
-reason = "unrenderable: no RENDER entry for return type `Float64`"
-
-[[skip]]
-slot   = "int.to_int16(n)"
-reason = "unrenderable: no RENDER entry for return type `Int16`"
-
-[[skip]]
-slot   = "int.to_int16_checked(n)"
-reason = "unrenderable: no RENDER entry for return type `Int16?`"
-
-[[skip]]
-slot   = "int.to_int16_saturating(n)"
-reason = "unrenderable: no RENDER entry for return type `Int16`"
-
-[[skip]]
-slot   = "int.to_int32(n)"
-reason = "unrenderable: no RENDER entry for return type `Int32`"
-
-[[skip]]
-slot   = "int.to_int32_checked(n)"
-reason = "unrenderable: no RENDER entry for return type `Int32?`"
-
-[[skip]]
-slot   = "int.to_int32_saturating(n)"
-reason = "unrenderable: no RENDER entry for return type `Int32`"
-
-[[skip]]
-slot   = "int.to_int64(n)"
-reason = "unrenderable: no RENDER entry for return type `Int64`"
-
-[[skip]]
-slot   = "int.to_int8(n)"
-reason = "unrenderable: no RENDER entry for return type `Int8`"
-
-[[skip]]
-slot   = "int.to_int8_checked(n)"
-reason = "unrenderable: no RENDER entry for return type `Int8?`"
-
-[[skip]]
-slot   = "int.to_int8_saturating(n)"
-reason = "unrenderable: no RENDER entry for return type `Int8`"
-
-[[skip]]
-slot   = "int.to_uint16(n)"
-reason = "unrenderable: no RENDER entry for return type `UInt16`"
-
-[[skip]]
-slot   = "int.to_uint16_checked(n)"
-reason = "unrenderable: no RENDER entry for return type `UInt16?`"
-
-[[skip]]
-slot   = "int.to_uint16_saturating(n)"
-reason = "unrenderable: no RENDER entry for return type `UInt16`"
-
-[[skip]]
-slot   = "int.to_uint32(n)"
-reason = "unrenderable: no RENDER entry for return type `UInt32`"
-
-[[skip]]
-slot   = "int.to_uint32_checked(n)"
-reason = "unrenderable: no RENDER entry for return type `UInt32?`"
-
-[[skip]]
-slot   = "int.to_uint32_saturating(n)"
-reason = "unrenderable: no RENDER entry for return type `UInt32`"
-
-[[skip]]
-slot   = "int.to_uint64(n)"
-reason = "unrenderable: no RENDER entry for return type `UInt64`"
-
-[[skip]]
-slot   = "int.to_uint64_checked(n)"
-reason = "unrenderable: no RENDER entry for return type `UInt64?`"
-
-[[skip]]
-slot   = "int.to_uint64_saturating(n)"
-reason = "unrenderable: no RENDER entry for return type `UInt64`"
-
-[[skip]]
-slot   = "int.to_uint8(n)"
-reason = "unrenderable: no RENDER entry for return type `UInt8`"
-
-[[skip]]
-slot   = "int.to_uint8_checked(n)"
-reason = "unrenderable: no RENDER entry for return type `UInt8?`"
-
-[[skip]]
-slot   = "int.to_uint8_saturating(n)"
-reason = "unrenderable: no RENDER entry for return type `UInt8`"
-
-[[skip]]
 slot   = "list.fold(init)"
 reason = "unbuildable: no VALUES entry for parameter type `(Int, Int) -> Int`"
 
@@ -805,31 +669,11 @@ slot   = "map.contains(key)"
 reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
 
 [[skip]]
-slot   = "map.delete(key)"
-reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
-
-[[skip]]
 slot   = "map.fold(init)"
 reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
 
 [[skip]]
 slot   = "map.get(key)"
-reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
-
-[[skip]]
-slot   = "map.get_or(default)"
-reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
-
-[[skip]]
-slot   = "map.get_or(key)"
-reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
-
-[[skip]]
-slot   = "map.insert(key)"
-reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
-
-[[skip]]
-slot   = "map.insert(value)"
 reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
 
 [[skip]]
@@ -855,18 +699,6 @@ reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
 [[skip]]
 slot   = "map.upsert(key)"
 reason = "unbuildable: no VALUES entry for parameter type `Map[Int, Int]`"
-
-[[skip]]
-slot   = "matrix.conv1d(kernel)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.conv1d(padding)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.conv1d(stride)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
 
 [[skip]]
 slot   = "matrix.dot_row(r)"
@@ -917,18 +749,6 @@ slot   = "matrix.get(row)"
 reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
 
 [[skip]]
-slot   = "matrix.linear_f32_row_no_bias(w_cols)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.linear_f32_row_no_bias(w_offset)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.linear_f32_row_no_bias(w_rows)"
-reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
 slot   = "matrix.ones(cols)"
 reason = "unrenderable: no RENDER entry for return type `Matrix`"
 
@@ -937,24 +757,8 @@ slot   = "matrix.ones(rows)"
 reason = "unrenderable: no RENDER entry for return type `Matrix`"
 
 [[skip]]
-slot   = "matrix.ones_f32(cols)"
-reason = "unrenderable: no RENDER entry for return type `Matrix[Float32]`"
-
-[[skip]]
-slot   = "matrix.ones_f32(rows)"
-reason = "unrenderable: no RENDER entry for return type `Matrix[Float32]`"
-
-[[skip]]
 slot   = "matrix.row_dot(r)"
 reason = "unbuildable: no VALUES entry for parameter type `Matrix`"
-
-[[skip]]
-slot   = "matrix.select_rows_f32(cols)"
-reason = "unrenderable: no RENDER entry for return type `Matrix`"
-
-[[skip]]
-slot   = "matrix.select_rows_f32(offset)"
-reason = "unrenderable: no RENDER entry for return type `Matrix`"
 
 [[skip]]
 slot   = "matrix.slice_rows(end)"
@@ -975,14 +779,6 @@ reason = "unrenderable: no RENDER entry for return type `Matrix`"
 [[skip]]
 slot   = "matrix.zeros(rows)"
 reason = "unrenderable: no RENDER entry for return type `Matrix`"
-
-[[skip]]
-slot   = "matrix.zeros_f32(cols)"
-reason = "unrenderable: no RENDER entry for return type `Matrix[Float32]`"
-
-[[skip]]
-slot   = "matrix.zeros_f32(rows)"
-reason = "unrenderable: no RENDER entry for return type `Matrix[Float32]`"
 
 [[skip]]
 slot   = "prim.alloc_list_str(n)"

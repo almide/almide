@@ -7,8 +7,8 @@
 // tests/process_start_unwaited_child_stopped_test.rs in almide/almide pins
 // its stdout.
 //
-// Run with no arguments it is the OBSERVER: for each exit route it runs its
-// own binary (argv[0]) as the PARENT, which starts `sleep 30`, prints the
+// Run with its own binary's path as the one argument it is the OBSERVER: for
+// each exit route it runs that binary as the PARENT, which starts `sleep 30`, prints the
 // child's pid and that the child is still running, and exits by that route.
 // Once the parent has ended, the observer asks whether the pid still exists
 // (`process.kill(pid, 0)`). A stopped child has been reaped by its parent, so
@@ -50,8 +50,8 @@ effect fn observe(self_path: String, route: String) -> Unit = {
 
 effect fn main() -> Unit = {
   let argv = env.args()
-  match list.get(argv, 1) {
-    some("parent") => parent(list.get(argv, 2) ?? "return")!,
+  match list.get(argv, 0) {
+    some("parent") => parent(list.get(argv, 1) ?? "return")!,
     _ => {
       let self_path = list.get(argv, 0) ?? ""
       observe(self_path, "return")!

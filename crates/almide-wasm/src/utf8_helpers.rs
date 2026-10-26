@@ -1,6 +1,6 @@
 //! UTF-8 byte-walk helpers — the WHATWG Table 3-7 classification
 //! shared by from_utf8 validation (bytes.to_string) and the lossy
-//! replacement walk (to_string_lossy / string.from_bytes). Split
+//! replacement walk (to_string_lossy). Split
 //! from value_helpers.rs for the file budget.
 
 use wasm_encoder::{BlockType, Function, MemArg, ValType};
@@ -270,7 +270,7 @@ pub(crate) fn emit_utf8_lossy_helper() -> Function {
 
 /// `$err_text(str) -> str` — C-418's escaper (#4126), the wasm twin of
 /// almide-base's err_text.rs for the error texts this emitter builds itself
-/// (`value.field`'s key, `error.context`'s label): TAB, CR, LF and NUL read
+/// (`value.__field`'s key): TAB, CR, LF and NUL read
 /// `\t` `\r` `\n` `\0`; every other C0 control and DEL reads `\u{<hex>}`; the
 /// multi-byte characters the rule escapes (C1 and the bidi controls) read
 /// `\u{<hex>}` too — that set is the rule's own predicate run over the code

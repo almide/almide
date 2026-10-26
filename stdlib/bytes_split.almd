@@ -1,4 +1,4 @@
-// bytes_split — SELF-HOSTED bytes.lines / chunks for v1 over the prim floor + the
+// bytes_split — SELF-HOSTED bytes.chunks for v1 over the prim floor + the
 // nested-ownership List[Bytes] machinery (prim.alloc_list_str + store_str, the same builder
 // list.map_str uses). Each piece is a FRESH owned Bytes (alloc_bytes + byte-copy) MOVED into the
 // result via store_str; the result list owns + frees them recursively (DropListStr). Source(s)
@@ -17,39 +17,6 @@ fn __bsp_piece(h: Int, start: Int, end: Int) -> Bytes = {
   let _x = __bsp_copy(prim.handle(piece) + 12, h + 12 + start, n, 0)
   piece
 }
-
-// ── lines (split on '\n'=10; final tail pushed only if non-empty; no '\r' strip) ─────────────
-fn __bl_count_nl(bh: Int, blen: Int, i: Int, acc: Int) -> Int = if i >= blen then acc
-else {
-  let b = prim.load8(bh + 12 + i)
-  if b == 10 then __bl_count_nl(bh, blen, i + 1, acc + 1)
-  else __bl_count_nl(bh, blen, i + 1, acc)
-}
-
-fn __bl_total(bh: Int, blen: Int) -> Int = {
-  let nl = __bl_count_nl(bh, blen, 0, 0)
-  if blen <= 0 then 0
-  else {
-    let last = prim.load8(bh + 12 + blen - 1)
-    if last == 10 then nl else nl + 1
-  }
-}
-
-fn __bl_find_nl(bh: Int, blen: Int, from: Int) -> Int = if from >= blen then blen
-else {
-  let b = prim.load8(bh + 12 + from)
-  if b == 10 then from
-  else __bl_find_nl(bh, blen, from + 1)
-}
-
-fn __bl_fill(lh: Int, bh: Int, blen: Int, from: Int, idx: Int, total: Int) -> Int =
-  if idx >= total then idx
-  else {
-    let nl = __bl_find_nl(bh, blen, from)
-    let piece = __bsp_piece(bh, from, nl)
-    prim.store_str(lh + 12 + idx * 8, piece)
-    __bl_fill(lh, bh, blen, nl + 1, idx + 1, total)
-  }
 
 // ── chunks (consecutive `size`-byte blocks, last possibly shorter; size<=0 -> []) ────────────
 fn __bc_outer(oh: Int, bh: Int, total: Int, size: Int, ci: Int, start: Int) -> Int =

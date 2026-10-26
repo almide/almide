@@ -103,7 +103,7 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
     }).collect::<io::Result<_>>()?;
 
     // The `Almide*` types each module defines at top level: a module that
-    // names one (json.rs's `AlmideMap` in `almide_json_to_map`) depends on its
+    // names another module's (e.g. map.rs's `AlmideMap`) depends on its
     // definer as surely as on an `almide_rt_` fn. Before #4071 `map` was in
     // every program, so the type edge never had to be stated.
     let mut defined_types: Vec<(String, Vec<String>)> = Vec::new();

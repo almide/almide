@@ -322,7 +322,7 @@ impl Emitter<'_> {
     }
 
     /// A float binop that IS a linked self-host fn of (Float, Float) -> Float:
-    /// `**` (math.fpow) and `%` (float.fmod — wasm has no float remainder).
+    /// `**` (math.__fpow) and `%` (float.fmod — wasm has no float remainder).
     fn lower_float_call(&mut self, key: &str, op: &str, left: &IrExpr, right: &IrExpr) -> Result<SliceTy, EmitError> {
         let Some(fi) = self.resolve_qualified(key) else {
             return unsup(&format!("binop:{op}-unlinked"));

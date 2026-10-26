@@ -216,7 +216,7 @@ pub fn desugar_to_option_calls(body: &IrExpr) -> Option<IrExpr> {
                 return;
             }
             // Admitted payloads (#1075 widening — the `value.as_*(v)?` /
-            // `value.field(v, k)?` survivors of the json.as_*/json.get
+            // `value.__field(v, k)?` survivors of the json.as_*/json.get
             // aliases produce `Result[T, String]?` for every T below): the
             // i64-slot scalars ride the len-tag base impl bit-preservingly,
             // and ANY heap-Ok instantiation routes to the payload-type-

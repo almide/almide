@@ -1,6 +1,6 @@
 //! The self-hosted stdlib bodies, lowered once and shared by every interpreter.
 //!
-//! The stdlib is self-hosted: `int.to_int8` is not a Rust intrinsic but pure
+//! The stdlib is self-hosted: `int.__to_int8` is not a Rust intrinsic but pure
 //! Almide (`stdlib/int_sized.almd` — `prim.band` + a sign-extend helper), and the
 //! WASM leg links exactly those bodies into every build via
 //! `almide_lang::self_host_registry`. This module lowers the SAME sources through

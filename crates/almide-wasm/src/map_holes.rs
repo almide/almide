@@ -1,5 +1,5 @@
 //! The hole family of the keyed-lookup index (#3691): the bodies of the
-//! helpers a tombstoning `map.delete` relies on — the index doubled with its
+//! helpers a tombstoning `map.remove` relies on — the index doubled with its
 //! tombstones dropped, the delete's tombstone, the in-place compaction and
 //! the hole count. The design is map_index.rs's "Holes" section; the index
 //! layout and its probe primitives live there.

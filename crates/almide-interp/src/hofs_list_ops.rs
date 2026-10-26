@@ -146,7 +146,7 @@ impl<'a> Interpreter<'a> {
             // or less aborts in the T6 form (#4147); windows past the length
             // are none.
             "chunk" => Some(self.list_chunk(args)),
-            "window" => Some(self.list_windows(args)),
+            "window" => Some(self.list_window(args)),
             // Element-type-blind too: the registry core `list_repeat` is
             // Int-declared, so a Float element reached its `prim.store64` as
             // "a non-address" and every `list.repeat(0.0, n)` zero row left
@@ -181,11 +181,11 @@ impl<'a> Interpreter<'a> {
         Flow::val(Value::list(out))
     }
 
-    /// `list.windows(xs, n)` — n <= 0 aborts (#4147), n > len is the empty
+    /// `list.window(xs, n)` — n <= 0 aborts (#4147), n > len is the empty
     /// list, else the len-n+1 overlapping sub-slices.
-    fn list_windows(&mut self, args: &[Value]) -> Flow {
+    fn list_window(&mut self, args: &[Value]) -> Flow {
         let (Some(Value::List(xs)), Some(Value::Int(n))) = (args.first(), args.get(1)) else {
-            return Flow::Abort("internal: list.windows bad args".into());
+            return Flow::Abort("internal: list.window bad args".into());
         };
         if *n <= 0 {
             return Flow::Abort("window size must be positive".into());

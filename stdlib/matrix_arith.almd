@@ -1,10 +1,8 @@
-// matrix_arith — SELF-HOSTED element-wise `matrix.__sub` / `matrix.__div` / `matrix.__neg` /
-// `matrix.pow` for v1, byte-matching native runtime/rs/src/matrix.rs (zip semantics:
-// rows/cols truncate to the shorter operand, exactly `a.iter().zip(b.iter())`; pow is
-// element-wise `x.powf(exp)` via the vendored math.__fpow). The prim-floor row walk is
+// matrix_arith — SELF-HOSTED element-wise `matrix.__sub` / `matrix.__div` / `matrix.__neg`
+// for v1, byte-matching native runtime/rs/src/matrix.rs (zip semantics: rows/cols truncate to
+// the shorter operand, exactly `a.iter().zip(b.iter())`). The prim-floor row walk is
 // matrix_core.almd's `__mx_add_*` shape verbatim, one file so the auto-linker pulls the
-// whole family together; `matrix.pow`'s element hop calls math.__fpow CROSS-FILE
-// (math_fpow.almd) like every other cross-file self-host callee.
+// whole family together.
 fn __mxa_sub_row(dh: Int, ah: Int, bh: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let x = prim.ffrombits(prim.load64(ah + 12 + i * 8))
@@ -98,21 +96,4 @@ fn matrix_neg(m: List[List[Float]]) -> List[List[Float]] = {
   let out: List[List[Float]] = prim.alloc_list_str(n)
   let _x = __mxa_neg_rows(prim.handle(out), hm, n, 0)
   out
-}
-
-fn __mxa_pow_row(dh: Int, sh: Int, e: Float, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let x = prim.ffrombits(prim.load64(sh + 12 + i * 8))
-  prim.store64(dh + 12 + i * 8, prim.fbits(math.__fpow(x, e)))
-  __mxa_pow_row(dh, sh, e, n, i + 1)
-}
-
-fn __mxa_pow_rows(ho: Int, hm: Int, e: Float, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let sr = prim.load64(hm + 12 + i * 8)
-  let c = prim.load32(sr + 4)
-  let row = prim.alloc_list_f64(c)
-  let _f = __mxa_pow_row(prim.handle(row), sr, e, c, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __mxa_pow_rows(ho, hm, e, n, i + 1)
 }

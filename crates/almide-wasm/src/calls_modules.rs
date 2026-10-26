@@ -302,8 +302,7 @@ impl Emitter<'_> {
                 }
                 unsup(&format!("call:{module}.{func}"))
             }
-            // datetime.now_ms (R-datetime-01): the third clock read, env.millis's
-            // op under the datetime name.
+            // datetime.now_ms (R-datetime-01): the third clock read.
             CallTarget::Module { module, func, .. }
                 if module.as_str() == "datetime" && func.as_str() == "now_ms" =>
             {

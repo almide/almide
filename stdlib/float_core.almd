@@ -9,7 +9,7 @@ fn float_floor(x: Float) -> Float = prim.ffloor(x)
 fn float_ceil(x: Float) -> Float = prim.fceil(x)
 
 // float.min/max are NaN-AWARE — NOT the raw wasm f64.min/f64.max instructions (which
-// PROPAGATE NaN). The exact decision tree shared with math.fmin/fmax (math_float.almd):
+// PROPAGATE NaN). The exact decision tree:
 // ignore a NaN operand (return the other); a TIE (±0 pair included) follows IEEE-754-2019
 // zero ordering (C-049, ALS-T23): min(±0) = -0.0, max(±0) = +0.0, commutative — computed
 // as the bitwise OR (min) / AND (max) of the payloads, the identity on non-zero ties.

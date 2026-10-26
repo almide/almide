@@ -100,7 +100,7 @@ pub(crate) const CODEC_ENCODE_VERIFIED: &[&str] = &[
     "__decode_default_bool", "__decode_default_string",
     // The list-default quartet (develop's DDD-arc addition, synced with
     // the front pin): pure composition of already-admitted fns —
-    // value.field + the native-twinned __is_null + __decode_list_T.
+    // value.__field + the native-twinned __is_null + __decode_list_T.
     "__decode_default_list_int", "__decode_default_list_float",
     "__decode_default_list_bool", "__decode_default_list_string",
 ];
@@ -199,7 +199,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // and two draws differing, not the bytes.
     "random_bytes",
     // json_path.almd, READ side only (audited 2026-08-25): the path rep
-    // is a plain List[String]; get walks value.field / value.as_array /
+    // is a plain List[String]; get walks value.__field / value.as_array /
     // list.get — all native arms here, no raw layout reads. set/remove
     // are REJECTED: their pair walks read the incumbent's inline-pairs
     // Value layout (tag@h+4, count@h+8) — see PORT-MATRIX.
@@ -210,7 +210,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // zlib_inflate.almd / zlib_deflate.almd (#1700, audited 2026-09-01):
     // the C-326 gzip decoder promoted to stdlib plus the stored-block
     // encoder. Every Result is built via language-level ok()/err(); the
-    // buffers are bytes.zeros/bytes.push/bytes.get_or (public surface — the
+    // buffers are bytes.zeros/bytes.push/bytes.get (public surface — the
     // exact construction the C-326 fixture already runs byte-identical on
     // the structural leg); no prim access at all. Parity evidence:
     // spec/wasm_cross/zlib_selfhost.almd (known-answer decode + round

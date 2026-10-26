@@ -59,7 +59,7 @@ fn lower_to_ir_impl(
 /// intrinsic declarations as `Hole` bodies. Where the self-host registry
 /// implements that surface, the declaration is dropped so the call links the
 /// registry's body exactly as it does when the module is auto-imported and
-/// never lowered (#2747: `bytes.write_uint16` walled `expr:Hole` behind an
+/// never lowered (#2747: a since-removed `bytes` writer walled `expr:Hole` behind an
 /// `import bytes` and lowered without one).
 fn drop_registered_intrinsic_stubs(name: &str, module: &mut crate::ir::IrModule) {
     if !crate::stdlib::is_stdlib_module(name) && !crate::stdlib::is_bundled_module(name) {
@@ -598,7 +598,7 @@ pub fn infer_module_capturing(
         // Its E006s are reported, against the embedded source. Every
         // bundled diagnostic used to be dropped ("no user file to blame"),
         // and that hid a bundled module breaking the effect rule the checker
-        // enforces on everyone (#848: `args.flag`, a plain fn, read argv).
+        // enforces on everyone (#848: an `args` plain fn read argv).
         // An E006 is context-free once the callee resolves (it reads only
         // the callee's `effect` marker), so a bundled one is a stdlib bug
         // and fails the build that reaches it; tests/bundled_module_effect_

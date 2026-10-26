@@ -55,7 +55,7 @@ struct Spelled {
     qualified: HashSet<(String, String)>,
     /// Every name the source binds (params, lets, patterns, loop vars). A
     /// module name a source binds anywhere is read as a binding wherever that
-    /// source spells it — and only there: `string.join(list: ...)` binding
+    /// source spells it — and only there: `string.split(list: ...)` binding
     /// `list` says nothing about `list.min(..)` in another module.
     binders: HashSet<String>,
     /// `a.f` read as a call into module `a`, classified by the binders of the

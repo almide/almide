@@ -38,7 +38,7 @@ fn unwrap_or_call_name_option_string(arg_tys: &[Ty]) -> Option<String> {
 /// Extracted from `unwrap_or_call_name_option` (codopsy8 complexity sweep, group 2 of 4):
 /// the "hval" payload family — Value / List[Value] / List[String] — routes to their
 /// rc-correct self-hosts (already registered for the `??` desugar). The generic unwrap_or
-/// takes an i64 scalar default, so a handle default (`json.get_array(v,k) |>
+/// takes an i64 scalar default, so a handle default (`value.get_array(v,k) |>
 /// option.unwrap_or([])`, json_gltf_walk's count_floats) repr-mismatched — invalid wasm. Verbatim.
 fn unwrap_or_call_name_option_value_family(arg_tys: &[Ty]) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;

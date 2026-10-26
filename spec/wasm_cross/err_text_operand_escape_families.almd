@@ -1,8 +1,7 @@
 // @contract: C-418
 // ALS-R5: the operand a runtime error text embeds is escaped by C-418's one
 // rule beyond fs / process / net too (#4126): datetime.parse_iso's offset
-// and json.parse's unexpected character (the err-context label and
-// value.get's key: err_text_label_and_key_escape.almd). Each input below
+// and json.parse's unexpected character. Each input below
 // carries LF, ESC, a C1 control (U+0085) and a bidi control (U+202E); every
 // err text reads them as `\n`, `\u{1b}`, `\u{85}`, `\u{202e}`, the same bytes
 // on native, wasm and the reference evaluator, and no line of stdout holds a

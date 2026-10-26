@@ -1,6 +1,6 @@
 //! In-place container mutation, modeled by binding write-back.
 //!
-//! The stdlib's `mut`-receiver mutators (`list.push`, `map.insert`, …) mutate
+//! The stdlib's `mut`-receiver mutators (`list.push`, `bytes.put_u8`, …) mutate
 //! the CALLER's binding and mostly return `Unit`: the program reads the effect
 //! on the variable, never a returned container. The generic dispatch path
 //! evaluates every argument by value before the callee sees it, so by then the

@@ -1198,8 +1198,6 @@ effect fn main() -> Unit = {
   for x in a {
     println("arg=[${x}]")
   }
-  let pa = env.args()
-  println("process argc=${list.len(pa)}")
   let t0 = datetime.monotonic_ns()
   env.sleep_ms(120)
   let dt = datetime.monotonic_ns() - t0
@@ -1236,7 +1234,7 @@ fn p3_component_serves_env_args_and_sleep_like_native() {
     assert!(native.status.success(), "native: {}", String::from_utf8_lossy(&native.stderr));
     assert_eq!(
         native_out,
-        "välue ✓=x\n<none>\n\n<none>\nvälue ✓=x\nargc=3\narg=[one]\narg=[two words]\narg=[]\nprocess argc=4\nslept\ndone\n",
+        "välue ✓=x\n<none>\n\n<none>\nvälue ✓=x\nargc=3\narg=[one]\narg=[two words]\narg=[]\nslept\ndone\n",
         "the native oracle moved"
     );
     if !wasmtime_available() || !wasmtime_runs_p3() {

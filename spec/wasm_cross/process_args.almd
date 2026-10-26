@@ -18,5 +18,5 @@ effect fn main() -> Unit = {
   let args = env.args()
   let first = list.get(args, 0) ?? ""
   println(int.to_string(list.len(args)))
-  println(if string.len(first) > 0 then "argv0-nonempty" else "argv0-empty")
+  println(if string.len(first) > 0 then "first-nonempty" else "first-empty")
 }

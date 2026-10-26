@@ -1,7 +1,7 @@
 
 /// `buf[i]` over `Bytes` (a scalar `Int` element read) → `bytes.index(buf, i)` — the
 /// CHECKED self-host byte read (aborts `Error: index out of bounds` + exit 1 exactly
-/// like v0's `b[i]`; `bytes.read_u8`'s 0-for-OOB convention is a DIFFERENT api).
+/// like v0's `b[i]`; `bytes.get`'s none-for-OOB answer is a DIFFERENT api).
 /// Same desugar-before-both slot as `desugar_map_access_calls`.
 fn desugar_bytes_index_calls(body: &IrExpr) -> Option<IrExpr> {
     use almide_ir::{walk_expr_mut, IrMutVisitor};
@@ -42,7 +42,7 @@ fn desugar_bytes_index_calls(body: &IrExpr) -> Option<IrExpr> {
 }
 
 /// A float-family BinOp over MATRIX operands (`a * b` / `a + b` / `a - b` on Matrix —
-/// the numeric-protocol operators) → the registered `matrix.mul`/`add`/`sub` module
+/// the numeric-protocol operators) → the registered `matrix.__mul`/`__add`/`__sub` module
 /// call. The scalar-binop path had NO operand gate on the arithmetic arms, so `a * b`
 /// lowered as an f64 multiply of the two BLOCK HANDLES — a silent garbage Matrix on
 /// the verified default (matrix_test's `*` row). Same desugar-before-both slot as
@@ -519,7 +519,7 @@ fn wrap_unit_body_in_ok(body: &IrExpr, result_ty: Ty) -> IrExpr {
 /// - `desugar_assert_calls` — assert/assert_eq/assert_ne → the controlled-halt `if`/die shape.
 /// - `desugar_map_access_calls` — `m[k]` → `map.get(m, k)`.
 /// - `desugar_bytes_index_calls` — `buf[i]` over Bytes → `bytes.index(buf, i)`.
-/// - `desugar_matrix_binops` — matrix `a * b` / `+` / `-` → matrix.mul/add/sub.
+/// - `desugar_matrix_binops` — matrix `a * b` / `+` / `-` → matrix.__mul/__add/__sub.
 /// - `desugar_hof_chain_anf` — the C-127 piped HOF chain → its source-`let` form.
 /// - `desugar_heap_if_call_args` — a HEAP-result `if` in argument position → let-decomposed (#881).
 /// - `desugar_mutable_global_projection_args` / `desugar_bytes_index_assign` —

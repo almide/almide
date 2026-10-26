@@ -16,7 +16,7 @@ use almide_frontend::bundled_sigs;
 use almide_lang::types::FnSig;
 
 const VERBS: &[&str] = &["start", "poll", "read_new", "wait", "cancel"];
-const ONE_SHOT: &[&str] = &["get", "request", "get_response", "send", "get_bytes", "request_bytes"];
+const ONE_SHOT: &[&str] = &["get", "request", "get_response", "send"];
 
 fn sig(name: &str) -> FnSig {
     bundled_sigs::lookup("http", name).unwrap_or_else(|| panic!("family cell missing: http.{name}"))

@@ -293,7 +293,7 @@ else {
 // empty-host check looks at the HOST, not the authority: `http://:8` used to
 // parse with `host = ""` because `:8` is non-empty (#2490). Scheme and host
 // are lowercased, and dot segments are removed from the path (C-402).
-// See also: url.to_string (the inverse), url.query_pairs.
+// See also: url.to_string (the inverse), url.parse_query.
 // Example: match url.parse("https://example.com:8080/a/b?x=1&y=2#top") { ok(u) => u.scheme == "https" and u.host == "example.com" and u.port == some(8080) and u.path == "/a/b" and u.query == "x=1&y=2" and u.fragment == "top", err(_) => false }
 // Example: match url.parse("http://x") { ok(u) => u.host == "x" and u.path == "" and u.port == none, err(_) => false }
 // Example: match url.parse("not a url") { ok(_) => false, err(_) => true }
@@ -382,7 +382,7 @@ fn to_string(u: Url) -> String = {
 
 // Build a query string from pairs, percent-encoding every key and value.
 // Total. `query_pairs(build_query(ps))` recovers the ENCODED forms.
-// See also: url.query_pairs, url.encode_component.
+// See also: url.parse_query, url.encode_component.
 // Example: url.build_query([("q", "a b"), ("lang", "ja")]) == "q=a%20b&lang=ja"
 // Example: url.build_query([]) == ""
 /// k=v joined by &, both sides percent-encoded.

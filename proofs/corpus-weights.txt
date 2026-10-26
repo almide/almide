@@ -60,7 +60,6 @@ bytes_push_inplace	325	9	336
 bytes_rawptr	330	11	384
 bytes_search_edit_family	421	121	788
 bytes_set_value_semantics	350	21	427
-bytes_string_window_domain	383	28	428
 bytes_temp_receiver	56991	87160	468
 bytes_writer_family	388	46	444
 call_closure_lambda_param	248	17	408

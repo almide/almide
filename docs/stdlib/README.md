@@ -643,7 +643,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `http.header_values(m: M, name: String) -> List[String]` — Every value of header name, any case, in wire order; [] if absent.
 - `http.headers(m: M) -> List[(String, String)]` — Every header as (name, value), wire spelling and order, repeats kept.
 - `http.body(m: M) -> String` — Body text; a fetched body is decoded as lossy UTF-8.
-- `http.body_bytes(m: M) -> Bytes` — Body as bytes: the UTF-8 bytes of body(m).
+- `http.body_bytes(m: M) -> Bytes` — Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
 - `http.set_header(m: M, name: String, value: String) -> M` — m with header name set, any case: the first match replaced in place, else appended.
 - `http.set_body(m: M, body: String) -> M` — m with its body replaced.
 - `http.set_body_bytes(m: M, body: Bytes) -> M` — m with its body replaced by body, decoded as lossy UTF-8.

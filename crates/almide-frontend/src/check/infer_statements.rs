@@ -302,7 +302,7 @@ impl Checker {
         self.check_closure_escape(name.as_str(), format!("{} = ...", name));
     }
 
-    /// A mut-receiver stdlib mutator (`list.push`, `map.insert`,
+    /// A mut-receiver stdlib mutator (`list.push`, `bytes.put_u8`,
     /// `string.push`, …) returns Unit and mutates in place. Writing
     /// `b = list.push(b, x)` therefore assigns Unit to a non-Unit
     /// binding. Native catches this at rustc (E0308 "expected Vec,

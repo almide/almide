@@ -82,7 +82,7 @@ fn headers[M: HttpMessage](m: M) -> List[(String, String)] = m.__self_headers()
 /// Body text; a fetched body is decoded as lossy UTF-8.
 fn body[M: HttpMessage](m: M) -> String = m.__self_body()
 
-/// Body as bytes: the UTF-8 bytes of body(m).
+/// Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
 fn body_bytes[M: HttpMessage](m: M) -> Bytes = m.__self_body_bytes()
 
 /// m with header name set, any case: the first match replaced in place, else appended.
@@ -116,7 +116,9 @@ fn __http_response_headers_flat(m: HttpResponse) -> List[String] = _
 @borrow_ref(m)
 fn __http_response_body(m: HttpResponse) -> String = _
 
-fn __http_response_body_bytes(m: HttpResponse) -> Bytes = bytes.from_string(http.__http_response_body(m))
+@intrinsic("almide_http_get_body_bytes")
+@borrow_ref(m)
+fn __http_response_body_bytes(m: HttpResponse) -> Bytes = _
 
 @intrinsic("almide_http_set_header")
 @consume(m)

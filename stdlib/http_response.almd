@@ -32,7 +32,7 @@ fn http_redirect(url: String) -> List[String] = ["302", "", "Location", url]
 // A non-ASCII char is not in the table and falls through unchanged, which is
 // exactly what the byte-wise fold does to a UTF-8 lead/continuation byte.
 // Spelled with chars/index_of/slice rather than a byte walk on purpose: the
-// interp oracle bridges those three, while string.to_bytes bottoms out in
+// interp oracle bridges those three, while bytes.from_string bottoms out in
 // prim.handle and would make every http fixture ABSTAIN from the 3-way vote.
 fn __hr_fold(c: String) -> String = match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
   some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
@@ -83,7 +83,11 @@ fn http_status(resp: List[String], code: Int) -> List[String] = list.set(
   int.to_string(code),
 )
 
-fn http_body(resp: List[String]) -> String = list.get(resp, 1) ?? ""
+// The body cell holds a fetched body's bytes as the host wrote them, so
+// `body` decodes them the lossy way native does and `body_bytes` copies them.
+fn http_body(resp: List[String]) -> String = bytes.to_string_lossy(http_body_bytes(resp))
+
+fn http_body_bytes(resp: List[String]) -> Bytes = bytes.from_string(list.get(resp, 1) ?? "")
 
 fn http_get_header(resp: List[String], key: String) -> String? = __hr_find(resp, 2, key)
 

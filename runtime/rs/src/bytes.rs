@@ -514,9 +514,6 @@ pub fn almide_rt_bytes_read_u32_be(b: &Vec<u8>, pos: i64) -> i64 {
     if p.checked_add(4).is_none_or(|__e| __e > b.len()) { return 0; }
     u32::from_be_bytes(bytes_fixed::<4>(b, p)) as i64
 }
-pub fn almide_rt_bytes_read_u8(b: &Vec<u8>, pos: i64) -> i64 {
-    b.get(pos as usize).map(|&x| x as i64).unwrap_or(0)
-}
 pub fn almide_rt_bytes_read_bool(b: &Vec<u8>, pos: i64) -> bool {
     b.get(pos as usize).map(|&x| x != 0).unwrap_or(false)
 }
@@ -675,7 +672,7 @@ pub fn almide_rt_bytes_append_i64_be(b: &mut Vec<u8>, val: i64) {
 // `write_f64_be`, `write_float32` — is a NaN observation boundary (C-210): a
 // NaN writes the one canonical pattern, as `float.to_bits` reads it, never its
 // raw sign/payload bits (#3647: x86 arithmetic sets the NaN sign where aarch64
-// does not, and `int.bits_to_float` smuggles any payload; #3658: the sets and
+// does not, and `float.from_bits` smuggles any payload; #3658: the sets and
 // writes too). Every writer takes its value through these two helpers.
 fn canonical_f64(val: f64) -> f64 {
     if val.is_nan() { f64::from_bits(0x7FF8_0000_0000_0000) } else { val }

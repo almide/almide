@@ -116,7 +116,6 @@ patterns = [
   "capability: HOF map.find",
   "capability: HOF list.update",
   "capability: list.min/max on non-comparable elements",
-  "capability: prim.args_get_list_full",
   "capability: prim.args_get_list",
   "capability: args.",
   "capability: prim.make_dir",

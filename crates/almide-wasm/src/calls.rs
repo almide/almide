@@ -611,7 +611,7 @@ impl Emitter<'_> {
                     // The incumbent packs EVERY list element into an
                     // 8-byte slot; ours are 4 for the i32 word class —
                     // List[Int]/List[Float] agree, List[String]/List[Bool]
-                    // do not (string.join through a linked impl trapped).
+                    // do not (list.join through a linked impl trapped).
                     SliceTy::List(h) => self.types.el(*h).slot_size() == 4,
                     _ => false,
                 }

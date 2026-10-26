@@ -478,8 +478,8 @@ fn __join(xs: List[String], sep: String) -> String = list.__join_string(xs, sep)
 
 // ── C-418's escaper, for the self-hosted bodies (#4126) ──
 // A runtime error text that embeds a text the program passed (datetime.parse_iso's
-// offset, json.parse's unexpected character, value.__field's key, error.context's
-// label) writes each C0 control, DEL, C1 control and bidirectional control in it
+// offset, json.parse's unexpected character, value.__field's key)
+// writes each C0 control, DEL, C1 control and bidirectional control in it
 // as `\n` `\r` `\t` `\0` or `\u{<lowercase hex>}`, and keeps every other character.
 // Native is almide-base's err_text.rs; the wasm bodies and the interp oracle run
 // the pure-Almide twin in stdlib/string_err_text.almd. A dunder name: not part of

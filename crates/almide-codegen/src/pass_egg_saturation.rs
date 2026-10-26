@@ -13,7 +13,7 @@
 //!
 //! Tree-shaped matrix expressions only. `MatrixFusionPass` runs after
 //! this pass and handles the complementary let-split chain form
-//! (`let x = matrix.add(...); matrix.scale(x, ...)`) which requires
+//! (`let x = a + b; matrix.scale(x, ...)`) which requires
 //! reasoning across binders that the egg bridge does not yet model.
 //! The two passes compose: egg fuses everything it can reach, the
 //! imperative pass mops up whatever remains.
@@ -88,8 +88,9 @@ impl<'a> IrMutVisitor for EggVisitor<'a> {
     }
 }
 
-/// Whether `expr` is a Call the bridge knows how to lift: every
-/// `matrix.<op>` Call. The list combinators are NOT lifted any more
+/// Whether `expr` is a node the bridge knows how to lift: every
+/// `matrix.<op>` Call, and the matrix operators (`a * b`, `a + b`, a scale),
+/// which lower to `matrix.__mul` / `__add` / `scale` (R-matrix-14). The list combinators are NOT lifted any more
 /// (#2045): the bridge's list rules compose lambdas by substituting one
 /// body into another (`map-filter-fuse` copies `f`'s body three times),
 /// which duplicates and reorders a callback's side effects — the
@@ -99,10 +100,15 @@ impl<'a> IrMutVisitor for EggVisitor<'a> {
 /// when the interleaving is unobservable. The rules themselves stay in
 /// `almide-egg-lab` (its bridge tests cover them).
 fn is_saturation_target(expr: &IrExpr) -> bool {
-    let IrExprKind::Call { target: almide_ir::CallTarget::Module { module, .. }, .. } = &expr.kind else {
-        return false;
-    };
-    module.as_str() == "matrix"
+    match &expr.kind {
+        IrExprKind::Call { target: almide_ir::CallTarget::Module { module, .. }, .. } => module.as_str() == "matrix",
+        IrExprKind::BinOp { op, .. } => is_matrix_operator(*op),
+        _ => false,
+    }
+}
+
+fn is_matrix_operator(op: almide_ir::BinOp) -> bool {
+    matches!(op, almide_ir::BinOp::MulMatrix | almide_ir::BinOp::AddMatrix | almide_ir::BinOp::ScaleMatrix)
 }
 
 fn try_saturate(
@@ -122,5 +128,10 @@ fn try_saturate(
     let canonical = runner.egraph.find(root);
     let extractor = Extractor::new(&runner.egraph, almide_egg_lab::FusionCost);
     let (_, best) = extractor.find_best(canonical);
+    // A subtree is replaced only by a fusion: an unfused one keeps its own
+    // nodes, so an operator keeps rendering as the operator it is.
+    if !best.as_ref().iter().any(|n| matches!(n, almide_egg_lab::AlmideExpr::MatrixMulScaled(_))) {
+        return None;
+    }
     bridge.lower(&best, vt).ok()
 }

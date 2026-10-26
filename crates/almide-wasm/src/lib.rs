@@ -479,8 +479,8 @@ enum SliceTy {
     /// `Map[K, V]` — i32 block; payload = INSERTION-ORDERED (k, v) entries
     /// (the oracle's semantics), entry layout from `pack_fields`. Keys are
     /// scalars (equality must be defined); values any slice type. Same
-    /// no-in-place-mutation doctrine: binds deep-copy, `map.insert`'s mut
-    /// form is a var write-back.
+    /// no-in-place-mutation doctrine: binds deep-copy, the in-place
+    /// `m[k] = v` form is a var write-back.
     Map(ETy, ETy),
     /// `Set[T]` — i32 block; an insertion-ordered element vector with the
     /// dedup-on-insert invariant (layout-identical to List[T]).
