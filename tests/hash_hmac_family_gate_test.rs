@@ -58,6 +58,7 @@ fn ty(t: &Value) -> String {
             }
         }
         "list" => format!("List[{}]", inner("inner")),
+        "result" => format!("Result[{}, {}]", inner("ok"), inner("err")),
         "option" => format!("Option[{}]", inner("inner")),
         other => format!("<{other}>"),
     }
@@ -164,6 +165,23 @@ fn family_problems(
     problems
 }
 
+/// The secret sources: a stdlib read whose value is a credential answers it
+/// as a `Secret`, so a token compared with a leaking `==` is not writable
+/// without a visible `secret.reveal` (row 20, C-438).
+const SECRET_SOURCES: &[(&str, &str, &str)] = &[("env", "secret", "secret(name: String) -> Option[Secret[String]]")];
+
+fn source_problems(surface: &dyn Fn(&str) -> BTreeMap<String, String>) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (m, name, sig) in SECRET_SOURCES {
+        match surface(m).get(*name) {
+            None => problems.push(format!("{m}: secret source missing: {sig}")),
+            Some(got) if got != sig => problems.push(format!("{m}: `{got}` must be `{sig}`")),
+            _ => {}
+        }
+    }
+    problems
+}
+
 /// The body of `fn name(` in `src`: from the declaration to the next blank line.
 fn body<'a>(src: &'a str, name: &str) -> Option<&'a str> {
     let at = src.find(&format!("\nfn {name}("))? + 1;
@@ -203,6 +221,12 @@ fn the_hmac_family_is_the_full_matrix_and_nothing_else() {
          in L2-hash.md and this gate in the same PR):\n{}",
         problems.join("\n")
     );
+}
+
+#[test]
+fn the_secret_sources_answer_a_secret() {
+    let problems = source_problems(&|m| declared(m));
+    assert!(problems.is_empty(), "row 20 / C-438:\n{}", problems.join("\n"));
 }
 
 #[test]
@@ -256,6 +280,18 @@ fn control_the_gates_fail_on_each_forged_shape() {
     let mut pointwise = hash.clone();
     pointwise.insert("hmac_sha384".into(), "hmac_sha384(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]".into());
     assert!(fails(&pointwise, &string, "outside the HMAC matrix"), "control: a point-wise extra cell must fail");
+
+    let plain_env = |m: &str| {
+        let mut s = declared(m);
+        if m == "env" {
+            s.insert("secret".into(), "secret(name: String) -> Option[String]".into());
+        }
+        s
+    };
+    assert!(
+        source_problems(&plain_env).iter().any(|p| p.contains("must be")),
+        "control: env.secret answering a plain String must fail the gate"
+    );
 
     let src = stdlib("hash.almd");
     let base = verify_problems(&src);
