@@ -533,6 +533,8 @@ impl Checker {
         }
 
         self.check_protocol_bounds(name, &sig, &bindings);
+        // Row 22 (C-436): an `@input_sink`'s input types are judged post-solve.
+        self.defer_input_sink_checks(name, qualified_via_direct.as_deref(), &bindings);
         self.propagate_call_arg_types(name, &sig, CheckedArgs {
             arg_tys, aligned_raw: &aligned_raw, e005_fired: &e005_fired,
         }, &bindings);

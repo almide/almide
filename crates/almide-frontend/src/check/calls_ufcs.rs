@@ -124,6 +124,16 @@ impl Checker {
         if field == "encode" && self.reject_secret_encode(&obj_concrete) {
             return Ty::Named(sym("Value"), vec![]);
         }
+        if let Ty::Named(n, _) = &obj_concrete
+            && let Some(hint) = self.missing_codec_direction_hint(*n, field.as_str())
+        {
+            self.emit(super::err(
+                format!("undefined method '{}' on {}", field, obj_concrete.display()),
+                hint,
+                format!("method call .{}()", field),
+            ).with_code("E002"));
+            return Ty::Unknown;
+        }
         if matches!(&obj_concrete, Ty::Named(..) | Ty::Record { .. }) && !obj_concrete.contains_typevar() {
             let type_name = obj_concrete.display();
             self.emit(super::err(

@@ -57,6 +57,11 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // Signals or probes a pid (#4125): `[permissions] proc` bounds it as the
     // `kill` command; crates/almide-types `signals_process_stdlib_fns`
     "signals_process",
+    // Decodes untrusted input into its `Decode`-bounded type parameters
+    // (row 22, C-436): each must bind an input type — a `: Decode` record
+    // that is not also `Encode` — or the call is E110 (crates/almide-frontend
+    // check/input_sink.rs)
+    "input_sink",
     // Scheduling and placement
     "schedule",
     "location",
@@ -276,6 +281,25 @@ pub fn check_field_attrs(field: &ast::FieldType, diagnostics: &mut Vec<Diagnosti
         if let Some(s) = &attr.span { diag.line = Some(s.line); diag.col = Some(s.col); }
         diagnostics.push(diag);
     }
+}
+
+/// R4 of row 22 (C-435): on an INPUT type — `: Decode` and not `Encode` —
+/// every field is input, so a field-skip attribute contradicts the
+/// declaration: the field could never be set. E053, the field-attribute
+/// family. `@skip` / `@skip_decode` stay for two-way types (C-428).
+pub fn check_input_type_field_skips(type_name: &str, field: &ast::FieldType, diagnostics: &mut Vec<Diagnostic>) {
+    let Some(attr) = field.attrs.iter().find(|a| CODEC_FIELD_SKIPS.iter().any(|(n, _)| *n == a.name.as_str())) else { return };
+    let name = attr.name.as_str();
+    let mut diag = Diagnostic::error(
+        format!("field '{}' of input type '{type_name}' is `@{name}`, but every field of a `: Decode` type is input", field.name),
+        format!(
+            "An input type lists what the client may set. Move '{}' to the type you build from it, or declare '{type_name}' `: Codec` if it is also written out.",
+            field.name
+        ),
+        format!("@{name} {}", field.name),
+    ).with_code("E053");
+    if let Some(s) = &attr.span { diag.line = Some(s.line); diag.col = Some(s.col); }
+    diagnostics.push(diag);
 }
 
 /// Every record field an `ast::TypeExpr` declares: a record's own fields and

@@ -86,9 +86,13 @@ impl Checker {
     fn check_typevar_static_requirement(&mut self, tv: Sym, field: &str, arg_tys: &[Ty]) -> Option<Ty> {
         let protos = self.env.generic_protocol_bounds.get(&tv).cloned()?;
         let self_ty = Ty::TypeVar(tv);
+        // Inside an `@input_sink` fn its input type parameter is a `Decode`
+        // record, so the record's `decode_strict` (the same signature as
+        // `decode`) is reachable through it (row 22, C-436).
+        let lookup = if self.input_sink_record_method(tv, field) { "decode" } else { field };
         let sig = protos.iter()
             .filter_map(|p| self.env.protocols.get(p))
-            .find_map(|p| p.methods.iter().find(|m| m.name.as_str() == field).cloned())?;
+            .find_map(|p| p.methods.iter().find(|m| m.name.as_str() == lookup).cloned())?;
         if sig.params.len() != arg_tys.len() {
             self.emit(super::err(
                 format!("{}.{}() expects {} argument(s) but got {}", tv, field, sig.params.len(), arg_tys.len()),
