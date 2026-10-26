@@ -73,12 +73,12 @@ fn flatten[T](xss: List[List[T]]) -> List[T] = _
 // consuming it cloned the WHOLE list per call whenever the source was read
 // again, O(n) per `take(xs, 2)` (#3397). Gated by
 // tests/list_read_only_source_borrow_test.rs.
-/// First n elements; all if n >= len or n < 0.
+/// First n elements; all if n >= len, [] if n < 0.
 @intrinsic("almide_rt_list_take")
 @reuse(xs)
 fn take[A](xs: List[A], n: Int) -> List[A] = _
 
-/// All but the first n; [] if n >= len or n < 0.
+/// All but the first n; [] if n >= len, all if n < 0.
 @intrinsic("almide_rt_list_drop")
 @reuse(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
@@ -98,7 +98,7 @@ fn index_of[A](xs: List[A], x: A) -> Int? = _
 @intrinsic("almide_rt_list_last")
 fn last[A](xs: List[A]) -> A? = _
 
-/// Runs of n, last may be short; n = 0 aborts.
+/// Runs of n, last may be short; n <= 0 aborts.
 @intrinsic("almide_rt_list_chunk")
 fn chunk[A](xs: List[A], n: Int) -> List[List[A]] = _
 
@@ -245,7 +245,7 @@ fn unique_by[A, K](xs: List[A], f: (A) -> K) -> List[A] = _
 @intrinsic("almide_rt_list_range")
 fn range(start: Int, end: Int) -> List[Int] = _
 
-/// Indices start..<end, clamped; [] if start >= end.
+/// Indices start..<end, each clamped to 0..len; [] if start >= end.
 @intrinsic("almide_rt_list_slice")
 @reuse(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
@@ -269,7 +269,7 @@ fn repeat[A](val: A, n: Int) -> List[A] = _
 @consume(xs)
 fn intersperse[A](xs: List[A], sep: A) -> List[A] = _
 
-/// All n-long runs; [] if n > len; n = 0 aborts.
+/// All n-long runs; [] if n > len; n <= 0 aborts.
 @intrinsic("almide_rt_list_windows")
 fn windows[A](xs: List[A], n: Int) -> List[List[A]] = _
 
@@ -277,12 +277,12 @@ fn windows[A](xs: List[A], n: Int) -> List[List[A]] = _
 @intrinsic("almide_rt_list_dedup")
 fn dedup[A](xs: List[A]) -> List[A] = _
 
-/// Last n elements; all if n >= len or n < 0.
+/// Last n elements; all if n >= len, [] if n < 0.
 @intrinsic("almide_rt_list_take_end")
 @reuse(xs)
 fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 
-/// All but the last n; [] if n >= len or n < 0.
+/// All but the last n; [] if n >= len, all if n < 0.
 @intrinsic("almide_rt_list_drop_end")
 @reuse(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
@@ -292,7 +292,7 @@ fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
 @consume(xs)
 fn shuffle[A](xs: List[A]) -> List[A] = _
 
-/// All n-long runs; [] if n > len; n = 0 aborts.
+/// All n-long runs; [] if n > len; n <= 0 aborts.
 @intrinsic("almide_rt_list_window")
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
@@ -328,7 +328,7 @@ fn bundled_probe(n: Int) -> Int = n + 1
 
 // Split a list at index `n`. Equivalent to `(list.take(xs, n), list.drop(xs, n))`.
 // Demonstrates bundled-Almide calling existing stdlib fns.
-/// (take n, drop n); n past the end gives (xs, []).
+/// (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
 fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), list.drop(xs, n))
 
 // Build [seed, f(seed), f(f(seed)), ...] of length `n`. `f` runs exactly `n`

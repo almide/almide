@@ -690,7 +690,7 @@ fn list_swap_value(xs: List[Value], i: Int, j: Int) -> List[Value] = {
 fn list_take_end_value(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let start = if n < 0 then 0
+  let start = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let cnt = len - start
   let buf = prim.alloc_list_str(cnt)
@@ -701,7 +701,7 @@ fn list_take_end_value(xs: List[Value], n: Int) -> List[Value] = {
 fn list_drop_end_value(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let endi = if n < 0 then 0
+  let endi = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let buf = prim.alloc_list_str(endi)
   let _c = __lsv_copy(h + 12, prim.handle(buf) + 12, endi, 0)
@@ -1119,7 +1119,7 @@ else {
 fn list_take_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let count = if n < 0 then len
+  let count = if n < 0 then 0
   else if n > len then len else n
   let buf = prim.alloc_list_str(count)
   __ldls_share(h, prim.handle(buf), 0, count, 0)
@@ -1133,7 +1133,7 @@ fn list_take_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
 fn list_drop_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let start = if n < 0 then len
+  let start = if n < 0 then 0
   else if n > len then len else n
   let count = len - start
   let buf = prim.alloc_list_str(count)

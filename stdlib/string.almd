@@ -196,19 +196,19 @@ fn first(s: String) -> String? = _
 @intrinsic("almide_rt_string_last")
 fn last(s: String) -> String? = _
 
-/// First n codepoints; all of s if n < 0.
+/// First n codepoints; "" if n < 0.
 @intrinsic("almide_rt_string_take")
 fn take(s: String, n: Int) -> String = _
 
-/// Last n codepoints; all of s if n < 0.
+/// Last n codepoints; "" if n < 0.
 @intrinsic("almide_rt_string_take_end")
 fn take_end(s: String, n: Int) -> String = _
 
-/// s minus first n codepoints; "" if n < 0.
+/// s minus first n codepoints; s if n < 0.
 @intrinsic("almide_rt_string_drop")
 fn drop(s: String, n: Int) -> String = _
 
-/// s minus last n codepoints; "" if n < 0.
+/// s minus last n codepoints; s if n < 0.
 @intrinsic("almide_rt_string_drop_end")
 fn drop_end(s: String, n: Int) -> String = _
 
@@ -462,10 +462,8 @@ fn window(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.window: size must be positive, got ${n}")
   else list.window(string.chars(s), n) |> list.map((cs) => string.join(cs, ""))
 
-/// (first n characters, the rest); n past the end gives (s, ""); n < 0 aborts.
-fn split_at(s: String, n: Int) -> (String, String) =
-  if n < 0 then panic("string.split_at: negative index ${n}")
-  else (string.take(s, n), string.drop(s, n))
+/// (first n characters, the rest); n past the end gives (s, ""), n < 0 gives ("", s).
+fn split_at(s: String, n: Int) -> (String, String) = (string.take(s, n), string.drop(s, n))
 
 /// s with each run of equal adjacent characters collapsed to one.
 fn dedup(s: String) -> String = string.join(list.dedup(string.chars(s)), "")

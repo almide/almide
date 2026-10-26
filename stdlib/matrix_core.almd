@@ -280,12 +280,11 @@ fn matrix_transpose(m: List[List[Float]]) -> List[List[Float]] = {
   out
 }
 
-// v0 slice_rows: rows start..min(end, len); start >= that end → the 0-row matrix.
-// Both bounds read as native's `as usize`: a negative end is past every row
-// (the slice runs to the last row), a negative start is past every row (the
-// empty slice) — the signed reading read rows at negative offsets (#1423).
-// That is `list.slice`'s index doctrine (C-034) and exactly what native's
-// `almide_rt_matrix_slice_rows` answers. The negative-start half was also an
+// slice_rows: rows start..min(end, len); start >= that end → the 0-row matrix.
+// Both bounds clamp into [0, len], a negative bound being 0 (#4147) — the
+// `list.slice` rule and exactly what native's `almide_rt_matrix_slice_rows`
+// answers. (Before #4147 both read as `as usize`: a negative end ran to the
+// last row and a negative start was empty.) The negative-start half was also an
 // out-of-bounds READ (#2475): this body clamped only `end`, so `start = -1`
 // reached `__mx_slice_fill`, whose first load `hm + 12 + (-1) * 8 = hm + 4` is
 // the outer block's own LENGTH word — dereferenced as a row pointer, for a
@@ -295,10 +294,11 @@ fn matrix_transpose(m: List[List[Float]]) -> List[List[Float]] = {
 fn matrix_slice_rows(m: List[List[Float]], start: Int, end: Int) -> List[List[Float]] = {
   let hm = prim.handle(m)
   let len = prim.load32(hm + 4)
-  let e = if end < 0 or end > len then len else end
-  let n = if start >= 0 and start < e then e - start else 0
+  let e = if end < 0 then 0 else (if end > len then len else end)
+  let s = if start < 0 then 0 else start
+  let n = if s < e then e - s else 0
   let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mx_slice_fill(prim.handle(out), hm, start, n, 0)
+  let _x = __mx_slice_fill(prim.handle(out), hm, s, n, 0)
   out
 }
 
