@@ -160,8 +160,8 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     // `uuid.v4` draws entropy; `v7` reads the clock too (declared there).
     // parse / to_string / the byte conversions / compare are pure.
     ("uuid", ModuleEffects::EffectFns(&[Effect::Rand])),
-    // The process environment: variables and argv. `env.set` declares
-    // `Env.write`; the clock readers declare `Time`.
+    // The process environment: variables and argv. `env.set` and
+    // `env.remove` declare `Env.write`; the clock readers declare `Time`.
     ("env", ModuleEffects::All(&[Effect::EnvRead])),
     // Starting and signalling processes. The readers (`process.args`,
     // `process.pid`) declare `Env.read`, `process.exit` `Abort`.
@@ -643,6 +643,8 @@ mod classification_gate {
         assert_eq!(stdlib_call_effect("process", "exit"), vec![Abort]);
         assert_eq!(stdlib_call_effect("env", "get"), vec![EnvRead]);
         assert_eq!(stdlib_call_effect("env", "set"), vec![EnvWrite]);
+        assert_eq!(stdlib_call_effect("env", "remove"), vec![EnvWrite]);
+        assert_eq!(stdlib_call_effect("env", "vars"), vec![EnvRead]);
         assert_eq!(stdlib_call_effect("fs", "read_text"), vec![FsRead]);
         assert_eq!(stdlib_call_effect("fs", "remove_all"), vec![FsWrite]);
         assert_eq!(stdlib_call_effect("fs", "copy"), vec![FsRead, FsWrite]);

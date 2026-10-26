@@ -123,6 +123,11 @@ pub const HOST_OPS: &[HostOp] = &[
     // (#4200) before it reaches its private op `__set`.
     wrapper("env", "set", "__set", "almide_rt_env___set", ENV).result(),
     op("env", "__set", "almide_rt_env___set", ENV),
+    // `env.remove` hands `__set` the value NUL, `set`'s refused value, as the
+    // unset mark (#3908); `env.vars` keys and sorts `__environ`'s entries.
+    wrapper("env", "remove", "__set", "almide_rt_env___set", ENV).result(),
+    wrapper("env", "vars", "__environ", "almide_rt_env___environ", ENV),
+    op("env", "__environ", "almide_rt_env___environ", ENV),
     // `env.cwd` reads PWD and `temp_dir` honours $TMPDIR: environment reads.
     op("env", "cwd", "almide_rt_env_cwd", ENV).result(),
     op("env", "temp_dir", "almide_rt_env_temp_dir", ENV),
