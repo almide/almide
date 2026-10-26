@@ -13,12 +13,12 @@ effect fn float() -> Float = _
 
 /// Random element of xs; none when empty. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_choice")
-effect fn choice[T](xs: List[T]) -> T? = _
+effect fn choice[A](xs: List[A]) -> A? = _
 
 /// Random permutation of xs as a new list. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_shuffle")
 @consume(xs)
-effect fn shuffle[T](xs: List[T]) -> List[T] = _
+effect fn shuffle[A](xs: List[A]) -> List[A] = _
 
 /// n bytes from the OS cryptographic random source (CSPRNG); n < 0 aborts.
 @intrinsic("almide_rt_random_bytes")
