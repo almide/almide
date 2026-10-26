@@ -197,6 +197,10 @@ impl Checker {
             ExprKind::SpreadRecord { base, fields, .. } => {
                 let base_ty = self.infer_expr(base);
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
+                // An update builds a new value of the base's type field by
+                // field: of an opaque record outside its module it is a
+                // literal of it (E033, #4107).
+                self.reject_foreign_opaque_record(&resolve_ty(&base_ty, &self.uf), "build a record update of");
                 // #3358: an updated field takes the base record's DECLARED field
                 // type, as the same field of a record literal does
                 // (`constrain_record_fields`). Without this the value was
