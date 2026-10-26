@@ -1,6 +1,7 @@
 import fs
 import process
 import datetime
+import env
 
 let FNV_OFFSET = 1469598103934665603
 let FNV_PRIME = 1099511628211
@@ -34,7 +35,7 @@ fn minihash(data: List[Int]) -> String = {
 }
 
 fn hash_str(s: String) -> String =
-  minihash(string.to_bytes(s))
+  minihash(bytes.to_list(bytes.from_string(s)))
 
 fn parse_commit_files(content: String) -> Map[String, String] = {
   let lines = string.split(content, "\n")
@@ -99,7 +100,7 @@ effect fn cmd_commit(message: String) -> Result[Unit, String] = {
   let head_content = fs.read_text(".minigit/HEAD")? ?? ""
   let parent = string.trim(head_content)
   let parent_str = if string.len(parent) > 0 then parent else "NONE"
-  let ts = datetime.to_unix(datetime.now())
+  let ts = datetime.now()
   var commit_text = "parent: " + parent_str + "\n"
   commit_text = commit_text + "timestamp: " + int.to_string(ts) + "\n"
   commit_text = commit_text + "message: " + message + "\n"
@@ -287,7 +288,7 @@ effect fn cmd_show(commit_hash: String) -> Result[Unit, String] = {
 }
 
 effect fn main() -> Unit = {
-  let args = process.args()
+  let args = env.args()
   let cmd = list.get(args, 1) ?? ""
   match cmd {
     "init" => {

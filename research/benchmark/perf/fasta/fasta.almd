@@ -56,7 +56,7 @@ effect fn main() -> Unit = {
 
   var seed = 42
 
-  let alu_bytes = string.to_bytes(ALU)
+  let alu_bytes = bytes.to_list(bytes.from_string(ALU))
   let alu_len = list.len(alu_bytes)
   let newline = 10
 
@@ -90,7 +90,7 @@ effect fn main() -> Unit = {
     var i = 0
     while i < line_len {
       seed = (seed * IA + IC) % IM
-      let r = float.from_int(seed) / im_float()
+      let r = float.from(seed) / im_float()
       bytes.push(buf, iub_select(r))
       i = i + 1
     }
@@ -108,7 +108,7 @@ effect fn main() -> Unit = {
     var i = 0
     while i < line_len {
       seed = (seed * IA + IC) % IM
-      let r = float.from_int(seed) / im_float()
+      let r = float.from(seed) / im_float()
       bytes.push(buf, hs_select(r))
       i = i + 1
     }

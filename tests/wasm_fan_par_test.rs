@@ -68,7 +68,7 @@ fn a_tuple_chunk_map_is_served_on_separate_instances() {
   for j in 0..<(1000 + i) {
     acc = acc + (j * k) % 7
   }
-  (acc, int.to_float(acc) / 2.0, acc % 2 == 0)
+  (acc, float.from(acc) / 2.0, acc % 2 == 0)
 }
 
 effect fn main() -> Unit = {
@@ -93,7 +93,7 @@ fn a_scalar_chunk_map_with_float_and_bool_captures_is_served() {
   let flip = true
   let xs = list.range(0, 9)
   let ys = fan {
-    list.map(xs, (x) => if flip then int.to_float(x) * scale else 0.0)
+    list.map(xs, (x) => if flip then float.from(x) * scale else 0.0)
   }
   println(list.join(list.map(ys, (y) => float.to_string(y)), ","))
 }
@@ -196,7 +196,7 @@ const REUSE_SRC: &str = r#"fn sq(i: Int, k: Int) -> Int = {
   acc
 }
 
-fn halve(i: Int) -> (Int, Float) = (i / 2, int.to_float(i) / 2.0)
+fn halve(i: Int) -> (Int, Float) = (i / 2, float.from(i) / 2.0)
 
 fn pick(i: Int) -> Int = {
   let xs = [1, 2, 3]
@@ -369,15 +369,15 @@ fn a_chunk_reading_captured_scalar_lists_is_served() {
     let src = r#"fn row(v: List[Float], w: List[Int], n: Int, i: Int) -> Float = {
   var s = 0.0
   var j = 0
-  while j < n { s = s + v[j] * int.to_float(i + j + w[j % list.len(w)]); j = j + 1 }
-  s + int.to_float(list.len(w))
+  while j < n { s = s + v[j] * float.from(i + j + w[j % list.len(w)]); j = j + 1 }
+  s + float.from(list.len(w))
 }
 
 effect fn rows(v: List[Float], w: List[Int], empty: List[Int], n: Int) -> List[Float] =
-  fan { list.map(list.range(0, n), (i) => row(v, w, n, i) + int.to_float(list.len(empty))) }
+  fan { list.map(list.range(0, n), (i) => row(v, w, n, i) + float.from(list.len(empty))) }
 
 effect fn main() -> Unit = {
-  let v = list.map(list.range(0, 40), (i) => int.to_float(i) * 0.25)
+  let v = list.map(list.range(0, 40), (i) => float.from(i) * 0.25)
   let w = [3, 1, 4, 1, 5]
   var u = v
   var k = 0

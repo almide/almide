@@ -22,7 +22,7 @@ use std::process::Command;
 const BOMB: &str = r#"import zlib
 
 fn show(r: Result[Bytes, String]) -> String = match r {
-  ok(b) => "ok ${bytes.len(b)} ${bytes.get_or(b, bytes.len(b) - 1, 9)}",
+  ok(b) => "ok ${bytes.len(b)} ${bytes.get(b, bytes.len(b) - 1) ?? 9}",
   err(e) => "err ${e}",
 }
 
@@ -33,21 +33,18 @@ fn be32(n: Int) -> Bytes = bytes.from_list([n / 16777216 % 256, n / 65536 % 256,
 fn raw(extra: Int) -> Bytes = {
   let period = bytes.from_list([24, 5, 163, 96, 20, 140, 130, 81, 48, 10, 70, 193, 40])
   let tail = if extra == 0 then 128 else 192
-  bytes.concat(
-    bytes.concat(bytes.from_list([99]), bytes.repeat(period, 130055)),
-    bytes.from_list([24, 5, 163, 96, 20, 140, 130, 81, 48, 10, 70, 193, tail, 3, 0]),
-  )
+  (bytes.from_list([99]) + bytes.repeat(period, 130055)) + bytes.from_list([24, 5, 163, 96, 20, 140, 130, 81, 48, 10, 70, 193, tail, 3, 0])
 }
 
 fn zl(extra: Int) -> Bytes = {
   let adler = if extra == 0 then 4026531841 else 4026597377
-  bytes.concat(bytes.concat(bytes.from_list([120, 1]), raw(extra)), be32(adler))
+  (bytes.from_list([120, 1]) + raw(extra)) + be32(adler)
 }
 
 fn gz(extra: Int) -> Bytes = {
   let crc = if extra == 0 then 705592763 else 2392558580
   let head = bytes.from_list([31, 139, 8, 0, 0, 0, 0, 0, 0, 255])
-  bytes.concat(bytes.concat(bytes.concat(head, raw(extra)), le32(crc)), le32(268435456 + extra))
+  ((head + raw(extra)) + le32(crc)) + le32(268435456 + extra)
 }
 
 effect fn main() -> Unit = {
@@ -70,9 +67,10 @@ const BOMB_EXPECTED: &[&str] = &[
 ];
 
 const ORDER: &str = r#"import zlib
+import hash
 
 fn show(r: Result[Bytes, String]) -> String = match r {
-  ok(b) => "ok ${bytes.len(b)} ${zlib.crc32(b)}",
+  ok(b) => "ok ${bytes.len(b)} ${hash.crc32(b)}",
   err(e) => "err ${e}",
 }
 
@@ -94,7 +92,7 @@ fn sweep(f: String, v: Bytes) -> Unit = {
     }
     for x in [1, 128, 255] {
       for i in 0..<bytes.len(v) {
-        println("${f} bound ${n} x${x} ${i}: " + run(f, bytes.set(v, i, int.bxor(bytes.get_or(v, i, 0), x)), n))
+        println("${f} bound ${n} x${x} ${i}: " + run(f, bytes.set(v, i, int.bxor(bytes.get(v, i) ?? 0, x)), n))
       }
     }
   }

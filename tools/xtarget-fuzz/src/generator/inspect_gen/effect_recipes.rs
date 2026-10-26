@@ -55,7 +55,6 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     // Metadata of a file of n lines: the work is the host's, not the size's.
     Recipe { func: "fs.exists", size: "path", args: FILE_N },
     Recipe { func: "fs.is_file", size: "path", args: FILE_N },
-    Recipe { func: "fs.file_size", size: "path", args: FILE_N },
     // The seeded link, reached from a diamond's project directory too.
     Recipe { func: "fs.is_symlink", size: "", args: &[("path", "(env.get(\"XF_SANDBOX\") ?? \".\") + \"/link.txt\"")] },
     // A directory of n files.
@@ -92,23 +91,19 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
         args: &[("path", "{ fs.mkdir_p(\"t${{i}}/a\")!\n  fs.write_text(\"t${{i}}/a/f\", \"x\")!\n  \"t${{i}}\" }")],
     },
     // argv and env (oracle/sandbox.rs ARGS / ENV).
-    Recipe { func: "args.flag", size: "", args: &[("name", "\"flag\"")] },
+    Recipe { func: "args.has_flag", size: "", args: &[("name", "\"flag\"")] },
     Recipe { func: "args.option", size: "", args: &[("name", "\"opt\"")] },
-    Recipe { func: "args.option_or", size: "", args: &[("name", "\"opt\""), ("fallback", "\"none\"")] },
-    Recipe { func: "args.positional_at", size: "", args: &[("i", "0"), ("options", "[]")] },
+    Recipe { func: "args.positional", size: "", args: &[("options", "[]")] },
     Recipe { func: "env.get", size: "", args: &[("name", "\"XF_GREETING\"")] },
     Recipe { func: "env.set", size: "value", args: &[("name", "\"XF_SET\""), ("value", "string.repeat(\"aé\", {n})")] },
     // Past the native 64 KiB stdout buffer at every size, so every size
     // writes in one regime (as io.write's recipe did).
     Recipe { func: "io.print", size: "s", args: &[("s", "string.repeat(\"aé\", 4 * {n})")] },
-    Recipe { func: "process.env", size: "", args: &[("key", "\"XF_GREETING\"")] },
     // Host-decided results (`verdicts.rs`): each probe checks the declared
     // properties instead of reading the value.
     Recipe { func: "random.int", size: "", args: &[("min", "0"), ("max", "9")] },
     Recipe { func: "random.choice", size: "xs", args: &[("xs", "{sized}")] },
     Recipe { func: "random.shuffle", size: "xs", args: &[("xs", "{sized}")] },
-    Recipe { func: "list.shuffle", size: "xs", args: &[("xs", "{sized}")] },
-    Recipe { func: "fs.modified_at", size: "path", args: FILE_N },
     Recipe { func: "fs.stat", size: "path", args: FILE_N },
     Recipe { func: "fs.create_temp_file", size: "", args: &[("prefix", "\"p\"")] },
     Recipe { func: "fs.create_temp_dir", size: "", args: &[("prefix", "\"p\"")] },
@@ -128,7 +123,6 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
             ("signal", "15"),
         ],
     },
-    Recipe { func: "process.sleep", size: "", args: &[("ms", "0")] },
     // Judged by the exit it makes (ADR-0027 D4): a code no clean end of a
     // program makes, inside C-350's 0..=125. The literal is what every
     // probe must exit with (`Target::expected_exit`).
@@ -149,11 +143,9 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     // is in the generator's type universe yet, so none is catalogued here.
     // HTTP against the fixture: a response of n bytes, or n bytes echoed.
     Recipe { func: "http.get", size: "url", args: &[("url", BYTES_URL)] },
-    Recipe { func: "http.get_bytes", size: "url", args: &[("url", BYTES_URL)] },
     Recipe { func: "http.get_response", size: "url", args: &[("url", BYTES_URL)] },
     Recipe { func: "http.request", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[(\"x-k\", \"v\")]")] },
     Recipe { func: "http.send", size: "req", args: &[("req", ECHO_REQUEST)] },
-    Recipe { func: "http.request_bytes", size: "body", args: &[("method", "\"POST\""), ("url", ECHO_URL), ("body", BODY), ("headers", "[(\"x-k\", \"v\")]")] },
     // The call handle (#2631): start's cost is the exchange it begins,
     // which the probe's digest waits out (the echo of n bytes); poll answers
     // a call that has ended (its recipe waits first) with a copy of the n
@@ -184,7 +176,7 @@ pub(super) fn prelude_for(func: &str, n: u64) -> Option<String> {
 /// the total is still k·n, so the marginal over k reads n per call).
 pub(super) fn stdin_for(func: &str, n: u64, k: u64) -> Option<(u64, u64)> {
     match func {
-        "io.read_line" | "io.read_all" | "process.stdin_lines" => Some((n, k)),
+        "io.read_line" | "io.read_all" => Some((n, k)),
         _ => None,
     }
 }

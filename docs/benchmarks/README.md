@@ -17,7 +17,7 @@ The most recent same-model comparison is the MiniGit bench: Sonnet 5 × 20 trial
 
 **Every program that compiles for both targets produces byte-identical observable output — stdout, stderr, exit code — whether it runs as a native binary or as WebAssembly.** Native is the oracle; `native == wasm` is a hard invariant, not a "target difference" to be documented around.
 
-The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-identical" means the execution output, not the compiled artifacts; inherently nondeterministic sources certify deterministic *invariants* instead of exact bytes; APIs not yet implemented on wasm are compile- or run-time *refusals* — never wrong bytes; and exactly two fns are exempt because their job is to report the host — `env.os()` and `env.temp_dir()`, bounded by C-189, since making them agree across targets would be the defect rather than the guarantee. Output printed from concurrent `fan { }` arms is inside the guarantee: each native arm writes into its own timeline, flushed in source order, so it reads as it does on wasm (C-004, ADR-0024 step 1).
+The guarantee is **continuous, with an explicit, ledger-managed scope**: "byte-identical" means the execution output, not the compiled artifacts; inherently nondeterministic sources certify deterministic *invariants* instead of exact bytes; APIs not yet implemented on wasm are compile- or run-time *refusals* — never wrong bytes; and exactly two fns are exempt because their job is to report the host — `env.os()` and `fs.temp_dir()`, bounded by C-189, since making them agree across targets would be the defect rather than the guarantee. Output printed from concurrent `fan { }` arms is inside the guarantee: each native arm writes into its own timeline, flushed in source order, so it reads as it does on wasm (C-004, ADR-0024 step 1).
 
 This claim is not prose. Every observable promise is a named contract in the [behavior-contract ledger](../contracts/), each traceable to executable evidence, and the numbers below are regenerated from the ledger (`scripts/gen-claims.sh`, enforced by `scripts/check-contracts.sh` in CI):
 
@@ -29,7 +29,7 @@ This claim is not prose. Every observable promise is a named contract in the [be
 > **Divergences awaiting a fix: none.** Every contract in the ledger is
 > `active`, carrying executable evidence of class >= `fixture`. The one
 > by-design carve-out in the law — the platform-reporting fns `env.os`
-> and `env.temp_dir` — is bounded by C-189.
+> and `fs.temp_dir` — is bounded by C-189.
 <!-- claims:generated:end -->
 
 Scope, ledger mechanics, and the evidence stack (contract ledger, cross-target fixture gate, differential fuzz, emit-time Σ-probes, Lean belt, org-wide byte-verify sweep): **[docs/design/EQUIVALENCE.md](../design/EQUIVALENCE.md)**.

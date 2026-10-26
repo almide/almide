@@ -64,6 +64,6 @@ fn main() -> Unit = {
   let pairs = list.enumerate(["a", "b", "c"])
   println(int.to_string(list.len(pairs)))
   // get_or
-  println(int.to_string(list.get_or(xs, 2, -1)))
-  println(int.to_string(list.get_or(xs, 99, -1)))
+  println(int.to_string(list.get(xs, 2) ?? -1))
+  println(int.to_string(list.get(xs, 99) ?? -1))
 }

@@ -31,10 +31,10 @@ test "value.as_array" {
   assert_eq(list.len(r), 2)
 }
 
-test "value.field" {
+test "value.get" {
   let v = json.parse('{"key": "val"}')!
-  let r = value.field(v, "key")
-  assert(result.is_ok(r))
+  let r = value.get(v, "key")
+  assert(option.is_some(r))
 }
 
 test "map.filter" {

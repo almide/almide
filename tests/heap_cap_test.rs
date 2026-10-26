@@ -129,7 +129,7 @@ fn churn_corpus_runs_identically_under_the_cap() {
 /// 2n-slot block — (n−1) value blocks leaked per literal, output-invisible;
 /// this harness caught it on its first live run. Under the ceiling, a
 /// regression is a deterministic OOM, not a green run.
-// The `map.get_or(m, "k1", some(0)) ?? 0` term this probe carried on the
+// The `map.get(m, "k1") ?? some(0) ?? 0` term this probe carried on the
 // incumbent leg leaks one block per call on the wasm leg (#2932); it is left
 // out until that lands, so the cap here judges the literal intermediates only.
 const MAP_LITERAL_CHURN: &str = r#"effect fn main() -> Unit = {

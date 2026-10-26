@@ -121,7 +121,7 @@ Contracts: C-045, C-100, C-101, C-141, C-147, C-148。
 `mut` パラメータへの in-place 変異は呼び出し元の `var` に反映される（ALS-C5 の
 例外）。呼び出し側が渡せるのは `var` 束縛だけで、`let`・非 `mut` パラメータ・
 一時値は E032。この例外を開くのは宣言された `mut` だけである: 標準ライブラリの
-in-place 変異子（`list.push`/`pop`/`clear`、`map.insert`/`delete`/`clear`、
+in-place 変異子（`list.push`/`pop`/`clear`、`map.clear`、
 `string.push`/`clear`、`bytes` の書き込み族）も受け手を `mut` と宣言しており、
 非 `mut` パラメータ越しに呼び出し元の値が変わる経路は無い（`Bytes` の素の
 パラメータ経路は dialect epoch 5 で閉じた、C-132）。**再割り当てする**

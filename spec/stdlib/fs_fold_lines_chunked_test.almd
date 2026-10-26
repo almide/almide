@@ -43,10 +43,10 @@ test "every worker count folds every line exactly once" {
   let seq = seq_counts(p)!
   for w in [1, 2, 3, 5, 16] {
     let par = par_counts(p, w)!
-    assert_eq(map.get_or(par, "x", 0), map.get_or(seq, "x", 0))
-    assert_eq(map.get_or(par, "y", 0), map.get_or(seq, "y", 0))
-    assert_eq(map.get_or(par, "z", 0), map.get_or(seq, "z", 0))
-    assert_eq(map.get_or(par, "w", 0), map.get_or(seq, "w", 0))
+    assert_eq(map.get(par, "x") ?? 0, map.get(seq, "x") ?? 0)
+    assert_eq(map.get(par, "y") ?? 0, map.get(seq, "y") ?? 0)
+    assert_eq(map.get(par, "z") ?? 0, map.get(seq, "z") ?? 0)
+    assert_eq(map.get(par, "w") ?? 0, map.get(seq, "w") ?? 0)
     assert_eq(map.len(par), map.len(seq))
   }
 }

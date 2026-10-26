@@ -1,7 +1,7 @@
-//! `bytes.set_*(h.f, ..)` on a record var's Bytes FIELD keeps value semantics
+//! `bytes.put_*(h.f, ..)` on a record var's Bytes FIELD keeps value semantics
 //! on the structural wasm leg: the record and then the field's block are
 //! made unique before the in-place store (bytes_recv.rs's two-level COW).
-//! Before, `var p2 = p1; bytes.set_at(p2.buf, 1, 42)` wrote through the block
+//! Before, `var p2 = p1; bytes.put_u8(p2.buf, 1, 42)` wrote through the block
 //! `p1.buf` shared and the alias read 42 where native reads 8 — a silent
 //! divergence in the released 0.62.0, caught by
 //! `spec/lang/rccow_value_semantics_test.almd` once the structural leg
@@ -23,8 +23,8 @@ type Outer = { name: String, inner: Pack }
 fn main() -> Unit = {
   let o1 = Outer { name: "o", inner: Pack { tag: "i", buf: bytes.from_list([7, 8]) } }
   var o2 = o1
-  bytes.set_at(o2.inner.buf, 1, 42)
-  println("${bytes.read_u8(o1.inner.buf, 1)} ${bytes.read_u8(o2.inner.buf, 1)}")
+  bytes.put_u8(o2.inner.buf, 1, 42)
+  println("${bytes.get(o1.inner.buf, 1) ?? 0} ${bytes.get(o2.inner.buf, 1) ?? 0}")
 }
 "#;
 
@@ -34,13 +34,13 @@ fn main() -> Unit = {
   var acc = Pack { tag: "acc", buf: bytes.zeros(64) }
   let snap = acc
   for i in 0..<64 {
-    bytes.set_at(acc.buf, i, i * 3)
+    bytes.put_u8(acc.buf, i, i * 3)
   }
   var sum = 0
   for i in 0..<64 {
-    sum = sum + bytes.read_u8(acc.buf, i)
+    sum = sum + bytes.get(acc.buf, i) ?? 0
   }
-  println("${sum} ${bytes.read_u8(acc.buf, 63)} ${bytes.read_u8(snap.buf, 63)} ${snap.tag}")
+  println("${sum} ${bytes.get(acc.buf, 63) ?? 0} ${bytes.get(snap.buf, 63) ?? 0} ${snap.tag}")
 }
 "#;
 

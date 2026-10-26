@@ -26,9 +26,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const PROBE: &str = r#"import zlib
+import hash
 
 fn show(r: Result[Bytes, String]) -> String = match r {
-  ok(b) => "ok ${bytes.len(b)} ${zlib.crc32(b)}",
+  ok(b) => "ok ${bytes.len(b)} ${hash.crc32(b)}",
   err(e) => "err ${e}",
 }
 
@@ -60,7 +61,7 @@ effect fn sweep(f: String, v: Bytes) -> Unit = {
   }
   for x in [1, 128, 255] {
     for i in 0..<bytes.len(v) {
-      println("${f} x${x} ${i}: " + run(f, bytes.set(v, i, int.bxor(bytes.get_or(v, i, 0), x)))!)
+      println("${f} x${x} ${i}: " + run(f, bytes.set(v, i, int.bxor(bytes.get(v, i) ?? 0, x)))!)
     }
   }
 }

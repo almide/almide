@@ -233,9 +233,8 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     // The asserts abort the same way on every leg outside a test block
     // (C-381, C-339), so a failing one is an observable, comparable outcome.
     ("testing", include_str!("../../../../stdlib/testing.almd"), true),
-    // Host-decided results only (`verdicts.rs`), and `process.env` over the
-    // sandbox's fixed env: every other function of these is an effect a
-    // sandbox does not reproduce.
+    // Host-decided results only (`verdicts.rs`): every other function of
+    // these is an effect a sandbox does not reproduce.
     ("random", include_str!("../../../../stdlib/random.almd"), true),
     ("process", include_str!("../../../../stdlib/process.almd"), true),
     // Over the loopback fixtures only (`oracle/fixture.rs`, `term.rs`).
@@ -309,13 +308,11 @@ const WEIGHT_OVERRIDES: &[(&str, &str, u32)] = &[
     ("float", "to_fixed", 10),
     ("float", "parse", 9),
     ("float", "round", 7),
-    ("float", "sqrt", 6),
     ("float", "abs", 5),
     // ── int width / conversion ──
     ("int", "to_string", 7),
     ("int", "parse", 7),
     ("int", "to_hex", 6),
-    ("int", "to_float", 6),
     ("int", "abs", 5),
     // ── higher-order functions (closure surface) ──
     ("list", "map", 9),
@@ -468,7 +465,7 @@ mod availability_tests {
     #[test]
     fn value_and_json_functions_over_the_grammar_are_catalogued() {
         let names: Vec<String> = build().iter().map(|s| format!("{}.{}", s.module, s.func)).collect();
-        for want in ["value.field", "value.pick", "value.to_camel_case", "value.stringify", "json.parse", "json.stringify", "json.to_map"] {
+        for want in ["value.get", "value.pick", "value.as_object", "json.parse", "json.stringify"] {
             assert!(names.iter().any(|n| n == want), "{want} is not in the catalogue");
         }
         let src = "fn main() -> Unit = {\n  let s = json.stringify(value.null())\n}\n";
@@ -486,7 +483,7 @@ mod availability_tests {
         let src = "fn main() -> Unit = {\n  let a = base64.encode(bytes.zeros(2))\n  let b = regex.is_match(\"a\", \"a\")\n}\n";
         assert_eq!(imports_for(src), "import base64\nimport regex\n");
         // auto-imported modules and look-alike identifiers need none
-        assert_eq!(imports_for("let x = error.chain(\"a\", \"b\")\nlet y = mypath.x"), "");
+        assert_eq!(imports_for("let x = list.len([1])\nlet y = mypath.x"), "");
         // A match inside a string literal still imports: an unused import is
         // only a warning, while a call inside an interpolation
         // (`"${base64.encode(b)}"`) that the scan skipped would be an E003.

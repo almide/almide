@@ -7,9 +7,8 @@
 // which after newtype erasure walks the request's carrier (every header
 // value); v1 now refuses it, and the leg that renders it prints the repr.
 import http
-import json
 
-type Ev = | Got(HttpRequest) | Hit { at: JsonPath } | Nothing
+type Ev = | Got(HttpRequest) | Hit { at: value.Path } | Nothing
 
 type Tag[T] = | Tagged(T, HttpRequest)
 
@@ -18,7 +17,7 @@ fn leaks(t: String) -> Bool = ["TOKXYZ-SECRET", "sid=COOKIE-SECRET", "Bearer", "
 effect fn main() -> Unit = {
   let h = [("Authorization", "Bearer TOKXYZ-SECRET"), ("Cookie", "sid=COOKIE-SECRET")]
   let req = http.new_request("GET", "/v", "", h)
-  let path = json.root() |> json.field("user") |> json.index(2)
+  let path = value.root() |> value.key("user") |> value.index(2)
   let a = Got(req)
   let b = Hit { at: path }
   let c: Tag[Int] = Tagged(7, req)

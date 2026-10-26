@@ -26,11 +26,7 @@ fn char_to_num(c: String) -> Int = {
   }
 }
 
-fn num_to_char(n: Int) -> String = list.get_or(
-  string.to_list("abcdefghijklmnopqrstuvwxyz"),
-  ((n % 26) + 26) % 26,
-  "?",
-)
+fn num_to_char(n: Int) -> String = list.get(string.to_list("abcdefghijklmnopqrstuvwxyz"), ((n % 26) + 26) % 26) ?? "?"
 
 effect fn encode(a: Int, b: Int, text: String) -> Result[String, String] = {
   guard gcd(a, 26) == 1 else err("a and m must be coprime")
@@ -62,7 +58,7 @@ effect fn encode(a: Int, b: Int, text: String) -> Result[String, String] = {
   } else {
     groups = groups
   }
-  ok(string.join(groups, " "))
+  ok(list.join(groups, " "))
 }
 
 effect fn decode(a: Int, b: Int, text: String) -> Result[String, String] = {
@@ -78,7 +74,7 @@ effect fn decode(a: Int, b: Int, text: String) -> Result[String, String] = {
       decoded = decoded + [c]
     }
   }
-  ok(string.join(decoded, ""))
+  ok(list.join(decoded, ""))
 }
 
 test "encode yes" {

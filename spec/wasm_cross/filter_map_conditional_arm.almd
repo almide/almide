@@ -3,7 +3,7 @@
 // porta load_porta_config `secrets` shape: `match v { some(s) => some(rec), none => { if c then
 // some(rec2) else none } }`. The defunc `emit_filter_map_arm` now recurses into a Block arm body and an
 // `if` arm body (a unit keep/skip into the same write-cursor), so the record element is built+stored
-// inside the taken arm. (`lookup` stands in for the porta `json.get_string` subject — a call returning
+// inside the taken arm. (`lookup` stands in for the porta `value.get_string` subject — a call returning
 // Option — so the fixture renders through render_program's self-host registry; the real config.almd is
 // covered by corpus-wall.) Byte-matches native; cert ACCEPT.
 type EV = { key: String, val: String }

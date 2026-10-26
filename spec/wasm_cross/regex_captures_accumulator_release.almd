@@ -10,7 +10,7 @@
 import regex
 
 fn show(o: List[String?]?) -> String = match o {
-  some(xs) => "[" + string.join(xs |> list.map((x) => x ?? ""), "|") + "]",
+  some(xs) => "[" + list.join(xs |> list.map((x) => x ?? ""), "|") + "]",
   none => "NONE",
 }
 

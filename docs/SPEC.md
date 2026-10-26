@@ -1615,7 +1615,7 @@ fn summary(config: Config) -> String =
 effect fn load(path: String) -> Result[Config, ConfigError] = {
   let text = fs.read_text(path)
   let raw = json.parse(text)
-  json.get_string(raw, "root")
+  value.get_string(raw, "root")
     |> option.ok_or("missing root")
     |> result.map((r) => { root: r, bare: false, description: "" })
 }

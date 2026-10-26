@@ -36,7 +36,7 @@ effect fn main() -> Unit = {
   io.close(s)!
   io.close(l)!
   // A Unix-domain socket and a shared-memory file.
-  let path = "${env.temp_dir()}/almide-huge-${random.int(0, 999999999)}.sock"
+  let path = "${fs.temp_dir()}/almide-huge-${random.int(0, 999999999)}.sock"
   let ul = unix.listen(path)!
   let uc = unix.connect(path)!
   let us = unix.accept(ul)!

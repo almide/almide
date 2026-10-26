@@ -8,7 +8,7 @@
 // 544254236199 index 170, a mutation of matrix_from_bytes_offset_domain).
 // The converse holds too: a 0×c matrix has NO columns — `shape` is (0, 0)
 // and `cols` is 0 whatever width the constructor was asked for. The wasm
-// byte loaders and `select_rows_f32` wrote the requested width into the
+// byte loaders and the f32 row selector wrote the requested width into the
 // header and answered (0, 3) where native answered (0, 0) (#2627,
 // differential fuzz seed 576831800136 index 11987).
 // The loaders answer `Option[Matrix]` (stdlib redesign R-matrix-15): a width
@@ -49,7 +49,7 @@ fn main() -> Unit = {
     [],
     []
   ]))}")
-  println("add3x0: ${shape(matrix.add(matrix.zeros(3, 0), matrix.zeros(3, 0)))}")
+  println("add3x0: ${shape(matrix.zeros(3, 0) + matrix.zeros(3, 0))}")
   let b3 = matrix.to_bytes_f32_le(matrix.from_lists([
     [0.5, 1.5, 2.5]
   ]))
@@ -59,6 +59,6 @@ fn main() -> Unit = {
   println("f32 0x3 empty buf: ${loaded_dims(matrix.from_bytes_f32_le(bytes.zeros(0), 0, 0, 3))}")
   println("f16 0x3: ${loaded(matrix.from_bytes_f16_le(b3, 0, 0, 3))}")
   println("f64 0x3 past-end: ${loaded(matrix.from_bytes_f64_le(b3, 99, 0, 3))}")
-  println("select none x3: ${shape(matrix.select_rows_f32(b3, 0, 3, []))}")
+  println("gather none x3: ${shape(matrix.gather_rows(matrix.from_bytes_f32_le(b3, 0, 1, 3) ?? matrix.zeros(1, 3), []))}")
   println("transpose3x0: ${shape(matrix.transpose(matrix.zeros(3, 0)))}")
 }

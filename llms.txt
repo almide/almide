@@ -18,8 +18,8 @@ read here is what the current compiler accepts.
   `value`, `error`, `math`, `datetime`.
   Sized-numeric conversion modules (`int8`, `int16`, `int32`, `int64`,
   `uint8`, `uint16`, `uint32`, `uint64`, `float32`, `float64`) are also
-  auto-imported for UFCS — e.g. `x.to_int64()` on `x: Int32` resolves to
-  `int32.to_int64(x)`.
+  auto-imported; a conversion is named after the type it builds —
+  `int64.from(x)` on `x: Int32`, `int.from_saturating(f)`, `uint8.from_wrapping(n)`.
   Everything else needs an explicit `import`: `args`, `base64`, `bigint`,
   `bytes`, `env`, `fs`, `hash`, `hex`, `html`, `http`, `io`, `json`,
   `matrix`, `net`, `path`, `process`, `random`, `regex`, `secret`, `testing`,
@@ -68,17 +68,17 @@ read here is what the current compiler accepts.
   `fn main() -> Unit`; write `effect fn main()` when it reads or propagates.
   Every stdlib reader is an effect fn — `io.read_line` (`String?`, none at
   end of input), `io.read` / `io.read_exact` / `io.read_to_end` on a handle
-  such as `io.stdin()!`, `process.args`, `env.args`, and the `args` module's
-  `args.flag` / `option` / `option_or` / `positional` / `positional_at` /
-  `raw` — so reading stdin or argv needs an effect fn (dialect epoch 8).
+  such as `io.stdin()!`, `env.args`, and the `args` module's
+  `args.has_flag` / `option` / `positional` — so reading stdin or argv needs
+  an effect fn (dialect epoch 8).
   A user-declared effect fn is always fallible, so write `f()!` on every
   effect call — read the `!` like Swift `await` (it marks where the world is
   touched); it is Swift `try`, never `try!`. On a stdlib effect fn that cannot
   fail the `!` is a no-op; the handle makers `io.stdin()` / `io.stdout()` /
   `io.stderr()` and `uuid.v4()` / `uuid.v7()` yield a `Result` like a
-  user-declared one: `io.write(io.stdout()!, data)!`. An effect fn returning `Option[T]` (`args.option`,
-  `args.positional_at`) takes the `!` before a default:
-  `args.positional_at(0, [])! ?? "in.txt"` — `!` propagates the error, `??`
+  user-declared one: `io.write(io.stdout()!, data)!`. An effect fn returning `Option[T]` (`args.option`)
+  takes the `!` before a default:
+  `args.option("in")! ?? "in.txt"` — `!` propagates the error, `??`
   defaults the none (without the `!`, `??` wants an `Option[T]`: E001).
 - Generics use `[T]` (not `<T>`). Variants use leading `|`.
 - `match` is exhaustive; missing arms emit a warning.
@@ -207,10 +207,10 @@ effect fn open_file(path: String) -> Result[String, String] = {
 
 ```almide check
 fn port(v: Value) -> Int =
-  result.to_option(value.as_int(value.field(v, "port") ?? value.null())) ?? 8080   // Option fallback
+  result.to_option(value.as_int(value.get(v, "port") ?? value.null())) ?? 8080   // Option fallback
 
 fn host(v: Value) -> Option[String] =
-  value.as_string(value.field(v, "host") ?? value.null())?                          // Result → Option (inside a fn returning Option)
+  value.as_string(value.get(v, "host") ?? value.null())?                          // Result → Option (inside a fn returning Option)
 
 effect fn parse_port(s: String) -> Result[Int, String] = ok(int.parse(s)!)          // unwrap a Result, propagate err (effect fn only)
 ```
@@ -298,8 +298,8 @@ Equality (`==` / `!=`) works on any type.
 
 ```almide check
 fn isqrt(n: Int) -> Int = {
-  let root_f = float.sqrt(int.to_float(n))
-  let root_i = float.to_int(root_f)    // truncating
+  let root_f = math.sqrt(float.from(n))
+  let root_i = int.from_saturating(root_f)    // truncating
   root_i
 }
 ```
@@ -376,7 +376,7 @@ type Account: Codec = { name: String, @skip_decode is_admin: Bool = false }
 | E029 | Unknown type name in an annotation or record literal (would fail the native build after check accepted) | Declare the type, fix the spelling, or add the missing import |
 | E030 | Type has no ordering — `list.sort/min/max` or a `sort_by` key over Map/Set/Fn or compound-nested Float | Sort by an explicit orderable key (`list.sort_by(xs, (m) => <Int/String key>)`) |
 | E031 | Retired range spelling — `..`/`..=` were replaced by Swift-style `..<` (exclusive) / `...` (inclusive) | Write `0 ..< n` / `1 ... n`, or run `almide fix <file>` to migrate every range mechanically |
-| E032 | Immutable binding (a `let`, a non-`mut` parameter, or a temporary) passed to a `mut` parameter — including every in-place writer's receiver (`list.push`, `map.insert`, the `bytes` writers `append_*`/`set_*`/`write_*`/`fill`/`clear`/`copy_from`) | A local: declare the root binding with `var` instead of `let`. A helper that writes its caller's buffer: declare the parameter `mut b: Bytes` and pass a `var`. A temporary must be bound to a `var` first (split from E007 in 2026-08) |
+| E032 | Immutable binding (a `let`, a non-`mut` parameter, or a temporary) passed to a `mut` parameter — including every in-place writer's receiver (`list.push`, `map.clear`, the `bytes` writers `append_*`/`put_*`/`fill`/`clear`/`copy_from`) | A local: declare the root binding with `var` instead of `let`. A helper that writes its caller's buffer: declare the parameter `mut b: Bytes` and pass a `var`. A temporary must be bound to a `var` first (split from E007 in 2026-08) |
 | E033 | Opaque type constructed outside its defining module | Use the defining module's public constructor API (split from E008 in 2026-08) |
 | E034 | Error-channel operator (`!` / `?` / `??`) on a non-Option/Result operand | Drop the operator — a plain value has no error channel; if a fallible call was intended, apply it to that call's Result |
 | E035 | (warning) Branch condition reads error message text (`string.contains(e, …)` / `e == "…"` on an err binding) | Branch on a variant error type or use `??` for a kind-independent fallback; message text is a report, not an API |
@@ -421,7 +421,7 @@ type Account: Codec = { name: String, @skip_decode is_admin: Bool = false }
 | E084 | A literal argument to stdlib `process.exit` is outside the exit status `0..=255` | Choose `0` for success or `1` through `255` for failure; computed arguments keep the runtime range check, and a WASI preview-1 build refuses 126..=255 at runtime |
 | E085 | `@intrinsic` / `@wasm_intrinsic` on a fn, or a `prim.*` reference / `import prim`, outside the stdlib (a user file binding a runtime symbol or calling the primitive floor directly bypasses the capability profile; `prim` is not user surface) | Intrinsics live in the stdlib; wrap in an effect fn — import the stdlib module that owns the operation (`fs`, `http`, `process`, …) and call it from an `effect fn` of your own. For `prim.*`, call the public function the hint names (`prim.read_text_file` → `fs.read_text`) |
 | E081 | The called stdlib fn is not available on `--target wasm` (the declared wasm wall set, `proofs/target-availability.toml`) | Run natively, use the named portable alternative from the `try:` line, or wait for the port the reason names |
-| E040 | Retired json.*/value.* alias — the dynamic surface has one name per operation: `value.*` is the data model, `json.*` the format (parse/stringify) | Use the named `value.*` survivor (`json.as_int(v)` → `value.as_int(v)?`, `json.get` → `value.field(v,k)?`, `value.get` → `value.field`), or run `almide fix <file>` |
+| E040 | Retired json.*/value.* alias — the dynamic surface has one name per operation: `value.*` is the data model, `json.*` the format (parse/stringify) | Use the named `value.*` survivor (`json.as_int(v)` → `value.as_int(v)?`, `json.get` → `value.get(v, k)`), or run `almide fix <file>` |
 | E089 | A `${…}` segment whose value has no defined string form — Bytes, Unit, Matrix, a raw pointer, a function value, or a container/record/variant holding one; also reported at the CALL that instantiates a generic fn whose body interpolates its type parameter | Interpolate what you mean: `${bytes.to_list(b)}` / `${bytes.to_string_lossy(b)}`, `${matrix.to_lists(m)}`, the result of calling the function (`${f(x)}`); a Unit carries nothing, so drop the segment |
 | E086 | A value built inside a `scoped { … }` block would outlive it (the block's value, or a write to an outer binding) — the rows name where it was allocated and where the scope ends (ALS-E31) | Compute the scalar summary inside the scope and let that cross the boundary |
 | E087 | An operation not permitted in a scoped region: a callee that is not `scoped fn`, a global, host output or an `effect fn`, an unknown indirect call, a heap value captured from outside, a type outside the fragment, or `!` / `?` / `guard` (ALS-E31) | Declare the callee `scoped fn`, pass the value in as a parameter, or move the effect outside the scope |

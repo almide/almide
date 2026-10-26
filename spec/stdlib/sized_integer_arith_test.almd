@@ -6,21 +6,21 @@
 // aborts (b == 0, lo > hi, exp < 0).
 import testing
 
-fn i8(n: Int) -> Int8 = int.to_int8(n)
+fn i8(n: Int) -> Int8 = int8.from_wrapping(n)
 
-fn i16(n: Int) -> Int16 = int.to_int16(n)
+fn i16(n: Int) -> Int16 = int16.from_wrapping(n)
 
-fn i32(n: Int) -> Int32 = int.to_int32(n)
+fn i32(n: Int) -> Int32 = int32.from_wrapping(n)
 
-fn i64(n: Int) -> Int64 = int.to_int64(n)
+fn i64(n: Int) -> Int64 = int64.from(n)
 
-fn u8(n: Int) -> UInt8 = int.to_uint8(n)
+fn u8(n: Int) -> UInt8 = uint8.from_wrapping(n)
 
-fn u16(n: Int) -> UInt16 = int.to_uint16(n)
+fn u16(n: Int) -> UInt16 = uint16.from_wrapping(n)
 
-fn u32(n: Int) -> UInt32 = int.to_uint32(n)
+fn u32(n: Int) -> UInt32 = uint32.from_wrapping(n)
 
-fn u64(n: Int) -> UInt64 = int.to_uint64(n)
+fn u64(n: Int) -> UInt64 = uint64.from_wrapping(n)
 
 // ── compare / min / max ──
 test "signed compare, min and max" {
@@ -79,16 +79,16 @@ test "clamp limits to lo..hi on every type" {
 test "clamp aborts when lo > hi" {
   testing.assert_aborts(
     "clamp requires min <= max",
-    () => int8.clamp(int.to_int8(0), int.to_int8(5), int.to_int8(1)),
+    () => int8.clamp(int8.from(0), int8.from(5), int8.from(1)),
   )
   testing.assert_aborts(
     "clamp requires min <= max",
-    () => uint32.clamp(int.to_uint32(0), int.to_uint32(5), int.to_uint32(1)),
+    () => uint32.clamp(uint32.from(0), uint32.from(5), uint32.from(1)),
   )
   // lo = 2^64-1 is above hi = 2, whatever its Int reinterpretation says
   testing.assert_aborts(
     "clamp requires min <= max",
-    () => uint64.clamp(int.to_uint64(1), int.to_uint64(-1), int.to_uint64(2)),
+    () => uint64.clamp(uint64.from(1), uint64.from_wrapping(-1), uint64.from(2)),
   )
 }
 
@@ -106,18 +106,18 @@ test "floor_div rounds toward -inf in all four sign quadrants" {
 }
 
 test "floor_div of min_value by -1 aborts like /, and any other a by -1 negates" {
-  testing.assert_aborts("integer overflow", () => int8.floor_div(int8.min_value(), int.to_int8(-1)))
+  testing.assert_aborts("integer overflow", () => int8.floor_div(int8.min_value(), int8.from(-1)))
   testing.assert_aborts(
     "integer overflow",
-    () => int16.floor_div(int16.min_value(), int.to_int16(-1)),
+    () => int16.floor_div(int16.min_value(), int16.from(-1)),
   )
   testing.assert_aborts(
     "integer overflow",
-    () => int32.floor_div(int32.min_value(), int.to_int32(-1)),
+    () => int32.floor_div(int32.min_value(), int32.from(-1)),
   )
   testing.assert_aborts(
     "integer overflow",
-    () => int64.floor_div(int64.min_value(), int.to_int64(-1)),
+    () => int64.floor_div(int64.min_value(), int64.from(-1)),
   )
   assert_eq(int8.floor_div(i8(5), i8(-1)), i8(-5))
   assert_eq(int8.floor_div(int8.max_value(), i8(-1)), i8(-127))
@@ -146,9 +146,9 @@ test "unsigned modulo is plain remainder, the upper half included" {
 }
 
 test "modulo by zero aborts" {
-  testing.assert_aborts("division by zero", () => int8.modulo(int.to_int8(5), int.to_int8(0)))
-  testing.assert_aborts("division by zero", () => int64.modulo(int.to_int64(5), int.to_int64(0)))
-  testing.assert_aborts("division by zero", () => uint64.modulo(int.to_uint64(5), int.to_uint64(0)))
+  testing.assert_aborts("division by zero", () => int8.modulo(int8.from(5), int8.from(0)))
+  testing.assert_aborts("division by zero", () => int64.modulo(int64.from(5), int64.from(0)))
+  testing.assert_aborts("division by zero", () => uint64.modulo(uint64.from(5), uint64.from(0)))
 }
 
 test "unsigned floor_div is plain division, the upper half included" {
@@ -160,11 +160,11 @@ test "unsigned floor_div is plain division, the upper half included" {
 }
 
 test "floor_div by zero aborts" {
-  testing.assert_aborts("division by zero", () => int8.floor_div(int.to_int8(5), int.to_int8(0)))
-  testing.assert_aborts("division by zero", () => int64.floor_div(int.to_int64(5), int.to_int64(0)))
+  testing.assert_aborts("division by zero", () => int8.floor_div(int8.from(5), int8.from(0)))
+  testing.assert_aborts("division by zero", () => int64.floor_div(int64.from(5), int64.from(0)))
   testing.assert_aborts(
     "division by zero",
-    () => uint64.floor_div(int.to_uint64(5), int.to_uint64(0)),
+    () => uint64.floor_div(uint64.from(5), uint64.from(0)),
   )
 }
 
@@ -188,8 +188,8 @@ test "pow wraps to the type's width like *" {
 }
 
 test "pow with a negative exponent aborts" {
-  testing.assert_aborts("negative exponent", () => int8.pow(int.to_int8(2), -1))
-  testing.assert_aborts("negative exponent", () => uint64.pow(int.to_uint64(2), -1))
+  testing.assert_aborts("negative exponent", () => int8.pow(int8.from(2), -1))
+  testing.assert_aborts("negative exponent", () => uint64.pow(uint64.from(2), -1))
 }
 
 // ── parity ──

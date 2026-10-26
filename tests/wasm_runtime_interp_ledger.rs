@@ -411,7 +411,7 @@ fn fallback_ledger_path() -> PathBuf {
 /// holds the witness equal to the observed one, like the reason, so a fixture
 /// that sorts ahead of the recorded witness is a ledger edit in its own PR —
 /// before, the column was written but never compared, and a regenerated
-/// ledger silently disagreed with the committed one (int.from_uint16/32
+/// ledger silently disagreed with the committed one (the UInt16/UInt32 widenings
 /// moved from endian_explicit_import to declaration_literal_domain).
 fn audit_bridge_fallback_ledger(sweep: &Sweep) -> String {
     let slice = sweep.slice();

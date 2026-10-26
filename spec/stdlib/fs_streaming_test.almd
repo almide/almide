@@ -76,7 +76,7 @@ test "fold_lines drives a Map accumulator (the aggregation shape)" {
     (acc, line) => {
       let parts = string.split(line, ";")
       let key = parts[0]
-      map.set(acc, key, map.get_or(acc, key, 0) + 1)
+      map.set(acc, key, map.get(acc, key) ?? 0 + 1)
     },
   )!
   assert_eq(map.get(counts, "a"), some(2))

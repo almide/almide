@@ -1,5 +1,5 @@
 // @contract: C-066
-// #643: an in-place stdlib mutator (`list.push`, `string.push`, `map.insert`)
+// #643: an in-place stdlib mutator (`list.push`, `string.push`, a `map.set` rebind)
 // applied to a binding declared OUTSIDE the loop reallocates that binding's
 // heap backing in the per-iteration arena, yet the binding escapes the
 // iteration. The iter-scope heap_restore must NOT reclaim that backing: it is

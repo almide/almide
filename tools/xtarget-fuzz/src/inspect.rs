@@ -940,7 +940,7 @@ fn projected_top_wall(d: &Delta, grow: u64, span: u64) -> Duration {
 /// every size is O(1) outright: it cannot hold a linear term, and what is
 /// left is the run's own jitter, which a relative fit reads as no class at
 /// all. Measured:
-/// - `int.to_int16_saturating` at k = 1M read 7.8e5 / 147 / 579 / 82 / 48
+/// - a sized-int saturating conversion at k = 1M read 7.8e5 / 147 / 579 / 82 / 48
 ///   instructions, which a relative fit called 1789% off every class.
 /// - wasm `string.drop`'s loop at k = 16 read 177 / 159 / 127 / 243 / 335
 ///   per call (rms 17.5%).

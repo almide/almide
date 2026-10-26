@@ -45,13 +45,13 @@ fn main() -> Unit = {
   bench("map_insert_10k", () => {
     var m: Map[Int, Int] = map.new()
     var i = 0
-    while i < 10000 { map.insert(m, i, i * 2); i = i + 1 }
+    while i < 10000 { m[i] = i * 2; i = i + 1 }
   })
 
   bench("map_get_10k", () => {
     var m: Map[Int, Int] = map.new()
     var i = 0
-    while i < 10000 { map.insert(m, i, i); i = i + 1 }
+    while i < 10000 { m[i] = i; i = i + 1 }
     var s = 0
     var j = 0
     while j < 10000 { s = s + (map.get(m, j) ?? 0); j = j + 1 }
@@ -70,6 +70,6 @@ fn main() -> Unit = {
 
   bench("math_sqrt_100k", () => {
     var i = 0
-    while i < 100000 { let _r = math.sqrt(float.from_int(i)); i = i + 1 }
+    while i < 100000 { let _r = math.sqrt(float.from(i)); i = i + 1 }
   })
 }

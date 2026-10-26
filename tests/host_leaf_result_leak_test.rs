@@ -45,9 +45,8 @@ fn self_hosted_host_leaf_calls_leave_no_block_live_on_wasm() {
         ("request_inline_headers", http_probe("", &format!("http.request(\"GET\", \"{URL}\", \"\", [])"))),
         ("request_let_headers", http_probe("  let h: List[(String, String)] = [(\"x-a\", \"1\")]\n", &format!("http.request(\"GET\", \"{URL}\", \"\", h)"))),
         ("send", http_probe("", &format!("http.send(http.new_request(\"GET\", \"{URL}\", \"\", []))"))),
-        ("request_bytes", http_probe("", &format!("http.request_bytes(\"GET\", \"{URL}\", \"\", [])"))),
-        ("get_response", http_probe("", &format!("http.get_response(\"{URL}\")"))),
-        ("get_bytes", http_probe("", &format!("http.get_bytes(\"{URL}\")"))),
+                ("get_response", http_probe("", &format!("http.get_response(\"{URL}\")"))),
+        ("body_bytes", http_probe("", &format!("http.get_response(\"{URL}\") |> result.map((r) => http.body_bytes(r))"))),
         (
             "process_exec",
             "import process\neffect fn main() -> Unit = {\n  match process.exec(\"/nonexistent-cmd\", []) {\n    ok(_) => println(\"?\"),\n    err(e) => println(e),\n  }\n}\n"

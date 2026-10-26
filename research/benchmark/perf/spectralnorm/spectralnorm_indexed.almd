@@ -8,7 +8,7 @@ import int
 
 fn eval_a(i: Int, j: Int) -> Float = {
   let ij = i + j
-  1.0 / float.from_int(ij * (ij + 1) / 2 + i + 1)
+  1.0 / float.from(ij * (ij + 1) / 2 + i + 1)
 }
 
 fn multiply_av(v: List[Float], n: Int) -> List[Float] =

@@ -1,14 +1,14 @@
 //! #4208 — the FUNCTIONAL `map.remove` / `set.remove` is amortized O(1) on
 //! both legs, and every observable of a map or set it shrank is what it was.
 //!
-//! #3691 made the in-place `map.delete` of a local var leave a hole on wasm,
+//! #3691 made the in-place map delete of a local var leave a hole on wasm,
 //! but the functional remove over a receiver whose credit the op holds — the
 //! fold callback `(m, i) => map.remove(m, i)` and the rebind
 //! `m = map.remove(m, k)` — still shifted the later entries and retired the
 //! block's index, so the next lookup scanned and the one after rebuilt it:
 //! O(n) per call, 2.3 s for 100k removals where native took 1 ms. Never a
 //! regression: that lane shifted from its first commit (7b38f6556, #3640),
-//! and #3691's gate times only `map.delete`. Now a remove in TAIL position of
+//! and #3691's gate timed only the in-place delete. Now a remove in TAIL position of
 //! its var's rebind or fold step (map_remove.rs `tail_removes_of`) holes the
 //! entry like the delete does, the var settles on every other read, and the
 //! fold's result settles once at the end.

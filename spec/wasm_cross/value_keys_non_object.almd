@@ -1,5 +1,5 @@
 // @contract: C-122
-// `value.keys` answers `[]` for every NON-object Value, on both legs.
+// The keys of `value.as_object(v)` are `[]` for every NON-object Value, on both legs.
 //
 // A wasm Value is a fixed 16-byte block `[rc][len][cap][tag][pad][payload:8B]`
 // and the payload slot is a pairs-list handle ONLY under tag Object. The wasm
@@ -27,7 +27,7 @@ fn dirty(mk: () -> Value) -> Value = {
   }
 }
 
-fn show(label: String, v: Value) -> Unit = println("${label}: ${list.len(value.keys(v))}")
+fn show(label: String, v: Value) -> Unit = println("${label}: ${list.len(list.map(value.as_object(v) ?? [], (kv) => kv.0))}")
 
 fn main() -> Unit = {
   // Standalone: the payload slot holds a real but non-address value.
@@ -49,7 +49,7 @@ fn main() -> Unit = {
   // The object path is unchanged: keys in insertion order, the source still
   // live after the keys are bound.
   let obj = value.object([("a", value.int(1)), ("b", value.string("two")), ("c", value.null())])
-  let ks = value.keys(obj)
+  let ks = list.map(value.as_object(obj) ?? [], (kv) => kv.0)
   println("object: ${ks |> list.join(",")}")
   println("object-len: ${list.len(ks)}")
   println("source: ${json.stringify(obj)}")
@@ -57,9 +57,9 @@ fn main() -> Unit = {
   show("empty-object", value.object([]))
   // A nested object reached through a field read keeps its own keys.
   let outer = value.object([("inner", obj), ("flat", value.int(9))])
-  println("outer: ${value.keys(outer) |> list.join(",")}")
-  println("inner: ${value.keys(value.field(outer, "inner") ?? value.null()) |> list.join(",")}")
-  println("flat: ${list.len(value.keys(value.field(outer, "flat") ?? value.null()))}")
+  println("outer: ${list.map(value.as_object(outer) ?? [], (kv) => kv.0) |> list.join(",")}")
+  println("inner: ${list.map(value.as_object(value.get(outer, "inner") ?? value.null()) ?? [], (kv) => kv.0) |> list.join(",")}")
+  println("flat: ${list.len(list.map(value.as_object(value.get(outer, "flat") ?? value.null()) ?? [], (kv) => kv.0))}")
   // The FAMILY gate: every `value.*` reader that can reach the payload slot,
   // over every tag. `keys` was the one unguarded cell; the rule this pins is
   // that a reader is TOTAL over the tag space — it answers the empty/identity
@@ -67,15 +67,8 @@ fn main() -> Unit = {
   // A reader added to `lower_value_call` belongs in this matrix.
   //
   // COMPLETENESS RULE: the matrix must hold every `value.*` op that walks an
-  // object's pairs. Six of the eight are below. `value.to_camel_case` and
-  // `value.to_snake_case` are DELIBERATELY absent and are the only intended
-  // omission: the als reference evaluator has no arm for either, so reaching
-  // them from the corpus raises its abstain ceiling, and writing them into the
-  // NORMATIVE judge in a hurry is a worse risk than not covering them here.
-  // Both are safe by the same construction the others now use — value_utils
-  // guards on the tag (`if prim.load32(prim.handle(v) + 4) == 6`) before
-  // renaming — so what is missing is third-oracle coverage, not a guard.
-  // Restore the two columns with the evaluator arms (almide/als#77).
+  // object's pairs. (The two key-case renames that were its only intended
+  // omission left the stdlib in dialect epoch 15.)
   let tags = [
     ("null", value.null()),
     ("bool", value.bool(true)),
@@ -90,13 +83,13 @@ fn main() -> Unit = {
     // position is outside the incumbent leg's MIR-lowering subset, and a
     // fixture it walls costs a shrink-only ceiling in the two determinism
     // gates rather than buying coverage.
-    let f = match value.field(v, "a") {
-      ok(_) => "ok",
-      err(_) => "err",
+    let f = match value.get(v, "a") {
+      some(_) => "ok",
+      none => "err",
     }
-    let m = value.stringify(value.merge(v, value.object([])))
-    let p = value.stringify(value.pick(v, ["a"]))
-    let o = value.stringify(value.omit(v, ["a"]))
-    println("${name} keys=${list.len(value.keys(v))} field=${f} merge=${m} pick=${p} omit=${o} strfy=${value.stringify(v)}")
+    let m = json.stringify(value.merge(v, value.object([])))
+    let p = json.stringify(value.pick(v, ["a"]))
+    let o = json.stringify(value.omit(v, ["a"]))
+    println("${name} keys=${list.len(list.map(value.as_object(v) ?? [], (kv) => kv.0))} field=${f} merge=${m} pick=${p} omit=${o} strfy=${json.stringify(v)}")
   }
 }

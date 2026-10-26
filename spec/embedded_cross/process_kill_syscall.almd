@@ -46,7 +46,7 @@ effect fn main() -> Unit = {
   // A background sleeper, orphaned to init so the system reaps it once killed.
   let child = int.parse(process.exec("/bin/sh", ["-c", "sleep 5 >/dev/null 2>&1 & printf %s $!"])!) ?? 0
   println("kill(child, 15): ${show(process.kill(child, 15))}")
-  process.sleep(300)
+  env.sleep_ms(300)
   println("after kill: ${show(process.kill(child, 0))}" |> string.replace(int.to_string(child), "<pid>"))
   env.set("PATH", old_path)
   println("fake kill ran=${fs.exists(marker)}")

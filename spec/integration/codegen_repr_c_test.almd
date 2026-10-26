@@ -3,7 +3,7 @@
 // ── Simple record types with field access ──
 type Point = { x: Float, y: Float }
 
-fn distance(p: Point) -> Float = float.sqrt(p.x * p.x + p.y * p.y)
+fn distance(p: Point) -> Float = math.sqrt(p.x * p.x + p.y * p.y)
 
 fn translate(p: Point, dx: Float, dy: Float) -> Point = { x: p.x + dx, y: p.y + dy }
 
@@ -78,7 +78,7 @@ fn area(s: Shape) -> Float = match s {
   Rect(w, h) => w * h,
   Triangle(a, b, c) => {
     let s = (a + b + c) / 2.0
-    float.sqrt(s * (s - a) * (s - b) * (s - c))
+    math.sqrt(s * (s - a) * (s - b) * (s - c))
   },
 }
 

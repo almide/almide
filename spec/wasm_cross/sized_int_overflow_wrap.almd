@@ -78,7 +78,7 @@ fn main() -> Unit = {
   // 0
   // `^` is repeated multiplication, so it wraps at the declared width like `*`.
   // It reached the lane by a different road and missed the wrap: on wasm the
-  // operator lowers to a `math.pow` CALL, which never passed through the IntBinOp
+  // operator lowers to an `int.pow` CALL, which never passed through the IntBinOp
   // path that re-wraps, so `Int32 999997 ^ 2` printed the un-narrowed
   // 999994000009 against native's -733379959 — while `a * a` at the very same type
   // agreed on both legs, which is what named the operator rather than the type as

@@ -2,19 +2,6 @@
 
 Environment and system. import env, effect.
 
-### `env.unix_timestamp() -> Int`
-
-Get the current Unix timestamp in seconds.
-
-```almd check
-import env
-
-effect fn main() -> Unit = {
-  let ts = env.unix_timestamp()
-  println(int.to_string(ts))
-}
-```
-
 ### `env.args() -> List[String]`
 
 Get the command-line arguments as a list of strings: `argv[1..]`, verbatim, on
@@ -111,24 +98,10 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `env.millis() -> Int`
-
-Get the current time in milliseconds since epoch.
-
-```almd check
-import env
-
-effect fn main() -> Unit = {
-  let ms = env.millis()
-  println(int.to_string(ms))
-}
-```
-
 ### `env.sleep_ms(ms: Int) -> Unit`
 
 Sleep for the given number of milliseconds. A zero or negative duration is an
-elapsed one and returns at once, on every target (`process.sleep` follows the
-same rule). A deadline is different: a `process.ProcessCommand`'s
+elapsed one and returns at once, on every target. A deadline is different: a `process.ProcessCommand`'s
 `timeout_ms` of `0` means no deadline at all.
 
 ```almd check
@@ -137,19 +110,6 @@ import env
 effect fn main() -> Unit = {
   env.sleep_ms(1000) // sleep 1 second
   println("awake")
-}
-```
-
-### `env.temp_dir() -> String`
-
-Get the system temporary directory path.
-
-```almd check
-import env
-
-effect fn main() -> Unit = {
-  let tmp = env.temp_dir()
-  println(tmp)
 }
 ```
 
@@ -167,13 +127,9 @@ effect fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (9 functions)
+## Signature index (6 functions)
 
 ```
-// Wall-clock seconds since the Unix epoch.
-// @since 0.5.0 or earlier
-effect env.unix_timestamp() -> Int
-
 // Program arguments, argv[0] excluded.
 // @since 0.5.0 or earlier
 effect env.args() -> List[String]
@@ -190,17 +146,9 @@ effect env.set(name: String, value: String) -> Unit
 // @since 0.5.0 or earlier
 effect env.cwd() -> String
 
-// Wall-clock ms since the Unix epoch.
-// @since 0.5.0 or earlier
-effect env.millis() -> Int
-
 // Blocks ms milliseconds; a negative ms hangs.
 // @since 0.5.0 or earlier
 effect env.sleep_ms(ms: Int) -> Unit
-
-// Host temp dir; may end with /.
-// @since 0.5.0 or earlier
-effect env.temp_dir() -> String
 
 // Host OS: macos, linux, windows or unknown; "wasi" on wasm (C-189).
 // @since 0.5.0 or earlier

@@ -162,8 +162,8 @@ fn specials() -> Vec<(&'static str, f64)> {
 /// the differential-fuzz finding (seed 1784965210163815000), and the 4096 domain ceiling.
 fn long_fixed() -> Vec<(&'static str, usize)> {
     vec![
-        ("int.bits_to_float(1)", 1074),
-        ("int.bits_to_float(1)", 1100),
+        ("float.from_bits(1)", 1074),
+        ("float.from_bits(1)", 1100),
         ("1.5", 1200),
         ("0.1", 4096),
         ("1e300", 4096),
@@ -196,7 +196,7 @@ fn sweep_n() -> u64 {
 fn build_program(n: u64) -> String {
     let mut src = String::new();
     src.push_str("fn show(b: Int) -> Unit = {\n");
-    src.push_str("  let x = int.bits_to_float(b)\n");
+    src.push_str("  let x = float.from_bits(b)\n");
     src.push_str("  println(float.to_string(x))\n");
     src.push_str("  println(\"${x}\")\n");
     src.push_str("  println(float.to_fixed(x, int.band(b, 7)))\n");
@@ -204,7 +204,7 @@ fn build_program(n: u64) -> String {
     src.push_str("fn both(b: Int) -> Unit = {\n");
     src.push_str("  show(b)\n");
     src.push_str("  show(int.bxor(b, int.bshl(1, 63)))\n");
-    src.push_str("  println(float.to_fixed(int.bits_to_float(b), 40))\n");
+    src.push_str("  println(float.to_fixed(float.from_bits(b), 40))\n");
     src.push_str("}\n\n");
     src.push_str("fn main() -> Unit = {\n");
     for (lit, nd) in long_fixed() {

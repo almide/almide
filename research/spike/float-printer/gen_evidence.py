@@ -41,7 +41,7 @@ fn main() -> Unit = {
     s = __h_next(s)
     let sign = if int.band(s, 1) == 1 then int.bshl(1, 63) else 0
     let b = int.bor(int.bor(int.bshl(e, 52), mant), sign)
-    println(float.to_string(int.bits_to_float(b)))
+    println(float.to_string(float.from_bits(b)))
     i = i + 1
   }
   println("end")
@@ -95,7 +95,7 @@ fn show(str: String) -> Unit = match float.parse(str) {
   Err(e) => println(str + " ERR " + e),
 }
 
-fn show_bits(b: Int) -> Unit = println(int.to_string(b) + " " + float.to_string(int.bits_to_float(b)))
+fn show_bits(b: Int) -> Unit = println(int.to_string(b) + " " + float.to_string(float.from_bits(b)))
 
 fn around(anchor: String) -> Unit = {
   let c = float.to_bits(float.parse(anchor) ?? 0.0)
@@ -109,7 +109,7 @@ fn around(anchor: String) -> Unit = {
 fn main() -> Unit = {
   var i = 0
   while i <= 100000 {
-    println(float.to_string(float.from_int(i)))
+    println(float.to_string(float.from(i)))
     i = i + 1
   }
   var k = 0 - 320
@@ -185,7 +185,7 @@ fn main() -> Unit = {
     let b = s
     s = __h_next(s)
     let p = __e_mod(s, 11)
-    println(int.to_string(b) + " " + int.to_string(p) + " " + float.to_fixed(int.bits_to_float(b), p))
+    println(int.to_string(b) + " " + int.to_string(p) + " " + float.to_fixed(float.from_bits(b), p))
     i = i + 1
   }
   println("end")

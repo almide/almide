@@ -2,4 +2,4 @@
 // explicit widening call; only literals adopt a width silently.
 fn widen(u: UInt8) -> Int = u
 
-fn main() -> Unit = println("${widen(int.to_uint8(5))}")
+fn main() -> Unit = println("${widen(uint8.from(5))}")

@@ -1,7 +1,7 @@
 //! The interp's pool tier keeps heap values as ADDRESSES while a self-hosted
 //! body is on the stack, so a VALUE-level body (`matrix_softmax_rows` was
 //! `m |> list.map(..)`) reached from inside another body with a block a
-//! HEAP-level body built (`matrix.mul`'s) used to iterate an Int and abort
+//! HEAP-level body built (matrix `*`'s) used to iterate an Int and abort
 //! with `internal: HOF receiver not iterable` — a wrong third vote (exit 1
 //! where both backends print), found by the `matrix_fused` compositions
 //! (#1423 stage 4). A HOF only reads its receiver, so `eval_hof` now reads a

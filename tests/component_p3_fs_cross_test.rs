@@ -164,10 +164,10 @@ effect fn main() -> Unit = {
   let t = fs.read_text(p)!
   println("len=${string.len(t)} same=${t == s}")
   fs.append_text(p, s)!
-  println("size=${fs.file_size(p)!}")
+  println("size=${fs.stat(p)!.size}")
   println("bytes=${bytes.len(fs.read_bytes(p)!)}")
   fs.copy(p, d + "/c.txt")!
-  println("copy=${fs.file_size(d + "/c.txt")!}")
+  println("copy=${fs.stat(d + "/c.txt")!.size}")
   let parts = fan.map([p, d + "/c.txt"], (q) => fs.read_text(q)!)!
   println("fan=${list.len(parts)} ${string.len(list.get(parts, 1) ?? "")}")
   fs.remove_all(d)!

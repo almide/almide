@@ -40,7 +40,7 @@ fn bytes_writes(mut b: Bytes) -> Unit = {
   bytes.put_u8(b, 0, 9)
   bytes.put_i16_be(b, 1, 1027)
   bytes.put_f32_le(b, 4, 2.5)
-  bytes.set_uint16(b, 6, 772.to_uint16(), BigEndian)
+  bytes.put_u16_be(b, 6, 772)
   println("set c=${bytes.to_list(c)} b=${bytes.to_list(b)}")
 }
 
@@ -48,7 +48,7 @@ fn bytes_grow(mut b: Bytes) -> Unit = {
   let c = b
   bytes.push(b, 1)
   bytes.append_u8(b, 2)
-  bytes.write_u32_be(b, 3)
+  bytes.append_u32_be(b, 3)
   bytes.copy_from(b, bytes.from_list([8, 8]), 0, 0, 2)
   bytes.copy_within(b, 0, 2, 2)
   b[1] = 6

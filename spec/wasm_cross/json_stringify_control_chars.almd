@@ -16,7 +16,7 @@ fn probe(c: Int) -> String = {
   let pretty = json.stringify_pretty(doc)
   let back = json.parse(text) ?? value.null()
   let back_pretty = json.parse(pretty) ?? value.null()
-  "${c} ${text} ${value.stringify(value.string(s))} ${back == doc} ${back_pretty == doc}"
+  "${c} ${text} ${json.stringify(value.string(s))} ${back == doc} ${back_pretty == doc}"
 }
 
 fn main() -> Unit = {

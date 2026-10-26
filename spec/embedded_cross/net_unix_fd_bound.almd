@@ -13,7 +13,7 @@ import random
 import unix
 
 effect fn main() -> Unit = {
-  let path = "${env.temp_dir()}/almide-fdbound-${random.int(0, 999999999)}.sock"
+  let path = "${fs.temp_dir()}/almide-fdbound-${random.int(0, 999999999)}.sock"
   let l = unix.listen(path)!
   let c = unix.connect(path)!
   let s = unix.accept(l)!

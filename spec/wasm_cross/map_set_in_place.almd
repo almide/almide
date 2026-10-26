@@ -24,36 +24,40 @@ fn render(m: Map[Int, Int]) -> String = {
   out
 }
 
-fn put(mut m: Map[Int, Int], k: Int, v: Int) -> Unit = map.insert(m, k, v)
+fn put(mut m: Map[Int, Int], k: Int, v: Int) -> Unit = {
+  m[k] = v
+}
 
-fn bump(mut m: Map[String, Int], k: String) -> Unit = map.insert(m, k, map.get_or(m, k, 0) + 1)
+fn bump(mut m: Map[String, Int], k: String) -> Unit = {
+  m[k] = map.get(m, k) ?? 0 + 1
+}
 
 fn main() -> Unit = {
   // A. the build loop: 3000 writes over 2000 keys — the last 1000 overwrite
   var m: Map[Int, Int] = map.new()
   for i in 0..<3000 {
-    map.insert(m, i % 2000, i)
+    m = map.set(m, i % 2000, i)
   }
   println("A.len=" + int.to_string(map.len(m)) + " sum=" + int.to_string(checksum(m)))
-  println("A.k0=" + int.to_string(map.get_or(m, 0, 0 - 1)) + " k999=" + int.to_string(map.get_or(m, 999, 0 - 1)) + " k1999=" + int.to_string(map.get_or(m, 1999, 0 - 1)))
-  println("A.first=" + int.to_string(list.get_or(map.keys(m), 0, 0 - 1)) + " last=" + int.to_string(list.get_or(map.keys(m), 1999, 0 - 1)))
+  println("A.k0=" + int.to_string(map.get(m, 0) ?? (0 - 1)) + " k999=" + int.to_string(map.get(m, 999) ?? (0 - 1)) + " k1999=" + int.to_string(map.get(m, 1999) ?? (0 - 1)))
+  println("A.first=" + int.to_string(list.get(map.keys(m), 0) ?? (0 - 1)) + " last=" + int.to_string(list.get(map.keys(m), 1999) ?? (0 - 1)))
   // B. the index-assign spelling with the counter idiom (the value reads the
   // map being written), and the explicit rebind spelling
   var c: Map[Int, Int] = map.new()
   for i in 0..<500 {
-    c[i % 7] = map.get_or(c, i % 7, 0) + 1
+    c[i % 7] = map.get(c, i % 7) ?? 0 + 1
   }
   println("B.c=" + render(c))
   var r: Map[Int, Int] = map.new()
   for i in 0..<64 {
     r = map.set(r, 63 - i, i)
   }
-  println("B.r.len=" + int.to_string(map.len(r)) + " first=" + int.to_string(list.get_or(map.keys(r), 0, 0 - 1)) + " sum=" + int.to_string(checksum(r)))
+  println("B.r.len=" + int.to_string(map.len(r)) + " first=" + int.to_string(list.get(map.keys(r), 0) ?? (0 - 1)) + " sum=" + int.to_string(checksum(r)))
   // C. aliases bound before a write keep the pre-write value; a set through
   // the alias leaves the alias untouched too
   let a = m
   var b = map.set(a, 5000, 1)
-  map.insert(m, 5001, 2)
+  m = map.set(m, 5001, 2)
   println("C.a=" + int.to_string(map.len(a)) + " b=" + int.to_string(map.len(b)) + " m=" + int.to_string(map.len(m)))
   println("C.a.has5000=" + (if map.contains(a, 5000) then "yes" else "no") + " a.has5001=" + (if map.contains(
     a,
@@ -65,7 +69,7 @@ fn main() -> Unit = {
   let held = Holder { snap: d, tag: 1 }
   let opt = some(d)
   let pair = (d, 7)
-  map.insert(d, 3, 30)
+  d = map.set(d, 3, 30)
   d[1] = 11
   let ol = match opt {
     some(x) => render(x),
@@ -78,7 +82,7 @@ fn main() -> Unit = {
   // (a snapshot); the writes land after it
   var e: Map[Int, Int] = map.from_list([(1, 1), (2, 2), (3, 3)])
   for (k, v) in e {
-    map.insert(e, k + 10, v * 100)
+    e = map.set(e, k + 10, v * 100)
   }
   println("E=" + render(e))
   // F. the `mut` parameter shape: the write persists to the caller
@@ -90,15 +94,15 @@ fn main() -> Unit = {
   bump(freq, "a")
   bump(freq, "a")
   bump(freq, "b")
-  println("F=" + render(counts) + " a=" + int.to_string(map.get_or(freq, "a", 0)) + " b=" + int.to_string(map.get_or(freq, "b", 0)))
+  println("F=" + render(counts) + " a=" + int.to_string(map.get(freq, "a") ?? 0) + " b=" + int.to_string(map.get(freq, "b") ?? 0))
   // G. `let`-bound String keys and values: the entry co-owns the handle, so the
   // binding's release at the next loop round does not free what the map holds
   var s: Map[String, Int] = map.new()
   for i in 0..<30 {
     let k = "k" + int.to_string(i % 4)
-    s[k] = map.get_or(s, k, 0) + i
+    s[k] = map.get(s, k) ?? 0 + i
   }
-  println("G.keys=" + list.join(map.keys(s), ",") + " k2=" + int.to_string(map.get_or(s, "k2", 0 - 1)))
+  println("G.keys=" + list.join(map.keys(s), ",") + " k2=" + int.to_string(map.get(s, "k2") ?? (0 - 1)))
   var w: Map[Int, String] = map.new()
   for i in 0..<12 {
     let v = "w" + int.to_string(i % 5)
@@ -112,14 +116,14 @@ fn main() -> Unit = {
   // H. a map shared by an earlier walk keeps growing correctly afterwards
   var h: Map[Int, Int] = map.new()
   for i in 0..<20 {
-    map.insert(h, i, i * i)
+    h = map.set(h, i, i * i)
   }
   var walked = 0
   for (k, v) in h {
     walked = walked + k + v
   }
   for i in 20..<40 {
-    map.insert(h, i, i * i)
+    h = map.set(h, i, i * i)
   }
   println("H.walked=" + int.to_string(walked) + " len=" + int.to_string(map.len(h)) + " sum=" + int.to_string(checksum(h)))
 }

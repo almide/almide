@@ -211,7 +211,7 @@ fn upper(c: Int) -> Int = if c >= 97 and c <= 122 then c - 32 else c
 
 fn is_keyword(word: List[Int]) -> Bool = list.contains(
   keywords,
-  string.from_bytes(word |> list.map(upper)),
+  bytes.to_string_lossy(bytes.from_list(word |> list.map(upper))),
 )
 
 fn is_op2(a: Int, b: Int) -> Bool = (a == 124 and b == 124) or (a == 60 and b == 60) or (a == 62 and b == 62) or (a == 60 and b == 61) or (a == 62 and b == 61) or (a == 61 and b == 61) or (a == 33 and b == 61) or (a == 60 and b == 62)
@@ -250,7 +250,7 @@ fn token(src: List[Int], i: Int) -> (Int, String) = {
 }
 
 fn emit_str(mut out: Bytes, s: String) -> Unit = {
-  for b in string.to_bytes(s) {
+  for b in bytes.to_list(bytes.from_string(s)) {
     bytes.push(out, b)
   }
 }
@@ -290,6 +290,6 @@ let sample = "SELECT name, COUNT(*) AS n FROM users u JOIN orders o ON u.id = o.
 
 fn main() -> Unit = {
   var out = bytes.zeros(0)
-  highlight(string.to_bytes(sample), out)
+  highlight(bytes.to_list(bytes.from_string(sample)), out)
   println(bytes.to_string_lossy(out))
 }

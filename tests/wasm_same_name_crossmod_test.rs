@@ -47,7 +47,7 @@ const BRIDGE_ALMD: &str = r#"import self as m
 import float
 import int
 @export(wasm, "route")
-fn route() -> Float = int.to_float(m.route_line(5))
+fn route() -> Float = float.from(m.route_line(5))
 effect fn main() -> Unit = {
   let _ = route()
   ()

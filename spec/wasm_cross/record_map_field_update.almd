@@ -31,7 +31,7 @@ fn yn(x: Bool) -> String = if x then "yes" else "no"
 
 fn keys_of(m: Map[String, List[Int]]) -> String = map.keys(m) |> list.sort |> list.join(",")
 
-fn show(m: Map[String, Int]) -> String = map.keys(m) |> list.sort |> list.map((k) => "${k}=${int.to_string(map.get_or(m, k, 0))}") |> list.join(",")
+fn show(m: Map[String, Int]) -> String = map.keys(m) |> list.sort |> list.map((k) => "${k}=${int.to_string(map.get(m, k) ?? 0)}") |> list.join(",")
 
 fn main() -> Unit = {
   // A. the call form, then the inline form
@@ -39,12 +39,12 @@ fn main() -> Unit = {
   for i in 0..<200 {
     b = add(b, i)
   }
-  println("A.len=${int.to_string(map.len(b.m))} n=${int.to_string(b.n)} k7=${int.to_string(list.len(map.get_or(b.m, "7", [])))}")
+  println("A.len=${int.to_string(map.len(b.m))} n=${int.to_string(b.n)} k7=${int.to_string(list.len(map.get(b.m, "7") ?? []))}")
   var c = Box { m: [:], n: 0 }
   for i in 0..<50 {
     c = { ...c, m: map.set(c.m, int.to_string(i * 2), [i]), n: c.n + 2 }
   }
-  println("A.inline len=${int.to_string(map.len(c.m))} n=${int.to_string(c.n)} k98=${int.to_string(list.sum(map.get_or(c.m, "98", [])))}")
+  println("A.inline len=${int.to_string(map.len(c.m))} n=${int.to_string(c.n)} k98=${int.to_string(list.sum(map.get(c.m, "98") ?? []))}")
   // B. an alias of the record bound before the update
   let old = b
   b = add(b, 1000)
@@ -60,7 +60,7 @@ fn main() -> Unit = {
       map.len(d.m)
     ]), n: size }
   }
-  println("D.keys=${keys_of(d.m)} n=${int.to_string(d.n)} k4=${int.to_string(list.sum(map.get_or(d.m, "4", [])))}")
+  println("D.keys=${keys_of(d.m)} n=${int.to_string(d.n)} k4=${int.to_string(list.sum(map.get(d.m, "4") ?? []))}")
   // E. a snapshot of the field taken before the update
   let snap = b.m
   b = add(b, 2000)

@@ -64,7 +64,7 @@ Inverse of `gzip`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (13 functions)
+## Signature index (11 functions)
 
 ```
 // Zlib-framed DEFLATE of b; bytes vary by target.
@@ -110,14 +110,6 @@ zlib.gunzip(b: Bytes) -> Result[Bytes, String]
 // Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 // @since unreleased
 zlib.gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String]
-
-// CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
-// @since 0.62.0
-zlib.crc32(data: Bytes) -> Int
-
-// Adler-32 as an unsigned Int; 1 for empty data.
-// @since 0.62.0
-zlib.adler32(data: Bytes) -> Int
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

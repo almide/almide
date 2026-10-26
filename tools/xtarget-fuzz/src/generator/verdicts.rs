@@ -51,32 +51,19 @@ pub const VERDICTS: &[Verdict] = &[
         canon: "{xs}",
         domain: &[],
     },
-    Verdict {
-        func: "list.shuffle",
-        holds: "list.len(v) == list.len({xs}) and list.all({xs}, (e) => list.count(v, (f) => f == e) == list.count({xs}, (f) => f == e))",
-        canon: "{xs}",
-        domain: &[],
-    },
     Verdict { func: "datetime.now", holds: concat!("v >= ", epoch_floor_s!()), canon: "0", domain: &[] },
-    Verdict { func: "env.unix_timestamp", holds: concat!("v >= ", epoch_floor_s!()), canon: "0", domain: &[] },
-    Verdict { func: "env.millis", holds: concat!("v >= ", epoch_floor_s!(), "000"), canon: "0", domain: &[] },
+    Verdict { func: "datetime.now_ms", holds: concat!("v >= ", epoch_floor_s!(), "000"), canon: "0", domain: &[] },
     Verdict { func: "datetime.monotonic_ns", holds: "v >= 0", canon: "0", domain: &[] },
-    // argv[0] is the program as the host names it (a native path, the wasm
-    // runner's name); the arguments after it are the sandbox's.
-    Verdict { func: "process.args", holds: "list.len(v) >= 1", canon: "[\"prog\"] + list.drop(v, 1)", domain: &[] },
     Verdict { func: "fs.stat", holds: concat!("v.modified >= ", epoch_floor_s!()), canon: "v", domain: &[] },
-    Verdict { func: "fs.modified_at", holds: concat!("v >= ", epoch_floor_s!()), canon: "0", domain: &[] },
     Verdict { func: "process.pid", holds: "v > 0", canon: "1", domain: &[] },
     Verdict { func: "env.os", holds: "list.contains([\"macos\", \"linux\", \"windows\", \"wasi\", \"unknown\"], v)", canon: "\"os\"", domain: &[] },
     Verdict { func: "env.cwd", holds: "string.len(v) > 0", canon: "\".\"", domain: &[] },
-    Verdict { func: "env.temp_dir", holds: "string.len(v) > 0", canon: "\"tmp\"", domain: &[] },
     Verdict { func: "fs.temp_dir", holds: "string.len(v) > 0", canon: "\"tmp\"", domain: &[] },
     Verdict { func: "fs.create_temp_file", holds: "string.contains(v, {prefix})", canon: "{prefix}", domain: &[] },
     Verdict { func: "fs.create_temp_dir", holds: "string.contains(v, {prefix})", canon: "{prefix}", domain: &[] },
     // Unit results: nothing to check but that the call returns, with a
     // short, non-negative wait.
     Verdict { func: "env.sleep_ms", holds: "true", canon: "()", domain: &[("ms", "int.abs({ms}) % 5")] },
-    Verdict { func: "process.sleep", holds: "true", canon: "()", domain: &[("ms", "int.abs({ms}) % 5")] },
     // A signal reaches only a child of this program's own: a generated pid
     // could name any process on the host. Past every pid_max, the fallback
     // fails with ESRCH.
@@ -163,7 +150,6 @@ const HTTP_CALL_OF_ITS_OWN: &str = "match http.start(http.new_request(\"GET\", \
 const PROBES: &[(&str, &str)] = &[
     ("random.choice", "match v { some(_) => not list.is_empty({xs}), none => list.is_empty({xs}) }"),
     ("random.shuffle", "list.len(v) == list.len({xs})"),
-    ("list.shuffle", "list.len(v) == list.len({xs})"),
     // The probe's call has ended before the loop (its recipe waits), so
     // poll answers it; comparing that answer with `wait`'s would time a
     // second copy of the body as poll's.

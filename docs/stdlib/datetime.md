@@ -62,19 +62,6 @@ fn main() -> Unit = {
 }
 ```
 
-### `datetime.from_unix(seconds: Int) -> Int`
-
-Convert a Unix timestamp (identity function for documentation clarity).
-
-```almd run
-fn main() -> Unit = {
-  println(int.to_string(datetime.from_unix(1705320000)))
-}
-```
-```output
-1705320000
-```
-
 ### `datetime.format(ts: Int, pattern: String) -> String`
 
 Format a timestamp using a strftime-style pattern. The following specifiers are
@@ -118,20 +105,6 @@ fn main() -> Unit = {
 ```
 ```output
 2024-01-15T12:00:00Z
-```
-
-### `datetime.to_unix(ts: Int) -> Int`
-
-Get the Unix timestamp value (identity function).
-
-```almd run
-fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
-  println(int.to_string(datetime.to_unix(ts)))
-}
-```
-```output
-1705320000
 ```
 
 ### `datetime.year(ts: Int) -> Int`
@@ -292,54 +265,9 @@ fn main() -> Unit = {
 2024-01-15T12:01:30Z
 ```
 
-### `datetime.diff_seconds(a: Int, b: Int) -> Int`
-
-Compute the difference in seconds between two timestamps.
-
-```almd run
-fn main() -> Unit = {
-  let earlier = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
-  let later = datetime.add_hours(earlier, 1)
-  println(int.to_string(datetime.diff_seconds(later, earlier)))
-}
-```
-```output
-3600
-```
-
-### `datetime.is_before(a: Int, b: Int) -> Bool`
-
-Check if timestamp a is before timestamp b.
-
-```almd run
-fn main() -> Unit = {
-  let earlier = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
-  let later = datetime.add_hours(earlier, 1)
-  println("${datetime.is_before(earlier, later)}")
-}
-```
-```output
-true
-```
-
-### `datetime.is_after(a: Int, b: Int) -> Bool`
-
-Check if timestamp a is after timestamp b.
-
-```almd run
-fn main() -> Unit = {
-  let earlier = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
-  let later = datetime.add_hours(earlier, 1)
-  println("${datetime.is_after(later, earlier)}")
-}
-```
-```output
-true
-```
-
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (23 functions)
+## Signature index (18 functions)
 
 ```
 // ts + n * 86400; no DST or calendar logic.
@@ -362,10 +290,6 @@ datetime.add_seconds(ts: Int, n: Int) -> Int
 // @since 0.6.0 or earlier
 datetime.day(ts: Int) -> Int
 
-// a - b; positive when a is later.
-// @since 0.6.0 or earlier
-datetime.diff_seconds(a: Int, b: Int) -> Int
-
 // Replaces %Y %m %d %H %M %S (UTC); no %% escape.
 // @since 0.6.0 or earlier
 datetime.format(ts: Int, pattern: String) -> String
@@ -374,21 +298,9 @@ datetime.format(ts: Int, pattern: String) -> String
 // @since 0.6.0 or earlier
 datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String]
 
-// Identity: seconds are already a timestamp.
-// @since 0.6.0 or earlier
-datetime.from_unix(seconds: Int) -> Int
-
 // UTC hour of day, 0..23.
 // @since 0.6.0 or earlier
 datetime.hour(ts: Int) -> Int
-
-// a > b; false when equal.
-// @since 0.6.0 or earlier
-datetime.is_after(a: Int, b: Int) -> Bool
-
-// a < b; false when equal.
-// @since 0.6.0 or earlier
-datetime.is_before(a: Int, b: Int) -> Bool
 
 // UTC minute, 0..59.
 // @since 0.6.0 or earlier
@@ -421,10 +333,6 @@ datetime.second(ts: Int) -> Int
 // YYYY-MM-DDTHH:MM:SSZ in UTC.
 // @since 0.6.0 or earlier
 datetime.to_iso(ts: Int) -> String
-
-// Identity: a timestamp is already Unix seconds.
-// @since 0.6.0 or earlier
-datetime.to_unix(ts: Int) -> Int
 
 // English day name in UTC; 0 is Thursday.
 // @since 0.6.0 or earlier

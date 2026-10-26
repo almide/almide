@@ -119,18 +119,6 @@ probe = 'string.pad_end("é", 3, "x")'
 expect = "éxx"
 
 [[string.fn]]
-name = "to_bytes"
-index_unit = "byte"
-probe = 'list.len(string.to_bytes("é"))'
-expect = "2"
-
-[[string.fn]]
-name = "from_bytes"
-index_unit = "byte"
-probe = 'string.from_bytes([195, 169])'
-expect = "é"
-
-[[string.fn]]
 name = "get"
 index_unit = "codepoint"
 probe = 'string.get("café7", 3) ?? "?"'
@@ -211,12 +199,6 @@ name = "drop_end"
 index_unit = "codepoint"
 probe = 'string.drop_end("café7", 2)'
 expect = "caf"
-
-[[string.fn]]
-name = "run_length_encode"
-index_unit = "count"
-probe = 'string.run_length_encode("ééa")'
-expect = """[("é", 2), ("a", 1)]"""
 
 [[string.fn]]
 name = "compare"
@@ -345,12 +327,6 @@ probe = 'datetime.day(1705322096)'
 expect = "15"
 
 [[datetime.fn]]
-name = "diff_seconds"
-index_unit = "second"
-probe = 'datetime.diff_seconds(90, 30)'
-expect = "60"
-
-[[datetime.fn]]
 name = "format"
 index_unit = "second"
 probe = 'datetime.format(1705322096, "%Y-%m-%dT%H:%M:%SZ")'
@@ -363,28 +339,10 @@ probe = 'datetime.from_parts(2024, 1, 15, 12, 34, 56) ?? 0'
 expect = "1705322096"
 
 [[datetime.fn]]
-name = "from_unix"
-index_unit = "second"
-probe = 'datetime.from_unix(1705322096)'
-expect = "1705322096"
-
-[[datetime.fn]]
 name = "hour"
 index_unit = "civil-field"
 probe = 'datetime.hour(1705322096)'
 expect = "12"
-
-[[datetime.fn]]
-name = "is_after"
-index_unit = "second"
-probe = 'datetime.is_after(0, 1)'
-expect = "false"
-
-[[datetime.fn]]
-name = "is_before"
-index_unit = "second"
-probe = 'datetime.is_before(0, 1)'
-expect = "true"
 
 [[datetime.fn]]
 name = "minute"
@@ -460,12 +418,6 @@ name = "to_iso"
 index_unit = "second"
 probe = 'datetime.to_iso(1705322096)'
 expect = "2024-01-15T12:34:56Z"
-
-[[datetime.fn]]
-name = "to_unix"
-index_unit = "second"
-probe = 'datetime.to_unix(1705322096)'
-expect = "1705322096"
 
 [[datetime.fn]]
 name = "weekday"
@@ -563,12 +515,6 @@ name = "get_i64_le"
 index_unit = "value"
 probe = '(bytes.get_i64_le(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 0) ?? 0)'
 expect = "-506097522914230529"
-
-[[bytes.fn]]
-name = "read_u8"
-index_unit = "byte-value"
-probe = 'bytes.read_u8(bytes.from_list([255, 254, 253, 252, 251, 250, 249, 248]), 1)'
-expect = "254"
 
 [[bytes.fn]]
 name = "get_f32_be"
@@ -777,23 +723,6 @@ setup = [
 ]
 probe = 'combined'
 expect = "1/true"
-
-[[bytes.fn]]
-name = "read_string_be_at"
-index_unit = "cursor"
-setup = [
-  'let (cur, v) = bytes.read_string_be_at(bytes.from_list([0, 0, 0, 3, 97, 98, 99]), 0)',
-  'let combined = "${cur}/${v ?? \"?\"}"',
-]
-probe = 'combined'
-expect = "7/abc"
-
-# The `_array` ELEMENT-COUNT family — the trap this table exists to catch.
-# `count` counts ELEMENTS of the decoded type, not bytes:
-# `read_i32_be_array(b, 0, 2)` consumes EIGHT bytes. Nothing in the name, the
-# signature or the prose says so, and the sibling `pos` argument immediately
-# above it IS a byte offset — so the two Ints in one call have different units.
-# The i64 probes need a 16-byte fixture for the same reason.
 
 [[bytes.fn]]
 name = "get_i16_be_array"
@@ -1083,16 +1012,6 @@ probe = "sm_out"
 expect = "1 -1"
 
 [[bytes.fn]]
-name = "get_or"
-index_unit = "byte-offset"
-setup = [
-  "let b8 = bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8])",
-  'let sm_out = "${bytes.get_or(b8, 2, 42)} ${bytes.get_or(b8, 9, 42)}"',
-]
-probe = "sm_out"
-expect = "3 42"
-
-[[bytes.fn]]
 name = "index_of"
 index_unit = "byte-offset"
 setup = [
@@ -1149,16 +1068,6 @@ probe = "bytes.to_list(b)"
 expect = "[1, 2]"
 
 [[bytes.fn]]
-name = "set_at"
-index_unit = "byte-offset"
-setup = [
-  "var b = bytes.from_list([1, 2, 3])",
-  "bytes.set_at(b, 1, 9)",
-]
-probe = "bytes.to_list(b)"
-expect = "[1, 9, 3]"
-
-[[bytes.fn]]
 name = "copy_within"
 index_unit = "byte-offset"
 setup = [
@@ -1177,36 +1086,6 @@ setup = [
 ]
 probe = "sm_out"
 expect = "false true true"
-
-[[bytes.fn]]
-name = "read_length_prefixed_strings_le"
-index_unit = "element-count"
-setup = [
-  "var b = bytes.new()",
-  "bytes.append_u32_le(b, 1)",
-  "bytes.append_u8(b, 65)",
-  "bytes.append_u32_le(b, 2)",
-  "bytes.append_u8(b, 66)",
-  "bytes.append_u8(b, 67)",
-]
-probe = 'bytes.read_length_prefixed_strings_le(b, 0, 2) |> list.join(",")'
-expect = "A,BC"
-
-[[bytes.fn]]
-name = "read_string_at"
-index_unit = "byte-count"
-probe = 'bytes.read_string_at(bytes.from_string("héllo"), 1, 2)'
-expect = "é"
-
-[[bytes.fn]]
-name = "read_string_be"
-index_unit = "byte-offset"
-setup = [
-  "var b = bytes.new()",
-  'bytes.write_string_be(b, "hi")',
-]
-probe = "bytes.read_string_be(b, 0)"
-expect = "hi"
 
 [[bytes.fn]]
 name = "remove_at"
@@ -1392,20 +1271,6 @@ probe = "sm_out"
 expect = "5 8"
 
 [[bytes.fn]]
-name = "skip_length_prefixed_le"
-index_unit = "cursor"
-setup = [
-  "var b = bytes.new()",
-  "bytes.append_u32_le(b, 1)",
-  "bytes.append_u8(b, 65)",
-  "bytes.append_u32_le(b, 2)",
-  "bytes.append_u8(b, 66)",
-  "bytes.append_u8(b, 67)",
-]
-probe = "bytes.skip_length_prefixed_le(b, 0, 2)"
-expect = "11"
-
-[[bytes.fn]]
 name = "slice"
 index_unit = "byte-offset"
 probe = "bytes.to_list(bytes.slice(bytes.from_list([1, 2, 3, 4, 5, 6, 7, 8]), 2, 5))"
@@ -1427,116 +1292,6 @@ name = "to_list"
 index_unit = "byte-value"
 probe = "bytes.to_list(bytes.from_list([200, 255]))"
 expect = "[200, 255]"
-
-[[bytes.fn]]
-name = "write_i64_be"
-index_unit = "value"
-setup = [
-  "var b = bytes.new()",
-  "bytes.write_i64_be(b, 258)",
-]
-probe = "bytes.to_list(b)"
-expect = "[0, 0, 0, 0, 0, 0, 1, 2]"
-
-[[bytes.fn]]
-name = "write_u32_be"
-index_unit = "value"
-setup = [
-  "var b = bytes.new()",
-  "bytes.write_u32_be(b, 258)",
-]
-probe = "bytes.to_list(b)"
-expect = "[0, 0, 1, 2]"
-
-[[bytes.fn]]
-name = "write_u8"
-index_unit = "value"
-setup = [
-  "var b = bytes.new()",
-  "bytes.write_u8(b, 200)",
-]
-probe = "bytes.to_list(b)"
-expect = "[200]"
-
-[[bytes.fn]]
-name = "read_uint16"
-index_unit = "value"
-setup = [
-  "let tb = bytes.from_list([1, 2, 3, 4])",
-  'let sm_out = "${bytes.read_uint16(tb, 0, BigEndian).to_int64()} ${bytes.read_uint16(tb, 0, LittleEndian).to_int64()}"',
-]
-probe = "sm_out"
-expect = "258 513"
-
-[[bytes.fn]]
-name = "read_uint32"
-index_unit = "value"
-setup = [
-  "let tb = bytes.from_list([1, 2, 3, 4])",
-  'let sm_out = "${bytes.read_uint32(tb, 0, BigEndian).to_int64()} ${bytes.read_uint32(tb, 0, LittleEndian).to_int64()}"',
-]
-probe = "sm_out"
-expect = "16909060 67305985"
-
-[[bytes.fn]]
-name = "read_int32"
-index_unit = "value"
-setup = [
-  "let nb = bytes.from_list([255, 255, 255, 254])",
-]
-probe = "bytes.read_int32(nb, 0, BigEndian).to_int64()"
-expect = "-2"
-
-[[bytes.fn]]
-name = "read_float32"
-index_unit = "value"
-setup = [
-  "var fb = bytes.zeros(4)",
-  "bytes.put_f32_be(fb, 0, 1.5)",
-  "let fv = bytes.read_float32(fb, 0, BigEndian).to_float64()",
-]
-probe = "float.to_string(fv)"
-expect = "1.5"
-
-[[bytes.fn]]
-name = "set_uint16"
-index_unit = "byte-offset"
-setup = [
-  "var b = bytes.zeros(4)",
-  "bytes.set_uint16(b, 1, (258).to_uint16(), BigEndian)",
-]
-probe = "bytes.to_list(b)"
-expect = "[0, 1, 2, 0]"
-
-[[bytes.fn]]
-name = "set_uint32"
-index_unit = "byte-offset"
-setup = [
-  "var b = bytes.zeros(6)",
-  "bytes.set_uint32(b, 1, (258).to_uint32(), BigEndian)",
-]
-probe = "bytes.to_list(b)"
-expect = "[0, 0, 0, 1, 2, 0]"
-
-[[bytes.fn]]
-name = "set_int32"
-index_unit = "byte-offset"
-setup = [
-  "var b = bytes.zeros(6)",
-  "bytes.set_int32(b, 1, (-2).to_int32(), BigEndian)",
-]
-probe = "bytes.to_list(b)"
-expect = "[0, 255, 255, 255, 254, 0]"
-
-[[bytes.fn]]
-name = "set_float32"
-index_unit = "byte-offset"
-setup = [
-  "var b = bytes.zeros(6)",
-  "bytes.set_float32(b, 1, 1.5.to_float32(), BigEndian)",
-]
-probe = "bytes.to_list(b)"
-expect = "[0, 63, 192, 0, 0, 0]"
 
 [[bytes.fn]]
 name = "get_u8"
@@ -2328,24 +2083,8 @@ Half-open like range: start included, the end VALUE never appears, whichever
 way the step counts. The probe pins a negative step stopping before end.
 """
 
-[[list.fn]]
-name = "bundled_probe"
-index_unit = "value"
-probe = 'list.bundled_probe(7)'
-expect = "8"
-
-# index_unit vocabulary — math:
-#   value    — the Int is a plain numeric value (abs/min/max/pow)
-#   count    — the Int counts arrangements or factors (choose, factorial)
-#   ordering — the Int is a comparison sign, strictly -1/0/1 (sign)
 [math]
 default_index_unit = "value"
-
-[[math.fn]]
-name = "abs"
-index_unit = "value"
-probe = 'math.abs(0 - 5)'
-expect = "5"
 
 [[math.fn]]
 name = "choose"
@@ -2360,27 +2099,15 @@ probe = 'math.factorial(5)'
 expect = "120"
 
 [[math.fn]]
-name = "max"
+name = "__pow"
 index_unit = "value"
-probe = 'math.max(3, 9)'
-expect = "9"
-
-[[math.fn]]
-name = "min"
-index_unit = "value"
-probe = 'math.min(3, 9)'
-expect = "3"
-
-[[math.fn]]
-name = "pow"
-index_unit = "value"
-probe = 'math.pow(2, 10)'
+probe = 'math.__pow(2, 10)'
 expect = "1024"
 
 [[math.fn]]
-name = "sign"
+name = "__sign"
 index_unit = "ordering"
-probe = 'math.sign(0 - 7)'
+probe = 'math.__sign(0 - 7)'
 expect = "-1"
 
 # index_unit vocabulary — float:
@@ -2392,9 +2119,9 @@ expect = "-1"
 default_index_unit = "value"
 
 [[float.fn]]
-name = "to_int"
+name = "__to_int"
 index_unit = "value"
-probe = 'float.to_int(0.0 - 3.9)'
+probe = 'float.__to_int(0.0 - 3.9)'
 expect = "-3"
 note = """
 Truncation TOWARD ZERO (native `as i64`), not floor: -3.9 becomes -3. The
@@ -2402,30 +2129,9 @@ negative operand is the discriminating case — floor would give -4.
 """
 
 [[float.fn]]
-name = "to_int_checked"
+name = "__from_int"
 index_unit = "value"
-probe = '"${float.to_int_checked(0.0 - 3.0)} ${float.to_int_checked(0.0 - 3.9)}"'
-expect = "some(-3) none"
-note = """
-The checked cell of the Float -> Int trio (#4145): some only for an integer
-value in the Int range. -3.9 is the discriminating case — a truncating or
-flooring conversion would answer some(-3) or some(-4) instead of none.
-"""
-
-[[float.fn]]
-name = "to_int_saturating"
-index_unit = "value"
-probe = 'float.to_int_saturating(0.0 - 3.9)'
-expect = "-3"
-note = """
-The saturating cell of the Float -> Int trio (#4145): float.to_int spelled
-explicitly — truncation toward zero, so -3.9 becomes -3, not -4.
-"""
-
-[[float.fn]]
-name = "from_int"
-index_unit = "value"
-probe = 'float.from_int(2)'
+probe = 'float.__from_int(2)'
 expect = "2"
 
 [[float.fn]]
@@ -2494,33 +2200,6 @@ Declared, not probed (host-capability): `__stdin_read(_h: Stdin, max: Int) -> Re
 
 [env]
 default_index_unit = "second"
-
-[[env.fn]]
-name = "unix_timestamp"
-index_unit = "second"
-setup = [
-  "let ts = env.unix_timestamp()",
-]
-probe = 'ts > 1700000000 and ts < 100000000000'
-expect = "true"
-note = """
-The window pins the SCALE: seconds since the epoch sit near 1.7e9 in this era,
-while a milliseconds value would exceed the 1e11 upper bound — the exact
-confusion the second/millisecond split exists to prevent.
-"""
-
-[[env.fn]]
-name = "millis"
-index_unit = "millisecond"
-setup = [
-  "let ms = env.millis()",
-]
-probe = 'ms > 1700000000000'
-expect = "true"
-note = """
-Milliseconds exceed 1.7e12 in this era — a seconds value could never reach the
-bound, so the probe separates the two scales.
-"""
 
 [[env.fn]]
 name = "sleep_ms"
@@ -2595,35 +2274,11 @@ The bytes themselves are the OS CSPRNG's and not probed; a negative n aborts.
 
 # index_unit vocabulary — json:
 #   value         — the Int is the number a JSON field decodes to
-#   element-index — the Int is a 0-based ARRAY position in a JsonPath
+#   element-index — the Int is a 0-based ARRAY position in a value.Path
 [json]
 default_index_unit = "value"
+fn = []
 
-[[json.fn]]
-name = "get_int"
-index_unit = "value"
-setup = [
-  'let v = json.parse("{\"a\": 42}")!',
-]
-probe = 'json.get_int(v, "a") ?? (0 - 1)'
-expect = "42"
-
-[[json.fn]]
-name = "index"
-index_unit = "element-index"
-setup = [
-  'let v = json.parse("[10, 20, 30]")!',
-  "let p = json.index(json.root(), 1)",
-]
-probe = 'value.as_int(json.get_path(v, p) ?? value.int(0 - 1)) ?? (0 - 1)'
-expect = "20"
-note = """
-0-based: index 1 of [10, 20, 30] is 20 — the second element, not the first.
-"""
-
-# index_unit vocabulary — value:
-#   value         — the Int is the number the dynamic Value wraps or yields
-#   element-index — the Int is a 0-based Array element position (value.index)
 [value]
 default_index_unit = "value"
 
@@ -2785,27 +2440,21 @@ probe = 'int.parse_radix("-0xff", 16) ?? 0'
 expect = "-255"
 
 [[int.fn]]
-name = "from_hex"
+name = "__raw_to_float"
 index_unit = "value"
-probe = 'int.from_hex("ff") ?? 0'
-expect = "255"
-
-[[int.fn]]
-name = "to_float"
-index_unit = "value"
-probe = 'int.to_float(3)'
+probe = 'int.__raw_to_float(3)'
 expect = "3"
 
 [[int.fn]]
-name = "bits_to_float"
+name = "__bits_to_float"
 index_unit = "bit-pattern"
-probe = 'int.bits_to_float(4607182418800017408)'
+probe = 'int.__bits_to_float(4607182418800017408)'
 expect = "1"
 
 [[int.fn]]
-name = "bits_to_f32"
+name = "__bits_to_f32"
 index_unit = "bit-pattern"
-probe = 'int.bits_to_f32(1065353216)'
+probe = 'int.__bits_to_f32(1065353216)'
 expect = "1"
 
 [[int.fn]]
@@ -2973,21 +2622,9 @@ probe = 'int.rotate_left(int.min_value(), 1)'
 expect = "1"
 
 [[int.fn]]
-name = "to_u32"
+name = "__to_int8"
 index_unit = "value"
-probe = 'int.to_u32(0 - 1)'
-expect = "4294967295"
-
-[[int.fn]]
-name = "to_u8"
-index_unit = "value"
-probe = 'int.to_u8(0 - 1)'
-expect = "255"
-
-[[int.fn]]
-name = "to_int8"
-index_unit = "value"
-probe = 'int.to_int8(200)'
+probe = 'int.__to_int8(200)'
 expect = "-56"
 note = """
 The PLAIN cast WRAPS (two's-complement truncation, `as i8`): 200 becomes -56.
@@ -2996,42 +2633,42 @@ input — three different answers to one question is why the matrix exists.
 """
 
 [[int.fn]]
-name = "to_int16"
+name = "__to_int16"
 index_unit = "value"
-probe = 'int.to_int16(40000)'
+probe = 'int.__to_int16(40000)'
 expect = "-25536"
 
 [[int.fn]]
-name = "to_int32"
+name = "__to_int32"
 index_unit = "value"
-probe = 'int.to_int32(4294967296)'
+probe = 'int.__to_int32(4294967296)'
 expect = "0"
 
 [[int.fn]]
-name = "to_uint8"
+name = "__to_uint8"
 index_unit = "value"
-probe = 'int.to_uint8(0 - 1)'
+probe = 'int.__to_uint8(0 - 1)'
 expect = "255"
 
 [[int.fn]]
-name = "to_uint16"
+name = "__to_uint16"
 index_unit = "value"
-probe = 'int.to_uint16(0 - 1)'
+probe = 'int.__to_uint16(0 - 1)'
 expect = "65535"
 
 [[int.fn]]
-name = "to_uint32"
+name = "__to_uint32"
 index_unit = "value"
-probe = 'int.to_uint32(0 - 1)'
+probe = 'int.__to_uint32(0 - 1)'
 expect = "4294967295"
 
 [[int.fn]]
-name = "to_uint64"
+name = "__to_uint64"
 index_unit = "value"
 setup = [
-  "let u = int.to_uint64(0 - 1)",
+  "let u = int.__to_uint64(0 - 1)",
 ]
-probe = 'int.from_uint64_checked(u) ?? (0 - 1)'
+probe = 'int.from_checked(u) ?? (0 - 1)'
 expect = "-1"
 note = """
 -1 wraps to 2^64-1: the checked back-edge refusing it (none -> -1 fallback)
@@ -3041,69 +2678,69 @@ leg's unlinked edge, so the probe avoids displaying the UInt64 itself).
 """
 
 [[int.fn]]
-name = "to_float32"
+name = "__raw_to_float32"
 index_unit = "value"
-probe = 'float.from_float32(int.to_float32(3))'
+probe = 'float.from(int.__raw_to_float32(3))'
 expect = "3"
 
 [[int.fn]]
-name = "to_float64"
+name = "__to_float64"
 index_unit = "value"
-probe = 'float.from_float64(int.to_float64(3))'
+probe = 'float.from(int.__to_float64(3))'
 expect = "3"
 
 [[int.fn]]
-name = "to_int64"
+name = "__to_int64"
 index_unit = "value"
-probe = 'int.to_int64(0 - 42)'
+probe = 'int.__to_int64(0 - 42)'
 expect = "-42"
 
 [[int.fn]]
-name = "from_int8"
+name = "__from_int8"
 index_unit = "value"
-probe = 'int.from_int8(int.to_int8(0 - 5))'
+probe = 'int.__from_int8(int8.from_wrapping(0 - 5))'
 expect = "-5"
 
 [[int.fn]]
-name = "from_int16"
+name = "__from_int16"
 index_unit = "value"
-probe = 'int.from_int16(int.to_int16(0 - 5))'
+probe = 'int.__from_int16(int16.from_wrapping(0 - 5))'
 expect = "-5"
 
 [[int.fn]]
-name = "from_int32"
+name = "__from_int32"
 index_unit = "value"
-probe = 'int.from_int32(int.to_int32(0 - 5))'
+probe = 'int.__from_int32(int32.from_wrapping(0 - 5))'
 expect = "-5"
 
 [[int.fn]]
-name = "from_int64"
+name = "__from_int64"
 index_unit = "value"
-probe = 'int.from_int64(int.to_int64(0 - 5))'
+probe = 'int.__from_int64(int64.from(0 - 5))'
 expect = "-5"
 
 [[int.fn]]
-name = "from_uint8"
+name = "__from_uint8"
 index_unit = "value"
-probe = 'int.from_uint8(int.to_uint8(200))'
+probe = 'int.__from_uint8(uint8.from(200))'
 expect = "200"
 
 [[int.fn]]
-name = "from_uint16"
+name = "__from_uint16"
 index_unit = "value"
-probe = 'int.from_uint16(int.to_uint16(40000))'
+probe = 'int.__from_uint16(uint16.from(40000))'
 expect = "40000"
 
 [[int.fn]]
-name = "from_uint32"
+name = "__from_uint32"
 index_unit = "value"
-probe = 'int.from_uint32(int.to_uint32(3000000000))'
+probe = 'int.__from_uint32(uint32.from(3000000000))'
 expect = "3000000000"
 
 [[int.fn]]
-name = "from_uint64"
+name = "__from_uint64"
 index_unit = "value"
-probe = 'int.from_uint64(int.to_uint64(7))'
+probe = 'int.__from_uint64(uint64.from(7))'
 expect = "7"
 note = """
 Lossless for values that fit i64; the OVERFLOW edge (a UInt64 above i64::MAX)
@@ -3111,51 +2748,51 @@ belongs to the checked/saturating back-edge cells below.
 """
 
 [[int.fn]]
-name = "to_int8_checked"
+name = "__to_int8_checked"
 index_unit = "value"
-probe = 'int.to_int8_checked(200) ?? int.to_int8(0)'
+probe = 'int.__to_int8_checked(200) ?? int8.from(0)'
 expect = "0"
 
 [[int.fn]]
-name = "to_int16_checked"
+name = "__to_int16_checked"
 index_unit = "value"
-probe = 'int.to_int16_checked(40000) ?? int.to_int16(0)'
+probe = 'int.__to_int16_checked(40000) ?? int16.from(0)'
 expect = "0"
 
 [[int.fn]]
-name = "to_int32_checked"
+name = "__to_int32_checked"
 index_unit = "value"
-probe = 'int.to_int32_checked(4294967296) ?? int.to_int32(0)'
+probe = 'int.__to_int32_checked(4294967296) ?? int32.from(0)'
 expect = "0"
 
 [[int.fn]]
-name = "to_uint8_checked"
+name = "__to_uint8_checked"
 index_unit = "value"
-probe = 'int.to_uint8_checked(0 - 1) ?? int.to_uint8(0)'
+probe = 'int.__to_uint8_checked(0 - 1) ?? uint8.from(0)'
 expect = "0"
 
 [[int.fn]]
-name = "to_uint16_checked"
+name = "__to_uint16_checked"
 index_unit = "value"
-probe = 'int.to_uint16_checked(0 - 1) ?? int.to_uint16(0)'
+probe = 'int.__to_uint16_checked(0 - 1) ?? uint16.from(0)'
 expect = "0"
 
 [[int.fn]]
-name = "to_uint32_checked"
+name = "__to_uint32_checked"
 index_unit = "value"
-probe = 'int.to_uint32_checked(0 - 1) ?? int.to_uint32(0)'
+probe = 'int.__to_uint32_checked(0 - 1) ?? uint32.from(0)'
 expect = "0"
 
 [[int.fn]]
-name = "to_uint64_checked"
+name = "__to_uint64_checked"
 index_unit = "value"
-probe = 'int.from_uint64(int.to_uint64_checked(0 - 1) ?? int.to_uint64(0))'
+probe = 'int.from_wrapping(int.__to_uint64_checked(0 - 1) ?? uint64.from(0))'
 expect = "0"
 
 [[int.fn]]
-name = "to_float32_checked"
+name = "__to_float32_checked"
 index_unit = "value"
-probe = 'float.from_float32(int.to_float32_checked(16777217) ?? int.to_float32(0))'
+probe = 'float.from(int.__to_float32_checked(16777217) ?? float32.from(0))'
 expect = "0"
 note = """
 16777217 = 2^24 + 1, the first integer an f32 cannot represent exactly — the
@@ -3163,57 +2800,57 @@ checked conversion refuses precision loss, not just range overflow.
 """
 
 [[int.fn]]
-name = "to_int8_saturating"
+name = "__to_int8_saturating"
 index_unit = "value"
-probe = 'int.to_int8_saturating(200)'
+probe = 'int.__to_int8_saturating(200)'
 expect = "127"
 
 [[int.fn]]
-name = "to_int16_saturating"
+name = "__to_int16_saturating"
 index_unit = "value"
-probe = 'int.to_int16_saturating(40000)'
+probe = 'int.__to_int16_saturating(40000)'
 expect = "32767"
 
 [[int.fn]]
-name = "to_int32_saturating"
+name = "__to_int32_saturating"
 index_unit = "value"
-probe = 'int.to_int32_saturating(4294967296)'
+probe = 'int.__to_int32_saturating(4294967296)'
 expect = "2147483647"
 
 [[int.fn]]
-name = "to_uint8_saturating"
+name = "__to_uint8_saturating"
 index_unit = "value"
-probe = 'int.to_uint8_saturating(0 - 1)'
+probe = 'int.__to_uint8_saturating(0 - 1)'
 expect = "0"
 
 [[int.fn]]
-name = "to_uint16_saturating"
+name = "__to_uint16_saturating"
 index_unit = "value"
-probe = 'int.to_uint16_saturating(0 - 1)'
+probe = 'int.__to_uint16_saturating(0 - 1)'
 expect = "0"
 
 [[int.fn]]
-name = "to_uint32_saturating"
+name = "__to_uint32_saturating"
 index_unit = "value"
-probe = 'int.to_uint32_saturating(0 - 1)'
+probe = 'int.__to_uint32_saturating(0 - 1)'
 expect = "0"
 
 [[int.fn]]
-name = "to_uint64_saturating"
+name = "__to_uint64_saturating"
 index_unit = "value"
-probe = 'int.from_uint64(int.to_uint64_saturating(0 - 1))'
+probe = 'int.from_wrapping(int.__to_uint64_saturating(0 - 1))'
 expect = "0"
 
 [[int.fn]]
-name = "from_uint64_checked"
+name = "__from_uint64_checked"
 index_unit = "value"
-probe = 'int.from_uint64_checked(int.to_uint64(0 - 1)) ?? (0 - 1)'
+probe = 'int.__from_uint64_checked(uint64.from_wrapping(0 - 1)) ?? (0 - 1)'
 expect = "-1"
 
 [[int.fn]]
-name = "from_uint64_saturating"
+name = "__from_uint64_saturating"
 index_unit = "value"
-probe = 'int.from_uint64_saturating(int.to_uint64(0 - 1))'
+probe = 'int.__from_uint64_saturating(uint64.from_wrapping(0 - 1))'
 expect = "9223372036854775807"
 
 [[int.fn]]
@@ -3374,16 +3011,6 @@ expect = "1"
 note = """
 Declared, not probed (host-capability): the Int is the calling process's own
 OS pid, strictly positive on every supported host.
-"""
-
-[[process.fn]]
-name = "sleep"
-index_unit = "millisecond"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (a sleeping probe is flaky by construction): ms is
-MILLISECONDS — process.sleep(1000) is one second.
 """
 
 [[process.fn]]
@@ -3555,25 +3182,6 @@ starting at 0 skips "--out" AND its value "r.txt" (a named option, #4144) and
 keeps "in.txt"; starting at 1 never sees "a" at position 0.
 """
 
-[[args.fn]]
-name = "positional_at"
-index_unit = "element-index"
-probe = 'args.positional_at(0, [])! ?? "none"'
-expect = "none"
-note = """
-The harness runs test files with an empty argv, so in-file the probe can only
-pin the empty case (index 0 of no positionals is none, not a trap). The
-FILTERED-list dimension is measured out-of-band on BOTH legs (2026-08-13,
-`almide run … -- alpha --flag beta`, native and wasm byte-identical):
-positional_at(0) = "alpha" and positional_at(1) = "beta" — the index counts
-POSITIONAL (non-flag) arguments with "--flag" filtered out, 0-based — and
-positional_at(2) is none.
-"""
-
-# index_unit vocabulary — zlib:
-#   value — the Int is the COMPRESSION LEVEL knob, 0–9 (0 = stored, 9 = max
-#           effort; out of range CLAMPS, never errors) — not a size and not
-#           a byte count
 [zlib]
 default_index_unit = "value"
 
@@ -3617,27 +3225,7 @@ to 9's 7 bytes, and inflate roundtrips the level-10 output byte-identically.
 #   byte-count — the Int counts BYTES of file content (file_size: "aé" is 3,
 #                not 2 characters and not a block count)
 #   second     — the Int is a Unix-epoch timestamp in SECONDS (modified_at —
-#                the same scale as env.unix_timestamp, NOT millis)
-[[zlib.fn]]
-name = "crc32"
-index_unit = "value"
-setup = ["let crc = zlib.crc32(bytes.from_list([1, 2, 3]))"]
-probe = "crc"
-expect = "1438416925"
-note = "The Int is the CRC-32 (IEEE, reflected) checksum value, unsigned 32-bit — pure Almide on every leg (#1700), probed for real now that zlib lowers on wasm."
-
-[[zlib.fn]]
-name = "adler32"
-index_unit = "value"
-setup = ["let adl = zlib.adler32(bytes.from_list([1, 2, 3]))"]
-probe = "adl"
-expect = "851975"
-note = "The Int is the Adler-32 checksum value ((s2 << 16) | s1, mod 65521) — pure Almide on every leg (#1700)."
-
-# The `_max` decoders (R-zlib-04, #4020): max_len is a BYTE-COUNT of decoded
-# output — the most bytes the result may hold (the default decoders' bound is
-# 268435456). A 3-byte output is ok at max_len 3 and err at 2 (the `?? 9-byte`
-# fallback shows which).
+#                the same scale as datetime.now, NOT millis)
 [[zlib.fn]]
 name = "inflate_max"
 index_unit = "byte-count"
@@ -3670,65 +3258,8 @@ expect = "3 9"
 
 [fs]
 default_index_unit = "byte-value"
+fn = []
 
-[[fs.fn]]
-name = "file_size"
-index_unit = "byte-count"
-setup = [
-  'let p = fs.create_temp_file("almide_manifest_file_size_")!',
-  'fs.write_text(p, "aé")!',
-  "let n = fs.file_size(p)!",
-  "fs.remove(p)!",
-]
-probe = "n"
-expect = "3"
-note = """
-BYTES on disk, not characters: the 2-codepoint "aé" is 3 — the same count
-as the file's Bytes, so file_size(p) == bytes.len(read_bytes(p)).
-"""
-
-[[fs.fn]]
-name = "modified_at"
-index_unit = "second"
-setup = [
-  'let p = fs.create_temp_file("almide_manifest_modified_at_")!',
-  "let now = env.unix_timestamp()",
-  "let mt = fs.modified_at(p)!",
-  "fs.remove(p)!",
-]
-probe = "mt > now - 300 and mt < now + 300"
-expect = "true"
-note = """
-SECONDS since the Unix epoch, on the same scale as env.unix_timestamp: the
-±300s window around a just-created file's mtime is unreachable for a
-milliseconds value (~1.7e12 against a ~1.7e9 bound), so the probe separates
-the two scales the way the env second/millisecond rows do — and it is
-tighter, because it also pins the ORIGIN as the epoch rather than some
-platform-specific zero.
-"""
-
-# index_unit vocabulary — http (the module where TWO unrelated Int scales sit
-# one call apart, which is exactly why neither may be spelled "value"):
-#   status-code — the Int is an HTTP RESPONSE STATUS, 3 digits, and it is the
-#                 FIRST parameter of every builder (response / json /
-#                 with_headers) — the body follows it. `status(resp, code)`
-#                 inverts that shape: there the response comes first
-#   port        — the Int is a TCP PORT the server BINDS (serve) — an OS
-#                 resource number, never a status. `serve(200, h)` would bind
-#                 port 200 and `response(8080, b)` would answer with status
-#                 8080; nothing but this declaration separates them
-#   millisecond — the Int is a per-call LIMIT in MILLISECONDS, 0 = no limit
-#                 (#2631): `total_ms` / `idle_ms` of HttpLimits, which the
-#                 public start / *_with_limits wrappers spread into the two
-#                 Ints of their private intrinsics below. Never seconds — the
-#                 process-wide ALMIDE_HTTP_TIMEOUT_SECS default is the one
-#                 seconds-denominated knob, and it is not this Int
-#
-# Every probe below verified on BOTH legs (native + wasm, 2026-08-13,
-# byte-identical). The with_headers probe deliberately reads only the CALLER's
-# header: the default-Content-Type cell of that builder DIVERGES between the
-# legs (#1352 — native seeds "text/plain", the self-hosted wasm builder starts
-# empty), so pinning it here would encode a bug as a promise.
 [http]
 
 [[http.fn]]
@@ -4150,10 +3681,6 @@ default_index_unit = "value"
 fn = []
 
 [result]
-default_index_unit = "value"
-fn = []
-
-[error]
 default_index_unit = "value"
 fn = []
 

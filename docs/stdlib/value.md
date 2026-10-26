@@ -4,20 +4,6 @@ The dynamic `Value` **data model**: constructors and accessors.
 auto-imported. The `json` module is the format over it
 (`json.parse` / `json.stringify`) — see [json.md](./json.md).
 
-### `value.field(v: Value, key: String) -> Result[Value, String]`
-
-Get a field from a Value object by key. `err("expected Object")` on a
-non-Object subject, `err("missing field '<k>'")` when absent. For an
-Option instead, apply `?`: `value.field(v, k)?`.
-
-(The retired `value.get` alias of this fn was dropped after its E040
-deprecation window — `get` means Option everywhere else: `map.get` /
-`list.get`.)
-
-### `value.keys(v: Value) -> List[String]`
-
-All keys of a Value object, `[]` for non-Objects.
-
 ### `value.as_string(v: Value) -> Result[String, String]`
 
 Extract a String from a Value. Returns err if not a Str.
@@ -58,8 +44,8 @@ Create a Value from a Bool.
 
 Create a Value object from a list of key-value pairs. No object holds a key
 twice (C-401, #4112): a key the list repeats keeps the position of its first
-occurrence and the value of its last, the rule `json.to_map` uses (C-380), so
-`value.field`, `value.keys` and every serializer see one entry —
+occurrence and the value of its last (C-380), so `value.get`,
+`value.as_object` and every serializer see one entry —
 `json.stringify(value.object([("role", value.string("user")), ("role", value.string("admin"))]))`
 is `{"role":"admin"}`, never a document with `role` twice.
 
@@ -85,23 +71,9 @@ Remove specific keys from an Object.
 
 Merge two Objects. Keys from b override keys from a.
 
-### `value.to_camel_case(v: Value) -> Value`
-
-Convert Object keys from snake_case to camelCase.
-
-### `value.to_snake_case(v: Value) -> Value`
-
-Convert Object keys from camelCase to snake_case.
-
-### `value.stringify(v: Value) -> String`
-
-Convert a Value to a JSON-like string representation — the same text as `json.stringify`:
-a Float prints in its shortest form without a trailing `.0`, and a non-finite Float
-(NaN, +inf, -inf) is written as `null`.
-
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (34 functions)
+## Signature index (29 functions)
 
 ```
 // Wraps xs as an Array Value.
@@ -163,26 +135,6 @@ value.pick(v: Value, keys: List[String]) -> Value
 // Value holding the String s.
 // @since 0.6.0 or earlier
 value.string(s: String) -> Value
-
-// Compact JSON; NaN/inf print as null.
-// @since 0.6.0 or earlier
-value.stringify(v: Value) -> String
-
-// Top-level keys to camelCase; nested untouched.
-// @since 0.6.0 or earlier
-value.to_camel_case(v: Value) -> Value
-
-// Top-level keys to snake_case; userID -> user_i_d.
-// @since 0.6.0 or earlier
-value.to_snake_case(v: Value) -> Value
-
-// Value at key; err if missing or v not an Object.
-// @since 0.6.0 or earlier
-value.field(v: Value, key: String) -> Result[Value, String]
-
-// Object keys in order; [] for non-objects.
-// @since 0.26.0 or earlier
-value.keys(v: Value) -> List[String]
 
 // Object pairs in order; err if v is another kind.
 // @since unreleased

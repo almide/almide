@@ -18,16 +18,16 @@ test "range map record elements with heap captures" {
   let b = { x: 10.0, y: 20.0 }
   let color = [0.5, 0.6]
   let n = 4
-  let nf = int.to_float(n)
+  let nf = float.from(n)
   let segs = 0..<n |> list.map((i) => {
-    let t0 = int.to_float(i) / nf
-    let t1 = int.to_float(i + 1) / nf
+    let t0 = float.from(i) / nf
+    let t1 = float.from(i + 1) / nf
     { p0: lerp(a, b, t0), p1: lerp(a, b, t1), color: color, path_id: 7 }
   })
   assert_eq(list.len(segs), 4)
   let tips = segs |> list.map((s) => float.to_string(s.p1.x)) |> list.join(",")
   assert_eq(tips, "2.5,5.0,7.5,10.0")
-  let c0 = segs |> list.map((s) => list.get_or(s.color, 0, 0.0))
+  let c0 = segs |> list.map((s) => list.get(s.color, 0) ?? 0.0)
   assert_eq(c0, [0.5, 0.5, 0.5, 0.5])
 }
 

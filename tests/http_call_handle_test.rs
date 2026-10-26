@@ -323,7 +323,7 @@ effect fn main() -> Unit = {
 
   // 4. the whole response record, any status: the request_response answer.
   let r7: Result[HttpResponse, String] = http.wait(http.start(http.new_request("GET", b + "/missing?record", "", []), { total_ms: 2000, idle_ms: 0 })!)
-  println("record: " + show(r7) + " " + (match r7 { ok(resp) => string.join(http.header_values(resp, "x-kind"), ","), err(_) => "-" }))
+  println("record: " + show(r7) + " " + (match r7 { ok(resp) => list.join(http.header_values(resp, "x-kind"), ","), err(_) => "-" }))
 
   // 5. read_new holds a split character back until it is whole.
   let c8 = http.start(http.new_request("GET", b + "/utf8?split", "", []), { total_ms: 5000, idle_ms: 0 })!
@@ -442,9 +442,9 @@ import env
 
 effect fn main() -> Unit = {
   let b = "http://127.0.0.1:" + (env.get("PORT") ?? "0")
-  let t6 = env.millis()
+  let t6 = datetime.now_ms()
   let r6: Result[HttpResponse, String] = http.send(http.new_request("GET", b + "/slow?default", "", []))
-  println("slow-default: " + int.to_string(env.millis() - t6) + " " + (match r6 { ok(_) => "ok", err(e) => e }))
+  println("slow-default: " + int.to_string(datetime.now_ms() - t6) + " " + (match r6 { ok(_) => "ok", err(e) => e }))
 }
 "#;
 

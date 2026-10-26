@@ -17,8 +17,8 @@ test "list.reverse works without import" {
   assert_eq(list.reverse([1, 2, 3]), [3, 2, 1])
 }
 
-test "math.abs works without import" {
-  assert_eq(math.abs(-5), 5)
+test "int.abs works without import" {
+  assert_eq(int.abs(-5), 5)
 }
 
 test "map.len works without import" {

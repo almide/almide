@@ -21,7 +21,7 @@ fn text(b: Bytes) -> String = bytes.to_string_lossy(b)
 effect fn main() -> Unit = {
   // A fresh socket path in the temp dir (a random name, so two runs at
   // once cannot meet), removed again before the closing line.
-  let path = "${env.temp_dir()}/almide-unix-${random.int(0, 999999999)}.sock"
+  let path = "${fs.temp_dir()}/almide-unix-${random.int(0, 999999999)}.sock"
   let l = unix.listen(path)!
   let c = unix.connect(path)!
   let s = unix.accept(l)!

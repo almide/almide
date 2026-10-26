@@ -1,7 +1,7 @@
 //! #2157: the keyed-aggregation shapes on the native leg — what the emitted
 //! Rust looks like and how much it allocates.
 //!
-//! The word count `let w = vocab[i]; m[w] = map.get_or(m, w, 0) + 1` against
+//! The word count `let w = vocab[i]; m[w] = (map.get(m, w) ?? 0) + 1` against
 //! the hand-written Rust reference (`HashMap<String, i64>`, one owned key
 //! clone and one `entry` per draw) cost three things the reference does not:
 //!
@@ -10,9 +10,9 @@
 //!   one, so the walker emitted `almide_index!(vocab, i).clone()` — one
 //!   allocation per draw made and freed on the spot (`m[k]` likewise ended
 //!   in `.cloned().clone()`).
-//! - the update probed the map twice (`get_or`, then `insert` of the same
+//! - the update probed the map twice (the read, then `insert` of the same
 //!   key). It is now one `upsert_with` when the new value is plain
-//!   arithmetic over the one `get_or` read.
+//!   arithmetic over the one defaulted read.
 //! - the idiomatic twin `list.group_by(ws, f) |> map.map((g) => list.len(g))`
 //!   built every group — each element copied once more for its key, pushed,
 //!   then copied AGAIN by `map.map` (which borrowed a map nothing else read)
@@ -41,7 +41,7 @@ effect fn main() -> Unit = {{
   var counts: Map[String, Int] = [:]
   for i in list.range(0, {n}) {{
     let w = vocab[draw(i)]
-    counts[w] = map.get_or(counts, w, 0) + 1
+    counts[w] = (map.get(counts, w) ?? 0) + 1
   }}
   let top = map.to_list(counts) |> list.sort_by(((w, c)) => (0 - c, w)) |> list.take(3)
   for (w, c) in top {{
@@ -128,9 +128,9 @@ fn a_counting_update_probes_the_map_once() {
     let body = main_body(&rust);
     assert!(
         body.contains("counts.upsert_with(w, 0i64, |__almide_old|"),
-        "`m[w] = map.get_or(m, w, 0) + 1` is not one probe:\n{body}"
+        "`m[w] = (map.get(m, w) ?? 0) + 1` is not one probe:\n{body}"
     );
-    assert!(!body.contains("almide_rt_map_get_or"), "the update still reads the map separately:\n{body}");
+    assert!(!body.contains("almide_rt_map_get"), "the update still reads the map separately:\n{body}");
 }
 
 /// `list.range(a, b)` walked once — a `for` head, an owned chain source —
@@ -158,11 +158,11 @@ fn an_update_that_is_not_plain_arithmetic_stays_two_steps() {
         effect fn main() -> Unit = {\n\
         \x20 var m: Map[String, Int] = [:]\n\
         \x20 for w in [\"a\", \"b\", \"a\"] {\n\
-        \x20   m[w] = bump(map.get_or(m, w, 0))\n\
-        \x20   m[w] = map.get_or(m, w, 0) + map.get_or(m, \"a\", 0)\n\
-        \x20   m[w] = map.get_or(m, w, 0) + string.len(w)\n\
+        \x20   m[w] = bump(map.get(m, w) ?? 0)\n\
+        \x20   m[w] = (map.get(m, w) ?? 0) + (map.get(m, \"a\") ?? 0)\n\
+        \x20   m[w] = (map.get(m, w) ?? 0) + string.len(w)\n\
         \x20 }\n\
-        \x20 println(\"${map.get_or(m, \"a\", 0)} ${map.get_or(m, \"b\", 0)}\")\n\
+        \x20 println(\"${map.get(m, \"a\") ?? 0} ${map.get(m, \"b\") ?? 0}\")\n\
         }\n";
     let body_rust = emit("two_step.almd", src);
     let body = main_body(&body_rust);

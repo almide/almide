@@ -17,9 +17,9 @@ fn main() -> Unit = {
   println(f2s(p * 2.0))
   println("${f2s(float.sign(mz))} ${f2s(float.sign(z))}")
   // int/float boundary
-  println(int.to_string(float.to_int(2.99)))
-  println(int.to_string(float.to_int(0.0 - 2.99)))
-  println(f2s(float.from_int(9007199254740993)))
+  println(int.to_string(int.from_saturating(2.99)))
+  println(int.to_string(int.from_saturating(0.0 - 2.99)))
+  println(f2s(float.from(9007199254740993)))
   // min/max propagation with equal magnitudes of opposite sign
   println("${f2s(float.min(nz, z))} ${f2s(float.max(nz, z))}")
 }

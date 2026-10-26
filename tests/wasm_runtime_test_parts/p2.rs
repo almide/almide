@@ -567,17 +567,17 @@ fn wasm_closures_stored_in_map() {
     // Two DIFFERENT closures stored in a `Map[String, () -> Unit]`, then one
     // extracted via get_or and called. Rust gave `E0308` — the map's erased `_`
     // value type was inferred from the first closure, so the second (and the get_or
-    // default) couldn't unify. The closures going into `map.insert` / `map.get_or`
+    // default) couldn't unify. The closures going into `m[k] = f` / `map.get(m, k) ?? d`
     // are now `RcWrap`'d to `Rc<dyn Fn>`, so `_` infers one uniform boxed type (as
     // a List[Fn] literal already does). f then h push -> len 2. Cross-target = 2.
     assert_cross_target_effect_main(
         "effect fn main() -> Unit = {\n\
          \x20 var acc: List[Int] = []\n\
          \x20 var m: Map[String, () -> Unit] = map.new()\n\
-         \x20 map.insert(m, \"a\", () => { list.push(acc, 1) })\n\
-         \x20 map.insert(m, \"b\", () => { list.push(acc, 1) })\n\
-         \x20 let f = map.get_or(m, \"a\", () => {})\n\
-         \x20 let h = map.get_or(m, \"b\", () => {})\n\
+         \x20 m[\"a\"] = () => { list.push(acc, 1) }\n\
+         \x20 m[\"b\"] = () => { list.push(acc, 1) }\n\
+         \x20 let f = map.get(m, \"a\") ?? (() => {})\n\
+         \x20 let h = map.get(m, \"b\") ?? (() => {})\n\
          \x20 f()\n\
          \x20 h()\n\
          \x20 println(int.to_string(list.len(acc)))\n\
@@ -595,12 +595,12 @@ fn wasm_typed_param_closure_capturing_mutable() {
         "effect fn main() -> Unit = {\n\
          \x20 var m: Map[String, Int] = map.new()\n\
          \x20 let bump = (k: String) => {\n\
-         \x20   let cur: Int = map.get_or(m, k, 0)\n\
-         \x20   map.insert(m, k, cur + 1)\n\
+         \x20   let cur: Int = map.get(m, k) ?? 0\n\
+         \x20   m[k] = cur + 1\n\
          \x20 }\n\
          \x20 for w in [\"a\", \"b\", \"a\", \"a\", \"b\"] { bump(w) }\n\
-         \x20 println(int.to_string(map.get_or(m, \"a\", -1)))\n\
-         \x20 println(int.to_string(map.get_or(m, \"b\", -1)))\n\
+         \x20 println(int.to_string(map.get(m, \"a\") ?? -1))\n\
+         \x20 println(int.to_string(map.get(m, \"b\") ?? -1))\n\
          \x20 println(int.to_string(map.len(m)))\n\
          }\n",
     );

@@ -64,7 +64,7 @@ test "float.parse trims ASCII whitespace only" {
   assert_eq(float.parse(" \t2.5\r\n"), ok(2.5))
 }
 
-test "int.from_hex keeps its whitespace handling" {
-  assert_eq(int.from_hex("\u{A0}ff"), ok(255))
-  assert_eq(int.from_hex(" ff "), ok(255))
+test "int.parse_radix keeps its whitespace handling" {
+  assert_eq(int.parse_radix("\u{A0}ff", 16), ok(255))
+  assert_eq(int.parse_radix(" ff ", 16), ok(255))
 }

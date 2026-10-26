@@ -26,21 +26,6 @@ fn main() -> Unit = {
 3214735720
 ```
 
-### `hash.fnv1a32_bytes(b: Bytes) -> Int`
-
-The same digest over raw bytes.
-
-```almd run
-import hash
-
-fn main() -> Unit = {
-  println("${hash.fnv1a32_bytes(bytes.from_string("foobar"))}")
-}
-```
-```output
-3214735720
-```
-
 ### `hash.sha256(b: Bytes) -> Bytes`
 
 The FIPS 180-4 SHA-256 digest: 32 bytes. Content addressing and integrity
@@ -135,16 +120,12 @@ Out of scope, deliberately: TLS, AEAD, signatures and asymmetric crypto
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (18 functions)
+## Signature index (17 functions)
 
 ```
 // 32-bit FNV-1a of b, in 0..4294967295.
 // @since 0.58.0 or earlier
 hash.fnv1a32(b: Bytes) -> Int
-
-// 32-bit FNV-1a of b, in 0..4294967295.
-// @since 0.58.0 or earlier
-hash.fnv1a32_bytes(b: Bytes) -> Int
 
 // 32-byte SHA-256 digest of b. Not a MAC: sha256(key ++ msg) is forgeable by length extension; use hash.hmac_sha256 / hash.is_valid_hmac_sha256.
 // @since 0.2.2 or earlier

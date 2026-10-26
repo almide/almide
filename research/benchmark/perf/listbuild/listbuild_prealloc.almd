@@ -21,11 +21,11 @@ effect fn main() -> Unit = {
     }
   } else 20
 
-  let n = math.pow(2, size)
+  let n = int.pow(2, size)
 
   var data: List[Float] = list.repeat(0.0, 2 * n)
   for i in 0..<n {
-    let theta = float.from_int(i) / float.from_int(n) * math.pi()
+    let theta = float.from(i) / float.from(n) * math.pi()
     let re = 1.0 * math.cos(10.0 * theta) + 0.5 * math.cos(25.0 * theta)
     let im = 1.0 * math.sin(10.0 * theta) + 0.5 * math.sin(25.0 * theta)
     data[2 * i] = float.round(re * 100.0) / 100.0

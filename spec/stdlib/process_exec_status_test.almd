@@ -1,4 +1,5 @@
 import process
+import env
 
 test "process.output returns a ProcessStatus on success" {
   let s = process.output(process.ProcessCommand { cmd: "echo", args: ["hi"] })!
@@ -8,7 +9,7 @@ test "process.output returns a ProcessStatus on success" {
 
 test "process.output on failing command returns non-zero code" {
   // `false` is a POSIX command that always exits 1
-  let is_win = (process.env("OS") ?? "") == "Windows_NT"
+  let is_win = (env.get("OS") ?? "") == "Windows_NT"
   if not is_win then {
     let s = process.output(process.ProcessCommand { cmd: "false", args: [] })!
     assert(s.code != 0)

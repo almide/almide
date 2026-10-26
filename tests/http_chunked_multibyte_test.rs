@@ -8,7 +8,7 @@
 //! character arrived as two U+FFFD pieces.
 //!
 //! One local server, one program that reads the same response through every
-//! client shape: `send`, `request`, `get_response`, `request_bytes` (the
+//! client shape: `send`, `request`, `get_response`, `body_bytes` of a sent request (the
 //! control that was already right) and the call handle's `read_new` (each
 //! chunk flushed separately, so the split also lands between two socket
 //! reads). Every body must be byte-equal to the payload.
@@ -113,7 +113,7 @@ fn a_character_split_across_chunks_reads_back_whole_in_every_text_client_shape()
   println("request:" + http.request("GET", "URL", "", [])!)
   let got = http.get_response("URL")!
   println("status:" + int.to_string(http.status(got)) + ":" + http.body(got))
-  let raw = http.request_bytes("GET", "URL", "", [])!
+  let raw = http.body_bytes(http.send(http.new_request("GET", "URL", "", []))!)
   println("bytes:" + bytes.to_string(raw)!)"#,
         4,
     );
@@ -137,7 +137,7 @@ fn a_character_split_across_chunks_streams_whole() {
     }
   }
   list.push(pieces, http.read_new(c))
-  println("stream:" + string.join(pieces, ""))"#,
+  println("stream:" + list.join(pieces, ""))"#,
         1,
     );
     assert_eq!(line(&out, "stream:"), BODY);

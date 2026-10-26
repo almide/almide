@@ -88,14 +88,9 @@ fn arg_for(module: &str, ty: &str) -> String {
     match (module, ty) {
         (_, "Int") | ("list", "A") | ("map", "V") => "pos(r)".into(),
         (_, "Float") => "flt(r)".into(),
-        (_, "Float32") => "f32_of(r)".into(),
-        (_, "Int32") => "i32_of(r)".into(),
-        (_, "UInt16") => "u16_of(r)".into(),
-        (_, "UInt32") => "u32_of(r)".into(),
         (_, "String") | ("map", "K") => "key(r)".into(),
         (_, "Bool") => "flag(r)".into(),
         (_, "Bytes") => "src(r)".into(),
-        (_, "Endian") => "endian_of(r)".into(),
         (m, t) => panic!("no sibling-read argument for {m}.* parameter type {t} — extend arg_for"),
     }
 }
@@ -128,15 +123,10 @@ fn program(ms: &[Mutator], hoisted: bool) -> String {
         r#"type R = {{ buf: Bytes, s: String, xs: List[Int], m: Map[String, Int], n: Int }}
 
 fn pos(r: R) -> Int = r.n + 1
-fn flt(r: R) -> Float = float.from_int(r.n) + 0.5
-fn f32_of(r: R) -> Float32 = float.to_float32(float.from_int(r.n) + 1.5)
-fn i32_of(r: R) -> Int32 = int.to_int32(r.n * 3 - 4)
-fn u16_of(r: R) -> UInt16 = int.to_uint16(r.n * 100 + 9)
-fn u32_of(r: R) -> UInt32 = int.to_uint32(r.n * 65536 + 11)
+fn flt(r: R) -> Float = float.from(r.n) + 0.5
 fn key(r: R) -> String = "k${{int.to_string(r.n)}}"
 fn flag(r: R) -> Bool = r.n % 2 == 0
 fn src(r: R) -> Bytes = bytes.from_list([r.n, 2, 3, 4])
-fn endian_of(r: R) -> Endian = if r.n % 2 == 0 then LittleEndian else BigEndian
 
 fn show(r: R) -> String = "${{bytes.to_list(r.buf)}} ${{r.s}} ${{r.xs}} ${{r.m}} ${{r.n}}"
 

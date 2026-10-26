@@ -4,7 +4,8 @@
 // panic") applied to the readers whose default is `(pos, none)`: when the
 // window `[pos, pos + width)` leaves the buffer, the POSITION IS UNCHANGED and
 // the value is `none`, on every leg, for every width and both endiannesses,
-// and for `read_bool_at`, `take_at` and `read_string_be_at` alike.
+// and for `next_bool`, `next_bytes` and the length-prefixed string cursor
+// composed from them alike.
 //
 // #2479, the residue of #1408: that fix reached the fourteen hand-written
 // `set_*` accessors and recorded the readers as already `checked_add`-guarded,
@@ -56,6 +57,16 @@ fn row(b: Bytes, pos: Int) -> String = {
   ] |> list.join(" ")
 }
 
+// The length-prefixed string cursor, composed from the checked reads: a u32 BE
+// length and that many bytes, `(pos, none)` unless both fit.
+fn string_be_at(b: Bytes, pos: Int) -> (Int, String?) = match bytes.next_u32_be(b, pos) {
+  (some(n), p) => match bytes.next_bytes(b, p, n) {
+    (some(x), q) => (q, some(bytes.to_string_lossy(x))),
+    (none, _) => (pos, none),
+  },
+  (none, _) => (pos, none),
+}
+
 fn misc(b: Bytes, pos: Int) -> String = {
   let (v1, p1) = bytes.next_bool(b, pos)
   let (v2, p2) = bytes.next_bytes(b, pos, 2)
@@ -63,7 +74,7 @@ fn misc(b: Bytes, pos: Int) -> String = {
     some(x) => "${bytes.to_list(x)}",
     none => "none",
   }
-  let (p3, v3) = bytes.read_string_be_at(b, pos)
+  let (p3, v3) = string_be_at(b, pos)
   "bool=${p1}/${v1} take=${p2}/${t2} sbe=${p3}/${v3}"
 }
 
@@ -101,7 +112,7 @@ fn main() -> Unit = {
   for pos in positions {
     println("pos ${pos}: ${row(b, pos)}")
   }
-  // read_bool_at / take_at / read_string_be_at on the same domain. The
+  // next_bool / next_bytes / the string cursor on the same domain. The
   // string buffer carries a length prefix of 2 at 0 (`AB`) so the in-range
   // control answers a value; every other position is `none`.
   let s = bytes.from_list([

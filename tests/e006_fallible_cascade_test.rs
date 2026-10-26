@@ -57,7 +57,7 @@ fn a_fallible_call_in_a_pure_fn_reports_one_error_naming_both_steps() {
 }
 
 /// The annotated-`let` spelling of the same cascade, and the argv reader whose
-/// hint already named `!` (`args.flag` is `Result[Bool, String]`).
+/// hint already named `!` (`args.has_flag` is `Result[Bool, String]`).
 #[test]
 fn the_let_and_argv_reader_cascades_are_dropped_too() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -69,12 +69,12 @@ fn the_let_and_argv_reader_cascades_are_dropped_too() {
          \x20 let s: String = fs.read_text(\"x\")\n\
          \x20 s\n\
          }\n\
-         fn verbose() -> Bool = args.flag(\"v\")\n\
+         fn verbose() -> Bool = args.has_flag(\"v\")\n\
          effect fn main() -> Unit = println(\"x\")\n",
     );
     assert_eq!(count(&out, "error[E006]"), 2, "{out}");
     assert_eq!(count(&out, "error[E001]"), 0, "{out}");
-    assert!(out.contains("`args.flag(..)!`"), "the argv hint keeps naming `!`:\n{out}");
+    assert!(out.contains("`args.has_flag(..)!`"), "the argv hint keeps naming `!`:\n{out}");
 }
 
 /// The other direction: an unrelated E001 in the same fn is still reported,

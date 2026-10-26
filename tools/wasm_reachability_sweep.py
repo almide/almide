@@ -126,12 +126,11 @@ def surface(module_filter=None):
 
 NAMED_CANDIDATES = {
     "Value": ['json.parse("1")!', 'json.parse("1")'],
-    "Int8": ["(1).to_int8()"], "Int16": ["(1).to_int16()"],
-    "Int32": ["(1).to_int32()"], "Int64": ["(1).to_int64()"],
-    "UInt8": ["(1).to_uint8()"], "UInt16": ["(1).to_uint16()"],
-    "UInt32": ["(1).to_uint32()"], "UInt64": ["(1).to_uint64()"],
-    "Float32": ["(1.0).to_float32()"], "Float64": ["(1.0).to_float64()"],
-    "Endian": ["LittleEndian"],
+    "Int8": ["int8.from(1)"], "Int16": ["int16.from(1)"],
+    "Int32": ["int32.from(1)"], "Int64": ["int64.from(1)"],
+    "UInt8": ["uint8.from(1)"], "UInt16": ["uint16.from(1)"],
+    "UInt32": ["uint32.from(1)"], "UInt64": ["uint64.from(1)"],
+    "Float32": ["float32.from(1.0)"], "Float64": ["float64.from(1.0)"],
     "Deque": ["deque.from_list([1, 2])"], "Heap": ["heap.from_list([1, 2])"],
     "BigInt": ['match bigint.parse("12") { ok(b) => b, err(e) => panic(e) }'],
     "Regex": ['regex.new("a")'],

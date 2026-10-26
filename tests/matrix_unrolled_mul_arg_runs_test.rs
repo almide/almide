@@ -1,4 +1,4 @@
-//! #3753: a small-shape `matrix.mul` / `matrix.mul_f32` (literal dims <= 8,
+//! #3753: a small-shape matrix product `a * b` (literal dims <= 8,
 //! unrolled by `MatrixShapeSpec` into an `InlineRust` block) used as the
 //! argument of another matrix runtime call failed the native build with
 //! rustc E0308 (`expected AlmideMatrix, found AlmideRcCow<AlmideMatrix>`):
@@ -8,21 +8,15 @@
 use std::process::Command;
 
 const SRC: &str = r#"fn main() -> Unit = {
-  let r0: Matrix[Float32] = matrix.mul_f32(
-    matrix.mul_f32(
-      matrix.ones_f32(2, 2),
-      matrix.mul_f32(matrix.ones_f32(2, 2), matrix.ones_f32(2, 2)),
-    ),
-    matrix.mul_f32_scaled(matrix.ones_f32(2, 2), 0.5, matrix.ones_f32(2, 2)),
-  )
+  let r0 = (matrix.ones(2, 2) * (matrix.ones(2, 2) * matrix.ones(2, 2))) * matrix.scale(matrix.ones(2, 2) * matrix.ones(2, 2), 0.5)
   println("${matrix.to_lists(r0)}")
-  let r1 = matrix.mul(matrix.ones(2, 2), matrix.mul(matrix.ones(2, 2), matrix.ones(2, 2)))
+  let r1 = matrix.ones(2, 2) * (matrix.ones(2, 2) * matrix.ones(2, 2))
   println("${matrix.to_lists(r1)}")
-  let r2 = matrix.mul(matrix.mul(matrix.ones(2, 3), matrix.ones(3, 2)), matrix.ones(2, 1))
+  let r2 = (matrix.ones(2, 3) * matrix.ones(3, 2)) * matrix.ones(2, 1)
   println("${matrix.to_lists(r2)}")
-  let r3 = matrix.transpose(matrix.mul(matrix.ones(2, 3), matrix.ones(3, 1)))
+  let r3 = matrix.transpose(matrix.ones(2, 3) * matrix.ones(3, 1))
   println("${matrix.to_lists(r3)}")
-  let r4 = matrix.add(matrix.mul_f32(matrix.ones_f32(2, 3), matrix.ones_f32(3, 2)), matrix.ones_f32(2, 2))
+  let r4 = (matrix.ones(2, 3) * matrix.ones(3, 2)) + matrix.ones(2, 2)
   println("${matrix.to_lists(r4)}")
 }
 "#;

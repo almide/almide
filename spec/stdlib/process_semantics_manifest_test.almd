@@ -27,10 +27,6 @@ test "process.pid unit=value" {
   assert_eq("${1}", "1")
 }
 
-test "process.sleep unit=millisecond" {
-  assert_eq("${1}", "1")
-}
-
 test "process.__os_output unit=millisecond" {
   assert_eq("${1}", "1")
 }

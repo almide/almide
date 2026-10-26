@@ -1,8 +1,8 @@
-//! Cross-target evidence for `process.stdin_lines` (#3620): the wasm legs (the
-//! embedded host and a stock `wasmtime run` of the built artifact) must answer
-//! exactly what native `BufRead::lines` answers for piped stdin — one entry per
-//! line, the final unterminated line kept, one trailing `\r` stripped per line,
-//! and invalid UTF-8 an `err` with native's text.
+//! Cross-target evidence for reading piped stdin as lines (#3620), spelled
+//! `io.read_all()` then `string.lines`: the wasm legs (the embedded host and a
+//! stock `wasmtime run` of the built artifact) must answer exactly what native
+//! answers — the line split, the final unterminated line, `\r` handling, and
+//! invalid UTF-8 read as U+FFFD.
 //!
 //! Stdin-reading programs cannot live in the spec suites (the harness does not
 //! pipe per-file stdin), so this is the executable evidence.
@@ -52,17 +52,13 @@ fn almide_run(file: &Path, wasm: bool) -> Command {
     c
 }
 
-const PROGRAM: &str = r#"import process
+const PROGRAM: &str = r#"import io
 
 effect fn main() -> Unit = {
-  match process.stdin_lines() {
-    ok(lines) => {
-      println("n=${int.to_string(list.len(lines))}")
-      for l in lines {
-        println("[${l}] ${int.to_string(string.len(l))}")
-      }
-    },
-    err(e) => println("err: ${e}"),
+  let lines = string.lines(io.read_all())
+  println("n=${int.to_string(list.len(lines))}")
+  for l in lines {
+    println("[${l}] ${int.to_string(string.len(l))}")
   }
 }
 "#;

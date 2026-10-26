@@ -20,7 +20,7 @@ fn show(r: R) -> String = "[" + r.name + "] " + int.to_string(bytes.len(r.buf)) 
 fn main() -> Unit = {
   // C. a record field: the record alias keeps its field.
   var m0: Map[String, Int] = map.new()
-  map.insert(m0, "k", 1)
+  m0 = map.set(m0, "k", 1)
   var r = R { name: "hi", buf: bytes.from_list([1, 2]), xs: [7, 8, 9], m: m0 }
   let r2 = r
   string.clear(r.name)

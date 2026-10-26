@@ -7,7 +7,7 @@ JSON / 正規表現 / バイナリ形式の観測規範。参照方法は [strin
 
 ## ALS-D1 JSON パス操作
 
-`json.get_path`・`set_path`・`remove_path` のエッジケース（欠損キー・配列
+`value.get_path`・`set_path`・`remove_path` のエッジケース（欠損キー・配列
 範囲外・型不一致ノード・空パス）は infallible native oracle（serde_json 上の
 参照実装）と観測等価: 欠損は none / no-op に縮退し、trap しない。
 Contracts: C-031。

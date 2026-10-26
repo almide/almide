@@ -142,16 +142,16 @@ effect fn generate(n: Int, path: String) -> Unit = {
     let t = (seed % 1999) - 999
     list.push(chunk, "${station};${fmt_tenths(t)}")
     if list.len(chunk) == CHUNK_LINES then {
-      fs.append_text(path, string.join(chunk, "\n") + "\n")!
+      fs.append_text(path, list.join(chunk, "\n") + "\n")!
       list.clear(chunk)
     } else ()
   }
-  if list.len(chunk) > 0 then fs.append_text(path, string.join(chunk, "\n") + "\n")!
+  if list.len(chunk) > 0 then fs.append_text(path, list.join(chunk, "\n") + "\n")!
   else ()
 }
 
 fn render(stats: Map[String, Stats]) -> String = {
-  let body = map.to_list(stats) |> list.sort_by(((name, _)) => name) |> list.map(((name, s)) => "${name}=${fmt_tenths(s.min)}/${fmt_tenths(mean_tenths(s.sum, s.count))}/${fmt_tenths(s.max)}") |> string.join(", ")
+  let body = map.to_list(stats) |> list.sort_by(((name, _)) => name) |> list.map(((name, s)) => "${name}=${fmt_tenths(s.min)}/${fmt_tenths(mean_tenths(s.sum, s.count))}/${fmt_tenths(s.max)}") |> list.join(", ")
   "{" + body + "}"
 }
 

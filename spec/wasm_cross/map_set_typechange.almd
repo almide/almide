@@ -39,7 +39,7 @@ fn main() -> Unit = {
   // Int -> String (i64 -> i32 ptr): narrow
   println(show_map_ss(map.map(mi, (v) => int.to_string(v) + "!")))
   // Int -> Float (i64 -> f64): same width, different valtype
-  println(show_map_sf(map.map(mi, (v) => int.to_float(v) / 2.0)))
+  println(show_map_sf(map.map(mi, (v) => float.from(v) / 2.0)))
   // map.map: value -> tuple (i64 -> i32 ptr)
   let mt = map.map(mi, (v) => (v, v * v))
   let tparts = map.to_list(mt) |> list.map((e) => {

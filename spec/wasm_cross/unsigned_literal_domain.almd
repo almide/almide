@@ -27,5 +27,5 @@ fn main() -> Unit = {
   let s64: Int64 = -9223372036854775808
   println("zero:${uint8.to_string(z8)}:${uint32.to_string(z32)}:${uint64.to_string(z64)}")
   println("max:${uint8.to_string(m8)}:${uint16.to_string(m16)}:${uint32.to_string(m32)}:${uint64.to_string(m64)}")
-  println("min:${int.to_string(int.from_int8(s8))}:${int.to_string(int.from_int16(s16))}:${int.to_string(int.from_int32(s32))}:${int.to_string(int.from_int64(s64))}")
+  println("min:${int.to_string(int.from(s8))}:${int.to_string(int.from(s16))}:${int.to_string(int.from(s32))}:${int.to_string(int.from(s64))}")
 }

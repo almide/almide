@@ -1,10 +1,10 @@
 //! Ordering / equality matrix over every stdlib-owned nominal type (#3755).
 //!
-//! `list.min([path.trusted("/"), …])` type-checked, the wasm leg ran it and
-//! ordered the paths by content, and the native build died in rustc
-//! (`SafePath: Ord is not satisfied`). The native leg renders an opaque
+//! `list.min` over an opaque `mod type` String newtype type-checked, the
+//! wasm leg ran it and ordered the values by content, and the native build
+//! died in rustc (`Ord is not satisfied`). The native leg renders an opaque
 //! `mod type X = String` as a newtype that derived only `PartialEq`, and a
-//! runtime-backed type (`http.HttpRequest`, `json.JsonPath`) has no
+//! runtime-backed type (`http.HttpRequest`, `http.HttpResponse`) has no
 //! declaration, so the checker's orderability walk found nothing to refuse.
 //!
 //! The rule this pins: for each type and each order- or equality-sensitive
@@ -280,19 +280,14 @@ fn every_stdlib_nominal_type_is_refused_or_builds_on_both_legs() {
 /// String newtype orders by its content (byte order), on both legs.
 #[test]
 fn opaque_string_newtypes_order_by_content_on_both_legs() {
-    const SOURCE: &str = r#"import path
-import html
+    const SOURCE: &str = r#"import html
 fn main() -> Unit = {
-  let p = list.min([path.trusted("/"), path.trusted("é.d/f"), path.trusted("")])
-  println("[${path.to_string(p ?? path.trusted("x"))}]")
-  let ps = list.sort([path.trusted("é"), path.trusted("b/a"), path.trusted("B"), path.trusted("b")])
-  println("${list.map(ps, (q) => path.to_string(q))}")
   let hs = [html.raw("<p>"), html.raw("<a>"), html.raw("")]
   println("${list.map(list.sort(hs), (h) => html.to_string(h))}")
   println("${list.map(list.max(hs) |> option.to_list, (h) => html.to_string(h))}")
 }
 "#;
-    const EXPECTED: &str = "[]\n[\"B\", \"b\", \"b/a\", \"é\"]\n[\"\", \"<a>\", \"<p>\"]\n[\"<p>\"]\n";
+    const EXPECTED: &str = "[\"\", \"<a>\", \"<p>\"]\n[\"<p>\"]\n";
     let dir = tempfile::tempdir().expect("scratch");
     let file = write(dir.path(), "order.almd", SOURCE);
     for wasm in [false, true] {

@@ -242,7 +242,7 @@ so the idiom cannot silently become the slow path again.
 ### Strings: what the stdlib's contract costs (2026-08-13)
 
 `strchurn` is the allocation-heavy string workload from #1004:
-`int.to_string` → `string.join` → `string.split` → `string.len` → `list.sum`.
+`int.to_string` → `list.join` → `string.split` → `string.len` → `list.sum`.
 It carries two references, and which one you compare against is the whole
 story (`bench.py --quick`, 2M, median of 3, M4 Pro):
 
@@ -342,10 +342,10 @@ owned key per draw):
    Threshold (16 entries), insertion order, order-independent equality, the
    Float/NaN linear path: all unchanged and pinned by the 77 Map/Set fixtures
    in `spec/wasm_cross`, byte-identical native == wasm.
-2. **The read side borrows its key.** `map.get` / `get_or` / `contains` and
+2. **The read side borrows its key.** `map.get` / `contains` and
    `set.contains` are `@borrow_ref(key)`; the runtime takes `&Q` with
    `K: Borrow<Q>`, so a `&str` parameter probes a `Map[String, _]` without
-   materializing a `String` and `map.get_or(counts, w, 0)` no longer
+   materializing a `String` and `map.get(counts, w) ?? 0` no longer
    consumes `w`.
 3. **The write moves the key.** `m[w] = f(&w)` with a plain-variable key
    evaluates the value FIRST (a var read has no effect, so the order is

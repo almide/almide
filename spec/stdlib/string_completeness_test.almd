@@ -156,16 +156,16 @@ test "string.from_codepoint 65" {
   assert_eq(string.from_codepoint(65), some("A"))
 }
 
-test "string.to_bytes and from_bytes roundtrip" {
-  let bytes = string.to_bytes("Hi")
-  assert_eq(string.from_bytes(bytes), "Hi")
+test "bytes.from_string and to_string_lossy roundtrip" {
+  let bs = bytes.to_list(bytes.from_string("Hi"))
+  assert_eq(bytes.to_string_lossy(bytes.from_list(bs)), "Hi")
 }
 
-test "string.to_bytes known values" {
-  let bytes = string.to_bytes("AB")
-  assert_eq(list.len(bytes), 2)
-  assert_eq(list.get(bytes, 0), some(65))
-  assert_eq(list.get(bytes, 1), some(66))
+test "bytes.from_string known values" {
+  let bs = bytes.to_list(bytes.from_string("AB"))
+  assert_eq(list.len(bs), 2)
+  assert_eq(list.get(bs, 0), some(65))
+  assert_eq(list.get(bs, 1), some(66))
 }
 
 test "string.lines splits on newline" {

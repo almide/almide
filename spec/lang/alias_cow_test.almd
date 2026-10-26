@@ -88,10 +88,10 @@ test "alias cow: list.pop in place" {
   assert_eq(b, [1, 2, 3])
 }
 
-test "alias cow: map.insert in place" {
+test "alias cow: map index assignment in place" {
   var m = map.set(map.new(), "x", 1)
   var b = m
-  map.insert(m, "y", 2)
+  m = map.set(m, "y", 2)
   assert(map.contains(m, "y"))
   assert(not map.contains(b, "y"))
   assert_eq(map.len(m), 2)

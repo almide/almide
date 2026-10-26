@@ -38,31 +38,31 @@ test "T23: signed zero propagates and compares equal" {
   assert_eq(float.to_string(1.0 / (0.0 - 1.0 / 0.0)), "-0.0")
 }
 
-test "T24: float.to_int truncates toward zero, saturates, NaN to 0" {
+test "T24: int.from_saturating truncates toward zero, saturates, NaN to 0" {
   let inf = 1.0 / 0.0
-  assert_eq(float.to_int(2.7), 2)
-  assert_eq(float.to_int(-2.7), -2)
-  assert_eq(float.to_int(2.5), 2)
-  assert_eq(float.to_int(inf), 9223372036854775807)
-  assert_eq(float.to_int(0.0 - inf), -9223372036854775808)
-  assert_eq(float.to_int(9.3e18), 9223372036854775807)
-  assert_eq(float.to_int(0.0 / 0.0), 0)
-  assert_eq(float.to_int(-0.0), 0)
+  assert_eq(int.from_saturating(2.7), 2)
+  assert_eq(int.from_saturating(-2.7), -2)
+  assert_eq(int.from_saturating(2.5), 2)
+  assert_eq(int.from_saturating(inf), 9223372036854775807)
+  assert_eq(int.from_saturating(0.0 - inf), -9223372036854775808)
+  assert_eq(int.from_saturating(9.3e18), 9223372036854775807)
+  assert_eq(int.from_saturating(0.0 / 0.0), 0)
+  assert_eq(int.from_saturating(-0.0), 0)
 }
 
 test "T24: the checked family is some only for exactly representable values" {
-  assert_eq(float.to_int64_checked(2.7), none)
-  assert_eq(float.to_int64_checked(-0.0), some(0))
-  assert_eq(float.to_int64_checked(0.0 / 0.0), none)
-  assert_eq(float.to_int64_checked(1.0 / 0.0), none)
-  assert_eq(float.to_int64_checked(9.3e18), none)
-  assert_eq(float.to_int8_checked(200.0), none)
+  assert_eq(int64.from_checked(2.7), none)
+  assert_eq(int64.from_checked(-0.0), some(0))
+  assert_eq(int64.from_checked(0.0 / 0.0), none)
+  assert_eq(int64.from_checked(1.0 / 0.0), none)
+  assert_eq(int64.from_checked(9.3e18), none)
+  assert_eq(int8.from_checked(200.0), none)
   assert_eq(
-    match float.to_uint8_checked(255.0) {
+    match uint8.from_checked(255.0) {
       some(v) => "some ${v}",
       none => "none",
     },
     "some 255",
   )
-  assert_eq(float.to_float32_checked(0.1), none)
+  assert_eq(float32.from_checked(0.1), none)
 }

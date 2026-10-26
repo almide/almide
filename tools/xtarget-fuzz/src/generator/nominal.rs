@@ -174,19 +174,6 @@ pub const NOMINALS: &[Nominal] = &[
         refuses_var: false,
         in_flight: false,
     },
-    Nominal {
-        name: "SafePath",
-        module: "path",
-        small: "path.trusted(\"a/b.txt\")",
-        sized: "path.trusted(string.repeat(\"ab/\", {n}) + \"f.txt\")",
-        leaves: &["path.trusted(\"/\")", "path.trusted(\"x/../y\")", "path.trusted(\"é.d/f\")", "path.trusted(\"\")"],
-        observe: "path.to_string({v})",
-        observed: string,
-        digest: "string.len(path.to_string({v}))",
-        observe_calls_effect: false,
-        refuses_var: false,
-        in_flight: false,
-    },
     // `url.parse` is the only constructor; these inputs parse.
     Nominal {
         name: "Url",
@@ -201,42 +188,6 @@ pub const NOMINALS: &[Nominal] = &[
         observe: "url.to_string({v})",
         observed: string,
         digest: "string.len(url.to_string({v}))",
-        observe_calls_effect: false,
-        refuses_var: false,
-        in_flight: false,
-    },
-    // Observed by where it leads in a fixed value. The sized path is ONE
-    // step whose key is n long: a path n steps deep is a structure n deep,
-    // and at the judge's 16n (320k) its recursive teardown overflowed the
-    // stack on both legs before any call was timed.
-    Nominal {
-        name: "JsonPath",
-        module: "json",
-        small: "json.field(json.root(), \"a\")",
-        sized: "json.field(json.root(), string.repeat(\"k\", {n}))",
-        leaves: &[
-            "json.root()",
-            "json.field(json.root(), \"a\")",
-            "json.index(json.field(json.root(), \"a\"), 1)",
-            "json.index(json.root(), 0)",
-        ],
-        observe: "option.map(json.get_path(value.object([(\"a\", value.array([value.int(1), value.string(\"x\")]))]), {v}), (jp) => value.stringify(jp))",
-        observed: || GenType::Option(Box::new(GenType::String)),
-        digest: "(if option.is_some(json.get_path(value.object([(\"a\", value.int(1))]), {v})) then 1 else 0)",
-        observe_calls_effect: false,
-        refuses_var: false,
-        in_flight: false,
-    },
-    // n rows of 2: the operands of the products agree with a 2 × 2 partner.
-    Nominal {
-        name: "Matrix[Float32]",
-        module: "matrix",
-        small: "matrix.ones_f32(2, 2)",
-        sized: "matrix.zeros_f32({n}, 2)",
-        leaves: &["matrix.ones_f32(2, 2)", "matrix.zeros_f32(1, 2)", "matrix.mul_f32_scaled(matrix.ones_f32(2, 2), 0.5, matrix.ones_f32(2, 2))"],
-        observe: "matrix.to_lists({v})",
-        observed: || GenType::List(Box::new(GenType::List(Box::new(GenType::Float)))),
-        digest: "matrix.rows({v})",
         observe_calls_effect: false,
         refuses_var: false,
         in_flight: false,

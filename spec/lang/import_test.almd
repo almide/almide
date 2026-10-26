@@ -4,9 +4,9 @@ import json
 
 // ── Module-qualified calls ──
 test "math module call" {
-  assert_eq(math.abs(-5), 5)
-  assert_eq(math.max(3, 7), 7)
-  assert_eq(math.min(3, 7), 3)
+  assert_eq(int.abs(-5), 5)
+  assert_eq(int.max(3, 7), 7)
+  assert_eq(int.min(3, 7), 3)
 }
 
 test "math.pi" {
@@ -39,7 +39,7 @@ test "int UFCS no import needed" {
 // ── Module-qualified with UFCS ──
 test "math via UFCS" {
   let x = -7
-  assert_eq(math.abs(x), 7)
+  assert_eq(int.abs(x), 7)
 }
 
 // ── json module (requires import) ──

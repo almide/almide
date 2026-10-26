@@ -1,8 +1,6 @@
-import env
-
 type Failure = | Slow | Broken(String)
 
-effect fn ready() -> Bool = env.millis() > 0
+effect fn ready() -> Bool = datetime.now_ms() > 0
 
 effect fn tidy() -> Unit = ()
 

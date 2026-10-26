@@ -40,7 +40,7 @@ fn parse_config(content: String) -> Result[List[List[String]], String] = {
                 match list.get(ip, 0) { some(v) => v != "0", none => false }
               });
               let rest_vals = list.map(rest, (ip) => match list.get(ip, 1) { some(v) => v, none => "" });
-              let value = string.join(rest_vals, "=");
+              let value = list.join(rest_vals, "=");
               let existing_keys = list.map(pairs, (p) => match list.get(p, 0) { some(v) => v, none => "" });
               if list.contains(existing_keys, key) then err("line ${line_num}: duplicate key: ${key}")
               else ok(pairs + [[key, value]])
@@ -83,7 +83,7 @@ fn serialize_config(pairs: List[List[String]]) -> String = {
     let value = match list.get(pair, 1) { some(v) => v, none => "" };
     key + "=" + value
   });
-  string.join(lines, "\n")
+  list.join(lines, "\n")
 }
 
 // Read and parse a config file
@@ -233,7 +233,7 @@ test "filter by prefix no match" {
 }
 
 test "load and parse config file" {
-  let td = env.temp_dir()
+  let td = fs.temp_dir()
   let f = td + "/almide_test_base.conf"
   fs.write_text(f, "host=localhost\nport=3000")!
   let result = load_config(f)
@@ -241,19 +241,19 @@ test "load and parse config file" {
 }
 
 test "load config file not found" {
-  let td = env.temp_dir()
+  let td = fs.temp_dir()
   assert(match load_config(td + "/almide_test_nonexistent_file.conf") { err(_e) => true, _ => false })
 }
 
 test "load config with parse error" {
-  let td = env.temp_dir()
+  let td = fs.temp_dir()
   let f = td + "/almide_test_bad.conf"
   fs.write_text(f, "good=ok\nbadline")!
   assert_eq(load_config(f), err(f + ": line 2: missing '='"))
 }
 
 test "save config file" {
-  let td = env.temp_dir()
+  let td = fs.temp_dir()
   let f = td + "/almide_test_output.conf"
   let pairs = [["host", "localhost"], ["port", "8080"]]
   save_config(f, pairs)!
@@ -262,7 +262,7 @@ test "save config file" {
 }
 
 test "merge two files" {
-  let td = env.temp_dir()
+  let td = fs.temp_dir()
   let f1 = td + "/almide_test_m1.conf"
   let f2 = td + "/almide_test_m2.conf"
   fs.write_text(f1, "host=localhost\nport=3000")!
@@ -272,7 +272,7 @@ test "merge two files" {
 }
 
 test "merge three files" {
-  let td = env.temp_dir()
+  let td = fs.temp_dir()
   let f1 = td + "/almide_test_t1.conf"
   let f2 = td + "/almide_test_t2.conf"
   let f3 = td + "/almide_test_t3.conf"
@@ -284,7 +284,7 @@ test "merge three files" {
 }
 
 test "merge files error propagation" {
-  let td = env.temp_dir()
+  let td = fs.temp_dir()
   let f1 = td + "/almide_test_e1.conf"
   let f2 = td + "/almide_test_e2.conf"
   fs.write_text(f1, "ok=yes")!
@@ -293,7 +293,7 @@ test "merge files error propagation" {
 }
 
 test "merge and save full pipeline" {
-  let td = env.temp_dir()
+  let td = fs.temp_dir()
   let f1 = td + "/almide_test_p1.conf"
   let f2 = td + "/almide_test_p2.conf"
   let out = td + "/almide_test_merged.conf"
@@ -306,7 +306,7 @@ test "merge and save full pipeline" {
 }
 
 test "merge and save error propagation" {
-  let td = env.temp_dir()
+  let td = fs.temp_dir()
   let f1 = td + "/almide_test_ep1.conf"
   let out = td + "/almide_test_should_not_exist.conf"
   fs.write_text(f1, "ok=yes")!

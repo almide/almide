@@ -12,13 +12,10 @@ fn obj_text(p: String, n: Int) -> String = "{" + (0..<n |> list.map((i) => "\"${
 
 fn check(p: String, n: Int) -> Unit = {
   let v = json.parse(obj_text(p, n)) ?? value.null()
-  let keys = value.keys(v)
+  let keys = list.map(value.as_object(v) ?? [], (kv) => kv.0)
   let rt = if json.stringify(v) == obj_text(p, n) then "same" else "DRIFT"
   println("${p}${n}: keys=${list.len(keys)} first=${keys[0]} last=${keys[n - 1]} rt=${rt}")
-  println("  first=${json.get_int(v, "${p}0") ?? -1} last=${json.get_int(v, "${p}${n - 1}") ?? -1} missing=${json.get_int(
-    v,
-    "nope",
-  ) ?? -1}")
+  println("  first=${value.get_int(v, "${p}0") ?? -1} last=${value.get_int(v, "${p}${n - 1}") ?? -1} missing=${value.get_int(v, "nope") ?? -1}")
 }
 
 fn main() -> Unit = {
@@ -34,8 +31,8 @@ fn main() -> Unit = {
   // compare bytes, not just the slot).
   let a = json.parse('{"alpha":1,"beta":2}') ?? value.null()
   let b = json.parse('{"beta":20,"alpha":10,"gamma":30}') ?? value.null()
-  println("${json.get_int(a, "alpha") ?? -1} ${json.get_int(b, "alpha") ?? -1} ${json.get_int(b, "gamma") ?? -1} ${list.join(
-    value.keys(b),
+  println("${value.get_int(a, "alpha") ?? -1} ${value.get_int(b, "alpha") ?? -1} ${value.get_int(b, "gamma") ?? -1} ${list.join(
+    list.map(value.as_object(b) ?? [], (kv) => kv.0),
     ",",
   )}")
 }

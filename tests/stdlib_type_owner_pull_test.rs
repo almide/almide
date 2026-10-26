@@ -58,19 +58,19 @@ fn run_leg(path: &Path, env: &[(&str, &str)], wasm: bool) -> (bool, String, Stri
     )
 }
 
-/// The issue's four rows, verbatim shapes, plus the typed read with a BOUND
-/// `Endian` value (the shape that walled on the structural leg even with an
-/// explicit `import bytes`).
+/// The issue's rows (bind + equality, match, param, `${e}`), first pinned on
+/// `bytes.Endian`; that type left the stdlib and no auto-imported stdlib
+/// VARIANT remains, so the rows now spell the auto-imported generic record
+/// `deque.Deque` by its literal, with no `deque.*` call and no import.
 const ROWS: &[(&str, &str, &str)] = &[
-    ("eq", "effect fn main() -> Unit = {\n  let e: Endian = BigEndian\n  println(\"${e == LittleEndian}\")\n}\n", "false\n"),
-    ("match", "effect fn main() -> Unit = {\n  let e: Endian = BigEndian\n  let s = match e { LittleEndian => \"le\", BigEndian => \"be\" }\n  println(s)\n}\n", "be\n"),
-    ("param", "fn name(e: Endian) -> String = match e { LittleEndian => \"le\", BigEndian => \"be\" }\neffect fn main() -> Unit = {\n  println(name(BigEndian))\n}\n", "be\n"),
-    ("repr", "effect fn main() -> Unit = {\n  let e = BigEndian\n  println(\"${e}\")\n}\n", "BigEndian\n"),
-    ("bound_read", "effect fn main() -> Unit = {\n  let e: Endian = BigEndian\n  let b = bytes.from_list([1, 2, 3, 4])\n  println(\"${int.from_uint16(bytes.read_uint16(b, 0, e))}\")\n}\n", "258\n"),
+    ("eq", "effect fn main() -> Unit = {\n  let d: Deque[Int] = Deque { front: [1], back: [] }\n  println(\"${d == Deque { front: [2], back: [] }}\")\n}\n", "false\n"),
+    ("match", "effect fn main() -> Unit = {\n  let d: Deque[Int] = Deque { front: [1], back: [2, 3] }\n  let n = match d { Deque { front, back } => list.len(front) + list.len(back) }\n  println(\"${n}\")\n}\n", "3\n"),
+    ("param", "fn size(d: Deque[Int]) -> Int = match d { Deque { front, back } => list.len(front) + list.len(back) }\neffect fn main() -> Unit = {\n  println(\"${size(Deque { front: [], back: [4, 5] })}\")\n}\n", "2\n"),
+    ("repr", "effect fn main() -> Unit = {\n  let d: Deque[Int] = Deque { front: [1], back: [2] }\n  println(\"${d}\")\n}\n", "Deque { front: [1], back: [2] }\n"),
 ];
 
 #[test]
-fn auto_import_endian_rows_build_on_the_wasm_leg() {
+fn auto_import_owned_type_rows_build_on_the_wasm_leg() {
     if !wasmtime_available() {
         eprintln!("skipping: wasmtime not on PATH");
         return;
@@ -87,7 +87,7 @@ fn auto_import_endian_rows_build_on_the_wasm_leg() {
             failures.push(format!("{tag}: structural: ok={ok_s} out={out_s:?} err={err_s}"));
         }
     }
-    assert!(failures.is_empty(), "auto-import Endian rows:\n{}", failures.join("\n"));
+    assert!(failures.is_empty(), "auto-import owned-type rows:\n{}", failures.join("\n"));
 }
 
 /// A program spelling only the type: a fn taking and returning it. A generic
@@ -101,9 +101,9 @@ fn spelling_program(ty: &str, arity: usize) -> String {
 #[test]
 fn every_bundled_type_decl_is_pulled_when_spelled() {
     let owners = almide_frontend::bundled_sigs::bundled_type_owners();
-    assert!(owners.contains_key("Endian"), "bytes.Endian is the auto-import row of the matrix");
+    assert!(owners.contains_key("Deque"), "deque.Deque is the auto-import row of the matrix");
     let nominal = nominal_bundled_types();
-    assert!(nominal.contains_key("Endian") && nominal.contains_key("FileStat"), "the nominal set enumerates");
+    assert!(nominal.contains_key("Deque") && nominal.contains_key("FileStat"), "the nominal set enumerates");
     let mut names: Vec<&String> = owners.keys().collect();
     names.sort();
     let mut failures = Vec::new();

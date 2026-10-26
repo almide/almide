@@ -46,7 +46,7 @@ const ROWS: &[(&str, &str, &str, &str)] = &[
     (
         "range_map_map",
         "List[Float]",
-        "list.range(0, n) |> list.map((i) => i + 1) |> list.map((x) => float.from_int(x) / 2.0)",
+        "list.range(0, n) |> list.map((i) => i + 1) |> list.map((x) => float.from(x) / 2.0)",
         "[0.5, 1, 1.5, 2] []",
     ),
     (

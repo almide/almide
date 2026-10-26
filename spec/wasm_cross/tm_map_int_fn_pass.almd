@@ -7,5 +7,5 @@ fn roundtrip(v: Map[String, Int]) -> Map[String, Int] = v
 fn main() -> Unit = {
   let v: Map[String, Int] = map.from_list([("a", 1), ("b", 2)])
   let w = roundtrip(v)
-  println(int.to_string(map.get_or(w, "a", 0 - 1) * 10 + map.len(w)))
+  println(int.to_string(map.get(w, "a") ?? (0 - 1) * 10 + map.len(w)))
 }

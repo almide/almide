@@ -41,12 +41,12 @@ fn tsv_row(line: String) -> Row? = {
   let f = string.split(line, "\t")
   if list.len(f) != 6 then none
   else some(Row {
-    modname: list.get_or(f, 0, ""),
-    name: list.get_or(f, 1, ""),
-    native: num(list.get_or(f, 2, "0")),
-    emitter: num(list.get_or(f, 3, "0")),
-    selfhost: num(list.get_or(f, 4, "0")),
-    total: num(list.get_or(f, 5, "0")),
+    modname: list.get(f, 0) ?? "",
+    name: list.get(f, 1) ?? "",
+    native: num(list.get(f, 2) ?? "0"),
+    emitter: num(list.get(f, 3) ?? "0"),
+    selfhost: num(list.get(f, 4) ?? "0"),
+    total: num(list.get(f, 5) ?? "0"),
   })
 }
 

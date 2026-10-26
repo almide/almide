@@ -2,7 +2,7 @@
 //! every user module.
 //!
 //! Bundled modules are inferred on every check, but their diagnostics were
-//! dropped, so `args.flag` — a plain fn calling the effect fn `env.args` —
+//! dropped, so `args.has_flag` — then a plain fn calling the effect fn `env.args` —
 //! compiled for every importer while the same body in a user module was E006.
 //! The check driver now reports a bundled module's E006 against
 //! `<bundled stdlib>/<module>.almd` (src/wasm_leg.rs); this test imports every

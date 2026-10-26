@@ -13,9 +13,9 @@ fn csv_to_json(input: String) -> String = {
       let val = list.get(values, pair.0) |> option.unwrap_or("")
       '"' + col + '":"' + val + '"'
     })
-    "{" + string.join(pairs, ",") + "}"
+    "{" + list.join(pairs, ",") + "}"
   })
-  "[" + string.join(records, ",\n") + "]"
+  "[" + list.join(records, ",\n") + "]"
 }
 
 test "csv_to_json basic" {

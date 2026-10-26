@@ -1,6 +1,6 @@
 // wordfreq — the keyed-aggregation row (#2150, #2157): N draws from a 5 000-word
 // LCG vocabulary counted in a `Map[String, Int]`, top 10 by count desc / word
-// asc. This is the imperative spelling — `var` Map + `for` + `m[w] = map.get_or(m, w, 0) + 1`
+// asc. This is the imperative spelling — `var` Map + `for` + `m[w] = (map.get(m, w) ?? 0) + 1`
 // — the shape #2157's attribution probe named: with the Map removed the same
 // loop ran 163 ms natively, with it 404 ms, so the row measures the native
 // Map's lookup + insert and nothing else the language does.
@@ -47,7 +47,7 @@ effect fn main() -> Unit = {
   var counts: Map[String, Int] = [:]
   for i in list.range(0, n) {
     let w = vocab[draw(i)]
-    counts[w] = map.get_or(counts, w, 0) + 1
+    counts[w] = map.get(counts, w) ?? 0 + 1
   }
   let top = map.to_list(counts) |> list.sort_by(((w, c)) => (0 - c, w)) |> list.take(10)
   for (w, c) in top {

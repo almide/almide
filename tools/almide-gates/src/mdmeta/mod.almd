@@ -18,9 +18,9 @@ fn strip_marker(line: String, prefix: String) -> String = {
   let after = string.split(line, prefix)
   if list.len(after) < 2 then ""
   else {
-    let rest = list.get_or(after, 1, "")
+    let rest = list.get(after, 1) ?? ""
     let parts = string.split(rest, " -->")
-    string.trim(list.get_or(parts, 0, ""))
+    string.trim(list.get(parts, 0) ?? "")
   }
 }
 
@@ -56,7 +56,7 @@ fn find_done(lines: List[String]) -> String = {
 // `basename path .md`, for the title fallback.
 fn basename_stem(path: String) -> String = {
   let segs = string.split(path, "/")
-  let last = list.get_or(segs, list.len(segs) - 1, path)
+  let last = list.get(segs, list.len(segs) - 1) ?? path
   if string.ends_with(last, ".md") then string.slice(last, 0, string.len(last) - 3)
   else last
 }

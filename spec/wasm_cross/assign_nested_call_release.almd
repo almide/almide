@@ -18,7 +18,7 @@ fn vmul(a: V3, s: Float) -> V3 = v3(a.x * s, a.y * s, a.z * s)
 fn vdot(a: V3, b: V3) -> Float = a.x * b.x + a.y * b.y + a.z * b.z
 
 fn vnorm(a: V3) -> V3 = {
-  let len = float.sqrt(vdot(a, a))
+  let len = math.sqrt(vdot(a, a))
   if len > 0.0 then vmul(a, 1.0 / len) else a
 }
 

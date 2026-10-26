@@ -317,7 +317,7 @@ effect fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (17 functions)
+## Signature index (11 functions)
 
 ```
 // Stdout on exit 0; else err with stderr text.
@@ -372,33 +372,9 @@ effect process.exit(code: Int) -> Never
 // @since 0.12.3 or earlier
 effect process.pid() -> Int
 
-// Full argv, program name at index 0.
-// @since 0.10.3 or earlier
-effect process.args() -> List[String]
-
-// All stdin lines; err on non-UTF-8 input.
-// @since 0.5.0 or earlier
-effect process.stdin_lines() -> List[String]
-
-// Variable value, or none if unset.
-// @since 0.12.3 or earlier
-effect process.env(key: String) -> Option[String]
-
-// Pid of cmd started in the background.
-// @since 0.12.3 or earlier
-effect process.spawn(cmd: String, args: List[String]) -> Int
-
 // Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
 // @since 0.12.3 or earlier
 effect process.kill(pid: Int, signal: Int) -> Unit
-
-// Blocks ms milliseconds; negative is 0.
-// @since 0.20.0 or earlier
-effect process.sleep(ms: Int) -> Unit
-
-// True while pid exists; false for a pid <= 0.
-// @since 0.12.3 or earlier
-effect process.is_alive(pid: Int) -> Bool
 ```
 
 ## Type index (2 types)

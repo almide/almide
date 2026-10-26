@@ -62,23 +62,23 @@ Fixture: `spec/wasm_cross/float_parse.almd`、`float_parse_finite_only.almd`、
 
 Fixture: `spec/wasm_cross/json_*.almd` 群（`json_string_span.almd` 含む）。
 
-## ALS-T4 `list.chunk` / `list.windows`
+## ALS-T4 `list.chunk` / `list.window`
 
 **裁定**: サイズ引数の非正値の挙動は次のとおり規範化する —
 
 - `n <= 0`: **定義域エラー**。負のサイズは ALS-T16 の負の個数規則で 0 と
   読む（almide/almide#4147）ので、`n < 0` も `n == 0` と同じく — ALS-T6 の終了規約に従い、`chunk` は
-  `Error: chunk size must be positive`、`windows` は
+  `Error: chunk size must be positive`、`window` は
   `Error: window size must be positive` を stderr に 1 行出力し exit code 1 で
   停止する。生の Rust panic（exit 101）や wasm trap（exit 134）、無言の
   空/全ウィンドウ返しは不適合。
 
-> 注記: 以前の `n < 0` の裁定（`chunk` は全体を 1 チャンク、`windows` は空）は
+> 注記: 以前の `n < 0` の裁定（`chunk` は全体を 1 チャンク、`window` は空）は
 > v0 の Rust 実装詳細（`chunks(n as usize)` の usize 再解釈）を規範へ昇格した
 > ものだったが、負の個数を 0 と読む ALS-T16 の規則（#4147）に合わせて撤回した。
 > 負のサイズの abort は `spec/wasm_cross/list_chunk_negative.almd` が固定する。`n == 0` はその再解釈でも定義
 > されず（Rust は panic）、v0.28.4 で T6 形式の abort に規範化した — それ以前は
-> native が生 panic、wasm は `windows(xs, 0)` が **len+1 個の空ウィンドウを
+> native が生 panic、wasm は `window(xs, 0)` が **len+1 個の空ウィンドウを
 > 無言で返していた**（silent-wrong）。
 > Fixtures: `spec/wasm_cross/list_chunk_windows.almd`（値ケース）、
 > `list_chunk_zero.almd` / `list_windows_zero.almd`（abort ケース）。
@@ -110,7 +110,7 @@ fixture `spec/wasm_cross/string_case_unicode.almd`、`string_case_no_ascii_fold.
 整数の `/`・`%` は**全域**である: ゼロ除数は stderr に `Error: division by zero`、
 符号付き最小値 ÷ −1（各ビット幅の真の MIN）は `Error: integer overflow` を1行出力し
 **exit code 1 で停止**する。ハードウェア trap（wasm unreachable、exit 134 等）や
-無言の wrap は不適合。同じ規約は `math.pow` の負指数（`Error: negative exponent`）、リスト添字の
+無言の wrap は不適合。同じ規約は `int.pow` の負指数（`Error: negative exponent`）、リスト添字の
 範囲外（`Error: index out of bounds`）、`int.clamp`/`float.clamp` の不正範囲
 （lo > hi、float は NaN 境界も — `Error: clamp requires min <= max`）に適用される。
 Fixtures: `spec/wasm_cross/int_div_by_zero*.almd`, `int_mod_*`, `int8_div_overflow.almd`,
@@ -148,35 +148,14 @@ Fixtures: `spec/wasm_cross/top_let_div_eager.almd`, `top_let_div_used.almd`。
 `invalid digit found in string`、範囲外は `number too large to fit in target type` /
 `number too small to fit in target type`。
 
-`int.from_hex(s)` は `i64::from_str_radix(…, 16)` **そのもの**ではなく、次の文法である
-（fixture `spec/wasm_cross/int_from_hex.almd` が全辺を固定する）:
-
-```ebnf
-hex     := ws* ("0x")* sign? hexdigit+ ws*      (* "0x" は小文字のみ、何回でも剥がす *)
-sign    := "+" | "-"
-hexdigit:= [0-9a-fA-F]                          (* 下線は不可 *)
-```
-
-- 接頭辞 `0x` は**小文字のみ**認識し、**繰り返し**剥がす（`0x0x0x10` = 16）。
-  `0X10` は `invalid digit found in string`。
-- 符号は接頭辞の**後**に置く（`0x-ff` = -255）。接頭辞の前の符号（`-0xff`）は
-  `invalid digit found in string`。
-- 接頭辞だけ（`0x`、`0x0x`）は除去後に空なので `cannot parse integer from empty string`。
-- 桁の大文字小文字は不問、`f_f` のような下線は不正文字。オーバーフローは
-  `int.parse` と同じ 2 文言。
-
 ```almide
-test "int.parse trims ASCII whitespace only; int.from_hex strips lowercase 0x repeatedly, sign after the prefix" {
+test "int.parse trims ASCII whitespace only" {
   assert_eq(int.parse("\u{00A0}99\u{3000}") ?? -1, -1)
   assert_eq(int.parse("\t 99\r\n") ?? -1, 99)
-  assert_eq(int.from_hex("0x0x0x10") ?? -1, 16)
-  assert_eq(int.from_hex("0x-ff") ?? 0, -255)
-  assert_eq(int.from_hex("0X10") ?? -1, -1)
-  assert_eq(int.from_hex("-0xff") ?? -1, -1)
 }
 ```
 
-Fixture: `spec/wasm_cross/int_from_hex.almd`、`spec/wasm_cross/string_whitespace.almd`、
+Fixture: `spec/wasm_cross/string_whitespace.almd`、
 `spec/wasm_cross/number_parse_ascii_trim.almd`。
 Contracts: C-028, C-029。
 
@@ -251,8 +230,7 @@ Contracts: C-048。
 
 ## ALS-T15 符号と min/max の NaN 規則
 
-`float.sign` は `f64::signum`（NaN → NaN、±0 → ±1）。`float.min/max`・
-`math.min/max` は **NaN を無視**する（片方が NaN なら他方を返す — IEEE-754
+`float.sign` は `f64::signum`（NaN → NaN、±0 → ±1）。`float.min/max` は **NaN を無視**する（片方が NaN なら他方を返す — IEEE-754
 minNum/maxNum 系）。`float.round` はゼロ結果の
 符号を保つ（round(-0.0) = -0.0、half away from zero は不変）。±0 同士の
 min/max の順序は ALS-T23（IEEE-754-2019 minimum/maximum）。
@@ -271,7 +249,7 @@ List / String の **個数（count）や添字（index）** を受け取る API 
 | 種類 | 規則 | 負値・巨大値の結果 |
 |------|------|--------------------|
 | 個数（`list.take/drop/take_end/drop_end/split_at`、`string.take/drop/take_end/drop_end/split_at`、`bytes.take/drop/take_end/drop_end/split_at`、`pad_start/pad_end` の幅）と範囲の端（`list.slice`・`bytes.slice`・`matrix.slice_rows` の start/end） | **符号あり** `max(n, 0).min(len)` | 負値は 0: `take(-1)` = 空、`drop(-1)` = 全体、`slice(xs, -2, 3)` = `slice(xs, 0, 3)`。`2^32` 以上は `len` に飽和（小さい値へラップしない） |
-| サイズ（`list.chunk/windows/window`、`string.chunk/window`、`bytes.chunk/window`） | 定義域は 1 以上（ALS-T4） | 0 以下（負値を含む）は abort |
+| サイズ（`list.chunk/window`、`string.chunk/window`、`bytes.chunk/window`） | 定義域は 1 以上（ALS-T4） | 0 以下（負値を含む）は abort |
 | 反復回数（`string.repeat` / `list.repeat` / `bytes.repeat`） | **符号あり**、負は 0 | `repeat(s, -1)` = 空（両ターゲット; panic / trap は不適合） |
 | `string.slice` の start/end | **符号あり** `max(0).min(len)` | 負の start は 0 |
 | 添字（`list.get/get_or/set/insert/remove_at/swap/update`） | **符号なし** `i as usize` | 負や `2^32` 以上の添字は範囲外として no-op / default / append の経路 |
@@ -430,10 +408,10 @@ ulp 差」（同符号の binary64 同士では `float.to_bits` の差の絶対�
 
 | 関数 | 上限 |
 |------|------|
-| `math.sqrt` / `float.sqrt` | 正確丸め（0 ulp） — IEEE-754 が要求する |
+| `math.sqrt` | 正確丸め（0 ulp） — IEEE-754 が要求する |
 | `math.exp` `math.log` `math.log2` `math.log10` | ≤ 1 ulp |
 | `math.sin` `math.cos` `math.tan` | ≤ 1 ulp |
-| `math.fpow` / Float `**` | ≤ 1 ulp |
+| `float.pow` / Float `**` | ≤ 1 ulp |
 | `math.log_gamma` | 宣言なし — byte 一致（T10）のみが規範で、精度は主張しない |
 
 表にない関数の精度は主張されない。上限は標本点で実行検証される（下の test と
@@ -441,7 +419,7 @@ ulp 差」（同符号の binary64 同士では `float.to_bits` の差の絶対�
 binary64）。
 
 ```almide
-fn ulp_from(x: Float, reference_bits: Int) -> Int = math.abs(float.to_bits(x) - reference_bits)
+fn ulp_from(x: Float, reference_bits: Int) -> Int = int.abs(float.to_bits(x) - reference_bits)
 
 test "sqrt is correctly rounded; exp/log/sin stay within 1 ulp at sample points" {
   assert_eq(ulp_from(math.sqrt(2.0), 4609047870845172685), 0)
@@ -461,7 +439,7 @@ Fixture: `spec/wasm_cross/math_transcendental_bits.almd`、
 `x + 0.0 → x` は `x = -0.0` に対して成り立たない恒等式なので、実装は畳み込んでは
 ならない。`x - 0.0 → x` と `x * 1.0 → x` は成り立つ）、`1.0 / -inf = -0.0`。等値は符号を
 無視する（`0.0 == -0.0` は真、ALS-C3）。表示は符号を保つ（`-0.0` → `-0.0`、
-ALS-E3）。`float.min/max`・`math.fmin/fmax` は **IEEE-754-2019 `minimum`/`maximum`
+ALS-E3）。`float.min/max` は **IEEE-754-2019 `minimum`/`maximum`
 のゼロ順序**に従う: `-0.0 < +0.0` として扱い、`min(-0.0, 0.0) = min(0.0, -0.0) = -0.0`、
 `max(-0.0, 0.0) = max(0.0, -0.0) = +0.0` — 引数順に依存せず（可換）、ALS-C9 の
 totalOrder と整合する。NaN は T15 のとおり無視される（片方が NaN なら他方、両方
@@ -482,8 +460,8 @@ test "signed zero propagates, compares equal, and orders -0 < +0 in min/max" {
   assert_eq(float.sign(float.min(0.0, mz)), -1.0)
   assert_eq(float.sign(float.max(mz, 0.0)), 1.0)
   assert_eq(float.sign(float.max(0.0, mz)), 1.0)
-  assert_eq(float.sign(math.fmin(0.0, mz)), -1.0)
-  assert_eq(float.sign(math.fmax(mz, 0.0)), 1.0)
+  assert_eq(float.sign(float.min(0.0, mz)), -1.0)
+  assert_eq(float.sign(float.max(mz, 0.0)), 1.0)
 }
 ```
 
@@ -499,26 +477,27 @@ Contracts: C-306。
 
 ## ALS-T24 Float → Int 変換
 
-`float.to_int(x)` は**ゼロ方向切り捨て**（truncation）で、範囲外は **i64 の両端に
-飽和**し、NaN は `0`: `to_int(2.7) = 2`、`to_int(-2.7) = -2`、`to_int(+inf)` は
-`9223372036854775807`、`to_int(-inf)` は `-9223372036854775808`、`to_int(9.3e18)`
-は `9223372036854775807`（飽和）、`to_int(NaN) = 0`、`to_int(-0.0) = 0`。
-checked 族（`float.to_{int8,int16,int32,int64,uint8,uint16,uint32,uint64}_checked`、
-`float.to_float32_checked`）は**値が目標型で正確に表現できるときだけ `some`**:
-小数部を持つ値・範囲外・NaN・±inf は `none`（`to_int64_checked(2.7) = none`、
-`to_int64_checked(-0.0) = some(0)`、`to_float32_checked(0.1) = none`）。
+`int.from_saturating(x)` は**ゼロ方向切り捨て**（truncation）で、範囲外は **i64 の両端に
+飽和**し、NaN は `0`: `from_saturating(2.7) = 2`、`from_saturating(-2.7) = -2`、
+`from_saturating(+inf)` は `9223372036854775807`、`from_saturating(-inf)` は
+`-9223372036854775808`、`from_saturating(9.3e18)` は `9223372036854775807`（飽和）、
+`from_saturating(NaN) = 0`、`from_saturating(-0.0) = 0`。
+checked 族（`int8.from_checked` … `uint64.from_checked`、`float32.from_checked`）は
+**値が目標型で正確に表現できるときだけ `some`**:
+小数部を持つ値・範囲外・NaN・±inf は `none`（`int64.from_checked(2.7) = none`、
+`int64.from_checked(-0.0) = some(0)`、`float32.from_checked(0.1) = none`）。
 `float.floor/ceil/round` は Float → Float であり本節の対象外（round の ±0 は T15）。
 
 ```almide
-test "float.to_int truncates toward zero, saturates, and maps NaN to 0" {
+test "int.from_saturating truncates toward zero, saturates, and maps NaN to 0" {
   let inf = 1.0 / 0.0
-  assert_eq(float.to_int(2.7), 2)
-  assert_eq(float.to_int(-2.7), -2)
-  assert_eq(float.to_int(inf), 9223372036854775807)
-  assert_eq(float.to_int(0.0 - inf), -9223372036854775808)
-  assert_eq(float.to_int(0.0 / 0.0), 0)
-  assert_eq(float.to_int64_checked(2.7), none)
-  assert_eq(float.to_int64_checked(-0.0), some(0))
+  assert_eq(int.from_saturating(2.7), 2)
+  assert_eq(int.from_saturating(-2.7), -2)
+  assert_eq(int.from_saturating(inf), 9223372036854775807)
+  assert_eq(int.from_saturating(0.0 - inf), -9223372036854775808)
+  assert_eq(int.from_saturating(0.0 / 0.0), 0)
+  assert_eq(int64.from_checked(2.7), none)
+  assert_eq(int64.from_checked(-0.0), some(0))
 }
 ```
 
@@ -527,10 +506,11 @@ Fixture: `spec/wasm_cross/float_to_int_edges.almd`、
 
 ## ALS-T25 matrix の超越計算と積の順序
 
-`matrix` の関数のうち超越関数に届くもの（`matrix.pow`）は、ホストの libm ではなく
+`matrix` の要素ごとの超越計算（`matrix.map(m, (x) => float.pow(x, e))` のように
+`float.pow` 等へ届くもの）は、ホストの libm ではなく
 **同梱の musl libm**（T22）で計算する。両ターゲットで同じバイトを出し、同じ
 プログラムはどのプラットフォームでビルドしても同じバイトを出す（C-223）。積
-（`mul`・`linear_row`・`linear_row_no_bias`・`conv1d`）はどのレッグでも native の
+（`a * b`）はどのレッグでも native の
 スカラーループで計算する: 0.0 から累積し、k は昇順、乗算してから加算し、融合
 積和は使わない。正準 fast-exp を通っていた活性化関数（`softmax_rows`・`gelu`・
 `swiglu_gate`）と rope の逆周波数表は、dialect epoch 14 で標準ライブラリを離れ、
@@ -607,12 +587,12 @@ host として読まずに名指しで拒否する: userinfo は
 `Float32` の各演算（`+` `-` `*` `/` `%` `**`、単項 `-`）の結果は IEEE-754 **binary32**
 の最近接偶数丸めで **1 演算ごとに** f32 に丸まり、native の `f32` 演算と同じ値に
 なる。より広いスロット（f64）で `Float32` を運ぶ実装も、各演算の直後に binary32 へ
-丸めなければならない — 丸めない値は `float32.to_float64` による拡幅、比較、後続の
-演算のすべてで native と異なる。`Float32` への変換（`float.to_float32`、
-`int.to_float32` と sized 整数の `to_float32`）は 1 回丸める。比較（`==` `!=` `<`
+丸めなければならない — 丸めない値は `float64.from` による拡幅、比較、後続の
+演算のすべてで native と異なる。`Float32` への変換（`float32.from(x)`、
+x は `Float`・`Int`・sized 整数のいずれでも）は 1 回丸める。比較（`==` `!=` `<`
 `<=` `>` `>=`）は丸めた binary32 の値を比べる。`Float32` 文脈の裸の float
 リテラルは生まれたときに binary32 へ狭まる（ALS-E3）。`math.*` は `Float` のみを
-受け取り、`Float32` は明示の拡幅（`float32.to_float64`）を経て渡る。`Float32` の
+受け取り、`Float32` は明示の拡幅（`float.from(x)`）を経て渡る。`Float32` の
 `a ** b` は、拡幅した両辺の `Float` の `**`（ALS-T10 の単一の pow 実装）を 1 回
 binary32 へ丸めた値である。
 

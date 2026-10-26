@@ -28,7 +28,7 @@ effect fn main() -> Unit = {
   // Record result: the parallel path.
   let cells = fan.map(
     list.range(0, 8),
-    (x) => ok(Cell { idx: x, score: float.from_int(churn(x, 1)) / 7.0 }),
+    (x) => ok(Cell { idx: x, score: float.from(churn(x, 1)) / 7.0 }),
   )!
   println("cell=" + int.to_string(cells[7].idx) + " " + float.to_string(cells[7].score))
   // First Err in LIST ORDER: index 3 fails while indices 4.. are heavier and

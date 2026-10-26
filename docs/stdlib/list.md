@@ -28,19 +28,6 @@ fn main() -> Unit = {
 some(20)
 ```
 
-### `list.get_or(xs: List[A], i: Int, default: A) -> A`
-
-Get the element at index i, or return a default value.
-
-```almd run
-fn main() -> Unit = {
-  println("${list.get_or([1, 2], 5, 0)}")
-}
-```
-```output
-0
-```
-
 ### `list.set(xs: List[A], i: Int, x: A) -> List[A]`
 
 Return a new list with the element at index i replaced.
@@ -636,19 +623,6 @@ fn main() -> Unit = {
 [1, 0, 2, 0, 3]
 ```
 
-### `list.windows(xs: List[A], n: Int) -> List[List[A]]`
-
-Return sliding windows of size n.
-
-```almd run
-fn main() -> Unit = {
-  println("${list.windows([1, 2, 3, 4], 2)}")
-}
-```
-```output
-[[1, 2], [2, 3], [3, 4]]
-```
-
 ### `list.dedup(xs: List[A]) -> List[A]`
 
 Remove consecutive duplicates.
@@ -732,18 +706,6 @@ Remove duplicates by key function, preserving first occurrence.
 fn main() -> Unit = {
   let firsts = list.unique_by(["aa", "ab", "ba"], (s) => string.get(s, 0))
   println("${firsts}")
-}
-```
-
-### `list.shuffle(xs: List[A]) -> List[A]`
-
-Return a randomly shuffled copy of the list.
-
-```almd check
-fn main() -> Unit = {
-  let shuffled = list.shuffle([1, 2, 3, 4])
-  println("${list.len(shuffled)}")
-  println("${list.sort(shuffled)}")
 }
 ```
 
@@ -847,7 +809,7 @@ When a callback that never errs leaves `E` unconstrained, annotate the result:
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (79 functions)
+## Signature index (74 functions)
 
 ```
 // Element count; 0 for an empty list.
@@ -861,10 +823,6 @@ list.length(xs: List[A]) -> Int   (deprecated — use list.len)
 // Element at index i, or none when out of range.
 // @since 0.5.0 or earlier
 list.get(xs: List[A], i: Int) -> Option[A]
-
-// Element at i, or default when out of range.
-// @since 0.5.0 or earlier
-list.get_or(xs: List[A], i: Int, default: A) -> A
 
 // Copy with slot i = x; no-op if i out of range.
 // @since 0.5.0 or earlier
@@ -905,10 +863,6 @@ list.take(xs: List[A], n: Int) -> List[A]
 // All but the first n; [] if n >= len, all if n < 0.
 // @since 0.5.0 or earlier
 list.drop(xs: List[A], n: Int) -> List[A]
-
-// All but the first element; [] when empty.
-// @since 0.16.5 or earlier
-list.tail(xs: List[A]) -> List[A]
 
 // Duplicates removed; first occurrences kept.
 // @since 0.5.0 or earlier
@@ -1058,10 +1012,6 @@ list.repeat(x: A, n: Int) -> List[A]
 // @since 0.5.0 or earlier
 list.intersperse(xs: List[A], sep: A) -> List[A]
 
-// All n-long runs; [] if n > len; n <= 0 aborts.
-// @since 0.5.0 or earlier
-list.windows(xs: List[A], n: Int) -> List[List[A]]
-
 // Adjacent equal runs collapsed; not global.
 // @since 0.5.0 or earlier
 list.dedup(xs: List[A]) -> List[A]
@@ -1073,10 +1023,6 @@ list.take_end(xs: List[A], n: Int) -> List[A]
 // All but the last n; [] if n >= len, all if n < 0.
 // @since 0.7.0 or earlier
 list.drop_end(xs: List[A], n: Int) -> List[A]
-
-// Random permutation; unseeded, differs per run.
-// @since 0.7.0 or earlier
-list.shuffle(xs: List[A]) -> List[A]
 
 // All n-long runs; [] if n > len; n <= 0 aborts.
 // @since 0.7.0 or earlier
@@ -1101,10 +1047,6 @@ list.pop(mut xs: List[A]) -> Option[A]
 // Removes every element of xs in place.
 // @since 0.9.3 or earlier
 list.clear(mut xs: List[A]) -> Unit
-
-// n + 1; bundled-dispatch smoke fn.
-// @since 0.14.6 or earlier
-list.bundled_probe(n: Int) -> Int
 
 // (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
 // @since 0.14.6 or earlier

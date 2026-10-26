@@ -70,13 +70,13 @@ fn test_rc_churn() -> String = {
   int.to_string(checksum)
 }
 
-// Map insert/lookup churn (alloc/rehash + rc on string keys). map.insert mutates.
+// Map insert/lookup churn (alloc/rehash + rc on string keys). map.set rebinds.
 fn test_map_churn() -> String = {
   var hits = 0
   for round in 0..<30 {
     var m = map.new()
     for i in 0..<40 {
-      map.insert(m, "k" + int.to_string(i), i * round)
+      m = map.set(m, "k" + int.to_string(i), i * round)
     }
     let v = map.get(m, "k20") ?? -1
     hits = hits + v

@@ -5,7 +5,7 @@
 //! that render's subset still refused two kinds of region the wasm leg runs:
 //!
 //!   1. an arm that calls a stdlib fn the v1 render has no native body for
-//!      (`string.split`, `int.to_float`);
+//!      (`string.split`, `float.from`);
 //!   2. a region whose signature the two renders spell differently (a record,
 //!      a variant, a tuple, `List[String]`, `Option`, a closure).
 //!
@@ -117,7 +117,7 @@ const STDLIB_ARMS: &str = r#"fn spin(n: Int) -> Int = {
 
 fn parts(s: String) -> Int = list.len(string.split(s, ",")) + spin(string.len(s))
 
-fn half(n: Int) -> Float = int.to_float(spin(n)) / 2.0
+fn half(n: Int) -> Float = float.from(spin(n)) / 2.0
 
 effect fn parts_units(s: String, ns: Int) -> Result[Int, String] =
   if ns > 3000 then ok(-1)

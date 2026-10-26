@@ -41,7 +41,7 @@ effect fn main() -> Unit = {
   let keys = ["a", "b"]
   let bump = (k: String) => {
     let cur = map.get(stats, k) ?? 0
-    map.insert(stats, k, cur + 1)
+    stats = map.set(stats, k, cur + 1)
   }
   for i in 0..<10 {
     bump(keys[i % 2])
@@ -76,8 +76,8 @@ effect fn main() -> Unit = {
   var stats: Map[String, Acc] = map.new()
   let feed = (k: String, t: Int) => {
     match map.get(stats, k) {
-      some(s) => map.insert(stats, k, Acc { sum: s.sum + t, count: s.count + 1 }),
-      none => map.insert(stats, k, Acc { sum: t, count: 1 }),
+      some(s) => { stats[k] = Acc { sum: s.sum + t, count: s.count + 1 } },
+      none => { stats[k] = Acc { sum: t, count: 1 } },
     }
   }
   feed("x", 3)
@@ -103,10 +103,10 @@ fn match_subject_read_is_hoisted_before_the_arms() {
 const FORIN_HEAD_READ: &str = r#"
 effect fn main() -> Unit = {
   var m: Map[String, Int] = map.new()
-  map.insert(m, "seed", 1)
+  m = map.set(m, "seed", 1)
   let sweep = () => {
     for k in map.keys(m) {
-      map.insert(m, k, 0)
+      m = map.set(m, k, 0)
     }
   }
   sweep()

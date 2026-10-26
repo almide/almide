@@ -32,6 +32,6 @@ effect fn main() -> Unit = {
   // and would bit-sort Float keys (wrong order for negatives).
   let s = list.sort_by([3, 1, 2], (x) => "k${x}")
   println("${s}")
-  let f = list.sort_by([3, 1, 2], (x) => 0.5 - int.to_float(x))
+  let f = list.sort_by([3, 1, 2], (x) => 0.5 - float.from(x))
   println("${f}")
 }

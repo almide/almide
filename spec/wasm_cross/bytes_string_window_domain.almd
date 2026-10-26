@@ -30,7 +30,40 @@
 // prose, and not fixed for as long as the comment existed — which is the argument
 // for `proofs/domain-edges.toml`. A divergence recorded in a comment is not
 // recorded. Only a gate that fails is.
+//
+// The four readers left the stdlib (dialect epoch 15); each is now a user
+// composition of the checked cursor reads `next_u32_le` / `next_u32_be` /
+// `next_bytes`, which answer `(none, pos)` outside the buffer, and the window
+// rule is pinned on that composition.
 import bytes
+
+fn read_string_at(b: Bytes, pos: Int, len: Int) -> String = match bytes.next_bytes(b, pos, len) {
+  (some(x), _) => bytes.to_string_lossy(x),
+  (none, _) => "",
+}
+
+fn read_string_be(b: Bytes, pos: Int) -> String = match bytes.next_u32_be(b, pos) {
+  (some(n), p) => read_string_at(b, p, n),
+  (none, _) => "",
+}
+
+fn skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int = if count <= 0 then pos
+else match bytes.next_u32_le(b, pos) {
+  (some(n), p) => match bytes.next_bytes(b, p, n) {
+    (some(_), q) => skip_length_prefixed_le(b, q, count - 1),
+    (none, _) => pos,
+  },
+  (none, _) => pos,
+}
+
+fn read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String] = if count <= 0 then []
+else match bytes.next_u32_le(b, pos) {
+  (some(n), p) => match bytes.next_bytes(b, p, n) {
+    (some(x), q) => [bytes.to_string_lossy(x)] + read_length_prefixed_strings_le(b, q, count - 1),
+    (none, _) => [],
+  },
+  (none, _) => [],
+}
 
 fn main() -> Unit = {
   // [3][abc][2][de] — two length-prefixed entries, 13 bytes.
@@ -50,24 +83,24 @@ fn main() -> Unit = {
     101
   ])
   // read_string_at: the window, and the four ways out of it.
-  println("at_ok=[" + bytes.read_string_at(b, 4, 3) + "]")
+  println("at_ok=[" + read_string_at(b, 4, 3) + "]")
   // Was `[<cap bytes>]` on the wasm leg — the silent-wrong cell.
-  println("at_neg=[" + bytes.read_string_at(b, 0 - 1, 3) + "]")
-  println("at_maxpos=[" + bytes.read_string_at(b, 9223372036854775807, 3) + "]")
-  println("at_neglen=[" + bytes.read_string_at(b, 4, 0 - 1) + "]")
-  println("at_maxlen=[" + bytes.read_string_at(b, 4, 9223372036854775807) + "]")
+  println("at_neg=[" + read_string_at(b, 0 - 1, 3) + "]")
+  println("at_maxpos=[" + read_string_at(b, 9223372036854775807, 3) + "]")
+  println("at_neglen=[" + read_string_at(b, 4, 0 - 1) + "]")
+  println("at_maxlen=[" + read_string_at(b, 4, 9223372036854775807) + "]")
   // read_string_be: prefix and body each get the subtractive test.
-  println("be_neg=[" + bytes.read_string_be(b, 0 - 1) + "]")
-  println("be_maxpos=[" + bytes.read_string_be(b, 9223372036854775807) + "]")
+  println("be_neg=[" + read_string_be(b, 0 - 1) + "]")
+  println("be_maxpos=[" + read_string_be(b, 9223372036854775807) + "]")
   // skip: a negative count is ZERO entries, not skip-to-EOF (was 13 vs 0).
-  println("skip_ok=" + int.to_string(bytes.skip_length_prefixed_le(b, 0, 2)))
-  println("skip_negcount=" + int.to_string(bytes.skip_length_prefixed_le(b, 0, 0 - 1)))
-  println("skip_neg=" + int.to_string(bytes.skip_length_prefixed_le(b, 0 - 1, 1)))
-  println("skip_maxpos=" + int.to_string(bytes.skip_length_prefixed_le(b, 9223372036854775807, 1)))
+  println("skip_ok=" + int.to_string(skip_length_prefixed_le(b, 0, 2)))
+  println("skip_negcount=" + int.to_string(skip_length_prefixed_le(b, 0, 0 - 1)))
+  println("skip_neg=" + int.to_string(skip_length_prefixed_le(b, 0 - 1, 1)))
+  println("skip_maxpos=" + int.to_string(skip_length_prefixed_le(b, 9223372036854775807, 1)))
   // read_length_prefixed_strings_le: same count rule; the huge count must be
   // bounded by what the buffer could hold rather than reserved outright.
-  println("lps_ok=" + list.join(bytes.read_length_prefixed_strings_le(b, 0, 2), ","))
-  println("lps_negcount=" + int.to_string(list.len(bytes.read_length_prefixed_strings_le(b, 0, 0 - 1))))
-  println("lps_maxcount=" + int.to_string(list.len(bytes.read_length_prefixed_strings_le(b, 0, 9223372036854775807))))
-  println("lps_maxpos=" + int.to_string(list.len(bytes.read_length_prefixed_strings_le(b, 9223372036854775807, 2))))
+  println("lps_ok=" + list.join(read_length_prefixed_strings_le(b, 0, 2), ","))
+  println("lps_negcount=" + int.to_string(list.len(read_length_prefixed_strings_le(b, 0, 0 - 1))))
+  println("lps_maxcount=" + int.to_string(list.len(read_length_prefixed_strings_le(b, 0, 9223372036854775807))))
+  println("lps_maxpos=" + int.to_string(list.len(read_length_prefixed_strings_le(b, 9223372036854775807, 2))))
 }

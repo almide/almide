@@ -17,12 +17,12 @@ test "pipe: filter then map then sum" {
 }
 
 test "pipe: string split then map then join" {
-  let result = "hello world foo" |> string.split(" ") |> list.map((s) => string.to_upper(s)) |> string.join(" ")
+  let result = "hello world foo" |> string.split(" ") |> list.map((s) => string.to_upper(s)) |> list.join(" ")
   assert_eq(result, "HELLO WORLD FOO")
 }
 
 test "pipe: string to chars then reverse then join" {
-  let result = "hello" |> string.to_list() |> list.reverse() |> string.join("")
+  let result = "hello" |> string.to_list() |> list.reverse() |> list.join("")
   assert_eq(result, "olleh")
 }
 
@@ -127,12 +127,12 @@ test "pipe: zip_with then sum" {
 }
 
 test "pipe: intersperse then join" {
-  let result = ["red", "green", "blue"] |> list.intersperse(",") |> string.join("")
+  let result = ["red", "green", "blue"] |> list.intersperse(",") |> list.join("")
   assert_eq(result, "red,green,blue")
 }
 
 test "pipe: windows then map to sums" {
-  let result = [1, 2, 3, 4, 5] |> list.windows(3) |> list.map((w) => list.sum(w))
+  let result = [1, 2, 3, 4, 5] |> list.window(3) |> list.map((w) => list.sum(w))
   assert_eq(result, [6, 9, 12])
 }
 

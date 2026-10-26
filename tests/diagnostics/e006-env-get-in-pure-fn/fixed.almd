@@ -1,0 +1,6 @@
+// The reader is an `effect fn`.
+import env
+
+effect fn home() -> String = env.get("HOME") ?? "none"
+
+effect fn main() -> Unit = println(home()!)

@@ -28,24 +28,6 @@ fn main() -> Unit = {
 ["a", "b", "c"]
 ```
 
-### `string.join(list: List[String], sep: String) -> String`
-
-Join a list of strings with a separator.
-
-```almd run
-fn main() -> Unit = {
-  println(string.join(["a", "b", "c"], "-"))
-}
-```
-```output
-a-b-c
-```
-
-`len`, `get`, `slice`, and search-result positions count Unicode codepoints,
-not UTF-8 bytes or grapheme clusters. `to_bytes` returns UTF-8 byte values as
-`List[Int]`; prefer `bytes.from_string` for a compact buffer. Byte offsets from
-a lexer belong to `byte_slice`, not `slice`.
-
 ### `string.len(s: String) -> Int`
 
 Return the number of characters in a string.
@@ -129,19 +111,6 @@ fn main() -> Unit = {
 ```
 ```output
 00042
-```
-
-### `string.to_bytes(s: String) -> List[Int]`
-
-Convert a string to a list of UTF-8 byte values.
-
-```almd run
-fn main() -> Unit = {
-  println("${string.to_bytes("Hi")}")
-}
-```
-```output
-[72, 105]
 ```
 
 ### `string.capitalize(s: String) -> String`
@@ -277,19 +246,6 @@ fn main() -> Unit = {
 ```
 ```output
 ababab
-```
-
-### `string.from_bytes(bytes: List[Int]) -> String`
-
-Create a string from a list of UTF-8 byte values.
-
-```almd run
-fn main() -> Unit = {
-  println(string.from_bytes([72, 105]))
-}
-```
-```output
-Hi
 ```
 
 ### `string.is_digit(s: String) -> Bool`
@@ -649,7 +605,7 @@ hel
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (89 functions)
+## Signature index (85 functions)
 
 ```
 // s without leading/trailing whitespace.
@@ -663,10 +619,6 @@ string.split(s: String, sep: String) -> List[String]
 // Split at the FIRST occurrence of `sep`: `(before, after)`, none ⇔ `sep` absent.
 // @since 0.57.0
 string.split_once(s: String, sep: String) -> Option[(String, String)]
-
-// Items with sep between; "" for [].
-// @since 0.5.0 or earlier
-string.join(list: List[String], sep: String) -> String
 
 // Codepoint count (not bytes).
 // @since 0.5.0 or earlier
@@ -707,10 +659,6 @@ string.byte_slice(s: String, start: Int, end: Int) -> Option[String]
 // @since 0.6.1 or earlier
 string.pad_start(s: String, n: Int, fill: String) -> String
 
-// UTF-8 bytes of s as Ints 0..255.
-// @since 0.5.0 or earlier
-string.to_bytes(s: String) -> List[Int]
-
 // First char uppercased as to_upper does, rest untouched.
 // @since 0.5.13 or earlier
 string.capitalize(s: String) -> String
@@ -746,10 +694,6 @@ string.index_of(s: String, needle: String) -> Option[Int]
 // s repeated n times; empty for n <= 0.
 // @since 0.5.0 or earlier
 string.repeat(s: String, n: Int) -> String
-
-// Lossy UTF-8 decode; bad sequences become U+FFFD.
-// @since 0.5.0 or earlier
-string.from_bytes(bytes: List[Int]) -> String
 
 // All ASCII 0-9; false for empty s.
 // @since 0.6.0 or earlier
@@ -850,10 +794,6 @@ string.drop(s: String, n: Int) -> String
 // s minus last n codepoints; s if n < 0.
 // @since 0.7.0 or earlier
 string.drop_end(s: String, n: Int) -> String
-
-// (char, count) per run of equal codepoints.
-// @since 0.14.6 or earlier
-string.run_length_encode(s: String) -> List[(String, Int)]
 
 // Appends x to s in place.
 // @since 0.23.3 or earlier

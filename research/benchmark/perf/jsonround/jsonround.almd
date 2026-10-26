@@ -19,7 +19,7 @@ fn record(i: Int) -> Value = value.object([
   ("meta", value.object([("score", value.int((i * 37) % 1000)), ("active", value.bool(i % 2 == 0))]))
 ])
 
-fn score(r: Value) -> Int = json.get_int(value.field(r, "meta") ?? value.null(), "score") ?? 0
+fn score(r: Value) -> Int = value.get_int(value.get(r, "meta") ?? value.null(), "score") ?? 0
 
 effect fn main() -> Unit = {
   let args = env.args()

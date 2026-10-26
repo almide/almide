@@ -8,7 +8,7 @@ test "sub element-wise" {
     [1.0, 2.0],
     [3.0, 4.0]
   ])
-  let c = matrix.sub(a, b)
+  let c = a - b
   assert_eq(matrix.get(c, 0, 0), some(4.0))
   assert_eq(matrix.get(c, 0, 1), some(5.0))
   assert_eq(matrix.get(c, 1, 0), some(6.0))
@@ -24,7 +24,7 @@ test "div element-wise" {
     [2.0, 4.0],
     [5.0, 8.0]
   ])
-  let c = matrix.div(a, b)
+  let c = a / b
   assert_eq(matrix.get(c, 0, 0), some(5.0))
   assert_eq(matrix.get(c, 0, 1), some(5.0))
   assert_eq(matrix.get(c, 1, 0), some(6.0))
@@ -36,7 +36,7 @@ test "neg flips signs" {
     [1.0, -2.0],
     [3.0, 0.0]
   ])
-  let n = matrix.neg(a)
+  let n = matrix.scale(a, -1.0)
   assert_eq(matrix.get(n, 0, 0), some(-1.0))
   assert_eq(matrix.get(n, 0, 1), some(2.0))
   assert_eq(matrix.get(n, 1, 0), some(-3.0))
@@ -48,7 +48,7 @@ test "pow squares each element" {
     [2.0, 3.0],
     [4.0, 5.0]
   ])
-  let s = matrix.pow(a, 2.0)
+  let s = matrix.map(a, (x) => float.pow(x, 2.0))
   assert_eq(matrix.get(s, 0, 0), some(4.0))
   assert_eq(matrix.get(s, 0, 1), some(9.0))
   assert_eq(matrix.get(s, 1, 0), some(16.0))
@@ -59,7 +59,7 @@ test "pow with cube" {
   let a = matrix.from_lists([
     [2.0, 3.0]
   ])
-  let s = matrix.pow(a, 3.0)
+  let s = matrix.map(a, (x) => float.pow(x, 3.0))
   assert_eq(matrix.get(s, 0, 0), some(8.0))
   assert_eq(matrix.get(s, 0, 1), some(27.0))
 }
@@ -69,7 +69,7 @@ test "pow with 0.5 = sqrt" {
     [4.0, 9.0],
     [16.0, 25.0]
   ])
-  let s = matrix.pow(a, 0.5)
+  let s = matrix.map(a, (x) => float.pow(x, 0.5))
   assert(
     float.abs(matrix.get(s, 0, 0)! - 2.0) < 0.001,
     "got " + float.to_string(matrix.get(s, 0, 0)!),

@@ -3,8 +3,8 @@
 // implementation catches up (same lag as float_signed_zero_minmax).
 // `float.sign` == Rust `f64::signum`: copysign(1.0, x) for every non-NaN x
 // (sign(0.0)=1, sign(-0.0)=-1, sign(±inf)=±1), NaN for NaN — NOT the old
-// three-way (0 for ±0.0/NaN). `float.max`/`min` and `math.fmax`/`fmin` IGNORE a
-// NaN operand and return the other; on ±0 ties all four follow IEEE 754-2019
+// three-way (0 for ±0.0/NaN). `float.max`/`min` IGNORE a
+// NaN operand and return the other; on ±0 ties both follow IEEE 754-2019
 // minimum/maximum (-0 < +0, commutative — ALS-T23 / C-306, which retired the
 // earlier first-operand rule on 2026-08-21). Both targets share one explicit
 // NaN/zero decision tree, NOT the NaN-propagating raw f64.max/f64.min wasm
@@ -29,10 +29,10 @@ fn main() -> Unit = {
   // 5
   println(float.to_string(float.max(5.0, nan)))
   // 5
-  // NaN-ignoring min/max (math.fmax/fmin)
-  println(float.to_string(math.fmax(1.5, nan)))
+  // NaN-ignoring min/max (float.max/min)
+  println(float.to_string(float.max(1.5, nan)))
   // 1.5
-  println(float.to_string(math.fmin(1.5, nan)))
+  println(float.to_string(float.min(1.5, nan)))
   // 1.5
   // ordinary (non-NaN) min/max stays correct
   println(float.to_string(float.max(3.0, 7.0)))
@@ -59,12 +59,12 @@ fn main() -> Unit = {
   // -1 (min → -0)
   println(float.to_string(float.sign(float.min(pz, mz))))
   // -1
-  println(float.to_string(float.sign(math.fmax(mz, pz))))
+  println(float.to_string(float.sign(float.max(mz, pz))))
   //  1
-  println(float.to_string(float.sign(math.fmax(pz, mz))))
+  println(float.to_string(float.sign(float.max(pz, mz))))
   //  1
-  println(float.to_string(float.sign(math.fmin(mz, pz))))
+  println(float.to_string(float.sign(float.min(mz, pz))))
   // -1
   // -1
-  println(float.to_string(float.sign(math.fmin(pz, mz))))
+  println(float.to_string(float.sign(float.min(pz, mz))))
 }

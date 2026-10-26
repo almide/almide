@@ -6,17 +6,17 @@
 // `Value`. Before this landing the newtype kept the bare key: `check` accepted
 // a program that mixed the two, native failed at rustc (E0308) and the
 // structural wasm leg read a json value's payload as a String. Both alias
-// visibilities (`mod`, `local`) and a second stdlib-owned name (`JsonPath`,
-// whose incumbent-leg self-host rep must stay the stdlib's) are pinned.
+// visibilities (`mod`, `local`) and a second stdlib-owned name (`Path`, the
+// auto-imported `value.Path` newtype, whose self-host rep must stay the stdlib's) are pinned.
 //
 // Cells, each byte-identical native == wasm: construction, destructure,
 // equality, a list of the newtype, a pipe through it, beside `json.parse`,
-// `json.stringify`, `value.int` and `json.field(json.root(), ..)`.
+// `json.stringify`, `value.int` and `value.key(value.root(), ..)`.
 import json
 
 mod type Value = String
 
-local type JsonPath = Int
+local type Path = Int
 
 fn mk(s: String) -> Value = Value(s)
 
@@ -26,8 +26,8 @@ fn un(v: Value) -> String = match v {
 
 fn same(a: Value, b: Value) -> Bool = a == b
 
-fn depth(p: JsonPath) -> Int = match p {
-  JsonPath(n) => n
+fn depth(p: Path) -> Int = match p {
+  Path(n) => n
 }
 
 effect fn main() -> Unit = {
@@ -37,6 +37,6 @@ effect fn main() -> Unit = {
   println("${same(mine, Value("x"))} ${same(mine, Value("y"))}")
   let items: List[Value] = [Value("a"), Value("b")]
   println("${list.len(items)} ${un(items[1])} ${"z" |> mk |> un}")
-  let path = json.field(json.root(), "a")
-  println("${depth(JsonPath(2))} ${json.stringify(json.get_path(doc, path) ?? value.null())}")
+  let path = value.key(value.root(), "a")
+  println("${depth(Path(2))} ${json.stringify(value.get_path(doc, path) ?? value.null())}")
 }

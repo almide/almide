@@ -1,4 +1,4 @@
-// matrix.{split_cols_even, concat_cols, concat_cols_many, conv1d,
+// matrix.{split_cols_even, concat_cols, concat_cols_many,
 //         gather_rows, dot_row, row_dot, from_bytes_f16_le}
 // — auxiliary ops regression tests.
 fn approx_eq(a: Float, b: Float, tol: Float) -> Bool = {
@@ -129,40 +129,6 @@ test "row_dot (deprecated alias) matches dot_row" {
   let v = [1.0, 1.0]
   assert_eq(matrix.row_dot(m, 0, v), matrix.dot_row(m, 0, v))
   assert_eq(matrix.row_dot(m, 1, v), 7.0)
-}
-
-test "conv1d 1-channel identity kernel (k=1) returns input" {
-  // input: (3, 1), weight: (1, 1*1) = (1, 1), bias: [0]
-  // out_t = 3 with stride=1, kernel=1, padding=0
-  let input = matrix.from_lists([
-    [2.0],
-    [5.0],
-    [7.0]
-  ])
-  let weight = matrix.from_lists([
-    [1.0]
-  ])
-  let out = matrix.conv1d(input, weight, [0.0], 1, 1, 0)
-  let (t, ch) = matrix.shape(out)
-  assert_eq(t, 3)
-  assert_eq(ch, 1)
-  assert_eq(matrix.get(out, 0, 0), some(2.0))
-  assert_eq(matrix.get(out, 1, 0), some(5.0))
-  assert_eq(matrix.get(out, 2, 0), some(7.0))
-}
-
-test "conv1d with bias adds to every output step" {
-  let input = matrix.from_lists([
-    [1.0],
-    [1.0],
-    [1.0]
-  ])
-  let weight = matrix.from_lists([
-    [1.0]
-  ])
-  let out = matrix.conv1d(input, weight, [10.0], 1, 1, 0)
-  assert_eq(matrix.get(out, 0, 0), some(11.0))
-  assert_eq(matrix.get(out, 2, 0), some(11.0))
 }
 
 test "from_bytes_f16_le decodes IEEE-754 half values" {

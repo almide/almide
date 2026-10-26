@@ -59,16 +59,10 @@ test "the bytes form and the hex form agree" {
   let x = b("hello")
   assert_eq(
     hash.md5_hex(x),
-    string.join(
-      bytes.to_list(hash.md5(x)) |> list.map((n) => string.pad_start(int.to_hex(n), 2, "0")),
-      "",
-    ),
+    list.join(bytes.to_list(hash.md5(x)) |> list.map((n) => string.pad_start(int.to_hex(n), 2, "0")), ""),
   )
   assert_eq(
     hash.sha1_hex(x),
-    string.join(
-      bytes.to_list(hash.sha1(x)) |> list.map((n) => string.pad_start(int.to_hex(n), 2, "0")),
-      "",
-    ),
+    list.join(bytes.to_list(hash.sha1(x)) |> list.map((n) => string.pad_start(int.to_hex(n), 2, "0")), ""),
   )
 }

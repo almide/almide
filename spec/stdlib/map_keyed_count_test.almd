@@ -1,5 +1,5 @@
 // Keyed counting, the shapes the native leg renders specially (#2157): the
-// one-probe update `m[k] = e(map.get_or(m, k, d))`, the group-and-count
+// one-probe update `m[k] = e(map.get(m, k) ?? d)`, the group-and-count
 // fusion `map.map(list.group_by(xs, f), (g) => list.len(g))`, the owned
 // whole-map reads at a map's last use, and the String-key hash over every
 // short length (the 1..=7-byte tail is read with overlapping loads). Every
@@ -22,7 +22,7 @@ test "the one-probe update counts like the two-step fold" {
   let ws = draws(3000)
   var m: Map[String, Int] = map.new()
   for w in ws {
-    m[w] = map.get_or(m, w, 0) + 1
+    m[w] = map.get(m, w) ?? 0 + 1
   }
   let want = count_two_step(ws)
   assert_eq(map.len(m), map.len(want))
@@ -35,7 +35,7 @@ test "the update reads a default variable and a step variable" {
   let step = 3
   var m: Map[String, Int] = map.new()
   for w in ws {
-    m[w] = step * 2 + map.get_or(m, w, start) - step
+    m[w] = step * 2 + map.get(m, w) ?? start - step
   }
   for (w, c) in map.to_list(count_two_step(ws)) {
     assert_eq(map.get(m, w), some(10 + 3 * c))
@@ -47,7 +47,7 @@ test "an update that is not plain arithmetic keeps its order" {
   var m: Map[String, Int] = map.new()
   var calls = 0
   for w in ws {
-    m[w] = map.get_or(m, w, 0) + string.len(w) + map.get_or(m, "a", 0)
+    m[w] = map.get(m, w) ?? 0 + string.len(w) + map.get(m, "a") ?? 0
     calls = calls + 1
   }
   assert_eq(calls, 400)
@@ -58,7 +58,7 @@ test "a String value accumulates in place" {
   var m: Map[Int, String] = map.new()
   for i in list.range(0, 200) {
     let k = i % 40
-    m[k] = map.get_or(m, k, "") + "x"
+    m[k] = map.get(m, k) ?? "" + "x"
   }
   assert_eq(map.len(m), 40)
   assert_eq(map.get(m, 0), some("xxxxx"))
@@ -102,7 +102,7 @@ test "String keys of every short length stay distinct" {
   let keys = list.range(0, 21) |> list.flat_map((n) => ["abcd", "abce", "bbcd", "abzd"] |> list.map((p) => string.take(string.repeat(p, 6), n)))
   var m: Map[String, Int] = map.new()
   for k in keys {
-    m[k] = map.get_or(m, k, 0) + 1
+    m[k] = map.get(m, k) ?? 0 + 1
   }
   let distinct = keys |> list.unique_by((k) => k)
   assert_eq(map.len(m), list.len(distinct))

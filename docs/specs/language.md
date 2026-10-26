@@ -779,7 +779,7 @@ type Shape =
 fn area(shape: Shape) -> Float = match shape {
   Circle(r) => 3.14 * r * r,
   Rect(w, h) => w * h,
-  Named{ name, sides } => float.from_int(sides),
+  Named{ name, sides } => float.from(sides),
 }
 
 test "every case is handled" {
@@ -1621,16 +1621,16 @@ There is no `print` function -- use `println` for all output.
 ## 12. Entry Point
 
 ```almide
-import process
+import env
 
 effect fn main() -> Unit = {
-  let args = process.args()
-  let name = list.get(args, 1) ?? "world"
+  let args = env.args()                    // argv without the program name
+  let name = list.get(args, 0) ?? "world"
   println("Hello, ${name}!")
 }
 ```
 
-`main` takes no parameters. Command-line arguments are accessed via `process.args()`. `effect fn main()` is auto-wrapped to return `Result<(), String>` — no need to write `ok(())` or explicit `Result` type.
+`main` takes no parameters. Command-line arguments are accessed via `env.args()` (argv without the program name). `effect fn main()` is auto-wrapped to return `Result<(), String>` — no need to write `ok(())` or explicit `Result` type.
 
 ---
 

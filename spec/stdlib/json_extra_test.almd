@@ -1,29 +1,29 @@
 import json
 
 // json extra tests — get, keys, as_*, null, stringify_pretty, path API
-test "value.field existing key" {
+test "value.get existing key" {
   let obj = value.object([("name", value.string("Alice"))])
-  let v = value.field(obj, "name")?
+  let v = value.get(obj, "name")
   assert_eq(option.is_some(v), true)
 }
 
-test "value.field missing key" {
+test "value.get missing key" {
   let obj = value.object([("name", value.string("Alice"))])
-  let v = value.field(obj, "age")?
+  let v = value.get(obj, "age")
   assert_eq(option.is_none(v), true)
 }
 
-test "value.keys of object" {
+test "value.as_object of object" {
   let obj = value.object([("a", value.int(1)), ("b", value.int(2))])
-  let ks = value.keys(obj)
+  let ks = list.map(value.as_object(obj) ?? [], (kv) => kv.0)
   assert_eq(list.len(ks), 2)
   assert_eq(list.contains(ks, "a"), true)
   assert_eq(list.contains(ks, "b"), true)
 }
 
-test "value.keys of empty object" {
+test "value.as_object of empty object" {
   let obj = value.object([])
-  let ks = value.keys(obj)
+  let ks = list.map(value.as_object(obj) ?? [], (kv) => kv.0)
   assert_eq(list.len(ks), 0)
 }
 
@@ -111,7 +111,7 @@ test "json.parse roundtrip array" {
 test "json.parse nested object" {
   match json.parse('{"user": {"name": "Alice", "age": 30}}') {
     ok(v) => {
-      let user = value.field(v, "user")?
+      let user = value.get(v, "user")
       assert_eq(option.is_some(user), true)
     },
     err(_) => assert(false, "should parse"),

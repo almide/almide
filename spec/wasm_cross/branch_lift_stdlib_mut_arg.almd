@@ -1,6 +1,6 @@
 // @contract: C-117
 // #2931: a let-bound heap branch whose body WRITES an enclosing var through a
-// stdlib `mut` parameter (`list.pop`, `list.push`, `map.insert`,
+// stdlib `mut` parameter (`list.pop`, `list.push`, `map.clear`,
 // `string.push`, `bytes.push`) is not outlined into a branch_lift helper — the
 // helper takes its captures by value, so the write landed in a copy and was
 // dropped. The wasm leg does not lower the bundled modules those surfaces live
@@ -40,7 +40,7 @@ fn arm_writes() -> Unit = {
   for i in 0..<4 {
     let label = if i % 2 == 0 then {
       list.push(acc, "e${i}")
-      map.insert(seen, "k${i}", i)
+      seen = map.set(seen, "k${i}", i)
       "even"
     } else {
       string.push(buf, "o${i}")

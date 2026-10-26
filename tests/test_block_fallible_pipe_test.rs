@@ -16,7 +16,7 @@ test "piped fallible map over a user effect fn" {
 }
 
 test "piped fallible map over an Almide-bodied stdlib effect fn" {
-  let flags = ["--a", "--b", "--c"] |> list.map((n) => args.flag(n)!)!
+  let flags = ["--a", "--b", "--c"] |> list.map((n) => args.has_flag(n)!)!
   assert_eq(list.len(flags), 3)
 }
 "#;

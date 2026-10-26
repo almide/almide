@@ -103,7 +103,7 @@ effect fn main() -> Unit = {
     assert_same_on_both(dir.path(), true);
 }
 
-/// The reporter's shape: `main` binds `process.args()` (a List) and the
+/// The reporter's shape: `main` binds `env.args()` (a List) and the
 /// module's record catalog names a String constant. Walled the structural leg
 /// `ty-mismatch:List(ETy(..))-vs-Scalar(Str)` before the fix.
 #[test]
@@ -129,9 +129,10 @@ fn who_of(id: String) -> String = {
 ";
     let main = "import process
 import self.fixes
+import env
 
 effect fn main() -> Unit = {
-  let argv = process.args()
+  let argv = env.args()
   println(fixes.who_of(\"SEC-01\"))
   println(fixes.who_of(\"SEC-02\"))
   println(int.to_string(list.len(argv)))

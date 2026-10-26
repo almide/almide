@@ -99,7 +99,7 @@ effect fn run_one(root: String, alm: String, file: String, secs: Int) -> String 
 effect fn is_runnable(path: String) -> Bool = {
   let src = fs.read_text(path) ?? ""
   string.contains(src, "fn main") and not string.contains(
-    list.get_or(string.split(src, "\n"), 0, ""),
+    list.get(string.split(src, "\n"), 0) ?? "",
     "wasm:skip",
   )
 }

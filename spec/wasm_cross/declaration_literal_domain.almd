@@ -42,15 +42,15 @@ type Edges = { n: Int, i8: Int8 = 127, u8: UInt8 = 255, i16: Int16 = -32768, u32
 
 type Cell = | Packed { tag: String, i8: Int8 = -128, u64: UInt64 = 9223372036854775808 } | Empty
 
-fn param_edges(a: Int8 = -128, b: UInt16 = 65535, c: UInt64 = 18446744073709551615) -> String = "${int.to_string(int.from_int8(a))} ${uint16.to_string(b)} ${uint64.to_string(c)}"
+fn param_edges(a: Int8 = -128, b: UInt16 = 65535, c: UInt64 = 18446744073709551615) -> String = "${int.to_string(int.from(a))} ${uint16.to_string(b)} ${uint64.to_string(c)}"
 
 fn show_cell(c: Cell) -> String = match c {
-  Packed { tag, i8, u64 } => "${tag} ${int.to_string(int.from_int8(i8))} ${uint64.to_string(u64)}",
+  Packed { tag, i8, u64 } => "${tag} ${int.to_string(int.from(i8))} ${uint64.to_string(u64)}",
   Empty => "empty",
 }
 
 fn main() -> Unit = {
-  println("top ${int.to_string(int.from_int8(TOP_I8))} ${uint8.to_string(TOP_U8)} ${int.to_string(int.from_int16(TOP_I16))} ${uint16.to_string(TOP_U16)} ${int.to_string(int.from_int32(TOP_I32))} ${uint32.to_string(TOP_U32)}")
+  println("top ${int.to_string(int.from(TOP_I8))} ${uint8.to_string(TOP_U8)} ${int.to_string(int.from(TOP_I16))} ${uint16.to_string(TOP_U16)} ${int.to_string(int.from(TOP_I32))} ${uint32.to_string(TOP_U32)}")
   println("top64 ${uint64.to_string(TOP_U64)} ${uint64.to_string(TOP_U64_LOW_HALF_TOP)}")
   println("aggregate ${TOP_LIST} ${uint16.to_string(TOP_PAIR.0)} ${TOP_PAIR.1}")
   TOP_VAR = 254
@@ -65,9 +65,9 @@ fn main() -> Unit = {
   var cell = Edges { n: 2 }
   cell.u8 = 0
   cell.i16 = 32767
-  println("assign ${int.to_string(int.from_int16(narrow))} ${xs} ${m} ${uint8.to_string(cell.u8)} ${int.to_string(int.from_int16(cell.i16))}")
+  println("assign ${int.to_string(int.from(narrow))} ${xs} ${m} ${uint8.to_string(cell.u8)} ${int.to_string(int.from(cell.i16))}")
   let e = Edges { n: 1 }
-  println("field ${e.n} ${int.to_string(int.from_int8(e.i8))} ${uint8.to_string(e.u8)} ${int.to_string(int.from_int16(e.i16))} ${uint32.to_string(e.u32)} ${uint64.to_string(e.u64)}")
+  println("field ${e.n} ${int.to_string(int.from(e.i8))} ${uint8.to_string(e.u8)} ${int.to_string(int.from(e.i16))} ${uint32.to_string(e.u32)} ${uint64.to_string(e.u64)}")
   println("variant ${show_cell(Packed { tag: "p" })} ${show_cell(Empty)}")
   println("param ${param_edges()}")
 }

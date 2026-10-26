@@ -80,5 +80,5 @@ test "multiple operations" {
   var todos = [create(1, "A"), create(2, "B"), create(3, "C")]
   let updated = list.map(todos, (t) => if t.id == 2 then complete(t) else t)
   assert_eq(pending_count(updated), 2)
-  assert(is_done(list.get_or(updated, 1, create(0, ""))))
+  assert(is_done(list.get(updated, 1) ?? create(0, "")))
 }

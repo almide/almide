@@ -115,7 +115,7 @@ SUITE = [
     # wordfreq (#2150, #2157): the keyed-aggregation row — N draws from a
     # 5 000-word vocabulary counted in a `Map[String, Int]`, top 10. TWO
     # spellings of one workload against ONE reference, like listbuild:
-    # `wordfreq` is the imperative `var` Map + `m[w] = map.get_or(m, w, 0) + 1`
+    # `wordfreq` is the imperative `var` Map + `m[w] = (map.get(m, w) ?? 0) + 1`
     # loop (the shape #2157's probe attributed the native Map's cost to),
     # `wordfreq-group` the CHEATSHEET's `list.group_by` + `map.map`. The
     # reference (`wordfreq.rs`) is same-shape/same-semantics: `HashMap<String,

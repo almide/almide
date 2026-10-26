@@ -29,7 +29,7 @@ effect fn main() -> Unit = {
   )
   show(
     "proxy-authorization",
-    http.request_bytes("GET", url, "", [("Proxy-Authorization", "x")]) |> result.map((b) => "bytes"),
+    http.send(http.new_request("GET", url, "", [("Proxy-Authorization", "x")])) |> result.map((r) => http.body_bytes(r)) |> result.map((b) => "bytes"),
   )
   show("sendable", http.request("GET", url, "", [("X-Ok", "fine")]))
 }

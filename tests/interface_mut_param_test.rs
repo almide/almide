@@ -1,7 +1,7 @@
 //! The module interface carries the `mut` parameter modifier. Before it did,
 //! `almide compile <module> --json` dropped it, so every surface rendered from
 //! that JSON — the docs/stdlib signature indexes, the stdlib README, the
-//! release interface diff — showed `map.insert(m: Map[K, V], …)` for a
+//! release interface diff — showed `bytes.push(b: Bytes, …)` for a
 //! function whose caller must pass a `var` (E032 otherwise), and a reader of
 //! the docs could not tell an in-place writer from a copying one.
 //!

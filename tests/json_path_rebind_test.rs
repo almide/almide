@@ -1,7 +1,7 @@
-//! #3750: building a `JsonPath` step by step is linear on the wasm leg.
+//! #3750: building a `value.Path` step by step is linear on the wasm leg.
 //!
-//! The self-hosted path is a `List[String]` of segments and `json.field` /
-//! `json.index` return `path + [seg]`. With the var shared into the call, every
+//! The self-hosted path is a `List[String]` of segments and `value.key` /
+//! `value.index` return `path + [seg]`. With the var shared into the call, every
 //! step copied every segment: 100 000 steps ran out of memory on wasm while
 //! native took milliseconds. The rebind now moves the dying var into the call
 //! (selfhost_rebind_move_cli_test.rs), so the append lands in place.
@@ -32,13 +32,13 @@ fn program(step: &str, steps: u32) -> String {
         "import json
 
 effect fn main() -> Unit = {{
-  var x: JsonPath = json.root()
+  var x: value.Path = value.root()
   var i = 0
   while i < {steps} {{
     x = {step}
     i = i + 1
   }}
-  println(\"${{option.is_some(json.get_path(value.object([(\\\"a\\\", value.int(1))]), x))}}\")
+  println(\"${{option.is_some(value.get_path(value.object([(\\\"a\\\", value.int(1))]), x))}}\")
 }}
 "
     )
@@ -46,7 +46,7 @@ effect fn main() -> Unit = {{
 
 #[test]
 fn a_path_built_step_by_step_is_linear_in_bytes_on_wasm() {
-    for step in ["json.field(x, \"a\")", "json.index(x, 0)"] {
+    for step in ["value.key(x, \"a\")", "value.index(x, 0)"] {
         let (small_out, small) = run(&program(step, 2048), Some("wasm"));
         let (large_out, large) = run(&program(step, 8192), Some("wasm"));
         let (native_out, _) = run(&program(step, 8192), None);

@@ -65,21 +65,20 @@ Contracts: C-012。
 
 ## ALS-R5 プロセス環境
 
-`env.args` は argv[0]（プログラム名）を**除いた**引数列を、`process.args`
-は argv[0] を**含む**全列を返し(0.59.1 実測: 引数 2 個で env.args は長さ 2、
-process.args は長さ 3・先頭がバイナリパス)、それぞれ両ターゲットで一致する。`env.get(name)` はホストプロセスの環境変数を
+`env.args` は argv[0]（プログラム名）を**除いた**引数列を返し(0.59.1 実測:
+引数 2 個で長さ 2)、両ターゲットで一致する。`env.get(name)` はホストプロセスの環境変数を
 観測し、存在すれば some(値)、無ければ none を両ターゲットで同一バイトで
 返す（wasm は WASI environ + ランナーの環境継承）。`random.int(a, b)` は
 WASI entropy 下でも常に [a, b] 範囲内。
 
-`env.os()` と `env.temp_dir()` は等価性則の**唯一の適用除外**である。両者は
+`env.os()` と `fs.temp_dir()` は等価性則の**唯一の適用除外**である。両者は
 実行中のホストを報告するため、native は実 OS 名と実 temp ディレクトリを、
 wasm レグは WASI サンドボックス（`wasi` / `/tmp`）を返す。両ターゲットで
 一致させることこそが欠陥であり、「今どのプラットフォームか」を問う
 プログラムには真を返さねばならない。除外は無制限ではなく、両レグで同一の
 決定的不変量（os は閉じた集合 {macos, linux, windows, wasi} の要素、
 temp_dir は非空かつ posix ホストでは絶対パス）が証明対象となる。除外は現在
-3 関数(env.os・env.temp_dir・fs.temp_dir — C-189)。第四の関数を
+2 関数(env.os・fs.temp_dir — C-189)。第三の関数を
 除外に加えるには C-189 の statement とその fixture の改訂を要する。
 
 `process.output` と `process.start` の起動失敗は、

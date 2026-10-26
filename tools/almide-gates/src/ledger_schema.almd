@@ -190,9 +190,9 @@ test "the schema errors come out in the bash's emission order" {
   }
   let errs = schema_errors(t, true)
   assert_eq(list.len(errs), 5)
-  assert_eq(string.starts_with(list.get_or(errs, 0, ""), "bad contract id"), true)
-  assert_eq(string.contains(list.get_or(errs, 1, ""), "is not one of {active"), true)
-  assert_eq(string.contains(list.get_or(errs, 2, ""), "'title' is missing"), true)
-  assert_eq(string.contains(list.get_or(errs, 3, ""), "'statement' is missing"), true)
-  assert_eq(string.contains(list.get_or(errs, 4, ""), "'since' is missing"), true)
+  assert_eq(string.starts_with(list.get(errs, 0) ?? "", "bad contract id"), true)
+  assert_eq(string.contains(list.get(errs, 1) ?? "", "is not one of {active"), true)
+  assert_eq(string.contains(list.get(errs, 2) ?? "", "'title' is missing"), true)
+  assert_eq(string.contains(list.get(errs, 3) ?? "", "'statement' is missing"), true)
+  assert_eq(string.contains(list.get(errs, 4) ?? "", "'since' is missing"), true)
 }

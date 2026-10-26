@@ -203,11 +203,11 @@ fn returns_int() -> Int = {
 
 #[test]
 fn e004_arg_count_emits_sig_placeholder() {
-    // dojo data: `string.join(xs)` forgets the separator. The try: snippet
+    // dojo data: `list.join(xs)` forgets the separator. The try: snippet
     // should show the full signature with named placeholders.
     let p = write_tmp("try_e004.almd", r#"
 fn greet(xs: List[String]) -> String = {
-    string.join(xs)
+    list.join(xs)
 }
 "#);
     let (ok, out) = check(&p);
@@ -215,14 +215,14 @@ fn greet(xs: List[String]) -> String = {
     assert!(out.contains("error[E004]"), "out:\n{}", out);
     assert!(out.contains("try:"), "missing try:\n{}", out);
     // placeholder must name both params with types
-    assert!(out.contains("<list: List[String]>"), "first placeholder missing\n{}", out);
-    assert!(out.contains("<sep: String>"), "second placeholder missing\n{}", out);
+    assert!(out.contains("<xs: List["), "first placeholder missing\n{}", out);
+    assert!(out.contains("<sep: "), "second placeholder missing\n{}", out);
 }
 
 #[test]
 fn int_sqrt_hallucination_emits_conversion_snippet() {
     // dojo is-prime fail mode: LLM writes int.sqrt(n). Almide only has
-    // float.sqrt, so we need to show the convert→sqrt→convert-back form.
+    // math.sqrt on Float, so we need to show the convert→sqrt→convert-back form.
     let p = write_tmp("try_int_sqrt.almd", r#"
 fn is_prime(n: Int) -> Bool = {
     let limit = int.sqrt(n)
@@ -232,8 +232,8 @@ fn is_prime(n: Int) -> Bool = {
     let (ok, out) = check(&p);
     assert!(!ok);
     assert!(out.contains("error[E002]"), "out:\n{}", out);
-    assert!(out.contains("float.sqrt(int.to_float(n))"), "conversion snippet missing:\n{}", out);
-    assert!(out.contains("float.to_int(root_f)"), "convert-back snippet missing:\n{}", out);
+    assert!(out.contains("math.sqrt(float.from(n))"), "conversion snippet missing:\n{}", out);
+    assert!(out.contains("int.from_saturating(root_f)"), "convert-back snippet missing:\n{}", out);
 }
 
 #[test]

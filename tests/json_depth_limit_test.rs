@@ -1,4 +1,4 @@
-//! #4209 / C-433 — `json.set_path` refuses to build a value nested deeper
+//! #4209 / C-433 — `value.set_path` refuses to build a value nested deeper
 //! than `json.parse` accepts, with parse's own text, on every leg.
 //!
 //! Before the fix set_path had no bound: a dotted key expanded into a path
@@ -21,7 +21,7 @@ use almide_base::json_limits::{JSON_MAX_DEPTH, json_depth_error};
 
 const SOURCE: &str = r#"import json
 
-fn path_of(d: Int) -> JsonPath = list.range(0, d) |> list.fold(json.root(), (acc, _i) => json.field(acc, "k"))
+fn path_of(d: Int) -> value.Path = list.range(0, d) |> list.fold(value.root(), (acc, _i) => value.key(acc, "k"))
 
 fn nest(d: Int) -> Value = list.range(0, d) |> list.fold(value.int(1), (acc, _i) => value.array([acc]))
 
@@ -32,19 +32,19 @@ fn show(r: Result[Value, String]) -> String = match r {
 
 effect fn main() -> Unit = {
   let doc = json.parse("{\"a\": [1, 2]}")!
-  println(show(json.set_path(doc, path_of(1000), value.int(1))))
-  println(show(json.set_path(doc, path_of(1001), value.int(1))))
-  println(show(json.set_path(doc, path_of(999), value.array([]))))
-  println(show(json.set_path(doc, path_of(1000), value.array([]))))
-  println(show(json.set_path(doc, path_of(1000), value.object([]))))
-  println(show(json.set_path(doc, json.root(), nest(1000))))
-  println(show(json.set_path(doc, json.root(), nest(1001))))
-  println(show(json.set_path(doc, path_of(500), nest(500))))
-  println(show(json.set_path(doc, path_of(500), nest(501))))
-  println(show(json.set_path(doc, path_of(500), value.object([("x", nest(499)), ("y", value.int(2))]))))
-  println(show(json.set_path(doc, path_of(500), value.object([("y", value.int(2)), ("x", nest(500))]))))
-  println(show(json.set_path(doc, json.index(json.field(json.root(), "a"), 0), value.int(9))))
-  println(show(json.set_path(doc, path_of(40000), value.int(1))))
+  println(show(value.set_path(doc, path_of(1000), value.int(1))))
+  println(show(value.set_path(doc, path_of(1001), value.int(1))))
+  println(show(value.set_path(doc, path_of(999), value.array([]))))
+  println(show(value.set_path(doc, path_of(1000), value.array([]))))
+  println(show(value.set_path(doc, path_of(1000), value.object([]))))
+  println(show(value.set_path(doc, value.root(), nest(1000))))
+  println(show(value.set_path(doc, value.root(), nest(1001))))
+  println(show(value.set_path(doc, path_of(500), nest(500))))
+  println(show(value.set_path(doc, path_of(500), nest(501))))
+  println(show(value.set_path(doc, path_of(500), value.object([("x", nest(499)), ("y", value.int(2))]))))
+  println(show(value.set_path(doc, path_of(500), value.object([("y", value.int(2)), ("x", nest(500))]))))
+  println(show(value.set_path(doc, value.index(value.key(value.root(), "a"), 0), value.int(9))))
+  println(show(value.set_path(doc, path_of(40000), value.int(1))))
 }
 "#;
 
@@ -95,7 +95,7 @@ fn set_path_refuses_past_the_parse_bound_on_both_legs() {
 /// deep — and on a shallow ok.
 const INTERP_SOURCE: &str = r#"import json
 
-fn path_of(d: Int) -> JsonPath = list.range(0, d) |> list.fold(json.root(), (acc, _i) => json.field(acc, "k"))
+fn path_of(d: Int) -> value.Path = list.range(0, d) |> list.fold(value.root(), (acc, _i) => value.key(acc, "k"))
 
 fn show(r: Result[Value, String]) -> String = match r {
   ok(v) => "ok ${json.stringify(v)}",
@@ -104,11 +104,11 @@ fn show(r: Result[Value, String]) -> String = match r {
 
 effect fn main() -> Unit = {
   let doc = json.parse("{\"a\": [1, 2]}")!
-  println(show(json.set_path(doc, path_of(3), value.int(1))))
-  println(show(json.set_path(doc, path_of(1001), value.int(1))))
-  println(show(json.set_path(doc, path_of(40000), value.int(1))))
-  println(show(json.set_path(doc, path_of(999), value.array([value.array([])]))))
-  println(show(json.set_path(doc, path_of(1000), value.object([]))))
+  println(show(value.set_path(doc, path_of(3), value.int(1))))
+  println(show(value.set_path(doc, path_of(1001), value.int(1))))
+  println(show(value.set_path(doc, path_of(40000), value.int(1))))
+  println(show(value.set_path(doc, path_of(999), value.array([value.array([])]))))
+  println(show(value.set_path(doc, path_of(1000), value.object([]))))
 }
 "#;
 

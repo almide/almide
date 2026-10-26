@@ -31,19 +31,19 @@ fn main() -> Unit = {
     [70.0, 80.0, 90.0]
   ])
   let e = matrix.zeros(0, 0)
-  show("add", matrix.add(a, c))
-  show("sub_cols", matrix.sub(c, matrix.from_lists([
+  show("add", a + c)
+  show("sub_cols", c - matrix.from_lists([
     [1.0],
     [2.0]
-  ])))
-  show("div", matrix.div(c, a))
-  show("div0", matrix.div(matrix.from_lists([
+  ]))
+  show("div", c / a)
+  show("div0", matrix.from_lists([
     [1.0, -1.0]
-  ]), matrix.zeros(1, 2)))
-  show("add_empty", matrix.add(a, e))
-  show("add_r0", matrix.add(matrix.zeros(3, 0), c))
-  show("zeros_after_free", matrix.neg(matrix.zeros(1, 2)))
-  show("neg", matrix.neg(a))
+  ]) / matrix.zeros(1, 2))
+  show("add_empty", a + e)
+  show("add_r0", matrix.zeros(3, 0) + c)
+  show("zeros_after_free", matrix.scale(matrix.zeros(1, 2), -1.0))
+  show("neg", matrix.scale(a, -1.0))
   show("scale", matrix.scale(a, -0.5))
   let k = 3.0
   show("map", matrix.map(a, (x) => x * k - 1.0))

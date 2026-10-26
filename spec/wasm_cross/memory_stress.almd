@@ -56,7 +56,7 @@ fn test_push_pop_integrity() -> String = {
 fn test_split_join_roundtrip() -> String = {
   let original = "alpha:beta:gamma:delta:epsilon"
   let parts = string.split(original, ":")
-  let rejoined = string.join(parts, ":")
+  let rejoined = list.join(parts, ":")
   if original == rejoined then "match" else "MISMATCH:" + rejoined
 }
 

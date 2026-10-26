@@ -66,8 +66,8 @@ type Strip = { out: String, in_str: Bool }
 
 fn strip_line(cs: List[String], i: Int, st: Strip) -> Strip = if i >= list.len(cs) then st
 else {
-  let c = list.get_or(cs, i, "")
-  let next = list.get_or(cs, i + 1, "")
+  let c = list.get(cs, i) ?? ""
+  let next = list.get(cs, i + 1) ?? ""
   if st.in_str then (if c == "\\" then strip_line(
     cs,
     i + 2,
@@ -90,7 +90,7 @@ fn code_only(text: String) -> String = {
       ], st.in_str)
     }),
   )
-  string.join(folded.0, "\n")
+  list.join(folded.0, "\n")
 }
 
 // ── top-level argument splitting ──
@@ -107,8 +107,8 @@ fn is_close(c: String) -> Bool = c == ")" or c == "]" or c == "}"
 // top-level commas, or none when the list never closes.
 fn split_args(cs: List[String], st: Split) -> List[String]? = if st.i >= list.len(cs) then none
 else {
-  let c = list.get_or(cs, st.i, "")
-  let next = list.get_or(cs, st.i + 1, "")
+  let c = list.get(cs, st.i) ?? ""
+  let next = list.get(cs, st.i + 1) ?? ""
   match st.mode {
     "str" => if c == "\\" then split_args(cs, { ...st, i: st.i + 2, cur: st.cur + c + next })
     else if c == "\"" then split_args(cs, { ...st, i: st.i + 1, mode: "code", cur: st.cur + c })
@@ -165,13 +165,13 @@ fn trailing_ident(s: String) -> String = {
   let cs = string.to_list(s)
   let n = list.len(cs)
   let run = trailing_run(cs, n, 0)
-  let before = list.get_or(cs, n - run - 1, "")
+  let before = list.get(cs, n - run - 1) ?? ""
   let name = string.take_end(s, run)
   if run > 0 and before != "." and is_bare_ident(name) then name else ""
 }
 
 fn trailing_run(cs: List[String], n: Int, k: Int) -> Int =
-  if k < n and is_ident_char(list.get_or(cs, n - k - 1, "")) then trailing_run(
+  if k < n and is_ident_char(list.get(cs, n - k - 1) ?? "") then trailing_run(
     cs,
     n,
     k + 1,
@@ -201,12 +201,12 @@ fn probe(path: String, text: String, callee: String, p: Int) -> Probe = {
       none => Probe { site: none, unsplit: true },
       some(args) => {
         let receiver = pipe_receiver(string.take(text, p))
-        let first = string.trim(list.get_or(args, 0, ""))
+        let first = string.trim(list.get(args, 0) ?? "")
         // Pipe form: the receiver is the source and the first argument is the
         // seed. Call form: the first argument must be a bare identifier and the
         // second is the seed.
-        let (source, seed, form) = if receiver != "" then (receiver, list.get_or(args, 0, ""), "pipe")
-        else if is_bare_ident(first) then (first, list.get_or(args, 1, ""), "call")
+        let (source, seed, form) = if receiver != "" then (receiver, list.get(args, 0) ?? "", "pipe")
+        else if is_bare_ident(first) then (first, list.get(args, 1) ?? "", "call")
         else ("", "", "")
         if source != "" and mentions(seed, source, 0) then Probe {
           site: some(Site { path: path, line: line, callee: callee, source: source, form: form }),

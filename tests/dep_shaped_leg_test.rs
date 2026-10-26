@@ -322,7 +322,7 @@ fn cell_user_bound(proto: &str) -> String {
     let p = almide_frontend::canonicalize::protocols::builtin_protocol(proto).expect("a builtin protocol");
     let witness = match p.conformers.first() {
         Some(almide_frontend::types::Ty::String) => "string.len(keep(\"z\"))",
-        Some(almide_frontend::types::Ty::Float) => "float.to_int(keep(1.0))",
+        Some(almide_frontend::types::Ty::Float) => "int.from_saturating(keep(1.0))",
         Some(almide_frontend::types::Ty::Int) => "keep(1)",
         // A protocol only stdlib NOMINAL types meet (`Read`, `Write`,
         // `Close`, `HttpMessage`: each type answers by its own
@@ -345,7 +345,7 @@ fn cell_user_with(head: &str, term: &str) -> String {
          \x20 let r: Result[Int, String] = ok(5)\n\
          \x20 let t: String = \"xy\"\n\
          \x20 let f: Float = 1.5\n\
-         \x20 map.len(m) + list.len(l) + (o ?? 0) + set.len(s) + (r ?? 0) + string.len(t) + float.to_int(f) + {term}\n\
+         \x20 map.len(m) + list.len(l) + (o ?? 0) + set.len(s) + (r ?? 0) + string.len(t) + int.from_saturating(f) + {term}\n\
          }}\n"
     )
 }

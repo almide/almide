@@ -3,8 +3,8 @@
 // borrow of the same binding in one expression.
 //
 // It was declared `@consume(xss)` and the runtime took an owned `Vec`, so
-// `list.get_or(xs, 0, list.flatten(xs))` moved `xs` into `flatten` while
-// `get_or` borrowed it: `check` accepted and native rustc rejected with E0505
+// `list.get(xs, 0) ?? list.flatten(xs)` moved `xs` into `flatten` while
+// `get` borrowed it: `check` accepted and native rustc rejected with E0505
 // (differential fuzz). The element type is already `Clone`, so consuming bought
 // nothing — the runtime now takes a slice like every other read-only list fn,
 // and an owned `Vec` still deref-coerces into it.
@@ -14,7 +14,7 @@ fn main() -> Unit = {
     [3]
   ]
   // The shape that failed: `xs` borrowed and flattened in one expression.
-  println(int.to_string(list.len(list.get_or(xs, 0, list.flatten(xs)))))
+  println(int.to_string(list.len(list.get(xs, 0) ?? list.flatten(xs))))
   // Flatten is non-destructive: the source is still readable afterwards.
   println(int.to_string(list.len(list.flatten(xs))))
   println(int.to_string(list.len(xs)))

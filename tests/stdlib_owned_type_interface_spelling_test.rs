@@ -1,13 +1,13 @@
 //! The interface spelling of a STDLIB-OWNED type name (#1828): a user
-//! declaration of `Endian` / `FileStat` / … takes the #433 module-qualified
-//! identity (`self.Endian` in the entry program) so the stdlib's bare key is
+//! declaration of `IpAddr` / `FileStat` / … takes the #433 module-qualified
+//! identity (`self.IpAddr` in the entry program) so the stdlib's bare key is
 //! never rebound — but the owning module's OWN declaration is that bare key,
-//! also when the module is compiled on its own (`almide compile bytes --json`
+//! also when the module is compiled on its own (`almide compile net --json`
 //! stages the bundled source as the entry program). Both spellings are
 //! pinned here because the second one feeds every consumer of the module
 //! interface JSON: the wasm reachability sweep keys its argument synthesizer
-//! on `"Endian"` (a `self.Endian` made the twelve endian-taking `bytes.*`
-//! fns UNPROBEABLE), the committed doc signature indexes, the target
+//! on the bare owned name (a `self.`-spelled owned type made every fn taking
+//! it UNPROBEABLE), the committed doc signature indexes, the target
 //! availability probe, and the release interface diff (where a `self.`
 //! spelling would read as a breaking change).
 
@@ -89,25 +89,25 @@ fn bundled_owner_modules_spell_their_own_types_bare() {
 }
 
 /// A USER entry program declaring a stdlib-owned name keeps the shadow scope
-/// (`self.Endian`) — that is #1828's point — while its other types stay bare.
+/// (`self.IpAddr`) — that is #1828's point — while its other types stay bare.
 #[test]
 fn entry_program_shadow_of_an_owned_name_keeps_its_scope() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("m.almd");
     std::fs::write(
         &path,
-        r#"type Endian = { n: Int }
+        r#"type IpAddr = { n: Int }
 type Pt = { x: Int }
 
-fn mk(n: Int) -> Endian = Endian { n: n }
+fn mk(n: Int) -> IpAddr = IpAddr { n: n }
 fn pt(x: Int) -> Pt = Pt { x: x }
 "#,
     )
     .expect("write module source");
     let names = spelled_type_names(&interface_json(path.to_str().unwrap()));
     let count = |s: &str| names.iter().filter(|n| n.as_str() == s).count();
-    assert_eq!(count("self.Endian"), 2, "the declaration and mk's return: {names:?}");
-    assert_eq!(count("Endian"), 0, "the bare spelling is the stdlib's: {names:?}");
+    assert_eq!(count("self.IpAddr"), 2, "the declaration and mk's return: {names:?}");
+    assert_eq!(count("IpAddr"), 0, "the bare spelling is the stdlib's: {names:?}");
     assert_eq!(count("Pt"), 2, "an unowned name keeps its bare identity: {names:?}");
     assert_eq!(count("self.Pt"), 0, "no shadow scope for an unowned name: {names:?}");
 }

@@ -36,7 +36,7 @@ test "convention method on all variant cases" {
 // ── Convention methods on record types ──
 type Point = { x: Int, y: Int }
 
-fn Point.manhattan(p: Point) -> Int = math.abs(p.x) + math.abs(p.y)
+fn Point.manhattan(p: Point) -> Int = int.abs(p.x) + int.abs(p.y)
 
 fn Point.scale(p: Point, factor: Int) -> Point = Point { x: p.x * factor, y: p.y * factor }
 

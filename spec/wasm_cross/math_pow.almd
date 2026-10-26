@@ -1,5 +1,5 @@
 // @contract: C-026
-// Cross-target equivalence for float `**` / math.fpow.
+// Cross-target equivalence for float `**` / float.pow.
 //
 // Both targets route `**` through the vendored musl-libm pow (native:
 // almide_rt_math_fpow -> almide_rt_libm_pow; wasm: __float_pow -> __libm_pow),

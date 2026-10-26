@@ -67,7 +67,7 @@ const ALLOWED: &[(&str, &str, &str)] = &[
 ];
 
 /// Shrink-only: lower it when an entry leaves `ALLOWED`, never raise it.
-/// (Raised once, 10 -> 11, for the trio's Int cell `float.to_int_saturating`
+/// (Raised once, 10 -> 11, for the trio's Int cell, the Float-to-Int saturating conversion
 /// (#4145): the family rule forces the cell, so it is not an accidental name.)
 const ALLOWED_CEILING: usize = 11;
 

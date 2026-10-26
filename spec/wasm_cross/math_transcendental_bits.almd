@@ -24,8 +24,8 @@ fn main() -> Unit = {
   show("cos10", math.cos(10.0))
   show("tan1", math.tan(1.0))
   show("tan10", math.tan(10.0))
-  show("pow2_0.5", math.fpow(2.0, 0.5))
-  show("pow3_2.5", math.fpow(3.0, 2.5))
-  show("pow10_-3", math.fpow(10.0, -3.0))
+  show("pow2_0.5", float.pow(2.0, 0.5))
+  show("pow3_2.5", float.pow(3.0, 2.5))
+  show("pow10_-3", float.pow(10.0, -3.0))
   show("lgamma4.5", math.log_gamma(4.5))
 }
