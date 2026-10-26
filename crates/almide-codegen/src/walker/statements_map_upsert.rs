@@ -39,14 +39,18 @@ fn try_render_map_upsert(ctx: &RenderContext, target: VarId, key: &IrExpr, value
 /// The name the rendered update closure binds the slot's current value to.
 const UPSERT_OLD: &str = "__almide_old";
 
-/// `k` / `k.clone()` — a key that is a plain variable.
+/// `k` / `k.clone()` / `k.to_string()` — a key that is a plain variable,
+/// moved, cloned, or owned off a borrowed `&str` param (`BorrowLowering`
+/// owns a by-reference key at the store).
 fn upsert_key_var(key: &IrExpr) -> Option<VarId> {
-    match &key.kind {
+    let inner = match &key.kind {
+        IrExprKind::Clone { expr } => expr.as_ref(),
+        IrExprKind::Call { target: CallTarget::Method { object, method }, args, .. }
+            if args.is_empty() && method.as_str() == "to_string" => object.as_ref(),
+        _ => key,
+    };
+    match &inner.kind {
         IrExprKind::Var { id } => Some(*id),
-        IrExprKind::Clone { expr } => match &expr.kind {
-            IrExprKind::Var { id } => Some(*id),
-            _ => None,
-        },
         _ => None,
     }
 }

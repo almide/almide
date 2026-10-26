@@ -772,6 +772,19 @@ impl IrMutVisitor for Lower<'_> {
                 self.lower_stored_value(value);
                 self.own_consumed_ref_mut(value);
             }
+            // `m[k] = v` stores BOTH the key and the value: `insert` /
+            // `upsert_with` take an owned `K` and `V`. Borrow inference
+            // records the key as an operand and the value as an assigned
+            // read (neither consumes, so a `String` param used only there is
+            // `&str` — and the ownership certifier's C4 would refuse an owned
+            // verdict for it), so the store owns them here, exactly as a
+            // `let` initializer is owned.
+            IrStmtKind::MapInsert { key, value, .. } => {
+                self.lower_stored_value(key);
+                self.own_consumed_ref_mut(key);
+                self.lower_stored_value(value);
+                self.own_consumed_ref_mut(value);
+            }
             _ => {}
         }
         walk_stmt_mut(self, stmt);
