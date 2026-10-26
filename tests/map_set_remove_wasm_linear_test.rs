@@ -44,12 +44,12 @@ effect fn main() -> Unit = {
     if i % 10 == 0 then m3 = map.set(m3, "n${i}", i) else ()
     if i % 37 == 0 then println("${i} ${map.len(m3)} ${map.get(m3, "k${i + 1}")} ${map.contains(m3, "k${i}")} ${map.keys(m3) |> list.take(3)}") else ()
   }
-  println("${map.len(m3)} ${map.entries(m3) |> list.take(4)} ${map.values(m3) |> list.drop(60)}")
+  println("${map.len(m3)} ${map.to_list(m3) |> list.take(4)} ${map.values(m3) |> list.drop(60)}")
   var total = 0
   for (k, v) in m3 {
     total = total + v + string.len(k)
   }
-  println("${total} ${m3 == (map.entries(m3) |> map.from_list)}")
+  println("${total} ${m3 == (map.to_list(m3) |> map.from_list)}")
   let s0: Set[Int] = list.range(0, 64) |> set.from_list
   let s1 = list.range(0, 64) |> list.fold(s0, (s, i) => if i % 4 == 0 then s else set.remove(s, i))
   println("${set.len(s1)} ${set.to_list(s1)} ${set.contains(s1, 8)} ${set.contains(s1, 9)} ${set.len(s0)} ${s1}")
@@ -65,7 +65,7 @@ effect fn main() -> Unit = {
   let em = list.range(0, 40) |> list.fold(list.range(0, 40) |> list.map((i) => (i, "v${i}")) |> map.from_list, (m, i) => map.remove(m, 39 - i))
   println("${map.len(em)} ${map.is_empty(em)} ${em}")
   let lv = list.range(0, 50) |> list.fold(list.range(0, 50) |> list.map((i) => ("L${i}", [i, i])) |> map.from_list, (m, i) => map.remove(m, "L${i * 2}"))
-  println("${map.len(lv)} ${map.entries(lv) |> list.take(3)} ${map.get(lv, "L49")}")
+  println("${map.len(lv)} ${map.to_list(lv) |> list.take(3)} ${map.get(lv, "L49")}")
 }
 "#;
 

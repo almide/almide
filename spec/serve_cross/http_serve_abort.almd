@@ -27,7 +27,7 @@ effect fn quit() -> Unit = {
 }
 
 effect fn handle(req: HttpRequest) -> HttpResponse = {
-  let body = http.req_body(req)
+  let body = http.body(req)
   let port2 = int.parse(env.args() |> list.get(1) ?? "0") ?? 0
   let xs = [10, 20, 30]
   match body {

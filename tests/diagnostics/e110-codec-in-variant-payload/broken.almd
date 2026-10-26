@@ -12,4 +12,4 @@ effect fn run(req: HttpRequest) -> HttpResponse = match http.decode_json[Command
   err(bad) => bad,
 }
 
-effect fn main() -> Unit = println(http.body(run(http.new_request("POST", "/c", "{}", [:]))!))
+effect fn main() -> Unit = println(http.body(run(http.new_request("POST", "/c", "{}", []))!))

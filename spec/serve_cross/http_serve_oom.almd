@@ -15,7 +15,7 @@ import env
 import http
 
 effect fn handle(req: HttpRequest) -> HttpResponse = {
-  let body = http.req_body(req)
+  let body = http.body(req)
   let xs = [10, 20, 30]
   match body {
     "O" => {

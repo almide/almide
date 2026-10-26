@@ -316,7 +316,7 @@ impl LowerCtx<'_> {
         name
     }
 
-    /// `["k": v, …]` (`[:]` when empty), over `map.entries` — the form and
+    /// `["k": v, …]` (`[:]` when empty), over `map.to_list` — the form and
     /// order the legs print a map in.
     fn map_walker(&mut self, name: Sym, map_ty: &Ty, k: &Ty, v: &Ty) -> Sym {
         let pair = Ty::Tuple(vec![k.clone(), v.clone()]);
@@ -324,7 +324,7 @@ impl LowerCtx<'_> {
         let pairs_name = sym(&format!("{}_pairs", name));
         let m = self.var_table.alloc(sym("_m"), map_ty.clone(), Mutability::Let, None);
         let to_list = e_(IrExprKind::Call {
-            target: CallTarget::Module { module: sym("map"), func: sym("entries"), def_id: self.def_map.get(&sym("map.entries")).copied() },
+            target: CallTarget::Module { module: sym("map"), func: sym("to_list"), def_id: self.def_map.get(&sym("map.to_list")).copied() },
             args: vec![e_(IrExprKind::Var { id: m }, map_ty.clone())], type_args: vec![],
         }, pairs_ty.clone());
         let is_empty = e_(IrExprKind::Call {

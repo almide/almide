@@ -80,8 +80,8 @@ effect fn create(req: HttpRequest) -> HttpResponse = match http.decode_json[User
 }
 
 effect fn main() -> Unit = {
-  let res = create(http.new_request("POST", "/users", "{\"name\":\"m\",\"email\":\"e\",\"is_admin\":true}", [:]))!
-  println("${http.status_code(res)} ${http.body(res)}")
+  let res = create(http.new_request("POST", "/users", "{\"name\":\"m\",\"email\":\"e\",\"is_admin\":true}", []))!
+  println("${http.status(res)} ${http.body(res)}")
 }
 "#;
 

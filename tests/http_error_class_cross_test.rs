@@ -278,8 +278,8 @@ effect fn main() -> Unit = {{
   show("empty-userinfo", http.get("http://@127.0.0.1:{port}/p"))
   show("encoded", http.get("http://al%40ce:p%3Ass%zz:x@127.0.0.1:{port}/p"))
   show("long", http.get("http://abcdefghijklmnopqrstuvwxyz:0123456789@127.0.0.1:{port}/"))
-  show("caller-auth", http.request("GET", "http://alice:s3cret@127.0.0.1:{port}/p", "", ["authorization": "Bearer t"]))
-  show("framed", http.request("GET", "http://bob:pw@127.0.0.1:{port}/p", "", ["X-Ok": "1"]))
+  show("caller-auth", http.request("GET", "http://alice:s3cret@127.0.0.1:{port}/p", "", [("authorization", "Bearer t")]))
+  show("framed", http.request("GET", "http://bob:pw@127.0.0.1:{port}/p", "", [("X-Ok", "1")]))
 }}
 "#
         ),

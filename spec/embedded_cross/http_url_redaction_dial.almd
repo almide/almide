@@ -19,5 +19,5 @@ effect fn main() -> Unit = {
   show("password", http.get("http://alice:s3cret@127.0.0.1:9/p?token=abc123&x=1#frag"))
   show("user-only", http.get("http://alice@127.0.0.1:9/p?token=abc123"))
   show("empty-password", http.get("http://alice:@127.0.0.1:9/p"))
-  show("framed", http.request("PUT", "http://alice:s3cret@127.0.0.1:9/x", "y", ["X-Ok": "fine"]))
+  show("framed", http.request("PUT", "http://alice:s3cret@127.0.0.1:9/x", "y", [("X-Ok", "fine")]))
 }

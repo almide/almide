@@ -14,31 +14,33 @@ use std::time::Duration;
 #[path = "support/capped_run.rs"]
 mod capped_run;
 
-const PROGRAM: &str = r#"import net
+const PROGRAM: &str = r#"import io
+import net
+import unix
 
-effect fn serve_tcp(listener: Int) -> Int = {
+effect fn serve_tcp(listener: net.TcpListener) -> net.TcpStream = {
   let s = net.tcp_accept(listener)!
-  let got = net.tcp_read_exact(s, 5)!
-  net.tcp_write(s, got)!
+  let got = io.read_exact(s, 5)!
+  io.write(s, got)!
   s
 }
 
-effect fn dial_tcp(port: Int) -> Int = {
+effect fn dial_tcp(port: Int) -> net.TcpStream = {
   let c = net.tcp_connect("127.0.0.1", port)!
-  net.tcp_write(c, bytes.from_string("hello"))!
+  io.write(c, bytes.from_string("hello"))!
   c
 }
 
-effect fn serve_unix(listener: Int) -> Int = {
-  let s = net.unix_accept(listener)!
-  let got = net.unix_recv(s, 5)!
-  net.unix_send(s, got, [])!
+effect fn serve_unix(listener: unix.Fd) -> unix.Fd = {
+  let s = unix.accept(listener)!
+  let got = io.read(s, 5)!
+  unix.write_fds(s, got, [])!
   s
 }
 
-effect fn dial_unix(path: String) -> Int = {
-  let c = net.unix_connect(path)!
-  net.unix_send(c, bytes.from_string("world"), [])!
+effect fn dial_unix(path: String) -> unix.Fd = {
+  let c = unix.connect(path)!
+  unix.write_fds(c, bytes.from_string("world"), [])!
   c
 }
 
@@ -46,12 +48,12 @@ effect fn main() -> Unit = {
   let l = net.tcp_listen("127.0.0.1", 0)!
   let port = net.tcp_local_port(l)!
   let (srv, cli) = fan { serve_tcp(l), dial_tcp(port) }
-  let back = net.tcp_read_exact(cli, 5)!
+  let back = io.read_exact(cli, 5)!
   println("tcp ${srv != cli} ${bytes.to_string(back) ?? "?"}")
   let path = "s.sock"
-  let u = net.unix_listen(path)!
+  let u = unix.listen(path)!
   let (us, uc) = fan { serve_unix(u), dial_unix(path) }
-  let uback = net.unix_recv(uc, 5)!
+  let uback = io.read(uc, 5)!
   println("unix ${us != uc} ${bytes.to_string(uback) ?? "?"}")
 }
 "#;

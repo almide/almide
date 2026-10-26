@@ -10,4 +10,4 @@ effect fn create(req: HttpRequest) -> HttpResponse = match http.decode_json[User
   err(bad) => bad,
 }
 
-effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{}", [:]))!))
+effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{}", []))!))

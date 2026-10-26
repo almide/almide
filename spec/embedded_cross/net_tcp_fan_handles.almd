@@ -11,24 +11,25 @@
 // in an arm, and an arm's socket came back as a number that named one of
 // `main`'s. Which arm takes the lower free slot can race, so handle numbers
 // are printed only as predicates. Payloads stay far below 8 KiB.
+import io
 import net
 
-effect fn serve_once(listener: Int) -> Int = {
+effect fn serve_once(listener: net.TcpListener) -> net.TcpStream = {
   let s = net.tcp_accept(listener)!
-  let got = net.tcp_read_exact(s, 5)!
-  net.tcp_write(s, bytes.from_string("echo:" + (bytes.to_string(got) ?? "?")))!
+  let got = io.read_exact(s, 5)!
+  io.write(s, bytes.from_string("echo:" + (bytes.to_string(got) ?? "?")))!
   s
 }
 
-effect fn listen_in_arm() -> Int = net.tcp_listen("127.0.0.1", 0)!
+effect fn listen_in_arm() -> net.TcpListener = net.tcp_listen("127.0.0.1", 0)!
 
-effect fn port_in_arm(listener: Int) -> Int = net.tcp_local_port(listener)!
+effect fn port_in_arm(listener: net.TcpListener) -> Int = net.tcp_local_port(listener)!
 
 effect fn main() -> Unit = {
   let l = net.tcp_listen("127.0.0.1", 0)!
   let port = net.tcp_local_port(l)!
   let cli = net.tcp_connect("127.0.0.1", port)!
-  net.tcp_write(cli, bytes.from_string("hello"))!
+  io.write(cli, bytes.from_string("hello"))!
   // main's listener is accepted on in an arm; a sibling arm listens.
   let (srv, side) = fan {
     serve_once(l)
@@ -37,7 +38,7 @@ effect fn main() -> Unit = {
   println("arm stream distinct from main's: ${srv != cli}")
   println("arm listener distinct from main's: ${side != l}")
   println("both open in main: ${net.tcp_is_open(srv) and net.tcp_is_open(cli)}")
-  let reply = net.tcp_read_exact(cli, 10)!
+  let reply = io.read_exact(cli, 10)!
   println("client reads in main: ${bytes.to_string(reply) ?? "?"}")
   // A handle from main answers the same in an arm.
   let (seen, again) = fan {
@@ -54,11 +55,11 @@ effect fn main() -> Unit = {
   let pb = net.tcp_local_port(b)!
   println("arm listeners distinct from main's: ${a != l and b != l and a != b}")
   println("arm listener ports distinct: ${pa != pb and pa != port and pb != port}")
-  net.tcp_close_listener(side)!
-  net.tcp_close(srv)!
-  net.tcp_close(cli)!
-  net.tcp_close_listener(a)!
-  net.tcp_close_listener(b)!
-  net.tcp_close_listener(l)!
+  io.close(side)!
+  io.close(srv)!
+  io.close(cli)!
+  io.close(a)!
+  io.close(b)!
+  io.close(l)!
   println("done")
 }

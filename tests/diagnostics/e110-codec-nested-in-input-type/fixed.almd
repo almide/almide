@@ -15,4 +15,4 @@ effect fn signup(req: HttpRequest) -> HttpResponse = match http.decode_json[Sign
   err(bad) => bad,
 }
 
-effect fn main() -> Unit = println(http.body(signup(http.new_request("POST", "/s", "{}", [:]))!))
+effect fn main() -> Unit = println(http.body(signup(http.new_request("POST", "/s", "{}", []))!))

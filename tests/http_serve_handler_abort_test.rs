@@ -20,7 +20,7 @@ const SERVER: &str = r#"import http
 effect fn main() -> Unit =
   http.serve(PORT, (req) => {
     let xs = [10, 20, 30]
-    let i = string.len(http.req_body(req))
+    let i = string.len(http.body(req))
     http.response(200, "val=" + int.to_string(xs[i]))
   })
 "#;

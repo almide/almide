@@ -48,7 +48,7 @@ effect fn main() -> Unit = {
     "not json"
   ]
   for body in bodies {
-    println(create(http.new_request("POST", "/users", body, [:])))
+    println(create(http.new_request("POST", "/users", body, [])))
   }
   let commands = [
     "{\"Rename\":{\"name\":\"n\"}}",
@@ -59,6 +59,6 @@ effect fn main() -> Unit = {
     "{\"Drop\":null}"
   ]
   for body in commands {
-    println(command(http.new_request("POST", "/commands", body, [:])))
+    println(command(http.new_request("POST", "/commands", body, [])))
   }
 }
