@@ -413,6 +413,7 @@ impl<'a> Interpreter<'a> {
         let det_was_user = self.det_in_user.get();
         let space_was = self.cur_space.get();
         let pool_was = self.cur_pool.get();
+        let bundled_was = self.cur_bundled.get();
         let chan_was = self.chan_str.get();
         // C-320: the meter's region depth at call entry — if the callee
         // leaves it HIGHER, a det cut skipped a region's budget_exit and
@@ -477,6 +478,7 @@ impl<'a> Interpreter<'a> {
         self.det_in_user.set(det_was_user);
         self.cur_space.set(space_was);
         self.cur_pool.set(pool_was);
+        self.cur_bundled.set(bundled_was);
         self.chan_str.set(chan_was);
         self.depth.set(self.depth.get() - 1);
         (result, first_frame.unwrap_or_else(|| base.child()))
@@ -494,6 +496,7 @@ impl<'a> Interpreter<'a> {
                 let space = self.fn_space_of(f);
                 self.cur_space.set(space);
                 self.cur_pool.set(crate::stdlib_pool::is_pool_body(f));
+                self.cur_bundled.set(self.bundled_space.borrow().get(&(*f as *const IrFunction as usize)).copied());
                 self.space_scope(space).clone()
             }
             TailCallee::Clo(_) => base.clone(),

@@ -219,6 +219,9 @@ impl<'a> Interpreter<'a> {
     /// module's own definition of `name`, when a module body is executing
     /// (`cur_space`) and its module defines the name.
     pub(crate) fn own_module_sibling(&self, name: Sym) -> Option<&'a almide_ir::IrFunction> {
+        if let Some(module) = self.cur_bundled.get() {
+            return self.bundled_fn(module, name);
+        }
         let space = self.cur_space.get();
         let owner = self.program.modules.get(space.checked_sub(1)? as usize)?.name;
         self.module_fns.get(&(owner, name)).copied()

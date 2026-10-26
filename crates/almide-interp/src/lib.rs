@@ -228,6 +228,9 @@ pub struct Interpreter<'a> {
     /// fn that happens to share the spelling (#3825: a user `list_len` beside
     /// the pool's).
     pub(crate) cur_pool: Cell<bool>,
+    /// The module of the EXECUTING `stdlib_pool::bundled_body` (its siblings).
+    pub(crate) cur_bundled: Cell<Option<Sym>>,
+    pub(crate) bundled_space: std::cell::RefCell<HashMap<usize, Sym>>,
     pub(crate) globals_ready: Cell<bool>,
     pub(crate) stdout: String,
     pub(crate) stderr: String,
@@ -597,6 +600,7 @@ impl<'a> Interpreter<'a> {
             fn_space,
             cur_space: Cell::new(0),
             cur_pool: Cell::new(false),
+            cur_bundled: Cell::new(None), bundled_space: Default::default(),
             globals_ready: Cell::new(false),
             stdout: String::new(),
             stderr: String::new(),
