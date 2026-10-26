@@ -106,7 +106,7 @@ pub fn almide_rt_datetime_parse_iso(s: &str) -> Result<i64, AlmideString> {
                         let secs = oh * 3600 + om * 60;
                         if raw.starts_with('-') { -secs } else { secs }
                     }
-                    _ => return Err(format!("invalid offset: {raw}")),
+                    _ => return Err(format!("invalid offset: {}", almide_rt_errtext_escape(raw))),
                 }
             }
         };

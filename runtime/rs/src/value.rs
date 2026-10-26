@@ -144,7 +144,7 @@ pub fn almide_rt_value_field(v: &AlmideValue, key: &str) -> Result<AlmideValue, 
             for (k, val) in pairs {
                 if k.as_ref() == key { return Ok(val.clone()); }
             }
-            Err(format!("missing field '{}'", key))
+            Err(format!("missing field '{}'", almide_rt_errtext_escape(key)))
         } else {
             Err(format!("expected Object, received {}", almide_rt_value_kind(v)))
         }
@@ -250,7 +250,7 @@ pub fn almide_rt_value_field_ref<'a>(v: &'a AlmideValue, key: &str) -> Result<&'
             for (k, val) in pairs {
                 if k.as_ref() == key { return Ok(val); }
             }
-            Err(format!("missing field '{}'", key))
+            Err(format!("missing field '{}'", almide_rt_errtext_escape(key)))
         } else {
             Err(format!("expected Object, received {}", almide_rt_value_kind(v)))
         }
