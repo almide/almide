@@ -239,5 +239,8 @@ fn __jpr_items(j: Value, path: List[String], k: Int, tgt: Int, last: Bool, i: In
 // which walks the public Value surface only (no layout reads, unlike
 // `__json_nests_past` here), so the structural leg links it.
 @implements("value.__set_path_steps")
-fn value_set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] =
-  value.__set_path_pure(v, steps, x)
+fn value_set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = value.__set_path_pure(
+  v,
+  steps,
+  x,
+)

@@ -193,15 +193,23 @@ local fn __nests_past(x: Value, budget: Int) -> Bool = match value.as_array(x) {
   },
 }
 
-local fn __set_steps(v: Value, steps: List[(Bool, String, Int)], k: Int, x: Value) -> Value = match list.get(steps, k) {
+local fn __set_steps(v: Value, steps: List[(Bool, String, Int)], k: Int, x: Value) -> Value = match list.get(
+  steps,
+  k,
+) {
   none => x,
   some((true, name, _)) => match value.as_object(v) {
     ok(pairs) => if list.any(pairs, ((pk, _)) => pk == name) then value.object(list.map(
       pairs,
-      ((pk, pv)) => if pk == name then (pk, __set_steps(pv, steps, k + 1, x)) else (pk, pv),
+      ((pk, pv)) => if pk == name then (pk, __set_steps(pv, steps, k + 1, x))
+      else (pk, pv),
     ))
-    else value.object(pairs + [(name, __set_steps(value.object([]), steps, k + 1, x))]),
-    err(_) => value.object([(name, __set_steps(value.object([]), steps, k + 1, x))]),
+    else value.object(pairs + [
+      (name, __set_steps(value.object([]), steps, k + 1, x))
+    ]),
+    err(_) => value.object([
+      (name, __set_steps(value.object([]), steps, k + 1, x))
+    ]),
   },
   some((false, _, i)) => match value.as_array(v) {
     ok(xs) => match list.get(xs, i) {
