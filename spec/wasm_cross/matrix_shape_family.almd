@@ -19,7 +19,7 @@ fn show(tag: String, m: Matrix) -> Unit = {
   println("${tag}: ${s} ${l}")
 }
 
-fn show_loaded(tag: String, o: Option[Matrix]) -> Unit = match o {
+fn show_loaded(tag: String, o: Matrix?) -> Unit = match o {
   some(m) => show(tag, m),
   none => println("${tag}: none"),
 }

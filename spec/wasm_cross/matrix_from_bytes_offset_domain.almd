@@ -9,7 +9,7 @@
 // passed, and the read returned a subnormal out of the wrong bytes (fuzz
 // seed 541740772278:10760, #1909) — the buffer-side test is what keeps a
 // huge offset `none`.
-fn show(o: Option[Matrix]) -> String = match o {
+fn show(o: Matrix?) -> String = match o {
   some(m) => "some ${matrix.to_lists(m)}",
   none => "none",
 }

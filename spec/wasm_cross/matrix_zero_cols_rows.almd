@@ -23,12 +23,12 @@ fn dims(m: Matrix) -> String = {
   "(${r}, ${c})"
 }
 
-fn loaded(o: Option[Matrix]) -> String = match o {
+fn loaded(o: Matrix?) -> String = match o {
   some(m) => "some ${shape(m)}",
   none => "none",
 }
 
-fn loaded_dims(o: Option[Matrix]) -> String = match o {
+fn loaded_dims(o: Matrix?) -> String = match o {
   some(m) => "some ${dims(m)}",
   none => "none",
 }

@@ -8,7 +8,7 @@
 // a `none` (the Option of stdlib redesign R-matrix-15 covers data that does
 // not fit, not a count no matrix can have) — it dies in the C-161 form on
 // both legs: `Error: matrix dimensions too large`, exit 1.
-fn show(o: Option[Matrix]) -> String = match o {
+fn show(o: Matrix?) -> String = match o {
   some(m) => "some ${matrix.to_lists(m)}",
   none => "none",
 }
