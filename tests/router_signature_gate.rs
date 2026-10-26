@@ -114,7 +114,20 @@ fn sweep() -> Vec<Row> {
     let mut rows = Vec::new();
     for module in STDLIB_MODULES {
         for func in module_functions(module) {
-            let Some(sig) = lookup_sig(module, func) else { continue };
+            let Some(mut sig) = lookup_sig(module, func) else { continue };
+            // A parameter spelled by the module's own type alias (`handler:
+            // HttpHandler`) is the aliased type at every call: route on that.
+            for (_, t) in sig.params.iter_mut() {
+                if let Ty::Named(n, a) = t {
+                    if a.is_empty() {
+                        if let Some(almide::ir::IrTypeDecl { kind: almide::ir::IrTypeDeclKind::Alias { target }, .. }) =
+                            almide_frontend::lower::lower_bundled_type_decl(module, n.as_str())
+                        {
+                            *t = target;
+                        }
+                    }
+                }
+            }
             for (args, ret) in instantiations(&sig) {
                 let raw = routers_call_name(module, func, &args, &ret, RouterHints::default());
                 let raw_fit = signature_fit(&raw, &args);

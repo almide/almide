@@ -108,7 +108,7 @@ fn a_manifest_text_with_a_terminal_control_is_refused_and_never_printed_raw() {
                 tag.ends_with("-raw") && stderr.contains("almide.toml is read as TOML");
             assert!(
                 toml_refused
-                    || stderr.contains("holds a control or bidirectional-control character"),
+                    || stderr.contains("holds a control or bidi character"),
                 "{what}: not refused for its control character:\n{}",
                 stderr.escape_debug()
             );
@@ -130,7 +130,7 @@ fn the_refusal_shows_the_text_escaped() {
     let out = run(&dir, &["check", "main.almd"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains(r#"key "\u{1b}]0;pwn\u{7}\u{1b}[2Kfake""#),
+        stderr.contains(r#"key `\u{1b}]0;pwn\u{7}\u{1b}[2Kfake`"#),
         "{}",
         stderr.escape_debug()
     );
