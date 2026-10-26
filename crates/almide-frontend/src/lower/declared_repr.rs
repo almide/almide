@@ -91,13 +91,6 @@ impl LowerCtx<'_> {
         synth.render_declared(expr)
     }
 
-    /// Does a value of `ty` contain, anywhere, a value whose type declares
-    /// its repr? `seen` breaks recursive types.
-    pub(super) fn holds_declared_repr(&self, ty: &Ty, seen: &mut Vec<Ty>) -> bool {
-        let facts = LowerFacts { env: self.env, explicit: &self.explicit_convention_fns, def_map: &self.def_map };
-        almide_ir::declared_repr::holds_declared_repr(&facts, ty, seen)
-    }
-
     /// The declared reprs and nominal shapes of every type the program can
     /// name, for the renderer rule's post-monomorphization run (#4239):
     /// after mono a generic body's `${x}` carries the instance's type, and
