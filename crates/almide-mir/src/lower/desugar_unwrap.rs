@@ -332,7 +332,7 @@ fn normalize_unit_discard(
 /// exits 1 — main is declared `-> Unit` (the void convention: an `err(…)` arm value would be
 /// silently DISCARDED), so the arm aborts through the prim floor instead:
 /// `prim.die(prim.handle(<full line>))` ($__die = STDERR write + proc_exit(1), the
-/// int_rotate/math_int precedent). `msg` is either the static line (Option-`!`: "Error:
+/// math_int precedent). `msg` is either the static line (Option-`!`: "Error:
 /// none\n") or a bound payload Var (Result-`!`: a `let $m = "Error: " + e + "\n"` bind
 /// precedes the die and the die consumes $m's handle — the arm's scope-end drop after the
 /// never-returning die balances the cert, exactly the checked-overflow abort shape).

@@ -256,9 +256,9 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // A router refuses two routes with one pattern: n distinct patterns.
     Recipe {
         func: "http.router",
-        size: "routes",
+        size: "xs",
         args: &[(
-            "routes",
+            "xs",
             "list.range(0, {n}) |> list.map((i) => http.route(\"GET /r${100000000 + i}/{id}\", (req) => http.response(200, http.param(req, \"id\") ?? \"-\")))",
         )],
     },

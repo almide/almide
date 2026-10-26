@@ -469,7 +469,7 @@ mod tests {
             let (module, func) = f.split_once('.').unwrap();
             assert_eq!(module, "http", "{f}: only http's declarations are read here");
             let sig = HTTP.lines().find(|l| l.starts_with(&format!("effect fn {func}("))).unwrap_or_else(|| panic!("{f}: not declared in stdlib/http.almd"));
-            assert_eq!(sig, format!("effect fn {func}(port: Int, handler: effect (HttpRequest) -> HttpResponse) -> Unit = _"), "{f}");
+            assert_eq!(sig, format!("effect fn {func}(port: Int, handler: HttpHandler) -> Unit = _"), "{f}");
         }
     }
 

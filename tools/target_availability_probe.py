@@ -283,6 +283,11 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
                     if not case.get("fields") and not case.get("payload") and not case.get("args"):
                         return case["name"]
                 raise Unsynth(f"variant {name} has no payload-less case")
+            # The interface keeps a transparent alias's name where the source
+            # wrote it (`handler: HttpHandler`); a value of it is a value of
+            # its target.
+            if kind.get("kind") == "alias":
+                return dummy(kind["target"], ctx, types)
             raise Unsynth(f"type {name} of kind {kind.get('kind')}")
         raise Unsynth(f"nominal type {name} has no known constructor")
     raise Unsynth(f"type kind={k}")

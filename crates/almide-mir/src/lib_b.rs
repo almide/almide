@@ -47,7 +47,7 @@ pub enum PrimKind {
     ElemAddr,
     /// Abort: write the String-block message to STDERR and proc_exit(1) — the
     /// self-host arm of the §13 termination convention (math.pow negative
-    /// exponent, int.rotate nonpositive width). Never returns.
+    /// exponent). Never returns.
     Die,
     /// ── T5-1 wall-clock deadline prims (fan.timeout, oracle tier) ────────
     /// `dst = saved deadline` — computes `min(now + args[0] ns, outer)` as the
