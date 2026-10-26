@@ -497,7 +497,7 @@ fn skip(b: Bytes, pos: Int, n: Int) -> Int = _
 @intrinsic("almide_rt_bytes_skip_length_prefixed_le")
 fn skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int = _
 
-/// Copy of start..end capped at len; empty if start >= end.
+/// Copy of start..end, each clamped to 0..len; empty if start >= end.
 @intrinsic("almide_rt_bytes_slice")
 fn slice(b: Bytes, start: Int, end: Int) -> Bytes = _
 
@@ -1105,26 +1105,31 @@ fn pop(mut b: Bytes) -> Int? = {
   last
 }
 
-/// The first n bytes; all of b past its length; n < 0 aborts.
-fn take(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.take: negative count ${n}")
-else bytes.slice(b, 0, n)
+// A negative count is 0 (#4147), as in list.take / string.take: these used to
+// abort on n < 0 while the list and string spellings answered.
+/// The first n bytes; all of b past its length; empty if n < 0.
+fn take(b: Bytes, n: Int) -> Bytes = bytes.slice(b, 0, int.max(n, 0))
 
-/// b without its first n bytes; empty past its length; n < 0 aborts.
-fn drop(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.drop: negative count ${n}")
-else bytes.slice(b, n, bytes.len(b))
+/// b without its first n bytes; empty past its length; all of b if n < 0.
+fn drop(b: Bytes, n: Int) -> Bytes = bytes.slice(b, int.max(n, 0), bytes.len(b))
 
-/// The last n bytes; all of b past its length; n < 0 aborts.
-fn take_end(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.take_end: negative count ${n}")
-else bytes.slice(b, int.max(bytes.len(b) - n, 0), bytes.len(b))
+/// The last n bytes; all of b past its length; empty if n < 0.
+fn take_end(b: Bytes, n: Int) -> Bytes = {
+  let k = int.min(int.max(n, 0), bytes.len(b))
+  bytes.slice(b, bytes.len(b) - k, bytes.len(b))
+}
 
-/// b without its last n bytes; empty past its length; n < 0 aborts.
-fn drop_end(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.drop_end: negative count ${n}")
-else bytes.slice(b, 0, int.max(bytes.len(b) - n, 0))
+/// b without its last n bytes; empty past its length; all of b if n < 0.
+fn drop_end(b: Bytes, n: Int) -> Bytes = {
+  let k = int.min(int.max(n, 0), bytes.len(b))
+  bytes.slice(b, 0, bytes.len(b) - k)
+}
 
-/// (first n bytes, the rest); n past the end gives (b, empty); n < 0 aborts.
-fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) =
-  if n < 0 then panic("bytes.split_at: negative index ${n}")
-  else (bytes.slice(b, 0, n), bytes.slice(b, n, bytes.len(b)))
+/// (first n bytes, the rest); n past the end gives (b, empty), n < 0 gives (empty, b).
+fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) = {
+  let k = int.max(n, 0)
+  (bytes.slice(b, 0, k), bytes.slice(b, k, bytes.len(b)))
+}
 
 /// The first byte, or none if b is empty.
 fn first(b: Bytes) -> Int? = bytes.get(b, 0)

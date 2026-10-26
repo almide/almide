@@ -318,12 +318,12 @@ fn list_tail(xs: List[Int]) -> List[Int] = {
   buf
 }
 
-// list.take_end(xs, n): the LAST n elements (whole list when n<0 or n>=len, per v0's
-// n as usize). start = clamped; copy [start, len) into a fresh List[Int].
+// list.take_end(xs, n): the LAST n elements (empty when n<0 — a negative count is 0,
+// #4147 — whole list when n>=len). start = clamped; copy [start, len) into a fresh List[Int].
 fn list_take_end(xs: List[Int], n: Int) -> List[Int] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let start = if n < 0 then 0
+  let start = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let newlen = len - start
   let buf = prim.alloc_list(newlen)
@@ -332,12 +332,13 @@ fn list_take_end(xs: List[Int], n: Int) -> List[Int] = {
   buf
 }
 
-// list.drop_end(xs, n): all but the LAST n elements (empty when n<0 or n>=len). end =
+// list.drop_end(xs, n): all but the LAST n elements (whole list when n<0, #4147; empty
+// when n>=len). end =
 // clamped; copy [0, end) into a fresh List[Int].
 fn list_drop_end(xs: List[Int], n: Int) -> List[Int] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let endi = if n < 0 then 0
+  let endi = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let buf = prim.alloc_list(endi)
   let _c = __copy_slots(h + 12, prim.handle(buf) + 12, endi, 0)
@@ -352,7 +353,7 @@ fn list_drop_end(xs: List[Int], n: Int) -> List[Int] = {
 fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let endi = if n < 0 then 0
+  let endi = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let buf = prim.alloc_list_str(endi)
   let _c = __copy_slots_rc(h + 12, prim.handle(buf) + 12, endi, 0)
@@ -365,7 +366,7 @@ fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
 fn list_take_end_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let start = if n < 0 then 0
+  let start = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let cnt = len - start
   let buf = prim.alloc_list_str(cnt)

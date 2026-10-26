@@ -26,15 +26,13 @@ else {
 }
 
 // list.drop over SHARED heap elements — the take_hshare mirror (#877): the kept
-// tail's elements are rc_inc-SHARED into a fresh block; n<0 → the native
-// `skip(n as usize)` wraps huge → drops ALL (empty result), n>len → empty.
+// tail's elements are rc_inc-SHARED into a fresh block; n<0 is 0 (#4147) →
+// drops nothing (the whole list), n>len → empty.
 fn list_take_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  // n<0 → the native `take(n as usize)` wraps huge → takes ALL (the
-  // list_take_drop __clamp_len convention); the old max(n,0) diverged
-  // (native take(-1) = whole list, wasm = empty).
-  let k = if n < 0 then len
+  // n<0 is 0 (#4147, the list_take_drop __clamp_len rule): takes nothing.
+  let k = if n < 0 then 0
   else if n > len then len else n
   let out: List[List[Int]] = prim.alloc_list_str(k)
   let _x = __take_h_fill(prim.handle(out), h, k, 0)
@@ -44,7 +42,7 @@ fn list_take_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
 fn list_drop_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let start = if n < 0 then len
+  let start = if n < 0 then 0
   else if n > len then len else n
   let k = len - start
   let out: List[List[Int]] = prim.alloc_list_str(k)
@@ -69,20 +67,18 @@ else {
 // i64 slots — exact for inline-scalar blocks), kept elements rc_inc-SHARED into an
 // over-allocated block whose len is patched to the kept count (the alloc_set
 // convention; cap keeps the free-list exact).
-// #1532 smoke-night finding (seed 514313080935/326): this twin had INVENTED
-// its own negative edges — start<0 clamped to 0 (the WHOLE list) and end<0
-// to 0 — while the scalar twin, the _str twin, and the native runtime all
-// follow v0's `as usize` doctrine: negative start -> EMPTY, negative end ->
-// len. A recursion shrinking via `list.slice(xs, <negative>, len)` therefore
-// terminated natively and looped forever on wasm (the koka_beans has_none
-// mutation: native printed F in 0.3s, wasm hung). One doctrine, four
-// implementations, byte-identical.
+// #1532 smoke-night finding (seed 514313080935/326): this twin once had its
+// own negative edges while the other implementations followed v0's `as usize`
+// reading, and a recursion shrinking via `list.slice(xs, <negative>, len)`
+// terminated natively and looped forever on wasm. Since #4147 every
+// implementation clamps both bounds into [0, len] (a negative bound is 0).
+// One rule, every implementation, byte-identical.
 fn list_slice_hshare(xs: List[List[Int]], start: Int, end: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let e0 = if end < 0 then len
+  let e0 = if end < 0 then 0
   else if end > len then len else end
-  let s0 = if start < 0 then len else start
+  let s0 = if start < 0 then 0 else start
   let k = if s0 >= e0 then 0 else e0 - s0
   let out: List[List[Int]] = prim.alloc_list_str(k)
   let _x = __drop_h_fill(prim.handle(out), h, s0, k, 0)
