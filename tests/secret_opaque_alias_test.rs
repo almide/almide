@@ -83,28 +83,28 @@ fn alias_in_a_dependency_module_is_e033() {
     // The module itself builds through its alias: foreign to `secret`.
     let (ok, out) = project_with_alias_module(
         "dep_builds",
-        "import secret\npub type Mine = Secret[Int]\npub fn make() -> Mine = Mine { hidden: 7 }\n",
+        "import secret\ntype Mine = Secret[Int]\npub fn make() -> Mine = Mine { hidden: 7 }\n",
         "import self.vault\nfn main() -> Unit = println(\"${vault.make()}\")\n",
     );
     assert!(!ok && out.contains("E033"), "a dependency module built a Secret through its alias:\n{out}");
     // The entry builds through the module's alias.
     let (ok, out) = project_with_alias_module(
         "entry_builds",
-        "import secret\npub type Mine = Secret[Int]\npub fn make() -> Mine = secret.new(7)\n",
+        "import secret\ntype Mine = Secret[Int]\npub fn make() -> Mine = secret.new(7)\n",
         "import self.vault\nfn main() -> Unit = {\n  let s = vault.Mine { hidden: 1 }\n  println(\"${s}\")\n}\n",
     );
     assert!(!ok && out.contains("E033"), "the entry built a Secret through a module's alias:\n{out}");
     // The entry reads through the module's alias.
     let (ok, out) = project_with_alias_module(
         "entry_reads",
-        "import secret\npub type Mine = Secret[Int]\npub fn make() -> Mine = secret.new(7)\n",
+        "import secret\ntype Mine = Secret[Int]\npub fn make() -> Mine = secret.new(7)\n",
         "import self.vault\nfn main() -> Unit = println(int.to_string(vault.make().hidden))\n",
     );
     assert!(!ok && out.contains("E033"), "the entry read a Secret through a module's alias:\n{out}");
     // Control: the same project through the module's fns checks.
     let (ok, out) = project_with_alias_module(
         "control",
-        "import secret\npub type Mine = Secret[Int]\npub fn make() -> Mine = secret.new(7)\npub fn get(s: Mine) -> Int = secret.reveal(s)\n",
+        "import secret\ntype Mine = Secret[Int]\npub fn make() -> Mine = secret.new(7)\npub fn get(s: Mine) -> Int = secret.reveal(s)\n",
         "import self.vault\nfn main() -> Unit = println(int.to_string(vault.get(vault.make())))\n",
     );
     assert!(ok, "the control project must check:\n{out}");
@@ -125,7 +125,7 @@ fn an_own_type_named_secret_is_its_own_type() {
     for (name, prelude) in [("own_no_import", ""), ("own_with_import", "import secret\n")] {
         let d = scratch(name);
         let src = format!(
-            "{prelude}type Secret = {{ ok: Bool }}\nfn main() -> Unit = {{\n  let s = Secret {{ ok: true }}\n  let t = {{ ...s, ok: false }}\n  match t {{\n    Secret {{ ok }} => println(\"${{s.ok}} ${{ok}}\"),\n  }}\n}}\n"
+            "{prelude}type Secret = {{ flag: Bool }}\nfn main() -> Unit = {{\n  let s = Secret {{ flag: true }}\n  let t = {{ ...s, flag: false }}\n  match t {{\n    Secret {{ flag }} => println(\"${{s.flag}} ${{flag}}\"),\n  }}\n}}\n"
         );
         std::fs::write(d.join("main.almd"), &src).unwrap();
         let (ok, out) = run(&d, "check", "main.almd");
@@ -141,7 +141,7 @@ fn an_own_type_named_secret_is_its_own_type() {
     // A user module declaring its own `Secret`, built and read from the entry.
     let (ok, out) = project_with_alias_module(
         "module_own_secret",
-        "pub type Secret = { ok: Bool }\npub fn make() -> Secret = Secret { ok: true }\n",
+        "type Secret = { ok: Bool }\npub fn make() -> Secret = Secret { ok: true }\n",
         "import self.vault\nfn main() -> Unit = {\n  let s = vault.Secret { ok: false }\n  println(\"${s.ok} ${vault.make().ok}\")\n}\n",
     );
     assert!(ok, "a module's own `type Secret` must check:\n{out}");
