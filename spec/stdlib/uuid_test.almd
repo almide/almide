@@ -3,9 +3,9 @@ import uuid
 test "parse and to_string round trip, lowercase out, the wrapped forms in" {
   let u = uuid.parse("0190F2A8-1D3B-7C4E-8A2B-123456789ABC")!
   assert_eq(uuid.to_string(u), "0190f2a8-1d3b-7c4e-8a2b-123456789abc")
-  assert_eq(uuid.parse(uuid.to_string(u))!, u)
-  assert_eq(uuid.parse("{0190f2a8-1d3b-7c4e-8a2b-123456789abc}")!, u)
-  assert_eq(uuid.parse("urn:uuid:0190f2a8-1d3b-7c4e-8a2b-123456789abc")!, u)
+  assert_eq(uuid.compare(uuid.parse(uuid.to_string(u))!, u), 0)
+  assert_eq(uuid.compare(uuid.parse("{0190f2a8-1d3b-7c4e-8a2b-123456789abc}")!, u), 0)
+  assert_eq(uuid.compare(uuid.parse("urn:uuid:0190f2a8-1d3b-7c4e-8a2b-123456789abc")!, u), 0)
 }
 
 test "parse refuses anything but 8-4-4-4-12 hex digits" {

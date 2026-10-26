@@ -106,6 +106,7 @@ NOMINAL = {
     "Value": ("value.int(0)", "value.int", None),
     # value's path (R-value, wave 4A): built from `value.root()` by key/index.
     "Path": ("value.root()", "value.root", None),
+    "Rng": ("random.seeded(1)", "random.seeded", "random"),
     "JsonPath": ("json.root()", "json.root", "json"),
     "SafeHtml": ("html.empty()", "html.empty", "html"),
     "SafePath": ('path.trusted("x")', "path.trusted", "path"),
@@ -253,6 +254,11 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
             ctx.imports.add("http")
             ctx.ctors.add("http.new_request")
             return 'http.new_request("GET", "/", "", [])'
+        # A record's own type parameter (`Heap[A]`'s `slots: List[(A, Int)]`)
+        # reaches the synthesizer as a bare named type: it is a type
+        # variable, measured at Int like every other unpinned one.
+        if len(name) == 1 and name.isupper() and name not in types:
+            return "0"
         if name in NOMINAL:
             expr, ctor, imp = NOMINAL[name]
             ctx.ctors.add(ctor)
@@ -333,6 +339,8 @@ BOUNDED_TVARS = {
     **{f"http.{n}": {"M": HTTP_RESPONSE} for n in (
         "header", "header_values", "headers", "body", "body_bytes",
         "set_header", "set_body", "set_body_bytes")},
+    # list.join[T: Text]: String is the conformer a probe can print.
+    "list.join": {"T": {"kind": "string"}},
 }
 
 
