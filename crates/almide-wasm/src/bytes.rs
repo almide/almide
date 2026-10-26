@@ -136,6 +136,8 @@ impl Emitter<'_> {
         let mut i = self.f.instructions();
         i.local_set(he);
         for h in [hs, he] {
+            // #4147: a negative bound is 0, then clamp to len.
+            i.local_get(h).i64_const(0).local_get(h).i64_const(0).i64_gt_s().select().local_set(h);
             i.local_get(h);
             i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
             i.local_get(h)

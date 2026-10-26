@@ -213,12 +213,14 @@ impl Emitter<'_> {
         self.f.instructions().local_set(bh);
         self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
         let ah = self.hold_i64()?;
-        self.f.instructions().local_set(ah);
+        // #4147: both bounds clamp into [0, count] — a negative bound is 0.
+        self.f.instructions().local_set(ah).local_get(ah).i64_const(0).local_get(ah).i64_const(0).i64_gt_s().select().local_set(ah);
         self.lower_arg(b, Some(INT), ArgMode::Borrow)?;
         let eh = self.hold_i64()?;
-        // e = min(b, count); s = a; s < 0 or s >= e → []
+        // e = min(b, count); s = a; s >= e → []
         let mut ins = self.f.instructions();
-        ins.local_tee(eh);
+        ins.local_set(eh);
+        ins.local_get(eh).i64_const(0).local_get(eh).i64_const(0).i64_gt_s().select().local_tee(eh);
         ins.local_get(bh)
             .i32_load(len_memarg())
             .i64_extend_i32_u()
