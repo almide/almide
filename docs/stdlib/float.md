@@ -2,7 +2,7 @@
 
 Floating-point operations. auto-imported.
 
-### `float.to_string(n: Float) -> String`
+### `float.to_string(x: Float) -> String`
 
 Convert a float to its string representation.
 
@@ -28,7 +28,7 @@ fn main() -> Unit = {
 3
 ```
 
-### `float.round(n: Float) -> Float`
+### `float.round(x: Float) -> Float`
 
 Round a float to the nearest integer value (as Float), halves away from zero
 (`round(2.5) = 3.0`, `round(-2.5) = -3.0`), exactly on the true value: `round(0.49999999999999994)`
@@ -43,7 +43,7 @@ fn main() -> Unit = {
 4.0
 ```
 
-### `float.floor(n: Float) -> Float`
+### `float.floor(x: Float) -> Float`
 
 Round a float down to the nearest integer value (as Float).
 
@@ -56,7 +56,7 @@ fn main() -> Unit = {
 3.0
 ```
 
-### `float.ceil(n: Float) -> Float`
+### `float.ceil(x: Float) -> Float`
 
 Round a float up to the nearest integer value (as Float).
 
@@ -69,7 +69,7 @@ fn main() -> Unit = {
 4.0
 ```
 
-### `float.abs(n: Float) -> Float`
+### `float.abs(x: Float) -> Float`
 
 Return the absolute value of a float.
 
@@ -154,7 +154,7 @@ fn main() -> Unit = {
 2.5
 ```
 
-### `float.to_fixed(n: Float, decimals: Int) -> String`
+### `float.to_fixed(x: Float, decimals: Int) -> String`
 
 Format a float with a fixed number of decimal places.
 
@@ -167,7 +167,7 @@ fn main() -> Unit = {
 3.14
 ```
 
-### `float.clamp(n: Float, lo: Float, hi: Float) -> Float`
+### `float.clamp(x: Float, lo: Float, hi: Float) -> Float`
 
 Clamp a float to the range [lo, hi].
 
@@ -195,7 +195,7 @@ fn main() -> Unit = {
 -1.0
 ```
 
-### `float.is_nan(n: Float) -> Bool`
+### `float.is_nan(x: Float) -> Bool`
 
 Check if a float is NaN (not a number).
 
@@ -208,7 +208,7 @@ fn main() -> Unit = {
 true
 ```
 
-### `float.is_infinite(n: Float) -> Bool`
+### `float.is_infinite(x: Float) -> Bool`
 
 Check if a float is positive or negative infinity.
 

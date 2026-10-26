@@ -32,7 +32,7 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `random.choice(xs: List[T]) -> Option[T]`
+### `random.choice(xs: List[A]) -> Option[A]`
 
 Pick a random element from a list, or none if empty.
 
@@ -59,7 +59,7 @@ effect fn main() -> Unit = {
 `(String, String)` elements run on the wasm leg; any other element type walls
 honestly (`random.choice_x` unlinked) and runs via the native leg.
 
-### `random.shuffle(xs: List[T]) -> List[T]`
+### `random.shuffle(xs: List[A]) -> List[A]`
 
 Return a randomly shuffled copy of a list.
 

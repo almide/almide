@@ -401,6 +401,7 @@ breaks = [
   "`http.request_stream(m, u, b, h, on_chunk)` and `http.request_stream_with_limits(m, u, b, h, limits, on_chunk)` → rewrite on the call handle: `http.start(http.new_request(m, u, b, h), limits)`, then `http.read_new(c)` between `http.poll(c)` until it answers (R-http-01); a non-2xx status is the response, no longer an err",
   "`http.url_decode(s)` → rewrite as `url.decode_form(s) ?? s` with `import url` (R-http-04); an invalid escape or invalid UTF-8 is the fallback, not U+FFFD",
   "`http.serve(port, f)`'s handler parameter is named `handler`, and `http.decode_json[T]`'s type parameter is `A` (named-argument callers rename)",
+  "the single-number parameter of the scalar `int` and `float` functions is named `x` (R-L0-30), as on every sized module, so a named argument spelled `n` (or `a` for `int.bnot`) is E004 and the hint names `x`; positional calls are unchanged: `float.to_string` / `to_fixed` / `abs` / `floor` / `ceil` / `round` / `clamp` / `is_nan` / `is_infinite` and `int.to_string` / `to_hex` / `abs` / `clamp` / `is_even` / `is_odd` / `bnot` / `count_leading_zeros` / `count_trailing_zeros` / `bit_reverse` / `byte_swap` / `log2_floor` / `log2_ceil` / `next_power_of_two` / `prev_power_of_two`; `random.choice` and `random.shuffle` name their type parameter `A` (was `T`)",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them

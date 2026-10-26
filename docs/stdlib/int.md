@@ -2,7 +2,7 @@
 
 Integer arithmetic and bitwise. auto-imported.
 
-### `int.to_string(n: Int) -> String`
+### `int.to_string(x: Int) -> String`
 
 Convert an integer to its decimal string representation.
 
@@ -15,7 +15,7 @@ fn main() -> Unit = {
 42
 ```
 
-### `int.to_hex(n: Int) -> String`
+### `int.to_hex(x: Int) -> String`
 
 Convert an integer to its hexadecimal string representation (lowercase).
 
@@ -68,7 +68,7 @@ ok 255
 err invalid digit found in string
 ```
 
-### `int.abs(n: Int) -> Int`
+### `int.abs(x: Int) -> Int`
 
 Return the absolute value of an integer.
 
@@ -81,7 +81,7 @@ fn main() -> Unit = {
 5
 ```
 
-### `int.is_even(n: Int) -> Bool`
+### `int.is_even(x: Int) -> Bool`
 
 Parity predicate: `true` when `n` is divisible by 2. Negative values and the
 bounds are exact (`%` keeps the dividend's sign, so the test is `% 2 == 0`).
@@ -95,7 +95,7 @@ fn main() -> Unit = {
 true false true
 ```
 
-### `int.is_odd(n: Int) -> Bool`
+### `int.is_odd(x: Int) -> Bool`
 
 The other half of the parity pair: `true` when `n` is not divisible by 2.
 Scalar `int` only — a sized value reaches it through `int.from_int8(x)`.
@@ -202,7 +202,7 @@ fn main() -> Unit = {
 -2
 ```
 
-### `int.bnot(a: Int) -> Int`
+### `int.bnot(x: Int) -> Int`
 
 Bitwise NOT (complement) of an integer.
 
@@ -297,7 +297,7 @@ fn main() -> Unit = {
 44
 ```
 
-### `int.clamp(n: Int, lo: Int, hi: Int) -> Int`
+### `int.clamp(x: Int, lo: Int, hi: Int) -> Int`
 
 Clamp an integer to the range [lo, hi].
 

@@ -22,11 +22,11 @@
 // ── Conversions ──
 /// Decimal digits, with - when negative.
 @intrinsic("almide_rt_int_to_string")
-fn to_string(n: Int) -> String = _
+fn to_string(x: Int) -> String = _
 
 /// Lowercase hex, no 0x; -1 gives 16 f digits.
 @intrinsic("almide_rt_int_to_hex")
-fn to_hex(n: Int) -> String = _
+fn to_hex(x: Int) -> String = _
 
 /// Decimal Int from trimmed s; err on junk or overflow.
 @intrinsic("almide_rt_int_parse")
@@ -53,9 +53,9 @@ fn bits_to_float(bits: Int) -> Float = _
 fn bits_to_f32(bits: Int) -> Float = _
 
 // ── Arithmetic ──
-/// Magnitude of n; min_value wraps to itself.
+/// Magnitude of x; min_value wraps to itself.
 @intrinsic("almide_rt_int_abs")
-fn abs(n: Int) -> Int = _
+fn abs(x: Int) -> Int = _
 
 /// Lesser of a and b.
 @intrinsic("almide_rt_int_min")
@@ -65,9 +65,9 @@ fn min(a: Int, b: Int) -> Int = _
 @intrinsic("almide_rt_int_max")
 fn max(a: Int, b: Int) -> Int = _
 
-/// n limited to lo..hi; aborts when lo > hi.
+/// x limited to lo..hi; aborts when lo > hi.
 @intrinsic("almide_rt_int_clamp")
-fn clamp(n: Int, lo: Int, hi: Int) -> Int = _
+fn clamp(x: Int, lo: Int, hi: Int) -> Int = _
 
 // ── Predicates ──
 // The parity PAIR (#1923): reflex vocabulary (Gleam's `int.is_even` /
@@ -77,11 +77,11 @@ fn clamp(n: Int, lo: Int, hi: Int) -> Int = _
 // (int8..uint64) — both halves on each, never one. `%` is remainder with the dividend's
 // sign, so `-3 % 2 == -1`: parity is `% 2 == 0` and its negation, never
 // `% 2 == 1`.
-/// True when n % 2 == 0; exact for negatives.
-fn is_even(n: Int) -> Bool = n % 2 == 0
+/// True when x % 2 == 0; exact for negatives.
+fn is_even(x: Int) -> Bool = x % 2 == 0
 
-/// True when n % 2 != 0; -3 counts as odd.
-fn is_odd(n: Int) -> Bool = n % 2 != 0
+/// True when x % 2 != 0; -3 counts as odd.
+fn is_odd(x: Int) -> Bool = x % 2 != 0
 
 // ── Bitwise ──
 /// Bitwise AND over all 64 bits.
@@ -96,9 +96,9 @@ fn bor(a: Int, b: Int) -> Int = _
 @intrinsic("almide_rt_int_bxor")
 fn bxor(a: Int, b: Int) -> Int = _
 
-/// Bitwise complement; equals -a - 1.
+/// Bitwise complement; equals -x - 1.
 @intrinsic("almide_rt_int_bnot")
-fn bnot(a: Int) -> Int = _
+fn bnot(x: Int) -> Int = _
 
 /// a shifted left by n bits; n is taken mod 64.
 @intrinsic("almide_rt_int_bshl")
@@ -111,11 +111,11 @@ fn bshr(a: Int, n: Int) -> Int = _
 // ── Bit introspection ──
 /// Leading zero bits of the 64-bit word; 64 for 0.
 @intrinsic("almide_rt_int_count_leading_zeros")
-fn count_leading_zeros(n: Int) -> Int = _
+fn count_leading_zeros(x: Int) -> Int = _
 
 /// Trailing zero bits; 64 for 0.
 @intrinsic("almide_rt_int_count_trailing_zeros")
-fn count_trailing_zeros(n: Int) -> Int = _
+fn count_trailing_zeros(x: Int) -> Int = _
 
 /// Number of set bits; 64 for -1.
 @deprecated(since=15, use="int.count_ones")
@@ -128,11 +128,11 @@ fn count_ones(x: Int) -> Int = _
 
 /// The 64 bits in reverse order; 1 gives min_value.
 @intrinsic("almide_rt_int_bit_reverse")
-fn bit_reverse(n: Int) -> Int = _
+fn bit_reverse(x: Int) -> Int = _
 
 /// The 8 bytes in reverse order (endian flip).
 @intrinsic("almide_rt_int_byte_swap")
-fn byte_swap(n: Int) -> Int = _
+fn byte_swap(x: Int) -> Int = _
 
 /// Bits needed to hold n; 0 for 0, 64 if negative.
 @deprecated(since=15, use="int.bit_length")
@@ -143,21 +143,21 @@ fn bit_width(n: Int) -> Int = _
 @intrinsic("almide_rt_int_bit_width")
 fn bit_length(x: Int) -> Int = _
 
-/// Floor of log2(n); -1 when n <= 0.
+/// Floor of log2(x); -1 when x <= 0.
 @intrinsic("almide_rt_int_log2_floor")
-fn log2_floor(n: Int) -> Int = _
+fn log2_floor(x: Int) -> Int = _
 
-/// Ceiling of log2(n); 0 when n <= 1.
+/// Ceiling of log2(x); 0 when x <= 1.
 @intrinsic("almide_rt_int_log2_ceil")
-fn log2_ceil(n: Int) -> Int = _
+fn log2_ceil(x: Int) -> Int = _
 
-/// Least power of 2 >= n; 1 if n <= 1; min_value past 2^62.
+/// Least power of 2 >= x; 1 if x <= 1; min_value past 2^62.
 @intrinsic("almide_rt_int_next_power_of_two")
-fn next_power_of_two(n: Int) -> Int = _
+fn next_power_of_two(x: Int) -> Int = _
 
-/// Greatest power of 2 <= n; 0 when n <= 0.
+/// Greatest power of 2 <= x; 0 when x <= 0.
 @intrinsic("almide_rt_int_prev_power_of_two")
-fn prev_power_of_two(n: Int) -> Int = _
+fn prev_power_of_two(x: Int) -> Int = _
 
 // ── Wrapping / masking ──
 /// (a + b) mod 2^bits, non-negative when bits < 64.
