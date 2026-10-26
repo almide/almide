@@ -240,6 +240,10 @@ pub struct TypeEnv {
     /// loaded — so its `type Url` replaces the pre-registered `url.Url`
     /// instead of being a second declaration of it (E020).
     pub stdlib_preregistered_types: std::collections::HashSet<Sym>,
+    /// Fns declared `@input_sink` (row 22, C-436), keyed like `functions`,
+    /// with the type parameters whose bound includes `Decode`: each call must
+    /// bind those to an input type (E110, `check/input_sink.rs`).
+    pub input_sinks: std::collections::HashMap<Sym, Vec<Sym>>,
     /// Types that implement the Eq protocol (via `deriving Eq`)
     pub eq_types: std::collections::HashSet<Sym>,
     /// Structural bounds for generic type parameters: TypeVar name → OpenRecord constraint
@@ -364,6 +368,7 @@ impl TypeEnv {
             top_lets: std::collections::HashMap::new(),
             prefixed_bare_aliases: std::collections::HashSet::new(),
             stdlib_preregistered_types: std::collections::HashSet::new(),
+            input_sinks: std::collections::HashMap::new(),
             eq_types: std::collections::HashSet::new(),
             structural_bounds: std::collections::HashMap::new(),
             generic_protocol_bounds: std::collections::HashMap::new(),

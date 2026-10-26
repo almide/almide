@@ -220,8 +220,14 @@ fn lower_call_target_typename(ctx: &mut LowerCtx, object: &ast::Expr, field: &Sy
         // `A.method` key a receiver call lowers to, which monomorphization
         // sends to the concrete type's function.
         let tv = sym(type_name);
+        // A record's `decode_strict` through a `Decode` bound: the checker
+        // admits it only inside an `@input_sink` fn, whose callers bind the
+        // parameter to a record input type (row 22, C-436).
+        let record_decode = field.as_str() == crate::canonicalize::protocols::RECORD_DECODE_METHOD;
         let is_requirement = ctx.protocol_bounds.get(&tv).is_some_and(|protos| protos.iter().any(|p| {
             ctx.env.protocols.get(&sym(p)).is_some_and(|d| d.methods.iter().any(|m| m.name == *field))
+                || (record_decode && crate::canonicalize::protocols::protocol_closure(p.as_str())
+                    .contains(&crate::canonicalize::protocols::DECODE_PROTOCOL))
         }));
         if is_requirement {
             return Some(CallTarget::Named { name: sym(&key) });

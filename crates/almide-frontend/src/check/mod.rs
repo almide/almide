@@ -350,6 +350,9 @@ pub struct Checker {
     /// Generic calls whose type parameters must each be determined (#3495,
     /// E025's call edition) — see `uninferable_type_param.rs`.
     pub(crate) deferred_type_param_checks: Vec<TypeParamSite>,
+    /// Calls to an `@input_sink` fn awaiting the post-solve input-type
+    /// check (E110, row 22) — see `input_sink.rs`.
+    pub(crate) deferred_input_sink_checks: Vec<InputSinkSite>,
     /// #1123 / ADR-0008 N+1: sites where the pre-switch implementation
     /// inserted implicit propagation (auto-`?`). Post-solve, every site whose
     /// type resolved to Result is a hard error — E042 (must-use: a discarded
@@ -722,6 +725,7 @@ impl Checker {
             deferred_unresolved_binding_checks: Vec::new(),
             errored_slots: Vec::new(),
             deferred_type_param_checks: Vec::new(),
+            deferred_input_sink_checks: Vec::new(),
             deferred_implicit_prop_checks: Vec::new(),
             effect_call_spans: std::collections::HashSet::new(),
             isolation_cascade: Default::default(),
