@@ -37,7 +37,7 @@ effect fn main() -> Unit = {
   }
   println("arm stream distinct from main's: ${srv != cli}")
   println("arm listener distinct from main's: ${side != l}")
-  println("both open in main: ${net.tcp_is_open(srv) and net.tcp_is_open(cli)}")
+  println("both open in main: ${net.tcp_is_open(srv)! and net.tcp_is_open(cli)!}")
   let reply = io.read_exact(cli, 10)!
   println("client reads in main: ${bytes.to_string(reply) ?? "?"}")
   // A handle from main answers the same in an arm.

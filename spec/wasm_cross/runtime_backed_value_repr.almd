@@ -24,12 +24,12 @@ fn leaks(t: String) -> Bool = [
 ] |> list.any((s) => string.contains(t, s))
 
 effect fn main() -> Unit = {
-  let h = map.from_list([("Authorization", "Bearer TOKXYZ-SECRET"), ("Cookie", "sid=COOKIE-SECRET")])
+  let h = [("Authorization", "Bearer TOKXYZ-SECRET"), ("Cookie", "sid=COOKIE-SECRET")]
   let req = http.new_request("POST", "/login?next=%2F", "a\"b\\c\nd\re\tf", h)
   let resp = http.with_headers(
     401,
     "denied",
-    map.from_list([("Set-Cookie", "sid=SETCOOKIE-SECRET"), ("X-A", "1"), ("X-B", "2")]),
+    [("Set-Cookie", "sid=SETCOOKIE-SECRET"), ("X-A", "1"), ("X-B", "2")],
   )
   let path = json.root() |> json.field("user") |> json.index(0) |> json.field("na me") |> json.index(-1)
   let lines = [

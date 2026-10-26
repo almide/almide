@@ -25,7 +25,7 @@ fn calls(ops: &[String], name: &str) -> usize {
     ops.iter().filter(|o| o.contains("CallFn") && o.contains(&needle)).count()
 }
 
-const START: &str = "  let c = http.start(\"GET\", \"http://127.0.0.1:1/x\", \"\", map.from_list([(\"A\", \"1\")]), { total_ms: 1000, idle_ms: 1000 })!\n";
+const START: &str = "  let c = http.start(http.new_request(\"GET\", \"http://127.0.0.1:1/x\", \"\", [(\"A\", \"1\")]), { total_ms: 1000, idle_ms: 1000 })!\n";
 
 #[test]
 fn an_unwrapped_http_call_interpolates_inside_a_list_and_a_tuple_literal() {
@@ -37,7 +37,7 @@ fn an_unwrapped_http_call_interpolates_inside_a_list_and_a_tuple_literal() {
     assert_eq!(calls(&ops, "compound.to_string"), 0, "walled through compound:\n{ops:#?}");
 }
 
-const REQ: &str = "  let req = http.new_request(\"POST\", \"/x\", \"b\", map.from_list([(\"Authorization\", \"Bearer T\")]))\n  let path = json.root() |> json.field(\"user\")\n";
+const REQ: &str = "  let req = http.new_request(\"POST\", \"/x\", \"b\", [(\"Authorization\", \"Bearer T\")])\n  let path = json.root() |> json.field(\"user\")\n";
 
 #[test]
 fn a_tuple_of_runtime_backed_values_interpolates_through_the_declared_reprs() {

@@ -27,10 +27,10 @@ effect fn main() -> Unit = {
   fs.write_text(note, "still opens")!
   println("read_text after: ${fs.read_text(note)!}")
   fs.remove(note)!
-  let taken = unix.take_fds(s)
+  let taken = unix.take_fds(s)!
   println("taken ${list.len(taken)}")
   unix.write_fds(c, bytes.from_string("y"), [m])!
-  println("after taking: ${bytes.to_string_lossy(io.read(s, 1)!)} with ${list.len(unix.take_fds(s))}")
+  println("after taking: ${bytes.to_string_lossy(io.read(s, 1)!)} with ${list.len(unix.take_fds(s)!)}")
   for fd in taken + [m, s, c, l] {
     io.close(fd)!
   }
