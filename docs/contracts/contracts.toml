@@ -5741,3 +5741,14 @@ status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/env_secret.almd", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-439"
+spec      = "ALS-R5"
+title     = "env.vars lists the environment keyed and ordered by name with the program's own set and remove applied, and env.remove unsets a name or refuses it as env.set does, with the same bytes on every leg"
+statement = "ALS-R5 (almide/almide#3908): `env.vars()` returns `Map[String, String]` holding every variable of the program's environment whose name and value are UTF-8, keyed by name and iterated in ascending name order, with the program's own `env.set` values and `env.remove` removals applied — for every name it lists, `env.get(name)` answers `some` of the listed value. Values are listed as they are; no name is filtered. `env.remove(name)` returns `Result[Unit, String]`: it answers `err` and changes nothing for exactly the names `env.set` refuses (C-421), checked in the same order with the same texts under its own name — an empty name (`env.remove: empty name`), a name containing `=` (`env.remove: name contains '='`), a name containing NUL (`env.remove: name contains NUL`). Every other name is `ok(())`, an unset one included; afterwards `env.get(name)` is `none`, `env.vars()` omits the name, and a later `env.set` sets it again. The removal reaches this process and the children it starts afterwards. Native unsets the process variable; the embedded wasm host and stock p1 / p3 artifacts record it in `env.set`'s guest-side overlay (op 37, C-329) as the value NUL — the one value `env.set` refuses — which `env.get` reads as unset and `env.vars` (op 77: the starting environment, then the overlay) as a dropped name, so every leg answers the same bytes."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/env_vars_remove.almd", class = "fixture" },
+]
