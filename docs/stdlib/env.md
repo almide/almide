@@ -31,6 +31,27 @@ effect fn main() -> Unit = {
 }
 ```
 
+### `env.secret(name: String) -> Option[Secret[String]]`
+
+Read an environment variable that holds a credential (an API token, a
+webhook key): the same value as `env.get`, born a `Secret[String]`
+(`import secret`). It prints as `Secret(***)` everywhere, and its `==` is
+the constant-time compare (C-426), so the token never reaches a log and is
+never compared with a leaking `==`. `secret.reveal` reads it; none if unset
+(C-438).
+
+```almd check
+import env
+import secret
+
+effect fn main() -> Unit = {
+  match env.secret("API_TOKEN")! {
+    some(token) => println("${token} ${token == secret.new("expected")}"),
+    none => println("API_TOKEN is not set"),
+  }
+}
+```
+
 ### `env.set(name: String, value: String) -> Unit`
 
 Set an environment variable. Errs, and sets nothing, when the name is empty
