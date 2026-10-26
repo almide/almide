@@ -103,8 +103,12 @@ effect fn positional(options: List[String]) -> List[String] = __positional(env.a
 // `["out"]` is `["input.txt"]`, not `["report.txt", "input.txt"]`. Before,
 // `positional()` took no names and could not tell a value from a file.
 @category
-fn __positional(args: List[String], options: List[String]) -> List[String] =
-  __positional_at(__options(args), options, 0, []) + __operands(args)
+fn __positional(args: List[String], options: List[String]) -> List[String] = __positional_at(
+  __options(args),
+  options,
+  0,
+  [],
+) + __operands(args)
 
 // Recursion with the names as a parameter, not a capturing lambda (#892).
 @category
@@ -113,9 +117,17 @@ fn __positional_at(args: List[String], options: List[String], i: Int, acc: List[
   else {
     let a = list.get_or(args, i, "")
     if not string.starts_with(a, "-") then __positional_at(args, options, i + 1, acc + [a])
-    else if string.starts_with(a, "--") and list.contains(options, string.drop(a, 2)) then __positional_at(args, options, i + 2, acc)
+    else if string.starts_with(a, "--") and list.contains(options, string.drop(a, 2)) then __positional_at(
+      args,
+      options,
+      i + 2,
+      acc,
+    )
     else __positional_at(args, options, i + 1, acc)
   }
 
 /// i-th positional arg (see positional); none if out of range.
-effect fn positional_at(i: Int, options: List[String]) -> String? = list.get(positional(options)!, i)
+effect fn positional_at(i: Int, options: List[String]) -> String? = list.get(
+  positional(options)!,
+  i,
+)

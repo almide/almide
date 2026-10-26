@@ -565,7 +565,7 @@ Headers and body of a request are read with the shared functions above:
 import http
 
 fn handle(req: HttpRequest) -> HttpResponse = {
-  let body = http.req_body(req)
+  let body = http.body(req)
   http.response(200, "received ${string.len(body)} chars")
 }
 
@@ -573,10 +573,6 @@ effect fn main() -> Unit = {
   http.serve(3000, handle)
 }
 ```
-
-### `http.req_header(req: HttpRequest, key: String) -> Option[String]`
-
-Get a header value from a request
 
 A credential in a header is checked, not just looked for: wrap both sides in
 `secret.new`, whose `==` on `Secret[String]` is constant time (C-426), and
@@ -590,7 +586,7 @@ import secret
 
 effect fn handle(req: HttpRequest) -> HttpResponse = {
   let expected = env.get("API_TOKEN") |> option.map((t) => secret.new("Bearer " + t))
-  match (http.req_header(req, "Authorization"), expected) {
+  match (http.header(req, "Authorization"), expected) {
     (some(got), some(want)) => if secret.new(got) == want then http.response(200, "ok")
     else http.response(401, "invalid token"),
     (none, _) => http.response(401, "missing Authorization"),
