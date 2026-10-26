@@ -108,7 +108,7 @@ fn inert(e: &IrExpr) -> bool {
 /// A match whose subject reads the var is not seen through: its bindings
 /// are views into that block, which an in-place write would change under
 /// them.
-fn tail_consumed_reads<'e>(e: &'e IrExpr, subjects: &mut Vec<&'e IrExpr>, out: &mut Vec<&'e IrExpr>) {
+pub(crate) fn tail_consumed_reads<'e>(e: &'e IrExpr, subjects: &mut Vec<&'e IrExpr>, out: &mut Vec<&'e IrExpr>) {
     match &e.kind {
         // A temp-bound concat (#3530) is judged as a whole, before its tail.
         IrExprKind::Block { expr: Some(t), .. } => match crate::concat_dying::concat_read(e) {

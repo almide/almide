@@ -43,7 +43,7 @@ use crate::work::Helper;
 use crate::*;
 
 #[path = "dying_move.rs"]
-mod dying_move;
+pub(crate) mod dying_move;
 
 /// The holds a map-set core works on: the receiver block, the key, the
 /// scan's ABSOLUTE entry address (0 = absent) and the value.

@@ -18,6 +18,15 @@
 //!   value, which a borrowed param's caller still holds;
 //! * is the base of the spread its body ends in (`{ ...p, f: v }`, #3406:
 //!   the dying base is rebuilt in place, dying_move.rs);
+//! * reaches a consuming op at a result leaf of its body — the dying list
+//!   var of a one-element push (`p + [e]`, #3530), a spread base, a
+//!   `@reuse` source — itself, or through the `let` / `var` binds its credit
+//!   moves along at their last read (rebind_move.rs). The transparent
+//!   newtype's ctor match `match p { Path(steps) => Path(steps + [e]) }` is
+//!   such a bind once erased (newtype.rs: `{ let steps = p; steps + [e] }`),
+//!   so `steps` holds `p`'s credit and the push lands in place at rc 1;
+//!   a borrowed `p` would leave the caller's credit on the block and
+//!   `$cow` would copy it on every step;
 //! * passes it directly (`Var`) to a program-function param that is
 //!   owned (the fixpoint), or to a call this pass cannot resolve the way
 //!   the emitter resolves it (the suffix and registry routes) — owned is
@@ -102,6 +111,7 @@ pub(crate) fn infer(
             scan.tail_fresh(&f.body);
             scan.tail_spread_base(&f.body);
             scan.dying_var_rebinds(&f.body);
+            scan.tail_consumed(&f.body);
             let Scan { mark, cross, .. } = scan;
             for k in mark {
                 if crate::rc_ownership::rc_droppable_ty(types, table.infos[i].params[k])
@@ -203,6 +213,61 @@ impl Scan<'_> {
                 found.extend(self.param_of(read));
             }
         });
+        self.mark.extend(found);
+    }
+
+    /// A param whose credit a consuming op at a result leaf takes — the
+    /// reads `note_dying_tail` notes at the frame's tail (dying_move.rs) —
+    /// directly, or through a chain of `let` / `var` binds each of which is
+    /// its source's last read (rebind_move.rs moves the credit along it).
+    /// Borrowed, the param's block stays at the caller's count and the op
+    /// copies it; owned, the caller hands its credit over (a dying var, an
+    /// owned temporary) and the op meets the block at rc 1 — or at rc > 1
+    /// when the caller still holds it, and `$cow` copies as before.
+    fn tail_consumed(&mut self, body: &IrExpr) {
+        let mut reads = Vec::new();
+        crate::map_inplace::dying_move::tail_consumed_reads(body, &mut Vec::new(), &mut reads);
+        if reads.is_empty() {
+            return;
+        }
+        let mut moved: Vec<*const IrExpr> = Vec::new();
+        crate::rebind_move::dying_rebinds(body, |read, _| moved.push(read as *const IrExpr));
+        // bound var -> the var its credit moved out of
+        let mut source: HashMap<VarId, VarId> = HashMap::new();
+        if !moved.is_empty() {
+            struct Binds<'m> {
+                moved: &'m [*const IrExpr],
+                source: &'m mut HashMap<VarId, VarId>,
+            }
+            impl IrVisitor for Binds<'_> {
+                fn visit_stmt(&mut self, s: &IrStmt) {
+                    if let IrStmtKind::Bind { var, value, .. } = &s.kind
+                        && let IrExprKind::Var { id } = &value.kind
+                        && self.moved.contains(&(value as *const IrExpr))
+                    {
+                        self.source.insert(*var, *id);
+                    }
+                    walk_stmt(self, s);
+                }
+            }
+            Binds { moved: &moved, source: &mut source }.visit_expr(body);
+        }
+        let mut found = Vec::new();
+        for read in reads {
+            let IrExprKind::Var { id } = &read.kind else { continue };
+            let mut id = *id;
+            // Bounded by the number of binds: a chain never revisits a var.
+            for _ in 0..=source.len() {
+                if let Some(&k) = self.params.get(&id) {
+                    found.push(k);
+                    break;
+                }
+                match source.get(&id) {
+                    Some(&s) => id = s,
+                    None => break,
+                }
+            }
+        }
         self.mark.extend(found);
     }
 
