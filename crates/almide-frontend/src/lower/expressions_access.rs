@@ -476,6 +476,14 @@ fn lower_expr_binary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
                 let target = CallTarget::Module { module: sym("bytes"), func: sym("__concat"), def_id };
                 return ctx.mk(IrExprKind::Call { target, args: vec![l, r], type_args: vec![] }, Ty::Bytes, span);
             }
+            // `Matrix / Matrix` is `matrix.__div(a, b)` (R-matrix-14), as `-m`
+            // is `matrix.__neg(m)` above: there is no matrix division `BinOp`,
+            // and `DivInt` on two Matrix operands is an IR verify ICE.
+            if op == "/" && *left_ty == Ty::Matrix && *right_ty == Ty::Matrix {
+                let def_id = ctx.def_map.get(&sym("matrix.__div")).copied();
+                let target = CallTarget::Module { module: sym("matrix"), func: sym("__div"), def_id };
+                return ctx.mk(IrExprKind::Call { target, args: vec![l, r], type_args: vec![] }, Ty::Matrix, span);
+            }
             let bin_op = binop_for(op.as_str(), left_ty, right_ty);
             ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span)
 }

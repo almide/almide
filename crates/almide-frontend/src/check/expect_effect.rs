@@ -94,6 +94,13 @@ impl Checker {
                 self.expect_expr(else_, &t);
             }
             ExprKind::Match { arms, .. } => arms.iter().for_each(|a| self.expect_expr(&a.body, &t)),
+            // `x ?? d`: the value is `x`'s payload or `d`, so `x` is expected
+            // as `Option[t]` (`map.get(handlers, k) ?? h` seeds the map's
+            // value type from the slot) and `d` as `t`.
+            ExprKind::UnwrapOr { expr: inner, fallback } => {
+                self.expect_expr(inner, &Ty::option(t.clone()));
+                self.expect_expr(fallback, &t);
+            }
             // A call's result: its generics are seeded from `t` before its
             // args are inferred (`seed_bindings_from_expected_ret`), so the
             // expectation reaches the args that produce the result.

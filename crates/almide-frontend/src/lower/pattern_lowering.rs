@@ -158,6 +158,7 @@ fn lower_pattern_record(
     let pat_name = struct_pattern_name(ctx, name, subject_ty);
     let field_ty_of = |ctx: &LowerCtx, field: &str| {
         record_case_field_ty_from_subject(ctx, name, field, subject_ty)
+            .or_else(|| struct_field_ty_from_subject(ctx, field, subject_ty))
             .unwrap_or_else(|| resolve_record_field_ty(ctx, &pat_name, field))
     };
     let mut ir_fields: Vec<IrFieldPattern> = fields.iter().map(|f| {
@@ -267,6 +268,18 @@ fn record_case_field_ty_from_subject(ctx: &LowerCtx, written: &almide_base::inte
     let case = cases.into_iter().find(|c| c.name == case_name)?;
     let crate::types::VariantPayload::Record(fs) = case.payload else { return None };
     fs.into_iter().find(|(n, _)| n == field).map(|(_, t)| t)
+}
+
+/// A STRUCT pattern's field type read off the match SUBJECT, the struct
+/// counterpart of `record_case_field_ty_from_subject`: `Deque { front, back }`
+/// against a `Deque[Int]` binds `front: List[Int]`, not the declaration's
+/// `List[A]`. The declaration's type left the binder's element type a bare
+/// type variable, and the wasm leg sized its slots as a 4-byte handle against
+/// the 8-byte Ints the list holds (`list.len(front)` read twice the length).
+/// `None` when the subject does not resolve to a record with that field.
+fn struct_field_ty_from_subject(ctx: &LowerCtx, field: &str, subject_ty: &Ty) -> Option<Ty> {
+    let Ty::Record { fields } = ctx.env.resolve_named(subject_ty) else { return None };
+    fields.into_iter().find(|(n, _)| n == field).map(|(_, t)| t)
 }
 
 fn resolve_record_field_ty(ctx: &LowerCtx, record_name: &str, field_name: &str) -> Ty {
