@@ -1,6 +1,6 @@
 // #4080: a value-returning call with a `mut` param as a match scrutinee or an
 // if condition writes its buffer back before the arms run, on every leg.
-fn pop_last(mut xs: List[Int]) -> Option[Int] = list.pop(xs)
+fn pop_last(mut xs: List[Int]) -> Int? = list.pop(xs)
 
 fn grow(mut xs: List[Int]) -> Bool = {
   list.push(xs, 9)
