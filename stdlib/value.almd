@@ -172,6 +172,46 @@ fn set_path(v: Value, p: Path, x: Value) -> Result[Value, String] = match p {
 @consume(v, x)
 fn __set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = _
 
+// The same walk in pure Almide over the public Value surface, one rebuild
+// per step: the body the wasm leg and the interp oracle run for
+// `__set_path_steps` (stdlib/json_path.almd). The depth bound first (#4209):
+// json.parse's bound and err text, which the runtime walk spells from
+// crates/almide-base/src/json_limits.rs.
+fn __set_path_pure(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = {
+  let n = list.len(steps)
+  if n > 1000 or __nests_past(x, 1000 - n) then err("json: nesting deeper than 1000")
+  else ok(__set_steps(v, steps, 0, x))
+}
+
+// x holds containers nested more than `budget` deep; the walk stops at the
+// budget, so it is at most 1000 frames whatever x holds.
+local fn __nests_past(x: Value, budget: Int) -> Bool = match value.as_array(x) {
+  ok(xs) => budget == 0 or list.any(xs, (e) => __nests_past(e, budget - 1)),
+  err(_) => match value.as_object(x) {
+    ok(kvs) => budget == 0 or list.any(kvs, (kv) => __nests_past(kv.1, budget - 1)),
+    err(_) => false,
+  },
+}
+
+local fn __set_steps(v: Value, steps: List[(Bool, String, Int)], k: Int, x: Value) -> Value = match list.get(steps, k) {
+  none => x,
+  some((true, name, _)) => match value.as_object(v) {
+    ok(pairs) => if list.any(pairs, ((pk, _)) => pk == name) then value.object(list.map(
+      pairs,
+      ((pk, pv)) => if pk == name then (pk, __set_steps(pv, steps, k + 1, x)) else (pk, pv),
+    ))
+    else value.object(pairs + [(name, __set_steps(value.object([]), steps, k + 1, x))]),
+    err(_) => value.object([(name, __set_steps(value.object([]), steps, k + 1, x))]),
+  },
+  some((false, _, i)) => match value.as_array(v) {
+    ok(xs) => match list.get(xs, i) {
+      some(child) => value.array(list.set(xs, i, __set_steps(child, steps, k + 1, x))),
+      none => v,
+    },
+    err(_) => v,
+  },
+}
+
 /// v minus the entry at p; unchanged if absent; null for the root.
 fn remove_path(v: Value, p: Path) -> Value = match p {
   Path(steps) => __remove_steps(v, steps, 0)
