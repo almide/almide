@@ -138,7 +138,7 @@ fn native_random_bytes_reads_only_the_os_csprng() {
         "almide_os_entropy: one body per cfg (linux, other unix, the rest)"
     );
     for s in &sources {
-        for other in ["next_u64", "ALMIDE_RNG_STATE", "RandomState", "SystemTime", "Instant"] {
+        for other in ["next_u64", "RNG_STATE", "RandomState", "SystemTime", "Instant"] {
             assert!(!s.contains(other), "almide_os_entropy reads `{other}`:\n{s}");
         }
     }
