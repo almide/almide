@@ -11868,9 +11868,14 @@ fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
 
 fn __apply(mw: HttpMiddleware, inner: HttpHandler) -> HttpHandler = mw(inner)
 
-/// JSON body through decode; err is a 400 response.
-fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
-  ok(v) => match decode(v) {
+
+
+
+
+/// JSON body into input type T, strictly; err is a 400 response.
+@input_sink
+fn decode_json[T: Decode](req: HttpRequest) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
+  ok(v) => match T.decode_strict(v) {
     ok(x) => ok(x),
     err(e) => err(http.response(400, "Bad Request: " + e)),
   },
