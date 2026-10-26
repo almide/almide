@@ -47,33 +47,19 @@ fn word() -> MemArg {
 
 impl Kmp {
     /// `k` after reading byte `c`: fall back through the table while the
-    /// next needle byte differs, then extend by one on a match. A `lazy`
-    /// step (the search) builds the table the first time it needs a slot:
-    /// slot 0 is always 0, so a partial match of one byte falls back with no
-    /// table, and a search that never falls back from two or more matched
-    /// bytes — every one-byte needle, every two-byte needle, most text —
-    /// allocates nothing.
-    fn emit_step(&self, i: &mut InstructionSink, lazy: bool) {
-        let Kmp { pat, tbl, k, c, q, .. } = *self;
+    /// next needle byte differs, then extend by one on a match.
+    fn emit_step(&self, i: &mut InstructionSink) {
+        let Kmp { pat, tbl, k, c, .. } = *self;
         i.block(BlockType::Empty).loop_(BlockType::Empty);
         i.local_get(k).i32_eqz().br_if(1);
         i.local_get(pat).local_get(k).i32_add().i32_load8_u(byte());
         i.local_get(c).i32_eq().br_if(1);
-        if lazy {
-            i.local_get(k).i32_const(1).i32_eq().if_(BlockType::Empty);
-            i.i32_const(0).local_set(k);
-            i.br(1);
-            i.end();
-            // The build reuses `k`, `c` and `q`: hold the search's on the
-            // operand stack across it.
-            i.local_get(tbl).i32_eqz().if_(BlockType::Empty);
-            i.local_get(q).local_get(c).local_get(k);
-            i.block(BlockType::Empty);
-            self.emit_build(i);
-            i.end();
-            i.local_set(k).local_set(c).local_set(q);
-            i.end();
-        }
+        // slot 0 is always 0: one matched byte falls back to none without
+        // reading the table (a one- or two-byte needle has none)
+        i.local_get(k).i32_const(1).i32_eq().if_(BlockType::Empty);
+        i.i32_const(0).local_set(k);
+        i.br(2);
+        i.end();
         i.local_get(tbl)
             .local_get(k)
             .i32_const(1)
@@ -89,17 +75,15 @@ impl Kmp {
         i.end();
     }
 
-    /// No table yet (`tbl` = 0): the first search step that needs one
-    /// builds it, and it then serves every later search with this needle.
-    /// Release it with [`Kmp::emit_free`].
-    pub(crate) fn emit_table(&self, i: &mut InstructionSink) {
-        i.i32_const(0).local_set(self.tbl);
-    }
-
     /// `tbl` = the failure table of the needle (`m >= 1`): slot `x` holds
     /// the length of the longest proper prefix of `pat[..=x]` that is also
-    /// its suffix. Clobbers `k`, `c` and `q`.
-    fn emit_build(&self, i: &mut InstructionSink) {
+    /// its suffix. Release it with [`Kmp::emit_free`].
+    ///
+    /// A search reads slot `k - 1` only after `k >= 2` bytes matched and the
+    /// next one differs, and slot 0 is always 0 — so a needle of one or two
+    /// bytes (`;`, `::`, `\r\n`) never reads the table, and `tbl` stays 0:
+    /// the common separators search without allocating.
+    pub(crate) fn emit_table(&self, i: &mut InstructionSink) {
         let Kmp {
             pat,
             m,
@@ -109,6 +93,8 @@ impl Kmp {
             q,
             ..
         } = *self;
+        i.i32_const(0).local_set(tbl);
+        i.local_get(m).i32_const(3).i32_ge_u().if_(BlockType::Empty);
         i.local_get(m)
             .i32_const(4)
             .i32_mul()
@@ -124,7 +110,7 @@ impl Kmp {
             .i32_add()
             .i32_load8_u(byte())
             .local_set(c);
-        self.emit_step(i, false);
+        self.emit_step(i);
         i.local_get(tbl)
             .local_get(q)
             .i32_const(4)
@@ -133,6 +119,7 @@ impl Kmp {
         i.local_get(k).i32_store(word());
         i.local_get(q).i32_const(1).i32_add().local_set(q);
         i.br(0).end().end();
+        i.end();
     }
 
     /// `res` = the first match start at or after `q` (the needle non-empty,
@@ -153,7 +140,7 @@ impl Kmp {
             .i32_add()
             .i32_load8_u(byte())
             .local_set(c);
-        self.emit_step(i, true);
+        self.emit_step(i);
         i.local_get(q).i32_const(1).i32_add().local_set(q);
         i.local_get(k).local_get(m).i32_eq().if_(BlockType::Empty);
         i.local_get(q).local_get(m).i32_sub().local_set(res);
@@ -162,8 +149,8 @@ impl Kmp {
         i.br(0).end().end();
     }
 
-    /// Release the table block (owned outright by the kernel), if a search
-    /// built one.
+    /// Release the table block (owned outright by the kernel), if the
+    /// needle needed one.
     pub(crate) fn emit_free(&self, i: &mut InstructionSink) {
         i.local_get(self.tbl).if_(BlockType::Empty);
         i.local_get(self.tbl).call(F_FREE);
