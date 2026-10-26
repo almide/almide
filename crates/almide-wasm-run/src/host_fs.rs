@@ -478,7 +478,7 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // Decomposed by op family (codopsy cc 38 -> per-family fns): the
         // http and env arms live in `fs_dispatch_http` / `fs_dispatch_env`.
         43..=50 => fs_dispatch_http(op, a, b),
-        26 | 27 | 28 | 29 | 33 | 37 => fs_dispatch_env(op, a, b),
+        26 | 27 | 28 | 29 | 33 | 37 | 77 => fs_dispatch_env(op, a, b),
         // incremental stdin (op 35) — same empty answer in the harness.
         35 => (pack(0, 0), Vec::new()),
         32 => fs_entropy(b.len()),
@@ -556,7 +556,7 @@ fn fs_http_framed(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     }
 }
 
-/// The env op family (26/27/28/29/33/37) of `fs_dispatch_host`, verbatim.
+/// The env op family (26/27/28/29/33/37/77) of `fs_dispatch_host`, verbatim.
 fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
@@ -565,7 +565,10 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // process-level setenv makes a later get observe the set, and the
         // overlay reproduces that observable without std::env::set_var
         // (unsafe under threads — the wasmtime host runs multi-threaded).
+        // `env.remove`'s mark (#3908) is an overlay entry with the value
+        // NUL — the one value `env.set` refuses — and reads as unset.
         26 => match with_env_overlay(|o| o.get(a).cloned()) {
+            Some(v) if v == "\0" => (pack(2, 0), Vec::new()),
             Some(v) => ok_text(v),
             None => match std::env::var(a) {
                 Ok(v) => ok_text(v),
@@ -587,6 +590,20 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
             let v = String::from_utf8_lossy(b).to_string();
             with_env_overlay(|o| o.insert(a.to_string(), v));
             (pack(0, 0), Vec::new())
+        }
+        // env.vars' leaf (#3908): `name=value` frames, the process
+        // environment first and the overlay's entries (sets and remove
+        // marks) after, by name so the answer is the same run to run. The
+        // guest's Almide body lets the later entry win, as on the stock legs.
+        77 => {
+            let mut entries: Vec<String> = std::env::vars_os()
+                .filter_map(|(k, v)| Some(format!("{}={}", k.into_string().ok()?, v.into_string().ok()?)))
+                .collect();
+            let mut overlay: Vec<String> = with_env_overlay(|o| o.iter().map(|(k, v)| format!("{k}={v}")).collect());
+            overlay.sort();
+            entries.extend(overlay);
+            let buf = frames(&entries);
+            (pack(0, buf.len()), buf)
         }
         27 => ok_text(std::env::consts::OS.to_string()),
         28 => ok_text(std::env::temp_dir().to_string_lossy().replace('\\', "/")),
