@@ -204,3 +204,55 @@ fn a_secret_never_reaches_a_generic_compare() {
     assert_checks("eq_plain", "fn same[A](a: A, b: A) -> Bool = a == b\nfn main() -> Unit = println(\"${same(1, 2)} ${same(\"a\", \"a\")}\")\n");
     assert_checks("eq_concrete", "import secret\nfn main() -> Unit = println(\"${secret.new(\"a\") == secret.new(\"b\")}\")\n");
 }
+
+/// A dependency package `vaultlib` declaring `mod type Vault`, and an app
+/// whose entry is `main`. `(check ok, output)` of `almide check` in the app.
+fn dep_project(name: &str, main: &str, app_mod: Option<&str>) -> (bool, String) {
+    let root = scratch(name);
+    let lib = root.join("vaultlib");
+    std::fs::create_dir_all(lib.join("src")).unwrap();
+    std::fs::write(lib.join("almide.toml"), "[package]\nname = \"vaultlib\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(
+        lib.join("src/mod.almd"),
+        "mod type Vault = { key: String }\n\npub fn make(s: String) -> Vault = { key: s }\n\npub fn key_len(v: Vault) -> Int = string.len(v.key)\n",
+    )
+    .unwrap();
+    let app = root.join("app");
+    std::fs::create_dir_all(app.join("src")).unwrap();
+    std::fs::write(app.join("almide.toml"), "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nvaultlib = { path = \"../vaultlib\" }\n").unwrap();
+    std::fs::write(app.join("src/main.almd"), main).unwrap();
+    if let Some(m) = app_mod {
+        std::fs::write(app.join("src/notes.almd"), m).unwrap();
+    }
+    run(&app, "check", "src/main.almd")
+}
+
+/// #4241: a USER `mod type` record is opaque outside its project by the
+/// same rule as the bundled Secret — read off the declaration, not a name.
+#[test]
+fn a_user_mod_type_is_opaque_outside_its_project() {
+    let cases = [
+        ("user_update_forge", "import vaultlib\neffect fn main() -> Unit = {\n  let v = { ...vaultlib.make(\"a\"), key: \"forged\" }\n  println(\"${vaultlib.key_len(v)}\")\n}\n", "cannot build a record update of opaque type 'Vault' outside its module 'vaultlib'"),
+        ("user_spread_copy", "import vaultlib\neffect fn main() -> Unit = {\n  let v = { ...vaultlib.make(\"a\") }\n  println(\"${vaultlib.key_len(v)}\")\n}\n", "cannot build a record update of opaque type 'Vault' outside its module 'vaultlib'"),
+        ("user_field_read", "import vaultlib\neffect fn main() -> Unit = println(vaultlib.make(\"a\").key)\n", "cannot read field 'key' of opaque type 'Vault' outside its module 'vaultlib'"),
+        ("user_structural_param", "import vaultlib\nfn peek(r: { key: String }) -> String = r.key\neffect fn main() -> Unit = println(peek(vaultlib.make(\"a\")))\n", "cannot use opaque type 'Vault' as another record type outside its module 'vaultlib'"),
+        ("user_structural_forge", "import vaultlib\neffect fn main() -> Unit = {\n  let r = { key: \"forged\" }\n  println(\"${vaultlib.key_len(r)}\")\n}\n", "outside its module 'vaultlib'"),
+    ];
+    for (name, main, needle) in cases {
+        let (ok, out) = dep_project(name, main, None);
+        assert!(!ok && out.contains("E033") && out.contains(needle), "{name}: expected E033 `{needle}`, got (ok={ok}):\n{out}");
+    }
+    // Control: through the module's API it checks.
+    let (ok, out) = dep_project("user_api", "import vaultlib\neffect fn main() -> Unit = println(\"${vaultlib.key_len(vaultlib.make(\"a\"))}\")\n", None);
+    assert!(ok, "the API route must check:\n{out}");
+}
+
+/// Inside its own project a `mod type` stays open: a sibling module of the
+/// declaring one reads, destructures and updates it.
+#[test]
+fn a_user_mod_type_is_open_inside_its_project() {
+    let notes = "mod type Note = { body: String }\n\nmod fn note(s: String) -> Note = { body: s }\n";
+    let main = "import self.notes\neffect fn main() -> Unit = {\n  let n = notes.note(\"a\")\n  let m = { ...n, body: \"b\" }\n  let { body } = m\n  println(n.body)\n  println(body)\n}\n";
+    let (ok, out) = dep_project("same_project", main, Some(notes));
+    assert!(ok, "a `mod type` is open to its own project:\n{out}");
+}
