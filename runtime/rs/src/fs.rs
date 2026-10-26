@@ -208,7 +208,11 @@ pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, AlmideString) -
         // file size, and the OS refusing the 4097th spawn crashed the run where
         // wasm answered ok. The chunks stay as they were; at most one thread per
         // core folds them, thread t taking chunks t, t+T, …, and each partial
-        // lands back in its chunk's slot.
+        // lands back in its chunk's slot. Each worker starts through
+        // `almide_fan_spawn` (#4141): it takes a thread from the pool `fan { }`
+        // arms share (one live thread per CPU), or folds its chunks inline here
+        // when none is free or the OS refuses one — the partition and the
+        // chunk-ordered result are the same either way.
         let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
         let threads = ranges.len().min(cores);
         let ranges = &ranges;
@@ -217,15 +221,17 @@ pub fn almide_rt_fs_fold_lines_chunked<A: Clone + Send, F: Fn(A, AlmideString) -
             let mut handles = Vec::with_capacity(threads);
             for t in 0..threads {
                 let init = init.clone();
-                let spawned = std::thread::Builder::new().spawn_scoped(scope, move || {
+                handles.push(almide_fan_spawn(scope, move || {
                     almide_stack_guard_register();
                     ranges.iter().skip(t).step_by(threads).map(|&(s, e)| fold_lines_range_impl(path, s, e, init.clone(), f)).collect::<Vec<_>>()
-                });
-                handles.push(spawned.map_err(|e| format!("fold_lines_chunked: cannot start a worker: {e}"))?);
+                }));
             }
             let mut slots: Vec<Option<Result<A, String>>> = (0..ranges.len()).map(|_| None).collect();
             for (t, h) in handles.into_iter().enumerate() {
-                let parts = h.join().map_err(|_| "fold_lines_chunked: worker panicked".to_string())?;
+                let parts = match h {
+                    AlmideFanArm::Spawned(h) => h.join().map_err(|_| "fold_lines_chunked: worker panicked".to_string())?,
+                    AlmideFanArm::Ran(parts) => parts,
+                };
                 for (k, part) in parts.into_iter().enumerate() {
                     slots[t + k * threads] = Some(part);
                 }
