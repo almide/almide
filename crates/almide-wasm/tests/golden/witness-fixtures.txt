@@ -190,6 +190,8 @@ spec/wasm_cross/env_set_overlay.almd
 spec/wasm_cross/env_set_refusal.almd
 spec/wasm_cross/env_sleep_pause.almd
 spec/wasm_cross/err_arm_takes_let_match_type.almd
+spec/wasm_cross/err_text_label_and_key_escape.almd
+spec/wasm_cross/err_text_operand_escape_families.almd
 spec/wasm_cross/error_operators.almd
 spec/wasm_cross/exit_code_out_of_range.almd
 spec/wasm_cross/expr_stmt_comment.almd
@@ -769,6 +771,7 @@ spec/wasm_cross/result_uoe_float.almd
 spec/wasm_cross/result_value_int_tuple.almd
 spec/wasm_cross/result_wall_escalations.almd
 spec/wasm_cross/runtime_backed_value_repr.almd
+spec/wasm_cross/runtime_backed_variant_repr.almd
 spec/wasm_cross/scalar_if_arm_effects.almd
 spec/wasm_cross/scan_heap_acc.almd
 spec/wasm_cross/scoped_region_value.almd
