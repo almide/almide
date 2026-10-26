@@ -1182,3 +1182,27 @@ effect fn main() -> Unit = {
         "{errs:?}"
     );
 }
+
+/// A Matrix operand admits `+ - * /` with another Matrix and `*` with a
+/// scale; any other pairing is refused at check time instead of reaching
+/// lowering as a scalar operator on a Matrix (an IR verify ICE).
+#[test]
+fn matrix_operator_without_a_matrix_operation_is_refused() {
+    for src in [
+        "fn f(m: Matrix) -> Matrix = m / 2.0",
+        "fn f(m: Matrix) -> Matrix = m + 1.0",
+        "fn f(m: Matrix) -> Matrix = m % m",
+        "fn f(m: Matrix) -> Matrix = 2.0 - m",
+    ] {
+        let hints = error_hints(src);
+        assert!(!hints.is_empty(), "{src} should not check");
+        assert!(hints[0].contains("matrix.map"), "hint should point at matrix.map for {src}, got: {}", hints[0]);
+    }
+    for src in [
+        "fn f(a: Matrix, b: Matrix) -> Matrix = a / b",
+        "fn f(a: Matrix, b: Matrix) -> Matrix = a + b - b * a",
+        "fn f(a: Matrix) -> Matrix = 2 * a * 0.5",
+    ] {
+        assert!(error_hints(src).is_empty(), "{src} should check");
+    }
+}

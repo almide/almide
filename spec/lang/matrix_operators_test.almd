@@ -1,0 +1,64 @@
+// The operators on Matrix (R-matrix-14). Removing matrix.add / sub / mul /
+// div left `/` on two Matrix values lowered as DivInt, an IR verify ICE;
+// every operator a Matrix admits is pinned here on its elementwise result.
+test "matrix division is elementwise" {
+  let a = matrix.from_lists([
+    [6.0, -3.0],
+    [1.0, 0.5]
+  ])
+  let b = matrix.from_lists([
+    [2.0, 3.0],
+    [4.0, 0.25]
+  ])
+  assert_eq(matrix.to_lists(a / b), [
+    [3.0, -1.0],
+    [0.25, 2.0]
+  ])
+}
+
+test "matrix addition and subtraction are elementwise" {
+  let a = matrix.from_lists([
+    [1.0, 2.0],
+    [3.0, 4.0]
+  ])
+  let b = matrix.from_lists([
+    [0.5, 0.5],
+    [1.0, -1.0]
+  ])
+  assert_eq(matrix.to_lists(a + b), [
+    [1.5, 2.5],
+    [4.0, 3.0]
+  ])
+  assert_eq(matrix.to_lists(a - b), [
+    [0.5, 1.5],
+    [2.0, 5.0]
+  ])
+}
+
+test "matrix times matrix is the product and times a number scales" {
+  let a = matrix.from_lists([
+    [1.0, 2.0],
+    [3.0, 4.0]
+  ])
+  let i = matrix.from_lists([
+    [1.0, 0.0],
+    [0.0, 1.0]
+  ])
+  assert_eq(matrix.to_lists(a * i), matrix.to_lists(a))
+  assert_eq(matrix.to_lists(a * 2.0), [
+    [2.0, 4.0],
+    [6.0, 8.0]
+  ])
+  assert_eq(matrix.to_lists(2 * a), matrix.to_lists(a * 2.0))
+}
+
+test "the operators compose" {
+  let a = matrix.from_lists([
+    [2.0, 4.0],
+    [8.0, 16.0]
+  ])
+  assert_eq(matrix.to_lists((a + a) / a - -a), [
+    [4.0, 6.0],
+    [10.0, 18.0]
+  ])
+}
