@@ -244,6 +244,10 @@ pub struct IrParam {
 
 // ── Top-level structures ────────────────────────────────────────
 
+/// The attribute a generator stamps on a fn it may leave out: the fn ships
+/// only when a call reaches it (`almide_optimize::on_demand`, after mono).
+pub const ON_DEMAND_ATTR: &str = "on_demand";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrFunction {
     pub name: Sym,

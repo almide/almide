@@ -141,6 +141,9 @@ fn derive_codec(
     let mut workers = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let ctx_env = ctx.env;
+    // The strict family's span in `out` and in `workers` (C-436).
+    let mut strict_from = (0, 0);
+    let mut strict_to = (0, 0);
     {
         // A type derives `Decode` when its protocol closure holds it; keyed
         // leniently (bare or qualified), like the derive-field checks.
@@ -168,12 +171,14 @@ fn derive_codec(
                 }
                 // C-436: the strict walk exists whenever `decode` does, so an
                 // enclosing type's strict decode can enter this one.
+                strict_from = (out.len(), wk.out.len());
                 if dirs.decode {
                     out.push(auto_derive_record_strict(&mut wk, fields));
                 }
                 if wants(crate::canonicalize::protocols::STRICT_DECODE_METHOD) {
                     out.push(auto_derive_decode_strict(&mut wk, type_ty));
                 }
+                strict_to = (out.len(), wk.out.len());
             }
             (None, IrTypeDeclKind::Variant { cases, .. }) => {
                 if wants("encode") {
@@ -182,16 +187,25 @@ fn derive_codec(
                 if wants("decode") {
                     out.push(auto_derive_variant_decode(&mut wk, type_ty, cases));
                 }
+                strict_from = (out.len(), wk.out.len());
                 if dirs.decode {
                     out.push(auto_derive_variant_strict(&mut wk, cases));
                 }
                 if wants(crate::canonicalize::protocols::STRICT_DECODE_METHOD) {
                     out.push(auto_derive_decode_strict(&mut wk, type_ty));
                 }
+                strict_to = (out.len(), wk.out.len());
             }
             (None, _) => {}
         }
     }
+    // The strict walk exists for every `Decode` type but runs only where a
+    // sink or a `T.decode_strict` call reaches it: stamped `@on_demand`, it
+    // is dropped after mono when nothing does, so a program that never
+    // decodes strictly ships none of it.
+    let stamp = |f: &mut IrFunction| f.attrs.push(almide_lang::ast::Attribute { name: sym(almide_ir::ON_DEMAND_ATTR), args: vec![], span: None });
+    out[strict_from.0..strict_to.0].iter_mut().for_each(stamp);
+    workers[strict_from.1..strict_to.1].iter_mut().for_each(stamp);
     out.append(&mut workers);
     // The four container helpers (`__{en,de}code_{list,option}_T`, #790 piece 1)
     // every Codec type provides — real bodies the v1 leg links; on v0 the
