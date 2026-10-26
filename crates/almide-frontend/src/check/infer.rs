@@ -428,7 +428,11 @@ impl Checker {
             ).with_code("E029"));
             return Err(Ty::Unknown);
         }
-        let generic_args = self.instantiate_type_generics(n);
+        // The generics of the type the literal BUILDS: by its bare spelling,
+        // the entry program's own `type Secret = { .. }` picked up the
+        // bundled `Secret[A]`'s parameter and was E025 (`self.Secret[?0]`).
+        let generics_key = if self.env.types.contains_key(&canon) { canon } else { *n };
+        let generic_args = self.instantiate_type_generics(generics_key.as_str());
         let named = Ty::Named(canon, generic_args);
         let (decl, closed) = match self.env.resolve_named(&named) {
             Ty::Record { fields } => (fields, true),
