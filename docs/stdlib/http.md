@@ -28,7 +28,7 @@ The client functions are `effect fn`s that return `Result`. Propagation is
 explicit (ADR-0008): write `http.send(req)!` in an effect fn, or handle the
 `Result` with `match` / `??`. A bare `http.get(url)` statement is E042.
 
-### `http.serve(port: Int, handler: effect (HttpRequest) -> HttpResponse) -> Unit`
+### `http.serve(port: Int, handler: HttpHandler) -> Unit`
 
 Start an HTTP server on the given port with a request handler
 

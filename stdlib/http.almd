@@ -30,7 +30,7 @@ import url
 @intrinsic("almide_rt_http_serve")
 @concurrent(handler)
 @category("Net.listen")
-effect fn serve(port: Int, handler: effect (HttpRequest) -> HttpResponse) -> Unit = _
+effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 
 // ── Response builders ──
 /// Reply with Content-Type text/plain.

@@ -80,6 +80,10 @@ patterns = [
   "capability: http.body",
   "capability: http.new_request",
   "capability: http.with_headers",
+  # (stdlib redesign wave 5) int.wrap, the N-bit register the width-free
+  # wrap_* / rotate_* compose with (R-int-12): a pure stdlib body over the
+  # bitwise floor the pool can lower with dispatch glue.
+  "capability: int.wrap",
   # env.sleep_ms (#1423 bucket A): the pause is wall-clock with no
   # observable value, so a sleep-that-does-nothing interp arm is a
   # faithful vote — bounded glue, no architectural change.
