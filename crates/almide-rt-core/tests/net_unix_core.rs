@@ -155,9 +155,22 @@ fn a_huge_read_length_answers_the_bytes_there_are() -> Result<(), String> {
 /// live in net_unix_sys.rs alone, every block under a SAFETY line.
 #[test]
 fn unsafe_lives_in_the_one_sanctioned_module() {
-    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    for entry in std::fs::read_dir(&src).unwrap() {
-        let path = entry.unwrap().path();
+    // Every .rs file under src/, subdirectories included (src/generated/
+    // holds the inlined snapshots, #3361): a directory is walked, not read.
+    let mut files = Vec::new();
+    let mut dirs = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                files.push(path);
+            }
+        }
+    }
+    assert!(files.iter().any(|p| p.ends_with("net_unix_sys.rs")), "the walk found no sources");
+    for path in files {
         let text = std::fs::read_to_string(&path).unwrap();
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
         let lines: Vec<&str> = text.lines().collect();
