@@ -1313,6 +1313,12 @@ complexity = "PASS: no size parameter — constant-size arguments only (the plai
 alloc = "PASS: call live=0"
 diamond = "PASS: direct = via left = via right on both legs (1 line(s) each)"
 
+[[fn]]
+name = "env.secret"
+sig = "effect (name: String) -> Option[Secret[String]] ! String"
+class = "effect"
+status = "uninspected"
+blocked = "new in security table row 20 (C-438): awaits its GCE inspection run"
 
 [[fn]]
 name = "env.millis"
@@ -14641,28 +14647,28 @@ blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE ins
 
 [[fn]]
 name = "hash.hmac_sha256"
-sig = "(key: Bytes, b: Bytes) -> Bytes"
+sig = "(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]"
 class = "pure"
 status = "uninspected"
 blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
 
 [[fn]]
 name = "hash.hmac_sha512"
-sig = "(key: Bytes, b: Bytes) -> Bytes"
+sig = "(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]"
 class = "pure"
 status = "uninspected"
 blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
 
 [[fn]]
 name = "hash.is_valid_hmac_sha256"
-sig = "(key: Bytes, b: Bytes, tag: Bytes) -> Bool"
+sig = "(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool"
 class = "pure"
 status = "uninspected"
 blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
 
 [[fn]]
 name = "hash.is_valid_hmac_sha512"
-sig = "(key: Bytes, b: Bytes, tag: Bytes) -> Bool"
+sig = "(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool"
 class = "pure"
 status = "uninspected"
 blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
