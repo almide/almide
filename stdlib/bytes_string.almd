@@ -32,8 +32,10 @@ fn __bs_seq(d: Int, n: Int, i: Int) -> Int = {
   else if b0 < 240 then 3
   else if b0 < 245 then 4
   else 0
-  let lo2 = if b0 == 224 then 160 else if b0 == 240 then 144 else 128
-  let hi2 = if b0 == 237 then 159 else if b0 == 244 then 143 else 191
+  let lo2 = if b0 == 224 then 160
+  else if b0 == 240 then 144 else 128
+  let hi2 = if b0 == 237 then 159
+  else if b0 == 244 then 143 else 191
   let e = d + n
   let m = if k < 2 then 1
   else if not __bs_cont(d + i + 1, e, lo2, hi2) then 1
@@ -42,14 +44,16 @@ fn __bs_seq(d: Int, n: Int, i: Int) -> Int = {
   else if k == 3 then 3
   else if not __bs_cont(d + i + 3, e, 128, 191) then 3
   else 4
-  if k == 0 then 0 - 1 else if m == k then k else 0 - m
+  if k == 0 then 0 - 1
+  else if m == k then k else 0 - m
 }
 
 // Pass 1: the decoded length in bytes (an invalid subpart costs the 3 bytes of U+FFFD).
 fn __bs_olen(d: Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
 else {
   let s = __bs_seq(d, n, i)
-  if s > 0 then __bs_olen(d, n, i + s, acc + s) else __bs_olen(d, n, i - s, acc + 3)
+  if s > 0 then __bs_olen(d, n, i + s, acc + s)
+  else __bs_olen(d, n, i - s, acc + 3)
 }
 
 // Pass 2: copy each well-formed sequence, write EF BF BD for each invalid subpart.
