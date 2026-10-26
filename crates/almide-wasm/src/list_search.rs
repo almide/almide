@@ -81,8 +81,8 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(INT)))))
     }
 
-    /// `list.window(xs, n)` — n == 0 dies loudly (both targets, C-153
-    /// family), n < 0 or n > len is the empty list, else len-n+1
+    /// `list.window(xs, n)` — n <= 0 dies loudly (both targets, C-153
+    /// family; a negative n is 0, #4147), n > len is the empty list, else len-n+1
     /// overlapping windows.
     pub(crate) fn lower_list_window(
         &mut self,
@@ -106,7 +106,8 @@ impl Emitter<'_> {
         let die = self.pool.intern("Error: window size must be positive");
         let mut i = self.f.instructions();
         i.local_set(hn64);
-        i.local_get(hn64).i64_eqz().if_(BlockType::Empty);
+        // A size of 0 or less aborts (#4147: a negative size is read as 0).
+        i.local_get(hn64).i64_const(0).i64_le_s().if_(BlockType::Empty);
         i.i32_const(die as i32).call(F_EPRINTLN_BLOCK);
         i.i32_const(1).call(F_EXIT_IMPORT).unreachable();
         i.end();

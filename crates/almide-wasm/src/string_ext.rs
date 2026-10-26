@@ -56,9 +56,8 @@ impl Emitter<'_> {
         .map(Some)
     }
 
-    /// First n CHARS (native `s.chars().take(n as usize)`): a NEGATIVE n
-    /// reinterprets huge and takes the WHOLE string — deliberately not
-    /// the C-054 clamp; cp_off clamps past-end.
+    /// First n CHARS; a NEGATIVE n is 0 (#4147 — it used to take the
+    /// WHOLE string, as `n as usize` did natively); cp_off clamps past-end.
     fn lower_string_take(&mut self, s: &IrExpr, n: &IrExpr) -> ArmResult {
         self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
@@ -71,7 +70,7 @@ impl Emitter<'_> {
         i.local_set(hn);
         i.local_get(hn).i64_const(0).i64_lt_s();
         i.if_(BlockType::Result(ValType::I32));
-        i.local_get(hs).i32_load(len_memarg());
+        i.i32_const(0); // #4147: a negative count is 0
         i.else_();
         i.local_get(hs).local_get(hn).call(F_CP_OFF);
         i.end();
@@ -90,9 +89,7 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(STR)))
     }
 
-    /// Skip n CHARS (native `s.chars().skip(n as usize)`): a NEGATIVE n
-    /// reinterprets huge and skips EVERYTHING — the deliberate
-    /// mirror-asymmetry of take (whole vs empty).
+    /// Skip n CHARS; a NEGATIVE n is 0 (#4147) — the whole string.
     fn lower_string_drop(&mut self, s: &IrExpr, n: &IrExpr) -> ArmResult {
         self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
         let hs = self.hold_i32()?;
@@ -105,7 +102,7 @@ impl Emitter<'_> {
         i.local_set(hn);
         i.local_get(hn).i64_const(0).i64_lt_s();
         i.if_(BlockType::Result(ValType::I32));
-        i.local_get(hs).i32_load(len_memarg());
+        i.i32_const(0); // #4147: a negative count is 0
         i.else_();
         i.local_get(hs).local_get(hn).call(F_CP_OFF);
         i.end();

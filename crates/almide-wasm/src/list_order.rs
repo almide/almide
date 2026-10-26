@@ -15,8 +15,7 @@ impl Emitter<'_> {
         args: &[IrExpr],
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         match (func, args) {
-            // First n elements (native `take(n as usize)`): a NEGATIVE
-            // n reinterprets huge and takes the WHOLE list.
+            // First n elements; a NEGATIVE n is 0 (#4147).
             ("take", [xs, n]) => self.lower_list_take(xs, n),
             ("min" | "max", [xs]) => self.lower_list_min_max(func, xs).map(Some),
             ("remove_at", [xs, idx]) => self.lower_list_remove_at(xs, idx).map(Some),
@@ -49,8 +48,7 @@ impl Emitter<'_> {
                 self.lower_list_chunk_windows(func, xs, n_arg).map(Some)
             }
             ("sort_by", [xs, cb]) => self.lower_list_sort_by(xs, cb).map(Some),
-            // skip(n as usize): a NEGATIVE n reinterprets huge — EMPTY
-            // (take's mirror keeps the WHOLE list; the asymmetry is v0's).
+            // All but the first n; a NEGATIVE n is 0 (#4147) — the whole list.
             ("drop", [xs, n]) => {
                 let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => h,
@@ -65,6 +63,7 @@ impl Emitter<'_> {
                 let ho = self.hold_i32()?;
                 let mut i = self.f.instructions();
                 i.local_set(hn);
+                i.local_get(hn).i64_const(0).local_get(hn).i64_const(0).i64_gt_s().select().local_set(hn); // #4147: a negative count is 0
                 // keep_bytes = n < 0 || n >= len/stride ? 0 : len - n*stride
                 // (index-domain test — the byte product wraps for a huge n,
                 // #2685)
@@ -344,7 +343,9 @@ impl Emitter<'_> {
                 {
                     let mut i = self.f.instructions();
                     i.local_set(hn);
-                    i.local_get(hn).i64_eqz();
+                    // A size of 0 or less aborts: a negative size is read
+                    // as 0 (#4147; chunk(-1) used to be one chunk).
+                    i.local_get(hn).i64_const(0).i64_le_s();
                     i.if_(BlockType::Empty);
                     i.i32_const(msg as i32);
                 }
@@ -515,8 +516,7 @@ impl Emitter<'_> {
 }
 
 impl Emitter<'_> {
-    /// First n elements (native `take(n as usize)`; a NEGATIVE n
-    /// reinterprets huge and takes the whole list) — split from
+    /// First n elements (a NEGATIVE n is 0, #4147) — split from
     /// `lower_list_order_call` for the complexity budget.
     fn lower_list_take(&mut self, xs: &IrExpr, n: &IrExpr) -> Result<Option<Option<Lowered>>, EmitError> {
                 let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
@@ -532,6 +532,7 @@ impl Emitter<'_> {
                 let ho = self.hold_i32()?;
                 let mut i = self.f.instructions();
                 i.local_set(hn);
+                i.local_get(hn).i64_const(0).local_get(hn).i64_const(0).i64_gt_s().select().local_set(hn); // #4147: a negative count is 0
                 // bytes = n < 0 || n >= len/stride ? len : n*stride
                 // select(v1, v2, cond) = cond ? v1 : v2 — LEN is v1. The
                 // test is in the INDEX domain: the byte product n*stride
