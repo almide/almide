@@ -284,7 +284,10 @@ fn from_utf16(xs: List[Int]) -> Result[String, String] = {
 }
 
 /// The characters of s for which f is true.
-fn filter(s: String, f: (String) -> Bool) -> String = list.join(list.filter(string.to_list(s), f), "")
+fn filter(s: String, f: (String) -> Bool) -> String = list.join(
+  list.filter(string.to_list(s), f),
+  "",
+)
 
 /// f folded over the characters of s, left to right.
 fn fold[B](s: String, init: B, f: (B, String) -> B) -> B = list.fold(string.to_list(s), init, f)
@@ -443,10 +446,16 @@ fn max_with(s: String, cmp: (String, String) -> Int) -> String? = match string.f
 fn find_index(s: String, f: (String) -> Bool) -> Int? = list.find_index(string.to_list(s), f)
 
 /// The longest prefix whose characters all satisfy f.
-fn take_while(s: String, f: (String) -> Bool) -> String = list.join(list.take_while(string.to_list(s), f), "")
+fn take_while(s: String, f: (String) -> Bool) -> String = list.join(
+  list.take_while(string.to_list(s), f),
+  "",
+)
 
 /// s after the longest prefix whose characters all satisfy f.
-fn drop_while(s: String, f: (String) -> Bool) -> String = list.join(list.drop_while(string.to_list(s), f), "")
+fn drop_while(s: String, f: (String) -> Bool) -> String = list.join(
+  list.drop_while(string.to_list(s), f),
+  "",
+)
 
 /// Runs of n characters, the last may be shorter; n <= 0 aborts.
 fn chunk(s: String, n: Int) -> List[String] =
@@ -471,7 +480,10 @@ fn intersperse(s: String, sep: String) -> String = list.join(string.to_list(s), 
 fn unique(s: String) -> String = list.join(list.unique(string.to_list(s)), "")
 
 /// The first character of each key f gives, in order.
-fn unique_by[K](s: String, f: (String) -> K) -> String = list.join(list.unique_by(string.to_list(s), f), "")
+fn unique_by[K](s: String, f: (String) -> K) -> String = list.join(
+  list.unique_by(string.to_list(s), f),
+  "",
+)
 
 // ── Text requirement (R-L0-42): `list.join[T: Text]` over Strings ──
 fn __join(xs: List[String], sep: String) -> String = list.__join_string(xs, sep)

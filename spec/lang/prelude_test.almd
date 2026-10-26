@@ -1,5 +1,3 @@
-import math
-
 // Test that prelude modules work without import
 // No import statements in this file — all module calls use prelude.
 test "int.parse works without import" {

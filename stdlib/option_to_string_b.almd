@@ -23,5 +23,8 @@ fn __bool_to_string(b: Bool) -> String = if b then "true" else "false"
 @implements("bytes.__join")
 fn bytes_join(xs: List[Bytes], sep: Bytes) -> Bytes = match xs {
   [] => bytes.zeros(0),
-  [first, ..rest] => rest |> list.fold(first, (acc, b) => bytes.__concat(bytes.__concat(acc, sep), b)),
+  [first, ..rest] => rest |> list.fold(
+    first,
+    (acc, b) => bytes.__concat(bytes.__concat(acc, sep), b),
+  ),
 }

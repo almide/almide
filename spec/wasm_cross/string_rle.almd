@@ -9,10 +9,14 @@
 // `run_length_encode` left in dialect epoch 15; this is its replacement).
 fn run_length_encode(s: String) -> List[(String, Int)] = {
   let init: List[(String, Int)] = []
-  string.to_list(s) |> list.fold(init, (runs, c) => match list.last(runs) {
-    some((p, n)) => if p == c then list.drop_end(runs, 1) + [(c, n + 1)] else runs + [(c, 1)],
-    none => [(c, 1)],
-  })
+  string.to_list(s) |> list.fold(
+    init,
+    (runs, c) => match list.last(runs) {
+      some((p, n)) => if p == c then list.drop_end(runs, 1) + [(c, n + 1)]
+      else runs + [(c, 1)],
+      none => [(c, 1)],
+    },
+  )
 }
 
 fn show(s: String) -> String = run_length_encode(s) |> list.map((r) => {

@@ -455,7 +455,10 @@ fn skip_zstr(b: Bytes, p: Int) -> Int = if bytes.get(b, p) ?? 0 == 0 then p + 1 
 
 // Position of the deflate stream after the gzip member header at `pos`, or -1 if not a gzip member.
 fn header_end(inp: Bytes, pos: Int) -> Int = {
-  if (bytes.get(inp, pos) ?? 0) != 31 or (bytes.get(inp, pos + 1) ?? 0) != 139 or (bytes.get(inp, pos + 2) ?? 0) != 8 then 0 - 1
+  if (bytes.get(inp, pos) ?? 0) != 31 or (bytes.get(inp, pos + 1) ?? 0) != 139 or (bytes.get(
+    inp,
+    pos + 2,
+  ) ?? 0) != 8 then 0 - 1
   else {
     let flg = bytes.get(inp, pos + 3) ?? 0
     let p0 = pos + 10

@@ -101,7 +101,10 @@ fn __decode_option_float(v: Value, key: String) -> Result[Float?, String] = matc
   err(_e) => ok(none),
 }
 
-fn __decode_option_bool(v: Value, key: String) -> Result[Bool?, String] = match value.__field(v, key) {
+fn __decode_option_bool(v: Value, key: String) -> Result[Bool?, String] = match value.__field(
+  v,
+  key,
+) {
   ok(fv) => if __is_null(fv) then ok(none)
   else match value.as_bool(fv) {
     ok(x) => ok(some(x)),

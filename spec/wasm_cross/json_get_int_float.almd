@@ -22,7 +22,10 @@ fn showf(r: Result[Float, String]) -> String = match r {
 effect fn main() -> Unit = {
   let v = json.parse("{\"f\": 2.7, \"g\": 3.0, \"n\": -0.5, \"i\": 3, \"s\": \"x\", \"z\": null}")!
   println("get_int f=${value.get_int(v, "f")} g=${value.get_int(v, "g")} n=${value.get_int(v, "n")}")
-  println("get_int i=${value.get_int(v, "i")} s=${value.get_int(v, "s")} z=${value.get_int(v, "z")} missing=${value.get_int(v, "q")}")
+  println("get_int i=${value.get_int(v, "i")} s=${value.get_int(v, "s")} z=${value.get_int(v, "z")} missing=${value.get_int(
+    v,
+    "q",
+  )}")
   println("get_float f=${value.get_float(v, "f")} i=${value.get_float(v, "i")}")
   let f = value.get(v, "f")!
   let g = value.get(v, "g")!

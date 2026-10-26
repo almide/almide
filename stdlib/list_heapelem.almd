@@ -187,4 +187,3 @@ fn list_drop_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   let _c = __lsh_copy(h + 12, prim.handle(buf) + 12, endi, 0)
   buf
 }
-

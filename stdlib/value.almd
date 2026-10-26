@@ -156,7 +156,7 @@ fn get_path(v: Value, p: Path) -> Value? = match p {
 /// v with x at p; missing keys are created, a missed index leaves v as is; err when the result would nest past 1000.
 fn set_path(v: Value, p: Path, x: Value) -> Result[Value, String] = match p {
   Path(steps) => if list.len(steps) > 1000 or __nests_past(x, 1000 - list.len(steps)) then err("json: nesting deeper than 1000")
-  else ok(__set_steps(v, steps, 0, x)),
+  else ok(__set_steps(v, steps, 0, x))
 }
 
 // x holds containers nested more than `budget` deep — json.parse's bound

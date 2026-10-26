@@ -8,7 +8,6 @@
 // never held cannot be written at all, since `unix.Fd` is opaque. (A
 // shm_write out of the file's range aborts, so it is not staged here.) The
 // socket path, a fresh name in the temp dir, is masked as `<path>`.
-import env
 import unix
 import io
 import fs

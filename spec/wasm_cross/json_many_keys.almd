@@ -15,7 +15,10 @@ fn check(p: String, n: Int) -> Unit = {
   let keys = list.map(value.as_object(v) ?? [], (kv) => kv.0)
   let rt = if json.stringify(v) == obj_text(p, n) then "same" else "DRIFT"
   println("${p}${n}: keys=${list.len(keys)} first=${keys[0]} last=${keys[n - 1]} rt=${rt}")
-  println("  first=${value.get_int(v, "${p}0") ?? -1} last=${value.get_int(v, "${p}${n - 1}") ?? -1} missing=${value.get_int(v, "nope") ?? -1}")
+  println("  first=${value.get_int(v, "${p}0") ?? -1} last=${value.get_int(v, "${p}${n - 1}") ?? -1} missing=${value.get_int(
+    v,
+    "nope",
+  ) ?? -1}")
 }
 
 fn main() -> Unit = {

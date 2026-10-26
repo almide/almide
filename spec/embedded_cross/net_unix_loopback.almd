@@ -7,7 +7,6 @@
 // embedded host, so the program prints their properties (non-negative,
 // distinct, new on receipt) and what flows through them, never the numbers
 // (`unix.Fd` is opaque, R-unix-01).
-import env
 import unix
 import io
 import fs

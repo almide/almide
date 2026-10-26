@@ -6,7 +6,6 @@
 // len = 2^62 on a socket or shm file holding 16 bytes answers those bytes
 // (io.read_exact, whose peer then closes, answers its defined err), and the
 // program runs to its last line.
-import env
 import fs
 import io
 import net

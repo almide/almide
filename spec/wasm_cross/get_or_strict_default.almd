@@ -12,5 +12,9 @@ fn main() -> Unit = {
   bytes.put_u8(b, 0, 7)
   println("hits: ${list.get(xs, 1) ?? 0} ${map.get(m, "a") ?? 0} ${bytes.get(b, 0) ?? 0}")
   println("misses: ${list.get(xs, 9) ?? -1} ${map.get(m, "z") ?? -1} ${bytes.get(b, 9) ?? -1}")
-  println("lazy fallback keeps going: ${list.get(xs, 0) ?? int.clamp(5, 1, 0)} ${map.get(m, "a") ?? int.clamp(5, 1, 0)}")
+  println("lazy fallback keeps going: ${list.get(xs, 0) ?? int.clamp(5, 1, 0)} ${map.get(m, "a") ?? int.clamp(
+    5,
+    1,
+    0,
+  )}")
 }
