@@ -10,12 +10,6 @@ pub const SRC_ARGS: &str = r#"
 
 import env
 
-/// Same as env.args; argv[0] excluded.
-effect fn raw() -> List[String] = env.args()
-
-/// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
-effect fn flag(name: String) -> Bool = __has(__options(env.args()), name)
-
 /// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
 effect fn has_flag(name: String) -> Bool = __has(__options(env.args()), name)
 
@@ -23,6 +17,7 @@ effect fn has_flag(name: String) -> Bool = __has(__options(env.args()), name)
 
 
 
+@category
 fn __has(args: List[String], name: String) -> Bool = {
 
 
@@ -34,12 +29,14 @@ fn __has(args: List[String], name: String) -> Bool = {
 
 
 
+@category
 fn __options(args: List[String]) -> List[String] = match list.index_of(args, "--") {
   some(i) => list.take(args, i),
   none => args,
 }
 
 
+@category
 fn __operands(args: List[String]) -> List[String] = match list.index_of(args, "--") {
   some(i) => list.drop(args, i + 1),
   none => [],
@@ -51,7 +48,7 @@ fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
   else {
 
 
-    let a = list.get_or(args, i, "")
+    let a = list.get(args, i) ?? ""
     if a == long or a == short then true
     else __flag_at(args, long, short, i + 1)
   }
@@ -78,14 +75,8 @@ effect fn option(name: String) -> String? = {
 @category
 fn __find_prefixed(args: List[String], prefix: String, i: Int) -> String? =
   if i >= list.len(args) then none
-  else if string.starts_with(list.get_or(args, i, ""), prefix) then list.get(args, i)
+  else if string.starts_with(list.get(args, i) ?? "", prefix) then list.get(args, i)
   else __find_prefixed(args, prefix, i + 1)
-
-/// option(name), or fallback when absent.
-effect fn option_or(name: String, fallback: String) -> String = match option(name)! {
-  some(v) => v,
-  none => fallback,
-}
 
 /// Args before `--` that are not flags or values of the named options, then all after `--`.
 effect fn positional(options: List[String]) -> List[String] = __positional(env.args(), options)
@@ -100,22 +91,29 @@ effect fn positional(options: List[String]) -> List[String] = __positional(env.a
 
 
 
-fn __positional(args: List[String], options: List[String]) -> List[String] =
-  __positional_at(__options(args), options, 0, []) + __operands(args)
+@category
+fn __positional(args: List[String], options: List[String]) -> List[String] = __positional_at(
+  __options(args),
+  options,
+  0,
+  [],
+) + __operands(args)
 
 
 @category
 fn __positional_at(args: List[String], options: List[String], i: Int, acc: List[String]) -> List[String] =
   if i >= list.len(args) then acc
   else {
-    let a = list.get_or(args, i, "")
+    let a = list.get(args, i) ?? ""
     if not string.starts_with(a, "-") then __positional_at(args, options, i + 1, acc + [a])
-    else if string.starts_with(a, "--") and list.contains(options, string.drop(a, 2)) then __positional_at(args, options, i + 2, acc)
+    else if string.starts_with(a, "--") and list.contains(options, string.drop(a, 2)) then __positional_at(
+      args,
+      options,
+      i + 2,
+      acc,
+    )
     else __positional_at(args, options, i + 1, acc)
   }
-
-/// i-th positional arg (see positional); none if out of range.
-effect fn positional_at(i: Int, options: List[String]) -> String? = list.get(positional(options)!, i)
 "#;
 pub const SRC_BASE64: &str = r#"
 
@@ -335,7 +333,7 @@ fn parse(s: String) -> Result[BigInt, String] = parse_radix(s, 10)
 /// radix outside 2..36 aborts.
 fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
   check_radix(radix)
-  let bytes = string.to_bytes(string.trim(s))
+  let bytes = bytes.to_list(bytes.from_string(string.trim(s)))
   match bytes {
     [] => err("cannot parse integer from empty string"),
     [45, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, true),
@@ -372,7 +370,7 @@ fn to_string_radix(x: BigInt, radix: Int) -> String = {
 
 local fn chunk_text(chunks: List[Int], radix: Int, k: Int) -> String = match chunks {
   [] => "0",
-  [top, ..rest] => int.to_string_radix(top, radix) + (rest |> list.map((c) => string.pad_start(int.to_string_radix(c, radix), k, "0")) |> string.join("")),
+  [top, ..rest] => int.to_string_radix(top, radix) + (rest |> list.map((c) => string.pad_start(int.to_string_radix(c, radix), k, "0")) |> list.join("")),
 }
 
 
@@ -808,7 +806,7 @@ else {
 
   let lo = int_value(make(false, list.take(x.limbs, 2)))
   let hi = int_value(make(false, list.drop(x.limbs, 2)))
-  some(int.to_uint64(lo) + int.to_uint64(hi) * int.to_uint64(1152921504606846976))
+  some(int.__to_uint64(lo) + int.__to_uint64(hi) * int.__to_uint64(1152921504606846976))
 }
 
 fn __trunc(x: BigInt) -> BigInt = x
@@ -818,18 +816,18 @@ fn __int_sat(x: BigInt) -> Int = match __int_exact(x) {
   none => if x.neg then int.min_value() else int.max_value(),
 }
 
-fn __uint64_sat(x: BigInt) -> UInt64 = if x.neg then int.to_uint64(0)
+fn __uint64_sat(x: BigInt) -> UInt64 = if x.neg then int.__to_uint64(0)
 else match __uint64_exact(x) {
   some(u) => u,
   none => uint64.max_value(),
 }
 
 fn __to_float(x: BigInt) -> Float = match __int_exact(x) {
-  some(n) => int.to_float(n),
+  some(n) => int.__raw_to_float(n),
   none => {
 
     let (top, e) = top_bits(x, 61)
-    pow2(e) * int.to_float(top)
+    pow2(e) * int.__raw_to_float(top)
   },
 }
 
@@ -839,17 +837,17 @@ fn __to_float_exact(x: BigInt) -> Float? = {
 }
 
 fn __to_float32(x: BigInt) -> Float32 = match __int_exact(x) {
-  some(n) => int.to_float32(n),
+  some(n) => int.__raw_to_float32(n),
   none => {
     let (top, e) = top_bits(x, 61)
-    if e > 200 then float.to_float32(if x.neg then 0.0 - float.infinity() else float.infinity())
-    else float.to_float32(pow2(e) * float.from_float32(int.to_float32(top)))
+    if e > 200 then float.__raw_to_float32(if x.neg then 0.0 - float.infinity() else float.infinity())
+    else float.__raw_to_float32(pow2(e) * float.__from_float32(int.__raw_to_float32(top)))
   },
 }
 
 fn __to_float32_exact(x: BigInt) -> Float32? = {
   let f = __to_float32(x)
-  if float.__decimal_exact(float.from_float32(f)) == some(to_string(x)) then some(f) else none
+  if float.__decimal_exact(float.__from_float32(f)) == some(to_string(x)) then some(f) else none
 }
 
 fn __decimal_exact(x: BigInt) -> String? = some(to_string(x))
@@ -999,7 +997,7 @@ fn compare(a: Bytes, b: Bytes) -> Int = _
 
 /// New Bytes holding a then b.
 @intrinsic("almide_rt_bytes_concat")
-fn concat(a: Bytes, b: Bytes) -> Bytes = _
+fn __concat(a: Bytes, b: Bytes) -> Bytes = _
 
 /// True if needle occurs in b, or needle is empty.
 @intrinsic("almide_rt_bytes_contains")
@@ -1051,10 +1049,6 @@ fn from_string(s: String) -> Bytes = _
 @intrinsic("almide_rt_bytes_get")
 fn get(b: Bytes, i: Int) -> Int? = _
 
-/// Byte at index i, or default when out of range.
-@intrinsic("almide_rt_bytes_get_or")
-fn get_or(b: Bytes, i: Int, default: Int) -> Int = _
-
 /// First offset of needle, or none; some(0) if empty.
 @intrinsic("almide_rt_bytes_index_of")
 fn index_of(b: Bytes, needle: Bytes) -> Int? = _
@@ -1075,10 +1069,6 @@ fn is_valid_utf8(b: Bytes) -> Bool = _
 @intrinsic("almide_rt_bytes_len")
 fn len(b: Bytes) -> Int = _
 
-/// Pieces split at LF; CR kept; a final LF adds no piece.
-@intrinsic("almide_rt_bytes_lines")
-fn lines(b: Bytes) -> List[Bytes] = _
-
 /// f applied per byte; results cut to low 8 bits.
 @intrinsic("almide_rt_bytes_map_each")
 fn map(b: Bytes, f: (Int) -> Int) -> Bytes = _
@@ -1098,10 +1088,6 @@ fn pad_end(b: Bytes, n: Int, fill: Int) -> Bytes = _
 /// Appends x's low 8 bits in place.
 @intrinsic("almide_rt_bytes_push")
 fn push(mut b: Bytes, x: Int) -> Unit = _
-
-/// Sets byte i to val's low 8 bits; no-op out of range.
-@intrinsic("almide_rt_bytes_set_at")
-fn set_at(mut b: Bytes, i: Int, val: Int) -> Unit = _
 
 /// Copies src_start..src_end to dst; no-op if it won't fit.
 @intrinsic("almide_rt_bytes_copy_within")
@@ -1247,22 +1233,6 @@ fn __read_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 @intrinsic("almide_rt_bytes_read_i64_le_at")
 fn __read_i64_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
-/// Up to count u32-LE-prefixed strings; stops if cut off.
-@intrinsic("almide_rt_bytes_read_length_prefixed_strings_le")
-fn read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String] = _
-
-/// len bytes at pos, lossy UTF-8; empty if out of range.
-@intrinsic("almide_rt_bytes_read_string_at")
-fn read_string_at(b: Bytes, pos: Int, len: Int) -> String = _
-
-/// String after a u32 BE length at pos; empty if cut off.
-@intrinsic("almide_rt_bytes_read_string_be")
-fn read_string_be(b: Bytes, pos: Int) -> String = _
-
-/// Cursor form of read_string_be; (pos, none) if cut off.
-@intrinsic("almide_rt_bytes_read_string_be_at")
-fn read_string_be_at(b: Bytes, pos: Int) -> (Int, String?) = _
-
 /// u16 BE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_u16_be")
 fn __read_u16_be(b: Bytes, pos: Int) -> Int = _
@@ -1310,10 +1280,6 @@ fn __read_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 /// (pos+4, u32 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u32_le_at")
 fn __read_u32_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
-
-/// Byte at pos; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_u8")
-fn read_u8(b: Bytes, pos: Int) -> Int = _
 
 /// (pos+1, byte); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u8_at")
@@ -1400,10 +1366,6 @@ fn __set_u8(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 @intrinsic("almide_rt_bytes_skip")
 fn skip(b: Bytes, pos: Int, n: Int) -> Int = _
 
-/// Offset past count u32-LE-prefixed records.
-@intrinsic("almide_rt_bytes_skip_length_prefixed_le")
-fn skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int = _
-
 /// Copy of start..end, each clamped to 0..len; empty if start >= end.
 @intrinsic("almide_rt_bytes_slice")
 fn slice(b: Bytes, start: Int, end: Int) -> Bytes = _
@@ -1443,85 +1405,9 @@ fn to_string_lossy(b: Bytes) -> String = _
 @intrinsic("almide_rt_bytes_write_bool")
 fn append_bool(mut b: Bytes, x: Bool) -> Unit = _
 
-/// Appends val as 8-byte f64, BE.
-@intrinsic("almide_rt_bytes_write_f64_be")
-fn write_f64_be(mut b: Bytes, val: Float) -> Unit = _
-
-/// Appends val as 8 bytes, BE.
-@intrinsic("almide_rt_bytes_write_i64_be")
-fn write_i64_be(mut b: Bytes, val: Int) -> Unit = _
-
-/// Appends s after a u32 BE byte-length prefix.
-@intrinsic("almide_rt_bytes_write_string_be")
-fn write_string_be(mut b: Bytes, s: String) -> Unit = _
-
-/// Appends val's low 32 bits, BE.
-@intrinsic("almide_rt_bytes_write_u32_be")
-fn write_u32_be(mut b: Bytes, val: Int) -> Unit = _
-
-/// Appends val's low 8 bits; 256 becomes 0.
-@intrinsic("almide_rt_bytes_write_u8")
-fn write_u8(mut b: Bytes, val: Int) -> Unit = _
-
 /// Bytewise XOR, as long as the shorter input.
 @intrinsic("almide_rt_bytes_xor")
 fn xor(a: Bytes, b: Bytes) -> Bytes = _
-
-
-
-
-
-
-/// Byte order: LittleEndian or BigEndian.
-type Endian = | LittleEndian | BigEndian
-
-/// UInt16 at offset; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_uint16")
-fn read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16 = _
-
-/// UInt32 at offset; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_uint32")
-fn read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32 = _
-
-/// Int32 at offset; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_int32")
-fn read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32 = _
-
-/// Float32 at offset; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_float32")
-fn read_float32(b: Bytes, offset: Int, endian: Endian) -> Float32 = _
-
-/// Appends value as 2 bytes in endian order.
-@intrinsic("almide_rt_bytes_write_uint16")
-fn write_uint16(mut b: Bytes, value: UInt16, endian: Endian) -> Unit = _
-
-/// Appends value as 4 bytes in endian order.
-@intrinsic("almide_rt_bytes_write_uint32")
-fn write_uint32(mut b: Bytes, value: UInt32, endian: Endian) -> Unit = _
-
-/// Appends value as 4 bytes in endian order.
-@intrinsic("almide_rt_bytes_write_int32")
-fn write_int32(mut b: Bytes, value: Int32, endian: Endian) -> Unit = _
-
-/// Appends value as 4 bytes in endian order.
-@intrinsic("almide_rt_bytes_write_float32")
-fn write_float32(mut b: Bytes, value: Float32, endian: Endian) -> Unit = _
-
-/// Writes value at offset; no-op out of range.
-@intrinsic("almide_rt_bytes_set_uint16")
-fn set_uint16(mut b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit = _
-
-/// Writes value at offset; no-op out of range.
-@intrinsic("almide_rt_bytes_set_uint32")
-fn set_uint32(mut b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit = _
-
-/// Writes value at offset; no-op out of range.
-@intrinsic("almide_rt_bytes_set_int32")
-fn set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit = _
-
-/// Writes value at offset; no-op out of range.
-@intrinsic("almide_rt_bytes_set_float32")
-fn set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit = _
 
 
 /// The parts with sep between them; empty for [].
@@ -1992,7 +1878,7 @@ fn next_bytes(b: Bytes, pos: Int, n: Int) -> (Bytes?, Int) = {
 
 /// Appends src's bytes to b in place.
 fn append_bytes(mut b: Bytes, src: Bytes) -> Unit = {
-  b = bytes.concat(b, src)
+  b = bytes.__concat(b, src)
 }
 
 /// An empty byte buffer.
@@ -2259,8 +2145,8 @@ fn replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes =
 
 /// b with the first from replaced by to.
 fn replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes = match bytes.index_of(b, from) {
-  some(i) => bytes.concat(
-    bytes.concat(bytes.slice(b, 0, i), to),
+  some(i) => bytes.__concat(
+    bytes.__concat(bytes.slice(b, 0, i), to),
     bytes.slice(b, i + bytes.len(from), bytes.len(b)),
   ),
   none => b,
@@ -2361,18 +2247,6 @@ fn bytes_append_f64_be(b: Bytes, v: Float) -> Bytes = __bam(b, float.to_bits(v),
 
 
 fn bytes_write_bool(b: Bytes, v: Bool) -> Bytes = __bam(b, if v then 1 else 0, 1, true)
-
-fn bytes_write_string_be(b: Bytes, s: String) -> Bytes = {
-  let sh = prim.handle(s)
-  let n = prim.load32(sh + 4)
-  let n0 = prim.load32(prim.handle(b) + 4)
-  let out = prim.alloc_bytes(n0 + 4 + n)
-  let dst = prim.handle(out) + 12
-  let _c = __bam_copy(dst, prim.handle(b) + 12, n0, 0)
-  let _l = __bam_be(dst + n0, n, 4, 0)
-  let _s = __bam_copy(dst + n0 + 4, sh + 12, n, 0)
-  out
-}
 "#;
 pub const SRC_BYTES_ARRAY: &str = r#"
 
@@ -2622,14 +2496,6 @@ fn bytes_data_ptr(b: Bytes) -> Int = prim.handle(b) + 12
 fn bytes_is_empty(b: Bytes) -> Bool = {
   let n = prim.load32(prim.handle(b) + 4)
   n == 0
-}
-
-fn bytes_get_or(b: Bytes, i: Int, default: Int) -> Int = {
-  let h = prim.handle(b)
-  let n = prim.load32(h + 4)
-  if i >= 0 then {
-    if i < n then prim.load8(h + 12 + i) else default
-  } else default
 }
 
 
@@ -3127,16 +2993,6 @@ fn bytes_read_i32_be(b: Bytes, pos: Int) -> Int = {
       let u = prim.bor(p012, b3)
       __sext32(u)
     }
-  }
-}
-
-
-fn bytes_read_u8(b: Bytes, pos: Int) -> Int = {
-  let h = prim.handle(b)
-  let n = prim.load32(h + 4)
-  if pos < 0 then 0
-  else {
-    if pos < n then prim.load8(h + 12 + pos) else 0
   }
 }
 
@@ -3647,7 +3503,7 @@ fn __bct_acc(a: Bytes, b: Bytes, n: Int, i: Int, acc: Int) -> Int =
     b,
     n,
     i + 1,
-    int.bor(acc, int.bxor(bytes.get_or(a, i, 0), bytes.get_or(b, i, 0))),
+    int.bor(acc, int.bxor(bytes.get(a, i) ?? 0, bytes.get(b, i) ?? 0)),
   )
 
 @implements("bytes.is_equal_constant_time")
@@ -3681,10 +3537,8 @@ pub const SRC_BYTES_CURSOR: &str = r#"
 fn __bc_n(b: Bytes) -> Int = prim.load32(prim.handle(b) + 4)
 
 fn bytes_read_u8_at(b: Bytes, pos: Int) -> (Int, Int?) =
-  if pos < 0 or pos > __bc_n(b) - 1 then (pos, none) else (pos + 1, some(bytes.read_u8(
-    b,
-    pos,
-  )))
+  if pos < 0 or pos > __bc_n(b) - 1 then (pos, none)
+  else (pos + 1, some(bytes.get(b, pos) ?? 0))
 
 fn bytes_read_bool_at(b: Bytes, pos: Int) -> (Int, Bool?) =
   if pos < 0 or pos >= __bc_n(b) then (pos, none) else (pos + 1, some(prim.load8(prim.handle(b) + 12 + pos) != 0))
@@ -3792,14 +3646,6 @@ fn bytes_take_at(b: Bytes, pos: Int, len: Int) -> (Int, Bytes?) =
     let _c = __bc_copy(prim.handle(out) + 12, prim.handle(b) + 12 + pos, len, 0)
     (pos + len, some(out))
   }
-
-fn bytes_read_string_be_at(b: Bytes, pos: Int) -> (Int, String?) =
-  if pos < 0 or pos > __bc_n(b) - 4 then (pos, none)
-  else {
-    let slen = bytes.__read_u32_be(b, pos)
-    if slen > __bc_n(b) - 4 - pos then (pos, none)
-    else (pos + 4 + slen, some(bytes.read_string_at(b, pos + 4, slen)))
-  }
 "#;
 pub const SRC_BYTES_F16: &str = r#"
 
@@ -3883,43 +3729,6 @@ fn bytes_read_f16_le_array(b: Bytes, pos: Int, count: Int) -> List[Float] = {
   buf
 }
 "#;
-pub const SRC_BYTES_LENPREFIX: &str = r#"
-
-
-
-
-
-
-
-
-
-
-fn __lps_count(b: Bytes, blen: Int, p: Int, remaining: Int, acc: Int) -> Int =
-  if remaining == 0 then acc
-  else if p < 0 or p > blen - 4 then acc
-  else {
-    let sl = bytes.__read_u32_le(b, p)
-    if sl > blen - 4 - p then acc
-    else __lps_count(b, blen, p + 4 + sl, remaining - 1, acc + 1)
-  }
-
-fn __lps_fill(dh: Int, b: Bytes, p: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let sl = bytes.__read_u32_le(b, p)
-  let s = bytes.to_string_lossy(bytes.slice(b, p + 4, p + 4 + sl))
-  prim.store_str(dh + 12 + i * 8, s)
-  __lps_fill(dh, b, p + 4 + sl, n, i + 1)
-}
-
-fn bytes_read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String] = {
-  let blen = bytes.len(b)
-  let n0 = if count > 0 then count else 0
-  let n = __lps_count(b, blen, pos, n0, 0)
-  let out = prim.alloc_list_str(n)
-  let _x = __lps_fill(prim.handle(out), b, pos, n, 0)
-  out
-}
-"#;
 pub const SRC_BYTES_MUTATE: &str = r#"
 
 
@@ -3949,13 +3758,6 @@ fn bytes_set_u8(b: Bytes, pos: Int, val: Int) -> Unit = {
   let n = prim.load32(prim.handle(b) + 4)
   let base = prim.handle(b) + 12
   let _ = if pos >= 0 then (if pos < n then __msb(base + pos, val) else 0)
-  else 0
-}
-
-fn bytes_set_at(b: Bytes, i: Int, val: Int) -> Unit = {
-  let n = prim.load32(prim.handle(b) + 4)
-  let base = prim.handle(b) + 12
-  let _ = if i >= 0 then (if i < n then __msb(base + i, val) else 0)
   else 0
 }
 
@@ -4293,34 +4095,6 @@ fn bytes_copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = {
 @implements("ffi.to_int")
 fn ffi_to_int(p: RawPtr) -> Int = prim.ptr_to_int(p)
 "#;
-pub const SRC_BYTES_SKIP: &str = r#"
-
-
-
-
-
-
-
-
-
-
-
-
-
-fn __skip_lp(h: Int, total: Int, p: Int, remaining: Int) -> Int = if remaining <= 0 then p
-else if p < 0 then p
-else if p > total - 4 then p
-else {
-  let l = prim.load32(h + 12 + p)
-  __skip_lp(h, total, p + 4 + l, remaining - 1)
-}
-
-fn bytes_skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int = {
-  let h = prim.handle(b)
-  let total = prim.load32(h + 4)
-  __skip_lp(h, total, pos, count)
-}
-"#;
 pub const SRC_BYTES_SPLIT: &str = r#"
 
 
@@ -4339,48 +4113,6 @@ fn __bsp_piece(h: Int, start: Int, end: Int) -> Bytes = {
   let piece = prim.alloc_bytes(n)
   let _x = __bsp_copy(prim.handle(piece) + 12, h + 12 + start, n, 0)
   piece
-}
-
-
-fn __bl_count_nl(bh: Int, blen: Int, i: Int, acc: Int) -> Int = if i >= blen then acc
-else {
-  let b = prim.load8(bh + 12 + i)
-  if b == 10 then __bl_count_nl(bh, blen, i + 1, acc + 1)
-  else __bl_count_nl(bh, blen, i + 1, acc)
-}
-
-fn __bl_total(bh: Int, blen: Int) -> Int = {
-  let nl = __bl_count_nl(bh, blen, 0, 0)
-  if blen <= 0 then 0
-  else {
-    let last = prim.load8(bh + 12 + blen - 1)
-    if last == 10 then nl else nl + 1
-  }
-}
-
-fn __bl_find_nl(bh: Int, blen: Int, from: Int) -> Int = if from >= blen then blen
-else {
-  let b = prim.load8(bh + 12 + from)
-  if b == 10 then from
-  else __bl_find_nl(bh, blen, from + 1)
-}
-
-fn __bl_fill(lh: Int, bh: Int, blen: Int, from: Int, idx: Int, total: Int) -> Int =
-  if idx >= total then idx
-  else {
-    let nl = __bl_find_nl(bh, blen, from)
-    let piece = __bsp_piece(bh, from, nl)
-    prim.store_str(lh + 12 + idx * 8, piece)
-    __bl_fill(lh, bh, blen, nl + 1, idx + 1, total)
-  }
-
-fn bytes_lines(b: Bytes) -> List[Bytes] = {
-  let bh = prim.handle(b)
-  let blen = prim.load32(bh + 4)
-  let total = __bl_total(bh, blen)
-  let result = prim.alloc_list_str(total)
-  let _x = __bl_fill(prim.handle(result), bh, blen, 0, 0, total)
-  result
 }
 
 
@@ -4417,7 +4149,6 @@ pub const SRC_BYTES_STRING: &str = r#"
 
 
 
-
 fn __bs_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   prim.store8(dst + i, prim.load8(src + i))
@@ -4425,231 +4156,73 @@ else {
 }
 
 
+fn __bs_cont(p: Int, end: Int, lo: Int, hi: Int) -> Bool = if p >= end then false
+else {
+  let c = prim.load8(p)
+  if c < lo then false else c <= hi
+}
+
+
+
+
+
+
+fn __bs_seq(d: Int, n: Int, i: Int) -> Int = {
+  let b0 = prim.load8(d + i)
+  let k = if b0 < 128 then 1
+  else if b0 < 194 then 0
+  else if b0 < 224 then 2
+  else if b0 < 240 then 3
+  else if b0 < 245 then 4
+  else 0
+  let lo2 = if b0 == 224 then 160
+  else if b0 == 240 then 144 else 128
+  let hi2 = if b0 == 237 then 159
+  else if b0 == 244 then 143 else 191
+  let e = d + n
+  let m = if k < 2 then 1
+  else if not __bs_cont(d + i + 1, e, lo2, hi2) then 1
+  else if k == 2 then 2
+  else if not __bs_cont(d + i + 2, e, 128, 191) then 2
+  else if k == 3 then 3
+  else if not __bs_cont(d + i + 3, e, 128, 191) then 3
+  else 4
+  if k == 0 then 0 - 1
+  else if m == k then k else 0 - m
+}
+
+
+fn __bs_olen(d: Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
+else {
+  let s = __bs_seq(d, n, i)
+  if s > 0 then __bs_olen(d, n, i + s, acc + s)
+  else __bs_olen(d, n, i - s, acc + 3)
+}
+
+
+fn __bs_emit(dst: Int, d: Int, n: Int, i: Int, o: Int) -> Int = if i >= n then 0
+else {
+  let s = __bs_seq(d, n, i)
+  if s > 0 then {
+    let _c = __bs_copy(dst + o, d + i, s, 0)
+    __bs_emit(dst, d, n, i + s, o + s)
+  } else {
+    prim.store8(dst + o, 239)
+    prim.store8(dst + o + 1, 191)
+    prim.store8(dst + o + 2, 189)
+    __bs_emit(dst, d, n, i - s, o + 3)
+  }
+}
+
+
 fn bytes_to_string_lossy(b: Bytes) -> String = {
   let h = prim.handle(b)
   let n = prim.load32(h + 4)
-  let out = prim.alloc_str(n)
-  let _x = __bs_copy(prim.handle(out) + 12, h + 12, n, 0)
+  let d = h + 12
+  let out = prim.alloc_str(__bs_olen(d, n, 0, 0))
+  let _x = __bs_emit(prim.handle(out) + 12, d, n, 0, 0)
   out
 }
-
-
-
-
-
-
-
-
-
-
-
-
-fn bytes_read_string_at(b: Bytes, pos: Int, len: Int) -> String = {
-  let h = prim.handle(b)
-  let blen = prim.load32(h + 4)
-  let n = if pos < 0 then 0
-  else if len < 0 then 0
-  else if pos > blen - len then 0 else len
-  bytes.to_string_lossy(bytes.slice(b, pos, pos + n))
-}
-
-
-fn __bs_be32(p: Int) -> Int = {
-  let b0 = prim.load8(p)
-  let b1 = prim.load8(p + 1)
-  let b2 = prim.load8(p + 2)
-  let b3 = prim.load8(p + 3)
-  ((b0 * 256 + b1) * 256 + b2) * 256 + b3
-}
-
-
-
-
-
-
-
-
-
-
-fn bytes_read_string_be(b: Bytes, pos: Int) -> String = {
-  let h = prim.handle(b)
-  let blen = prim.load32(h + 4)
-  let hdr_ok = if pos < 0 then false else pos <= blen - 4
-  let slen = if hdr_ok then __bs_be32(h + 12 + pos) else 0
-  let n = if hdr_ok then (if slen > blen - 4 - pos then 0 else slen)
-  else 0
-  bytes.to_string_lossy(bytes.slice(b, pos + 4, pos + 4 + n))
-}
-"#;
-pub const SRC_BYTES_TYPED: &str = r#"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-fn __endian_is_le(e: Endian) -> Bool = match e {
-  LittleEndian => true,
-  BigEndian => false,
-}
-
-fn bytes_read_uint16(b: Bytes, offset: Int, e: Endian) -> Int =
-  if __endian_is_le(e) then bytes.__read_u16_le(
-    b,
-    offset,
-  )
-  else bytes.__read_u16_be(b, offset)
-
-fn bytes_read_uint32(b: Bytes, offset: Int, e: Endian) -> Int =
-  if __endian_is_le(e) then bytes.__read_u32_le(
-    b,
-    offset,
-  )
-  else bytes.__read_u32_be(b, offset)
-
-fn bytes_read_int32(b: Bytes, offset: Int, e: Endian) -> Int =
-  if __endian_is_le(e) then bytes.__read_i32_le(
-    b,
-    offset,
-  )
-  else bytes.__read_i32_be(b, offset)
-
-
-
-
-fn bytes_read_float32(b: Bytes, offset: Int, e: Endian) -> Float32 = {
-  let f = if __endian_is_le(e) then bytes.__read_f32_le(b, offset) else bytes.__read_f32_be(
-    b,
-    offset,
-  )
-  float.to_float32(f)
-}
-
-
-
-
-fn __bt_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  prim.store8(dst + i, prim.load8(src + i))
-  __bt_copy(dst, src, n, i + 1)
-}
-
-fn __bt_le(p: Int, bits: Int, k: Int, i: Int) -> Int = if i >= k then 0
-else {
-  prim.store8(p + i, prim.band(prim.bshr_u(bits, i * 8), 255))
-  __bt_le(p, bits, k, i + 1)
-}
-
-fn __bt_be(p: Int, bits: Int, k: Int, i: Int) -> Int = if i >= k then 0
-else {
-  prim.store8(p + i, prim.band(prim.bshr_u(bits, (k - 1 - i) * 8), 255))
-  __bt_be(p, bits, k, i + 1)
-}
-
-fn __bt_append(b: Bytes, bits: Int, k: Int, le: Bool) -> Bytes = {
-  let n = prim.load32(prim.handle(b) + 4)
-  let out = prim.alloc_bytes(n + k)
-  let dst = prim.handle(out) + 12
-  let _c = __bt_copy(dst, prim.handle(b) + 12, n, 0)
-  let _w = if le then __bt_le(dst + n, bits, k, 0)
-  else __bt_be(dst + n, bits, k, 0)
-  out
-}
-
-fn bytes_write_uint16(b: Bytes, v: Int, e: Endian) -> Bytes = __bt_append(
-  b,
-  v,
-  2,
-  __endian_is_le(e),
-)
-
-fn bytes_write_uint32(b: Bytes, v: Int, e: Endian) -> Bytes = __bt_append(
-  b,
-  v,
-  4,
-  __endian_is_le(e),
-)
-
-fn bytes_write_int32(b: Bytes, v: Int, e: Endian) -> Bytes = __bt_append(b, v, 4, __endian_is_le(e))
-
-
-
-fn __bt_f32_obs_bits(v: Float32) -> Int = {
-  let f = float.from_float32(v)
-  if float.is_nan(f) then 0x7FC00000 else prim.f32bits(prim.f2f32(f))
-}
-
-fn bytes_write_float32(b: Bytes, v: Float32, e: Endian) -> Bytes = __bt_append(
-  b,
-  __bt_f32_obs_bits(v),
-  4,
-  __endian_is_le(e),
-)
-
-
-
-
-
-
-
-
-fn __bt_put(p: Int, bits: Int, k: Int, le: Bool) -> Int = if le then __bt_le(p, bits, k, 0)
-else __bt_be(p, bits, k, 0)
-
-fn __bt_set(b: Bytes, offset: Int, bits: Int, k: Int, le: Bool) -> Unit = {
-  let n = prim.load32(prim.handle(b) + 4)
-  let _ = if offset >= 0 then (if offset <= n - k then __bt_put(
-    prim.handle(b) + 12 + offset,
-    bits,
-    k,
-    le,
-  )
-  else 0)
-  else 0
-}
-
-fn bytes_set_uint16(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = __bt_set(
-  b,
-  offset,
-  v,
-  2,
-  __endian_is_le(e),
-)
-
-fn bytes_set_uint32(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = __bt_set(
-  b,
-  offset,
-  v,
-  4,
-  __endian_is_le(e),
-)
-
-fn bytes_set_int32(b: Bytes, offset: Int, v: Int, e: Endian) -> Unit = __bt_set(
-  b,
-  offset,
-  v,
-  4,
-  __endian_is_le(e),
-)
-
-fn bytes_set_float32(b: Bytes, offset: Int, v: Float32, e: Endian) -> Unit = __bt_set(
-  b,
-  offset,
-  __bt_f32_obs_bits(v),
-  4,
-  __endian_is_le(e),
-)
 "#;
 pub const SRC_CLOCK_NOW: &str = r#"
 
@@ -4668,14 +4241,6 @@ fn datetime_now() -> Int = {
   let _e = prim.clock_time_get(0, 0, p)
   let ns = prim.load64(p)
   ns / 1000000000
-}
-
-fn env_millis() -> Int = {
-  let buf = prim.alloc_bytes(16)
-  let p = int.band(prim.handle(buf) + 12 + 7, 0 - 8)
-  let _e = prim.clock_time_get(0, 0, p)
-  let ns = prim.load64(p)
-  ns / 1000000
 }
 
 
@@ -4777,7 +4342,7 @@ fn __decode_list_string(v: Value) -> Result[List[String], String] = match value.
 
 
 
-fn __decode_option_int(v: Value, key: String) -> Result[Int?, String] = match value.field(v, key) {
+fn __decode_option_int(v: Value, key: String) -> Result[Int?, String] = match value.__field(v, key) {
   ok(fv) => if __is_null(fv) then ok(none)
   else match value.as_int(fv) {
     ok(x) => ok(some(x)),
@@ -4786,7 +4351,7 @@ fn __decode_option_int(v: Value, key: String) -> Result[Int?, String] = match va
   err(_e) => ok(none),
 }
 
-fn __decode_option_float(v: Value, key: String) -> Result[Float?, String] = match value.field(
+fn __decode_option_float(v: Value, key: String) -> Result[Float?, String] = match value.__field(
   v,
   key,
 ) {
@@ -4798,7 +4363,10 @@ fn __decode_option_float(v: Value, key: String) -> Result[Float?, String] = matc
   err(_e) => ok(none),
 }
 
-fn __decode_option_bool(v: Value, key: String) -> Result[Bool?, String] = match value.field(v, key) {
+fn __decode_option_bool(v: Value, key: String) -> Result[Bool?, String] = match value.__field(
+  v,
+  key,
+) {
   ok(fv) => if __is_null(fv) then ok(none)
   else match value.as_bool(fv) {
     ok(x) => ok(some(x)),
@@ -4807,7 +4375,7 @@ fn __decode_option_bool(v: Value, key: String) -> Result[Bool?, String] = match 
   err(_e) => ok(none),
 }
 
-fn __decode_option_string(v: Value, key: String) -> Result[String?, String] = match value.field(
+fn __decode_option_string(v: Value, key: String) -> Result[String?, String] = match value.__field(
   v,
   key,
 ) {
@@ -4820,7 +4388,7 @@ fn __decode_option_string(v: Value, key: String) -> Result[String?, String] = ma
 }
 
 
-fn __decode_default_int(v: Value, key: String, default: Int) -> Result[Int, String] = match value.field(
+fn __decode_default_int(v: Value, key: String, default: Int) -> Result[Int, String] = match value.__field(
   v,
   key,
 ) {
@@ -4828,7 +4396,7 @@ fn __decode_default_int(v: Value, key: String, default: Int) -> Result[Int, Stri
   err(_e) => ok(default),
 }
 
-fn __decode_default_float(v: Value, key: String, default: Float) -> Result[Float, String] = match value.field(
+fn __decode_default_float(v: Value, key: String, default: Float) -> Result[Float, String] = match value.__field(
   v,
   key,
 ) {
@@ -4836,7 +4404,7 @@ fn __decode_default_float(v: Value, key: String, default: Float) -> Result[Float
   err(_e) => ok(default),
 }
 
-fn __decode_default_bool(v: Value, key: String, default: Bool) -> Result[Bool, String] = match value.field(
+fn __decode_default_bool(v: Value, key: String, default: Bool) -> Result[Bool, String] = match value.__field(
   v,
   key,
 ) {
@@ -4844,7 +4412,7 @@ fn __decode_default_bool(v: Value, key: String, default: Bool) -> Result[Bool, S
   err(_e) => ok(default),
 }
 
-fn __decode_default_string(v: Value, key: String, default: String) -> Result[String, String] = match value.field(
+fn __decode_default_string(v: Value, key: String, default: String) -> Result[String, String] = match value.__field(
   v,
   key,
 ) {
@@ -4854,7 +4422,7 @@ fn __decode_default_string(v: Value, key: String, default: String) -> Result[Str
 
 
 
-fn __decode_default_list_int(v: Value, key: String, default: List[Int]) -> Result[List[Int], String] = match value.field(
+fn __decode_default_list_int(v: Value, key: String, default: List[Int]) -> Result[List[Int], String] = match value.__field(
   v,
   key,
 ) {
@@ -4862,7 +4430,7 @@ fn __decode_default_list_int(v: Value, key: String, default: List[Int]) -> Resul
   err(_e) => ok(default),
 }
 
-fn __decode_default_list_float(v: Value, key: String, default: List[Float]) -> Result[List[Float], String] = match value.field(
+fn __decode_default_list_float(v: Value, key: String, default: List[Float]) -> Result[List[Float], String] = match value.__field(
   v,
   key,
 ) {
@@ -4870,7 +4438,7 @@ fn __decode_default_list_float(v: Value, key: String, default: List[Float]) -> R
   err(_e) => ok(default),
 }
 
-fn __decode_default_list_bool(v: Value, key: String, default: List[Bool]) -> Result[List[Bool], String] = match value.field(
+fn __decode_default_list_bool(v: Value, key: String, default: List[Bool]) -> Result[List[Bool], String] = match value.__field(
   v,
   key,
 ) {
@@ -4878,7 +4446,7 @@ fn __decode_default_list_bool(v: Value, key: String, default: List[Bool]) -> Res
   err(_e) => ok(default),
 }
 
-fn __decode_default_list_string(v: Value, key: String, default: List[String]) -> Result[List[String], String] = match value.field(
+fn __decode_default_list_string(v: Value, key: String, default: List[String]) -> Result[List[String], String] = match value.__field(
   v,
   key,
 ) {
@@ -4915,7 +4483,7 @@ fn __encode_list_bool(items: List[Bool]) -> Value = value.array(__el_bool(items,
 fn __el_string(items: List[String], n: Int, i: Int, acc: List[Value]) -> List[Value] =
   if i >= n then acc
   else __el_string(items, n, i + 1, acc + [
-    value.str(list.get(items, i) ?? "")
+    value.string(list.get(items, i) ?? "")
   ])
 
 fn __encode_list_string(items: List[String]) -> Value = value.array(__el_string(items, list.len(items), 0, []))
@@ -4936,7 +4504,7 @@ fn __encode_option_bool(v: Bool?) -> Value = match v {
 }
 
 fn __encode_option_string(v: String?) -> Value = match v {
-  some(x) => value.str(x),
+  some(x) => value.string(x),
   none => value.null(),
 }
 "#;
@@ -4967,10 +4535,6 @@ fn add_seconds(ts: Int, n: Int) -> Int = _
 @intrinsic("almide_rt_datetime_day")
 fn day(ts: Int) -> Int = _
 
-/// a - b; positive when a is later.
-@intrinsic("almide_rt_datetime_diff_seconds")
-fn diff_seconds(a: Int, b: Int) -> Int = _
-
 /// Replaces %Y %m %d %H %M %S (UTC); no %% escape.
 @intrinsic("almide_rt_datetime_format")
 fn format(ts: Int, pattern: String) -> String = _
@@ -4979,21 +4543,9 @@ fn format(ts: Int, pattern: String) -> String = _
 @intrinsic("almide_rt_datetime_from_parts")
 fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String] = _
 
-/// Identity: seconds are already a timestamp.
-@intrinsic("almide_rt_datetime_from_unix")
-fn from_unix(seconds: Int) -> Int = _
-
 /// UTC hour of day, 0..23.
 @intrinsic("almide_rt_datetime_hour")
 fn hour(ts: Int) -> Int = _
-
-/// a > b; false when equal.
-@intrinsic("almide_rt_datetime_is_after")
-fn is_after(a: Int, b: Int) -> Bool = _
-
-/// a < b; false when equal.
-@intrinsic("almide_rt_datetime_is_before")
-fn is_before(a: Int, b: Int) -> Bool = _
 
 /// UTC minute, 0..59.
 @intrinsic("almide_rt_datetime_minute")
@@ -5035,10 +4587,6 @@ fn second(ts: Int) -> Int = _
 @intrinsic("almide_rt_datetime_to_iso")
 fn to_iso(ts: Int) -> String = _
 
-/// Identity: a timestamp is already Unix seconds.
-@intrinsic("almide_rt_datetime_to_unix")
-fn to_unix(ts: Int) -> Int = _
-
 /// English day name in UTC; 0 is Thursday.
 @intrinsic("almide_rt_datetime_weekday")
 fn weekday(ts: Int) -> String = _
@@ -5062,21 +4610,11 @@ fn datetime_add_minutes(ts: Int, n: Int) -> Int = ts + n * 60
 
 fn datetime_add_seconds(ts: Int, n: Int) -> Int = ts + n
 
-fn datetime_diff_seconds(a: Int, b: Int) -> Int = a - b
-
-fn datetime_from_unix(seconds: Int) -> Int = seconds
-
-fn datetime_to_unix(ts: Int) -> Int = ts
-
 fn datetime_hour(ts: Int) -> Int = (((ts % 86400) + 86400) % 86400) / 3600
 
 fn datetime_minute(ts: Int) -> Int = (((ts % 3600) + 3600) % 3600) / 60
 
 fn datetime_second(ts: Int) -> Int = ((ts % 60) + 60) % 60
-
-fn datetime_is_before(a: Int, b: Int) -> Bool = a < b
-
-fn datetime_is_after(a: Int, b: Int) -> Bool = a > b
 "#;
 pub const SRC_DATETIME_CALENDAR: &str = r#"
 
@@ -5685,27 +5223,7 @@ fn sum[A: Numeric](d: Deque[A]) -> A = A.__sum(to_list(d))
 /// Product of the elements; 1 when empty; integers wrap on overflow.
 fn product[A: Numeric](d: Deque[A]) -> A = A.__product(to_list(d))
 "#;
-pub const SRC_ENV: &str = r#"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/// Wall-clock seconds since the Unix epoch.
-@intrinsic("almide_rt_env_unix_timestamp")
-@category("Time")
-effect fn unix_timestamp() -> Int = _
+pub const SRC_ENV: &str = r#"import secret
 
 /// Program arguments, argv[0] excluded.
 @intrinsic("almide_rt_env_args")
@@ -5715,10 +5233,21 @@ effect fn args() -> List[String] = _
 @intrinsic("almide_rt_env_get")
 effect fn get(name: String) -> String? = _
 
+
+
+
+
+
+/// Value of name as a Secret (prints Secret(***), constant-time ==), or none if unset. For a token or key.
+effect fn secret(name: String) -> Secret[String]? = env.get(name) |> option.map((v) => secret.new(v))
+
 /// Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
 @ordered
 @category("Env.write")
-effect fn set(name: String, value: String) -> Result[Unit, String] = match __set_refusal(name, value) {
+effect fn set(name: String, value: String) -> Result[Unit, String] = match __set_refusal(
+  name,
+  value,
+) {
   some(why) => err("env.set: " + why),
   none => {
     __set(name, value)
@@ -5739,28 +5268,53 @@ local fn __set_refusal(name: String, value: String) -> String? =
   else none
 
 
+
+
 @ordered
 @intrinsic("almide_rt_env___set")
 @category("Env.write")
 effect fn __set(name: String, value: String) -> Unit = _
 
+/// Removes name for this process and later spawns; ok if unset; err if name is empty or holds `=` or NUL.
+@ordered
+@category("Env.write")
+effect fn remove(name: String) -> Result[Unit, String] = match __set_refusal(name, "") {
+  some(why) => err("env.remove: " + why),
+  none => {
+    __set(name, "\u{0}")
+    ok(())
+  },
+}
+
+/// Every environment variable of this process, keyed and ordered by name.
+/// Holds secrets as plain values: read a credential by name with `env.secret` instead.
+effect fn vars() -> Map[String, String] = {
+  let merged = __environ() |> list.fold(map.new(), (m, entry) => __vars_step(m, entry))
+  merged |> map.to_list |> list.sort_by(((name, _)) => name) |> map.from_list
+}
+
+
+
+
+
+local fn __vars_step(m: Map[String, String], entry: String) -> Map[String, String] =
+  match string.split_once(entry, "=") {
+    some((name, value)) => if value == "\u{0}" then map.remove(m, name) else map.set(m, name, value),
+    none => m,
+  }
+
+
+@intrinsic("almide_rt_env___environ")
+effect fn __environ() -> List[String] = _
+
 /// Absolute current directory; err if unreadable.
 @intrinsic("almide_rt_env_cwd")
 effect fn cwd() -> Result[String, String] = _
-
-/// Wall-clock ms since the Unix epoch.
-@intrinsic("almide_rt_env_millis")
-@category("Time")
-effect fn millis() -> Int = _
 
 /// Blocks ms milliseconds; a negative ms hangs.
 @intrinsic("almide_rt_env_sleep_ms")
 @category("Time")
 effect fn sleep_ms(ms: Int) -> Unit = _
-
-/// Host temp dir; may end with /.
-@intrinsic("almide_rt_env_temp_dir")
-effect fn temp_dir() -> String = _
 
 /// Host OS: macos, linux, windows or unknown; "wasi" on wasm (C-189).
 @intrinsic("almide_rt_env_os")
@@ -5816,38 +5370,6 @@ pub const SRC_ENV_OS: &str = r#"
 
 fn env_os() -> String = "wasi"
 "#;
-pub const SRC_ENV_TEMP_DIR: &str = r#"
-
-
-
-
-
-
-import env
-
-effect fn env_temp_dir() -> String = env.get("TMPDIR") ?? "/tmp"
-"#;
-pub const SRC_ENV_UNIX_TIMESTAMP: &str = r#"
-
-
-
-
-
-
-
-
-
-
-
-
-fn env_unix_timestamp() -> Int = {
-  let buf = prim.alloc_bytes(16)
-  let p = int.band(prim.handle(buf) + 12 + 7, 0 - 8)
-  let _e = prim.clock_time_get(0, 0, p)
-  let ns = prim.load64(p)
-  ns / 1000000000
-}
-"#;
 pub const SRC_EPRINTLN: &str = r#"
 
 
@@ -5876,91 +5398,6 @@ fn __eprintln_str(s: String) -> Unit = {
 
   prim.store32(12, 1)
   let _w1 = prim.fd_write(2, 8, 1, 0)
-}
-"#;
-pub const SRC_ERROR: &str = r#"
-
-
-
-
-
-
-
-/// outer + "\ncaused by: " + cause.
-@intrinsic("almide_rt_error_chain")
-fn chain(outer: String, cause: String) -> String = _
-
-/// err(e) becomes err("msg: e"); ok unchanged.
-@intrinsic("almide_rt_error_context")
-@borrow_ref(r)
-fn context[T](r: Result[T, String], msg: String) -> Result[T, String] = _
-
-/// Error text of r; "" when r is ok.
-@intrinsic("almide_rt_error_message")
-@borrow_ref(r)
-fn message[T](r: Result[T, String]) -> String = _
-"#;
-pub const SRC_ERROR_CHAIN: &str = r#"
-
-
-
-fn __echain_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let b = prim.load8(src + i)
-  prim.store8(dst + i, b)
-  __echain_copy(dst, src, n, i + 1)
-}
-
-
-fn __echain_sep(d: Int) -> Int = {
-  prim.store8(d, 10)
-  prim.store8(d + 1, 99)
-  prim.store8(d + 2, 97)
-  prim.store8(d + 3, 117)
-  prim.store8(d + 4, 115)
-  prim.store8(d + 5, 101)
-  prim.store8(d + 6, 100)
-  prim.store8(d + 7, 32)
-  prim.store8(d + 8, 98)
-  prim.store8(d + 9, 121)
-  prim.store8(d + 10, 58)
-  prim.store8(d + 11, 32)
-  0
-}
-
-fn error_chain(outer: String, cause: String) -> String = {
-  let oh = prim.handle(outer)
-  let olen = prim.load32(oh + 4)
-  let ch = prim.handle(cause)
-  let clen = prim.load32(ch + 4)
-  let total = olen + 12 + clen
-  let out = prim.alloc_str(total)
-  let d0 = prim.handle(out) + 12
-  let _1 = __echain_copy(d0, oh + 12, olen, 0)
-  let d1 = d0 + olen
-  let _2 = __echain_sep(d1)
-  let d2 = d1 + 12
-  let _3 = __echain_copy(d2, ch + 12, clen, 0)
-  out
-}
-
-
-
-
-
-fn error_context(r: Result[Int, String], ctx: String) -> Result[Int, String] = match r {
-  ok(v) => ok(v),
-  err(e) => err(string.__err_text(ctx) + ": " + e),
-}
-"#;
-pub const SRC_ERROR_MESSAGE: &str = r#"
-
-
-
-
-fn error_message(r: Result[Int, String]) -> String = match r {
-  ok(_) => "",
-  err(e) => e,
 }
 "#;
 pub const SRC_FAN_ANY: &str = r#"
@@ -6340,15 +5777,15 @@ pub const SRC_FLOAT: &str = r#"
 
 /// Shortest round-trip digits, no exponent; 2.0 keeps .0.
 @intrinsic("almide_rt_float_to_string")
-fn to_string(n: Float) -> String = _
+fn to_string(x: Float) -> String = _
 
 /// Truncates toward 0, saturating; NaN gives 0.
 @intrinsic("almide_rt_float_to_int")
-fn to_int(n: Float) -> Int = _
+fn __to_int(n: Float) -> Int = _
 
 /// Nearest Float; may round when |n| > 2^53.
 @intrinsic("almide_rt_float_from_int")
-fn from_int(n: Int) -> Float = _
+fn __from_int(n: Int) -> Float = _
 
 /// Finite Float from s trimmed of ASCII space; err on junk, inf, NaN, overflow.
 @intrinsic("almide_rt_float_parse")
@@ -6356,35 +5793,31 @@ fn parse(s: String) -> Result[Float, String] = _
 
 /// Fixed-point, ties to even; decimals outside 0..4096 abort.
 @intrinsic("almide_rt_float_to_fixed")
-fn to_fixed(n: Float, decimals: Int) -> String = _
+fn to_fixed(x: Float, decimals: Int) -> String = _
 
 /// IEEE-754 bits as Int; any NaN gives the canonical NaN.
 @intrinsic("almide_rt_float_to_bits")
 fn to_bits(f: Float) -> Int = _
 
 
-/// Square root; NaN below 0, -0.0 stays -0.0.
-@intrinsic("almide_rt_float_sqrt")
-fn sqrt(n: Float) -> Float = _
-
 /// Magnitude; -0.0 gives 0.0, NaN stays NaN.
 @intrinsic("almide_rt_float_abs")
-fn abs(n: Float) -> Float = _
+fn abs(x: Float) -> Float = _
 
 /// Round toward -inf; -0.5 gives -1.0.
 @intrinsic("almide_rt_float_floor")
-fn floor(n: Float) -> Float = _
+fn floor(x: Float) -> Float = _
 
 /// Round toward +inf; -0.5 gives -0.0.
 @intrinsic("almide_rt_float_ceil")
-fn ceil(n: Float) -> Float = _
+fn ceil(x: Float) -> Float = _
 
 
 
 
 /// Nearest whole value; halves round away from zero.
 @intrinsic("almide_rt_float_round")
-fn round(n: Float) -> Float = _
+fn round(x: Float) -> Float = _
 
 /// Lesser; a NaN operand is ignored; -0.0 < 0.0.
 @intrinsic("almide_rt_float_min")
@@ -6394,9 +5827,9 @@ fn min(a: Float, b: Float) -> Float = _
 @intrinsic("almide_rt_float_max")
 fn max(a: Float, b: Float) -> Float = _
 
-/// n limited to lo..hi; lo > hi or a NaN bound aborts.
+/// x limited to lo..hi; lo > hi or a NaN bound aborts.
 @intrinsic("almide_rt_float_clamp")
-fn clamp(n: Float, lo: Float, hi: Float) -> Float = _
+fn clamp(x: Float, lo: Float, hi: Float) -> Float = _
 
 /// 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
 @deprecated(since=15, use="float.signum", note="signum keeps sign's answers, 1.0 for 0.0 included")
@@ -6410,131 +5843,34 @@ else if float.to_bits(x) < 0 then -1.0 else 1.0
 
 /// True only for NaN (unequal to itself).
 @intrinsic("almide_rt_float_is_nan")
-fn is_nan(n: Float) -> Bool = _
+fn is_nan(x: Float) -> Bool = _
 
 /// True for inf and -inf; false for NaN.
 @intrinsic("almide_rt_float_is_infinite")
-fn is_infinite(n: Float) -> Bool = _
+fn is_infinite(x: Float) -> Bool = _
 
-
-/// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_int8")
-fn to_int8(n: Float) -> Int8 = _
-
-/// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_int16")
-fn to_int16(n: Float) -> Int16 = _
-
-/// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_int32")
-fn to_int32(n: Float) -> Int32 = _
-
-/// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_uint8")
-fn to_uint8(n: Float) -> UInt8 = _
-
-/// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_uint16")
-fn to_uint16(n: Float) -> UInt16 = _
-
-/// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_uint32")
-fn to_uint32(n: Float) -> UInt32 = _
 
 /// Truncates toward 0, saturating; NaN gives 0.
 @intrinsic("almide_rt_float_to_uint64")
-fn to_uint64(n: Float) -> UInt64 = _
+fn __to_uint64(n: Float) -> UInt64 = _
 
 /// Nearest Float32; overflow gives inf.
 @intrinsic("almide_rt_float_to_float32")
-fn to_float32(n: Float) -> Float32 = _
-
-/// Truncates toward 0, saturating; NaN gives 0.
-@intrinsic("almide_rt_float_to_int64")
-fn to_int64(n: Float) -> Int64 = _
+fn __raw_to_float32(n: Float) -> Float32 = _
 
 /// Same f64 value; always exact.
 @intrinsic("almide_rt_float_to_float64")
-fn to_float64(n: Float) -> Float64 = _
+fn __to_float64(n: Float) -> Float64 = _
 
 
 /// Exact widening; never rounds.
 @intrinsic("almide_rt_float_from_float32")
-fn from_float32(n: Float32) -> Float = _
+fn __from_float32(n: Float32) -> Float = _
 
 /// Same f64 value; always exact.
 @intrinsic("almide_rt_float_from_float64")
-fn from_float64(n: Float64) -> Float = _
+fn __from_float64(n: Float64) -> Float = _
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/// some iff n is an integer in -2^63..2^63-1; NaN and ±inf give none.
-fn to_int_checked(n: Float) -> Int? =
-  if float.is_nan(n) or float.is_infinite(n) or n < -9223372036854776000.0 or n >= 9223372036854776000.0 then none
-  else if float.floor(n) == n then some(float.to_int(n)) else none
-
-/// some iff n is an integer in -128..127.
-fn to_int8_checked(n: Float) -> Int8? =
-  if float.is_nan(n) or float.is_infinite(n) or n < -128.0 or n > 127.0 then none
-  else if float.floor(n) == n then some(float.to_int8(n)) else none
-
-/// some iff n is an integer in -32768..32767.
-fn to_int16_checked(n: Float) -> Int16? =
-  if float.is_nan(n) or float.is_infinite(n) or n < -32768.0 or n > 32767.0 then none
-  else if float.floor(n) == n then some(float.to_int16(n)) else none
-
-/// some iff n is an integer in -2^31..2^31-1.
-fn to_int32_checked(n: Float) -> Int32? =
-  if float.is_nan(n) or float.is_infinite(n) or n < -2147483648.0 or n > 2147483647.0 then none
-  else if float.floor(n) == n then some(float.to_int32(n)) else none
-
-/// some iff n is an integer in -2^63..2^63-1.
-fn to_int64_checked(n: Float) -> Int64? =
-  if float.is_nan(n) or float.is_infinite(n) or n < -9223372036854776000.0 or n >= 9223372036854776000.0 then none
-  else if float.floor(n) == n then some(float.to_int64(n)) else none
-
-/// some iff n is an integer in 0..255.
-fn to_uint8_checked(n: Float) -> UInt8? =
-  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 255.0 then none
-  else if float.floor(n) == n then some(float.to_uint8(n)) else none
-
-/// some iff n is an integer in 0..65535.
-fn to_uint16_checked(n: Float) -> UInt16? =
-  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 65535.0 then none
-  else if float.floor(n) == n then some(float.to_uint16(n)) else none
-
-/// some iff n is an integer in 0..2^32-1.
-fn to_uint32_checked(n: Float) -> UInt32? =
-  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n > 4294967295.0 then none
-  else if float.floor(n) == n then some(float.to_uint32(n)) else none
-
-/// some iff n is an integer in 0..2^64-1.
-fn to_uint64_checked(n: Float) -> UInt64? =
-  if float.is_nan(n) or float.is_infinite(n) or n < 0.0 or n >= 18446744073709552000.0 then none
-  else if float.floor(n) == n then some(float.to_uint64(n)) else none
 
 
 
@@ -6544,40 +5880,16 @@ fn to_uint64_checked(n: Float) -> UInt64? =
 
 
 /// some if n is exact in Float32; NaN and ±inf give none.
-fn to_float32_checked(n: Float) -> Float32? = {
-  let f: Float32 = float.to_float32(n)
-  let back: Float = float.from_float32(f)
+fn __to_float32_checked(n: Float) -> Float32? = {
+  let f: Float32 = float.__raw_to_float32(n)
+  let back: Float = float.__from_float32(f)
   if float.is_nan(n) then none
   else if float.is_infinite(n) then none
   else if back == n then some(f) else none
 }
 
-/// Truncates, clamps to Int range; NaN gives 0.
-fn to_int_saturating(n: Float) -> Int = float.to_int(n)
-
-/// Truncates, clamps to -128..127; NaN gives 0.
-fn to_int8_saturating(n: Float) -> Int8 = float.to_int8(n)
-
-/// Truncates, clamps to -32768..32767; NaN gives 0.
-fn to_int16_saturating(n: Float) -> Int16 = float.to_int16(n)
-
-/// Truncates, clamps to Int32 range; NaN gives 0.
-fn to_int32_saturating(n: Float) -> Int32 = float.to_int32(n)
-
-/// Truncates, clamps to Int64 range; NaN gives 0.
-fn to_int64_saturating(n: Float) -> Int64 = float.to_int64(n)
-
-/// Truncates, clamps to 0..255; NaN gives 0.
-fn to_uint8_saturating(n: Float) -> UInt8 = float.to_uint8(n)
-
-/// Truncates, clamps to 0..65535; NaN gives 0.
-fn to_uint16_saturating(n: Float) -> UInt16 = float.to_uint16(n)
-
-/// Truncates, clamps to 0..2^32-1; NaN gives 0.
-fn to_uint32_saturating(n: Float) -> UInt32 = float.to_uint32(n)
-
 /// Truncates, clamps to 0..2^64-1; NaN gives 0.
-fn to_uint64_saturating(n: Float) -> UInt64 = float.to_uint64(n)
+fn __to_uint64_saturating(n: Float) -> UInt64 = float.__to_uint64(n)
 
 
 /// Round toward 0; -0.5 gives -0.0.
@@ -6587,7 +5899,7 @@ fn trunc(x: Float) -> Float = if x < 0.0 then float.ceil(x) else float.floor(x)
 fn is_finite(x: Float) -> Bool = not (float.is_nan(x) or float.is_infinite(x))
 
 /// base to the exp; NaN for a negative base with a fractional exp.
-fn pow(base: Float, exp: Float) -> Float = math.fpow(base, exp)
+fn pow(base: Float, exp: Float) -> Float = math.__fpow(base, exp)
 
 /// -1, 0 or 1 in IEEE-754 total order: -0.0 < 0.0, NaN above inf and equal to itself.
 fn compare(a: Float, b: Float) -> Int = int.compare(order_key(a), order_key(b))
@@ -6600,7 +5912,7 @@ local fn order_key(x: Float) -> Int = {
 
 
 /// Float whose IEEE-754 binary64 bits are bits; any NaN gives the one NaN.
-fn from_bits(bits: Int) -> Float = int.bits_to_float(bits)
+fn from_bits(bits: Int) -> Float = int.__bits_to_float(bits)
 
 /// Positive infinity.
 fn infinity() -> Float = from_bits(9218868437227405312)
@@ -6631,11 +5943,11 @@ fn from_checked[S: Numeric](x: S) -> Float? = x.__to_float_exact()
 
 
 fn __int_exact(x: Float) -> Int? =
-  if x == float.trunc(x) and x >= -9223372036854775808.0 and x < 9223372036854775808.0 then some(float.to_int(x))
+  if x == float.trunc(x) and x >= -9223372036854775808.0 and x < 9223372036854775808.0 then some(float.__to_int(x))
   else none
 
 fn __uint64_exact(x: Float) -> UInt64? =
-  if x == float.trunc(x) and x >= 0.0 and x < 18446744073709551616.0 then some(float.to_uint64(x))
+  if x == float.trunc(x) and x >= 0.0 and x < 18446744073709551616.0 then some(float.__to_uint64(x))
   else none
 
 fn __trunc(x: Float) -> Float = float.trunc(x)
@@ -6644,17 +5956,17 @@ fn __int_sat(x: Float) -> Int =
   if float.is_nan(x) then 0
   else if x >= 9223372036854775808.0 then int.max_value()
   else if x <= -9223372036854775808.0 then int.min_value()
-  else float.to_int(x)
+  else float.__to_int(x)
 
-fn __uint64_sat(x: Float) -> UInt64 = float.to_uint64_saturating(x)
+fn __uint64_sat(x: Float) -> UInt64 = float.__to_uint64_saturating(x)
 
 fn __to_float(x: Float) -> Float = x
 
 fn __to_float_exact(x: Float) -> Float? = if float.is_nan(x) then none else some(x)
 
-fn __to_float32(x: Float) -> Float32 = float.to_float32(x)
+fn __to_float32(x: Float) -> Float32 = float.__raw_to_float32(x)
 
-fn __to_float32_exact(x: Float) -> Float32? = float.to_float32_checked(x)
+fn __to_float32_exact(x: Float) -> Float32? = float.__to_float32_checked(x)
 
 fn __decimal_exact(x: Float) -> String? = match float.__int_exact(x) {
   some(n) => some(int.to_string(n)),
@@ -6689,48 +6001,15 @@ local fn double_from(l: List[Int], i: Int, carry: Int, acc: List[Int]) -> List[I
 
 local fn pad9(s: String) -> String = if string.len(s) >= 9 then s else pad9("0" + s)
 "#;
-pub const SRC_FLOAT32: &str = r#"
-
-
-
-
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_int8(x: Float32) -> Int8 = float.to_int8(float.from_float32(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_int16(x: Float32) -> Int16 = float.to_int16(float.from_float32(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_int32(x: Float32) -> Int32 = float.to_int32(float.from_float32(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_int64(x: Float32) -> Int64 = float.to_int64(float.from_float32(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_uint8(x: Float32) -> UInt8 = float.to_uint8(float.from_float32(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_uint16(x: Float32) -> UInt16 = float.to_uint16(float.from_float32(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_uint32(x: Float32) -> UInt32 = float.to_uint32(float.from_float32(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_uint64(x: Float32) -> UInt64 = float.to_uint64(float.from_float32(x))
-
-/// Exact widening; never rounds.
-fn to_float64(x: Float32) -> Float64 = float.from_float32(x)
-
-/// Shortest f32 round-trip digits, no exponent; 0.1 stays 0.1, 2.0 keeps .0.
+pub const SRC_FLOAT32: &str = r#"/// Shortest f32 round-trip digits, no exponent; 0.1 stays 0.1, 2.0 keeps .0.
 @intrinsic("almide_rt_float32_to_string")
 fn to_string(x: Float32) -> String = _
 
 
 /// -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
 fn compare(a: Float32, b: Float32) -> Int = total_order(
-  float.from_float32(a),
-  float.from_float32(b),
+  float.__from_float32(a),
+  float.__from_float32(b),
 )
 
 local fn total_order(a: Float, b: Float) -> Int = match (float.is_nan(a), float.is_nan(b)) {
@@ -6749,51 +6028,51 @@ local fn sign_order(neg_a: Bool, neg_b: Bool) -> Int = match (neg_a, neg_b) {
 }
 
 /// Lesser; a NaN operand is ignored; -0.0 < 0.0.
-fn min(a: Float32, b: Float32) -> Float32 = float.to_float32(float.min(float.from_float32(a), float.from_float32(b)))
+fn min(a: Float32, b: Float32) -> Float32 = float.__raw_to_float32(float.min(float.__from_float32(a), float.__from_float32(b)))
 
 /// Greater; a NaN operand is ignored; 0.0 > -0.0.
-fn max(a: Float32, b: Float32) -> Float32 = float.to_float32(float.max(float.from_float32(a), float.from_float32(b)))
+fn max(a: Float32, b: Float32) -> Float32 = float.__raw_to_float32(float.max(float.__from_float32(a), float.__from_float32(b)))
 
 /// x limited to lo..hi; lo > hi or a NaN bound aborts.
-fn clamp(x: Float32, lo: Float32, hi: Float32) -> Float32 = float.to_float32(float.clamp(float.from_float32(x), float.from_float32(lo), float.from_float32(hi)))
+fn clamp(x: Float32, lo: Float32, hi: Float32) -> Float32 = float.__raw_to_float32(float.clamp(float.__from_float32(x), float.__from_float32(lo), float.__from_float32(hi)))
 
 /// True only for NaN.
-fn is_nan(x: Float32) -> Bool = float.is_nan(float.from_float32(x))
+fn is_nan(x: Float32) -> Bool = float.is_nan(float.__from_float32(x))
 
 /// True for inf and -inf; false for NaN.
-fn is_infinite(x: Float32) -> Bool = float.is_infinite(float.from_float32(x))
+fn is_infinite(x: Float32) -> Bool = float.is_infinite(float.__from_float32(x))
 
 /// True unless x is inf, -inf or NaN.
-fn is_finite(x: Float32) -> Bool = not (float.is_nan(float.from_float32(x)) or float.is_infinite(float.from_float32(x)))
+fn is_finite(x: Float32) -> Bool = not (float.is_nan(float.__from_float32(x)) or float.is_infinite(float.__from_float32(x)))
 
 /// Magnitude; -0.0 gives 0.0, NaN stays NaN.
-fn abs(x: Float32) -> Float32 = float.to_float32(float.abs(float.from_float32(x)))
+fn abs(x: Float32) -> Float32 = float.__raw_to_float32(float.abs(float.__from_float32(x)))
 
 /// Round toward -inf; -0.5 gives -1.0.
-fn floor(x: Float32) -> Float32 = float.to_float32(float.floor(float.from_float32(x)))
+fn floor(x: Float32) -> Float32 = float.__raw_to_float32(float.floor(float.__from_float32(x)))
 
 /// Round toward +inf; -0.5 gives -0.0.
-fn ceil(x: Float32) -> Float32 = float.to_float32(float.ceil(float.from_float32(x)))
+fn ceil(x: Float32) -> Float32 = float.__raw_to_float32(float.ceil(float.__from_float32(x)))
 
 /// Nearest whole value; halves round away from zero.
-fn round(x: Float32) -> Float32 = float.to_float32(float.round(float.from_float32(x)))
+fn round(x: Float32) -> Float32 = float.__raw_to_float32(float.round(float.__from_float32(x)))
 
 /// Round toward 0; -0.5 gives -0.0.
 fn trunc(x: Float32) -> Float32 = {
-  let f = float.from_float32(x)
-  float.to_float32(if f < 0.0 then float.ceil(f) else float.floor(f))
+  let f = float.__from_float32(x)
+  float.__raw_to_float32(if f < 0.0 then float.ceil(f) else float.floor(f))
 }
 
 /// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
 fn signum(x: Float32) -> Float32 = {
-  let f = float.from_float32(x)
+  let f = float.__from_float32(x)
   if float.is_nan(f) then x
-  else if float.to_bits(f) < 0 then float.to_float32(-1.0) else float.to_float32(1.0)
+  else if float.to_bits(f) < 0 then float.__raw_to_float32(-1.0) else float.__raw_to_float32(1.0)
 }
 
 /// The 32 IEEE-754 binary32 bits as a non-negative Int; any NaN gives 0x7fc00000.
 fn to_bits(x: Float32) -> Int = {
-  let b = float.to_bits(float.from_float32(x))
+  let b = float.to_bits(float.__from_float32(x))
   let sign = if b < 0 then 2147483648 else 0
   sign + binary32_magnitude(int.band(int.bshr(b, 52), 2047), int.band(b, 4503599627370495))
 }
@@ -6808,7 +6087,7 @@ local fn binary32_magnitude(e: Int, f: Int) -> Int = match e {
 }
 
 /// Float32 whose binary32 bits are the low 32 bits of bits.
-fn from_bits(bits: Int) -> Float32 = float.to_float32(int.bits_to_f32(bits))
+fn from_bits(bits: Int) -> Float32 = float.__raw_to_float32(int.__bits_to_f32(bits))
 
 /// Positive infinity.
 fn infinity() -> Float32 = from_bits(2139095040)
@@ -6829,7 +6108,7 @@ fn min_value() -> Float32 = from_bits(4286578687)
 
 /// Float32 from trimmed s, the grammar of float.parse; err on junk; overflow gives inf.
 fn parse(s: String) -> Result[Float32, String] = match float.parse(s) {
-  ok(f) => ok(float.to_float32(f)),
+  ok(f) => ok(float.__raw_to_float32(f)),
   err(e) => err(e),
 }
 
@@ -6846,25 +6125,25 @@ fn from_checked[S: Numeric](x: S) -> Float32? = x.__to_float32_exact()
 
 
 
-fn __int_exact(x: Float32) -> Int? = float.__int_exact(float.from_float32(x))
+fn __int_exact(x: Float32) -> Int? = float.__int_exact(float.__from_float32(x))
 
-fn __uint64_exact(x: Float32) -> UInt64? = float.__uint64_exact(float.from_float32(x))
+fn __uint64_exact(x: Float32) -> UInt64? = float.__uint64_exact(float.__from_float32(x))
 
 fn __trunc(x: Float32) -> Float32 = float32.trunc(x)
 
-fn __int_sat(x: Float32) -> Int = float.__int_sat(float.from_float32(x))
+fn __int_sat(x: Float32) -> Int = float.__int_sat(float.__from_float32(x))
 
-fn __uint64_sat(x: Float32) -> UInt64 = float.__uint64_sat(float.from_float32(x))
+fn __uint64_sat(x: Float32) -> UInt64 = float.__uint64_sat(float.__from_float32(x))
 
-fn __to_float(x: Float32) -> Float = float.from_float32(x)
+fn __to_float(x: Float32) -> Float = float.__from_float32(x)
 
-fn __to_float_exact(x: Float32) -> Float? = float.__to_float_exact(float.from_float32(x))
+fn __to_float_exact(x: Float32) -> Float? = float.__to_float_exact(float.__from_float32(x))
 
 fn __to_float32(x: Float32) -> Float32 = x
 
 fn __to_float32_exact(x: Float32) -> Float32? = if float32.is_nan(x) then none else some(x)
 
-fn __decimal_exact(x: Float32) -> String? = float.__decimal_exact(float.from_float32(x))
+fn __decimal_exact(x: Float32) -> String? = float.__decimal_exact(float.__from_float32(x))
 
 fn __sum(xs: List[Float32]) -> Float32 = {
   let zero: Float32 = 0.0
@@ -6876,102 +6155,17 @@ fn __product(xs: List[Float32]) -> Float32 = {
   list.fold(xs, one, (a, b) => a * b)
 }
 "#;
-pub const SRC_FLOAT32_CONVERT: &str = r#"
-
-
-
-
-
-
-
-fn float32_to_int8(x: Float32) -> Int8 = {
-  let f = float.from_float32(x)
-  float.to_int8(f)
-}
-
-fn float32_to_int16(x: Float32) -> Int16 = {
-  let f = float.from_float32(x)
-  float.to_int16(f)
-}
-
-fn float32_to_int32(x: Float32) -> Int32 = {
-  let f = float.from_float32(x)
-  float.to_int32(f)
-}
-
-fn float32_to_int64(x: Float32) -> Int64 = {
-  let f = float.from_float32(x)
-  float.to_int64(f)
-}
-
-fn float32_to_uint8(x: Float32) -> UInt8 = {
-  let f = float.from_float32(x)
-  float.to_uint8(f)
-}
-
-fn float32_to_uint16(x: Float32) -> UInt16 = {
-  let f = float.from_float32(x)
-  float.to_uint16(f)
-}
-
-fn float32_to_uint32(x: Float32) -> UInt32 = {
-  let f = float.from_float32(x)
-  float.to_uint32(f)
-}
-
-fn float32_to_uint64(x: Float32) -> UInt64 = {
-  let f = float.from_float32(x)
-  float.to_uint64(f)
-}
-
-
-fn float32_to_float64(x: Float32) -> Float64 = float.from_float32(x)
-"#;
-pub const SRC_FLOAT64: &str = r#"
-
-
-
-
-
-
-
-
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_int8(x: Float64) -> Int8 = float.to_int8(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_int16(x: Float64) -> Int16 = float.to_int16(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_int32(x: Float64) -> Int32 = float.to_int32(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_int64(x: Float64) -> Int64 = float.to_int64(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_uint8(x: Float64) -> UInt8 = float.to_uint8(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_uint16(x: Float64) -> UInt16 = float.to_uint16(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_uint32(x: Float64) -> UInt32 = float.to_uint32(float.from_float64(x))
-
-/// Truncates toward 0, saturating; NaN gives 0.
-fn to_uint64(x: Float64) -> UInt64 = float.to_uint64(float.from_float64(x))
-
-/// Nearest Float32; overflow becomes infinity.
-fn to_float32(x: Float64) -> Float32 = float.to_float32(float.from_float64(x))
+pub const SRC_FLOAT64: &str = r#"/// Nearest Float32; overflow becomes infinity.
+fn __raw_to_float32(x: Float64) -> Float32 = float.__raw_to_float32(float.__from_float64(x))
 
 /// Plain decimal, never an exponent; 2.0 keeps .0.
-fn to_string(x: Float64) -> String = float.to_string(float.from_float64(x))
+fn to_string(x: Float64) -> String = float.to_string(float.__from_float64(x))
 
 
 /// -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
 fn compare(a: Float64, b: Float64) -> Int = total_order(
-  float.from_float64(a),
-  float.from_float64(b),
+  float.__from_float64(a),
+  float.__from_float64(b),
 )
 
 local fn total_order(a: Float, b: Float) -> Int = match (float.is_nan(a), float.is_nan(b)) {
@@ -6990,53 +6184,53 @@ local fn sign_order(neg_a: Bool, neg_b: Bool) -> Int = match (neg_a, neg_b) {
 }
 
 /// Lesser; a NaN operand is ignored; -0.0 < 0.0.
-fn min(a: Float64, b: Float64) -> Float64 = float.to_float64(float.min(float.from_float64(a), float.from_float64(b)))
+fn min(a: Float64, b: Float64) -> Float64 = float.__to_float64(float.min(float.__from_float64(a), float.__from_float64(b)))
 
 /// Greater; a NaN operand is ignored; 0.0 > -0.0.
-fn max(a: Float64, b: Float64) -> Float64 = float.to_float64(float.max(float.from_float64(a), float.from_float64(b)))
+fn max(a: Float64, b: Float64) -> Float64 = float.__to_float64(float.max(float.__from_float64(a), float.__from_float64(b)))
 
 /// x limited to lo..hi; lo > hi or a NaN bound aborts.
-fn clamp(x: Float64, lo: Float64, hi: Float64) -> Float64 = float.to_float64(float.clamp(float.from_float64(x), float.from_float64(lo), float.from_float64(hi)))
+fn clamp(x: Float64, lo: Float64, hi: Float64) -> Float64 = float.__to_float64(float.clamp(float.__from_float64(x), float.__from_float64(lo), float.__from_float64(hi)))
 
 /// True only for NaN.
-fn is_nan(x: Float64) -> Bool = float.is_nan(float.from_float64(x))
+fn is_nan(x: Float64) -> Bool = float.is_nan(float.__from_float64(x))
 
 /// True for inf and -inf; false for NaN.
-fn is_infinite(x: Float64) -> Bool = float.is_infinite(float.from_float64(x))
+fn is_infinite(x: Float64) -> Bool = float.is_infinite(float.__from_float64(x))
 
 /// True unless x is inf, -inf or NaN.
-fn is_finite(x: Float64) -> Bool = not (float.is_nan(float.from_float64(x)) or float.is_infinite(float.from_float64(x)))
+fn is_finite(x: Float64) -> Bool = not (float.is_nan(float.__from_float64(x)) or float.is_infinite(float.__from_float64(x)))
 
 /// Magnitude; -0.0 gives 0.0, NaN stays NaN.
-fn abs(x: Float64) -> Float64 = float.to_float64(float.abs(float.from_float64(x)))
+fn abs(x: Float64) -> Float64 = float.__to_float64(float.abs(float.__from_float64(x)))
 
 /// Round toward -inf; -0.5 gives -1.0.
-fn floor(x: Float64) -> Float64 = float.to_float64(float.floor(float.from_float64(x)))
+fn floor(x: Float64) -> Float64 = float.__to_float64(float.floor(float.__from_float64(x)))
 
 /// Round toward +inf; -0.5 gives -0.0.
-fn ceil(x: Float64) -> Float64 = float.to_float64(float.ceil(float.from_float64(x)))
+fn ceil(x: Float64) -> Float64 = float.__to_float64(float.ceil(float.__from_float64(x)))
 
 /// Nearest whole value; halves round away from zero.
-fn round(x: Float64) -> Float64 = float.to_float64(float.round(float.from_float64(x)))
+fn round(x: Float64) -> Float64 = float.__to_float64(float.round(float.__from_float64(x)))
 
 /// Round toward 0; -0.5 gives -0.0.
 fn trunc(x: Float64) -> Float64 = {
-  let f = float.from_float64(x)
-  float.to_float64(if f < 0.0 then float.ceil(f) else float.floor(f))
+  let f = float.__from_float64(x)
+  float.__to_float64(if f < 0.0 then float.ceil(f) else float.floor(f))
 }
 
 /// 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
 fn signum(x: Float64) -> Float64 = {
-  let f = float.from_float64(x)
+  let f = float.__from_float64(x)
   if float.is_nan(f) then x
-  else if float.to_bits(f) < 0 then float.to_float64(-1.0) else float.to_float64(1.0)
+  else if float.to_bits(f) < 0 then float.__to_float64(-1.0) else float.__to_float64(1.0)
 }
 
 /// The 64 IEEE-754 binary64 bits as Int; any NaN gives the canonical NaN.
-fn to_bits(x: Float64) -> Int = float.to_bits(float.from_float64(x))
+fn to_bits(x: Float64) -> Int = float.to_bits(float.__from_float64(x))
 
 /// Float64 whose IEEE-754 binary64 bits are bits.
-fn from_bits(bits: Int) -> Float64 = float.to_float64(int.bits_to_float(bits))
+fn from_bits(bits: Int) -> Float64 = float.__to_float64(int.__bits_to_float(bits))
 
 /// Positive infinity.
 fn infinity() -> Float64 = from_bits(9218868437227405312)
@@ -7055,7 +6249,7 @@ fn min_value() -> Float64 = from_bits(-4503599627370497)
 
 /// Float64 from ASCII-trimmed s, the grammar of float.parse; err on junk, inf, NaN.
 fn parse(s: String) -> Result[Float64, String] = match float.parse(s) {
-  ok(f) => ok(float.to_float64(f)),
+  ok(f) => ok(float.__to_float64(f)),
   err(e) => err(e),
 }
 
@@ -7064,93 +6258,53 @@ fn parse(s: String) -> Result[Float64, String] = match float.parse(s) {
 
 
 /// x as the nearest Float64 (ties to even); NaN stays NaN.
-fn from[S: Numeric](x: S) -> Float64 = float.to_float64(x.__to_float())
+fn from[S: Numeric](x: S) -> Float64 = float.__to_float64(x.__to_float())
 
 /// some(x as Float64) when Float64 holds x exactly, else none (a rounded value, NaN).
 fn from_checked[S: Numeric](x: S) -> Float64? = match x.__to_float_exact() {
-  some(f) => some(float.to_float64(f)),
+  some(f) => some(float.__to_float64(f)),
   none => none,
 }
 
 
 
 
-fn __int_exact(x: Float64) -> Int? = float.__int_exact(float.from_float64(x))
+fn __int_exact(x: Float64) -> Int? = float.__int_exact(float.__from_float64(x))
 
-fn __uint64_exact(x: Float64) -> UInt64? = float.__uint64_exact(float.from_float64(x))
+fn __uint64_exact(x: Float64) -> UInt64? = float.__uint64_exact(float.__from_float64(x))
 
 fn __trunc(x: Float64) -> Float64 = float64.trunc(x)
 
-fn __int_sat(x: Float64) -> Int = float.__int_sat(float.from_float64(x))
+fn __int_sat(x: Float64) -> Int = float.__int_sat(float.__from_float64(x))
 
-fn __uint64_sat(x: Float64) -> UInt64 = float.__uint64_sat(float.from_float64(x))
+fn __uint64_sat(x: Float64) -> UInt64 = float.__uint64_sat(float.__from_float64(x))
 
-fn __to_float(x: Float64) -> Float = float.from_float64(x)
+fn __to_float(x: Float64) -> Float = float.__from_float64(x)
 
-fn __to_float_exact(x: Float64) -> Float? = float.__to_float_exact(float.from_float64(x))
+fn __to_float_exact(x: Float64) -> Float? = float.__to_float_exact(float.__from_float64(x))
 
-fn __to_float32(x: Float64) -> Float32 = float64.to_float32(x)
+fn __to_float32(x: Float64) -> Float32 = float64.__raw_to_float32(x)
 
-fn __to_float32_exact(x: Float64) -> Float32? = float.to_float32_checked(float.from_float64(x))
+fn __to_float32_exact(x: Float64) -> Float32? = float.__to_float32_checked(float.__from_float64(x))
 
-fn __decimal_exact(x: Float64) -> String? = float.__decimal_exact(float.from_float64(x))
+fn __decimal_exact(x: Float64) -> String? = float.__decimal_exact(float.__from_float64(x))
 
-fn __sum(xs: List[Float64]) -> Float64 = float.to_float64(list.fold(xs, 0.0, (a, b) => a + float.from_float64(b)))
+fn __sum(xs: List[Float64]) -> Float64 = float.__to_float64(list.fold(xs, 0.0, (a, b) => a + float.__from_float64(b)))
 
-fn __product(xs: List[Float64]) -> Float64 = float.to_float64(list.fold(xs, 1.0, (a, b) => a * float.from_float64(b)))
+fn __product(xs: List[Float64]) -> Float64 = float.__to_float64(list.fold(xs, 1.0, (a, b) => a * float.__from_float64(b)))
 "#;
 pub const SRC_FLOAT64_CONVERT: &str = r#"
 
 
 
 fn float64_to_string(x: Float64) -> String = {
-  let v = float.from_float64(x)
+  let v = float.__from_float64(x)
   float.to_string(v)
 }
 
-fn float64_to_int8(x: Float64) -> Int8 = {
-  let v = float.from_float64(x)
-  float.to_int8(v)
-}
-
-fn float64_to_int16(x: Float64) -> Int16 = {
-  let v = float.from_float64(x)
-  float.to_int16(v)
-}
-
-fn float64_to_int32(x: Float64) -> Int32 = {
-  let v = float.from_float64(x)
-  float.to_int32(v)
-}
-
-fn float64_to_int64(x: Float64) -> Int64 = {
-  let v = float.from_float64(x)
-  float.to_int64(v)
-}
-
-fn float64_to_uint8(x: Float64) -> UInt8 = {
-  let v = float.from_float64(x)
-  float.to_uint8(v)
-}
-
-fn float64_to_uint16(x: Float64) -> UInt16 = {
-  let v = float.from_float64(x)
-  float.to_uint16(v)
-}
-
-fn float64_to_uint32(x: Float64) -> UInt32 = {
-  let v = float.from_float64(x)
-  float.to_uint32(v)
-}
-
-fn float64_to_uint64(x: Float64) -> UInt64 = {
-  let v = float.from_float64(x)
-  float.to_uint64(v)
-}
-
 fn float64_to_float32(x: Float64) -> Float32 = {
-  let v = float.from_float64(x)
-  float.to_float32(v)
+  let v = float.__from_float64(x)
+  float.__raw_to_float32(v)
 }
 "#;
 pub const SRC_FLOAT_BITS: &str = r#"
@@ -7173,229 +6327,7 @@ fn int_bits_to_float(b: Int) -> Float = prim.ffrombits(b)
 
 fn int_bits_to_f32(bits: Int) -> Float = prim.bits_to_f32(bits)
 "#;
-pub const SRC_FLOAT_CHECKED: &str = r#"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-fn float_to_int8_checked(n: Float) -> Int8? = {
-  let nan = float.is_nan(n)
-  let inf = float.is_infinite(n)
-  let neg = prim.fneg(128.0)
-  let lo = prim.flt(n, neg)
-  let hi = prim.fgt(n, 127.0)
-  let i = float.to_int8(n)
-  let fl = prim.ffloor(n)
-  let rt = prim.feq(fl, n)
-  if nan then none
-  else if inf then none
-  else if lo then none
-  else if hi then none
-  else if rt then some(i) else none
-}
-
-fn float_to_int16_checked(n: Float) -> Int16? = {
-  let nan = float.is_nan(n)
-  let inf = float.is_infinite(n)
-  let neg = prim.fneg(32768.0)
-  let lo = prim.flt(n, neg)
-  let hi = prim.fgt(n, 32767.0)
-  let i = float.to_int16(n)
-  let fl = prim.ffloor(n)
-  let rt = prim.feq(fl, n)
-  if nan then none
-  else if inf then none
-  else if lo then none
-  else if hi then none
-  else if rt then some(i) else none
-}
-
-fn float_to_int32_checked(n: Float) -> Int32? = {
-  let nan = float.is_nan(n)
-  let inf = float.is_infinite(n)
-  let neg = prim.fneg(2147483648.0)
-  let lo = prim.flt(n, neg)
-  let hi = prim.fgt(n, 2147483647.0)
-  let i = float.to_int32(n)
-  let fl = prim.ffloor(n)
-  let rt = prim.feq(fl, n)
-  if nan then none
-  else if inf then none
-  else if lo then none
-  else if hi then none
-  else if rt then some(i) else none
-}
-
-fn float_to_uint8_checked(n: Float) -> UInt8? = {
-  let nan = float.is_nan(n)
-  let inf = float.is_infinite(n)
-  let lo = prim.flt(n, 0.0)
-  let hi = prim.fgt(n, 255.0)
-  let i = float.to_uint8(n)
-  let fl = prim.ffloor(n)
-  let rt = prim.feq(fl, n)
-  if nan then none
-  else if inf then none
-  else if lo then none
-  else if hi then none
-  else if rt then some(i) else none
-}
-
-fn float_to_uint16_checked(n: Float) -> UInt16? = {
-  let nan = float.is_nan(n)
-  let inf = float.is_infinite(n)
-  let lo = prim.flt(n, 0.0)
-  let hi = prim.fgt(n, 65535.0)
-  let i = float.to_uint16(n)
-  let fl = prim.ffloor(n)
-  let rt = prim.feq(fl, n)
-  if nan then none
-  else if inf then none
-  else if lo then none
-  else if hi then none
-  else if rt then some(i) else none
-}
-
-fn float_to_uint32_checked(n: Float) -> UInt32? = {
-  let nan = float.is_nan(n)
-  let inf = float.is_infinite(n)
-  let lo = prim.flt(n, 0.0)
-  let hi = prim.fgt(n, 4294967295.0)
-  let i = float.to_uint32(n)
-  let fl = prim.ffloor(n)
-  let rt = prim.feq(fl, n)
-  if nan then none
-  else if inf then none
-  else if lo then none
-  else if hi then none
-  else if rt then some(i) else none
-}
-
-
-
-fn float_to_int64_checked(n: Float) -> Int64? = {
-  let nan = float.is_nan(n)
-  let inf = float.is_infinite(n)
-  let p62 = prim.bshl(1, 62)
-  let f62 = prim.i2f(p62)
-  let two63 = prim.fadd(f62, f62)
-  let neg63 = prim.fneg(two63)
-  let lo = prim.flt(n, neg63)
-  let hi = prim.fge(n, two63)
-  let i = float.to_int64(n)
-  let fl = prim.ffloor(n)
-  let rt = prim.feq(fl, n)
-  if nan then none
-  else if inf then none
-  else if lo then none
-  else if hi then none
-  else if rt then some(i) else none
-}
-
-
-
-
-@implements("float.to_int_checked")
-fn float_to_int_checked(n: Float) -> Int? = {
-  let nan = float.is_nan(n)
-  let inf = float.is_infinite(n)
-  let lo = n < -9223372036854775808.0
-  let hi = n >= 9223372036854775808.0
-  let i = float.to_int(n)
-  let rt = float.floor(n) == n
-  if nan then none
-  else if inf then none
-  else if lo then none
-  else if hi then none
-  else if rt then some(i) else none
-}
-
-
-
-
-fn float_to_uint64_checked(n: Float) -> UInt64? = {
-  let nan = float.is_nan(n)
-  let inf = float.is_infinite(n)
-  let p62 = prim.bshl(1, 62)
-  let f62 = prim.i2f(p62)
-  let two63 = prim.fadd(f62, f62)
-  let two64 = prim.fadd(two63, two63)
-  let lo = prim.flt(n, 0.0)
-  let hi = prim.fge(n, two64)
-  let i = float.to_uint64(n)
-  let fl = prim.ffloor(n)
-  let rt = prim.feq(fl, n)
-  if nan then none
-  else if inf then none
-  else if lo then none
-  else if hi then none
-  else if rt then some(i) else none
-}
-"#;
 pub const SRC_FLOAT_CONVERT: &str = r#"
-
-
-
-fn float_to_int8(f: Float) -> Int8 = {
-  let t = prim.f2i(f)
-  if t < 0 - 128 then 0 - 128
-  else (if t > 127 then 127 else t)
-}
-
-fn float_to_int16(f: Float) -> Int16 = {
-  let t = prim.f2i(f)
-  if t < 0 - 32768 then 0 - 32768
-  else (if t > 32767 then 32767 else t)
-}
-
-fn float_to_int32(f: Float) -> Int32 = {
-  let t = prim.f2i(f)
-  if t < 0 - 2147483648 then 0 - 2147483648
-  else (if t > 2147483647 then 2147483647 else t)
-}
-
-fn float_to_uint8(f: Float) -> UInt8 = {
-  let t = prim.f2i(f)
-  if t < 0 then 0
-  else (if t > 255 then 255 else t)
-}
-
-fn float_to_uint16(f: Float) -> UInt16 = {
-  let t = prim.f2i(f)
-  if t < 0 then 0
-  else (if t > 65535 then 65535 else t)
-}
-
-fn float_to_uint32(f: Float) -> UInt32 = {
-  let t = prim.f2i(f)
-  if t < 0 then 0
-  else (if t > 4294967295 then 4294967295 else t)
-}
-
-
-fn float_to_int64(f: Float) -> Int64 = prim.f2i(f)
-
-
 
 
 
@@ -7447,9 +6379,6 @@ pub const SRC_FLOAT_CORE: &str = r#"
 
 
 fn float_abs(x: Float) -> Float = prim.fabs(x)
-
-
-fn float_sqrt(x: Float) -> Float = if prim.flt(x, 0.0) then prim.ffrombits(0x7FF8000000000000) else prim.fsqrt(x)
 
 fn float_floor(x: Float) -> Float = prim.ffloor(x)
 
@@ -8016,28 +6945,7 @@ fn float_round(x: Float) -> Float = {
   prim.fcopysign(m, x)
 }
 "#;
-pub const SRC_FLOAT_SATURATING: &str = r#"
-
-
-
-@implements("float.to_int_saturating")
-fn float_to_int_saturating(n: Float) -> Int = float.to_int(n)
-
-fn float_to_int8_saturating(n: Float) -> Int8 = float.to_int8(n)
-
-fn float_to_int16_saturating(n: Float) -> Int16 = float.to_int16(n)
-
-fn float_to_int32_saturating(n: Float) -> Int32 = float.to_int32(n)
-
-fn float_to_int64_saturating(n: Float) -> Int64 = float.to_int64(n)
-
-fn float_to_uint8_saturating(n: Float) -> UInt8 = float.to_uint8(n)
-
-fn float_to_uint16_saturating(n: Float) -> UInt16 = float.to_uint16(n)
-
-fn float_to_uint32_saturating(n: Float) -> UInt32 = float.to_uint32(n)
-
-fn float_to_uint64_saturating(n: Float) -> UInt64 = float.to_uint64(n)
+pub const SRC_FLOAT_SATURATING: &str = r#"fn float_to_uint64_saturating(n: Float) -> UInt64 = float.__to_uint64(n)
 "#;
 pub const SRC_FLOAT_TO_STRING: &str = r#"
 
@@ -8542,33 +7450,46 @@ type FileStat = { size: Int, is_dir: Bool, is_file: Bool, modified: Int }
 @intrinsic("almide_rt_fs_read_text")
 effect fn read_text(path: String) -> Result[String, String] = _
 
-/// Bytes as Ints 0..255; regular file <= 1 GiB; err if missing.
+
+
+
+/// Whole regular file (<= 1 GiB) as Bytes; err if missing.
 @intrinsic("almide_rt_fs_read_bytes")
-effect fn read_bytes(path: String) -> Result[List[Int], String] = _
+effect fn read_bytes(path: String) -> Result[Bytes, String] = _
 
 /// Overwrites or creates; err if no parent dir.
 @ordered
 @intrinsic("almide_rt_fs_write")
 @category("FS.write")
-effect fn write(path: String, content: String) -> Result[Unit, String] = _
-
-/// Writes low byte of each Int (-1 -> 255).
-@ordered
-@intrinsic("almide_rt_fs_write_bytes")
-@category("FS.write")
-effect fn write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = _
+effect fn write_text(path: String, content: String) -> Result[Unit, String] = _
 
 /// Writes data verbatim, replacing the file.
 @ordered
-@intrinsic("almide_rt_fs_write_bytes_raw")
+@intrinsic("almide_rt_fs_write_bytes")
 @category("FS.write")
-effect fn write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = _
+effect fn write_bytes(path: String, data: Bytes) -> Result[Unit, String] = _
 
 /// Appends content; creates the file if missing.
 @ordered
 @intrinsic("almide_rt_fs_append")
 @category("FS.write")
-effect fn append(path: String, content: String) -> Result[Unit, String] = _
+effect fn append_text(path: String, content: String) -> Result[Unit, String] = _
+
+
+
+/// Appends data verbatim; creates the file if missing.
+@ordered
+@category("FS.write")
+effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = {
+  let old = if fs.exists(path) then __as_append(fs.read_bytes(path))!
+  else bytes.new()
+  __as_append(fs.write_bytes(path, bytes.__concat(old, data)))
+}
+
+local fn __as_append[A](r: Result[A, String]) -> Result[A, String] = match r {
+  ok(x) => ok(x),
+  err(e) => err(["fs.read_bytes", "fs.write_bytes"] |> list.find((call) => string.starts_with(e, call)) |> option.map((call) => "fs.append_bytes" + string.drop(e, string.len(call))) ?? e),
+}
 
 /// Creates dir and parents; ok if it exists.
 @ordered
@@ -8654,17 +7575,13 @@ effect fn fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, Stri
 @intrinsic("almide_rt_fs_read_text_if_exists")
 effect fn read_text_if_exists(path: String) -> Result[String?, String] = _
 
-/// Bytes as Ints, or none if missing.
+/// File Bytes, or none if missing.
 @intrinsic("almide_rt_fs_read_bytes_if_exists")
-effect fn read_bytes_if_exists(path: String) -> Result[List[Int]?, String] = _
+effect fn read_bytes_if_exists(path: String) -> Result[Bytes?, String] = _
 
 /// read_lines result, or none if missing.
 @intrinsic("almide_rt_fs_read_lines_if_exists")
 effect fn read_lines_if_exists(path: String) -> Result[List[String]?, String] = _
-
-/// File Bytes, or none if missing.
-@intrinsic("almide_rt_fs_read_bytes_raw_if_exists")
-effect fn read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = _
 
 /// Deletes a file or empty dir; err if missing.
 @ordered
@@ -8706,11 +7623,6 @@ effect fn walk(dir: String) -> Result[List[String], String] = _
 @category("FS.write")
 effect fn remove_all(path: String) -> Result[Unit, String] = _
 
-/// Size in bytes; err if missing.
-@intrinsic("almide_rt_fs_file_size")
-effect fn file_size(path: String) -> Result[Int, String] = _
-
-
 
 
 /// Host temp dir; a location, not a safe name.
@@ -8740,14 +7652,6 @@ effect fn create_temp_dir(prefix: String) -> Result[String, String] = _
 /// True for a symlink, even a dangling one.
 @intrinsic("almide_rt_fs_is_symlink")
 effect fn is_symlink(path: String) -> Bool = _
-
-/// Mtime in Unix seconds; err if missing.
-@intrinsic("almide_rt_fs_modified_at")
-effect fn modified_at(path: String) -> Result[Int, String] = _
-
-/// Whole regular file (<= 1 GiB) as Bytes; err if missing.
-@intrinsic("almide_rt_fs_read_bytes_raw")
-effect fn read_bytes_raw(path: String) -> Result[Bytes, String] = _
 
 
 
@@ -8800,7 +7704,7 @@ local fn __root_segments(path: String) -> List[String]? =
 
 local fn __root_at(root: FsRoot, path: String) -> Result[String, String] = match __root_segments(path) {
   none => err("fs: path escapes root: " + path),
-  some(segs) => ok(__root_dir(root) + "\u{0}" + string.join(segs, "/")),
+  some(segs) => ok(__root_dir(root) + "\u{0}" + list.join(segs, "/")),
 }
 
 
@@ -8839,7 +7743,7 @@ effect fn root_read_text(root: FsRoot, path: String) -> Result[String, String] =
   path,
 )
 
-/// read_bytes_raw of path inside root; err if it escapes.
+/// read_bytes of path inside root; err if it escapes.
 effect fn root_read_bytes(root: FsRoot, path: String) -> Result[Bytes, String] = __root_answer(
   __root_read_bytes(__root_at(root, path)!),
   path,
@@ -8905,7 +7809,7 @@ fn __app_old(path: String) -> String = if prim.path_exists(path) then __app_read
 effect fn fs_append(path: String, content: String) -> Result[Unit, String] = {
   let old = __app_old(path)
   let joined = old + content
-  let w: Result[Unit, String] = prim.write_text_file_as(path, joined, "fs.append")
+  let w: Result[Unit, String] = prim.write_text_file_as(path, joined, "fs.append_text")
   let wh = prim.handle(w)
   if prim.load32(wh + 16) != 0 then {
     let m: String = prim.load_handle(wh + 12)
@@ -9024,20 +7928,6 @@ pub const SRC_FS_EXISTS: &str = r#"
 
 
 effect fn fs_exists(path: String) -> Bool = prim.path_exists(path)
-"#;
-pub const SRC_FS_FILE_SIZE: &str = r#"
-
-
-
-
-
-
-effect fn fs_file_size(path: String) -> Result[Int, String] = {
-  let buf = prim.alloc_bytes(64)
-  let p = prim.handle(buf) + 12
-  let errno = prim.path_filestat(p, path)
-  if errno != 0 then err("stat failed: " + path) else ok(prim.load64(p + 32))
-}
 "#;
 pub const SRC_FS_FOLD_LINES: &str = r#"
 
@@ -9620,68 +8510,23 @@ pub const SRC_FS_MKDIR_P: &str = r#"
 
 effect fn fs_mkdir_p(path: String) -> Result[Unit, String] = prim.make_dir(path)
 "#;
-pub const SRC_FS_MODIFIED_AT: &str = r#"
-
-
-
-
-
-effect fn fs_modified_at(path: String) -> Result[Int, String] = {
-  let buf = prim.alloc_bytes(64)
-  let p = prim.handle(buf) + 12
-  let errno = prim.path_filestat(p, path)
-  if errno != 0 then err("stat failed: " + path) else ok(prim.load64(p + 48) / 1000000000)
-}
-"#;
 pub const SRC_FS_READ_BYTES: &str = r#"
 
 
 
 
-
-effect fn fs_read_bytes(path: String) -> Result[List[Int], String] = {
-  let r = prim.read_bytes_file(path)
-  match r {
-    ok(b) => ok(bytes.to_list(b)),
-    err(e) => err(e),
-  }
-}
+effect fn fs_read_bytes(path: String) -> Result[Bytes, String] = prim.read_bytes_file_as(
+  path,
+  "fs.read_bytes",
+)
 "#;
 pub const SRC_FS_READ_BYTES_IF_EXISTS: &str = r#"
 
 
 
-
-effect fn fs_read_bytes_if_exists(path: String) -> Result[List[Int]?, String] = {
+effect fn fs_read_bytes_if_exists(path: String) -> Result[Bytes?, String] = {
   if prim.path_exists(path) then {
     let r = prim.read_bytes_file_as(path, "fs.read_bytes_if_exists")
-    match r {
-      ok(b) => {
-        let xs = bytes.to_list(b)
-        ok(some(xs))
-      },
-      err(e) => err(e),
-    }
-  } else ok(none)
-}
-"#;
-pub const SRC_FS_READ_BYTES_RAW: &str = r#"
-
-
-
-
-effect fn fs_read_bytes_raw(path: String) -> Result[Bytes, String] = prim.read_bytes_file_as(
-  path,
-  "fs.read_bytes_raw",
-)
-"#;
-pub const SRC_FS_READ_BYTES_RAW_IF_EXISTS: &str = r#"
-
-
-
-effect fn fs_read_bytes_raw_if_exists(path: String) -> Result[Bytes?, String] = {
-  if prim.path_exists(path) then {
-    let r = prim.read_bytes_file_as(path, "fs.read_bytes_raw_if_exists")
     match r {
       ok(b) => ok(some(b)),
       err(e) => err(e),
@@ -10094,32 +8939,6 @@ pub const SRC_FS_WRITE_BYTES: &str = r#"
 
 
 
-fn __wb_fill(dst: Int, xs: List[Int], n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let b = xs[i]
-  prim.store8(dst + i, int.band(b, 255))
-  __wb_fill(dst, xs, n, i + 1)
-}
-
-effect fn fs_write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String] = {
-  let n = list.len(bytes)
-  let s = prim.alloc_str(n)
-  let _f = __wb_fill(prim.handle(s) + 12, bytes, n, 0)
-  let w: Result[Unit, String] = prim.write_text_file_as(path, s, "fs.write_bytes")
-  let wh = prim.handle(w)
-  if prim.load32(wh + 16) != 0 then {
-    let m: String = prim.load_handle(wh + 12)
-    err(m)
-  } else ok(())
-}
-"#;
-pub const SRC_FS_WRITE_BYTES_RAW: &str = r#"
-
-
-
-
-
-
 fn __wbr_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let b = prim.load8(src + i)
@@ -10127,12 +8946,12 @@ else {
   __wbr_copy(dst, src, n, i + 1)
 }
 
-effect fn fs_write_bytes_raw(path: String, data: Bytes) -> Result[Unit, String] = {
+effect fn fs_write_bytes(path: String, data: Bytes) -> Result[Unit, String] = {
   let h = prim.handle(data)
   let n = prim.load32(h + 4)
   let s = prim.alloc_str(n)
   let _c = __wbr_copy(prim.handle(s) + 12, h + 12, n, 0)
-  let w: Result[Unit, String] = prim.write_text_file_as(path, s, "fs.write_bytes_raw")
+  let w: Result[Unit, String] = prim.write_text_file_as(path, s, "fs.write_bytes")
   let wh = prim.handle(w)
   if prim.load32(wh + 16) != 0 then {
     let m: String = prim.load_handle(wh + 12)
@@ -10155,21 +8974,20 @@ pub const SRC_HASH: &str = r#"
 
 
 
-/// 32-bit FNV-1a of s's UTF-8; non-negative Int.
-@intrinsic("almide_rt_hash_fnv1a32")
-fn fnv1a32(s: String) -> Int = _
+import secret
 
 /// 32-bit FNV-1a of b, in 0..4294967295.
-@intrinsic("almide_rt_hash_fnv1a32_bytes")
-fn fnv1a32_bytes(b: Bytes) -> Int = _
+@intrinsic("almide_rt_hash_fnv1a32")
+fn fnv1a32(b: Bytes) -> Int = _
 
 /// 32-byte SHA-256 digest of b. Not a MAC: sha256(key ++ msg) is forgeable by length extension; use hash.hmac_sha256 / hash.is_valid_hmac_sha256.
 @intrinsic("almide_rt_hash_sha256")
 fn sha256(b: Bytes) -> Bytes = _
 
-/// SHA-256 of s's UTF-8, 64 lowercase hex chars.
+/// SHA-256 of b as 64 lowercase hex chars.
 @intrinsic("almide_rt_hash_sha256_hex")
-fn sha256_hex(s: String) -> String = _
+fn sha256_hex(b: Bytes) -> String = _
+
 
 
 
@@ -10193,7 +9011,7 @@ fn crc32(b: Bytes) -> Int = {
   var i = 0
   let len = bytes.len(b)
   while i < len {
-    acc = int.bxor(table[int.band(int.bxor(acc, bytes.get_or(b, i, 0)), 255)], int.bshr(acc, 8))
+    acc = int.bxor(table[int.band(int.bxor(acc, bytes.get(b, i) ?? 0), 255)], int.bshr(acc, 8))
     i = i + 1
   }
   int.bxor(acc, 4294967295)
@@ -10206,16 +9024,12 @@ fn adler32(b: Bytes) -> Int = {
   var i = 0
   let len = bytes.len(b)
   while i < len {
-    s1 = (s1 + bytes.get_or(b, i, 0)) % 65521
+    s1 = (s1 + bytes.get(b, i) ?? 0) % 65521
     s2 = (s2 + s1) % 65521
     i = i + 1
   }
   int.bor(int.bshl(s2, 16), s1)
 }
-
-local fn h_mask32(x: Int) -> Int = int.band(x, 4294967295)
-
-local fn h_rotl32(x: Int, n: Int) -> Int = h_mask32(int.bor(int.bshl(x, n), int.bshr(x, 32 - n)))
 
 
 local fn h_shr64(x: Int, n: Int) -> Int = int.band(int.bshr(x, n), int.bshl(1, 64 - n) - 1)
@@ -10239,15 +9053,6 @@ local fn h_pad(b: Bytes, block: Int, len_count: Int, big_endian: Bool) -> List[I
   )
 }
 
-local fn h_word32(m: List[Int], at: Int, big_endian: Bool) -> Int =
-  if big_endian then int.bor(
-    int.bor(int.bshl(m[at], 24), int.bshl(m[at + 1], 16)),
-    int.bor(int.bshl(m[at + 2], 8), m[at + 3]),
-  ) else int.bor(
-    int.bor(m[at], int.bshl(m[at + 1], 8)),
-    int.bor(int.bshl(m[at + 2], 16), int.bshl(m[at + 3], 24)),
-  )
-
 local fn h_word64(m: List[Int], at: Int) -> Int = list.range(0, 8) |> list.fold(
   0,
   (acc, k) => int.bor(int.bshl(acc, 8), m[at + k]),
@@ -10263,180 +9068,7 @@ local fn h_hex(b: Bytes) -> String = bytes.to_list(b) |> list.map((x) => string.
   "0123456789abcdef",
   int.band(x, 15),
   int.band(x, 15) + 1,
-)) |> string.join("")
-
-local fn h_md5_k() -> List[Int] = [
-  3614090360,
-  3905402710,
-  606105819,
-  3250441966,
-  4118548399,
-  1200080426,
-  2821735955,
-  4249261313,
-  1770035416,
-  2336552879,
-  4294925233,
-  2304563134,
-  1804603682,
-  4254626195,
-  2792965006,
-  1236535329,
-  4129170786,
-  3225465664,
-  643717713,
-  3921069994,
-  3593408605,
-  38016083,
-  3634488961,
-  3889429448,
-  568446438,
-  3275163606,
-  4107603335,
-  1163531501,
-  2850285829,
-  4243563512,
-  1735328473,
-  2368359562,
-  4294588738,
-  2272392833,
-  1839030562,
-  4259657740,
-  2763975236,
-  1272893353,
-  4139469664,
-  3200236656,
-  681279174,
-  3936430074,
-  3572445317,
-  76029189,
-  3654602809,
-  3873151461,
-  530742520,
-  3299628645,
-  4096336452,
-  1126891415,
-  2878612391,
-  4237533241,
-  1700485571,
-  2399980690,
-  4293915773,
-  2240044497,
-  1873313359,
-  4264355552,
-  2734768916,
-  1309151649,
-  4149444226,
-  3174756917,
-  718787259,
-  3951481745
-]
-
-local fn h_md5_s(i: Int) -> Int = {
-  let row = match i / 16 {
-    0 => [7, 12, 17, 22],
-    1 => [5, 9, 14, 20],
-    2 => [4, 11, 16, 23],
-    _ => [6, 10, 15, 21],
-  }
-  row[i % 4]
-}
-
-/// 16-byte MD5 digest of b. For compatibility only: MD5 is broken, never use it for security.
-@insecure_digest
-fn md5(b: Bytes) -> Bytes = {
-  let m = h_pad(b, 64, 8, false)
-  let k = h_md5_k()
-  var h0 = 1732584193
-  var h1 = 4023233417
-  var h2 = 2562383102
-  var h3 = 271733878
-  var off = 0
-  while off < list.len(m) {
-    var a = h0
-    var bb = h1
-    var c = h2
-    var d = h3
-    var i = 0
-    while i < 64 {
-      let fg = match i / 16 {
-        0 => (int.bor(int.band(bb, c), int.band(int.bxor(bb, 4294967295), d)), i),
-        1 => (int.bor(int.band(d, bb), int.band(int.bxor(d, 4294967295), c)), (5 * i + 1) % 16),
-        2 => (int.bxor(int.bxor(bb, c), d), (3 * i + 5) % 16),
-        _ => (int.bxor(c, int.bor(bb, int.bxor(d, 4294967295))), (7 * i) % 16),
-      }
-      let f = h_mask32(fg.0 + a + k[i] + h_word32(m, off + fg.1 * 4, false))
-      a = d
-      d = c
-      c = bb
-      bb = h_mask32(bb + h_rotl32(f, h_md5_s(i)))
-      i = i + 1
-    }
-    h0 = h_mask32(h0 + a)
-    h1 = h_mask32(h1 + bb)
-    h2 = h_mask32(h2 + c)
-    h3 = h_mask32(h3 + d)
-    off = off + 64
-  }
-  h_out([h0, h1, h2, h3], 4, false)
-}
-
-/// MD5 of b as 32 lowercase hex chars. For compatibility only, never for security.
-@insecure_digest
-fn md5_hex(b: Bytes) -> String = h_hex(md5(b))
-
-/// 20-byte SHA-1 digest of b. For compatibility only: SHA-1 is broken, never use it for security.
-@insecure_digest
-fn sha1(b: Bytes) -> Bytes = {
-  let m = h_pad(b, 64, 8, true)
-  var h0 = 1732584193
-  var h1 = 4023233417
-  var h2 = 2562383102
-  var h3 = 271733878
-  var h4 = 3285377520
-  var w = list.repeat(0, 80)
-  var off = 0
-  while off < list.len(m) {
-    var t = 0
-    while t < 80 {
-      w[t] = if t < 16 then h_word32(m, off + t * 4, true)
-      else h_rotl32(int.bxor(int.bxor(w[t - 3], w[t - 8]), int.bxor(w[t - 14], w[t - 16])), 1)
-      t = t + 1
-    }
-    var a = h0
-    var bb = h1
-    var c = h2
-    var d = h3
-    var e = h4
-    var i = 0
-    while i < 80 {
-      let fk = match i / 20 {
-        0 => (int.bor(int.band(bb, c), int.band(int.bxor(bb, 4294967295), d)), 1518500249),
-        1 => (int.bxor(int.bxor(bb, c), d), 1859775393),
-        2 => (int.bor(int.bor(int.band(bb, c), int.band(bb, d)), int.band(c, d)), 2400959708),
-        _ => (int.bxor(int.bxor(bb, c), d), 3395469782),
-      }
-      let temp = h_mask32(h_rotl32(a, 5) + fk.0 + e + fk.1 + w[i])
-      e = d
-      d = c
-      c = h_rotl32(bb, 30)
-      bb = a
-      a = temp
-      i = i + 1
-    }
-    h0 = h_mask32(h0 + a)
-    h1 = h_mask32(h1 + bb)
-    h2 = h_mask32(h2 + c)
-    h3 = h_mask32(h3 + d)
-    h4 = h_mask32(h4 + e)
-    off = off + 64
-  }
-  h_out([h0, h1, h2, h3, h4], 4, true)
-}
-
-/// SHA-1 of b as 40 lowercase hex chars. For compatibility only, never for security.
-@insecure_digest
-fn sha1_hex(b: Bytes) -> String = h_hex(sha1(b))
+)) |> list.join("")
 
 local fn h_sha512_k() -> List[Int] = [
   4794697086780616226,
@@ -10600,6 +9232,11 @@ fn sha512_hex(b: Bytes) -> String = h_hex(sha512(b))
 
 
 
+
+
+
+
+
 local fn h_digest(b: Bytes, wide: Bool) -> Bytes = if wide then hash.sha512(b) else hash.sha256(b)
 
 local fn h_hmac(key: Bytes, b: Bytes, wide: Bool) -> Bytes = {
@@ -10608,31 +9245,25 @@ local fn h_hmac(key: Bytes, b: Bytes, wide: Bool) -> Bytes = {
   let k = bytes.to_list(k0) + list.repeat(0, block - bytes.len(k0))
   let ipad = k |> list.map((x) => int.bxor(x, 54)) |> bytes.from_list
   let opad = k |> list.map((x) => int.bxor(x, 92)) |> bytes.from_list
-  h_digest(bytes.concat(opad, h_digest(bytes.concat(ipad, b), wide)), wide)
+  h_digest(bytes.__concat(opad, h_digest(bytes.__concat(ipad, b), wide)), wide)
 }
 
-/// 32-byte HMAC-SHA256 of b under key (RFC 2104); key first.
-fn hmac_sha256(key: Bytes, b: Bytes) -> Bytes = h_hmac(key, b, false)
+/// 32-byte HMAC-SHA256 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time. Hex: hex.encode(secret.reveal(tag)).
+fn hmac_sha256(key: Secret[Bytes], b: Bytes) -> Secret[Bytes] = secret.new(h_hmac(secret.reveal(key), b, false))
 
-/// HMAC-SHA256 of b under key as 64 lowercase hex chars.
-fn hmac_sha256_hex(key: Bytes, b: Bytes) -> String = h_hex(hmac_sha256(key, b))
+/// 64-byte HMAC-SHA512 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time. Hex: hex.encode(secret.reveal(tag)).
+fn hmac_sha512(key: Secret[Bytes], b: Bytes) -> Secret[Bytes] = secret.new(h_hmac(secret.reveal(key), b, true))
 
-/// 64-byte HMAC-SHA512 of b under key (RFC 2104); key first.
-fn hmac_sha512(key: Bytes, b: Bytes) -> Bytes = h_hmac(key, b, true)
-
-/// HMAC-SHA512 of b under key as 128 lowercase hex chars.
-fn hmac_sha512_hex(key: Bytes, b: Bytes) -> String = h_hex(hmac_sha512(key, b))
-
-/// True if tag is the HMAC-SHA256 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha256(key, b, hex.decode(sig) ?? bytes.from_list([])).
-fn is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool = bytes.is_equal_constant_time(
-  hmac_sha256(key, b),
-  tag,
+/// True if tag is the HMAC-SHA256 of b under key, compared in constant time. A hex tag: hash.is_valid_hmac_sha256(key, b, secret.new(hex.decode(sig) ?? bytes.from_list([]))).
+fn is_valid_hmac_sha256(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool = bytes.is_equal_constant_time(
+  secret.reveal(hmac_sha256(key, b)),
+  secret.reveal(tag),
 )
 
-/// True if tag is the HMAC-SHA512 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha512(key, b, hex.decode(sig) ?? bytes.from_list([])).
-fn is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool = bytes.is_equal_constant_time(
-  hmac_sha512(key, b),
-  tag,
+/// True if tag is the HMAC-SHA512 of b under key, compared in constant time. A hex tag: hash.is_valid_hmac_sha512(key, b, secret.new(hex.decode(sig) ?? bytes.from_list([]))).
+fn is_valid_hmac_sha512(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool = bytes.is_equal_constant_time(
+  secret.reveal(hmac_sha512(key, b)),
+  secret.reveal(tag),
 )
 "#;
 pub const SRC_HASH_IMPL: &str = r#"
@@ -10648,17 +9279,11 @@ import prim
 fn __fnv_go(a: Int, n: Int, i: Int, h: Int) -> Int = if i >= n then h
 else __fnv_go(a, n, i + 1, prim.band(prim.bxor(h, prim.load8(a + i)) * 16777619, 4294967295))
 
-fn hash_fnv1a32(s: String) -> Int = {
-  let h = prim.handle(s)
-  __fnv_go(h + 12, prim.load32(h + 4), 0, 2166136261)
-}
-
-
-
-fn hash_fnv1a32_bytes(b: Bytes) -> Int = {
+fn hash_fnv1a32(b: Bytes) -> Int = {
   let h = prim.handle(b)
   __fnv_go(h + 12, prim.load32(h + 4), 0, 2166136261)
 }
+
 
 
 fn __sha_k() -> List[Int] = [
@@ -10900,8 +9525,8 @@ else {
   __sha_hex_fill(dst, src, i + 1)
 }
 
-fn hash_sha256_hex(s: String) -> String = {
-  let h = prim.handle(s)
+fn hash_sha256_hex(b: Bytes) -> String = {
+  let h = prim.handle(b)
   let d = __sha256_digest(h + 12, prim.load32(h + 4))
   let out = prim.alloc_str(64)
   let _x = __sha_hex_fill(prim.handle(out) + 12, prim.handle(d) + 12, 0)
@@ -11261,9 +9886,9 @@ import url
 
 /// Serves 0.0.0.0:port forever; handler err is a 500.
 @intrinsic("almide_rt_http_serve")
-@concurrent(f)
+@concurrent(handler)
 @category("Net.listen")
-effect fn serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit = _
+effect fn serve(port: Int, handler: HttpHandler) -> Unit = _
 
 
 /// Reply with Content-Type text/plain.
@@ -11273,16 +9898,19 @@ fn response(status: Int, body: String) -> HttpResponse = _
 
 
 
-
-
 /// Reply with Content-Type application/json.
 @intrinsic("almide_rt_http_json")
 fn json(status: Int, body: String) -> HttpResponse = _
 
-/// Reply with headers as-is; no default Content-Type.
-@intrinsic("almide_rt_http_with_headers")
-@borrow_ref(headers)
-fn with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse = _
+/// Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
+fn with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse = {
+  let flat = __flat(headers)
+  http.__with_headers(status, body, flat)
+}
+
+@intrinsic("almide_rt_http___with_headers")
+@borrow_ref(flat)
+fn __with_headers(status: Int, body: String, flat: List[String]) -> HttpResponse = _
 
 /// 302 with Location url and empty body.
 @intrinsic("almide_rt_http_redirect")
@@ -11292,65 +9920,126 @@ fn redirect(url: String) -> HttpResponse = _
 /// resp with code set; not range-checked.
 @intrinsic("almide_http_set_status")
 @consume(resp)
-fn status(resp: HttpResponse, code: Int) -> HttpResponse = _
+fn set_status(resp: HttpResponse, code: Int) -> HttpResponse = _
 
-/// Payload text; lossy UTF-8 when fetched.
-@intrinsic("almide_http_get_body")
-@borrow_ref(resp)
-fn body(resp: HttpResponse) -> String = _
-
-/// Case-insensitive upsert of header key.
-@intrinsic("almide_http_set_header")
-@consume(resp)
-fn set_header(resp: HttpResponse, key: String, value: String) -> HttpResponse = _
-
-/// First value for key, any case; none if absent.
-@intrinsic("almide_http_get_header")
-@borrow_ref(resp)
-fn get_header(resp: HttpResponse, key: String) -> String? = _
-
-
-
-
-
-
-
-/// HTTP status; 0 if the status line was bad.
+/// HTTP status code; 0 if the status line was bad.
 @intrinsic("almide_http_status_code")
 @borrow_ref(resp)
-fn status_code(resp: HttpResponse) -> Int = _
+fn status(resp: HttpResponse) -> Int = _
 
-/// Map by lowercased name; first value wins.
-@intrinsic("almide_http_headers")
-@borrow_ref(resp)
-fn headers(resp: HttpResponse) -> Map[String, String] = _
 
-/// Every value for key, wire order; [] if absent.
+/// First value of header name, any case; none if absent.
+fn header[M: HttpMessage](m: M, name: String) -> String? = m.__self_header(name)
+
+/// Every value of header name, any case, in wire order; [] if absent.
+fn header_values[M: HttpMessage](m: M, name: String) -> List[String] = m.__self_header_values(name)
+
+/// Every header as (name, value), wire spelling and order, repeats kept.
+fn headers[M: HttpMessage](m: M) -> List[(String, String)] = m.__self_headers()
+
+/// Body text; a fetched body is decoded as lossy UTF-8.
+fn body[M: HttpMessage](m: M) -> String = m.__self_body()
+
+/// Body as bytes: a fetched body exactly as sent, a built one as the UTF-8 bytes of body(m).
+fn body_bytes[M: HttpMessage](m: M) -> Bytes = m.__self_body_bytes()
+
+/// m with header name set, any case: the first match replaced in place, else appended.
+fn set_header[M: HttpMessage](m: M, name: String, value: String) -> M = m.__self_set_header(
+  name,
+  value,
+)
+
+/// m with its body replaced.
+fn set_body[M: HttpMessage](m: M, body: String) -> M = m.__self_set_body(body)
+
+/// m with its body replaced by body, decoded as lossy UTF-8.
+fn set_body_bytes[M: HttpMessage](m: M, body: Bytes) -> M = m.__self_set_body_bytes(body)
+
+
+@intrinsic("almide_http_get_header")
+@borrow_ref(m)
+fn __http_response_header(m: HttpResponse, name: String) -> String? = _
+
 @intrinsic("almide_http_header_values")
-@borrow_ref(resp)
-fn header_values(resp: HttpResponse, key: String) -> List[String] = _
+@borrow_ref(m)
+fn __http_response_header_values(m: HttpResponse, name: String) -> List[String] = _
+
+fn __http_response_headers(m: HttpResponse) -> List[(String, String)] = __pairs(http.__http_response_headers_flat(m))
+
+@intrinsic("almide_http_headers_flat")
+@borrow_ref(m)
+fn __http_response_headers_flat(m: HttpResponse) -> List[String] = _
+
+@intrinsic("almide_http_get_body")
+@borrow_ref(m)
+fn __http_response_body(m: HttpResponse) -> String = _
+
+@intrinsic("almide_http_get_body_bytes")
+@borrow_ref(m)
+fn __http_response_body_bytes(m: HttpResponse) -> Bytes = _
+
+@intrinsic("almide_http_set_header")
+@consume(m)
+fn __http_response_set_header(m: HttpResponse, name: String, value: String) -> HttpResponse = _
+
+@intrinsic("almide_http_set_body")
+@consume(m)
+fn __http_response_set_body(m: HttpResponse, body: String) -> HttpResponse = _
+
+fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = http.__http_response_set_body(
+  m,
+  bytes.to_string_lossy(body),
+)
+
+
+@intrinsic("almide_http_req_header")
+@borrow_ref(m)
+fn __http_request_header(m: HttpRequest, name: String) -> String? = _
+
+@intrinsic("almide_http_req_header_values")
+@borrow_ref(m)
+fn __http_request_header_values(m: HttpRequest, name: String) -> List[String] = _
+
+fn __http_request_headers(m: HttpRequest) -> List[(String, String)] = __pairs(http.__http_request_headers_flat(m))
+
+@intrinsic("almide_http_req_headers_flat")
+@borrow_ref(m)
+fn __http_request_headers_flat(m: HttpRequest) -> List[String] = _
+
+@intrinsic("almide_http_req_body")
+@borrow_ref(m)
+fn __http_request_body(m: HttpRequest) -> String = _
+
+fn __http_request_body_bytes(m: HttpRequest) -> Bytes = bytes.from_string(http.__http_request_body(m))
+
+@intrinsic("almide_http_req_set_header")
+@consume(m)
+fn __http_request_set_header(m: HttpRequest, name: String, value: String) -> HttpRequest = _
+
+@intrinsic("almide_http_req_set_body")
+@consume(m)
+fn __http_request_set_body(m: HttpRequest, body: String) -> HttpRequest = _
+
+fn __http_request_set_body_bytes(m: HttpRequest, body: Bytes) -> HttpRequest = http.__http_request_set_body(
+  m,
+  bytes.to_string_lossy(body),
+)
+
+
+fn __flat(xs: List[(String, String)]) -> List[String] = xs |> list.flat_map(((k, v)) => [k, v])
+
+fn __pairs(flat: List[String]) -> List[(String, String)] = list.range(0, list.len(flat) / 2) |> list.map((i) => (list.get(flat, 2 * i) ?? "", list.get(flat, 2 * i + 1) ?? ""))
 
 
 /// Request method as sent, e.g. GET.
 @intrinsic("almide_http_req_method")
 @borrow_ref(req)
-fn req_method(req: HttpRequest) -> String = _
+fn method(req: HttpRequest) -> String = _
 
-/// Request target, query string included.
+/// Request target, query string included (a full URL for a request built to send).
 @intrinsic("almide_http_req_path")
 @borrow_ref(req)
-fn req_path(req: HttpRequest) -> String = _
-
-/// Body text; empty without a Content-Length.
-@intrinsic("almide_http_req_body")
-@borrow_ref(req)
-fn req_body(req: HttpRequest) -> String = _
-
-/// First value for key, any case; none if absent.
-@intrinsic("almide_http_req_header")
-@borrow_ref(req)
-fn req_header(req: HttpRequest, key: String) -> String? = _
-
+fn path(req: HttpRequest) -> String = _
 
 
 
@@ -11360,7 +10049,7 @@ fn req_header(req: HttpRequest, key: String) -> String? = _
 
 
 /// url.parse_query of the target after its first ?; pairs in order; err on a bad escape.
-fn query_params(req: HttpRequest) -> Result[List[(String, String)], String] = match url.parse_query(__query_of(http.req_path(req))) {
+fn query_params(req: HttpRequest) -> Result[List[(String, String)], String] = match url.parse_query(__query_of(http.path(req))) {
   ok(ps) => ok(ps),
   err(e) => err(string.replace(e, "url.parse_query", "http.query_params")),
 }
@@ -11368,118 +10057,42 @@ fn query_params(req: HttpRequest) -> Result[List[(String, String)], String] = ma
 
 
 
-/// + to space, %XX to byte; bad escapes kept.
-@intrinsic("almide_http_url_decode")
-fn url_decode(s: String) -> String = _
+
 
 
 /// Body even for a 404; err only on transport.
 @intrinsic("almide_http_get")
 effect fn get(url: String) -> Result[String, String] = _
 
-/// Reply body of a POST; JSON type by default.
-@intrinsic("almide_http_post")
-effect fn post(url: String, body: String) -> Result[String, String] = _
-
-/// Reply body of a PUT; JSON type by default.
-@intrinsic("almide_http_put")
-effect fn put(url: String, body: String) -> Result[String, String] = _
-
-/// Reply body of a PATCH; JSON type by default.
-@intrinsic("almide_http_patch")
-effect fn patch(url: String, body: String) -> Result[String, String] = _
-
-/// Reply body of a DELETE; any status is ok.
-@intrinsic("almide_http_delete")
-effect fn delete(url: String) -> Result[String, String] = _
-
 /// Reply body for any method; any status is ok.
+@category("Net.fetch")
+effect fn request(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[String, String] = http.__request(
+  method,
+  url,
+  body,
+  __flat(headers),
+)
+
 @intrinsic("almide_http_request")
-@borrow_ref(headers)
-effect fn request(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = _
-
-
-
-
-
-/// (status, body); a 404 is ok, not err.
-@intrinsic("almide_http_get_status")
-effect fn get_status(url: String) -> Result[(Int, String), String] = _
-
-/// (status, body) for any method; 3xx not followed.
-@intrinsic("almide_http_request_status")
-@borrow_ref(headers)
-effect fn request_status(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String] = _
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+@borrow_ref(flat)
+effect fn __request(method: String, url: String, body: String, flat: List[String]) -> Result[String, String] = _
 
 /// Whole reply, 404 included; redirects not followed.
 @intrinsic("almide_http_get_response")
 effect fn get_response(url: String) -> Result[HttpResponse, String] = _
 
-/// Whole reply to a POST; any status is ok.
-@intrinsic("almide_http_post_response")
-effect fn post_response(url: String, body: String) -> Result[HttpResponse, String] = _
+/// Sends req to the URL its target names; the whole reply, any status; redirects not followed.
+@category("Net.fetch")
+effect fn send(req: HttpRequest) -> Result[HttpResponse, String] = http.__request_response(
+  http.method(req),
+  http.path(req),
+  http.__http_request_body(req),
+  http.__http_request_headers_flat(req),
+)
 
-/// Whole reply to a PUT; any status is ok.
-@intrinsic("almide_http_put_response")
-effect fn put_response(url: String, body: String) -> Result[HttpResponse, String] = _
-
-/// Whole reply to a PATCH; any status is ok.
-@intrinsic("almide_http_patch_response")
-effect fn patch_response(url: String, body: String) -> Result[HttpResponse, String] = _
-
-/// Whole reply to a DELETE; any status is ok.
-@intrinsic("almide_http_delete_response")
-effect fn delete_response(url: String) -> Result[HttpResponse, String] = _
-
-/// Whole reply for any method; 3xx not followed.
 @intrinsic("almide_http_request_response")
-@borrow_ref(headers)
-effect fn request_response(method: String, url: String, body: String, headers: Map[String, String]) -> Result[HttpResponse, String] = _
-
-
-
-
-/// Raw body bytes, not UTF-8 decoded.
-@intrinsic("almide_http_get_bytes")
-effect fn get_bytes(url: String) -> Result[Bytes, String] = _
-
-/// Raw body bytes for any method and headers.
-@intrinsic("almide_http_request_bytes")
-@borrow_ref(headers)
-effect fn request_bytes(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String] = _
-
-
-
-
-
-/// Body chunks to on_chunk; err on a non-2xx.
-@intrinsic("almide_http_request_stream")
-@borrow_ref(headers)
-effect fn request_stream(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Result[Unit, String] = _
-
-
-
-
-
-
-
+@borrow_ref(flat)
+effect fn __request_response(method: String, url: String, body: String, flat: List[String]) -> Result[HttpResponse, String] = _
 
 
 
@@ -11500,19 +10113,20 @@ effect fn request_stream(method: String, url: String, body: String, headers: Map
 /// Per-call limits in ms; 0 = no limit.
 type HttpLimits = { total_ms: Int, idle_ms: Int }
 
-/// Begins a request; returns at once with a handle.
-effect fn start(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits) -> Result[HttpCall, String] = __call_start(
-  method,
-  url,
-  body,
-  headers,
+/// Begins sending req; returns at once with a handle.
+@category("Net.fetch")
+effect fn start(req: HttpRequest, limits: HttpLimits) -> Result[HttpCall, String] = __call_start(
+  http.method(req),
+  http.path(req),
+  http.__http_request_body(req),
+  http.__http_request_headers_flat(req),
   limits.total_ms,
   limits.idle_ms,
 )
 
 @intrinsic("almide_rt_http___call_start")
-@borrow_ref(headers)
-effect fn __call_start(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
+@borrow_ref(flat)
+effect fn __call_start(method: String, url: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = _
 
 /// Never blocks: none while running, then the result.
 @intrinsic("almide_http_call_poll")
@@ -11533,21 +10147,6 @@ effect fn wait(c: HttpCall) -> Result[HttpResponse, String] = _
 @intrinsic("almide_http_call_cancel")
 @borrow_ref(c)
 effect fn cancel(c: HttpCall) -> Unit = _
-
-/// request_stream bounded by per-call limits.
-effect fn request_stream_with_limits(method: String, url: String, body: String, headers: Map[String, String], limits: HttpLimits, on_chunk: (String) -> Unit) -> Result[Unit, String] = __request_stream_limited(
-  method,
-  url,
-  body,
-  headers,
-  limits.total_ms,
-  limits.idle_ms,
-  on_chunk,
-)
-
-@intrinsic("almide_rt_http___request_stream_limited")
-@borrow_ref(headers)
-effect fn __request_stream_limited(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int, on_chunk: (String) -> Unit) -> Result[Unit, String] = _
 
 
 
@@ -11571,10 +10170,15 @@ type HttpMiddleware = (HttpHandler) -> HttpHandler
 /// Route table row; build it with route or mount.
 type HttpRoute = { method: String, pattern: String, segments: List[String], handler: HttpHandler }
 
-/// Request built in code; target keeps its ?query.
-@intrinsic("almide_rt_http_new_request")
-@borrow_ref(headers)
-fn new_request(method: String, target: String, body: String, headers: Map[String, String]) -> HttpRequest = _
+/// Request built in code; target keeps its ?query (a full URL for send / start).
+fn new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest = {
+  let flat = __flat(headers)
+  http.__new_request(method, target, body, flat)
+}
+
+@intrinsic("almide_rt_http___new_request")
+@borrow_ref(flat)
+fn __new_request(method: String, target: String, body: String, flat: List[String]) -> HttpRequest = _
 
 /// Router-bound path parameter, decoded; none if unbound.
 @intrinsic("almide_http_param")
@@ -11589,10 +10193,6 @@ fn __with_params(req: HttpRequest, flat: List[String]) -> HttpRequest = _
 @intrinsic("almide_http_req_with_path")
 @consume(req)
 fn __with_path(req: HttpRequest, target: String) -> HttpRequest = _
-
-@intrinsic("almide_http_set_body")
-@consume(resp)
-fn __set_body(resp: HttpResponse, body: String) -> HttpResponse = _
 
 
 
@@ -11626,7 +10226,7 @@ fn __query_of(target: String) -> String = match string.index_of(target, "?") {
 fn __parts(path: String) -> List[String] = string.split(path, "/") |> list.filter((s) => s != "")
 
 
-fn __decode_part(s: String) -> String = http.url_decode(string.replace(s, "+", "%2B"))
+fn __decode_part(s: String) -> String = url.decode_form(string.replace(s, "+", "%2B")) ?? s
 
 fn __is_hex(c: String) -> Bool = c != "" and string.contains("0123456789abcdefABCDEF", c)
 
@@ -11659,7 +10259,7 @@ fn __canonical(path: String) -> Bool = {
   let empty_inner = list.enumerate(segs) |> list.any(((i, s)) => s == "" and i + 1 < n)
   let dot = segs |> list.any((s) => s == "." or s == "..")
   let unreserved = string.split(path, "%") |> list.drop(1) |> list.any((p) => __encodes_unreserved(p))
-  let odd = string.chars(path) |> list.any((c) => c == "\\" or (string.codepoint(c) ?? 0) < 32 or (string.codepoint(c) ?? 0) == 127)
+  let odd = string.to_list(path) |> list.any((c) => c == "\\" or (string.to_codepoint(c) ?? 0) < 32 or (string.to_codepoint(c) ?? 0) == 127)
   not empty_inner and not dot and not unreserved and not odd
 }
 
@@ -11684,7 +10284,7 @@ fn __bad_binding(segs: List[String], parts: List[String]) -> Bool = {
 }
 
 fn __hex_pair(p: String) -> Bool = {
-  let cs = string.chars(string.take(p, 2))
+  let cs = string.to_list(string.take(p, 2))
   list.len(cs) == 2 and list.all(cs, __is_hex)
 }
 
@@ -11711,11 +10311,11 @@ fn __pattern_path(pattern: String) -> String = match string.index_of(pattern, " 
 @concurrent(handler)
 fn route(pattern: String, handler: HttpHandler) -> HttpRoute = {
   let p = string.trim(pattern)
-  let method = match string.index_of(p, " ") {
+  let verb = match string.index_of(p, " ") {
     some(i) => string.take(p, i),
     none => "",
   }
-  { method: method, pattern: p, segments: __parts(__pattern_path(p)), handler: handler }
+  { method: verb, pattern: p, segments: __parts(__pattern_path(p)), handler: handler }
 }
 
 /// Sub-app under prefix: /api/x reaches it as /x.
@@ -11728,7 +10328,7 @@ fn mount(prefix: String, sub: HttpHandler) -> HttpRoute = {
 
 
 fn __mounted(sub: HttpHandler) -> HttpHandler = (req) => {
-  let q = __query_of(http.req_path(req))
+  let q = __query_of(http.path(req))
   let rest = http.param(req, "") ?? ""
   sub(http.__with_path(req, "/" + rest + (if q == "" then "" else "?" + q)))!
 }
@@ -11806,7 +10406,7 @@ else if __is_param(s) then __name_of(s) != "" and not string.contains(__name_of(
 )
 else not string.contains(s, "{") and not string.contains(s, "}")
 
-fn __method_ok(m: String) -> Bool = string.chars(m) |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c))
+fn __method_ok(m: String) -> Bool = string.to_list(m) |> list.all((c) => string.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c))
 
 fn __pattern_problems(r: HttpRoute) -> List[String] = {
   let last = list.len(r.segments) - 1
@@ -11839,33 +10439,33 @@ fn __not_allowed(hits: List[(HttpRoute, List[String])]) -> HttpResponse = {
 
 @category
 effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) -> HttpResponse = {
-  let method = http.req_method(req)
-  let path = __path_of(http.req_path(req))
-  if not string.starts_with(path, "/") then http.response(
+  let verb = http.method(req)
+  let target_path = __path_of(http.path(req))
+  if not string.starts_with(target_path, "/") then http.response(
     400,
     "Bad Request: the request target must start with /",
   )
-  else if __bad_escape(path) then http.response(
+  else if __bad_escape(target_path) then http.response(
     400,
     "Bad Request: malformed percent-encoding in the path",
   )
-  else if not __canonical(path) then http.response(
+  else if not __canonical(target_path) then http.response(
     400,
     "Bad Request: the path is not in canonical form",
   )
   else {
-    let exact = hits |> list.filter(((r, _)) => r.method == method or r.method == "")
-    let via_get = method == "HEAD" and list.is_empty(exact)
+    let exact = hits |> list.filter(((r, _)) => r.method == verb or r.method == "")
+    let via_get = verb == "HEAD" and list.is_empty(exact)
     let allowed = if via_get then hits |> list.filter(((r, _)) => r.method == "GET")
     else exact
     match allowed |> list.find(((a, _)) => list.all(allowed, ((b, _)) => __route_covers(a, b))) {
-      some((r, bound)) => if __bad_binding(r.segments, __parts(path)) then http.response(
+      some((r, bound)) => if __bad_binding(r.segments, __parts(target_path)) then http.response(
         400,
         "Bad Request: a path parameter is a dot segment or holds a /, \\ or NUL",
       )
       else {
         let res = r.handler(http.__with_params(req, bound))!
-        if via_get then http.__set_body(res, "") else res
+        if via_get then http.__http_response_set_body(res, "") else res
       },
       none => if list.is_empty(hits) then http.response(404, "Not Found") else __not_allowed(hits),
     }
@@ -11875,15 +10475,15 @@ effect fn __dispatch(hits: List[(HttpRoute, List[String])], req: HttpRequest) ->
 
 
 fn __table(routes: List[HttpRoute]) -> HttpHandler = (req) => {
-  let parts = __parts(__path_of(http.req_path(req)))
+  let parts = __parts(__path_of(http.path(req)))
   let hits = routes |> list.filter_map((r) => __bind(r.segments, parts) |> option.map((bound) => (r, bound)))
   __dispatch(hits, req)!
 }
 
 /// Route table as a handler; err on conflicting routes.
-fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String] = {
-  let problems = __problems(routes)
-  if list.is_empty(problems) then ok(__table(routes)) else err("http.router: " + list.join(
+fn router(xs: List[HttpRoute]) -> Result[HttpHandler, String] = {
+  let problems = __problems(xs)
+  if list.is_empty(problems) then ok(__table(xs)) else err("http.router: " + list.join(
     problems,
     "; ",
   ))
@@ -11902,9 +10502,14 @@ fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
 
 fn __apply(mw: HttpMiddleware, inner: HttpHandler) -> HttpHandler = mw(inner)
 
-/// JSON body through decode; err is a 400 response.
-fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
-  ok(v) => match decode(v) {
+
+
+
+
+/// JSON body into input type T, strictly; err is a 400 response.
+@input_sink
+fn decode_json[T: Decode](req: HttpRequest) -> Result[T, HttpResponse] = match json.parse(http.__http_request_body(req)) {
+  ok(v) => match T.decode_strict(v) {
     ok(x) => ok(x),
     err(e) => err(http.response(400, "Bad Request: " + e)),
   },
@@ -11934,7 +10539,10 @@ import http
 
 fn __hc_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __hc_frame(method: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
+fn __hc_frame(method: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> String = list.take(
+  flat,
+  2 * (list.len(flat) / 2),
+) |> list.map((c) => __hc_cell(c)) |> list.fold(
   "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell(int.to_string(total_ms))}${__hc_cell(int.to_string(idle_ms))}",
   (acc, cell) => acc + cell,
 )
@@ -11959,9 +10567,9 @@ effect fn __http_call_cancel_raw(c: HttpCall) -> Result[String, String] = _
 effect fn __http_call_step_raw(c: HttpCall) -> Result[String, String] = _
 
 
-effect fn __hc_start_impl(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = __http_call_open(
+effect fn __hc_start_impl(method: String, url: String, body: String, flat: List[String], total_ms: Int, idle_ms: Int) -> Result[HttpCall, String] = __http_call_open(
   url,
-  __hc_frame(method, body, headers, total_ms, idle_ms),
+  __hc_frame(method, body, flat, total_ms, idle_ms),
 )
 
 
@@ -11982,56 +10590,6 @@ fn __hc_read_new_impl(c: HttpCall) -> String = __http_call_read_raw(c) ?? ""
 effect fn __hc_cancel_impl(c: HttpCall) -> Unit = {
   let _ = __http_call_cancel_raw(c)
   ()
-}
-
-
-
-
-
-fn __hc_step_piece(s: String) -> String = {
-  let rest = string.drop(s, 1)
-  let cut = string.index_of(rest, "\n") ?? 0
-  let n = int.parse(string.take(rest, cut)) ?? 0
-  string.slice(rest, cut + 1, cut + 1 + n)
-}
-
-fn __hc_step_error(s: String) -> String = {
-  let rest = string.drop(s, 1)
-  let cut = string.index_of(rest, "\n") ?? 0
-  let n = int.parse(string.take(rest, cut)) ?? 0
-  string.drop(rest, cut + 1 + n)
-}
-
-effect fn __hc_pump(c: HttpCall, on_chunk: (String) -> Unit) -> Result[Unit, String] = {
-  let s = __http_call_step_raw(c) ?? "o0\n"
-  let piece = __hc_step_piece(s)
-  if string.len(piece) > 0 then on_chunk(piece) else ()
-  match string.take(s, 1) {
-    "c" => __hc_pump(c, on_chunk),
-    "x" => err(__hc_step_error(s)),
-    _ => ok(()),
-  }
-}
-
-
-effect fn __hc_stream_limited_impl(method: String, url: String, body: String, headers: Map[String, String], total_ms: Int, idle_ms: Int, on_chunk: (String) -> Unit) -> Result[Unit, String] = {
-  let c = __hc_start_impl(method, url, body, headers, total_ms, idle_ms)!
-  __hc_pump(c, on_chunk)
-}
-
-
-
-
-
-fn __hc_classic_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__hc_cell(k)}${__hc_cell(v)}") |> list.fold(
-  "${__hc_cell(method)}${__hc_cell(body)}${__hc_cell("classic")}${__hc_cell("classic")}",
-  (acc, cell) => acc + cell,
-)
-
-@implements("http.request_stream")
-effect fn __hc_stream_classic_impl(method: String, url: String, body: String, headers: Map[String, String], on_chunk: (String) -> Unit) -> Result[Unit, String] = {
-  let c = __http_call_open(url, __hc_classic_frame(method, body, headers))!
-  __hc_pump(c, on_chunk)
 }
 
 
@@ -12060,9 +10618,13 @@ pub const SRC_HTTP_FRAMED: &str = r#"
 
 
 
+
 fn __http_cell(s: String) -> String = "${string.len(s)}\n${s}"
 
-fn __http_frame(method: String, body: String, headers: Map[String, String]) -> String = map.entries(headers) |> list.map(((k, v)) => "${__http_cell(k)}${__http_cell(v)}") |> list.fold(
+fn __http_frame(method: String, body: String, flat: List[String]) -> String = list.take(
+  flat,
+  2 * (list.len(flat) / 2),
+) |> list.map((c) => __http_cell(c)) |> list.fold(
   "${__http_cell(method)}${__http_cell(body)}",
   (acc, cell) => acc + cell,
 )
@@ -12071,41 +10633,10 @@ effect fn __http_framed_text(url: String, frame: String) -> Result[String, Strin
 
 effect fn __http_framed_status(url: String, frame: String) -> Result[String, String] = _
 
-effect fn __http_framed_bytes(url: String, frame: String) -> Result[Bytes, String] = _
-
-@implements("http.request")
-effect fn __request_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[String, String] = __http_framed_text(
+@implements("http.__request")
+effect fn __request_impl(method: String, url: String, body: String, flat: List[String]) -> Result[String, String] = __http_framed_text(
   url,
-  __http_frame(method, body, headers),
-)
-
-@implements("http.request_status")
-effect fn __request_status_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[(Int, String), String] = {
-  let f = __http_framed_status(url, __http_frame(method, body, headers))!
-  let cut = string.index_of(f, "\n") ?? 0
-  ok((int.parse(string.take(f, cut)) ?? 0, string.drop(f, cut + 1)))
-}
-
-@implements("http.get_status")
-effect fn __get_status_impl(url: String) -> Result[(Int, String), String] = __request_status_impl(
-  "GET",
-  url,
-  "",
-  map.new(),
-)
-
-@implements("http.request_bytes")
-effect fn __request_bytes_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[Bytes, String] = __http_framed_bytes(
-  url,
-  __http_frame(method, body, headers),
-)
-
-@implements("http.get_bytes")
-effect fn __get_bytes_impl(url: String) -> Result[Bytes, String] = __request_bytes_impl(
-  "GET",
-  url,
-  "",
-  map.new(),
+  __http_frame(method, body, flat),
 )
 
 effect fn __http_framed_response(url: String, frame: String) -> Result[String, String] = _
@@ -12124,9 +10655,9 @@ else {
   __http_cells(rest, acc + [cell])
 }
 
-@implements("http.request_response")
-effect fn __request_response_impl(method: String, url: String, body: String, headers: Map[String, String]) -> Result[List[String], String] = {
-  let f = __http_framed_response(url, __http_frame(method, body, headers))!
+@implements("http.__request_response")
+effect fn __request_response_impl(method: String, url: String, body: String, flat: List[String]) -> Result[List[String], String] = {
+  let f = __http_framed_response(url, __http_frame(method, body, flat))!
   let c1 = string.index_of(f, "\n") ?? 0
   let after_code = string.drop(f, c1 + 1)
   let c2 = string.index_of(after_code, "\n") ?? 0
@@ -12140,39 +10671,7 @@ effect fn __get_response_impl(url: String) -> Result[List[String], String] = __r
   "GET",
   url,
   "",
-  map.new(),
-)
-
-@implements("http.post_response")
-effect fn __post_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
-  "POST",
-  url,
-  body,
-  map.new(),
-)
-
-@implements("http.put_response")
-effect fn __put_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
-  "PUT",
-  url,
-  body,
-  map.new(),
-)
-
-@implements("http.patch_response")
-effect fn __patch_response_impl(url: String, body: String) -> Result[List[String], String] = __request_response_impl(
-  "PATCH",
-  url,
-  body,
-  map.new(),
-)
-
-@implements("http.delete_response")
-effect fn __delete_response_impl(url: String) -> Result[List[String], String] = __request_response_impl(
-  "DELETE",
-  url,
-  "",
-  map.new(),
+  [],
 )
 "#;
 pub const SRC_HTTP_REQUEST: &str = r#"
@@ -12199,8 +10698,8 @@ else if __hq_fold(list.get(a, i) ?? "") != __hq_fold(list.get(b, i) ?? "") then 
 else __hq_ci_at(a, b, i + 1)
 
 fn __hq_ci_eq(x: String, y: String) -> Bool = {
-  let a = string.chars(x)
-  let b = string.chars(y)
+  let a = string.to_list(x)
+  let b = string.to_list(y)
   if list.len(a) != list.len(b) then false
   else __hq_ci_at(a, b, 0)
 }
@@ -12210,9 +10709,11 @@ fn __hq_nh(req: List[String]) -> Int = int.parse(list.get(req, 3) ?? "0") ?? 0
 
 fn __hq_params_at(req: List[String]) -> Int = 4 + 2 * __hq_nh(req)
 
-fn http_new_request(method: String, target: String, body: String, headers: Map[String, String]) -> List[String] = {
-  let pairs = map.entries(headers) |> list.flat_map(((k, v)) => [k, v])
-  [method, target, body, int.to_string(map.len(headers))] + pairs
+
+
+fn http_new_request(method: String, target: String, body: String, flat: List[String]) -> List[String] = {
+  let n = list.len(flat) / 2
+  [method, target, body, int.to_string(n)] + list.take(flat, 2 * n)
 }
 
 fn http_req_method(req: List[String]) -> String = list.get(req, 0) ?? ""
@@ -12231,6 +10732,53 @@ fn http_req_header(req: List[String], key: String) -> String? = __hq_find(
   __hq_params_at(req),
   key,
 )
+
+fn __hq_all(req: List[String], i: Int, end: Int, key: String, acc: List[String]) -> List[String] =
+  if i >= end then acc
+  else if __hq_ci_eq(list.get(req, i) ?? "", key) then __hq_all(
+    req,
+    i + 2,
+    end,
+    key,
+    acc + [
+      list.get(req, i + 1) ?? ""
+    ],
+  )
+  else __hq_all(req, i + 2, end, key, acc)
+
+fn http_req_header_values(req: List[String], key: String) -> List[String] = __hq_all(
+  req,
+  4,
+  __hq_params_at(req),
+  key,
+  [],
+)
+
+fn http_req_headers_flat(req: List[String]) -> List[String] = list.take(
+  list.drop(req, 4),
+  2 * __hq_nh(req),
+)
+
+
+
+fn __hq_set(req: List[String], i: Int, end: Int, key: String, value: String) -> List[String] =
+  if i >= end then list.set(
+    list.take(req, end) + [key, value] + list.drop(req, end),
+    3,
+    int.to_string(__hq_nh(req) + 1),
+  )
+  else if __hq_ci_eq(list.get(req, i) ?? "", key) then list.set(req, i + 1, value)
+  else __hq_set(req, i + 2, end, key, value)
+
+fn http_req_set_header(req: List[String], key: String, value: String) -> List[String] = __hq_set(
+  req,
+  4,
+  __hq_params_at(req),
+  key,
+  value,
+)
+
+fn http_req_set_body(req: List[String], body: String) -> List[String] = list.set(req, 2, body)
 
 fn __hq_param(req: List[String], i: Int, name: String) -> String? = if i >= list.len(req) then none
 else if (list.get(req, i) ?? "") == name then list.get(req, i + 1)
@@ -12267,7 +10815,7 @@ fn __hq_quote_char(c: String) -> String = match c {
 }
 
 
-fn __hq_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hq_quote_char(c)) |> list.join("")) + "\""
+fn __hq_quote(s: String) -> String = "\"" + (string.to_list(s) |> list.map((c) => __hq_quote_char(c)) |> list.join("")) + "\""
 
 @implements("http.__http_request_repr")
 fn http_req_repr(req: List[String]) -> String = {
@@ -12330,8 +10878,8 @@ else if __hr_fold(list.get(a, i) ?? "") != __hr_fold(list.get(b, i) ?? "") then 
 else __hr_ci_at(a, b, i + 1)
 
 fn __hr_ci_eq(x: String, y: String) -> Bool = {
-  let a = string.chars(x)
-  let b = string.chars(y)
+  let a = string.to_list(x)
+  let b = string.to_list(y)
   if list.len(a) != list.len(b) then false
   else __hr_ci_at(a, b, 0)
 }
@@ -12341,12 +10889,13 @@ fn __hr_ci_eq(x: String, y: String) -> Bool = {
 
 
 
-fn http_with_headers(status: Int, body: String, headers: Map[String, String]) -> List[String] = {
+
+fn http_with_headers(status: Int, body: String, flat: List[String]) -> List[String] = {
   let st = int.to_string(status)
-  let named = map.keys(headers) |> list.enumerate |> list.map(((i, k)) => (i, __hr_lower(k), k))
+  let named = list.range(0, list.len(flat) / 2) |> list.map((i) => (i, __hr_lower(list.get(flat, 2 * i) ?? ""), list.get(flat, 2 * i) ?? ""))
   let last = named |> list.fold(
     map.new(),
-    (m, (_, low, k)) => map.set(m, low, map.get(headers, k) ?? ""),
+    (m, (i, low, _)) => map.set(m, low, list.get(flat, 2 * i + 1) ?? ""),
   )
   let first = named |> list.fold(
     map.new(),
@@ -12368,7 +10917,11 @@ fn http_status(resp: List[String], code: Int) -> List[String] = list.set(
   int.to_string(code),
 )
 
-fn http_body(resp: List[String]) -> String = list.get(resp, 1) ?? ""
+
+
+fn http_body(resp: List[String]) -> String = bytes.to_string_lossy(http_body_bytes(resp))
+
+fn http_body_bytes(resp: List[String]) -> Bytes = bytes.from_string(list.get(resp, 1) ?? "")
 
 fn http_get_header(resp: List[String], key: String) -> String? = __hr_find(resp, 2, key)
 
@@ -12408,20 +10961,10 @@ fn __hr_all(resp: List[String], i: Int, key: String, acc: List[String]) -> List[
 
 
 
-fn __hr_lower(s: String) -> String = string.chars(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
+fn __hr_lower(s: String) -> String = string.to_list(s) |> list.map((c) => __hr_fold(c)) |> list.join("")
 
 
-
-
-
-fn http_headers(resp: List[String]) -> Map[String, String] = list.range(0, (list.len(resp) - 2) / 2) |> list.fold(
-  map.new(),
-  (acc, j) => {
-    let k = __hr_lower(list.get(resp, 2 + 2 * j) ?? "")
-    if map.contains(acc, k) then acc
-    else map.set(acc, k, list.get(resp, 3 + 2 * j) ?? "")
-  },
-)
+fn http_headers_flat(resp: List[String]) -> List[String] = list.drop(resp, 2)
 
 
 fn http_set_body(resp: List[String], body: String) -> List[String] = list.set(resp, 1, body)
@@ -12485,7 +11028,7 @@ fn __hs_tchar(c: String) -> Bool = c != "" and string.contains(
   c,
 )
 
-fn __hs_cp(c: String) -> Int = string.codepoint(c) ?? 0
+fn __hs_cp(c: String) -> Int = string.to_codepoint(c) ?? 0
 
 
 
@@ -12497,13 +11040,13 @@ fn __hs_quote_char(c: String) -> String = match c {
 
 fn __hs_bidi(n: Int) -> Bool = n == 1564 or n == 8206 or n == 8207 or (n >= 8234 and n <= 8238) or (n >= 8294 and n <= 8297)
 
-fn __hs_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
+fn __hs_quote(s: String) -> String = "\"" + (string.to_list(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
 
 fn __hs_control(c: String) -> Bool = (__hs_cp(c) < 32 and c != "\t") or __hs_cp(c) == 127
 
 fn __hs_bad_header(k: String, v: String) -> String? =
-  if k == "" or not list.all(string.chars(k), (c) => __hs_tchar(c)) then some("response header name ${__hs_quote(k)} is not a token")
-  else if list.any(string.chars(v), (c) => __hs_control(c)) then some("response header ${k} has a control character in its value")
+  if k == "" or not list.all(string.to_list(k), (c) => __hs_tchar(c)) then some("response header name ${__hs_quote(k)} is not a token")
+  else if list.any(string.to_list(v), (c) => __hs_control(c)) then some("response header ${k} has a control character in its value")
   else none
 
 fn __hs_pairs(resp: List[String]) -> List[(String, String)] = list.range(
@@ -12544,7 +11087,7 @@ fn __hs_shaped(resp: List[String]) -> List[String] = list.take(resp, 2) + (__hs_
 
 
 fn __hs_request_id(raw: List[String]) -> String = string.pad_start(
-  int.to_hex(hash.fnv1a32((list.get(raw, 0) ?? "") + " " + (list.get(raw, 1) ?? "") + "\n" + (list.get(raw, 2) ?? ""))),
+  int.to_hex(hash.fnv1a32(bytes.from_string((list.get(raw, 0) ?? "") + " " + (list.get(raw, 1) ?? "") + "\n" + (list.get(raw, 2) ?? "")))),
   8,
   "0",
 )
@@ -12596,49 +11139,6 @@ effect fn __hs_loop(f: effect (List[String]) -> List[String]) -> Unit = {
   }
 }
 "#;
-pub const SRC_HTTP_URL_DECODE: &str = r#"
-
-
-
-
-
-
-
-
-fn __ud_hex(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
-else if b >= 97 and b <= 102 then b - 87
-else if b >= 65 and b <= 70 then b - 55 else 0 - 1
-
-
-fn __ud_step(d: Int, n: Int, i: Int) -> Int = {
-  let b = prim.load8(d + i)
-  if b == 43 then 1 * 256 + 32
-  else if b == 37 and i + 2 < n then {
-    let hi = __ud_hex(prim.load8(d + i + 1))
-    let lo = __ud_hex(prim.load8(d + i + 2))
-    if hi >= 0 and lo >= 0 then 3 * 256 + hi * 16 + lo else 1 * 256 + 37
-  } else 1 * 256 + b
-}
-
-fn __ud_count(d: Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else __ud_count(d, n, i + __ud_step(d, n, i) / 256, acc + 1)
-
-fn __ud_fill(lh: Int, d: Int, n: Int, i: Int, o: Int) -> Int = if i >= n then o
-else {
-  let st = __ud_step(d, n, i)
-  prim.store64(lh + 12 + o * 8, st - st / 256 * 256)
-  __ud_fill(lh, d, n, i + st / 256, o + 1)
-}
-
-fn http_url_decode(s: String) -> String = {
-  let h = prim.handle(s)
-  let n = prim.load32(h + 4)
-  let m = __ud_count(h + 12, n, 0, 0)
-  let buf = prim.alloc_list(m)
-  let _x = __ud_fill(prim.handle(buf), h + 12, n, 0, 0)
-  string.from_bytes(buf)
-}
-"#;
 pub const SRC_INT: &str = r#"
 
 
@@ -12663,27 +11163,23 @@ pub const SRC_INT: &str = r#"
 
 /// Decimal digits, with - when negative.
 @intrinsic("almide_rt_int_to_string")
-fn to_string(n: Int) -> String = _
+fn to_string(x: Int) -> String = _
 
 /// Lowercase hex, no 0x; -1 gives 16 f digits.
 @intrinsic("almide_rt_int_to_hex")
-fn to_hex(n: Int) -> String = _
+fn to_hex(x: Int) -> String = _
 
 /// Decimal Int from s trimmed of ASCII space/tab/LF/FF/CR; err on junk or overflow.
 @intrinsic("almide_rt_int_parse")
 fn parse(s: String) -> Result[Int, String] = _
 
-/// Hex, any case, 0x optional; err on junk or > 2^63-1.
-@intrinsic("almide_rt_int_parse_hex")
-fn from_hex(s: String) -> Result[Int, String] = _
-
 /// Nearest Float; may round when |n| > 2^53.
 @intrinsic("almide_rt_int_to_float")
-fn to_float(n: Int) -> Float = _
+fn __raw_to_float(n: Int) -> Float = _
 
 /// Float whose IEEE-754 binary64 bits are bits.
 @intrinsic("almide_rt_int_bits_to_float")
-fn bits_to_float(bits: Int) -> Float = _
+fn __bits_to_float(bits: Int) -> Float = _
 
 
 
@@ -12691,12 +11187,12 @@ fn bits_to_float(bits: Int) -> Float = _
 
 /// Low 32 bits read as binary32, widened to Float.
 @intrinsic("almide_rt_int_bits_to_f32")
-fn bits_to_f32(bits: Int) -> Float = _
+fn __bits_to_f32(bits: Int) -> Float = _
 
 
-/// Magnitude of n; min_value wraps to itself.
+/// Magnitude of x; min_value wraps to itself.
 @intrinsic("almide_rt_int_abs")
-fn abs(n: Int) -> Int = _
+fn abs(x: Int) -> Int = _
 
 /// Lesser of a and b.
 @intrinsic("almide_rt_int_min")
@@ -12706,9 +11202,9 @@ fn min(a: Int, b: Int) -> Int = _
 @intrinsic("almide_rt_int_max")
 fn max(a: Int, b: Int) -> Int = _
 
-/// n limited to lo..hi; aborts when lo > hi.
+/// x limited to lo..hi; aborts when lo > hi.
 @intrinsic("almide_rt_int_clamp")
-fn clamp(n: Int, lo: Int, hi: Int) -> Int = _
+fn clamp(x: Int, lo: Int, hi: Int) -> Int = _
 
 
 
@@ -12718,11 +11214,11 @@ fn clamp(n: Int, lo: Int, hi: Int) -> Int = _
 
 
 
-/// True when n % 2 == 0; exact for negatives.
-fn is_even(n: Int) -> Bool = n % 2 == 0
+/// True when x % 2 == 0; exact for negatives.
+fn is_even(x: Int) -> Bool = x % 2 == 0
 
-/// True when n % 2 != 0; -3 counts as odd.
-fn is_odd(n: Int) -> Bool = n % 2 != 0
+/// True when x % 2 != 0; -3 counts as odd.
+fn is_odd(x: Int) -> Bool = x % 2 != 0
 
 
 /// Bitwise AND over all 64 bits.
@@ -12737,9 +11233,9 @@ fn bor(a: Int, b: Int) -> Int = _
 @intrinsic("almide_rt_int_bxor")
 fn bxor(a: Int, b: Int) -> Int = _
 
-/// Bitwise complement; equals -a - 1.
+/// Bitwise complement; equals -x - 1.
 @intrinsic("almide_rt_int_bnot")
-fn bnot(a: Int) -> Int = _
+fn bnot(x: Int) -> Int = _
 
 /// a shifted left by n bits; n is taken mod 64.
 @intrinsic("almide_rt_int_bshl")
@@ -12752,11 +11248,11 @@ fn bshr(a: Int, n: Int) -> Int = _
 
 /// Leading zero bits of the 64-bit word; 64 for 0.
 @intrinsic("almide_rt_int_count_leading_zeros")
-fn count_leading_zeros(n: Int) -> Int = _
+fn count_leading_zeros(x: Int) -> Int = _
 
 /// Trailing zero bits; 64 for 0.
 @intrinsic("almide_rt_int_count_trailing_zeros")
-fn count_trailing_zeros(n: Int) -> Int = _
+fn count_trailing_zeros(x: Int) -> Int = _
 
 /// Number of set bits; 64 for -1.
 @deprecated(since=15, use="int.count_ones")
@@ -12769,11 +11265,11 @@ fn count_ones(x: Int) -> Int = _
 
 /// The 64 bits in reverse order; 1 gives min_value.
 @intrinsic("almide_rt_int_bit_reverse")
-fn bit_reverse(n: Int) -> Int = _
+fn bit_reverse(x: Int) -> Int = _
 
 /// The 8 bytes in reverse order (endian flip).
 @intrinsic("almide_rt_int_byte_swap")
-fn byte_swap(n: Int) -> Int = _
+fn byte_swap(x: Int) -> Int = _
 
 /// Bits needed to hold n; 0 for 0, 64 if negative.
 @deprecated(since=15, use="int.bit_length")
@@ -12784,123 +11280,115 @@ fn bit_width(n: Int) -> Int = _
 @intrinsic("almide_rt_int_bit_width")
 fn bit_length(x: Int) -> Int = _
 
-/// Floor of log2(n); -1 when n <= 0.
+/// Floor of log2(x); -1 when x <= 0.
 @intrinsic("almide_rt_int_log2_floor")
-fn log2_floor(n: Int) -> Int = _
+fn log2_floor(x: Int) -> Int = _
 
-/// Ceiling of log2(n); 0 when n <= 1.
+/// Ceiling of log2(x); 0 when x <= 1.
 @intrinsic("almide_rt_int_log2_ceil")
-fn log2_ceil(n: Int) -> Int = _
+fn log2_ceil(x: Int) -> Int = _
 
-/// Least power of 2 >= n; 1 if n <= 1; min_value past 2^62.
+/// Least power of 2 >= x; 1 if x <= 1; min_value past 2^62.
 @intrinsic("almide_rt_int_next_power_of_two")
-fn next_power_of_two(n: Int) -> Int = _
+fn next_power_of_two(x: Int) -> Int = _
 
-/// Greatest power of 2 <= n; 0 when n <= 0.
+/// Greatest power of 2 <= x; 0 when x <= 0.
 @intrinsic("almide_rt_int_prev_power_of_two")
-fn prev_power_of_two(n: Int) -> Int = _
+fn prev_power_of_two(x: Int) -> Int = _
 
 
-/// (a + b) mod 2^bits, non-negative when bits < 64.
+
+/// a + b wrapped to 64 bits.
 @intrinsic("almide_rt_int_wrap_add")
-fn wrap_add(a: Int, b: Int, bits: Int) -> Int = _
+fn wrap_add(a: Int, b: Int) -> Int = _
 
-/// (a * b) mod 2^bits, non-negative when bits < 64.
+/// a * b wrapped to 64 bits.
 @intrinsic("almide_rt_int_wrap_mul")
-fn wrap_mul(a: Int, b: Int, bits: Int) -> Int = _
+fn wrap_mul(a: Int, b: Int) -> Int = _
 
 
 
-
-/// Low bits of a rotated right by n mod bits; bits <= 0 aborts.
+/// The 64 bits of a rotated right by n; n is taken mod 64.
 @intrinsic("almide_rt_int_rotate_right")
-fn rotate_right(a: Int, n: Int, bits: Int) -> Int = _
+fn rotate_right(a: Int, n: Int) -> Int = _
 
-/// Low bits of a rotated left by n mod bits; bits <= 0 aborts.
+/// The 64 bits of a rotated left by n; n is taken mod 64.
 @intrinsic("almide_rt_int_rotate_left")
-fn rotate_left(a: Int, n: Int, bits: Int) -> Int = _
-
-/// Low 32 bits as unsigned; -1 becomes 4294967295.
-@intrinsic("almide_rt_int_to_u32")
-fn to_u32(a: Int) -> Int = _
-
-/// Low 8 bits as unsigned; 300 becomes 44.
-@intrinsic("almide_rt_int_to_u8")
-fn to_u8(a: Int) -> Int = _
+fn rotate_left(a: Int, n: Int) -> Int = _
 
 
 /// Wraps to 8 bits; 200 becomes -56.
 @intrinsic("almide_rt_int_to_int8")
-fn to_int8(n: Int) -> Int8 = _
+fn __to_int8(n: Int) -> Int8 = _
 
 /// Wraps to 16 bits; 40000 becomes -25536.
 @intrinsic("almide_rt_int_to_int16")
-fn to_int16(n: Int) -> Int16 = _
+fn __to_int16(n: Int) -> Int16 = _
 
 /// Wraps to 32 bits; 2^31 becomes -2^31.
 @intrinsic("almide_rt_int_to_int32")
-fn to_int32(n: Int) -> Int32 = _
+fn __to_int32(n: Int) -> Int32 = _
 
 /// Wraps to 8 bits; -1 becomes 255.
 @intrinsic("almide_rt_int_to_uint8")
-fn to_uint8(n: Int) -> UInt8 = _
+fn __to_uint8(n: Int) -> UInt8 = _
 
 /// Wraps to 16 bits; -1 becomes 65535.
 @intrinsic("almide_rt_int_to_uint16")
-fn to_uint16(n: Int) -> UInt16 = _
+fn __to_uint16(n: Int) -> UInt16 = _
 
 /// Wraps to 32 bits; -1 becomes 2^32-1.
 @intrinsic("almide_rt_int_to_uint32")
-fn to_uint32(n: Int) -> UInt32 = _
+fn __to_uint32(n: Int) -> UInt32 = _
 
 /// Wraps to 64 bits; -1 becomes 2^64-1.
 @intrinsic("almide_rt_int_to_uint64")
-fn to_uint64(n: Int) -> UInt64 = _
+fn __to_uint64(n: Int) -> UInt64 = _
 
 /// Float32 value; may round when |n| > 2^24.
 @intrinsic("almide_rt_int_to_float32")
-fn to_float32(n: Int) -> Float32 = _
+fn __raw_to_float32(n: Int) -> Float32 = _
 
 /// Float64 value; may round when |n| > 2^53.
 @intrinsic("almide_rt_int_to_float64")
-fn to_float64(n: Int) -> Float64 = _
+fn __to_float64(n: Int) -> Float64 = _
 
 /// Same value as Int64; always exact.
 @intrinsic("almide_rt_int_to_int64")
-fn to_int64(n: Int) -> Int64 = _
+fn __to_int64(n: Int) -> Int64 = _
 
 
 /// Sign-extending widen; always exact.
 @intrinsic("almide_rt_int_from_int8")
-fn from_int8(n: Int8) -> Int = _
+fn __from_int8(n: Int8) -> Int = _
 
 /// Sign-extending widen; always exact.
 @intrinsic("almide_rt_int_from_int16")
-fn from_int16(n: Int16) -> Int = _
+fn __from_int16(n: Int16) -> Int = _
 
 /// Sign-extending widen; always exact.
 @intrinsic("almide_rt_int_from_int32")
-fn from_int32(n: Int32) -> Int = _
+fn __from_int32(n: Int32) -> Int = _
 
 /// Same value as Int; always exact.
 @intrinsic("almide_rt_int_from_int64")
-fn from_int64(n: Int64) -> Int = _
+fn __from_int64(n: Int64) -> Int = _
 
 /// Zero-extending widen; always exact.
 @intrinsic("almide_rt_int_from_uint8")
-fn from_uint8(n: UInt8) -> Int = _
+fn __from_uint8(n: UInt8) -> Int = _
 
 /// Zero-extending widen; always exact.
 @intrinsic("almide_rt_int_from_uint16")
-fn from_uint16(n: UInt16) -> Int = _
+fn __from_uint16(n: UInt16) -> Int = _
 
 /// Zero-extending widen; always exact.
 @intrinsic("almide_rt_int_from_uint32")
-fn from_uint32(n: UInt32) -> Int = _
+fn __from_uint32(n: UInt32) -> Int = _
 
 /// Reinterprets bits; values >= 2^63 go negative.
 @intrinsic("almide_rt_int_from_uint64")
-fn from_uint64(n: UInt64) -> Int = _
+fn __from_uint64(n: UInt64) -> Int = _
 
 
 
@@ -12910,26 +11398,26 @@ fn from_uint64(n: UInt64) -> Int = _
 
 
 /// some(n), or none outside -128..127.
-fn to_int8_checked(n: Int) -> Int8? = if n < -128 or n > 127 then none else some(int.to_int8(n))
+fn __to_int8_checked(n: Int) -> Int8? = if n < -128 or n > 127 then none else some(int.__to_int8(n))
 
 /// some(n), or none outside -32768..32767.
-fn to_int16_checked(n: Int) -> Int16? = if n < -32768 or n > 32767 then none else some(int.to_int16(n))
+fn __to_int16_checked(n: Int) -> Int16? = if n < -32768 or n > 32767 then none else some(int.__to_int16(n))
 
 /// some(n), or none outside -2^31..2^31-1.
-fn to_int32_checked(n: Int) -> Int32? = if n < -2147483648 or n > 2147483647 then none else some(int.to_int32(n))
+fn __to_int32_checked(n: Int) -> Int32? = if n < -2147483648 or n > 2147483647 then none else some(int.__to_int32(n))
 
 /// some(n), or none outside 0..255.
-fn to_uint8_checked(n: Int) -> UInt8? = if n < 0 or n > 255 then none else some(int.to_uint8(n))
+fn __to_uint8_checked(n: Int) -> UInt8? = if n < 0 or n > 255 then none else some(int.__to_uint8(n))
 
 /// some(n), or none outside 0..65535.
-fn to_uint16_checked(n: Int) -> UInt16? = if n < 0 or n > 65535 then none else some(int.to_uint16(n))
+fn __to_uint16_checked(n: Int) -> UInt16? = if n < 0 or n > 65535 then none else some(int.__to_uint16(n))
 
 /// some(n), or none outside 0..2^32-1.
-fn to_uint32_checked(n: Int) -> UInt32? = if n < 0 or n > 4294967295 then none else some(int.to_uint32(n))
+fn __to_uint32_checked(n: Int) -> UInt32? = if n < 0 or n > 4294967295 then none else some(int.__to_uint32(n))
 
 
 /// some(n), or none if n is negative.
-fn to_uint64_checked(n: Int) -> UInt64? = if n < 0 then none else some(int.to_uint64(n))
+fn __to_uint64_checked(n: Int) -> UInt64? = if n < 0 then none else some(int.__to_uint64(n))
 
 
 
@@ -12939,47 +11427,49 @@ fn to_uint64_checked(n: Int) -> UInt64? = if n < 0 then none else some(int.to_ui
 
 
 /// some(f), or none if the f32 does not hold n exactly.
-fn to_float32_checked(n: Int) -> Float32? = {
-  let f: Float32 = int.to_float32(n)
-  let back: Float = float.from_float32(f)
+fn __to_float32_checked(n: Int) -> Float32? = {
+  let f: Float32 = int.__raw_to_float32(n)
+  let back: Float = float.__from_float32(f)
   if back >= 9223372036854776000.0 then none
-  else if float.to_int(back) == n then some(f) else none
+  else if float.__to_int(back) == n then some(f) else none
 }
 
 /// Clamps n to -128..127.
-fn to_int8_saturating(n: Int) -> Int8 = if n < -128 then int.to_int8(-128)
-else if n > 127 then int.to_int8(127) else int.to_int8(n)
+fn __to_int8_saturating(n: Int) -> Int8 = if n < -128 then int.__to_int8(-128)
+else if n > 127 then int.__to_int8(127) else int.__to_int8(n)
 
 /// Clamps n to -32768..32767.
-fn to_int16_saturating(n: Int) -> Int16 = if n < -32768 then int.to_int16(-32768)
-else if n > 32767 then int.to_int16(32767) else int.to_int16(n)
+fn __to_int16_saturating(n: Int) -> Int16 = if n < -32768 then int.__to_int16(-32768)
+else if n > 32767 then int.__to_int16(32767) else int.__to_int16(n)
 
 /// Clamps n to -2^31..2^31-1.
-fn to_int32_saturating(n: Int) -> Int32 = if n < -2147483648 then int.to_int32(-2147483648)
-else if n > 2147483647 then int.to_int32(2147483647) else int.to_int32(n)
+fn __to_int32_saturating(n: Int) -> Int32 = if n < -2147483648 then int.__to_int32(-2147483648)
+else if n > 2147483647 then int.__to_int32(2147483647) else int.__to_int32(n)
 
 /// Clamps n to 0..255.
-fn to_uint8_saturating(n: Int) -> UInt8 = if n < 0 then int.to_uint8(0)
-else if n > 255 then int.to_uint8(255) else int.to_uint8(n)
+fn __to_uint8_saturating(n: Int) -> UInt8 = if n < 0 then int.__to_uint8(0)
+else if n > 255 then int.__to_uint8(255) else int.__to_uint8(n)
 
 /// Clamps n to 0..65535.
-fn to_uint16_saturating(n: Int) -> UInt16 = if n < 0 then int.to_uint16(0)
-else if n > 65535 then int.to_uint16(65535) else int.to_uint16(n)
+fn __to_uint16_saturating(n: Int) -> UInt16 = if n < 0 then int.__to_uint16(0)
+else if n > 65535 then int.__to_uint16(65535) else int.__to_uint16(n)
 
 /// Clamps n to 0..2^32-1.
-fn to_uint32_saturating(n: Int) -> UInt32 = if n < 0 then int.to_uint32(0)
-else if n > 4294967295 then int.to_uint32(4294967295) else int.to_uint32(n)
+fn __to_uint32_saturating(n: Int) -> UInt32 = if n < 0 then int.__to_uint32(0)
+else if n > 4294967295 then int.__to_uint32(4294967295) else int.__to_uint32(n)
 
 /// Negative n clamps to 0.
-fn to_uint64_saturating(n: Int) -> UInt64 = if n < 0 then int.to_uint64(0) else int.to_uint64(n)
+fn __to_uint64_saturating(n: Int) -> UInt64 = if n < 0 then int.__to_uint64(0) else int.__to_uint64(n)
 
 
 
 /// some(n), or none if n exceeds 2^63-1.
-fn from_uint64_checked(n: UInt64) -> Int? = if int.from_uint64(n) >= 0 then some(int.from_uint64(n)) else none
+fn __from_uint64_checked(n: UInt64) -> Int? =
+  if int.__from_uint64(n) >= 0 then some(int.__from_uint64(n)) else none
 
 /// Clamps n to at most 2^63-1.
-fn from_uint64_saturating(n: UInt64) -> Int = if int.from_uint64(n) >= 0 then int.from_uint64(n) else 9223372036854775807
+fn __from_uint64_saturating(n: UInt64) -> Int =
+  if int.__from_uint64(n) >= 0 then int.__from_uint64(n) else 9223372036854775807
 
 
 /// Smallest Int: -2^63.
@@ -12997,7 +11487,7 @@ else if a > b then 1 else 0
 fn sign(x: Int) -> Int = compare(x, 0)
 
 /// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
-fn pow(base: Int, exp: Int) -> Int = math.pow(base, exp)
+fn pow(base: Int, exp: Int) -> Int = math.__pow(base, exp)
 
 /// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
 fn floor_div(a: Int, b: Int) -> Int = {
@@ -13020,7 +11510,7 @@ else if bits >= 64 then x
 else int.band(x, int.bnot(int.bshl(-1, bits)))
 
 /// a - b wrapped to 64 bits.
-fn wrap_sub(a: Int, b: Int) -> Int = int.wrap_add(int.wrap_add(a, int.bnot(b), 64), 1, 64)
+fn wrap_sub(a: Int, b: Int) -> Int = int.wrap_add(int.wrap_add(a, int.bnot(b)), 1)
 
 /// Zero-filling right shift of the 64 bits; n is taken mod 64.
 fn bshr_logical(a: Int, n: Int) -> Int = {
@@ -13040,8 +11530,8 @@ fn to_string_radix(x: Int, radix: Int) -> String = {
   check_radix(radix)
 
   let digits = radix_digits(if x < 0 then x else 0 - x, radix, [])
-  string.from_bytes(if x < 0 then [45] + digits
-  else digits)
+  bytes.to_string_lossy(bytes.from_list(if x < 0 then [45] + digits
+  else digits))
 }
 
 /// Int from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
@@ -13049,7 +11539,7 @@ fn to_string_radix(x: Int, radix: Int) -> String = {
 fn parse_radix(s: String, radix: Int) -> Result[Int, String] = {
   check_radix(radix)
   let t = string.trim(s)
-  let bytes = string.to_bytes(t)
+  let bytes = bytes.to_list(bytes.from_string(t))
   match bytes {
     [] => err("cannot parse integer from empty string"),
     [45, ..rest] => accumulate_negative(strip_radix_prefix(rest, radix), radix, 0, true),
@@ -13131,24 +11621,24 @@ fn from_wrapping[S: Integer](x: S) -> Int = x.__bits64()
 
 fn __int_exact(x: Int) -> Int? = some(x)
 
-fn __uint64_exact(x: Int) -> UInt64? = int.to_uint64_checked(x)
+fn __uint64_exact(x: Int) -> UInt64? = int.__to_uint64_checked(x)
 
 fn __trunc(x: Int) -> Int = x
 
 fn __int_sat(x: Int) -> Int = x
 
-fn __uint64_sat(x: Int) -> UInt64 = int.to_uint64_saturating(x)
+fn __uint64_sat(x: Int) -> UInt64 = int.__to_uint64_saturating(x)
 
-fn __to_float(x: Int) -> Float = int.to_float(x)
+fn __to_float(x: Int) -> Float = int.__raw_to_float(x)
 
 fn __to_float_exact(x: Int) -> Float? = {
-  let f = int.to_float(x)
-  if f < 9223372036854775808.0 and float.to_int(f) == x then some(f) else none
+  let f = int.__raw_to_float(x)
+  if f < 9223372036854775808.0 and float.__to_int(f) == x then some(f) else none
 }
 
-fn __to_float32(x: Int) -> Float32 = int.to_float32(x)
+fn __to_float32(x: Int) -> Float32 = int.__raw_to_float32(x)
 
-fn __to_float32_exact(x: Int) -> Float32? = int.to_float32_checked(x)
+fn __to_float32_exact(x: Int) -> Float32? = int.__to_float32_checked(x)
 
 fn __decimal_exact(x: Int) -> String? = some(int.to_string(x))
 
@@ -13158,77 +11648,16 @@ fn __sum(xs: List[Int]) -> Int = list.__sum_int(xs)
 
 fn __product(xs: List[Int]) -> Int = list.__product_int(xs)
 "#;
-pub const SRC_INT16: &str = r#"
+pub const SRC_INT16: &str = r#"/// Decimal digits, with - when negative.
+fn to_string(x: Int16) -> String = int.to_string(int.__from_int16(x))
 
-
-
-/// Wraps to 8 bits; 128 becomes -128.
-fn to_int8(x: Int16) -> Int8 = int.to_int8(int.from_int16(x))
-
-/// Sign-extending widen; always exact.
-fn to_int32(x: Int16) -> Int32 = int.to_int32(int.from_int16(x))
-
-/// Sign-extending widen; always exact.
-fn to_int64(x: Int16) -> Int64 = int.to_int64(int.from_int16(x))
-
-/// Wraps to 8 bits; -1 becomes 255.
-fn to_uint8(x: Int16) -> UInt8 = int.to_uint8(int.from_int16(x))
-
-/// Wraps to 16 bits; -1 becomes 65535.
-fn to_uint16(x: Int16) -> UInt16 = int.to_uint16(int.from_int16(x))
-
-/// Wraps to 32 bits; -1 becomes 2^32-1.
-fn to_uint32(x: Int16) -> UInt32 = int.to_uint32(int.from_int16(x))
-
-/// Wraps to 64 bits; -1 becomes 2^64-1.
-fn to_uint64(x: Int16) -> UInt64 = int.to_uint64(int.from_int16(x))
-
-/// Same value as Float32; always exact.
-fn to_float32(x: Int16) -> Float32 = int.to_float32(int.from_int16(x))
-
-/// Same value as Float64; always exact.
-fn to_float64(x: Int16) -> Float64 = int.to_float64(int.from_int16(x))
-
-/// Decimal digits, with - when negative.
-fn to_string(x: Int16) -> String = int.to_string(int.from_int16(x))
-
-
-/// some(x), or none if outside -128..127.
-fn to_int8_checked(x: Int16) -> Int8? = int.to_int8_checked(int.from_int16(x))
-
-/// Clamps x to -128..127.
-fn to_int8_saturating(x: Int16) -> Int8 = int.to_int8_saturating(int.from_int16(x))
-
-/// some(x), or none if outside 0..255.
-fn to_uint8_checked(x: Int16) -> UInt8? = int.to_uint8_checked(int.from_int16(x))
-
-/// Clamps x to 0..255.
-fn to_uint8_saturating(x: Int16) -> UInt8 = int.to_uint8_saturating(int.from_int16(x))
-
-/// some(x), or none if x is negative.
-fn to_uint16_checked(x: Int16) -> UInt16? = int.to_uint16_checked(int.from_int16(x))
-
-/// Negative x clamps to 0.
-fn to_uint16_saturating(x: Int16) -> UInt16 = int.to_uint16_saturating(int.from_int16(x))
-
-/// some(x), or none if x is negative.
-fn to_uint32_checked(x: Int16) -> UInt32? = int.to_uint32_checked(int.from_int16(x))
-
-/// Negative x clamps to 0.
-fn to_uint32_saturating(x: Int16) -> UInt32 = int.to_uint32_saturating(int.from_int16(x))
-
-/// some(x), or none if x is negative.
-fn to_uint64_checked(x: Int16) -> UInt64? = int.to_uint64_checked(int.from_int16(x))
-
-/// Negative x clamps to 0.
-fn to_uint64_saturating(x: Int16) -> UInt64 = int.to_uint64_saturating(int.from_int16(x))
 
 
 /// Smallest Int16: -32768.
-fn min_value() -> Int16 = int.to_int16(-32768)
+fn min_value() -> Int16 = int.__to_int16(-32768)
 
 /// Largest Int16: 32767.
-fn max_value() -> Int16 = int.to_int16(32767)
+fn max_value() -> Int16 = int.__to_int16(32767)
 
 
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -13242,14 +11671,14 @@ fn min(a: Int16, b: Int16) -> Int16 = if a <= b then a else b
 fn max(a: Int16, b: Int16) -> Int16 = if a >= b then a else b
 
 /// x limited to lo..hi; aborts when lo > hi.
-fn clamp(x: Int16, lo: Int16, hi: Int16) -> Int16 = int.to_int16(int.clamp(int.from_int16(x), int.from_int16(lo), int.from_int16(hi)))
+fn clamp(x: Int16, lo: Int16, hi: Int16) -> Int16 = int.__to_int16(int.clamp(int.__from_int16(x), int.__from_int16(lo), int.__from_int16(hi)))
 
 /// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
-fn floor_div(a: Int16, b: Int16) -> Int16 = if int.from_int16(b) == -1 then a / b
-else int.to_int16(floor_quotient(int.from_int16(a), int.from_int16(b)))
+fn floor_div(a: Int16, b: Int16) -> Int16 = if int.__from_int16(b) == -1 then a / b
+else int.__to_int16(floor_quotient(int.__from_int16(a), int.__from_int16(b)))
 
 /// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
-fn modulo(a: Int16, b: Int16) -> Int16 = int.to_int16(floor_remainder(int.from_int16(a), int.from_int16(b)))
+fn modulo(a: Int16, b: Int16) -> Int16 = int.__to_int16(floor_remainder(int.__from_int16(a), int.__from_int16(b)))
 
 
 local fn floor_quotient(a: Int, b: Int) -> Int = {
@@ -13265,38 +11694,38 @@ else {
 }
 
 /// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
-fn pow(base: Int16, exp: Int) -> Int16 = int.to_int16(math.pow(int.from_int16(base), exp))
+fn pow(base: Int16, exp: Int) -> Int16 = int.__to_int16(math.__pow(int.__from_int16(base), exp))
 
 /// True when x is a multiple of 2.
-fn is_even(x: Int16) -> Bool = int.from_int16(x) % 2 == 0
+fn is_even(x: Int16) -> Bool = int.__from_int16(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
-fn is_odd(x: Int16) -> Bool = int.from_int16(x) % 2 != 0
+fn is_odd(x: Int16) -> Bool = int.__from_int16(x) % 2 != 0
 
 /// Magnitude of x; min_value wraps to itself.
-fn abs(x: Int16) -> Int16 = int.to_int16(int.abs(int.from_int16(x)))
+fn abs(x: Int16) -> Int16 = int.__to_int16(int.abs(int.__from_int16(x)))
 
 /// -1, 0 or 1 by the sign of x.
-fn sign(x: Int16) -> Int = math.sign(int.from_int16(x))
+fn sign(x: Int16) -> Int = math.__sign(int.__from_int16(x))
 
 
 /// Bitwise AND.
-fn band(a: Int16, b: Int16) -> Int16 = int.to_int16(int.band(int.from_int16(a), int.from_int16(b)))
+fn band(a: Int16, b: Int16) -> Int16 = int.__to_int16(int.band(int.__from_int16(a), int.__from_int16(b)))
 
 /// Bitwise OR.
-fn bor(a: Int16, b: Int16) -> Int16 = int.to_int16(int.bor(int.from_int16(a), int.from_int16(b)))
+fn bor(a: Int16, b: Int16) -> Int16 = int.__to_int16(int.bor(int.__from_int16(a), int.__from_int16(b)))
 
 /// Bitwise XOR.
-fn bxor(a: Int16, b: Int16) -> Int16 = int.to_int16(int.bxor(int.from_int16(a), int.from_int16(b)))
+fn bxor(a: Int16, b: Int16) -> Int16 = int.__to_int16(int.bxor(int.__from_int16(a), int.__from_int16(b)))
 
 /// Bitwise complement of all 16 bits.
-fn bnot(x: Int16) -> Int16 = int.to_int16(int.bnot(int.from_int16(x)))
+fn bnot(x: Int16) -> Int16 = int.__to_int16(int.bnot(int.__from_int16(x)))
 
 /// a shifted left by n bits; n is taken mod 16.
-fn bshl(a: Int16, n: Int) -> Int16 = int.to_int16(int.bshl(int.from_int16(a), shift_count(n)))
+fn bshl(a: Int16, n: Int) -> Int16 = int.__to_int16(int.bshl(int.__from_int16(a), shift_count(n)))
 
 /// Sign-filling right shift; n is taken mod 16.
-fn bshr(a: Int16, n: Int) -> Int16 = int.to_int16(int.bshr(int.from_int16(a), shift_count(n)))
+fn bshr(a: Int16, n: Int) -> Int16 = int.__to_int16(int.bshr(int.__from_int16(a), shift_count(n)))
 
 
 local fn shift_count(n: Int) -> Int = {
@@ -13305,32 +11734,35 @@ local fn shift_count(n: Int) -> Int = {
 }
 
 /// Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
-fn count_leading_zeros(x: Int16) -> Int = int.count_leading_zeros(int.band(int.from_int16(x), 65535)) - 48
+fn count_leading_zeros(x: Int16) -> Int = int.count_leading_zeros(int.band(int.__from_int16(x), 65535)) - 48
 
 /// Zero bits below the lowest set bit; 16 for 0.
-fn count_trailing_zeros(x: Int16) -> Int = int.min(int.count_trailing_zeros(int.from_int16(x)), 16)
+fn count_trailing_zeros(x: Int16) -> Int = int.min(
+  int.count_trailing_zeros(int.__from_int16(x)),
+  16,
+)
 
 /// Number of set bits among the 16.
-fn count_ones(x: Int16) -> Int = int.pop_count(int.band(int.from_int16(x), 65535))
+fn count_ones(x: Int16) -> Int = int.count_ones(int.band(int.__from_int16(x), 65535))
 
 /// The 2 bytes in reverse order (endian flip).
-fn byte_swap(x: Int16) -> Int16 = int.to_int16(int.bshr(int.byte_swap(int.band(int.from_int16(x), 65535)), 48))
+fn byte_swap(x: Int16) -> Int16 = int.__to_int16(int.bshr(int.byte_swap(int.band(int.__from_int16(x), 65535)), 48))
 
 
 /// a + b wrapped to 16 bits.
-fn wrap_add(a: Int16, b: Int16) -> Int16 = int.to_int16(int.from_int16(a) + int.from_int16(b))
+fn wrap_add(a: Int16, b: Int16) -> Int16 = int.__to_int16(int.__from_int16(a) + int.__from_int16(b))
 
 /// a - b wrapped to 16 bits.
-fn wrap_sub(a: Int16, b: Int16) -> Int16 = int.to_int16(int.from_int16(a) - int.from_int16(b))
+fn wrap_sub(a: Int16, b: Int16) -> Int16 = int.__to_int16(int.__from_int16(a) - int.__from_int16(b))
 
 /// a * b wrapped to 16 bits.
-fn wrap_mul(a: Int16, b: Int16) -> Int16 = int.to_int16(int.from_int16(a) * int.from_int16(b))
+fn wrap_mul(a: Int16, b: Int16) -> Int16 = int.__to_int16(int.__from_int16(a) * int.__from_int16(b))
 
 /// The 16 bits of a rotated left by n; n is taken mod 16.
-fn rotate_left(a: Int16, n: Int) -> Int16 = int.to_int16(rotate_bits(int.band(int.from_int16(a), 65535), rotate_count(n)))
+fn rotate_left(a: Int16, n: Int) -> Int16 = int.__to_int16(rotate_bits(int.band(int.__from_int16(a), 65535), rotate_count(n)))
 
 /// The 16 bits of a rotated right by n; n is taken mod 16.
-fn rotate_right(a: Int16, n: Int) -> Int16 = int.to_int16(rotate_bits(int.band(int.from_int16(a), 65535), rotate_count(0 - rotate_count(n))))
+fn rotate_right(a: Int16, n: Int) -> Int16 = int.__to_int16(rotate_bits(int.band(int.__from_int16(a), 65535), rotate_count(0 - rotate_count(n))))
 
 
 local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
@@ -13342,25 +11774,25 @@ local fn rotate_count(n: Int) -> Int = {
 }
 
 /// Bits needed to hold x; 0 for 0, 16 if negative.
-fn bit_length(x: Int16) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int16(x), 65535))
+fn bit_length(x: Int16) -> Int = 64 - int.count_leading_zeros(int.band(int.__from_int16(x), 65535))
 
 /// Decimal Int16 from ASCII-trimmed s; err on junk or outside -32768..32767.
 fn parse(s: String) -> Result[Int16, String] = match int.parse(s) {
   ok(n) => if n < -32768 then err("number too small to fit in target type")
   else if n > 32767 then err("number too large to fit in target type")
-  else ok(int.to_int16(n)),
+  else ok(int.__to_int16(n)),
   err(e) => err(e),
 }
 
 
 /// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
-fn to_string_radix(x: Int16, radix: Int) -> String = int.to_string_radix(int.from_int16(x), radix)
+fn to_string_radix(x: Int16, radix: Int) -> String = int.to_string_radix(int.__from_int16(x), radix)
 
 /// Int16 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -32768..32767.
 fn parse_radix(s: String, radix: Int) -> Result[Int16, String] = match int.parse_radix(s, radix) {
   ok(n) => if n < -32768 then err("number too small to fit in target type")
   else if n > 32767 then err("number too large to fit in target type")
-  else ok(int.to_int16(n)),
+  else ok(int.__to_int16(n)),
   err(e) => err(e),
 }
 
@@ -13370,49 +11802,49 @@ fn parse_radix(s: String, radix: Int) -> Result[Int16, String] = match int.parse
 
 /// x as Int16, toward zero; NaN, an infinity or a value outside Int16 aborts.
 fn from[S: Numeric](x: S) -> Int16 = match x.__trunc().__int_exact() {
-  some(n) => int.to_int16_checked(n) ?? panic("int16.from: the value is not a number in the range of Int16"),
+  some(n) => int.__to_int16_checked(n) ?? panic("int16.from: the value is not a number in the range of Int16"),
   none => panic("int16.from: the value is not a number in the range of Int16"),
 }
 
 /// some(x as Int16) when Int16 holds x exactly, else none (a fraction, NaN, out of range).
 fn from_checked[S: Numeric](x: S) -> Int16? = match x.__int_exact() {
-  some(n) => int.to_int16_checked(n),
+  some(n) => int.__to_int16_checked(n),
   none => none,
 }
 
 /// x as Int16, toward zero, clamped to Int16's range; NaN is 0.
-fn from_saturating[S: Numeric](x: S) -> Int16 = int.to_int16_saturating(x.__int_sat())
+fn from_saturating[S: Numeric](x: S) -> Int16 = int.__to_int16_saturating(x.__int_sat())
 
 /// The low 16 bits of integer x as Int16 (two's complement).
 fn from_wrapping[S: Integer](x: S) -> Int16 = {
   let u = int.wrap(x.__bits64(), 16)
-  int.to_int16(if u >= 32768 then u - 65536 else u)
+  int.__to_int16(if u >= 32768 then u - 65536 else u)
 }
 
 
 
 
-fn __int_exact(x: Int16) -> Int? = some(int.from_int16(x))
+fn __int_exact(x: Int16) -> Int? = some(int.__from_int16(x))
 
-fn __uint64_exact(x: Int16) -> UInt64? = int.__uint64_exact(int.from_int16(x))
+fn __uint64_exact(x: Int16) -> UInt64? = int.__uint64_exact(int.__from_int16(x))
 
 fn __trunc(x: Int16) -> Int16 = x
 
-fn __int_sat(x: Int16) -> Int = int.from_int16(x)
+fn __int_sat(x: Int16) -> Int = int.__from_int16(x)
 
-fn __uint64_sat(x: Int16) -> UInt64 = int.__uint64_sat(int.from_int16(x))
+fn __uint64_sat(x: Int16) -> UInt64 = int.__uint64_sat(int.__from_int16(x))
 
-fn __to_float(x: Int16) -> Float = int.to_float(int.from_int16(x))
+fn __to_float(x: Int16) -> Float = int.__raw_to_float(int.__from_int16(x))
 
-fn __to_float_exact(x: Int16) -> Float? = int.__to_float_exact(int.from_int16(x))
+fn __to_float_exact(x: Int16) -> Float? = int.__to_float_exact(int.__from_int16(x))
 
-fn __to_float32(x: Int16) -> Float32 = int.to_float32(int.from_int16(x))
+fn __to_float32(x: Int16) -> Float32 = int.__raw_to_float32(int.__from_int16(x))
 
-fn __to_float32_exact(x: Int16) -> Float32? = int.to_float32_checked(int.from_int16(x))
+fn __to_float32_exact(x: Int16) -> Float32? = int.__to_float32_checked(int.__from_int16(x))
 
-fn __decimal_exact(x: Int16) -> String? = some(int.to_string(int.from_int16(x)))
+fn __decimal_exact(x: Int16) -> String? = some(int.to_string(int.__from_int16(x)))
 
-fn __bits64(x: Int16) -> Int = int.from_int16(x)
+fn __bits64(x: Int16) -> Int = int.__from_int16(x)
 
 fn __sum(xs: List[Int16]) -> Int16 = {
   let zero: Int16 = 0
@@ -13428,183 +11860,20 @@ pub const SRC_INT16_CONVERT: &str = r#"
 
 
 fn int16_to_string(x: Int16) -> String = {
-  let i = int.from_int16(x)
+  let i = int.__from_int16(x)
   int.to_string(i)
 }
-
-fn int16_to_int8(x: Int16) -> Int8 = {
-  let i = int.from_int16(x)
-  int.to_int8(i)
-}
-
-fn int16_to_int32(x: Int16) -> Int32 = {
-  let i = int.from_int16(x)
-  int.to_int32(i)
-}
-
-fn int16_to_int64(x: Int16) -> Int64 = {
-  let i = int.from_int16(x)
-  int.to_int64(i)
-}
-
-fn int16_to_uint8(x: Int16) -> UInt8 = {
-  let i = int.from_int16(x)
-  int.to_uint8(i)
-}
-
-fn int16_to_uint16(x: Int16) -> UInt16 = {
-  let i = int.from_int16(x)
-  int.to_uint16(i)
-}
-
-fn int16_to_uint32(x: Int16) -> UInt32 = {
-  let i = int.from_int16(x)
-  int.to_uint32(i)
-}
-
-fn int16_to_uint64(x: Int16) -> UInt64 = {
-  let i = int.from_int16(x)
-  int.to_uint64(i)
-}
-
-fn int16_to_float32(x: Int16) -> Float32 = {
-  let i = int.from_int16(x)
-  int.to_float32(i)
-}
-
-fn int16_to_float64(x: Int16) -> Float64 = {
-  let i = int.from_int16(x)
-  int.to_float64(i)
-}
-
-
-fn int16_to_int8_checked(x: Int16) -> Int8? = {
-  let i = int.from_int16(x)
-  int.to_int8_checked(i)
-}
-
-fn int16_to_int8_saturating(x: Int16) -> Int8 = {
-  let i = int.from_int16(x)
-  int.to_int8_saturating(i)
-}
-
-fn int16_to_uint8_checked(x: Int16) -> UInt8? = {
-  let i = int.from_int16(x)
-  int.to_uint8_checked(i)
-}
-
-fn int16_to_uint8_saturating(x: Int16) -> UInt8 = {
-  let i = int.from_int16(x)
-  int.to_uint8_saturating(i)
-}
-
-fn int16_to_uint16_checked(x: Int16) -> UInt16? = {
-  let i = int.from_int16(x)
-  int.to_uint16_checked(i)
-}
-
-fn int16_to_uint16_saturating(x: Int16) -> UInt16 = {
-  let i = int.from_int16(x)
-  int.to_uint16_saturating(i)
-}
-
-fn int16_to_uint32_checked(x: Int16) -> UInt32? = {
-  let i = int.from_int16(x)
-  int.to_uint32_checked(i)
-}
-
-fn int16_to_uint32_saturating(x: Int16) -> UInt32 = {
-  let i = int.from_int16(x)
-  int.to_uint32_saturating(i)
-}
-
-fn int16_to_uint64_checked(x: Int16) -> UInt64? = {
-  let i = int.from_int16(x)
-  int.to_uint64_checked(i)
-}
-
-fn int16_to_uint64_saturating(x: Int16) -> UInt64 = {
-  let i = int.from_int16(x)
-  int.to_uint64_saturating(i)
-}
 "#;
-pub const SRC_INT32: &str = r#"
+pub const SRC_INT32: &str = r#"/// Decimal digits, with - when negative.
+fn to_string(x: Int32) -> String = int.to_string(int.__from_int32(x))
 
-
-
-/// Wraps to 8 bits; 128 becomes -128.
-fn to_int8(x: Int32) -> Int8 = int.to_int8(int.from_int32(x))
-
-/// Wraps to 16 bits; 32768 becomes -32768.
-fn to_int16(x: Int32) -> Int16 = int.to_int16(int.from_int32(x))
-
-/// Sign-extending widen; always exact.
-fn to_int64(x: Int32) -> Int64 = int.to_int64(int.from_int32(x))
-
-/// Wraps to 8 bits; -1 becomes 255.
-fn to_uint8(x: Int32) -> UInt8 = int.to_uint8(int.from_int32(x))
-
-/// Wraps to 16 bits; -1 becomes 65535.
-fn to_uint16(x: Int32) -> UInt16 = int.to_uint16(int.from_int32(x))
-
-/// Wraps to 32 bits; -1 becomes 2^32-1.
-fn to_uint32(x: Int32) -> UInt32 = int.to_uint32(int.from_int32(x))
-
-/// Wraps to 64 bits; -1 becomes 2^64-1.
-fn to_uint64(x: Int32) -> UInt64 = int.to_uint64(int.from_int32(x))
-
-/// Float32 value; may round when abs(x) > 2^24.
-fn to_float32(x: Int32) -> Float32 = int.to_float32(int.from_int32(x))
-
-/// Same value as Float64; always exact.
-fn to_float64(x: Int32) -> Float64 = int.to_float64(int.from_int32(x))
-
-/// Decimal digits, with - when negative.
-fn to_string(x: Int32) -> String = int.to_string(int.from_int32(x))
-
-
-/// some(x), or none if outside -128..127.
-fn to_int8_checked(x: Int32) -> Int8? = int.to_int8_checked(int.from_int32(x))
-
-/// Clamps x to -128..127.
-fn to_int8_saturating(x: Int32) -> Int8 = int.to_int8_saturating(int.from_int32(x))
-
-/// some(x), or none if outside -32768..32767.
-fn to_int16_checked(x: Int32) -> Int16? = int.to_int16_checked(int.from_int32(x))
-
-/// Clamps x to -32768..32767.
-fn to_int16_saturating(x: Int32) -> Int16 = int.to_int16_saturating(int.from_int32(x))
-
-/// some(x), or none if outside 0..255.
-fn to_uint8_checked(x: Int32) -> UInt8? = int.to_uint8_checked(int.from_int32(x))
-
-/// Clamps x to 0..255.
-fn to_uint8_saturating(x: Int32) -> UInt8 = int.to_uint8_saturating(int.from_int32(x))
-
-/// some(x), or none if outside 0..65535.
-fn to_uint16_checked(x: Int32) -> UInt16? = int.to_uint16_checked(int.from_int32(x))
-
-/// Clamps x to 0..65535.
-fn to_uint16_saturating(x: Int32) -> UInt16 = int.to_uint16_saturating(int.from_int32(x))
-
-/// some(x), or none if x is negative.
-fn to_uint32_checked(x: Int32) -> UInt32? = int.to_uint32_checked(int.from_int32(x))
-
-/// Negative x clamps to 0.
-fn to_uint32_saturating(x: Int32) -> UInt32 = int.to_uint32_saturating(int.from_int32(x))
-
-/// some(x), or none if x is negative.
-fn to_uint64_checked(x: Int32) -> UInt64? = int.to_uint64_checked(int.from_int32(x))
-
-/// Negative x clamps to 0.
-fn to_uint64_saturating(x: Int32) -> UInt64 = int.to_uint64_saturating(int.from_int32(x))
 
 
 /// Smallest Int32: -2147483648.
-fn min_value() -> Int32 = int.to_int32(-2147483648)
+fn min_value() -> Int32 = int.__to_int32(-2147483648)
 
 /// Largest Int32: 2147483647.
-fn max_value() -> Int32 = int.to_int32(2147483647)
+fn max_value() -> Int32 = int.__to_int32(2147483647)
 
 
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -13618,14 +11887,14 @@ fn min(a: Int32, b: Int32) -> Int32 = if a <= b then a else b
 fn max(a: Int32, b: Int32) -> Int32 = if a >= b then a else b
 
 /// x limited to lo..hi; aborts when lo > hi.
-fn clamp(x: Int32, lo: Int32, hi: Int32) -> Int32 = int.to_int32(int.clamp(int.from_int32(x), int.from_int32(lo), int.from_int32(hi)))
+fn clamp(x: Int32, lo: Int32, hi: Int32) -> Int32 = int.__to_int32(int.clamp(int.__from_int32(x), int.__from_int32(lo), int.__from_int32(hi)))
 
 /// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
-fn floor_div(a: Int32, b: Int32) -> Int32 = if int.from_int32(b) == -1 then a / b
-else int.to_int32(floor_quotient(int.from_int32(a), int.from_int32(b)))
+fn floor_div(a: Int32, b: Int32) -> Int32 = if int.__from_int32(b) == -1 then a / b
+else int.__to_int32(floor_quotient(int.__from_int32(a), int.__from_int32(b)))
 
 /// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
-fn modulo(a: Int32, b: Int32) -> Int32 = int.to_int32(floor_remainder(int.from_int32(a), int.from_int32(b)))
+fn modulo(a: Int32, b: Int32) -> Int32 = int.__to_int32(floor_remainder(int.__from_int32(a), int.__from_int32(b)))
 
 
 local fn floor_quotient(a: Int, b: Int) -> Int = {
@@ -13641,38 +11910,38 @@ else {
 }
 
 /// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
-fn pow(base: Int32, exp: Int) -> Int32 = int.to_int32(math.pow(int.from_int32(base), exp))
+fn pow(base: Int32, exp: Int) -> Int32 = int.__to_int32(math.__pow(int.__from_int32(base), exp))
 
 /// True when x is a multiple of 2.
-fn is_even(x: Int32) -> Bool = int.from_int32(x) % 2 == 0
+fn is_even(x: Int32) -> Bool = int.__from_int32(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
-fn is_odd(x: Int32) -> Bool = int.from_int32(x) % 2 != 0
+fn is_odd(x: Int32) -> Bool = int.__from_int32(x) % 2 != 0
 
 /// Magnitude of x; min_value wraps to itself.
-fn abs(x: Int32) -> Int32 = int.to_int32(int.abs(int.from_int32(x)))
+fn abs(x: Int32) -> Int32 = int.__to_int32(int.abs(int.__from_int32(x)))
 
 /// -1, 0 or 1 by the sign of x.
-fn sign(x: Int32) -> Int = math.sign(int.from_int32(x))
+fn sign(x: Int32) -> Int = math.__sign(int.__from_int32(x))
 
 
 /// Bitwise AND.
-fn band(a: Int32, b: Int32) -> Int32 = int.to_int32(int.band(int.from_int32(a), int.from_int32(b)))
+fn band(a: Int32, b: Int32) -> Int32 = int.__to_int32(int.band(int.__from_int32(a), int.__from_int32(b)))
 
 /// Bitwise OR.
-fn bor(a: Int32, b: Int32) -> Int32 = int.to_int32(int.bor(int.from_int32(a), int.from_int32(b)))
+fn bor(a: Int32, b: Int32) -> Int32 = int.__to_int32(int.bor(int.__from_int32(a), int.__from_int32(b)))
 
 /// Bitwise XOR.
-fn bxor(a: Int32, b: Int32) -> Int32 = int.to_int32(int.bxor(int.from_int32(a), int.from_int32(b)))
+fn bxor(a: Int32, b: Int32) -> Int32 = int.__to_int32(int.bxor(int.__from_int32(a), int.__from_int32(b)))
 
 /// Bitwise complement of all 32 bits.
-fn bnot(x: Int32) -> Int32 = int.to_int32(int.bnot(int.from_int32(x)))
+fn bnot(x: Int32) -> Int32 = int.__to_int32(int.bnot(int.__from_int32(x)))
 
 /// a shifted left by n bits; n is taken mod 32.
-fn bshl(a: Int32, n: Int) -> Int32 = int.to_int32(int.bshl(int.from_int32(a), shift_count(n)))
+fn bshl(a: Int32, n: Int) -> Int32 = int.__to_int32(int.bshl(int.__from_int32(a), shift_count(n)))
 
 /// Sign-filling right shift; n is taken mod 32.
-fn bshr(a: Int32, n: Int) -> Int32 = int.to_int32(int.bshr(int.from_int32(a), shift_count(n)))
+fn bshr(a: Int32, n: Int) -> Int32 = int.__to_int32(int.bshr(int.__from_int32(a), shift_count(n)))
 
 
 local fn shift_count(n: Int) -> Int = {
@@ -13681,32 +11950,35 @@ local fn shift_count(n: Int) -> Int = {
 }
 
 /// Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
-fn count_leading_zeros(x: Int32) -> Int = int.count_leading_zeros(int.band(int.from_int32(x), 4294967295)) - 32
+fn count_leading_zeros(x: Int32) -> Int = int.count_leading_zeros(int.band(int.__from_int32(x), 4294967295)) - 32
 
 /// Zero bits below the lowest set bit; 32 for 0.
-fn count_trailing_zeros(x: Int32) -> Int = int.min(int.count_trailing_zeros(int.from_int32(x)), 32)
+fn count_trailing_zeros(x: Int32) -> Int = int.min(
+  int.count_trailing_zeros(int.__from_int32(x)),
+  32,
+)
 
 /// Number of set bits among the 32.
-fn count_ones(x: Int32) -> Int = int.pop_count(int.band(int.from_int32(x), 4294967295))
+fn count_ones(x: Int32) -> Int = int.count_ones(int.band(int.__from_int32(x), 4294967295))
 
 /// The 4 bytes in reverse order (endian flip).
-fn byte_swap(x: Int32) -> Int32 = int.to_int32(int.bshr(int.byte_swap(int.band(int.from_int32(x), 4294967295)), 32))
+fn byte_swap(x: Int32) -> Int32 = int.__to_int32(int.bshr(int.byte_swap(int.band(int.__from_int32(x), 4294967295)), 32))
 
 
 /// a + b wrapped to 32 bits.
-fn wrap_add(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) + int.from_int32(b))
+fn wrap_add(a: Int32, b: Int32) -> Int32 = int.__to_int32(int.__from_int32(a) + int.__from_int32(b))
 
 /// a - b wrapped to 32 bits.
-fn wrap_sub(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) - int.from_int32(b))
+fn wrap_sub(a: Int32, b: Int32) -> Int32 = int.__to_int32(int.__from_int32(a) - int.__from_int32(b))
 
 /// a * b wrapped to 32 bits.
-fn wrap_mul(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) * int.from_int32(b))
+fn wrap_mul(a: Int32, b: Int32) -> Int32 = int.__to_int32(int.__from_int32(a) * int.__from_int32(b))
 
 /// The 32 bits of a rotated left by n; n is taken mod 32.
-fn rotate_left(a: Int32, n: Int) -> Int32 = int.to_int32(rotate_bits(int.band(int.from_int32(a), 4294967295), rotate_count(n)))
+fn rotate_left(a: Int32, n: Int) -> Int32 = int.__to_int32(rotate_bits(int.band(int.__from_int32(a), 4294967295), rotate_count(n)))
 
 /// The 32 bits of a rotated right by n; n is taken mod 32.
-fn rotate_right(a: Int32, n: Int) -> Int32 = int.to_int32(rotate_bits(int.band(int.from_int32(a), 4294967295), rotate_count(0 - rotate_count(n))))
+fn rotate_right(a: Int32, n: Int) -> Int32 = int.__to_int32(rotate_bits(int.band(int.__from_int32(a), 4294967295), rotate_count(0 - rotate_count(n))))
 
 
 local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
@@ -13718,25 +11990,25 @@ local fn rotate_count(n: Int) -> Int = {
 }
 
 /// Bits needed to hold x; 0 for 0, 32 if negative.
-fn bit_length(x: Int32) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int32(x), 4294967295))
+fn bit_length(x: Int32) -> Int = 64 - int.count_leading_zeros(int.band(int.__from_int32(x), 4294967295))
 
 /// Decimal Int32 from ASCII-trimmed s; err on junk or outside -2147483648..2147483647.
 fn parse(s: String) -> Result[Int32, String] = match int.parse(s) {
   ok(n) => if n < -2147483648 then err("number too small to fit in target type")
   else if n > 2147483647 then err("number too large to fit in target type")
-  else ok(int.to_int32(n)),
+  else ok(int.__to_int32(n)),
   err(e) => err(e),
 }
 
 
 /// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
-fn to_string_radix(x: Int32, radix: Int) -> String = int.to_string_radix(int.from_int32(x), radix)
+fn to_string_radix(x: Int32, radix: Int) -> String = int.to_string_radix(int.__from_int32(x), radix)
 
 /// Int32 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -2147483648..2147483647.
 fn parse_radix(s: String, radix: Int) -> Result[Int32, String] = match int.parse_radix(s, radix) {
   ok(n) => if n < -2147483648 then err("number too small to fit in target type")
   else if n > 2147483647 then err("number too large to fit in target type")
-  else ok(int.to_int32(n)),
+  else ok(int.__to_int32(n)),
   err(e) => err(e),
 }
 
@@ -13746,49 +12018,49 @@ fn parse_radix(s: String, radix: Int) -> Result[Int32, String] = match int.parse
 
 /// x as Int32, toward zero; NaN, an infinity or a value outside Int32 aborts.
 fn from[S: Numeric](x: S) -> Int32 = match x.__trunc().__int_exact() {
-  some(n) => int.to_int32_checked(n) ?? panic("int32.from: the value is not a number in the range of Int32"),
+  some(n) => int.__to_int32_checked(n) ?? panic("int32.from: the value is not a number in the range of Int32"),
   none => panic("int32.from: the value is not a number in the range of Int32"),
 }
 
 /// some(x as Int32) when Int32 holds x exactly, else none (a fraction, NaN, out of range).
 fn from_checked[S: Numeric](x: S) -> Int32? = match x.__int_exact() {
-  some(n) => int.to_int32_checked(n),
+  some(n) => int.__to_int32_checked(n),
   none => none,
 }
 
 /// x as Int32, toward zero, clamped to Int32's range; NaN is 0.
-fn from_saturating[S: Numeric](x: S) -> Int32 = int.to_int32_saturating(x.__int_sat())
+fn from_saturating[S: Numeric](x: S) -> Int32 = int.__to_int32_saturating(x.__int_sat())
 
 /// The low 32 bits of integer x as Int32 (two's complement).
 fn from_wrapping[S: Integer](x: S) -> Int32 = {
   let u = int.wrap(x.__bits64(), 32)
-  int.to_int32(if u >= 2147483648 then u - 4294967296 else u)
+  int.__to_int32(if u >= 2147483648 then u - 4294967296 else u)
 }
 
 
 
 
-fn __int_exact(x: Int32) -> Int? = some(int.from_int32(x))
+fn __int_exact(x: Int32) -> Int? = some(int.__from_int32(x))
 
-fn __uint64_exact(x: Int32) -> UInt64? = int.__uint64_exact(int.from_int32(x))
+fn __uint64_exact(x: Int32) -> UInt64? = int.__uint64_exact(int.__from_int32(x))
 
 fn __trunc(x: Int32) -> Int32 = x
 
-fn __int_sat(x: Int32) -> Int = int.from_int32(x)
+fn __int_sat(x: Int32) -> Int = int.__from_int32(x)
 
-fn __uint64_sat(x: Int32) -> UInt64 = int.__uint64_sat(int.from_int32(x))
+fn __uint64_sat(x: Int32) -> UInt64 = int.__uint64_sat(int.__from_int32(x))
 
-fn __to_float(x: Int32) -> Float = int.to_float(int.from_int32(x))
+fn __to_float(x: Int32) -> Float = int.__raw_to_float(int.__from_int32(x))
 
-fn __to_float_exact(x: Int32) -> Float? = int.__to_float_exact(int.from_int32(x))
+fn __to_float_exact(x: Int32) -> Float? = int.__to_float_exact(int.__from_int32(x))
 
-fn __to_float32(x: Int32) -> Float32 = int.to_float32(int.from_int32(x))
+fn __to_float32(x: Int32) -> Float32 = int.__raw_to_float32(int.__from_int32(x))
 
-fn __to_float32_exact(x: Int32) -> Float32? = int.to_float32_checked(int.from_int32(x))
+fn __to_float32_exact(x: Int32) -> Float32? = int.__to_float32_checked(int.__from_int32(x))
 
-fn __decimal_exact(x: Int32) -> String? = some(int.to_string(int.from_int32(x)))
+fn __decimal_exact(x: Int32) -> String? = some(int.to_string(int.__from_int32(x)))
 
-fn __bits64(x: Int32) -> Int = int.from_int32(x)
+fn __bits64(x: Int32) -> Int = int.__from_int32(x)
 
 fn __sum(xs: List[Int32]) -> Int32 = {
   let zero: Int32 = 0
@@ -13804,205 +12076,20 @@ pub const SRC_INT32_CONVERT: &str = r#"
 
 
 fn int32_to_string(x: Int32) -> String = {
-  let i = int.from_int32(x)
+  let i = int.__from_int32(x)
   int.to_string(i)
 }
-
-fn int32_to_int8(x: Int32) -> Int8 = {
-  let i = int.from_int32(x)
-  int.to_int8(i)
-}
-
-fn int32_to_int16(x: Int32) -> Int16 = {
-  let i = int.from_int32(x)
-  int.to_int16(i)
-}
-
-fn int32_to_int64(x: Int32) -> Int64 = {
-  let i = int.from_int32(x)
-  int.to_int64(i)
-}
-
-fn int32_to_uint8(x: Int32) -> UInt8 = {
-  let i = int.from_int32(x)
-  int.to_uint8(i)
-}
-
-fn int32_to_uint16(x: Int32) -> UInt16 = {
-  let i = int.from_int32(x)
-  int.to_uint16(i)
-}
-
-fn int32_to_uint32(x: Int32) -> UInt32 = {
-  let i = int.from_int32(x)
-  int.to_uint32(i)
-}
-
-fn int32_to_uint64(x: Int32) -> UInt64 = {
-  let i = int.from_int32(x)
-  int.to_uint64(i)
-}
-
-fn int32_to_float32(x: Int32) -> Float32 = {
-  let i = int.from_int32(x)
-  int.to_float32(i)
-}
-
-fn int32_to_float64(x: Int32) -> Float64 = {
-  let i = int.from_int32(x)
-  int.to_float64(i)
-}
-
-
-fn int32_to_int8_checked(x: Int32) -> Int8? = {
-  let i = int.from_int32(x)
-  int.to_int8_checked(i)
-}
-
-fn int32_to_int8_saturating(x: Int32) -> Int8 = {
-  let i = int.from_int32(x)
-  int.to_int8_saturating(i)
-}
-
-fn int32_to_int16_checked(x: Int32) -> Int16? = {
-  let i = int.from_int32(x)
-  int.to_int16_checked(i)
-}
-
-fn int32_to_int16_saturating(x: Int32) -> Int16 = {
-  let i = int.from_int32(x)
-  int.to_int16_saturating(i)
-}
-
-fn int32_to_uint8_checked(x: Int32) -> UInt8? = {
-  let i = int.from_int32(x)
-  int.to_uint8_checked(i)
-}
-
-fn int32_to_uint8_saturating(x: Int32) -> UInt8 = {
-  let i = int.from_int32(x)
-  int.to_uint8_saturating(i)
-}
-
-fn int32_to_uint16_checked(x: Int32) -> UInt16? = {
-  let i = int.from_int32(x)
-  int.to_uint16_checked(i)
-}
-
-fn int32_to_uint16_saturating(x: Int32) -> UInt16 = {
-  let i = int.from_int32(x)
-  int.to_uint16_saturating(i)
-}
-
-fn int32_to_uint32_checked(x: Int32) -> UInt32? = {
-  let i = int.from_int32(x)
-  int.to_uint32_checked(i)
-}
-
-fn int32_to_uint32_saturating(x: Int32) -> UInt32 = {
-  let i = int.from_int32(x)
-  int.to_uint32_saturating(i)
-}
-
-fn int32_to_uint64_checked(x: Int32) -> UInt64? = {
-  let i = int.from_int32(x)
-  int.to_uint64_checked(i)
-}
-
-fn int32_to_uint64_saturating(x: Int32) -> UInt64 = {
-  let i = int.from_int32(x)
-  int.to_uint64_saturating(i)
-}
 "#;
-pub const SRC_INT64: &str = r#"
+pub const SRC_INT64: &str = r#"/// Decimal digits, with - when negative.
+fn to_string(x: Int64) -> String = int.to_string(int.__from_int64(x))
 
-
-
-
-
-
-
-
-
-/// Wraps to 8 bits; 128 becomes -128.
-fn to_int8(x: Int64) -> Int8 = int.to_int8(int.from_int64(x))
-
-/// Wraps to 16 bits; 32768 becomes -32768.
-fn to_int16(x: Int64) -> Int16 = int.to_int16(int.from_int64(x))
-
-/// Wraps to 32 bits; 2^31 becomes -2^31.
-fn to_int32(x: Int64) -> Int32 = int.to_int32(int.from_int64(x))
-
-/// Wraps to 8 bits; -1 becomes 255.
-fn to_uint8(x: Int64) -> UInt8 = int.to_uint8(int.from_int64(x))
-
-/// Wraps to 16 bits; -1 becomes 65535.
-fn to_uint16(x: Int64) -> UInt16 = int.to_uint16(int.from_int64(x))
-
-/// Wraps to 32 bits; -1 becomes 2^32-1.
-fn to_uint32(x: Int64) -> UInt32 = int.to_uint32(int.from_int64(x))
-
-/// Wraps to 64 bits; -1 becomes 2^64-1.
-fn to_uint64(x: Int64) -> UInt64 = int.to_uint64(int.from_int64(x))
-
-/// Float32 value; may round when abs(x) > 2^24.
-fn to_float32(x: Int64) -> Float32 = int.to_float32(int.from_int64(x))
-
-/// Float64 value; may round when abs(x) > 2^53.
-fn to_float64(x: Int64) -> Float64 = int.to_float64(int.from_int64(x))
-
-/// Decimal digits, with - when negative.
-fn to_string(x: Int64) -> String = int.to_string(int.from_int64(x))
-
-
-/// some(x), or none if outside -128..127.
-fn to_int8_checked(x: Int64) -> Int8? = int.to_int8_checked(int.from_int64(x))
-
-/// Clamps x to -128..127.
-fn to_int8_saturating(x: Int64) -> Int8 = int.to_int8_saturating(int.from_int64(x))
-
-/// some(x), or none if outside -32768..32767.
-fn to_int16_checked(x: Int64) -> Int16? = int.to_int16_checked(int.from_int64(x))
-
-/// Clamps x to -32768..32767.
-fn to_int16_saturating(x: Int64) -> Int16 = int.to_int16_saturating(int.from_int64(x))
-
-/// some(x), or none if outside -2^31..2^31-1.
-fn to_int32_checked(x: Int64) -> Int32? = int.to_int32_checked(int.from_int64(x))
-
-/// Clamps x to -2^31..2^31-1.
-fn to_int32_saturating(x: Int64) -> Int32 = int.to_int32_saturating(int.from_int64(x))
-
-/// some(x), or none if outside 0..255.
-fn to_uint8_checked(x: Int64) -> UInt8? = int.to_uint8_checked(int.from_int64(x))
-
-/// Clamps x to 0..255.
-fn to_uint8_saturating(x: Int64) -> UInt8 = int.to_uint8_saturating(int.from_int64(x))
-
-/// some(x), or none if outside 0..65535.
-fn to_uint16_checked(x: Int64) -> UInt16? = int.to_uint16_checked(int.from_int64(x))
-
-/// Clamps x to 0..65535.
-fn to_uint16_saturating(x: Int64) -> UInt16 = int.to_uint16_saturating(int.from_int64(x))
-
-/// some(x), or none if outside 0..2^32-1.
-fn to_uint32_checked(x: Int64) -> UInt32? = int.to_uint32_checked(int.from_int64(x))
-
-/// Clamps x to 0..2^32-1.
-fn to_uint32_saturating(x: Int64) -> UInt32 = int.to_uint32_saturating(int.from_int64(x))
-
-/// some(x), or none if x is negative.
-fn to_uint64_checked(x: Int64) -> UInt64? = int.to_uint64_checked(int.from_int64(x))
-
-/// Negative x clamps to 0.
-fn to_uint64_saturating(x: Int64) -> UInt64 = int.to_uint64_saturating(int.from_int64(x))
 
 
 /// Smallest Int64: -2^63.
-fn min_value() -> Int64 = int.to_int64(-9223372036854775807 - 1)
+fn min_value() -> Int64 = int.__to_int64(-9223372036854775807 - 1)
 
 /// Largest Int64: 2^63-1.
-fn max_value() -> Int64 = int.to_int64(9223372036854775807)
+fn max_value() -> Int64 = int.__to_int64(9223372036854775807)
 
 
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -14016,13 +12103,13 @@ fn min(a: Int64, b: Int64) -> Int64 = if a <= b then a else b
 fn max(a: Int64, b: Int64) -> Int64 = if a >= b then a else b
 
 /// x limited to lo..hi; aborts when lo > hi.
-fn clamp(x: Int64, lo: Int64, hi: Int64) -> Int64 = int.to_int64(int.clamp(int.from_int64(x), int.from_int64(lo), int.from_int64(hi)))
+fn clamp(x: Int64, lo: Int64, hi: Int64) -> Int64 = int.__to_int64(int.clamp(int.__from_int64(x), int.__from_int64(lo), int.__from_int64(hi)))
 
 /// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
-fn floor_div(a: Int64, b: Int64) -> Int64 = int.to_int64(floor_quotient(int.from_int64(a), int.from_int64(b)))
+fn floor_div(a: Int64, b: Int64) -> Int64 = int.__to_int64(floor_quotient(int.__from_int64(a), int.__from_int64(b)))
 
 /// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
-fn modulo(a: Int64, b: Int64) -> Int64 = int.to_int64(floor_remainder(int.from_int64(a), int.from_int64(b)))
+fn modulo(a: Int64, b: Int64) -> Int64 = int.__to_int64(floor_remainder(int.__from_int64(a), int.__from_int64(b)))
 
 
 local fn floor_quotient(a: Int, b: Int) -> Int = {
@@ -14038,38 +12125,38 @@ else {
 }
 
 /// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
-fn pow(base: Int64, exp: Int) -> Int64 = int.to_int64(math.pow(int.from_int64(base), exp))
+fn pow(base: Int64, exp: Int) -> Int64 = int.__to_int64(math.__pow(int.__from_int64(base), exp))
 
 /// True when x is a multiple of 2.
-fn is_even(x: Int64) -> Bool = int.from_int64(x) % 2 == 0
+fn is_even(x: Int64) -> Bool = int.__from_int64(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
-fn is_odd(x: Int64) -> Bool = int.from_int64(x) % 2 != 0
+fn is_odd(x: Int64) -> Bool = int.__from_int64(x) % 2 != 0
 
 /// Magnitude of x; min_value wraps to itself.
-fn abs(x: Int64) -> Int64 = int.to_int64(int.abs(int.from_int64(x)))
+fn abs(x: Int64) -> Int64 = int.__to_int64(int.abs(int.__from_int64(x)))
 
 /// -1, 0 or 1 by the sign of x.
-fn sign(x: Int64) -> Int = math.sign(int.from_int64(x))
+fn sign(x: Int64) -> Int = math.__sign(int.__from_int64(x))
 
 
 /// Bitwise AND.
-fn band(a: Int64, b: Int64) -> Int64 = int.to_int64(int.band(int.from_int64(a), int.from_int64(b)))
+fn band(a: Int64, b: Int64) -> Int64 = int.__to_int64(int.band(int.__from_int64(a), int.__from_int64(b)))
 
 /// Bitwise OR.
-fn bor(a: Int64, b: Int64) -> Int64 = int.to_int64(int.bor(int.from_int64(a), int.from_int64(b)))
+fn bor(a: Int64, b: Int64) -> Int64 = int.__to_int64(int.bor(int.__from_int64(a), int.__from_int64(b)))
 
 /// Bitwise XOR.
-fn bxor(a: Int64, b: Int64) -> Int64 = int.to_int64(int.bxor(int.from_int64(a), int.from_int64(b)))
+fn bxor(a: Int64, b: Int64) -> Int64 = int.__to_int64(int.bxor(int.__from_int64(a), int.__from_int64(b)))
 
 /// Bitwise complement of all 64 bits.
-fn bnot(x: Int64) -> Int64 = int.to_int64(int.bnot(int.from_int64(x)))
+fn bnot(x: Int64) -> Int64 = int.__to_int64(int.bnot(int.__from_int64(x)))
 
 /// a shifted left by n bits; n is taken mod 64.
-fn bshl(a: Int64, n: Int) -> Int64 = int.to_int64(int.bshl(int.from_int64(a), shift_count(n)))
+fn bshl(a: Int64, n: Int) -> Int64 = int.__to_int64(int.bshl(int.__from_int64(a), shift_count(n)))
 
 /// Sign-filling right shift; n is taken mod 64.
-fn bshr(a: Int64, n: Int) -> Int64 = int.to_int64(int.bshr(int.from_int64(a), shift_count(n)))
+fn bshr(a: Int64, n: Int) -> Int64 = int.__to_int64(int.bshr(int.__from_int64(a), shift_count(n)))
 
 
 local fn shift_count(n: Int) -> Int = {
@@ -14078,32 +12165,35 @@ local fn shift_count(n: Int) -> Int = {
 }
 
 /// Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
-fn count_leading_zeros(x: Int64) -> Int = int.count_leading_zeros(int.from_int64(x))
+fn count_leading_zeros(x: Int64) -> Int = int.count_leading_zeros(int.__from_int64(x))
 
 /// Zero bits below the lowest set bit; 64 for 0.
-fn count_trailing_zeros(x: Int64) -> Int = int.min(int.count_trailing_zeros(int.from_int64(x)), 64)
+fn count_trailing_zeros(x: Int64) -> Int = int.min(
+  int.count_trailing_zeros(int.__from_int64(x)),
+  64,
+)
 
 /// Number of set bits among the 64.
-fn count_ones(x: Int64) -> Int = int.pop_count(int.from_int64(x))
+fn count_ones(x: Int64) -> Int = int.count_ones(int.__from_int64(x))
 
 /// The 8 bytes in reverse order (endian flip).
-fn byte_swap(x: Int64) -> Int64 = int.to_int64(int.byte_swap(int.from_int64(x)))
+fn byte_swap(x: Int64) -> Int64 = int.__to_int64(int.byte_swap(int.__from_int64(x)))
 
 
 /// a + b wrapped to 64 bits.
-fn wrap_add(a: Int64, b: Int64) -> Int64 = int.to_int64(int.from_int64(a) + int.from_int64(b))
+fn wrap_add(a: Int64, b: Int64) -> Int64 = int.__to_int64(int.__from_int64(a) + int.__from_int64(b))
 
 /// a - b wrapped to 64 bits.
-fn wrap_sub(a: Int64, b: Int64) -> Int64 = int.to_int64(int.from_int64(a) - int.from_int64(b))
+fn wrap_sub(a: Int64, b: Int64) -> Int64 = int.__to_int64(int.__from_int64(a) - int.__from_int64(b))
 
 /// a * b wrapped to 64 bits.
-fn wrap_mul(a: Int64, b: Int64) -> Int64 = int.to_int64(int.from_int64(a) * int.from_int64(b))
+fn wrap_mul(a: Int64, b: Int64) -> Int64 = int.__to_int64(int.__from_int64(a) * int.__from_int64(b))
 
 /// The 64 bits of a rotated left by n; n is taken mod 64.
-fn rotate_left(a: Int64, n: Int) -> Int64 = int.to_int64(rotate_bits(int.from_int64(a), rotate_count(n)))
+fn rotate_left(a: Int64, n: Int) -> Int64 = int.__to_int64(rotate_bits(int.__from_int64(a), rotate_count(n)))
 
 /// The 64 bits of a rotated right by n; n is taken mod 64.
-fn rotate_right(a: Int64, n: Int) -> Int64 = int.to_int64(rotate_bits(int.from_int64(a), rotate_count(0 - rotate_count(n))))
+fn rotate_right(a: Int64, n: Int) -> Int64 = int.__to_int64(rotate_bits(int.__from_int64(a), rotate_count(0 - rotate_count(n))))
 
 
 local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
@@ -14115,21 +12205,21 @@ local fn rotate_count(n: Int) -> Int = {
 }
 
 /// Bits needed to hold x; 0 for 0, 64 if negative.
-fn bit_length(x: Int64) -> Int = 64 - int.count_leading_zeros(int.from_int64(x))
+fn bit_length(x: Int64) -> Int = 64 - int.count_leading_zeros(int.__from_int64(x))
 
 /// Decimal Int64 from ASCII-trimmed s; err on junk or overflow.
 fn parse(s: String) -> Result[Int64, String] = match int.parse(s) {
-  ok(n) => ok(int.to_int64(n)),
+  ok(n) => ok(int.__to_int64(n)),
   err(e) => err(e),
 }
 
 
 /// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
-fn to_string_radix(x: Int64, radix: Int) -> String = int.to_string_radix(int.from_int64(x), radix)
+fn to_string_radix(x: Int64, radix: Int) -> String = int.to_string_radix(int.__from_int64(x), radix)
 
 /// Int64 from trimmed s in radix, the grammar of int.parse_radix; err on junk or overflow.
 fn parse_radix(s: String, radix: Int) -> Result[Int64, String] = match int.parse_radix(s, radix) {
-  ok(n) => ok(int.to_int64(n)),
+  ok(n) => ok(int.__to_int64(n)),
   err(e) => err(e),
 }
 
@@ -14139,249 +12229,69 @@ fn parse_radix(s: String, radix: Int) -> Result[Int64, String] = match int.parse
 
 /// x as Int64, toward zero; NaN, an infinity or a value outside Int64 aborts.
 fn from[S: Numeric](x: S) -> Int64 = match x.__trunc().__int_exact() {
-  some(n) => int.to_int64(n),
+  some(n) => int.__to_int64(n),
   none => panic("int64.from: the value is not a number in the range of Int64"),
 }
 
 /// some(x as Int64) when Int64 holds x exactly, else none (a fraction, NaN, out of range).
 fn from_checked[S: Numeric](x: S) -> Int64? = match x.__int_exact() {
-  some(n) => some(int.to_int64(n)),
+  some(n) => some(int.__to_int64(n)),
   none => none,
 }
 
 /// x as Int64, toward zero, clamped to Int64's range; NaN is 0.
-fn from_saturating[S: Numeric](x: S) -> Int64 = int.to_int64(x.__int_sat())
+fn from_saturating[S: Numeric](x: S) -> Int64 = int.__to_int64(x.__int_sat())
 
 /// The low 64 bits of integer x as Int64 (two's complement).
-fn from_wrapping[S: Integer](x: S) -> Int64 = int.to_int64(x.__bits64())
+fn from_wrapping[S: Integer](x: S) -> Int64 = int.__to_int64(x.__bits64())
 
 
 
 
-fn __int_exact(x: Int64) -> Int? = some(int.from_int64(x))
+fn __int_exact(x: Int64) -> Int? = some(int.__from_int64(x))
 
-fn __uint64_exact(x: Int64) -> UInt64? = int.__uint64_exact(int.from_int64(x))
+fn __uint64_exact(x: Int64) -> UInt64? = int.__uint64_exact(int.__from_int64(x))
 
 fn __trunc(x: Int64) -> Int64 = x
 
-fn __int_sat(x: Int64) -> Int = int.from_int64(x)
+fn __int_sat(x: Int64) -> Int = int.__from_int64(x)
 
-fn __uint64_sat(x: Int64) -> UInt64 = int.__uint64_sat(int.from_int64(x))
+fn __uint64_sat(x: Int64) -> UInt64 = int.__uint64_sat(int.__from_int64(x))
 
-fn __to_float(x: Int64) -> Float = int.to_float(int.from_int64(x))
+fn __to_float(x: Int64) -> Float = int.__raw_to_float(int.__from_int64(x))
 
-fn __to_float_exact(x: Int64) -> Float? = int.__to_float_exact(int.from_int64(x))
+fn __to_float_exact(x: Int64) -> Float? = int.__to_float_exact(int.__from_int64(x))
 
-fn __to_float32(x: Int64) -> Float32 = int.to_float32(int.from_int64(x))
+fn __to_float32(x: Int64) -> Float32 = int.__raw_to_float32(int.__from_int64(x))
 
-fn __to_float32_exact(x: Int64) -> Float32? = int.to_float32_checked(int.from_int64(x))
+fn __to_float32_exact(x: Int64) -> Float32? = int.__to_float32_checked(int.__from_int64(x))
 
-fn __decimal_exact(x: Int64) -> String? = some(int.to_string(int.from_int64(x)))
+fn __decimal_exact(x: Int64) -> String? = some(int.to_string(int.__from_int64(x)))
 
-fn __bits64(x: Int64) -> Int = int.from_int64(x)
+fn __bits64(x: Int64) -> Int = int.__from_int64(x)
 
-fn __sum(xs: List[Int64]) -> Int64 = int.to_int64(list.fold(xs, 0, (a, b) => a + int.from_int64(b)))
+fn __sum(xs: List[Int64]) -> Int64 = int.__to_int64(list.fold(xs, 0, (a, b) => a + int.__from_int64(b)))
 
-fn __product(xs: List[Int64]) -> Int64 = int.to_int64(list.fold(xs, 1, (a, b) => a * int.from_int64(b)))
+fn __product(xs: List[Int64]) -> Int64 = int.__to_int64(list.fold(xs, 1, (a, b) => a * int.__from_int64(b)))
 "#;
 pub const SRC_INT64_CONVERT: &str = r#"
 
 
 fn int64_to_string(x: Int64) -> String = {
-  let v = int.from_int64(x)
+  let v = int.__from_int64(x)
   int.to_string(v)
 }
-
-fn int64_to_int8(x: Int64) -> Int8 = {
-  let v = int.from_int64(x)
-  int.to_int8(v)
-}
-
-fn int64_to_int16(x: Int64) -> Int16 = {
-  let v = int.from_int64(x)
-  int.to_int16(v)
-}
-
-fn int64_to_int32(x: Int64) -> Int32 = {
-  let v = int.from_int64(x)
-  int.to_int32(v)
-}
-
-fn int64_to_uint8(x: Int64) -> UInt8 = {
-  let v = int.from_int64(x)
-  int.to_uint8(v)
-}
-
-fn int64_to_uint16(x: Int64) -> UInt16 = {
-  let v = int.from_int64(x)
-  int.to_uint16(v)
-}
-
-fn int64_to_uint32(x: Int64) -> UInt32 = {
-  let v = int.from_int64(x)
-  int.to_uint32(v)
-}
-
-fn int64_to_uint64(x: Int64) -> UInt64 = {
-  let v = int.from_int64(x)
-  int.to_uint64(v)
-}
-
-fn int64_to_float32(x: Int64) -> Float32 = {
-  let v = int.from_int64(x)
-  int.to_float32(v)
-}
-
-fn int64_to_float64(x: Int64) -> Float64 = {
-  let v = int.from_int64(x)
-  int.to_float64(v)
-}
-
-
-fn int64_to_int8_checked(x: Int64) -> Int8? = {
-  let i = int.from_int64(x)
-  int.to_int8_checked(i)
-}
-
-fn int64_to_int8_saturating(x: Int64) -> Int8 = {
-  let i = int.from_int64(x)
-  int.to_int8_saturating(i)
-}
-
-fn int64_to_int16_checked(x: Int64) -> Int16? = {
-  let i = int.from_int64(x)
-  int.to_int16_checked(i)
-}
-
-fn int64_to_int16_saturating(x: Int64) -> Int16 = {
-  let i = int.from_int64(x)
-  int.to_int16_saturating(i)
-}
-
-fn int64_to_int32_checked(x: Int64) -> Int32? = {
-  let i = int.from_int64(x)
-  int.to_int32_checked(i)
-}
-
-fn int64_to_int32_saturating(x: Int64) -> Int32 = {
-  let i = int.from_int64(x)
-  int.to_int32_saturating(i)
-}
-
-fn int64_to_uint8_checked(x: Int64) -> UInt8? = {
-  let i = int.from_int64(x)
-  int.to_uint8_checked(i)
-}
-
-fn int64_to_uint8_saturating(x: Int64) -> UInt8 = {
-  let i = int.from_int64(x)
-  int.to_uint8_saturating(i)
-}
-
-fn int64_to_uint16_checked(x: Int64) -> UInt16? = {
-  let i = int.from_int64(x)
-  int.to_uint16_checked(i)
-}
-
-fn int64_to_uint16_saturating(x: Int64) -> UInt16 = {
-  let i = int.from_int64(x)
-  int.to_uint16_saturating(i)
-}
-
-fn int64_to_uint32_checked(x: Int64) -> UInt32? = {
-  let i = int.from_int64(x)
-  int.to_uint32_checked(i)
-}
-
-fn int64_to_uint32_saturating(x: Int64) -> UInt32 = {
-  let i = int.from_int64(x)
-  int.to_uint32_saturating(i)
-}
-
-fn int64_to_uint64_checked(x: Int64) -> UInt64? = {
-  let i = int.from_int64(x)
-  int.to_uint64_checked(i)
-}
-
-fn int64_to_uint64_saturating(x: Int64) -> UInt64 = {
-  let i = int.from_int64(x)
-  int.to_uint64_saturating(i)
-}
 "#;
-pub const SRC_INT8: &str = r#"
+pub const SRC_INT8: &str = r#"/// Decimal digits, with - when negative.
+fn to_string(x: Int8) -> String = int.to_string(int.__from_int8(x))
 
-
-
-
-
-
-
-
-
-
-
-
-/// Sign-extending widen; always exact.
-fn to_int16(x: Int8) -> Int16 = int.to_int16(int.from_int8(x))
-
-/// Sign-extending widen; always exact.
-fn to_int32(x: Int8) -> Int32 = int.to_int32(int.from_int8(x))
-
-/// Sign-extending widen; always exact.
-fn to_int64(x: Int8) -> Int64 = int.to_int64(int.from_int8(x))
-
-/// Wraps to 8 bits; -1 becomes 255.
-fn to_uint8(x: Int8) -> UInt8 = int.to_uint8(int.from_int8(x))
-
-/// Wraps to 16 bits; -1 becomes 65535.
-fn to_uint16(x: Int8) -> UInt16 = int.to_uint16(int.from_int8(x))
-
-/// Wraps to 32 bits; -1 becomes 2^32-1.
-fn to_uint32(x: Int8) -> UInt32 = int.to_uint32(int.from_int8(x))
-
-/// Wraps to 64 bits; -1 becomes 2^64-1.
-fn to_uint64(x: Int8) -> UInt64 = int.to_uint64(int.from_int8(x))
-
-/// Same value as Float32; always exact.
-fn to_float32(x: Int8) -> Float32 = int.to_float32(int.from_int8(x))
-
-/// Same value as Float64; always exact.
-fn to_float64(x: Int8) -> Float64 = int.to_float64(int.from_int8(x))
-
-/// Decimal digits, with - when negative.
-fn to_string(x: Int8) -> String = int.to_string(int.from_int8(x))
-
-
-/// some(x), or none if x is negative.
-fn to_uint8_checked(x: Int8) -> UInt8? = int.to_uint8_checked(int.from_int8(x))
-
-/// Negative x clamps to 0.
-fn to_uint8_saturating(x: Int8) -> UInt8 = int.to_uint8_saturating(int.from_int8(x))
-
-/// some(x), or none if x is negative.
-fn to_uint16_checked(x: Int8) -> UInt16? = int.to_uint16_checked(int.from_int8(x))
-
-/// Negative x clamps to 0.
-fn to_uint16_saturating(x: Int8) -> UInt16 = int.to_uint16_saturating(int.from_int8(x))
-
-/// some(x), or none if x is negative.
-fn to_uint32_checked(x: Int8) -> UInt32? = int.to_uint32_checked(int.from_int8(x))
-
-/// Negative x clamps to 0.
-fn to_uint32_saturating(x: Int8) -> UInt32 = int.to_uint32_saturating(int.from_int8(x))
-
-/// some(x), or none if x is negative.
-fn to_uint64_checked(x: Int8) -> UInt64? = int.to_uint64_checked(int.from_int8(x))
-
-/// Negative x clamps to 0.
-fn to_uint64_saturating(x: Int8) -> UInt64 = int.to_uint64_saturating(int.from_int8(x))
 
 
 /// Smallest Int8: -128.
-fn min_value() -> Int8 = int.to_int8(-128)
+fn min_value() -> Int8 = int.__to_int8(-128)
 
 /// Largest Int8: 127.
-fn max_value() -> Int8 = int.to_int8(127)
+fn max_value() -> Int8 = int.__to_int8(127)
 
 
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -14395,14 +12305,14 @@ fn min(a: Int8, b: Int8) -> Int8 = if a <= b then a else b
 fn max(a: Int8, b: Int8) -> Int8 = if a >= b then a else b
 
 /// x limited to lo..hi; aborts when lo > hi.
-fn clamp(x: Int8, lo: Int8, hi: Int8) -> Int8 = int.to_int8(int.clamp(int.from_int8(x), int.from_int8(lo), int.from_int8(hi)))
+fn clamp(x: Int8, lo: Int8, hi: Int8) -> Int8 = int.__to_int8(int.clamp(int.__from_int8(x), int.__from_int8(lo), int.__from_int8(hi)))
 
 /// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
-fn floor_div(a: Int8, b: Int8) -> Int8 = if int.from_int8(b) == -1 then a / b
-else int.to_int8(floor_quotient(int.from_int8(a), int.from_int8(b)))
+fn floor_div(a: Int8, b: Int8) -> Int8 = if int.__from_int8(b) == -1 then a / b
+else int.__to_int8(floor_quotient(int.__from_int8(a), int.__from_int8(b)))
 
 /// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
-fn modulo(a: Int8, b: Int8) -> Int8 = int.to_int8(floor_remainder(int.from_int8(a), int.from_int8(b)))
+fn modulo(a: Int8, b: Int8) -> Int8 = int.__to_int8(floor_remainder(int.__from_int8(a), int.__from_int8(b)))
 
 
 local fn floor_quotient(a: Int, b: Int) -> Int = {
@@ -14418,38 +12328,38 @@ else {
 }
 
 /// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
-fn pow(base: Int8, exp: Int) -> Int8 = int.to_int8(math.pow(int.from_int8(base), exp))
+fn pow(base: Int8, exp: Int) -> Int8 = int.__to_int8(math.__pow(int.__from_int8(base), exp))
 
 /// True when x is a multiple of 2.
-fn is_even(x: Int8) -> Bool = int.from_int8(x) % 2 == 0
+fn is_even(x: Int8) -> Bool = int.__from_int8(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
-fn is_odd(x: Int8) -> Bool = int.from_int8(x) % 2 != 0
+fn is_odd(x: Int8) -> Bool = int.__from_int8(x) % 2 != 0
 
 /// Magnitude of x; min_value wraps to itself.
-fn abs(x: Int8) -> Int8 = int.to_int8(int.abs(int.from_int8(x)))
+fn abs(x: Int8) -> Int8 = int.__to_int8(int.abs(int.__from_int8(x)))
 
 /// -1, 0 or 1 by the sign of x.
-fn sign(x: Int8) -> Int = math.sign(int.from_int8(x))
+fn sign(x: Int8) -> Int = math.__sign(int.__from_int8(x))
 
 
 /// Bitwise AND.
-fn band(a: Int8, b: Int8) -> Int8 = int.to_int8(int.band(int.from_int8(a), int.from_int8(b)))
+fn band(a: Int8, b: Int8) -> Int8 = int.__to_int8(int.band(int.__from_int8(a), int.__from_int8(b)))
 
 /// Bitwise OR.
-fn bor(a: Int8, b: Int8) -> Int8 = int.to_int8(int.bor(int.from_int8(a), int.from_int8(b)))
+fn bor(a: Int8, b: Int8) -> Int8 = int.__to_int8(int.bor(int.__from_int8(a), int.__from_int8(b)))
 
 /// Bitwise XOR.
-fn bxor(a: Int8, b: Int8) -> Int8 = int.to_int8(int.bxor(int.from_int8(a), int.from_int8(b)))
+fn bxor(a: Int8, b: Int8) -> Int8 = int.__to_int8(int.bxor(int.__from_int8(a), int.__from_int8(b)))
 
 /// Bitwise complement of all 8 bits.
-fn bnot(x: Int8) -> Int8 = int.to_int8(int.bnot(int.from_int8(x)))
+fn bnot(x: Int8) -> Int8 = int.__to_int8(int.bnot(int.__from_int8(x)))
 
 /// a shifted left by n bits; n is taken mod 8.
-fn bshl(a: Int8, n: Int) -> Int8 = int.to_int8(int.bshl(int.from_int8(a), shift_count(n)))
+fn bshl(a: Int8, n: Int) -> Int8 = int.__to_int8(int.bshl(int.__from_int8(a), shift_count(n)))
 
 /// Sign-filling right shift; n is taken mod 8.
-fn bshr(a: Int8, n: Int) -> Int8 = int.to_int8(int.bshr(int.from_int8(a), shift_count(n)))
+fn bshr(a: Int8, n: Int) -> Int8 = int.__to_int8(int.bshr(int.__from_int8(a), shift_count(n)))
 
 
 local fn shift_count(n: Int) -> Int = {
@@ -14458,32 +12368,32 @@ local fn shift_count(n: Int) -> Int = {
 }
 
 /// Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
-fn count_leading_zeros(x: Int8) -> Int = int.count_leading_zeros(int.band(int.from_int8(x), 255)) - 56
+fn count_leading_zeros(x: Int8) -> Int = int.count_leading_zeros(int.band(int.__from_int8(x), 255)) - 56
 
 /// Zero bits below the lowest set bit; 8 for 0.
-fn count_trailing_zeros(x: Int8) -> Int = int.min(int.count_trailing_zeros(int.from_int8(x)), 8)
+fn count_trailing_zeros(x: Int8) -> Int = int.min(int.count_trailing_zeros(int.__from_int8(x)), 8)
 
 /// Number of set bits among the 8.
-fn count_ones(x: Int8) -> Int = int.pop_count(int.band(int.from_int8(x), 255))
+fn count_ones(x: Int8) -> Int = int.count_ones(int.band(int.__from_int8(x), 255))
 
 /// The bytes in reverse order; one byte, so x itself.
 fn byte_swap(x: Int8) -> Int8 = x
 
 
 /// a + b wrapped to 8 bits.
-fn wrap_add(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) + int.from_int8(b))
+fn wrap_add(a: Int8, b: Int8) -> Int8 = int.__to_int8(int.__from_int8(a) + int.__from_int8(b))
 
 /// a - b wrapped to 8 bits.
-fn wrap_sub(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) - int.from_int8(b))
+fn wrap_sub(a: Int8, b: Int8) -> Int8 = int.__to_int8(int.__from_int8(a) - int.__from_int8(b))
 
 /// a * b wrapped to 8 bits.
-fn wrap_mul(a: Int8, b: Int8) -> Int8 = int.to_int8(int.from_int8(a) * int.from_int8(b))
+fn wrap_mul(a: Int8, b: Int8) -> Int8 = int.__to_int8(int.__from_int8(a) * int.__from_int8(b))
 
 /// The 8 bits of a rotated left by n; n is taken mod 8.
-fn rotate_left(a: Int8, n: Int) -> Int8 = int.to_int8(rotate_bits(int.band(int.from_int8(a), 255), rotate_count(n)))
+fn rotate_left(a: Int8, n: Int) -> Int8 = int.__to_int8(rotate_bits(int.band(int.__from_int8(a), 255), rotate_count(n)))
 
 /// The 8 bits of a rotated right by n; n is taken mod 8.
-fn rotate_right(a: Int8, n: Int) -> Int8 = int.to_int8(rotate_bits(int.band(int.from_int8(a), 255), rotate_count(0 - rotate_count(n))))
+fn rotate_right(a: Int8, n: Int) -> Int8 = int.__to_int8(rotate_bits(int.band(int.__from_int8(a), 255), rotate_count(0 - rotate_count(n))))
 
 
 local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
@@ -14495,25 +12405,25 @@ local fn rotate_count(n: Int) -> Int = {
 }
 
 /// Bits needed to hold x; 0 for 0, 8 if negative.
-fn bit_length(x: Int8) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int8(x), 255))
+fn bit_length(x: Int8) -> Int = 64 - int.count_leading_zeros(int.band(int.__from_int8(x), 255))
 
 /// Decimal Int8 from ASCII-trimmed s; err on junk or outside -128..127.
 fn parse(s: String) -> Result[Int8, String] = match int.parse(s) {
   ok(n) => if n < -128 then err("number too small to fit in target type")
   else if n > 127 then err("number too large to fit in target type")
-  else ok(int.to_int8(n)),
+  else ok(int.__to_int8(n)),
   err(e) => err(e),
 }
 
 
 /// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
-fn to_string_radix(x: Int8, radix: Int) -> String = int.to_string_radix(int.from_int8(x), radix)
+fn to_string_radix(x: Int8, radix: Int) -> String = int.to_string_radix(int.__from_int8(x), radix)
 
 /// Int8 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -128..127.
 fn parse_radix(s: String, radix: Int) -> Result[Int8, String] = match int.parse_radix(s, radix) {
   ok(n) => if n < -128 then err("number too small to fit in target type")
   else if n > 127 then err("number too large to fit in target type")
-  else ok(int.to_int8(n)),
+  else ok(int.__to_int8(n)),
   err(e) => err(e),
 }
 
@@ -14523,49 +12433,49 @@ fn parse_radix(s: String, radix: Int) -> Result[Int8, String] = match int.parse_
 
 /// x as Int8, toward zero; NaN, an infinity or a value outside Int8 aborts.
 fn from[S: Numeric](x: S) -> Int8 = match x.__trunc().__int_exact() {
-  some(n) => int.to_int8_checked(n) ?? panic("int8.from: the value is not a number in the range of Int8"),
+  some(n) => int.__to_int8_checked(n) ?? panic("int8.from: the value is not a number in the range of Int8"),
   none => panic("int8.from: the value is not a number in the range of Int8"),
 }
 
 /// some(x as Int8) when Int8 holds x exactly, else none (a fraction, NaN, out of range).
 fn from_checked[S: Numeric](x: S) -> Int8? = match x.__int_exact() {
-  some(n) => int.to_int8_checked(n),
+  some(n) => int.__to_int8_checked(n),
   none => none,
 }
 
 /// x as Int8, toward zero, clamped to Int8's range; NaN is 0.
-fn from_saturating[S: Numeric](x: S) -> Int8 = int.to_int8_saturating(x.__int_sat())
+fn from_saturating[S: Numeric](x: S) -> Int8 = int.__to_int8_saturating(x.__int_sat())
 
 /// The low 8 bits of integer x as Int8 (two's complement).
 fn from_wrapping[S: Integer](x: S) -> Int8 = {
   let u = int.wrap(x.__bits64(), 8)
-  int.to_int8(if u >= 128 then u - 256 else u)
+  int.__to_int8(if u >= 128 then u - 256 else u)
 }
 
 
 
 
-fn __int_exact(x: Int8) -> Int? = some(int.from_int8(x))
+fn __int_exact(x: Int8) -> Int? = some(int.__from_int8(x))
 
-fn __uint64_exact(x: Int8) -> UInt64? = int.__uint64_exact(int.from_int8(x))
+fn __uint64_exact(x: Int8) -> UInt64? = int.__uint64_exact(int.__from_int8(x))
 
 fn __trunc(x: Int8) -> Int8 = x
 
-fn __int_sat(x: Int8) -> Int = int.from_int8(x)
+fn __int_sat(x: Int8) -> Int = int.__from_int8(x)
 
-fn __uint64_sat(x: Int8) -> UInt64 = int.__uint64_sat(int.from_int8(x))
+fn __uint64_sat(x: Int8) -> UInt64 = int.__uint64_sat(int.__from_int8(x))
 
-fn __to_float(x: Int8) -> Float = int.to_float(int.from_int8(x))
+fn __to_float(x: Int8) -> Float = int.__raw_to_float(int.__from_int8(x))
 
-fn __to_float_exact(x: Int8) -> Float? = int.__to_float_exact(int.from_int8(x))
+fn __to_float_exact(x: Int8) -> Float? = int.__to_float_exact(int.__from_int8(x))
 
-fn __to_float32(x: Int8) -> Float32 = int.to_float32(int.from_int8(x))
+fn __to_float32(x: Int8) -> Float32 = int.__raw_to_float32(int.__from_int8(x))
 
-fn __to_float32_exact(x: Int8) -> Float32? = int.to_float32_checked(int.from_int8(x))
+fn __to_float32_exact(x: Int8) -> Float32? = int.__to_float32_checked(int.__from_int8(x))
 
-fn __decimal_exact(x: Int8) -> String? = some(int.to_string(int.from_int8(x)))
+fn __decimal_exact(x: Int8) -> String? = some(int.to_string(int.__from_int8(x)))
 
-fn __bits64(x: Int8) -> Int = int.from_int8(x)
+fn __bits64(x: Int8) -> Int = int.__from_int8(x)
 
 fn __sum(xs: List[Int8]) -> Int8 = {
   let zero: Int8 = 0
@@ -14585,94 +12495,8 @@ pub const SRC_INT8_CONVERT: &str = r#"
 
 
 fn int8_to_string(x: Int8) -> String = {
-  let i = int.from_int8(x)
+  let i = int.__from_int8(x)
   int.to_string(i)
-}
-
-fn int8_to_int16(x: Int8) -> Int16 = {
-  let i = int.from_int8(x)
-  int.to_int16(i)
-}
-
-fn int8_to_int32(x: Int8) -> Int32 = {
-  let i = int.from_int8(x)
-  int.to_int32(i)
-}
-
-fn int8_to_int64(x: Int8) -> Int64 = {
-  let i = int.from_int8(x)
-  int.to_int64(i)
-}
-
-fn int8_to_uint8(x: Int8) -> UInt8 = {
-  let i = int.from_int8(x)
-  int.to_uint8(i)
-}
-
-fn int8_to_uint16(x: Int8) -> UInt16 = {
-  let i = int.from_int8(x)
-  int.to_uint16(i)
-}
-
-fn int8_to_uint32(x: Int8) -> UInt32 = {
-  let i = int.from_int8(x)
-  int.to_uint32(i)
-}
-
-fn int8_to_uint64(x: Int8) -> UInt64 = {
-  let i = int.from_int8(x)
-  int.to_uint64(i)
-}
-
-fn int8_to_float32(x: Int8) -> Float32 = {
-  let i = int.from_int8(x)
-  int.to_float32(i)
-}
-
-fn int8_to_float64(x: Int8) -> Float64 = {
-  let i = int.from_int8(x)
-  int.to_float64(i)
-}
-
-
-fn int8_to_uint8_checked(x: Int8) -> UInt8? = {
-  let i = int.from_int8(x)
-  int.to_uint8_checked(i)
-}
-
-fn int8_to_uint8_saturating(x: Int8) -> UInt8 = {
-  let i = int.from_int8(x)
-  int.to_uint8_saturating(i)
-}
-
-fn int8_to_uint16_checked(x: Int8) -> UInt16? = {
-  let i = int.from_int8(x)
-  int.to_uint16_checked(i)
-}
-
-fn int8_to_uint16_saturating(x: Int8) -> UInt16 = {
-  let i = int.from_int8(x)
-  int.to_uint16_saturating(i)
-}
-
-fn int8_to_uint32_checked(x: Int8) -> UInt32? = {
-  let i = int.from_int8(x)
-  int.to_uint32_checked(i)
-}
-
-fn int8_to_uint32_saturating(x: Int8) -> UInt32 = {
-  let i = int.from_int8(x)
-  int.to_uint32_saturating(i)
-}
-
-fn int8_to_uint64_checked(x: Int8) -> UInt64? = {
-  let i = int.from_int8(x)
-  int.to_uint64_checked(i)
-}
-
-fn int8_to_uint64_saturating(x: Int8) -> UInt64 = {
-  let i = int.from_int8(x)
-  int.to_uint64_saturating(i)
 }
 "#;
 pub const SRC_INT_BITCOUNT: &str = r#"
@@ -14801,50 +12625,50 @@ fn int_max_value() -> Int = 9223372036854775807
 
 fn int8_min_value() -> Int8 = {
   let v = 0 - 128
-  int.to_int8(v)
+  int.__to_int8(v)
 }
 
-fn int8_max_value() -> Int8 = int.to_int8(127)
+fn int8_max_value() -> Int8 = int.__to_int8(127)
 
 fn int16_min_value() -> Int16 = {
   let v = 0 - 32768
-  int.to_int16(v)
+  int.__to_int16(v)
 }
 
-fn int16_max_value() -> Int16 = int.to_int16(32767)
+fn int16_max_value() -> Int16 = int.__to_int16(32767)
 
 fn int32_min_value() -> Int32 = {
   let v = 0 - 2147483648
-  int.to_int32(v)
+  int.__to_int32(v)
 }
 
-fn int32_max_value() -> Int32 = int.to_int32(2147483647)
+fn int32_max_value() -> Int32 = int.__to_int32(2147483647)
 
 fn int64_min_value() -> Int64 = {
   let a = 0 - 9223372036854775807
   let b = a - 1
-  int.to_int64(b)
+  int.__to_int64(b)
 }
 
-fn int64_max_value() -> Int64 = int.to_int64(9223372036854775807)
+fn int64_max_value() -> Int64 = int.__to_int64(9223372036854775807)
 
-fn uint8_min_value() -> UInt8 = int.to_uint8(0)
+fn uint8_min_value() -> UInt8 = int.__to_uint8(0)
 
-fn uint8_max_value() -> UInt8 = int.to_uint8(255)
+fn uint8_max_value() -> UInt8 = int.__to_uint8(255)
 
-fn uint16_min_value() -> UInt16 = int.to_uint16(0)
+fn uint16_min_value() -> UInt16 = int.__to_uint16(0)
 
-fn uint16_max_value() -> UInt16 = int.to_uint16(65535)
+fn uint16_max_value() -> UInt16 = int.__to_uint16(65535)
 
-fn uint32_min_value() -> UInt32 = int.to_uint32(0)
+fn uint32_min_value() -> UInt32 = int.__to_uint32(0)
 
-fn uint32_max_value() -> UInt32 = int.to_uint32(4294967295)
+fn uint32_max_value() -> UInt32 = int.__to_uint32(4294967295)
 
-fn uint64_min_value() -> UInt64 = int.to_uint64(0)
+fn uint64_min_value() -> UInt64 = int.__to_uint64(0)
 
 fn uint64_max_value() -> UInt64 = {
   let v = 0 - 1
-  int.to_uint64(v)
+  int.__to_uint64(v)
 }
 "#;
 pub const SRC_INT_CHECKED: &str = r#"
@@ -14943,39 +12767,19 @@ pub const SRC_INT_ROTATE: &str = r#"
 
 
 
-fn __rotate_count(n: Int, bits: Int) -> Int = {
-  let r = n % bits
-  if r < 0 then r + bits else r
+fn __rotate_count(n: Int) -> Int = {
+  let r = n % 64
+  if r < 0 then r + 64 else r
 }
 
-fn __rotate_mask(bits: Int) -> Int = if bits >= 64 then 0 - 1
-else {
-  let p = prim.bshl(1, bits)
-  p - 1
+fn int_rotate_left(a: Int, n: Int) -> Int = {
+  let nn = __rotate_count(n)
+  if nn == 0 then a else prim.bor(prim.bshl(a, nn), prim.bshr_u(a, 64 - nn))
 }
 
-fn int_rotate_left(a: Int, n: Int, bits: Int) -> Int = {
-
-
-  if bits <= 0 then prim.die(prim.handle("Error: rotate width must be positive\n")) else ()
-  let mask = __rotate_mask(bits)
-  let v = prim.band(a, mask)
-  let nn = __rotate_count(n, bits)
-  let left = prim.bshl(v, nn)
-  let right = prim.bshr_u(v, bits - nn)
-  let combined = prim.bor(left, right)
-  prim.band(combined, mask)
-}
-
-fn int_rotate_right(a: Int, n: Int, bits: Int) -> Int = {
-  if bits <= 0 then prim.die(prim.handle("Error: rotate width must be positive\n")) else ()
-  let mask = __rotate_mask(bits)
-  let v = prim.band(a, mask)
-  let nn = __rotate_count(n, bits)
-  let right = prim.bshr_u(v, nn)
-  let left = prim.bshl(v, bits - nn)
-  let combined = prim.bor(left, right)
-  prim.band(combined, mask)
+fn int_rotate_right(a: Int, n: Int) -> Int = {
+  let nn = __rotate_count(n)
+  if nn == 0 then a else prim.bor(prim.bshr_u(a, nn), prim.bshl(a, 64 - nn))
 }
 "#;
 pub const SRC_INT_SCALAR: &str = r#"
@@ -15185,71 +12989,144 @@ pub const SRC_INT_WRAP: &str = r#"
 
 
 
-fn __wrap_mask(s: Int, bits: Int) -> Int = if bits >= 64 then s
-else {
-  let hi = prim.bshl(1, bits)
-  let mask = hi - 1
-  prim.band(s, mask)
-}
+fn int_wrap_add(a: Int, b: Int) -> Int = a + b
 
-fn int_wrap_add(a: Int, b: Int, bits: Int) -> Int = {
-  let s = a + b
-  __wrap_mask(s, bits)
-}
-
-fn int_wrap_mul(a: Int, b: Int, bits: Int) -> Int = {
-  let s = a * b
-  __wrap_mask(s, bits)
-}
-
-fn int_to_u32(n: Int) -> Int = prim.band(n, 4294967295)
-
-fn int_to_u8(n: Int) -> Int = prim.band(n, 255)
+fn int_wrap_mul(a: Int, b: Int) -> Int = a * b
 "#;
 pub const SRC_IO: &str = r#"
 
 
 
 
-/// Next stdin line, newline cut, bad UTF-8 as U+FFFD; "" at EOF too — read_line_opt tells them apart.
+
+
+
+
+
+
+
+
+
+
+
+
+/// The standard input stream; a Read handle.
+mod type Stdin: Read = Int
+
+/// The standard output stream; a Write handle.
+mod type Stdout: Write = Int
+
+/// The standard error stream; a Write handle.
+mod type Stderr: Write = Int
+
+
+/// Next stdin line, newline cut, bad UTF-8 as U+FFFD; none at EOF, some("") for an empty line.
 @ordered
 @intrinsic("almide_rt_io_read_line")
-effect fn read_line() -> String = _
-
-/// Next stdin line, newline cut; none at EOF, some("") for an empty line.
-@ordered
-@intrinsic("almide_rt_io_read_line_opt")
-effect fn read_line_opt() -> String? = _
-
-/// Writes s, no newline, then flushes.
-@intrinsic("almide_rt_io_print")
-@category("IO.stdout")
-effect fn print(s: String) -> Unit = _
+effect fn read_line() -> String? = _
 
 /// Rest of stdin as text, bad UTF-8 as U+FFFD; empty at EOF.
 @ordered
 @intrinsic("almide_rt_io_read_all")
 effect fn read_all() -> String = _
 
-/// Next stdin byte 0..255, or -1 at EOF.
-@ordered
-@intrinsic("almide_rt_io_read_byte")
-effect fn read_byte() -> Int = _
-
-/// Up to n stdin bytes; [] if n <= 0.
-@ordered
-@intrinsic("almide_rt_io_read_n_bytes")
-effect fn read_n_bytes(n: Int) -> List[Int] = _
-
-/// Low byte of each Int to stdout; unflushed.
-@intrinsic("almide_rt_io_write_bytes")
+/// Writes s to stdout, no newline, then flushes.
+@intrinsic("almide_rt_io_print")
 @category("IO.stdout")
-effect fn write_bytes(data: List[Int]) -> Unit = _
+effect fn print(s: String) -> Unit = _
 
-/// Raw data to stdout; no newline.
-@intrinsic("almide_rt_io_write")
+/// Writes s to stderr, no newline.
+@intrinsic("almide_rt_io_eprint")
+@category("IO.stderr")
+effect fn eprint(s: String) -> Unit = _
+
+
+/// Standard input, for io.read / read_exact / read_to_end.
+@category("IO.stdin")
+effect fn stdin() -> Stdin = Stdin(0)
+
+/// Standard output, for io.write.
 @category("IO.stdout")
-effect fn write(data: Bytes) -> Unit = _
+effect fn stdout() -> Stdout = Stdout(1)
+
+/// Standard error, for io.write.
+@category("IO.stderr")
+effect fn stderr() -> Stderr = Stderr(2)
+
+
+/// Up to max bytes from h; empty once h has ended; err if max < 0.
+@ordered
+@category
+effect fn read[H: Read](h: H, max: Int) -> Result[Bytes, String] =
+  if max < 0 then err("io.read: negative length ${max}") else h.__self_read(max)
+
+/// Exactly n bytes from h; err if h ends first, naming how many arrived.
+@ordered
+@category
+effect fn read_exact[H: Read](h: H, n: Int) -> Result[Bytes, String] =
+  if n < 0 then err("io.read_exact: negative length ${n}")
+  else __read_exact_from(h, n, 0, [])
+
+/// Every byte until h ends.
+@ordered
+@category
+effect fn read_to_end[H: Read](h: H) -> Result[Bytes, String] = __read_to_end_from(h, [])
+
+/// Writes all of data to h.
+@category
+effect fn write[H: Write](h: H, data: Bytes) -> Result[Unit, String] = h.__self_write(data)
+
+/// Closes h; closing twice is ok.
+@category
+effect fn close[H: Close](h: H) -> Result[Unit, String] = h.__self_close()
+
+
+
+
+effect fn __read_exact_from[H: Read](h: H, n: Int, got: Int, chunks: List[Bytes]) -> Result[Bytes, String] =
+  if got >= n then ok(list.join(chunks, bytes.new()))
+  else {
+    let left = n - got
+    let b = h.__self_read(if left > 65536 then 65536 else left)!
+    if bytes.len(b) == 0 then err("io.read_exact: the stream ended after ${got} of ${n} bytes")
+    else __read_exact_from(h, n, got + bytes.len(b), chunks + [b])
+  }
+
+effect fn __read_to_end_from[H: Read](h: H, chunks: List[Bytes]) -> Result[Bytes, String] = {
+  let b = h.__self_read(65536)!
+  if bytes.len(b) == 0 then ok(list.join(chunks, bytes.new()))
+  else __read_to_end_from(h, chunks + [b])
+}
+
+
+/// Up to max bytes of stdin; fewer only at its end.
+@ordered
+@intrinsic("almide_rt_io___read_stdin_bytes")
+effect fn __read_stdin_bytes(max: Int) -> Bytes = _
+
+/// data to stdout, unflushed; shares println's buffer, so order is program order.
+@intrinsic("almide_rt_io___write_stdout")
+@category("IO.stdout")
+effect fn __write_stdout(data: Bytes) -> Unit = _
+
+/// data to stderr, after flushing stdout.
+@intrinsic("almide_rt_io___write_stderr")
+@category("IO.stderr")
+effect fn __write_stderr(data: Bytes) -> Unit = _
+
+effect fn __stdin_read(_h: Stdin, max: Int) -> Result[Bytes, String] = ok(io.__read_stdin_bytes(max))
+
+@category("IO.stdout")
+effect fn __stdout_write(_h: Stdout, data: Bytes) -> Result[Unit, String] = {
+  io.__write_stdout(data)
+  ok(())
+}
+
+@category("IO.stderr")
+effect fn __stderr_write(_h: Stderr, data: Bytes) -> Result[Unit, String] = {
+  io.__write_stderr(data)
+  ok(())
+}
 "#;
 pub const SRC_IO_PRINT: &str = r#"
 
@@ -15301,32 +13178,6 @@ effect fn io_read_all() -> String = {
   bytes.to_string_lossy(buf)
 }
 "#;
-pub const SRC_IO_READ_BYTE: &str = r#"
-
-
-
-
-
-
-effect fn io_read_byte() -> Int = {
-  let b = prim.read_n_bytes(1)
-  let h = prim.handle(b)
-  if prim.load32(h + 4) < 1 then 0 - 1 else prim.load8(h + 12)
-}
-"#;
-pub const SRC_IO_READ_LINE: &str = r#"
-
-
-
-
-
-
-
-
-
-
-effect fn io_read_line() -> String = prim.read_line()
-"#;
 pub const SRC_IO_READ_LINE_OPT: &str = r#"
 
 
@@ -15351,7 +13202,7 @@ effect fn io_read_line_opt() -> String? = {
     }
   }
   var end = bytes.len(buf)
-  while end > 0 and bytes.get_or(buf, end - 1, 0) == 13 {
+  while end > 0 and bytes.get(buf, end - 1) ?? 0 == 13 {
     end = end - 1
   }
   if got == 0 then none
@@ -15399,7 +13250,8 @@ else {
   if list.len(got) < want then got else got + __read_n_chunked(remaining - want)
 }
 
-effect fn io_read_n_bytes(n: Int) -> List[Int] = if n <= 0 then prim.read_n_bytes(0) else __read_n_chunked(n)
+@implements("io.__read_stdin_bytes")
+effect fn io_read_n_bytes(n: Int) -> Bytes = bytes.from_list(if n <= 0 then prim.read_n_bytes(0) else __read_n_chunked(n))
 "#;
 pub const SRC_IO_WRITE: &str = r#"
 
@@ -15421,32 +13273,17 @@ fn io_write(data: Bytes) -> Unit = {
 }
 
 
-fn __io_pack_bytes(dh: Int, sh: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  prim.store8(dh + 12 + i, prim.band(prim.load64(sh + 12 + i * 8), 255))
-  __io_pack_bytes(dh, sh, n, i + 1)
-}
 
-
-
-fn io_write_bytes(data: List[Int]) -> Unit = {
-  let sh = prim.handle(data)
-  let n = prim.load32(sh + 4)
-  let buf = prim.alloc_bytes(n)
-  let dh = prim.handle(buf)
-  let _p = __io_pack_bytes(dh, sh, n, 0)
-  prim.store32(8, dh + 12)
-  prim.store32(12, n)
-  let _w = prim.fd_write(1, 8, 1, 0)
+@implements("io.__write_stderr")
+fn io_write_stderr(data: Bytes) -> Unit = {
+  let h = prim.handle(data)
+  let len = prim.load32(h + 4)
+  prim.store32(8, h + 12)
+  prim.store32(12, len)
+  let _w = prim.fd_write(2, 8, 1, 0)
 }
 "#;
 pub const SRC_JSON: &str = r#"
-
-
-
-
-
-
 
 
 
@@ -15464,72 +13301,7 @@ fn stringify(v: Value) -> String = _
 
 /// JSON with 2-space indent; [] and {} inline, NaN/inf null.
 @intrinsic("almide_json_stringify_pretty")
-fn stringify_pretty(j: Value) -> String = _
-
-
-/// String at key; none if absent or non-string.
-@intrinsic("almide_json_get_string")
-fn get_string(j: Value, key: String) -> String? = _
-
-
-
-
-/// Int at key; none if absent or not an Int (a Float is never truncated).
-@intrinsic("almide_json_get_int")
-fn get_int(j: Value, key: String) -> Int? = _
-
-/// Float at key (Int widens); none if absent.
-@intrinsic("almide_json_get_float")
-fn get_float(j: Value, key: String) -> Float? = _
-
-/// Bool at key; none if absent or non-Bool.
-@intrinsic("almide_json_get_bool")
-fn get_bool(j: Value, key: String) -> Bool? = _
-
-/// Array at key; none if absent or non-array.
-@intrinsic("almide_json_get_array")
-fn get_array(j: Value, key: String) -> List[Value]? = _
-
-
-/// Empty path: the whole value.
-@intrinsic("almide_rt_json_root")
-fn root() -> JsonPath = _
-
-/// path extended by object key name.
-@intrinsic("almide_rt_json_field")
-fn field(path: JsonPath, name: String) -> JsonPath = _
-
-/// path plus index i; negative i counts from end.
-@intrinsic("almide_rt_json_index")
-fn index(path: JsonPath, i: Int) -> JsonPath = _
-
-
-
-
-@intrinsic("almide_rt_json_path_repr")
-@borrow_ref(path)
-fn __json_path_repr(path: JsonPath) -> String = _
-
-/// Value at path, or none if a step misses.
-@intrinsic("almide_json_get_path")
-@borrow_ref(path)
-fn get_path(j: Value, path: JsonPath) -> Value? = _
-
-/// j with value at path; missing keys created; err if nested past 1000.
-@reuse(j)
-@intrinsic("almide_json_set_path")
-@borrow_ref(path)
-@consume(value)
-fn set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String] = _
-
-/// j minus the entry at path; unchanged if absent.
-@intrinsic("almide_json_remove_path")
-@borrow_ref(path)
-fn remove_path(j: Value, path: JsonPath) -> Value = _
-
-/// Object as key->string map (non-strings as JSON).
-@intrinsic("almide_json_to_map")
-fn to_map(j: Value) -> Map[String, String]? = _
+fn stringify_pretty(v: Value) -> String = _
 "#;
 pub const SRC_JSON_CTOR: &str = r#"
 
@@ -15538,11 +13310,9 @@ pub const SRC_JSON_CTOR: &str = r#"
 
 
 
-fn json_stringify(v: Value) -> String = value.stringify(v)
+fn json_stringify(v: Value) -> String = value.__stringify(v)
 "#;
 pub const SRC_JSON_GET_TYPED: &str = r#"
-
-
 
 
 
@@ -15579,28 +13349,56 @@ fn __r2o_arr(r: Result[List[Value], String]) -> List[Value]? = match r {
   err(_) => none,
 }
 
-fn json_get_string(j: Value, key: String) -> String? = match value.field(j, key) {
-  ok(v) => __r2o_str(value.as_string(v)),
+
+
+
+
+fn __r2o_val(r: Result[Value, String]) -> Value? = match r {
+  ok(v) => some(v),
   err(_) => none,
 }
 
-fn json_get_int(j: Value, key: String) -> Int? = match value.field(j, key) {
-  ok(v) => __r2o_int(value.as_int(v)),
+fn __r2o_obj(r: Result[List[(String, Value)], String]) -> List[(String, Value)]? = match r {
+  ok(ps) => some(ps),
   err(_) => none,
 }
 
-fn json_get_float(j: Value, key: String) -> Float? = match value.field(j, key) {
-  ok(v) => __r2o_float(value.as_float(v)),
+@implements("value.get")
+fn value_get(v: Value, key: String) -> Value? = __r2o_val(value.__field(v, key))
+
+@implements("value.get_string")
+fn value_get_string(v: Value, key: String) -> String? = match value.__field(v, key) {
+  ok(x) => __r2o_str(value.as_string(x)),
   err(_) => none,
 }
 
-fn json_get_bool(j: Value, key: String) -> Bool? = match value.field(j, key) {
-  ok(v) => __r2o_bool(value.as_bool(v)),
+@implements("value.get_int")
+fn value_get_int(v: Value, key: String) -> Int? = match value.__field(v, key) {
+  ok(x) => __r2o_int(value.as_int(x)),
   err(_) => none,
 }
 
-fn json_get_array(j: Value, key: String) -> List[Value]? = match value.field(j, key) {
-  ok(v) => __r2o_arr(value.as_array(v)),
+@implements("value.get_float")
+fn value_get_float(v: Value, key: String) -> Float? = match value.__field(v, key) {
+  ok(x) => __r2o_float(value.as_float(x)),
+  err(_) => none,
+}
+
+@implements("value.get_bool")
+fn value_get_bool(v: Value, key: String) -> Bool? = match value.__field(v, key) {
+  ok(x) => __r2o_bool(value.as_bool(x)),
+  err(_) => none,
+}
+
+@implements("value.get_array")
+fn value_get_array(v: Value, key: String) -> List[Value]? = match value.__field(v, key) {
+  ok(x) => __r2o_arr(value.as_array(x)),
+  err(_) => none,
+}
+
+@implements("value.get_object")
+fn value_get_object(v: Value, key: String) -> List[(String, Value)]? = match value.__field(v, key) {
+  ok(x) => __r2o_obj(value.as_object(x)),
   err(_) => none,
 }
 "#;
@@ -15718,7 +13516,7 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
     if b == 34 then match __jp_string(base, len, q) {
       ok(r) => {
         let (s, np) = r
-        ok((value.str(s), np))
+        ok((value.string(s), np))
       },
       err(e) => err(e),
     } else if (b == 123 or b == 91) and depth >= __json_max_depth() then err(__json_depth_error())
@@ -15746,7 +13544,7 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
     else {
       let (cp, _l) = __jp_cp(base, q)
       let cpos = __jp_charpos(base, q, 0, 0)
-      err("unexpected char '" + string.__err_text(string.from_codepoint(cp)) + "' at pos " + int.to_string(cpos))
+      err("unexpected char '" + string.__err_text(string.from_codepoint(cp) ?? "") + "' at pos " + int.to_string(cpos))
     }
   }
 }
@@ -16091,7 +13889,7 @@ fn __jp_object(base: Int, len: Int, p0: Int, acc0: List[(String, Value)], depth:
           if map.contains(seen, k) then {
             error = __jp_at("json: duplicate key", base, p)
           } else {
-            map.insert(seen, k, 0)
+            seen = map.set(seen, k, 0)
             let c = __jp_ws(base, len, kp)
             if c >= len then {
               error = "unexpected end of input"
@@ -16139,31 +13937,17 @@ pub const SRC_JSON_PATH: &str = r#"
 
 
 
-
-
-
-
-
-fn json_path_root() -> List[String] = []
-
-fn json_path_field(path: List[String], name: String) -> List[String] = {
-  let seg = "f" + name
-  path + [seg]
-}
-
 fn json_path_index(path: List[String], i: Int) -> List[String] = {
   let seg = "i" + int.to_string(i)
   path + [seg]
 }
-
-fn json_path_get(j: Value, path: List[String]) -> Value? = json_path_get_go(j, path, 0)
 
 fn json_path_get_go(j: Value, path: List[String], k: Int) -> Value? =
   if k >= list.len(path) then some(j)
   else {
     let seg = list.get(path, k) ?? ""
     let rest = string.drop(seg, 1)
-    if string.take(seg, 1) == "f" then match value.field(j, rest) {
+    if string.take(seg, 1) == "f" then match value.__field(j, rest) {
       ok(v) => json_path_get_go(v, path, k + 1),
       err(_) => none,
     } else match int.parse(rest) {
@@ -16174,16 +13958,45 @@ fn json_path_get_go(j: Value, path: List[String], k: Int) -> Value? =
 
 fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Value? = match value.as_array(j) {
   ok(xs) => {
-    let n = list.len(xs)
-    let idx = if i < 0 then n + i else i
-    if idx < 0 then none
-    else match list.get(xs, idx) {
+    match list.get(xs, i) {
       some(v) => json_path_get_go(v, path, k + 1),
       none => none,
     }
   },
   err(_) => none,
 }
+
+
+
+
+
+
+@implements("value.root")
+fn value_path_root() -> List[String] = []
+
+@implements("value.key")
+fn value_path_key(p: List[String], name: String) -> List[String] = {
+  let seg = "f" + name
+  p + [seg]
+}
+
+@implements("value.index")
+fn value_path_index(p: List[String], i: Int) -> List[String] =
+  if i < 0 then json_path_index(p, 9223372036854775807)
+  else json_path_index(p, i)
+
+@implements("value.get_path")
+fn value_get_path(v: Value, p: List[String]) -> Value? = json_path_get_go(v, p, 0)
+
+@implements("value.set_path")
+fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = {
+  let steps = list.len(p)
+  if steps > __jpath_max_depth() or __json_nests_past(x, __jpath_max_depth() - steps) then err(__jpath_depth_error())
+  else ok(json_path_set_go(v, p, 0, x))
+}
+
+@implements("value.remove_path")
+fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p, 0)
 
 
 
@@ -16226,12 +14039,6 @@ else {
 
 
 fn __jpath_max_depth() -> Int = 1000
-
-fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = {
-  let steps = list.len(path)
-  if steps > __jpath_max_depth() or __json_nests_past(nv, __jpath_max_depth() - steps) then err(__jpath_depth_error())
-  else ok(json_path_set_go(j, path, 0, nv))
-}
 
 
 fn __jpath_depth_error() -> String = "json: nesting deeper than 1000"
@@ -16295,8 +14102,7 @@ fn __jps_pairs(j: Value, path: List[String], k: Int, key: String, nv: Value, i: 
 fn json_path_set_index(j: Value, path: List[String], k: Int, i: Int, nv: Value) -> Value =
   if prim.load32(prim.handle(j) + 4) == 5 then {
     let n = prim.load32(prim.handle(j) + 8)
-    let idx = if i < 0 then n + i else i
-    if idx >= 0 and idx < n then value.array(__jps_items(j, path, k, nv, idx, 0, n, []))
+    if i < n then value.array(__jps_items(j, path, k, nv, i, 0, n, []))
     else j
   } else j
 
@@ -16309,8 +14115,6 @@ fn __jps_items(j: Value, path: List[String], k: Int, nv: Value, tgt: Int, i: Int
       __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [sv])
     } else __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [ev])
   }
-
-fn json_path_remove(j: Value, path: List[String]) -> Value = json_path_rm_go(j, path, 0)
 
 fn json_path_rm_go(j: Value, path: List[String], k: Int) -> Value =
   if k >= list.len(path) then value.null()
@@ -16346,8 +14150,7 @@ fn __jpr_pairs(j: Value, path: List[String], k: Int, key: String, last: Bool, i:
 fn json_path_rm_index(j: Value, path: List[String], k: Int, i: Int, last: Bool) -> Value =
   if prim.load32(prim.handle(j) + 4) == 5 then {
     let n = prim.load32(prim.handle(j) + 8)
-    let idx = if i < 0 then n + i else i
-    if idx >= 0 and idx < n then value.array(__jpr_items(j, path, k, idx, last, 0, n, []))
+    if i < n then value.array(__jpr_items(j, path, k, i, last, 0, n, []))
     else j
   } else j
 
@@ -16369,43 +14172,12 @@ fn __jpr_items(j: Value, path: List[String], k: Int, tgt: Int, last: Bool, i: In
 
 
 
-
-
-
-
-
-@implements("json.to_map")
-fn json_to_map(j: Value) -> Map[String, String]? =
-  if prim.load32(prim.handle(j) + 4) == 6 then some(__tomap_fold(
-    j,
-    0,
-    prim.load32(prim.handle(j) + 8) / 2,
-    map.new(),
-  ))
-  else none
-
-fn __tomap_fold(v: Value, i: Int, n: Int, acc: Map[String, String]) -> Map[String, String] =
-  if i >= n then acc
-  else {
-    let h = prim.handle(v)
-    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
-    let x: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
-    __tomap_fold(v, i + 1, n, map.set(acc, k, __tomap_text(x)))
-  }
-
-fn __tomap_text(x: Value) -> String =
-  if prim.load32(prim.handle(x) + 4) == 4 then prim.load_str(prim.handle(x) + 12)
-  else value.stringify(x)
-
-
-
-fn __jp_seg_repr(seg: String) -> String = match string.take(seg, 1) {
-  "i" => "[" + string.drop(seg, 1) + "]",
-  _ => "." + string.drop(seg, 1),
-}
-
-@implements("json.__json_path_repr")
-fn json_path_repr(path: List[String]) -> String = "$" + (path |> list.map((s) => __jp_seg_repr(s)) |> list.join(""))
+@implements("value.__set_path_steps")
+fn value_set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = value.__set_path_pure(
+  v,
+  steps,
+  x,
+)
 "#;
 pub const SRC_LIST: &str = r#"
 
@@ -16432,14 +14204,10 @@ fn length[A](xs: List[A]) -> Int = _
 @intrinsic("almide_rt_list_get")
 fn get[A](xs: List[A], i: Int) -> A? = _
 
-/// Element at i, or default when out of range.
-@intrinsic("almide_rt_list_get_or")
-fn get_or[A](xs: List[A], i: Int, default: A) -> A = _
-
-/// Copy with slot i = val; no-op if i out of range.
+/// Copy with slot i = x; no-op if i out of range.
 @intrinsic("almide_rt_list_set")
 @reuse(xs)
-fn set[A](xs: List[A], i: Int, val: A) -> List[A] = _
+fn set[A](xs: List[A], i: Int, x: A) -> List[A] = _
 
 /// Copy with i and j swapped; no-op if either OOB.
 @intrinsic("almide_rt_list_swap")
@@ -16475,7 +14243,7 @@ fn zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)] = _
 
 /// Inner lists concatenated in order.
 @intrinsic("almide_rt_list_flatten")
-fn flatten[T](xss: List[List[T]]) -> List[T] = _
+fn flatten[A](xs: List[List[A]]) -> List[A] = _
 
 
 
@@ -16491,9 +14259,6 @@ fn take[A](xs: List[A], n: Int) -> List[A] = _
 @intrinsic("almide_rt_list_drop")
 @reuse(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
-
-/// All but the first element; [] when empty.
-fn tail[A](xs: List[A]) -> List[A] = list.drop(xs, 1)
 
 /// Duplicates removed; first occurrences kept.
 @intrinsic("almide_rt_list_unique")
@@ -16659,28 +14424,24 @@ fn range(start: Int, end: Int) -> List[Int] = _
 @reuse(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
-/// Copy with val at i; i >= len or i < 0 appends.
+/// Copy with x at i; i >= len or i < 0 appends.
 @intrinsic("almide_rt_list_insert")
 @consume(xs)
-fn insert[A](xs: List[A], i: Int, val: A) -> List[A] = _
+fn insert[A](xs: List[A], i: Int, x: A) -> List[A] = _
 
 /// Copy without slot i; no-op if i out of range.
 @intrinsic("almide_rt_list_remove_at")
 @consume(xs)
 fn remove_at[A](xs: List[A], i: Int) -> List[A] = _
 
-/// n copies of val; [] for n <= 0.
+/// n copies of x; [] for n <= 0.
 @intrinsic("almide_rt_list_repeat")
-fn repeat[A](val: A, n: Int) -> List[A] = _
+fn repeat[A](x: A, n: Int) -> List[A] = _
 
 /// sep between adjacent elements.
 @intrinsic("almide_rt_list_intersperse")
 @consume(xs)
 fn intersperse[A](xs: List[A], sep: A) -> List[A] = _
-
-/// All n-long runs; [] if n > len; n <= 0 aborts.
-@intrinsic("almide_rt_list_windows")
-fn windows[A](xs: List[A], n: Int) -> List[List[A]] = _
 
 /// Adjacent equal runs collapsed; not global.
 @intrinsic("almide_rt_list_dedup")
@@ -16696,18 +14457,12 @@ fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 @reuse(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
 
-/// Random permutation; unseeded, differs per run.
-@intrinsic("almide_rt_list_shuffle")
-@consume(xs)
-fn shuffle[A](xs: List[A]) -> List[A] = _
-
 /// All n-long runs; [] if n > len; n <= 0 aborts.
 @intrinsic("almide_rt_list_window")
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
-/// Index of target in ascending xs, or none.
-@intrinsic("almide_rt_list_binary_search")
-fn binary_search(xs: List[Int], target: Int) -> Int? = _
+/// Index of target in xs sorted ascending (list.sort's order), or none.
+fn binary_search[A](xs: List[A], target: A) -> Int? = list.binary_search_by(xs, target, (x) => x)
 
 
 /// Appends x to xs in place.
@@ -16732,13 +14487,8 @@ fn clear[A](mut xs: List[A]) -> Unit = _
 
 
 
-/// n + 1; bundled-dispatch smoke fn.
-fn bundled_probe(n: Int) -> Int = n + 1
-
-
-
 /// (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
-fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), list.drop(xs, n))
+fn split_at[A](xs: List[A], n: Int) -> (List[A], List[A]) = (list.take(xs, n), list.drop(xs, n))
 
 
 
@@ -16755,8 +14505,8 @@ fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), l
 
 
 /// [seed, f(seed), ...] of length n; [] if n <= 0.
-fn iterate[T](seed: T, f: (T) -> T, n: Int) -> List[T] = {
-  var out: List[T] = []
+fn iterate[A](seed: A, f: (A) -> A, n: Int) -> List[A] = {
+  var out: List[A] = []
   var x = seed
   for _ in 0..<n {
     list.push(out, x)
@@ -17765,7 +15515,6 @@ fn list_chunk(xs: List[Int], n: Int) -> List[List[Int]] = {
 
 
 
-
 fn __win_outer(oh: Int, sh: Int, n: Int, num: Int, wi: Int) -> Int = if wi >= num then 0
 else {
   let w = __chunk_one(sh, wi, n)
@@ -17786,8 +15535,6 @@ fn __do_windows(xs: List[Int], n: Int) -> List[List[Int]] = {
   let _x = __win_outer(prim.handle(outer), sh, n, num, 0)
   outer
 }
-
-fn list_windows(xs: List[Int], n: Int) -> List[List[Int]] = __do_windows(xs, n)
 
 fn list_window(xs: List[Int], n: Int) -> List[List[Int]] = __do_windows(xs, n)
 
@@ -17861,8 +15608,6 @@ fn __do_windows_str(xs: List[String], n: Int) -> List[List[String]] = {
   let _x = __win_outer_str(prim.handle(outer), sh, n, num, 0)
   outer
 }
-
-fn list_windows_str(xs: List[String], n: Int) -> List[List[String]] = __do_windows_str(xs, n)
 
 fn list_window_str(xs: List[String], n: Int) -> List[List[String]] = __do_windows_str(xs, n)
 "#;
@@ -18770,47 +16515,6 @@ fn list_last(xs: List[Int]) -> Int? = {
   if len <= 0 then __opt_none_int() else __opt_some_at(h, len - 1)
 }
 "#;
-pub const SRC_LIST_GET_OR: &str = r#"
-
-
-
-
-fn list_get_or(xs: List[Int], i: Int, default: Int) -> Int = {
-  let h = prim.handle(xs)
-  let len = prim.load32(h + 4)
-
-
-  if i < 0 then default
-  else if i >= len then default else prim.load64(h + 12 + i * 8)
-}
-"#;
-pub const SRC_LIST_GET_OR_STR: &str = r#"
-
-
-
-
-
-
-
-
-
-fn __gos_copy(s: String) -> String = string.repeat(s, 1)
-
-
-fn __gos_elem(h: Int, i: Int) -> String = {
-  let x = prim.load_str(h + 12 + i * 8)
-  __gos_copy(x)
-}
-
-fn list_get_or_str(xs: List[String], i: Int, default: String) -> String = {
-  let h = prim.handle(xs)
-  let len = prim.load32(h + 4)
-  let ge0 = if i >= 0 then 1 else 0
-  let lt_len = if i < len then 1 else 0
-  let in_bounds = ge0 * lt_len
-  if in_bounds == 1 then __gos_elem(h, i) else __gos_copy(default)
-}
-"#;
 pub const SRC_LIST_GET_STR: &str = r#"
 
 
@@ -19031,15 +16735,6 @@ fn list_drop_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   let _c = __lsh_copy(h + 12, prim.handle(buf) + 12, endi, 0)
   buf
 }
-
-fn list_tail_heapelem(xs: List[Value]) -> List[Value] = {
-  let h = prim.handle(xs)
-  let n = prim.load32(h + 4)
-  let newlen = if n > 0 then n - 1 else 0
-  let buf: List[Value] = prim.alloc_list_str(newlen)
-  let _c = __lsh_copy(h + 12 + 8, prim.handle(buf) + 12, newlen, 0)
-  buf
-}
 "#;
 pub const SRC_LIST_HSHARE: &str = r#"
 
@@ -19051,13 +16746,6 @@ import prim
 fn __hshare_elem(h: Int, i: Int) -> List[Int] = {
   let v: List[Int] = prim.load_handle(h + 12 + i * 8)
   v
-}
-
-fn list_get_or_hshare(xs: List[List[Int]], i: Int, default: List[Int]) -> List[Int] = {
-  let h = prim.handle(xs)
-  let len = prim.load32(h + 4)
-  if i < 0 then default
-  else if i >= len then default else __hshare_elem(h, i)
 }
 
 fn __take_h_fill(dh: Int, sh: Int, n: Int, i: Int) -> Int = if i >= n then 0
@@ -19744,19 +17432,6 @@ fn list_remove_at(xs: List[Int], i: Int) -> List[Int] = {
 
 
 
-fn list_tail(xs: List[Int]) -> List[Int] = {
-  let h = prim.handle(xs)
-  let n = prim.load32(h + 4)
-  let newlen = if n > 0 then n - 1 else 0
-  let buf = prim.alloc_list(newlen)
-  let bh = prim.handle(buf)
-  let src1 = h + 12 + 8
-  let _c = __copy_slots(src1, bh + 12, newlen, 0)
-  buf
-}
-
-
-
 fn list_take_end(xs: List[Int], n: Int) -> List[Int] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
@@ -19808,17 +17483,6 @@ fn list_take_end_str(xs: List[String], n: Int) -> List[String] = {
   let cnt = len - start
   let buf = prim.alloc_list_str(cnt)
   let _c = __copy_slots_rc(h + 12 + start * 8, prim.handle(buf) + 12, cnt, 0)
-  buf
-}
-
-
-
-fn list_tail_str(xs: List[String]) -> List[String] = {
-  let h = prim.handle(xs)
-  let n = prim.load32(h + 4)
-  let newlen = if n > 0 then n - 1 else 0
-  let buf = prim.alloc_list_str(newlen)
-  let _c = __copy_slots_rc(h + 12 + 8, prim.handle(buf) + 12, newlen, 0)
   buf
 }
 
@@ -20605,38 +18269,6 @@ fn list_index_of(xs: List[Int], x: Int) -> Int? = {
   let len = prim.load32(h + 4)
   let idx = __idx_find(h, len, x, 0)
   if idx < 0 then __lio_none() else __lio_some(idx)
-}
-
-
-
-
-
-
-
-
-
-
-
-
-fn __bsearch(h: Int, target: Int, base: Int, size: Int) -> Int = if size > 1 then {
-  let half = size / 2
-  let mid = base + half
-  let e = prim.load64(h + 12 + mid * 8)
-  let nb = if e > target then base else mid
-  __bsearch(h, target, nb, size - half)
-} else {
-  let e = prim.load64(h + 12 + base * 8)
-  if e == target then base else -1
-}
-
-fn list_binary_search(xs: List[Int], target: Int) -> Int? = {
-  let h = prim.handle(xs)
-  let len = prim.load32(h + 4)
-  if len == 0 then __lio_none()
-  else {
-    let idx = __bsearch(h, target, 0, len)
-    if idx < 0 then __lio_none() else __lio_some(idx)
-  }
 }
 "#;
 pub const SRC_LIST_SORT: &str = r#"
@@ -22509,11 +20141,6 @@ fn new[K, V]() -> Map[K, V] = _
 @borrow_ref(key)
 fn get[K, V](m: Map[K, V], key: K) -> V? = _
 
-/// Value for key, or default when absent.
-@intrinsic("almide_rt_map_get_or")
-@borrow_ref(key)
-fn get_or[K, V](m: Map[K, V], key: K, default: V) -> V = _
-
 /// Copy with key -> value; an existing key is overwritten and keeps its position.
 @intrinsic("almide_rt_map_set")
 @reuse(m)
@@ -22547,7 +20174,7 @@ fn len[K, V](m: Map[K, V]) -> Int = _
 /// (key, value) pairs in insertion order.
 @intrinsic("almide_rt_map_entries")
 @reuse(m)
-fn entries[K, V](m: Map[K, V]) -> List[(K, V)] = _
+fn to_list[K, V](m: Map[K, V]) -> List[(K, V)] = _
 
 /// a plus b's entries; b wins on shared keys.
 @intrinsic("almide_rt_map_merge")
@@ -22559,10 +20186,10 @@ fn merge[K, V](a: Map[K, V], b: Map[K, V]) -> Map[K, V] = _
 fn is_empty[K, V](m: Map[K, V]) -> Bool = _
 
 
-/// Map of pairs; a repeated key takes the last value.
+/// Map of the pairs xs; a repeated key takes the last value.
 @intrinsic("almide_rt_map_from_entries")
-@consume(pairs)
-fn from_list[K, V](pairs: List[(K, V)]) -> Map[K, V] = _
+@consume(xs)
+fn from_list[K, V](xs: List[(K, V)]) -> Map[K, V] = _
 
 
 /// Same keys and order, values replaced by f(v).
@@ -22609,14 +20236,6 @@ fn update[K, V](m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V] = _
 fn upsert[K, V](m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V] = _
 
 
-/// In-place key -> value; an existing key is overwritten and keeps its position.
-@intrinsic("almide_rt_map_insert")
-fn insert[K, V](mut m: Map[K, V], key: K, value: V) -> Unit = _
-
-/// Removes key in place; no-op when absent.
-@intrinsic("almide_rt_map_delete")
-fn delete[K, V](mut m: Map[K, V], key: K) -> Unit = _
-
 /// Removes every entry of m in place.
 @intrinsic("almide_rt_map_clear")
 fn clear[K, V](mut m: Map[K, V]) -> Unit = _
@@ -22627,79 +20246,79 @@ fn clear[K, V](mut m: Map[K, V]) -> Unit = _
 
 
 /// (index, (key, value)) pairs in insertion order, index from 0.
-fn enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))] = list.enumerate(map.entries(m))
+fn enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))] = list.enumerate(map.to_list(m))
 
 /// Entries paired with ys by position; stops at the shorter.
-fn zip[K, V, B](m: Map[K, V], ys: List[B]) -> List[((K, V), B)] = list.zip(map.entries(m), ys)
+fn zip[K, V, B](m: Map[K, V], ys: List[B]) -> List[((K, V), B)] = list.zip(map.to_list(m), ys)
 
 /// f over (entry, ys element) pairs; stops at the shorter.
 fn zip_with[K, V, B, C](m: Map[K, V], ys: List[B], f: ((K, V), B) -> C) -> List[C] = list.zip_with(
-  map.entries(m),
+  map.to_list(m),
   ys,
   f,
 )
 
 /// The somes f gives over the entries, in insertion order.
 fn filter_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> List[B] = list.filter_map(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// The first some f gives over the entries, or none; f is not called after the hit.
-fn find_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> B? = list.find_map(map.entries(m), f)
+fn find_map[K, V, B](m: Map[K, V], f: ((K, V)) -> B?) -> B? = list.find_map(map.to_list(m), f)
 
 /// Left fold of the entries seeded by the first; none when empty.
 fn reduce[K, V](m: Map[K, V], f: ((K, V), (K, V)) -> (K, V)) -> (K, V)? = list.reduce(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// Running fold values over the entries, init excluded.
 fn scan[K, V, B](m: Map[K, V], init: B, f: (B, (K, V)) -> B) -> List[B] = list.scan(
-  map.entries(m),
+  map.to_list(m),
   init,
   f,
 )
 
 /// (entries where f holds, the rest), insertion order kept.
 fn partition[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> (List[(K, V)], List[(K, V)]) = list.partition(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// Key f(entry) -> entries; keys in first-seen order.
 fn group_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> Map[B, List[(K, V)]] = list.group_by(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// Entries sorted by key f(entry), stable; f runs once per entry.
 fn sort_by[K, V, B](m: Map[K, V], f: ((K, V)) -> B) -> List[(K, V)] = list.sort_by(
-  map.entries(m),
+  map.to_list(m),
   f,
 )
 
 /// Entries sorted by cmp, stable: negative puts a first.
 fn sort_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> List[(K, V)] = list.sort_with(
-  map.entries(m),
+  map.to_list(m),
   cmp,
 )
 
 /// Entry with the least f(entry); the first on ties.
-fn min_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.entries(m), f)
+fn min_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.min_by(map.to_list(m), f)
 
 /// Entry with the greatest f(entry); the first on ties.
-fn max_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.entries(m), f)
+fn max_by[K, V, U](m: Map[K, V], f: ((K, V)) -> U) -> (K, V)? = list.max_by(map.to_list(m), f)
 
 /// Least entry by cmp; the first on ties.
 fn min_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.min_with(
-  map.entries(m),
+  map.to_list(m),
   cmp,
 )
 
 /// Greatest entry by cmp; the first on ties.
 fn max_with[K, V](m: Map[K, V], cmp: ((K, V), (K, V)) -> Int) -> (K, V)? = list.max_with(
-  map.entries(m),
+  map.to_list(m),
   cmp,
 )
 
@@ -22714,7 +20333,7 @@ fn __fallible_map[K, V, B, E](m: Map[K, V], f: (V) -> Result[B, E]) -> Result[Ma
   var out: List[(K, B)] = []
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.1) {
       ok(b) => list.push(out, (p.0, b)),
@@ -22734,7 +20353,7 @@ fn __fallible_filter[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Res
   var out: List[(K, V)] = []
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(keep) => if keep then list.push(out, p) else (),
@@ -22754,7 +20373,7 @@ fn __fallible_fold[K, V, A, E](m: Map[K, V], init: A, f: (A, K, V) -> Result[A, 
   var acc = init
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(acc, p.0, p.1) {
       ok(a) => {
@@ -22776,7 +20395,7 @@ fn __fallible_any[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result
   var hit = false
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(b) => if b then {
@@ -22799,7 +20418,7 @@ fn __fallible_all[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result
   var held = true
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(b) => if b then ()
@@ -22823,7 +20442,7 @@ fn __fallible_count[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Resu
   var n = 0
   var failed: E? = none
   var stop = false
-  for p in map.entries(m) {
+  for p in map.to_list(m) {
     if stop then ()
     else match f(p.0, p.1) {
       ok(b) => if b then {
@@ -22844,7 +20463,7 @@ fn __fallible_count[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Resu
 
 
 fn __fallible_find[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[(K, V)?, E] = {
-  let es = map.entries(m)
+  let es = map.to_list(m)
   var hit_at = list.len(es)
   var i = 0
   var failed: E? = none
@@ -22900,69 +20519,69 @@ fn __fallible_upsert[K, V, E](m: Map[K, V], key: K, init: V, f: (V) -> Result[V,
 
 
 fn __fallible_zip_with[K, V, B, C, E](m: Map[K, V], ys: List[B], f: ((K, V), B) -> Result[C, E]) -> Result[List[C], E] = list.zip_with(
-  map.entries(m),
+  map.to_list(m),
   ys,
   (p, y) => f(p, y)!,
 )
 
 fn __fallible_filter_map[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B?, E]) -> Result[List[B], E] = list.filter_map(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_find_map[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B?, E]) -> Result[B?, E] = list.find_map(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_reduce[K, V, E](m: Map[K, V], f: ((K, V), (K, V)) -> Result[(K, V), E]) -> Result[(K, V)?, E] = list.reduce(
-  map.entries(m),
+  map.to_list(m),
   (a, b) => f(a, b)!,
 )
 
 fn __fallible_scan[K, V, B, E](m: Map[K, V], init: B, f: (B, (K, V)) -> Result[B, E]) -> Result[List[B], E] = list.scan(
-  map.entries(m),
+  map.to_list(m),
   init,
   (acc, p) => f(acc, p)!,
 )
 
 fn __fallible_partition[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -> Result[(List[(K, V)], List[(K, V)]), E] = list.partition(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_group_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E] = list.group_by(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_sort_by[K, V, B, E](m: Map[K, V], f: ((K, V)) -> Result[B, E]) -> Result[List[(K, V)], E] = list.sort_by(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_sort_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[List[(K, V)], E] = list.sort_with(
-  map.entries(m),
+  map.to_list(m),
   (a, b) => cmp(a, b)!,
 )
 
 fn __fallible_min_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.min_by(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_max_by[K, V, U, E](m: Map[K, V], f: ((K, V)) -> Result[U, E]) -> Result[(K, V)?, E] = list.max_by(
-  map.entries(m),
+  map.to_list(m),
   (p) => f(p)!,
 )
 
 fn __fallible_min_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[(K, V)?, E] = list.min_with(
-  map.entries(m),
+  map.to_list(m),
   (a, b) => cmp(a, b)!,
 )
 
 fn __fallible_max_with[K, V, E](m: Map[K, V], cmp: ((K, V), (K, V)) -> Result[Int, E]) -> Result[(K, V)?, E] = list.max_with(
-  map.entries(m),
+  map.to_list(m),
   (a, b) => cmp(a, b)!,
 )
 "#;
@@ -23148,14 +20767,6 @@ fn map_contains(m: Map[Int, Int], k: Int) -> Bool = {
   let cap = prim.load32(h + 8)
   let idx = __map_lookup(h, len, cap, k)
   idx >= 0
-}
-
-fn map_get_or(m: Map[Int, Int], k: Int, default: Int) -> Int = {
-  let h = prim.handle(m)
-  let len = prim.load32(h + 4)
-  let cap = prim.load32(h + 8)
-  let idx = __map_lookup(h, len, cap, k)
-  if idx < 0 then default else prim.load64(h + 12 + idx * 16 + 8)
 }
 
 
@@ -24013,14 +21624,6 @@ fn __hvl_elem(h: Int, n: Int, idx: Int) -> List[Int] = {
   v
 }
 
-fn map_get_or_hval(m: Map[String, List[Int]], k: String, default: List[Int]) -> List[Int] = {
-  let h = prim.handle(m)
-  let n = prim.load32(h + 4)
-  let idx = __hvl_find(h, n, k, 0)
-  if idx < 0 then default
-  else __hvl_elem(h, n, idx)
-}
-
 
 
 
@@ -24616,14 +22219,6 @@ fn __msv_elem(h: Int, n: Int, idx: Int) -> Map[String, String] = {
   v
 }
 
-fn map_get_or_msv(m: Map[String, Map[String, String]], k: String, default: Map[String, String]) -> Map[String, String] = {
-  let h = prim.handle(m)
-  let n = prim.load32(h + 4)
-  let idx = __msv_find(h, n, k, 0)
-  if idx < 0 then default
-  else __msv_elem(h, n, idx)
-}
-
 
 
 fn __drop_msv_inner_slots(ih: Int, m2: Int, j: Int) -> Unit = if j >= m2 then ()
@@ -24818,13 +22413,6 @@ fn map_contains_skv(m: Map[String, Int], k: String) -> Bool = {
   let entries = prim.load32(h + 4)
   let idx = __skv_find(h, entries, k, 0)
   idx >= 0
-}
-
-fn map_get_or_skv(m: Map[String, Int], k: String, default: Int) -> Int = {
-  let h = prim.handle(m)
-  let entries = prim.load32(h + 4)
-  let idx = __skv_find(h, entries, k, 0)
-  if idx < 0 then default else prim.load64(h + 12 + (entries + idx) * 8)
 }
 
 
@@ -25375,14 +22963,6 @@ fn map_get_str(m: Map[String, String], k: String) -> String? = {
 fn __mgetor_str_hit(h: Int, idx: Int) -> String = {
   let v = prim.load_str(h + 12 + idx * 16 + 8)
   string.repeat(v, 1)
-}
-
-fn map_get_or_str(m: Map[String, String], k: String, default: String) -> String = {
-  let h = prim.handle(m)
-  let n = prim.load32(h + 4)
-  let entries = n / 2
-  let idx = __mstr_find(h, entries, k, 0)
-  if idx < 0 then default else __mgetor_str_hit(h, idx)
 }
 
 
@@ -26284,21 +23864,7 @@ fn set_insert_srec(s: Set[String], x: Value) -> Set[String] = set.insert(s, __sr
 
 fn set_contains_srec(s: Set[String], x: Value) -> Bool = set.contains(s, __srec_key(x))
 "#;
-pub const SRC_MATH: &str = r#"
-
-
-
-
-
-
-
-
-
-/// Magnitude of n; min_value wraps to itself.
-@intrinsic("almide_rt_math_abs")
-fn abs(n: Int) -> Int = _
-
-/// Arctangent in radians, within -pi/2..pi/2.
+pub const SRC_MATH: &str = r#"/// Arctangent in radians, within -pi/2..pi/2.
 @intrinsic("almide_rt_math_atan")
 fn atan(x: Float) -> Float = _
 
@@ -26324,17 +23890,9 @@ fn exp(x: Float) -> Float = _
 @intrinsic("almide_rt_math_factorial")
 fn factorial(n: Int) -> Int = _
 
-/// Greater; a NaN operand is ignored; 0.0 > -0.0.
-@intrinsic("almide_rt_math_fmax")
-fn fmax(a: Float, b: Float) -> Float = _
-
-/// Lesser; a NaN operand is ignored; -0.0 < 0.0.
-@intrinsic("almide_rt_math_fmin")
-fn fmin(a: Float, b: Float) -> Float = _
-
 /// base to the exp; NaN for negative base, fractional exp.
 @intrinsic("almide_rt_math_fpow")
-fn fpow(base: Float, exp: Float) -> Float = _
+fn __fpow(base: Float, exp: Float) -> Float = _
 
 /// Natural log; -inf at 0, NaN for negative x.
 @intrinsic("almide_rt_math_log")
@@ -26354,25 +23912,17 @@ fn log2(x: Float) -> Float = _
 @intrinsic("almide_rt_math_log_gamma")
 fn log_gamma(x: Float) -> Float = _
 
-/// Greater of a and b.
-@intrinsic("almide_rt_math_max")
-fn max(a: Int, b: Int) -> Int = _
-
-/// Lesser of a and b.
-@intrinsic("almide_rt_math_min")
-fn min(a: Int, b: Int) -> Int = _
-
 /// The circle constant, 3.141592653589793.
 @intrinsic("almide_rt_math_pi")
 fn pi() -> Float = _
 
 /// base to the exp, wrapping; negative exp aborts.
 @intrinsic("almide_rt_math_pow")
-fn pow(base: Int, exp: Int) -> Int = _
+fn __pow(base: Int, exp: Int) -> Int = _
 
 /// -1, 0 or 1 by the sign of n.
 @intrinsic("almide_rt_math_sign")
-fn sign(n: Int) -> Int = _
+fn __sign(n: Int) -> Int = _
 
 /// Sine of x radians; NaN for infinite x.
 @intrinsic("almide_rt_math_sin")
@@ -26399,7 +23949,7 @@ fn tanh(x: Float) -> Float = _
 
 local fn m_bits(x: Float) -> Int = float.to_bits(x)
 
-local fn m_from(b: Int) -> Float = int.bits_to_float(b)
+local fn m_from(b: Int) -> Float = int.__bits_to_float(b)
 
 
 local fn m_hi(x: Float) -> Int = int.band(int.bshr(m_bits(x), 32), 4294967295)
@@ -26542,12 +24092,12 @@ fn expm1(x: Float) -> Float = {
     let k = if not reduce then 0
     else if near then {
       if sgn == 0 then 1 else -1
-    } else float.to_int(1.44269504088896338700e+00 * x + (if sgn != 0 then -0.5 else 0.5))
+    } else float.__to_int(1.44269504088896338700e+00 * x + (if sgn != 0 then -0.5 else 0.5))
     let hl = if not reduce then (x, 0.0)
     else if near then {
       if sgn == 0 then (x - ln2_hi, ln2_lo) else (x + ln2_hi, -ln2_lo)
     } else {
-      let t = float.from_int(k)
+      let t = float.__from_int(k)
       (x - t * ln2_hi, t * ln2_lo)
     }
     let x1 = if reduce then hl.0 - hl.1
@@ -26612,7 +24162,7 @@ local fn m_log1p(x: Float) -> Float = {
     let t1 = w * (3.999999999940941908e-01 + w * (2.222219843214978396e-01 + w * 1.531383769920937332e-01))
     let t2 = z * (6.666666666666735130e-01 + w * (2.857142874366239149e-01 + w * (1.818357216161805012e-01 + w * 1.479819860511658591e-01)))
     let r = t2 + t1
-    let dk = float.from_int(parts.0)
+    let dk = float.__from_int(parts.0)
     s * (hfsq + r) + (dk * ln2_lo + parts.1) - hfsq + f + dk * ln2_hi
   }
 }
@@ -26913,43 +24463,6 @@ pub const SRC_MATH_FLOAT: &str = r#"
 
 
 fn math_sqrt(x: Float) -> Float = if prim.flt(x, 0.0) then prim.ffrombits(0x7FF8000000000000) else prim.fsqrt(x)
-
-
-
-
-fn math_fmin(a: Float, b: Float) -> Float = {
-  let anan = prim.fne(a, a)
-  if anan then b
-  else {
-    let bnan = prim.fne(b, b)
-    if bnan then a
-    else {
-      let agtb = prim.fgt(a, b)
-      if agtb then b
-      else {
-        let bgta = prim.fgt(b, a)
-        if bgta then a else prim.ffrombits(prim.bor(prim.fbits(a), prim.fbits(b)))
-      }
-    }
-  }
-}
-
-fn math_fmax(a: Float, b: Float) -> Float = {
-  let anan = prim.fne(a, a)
-  if anan then b
-  else {
-    let bnan = prim.fne(b, b)
-    if bnan then a
-    else {
-      let altb = prim.flt(a, b)
-      if altb then b
-      else {
-        let blta = prim.flt(b, a)
-        if blta then a else prim.ffrombits(prim.band(prim.fbits(a), prim.fbits(b)))
-      }
-    }
-  }
-}
 
 
 
@@ -27354,16 +24867,7 @@ fn math_fpow(base: Float, exp: Float) -> Float = {
   else __fpow_dispatch(base, exp, hx, lx, hy, ly, ix, iy)
 }
 "#;
-pub const SRC_MATH_INT: &str = r#"
-
-
-fn math_abs(n: Int) -> Int = if n < 0 then 0 - n else n
-
-fn math_max(a: Int, b: Int) -> Int = if a > b then a else b
-
-fn math_min(a: Int, b: Int) -> Int = if a < b then a else b
-
-fn math_sign(n: Int) -> Int = if n > 0 then 1
+pub const SRC_MATH_INT: &str = r#"fn math_sign(n: Int) -> Int = if n > 0 then 1
 else if n < 0 then 0 - 1 else 0
 
 
@@ -27436,12 +24940,120 @@ fn __choose_loop(n: Int, k: Int, i: Int, num: Int, den: Int, twos: Int) -> Int =
   }
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+fn __choose_block(s: Int, y: Int) -> Int = match s {
+  1 => 1 + y * 2,
+  2 => 3 + y * (16 + y * 16),
+  3 => 105 + y * (1408 + y * (5504 + y * (8192 + y * 4096))),
+  4 => 2027025 + y * (65571840 + y * (748588032 + y * (4251713536 + y * (13635026944 + y * (25836912640 + y * (28655484928 + y * (17179869184 + y * 4294967296))))))),
+  5 => 191898783962510625 + y * (-3904619229925974016 + y * (7048248523113521152 + y * (6506726038364487680 + y * (6914499455618121728 + y * (-1600528917293170688 + y * (132186010900496384 + y * (7387759364515299328 + y * (5427301544888369152 + y * (6998593820933750784 + y * (-8745990476353503232 + y * ((-9223372036854775807 - 1) + y * (-4611686018427387904)))))))))))),
+  6 => 2357173134616391233 + y * (7657803463945027584 + y * (3494150956406472704 + y * (6231373528281645056 + y * (8841743760237789184 + y * (-5219545524285210624 + y * (-3444460967054802944 + y * (6444651066767179776 + y * 6222848785119182848))))))),
+  7 => -5636733533894480767 + y * (837863529390800896 + y * (6437700056657690624 + y * (-8698215261607559168 + y * (669943047668105216 + y * (-6659275736509054976 + y * (-4909908756252327936 + y * (-2305843009213693952 + y * (-576460752303423488)))))))),
+  8 => 976013773578705153 + y * (-851135463862304768 + y * (7865380266846453760 + y * (1454259983506997248 + y * (-2326310555603697664 + y * (7403917787397095424 + y * 2467972595799031808))))),
+  9 => 4414235575625265665 + y * (8396726101933555712 + y * (-2678157545398337536 + y * (-1397180211740540928 + y * (-4157354619690811392 + y * (6917529027641081856 + y * 2305843009213693952))))),
+  10 => 228171713749607425 + y * (3658443071839797248 + y * (1569758007158374400 + y * (-4177370129362845696 + y * (-2088685064681422848)))),
+  11 => 8147960259420145665 + y * (-5500959231139905536 + y * (7212702516927004672 + y * (6980579422424268800 + y * (-5733082325642641408)))),
+  12 => -1781561055693402111 + y * (-3702884905827434496 + y * (-2694078589296443392 + y * (2017612633061982208 + y * 1008806316530991104))),
+  13 => -4254975262804729855 + y * (5358067909027430400 + y * (746381890600042496 + y * ((-9223372036854775807 - 1) + y * (-4611686018427387904)))),
+  14 => -4655786762270523391 + y * (-6179656669845258240 + y * (-6179656669845258240)),
+  15 => 4532345594002046977 + y * (-4040969114867466240 + y * (-4040969114867466240)),
+  16 => -9210330763468668927 + y * (-6963479817589096448 + y * (-6963479817589096448)),
+  17 => 2379654741567340545 + y * (-367606319584116736 + y * (-367606319584116736)),
+  18 => -163048201465364479 + y * (-2940850556672933888 + y * (-2940850556672933888)),
+  19 => -5581490335608471551 + y * (-5080060379673919488 + y * (-5080060379673919488)),
+  20 => -8945982324696154111 + y * (-3746994889972252672 + y * (-3746994889972252672)),
+  21 => -7582819382550593535 + y * (6917529027641081856 + y * 6917529027641081856),
+  22 => 706669200915038209,
+  23 => -8884406028943228927,
+  24 => -3619557559851024383,
+  25 => -5982329348688969727,
+  26 => -6937515613325623295,
+  27 => 6233541109558018049,
+  28 => 667651195405336577,
+  29 => -8968933556613021695,
+  30 => -3814578681792167935,
+  31 => -6476235858977488895,
+  32 => -8340785699527589887,
+  33 => 1765172674654371841,
+  34 => 3530345349308743681,
+  35 => 7060690698617487361,
+  36 => -4325362676474576895,
+  37 => -8650725352949153791,
+  38 => 1145293367811244033,
+  39 => 2290586735622488065,
+  40 => 4581173471244976129,
+  41 => 9162346942489952257,
+  42 => -122050188729647103,
+  43 => -244100377459294207,
+  44 => -488200754918588415,
+  45 => -976401509837176831,
+  46 => -1952803019674353663,
+  47 => -3905606039348707327,
+  48 => -7811212078697414655,
+  49 => 2824319916314722305,
+  50 => 5648639832629444609,
+  51 => -7149464408450662399,
+  52 => 4147815256808226817,
+  53 => 8295630513616453633,
+  54 => -1855483046476644351,
+  55 => -3710966092953288703,
+  56 => -7421932185906577407,
+  57 => 3602879701896396801,
+  58 => 7205759403792793601,
+  59 => -4035225266123964415,
+  60 => -8070450532247928831,
+  61 => 2305843009213693953,
+  62 => 4611686018427387905,
+  63 => -9223372036854775807,
+  _ => 1,
+}
+
+
+
+
+fn __choose_odd_below(nn: Int, s: Int, base: Int, acc: Int) -> Int =
+  if s < 1 then acc
+  else if prim.band(prim.bshr(nn, s), 1) == 1 then __choose_odd_below(
+    nn,
+    s - 1,
+    base + prim.bshl(1, s),
+    acc * __choose_block(s, prim.bshr(base, s)),
+  )
+  else __choose_odd_below(nn, s - 1, base, acc)
+
+
+fn __choose_odd_fact(m: Int, acc: Int) -> Int =
+  if m == 0 then acc
+  else __choose_odd_fact(m / 2, acc * __choose_odd_below(m + 1, 63, 0, 1))
+
+fn __choose_ones(x: Int, c: Int) -> Int = if x == 0 then c else __choose_ones(x / 2, c + x % 2)
+
+fn __choose_odd_factorials(n: Int, k: Int) -> Int = {
+  let t = __choose_ones(k, 0) + __choose_ones(n - k, 0) - __choose_ones(n, 0)
+  let odd = __choose_odd_fact(n, 1) * __choose_inv(__choose_odd_fact(k, 1)) * __choose_inv(__choose_odd_fact(n - k, 1))
+  if t >= 64 then 0 else prim.bshl(odd, t)
+}
+
 fn math_choose(n: Int, k: Int) -> Int = if k < 0 then 0
 else if k > n then 0
 else {
   let nk = n - k
   let k2 = if k < nk then k else nk
-  __choose_loop(n, k2, 0, 1, 1, 0)
+  if k2 > 64 then __choose_odd_factorials(n, k2)
+  else __choose_loop(n, k2, 0, 1, 1, 0)
 }
 "#;
 pub const SRC_MATH_LGAMMA: &str = r#"
@@ -28639,9 +26251,6 @@ pub const SRC_MATRIX: &str = r#"
 
 
 
-
-
-
 /// rows x cols of 0.0; negatives clamp to 0.
 @intrinsic("almide_rt_matrix_zeros")
 fn zeros(rows: Int, cols: Int) -> Matrix = _
@@ -28658,43 +26267,24 @@ fn shape(m: Matrix) -> (Int, Int) = _
 @intrinsic("almide_rt_matrix_transpose")
 fn transpose(m: Matrix) -> Matrix = _
 
-/// Matrix of equal-length rows; [] is 0 x 0.
+/// Matrix of the equal-length rows xs; [] is 0 x 0.
 @intrinsic("almide_rt_matrix_from_lists")
-fn from_lists(rows: List[List[Float]]) -> Matrix = _
-
-
-
-
-/// Rows at row_ids; id < 0 is row 0, past end zeros.
-@intrinsic("almide_rt_matrix_select_rows")
-fn select_rows(m: Matrix, row_ids: List[Int]) -> Matrix = _
+fn from_lists(xs: List[List[Float]]) -> Matrix = _
 
 
 
 /// base rows then extra; empty side gives other.
 @intrinsic("almide_rt_matrix_append_rows")
-fn append_rows(base: Matrix, extra: Matrix) -> Matrix = _
+fn __append_rows(base: Matrix, extra: Matrix) -> Matrix = _
 
-
-
-
-
-/// x times f32 LE W^T.
-@intrinsic("almide_rt_matrix_linear_f32_row_no_bias")
-fn linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = _
-
-
-/// f32 LE rows at row_ids; past-data rows are 0.
-@intrinsic("almide_rt_matrix_select_rows_f32")
-fn select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix = _
 
 /// Rows as lists; r x 0 gives r empty rows.
 @intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
 
-/// Element at (row, col); out of range aborts.
+/// Element at (row, col); none out of range.
 @intrinsic("almide_rt_matrix_get")
-fn get(m: Matrix, row: Int, col: Int) -> Float = _
+fn get(m: Matrix, row: Int, col: Int) -> Float? = _
 
 /// Row count; 0 for an empty matrix.
 @intrinsic("almide_rt_matrix_rows")
@@ -28707,11 +26297,11 @@ fn cols(m: Matrix) -> Int = _
 
 /// Elementwise a + b; shapes truncate to overlap.
 @intrinsic("almide_rt_matrix_add")
-fn add(a: Matrix, b: Matrix) -> Matrix = _
+fn __add(a: Matrix, b: Matrix) -> Matrix = _
 
 /// Matrix product; cols(a) == rows(b) is not checked.
 @intrinsic("almide_rt_matrix_mul")
-fn mul(a: Matrix, b: Matrix) -> Matrix = _
+fn __mul(a: Matrix, b: Matrix) -> Matrix = _
 
 /// Every element times s.
 @intrinsic("almide_rt_matrix_scale")
@@ -28719,36 +26309,32 @@ fn scale(m: Matrix, s: Float) -> Matrix = _
 
 /// a*ka + b*kb in one pass; shapes truncate.
 @intrinsic("almide_rt_matrix_fma")
-fn fma(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix = _
+fn __fma(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix = _
 
 /// a*ka + b*kb + c*kc; shapes truncate.
 @intrinsic("almide_rt_matrix_fma3")
-fn fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix = _
+fn __fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix = _
 
 /// Elementwise a - b; shapes truncate to overlap.
 @intrinsic("almide_rt_matrix_sub")
-fn sub(a: Matrix, b: Matrix) -> Matrix = _
+fn __sub(a: Matrix, b: Matrix) -> Matrix = _
 
 /// Elementwise a / b; x/0.0 is inf or NaN.
 @intrinsic("almide_rt_matrix_div")
-fn div(a: Matrix, b: Matrix) -> Matrix = _
+fn __div(a: Matrix, b: Matrix) -> Matrix = _
 
 /// Every element negated.
 @intrinsic("almide_rt_matrix_neg")
-fn neg(m: Matrix) -> Matrix = _
-
-/// Elementwise x^exp; x < 0, fractional exp: NaN.
-@intrinsic("almide_rt_matrix_pow")
-fn pow(m: Matrix, exp: Float) -> Matrix = _
+fn __neg(m: Matrix) -> Matrix = _
 
 /// f applied to every element.
 @intrinsic("almide_rt_matrix_map")
 fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
 
 
-/// f32 LE rows x cols at offset; all 0 if data short.
+/// f32 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f32_le")
-fn from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 /// Row-major f64 LE, 8 bytes per element.
 @intrinsic("almide_rt_matrix_to_bytes_f64_le")
@@ -28762,13 +26348,13 @@ fn to_bytes_f32_le(m: Matrix) -> Bytes = _
 @intrinsic("almide_rt_matrix_to_bytes_f16_le")
 fn to_bytes_f16_le(m: Matrix) -> Bytes = _
 
-/// f16 LE rows x cols at offset; all 0 if data short.
+/// f16 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f16_le")
-fn from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
-/// f64 LE rows x cols at offset; all 0 if data short.
+/// f64 LE rows x cols of b at offset; none if b is short.
 @intrinsic("almide_rt_matrix_from_bytes_f64_le")
-fn from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 
 /// bias added to each row; cols cut to bias.
@@ -28781,28 +26367,16 @@ fn split_cols_even(m: Matrix, n: Int) -> List[Matrix] = _
 
 /// Side-by-side join; [] gives 0 x 0.
 @intrinsic("almide_rt_matrix_concat_cols_many")
-fn concat_cols(matrices: List[Matrix]) -> Matrix = _
+fn concat_cols(xs: List[Matrix]) -> Matrix = _
 
 /// Alias of matrix.concat_cols.
 @deprecated(since=5, use="matrix.concat_cols")
 @intrinsic("almide_rt_matrix_concat_cols_many")
 fn concat_cols_many(matrices: List[Matrix]) -> Matrix = _
 
-/// x W^T + bias; empty x or W gives 0 x 0.
-@intrinsic("almide_rt_matrix_linear_row")
-fn linear_row(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix = _
-
-/// x W^T; empty x or W gives 0 x 0.
-@intrinsic("almide_rt_matrix_linear_row_no_bias")
-fn linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix = _
-
 /// Rows [start, end), each bound clamped to 0..row count.
 @intrinsic("almide_rt_matrix_slice_rows")
 fn slice_rows(m: Matrix, start: Int, end: Int) -> Matrix = _
-
-/// 1-D conv over rows; [] if input too short.
-@intrinsic("almide_rt_matrix_conv1d")
-fn conv1d(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, stride: Int, padding: Int) -> Matrix = _
 
 /// Rows at indices; out of range is a zero row.
 @intrinsic("almide_rt_matrix_gather_rows")
@@ -28823,43 +26397,11 @@ fn row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float = _
 
 
 
-
-
-
-
-/// Float32 rows x cols of 0.0; negatives clamp.
-@intrinsic("almide_rt_matrix_zeros_f32")
-fn zeros_f32(rows: Int, cols: Int) -> Matrix[Float32] = _
-
-/// Float32 rows x cols of 1.0; negatives clamp.
-@intrinsic("almide_rt_matrix_ones_f32")
-fn ones_f32(rows: Int, cols: Int) -> Matrix[Float32] = _
-
-/// Float32 product; cols(a) == rows(b) is not checked.
-@intrinsic("almide_rt_matrix_mul_f32")
-fn mul_f32(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32] = _
-
-/// alpha * (a x b), Float32.
-@intrinsic("almide_rt_matrix_mul_f32_scaled")
-fn mul_f32_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32] = _
-
-/// a x transpose(b), Float32.
-@intrinsic("almide_rt_matrix_mul_f32_t")
-fn mul_f32_t(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32] = _
-
-/// alpha * (a x transpose(b)), Float32.
-@intrinsic("almide_rt_matrix_mul_f32_t_scaled")
-fn mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32] = _
-
-
-
-
-
-/// Same as scale(mul(a, b), alpha).
-@rewrite(name="mul_scaled_rhs", from="matrix.mul(?a, matrix.scale(?b, ?s))", to="matrix.mul_scaled(?a, ?s, ?b)")
-@rewrite(name="mul_scaled_lhs", from="matrix.mul(matrix.scale(?a, ?s), ?b)", to="matrix.mul_scaled(?a, ?s, ?b)")
+/// Same as scale(__mul(a, b), alpha).
+@rewrite(name="mul_scaled_rhs", from="matrix.__mul(?a, matrix.scale(?b, ?s))", to="matrix.__mul_scaled(?a, ?s, ?b)")
+@rewrite(name="mul_scaled_lhs", from="matrix.__mul(matrix.scale(?a, ?s), ?b)", to="matrix.__mul_scaled(?a, ?s, ?b)")
 @intrinsic("almide_rt_matrix_mul_scaled")
-fn mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
+fn __mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix = _
 
 /// f over each pair of same-position elements; a shape mismatch aborts.
 @intrinsic("almide_rt_matrix_zip_with")
@@ -28870,8 +26412,6 @@ fn zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix = _
 fn concat_rows(xs: List[Matrix]) -> Matrix = _
 "#;
 pub const SRC_MATRIX_ARITH: &str = r#"
-
-
 
 
 
@@ -28968,31 +26508,6 @@ fn matrix_neg(m: List[List[Float]]) -> List[List[Float]] = {
   let n = prim.load32(hm + 4)
   let out: List[List[Float]] = prim.alloc_list_str(n)
   let _x = __mxa_neg_rows(prim.handle(out), hm, n, 0)
-  out
-}
-
-fn __mxa_pow_row(dh: Int, sh: Int, e: Float, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let x = prim.ffrombits(prim.load64(sh + 12 + i * 8))
-  prim.store64(dh + 12 + i * 8, prim.fbits(math.fpow(x, e)))
-  __mxa_pow_row(dh, sh, e, n, i + 1)
-}
-
-fn __mxa_pow_rows(ho: Int, hm: Int, e: Float, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let sr = prim.load64(hm + 12 + i * 8)
-  let c = prim.load32(sr + 4)
-  let row = prim.alloc_list_f64(c)
-  let _f = __mxa_pow_row(prim.handle(row), sr, e, c, 0)
-  prim.store_str(ho + 12 + i * 8, row)
-  __mxa_pow_rows(ho, hm, e, n, i + 1)
-}
-
-fn matrix_pow(m: List[List[Float]], e: Float) -> List[List[Float]] = {
-  let hm = prim.handle(m)
-  let n = prim.load32(hm + 4)
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mxa_pow_rows(prim.handle(out), hm, e, n, 0)
   out
 }
 "#;
@@ -29151,20 +26666,22 @@ fn matrix_cols(m: List[List[Float]]) -> Int = {
 
 
 
-fn __mx_bounds(idx: Int, extent: Int) -> Int = {
-  if idx < 0 or idx >= extent then prim.die(prim.handle("Error: matrix index out of bounds\n")) else ()
-  0
-}
 
-fn matrix_get(m: List[List[Float]], row: Int, col: Int) -> Float = {
+fn __mx_get_none() -> Float? = none
+
+fn __mx_get_some(x: Float) -> Float? = some(x)
+
+fn matrix_get(m: List[List[Float]], row: Int, col: Int) -> Float? = {
   let h = prim.handle(m)
   let rows = prim.load32(h + 4)
-  let _gr = __mx_bounds(row, rows)
-  let rh = prim.load64(h + 12 + row * 8)
+  if row < 0 or row >= rows then __mx_get_none()
+  else {
+    let rh = prim.load64(h + 12 + row * 8)
 
-  let cols = prim.load32(rh + 4)
-  let _gc = __mx_bounds(col, cols)
-  prim.ffrombits(prim.load64(rh + 12 + col * 8))
+    let cols = prim.load32(rh + 4)
+    if col < 0 or col >= cols then __mx_get_none()
+    else __mx_get_some(prim.ffrombits(prim.load64(rh + 12 + col * 8)))
+  }
 }
 
 
@@ -29292,7 +26809,8 @@ fn matrix_transpose(m: List[List[Float]]) -> List[List[Float]] = {
 fn matrix_slice_rows(m: List[List[Float]], start: Int, end: Int) -> List[List[Float]] = {
   let hm = prim.handle(m)
   let len = prim.load32(hm + 4)
-  let e = if end < 0 then 0 else (if end > len then len else end)
+  let e = if end < 0 then 0
+  else (if end > len then len else end)
   let s = if start < 0 then 0 else start
   let n = if s < e then e - s else 0
   let out: List[List[Float]] = prim.alloc_list_str(n)
@@ -29427,31 +26945,6 @@ fn __mx_lin_guard(hx: Int, hw: Int, r: Int, wr: Int) -> Int = if r == 0 or wr ==
   prim.load32(prim.load64(hx + 12) + 4),
 )
 
-fn matrix_linear_row(x: List[List[Float]], weight: List[List[Float]], bias: List[Float]) -> List[List[Float]] = {
-  let hx = prim.handle(x)
-  let hw = prim.handle(weight)
-  let r = prim.load32(hx + 4)
-  let wr = prim.load32(hw + 4)
-  let _g = __mx_lin_guard(hx, hw, r, wr)
-  let _b = if r == 0 or wr == 0 then 0 else __mx_shape_eq(prim.load32(prim.handle(bias) + 4), wr)
-  let n = if wr == 0 then 0 else r
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mx_lin_rows(prim.handle(out), hx, hw, prim.handle(bias), 1, wr, n, 0)
-  out
-}
-
-fn matrix_linear_row_no_bias(x: List[List[Float]], weight: List[List[Float]]) -> List[List[Float]] = {
-  let hx = prim.handle(x)
-  let hw = prim.handle(weight)
-  let r = prim.load32(hx + 4)
-  let wr = prim.load32(hw + 4)
-  let _g = __mx_lin_guard(hx, hw, r, wr)
-  let n = if wr == 0 then 0 else r
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mx_lin_rows(prim.handle(out), hx, hw, 0, 0, wr, n, 0)
-  out
-}
-
 fn __mx_lin_rows(ho: Int, hx: Int, hw: Int, hbias: Int, with_bias: Int, n_out: Int, n: Int, i: Int) -> Int =
   if i >= n then 0
   else {
@@ -29485,7 +26978,13 @@ else {
 
 
 
-fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+
+
+fn __mx_load_none() -> List[List[Float]]? = none
+
+fn __mx_load_some(m: List[List[Float]]) -> List[List[Float]]? = some(m)
+
+fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let hd = prim.handle(data)
   let len = prim.load32(hd + 4)
 
@@ -29507,11 +27006,11 @@ fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
 
 
 
-  if offset < 0 or offset > len or need > len - offset then __mx_const(r, c, 0.0)
+  if offset < 0 or offset > len or need > len - offset then __mx_load_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __mx_f32_rows(prim.handle(out), hd, offset, r, c, 0)
-    out
+    __mx_load_some(out)
   }
 }
 
@@ -29565,22 +27064,6 @@ fn __mx_f32_sel_rows(ho: Int, hd: Int, offset: Int, len: Int, ids: List[Int], c:
     __mx_f32_sel_rows(ho, hd, offset, len, ids, c, i + 1)
   }
 
-fn matrix_select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> List[List[Float]] = {
-  let hd = prim.handle(data)
-  let len = prim.load32(hd + 4)
-  let off = if offset < 0 then 0 else offset
-
-
-  let c = if cols < 0 then 0 else cols
-  let n = list.len(row_ids)
-
-
-  let _g = __mx_dims_guard(n, c)
-  let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mx_f32_sel_rows(prim.handle(out), hd, off, len, row_ids, c, 0)
-  out
-}
-
 
 
 
@@ -29604,7 +27087,7 @@ fn __mx_f16_decode(bits: Int) -> Float = {
   }
 }
 
-fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let hd = prim.handle(data)
   let len = prim.load32(hd + 4)
 
@@ -29623,11 +27106,11 @@ fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
 
 
 
-  if offset < 0 or offset > len or need > len - offset then __mx_const(r, c, 0.0)
+  if offset < 0 or offset > len or need > len - offset then __mx_load_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __mx_f16_rows(prim.handle(out), hd, offset, r, c, 0)
-    out
+    __mx_load_some(out)
   }
 }
 
@@ -29912,49 +27395,6 @@ else {
   if k > 9223372036854775807 / in_ch then 9223372036854775807 else in_ch * k
 }
 
-fn matrix_conv1d(input: List[List[Float]], weight: List[List[Float]], bias: List[Float], kernel: Int, stride: Int, padding: Int) -> List[List[Float]] = {
-  let hin = prim.handle(input)
-  let hw = prim.handle(weight)
-  let t_in = prim.load32(hin + 4)
-  let out_ch = prim.load32(hw + 4)
-  if t_in == 0 or out_ch == 0 then __mxe_zeros(0, 0)
-  else {
-    let irow0 = prim.load64(hin + 12)
-    let in_ch = prim.load32(irow0 + 4)
-    let s = __mxe_stride(stride)
-    let k = if kernel < 0 then 0 else kernel
-    let p = if padding < 0 then 0 else padding
-    if p > 268435456 then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
-
-
-
-    let _w = __mxe_shape_eq(prim.load32(prim.load64(hw + 12) + 4), __mxe_taps(in_ch, k))
-    let _b = __mxe_shape_eq(prim.load32(prim.handle(bias) + 4), out_ch)
-    let t_padded = t_in + 2 * p
-    if t_padded < k then __mxe_zeros(0, 0)
-    else {
-      let t_out = (t_padded - k) / s + 1
-      let _d = __mxe_dims_guard(t_out, out_ch)
-      let out: List[List[Float]] = prim.alloc_list_str(t_out)
-      let _x = __cv_rows(
-        prim.handle(out),
-        hin,
-        hw,
-        prim.handle(bias),
-        t_in,
-        in_ch,
-        out_ch,
-        k,
-        s,
-        p,
-        t_out,
-        0,
-      )
-      out
-    }
-  }
-}
-
 
 
 fn __tb64_row(bh: Int, rh: Int, c: Int, pos: Int, j: Int) -> Int = if j >= c then pos + c * 8
@@ -30023,7 +27463,11 @@ else {
   __fb64_rows(ho, base, r, c, i + 1)
 }
 
-fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+fn __fb64_none() -> List[List[Float]]? = none
+
+fn __fb64_some(m: List[List[Float]]) -> List[List[Float]]? = some(m)
+
+fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let bh = prim.handle(data)
   let len = prim.load32(bh + 4)
 
@@ -30037,11 +27481,11 @@ fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   if r > 0 and c > 268435456 / r then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
 
 
-  if offset < 0 or offset > len or r * c * 8 > len - offset then __mxe_zeros(r, c)
+  if offset < 0 or offset > len or r * c * 8 > len - offset then __fb64_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __fb64_rows(prim.handle(out), bh + 12 + offset, r, c, 0)
-    out
+    __fb64_some(out)
   }
 }
 "#;
@@ -30054,31 +27498,9 @@ pub const SRC_MATRIX_FUSED: &str = r#"
 import prim
 
 fn matrix_mul_scaled(a: Matrix, s: Float, b: Matrix) -> Matrix = {
-  let p = matrix.mul(a, b)
+  let p = matrix.__mul(a, b)
   matrix.scale(p, s)
 }
-
-fn matrix_mul_f32(a: Matrix, b: Matrix) -> Matrix = matrix.mul(a, b)
-
-fn matrix_mul_f32_scaled(a: Matrix, s: Float, b: Matrix) -> Matrix = {
-  let p = matrix.mul(a, b)
-  matrix.scale(p, s)
-}
-
-fn matrix_mul_f32_t(a: Matrix, b: Matrix) -> Matrix = {
-  let t = matrix.transpose(b)
-  matrix.mul(a, t)
-}
-
-fn matrix_mul_f32_t_scaled(a: Matrix, s: Float, b: Matrix) -> Matrix = {
-  let t = matrix.transpose(b)
-  let p = matrix.mul(a, t)
-  matrix.scale(p, s)
-}
-
-fn matrix_zeros_f32(rows: Int, cols: Int) -> Matrix = matrix.zeros(rows, cols)
-
-fn matrix_ones_f32(rows: Int, cols: Int) -> Matrix = matrix.ones(rows, cols)
 
 
 
@@ -30088,14 +27510,14 @@ fn matrix_ones_f32(rows: Int, cols: Int) -> Matrix = matrix.ones(rows, cols)
 fn matrix_fma(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix = {
   let sa = matrix.scale(a, ka)
   let sb = matrix.scale(b, kb)
-  matrix.add(sa, sb)
+  matrix.__add(sa, sb)
 }
 
 
 fn matrix_fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix = {
   let ab = matrix_fma(a, ka, b, kb)
   let sc = matrix.scale(c, kc)
-  matrix.add(ab, sc)
+  matrix.__add(ab, sc)
 }
 
 
@@ -30113,22 +27535,6 @@ fn matrix_append_rows(base: Matrix, extra: Matrix) -> Matrix = {
   else {
     if matrix.cols(base) != matrix.cols(extra) then prim.die(prim.handle("Error: matrix shape mismatch\n")) else ()
     matrix.from_lists(matrix.to_lists(base) + matrix.to_lists(extra))
-  }
-}
-
-
-
-
-
-
-
-fn matrix_linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = {
-  let rows = matrix.rows(x)
-  if rows == 0 or w_rows <= 0 or w_cols <= 0 then matrix.zeros(rows, w_rows)
-  else {
-    let off = if w_offset < 0 then 0 else w_offset
-    let w = matrix.from_bytes_f32_le(w_bytes, off, w_rows, w_cols)
-    matrix.linear_row_no_bias(x, w)
   }
 }
 "#;
@@ -30150,7 +27556,7 @@ fn matrix_shape(m: Matrix) -> (Int, Int) = {
 
 
 fn __matrix_concat_rows_go(xs: List[Matrix], i: Int, acc: Matrix) -> Matrix = match list.get(xs, i) {
-  some(m) => __matrix_concat_rows_go(xs, i + 1, matrix.append_rows(acc, m)),
+  some(m) => __matrix_concat_rows_go(xs, i + 1, matrix.__append_rows(acc, m)),
   none => acc,
 }
 
@@ -30191,11 +27597,11 @@ fn __matrix_zip_rows(la: List[List[Float]], lb: List[List[Float]], f: (Float, Fl
 
 @implements("matrix.zip_with")
 fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix = {
-  let rows_probe = matrix.append_rows(
+  let rows_probe = matrix.__append_rows(
     matrix.zeros(1, matrix.rows(a)),
     matrix.zeros(1, matrix.rows(b)),
   )
-  let cols_probe = matrix.append_rows(
+  let cols_probe = matrix.__append_rows(
     matrix.zeros(1, matrix.cols(a)),
     matrix.zeros(1, matrix.cols(b)),
   )
@@ -30234,132 +27640,281 @@ pub const SRC_NET: &str = r#"
 
 
 
-/// Opaque Int handle to a TCP connection.
-type TcpStream = Int
-
-/// Opaque Int handle to a listening socket.
-type TcpListener = Int
 
 
-/// Connected stream handle; err if refused.
-@intrinsic("almide_rt_net_tcp_connect")
+/// A connected TCP stream; Read, Write and Close.
+mod type TcpStream: Read, Write, Close = Int
+
+/// A listening TCP socket; Close.
+mod type TcpListener: Close = Int
+
+/// A bound UDP socket; Close.
+mod type UdpSocket: Close = Int
+
+/// One received datagram and where it came from.
+type UdpPacket = { data: Bytes, host: String, port: Int }
+
+/// An IP address: four octets, or eight 16-bit groups.
+type IpAddr = | V4(Int, Int, Int, Int) | V6(List[Int])
+
+
+/// A stream connected to host:port; err if refused.
 @category("Net.fetch")
-effect fn tcp_connect(host: String, port: Int) -> Result[Int, String] = _
+effect fn tcp_connect(host: String, port: Int) -> Result[TcpStream, String] = ok(TcpStream(net.__os_tcp_connect(host, port)!))
 
-
-/// Up to len bytes; empty once the peer closed; err if len < 0.
-@intrinsic("almide_rt_net_tcp_read")
-effect fn tcp_read(stream: Int, len: Int) -> Result[Bytes, String] = _
-
-/// Sends all of data, flushed; err if closed.
-@intrinsic("almide_rt_net_tcp_write")
-effect fn tcp_write(stream: Int, data: Bytes) -> Result[Unit, String] = _
-
-/// Exactly len bytes; err on early EOF, naming how many arrived.
-@intrinsic("almide_rt_net_tcp_read_exact")
-effect fn tcp_read_exact(stream: Int, len: Int) -> Result[Bytes, String] = _
-
-
-/// Shuts down the stream; twice is ok.
-@intrinsic("almide_rt_net_tcp_close")
-effect fn tcp_close(stream: Int) -> Result[Unit, String] = _
-
-
-/// False after tcp_close; a peer close is not seen.
-@intrinsic("almide_rt_net_tcp_is_open")
-effect fn tcp_is_open(stream: Int) -> Bool = _
-
+/// False after io.close; a peer close is not seen.
+effect fn tcp_is_open(stream: TcpStream) -> Bool = net.__os_tcp_is_open(__tcp(stream))
 
 /// Up to len bytes within timeout_ms (> 0); the stream's own timeout holds again after.
-@intrinsic("almide_rt_net_tcp_read_timeout")
-effect fn tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = _
+effect fn tcp_read_timeout(stream: TcpStream, len: Int, timeout_ms: Int) -> Result[Bytes, String] = ok(net.__os_tcp_read_timeout(
+  __tcp(stream),
+  len,
+  timeout_ms,
+)!)
 
 /// Sets read/write timeout; <= 0 clears it.
-@intrinsic("almide_rt_net_tcp_set_timeout")
-effect fn tcp_set_timeout(stream: Int, timeout_ms: Int) -> Result[Unit, String] = _
-
+effect fn tcp_set_timeout(stream: TcpStream, timeout_ms: Int) -> Result[Unit, String] = net.__os_tcp_set_timeout(
+  __tcp(stream),
+  timeout_ms,
+)
 
 /// Bytes readable now, capped at 65536; 0 if none.
-@intrinsic("almide_rt_net_tcp_available")
-effect fn tcp_available(stream: Int) -> Result[Int, String] = _
+effect fn tcp_available(stream: TcpStream) -> Result[Int, String] = net.__os_tcp_available(__tcp(stream))
 
-
-/// Listener bound to host:port; err if in use.
-@intrinsic("almide_rt_net_tcp_listen")
+/// A listener bound to host:port; err if in use. Port 0 lets the OS choose.
 @category("Net.listen")
-effect fn tcp_listen(host: String, port: Int) -> Result[Int, String] = _
+effect fn tcp_listen(host: String, port: Int) -> Result[TcpListener, String] = ok(TcpListener(net.__os_tcp_listen(host, port)!))
 
 /// The port a listener is bound to: the one the OS chose when it listened on port 0.
-@intrinsic("almide_rt_net_tcp_local_port")
 @category("Net.listen")
-effect fn tcp_local_port(listener: Int) -> Result[Int, String] = _
+effect fn tcp_local_port(listener: TcpListener) -> Result[Int, String] = net.__os_tcp_local_port(__listener(listener))
 
-/// Blocks for the next client; its stream handle.
-@intrinsic("almide_rt_net_tcp_accept")
+/// Blocks for the next client; its stream.
 @category("Net.listen")
-effect fn tcp_accept(listener: Int) -> Result[Int, String] = _
-
-/// Stops listening; closing twice is ok.
-@intrinsic("almide_rt_net_tcp_close_listener")
-@category("Net.listen")
-effect fn tcp_close_listener(listener: Int) -> Result[Unit, String] = _
+effect fn tcp_accept(listener: TcpListener) -> Result[TcpStream, String] = ok(TcpStream(net.__os_tcp_accept(__listener(listener))!))
 
 
-/// Stream socket connected to the listener at path; its descriptor.
-@intrinsic("almide_rt_net_unix_connect")
+/// A UDP socket bound to host:port; port 0 lets the OS choose.
+effect fn udp_bind(host: String, port: Int) -> Result[UdpSocket, String] = ok(UdpSocket(net.__os_udp_bind(host, port)!))
+
+/// The port sock is bound to.
+effect fn udp_local_port(sock: UdpSocket) -> Result[Int, String] = net.__os_udp_local_port(__udp(sock))
+
+/// Sends data as one datagram to host:port.
+effect fn udp_send_to(sock: UdpSocket, data: Bytes, host: String, port: Int) -> Result[Unit, String] = net.__os_udp_send_to(
+  __udp(sock),
+  data,
+  host,
+  port,
+)
+
+/// Blocks for the next datagram: at most max bytes of it, and its sender.
+effect fn udp_recv_from(sock: UdpSocket, max: Int) -> Result[UdpPacket, String] = {
+  let (data, host, port) = net.__os_udp_recv_from(__udp(sock), max)!
+  ok(UdpPacket { data: data, host: host, port: port })
+}
+
+
+/// The addresses host resolves to, each once; err if none.
 @category("Net.fetch")
-effect fn unix_connect(path: String) -> Result[Int, String] = _
+effect fn lookup_host(host: String) -> Result[List[IpAddr], String] = {
+  let texts = net.__os_lookup_host(host)!
+  ok(texts |> list.filter_map((t) => parse_ip(t)?))
+}
 
-/// Listener bound at path, which must not exist yet.
-@intrinsic("almide_rt_net_unix_listen")
+/// The IP address s spells: dotted IPv4, or IPv6 (`::` and an IPv4 tail allowed).
+@category
+fn parse_ip(s: String) -> Result[IpAddr, String] =
+  if string.contains(s, ":") then __parse_v6(s) else __parse_v4(s, s)
+
+/// ip as text: dotted IPv4, or the RFC 5952 short IPv6 form.
+@category
+fn ip_to_string(ip: IpAddr) -> String = match ip {
+  V4(a, b, c, d) => "${a}.${b}.${c}.${d}",
+  V6(gs) => __v6_text(gs),
+}
+
+/// True for 127.0.0.0/8 and ::1.
+@category
+fn is_loopback(ip: IpAddr) -> Bool = match ip {
+  V4(a, _, _, _) => a == 127,
+  V6(gs) => gs == [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1
+  ],
+}
+
+
+effect fn __tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String] = ok(net.__os_tcp_read(
+  __tcp(h),
+  max,
+)!)
+
+effect fn __tcp_stream_write(h: TcpStream, data: Bytes) -> Result[Unit, String] = net.__os_tcp_write(
+  __tcp(h),
+  data,
+)
+
+effect fn __tcp_stream_close(h: TcpStream) -> Result[Unit, String] = net.__os_tcp_close(__tcp(h))
+
 @category("Net.listen")
-effect fn unix_listen(path: String) -> Result[Int, String] = _
+effect fn __tcp_listener_close(h: TcpListener) -> Result[Unit, String] = net.__os_tcp_close_listener(__listener(h))
 
-/// Blocks for the next connection; its descriptor.
-@intrinsic("almide_rt_net_unix_accept")
+effect fn __udp_socket_close(h: UdpSocket) -> Result[Unit, String] = net.__os_udp_close(__udp(h))
+
+local fn __tcp(s: TcpStream) -> Int = match s {
+  TcpStream(n) => n
+}
+
+local fn __listener(l: TcpListener) -> Int = match l {
+  TcpListener(n) => n
+}
+
+local fn __udp(u: UdpSocket) -> Int = match u {
+  UdpSocket(n) => n
+}
+
+
+local fn __octet(t: String) -> Int? =
+  if string.len(t) == 0 or string.len(t) > 3 or (string.len(t) > 1 and string.starts_with(t, "0")) then none
+  else match int.parse(t) {
+    ok(n) => if n >= 0 and n <= 255 and string.to_list(t) |> list.all((c) => string.contains("0123456789", c)) then some(n) else none,
+    err(_) => none,
+  }
+
+local fn __parse_v4(t: String, whole: String) -> Result[IpAddr, String] = {
+  let parts = string.split(t, ".") |> list.map((p) => __octet(p))
+  match parts {
+    [some(a), some(b), some(c), some(d)] => ok(V4(a, b, c, d)),
+    _ => err("net.parse_ip: not an IP address: \"${whole}\""),
+  }
+}
+
+local fn __group(t: String) -> Int? =
+  if string.len(t) == 0 or string.len(t) > 4 then none
+  else if string.to_list(string.to_lower(t)) |> list.all((c) => string.contains("0123456789abcdef", c)) then int.parse_radix(
+    t,
+    16,
+  )?
+  else none
+
+
+
+local fn __v6_side(t: String) -> List[Int?] =
+  if t == "" then []
+  else {
+    let parts = string.split(t, ":")
+    let last = list.get(parts, list.len(parts) - 1) ?? ""
+    if string.contains(last, ".") then match __parse_v4(last, last) {
+      ok(V4(a, b, c, d)) => (list.take(parts, list.len(parts) - 1) |> list.map((p) => __group(p))) + [some(a * 256 + b), some(c * 256 + d)],
+      _ => [none],
+    } else parts |> list.map((p) => __group(p))
+  }
+
+local fn __parse_v6(s: String) -> Result[IpAddr, String] = {
+  let bad = err("net.parse_ip: not an IP address: \"${s}\"")
+  let halves = string.split(s, "::")
+  match halves {
+    [whole] => {
+      let gs = __v6_side(whole)
+      if list.len(gs) == 8 and gs |> list.all((g) => g != none) then ok(V6(gs |> list.filter_map((g) => g)))
+      else bad
+    },
+    [head, tail] => {
+      let h = __v6_side(head)
+      let t = __v6_side(tail)
+      let n = list.len(h) + list.len(t)
+      if n > 7 or not (h + t |> list.all((g) => g != none)) then bad
+      else ok(V6((h |> list.filter_map((g) => g)) + list.repeat(0, 8 - n) + (t |> list.filter_map((g) => g))))
+    },
+    _ => bad,
+  }
+}
+
+
+
+local fn __v6_text(gs: List[Int]) -> String = {
+  let hex = gs |> list.map((g) => string.to_lower(int.to_hex(g)))
+  let (start, len) = __zero_run(gs, 0, -1, 0, -1, 0)
+  if len < 2 then list.join(hex, ":")
+  else list.join(list.take(hex, start), ":") + "::" + list.join(list.drop(hex, start + len), ":")
+}
+
+
+
+local fn __zero_run(gs: List[Int], i: Int, cs: Int, cl: Int, bs: Int, bl: Int) -> (Int, Int) =
+  if i >= list.len(gs) then (if cl > bl then (cs, cl) else (bs, bl))
+  else if (list.get(gs, i) ?? 1) == 0 then (if cl == 0 then __zero_run(gs, i + 1, i, 1, bs, bl)
+  else __zero_run(gs, i + 1, cs, cl + 1, bs, bl))
+  else if cl > bl then __zero_run(gs, i + 1, -1, 0, cs, cl)
+  else __zero_run(gs, i + 1, -1, 0, bs, bl)
+
+
+@intrinsic("almide_rt_net___os_tcp_connect")
+@category("Net.fetch")
+effect fn __os_tcp_connect(host: String, port: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_read")
+effect fn __os_tcp_read(stream: Int, len: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_write")
+effect fn __os_tcp_write(stream: Int, data: Bytes) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_close")
+effect fn __os_tcp_close(stream: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_is_open")
+effect fn __os_tcp_is_open(stream: Int) -> Bool = _
+
+@intrinsic("almide_rt_net___os_tcp_read_timeout")
+effect fn __os_tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_set_timeout")
+effect fn __os_tcp_set_timeout(stream: Int, timeout_ms: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_available")
+effect fn __os_tcp_available(stream: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_net___os_tcp_listen")
 @category("Net.listen")
-effect fn unix_accept(listener: Int) -> Result[Int, String] = _
+effect fn __os_tcp_listen(host: String, port: Int) -> Result[Int, String] = _
 
-/// Sends all of data, the descriptors fds riding with its first byte.
-@intrinsic("almide_rt_net_unix_send")
-effect fn unix_send(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = _
+@intrinsic("almide_rt_net___os_tcp_local_port")
+@category("Net.listen")
+effect fn __os_tcp_local_port(listener: Int) -> Result[Int, String] = _
 
-/// Up to max bytes, blocking; empty once the peer closed.
-@intrinsic("almide_rt_net_unix_recv")
-effect fn unix_recv(sock: Int, max: Int) -> Result[Bytes, String] = _
+@intrinsic("almide_rt_net___os_tcp_accept")
+@category("Net.listen")
+effect fn __os_tcp_accept(listener: Int) -> Result[Int, String] = _
 
-/// Descriptors received on sock and not yet taken, oldest first.
-@intrinsic("almide_rt_net_unix_take_fds")
-effect fn unix_take_fds(sock: Int) -> List[Int] = _
+@intrinsic("almide_rt_net___os_tcp_close_listener")
+@category("Net.listen")
+effect fn __os_tcp_close_listener(listener: Int) -> Result[Unit, String] = _
 
-/// True if fd is readable within timeout_ms; < 0 waits forever.
-@intrinsic("almide_rt_net_unix_poll")
-effect fn unix_poll(fd: Int, timeout_ms: Int) -> Result[Bool, String] = _
+@intrinsic("almide_rt_net___os_udp_bind")
+effect fn __os_udp_bind(host: String, port: Int) -> Result[Int, String] = _
 
-/// The fds readable within timeout_ms, in order; < 0 waits for one.
-@intrinsic("almide_rt_net_unix_wait")
-effect fn unix_wait(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = _
+@intrinsic("almide_rt_net___os_udp_local_port")
+effect fn __os_udp_local_port(sock: Int) -> Result[Int, String] = _
 
-/// Closes a socket, listener or received descriptor.
-@intrinsic("almide_rt_net_unix_close")
-effect fn unix_close(fd: Int) -> Result[Unit, String] = _
+@intrinsic("almide_rt_net___os_udp_send_to")
+effect fn __os_udp_send_to(sock: Int, data: Bytes, host: String, port: Int) -> Result[Unit, String] = _
 
+@intrinsic("almide_rt_net___os_udp_recv_from")
+effect fn __os_udp_recv_from(sock: Int, max: Int) -> Result[(Bytes, String, Int), String] = _
 
-/// New zero-filled unnamed file of size bytes; its descriptor.
-@intrinsic("almide_rt_net_shm_create")
-effect fn shm_create(size: Int) -> Result[Int, String] = _
+@intrinsic("almide_rt_net___os_udp_close")
+effect fn __os_udp_close(sock: Int) -> Result[Unit, String] = _
 
-/// Grows or shrinks the file fd to size bytes.
-@intrinsic("almide_rt_net_shm_resize")
-effect fn shm_resize(fd: Int, size: Int) -> Result[Unit, String] = _
-
-/// Writes data into fd at byte offset.
-@intrinsic("almide_rt_net_shm_write")
-effect fn shm_write(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = _
-
-/// Up to len bytes of fd from offset; fewer at its end.
-@intrinsic("almide_rt_net_shm_read")
-effect fn shm_read(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = _
+@intrinsic("almide_rt_net___os_lookup_host")
+@category("Net.fetch")
+effect fn __os_lookup_host(host: String) -> Result[List[String], String] = _
 "#;
 pub const SRC_NET_WASM: &str = r#"
 
@@ -30381,8 +27936,6 @@ effect fn __net_connect(host: String, port: String) -> Result[String, String] = 
 
 effect fn __net_read(stream: String, len: String) -> Result[Bytes, String] = _
 
-effect fn __net_read_exact(stream: String, len: String) -> Result[Bytes, String] = _
-
 
 effect fn __net_read_timeout(stream: String, len_ms: String) -> Result[Bytes, String] = _
 
@@ -30402,209 +27955,77 @@ effect fn __net_local_port(listener: String, unused: String) -> Result[String, S
 
 fn __net_is_open(stream: String, unused: String) -> Result[String, String] = _
 
-@implements("net.tcp_listen")
+@implements("net.__os_tcp_listen")
 effect fn __net_tcp_listen_impl(host: String, port: Int) -> Result[Int, String] = {
   let t = __net_listen(host, int.to_string(port))!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_accept")
+@implements("net.__os_tcp_accept")
 effect fn __net_tcp_accept_impl(listener: Int) -> Result[Int, String] = {
   let t = __net_accept(int.to_string(listener), "")!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_connect")
+@implements("net.__os_tcp_connect")
 effect fn __net_tcp_connect_impl(host: String, port: Int) -> Result[Int, String] = {
   let t = __net_connect(host, int.to_string(port))!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_local_port")
+@implements("net.__os_tcp_local_port")
 effect fn __net_tcp_local_port_impl(listener: Int) -> Result[Int, String] = {
   let t = __net_local_port(int.to_string(listener), "")!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_read")
+@implements("net.__os_tcp_read")
 effect fn __net_tcp_read_impl(stream: Int, len: Int) -> Result[Bytes, String] = __net_read(
   int.to_string(stream),
   int.to_string(len),
 )
 
-@implements("net.tcp_read_exact")
-effect fn __net_tcp_read_exact_impl(stream: Int, len: Int) -> Result[Bytes, String] = __net_read_exact(
-  int.to_string(stream),
-  int.to_string(len),
-)
-
-@implements("net.tcp_read_timeout")
+@implements("net.__os_tcp_read_timeout")
 effect fn __net_tcp_read_timeout_impl(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String] = __net_read_timeout(
   int.to_string(stream),
   "${len}\n${timeout_ms}",
 )
 
-@implements("net.tcp_write")
+@implements("net.__os_tcp_write")
 effect fn __net_tcp_write_impl(stream: Int, data: Bytes) -> Result[Unit, String] = {
   let _ = __net_write(int.to_string(stream), data)!
   ok(())
 }
 
-@implements("net.tcp_available")
+@implements("net.__os_tcp_available")
 effect fn __net_tcp_available_impl(stream: Int) -> Result[Int, String] = {
   let t = __net_available(int.to_string(stream), "")!
   ok(int.parse(t) ?? -1)
 }
 
-@implements("net.tcp_set_timeout")
+@implements("net.__os_tcp_set_timeout")
 effect fn __net_tcp_set_timeout_impl(stream: Int, timeout_ms: Int) -> Result[Unit, String] = {
   let _ = __net_set_timeout(int.to_string(stream), int.to_string(timeout_ms))!
   ok(())
 }
 
-@implements("net.tcp_close")
+@implements("net.__os_tcp_close")
 effect fn __net_tcp_close_impl(stream: Int) -> Result[Unit, String] = {
   let _ = __net_close(int.to_string(stream), "")!
   ok(())
 }
 
-@implements("net.tcp_close_listener")
+@implements("net.__os_tcp_close_listener")
 effect fn __net_tcp_close_listener_impl(listener: Int) -> Result[Unit, String] = {
   let _ = __net_close_listener(int.to_string(listener), "")!
   ok(())
 }
 
-@implements("net.tcp_is_open")
+@implements("net.__os_tcp_is_open")
 fn __net_tcp_is_open_impl(stream: Int) -> Bool = match __net_is_open(int.to_string(stream), "") {
   ok("1") => true,
   _ => false,
 }
-
-
-
-
-
-
-
-
-
-
-
-
-effect fn __unix_connect(path: String, unused: String) -> Result[String, String] = _
-
-effect fn __unix_listen(path: String, unused: String) -> Result[String, String] = _
-
-effect fn __unix_accept(listener: String, unused: String) -> Result[String, String] = _
-
-
-effect fn __unix_send(sock_fds: String, data: Bytes) -> Result[String, String] = _
-
-effect fn __unix_recv(sock: String, max: String) -> Result[Bytes, String] = _
-
-
-
-fn __unix_take_fds(sock: String, unused: String) -> Result[String, String] = _
-
-effect fn __unix_poll(fd: String, timeout_ms: String) -> Result[String, String] = _
-
-effect fn __unix_wait(fds: String, timeout_ms: String) -> Result[String, String] = _
-
-effect fn __unix_close(fd: String, unused: String) -> Result[String, String] = _
-
-effect fn __shm_create(size: String, unused: String) -> Result[String, String] = _
-
-effect fn __shm_resize(fd: String, size: String) -> Result[String, String] = _
-
-
-effect fn __shm_write(fd_offset: String, data: Bytes) -> Result[String, String] = _
-
-
-effect fn __shm_read(fd: String, offset_len: String) -> Result[Bytes, String] = _
-
-fn __net_fd_lines(fds: List[Int]) -> String = fds |> list.map((f) => int.to_string(f)) |> list.join("\n")
-
-fn __net_fd_list(t: String) -> List[Int] =
-  if t == "" then []
-  else string.split(t, "\n") |> list.map((x) => int.parse(x) ?? -1)
-
-@implements("net.unix_connect")
-effect fn __net_unix_connect_impl(path: String) -> Result[Int, String] = {
-  let t = __unix_connect(path, "")!
-  ok(int.parse(t) ?? -1)
-}
-
-@implements("net.unix_listen")
-effect fn __net_unix_listen_impl(path: String) -> Result[Int, String] = {
-  let t = __unix_listen(path, "")!
-  ok(int.parse(t) ?? -1)
-}
-
-@implements("net.unix_accept")
-effect fn __net_unix_accept_impl(listener: Int) -> Result[Int, String] = {
-  let t = __unix_accept(int.to_string(listener), "")!
-  ok(int.parse(t) ?? -1)
-}
-
-@implements("net.unix_send")
-effect fn __net_unix_send_impl(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = {
-  let _ = __unix_send(__net_fd_lines([sock] + fds), data)!
-  ok(())
-}
-
-@implements("net.unix_recv")
-effect fn __net_unix_recv_impl(sock: Int, max: Int) -> Result[Bytes, String] = __unix_recv(
-  int.to_string(sock),
-  int.to_string(max),
-)
-
-@implements("net.unix_take_fds")
-fn __net_unix_take_fds_impl(sock: Int) -> List[Int] = match __unix_take_fds(int.to_string(sock), "") {
-  ok(t) => __net_fd_list(t),
-  err(_) => [],
-}
-
-@implements("net.unix_poll")
-effect fn __net_unix_poll_impl(fd: Int, timeout_ms: Int) -> Result[Bool, String] = {
-  let t = __unix_poll(int.to_string(fd), int.to_string(timeout_ms))!
-  ok(t == "1")
-}
-
-@implements("net.unix_wait")
-effect fn __net_unix_wait_impl(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = {
-  let t = __unix_wait(__net_fd_lines(fds), int.to_string(timeout_ms))!
-  ok(__net_fd_list(t))
-}
-
-@implements("net.unix_close")
-effect fn __net_unix_close_impl(fd: Int) -> Result[Unit, String] = {
-  let _ = __unix_close(int.to_string(fd), "")!
-  ok(())
-}
-
-@implements("net.shm_create")
-effect fn __net_shm_create_impl(size: Int) -> Result[Int, String] = {
-  let t = __shm_create(int.to_string(size), "")!
-  ok(int.parse(t) ?? -1)
-}
-
-@implements("net.shm_resize")
-effect fn __net_shm_resize_impl(fd: Int, size: Int) -> Result[Unit, String] = {
-  let _ = __shm_resize(int.to_string(fd), int.to_string(size))!
-  ok(())
-}
-
-@implements("net.shm_write")
-effect fn __net_shm_write_impl(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = {
-  let _ = __shm_write("${fd}\n${offset}", data)!
-  ok(())
-}
-
-@implements("net.shm_read")
-effect fn __net_shm_read_impl(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = __shm_read(
-  int.to_string(fd),
-  "${offset}\n${len}",
-)
 "#;
 pub const SRC_OPTION: &str = r#"
 
@@ -30690,7 +28111,12 @@ fn to_list[A](o: A?) -> List[A] = _
 
 
 /// some(values) if no element is none, else none.
-fn collect[T](xs: List[T?]) -> List[T]? =
+fn collect[A](xs: List[A?]) -> List[A]? = __collect(xs)
+
+
+
+
+local fn __collect[T](xs: List[T?]) -> List[T]? =
   if list.any(xs, (o) => option.is_none(o)) then none
   else some(list.map(
     xs,
@@ -30701,7 +28127,7 @@ fn collect[T](xs: List[T?]) -> List[T]? =
   ))
 
 /// some of all f(x), or none; f runs on every x.
-fn collect_map[T, U](xs: List[T], f: (T) -> U?) -> List[U]? = option.collect(list.map(xs, f))
+fn collect_map[A, B](xs: List[A], f: (A) -> B?) -> List[B]? = option.collect(list.map(xs, f))
 
 
 
@@ -31165,7 +28591,10 @@ fn __bool_to_string(b: Bool) -> String = if b then "true" else "false"
 @implements("bytes.__join")
 fn bytes_join(xs: List[Bytes], sep: Bytes) -> Bytes = match xs {
   [] => bytes.zeros(0),
-  [first, ..rest] => rest |> list.fold(first, (acc, b) => bytes.concat(bytes.concat(acc, sep), b)),
+  [first, ..rest] => rest |> list.fold(
+    first,
+    (acc, b) => bytes.__concat(bytes.__concat(acc, sep), b),
+  ),
 }
 "#;
 pub const SRC_OPTION_TO_STRING_F: &str = r#"
@@ -32085,12 +29514,6 @@ pub const SRC_PATH: &str = r#"
 
 
 
-mod type SafePath = String
-
-
-
-
-
 
 
 
@@ -32108,31 +29531,15 @@ local fn stays_inside(s: String) -> Bool = {
 }
 
 
-/// SafePath of s; err unless relative and inside.
-fn from_string(s: String) -> Result[SafePath, String] =
-  if stays_inside(s) then ok(SafePath(s)) else err("path traversal rejected: " + s)
-
-
-/// SafePath of s with no traversal check.
-fn trusted(s: String) -> SafePath = SafePath(s)
-
-
-/// Path text inside p, unchanged.
-fn to_string(p: SafePath) -> String = match p {
-  SafePath(s) => s
-}
-
-
 
 /// base/child; an absolute child replaces base.
 fn join(base: String, child: String) -> String = {
 
   if string.starts_with(child, "/") then child
   else {
-    let b = if string.ends_with(base, "/") then string.slice(base, 0, string.len(base) - 1)
-    else base
+    let n = if string.ends_with(base, "/") then string.len(base) - 1 else string.len(base)
 
-    if string.len(b) > 0 then b + "/" + child
+    if n > 0 then string.slice(base, 0, n) + "/" + child
     else if string.starts_with(base, "/") then "/" + child
     else child
   }
@@ -32145,22 +29552,22 @@ fn join(base: String, child: String) -> String = {
 fn join_within(base: String, child: String) -> Result[String, String] =
   if stays_inside(child) then ok(join(base, child)) else err("path traversal rejected: " + child)
 
-/// p minus last segment; "" if no slash.
-fn dirname(p: String) -> String = {
-  let parts = string.split(p, "/")
+/// path minus last segment; "" if no slash.
+fn dirname(path: String) -> String = {
+  let parts = string.split(path, "/")
   let n = list.len(parts)
   if n <= 1 then ""
   else {
     let parent_parts = list.take(parts, n - 1)
-    let joined = string.join(parent_parts, "/")
+    let joined = list.join(parent_parts, "/")
 
-    if string.len(joined) == 0 and string.starts_with(p, "/") then "/" else joined
+    if string.len(joined) == 0 and string.starts_with(path, "/") then "/" else joined
   }
 }
 
-/// Last non-empty segment; "" for / or empty p.
-fn basename(p: String) -> String = {
-  let parts = string.split(p, "/")
+/// Last non-empty segment; "" for / or empty path.
+fn basename(path: String) -> String = {
+  let parts = string.split(path, "/")
   let filtered = list.filter(parts, (s) => string.len(s) > 0)
   match list.last(filtered) {
     some(name) => name,
@@ -32169,8 +29576,8 @@ fn basename(p: String) -> String = {
 }
 
 /// After basename's last dot; none if no dot or dotfile.
-fn extension(p: String) -> String? = {
-  let name = basename(p)
+fn extension(path: String) -> String? = {
+  let name = basename(path)
   let parts = string.split(name, ".")
   let n = list.len(parts)
 
@@ -32179,12 +29586,12 @@ fn extension(p: String) -> String? = {
   else if string.starts_with(name, ".") and n == 2 then none else list.last(parts)
 }
 
-/// True when p starts with /.
-fn is_absolute(p: String) -> Bool = string.starts_with(p, "/")
+/// True when path starts with /.
+fn is_absolute(path: String) -> Bool = string.starts_with(path, "/")
 
 /// Basename minus last extension; dotfiles as-is.
-fn stem(p: String) -> String = {
-  let name = basename(p)
+fn stem(path: String) -> String = {
+  let name = basename(path)
   let parts = string.split(name, ".")
   let n = list.len(parts)
 
@@ -32193,18 +29600,18 @@ fn stem(p: String) -> String = {
   else {
 
     let prefix_parts = list.take(parts, n - 1)
-    string.join(prefix_parts, ".")
+    list.join(prefix_parts, ".")
   }
 }
 
 /// Resolves . and .. lexically; "" becomes ".".
-fn normalize(p: String) -> String = {
-  let absolute = string.starts_with(p, "/")
+fn normalize(path: String) -> String = {
+  let absolute = string.starts_with(path, "/")
 
 
 
   var stack: List[String] = []
-  for seg in string.split(p, "/") {
+  for seg in string.split(path, "/") {
 
     if string.len(seg) == 0 or seg == "." then ()
     else if seg == ".." then {
@@ -32219,7 +29626,7 @@ fn normalize(p: String) -> String = {
       }
     } else list.push(stack, seg)
   }
-  let joined = string.join(stack, "/")
+  let joined = list.join(stack, "/")
   if absolute then "/" + joined
   else if string.len(joined) == 0 then "." else joined
 }
@@ -32239,7 +29646,7 @@ fn relative_to(path: String, base: String) -> String? = {
   let rest = list.drop(pc, list.len(bc))
   if list.take(pc, list.len(bc)) != bc or list.contains(rest, "..") then none
   else if list.is_empty(rest) then some(".")
-  else some(string.join(rest, "/"))
+  else some(list.join(rest, "/"))
 }
 
 local fn trim_end_slashes(p: String) -> String =
@@ -32456,13 +29863,6 @@ fn random_get(buf: Int, len: Int) -> Int = _
 
 @intrinsic("almide_rt_prim_args_get_list")
 fn args_get_list() -> List[String] = _
-
-
-
-
-
-@intrinsic("almide_rt_prim_args_get_list_full")
-fn args_get_list_full() -> List[String] = _
 
 
 
@@ -32813,100 +30213,80 @@ pub const SRC_PROCESS: &str = r#"
 
 
 
-/// Exit code plus captured stdout and stderr.
+
+
+
+
+
+
+
+
+
+/// Exit code plus captured stdout and stderr; code -1 if a signal ended the child.
 type ProcessStatus = { code: Int, stdout: String, stderr: String }
+
+/// A child's settings: dir "" keeps this one, stdin "" gives it none, timeout_ms 0 means no deadline.
+type ProcessCommand = { cmd: String, args: List[String], dir: String = "", stdin: String = "", timeout_ms: Int = 0 }
+
+/// A running child from process.start.
+mod type ProcessChild = Int
 
 /// Stdout on exit 0; else err with stderr text.
 @ordered
 @intrinsic("almide_rt_process_exec")
 effect fn exec(cmd: String, args: List[String]) -> Result[String, String] = _
 
-/// Ends with code 0..=255; others abort, exit 1.
-@intrinsic("almide_rt_process_exit")
-@category("Abort")
-effect fn exit(code: Int) -> Never = _
-
-/// Full argv, program name at index 0.
-@intrinsic("almide_rt_process_args")
-@category("Env.read")
-effect fn args() -> List[String] = _
-
-/// All stdin lines; err on non-UTF-8 input.
+/// Runs c to its end: any exit code is ok; err if it cannot start or passes its deadline.
 @ordered
-@intrinsic("almide_rt_process_stdin_lines")
-@category("IO.stdin")
-effect fn stdin_lines() -> Result[List[String], String] = _
+effect fn output(c: ProcessCommand) -> Result[ProcessStatus, String] = __os_output(
+  c.cmd,
+  c.args,
+  c.dir,
+  c.stdin,
+  c.timeout_ms,
+)
 
-/// exec in dir; err is stderr, maybe empty.
+/// Runs c on this terminal (its stdin too, unless c.stdin is set); the exit code, -1 if signalled.
 @ordered
-@intrinsic("almide_rt_process_exec_in")
-effect fn exec_in(dir: String, cmd: String, args: List[String]) -> Result[String, String] = _
+effect fn run(c: ProcessCommand) -> Result[Int, String] = __os_run(
+  c.cmd,
+  c.args,
+  c.dir,
+  c.stdin,
+  c.timeout_ms,
+)
 
-/// exec with input piped in; err may be empty.
+/// Starts c in its own process group and returns at once; its output is captured.
 @ordered
-@intrinsic("almide_rt_process_exec_with_stdin")
-effect fn exec_with_stdin(cmd: String, args: List[String], input: String) -> Result[String, String] = _
+effect fn start(c: ProcessCommand) -> Result[ProcessChild, String] = ok(ProcessChild(__os_start(c.cmd, c.args, c.dir, c.stdin, c.timeout_ms)!))
 
+/// Never blocks: none while c runs, then its outcome (err past its deadline).
+effect fn poll(c: ProcessChild) -> Result[ProcessStatus, String]? = match __os_poll(__child(c)) {
+  ok(true) => match __os_wait(__child(c)) {
+    ok(s) => some(ok(s)),
+    err(e) => some(err(e)),
+  },
+  ok(false) => none,
+  err(e) => some(err(e)),
+}
 
+/// Blocks until c ends; its outcome.
+effect fn wait(c: ProcessChild) -> Result[ProcessStatus, String] = __os_wait(__child(c))
 
+/// SIGTERM to c's group, grace_ms to end, then SIGKILL; again after the end is the same outcome.
+effect fn stop(c: ProcessChild, grace_ms: Int) -> Result[ProcessStatus, String] = __os_stop(
+  __child(c),
+  grace_ms,
+)
 
-/// Code and output; code -1 if killed by signal. Child stdin is null.
-@ordered
-@intrinsic("almide_rt_process_exec_status")
-effect fn exec_status(cmd: String, args: List[String]) -> Result[ProcessStatus, String] = _
+/// What c wrote to stdout since the last read; never blocks.
+effect fn read_new_stdout(c: ProcessChild) -> String = __os_read_new(__child(c), 1)
 
+/// What c wrote to stderr since the last read; never blocks.
+effect fn read_new_stderr(c: ProcessChild) -> String = __os_read_new(__child(c), 2)
 
-
-
-
-
-
-
-
-
-
-
-/// exec_status, but kills cmd and errs at timeout_ms.
-@ordered
-@intrinsic("almide_rt_process_exec_status_timeout")
-effect fn exec_status_timeout(cmd: String, args: List[String], timeout_ms: Int) -> Result[ProcessStatus, String] = _
-
-
-
-
-
-
-
-/// Run cmd on this terminal; exit code, -1 if signalled.
-@ordered
-@intrinsic("almide_rt_process_run")
-effect fn run(cmd: String, args: List[String]) -> Result[Int, String] = _
-
-/// run in dir; exit code, -1 if signalled.
-@ordered
-@intrinsic("almide_rt_process_run_in")
-effect fn run_in(dir: String, cmd: String, args: List[String]) -> Result[Int, String] = _
-
-/// Alias of process.run.
-@ordered
-@deprecated(since=10, use="process.run")
-@intrinsic("almide_rt_process_run")
-effect fn exec_attached(cmd: String, args: List[String]) -> Result[Int, String] = _
-
-/// OS process ID of this program.
-@intrinsic("almide_rt_process_pid")
-@category("Env.read")
-effect fn pid() -> Int = _
-
-/// Variable value, or none if unset.
-@intrinsic("almide_rt_process_env")
-@category("Env.read")
-effect fn env(key: String) -> String? = _
-
-/// Pid of cmd started in the background.
-@ordered
-@intrinsic("almide_rt_process_spawn")
-effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _
+/// The OS process id of c, for process.kill.
+effect fn child_pid(c: ProcessChild) -> Int = __os_child_pid(__child(c))
 
 /// Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
 @ordered
@@ -32914,62 +30294,48 @@ effect fn spawn(cmd: String, args: List[String]) -> Result[Int, String] = _
 @intrinsic("almide_rt_process_kill")
 effect fn kill(pid: Int, signal: Int) -> Result[Unit, String] = _
 
-/// Blocks ms milliseconds; negative is 0.
-@intrinsic("almide_rt_process_sleep")
-@category("Time")
-effect fn sleep(ms: Int) -> Unit = _
+/// Ends with code 0..=255; others abort, exit 1.
+@intrinsic("almide_rt_process_exit")
+@category("Abort")
+effect fn exit(code: Int) -> Never = _
 
-/// True while pid exists; false for a pid <= 0.
-@signals_process
-@intrinsic("almide_rt_process_is_alive")
-effect fn is_alive(pid: Int) -> Bool = _
-"#;
-pub const SRC_PROCESS_ARGS: &str = r#"
+/// OS process ID of this program.
+@intrinsic("almide_rt_process_pid")
+@category("Env.read")
+effect fn pid() -> Int = _
 
 
-
-
-
-
-effect fn process_args() -> List[String] = prim.args_get_list_full()
-"#;
-pub const SRC_PROCESS_STDIN_LINES: &str = r#"
-
-
-
-
-
-
-
-
-
-
-
-import io
-
-@implements("process.stdin_lines")
-effect fn process_stdin_lines() -> Result[List[String], String] = {
-  var buf = bytes.zeros(0)
-  var n = 1
-  while n > 0 {
-    let chunk = io.read_n_bytes(4096)
-    n = list.len(chunk)
-    for v in chunk {
-      bytes.push(buf, v)
-    }
-  }
-  if not bytes.is_valid_utf8(buf) then err("process.stdin_lines(): stream did not contain valid UTF-8")
-  else {
-
-
-
-    let parts = string.split(bytes.to_string_lossy(buf), "\n")
-    let cut = list.len(parts) - 1
-    let terminated = list.take(parts, cut) |> list.map((l) => string.strip_suffix(l, "\r") ?? l)
-    let tail = list.drop(parts, cut)
-    ok(if tail == [""] then terminated else terminated + tail)
-  }
+local fn __child(c: ProcessChild) -> Int = match c {
+  ProcessChild(h) => h
 }
+
+
+@ordered
+@intrinsic("almide_rt_process___os_output")
+effect fn __os_output(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[ProcessStatus, String] = _
+
+@ordered
+@intrinsic("almide_rt_process___os_run")
+effect fn __os_run(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
+
+@ordered
+@intrinsic("almide_rt_process___os_start")
+effect fn __os_start(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_process___os_poll")
+effect fn __os_poll(h: Int) -> Result[Bool, String] = _
+
+@intrinsic("almide_rt_process___os_wait")
+effect fn __os_wait(h: Int) -> Result[ProcessStatus, String] = _
+
+@intrinsic("almide_rt_process___os_stop")
+effect fn __os_stop(h: Int, grace_ms: Int) -> Result[ProcessStatus, String] = _
+
+@intrinsic("almide_rt_process___os_read_new")
+effect fn __os_read_new(h: Int, which: Int) -> String = _
+
+@intrinsic("almide_rt_process___os_child_pid")
+effect fn __os_child_pid(h: Int) -> Int = _
 "#;
 pub const SRC_PROCESS_WASM: &str = r#"
 
@@ -32999,26 +30365,15 @@ fn __proc_argv(args: List[String]) -> String = args |> list.map((a) => __proc_ce
 
 effect fn __proc_exec(cmd: String, argv: String) -> Result[String, String] = _
 
-effect fn __proc_exec_in(dir: String, argv: String) -> Result[String, String] = _
 
-effect fn __proc_exec_with_stdin(cmd: String, argv: String) -> Result[String, String] = _
+effect fn __proc_output(cmd: String, argv: String) -> Result[String, String] = _
 
-effect fn __proc_exec_status(cmd: String, argv: String) -> Result[String, String] = _
 
-effect fn __proc_exec_status_timeout(cmd: String, argv: String) -> Result[String, String] = _
-
-effect fn __proc_run(cmd: String, argv: String) -> Result[String, String] = _
-
-effect fn __proc_run_in(dir: String, argv: String) -> Result[String, String] = _
-
-effect fn __proc_spawn(cmd: String, argv: String) -> Result[String, String] = _
+effect fn __proc_run_cmd(dir: String, argv: String) -> Result[String, String] = _
 
 effect fn __proc_kill(pid: String, signal: String) -> Result[String, String] = _
 
 
-
-
-fn __proc_is_alive(pid: String, unused: String) -> Result[String, String] = _
 
 fn __proc_pid(unused: String, unused2: String) -> Result[String, String] = _
 
@@ -33042,49 +30397,19 @@ effect fn __process_exec_impl(cmd: String, args: List[String]) -> Result[String,
   __proc_argv(args),
 )
 
-effect fn __process_exec_in_impl(dir: String, cmd: String, args: List[String]) -> Result[String, String] = __proc_exec_in(
-  dir,
-  __proc_argv([cmd] + args),
-)
-
-effect fn __process_exec_with_stdin_impl(cmd: String, args: List[String], input: String) -> Result[String, String] = __proc_exec_with_stdin(
-  cmd,
-  __proc_argv([input] + args),
-)
-
-effect fn __process_exec_status_impl(cmd: String, args: List[String]) -> Result[ProcessStatus, String] = {
-  let f = __proc_exec_status(cmd, __proc_argv(args))!
+effect fn __process_output_impl(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[ProcessStatus, String] = {
+  let f = __proc_output(cmd, __proc_argv([int.to_string(timeout_ms), dir, stdin] + args))!
   ok(__proc_status(f))
 }
 
-effect fn __process_exec_status_timeout_impl(cmd: String, args: List[String], timeout_ms: Int) -> Result[ProcessStatus, String] = {
-  let f = __proc_exec_status_timeout(cmd, __proc_argv([int.to_string(timeout_ms)] + args))!
-  ok(__proc_status(f))
-}
-
-effect fn __process_run_impl(cmd: String, args: List[String]) -> Result[Int, String] = {
-  let code = __proc_run(cmd, __proc_argv(args))!
+effect fn __process_run_impl(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String] = {
+  let code = __proc_run_cmd(dir, __proc_argv([cmd, stdin, int.to_string(timeout_ms)] + args))!
   ok(int.parse(code) ?? -1)
-}
-
-effect fn __process_run_in_impl(dir: String, cmd: String, args: List[String]) -> Result[Int, String] = {
-  let code = __proc_run_in(dir, __proc_argv([cmd] + args))!
-  ok(int.parse(code) ?? -1)
-}
-
-effect fn __process_spawn_impl(cmd: String, args: List[String]) -> Result[Int, String] = {
-  let pid = __proc_spawn(cmd, __proc_argv(args))!
-  ok(int.parse(pid) ?? -1)
 }
 
 effect fn __process_kill_impl(pid: Int, signal: Int) -> Result[Unit, String] = {
   let _ = __proc_kill(int.to_string(pid), int.to_string(signal))!
   ok(())
-}
-
-fn __process_is_alive_impl(pid: Int) -> Bool = match __proc_is_alive(int.to_string(pid), "") {
-  ok("1") => true,
-  _ => false,
 }
 
 fn __process_pid_impl() -> Int = match __proc_pid("", "") {
@@ -33107,12 +30432,12 @@ effect fn float() -> Float = _
 
 /// Random element of xs; none when empty. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_choice")
-effect fn choice[T](xs: List[T]) -> T? = _
+effect fn choice[A](xs: List[A]) -> A? = _
 
 /// Random permutation of xs as a new list. Not for secrets: use random.bytes.
 @intrinsic("almide_rt_random_shuffle")
 @consume(xs)
-effect fn shuffle[T](xs: List[T]) -> List[T] = _
+effect fn shuffle[A](xs: List[A]) -> List[A] = _
 
 /// n bytes from the OS cryptographic random source (CSPRNG); n < 0 aborts.
 @intrinsic("almide_rt_random_bytes")
@@ -33180,7 +30505,7 @@ else {
 @category
 fn next_float(rng: Rng) -> (Float, Rng) = {
   let (z, next) = rng_next64(rng)
-  (float.from_int(rng_shr(z, 11)) * 1.1102230246251565e-16, next)
+  (float.__from_int(rng_shr(z, 11)) * 1.1102230246251565e-16, next)
 }
 
 /// A uniformly chosen element (none, state unchanged, when xs is empty) and the next state.
@@ -33310,7 +30635,7 @@ fn random_float() -> Float = {
   let _e = prim.random_get(p, 8)
   let r = prim.load64(p)
   let r53 = int.band(r, 0x1FFFFFFFFFFFFF)
-  int.to_float(r53) / 9007199254740992.0
+  int.__raw_to_float(r53) / 9007199254740992.0
 }
 "#;
 pub const SRC_RANDOM_INT: &str = r#"
@@ -33488,7 +30813,7 @@ fn captures(re: Regex, s: String) -> List[String?]? = regex.__captures(re.patter
 fn captures_all(re: Regex, s: String) -> List[List[String?]] = __matches(regex.__scan(re.pattern, s, false)) |> list.map((m) => m |> list.drop(1) |> list.map((c) => __unmark(c)))
 
 /// s with every regex metacharacter escaped, so it matches itself.
-fn escape(s: String) -> String = string.chars(s) |> list.map((c) => if string.contains("\\.+*?()|[]{}^$", c) then "\\" + c else c) |> string.join("")
+fn escape(s: String) -> String = string.to_list(s) |> list.map((c) => if string.contains("\\.+*?()|[]{}^$", c) then "\\" + c else c) |> list.join("")
 
 
 fn __unmark(c: String) -> String? = if string.starts_with(c, "1") then some(string.drop(c, 1)) else none
@@ -33496,7 +30821,7 @@ fn __unmark(c: String) -> String? = if string.starts_with(c, "1") then some(stri
 
 
 fn __matches(scan: List[String]) -> List[List[String]] = {
-  let k = int.parse(list.get_or(scan, 0, "1")) ?? 1
+  let k = int.parse(list.get(scan, 0) ?? "1") ?? 1
   let body = scan |> list.drop(1)
   let n = (list.len(body) - 1) / (k + 1)
   body |> list.take(n * (k + 1)) |> list.chunk(k + 1)
@@ -33504,8 +30829,8 @@ fn __matches(scan: List[String]) -> List[List[String]] = {
 
 
 fn __splice(scan: List[String], f: (List[String?]) -> String) -> String = {
-  let parts = __matches(scan) |> list.map((m) => list.get_or(m, 0, "") + f(m |> list.drop(1) |> list.map((c) => __unmark(c))))
-  string.join(parts, "") + list.get_or(scan, list.len(scan) - 1, "")
+  let parts = __matches(scan) |> list.map((m) => list.get(m, 0) ?? "" + f(m |> list.drop(1) |> list.map((c) => __unmark(c))))
+  list.join(parts, "") + list.get(scan, list.len(scan) - 1) ?? ""
 }
 
 @intrinsic("almide_regex_check")
@@ -36006,8 +33331,8 @@ fn to_err_option[A, E](r: Result[A, E]) -> E? = _
 
 /// (ok values, err values), each in list order.
 @intrinsic("almide_rt_result_partition")
-@consume(rs)
-fn partition[T, E](rs: List[Result[T, E]]) -> (List[T], List[E]) = _
+@consume(xs)
+fn partition[A, E](xs: List[Result[A, E]]) -> (List[A], List[E]) = _
 
 
 
@@ -36044,9 +33369,9 @@ fn or_else[A, E, F](r: Result[A, E], f: (E) -> Result[A, F]) -> Result[A, F] = m
   err(e) => f(e),
 }
 
-/// err(err_val) if pred fails on ok; err kept.
-fn filter[A, E](r: Result[A, E], pred: (A) -> Bool, err_val: E) -> Result[A, E] = match r {
-  ok(v) => if pred(v) then ok(v) else err(err_val),
+/// err(err_val) if f fails on ok; err kept.
+fn filter[A, E](r: Result[A, E], f: (A) -> Bool, err_val: E) -> Result[A, E] = match r {
+  ok(v) => if f(v) then ok(v) else err(err_val),
   err(e) => err(e),
 }
 "#;
@@ -37219,20 +34544,20 @@ fn new[A]() -> Set[A] = _
 @intrinsic("almide_rt_set_from_list")
 fn from_list[A](xs: List[A]) -> Set[A] = _
 
-/// Copy with value appended; unchanged if present.
+/// Copy with x appended; unchanged if present.
 @intrinsic("almide_rt_set_insert")
 @reuse(s)
-fn insert[A](s: Set[A], value: A) -> Set[A] = _
+fn insert[A](s: Set[A], x: A) -> Set[A] = _
 
-/// Copy without value; unchanged if absent.
+/// Copy without x; unchanged if absent.
 @intrinsic("almide_rt_set_remove")
 @reuse(s)
-fn remove[A](s: Set[A], value: A) -> Set[A] = _
+fn remove[A](s: Set[A], x: A) -> Set[A] = _
 
-/// true when value is a member.
+/// true when x is a member.
 @intrinsic("almide_rt_set_contains")
-@borrow_ref(value)
-fn contains[A](s: Set[A], value: A) -> Bool = _
+@borrow_ref(x)
+fn contains[A](s: Set[A], x: A) -> Bool = _
 
 /// Member count; 0 for an empty set.
 @intrinsic("almide_rt_set_len")
@@ -38753,10 +36078,6 @@ fn split(s: String, sep: String) -> List[String] = _
 @intrinsic("almide_rt_string_split_once")
 fn split_once(s: String, sep: String) -> (String, String)? = _
 
-/// Items with sep between; "" for [].
-@intrinsic("almide_rt_string_join")
-fn join(list: List[String], sep: String) -> String = _
-
 /// Codepoint count (not bytes).
 @intrinsic("almide_rt_string_len")
 fn len(s: String) -> Int = _
@@ -38766,9 +36087,9 @@ fn len(s: String) -> Int = _
 @intrinsic("almide_rt_string_len")
 fn length(s: String) -> Int = _
 
-/// sub occurs in s; true for empty sub.
+/// needle occurs in s; true for empty needle.
 @intrinsic("almide_rt_string_contains")
-fn contains(s: String, sub: String) -> Bool = _
+fn contains(s: String, needle: String) -> Bool = _
 
 /// True if a and b hold the same UTF-8 bytes, in time that depends only on
 /// their lengths: no early exit on the first differing byte. Use it to compare
@@ -38794,13 +36115,9 @@ fn slice(s: String, start: Int, end: Int = 9223372036854775807) -> String = _
 @intrinsic("almide_rt_string_byte_slice")
 fn byte_slice(s: String, start: Int, end: Int) -> String? = _
 
-/// Left-padded to n chars with ch; never truncates.
+/// Left-padded to n chars with fill; never truncates.
 @intrinsic("almide_rt_string_pad_left")
-fn pad_start(s: String, n: Int, ch: String) -> String = _
-
-/// UTF-8 bytes of s as Ints 0..255.
-@intrinsic("almide_rt_string_to_bytes")
-fn to_bytes(s: String) -> List[Int] = _
+fn pad_start(s: String, n: Int, fill: String) -> String = _
 
 /// First char uppercased as to_upper does, rest untouched.
 @intrinsic("almide_rt_string_capitalize")
@@ -38828,7 +36145,7 @@ fn lines(s: String) -> List[String] = _
 
 /// Each codepoint as a one-char string.
 @intrinsic("almide_rt_string_chars")
-fn chars(s: String) -> List[String] = _
+fn to_list(s: String) -> List[String] = _
 
 /// Codepoint index of first needle, or none.
 @intrinsic("almide_rt_string_index_of")
@@ -38837,10 +36154,6 @@ fn index_of(s: String, needle: String) -> Int? = _
 /// s repeated n times; empty for n <= 0.
 @intrinsic("almide_rt_string_repeat")
 fn repeat(s: String, n: Int) -> String = _
-
-/// Lossy UTF-8 decode; bad sequences become U+FFFD.
-@intrinsic("almide_rt_string_from_bytes")
-fn from_bytes(bytes: List[Int]) -> String = _
 
 /// All ASCII 0-9; false for empty s.
 @intrinsic("almide_rt_string_is_digit")
@@ -38866,17 +36179,22 @@ fn is_upper(s: String) -> Bool = _
 @intrinsic("almide_rt_string_is_lower")
 fn is_lower(s: String) -> Bool = _
 
-/// Scalar value of first char; none if s empty.
+/// Scalar value of s when s is exactly one codepoint; none otherwise.
 @intrinsic("almide_rt_string_codepoint")
-fn codepoint(s: String) -> Int? = _
+fn to_codepoint(s: String) -> Int? = _
 
-/// One-char string; "" if n is not a scalar.
-@intrinsic("almide_rt_string_from_codepoint")
-fn from_codepoint(n: Int) -> String = _
+/// One-char string of n; none if n is not a Unicode scalar value.
+fn from_codepoint(n: Int) -> String? =
+  if n < 0 or n > 1114111 or (n >= 55296 and n <= 57343) then none
+  else some(string.__from_codepoint(n))
 
-/// Right-padded to n chars with ch; never truncates.
+
+@intrinsic("almide_rt_string___from_codepoint")
+fn __from_codepoint(n: Int) -> String = _
+
+/// Right-padded to n chars with fill; never truncates.
 @intrinsic("almide_rt_string_pad_right")
-fn pad_end(s: String, n: Int, ch: String) -> String = _
+fn pad_end(s: String, n: Int, fill: String) -> String = _
 
 /// s without leading whitespace.
 @intrinsic("almide_rt_string_trim_start")
@@ -38886,9 +36204,12 @@ fn trim_start(s: String) -> String = _
 @intrinsic("almide_rt_string_trim_end")
 fn trim_end(s: String) -> String = _
 
-/// Non-overlapping sub count; len+1 if sub empty.
-@intrinsic("almide_rt_string_count")
-fn count(s: String, sub: String) -> Int = _
+/// Non-overlapping needle count; len+1 if needle empty.
+@intrinsic("almide_rt_string_count_matches")
+fn count_matches(s: String, needle: String) -> Int = _
+
+/// Number of characters for which f is true.
+fn count(s: String, f: (String) -> Bool) -> Int = list.count(string.to_list(s), f)
 
 /// True only for ""; " " is not empty.
 @intrinsic("almide_rt_string_is_empty")
@@ -38938,14 +36259,19 @@ fn drop(s: String, n: Int) -> String = _
 @intrinsic("almide_rt_string_drop_end")
 fn drop_end(s: String, n: Int) -> String = _
 
-/// (char, count) per run of equal codepoints.
-@intrinsic("almide_rt_string_run_length_encode")
-fn run_length_encode(s: String) -> List[(String, Int)] = _
 
-
-/// Appends suffix to s in place.
+/// Appends x to s in place.
 @intrinsic("almide_rt_string_push")
-fn push(mut s: String, suffix: String) -> Unit = _
+fn push(mut s: String, x: String) -> Unit = _
+
+/// Removes and returns the last character; none if s is empty.
+fn pop(mut s: String) -> String? = {
+  let popped = string.last(s)
+  if string.len(s) > 0 then {
+    s = string.drop_end(s, 1)
+  } else ()
+  popped
+}
 
 /// Empties s in place.
 @intrinsic("almide_rt_string_clear")
@@ -38967,16 +36293,16 @@ else if cp < 2048 then 2
 else if cp < 65536 then 3 else 4
 
 /// UTF-8 byte count (string.len counts codepoints).
-fn byte_len(s: String) -> Int = string.chars(s) |> list.fold(
+fn byte_len(s: String) -> Int = string.to_list(s) |> list.fold(
   0,
-  (n, c) => n + utf8_width(string.codepoint(c) ?? 0),
+  (n, c) => n + utf8_width(string.to_codepoint(c) ?? 0),
 )
 
 local fn utf16_units(cp: Int) -> List[Int] = if cp < 65536 then [cp]
 else [55296 + (cp - 65536) / 1024, 56320 + (cp - 65536) % 1024]
 
 /// UTF-16 code units; a codepoint past U+FFFF is a surrogate pair.
-fn to_utf16(s: String) -> List[Int] = string.chars(s) |> list.flat_map((c) => utf16_units(string.codepoint(c) ?? 0))
+fn to_utf16(s: String) -> List[Int] = string.to_list(s) |> list.flat_map((c) => utf16_units(string.to_codepoint(c) ?? 0))
 
 
 
@@ -38993,7 +36319,7 @@ fn from_utf16(xs: List[Int]) -> Result[String, String] = {
     } else if u >= 55296 and u <= 56319 then {
       let lo = list.get(xs, i + 1) ?? -1
       if lo >= 56320 and lo <= 57343 then {
-        list.push(out, string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320)))
+        list.push(out, string.from_codepoint(65536 + (u - 55296) * 1024 + (lo - 56320)) ?? "")
         i = i + 2
       } else {
         bad = "string.from_utf16: unpaired surrogate at ${i}"
@@ -39001,21 +36327,21 @@ fn from_utf16(xs: List[Int]) -> Result[String, String] = {
     } else if u >= 56320 and u <= 57343 then {
       bad = "string.from_utf16: unpaired surrogate at ${i}"
     } else {
-      list.push(out, string.from_codepoint(u))
+      list.push(out, string.from_codepoint(u) ?? "")
       i = i + 1
     }
   }
-  if bad == "" then ok(string.join(out, "")) else err(bad)
+  if bad == "" then ok(list.join(out, "")) else err(bad)
 }
 
 /// The characters of s for which f is true.
-fn filter(s: String, f: (String) -> Bool) -> String = string.join(
-  list.filter(string.chars(s), f),
+fn filter(s: String, f: (String) -> Bool) -> String = list.join(
+  list.filter(string.to_list(s), f),
   "",
 )
 
 /// f folded over the characters of s, left to right.
-fn fold[B](s: String, init: B, f: (B, String) -> B) -> B = list.fold(string.chars(s), init, f)
+fn fold[B](s: String, init: B, f: (B, String) -> B) -> B = list.fold(string.to_list(s), init, f)
 
 /// s with x inserted before character i; i outside 0..=len aborts.
 fn insert(s: String, i: Int, x: String) -> String = {
@@ -39035,50 +36361,54 @@ fn remove_at(s: String, i: Int) -> String = {
 fn new() -> String = ""
 
 /// The strings of xs joined with nothing between.
-fn from_list(xs: List[String]) -> String = string.join(xs, "")
+fn from_list(xs: List[String]) -> String = list.join(xs, "")
 
 /// (index, character) pairs from 0.
-fn enumerate(s: String) -> List[(Int, String)] = list.enumerate(string.chars(s))
+fn enumerate(s: String) -> List[(Int, String)] = list.enumerate(string.to_list(s))
 
 /// Characters paired with ys; stops at the shorter.
-fn zip[B](s: String, ys: List[B]) -> List[(String, B)] = list.zip(string.chars(s), ys)
+fn zip[B](s: String, ys: List[B]) -> List[(String, B)] = list.zip(string.to_list(s), ys)
 
 /// f over characters paired with ys; stops at the shorter.
 fn zip_with[B, C](s: String, ys: List[B], f: (String, B) -> C) -> List[C] = list.zip_with(
-  string.chars(s),
+  string.to_list(s),
   ys,
   f,
 )
 
 /// The some results of f over the characters, in order.
-fn filter_map[B](s: String, f: (String) -> B?) -> List[B] = list.filter_map(string.chars(s), f)
+fn filter_map[B](s: String, f: (String) -> B?) -> List[B] = list.filter_map(string.to_list(s), f)
 
 /// The first some result of f over the characters, or none.
-fn find_map[B](s: String, f: (String) -> B?) -> B? = list.find_map(string.chars(s), f)
+fn find_map[B](s: String, f: (String) -> B?) -> B? = list.find_map(string.to_list(s), f)
 
 /// f folded over the characters from the first; none if s is empty.
-fn reduce(s: String, f: (String, String) -> String) -> String? = list.reduce(string.chars(s), f)
+fn reduce(s: String, f: (String, String) -> String) -> String? = list.reduce(string.to_list(s), f)
 
 /// The running fold over the characters, init excluded.
-fn scan[B](s: String, init: B, f: (B, String) -> B) -> List[B] = list.scan(string.chars(s), init, f)
+fn scan[B](s: String, init: B, f: (B, String) -> B) -> List[B] = list.scan(
+  string.to_list(s),
+  init,
+  f,
+)
 
 /// (characters where f is true, the rest), each in order.
 fn partition(s: String, f: (String) -> Bool) -> (List[String], List[String]) = list.partition(
-  string.chars(s),
+  string.to_list(s),
   f,
 )
 
 /// Characters grouped by f's key, each group in order.
 fn group_by[B](s: String, f: (String) -> B) -> Map[B, List[String]] = list.group_by(
-  string.chars(s),
+  string.to_list(s),
   f,
 )
 
 /// The characters in codepoint order.
-fn sort(s: String) -> List[String] = list.sort(string.chars(s))
+fn sort(s: String) -> List[String] = list.sort(string.to_list(s))
 
 /// The characters ordered by f's key; equal keys keep their order.
-fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.chars(s), f)
+fn sort_by[B](s: String, f: (String) -> B) -> List[String] = list.sort_by(string.to_list(s), f)
 
 
 
@@ -39123,21 +36453,21 @@ local fn merge_sort_with(xs: List[String], cmp: (String, String) -> Int) -> List
 
 /// The characters ordered by cmp (negative = first argument first); stable.
 fn sort_with(s: String, cmp: (String, String) -> Int) -> List[String] = merge_sort_with(
-  string.chars(s),
+  string.to_list(s),
   cmp,
 )
 
 /// The smallest character in codepoint order; none if empty.
-fn min(s: String) -> String? = list.min(string.chars(s))
+fn min(s: String) -> String? = list.min(string.to_list(s))
 
 /// The largest character in codepoint order; none if empty.
-fn max(s: String) -> String? = list.max(string.chars(s))
+fn max(s: String) -> String? = list.max(string.to_list(s))
 
 /// The first character with the smallest key; none if empty.
-fn min_by[K](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.chars(s), f))
+fn min_by[K](s: String, f: (String) -> K) -> String? = list.first(list.sort_by(string.to_list(s), f))
 
 /// The last character with the largest key; none if empty.
-fn max_by[K](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.chars(s), f))
+fn max_by[K](s: String, f: (String) -> K) -> String? = list.last(list.sort_by(string.to_list(s), f))
 
 local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String) -> Int, want_max: Bool) -> String = match list.get(
   xs,
@@ -39153,56 +36483,56 @@ local fn pick_with(xs: List[String], i: Int, best: String, cmp: (String, String)
 
 /// The first smallest character by cmp; none if empty.
 fn min_with(s: String, cmp: (String, String) -> Int) -> String? = match string.first(s) {
-  some(c) => some(pick_with(string.chars(s), 1, c, cmp, false)),
+  some(c) => some(pick_with(string.to_list(s), 1, c, cmp, false)),
   none => none,
 }
 
 /// The last largest character by cmp; none if empty.
 fn max_with(s: String, cmp: (String, String) -> Int) -> String? = match string.first(s) {
-  some(c) => some(pick_with(string.chars(s), 1, c, cmp, true)),
+  some(c) => some(pick_with(string.to_list(s), 1, c, cmp, true)),
   none => none,
 }
 
 /// Index of the first character where f is true, or none.
-fn find_index(s: String, f: (String) -> Bool) -> Int? = list.find_index(string.chars(s), f)
+fn find_index(s: String, f: (String) -> Bool) -> Int? = list.find_index(string.to_list(s), f)
 
 /// The longest prefix whose characters all satisfy f.
-fn take_while(s: String, f: (String) -> Bool) -> String = string.join(
-  list.take_while(string.chars(s), f),
+fn take_while(s: String, f: (String) -> Bool) -> String = list.join(
+  list.take_while(string.to_list(s), f),
   "",
 )
 
 /// s after the longest prefix whose characters all satisfy f.
-fn drop_while(s: String, f: (String) -> Bool) -> String = string.join(
-  list.drop_while(string.chars(s), f),
+fn drop_while(s: String, f: (String) -> Bool) -> String = list.join(
+  list.drop_while(string.to_list(s), f),
   "",
 )
 
 /// Runs of n characters, the last may be shorter; n <= 0 aborts.
 fn chunk(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.chunk: size must be positive, got ${n}")
-  else list.chunk(string.chars(s), n) |> list.map((cs) => string.join(cs, ""))
+  else list.chunk(string.to_list(s), n) |> list.map((cs) => list.join(cs, ""))
 
 /// Every run of n consecutive characters; [] if n > len; n <= 0 aborts.
 fn window(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.window: size must be positive, got ${n}")
-  else list.window(string.chars(s), n) |> list.map((cs) => string.join(cs, ""))
+  else list.window(string.to_list(s), n) |> list.map((cs) => list.join(cs, ""))
 
 /// (first n characters, the rest); n past the end gives (s, ""), n < 0 gives ("", s).
 fn split_at(s: String, n: Int) -> (String, String) = (string.take(s, n), string.drop(s, n))
 
 /// s with each run of equal adjacent characters collapsed to one.
-fn dedup(s: String) -> String = string.join(list.dedup(string.chars(s)), "")
+fn dedup(s: String) -> String = list.join(list.dedup(string.to_list(s)), "")
 
 /// The characters of s with sep between each pair.
-fn intersperse(s: String, sep: String) -> String = string.join(string.chars(s), sep)
+fn intersperse(s: String, sep: String) -> String = list.join(string.to_list(s), sep)
 
 /// The first occurrence of each character, in order.
-fn unique(s: String) -> String = string.join(list.unique(string.chars(s)), "")
+fn unique(s: String) -> String = list.join(list.unique(string.to_list(s)), "")
 
 /// The first character of each key f gives, in order.
-fn unique_by[K](s: String, f: (String) -> K) -> String = string.join(
-  list.unique_by(string.chars(s), f),
+fn unique_by[K](s: String, f: (String) -> K) -> String = list.join(
+  list.unique_by(string.to_list(s), f),
   "",
 )
 
@@ -39459,10 +36789,16 @@ fn __sco_none() -> Int? = none
 
 fn __sco_some(i: Int) -> Int? = some(i)
 
+
+fn __scp_width(b0: Int) -> Int = if b0 < 128 then 1
+else if b0 < 224 then 2
+else if b0 < 240 then 3 else 4
+
 fn string_codepoint(s: String) -> Int? = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
-  let cp = if blen == 0 then 0 - 1 else __scp_decode(h + 12)
+  let one = blen > 0 and blen == __scp_width(prim.load8(h + 12))
+  let cp = if one then __scp_decode(h + 12) else 0 - 1
   if cp < 0 then __sco_none() else __sco_some(cp)
 }
 "#;
@@ -39557,7 +36893,7 @@ fn __et_char(c: String, n: Int) -> String = match n {
 
 @implements("string.__err_text")
 fn string_err_text(s: String) -> String =
-  if string.chars(s) |> list.any((c) => __et_escaped(string.codepoint(c) ?? 0)) then string.chars(s) |> list.map((c) => __et_char(c, string.codepoint(c) ?? 0)) |> list.join("")
+  if string.to_list(s) |> list.any((c) => __et_escaped(string.to_codepoint(c) ?? 0)) then string.to_list(s) |> list.map((c) => __et_char(c, string.to_codepoint(c) ?? 0)) |> list.join("")
   else s
 "#;
 pub const SRC_STRING_FIRST_LAST: &str = r#"
@@ -39768,174 +37104,6 @@ fn string_is_whitespace(s: String) -> Bool = {
   __ws_all(h, blen, 0)
 }
 "#;
-pub const SRC_STRING_FROM_BYTES_SELF: &str = r#"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-fn __fb_byte(h: Int, i: Int) -> Int = {
-  let v = prim.load64(h + 12 + i * 8)
-  prim.band(v, 255)
-}
-
-
-
-fn __fb_lead_len(b0: Int) -> Int = if b0 < 128 then 1
-else if b0 < 194 then 0
-else if b0 < 224 then 2
-else if b0 < 240 then 3
-else if b0 < 245 then 4 else 0
-
-
-
-fn __fb_lo2(b0: Int) -> Int = if b0 == 224 then 160
-else if b0 == 240 then 144 else 128
-
-
-fn __fb_hi2(b0: Int) -> Int = if b0 == 237 then 159
-else if b0 == 244 then 143 else 191
-
-
-
-fn __fb_is_cont(b: Int) -> Bool = if b >= 128 then (if b <= 191 then true else false)
-else false
-
-
-fn __fb_in_range(b: Int, lo: Int, hi: Int) -> Bool =
-  if b >= lo then (if b <= hi then true else false)
-  else false
-
-
-
-
-
-
-
-
-fn __fb_step4(h: Int, i: Int, n: Int) -> Int = {
-  let trunc = i + 3 >= n
-  let b3 = __fb_byte(h, i + 3)
-  let ok3 = __fb_is_cont(b3)
-
-  if trunc then 6
-  else if ok3 then 9 else 6
-}
-
-
-
-fn __fb_step3b(h: Int, i: Int, n: Int, len: Int) -> Int = {
-  let three = len == 3
-
-  if three then 7
-  else __fb_step4(h, i, n)
-}
-
-
-
-fn __fb_step3(h: Int, i: Int, n: Int, len: Int) -> Int = {
-  let trunc = i + 2 >= n
-  let b2 = __fb_byte(h, i + 2)
-  let ok2 = __fb_is_cont(b2)
-
-  if trunc then 4
-  else if ok2 then __fb_step3b(h, i, n, len)
-  else 4
-}
-
-
-fn __fb_step2b(h: Int, i: Int, n: Int, len: Int) -> Int = {
-  let two = len == 2
-
-  if two then 5
-  else __fb_step3(h, i, n, len)
-}
-
-
-
-fn __fb_step2(h: Int, i: Int, n: Int, b0: Int, len: Int) -> Int = {
-  let trunc = i + 1 >= n
-  let b1 = __fb_byte(h, i + 1)
-  let lo = __fb_lo2(b0)
-  let hi = __fb_hi2(b0)
-  let ok1 = __fb_in_range(b1, lo, hi)
-
-  if trunc then 2
-  else if ok1 then __fb_step2b(h, i, n, len)
-  else 2
-}
-
-
-fn __fb_step(h: Int, i: Int, n: Int) -> Int = {
-  let b0 = __fb_byte(h, i)
-  let ascii = b0 < 128
-  let len = __fb_lead_len(b0)
-  let bad_lead = len == 0
-
-  if ascii then 3
-  else if bad_lead then 2
-  else __fb_step2(h, i, n, b0, len)
-}
-
-
-
-fn __fb_outlen(h: Int, i: Int, n: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let e = __fb_step(h, i, n)
-  let consume = e / 2
-  let valid = e % 2
-  let add = if valid == 1 then consume else 3
-  __fb_outlen(h, i + consume, n, acc + add)
-}
-
-
-fn __fb_copy(sh: Int, i: Int, dh: Int, d: Int, consume: Int) -> Int = if consume <= 0 then d
-else {
-  prim.store8(dh + d, __fb_byte(sh, i))
-  __fb_copy(sh, i + 1, dh, d + 1, consume - 1)
-}
-
-
-fn __fb_fill(sh: Int, i: Int, n: Int, dh: Int, d: Int) -> Int = if i >= n then d
-else {
-  let e = __fb_step(sh, i, n)
-  let consume = e / 2
-  let valid = e % 2
-  if valid == 1 then {
-    let d2 = __fb_copy(sh, i, dh, d, consume)
-    __fb_fill(sh, i + consume, n, dh, d2)
-  } else {
-    prim.store8(dh + d, 239)
-
-    prim.store8(dh + d + 1, 191)
-
-    prim.store8(dh + d + 2, 189)
-
-    __fb_fill(sh, i + consume, n, dh, d + 3)
-  }
-}
-
-fn string_from_bytes(xs: List[Int]) -> String = {
-  let h = prim.handle(xs)
-  let n = prim.load32(h + 4)
-  let outlen = __fb_outlen(h, 0, n, 0)
-  let out = prim.alloc_str(outlen)
-  let _x = __fb_fill(h, 0, n, prim.handle(out) + 12, 0)
-  out
-}
-"#;
 pub const SRC_STRING_FROM_CODEPOINT: &str = r#"
 
 
@@ -40053,17 +37221,6 @@ fn __join_fill(rh: Int, ph: Int, count: Int, seph: Int, sep_len: Int, i: Int, of
     let _x = __bcopy(rh + 12 + off1, elem + 12, elen, 0)
     __join_fill(rh, ph, count, seph, sep_len, i + 1, off1 + elen)
   }
-
-fn string_join(parts: List[String], sep: String) -> String = {
-  let ph = prim.handle(parts)
-  let count = prim.load32(ph + 4)
-  let seph = prim.handle(sep)
-  let sep_len = prim.load32(seph + 4)
-  let total = __join_totlen(ph, count, sep_len, 0, 0)
-  let result = prim.alloc_str(total)
-  let _x = __join_fill(prim.handle(result), ph, count, seph, sep_len, 0, 0)
-  result
-}
 
 
 
@@ -40429,58 +37586,6 @@ fn string_reverse(s: String) -> String = {
   let dbase = prim.handle(buf) + 12
   let _x = __rev_walk(h + 12, h + 12 + blen, dbase, blen)
   buf
-}
-"#;
-pub const SRC_STRING_RLE: &str = r#"
-
-
-
-
-
-
-
-fn __rle_runs(ch: Int, n: Int, i: Int, acc: Int) -> Int = if i >= n then acc
-else {
-  let cur: String = prim.load_handle(ch + 12 + i * 8)
-  let prev: String = prim.load_handle(ch + 12 + (i - 1) * 8)
-  if cur == prev then __rle_runs(ch, n, i + 1, acc)
-  else __rle_runs(ch, n, i + 1, acc + 1)
-}
-
-
-fn __rle_runlen(ch: Int, n: Int, j: Int, c: String, acc: Int) -> Int = if j >= n then acc
-else {
-  let cur: String = prim.load_handle(ch + 12 + j * 8)
-  if cur == c then __rle_runlen(ch, n, j + 1, c, acc + 1)
-  else acc
-}
-
-fn __rle_fill(dh: Int, ch: Int, n: Int, j: Int, w: Int) -> Int = if j >= n then 0
-else {
-  let c: String = prim.load_handle(ch + 12 + j * 8)
-  let cnt = __rle_runlen(ch, n, j + 1, c, 1)
-  let copy = string.repeat(c, 1)
-  let pair = prim.alloc_list(2)
-  let ph = prim.handle(pair)
-  prim.store_str(ph + 12, copy)
-  prim.store64(ph + 20, cnt)
-  prim.store_str(dh + 12 + w * 8, pair)
-  __rle_fill(dh, ch, n, j + cnt, w + 1)
-}
-
-fn string_run_length_encode(s: String) -> List[(String, Int)] = {
-  let cs = string.chars(s)
-  let ch = prim.handle(cs)
-  let n = prim.load32(ch + 4)
-  if n == 0 then {
-    let out0: List[(String, Int)] = prim.alloc_list_str(0)
-    out0
-  } else {
-    let runs = __rle_runs(ch, n, 1, 1)
-    let out: List[(String, Int)] = prim.alloc_list_str(runs)
-    let _f = __rle_fill(prim.handle(out), ch, n, 0, 0)
-    out
-  }
 }
 "#;
 pub const SRC_STRING_SEARCH: &str = r#"
@@ -41100,25 +38205,6 @@ fn string_drop_end(s: String, n: Int) -> String = {
   __td_bytes(base, cut)
 }
 "#;
-pub const SRC_STRING_TO_BYTES: &str = r#"
-
-
-
-fn __tb_fill(sh: Int, dh: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  let b = prim.load8(sh + i)
-  prim.store64(dh + 12 + i * 8, b)
-  __tb_fill(sh, dh, n, i + 1)
-}
-
-fn string_to_bytes(s: String) -> List[Int] = {
-  let h = prim.handle(s)
-  let n = prim.load32(h + 4)
-  let buf = prim.alloc_list(n)
-  let _f = __tb_fill(h + 12, prim.handle(buf), n, 0)
-  buf
-}
-"#;
 pub const SRC_STRING_TO_INT: &str = r#"
 
 
@@ -41126,28 +38212,6 @@ pub const SRC_STRING_TO_INT: &str = r#"
 
 
 
-
-
-fn __sti_ws(b: Int) -> Bool = if b == 32 then true
-else if b < 9 then false
-else if b <= 13 then true else false
-
-
-fn __sti_trim_s(data: Int, pos: Int, end: Int) -> Int = if pos >= end then pos
-else {
-  let b = prim.load8(data + pos)
-  let w = __sti_ws(b)
-  if w then __sti_trim_s(data, pos + 1, end)
-  else pos
-}
-
-
-fn __sti_trim_e(data: Int, end: Int) -> Int = if end <= 0 then 0
-else {
-  let b = prim.load8(data + end - 1)
-  let w = __sti_ws(b)
-  if w then __sti_trim_e(data, end - 1) else end
-}
 
 
 fn __sti_cutoff() -> Int = 922337203685477580
@@ -41204,21 +38268,6 @@ fn __sti_atrim_e(data: Int, start: Int, end: Int) -> Int =
 
 fn string_to_int(s: String) -> Result[Int, String] = __sti_raw(s)
 
-
-
-
-
-fn __sti_bare(s: String) -> Bool = {
-  let h = prim.handle(s)
-  let n = prim.load32(h + 4)
-  if n == 0 then false
-  else {
-    let b0 = prim.load8(h + 12)
-    let b1 = prim.load8(h + 12 + n - 1)
-    b0 > 32 and b0 < 127 and b1 > 32 and b1 < 127
-  }
-}
-
 fn __sti_raw(s: String) -> Result[Int, String] = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
@@ -41237,103 +38286,6 @@ fn __sti_raw(s: String) -> Result[Int, String] = {
   else (if signonly then 2 else code0)
   let m = __sti_val(data, dstart, te, 0)
   let val = if neg then 0 - m else m
-  if code == 0 then ok(val)
-  else if code == 1 then err("cannot parse integer from empty string")
-  else if code == 2 then err("invalid digit found in string")
-  else if code == 3 then err("number too large to fit in target type") else err("number too small to fit in target type")
-}
-
-
-
-
-
-
-
-
-fn __hex_d(b: Int) -> Int = if b < 48 then 0 - 1
-else if b <= 57 then b - 48
-else if b < 65 then 0 - 1
-else if b <= 70 then b - 55
-else if b < 97 then 0 - 1
-else if b <= 102 then b - 87 else 0 - 1
-
-
-fn __hex_strip(data: Int, pos: Int, end: Int) -> Int = if pos + 2 > end then pos
-else {
-  let b0 = prim.load8(data + pos)
-  let b1 = prim.load8(data + pos + 1)
-  if b0 == 48 then (if b1 == 120 then __hex_strip(data, pos + 2, end)
-  else pos)
-  else pos
-}
-
-
-
-fn __hex_over(neg: Bool, acc: Int, d: Int) -> Int = {
-  let maxv = 9223372036854775807
-  let minv = prim.bshl(1, 63)
-  if neg then {
-    let lim = (minv + d) / 16
-    if acc < lim then 1 else 0
-  } else {
-    let lim = (maxv - d) / 16
-    if acc > lim then 1 else 0
-  }
-}
-
-
-fn __hex_code(data: Int, pos: Int, end: Int, neg: Bool, acc: Int) -> Int = if pos >= end then 0
-else {
-  let b = prim.load8(data + pos)
-  let d = __hex_d(b)
-  if d < 0 then 2
-  else {
-    let over = __hex_over(neg, acc, d)
-    if over == 1 then (if neg then 4 else 3)
-    else {
-      let na = acc * 16 - d
-      let pa = acc * 16 + d
-      let acc2 = if neg then na else pa
-      __hex_code(data, pos + 1, end, neg, acc2)
-    }
-  }
-}
-
-
-fn __hex_val(data: Int, pos: Int, end: Int, neg: Bool, acc: Int) -> Int = if pos >= end then acc
-else {
-  let b = prim.load8(data + pos)
-  let d = __hex_d(b)
-  let na = acc * 16 - d
-  let pa = acc * 16 + d
-  let acc2 = if neg then na else pa
-  __hex_val(data, pos + 1, end, neg, acc2)
-}
-
-fn int_from_hex(s: String) -> Result[Int, String] = if __sti_bare(s) then __hex_raw(s)
-else {
-  let t = string.trim(s)
-  __hex_raw(t)
-}
-
-fn __hex_raw(s: String) -> Result[Int, String] = {
-  let h = prim.handle(s)
-  let blen = prim.load32(h + 4)
-  let data = h + 12
-  let ts = __sti_trim_s(data, 0, blen)
-  let te = __sti_trim_e(data, blen)
-  let s0 = __hex_strip(data, ts, te)
-  let empty = s0 >= te
-  let b0 = if empty then 48 else prim.load8(data + s0)
-  let neg = b0 == 45
-  let hassign = if b0 == 43 then 1
-  else (if b0 == 45 then 1 else 0)
-  let dstart = s0 + hassign
-  let signonly = dstart >= te
-  let code0 = __hex_code(data, dstart, te, neg, 0)
-  let code = if empty then 1
-  else (if signonly then 2 else code0)
-  let val = __hex_val(data, dstart, te, neg, 0)
   if code == 0 then ok(val)
   else if code == 1 then err("cannot parse integer from empty string")
   else if code == 2 then err("invalid digit found in string")
@@ -41728,7 +38680,7 @@ pub const SRC_TESTING: &str = r#"
 
 
 /// Fails unless f, run alone in a child, aborts with text containing expected.
-fn assert_aborts[T](expected: String, f: () -> T) -> Unit = panic("testing.assert_aborts runs only as a direct call in a test block (E099)")
+fn assert_aborts[A](expected: String, f: () -> A) -> Unit = panic("testing.assert_aborts runs only as a direct call in a test block (E099)")
 
 
 
@@ -41799,33 +38751,35 @@ fn assert_contains(haystack: String, needle: String) -> Unit = _
 @intrinsic("almide_rt_test_assert_approx")
 fn assert_approx(a: Float, b: Float, tolerance: Float) -> Unit = _
 
+
+
+
+
 /// Fails unless a > b; equal fails.
-@intrinsic("almide_rt_test_assert_gt")
-fn assert_gt(a: Int, b: Int) -> Unit = _
+fn assert_gt[A](a: A, b: A) -> Unit = if a > b then () else panic("assert_gt failed")
 
 /// Fails unless a < b; equal fails.
-@intrinsic("almide_rt_test_assert_lt")
-fn assert_lt(a: Int, b: Int) -> Unit = _
+fn assert_lt[A](a: A, b: A) -> Unit = if a < b then () else panic("assert_lt failed")
 
-/// Fails when opt is none.
+/// Fails when o is none.
 @intrinsic("almide_rt_test_assert_some")
-@borrow_ref(opt)
-fn assert_some[A](opt: A?) -> Unit = _
+@borrow_ref(o)
+fn assert_some[A](o: A?) -> Unit = _
 
-/// Fails when result is an err.
+/// Fails when r is an err.
 @intrinsic("almide_rt_test_assert_ok")
-@borrow_ref(result)
-fn assert_ok[A, B](result: Result[A, B]) -> Unit = _
+@borrow_ref(r)
+fn assert_ok[A, B](r: Result[A, B]) -> Unit = _
 
-/// Fails when opt is some.
+/// Fails when o is some.
 @intrinsic("almide_rt_test_assert_none")
-@borrow_ref(opt)
-fn assert_none[A](opt: A?) -> Unit = _
+@borrow_ref(o)
+fn assert_none[A](o: A?) -> Unit = _
 
-/// Fails when result is ok.
+/// Fails when r is ok.
 @intrinsic("almide_rt_test_assert_err")
-@borrow_ref(result)
-fn assert_err[A, B](result: Result[A, B]) -> Unit = _
+@borrow_ref(r)
+fn assert_err[A, B](r: Result[A, B]) -> Unit = _
 
 
 
@@ -41850,10 +38804,6 @@ pub const SRC_TESTING_ASSERT: &str = r#"
 
 
 
-
-fn testing_assert_gt(a: Int, b: Int) -> Unit = if a > b then () else prim.die(prim.handle("assert_gt failed\n"))
-
-fn testing_assert_lt(a: Int, b: Int) -> Unit = if a < b then () else prim.die(prim.handle("assert_lt failed\n"))
 
 fn testing_assert_approx(a: Float, b: Float, epsilon: Float) -> Unit =
   if float.abs(a - b) < epsilon then () else prim.die(prim.handle("assert_approx failed\n"))
@@ -41904,65 +38854,16 @@ fn testing_assert_err_sc(r: Result[Int, String]) -> Unit = {
   if prim.load32(h + 4) != 0 then () else prim.die(prim.handle("assert_err failed\n"))
 }
 "#;
-pub const SRC_UINT16: &str = r#"
+pub const SRC_UINT16: &str = r#"/// Decimal digits; never a sign.
+fn to_string(x: UInt16) -> String = int.to_string(int.__from_uint16(x))
 
-
-
-/// Wraps to 8 bits; 255 becomes -1.
-fn to_int8(x: UInt16) -> Int8 = int.to_int8(int.from_uint16(x))
-
-/// Wraps to 16 bits; 65535 becomes -1.
-fn to_int16(x: UInt16) -> Int16 = int.to_int16(int.from_uint16(x))
-
-/// Zero-extending widen; always exact.
-fn to_int32(x: UInt16) -> Int32 = int.to_int32(int.from_uint16(x))
-
-/// Zero-extending widen; always exact.
-fn to_int64(x: UInt16) -> Int64 = int.to_int64(int.from_uint16(x))
-
-/// Wraps to 8 bits; 256 becomes 0.
-fn to_uint8(x: UInt16) -> UInt8 = int.to_uint8(int.from_uint16(x))
-
-/// Zero-extending widen; always exact.
-fn to_uint32(x: UInt16) -> UInt32 = int.to_uint32(int.from_uint16(x))
-
-/// Zero-extending widen; always exact.
-fn to_uint64(x: UInt16) -> UInt64 = int.to_uint64(int.from_uint16(x))
-
-/// Same value as Float32; always exact.
-fn to_float32(x: UInt16) -> Float32 = int.to_float32(int.from_uint16(x))
-
-/// Same value as Float64; always exact.
-fn to_float64(x: UInt16) -> Float64 = int.to_float64(int.from_uint16(x))
-
-/// Decimal digits; never a sign.
-fn to_string(x: UInt16) -> String = int.to_string(int.from_uint16(x))
-
-
-/// some(x), or none if x exceeds 127.
-fn to_int8_checked(x: UInt16) -> Int8? = int.to_int8_checked(int.from_uint16(x))
-
-/// Clamps x to at most 127.
-fn to_int8_saturating(x: UInt16) -> Int8 = int.to_int8_saturating(int.from_uint16(x))
-
-/// some(x), or none if x exceeds 32767.
-fn to_int16_checked(x: UInt16) -> Int16? = int.to_int16_checked(int.from_uint16(x))
-
-/// Clamps x to at most 32767.
-fn to_int16_saturating(x: UInt16) -> Int16 = int.to_int16_saturating(int.from_uint16(x))
-
-/// some(x), or none if x exceeds 255.
-fn to_uint8_checked(x: UInt16) -> UInt8? = int.to_uint8_checked(int.from_uint16(x))
-
-/// Clamps x to at most 255.
-fn to_uint8_saturating(x: UInt16) -> UInt8 = int.to_uint8_saturating(int.from_uint16(x))
 
 
 /// Smallest UInt16: 0.
-fn min_value() -> UInt16 = int.to_uint16(0)
+fn min_value() -> UInt16 = int.__to_uint16(0)
 
 /// Largest UInt16: 65535.
-fn max_value() -> UInt16 = int.to_uint16(65535)
+fn max_value() -> UInt16 = int.__to_uint16(65535)
 
 
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -41976,7 +38877,7 @@ fn min(a: UInt16, b: UInt16) -> UInt16 = if a <= b then a else b
 fn max(a: UInt16, b: UInt16) -> UInt16 = if a >= b then a else b
 
 /// x limited to lo..hi; aborts when lo > hi.
-fn clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16 = int.to_uint16(int.clamp(int.from_uint16(x), int.from_uint16(lo), int.from_uint16(hi)))
+fn clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16 = int.__to_uint16(int.clamp(int.__from_uint16(x), int.__from_uint16(lo), int.__from_uint16(hi)))
 
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt16, b: UInt16) -> UInt16 = a / b
@@ -41985,32 +38886,32 @@ fn floor_div(a: UInt16, b: UInt16) -> UInt16 = a / b
 fn modulo(a: UInt16, b: UInt16) -> UInt16 = a % b
 
 /// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
-fn pow(base: UInt16, exp: Int) -> UInt16 = int.to_uint16(math.pow(int.from_uint16(base), exp))
+fn pow(base: UInt16, exp: Int) -> UInt16 = int.__to_uint16(math.__pow(int.__from_uint16(base), exp))
 
 /// True when x is a multiple of 2.
-fn is_even(x: UInt16) -> Bool = int.from_uint16(x) % 2 == 0
+fn is_even(x: UInt16) -> Bool = int.__from_uint16(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
-fn is_odd(x: UInt16) -> Bool = int.from_uint16(x) % 2 != 0
+fn is_odd(x: UInt16) -> Bool = int.__from_uint16(x) % 2 != 0
 
 
 /// Bitwise AND.
-fn band(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.band(int.from_uint16(a), int.from_uint16(b)))
+fn band(a: UInt16, b: UInt16) -> UInt16 = int.__to_uint16(int.band(int.__from_uint16(a), int.__from_uint16(b)))
 
 /// Bitwise OR.
-fn bor(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.bor(int.from_uint16(a), int.from_uint16(b)))
+fn bor(a: UInt16, b: UInt16) -> UInt16 = int.__to_uint16(int.bor(int.__from_uint16(a), int.__from_uint16(b)))
 
 /// Bitwise XOR.
-fn bxor(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.bxor(int.from_uint16(a), int.from_uint16(b)))
+fn bxor(a: UInt16, b: UInt16) -> UInt16 = int.__to_uint16(int.bxor(int.__from_uint16(a), int.__from_uint16(b)))
 
 /// Bitwise complement of all 16 bits.
-fn bnot(x: UInt16) -> UInt16 = int.to_uint16(int.bnot(int.from_uint16(x)))
+fn bnot(x: UInt16) -> UInt16 = int.__to_uint16(int.bnot(int.__from_uint16(x)))
 
 /// a shifted left by n bits; n is taken mod 16.
-fn bshl(a: UInt16, n: Int) -> UInt16 = int.to_uint16(int.bshl(int.from_uint16(a), shift_count(n)))
+fn bshl(a: UInt16, n: Int) -> UInt16 = int.__to_uint16(int.bshl(int.__from_uint16(a), shift_count(n)))
 
 /// Zero-filling right shift; n is taken mod 16.
-fn bshr(a: UInt16, n: Int) -> UInt16 = int.to_uint16(int.bshr(int.from_uint16(a), shift_count(n)))
+fn bshr(a: UInt16, n: Int) -> UInt16 = int.__to_uint16(int.bshr(int.__from_uint16(a), shift_count(n)))
 
 
 local fn shift_count(n: Int) -> Int = {
@@ -42019,35 +38920,35 @@ local fn shift_count(n: Int) -> Int = {
 }
 
 /// Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
-fn count_leading_zeros(x: UInt16) -> Int = int.count_leading_zeros(int.from_uint16(x)) - 48
+fn count_leading_zeros(x: UInt16) -> Int = int.count_leading_zeros(int.__from_uint16(x)) - 48
 
 /// Zero bits below the lowest set bit; 16 for 0.
 fn count_trailing_zeros(x: UInt16) -> Int = int.min(
-  int.count_trailing_zeros(int.from_uint16(x)),
+  int.count_trailing_zeros(int.__from_uint16(x)),
   16,
 )
 
 /// Number of set bits among the 16.
-fn count_ones(x: UInt16) -> Int = int.pop_count(int.from_uint16(x))
+fn count_ones(x: UInt16) -> Int = int.count_ones(int.__from_uint16(x))
 
 /// The 2 bytes in reverse order (endian flip).
-fn byte_swap(x: UInt16) -> UInt16 = int.to_uint16(int.bshr(int.byte_swap(int.from_uint16(x)), 48))
+fn byte_swap(x: UInt16) -> UInt16 = int.__to_uint16(int.bshr(int.byte_swap(int.__from_uint16(x)), 48))
 
 
 /// a + b wrapped to 16 bits.
-fn wrap_add(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.from_uint16(a) + int.from_uint16(b))
+fn wrap_add(a: UInt16, b: UInt16) -> UInt16 = int.__to_uint16(int.__from_uint16(a) + int.__from_uint16(b))
 
 /// a - b wrapped to 16 bits.
-fn wrap_sub(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.from_uint16(a) - int.from_uint16(b))
+fn wrap_sub(a: UInt16, b: UInt16) -> UInt16 = int.__to_uint16(int.__from_uint16(a) - int.__from_uint16(b))
 
 /// a * b wrapped to 16 bits.
-fn wrap_mul(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.from_uint16(a) * int.from_uint16(b))
+fn wrap_mul(a: UInt16, b: UInt16) -> UInt16 = int.__to_uint16(int.__from_uint16(a) * int.__from_uint16(b))
 
 /// The 16 bits of a rotated left by n; n is taken mod 16.
-fn rotate_left(a: UInt16, n: Int) -> UInt16 = int.to_uint16(rotate_bits(int.from_uint16(a), rotate_count(n)))
+fn rotate_left(a: UInt16, n: Int) -> UInt16 = int.__to_uint16(rotate_bits(int.__from_uint16(a), rotate_count(n)))
 
 /// The 16 bits of a rotated right by n; n is taken mod 16.
-fn rotate_right(a: UInt16, n: Int) -> UInt16 = int.to_uint16(rotate_bits(int.from_uint16(a), rotate_count(0 - rotate_count(n))))
+fn rotate_right(a: UInt16, n: Int) -> UInt16 = int.__to_uint16(rotate_bits(int.__from_uint16(a), rotate_count(0 - rotate_count(n))))
 
 
 local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
@@ -42059,26 +38960,29 @@ local fn rotate_count(n: Int) -> Int = {
 }
 
 /// Bits needed to hold x; 0 for 0.
-fn bit_length(x: UInt16) -> Int = 64 - int.count_leading_zeros(int.from_uint16(x))
+fn bit_length(x: UInt16) -> Int = 64 - int.count_leading_zeros(int.__from_uint16(x))
 
 /// Decimal UInt16 from ASCII-trimmed s; err on junk, a sign of -, or above 65535.
 fn parse(s: String) -> Result[UInt16, String] =
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
   else match int.parse(s) {
-    ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.to_uint16(n)),
+    ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.__to_uint16(n)),
     err(e) => err(e),
   }
 
 
 /// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
-fn to_string_radix(x: UInt16, radix: Int) -> String = int.to_string_radix(int.from_uint16(x), radix)
+fn to_string_radix(x: UInt16, radix: Int) -> String = int.to_string_radix(
+  int.__from_uint16(x),
+  radix,
+)
 
 /// UInt16 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 65535.
 fn parse_radix(s: String, radix: Int) -> Result[UInt16, String] = {
   let parsed = int.parse_radix(s, radix)
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
   else match parsed {
-    ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.to_uint16(n)),
+    ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.__to_uint16(n)),
     err(e) => err(e),
   }
 }
@@ -42089,46 +38993,46 @@ fn parse_radix(s: String, radix: Int) -> Result[UInt16, String] = {
 
 /// x as UInt16, toward zero; NaN, an infinity or a value outside UInt16 aborts.
 fn from[S: Numeric](x: S) -> UInt16 = match x.__trunc().__int_exact() {
-  some(n) => int.to_uint16_checked(n) ?? panic("uint16.from: the value is not a number in the range of UInt16"),
+  some(n) => int.__to_uint16_checked(n) ?? panic("uint16.from: the value is not a number in the range of UInt16"),
   none => panic("uint16.from: the value is not a number in the range of UInt16"),
 }
 
 /// some(x as UInt16) when UInt16 holds x exactly, else none (a fraction, NaN, out of range).
 fn from_checked[S: Numeric](x: S) -> UInt16? = match x.__int_exact() {
-  some(n) => int.to_uint16_checked(n),
+  some(n) => int.__to_uint16_checked(n),
   none => none,
 }
 
 /// x as UInt16, toward zero, clamped to UInt16's range; NaN is 0.
-fn from_saturating[S: Numeric](x: S) -> UInt16 = int.to_uint16_saturating(x.__int_sat())
+fn from_saturating[S: Numeric](x: S) -> UInt16 = int.__to_uint16_saturating(x.__int_sat())
 
 /// The low 16 bits of integer x as UInt16 (two's complement).
-fn from_wrapping[S: Integer](x: S) -> UInt16 = int.to_uint16(int.wrap(x.__bits64(), 16))
+fn from_wrapping[S: Integer](x: S) -> UInt16 = int.__to_uint16(int.wrap(x.__bits64(), 16))
 
 
 
 
-fn __int_exact(x: UInt16) -> Int? = some(int.from_uint16(x))
+fn __int_exact(x: UInt16) -> Int? = some(int.__from_uint16(x))
 
-fn __uint64_exact(x: UInt16) -> UInt64? = int.__uint64_exact(int.from_uint16(x))
+fn __uint64_exact(x: UInt16) -> UInt64? = int.__uint64_exact(int.__from_uint16(x))
 
 fn __trunc(x: UInt16) -> UInt16 = x
 
-fn __int_sat(x: UInt16) -> Int = int.from_uint16(x)
+fn __int_sat(x: UInt16) -> Int = int.__from_uint16(x)
 
-fn __uint64_sat(x: UInt16) -> UInt64 = int.__uint64_sat(int.from_uint16(x))
+fn __uint64_sat(x: UInt16) -> UInt64 = int.__uint64_sat(int.__from_uint16(x))
 
-fn __to_float(x: UInt16) -> Float = int.to_float(int.from_uint16(x))
+fn __to_float(x: UInt16) -> Float = int.__raw_to_float(int.__from_uint16(x))
 
-fn __to_float_exact(x: UInt16) -> Float? = int.__to_float_exact(int.from_uint16(x))
+fn __to_float_exact(x: UInt16) -> Float? = int.__to_float_exact(int.__from_uint16(x))
 
-fn __to_float32(x: UInt16) -> Float32 = int.to_float32(int.from_uint16(x))
+fn __to_float32(x: UInt16) -> Float32 = int.__raw_to_float32(int.__from_uint16(x))
 
-fn __to_float32_exact(x: UInt16) -> Float32? = int.to_float32_checked(int.from_uint16(x))
+fn __to_float32_exact(x: UInt16) -> Float32? = int.__to_float32_checked(int.__from_uint16(x))
 
-fn __decimal_exact(x: UInt16) -> String? = some(int.to_string(int.from_uint16(x)))
+fn __decimal_exact(x: UInt16) -> String? = some(int.to_string(int.__from_uint16(x)))
 
-fn __bits64(x: UInt16) -> Int = int.from_uint16(x)
+fn __bits64(x: UInt16) -> Int = int.__from_uint16(x)
 
 fn __sum(xs: List[UInt16]) -> UInt16 = {
   let zero: UInt16 = 0
@@ -42140,161 +39044,21 @@ fn __product(xs: List[UInt16]) -> UInt16 = {
   list.fold(xs, one, (a, b) => a * b)
 }
 "#;
-pub const SRC_UINT16_CONVERT: &str = r#"
-
-
-fn uint16_to_int8(x: UInt16) -> Int8 = {
-  let i = int.from_uint16(x)
-  int.to_int8(i)
-}
-
-fn uint16_to_int16(x: UInt16) -> Int16 = {
-  let i = int.from_uint16(x)
-  int.to_int16(i)
-}
-
-fn uint16_to_int32(x: UInt16) -> Int32 = {
-  let i = int.from_uint16(x)
-  int.to_int32(i)
-}
-
-fn uint16_to_int64(x: UInt16) -> Int64 = {
-  let i = int.from_uint16(x)
-  int.to_int64(i)
-}
-
-fn uint16_to_uint8(x: UInt16) -> UInt8 = {
-  let i = int.from_uint16(x)
-  int.to_uint8(i)
-}
-
-fn uint16_to_uint32(x: UInt16) -> UInt32 = {
-  let i = int.from_uint16(x)
-  int.to_uint32(i)
-}
-
-fn uint16_to_uint64(x: UInt16) -> UInt64 = {
-  let i = int.from_uint16(x)
-  int.to_uint64(i)
-}
-
-fn uint16_to_float32(x: UInt16) -> Float32 = {
-  let i = int.from_uint16(x)
-  int.to_float32(i)
-}
-
-fn uint16_to_float64(x: UInt16) -> Float64 = {
-  let i = int.from_uint16(x)
-  int.to_float64(i)
-}
-
-fn uint16_to_string(x: UInt16) -> String = {
-  let i = int.from_uint16(x)
+pub const SRC_UINT16_CONVERT: &str = r#"fn uint16_to_string(x: UInt16) -> String = {
+  let i = int.__from_uint16(x)
   int.to_string(i)
 }
-
-
-fn uint16_to_int8_checked(x: UInt16) -> Int8? = {
-  let i = int.from_uint16(x)
-  int.to_int8_checked(i)
-}
-
-fn uint16_to_int8_saturating(x: UInt16) -> Int8 = {
-  let i = int.from_uint16(x)
-  int.to_int8_saturating(i)
-}
-
-fn uint16_to_int16_checked(x: UInt16) -> Int16? = {
-  let i = int.from_uint16(x)
-  int.to_int16_checked(i)
-}
-
-fn uint16_to_int16_saturating(x: UInt16) -> Int16 = {
-  let i = int.from_uint16(x)
-  int.to_int16_saturating(i)
-}
-
-fn uint16_to_uint8_checked(x: UInt16) -> UInt8? = {
-  let i = int.from_uint16(x)
-  int.to_uint8_checked(i)
-}
-
-fn uint16_to_uint8_saturating(x: UInt16) -> UInt8 = {
-  let i = int.from_uint16(x)
-  int.to_uint8_saturating(i)
-}
 "#;
-pub const SRC_UINT32: &str = r#"
+pub const SRC_UINT32: &str = r#"/// Decimal digits; never a sign.
+fn to_string(x: UInt32) -> String = int.to_string(int.__from_uint32(x))
 
-
-
-/// Wraps to 8 bits; 255 becomes -1.
-fn to_int8(x: UInt32) -> Int8 = int.to_int8(int.from_uint32(x))
-
-/// Wraps to 16 bits; 65535 becomes -1.
-fn to_int16(x: UInt32) -> Int16 = int.to_int16(int.from_uint32(x))
-
-/// Wraps to 32 bits; 2^32-1 becomes -1.
-fn to_int32(x: UInt32) -> Int32 = int.to_int32(int.from_uint32(x))
-
-/// Zero-extending widen; always exact.
-fn to_int64(x: UInt32) -> Int64 = int.to_int64(int.from_uint32(x))
-
-/// Wraps to 8 bits; 256 becomes 0.
-fn to_uint8(x: UInt32) -> UInt8 = int.to_uint8(int.from_uint32(x))
-
-/// Wraps to 16 bits; 65536 becomes 0.
-fn to_uint16(x: UInt32) -> UInt16 = int.to_uint16(int.from_uint32(x))
-
-/// Zero-extending widen; always exact.
-fn to_uint64(x: UInt32) -> UInt64 = int.to_uint64(int.from_uint32(x))
-
-/// Float32 value; may round when x > 2^24.
-fn to_float32(x: UInt32) -> Float32 = int.to_float32(int.from_uint32(x))
-
-/// Same value as Float64; always exact.
-fn to_float64(x: UInt32) -> Float64 = int.to_float64(int.from_uint32(x))
-
-/// Decimal digits; never a sign.
-fn to_string(x: UInt32) -> String = int.to_string(int.from_uint32(x))
-
-
-/// some(x), or none if x exceeds 127.
-fn to_int8_checked(x: UInt32) -> Int8? = int.to_int8_checked(int.from_uint32(x))
-
-/// Clamps x to at most 127.
-fn to_int8_saturating(x: UInt32) -> Int8 = int.to_int8_saturating(int.from_uint32(x))
-
-/// some(x), or none if x exceeds 32767.
-fn to_int16_checked(x: UInt32) -> Int16? = int.to_int16_checked(int.from_uint32(x))
-
-/// Clamps x to at most 32767.
-fn to_int16_saturating(x: UInt32) -> Int16 = int.to_int16_saturating(int.from_uint32(x))
-
-/// some(x), or none if x exceeds 2^31-1.
-fn to_int32_checked(x: UInt32) -> Int32? = int.to_int32_checked(int.from_uint32(x))
-
-/// Clamps x to at most 2^31-1.
-fn to_int32_saturating(x: UInt32) -> Int32 = int.to_int32_saturating(int.from_uint32(x))
-
-/// some(x), or none if x exceeds 255.
-fn to_uint8_checked(x: UInt32) -> UInt8? = int.to_uint8_checked(int.from_uint32(x))
-
-/// Clamps x to at most 255.
-fn to_uint8_saturating(x: UInt32) -> UInt8 = int.to_uint8_saturating(int.from_uint32(x))
-
-/// some(x), or none if x exceeds 65535.
-fn to_uint16_checked(x: UInt32) -> UInt16? = int.to_uint16_checked(int.from_uint32(x))
-
-/// Clamps x to at most 65535.
-fn to_uint16_saturating(x: UInt32) -> UInt16 = int.to_uint16_saturating(int.from_uint32(x))
 
 
 /// Smallest UInt32: 0.
-fn min_value() -> UInt32 = int.to_uint32(0)
+fn min_value() -> UInt32 = int.__to_uint32(0)
 
 /// Largest UInt32: 4294967295.
-fn max_value() -> UInt32 = int.to_uint32(4294967295)
+fn max_value() -> UInt32 = int.__to_uint32(4294967295)
 
 
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -42308,7 +39072,7 @@ fn min(a: UInt32, b: UInt32) -> UInt32 = if a <= b then a else b
 fn max(a: UInt32, b: UInt32) -> UInt32 = if a >= b then a else b
 
 /// x limited to lo..hi; aborts when lo > hi.
-fn clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32 = int.to_uint32(int.clamp(int.from_uint32(x), int.from_uint32(lo), int.from_uint32(hi)))
+fn clamp(x: UInt32, lo: UInt32, hi: UInt32) -> UInt32 = int.__to_uint32(int.clamp(int.__from_uint32(x), int.__from_uint32(lo), int.__from_uint32(hi)))
 
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt32, b: UInt32) -> UInt32 = a / b
@@ -42317,32 +39081,32 @@ fn floor_div(a: UInt32, b: UInt32) -> UInt32 = a / b
 fn modulo(a: UInt32, b: UInt32) -> UInt32 = a % b
 
 /// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
-fn pow(base: UInt32, exp: Int) -> UInt32 = int.to_uint32(math.pow(int.from_uint32(base), exp))
+fn pow(base: UInt32, exp: Int) -> UInt32 = int.__to_uint32(math.__pow(int.__from_uint32(base), exp))
 
 /// True when x is a multiple of 2.
-fn is_even(x: UInt32) -> Bool = int.from_uint32(x) % 2 == 0
+fn is_even(x: UInt32) -> Bool = int.__from_uint32(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
-fn is_odd(x: UInt32) -> Bool = int.from_uint32(x) % 2 != 0
+fn is_odd(x: UInt32) -> Bool = int.__from_uint32(x) % 2 != 0
 
 
 /// Bitwise AND.
-fn band(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.band(int.from_uint32(a), int.from_uint32(b)))
+fn band(a: UInt32, b: UInt32) -> UInt32 = int.__to_uint32(int.band(int.__from_uint32(a), int.__from_uint32(b)))
 
 /// Bitwise OR.
-fn bor(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.bor(int.from_uint32(a), int.from_uint32(b)))
+fn bor(a: UInt32, b: UInt32) -> UInt32 = int.__to_uint32(int.bor(int.__from_uint32(a), int.__from_uint32(b)))
 
 /// Bitwise XOR.
-fn bxor(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.bxor(int.from_uint32(a), int.from_uint32(b)))
+fn bxor(a: UInt32, b: UInt32) -> UInt32 = int.__to_uint32(int.bxor(int.__from_uint32(a), int.__from_uint32(b)))
 
 /// Bitwise complement of all 32 bits.
-fn bnot(x: UInt32) -> UInt32 = int.to_uint32(int.bnot(int.from_uint32(x)))
+fn bnot(x: UInt32) -> UInt32 = int.__to_uint32(int.bnot(int.__from_uint32(x)))
 
 /// a shifted left by n bits; n is taken mod 32.
-fn bshl(a: UInt32, n: Int) -> UInt32 = int.to_uint32(int.bshl(int.from_uint32(a), shift_count(n)))
+fn bshl(a: UInt32, n: Int) -> UInt32 = int.__to_uint32(int.bshl(int.__from_uint32(a), shift_count(n)))
 
 /// Zero-filling right shift; n is taken mod 32.
-fn bshr(a: UInt32, n: Int) -> UInt32 = int.to_uint32(int.bshr(int.from_uint32(a), shift_count(n)))
+fn bshr(a: UInt32, n: Int) -> UInt32 = int.__to_uint32(int.bshr(int.__from_uint32(a), shift_count(n)))
 
 
 local fn shift_count(n: Int) -> Int = {
@@ -42351,35 +39115,35 @@ local fn shift_count(n: Int) -> Int = {
 }
 
 /// Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
-fn count_leading_zeros(x: UInt32) -> Int = int.count_leading_zeros(int.from_uint32(x)) - 32
+fn count_leading_zeros(x: UInt32) -> Int = int.count_leading_zeros(int.__from_uint32(x)) - 32
 
 /// Zero bits below the lowest set bit; 32 for 0.
 fn count_trailing_zeros(x: UInt32) -> Int = int.min(
-  int.count_trailing_zeros(int.from_uint32(x)),
+  int.count_trailing_zeros(int.__from_uint32(x)),
   32,
 )
 
 /// Number of set bits among the 32.
-fn count_ones(x: UInt32) -> Int = int.pop_count(int.from_uint32(x))
+fn count_ones(x: UInt32) -> Int = int.count_ones(int.__from_uint32(x))
 
 /// The 4 bytes in reverse order (endian flip).
-fn byte_swap(x: UInt32) -> UInt32 = int.to_uint32(int.bshr(int.byte_swap(int.from_uint32(x)), 32))
+fn byte_swap(x: UInt32) -> UInt32 = int.__to_uint32(int.bshr(int.byte_swap(int.__from_uint32(x)), 32))
 
 
 /// a + b wrapped to 32 bits.
-fn wrap_add(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.from_uint32(a) + int.from_uint32(b))
+fn wrap_add(a: UInt32, b: UInt32) -> UInt32 = int.__to_uint32(int.__from_uint32(a) + int.__from_uint32(b))
 
 /// a - b wrapped to 32 bits.
-fn wrap_sub(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.from_uint32(a) - int.from_uint32(b))
+fn wrap_sub(a: UInt32, b: UInt32) -> UInt32 = int.__to_uint32(int.__from_uint32(a) - int.__from_uint32(b))
 
 /// a * b wrapped to 32 bits.
-fn wrap_mul(a: UInt32, b: UInt32) -> UInt32 = int.to_uint32(int.from_uint32(a) * int.from_uint32(b))
+fn wrap_mul(a: UInt32, b: UInt32) -> UInt32 = int.__to_uint32(int.__from_uint32(a) * int.__from_uint32(b))
 
 /// The 32 bits of a rotated left by n; n is taken mod 32.
-fn rotate_left(a: UInt32, n: Int) -> UInt32 = int.to_uint32(rotate_bits(int.from_uint32(a), rotate_count(n)))
+fn rotate_left(a: UInt32, n: Int) -> UInt32 = int.__to_uint32(rotate_bits(int.__from_uint32(a), rotate_count(n)))
 
 /// The 32 bits of a rotated right by n; n is taken mod 32.
-fn rotate_right(a: UInt32, n: Int) -> UInt32 = int.to_uint32(rotate_bits(int.from_uint32(a), rotate_count(0 - rotate_count(n))))
+fn rotate_right(a: UInt32, n: Int) -> UInt32 = int.__to_uint32(rotate_bits(int.__from_uint32(a), rotate_count(0 - rotate_count(n))))
 
 
 local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
@@ -42391,26 +39155,29 @@ local fn rotate_count(n: Int) -> Int = {
 }
 
 /// Bits needed to hold x; 0 for 0.
-fn bit_length(x: UInt32) -> Int = 64 - int.count_leading_zeros(int.from_uint32(x))
+fn bit_length(x: UInt32) -> Int = 64 - int.count_leading_zeros(int.__from_uint32(x))
 
 /// Decimal UInt32 from ASCII-trimmed s; err on junk, a sign of -, or above 4294967295.
 fn parse(s: String) -> Result[UInt32, String] =
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
   else match int.parse(s) {
-    ok(n) => if n > 4294967295 then err("number too large to fit in target type") else ok(int.to_uint32(n)),
+    ok(n) => if n > 4294967295 then err("number too large to fit in target type") else ok(int.__to_uint32(n)),
     err(e) => err(e),
   }
 
 
 /// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
-fn to_string_radix(x: UInt32, radix: Int) -> String = int.to_string_radix(int.from_uint32(x), radix)
+fn to_string_radix(x: UInt32, radix: Int) -> String = int.to_string_radix(
+  int.__from_uint32(x),
+  radix,
+)
 
 /// UInt32 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 4294967295.
 fn parse_radix(s: String, radix: Int) -> Result[UInt32, String] = {
   let parsed = int.parse_radix(s, radix)
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
   else match parsed {
-    ok(n) => if n > 4294967295 then err("number too large to fit in target type") else ok(int.to_uint32(n)),
+    ok(n) => if n > 4294967295 then err("number too large to fit in target type") else ok(int.__to_uint32(n)),
     err(e) => err(e),
   }
 }
@@ -42421,46 +39188,46 @@ fn parse_radix(s: String, radix: Int) -> Result[UInt32, String] = {
 
 /// x as UInt32, toward zero; NaN, an infinity or a value outside UInt32 aborts.
 fn from[S: Numeric](x: S) -> UInt32 = match x.__trunc().__int_exact() {
-  some(n) => int.to_uint32_checked(n) ?? panic("uint32.from: the value is not a number in the range of UInt32"),
+  some(n) => int.__to_uint32_checked(n) ?? panic("uint32.from: the value is not a number in the range of UInt32"),
   none => panic("uint32.from: the value is not a number in the range of UInt32"),
 }
 
 /// some(x as UInt32) when UInt32 holds x exactly, else none (a fraction, NaN, out of range).
 fn from_checked[S: Numeric](x: S) -> UInt32? = match x.__int_exact() {
-  some(n) => int.to_uint32_checked(n),
+  some(n) => int.__to_uint32_checked(n),
   none => none,
 }
 
 /// x as UInt32, toward zero, clamped to UInt32's range; NaN is 0.
-fn from_saturating[S: Numeric](x: S) -> UInt32 = int.to_uint32_saturating(x.__int_sat())
+fn from_saturating[S: Numeric](x: S) -> UInt32 = int.__to_uint32_saturating(x.__int_sat())
 
 /// The low 32 bits of integer x as UInt32 (two's complement).
-fn from_wrapping[S: Integer](x: S) -> UInt32 = int.to_uint32(int.wrap(x.__bits64(), 32))
+fn from_wrapping[S: Integer](x: S) -> UInt32 = int.__to_uint32(int.wrap(x.__bits64(), 32))
 
 
 
 
-fn __int_exact(x: UInt32) -> Int? = some(int.from_uint32(x))
+fn __int_exact(x: UInt32) -> Int? = some(int.__from_uint32(x))
 
-fn __uint64_exact(x: UInt32) -> UInt64? = int.__uint64_exact(int.from_uint32(x))
+fn __uint64_exact(x: UInt32) -> UInt64? = int.__uint64_exact(int.__from_uint32(x))
 
 fn __trunc(x: UInt32) -> UInt32 = x
 
-fn __int_sat(x: UInt32) -> Int = int.from_uint32(x)
+fn __int_sat(x: UInt32) -> Int = int.__from_uint32(x)
 
-fn __uint64_sat(x: UInt32) -> UInt64 = int.__uint64_sat(int.from_uint32(x))
+fn __uint64_sat(x: UInt32) -> UInt64 = int.__uint64_sat(int.__from_uint32(x))
 
-fn __to_float(x: UInt32) -> Float = int.to_float(int.from_uint32(x))
+fn __to_float(x: UInt32) -> Float = int.__raw_to_float(int.__from_uint32(x))
 
-fn __to_float_exact(x: UInt32) -> Float? = int.__to_float_exact(int.from_uint32(x))
+fn __to_float_exact(x: UInt32) -> Float? = int.__to_float_exact(int.__from_uint32(x))
 
-fn __to_float32(x: UInt32) -> Float32 = int.to_float32(int.from_uint32(x))
+fn __to_float32(x: UInt32) -> Float32 = int.__raw_to_float32(int.__from_uint32(x))
 
-fn __to_float32_exact(x: UInt32) -> Float32? = int.to_float32_checked(int.from_uint32(x))
+fn __to_float32_exact(x: UInt32) -> Float32? = int.__to_float32_checked(int.__from_uint32(x))
 
-fn __decimal_exact(x: UInt32) -> String? = some(int.to_string(int.from_uint32(x)))
+fn __decimal_exact(x: UInt32) -> String? = some(int.to_string(int.__from_uint32(x)))
 
-fn __bits64(x: UInt32) -> Int = int.from_uint32(x)
+fn __bits64(x: UInt32) -> Int = int.__from_uint32(x)
 
 fn __sum(xs: List[UInt32]) -> UInt32 = {
   let zero: UInt32 = 0
@@ -42472,221 +39239,41 @@ fn __product(xs: List[UInt32]) -> UInt32 = {
   list.fold(xs, one, (a, b) => a * b)
 }
 "#;
-pub const SRC_UINT32_CONVERT: &str = r#"
-
-
-fn uint32_to_int8(x: UInt32) -> Int8 = {
-  let i = int.from_uint32(x)
-  int.to_int8(i)
-}
-
-fn uint32_to_int16(x: UInt32) -> Int16 = {
-  let i = int.from_uint32(x)
-  int.to_int16(i)
-}
-
-fn uint32_to_int32(x: UInt32) -> Int32 = {
-  let i = int.from_uint32(x)
-  int.to_int32(i)
-}
-
-fn uint32_to_int64(x: UInt32) -> Int64 = {
-  let i = int.from_uint32(x)
-  int.to_int64(i)
-}
-
-fn uint32_to_uint8(x: UInt32) -> UInt8 = {
-  let i = int.from_uint32(x)
-  int.to_uint8(i)
-}
-
-fn uint32_to_uint16(x: UInt32) -> UInt16 = {
-  let i = int.from_uint32(x)
-  int.to_uint16(i)
-}
-
-fn uint32_to_uint64(x: UInt32) -> UInt64 = {
-  let i = int.from_uint32(x)
-  int.to_uint64(i)
-}
-
-fn uint32_to_float32(x: UInt32) -> Float32 = {
-  let i = int.from_uint32(x)
-  int.to_float32(i)
-}
-
-fn uint32_to_float64(x: UInt32) -> Float64 = {
-  let i = int.from_uint32(x)
-  int.to_float64(i)
-}
-
-fn uint32_to_string(x: UInt32) -> String = {
-  let i = int.from_uint32(x)
+pub const SRC_UINT32_CONVERT: &str = r#"fn uint32_to_string(x: UInt32) -> String = {
+  let i = int.__from_uint32(x)
   int.to_string(i)
-}
-
-
-fn uint32_to_int8_checked(x: UInt32) -> Int8? = {
-  let i = int.from_uint32(x)
-  int.to_int8_checked(i)
-}
-
-fn uint32_to_int8_saturating(x: UInt32) -> Int8 = {
-  let i = int.from_uint32(x)
-  int.to_int8_saturating(i)
-}
-
-fn uint32_to_int16_checked(x: UInt32) -> Int16? = {
-  let i = int.from_uint32(x)
-  int.to_int16_checked(i)
-}
-
-fn uint32_to_int16_saturating(x: UInt32) -> Int16 = {
-  let i = int.from_uint32(x)
-  int.to_int16_saturating(i)
-}
-
-fn uint32_to_int32_checked(x: UInt32) -> Int32? = {
-  let i = int.from_uint32(x)
-  int.to_int32_checked(i)
-}
-
-fn uint32_to_int32_saturating(x: UInt32) -> Int32 = {
-  let i = int.from_uint32(x)
-  int.to_int32_saturating(i)
-}
-
-fn uint32_to_uint8_checked(x: UInt32) -> UInt8? = {
-  let i = int.from_uint32(x)
-  int.to_uint8_checked(i)
-}
-
-fn uint32_to_uint8_saturating(x: UInt32) -> UInt8 = {
-  let i = int.from_uint32(x)
-  int.to_uint8_saturating(i)
-}
-
-fn uint32_to_uint16_checked(x: UInt32) -> UInt16? = {
-  let i = int.from_uint32(x)
-  int.to_uint16_checked(i)
-}
-
-fn uint32_to_uint16_saturating(x: UInt32) -> UInt16 = {
-  let i = int.from_uint32(x)
-  int.to_uint16_saturating(i)
 }
 "#;
 pub const SRC_UINT64: &str = r#"
 
-
-
-/// Wraps to 8 bits; 255 becomes -1.
-fn to_int8(x: UInt64) -> Int8 = int.to_int8(int.from_uint64(x))
-
-/// Wraps to 16 bits; 65535 becomes -1.
-fn to_int16(x: UInt64) -> Int16 = int.to_int16(int.from_uint64(x))
-
-/// Wraps to 32 bits; 2^32-1 becomes -1.
-fn to_int32(x: UInt64) -> Int32 = int.to_int32(int.from_uint64(x))
-
-/// Wraps to 64 bits; 2^64-1 becomes -1.
-fn to_int64(x: UInt64) -> Int64 = int.to_int64(int.from_uint64(x))
-
-/// Wraps to 8 bits; 256 becomes 0.
-fn to_uint8(x: UInt64) -> UInt8 = int.to_uint8(int.from_uint64(x))
-
-/// Wraps to 16 bits; 65536 becomes 0.
-fn to_uint16(x: UInt64) -> UInt16 = int.to_uint16(int.from_uint64(x))
-
-/// Wraps to 32 bits; 2^32 becomes 0.
-fn to_uint32(x: UInt64) -> UInt32 = int.to_uint32(int.from_uint64(x))
-
-
-
 /// Float32 value; may round when x > 2^24.
-fn to_float32(x: UInt64) -> Float32 =
-  if int.from_uint64(x) >= 0 then int.to_float32(int.from_uint64(x))
+fn __raw_to_float32(x: UInt64) -> Float32 =
+  if int.__from_uint64(x) >= 0 then int.__raw_to_float32(int.__from_uint64(x))
   else {
-    let hf = int.to_float(int.from_uint64(x / 2))
-    float.to_float32(hf + hf + int.to_float(int.from_uint64(x % 2)))
+    let hf = int.__raw_to_float(int.__from_uint64(x / 2))
+    float.__raw_to_float32(hf + hf + int.__raw_to_float(int.__from_uint64(x % 2)))
   }
 
 /// Float64 value; may round when x > 2^53.
-fn to_float64(x: UInt64) -> Float64 =
-  if int.from_uint64(x) >= 0 then int.to_float64(int.from_uint64(x))
+fn __to_float64(x: UInt64) -> Float64 =
+  if int.__from_uint64(x) >= 0 then int.__to_float64(int.__from_uint64(x))
   else {
-    let hf = int.to_float(int.from_uint64(x / 2))
-    float.to_float64(hf + hf + int.to_float(int.from_uint64(x % 2)))
+    let hf = int.__raw_to_float(int.__from_uint64(x / 2))
+    float.__to_float64(hf + hf + int.__raw_to_float(int.__from_uint64(x % 2)))
   }
 
 /// Decimal digits, no sign; exact up to 2^64-1.
 fn to_string(x: UInt64) -> String =
-  if int.from_uint64(x) >= 0 then int.to_string(int.from_uint64(x)) else int.to_string(int.from_uint64(x / 10)) + int.to_string(int.from_uint64(x % 10))
+  if int.__from_uint64(x) >= 0 then int.to_string(int.__from_uint64(x)) else int.to_string(int.__from_uint64(x / 10)) + int.to_string(int.__from_uint64(x % 10))
 
-
-/// some(x), or none if x exceeds 127.
-fn to_int8_checked(x: UInt64) -> Int8? =
-  if int.from_uint64(x) >= 0 then int.to_int8_checked(int.from_uint64(x)) else none
-
-/// Clamps x to at most 127.
-fn to_int8_saturating(x: UInt64) -> Int8 =
-  if int.from_uint64(x) >= 0 then int.to_int8_saturating(int.from_uint64(x)) else int.to_int8(127)
-
-/// some(x), or none if x exceeds 32767.
-fn to_int16_checked(x: UInt64) -> Int16? =
-  if int.from_uint64(x) >= 0 then int.to_int16_checked(int.from_uint64(x)) else none
-
-/// Clamps x to at most 32767.
-fn to_int16_saturating(x: UInt64) -> Int16 =
-  if int.from_uint64(x) >= 0 then int.to_int16_saturating(int.from_uint64(x)) else int.to_int16(32767)
-
-/// some(x), or none if x exceeds 2^31-1.
-fn to_int32_checked(x: UInt64) -> Int32? =
-  if int.from_uint64(x) >= 0 then int.to_int32_checked(int.from_uint64(x)) else none
-
-/// Clamps x to at most 2^31-1.
-fn to_int32_saturating(x: UInt64) -> Int32 =
-  if int.from_uint64(x) >= 0 then int.to_int32_saturating(int.from_uint64(x)) else int.to_int32(2147483647)
-
-/// some(x), or none if x exceeds 2^63-1.
-fn to_int64_checked(x: UInt64) -> Int64? =
-  if int.from_uint64(x) >= 0 then some(int.to_int64(int.from_uint64(x))) else none
-
-/// Clamps x to at most 2^63-1.
-fn to_int64_saturating(x: UInt64) -> Int64 =
-  if int.from_uint64(x) >= 0 then int.to_int64(int.from_uint64(x)) else int.to_int64(9223372036854775807)
-
-/// some(x), or none if x exceeds 255.
-fn to_uint8_checked(x: UInt64) -> UInt8? =
-  if int.from_uint64(x) >= 0 then int.to_uint8_checked(int.from_uint64(x)) else none
-
-/// Clamps x to at most 255.
-fn to_uint8_saturating(x: UInt64) -> UInt8 =
-  if int.from_uint64(x) >= 0 then int.to_uint8_saturating(int.from_uint64(x)) else int.to_uint8(255)
-
-/// some(x), or none if x exceeds 65535.
-fn to_uint16_checked(x: UInt64) -> UInt16? =
-  if int.from_uint64(x) >= 0 then int.to_uint16_checked(int.from_uint64(x)) else none
-
-/// Clamps x to at most 65535.
-fn to_uint16_saturating(x: UInt64) -> UInt16 =
-  if int.from_uint64(x) >= 0 then int.to_uint16_saturating(int.from_uint64(x)) else int.to_uint16(65535)
-
-/// some(x), or none if x exceeds 2^32-1.
-fn to_uint32_checked(x: UInt64) -> UInt32? =
-  if int.from_uint64(x) >= 0 then int.to_uint32_checked(int.from_uint64(x)) else none
-
-/// Clamps x to at most 2^32-1.
-fn to_uint32_saturating(x: UInt64) -> UInt32 =
-  if int.from_uint64(x) >= 0 then int.to_uint32_saturating(int.from_uint64(x)) else int.to_uint32(4294967295)
 
 
 /// Smallest UInt64: 0.
-fn min_value() -> UInt64 = int.to_uint64(0)
+fn min_value() -> UInt64 = int.__to_uint64(0)
 
 
 /// Largest UInt64: 2^64-1.
-fn max_value() -> UInt64 = int.to_uint64(-1)
+fn max_value() -> UInt64 = int.__to_uint64(-1)
 
 
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -42703,9 +39290,9 @@ fn max(a: UInt64, b: UInt64) -> UInt64 = if a >= b then a else b
 fn clamp(x: UInt64, lo: UInt64, hi: UInt64) -> UInt64 = unbias(int.clamp(bias(x), bias(lo), bias(hi)))
 
 
-local fn bias(x: UInt64) -> Int = int.bxor(int.from_uint64(x), int.bshl(1, 63))
+local fn bias(x: UInt64) -> Int = int.bxor(int.__from_uint64(x), int.bshl(1, 63))
 
-local fn unbias(n: Int) -> UInt64 = int.to_uint64(int.bxor(n, int.bshl(1, 63)))
+local fn unbias(n: Int) -> UInt64 = int.__to_uint64(int.bxor(n, int.bshl(1, 63)))
 
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt64, b: UInt64) -> UInt64 = a / b
@@ -42714,32 +39301,32 @@ fn floor_div(a: UInt64, b: UInt64) -> UInt64 = a / b
 fn modulo(a: UInt64, b: UInt64) -> UInt64 = a % b
 
 /// base raised to exp, wrapping to 64 bits like *; exp < 0 aborts.
-fn pow(base: UInt64, exp: Int) -> UInt64 = int.to_uint64(math.pow(int.from_uint64(base), exp))
+fn pow(base: UInt64, exp: Int) -> UInt64 = int.__to_uint64(math.__pow(int.__from_uint64(base), exp))
 
 /// True when x is a multiple of 2.
-fn is_even(x: UInt64) -> Bool = int.from_uint64(x) % 2 == 0
+fn is_even(x: UInt64) -> Bool = int.__from_uint64(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
-fn is_odd(x: UInt64) -> Bool = int.from_uint64(x) % 2 != 0
+fn is_odd(x: UInt64) -> Bool = int.__from_uint64(x) % 2 != 0
 
 
 /// Bitwise AND.
-fn band(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.band(int.from_uint64(a), int.from_uint64(b)))
+fn band(a: UInt64, b: UInt64) -> UInt64 = int.__to_uint64(int.band(int.__from_uint64(a), int.__from_uint64(b)))
 
 /// Bitwise OR.
-fn bor(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.bor(int.from_uint64(a), int.from_uint64(b)))
+fn bor(a: UInt64, b: UInt64) -> UInt64 = int.__to_uint64(int.bor(int.__from_uint64(a), int.__from_uint64(b)))
 
 /// Bitwise XOR.
-fn bxor(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.bxor(int.from_uint64(a), int.from_uint64(b)))
+fn bxor(a: UInt64, b: UInt64) -> UInt64 = int.__to_uint64(int.bxor(int.__from_uint64(a), int.__from_uint64(b)))
 
 /// Bitwise complement of all 64 bits.
-fn bnot(x: UInt64) -> UInt64 = int.to_uint64(int.bnot(int.from_uint64(x)))
+fn bnot(x: UInt64) -> UInt64 = int.__to_uint64(int.bnot(int.__from_uint64(x)))
 
 /// a shifted left by n bits; n is taken mod 64.
-fn bshl(a: UInt64, n: Int) -> UInt64 = int.to_uint64(int.bshl(int.from_uint64(a), shift_count(n)))
+fn bshl(a: UInt64, n: Int) -> UInt64 = int.__to_uint64(int.bshl(int.__from_uint64(a), shift_count(n)))
 
 /// Zero-filling right shift; n is taken mod 64.
-fn bshr(a: UInt64, n: Int) -> UInt64 = int.to_uint64(shift_right_zero(int.from_uint64(a), shift_count(n)))
+fn bshr(a: UInt64, n: Int) -> UInt64 = int.__to_uint64(shift_right_zero(int.__from_uint64(a), shift_count(n)))
 
 
 local fn shift_right_zero(v: Int, k: Int) -> Int = if k == 0 then v
@@ -42752,35 +39339,35 @@ local fn shift_count(n: Int) -> Int = {
 }
 
 /// Zero bits above the highest set bit, counted in 64 bits; 64 for 0.
-fn count_leading_zeros(x: UInt64) -> Int = int.count_leading_zeros(int.from_uint64(x))
+fn count_leading_zeros(x: UInt64) -> Int = int.count_leading_zeros(int.__from_uint64(x))
 
 /// Zero bits below the lowest set bit; 64 for 0.
 fn count_trailing_zeros(x: UInt64) -> Int = int.min(
-  int.count_trailing_zeros(int.from_uint64(x)),
+  int.count_trailing_zeros(int.__from_uint64(x)),
   64,
 )
 
 /// Number of set bits among the 64.
-fn count_ones(x: UInt64) -> Int = int.pop_count(int.from_uint64(x))
+fn count_ones(x: UInt64) -> Int = int.count_ones(int.__from_uint64(x))
 
 /// The 8 bytes in reverse order (endian flip).
-fn byte_swap(x: UInt64) -> UInt64 = int.to_uint64(int.byte_swap(int.from_uint64(x)))
+fn byte_swap(x: UInt64) -> UInt64 = int.__to_uint64(int.byte_swap(int.__from_uint64(x)))
 
 
 /// a + b wrapped to 64 bits.
-fn wrap_add(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) + int.from_uint64(b))
+fn wrap_add(a: UInt64, b: UInt64) -> UInt64 = int.__to_uint64(int.__from_uint64(a) + int.__from_uint64(b))
 
 /// a - b wrapped to 64 bits.
-fn wrap_sub(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) - int.from_uint64(b))
+fn wrap_sub(a: UInt64, b: UInt64) -> UInt64 = int.__to_uint64(int.__from_uint64(a) - int.__from_uint64(b))
 
 /// a * b wrapped to 64 bits.
-fn wrap_mul(a: UInt64, b: UInt64) -> UInt64 = int.to_uint64(int.from_uint64(a) * int.from_uint64(b))
+fn wrap_mul(a: UInt64, b: UInt64) -> UInt64 = int.__to_uint64(int.__from_uint64(a) * int.__from_uint64(b))
 
 /// The 64 bits of a rotated left by n; n is taken mod 64.
-fn rotate_left(a: UInt64, n: Int) -> UInt64 = int.to_uint64(rotate_bits(int.from_uint64(a), rotate_count(n)))
+fn rotate_left(a: UInt64, n: Int) -> UInt64 = int.__to_uint64(rotate_bits(int.__from_uint64(a), rotate_count(n)))
 
 /// The 64 bits of a rotated right by n; n is taken mod 64.
-fn rotate_right(a: UInt64, n: Int) -> UInt64 = int.to_uint64(rotate_bits(int.from_uint64(a), rotate_count(0 - rotate_count(n))))
+fn rotate_right(a: UInt64, n: Int) -> UInt64 = int.__to_uint64(rotate_bits(int.__from_uint64(a), rotate_count(0 - rotate_count(n))))
 
 
 local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
@@ -42792,14 +39379,14 @@ local fn rotate_count(n: Int) -> Int = {
 }
 
 /// Bits needed to hold x; 0 for 0.
-fn bit_length(x: UInt64) -> Int = 64 - int.count_leading_zeros(int.from_uint64(x))
+fn bit_length(x: UInt64) -> Int = 64 - int.count_leading_zeros(int.__from_uint64(x))
 
 /// Decimal UInt64 from ASCII-trimmed s; err on junk, a sign of -, or above 2^64-1.
 fn parse(s: String) -> Result[UInt64, String] = {
   let t = trim_ascii_ws(s)
   if string.starts_with(t, "-") then err("invalid digit found in string")
   else match int.parse(t) {
-    ok(n) => ok(int.to_uint64(n)),
+    ok(n) => ok(int.__to_uint64(n)),
     err(e) => match parse_upper(t) {
       some(u) => ok(u),
       none => err(e),
@@ -42812,7 +39399,7 @@ fn parse(s: String) -> Result[UInt64, String] = {
 local fn parse_upper(t: String) -> UInt64? = {
   let n = string.len(t)
   match (int.parse(string.slice(t, 0, n - 1)), int.parse(string.slice(t, n - 1, n))) {
-    (ok(head), ok(digit)) => if head < 1844674407370955161 or head == 1844674407370955161 and digit <= 5 then some(int.to_uint64(head) * int.to_uint64(10) + int.to_uint64(digit))
+    (ok(head), ok(digit)) => if head < 1844674407370955161 or head == 1844674407370955161 and digit <= 5 then some(int.__to_uint64(head) * int.__to_uint64(10) + int.__to_uint64(digit))
     else none,
     _ => none,
   }
@@ -42821,12 +39408,12 @@ local fn parse_upper(t: String) -> UInt64? = {
 
 /// Digits of x in radix, lowercase, no sign; exact up to 2^64-1; radix outside 2..36 aborts.
 fn to_string_radix(x: UInt64, radix: Int) -> String =
-  if int.from_uint64(x) >= 0 then int.to_string_radix(int.from_uint64(x), radix)
+  if int.__from_uint64(x) >= 0 then int.to_string_radix(int.__from_uint64(x), radix)
   else {
 
-    let r = int.to_uint64(radix)
-    int.to_string_radix(int.from_uint64(x / r), radix) + int.to_string_radix(
-      int.from_uint64(x % r),
+    let r = int.__to_uint64(radix)
+    int.to_string_radix(int.__from_uint64(x / r), radix) + int.to_string_radix(
+      int.__from_uint64(x % r),
       radix,
     )
   }
@@ -42837,7 +39424,7 @@ fn parse_radix(s: String, radix: Int) -> Result[UInt64, String] = {
   let t = string.trim(s)
   if string.starts_with(t, "-") then err("invalid digit found in string")
   else match parsed {
-    ok(n) => ok(int.to_uint64(n)),
+    ok(n) => ok(int.__to_uint64(n)),
     err(e) => if e == "number too large to fit in target type" then parse_radix_upper(t, radix) ?? err(e)
     else err(e),
   }
@@ -42852,9 +39439,9 @@ local fn parse_radix_upper(t: String, radix: Int) -> Result[UInt64, String]? = {
     radix,
   )) {
     (ok(head), ok(digit)) => {
-      let r = int.to_uint64(radix)
-      let d = int.to_uint64(digit)
-      if int.to_uint64(head) <= (max_value() - d) / r then some(ok(int.to_uint64(head) * r + d)) else none
+      let r = int.__to_uint64(radix)
+      let d = int.__to_uint64(digit)
+      if int.__to_uint64(head) <= (max_value() - d) / r then some(ok(int.__to_uint64(head) * r + d)) else none
     },
     _ => none,
   }
@@ -42876,40 +39463,40 @@ fn from_saturating[S: Numeric](x: S) -> UInt64 = x.__uint64_sat()
 /// The low 64 bits of integer x as UInt64 (two's complement).
 fn from_wrapping[S: Integer](x: S) -> UInt64 = {
   let b = x.__bits64()
-  if b >= 0 then int.to_uint64(b)
-  else int.to_uint64(int.band(b, 9223372036854775807)) + int.to_uint64(4611686018427387904) * int.to_uint64(2)
+  if b >= 0 then int.__to_uint64(b)
+  else int.__to_uint64(int.band(b, 9223372036854775807)) + int.__to_uint64(4611686018427387904) * int.__to_uint64(2)
 }
 
 
 
 
-fn __int_exact(x: UInt64) -> Int? = int.from_uint64_checked(x)
+fn __int_exact(x: UInt64) -> Int? = int.__from_uint64_checked(x)
 
 fn __uint64_exact(x: UInt64) -> UInt64? = some(x)
 
 fn __trunc(x: UInt64) -> UInt64 = x
 
-fn __int_sat(x: UInt64) -> Int = int.from_uint64_saturating(x)
+fn __int_sat(x: UInt64) -> Int = int.__from_uint64_saturating(x)
 
 fn __uint64_sat(x: UInt64) -> UInt64 = x
 
-fn __to_float(x: UInt64) -> Float = float.from_float64(uint64.to_float64(x))
+fn __to_float(x: UInt64) -> Float = float.__from_float64(uint64.__to_float64(x))
 
 fn __to_float_exact(x: UInt64) -> Float? = {
   let f = uint64.__to_float(x)
   if float.__uint64_exact(f) == some(x) then some(f) else none
 }
 
-fn __to_float32(x: UInt64) -> Float32 = uint64.to_float32(x)
+fn __to_float32(x: UInt64) -> Float32 = uint64.__raw_to_float32(x)
 
 fn __to_float32_exact(x: UInt64) -> Float32? = {
-  let f = uint64.to_float32(x)
-  if float.__uint64_exact(float.from_float32(f)) == some(x) then some(f) else none
+  let f = uint64.__raw_to_float32(x)
+  if float.__uint64_exact(float.__from_float32(f)) == some(x) then some(f) else none
 }
 
 fn __decimal_exact(x: UInt64) -> String? = some(uint64.to_string(x))
 
-fn __bits64(x: UInt64) -> Int = int.from_uint64(x)
+fn __bits64(x: UInt64) -> Int = int.__from_uint64(x)
 
 fn __sum(xs: List[UInt64]) -> UInt64 = {
   let zero: UInt64 = 0
@@ -42924,7 +39511,7 @@ fn __product(xs: List[UInt64]) -> UInt64 = {
 
 local fn is_ascii_ws(c: String) -> Bool = match c {
   " " | "\t" | "\n" | "\r" => true,
-  _ => c == string.from_codepoint(12),
+  _ => c == (string.from_codepoint(12) ?? ""),
 }
 
 local fn trim_ascii_ws(s: String) -> String = {
@@ -42937,215 +39524,66 @@ local fn trim_ascii_ws(s: String) -> String = {
 pub const SRC_UINT64_CONVERT: &str = r#"
 
 
-fn uint64_to_int8(x: UInt64) -> Int8 = {
-  let i = int.from_uint64(x)
-  int.to_int8(i)
-}
-
-fn uint64_to_int16(x: UInt64) -> Int16 = {
-  let i = int.from_uint64(x)
-  int.to_int16(i)
-}
-
-fn uint64_to_int32(x: UInt64) -> Int32 = {
-  let i = int.from_uint64(x)
-  int.to_int32(i)
-}
-
-fn uint64_to_int64(x: UInt64) -> Int64 = {
-  let i = int.from_uint64(x)
-  int.to_int64(i)
-}
-
-fn uint64_to_uint8(x: UInt64) -> UInt8 = {
-  let i = int.from_uint64(x)
-  int.to_uint8(i)
-}
-
-fn uint64_to_uint16(x: UInt64) -> UInt16 = {
-  let i = int.from_uint64(x)
-  int.to_uint16(i)
-}
-
-fn uint64_to_uint32(x: UInt64) -> UInt32 = {
-  let i = int.from_uint64(x)
-  int.to_uint32(i)
-}
-
-
-
-
 
 
 
 
 
 fn uint64_to_float32(x: UInt64) -> Float32 = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_float32(i)
+  let i = int.__from_uint64(x)
+  if i >= 0 then int.__raw_to_float32(i)
   else {
     let h: UInt64 = x / 2
     let l: UInt64 = x % 2
-    let hf = int.to_float(int.from_uint64(h))
-    let lf = int.to_float(int.from_uint64(l))
-    float.to_float32(hf + hf + lf)
+    let hf = int.__raw_to_float(int.__from_uint64(h))
+    let lf = int.__raw_to_float(int.__from_uint64(l))
+    float.__raw_to_float32(hf + hf + lf)
   }
 }
 
 fn uint64_to_float64(x: UInt64) -> Float64 = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_float64(i)
+  let i = int.__from_uint64(x)
+  if i >= 0 then int.__to_float64(i)
   else {
     let h: UInt64 = x / 2
     let l: UInt64 = x % 2
-    let hf = int.to_float(int.from_uint64(h))
-    let lf = int.to_float(int.from_uint64(l))
-    float.to_float64(hf + hf + lf)
+    let hf = int.__raw_to_float(int.__from_uint64(h))
+    let lf = int.__raw_to_float(int.__from_uint64(l))
+    float.__to_float64(hf + hf + lf)
   }
 }
 
 fn uint64_to_string(x: UInt64) -> String = {
-  let i = int.from_uint64(x)
+  let i = int.__from_uint64(x)
   if i >= 0 then int.to_string(i)
   else {
     let q: UInt64 = x / 10
     let r: UInt64 = x % 10
-    int.to_string(int.from_uint64(q)) + int.to_string(int.from_uint64(r))
+    int.to_string(int.__from_uint64(q)) + int.to_string(int.__from_uint64(r))
   }
 }
 
 
-fn uint64_to_int8_checked(x: UInt64) -> Int8? = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_int8_checked(i) else none
-}
-
-fn uint64_to_int8_saturating(x: UInt64) -> Int8 = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_int8_saturating(i) else int.to_int8(127)
-}
-
-fn uint64_to_int16_checked(x: UInt64) -> Int16? = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_int16_checked(i) else none
-}
-
-fn uint64_to_int16_saturating(x: UInt64) -> Int16 = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_int16_saturating(i) else int.to_int16(32767)
-}
-
-fn uint64_to_int32_checked(x: UInt64) -> Int32? = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_int32_checked(i) else none
-}
-
-fn uint64_to_int32_saturating(x: UInt64) -> Int32 = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_int32_saturating(i) else int.to_int32(2147483647)
-}
-
-fn uint64_to_int64_checked(x: UInt64) -> Int64? = {
-  let i = int.from_uint64(x)
-  if i >= 0 then {
-    let v = int.to_int64(i)
-    some(v)
-  } else none
-}
-
-fn uint64_to_int64_saturating(x: UInt64) -> Int64 = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_int64(i) else int.to_int64(9223372036854775807)
-}
-
-fn uint64_to_uint8_checked(x: UInt64) -> UInt8? = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_uint8_checked(i) else none
-}
-
-fn uint64_to_uint8_saturating(x: UInt64) -> UInt8 = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_uint8_saturating(i) else int.to_uint8(255)
-}
-
-fn uint64_to_uint16_checked(x: UInt64) -> UInt16? = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_uint16_checked(i) else none
-}
-
-fn uint64_to_uint16_saturating(x: UInt64) -> UInt16 = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_uint16_saturating(i) else int.to_uint16(65535)
-}
-
-fn uint64_to_uint32_checked(x: UInt64) -> UInt32? = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_uint32_checked(i) else none
-}
-
-fn uint64_to_uint32_saturating(x: UInt64) -> UInt32 = {
-  let i = int.from_uint64(x)
-  if i >= 0 then int.to_uint32_saturating(i) else int.to_uint32(4294967295)
-}
-
-
 fn int_from_uint64_checked(x: UInt64) -> Int? = {
-  let i = int.from_uint64(x)
+  let i = int.__from_uint64(x)
   if i >= 0 then some(i) else none
 }
 
 fn int_from_uint64_saturating(x: UInt64) -> Int = {
-  let i = int.from_uint64(x)
+  let i = int.__from_uint64(x)
   if i >= 0 then i else 9223372036854775807
 }
 "#;
-pub const SRC_UINT8: &str = r#"
+pub const SRC_UINT8: &str = r#"/// Decimal digits; never a sign.
+fn to_string(x: UInt8) -> String = int.to_string(int.__from_uint8(x))
 
-
-
-/// Wraps to 8 bits; 255 becomes -1.
-fn to_int8(x: UInt8) -> Int8 = int.to_int8(int.from_uint8(x))
-
-/// Zero-extending widen; always exact.
-fn to_int16(x: UInt8) -> Int16 = int.to_int16(int.from_uint8(x))
-
-/// Zero-extending widen; always exact.
-fn to_int32(x: UInt8) -> Int32 = int.to_int32(int.from_uint8(x))
-
-/// Zero-extending widen; always exact.
-fn to_int64(x: UInt8) -> Int64 = int.to_int64(int.from_uint8(x))
-
-/// Zero-extending widen; always exact.
-fn to_uint16(x: UInt8) -> UInt16 = int.to_uint16(int.from_uint8(x))
-
-/// Zero-extending widen; always exact.
-fn to_uint32(x: UInt8) -> UInt32 = int.to_uint32(int.from_uint8(x))
-
-/// Zero-extending widen; always exact.
-fn to_uint64(x: UInt8) -> UInt64 = int.to_uint64(int.from_uint8(x))
-
-/// Same value as Float32; always exact.
-fn to_float32(x: UInt8) -> Float32 = int.to_float32(int.from_uint8(x))
-
-/// Same value as Float64; always exact.
-fn to_float64(x: UInt8) -> Float64 = int.to_float64(int.from_uint8(x))
-
-/// Decimal digits; never a sign.
-fn to_string(x: UInt8) -> String = int.to_string(int.from_uint8(x))
-
-
-/// some(x), or none if x exceeds 127.
-fn to_int8_checked(x: UInt8) -> Int8? = int.to_int8_checked(int.from_uint8(x))
-
-/// Clamps x to at most 127.
-fn to_int8_saturating(x: UInt8) -> Int8 = int.to_int8_saturating(int.from_uint8(x))
 
 
 /// Smallest UInt8: 0.
-fn min_value() -> UInt8 = int.to_uint8(0)
+fn min_value() -> UInt8 = int.__to_uint8(0)
 
 /// Largest UInt8: 255.
-fn max_value() -> UInt8 = int.to_uint8(255)
+fn max_value() -> UInt8 = int.__to_uint8(255)
 
 
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -43159,7 +39597,7 @@ fn min(a: UInt8, b: UInt8) -> UInt8 = if a <= b then a else b
 fn max(a: UInt8, b: UInt8) -> UInt8 = if a >= b then a else b
 
 /// x limited to lo..hi; aborts when lo > hi.
-fn clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8 = int.to_uint8(int.clamp(int.from_uint8(x), int.from_uint8(lo), int.from_uint8(hi)))
+fn clamp(x: UInt8, lo: UInt8, hi: UInt8) -> UInt8 = int.__to_uint8(int.clamp(int.__from_uint8(x), int.__from_uint8(lo), int.__from_uint8(hi)))
 
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt8, b: UInt8) -> UInt8 = a / b
@@ -43168,32 +39606,32 @@ fn floor_div(a: UInt8, b: UInt8) -> UInt8 = a / b
 fn modulo(a: UInt8, b: UInt8) -> UInt8 = a % b
 
 /// base raised to exp, wrapping to 8 bits like *; exp < 0 aborts.
-fn pow(base: UInt8, exp: Int) -> UInt8 = int.to_uint8(math.pow(int.from_uint8(base), exp))
+fn pow(base: UInt8, exp: Int) -> UInt8 = int.__to_uint8(math.__pow(int.__from_uint8(base), exp))
 
 /// True when x is a multiple of 2.
-fn is_even(x: UInt8) -> Bool = int.from_uint8(x) % 2 == 0
+fn is_even(x: UInt8) -> Bool = int.__from_uint8(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
-fn is_odd(x: UInt8) -> Bool = int.from_uint8(x) % 2 != 0
+fn is_odd(x: UInt8) -> Bool = int.__from_uint8(x) % 2 != 0
 
 
 /// Bitwise AND.
-fn band(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.band(int.from_uint8(a), int.from_uint8(b)))
+fn band(a: UInt8, b: UInt8) -> UInt8 = int.__to_uint8(int.band(int.__from_uint8(a), int.__from_uint8(b)))
 
 /// Bitwise OR.
-fn bor(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.bor(int.from_uint8(a), int.from_uint8(b)))
+fn bor(a: UInt8, b: UInt8) -> UInt8 = int.__to_uint8(int.bor(int.__from_uint8(a), int.__from_uint8(b)))
 
 /// Bitwise XOR.
-fn bxor(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.bxor(int.from_uint8(a), int.from_uint8(b)))
+fn bxor(a: UInt8, b: UInt8) -> UInt8 = int.__to_uint8(int.bxor(int.__from_uint8(a), int.__from_uint8(b)))
 
 /// Bitwise complement of all 8 bits.
-fn bnot(x: UInt8) -> UInt8 = int.to_uint8(int.bnot(int.from_uint8(x)))
+fn bnot(x: UInt8) -> UInt8 = int.__to_uint8(int.bnot(int.__from_uint8(x)))
 
 /// a shifted left by n bits; n is taken mod 8.
-fn bshl(a: UInt8, n: Int) -> UInt8 = int.to_uint8(int.bshl(int.from_uint8(a), shift_count(n)))
+fn bshl(a: UInt8, n: Int) -> UInt8 = int.__to_uint8(int.bshl(int.__from_uint8(a), shift_count(n)))
 
 /// Zero-filling right shift; n is taken mod 8.
-fn bshr(a: UInt8, n: Int) -> UInt8 = int.to_uint8(int.bshr(int.from_uint8(a), shift_count(n)))
+fn bshr(a: UInt8, n: Int) -> UInt8 = int.__to_uint8(int.bshr(int.__from_uint8(a), shift_count(n)))
 
 
 local fn shift_count(n: Int) -> Int = {
@@ -43202,32 +39640,32 @@ local fn shift_count(n: Int) -> Int = {
 }
 
 /// Zero bits above the highest set bit, counted in 8 bits; 8 for 0.
-fn count_leading_zeros(x: UInt8) -> Int = int.count_leading_zeros(int.from_uint8(x)) - 56
+fn count_leading_zeros(x: UInt8) -> Int = int.count_leading_zeros(int.__from_uint8(x)) - 56
 
 /// Zero bits below the lowest set bit; 8 for 0.
-fn count_trailing_zeros(x: UInt8) -> Int = int.min(int.count_trailing_zeros(int.from_uint8(x)), 8)
+fn count_trailing_zeros(x: UInt8) -> Int = int.min(int.count_trailing_zeros(int.__from_uint8(x)), 8)
 
 /// Number of set bits among the 8.
-fn count_ones(x: UInt8) -> Int = int.pop_count(int.from_uint8(x))
+fn count_ones(x: UInt8) -> Int = int.count_ones(int.__from_uint8(x))
 
 /// The bytes in reverse order; one byte, so x itself.
 fn byte_swap(x: UInt8) -> UInt8 = x
 
 
 /// a + b wrapped to 8 bits.
-fn wrap_add(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.from_uint8(a) + int.from_uint8(b))
+fn wrap_add(a: UInt8, b: UInt8) -> UInt8 = int.__to_uint8(int.__from_uint8(a) + int.__from_uint8(b))
 
 /// a - b wrapped to 8 bits.
-fn wrap_sub(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.from_uint8(a) - int.from_uint8(b))
+fn wrap_sub(a: UInt8, b: UInt8) -> UInt8 = int.__to_uint8(int.__from_uint8(a) - int.__from_uint8(b))
 
 /// a * b wrapped to 8 bits.
-fn wrap_mul(a: UInt8, b: UInt8) -> UInt8 = int.to_uint8(int.from_uint8(a) * int.from_uint8(b))
+fn wrap_mul(a: UInt8, b: UInt8) -> UInt8 = int.__to_uint8(int.__from_uint8(a) * int.__from_uint8(b))
 
 /// The 8 bits of a rotated left by n; n is taken mod 8.
-fn rotate_left(a: UInt8, n: Int) -> UInt8 = int.to_uint8(rotate_bits(int.from_uint8(a), rotate_count(n)))
+fn rotate_left(a: UInt8, n: Int) -> UInt8 = int.__to_uint8(rotate_bits(int.__from_uint8(a), rotate_count(n)))
 
 /// The 8 bits of a rotated right by n; n is taken mod 8.
-fn rotate_right(a: UInt8, n: Int) -> UInt8 = int.to_uint8(rotate_bits(int.from_uint8(a), rotate_count(0 - rotate_count(n))))
+fn rotate_right(a: UInt8, n: Int) -> UInt8 = int.__to_uint8(rotate_bits(int.__from_uint8(a), rotate_count(0 - rotate_count(n))))
 
 
 local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
@@ -43239,26 +39677,26 @@ local fn rotate_count(n: Int) -> Int = {
 }
 
 /// Bits needed to hold x; 0 for 0.
-fn bit_length(x: UInt8) -> Int = 64 - int.count_leading_zeros(int.from_uint8(x))
+fn bit_length(x: UInt8) -> Int = 64 - int.count_leading_zeros(int.__from_uint8(x))
 
 /// Decimal UInt8 from ASCII-trimmed s; err on junk, a sign of -, or above 255.
 fn parse(s: String) -> Result[UInt8, String] =
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
   else match int.parse(s) {
-    ok(n) => if n > 255 then err("number too large to fit in target type") else ok(int.to_uint8(n)),
+    ok(n) => if n > 255 then err("number too large to fit in target type") else ok(int.__to_uint8(n)),
     err(e) => err(e),
   }
 
 
 /// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
-fn to_string_radix(x: UInt8, radix: Int) -> String = int.to_string_radix(int.from_uint8(x), radix)
+fn to_string_radix(x: UInt8, radix: Int) -> String = int.to_string_radix(int.__from_uint8(x), radix)
 
 /// UInt8 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 255.
 fn parse_radix(s: String, radix: Int) -> Result[UInt8, String] = {
   let parsed = int.parse_radix(s, radix)
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
   else match parsed {
-    ok(n) => if n > 255 then err("number too large to fit in target type") else ok(int.to_uint8(n)),
+    ok(n) => if n > 255 then err("number too large to fit in target type") else ok(int.__to_uint8(n)),
     err(e) => err(e),
   }
 }
@@ -43269,46 +39707,46 @@ fn parse_radix(s: String, radix: Int) -> Result[UInt8, String] = {
 
 /// x as UInt8, toward zero; NaN, an infinity or a value outside UInt8 aborts.
 fn from[S: Numeric](x: S) -> UInt8 = match x.__trunc().__int_exact() {
-  some(n) => int.to_uint8_checked(n) ?? panic("uint8.from: the value is not a number in the range of UInt8"),
+  some(n) => int.__to_uint8_checked(n) ?? panic("uint8.from: the value is not a number in the range of UInt8"),
   none => panic("uint8.from: the value is not a number in the range of UInt8"),
 }
 
 /// some(x as UInt8) when UInt8 holds x exactly, else none (a fraction, NaN, out of range).
 fn from_checked[S: Numeric](x: S) -> UInt8? = match x.__int_exact() {
-  some(n) => int.to_uint8_checked(n),
+  some(n) => int.__to_uint8_checked(n),
   none => none,
 }
 
 /// x as UInt8, toward zero, clamped to UInt8's range; NaN is 0.
-fn from_saturating[S: Numeric](x: S) -> UInt8 = int.to_uint8_saturating(x.__int_sat())
+fn from_saturating[S: Numeric](x: S) -> UInt8 = int.__to_uint8_saturating(x.__int_sat())
 
 /// The low 8 bits of integer x as UInt8 (two's complement).
-fn from_wrapping[S: Integer](x: S) -> UInt8 = int.to_uint8(int.wrap(x.__bits64(), 8))
+fn from_wrapping[S: Integer](x: S) -> UInt8 = int.__to_uint8(int.wrap(x.__bits64(), 8))
 
 
 
 
-fn __int_exact(x: UInt8) -> Int? = some(int.from_uint8(x))
+fn __int_exact(x: UInt8) -> Int? = some(int.__from_uint8(x))
 
-fn __uint64_exact(x: UInt8) -> UInt64? = int.__uint64_exact(int.from_uint8(x))
+fn __uint64_exact(x: UInt8) -> UInt64? = int.__uint64_exact(int.__from_uint8(x))
 
 fn __trunc(x: UInt8) -> UInt8 = x
 
-fn __int_sat(x: UInt8) -> Int = int.from_uint8(x)
+fn __int_sat(x: UInt8) -> Int = int.__from_uint8(x)
 
-fn __uint64_sat(x: UInt8) -> UInt64 = int.__uint64_sat(int.from_uint8(x))
+fn __uint64_sat(x: UInt8) -> UInt64 = int.__uint64_sat(int.__from_uint8(x))
 
-fn __to_float(x: UInt8) -> Float = int.to_float(int.from_uint8(x))
+fn __to_float(x: UInt8) -> Float = int.__raw_to_float(int.__from_uint8(x))
 
-fn __to_float_exact(x: UInt8) -> Float? = int.__to_float_exact(int.from_uint8(x))
+fn __to_float_exact(x: UInt8) -> Float? = int.__to_float_exact(int.__from_uint8(x))
 
-fn __to_float32(x: UInt8) -> Float32 = int.to_float32(int.from_uint8(x))
+fn __to_float32(x: UInt8) -> Float32 = int.__raw_to_float32(int.__from_uint8(x))
 
-fn __to_float32_exact(x: UInt8) -> Float32? = int.to_float32_checked(int.from_uint8(x))
+fn __to_float32_exact(x: UInt8) -> Float32? = int.__to_float32_checked(int.__from_uint8(x))
 
-fn __decimal_exact(x: UInt8) -> String? = some(int.to_string(int.from_uint8(x)))
+fn __decimal_exact(x: UInt8) -> String? = some(int.to_string(int.__from_uint8(x)))
 
-fn __bits64(x: UInt8) -> Int = int.from_uint8(x)
+fn __bits64(x: UInt8) -> Int = int.__from_uint8(x)
 
 fn __sum(xs: List[UInt8]) -> UInt8 = {
   let zero: UInt8 = 0
@@ -43320,69 +39758,263 @@ fn __product(xs: List[UInt8]) -> UInt8 = {
   list.fold(xs, one, (a, b) => a * b)
 }
 "#;
-pub const SRC_UINT8_CONVERT: &str = r#"
-
-
-fn uint8_to_int8(x: UInt8) -> Int8 = {
-  let i = int.from_uint8(x)
-  int.to_int8(i)
-}
-
-fn uint8_to_int16(x: UInt8) -> Int16 = {
-  let i = int.from_uint8(x)
-  int.to_int16(i)
-}
-
-fn uint8_to_int32(x: UInt8) -> Int32 = {
-  let i = int.from_uint8(x)
-  int.to_int32(i)
-}
-
-fn uint8_to_int64(x: UInt8) -> Int64 = {
-  let i = int.from_uint8(x)
-  int.to_int64(i)
-}
-
-fn uint8_to_uint16(x: UInt8) -> UInt16 = {
-  let i = int.from_uint8(x)
-  int.to_uint16(i)
-}
-
-fn uint8_to_uint32(x: UInt8) -> UInt32 = {
-  let i = int.from_uint8(x)
-  int.to_uint32(i)
-}
-
-fn uint8_to_uint64(x: UInt8) -> UInt64 = {
-  let i = int.from_uint8(x)
-  int.to_uint64(i)
-}
-
-fn uint8_to_float32(x: UInt8) -> Float32 = {
-  let i = int.from_uint8(x)
-  int.to_float32(i)
-}
-
-fn uint8_to_float64(x: UInt8) -> Float64 = {
-  let i = int.from_uint8(x)
-  int.to_float64(i)
-}
-
-fn uint8_to_string(x: UInt8) -> String = {
-  let i = int.from_uint8(x)
+pub const SRC_UINT8_CONVERT: &str = r#"fn uint8_to_string(x: UInt8) -> String = {
+  let i = int.__from_uint8(x)
   int.to_string(i)
 }
+"#;
+pub const SRC_UNIX: &str = r#"
 
 
-fn uint8_to_int8_checked(x: UInt8) -> Int8? = {
-  let i = int.from_uint8(x)
-  int.to_int8_checked(i)
+
+
+
+
+
+
+
+
+
+
+
+/// An open descriptor: a socket, a listener, a received descriptor or a shared-memory file.
+mod type Fd: Read, Write, Close = Int
+
+
+/// Stream socket connected to the listener at path.
+@category("Net.fetch")
+effect fn connect(path: String) -> Result[Fd, String] = ok(Fd(unix.__os_connect(path)!))
+
+/// Listener bound at path, which must not exist yet.
+@category("Net.listen")
+effect fn listen(path: String) -> Result[Fd, String] = ok(Fd(unix.__os_listen(path)!))
+
+/// Blocks for the next connection on listener.
+@category("Net.listen")
+effect fn accept(listener: Fd) -> Result[Fd, String] = ok(Fd(unix.__os_accept(__raw(listener))!))
+
+/// Sends all of data, the descriptors fds riding with its first byte.
+effect fn write_fds(sock: Fd, data: Bytes, fds: List[Fd]) -> Result[Unit, String] = {
+  let raw = fds |> list.map((f) => __raw(f))
+  unix.__os_send(__raw(sock), data, raw)
 }
 
-fn uint8_to_int8_saturating(x: UInt8) -> Int8 = {
-  let i = int.from_uint8(x)
-  int.to_int8_saturating(i)
+/// Descriptors received on sock and not yet taken, oldest first.
+effect fn take_fds(sock: Fd) -> List[Fd] = unix.__os_take_fds(__raw(sock)) |> list.map((f) => Fd(f))
+
+/// The descriptors of xs readable within timeout_ms, in order; < 0 waits for one, 0 only checks.
+effect fn select(xs: List[Fd], timeout_ms: Int) -> Result[List[Fd], String] = {
+  let raw = xs |> list.map((f) => __raw(f))
+  let ready = unix.__os_wait(raw, timeout_ms)!
+  ok(ready |> list.map((f) => Fd(f)))
 }
+
+
+/// New zero-filled unnamed file of size bytes.
+effect fn shm_create(size: Int) -> Result[Fd, String] = ok(Fd(unix.__os_shm_create(size)!))
+
+/// Grows or shrinks the file fd to size bytes.
+effect fn shm_resize(fd: Fd, size: Int) -> Result[Unit, String] = unix.__os_shm_resize(
+  __raw(fd),
+  size,
+)
+
+/// Writes data into fd at offset; a negative offset or a write past the end aborts (shm_resize first).
+effect fn shm_write(fd: Fd, offset: Int, data: Bytes) -> Result[Unit, String] = match unix.__os_shm_write(
+  __raw(fd),
+  offset,
+  data,
+) {
+  ok(_) => ok(()),
+  err(e) => if string.starts_with(e, "unix.shm_write:") then panic(e) else err(e),
+}
+
+/// Up to len bytes of fd from offset; fewer at its end.
+effect fn shm_read(fd: Fd, offset: Int, len: Int) -> Result[Bytes, String] = ok(unix.__os_shm_read(
+  __raw(fd),
+  offset,
+  len,
+)!)
+
+
+
+effect fn __fd_read(h: Fd, max: Int) -> Result[Bytes, String] = ok(unix.__os_recv(__raw(h), max)!)
+
+effect fn __fd_write(h: Fd, data: Bytes) -> Result[Unit, String] = {
+  let no_fds: List[Int] = []
+  unix.__os_send(__raw(h), data, no_fds)
+}
+
+effect fn __fd_close(h: Fd) -> Result[Unit, String] = unix.__os_close(__raw(h))
+
+local fn __raw(f: Fd) -> Int = match f {
+  Fd(n) => n
+}
+
+
+@intrinsic("almide_rt_unix___os_connect")
+@category("Net.fetch")
+effect fn __os_connect(path: String) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_unix___os_listen")
+@category("Net.listen")
+effect fn __os_listen(path: String) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_unix___os_accept")
+@category("Net.listen")
+effect fn __os_accept(listener: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_unix___os_send")
+effect fn __os_send(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_unix___os_recv")
+effect fn __os_recv(sock: Int, max: Int) -> Result[Bytes, String] = _
+
+@intrinsic("almide_rt_unix___os_take_fds")
+effect fn __os_take_fds(sock: Int) -> List[Int] = _
+
+@intrinsic("almide_rt_unix___os_wait")
+effect fn __os_wait(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = _
+
+@intrinsic("almide_rt_unix___os_close")
+effect fn __os_close(fd: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_unix___os_shm_create")
+effect fn __os_shm_create(size: Int) -> Result[Int, String] = _
+
+@intrinsic("almide_rt_unix___os_shm_resize")
+effect fn __os_shm_resize(fd: Int, size: Int) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_unix___os_shm_write")
+effect fn __os_shm_write(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = _
+
+@intrinsic("almide_rt_unix___os_shm_read")
+effect fn __os_shm_read(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = _
+"#;
+pub const SRC_UNIX_WASM: &str = r#"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+effect fn __unix_connect(path: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_listen(path: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_accept(listener: String, unused: String) -> Result[String, String] = _
+
+
+effect fn __unix_send(sock_fds: String, data: Bytes) -> Result[String, String] = _
+
+effect fn __unix_recv(sock: String, max: String) -> Result[Bytes, String] = _
+
+
+
+fn __unix_take_fds(sock: String, unused: String) -> Result[String, String] = _
+
+effect fn __unix_wait(fds: String, timeout_ms: String) -> Result[String, String] = _
+
+effect fn __unix_close(fd: String, unused: String) -> Result[String, String] = _
+
+effect fn __shm_create(size: String, unused: String) -> Result[String, String] = _
+
+effect fn __shm_resize(fd: String, size: String) -> Result[String, String] = _
+
+
+effect fn __shm_write(fd_offset: String, data: Bytes) -> Result[String, String] = _
+
+
+effect fn __shm_read(fd: String, offset_len: String) -> Result[Bytes, String] = _
+
+fn __unix_fd_lines(fds: List[Int]) -> String = fds |> list.map((f) => int.to_string(f)) |> list.join("\n")
+
+fn __unix_fd_list(t: String) -> List[Int] =
+  if t == "" then []
+  else string.split(t, "\n") |> list.map((x) => int.parse(x) ?? -1)
+
+@implements("unix.__os_connect")
+effect fn __unix_impl_connect_impl(path: String) -> Result[Int, String] = {
+  let t = __unix_connect(path, "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_listen")
+effect fn __unix_impl_listen_impl(path: String) -> Result[Int, String] = {
+  let t = __unix_listen(path, "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_accept")
+effect fn __unix_impl_accept_impl(listener: Int) -> Result[Int, String] = {
+  let t = __unix_accept(int.to_string(listener), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_send")
+effect fn __unix_impl_send_impl(sock: Int, data: Bytes, fds: List[Int]) -> Result[Unit, String] = {
+  let _ = __unix_send(__unix_fd_lines([sock] + fds), data)!
+  ok(())
+}
+
+@implements("unix.__os_recv")
+effect fn __unix_impl_recv_impl(sock: Int, max: Int) -> Result[Bytes, String] = __unix_recv(
+  int.to_string(sock),
+  int.to_string(max),
+)
+
+@implements("unix.__os_take_fds")
+fn __unix_impl_take_fds_impl(sock: Int) -> List[Int] = match __unix_take_fds(
+  int.to_string(sock),
+  "",
+) {
+  ok(t) => __unix_fd_list(t),
+  err(_) => [],
+}
+
+@implements("unix.__os_wait")
+effect fn __unix_impl_wait_impl(fds: List[Int], timeout_ms: Int) -> Result[List[Int], String] = {
+  let t = __unix_wait(__unix_fd_lines(fds), int.to_string(timeout_ms))!
+  ok(__unix_fd_list(t))
+}
+
+@implements("unix.__os_close")
+effect fn __unix_impl_close_impl(fd: Int) -> Result[Unit, String] = {
+  let _ = __unix_close(int.to_string(fd), "")!
+  ok(())
+}
+
+@implements("unix.__os_shm_create")
+effect fn __unix_impl_shm_create_impl(size: Int) -> Result[Int, String] = {
+  let t = __shm_create(int.to_string(size), "")!
+  ok(int.parse(t) ?? -1)
+}
+
+@implements("unix.__os_shm_resize")
+effect fn __unix_impl_shm_resize_impl(fd: Int, size: Int) -> Result[Unit, String] = {
+  let _ = __shm_resize(int.to_string(fd), int.to_string(size))!
+  ok(())
+}
+
+@implements("unix.__os_shm_write")
+effect fn __unix_impl_shm_write_impl(fd: Int, offset: Int, data: Bytes) -> Result[Unit, String] = {
+  let _ = __shm_write("${fd}\n${offset}", data)!
+  ok(())
+}
+
+@implements("unix.__os_shm_read")
+effect fn __unix_impl_shm_read_impl(fd: Int, offset: Int, len: Int) -> Result[Bytes, String] = __shm_read(
+  int.to_string(fd),
+  "${offset}\n${len}",
+)
 "#;
 pub const SRC_URL: &str = r##"
 
@@ -43434,7 +40066,7 @@ fn __url_enc_cp(cp: Int) -> String = if cp < 128 then __url_enc_byte(cp)
 else if cp < 2048 then __url_enc_byte(192 + cp / 64) + __url_enc_byte(128 + cp % 64)
 else if cp < 65536 then __url_enc_byte(224 + cp / 4096) + __url_enc_byte(128 + (cp / 64) % 64) + __url_enc_byte(128 + cp % 64) else __url_enc_byte(240 + cp / 262144) + __url_enc_byte(128 + (cp / 4096) % 64) + __url_enc_byte(128 + (cp / 64) % 64) + __url_enc_byte(128 + cp % 64)
 
-fn __url_enc_char(c: String) -> String = match string.codepoint(c) {
+fn __url_enc_char(c: String) -> String = match string.to_codepoint(c) {
   some(cp) => if __url_is_unreserved(cp) then c else __url_enc_cp(cp),
   none => "",
 }
@@ -43446,9 +40078,9 @@ fn __url_enc_char(c: String) -> String = match string.codepoint(c) {
 
 
 /// All but A-Za-z0-9-._~ as UTF-8 %XX escapes.
-fn encode_component(s: String) -> String = s |> string.chars |> list.map((c) => __url_enc_char(c)) |> list.join("")
+fn encode_component(s: String) -> String = s |> string.to_list |> list.map((c) => __url_enc_char(c)) |> list.join("")
 
-fn __url_hex_val(c: String) -> Int? = match string.codepoint(c) {
+fn __url_hex_val(c: String) -> Int? = match string.to_codepoint(c) {
   some(cp) => if cp >= 48 and cp <= 57 then some(cp - 48)
   else if cp >= 65 and cp <= 70 then some(cp - 55)
   else if cp >= 97 and cp <= 102 then some(cp - 87) else none,
@@ -43492,14 +40124,19 @@ fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[Stri
   if p >= end then ok(acc)
   else {
     let b0 = __url_pbyte(cs, p)
-    if b0 >= 0 and b0 < 128 then __url_utf8_go(cs, p + 3, end, acc + string.from_codepoint(b0))
+    if b0 >= 0 and b0 < 128 then __url_utf8_go(
+      cs,
+      p + 3,
+      end,
+      acc + (string.from_codepoint(b0) ?? ""),
+    )
     else if b0 >= 194 and b0 <= 223 then {
       let b1 = __url_pbyte(cs, p + 3)
       if p + 6 <= end and __url_cont(b1) then __url_utf8_go(
         cs,
         p + 6,
         end,
-        acc + string.from_codepoint((b0 - 192) * 64 + (b1 - 128)),
+        acc + (string.from_codepoint((b0 - 192) * 64 + (b1 - 128)) ?? ""),
       )
       else err("url.decode_component: invalid UTF-8 in percent data")
     } else if b0 >= 224 and b0 <= 239 then {
@@ -43511,7 +40148,7 @@ fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[Stri
         cs,
         p + 9,
         end,
-        acc + string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)),
+        acc + (string.from_codepoint((b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)) ?? ""),
       )
       else err("url.decode_component: invalid UTF-8 in percent data")
     } else if b0 >= 240 and b0 <= 244 then {
@@ -43524,7 +40161,7 @@ fn __url_utf8_go(cs: List[String], p: Int, end: Int, acc: String) -> Result[Stri
         cs,
         p + 12,
         end,
-        acc + string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)),
+        acc + (string.from_codepoint((b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)) ?? ""),
       )
       else err("url.decode_component: invalid UTF-8 in percent data")
     } else err("url.decode_component: invalid UTF-8 in percent data")
@@ -43555,7 +40192,7 @@ fn __url_dec_go(cs: List[String], i: Int, n: Int, acc: String) -> Result[String,
 
 /// Percent-decoded s; err on bad escape/UTF-8; + kept.
 fn decode_component(s: String) -> Result[String, String] = {
-  let cs = string.chars(s)
+  let cs = string.to_list(s)
   __url_dec_go(cs, 0, list.len(cs), "")
 }
 
@@ -43564,7 +40201,7 @@ fn decode_component(s: String) -> Result[String, String] = {
 
 fn __url_host_char(cp: Int) -> Bool = __url_is_unreserved(cp) or cp == 33 or cp == 36 or cp == 38 or cp == 39 or cp == 40 or cp == 41 or cp == 42 or cp == 43 or cp == 44 or cp == 59 or cp == 61
 
-fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) => match string.codepoint(c) {
+fn __url_host_ok(host: String) -> Bool = host |> string.to_list |> list.all((c) => match string.to_codepoint(c) {
   some(cp) => __url_host_char(cp),
   none => false,
 })
@@ -43573,7 +40210,7 @@ fn __url_host_ok(host: String) -> Bool = host |> string.chars |> list.all((c) =>
 
 
 
-fn __url_cp(c: String) -> Int = string.codepoint(c) ?? 0
+fn __url_cp(c: String) -> Int = string.to_codepoint(c) ?? 0
 
 fn __url_first_kept(cs: List[String], i: Int) -> Int =
   if i < list.len(cs) and __url_cp(list.get(cs, i) ?? "") <= 32 then __url_first_kept(cs, i + 1)
@@ -43584,7 +40221,7 @@ fn __url_last_kept(cs: List[String], i: Int) -> Int =
   else i
 
 fn __url_clean(s: String, who: String) -> Result[String, String] = {
-  let cs = string.chars(s)
+  let cs = string.to_list(s)
   let start = __url_first_kept(cs, 0)
   let end = __url_last_kept(cs, list.len(cs))
   let kept = cs |> list.take(end) |> list.drop(start) |> list.filter((c) => c != "\t" and c != "\n" and c != "\r")
@@ -43594,12 +40231,12 @@ fn __url_clean(s: String, who: String) -> Result[String, String] = {
 }
 
 
-fn __url_scheme_ok(t: String) -> Bool = string.len(t) > 0 and string.chars(t) |> list.enumerate |> list.all(((j, c)) => {
+fn __url_scheme_ok(t: String) -> Bool = string.len(t) > 0 and string.to_list(t) |> list.enumerate |> list.all(((j, c)) => {
   let cp = __url_cp(c)
   (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122) or (j > 0 and ((cp >= 48 and cp <= 57) or cp == 43 or cp == 45 or cp == 46))
 })
 
-fn __url_all_digits(t: String) -> Bool = string.len(t) > 0 and string.chars(t) |> list.all((c) => __url_cp(c) >= 48 and __url_cp(c) <= 57)
+fn __url_all_digits(t: String) -> Bool = string.len(t) > 0 and string.to_list(t) |> list.all((c) => __url_cp(c) >= 48 and __url_cp(c) <= 57)
 
 fn __url_hex_digit(c: String) -> Bool = match __url_hex_val(c) {
   some(_) => true,
@@ -43613,7 +40250,7 @@ fn __url_ends_in_number(host: String) -> Bool = {
   let n = list.len(labels)
   let last = if n > 1 and (list.get(labels, n - 1) ?? "") == "" then list.get(labels, n - 2) ?? ""
   else list.get(labels, n - 1) ?? ""
-  __url_all_digits(last) or ((string.starts_with(last, "0x") or string.starts_with(last, "0X")) and string.chars(string.drop(last, 2)) |> list.all((c) => __url_hex_digit(c)))
+  __url_all_digits(last) or ((string.starts_with(last, "0x") or string.starts_with(last, "0X")) and string.to_list(string.drop(last, 2)) |> list.all((c) => __url_hex_digit(c)))
 }
 
 
@@ -43766,30 +40403,15 @@ fn to_string(u: Url) -> String = {
 
 
 
-
-
-
-/// Undecoded (k, v) pairs; bare key gets "".
-fn query_pairs(query: String) -> List[(String, String)] = if string.len(query) == 0 then []
-else query |> string.split("&") |> list.filter((part) => string.len(part) > 0) |> list.map((part) => {
-  let kv = __url_split_once(part, "=")
-  (kv.0, kv.1)
-})
-
-
-
-
-
-
 /// k=v joined by &, both sides percent-encoded.
-fn build_query(pairs: List[(String, String)]) -> String = pairs |> list.map(((k, v)) => encode_component(k) + "=" + encode_component(v)) |> list.join("&")
+fn build_query(xs: List[(String, String)]) -> String = xs |> list.map(((k, v)) => encode_component(k) + "=" + encode_component(v)) |> list.join("&")
 
 
 
 
 
 /// Like encode_component, but a space becomes +.
-fn encode_form(s: String) -> String = s |> string.chars |> list.map((c) => if c == " " then "+" else __url_enc_char(c)) |> list.join("")
+fn encode_form(s: String) -> String = s |> string.to_list |> list.map((c) => if c == " " then "+" else __url_enc_char(c)) |> list.join("")
 
 
 
@@ -43869,19 +40491,19 @@ fn resolve(base: Url, ref: String) -> Result[Url, String] = match __url_clean(re
 }
 
 
-fn __url_t_pctend(s: String) -> Int = __url_pct_end(string.chars(s), 1, string.len(s))
+fn __url_t_pctend(s: String) -> Int = __url_pct_end(string.to_list(s), 1, string.len(s))
 
-fn __url_t_pbyte(s: String) -> Int = __url_pbyte(string.chars(s), 0)
+fn __url_t_pbyte(s: String) -> Int = __url_pbyte(string.to_list(s), 0)
 
-fn __url_t_utf8(s: String) -> String = match __url_utf8_go(string.chars(s), 0, string.len(s), "") {
+fn __url_t_utf8(s: String) -> String = match __url_utf8_go(string.to_list(s), 0, string.len(s), "") {
   ok(v) => v,
   err(e) => "E:" + e,
 }
 
-fn __url_t_fcp(b: Int) -> String = string.from_codepoint(b)
+fn __url_t_fcp(b: Int) -> String = (string.from_codepoint(b) ?? "")
 
 fn __url_t_dec_nopct(s: String) -> String = match __url_dec_go(
-  string.chars(s),
+  string.to_list(s),
   0,
   string.len(s),
   "",
@@ -43890,10 +40512,111 @@ fn __url_t_dec_nopct(s: String) -> String = match __url_dec_go(
   err(e) => "E:" + e,
 }
 "##;
-pub const SRC_VALUE: &str = r#"/// Wraps items as an Array Value.
+pub const SRC_UUID: &str = r#"
+
+
+
+
+
+
+import hex
+import random
+
+/// A 128-bit identifier: 16 bytes, ordered from the first byte.
+mod type Uuid = Bytes
+
+/// A random (version 4) Uuid: 122 bits from the OS CSPRNG.
+@category("Rand")
+effect fn v4() -> Uuid = Uuid(__versioned(random.bytes(16), 4))
+
+/// A time-ordered (version 7) Uuid: Unix ms, a counter, random bits; each is greater than the last.
+@category("Time", "Rand")
+effect fn v7() -> Uuid = {
+  let t = __v7_stamp(datetime.now_ms())
+  let ms = int.bshr(t, 12)
+  let seq = int.band(t, 4095)
+  let head = bytes.from_list([
+    __octet(ms, 40),
+    __octet(ms, 32),
+    __octet(ms, 24),
+    __octet(ms, 16),
+    __octet(ms, 8),
+    __octet(ms, 0),
+    int.bshr(seq, 8),
+    int.band(seq, 255)
+  ])
+  Uuid(__versioned(bytes.__concat(head, random.bytes(8)), 7))
+}
+
+/// The Uuid s spells: 8-4-4-4-12 hex digits, either case, optionally in {…} or after urn:uuid:.
+fn parse(s: String) -> Result[Uuid, String] = {
+  let body = __unwrapped(s)
+  let groups = string.split(body, "-")
+  let lens = groups |> list.map((g) => string.len(g))
+  if lens != [8, 4, 4, 4, 12] then err("uuid.parse: not an 8-4-4-4-12 UUID: \"${s}\"")
+  else match hex.decode(list.join(groups, "")) {
+    ok(b) => ok(Uuid(b)),
+    err(_) => err("uuid.parse: not an 8-4-4-4-12 UUID: \"${s}\""),
+  }
+}
+
+/// u as 8-4-4-4-12 lowercase hex digits.
+fn to_string(u: Uuid) -> String = {
+  let h = hex.encode(__bytes_of(u))
+  "${string.slice(h, 0, 8)}-${string.slice(h, 8, 12)}-${string.slice(h, 12, 16)}-${string.slice(
+    h,
+    16,
+    20,
+  )}-${string.slice(h, 20, 32)}"
+}
+
+/// The Uuid of exactly 16 bytes b; err for any other length.
+fn from_bytes(b: Bytes) -> Result[Uuid, String] =
+  if bytes.len(b) == 16 then ok(Uuid(b))
+  else err("uuid.from_bytes: expected 16 bytes, got ${bytes.len(b)}")
+
+/// The 16 bytes of u.
+fn to_bytes(u: Uuid) -> Bytes = __bytes_of(u)
+
+/// Negative, zero or positive as a orders before, with or after b, byte by byte.
+fn compare(a: Uuid, b: Uuid) -> Int = bytes.compare(__bytes_of(a), __bytes_of(b))
+
+local fn __bytes_of(u: Uuid) -> Bytes = match u {
+  Uuid(b) => b
+}
+
+
+local fn __octet(n: Int, shift: Int) -> Int = int.band(int.bshr(n, shift), 255)
+
+
+
+local fn __versioned(b: Bytes, ver: Int) -> Bytes = {
+  let b6 = bytes.set(b, 6, int.bor(int.band(bytes.get(b, 6) ?? 0, 15), ver * 16))
+  bytes.set(b6, 8, int.bor(int.band(bytes.get(b6, 8) ?? 0, 63), 128))
+}
+
+
+local fn __unwrapped(s: String) -> String =
+  if string.starts_with(s, "{") and string.ends_with(s, "}") then string.slice(
+    s,
+    1,
+    string.len(s) - 1,
+  )
+  else if string.starts_with(string.to_lower(s), "urn:uuid:") then string.drop(s, 9)
+  else s
+
+
+
+
+
+@intrinsic("almide_rt_uuid___v7_stamp")
+@category("Time")
+effect fn __v7_stamp(ms: Int) -> Int = _
+"#;
+pub const SRC_VALUE: &str = r#"/// Wraps xs as an Array Value.
 @intrinsic("almide_rt_value_array")
-@reuse(items)
-fn array(items: List[Value]) -> Value = _
+@reuse(xs)
+fn array(xs: List[Value]) -> Value = _
 
 /// Array items; err if v is another kind.
 @intrinsic("almide_rt_value_as_array")
@@ -43936,10 +40659,10 @@ fn merge(a: Value, b: Value) -> Value = _
 @intrinsic("almide_rt_value_null")
 fn null() -> Value = _
 
-/// Wraps pairs as an Object; a repeated key keeps its first position, last value.
+/// Wraps the pairs xs as an Object; a repeated key keeps its first position, last value.
 @intrinsic("almide_rt_value_object")
-@reuse(pairs)
-fn object(pairs: List[(String, Value)]) -> Value = _
+@reuse(xs)
+fn object(xs: List[(String, Value)]) -> Value = _
 
 /// v minus the listed keys; non-objects as-is.
 @intrinsic("almide_rt_value_omit")
@@ -43951,32 +40674,214 @@ fn pick(v: Value, keys: List[String]) -> Value = _
 
 /// Value holding the String s.
 @intrinsic("almide_rt_value_str")
-fn str(s: String) -> Value = _
+fn string(s: String) -> Value = _
 
 
 
 
 /// Compact JSON; NaN/inf print as null.
 @intrinsic("almide_rt_value_stringify")
-fn stringify(v: Value) -> String = _
-
-/// Top-level keys to camelCase; nested untouched.
-@intrinsic("almide_rt_value_to_camel_case")
-fn to_camel_case(v: Value) -> Value = _
-
-/// Top-level keys to snake_case; userID -> user_i_d.
-@intrinsic("almide_rt_value_to_snake_case")
-fn to_snake_case(v: Value) -> Value = _
+fn __stringify(v: Value) -> String = _
 
 /// Value at key; err if missing or v not an Object.
 @intrinsic("almide_rt_value_field")
-fn field(v: Value, key: String) -> Result[Value, String] = _
+fn __field(v: Value, key: String) -> Result[Value, String] = _
 
 
 
 /// Object keys in order; [] for non-objects.
 @intrinsic("almide_rt_value_keys")
-fn keys(v: Value) -> List[String] = _
+fn __keys(v: Value) -> List[String] = _
+
+/// Object pairs in order; err if v is another kind.
+@intrinsic("almide_rt_value_as_object")
+fn as_object(v: Value) -> Result[List[(String, Value)], String] = _
+
+
+
+
+
+
+/// Value at key; none if absent or v is not an Object.
+fn get(v: Value, key: String) -> Value? = result.to_option(value.__field(v, key))
+
+/// String at key; none if absent or another kind.
+fn get_string(v: Value, key: String) -> String? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_string(x)),
+  none => none,
+}
+
+/// Int at key; none if absent or not an Int (a Float is never truncated).
+fn get_int(v: Value, key: String) -> Int? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_int(x)),
+  none => none,
+}
+
+/// Float at key (an Int widens); none if absent or another kind.
+fn get_float(v: Value, key: String) -> Float? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_float(x)),
+  none => none,
+}
+
+/// Bool at key; none if absent or another kind.
+fn get_bool(v: Value, key: String) -> Bool? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_bool(x)),
+  none => none,
+}
+
+/// Array items at key; none if absent or another kind.
+fn get_array(v: Value, key: String) -> List[Value]? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_array(x)),
+  none => none,
+}
+
+/// Object pairs at key; none if absent or another kind.
+fn get_object(v: Value, key: String) -> List[(String, Value)]? = match value.get(v, key) {
+  some(x) => result.to_option(value.as_object(x)),
+  none => none,
+}
+
+
+
+
+
+
+
+/// A path into a Value: key and index steps from the root.
+mod type Path = List[(Bool, String, Int)]
+
+/// The empty path: the whole value.
+fn root() -> Path = Path([])
+
+/// p extended by the object key name.
+fn key(p: Path, name: String) -> Path = match p {
+  Path(steps) => Path(steps + [(true, name, 0)])
+}
+
+/// p extended by the array index i; a negative i is out of range.
+fn index(p: Path, i: Int) -> Path = match p {
+  Path(steps) => Path(steps + [(false, "", i)])
+}
+
+/// Value at p, or none if a step misses.
+fn get_path(v: Value, p: Path) -> Value? = match p {
+  Path(steps) => __get_steps(v, steps, 0)
+}
+
+/// v with x at p; missing keys are created, a missed index leaves v as is; err when the result would nest past 1000.
+fn set_path(v: Value, p: Path, x: Value) -> Result[Value, String] = match p {
+  Path(steps) => value.__set_path_steps(v, steps, x)
+}
+
+
+
+
+
+
+
+
+
+
+
+@intrinsic("almide_rt_value_set_path_steps")
+@consume(v, x)
+fn __set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = _
+
+
+
+
+
+
+fn __set_path_pure(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = {
+  let n = list.len(steps)
+  if n > 1000 or __nests_past(x, 1000 - n) then err("json: nesting deeper than 1000")
+  else ok(__set_steps(v, steps, 0, x))
+}
+
+
+
+local fn __nests_past(x: Value, budget: Int) -> Bool = match value.as_array(x) {
+  ok(xs) => budget == 0 or list.any(xs, (e) => __nests_past(e, budget - 1)),
+  err(_) => match value.as_object(x) {
+    ok(kvs) => budget == 0 or list.any(kvs, (kv) => __nests_past(kv.1, budget - 1)),
+    err(_) => false,
+  },
+}
+
+local fn __set_steps(v: Value, steps: List[(Bool, String, Int)], k: Int, x: Value) -> Value = match list.get(
+  steps,
+  k,
+) {
+  none => x,
+  some((true, name, _)) => match value.as_object(v) {
+    ok(pairs) => if list.any(pairs, ((pk, _)) => pk == name) then value.object(list.map(
+      pairs,
+      ((pk, pv)) => if pk == name then (pk, __set_steps(pv, steps, k + 1, x))
+      else (pk, pv),
+    ))
+    else value.object(pairs + [
+      (name, __set_steps(value.object([]), steps, k + 1, x))
+    ]),
+    err(_) => value.object([
+      (name, __set_steps(value.object([]), steps, k + 1, x))
+    ]),
+  },
+  some((false, _, i)) => match value.as_array(v) {
+    ok(xs) => match list.get(xs, i) {
+      some(child) => value.array(list.set(xs, i, __set_steps(child, steps, k + 1, x))),
+      none => v,
+    },
+    err(_) => v,
+  },
+}
+
+/// v minus the entry at p; unchanged if absent; null for the root.
+fn remove_path(v: Value, p: Path) -> Value = match p {
+  Path(steps) => __remove_steps(v, steps, 0)
+}
+
+local fn __step_at(v: Value, step: (Bool, String, Int)) -> Value? = match step {
+  (true, name, _) => value.get(v, name),
+  (false, _, i) => match value.as_array(v) {
+    ok(xs) => list.get(xs, i),
+    err(_) => none,
+  },
+}
+
+local fn __get_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> Value? = match list.get(
+  steps,
+  k,
+) {
+  none => some(v),
+  some(step) => match __step_at(v, step) {
+    some(child) => __get_steps(child, steps, k + 1),
+    none => none,
+  },
+}
+
+local fn __remove_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> Value = match list.get(
+  steps,
+  k,
+) {
+  none => value.null(),
+  some((true, name, _)) => match value.as_object(v) {
+    ok(pairs) => value.object(list.filter_map(
+      pairs,
+      ((pk, pv)) => if pk != name then some((pk, pv))
+      else if k + 1 >= list.len(steps) then none
+      else some((pk, __remove_steps(pv, steps, k + 1))),
+    )),
+    err(_) => v,
+  },
+  some((false, _, i)) => match value.as_array(v) {
+    ok(xs) => match list.get(xs, i) {
+      some(child) => if k + 1 >= list.len(steps) then value.array(list.remove_at(xs, i))
+      else value.array(list.set(xs, i, __remove_steps(child, steps, k + 1))),
+      none => v,
+    },
+    err(_) => v,
+  },
+}
 "#;
 pub const SRC_VALUE_CORE: &str = r#"
 
@@ -44202,7 +41107,7 @@ fn __vobj_has_dup(pairs: List[(String, Value)]) -> Bool = {
       if map.contains(seen, k) then {
         dup = true
       } else {
-        map.insert(seen, k, 0)
+        seen = map.set(seen, k, 0)
       }
     }
     dup
@@ -44219,7 +41124,7 @@ fn __vobj_upsert(pairs: List[(String, Value)]) -> List[(String, Value)] = {
         vals = list.set(vals, i, v)
       },
       none => {
-        map.insert(at, k, list.len(keys))
+        at = map.set(at, k, list.len(keys))
         list.push(keys, k)
         list.push(vals, v)
       },
@@ -44269,6 +41174,25 @@ else {
 
 
 
+
+
+
+
+fn __vobj_pairs(v: Value, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
+  if i >= n then acc
+  else {
+    let h = prim.handle(v)
+    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
+    let x: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
+    __vobj_pairs(v, i + 1, n, acc + [(k, x)])
+  }
+
+fn value_as_object(v: Value) -> Result[List[(String, Value)], String] = {
+  let h = prim.handle(v)
+  let tag = prim.load32(h + 4)
+  if tag == 6 then ok(__vobj_pairs(v, 0, prim.load32(h + 8) / 2, []))
+  else err("expected Object, received " + __vkind(tag))
+}
 
 fn value_keys(v: Value) -> List[String] = if prim.load32(prim.handle(v) + 4) == 6 then {
   let h = prim.handle(v)
@@ -44700,15 +41624,6 @@ fn list_drop_end_value(xs: List[Value], n: Int) -> List[Value] = {
 
 
 
-
-fn list_tail_value(xs: List[Value]) -> List[Value] = {
-  let h = prim.handle(xs)
-  let n = prim.load32(h + 4)
-  let newlen = if n > 0 then n - 1 else 0
-  let buf = prim.alloc_list_str(newlen)
-  let _c = __lsv_copy(h + 12 + 8, prim.handle(buf) + 12, newlen, 0)
-  buf
-}
 
 
 
@@ -45154,7 +42069,7 @@ else {
 fn __jq_ctrl(s: String, c: Int) -> String = if c >= 32 then s
 else if c == 9 or c == 10 or c == 13 then __jq_ctrl(s, c + 1)
 else __jq_ctrl(
-  string.replace(s, string.from_codepoint(c), "\\u00" + __jq_hex(c / 16) + __jq_hex(c % 16)),
+  string.replace(s, (string.from_codepoint(c) ?? ""), "\\u00" + __jq_hex(c / 16) + __jq_hex(c % 16)),
   c + 1,
 )
 
@@ -45444,10 +42359,6 @@ fn __drop_result_lv(r: Result[List[Value], String]) -> Unit = {
   prim.rc_dec(h)
 }
 
-
-
-
-
 fn __drop_result_value(r: Result[Value, String]) -> Unit = {
   let h = prim.handle(r)
   if prim.load32(h + 0) == 1 then {
@@ -45459,21 +42370,9 @@ fn __drop_result_value(r: Result[Value, String]) -> Unit = {
   prim.rc_dec(h)
 }
 
-fn __get_or_value_elem(h: Int, i: Int) -> Value = {
-  let v: Value = prim.load_handle(h + 12 + i * 8)
-  v
-}
 
 
 
-
-
-fn list_get_or_value(xs: List[Value], i: Int, default: Value) -> Value = {
-  let h = prim.handle(xs)
-  let len = prim.load32(h + 4)
-  if i < 0 then default
-  else if i >= len then default else __get_or_value_elem(h, i)
-}
 
 fn __vsp_indent(d: Int) -> String = string.repeat("  ", d)
 
@@ -45567,15 +42466,10 @@ pub const SRC_VALUE_UTILS: &str = r#"
 
 
 
-
-
-
-
-
 fn __vu_keyset(keys: List[String]) -> Map[String, Int] = {
   var named: Map[String, Int] = map.new()
   for k in keys {
-    map.insert(named, k, 0)
+    named = map.set(named, k, 0)
   }
   named
 }
@@ -45641,107 +42535,6 @@ fn value_omit(v: Value, keys: List[String]) -> Value =
 
 
 
-fn __vu_camel_fill(dst: Int, src: Int, n: Int, i: Int, w: Int, up: Bool) -> Int = if i >= n then w
-else {
-  let b = prim.load8(src + i)
-  if b == 95 then __vu_camel_fill(dst, src, n, i + 1, w, true)
-  else if up and b >= 97 and b <= 122 then {
-    prim.store8(dst + w, b - 32)
-    __vu_camel_fill(dst, src, n, i + 1, w + 1, false)
-  } else {
-    prim.store8(dst + w, b)
-    __vu_camel_fill(dst, src, n, i + 1, w + 1, false)
-  }
-}
-
-fn __vu_camel(k: String) -> String = {
-  let sh = prim.handle(k)
-  let n = prim.load32(sh + 4)
-  let out = prim.alloc_str(n)
-  let w = __vu_camel_fill(prim.handle(out) + 12, sh + 12, n, 0, 0, false)
-  prim.store32(prim.handle(out) + 4, w)
-  out
-}
-
-
-
-fn __vu_snake_fill(dst: Int, src: Int, n: Int, i: Int, w: Int) -> Int = if i >= n then w
-else {
-  let b = prim.load8(src + i)
-  if b >= 65 and b <= 90 and i > 0 then {
-    prim.store8(dst + w, 95)
-    prim.store8(dst + w + 1, b + 32)
-    __vu_snake_fill(dst, src, n, i + 1, w + 2)
-  } else if b >= 65 and b <= 90 then {
-    prim.store8(dst + w, b + 32)
-    __vu_snake_fill(dst, src, n, i + 1, w + 1)
-  } else {
-    prim.store8(dst + w, b)
-    __vu_snake_fill(dst, src, n, i + 1, w + 1)
-  }
-}
-
-fn __vu_snake(k: String) -> String = {
-  let sh = prim.handle(k)
-  let n = prim.load32(sh + 4)
-  let out = prim.alloc_str(2 * n)
-  let w = __vu_snake_fill(prim.handle(out) + 12, sh + 12, n, 0, 0)
-  prim.store32(prim.handle(out) + 4, w)
-  out
-}
-
-
-
-fn __vu_ren_fill_c(v: Value, dst: Value, i: Int, n: Int) -> Unit = if i >= n then ()
-else {
-  let h = prim.handle(v)
-  let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
-  let nk = __vu_camel(k)
-  let dh = prim.handle(dst)
-  prim.store_str(dh + 12 + (2 * i) * 8, nk)
-  let vh = prim.load64(h + 12 + (2 * i + 1) * 8)
-  prim.rc_inc(vh)
-  prim.store64(dh + 12 + (2 * i + 1) * 8, vh)
-  __vu_ren_fill_c(v, dst, i + 1, n)
-}
-
-fn __vu_ren_fill_s(v: Value, dst: Value, i: Int, n: Int) -> Unit = if i >= n then ()
-else {
-  let h = prim.handle(v)
-  let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
-  let nk = __vu_snake(k)
-  let dh = prim.handle(dst)
-  prim.store_str(dh + 12 + (2 * i) * 8, nk)
-  let vh = prim.load64(h + 12 + (2 * i + 1) * 8)
-  prim.rc_inc(vh)
-  prim.store64(dh + 12 + (2 * i + 1) * 8, vh)
-  __vu_ren_fill_s(v, dst, i + 1, n)
-}
-
-fn __vu_ren_c(v: Value) -> Value = {
-  let h = prim.handle(v)
-  let n = prim.load32(h + 8) / 2
-  let dst = prim.alloc_value(2 * n)
-  let dh = prim.handle(dst)
-  prim.store32(dh + 4, 6)
-  prim.store32(dh + 8, 2 * n)
-  __vu_ren_fill_c(v, dst, 0, n)
-  dst
-}
-
-fn __vu_ren_s(v: Value) -> Value = {
-  let h = prim.handle(v)
-  let n = prim.load32(h + 8) / 2
-  let dst = prim.alloc_value(2 * n)
-  let dh = prim.handle(dst)
-  prim.store32(dh + 4, 6)
-  prim.store32(dh + 8, 2 * n)
-  __vu_ren_fill_s(v, dst, 0, n)
-  dst
-}
-
-
-
 
 
 fn __vu_dup_small(pairs: List[(String, Value)], i: Int, j: Int, n: Int) -> Bool =
@@ -45765,7 +42558,7 @@ fn __vu_has_dup(pairs: List[(String, Value)]) -> Bool = {
       if map.contains(seen, k) then {
         dup = true
       } else {
-        map.insert(seen, k, 0)
+        seen = map.set(seen, k, 0)
       }
     }
     dup
@@ -45784,7 +42577,7 @@ fn __vu_fold_pairs(pairs: List[(String, Value)]) -> List[(String, Value)] =
           vals = list.set(vals, i, v)
         },
         none => {
-          map.insert(at, k, list.len(keys))
+          at = map.set(at, k, list.len(keys))
           list.push(keys, k)
           list.push(vals, v)
         },
@@ -45806,7 +42599,7 @@ fn __vu_merge_pairs(pa: List[(String, Value)], pb: List[(String, Value)]) -> Lis
   var vals: List[Value] = []
   for (k, v) in pa {
     if not map.contains(at, k) then {
-      map.insert(at, k, list.len(keys))
+      at = map.set(at, k, list.len(keys))
     } else ()
     list.push(keys, k)
     list.push(vals, v)
@@ -45817,7 +42610,7 @@ fn __vu_merge_pairs(pa: List[(String, Value)], pb: List[(String, Value)]) -> Lis
         vals = list.set(vals, i, v)
       },
       none => {
-        map.insert(at, k, list.len(keys))
+        at = map.set(at, k, list.len(keys))
         list.push(keys, k)
         list.push(vals, v)
       },
@@ -45829,7 +42622,7 @@ fn __vu_merge_pairs(pa: List[(String, Value)], pb: List[(String, Value)]) -> Lis
 fn __vu_select_pairs(pairs: List[(String, Value)], keys: List[String], want: Bool) -> List[(String, Value)] = {
   var named: Map[String, Int] = map.new()
   for k in keys {
-    map.insert(named, k, 0)
+    named = map.set(named, k, 0)
   }
   var out: List[(String, Value)] = []
   for (k, v) in pairs {
@@ -45860,34 +42653,28 @@ fn __vu_pair(v: Value, i: Int) -> (String, Value) = {
 }
 
 fn __vu_refold(v: Value) -> Value = {
-  let keys = value.keys(v)
+  let keys = value.__keys(v)
   let n = list.len(keys)
   if list.len(list.unique(keys)) == n then v
   else value.object(list.range(0, n) |> list.map((i) => __vu_pair(v, i)))
 }
-
-fn value_to_camel_case(v: Value) -> Value =
-  if prim.load32(prim.handle(v) + 4) == 6 then __vu_refold(__vu_ren_c(v)) else v
-
-fn value_to_snake_case(v: Value) -> Value =
-  if prim.load32(prim.handle(v) + 4) == 6 then __vu_refold(__vu_ren_s(v)) else v
 "#;
 pub const SRC_ZLIB: &str = r#"
 
 
 
 
-/// Zlib-framed DEFLATE of data; bytes vary by target.
+/// Zlib-framed DEFLATE of b; bytes vary by target.
 @intrinsic("almide_rt_zlib_compress")
-effect fn compress(data: Bytes) -> Result[Bytes, String] = _
+effect fn compress(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like compress; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_compress_level")
-effect fn compress_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
+effect fn compress_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
 /// Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_decompress")
-effect fn decompress(data: Bytes) -> Result[Bytes, String] = _
+fn decompress(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like decompress, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_decompress_max")
@@ -45896,24 +42683,24 @@ fn decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 /// Raw DEFLATE, no header; bytes vary by target.
 @intrinsic("almide_rt_zlib_deflate")
-effect fn deflate(data: Bytes) -> Result[Bytes, String] = _
+effect fn deflate(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like deflate; level clamped to 0..9, unused on wasm.
 @intrinsic("almide_rt_zlib_deflate_level")
-effect fn deflate_level(data: Bytes, level: Int) -> Result[Bytes, String] = _
+effect fn deflate_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
 /// Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_inflate")
-effect fn inflate(data: Bytes) -> Result[Bytes, String] = _
+fn inflate(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like inflate, output bound max_len bytes; max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_inflate_max")
 fn inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
 
 
-/// RFC 1952 gzip of data; bytes vary by target.
+/// RFC 1952 gzip of b; bytes vary by target.
 @intrinsic("almide_rt_zlib_gzip")
-effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
+effect fn gzip(b: Bytes) -> Result[Bytes, String] = _
 
 
 
@@ -45924,82 +42711,11 @@ effect fn gzip(data: Bytes) -> Result[Bytes, String] = _
 
 /// Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_gunzip")
-effect fn gunzip(data: Bytes) -> Result[Bytes, String] = _
+fn gunzip(b: Bytes) -> Result[Bytes, String] = _
 
 /// Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 @intrinsic("almide_rt_zlib_gunzip_max")
 fn gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String] = _
-
-
-
-
-
-
-/// CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
-fn crc32(data: Bytes) -> Int = {
-  let len = bytes.len(data)
-  let acc = if len < 256 then crc32_bits(data, len) else crc32_table(data, len)
-  int.bxor(acc, 4294967295)
-}
-
-
-
-
-
-local fn crc32_step(c: Int) -> Int = int.bxor(
-  int.bshr(c, 1),
-  int.band(3988292384, 0 - int.band(c, 1)),
-)
-
-
-local fn crc32_byte_bits(c: Int) -> Int = {
-  let c2 = crc32_step(crc32_step(c))
-  let c4 = crc32_step(crc32_step(c2))
-  let c6 = crc32_step(crc32_step(c4))
-  crc32_step(crc32_step(c6))
-}
-
-
-local fn crc32_bits(data: Bytes, len: Int) -> Int = {
-  var acc = 4294967295
-  var i = 0
-  while i < len {
-    acc = crc32_byte_bits(int.bxor(acc, bytes.get_or(data, i, 0)))
-    i = i + 1
-  }
-  acc
-}
-
-
-local fn crc32_table(data: Bytes, len: Int) -> Int = {
-  var t = list.repeat(0, 256)
-  var n = 0
-  while n < 256 {
-    t[n] = crc32_byte_bits(n)
-    n = n + 1
-  }
-  var acc = 4294967295
-  var i = 0
-  while i < len {
-    acc = int.bxor(t[int.band(int.bxor(acc, bytes.get_or(data, i, 0)), 255)], int.bshr(acc, 8))
-    i = i + 1
-  }
-  acc
-}
-
-/// Adler-32 as an unsigned Int; 1 for empty data.
-fn adler32(data: Bytes) -> Int = {
-  var s1 = 1
-  var s2 = 0
-  var i = 0
-  let len = bytes.len(data)
-  while i < len {
-    s1 = (s1 + bytes.get_or(data, i, 0)) % 65521
-    s2 = (s2 + s1) % 65521
-    i = i + 1
-  }
-  int.bor(int.bshl(s2, 16), s1)
-}
 "#;
 pub const SRC_ZLIB_DEFLATE: &str = r#"
 
@@ -46028,7 +42744,7 @@ fn zld_stored_stream(data: Bytes, mut out: Bytes) -> Unit = {
     zld_push_u16_le(out, nlen)
     var k = 0
     while k < take {
-      bytes.push(out, bytes.get_or(data, pos + k, 0))
+      bytes.push(out, bytes.get(data, pos + k) ?? 0)
       k = k + 1
     }
     pos = pos + take
@@ -46063,7 +42779,7 @@ fn zld_crc32(b: Bytes) -> Int = {
   var i = 0
   let n = bytes.len(b)
   while i < n {
-    cc = int.bxor(t[int.band(int.bxor(cc, bytes.get_or(b, i, 0)), 255)], int.bshr(cc, 8))
+    cc = int.bxor(t[int.band(int.bxor(cc, bytes.get(b, i) ?? 0), 255)], int.bshr(cc, 8))
     i = i + 1
   }
   int.bxor(cc, 4294967295)
@@ -46075,7 +42791,7 @@ fn zld_adler32(b: Bytes) -> Int = {
   var i = 0
   let n = bytes.len(b)
   while i < n {
-    s1 = (s1 + bytes.get_or(b, i, 0)) % 65521
+    s1 = (s1 + bytes.get(b, i) ?? 0) % 65521
     s2 = (s2 + s1) % 65521
     i = i + 1
   }
@@ -46161,7 +42877,7 @@ fn zli_bits(pos: Int, buf: Int, cnt: Int, inp: Bytes, need: Int) -> (Int, Int, I
   var b = buf
   var c = cnt
   while c < need {
-    b = int.bor(b, int.bshl(bytes.get_or(inp, p, 0), c))
+    b = int.bor(b, int.bshl(bytes.get(inp, p) ?? 0, c))
     p = p + 1
     c = c + 8
   }
@@ -46450,7 +43166,7 @@ fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int
     while k < clen {
       let src = bytes.len(out) - dist
       bytes.push(out, if src < base then 0
-      else bytes.get_or(out, src, 0))
+      else bytes.get(out, src) ?? 0)
       k = k + 1
     }
   }
@@ -46596,8 +43312,8 @@ fn zli_dynamic_tables(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, 
 
 
 fn zli_stored(pos: Int, inp: Bytes, mut out: Bytes, limit: Int) -> (Int, Int, Int, Int) = {
-  let len = int.bor(bytes.get_or(inp, pos, 0), int.bshl(bytes.get_or(inp, pos + 1, 0), 8))
-  let nlen = int.bor(bytes.get_or(inp, pos + 2, 0), int.bshl(bytes.get_or(inp, pos + 3, 0), 8))
+  let len = int.bor(bytes.get(inp, pos) ?? 0, int.bshl(bytes.get(inp, pos + 1) ?? 0, 8))
+  let nlen = int.bor(bytes.get(inp, pos + 2) ?? 0, int.bshl(bytes.get(inp, pos + 3) ?? 0, 8))
   let start = pos + 4
 
 
@@ -46612,7 +43328,7 @@ fn zli_stored(pos: Int, inp: Bytes, mut out: Bytes, limit: Int) -> (Int, Int, In
   let n = if status != 0 then 0 else len
   var k = 0
   while k < n {
-    bytes.push(out, bytes.get_or(inp, start + k, 0))
+    bytes.push(out, bytes.get(inp, start + k) ?? 0)
     k = k + 1
   }
   (status, start + n, 0, 0)
@@ -46675,7 +43391,7 @@ fn zli_crc32_from(t: List[Int], b: Bytes, start: Int) -> Int = {
   var i = start
   let n = bytes.len(b)
   while i < n {
-    cc = int.bxor(t[int.band(int.bxor(cc, bytes.get_or(b, i, 0)), 255)], int.bshr(cc, 8))
+    cc = int.bxor(t[int.band(int.bxor(cc, bytes.get(b, i) ?? 0), 255)], int.bshr(cc, 8))
     i = i + 1
   }
   int.bxor(cc, 4294967295)
@@ -46688,7 +43404,7 @@ fn zli_adler32_from(b: Bytes, start: Int) -> Int = {
   var i = start
   let n = bytes.len(b)
   while i < n {
-    s1 = (s1 + bytes.get_or(b, i, 0)) % 65521
+    s1 = (s1 + bytes.get(b, i) ?? 0) % 65521
     s2 = (s2 + s1) % 65521
     i = i + 1
   }
@@ -46696,11 +43412,11 @@ fn zli_adler32_from(b: Bytes, start: Int) -> Int = {
 }
 
 fn zli_u32_le(b: Bytes, p: Int) -> Int = int.bor(
-  int.bor(bytes.get_or(b, p, 0), int.bshl(bytes.get_or(b, p + 1, 0), 8)),
-  int.bor(int.bshl(bytes.get_or(b, p + 2, 0), 16), int.bshl(bytes.get_or(b, p + 3, 0), 24)),
+  int.bor(bytes.get(b, p) ?? 0, int.bshl(bytes.get(b, p + 1) ?? 0, 8)),
+  int.bor(int.bshl(bytes.get(b, p + 2) ?? 0, 16), int.bshl(bytes.get(b, p + 3) ?? 0, 24)),
 )
 
-fn zli_skip_zstr(b: Bytes, p: Int) -> Int = if bytes.get_or(b, p, 0) == 0 then p + 1 else zli_skip_zstr(
+fn zli_skip_zstr(b: Bytes, p: Int) -> Int = if bytes.get(b, p) ?? 0 == 0 then p + 1 else zli_skip_zstr(
   b,
   p + 1,
 )
@@ -46716,7 +43432,7 @@ fn zli_gzip_magic(i: Int) -> Int = match i {
 
 fn zli_magic_prefix(inp: Bytes, pos: Int, i: Int) -> Bool =
   if i >= 3 or pos + i >= bytes.len(inp) then true
-  else if bytes.get_or(inp, pos + i, 0) != zli_gzip_magic(i) then false
+  else if (bytes.get(inp, pos + i) ?? 0) != zli_gzip_magic(i) then false
   else zli_magic_prefix(inp, pos, i + 1)
 
 
@@ -46728,11 +43444,11 @@ fn zli_header_end(t: List[Int], inp: Bytes, pos: Int) -> Int = {
   if not zli_magic_prefix(inp, pos, 0) then 0 - 1
   else if pos + 10 > n then 0 - 2
   else {
-    let flg = bytes.get_or(inp, pos + 3, 0)
+    let flg = bytes.get(inp, pos + 3) ?? 0
     let p0 = pos + 10
     let p1 = if int.band(flg, 4) != 0 then p0 + 2 + int.bor(
-      bytes.get_or(inp, p0, 0),
-      int.bshl(bytes.get_or(inp, p0 + 1, 0), 8),
+      bytes.get(inp, p0) ?? 0,
+      int.bshl(bytes.get(inp, p0 + 1) ?? 0, 8),
     )
     else p0
     let p2 = if int.band(flg, 8) != 0 then zli_skip_zstr(inp, p1) else p1
@@ -46744,8 +43460,8 @@ fn zli_header_end(t: List[Int], inp: Bytes, pos: Int) -> Int = {
       zli_crc32_from(t, bytes.slice(inp, pos, p3), 0),
       65535,
     ) != int.bor(
-      bytes.get_or(inp, p3, 0),
-      int.bshl(bytes.get_or(inp, p3 + 1, 0), 8),
+      bytes.get(inp, p3) ?? 0,
+      int.bshl(bytes.get(inp, p3 + 1) ?? 0, 8),
     ) then 0 - 3
     else end
   }
@@ -46827,8 +43543,8 @@ fn zli_inflate(data: Bytes, limit: Int) -> Result[Bytes, String] = {
 
 
 fn zli_decompress(data: Bytes, limit: Int) -> Result[Bytes, String] = {
-  let cmf = bytes.get_or(data, 0, 0)
-  let flg = bytes.get_or(data, 1, 0)
+  let cmf = bytes.get(data, 0) ?? 0
+  let flg = bytes.get(data, 1) ?? 0
   if bytes.len(data) < 2 then err("zlib.decompress: unexpected end of file")
   else if int.band(cmf, 15) != 8 or int.bshr(cmf, 4) > 7 or (cmf * 256 + flg) % 31 != 0 then err("zlib.decompress: invalid zlib header")
   else if int.band(flg, 32) != 0 then err("zlib.decompress: preset dictionary unsupported")
@@ -46836,10 +43552,10 @@ fn zli_decompress(data: Bytes, limit: Int) -> Result[Bytes, String] = {
     var out = bytes.zeros(0)
     let (status, after) = zli_inflate_stream(2, data, out, limit)
     let stored = int.bor(
-      int.bshl(bytes.get_or(data, after, 0), 24),
+      int.bshl(bytes.get(data, after) ?? 0, 24),
       int.bor(
-        int.bshl(bytes.get_or(data, after + 1, 0), 16),
-        int.bor(int.bshl(bytes.get_or(data, after + 2, 0), 8), bytes.get_or(data, after + 3, 0)),
+        int.bshl(bytes.get(data, after + 1) ?? 0, 16),
+        int.bor(int.bshl(bytes.get(data, after + 2) ?? 0, 8), bytes.get(data, after + 3) ?? 0),
       ),
     )
     if status == 0 - 3 then err(zli_exceeds(limit))
@@ -46851,14 +43567,14 @@ fn zli_decompress(data: Bytes, limit: Int) -> Result[Bytes, String] = {
 }
 
 
-effect fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = zli_gunzip(data, zli_default_limit())
+fn zlib_gunzip(data: Bytes) -> Result[Bytes, String] = zli_gunzip(data, zli_default_limit())
 
-effect fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = zli_inflate(
+fn zlib_inflate(data: Bytes) -> Result[Bytes, String] = zli_inflate(
   data,
   zli_default_limit(),
 )
 
-effect fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = zli_decompress(
+fn zlib_decompress(data: Bytes) -> Result[Bytes, String] = zli_decompress(
   data,
   zli_default_limit(),
 )
@@ -46897,13 +43613,10 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "bytes_ct" => Some(SRC_BYTES_CT),
         "bytes_cursor" => Some(SRC_BYTES_CURSOR),
         "bytes_f16" => Some(SRC_BYTES_F16),
-        "bytes_lenprefix" => Some(SRC_BYTES_LENPREFIX),
         "bytes_mutate" => Some(SRC_BYTES_MUTATE),
         "bytes_rawptr" => Some(SRC_BYTES_RAWPTR),
-        "bytes_skip" => Some(SRC_BYTES_SKIP),
         "bytes_split" => Some(SRC_BYTES_SPLIT),
         "bytes_string" => Some(SRC_BYTES_STRING),
-        "bytes_typed" => Some(SRC_BYTES_TYPED),
         "clock_now" => Some(SRC_CLOCK_NOW),
         "codec_decode" => Some(SRC_CODEC_DECODE),
         "codec_encode" => Some(SRC_CODEC_ENCODE),
@@ -46918,23 +43631,16 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "env_cwd" => Some(SRC_ENV_CWD),
         "env_get" => Some(SRC_ENV_GET),
         "env_os" => Some(SRC_ENV_OS),
-        "env_temp_dir" => Some(SRC_ENV_TEMP_DIR),
-        "env_unix_timestamp" => Some(SRC_ENV_UNIX_TIMESTAMP),
         "eprintln" => Some(SRC_EPRINTLN),
-        "error" => Some(SRC_ERROR),
-        "error_chain" => Some(SRC_ERROR_CHAIN),
-        "error_message" => Some(SRC_ERROR_MESSAGE),
         "fan_any" => Some(SRC_FAN_ANY),
         "fan_map" => Some(SRC_FAN_MAP),
         "ffi" => Some(SRC_FFI),
         "ffi_bridge" => Some(SRC_FFI_BRIDGE),
         "float" => Some(SRC_FLOAT),
         "float32" => Some(SRC_FLOAT32),
-        "float32_convert" => Some(SRC_FLOAT32_CONVERT),
         "float64" => Some(SRC_FLOAT64),
         "float64_convert" => Some(SRC_FLOAT64_CONVERT),
         "float_bits" => Some(SRC_FLOAT_BITS),
-        "float_checked" => Some(SRC_FLOAT_CHECKED),
         "float_convert" => Some(SRC_FLOAT_CONVERT),
         "float_core" => Some(SRC_FLOAT_CORE),
         "float_extra" => Some(SRC_FLOAT_EXTRA),
@@ -46949,17 +43655,13 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "fs_create_temp_dir" => Some(SRC_FS_CREATE_TEMP_DIR),
         "fs_create_temp_file" => Some(SRC_FS_CREATE_TEMP_FILE),
         "fs_exists" => Some(SRC_FS_EXISTS),
-        "fs_file_size" => Some(SRC_FS_FILE_SIZE),
         "fs_fold_lines" => Some(SRC_FS_FOLD_LINES),
         "fs_is_dir" => Some(SRC_FS_IS_DIR),
         "fs_is_symlink" => Some(SRC_FS_IS_SYMLINK),
         "fs_list_dir" => Some(SRC_FS_LIST_DIR),
         "fs_mkdir_p" => Some(SRC_FS_MKDIR_P),
-        "fs_modified_at" => Some(SRC_FS_MODIFIED_AT),
         "fs_read_bytes" => Some(SRC_FS_READ_BYTES),
         "fs_read_bytes_if_exists" => Some(SRC_FS_READ_BYTES_IF_EXISTS),
-        "fs_read_bytes_raw" => Some(SRC_FS_READ_BYTES_RAW),
-        "fs_read_bytes_raw_if_exists" => Some(SRC_FS_READ_BYTES_RAW_IF_EXISTS),
         "fs_read_lines" => Some(SRC_FS_READ_LINES),
         "fs_read_lines_if_exists" => Some(SRC_FS_READ_LINES_IF_EXISTS),
         "fs_read_text" => Some(SRC_FS_READ_TEXT),
@@ -46972,7 +43674,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "fs_walk" => Some(SRC_FS_WALK),
         "fs_write" => Some(SRC_FS_WRITE),
         "fs_write_bytes" => Some(SRC_FS_WRITE_BYTES),
-        "fs_write_bytes_raw" => Some(SRC_FS_WRITE_BYTES_RAW),
         "hash" => Some(SRC_HASH),
         "hash_impl" => Some(SRC_HASH_IMPL),
         "heap" => Some(SRC_HEAP),
@@ -46985,7 +43686,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "http_request" => Some(SRC_HTTP_REQUEST),
         "http_response" => Some(SRC_HTTP_RESPONSE),
         "http_serve" => Some(SRC_HTTP_SERVE),
-        "http_url_decode" => Some(SRC_HTTP_URL_DECODE),
         "int" => Some(SRC_INT),
         "int16" => Some(SRC_INT16),
         "int16_convert" => Some(SRC_INT16_CONVERT),
@@ -47009,8 +43709,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "io" => Some(SRC_IO),
         "io_print" => Some(SRC_IO_PRINT),
         "io_read_all" => Some(SRC_IO_READ_ALL),
-        "io_read_byte" => Some(SRC_IO_READ_BYTE),
-        "io_read_line" => Some(SRC_IO_READ_LINE),
         "io_read_line_opt" => Some(SRC_IO_READ_LINE_OPT),
         "io_read_n_bytes" => Some(SRC_IO_READ_N_BYTES),
         "io_write" => Some(SRC_IO_WRITE),
@@ -47040,8 +43738,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "list_fold_ols" => Some(SRC_LIST_FOLD_OLS),
         "list_foldf" => Some(SRC_LIST_FOLDF),
         "list_get" => Some(SRC_LIST_GET),
-        "list_get_or" => Some(SRC_LIST_GET_OR),
-        "list_get_or_str" => Some(SRC_LIST_GET_OR_STR),
         "list_get_str" => Some(SRC_LIST_GET_STR),
         "list_heapelem" => Some(SRC_LIST_HEAPELEM),
         "list_hshare" => Some(SRC_LIST_HSHARE),
@@ -47137,8 +43833,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "prim" => Some(SRC_PRIM),
         "print_str" => Some(SRC_PRINT_STR),
         "process" => Some(SRC_PROCESS),
-        "process_args" => Some(SRC_PROCESS_ARGS),
-        "process_stdin_lines" => Some(SRC_PROCESS_STDIN_LINES),
         "process_wasm" => Some(SRC_PROCESS_WASM),
         "random" => Some(SRC_RANDOM),
         "random_bytes" => Some(SRC_RANDOM_BYTES),
@@ -47170,7 +43864,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "string_eq" => Some(SRC_STRING_EQ),
         "string_err_text" => Some(SRC_STRING_ERR_TEXT),
         "string_first_last" => Some(SRC_STRING_FIRST_LAST),
-        "string_from_bytes_self" => Some(SRC_STRING_FROM_BYTES_SELF),
         "string_from_codepoint" => Some(SRC_STRING_FROM_CODEPOINT),
         "string_is_digit" => Some(SRC_STRING_IS_DIGIT),
         "string_is_empty" => Some(SRC_STRING_IS_EMPTY),
@@ -47182,12 +43875,10 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "string_quote" => Some(SRC_STRING_QUOTE),
         "string_repeat" => Some(SRC_STRING_REPEAT),
         "string_reverse" => Some(SRC_STRING_REVERSE),
-        "string_rle" => Some(SRC_STRING_RLE),
         "string_search" => Some(SRC_STRING_SEARCH),
         "string_slice" => Some(SRC_STRING_SLICE),
         "string_slice2" => Some(SRC_STRING_SLICE2),
         "string_take_drop" => Some(SRC_STRING_TAKE_DROP),
-        "string_to_bytes" => Some(SRC_STRING_TO_BYTES),
         "string_to_int" => Some(SRC_STRING_TO_INT),
         "string_to_lower" => Some(SRC_STRING_TO_LOWER),
         "string_to_upper" => Some(SRC_STRING_TO_UPPER),
@@ -47202,7 +43893,10 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "uint64_convert" => Some(SRC_UINT64_CONVERT),
         "uint8" => Some(SRC_UINT8),
         "uint8_convert" => Some(SRC_UINT8_CONVERT),
+        "unix" => Some(SRC_UNIX),
+        "unix_wasm" => Some(SRC_UNIX_WASM),
         "url" => Some(SRC_URL),
+        "uuid" => Some(SRC_UUID),
         "value" => Some(SRC_VALUE),
         "value_core" => Some(SRC_VALUE_CORE),
         "value_utils" => Some(SRC_VALUE_UTILS),
