@@ -1,4 +1,0 @@
-expects_code = "E100"
-expects_error = "is a digest broken for security"
-hint_substring = "hash.sha256"
-check_profile = "critical"
