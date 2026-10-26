@@ -1,80 +1,13 @@
-// int32 — bundled-Almide sized-numeric conversion module.
-//
-// See `int8.almd` for the routing rationale (dimensional pivot via
-// canonical `int`).
-/// Wraps to 8 bits; 128 becomes -128.
-fn to_int8(x: Int32) -> Int8 = int.to_int8(int.from_int32(x))
-
-/// Wraps to 16 bits; 32768 becomes -32768.
-fn to_int16(x: Int32) -> Int16 = int.to_int16(int.from_int32(x))
-
-/// Sign-extending widen; always exact.
-fn to_int64(x: Int32) -> Int64 = int.to_int64(int.from_int32(x))
-
-/// Wraps to 8 bits; -1 becomes 255.
-fn to_uint8(x: Int32) -> UInt8 = int.to_uint8(int.from_int32(x))
-
-/// Wraps to 16 bits; -1 becomes 65535.
-fn to_uint16(x: Int32) -> UInt16 = int.to_uint16(int.from_int32(x))
-
-/// Wraps to 32 bits; -1 becomes 2^32-1.
-fn to_uint32(x: Int32) -> UInt32 = int.to_uint32(int.from_int32(x))
-
-/// Wraps to 64 bits; -1 becomes 2^64-1.
-fn to_uint64(x: Int32) -> UInt64 = int.to_uint64(int.from_int32(x))
-
-/// Float32 value; may round when abs(x) > 2^24.
-fn to_float32(x: Int32) -> Float32 = int.to_float32(int.from_int32(x))
-
-/// Same value as Float64; always exact.
-fn to_float64(x: Int32) -> Float64 = int.to_float64(int.from_int32(x))
-
 /// Decimal digits, with - when negative.
-fn to_string(x: Int32) -> String = int.to_string(int.from_int32(x))
+fn to_string(x: Int32) -> String = int.to_string(int.__from_int32(x))
 
 // ── Range-checked / saturating narrowings (matrix rule: lossy ⇒ trio) ──
-/// some(x), or none if outside -128..127.
-fn to_int8_checked(x: Int32) -> Int8? = int.to_int8_checked(int.from_int32(x))
-
-/// Clamps x to -128..127.
-fn to_int8_saturating(x: Int32) -> Int8 = int.to_int8_saturating(int.from_int32(x))
-
-/// some(x), or none if outside -32768..32767.
-fn to_int16_checked(x: Int32) -> Int16? = int.to_int16_checked(int.from_int32(x))
-
-/// Clamps x to -32768..32767.
-fn to_int16_saturating(x: Int32) -> Int16 = int.to_int16_saturating(int.from_int32(x))
-
-/// some(x), or none if outside 0..255.
-fn to_uint8_checked(x: Int32) -> UInt8? = int.to_uint8_checked(int.from_int32(x))
-
-/// Clamps x to 0..255.
-fn to_uint8_saturating(x: Int32) -> UInt8 = int.to_uint8_saturating(int.from_int32(x))
-
-/// some(x), or none if outside 0..65535.
-fn to_uint16_checked(x: Int32) -> UInt16? = int.to_uint16_checked(int.from_int32(x))
-
-/// Clamps x to 0..65535.
-fn to_uint16_saturating(x: Int32) -> UInt16 = int.to_uint16_saturating(int.from_int32(x))
-
-/// some(x), or none if x is negative.
-fn to_uint32_checked(x: Int32) -> UInt32? = int.to_uint32_checked(int.from_int32(x))
-
-/// Negative x clamps to 0.
-fn to_uint32_saturating(x: Int32) -> UInt32 = int.to_uint32_saturating(int.from_int32(x))
-
-/// some(x), or none if x is negative.
-fn to_uint64_checked(x: Int32) -> UInt64? = int.to_uint64_checked(int.from_int32(x))
-
-/// Negative x clamps to 0.
-fn to_uint64_saturating(x: Int32) -> UInt64 = int.to_uint64_saturating(int.from_int32(x))
-
 // ── Bounds ──
 /// Smallest Int32: -2147483648.
-fn min_value() -> Int32 = int.to_int32(-2147483648)
+fn min_value() -> Int32 = int.__to_int32(-2147483648)
 
 /// Largest Int32: 2147483647.
-fn max_value() -> Int32 = int.to_int32(2147483647)
+fn max_value() -> Int32 = int.__to_int32(2147483647)
 
 // ── Integer: compare, select, divide (R-sized-02, R-sized-08, R-sized-10) ──
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -88,14 +21,14 @@ fn min(a: Int32, b: Int32) -> Int32 = if a <= b then a else b
 fn max(a: Int32, b: Int32) -> Int32 = if a >= b then a else b
 
 /// x limited to lo..hi; aborts when lo > hi.
-fn clamp(x: Int32, lo: Int32, hi: Int32) -> Int32 = int.to_int32(int.clamp(int.from_int32(x), int.from_int32(lo), int.from_int32(hi)))
+fn clamp(x: Int32, lo: Int32, hi: Int32) -> Int32 = int.__to_int32(int.clamp(int.__from_int32(x), int.__from_int32(lo), int.__from_int32(hi)))
 
 /// Quotient rounded toward -inf; b == 0 and min_value / -1 abort, like /.
-fn floor_div(a: Int32, b: Int32) -> Int32 = if int.from_int32(b) == -1 then a / b
-else int.to_int32(floor_quotient(int.from_int32(a), int.from_int32(b)))
+fn floor_div(a: Int32, b: Int32) -> Int32 = if int.__from_int32(b) == -1 then a / b
+else int.__to_int32(floor_quotient(int.__from_int32(a), int.__from_int32(b)))
 
 /// Remainder with the sign of b, so a == floor_div(a, b) * b + modulo(a, b); b == 0 aborts.
-fn modulo(a: Int32, b: Int32) -> Int32 = int.to_int32(floor_remainder(int.from_int32(a), int.from_int32(b)))
+fn modulo(a: Int32, b: Int32) -> Int32 = int.__to_int32(floor_remainder(int.__from_int32(a), int.__from_int32(b)))
 
 // b == -1 never reaches here: it divides exactly, and the type's own `/` aborts on min_value / -1.
 local fn floor_quotient(a: Int, b: Int) -> Int = {
@@ -111,38 +44,38 @@ else {
 }
 
 /// base raised to exp, wrapping to 32 bits like *; exp < 0 aborts.
-fn pow(base: Int32, exp: Int) -> Int32 = int.to_int32(math.pow(int.from_int32(base), exp))
+fn pow(base: Int32, exp: Int) -> Int32 = int.__to_int32(math.__pow(int.__from_int32(base), exp))
 
 /// True when x is a multiple of 2.
-fn is_even(x: Int32) -> Bool = int.from_int32(x) % 2 == 0
+fn is_even(x: Int32) -> Bool = int.__from_int32(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
-fn is_odd(x: Int32) -> Bool = int.from_int32(x) % 2 != 0
+fn is_odd(x: Int32) -> Bool = int.__from_int32(x) % 2 != 0
 
 /// Magnitude of x; min_value wraps to itself.
-fn abs(x: Int32) -> Int32 = int.to_int32(int.abs(int.from_int32(x)))
+fn abs(x: Int32) -> Int32 = int.__to_int32(int.abs(int.__from_int32(x)))
 
 /// -1, 0 or 1 by the sign of x.
-fn sign(x: Int32) -> Int = math.sign(int.from_int32(x))
+fn sign(x: Int32) -> Int = math.__sign(int.__from_int32(x))
 
 // ── Integer: bitwise, FixedWidthInteger: bit counts (R-sized-10) ──
 /// Bitwise AND.
-fn band(a: Int32, b: Int32) -> Int32 = int.to_int32(int.band(int.from_int32(a), int.from_int32(b)))
+fn band(a: Int32, b: Int32) -> Int32 = int.__to_int32(int.band(int.__from_int32(a), int.__from_int32(b)))
 
 /// Bitwise OR.
-fn bor(a: Int32, b: Int32) -> Int32 = int.to_int32(int.bor(int.from_int32(a), int.from_int32(b)))
+fn bor(a: Int32, b: Int32) -> Int32 = int.__to_int32(int.bor(int.__from_int32(a), int.__from_int32(b)))
 
 /// Bitwise XOR.
-fn bxor(a: Int32, b: Int32) -> Int32 = int.to_int32(int.bxor(int.from_int32(a), int.from_int32(b)))
+fn bxor(a: Int32, b: Int32) -> Int32 = int.__to_int32(int.bxor(int.__from_int32(a), int.__from_int32(b)))
 
 /// Bitwise complement of all 32 bits.
-fn bnot(x: Int32) -> Int32 = int.to_int32(int.bnot(int.from_int32(x)))
+fn bnot(x: Int32) -> Int32 = int.__to_int32(int.bnot(int.__from_int32(x)))
 
 /// a shifted left by n bits; n is taken mod 32.
-fn bshl(a: Int32, n: Int) -> Int32 = int.to_int32(int.bshl(int.from_int32(a), shift_count(n)))
+fn bshl(a: Int32, n: Int) -> Int32 = int.__to_int32(int.bshl(int.__from_int32(a), shift_count(n)))
 
 /// Sign-filling right shift; n is taken mod 32.
-fn bshr(a: Int32, n: Int) -> Int32 = int.to_int32(int.bshr(int.from_int32(a), shift_count(n)))
+fn bshr(a: Int32, n: Int) -> Int32 = int.__to_int32(int.bshr(int.__from_int32(a), shift_count(n)))
 
 // n reduced into 0..31, a negative n included.
 local fn shift_count(n: Int) -> Int = {
@@ -151,32 +84,32 @@ local fn shift_count(n: Int) -> Int = {
 }
 
 /// Zero bits above the highest set bit, counted in 32 bits; 32 for 0.
-fn count_leading_zeros(x: Int32) -> Int = int.count_leading_zeros(int.band(int.from_int32(x), 4294967295)) - 32
+fn count_leading_zeros(x: Int32) -> Int = int.count_leading_zeros(int.band(int.__from_int32(x), 4294967295)) - 32
 
 /// Zero bits below the lowest set bit; 32 for 0.
-fn count_trailing_zeros(x: Int32) -> Int = int.min(int.count_trailing_zeros(int.from_int32(x)), 32)
+fn count_trailing_zeros(x: Int32) -> Int = int.min(int.count_trailing_zeros(int.__from_int32(x)), 32)
 
 /// Number of set bits among the 32.
-fn count_ones(x: Int32) -> Int = int.pop_count(int.band(int.from_int32(x), 4294967295))
+fn count_ones(x: Int32) -> Int = int.pop_count(int.band(int.__from_int32(x), 4294967295))
 
 /// The 4 bytes in reverse order (endian flip).
-fn byte_swap(x: Int32) -> Int32 = int.to_int32(int.bshr(int.byte_swap(int.band(int.from_int32(x), 4294967295)), 32))
+fn byte_swap(x: Int32) -> Int32 = int.__to_int32(int.bshr(int.byte_swap(int.band(int.__from_int32(x), 4294967295)), 32))
 
 // ── FixedWidthInteger: wrapping, rotation, bit length; parse (R-int-11, R-int-12, R-sized-02) ──
 /// a + b wrapped to 32 bits.
-fn wrap_add(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) + int.from_int32(b))
+fn wrap_add(a: Int32, b: Int32) -> Int32 = int.__to_int32(int.__from_int32(a) + int.__from_int32(b))
 
 /// a - b wrapped to 32 bits.
-fn wrap_sub(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) - int.from_int32(b))
+fn wrap_sub(a: Int32, b: Int32) -> Int32 = int.__to_int32(int.__from_int32(a) - int.__from_int32(b))
 
 /// a * b wrapped to 32 bits.
-fn wrap_mul(a: Int32, b: Int32) -> Int32 = int.to_int32(int.from_int32(a) * int.from_int32(b))
+fn wrap_mul(a: Int32, b: Int32) -> Int32 = int.__to_int32(int.__from_int32(a) * int.__from_int32(b))
 
 /// The 32 bits of a rotated left by n; n is taken mod 32.
-fn rotate_left(a: Int32, n: Int) -> Int32 = int.to_int32(rotate_bits(int.band(int.from_int32(a), 4294967295), rotate_count(n)))
+fn rotate_left(a: Int32, n: Int) -> Int32 = int.__to_int32(rotate_bits(int.band(int.__from_int32(a), 4294967295), rotate_count(n)))
 
 /// The 32 bits of a rotated right by n; n is taken mod 32.
-fn rotate_right(a: Int32, n: Int) -> Int32 = int.to_int32(rotate_bits(int.band(int.from_int32(a), 4294967295), rotate_count(0 - rotate_count(n))))
+fn rotate_right(a: Int32, n: Int) -> Int32 = int.__to_int32(rotate_bits(int.band(int.__from_int32(a), 4294967295), rotate_count(0 - rotate_count(n))))
 
 // The low 32 bits v rotated left by k (k in 0..31); bits above 32 are dropped by the narrowing.
 local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
@@ -188,25 +121,25 @@ local fn rotate_count(n: Int) -> Int = {
 }
 
 /// Bits needed to hold x; 0 for 0, 32 if negative.
-fn bit_length(x: Int32) -> Int = 64 - int.count_leading_zeros(int.band(int.from_int32(x), 4294967295))
+fn bit_length(x: Int32) -> Int = 64 - int.count_leading_zeros(int.band(int.__from_int32(x), 4294967295))
 
 /// Decimal Int32 from ASCII-trimmed s; err on junk or outside -2147483648..2147483647.
 fn parse(s: String) -> Result[Int32, String] = match int.parse(s) {
   ok(n) => if n < -2147483648 then err("number too small to fit in target type")
   else if n > 2147483647 then err("number too large to fit in target type")
-  else ok(int.to_int32(n)),
+  else ok(int.__to_int32(n)),
   err(e) => err(e),
 }
 
 // ── Integer: radix text (R-sized-06) ──
 /// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
-fn to_string_radix(x: Int32, radix: Int) -> String = int.to_string_radix(int.from_int32(x), radix)
+fn to_string_radix(x: Int32, radix: Int) -> String = int.to_string_radix(int.__from_int32(x), radix)
 
 /// Int32 from trimmed s in radix, the grammar of int.parse_radix; err on junk or outside -2147483648..2147483647.
 fn parse_radix(s: String, radix: Int) -> Result[Int32, String] = match int.parse_radix(s, radix) {
   ok(n) => if n < -2147483648 then err("number too small to fit in target type")
   else if n > 2147483647 then err("number too large to fit in target type")
-  else ok(int.to_int32(n)),
+  else ok(int.__to_int32(n)),
   err(e) => err(e),
 }
 
@@ -216,49 +149,49 @@ fn parse_radix(s: String, radix: Int) -> Result[Int32, String] = match int.parse
 //    type defines below its own conversions. ──
 /// x as Int32, toward zero; NaN, an infinity or a value outside Int32 aborts.
 fn from[S: Numeric](x: S) -> Int32 = match x.__trunc().__int_exact() {
-  some(n) => int.to_int32_checked(n) ?? panic("int32.from: the value is not a number in the range of Int32"),
+  some(n) => int.__to_int32_checked(n) ?? panic("int32.from: the value is not a number in the range of Int32"),
   none => panic("int32.from: the value is not a number in the range of Int32"),
 }
 
 /// some(x as Int32) when Int32 holds x exactly, else none (a fraction, NaN, out of range).
 fn from_checked[S: Numeric](x: S) -> Int32? = match x.__int_exact() {
-  some(n) => int.to_int32_checked(n),
+  some(n) => int.__to_int32_checked(n),
   none => none,
 }
 
 /// x as Int32, toward zero, clamped to Int32's range; NaN is 0.
-fn from_saturating[S: Numeric](x: S) -> Int32 = int.to_int32_saturating(x.__int_sat())
+fn from_saturating[S: Numeric](x: S) -> Int32 = int.__to_int32_saturating(x.__int_sat())
 
 /// The low 32 bits of integer x as Int32 (two's complement).
 fn from_wrapping[S: Integer](x: S) -> Int32 = {
   let u = int.wrap(x.__bits64(), 32)
-  int.to_int32(if u >= 2147483648 then u - 4294967296 else u)
+  int.__to_int32(if u >= 2147483648 then u - 4294967296 else u)
 }
 
 // ── Numeric / Integer requirements: the conversion pivots the `<T>.from`
 //    family reads through a type variable, and the receiver-less sum and
 //    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
-fn __int_exact(x: Int32) -> Int? = some(int.from_int32(x))
+fn __int_exact(x: Int32) -> Int? = some(int.__from_int32(x))
 
-fn __uint64_exact(x: Int32) -> UInt64? = int.__uint64_exact(int.from_int32(x))
+fn __uint64_exact(x: Int32) -> UInt64? = int.__uint64_exact(int.__from_int32(x))
 
 fn __trunc(x: Int32) -> Int32 = x
 
-fn __int_sat(x: Int32) -> Int = int.from_int32(x)
+fn __int_sat(x: Int32) -> Int = int.__from_int32(x)
 
-fn __uint64_sat(x: Int32) -> UInt64 = int.__uint64_sat(int.from_int32(x))
+fn __uint64_sat(x: Int32) -> UInt64 = int.__uint64_sat(int.__from_int32(x))
 
-fn __to_float(x: Int32) -> Float = int.to_float(int.from_int32(x))
+fn __to_float(x: Int32) -> Float = int.__raw_to_float(int.__from_int32(x))
 
-fn __to_float_exact(x: Int32) -> Float? = int.__to_float_exact(int.from_int32(x))
+fn __to_float_exact(x: Int32) -> Float? = int.__to_float_exact(int.__from_int32(x))
 
-fn __to_float32(x: Int32) -> Float32 = int.to_float32(int.from_int32(x))
+fn __to_float32(x: Int32) -> Float32 = int.__raw_to_float32(int.__from_int32(x))
 
-fn __to_float32_exact(x: Int32) -> Float32? = int.to_float32_checked(int.from_int32(x))
+fn __to_float32_exact(x: Int32) -> Float32? = int.__to_float32_checked(int.__from_int32(x))
 
-fn __decimal_exact(x: Int32) -> String? = some(int.to_string(int.from_int32(x)))
+fn __decimal_exact(x: Int32) -> String? = some(int.to_string(int.__from_int32(x)))
 
-fn __bits64(x: Int32) -> Int = int.from_int32(x)
+fn __bits64(x: Int32) -> Int = int.__from_int32(x)
 
 fn __sum(xs: List[Int32]) -> Int32 = {
   let zero: Int32 = 0

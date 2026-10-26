@@ -86,7 +86,7 @@ else {
 @category
 fn next_float(rng: Rng) -> (Float, Rng) = {
   let (z, next) = rng_next64(rng)
-  (float.from_int(rng_shr(z, 11)) * 1.1102230246251565e-16, next)
+  (float.__from_int(rng_shr(z, 11)) * 1.1102230246251565e-16, next)
 }
 
 /// A uniformly chosen element (none, state unchanged, when xs is empty) and the next state.

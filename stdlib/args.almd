@@ -9,12 +9,6 @@
 // was an unresolved name in the bundled context and E006 could not fire).
 import env
 
-/// Same as env.args; argv[0] excluded.
-effect fn raw() -> List[String] = env.args()
-
-/// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
-effect fn flag(name: String) -> Bool = __has(__options(env.args()), name)
-
 /// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
 effect fn has_flag(name: String) -> Bool = __has(__options(env.args()), name)
 
@@ -53,7 +47,7 @@ fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
   else {
     // Read the element ONCE — a repeated `list.get_or` on a heap list param
     // inside a bundled module doubled the borrow (#892).
-    let a = list.get_or(args, i, "")
+    let a = list.get(args, i) ?? ""
     if a == long or a == short then true
     else __flag_at(args, long, short, i + 1)
   }
@@ -80,14 +74,8 @@ effect fn option(name: String) -> String? = {
 @category
 fn __find_prefixed(args: List[String], prefix: String, i: Int) -> String? =
   if i >= list.len(args) then none
-  else if string.starts_with(list.get_or(args, i, ""), prefix) then list.get(args, i)
+  else if string.starts_with(list.get(args, i) ?? "", prefix) then list.get(args, i)
   else __find_prefixed(args, prefix, i + 1)
-
-/// option(name), or fallback when absent.
-effect fn option_or(name: String, fallback: String) -> String = match option(name)! {
-  some(v) => v,
-  none => fallback,
-}
 
 /// Args before `--` that are not flags or values of the named options, then all after `--`.
 effect fn positional(options: List[String]) -> List[String] = __positional(env.args(), options)
@@ -111,11 +99,8 @@ fn __positional(args: List[String], options: List[String]) -> List[String] =
 fn __positional_at(args: List[String], options: List[String], i: Int, acc: List[String]) -> List[String] =
   if i >= list.len(args) then acc
   else {
-    let a = list.get_or(args, i, "")
+    let a = list.get(args, i) ?? ""
     if not string.starts_with(a, "-") then __positional_at(args, options, i + 1, acc + [a])
     else if string.starts_with(a, "--") and list.contains(options, string.drop(a, 2)) then __positional_at(args, options, i + 2, acc)
     else __positional_at(args, options, i + 1, acc)
   }
-
-/// i-th positional arg (see positional); none if out of range.
-effect fn positional_at(i: Int, options: List[String]) -> String? = list.get(positional(options)!, i)

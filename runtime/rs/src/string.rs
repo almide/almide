@@ -93,7 +93,6 @@ pub fn almide_rt_string_split_once_ref<'a>(s: &'a str, sep: &str) -> Option<(&'a
     }
 }
 pub fn almide_rt_string_replace(s: &str, from: &str, to: &str) -> AlmideString { let __almide_out: String = s.replace(from, to); __almide_out.into() }
-pub fn almide_rt_string_join(parts: &[AlmideString], sep: &str) -> AlmideString { almide_str_join(parts, sep) }
 // Negative counts clamp to 0 (C-054 discipline; `n as usize` on a negative
 // i64 reinterpreted to a huge count — a native "capacity overflow" panic
 // while the wasm leg trapped on the negative alloc size).
@@ -144,19 +143,6 @@ pub fn almide_rt_string_capitalize(s: &str) -> AlmideString {
 }
 pub fn almide_rt_string_to_int(s: &str) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { s.trim_ascii().parse::<i64>().map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
 pub fn almide_rt_string_to_float(s: &str) -> Result<f64, AlmideString> { almide_rt_float_parse(s) }
-pub fn almide_rt_string_to_bytes(s: &str) -> Vec<i64> { s.bytes().map(|b| b as i64).collect() }
-// UTF-8 lossy decode — the inverse of `to_bytes` (which emits UTF-8), matching
-// Almide's `bytes.to_string_lossy` and every other language's bytes→string. (Was
-// a Latin-1 `b as u8 as char` map, which broke the round-trip on all non-ASCII.)
-// Each i64 is truncated to a byte (`b as u8`, preserving the prior wrap), then the
-// byte sequence is decoded as UTF-8 with U+FFFD for each maximal invalid subpart.
-pub fn almide_rt_string_from_bytes(bytes: &[i64]) -> AlmideString {
-    let __almide_out: String = {
-        let v: Vec<u8> = bytes.iter().map(|&b| b as u8).collect();
-        String::from_utf8_lossy(&v).into_owned()
-    };
-    __almide_out.into()
-}
 /// `string.to_codepoint` (R-string-14): the scalar value of a string that is
 /// EXACTLY one codepoint; none for "" and for two or more.
 pub fn almide_rt_string_codepoint(s: &str) -> Option<i64> { let mut it = s.chars(); match (it.next(), it.next()) { (Some(c), None) => Some(c as i64), _ => None } }
@@ -267,20 +253,6 @@ pub fn almide_rt_string_drop_end(s: &str, n: i64) -> AlmideString { let __almide
 
 // ── Algorithmic primitives (Phase 3 stdlib expansion) ──
 
-pub fn almide_rt_string_run_length_encode(s: &str) -> Vec<(AlmideString, i64)> {
-    let __almide_v: Vec<(String, i64)> = {
-        let mut result: Vec<(String, i64)> = Vec::new();
-        for c in s.chars() {
-            let cs: String = c.to_string();
-            match result.last_mut() {
-                Some((prev, count)) if *prev == cs => { *count += 1; }
-                _ => { result.push((cs, 1)); }
-            }
-        }
-        result
-    };
-    __almide_v.into_almide()
-}
 
 // ── Mutable string operations ──
 

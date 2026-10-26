@@ -44,9 +44,6 @@ pub fn almide_rt_float_abs(n: f64) -> f64 { n.abs() }
 pub fn almide_rt_float_ceil(n: f64) -> f64 { n.ceil() }
 pub fn almide_rt_float_floor(n: f64) -> f64 { n.floor() }
 pub fn almide_rt_float_round(n: f64) -> f64 { n.round() }
-// The fixed +qNaN below zero, matching almide_rt_math_sqrt (C-055), and by
-// the same sign-clearing `abs` (a selected NaN constant is folded away).
-pub fn almide_rt_float_sqrt(n: f64) -> f64 { let r = n.sqrt(); if n < 0.0 { r.abs() } else { r } }
 // Explicit NaN/tie decision tree — see almide_rt_math_fmin/fmax (math.rs) for
 // why `f64::min`/`f64::max` (llvm.minnum/maxnum, unspecified ±0-tie order)
 // must not be used. Ties follow IEEE-754-2019 zero ordering (C-049,
@@ -104,13 +101,6 @@ pub fn almide_rt_float_to_bits(f: f64) -> i64 {
 
 // ── Sized conversions (for `@intrinsic` migration of `float.to_*`) ──
 
-pub fn almide_rt_float_to_int8(n: f64) -> i8 { n as i8 }
-pub fn almide_rt_float_to_int16(n: f64) -> i16 { n as i16 }
-pub fn almide_rt_float_to_int32(n: f64) -> i32 { n as i32 }
-pub fn almide_rt_float_to_int64(n: f64) -> i64 { n as i64 }
-pub fn almide_rt_float_to_uint8(n: f64) -> u8 { n as u8 }
-pub fn almide_rt_float_to_uint16(n: f64) -> u16 { n as u16 }
-pub fn almide_rt_float_to_uint32(n: f64) -> u32 { n as u32 }
 pub fn almide_rt_float_to_uint64(n: f64) -> u64 { n as u64 }
 pub fn almide_rt_float_to_float32(n: f64) -> f32 { n as f32 }
 pub fn almide_rt_float_to_float64(n: f64) -> f64 { n }

@@ -20,7 +20,6 @@ pub fn almide_rt_int_to_hex(n: i64) -> AlmideString { let __almide_out: String =
 // Trims ASCII whitespace only — str::trim_ascii: TAB LF FF CR SPACE, not VT
 // and no Unicode space (C-413, #4121); "\u{a0}5" is junk, not 5.
 pub fn almide_rt_int_parse(s: &str) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { s.trim_ascii().parse::<i64>().map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
-pub fn almide_rt_int_parse_hex(s: &str) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { i64::from_str_radix(s.trim().trim_start_matches("0x"), 16).map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
 #[inline(always)] pub fn almide_rt_int_band(a: i64, b: i64) -> i64 { a & b }
 #[inline(always)] pub fn almide_rt_int_bor(a: i64, b: i64) -> i64 { a | b }
 #[inline(always)] pub fn almide_rt_int_bxor(a: i64, b: i64) -> i64 { a ^ b }
@@ -70,8 +69,6 @@ pub fn almide_rt_int_wrap_mul(a: i64, b: i64) -> i64 {
     else { 1i64 << (63 - (n as u64).leading_zeros() as i64) }
 }
 
-pub fn almide_rt_int_to_u32(n: i64) -> i64 { (n as u32) as i64 }
-pub fn almide_rt_int_to_u8(n: i64) -> i64 { (n as u8) as i64 }
 #[inline(always)] pub fn almide_rt_int_bits_to_float(bits: i64) -> f64 { f64::from_bits(bits as u64) }
 #[inline(always)] pub fn almide_rt_int_bits_to_f32(bits: i64) -> f64 { f32::from_bits(bits as u32) as f64 }
 

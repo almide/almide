@@ -17,14 +17,6 @@ fn datetime_now() -> Int = {
   ns / 1000000000
 }
 
-fn env_millis() -> Int = {
-  let buf = prim.alloc_bytes(16)
-  let p = int.band(prim.handle(buf) + 12 + 7, 0 - 8)
-  let _e = prim.clock_time_get(0, 0, p)
-  let ns = prim.load64(p)
-  ns / 1000000
-}
-
 // `datetime.monotonic_ns` — the same scratch/alignment template, but clock_id 1
 // = CLOCK_MONOTONIC and NO division: the return is raw NANOSECONDS. This was the
 // one datetime fn with no wasm body, so any file touching it fell off the wasm

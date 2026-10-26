@@ -153,49 +153,6 @@ else {
   if k > 9223372036854775807 / in_ch then 9223372036854775807 else in_ch * k
 }
 
-fn matrix_conv1d(input: List[List[Float]], weight: List[List[Float]], bias: List[Float], kernel: Int, stride: Int, padding: Int) -> List[List[Float]] = {
-  let hin = prim.handle(input)
-  let hw = prim.handle(weight)
-  let t_in = prim.load32(hin + 4)
-  let out_ch = prim.load32(hw + 4)
-  if t_in == 0 or out_ch == 0 then __mxe_zeros(0, 0)
-  else {
-    let irow0 = prim.load64(hin + 12)
-    let in_ch = prim.load32(irow0 + 4)
-    let s = __mxe_stride(stride)
-    let k = if kernel < 0 then 0 else kernel
-    let p = if padding < 0 then 0 else padding
-    if p > 268435456 then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
-    // The weight row is `in_ch * kernel` taps wide and the bias has one entry
-    // per output channel: a short weight row or bias read past its block here
-    // and panicked natively.
-    let _w = __mxe_shape_eq(prim.load32(prim.load64(hw + 12) + 4), __mxe_taps(in_ch, k))
-    let _b = __mxe_shape_eq(prim.load32(prim.handle(bias) + 4), out_ch)
-    let t_padded = t_in + 2 * p
-    if t_padded < k then __mxe_zeros(0, 0)
-    else {
-      let t_out = (t_padded - k) / s + 1
-      let _d = __mxe_dims_guard(t_out, out_ch)
-      let out: List[List[Float]] = prim.alloc_list_str(t_out)
-      let _x = __cv_rows(
-        prim.handle(out),
-        hin,
-        hw,
-        prim.handle(bias),
-        t_in,
-        in_ch,
-        out_ch,
-        k,
-        s,
-        p,
-        t_out,
-        0,
-      )
-      out
-    }
-  }
-}
-
 // ── byte codecs (LE — wasm memory is little-endian, so an 8/4-byte store IS the
 //    to_le_bytes sequence) ──
 fn __tb64_row(bh: Int, rh: Int, c: Int, pos: Int, j: Int) -> Int = if j >= c then pos + c * 8

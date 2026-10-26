@@ -430,31 +430,7 @@ pub fn almide_rt_value_omit(v: &AlmideValue, keys: &[AlmideString]) -> AlmideVal
     }
 }
 
-/// Convert snake_case key to camelCase.
-pub fn almide_rt_value_to_camel_case(v: &AlmideValue) -> AlmideValue {
-    almide_rt_value_rename_keys(v, |k| {
-        let mut result = String::new();
-        let mut capitalize_next = false;
-        for c in k.chars() {
-            if c == '_' { capitalize_next = true; }
-            else if capitalize_next { result.push(c.to_ascii_uppercase()); capitalize_next = false; }
-            else { result.push(c); }
-        }
-        AlmideString::from(result)
-    })
-}
 
-/// Convert camelCase key to snake_case.
-pub fn almide_rt_value_to_snake_case(v: &AlmideValue) -> AlmideValue {
-    almide_rt_value_rename_keys(v, |k| {
-        let mut result = String::new();
-        for (i, c) in k.chars().enumerate() {
-            if c.is_ascii_uppercase() && i > 0 { result.push('_'); }
-            result.push(c.to_ascii_lowercase());
-        }
-        AlmideString::from(result)
-    })
-}
 
 // ── Variant decode helper ──
 

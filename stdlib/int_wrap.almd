@@ -7,7 +7,3 @@
 fn int_wrap_add(a: Int, b: Int) -> Int = a + b
 
 fn int_wrap_mul(a: Int, b: Int) -> Int = a * b
-
-fn int_to_u32(n: Int) -> Int = prim.band(n, 4294967295)
-
-fn int_to_u8(n: Int) -> Int = prim.band(n, 255)

@@ -4,9 +4,6 @@
 // (Op::Prim, no ownership). Matches v0's f64 semantics for finite, non-NaN values.
 fn float_abs(x: Float) -> Float = prim.fabs(x)
 
-// A negative x gives the fixed +qNaN, exactly as math_sqrt (C-055).
-fn float_sqrt(x: Float) -> Float = if prim.flt(x, 0.0) then prim.ffrombits(0x7FF8000000000000) else prim.fsqrt(x)
-
 fn float_floor(x: Float) -> Float = prim.ffloor(x)
 
 fn float_ceil(x: Float) -> Float = prim.fceil(x)

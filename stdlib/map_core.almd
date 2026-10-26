@@ -182,14 +182,6 @@ fn map_contains(m: Map[Int, Int], k: Int) -> Bool = {
   idx >= 0
 }
 
-fn map_get_or(m: Map[Int, Int], k: Int, default: Int) -> Int = {
-  let h = prim.handle(m)
-  let len = prim.load32(h + 4)
-  let cap = prim.load32(h + 8)
-  let idx = __map_lookup(h, len, cap, k)
-  if idx < 0 then default else prim.load64(h + 12 + idx * 16 + 8)
-}
-
 // `a == b` over Map[Int, Int] (the eq lowering's `map.eq`), order-independent like v0's:
 // the same entry count and every (k, v) of `a` has an equal value under k in `b`.
 fn __map_eqm_at(ah: Int, an: Int, bh: Int, bn: Int, bcap: Int, i: Int) -> Bool =

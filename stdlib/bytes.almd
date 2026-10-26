@@ -92,7 +92,7 @@ fn compare(a: Bytes, b: Bytes) -> Int = _
 
 /// New Bytes holding a then b.
 @intrinsic("almide_rt_bytes_concat")
-fn concat(a: Bytes, b: Bytes) -> Bytes = _
+fn __concat(a: Bytes, b: Bytes) -> Bytes = _
 
 /// True if needle occurs in b, or needle is empty.
 @intrinsic("almide_rt_bytes_contains")
@@ -144,10 +144,6 @@ fn from_string(s: String) -> Bytes = _
 @intrinsic("almide_rt_bytes_get")
 fn get(b: Bytes, i: Int) -> Int? = _
 
-/// Byte at index i, or default when out of range.
-@intrinsic("almide_rt_bytes_get_or")
-fn get_or(b: Bytes, i: Int, default: Int) -> Int = _
-
 /// First offset of needle, or none; some(0) if empty.
 @intrinsic("almide_rt_bytes_index_of")
 fn index_of(b: Bytes, needle: Bytes) -> Int? = _
@@ -168,10 +164,6 @@ fn is_valid_utf8(b: Bytes) -> Bool = _
 @intrinsic("almide_rt_bytes_len")
 fn len(b: Bytes) -> Int = _
 
-/// Pieces split at LF; CR kept; a final LF adds no piece.
-@intrinsic("almide_rt_bytes_lines")
-fn lines(b: Bytes) -> List[Bytes] = _
-
 /// f applied per byte; results cut to low 8 bits.
 @intrinsic("almide_rt_bytes_map_each")
 fn map(b: Bytes, f: (Int) -> Int) -> Bytes = _
@@ -191,10 +183,6 @@ fn pad_end(b: Bytes, n: Int, fill: Int) -> Bytes = _
 /// Appends x's low 8 bits in place.
 @intrinsic("almide_rt_bytes_push")
 fn push(mut b: Bytes, x: Int) -> Unit = _
-
-/// Sets byte i to val's low 8 bits; no-op out of range.
-@intrinsic("almide_rt_bytes_set_at")
-fn set_at(mut b: Bytes, i: Int, val: Int) -> Unit = _
 
 /// Copies src_start..src_end to dst; no-op if it won't fit.
 @intrinsic("almide_rt_bytes_copy_within")
@@ -340,22 +328,6 @@ fn __read_i64_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 @intrinsic("almide_rt_bytes_read_i64_le_at")
 fn __read_i64_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
 
-/// Up to count u32-LE-prefixed strings; stops if cut off.
-@intrinsic("almide_rt_bytes_read_length_prefixed_strings_le")
-fn read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String] = _
-
-/// len bytes at pos, lossy UTF-8; empty if out of range.
-@intrinsic("almide_rt_bytes_read_string_at")
-fn read_string_at(b: Bytes, pos: Int, len: Int) -> String = _
-
-/// String after a u32 BE length at pos; empty if cut off.
-@intrinsic("almide_rt_bytes_read_string_be")
-fn read_string_be(b: Bytes, pos: Int) -> String = _
-
-/// Cursor form of read_string_be; (pos, none) if cut off.
-@intrinsic("almide_rt_bytes_read_string_be_at")
-fn read_string_be_at(b: Bytes, pos: Int) -> (Int, String?) = _
-
 /// u16 BE at pos; 0 if out of range.
 @intrinsic("almide_rt_bytes_read_u16_be")
 fn __read_u16_be(b: Bytes, pos: Int) -> Int = _
@@ -403,10 +375,6 @@ fn __read_u32_le_array(b: Bytes, pos: Int, count: Int) -> List[Int] = _
 /// (pos+4, u32 LE); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u32_le_at")
 fn __read_u32_le_at(b: Bytes, pos: Int) -> (Int, Int?) = _
-
-/// Byte at pos; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_u8")
-fn read_u8(b: Bytes, pos: Int) -> Int = _
 
 /// (pos+1, byte); (pos, none) at EOF.
 @intrinsic("almide_rt_bytes_read_u8_at")
@@ -493,10 +461,6 @@ fn __set_u8(mut b: Bytes, pos: Int, val: Int) -> Unit = _
 @intrinsic("almide_rt_bytes_skip")
 fn skip(b: Bytes, pos: Int, n: Int) -> Int = _
 
-/// Offset past count u32-LE-prefixed records.
-@intrinsic("almide_rt_bytes_skip_length_prefixed_le")
-fn skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int = _
-
 /// Copy of start..end, each clamped to 0..len; empty if start >= end.
 @intrinsic("almide_rt_bytes_slice")
 fn slice(b: Bytes, start: Int, end: Int) -> Bytes = _
@@ -536,26 +500,6 @@ fn to_string_lossy(b: Bytes) -> String = _
 @intrinsic("almide_rt_bytes_write_bool")
 fn append_bool(mut b: Bytes, x: Bool) -> Unit = _
 
-/// Appends val as 8-byte f64, BE.
-@intrinsic("almide_rt_bytes_write_f64_be")
-fn write_f64_be(mut b: Bytes, val: Float) -> Unit = _
-
-/// Appends val as 8 bytes, BE.
-@intrinsic("almide_rt_bytes_write_i64_be")
-fn write_i64_be(mut b: Bytes, val: Int) -> Unit = _
-
-/// Appends s after a u32 BE byte-length prefix.
-@intrinsic("almide_rt_bytes_write_string_be")
-fn write_string_be(mut b: Bytes, s: String) -> Unit = _
-
-/// Appends val's low 32 bits, BE.
-@intrinsic("almide_rt_bytes_write_u32_be")
-fn write_u32_be(mut b: Bytes, val: Int) -> Unit = _
-
-/// Appends val's low 8 bits; 256 becomes 0.
-@intrinsic("almide_rt_bytes_write_u8")
-fn write_u8(mut b: Bytes, val: Int) -> Unit = _
-
 /// Bytewise XOR, as long as the shorter input.
 @intrinsic("almide_rt_bytes_xor")
 fn xor(a: Bytes, b: Bytes) -> Bytes = _
@@ -567,54 +511,6 @@ fn xor(a: Bytes, b: Bytes) -> Bytes = _
 // append_ matrix further down is the surface.
 /// Byte order: LittleEndian or BigEndian.
 type Endian = | LittleEndian | BigEndian
-
-/// UInt16 at offset; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_uint16")
-fn read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16 = _
-
-/// UInt32 at offset; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_uint32")
-fn read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32 = _
-
-/// Int32 at offset; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_int32")
-fn read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32 = _
-
-/// Float32 at offset; 0 if out of range.
-@intrinsic("almide_rt_bytes_read_float32")
-fn read_float32(b: Bytes, offset: Int, endian: Endian) -> Float32 = _
-
-/// Appends value as 2 bytes in endian order.
-@intrinsic("almide_rt_bytes_write_uint16")
-fn write_uint16(mut b: Bytes, value: UInt16, endian: Endian) -> Unit = _
-
-/// Appends value as 4 bytes in endian order.
-@intrinsic("almide_rt_bytes_write_uint32")
-fn write_uint32(mut b: Bytes, value: UInt32, endian: Endian) -> Unit = _
-
-/// Appends value as 4 bytes in endian order.
-@intrinsic("almide_rt_bytes_write_int32")
-fn write_int32(mut b: Bytes, value: Int32, endian: Endian) -> Unit = _
-
-/// Appends value as 4 bytes in endian order.
-@intrinsic("almide_rt_bytes_write_float32")
-fn write_float32(mut b: Bytes, value: Float32, endian: Endian) -> Unit = _
-
-/// Writes value at offset; no-op out of range.
-@intrinsic("almide_rt_bytes_set_uint16")
-fn set_uint16(mut b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit = _
-
-/// Writes value at offset; no-op out of range.
-@intrinsic("almide_rt_bytes_set_uint32")
-fn set_uint32(mut b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit = _
-
-/// Writes value at offset; no-op out of range.
-@intrinsic("almide_rt_bytes_set_int32")
-fn set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit = _
-
-/// Writes value at offset; no-op out of range.
-@intrinsic("almide_rt_bytes_set_float32")
-fn set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit = _
 
 // ── Text requirement (R-L0-42): `list.join[T: Text]` over Bytes ──
 /// The parts with sep between them; empty for [].
@@ -1085,7 +981,7 @@ fn next_bytes(b: Bytes, pos: Int, n: Int) -> (Bytes?, Int) = {
 
 /// Appends src's bytes to b in place.
 fn append_bytes(mut b: Bytes, src: Bytes) -> Unit = {
-  b = bytes.concat(b, src)
+  b = bytes.__concat(b, src)
 }
 
 /// An empty byte buffer.
@@ -1352,8 +1248,8 @@ fn replace(b: Bytes, from: Bytes, to: Bytes) -> Bytes =
 
 /// b with the first from replaced by to.
 fn replace_first(b: Bytes, from: Bytes, to: Bytes) -> Bytes = match bytes.index_of(b, from) {
-  some(i) => bytes.concat(
-    bytes.concat(bytes.slice(b, 0, i), to),
+  some(i) => bytes.__concat(
+    bytes.__concat(bytes.slice(b, 0, i), to),
     bytes.slice(b, i + bytes.len(from), bytes.len(b)),
   ),
   none => b,

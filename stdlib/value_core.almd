@@ -222,7 +222,7 @@ fn __vobj_has_dup(pairs: List[(String, Value)]) -> Bool = {
       if map.contains(seen, k) then {
         dup = true
       } else {
-        map.insert(seen, k, 0)
+        seen = map.set(seen, k, 0)
       }
     }
     dup
@@ -239,7 +239,7 @@ fn __vobj_upsert(pairs: List[(String, Value)]) -> List[(String, Value)] = {
         vals = list.set(vals, i, v)
       },
       none => {
-        map.insert(at, k, list.len(keys))
+        at = map.set(at, k, list.len(keys))
         list.push(keys, k)
         list.push(vals, v)
       },
@@ -292,7 +292,7 @@ else {
 // the same reason instead of three different ones.
 // value.as_object (R-value-02) — the Object's (key, value) pairs in slot order, each handle
 // SHALLOW-COPIED into its `acc + [(k, x)]` tuple (the __jps_pairs discipline of json_path.almd);
-// any other tag is the `expected Object` err value.field gives.
+// any other tag is the `expected Object` err value.__field gives.
 fn __vobj_pairs(v: Value, i: Int, n: Int, acc: List[(String, Value)]) -> List[(String, Value)] =
   if i >= n then acc
   else {
@@ -938,11 +938,11 @@ fn value_merge(a: Value, b: Value) -> Value = {
   } else b
 }
 
-// value.field — the Codec-derive field accessor. IDENTICAL to the retired value.get EXCEPT it first
+// value.__field — the Codec-derive field accessor. IDENTICAL to the retired value.get EXCEPT it first
 // checks the Object tag (6): a non-Object subject is `Err("expected Object")` (v0
 // almide_rt_value_field), where the retired value.get would scan a scalar's garbage header. The
 // found/missing behaviour + error text ("missing field '<k>'") mirror v0 exactly, so a
-// derived `decode`'s `value.field(_v, "k")?` byte-matches. Ok payload is a fresh co-owned
+// derived `decode`'s `value.__field(_v, "k")?` byte-matches. Ok payload is a fresh co-owned
 // Value (bare-Var arm auto-acquire; the Result frees via its own DropResultValue).
 fn __vobj_find(v: Value, key: String, i: Int, n: Int) -> Int = if i >= n then 0 - 1
 else {
@@ -1145,7 +1145,7 @@ fn list_take_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
   buf
 }
 
-// value.stringify — the recursive JSON serializer, byte-identical to v0's runtime
+// value.__stringify — the recursive JSON serializer, byte-identical to v0's runtime
 // (`almide_rt_value_stringify`): tag-dispatch; scalars rendered directly, Str quoted+escaped,
 // Array/Object joined with "," (no spaces). Escape replaces `\` FIRST (so the backslashes it
 // introduces are not re-escaped), then `"`/newline/CR/tab — v0's exact order.

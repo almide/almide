@@ -1,17 +1,3 @@
-// math — bundled-Almide stdlib module (Stdlib Declarative Unification Stage 2d).
-//
-// Migrated mechanically from the matching `stdlib/defs/*.toml`.
-// Signatures (including any generic type params) match the legacy
-// TOML definitions byte-for-byte; the Rust runtime in
-// `runtime/rs/src/math.rs` stays as the implementation target.
-// On WASM the math fns are SELF-HOSTED (`stdlib/math_trig.almd`,
-// `math_exp.almd`, `math_log.almd`, `math_atan.almd`, `math_tanh.almd`, …),
-// registered in `crates/almide-mir/src/render_wasm/registry.rs`. (v0
-// dispatched through `emit_wasm/calls_math.rs`, retired in c71eff7b.)
-/// Magnitude of n; min_value wraps to itself.
-@intrinsic("almide_rt_math_abs")
-fn abs(n: Int) -> Int = _
-
 /// Arctangent in radians, within -pi/2..pi/2.
 @intrinsic("almide_rt_math_atan")
 fn atan(x: Float) -> Float = _
@@ -38,17 +24,9 @@ fn exp(x: Float) -> Float = _
 @intrinsic("almide_rt_math_factorial")
 fn factorial(n: Int) -> Int = _
 
-/// Greater; a NaN operand is ignored; 0.0 > -0.0.
-@intrinsic("almide_rt_math_fmax")
-fn fmax(a: Float, b: Float) -> Float = _
-
-/// Lesser; a NaN operand is ignored; -0.0 < 0.0.
-@intrinsic("almide_rt_math_fmin")
-fn fmin(a: Float, b: Float) -> Float = _
-
 /// base to the exp; NaN for negative base, fractional exp.
 @intrinsic("almide_rt_math_fpow")
-fn fpow(base: Float, exp: Float) -> Float = _
+fn __fpow(base: Float, exp: Float) -> Float = _
 
 /// Natural log; -inf at 0, NaN for negative x.
 @intrinsic("almide_rt_math_log")
@@ -68,25 +46,17 @@ fn log2(x: Float) -> Float = _
 @intrinsic("almide_rt_math_log_gamma")
 fn log_gamma(x: Float) -> Float = _
 
-/// Greater of a and b.
-@intrinsic("almide_rt_math_max")
-fn max(a: Int, b: Int) -> Int = _
-
-/// Lesser of a and b.
-@intrinsic("almide_rt_math_min")
-fn min(a: Int, b: Int) -> Int = _
-
 /// The circle constant, 3.141592653589793.
 @intrinsic("almide_rt_math_pi")
 fn pi() -> Float = _
 
 /// base to the exp, wrapping; negative exp aborts.
 @intrinsic("almide_rt_math_pow")
-fn pow(base: Int, exp: Int) -> Int = _
+fn __pow(base: Int, exp: Int) -> Int = _
 
 /// -1, 0 or 1 by the sign of n.
 @intrinsic("almide_rt_math_sign")
-fn sign(n: Int) -> Int = _
+fn __sign(n: Int) -> Int = _
 
 /// Sine of x radians; NaN for infinite x.
 @intrinsic("almide_rt_math_sin")
@@ -113,7 +83,7 @@ fn tanh(x: Float) -> Float = _
 // +qNaN 0x7FF8000000000000 (C-055), as every other math function returns.
 local fn m_bits(x: Float) -> Int = float.to_bits(x)
 
-local fn m_from(b: Int) -> Float = int.bits_to_float(b)
+local fn m_from(b: Int) -> Float = int.__bits_to_float(b)
 
 // The high 32 bits as an unsigned word (the musl `get_high_word`).
 local fn m_hi(x: Float) -> Int = int.band(int.bshr(m_bits(x), 32), 4294967295)
@@ -256,12 +226,12 @@ fn expm1(x: Float) -> Float = {
     let k = if not reduce then 0
     else if near then {
       if sgn == 0 then 1 else -1
-    } else float.to_int(1.44269504088896338700e+00 * x + (if sgn != 0 then -0.5 else 0.5))
+    } else float.__to_int(1.44269504088896338700e+00 * x + (if sgn != 0 then -0.5 else 0.5))
     let hl = if not reduce then (x, 0.0)
     else if near then {
       if sgn == 0 then (x - ln2_hi, ln2_lo) else (x + ln2_hi, -ln2_lo)
     } else {
-      let t = float.from_int(k)
+      let t = float.__from_int(k)
       (x - t * ln2_hi, t * ln2_lo)
     }
     let x1 = if reduce then hl.0 - hl.1
@@ -326,7 +296,7 @@ local fn m_log1p(x: Float) -> Float = {
     let t1 = w * (3.999999999940941908e-01 + w * (2.222219843214978396e-01 + w * 1.531383769920937332e-01))
     let t2 = z * (6.666666666666735130e-01 + w * (2.857142874366239149e-01 + w * (1.818357216161805012e-01 + w * 1.479819860511658591e-01)))
     let r = t2 + t1
-    let dk = float.from_int(parts.0)
+    let dk = float.__from_int(parts.0)
     s * (hfsq + r) + (dk * ln2_lo + parts.1) - hfsq + f + dk * ln2_hi
   }
 }

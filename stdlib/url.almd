@@ -380,21 +380,6 @@ fn to_string(u: Url) -> String = {
   u.scheme + "://" + u.host + port_part + u.path + query_part + frag_part
 }
 
-// Split a raw query string into key/value pairs. Total and lenient: empty
-// segments are dropped, a segment without `=` becomes (key, ""). Values are
-// returned RAW (not percent-decoded) — decode per pair when needed, so one
-// malformed value cannot fail the whole query.
-// See also: url.build_query (the inverse), url.decode_component.
-// Example: url.query_pairs("a=1&b=two") == [("a", "1"), ("b", "two")]
-// Example: url.query_pairs("") == []
-// Example: url.query_pairs("flag&x=1") == [("flag", ""), ("x", "1")]
-/// Undecoded (k, v) pairs; bare key gets "".
-fn query_pairs(query: String) -> List[(String, String)] = if string.len(query) == 0 then []
-else query |> string.split("&") |> list.filter((part) => string.len(part) > 0) |> list.map((part) => {
-  let kv = __url_split_once(part, "=")
-  (kv.0, kv.1)
-})
-
 // Build a query string from pairs, percent-encoding every key and value.
 // Total. `query_pairs(build_query(ps))` recovers the ENCODED forms.
 // See also: url.query_pairs, url.encode_component.

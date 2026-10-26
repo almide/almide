@@ -75,8 +75,6 @@ fn __do_windows(xs: List[Int], n: Int) -> List[List[Int]] = {
   outer
 }
 
-fn list_windows(xs: List[Int], n: Int) -> List[List[Int]] = __do_windows(xs, n)
-
 fn list_window(xs: List[Int], n: Int) -> List[List[Int]] = __do_windows(xs, n)
 
 // ── The HEAP-element (List[String]) variants → List[List[String]]. Each cell is a String HANDLE, so

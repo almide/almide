@@ -303,9 +303,6 @@ pub fn almide_http_request_response(method: &str, url: &str, body: &str, headers
 // (Almide `Bytes`) with NO UTF-8 conversion, so binary payloads (images,
 // audio — e.g. TTS mp3/wav) survive byte-identical.
 
-pub fn almide_http_get_bytes(url: &str) -> Result<Vec<u8>, AlmideString> {
-    almide_rt_http___request_bytes("GET", url, "", &[])
-}
 
 pub fn almide_rt_http___request_bytes(method: &str, url: &str, body: &str, headers: &[AlmideString]) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| {
     request_bytes(method, url, body, &header_pairs(headers))

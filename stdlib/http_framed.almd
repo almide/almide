@@ -48,14 +48,6 @@ effect fn __request_bytes_impl(method: String, url: String, body: String, flat: 
   __http_frame(method, body, flat),
 )
 
-@implements("http.get_bytes")
-effect fn __get_bytes_impl(url: String) -> Result[Bytes, String] = __request_bytes_impl(
-  "GET",
-  url,
-  "",
-  [],
-)
-
 effect fn __http_framed_response(url: String, frame: String) -> Result[String, String] = _
 
 // The next decimal-length cell of `f`: (payload, rest).

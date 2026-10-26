@@ -495,16 +495,6 @@ pub fn almide_rt_fs_is_dir(path: &str) -> bool { Path::new(path).is_dir() }
 pub fn almide_rt_fs_is_file(path: &str) -> bool { Path::new(path).is_file() }
 pub fn almide_rt_fs_is_symlink(path: &str) -> bool { Path::new(path).is_symlink() }
 
-// Metadata
-pub fn almide_rt_fs_file_size(path: &str) -> Result<i64, AlmideString> { let __almide_r: Result<i64, String> = (|| { std::fs::metadata(path).map(|m| m.len() as i64).map_err(|e| io_err("fs.file_size", &fs_q(path), e)) })(); __almide_r.map_err(Into::into) }
-pub fn almide_rt_fs_modified_at(path: &str) -> Result<i64, AlmideString> {
-    let __almide_r: Result<i64, String> = (|| {
-        let meta = std::fs::metadata(path).map_err(|e| io_err("fs.modified_at", &fs_q(path), e))?;
-        let modified = meta.modified().map_err(|e| io_err("fs.modified_at", &fs_q(path), e))?;
-        Ok(modified.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
-    })();
-    __almide_r.map_err(Into::into)
-}
 pub fn almide_rt_fs_stat(path: &str) -> Result<AlmideFileStat, AlmideString> {
     let __almide_r: Result<AlmideFileStat, String> = (|| {
         let meta = std::fs::metadata(path).map_err(|e| io_err("fs.stat", &fs_q(path), e))?;

@@ -25,10 +25,6 @@ fn add_seconds(ts: Int, n: Int) -> Int = _
 @intrinsic("almide_rt_datetime_day")
 fn day(ts: Int) -> Int = _
 
-/// a - b; positive when a is later.
-@intrinsic("almide_rt_datetime_diff_seconds")
-fn diff_seconds(a: Int, b: Int) -> Int = _
-
 /// Replaces %Y %m %d %H %M %S (UTC); no %% escape.
 @intrinsic("almide_rt_datetime_format")
 fn format(ts: Int, pattern: String) -> String = _
@@ -37,21 +33,9 @@ fn format(ts: Int, pattern: String) -> String = _
 @intrinsic("almide_rt_datetime_from_parts")
 fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String] = _
 
-/// Identity: seconds are already a timestamp.
-@intrinsic("almide_rt_datetime_from_unix")
-fn from_unix(seconds: Int) -> Int = _
-
 /// UTC hour of day, 0..23.
 @intrinsic("almide_rt_datetime_hour")
 fn hour(ts: Int) -> Int = _
-
-/// a > b; false when equal.
-@intrinsic("almide_rt_datetime_is_after")
-fn is_after(a: Int, b: Int) -> Bool = _
-
-/// a < b; false when equal.
-@intrinsic("almide_rt_datetime_is_before")
-fn is_before(a: Int, b: Int) -> Bool = _
 
 /// UTC minute, 0..59.
 @intrinsic("almide_rt_datetime_minute")
@@ -92,10 +76,6 @@ fn second(ts: Int) -> Int = _
 /// YYYY-MM-DDTHH:MM:SSZ in UTC.
 @intrinsic("almide_rt_datetime_to_iso")
 fn to_iso(ts: Int) -> String = _
-
-/// Identity: a timestamp is already Unix seconds.
-@intrinsic("almide_rt_datetime_to_unix")
-fn to_unix(ts: Int) -> Int = _
 
 /// English day name in UTC; 0 is Thursday.
 @intrinsic("almide_rt_datetime_weekday")

@@ -16,7 +16,7 @@ fn matrix_shape(m: Matrix) -> (Int, Int) = {
 // concat_rows: native folds append_rows over the list from the 0 x 0 matrix.
 // The same fold, by recursion (no capturing lambda in a bundled module, #892).
 fn __matrix_concat_rows_go(xs: List[Matrix], i: Int, acc: Matrix) -> Matrix = match list.get(xs, i) {
-  some(m) => __matrix_concat_rows_go(xs, i + 1, matrix.append_rows(acc, m)),
+  some(m) => __matrix_concat_rows_go(xs, i + 1, matrix.__append_rows(acc, m)),
   none => acc,
 }
 
@@ -57,11 +57,11 @@ fn __matrix_zip_rows(la: List[List[Float]], lb: List[List[Float]], f: (Float, Fl
 // feed the result's guard, so neither call is dead code.
 @implements("matrix.zip_with")
 fn __matrix_zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix = {
-  let rows_probe = matrix.append_rows(
+  let rows_probe = matrix.__append_rows(
     matrix.zeros(1, matrix.rows(a)),
     matrix.zeros(1, matrix.rows(b)),
   )
-  let cols_probe = matrix.append_rows(
+  let cols_probe = matrix.__append_rows(
     matrix.zeros(1, matrix.cols(a)),
     matrix.zeros(1, matrix.cols(b)),
   )

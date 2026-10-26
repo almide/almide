@@ -54,8 +54,6 @@ pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 {
     result
 }
 
-// Rounding
-#[inline(always)] pub fn almide_rt_math_abs(x: i64) -> i64 { x.abs() }
 #[inline(always)] pub fn almide_rt_math_ceil(x: f64) -> f64 { x.ceil() }
 #[inline(always)] pub fn almide_rt_math_floor(x: f64) -> f64 { x.floor() }
 #[inline(always)] pub fn almide_rt_math_round(x: f64) -> f64 { x.round() }
@@ -77,9 +75,6 @@ pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 {
 #[inline(always)] pub fn almide_rt_math_inf() -> f64 { f64::INFINITY }
 #[inline(always)] pub fn almide_rt_math_is_nan(x: f64) -> bool { x.is_nan() }
 
-// Int min/max/sign
-#[inline(always)] pub fn almide_rt_math_min(a: i64, b: i64) -> i64 { a.min(b) }
-#[inline(always)] pub fn almide_rt_math_max(a: i64, b: i64) -> i64 { a.max(b) }
 #[inline(always)] pub fn almide_rt_math_sign(n: i64) -> i64 { if n > 0 { 1 } else if n < 0 { -1 } else { 0 } }
 
 // Float min/max — explicit NaN/tie decision tree, mirrored bit-for-bit by the
@@ -98,15 +93,6 @@ pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 {
     // Tie (a == b, the ±0 pair included): IEEE-754-2019 minimum — a
     // negative-signed operand wins, commutatively (min(0,-0) = -0).
     else if a.is_sign_negative() { a } else { b }
-}
-#[inline(always)] pub fn almide_rt_math_fmax(a: f64, b: f64) -> f64 {
-    if a.is_nan() { b }
-    else if b.is_nan() { a }
-    else if a > b { a }
-    else if b > a { b }
-    // Tie: IEEE-754-2019 maximum — a positive-signed operand wins,
-    // commutatively (max(-0,0) = +0).
-    else if a.is_sign_positive() { a } else { b }
 }
 // Float pow delegates to the vendored musl-libm `pow` (deterministic +
 // bit-identical to the WASM port). This also makes all the special cases

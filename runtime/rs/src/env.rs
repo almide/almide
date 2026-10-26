@@ -33,19 +33,7 @@ pub fn almide_rt_env_cwd() -> Result<AlmideString, AlmideString> {
     __almide_v.into_almide()
 }
 
-pub fn almide_rt_env_unix_timestamp() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
-}
 
-pub fn almide_rt_env_millis() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
-}
 
 // A negative duration sleeps 0 ms (#2486): `ms as u64` made -1 into u64::MAX
 // milliseconds, so the native leg never returned where every wasm host clamps
@@ -57,7 +45,6 @@ pub fn almide_rt_env_sleep_ms(ms: i64) {
     std::thread::sleep(std::time::Duration::from_millis(ms.max(0) as u64));
 }
 
-pub fn almide_rt_env_temp_dir() -> AlmideString { let __almide_out: String = std::env::temp_dir().to_string_lossy().replace('\\', "/"); __almide_out.into() }
 
 pub fn almide_rt_env_os() -> AlmideString {
     let __almide_out: String = {

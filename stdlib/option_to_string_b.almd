@@ -15,7 +15,7 @@ fn option_to_string_b(o: Bool?) -> String = match o {
 fn __bool_to_string(b: Bool) -> String = if b then "true" else "false"
 
 // The SELF-HOSTED `bytes.__join`, the Text requirement `list.join[T: Text]`
-// reaches for Bytes: language-level match / fold / bytes.concat, no prim floor.
+// reaches for Bytes: language-level match / fold / bytes.__concat, no prim floor.
 // It lives in this classified prim-free pure file (beside `bool.to_string`'s
 // body, for the same reason) because a new stdlib file would need a new
 // purity classification; bytes_split.almd reaches the prim floor, which
@@ -23,5 +23,5 @@ fn __bool_to_string(b: Bool) -> String = if b then "true" else "false"
 @implements("bytes.__join")
 fn bytes_join(xs: List[Bytes], sep: Bytes) -> Bytes = match xs {
   [] => bytes.zeros(0),
-  [first, ..rest] => rest |> list.fold(first, (acc, b) => bytes.concat(bytes.concat(acc, sep), b)),
+  [first, ..rest] => rest |> list.fold(first, (acc, b) => bytes.__concat(bytes.__concat(acc, sep), b)),
 }

@@ -29,14 +29,6 @@ fn bytes_is_empty(b: Bytes) -> Bool = {
   n == 0
 }
 
-fn bytes_get_or(b: Bytes, i: Int, default: Int) -> Int = {
-  let h = prim.handle(b)
-  let n = prim.load32(h + 4)
-  if i >= 0 then {
-    if i < n then prim.load8(h + 12 + i) else default
-  } else default
-}
-
 // Fill n bytes at p with zero (bytes.zeros returns a zeroed block; alloc_bytes leaves it raw).
 fn __zerofill(p: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
@@ -59,7 +51,7 @@ fn bytes_new(len: Int) -> Bytes = {
   b
 }
 
-// bytes.concat(a, b) -> a fresh Bytes holding a's bytes then b's bytes.
+// bytes.__concat(a, b) -> a fresh Bytes holding a's bytes then b's bytes.
 fn bytes_concat(a: Bytes, b: Bytes) -> Bytes = {
   let an = prim.load32(prim.handle(a) + 4)
   let bn = prim.load32(prim.handle(b) + 4)
@@ -532,16 +524,6 @@ fn bytes_read_i32_be(b: Bytes, pos: Int) -> Int = {
       let u = prim.bor(p012, b3)
       __sext32(u)
     }
-  }
-}
-
-// bytes.read_u8(b, pos) -> the byte at pos (0 if out of range).
-fn bytes_read_u8(b: Bytes, pos: Int) -> Int = {
-  let h = prim.handle(b)
-  let n = prim.load32(h + 4)
-  if pos < 0 then 0
-  else {
-    if pos < n then prim.load8(h + 12 + pos) else 0
   }
 }
 

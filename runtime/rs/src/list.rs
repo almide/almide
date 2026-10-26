@@ -6,7 +6,6 @@ pub fn almide_rt_list_is_empty<T>(xs: &[T]) -> bool { xs.is_empty() }
 pub fn almide_rt_list_first<A: Clone>(xs: &[A]) -> Option<A> { xs.first().cloned() }
 pub fn almide_rt_list_last<A: Clone>(xs: &[A]) -> Option<A> { xs.last().cloned() }
 pub fn almide_rt_list_get<T: Clone>(xs: &[T], i: i64) -> Option<T> { xs.get(i as usize).cloned() }
-pub fn almide_rt_list_get_or<T: Clone>(xs: &[T], i: i64, default: T) -> T { xs.get(i as usize).cloned().unwrap_or(default) }
 pub fn almide_rt_list_contains<T: PartialEq>(xs: &[T], x: T) -> bool { xs.contains(&x) }
 pub fn almide_rt_list_index_of<T: PartialEq>(xs: &[T], x: T) -> Option<i64> { xs.iter().position(|v| *v == x).map(|i| i as i64) }
 pub fn almide_rt_list_join(xs: &[AlmideString], sep: &str) -> AlmideString { let __almide_out: String = xs.join(sep); __almide_out.into() }
@@ -240,20 +239,6 @@ pub fn almide_rt_list_unique_by<T: Clone, K: PartialEq + 'static>(xs: Vec<T>, f:
         if !seen.contains_key(&k) { seen.insert(k, ()); result.push(x); }
     }
     result
-}
-pub fn almide_rt_list_shuffle<T>(mut xs: Vec<T>) -> Vec<T> {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
-    for i in (1..xs.len()).rev() {
-        let mut h = DefaultHasher::new();
-        seed.hash(&mut h);
-        i.hash(&mut h);
-        let j = (h.finish() as usize) % (i + 1);
-        xs.swap(i, j);
-        seed = seed.wrapping_add(1);
-    }
-    xs
 }
 // Same ALS-T6 guard as `almide_rt_list_windows`: n == 0 aborts with the
 // unified `Error: …` + exit 1 form (std's `windows(0)` panics — a raw Rust

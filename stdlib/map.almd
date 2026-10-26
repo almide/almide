@@ -19,11 +19,6 @@ fn new[K, V]() -> Map[K, V] = _
 @borrow_ref(key)
 fn get[K, V](m: Map[K, V], key: K) -> V? = _
 
-/// Value for key, or default when absent.
-@intrinsic("almide_rt_map_get_or")
-@borrow_ref(key)
-fn get_or[K, V](m: Map[K, V], key: K, default: V) -> V = _
-
 /// Copy with key -> value; an existing key is overwritten and keeps its position.
 @intrinsic("almide_rt_map_set")
 @reuse(m)
@@ -119,14 +114,6 @@ fn update[K, V](m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V] = _
 fn upsert[K, V](m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V] = _
 
 // ── mutable (in-place) ──
-/// In-place key -> value; an existing key is overwritten and keeps its position.
-@intrinsic("almide_rt_map_insert")
-fn insert[K, V](mut m: Map[K, V], key: K, value: V) -> Unit = _
-
-/// Removes key in place; no-op when absent.
-@intrinsic("almide_rt_map_delete")
-fn delete[K, V](mut m: Map[K, V], key: K) -> Unit = _
-
 /// Removes every entry of m in place.
 @intrinsic("almide_rt_map_clear")
 fn clear[K, V](mut m: Map[K, V]) -> Unit = _

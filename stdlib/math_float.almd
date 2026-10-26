@@ -7,43 +7,6 @@
 // list.min/max is the same on every leg (C-055). -0.0 and a NaN x take the instruction.
 fn math_sqrt(x: Float) -> Float = if prim.flt(x, 0.0) then prim.ffrombits(0x7FF8000000000000) else prim.fsqrt(x)
 
-// math.fmin/fmax are NaN-AWARE (return the non-NaN operand, unlike wasm f64.min/max which
-// propagate NaN). A TIE (±0 pair included) follows IEEE-754-2019 zero ordering (C-049,
-// ALS-T23): fmin(±0) = -0.0, fmax(±0) = +0.0, commutative — the bit OR/AND of the payloads.
-fn math_fmin(a: Float, b: Float) -> Float = {
-  let anan = prim.fne(a, a)
-  if anan then b
-  else {
-    let bnan = prim.fne(b, b)
-    if bnan then a
-    else {
-      let agtb = prim.fgt(a, b)
-      if agtb then b
-      else {
-        let bgta = prim.fgt(b, a)
-        if bgta then a else prim.ffrombits(prim.bor(prim.fbits(a), prim.fbits(b)))
-      }
-    }
-  }
-}
-
-fn math_fmax(a: Float, b: Float) -> Float = {
-  let anan = prim.fne(a, a)
-  if anan then b
-  else {
-    let bnan = prim.fne(b, b)
-    if bnan then a
-    else {
-      let altb = prim.flt(a, b)
-      if altb then b
-      else {
-        let blta = prim.flt(b, a)
-        if blta then a else prim.ffrombits(prim.band(prim.fbits(a), prim.fbits(b)))
-      }
-    }
-  }
-}
-
 // math.pi / math.e — the f64 constants (declared `= _` in stdlib/math.almd; self-hosted here).
 // The decimal literals are the shortest round-tripping forms of std::f64::consts::PI / E, so
 // they parse to the identical f64 bits (a float-literal tail materializes its real bits via the

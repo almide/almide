@@ -25,7 +25,7 @@ else if n > 4294967295 then none else some(n)
 // Only the sign bit can fail for Int → UInt64 (|Int64| ≤ UInt64::MAX), so just reject negatives.
 fn int_to_uint64_checked(n: Int) -> Int? = if n < 0 then none else some(n)
 
-// int.to_float32_checked(n) -> Some(n as f32) iff the value is exactly representable in f32 (the
+// int.__to_float32_checked(n) -> Some(n as f32) iff the value is exactly representable in f32 (the
 // widened f32 is n itself), else None. The conversions are INLINED as the prim floor (i2f32 =
 // `n as f32`, f32_2f = widen to f64, f2i = `as i64`) — avoids any cross/intra-file link.
 // Flat-arm materialized Option[Float32].

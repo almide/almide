@@ -1,33 +1,14 @@
-// json_path — SELF-HOSTED json path API (root/field/index/get_path/set_path/remove_path).
-// v0's JsonPath
-// is an opaque Rust enum (JpRoot/JpField/JpIndex) consumed ONLY by these fns, so the
-// v1 self-host owns the rep: a List[String] of segments, root-first — "f<name>" is a
-// field step, "i<int>" an index step (digits from int.to_string, so int.parse always
-// round-trips). The newtype eraser publishes Named("JsonPath") → List[String], making
-// user-side binds route the List[String] drop. get_path walks the PROVEN value.field /
-// value.as_array / generic list.get path, byte-matching almide_json_get_path: a field
-// step on a non-object → none; an index step wraps a NEGATIVE i from the end (len + i)
-// and misses out-of-range.
-fn json_path_root() -> List[String] = []
-
-fn json_path_field(path: List[String], name: String) -> List[String] = {
-  let seg = "f" + name
-  path + [seg]
-}
-
 fn json_path_index(path: List[String], i: Int) -> List[String] = {
   let seg = "i" + int.to_string(i)
   path + [seg]
 }
-
-fn json_path_get(j: Value, path: List[String]) -> Value? = json_path_get_go(j, path, 0)
 
 fn json_path_get_go(j: Value, path: List[String], k: Int) -> Value? =
   if k >= list.len(path) then some(j)
   else {
     let seg = list.get(path, k) ?? ""
     let rest = string.drop(seg, 1)
-    if string.take(seg, 1) == "f" then match value.field(j, rest) {
+    if string.take(seg, 1) == "f" then match value.__field(j, rest) {
       ok(v) => json_path_get_go(v, path, k + 1),
       err(_) => none,
     } else match int.parse(rest) {
@@ -122,12 +103,6 @@ else {
 // crates/almide-base/src/json_limits.rs's JSON_MAX_DEPTH.
 fn __jpath_max_depth() -> Int = 1000
 
-fn json_path_set(j: Value, path: List[String], nv: Value) -> Result[Value, String] = {
-  let steps = list.len(path)
-  if steps > __jpath_max_depth() or __json_nests_past(nv, __jpath_max_depth() - steps) then err(__jpath_depth_error())
-  else ok(json_path_set_go(j, path, 0, nv))
-}
-
 // json.parse's err text, spelled out; the test pins it to json_depth_error().
 fn __jpath_depth_error() -> String = "json: nesting deeper than 1000"
 
@@ -205,8 +180,6 @@ fn __jps_items(j: Value, path: List[String], k: Int, nv: Value, tgt: Int, i: Int
     } else __jps_items(j, path, k, nv, tgt, i + 1, n, acc + [ev])
   }
 
-fn json_path_remove(j: Value, path: List[String]) -> Value = json_path_rm_go(j, path, 0)
-
 fn json_path_rm_go(j: Value, path: List[String], k: Int) -> Value =
   if k >= list.len(path) then value.null()
   else {
@@ -260,25 +233,6 @@ fn __jpr_items(j: Value, path: List[String], k: Int, tgt: Int, last: Bool, i: In
   }
 
 // ── json.to_map ── SELF-HOSTED `json.to_map(j)` (#3700, C-380): an object's fields
-// folded into a Map[String, String] one `map.set` at a time, so a key the object
-// repeats keeps its first position and takes its last value; a Str field is
-// taken verbatim, any other value is its `value.stringify` text; a non-object
-// is none. Native answers from its intrinsic and wasm from its emitter
-// lowering (crates/almide-wasm/src/value.rs); this body is the one the
-// reference interpreter evaluates, the third vote on the C-380 fixture.
-//
-// The object walk reads value_core's block layout (tag 6 at @4, the slot
-// count at @8, (key, value) handle pairs from @12), as value_keys does.
-@implements("json.to_map")
-fn json_to_map(j: Value) -> Map[String, String]? =
-  if prim.load32(prim.handle(j) + 4) == 6 then some(__tomap_fold(
-    j,
-    0,
-    prim.load32(prim.handle(j) + 8) / 2,
-    map.new(),
-  ))
-  else none
-
 fn __tomap_fold(v: Value, i: Int, n: Int, acc: Map[String, String]) -> Map[String, String] =
   if i >= n then acc
   else {
@@ -290,7 +244,7 @@ fn __tomap_fold(v: Value, i: Int, n: Int, acc: Map[String, String]) -> Map[Strin
 
 fn __tomap_text(x: Value) -> String =
   if prim.load32(prim.handle(x) + 4) == 4 then prim.load_str(prim.handle(x) + 12)
-  else value.stringify(x)
+  else value.__stringify(x)
 
 // The declared repr (#4204): native's `Display` of its JsonPath enum — `$`,
 // then `.name` per field step and `[i]` per index step.

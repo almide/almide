@@ -485,7 +485,7 @@ fn __jp_object(base: Int, len: Int, p0: Int, acc0: List[(String, Value)], depth:
           if map.contains(seen, k) then {
             error = __jp_at("json: duplicate key", base, p)
           } else {
-            map.insert(seen, k, 0)
+            seen = map.set(seen, k, 0)
             let c = __jp_ws(base, len, kp)
             if c >= len then {
               error = "unexpected end of input"
