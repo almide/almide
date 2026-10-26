@@ -6,6 +6,7 @@ use almide_base::intern::{Sym, sym};
 use super::LowerCtx;
 use super::derive_codec::{
     auto_derive_encode, auto_derive_decode, auto_derive_decode_strict, CodecWk,
+    auto_derive_record_strict, auto_derive_variant_strict,
     auto_derive_variant_encode, auto_derive_variant_decode,
     derive_container_helpers,
 };
@@ -141,11 +142,19 @@ fn derive_codec(
     let mut seen = std::collections::HashSet::new();
     let ctx_env = ctx.env;
     {
+        // A type derives `Decode` when its protocol closure holds it; keyed
+        // leniently (bare or qualified), like the derive-field checks.
+        let strict_types = |n: Sym| {
+            let bare = n.as_str().rsplit('.').next().unwrap_or(n.as_str());
+            [n, sym(bare)].iter().filter_map(|k| ctx_env.type_protocols.get(k)).flatten()
+                .any(|p| crate::canonicalize::protocols::codec_directions(&[*p]).1)
+        };
         let mut wk = CodecWk {
             vt: &mut ctx.var_table,
             type_name: td.name.as_str(),
             out: &mut workers,
             seen: &mut seen,
+            strict_types: &strict_types,
         };
         match (fields, &td.kind) {
             (Some(fields), _) => {
@@ -157,8 +166,13 @@ fn derive_codec(
                 if wants("decode") {
                     out.push(auto_derive_decode(&mut wk, type_ty, fields));
                 }
-                if wants(crate::canonicalize::protocols::RECORD_DECODE_METHOD) {
-                    out.push(auto_derive_decode_strict(&mut wk, type_ty, fields));
+                // C-436: the strict walk exists whenever `decode` does, so an
+                // enclosing type's strict decode can enter this one.
+                if dirs.decode {
+                    out.push(auto_derive_record_strict(&mut wk, fields));
+                }
+                if wants(crate::canonicalize::protocols::STRICT_DECODE_METHOD) {
+                    out.push(auto_derive_decode_strict(&mut wk, type_ty));
                 }
             }
             (None, IrTypeDeclKind::Variant { cases, .. }) => {
@@ -167,6 +181,12 @@ fn derive_codec(
                 }
                 if wants("decode") {
                     out.push(auto_derive_variant_decode(&mut wk, type_ty, cases));
+                }
+                if dirs.decode {
+                    out.push(auto_derive_variant_strict(&mut wk, cases));
+                }
+                if wants(crate::canonicalize::protocols::STRICT_DECODE_METHOD) {
+                    out.push(auto_derive_decode_strict(&mut wk, type_ty));
                 }
             }
             (None, _) => {}

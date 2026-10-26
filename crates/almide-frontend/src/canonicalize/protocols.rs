@@ -210,6 +210,7 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         methods: |s, v| vec![
             method("encode", &[("v", s)], v.clone()),
             method("decode", &[("v", v)], Ty::result(s.clone(), Ty::String)),
+            method(STRICT_DECODE_METHOD, &[("v", v)], Ty::result(s.clone(), Ty::String)),
         ],
         conformers: &[],
         derivable: true,
@@ -217,11 +218,15 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
     // Encode: fn encode(v: Self) -> Value — the type is written out.
     BuiltinProtocol { name: "Encode", methods: |s, v| vec![method("encode", &[("v", s)], v.clone())], conformers: &[], derivable: true },
     // Decode: fn decode(v: Value) -> Result[Self, String] — the type is read
-    // from input. A `: Decode` type that is not also `Encode` is an INPUT type:
-    // every field of it is input (row 22, E110).
+    // from input — and its strict twin, which refuses a key outside the type
+    // at every depth. A `: Decode` type that is not also `Encode` is an INPUT
+    // type: every field of it is input (row 22, E110).
     BuiltinProtocol {
         name: "Decode",
-        methods: |s, v| vec![method("decode", &[("v", v)], Ty::result(s.clone(), Ty::String))],
+        methods: |s, v| vec![
+            method("decode", &[("v", v)], Ty::result(s.clone(), Ty::String)),
+            method(STRICT_DECODE_METHOD, &[("v", v)], Ty::result(s.clone(), Ty::String)),
+        ],
         conformers: &[],
         derivable: true,
     },
@@ -261,14 +266,12 @@ pub fn builtin_protocol(name: &str) -> Option<&'static BuiltinProtocol> {
 pub const PROTOCOL_PARTS: &[(&str, &[&str])] = &[("Codec", &["Encode", "Decode"])];
 
 /// The direction protocols a derive writes code for: `Encode` derives
-/// `encode`; `Decode` derives `decode` and, for a record, `decode_strict`
-/// (the decode that refuses a key outside the record's decoded fields).
+/// `encode`; `Decode` derives `decode` and `decode_strict` (the decode that
+/// refuses a key outside the type, at every depth — C-429, C-436).
 pub const ENCODE_PROTOCOL: &str = "Encode";
 pub const DECODE_PROTOCOL: &str = "Decode";
-/// The derived method a record conforming to `Decode` has beyond the
-/// protocol's own requirement. Records only: a variant's wire form is a tag
-/// and a payload, with no field set to hold keys to.
-pub const RECORD_DECODE_METHOD: &str = "decode_strict";
+/// `Decode`'s strict requirement, derived for records and variants alike.
+pub const STRICT_DECODE_METHOD: &str = "decode_strict";
 
 /// `name` and every protocol it is composed of (`Codec` → Codec, Encode,
 /// Decode). A protocol with no parts is just itself.

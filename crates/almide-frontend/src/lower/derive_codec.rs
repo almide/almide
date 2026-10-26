@@ -240,6 +240,9 @@ pub(super) struct CodecWk<'a> {
     pub type_name: &'a str,
     pub out: &'a mut Vec<IrFunction>,
     pub seen: &'a mut std::collections::HashSet<String>,
+    /// Does the named type derive `Decode` — so it has a `T.__strict`
+    /// walk the strict decode of an enclosing type enters (C-436)?
+    pub strict_types: &'a dyn Fn(almide_base::intern::Sym) -> bool,
 }
 
 fn e_(kind: IrExprKind, ty: Ty) -> IrExpr {
@@ -780,6 +783,7 @@ pub(super) fn decode_option_field_inline(wk: &mut CodecWk, payload: IrExpr, key:
 }
 
 include!("derive_codec_decode.rs");
+include!("derive_codec_strict.rs");
 
 include!("derive_codec_variant.rs");
 include!("derive_codec_arity.rs");
