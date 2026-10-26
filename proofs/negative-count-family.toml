@@ -300,86 +300,6 @@ slot = "matrix.slice_rows.end"
 class = "bound"
 probe = 'show_m(matrix.slice_rows(matrix.ones(3, 1), 0, N))'
 
-[[cell]]
-slot = "bytes.get_u16_le_array.count"
-class = "count"
-probe = 'show_oa(bytes.get_u16_le_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_u16_be_array.count"
-class = "count"
-probe = 'show_oa(bytes.get_u16_be_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_i16_le_array.count"
-class = "count"
-probe = 'show_oa(bytes.get_i16_le_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_i16_be_array.count"
-class = "count"
-probe = 'show_oa(bytes.get_i16_be_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_u32_le_array.count"
-class = "count"
-probe = 'show_oa(bytes.get_u32_le_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_u32_be_array.count"
-class = "count"
-probe = 'show_oa(bytes.get_u32_be_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_i32_le_array.count"
-class = "count"
-probe = 'show_oa(bytes.get_i32_le_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_i32_be_array.count"
-class = "count"
-probe = 'show_oa(bytes.get_i32_be_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_i64_le_array.count"
-class = "count"
-probe = 'show_oa(bytes.get_i64_le_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_i64_be_array.count"
-class = "count"
-probe = 'show_oa(bytes.get_i64_be_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_f32_le_array.count"
-class = "count"
-probe = 'show_of(bytes.get_f32_le_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_f32_be_array.count"
-class = "count"
-probe = 'show_of(bytes.get_f32_be_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_f64_le_array.count"
-class = "count"
-probe = 'show_of(bytes.get_f64_le_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_f64_be_array.count"
-class = "count"
-probe = 'show_of(bytes.get_f64_be_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_f16_le_array.count"
-class = "count"
-probe = 'show_of(bytes.get_f16_le_array(bytes.zeros(16), 0, N))'
-
-[[cell]]
-slot = "bytes.get_f16_be_array.count"
-class = "count"
-probe = 'show_of(bytes.get_f16_be_array(bytes.zeros(16), 0, N))'
-
 [outside]
 # index: an element index: out of range (a negative one included) is none, the default, a no-op or an append, never a clamp to 0
 index = [
@@ -555,10 +475,26 @@ value = [
   "bytes.put_i64_be.x",
   "bytes.intersperse.sep",
 ]
-# checked: a refused input answers none or err rather than being clamped (byte_slice, next_bytes)
+# checked: a checked reader that answers none unless its whole window fits (string.byte_slice, bytes.next_bytes, bytes.get_*_array): a negative count or offset is a window that does not fit, so the answer is none, never a partial or a whole read
 checked = [
   "string.byte_slice.start",
   "string.byte_slice.end",
+  "bytes.get_u16_le_array.count",
+  "bytes.get_u16_be_array.count",
+  "bytes.get_i16_le_array.count",
+  "bytes.get_i16_be_array.count",
+  "bytes.get_u32_le_array.count",
+  "bytes.get_u32_be_array.count",
+  "bytes.get_i32_le_array.count",
+  "bytes.get_i32_be_array.count",
+  "bytes.get_i64_le_array.count",
+  "bytes.get_i64_be_array.count",
+  "bytes.get_f32_le_array.count",
+  "bytes.get_f32_be_array.count",
+  "bytes.get_f64_le_array.count",
+  "bytes.get_f64_be_array.count",
+  "bytes.get_f16_le_array.count",
+  "bytes.get_f16_be_array.count",
   "bytes.next_bytes.n",
 ]
 # raw-memory: a raw-pointer length under `import ffi`: outside the memory-safety guarantee, where the caller promises the length
