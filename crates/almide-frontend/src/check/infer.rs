@@ -50,6 +50,17 @@ impl Checker {
         if let Some(span) = expr.span {
             self.current_span = Some(span);
         }
+        // #4237: a bare constructor word (`ok`, `err`, `some`, `none`) names
+        // a binding of that name when one is in scope — a record pattern's
+        // shorthand field `{ ok }` binds `ok`, as a backtick `ok` binding does —
+        // so the innermost binding shadows the constructor, as every other
+        // name in scope does. Rewritten to the name here, before its type is
+        // recorded, so the lowering resolves the same binding.
+        if let Some(word) = expr.bare_ctor_word()
+            && self.env.lookup_var(word).is_some()
+        {
+            expr.kind = ExprKind::Ident { name: almide_base::intern::sym(word) };
+        }
         // #626: register a candidate for any int literal that overflows i64. The
         // actual range error is decided post-solve against context (a wider
         // annotation or unary negation may make it valid) — see
