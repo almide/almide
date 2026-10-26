@@ -33,8 +33,17 @@ test "everything after -- is positional, a second -- included" {
       "-d",
       "--",
       "x"
-    ]),
+    ], []),
     ["in.txt", "-d", "--", "x"],
   )
-  assert_eq(args.__positional(["--out", "r.txt", "in.txt"]), ["r.txt", "in.txt"])
+  // with no option named, a value stays an ordinary argument (#4144)
+  assert_eq(args.__positional(["--out", "r.txt", "in.txt"], []), ["r.txt", "in.txt"])
+}
+
+test "the value of a named option is not positional (#4144)" {
+  assert_eq(args.__positional(["--out", "r.txt", "in.txt"], ["out"]), ["in.txt"])
+  assert_eq(args.__positional(["in.txt", "--out", "r.txt", "b"], ["out"]), ["in.txt", "b"])
+  assert_eq(args.__positional(["--dry-run", "in.txt"], ["out"]), ["in.txt"])
+  assert_eq(args.__positional(["--out=r.txt", "in.txt"], ["out"]), ["in.txt"])
+  assert_eq(args.__positional(["--", "--out", "r.txt"], ["out"]), ["--out", "r.txt"])
 }
