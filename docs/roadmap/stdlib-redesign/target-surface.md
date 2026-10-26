@@ -548,7 +548,7 @@
 | `cwd` | `effect fn env.cwd() -> String` |  |  |
 | `get` | `effect fn env.get(name: String) -> String?` |  | R-env-01、R-env-03 |
 | `os` | `fn env.os() -> String` |  |  |
-| `remove` | `effect fn env.remove(name: String) -> Unit` | 新規 | R-env-02 |
+| `remove` | `effect fn env.remove(name: String) -> Result[Unit, String]` | 新規 | R-env-02 |
 | `set` | `effect fn env.set(name: String, value: String) -> Unit` |  |  |
 | `sleep_ms` | `effect fn env.sleep_ms(ms: Int) -> Unit` |  | R-env-01 |
 | `vars` | `effect fn env.vars() -> Map[String, String]` | 新規 | R-env-02 |
