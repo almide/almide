@@ -44,9 +44,7 @@ effect fn main() -> Unit = {
   println(show(process.kill(process.pid(), 32)) |> string.replace(int.to_string(process.pid()), "<pid>"))
   println("kill(self, 0): ${show(process.kill(process.pid(), 0))}")
   // A background sleeper, orphaned to init so the system reaps it once killed.
-  let child = int.parse(
-    process.exec("/bin/sh", ["-c", "sleep 5 >/dev/null 2>&1 & printf %s $!"])!,
-  ) ?? 0
+  let child = int.parse(process.exec("/bin/sh", ["-c", "sleep 5 >/dev/null 2>&1 & printf %s $!"])!) ?? 0
   println("kill(child, 15): ${show(process.kill(child, 15))}")
   process.sleep(300)
   println("after kill: ${show(process.kill(child, 0))}" |> string.replace(int.to_string(child), "<pid>"))

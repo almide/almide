@@ -12,29 +12,93 @@ fn lowest() -> Int = 0 - 9223372036854775807 - 1
 
 fn show(xs: List[Int]) -> String = "[" + list.join(list.map(xs, (x) => int.to_string(x)), ",") + "]"
 
-fn row(name: String, a: String, b: String, c: String) -> Unit =
-  println(name + ": " + a + " " + b + " " + c + (if a == b and b == c then " same" else " DIFFERENT"))
+fn row(name: String, a: String, b: String, c: String) -> Unit = println(name + ": " + a + " " + b + " " + c + (if a == b and b == c then " same" else " DIFFERENT"))
 
 fn main() -> Unit = {
   let xs = [10, 20, 30]
-  row("list.take", show(list.take(xs, 0)), show(list.take(xs, neg(1))), show(list.take(xs, lowest())))
-  row("list.drop", show(list.drop(xs, 0)), show(list.drop(xs, neg(1))), show(list.drop(xs, lowest())))
-  row("list.take_end", show(list.take_end(xs, 0)), show(list.take_end(xs, neg(1))), show(list.take_end(xs, lowest())))
-  row("list.drop_end", show(list.drop_end(xs, 0)), show(list.drop_end(xs, neg(1))), show(list.drop_end(xs, lowest())))
-  row("list.slice start", show(list.slice(xs, 0, 2)), show(list.slice(xs, neg(2), 2)), show(list.slice(xs, lowest(), 2)))
-  row("list.slice end", show(list.slice(xs, 0, 0)), show(list.slice(xs, 0, neg(1))), show(list.slice(xs, 0, lowest())))
+  row(
+    "list.take",
+    show(list.take(xs, 0)),
+    show(list.take(xs, neg(1))),
+    show(list.take(xs, lowest())),
+  )
+  row(
+    "list.drop",
+    show(list.drop(xs, 0)),
+    show(list.drop(xs, neg(1))),
+    show(list.drop(xs, lowest())),
+  )
+  row(
+    "list.take_end",
+    show(list.take_end(xs, 0)),
+    show(list.take_end(xs, neg(1))),
+    show(list.take_end(xs, lowest())),
+  )
+  row(
+    "list.drop_end",
+    show(list.drop_end(xs, 0)),
+    show(list.drop_end(xs, neg(1))),
+    show(list.drop_end(xs, lowest())),
+  )
+  row(
+    "list.slice start",
+    show(list.slice(xs, 0, 2)),
+    show(list.slice(xs, neg(2), 2)),
+    show(list.slice(xs, lowest(), 2)),
+  )
+  row(
+    "list.slice end",
+    show(list.slice(xs, 0, 0)),
+    show(list.slice(xs, 0, neg(1))),
+    show(list.slice(xs, 0, lowest())),
+  )
   let ss = ["a", "b", "c"]
-  row("list.take str", list.join(list.take(ss, 0), ","), list.join(list.take(ss, neg(1)), ","), list.join(list.take(ss, lowest()), ","))
-  row("list.drop str", list.join(list.drop(ss, 0), ","), list.join(list.drop(ss, neg(1)), ","), list.join(list.drop(ss, lowest()), ","))
-  row("list.slice str", list.join(list.slice(ss, 0, 2), ","), list.join(list.slice(ss, neg(1), 2), ","), list.join(list.slice(ss, lowest(), 2), ","))
+  row(
+    "list.take str",
+    list.join(list.take(ss, 0), ","),
+    list.join(list.take(ss, neg(1)), ","),
+    list.join(list.take(ss, lowest()), ","),
+  )
+  row(
+    "list.drop str",
+    list.join(list.drop(ss, 0), ","),
+    list.join(list.drop(ss, neg(1)), ","),
+    list.join(list.drop(ss, lowest()), ","),
+  )
+  row(
+    "list.slice str",
+    list.join(list.slice(ss, 0, 2), ","),
+    list.join(list.slice(ss, neg(1), 2), ","),
+    list.join(list.slice(ss, lowest(), 2), ","),
+  )
   let s = "aéc"
   row("string.take", string.take(s, 0), string.take(s, neg(1)), string.take(s, lowest()))
   row("string.drop", string.drop(s, 0), string.drop(s, neg(1)), string.drop(s, lowest()))
-  row("string.take_end", string.take_end(s, 0), string.take_end(s, neg(1)), string.take_end(s, lowest()))
-  row("string.drop_end", string.drop_end(s, 0), string.drop_end(s, neg(1)), string.drop_end(s, lowest()))
+  row(
+    "string.take_end",
+    string.take_end(s, 0),
+    string.take_end(s, neg(1)),
+    string.take_end(s, lowest()),
+  )
+  row(
+    "string.drop_end",
+    string.drop_end(s, 0),
+    string.drop_end(s, neg(1)),
+    string.drop_end(s, lowest()),
+  )
   let b = bytes.from_list([1, 2, 3])
-  row("bytes.slice start", show(bytes.to_list(bytes.slice(b, 0, 2))), show(bytes.to_list(bytes.slice(b, neg(1), 2))), show(bytes.to_list(bytes.slice(b, lowest(), 2))))
-  row("bytes.slice end", show(bytes.to_list(bytes.slice(b, 0, 0))), show(bytes.to_list(bytes.slice(b, 0, neg(1)))), show(bytes.to_list(bytes.slice(b, 0, lowest()))))
+  row(
+    "bytes.slice start",
+    show(bytes.to_list(bytes.slice(b, 0, 2))),
+    show(bytes.to_list(bytes.slice(b, neg(1), 2))),
+    show(bytes.to_list(bytes.slice(b, lowest(), 2))),
+  )
+  row(
+    "bytes.slice end",
+    show(bytes.to_list(bytes.slice(b, 0, 0))),
+    show(bytes.to_list(bytes.slice(b, 0, neg(1)))),
+    show(bytes.to_list(bytes.slice(b, 0, lowest()))),
+  )
   // The cap a request cannot lift: the first `limit` rows, whatever limit says.
   let limit = int.parse("-1") ?? 2
   println("page: " + show(list.take([1, 2, 3, 4, 5], limit)))
