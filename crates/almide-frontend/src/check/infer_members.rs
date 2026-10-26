@@ -42,6 +42,10 @@ impl Checker {
     /// field read, a literal) is refused and the module's own fns named.
     pub(crate) fn reject_foreign_opaque_record(&mut self, ty: &Ty, doing: &str) {
         let Ty::Named(n, _) = ty else { return };
+        // The type it NAMES, not its spelling: `type Mine = Secret[Int]` (an
+        // alias at any depth, any instantiation, in any module) is the
+        // opaque type itself, so the boundary reads through every alias link.
+        let n = &self.opaque_check_target(*n);
         let bare = n.as_str().rsplit('.').next().unwrap_or(n.as_str());
         let Some(owner) = self.env.opaque_records.get(&sym(bare)).copied() else { return };
         // Only the bundled module's own type: its bare key or `owner.T`. A user
@@ -63,6 +67,20 @@ impl Checker {
             format!("'{}' is opaque: build and read it with the `{}` module's fns (`{}.new`, `{}.reveal`)", bare, owner, owner, owner),
             format!("opaque type {}", bare),
         ).with_code("E033"));
+    }
+
+    /// The declaration a type name finally denotes: follows transparent alias
+    /// links (`type A = B[..]`) whatever their generic arguments, stopping at
+    /// a self-named newtype identity or a non-alias declaration.
+    fn opaque_check_target(&self, n: Sym) -> Sym {
+        let mut cur = n;
+        for _ in 0..16 {
+            match self.env.types.get(&cur) {
+                Some(Ty::Named(next, _)) if *next != cur => cur = *next,
+                _ => break,
+            }
+        }
+        cur
     }
 
     /// Resolve `mod.name` where `mod` names a module rather than a value.
