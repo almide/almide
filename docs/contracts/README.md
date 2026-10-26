@@ -473,4 +473,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-435 | `Codec` is `Encode + Decode`: a `: Decode` type derives only `decode` (+ a record's `decode_strict`), a `: Encode` type only `encode`, and an input type skips no field | 0.69.0 | active | fixture | 1 |
 | C-436 | `http.decode_json[T](req)` decodes a request body only into an input type: a `Codec` T is E110, and a key outside T is `400 Bad Request: unknown key '<k>'` | 0.69.0 | active | fixture | 1 |
 | C-437 | A process.start child neither waited on nor stopped is stopped when the program exits by main's return, process.exit or an effect error | 0.69.0 | active | fixture | 0 |
+| C-439 | env.vars lists the environment keyed and ordered by name with the program's own set and remove applied, and env.remove unsets a name or refuses it as env.set does, with the same bytes on every leg | 0.69.0 | active | fixture | 1 |
 
