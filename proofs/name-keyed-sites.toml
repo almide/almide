@@ -200,9 +200,15 @@ class = "legacy"
 names = 15
 
 [[site]]
+id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_FLOAT_COMPUTE_CALLS::table"
+class = "justified"
+names = 3
+why = "ALS-B10 names which Float calls compute rather than observe; the math.* computations moved to float.* (R-math-01) and no stdlib attribute declares compute-vs-observe yet"
+
+[[site]]
 id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_PURE_MODULES::table"
 class = "legacy"
-names = 32
+names = 31
 
 [[site]]
 id = "crates/almide-frontend/src/check/bounded.rs::BOUNDED_SIZED_CTORS::table"
@@ -267,7 +273,7 @@ names = 41
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::MODULE_DESCRIPTIONS::table"
 class = "legacy"
-names = 48
+names = 49
 
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::comparison_operator_of::or-pattern"
@@ -372,7 +378,7 @@ names = 5
 [[site]]
 id = "crates/almide-ir/src/effect.rs::STDLIB_MODULE_EFFECTS::table"
 class = "legacy"
-names = 48
+names = 49
 
 [[site]]
 id = "crates/almide-ir/src/fusion.rs::EFFECT_MODULES::table"
@@ -500,11 +506,6 @@ class = "legacy"
 names = 3
 
 [[site]]
-id = "crates/almide-mir/src/lower/mod_d.rs::is_identity_int_widening::or-pattern"
-class = "legacy"
-names = 9
-
-[[site]]
 id = "crates/almide-mir/src/lower/mod_p3_b.rs::BYTES_INPLACE_APPENDS::table"
 class = "legacy"
 names = 26
@@ -520,11 +521,6 @@ class = "legacy"
 names = 4
 
 [[site]]
-id = "crates/almide-mir/src/lower/mod_p3_b.rs::rewrite_map_mutation::or-pattern"
-class = "legacy"
-names = 2
-
-[[site]]
 id = "crates/almide-mir/src/lower/mod_p3_b.rs::rewrite_push_concat::or-pattern"
 class = "legacy"
 names = 2
@@ -537,7 +533,7 @@ names = 12
 [[site]]
 id = "crates/almide-mir/src/lower/mod_p4.rs::is_self_host_option_module_fn::or-pattern"
 class = "legacy"
-names = 40
+names = 35
 
 [[site]]
 id = "crates/almide-mir/src/lower/mod_p4_c.rs::random_call_name::or-pattern"
@@ -615,11 +611,6 @@ class = "legacy"
 names = 4
 
 [[site]]
-id = "crates/almide-mir/src/lower/mod_p4_e.rs::map_heap_val_nested_route::or-pattern"
-class = "legacy"
-names = 2
-
-[[site]]
 id = "crates/almide-mir/src/lower/mod_p4_e.rs::map_variant_heap_key::or-pattern"
 class = "legacy"
 names = 19
@@ -653,11 +644,6 @@ names = 6
 id = "crates/almide-mir/src/lower/mod_p4_f.rs::list_call_name_ordering::or-pattern"
 class = "legacy"
 names = 3
-
-[[site]]
-id = "crates/almide-mir/src/lower/mod_p4_f.rs::list_call_name_shuffle_choice::or-pattern"
-class = "legacy"
-names = 2
 
 [[site]]
 id = "crates/almide-mir/src/lower/mod_p4_f.rs::list_call_name_str_elem_combinators::or-pattern"
@@ -747,22 +733,22 @@ names = 1766
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
 class = "legacy"
-names = 26
+names = 25
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::BUNDLED_MODULES::table"
 class = "legacy"
-names = 48
+names = 49
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::RUNTIME_BACKED_TYPES::table"
 class = "legacy"
-names = 2
+names = 1
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::STDLIB_MODULES::table"
 class = "legacy"
-names = 44
+names = 43
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::STDLIB_OWNED_TYPES::table"
@@ -782,7 +768,7 @@ names = 16
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_ambiguous_container::table"
 class = "legacy"
-names = 9
+names = 8
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_ambiguous_string_list::or-pattern"
@@ -803,11 +789,6 @@ names = 102
 id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_exclusive::table"
 class = "legacy"
 names = 5
-
-[[site]]
-id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_sized_numeric::or-pattern"
-class = "legacy"
-names = 11
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::resolve_ufcs_sized_numeric::table"
@@ -843,11 +824,6 @@ names = 1
 id = "crates/almide-wasm/src/bytes.rs::lower_bytes_call::or-pattern"
 class = "legacy"
 names = 19
-
-[[site]]
-id = "crates/almide-wasm/src/bytes_append.rs::shape::or-pattern"
-class = "legacy"
-names = 2
 
 [[site]]
 id = "crates/almide-wasm/src/calls.rs::resolve_qualified::VERIFIED::table"
@@ -973,11 +949,6 @@ names = 4
 id = "crates/almide-wasm/src/prim.rs::lower_prim_float_b::or-pattern"
 class = "legacy"
 names = 6
-
-[[site]]
-id = "crates/almide-wasm/src/random.rs::lower_random_call::or-pattern"
-class = "legacy"
-names = 2
 
 [[site]]
 id = "crates/almide-wasm/src/region.rs::SCALAR_MODULES::table"
@@ -1130,11 +1101,6 @@ class = "legacy"
 names = 4
 
 [[site]]
-id = "src/wasm_leg.rs::link_self_host::scan_expr::or-chain"
-class = "legacy"
-names = 2
-
-[[site]]
 id = "crates/almide-ir/src/meter_plan.rs::INLINED_CALLBACK_MODULES::table"
 class = "justified"
 names = 7
@@ -1193,12 +1159,6 @@ id = "src/cli/fs_scope_twin.rs::rewrite::table"
 class = "justified"
 names = 4
 why = "These are Rust std::path::Path method names (exists / is_dir / is_file / is_symlink) rewritten in the native fs runtime source text to the scoped twin's descriptor-relative methods, not Almide stdlib functions: the list is the set of std calls the twin replaces, so it lives beside the textual rewrite that reads it."
-
-[[site]]
-id = "src/wasm_leg.rs::link_self_host::scan_expr::or-pattern"
-class = "justified"
-names = 3
-why = "A link-time dependency of the structural leg's lowering, not a property of the stdlib functions: value.object, value.to_camel_case and value.to_snake_case lower to code that calls the linked `__vu_fold_pairs` (C-401), which is reachable only through value.pick, so the linker has to be told to pull that surface in, beside the sibling float.to_string / string.from_bytes / testing.assert_contains rows of the same scan."
 
 [[site]]
 id = "crates/almide-codegen/src/walker/expressions.rs::render_expr_map_access::table"
