@@ -63,8 +63,15 @@ fn ty(t: &Value) -> String {
     }
 }
 
-/// `name` -> `name(params) -> ret` for every public fn of `module`.
+/// `name` -> `name(params) -> ret` for every public fn of `module`, read once
+/// per process so the tests below judge one surface.
 fn declared(module: &str) -> BTreeMap<String, String> {
+    static CACHE: std::sync::Mutex<BTreeMap<String, BTreeMap<String, String>>> = std::sync::Mutex::new(BTreeMap::new());
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    cache.entry(module.to_string()).or_insert_with(|| read_surface(module)).clone()
+}
+
+fn read_surface(module: &str) -> BTreeMap<String, String> {
     let o = Command::new(env!("CARGO_BIN_EXE_almide"))
         .args(["compile", module, "--json"])
         .current_dir(root())
@@ -211,7 +218,8 @@ fn the_verify_cells_compare_in_constant_time() {
 #[test]
 fn control_the_gates_fail_on_each_forged_shape() {
     let (hash, bytes, string) = (declared("hash"), declared("bytes"), declared("string"));
-    assert!(family_problems(&hash, &bytes, &string).is_empty(), "control baseline must be clean");
+    let base = family_problems(&hash, &bytes, &string);
+    assert!(base.is_empty(), "control baseline must be clean:\n{}", base.join("\n"));
     let fails = |h: &BTreeMap<String, String>, s: &BTreeMap<String, String>, needle: &str| {
         family_problems(h, &bytes, s).iter().any(|p| p.contains(needle))
     };
@@ -250,7 +258,8 @@ fn control_the_gates_fail_on_each_forged_shape() {
     assert!(fails(&pointwise, &string, "outside the HMAC matrix"), "control: a point-wise extra cell must fail");
 
     let src = stdlib("hash.almd");
-    assert!(verify_problems(&src).is_empty(), "control baseline must be clean");
+    let base = verify_problems(&src);
+    assert!(base.is_empty(), "control baseline must be clean:\n{}", base.join("\n"));
     let eq = src.replacen(
         "bytes.is_equal_constant_time(\n  secret.reveal(hmac_sha256(key, b)),\n  secret.reveal(tag),\n)",
         "secret.reveal(hmac_sha256(key, b)) == secret.reveal(tag)",
