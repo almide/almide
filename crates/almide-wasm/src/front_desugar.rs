@@ -48,10 +48,21 @@
 //!
 //! 5. A `match` that takes `string.split_once`'s pair apart in place
 //! never builds the pair (split_match.rs).
+//!
+//! 6. `bytes.get(b, i) ?? d` with a plain Int fallback (a literal or a
+//! variable) reads the byte in place: `bytes.get` answers a fresh `some`
+//! cell, and in a decoder's or a checksum's per-byte loop that cell was an
+//! allocation and a free per byte. The fallback is evaluated whether or not
+//! the index is in range, which only a literal or a variable read allows.
+//!
+//!   bytes.get(b, i) ?? 0   =>   bytes.get#or(b, i, 0)
 
 #[path = "split_match.rs"]
 mod split_match;
 pub(crate) use split_match::{AT as SPLIT_AT, HEAD as SPLIT_HEAD, TAIL as SPLIT_TAIL};
+
+/// The in-place `bytes.get(b, i) ?? d` read (item 6): `(b, i, d)`, an Int.
+pub(crate) const BYTES_GET_OR: &str = "get#or";
 
 use almide_base::intern::sym;
 use almide_ir::visit_mut::{walk_expr_mut, IrMutVisitor};
@@ -134,6 +145,7 @@ impl IrMutVisitor for Rewriter<'_> {
         self.optional_chain(e);
         self.map_loop(e);
         self.matrix_op(e);
+        self.bytes_get_or(e);
         self.fan_arm_markers(e);
         *self.changed |= split_match::rewrite(self.vars, e);
     }
@@ -181,6 +193,22 @@ fn module_call(module: &str, func: &str, args: Vec<IrExpr>) -> IrExprKind {
 }
 
 impl Rewriter<'_> {
+    fn bytes_get_or(&mut self, e: &mut IrExpr) {
+        let IrExprKind::UnwrapOr { expr, fallback } = &mut e.kind else { return };
+        let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &mut expr.kind else { return };
+        if module.as_str() != "bytes" || func.as_str() != "get" || args.len() != 2 {
+            return;
+        }
+        if fallback.ty != Ty::Int || !matches!(fallback.kind, IrExprKind::LitInt { .. } | IrExprKind::Var { .. }) {
+            return;
+        }
+        let mut operands = std::mem::take(args);
+        operands.push(std::mem::take(&mut **fallback));
+        e.kind = module_call("bytes", BYTES_GET_OR, operands);
+        e.ty = Ty::Int;
+        *self.changed = true;
+    }
+
     fn fan_arm_markers(&mut self, e: &mut IrExpr) {
         let IrExprKind::Fan { exprs } = &mut e.kind else { return };
         for arm in exprs.iter_mut() {

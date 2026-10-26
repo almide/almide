@@ -94,6 +94,36 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(INT)))))
     }
 
+    /// `bytes.get(b, i) ?? d` read in place (front_desugar.rs item 6): the
+    /// byte, or `d` out of range, with no `some` cell. `d` is a literal or a
+    /// variable, so evaluating it on both paths is unobservable.
+    fn lower_bytes_get_or(&mut self, b: &IrExpr, i: &IrExpr, d: &IrExpr) -> ArmResult {
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
+        let bh = self.hold_i32()?;
+        self.f.instructions().local_set(bh);
+        self.lower_arg(i, Some(INT), ArgMode::Borrow)?;
+        let ih = self.hold_i64()?;
+        self.f.instructions().local_set(ih);
+        self.lower_arg(d, Some(INT), ArgMode::Borrow)?;
+        let hd = self.hold_i64()?;
+        self.f.instructions().local_set(hd);
+        self.bytes_room(bh, ih, 1);
+        let mut ins = self.f.instructions();
+        ins.if_(BlockType::Result(ValType::I64));
+        ins.local_get(bh)
+            .local_get(ih)
+            .i32_wrap_i64()
+            .i32_add()
+            .i32_load8_u(byte_at())
+            .i64_extend_i32_u();
+        ins.else_().local_get(hd).end();
+        let _ = ins;
+        self.release_i64();
+        self.release_i64();
+        self.release_i32();
+        Ok(Some(Lowered::scalar(INT)))
+    }
+
     fn lower_bytes_set_arm(&mut self, b: &IrExpr, idx: &IrExpr, v: &IrExpr) -> ArmResult {
         // `@reuse(b)` (#3577): a dying source is written in place; a live one
         // is copied first, as before.
@@ -416,6 +446,7 @@ impl Emitter<'_> {
                 self.lower_bytes_pair(func, a, b)
             }
             ("set" | "slice", [a, b, c]) => self.lower_bytes_triple(func, a, b, c),
+            (crate::emit::front_desugar::BYTES_GET_OR, [b, i, d]) => self.lower_bytes_get_or(b, i, d),
             ("fill", [b, v]) => self.lower_bytes_fill(b, v),
             ("clear", [b]) => self.lower_bytes_clear(b),
             // some(byte) / none (native b.get — usize-wrap: negative i
