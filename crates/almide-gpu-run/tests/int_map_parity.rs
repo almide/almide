@@ -60,8 +60,10 @@ fn gpu() -> Option<Gpu> {
     }
 }
 
-/// Run `entry` from `kernels` on both legs and compare.
-fn assert_parity(kernels: &str, entry: &str) {
+/// Run `entry` from `kernels` on both legs: `(inputs, cpu, gpu, wgsl)`, with
+/// `mutate` applied to the emitted kernel first. `None` when there is no
+/// adapter (and `ALMIDE_GPU_REQUIRED` is unset).
+fn both_legs(kernels: &str, entry: &str, mutate: impl Fn(String) -> String) -> Option<(Vec<i64>, Vec<i64>, Vec<i64>, String)> {
     let xs = inputs();
     let list = xs.iter().map(|x| almide_lit(*x)).collect::<Vec<_>>().join(", ");
     let src = format!("{kernels}\nfn main() -> Unit = {{\n  for x in [{list}] {{\n    println(int.to_string({entry}(x)))\n  }}\n}}\n");
@@ -70,12 +72,46 @@ fn assert_parity(kernels: &str, entry: &str) {
     assert_eq!(out.exit_code(), 0, "CPU leg failed: {}", out.stderr);
     let cpu: Vec<i64> = out.stdout.lines().map(|l| l.parse().expect("an Int line")).collect();
     assert_eq!(cpu.len(), xs.len());
-    let wgsl = int_map_kernel(&ir, entry).unwrap_or_else(|r| panic!("`{entry}` refused: {r}"));
-    let Some(gpu) = gpu() else { return };
+    let wgsl = mutate(int_map_kernel(&ir, entry).unwrap_or_else(|r| panic!("`{entry}` refused: {r}")));
+    let gpu = gpu()?;
     let dev = gpu.run_int_map(&wgsl, &xs).unwrap_or_else(|e| panic!("GPU leg failed: {e}\n{wgsl}"));
+    Some((xs, cpu, dev, wgsl))
+}
+
+/// Run `entry` from `kernels` on both legs and compare.
+fn assert_parity(kernels: &str, entry: &str) {
+    let Some((xs, cpu, dev, wgsl)) = both_legs(kernels, entry, |w| w) else { return };
     for (i, x) in xs.iter().enumerate() {
         assert_eq!(dev[i], cpu[i], "`{entry}({x})`: GPU {} vs CPU {}\n{wgsl}", dev[i], cpu[i]);
     }
+}
+
+/// The negative control: with `needle` in the kernel replaced by `broken`,
+/// the comparison above MUST see a difference — otherwise the parity tests
+/// pass for a reason they do not check.
+fn assert_mutant_caught(kernels: &str, entry: &str, needle: &str, broken: &str) {
+    let mutate = |w: String| {
+        assert!(w.contains(needle), "the mutation site `{needle}` is gone from the kernel");
+        w.replace(needle, broken)
+    };
+    let Some((_, cpu, dev, wgsl)) = both_legs(kernels, entry, mutate) else { return };
+    assert_ne!(dev, cpu, "the mutant `{needle}` -> `{broken}` was NOT caught\n{wgsl}");
+}
+
+#[test]
+fn a_kernel_that_drops_the_add_carry_is_caught() {
+    assert_mutant_caught("fn poly(x: Int) -> Int = x * x * 3 + x * 7 - 11", "poly", "select(0u, 1u, lo < a.x)", "0u");
+}
+
+#[test]
+fn a_kernel_that_drops_the_cross_terms_is_caught() {
+    assert_mutant_caught("fn poly(x: Int) -> Int = x * x * 3 + x * 7 - 11", "poly", "p.y + a.x * b.y + a.y * b.x", "p.y");
+}
+
+#[test]
+fn a_kernel_that_compares_the_high_word_unsigned_is_caught() {
+    let src = "fn sign(x: Int) -> Int = if x > 0 then 1 else if x < 0 then -1 else 0";
+    assert_mutant_caught(src, "sign", "bitcast<i32>(a.y) < bitcast<i32>(b.y)", "a.y < b.y");
 }
 
 #[test]
