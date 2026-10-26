@@ -11,6 +11,8 @@
 // a `let` annotation, a ctor bound to a name, a fn parameter, a fn result, a
 // `match` subject, an `==`, an interpolation and a list element. No auto-imported
 // stdlib variant type remains, so that half needs `import net`.
+import net
+
 type Endian = | LittleEndian | BigEndian
 
 fn host(a: IpAddr) -> String = match a {
