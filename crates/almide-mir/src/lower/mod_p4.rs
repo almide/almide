@@ -226,6 +226,10 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         }
         "string" => matches!(func, "index_of" | "last_index_of" | "codepoint" | "first" | "last" | "get" | "strip_prefix" | "strip_suffix"),
         "bytes" => matches!(func, "get" | "index_of"),
+        // matrix.get and the from_bytes_* loaders (C-282, C-341) are self-hosted
+        // (matrix_core / matrix_ext) through the ordinary some()/none ctor rails —
+        // a materialized Option a value-position `match` / `!` reads.
+        "matrix" => matches!(func, "get" | "from_bytes_f16_le" | "from_bytes_f32_le" | "from_bytes_f64_le"),
         // regex.find builds a materialized Option[String] via the self-hosted
         // engine's ordinary some()/none ctors (stdlib/regex_engine.almd) — a
         // `match` over the bound result EXECUTES.
