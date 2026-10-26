@@ -18,13 +18,25 @@ fn shape_of(src: &str, name: &str) -> AffineShape {
 #[test]
 fn a_scalar_body_is_affine_shaped() {
     let src = "fn add(a: Int, b: Int) -> Int = a + b\n";
-    assert!(shape_of(src, "add").is_affine());
+    let s = shape_of(src, "add");
+    assert!(s.is_affine());
+    assert!(!s.touches_heap, "{s:?}");
 }
 
 #[test]
 fn a_fresh_heap_value_used_once_is_affine_shaped() {
     let src = "fn make() -> List[Int] = [1, 2, 3]\n";
-    assert!(shape_of(src, "make").is_affine());
+    let s = shape_of(src, "make");
+    assert!(s.is_affine());
+    assert!(s.touches_heap, "{s:?}");
+}
+
+#[test]
+fn reading_a_borrowed_param_without_keeping_it_is_affine_shaped() {
+    let src = "fn size(xs: List[Int]) -> Int = list.len(xs)\n";
+    let s = shape_of(src, "size");
+    assert!(s.is_affine(), "{s:?}");
+    assert!(s.touches_heap, "{s:?}");
 }
 
 #[test]

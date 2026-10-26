@@ -6,9 +6,10 @@
 //! Each file is lowered alone (`program_affine_shapes(src, &[])`), so a file
 //! that imports a user module is a whole-program wall and is counted as such.
 //! Walled functions are reported, never classified. Output on stdout:
-//!   - one `AFFINE|PARAM|LOCAL|BOTH <file> <fn> param=<n> local=<n>` row per
+//!   - one `HEAPFREE|AFFINE|PARAM|LOCAL|BOTH <file> <fn> param=<n> local=<n>` row per
 //!     lowered function (`--rows`),
-//!   - the totals, and the share of affine-shaped functions among the lowered.
+//!   - the totals, and each share among the functions that touch the heap
+//!     (a heap-free body is affine trivially, so it is counted apart).
 
 use std::path::{Path, PathBuf};
 
@@ -30,6 +31,7 @@ struct Totals {
     files: usize,
     program_walls: usize,
     walled_fns: usize,
+    heap_free: usize,
     affine: usize,
     param_only: usize,
     local_only: usize,
@@ -55,6 +57,7 @@ fn main() {
         t.walled_fns += walled.len();
         for (name, s) in shapes {
             let kind = match (s.param_dups.is_empty(), s.local_dups.is_empty()) {
+                (true, true) if !s.touches_heap => { t.heap_free += 1; "HEAPFREE" }
                 (true, true) => { t.affine += 1; "AFFINE" }
                 (false, true) => { t.param_only += 1; "PARAM" }
                 (true, false) => { t.local_only += 1; "LOCAL" }
@@ -65,12 +68,14 @@ fn main() {
             }
         }
     }
-    let lowered = t.affine + t.param_only + t.local_only + t.both;
-    let pct = |n: usize| if lowered == 0 { 0.0 } else { 100.0 * n as f64 / lowered as f64 };
+    let heap = t.affine + t.param_only + t.local_only + t.both;
+    let pct = |n: usize| if heap == 0 { 0.0 } else { 100.0 * n as f64 / heap as f64 };
     println!("files            {}", t.files);
     println!("program walls    {}", t.program_walls);
     println!("walled fns       {}", t.walled_fns);
-    println!("lowered fns      {lowered}");
+    println!("lowered fns      {}", heap + t.heap_free);
+    println!("heap-free fns    {} (affine trivially; excluded below)", t.heap_free);
+    println!("heap fns         {heap} (the base of the shares below)");
     println!("affine-shaped    {} ({:.1}%)", t.affine, pct(t.affine));
     println!("param dups only  {} ({:.1}%)", t.param_only, pct(t.param_only));
     println!("local dups only  {} ({:.1}%)", t.local_only, pct(t.local_only));
