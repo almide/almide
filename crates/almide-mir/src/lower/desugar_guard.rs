@@ -564,7 +564,10 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
     impl IrMutVisitor for H<'_> {
         fn visit_expr_mut(&mut self, e: &mut IrExpr) {
             walk_expr_mut(self, e);
-            if absorb_unwrap_or_block_operand(e) || absorb_interp_block_parts(e, self.vt) {
+            if absorb_unwrap_or_block_operand(e)
+                || absorb_interp_block_parts(e, self.vt)
+                || absorb_block_scrutinee(e)
+            {
                 return;
             }
             let (IrExprKind::Call { args, .. } | IrExprKind::List { elements: args }) = &mut e.kind else { return };
@@ -678,6 +681,50 @@ pub fn hoist_block_call_args(program: &mut almide_ir::IrProgram) {
         S2.visit_expr_mut(&mut func.body);
         normalize_stmt_lists(&mut func.body, &mut *var_table);
     }
+}
+
+/// A BLOCK as the scrutinee of a `match` or the condition of an `if` absorbs
+/// the branch, as a block argument absorbs its call:
+///
+///   match { stmts; e } { arms }       ≡  { stmts; match e { arms } }
+///   if { stmts; c } then a else b     ≡  { stmts; if c then a else b }
+///
+/// — exact: the scrutinee / condition is evaluated before any arm, so its
+/// statements already ran first. The shape comes from the C-132 move-mode
+/// write-back (`almide_ir::mut_param`): a value-returning call with a `mut`
+/// param becomes `{ let (r, buf) = f(q); q = buf; r }`, so `match
+/// deque.pop_front(q) { … }` reached the lowering with a block scrutinee, which
+/// it walls ("call argument Block", #4080) — whenever the callee's body is in
+/// the program: a same-file fn, a user module, or a bundled module the file
+/// imports explicitly. An auto-imported one stayed a stdlib call the emitters
+/// mutate in place, so only the explicit import walled.
+fn absorb_block_scrutinee(e: &mut almide_ir::IrExpr) -> bool {
+    use almide_ir::{IrExpr, IrExprKind};
+    let scrutinee = match &mut e.kind {
+        IrExprKind::Match { subject, .. } => subject,
+        IrExprKind::If { cond, .. } => cond,
+        _ => return false,
+    };
+    let IrExprKind::Block { stmts, expr: Some(tail) } = &mut scrutinee.kind else {
+        return false;
+    };
+    if stmts.is_empty() {
+        return false;
+    }
+    let hoisted = std::mem::take(stmts);
+    let tail = (**tail).clone();
+    **scrutinee = tail;
+    let branch = std::mem::replace(
+        e,
+        IrExpr { kind: IrExprKind::Unit, ty: almide_lang::types::Ty::Unit, span: None, def_id: None },
+    );
+    *e = IrExpr {
+        ty: branch.ty.clone(),
+        span: branch.span.clone(),
+        def_id: branch.def_id,
+        kind: IrExprKind::Block { stmts: hoisted, expr: Some(Box::new(branch)) },
+    };
+    true
 }
 
 /// ASSERT-SUBJECT HOIST (a pre-lowering program pass, shared chain like the
