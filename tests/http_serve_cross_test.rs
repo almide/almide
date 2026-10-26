@@ -1062,7 +1062,7 @@ fn serve_peak_rss(aborts: usize) -> Option<u64> {
         return None;
     }
     let port = free_port();
-    let mut time = Command::new("/usr/bin/time")
+    let time = Command::new("/usr/bin/time")
         .arg(flag)
         .arg(almide_bin())
         .arg("run")
