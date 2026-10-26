@@ -1,0 +1,27 @@
+// math.choose answers a large n without looping min(k, n-k) times (#4212). Past
+// 64 steps it takes the odd-factorial form; the values are C(n, k) mod 2^64 read
+// as an Int, the first group checked against exact big-integer binomials.
+
+test "the odd-factorial form agrees with the exact binomial" {
+  assert_eq(math.choose(200, 64), 5355594734165852119)
+  assert_eq(math.choose(200, 65), 2975466241676598328)
+  assert_eq(math.choose(200, 66), -4814167821944420284)
+  assert_eq(math.choose(129, 64), 4664843208282895302)
+  assert_eq(math.choose(130, 65), -9117057657143761012)
+  assert_eq(math.choose(200, 100), 3674307795577560168)
+  assert_eq(math.choose(1000, 500), 2548782591045708352)
+  assert_eq(math.choose(4096, 2048), -5985950255819767226)
+  assert_eq(math.choose(100000, 50000), -8075374251427370432)
+  assert_eq(math.choose(99999, 33333), -8905625225981837772)
+  assert_eq(math.choose(200003, 77777), 7137577743407308800)
+  assert_eq(math.choose(1000000, 999900), 5450151844841398400)
+}
+
+test "a large n answers at once" {
+  assert_eq(math.choose(1000000000, 500000000), 3369881269350916096)
+  assert_eq(math.choose(1000000000000000000, 500000000000000000), 4175565779728596992)
+  assert_eq(math.choose(4611686018427387904, 2305843009213693952), 687113425221075526)
+  assert_eq(math.choose(9223372036854775807, 4611686018427387904), -8879815324244238045)
+  assert_eq(math.choose(9223372036854775807, 4611686018427387903), -8879815324244238045)
+  assert_eq(math.choose(9223372036854775807, 6917529027641081856), 319800811785195463)
+}
