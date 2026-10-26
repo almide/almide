@@ -496,6 +496,11 @@ fn render_expr_spread_record(ctx: &RenderContext, expr: &IrExpr) -> String {
     // param, a lazy global, a cross-module accessor read) arrives wrapped
     // in the `Clone` `BorrowLowering` spelled for it.
     let base_str = render_expr(ctx, base);
+    // #4242: no override is a copy of the base — the (owned) base value
+    // itself. The update form would render `T { , ..base }`.
+    if fields.is_empty() {
+        return base_str;
+    }
     let fields_str = fields.iter()
         .map(|(k, v)| format!("{}: {}", ctx.field_ident(k.as_str()), render_expr(ctx, v)))
         .collect::<Vec<_>>()
