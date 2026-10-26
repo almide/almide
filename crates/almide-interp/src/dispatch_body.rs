@@ -194,10 +194,20 @@ impl<'a> Interpreter<'a> {
         if let Some(d) = self.module_fns.get(&(module, func)).copied().filter(bodied) {
             return Some((d, true));
         }
-        let program_root = |d: &&almide_ir::IrFunction| {
-            self.fn_space.get(&(*d as *const almide_ir::IrFunction as usize)) == Some(&0)
+        // A flat-table fn another namespace owns never answers `module.func`:
+        // the entry program's (space 0), or ANOTHER loaded module's — a
+        // module's private `__` helper is flattened by its bare name, and
+        // bigint's `__trunc(x: BigInt)` answered mono's `int.__trunc` (the
+        // `S.__trunc` requirement of `bigint.from[S]` at S = Int) and read
+        // `.neg` off an Int. The module-identity class again (#1087–#1094).
+        let foreign = |d: &&almide_ir::IrFunction| {
+            match self.fn_space.get(&(*d as *const almide_ir::IrFunction as usize)) {
+                Some(0) => true,
+                Some(&space) => self.program.modules.get(space as usize - 1).is_some_and(|m| m.name != module),
+                None => false,
+            }
         };
-        if let Some(d) = self.fns.get(&func).copied().filter(bodied).filter(|d| !program_root(d)) {
+        if let Some(d) = self.fns.get(&func).copied().filter(bodied).filter(|d| !foreign(d)) {
             return Some((d, true));
         }
         // The registry's impl NAME is the pool's key, not a program-wide one:
@@ -209,7 +219,7 @@ impl<'a> Interpreter<'a> {
         // the entry program's own fn.
         let impl_name = crate::stdlib_pool::impl_fn(module, func)?;
         crate::stdlib_pool::body(impl_name)
-            .or_else(|| self.fns.get(&impl_name).copied().filter(|d| !program_root(d)))
+            .or_else(|| self.fns.get(&impl_name).copied().filter(|d| !foreign(d)))
             .filter(bodied)
             .map(|d| (d, false))
     }
