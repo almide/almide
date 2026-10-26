@@ -118,8 +118,7 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         // that function's, and the not-served fallback calls the same
         // function from this frame, so the call graph already counts it.
         74 => &[],
-        // A deliberate exit's mark (#4203): it answers nothing and reaches
-        // nothing; the exit that follows is the exit import's.
+        // A deliberate exit's mark (#4203): it answers and reaches nothing.
         76 => &[],
         _ => &[SENTINEL],
     }
