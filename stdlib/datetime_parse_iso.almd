@@ -40,11 +40,6 @@ fn __dpi_sign_at(t: String) -> Int? = match (string.index_of(t, "+"), string.ind
   (none, none) => none,
 }
 
-fn __dpi_leap(y: Int) -> Bool = y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
-
-fn __dpi_days_in_month(y: Int, m: Int) -> Int = if m == 2 then (if __dpi_leap(y) then 29 else 28)
-else if m == 4 or m == 6 or m == 9 or m == 11 then 30 else 31
-
 // The `±HH:MM` after the sign at `i`, in seconds (signed), or none.
 fn __dpi_offset(t: String, i: Int) -> Int? = {
   let sign = string.slice(t, i, i + 1)
@@ -63,7 +58,8 @@ fn __dpi_offset(t: String, i: Int) -> Int? = {
   }
 }
 
-// Range-check the six fields in order, then build the UTC instant.
+// Range-check the six fields in order (in `datetime.from_parts`, the one
+// place both constructors share, #4149), then apply the offset.
 fn __dpi_build(d: List[Int], tm: List[Int], off: Int) -> Result[Int, String] = {
   let y = list.get(d, 0) ?? 0
   let mo = list.get(d, 1) ?? 0
@@ -71,13 +67,10 @@ fn __dpi_build(d: List[Int], tm: List[Int], off: Int) -> Result[Int, String] = {
   let h = list.get(tm, 0) ?? 0
   let mi = list.get(tm, 1) ?? 0
   let s = list.get(tm, 2) ?? 0
-  if y < 0 or y > 9999 then err("year out of range: " + int.to_string(y))
-  else if mo < 1 or mo > 12 then err("month out of range: " + int.to_string(mo))
-  else if dd < 1 or dd > __dpi_days_in_month(y, mo) then err("day out of range: " + int.to_string(dd))
-  else if h < 0 or h > 23 then err("hour out of range: " + int.to_string(h))
-  else if mi < 0 or mi > 59 then err("minute out of range: " + int.to_string(mi))
-  else if s < 0 or s > 59 then err("second out of range: " + int.to_string(s))
-  else ok(datetime.from_parts(y, mo, dd, h, mi, s) - off)
+  match datetime.from_parts(y, mo, dd, h, mi, s) {
+    ok(t) => ok(t - off),
+    err(e) => err(e),
+  }
 }
 
 fn datetime_parse_iso(s: String) -> Result[Int, String] = {

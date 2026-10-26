@@ -18,17 +18,22 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int`
+### `datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String]`
 
-Create a timestamp from year, month, day, hour, minute, second (UTC).
+Create a timestamp from year, month, day, hour, minute, second (UTC). A field out of range is an `err` naming it, with the same rules and text as `parse_iso`: year 0..=9999, month 1..=12, day 1..=days in that month, hour 0..=23, minute and second 0..=59. Nothing rolls over: February 30th is `err("day out of range: 30")`, not March 2nd.
 
 ```almd run
 fn main() -> Unit = {
-  println(int.to_string(datetime.from_parts(2024, 1, 15, 12, 0, 0)))
+  println(int.to_string(datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0))
+  match datetime.from_parts(2026, 2, 30, 0, 0, 0) {
+    ok(ts) => println(datetime.to_iso(ts)),
+    err(e) => println(e),
+  }
 }
 ```
 ```output
 1705320000
+day out of range: 30
 ```
 
 ### `datetime.parse_iso(s: String) -> Result[Int, String]`
@@ -88,7 +93,7 @@ verbatim. There is **no** `%%` escape.
 
 ```almd run
 fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
   println(datetime.format(ts, "%Y-%m-%d"))
   println(datetime.format(ts, "%Y-%m-%dT%H:%M:%SZ"))
 }
@@ -121,7 +126,7 @@ Get the Unix timestamp value (identity function).
 
 ```almd run
 fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
   println(int.to_string(datetime.to_unix(ts)))
 }
 ```
@@ -135,7 +140,7 @@ Extract the year from a timestamp.
 
 ```almd run
 fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45) ?? 0
   println(int.to_string(datetime.year(ts)))
 }
 ```
@@ -149,7 +154,7 @@ Extract the month (1-12) from a timestamp.
 
 ```almd run
 fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45) ?? 0
   println(int.to_string(datetime.month(ts)))
 }
 ```
@@ -163,7 +168,7 @@ Extract the day of month (1-31) from a timestamp.
 
 ```almd run
 fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45) ?? 0
   println(int.to_string(datetime.day(ts)))
 }
 ```
@@ -177,7 +182,7 @@ Extract the hour (0-23) from a timestamp.
 
 ```almd run
 fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45) ?? 0
   println(int.to_string(datetime.hour(ts)))
 }
 ```
@@ -191,7 +196,7 @@ Extract the minute (0-59) from a timestamp.
 
 ```almd run
 fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45) ?? 0
   println(int.to_string(datetime.minute(ts)))
 }
 ```
@@ -205,7 +210,7 @@ Extract the second (0-59) from a timestamp.
 
 ```almd run
 fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45) ?? 0
   println(int.to_string(datetime.second(ts)))
 }
 ```
@@ -223,7 +228,7 @@ Every civil extractor (`year` / `month` / `day` / `weekday`, and `to_iso` /
 
 ```almd run
 fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 30, 45) ?? 0
   println(datetime.weekday(ts))
 }
 ```
@@ -237,7 +242,7 @@ Add n days to a timestamp.
 
 ```almd run
 fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
   println(datetime.to_iso(datetime.add_days(ts, 7))) // one week later
 }
 ```
@@ -251,7 +256,7 @@ Add n hours to a timestamp.
 
 ```almd run
 fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
   println(datetime.to_iso(datetime.add_hours(ts, 3)))
 }
 ```
@@ -265,7 +270,7 @@ Add n minutes to a timestamp.
 
 ```almd run
 fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
   println(datetime.to_iso(datetime.add_minutes(ts, 30)))
 }
 ```
@@ -279,7 +284,7 @@ Add n seconds to a timestamp.
 
 ```almd run
 fn main() -> Unit = {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
   println(datetime.to_iso(datetime.add_seconds(ts, 90)))
 }
 ```
@@ -293,7 +298,7 @@ Compute the difference in seconds between two timestamps.
 
 ```almd run
 fn main() -> Unit = {
-  let earlier = datetime.from_parts(2024, 1, 15, 12, 0, 0)
+  let earlier = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
   let later = datetime.add_hours(earlier, 1)
   println(int.to_string(datetime.diff_seconds(later, earlier)))
 }
@@ -308,7 +313,7 @@ Check if timestamp a is before timestamp b.
 
 ```almd run
 fn main() -> Unit = {
-  let earlier = datetime.from_parts(2024, 1, 15, 12, 0, 0)
+  let earlier = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
   let later = datetime.add_hours(earlier, 1)
   println("${datetime.is_before(earlier, later)}")
 }
@@ -323,7 +328,7 @@ Check if timestamp a is after timestamp b.
 
 ```almd run
 fn main() -> Unit = {
-  let earlier = datetime.from_parts(2024, 1, 15, 12, 0, 0)
+  let earlier = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
   let later = datetime.add_hours(earlier, 1)
   println("${datetime.is_after(later, earlier)}")
 }
@@ -365,9 +370,9 @@ datetime.diff_seconds(a: Int, b: Int) -> Int
 // @since 0.6.0 or earlier
 datetime.format(ts: Int, pattern: String) -> String
 
-// UTC epoch secs; out-of-range fields roll over.
+// UTC epoch secs; a field out of range is err, as in parse_iso.
 // @since 0.6.0 or earlier
-datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int
+datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String]
 
 // Identity: seconds are already a timestamp.
 // @since 0.6.0 or earlier

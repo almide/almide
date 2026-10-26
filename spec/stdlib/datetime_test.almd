@@ -2,65 +2,65 @@ import datetime
 
 // datetime module tests — pure functions with runtime implementations only
 test "datetime.from_parts basic" {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
   assert_eq(datetime.year(ts), 2024)
   assert_eq(datetime.month(ts), 1)
   assert_eq(datetime.day(ts), 15)
 }
 
 test "datetime.from_parts midnight" {
-  let ts = datetime.from_parts(2024, 6, 1, 0, 0, 0)
+  let ts = datetime.from_parts(2024, 6, 1, 0, 0, 0) ?? 0
   assert_eq(datetime.hour(ts), 0)
   assert_eq(datetime.minute(ts), 0)
   assert_eq(datetime.second(ts), 0)
 }
 
 test "datetime.from_parts end of day" {
-  let ts = datetime.from_parts(2024, 12, 31, 23, 59, 59)
+  let ts = datetime.from_parts(2024, 12, 31, 23, 59, 59) ?? 0
   assert_eq(datetime.hour(ts), 23)
   assert_eq(datetime.minute(ts), 59)
   assert_eq(datetime.second(ts), 59)
 }
 
 test "datetime.year 2000" {
-  let ts = datetime.from_parts(2000, 1, 1, 0, 0, 0)
+  let ts = datetime.from_parts(2000, 1, 1, 0, 0, 0) ?? 0
   assert_eq(datetime.year(ts), 2000)
 }
 
 test "datetime.month extraction" {
-  let ts = datetime.from_parts(2024, 7, 15, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 7, 15, 12, 0, 0) ?? 0
   assert_eq(datetime.month(ts), 7)
 }
 
 test "datetime.day extraction" {
-  let ts = datetime.from_parts(2024, 3, 25, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 3, 25, 12, 0, 0) ?? 0
   assert_eq(datetime.day(ts), 25)
 }
 
 test "datetime.hour extraction" {
-  let ts = datetime.from_parts(2024, 1, 1, 15, 30, 0)
+  let ts = datetime.from_parts(2024, 1, 1, 15, 30, 0) ?? 0
   assert_eq(datetime.hour(ts), 15)
 }
 
 test "datetime.minute extraction" {
-  let ts = datetime.from_parts(2024, 1, 1, 0, 45, 0)
+  let ts = datetime.from_parts(2024, 1, 1, 0, 45, 0) ?? 0
   assert_eq(datetime.minute(ts), 45)
 }
 
 test "datetime.second extraction" {
-  let ts = datetime.from_parts(2024, 1, 1, 0, 0, 33)
+  let ts = datetime.from_parts(2024, 1, 1, 0, 0, 33) ?? 0
   assert_eq(datetime.second(ts), 33)
 }
 
 test "datetime.to_iso roundtrip" {
-  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 1, 15, 12, 0, 0) ?? 0
   let iso = datetime.to_iso(ts)
   assert_eq(string.contains(iso, "2024"), true)
   assert_eq(string.contains(iso, "15"), true)
 }
 
 test "datetime.format substitutes strftime specifiers" {
-  let ts = datetime.from_parts(2024, 3, 5, 13, 7, 9)
+  let ts = datetime.from_parts(2024, 3, 5, 13, 7, 9) ?? 0
   assert_eq(datetime.format(ts, "%Y-%m-%d"), "2024-03-05")
   assert_eq(datetime.format(ts, "%H:%M:%S"), "13:07:09")
   assert_eq(datetime.format(ts, "%Y-%m-%dT%H:%M:%SZ"), "2024-03-05T13:07:09Z")
@@ -69,13 +69,13 @@ test "datetime.format substitutes strftime specifiers" {
 }
 
 test "datetime.weekday returns string" {
-  let ts = datetime.from_parts(2024, 1, 15, 0, 0, 0)
+  let ts = datetime.from_parts(2024, 1, 15, 0, 0, 0) ?? 0
   let wd = datetime.weekday(ts)
   assert_eq(string.len(wd) > 0, true)
 }
 
 test "datetime.weekday Monday" {
-  let ts = datetime.from_parts(2024, 1, 15, 0, 0, 0)
+  let ts = datetime.from_parts(2024, 1, 15, 0, 0, 0) ?? 0
   assert_eq(datetime.weekday(ts), "Monday")
 }
 
@@ -110,38 +110,38 @@ test "datetime.parse_iso then format" {
 }
 
 test "datetime.year on epoch" {
-  let ts = datetime.from_parts(1970, 1, 1, 0, 0, 0)
+  let ts = datetime.from_parts(1970, 1, 1, 0, 0, 0) ?? 0
   assert_eq(datetime.year(ts), 1970)
 }
 
 test "datetime.from_parts february" {
-  let ts = datetime.from_parts(2024, 2, 29, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 2, 29, 12, 0, 0) ?? 0
   assert_eq(datetime.month(ts), 2)
   assert_eq(datetime.day(ts), 29)
 }
 
 test "datetime.to_iso format check" {
-  let ts = datetime.from_parts(2024, 1, 1, 0, 0, 0)
+  let ts = datetime.from_parts(2024, 1, 1, 0, 0, 0) ?? 0
   let iso = datetime.to_iso(ts)
   assert_eq(string.contains(iso, "T"), true)
 }
 
 test "datetime.from_parts all months" {
-  let jan = datetime.from_parts(2024, 1, 1, 0, 0, 0)
-  let dec = datetime.from_parts(2024, 12, 1, 0, 0, 0)
+  let jan = datetime.from_parts(2024, 1, 1, 0, 0, 0) ?? 0
+  let dec = datetime.from_parts(2024, 12, 1, 0, 0, 0) ?? 0
   assert_eq(datetime.month(jan), 1)
   assert_eq(datetime.month(dec), 12)
 }
 
 test "datetime.from_parts different years" {
-  let ts1 = datetime.from_parts(2020, 6, 15, 0, 0, 0)
-  let ts2 = datetime.from_parts(2025, 6, 15, 0, 0, 0)
+  let ts1 = datetime.from_parts(2020, 6, 15, 0, 0, 0) ?? 0
+  let ts2 = datetime.from_parts(2025, 6, 15, 0, 0, 0) ?? 0
   assert_eq(datetime.year(ts1), 2020)
   assert_eq(datetime.year(ts2), 2025)
 }
 
 test "datetime.to_iso contains Z" {
-  let ts = datetime.from_parts(2024, 6, 15, 12, 0, 0)
+  let ts = datetime.from_parts(2024, 6, 15, 12, 0, 0) ?? 0
   let iso = datetime.to_iso(ts)
   assert_eq(string.contains(iso, "Z"), true)
 }
@@ -158,7 +158,7 @@ test "pre-epoch timestamps floor to their own day (#2488)" {
   assert_eq(datetime.weekday(-86401), "Tuesday")
   assert_eq(datetime.format(-1, "%Y-%m-%d %H:%M:%S"), "1969-12-31 23:59:59")
   // the inverse still agrees with the forward direction across the epoch
-  assert_eq(datetime.from_parts(1969, 12, 31, 23, 59, 59), -1)
+  assert_eq((datetime.from_parts(1969, 12, 31, 23, 59, 59) ?? 0), -1)
   assert_eq(datetime.to_iso(-62135596801), "0000-12-31T23:59:59Z")
 }
 
@@ -225,4 +225,22 @@ test "datetime.parse_iso refuses a year outside 0..=9999 (#4118)" {
   assert_eq(parse_err("99999999999999999999-01-01T00:00:00Z"), "invalid datetime format")
   assert_eq(parse_err(datetime.to_iso(253402300799)), "ok(253402300799)")
   assert_eq(parse_err(datetime.to_iso(253402300800)), "year out of range: 10000")
+}
+
+fn parts_err(y: Int, mo: Int, d: Int, h: Int, mi: Int, s: Int) -> String = match datetime.from_parts(y, mo, d, h, mi, s) {
+  ok(n) => "ok(${n})",
+  err(e) => e,
+}
+
+test "datetime.from_parts refuses what parse_iso refuses, with the same text (#4149)" {
+  assert_eq(parts_err(2026, 2, 30, 0, 0, 0), "day out of range: 30")
+  assert_eq(parts_err(2026, 2, 30, 0, 0, 0), parse_err("2026-02-30T00:00:00Z"))
+  assert_eq(parts_err(2026, 13, 1, 0, 0, 0), "month out of range: 13")
+  assert_eq(parts_err(2023, 2, 29, 0, 0, 0), "day out of range: 29")
+  assert_eq(parts_err(2024, 2, 29, 0, 0, 0), "ok(1709164800)")
+  assert_eq(parts_err(2026, 1, 1, 24, 0, 0), "hour out of range: 24")
+  assert_eq(parts_err(2026, 1, 1, 0, 60, 0), "minute out of range: 60")
+  assert_eq(parts_err(2026, 1, 1, 0, 0, 60), "second out of range: 60")
+  assert_eq(parts_err(10000, 1, 1, 0, 0, 0), "year out of range: 10000")
+  assert_eq(parts_err(2026, 13, 45, 99, 99, 99), "month out of range: 13")
 }

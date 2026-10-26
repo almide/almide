@@ -7,6 +7,7 @@
 //
 //   datetime.from_parts  cast the month `as u64`, so month -1 became 18446744073709551615
 //                        and `153 * (m - 3)` wrapped: 1540840320 here, 1572566400 there.
+//                        (Since #4149 a month outside 1..=12 is an err on every leg.)
 //   math.choose          accumulated in u64: choose(i64::MAX, 2) was 4611686018427387905
 //                        on one leg and -4611686018427387903 on the other. Neither is a
 //                        binomial coefficient — the requirement is that they be the same
@@ -33,17 +34,23 @@
 // A documented scope that produces a malformed value outside itself is not a scope.
 import datetime
 
+fn fp(r: Result[Int, String]) -> String = match r {
+  ok(n) => int.to_string(n),
+  err(e) => "err(" + e + ")",
+}
+
 fn main() -> Unit = {
   // to_iso across the whole i64 range, plus year 1 to pin the zero-padding.
   println("iso_epoch=" + datetime.to_iso(0))
   println("iso_y1=" + datetime.to_iso(0 - 62135596800))
   println("iso_max=" + datetime.to_iso(9223372036854775807))
   println("iso_min=" + datetime.to_iso(0 - 9223372036854775807 - 1))
-  // from_parts: the valid months must be untouched by the signedness change.
-  println("fp_jan=" + int.to_string(datetime.from_parts(2020, 1, 1, 0, 0, 0)))
-  println("fp_dec=" + int.to_string(datetime.from_parts(2020, 12, 1, 0, 0, 0)))
-  println("fp_neg=" + int.to_string(datetime.from_parts(2020, 0 - 1, 1, 0, 0, 0)))
-  println("fp_min=" + int.to_string(datetime.from_parts(2020, 0 - 9223372036854775807 - 1, 1, 0, 0, 0)))
+  // from_parts: the valid months must be untouched by the signedness change; an
+  // out-of-range month is the same err on both legs (#4149, C-360).
+  println("fp_jan=" + fp(datetime.from_parts(2020, 1, 1, 0, 0, 0)))
+  println("fp_dec=" + fp(datetime.from_parts(2020, 12, 1, 0, 0, 0)))
+  println("fp_neg=" + fp(datetime.from_parts(2020, 0 - 1, 1, 0, 0, 0)))
+  println("fp_min=" + fp(datetime.from_parts(2020, 0 - 9223372036854775807 - 1, 1, 0, 0, 0)))
   // choose: the real answer, then the two wrapping ones.
   println("ch_5=" + int.to_string(math.choose(5, 2)))
   println("ch_max=" + int.to_string(math.choose(9223372036854775807, 2)))
