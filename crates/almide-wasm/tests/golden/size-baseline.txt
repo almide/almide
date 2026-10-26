@@ -123,7 +123,7 @@
 4864	spec/wasm_cross/const_fold_nonfinite_float.almd
 2353	spec/wasm_cross/container_alias_return.almd
 1974	spec/wasm_cross/control_flow.almd
-4726	spec/wasm_cross/count_domain_nonbytes.almd
+4792	spec/wasm_cross/count_domain_nonbytes.almd
 2697	spec/wasm_cross/cross_dep_accumulator.almd
 5621	spec/wasm_cross/cross_module_spread.almd
 4252	spec/wasm_cross/ctor_fn_value.almd

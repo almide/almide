@@ -1234,16 +1234,16 @@ why = "Not a stdlib name list: `key` / `value` / `object` here are the field nam
 id = "crates/almide-codegen/src/pass_borrow_inference.rs::seed_builtin_output_sigs::table"
 class = "justified"
 names = 2
-why = ""
+why = "the strings are the compiler's own builtin call names (not a grouping of stdlib functions by a property); two of them now coincide with public fns the wave-4 io/process/http surface added, which is a spelling collision the gate counts, not name-keyed stdlib logic"
 
 [[site]]
 id = "crates/almide-interp/src/dispatch.rs::eval_builtin_call::or-pattern"
 class = "justified"
 names = 2
-why = ""
+why = "the arms dispatch the interpreter's builtin call names (println, assert, ...), not a property of stdlib functions; two of them now coincide with public fns the wave-4 io/process/http surface added, a spelling collision rather than name-keyed stdlib logic"
 
 [[site]]
 id = "crates/almide-wasm-vm/src/ir.rs::CONTROL_AND_VARIABLE::table"
 class = "justified"
 names = 2
-why = ""
+why = "the strings are wasm instruction mnemonics (block, loop, select, ...) the VM's instruction set pins, not stdlib functions; two of them now coincide with public fns the wave-4 surface added (unix.select and one more), a spelling collision rather than name-keyed stdlib logic"
