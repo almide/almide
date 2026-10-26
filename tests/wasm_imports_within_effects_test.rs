@@ -114,8 +114,12 @@ const BASE_CAPS: &[u32] = &[cap::STDOUT, cap::CLOCK];
 
 /// The capability ids each effect adds to [`BASE_CAPS`], as [`BY_EFFECT`].
 const CAPS_BY_EFFECT: &[(&str, &[u32])] = &[
-    ("FS.read", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN]),
-    ("FS.write", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN]),
+    // The temp root (`fs.temp_dir`, the parent `fs.create_temp_*` names an
+    // entry under) is `$TMPDIR` ?? "/tmp" (C-189), so the file leaves reach
+    // the environment — the `environ_get` their [`BY_EFFECT`] rows already
+    // allow — and writing may draw a temp name's entropy (`random_get`).
+    ("FS.read", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN, cap::ENV]),
+    ("FS.write", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN, cap::ENV, cap::ENTROPY]),
     ("IO.stdin", &[cap::FS_READ, cap::FS_WRITE, cap::STDIN]),
     ("IO.stdout", &[]),
     ("IO.stderr", &[]),

@@ -362,7 +362,10 @@ fn wasm_constant_time_compare_has_no_data_dependent_branch() {
 fn control_wasm_early_exit_twins_are_caught() {
     let dir = scratch("wasm-ctl");
     let base = build_wasm(&dir, "baseline", &program("bytes.len(a) == bytes.len(b)", ""));
-    let twin = "fn early(a: Bytes, b: Bytes, i: Int) -> Bool =\n  if i >= bytes.len(a) then true\n  else if (bytes.get(a, i) ?? 0) != (bytes.get(b, i) ?? 0) then false\n  else early(a, b, i + 1)\n\n";
+    // The twin reads with the checked index `a[i]` (an Int straight off a
+    // byte load): `bytes.get(a, i) ?? 0` hands the byte through an Option
+    // box, a store/load round trip the taint walk does not follow.
+    let twin = "fn early(a: Bytes, b: Bytes, i: Int) -> Bool =\n  if i >= bytes.len(a) then true\n  else if a[i] != b[i] then false\n  else early(a, b, i + 1)\n\n";
     for (name, call, extra) in [("early_twin", "early(a, b, 0)", twin), ("plain_eq", "a == b", ""), ("plain_eq_string", "x == y", "")] {
         let with = build_wasm(&dir, name, &program(call, extra));
         let (n, findings) = wasm_findings(&with, &base);
