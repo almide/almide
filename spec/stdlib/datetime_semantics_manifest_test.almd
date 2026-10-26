@@ -35,10 +35,6 @@ test "datetime.from_parts unit=civil-field" {
   assert_eq("${datetime.from_parts(2024, 1, 15, 12, 34, 56) ?? 0}", "1705322096")
 }
 
-test "datetime.__from_parts unit=civil-field" {
-  assert_eq("${datetime.__from_parts(2024, 1, 15, 12, 34, 56)}", "1705322096")
-}
-
 test "datetime.from_unix unit=second" {
   assert_eq("${datetime.from_unix(1705322096)}", "1705322096")
 }

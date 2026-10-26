@@ -363,16 +363,6 @@ probe = 'datetime.from_parts(2024, 1, 15, 12, 34, 56) ?? 0'
 expect = "1705322096"
 
 [[datetime.fn]]
-name = "__from_parts"
-index_unit = "civil-field"
-probe = 'datetime.__from_parts(2024, 1, 15, 12, 34, 56)'
-expect = "1705322096"
-note = """
-The unchecked civil-to-Unix core under from_parts (which range-checks each
-field first): same field order, same result on a valid date.
-"""
-
-[[datetime.fn]]
 name = "from_unix"
 index_unit = "second"
 probe = 'datetime.from_unix(1705322096)'
