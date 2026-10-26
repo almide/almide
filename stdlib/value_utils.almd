@@ -12,7 +12,7 @@
 fn __vu_keyset(keys: List[String]) -> Map[String, Int] = {
   var named: Map[String, Int] = map.new()
   for k in keys {
-    map.insert(named, k, 0)
+    named = map.set(named, k, 0)
   }
   named
 }
@@ -202,7 +202,7 @@ fn __vu_has_dup(pairs: List[(String, Value)]) -> Bool = {
       if map.contains(seen, k) then {
         dup = true
       } else {
-        map.insert(seen, k, 0)
+        seen = map.set(seen, k, 0)
       }
     }
     dup
@@ -221,7 +221,7 @@ fn __vu_fold_pairs(pairs: List[(String, Value)]) -> List[(String, Value)] =
           vals = list.set(vals, i, v)
         },
         none => {
-          map.insert(at, k, list.len(keys))
+          at = map.set(at, k, list.len(keys))
           list.push(keys, k)
           list.push(vals, v)
         },
@@ -243,7 +243,7 @@ fn __vu_merge_pairs(pa: List[(String, Value)], pb: List[(String, Value)]) -> Lis
   var vals: List[Value] = []
   for (k, v) in pa {
     if not map.contains(at, k) then {
-      map.insert(at, k, list.len(keys))
+      at = map.set(at, k, list.len(keys))
     } else ()
     list.push(keys, k)
     list.push(vals, v)
@@ -254,7 +254,7 @@ fn __vu_merge_pairs(pa: List[(String, Value)], pb: List[(String, Value)]) -> Lis
         vals = list.set(vals, i, v)
       },
       none => {
-        map.insert(at, k, list.len(keys))
+        at = map.set(at, k, list.len(keys))
         list.push(keys, k)
         list.push(vals, v)
       },
@@ -266,7 +266,7 @@ fn __vu_merge_pairs(pa: List[(String, Value)], pb: List[(String, Value)]) -> Lis
 fn __vu_select_pairs(pairs: List[(String, Value)], keys: List[String], want: Bool) -> List[(String, Value)] = {
   var named: Map[String, Int] = map.new()
   for k in keys {
-    map.insert(named, k, 0)
+    named = map.set(named, k, 0)
   }
   var out: List[(String, Value)] = []
   for (k, v) in pairs {
@@ -297,14 +297,8 @@ fn __vu_pair(v: Value, i: Int) -> (String, Value) = {
 }
 
 fn __vu_refold(v: Value) -> Value = {
-  let keys = value.keys(v)
+  let keys = value.__keys(v)
   let n = list.len(keys)
   if list.len(list.unique(keys)) == n then v
   else value.object(list.range(0, n) |> list.map((i) => __vu_pair(v, i)))
 }
-
-fn value_to_camel_case(v: Value) -> Value =
-  if prim.load32(prim.handle(v) + 4) == 6 then __vu_refold(__vu_ren_c(v)) else v
-
-fn value_to_snake_case(v: Value) -> Value =
-  if prim.load32(prim.handle(v) + 4) == 6 then __vu_refold(__vu_ren_s(v)) else v

@@ -27,10 +27,6 @@ fn split(s: String, sep: String) -> List[String] = _
 @intrinsic("almide_rt_string_split_once")
 fn split_once(s: String, sep: String) -> (String, String)? = _
 
-/// Items with sep between; "" for [].
-@intrinsic("almide_rt_string_join")
-fn join(list: List[String], sep: String) -> String = _
-
 /// Codepoint count (not bytes).
 @intrinsic("almide_rt_string_len")
 fn len(s: String) -> Int = _
@@ -72,10 +68,6 @@ fn byte_slice(s: String, start: Int, end: Int) -> String? = _
 @intrinsic("almide_rt_string_pad_left")
 fn pad_start(s: String, n: Int, fill: String) -> String = _
 
-/// UTF-8 bytes of s as Ints 0..255.
-@intrinsic("almide_rt_string_to_bytes")
-fn to_bytes(s: String) -> List[Int] = _
-
 /// First char uppercased as to_upper does, rest untouched.
 @intrinsic("almide_rt_string_capitalize")
 fn capitalize(s: String) -> String = _
@@ -111,10 +103,6 @@ fn index_of(s: String, needle: String) -> Int? = _
 /// s repeated n times; empty for n <= 0.
 @intrinsic("almide_rt_string_repeat")
 fn repeat(s: String, n: Int) -> String = _
-
-/// Lossy UTF-8 decode; bad sequences become U+FFFD.
-@intrinsic("almide_rt_string_from_bytes")
-fn from_bytes(bytes: List[Int]) -> String = _
 
 /// All ASCII 0-9; false for empty s.
 @intrinsic("almide_rt_string_is_digit")
@@ -220,10 +208,6 @@ fn drop(s: String, n: Int) -> String = _
 @intrinsic("almide_rt_string_drop_end")
 fn drop_end(s: String, n: Int) -> String = _
 
-/// (char, count) per run of equal codepoints.
-@intrinsic("almide_rt_string_run_length_encode")
-fn run_length_encode(s: String) -> List[(String, Int)] = _
-
 // ── Mutable string operations ──
 /// Appends x to s in place.
 @intrinsic("almide_rt_string_push")
@@ -296,14 +280,11 @@ fn from_utf16(xs: List[Int]) -> Result[String, String] = {
       i = i + 1
     }
   }
-  if bad == "" then ok(string.join(out, "")) else err(bad)
+  if bad == "" then ok(list.join(out, "")) else err(bad)
 }
 
 /// The characters of s for which f is true.
-fn filter(s: String, f: (String) -> Bool) -> String = string.join(
-  list.filter(string.to_list(s), f),
-  "",
-)
+fn filter(s: String, f: (String) -> Bool) -> String = list.join(list.filter(string.to_list(s), f), "")
 
 /// f folded over the characters of s, left to right.
 fn fold[B](s: String, init: B, f: (B, String) -> B) -> B = list.fold(string.to_list(s), init, f)
@@ -326,7 +307,7 @@ fn remove_at(s: String, i: Int) -> String = {
 fn new() -> String = ""
 
 /// The strings of xs joined with nothing between.
-fn from_list(xs: List[String]) -> String = string.join(xs, "")
+fn from_list(xs: List[String]) -> String = list.join(xs, "")
 
 /// (index, character) pairs from 0.
 fn enumerate(s: String) -> List[(Int, String)] = list.enumerate(string.to_list(s))
@@ -462,51 +443,42 @@ fn max_with(s: String, cmp: (String, String) -> Int) -> String? = match string.f
 fn find_index(s: String, f: (String) -> Bool) -> Int? = list.find_index(string.to_list(s), f)
 
 /// The longest prefix whose characters all satisfy f.
-fn take_while(s: String, f: (String) -> Bool) -> String = string.join(
-  list.take_while(string.to_list(s), f),
-  "",
-)
+fn take_while(s: String, f: (String) -> Bool) -> String = list.join(list.take_while(string.to_list(s), f), "")
 
 /// s after the longest prefix whose characters all satisfy f.
-fn drop_while(s: String, f: (String) -> Bool) -> String = string.join(
-  list.drop_while(string.to_list(s), f),
-  "",
-)
+fn drop_while(s: String, f: (String) -> Bool) -> String = list.join(list.drop_while(string.to_list(s), f), "")
 
 /// Runs of n characters, the last may be shorter; n <= 0 aborts.
 fn chunk(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.chunk: size must be positive, got ${n}")
-  else list.chunk(string.to_list(s), n) |> list.map((cs) => string.join(cs, ""))
+  else list.chunk(string.to_list(s), n) |> list.map((cs) => list.join(cs, ""))
 
 /// Every run of n consecutive characters; [] if n > len; n <= 0 aborts.
 fn window(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.window: size must be positive, got ${n}")
-  else list.window(string.to_list(s), n) |> list.map((cs) => string.join(cs, ""))
+  else list.window(string.to_list(s), n) |> list.map((cs) => list.join(cs, ""))
 
 /// (first n characters, the rest); n past the end gives (s, ""), n < 0 gives ("", s).
 fn split_at(s: String, n: Int) -> (String, String) = (string.take(s, n), string.drop(s, n))
 
 /// s with each run of equal adjacent characters collapsed to one.
-fn dedup(s: String) -> String = string.join(list.dedup(string.to_list(s)), "")
+fn dedup(s: String) -> String = list.join(list.dedup(string.to_list(s)), "")
 
 /// The characters of s with sep between each pair.
-fn intersperse(s: String, sep: String) -> String = string.join(string.to_list(s), sep)
+fn intersperse(s: String, sep: String) -> String = list.join(string.to_list(s), sep)
 
 /// The first occurrence of each character, in order.
-fn unique(s: String) -> String = string.join(list.unique(string.to_list(s)), "")
+fn unique(s: String) -> String = list.join(list.unique(string.to_list(s)), "")
 
 /// The first character of each key f gives, in order.
-fn unique_by[K](s: String, f: (String) -> K) -> String = string.join(
-  list.unique_by(string.to_list(s), f),
-  "",
-)
+fn unique_by[K](s: String, f: (String) -> K) -> String = list.join(list.unique_by(string.to_list(s), f), "")
 
 // ── Text requirement (R-L0-42): `list.join[T: Text]` over Strings ──
 fn __join(xs: List[String], sep: String) -> String = list.__join_string(xs, sep)
 
 // ── C-418's escaper, for the self-hosted bodies (#4126) ──
 // A runtime error text that embeds a text the program passed (datetime.parse_iso's
-// offset, json.parse's unexpected character, value.field's key, error.context's
+// offset, json.parse's unexpected character, value.__field's key, error.context's
 // label) writes each C0 control, DEL, C1 control and bidirectional control in it
 // as `\n` `\r` `\t` `\0` or `\u{<lowercase hex>}`, and keeps every other character.
 // Native is almide-base's err_text.rs; the wasm bodies and the interp oracle run

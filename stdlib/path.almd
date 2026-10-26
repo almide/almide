@@ -1,10 +1,5 @@
 // path — file path manipulation (secure-by-design Layer 3)
 // Bundled stdlib module (written in Almide, auto multi-target)
-//
-// `SafePath` is an opaque type: external modules cannot construct it
-// from raw String. Construction goes through from_string(), which admits
-// only a path that stays inside whatever directory it is joined to (#4146).
-mod type SafePath = String
 
 // Whether `s` stays inside the directory it is joined to: relative (no
 // leading `/` or `\`, no drive letter `C:`, no leading `~`), no NUL, and no
@@ -24,21 +19,6 @@ local fn stays_inside(s: String) -> Bool = {
   let nul = string.contains(s, "\u{0}")
   let climbs = list.any(segs, (seg) => seg == "..")
   not (rooted or drive or home or nul or climbs)
-}
-
-// Validate and construct a SafePath.
-/// SafePath of s; err unless relative and inside.
-fn from_string(s: String) -> Result[SafePath, String] =
-  if stays_inside(s) then ok(SafePath(s)) else err("path traversal rejected: " + s)
-
-// Trust a raw path — explicit opt-in for known-safe paths.
-/// SafePath of s with no traversal check.
-fn trusted(s: String) -> SafePath = SafePath(s)
-
-// Unwrap SafePath to String
-/// Path text inside p, unchanged.
-fn to_string(p: SafePath) -> String = match p {
-  SafePath(s) => s
 }
 
 // For a child that crossed a trust boundary, use join_within (#4146): here an
@@ -70,7 +50,7 @@ fn dirname(path: String) -> String = {
   if n <= 1 then ""
   else {
     let parent_parts = list.take(parts, n - 1)
-    let joined = string.join(parent_parts, "/")
+    let joined = list.join(parent_parts, "/")
     // Preserve root "/" for absolute paths
     if string.len(joined) == 0 and string.starts_with(path, "/") then "/" else joined
   }
@@ -111,7 +91,7 @@ fn stem(path: String) -> String = {
   else {
     // Drop the last segment and rejoin
     let prefix_parts = list.take(parts, n - 1)
-    string.join(prefix_parts, ".")
+    list.join(prefix_parts, ".")
   }
 }
 
@@ -137,7 +117,7 @@ fn normalize(path: String) -> String = {
       }
     } else list.push(stack, seg)
   }
-  let joined = string.join(stack, "/")
+  let joined = list.join(stack, "/")
   if absolute then "/" + joined
   else if string.len(joined) == 0 then "." else joined
 }
@@ -157,7 +137,7 @@ fn relative_to(path: String, base: String) -> String? = {
   let rest = list.drop(pc, list.len(bc))
   if list.take(pc, list.len(bc)) != bc or list.contains(rest, "..") then none
   else if list.is_empty(rest) then some(".")
-  else some(string.join(rest, "/"))
+  else some(list.join(rest, "/"))
 }
 
 local fn trim_end_slashes(p: String) -> String =

@@ -105,29 +105,11 @@ pub fn almide_rt_matrix_row_dot(m: &AlmideMatrix, r: i64, vec: &[f64]) -> f64 {
     s
 }
 
-// matrix: f32 path stubs for WASM target. matrix.rs has no distinct f32
-// matrix: storage (all Vec<Vec<f64>>), so these delegate to f64 ops.
-// matrix: storage stays f64 on native; the f32 values are widened on load.
-pub fn almide_rt_matrix_zeros_f32(rows: i64, cols: i64) -> AlmideMatrix {
-    almide_rt_matrix_zeros(rows, cols)
-}
-pub fn almide_rt_matrix_ones_f32(rows: i64, cols: i64) -> AlmideMatrix {
-    almide_rt_matrix_ones(rows, cols)
-}
-pub fn almide_rt_matrix_mul_f32(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
-    almide_rt_matrix_mul(a, b)
-}
-pub fn almide_rt_matrix_mul_f32_scaled(a: &AlmideMatrix, alpha: f64, b: &AlmideMatrix) -> AlmideMatrix {
-    almide_rt_matrix_scale(&almide_rt_matrix_mul(a, b), alpha)
-}
 pub fn almide_rt_matrix_mul_scaled(a: &AlmideMatrix, alpha: f64, b: &AlmideMatrix) -> AlmideMatrix {
     almide_rt_matrix_scale(&almide_rt_matrix_mul(a, b), alpha)
 }
 pub fn almide_rt_matrix_mul_f32_t(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
     almide_rt_matrix_mul(a, &almide_rt_matrix_transpose(b))
-}
-pub fn almide_rt_matrix_mul_f32_t_scaled(a: &AlmideMatrix, alpha: f64, b: &AlmideMatrix) -> AlmideMatrix {
-    almide_rt_matrix_scale(&almide_rt_matrix_mul_f32_t(a, b), alpha)
 }
 
 // append_rows: row-wise concat — used for KV-cache accumulation.
@@ -159,19 +141,6 @@ pub fn almide_rt_matrix_zip_with(a: &AlmideMatrix, b: &AlmideMatrix, f: std::rc:
     mk(a.rows, a.cols, a.data.iter().zip(b.data.iter()).map(|(x, y)| f(*x, *y)).collect())
 }
 
-// select_rows: gather a small number of rows from a big matrix into a
-// new matrix. Avoids the `to_lists` round-trip for the common case of
-// embedding lookups (LLM inference).
-pub fn almide_rt_matrix_select_rows(m: &AlmideMatrix, row_ids: &[i64]) -> AlmideMatrix {
-    let cols = if m.is_empty() { 0 } else { m[0].len() };
-    let mut out = Vec::<Vec<f64>>::with_capacity(row_ids.len());
-    for &rid in row_ids {
-        let r = rid.max(0) as usize;
-        if r < m.len() { out.push(m[r].to_vec()); }
-        else { out.push(vec![0.0f64; cols]); }
-    }
-    out.into()
-}
 
 // ── f32 bytes-resident path (L2-2): weights stay in the source GGUF buffer ──
 //
@@ -219,90 +188,7 @@ fn linear_empty_out(x_rows: usize, w_rows: i64) -> AlmideMatrix {
     mk(r, c, vec![0.0f64; r * c])
 }
 
-/// `y = x @ Wᵀ` where W is f32 row-major (out, in) still sitting in the
-/// source byte buffer at `w_offset`.
-pub fn almide_rt_matrix_linear_f32_row_no_bias(
-    x: &AlmideMatrix,
-    w_bytes: &Vec<u8>,
-    w_offset: i64,
-    w_rows: i64,
-    w_cols: i64,
-) -> AlmideMatrix {
-    let x_rows = x.rows;
-    let off = w_offset.max(0) as usize;
-    // #2783: the empty-extent answer is `zeros(rows(x), w_rows)`, so its shape
-    // goes through the shared C-161 ceiling; a huge `w_rows` took the raw
-    // `capacity overflow` panic here (exit 101) or returned an over-ceiling
-    // matrix, where wasm aborts with `matrix dimensions too large`.
-    if x_rows == 0 || w_rows <= 0 || w_cols <= 0 {
-        return linear_empty_out(x_rows, w_rows);
-    }
-    // The weight shape is a constructor's (`from_bytes_f32_le(.., w_rows,
-    // w_cols)` in the self-hosted definition): ceilinged before the width check.
-    let (out_cols, n_in) = almide_rt_matrix_dims(w_rows, w_cols);
-    almide_rt_matrix_shape_eq(x.cols, n_in);
-    // The weight window must be IN the buffer. Out of it, the answer is the
-    // all-zero output — the same edge the unfused composition takes, because
-    // the self-hosted definition reads `from_bytes_f32_le(..) ?? zeros(..)`
-    // (C-341's `none` for a window past the end) and a zero weight makes a
-    // zero product. Without the test the
-    // slice below was a raw `range end index N out of range` panic (exit 101,
-    // the form ALS-T6 forbids) on a buffer one element short.
-    let need = out_cols.saturating_mul(n_in).saturating_mul(4);
-    if off > w_bytes.len() || need > w_bytes.len() - off {
-        return mk(x_rows, out_cols, vec![0.0f64; x_rows * out_cols]);
-    }
-    let mut out = vec![0.0f64; x_rows * out_cols];
-    // One safe path (#4007): each weight is decoded from its little-endian bytes
-    // in the inner loop (`from_le_bytes` over `chunks_exact(4)` is a plain load
-    // on a little-endian target, so the dot still vectorizes), and the output row
-    // is split across threads — GEMV is embarrassingly parallel over output
-    // elements. The earlier `align_to::<f32>()` fast path was `unsafe`, read the
-    // bytes in the HOST's byte order (wrong on a big-endian target) and fell back
-    // to a serial loop when the buffer happened to be misaligned.
-    let w_all = &w_bytes[off..off + need];
-    for i in 0..x_rows {
-        let xi = &x.data[i * n_in..(i + 1) * n_in];
-        par_out_rows(&mut out[i * out_cols..(i + 1) * out_cols], |j, o| {
-            let wj = &w_all[j * n_in * 4..(j + 1) * n_in * 4];
-            let mut acc = 0.0f64;
-            for (xk, c) in xi.iter().zip(wj.chunks_exact(4)) {
-                acc += xk * f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64;
-            }
-            *o = acc;
-        });
-    }
-    mk(x_rows, out_cols, out)
-}
 
-/// Gather rows from an f32 tensor still in the source byte buffer
-/// (embedding lookup without decoding the 600 MB table).
-pub fn almide_rt_matrix_select_rows_f32(
-    data: &Vec<u8>,
-    offset: i64,
-    cols: i64,
-    row_ids: &[i64],
-) -> AlmideMatrix {
-    // #1525: ceiling the output shape like every constructor — an over-ceiling
-    // `cols` died in the raw capacity-overflow form here.
-    let (_, c) = almide_rt_matrix_dims(row_ids.len() as i64, cols);
-    let off = offset.max(0) as usize;
-    let mut out = Vec::<f64>::with_capacity(row_ids.len() * c);
-    for &rid in row_ids {
-        // A row past the buffer is the all-zero row — the defined OOB→zeros
-        // edge of the row-subset loader (the full loader answers `none`); an unchecked slice here was a raw panic
-        // while the wasm leg read undefined bytes (the 2026-08-12 fuzz
-        // divergence, run 31515916427).
-        let Some(base) = select_row_window(off, rid, c * 4, data.len()) else {
-            out.extend(std::iter::repeat(0.0f64).take(c));
-            continue;
-        };
-        for ch in data[base..base + c * 4].chunks_exact(4) {
-            out.push(f32::from_le_bytes([ch[0], ch[1], ch[2], ch[3]]) as f64);
-        }
-    }
-    mk(row_ids.len(), c, out)
-}
 
 /// The byte start of selected row `rid` (clamped to 0) when its whole
 /// `row_bytes` window `off + rid·row_bytes ..+ row_bytes` lies inside a

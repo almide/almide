@@ -55,7 +55,7 @@ effect fn append_text(path: String, content: String) -> Result[Unit, String] = _
 effect fn append_bytes(path: String, data: Bytes) -> Result[Unit, String] = {
   let old = if fs.exists(path) then __as_append(fs.read_bytes(path))!
   else bytes.new()
-  __as_append(fs.write_bytes(path, bytes.concat(old, data)))
+  __as_append(fs.write_bytes(path, bytes.__concat(old, data)))
 }
 
 local fn __as_append[A](r: Result[A, String]) -> Result[A, String] = match r {
@@ -195,10 +195,6 @@ effect fn walk(dir: String) -> Result[List[String], String] = _
 @category("FS.write")
 effect fn remove_all(path: String) -> Result[Unit, String] = _
 
-/// Size in bytes; err if missing.
-@intrinsic("almide_rt_fs_file_size")
-effect fn file_size(path: String) -> Result[Int, String] = _
-
 // Effect fn: the answer is a host read (`$TMPDIR` / GetTempPath), not a
 // constant — the bare-`fn` spelling was a misdeclaration (env.temp_dir was
 // always declared effect).
@@ -229,10 +225,6 @@ effect fn create_temp_dir(prefix: String) -> Result[String, String] = _
 /// True for a symlink, even a dangling one.
 @intrinsic("almide_rt_fs_is_symlink")
 effect fn is_symlink(path: String) -> Bool = _
-
-/// Mtime in Unix seconds; err if missing.
-@intrinsic("almide_rt_fs_modified_at")
-effect fn modified_at(path: String) -> Result[Int, String] = _
 
 // Rooted access (#4022, R-fs-06): the analogue of Go 1.24's `os.Root`. A
 // program that joins untrusted input onto a base directory opens the base as
@@ -285,7 +277,7 @@ local fn __root_segments(path: String) -> List[String]? =
 // escape refusal for an absolute path or a `..` past the root.
 local fn __root_at(root: FsRoot, path: String) -> Result[String, String] = match __root_segments(path) {
   none => err("fs: path escapes root: " + path),
-  some(segs) => ok(__root_dir(root) + "\u{0}" + string.join(segs, "/")),
+  some(segs) => ok(__root_dir(root) + "\u{0}" + list.join(segs, "/")),
 }
 
 // A rooted call's answer, its symlink refusal completed with `path`.

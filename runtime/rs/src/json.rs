@@ -299,29 +299,10 @@ pub fn almide_json_get(j: &AlmideValue, key: &str) -> Option<AlmideValue> {
     }
 }
 
-pub fn almide_json_get_string(j: &AlmideValue, key: &str) -> Option<AlmideString> { let __almide_v: Option<AlmideString> = (|| {
-    match almide_json_get(j, key)? { AlmideValue::Str(s) => Some(s), _ => None }
-})(); __almide_v.into_almide() }
 
-/// An Int field only: a Float value is `None`, even an integral one (`3.0`),
-/// never truncated — the same answer as `value.as_int` and Codec Int decode, and
-/// the self-hosted `json_get_int` the wasm legs link (#2476). The widening runs
-/// one way only: `get_float` accepts an Int (C-085).
-pub fn almide_json_get_int(j: &AlmideValue, key: &str) -> Option<i64> {
-    match almide_json_get(j, key)? { AlmideValue::Int(n) => Some(n), _ => None }
-}
 
-pub fn almide_json_get_float(j: &AlmideValue, key: &str) -> Option<f64> {
-    match almide_json_get(j, key)? { AlmideValue::Float(f) => Some(f), AlmideValue::Int(n) => Some(n as f64), _ => None }
-}
 
-pub fn almide_json_get_bool(j: &AlmideValue, key: &str) -> Option<bool> {
-    match almide_json_get(j, key)? { AlmideValue::Bool(b) => Some(b), _ => None }
-}
 
-pub fn almide_json_get_array(j: &AlmideValue, key: &str) -> Option<Vec<AlmideValue>> {
-    match almide_json_get(j, key)? { AlmideValue::Array(a) => Some(a), _ => None }
-}
 
 // ── Keyless extractors ──
 
@@ -351,21 +332,6 @@ pub fn almide_json_keys(j: &AlmideValue) -> Vec<AlmideString> { let __almide_v: 
     match j { AlmideValue::Object(entries) => entries.iter().map(|(k, _)| k.to_string()).collect(), _ => vec![] }
 })(); __almide_v.into_almide() }
 
-pub fn almide_json_to_map(j: &AlmideValue) -> Option<AlmideMap<AlmideString, AlmideString>> { let __almide_v: Option<AlmideMap<String, String>> = (|| {
-    match j {
-        AlmideValue::Object(entries) => {
-            let map: AlmideMap<String, String> = entries.iter().map(|(k, v)| {
-                let s = match v {
-                    AlmideValue::Str(s) => s.to_string(),
-                    _ => String::from(almide_rt_value_stringify(v)),
-                };
-                (k.to_string(), s)
-            }).collect();
-            Some(map)
-        }
-        _ => None,
-    }
-})(); __almide_v.into_almide() }
 
 pub fn almide_json_object(entries: &[(AlmideString, AlmideValue)]) -> AlmideValue {
     AlmideValue::Object(entries.iter().map(|(k, v)| (almide_rt_intern_key(k), v.clone())).collect())
@@ -442,10 +408,6 @@ impl AlmideRepr for AlmideJsonPath {
 // legs' self-hosted twin prints the same text.
 pub fn almide_rt_json_path_repr(path: &AlmideJsonPath) -> AlmideString { path.almide_repr().into_almide() }
 
-// Wrapper functions for stdlib codegen (json.root(), json.field(), json.index())
-pub fn almide_rt_json_root() -> AlmideJsonPath { AlmideJsonPath::JpRoot }
-pub fn almide_rt_json_field(path: AlmideJsonPath, name: &str) -> AlmideJsonPath { AlmideJsonPath::JpField(std::boxed::Box::new(path), name.to_string()) }
-pub fn almide_rt_json_index(path: AlmideJsonPath, i: i64) -> AlmideJsonPath { AlmideJsonPath::JpIndex(std::boxed::Box::new(path), i) }
 
 /// Resolve a AlmideJsonPath to a list of traversal steps, root-first.
 fn resolve_path(path: &AlmideJsonPath) -> Vec<AlmidePathStep> {
@@ -486,25 +448,7 @@ fn get_by_step(v: &AlmideValue, step: &AlmidePathStep) -> Option<AlmideValue> {
     }
 }
 
-pub fn almide_json_get_path(j: &AlmideValue, path: &AlmideJsonPath) -> Option<AlmideValue> {
-    let steps = resolve_path(path);
-    let mut current = j.clone();
-    for step in &steps {
-        current = get_by_step(&current, step)?;
-    }
-    Some(current)
-}
 
-pub fn almide_json_set_path(j: &AlmideValue, path: &AlmideJsonPath, value: AlmideValue) -> Result<AlmideValue, AlmideString> { let __almide_r: Result<AlmideValue, String> = (|| {
-    let steps = resolve_path(path);
-    // #4209: the value set_path builds nests its path's steps plus the new
-    // value's own nesting deep; past parse's bound it is refused, so a
-    // value made here is one `json.parse` could have made.
-    if steps.len() > JSON_MAX_DEPTH || json_nests_past(&value, JSON_MAX_DEPTH - steps.len()) {
-        return Err(json_depth_error());
-    }
-    Ok(set_at_steps(j, &steps, &value))
-})(); __almide_r.map_err(Into::into) }
 
 /// The `@reuse(j)` twin (#4207): a document at its last use is updated IN
 /// PLACE — only the path is walked, every untouched sibling stays where it is
@@ -565,10 +509,6 @@ fn json_nests_past(v: &AlmideValue, budget: usize) -> bool {
     }
 }
 
-pub fn almide_json_remove_path(j: &AlmideValue, path: &AlmideJsonPath) -> AlmideValue {
-    let steps = resolve_path(path);
-    remove_at_steps(j, &steps)
-}
 
 fn set_at_steps(j: &AlmideValue, steps: &[AlmidePathStep], value: &AlmideValue) -> AlmideValue {
     if steps.is_empty() { return value.clone(); }

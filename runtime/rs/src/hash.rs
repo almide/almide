@@ -24,7 +24,6 @@ fn fnv1a32(data: &[u8]) -> i64 {
 }
 
 pub fn almide_rt_hash_fnv1a32(b: &Vec<u8>) -> i64 { fnv1a32(b) }
-pub fn almide_rt_hash_fnv1a32_bytes(b: &Vec<u8>) -> i64 { fnv1a32(b) }
 
 const ALMIDE_SHA_K: [u32; 64] = [
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,

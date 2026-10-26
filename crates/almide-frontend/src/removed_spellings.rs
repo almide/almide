@@ -67,8 +67,11 @@ pub fn parse_break(epoch: u32, text: &str) -> Option<Removal> {
     let fate = if rest.starts_with("delete the call") {
         Fate::Deleted { repair: rest.to_string() }
     } else if let Some(shape) = rest.strip_prefix("rewrite as ") {
+        // The replacement is a call (`list.drop(xs, 1)`) or, for a spelling
+        // an operator or a plain value replaced, an expression (`a + b`).
         let (new_call, _) = between(shape, "`", "`")?;
-        Fate::Rewritten { to: callee(new_call)?.to_string(), repair: rest.to_string() }
+        let to = callee(new_call).unwrap_or(new_call.trim());
+        Fate::Rewritten { to: to.to_string(), repair: rest.to_string() }
     } else {
         let (import_line, rest) = between(rest, "`", "`")?;
         let import = import_line.strip_prefix("import ")?.trim().to_string();
@@ -194,6 +197,27 @@ mod tests {
         );
         assert!(hint(&r).starts_with("`testing.assert_throws` was removed at dialect epoch 14: rewrite as `testing.assert_aborts("));
         assert!(parse_break(14, "`testing.assert_throws(f)` → rewrite as prose without a call").is_none());
+        // An operator replacement is an expression, not a call.
+        let r = parse_break(15, "`bytes.concat(a, b)` → rewrite as `a + b`: Bytes concatenate with `+`").unwrap();
+        assert_eq!(r.fate, Fate::Rewritten { to: "a + b".into(), repair: "rewrite as `a + b`: Bytes concatenate with `+`".into() });
+    }
+
+    /// Epoch 15 removed the stdlib spellings off the redesign's target
+    /// surface; every one is a removal row, so each call to one names its
+    /// replacement.
+    #[test]
+    fn every_epoch_15_removal_parses() {
+        let ledger: toml::Value = toml::from_str(LEDGER).unwrap();
+        let e15 = ledger["epoch"].as_array().unwrap().iter().find(|e| e["n"].as_integer() == Some(15)).unwrap();
+        for b in e15["breaks"].as_array().unwrap().iter().filter_map(|b| b.as_str()) {
+            let shaped = b.contains("` → `import ") || b.contains("` → delete the call") || b.contains("` → rewrite as `");
+            assert!(!shaped || parse_break(15, b).is_some(), "a removal-shaped break that does not parse: {b}");
+        }
+        for name in ["matrix.mul", "int.to_int8", "list.get_or", "bytes.concat", "path.trusted", "matrix.conv1d", "process.spawn"] {
+            assert!(lookup(name).is_some_and(|r| r.epoch == 15), "{name} has no epoch-15 removal row");
+        }
+        assert!(matches!(lookup("matrix.conv1d").map(|r| &r.fate), Some(Fate::Moved { .. })));
+        assert!(matches!(lookup("path.trusted").map(|r| &r.fate), Some(Fate::Deleted { .. })));
     }
 
     /// Epoch 14 removed 33 stdlib spellings, and every one of them parses as
@@ -214,7 +238,7 @@ mod tests {
         assert_eq!(all().iter().filter(|r| r.epoch == 14).count(), 34);
         assert!(lookup("matrix.gelu").is_some());
         assert!(matches!(lookup("testing.assert_throws").map(|r| &r.fate), Some(Fate::Rewritten { .. })));
-        assert!(lookup("matrix.mul").is_none());
+        assert!(lookup("matrix.gelu").is_some_and(|r| r.epoch == 14));
         assert!(removed_module_hint("mem").is_some());
         assert!(removed_module_hint("matrix").is_none());
         assert!(removed_module_hint("bytes").is_none());

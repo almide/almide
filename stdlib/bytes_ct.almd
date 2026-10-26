@@ -16,7 +16,7 @@ fn __bct_acc(a: Bytes, b: Bytes, n: Int, i: Int, acc: Int) -> Int =
     b,
     n,
     i + 1,
-    int.bor(acc, int.bxor(bytes.get_or(a, i, 0), bytes.get_or(b, i, 0))),
+    int.bor(acc, int.bxor(bytes.get(a, i) ?? 0, bytes.get(b, i) ?? 0)),
   )
 
 @implements("bytes.is_equal_constant_time")

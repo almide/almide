@@ -305,19 +305,6 @@ fn list_remove_at(xs: List[Int], i: Int) -> List[Int] = {
   buf
 }
 
-// list.tail = list.drop(xs, 1): a fresh List[Int] of elements [1, n) (empty when n<=1).
-// Self-contained copy (reusing __copy_slots), so it needs no cross-stdlib call.
-fn list_tail(xs: List[Int]) -> List[Int] = {
-  let h = prim.handle(xs)
-  let n = prim.load32(h + 4)
-  let newlen = if n > 0 then n - 1 else 0
-  let buf = prim.alloc_list(newlen)
-  let bh = prim.handle(buf)
-  let src1 = h + 12 + 8
-  let _c = __copy_slots(src1, bh + 12, newlen, 0)
-  buf
-}
-
 // list.take_end(xs, n): the LAST n elements (empty when n<0 — a negative count is 0,
 // #4147 — whole list when n>=len). start = clamped; copy [start, len) into a fresh List[Int].
 fn list_take_end(xs: List[Int], n: Int) -> List[Int] = {

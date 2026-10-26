@@ -96,29 +96,6 @@ effect fn exit(code: Int) -> Never = _
 effect fn pid() -> Int = _
 
 // ── Kept until their judge contracts move (C-096 and the stdin_lines and
-// process.env / sleep rows): the redesign gives these to `env` and `io`
-// (R-process-01) ──
-/// Full argv, program name at index 0.
-@intrinsic("almide_rt_process_args")
-@category("Env.read")
-effect fn args() -> List[String] = _
-
-/// All stdin lines; err on non-UTF-8 input.
-@ordered
-@intrinsic("almide_rt_process_stdin_lines")
-@category("IO.stdin")
-effect fn stdin_lines() -> Result[List[String], String] = _
-
-/// Variable value, or none if unset.
-@intrinsic("almide_rt_process_env")
-@category("Env.read")
-effect fn env(key: String) -> String? = _
-
-/// Blocks ms milliseconds; negative is 0.
-@intrinsic("almide_rt_process_sleep")
-@category("Time")
-effect fn sleep(ms: Int) -> Unit = _
-
 local fn __child(c: ProcessChild) -> Int = match c {
   ProcessChild(h) => h
 }

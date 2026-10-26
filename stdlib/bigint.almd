@@ -24,7 +24,7 @@ fn parse(s: String) -> Result[BigInt, String] = parse_radix(s, 10)
 /// radix outside 2..36 aborts.
 fn parse_radix(s: String, radix: Int) -> Result[BigInt, String] = {
   check_radix(radix)
-  let bytes = string.to_bytes(string.trim(s))
+  let bytes = bytes.to_list(bytes.from_string(string.trim(s)))
   match bytes {
     [] => err("cannot parse integer from empty string"),
     [45, ..rest] => read_digits(strip_radix_prefix(rest, radix), radix, true),
@@ -61,7 +61,7 @@ fn to_string_radix(x: BigInt, radix: Int) -> String = {
 // The chunks of k digits each, most significant first, as one text.
 local fn chunk_text(chunks: List[Int], radix: Int, k: Int) -> String = match chunks {
   [] => "0",
-  [top, ..rest] => int.to_string_radix(top, radix) + (rest |> list.map((c) => string.pad_start(int.to_string_radix(c, radix), k, "0")) |> string.join("")),
+  [top, ..rest] => int.to_string_radix(top, radix) + (rest |> list.map((c) => string.pad_start(int.to_string_radix(c, radix), k, "0")) |> list.join("")),
 }
 
 // ── the conversion limits (#4196) ──
@@ -497,7 +497,7 @@ else {
   // x = hi * 2^60 + lo, hi < 16
   let lo = int_value(make(false, list.take(x.limbs, 2)))
   let hi = int_value(make(false, list.drop(x.limbs, 2)))
-  some(int.to_uint64(lo) + int.to_uint64(hi) * int.to_uint64(1152921504606846976))
+  some(int.__to_uint64(lo) + int.__to_uint64(hi) * int.__to_uint64(1152921504606846976))
 }
 
 fn __trunc(x: BigInt) -> BigInt = x
@@ -507,18 +507,18 @@ fn __int_sat(x: BigInt) -> Int = match __int_exact(x) {
   none => if x.neg then int.min_value() else int.max_value(),
 }
 
-fn __uint64_sat(x: BigInt) -> UInt64 = if x.neg then int.to_uint64(0)
+fn __uint64_sat(x: BigInt) -> UInt64 = if x.neg then int.__to_uint64(0)
 else match __uint64_exact(x) {
   some(u) => u,
   none => uint64.max_value(),
 }
 
 fn __to_float(x: BigInt) -> Float = match __int_exact(x) {
-  some(n) => int.to_float(n),
+  some(n) => int.__raw_to_float(n),
   none => {
     // the top 61 bits with a sticky bit below them round like the whole value
     let (top, e) = top_bits(x, 61)
-    pow2(e) * int.to_float(top)
+    pow2(e) * int.__raw_to_float(top)
   },
 }
 
@@ -528,17 +528,17 @@ fn __to_float_exact(x: BigInt) -> Float? = {
 }
 
 fn __to_float32(x: BigInt) -> Float32 = match __int_exact(x) {
-  some(n) => int.to_float32(n),
+  some(n) => int.__raw_to_float32(n),
   none => {
     let (top, e) = top_bits(x, 61)
-    if e > 200 then float.to_float32(if x.neg then 0.0 - float.infinity() else float.infinity())
-    else float.to_float32(pow2(e) * float.from_float32(int.to_float32(top)))
+    if e > 200 then float.__raw_to_float32(if x.neg then 0.0 - float.infinity() else float.infinity())
+    else float.__raw_to_float32(pow2(e) * float.__from_float32(int.__raw_to_float32(top)))
   },
 }
 
 fn __to_float32_exact(x: BigInt) -> Float32? = {
   let f = __to_float32(x)
-  if float.__decimal_exact(float.from_float32(f)) == some(to_string(x)) then some(f) else none
+  if float.__decimal_exact(float.__from_float32(f)) == some(to_string(x)) then some(f) else none
 }
 
 fn __decimal_exact(x: BigInt) -> String? = some(to_string(x))

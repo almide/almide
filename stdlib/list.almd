@@ -23,10 +23,6 @@ fn length[A](xs: List[A]) -> Int = _
 @intrinsic("almide_rt_list_get")
 fn get[A](xs: List[A], i: Int) -> A? = _
 
-/// Element at i, or default when out of range.
-@intrinsic("almide_rt_list_get_or")
-fn get_or[A](xs: List[A], i: Int, default: A) -> A = _
-
 /// Copy with slot i = x; no-op if i out of range.
 @intrinsic("almide_rt_list_set")
 @reuse(xs)
@@ -82,9 +78,6 @@ fn take[A](xs: List[A], n: Int) -> List[A] = _
 @intrinsic("almide_rt_list_drop")
 @reuse(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
-
-/// All but the first element; [] when empty.
-fn tail[A](xs: List[A]) -> List[A] = list.drop(xs, 1)
 
 /// Duplicates removed; first occurrences kept.
 @intrinsic("almide_rt_list_unique")
@@ -269,10 +262,6 @@ fn repeat[A](x: A, n: Int) -> List[A] = _
 @consume(xs)
 fn intersperse[A](xs: List[A], sep: A) -> List[A] = _
 
-/// All n-long runs; [] if n > len; n <= 0 aborts.
-@intrinsic("almide_rt_list_windows")
-fn windows[A](xs: List[A], n: Int) -> List[List[A]] = _
-
 /// Adjacent equal runs collapsed; not global.
 @intrinsic("almide_rt_list_dedup")
 fn dedup[A](xs: List[A]) -> List[A] = _
@@ -286,11 +275,6 @@ fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 @intrinsic("almide_rt_list_drop_end")
 @reuse(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
-
-/// Random permutation; unseeded, differs per run.
-@intrinsic("almide_rt_list_shuffle")
-@consume(xs)
-fn shuffle[A](xs: List[A]) -> List[A] = _
 
 /// All n-long runs; [] if n > len; n <= 0 aborts.
 @intrinsic("almide_rt_list_window")
@@ -320,11 +304,6 @@ fn pop[A](mut xs: List[A]) -> A? = _
 fn clear[A](mut xs: List[A]) -> Unit = _
 
 // ── bundled-Almide extensions (non-TOML, pure Almide body) ──
-// Smoke fn: covered by spec/stdlib/list_bundled_test.almd as a regression
-// guard for the bundled-dispatch pipeline. Do not remove.
-/// n + 1; bundled-dispatch smoke fn.
-fn bundled_probe(n: Int) -> Int = n + 1
-
 // Split a list at index `n`. Equivalent to `(list.take(xs, n), list.drop(xs, n))`.
 // Demonstrates bundled-Almide calling existing stdlib fns.
 /// (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).

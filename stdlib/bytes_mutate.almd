@@ -30,13 +30,6 @@ fn bytes_set_u8(b: Bytes, pos: Int, val: Int) -> Unit = {
   else 0
 }
 
-fn bytes_set_at(b: Bytes, i: Int, val: Int) -> Unit = {
-  let n = prim.load32(prim.handle(b) + 4)
-  let base = prim.handle(b) + 12
-  let _ = if i >= 0 then (if i < n then __msb(base + i, val) else 0)
-  else 0
-}
-
 // ── 2-byte (i16/u16 store the same low-16 bits) ──
 fn __s16be(p: Int, val: Int) -> Int = {
   prim.store8(p, prim.bshr(val, 8))

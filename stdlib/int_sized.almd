@@ -1,4 +1,4 @@
-// int_sized — SELF-HOSTED signed narrowing `int.to_int8/16/32/64` for v1 (pure scalar).
+// int_sized — SELF-HOSTED signed narrowing `int.__to_int8/16/32/64` for v1 (pure scalar).
 // v0 truncates to N bits with SIGN extension (`n as i8/i16/i32`), widened back to Int:
 // take the low N bits, then if bit N-1 is set, subtract 2^N to sign-extend. to_int64 is
 // the identity. Composed from the prim band floor; cert-untouching (scalar).
@@ -58,7 +58,7 @@ fn int_to_uint16(n: Int) -> Int = prim.band(n, 65535)
 
 fn int_to_uint32(n: Int) -> Int = prim.band(n, 4294967295)
 
-// int.to_int8/16/32_saturating: CLAMP n to the signed N-bit range (v0 returns Int8/16/32
+// int.__to_int8/16/32_saturating: CLAMP n to the signed N-bit range (v0 returns Int8/16/32
 // but the value — and its decimal print — is exactly the clamp). Pure scalar; the same
 // `-> Int` shape as to_int8 above (the value byte-matches v0). Shared clamp helper.
 fn __sat_clamp(n: Int, lo: Int, hi: Int) -> Int = if n < lo then lo

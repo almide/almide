@@ -344,9 +344,6 @@ pub fn almide_rt_matrix_neg(m: &AlmideMatrix) -> AlmideMatrix {
     m.iter().map(|r| r.iter().map(|x| -x).collect()).collect()
 }
 
-pub fn almide_rt_matrix_pow(m: &AlmideMatrix, exp: f64) -> AlmideMatrix {
-    m.iter().map(|r| r.iter().map(|x| almide_rt_libm_pow(*x, exp)).collect()).collect()
-}
 
 pub fn almide_rt_matrix_mul(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
     // Dense matmul: BLAS if linked (have_blas → Accelerate cblas_dgemm, ~4.9x
@@ -463,54 +460,7 @@ pub fn almide_rt_matrix_concat_cols_many(matrices: &[AlmideMatrix]) -> AlmideMat
     }).collect()
 }
 
-pub fn almide_rt_matrix_linear_row(x: &AlmideMatrix, weight: &AlmideMatrix, bias: &[f64]) -> AlmideMatrix {
-    // y[i][j] = sum_k x[i][k] * weight[j][k] + bias[j]
-    if x.is_empty() || weight.is_empty() { return vec![].into(); }
-    let r = x.len();
-    let n_in = x[0].len();
-    let n_out = weight.len();
-    // #2483: the weight is (n_out, n_in) and the bias has one entry per
-    // output — `bias[j]` for j < n_out was a raw index panic on a short bias
-    // while the wasm body read 0.0 past the list and printed a value.
-    almide_rt_matrix_shape_eq(weight.cols, n_in);
-    almide_rt_matrix_shape_eq(bias.len(), n_out);
-    let mut out = vec![vec![0.0f64; n_out]; r];
-    for i in 0..r {
-        let xi = &x[i];
-        let oi = &mut out[i];
-        for j in 0..n_out {
-            let wj = &weight[j];
-            let mut s = 0.0;
-            for k in 0..n_in {
-                s += xi[k] * wj[k];
-            }
-            oi[j] = s + bias[j];
-        }
-    }
-    out.into()
-}
 
-pub fn almide_rt_matrix_linear_row_no_bias(x: &AlmideMatrix, weight: &AlmideMatrix) -> AlmideMatrix {
-    if x.is_empty() || weight.is_empty() { return vec![].into(); }
-    let r = x.len();
-    let n_in = x[0].len();
-    let n_out = weight.len();
-    almide_rt_matrix_shape_eq(weight.cols, n_in);
-    let mut out = vec![vec![0.0f64; n_out]; r];
-    for i in 0..r {
-        let xi = &x[i];
-        let oi = &mut out[i];
-        for j in 0..n_out {
-            let wj = &weight[j];
-            let mut s = 0.0;
-            for k in 0..n_in {
-                s += xi[k] * wj[k];
-            }
-            oi[j] = s;
-        }
-    }
-    out.into()
-}
 
 pub fn almide_rt_matrix_slice_rows(m: &AlmideMatrix, start: i64, end: i64) -> AlmideMatrix {
     // `list.slice` over the rows: both bounds clamp into [0, len] — a
@@ -525,55 +475,5 @@ pub fn almide_rt_matrix_slice_rows(m: &AlmideMatrix, start: i64, end: i64) -> Al
     mk(e - s, m.cols, m.data[s * m.cols..e * m.cols].to_vec())
 }
 
-pub fn almide_rt_matrix_conv1d(input: &AlmideMatrix, weight: &AlmideMatrix, bias: &[f64], kernel: i64, stride: i64, padding: i64) -> AlmideMatrix {
-    // input: (T, in_ch). weight: (out_ch, in_ch * kernel). bias: (out_ch,).
-    // Output: (T_out, out_ch) where T_out = floor((T + 2P - K) / S) + 1.
-    // Weight layout within a row: for c in 0..in_ch, for k in 0..kernel: weight[o][c*kernel + k].
-    let t_in = input.len();
-    if t_in == 0 || weight.is_empty() { return vec![].into(); }
-    let in_ch = input[0].len();
-    let out_ch = weight.len();
-    // The count domain, in one fixed order on both legs: stride is a step
-    // (below 1 aborts), kernel and padding are widths (a negative one clamps
-    // to 0 like every C-034/C-161 dimension — a kernel of 0 taps is the
-    // bias-only output both legs already agreed on), and the padded length
-    // is bounded by the shared ceiling BEFORE `t_in + 2 * p` is formed, so
-    // the two legs never disagree by an overflow one of them wrapped.
-    let s = almide_rt_matrix_stride(stride);
-    let k = kernel.max(0) as usize;
-    let p = padding.max(0) as usize;
-    if p as i64 > ALMIDE_MATRIX_MAX_ELEMS {
-        almide_abort("matrix dimensions too large");
-    }
-    // The weight row is `in_ch * kernel` taps wide and the bias has one entry
-    // per output channel: a short weight row or bias was a raw index panic
-    // natively and an out-of-block read on the wasm leg.
-    almide_rt_matrix_shape_eq(weight.cols, in_ch.checked_mul(k).unwrap_or(usize::MAX));
-    almide_rt_matrix_shape_eq(bias.len(), out_ch);
-    let t_padded = t_in + 2 * p;
-    if t_padded < k { return vec![].into(); }
-    let t_out = (t_padded - k) / s + 1;
-    let (t_out, out_ch) = almide_rt_matrix_dims(t_out as i64, out_ch as i64);
-    let mut out = vec![vec![0.0f64; out_ch]; t_out];
-    for t in 0..t_out {
-        let base = t * s;  // start in padded coords
-        for o in 0..out_ch {
-            let wo = &weight[o];
-            let mut sum = bias[o];
-            for c in 0..in_ch {
-                let w_base = c * k;
-                for ki in 0..k {
-                    let tp = base + ki;
-                    if tp >= p && tp < p + t_in {
-                        let tc = tp - p;
-                        sum += wo[w_base + ki] * input[tc][c];
-                    }
-                }
-            }
-            out[t][o] = sum;
-        }
-    }
-    out.into()
-}
 
 include!("matrix_p2.rs");

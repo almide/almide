@@ -17,12 +17,6 @@ fn hash_fnv1a32(b: Bytes) -> Int = {
 }
 
 // ── SHA-256 (FIPS 180-4) ──
-// The 64 round constants, materialized per digest (one list allocation).
-fn hash_fnv1a32_bytes(b: Bytes) -> Int = {
-  let h = prim.handle(b)
-  __fnv_go(h + 12, prim.load32(h + 4), 0, 2166136261)
-}
-
 // Rotate a 32-bit lane right by n (n in 1..31).
 fn __sha_k() -> List[Int] = [
   1116352408,

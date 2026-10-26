@@ -1,62 +1,13 @@
-// uint16 — bundled-Almide sized-numeric conversion module.
-//
-// See `int8.almd` for the routing rationale (dimensional pivot via
-// canonical `int`).
-/// Wraps to 8 bits; 255 becomes -1.
-fn to_int8(x: UInt16) -> Int8 = int.to_int8(int.from_uint16(x))
-
-/// Wraps to 16 bits; 65535 becomes -1.
-fn to_int16(x: UInt16) -> Int16 = int.to_int16(int.from_uint16(x))
-
-/// Zero-extending widen; always exact.
-fn to_int32(x: UInt16) -> Int32 = int.to_int32(int.from_uint16(x))
-
-/// Zero-extending widen; always exact.
-fn to_int64(x: UInt16) -> Int64 = int.to_int64(int.from_uint16(x))
-
-/// Wraps to 8 bits; 256 becomes 0.
-fn to_uint8(x: UInt16) -> UInt8 = int.to_uint8(int.from_uint16(x))
-
-/// Zero-extending widen; always exact.
-fn to_uint32(x: UInt16) -> UInt32 = int.to_uint32(int.from_uint16(x))
-
-/// Zero-extending widen; always exact.
-fn to_uint64(x: UInt16) -> UInt64 = int.to_uint64(int.from_uint16(x))
-
-/// Same value as Float32; always exact.
-fn to_float32(x: UInt16) -> Float32 = int.to_float32(int.from_uint16(x))
-
-/// Same value as Float64; always exact.
-fn to_float64(x: UInt16) -> Float64 = int.to_float64(int.from_uint16(x))
-
 /// Decimal digits; never a sign.
-fn to_string(x: UInt16) -> String = int.to_string(int.from_uint16(x))
+fn to_string(x: UInt16) -> String = int.to_string(int.__from_uint16(x))
 
 // ── Range-checked / saturating narrowings (matrix rule: lossy ⇒ trio) ──
-/// some(x), or none if x exceeds 127.
-fn to_int8_checked(x: UInt16) -> Int8? = int.to_int8_checked(int.from_uint16(x))
-
-/// Clamps x to at most 127.
-fn to_int8_saturating(x: UInt16) -> Int8 = int.to_int8_saturating(int.from_uint16(x))
-
-/// some(x), or none if x exceeds 32767.
-fn to_int16_checked(x: UInt16) -> Int16? = int.to_int16_checked(int.from_uint16(x))
-
-/// Clamps x to at most 32767.
-fn to_int16_saturating(x: UInt16) -> Int16 = int.to_int16_saturating(int.from_uint16(x))
-
-/// some(x), or none if x exceeds 255.
-fn to_uint8_checked(x: UInt16) -> UInt8? = int.to_uint8_checked(int.from_uint16(x))
-
-/// Clamps x to at most 255.
-fn to_uint8_saturating(x: UInt16) -> UInt8 = int.to_uint8_saturating(int.from_uint16(x))
-
 // ── Bounds ──
 /// Smallest UInt16: 0.
-fn min_value() -> UInt16 = int.to_uint16(0)
+fn min_value() -> UInt16 = int.__to_uint16(0)
 
 /// Largest UInt16: 65535.
-fn max_value() -> UInt16 = int.to_uint16(65535)
+fn max_value() -> UInt16 = int.__to_uint16(65535)
 
 // ── Integer: compare, select, divide (R-sized-02, R-sized-08, R-sized-10) ──
 /// -1, 0 or 1 as a is below, equal to or above b.
@@ -70,7 +21,7 @@ fn min(a: UInt16, b: UInt16) -> UInt16 = if a <= b then a else b
 fn max(a: UInt16, b: UInt16) -> UInt16 = if a >= b then a else b
 
 /// x limited to lo..hi; aborts when lo > hi.
-fn clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16 = int.to_uint16(int.clamp(int.from_uint16(x), int.from_uint16(lo), int.from_uint16(hi)))
+fn clamp(x: UInt16, lo: UInt16, hi: UInt16) -> UInt16 = int.__to_uint16(int.clamp(int.__from_uint16(x), int.__from_uint16(lo), int.__from_uint16(hi)))
 
 /// Quotient; the same as a / b for an unsigned type; b == 0 aborts.
 fn floor_div(a: UInt16, b: UInt16) -> UInt16 = a / b
@@ -79,32 +30,32 @@ fn floor_div(a: UInt16, b: UInt16) -> UInt16 = a / b
 fn modulo(a: UInt16, b: UInt16) -> UInt16 = a % b
 
 /// base raised to exp, wrapping to 16 bits like *; exp < 0 aborts.
-fn pow(base: UInt16, exp: Int) -> UInt16 = int.to_uint16(math.pow(int.from_uint16(base), exp))
+fn pow(base: UInt16, exp: Int) -> UInt16 = int.__to_uint16(math.__pow(int.__from_uint16(base), exp))
 
 /// True when x is a multiple of 2.
-fn is_even(x: UInt16) -> Bool = int.from_uint16(x) % 2 == 0
+fn is_even(x: UInt16) -> Bool = int.__from_uint16(x) % 2 == 0
 
 /// True when x is not a multiple of 2.
-fn is_odd(x: UInt16) -> Bool = int.from_uint16(x) % 2 != 0
+fn is_odd(x: UInt16) -> Bool = int.__from_uint16(x) % 2 != 0
 
 // ── Integer: bitwise, FixedWidthInteger: bit counts (R-sized-10) ──
 /// Bitwise AND.
-fn band(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.band(int.from_uint16(a), int.from_uint16(b)))
+fn band(a: UInt16, b: UInt16) -> UInt16 = int.__to_uint16(int.band(int.__from_uint16(a), int.__from_uint16(b)))
 
 /// Bitwise OR.
-fn bor(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.bor(int.from_uint16(a), int.from_uint16(b)))
+fn bor(a: UInt16, b: UInt16) -> UInt16 = int.__to_uint16(int.bor(int.__from_uint16(a), int.__from_uint16(b)))
 
 /// Bitwise XOR.
-fn bxor(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.bxor(int.from_uint16(a), int.from_uint16(b)))
+fn bxor(a: UInt16, b: UInt16) -> UInt16 = int.__to_uint16(int.bxor(int.__from_uint16(a), int.__from_uint16(b)))
 
 /// Bitwise complement of all 16 bits.
-fn bnot(x: UInt16) -> UInt16 = int.to_uint16(int.bnot(int.from_uint16(x)))
+fn bnot(x: UInt16) -> UInt16 = int.__to_uint16(int.bnot(int.__from_uint16(x)))
 
 /// a shifted left by n bits; n is taken mod 16.
-fn bshl(a: UInt16, n: Int) -> UInt16 = int.to_uint16(int.bshl(int.from_uint16(a), shift_count(n)))
+fn bshl(a: UInt16, n: Int) -> UInt16 = int.__to_uint16(int.bshl(int.__from_uint16(a), shift_count(n)))
 
 /// Zero-filling right shift; n is taken mod 16.
-fn bshr(a: UInt16, n: Int) -> UInt16 = int.to_uint16(int.bshr(int.from_uint16(a), shift_count(n)))
+fn bshr(a: UInt16, n: Int) -> UInt16 = int.__to_uint16(int.bshr(int.__from_uint16(a), shift_count(n)))
 
 // n reduced into 0..15, a negative n included.
 local fn shift_count(n: Int) -> Int = {
@@ -113,35 +64,35 @@ local fn shift_count(n: Int) -> Int = {
 }
 
 /// Zero bits above the highest set bit, counted in 16 bits; 16 for 0.
-fn count_leading_zeros(x: UInt16) -> Int = int.count_leading_zeros(int.from_uint16(x)) - 48
+fn count_leading_zeros(x: UInt16) -> Int = int.count_leading_zeros(int.__from_uint16(x)) - 48
 
 /// Zero bits below the lowest set bit; 16 for 0.
 fn count_trailing_zeros(x: UInt16) -> Int = int.min(
-  int.count_trailing_zeros(int.from_uint16(x)),
+  int.count_trailing_zeros(int.__from_uint16(x)),
   16,
 )
 
 /// Number of set bits among the 16.
-fn count_ones(x: UInt16) -> Int = int.count_ones(int.from_uint16(x))
+fn count_ones(x: UInt16) -> Int = int.count_ones(int.__from_uint16(x))
 
 /// The 2 bytes in reverse order (endian flip).
-fn byte_swap(x: UInt16) -> UInt16 = int.to_uint16(int.bshr(int.byte_swap(int.from_uint16(x)), 48))
+fn byte_swap(x: UInt16) -> UInt16 = int.__to_uint16(int.bshr(int.byte_swap(int.__from_uint16(x)), 48))
 
 // ── FixedWidthInteger: wrapping, rotation, bit length; parse (R-int-11, R-int-12, R-sized-02) ──
 /// a + b wrapped to 16 bits.
-fn wrap_add(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.from_uint16(a) + int.from_uint16(b))
+fn wrap_add(a: UInt16, b: UInt16) -> UInt16 = int.__to_uint16(int.__from_uint16(a) + int.__from_uint16(b))
 
 /// a - b wrapped to 16 bits.
-fn wrap_sub(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.from_uint16(a) - int.from_uint16(b))
+fn wrap_sub(a: UInt16, b: UInt16) -> UInt16 = int.__to_uint16(int.__from_uint16(a) - int.__from_uint16(b))
 
 /// a * b wrapped to 16 bits.
-fn wrap_mul(a: UInt16, b: UInt16) -> UInt16 = int.to_uint16(int.from_uint16(a) * int.from_uint16(b))
+fn wrap_mul(a: UInt16, b: UInt16) -> UInt16 = int.__to_uint16(int.__from_uint16(a) * int.__from_uint16(b))
 
 /// The 16 bits of a rotated left by n; n is taken mod 16.
-fn rotate_left(a: UInt16, n: Int) -> UInt16 = int.to_uint16(rotate_bits(int.from_uint16(a), rotate_count(n)))
+fn rotate_left(a: UInt16, n: Int) -> UInt16 = int.__to_uint16(rotate_bits(int.__from_uint16(a), rotate_count(n)))
 
 /// The 16 bits of a rotated right by n; n is taken mod 16.
-fn rotate_right(a: UInt16, n: Int) -> UInt16 = int.to_uint16(rotate_bits(int.from_uint16(a), rotate_count(0 - rotate_count(n))))
+fn rotate_right(a: UInt16, n: Int) -> UInt16 = int.__to_uint16(rotate_bits(int.__from_uint16(a), rotate_count(0 - rotate_count(n))))
 
 // The low 16 bits v rotated left by k (k in 0..15); bits above 16 are dropped by the narrowing.
 local fn rotate_bits(v: Int, k: Int) -> Int = if k == 0 then v
@@ -153,26 +104,26 @@ local fn rotate_count(n: Int) -> Int = {
 }
 
 /// Bits needed to hold x; 0 for 0.
-fn bit_length(x: UInt16) -> Int = 64 - int.count_leading_zeros(int.from_uint16(x))
+fn bit_length(x: UInt16) -> Int = 64 - int.count_leading_zeros(int.__from_uint16(x))
 
 /// Decimal UInt16 from ASCII-trimmed s; err on junk, a sign of -, or above 65535.
 fn parse(s: String) -> Result[UInt16, String] =
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
   else match int.parse(s) {
-    ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.to_uint16(n)),
+    ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.__to_uint16(n)),
     err(e) => err(e),
   }
 
 // ── Integer: radix text (R-sized-06) ──
 /// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
-fn to_string_radix(x: UInt16, radix: Int) -> String = int.to_string_radix(int.from_uint16(x), radix)
+fn to_string_radix(x: UInt16, radix: Int) -> String = int.to_string_radix(int.__from_uint16(x), radix)
 
 /// UInt16 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 65535.
 fn parse_radix(s: String, radix: Int) -> Result[UInt16, String] = {
   let parsed = int.parse_radix(s, radix)
   if string.starts_with(string.trim(s), "-") then err("invalid digit found in string")
   else match parsed {
-    ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.to_uint16(n)),
+    ok(n) => if n > 65535 then err("number too large to fit in target type") else ok(int.__to_uint16(n)),
     err(e) => err(e),
   }
 }
@@ -183,46 +134,46 @@ fn parse_radix(s: String, radix: Int) -> Result[UInt16, String] = {
 //    type defines below its own conversions. ──
 /// x as UInt16, toward zero; NaN, an infinity or a value outside UInt16 aborts.
 fn from[S: Numeric](x: S) -> UInt16 = match x.__trunc().__int_exact() {
-  some(n) => int.to_uint16_checked(n) ?? panic("uint16.from: the value is not a number in the range of UInt16"),
+  some(n) => int.__to_uint16_checked(n) ?? panic("uint16.from: the value is not a number in the range of UInt16"),
   none => panic("uint16.from: the value is not a number in the range of UInt16"),
 }
 
 /// some(x as UInt16) when UInt16 holds x exactly, else none (a fraction, NaN, out of range).
 fn from_checked[S: Numeric](x: S) -> UInt16? = match x.__int_exact() {
-  some(n) => int.to_uint16_checked(n),
+  some(n) => int.__to_uint16_checked(n),
   none => none,
 }
 
 /// x as UInt16, toward zero, clamped to UInt16's range; NaN is 0.
-fn from_saturating[S: Numeric](x: S) -> UInt16 = int.to_uint16_saturating(x.__int_sat())
+fn from_saturating[S: Numeric](x: S) -> UInt16 = int.__to_uint16_saturating(x.__int_sat())
 
 /// The low 16 bits of integer x as UInt16 (two's complement).
-fn from_wrapping[S: Integer](x: S) -> UInt16 = int.to_uint16(int.wrap(x.__bits64(), 16))
+fn from_wrapping[S: Integer](x: S) -> UInt16 = int.__to_uint16(int.wrap(x.__bits64(), 16))
 
 // ── Numeric / Integer requirements: the conversion pivots the `<T>.from`
 //    family reads through a type variable, and the receiver-less sum and
 //    product. Internal (`__`): the public surface is `from` and `list.sum`. ──
-fn __int_exact(x: UInt16) -> Int? = some(int.from_uint16(x))
+fn __int_exact(x: UInt16) -> Int? = some(int.__from_uint16(x))
 
-fn __uint64_exact(x: UInt16) -> UInt64? = int.__uint64_exact(int.from_uint16(x))
+fn __uint64_exact(x: UInt16) -> UInt64? = int.__uint64_exact(int.__from_uint16(x))
 
 fn __trunc(x: UInt16) -> UInt16 = x
 
-fn __int_sat(x: UInt16) -> Int = int.from_uint16(x)
+fn __int_sat(x: UInt16) -> Int = int.__from_uint16(x)
 
-fn __uint64_sat(x: UInt16) -> UInt64 = int.__uint64_sat(int.from_uint16(x))
+fn __uint64_sat(x: UInt16) -> UInt64 = int.__uint64_sat(int.__from_uint16(x))
 
-fn __to_float(x: UInt16) -> Float = int.to_float(int.from_uint16(x))
+fn __to_float(x: UInt16) -> Float = int.__raw_to_float(int.__from_uint16(x))
 
-fn __to_float_exact(x: UInt16) -> Float? = int.__to_float_exact(int.from_uint16(x))
+fn __to_float_exact(x: UInt16) -> Float? = int.__to_float_exact(int.__from_uint16(x))
 
-fn __to_float32(x: UInt16) -> Float32 = int.to_float32(int.from_uint16(x))
+fn __to_float32(x: UInt16) -> Float32 = int.__raw_to_float32(int.__from_uint16(x))
 
-fn __to_float32_exact(x: UInt16) -> Float32? = int.to_float32_checked(int.from_uint16(x))
+fn __to_float32_exact(x: UInt16) -> Float32? = int.__to_float32_checked(int.__from_uint16(x))
 
-fn __decimal_exact(x: UInt16) -> String? = some(int.to_string(int.from_uint16(x)))
+fn __decimal_exact(x: UInt16) -> String? = some(int.to_string(int.__from_uint16(x)))
 
-fn __bits64(x: UInt16) -> Int = int.from_uint16(x)
+fn __bits64(x: UInt16) -> Int = int.__from_uint16(x)
 
 fn __sum(xs: List[UInt16]) -> UInt16 = {
   let zero: UInt16 = 0

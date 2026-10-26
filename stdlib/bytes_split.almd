@@ -51,15 +51,6 @@ fn __bl_fill(lh: Int, bh: Int, blen: Int, from: Int, idx: Int, total: Int) -> In
     __bl_fill(lh, bh, blen, nl + 1, idx + 1, total)
   }
 
-fn bytes_lines(b: Bytes) -> List[Bytes] = {
-  let bh = prim.handle(b)
-  let blen = prim.load32(bh + 4)
-  let total = __bl_total(bh, blen)
-  let result = prim.alloc_list_str(total)
-  let _x = __bl_fill(prim.handle(result), bh, blen, 0, 0, total)
-  result
-}
-
 // ── chunks (consecutive `size`-byte blocks, last possibly shorter; size<=0 -> []) ────────────
 fn __bc_outer(oh: Int, bh: Int, total: Int, size: Int, ci: Int, start: Int) -> Int =
   if start >= total then 0

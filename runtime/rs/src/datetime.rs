@@ -171,11 +171,6 @@ pub fn almide_rt_datetime_add_days(ts: i64, n: i64) -> i64 { ts + n * 86400 }
 pub fn almide_rt_datetime_add_hours(ts: i64, n: i64) -> i64 { ts + n * 3600 }
 pub fn almide_rt_datetime_add_minutes(ts: i64, n: i64) -> i64 { ts + n * 60 }
 pub fn almide_rt_datetime_add_seconds(ts: i64, n: i64) -> i64 { ts + n }
-pub fn almide_rt_datetime_diff_seconds(a: i64, b: i64) -> i64 { a - b }
-pub fn almide_rt_datetime_is_before(a: i64, b: i64) -> bool { a < b }
-pub fn almide_rt_datetime_is_after(a: i64, b: i64) -> bool { a > b }
-pub fn almide_rt_datetime_from_unix(seconds: i64) -> i64 { seconds }
-pub fn almide_rt_datetime_to_unix(ts: i64) -> i64 { ts }
 
 // The day number of a timestamp, FLOORED (#2488): `ts / 86400` truncates toward
 // zero, so every pre-epoch second that is not on a day boundary landed on the

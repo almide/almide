@@ -710,8 +710,6 @@ pub fn almide_rt_map_is_empty<K, V>(m: &AlmideMap<K, V>) -> bool { m.is_empty() 
 // borrowed key form: `&String`/`&str` for a String key, `&i64` for Int.
 pub fn almide_rt_map_get<K: PartialEq + 'static, V: Clone, Q: ?Sized + PartialEq + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q) -> Option<V>
 where K: std::borrow::Borrow<Q> { m.get(k).cloned() }
-pub fn almide_rt_map_get_or<K: PartialEq + 'static, V: Clone, Q: ?Sized + PartialEq + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q, default: V) -> V
-where K: std::borrow::Borrow<Q> { m.get(k).cloned().unwrap_or(default) }
 // Consuming (@consume(m) in stdlib/map.almd): a caller whose map is dead at
 // the call moves it in and this is one hash insert; a caller that still uses
 // the source gets its clone inserted by pass_clone at the call site. The
@@ -851,6 +849,4 @@ pub fn almide_rt_map_update_owned<K: PartialEq + Clone + 'static, V: Clone>(mut 
 
 // ── Mutable operations ──
 
-pub fn almide_rt_map_insert<K: PartialEq + 'static, V>(m: &mut AlmideMap<K, V>, k: K, v: V) { m.insert(k, v); }
-pub fn almide_rt_map_delete<K: PartialEq + 'static, V>(m: &mut AlmideMap<K, V>, k: K) { m.remove(&k); }
 pub fn almide_rt_map_clear<K, V>(m: &mut AlmideMap<K, V>) { m.clear(); }

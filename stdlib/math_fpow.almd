@@ -1,4 +1,4 @@
-// math_fpow — SELF-HOSTED math.fpow (the FLOAT pow), a FAITHFUL bit-exact transcription of
+// math_fpow — SELF-HOSTED math.__fpow (the FLOAT pow), a FAITHFUL bit-exact transcription of
 // runtime/rs/src/libm.rs `pow` (vendored libm 0.2.16, origin FreeBSD e_pow.c). The f64 ops are
 // natural Float operators (they lower to the prim float floor); every f64 CONSTANT is a
 // prim.ffrombits(<exact i64 bits>) so the value is the exact libm bit pattern (no decimal-literal
@@ -7,7 +7,7 @@
 // wraps only where Rust truncates (the odd-int high-shift, the z bit re-split, the u32 underflow
 // subtraction). Validated bit-for-bit against the compiled vendored `pow` over 32k inputs.
 //
-// NB the registered name is `math.fpow` (NOT `math.pow` — that is the INTEGER pow in math_int.almd).
+// NB the registered name is `math.__fpow` (NOT `math.__pow` — that is the INTEGER pow in math_int.almd).
 //
 // Rust `pow` mutates locals and uses many early `return`s; Almide has neither, so the body is
 // restructured into nested if/else value-expressions and __pow_* helpers that thread the would-be
@@ -374,7 +374,7 @@ fn __fpow_after_specials(x: Float, y: Float, hx: Int, lx: Int, hy: Int, ly: Int,
   } else __fpow_signed(x, y, hx, ix, iy, hy, yisint)
 }
 
-// ── public entry: math.fpow(base, exp) — libm.rs:1165-1185 (the x**0 / 1**y prelude) ──
+// ── public entry: math.__fpow(base, exp) — libm.rs:1165-1185 (the x**0 / 1**y prelude) ──
 fn math_fpow(base: Float, exp: Float) -> Float = {
   // NB: use `base`/`exp` DIRECTLY — a scalar `let x = base` alias of a Float PARAMETER does
   // not lower in v1 (a bare-Var scalar bind falls to the deferred `Const` 0), which would

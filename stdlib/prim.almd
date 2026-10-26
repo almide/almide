@@ -496,7 +496,7 @@ fn i2f32(x: Int) -> Float32 = _
 fn f32bits(x: Float32) -> Int = _
 
 // Abort: write the message bytes at String-block address `s` to STDERR and
-// exit(1) — the self-host arm of the §13 termination convention (math.pow
+// exit(1) — the self-host arm of the §13 termination convention (math.__pow
 // negative exponent, int.rotate nonpositive width). Never returns.
 @intrinsic("almide_rt_prim_die")
 fn die(s: Int) -> Unit = _

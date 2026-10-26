@@ -31,7 +31,7 @@ effect fn v7() -> Uuid = {
     int.bshr(seq, 8),
     int.band(seq, 255)
   ])
-  Uuid(__versioned(bytes.concat(head, random.bytes(8)), 7))
+  Uuid(__versioned(bytes.__concat(head, random.bytes(8)), 7))
 }
 
 /// The Uuid s spells: 8-4-4-4-12 hex digits, either case, optionally in {…} or after urn:uuid:.
@@ -40,7 +40,7 @@ fn parse(s: String) -> Result[Uuid, String] = {
   let groups = string.split(body, "-")
   let lens = groups |> list.map((g) => string.len(g))
   if lens != [8, 4, 4, 4, 12] then err("uuid.parse: not an 8-4-4-4-12 UUID: \"${s}\"")
-  else match hex.decode(string.join(groups, "")) {
+  else match hex.decode(list.join(groups, "")) {
     ok(b) => ok(Uuid(b)),
     err(_) => err("uuid.parse: not an 8-4-4-4-12 UUID: \"${s}\""),
   }

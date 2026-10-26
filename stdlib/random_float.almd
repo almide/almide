@@ -13,5 +13,5 @@ fn random_float() -> Float = {
   let _e = prim.random_get(p, 8)
   let r = prim.load64(p)
   let r53 = int.band(r, 0x1FFFFFFFFFFFFF)
-  int.to_float(r53) / 9007199254740992.0
+  int.__raw_to_float(r53) / 9007199254740992.0
 }

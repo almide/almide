@@ -189,12 +189,6 @@ else {
   __hex_val(data, pos + 1, end, neg, acc2)
 }
 
-fn int_from_hex(s: String) -> Result[Int, String] = if __sti_bare(s) then __hex_raw(s)
-else {
-  let t = string.trim(s)
-  __hex_raw(t)
-}
-
 fn __hex_raw(s: String) -> Result[Int, String] = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
