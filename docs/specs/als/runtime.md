@@ -1,6 +1,6 @@
 # ALS — 実行時規範（Runtime）
 
-> Last updated: 2026-10-17
+> Last updated: 2026-10-26
 
 プログラム実行の観測規範（エラー終了・文字列補間の表示形・並行コンビネータ）。
 参照方法は [strings.md](strings.md) 冒頭と同じ。
@@ -310,12 +310,16 @@ target, body, headers)` はソケットなしでリクエストを作り、読�
 - `http.mount(prefix, sub)` は prefix 以降のパスとクエリを `sub` に渡し、prefix
   が束縛した名前は `sub` からも読める。`http.wrap(h, [a, b])` は `a(b(h))` で
   あり、リストの先頭が最も外側になる。
-- `http.decode_json(req, decode)` は本文を JSON として読み decode に渡す。
-  失敗の `err` は理由を本文に持つ `400 Bad Request` のレスポンスである。
-  ハンドラの `err` は `err` のまま呼び出し側に返る。
+- `http.decode_json[T](req)` は本文を JSON として読み、`T.decode_strict` で
+  入力の型 `T`（`: Decode` だけの record。C-435）に変換する。失敗の `err` は
+  理由を本文に持つ `400 Bad Request` のレスポンスである。`T` の外のキー
+  （知らないキーと `@skip` のキー）は `400 Bad Request: unknown key '<k>'`
+  である。`T` が `Encode` でもある型（`Codec`）、`Codec` の record を入れ子に
+  持つ型、variant は検査時に E110 である（C-436）。ハンドラの `err` は `err`
+  のまま呼び出し側に返る。
 
 テスト: `spec/stdlib/http_router_test.almd`。
-Contracts: C-275, C-368。
+Contracts: C-275, C-368, C-436。
 
 ## ALS-R9 プロセス終了コードの値域
 

@@ -39,7 +39,7 @@
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1302 | 409 | 718 | 88 | 87 | 417 |
+| 1001 | 1302 | 408 | 718 | 88 | 88 | 417 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
@@ -78,7 +78,7 @@
 | [`heap`](#heap)（新しいモジュール） | 16 | 16 | 0 | 0 | 0 | [L2-heap.md](L2-heap.md) |
 | [`hex`](#hex) | 3 | 0 | 0 | 0 | 0 | [L2-hex.md](L2-hex.md) |
 | [`html`](#html) | 5 | 0 | 0 | 0 | 0 | [L2-html.md](L2-html.md) |
-| [`http`](#http) | 34 | 4 | 5 | 9 | 18 | [L2-http.md](L2-http.md) |
+| [`http`](#http) | 34 | 4 | 5 | 10 | 18 | [L2-http.md](L2-http.md) |
 | [`int`](#int) | 45 | 14 | 2 | 4 | 41 | [L2-int.md](L2-int.md) |
 | [`int16`](#int16) | 37 | 34 | 0 | 0 | 19 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`int32`](#int32) | 37 | 34 | 0 | 0 | 21 | [L2-sized-numbers.md](L2-sized-numbers.md) |
@@ -867,7 +867,7 @@
 | `body` | `fn http.body[M: HttpMessage](m: M) -> String` | 意味変更: `HttpRequest` も受け取る | R-http-12 |
 | `body_bytes` | `fn http.body_bytes[M: HttpMessage](m: M) -> Bytes` | 新規。`HttpRequest` も受け取る | R-http-12 |
 | `cancel` | `effect fn http.cancel(c: HttpCall) -> Unit` |  | R-http-01 |
-| `decode_json` | `fn http.decode_json[A](req: HttpRequest, decode: (Value) -> Result[A, String]) -> Result[A, HttpResponse]` |  |  |
+| `decode_json` | `fn http.decode_json[A: Decode](req: HttpRequest) -> Result[A, HttpResponse]` | 型引数 `A` は入力の型（`: Decode` だけの record）。`Codec` の型は E110。本文は `A.decode_strict` で読み、型の外のキーは `400 Bad Request: unknown key '<k>'`（decode 関数の引数は撤去） | 行 22、C-436 |
 | `get` | `effect fn http.get(url: String) -> String` |  | R-http-01 |
 | `get_response` | `effect fn http.get_response(url: String) -> HttpResponse` |  | R-http-01 |
 | `header` | `fn http.header[M: HttpMessage](m: M, name: String) -> String?` | 改名（旧 `get_header`）。`HttpRequest` も受け取る | R-http-12 |

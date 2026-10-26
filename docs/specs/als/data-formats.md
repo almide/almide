@@ -1,6 +1,6 @@
 # ALS — データ形式（Data Formats）
 
-> Last updated: 2026-10-24
+> Last updated: 2026-10-26
 
 JSON / 正規表現 / バイナリ形式の観測規範。参照方法は [strings.md](strings.md)
 冒頭と同じ。
@@ -44,6 +44,13 @@ JSON 数値・`\u` エスケープのデコード、整数形数値の f64 へ�
 モジュール dispatch、動的 Value モデル（merge / array 往復）、および
 decode エラーメッセージの文言はターゲット間で byte 一致する。
 
+`Codec` は `Encode` と `Decode` の合成である（C-435）。`: Decode` を宣言した型
+`T` は `T.decode`（レコード型ならさらに `T.decode_strict`）だけを、`: Encode`
+を宣言した型は `T.encode` だけを derive し、`: Codec` は両方を derive する。
+`: Codec` の型は `Encode` と `Decode` の両方に適合する（`[T: Decode]` の境界を
+満たす）。宣言していない向きのメソッドの参照は E002 で拒否する。`Encode` で
+ない `: Decode` の型を入力の型と呼び、そのフィールドはすべて入力である。入力の
+型のフィールドに `@skip` / `@skip_decode` を付けると E053 で拒否する。
 `: Codec` を宣言した型 `T` は静的メソッド `T.encode` / `T.decode` を持つ。
 レコードの encode は宣言順に走り、`none` のフィールドを省略する（明示
 null は出さない。`Value?` の `some(null)` だけが明示 null になる）。
@@ -75,7 +82,7 @@ Value variant 名を使う `expected Int` / `expected Float` / `expected Str` /
 `spec/wasm_cross/codec_variant_roundtrip.almd`・
 `spec/wasm_cross/codec_extra_keys.almd`・
 `spec/wasm_cross/codec_float_int.almd` — が固定する。
-Contracts: C-084, C-085, C-087, C-095, C-098, C-103, C-209, C-427, C-428, C-429。
+Contracts: C-084, C-085, C-087, C-095, C-098, C-103, C-209, C-427, C-428, C-429, C-435。
 
 ## ALS-D7 バイト列ブリッジ
 
