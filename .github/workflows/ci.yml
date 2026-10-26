@@ -2101,6 +2101,12 @@ jobs:
         shell: bash
         run: |
           cargo test --test tool_arming_tripwire_test --test lsp_test --test fix_test --test diagnostic_harness_test
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            # The rustc floor's Windows path (#4110, CVE-2024-24576 is a
+            # Windows bug): the rustup fallback and the CRLF version line,
+            # judged on the OS itself. tests/rustc_floor_test.rs is unix-only.
+            cargo test --bin almide rustc_floor::
+          fi
           if [ "${{ runner.os }}" != "Windows" ]; then
             cargo test --test wasm_runtime_inline --test wasm_runtime_interp_ledger --test wasm_runtime_fail_corpus
           fi
