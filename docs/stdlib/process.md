@@ -223,9 +223,16 @@ effect fn main() -> Unit = {
 
 ### `process.kill(pid: Int, signal: Int) -> Result[Unit, String]`
 
-Send `signal` to the process `pid` (e.g. 15 for SIGTERM, 9 for SIGKILL); the
-err is `kill`'s stderr. For a child of this program, `process.stop` also waits
-and reaps it; `kill` is for any pid.
+Send `signal` to the process `pid` (e.g. 15 for SIGTERM, 9 for SIGKILL). The
+signal goes through the kill(2) system call, never a `kill` program found on
+`PATH`. `pid` must be in 1..=2147483647 — `0` (the caller's process group) and
+`-1` (every process the user may signal) are refused — and `signal` in 0..=31
+(0 only asks whether the process exists). Every err is a fixed text:
+`process.kill(<pid>, <signal>): pid must be in 1..=2147483647`,
+`…: signal must be in 0..=31`, or the kill(2) failure as `no such process`,
+`operation not permitted` or `invalid signal`. Under `[permissions] proc`,
+`kill` must be on the list. For a child of this program, `process.stop` also
+waits and reaps it; `kill` is for any pid.
 
 ```almd check
 import process
@@ -277,112 +284,8 @@ effect fn main() -> Unit = {
 
 ## Kept until they move
 
-Execute a command in a specific working directory
-
-```almd check
-import process
-
-effect fn main() -> Unit = {
-  let output = process.exec_in("/tmp", "pwd", [])!
-  println(output)
-}
-```
-
-### `process.exec_with_stdin(cmd: String, args: List[String], input: String) -> Result[String, String]`
-
-Execute a command with input piped to its stdin
-
-```almd check
-import process
-
-effect fn main() -> Unit = {
-  let output = process.exec_with_stdin("cat", [], "hello")!
-  println(output)
-}
-```
-
-### `process.exec_status(cmd: String, args: List[String]) -> Result[{code: Int, stdout: String, stderr: String}, String]`
-
-Execute a command and return exit code, stdout, and stderr. The child's stdin
-is null (not the terminal) and its output is captured, so a program that needs
-the terminal — a pager, an editor, `stty` — belongs in `process.run`.
-
-```almd check
-import process
-
-effect fn main() -> Unit = {
-  let r = process.exec_status("ls", [])! // {code, stdout, stderr}
-  println("exit ${r.code}")
-  println(r.stdout)
-}
-```
-
-### `process.env(key: String) -> Option[String]`
-
-Get the value of an environment variable, or None if not set
-
-```almd check
-import process
-
-effect fn main() -> Unit = {
-  let home = process.env("HOME") ?? "/tmp"
-  println(home)
-}
-```
-
-### `process.spawn(cmd: String, args: List[String]) -> Result[Int, String]`
-
-Spawn a child process without waiting, return its PID
-
-```almd check
-import process
-
-effect fn main() -> Unit = {
-  let pid = process.spawn("node", ["server.js"])!
-  println("started pid ${pid}")
-}
-```
-
-### `process.kill(pid: Int, signal: Int) -> Result[Unit, String]`
-
-Send a signal to a process by PID (e.g. 15 for SIGTERM, 9 for SIGKILL). The
-signal goes through the kill(2) system call, never a `kill` program found on
-`PATH`. `pid` must be in 1..=2147483647 — `0` (the caller's process group) and
-`-1` (every process the user may signal) are refused — and `signal` in 0..=31
-(0 only asks whether the process exists). Every err is a fixed text:
-`process.kill(<pid>, <signal>): pid must be in 1..=2147483647`,
-`…: signal must be in 0..=31`, or the kill(2) failure as `no such process`,
-`operation not permitted` or `invalid signal`. Under `[permissions] proc`,
-`kill` must be on the list.
-
-```almd check
-import process
-
-effect fn main() -> Unit = {
-  let pid = process.spawn("sleep", ["30"])!
-  process.kill(pid, 15)!
-}
-```
-
-### `process.is_alive(pid: Int) -> Bool`
-
-Check if a process with the given PID is still running. A child this process
-spawned is polled through its handle (and reaped once it has exited), so the
-answer turns `false` when the child exits or is killed — a zombie never
-answers `true`. Any other pid is asked of the OS with kill(2) and signal 0
-(a process owned by another user is alive). A pid outside 1..=2147483647 is
-never alive. Under `[permissions] proc`, `kill` must be on the list.
-
-```almd check
-import process
-
-effect fn main() -> Unit = {
-  let pid = process.spawn("sleep", ["30"])!
-  let running = process.is_alive(pid)
-  println(if running then "running" else "exited")
-  process.kill(pid, 15)!
-}
-```
+`args`, `stdin_lines`, `env` and `sleep` belong to `env` and `io` in the
+redesign; they stay here until their behavior contracts move.
 
 ### `process.args() -> List[String]`
 
