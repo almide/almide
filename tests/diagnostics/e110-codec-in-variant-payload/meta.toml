@@ -1,0 +1,3 @@
+expects_code = "E110"
+expects_error = "its field `Grant.0` holds `Role`, which is also sent out"
+hint_substring = "type RoleInput: Decode"
