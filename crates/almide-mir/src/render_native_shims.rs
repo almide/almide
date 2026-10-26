@@ -83,12 +83,9 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
             "fn rt_float_to_bits(f: f64) -> i64 { if f.is_nan() { 0x7FF8_0000_0000_0000_u64 as i64 } else { f.to_bits() as i64 } }"),
     // Square-and-multiply with wrapping steps; a negative exponent is the
     // v0 abort `Error: negative exponent`, exit 1 (almide_rt_math_pow).
-    ("math.__pow", &[NTy::I64, NTy::I64],
-            Some(NTy::I64),
-            "fn rt_math___pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { eprintln!(\"Error: negative exponent\"); std::process::exit(1); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
-    // `int.pow` is the public name (`math.pow` left the surface, R-math-01):
-    // a bundled wrapper over `math.__pow`, which the rung renderer does not
-    // inline, so the public call keeps its own row with the same body.
+    // `int.pow` is the public name (`math.pow` left the surface, R-math-01),
+    // and the `^` operator on Int lowers to a call of it too (calls_p4.rs),
+    // so this one row serves both, as `math.pow`'s did.
     ("int.pow", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
             "fn rt_int_pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { eprintln!(\"Error: negative exponent\"); std::process::exit(1); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
