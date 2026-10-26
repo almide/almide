@@ -72,3 +72,52 @@ fn a_recursive_record_without_a_runtime_backed_field_is_left_alone() {
     let ops = main_ops(src);
     assert_eq!(calls(&ops, "compound.to_string"), 0, "routed to the runtime-backed wall:\n{ops:#?}");
 }
+
+
+/// `main`'s ops, or `None` when `main` walled on v1 (the honest refusal: the
+/// native leg then renders the program with its standard codegen).
+fn main_ops_if_lowered(src: &str) -> Option<Vec<String>> {
+    let funcs = lowered(src);
+    let f = funcs.iter().find(|f| f.name.as_str() == "main")?;
+    assert!(almide_mir::verify_ownership(f).is_ok(), "`main` fails ownership verification");
+    Some(f.ops.iter().map(|op| format!("{op:?}")).collect())
+}
+
+/// Calls to the structural repr v1 synthesizes for a user type (`__repr_Ev`,
+/// `__repr_Tag_Int`): after newtype erasure it walks the payload's CARRIER.
+fn synthesized_reprs(ops: &[String], ty: &str) -> usize {
+    let needle = format!("name: \"__repr_{ty}");
+    ops.iter().filter(|o| o.contains("CallFn") && o.contains(&needle)).count()
+}
+
+/// #4230: a user VARIANT whose payload is runtime-backed (a tuple case, a
+/// record case, and a generic variant whose fixed field is one) reaches the
+/// declared-repr pass the way a record does. Before, `main` lowered and
+/// displayed the value through the structural `__repr_Ev`, which after newtype
+/// erasure walks the carrier (`List[String]`, every header value), the form
+/// C-432 forbids. Now the part routes to the runtime-backed wall, so v1 refuses
+/// `main` rather than certifying the carrier's text.
+#[test]
+fn a_user_variant_with_a_runtime_backed_payload_is_not_displayed_through_its_carrier() {
+    let cases = [
+        ("type Ev = | Got(HttpRequest) | Nothing", "let v = Got(req)", "Ev"),
+        ("type Ev = | Hit { at: JsonPath } | Nothing", "let v = Hit { at: path }", "Ev"),
+        ("type Tag[T] = | Tagged(T, HttpRequest)", "let v: Tag[Int] = Tagged(1, req)", "Tag"),
+    ];
+    for (decl, bind, ty) in cases {
+        let src = format!("import http\nimport json\n\n{decl}\n\neffect fn main() -> Unit = {{\n{REQ}  {bind}\n  println(\"${{v}}\")\n}}\n");
+        let shown = main_ops_if_lowered(&src).map_or(0, |ops| synthesized_reprs(&ops, ty));
+        assert_eq!(shown, 0, "`{decl}` was displayed through its structural repr (the carrier):\n{src}");
+    }
+}
+
+/// The control for the test above: a variant whose payloads mention no
+/// runtime-backed type keeps its own structural display, so the probe above
+/// does see that route when it is taken.
+#[test]
+fn a_variant_without_a_runtime_backed_payload_is_left_alone() {
+    let src = "type P = | A(Int) | B(String) | C\n\neffect fn main() -> Unit = {\n  let p = A(1)\n  println(\"${p}\")\n}\n";
+    let ops = main_ops(src);
+    assert_eq!(synthesized_reprs(&ops, "P"), 1, "{ops:#?}");
+    assert_eq!(calls(&ops, "compound.to_string"), 0, "routed to the runtime-backed wall:\n{ops:#?}");
+}
