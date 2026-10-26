@@ -184,6 +184,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-env-02](L2-env.md#r-env-02-envvars-と-envremove-を足す---採用) | `env.vars` と `env.remove` を足す | ○ | #3908 |
 | [R-env-03](L2-env.md#r-env-03-envget-を--で受ける形を自前の-effect-fn-と同じにする---採用r-l0-17-に従う) | `env.get` を `??` で受ける形を、自前の effect fn と同じにする | ○ | #3900 |
 | [R-env-04](L2-env.md#r-env-04-待ち時間タイムアウトの引数を-duration-にする---不採用) | 待ち時間・タイムアウトの引数を `Duration` にする | × | なし |
+| [R-env-05](L2-env.md#r-env-05-資格情報を-secretstring-で読む-envsecret-を足す---採用2026-10-26) | 資格情報を `Secret[String]` で読む `env.secret` を足す | ○ | なし |
 | [R-error-01](L2-error.md#r-error-01-errorcontexterrormessageerrorchain-を撤去しerror-モジュールを閉じる---採用) | `error.context`・`error.message`・`error.chain` を撤去し、`error` モジュールを閉じる | ○ | #3909 |
 | [R-error-02](L2-error.md#r-error-02-errorcontext-を-resultcontext-として残す---不採用) | `error.context` を `result.context` として残す | × | — |
 | [R-ffi-01](L2-ffi.md#r-ffi-01-ffi-を作りbytes-の生ポインタ-5-関数を移す---採用) | `ffi` を作り、`bytes` の生ポインタ 5 関数を移す | ○ | #3853 |
@@ -210,6 +211,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-hash-04](L2-hash.md#r-hash-04-_hex-のセルの入力を-bytes-に変える---不採用-r-hash-05-で採用に変更) | `_hex` のセルの入力を Bytes に変える | ×（→ R-hash-05） | — |
 | [R-hash-05](L2-hash.md#r-hash-05-_hex-も-bytes-を受け取る完全性の規則-2-の見直し---採用) | `_hex` も `Bytes` を受け取る（完全性の規則 2 の見直し） | ○ | #3985 |
 | [R-hash-06](L2-hash.md#r-hash-06-hmac-と定数時間の比較を-hash-に置く完全性の規則-4-の見直し---採用) | HMAC と定数時間の比較を `hash` に置く（完全性の規則 4 の見直し） | ○ | #4106 |
+| [R-hash-07](L2-hash.md#r-hash-07-秘密は-secret-で受け渡し壊れた要約を撤去するr-hash-03r-hash-06-の見直し---採用2026-10-26) | 秘密は `Secret` で受け渡し、壊れた要約を撤去する（R-hash-03・R-hash-06 の見直し） | ○ | なし |
 | [R-heap-01](L2-heap.md#r-heap-01-heap-モジュールを足す---採用) | `heap` モジュールを足す | ○ | #3933 |
 | [R-heap-02](L2-heap.md#r-heap-02-heap-には中の並びに依存しないセルだけを置くcontainsanyallcountfilterclear---採用) | heap には中の並びに依存しないセルだけを置く（`contains`・`any`・`all`・`count`・`filter`・`clear`） | ○ | #3968 |
 | [R-heap-03](L2-heap.md#r-heap-03-heapnew_with-の例を引き算にしない---採用文書だけ) | `heap.new_with` の例を引き算にしない | ○ | #3968 |

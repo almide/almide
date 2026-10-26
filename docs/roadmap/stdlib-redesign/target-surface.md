@@ -39,20 +39,20 @@
 
 | いまの関数 | リデザイン後 | 据え置き | 新規 | 改名 | 意味変更 | 撤去 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1001 | 1302 | 408 | 718 | 88 | 88 | 417 |
+| 1001 | 1297 | 408 | 713 | 88 | 88 | 417 |
 
 固定幅の数（`int8`〜`uint64`、`float32`・`float64`）は型ごとに 1 関数と数えます。
 
 ## 実体の数
 
-この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,302 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
+この一覧は、同じ protocol の関数を型ごとに 1 行と数えています（計 1,297 行）。[protocol の階層](protocol-view.md)で数え直すと、覚える名前はずっと少なくなります。
 
 | 数え方 | 一覧の行 | 覚える名前 |
 |---|---:|---:|
 | protocol の要件（protocol ごとに 1 回） | 796 | 166 |
 | 値の型だけが持つ関数 | 297 | 297 |
-| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 209 | 209 |
-| 計 | 1302 | 672 |
+| 値の型を持たないモジュール（`fs`・`http`・`math` など） | 204 | 204 |
+| 計 | 1297 | 667 |
 
 ## モジュールごとの数
 
@@ -67,14 +67,14 @@
 | [`datetime`](#datetime) | 18 | 1 | 0 | 1 | 5 | [L2-datetime.md](L2-datetime.md) |
 | [`deque`](#deque)（新しいモジュール） | 60 | 60 | 0 | 0 | 0 | [L2-deque.md](L2-deque.md) |
 | [`duration`](#duration) | 7 | 1 | 0 | 0 | 0 | [L2-duration.md](L2-duration.md) |
-| [`env`](#env) | 8 | 2 | 0 | 0 | 3 | [L2-env.md](L2-env.md) |
+| [`env`](#env) | 9 | 3 | 0 | 0 | 3 | [L2-env.md](L2-env.md) |
 | `error`（モジュールごと撤去） | 0 | 0 | 0 | 0 | 3 | [L2-error.md](L2-error.md) |
 | [`ffi`](#ffi)（新しいモジュール） | 4 | 4 | 0 | 0 | 0 | [L2-ffi.md](L2-ffi.md) |
 | [`float`](#float) | 26 | 12 | 1 | 0 | 32 | [L2-float.md](L2-float.md) |
 | [`float32`](#float32) | 24 | 23 | 0 | 0 | 9 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`float64`](#float64) | 24 | 23 | 0 | 0 | 9 | [L2-sized-numbers.md](L2-sized-numbers.md) |
 | [`fs`](#fs) | 30 | 1 | 2 | 4 | 5 | [L2-fs.md](L2-fs.md) |
-| [`hash`](#hash) | 17 | 14 | 0 | 2 | 1 | [L2-hash.md](L2-hash.md) |
+| [`hash`](#hash) | 11 | 8 | 0 | 2 | 1 | [L2-hash.md](L2-hash.md) |
 | [`heap`](#heap)（新しいモジュール） | 16 | 16 | 0 | 0 | 0 | [L2-heap.md](L2-heap.md) |
 | [`hex`](#hex) | 3 | 0 | 0 | 0 | 0 | [L2-hex.md](L2-hex.md) |
 | [`html`](#html) | 5 | 0 | 0 | 0 | 0 | [L2-html.md](L2-html.md) |
@@ -549,6 +549,7 @@
 | `get` | `effect fn env.get(name: String) -> String?` |  | R-env-01、R-env-03 |
 | `os` | `fn env.os() -> String` |  |  |
 | `remove` | `effect fn env.remove(name: String) -> Result[Unit, String]` | 新規 | R-env-02 |
+| `secret` | `effect fn env.secret(name: String) -> Secret[String]?` | 新規。値は `Secret` で生まれる | R-env-05 |
 | `set` | `effect fn env.set(name: String, value: String) -> Unit` |  |  |
 | `sleep_ms` | `effect fn env.sleep_ms(ms: Int) -> Unit` |  | R-env-01 |
 | `vars` | `effect fn env.vars() -> Map[String, String]` | 新規 | R-env-02 |
@@ -791,16 +792,10 @@
 | `adler32` | `fn hash.adler32(b: Bytes) -> Int` | 新規 | R-hash-02 |
 | `crc32` | `fn hash.crc32(b: Bytes) -> Int` | 新規 | R-hash-02 |
 | `fnv1a32` | `fn hash.fnv1a32(b: Bytes) -> Int` | 意味変更: 引数を `Bytes` に。`fnv1a32(bytes.from_string(s))` | R-hash-01 |
-| `hmac_sha256` | `fn hash.hmac_sha256(key: Bytes, b: Bytes) -> Bytes` | 新規 | R-hash-06 |
-| `hmac_sha256_hex` | `fn hash.hmac_sha256_hex(key: Bytes, b: Bytes) -> String` | 新規 | R-hash-06 |
-| `hmac_sha512` | `fn hash.hmac_sha512(key: Bytes, b: Bytes) -> Bytes` | 新規 | R-hash-06 |
-| `hmac_sha512_hex` | `fn hash.hmac_sha512_hex(key: Bytes, b: Bytes) -> String` | 新規 | R-hash-06 |
-| `is_valid_hmac_sha256` | `fn hash.is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool` | 新規 | R-hash-06 |
-| `is_valid_hmac_sha512` | `fn hash.is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool` | 新規 | R-hash-06 |
-| `md5` | `fn hash.md5(b: Bytes) -> Bytes` | 新規 | R-hash-03 |
-| `md5_hex` | `fn hash.md5_hex(b: Bytes) -> String` | 新規。`Bytes` を受け取る | R-hash-03、R-hash-05 |
-| `sha1` | `fn hash.sha1(b: Bytes) -> Bytes` | 新規 | R-hash-03 |
-| `sha1_hex` | `fn hash.sha1_hex(b: Bytes) -> String` | 新規。`Bytes` を受け取る | R-hash-03、R-hash-05 |
+| `hmac_sha256` | `fn hash.hmac_sha256(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]` | 新規 | R-hash-06、R-hash-07 |
+| `hmac_sha512` | `fn hash.hmac_sha512(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]` | 新規 | R-hash-06、R-hash-07 |
+| `is_valid_hmac_sha256` | `fn hash.is_valid_hmac_sha256(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool` | 新規 | R-hash-06、R-hash-07 |
+| `is_valid_hmac_sha512` | `fn hash.is_valid_hmac_sha512(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool` | 新規 | R-hash-06、R-hash-07 |
 | `sha256` | `fn hash.sha256(b: Bytes) -> Bytes` |  |  |
 | `sha256_hex` | `fn hash.sha256_hex(b: Bytes) -> String` | 意味変更: `Bytes` を受け取る | R-hash-05 |
 | `sha512` | `fn hash.sha512(b: Bytes) -> Bytes` | 新規 | R-hash-03 |
@@ -811,6 +806,8 @@
 | 関数 | 代わり | 案 |
 |---|---|---|
 | `fnv1a32_bytes` | `fnv1a32` | R-hash-01 |
+
+足さない（R-hash-07）: `md5`・`md5_hex`・`sha1`・`sha1_hex`（安全性に使えない要約。epoch 15 で撤去、代わりは `sha256`）と、HMAC の `_hex` のセル `hmac_sha256_hex`・`hmac_sha512_hex`（16 進は `hex.encode(secret.reveal(tag))`）。
 
 ## heap
 
