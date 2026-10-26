@@ -1,7 +1,6 @@
 // math.choose answers a large n without looping min(k, n-k) times (#4212). Past
 // 64 steps it takes the odd-factorial form; the values are C(n, k) mod 2^64 read
 // as an Int, the first group checked against exact big-integer binomials.
-
 test "the odd-factorial form agrees with the exact binomial" {
   assert_eq(math.choose(200, 64), 5355594734165852119)
   assert_eq(math.choose(200, 65), 2975466241676598328)
