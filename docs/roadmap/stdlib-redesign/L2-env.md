@@ -61,7 +61,8 @@
 - (b) `vars` は `wasi:cli/environment` の `get-environment` そのものです。`remove` は `env.set` と同じく、p1 shim の guest 側の上書き記録（op 37、#3223）で wasm でも同じに動きます。新しい host op は要りません。結果は ADR-0027 D2 の固定された env で決定的です。
 - (c) 「全部の環境変数を出す」課題で、LLM は他言語の癖で 1 関数を探します。無いと書けません。
 - (d) 追加。使用数 0。
-- ゲート案: env の 4 つ組（get/vars/set/remove）が全部あることを、family の行列テストで確かめます。
+- ゲート案: env の 4 つ組（get/vars/set/remove）が全部あることを、family の行列テストで確かめます（`tests/env_variable_family_gate_test.rs`）。
+- 実装（#3908）: `remove` は `set` と同じ名前の検査（空の名前、`=`、NUL）をするので、`set` と同じく `Result[Unit, String]` を返します（`env.remove: empty name` など）。
 - issue: #3908
 
 ### R-env-03 `env.get` を `??` で受ける形を、自前の effect fn と同じにする — ○ 採用（R-L0-17 に従う）
@@ -98,8 +99,8 @@
 | `env.temp_dir` | `effect fn temp_dir() -> String` | Rust `env::temp_dir` / Go `os.TempDir` / Elixir `System.tmp_dir` | 撤去（→ `fs.temp_dir`） | R-env-01 |
 | `env.unix_timestamp` | `effect fn unix_timestamp() -> Int` | Python `time.time` / Elixir `os_time` | 撤去（→ `datetime.now`） | R-env-01 |
 | `env.millis` | `effect fn millis() -> Int` | JS `Date.now()` / Elixir `os_time(:millisecond)` | 撤去（→ `datetime.now_ms` へ移動） | R-env-01 |
-| `env.vars` | `effect fn vars() -> Map[String, String]`（案） | Rust `vars` / Go `Environ` / Python `environ` / Elixir `get_env/0` | 追加 | R-env-02 |
-| `env.remove` | `effect fn remove(name: String) -> Unit`（案） | Rust `remove_var` / Go `Unsetenv` / Elixir `delete_env` | 追加 | R-env-02 |
+| `env.vars` | `effect fn vars() -> Map[String, String]` | Rust `vars` / Go `Environ` / Python `environ` / Elixir `get_env/0` | 追加 | R-env-02 |
+| `env.remove` | `effect fn remove(name: String) -> Result[Unit, String]` | Rust `remove_var` / Go `Unsetenv` / Elixir `delete_env` | 追加 | R-env-02 |
 
 ## L0 への差し戻し（処理済み）
 

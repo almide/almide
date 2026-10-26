@@ -61,6 +61,43 @@ effect fn main() -> Unit = {
 }
 ```
 
+### `env.remove(name: String) -> Result[Unit, String]`
+
+Unset an environment variable for this process and the child processes it
+starts afterwards; `env.get` then answers none and `env.vars` leaves the name
+out. Removing a name that is not set is ok. The name follows `env.set`'s rule
+(C-421) and errs the same way under its own name: `env.remove: empty name`,
+`env.remove: name contains '='`, `env.remove: name contains NUL`.
+
+```almd check
+import env
+
+effect fn main() -> Unit = {
+  env.set("MY_VAR", "hello")!
+  env.remove("MY_VAR")!
+  println(env.get("MY_VAR") ?? "unset") // => unset
+}
+```
+
+### `env.vars() -> Map[String, String]`
+
+Every environment variable of this process, keyed and ordered by name, with
+the program's own `env.set` / `env.remove` calls applied. The values are plain
+text, secrets included: to read a credential, ask for it by name with
+`env.secret` instead of listing the whole environment. The call is written
+`env.vars()!`, the call shape every stdlib effect fn with an Almide body has
+today (R-env-03).
+
+```almd check
+import env
+
+effect fn main() -> Unit = {
+  env.set("MY_VAR", "hello")!
+  let all = env.vars()!
+  println(all["MY_VAR"] ?? "unset") // => hello
+}
+```
+
 ### `env.cwd() -> Result[String, String]`
 
 Get the current working directory.
