@@ -55,7 +55,9 @@ use wasmparser::{Parser, Payload};
 /// (an unserved op = a runtime refusal on a runtime the developer never
 /// ran — the env.set lesson): extend the shim and this list TOGETHER.
 pub const P1_SERVED_OPS: &[i32] = &[
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
+    // 17 and 18 (fs.file_size / fs.modified_at) are retired: the fs service
+    // no longer carries their bodies (62 is fold_lines_chunked's size probe).
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
     29, 30, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 51, 52, 60, 61, 62, 63, 64, 73,
     // The instance-parallel fan offer (#3003): answered "not served" (0), so
     // the guest's sequential path runs — byte-identical to the embedded host.
