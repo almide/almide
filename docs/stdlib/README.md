@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 50 stdlib modules, 1667 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 50 stdlib modules, 1662 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -17,14 +17,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [datetime](#datetime) | 23 | 0 |
 | [deque](#deque) | 60 | 1 |
 | [duration](#duration) | 7 | 0 |
-| [env](#env) | 9 | 0 |
+| [env](#env) | 10 | 0 |
 | [error](#error) | 3 | 0 |
 | [ffi](#ffi) | 4 | 0 |
 | [float](#float) | 61 | 0 |
 | [float32](#float32) | 33 | 0 |
 | [float64](#float64) | 33 | 0 |
 | [fs](#fs) | 41 | 1 |
-| [hash](#hash) | 18 | 0 |
+| [hash](#hash) | 12 | 0 |
 | [heap](#heap) | 16 | 1 |
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 5 | 0 |
@@ -456,6 +456,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect env.unix_timestamp() -> Int` — Wall-clock seconds since the Unix epoch.
 - `effect env.args() -> List[String]` — Program arguments, argv[0] excluded.
 - `effect env.get(name: String) -> Option[String]` — Value of name, or none if unset.
+- `effect env.secret(name: String) -> Option[Secret[String]]` — Value of name as a Secret (prints Secret(***), constant-time ==), or none if unset.
 - `effect env.set(name: String, value: String) -> Unit` — Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
 - `effect env.cwd() -> String` — Absolute current directory; err if unreadable.
 - `effect env.millis() -> Int` — Wall-clock ms since the Unix epoch.
@@ -678,18 +679,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `hash.sha256_hex(s: String) -> String` — SHA-256 of s's UTF-8, 64 lowercase hex chars.
 - `hash.crc32(b: Bytes) -> Int` — CRC-32 (IEEE, reflected) as an unsigned Int; 0 for empty b.
 - `hash.adler32(b: Bytes) -> Int` — Adler-32 as an unsigned Int; 1 for empty b.
-- `hash.md5(b: Bytes) -> Bytes` — 16-byte MD5 digest of b.
-- `hash.md5_hex(b: Bytes) -> String` — MD5 of b as 32 lowercase hex chars.
-- `hash.sha1(b: Bytes) -> Bytes` — 20-byte SHA-1 digest of b.
-- `hash.sha1_hex(b: Bytes) -> String` — SHA-1 of b as 40 lowercase hex chars.
 - `hash.sha512(b: Bytes) -> Bytes` — 64-byte SHA-512 digest of b.
 - `hash.sha512_hex(b: Bytes) -> String` — SHA-512 of b as 128 lowercase hex chars.
-- `hash.hmac_sha256(key: Bytes, b: Bytes) -> Bytes` — 32-byte HMAC-SHA256 of b under key (RFC 2104); key first.
-- `hash.hmac_sha256_hex(key: Bytes, b: Bytes) -> String` — HMAC-SHA256 of b under key as 64 lowercase hex chars.
-- `hash.hmac_sha512(key: Bytes, b: Bytes) -> Bytes` — 64-byte HMAC-SHA512 of b under key (RFC 2104); key first.
-- `hash.hmac_sha512_hex(key: Bytes, b: Bytes) -> String` — HMAC-SHA512 of b under key as 128 lowercase hex chars.
-- `hash.is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool` — True if tag is the HMAC-SHA256 of b under key, compared in constant time.
-- `hash.is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool` — True if tag is the HMAC-SHA512 of b under key, compared in constant time.
+- `hash.hmac_sha256(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]` — 32-byte HMAC-SHA256 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time.
+- `hash.hmac_sha512(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]` — 64-byte HMAC-SHA512 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time.
+- `hash.is_valid_hmac_sha256(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool` — True if tag is the HMAC-SHA256 of b under key, compared in constant time.
+- `hash.is_valid_hmac_sha512(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool` — True if tag is the HMAC-SHA512 of b under key, compared in constant time.
 
 ## heap
 
