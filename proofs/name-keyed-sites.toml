@@ -1077,7 +1077,7 @@ names = 5
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::SCALAR_TEXT_VERIFIED::table"
 class = "legacy"
-names = 60
+names = 59
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::SIZED_CONVERT_SUM_BUILDERS::table"

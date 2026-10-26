@@ -92,7 +92,7 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "string_is_alpha", "string_is_digit", "string_is_alphanumeric_uni", "string_is_upper",
     "string_is_lower",
     "base64_encode", "base64_encode_url", "hash_fnv1a32_bytes",
-    "datetime_add_days", "datetime_add_hours", "datetime_add_minutes", "datetime_add_seconds", "datetime_day", "datetime_diff_seconds", "datetime_format", "datetime_from_parts", "datetime_from_unix", "datetime_hour", "datetime_is_after", "datetime_is_before", "datetime_minute", "datetime_month", "datetime_second", "datetime_to_iso", "datetime_to_unix", "datetime_weekday", "datetime_year",
+    "datetime_add_days", "datetime_add_hours", "datetime_add_minutes", "datetime_add_seconds", "datetime_day", "datetime_diff_seconds", "datetime_format", "datetime_from_unix", "datetime_hour", "datetime_is_after", "datetime_is_before", "datetime_minute", "datetime_month", "datetime_second", "datetime_to_iso", "datetime_to_unix", "datetime_weekday", "datetime_year",
     "string_is_whitespace", "string_to_bytes",
 ];
 

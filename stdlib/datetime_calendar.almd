@@ -113,6 +113,10 @@ else if m == 4 or m == 6 or m == 9 or m == 11 then 30 else 31
 // through `datetime.from_parts`, so a date one refuses the other refuses with
 // the same text. The first field out of range wins; with every field bounded
 // the arithmetic below cannot wrap. Native twin: `almide_rt_datetime_civil_fields`.
+// Declared with @implements (#3620): the body never reaches `prim.`, so the
+// wasm emitter and the MIR read its Result as built by the ok()/err() ctors
+// without a list entry.
+@implements("datetime.from_parts")
 fn datetime_from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String] =
   if y < 0 or y > 9999 then err("year out of range: " + int.to_string(y))
   else if m < 1 or m > 12 then err("month out of range: " + int.to_string(m))

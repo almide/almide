@@ -406,7 +406,6 @@ pub fn self_host_runtime() -> &'static [SelfHostRow] {
                 ("datetime_month", "datetime.month"),
                 ("datetime_day", "datetime.day"),
                 ("datetime_weekday", "datetime.weekday"),
-                ("datetime_from_parts", "datetime.from_parts"),
             ],
         ),
         (
