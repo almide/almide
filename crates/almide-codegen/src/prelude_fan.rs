@@ -115,7 +115,7 @@ VIS fn almide_fan_trap_wait() {
 }
 VIS fn almide_fan_join<T>(h: std::thread::ScopedJoinHandle<'_, T>) -> T { match h.join() { Ok(v) => v, Err(p) => std::panic::resume_unwind(p) } }
 VIS enum AlmideFanArm<'s, T> { Spawned(std::thread::ScopedJoinHandle<'s, T>), Ran(T) }
-static ALMIDE_FAN_ARM_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static ALMIDE_FAN_ARM_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0); // the emitted program's live-arm count, never the compiler's: sanctioned
 fn almide_fan_arm_threads_max() -> usize {
     static MAX: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *MAX.get_or_init(|| {
@@ -129,7 +129,7 @@ fn almide_fan_arm_threads_max() -> usize {
 struct AlmideFanArmSlot;
 impl Drop for AlmideFanArmSlot { fn drop(&mut self) { ALMIDE_FAN_ARM_THREADS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst); } }
 VIS fn almide_fan_spawn<'s, 'e, T: Send + 's, F: FnOnce() -> T + Send + 's>(s: &'s std::thread::Scope<'s, 'e>, f: F) -> AlmideFanArm<'s, T> {
-    if ALMIDE_FAN_ARM_THREADS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= almide_fan_arm_threads_max() {
+    if ALMIDE_FAN_ARM_THREADS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= almide_fan_arm_threads_max() { // emitted program code: sanctioned
         drop(AlmideFanArmSlot);
         return AlmideFanArm::Ran(f());
     }
