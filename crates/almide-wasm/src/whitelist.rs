@@ -203,8 +203,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // list.get — all native arms here, no raw layout reads. set/remove
     // are REJECTED: their pair walks read the incumbent's inline-pairs
     // Value layout (tag@h+4, count@h+8) — see PORT-MATRIX.
-    "value_path_root", "value_path_key", "value_path_index", "json_path_index",
-    "value_get_path",
+    "json_path_index",
     // value.__set_path_steps (the wasm body of value.set_path's walk): pure
     // Almide over value.as_object / as_array and the constructors, no layout
     // reads — unlike json_path_set_go below the REJECTED line.
