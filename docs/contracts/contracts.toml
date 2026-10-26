@@ -5721,3 +5721,16 @@ evidence  = [
   { path = "tests/diagnostics/e110-forwarded-input-type-parameter/broken.almd", class = "fixture" },
   { path = "tests/input_sink_test.rs", name = "admitting_codec_at_the_sink_lets_the_over_post_land", class = "fixture" },
 ]
+
+[[contract]]
+id        = "C-437"
+spec      = "ALS-R5"
+title     = "A process.start child neither waited on nor stopped is stopped when the program exits by main's return, process.exit or an effect error"
+statement = "ALS-R5 (almide#4214): when a program exits because main returns, because `process.exit` is called, or because an effect error ends main, every child it started with `process.start` and has neither waited on nor stopped is stopped the way `process.stop(child, 500)` stops it — SIGTERM to the child's process group, 500 ms to end, then SIGKILL — before the program's exit status is reported, so no child the program started outlives it through those exits. A child already waited on or stopped is left as it is, and the exit neither waits for a running child's own end nor changes the exit status. `process.start` is native-only (E081 on every wasm leg), and an exit by a runtime abort or a signal is outside this contract."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/native_only/process_start_exit_stops_children.almd", class = "fixture" },
+  { path = "tests/process_start_unwaited_child_stopped_test.rs", name = "the_c437_fixture_sees_every_route_stop_the_child", class = "fixture" },
+  { path = "tests/process_start_unwaited_child_stopped_test.rs", name = "children_already_waited_on_or_stopped_are_left_alone", class = "fixture" },
+]
