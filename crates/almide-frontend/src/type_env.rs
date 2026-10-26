@@ -324,6 +324,11 @@ pub struct TypeEnv {
     /// its module the type is opaque — its fields cannot be read and its
     /// literal cannot be written (E033). Bare type name → owning module.
     pub opaque_records: std::collections::HashMap<Sym, Sym>,
+    /// A user module's `mod type` / `local type` RECORD (#4241): opaque
+    /// outside its visibility (another package for `mod`, another file for
+    /// `local`) exactly as a bundled one is outside its module. Qualified
+    /// type key → (defining module, visibility).
+    pub opaque_user_records: std::collections::HashMap<Sym, (Sym, crate::ast::Visibility)>,
 }
 
 impl TypeEnv {
@@ -392,6 +397,7 @@ impl TypeEnv {
             opaque_alias_targets: std::collections::HashMap::new(),
             opaque_alias_visibility: std::collections::HashMap::new(),
             opaque_records: std::collections::HashMap::new(),
+            opaque_user_records: std::collections::HashMap::new(),
             opaque_alias_module: std::collections::HashMap::new(),
             alias_owner_module: None,
             entry_bundled_module: None,
