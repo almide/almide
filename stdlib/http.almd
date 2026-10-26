@@ -623,9 +623,9 @@ fn __table(routes: List[HttpRoute]) -> HttpHandler = (req) => {
 }
 
 /// Route table as a handler; err on conflicting routes.
-fn router(routes: List[HttpRoute]) -> Result[HttpHandler, String] = {
-  let problems = __problems(routes)
-  if list.is_empty(problems) then ok(__table(routes)) else err("http.router: " + list.join(
+fn router(xs: List[HttpRoute]) -> Result[HttpHandler, String] = {
+  let problems = __problems(xs)
+  if list.is_empty(problems) then ok(__table(xs)) else err("http.router: " + list.join(
     problems,
     "; ",
   ))
