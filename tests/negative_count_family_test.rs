@@ -113,7 +113,7 @@ fn population() -> BTreeSet<String> {
                 continue;
             }
             for p in f["params"].as_array().unwrap() {
-                if p["type"]["kind"].as_str() == Some("Int") {
+                if p["type"]["kind"].as_str() == Some("int") {
                     out.insert(format!("{m}.{name}.{}", p["name"].as_str().unwrap()));
                 }
             }

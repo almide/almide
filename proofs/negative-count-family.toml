@@ -273,7 +273,7 @@ probe = 'show_shape(matrix.shape(matrix.ones_f32(2, N)))'
 [[cell]]
 slot = "matrix.conv1d.kernel"
 class = "count"
-probe = 'show_m(matrix.conv1d(matrix.ones(4, 1), matrix.ones(1, 2), [0.5], N, 1, 0))'
+probe = 'show_m(matrix.conv1d(matrix.ones(4, 1), matrix.zeros(1, 0), [0.5], N, 1, 0))'
 
 [[cell]]
 slot = "matrix.conv1d.padding"
