@@ -380,15 +380,28 @@ impl StdinSource {
                 b.drain(..k).collect()
             }
             StdinSource::RealOnce => {
+                // Read in bounded chunks, so what the host holds grows with
+                // the bytes that ARRIVE, never with the guest's word (#4135:
+                // a forged count must not reserve up to 2 GiB). A chunk that
+                // comes back short is all the stream has ready (a terminal
+                // line, EOF), so the read stops there; a full one may have
+                // more behind it, so it reads on until the request is filled
+                // (native's io.read_n_bytes answers min(n, what stdin has)).
                 use std::io::Read;
-                let mut buf = vec![0u8; n];
-                match std::io::stdin().read(&mut buf) {
-                    Ok(got) => {
-                        buf.truncate(got);
-                        buf
+                const CHUNK: usize = 64 * 1024;
+                let mut out = Vec::new();
+                let mut stdin = std::io::stdin().lock();
+                while out.len() < n {
+                    let want = (n - out.len()).min(CHUNK);
+                    let start = out.len();
+                    out.resize(start + want, 0);
+                    let got = stdin.read(&mut out[start..]).unwrap_or(0);
+                    out.truncate(start + got);
+                    if got < want {
+                        break;
                     }
-                    Err(_) => Vec::new(),
                 }
+                out
             }
         }
     }
@@ -817,11 +830,13 @@ fn host_linker(engine: &wasmtime::Engine) -> anyhow::Result<wasmtime::Linker<Hos
             // buffer would read a_len bytes of guest memory (the 4 GiB
             // trap the op-31 comment in the emitter records).
             if op == 35 {
-                // never more than the guest could receive: host_read copies
-                // the parked bytes into its memory (#4135 — the real stream
-                // would otherwise reserve up to 2 GiB on the guest's word)
-                let room = guest_memory(&mut caller)?.data_size(&caller);
-                let n = (i64::from(a_len).max(0) as usize).min(room);
+                // The answer is min(a_len, what stdin has) — NOT capped at the
+                // guest's current memory size: the guest allocates the answer
+                // AFTER this op (growing its memory), then host_read copies it
+                // in, so a cap at the size before the read truncated a 1 MB
+                // request to the 512 KiB the memory then had. What bounds the
+                // host's reservation is `take` reading in chunks (#4135).
+                let n = i64::from(a_len).max(0) as usize;
                 let got = caller.data().stdin.lock().expect("stdin").take(n);
                 let len = got.len();
                 *caller.data().fs_buf.lock().expect("fs buf") = got;
