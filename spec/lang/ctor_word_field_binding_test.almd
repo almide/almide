@@ -4,7 +4,7 @@
 type Fresh = { ok: Bool, err: String, some: Int }
 
 fn show(t: Fresh) -> String = match t {
-  Fresh { ok, err, some } => "${ok} ${err} ${some}",
+  Fresh { ok, err, some } => "${ok} ${err} ${some}"
 }
 
 test "a shorthand field named like a constructor reads the bound field" {
@@ -18,7 +18,7 @@ test "the bound field is the value in every position" {
       assert_eq(some + 1, 8)
       let r: Result[Int, String] = ok(5)
       assert_eq(r, ok(5))
-    },
+    }
   }
 }
 

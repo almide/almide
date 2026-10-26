@@ -1,7 +1,7 @@
 // #4080: a value-returning call with a `mut` param, as the scrutinee of a
 // match or the condition of an if. The move-mode write-back makes each one a
 // block, `{ let (r, buf) = f(q); q = buf; r }`, which the lowering walled.
-fn pop_last(mut xs: List[Int]) -> Option[Int] = list.pop(xs)
+fn pop_last(mut xs: List[Int]) -> Int? = list.pop(xs)
 
 fn grow(mut xs: List[Int]) -> Bool = {
   list.push(xs, 9)
