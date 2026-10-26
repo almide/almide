@@ -797,4 +797,3 @@ impl Emitter<'_> {
         Ok(())
     }
 }
-
