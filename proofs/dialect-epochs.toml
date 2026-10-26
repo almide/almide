@@ -371,6 +371,7 @@ breaks = [
   "`http.decode_json[T]` answers `400 Bad Request: unknown key '<k>'` (with the key's path, `, at address`) for a body key outside `T` at any depth, where the old decode callback (`T.decode`) ignored it (row 22, C-436)",
   "`T.decode_strict` refuses an unknown key at every depth, with its path (`unknown key 'k', at address.geo`), and a `Decode` variant derives it too (a key after the tag, or outside a record payload, is unknown), where it refused only a record's own top-level keys (C-429, row 22)",
   "`type T: Decode` / `type T: Encode` derive their half (`T.decode` + a record's `decode_strict` / `T.encode`) where they derived nothing (C-435); a `@skip` or `@skip_decode` field on a `: Decode` type that is not `Encode` is E053, since every field of an input type is input",
+  "the embedded wasm host (`almide run --target wasm`) without a named cap budgets a run's linear memory at the least of 4 GiB, the cgroup memory limit and physical memory instead of 4 GiB (#4135, C-197): in a container or on a machine under 4 GiB a program that grows past that limit ends in `Error: out of memory`, exit 1, where it used to be killed by the kernel",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
