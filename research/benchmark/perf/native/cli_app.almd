@@ -28,7 +28,7 @@ fn minihash(data: List[Int]) -> String = {
   var h = FNV_OFFSET
   for b in data {
     h = int.bxor(h, b)
-    h = int.wrap_mul(h, FNV_PRIME, 64)
+    h = int.wrap_mul(h, FNV_PRIME)
   }
   to_hex16(h)
 }

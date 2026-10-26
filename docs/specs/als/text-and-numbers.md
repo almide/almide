@@ -110,12 +110,11 @@ fixture `spec/wasm_cross/string_case_unicode.almd`、`string_case_no_ascii_fold.
 整数の `/`・`%` は**全域**である: ゼロ除数は stderr に `Error: division by zero`、
 符号付き最小値 ÷ −1（各ビット幅の真の MIN）は `Error: integer overflow` を1行出力し
 **exit code 1 で停止**する。ハードウェア trap（wasm unreachable、exit 134 等）や
-無言の wrap は不適合。同じ規約は `math.pow` の負指数（`Error: negative exponent`）、
-`int.rotate_*` の非正幅（`Error: rotate width must be positive`）、リスト添字の
+無言の wrap は不適合。同じ規約は `math.pow` の負指数（`Error: negative exponent`）、リスト添字の
 範囲外（`Error: index out of bounds`）、`int.clamp`/`float.clamp` の不正範囲
 （lo > hi、float は NaN 境界も — `Error: clamp requires min <= max`）に適用される。
 Fixtures: `spec/wasm_cross/int_div_by_zero*.almd`, `int_mod_*`, `int8_div_overflow.almd`,
-`int_pow_negative_exponent.almd`, `int_rotate_nonpositive_width.almd`, `index_bounds.almd`。
+`int_pow_negative_exponent.almd`, `index_bounds.almd`。
 
 呼び出しスタックの枯渇も同じ終了形に従う: native と組み込み wasm ホスト
 （`almide run --target wasm`）は stderr に `Error: stack overflow` を1行出力し
@@ -240,13 +239,14 @@ Dragon4/Ryū 等価）: `parse(to_string(x)) == x` かつ、それを満たす�
 整数値は `.0` を保持（ALS-R2 の Display と区別）。
 Contracts: C-023。
 
-## ALS-T14 wrap / rotate のマスク飽和
+## ALS-T14 64 bit レジスタと wrap のマスク飽和
 
-`int.wrap_*` / `int.rotate_*` の bits 引数が 64 を超える場合、マスクは
-`u64::MAX` に**飽和**する（モジュロではない）。bits ≤ 0 は wrap 族では
-**黙って全域**（`wrap_add(1,1,0)` → 0、`wrap_add(1,1,-1)` → 2 — 0.59.1
-実測、abort しない）; abort するのは rotate 族のみ（`Error: rotate width
-must be positive`、ALS-T6）。
+`int.wrap_add` / `wrap_sub` / `wrap_mul` / `rotate_left` / `rotate_right` は幅の
+引数を持たず、64 bit の `Int` そのものをレジスタとして折り返す・回す（R-int-12）。
+回転数は 64 を法としてユークリッド的に縮める（負の回転数は逆向き）。N bit の
+レジスタは `int.wrap(x, bits)` と組む（`int.wrap(int.wrap_add(a, b), bits)`）。
+`int.wrap` の `bits ≥ 64` はマスクが `u64::MAX` に**飽和**し、`x` をそのまま返す
+（モジュロではない）。
 Contracts: C-048。
 
 ## ALS-T15 符号と min/max の NaN 規則

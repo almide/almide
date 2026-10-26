@@ -2956,30 +2956,30 @@ expect = "8"
 
 [[int.fn]]
 name = "wrap_add"
-index_unit = "count"
-probe = 'int.wrap_add(255, 1, 8)'
-expect = "0"
+index_unit = "value"
+probe = 'int.wrap_add(int.max_value(), 1)'
+expect = "-9223372036854775808"
 note = """
-The `bits` param is a WIDTH count: the sum wraps at 2^bits (255+1 at width 8
-is 0), independent of the i64 carrier.
+The register is the 64-bit Int itself: the sum wraps at 2^64 (R-int-12). An
+N-bit width composes with `int.wrap(int.wrap_add(a, b), bits)`.
 """
 
 [[int.fn]]
 name = "wrap_mul"
-index_unit = "count"
-probe = 'int.wrap_mul(16, 16, 8)'
+index_unit = "value"
+probe = 'int.wrap_mul(4294967296, 4294967296)'
 expect = "0"
 
 [[int.fn]]
 name = "rotate_right"
 index_unit = "count"
-probe = 'int.rotate_right(1, 1, 8)'
-expect = "128"
+probe = 'int.rotate_right(1, 1)'
+expect = "-9223372036854775808"
 
 [[int.fn]]
 name = "rotate_left"
 index_unit = "count"
-probe = 'int.rotate_left(128, 1, 8)'
+probe = 'int.rotate_left(int.min_value(), 1)'
 expect = "1"
 
 [[int.fn]]

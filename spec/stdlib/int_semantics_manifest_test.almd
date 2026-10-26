@@ -167,20 +167,20 @@ test "int.prev_power_of_two unit=value" {
   assert_eq("${int.prev_power_of_two(9)}", "8")
 }
 
-test "int.wrap_add unit=count" {
-  assert_eq("${int.wrap_add(255, 1, 8)}", "0")
+test "int.wrap_add unit=value" {
+  assert_eq("${int.wrap_add(int.max_value(), 1)}", "-9223372036854775808")
 }
 
-test "int.wrap_mul unit=count" {
-  assert_eq("${int.wrap_mul(16, 16, 8)}", "0")
+test "int.wrap_mul unit=value" {
+  assert_eq("${int.wrap_mul(4294967296, 4294967296)}", "0")
 }
 
 test "int.rotate_right unit=count" {
-  assert_eq("${int.rotate_right(1, 1, 8)}", "128")
+  assert_eq("${int.rotate_right(1, 1)}", "-9223372036854775808")
 }
 
 test "int.rotate_left unit=count" {
-  assert_eq("${int.rotate_left(128, 1, 8)}", "1")
+  assert_eq("${int.rotate_left(int.min_value(), 1)}", "1")
 }
 
 test "int.to_u32 unit=value" {

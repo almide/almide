@@ -27,54 +27,21 @@ pub fn almide_rt_int_parse_hex(s: &str) -> Result<i64, AlmideString> { let __alm
 #[inline(always)] pub fn almide_rt_int_bnot(n: i64) -> i64 { !n }
 #[inline(always)] pub fn almide_rt_int_bshl(n: i64, bits: i64) -> i64 { n << bits }
 #[inline(always)] pub fn almide_rt_int_bshr(n: i64, bits: i64) -> i64 { n >> bits }
-/// Width at and above which the `bits`-wide mask saturates to all-ones — see
-/// the wasm `FULL_WIDTH_BITS` (calls_numeric.rs); the guard is shared.
-const ALMIDE_ROTATE_FULL_WIDTH_BITS: i64 = 64;
-/// `Error: <msg>` text for a non-positive rotate width. A width `<= 0` has no
-/// register to rotate (and `n % bits` would divide by zero), so `rotate_*` is
-/// TOTAL like int `/`/`%` (C-001): it aborts with this message + exit 1,
-/// byte-identical on both targets, instead of a native rem-by-zero panic (101)
-/// / wasm `i64.rem_s` trap (134). Wording shared verbatim with the wasm emit.
-pub const ALMIDE_ROTATE_NONPOSITIVE_WIDTH_MSG: &str = "rotate width must be positive";
-#[inline]
-fn almide_rt_rotate_mask(bits: i64) -> u64 {
-    if bits >= ALMIDE_ROTATE_FULL_WIDTH_BITS { u64::MAX } else { (1u64 << bits) - 1 }
+// The 64-bit register (R-int-12): `wrap_*` and `rotate_*` take no width; an
+// N-bit register composes with `int.wrap(x, bits)`. The rotate count is taken
+// mod 64 EUCLIDEAN-ly, so a negative count rotates the other way (#2492,
+// C-358); shared verbatim with stdlib/int_rotate.almd.
+pub fn almide_rt_int_rotate_left(a: i64, n: i64) -> i64 {
+    (a as u64).rotate_left(n.rem_euclid(64) as u32) as i64
 }
-#[inline]
-fn almide_rt_check_rotate_width(bits: i64) {
-    if bits <= 0 {
-        almide_abort(ALMIDE_ROTATE_NONPOSITIVE_WIDTH_MSG);
-    }
+pub fn almide_rt_int_rotate_right(a: i64, n: i64) -> i64 {
+    (a as u64).rotate_right(n.rem_euclid(64) as u32) as i64
 }
-/// The count reduced into `[0, bits)` EUCLIDEAN-ly, so a negative count rotates the
-/// other way (`rotate_left(x, -1, 8)` = `rotate_left(x, 7, 8)`). #2492: the old
-/// `(n % bits) as u32` kept the sign of `n`, `-1 as u32` became 4294967295, and every
-/// negative count returned 0. Shared verbatim with stdlib/int_rotate.almd.
-#[inline]
-fn almide_rt_rotate_count(n: i64, bits: i64) -> u32 {
-    n.rem_euclid(bits) as u32
+pub fn almide_rt_int_wrap_add(a: i64, b: i64) -> i64 {
+    a.wrapping_add(b)
 }
-pub fn almide_rt_int_rotate_left(a: i64, n: i64, bits: i64) -> i64 {
-    almide_rt_check_rotate_width(bits);
-    let mask = almide_rt_rotate_mask(bits);
-    let v = (a as u64) & mask;
-    let n = almide_rt_rotate_count(n, bits);
-    ((v << n) | (v >> (bits as u32 - n))) as i64 & mask as i64
-}
-pub fn almide_rt_int_rotate_right(a: i64, n: i64, bits: i64) -> i64 {
-    almide_rt_check_rotate_width(bits);
-    let mask = almide_rt_rotate_mask(bits);
-    let v = (a as u64) & mask;
-    let n = almide_rt_rotate_count(n, bits);
-    ((v >> n) | (v << (bits as u32 - n))) as i64 & mask as i64
-}
-pub fn almide_rt_int_wrap_add(a: i64, b: i64, bits: i64) -> i64 {
-    let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
-    ((a as u64).wrapping_add(b as u64) & mask) as i64
-}
-pub fn almide_rt_int_wrap_mul(a: i64, b: i64, bits: i64) -> i64 {
-    let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
-    ((a as u64).wrapping_mul(b as u64) & mask) as i64
+pub fn almide_rt_int_wrap_mul(a: i64, b: i64) -> i64 {
+    a.wrapping_mul(b)
 }
 
 // ── Bit introspection ──

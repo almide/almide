@@ -171,7 +171,7 @@
 | [ALS-T11](./text-and-numbers.md#als-t11-バイナリテキスト符号化) | バイナリテキスト符号化 | C-027, C-030, C-411 |
 | [ALS-T12](./text-and-numbers.md#als-t12-非-abort-整数除算の一致) | 非 abort 整数除算の一致 | C-003 |
 | [ALS-T13](./text-and-numbers.md#als-t13-浮動小数の文字列化) | 浮動小数の文字列化 | C-023 |
-| [ALS-T14](./text-and-numbers.md#als-t14-wrap--rotate-のマスク飽和) | wrap / rotate のマスク飽和 | C-048 |
+| [ALS-T14](./text-and-numbers.md#als-t14-64-bit-レジスタと-wrap-のマスク飽和) | 64 bit レジスタと wrap のマスク飽和 | C-048 |
 | [ALS-T15](./text-and-numbers.md#als-t15-符号と-minmax-の-nan-規則) | 符号と min/max の NaN 規則 | C-049, C-140 |
 | [ALS-T16](./text-and-numbers.md#als-t16-個数・添字の-i64-クランプ) | 個数・添字の i64 クランプ | C-054, C-056 |
 | [ALS-T17](./text-and-numbers.md#als-t17-datetimeformat-の指定子置換) | datetime.format の指定子置換 | C-128 |

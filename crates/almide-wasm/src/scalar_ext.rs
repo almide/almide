@@ -312,7 +312,7 @@ impl Emitter<'_> {
         Ok(FLOAT)
     }
 
-    /// The int bit family + the width-wrap pair — split from
+    /// The int bit family + the 64-bit wrap pair — split from
     /// lower_scalar_ext for the complexity budget.
     fn lower_int_bitops(
         &mut self,
@@ -352,26 +352,15 @@ impl Emitter<'_> {
                 self.f.instructions().i64_const(0xFF).i64_and();
                 Ok(Some(Lowered::scalar(INT)))
             }
-            ("wrap_add" | "wrap_mul", [a, b, bits]) => {
-                let mul = func == "wrap_mul";
+            // The 64-bit register (R-int-12): i64.add / i64.mul already wrap.
+            ("wrap_add" | "wrap_mul", [a, b]) => {
                 self.lower_arg(a, Some(INT), ArgMode::Borrow)?;
                 self.lower_arg(b, Some(INT), ArgMode::Borrow)?;
-                if mul {
+                if func == "wrap_mul" {
                     self.f.instructions().i64_mul();
                 } else {
                     self.f.instructions().i64_add();
                 }
-                self.lower_arg(bits, Some(INT), ArgMode::Borrow)?;
-                let hb = self.hold_i64()?;
-                let mut i = self.f.instructions();
-                i.local_set(hb);
-                // mask = bits >= 64 ? -1 : (1<<bits)-1  (select: v1 first)
-                i.i64_const(-1);
-                i.i64_const(1).local_get(hb).i64_shl().i64_const(1).i64_sub();
-                i.local_get(hb).i64_const(64).i64_ge_s();
-                i.select().i64_and();
-                let _ = i;
-                self.release_i64();
                 Ok(Some(Lowered::scalar(INT)))
             }
             _ => unsup(&format!("call:int.{func}")),
