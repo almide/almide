@@ -56,6 +56,12 @@ effect fn handle(req: HttpRequest) -> HttpResponse = {
       deny(route)!
       http.response(200, "unreachable")
     },
+    // An err holding a bidi and a C1 control (#4126): stderr quotes them by
+    // C-418's set, `\u{202e}` and `\u{85}`, on both legs.
+    "/fail-bidi" => {
+      deny("\u{202e}\u{85}x")!
+      http.response(200, "unreachable")
+    },
     _ => http.response(404, "not found: ${route}"),
   }
 }
