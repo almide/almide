@@ -124,6 +124,10 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
     // step of the Path, the JSON path walk's bound.
     ("value.almd", "__set_steps", "__set_steps", PATH_SEGMENTS),
     ("value.almd", "__remove_steps", "__remove_steps", PATH_SEGMENTS),
+    // set_path's nesting probe stops at its budget (at most 1000 levels,
+    // the JSON depth cap), whatever the Value holds — json_path.almd's
+    // `__json_nests_past` bound.
+    ("value.almd", "__nests_past", "__nests_past", VALUE_NESTING),
     ("value_core.almd", "__vobj_eq", "value_eq", VALUE_NESTING),
     ("value_core.almd", "__drop_value", "__vdrop_arr", VALUE_NESTING),
     ("value_core.almd", "__drop_value", "__vdrop_obj", VALUE_NESTING),

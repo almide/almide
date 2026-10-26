@@ -672,14 +672,14 @@ fn hint_int_to_string_let() {
 fn hint_float_to_int_return() {
     let hints = error_hints("fn f() -> Int = 3.14");
     assert!(!hints.is_empty(), "should have an error");
-    assert!(hints[0].contains("to_int"), "hint should suggest to_int, got: {}", hints[0]);
+    assert!(hints[0].contains("int.from_saturating"), "hint should suggest int.from_saturating, got: {}", hints[0]);
 }
 
 #[test]
 fn hint_int_to_float_return() {
     let hints = error_hints("fn f() -> Float = 42");
     assert!(!hints.is_empty(), "should have an error");
-    assert!(hints[0].contains("to_float"), "hint should suggest to_float, got: {}", hints[0]);
+    assert!(hints[0].contains("float.from"), "hint should suggest float.from, got: {}", hints[0]);
 }
 
 #[test]

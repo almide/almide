@@ -359,7 +359,6 @@ position = [
 value = [
   "list.range.start",
   "list.range.end",
-  "list.binary_search.target",
   "list.range_step.start",
   "list.range_step.end",
   "list.range_step.step",

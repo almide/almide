@@ -44,20 +44,6 @@ const NOT_SURFACE: &[&str] = &["prim"];
 /// `(module, fn)` pairs allowed to stay live although the rule groups them
 /// with another live fn.
 const ALLOWED: &[(&str, &str, &str)] = &[
-    // The numeric conversion trio (CLAUDE.md "API families are extended by
-    // matrix"): a lossy conversion has all three cells `to_T` /
-    // `to_T_saturating` / `to_T_checked`. Float → integer `to_T` already
-    // truncates and clamps, so the saturating cell forwards to it — the
-    // family rule, not an accidental second name, is why both are live.
-    ("float", "to_int_saturating", "conversion trio: the saturating cell of a lossy Float -> Int (#4145)"),
-    ("float", "to_int8_saturating", "conversion trio: the saturating cell of a lossy Float -> Int8"),
-    ("float", "to_int16_saturating", "conversion trio: the saturating cell of a lossy Float -> Int16"),
-    ("float", "to_int32_saturating", "conversion trio: the saturating cell of a lossy Float -> Int32"),
-    ("float", "to_int64_saturating", "conversion trio: the saturating cell of a lossy Float -> Int64"),
-    ("float", "to_uint8_saturating", "conversion trio: the saturating cell of a lossy Float -> UInt8"),
-    ("float", "to_uint16_saturating", "conversion trio: the saturating cell of a lossy Float -> UInt16"),
-    ("float", "to_uint32_saturating", "conversion trio: the saturating cell of a lossy Float -> UInt32"),
-    ("float", "to_uint64_saturating", "conversion trio: the saturating cell of a lossy Float -> UInt64"),
     // The byte-width matrix (get_/next_/put_/append_ per width and endianness):
     // the 8-bit row has every cell like the wider rows, and its u8 read and
     // i8 append forward to the base `get` / `push` because one byte has no
@@ -68,8 +54,9 @@ const ALLOWED: &[(&str, &str, &str)] = &[
 
 /// Shrink-only: lower it when an entry leaves `ALLOWED`, never raise it.
 /// (Raised once, 10 -> 11, for the trio's Int cell, the Float-to-Int saturating conversion
-/// (#4145): the family rule forces the cell, so it is not an accidental name.)
-const ALLOWED_CEILING: usize = 11;
+/// (#4145); lowered 11 -> 2 when dialect epoch 15 removed the `float.to_T_saturating`
+/// cells for `T.from_saturating`.)
+const ALLOWED_CEILING: usize = 2;
 
 struct SurfaceFn {
     name: String,
