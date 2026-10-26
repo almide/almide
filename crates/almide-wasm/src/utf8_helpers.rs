@@ -272,16 +272,17 @@ pub(crate) fn emit_utf8_lossy_helper() -> Function {
 /// almide-base's err_text.rs for the error texts this emitter builds itself
 /// (`value.__field`'s key): TAB, CR, LF and NUL read
 /// `\t` `\r` `\n` `\0`; every other C0 control and DEL reads `\u{<hex>}`; the
-/// multi-byte characters the rule escapes (C1 and the bidi controls) read
-/// `\u{<hex>}` too — that set is the rule's own predicate run over the code
-/// points at emit time, not a copy of it. Every other byte is copied. The
+/// multi-byte characters the rule escapes (C1, Cf / Zl / Zp, the Tags block)
+/// read `\u{<hex>}` too — decoded and tested against the rule's own table
+/// (`emit_errtext_multibyte`), not a copy of it. Every other byte is copied. The
 /// result is always a FRESH block (the caller releases it), over-allocated
 /// 6n (the widest growth: one byte to `\u{1b}`) with its len patched.
 pub(crate) fn emit_err_text_helper() -> Function {
     let (s, n, out, k, w, b) = (0u32, 1u32, 2u32, 3u32, 4u32, 5u32);
+    let (cp, m, sh) = (6u32, 7u32, 8u32);
     let pay = almide_layout::PAYLOAD as i32;
     let byte = MemArg { offset: 0, align: 0, memory_index: 0 };
-    let mut f = Function::new([(5, ValType::I32)]);
+    let mut f = Function::new([(8, ValType::I32)]);
     let mut i = f.instructions();
     let put = |i: &mut wasm_encoder::InstructionSink<'_>, c: u8| {
         i.local_get(w).i32_const(c as i32).i32_store8(byte);
@@ -327,32 +328,12 @@ pub(crate) fn emit_err_text_helper() -> Function {
     i.local_get(k).i32_const(1).i32_add().local_set(k);
     i.br(2);
     i.end();
-    // The multi-byte members of the set, matched as their UTF-8 bytes
-    // (depth from inside the two ifs: 3 = the loop).
-    for cp in 0x80u32..=0xffff {
-        let Some(ch) = char::from_u32(cp) else { continue };
-        if !almide_base::err_text::almide_rt_errtext_is_escaped(ch) {
-            continue;
-        }
-        let mut buf = [0u8; 4];
-        let seq = ch.encode_utf8(&mut buf).as_bytes().to_vec();
-        let m = seq.len() as i32;
-        i.local_get(k).i32_const(m).i32_add().local_get(n).i32_le_u().if_(BlockType::Empty);
-        i.i32_const(1);
-        for (j, sb) in seq.iter().enumerate() {
-            i.local_get(s).i32_const(pay).i32_add().local_get(k).i32_add();
-            i.i32_load8_u(MemArg { offset: j as u64, align: 0, memory_index: 0 });
-            i.i32_const(*sb as i32).i32_eq().i32_and();
-        }
-        i.if_(BlockType::Empty);
-        for c in format!("\\u{{{cp:x}}}").bytes() {
-            put(&mut i, c);
-        }
-        i.local_get(k).i32_const(m).i32_add().local_set(k);
-        i.br(3);
-        i.end();
-        i.end();
-    }
+    // The multi-byte members of the set: decoded and tested against C-418's
+    // table (`emit_errtext_multibyte`). From the per-byte block the loop is 1.
+    let addr = |i: &mut wasm_encoder::InstructionSink<'_>| {
+        i.local_get(s).i32_const(pay).i32_add().local_get(k).i32_add();
+    };
+    emit_errtext_multibyte(&mut i, &addr, (k, n, b, w), (cp, m, sh), 1);
     // Any other byte: copied.
     i.local_get(w).local_get(b).i32_store8(byte);
     i.local_get(w).i32_const(1).i32_add().local_set(w);
@@ -365,4 +346,79 @@ pub(crate) fn emit_err_text_helper() -> Function {
     i.local_get(out);
     i.end();
     f
+}
+
+/// The multi-byte half of a C-418 escape loop (#4126, #4265), shared by every
+/// escaper this compiler emits in wasm: at a UTF-8 lead byte `b` (>= 0xC0)
+/// whose whole sequence lies inside the text (`k + len <= n`), decode the code
+/// point into `cp`; if almide-base's `ALMIDE_RT_ERRTEXT_ESCAPED` holds it,
+/// write `\u{<lowercase hex, no leading zeros>}` at `w` (advancing `w`),
+/// move `k` past the sequence and branch to the loop (`loop_depth` is the
+/// loop's depth from where this code is placed). Anything else falls
+/// through. `addr` pushes the address of byte `k`. The ranges are the table
+/// itself, read at emit time: no leg keeps a copy of its own.
+pub fn emit_errtext_multibyte(
+    i: &mut wasm_encoder::InstructionSink<'_>,
+    addr: &dyn Fn(&mut wasm_encoder::InstructionSink<'_>),
+    (k, n, b, w): (u32, u32, u32, u32),
+    (cp, m, sh): (u32, u32, u32),
+    loop_depth: u32,
+) {
+    let at = |j: u64| MemArg { offset: j, align: 0, memory_index: 0 };
+    let put = |i: &mut wasm_encoder::InstructionSink<'_>, c: u8| {
+        i.local_get(w).i32_const(c as i32).i32_store8(at(0));
+        i.local_get(w).i32_const(1).i32_add().local_set(w);
+    };
+    i.local_get(b).i32_const(0xc0).i32_ge_u().if_(BlockType::Empty);
+    // m = 2 below 0xE0, 3 below 0xF0, else 4.
+    i.i32_const(2).i32_const(3).local_get(b).i32_const(0xe0).i32_lt_u().select();
+    i.i32_const(4).local_get(b).i32_const(0xf0).i32_lt_u().select().local_set(m);
+    i.local_get(k).local_get(m).i32_add().local_get(n).i32_le_u().if_(BlockType::Empty);
+    // cp = lead bits, then six bits per continuation byte the sequence has.
+    i.local_get(b).i32_const(0x7f).local_get(m).i32_shr_u().i32_and().local_set(cp);
+    for j in 1..4u64 {
+        i.local_get(m).i32_const(j as i32).i32_gt_u().if_(BlockType::Empty);
+        i.local_get(cp).i32_const(6).i32_shl();
+        addr(i);
+        i.i32_load8_u(at(j)).i32_const(0x3f).i32_and().i32_or().local_set(cp);
+        i.end();
+    }
+    // In C-418's table? One unsigned range test per row (`cp - lo <= hi - lo`).
+    i.i32_const(0);
+    for &(lo, hi) in almide_base::err_text::ALMIDE_RT_ERRTEXT_ESCAPED {
+        if hi < 0x80 {
+            continue;
+        }
+        let lo = lo.max(0x80);
+        i.local_get(cp).i32_const(lo as i32).i32_sub().i32_const((hi - lo) as i32).i32_le_u().i32_or();
+    }
+    i.if_(BlockType::Empty);
+    for c in *b"\\u{" {
+        put(i, c);
+    }
+    // The first nonzero hex digit (a code point has at most six), then each.
+    i.i32_const(20).local_set(sh);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(cp).local_get(sh).i32_shr_u().br_if(1);
+    i.local_get(sh).i32_eqz().br_if(1);
+    i.local_get(sh).i32_const(4).i32_sub().local_set(sh);
+    i.br(0);
+    i.end().end();
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(w);
+    i.local_get(cp).local_get(sh).i32_shr_u().i32_const(15).i32_and();
+    i.local_get(cp).local_get(sh).i32_shr_u().i32_const(15).i32_and().i32_const(10).i32_lt_u();
+    i.if_(BlockType::Result(ValType::I32)).i32_const('0' as i32).else_().i32_const('a' as i32 - 10).end();
+    i.i32_add().i32_store8(at(0));
+    i.local_get(w).i32_const(1).i32_add().local_set(w);
+    i.local_get(sh).i32_eqz().br_if(1);
+    i.local_get(sh).i32_const(4).i32_sub().local_set(sh);
+    i.br(0);
+    i.end().end();
+    put(i, b'}');
+    i.local_get(k).local_get(m).i32_add().local_set(k);
+    i.br(loop_depth + 3);
+    i.end();
+    i.end();
+    i.end();
 }
