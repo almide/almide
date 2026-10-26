@@ -182,7 +182,7 @@ fn http_url_scheme(url: &str) -> Result<(bool, &str), String> {
         "https" => Ok((true, rest)),
         other => {
             let [head, tail] = HTTP_ERR_URL_SCHEME;
-            Err(format!("{}{}{}", head, other, tail))
+            Err(format!("{}{}{}", head, almide_rt_errtext_escape(other), tail))
         }
     }
 }
