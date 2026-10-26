@@ -63,11 +63,12 @@ pub(crate) fn dispatch(module: &str, func: &str, args: &[Value]) -> Option<Flow>
 }
 
 thread_local! {
-    // The variables the running program set with `env.set`. They are the
-    // program's environment, layered over the process's: the interp runs
-    // in-process beside the harness that spawns the native and wasm legs,
-    // and a write to the real environment would reach those children (#3808).
-    static ENV_OVERLAY: std::cell::RefCell<std::collections::HashMap<String, String>> =
+    // The variables the running program set with `env.set` (`Some`) or
+    // removed with `env.remove` (`None`, #3908). They are the program's
+    // environment, layered over the process's: the interp runs in-process
+    // beside the harness that spawns the native and wasm legs, and a write
+    // to the real environment would reach those children (#3808).
+    static ENV_OVERLAY: std::cell::RefCell<std::collections::HashMap<String, Option<String>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
@@ -77,9 +78,48 @@ pub(crate) fn reset_env_overlay() {
     ENV_OVERLAY.with(|o| o.borrow_mut().clear());
 }
 
-/// The value the running program set for `name`, if it set one.
-pub(crate) fn env_overlay_get(name: &str) -> Option<String> {
+/// What the running program did to `name`: `Some(Some(v))` it set v,
+/// `Some(None)` it removed the name, `None` it left the name alone.
+pub(crate) fn env_overlay_get(name: &str) -> Option<Option<String>> {
     ENV_OVERLAY.with(|o| o.borrow().get(name).cloned())
+}
+
+/// The program's whole environment, as `env.vars`' leaf answers it: the
+/// process's `name=value` entries with the overlay applied, by name.
+fn env_overlay_environ() -> Vec<String> {
+    let mut all: std::collections::BTreeMap<String, String> = std::env::vars_os()
+        .filter_map(|(k, v)| Some((k.into_string().ok()?, v.into_string().ok()?)))
+        .collect();
+    ENV_OVERLAY.with(|o| {
+        for (k, v) in o.borrow().iter() {
+            match v {
+                Some(v) => all.insert(k.clone(), v.clone()),
+                None => all.remove(k),
+            };
+        }
+    });
+    all.into_iter().map(|(k, v)| format!("{k}={v}")).collect()
+}
+
+/// Why `name` cannot be in an environment (#4200's rule, which `env.set`
+/// and `env.remove` share), or `None`.
+fn env_name_refusal(name: &str) -> Option<&'static str> {
+    if name.is_empty() {
+        Some("empty name")
+    } else if name.contains('=') {
+        Some("name contains '='")
+    } else if name.contains('\0') {
+        Some("name contains NUL")
+    } else {
+        None
+    }
+}
+
+/// `__set`'s write into the overlay: `env.remove`'s mark, the value NUL
+/// (#3908), unsets the name.
+fn env_overlay_put(name: &str, value: &str) {
+    let v = (value != "\0").then(|| value.to_string());
+    ENV_OVERLAY.with(|o| o.borrow_mut().insert(name.to_string(), v));
 }
 
 /// `env.set` writes the program's environment, as the other two legs do
@@ -96,29 +136,41 @@ fn env_fn(func: &str, args: &[Value]) -> Option<Flow> {
         // and store nothing — the rule restated here, independently of the
         // Almide body the backends run, so the third oracle checks it.
         ("set", [Value::Str(name), Value::Str(value)]) => {
-            let why = if name.is_empty() {
-                Some("empty name")
-            } else if name.contains('=') {
-                Some("name contains '='")
-            } else if name.contains('\0') {
-                Some("name contains NUL")
-            } else if value.contains('\0') {
-                Some("value contains NUL")
-            } else {
-                None
-            };
+            let why = env_name_refusal(name).or_else(|| value.contains('\0').then_some("value contains NUL"));
             Some(Flow::val(match why {
                 Some(why) => Value::Result(Err(Box::new(Value::str(format!("env.set: {why}"))))),
                 None => {
-                    ENV_OVERLAY.with(|o| o.borrow_mut().insert(name.to_string(), value.to_string()));
+                    env_overlay_put(name, value);
                     Value::Result(Ok(Box::new(Value::Unit)))
                 }
             }))
         }
-        // `env.set`'s private op, reached through its body.
+        // `env.remove` (#3908): `set`'s name rule and err texts under its own
+        // name; an unset name is ok.
+        ("remove", [Value::Str(name)]) => Some(Flow::val(match env_name_refusal(name) {
+            Some(why) => Value::Result(Err(Box::new(Value::str(format!("env.remove: {why}"))))),
+            None => {
+                ENV_OVERLAY.with(|o| o.borrow_mut().insert(name.to_string(), None));
+                Value::Result(Ok(Box::new(Value::Unit)))
+            }
+        })),
+        // `env.set`'s and `env.remove`'s private op, reached through their bodies.
         ("__set", [Value::Str(name), Value::Str(value)]) => {
-            ENV_OVERLAY.with(|o| o.borrow_mut().insert(name.to_string(), value.to_string()));
+            env_overlay_put(name, value);
             Some(Flow::val(Value::Unit))
+        }
+        // `env.vars` (#3908): the program's environment keyed by name, in
+        // name order — restated here, as `set` is, since the interp lowers
+        // no env body; `__environ` is the leaf that body reads.
+        ("vars", []) => {
+            let entries: Vec<(Value, Value)> = env_overlay_environ()
+                .into_iter()
+                .filter_map(|e| e.split_once('=').map(|(k, v)| (Value::str(k), Value::str(v))))
+                .collect();
+            Some(Flow::val(Value::Map(std::rc::Rc::new(entries))))
+        }
+        ("__environ", []) => {
+            Some(Flow::val(Value::list(env_overlay_environ().into_iter().map(Value::str).collect())))
         }
         ("sleep_ms", [Value::Int(ms)]) => {
             std::thread::sleep(std::time::Duration::from_millis((*ms).max(0) as u64));
@@ -694,8 +746,25 @@ mod env_overlay_tests {
         reset_env_overlay();
         env_fn("__set", &[Value::str(key.to_string()), Value::str("written".to_string())]);
         assert_eq!(std::env::var(key).ok(), None, "env.set leaked into the host process");
-        assert_eq!(env_overlay_get(key), Some("written".to_string()));
+        assert_eq!(env_overlay_get(key), Some(Some("written".to_string())));
         reset_env_overlay();
         assert_eq!(env_overlay_get(key), None);
+    }
+
+    /// `env.remove` unsets a name inside the interpreter only: the overlay
+    /// records the removal, `env.vars`' leaf drops the name, and the host
+    /// process keeps the variable it had (#3908).
+    #[test]
+    fn env_remove_stays_inside_the_interpreter() {
+        let key = "PATH";
+        let before = std::env::var(key).ok();
+        reset_env_overlay();
+        env_fn("remove", &[Value::str(key.to_string())]);
+        assert_eq!(env_overlay_get(key), Some(None));
+        assert!(!env_overlay_environ().iter().any(|e| e.starts_with("PATH=")), "a removed name is still listed");
+        assert_eq!(std::env::var(key).ok(), before, "env.remove leaked into the host process");
+        env_fn("__set", &[Value::str(key.to_string()), Value::str("\0".to_string())]);
+        assert_eq!(env_overlay_get(key), Some(None), "the NUL mark is a removal");
+        reset_env_overlay();
     }
 }

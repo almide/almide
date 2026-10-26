@@ -484,8 +484,9 @@ impl<'a> Interpreter<'a> {
                 };
                 // A variable the program set itself wins (`env.set`, held in
                 // the interp's overlay, #3808).
+                // A name it removed (`env.remove`, #3908) reads as unset.
                 let value = crate::bridge::env_overlay_get(name.as_str())
-                    .or_else(|| std::env::var(name.as_str()).ok());
+                    .unwrap_or_else(|| std::env::var(name.as_str()).ok());
                 Some(Flow::val(Value::Option(value.map(|v| Box::new(Value::str(v))))))
             }
             _ => self.vfs_prim(func, args),
