@@ -551,9 +551,6 @@ fn string_fn(func: &str, args: &[Value]) -> Option<Flow> {
 fn string_fn_whole(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
         "len" | "length" => Flow::val(Value::Int(as_str(args.first())?.chars().count() as i64)),
-        // C-418's escaper (#4126): the self-hosted error texts (datetime,
-        // json, value, error) call it; the rule is almide-base's one function.
-        "__err_text" => Flow::val(Value::str(almide_base::err_text::almide_rt_errtext_escape(as_str(args.first())?))),
         "to_upper" => Flow::val(Value::str(to_upper_no_ascii_fold(as_str(args.first())?))),
         "trim" => Flow::val(Value::str(as_str(args.first())?.trim().to_string())),
         "contains" => Flow::val(Value::Bool(
