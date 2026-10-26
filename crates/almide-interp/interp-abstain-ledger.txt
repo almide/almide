@@ -40,7 +40,6 @@ count_domain_nonbytes  out-of-interp-scope capability: prim.read_n_bytes: no low
 effect_tco_err_rewrap  interp fuel/recursion budget exhausted
 fs_root_escape  out-of-interp-scope capability: fs.open_root: no lowered body
 hash_hmac_rfc4231  out-of-interp-scope capability: hash.hmac_sha256_hex: no lowered body
-http_query_params_decoder  out-of-interp-scope capability: http.query_params: no lowered body
 io_write_ordering  out-of-interp-scope capability: prim.fd_write: no lowered body
 io_write_raw_bytes  out-of-interp-scope capability: prim.fd_write: no lowered body
 list_range_step_extremes  out-of-interp-scope capability: list.range_step: no lowered body

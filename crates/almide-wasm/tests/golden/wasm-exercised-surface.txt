@@ -301,6 +301,7 @@ call:html.empty
 call:html.escape
 call:html.raw
 call:html.to_string
+call:http.__almd_mono11_decode_json___nCommandInput
 call:http.__almd_mono11_decode_json___nUserInput
 call:http.body
 call:http.get_header
