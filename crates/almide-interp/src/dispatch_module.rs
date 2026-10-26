@@ -56,6 +56,13 @@ impl<'a> Interpreter<'a> {
         if let Some(flow) = self.eval_numeric_carrier(module, func, args, &evaled) {
             return flow;
         }
+        // `value.__set_path_steps` is the native runtime's in-place walk; its
+        // registry body (stdlib/json_path.almd) only forwards to the bundled
+        // pure walk `value.__set_path_pure`, which the pool does not lower —
+        // so the oracle runs that walk directly, as the wasm leg does.
+        if module.as_str() == "value" && func.as_str() == "__set_path_steps" {
+            return self.dispatch_module_resolved(module, almide_base::intern::sym("__set_path_pure"), evaled);
+        }
         // `prim.handle`'s STATIC argument type — the only honest way to tell
         // a Bytes value from a List[Int] value at materialization (see
         // `handle_arg_ty`). Stashed, not threaded: the hint is consumed by
