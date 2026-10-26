@@ -48,10 +48,9 @@ fn join(base: String, child: String) -> String = {
   // If child is absolute, it replaces base (matches Rust Path::join behavior)
   if string.starts_with(child, "/") then child
   else {
-    let b = if string.ends_with(base, "/") then string.slice(base, 0, string.len(base) - 1)
-    else base
+    let n = if string.ends_with(base, "/") then string.len(base) - 1 else string.len(base)
     // The root keeps its slash: join("/", "a") is "/a" (#4072).
-    if string.len(b) > 0 then b + "/" + child
+    if n > 0 then string.slice(base, 0, n) + "/" + child
     else if string.starts_with(base, "/") then "/" + child
     else child
   }
