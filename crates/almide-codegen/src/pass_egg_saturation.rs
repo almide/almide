@@ -77,6 +77,12 @@ impl<'a> IrMutVisitor for EggVisitor<'a> {
         // `mul(a, scale(b, s))` fusion's natural direction.
         walk_expr_mut(self, expr);
 
+        if let Some(fused) = fused_fma(expr) {
+            *expr = fused;
+            self.changed = true;
+            return;
+        }
+
         if !is_saturation_target(expr) {
             return;
         }
@@ -86,6 +92,56 @@ impl<'a> IrMutVisitor for EggVisitor<'a> {
             self.changed = true;
         }
     }
+}
+
+/// The args of a `matrix.<func>(..)` call of `arity` operands.
+fn matrix_call_args<'a>(e: &'a IrExpr, func: &str, arity: usize) -> Option<&'a [IrExpr]> {
+    match &e.kind {
+        IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func: f, .. }, args, .. }
+            if module.as_str() == "matrix" && f.as_str() == func && args.len() == arity =>
+        {
+            Some(args)
+        }
+        _ => None,
+    }
+}
+
+/// R-matrix-03 on the native leg, the same rewrite the v1 lowering
+/// (`almide-mir` `fused_fma`) and the wasm front desugar make:
+/// `scale(a, ka) + scale(b, kb)` is `__fma(a, ka, b, kb)` and
+/// `__fma(..) + scale(c, kc)` is `__fma3(..)` — the same per-cell products
+/// and left-to-right sum over the operands' overlap, operands in written
+/// order, but one pass over the overlap instead of a whole-operand `scale`
+/// copy each (#3644). The visitor is post-order, so a three-term sum arrives
+/// as `__fma(..) + scale(..)`.
+fn fused_fma(expr: &IrExpr) -> Option<IrExpr> {
+    let (a, b) = match &expr.kind {
+        IrExprKind::BinOp { op: almide_ir::BinOp::AddMatrix, left, right } => (&**left, &**right),
+        IrExprKind::Call { target: almide_ir::CallTarget::Module { module, func, .. }, args, .. }
+            if module.as_str() == "matrix" && func.as_str() == "__add" && args.len() == 2 =>
+        {
+            (&args[0], &args[1])
+        }
+        _ => return None,
+    };
+    let rhs = matrix_call_args(b, "scale", 2)?;
+    let (fused, lhs) = matrix_call_args(a, "scale", 2)
+        .map(|l| ("__fma", l))
+        .or_else(|| matrix_call_args(a, "__fma", 4).map(|l| ("__fma3", l)))?;
+    Some(IrExpr {
+        kind: IrExprKind::Call {
+            target: almide_ir::CallTarget::Module {
+                module: almide_base::intern::sym("matrix"),
+                func: almide_base::intern::sym(fused),
+                def_id: None,
+            },
+            args: lhs.iter().chain(rhs).cloned().collect(),
+            type_args: vec![],
+        },
+        ty: expr.ty.clone(),
+        span: expr.span,
+        def_id: None,
+    })
 }
 
 /// Whether `expr` is a node the bridge knows how to lift: every

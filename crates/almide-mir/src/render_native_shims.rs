@@ -86,6 +86,12 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
     ("math.__pow", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
             "fn rt_math___pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { eprintln!(\"Error: negative exponent\"); std::process::exit(1); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
+    // `int.pow` is the public name (`math.pow` left the surface, R-math-01):
+    // a bundled wrapper over `math.__pow`, which the rung renderer does not
+    // inline, so the public call keeps its own row with the same body.
+    ("int.pow", &[NTy::I64, NTy::I64],
+            Some(NTy::I64),
+            "fn rt_int_pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { eprintln!(\"Error: negative exponent\"); std::process::exit(1); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
     // #1869: `list.range` joins the floor as a closed shim. The lowering
     // materializes a `let`-bound range that is indexed or measured as
     // `CallFn list.range(s, e)`; without a floor entry the whole program
