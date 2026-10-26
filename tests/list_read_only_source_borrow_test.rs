@@ -442,31 +442,42 @@ fn a_scalar_read_of_the_source_in_a_later_argument_still_lets_it_move() {
     );
 }
 
-/// The tail recursion of #3398 over 4000 strings, timed against its own
+/// The tail recursion of #3398 over 4000 elements, timed against its own
 /// control in the same binary: `moved` drops at the source's last use (the
 /// owned twin, no element cloned), `kept` reads the source once more after the
 /// drop, which keeps it borrowed and clones every kept element. Both are
-/// O(n²) element moves; only `kept` allocates per element. Measured (release,
-/// 5 × 4000): moved 10 ms, kept 700 ms; before #3398 both were the clone path.
+/// O(n²) element moves; only `kept` allocates per element.
+///
+/// #4227: the timed binary is the one built from the emitted Rust the two
+/// shape asserts read. `almide run` ships the v1 render whenever the program
+/// is inside its subset, so timing it measured a renderer this test does not
+/// inspect; and the elements were `String`s, whose clone is a reference-count
+/// bump since ADR-0013, so `kept` stopped allocating per element and the ratio
+/// collapsed (moved 158 ms vs kept 180 ms). Each element is now an 8-Int list,
+/// whose clone allocates, compiled with `-O` as a release build is.
 /// The gate is a RATIO, so a slow machine moves both sides.
 #[test]
 fn perf_tail_recursion_moves_instead_of_cloning() {
+    if Command::new("rustc").arg("--version").output().is_err() {
+        eprintln!("skip: rustc unavailable");
+        return;
+    }
     let src = "import env\n\
         \n\
-        fn moved(xs: List[String], acc: Int) -> Int =\n\
+        fn moved(xs: List[List[Int]], acc: Int) -> Int =\n\
         \x20 match xs {\n\
         \x20   [] => acc,\n\
-        \x20   [x, ..] => moved(list.drop(xs, 1), acc + string.len(x)),\n\
+        \x20   [x, ..] => moved(list.drop(xs, 1), acc + list.len(x)),\n\
         \x20 }\n\
         \n\
-        fn kept(xs: List[String], acc: Int) -> Int =\n\
+        fn kept(xs: List[List[Int]], acc: Int) -> Int =\n\
         \x20 match xs {\n\
         \x20   [] => acc,\n\
-        \x20   [x, ..] => kept(list.drop(xs, 1), acc + string.len(x) + (if list.is_empty(xs) then 1 else 0)),\n\
+        \x20   [x, ..] => kept(list.drop(xs, 1), acc + list.len(x) + (if list.is_empty(xs) then 1 else 0)),\n\
         \x20 }\n\
         \n\
         effect fn main() -> Unit = {\n\
-        \x20 let xs = list.map(list.range(0, 4000), (i) => \"s${i}\")\n\
+        \x20 let xs = list.map(list.range(0, 4000), (i) => [i, i, i, i, i, i, i, i])\n\
         \x20 let t0 = env.millis()\n\
         \x20 let a = moved(xs, 0) + moved(xs, 0) + moved(xs, 0) + moved(xs, 0) + moved(xs, 0)\n\
         \x20 let t1 = env.millis()\n\
@@ -474,16 +485,25 @@ fn perf_tail_recursion_moves_instead_of_cloning() {
         \x20 let t2 = env.millis()\n\
         \x20 println(\"${a} ${b} ${t1 - t0} ${t2 - t1}\")\n\
         }\n";
-    let (_dir, path, rust) = emit_rust("tail_perf.almd", src);
+    let (dir, _path, rust) = emit_rust("tail_perf.almd", src);
     assert!(fn_body(&rust, "moved").contains("almide_rt_list_drop_owned(xs, 1i64)"), "the moved shape lost its move");
     assert!(fn_body(&rust, "kept").contains("almide_rt_list_drop(&xs, 1i64)"), "the control no longer borrows");
-    let run = Command::new(almide()).args(["run", path.to_str().unwrap()]).output().unwrap();
+    let rs = dir.path().join("tail_perf.rs");
+    std::fs::write(&rs, &rust).unwrap();
+    let bin = dir.path().join("tail_perf");
+    let rustc = Command::new("rustc")
+        .args(["--edition", "2021", "-O", "-A", "warnings", "-o"])
+        .arg(&bin)
+        .arg(&rs)
+        .output()
+        .unwrap();
+    assert!(rustc.status.success(), "the emitted Rust does not compile:\n{}", String::from_utf8_lossy(&rustc.stderr));
+    let run = Command::new(&bin).output().unwrap();
     let stdout = String::from_utf8_lossy(&run.stdout);
     let f: Vec<i64> = stdout.split_whitespace().map(|w| w.parse().unwrap()).collect();
     assert_eq!(f.len(), 4, "unexpected output: {stdout}\n{}", String::from_utf8_lossy(&run.stderr));
-    assert_eq!((f[0], f[1]), (94450, 94450), "the two shapes disagree on the sum");
+    assert_eq!((f[0], f[1]), (160000, 160000), "the two shapes disagree on the sum");
     let (moved_ms, kept_ms) = (f[2], f[3]);
-    // ~70× apart when measured; fail only well short of that.
     assert!(
         moved_ms * 5 <= kept_ms.max(1),
         "moving the source at its last use is not faster than cloning its elements: \

@@ -14,7 +14,12 @@ stamp_toolchain() {
         local ver hash mt
         ver="$("$alm" --version 2>/dev/null | head -1)"
         hash="$(shasum -a 256 "$alm" 2>/dev/null | cut -c1-16)"
-        mt="$(stat -f '%Sm' "$alm" 2>/dev/null || stat -c '%y' "$alm" 2>/dev/null)"
+        # BSD `stat -f '%Sm'` first, GNU `stat -c '%y'` when it fails. The two are
+        # separate substitutions: GNU reads `-f` as "filesystem status" and `%Sm` as
+        # a second file, so it prints the filesystem block of $alm before failing on
+        # `%Sm` — inside one `$( a || b )` that block landed in the line ahead of the
+        # GNU date (#4227), where the Almide twin keeps only a succeeding answer.
+        mt="$(stat -f '%Sm' "$alm" 2>/dev/null)" || mt="$(stat -c '%y' "$alm" 2>/dev/null)"
         echo "  almide: $ver  sha256:$hash  mtime:$mt  ($alm)"
         if [ -x "$ws" ]; then
             local wshash
