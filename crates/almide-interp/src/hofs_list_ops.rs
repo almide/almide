@@ -144,9 +144,9 @@ impl<'a> Interpreter<'a> {
             // Structural, element-type-blind — served natively so a heap-element
             // list never reaches the pool's Int-declared core impl (the
             // wrong-impl guard walled chunk/windows on List[String], #1226).
-            // Semantics mirror stdlib/list_chunk.almd EXACTLY: chunk(0) /
-            // windows(0) abort in the T6 form; a negative chunk size is one
-            // chunk holding everything; windows past the length are none.
+            // Semantics mirror stdlib/list_chunk.almd EXACTLY: a size of 0
+            // or less aborts in the T6 form (#4147); windows past the length
+            // are none.
             "chunk" => Some(self.list_chunk(args)),
             "windows" | "window" => Some(self.list_windows(args)),
             // Element-type-blind too: the registry core `list_repeat` is
@@ -170,7 +170,8 @@ impl<'a> Interpreter<'a> {
         let (Some(Value::List(xs)), Some(Value::Int(n))) = (args.first(), args.get(1)) else {
             return Flow::Abort("internal: list.chunk bad args".into());
         };
-        if *n == 0 {
+        // A size of 0 or less aborts: a negative size is 0 (#4147).
+        if *n <= 0 {
             return Flow::Abort("chunk size must be positive".into());
         }
         let total = xs.len() as i64;
@@ -182,13 +183,13 @@ impl<'a> Interpreter<'a> {
         Flow::val(Value::list(out))
     }
 
-    /// `list.windows(xs, n)` — n == 0 aborts, n < 0 or n > len is the empty
+    /// `list.windows(xs, n)` — n <= 0 aborts (#4147), n > len is the empty
     /// list, else the len-n+1 overlapping sub-slices.
     fn list_windows(&mut self, args: &[Value]) -> Flow {
         let (Some(Value::List(xs)), Some(Value::Int(n))) = (args.first(), args.get(1)) else {
             return Flow::Abort("internal: list.windows bad args".into());
         };
-        if *n == 0 {
+        if *n <= 0 {
             return Flow::Abort("window size must be positive".into());
         }
         let total = xs.len() as i64;
@@ -381,8 +382,8 @@ impl<'a> Interpreter<'a> {
     fn eval_list_slice_a(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         let items = args.first().and_then(|v| v.as_iter_items())?;
         let n = items.len();
-        // An unsigned count, saturated to `n` — `-1 as usize` is enormous.
-        let count = |i: i64| -> usize { if i < 0 { n } else { (i as usize).min(n) } };
+        // A count or range bound, clamped into [0, n]: a negative one is 0 (#4147).
+        let count = |i: i64| -> usize { if i < 0 { 0 } else { (i as usize).min(n) } };
         let int_arg = |k: usize| -> Option<i64> {
             match args.get(k) { Some(Value::Int(i)) => Some(*i), _ => None }
         };
@@ -404,8 +405,8 @@ impl<'a> Interpreter<'a> {
     fn eval_list_slice_b(&mut self, func: &str, args: &[Value]) -> Option<Flow> {
         let items = args.first().and_then(|v| v.as_iter_items())?;
         let n = items.len();
-        // An unsigned count, saturated to `n` — `-1 as usize` is enormous.
-        let count = |i: i64| -> usize { if i < 0 { n } else { (i as usize).min(n) } };
+        // A count or range bound, clamped into [0, n]: a negative one is 0 (#4147).
+        let count = |i: i64| -> usize { if i < 0 { 0 } else { (i as usize).min(n) } };
         // An unsigned index; `None` when out of range (the no-op / default path).
         let index = |i: i64| -> Option<usize> {
             if i < 0 { None } else { let u = i as usize; (u < n).then_some(u) }

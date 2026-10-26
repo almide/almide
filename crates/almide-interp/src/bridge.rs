@@ -601,23 +601,23 @@ fn string_fn_slice(func: &str, args: &[Value]) -> Option<Flow> {
         "take" => Flow::val(Value::str(
             as_str(args.first())?
                 .chars()
-                .take(as_int(args.get(1))? as usize)
+                .take(as_int(args.get(1))?.max(0) as usize)
                 .collect::<String>(),
         )),
-        // `drop`/`take_end`/`drop_end` are `take`'s unsigned-count siblings, and
-        // `slice` clamps its start/end SIGNED (the one C-034 exception: the native
-        // oracle is `(x.max(0) as usize).min(len)`), with a reversed range empty.
+        // `drop`/`take_end`/`drop_end` are `take`'s siblings — a negative count is
+        // 0 (#4147) — and `slice` clamps its start/end into [0, len], with a
+        // reversed range empty.
         "drop" => Flow::val(Value::str(
             as_str(args.first())?
                 .chars()
-                .skip(as_int(args.get(1))? as usize)
+                .skip(as_int(args.get(1))?.max(0) as usize)
                 .collect::<String>(),
         )),
         "take_end" | "drop_end" => {
             let cs: Vec<char> = as_str(args.first())?.chars().collect();
             let raw = as_int(args.get(1))?;
-            // Unsigned: a negative count is enormous, so it saturates to all.
-            let k = if raw < 0 { cs.len() } else { (raw as usize).min(cs.len()) };
+            // A negative count is 0 (#4147).
+            let k = if raw < 0 { 0 } else { (raw as usize).min(cs.len()) };
             let kept: String = if func == "take_end" {
                 cs[cs.len() - k..].iter().collect()
             } else {
