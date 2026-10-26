@@ -119,7 +119,10 @@ static ALMIDE_FAN_ARM_THREADS: std::sync::atomic::AtomicUsize = std::sync::atomi
 fn almide_fan_arm_threads_max() -> usize {
     static MAX: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *MAX.get_or_init(|| {
-        let cap = std::env::var("ALMIDE_FAN_THREADS").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&n| n > 0).unwrap_or(usize::MAX);
+        // The generated program's own read of its run-time switch (not a
+        // compiler read, so not through almide_base::env).
+        const ALMIDE_FAN_THREADS_ENV: &str = "ALMIDE_FAN_THREADS";
+        let cap = std::env::var(ALMIDE_FAN_THREADS_ENV).ok().and_then(|v| v.parse::<usize>().ok()).filter(|&n| n > 0).unwrap_or(usize::MAX);
         std::thread::available_parallelism().map_or(1, |n| n.get()).saturating_mul(ALMIDE_FAN_ARM_THREADS_PER_CPU).min(cap).max(1)
     })
 }
