@@ -1,0 +1,12 @@
+// Destructuring reads the fields: a `Secret` pattern outside the `secret`
+// module is refused like `s.hidden`, through an alias as well.
+import secret
+
+type Mine = Secret[Int]
+
+fn main() -> Unit = {
+  let s: Mine = secret.new(1)
+  match s {
+    Mine { hidden } => println(int.to_string(hidden)),
+  }
+}

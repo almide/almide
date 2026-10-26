@@ -1,0 +1,9 @@
+// A record update builds a new value field by field: of a `Secret` outside
+// the `secret` module it is a literal of the opaque type.
+import secret
+
+fn main() -> Unit = {
+  let s = secret.new(1)
+  let t = { ...s, hidden: 2 }
+  println("${t}")
+}

@@ -1,0 +1,10 @@
+// An alias names the opaque type itself: building `Mine { .. }` is a
+// `Secret` literal outside the `secret` module, refused like `Secret { .. }`.
+import secret
+
+type Mine = Secret[Int]
+
+fn main() -> Unit = {
+  let s = Mine { hidden: 1 }
+  println("${s}")
+}
