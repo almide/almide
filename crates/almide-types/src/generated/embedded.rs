@@ -23,6 +23,7 @@ effect fn has_flag(name: String) -> Bool = __has(__options(env.args()), name)
 
 
 
+@category
 fn __has(args: List[String], name: String) -> Bool = {
 
 
@@ -34,12 +35,14 @@ fn __has(args: List[String], name: String) -> Bool = {
 
 
 
+@category
 fn __options(args: List[String]) -> List[String] = match list.index_of(args, "--") {
   some(i) => list.take(args, i),
   none => args,
 }
 
 
+@category
 fn __operands(args: List[String]) -> List[String] = match list.index_of(args, "--") {
   some(i) => list.drop(args, i + 1),
   none => [],
@@ -100,6 +103,7 @@ effect fn positional(options: List[String]) -> List[String] = __positional(env.a
 
 
 
+@category
 fn __positional(args: List[String], options: List[String]) -> List[String] =
   __positional_at(__options(args), options, 0, []) + __operands(args)
 
@@ -5702,6 +5706,8 @@ pub const SRC_ENV: &str = r#"
 
 
 
+import secret
+
 /// Wall-clock seconds since the Unix epoch.
 @intrinsic("almide_rt_env_unix_timestamp")
 @category("Time")
@@ -5715,10 +5721,21 @@ effect fn args() -> List[String] = _
 @intrinsic("almide_rt_env_get")
 effect fn get(name: String) -> String? = _
 
+
+
+
+
+
+/// Value of name as a Secret (prints Secret(***), constant-time ==), or none if unset. For a token or key.
+effect fn secret(name: String) -> Secret[String]? = env.get(name) |> option.map((v) => secret.new(v))
+
 /// Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
 @ordered
 @category("Env.write")
-effect fn set(name: String, value: String) -> Result[Unit, String] = match __set_refusal(name, value) {
+effect fn set(name: String, value: String) -> Result[Unit, String] = match __set_refusal(
+  name,
+  value,
+) {
   some(why) => err("env.set: " + why),
   none => {
     __set(name, value)
@@ -10155,6 +10172,8 @@ pub const SRC_HASH: &str = r#"
 
 
 
+import secret
+
 /// 32-bit FNV-1a of s's UTF-8; non-negative Int.
 @intrinsic("almide_rt_hash_fnv1a32")
 fn fnv1a32(s: String) -> Int = _
@@ -10170,6 +10189,7 @@ fn sha256(b: Bytes) -> Bytes = _
 /// SHA-256 of s's UTF-8, 64 lowercase hex chars.
 @intrinsic("almide_rt_hash_sha256_hex")
 fn sha256_hex(s: String) -> String = _
+
 
 
 
@@ -10213,10 +10233,6 @@ fn adler32(b: Bytes) -> Int = {
   int.bor(int.bshl(s2, 16), s1)
 }
 
-local fn h_mask32(x: Int) -> Int = int.band(x, 4294967295)
-
-local fn h_rotl32(x: Int, n: Int) -> Int = h_mask32(int.bor(int.bshl(x, n), int.bshr(x, 32 - n)))
-
 
 local fn h_shr64(x: Int, n: Int) -> Int = int.band(int.bshr(x, n), int.bshl(1, 64 - n) - 1)
 
@@ -10239,15 +10255,6 @@ local fn h_pad(b: Bytes, block: Int, len_count: Int, big_endian: Bool) -> List[I
   )
 }
 
-local fn h_word32(m: List[Int], at: Int, big_endian: Bool) -> Int =
-  if big_endian then int.bor(
-    int.bor(int.bshl(m[at], 24), int.bshl(m[at + 1], 16)),
-    int.bor(int.bshl(m[at + 2], 8), m[at + 3]),
-  ) else int.bor(
-    int.bor(m[at], int.bshl(m[at + 1], 8)),
-    int.bor(int.bshl(m[at + 2], 16), int.bshl(m[at + 3], 24)),
-  )
-
 local fn h_word64(m: List[Int], at: Int) -> Int = list.range(0, 8) |> list.fold(
   0,
   (acc, k) => int.bor(int.bshl(acc, 8), m[at + k]),
@@ -10264,179 +10271,6 @@ local fn h_hex(b: Bytes) -> String = bytes.to_list(b) |> list.map((x) => string.
   int.band(x, 15),
   int.band(x, 15) + 1,
 )) |> string.join("")
-
-local fn h_md5_k() -> List[Int] = [
-  3614090360,
-  3905402710,
-  606105819,
-  3250441966,
-  4118548399,
-  1200080426,
-  2821735955,
-  4249261313,
-  1770035416,
-  2336552879,
-  4294925233,
-  2304563134,
-  1804603682,
-  4254626195,
-  2792965006,
-  1236535329,
-  4129170786,
-  3225465664,
-  643717713,
-  3921069994,
-  3593408605,
-  38016083,
-  3634488961,
-  3889429448,
-  568446438,
-  3275163606,
-  4107603335,
-  1163531501,
-  2850285829,
-  4243563512,
-  1735328473,
-  2368359562,
-  4294588738,
-  2272392833,
-  1839030562,
-  4259657740,
-  2763975236,
-  1272893353,
-  4139469664,
-  3200236656,
-  681279174,
-  3936430074,
-  3572445317,
-  76029189,
-  3654602809,
-  3873151461,
-  530742520,
-  3299628645,
-  4096336452,
-  1126891415,
-  2878612391,
-  4237533241,
-  1700485571,
-  2399980690,
-  4293915773,
-  2240044497,
-  1873313359,
-  4264355552,
-  2734768916,
-  1309151649,
-  4149444226,
-  3174756917,
-  718787259,
-  3951481745
-]
-
-local fn h_md5_s(i: Int) -> Int = {
-  let row = match i / 16 {
-    0 => [7, 12, 17, 22],
-    1 => [5, 9, 14, 20],
-    2 => [4, 11, 16, 23],
-    _ => [6, 10, 15, 21],
-  }
-  row[i % 4]
-}
-
-/// 16-byte MD5 digest of b. For compatibility only: MD5 is broken, never use it for security.
-@insecure_digest
-fn md5(b: Bytes) -> Bytes = {
-  let m = h_pad(b, 64, 8, false)
-  let k = h_md5_k()
-  var h0 = 1732584193
-  var h1 = 4023233417
-  var h2 = 2562383102
-  var h3 = 271733878
-  var off = 0
-  while off < list.len(m) {
-    var a = h0
-    var bb = h1
-    var c = h2
-    var d = h3
-    var i = 0
-    while i < 64 {
-      let fg = match i / 16 {
-        0 => (int.bor(int.band(bb, c), int.band(int.bxor(bb, 4294967295), d)), i),
-        1 => (int.bor(int.band(d, bb), int.band(int.bxor(d, 4294967295), c)), (5 * i + 1) % 16),
-        2 => (int.bxor(int.bxor(bb, c), d), (3 * i + 5) % 16),
-        _ => (int.bxor(c, int.bor(bb, int.bxor(d, 4294967295))), (7 * i) % 16),
-      }
-      let f = h_mask32(fg.0 + a + k[i] + h_word32(m, off + fg.1 * 4, false))
-      a = d
-      d = c
-      c = bb
-      bb = h_mask32(bb + h_rotl32(f, h_md5_s(i)))
-      i = i + 1
-    }
-    h0 = h_mask32(h0 + a)
-    h1 = h_mask32(h1 + bb)
-    h2 = h_mask32(h2 + c)
-    h3 = h_mask32(h3 + d)
-    off = off + 64
-  }
-  h_out([h0, h1, h2, h3], 4, false)
-}
-
-/// MD5 of b as 32 lowercase hex chars. For compatibility only, never for security.
-@insecure_digest
-fn md5_hex(b: Bytes) -> String = h_hex(md5(b))
-
-/// 20-byte SHA-1 digest of b. For compatibility only: SHA-1 is broken, never use it for security.
-@insecure_digest
-fn sha1(b: Bytes) -> Bytes = {
-  let m = h_pad(b, 64, 8, true)
-  var h0 = 1732584193
-  var h1 = 4023233417
-  var h2 = 2562383102
-  var h3 = 271733878
-  var h4 = 3285377520
-  var w = list.repeat(0, 80)
-  var off = 0
-  while off < list.len(m) {
-    var t = 0
-    while t < 80 {
-      w[t] = if t < 16 then h_word32(m, off + t * 4, true)
-      else h_rotl32(int.bxor(int.bxor(w[t - 3], w[t - 8]), int.bxor(w[t - 14], w[t - 16])), 1)
-      t = t + 1
-    }
-    var a = h0
-    var bb = h1
-    var c = h2
-    var d = h3
-    var e = h4
-    var i = 0
-    while i < 80 {
-      let fk = match i / 20 {
-        0 => (int.bor(int.band(bb, c), int.band(int.bxor(bb, 4294967295), d)), 1518500249),
-        1 => (int.bxor(int.bxor(bb, c), d), 1859775393),
-        2 => (int.bor(int.bor(int.band(bb, c), int.band(bb, d)), int.band(c, d)), 2400959708),
-        _ => (int.bxor(int.bxor(bb, c), d), 3395469782),
-      }
-      let temp = h_mask32(h_rotl32(a, 5) + fk.0 + e + fk.1 + w[i])
-      e = d
-      d = c
-      c = h_rotl32(bb, 30)
-      bb = a
-      a = temp
-      i = i + 1
-    }
-    h0 = h_mask32(h0 + a)
-    h1 = h_mask32(h1 + bb)
-    h2 = h_mask32(h2 + c)
-    h3 = h_mask32(h3 + d)
-    h4 = h_mask32(h4 + e)
-    off = off + 64
-  }
-  h_out([h0, h1, h2, h3, h4], 4, true)
-}
-
-/// SHA-1 of b as 40 lowercase hex chars. For compatibility only, never for security.
-@insecure_digest
-fn sha1_hex(b: Bytes) -> String = h_hex(sha1(b))
 
 local fn h_sha512_k() -> List[Int] = [
   4794697086780616226,
@@ -10600,6 +10434,11 @@ fn sha512_hex(b: Bytes) -> String = h_hex(sha512(b))
 
 
 
+
+
+
+
+
 local fn h_digest(b: Bytes, wide: Bool) -> Bytes = if wide then hash.sha512(b) else hash.sha256(b)
 
 local fn h_hmac(key: Bytes, b: Bytes, wide: Bool) -> Bytes = {
@@ -10611,28 +10450,22 @@ local fn h_hmac(key: Bytes, b: Bytes, wide: Bool) -> Bytes = {
   h_digest(bytes.concat(opad, h_digest(bytes.concat(ipad, b), wide)), wide)
 }
 
-/// 32-byte HMAC-SHA256 of b under key (RFC 2104); key first.
-fn hmac_sha256(key: Bytes, b: Bytes) -> Bytes = h_hmac(key, b, false)
+/// 32-byte HMAC-SHA256 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time. Hex: hex.encode(secret.reveal(tag)).
+fn hmac_sha256(key: Secret[Bytes], b: Bytes) -> Secret[Bytes] = secret.new(h_hmac(secret.reveal(key), b, false))
 
-/// HMAC-SHA256 of b under key as 64 lowercase hex chars.
-fn hmac_sha256_hex(key: Bytes, b: Bytes) -> String = h_hex(hmac_sha256(key, b))
+/// 64-byte HMAC-SHA512 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time. Hex: hex.encode(secret.reveal(tag)).
+fn hmac_sha512(key: Secret[Bytes], b: Bytes) -> Secret[Bytes] = secret.new(h_hmac(secret.reveal(key), b, true))
 
-/// 64-byte HMAC-SHA512 of b under key (RFC 2104); key first.
-fn hmac_sha512(key: Bytes, b: Bytes) -> Bytes = h_hmac(key, b, true)
-
-/// HMAC-SHA512 of b under key as 128 lowercase hex chars.
-fn hmac_sha512_hex(key: Bytes, b: Bytes) -> String = h_hex(hmac_sha512(key, b))
-
-/// True if tag is the HMAC-SHA256 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha256(key, b, hex.decode(sig) ?? bytes.from_list([])).
-fn is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool = bytes.is_equal_constant_time(
-  hmac_sha256(key, b),
-  tag,
+/// True if tag is the HMAC-SHA256 of b under key, compared in constant time. A hex tag: hash.is_valid_hmac_sha256(key, b, secret.new(hex.decode(sig) ?? bytes.from_list([]))).
+fn is_valid_hmac_sha256(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool = bytes.is_equal_constant_time(
+  secret.reveal(hmac_sha256(key, b)),
+  secret.reveal(tag),
 )
 
-/// True if tag is the HMAC-SHA512 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha512(key, b, hex.decode(sig) ?? bytes.from_list([])).
-fn is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool = bytes.is_equal_constant_time(
-  hmac_sha512(key, b),
-  tag,
+/// True if tag is the HMAC-SHA512 of b under key, compared in constant time. A hex tag: hash.is_valid_hmac_sha512(key, b, secret.new(hex.decode(sig) ?? bytes.from_list([]))).
+fn is_valid_hmac_sha512(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool = bytes.is_equal_constant_time(
+  secret.reveal(hmac_sha512(key, b)),
+  secret.reveal(tag),
 )
 "#;
 pub const SRC_HASH_IMPL: &str = r#"
@@ -11902,9 +11735,14 @@ fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
 
 fn __apply(mw: HttpMiddleware, inner: HttpHandler) -> HttpHandler = mw(inner)
 
-/// JSON body through decode; err is a 400 response.
-fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
-  ok(v) => match decode(v) {
+
+
+
+
+/// JSON body into input type T, strictly; err is a 400 response.
+@input_sink
+fn decode_json[T: Decode](req: HttpRequest) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
+  ok(v) => match T.decode_strict(v) {
     ok(x) => ok(x),
     err(e) => err(http.response(400, "Bad Request: " + e)),
   },
@@ -28692,9 +28530,9 @@ fn select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> M
 @intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
 
-/// Element at (row, col); out of range aborts.
+/// Element at (row, col); none out of range.
 @intrinsic("almide_rt_matrix_get")
-fn get(m: Matrix, row: Int, col: Int) -> Float = _
+fn get(m: Matrix, row: Int, col: Int) -> Float? = _
 
 /// Row count; 0 for an empty matrix.
 @intrinsic("almide_rt_matrix_rows")
@@ -28746,9 +28584,9 @@ fn pow(m: Matrix, exp: Float) -> Matrix = _
 fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
 
 
-/// f32 LE rows x cols at offset; all 0 if data short.
+/// f32 LE rows x cols at offset; none if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f32_le")
-fn from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 /// Row-major f64 LE, 8 bytes per element.
 @intrinsic("almide_rt_matrix_to_bytes_f64_le")
@@ -28762,13 +28600,13 @@ fn to_bytes_f32_le(m: Matrix) -> Bytes = _
 @intrinsic("almide_rt_matrix_to_bytes_f16_le")
 fn to_bytes_f16_le(m: Matrix) -> Bytes = _
 
-/// f16 LE rows x cols at offset; all 0 if data short.
+/// f16 LE rows x cols at offset; none if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f16_le")
-fn from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
-/// f64 LE rows x cols at offset; all 0 if data short.
+/// f64 LE rows x cols at offset; none if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f64_le")
-fn from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 
 /// bias added to each row; cols cut to bias.
@@ -29151,20 +28989,22 @@ fn matrix_cols(m: List[List[Float]]) -> Int = {
 
 
 
-fn __mx_bounds(idx: Int, extent: Int) -> Int = {
-  if idx < 0 or idx >= extent then prim.die(prim.handle("Error: matrix index out of bounds\n")) else ()
-  0
-}
 
-fn matrix_get(m: List[List[Float]], row: Int, col: Int) -> Float = {
+fn __mx_get_none() -> Float? = none
+
+fn __mx_get_some(x: Float) -> Float? = some(x)
+
+fn matrix_get(m: List[List[Float]], row: Int, col: Int) -> Float? = {
   let h = prim.handle(m)
   let rows = prim.load32(h + 4)
-  let _gr = __mx_bounds(row, rows)
-  let rh = prim.load64(h + 12 + row * 8)
+  if row < 0 or row >= rows then __mx_get_none()
+  else {
+    let rh = prim.load64(h + 12 + row * 8)
 
-  let cols = prim.load32(rh + 4)
-  let _gc = __mx_bounds(col, cols)
-  prim.ffrombits(prim.load64(rh + 12 + col * 8))
+    let cols = prim.load32(rh + 4)
+    if col < 0 or col >= cols then __mx_get_none()
+    else __mx_get_some(prim.ffrombits(prim.load64(rh + 12 + col * 8)))
+  }
 }
 
 
@@ -29485,7 +29325,13 @@ else {
 
 
 
-fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+
+
+fn __mx_load_none() -> List[List[Float]]? = none
+
+fn __mx_load_some(m: List[List[Float]]) -> List[List[Float]]? = some(m)
+
+fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let hd = prim.handle(data)
   let len = prim.load32(hd + 4)
 
@@ -29507,11 +29353,11 @@ fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
 
 
 
-  if offset < 0 or offset > len or need > len - offset then __mx_const(r, c, 0.0)
+  if offset < 0 or offset > len or need > len - offset then __mx_load_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __mx_f32_rows(prim.handle(out), hd, offset, r, c, 0)
-    out
+    __mx_load_some(out)
   }
 }
 
@@ -29604,7 +29450,7 @@ fn __mx_f16_decode(bits: Int) -> Float = {
   }
 }
 
-fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let hd = prim.handle(data)
   let len = prim.load32(hd + 4)
 
@@ -29623,11 +29469,11 @@ fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
 
 
 
-  if offset < 0 or offset > len or need > len - offset then __mx_const(r, c, 0.0)
+  if offset < 0 or offset > len or need > len - offset then __mx_load_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __mx_f16_rows(prim.handle(out), hd, offset, r, c, 0)
-    out
+    __mx_load_some(out)
   }
 }
 
@@ -30023,7 +29869,11 @@ else {
   __fb64_rows(ho, base, r, c, i + 1)
 }
 
-fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+fn __fb64_none() -> List[List[Float]]? = none
+
+fn __fb64_some(m: List[List[Float]]) -> List[List[Float]]? = some(m)
+
+fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let bh = prim.handle(data)
   let len = prim.load32(bh + 4)
 
@@ -30037,11 +29887,11 @@ fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   if r > 0 and c > 268435456 / r then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
 
 
-  if offset < 0 or offset > len or r * c * 8 > len - offset then __mxe_zeros(r, c)
+  if offset < 0 or offset > len or r * c * 8 > len - offset then __fb64_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __fb64_rows(prim.handle(out), bh + 12 + offset, r, c, 0)
-    out
+    __fb64_some(out)
   }
 }
 "#;
@@ -30127,7 +29977,8 @@ fn matrix_linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_row
   if rows == 0 or w_rows <= 0 or w_cols <= 0 then matrix.zeros(rows, w_rows)
   else {
     let off = if w_offset < 0 then 0 else w_offset
-    let w = matrix.from_bytes_f32_le(w_bytes, off, w_rows, w_cols)
+
+    let w = matrix.from_bytes_f32_le(w_bytes, off, w_rows, w_cols) ?? matrix.zeros(w_rows, w_cols)
     matrix.linear_row_no_bias(x, w)
   }
 }
@@ -32129,10 +31980,9 @@ fn join(base: String, child: String) -> String = {
 
   if string.starts_with(child, "/") then child
   else {
-    let b = if string.ends_with(base, "/") then string.slice(base, 0, string.len(base) - 1)
-    else base
+    let n = if string.ends_with(base, "/") then string.len(base) - 1 else string.len(base)
 
-    if string.len(b) > 0 then b + "/" + child
+    if n > 0 then string.slice(base, 0, n) + "/" + child
     else if string.starts_with(base, "/") then "/" + child
     else child
   }
