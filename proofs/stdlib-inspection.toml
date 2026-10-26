@@ -10306,34 +10306,6 @@ status = "uninspected"
 blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
 
 [[fn]]
-name = "hash.md5"
-sig = "(b: Bytes) -> Bytes"
-class = "pure"
-status = "uninspected"
-blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
-
-[[fn]]
-name = "hash.md5_hex"
-sig = "(b: Bytes) -> String"
-class = "pure"
-status = "uninspected"
-blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
-
-[[fn]]
-name = "hash.sha1"
-sig = "(b: Bytes) -> Bytes"
-class = "pure"
-status = "uninspected"
-blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
-
-[[fn]]
-name = "hash.sha1_hex"
-sig = "(b: Bytes) -> String"
-class = "pure"
-status = "uninspected"
-blocked = "new in the stdlib redesign wave 1C (the 追加 rows of target-surface.md): awaits its GCE inspection run"
-
-[[fn]]
 name = "hash.sha512"
 sig = "(b: Bytes) -> Bytes"
 class = "pure"
@@ -14675,22 +14647,8 @@ status = "uninspected"
 blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
 
 [[fn]]
-name = "hash.hmac_sha256_hex"
-sig = "(key: Bytes, b: Bytes) -> String"
-class = "pure"
-status = "uninspected"
-blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
-
-[[fn]]
 name = "hash.hmac_sha512"
 sig = "(key: Bytes, b: Bytes) -> Bytes"
-class = "pure"
-status = "uninspected"
-blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
-
-[[fn]]
-name = "hash.hmac_sha512_hex"
-sig = "(key: Bytes, b: Bytes) -> String"
 class = "pure"
 status = "uninspected"
 blocked = "new in #4106 (HMAC and the constant-time compare): awaits its GCE inspection run"
