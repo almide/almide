@@ -9,5 +9,7 @@ fn main() -> Unit = {
   ])
   let b = matrix.transpose(matrix.ones(2, 2))
   let c = matrix.mul(a, b)
-  println(float.to_string(matrix.get(c, 1, 1) ?? 0.0))
+  // matrix.get, not read here: it returns Float? since C-282, and the
+  // latest release, which builds this file too, returns Float
+  println(float.to_string(matrix.to_lists(c) |> list.flatten |> list.fold(0.0, (s, x) => s + x)))
 }
