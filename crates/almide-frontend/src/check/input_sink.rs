@@ -36,9 +36,6 @@ enum NotInput {
     SentOut { ty: String, proto: &'static str },
     /// A record nested in the input type is also written out.
     NestedSentOut { outer: String, field: String, inner: String, proto: &'static str },
-    /// A variant: its wire form is a tag and a payload, with no field set the
-    /// sink can hold keys to.
-    Variant { ty: String },
     /// A type parameter of a caller that is not itself an input sink.
     Forwarded { tv: String, caller: String },
 }
@@ -60,21 +57,11 @@ impl Checker {
         }
     }
 
-    /// Inside an `@input_sink` fn, its input type parameter is a record
-    /// conforming to `Decode` (the call sites are held to that), so the
-    /// record's derived `decode_strict` is reachable through it.
-    pub(crate) fn input_sink_record_method(&self, tv: Sym, field: &str) -> bool {
-        field == crate::canonicalize::protocols::RECORD_DECODE_METHOD
-            && self.current_fn.as_ref()
-                .and_then(|(k, _)| self.env.input_sinks.get(k))
-                .is_some_and(|tvs| tvs.contains(&tv))
-    }
-
     /// E002's hint for `T.encode` on a decode-only type or `T.decode` on an
     /// encode-only one (C-435): the method belongs to the direction the type
     /// did not declare. `None` when that is not why it is missing.
     pub(crate) fn missing_codec_direction_hint(&self, name: Sym, method: &str) -> Option<String> {
-        use crate::canonicalize::protocols::{builtin_protocol, codec_directions, ENCODE_PROTOCOL, DECODE_PROTOCOL, RECORD_DECODE_METHOD};
+        use crate::canonicalize::protocols::{builtin_protocol, codec_directions, ENCODE_PROTOCOL, DECODE_PROTOCOL};
         let bare = name.as_str().rsplit('.').next().unwrap_or(name.as_str());
         let declared: Vec<Sym> = [name, sym(bare)].iter()
             .filter_map(|n| self.env.type_protocols.get(n))
@@ -83,8 +70,7 @@ impl Checker {
         if !enc && !dec {
             return None;
         }
-        let in_dir = |p: &str| builtin_protocol(p).is_some_and(|bp| bp.method_names().iter().any(|m| m == method))
-            || (p == DECODE_PROTOCOL && method == RECORD_DECODE_METHOD);
+        let in_dir = |p: &str| builtin_protocol(p).is_some_and(|bp| bp.method_names().iter().any(|m| m == method));
         if !enc && in_dir(ENCODE_PROTOCOL) {
             return Some(format!(
                 "`{bare}` is `: Decode` only — an input type, read from input and never written out, so it has no `{method}`. Declare `type {bare}: Codec` if it is also sent out, or build the type you send from it."
@@ -141,13 +127,10 @@ impl Checker {
                 if let Some(proto) = self.sent_out_as(*name) {
                     return Some(NotInput::SentOut { ty: name.to_string(), proto });
                 }
-                if matches!(self.named_def(*name), Some(Ty::Variant { .. })) {
-                    return Some(NotInput::Variant { ty: name.to_string() });
-                }
                 let mut seen = std::collections::HashSet::new();
                 self.nested_sent_out(*name, &mut seen)
             }
-            Ty::Variant { name, .. } => Some(NotInput::Variant { ty: name.to_string() }),
+            Ty::Variant { name, .. } => self.not_an_input_type(&Ty::Named(*name, vec![]), caller),
             _ => None,
         }
     }
@@ -183,9 +166,17 @@ impl Checker {
         if !seen.insert(outer) {
             return None;
         }
+        // A record's fields, or every payload slot of a variant's cases.
         let fields: Vec<(String, Ty)> = match self.named_def(outer) {
             Some(Ty::Record { fields }) | Some(Ty::OpenRecord { fields }) =>
                 fields.iter().map(|(n, t)| (n.to_string(), t.clone())).collect(),
+            Some(Ty::Variant { cases, .. }) => cases.iter().flat_map(|c| match &c.payload {
+                crate::types::VariantPayload::Unit => Vec::new(),
+                crate::types::VariantPayload::Tuple(ts) => ts.iter().enumerate()
+                    .map(|(i, t)| (format!("{}.{}", c.name, i), t.clone())).collect(),
+                crate::types::VariantPayload::Record(fs) => fs.iter()
+                    .map(|(n, t)| (format!("{}.{}", c.name, n), t.clone())).collect(),
+            }).collect(),
             _ => return None,
         };
         for (field, fty) in fields {
@@ -226,11 +217,6 @@ impl Checker {
             NotInput::NestedSentOut { outer, field, inner, proto } => err(
                 format!("`{callee}` decodes untrusted input into `{outer}`, and its field `{field}` holds `{inner}`, which is also sent out (it is `{proto}`)"),
                 format!("Every record inside an input type is input too. Declare an input copy, `type {inner}Input: Decode = {{ ... }}`, use it in `{outer}`, and build `{inner}` from it in code."),
-                format!("{callee}[{}]", ty.display()),
-            ),
-            NotInput::Variant { ty: t } => err(
-                format!("`{callee}` decodes untrusted input only into a record input type, and `{t}` is a variant"),
-                format!("A request body is a JSON object, and the sink refuses any key outside the record's fields. Declare the body as a record, `type {t}Input: Decode = {{ ... }}`, and build `{t}` from it in code."),
                 format!("{callee}[{}]", ty.display()),
             ),
             NotInput::Forwarded { tv, caller } => err(

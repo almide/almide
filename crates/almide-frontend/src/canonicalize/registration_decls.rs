@@ -82,8 +82,7 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     }
 
     if let Some(derives) = deriving {
-        let is_record = matches!(ty, ast::TypeExpr::Record { .. } | ast::TypeExpr::OpenRecord { .. });
-        register_derive_sigs(env, derives, name, prefix, is_record);
+        register_derive_sigs(env, derives, name, prefix);
     }
 }
 /// `mod`/local type alias → nominal newtype (opaque constructor), when the declared visibility isn't Public and the resolved shape isn't already a Record/Variant. Registers the opaque-alias bookkeeping under the newtype's `identity` and returns the (possibly rewritten) resolved type. Verbatim text move out of [`register_type_decl`].
