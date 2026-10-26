@@ -155,11 +155,28 @@ fn a_huge_read_length_answers_the_bytes_there_are() -> Result<(), String> {
 /// live in net_unix_sys.rs alone, every block under a SAFETY line.
 #[test]
 fn unsafe_lives_in_the_one_sanctioned_module() {
+    // Every file under src/, subdirectories included (src/generated/ holds
+    // emitted sources that are compiled into the crate like any other).
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    for entry in std::fs::read_dir(&src).unwrap() {
-        let path = entry.unwrap().path();
+    let mut files = Vec::new();
+    walk(&src, &mut files);
+    assert!(
+        files.iter().any(|p| p.strip_prefix(&src).unwrap().components().count() > 1),
+        "the walk reached no file below a subdirectory of src/"
+    );
+    for path in files {
         let text = std::fs::read_to_string(&path).unwrap();
-        let name = path.file_name().unwrap().to_str().unwrap().to_string();
+        let name = path.strip_prefix(&src).unwrap().to_string_lossy().replace('\\', "/");
         let lines: Vec<&str> = text.lines().collect();
         for (i, line) in lines.iter().enumerate() {
             let code = line.split("//").next().unwrap_or("");
