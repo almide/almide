@@ -190,6 +190,10 @@ pub struct Checker {
     /// The expected result of each call an effect expectation reached, and
     /// the one armed for the call whose args are being inferred.
     pub(crate) call_expect: std::collections::HashMap<crate::ast::ExprId, crate::types::Ty>,
+    /// The expected type of a `??` fallback, keyed by the fallback: applied
+    /// once the `??` operand is inferred, unless that operand's payload holds
+    /// pure closures (data decides, as for a call's args).
+    pub(crate) qq_fallback_expect: std::collections::HashMap<crate::ast::ExprId, crate::types::Ty>,
     pub(crate) pending_call_ret: Option<crate::types::Ty>,
     /// #2588: the declared return type of the lambda being inferred, when its
     /// expected type is a `Fn` known from a declaration (a fn return type, a
@@ -702,6 +706,7 @@ impl Checker {
             lambda_slot_effect: false,
             lambda_expect: std::collections::HashMap::new(),
             call_expect: std::collections::HashMap::new(),
+            qq_fallback_expect: std::collections::HashMap::new(),
             pending_call_ret: None,
             lambda_ret_expect: None,
             list_elem_expect: None,
