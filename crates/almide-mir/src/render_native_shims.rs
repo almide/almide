@@ -76,7 +76,7 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
             "fn rt_string_capitalize(s: &str) -> AlmideString {\n    // C-412: the first scalar upper-cases under the to_upper rule.\n    let mut c = s.chars();\n    let mut out = String::with_capacity(s.len());\n    if let Some(f) = c.next() { let m = f.to_uppercase(); if !f.is_ascii() && m.clone().any(|x| x.is_ascii()) { out.push(f) } else { out.extend(m) } out.push_str(c.as_str()); }\n    AlmideString::from(out)\n}"),
     ("string.take", &[NTy::Str, NTy::I64],
             Some(NTy::Str),
-            "fn rt_string_take(s: &str, n: i64) -> AlmideString { AlmideString::from(s.chars().take(n as usize).collect::<String>()) }"),
+            "fn rt_string_take(s: &str, n: i64) -> AlmideString { AlmideString::from(s.chars().take(n.max(0) as usize).collect::<String>()) }"),
     ("string.from_codepoint", &[NTy::I64],
             Some(NTy::Str),
             "fn rt_string_from_codepoint(cp: i64) -> AlmideString { AlmideString::from(<u32 as std::convert::TryFrom<i64>>::try_from(cp).ok().and_then(char::from_u32).map(|c| c.to_string()).unwrap_or_default()) }"),

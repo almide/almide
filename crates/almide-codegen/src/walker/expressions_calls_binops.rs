@@ -40,7 +40,7 @@ fn render_iter_chain(ctx: &RenderContext, source: &IrExpr, consume: bool, steps:
             IterStep::Filter { lambda } => chain = format!("{}.filter({})", chain, render_expr(ctx, lambda)),
             IterStep::FlatMap { lambda } => chain = format!("{}.flat_map({})", chain, render_expr(ctx, lambda)),
             IterStep::FilterMap { lambda } => chain = format!("{}.filter_map({})", chain, render_expr(ctx, lambda)),
-            IterStep::Take { n } => chain = format!("{}.take(({}) as usize)", chain, render_expr(ctx, n)),
+            IterStep::Take { n } => chain = format!("{}.take(i64::max({}, 0) as usize)", chain, render_expr(ctx, n)), // #4147: a negative count is 0
             // `(usize, T)` re-indexed to Almide's `Int`, which is what the
             // `almide_rt_list_enumerate` twin returns — same pairs, same
             // order, no `Vec<(i64, T)>` in between (#2098).

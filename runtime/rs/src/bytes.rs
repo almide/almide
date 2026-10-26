@@ -51,8 +51,9 @@ pub fn almide_rt_bytes_set(b: &Vec<u8>, i: i64, val: i64) -> Vec<u8> { let mut b
 // only holder, copied when shared), a raw `Vec<u8>` is itself.
 pub fn almide_rt_bytes_set_owned(b: impl Into<Vec<u8>>, i: i64, val: i64) -> Vec<u8> { let mut b = b.into(); if (i as usize) < b.len() { b[i as usize] = val as u8; } b }
 pub fn almide_rt_bytes_slice(b: &Vec<u8>, start: i64, end: i64) -> Vec<u8> {
-    let s = (start as usize).min(b.len());
-    let e = (end as usize).min(b.len());
+    // Range bounds clamp into [0, len]; a negative bound is 0 (#4147).
+    let s = (start.max(0) as usize).min(b.len());
+    let e = (end.max(0) as usize).min(b.len());
     if s >= e { Vec::new() } else { b[s..e].to_vec() }
 }
 // Takes a slice (not `&Vec`) so a `List[Int]` function PARAMETER — emitted as
