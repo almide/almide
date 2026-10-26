@@ -335,7 +335,7 @@ bytes.skip(b: Bytes, pos: Int, n: Int) -> Int
 // @since 0.13.4 or earlier
 bytes.skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int
 
-// Copy of start..end capped at len; empty if start >= end.
+// Copy of start..end, each clamped to 0..len; empty if start >= end.
 // @since 0.9.3 or earlier
 bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes
 
@@ -766,23 +766,23 @@ bytes.chunk(b: Bytes, n: Int) -> List[Bytes]
 // @since unreleased
 bytes.pop(mut b: Bytes) -> Option[Int]
 
-// The first n bytes; all of b past its length; n < 0 aborts.
+// The first n bytes; all of b past its length; empty if n < 0.
 // @since unreleased
 bytes.take(b: Bytes, n: Int) -> Bytes
 
-// b without its first n bytes; empty past its length; n < 0 aborts.
+// b without its first n bytes; empty past its length; all of b if n < 0.
 // @since unreleased
 bytes.drop(b: Bytes, n: Int) -> Bytes
 
-// The last n bytes; all of b past its length; n < 0 aborts.
+// The last n bytes; all of b past its length; empty if n < 0.
 // @since unreleased
 bytes.take_end(b: Bytes, n: Int) -> Bytes
 
-// b without its last n bytes; empty past its length; n < 0 aborts.
+// b without its last n bytes; empty past its length; all of b if n < 0.
 // @since unreleased
 bytes.drop_end(b: Bytes, n: Int) -> Bytes
 
-// (first n bytes, the rest); n past the end gives (b, empty); n < 0 aborts.
+// (first n bytes, the rest); n past the end gives (b, empty), n < 0 gives (empty, b).
 // @since unreleased
 bytes.split_at(b: Bytes, n: Int) -> (Bytes, Bytes)
 

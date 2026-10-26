@@ -291,7 +291,7 @@ matrix.linear_row(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix
 // @since 0.13.4 or earlier
 matrix.linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix
 
-// Rows [start, end), end clamped to the row count.
+// Rows [start, end), each bound clamped to 0..row count.
 // @since 0.13.4 or earlier
 matrix.slice_rows(m: Matrix, start: Int, end: Int) -> Matrix
 

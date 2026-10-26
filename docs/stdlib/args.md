@@ -138,13 +138,13 @@ effect args.option(name: String) -> Option[String]
 // @since 0.2.0 or earlier
 effect args.option_or(name: String, fallback: String) -> String
 
-// Args before `--` not starting with -, then every arg after `--`; option values too.
+// Args before `--` that are not flags or values of the named options, then all after `--`.
 // @since 0.2.0 or earlier
-effect args.positional() -> List[String]
+effect args.positional(options: List[String]) -> List[String]
 
-// i-th positional arg; none if out of range.
+// i-th positional arg (see positional); none if out of range.
 // @since 0.2.0 or earlier
-effect args.positional_at(i: Int) -> Option[String]
+effect args.positional_at(i: Int, options: List[String]) -> Option[String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
