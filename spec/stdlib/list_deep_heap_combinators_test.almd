@@ -33,7 +33,7 @@ test "drop over nested-heap elements" {
     [4, 5]
   ]
   assert_eq(list.drop(a, 1) |> list.map((x) => fmt(x)) |> list.join(","), "3,4.5")
-  assert_eq(list.len(list.drop(a, -1)), 0)
+  assert_eq(list.len(list.drop(a, -1)), 3)
   assert_eq(list.len(list.drop(a, 9)), 0)
 }
 

@@ -32,7 +32,7 @@ const EXPECTED: &str = r#"0: [] [héllo wörld 👨‍👩‍👧!]
 3: [‍👧!] [héllo wörld 👨‍👩]
 7: [ 👨‍👩‍👧!] [héllo wörld]
 30: [héllo wörld 👨‍👩‍👧!] []
--1: [héllo wörld 👨‍👩‍👧!] []
+-1: [] [héllo wörld 👨‍👩‍👧!]
 [] [] []
 : true true
 !: true false

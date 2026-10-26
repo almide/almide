@@ -51,6 +51,11 @@ class = "count"
 probe = 'show_l(list.repeat(7, N))'
 
 [[cell]]
+slot = "list.iterate.n"
+class = "count"
+probe = 'show_l(list.iterate(1, (x) => x + 1, N))'
+
+[[cell]]
 slot = "list.with_capacity.cap"
 class = "count"
 probe = 'show_l(cap_list(N))'
@@ -201,11 +206,6 @@ class = "count"
 probe = 'int.to_string(bytes.skip_length_prefixed_le(bytes.from_list([1, 0, 0, 0, 97]), 0, N))'
 
 [[cell]]
-slot = "bytes.skip.n"
-class = "count"
-probe = 'int.to_string(bytes.skip(bytes.from_list([1, 2, 3]), 1, N))'
-
-[[cell]]
 slot = "bytes.copy_from.len"
 class = "count"
 probe = 'show_b(copy_from_probe(N))'
@@ -325,7 +325,7 @@ index = [
   "matrix.dot_row.r",
   "matrix.row_dot.r",
 ]
-# position: a read or write position in a buffer: a position outside it answers the documented out-of-range result (none, empty, unchanged or a no-op)
+# position: a read or write position in a buffer, or a signed offset added to one (bytes.skip's n, C-337): a position outside the buffer answers the documented out-of-range result (none, empty, unchanged, clamped or a no-op)
 position = [
   "bytes.copy_from.dst_off",
   "bytes.copy_from.src_off",
@@ -339,6 +339,7 @@ position = [
   "bytes.read_string_be_at.pos",
   "bytes.read_u8.pos",
   "bytes.skip.pos",
+  "bytes.skip.n",
   "bytes.skip_length_prefixed_le.pos",
   "bytes.read_uint16.offset",
   "bytes.read_uint32.offset",
