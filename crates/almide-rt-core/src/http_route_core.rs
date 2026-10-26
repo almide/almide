@@ -173,7 +173,7 @@ fn http_url_scheme(url: &str) -> Result<(bool, &str), String> {
         }
         Some(i) if url[..i].eq_ignore_ascii_case("http") || url[..i].eq_ignore_ascii_case("https") => {
             let [head, tail] = HTTP_ERR_URL_SLASHES;
-            return Err(format!("{}{}{}", head, &url[..i], tail));
+            return Err(format!("{}{}{}", head, almide_rt_errtext_escape(&url[..i]), tail));
         }
         _ => return Err(HTTP_ERR_URL_NO_SCHEME.to_string()),
     };
