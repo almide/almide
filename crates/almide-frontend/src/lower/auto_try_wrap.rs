@@ -39,7 +39,12 @@ fn insert_try_wrapper(kind: IrExprKind, ty: &Ty, ctx: &mut TryCtx) -> Result<IrE
         },
         IrExprKind::UnwrapOr { expr: inner, fallback } => IrExprKind::UnwrapOr {
             expr: Box::new(insert_try(*inner, true, ctx)),
-            fallback: Box::new(insert_try(*fallback, false, ctx)),
+            // The fallback IS the `??` node's value: when that value is a
+            // Result (`map.get(m, k) ?? int.parse(s)` over a
+            // `Map[_, Result[..]]`), the fallback keeps its Result — the
+            // argument rule of #3646, which the removed `map.get_or(m, k, d)`
+            // spelling used to route this through.
+            fallback: Box::new(insert_try(*fallback, ty.is_result(), ctx)),
         },
         other => return Err(other),
     })
