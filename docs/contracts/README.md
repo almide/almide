@@ -188,7 +188,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-150 | Ctors over a heap var are value copies — the var stays live | 0.31.0 | active | fixture | 1 |
 | C-151 | Result combinators with a heap-Ok RESULT never link the scalar impl | 0.31.0 | active | fixture | 1 |
 | C-152 | An un-admitted heap call payload in a ctor walls, never zeroes | 0.31.0 | active | fixture | 1 |
-| C-153 | Non-test assert failures abort in the T6 form on both targets | 0.31.0 | active | fixture | 5 |
+| C-153 | Non-test assert failures abort in the T6 form on both targets | 0.31.0 | active | fixture | 6 |
 | C-154 | clamp with an invalid range aborts in the T6 form | 0.31.0 | active | fixture | 2 |
 | C-155 | to_fixed with out-of-domain decimals aborts in the T6 form | 0.31.0 | active | fixture | 3 |
 | C-156 | An if-merged some((String, String)) ctor is a real tracked Option | 0.32.0 | active | fixture | 1 |
@@ -453,7 +453,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-415 | random.int, float, choice and shuffle draw from OS entropy on native and the embedded wasm lane: draws in one clock tick differ, and threads started together draw different streams | 0.69.0 | active | fixture | 0 |
 | C-416 | net reads and received descriptors are bounded: a read never pre-allocates its length, and at most 28 untaken descriptors wait per Unix socket | 0.69.0 | active | fixture | 0 |
 | C-417 | process.kill and process.is_alive ask the kernel with kill(2), refuse a pid outside 1..=2147483647, answer fixed err texts, and are bounded by [permissions] proc as the kill command | 0.69.0 | active | fixture | 0 |
-| C-418 | a runtime error text escapes the control and bidi characters of the user data it embeds, with one rule and the same bytes on every leg | 0.69.0 | active | fixture | 3 |
+| C-418 | a runtime error text escapes the control and bidi characters of the user data it embeds, with one rule and the same bytes on every leg | 0.69.0 | active | fixture | 5 |
 | C-419 | bigint text in a radix that is not a power of two is limited to 4300 digits with one fixed text, a power-of-two radix has no limit, and bigint.pow refuses a result sure to pass 30 * 2^28 bits before computing | 0.69.0 | active | fixture | 1 |
 | C-420 | list.range_step lists every Int start + i * step strictly before end, with a count that does not wrap at the ends of Int | 0.69.0 | active | fixture | 1 |
 | C-421 | env.set refuses an empty name, `=` or NUL in the name and NUL in the value with the same err on every leg, and stores nothing | 0.69.0 | active | fixture | 1 |
@@ -464,12 +464,12 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-426 | == on Secret[String] and Secret[Bytes] compares the revealed values; any other Secret, and a variant or map holding one, is E103 | 0.69.0 | active | fixture | 1 |
 | C-427 | A Codec record decodes a Secret field from its value's wire form and derives no encode (E023) | 0.69.0 | active | fixture | 1 |
 | C-428 | A `@skip` record field is neither decoded nor encoded and a `@skip_decode` field is never decoded but still encoded; both need a default | 0.69.0 | active | fixture | 1 |
-| C-429 | A derived `T.decode_strict` refuses the first key outside the record's decoded fields with `unknown key '<k>'`; `T.decode` stays lenient | 0.69.0 | active | fixture | 1 |
+| C-429 | A derived `T.decode_strict` refuses the first key outside the record's decoded fields with `unknown key '<k>'`; `T.decode` stays lenient | 0.69.0 | active | fixture | 2 |
 | C-430 | An attribute on a record field that the compiler does not read is a check error (E053); the field vocabulary is @builtin, @location, @skip, @skip_decode | 0.69.0 | active | fixture | 0 |
 | C-431 | the fs whole-file readers read a regular file of at most 1 GiB: a device, FIFO or socket errs Not a regular file without blocking, a larger file errs File too large, on every leg | 0.69.0 | active | fixture | 1 |
 | C-432 | A runtime-backed value (HttpRequest, HttpResponse, JsonPath, HttpCall) interpolates as its declared repr, bare and nested, on every leg; the http reprs count the headers and never show a header value | 0.69.0 | active | fixture | 2 |
 | C-433 | json.set_path refuses to build a value nested deeper than json.parse accepts, with parse's err text, on every leg | 0.69.0 | active | fixture | 1 |
 | C-434 | a runtime abort inside an http.serve handler fails only that request: the fixed C-409 500, one stderr line, and the server keeps serving | 0.69.0 | active | fixture | 0 |
 | C-435 | `Codec` is `Encode + Decode`: a `: Decode` type derives only `decode` (+ a record's `decode_strict`), a `: Encode` type only `encode`, and an input type skips no field | 0.69.0 | active | fixture | 1 |
-| C-436 | `http.decode_json[T](req)` decodes a request body only into an input type: a `Codec` T is E110, and a key outside T is `400 Bad Request: unknown key '<k>'` | 0.69.0 | active | fixture | 1 |
+| C-436 | `http.decode_json[T](req)` decodes a request body only into an input type: a `Codec` T is E110, and a key outside T is `400 Bad Request: unknown key '<k>'` | 0.69.0 | active | fixture | 2 |
 
