@@ -209,7 +209,11 @@ impl Checker {
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 if let Some(n) = name {
                     let n = *n;
-                    self.reject_foreign_opaque_record(&Ty::Named(n, vec![]), "build a literal of");
+                    // The type the literal BUILDS, not its spelling: a module's
+                    // own `type Secret` is `m.Secret`, never the bundled one,
+                    // and an alias of the bundled type is the bundled type.
+                    let built = self.record_type_canon(&n);
+                    self.reject_foreign_opaque_record(&Ty::Named(built, vec![]), "build a literal of");
                     self.infer_expr_record_named(&n, fields)
                 } else {
                     let field_tys: Vec<(Sym, Ty)> = fields.iter().map(|f| {
