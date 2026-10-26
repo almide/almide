@@ -306,6 +306,9 @@ impl Scan<'_> {
             Expr::Index(i) => self.carries(&i.expr),
             Expr::Try(t) => self.carries(&t.expr),
             Expr::Binary(b) if matches!(b.op, syn::BinOp::Add(_)) => self.carries(&b.left) || self.carries(&b.right),
+            // `(halves.next(), halves.next())`, `[a, b]`: a part carries.
+            Expr::Tuple(t) => t.elems.iter().any(|e| self.carries(e)),
+            Expr::Array(a) => a.elems.iter().any(|e| self.carries(e)),
             Expr::MethodCall(m) => {
                 let name = m.method.to_string();
                 if TEXT_KEEPING_METHODS.contains(&name.as_str()) {
@@ -659,6 +662,12 @@ fn control_a_raw_operand_and_a_debug_operand_are_caught() {
             let Some((_, tz)) = s.split_once('T') else { return Err("no T".into()) };
             match tz.find('+') { Some(i) => { let raw = &tz[i..]; Err(format!("invalid offset: {raw}")) } None => Ok(0) }
         }
+        pub fn twin_tuple_let(t: &str) -> Result<i64, String> {
+            let mut halves = t.split('T');
+            let (Some(_d), Some(tz), None) = (halves.next(), halves.next(), halves.next()) else { return Err("format".into()) };
+            let (z, _) = match tz.strip_suffix('Z') { Some(x) => (x, true), None => (tz, false) };
+            Err(format!("invalid offset: {z}"))
+        }
         pub fn twin_debug(text: String) -> Result<(), String> { Err(format!("bad line {:?}", text)) }
         pub fn twin_ok_or(host: &str) -> Result<u16, String> { None.ok_or(format!("{host}: no port")) }
         pub fn twin_panic(cmd: &str) { panic!("exec {cmd} failed") }
@@ -673,7 +682,7 @@ fn control_a_raw_operand_and_a_debug_operand_are_caught() {
     files.push(("<twins>".to_string(), twins.to_string()));
     let found: Vec<String> = findings_in(&files).into_iter().filter(|f| f.starts_with("<twins>")).collect();
     let caught = |f: &str| found.iter().any(|x| x.contains(&format!(":: {f} ::")));
-    for twin in ["twin_raw_quote", "twin_inline_capture", "twin_let_slice", "twin_destructure", "twin_debug", "twin_ok_or", "twin_panic", "twin_hand_rolled_quote"] {
+    for twin in ["twin_raw_quote", "twin_inline_capture", "twin_let_slice", "twin_destructure", "twin_tuple_let", "twin_debug", "twin_ok_or", "twin_panic", "twin_hand_rolled_quote"] {
         assert!(caught(twin), "{twin} was not caught:\n{}", found.join("\n"));
     }
     for clean in ["twin_escaped", "twin_length_only"] {
