@@ -89,7 +89,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-051 | math.log_gamma is bit-identical (both targets use the vendored musl-libm log) | 0.24.0 | active | fixture | 2 |
 | C-052 | A fold over an empty collection requires the collection to carry an element type (no codegen defaulting) | 0.24.0 | active | fixture | 1 |
 | C-053 | list.min/max/sort/sort_by/unique_by are type-directed and total, native == wasm | 0.24.0 | active | fixture | 5 |
-| C-054 | List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB | 0.24.0 | active | fixture | 11 |
+| C-054 | List/string Int counts and indices are i64-clamped before narrowing — no truncation, no OOB | 0.24.0 | active | fixture | 12 |
 | C-055 | list.min/max/sort/sort_by over Float use IEEE-754 totalOrder, valid + identical on both targets | 0.24.0 | active | fixture | 3 |
 | C-056 | list.product wraps on i64 overflow, consistent with list.sum and plain `*` | 0.24.0 | active | fixture | 1 |
 | C-057 | Assigning a Unit-returning in-place mutator's result is a checker error on both targets | 0.24.0 | active | fixture | 1 |
@@ -164,7 +164,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-126 | Nested-lambda HOF params keep their inference link (no literal sig-generic pin) | 0.27.6 | active | fixture | 2 |
 | C-127 | unwrap_or sizes its payload from the default when the chain type is unresolved | 0.27.6 | active | fixture | 2 |
 | C-128 | datetime.format substitutes strftime specifiers identically on every backend | 0.28.1 | active | fixture | 1 |
-| C-129 | list.chunk / list.windows non-positive sizes: negative keeps the promoted norm, zero aborts in the T6 form | 0.28.4 | active | fixture | 4 |
+| C-129 | list.chunk / list.windows non-positive sizes: negative keeps the promoted norm, zero aborts in the T6 form | 0.28.4 | active | fixture | 5 |
 | C-130 | option/map combinators hand back OWNED heap results (no bare pass-through handles) | 0.28.5 | active | fixture | 2 |
 | C-131 | Loop-rebuilt buffers are O(n): COW guards only LIVE aliases, and LICM never hoists heap allocations | 0.28.6 | active | fixture | 3 |
 | C-132 | mut parameters of reallocating containers persist to the caller at every call position | 0.28.6 | active | fixture | 30 |
@@ -395,7 +395,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-357 | json.get_int is Int-only: a Float field is none, never truncated | 0.63.0 | active | fixture | 1 |
 | C-358 | float.round, math.choose, int.rotate_* and math.log_gamma are exact over their whole domain on every leg | 0.63.0 | active | fixture | 4 |
 | C-359 | Pre-epoch timestamps floor to the day they belong to, and %Y renders any year | 0.63.0 | active | fixture | 1 |
-| C-360 | datetime.parse_iso applies the UTC offset and refuses an out-of-range field by name | 0.63.0 | active | fixture | 1 |
+| C-360 | datetime.parse_iso applies the UTC offset and refuses an out-of-range field by name | 0.63.0 | active | fixture | 2 |
 | C-361 | url.parse validates the host after the host:port split, and refuses the out-of-scope authorities by name | 0.63.0 | active | fixture | 1 |
 | C-362 | A `scoped` block's observables are its body's — the region is not observable | 0.64.0 | active | fixture | 1 |
 | C-363 | A `scoped fn` computes the same answer inside and outside a region | 0.64.0 | active | fixture | 1 |
