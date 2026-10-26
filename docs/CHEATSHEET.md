@@ -1124,7 +1124,8 @@ report. Hold it as `Secret[String]`: every renderer prints `Secret(***)`,
 `Secret[Bytes]` is constant time (any other `Secret` has no `==`, E103), and a
 record with a Secret field is read, never written: declare it `: Decode`
 (a `: Codec` one derives `decode` only and `T.encode` is E023), and build an
-outgoing Value by hand with `secret.reveal`.
+outgoing Value by hand with `secret.reveal`. A token from the environment is
+born a Secret: `env.secret(name)` answers `Option[Secret[String]]`.
 
 ```almide check
 import json
@@ -1141,27 +1142,43 @@ effect fn main() -> Unit = {
 
 ## Verifying a webhook signature (HMAC)
 
-`import hash`. Verify with the `is_valid_` cell, key first: it computes
-HMAC-SHA256 and compares in constant time. Never `hash.sha256(key + body)`
-(forgeable by length extension), never `hash.hmac_sha256_hex(key, body) ==
-header` (`==` returns at the first differing byte and leaks the MAC through
-timing). The header's hex goes through `hex.decode`; bad hex becomes an
-empty tag, which verifies `false`, never an abort.
+`import hash` and `import secret`. The key and the tag are `Secret[Bytes]`;
+read the key with `env.secret(name)`, which answers `Secret[String]`. Verify
+with the `is_valid_` cell, key first: it computes HMAC-SHA256 and compares in
+constant time. A tag's own `==` is the constant-time one too (it is a
+`Secret[Bytes]`), so never `secret.reveal` two tags to compare them, and never
+`hash.sha256(key + body)` (forgeable by length extension). The header's hex
+goes through `hex.decode`; bad hex becomes an empty tag, which verifies
+`false`, never an abort. To sign, the header value is
+`hex.encode(secret.reveal(hash.hmac_sha256(key, body)))`.
 
 ```almide check
+import env
 import hash
 import hex
+import secret
 
-fn is_signed(secret: String, body: String, header: String) -> Bool = {
+fn is_signed(key: Secret[Bytes], body: String, header: String) -> Bool = {
   let sig = string.strip_prefix(header, "sha256=") ?? header
-  let tag = hex.decode(sig) ?? bytes.from_list([])   // bad hex -> empty tag -> false
-  hash.is_valid_hmac_sha256(bytes.from_string(secret), bytes.from_string(body), tag)
+  let tag = secret.new(hex.decode(sig) ?? bytes.from_list([]))   // bad hex -> empty tag -> false
+  hash.is_valid_hmac_sha256(key, bytes.from_string(body), tag)
+}
+
+effect fn main() -> Unit = {
+  match env.secret("WEBHOOK_SECRET")! {
+    some(s) => {
+      let key = secret.new(bytes.from_string(secret.reveal(s)))
+      println("${is_signed(key, "{}", "sha256=00")}")
+    },
+    none => println("WEBHOOK_SECRET is not set"),
+  }
 }
 ```
 
-Comparing two tokens yourself: `string.is_equal_constant_time(a, b)` /
-`bytes.is_equal_constant_time(a, b)`. `hash.md5` / `hash.sha1` are for
-compatibility only; `--profile critical` refuses them (E100).
+Comparing two tokens yourself: hold both as `Secret[String]` (`env.secret`,
+`secret.new`) and compare with `==`, which is constant time (C-426).
+`hash.md5` / `hash.sha1` are not in the stdlib: they were removed at dialect
+epoch 15; use `hash.sha256`.
 
 ## Key rules
 - Newline = statement separator (no semicolons needed)
