@@ -383,6 +383,36 @@ fn numeric_protocol_rejects_bool() {
         "should reject Bool, got: {:?}", errs);
 }
 
+// #4235: a bounded parameter the call leaves open (an empty list argument)
+// and a LATER annotation pins is judged post-solve, with the call-time
+// diagnostic. Skipping it passed check and panicked in ResolveCalls.
+const PICK: &str = "fn pick[T: Numeric](xs: List[T]) -> List[T] = xs\n";
+
+#[test]
+fn numeric_protocol_rejects_string_pinned_after_the_call() {
+    let errs = errors(&format!(
+        "{PICK}fn use_it() -> List[String] = {{\n  let r = pick([])\n  let s: List[String] = r\n  s\n}}"
+    ));
+    assert!(errs.iter().any(|e| e.contains("type 'String' does not implement protocol 'Numeric'")),
+        "should reject String pinned after the call, got: {:?}", errs);
+}
+
+#[test]
+fn numeric_protocol_rejects_container_pinned_after_the_call() {
+    let errs = errors(&format!(
+        "{PICK}fn use_it() -> List[Result[Bool, String]] = {{\n  let r = pick([])\n  let s: List[Result[Bool, String]] = r\n  s\n}}"
+    ));
+    assert!(errs.iter().any(|e| e.contains("does not implement protocol 'Numeric'")),
+        "should reject Result pinned after the call, got: {:?}", errs);
+}
+
+#[test]
+fn numeric_protocol_accepts_int_pinned_after_the_call() {
+    has_no_errors(&format!(
+        "{PICK}fn use_it() -> List[Int] = {{\n  let r = pick([])\n  let s: List[Int] = r\n  s\n}}"
+    ));
+}
+
 #[test]
 fn sized_int64_explicit_vs_int32_rejected() {
     let errs = errors(

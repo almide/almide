@@ -1,0 +1,6 @@
+// #4235: a bounded type parameter the call leaves open and the annotation
+// pins later is still judged against its bound — `list.product` sums numbers.
+effect fn main() -> Unit = {
+  let r: Int = list.product(list.with_capacity(0))
+  println("${r}")
+}

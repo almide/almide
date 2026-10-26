@@ -8,6 +8,25 @@ use crate::types::Ty;
 use super::types::resolve_ty;
 use super::Checker;
 pub(crate) use super::builtin_calls::{builtin_module_for_type, types_mismatch};
+/// A call whose protocol-bounded type parameters were still open inference
+/// vars when the call was checked — judged post-solve (#4235).
+#[derive(Debug, Clone)]
+pub(crate) struct DeferredBoundSite {
+    /// The callee as written at the call.
+    pub callee: String,
+    pub sig: crate::types::FnSig,
+    /// The call's generic bindings (inference vars intact).
+    pub bindings: HashMap<Sym, Ty>,
+    /// The bounded parameters that were open at the call.
+    pub tvs: Vec<Sym>,
+    pub span: Option<ast::Span>,
+}
+
+/// An unbound `?` inference var (not a rigid type parameter, not `Unknown`).
+fn is_open_infer_var(t: &Ty) -> bool {
+    matches!(t, Ty::TypeVar(n) if n.as_str().starts_with('?'))
+}
+
 /// Substitute named TypeVars in a type with replacement types.
 pub(crate) fn subst_ty(ty: &Ty, subst: &HashMap<Sym, Ty>) -> Ty {
     match ty {
@@ -727,11 +746,64 @@ impl Checker {
         self.arg_spans.clear();
         e005_fired
     }
-    /// Verify protocol bounds on generic type parameters. Verbatim text move out of [`Self::check_named_call_with_type_args`].
+    /// Verify protocol bounds on generic type parameters. A parameter whose
+    /// binding is still an open inference var here (`let r: String =
+    /// list.product(list.with_capacity(0))` — `A` is pinned only later, by
+    /// the annotation) is deferred whole: [`Self::validate_deferred_protocol_bounds`]
+    /// judges it post-solve with the same diagnostics. Skipping it outright
+    /// let a non-conforming type pass check and reach ResolveCalls as an
+    /// unresolvable `A.__product` dispatch (#4235).
     fn check_protocol_bounds(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>) {
-        for (tv_name, proto_names) in &sig.protocol_bounds {
-            if let Some(concrete_ty) = bindings.get(tv_name) {
-                let type_name = self.resolve_type_name_for_protocol(concrete_ty);
+        let open: Vec<Sym> = sig.protocol_bounds.keys()
+            .filter(|tv| bindings.get(*tv).is_some_and(|b| is_open_infer_var(&resolve_ty(b, &self.uf))))
+            .copied()
+            .collect();
+        if !open.is_empty() {
+            self.deferred_protocol_bounds.push(DeferredBoundSite {
+                callee: name.to_string(),
+                sig: sig.clone(),
+                bindings: bindings.clone(),
+                tvs: open.clone(),
+                span: self.current_span,
+            });
+        }
+        self.check_protocol_bounds_on(name, sig, bindings, &|tv| !open.contains(&tv));
+    }
+
+    /// Post-solve half of [`Self::check_protocol_bounds`]: each deferred
+    /// parameter, now resolved, gets the call-time check verbatim. One still
+    /// open after the solve is left to inference defaulting, as before.
+    pub(crate) fn validate_deferred_protocol_bounds(&mut self) {
+        let sites = std::mem::take(&mut self.deferred_protocol_bounds);
+        for site in sites {
+            let resolved: HashMap<Sym, Ty> = site.bindings.iter()
+                .map(|(k, v)| (*k, resolve_ty(v, &self.uf)))
+                .collect();
+            let closed: Vec<Sym> = site.tvs.iter()
+                .filter(|tv| resolved.get(*tv).is_some_and(|t| !is_open_infer_var(t)))
+                .copied()
+                .collect();
+            if closed.is_empty() {
+                continue;
+            }
+            let saved_span = std::mem::replace(&mut self.current_span, site.span);
+            self.check_protocol_bounds_on(&site.callee, &site.sig, &resolved, &|tv| closed.contains(&tv));
+            self.current_span = saved_span;
+        }
+    }
+
+    /// The bound checks of [`Self::check_protocol_bounds`], restricted to the
+    /// type parameters `judge` selects.
+    fn check_protocol_bounds_on(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>, judge: &dyn Fn(Sym) -> bool) {
+        let mut bounds: Vec<(&Sym, &Vec<Sym>)> = sig.protocol_bounds.iter().collect();
+        bounds.sort_by_key(|(tv, _)| tv.as_str());
+        for (tv_name, proto_names) in bounds {
+            if !judge(*tv_name) {
+                continue;
+            }
+            if let Some(bound_ty) = bindings.get(tv_name) {
+                let concrete_ty = resolve_ty(bound_ty, &self.uf);
+                let type_name = self.resolve_type_name_for_protocol(&concrete_ty);
                 if let Some(type_name) = type_name {
                     for proto in proto_names {
                         // An unknown protocol is reported once, at the bound
@@ -751,11 +823,11 @@ impl Checker {
                         }
                     }
                 } else {
-                    self.check_structural_protocol_bound(name, sig, *tv_name, proto_names, concrete_ty, bindings);
+                    self.check_structural_protocol_bound(name, sig, *tv_name, proto_names, &concrete_ty, bindings);
                 }
             }
         }
-        self.check_protocol_bound_args(name, sig, bindings);
+        self.check_protocol_bound_args(name, sig, bindings, judge);
     }
 
     /// A container, tuple or function type has no conformance-table name, but
@@ -800,10 +872,11 @@ impl Checker {
     /// unifying them also pins a letter only the bound mentions (`K` from
     /// `type UserRepo: Repository[UserId, User]`). No other implementation
     /// is searched for: a conformance with different arguments is a mismatch.
-    fn check_protocol_bound_args(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>) {
+    fn check_protocol_bound_args(&mut self, name: &str, sig: &crate::types::FnSig, bindings: &HashMap<Sym, Ty>, judge: &dyn Fn(Sym) -> bool) {
         let mut applied: Vec<(&(Sym, Sym), &Vec<Ty>)> = sig.protocol_bound_args.iter().collect();
         applied.sort_by_key(|((tv, p), _)| (tv.as_str(), p.as_str()));
         for ((tv, proto), want) in applied {
+            if !judge(*tv) { continue; }
             let Some(bound_ty) = bindings.get(tv) else { continue };
             let concrete = resolve_ty(bound_ty, &self.uf);
             let Some(type_name) = self.resolve_type_name_for_protocol(&concrete) else { continue };
