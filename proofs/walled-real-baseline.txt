@@ -333,3 +333,13 @@ spec/stdlib/regex_test.almd :: __test_almd_0024_regex brace quantifiers  # #4189
 spec/stdlib/regex_test.almd :: __test_almd_0026_regex group backtracking  # #4189
 spec/stdlib/regex_test.almd :: __test_almd_0029_regex non-capturing group  # #4189
 spec/stdlib/value_readers_test.almd :: __test_almd_0000_value.get and the get_<kind> family answer an Option  # #4189
+# (2026-10-26, wave 4) Three fns the wave-4 fixtures respelled wall on the MIR rung.
+# The two serve handlers' header list is now List[(String, String)]: the
+# `("X-Echo", http.header(req, "x-token") ?? "none")` element is a tuple literal
+# with a heap `??` component, which the tuple-construct brick does not admit (a
+# probe: `[s ?? "none"]` lowers, `("k", s ?? "none")` walls). The Map literal the
+# handlers used before lowered. `sleeper` returns a process.ProcessCommand record
+# literal with its defaulted fields omitted (heap-result Record). #4189 owns them.
+spec/serve_cross/http_serve_export.almd :: app  # #4189
+spec/serve_cross/http_serve_replay.almd :: handle  # #4189
+spec/stdlib/process_start_test.almd :: sleeper  # #4189
