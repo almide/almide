@@ -197,14 +197,15 @@ effect fn main() -> Unit = {
   outermost. A middleware may answer without calling the handler it wraps.
   Per-request data travels as arguments; there is no mutable context.
 - **Request bodies** — `http.decode_json[T](req)` parses the body into an
-  input type `T`: a record declared `: Decode` and not also `Encode`, whose
-  every field is input (C-436). A `Codec` type — one the program also sends
-  or stores — is the check error E110, and so is a `Codec` record nested in
-  `T`: decode into the input type and build the domain value in code, so a
-  field the client must not set (`is_admin`) has no way in. The body decodes
-  with `T.decode_strict`; its `err` is a ready `400 Bad Request` response
-  naming why: not JSON, a wrong field type, a missing field, or a key
-  outside `T` (`unknown key '<k>'`).
+  input type `T`: a record or variant declared `: Decode` and not also
+  `Encode`, whose every field is input (C-436). A `Codec` type — one the
+  program also sends or stores — is the check error E110, and so is a `Codec`
+  record nested in `T`: decode into the input type and build the domain value
+  in code, so a field the client must not set (`is_admin`) has no way in. The
+  body decodes with `T.decode_strict`; its `err` is a ready `400 Bad Request`
+  response naming why: not JSON, a wrong field type, a missing field, or a
+  key outside `T` at any depth (`unknown key '<k>'`, with its path, such as
+  `unknown key 'verified', at address`).
 - **Out of scope** — built-in logger / CORS / sessions, streaming responses
   and WebSocket are left to packages.
 
