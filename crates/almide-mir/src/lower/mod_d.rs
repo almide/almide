@@ -336,6 +336,15 @@ pub(crate) fn canonical_record_key<'a>(layouts: &'a RecordLayouts, name: &str) -
     if let Some((k, _)) = layouts.get_key_value(name) {
         return Some(k.as_str());
     }
+    // A stdlib record spelled through its module (`process.ProcessCommand`)
+    // whose decl the bundled module registers under its bare name.
+    if let Some((module, bare)) = name.rsplit_once('.') {
+        if almide_lang::stdlib_info::stdlib_owned_type_owner(bare) == Some(module) {
+            if let Some((k, _)) = layouts.get_key_value(bare) {
+                return Some(k.as_str());
+            }
+        }
+    }
     let suffix = format!(".{name}");
     let mut found: Option<&'a str> = None;
     for k in layouts.keys() {
