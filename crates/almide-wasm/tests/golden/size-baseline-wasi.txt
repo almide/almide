@@ -367,7 +367,6 @@
 2210	spec/wasm_cross/int_pow_operator_negative_base.almd
 1154	spec/wasm_cross/int_pow_overflow_wraps.almd
 3185	spec/wasm_cross/int_rotate_negative_count.almd
-1111	spec/wasm_cross/int_rotate_nonpositive_width.almd
 1332	spec/wasm_cross/int_wrap_rotate_width.almd
 2139	spec/wasm_cross/interp_diverging_part.almd
 2912	spec/wasm_cross/interp_effect_unwrap_arg.almd
