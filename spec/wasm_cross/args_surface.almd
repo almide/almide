@@ -1,6 +1,6 @@
 // @contract: C-181
 // The `args` module's whole surface behaves identically on both targets, with
-// `positional()` returning EVERY non-flag argument (#891 — it dropped the
+// `positional(options)` returning EVERY non-flag argument (#891 — it dropped the
 // first, because `env.args()` already excludes argv[0] and the body dropped
 // one more). The flag/option lookups are written as recursions rather than
 // combinators over CAPTURING lambdas: a capture inside a BUNDLED module
@@ -11,7 +11,7 @@ import env
 
 effect fn main() -> Result[Unit, String] = {
   println("args=" + list.join(env.args(), ","))
-  println("pos=" + list.join(args.positional()!, ","))
+  println("pos=" + list.join(args.positional(["out"])!, ","))
   println("raw=" + list.join(args.raw()!, ","))
   println("flag_q=${args.flag("quiet")!}")
   println("flag_v=${args.flag("verbose")!}")
