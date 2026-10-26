@@ -140,8 +140,14 @@ impl Emitter<'_> {
         i.local_get(hb).call(F_INC);
         i.local_get(hb);
         i.else_();
+        // Both operands are Objects on this arm (the tag test above), so the
+        // payload slot is each one's pair list: pushed as the helper's
+        // argument, with a fresh credit when the callee owns the param.
         for (k, h) in [ha, hb].into_iter().enumerate() {
-            pairs_arg(&mut i, h, owned[k]);
+            i.local_get(h).i32_load(slot_memarg(almide_layout::SUM_FIELD));
+            if owned[k] {
+                i.local_get(h).i32_load(slot_memarg(almide_layout::SUM_FIELD)).call(F_INC);
+            }
         }
         i.call(merge).local_set(ho);
         box_object(&mut i, ho, ha);
@@ -190,7 +196,11 @@ impl Emitter<'_> {
             i.local_get(hv);
         }
         i.else_();
-        pairs_arg(&mut i, hv, owned[0]);
+        // An Object on this arm (the tag test above): its pair list.
+        i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD));
+        if owned[0] {
+            i.local_get(hv).i32_load(slot_memarg(almide_layout::SUM_FIELD)).call(F_INC);
+        }
         i.local_get(hk);
         if owned[1] {
             i.local_get(hk).call(F_INC);
@@ -683,15 +693,6 @@ impl Emitter<'_> {
             _ => return Ok(None),
         };
         Ok(Some(out))
-    }
-}
-
-/// Push the pair list of the Object held in `h` as a helper argument, with a
-/// fresh credit when the callee owns the param.
-fn pairs_arg(i: &mut wasm_encoder::InstructionSink, h: u32, owned: bool) {
-    i.local_get(h).i32_load(slot_memarg(almide_layout::SUM_FIELD));
-    if owned {
-        i.local_get(h).i32_load(slot_memarg(almide_layout::SUM_FIELD)).call(F_INC);
     }
 }
 
