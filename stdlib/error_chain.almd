@@ -42,10 +42,11 @@ fn error_chain(outer: String, cause: String) -> String = {
   out
 }
 
-// error_context(r, ctx) = Ok kept, Err(e) → Err("{ctx}: {e}") (the runtime's map_err(format!)).
+// error_context(r, ctx) = Ok kept, Err(e) → Err("{ctx}: {e}") (the runtime's map_err(format!)),
+// the label escaped by C-418's rule (#4126): a label carrying a path cannot forge a line.
 // A match, not a scalar `Result[Int, String]` layout read, so an Ok payload of any type passes
 // through as itself (the reference interpreter runs this body; it rebuilt an Ok Bool as an Int).
 fn error_context(r: Result[Int, String], ctx: String) -> Result[Int, String] = match r {
   ok(v) => ok(v),
-  err(e) => err(ctx + ": " + e),
+  err(e) => err(string.__err_text(ctx) + ": " + e),
 }
