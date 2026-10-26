@@ -13,6 +13,8 @@
 // Templates route the Rust target to `runtime/rs/src/hash.rs`; on WASM all
 // four are SELF-HOSTED in `stdlib/hash_impl.almd`, registered in
 // `crates/almide-types/src/self_host_registry.rs`.
+import secret
+
 /// 32-bit FNV-1a of s's UTF-8; non-negative Int.
 @intrinsic("almide_rt_hash_fnv1a32")
 fn fnv1a32(s: String) -> Int = _
@@ -29,10 +31,11 @@ fn sha256(b: Bytes) -> Bytes = _
 @intrinsic("almide_rt_hash_sha256_hex")
 fn sha256_hex(s: String) -> String = _
 
-// ── Checksums and the other digests (R-hash-02, R-hash-03) ──
-// Pure Almide on every target, so native and wasm run the same code. 32-bit
-// lanes are Ints masked to 32 bits after every add; SHA-512's 64-bit lanes are
-// plain Ints, whose + and * wrap mod 2^64 on every leg.
+// ── Checksums and SHA-512 (R-hash-02, R-hash-03) ──
+// Pure Almide on every target, so native and wasm run the same code. SHA-512's
+// 64-bit lanes are plain Ints, whose + and * wrap mod 2^64 on every leg.
+// MD5 and SHA-1 are not here: broken for security, they left the stdlib at
+// dialect epoch 15 (security table row 20).
 /// CRC-32 (IEEE, reflected) as an unsigned Int; 0 for empty b.
 fn crc32(b: Bytes) -> Int = {
   var table = list.repeat(0, 256)
@@ -71,10 +74,6 @@ fn adler32(b: Bytes) -> Int = {
   int.bor(int.bshl(s2, 16), s1)
 }
 
-local fn h_mask32(x: Int) -> Int = int.band(x, 4294967295)
-
-local fn h_rotl32(x: Int, n: Int) -> Int = h_mask32(int.bor(int.bshl(x, n), int.bshr(x, 32 - n)))
-
 // Logical right shift of a 64-bit lane, n in 1..63.
 local fn h_shr64(x: Int, n: Int) -> Int = int.band(int.bshr(x, n), int.bshl(1, 64 - n) - 1)
 
@@ -97,15 +96,6 @@ local fn h_pad(b: Bytes, block: Int, len_count: Int, big_endian: Bool) -> List[I
   )
 }
 
-local fn h_word32(m: List[Int], at: Int, big_endian: Bool) -> Int =
-  if big_endian then int.bor(
-    int.bor(int.bshl(m[at], 24), int.bshl(m[at + 1], 16)),
-    int.bor(int.bshl(m[at + 2], 8), m[at + 3]),
-  ) else int.bor(
-    int.bor(m[at], int.bshl(m[at + 1], 8)),
-    int.bor(int.bshl(m[at + 2], 16), int.bshl(m[at + 3], 24)),
-  )
-
 local fn h_word64(m: List[Int], at: Int) -> Int = list.range(0, 8) |> list.fold(
   0,
   (acc, k) => int.bor(int.bshl(acc, 8), m[at + k]),
@@ -122,179 +112,6 @@ local fn h_hex(b: Bytes) -> String = bytes.to_list(b) |> list.map((x) => string.
   int.band(x, 15),
   int.band(x, 15) + 1,
 )) |> string.join("")
-
-local fn h_md5_k() -> List[Int] = [
-  3614090360,
-  3905402710,
-  606105819,
-  3250441966,
-  4118548399,
-  1200080426,
-  2821735955,
-  4249261313,
-  1770035416,
-  2336552879,
-  4294925233,
-  2304563134,
-  1804603682,
-  4254626195,
-  2792965006,
-  1236535329,
-  4129170786,
-  3225465664,
-  643717713,
-  3921069994,
-  3593408605,
-  38016083,
-  3634488961,
-  3889429448,
-  568446438,
-  3275163606,
-  4107603335,
-  1163531501,
-  2850285829,
-  4243563512,
-  1735328473,
-  2368359562,
-  4294588738,
-  2272392833,
-  1839030562,
-  4259657740,
-  2763975236,
-  1272893353,
-  4139469664,
-  3200236656,
-  681279174,
-  3936430074,
-  3572445317,
-  76029189,
-  3654602809,
-  3873151461,
-  530742520,
-  3299628645,
-  4096336452,
-  1126891415,
-  2878612391,
-  4237533241,
-  1700485571,
-  2399980690,
-  4293915773,
-  2240044497,
-  1873313359,
-  4264355552,
-  2734768916,
-  1309151649,
-  4149444226,
-  3174756917,
-  718787259,
-  3951481745
-]
-
-local fn h_md5_s(i: Int) -> Int = {
-  let row = match i / 16 {
-    0 => [7, 12, 17, 22],
-    1 => [5, 9, 14, 20],
-    2 => [4, 11, 16, 23],
-    _ => [6, 10, 15, 21],
-  }
-  row[i % 4]
-}
-
-/// 16-byte MD5 digest of b. For compatibility only: MD5 is broken, never use it for security.
-@insecure_digest
-fn md5(b: Bytes) -> Bytes = {
-  let m = h_pad(b, 64, 8, false)
-  let k = h_md5_k()
-  var h0 = 1732584193
-  var h1 = 4023233417
-  var h2 = 2562383102
-  var h3 = 271733878
-  var off = 0
-  while off < list.len(m) {
-    var a = h0
-    var bb = h1
-    var c = h2
-    var d = h3
-    var i = 0
-    while i < 64 {
-      let fg = match i / 16 {
-        0 => (int.bor(int.band(bb, c), int.band(int.bxor(bb, 4294967295), d)), i),
-        1 => (int.bor(int.band(d, bb), int.band(int.bxor(d, 4294967295), c)), (5 * i + 1) % 16),
-        2 => (int.bxor(int.bxor(bb, c), d), (3 * i + 5) % 16),
-        _ => (int.bxor(c, int.bor(bb, int.bxor(d, 4294967295))), (7 * i) % 16),
-      }
-      let f = h_mask32(fg.0 + a + k[i] + h_word32(m, off + fg.1 * 4, false))
-      a = d
-      d = c
-      c = bb
-      bb = h_mask32(bb + h_rotl32(f, h_md5_s(i)))
-      i = i + 1
-    }
-    h0 = h_mask32(h0 + a)
-    h1 = h_mask32(h1 + bb)
-    h2 = h_mask32(h2 + c)
-    h3 = h_mask32(h3 + d)
-    off = off + 64
-  }
-  h_out([h0, h1, h2, h3], 4, false)
-}
-
-/// MD5 of b as 32 lowercase hex chars. For compatibility only, never for security.
-@insecure_digest
-fn md5_hex(b: Bytes) -> String = h_hex(md5(b))
-
-/// 20-byte SHA-1 digest of b. For compatibility only: SHA-1 is broken, never use it for security.
-@insecure_digest
-fn sha1(b: Bytes) -> Bytes = {
-  let m = h_pad(b, 64, 8, true)
-  var h0 = 1732584193
-  var h1 = 4023233417
-  var h2 = 2562383102
-  var h3 = 271733878
-  var h4 = 3285377520
-  var w = list.repeat(0, 80)
-  var off = 0
-  while off < list.len(m) {
-    var t = 0
-    while t < 80 {
-      w[t] = if t < 16 then h_word32(m, off + t * 4, true)
-      else h_rotl32(int.bxor(int.bxor(w[t - 3], w[t - 8]), int.bxor(w[t - 14], w[t - 16])), 1)
-      t = t + 1
-    }
-    var a = h0
-    var bb = h1
-    var c = h2
-    var d = h3
-    var e = h4
-    var i = 0
-    while i < 80 {
-      let fk = match i / 20 {
-        0 => (int.bor(int.band(bb, c), int.band(int.bxor(bb, 4294967295), d)), 1518500249),
-        1 => (int.bxor(int.bxor(bb, c), d), 1859775393),
-        2 => (int.bor(int.bor(int.band(bb, c), int.band(bb, d)), int.band(c, d)), 2400959708),
-        _ => (int.bxor(int.bxor(bb, c), d), 3395469782),
-      }
-      let temp = h_mask32(h_rotl32(a, 5) + fk.0 + e + fk.1 + w[i])
-      e = d
-      d = c
-      c = h_rotl32(bb, 30)
-      bb = a
-      a = temp
-      i = i + 1
-    }
-    h0 = h_mask32(h0 + a)
-    h1 = h_mask32(h1 + bb)
-    h2 = h_mask32(h2 + c)
-    h3 = h_mask32(h3 + d)
-    h4 = h_mask32(h4 + e)
-    off = off + 64
-  }
-  h_out([h0, h1, h2, h3, h4], 4, true)
-}
-
-/// SHA-1 of b as 40 lowercase hex chars. For compatibility only, never for security.
-@insecure_digest
-fn sha1_hex(b: Bytes) -> String = h_hex(sha1(b))
 
 local fn h_sha512_k() -> List[Int] = [
   4794697086780616226,
@@ -456,8 +273,13 @@ fn sha512_hex(b: Bytes) -> String = h_hex(sha512(b))
 // Pure Almide on every target, on top of sha256/sha512, so native and wasm run
 // the same code. Key first (RFC 2104 writes HMAC(K, m)). A key longer than the
 // block is hashed first; a shorter one is zero-padded. The only branches depend
-// on lengths, which are public; the digest rounds are fixed-count. The
-// is_valid_* cells compare through bytes.is_equal_constant_time, never `==`.
+// on lengths, which are public; the digest rounds are fixed-count.
+// The key and the tag are `Secret[Bytes]` (security table row 20): the tag
+// prints as `Secret(***)` and its only `==` is the constant-time one (C-426),
+// so the timing-leaking compare of a MAC is not writable without a visible
+// `secret.reveal`. There is no `_hex` cell: a hex tag for a header is
+// `hex.encode(secret.reveal(tag))`. The is_valid_* cells compare through
+// bytes.is_equal_constant_time, never `==` on the revealed bytes.
 local fn h_digest(b: Bytes, wide: Bool) -> Bytes = if wide then hash.sha512(b) else hash.sha256(b)
 
 local fn h_hmac(key: Bytes, b: Bytes, wide: Bool) -> Bytes = {
@@ -469,26 +291,20 @@ local fn h_hmac(key: Bytes, b: Bytes, wide: Bool) -> Bytes = {
   h_digest(bytes.concat(opad, h_digest(bytes.concat(ipad, b), wide)), wide)
 }
 
-/// 32-byte HMAC-SHA256 of b under key (RFC 2104); key first.
-fn hmac_sha256(key: Bytes, b: Bytes) -> Bytes = h_hmac(key, b, false)
+/// 32-byte HMAC-SHA256 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time. Hex: hex.encode(secret.reveal(tag)).
+fn hmac_sha256(key: Secret[Bytes], b: Bytes) -> Secret[Bytes] = secret.new(h_hmac(secret.reveal(key), b, false))
 
-/// HMAC-SHA256 of b under key as 64 lowercase hex chars.
-fn hmac_sha256_hex(key: Bytes, b: Bytes) -> String = h_hex(hmac_sha256(key, b))
+/// 64-byte HMAC-SHA512 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time. Hex: hex.encode(secret.reveal(tag)).
+fn hmac_sha512(key: Secret[Bytes], b: Bytes) -> Secret[Bytes] = secret.new(h_hmac(secret.reveal(key), b, true))
 
-/// 64-byte HMAC-SHA512 of b under key (RFC 2104); key first.
-fn hmac_sha512(key: Bytes, b: Bytes) -> Bytes = h_hmac(key, b, true)
-
-/// HMAC-SHA512 of b under key as 128 lowercase hex chars.
-fn hmac_sha512_hex(key: Bytes, b: Bytes) -> String = h_hex(hmac_sha512(key, b))
-
-/// True if tag is the HMAC-SHA256 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha256(key, b, hex.decode(sig) ?? bytes.from_list([])).
-fn is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool = bytes.is_equal_constant_time(
-  hmac_sha256(key, b),
-  tag,
+/// True if tag is the HMAC-SHA256 of b under key, compared in constant time. A hex tag: hash.is_valid_hmac_sha256(key, b, secret.new(hex.decode(sig) ?? bytes.from_list([]))).
+fn is_valid_hmac_sha256(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool = bytes.is_equal_constant_time(
+  secret.reveal(hmac_sha256(key, b)),
+  secret.reveal(tag),
 )
 
-/// True if tag is the HMAC-SHA512 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha512(key, b, hex.decode(sig) ?? bytes.from_list([])).
-fn is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool = bytes.is_equal_constant_time(
-  hmac_sha512(key, b),
-  tag,
+/// True if tag is the HMAC-SHA512 of b under key, compared in constant time. A hex tag: hash.is_valid_hmac_sha512(key, b, secret.new(hex.decode(sig) ?? bytes.from_list([]))).
+fn is_valid_hmac_sha512(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool = bytes.is_equal_constant_time(
+  secret.reveal(hmac_sha512(key, b)),
+  secret.reveal(tag),
 )

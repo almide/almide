@@ -1,8 +1,0 @@
-// E100 (#4106): `hash.md5` is a digest broken for security (`@insecure_digest`),
-// so `--profile critical` refuses it, whatever `--allow` grants. The same
-// program checks clean without the profile.
-import hash
-
-fn main() -> Unit = {
-  println(hash.md5_hex(bytes.from_string("abc")))
-}
