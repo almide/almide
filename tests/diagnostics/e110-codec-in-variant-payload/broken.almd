@@ -1,0 +1,15 @@
+// E110 (row 22, C-436): a variant input type is accepted at the sink, but its
+// `Grant` case carries `Role`, a record the program also sends out — adding a
+// field to `Role` would make it settable from the request body.
+import http
+
+type Role: Codec = { name: String, level: Int = 0 }
+
+type CommandInput: Decode = | Grant(Role) | Revoke
+
+effect fn run(req: HttpRequest) -> HttpResponse = match http.decode_json[CommandInput](req) {
+  ok(_) => http.response(200, "ok"),
+  err(bad) => bad,
+}
+
+effect fn main() -> Unit = println(http.body(run(http.new_request("POST", "/c", "{}", [:]))!))

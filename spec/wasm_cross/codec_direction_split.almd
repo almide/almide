@@ -1,10 +1,11 @@
 // @contract: C-435
 // C-435: `Codec` is `Encode + Decode`. A `: Decode` type derives `decode`
-// (and, for a record, `decode_strict`) and no `encode`; a `: Encode` type
-// derives `encode` and no `decode`; a `: Codec` type derives both. The derived
-// halves answer exactly as the `: Codec` derive's do (ALS-D6): lenient
-// `decode` ignores an unknown key, `decode_strict` refuses it, a variant is
-// externally tagged, a record nests its own input type.
+// and `decode_strict` (records and variants alike) and no `encode`; a
+// `: Encode` type derives `encode` and no `decode`; a `: Codec` type derives
+// all three. The derived halves answer exactly as the `: Codec` derive's do
+// (ALS-D6): lenient `decode` ignores an unknown key, `decode_strict` refuses
+// one at any depth with its path (C-429), a variant is externally tagged, a
+// record nests its own input type.
 import json
 
 type TagInput: Decode = { label: String }
@@ -27,6 +28,17 @@ effect fn main() -> Unit = {
     ok(i) => "strict ok ${i.name}",
     err(e) => "strict err ${e}",
   })
+  // decode_strict refuses an unknown key at every depth, with its path.
+  println(match NameInput.decode_strict(json.parse("{\"name\":\"m\",\"tags\":[{\"label\":\"a\"},{\"label\":\"b\",\"x\":1}]}")!) {
+    ok(i) => "deep ok ${i.name}",
+    err(e) => "deep err ${e}",
+  })
+  for src in ["{\"Sized\":[3]}", "{\"Sized\":[3],\"Dot\":null}"] {
+    println(match Shape.decode_strict(json.parse(src)!) {
+      ok(s) => "strict shape ${s}",
+      err(e) => "strict shape err ${e}",
+    })
+  }
   println(match NameInput.decode(json.parse("{\"tags\":[]}")!) {
     ok(i) => "missing ok ${i.name}",
     err(e) => "missing err ${e}",
