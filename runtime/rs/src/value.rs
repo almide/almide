@@ -428,7 +428,7 @@ pub fn almide_rt_value_merge(a: &AlmideValue, b: &AlmideValue) -> AlmideValue {
 /// value as is (the keys created above it stay). A result nested past
 /// JSON_MAX_DEPTH — the path's steps plus `x`'s own nesting — is
 /// `json_depth_error()` (#4209, C-433), checked before anything is touched.
-pub fn almide_rt_value_set_path(v: AlmideValue, steps: &[(bool, AlmideString, i64)], x: AlmideValue) -> Result<AlmideValue, AlmideString> {
+pub fn almide_rt_value_set_path_steps(v: AlmideValue, steps: &[(bool, AlmideString, i64)], x: AlmideValue) -> Result<AlmideValue, AlmideString> {
     if steps.len() > JSON_MAX_DEPTH || almide_rt_value_nests_past(&x, JSON_MAX_DEPTH - steps.len()) {
         return Err(json_depth_error().into());
     }

@@ -168,7 +168,7 @@ fn set_path(v: Value, p: Path, x: Value) -> Result[Value, String] = match p {
 // path's steps plus x's own nesting — is json.parse's err, so a value
 // set_path builds is one parse could have made. The wasm leg and the interp
 // oracle run stdlib/json_path.almd's `value.set_path` body instead.
-@intrinsic("almide_rt_value_set_path")
+@intrinsic("almide_rt_value_set_path_steps")
 @consume(v, x)
 fn __set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = _
 
