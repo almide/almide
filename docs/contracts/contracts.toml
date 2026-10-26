@@ -5531,8 +5531,8 @@ evidence  = [
 [[contract]]
 id        = "C-422"
 spec      = "ALS-T31"
-title     = "hash.hmac_sha256/512 equal the RFC 4231 vectors on every leg, key first, and is_valid_ accepts exactly the right tag"
-statement = "hash.hmac_sha256(key, b) / hmac_sha512(key, b) are HMAC (RFC 2104) over SHA-256 / SHA-512 with the KEY FIRST: a key longer than the block (64 bytes for SHA-256, 128 for SHA-512) is hashed first, a shorter one is zero-padded to the block, and the result is H((K xor opad) ++ H((K xor ipad) ++ b)) — 32 and 64 bytes. The _hex cells are the same digest as lowercase hex (64 / 128 chars). They answer byte-identically on native and wasm and equal RFC 4231 test cases 1-7 for both digests, including case 5's 128-bit truncation (taken with bytes.slice) and the 131-byte key of cases 6-7; every vector pins the argument order, so a call with key and message swapped differs. hash.is_valid_hmac_sha256(key, b, tag) / is_valid_hmac_sha512 are true iff tag equals the computed MAC, compared through bytes.is_equal_constant_time (C-423); a tag of another length (a truncated tag, a SHA-256 tag against SHA-512) is false. There is no hex verify cell (_hex means only a lowercase-hex OUTPUT, R-hash-05): a hex tag is decoded with hex.decode first (either case), and `hex.decode(sig) ?? bytes.from_list([])` turns odd-length or non-hex text into the empty tag, which is false, never an abort. HMAC is pure Almide (stdlib/hash.almd) on every leg, so both legs run the same code."
+title     = "hash.hmac_sha256/512 take a Secret[Bytes] key, answer a Secret[Bytes] tag equal to the RFC 4231 vectors on every leg, key first, and is_valid_ accepts exactly the right tag"
+statement = "hash.hmac_sha256(key, b) / hmac_sha512(key, b) are HMAC (RFC 2104) over SHA-256 / SHA-512 with the KEY FIRST; the key is a Secret[Bytes] and the result is a Secret[Bytes] tag: a key longer than the block (64 bytes for SHA-256, 128 for SHA-512) is hashed first, a shorter one is zero-padded to the block, and the revealed tag is H((K xor opad) ++ H((K xor ipad) ++ b)) — 32 and 64 bytes. They answer byte-identically on native and wasm and equal RFC 4231 test cases 1-7 for both digests, including case 5's 128-bit truncation (taken with bytes.slice of the revealed tag) and the 131-byte key of cases 6-7; every vector pins the argument order, so a call with key and message swapped differs. The tag renders as Secret(***) and its == is the constant-time compare of C-426; there is no _hex cell (a tag's hex is hex.encode(secret.reveal(tag))). hash.is_valid_hmac_sha256(key, b, tag) / is_valid_hmac_sha512, the tag a Secret[Bytes], are true iff the revealed tag equals the computed MAC, compared through bytes.is_equal_constant_time (C-423); a tag of another length (a truncated tag, a SHA-256 tag against SHA-512) is false. A hex tag is decoded with hex.decode first (either case), and `secret.new(hex.decode(sig) ?? bytes.from_list([]))` turns odd-length or non-hex text into the empty tag, which is false, never an abort. HMAC is pure Almide (stdlib/hash.almd) on every leg, so both legs run the same code."
 since     = "0.69.0"
 status    = "active"
 evidence  = [
@@ -5556,12 +5556,13 @@ evidence  = [
 [[contract]]
 id        = "C-424"
 spec      = "ALS-B12"
-title     = "--profile critical refuses a call to an @insecure_digest fn (md5, sha1) with E100"
-statement = "hash.md5, hash.md5_hex, hash.sha1 and hash.sha1_hex carry the declared attribute @insecure_digest: digests broken for security, kept for compatibility. Under --profile critical a call to one is E100 at check time, whatever --allow grants, with a hint naming hash.sha256 / hash.sha512 and hash.hmac_sha256 / hash.is_valid_hmac_sha256; the pipe form is refused the same way. The set is derived from the one declaration site (the attribute in stdlib/hash.almd), never from a list of names. The same program checked without the profile is unchanged."
+title     = "md5 and sha1 are not in the stdlib: a call to hash.md5, md5_hex, sha1 or sha1_hex is a check-time error whose hint names SHA-256"
+statement = "hash.md5, hash.md5_hex, hash.sha1 and hash.sha1_hex are not public stdlib functions: digests broken for security, they were removed at dialect epoch 15 with no deprecation window and no package. A call to one is E002 at check time in every profile, and its hint is the removal's entry in proofs/dialect-epochs.toml (it was removed at dialect epoch 15; rewrite as hash.sha256(b) or hex.encode(hash.sha256(b)), a different digest). The removed set is derived from that ledger, never from a list of names, and no spelling the ledger records as removed is public again."
 since     = "0.69.0"
 status    = "active"
 evidence  = [
-  { path = "tests/diagnostics/e100-critical-insecure-digest/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e002-epoch15-md5-removed/broken.almd", class = "fixture" },
+  { path = "tests/removed_spellings_stay_removed_test.rs", class = "by-construction", name = "no_removed_spelling_is_public_again" },
 ]
 
 [[contract]]
@@ -5721,4 +5722,15 @@ evidence  = [
   { path = "tests/diagnostics/e110-codec-in-variant-payload/broken.almd", class = "fixture" },
   { path = "tests/diagnostics/e110-forwarded-input-type-parameter/broken.almd", class = "fixture" },
   { path = "tests/input_sink_test.rs", name = "admitting_codec_at_the_sink_lets_the_over_post_land", class = "fixture" },
+]
+
+[[contract]]
+id        = "C-438"
+spec      = "ALS-R5"
+title     = "env.secret(name) reads an environment variable as Option[Secret[String]]: env.get's value, rendered Secret(***), compared in constant time"
+statement = "env.secret(name) is some(secret.new(v)) exactly when env.get(name) is some(v), and none when env.get(name) is none; secret.reveal of the value is env.get's value byte for byte, an empty value included. The value renders as Secret(***) at the top, inside an option and inside a record (C-425), and its == is the constant-time compare of the revealed text (C-426). Identical on native and wasm."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "spec/wasm_cross/env_secret.almd", class = "fixture" },
 ]

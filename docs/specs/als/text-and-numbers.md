@@ -1,6 +1,6 @@
 # ALS §T — Text and Number Semantics (normative)
 
-> Last updated: 2026-10-24
+> Last updated: 2026-10-26
 
 > **Status**: normative. これらの節は実装から独立した**規範**であり、v0（native）と
 > v1（MIR/wasm）の両実装がこの節に適合する義務を負う。適合の証拠は
@@ -677,15 +677,17 @@ trap）、見出しのない exit 1 は不合格である。不合格は ALS-T18
 ## ALS-T31 HMAC と定数時間比較
 
 `hash.hmac_sha256(key, b)`・`hash.hmac_sha512(key, b)` は SHA-256・SHA-512 上の
-HMAC（RFC 2104）で、**鍵が第一引数**である。ブロック長（64・128 バイト）より長い
-鍵は先にハッシュし、短い鍵はブロック長まで 0 で埋める。結果は 32・64 バイトで、
-`_hex` は同じ値の小文字 16 進（64・128 文字）。RFC 4231 のテストケース 1〜7 に
-両ダイジェストで一致する。`hash.is_valid_hmac_sha256(key, b, tag)`・
-`is_valid_hmac_sha512` は `tag` が計算した MAC と等しいときだけ true で、比較は
-`bytes.is_equal_constant_time` を通る。長さの違う tag は false。16 進で届く
-tag は `hex.decode` で戻してから渡す（大小どちらの 16 進も受ける）。
-`hex.decode(sig) ?? bytes.from_list([])` は奇数長・16 進でない文字・空文字列を
-空の tag にし、検証は abort せず false を返す。
+HMAC（RFC 2104）で、**鍵が第一引数**である。鍵は `Secret[Bytes]`、結果の tag も
+`Secret[Bytes]` である。ブロック長（64・128 バイト）より長い鍵は先にハッシュし、
+短い鍵はブロック長まで 0 で埋める。tag を取り出した値は 32・64 バイトで、RFC 4231
+のテストケース 1〜7 に両ダイジェストで一致する。tag は `Secret(***)` と表示し、
+`==` は定数時間比較（ALS-C3、C-426）である。`_hex` のセルはない。tag の 16 進は
+`hex.encode(secret.reveal(tag))` と書く。`hash.is_valid_hmac_sha256(key, b, tag)`・
+`is_valid_hmac_sha512` は `Secret[Bytes]` の `tag` を取り出した値が計算した MAC と
+等しいときだけ true で、比較は `bytes.is_equal_constant_time` を通る。長さの違う
+tag は false。16 進で届く tag は `hex.decode` で戻してから渡す（大小どちらの 16 進
+も受ける）。`secret.new(hex.decode(sig) ?? bytes.from_list([]))` は奇数長・16 進で
+ない文字・空文字列を空の tag にし、検証は abort せず false を返す。
 
 `bytes.is_equal_constant_time(a, b)`・`string.is_equal_constant_time(a, b)` は
 長さとバイト列が等しいときだけ true（String は UTF-8 のバイトを比べる）。長さ

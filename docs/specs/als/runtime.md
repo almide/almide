@@ -72,6 +72,13 @@ process.args は長さ 3・先頭がバイナリパス)、それぞれ両ター�
 返す（wasm は WASI environ + ランナーの環境継承）。`random.int(a, b)` は
 WASI entropy 下でも常に [a, b] 範囲内。
 
+`env.secret(name)` は `env.get(name)` と同じ値を `Secret[String]` で返す。
+`env.get(name)` が some(v) のときだけ some(secret.new(v))、none のときは none
+である。`secret.reveal` で取り出した値は `env.get` の値とバイト単位で同じで、
+空の値も同じ。値はどの描画でも `Secret(***)` と表示し（C-425）、`==` は
+取り出した文字列の定数時間比較である（C-426）。両ターゲットで一致する。
+テスト: `spec/wasm_cross/env_secret.almd`。Contracts: C-438。
+
 `env.os()` と `env.temp_dir()` は等価性則の**唯一の適用除外**である。両者は
 実行中のホストを報告するため、native は実 OS 名と実 temp ディレクトリを、
 wasm レグは WASI サンドボックス（`wasi` / `/tmp`）を返す。両ターゲットで
