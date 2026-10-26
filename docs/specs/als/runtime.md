@@ -94,9 +94,8 @@ temp_dir は非空かつ posix ホストでは絶対パス）が証明対象と�
 テスト: `spec/stdlib/process_timeout_test.almd`
 
 wasm ターゲットでは、埋め込みホスト（`almide run --target wasm` と `almide test`
-の wasm レグ）が子プロセス族（`process.exec`・`exec_in`・`exec_with_stdin`・
-`exec_status`・`exec_status_timeout`・`run`・`run_in`・`spawn`・
-`kill`・`is_alive`・`pid`）を native と同じ観測で提供する。捕捉した stdout と stderr、
+の wasm レグ）が子プロセス族（`process.exec`・`output`・`run`・`kill`・`pid`）を
+native と同じ観測で提供する。捕捉した stdout と stderr、
 終了コード（シグナルで終わった子は -1）、err の文字列は同一バイトである。pid は
 ホストの値であり、レグ間で比べない。単体の成果物（`almide build --target wasm`）
 は、プログラムが子プロセス操作を含むときに限り、非公開インターフェース
