@@ -119,7 +119,11 @@ fn main() -> Unit = {
   println("valid256 HEX ${hash.is_valid_hmac_sha256(k2, d2, tag_of(string.to_upper(hex2)))}")
   println("valid256 wrong-data ${hash.is_valid_hmac_sha256(k2, s("what do ya want for nothing!"), tag2)}")
   println("valid256 wrong-key ${hash.is_valid_hmac_sha256(secret.new(s("jefe")), d2, tag_of(hex2))}")
-  println("valid256 truncated ${hash.is_valid_hmac_sha256(k2, d2, secret.new(bytes.slice(secret.reveal(tag2), 0, 16)))}")
+  println("valid256 truncated ${hash.is_valid_hmac_sha256(
+    k2,
+    d2,
+    secret.new(bytes.slice(secret.reveal(tag2), 0, 16)),
+  )}")
   println("valid256 odd-hex ${hash.is_valid_hmac_sha256(k2, d2, tag_of(string.slice(hex2, 0, 63)))}")
   println("valid256 non-hex ${hash.is_valid_hmac_sha256(k2, d2, tag_of("zz" + string.slice(hex2, 2, 64)))}")
   println("valid256 empty ${hash.is_valid_hmac_sha256(k2, d2, tag_of(""))}")
@@ -133,5 +137,8 @@ fn main() -> Unit = {
   println("valid512 non-hex ${hash.is_valid_hmac_sha512(k2, d2, tag_of(string.slice(hex5, 0, 126) + "g0"))}")
   println("empty-key ${hx(hash.hmac_sha256(secret.new(bytes.from_list([])), bytes.from_list([])))}")
   println("tag renders ${tag2} ${[tag5]}")
-  println("tag == ${tag2 == hash.hmac_sha256(secret.new(s("Jefe")), d2)} ${tag2 == hash.hmac_sha256(k2, s("x"))} ${tag2 != tag5}")
+  println("tag == ${tag2 == hash.hmac_sha256(secret.new(s("Jefe")), d2)} ${tag2 == hash.hmac_sha256(
+    k2,
+    s("x"),
+  )} ${tag2 != tag5}")
 }
