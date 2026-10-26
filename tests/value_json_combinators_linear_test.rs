@@ -12,7 +12,7 @@
 //! (native: a hash map / set; stock wasm: the self-host `__vu_*_pairs` over the
 //! keyed Map; the interp's prim bodies: a sorted index). Native `set_path`
 //! updates a document at its last use in place (`@consume(v, x)` on the
-//! `almide_rt_value_set_path` intrinsic): only the path is walked, so the array
+//! `almide_rt_value_set_path_steps` intrinsic): only the path is walked, so the array
 //! fold is linear; the object fold still compares each new key against the
 //! fields so far (an Object is a pair vector with no index), but no longer
 //! copies them.
