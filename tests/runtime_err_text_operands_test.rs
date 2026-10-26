@@ -37,6 +37,9 @@
 //!   rule escapes). A text handed back unchanged (`Err(e)`,
 //!   `.ok_or(err.to_string())`) is the program's own value and embeds nothing;
 //!   the error a `.map_err` closure receives is its producer's, gated there.
+//!   A structured error (`Err((path, e))`) is not a text yet; the gate meets
+//!   it where a function formats it. A function that returns no text passes
+//!   none on.
 //!
 //! The analysis is local to a function and does not follow fields or values
 //! read from guest memory; a text that reaches an error that way is held by the
@@ -192,7 +195,10 @@ impl FnFacts {
             let mut grew = false;
             for (sig, block) in &defs {
                 let name = sig.ident.to_string();
-                if ESCAPE_ROOTS.contains(&name.as_str()) {
+                // A function that does not return text cannot pass text on
+                // (`fn fields(half: &str) -> Option<Vec<i64>>`).
+                let returns_text = matches!(&sig.output, syn::ReturnType::Type(_, ty) if is_text_type(ty));
+                if ESCAPE_ROOTS.contains(&name.as_str()) || !returns_text {
                     continue;
                 }
                 for (i, p) in text_params(sig).into_iter().enumerate() {
@@ -356,6 +362,11 @@ impl Scan<'_> {
         // collected `Err(e)` — is the program's own value: nothing is embedded
         // in a text of the runtime's.
         if is_pass_through(e) {
+            return;
+        }
+        // A structured error (`Err((rel.to_string(), e))`) is not a text yet:
+        // the text is made where a caller formats it, and gated there.
+        if matches!(peel(e), Expr::Tuple(_) | Expr::Struct(_)) {
             return;
         }
         if self.carries(e) {
