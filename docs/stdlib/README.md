@@ -68,8 +68,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect args.has_flag(name: String) -> Bool` — True on --name before `--`; a one-letter name also matches -name.
 - `effect args.option(name: String) -> Option[String]` — Value of --name=v or --name v before `--`; none if absent.
 - `effect args.option_or(name: String, fallback: String) -> String` — option(name), or fallback when absent.
-- `effect args.positional() -> List[String]` — Args before `--` not starting with -, then every arg after `--`; option values too.
-- `effect args.positional_at(i: Int) -> Option[String]` — i-th positional arg; none if out of range.
+- `effect args.positional(options: List[String]) -> List[String]` — Args before `--` that are not flags or values of the named options, then all after `--`.
+- `effect args.positional_at(i: Int, options: List[String]) -> Option[String]` — i-th positional arg (see positional); none if out of range.
 
 ## base64
 
@@ -177,7 +177,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `bytes.set(b: Bytes, i: Int, x: Int) -> Bytes` — Copy with byte i set to x; as-is if out of range.
 - `bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` — pos + n, capped at len.
 - `bytes.skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int` — Offset past count u32-LE-prefixed records.
-- `bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` — Copy of start..end capped at len; empty if start >= end.
+- `bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` — Copy of start..end, each clamped to 0..len; empty if start >= end.
 - `bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]` — Pieces between sep matches; [b] for an empty sep.
 - `bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool` — True if b begins with prefix, or prefix is empty.
 - `bytes.is_equal_constant_time(a: Bytes, b: Bytes) -> Bool` — True if a and b hold the same bytes, in time that depends only on their lengths: no early exit on the first differing byte.
@@ -284,11 +284,11 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `bytes.new() -> Bytes` — An empty byte buffer.
 - `bytes.chunk(b: Bytes, n: Int) -> List[Bytes]` — n-byte pieces in order, the last may be short; n <= 0 aborts.
 - `bytes.pop(mut b: Bytes) -> Option[Int]` — Removes and returns the last byte; none if b is empty.
-- `bytes.take(b: Bytes, n: Int) -> Bytes` — The first n bytes; all of b past its length; n < 0 aborts.
-- `bytes.drop(b: Bytes, n: Int) -> Bytes` — b without its first n bytes; empty past its length; n < 0 aborts.
-- `bytes.take_end(b: Bytes, n: Int) -> Bytes` — The last n bytes; all of b past its length; n < 0 aborts.
-- `bytes.drop_end(b: Bytes, n: Int) -> Bytes` — b without its last n bytes; empty past its length; n < 0 aborts.
-- `bytes.split_at(b: Bytes, n: Int) -> (Bytes, Bytes)` — (first n bytes, the rest); n past the end gives (b, empty); n < 0 aborts.
+- `bytes.take(b: Bytes, n: Int) -> Bytes` — The first n bytes; all of b past its length; empty if n < 0.
+- `bytes.drop(b: Bytes, n: Int) -> Bytes` — b without its first n bytes; empty past its length; all of b if n < 0.
+- `bytes.take_end(b: Bytes, n: Int) -> Bytes` — The last n bytes; all of b past its length; empty if n < 0.
+- `bytes.drop_end(b: Bytes, n: Int) -> Bytes` — b without its last n bytes; empty past its length; all of b if n < 0.
+- `bytes.split_at(b: Bytes, n: Int) -> (Bytes, Bytes)` — (first n bytes, the rest); n past the end gives (b, empty), n < 0 gives (empty, b).
 - `bytes.first(b: Bytes) -> Option[Int]` — The first byte, or none if b is empty.
 - `bytes.last(b: Bytes) -> Option[Int]` — The last byte, or none if b is empty.
 - `bytes.filter(b: Bytes, f: (Int) -> Bool) -> Bytes` — The bytes for which f is true.
@@ -355,7 +355,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `datetime.day(ts: Int) -> Int` — Calendar day 1..31 (UTC).
 - `datetime.diff_seconds(a: Int, b: Int) -> Int` — a - b; positive when a is later.
 - `datetime.format(ts: Int, pattern: String) -> String` — Replaces %Y %m %d %H %M %S (UTC); no %% escape.
-- `datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int` — UTC epoch secs; out-of-range fields roll over.
+- `datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String]` — UTC epoch secs; a field out of range is err, as in parse_iso.
 - `datetime.from_unix(seconds: Int) -> Int` — Identity: seconds are already a timestamp.
 - `datetime.hour(ts: Int) -> Int` — UTC hour of day, 0..23.
 - `datetime.is_after(a: Int, b: Int) -> Bool` — a > b; false when equal.
@@ -1173,13 +1173,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.enumerate(xs: List[A]) -> List[(Int, A)]` — (index, element) pairs, index from 0.
 - `list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]` — Pairs by position; stops at the shorter list.
 - `list.flatten(xss: List[List[T]]) -> List[T]` — Inner lists concatenated in order.
-- `list.take(xs: List[A], n: Int) -> List[A]` — First n elements; all if n >= len or n < 0.
-- `list.drop(xs: List[A], n: Int) -> List[A]` — All but the first n; [] if n >= len or n < 0.
+- `list.take(xs: List[A], n: Int) -> List[A]` — First n elements; all if n >= len, [] if n < 0.
+- `list.drop(xs: List[A], n: Int) -> List[A]` — All but the first n; [] if n >= len, all if n < 0.
 - `list.tail(xs: List[A]) -> List[A]` — All but the first element; [] when empty.
 - `list.unique(xs: List[A]) -> List[A]` — Duplicates removed; first occurrences kept.
 - `list.index_of(xs: List[A], x: A) -> Option[Int]` — Index of the first x, or none.
 - `list.last(xs: List[A]) -> Option[A]` — Final element, or none when empty.
-- `list.chunk(xs: List[A], n: Int) -> List[List[A]]` — Runs of n, last may be short; n = 0 aborts.
+- `list.chunk(xs: List[A], n: Int) -> List[List[A]]` — Runs of n, last may be short; n <= 0 aborts.
 - `list.sum(xs: List[A]) -> A` — Sum of any numbers (R-L0-42); 0 when empty; integers wrap on overflow.
 - `list.product(xs: List[A]) -> A` — Product of any numbers (R-L0-42); 1 when empty; integers wrap on overflow.
 - `list.first(xs: List[A]) -> Option[A]` — Head element, or none when empty.
@@ -1208,24 +1208,24 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.zip_with(xs: List[A], ys: List[B], f: (A, B) -> C) -> List[C]` — f over pairs; stops at the shorter list.
 - `list.unique_by(xs: List[A], f: (A) -> K) -> List[A]` — First element per distinct key f(x).
 - `list.range(start: Int, end: Int) -> List[Int]` — start up to end, exclusive; [] if end <= start.
-- `list.slice(xs: List[A], start: Int, end: Int) -> List[A]` — Indices start..<end, clamped; [] if start >= end.
+- `list.slice(xs: List[A], start: Int, end: Int) -> List[A]` — Indices start..<end, each clamped to 0..len; [] if start >= end.
 - `list.insert(xs: List[A], i: Int, val: A) -> List[A]` — Copy with val at i; i >= len or i < 0 appends.
 - `list.remove_at(xs: List[A], i: Int) -> List[A]` — Copy without slot i; no-op if i out of range.
 - `list.repeat(val: A, n: Int) -> List[A]` — n copies of val; [] for n <= 0.
 - `list.intersperse(xs: List[A], sep: A) -> List[A]` — sep between adjacent elements.
-- `list.windows(xs: List[A], n: Int) -> List[List[A]]` — All n-long runs; [] if n > len; n = 0 aborts.
+- `list.windows(xs: List[A], n: Int) -> List[List[A]]` — All n-long runs; [] if n > len; n <= 0 aborts.
 - `list.dedup(xs: List[A]) -> List[A]` — Adjacent equal runs collapsed; not global.
-- `list.take_end(xs: List[A], n: Int) -> List[A]` — Last n elements; all if n >= len or n < 0.
-- `list.drop_end(xs: List[A], n: Int) -> List[A]` — All but the last n; [] if n >= len or n < 0.
+- `list.take_end(xs: List[A], n: Int) -> List[A]` — Last n elements; all if n >= len, [] if n < 0.
+- `list.drop_end(xs: List[A], n: Int) -> List[A]` — All but the last n; [] if n >= len, all if n < 0.
 - `list.shuffle(xs: List[A]) -> List[A]` — Random permutation; unseeded, differs per run.
-- `list.window(xs: List[A], n: Int) -> List[List[A]]` — All n-long runs; [] if n > len; n = 0 aborts.
+- `list.window(xs: List[A], n: Int) -> List[List[A]]` — All n-long runs; [] if n > len; n <= 0 aborts.
 - `list.binary_search(xs: List[Int], target: Int) -> Option[Int]` — Index of target in ascending xs, or none.
 - `list.push(mut xs: List[A], x: A) -> Unit` — Appends x to xs in place.
 - `list.with_capacity(cap: Int) -> List[A]` — Empty list; cap is only a preallocation hint.
 - `list.pop(mut xs: List[A]) -> Option[A]` — Removes and yields the last element; none if empty.
 - `list.clear(mut xs: List[A]) -> Unit` — Removes every element of xs in place.
 - `list.bundled_probe(n: Int) -> Int` — n + 1; bundled-dispatch smoke fn.
-- `list.split_at(xs: List[T], n: Int) -> (List[T], List[T])` — (take n, drop n); n past the end gives (xs, []).
+- `list.split_at(xs: List[T], n: Int) -> (List[T], List[T])` — (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
 - `list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]` — [seed, f(seed), ...] of length n; [] if n <= 0.
 - `list.find_map(xs: List[A], f: (A) -> Option[B]) -> Option[B]` — The first some that f gives, or none; f is not called after the hit.
 - `list.new() -> List[A]` — An empty list; the same value as [].
@@ -1365,7 +1365,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `matrix.concat_cols_many(matrices: List[Matrix]) -> Matrix   (deprecated — use matrix.concat_cols)` — Alias of matrix.concat_cols.
 - `matrix.linear_row(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix` — x W^T + bias; empty x or W gives 0 x 0.
 - `matrix.linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix` — x W^T; empty x or W gives 0 x 0.
-- `matrix.slice_rows(m: Matrix, start: Int, end: Int) -> Matrix` — Rows [start, end), end clamped to the row count.
+- `matrix.slice_rows(m: Matrix, start: Int, end: Int) -> Matrix` — Rows [start, end), each bound clamped to 0..row count.
 - `matrix.conv1d(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, stride: Int, padding: Int) -> Matrix` — 1-D conv over rows; [] if input too short.
 - `matrix.gather_rows(m: Matrix, indices: List[Int]) -> Matrix` — Rows at indices; out of range is a zero row.
 - `matrix.dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float` — Row r dot vec; 0.0 if r is out of range.
@@ -1629,10 +1629,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.last_index_of(s: String, needle: String) -> Option[Int]` — Codepoint index of last needle, or none.
 - `string.first(s: String) -> Option[String]` — Leading codepoint, or none if empty.
 - `string.last(s: String) -> Option[String]` — Final codepoint, or none if empty.
-- `string.take(s: String, n: Int) -> String` — First n codepoints; all of s if n < 0.
-- `string.take_end(s: String, n: Int) -> String` — Last n codepoints; all of s if n < 0.
-- `string.drop(s: String, n: Int) -> String` — s minus first n codepoints; "" if n < 0.
-- `string.drop_end(s: String, n: Int) -> String` — s minus last n codepoints; "" if n < 0.
+- `string.take(s: String, n: Int) -> String` — First n codepoints; "" if n < 0.
+- `string.take_end(s: String, n: Int) -> String` — Last n codepoints; "" if n < 0.
+- `string.drop(s: String, n: Int) -> String` — s minus first n codepoints; s if n < 0.
+- `string.drop_end(s: String, n: Int) -> String` — s minus last n codepoints; s if n < 0.
 - `string.run_length_encode(s: String) -> List[(String, Int)]` — (char, count) per run of equal codepoints.
 - `string.push(mut s: String, suffix: String) -> Unit` — Appends suffix to s in place.
 - `string.clear(mut s: String) -> Unit` — Empties s in place.
@@ -1669,7 +1669,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.drop_while(s: String, f: (String) -> Bool) -> String` — s after the longest prefix whose characters all satisfy f.
 - `string.chunk(s: String, n: Int) -> List[String]` — Runs of n characters, the last may be shorter; n <= 0 aborts.
 - `string.window(s: String, n: Int) -> List[String]` — Every run of n consecutive characters; [] if n > len; n <= 0 aborts.
-- `string.split_at(s: String, n: Int) -> (String, String)` — (first n characters, the rest); n past the end gives (s, ""); n < 0 aborts.
+- `string.split_at(s: String, n: Int) -> (String, String)` — (first n characters, the rest); n past the end gives (s, ""), n < 0 gives ("", s).
 - `string.dedup(s: String) -> String` — s with each run of equal adjacent characters collapsed to one.
 - `string.intersperse(s: String, sep: String) -> String` — The characters of s with sep between each pair.
 - `string.unique(s: String) -> String` — The first occurrence of each character, in order.

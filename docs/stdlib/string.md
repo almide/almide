@@ -830,19 +830,19 @@ string.first(s: String) -> Option[String]
 // @since 0.7.0 or earlier
 string.last(s: String) -> Option[String]
 
-// First n codepoints; all of s if n < 0.
+// First n codepoints; "" if n < 0.
 // @since 0.7.0 or earlier
 string.take(s: String, n: Int) -> String
 
-// Last n codepoints; all of s if n < 0.
+// Last n codepoints; "" if n < 0.
 // @since 0.7.0 or earlier
 string.take_end(s: String, n: Int) -> String
 
-// s minus first n codepoints; "" if n < 0.
+// s minus first n codepoints; s if n < 0.
 // @since 0.7.0 or earlier
 string.drop(s: String, n: Int) -> String
 
-// s minus last n codepoints; "" if n < 0.
+// s minus last n codepoints; s if n < 0.
 // @since 0.7.0 or earlier
 string.drop_end(s: String, n: Int) -> String
 
@@ -990,7 +990,7 @@ string.chunk(s: String, n: Int) -> List[String]
 // @since unreleased
 string.window(s: String, n: Int) -> List[String]
 
-// (first n characters, the rest); n past the end gives (s, ""); n < 0 aborts.
+// (first n characters, the rest); n past the end gives (s, ""), n < 0 gives ("", s).
 // @since unreleased
 string.split_at(s: String, n: Int) -> (String, String)
 

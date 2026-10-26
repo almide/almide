@@ -898,11 +898,11 @@ list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]
 // @since 0.5.0 or earlier
 list.flatten(xss: List[List[T]]) -> List[T]
 
-// First n elements; all if n >= len or n < 0.
+// First n elements; all if n >= len, [] if n < 0.
 // @since 0.5.0 or earlier
 list.take(xs: List[A], n: Int) -> List[A]
 
-// All but the first n; [] if n >= len or n < 0.
+// All but the first n; [] if n >= len, all if n < 0.
 // @since 0.5.0 or earlier
 list.drop(xs: List[A], n: Int) -> List[A]
 
@@ -922,7 +922,7 @@ list.index_of(xs: List[A], x: A) -> Option[Int]
 // @since 0.5.0 or earlier
 list.last(xs: List[A]) -> Option[A]
 
-// Runs of n, last may be short; n = 0 aborts.
+// Runs of n, last may be short; n <= 0 aborts.
 // @since 0.5.0 or earlier
 list.chunk(xs: List[A], n: Int) -> List[List[A]]
 
@@ -1038,7 +1038,7 @@ list.unique_by(xs: List[A], f: (A) -> K) -> List[A]
 // @since 0.5.0 or earlier
 list.range(start: Int, end: Int) -> List[Int]
 
-// Indices start..<end, clamped; [] if start >= end.
+// Indices start..<end, each clamped to 0..len; [] if start >= end.
 // @since 0.5.0 or earlier
 list.slice(xs: List[A], start: Int, end: Int) -> List[A]
 
@@ -1058,7 +1058,7 @@ list.repeat(val: A, n: Int) -> List[A]
 // @since 0.5.0 or earlier
 list.intersperse(xs: List[A], sep: A) -> List[A]
 
-// All n-long runs; [] if n > len; n = 0 aborts.
+// All n-long runs; [] if n > len; n <= 0 aborts.
 // @since 0.5.0 or earlier
 list.windows(xs: List[A], n: Int) -> List[List[A]]
 
@@ -1066,11 +1066,11 @@ list.windows(xs: List[A], n: Int) -> List[List[A]]
 // @since 0.5.0 or earlier
 list.dedup(xs: List[A]) -> List[A]
 
-// Last n elements; all if n >= len or n < 0.
+// Last n elements; all if n >= len, [] if n < 0.
 // @since 0.7.0 or earlier
 list.take_end(xs: List[A], n: Int) -> List[A]
 
-// All but the last n; [] if n >= len or n < 0.
+// All but the last n; [] if n >= len, all if n < 0.
 // @since 0.7.0 or earlier
 list.drop_end(xs: List[A], n: Int) -> List[A]
 
@@ -1078,7 +1078,7 @@ list.drop_end(xs: List[A], n: Int) -> List[A]
 // @since 0.7.0 or earlier
 list.shuffle(xs: List[A]) -> List[A]
 
-// All n-long runs; [] if n > len; n = 0 aborts.
+// All n-long runs; [] if n > len; n <= 0 aborts.
 // @since 0.7.0 or earlier
 list.window(xs: List[A], n: Int) -> List[List[A]]
 
@@ -1106,7 +1106,7 @@ list.clear(mut xs: List[A]) -> Unit
 // @since 0.14.6 or earlier
 list.bundled_probe(n: Int) -> Int
 
-// (take n, drop n); n past the end gives (xs, []).
+// (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
 // @since 0.14.6 or earlier
 list.split_at(xs: List[T], n: Int) -> (List[T], List[T])
 
