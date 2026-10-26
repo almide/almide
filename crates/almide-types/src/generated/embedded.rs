@@ -2743,9 +2743,9 @@ fn bytes_ends_with(b: Bytes, suffix: Bytes) -> Bool = {
 
 fn bytes_slice(b: Bytes, start: Int, end: Int) -> Bytes = {
   let len = prim.load32(prim.handle(b) + 4)
-  let s = if start < 0 then len
+  let s = if start < 0 then 0
   else (if start > len then len else start)
-  let e0 = if end < 0 then len
+  let e0 = if end < 0 then 0
   else (if end > len then len else end)
   let e = if e0 > s then e0 else s
   let m = e - s
