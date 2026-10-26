@@ -5433,7 +5433,7 @@ fn datetime_parse_iso(s: String) -> Result[Int, String] = {
         none => __dpi_build(d, tm, 0),
         some(i) => match __dpi_offset(time_z, i) {
           some(off) => __dpi_build(d, tm, off),
-          none => err("invalid offset: " + string.slice(time_z, i, string.len(time_z))),
+          none => err("invalid offset: " + string.__err_text(string.slice(time_z, i, string.len(time_z)))),
         },
       },
       _ => err("invalid datetime format"),
@@ -5947,9 +5947,10 @@ fn error_chain(outer: String, cause: String) -> String = {
 
 
 
+
 fn error_context(r: Result[Int, String], ctx: String) -> Result[Int, String] = match r {
   ok(v) => ok(v),
-  err(e) => err(ctx + ": " + e),
+  err(e) => err(string.__err_text(ctx) + ": " + e),
 }
 "#;
 pub const SRC_ERROR_MESSAGE: &str = r#"
@@ -12491,8 +12492,10 @@ fn __hs_cp(c: String) -> Int = string.codepoint(c) ?? 0
 fn __hs_quote_char(c: String) -> String = match c {
   "\\" => "\\\\",
   "\"" => "\\\"",
-  _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
+  _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) or __hs_bidi(__hs_cp(c)) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
 }
+
+fn __hs_bidi(n: Int) -> Bool = n == 1564 or n == 8206 or n == 8207 or (n >= 8234 and n <= 8238) or (n >= 8294 and n <= 8297)
 
 fn __hs_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
 
@@ -15743,7 +15746,7 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
     else {
       let (cp, _l) = __jp_cp(base, q)
       let cpos = __jp_charpos(base, q, 0, 0)
-      err("unexpected char '" + string.from_codepoint(cp) + "' at pos " + int.to_string(cpos))
+      err("unexpected char '" + string.__err_text(string.from_codepoint(cp)) + "' at pos " + int.to_string(cpos))
     }
   }
 }
@@ -39205,6 +39208,17 @@ fn unique_by[K](s: String, f: (String) -> K) -> String = string.join(
 
 
 fn __join(xs: List[String], sep: String) -> String = list.__join_string(xs, sep)
+
+
+
+
+
+
+
+
+
+@intrinsic("almide_rt_string___err_text")
+fn __err_text(s: String) -> String = _
 "#;
 pub const SRC_STRING_BYTE_SLICE: &str = r#"
 fn __byte_slice_boundary(base: Int, len: Int, pos: Int) -> Bool = if pos == len then true else prim.load8(base + pos) / 64 != 2
@@ -39524,6 +39538,27 @@ fn string_eq(a: String, b: String) -> Bool = {
 fn __streq_at(da: Int, db: Int, i: Int, n: Int) -> Bool = if i >= n then true
 else if prim.load8(da + i) == prim.load8(db + i) then __streq_at(da, db, i + 1, n)
 else false
+"#;
+pub const SRC_STRING_ERR_TEXT: &str = r#"
+
+
+
+
+
+fn __et_escaped(n: Int) -> Bool = n <= 31 or (n >= 127 and n <= 159) or n == 1564 or n == 8206 or n == 8207 or (n >= 8234 and n <= 8238) or (n >= 8294 and n <= 8297)
+
+fn __et_char(c: String, n: Int) -> String = match n {
+  10 => "\\n",
+  13 => "\\r",
+  9 => "\\t",
+  0 => "\\0",
+  _ => if __et_escaped(n) then "\\u{" + int.to_hex(n) + "}" else c,
+}
+
+@implements("string.__err_text")
+fn string_err_text(s: String) -> String = if string.chars(s) |> list.any((c) => __et_escaped(string.codepoint(c) ?? 0)) then
+  string.chars(s) |> list.map((c) => __et_char(c, string.codepoint(c) ?? 0)) |> list.join("")
+else s
 "#;
 pub const SRC_STRING_FIRST_LAST: &str = r#"
 
@@ -44890,7 +44925,7 @@ fn value_field(v: Value, key: String) -> Result[Value, String] = {
   else {
     let n = prim.load32(h + 8) / 2
     let idx = __vobj_find(v, key, 0, n)
-    if idx < 0 then err("missing field '" + key + "'")
+    if idx < 0 then err("missing field '" + string.__err_text(key) + "'")
     else {
       let val: Value = prim.load_handle(h + 12 + (2 * idx + 1) * 8)
       ok(val)
@@ -47133,6 +47168,7 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "string_codepoint" => Some(SRC_STRING_CODEPOINT),
         "string_concat" => Some(SRC_STRING_CONCAT),
         "string_eq" => Some(SRC_STRING_EQ),
+        "string_err_text" => Some(SRC_STRING_ERR_TEXT),
         "string_first_last" => Some(SRC_STRING_FIRST_LAST),
         "string_from_bytes_self" => Some(SRC_STRING_FROM_BYTES_SELF),
         "string_from_codepoint" => Some(SRC_STRING_FROM_CODEPOINT),

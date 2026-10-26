@@ -16,6 +16,7 @@ pub const DECLARED: &[(&str, &[(&str, &str)])] = &[
     (crate::embedded::SRC_NET_WASM, &[("__net_tcp_listen_impl", "net.tcp_listen"), ("__net_tcp_accept_impl", "net.tcp_accept"), ("__net_tcp_connect_impl", "net.tcp_connect"), ("__net_tcp_local_port_impl", "net.tcp_local_port"), ("__net_tcp_read_impl", "net.tcp_read"), ("__net_tcp_read_exact_impl", "net.tcp_read_exact"), ("__net_tcp_read_timeout_impl", "net.tcp_read_timeout"), ("__net_tcp_write_impl", "net.tcp_write"), ("__net_tcp_available_impl", "net.tcp_available"), ("__net_tcp_set_timeout_impl", "net.tcp_set_timeout"), ("__net_tcp_close_impl", "net.tcp_close"), ("__net_tcp_close_listener_impl", "net.tcp_close_listener"), ("__net_tcp_is_open_impl", "net.tcp_is_open"), ("__net_unix_connect_impl", "net.unix_connect"), ("__net_unix_listen_impl", "net.unix_listen"), ("__net_unix_accept_impl", "net.unix_accept"), ("__net_unix_send_impl", "net.unix_send"), ("__net_unix_recv_impl", "net.unix_recv"), ("__net_unix_take_fds_impl", "net.unix_take_fds"), ("__net_unix_poll_impl", "net.unix_poll"), ("__net_unix_wait_impl", "net.unix_wait"), ("__net_unix_close_impl", "net.unix_close"), ("__net_shm_create_impl", "net.shm_create"), ("__net_shm_resize_impl", "net.shm_resize"), ("__net_shm_write_impl", "net.shm_write"), ("__net_shm_read_impl", "net.shm_read")]),
     (crate::embedded::SRC_OPTION_TO_STRING_B, &[("__bool_to_string", "bool.to_string"), ("bytes_join", "bytes.__join")]),
     (crate::embedded::SRC_PROCESS_STDIN_LINES, &[("process_stdin_lines", "process.stdin_lines")]),
+    (crate::embedded::SRC_STRING_ERR_TEXT, &[("string_err_text", "string.__err_text")]),
     (crate::embedded::SRC_STRING_SEARCH, &[("string_split", "string.split"), ("string_split_once", "string.split_once"), ("string_replace", "string.replace"), ("string_replace_first", "string.replace_first")]),
     (crate::embedded::SRC_ZLIB_INFLATE, &[("zlib_gunzip_max", "zlib.gunzip_max"), ("zlib_inflate_max", "zlib.inflate_max"), ("zlib_decompress_max", "zlib.decompress_max")]),
 ];
@@ -78,6 +79,7 @@ pub const PRIM_FREE: &[&str] = &[
     "__bool_to_string",
     "bytes_join",
     "process_stdin_lines",
+    "string_err_text",
     "zlib_gunzip_max",
     "zlib_inflate_max",
     "zlib_decompress_max",

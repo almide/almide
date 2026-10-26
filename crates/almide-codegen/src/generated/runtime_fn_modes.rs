@@ -715,6 +715,7 @@ pub fn runtime_param_mutability(name: &str) -> Option<&'static [bool]> {
         "almide_rt_set_symmetric_difference" => &[false, false],
         "almide_rt_set_to_list" => &[false],
         "almide_rt_set_union" => &[false, false],
+        "almide_rt_string___err_text" => &[false],
         "almide_rt_string_byte_slice" => &[false, false, false],
         "almide_rt_string_capitalize" => &[false],
         "almide_rt_string_char_at" => &[false, false],
