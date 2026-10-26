@@ -128,18 +128,13 @@ pub const HOST_OPS: &[HostOp] = &[
     wrapper("env", "remove", "__set", "almide_rt_env___set", ENV).result(),
     wrapper("env", "vars", "__environ", "almide_rt_env___environ", ENV),
     op("env", "__environ", "almide_rt_env___environ", ENV),
-    // `env.cwd` reads PWD and `temp_dir` honours $TMPDIR: environment reads.
+    // `env.cwd` reads PWD: an environment read.
     op("env", "cwd", "almide_rt_env_cwd", ENV).result(),
-    op("env", "temp_dir", "almide_rt_env_temp_dir", ENV),
-    op("env", "unix_timestamp", "almide_rt_env_unix_timestamp", CLOCK),
-    op("env", "millis", "almide_rt_env_millis", CLOCK),
     op("env", "sleep_ms", "almide_rt_env_sleep_ms", CLOCK),
-    // ── process: argv[0]-inclusive arguments (every other process fn is walled) ──
-    op("process", "args", "almide_rt_process_args", ENV),
     // ── datetime: the two clock reads (the rest of the module is pure) ──
     op("datetime", "now", "almide_rt_datetime_now", CLOCK),
     op("datetime", "monotonic_ns", "almide_rt_datetime_monotonic_ns", CLOCK),
-    // `datetime.now_ms` (R-datetime-01): env.millis's read, owned by the datetime module.
+    // `datetime.now_ms` (R-datetime-01): the millisecond wall-clock read.
     op("datetime", "now_ms", "almide_rt_datetime_now_ms", CLOCK),
     // ── random ──
     op("random", "int", "almide_rt_random_int", ENTROPY),
@@ -172,8 +167,6 @@ pub const HOST_OPS: &[HostOp] = &[
     op("fs", "list_dir", "almide_rt_fs_list_dir", READ).result(),
     op("fs", "exists", "almide_rt_fs_exists", READ),
     op("fs", "stat", "almide_rt_fs_stat", READ).result(),
-    op("fs", "file_size", "almide_rt_fs_file_size", READ).result(),
-    op("fs", "modified_at", "almide_rt_fs_modified_at", READ).result(),
     op("fs", "is_dir", "almide_rt_fs_is_dir", READ),
     op("fs", "is_file", "almide_rt_fs_is_file", READ),
     op("fs", "is_symlink", "almide_rt_fs_is_symlink", READ),
@@ -192,7 +185,7 @@ pub const HOST_OPS: &[HostOp] = &[
     op("fs", "__root_read_bytes", "almide_rt_fs___root_read_bytes", READ).result(),
     op("fs", "__root_list_dir", "almide_rt_fs___root_list_dir", READ).result(),
     op("fs", "__root_exists", "almide_rt_fs___root_exists", READ).result(),
-    // `fs.temp_dir` is env.temp_dir's other spelling (C-189): an environment read.
+    // `fs.temp_dir` honours $TMPDIR (C-189): an environment read.
     op("fs", "temp_dir", "almide_rt_fs_temp_dir", ENV),
     // ── fs: writes ──
     op("fs", "write_text", "almide_rt_fs_write", WRITE).result(),
@@ -209,14 +202,12 @@ pub const HOST_OPS: &[HostOp] = &[
     op("fs", "create_temp_dir", "almide_rt_fs_create_temp_dir", WRITE_ENTROPY).result(),
     op("fs", "create_temp_file", "almide_rt_fs_create_temp_file", WRITE_ENTROPY).result(),
     // ── http: the client (R-http-01) — get / request answer the body text,
-    // get_response / send the whole response, get_bytes / request_bytes the
-    // raw body; the header-taking forms call their flat-header leaf ──
+    // get_response / send the whole response; the header-taking forms call
+    // their flat-header leaf ──
     op("http", "get", "almide_http_get", NET).result(),
     wrapper("http", "request", "__request", "almide_http_request", NET).result(),
     op("http", "get_response", "almide_http_get_response", NET).result(),
     wrapper("http", "send", "__request_response", "almide_http_request_response", NET).result(),
-    op("http", "get_bytes", "almide_http_get_bytes", NET).result(),
-    wrapper("http", "request_bytes", "__request_bytes", "almide_rt_http___request_bytes", NET).result(),
     // The call handle (#2631): start and the four verbs over it.
     wrapper("http", "start", "__call_start", "almide_rt_http___call_start", NET).result(),
     op("http", "poll", "almide_http_call_poll", NET),
@@ -244,12 +235,11 @@ pub const CAP_MODULES: &[&str] =
 pub const WALLED: &[(&str, &str, &str)] = &[
     ("net", "*", "sockets, unix sockets and shared memory: native-only, no WASI floor (the native-FFI class)"),
     ("unix", "*", "unix sockets and shared memory: native-only, no WASI floor (the native-FFI class)"),
-    ("process", "*", "child processes, signals and the exit / sleep / pid / env family: native-only; `exit` lowers as the ProcExit prim; stdin_lines runs on wasm through a self-host body, outside this subset"),
+    ("process", "*", "child processes, signals and the exit / sleep / pid / env family: native-only; `exit` lowers as the ProcExit prim"),
     ("http", "serve", "the listener: native-only, and its handler is a closure the host invokes"),
     ("http", "__call_start", "reached only through its wrapper row `http.start`"),
     ("http", "__request", "reached only through its wrapper row `http.request`"),
     ("http", "__request_response", "reached only through its wrapper row `http.send`"),
-    ("http", "__request_bytes", "reached only through its wrapper row `http.request_bytes`"),
 ];
 
 /// The typed-twin suffixes a ROUTED row's call name can carry
@@ -338,7 +328,7 @@ mod tests {
     /// The clock readers of #3302 count Clock; the structural leg's mapping holds.
     #[test]
     fn the_clock_readers_count_clock() {
-        for name in ["env.millis", "env.unix_timestamp", "datetime.now", "datetime.monotonic_ns", "env.sleep_ms"] {
+        for name in ["datetime.now", "datetime.monotonic_ns", "datetime.now_ms", "env.sleep_ms"] {
             assert_eq!(host_op_capabilities(name), &[Capability::Clock], "{name}");
         }
         assert_eq!(host_op_capabilities("env.__set"), &[Capability::CliArgs]);
@@ -365,9 +355,9 @@ mod tests {
         assert_eq!(host_op_for_call_name("fs.fold_lines_msi").map(|o| o.func), Some("fold_lines"));
         assert_eq!(host_op_for_call_name("fs.__fallible_fold_lines_x").map(|o| o.func), Some("__fallible_fold_lines"));
         assert_eq!(host_op_for_call_name("fs.read_bytes").map(|o| o.func), Some("read_bytes"));
-        assert_eq!(host_op_for_call_name("env.millis_x").map(|o| o.func), Some("millis"));
+        assert_eq!(host_op_for_call_name("env.sleep_ms_x").map(|o| o.func), Some("sleep_ms"));
         // An unrouted row takes no typed suffix, and a pure fn never resolves.
-        assert!(host_op_for_call_name("env.millis_str").is_none());
+        assert!(host_op_for_call_name("env.sleep_ms_str").is_none());
         assert!(host_op_for_call_name("http.header").is_none());
         assert!(host_op_for_call_name("list.map").is_none());
     }
@@ -379,7 +369,7 @@ mod tests {
         assert!(is_uncounted_host_call("net.tcp_connect"));
         assert!(is_uncounted_host_call("env.some_future_reader"));
         // Host ops, pure fns and non-capability modules are accounted for.
-        assert!(!is_uncounted_host_call("env.millis"));
+        assert!(!is_uncounted_host_call("env.sleep_ms"));
         assert!(!is_uncounted_host_call("datetime.add_days"));
         assert!(!is_uncounted_host_call("http.header"));
         assert!(!is_uncounted_host_call("list.map"));

@@ -638,15 +638,15 @@ impl LowerCtx {
     ) -> Option<ValueId> {
         use almide_ir::BinOp;
         // The `**` OPERATOR has no single hardware instruction — it desugars to a CALL into
-        // the self-hosted pow stdlib, exactly as if the user wrote `math.fpow(a, b)` /
-        // `math.pow(a, b)`. `PowFloat` → `math.fpow` (the bit-exact libm transcription),
-        // `PowInt` → `math.pow` (exponentiation-by-squaring). Both callees live in a
+        // the self-hosted pow stdlib (`math.__fpow(a, b)` / `math.__pow(a, b)`).
+        // `PowFloat` → `math.__fpow` (the bit-exact libm transcription),
+        // `PowInt` → `math.__pow` (exponentiation-by-squaring). Both callees live in a
         // PURE_MODULES module, so the synthesized `Op::CallFn` carries an EMPTY capability
         // witness (sound), and the corpus `count_ir_calls` credits the operator node 1:1 so
         // `mir_calls <= ir_calls` holds BY CONSTRUCTION (no elision-masking over-count).
         let pow_callee = match op {
-            BinOp::PowFloat => Some("math.fpow"),
-            BinOp::PowInt => Some("math.pow"),
+            BinOp::PowFloat => Some("math.__fpow"),
+            BinOp::PowInt => Some("math.__pow"),
             _ => None,
         };
         if let Some(callee) = pow_callee {

@@ -504,14 +504,6 @@ fn append_bool(mut b: Bytes, x: Bool) -> Unit = _
 @intrinsic("almide_rt_bytes_xor")
 fn xor(a: Bytes, b: Bytes) -> Bytes = _
 
-// ── The Endian-argument family (Stage 4a) ──
-//
-// A second spelling of four cells of the typed byte IO matrix, with the byte
-// order as an argument. R-bytes-04 retires it; the get_ / next_ / put_ /
-// append_ matrix further down is the surface.
-/// Byte order: LittleEndian or BigEndian.
-type Endian = | LittleEndian | BigEndian
-
 // ── Text requirement (R-L0-42): `list.join[T: Text]` over Bytes ──
 /// The parts with sep between them; empty for [].
 @intrinsic("almide_rt_bytes_join")

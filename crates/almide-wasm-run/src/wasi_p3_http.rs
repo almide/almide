@@ -114,7 +114,7 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     let (n, k) = (26u32, 27u32);
     let s64 = 28u32;
     let (hws, trl_pend, str_pend, snd_done) = (29u32, 30u32, 31u32, 32u32);
-    // The framed family (ops 48..=50, #1710): the frame's cells.
+    // The framed family (ops 48 / 49 / 65, #1710): the frame's cells.
     let (m_ptr, m_len, cur, cell_len, frame_end, hdr_ptr, digit, tmp) =
         (33u32, 34u32, 35u32, 36u32, 37u32, 38u32, 39u32, 40u32);
     let (key_ptr, key_len) = (41u32, 42u32);
@@ -136,7 +136,7 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     // The URL's userinfo (wasi_p3_http_auth.rs).
     let al = AuthLocals { ui_ptr: 60, ui_len: 61, j: 62, b: 63, v: 64, w: 65, dec: 66, dlen: 67, enc: 68, flag: 69 };
     let mut i = f.instructions();
-    // ── ops 48..=50: parse the http_framed cell frame in `b` ──
+    // ── the framed ops (48 / 49 / 65): parse the http_framed cell frame in `b` ──
     // `<len>\n<payload>` cells with CHAR-count lengths (string.len
     // semantics — a char starts at every byte that is not 10xxxxxx):
     // method, body, then key/value pairs to the end of the frame. The

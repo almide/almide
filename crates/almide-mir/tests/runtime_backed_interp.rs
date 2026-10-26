@@ -1,4 +1,4 @@
-//! A runtime-backed value (`HttpCall`, `HttpRequest`, `JsonPath`, …) interpolates
+//! A runtime-backed value (`HttpCall`, `HttpRequest`, …) interpolates
 //! through its DECLARED repr on v1, bare or inside a literal tuple / list /
 //! `some(..)` — never through the self-hosted carrier the newtype erasure leaves
 //! (`list.to_string_s` over an `HttpRequest` would print every header value).
@@ -37,7 +37,7 @@ fn an_unwrapped_http_call_interpolates_inside_a_list_and_a_tuple_literal() {
     assert_eq!(calls(&ops, "compound.to_string"), 0, "walled through compound:\n{ops:#?}");
 }
 
-const REQ: &str = "  let req = http.new_request(\"POST\", \"/x\", \"b\", [(\"Authorization\", \"Bearer T\")])\n  let path = json.root() |> json.field(\"user\")\n";
+const REQ: &str = "  let req = http.new_request(\"POST\", \"/x\", \"b\", [(\"Authorization\", \"Bearer T\")])\n  let path = value.root() |> value.key(\"user\")\n";
 
 #[test]
 fn a_tuple_of_runtime_backed_values_interpolates_through_the_declared_reprs() {
@@ -46,7 +46,6 @@ fn a_tuple_of_runtime_backed_values_interpolates_through_the_declared_reprs() {
     );
     let ops = main_ops(&src);
     assert_eq!(calls(&ops, "http.__http_request_repr"), 1, "{ops:#?}");
-    assert_eq!(calls(&ops, "json.__json_path_repr"), 1, "{ops:#?}");
     assert_eq!(calls(&ops, "list.to_string_s"), 0, "the carrier was displayed:\n{ops:#?}");
 }
 
@@ -57,7 +56,6 @@ fn a_list_literal_of_runtime_backed_interpolations_lowers() {
     );
     let ops = main_ops(&src);
     assert_eq!(calls(&ops, "http.__http_request_repr"), 2, "{ops:#?}");
-    assert_eq!(calls(&ops, "json.__json_path_repr"), 2, "{ops:#?}");
     for carrier in ["list.to_string_s", "list.to_string_x", "option.to_string_ls"] {
         assert_eq!(calls(&ops, carrier), 0, "the carrier was displayed via {carrier}:\n{ops:#?}");
     }
@@ -101,7 +99,7 @@ fn synthesized_reprs(ops: &[String], ty: &str) -> usize {
 fn a_user_variant_with_a_runtime_backed_payload_is_not_displayed_through_its_carrier() {
     let cases = [
         ("type Ev = | Got(HttpRequest) | Nothing", "let v = Got(req)", "Ev"),
-        ("type Ev = | Hit { at: JsonPath } | Nothing", "let v = Hit { at: path }", "Ev"),
+        ("type Ev = | Hit { at: value.Path } | Nothing", "let v = Hit { at: path }", "Ev"),
         ("type Tag[T] = | Tagged(T, HttpRequest)", "let v: Tag[Int] = Tagged(1, req)", "Tag"),
     ];
     for (decl, bind, ty) in cases {

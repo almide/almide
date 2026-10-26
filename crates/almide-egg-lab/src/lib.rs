@@ -75,7 +75,6 @@ define_language! {
         "matrix_mul" = MatrixMul([Id; 2]),
         "matrix_add" = MatrixAdd([Id; 2]),
         "matrix_scale" = MatrixScale([Id; 2]),
-        "matrix_linear_row" = MatrixLinearRow([Id; 3]),
 
         // ── Matrix fused targets (RHS of fusion rules) ────────────
         "matrix_mul_scaled" = MatrixMulScaled([Id; 3]),
@@ -195,7 +194,7 @@ impl CostFunction<AlmideExpr> for FusionCost {
             | AlmideExpr::FlatMap(_) | AlmideExpr::FilterMap(_) => 100,
 
             AlmideExpr::MatrixMul(_) | AlmideExpr::MatrixAdd(_)
-            | AlmideExpr::MatrixScale(_) | AlmideExpr::MatrixLinearRow(_) => 200,
+            | AlmideExpr::MatrixScale(_) => 200,
 
             AlmideExpr::MatrixMulScaled(_) => 110,
 

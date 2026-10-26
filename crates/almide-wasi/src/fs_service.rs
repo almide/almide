@@ -1,5 +1,5 @@
 //! The p1 fs service (#2742): the `fs.*` host ops (and `env.os` /
-//! `env.temp_dir` / `env.cwd`, which answer from the same environment) over
+//! `fs.temp_dir` / `env.cwd`, which answer from the same environment) over
 //! WASI preview 1, for a stock-runtime artifact.
 //!
 //! Before this, the p1 shim served none of them, so the build path's op
@@ -44,8 +44,6 @@ pub const FS_SERVICE_OPS: &[(i32, &str, i32)] = &[
     (14, "op_read_bytes", 14),
     (15, "op_write", 15),
     (16, "op_append", 16),
-    (17, "op_file_size", 17),
-    (18, "op_modified_at", 18),
     (19, "op_copy", 19),
     (20, "op_rename", 20),
     (21, "op_create_temp_file", 21),
@@ -66,7 +64,7 @@ pub const FS_SERVICE_OPS: &[(i32, &str, i32)] = &[
     // 61: fold_lines_range (and fold_lines_chunked's worker read) — the raw
     // bytes reader under the range's name; the guest walks the bytes and
     // validates UTF-8 only in what it reads (#2744, #3758).
-    // 62: fold_lines_chunked's size probe — op 17's body under its name.
+    // 62: fold_lines_chunked's size probe — the file-size body under its name.
     (61, "op_read_bytes", 61),
     (62, "op_file_size", 62),
     // 63/64: the Bytes-typed readers `fs.read_bytes` / `_if_exists`, ops
@@ -105,8 +103,6 @@ const FS_OP_NAMES: &[(i32, &str)] = &[
     (14, "fs.read_bytes"),
     (15, "fs.write_bytes"),
     (16, "fs.append_text"),
-    (17, "fs.file_size"),
-    (18, "fs.modified_at"),
     (19, "fs.copy"),
     (20, "fs.rename"),
     (21, "fs.create_temp_file"),

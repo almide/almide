@@ -243,9 +243,9 @@ impl<'a> Walk<'a> {
     /// a sibling `&mut` argument borrows is hoisted into a `let` before the
     /// call, so it runs before every argument that stays. The table must say
     /// so, or a consuming read in a staying argument looks earlier than a
-    /// hoisted read that in fact precedes it — `map.insert(m, k,
-    /// map.get_or(m, k, 0) + 1)` on `mut m` hoists the `get_or`, which reads
-    /// `k` first; the `insert` then moves `k` as its LAST use.
+    /// hoisted read that in fact precedes it — `insert(m, k, (map.get(m, k)
+    /// ?? 0) + 1)` on `mut m` hoists the `get`, which reads `k` first; the
+    /// `insert` then moves `k` as its LAST use.
     fn call_args(&mut self, args: &[IrExpr], modes: &[SlotMode]) {
         let mut_id = args.iter().zip(modes).find_map(|(a, m)| Self::mut_borrowed_var(a, *m));
         let hoisted = |i: usize| {

@@ -299,8 +299,8 @@ impl Checker {
     // early-return to the caller, `None` to continue.
     fn check_record_enum_misuse(&mut self, n: &Sym) -> Option<Ty> {
         // The literal's TYPE resolves canonically: the entry program's
-        // `type Endian = { n: Int }` is `self.Endian`, not the bundled
-        // `Endian` enum the bare key holds (#1828).
+        // `type IpAddr = { n: Int }` is `self.IpAddr`, not the bundled
+        // `IpAddr` enum the bare key holds (#1828).
         let key = crate::canonicalize::resolve::canonical_user_type_sym(
             n.as_str(), &self.env.types, self.current_module_prefix.as_deref(),
         ).unwrap_or(*n);

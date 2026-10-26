@@ -237,7 +237,7 @@ fn seed_intrinsic_sig_for_fn(
     // `@borrow_ref(p1, p2, ...)` — opposite override: force
     // `Ref` on params the default heuristic would pass by
     // value (e.g. user-defined named types whose runtime fn
-    // takes `&T`, like `JsonPath`).
+    // takes `&T`, like `HttpRequest`).
     let borrow_ref_names: Vec<&str> = attrs.iter()
         .filter(|a| a.name.as_str() == "borrow_ref")
         .flat_map(|a| a.args.iter().filter_map(|arg| match &arg.value {

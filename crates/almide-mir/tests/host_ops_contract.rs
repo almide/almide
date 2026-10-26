@@ -14,7 +14,7 @@
 //!   returns no reference;
 //! - the MATRIX: every `@intrinsic` of every capability module is a host op,
 //!   pure, or walled — an unlisted capability-bearing intrinsic fails, the
-//!   shape `env.millis` / `datetime.now` had before #3302 (pinned negative
+//!   shape the env clock reader / `datetime.now` had before #3302 (pinned negative
 //!   below) — and every stdlib module is either wholly pure or a capability
 //!   module.
 
@@ -308,7 +308,7 @@ fn every_capability_module_intrinsic_is_classified() {
 }
 
 /// The negative: a capability-bearing intrinsic the table does not list fails
-/// the matrix — the shape `env.millis` had before #3302.
+/// the matrix — the shape the env clock reader had before #3302.
 #[test]
 fn an_unlisted_capability_bearing_intrinsic_fails_the_matrix() {
     let src = "/// Reads the clock.\n@intrinsic(\"almide_rt_env_fake_clock\")\neffect fn fake_clock() -> Int = _\n";
@@ -360,13 +360,13 @@ effect fn main() -> Unit = {
 }
 
 /// End to end (#3302): the witness producer `almide verify` runs counts the
-/// clock reads of `env.millis` / `datetime.now` in the caps witness of the
+/// clock reads of `datetime.now_ms` / `datetime.now` in the caps witness of the
 /// function that makes them — `<declared>|<used>`, Clock is id 5.
 #[test]
 fn the_caps_witness_of_a_clock_reader_names_the_clock() {
     let src = r#"import env
 effect fn main() -> Unit = {
-  let a = env.millis()
+  let a = datetime.now_ms()
   let b = datetime.now()
   if a >= 0 and b >= 0 then println("ok") else println("no")
 }

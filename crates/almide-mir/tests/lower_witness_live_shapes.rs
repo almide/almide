@@ -175,12 +175,12 @@ effect fn main() -> Unit = {
   let header = ["a", "b"]
   let pairs = header |> list.enumerate |> list.map((entry) => {
     let (i, key) = entry
-    (key, value.string(list.get_or(row, i, "")))
+    (key, value.string(list.get(row, i) ?? ""))
   })
-  println(value.stringify(value.object(pairs)))
+  println(json.stringify(value.object(pairs)))
   let strs = ["p", "q"]
   let objs = strs |> list.map((s) => value.object([(s, value.int(1))]))
-  println(value.stringify(value.array(objs)))
+  println(json.stringify(value.array(objs)))
 }
 "#,
         fns: &["main"],

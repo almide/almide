@@ -981,30 +981,3 @@ pub fn almide_rt_bytes_append_i32_le(b: &mut Vec<u8>, val: i64) {
 pub fn almide_rt_bytes_append_i64_le(b: &mut Vec<u8>, val: i64) {
     b.extend_from_slice(&val.to_le_bytes());
 }
-
-// ── Typed byte IO: the Endian-parameterized surface (#1098) ──
-//
-// `AlmideEndian` is the runtime-side twin of stdlib/bytes.almd's
-// `type Endian = | LittleEndian | BigEndian` — the same pattern as fs.rs's
-// `AlmideFileStat`: the bundled decl types the surface at check time, this
-// enum is the value at run time. The emitter spells the type under this
-// reserved name and qualifies both ctors against it (`AlmideEndian::
-// LittleEndian`, construction and pattern alike, whether or not the bundled
-// decl reached the program — walker/runtime_owned.rs, #1821), so a user's own
-// `type Endian` keeps the bare spelling and never collides with this enum.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum AlmideEndian { LittleEndian, BigEndian }
-// The repr the codegen-emitted decl used to carry — the decl emission is
-// skipped (the runtime owns the type), so the impl lives here and prints the
-// Almide-level ctor names.
-impl AlmideRepr for AlmideEndian {
-    fn almide_repr(&self) -> String {
-        match self {
-            AlmideEndian::LittleEndian => "LittleEndian".to_string(),
-            AlmideEndian::BigEndian => "BigEndian".to_string(),
-        }
-    }
-}
-
-
-

@@ -646,7 +646,7 @@ fn mutates_its_receiver(call: &IrExpr) -> bool {
         IrExprKind::Call { target: CallTarget::Module { module, func, .. }, .. } => {
             let (module, func) = (module.as_str(), func.as_str());
             crate::lower::is_inplace_mutator(module, func)
-                || matches!((module, func), ("list" | "string" | "bytes", "push") | ("map", "insert" | "delete") | (_, "clear"))
+                || matches!((module, func), ("list" | "string" | "bytes", "push") | (_, "clear"))
         }
         _ => false,
     }

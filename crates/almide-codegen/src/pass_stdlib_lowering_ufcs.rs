@@ -94,7 +94,7 @@ fn try_inline_intrinsic(module: &str, func: &str, args: &[IrExpr], ty: &Ty, span
         .or_else(|| try_inline_intrinsic_exp_log(module, func, args, ty, span))
 }
 
-/// `math.sqrt`/`abs`/`floor`/`ceil`/`round` group of `try_inline_intrinsic`,
+/// `math.sqrt`/`floor`/`ceil`/`round` group of `try_inline_intrinsic`,
 /// extracted (cog>30 decomposition, pattern 1 — independent `(module,
 /// func)` name-router arms, mirrors the `list_call_name` recipe). These
 /// are the highest-impact — called in tight loops (nbody, spectralnorm).
@@ -106,16 +106,6 @@ fn try_inline_intrinsic_rounding(module: &str, func: &str, args: &[IrExpr], ty: 
                 target: CallTarget::Method {
                     object: Box::new(args[0].clone()),
                     method: almide_base::intern::sym("sqrt"),
-                },
-                args: vec![],
-                type_args: vec![],
-            }))
-        }
-        ("math", "abs") if args.len() >= 1 => {
-            Some(mk(IrExprKind::Call {
-                target: CallTarget::Method {
-                    object: Box::new(args[0].clone()),
-                    method: almide_base::intern::sym("abs"),
                 },
                 args: vec![],
                 type_args: vec![],
@@ -224,8 +214,8 @@ fn try_inline_intrinsic_exp_log(module: &str, func: &str, args: &[IrExpr], ty: &
         })),
         // float.from_int / int.to_float / float.to_int: walker handles inline cast
         // math.pow: Int exponentiation — keep as runtime call (i64.pow needs u32 cast)
-        // ── math.fpow(base, exp) → base.powf(exp) ──
-        ("math", "fpow") if args.len() >= 2 => Some(mk(IrExprKind::Call {
+        // ── math.__fpow(base, exp) → base.powf(exp) ──
+        ("math", "__fpow") if args.len() >= 2 => Some(mk(IrExprKind::Call {
             target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("powf") },
             args: vec![args[1].clone()], type_args: vec![],
         })),

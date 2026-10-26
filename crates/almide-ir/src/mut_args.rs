@@ -85,8 +85,8 @@ pub fn stdlib_fn_has_almide_body(module: &str, func: &str) -> bool {
 /// Is `symbol` the runtime symbol some bundled stdlib fn DECLARES with
 /// `@intrinsic("symbol")`? Read from the declarations, so the answer is a
 /// property of the declaration, never of how the symbol happens to be spelled:
-/// a leaf `@intrinsic("almide_http_request_bytes")` is a runtime fn even once
-/// `http.request_bytes` has an Almide body (#4217).
+/// a leaf `@intrinsic("almide_http_get")` is a runtime fn even when a
+/// wrapper with an Almide body calls it (#4217).
 pub fn is_bundled_intrinsic_symbol(symbol: &str) -> bool {
     static SYMBOLS: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
     SYMBOLS
@@ -235,7 +235,7 @@ mod tests {
     fn a_bundled_mutator_answers_from_its_declaration() {
         assert_eq!(stdlib_mut_positions("list", "push"), Some(vec![0]));
         assert_eq!(stdlib_mut_positions("list", "len"), None);
-        assert_eq!(stdlib_mut_positions("bytes", "set_uint16"), Some(vec![0]));
+        assert_eq!(stdlib_mut_positions("bytes", "put_u8"), Some(vec![0]));
         // A bare `@mutating` writes its receiver.
         assert_eq!(stdlib_mut_positions("bytes", "as_mut_ptr"), Some(vec![0]));
         assert_eq!(stdlib_mut_positions("no_such_module", "push"), None);

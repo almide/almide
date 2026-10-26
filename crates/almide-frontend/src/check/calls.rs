@@ -1550,12 +1550,11 @@ fn bundled_call_is_lifted(name: &str) -> bool {
 fn argv_reader_hint(name: &str) -> Option<String> {
     let reads_argv = matches!(
         name.split_once('.'),
-        Some(("env" | "process", "args"))
-            | Some(("args", "raw" | "flag" | "option" | "option_or" | "positional" | "positional_at"))
+        Some(("env", "args")) | Some(("args", "has_flag" | "option" | "positional"))
     );
     // The `args` readers have Almide bodies, so their call is a Result
-    // propagated with `!`; `env.args` / `process.args` are runtime templates
-    // that return the list itself.
+    // propagated with `!`; `env.args` is a runtime template that returns the
+    // list itself.
     let call = if name.starts_with("args.") { format!("{name}(..)!") } else { format!("{name}()") };
     reads_argv.then(|| {
         format!(

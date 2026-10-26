@@ -531,7 +531,7 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
         .or_else(|| runtime_line::helper_body(h, work))
     {
         Some(f) => f,
-        None => helper_body_b(h, work, helper_snapshot),
+        None => helper_body_b(h, work),
     },
     }
 }
@@ -565,11 +565,8 @@ pub(crate) fn resolve_extras(
             Helper::ScanDeep { .. } => {
                 vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
             }
-            Helper::JsonValuePretty { .. } | Helper::JsonPathRemove => {
+            Helper::JsonValuePretty { .. } => {
                 vec![ValType::I32, ValType::I32, ValType::I32]
-            }
-            Helper::JsonPathSet { .. } => {
-                vec![ValType::I32, ValType::I32, ValType::I32, ValType::I32]
             }
             _ => vec![ValType::I32, ValType::I32],
             },
@@ -626,7 +623,7 @@ pub(crate) fn resolve_extras(
 }
 /// The named-type / json-path half of the helper table —
 /// split from `helper_body` for the complexity budget.
-fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Function {
+fn helper_body_b(h: &Helper, work: &FnWork) -> Function {
     match h {
     Helper::DisplayNamed { ti, irk } => {
         match work.display_bodies.borrow_mut().remove(&(*ti, *irk)) {
@@ -656,13 +653,6 @@ fn helper_body_b(h: &Helper, work: &FnWork, helper_snapshot: &[Helper]) -> Funct
             f
         }
     },
-    Helper::JsonPathSet { vdec } => {
-        json_path_helpers::emit_json_path_set_helper(work.helper_base.get(), helper_snapshot, *vdec)
-    }
-    Helper::JsonPathRemove => {
-        json_path_helpers::emit_json_path_remove_helper(work.helper_base.get(), helper_snapshot)
-    }
-    Helper::JsonNestsPast => json_path_helpers::emit_json_nests_past_helper(work.helper_base.get(), helper_snapshot),
     Helper::ScanDeep { key } => match work.scan_bodies.borrow_mut().remove(key) {
         Some(work::DisplayBuild::Built(f)) => f,
         _ => {

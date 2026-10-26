@@ -1,5 +1,5 @@
-//! #3327: an in-place mutator (`list.push`, `list.pop`, `map.insert`,
-//! `map.delete`, `list.clear`, `string.push`, a field assign, and a push two
+//! #3327: an in-place mutator (`list.push`, `list.pop`, `m[k] = v`,
+//! a map remove, `list.clear`, `string.push`, a field assign, and a push two
 //! fields deep) on a field of a mutable module-level record lost its write in
 //! the MIR: the call-argument projection hoist bound `g.xs` to a temp and the
 //! mutator wrote the temp. Every shape — straight-line, in a loop, in a fold

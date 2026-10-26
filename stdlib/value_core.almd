@@ -1498,22 +1498,10 @@ fn __drop_result_value(r: Result[Value, String]) -> Unit = {
   prim.rc_dec(h)
 }
 
-fn __get_or_value_elem(h: Int, i: Int) -> Value = {
-  let v: Value = prim.load_handle(h + 12 + i * 8)
-  v
-}
-
 // ── json.stringify_pretty ── 2-space indent, native stringify_value's exact shape:
 // empty [] / {} inline; else one element per line at depth+1, closer at depth.
 // Strings quote via __json_quote — the one RFC 8259 §7 rule every leg
 // shares (native value.rs almide_rt_value_json_quote is the mirror; C-095).
-fn list_get_or_value(xs: List[Value], i: Int, default: Value) -> Value = {
-  let h = prim.handle(xs)
-  let len = prim.load32(h + 4)
-  if i < 0 then default
-  else if i >= len then default else __get_or_value_elem(h, i)
-}
-
 fn __vsp_indent(d: Int) -> String = string.repeat("  ", d)
 
 fn __vsp_sep(i: Int) -> String = {

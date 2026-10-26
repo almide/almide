@@ -3,7 +3,7 @@
 /// desugar-before-both: the caps `mir == ir` count reads the rewritten tree on
 /// both sides).
 ///
-/// A runtime-backed value (`HttpRequest`, `HttpResponse`, `HttpCall`, `JsonPath`
+/// A runtime-backed value (`HttpRequest`, `HttpResponse`, `HttpCall`
 /// — `stdlib_info::RUNTIME_BACKED_TYPES`) displays as its DECLARED repr
 /// (`<module>.__<type>_repr`, #4204), bare or nested in a container. Newtype
 /// erasure then rewrites the self-hosted ones to their carrier (`List[String]`),

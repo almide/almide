@@ -70,8 +70,7 @@ struct RemoveFns {
     tomb: Option<(u32, u32)>,
 }
 
-/// Every var a `map.delete` in `body` receives, every var rebound to a
-/// functional remove of itself (`m = map.remove(m, k)`, `s = set.remove(s,
+/// Every var rebound to a functional remove of itself (`m = map.remove(m, k)`, `s = set.remove(s,
 /// x)`), and every `list.fold` accumulator whose callback body ends in one
 /// (`(m, i) => map.remove(m, i)`, #4208) — the frame's candidate tombstone
 /// vars (an over-approximation is only a no-op settle per read).
@@ -80,12 +79,6 @@ pub(crate) fn tomb_vars_of(body: &IrExpr) -> HashSet<VarId> {
     impl IrVisitor for Scan {
         fn visit_expr(&mut self, e: &IrExpr) {
             if let IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. } = &e.kind {
-                if module.as_str() == "map"
-                    && func.as_str() == "delete"
-                    && let Some(IrExprKind::Var { id }) = args.first().map(|a| &a.kind)
-                {
-                    self.0.insert(*id);
-                }
                 if module.as_str() == "list"
                     && func.as_str() == "fold"
                     && let Some(IrExprKind::Lambda { params, body, .. }) = args.get(2).map(|a| &a.kind)
@@ -393,43 +386,6 @@ impl Emitter<'_> {
         self.emit_map_remove_judged(RemoveHolds { mh, eh }, kv, fns)?;
         self.release_i32(); // eh
         Ok(())
-    }
-
-    /// `map.delete(m, k)` on a var the frame owns: the judged delete on the
-    /// var's credit. `Ok(false)` when the receiver does not qualify (the
-    /// window's rules: not metered, not a C-319 cell, not a param) — the
-    /// caller keeps the functional remove + var write-back.
-    pub(crate) fn try_map_delete_in_place(&mut self, id: &VarId, key: &IrExpr) -> Result<bool, EmitError> {
-        if self.metered || self.cells.contains(id) {
-            return Ok(false);
-        }
-        let Some((idx, ty, global)) = self.mut_var(id) else {
-            return Ok(false);
-        };
-        if !global && idx < self.rc_param_ceiling {
-            return Ok(false);
-        }
-        let SliceTy::Map(kt, vt) = ty else {
-            return Ok(false);
-        };
-        let (k, v) = (self.types.el(kt), self.types.el(vt));
-        let mut fns = self.map_remove_fns(k, v)?;
-        if !global && self.tomb_vars.contains(id) {
-            fns.tomb = self.keyed_kill(k);
-        }
-        let kh = self.hold_for(k)?;
-        self.lower_arg(key, Some(k), ArgMode::Borrow)?;
-        self.f.instructions().local_set(kh);
-        let mh = self.hold_i32()?;
-        self.emit_read_mut_var(id, idx, ty, global);
-        self.f.instructions().local_set(mh);
-        self.emit_map_remove_scanned(mh, kh, (k, v), fns)?;
-        self.f.instructions().local_get(mh);
-        self.emit_store_mut_var(*id, idx, ty, global)?;
-        self.witness_mut_rebind(*id, global);
-        self.release_i32(); // mh
-        self.release_for(k);
-        Ok(true)
     }
 
     /// `map.remove(m, k)` over a receiver whose credit the op may take

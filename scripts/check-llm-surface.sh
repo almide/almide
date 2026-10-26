@@ -18,8 +18,8 @@
 # marker, one fence at a time (#1483 tracks the arc). The allowlist below is
 # SHRINK-ONLY: a day-one failure may be listed with its reason, a new
 # failure may not be added. First run already paid for the gate: the
-# CHEATSHEET's own "Complete example" used process.args() without
-# `import process`.
+# CHEATSHEET's own "Complete example" used `process.args()` (now
+# `env.args()`) without its import.
 #
 # Usage: check-llm-surface.sh          (uses target/release/almide or PATH)
 set -euo pipefail

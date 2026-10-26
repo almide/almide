@@ -19,14 +19,6 @@ fn seed_selfhost_newtype_reps(
     declared: &std::collections::HashSet<&str>,
 ) {
     use almide_lang::types::Ty;
-    // JsonPath — the self-host rep is a List[String] of segments
-    // (stdlib/json_path.almd).
-    if !declared.contains("JsonPath") {
-        map.insert(
-            "JsonPath".to_string(),
-            Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::String]),
-        );
-    }
     // Path — value.Path's self-host rep is json_path.almd's List[String] of
     // segments (#4220); value.almd's own List[(Bool, String, Int)] body is the
     // native one, and the two never meet (Path is opaque outside value).
@@ -270,7 +262,7 @@ fn build_newtype_substitution_map(
         collect(&m.type_decls, &mut map);
     }
     // SELF-HOST REP table: opaque STDLIB nominals whose v1 self-host owns the
-    // representation (`stdlib/json_path.almd` — JsonPath = a List[String] of
+    // representation (`stdlib/json_path.almd` — value.Path = a List[String] of
     // segments). Publishing the rep here makes every user-side bind/param of the
     // opaque type route the CORRECT drop (heap_elem_list str). Only when the
     // program does not declare its own type of the same name.

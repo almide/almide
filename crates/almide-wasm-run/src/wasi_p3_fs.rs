@@ -232,12 +232,13 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve): (u32, Opti
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I64), (7, ValType::I32)]);
     let mut i = f.instructions();
 
-    // ops 43..=47 (the string client) and 48..=50 (the framed family) —
+    // ops 43..=47 (the string client) and 48..=49 (the framed family; 50 is
+    // retired) —
     // forwarded whole to the http shim when the module's op set earned the
     // imports (#1710 PR B).
     if let Some(h) = f_http {
         i.local_get(op).i32_const(43).i32_ge_s();
-        i.local_get(op).i32_const(50).i32_le_s();
+        i.local_get(op).i32_const(49).i32_le_s();
         i.i32_and();
         // op 65: the full-response family (ADR-0023 step 4).
         i.local_get(op).i32_const(65).i32_eq().i32_or().if_(BlockType::Empty);

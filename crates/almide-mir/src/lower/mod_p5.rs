@@ -6,7 +6,6 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             // `float.parse` is the same intrinsic-Result shape as `int.parse` (Result[Float, String],
             // a materialized scalar Result read len-as-tag); a `match` over it EXECUTES the same way.
             | ("float", "parse")
-            | ("int", "from_hex")
             | ("option", "to_result")
             | ("result", "collect")
             | ("result", "map")
@@ -15,7 +14,6 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             | ("result", "filter")
             | ("result", "or_else")
             | ("result", "flatten")
-            | ("error", "context")
             // value.as_int/as_bool/as_float build a materialized Result[T, String] (Ok(payload)
             // on a tag match, else Err("expected T")) — a `match` over the result EXECUTES.
             | ("value", "as_int")
@@ -30,12 +28,6 @@ pub(crate) fn is_self_host_result_module_fn(module: &str, func: &str) -> bool {
             // heap-Ok cap-as-tag for the String-output pairings) is decided by the
             // RESULT TYPE at the call sites via `is_fan_any_map` + `is_heap_ok_result`.
             | ("fan", "any_map")
-            // `fs.file_size` / `fs.modified_at` build their Result[Int, String]
-            // through the ordinary ok()/err() ctors over the path_filestat scratch
-            // (fs_file_size.almd / fs_modified_at.almd) — the int.parse scalar-Ok
-            // shape, so a `match`/`!` over the bound result EXECUTES.
-            | ("fs", "file_size")
-            | ("fs", "modified_at")
             // `datetime.parse_iso` — Result[Int, String] from the ok()/err() ctors
             // (datetime_parse_iso.almd), the int.parse scalar-Ok shape.
             | ("datetime", "parse_iso")
@@ -52,7 +44,7 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
         ("value", "as_string") | ("result", "zip") | ("value", "as_array")
             // value.as_object — Result[List[(String, Value)], String] from the ok()/err()
             // ctors (value_core.almd), as_array's shape. (value.get is the pure
-            // Option read over value.field, not a Result.)
+            // Option read over value.__field, not a Result.)
             | ("value", "as_object")
             // `json.parse` is the SELF-HOSTED recursive-descent parser
             // (stdlib/json_parse.almd): its `Result[Value, String]` is built by the
@@ -127,12 +119,10 @@ pub fn is_self_host_result_str_module_fn(module: &str, func: &str) -> bool {
             // `fs.for_each_line(..)!` followed by a statement).
             | ("fs", "for_each_line")
             | ("fs", "__fallible_for_each_line")
-            // `json.set_path` / `value.field` — Result[Value, String] built by the
+            // `value.set_path` / `value.__field` — Result[Value, String] built by the
             // ok()/err() ctors (json_path.almd, value_core.almd), json.parse's shape.
-            | ("json", "set_path")
-            // value.set_path — the same json_path walk under its value name (#4220).
             | ("value", "set_path")
-            | ("value", "field")
+            | ("value", "__field")
             // The zlib family — Result[Bytes, String] from the ok()/err() ctors
             // (zlib_deflate.almd, zlib_inflate.almd), fs.read_bytes_raw's shape.
             | ("zlib", "deflate")

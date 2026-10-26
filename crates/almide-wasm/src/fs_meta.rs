@@ -19,8 +19,7 @@ mod fs_fold;
 #[path = "fs_root.rs"]
 pub(crate) mod fs_root;
 
-pub(crate) const OP_FILE_SIZE: i32 = 17;
-pub(crate) const OP_MODIFIED_AT: i32 = 18;
+// Ops 17 / 18 (fs.file_size / fs.modified_at) are retired: fs.stat carries both.
 pub(crate) const OP_COPY: i32 = 19;
 pub(crate) const OP_RENAME: i32 = 20;
 pub(crate) const OP_CREATE_TEMP_FILE: i32 = 21;
@@ -79,10 +78,9 @@ pub(crate) const OP_HTTP_DELETE: i32 = 47;
 /// decimal-length (method, body, headers) frame in b — CHAR-count cells,
 /// `<len>\n<payload>`, built by stdlib/http_framed.almd and parsed by the
 /// embedded host with the same char arithmetic. 48 answers the body text,
-/// 49 answers `<status>\n<body>` (split guest-side), 50 answers raw bytes.
+/// 49 answers `<status>\n<body>` (split guest-side). 50 (raw bytes) is retired.
 pub(crate) const OP_HTTP_FRAMED_TEXT: i32 = 48;
 pub(crate) const OP_HTTP_FRAMED_STATUS: i32 = 49;
-pub(crate) const OP_HTTP_FRAMED_BYTES: i32 = 50;
 /// The full-response leaf (ADR-0023 step 4): `<status>\n<hlen>\n`, hlen chars
 /// of header cells (name, value), then the body. Served by the p3 shim only.
 pub(crate) const OP_HTTP_FRAMED_RESPONSE: i32 = 65;
@@ -190,11 +188,6 @@ impl Emitter<'_> {
         args: &[IrExpr],
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
-            ("file_size" | "modified_at", [p]) => {
-                let op = if func == "file_size" { OP_FILE_SIZE } else { OP_MODIFIED_AT };
-                self.fs_call_1(p, op)?;
-                self.fs_result_i64()?
-            }
             ("copy" | "rename", [a, b]) => {
                 let op = if func == "copy" { OP_COPY } else { OP_RENAME };
                 self.fs_call_str2(a, b, op)?;

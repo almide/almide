@@ -63,7 +63,7 @@ pub(super) fn lower_type_decl(ctx: &mut LowerCtx, decl: &TypeToLower<'_>) -> IrT
         ast::Visibility::Local => IrVisibility::Private,
     };
     let mut deriving: Option<Vec<Sym>> = deriving.as_ref().map(|d| d.iter().copied().collect());
-    // #3755: an opaque newtype (`mod type SafePath = String`) compares and
+    // #3755: an opaque newtype (`mod type SafeHtml = String`) compares and
     // orders exactly when its target does: the checker's capability walks
     // follow the newtype to its target (`TypeEnv::named_def`), and the wasm
     // leg erases the newtype and compares the payload. The native struct is

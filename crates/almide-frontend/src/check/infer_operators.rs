@@ -75,8 +75,8 @@ impl Checker {
                 self.emit(super::err(
                     format!("operator '-' cannot negate the unsigned type {}", name),
                     format!(
-                        "Negate the signed value before converting — `(-128).to_{}()` — \
-                         or subtract from zero in the unsigned type (`0.to_{}() - x`)",
+                        "Negate the signed value before converting — `{}.from_wrapping(-128)` — \
+                         or subtract from zero in the unsigned type (`{}.from(0) - x`)",
                         name.to_lowercase(), name.to_lowercase()),
                     "operator -").with_code("E001"));
             }
@@ -413,10 +413,10 @@ impl Checker {
                 self.emit(super::err(
                     format!(
                         "operator '{}' mixes sized numeric types {} and {} — \
-                         explicit conversion required (e.g. `.to_{}()`)",
+                         explicit conversion required (e.g. `{}.from(x)`)",
                         op, lc.display(), rc.display(),
                         lc.display().to_lowercase()),
-                    "Convert one side with `.to_intN()` / `.to_floatN()` before the op",
+                    "Convert one side with `<type>.from(x)` (`int32.from(x)`, `float64.from(x)`) before the op",
                     format!("operator {}", op)));
                 lc
             } else if lc.compatible(&rc) && is_sized_scalar(&lc) {

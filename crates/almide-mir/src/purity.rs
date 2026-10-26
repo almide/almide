@@ -67,13 +67,10 @@ pub const PURE_MODULES: &[&str] = &[
     "bytes_ct",
     "bytes_cursor",
     "bytes_f16",
-    "bytes_lenprefix",
     "bytes_mutate",
     "bytes_rawptr",
-    "bytes_skip",
     "bytes_split",
     "bytes_string",
-    "bytes_typed",
     "codec_decode",
     "codec_encode",
     "datetime_arith",
@@ -82,19 +79,14 @@ pub const PURE_MODULES: &[&str] = &[
     "datetime_parse_iso",
     "deque",
     "env_os",
-    "error",
-    "error_chain",
-    "error_message",
     "fan_any",
     "fan_map",
     "ffi_bridge",
     "float",
     "float32",
-    "float32_convert",
     "float64",
     "float64_convert",
     "float_bits",
-    "float_checked",
     "float_convert",
     "float_core",
     "float_extra",
@@ -157,7 +149,6 @@ pub const PURE_MODULES: &[&str] = &[
     "list_fold_ols",
     "list_foldf",
     "list_get",
-    "list_get_or",
     "list_get_or_str",
     "list_get_str",
     "list_heapelem",
@@ -273,7 +264,6 @@ pub const PURE_MODULES: &[&str] = &[
     "string_eq",
     "string_err_text",
     "string_first_last",
-    "string_from_bytes_self",
     "string_from_codepoint",
     "string_is_digit",
     "string_is_empty",
@@ -285,12 +275,10 @@ pub const PURE_MODULES: &[&str] = &[
     "string_quote",
     "string_repeat",
     "string_reverse",
-    "string_rle",
     "string_search",
     "string_slice",
     "string_slice2",
     "string_take_drop",
-    "string_to_bytes",
     "string_to_int",
     "string_to_lower",
     "string_to_upper",
@@ -351,14 +339,9 @@ fn is_pure_fn_in_impure_module(module: &str, func: &str) -> bool {
                 | "add_hours"
                 | "add_minutes"
                 | "add_seconds"
-                | "diff_seconds"
-                | "from_unix"
-                | "to_unix"
                 | "hour"
                 | "minute"
                 | "second"
-                | "is_before"
-                | "is_after"
                 | "year"
                 | "month"
                 | "day"

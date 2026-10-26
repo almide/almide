@@ -366,12 +366,12 @@ fn lower_expr_unary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
                 if let Some(target) = requirement_call_target(ctx, &operand_ty, crate::canonicalize::protocols::NEG_REQUIREMENT) {
                     return ctx.mk(IrExprKind::Call { target, args: vec![o], type_args: vec![] }, ty, span);
                 }
-                // The checker admits `-m` on a Matrix; it is `matrix.neg(m)`,
+                // The checker admits `-m` on a Matrix; it is `matrix.__neg(m)`,
                 // as `a - b` is the matrix subtraction (#3965). There is no
                 // matrix `UnOp`, and `NegInt` on a Matrix is an IR verify ICE.
                 if operand_ty == Ty::Matrix {
-                    let def_id = ctx.def_map.get(&sym("matrix.neg")).copied();
-                    let target = CallTarget::Module { module: sym("matrix"), func: sym("neg"), def_id };
+                    let def_id = ctx.def_map.get(&sym("matrix.__neg")).copied();
+                    let target = CallTarget::Module { module: sym("matrix"), func: sym("__neg"), def_id };
                     return ctx.mk(IrExprKind::Call { target, args: vec![o], type_args: vec![] }, Ty::Matrix, span);
                 }
             }
@@ -466,6 +466,15 @@ fn lower_expr_binary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             }
             if let Some(out) = lower_requirement_operator(ctx, op.as_str(), left_ty, (l.clone(), r.clone()), ty.clone(), span) {
                 return out;
+            }
+            // `Bytes + Bytes` is concatenation (R-bytes-16): the stdlib's
+            // internal `bytes.__concat`, an ordinary module call every leg
+            // serves (native via its @intrinsic, wasm via the self-host row,
+            // the interp via the registry). There is no Bytes `BinOp`.
+            if op == "+" && *left_ty == Ty::Bytes && *right_ty == Ty::Bytes {
+                let def_id = ctx.def_map.get(&sym("bytes.__concat")).copied();
+                let target = CallTarget::Module { module: sym("bytes"), func: sym("__concat"), def_id };
+                return ctx.mk(IrExprKind::Call { target, args: vec![l, r], type_args: vec![] }, Ty::Bytes, span);
             }
             let bin_op = binop_for(op.as_str(), left_ty, right_ty);
             ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span)

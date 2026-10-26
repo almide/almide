@@ -20,7 +20,7 @@ This crate adds a third, independent judge. It evaluates the IR at the cut point
 - `eval.rs` — the tree-walker for every eval-able IR node, fuel accounting, the pattern engine (incl. list patterns, which survive past the cut point), and record-repr nominal-name recovery.
 - `dispatch.rs` — `Call` routing (`Named` / `Module` / `Method` / `Computed`), the variant-ctor registry, and the **HOF allowlist** (`is_hof`).
 - `hofs.rs` — the in-interp HOFs (map/filter/fold/…) and the interp-native container ops, plus the in-place-mutation predicate.
-- `inplace.rs` — the `mut`-receiver mutators (`list.push`, `map.insert`, …), modeled as read → transform → write-back on the receiver's binding. `Rc::make_mut` on the binding's own storage slot IS the COW rule: sole owner mutates in place (a push loop stays linear), an alias forces the copy (C-033).
+- `inplace.rs` — the `mut`-receiver mutators (`list.push`, `set.insert`, …), modeled as read → transform → write-back on the receiver's binding. `Rc::make_mut` on the binding's own storage slot IS the COW rule: sole owner mutates in place (a push loop stays linear), an alias forces the copy (C-033).
 - `bridge.rs` — the `prim.*` scalar floor, the scalar/string arms a self-hosted body consumes as its floor INSIDE the pool tier, and the two boundary fallbacks (the sized-numeric `to_string` observers, `bytes.zeros`) — every arm one the corpus reaches, gated by the fallback ledger.
 - `stdlib_pool.rs` — the self-hosted stdlib bodies (the SAME sources the wasm leg links), lowered once; below the container tier they are the vote (#2185).
 

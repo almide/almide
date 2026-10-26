@@ -76,7 +76,7 @@ fn desugar_matrix_binops(body: &IrExpr) -> Option<IrExpr> {
             IrExpr {
                 span: k.span,
                 kind: IrExprKind::Call {
-                    target: CallTarget::Module { module: sym("int"), func: sym("to_float"), def_id: None },
+                    target: CallTarget::Module { module: sym("int"), func: sym("__raw_to_float"), def_id: None },
                     args: vec![k],
                     type_args: Vec::new(),
                 },
@@ -101,13 +101,13 @@ fn desugar_matrix_binops(body: &IrExpr) -> Option<IrExpr> {
     // BinOp verbatim). Pure name lookup, split out of `matrix_binop_rewrite` (cc).
     fn matrix_binop_func_name(op: &almide_ir::BinOp) -> Option<&'static str> {
         Some(match op {
-            almide_ir::BinOp::MulMatrix => "mul",
-            almide_ir::BinOp::AddMatrix => "add",
-            almide_ir::BinOp::SubMatrix => "sub",
-            almide_ir::BinOp::AddInt | almide_ir::BinOp::AddFloat => "add",
-            almide_ir::BinOp::SubInt | almide_ir::BinOp::SubFloat => "sub",
-            almide_ir::BinOp::DivInt | almide_ir::BinOp::DivFloat => "div",
-            almide_ir::BinOp::MulInt | almide_ir::BinOp::MulFloat => "mul",
+            almide_ir::BinOp::MulMatrix => "__mul",
+            almide_ir::BinOp::AddMatrix => "__add",
+            almide_ir::BinOp::SubMatrix => "__sub",
+            almide_ir::BinOp::AddInt | almide_ir::BinOp::AddFloat => "__add",
+            almide_ir::BinOp::SubInt | almide_ir::BinOp::SubFloat => "__sub",
+            almide_ir::BinOp::DivInt | almide_ir::BinOp::DivFloat => "__div",
+            almide_ir::BinOp::MulInt | almide_ir::BinOp::MulFloat => "__mul",
             _ => return None,
         })
     }
@@ -124,11 +124,40 @@ fn desugar_matrix_binops(body: &IrExpr) -> Option<IrExpr> {
             return None;
         }
         let func = matrix_binop_func_name(op)?;
+        let (func, args) = fused_fma(func, left, right).unwrap_or((func, vec![left.clone(), right.clone()]));
         Some(IrExprKind::Call {
             target: CallTarget::Module { module: sym("matrix"), func: sym(func), def_id: None },
-            args: vec![left.clone(), right.clone()],
+            args,
             type_args: Vec::new(),
         })
+    }
+
+    /// The args of a `matrix.<func>(..)` call of `arity` operands.
+    fn matrix_call_args<'a>(e: &'a IrExpr, func: &str, arity: usize) -> Option<&'a [IrExpr]> {
+        match &e.kind {
+            IrExprKind::Call { target: CallTarget::Module { module, func: f, .. }, args, .. }
+                if module.as_str() == "matrix" && f.as_str() == func && args.len() == arity =>
+            {
+                Some(args)
+            }
+            _ => None,
+        }
+    }
+
+    // R-matrix-03: `scale(a, ka) + scale(b, kb)` is `__fma(a, ka, b, kb)` and
+    // `__fma(..) + scale(c, kc)` is `__fma3(..)` — the same per-cell products and
+    // left-to-right sum over the operands' overlap, operands in written order, one
+    // pass instead of a whole-operand `scale` copy each (#3644). The visitor is
+    // post-order, so a three-term sum arrives as `__fma(..) + scale(..)`.
+    fn fused_fma(func: &'static str, a: &IrExpr, b: &IrExpr) -> Option<(&'static str, Vec<IrExpr>)> {
+        if func != "__add" {
+            return None;
+        }
+        let rhs = matrix_call_args(b, "scale", 2)?;
+        let (fused, lhs) = matrix_call_args(a, "scale", 2)
+            .map(|l| ("__fma", l))
+            .or_else(|| matrix_call_args(a, "__fma", 4).map(|l| ("__fma3", l)))?;
+        Some((fused, lhs.iter().chain(rhs).cloned().collect()))
     }
 
     struct S {
@@ -151,7 +180,7 @@ fn desugar_matrix_binops(body: &IrExpr) -> Option<IrExpr> {
 }
 
 /// `buf[i] = v` over `Bytes` — the WRITE-side twin of `desugar_bytes_index_calls` —
-/// → `{ let i' = i; let v' = v; bytes.index(buf, i'); bytes.set_at(buf, i', v') }`:
+/// → `{ let i' = i; let v' = v; bytes.index(buf, i'); bytes.__set_u8(buf, i', v') }`:
 /// the checked read aborts out of range (#2893), then the packed-byte store self-host
 /// (whose receiver rides the #794 COW discipline: local var → MakeUnique, mut param
 /// → write-through). Without this rewrite `IndexAssign` lowers as a uniform 8-byte
@@ -180,13 +209,13 @@ fn desugar_bytes_index_assign(body: &IrExpr, params: &[IrParam]) -> Option<IrExp
             if !self.bytes_vars.contains(target) {
                 return;
             }
-            // #2893: `set_at` is C-229's TOTAL store (an out-of-range write is a
+            // #2893: `__set_u8` is C-229's TOTAL store (an out-of-range write is a
             // no-op), but the index syntax is C-067's CHECKED form — native's
             // `almide_index_set!` aborts `Error: index out of bounds`, exit 1.
             // So the index and the value are bound first (index, then value:
             // the list store's order), the checked read `bytes.index` judges the
             // bound index — it aborts exactly as the read syntax does — and only
-            // then does `set_at` store, always in range.
+            // then does `__set_u8` store, always in range.
             let span = index.span;
             let seed = crate::lower::desugar_var_seed();
             let (ti, tv, tc) = (VarId(seed), VarId(seed + 1), VarId(seed + 2));
@@ -213,7 +242,7 @@ fn desugar_bytes_index_assign(body: &IrExpr, params: &[IrParam]) -> Option<IrExp
             };
             let check = bytes_call("index", vec![recv(), at(IrExprKind::Var { id: ti })], Ty::Int);
             let store = bytes_call(
-                "set_at",
+                "__set_u8",
                 vec![recv(), at(IrExprKind::Var { id: ti }), at(IrExprKind::Var { id: tv })],
                 Ty::Unit,
             );

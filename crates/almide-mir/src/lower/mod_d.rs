@@ -28,13 +28,7 @@ pub fn identity_int_widening_call(e: &IrExpr) -> Option<&IrExpr> {
 /// producers that hold an UNPACKED Module call (`lower_pure_module_value_call`)
 /// — one predicate, so the elision and the caps counter cannot drift apart.
 pub fn is_identity_int_widening(module: &str, func: &str, args: &[IrExpr]) -> bool {
-    if args.len() != 1 || func != "to_int64" {
-        return false;
-    }
-    if !matches!(
-        module,
-        "int" | "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64"
-    ) {
+    if args.len() != 1 || module != "int" || func != "__to_int64" {
         return false;
     }
     matches!(
@@ -51,7 +45,7 @@ pub fn is_identity_int_widening(module: &str, func: &str, args: &[IrExpr]) -> bo
     )
 }
 
-/// A `float.from_int(x)` call over an `Int` — the sitofp floor (#806 step 2):
+/// A `float.__from_int(x)` call over an `Int` — the sitofp floor (#806 step 2):
 /// the lowering emits ONE `PrimKind::F64FromInt` (a `f64.convert_i64_s` in the
 /// render, `as f64` natively) instead of the self-host runtime CALL, and
 /// `count_ir_calls` skips the node by this SAME predicate (`mir == ir` by
@@ -71,7 +65,7 @@ pub fn float_from_int_prim_call(e: &IrExpr) -> Option<&IrExpr> {
 /// The (module, func, args) core of [`float_from_int_prim_call`] — same
 /// single-predicate discipline as [`is_identity_int_widening`].
 pub fn is_float_from_int_prim(module: &str, func: &str, args: &[IrExpr]) -> bool {
-    module == "float" && func == "from_int" && args.len() == 1 && matches!(args[0].ty, Ty::Int)
+    module == "float" && func == "__from_int" && args.len() == 1 && matches!(args[0].ty, Ty::Int)
 }
 
 /// The `@extern(wasm, module, name)` attribute on a function, iff present (the
@@ -358,7 +352,7 @@ pub(crate) fn canonical_record_key<'a>(layouts: &'a RecordLayouts, name: &str) -
     found
 }
 
-/// The bare spelling of a STDLIB-OWNED type name (`Value`, `Endian`, `Url`, …)
+/// The bare spelling of a STDLIB-OWNED type name (`Value`, `IpAddr`, `Url`, …)
 /// is that stdlib type's own canonical identity — the `Ty::Named("Value")`
 /// every linked registry body carries — and a user scope's declaration of the
 /// same name (`self.Value`, `m.Value`; #1828) is a different type that merely
@@ -366,7 +360,7 @@ pub(crate) fn canonical_record_key<'a>(layouts: &'a RecordLayouts, name: &str) -
 /// it did, and `json.parse`'s `List[Value]` accumulator lowered against the
 /// user's `{ n: Int }` layout — its drops walked an Int as a handle, and the
 /// incumbent leg of `stdlib_type_shadow.almd` never terminated. A BUNDLED
-/// module's own qualified key (`bytes.Endian`) is still reachable by its bare
+/// module's own qualified key (`net.IpAddr`) is still reachable by its bare
 /// name, exactly as before.
 fn bare_is_stdlib_own_identity(bare: &str, qualified: &str) -> bool {
     almide_lang::stdlib_info::stdlib_type_vs_user_shadow(bare, qualified)

@@ -1,7 +1,7 @@
-// `m[k] = e(map.get_or(m, k, d))` as ONE keyed operation (the word-count
-// update). Spelled literally it is a lookup (`get_or`) followed by an insert
+// `m[k] = e(map.get(m, k) ?? d)` as ONE keyed operation (the word-count
+// update). Spelled literally it is a lookup (`get ?? d`) followed by an insert
 // that looks the same key up again — two hashes, two probes, two key
-// compares per update. When `e` is plain arithmetic over the one `get_or`
+// compares per update. When `e` is plain arithmetic over the one `get ?? d`
 // read, the statement is rendered through the `map_upsert` template
 // (`AlmideMap::upsert_with`): one probe finds the slot, `e` runs on its
 // current value (or on `d` when the key is absent, which then appends), and
@@ -9,7 +9,7 @@
 //
 // Equivalence with the two-step form: `e` may only contain literals, plain
 // variables other than `m` and `k`, unary/binary operators, and the single
-// `get_or(m, k, d)` read (whose `d` obeys the same rule). Nothing in it can
+// `map.get(m, k) ?? d` read (whose `d` obeys the same rule). Nothing in it can
 // observe or change `m`, so running it before or after the probe cannot be
 // told apart; an operator that aborts (`/ 0`) ends the process either way.
 // The key is a plain variable — moved in, exactly as the insert moved it.
@@ -74,17 +74,22 @@ fn reads_var(e: &IrExpr, id: VarId) -> bool {
     }
 }
 
-/// `value` with its one `get_or(target, key, d)` replaced by the closure
+/// `value` with its one `map.get(target, key) ?? d` replaced by the closure
 /// parameter; `d` is moved out into `default`. `None` when `value` is not
 /// the admitted shape (see the header).
 fn upsert_body(value: &IrExpr, target: VarId, key: VarId, default: &mut Option<IrExpr>) -> Option<IrExpr> {
     let kind = match &value.kind {
-        IrExprKind::RuntimeCall { symbol, args } if symbol.as_str() == "almide_rt_map_get_or" => {
-            let [m, k, d] = args.as_slice() else { return None };
-            if default.is_some() || !reads_var(m, target) || !reads_var(k, key) {
+        IrExprKind::UnwrapOr { expr: inner, fallback } => {
+            let IrExprKind::RuntimeCall { symbol, args } = &inner.kind else { return None };
+            let [m, k] = args.as_slice() else { return None };
+            if symbol.as_str() != "almide_rt_map_get"
+                || default.is_some()
+                || !reads_var(m, target)
+                || !reads_var(k, key)
+            {
                 return None;
             }
-            *default = Some(upsert_operand(d, target, key)?);
+            *default = Some(upsert_operand(fallback, target, key)?);
             IrExprKind::InlineRust { template: UPSERT_OLD.to_string(), args: Vec::new() }
         }
         IrExprKind::BinOp { op, left, right } => IrExprKind::BinOp {

@@ -143,6 +143,35 @@ fn is_matrix(t: &Ty) -> bool {
     matches!(t, Ty::Matrix) || matches!(t, Ty::Applied(TypeConstructorId::Matrix, _))
 }
 
+/// The args of a `matrix.<func>(..)` call of `arity` operands.
+fn matrix_call_args<'a>(e: &'a IrExpr, func: &str, arity: usize) -> Option<&'a [IrExpr]> {
+    match &e.kind {
+        IrExprKind::Call { target: CallTarget::Module { module, func: f, .. }, args, .. }
+            if module.as_str() == "matrix" && f.as_str() == func && args.len() == arity =>
+        {
+            Some(args)
+        }
+        _ => None,
+    }
+}
+
+/// R-matrix-03: `scale(a, ka) + scale(b, kb)` is `__fma(a, ka, b, kb)` and
+/// `__fma(..) + scale(c, kc)` is `__fma3(..)` — the same per-cell products and
+/// left-to-right sum over the operands' overlap, with the operands evaluated in
+/// the order they were written, but one pass over the overlap instead of a
+/// whole-operand `scale` copy each (#3644). Children are rewritten first, so a
+/// three-term sum arrives as `__fma(..) + scale(..)`.
+fn fused_fma(func: &str, a: &IrExpr, b: &IrExpr) -> Option<IrExprKind> {
+    if func != "__add" {
+        return None;
+    }
+    let rhs = matrix_call_args(b, "scale", 2)?;
+    let (fused, lhs) = matrix_call_args(a, "scale", 2)
+        .map(|l| ("__fma", l))
+        .or_else(|| matrix_call_args(a, "__fma", 4).map(|l| ("__fma3", l)))?;
+    Some(module_call("matrix", fused, lhs.iter().chain(rhs).cloned().collect()))
+}
+
 fn module_call(module: &str, func: &str, args: Vec<IrExpr>) -> IrExprKind {
     IrExprKind::Call {
         target: CallTarget::Module { module: sym(module), func: sym(func), def_id: None },
@@ -171,10 +200,10 @@ impl Rewriter<'_> {
         let func = match op {
             B::ScaleMatrix => "scale",
             _ if !(is_matrix(&left.ty) && is_matrix(&right.ty)) => return,
-            B::MulMatrix | B::MulInt | B::MulFloat => "mul",
-            B::AddMatrix | B::AddInt | B::AddFloat => "add",
-            B::SubMatrix | B::SubInt | B::SubFloat => "sub",
-            B::DivInt | B::DivFloat => "div",
+            B::MulMatrix | B::MulInt | B::MulFloat => "__mul",
+            B::AddMatrix | B::AddInt | B::AddFloat => "__add",
+            B::SubMatrix | B::SubInt | B::SubFloat => "__sub",
+            B::DivInt | B::DivFloat => "__div",
             _ => return,
         };
         let (mut a, mut b) = (std::mem::take(&mut **left), std::mem::take(&mut **right));
@@ -183,9 +212,9 @@ impl Rewriter<'_> {
         }
         if func == "scale" && b.ty == Ty::Int {
             let span = b.span;
-            b = IrExpr { kind: module_call("int", "to_float", vec![b]), ty: Ty::Float, span, def_id: None };
+            b = IrExpr { kind: module_call("int", "__raw_to_float", vec![b]), ty: Ty::Float, span, def_id: None };
         }
-        e.kind = module_call("matrix", func, vec![a, b]);
+        e.kind = fused_fma(func, &a, &b).unwrap_or_else(|| module_call("matrix", func, vec![a, b]));
         *self.changed = true;
     }
 

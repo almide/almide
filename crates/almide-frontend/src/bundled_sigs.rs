@@ -287,7 +287,7 @@ pub fn register_bundled_types(module: &str, env: &mut crate::types::TypeEnv) {
 }
 
 /// #1839: the bundled module that DECLARES the nominal type `name` (bare
-/// spelling — `Endian` → `bytes`, `FileStat` → `fs`), `None` for every other
+/// spelling — `IpAddr` → `net`, `FileStat` → `fs`), `None` for every other
 /// name. Enumerated from the bundled sources themselves, so a new `type` in
 /// any bundled module joins `ir_link`'s type-owner pull with no table to
 /// maintain; `bundled_type_decls_are_unique_by_name` (tests/) pins that no

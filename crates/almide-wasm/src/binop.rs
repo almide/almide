@@ -318,7 +318,7 @@ impl Emitter<'_> {
     /// `**` on floats IS the vendored libm pow (the interp's PowFloat →
     /// almide_rt_libm_pow) — one table, bit parity.
     fn lower_pow_float(&mut self, left: &IrExpr, right: &IrExpr) -> Result<SliceTy, EmitError> {
-        self.lower_float_call("math.fpow", "PowFloat", left, right)
+        self.lower_float_call("math.__fpow", "PowFloat", left, right)
     }
 
     /// A float binop that IS a linked self-host fn of (Float, Float) -> Float:

@@ -862,13 +862,13 @@ impl Checker {
         self.emit(err(
             format!(
                 "operator '{}' mixes sized numeric type {} with a canonical {} value — \
-                 explicit conversion required (e.g. `.to_{}()`)",
+                 explicit conversion required (e.g. `{}.from(x)`)",
                 op,
                 sized.display(),
                 canon_ty.display(),
                 sized.display().to_lowercase()
             ),
-            "Convert one side with `.to_intN()` / `.to_floatN()` before the op. A literal \
+            "Convert one side with `<type>.from(x)` (`int32.from(x)`, `float64.from(x)`) before the op. A literal \
              adopts the sized width automatically; a VALUE does not.",
             format!("operator {}", op),
         ));
@@ -910,13 +910,13 @@ impl Checker {
             self.emit(err(
                 format!(
                     "{} mixes sized numeric type {} with a canonical {} value — \
-                     explicit conversion required (e.g. `.to_{}()`)",
+                     explicit conversion required (e.g. `{}.from(x)`)",
                     context,
                     sized.display(),
                     t.display(),
                     sized.display().to_lowercase()
                 ),
-                "Convert the value with `.to_intN()` / `.to_floatN()` so every peer has \
+                "Convert the value with `<type>.from(x)` (`int32.from(x)`, `float64.from(x)`) so every peer has \
                  the same width. A literal adopts the sized width automatically; a VALUE \
                  does not.",
                 context.to_string(),
@@ -1292,13 +1292,13 @@ impl Checker {
         //   - a BARE protocol name in a generic bound or a conformance list
         //     (`[S: Store]`, `type Mem: Store`), through the protocol's origin;
         //   - a BARE stdlib-owned type name in a type position or at a record
-        //     head (`e: Endian`, `List[FileStat]`, `FileStat { .. }`), through
+        //     head (`a: IpAddr`, `List[FileStat]`, `FileStat { .. }`), through
         //     `STDLIB_OWNED_TYPES` (#1853) — the type alone pulls the module's
         //     declaration into the IR, so the import is not unused;
-        //   - a BARE constructor of a stdlib-owned variant (`LittleEndian`),
+        //   - a BARE constructor of a stdlib-owned variant (`V4`),
         //     through the constructor table to its type, then as above.
-        // A name THIS file declares is the user's own (`type Endian` is
-        // `self.Endian`, #1837), so its bare spelling marks nothing.
+        // A name THIS file declares is the user's own (`type IpAddr` is
+        // `self.IpAddr`, #1837), so its bare spelling marks nothing.
         let owned_origin = |ty: &Sym| -> Option<Sym> {
             if spelled.declared.contains(ty) { return None; }
             almide_lang::stdlib_info::stdlib_owned_type_owner(ty.as_str()).map(sym)
@@ -1308,8 +1308,8 @@ impl Checker {
             self.env.constructors.get(ctor)?.iter().find_map(|(ty, owner, _)| {
                 let origin = almide_lang::stdlib_info::stdlib_owned_type_owner(ty.as_str())?;
                 // Only the OWNING stdlib module's own case maps: a user
-                // `type Endian` (#1837) registers its cases under the user
-                // scope, and the stdlib's `LittleEndian` spelled beside that
+                // `type IpAddr` (#1837) registers its cases under the user
+                // scope, and the stdlib's `V4` spelled beside that
                 // shadow is still the stdlib's — judged by the case's owner,
                 // not by the type name the shadow reuses.
                 owner.is_some_and(|m| m.as_str() == origin).then(|| sym(origin))
@@ -1434,7 +1434,7 @@ impl Checker {
                 | "base64" | "hex" | "hash" | "regex" | "json" | "matrix"
                 | "path" | "html" | "url" | "zlib") { continue; }
             for fn_name in crate::stdlib::module_functions_all(module) {
-                if user_name != fn_name { continue; }
+                if user_name != fn_name || fn_name.starts_with("__") { continue; }
                 let Some(sig) = crate::stdlib::lookup_sig(module, fn_name) else { continue };
                 if sig.is_effect || sig.params.len() != user_param_tys.len() { continue; }
                 if !sigs_match_structurally(&sig.params, &sig.ret, user_param_tys, user_ret) {
@@ -1523,19 +1523,19 @@ struct ImportSpellings {
     /// `h.open()`, `m.Box { .. }`, `g.Point` in any type position, `c.Red`
     /// in a pattern.
     heads: std::collections::HashSet<Sym>,
-    /// Every BARE name in a type position or at a record head (`e: Endian`,
+    /// Every BARE name in a type position or at a record head (`a: IpAddr`,
     /// `List[FileStat]`, `FileStat { .. }`). A stdlib module OWNS some of
     /// these (`STDLIB_OWNED_TYPES`), and spelling one uses that module's
     /// import (#1853). Each carries how it was spelled, which decides
     /// whether the resolver's builtin table answers it (#2839).
     bare_types: std::collections::HashSet<(Sym, TypeSpelling)>,
     /// Every BARE capitalised value or pattern spelling — a variant
-    /// constructor's (`LittleEndian`, `LittleEndian => ..`). The E060 pass
+    /// constructor's (`V4(..)`, `V4(..) => ..`). The E060 pass
     /// maps each to its declaring type through the constructor table.
     bare_ctors: std::collections::HashSet<Sym>,
     /// Every type name and variant case THIS file declares. A bare spelling
-    /// of one is the file's own declaration — a user `type Endian` shadows
-    /// the stdlib's, it never uses `import bytes` (#1837).
+    /// of one is the file's own declaration — a user `type IpAddr` shadows
+    /// the stdlib's, it never uses `import net` (#1837).
     declared: std::collections::HashSet<Sym>,
     /// Every QUALIFIED name in a type position (`v.View`, `List[m.Row]`),
     /// whole — the qualifier check (#3336) reads it.

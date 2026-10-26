@@ -115,9 +115,6 @@ fn list_call_name_accessors(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Optio
     if let Some(name) = list_call_name_partition(func, arg_tys) {
         return Some(name);
     }
-    if let Some(name) = list_call_name_get_or(func, result_ty) {
-        return Some(name);
-    }
     if let Some(name) = list_call_name_search(func, arg_tys) {
         return Some(name);
     }
@@ -250,27 +247,6 @@ fn list_call_name_partition(func: &str, arg_tys: &[Ty]) -> Option<String> {
         return Some("list.partition_rc".to_string());
     }
     Some("list.partition_x".to_string())
-}
-
-/// Extracted from `list_call_name_accessors` (codopsy7 complexity sweep, pattern-1
-/// group 3 of 5): `get_or` returns the ELEMENT directly (not an Option). Over a List[heap] it
-/// must return an i32 handle (a deep copy), so it is keyed on the heap RESULT being the
-/// element type. Verbatim.
-fn list_call_name_get_or(func: &str, result_ty: &Ty) -> Option<String> {
-    if !(func == "get_or" && is_heap_ty(result_ty)) {
-        return None;
-    }
-    // A Value element SHARES (the _str deep copy corrupts a Value block —
-    // json_gltf_walk's `list.get_or(meshes, 0, json.null())` returned "?").
-    if is_value_ty(result_ty) {
-        return Some("list.get_or_value".to_string());
-    }
-    if matches!(result_ty, Ty::String) {
-        return Some("list.get_or_str".to_string());
-    }
-    // No handle-sharing self-host for other heap elements yet — an
-    // UNREGISTERED name walls cleanly (the fold_hacc precedent).
-    Some("list.get_or_hshare".to_string())
 }
 
 /// Extracted from `list_call_name_accessors` (codopsy7 complexity sweep, pattern-1

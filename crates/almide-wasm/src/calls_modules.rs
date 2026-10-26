@@ -138,7 +138,7 @@ impl Emitter<'_> {
             // i64 → f64 is one wasm op; f64.convert_i64_s IS Rust's
             // `as f64` (IEEE round-to-nearest-even), bit-exact.
             CallTarget::Module { module, func, .. }
-                if module.as_str() == "int" && func.as_str() == "to_float" && args.len() == 1 =>
+                if module.as_str() == "int" && func.as_str() == "__raw_to_float" && args.len() == 1 =>
             {
                 self.lower_arg(&args[0], Some(INT), ArgMode::Borrow)?;
                 self.f.instructions().f64_convert_i64_s();
@@ -168,72 +168,6 @@ impl Emitter<'_> {
                 self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
                 self.emit_value_stringify_pretty()?;
                 Ok(Some(Lowered::owned(STR)))
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "json"
-                    && func.as_str() == "set_path"
-                    && args.len() == 3 =>
-            {
-                // #2010 item 5: `$jp_set` BORROWS the document and the new
-                // value and takes its own credit on every block it shares.
-                let vdec = self.dec_fn_of(SliceTy::Value);
-                let h = self.work.helper(crate::work::Helper::JsonPathSet { vdec });
-                let deep = self.work.helper(crate::work::Helper::JsonNestsPast);
-                let (hj, hp, hn) = (self.hold_i32()?, self.hold_i32()?, self.hold_i32()?);
-                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
-                self.f.instructions().local_set(hj);
-                self.lower_arg(&args[1], None, ArgMode::Borrow)?;
-                self.f.instructions().local_set(hp);
-                self.lower_arg(&args[2], Some(SliceTy::Value), ArgMode::Borrow)?;
-                self.f.instructions().local_set(hn);
-                // #4209: the value built nests the path's steps plus the new
-                // value's own nesting deep; past parse's bound it is
-                // `err(json_depth_error())` — one declaration, every leg.
-                let max = almide_base::json_limits::JSON_MAX_DEPTH as i32;
-                let msg = self.pool.intern(&almide_base::json_limits::json_depth_error());
-                let (tag, field) = (slot_memarg(almide_layout::SUM_TAG), slot_memarg(almide_layout::SUM_FIELD));
-                let scr = self.scr_i32_local;
-                let mut i = self.f.instructions();
-                // steps = the path list's slot count
-                i.local_get(hp).i32_load(len_memarg()).i32_const(2).i32_shr_u().local_tee(scr);
-                i.i32_const(max).i32_gt_u().if_(BlockType::Result(ValType::I32));
-                i.i32_const(1);
-                i.else_();
-                i.local_get(hn).i32_const(max).local_get(scr).i32_sub().call(deep);
-                i.end();
-                i.if_(BlockType::Result(ValType::I32));
-                i.i32_const(16).call(F_ALLOC).local_tee(scr).i32_const(1).i32_store(tag);
-                i.local_get(scr).i32_const(msg as i32).i32_store(field);
-                i.local_get(scr);
-                i.else_();
-                i.local_get(hj).local_get(hp).i32_const(0).local_get(hn).call(h).local_set(hj);
-                i.i32_const(16).call(F_ALLOC).local_tee(scr).i32_const(0).i32_store(tag);
-                i.local_get(scr).local_get(hj).i32_store(field);
-                i.local_get(scr);
-                i.end();
-                let _ = i;
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                let vh = self.types.intern(SliceTy::Value);
-                Ok(Some(Lowered::owned(SliceTy::Result(vh, self.types.intern(STR)))))
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "json" && func.as_str() == "to_map" && args.len() == 1 =>
-            {
-                self.lower_json_to_map(&args[0])
-            }
-            CallTarget::Module { module, func, .. }
-                if module.as_str() == "json"
-                    && func.as_str() == "remove_path"
-                    && args.len() == 2 =>
-            {
-                let h = self.work.helper(crate::work::Helper::JsonPathRemove);
-                self.lower_arg(&args[0], Some(SliceTy::Value), ArgMode::Borrow)?;
-                self.lower_arg(&args[1], None, ArgMode::Borrow)?;
-                self.f.instructions().i32_const(0);
-                self.f.instructions().call(h);
-                Ok(Some(Lowered::owned(SliceTy::Value)))
             }
             _ => self.lower_module_call_b(target, args, tail, ret_hint),
         }
@@ -390,14 +324,6 @@ impl Emitter<'_> {
                 // self-host registry serves the pure fns (url_decode, the
                 // response constructors) exactly as before the port.
                 self.lower_module_call_c(target, args, tail, ret_hint)
-            }
-            // #1423 stage 4: the error trio — semantics verbatim from
-            // runtime/rs/src/error.rs.
-            CallTarget::Module { module, func, .. } if module.as_str() == "error" => {
-                if let Some(out) = self.lower_error_call(func.as_str(), args)? {
-                    return Ok(out);
-                }
-                unsup(&format!("call:error.{func}"))
             }
             CallTarget::Module { module, func, .. } if module.as_str() == "value" => {
                 if let Some(out) = self.lower_value_call(func.as_str(), args)? {

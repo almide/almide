@@ -72,7 +72,6 @@ const MODULE_DESCRIPTIONS: &[(&str, &str)] = &[
     ("io", "input/output"),
     ("result", "Result type utilities"),
     ("option", "Option type utilities"),
-    ("error", "error handling"),
     ("datetime", "date and time operations"),
     ("testing", "test assertion utilities"),
     ("value", "dynamic value operations"),
@@ -227,15 +226,14 @@ const ALIASES: &[(&str, &str, &str)] = &[
     ("list", "empty", "[] (empty list literal)"),
     ("list", "new", "[] (empty list literal)"),
     ("list", "head", "list.first"),
-    ("list", "tail", "list.drop(xs, 1)"),
     ("map", "new", "[:] (empty map literal)"),
     ("map", "empty", "[:] (empty map literal)"),
     ("map", "has_key", "map.contains"),
     ("map", "has", "map.contains"),
     ("map", "includes", "map.contains"),
-    // Almide has only `float.sqrt`. Most LLMs reach for `int.sqrt(n)` in
-    // is-prime / perfect-square style tasks.
-    ("int", "sqrt", "float.sqrt(int.to_float(n))"),
+    // Almide has only `math.sqrt` (Float). Most LLMs reach for `int.sqrt(n)`
+    // in is-prime / perfect-square style tasks.
+    ("int", "sqrt", "math.sqrt(float.from(n))"),
 ];
 
 /// Suggest the correct stdlib function for a commonly hallucinated name.
@@ -286,11 +284,11 @@ pub fn comparison_operator_of(module: &str, func: &str) -> Option<&'static str> 
 pub fn try_snippet_for_alias(module: &str, func: &str) -> Option<&'static str> {
     if (module, func) == ("int", "sqrt") {
         return Some(
-            "// Almide has float.sqrt; int.sqrt doesn't exist.\n\
+            "// Almide has math.sqrt; int.sqrt doesn't exist.\n\
              // Convert → sqrt → (optionally) convert back:\n\
-             let root_f = float.sqrt(int.to_float(n))       // Float\n\
-             let root_i = float.to_int(root_f)              // Int (truncates)\n\
-             // — or inline: float.to_int(float.sqrt(int.to_float(n)))"
+             let root_f = math.sqrt(float.from(n))          // Float\n\
+             let root_i = int.from_saturating(root_f)       // Int (truncates)\n\
+             // — or inline: int.from_saturating(math.sqrt(float.from(n)))"
         );
     }
     if comparison_operator_of(module, func).is_some() {
@@ -338,12 +336,15 @@ pub fn module_functions_all(module: &str) -> Vec<&'static str> {
     module_functions(module)
 }
 
-/// The module's surface minus its `@deprecated` fns: what a suggestion may
-/// name. A "did you mean" that steers a writer onto a deprecated spelling
-/// (`list.lengt` → `list.length`, #3085) hands them the next warning.
+/// The module's surface minus its `@deprecated` fns and its `__` internal
+/// carriers: what a suggestion may name. A "did you mean" that steers a
+/// writer onto a deprecated spelling (`list.lengt` → `list.length`, #3085)
+/// hands them the next warning; one onto `int.__to_uint16` names a fn the
+/// writer is not meant to call.
 pub fn module_functions_current(module: &str) -> Vec<&'static str> {
     module_functions(module)
         .into_iter()
+        .filter(|f| !f.starts_with("__"))
         .filter(|f| crate::bundled_sigs::lookup_deprecation(module, f).is_none())
         .collect()
 }

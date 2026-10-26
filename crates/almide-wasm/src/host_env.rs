@@ -9,7 +9,7 @@ use wasm_encoder::BlockType;
 
 use crate::emitter::Emitter;
 use crate::fs_meta::{
-    OP_ARGS, OP_CWD, OP_ENV_GET, OP_ENV_OS, OP_ENV_VARS, OP_STDIN_TAKE, OP_STDOUT_RAW, OP_TEMP_DIR,
+    OP_ARGS, OP_CWD, OP_ENV_GET, OP_ENV_OS, OP_ENV_VARS, OP_STDIN_TAKE, OP_STDOUT_RAW,
 };
 use crate::*;
 
@@ -22,9 +22,8 @@ impl Emitter<'_> {
         args: &[IrExpr],
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (module, func, args) {
-            // Option[String]: status 2 = unset → none. `process.env` is the
-            // same read under the process module's name (#2589).
-            ("env", "get", [name]) | ("process", "env", [name]) => {
+            // Option[String]: status 2 = unset → none.
+            ("env", "get", [name]) => {
                 self.fs_call_1(name, OP_ENV_GET)?;
                 let hret = self.hold_i64()?;
                 let mut i = self.f.instructions();
@@ -90,7 +89,7 @@ impl Emitter<'_> {
             // The framed request family (#1710 increment 3): the spliced
             // http_framed leaves — url in a, the (method, body, headers)
             // frame in b. 49's status answer is a `<code>\n<body>` string
-            // the guest splits; 50 is the raw-bytes carrier.
+            // the guest splits.
             ("http", "__http_framed_text", [u, f]) => {
                 self.fs_call_str2(u, f, crate::fs_meta::OP_HTTP_FRAMED_TEXT)?;
                 Some(Lowered::owned(self.fs_result_string()?))
@@ -98,10 +97,6 @@ impl Emitter<'_> {
             ("http", "__http_framed_status", [u, f]) => {
                 self.fs_call_str2(u, f, crate::fs_meta::OP_HTTP_FRAMED_STATUS)?;
                 Some(Lowered::owned(self.fs_result_string()?))
-            }
-            ("http", "__http_framed_bytes", [u, f]) => {
-                self.fs_call_str2(u, f, crate::fs_meta::OP_HTTP_FRAMED_BYTES)?;
-                Some(Lowered::owned(self.fs_result_bytes()?))
             }
             // `env.vars`' leaf (#3908): the `name=value` frames, every one
             // kept (no argv0 to skip).
@@ -120,19 +115,13 @@ impl Emitter<'_> {
                 self.fs_call_0(OP_CWD)?;
                 Some(Lowered::owned(self.fs_result_string()?))
             }
-            ("env", "temp_dir", []) => {
-                self.fs_call_0(OP_TEMP_DIR)?;
-                self.fs_take_text()?;
-                Some(Lowered::owned(STR))
-            }
-            ("env" | "process", "args", []) => {
+            ("env", "args", []) => {
                 // Frames arrive [argv0, args...] on every host (#1716):
                 // the embedded host names itself, a stock p1 runtime
                 // passes the module path. env.args is native argv[1..]
-                // (the FIRST frame drops — its fresh block frees);
-                // process.args is the FULL argv (C-096, argv0 kept).
+                // (the FIRST frame drops — its fresh block frees).
                 self.fs_call_0(OP_ARGS)?;
-                Some(Lowered::owned(self.frames_to_string_list(module == "env")?))
+                Some(Lowered::owned(self.frames_to_string_list(true)?))
             }
             // stdin read-to-end (#1598's io half): chunks off the shared
             // cursor, appended into the owned-string accumulator (#2116 —
@@ -151,15 +140,10 @@ impl Emitter<'_> {
             // `unwrap_or_default`), truncated to the unit native's
             // `as_secs` / `as_millis` truncate to. A bare Int, like
             // io.read_byte: never-err, so the frontend absorbs a `!`.
-            ("env", "unix_timestamp", []) | ("datetime", "now", []) => {
+            ("datetime", "now", []) => {
                 self.wall_now_div(1_000_000_000);
                 Some(Lowered::scalar(INT))
             }
-            ("env", "millis", []) => {
-                self.wall_now_div(1_000_000);
-                Some(Lowered::scalar(INT))
-            }
-            // datetime.now_ms is env.millis's read under the datetime name.
             ("datetime", "now_ms", []) => {
                 self.wall_now_div(1_000_000);
                 Some(Lowered::scalar(INT))
@@ -238,12 +222,6 @@ impl Emitter<'_> {
                 let uh = self.types.intern(SliceTy::Unit);
                 let sh = self.types.intern(STR);
                 Some(Lowered::owned(SliceTy::Result(uh, sh)))
-            }
-            // `process.sleep` is a plain fn returning Unit (no carrier): the
-            // same host sleep, nothing on the stack (#2589).
-            ("process", "sleep", [ms]) => {
-                self.sleep_ms(ms)?;
-                None
             }
             // n <= 0 → empty; else up to n stdin bytes (harness: none), the
             // staged block itself being the Bytes answer (`io.read(io.stdin(), n)`).

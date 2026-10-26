@@ -711,7 +711,7 @@ fn opt_field_dec_worker(wk: &mut CodecWk, inner: &Ty, value_ty: &Ty) -> String {
         }, res_ty.clone())),
     }, res_ty.clone());
     let body = e_(IrExprKind::Match {
-        subject: Box::new(call_mod_("value", "field", vec![
+        subject: Box::new(call_mod_("value", "__field", vec![
             e_(IrExprKind::Var { id: v }, value_ty.clone()),
             e_(IrExprKind::Var { id: key }, Ty::String),
         ], Ty::result(value_ty.clone(), Ty::String))),
@@ -756,7 +756,7 @@ pub(super) fn decode_option_field_inline(wk: &mut CodecWk, payload: IrExpr, key:
     let fv_expr = IrExpr { kind: IrExprKind::Var { id: fv }, ty: value_ty.clone(), span: None, def_id: None };
     let field_call = IrExpr {
         kind: IrExprKind::Call {
-            target: CallTarget::Module { module: sym("value"), func: sym("field"), def_id: None },
+            target: CallTarget::Module { module: sym("value"), func: sym("__field"), def_id: None },
             args: vec![payload, IrExpr { kind: IrExprKind::LitStr { value: key.to_string() }, ty: Ty::String, span: None, def_id: None }],
             type_args: vec![],
         },

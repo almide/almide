@@ -25,14 +25,14 @@
 //! output (println/eprintln/io.print/io.write), exit codes, stdin
 //! read-to-end, entropy, the wall clock, and — through the spliced fs
 //! service (`fs_service.rs`, #2742) — the fs ops with `env.os` /
-//! `env.temp_dir` / `env.cwd`. Other ops (process, http) take the
+//! `fs.temp_dir` / `env.cwd`. Other ops (process, http) take the
 //! DEFINED refusal: a named message on stderr + exit 1 — never a silent
 //! wrong answer (the target-availability doctrine, #1423).
 //!
 //! The env/args SERVICES are reachability-gated (#1841, the #1712
 //! discipline applied to the transform): `env.get` (op 26) ships the
 //! environ pair of imports + its scan shim, `env.set` (op 37) its
-//! overlay-append shim, `env.args`/`process.args` (op 29) the args
+//! overlay-append shim, `env.args` (op 29) the args
 //! pair of imports + its frames shim — each only when the emitted op
 //! set names the op. A hello-world artifact carries none of them
 //! (two imports, five shims), and an op that never reached the module
@@ -330,7 +330,7 @@ pub struct P1Services {
     pub env_get: bool,
     /// op 37 (`env.set`): the overlay-append shim (no import).
     pub env_set: bool,
-    /// op 29 (`env.args` / `process.args`): args_sizes_get + args_get,
+    /// op 29 (`env.args`): args_sizes_get + args_get,
     /// the frames shim.
     pub args: bool,
     /// op 77 (`env.vars`, #3908): environ_sizes_get + environ_get re-framed

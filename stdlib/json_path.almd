@@ -32,7 +32,7 @@ fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Value? 
 
 // ── value.Path (#4220) ── stdlib/value.almd's root/key/index/get_path/set_path/
 // remove_path on the wasm leg, over this file's List[String] segment rep (the newtype
-// eraser publishes Named("Path") → List[String], as for JsonPath). The walks are the
+// eraser publishes Named("Path") → List[String]). The walks are the
 // json ones; the one difference is the index: value.index treats a negative i as OUT
 // OF RANGE (it never counts from the end), so a negative step is recorded as the
 // largest Int, which no array reaches — get misses, set and remove leave v as is.
@@ -40,7 +40,7 @@ fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Value? 
 fn value_path_root() -> List[String] = []
 
 @implements("value.key")
-fn value_path_key(p: List[String], name: String) -> List[String] = json_path_field(p, name)
+fn value_path_key(p: List[String], name: String) -> List[String] = p + ["f" + name]
 
 @implements("value.index")
 fn value_path_index(p: List[String], i: Int) -> List[String] =
@@ -51,12 +51,11 @@ fn value_path_index(p: List[String], i: Int) -> List[String] =
 fn value_get_path(v: Value, p: List[String]) -> Value? = json_path_get_go(v, p, 0)
 
 @implements("value.set_path")
-fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = ok(json_path_set_go(
-  v,
-  p,
-  0,
-  x,
-))
+fn value_set_path(v: Value, p: List[String], x: Value) -> Result[Value, String] = {
+  let steps = list.len(p)
+  if steps > __jpath_max_depth() or __json_nests_past(x, __jpath_max_depth() - steps) then err(__jpath_depth_error())
+  else ok(json_path_set_go(v, p, 0, x))
+}
 
 @implements("value.remove_path")
 fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p, 0)
@@ -231,27 +230,3 @@ fn __jpr_items(j: Value, path: List[String], k: Int, tgt: Int, last: Bool, i: In
       }
     } else __jpr_items(j, path, k, tgt, last, i + 1, n, acc + [ev])
   }
-
-// ── json.to_map ── SELF-HOSTED `json.to_map(j)` (#3700, C-380): an object's fields
-fn __tomap_fold(v: Value, i: Int, n: Int, acc: Map[String, String]) -> Map[String, String] =
-  if i >= n then acc
-  else {
-    let h = prim.handle(v)
-    let k: String = prim.load_handle(h + 12 + (2 * i) * 8)
-    let x: Value = prim.load_handle(h + 12 + (2 * i + 1) * 8)
-    __tomap_fold(v, i + 1, n, map.set(acc, k, __tomap_text(x)))
-  }
-
-fn __tomap_text(x: Value) -> String =
-  if prim.load32(prim.handle(x) + 4) == 4 then prim.load_str(prim.handle(x) + 12)
-  else value.__stringify(x)
-
-// The declared repr (#4204): native's `Display` of its JsonPath enum — `$`,
-// then `.name` per field step and `[i]` per index step.
-fn __jp_seg_repr(seg: String) -> String = match string.take(seg, 1) {
-  "i" => "[" + string.drop(seg, 1) + "]",
-  _ => "." + string.drop(seg, 1),
-}
-
-@implements("json.__json_path_repr")
-fn json_path_repr(path: List[String]) -> String = "$" + (path |> list.map((s) => __jp_seg_repr(s)) |> list.join(""))

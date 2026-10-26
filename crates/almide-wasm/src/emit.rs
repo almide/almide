@@ -58,7 +58,7 @@ pub fn emit_library_with_ops(
 
 fn emit_with_ops(ir: &IrProgram, library: bool) -> Result<(Vec<u8>, std::collections::BTreeSet<i32>), EmitError> {
     // Transparent newtypes erase FIRST, so both passes read one tree
-    // (#1423 stage 4: the html/path SafeHtml/SafePath rows).
+    // (#1423 stage 4: the html SafeHtml row).
     let erased = crate::newtype::erase_transparent_aliases(ir);
     let ir = erased.as_ref().unwrap_or(ir);
     let desugared = front_desugar::desugar(ir);

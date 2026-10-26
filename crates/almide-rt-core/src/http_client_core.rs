@@ -401,17 +401,6 @@ pub fn request_status(
     request_response(method, url, body, headers).map(|(c, _, b)| (c, b))
 }
 
-/// The binary client: the raw response body as `Vec<u8>` — binary payloads
-/// are never run through `from_utf8_lossy`.
-pub fn request_bytes(
-    method: &str,
-    url: &str,
-    body: &str,
-    headers: &[(String, String)],
-) -> Result<Vec<u8>, String> {
-    http_request_raw(method, url, body, headers).map(|(_, _, b)| b)
-}
-
 // The call-handle core (#2631 / #2633) rides the same include chain: inlined
 // into http.rs's flat module at embed time, compiled into this module for the
 // embedded host.

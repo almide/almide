@@ -30,7 +30,7 @@
 //!
 //! THE THIRD LEDGER — LIVE AT EXIT. Native drops every value when it goes
 //! out of scope; the wasm leg releases by hand, so a missing release is a
-//! wasm-only defect that stdout parity cannot see (#2932's `map.get_or`
+//! wasm-only defect that stdout parity cannot see (#2932's `map.get(..) ??`
 //! default, #2944's field write, #2931's OOM). From the same armed run,
 //! `allocs − frees − region_reclaimed` after `main` returns is the number
 //! of blocks the program never released — the armed `main` drops its

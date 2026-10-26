@@ -20,7 +20,7 @@
 /// closure class this machinery exists for.
 ///
 /// EXACT-MIRROR contract: this table must match the rebind arms and NOTHING more.
-/// A genuine in-place effect call that never rebinds (`bytes.set_at` — an index
+/// A genuine in-place effect call that never rebinds (`bytes.__set_u8` — an index
 /// store with no realloc) mutates the SHARED block through the handle, so a plain
 /// env value-copy capture is already correct; forcing a cell for it regressed the
 /// working shape to a wall (wasm_bytes_set_at_shared_through_closure).
@@ -32,12 +32,8 @@ pub(crate) fn inplace_mutated_receiver(e: &IrExpr) -> Option<VarId> {
     let mutates = match (module.as_str(), func.as_str()) {
         ("list", "push") | ("list", "clear") => true,
         ("string", "push") => true,
-        ("map", "insert") | ("map", "delete") | ("map", "clear") => true,
-        ("bytes", f) => {
-            matches!(f, "push" | "append_u8")
-                || f.starts_with("append_")
-                || matches!(f, "write_uint16" | "write_uint32" | "write_int32" | "write_float32")
-        }
+        ("map", "clear") => true,
+        ("bytes", f) => matches!(f, "push" | "append_u8") || f.starts_with("append_"),
         _ => false,
     };
     if !mutates {
@@ -96,7 +92,7 @@ pub(crate) fn collect_cell_vars(
                 // element SLOT of the shared block through the handle — no
                 // rebind, no realloc — so a plain env value-copy capture is
                 // already correct in both directions (the same physics as the
-                // `bytes.set_at` exclusion above). Forcing a cell regressed the
+                // `bytes.__set_u8` exclusion above). Forcing a cell regressed the
                 // proven wasm_indexassign_noncopy_element_through_closure shape
                 // to a lift refusal the moment List[String] gained a cell class
                 // (cb7c00ee4's admission widening): the closure body's

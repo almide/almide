@@ -328,7 +328,7 @@ fn map_variant_heap_key(r: MapRoute<'_>) -> Option<MapName> {
         return Some(if matches!(
             r.func,
             "new" | "set" | "remove" | "merge" | "update" | "upsert" | "filter" | "get"
-                | "get_or" | "keys" | "values" | "len" | "is_empty" | "contains" | "all"
+                | "keys" | "values" | "len" | "is_empty" | "contains" | "all"
                 | "any" | "count" | "fold" | "to_list"
         ) {
             MapName::Suffix("_str")
@@ -355,37 +355,37 @@ fn map_heap_val_construction_route(r: MapRoute<'_>) -> Option<MapName> {
     } = r;
     match (r.key_heap, r.val_heap) {
     // `Map[String, List[scalar]]` — the implemented subset of the heap-value
-    // family (new/set/eq/len/contains/get/get_or; other funcs keep the
-    // unregistered wall name). `get`/`get_or` SHARE the stored value (the
+    // family (new/set/eq/len/contains/get; other funcs keep the
+    // unregistered wall name). `get` SHARES the stored value (the
     // hshare discipline).
     (true, true)
         if val_is_flat_list
             && matches!(
                 func,
-                "new" | "set" | "eq" | "len" | "contains" | "get" | "get_or" | "keys"
+                "new" | "set" | "eq" | "len" | "contains" | "get" | "keys"
             ) =>
     {
         Some(MapName::Suffix("_hval"))
     }
     (true, true)
         if val_is_fn
-            && matches!(func, "new" | "set" | "len" | "contains" | "get" | "get_or") =>
+            && matches!(func, "new" | "set" | "len" | "contains" | "get") =>
     {
         Some(MapName::Suffix("_hval"))
     }
     // `Map[String, Option[<scalar>]]` — the Flat-ctor value class (#1527's
     // map-literal family): the hval twins are handle-level (set stores +
-    // rc-shares the value handle; get_or shares it back), and the value block
+    // rc-shares the value handle), and the value block
     // is FLAT (scalar payload under len-as-tag), so `$__drop_map_hval`'s
     // one-level sweep frees it exactly. `eq` is EXCLUDED: hval eq compares
     // value blocks structurally, which for an `Option[Float]` payload is an
     // i64 bit-compare, not the f64 `==` native implements (-0.0/NaN) — it
     // keeps the honest wall. `get` is EXCLUDED for now too: its result is a
     // NESTED `Option[Option[<scalar>]]` wrapper whose drop routing has no
-    // verified class yet — get_or (the fuzz shape) needs no wrapper.
+    // verified class yet.
     (true, true)
         if val_is_flat_ctor
-            && matches!(func, "new" | "set" | "len" | "contains" | "get_or" | "keys") =>
+            && matches!(func, "new" | "set" | "len" | "contains" | "keys") =>
     {
         Some(MapName::Suffix("_hval"))
     }
@@ -462,17 +462,17 @@ fn map_heap_val_nested_route(r: MapRoute<'_>) -> Option<MapName> {
     use almide_lang::types::constructor::TypeConstructorId;
     let MapRoute { func, arg_tys, result_ty, .. } = r;
     match (r.key_heap, r.val_heap) {
-    // `Map[String, Map[String, String]]` get_or / from_list — the msv family
-    // (map_fold_heap_acc's nested-map literal + get_or default).
+    // `Map[String, Map[String, String]]` remove — the msv family
+    // (map_fold_heap_acc's nested-map literal).
     (true, true)
-        if matches!(func, "get_or" | "remove")
+        if func == "remove"
             && matches!(arg_tys.first(), Some(Ty::Applied(TypeConstructorId::Map, a))
                 if a.len() == 2 && matches!(a[0], Ty::String)
                     && is_msv_family_inner(&a[1])) =>
     {
         // Inner Map[String,String] = msv proper; inner scalar-value map,
         // Option[String], or Result[T, String] = the msb DROP variants. All share
-        // the handle-generic `_msv` impls (from_list/get_or/remove never inspect a
+        // the handle-generic `_msv` impls (from_list/remove never inspect a
         // value payload) — only the drop routing differs (`is_map_msb_ty` →
         // `$__drop_map_msb` len-sweep).
         Some(MapName::Suffix("_msv"))
@@ -580,7 +580,7 @@ fn map_variant_other(r: MapRoute<'_>) -> Option<MapName> {
 /// unlisted func routes to the `_skv_wall` name (never a dangling `_skv`
 /// reference).
 const SKV_FUNCS: &[&str] = &[
-    "new", "set", "remove", "filter", "get", "get_or", "keys", "values", "len", "is_empty",
+    "new", "set", "remove", "filter", "get", "keys", "values", "len", "is_empty",
     "contains", "all", "any", "count", "fold", "eq", "find", "update", "merge", "map",
     "upsert",
 ];

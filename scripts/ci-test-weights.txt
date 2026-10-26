@@ -255,7 +255,6 @@ chain_match_binder_moves_test    6
 section_dump                     6
 result_zip_routing_test          6
 map_set_tail_reuse_test          6
-interp_error_trio_payload_test   6
 non_ascii_rust_lints_test        6
 witness_map_insert               6
 env_staging_capacity_test        6

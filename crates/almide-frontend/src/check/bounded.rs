@@ -105,13 +105,13 @@ impl Checker {
 }
 
 /// Pure stdlib modules a @bounded fn may call FIRST-ORDER members of (ALS-B7).
-/// `hash` and `error` reach intrinsics, but the intrinsics are computations
-/// (FNV/SHA over bytes, error-chain text) with no host effect; `path` is string
+/// `hash` reaches intrinsics, but the intrinsics are computations
+/// (FNV/SHA over bytes) with no host effect; `path` is string
 /// arithmetic on separators and never touches the filesystem.
 const BOUNDED_PURE_MODULES: &[&str] = &[
     "int", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "float",
     "float32", "float64", "bool", "string", "list", "map", "set", "math", "option", "result", "value",
-    "json", "bytes", "regex", "matrix", "hex", "base64", "url", "html", "hash", "error", "path",
+    "json", "bytes", "regex", "matrix", "hex", "base64", "url", "html", "hash", "path",
 ];
 
 /// Effect / host-reaching modules E076 rejects outright (ALS-B9); `io` is
@@ -274,8 +274,13 @@ const BOUNDED_SIZED_CTORS: &[(&str, &[usize])] = &[
 /// In-loop allocating calls (ALS-B4).
 const BOUNDED_ALLOC_CALLS: &[&str] = &[
     "list.push", "string.push", "bytes.push", "list.concat", "string.concat", "list.append",
-    "map.insert", "set.insert", "bytes.append",
+    "map.set", "set.insert", "bytes.append",
 ];
+
+/// The `float.*` members that COMPUTE on Floats (ALS-B10 / E077): the
+/// `math.fpow` / `fmin` / `fmax` computations moved here (R-math-01). The
+/// rest of `float.*` observes a Float (`to_string`, `sign`, ...).
+const BOUNDED_FLOAT_COMPUTE_CALLS: &[&str] = &["float.pow", "float.min", "float.max"];
 
 fn bounded_err(
     msg: &str,
@@ -1042,8 +1047,9 @@ impl BoundedCx<'_, '_> {
         }
         // ALS-B10 / E077: a stdlib call computing on Float arguments.
         // float.to_string / float.sign etc. OBSERVE a Float — computing
-        // modules (math.*) reject it
-        if m == "math" && args.iter().any(|a| self.expr_is_float(a)) {
+        // calls (math.*, BOUNDED_FLOAT_COMPUTE_CALLS) reject it
+        let computes = m == "math" || BOUNDED_FLOAT_COMPUTE_CALLS.contains(&full.as_str());
+        if computes && args.iter().any(|a| self.expr_is_float(a)) {
             self.err(
                 "a Float operation is not admissible in a @bounded function",
                 "keep to Int arithmetic — Float values may be held and passed, not computed on",

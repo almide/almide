@@ -388,7 +388,7 @@ impl<'a> Interpreter<'a> {
     ///
     /// What is preserved exactly:
     ///   - resolution order — the spine walker re-checks builtins / variant
-    ///     ctors / Endian before the fn table, same as `eval_named_call`;
+    ///     ctors before the fn table, same as `eval_named_call`;
     ///   - the deterministic meter — the per-hop entry charge fires each
     ///     transfer, matching the backends' charge-inside-the-loop placement;
     ///   - `Try`/`Unwrap` — a transfer through the effect wrapper records the

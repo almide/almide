@@ -59,9 +59,9 @@ fn bare_named_of(name: &str, types: &TypeTable) -> Option<SliceTy> {
             almide_types::time_units::TIME_MODULES.iter().any(|(_, t)| *t == name).then_some(SliceTy::Scalar(Scalar::Int))
         })
         .or_else(|| match name {
-            // stdlib/http_response.almd / http_request.almd / json_path.almd
-            // own these reps; the eraser publishes them as List[String].
-            "HttpResponse" | "HttpRequest" | "JsonPath" => {
+            // stdlib/http_response.almd / http_request.almd own these reps;
+            // the eraser publishes them as List[String].
+            "HttpResponse" | "HttpRequest" => {
                 Some(SliceTy::List(types.intern(SliceTy::Scalar(Scalar::Str))))
             }
             // The http call handle (#2633): this emitter's own one-slot block

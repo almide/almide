@@ -51,13 +51,6 @@ fn map_contains_skv(m: Map[String, Int], k: String) -> Bool = {
   idx >= 0
 }
 
-fn map_get_or_skv(m: Map[String, Int], k: String, default: Int) -> Int = {
-  let h = prim.handle(m)
-  let entries = prim.load32(h + 4)
-  let idx = __skv_find(h, entries, k, 0)
-  if idx < 0 then default else prim.load64(h + 12 + (entries + idx) * 8)
-}
-
 // map.get — Some(value) when the key is present, None otherwise (a materialized Option, scalar
 // payload — works for Map[String,Int] and Map[String,Float] alike: the value slot is i64-width).
 fn __skv_none() -> Int? = none

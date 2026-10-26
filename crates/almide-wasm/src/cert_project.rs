@@ -92,7 +92,7 @@ const PURE_BOUND: &[u32] = &[cap::STDOUT];
 pub fn op_caps(op: i32) -> &'static [u32] {
     use cap::*;
     match op {
-        1 | 4..=6 | 11..=14 | 17 | 18 | 22..=25 | 38..=42 | 51 | 52 | 61..=64 => &[FS_READ],
+        1 | 4..=6 | 11..=14 | 22..=25 | 38..=42 | 51 | 52 | 61..=64 => &[FS_READ],
         2 | 3 | 7..=10 | 15 | 16 | 20 | 21 => &[FS_WRITE],
         19 => &[FS_READ, FS_WRITE],
         // The rooted family's descriptor ops (#4084, fs_root.rs): read text,
@@ -104,7 +104,8 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         32 => &[ENTROPY],
         34 | 36 | 60 => &[CLOCK],
         35 => &[STDIN],
-        43..=50 | 53..=59 | 65 | 70..=72 | 75 => &[NET],
+        // 50 (framed raw-bytes http) is retired.
+        43..=49 | 53..=59 | 65 | 70..=72 | 75 => &[NET],
         80..=90 => &[PROC],
         // testing.assert_aborts's site pair (ADR-0029, #3792): op 117 runs a
         // site on a fresh instance — a child, the native leg's re-exec — and

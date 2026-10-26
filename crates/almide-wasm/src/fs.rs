@@ -39,7 +39,7 @@ const OP_APPEND: i32 = 16;
 // CALL, sharing the op would make the wasm leg say `fs.read_lines(...)` where
 // native says `fs.fold_lines(...)` — a divergence introduced by the fix. The
 // body the host runs is identical; only the name it reports differs.
-// 43..=50 is the http family and 26..=37 the env/host family, so these take
+// 43..=49 is the http family (50 retired) and 26..=37 the env/host family, so these take
 // the first numbers above both. The ADR-0006 fallible carriers
 // (`__fallible_fold_lines` / `__fallible_for_each_line`, fs_meta.rs /
 // fs_fallible.rs) are the SAME user calls and ride these ops too (#3148 —

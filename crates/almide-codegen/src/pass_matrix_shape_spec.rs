@@ -1,26 +1,26 @@
 //! MatrixShapeSpecializationPass — NumPy 超え の起点。
 //!
-//! Detects `matrix.mul_f32 / mul_f64` calls whose inputs have a
-//! compile-time known **small** shape (both dims ≤ 8) and rewrites
-//! them into a fully-unrolled `InlineRust` expression. NumPy's baseline
-//! for small matmul is ~1μs dispatch overhead; a fully-unrolled
-//! 3×3 f32 matmul drops to <50ns under LLVM register allocation.
+//! Detects `matrix.__mul` calls (the `*` operator on two matrices) whose
+//! inputs have a compile-time known **small** shape (both dims ≤ 8) and
+//! rewrites them into a fully-unrolled `InlineRust` expression. NumPy's
+//! baseline for small matmul is ~1μs dispatch overhead; a fully-unrolled
+//! 3×3 matmul drops to <50ns under LLVM register allocation.
 //!
 //! ## Shape propagation
 //!
 //! The pass tracks `VarId → (rows, cols)` via a side-table populated
 //! per block. We recognise a shape producer when:
 //!
-//! - `matrix.ones(r, c)` / `matrix.ones_f32(r, c)` — shape (r, c)
-//! - `matrix.zeros(r, c)` / `matrix.zeros_f32(r, c)` — shape (r, c)
+//! - `matrix.ones(r, c)` — shape (r, c)
+//! - `matrix.zeros(r, c)` — shape (r, c)
 //!
-//! Shape-preserving ops (matrix.scale, matrix.neg) propagate the
+//! Shape-preserving ops (matrix.scale, matrix.__neg) propagate the
 //! source shape. `matrix.transpose(m)` inverts it. Other operations
 //! are treated as shape-opaque and drop the binding.
 //!
 //! ## Rewrite
 //!
-//! `matrix.mul_<dtype>(a, b)` where `a: (r, k)`, `b: (k, c)`, and
+//! `matrix.__mul(a, b)` where `a: (r, k)`, `b: (k, c)`, and
 //! `max(r, k, c) ≤ 8` becomes:
 //!
 //! ```text
@@ -42,7 +42,7 @@
 //! - Threshold `SMALL_LIMIT = 8` picked from the `_bench_matmul_small`
 //!   sweep: 8² is where the current path spends 0.39μs — mostly on
 //!   heap allocation that an unrolled emit elides.
-//! - f64 (`matrix.mul`) and f32 (`matrix.mul_f32`) both covered.
+//! - f64 (`matrix.__mul`).
 
 use almide_base::intern::sym;
 use almide_ir::*;
@@ -90,11 +90,11 @@ impl NanoPass for MatrixShapeSpecPass {
 /// Matrix dtype label — threads through rewrite emission so we pick
 /// the right Rust float width.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Dtype { F32, F64 }
+enum Dtype { F64 }
 
 impl Dtype {
     fn rust_type(self) -> &'static str {
-        match self { Dtype::F32 => "f32", Dtype::F64 => "f64" }
+        match self { Dtype::F64 => "f64" }
     }
 }
 
@@ -127,16 +127,11 @@ fn infer_shape(expr: &IrExpr, shapes: &HashMap<VarId, Shape>) -> Option<Shape> {
             let c = lit_int(&args[1])?;
             Some(Shape { rows: r, cols: c, dtype: Dtype::F64 })
         }
-        "ones_f32" | "zeros_f32" if args.len() == 2 => {
-            let r = lit_int(&args[0])?;
-            let c = lit_int(&args[1])?;
-            Some(Shape { rows: r, cols: c, dtype: Dtype::F32 })
-        }
         // Shape-preserving unary / binary ops.
-        "scale" | "neg" if !args.is_empty() => {
+        "scale" | "__neg" if !args.is_empty() => {
             infer_shape(&args[0], shapes)
         }
-        "add" | "sub" | "div" | "fma" | "mul" if args.len() >= 2 => {
+        "__add" | "__sub" | "__div" | "__fma" | "__mul" if args.len() >= 2 => {
             // For element-wise binary, both sides must share shape. We
             // trust the checker — taking either side is sufficient for
             // propagation.
@@ -227,8 +222,7 @@ fn try_unroll_small_matmul(expr: &mut IrExpr, shapes: &HashMap<VarId, Shape>) ->
     let Some((module, func, args)) = match_module_call(expr) else { return false; };
     if module != "matrix" || args.len() != 2 { return false; }
     let dtype = match func {
-        "mul" => Some(Dtype::F64),
-        "mul_f32" => Some(Dtype::F32),
+        "__mul" => Some(Dtype::F64),
         _ => None,
     };
     let Some(dtype) = dtype else { return false; };

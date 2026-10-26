@@ -120,7 +120,6 @@ impl<'a> Interpreter<'a> {
             "first" | "head" => Some(self.list_first(args)),
             "last" => Some(self.list_last(args)),
             "get" => Some(self.list_get(args)),
-            "get_or" => Some(self.list_get_or(args)),
             "contains" => Some(self.list_contains(args)),
             // First index of an equal element — `PartialEq` equality, the same
             // relation `contains` uses (measured against native on the corpus;
@@ -142,12 +141,12 @@ impl<'a> Interpreter<'a> {
             "concat" => Some(self.list_concat(args)),
             // Structural, element-type-blind — served natively so a heap-element
             // list never reaches the pool's Int-declared core impl (the
-            // wrong-impl guard walled chunk/windows on List[String], #1226).
+            // wrong-impl guard walled chunk/window on List[String], #1226).
             // Semantics mirror stdlib/list_chunk.almd EXACTLY: a size of 0
             // or less aborts in the T6 form (#4147); windows past the length
             // are none.
             "chunk" => Some(self.list_chunk(args)),
-            "windows" | "window" => Some(self.list_windows(args)),
+            "window" => Some(self.list_windows(args)),
             // Element-type-blind too: the registry core `list_repeat` is
             // Int-declared, so a Float element reached its `prim.store64` as
             // "a non-address" and every `list.repeat(0.0, n)` zero row left
@@ -392,7 +391,6 @@ impl<'a> Interpreter<'a> {
             "drop" => out(items[count(int_arg(1)?)..].to_vec()),
             "take_end" => { let k = count(int_arg(1)?); out(items[n - k..].to_vec()) }
             "drop_end" => { let k = count(int_arg(1)?); out(items[..n - k].to_vec()) }
-            "tail" => out(if n == 0 { Vec::new() } else { items[1..].to_vec() }),
             _ => None,
         }
     }
@@ -583,28 +581,6 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    // get_or(xs, i, default) — the OOB/negative index yields the default
-    // (runtime/rs list.rs get_or; the Value-level twin of list_get's some/none).
-    pub(crate) fn list_get_or(&mut self, args: &[Value]) -> Flow {
-        fn at(items: &[Value], i: i64, default: &Value) -> Flow {
-            if i < 0 || (i as usize) >= items.len() {
-                Flow::val(default.clone())
-            } else {
-                Flow::val(items[i as usize].clone())
-            }
-        }
-        match (args.first(), args.get(1), args.get(2)) {
-            (Some(v), Some(Value::Int(i)), Some(default)) => match v.as_iter_slice() {
-                Some(items) => at(items, *i, default),
-                None => match v.as_iter_items() {
-                    Some(items) => at(&items, *i, default),
-                    None => Flow::Abort("internal: list.get_or bad args".into()),
-                },
-            },
-            _ => Flow::Abort("internal: list.get_or bad args".into()),
-        }
-    }
-
     fn list_get(&mut self, args: &[Value]) -> Flow {
         fn at(items: &[Value], i: i64) -> Flow {
             if i < 0 || (i as usize) >= items.len() {
@@ -761,15 +737,15 @@ impl<'a> Interpreter<'a> {
 /// `list.insert`, `map.set`, `set.insert` — all `-> NewContainer`) are NOT
 /// listed and remain fully supported.
 ///
-/// `bytes` is matched by PREFIX rather than by name. Only three of its mutators
-/// (`push`, `set_at`, `copy_within`) spell `mut` on the receiver; the ~40 in the
-/// `set_*` / `append_*` / `write_*` families do not — they are `@intrinsic`s whose
+/// `bytes` is matched by PREFIX rather than by name. Only two of its mutators
+/// (`push`, `copy_within`) spell `mut` on the receiver; the ~30 in the
+/// `set_*` / `append_*` families do not — they are `@intrinsic`s whose
 /// mutation lives in the native signature (`&mut Vec<u8>`), invisible to the `.almd`
 /// declaration. So an enumerated list here had nothing to be checked against and
 /// silently fell behind: `bytes.put_f32_le` reported the generic "unknown
 /// capability" abstain instead of naming what it actually is, which is what the
-/// ledger gate caught on `mutable_global_bytes_arena`. Every `set_*`/`append_*`/
-/// `write_*` in `stdlib/bytes.almd` returns Unit and mutates in place, and the
+/// ledger gate caught on `mutable_global_bytes_arena`. Every `set_*`/`append_*`
+/// in `stdlib/bytes.almd` returns Unit and mutates in place, and the
 /// functional `bytes.set(b, i, v) -> Bytes` is excluded by the underscore — the
 /// prefix is the whole rule, and a new family member is covered on arrival.
 pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
@@ -778,8 +754,7 @@ pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
     if module == "bytes"
         && (func.starts_with("set_")
             || func.starts_with("put_")
-            || func.starts_with("append_")
-            || func.starts_with("write_"))
+            || func.starts_with("append_"))
         && crate::inplace::bytes_write_op(func).is_some()
     {
         return true;
@@ -789,8 +764,6 @@ pub(crate) fn is_inplace_mutating_op(module: &str, func: &str) -> bool {
         ("list", "push")
             | ("list", "pop")
             | ("list", "clear")
-            | ("map", "insert")
-            | ("map", "delete")
             | ("map", "clear")
             | ("string", "push")
             | ("string", "clear")
