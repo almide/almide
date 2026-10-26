@@ -17,6 +17,12 @@ test "args.__find_prefixed unit=element-index" {
   assert_eq("${found + " " + skipped}", "--out=x none")
 }
 
+test "args.__positional_at unit=element-index" {
+  let kept = args.__positional_at(["--out", "r.txt", "in.txt"], ["out"], 0, [])
+  let late = args.__positional_at(["a", "b"], [], 1, [])
+  assert_eq("${list.join(kept, ",") + " " + list.join(late, ",")}", "in.txt b")
+}
+
 test "args.positional_at unit=element-index" {
   assert_eq("${args.positional_at(0, [])! ?? "none"}", "none")
 }
