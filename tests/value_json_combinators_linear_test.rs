@@ -143,7 +143,7 @@ effect fn main() -> Unit = {{
   for i in 0..<{n} {{
     acc = value.set_path(acc, value.index(value.root(), i), value.int(i + 1))!
   }}
-  acc = value.set_path(acc, value.index(value.root(), -1), value.string("last"))!
+  acc = value.set_path(acc, value.index(value.root(), {n} - 1), value.string("last"))!
   let xs = value.as_array(acc) ?? []
   println("${{list.len(xs)}} ${{json.stringify(list.first(xs) ?? value.null())}} ${{json.stringify(list.get(xs, {n} - 2) ?? value.null())}} ${{json.stringify(list.last(xs) ?? value.null())}}")
 }}
