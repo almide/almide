@@ -608,4 +608,9 @@ pub struct IrProgram {
     /// User`) — the one conformance the type declares, never a search.
     #[serde(skip)]
     pub protocol_conformance_args: std::collections::HashMap<(Sym, Sym), Vec<Ty>>,
+    /// The declared reprs and nominal shapes the lowering knew (#4239), for
+    /// the renderer rule's post-monomorphization run
+    /// ([`crate::declared_repr::route_instantiated_segments`]).
+    #[serde(skip)]
+    pub declared_reprs: crate::declared_repr::DeclaredReprTable,
 }

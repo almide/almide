@@ -156,21 +156,7 @@ impl<'a> LowerCtx<'a> {
     /// the canonical Almide-literal form (quoted strings, Display floats), so a
     /// `deriving Repr` record and a plain record interpolate identically.
     pub(super) fn find_explicit_convention_fn(&self, ty: &Ty, convention: &str) -> Option<Sym> {
-        if let Ty::Named(type_name, _) = ty {
-            let fn_name = sym(&format!("{}.{}", type_name, convention));
-            if self.explicit_convention_fns.contains(&fn_name) {
-                return Some(fn_name);
-            }
-            // The set above only holds the program being lowered, so a custom
-            // `repr` defined in ANOTHER module was silently skipped and the
-            // value fell through to the derived `AlmideRepr` impl — printing
-            // the variant name with no error anywhere (#1087).
-            let held = crate::canonicalize::registration::convention_fn_key(self.env, &type_name.to_string(), convention)?;
-            if self.env.explicit_convention_fns.contains(&held) {
-                return crate::canonicalize::registration::convention_emit_key(self.env, &type_name.to_string(), convention);
-            }
-        }
-        None
+        declared_repr::explicit_convention_fn(self.env, &self.explicit_convention_fns, ty, convention)
     }
 
     pub(super) fn find_convention_fn(&self, ty: &Ty, convention: &str) -> Option<Sym> {
@@ -627,7 +613,10 @@ fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec
         }
     }
     functions.append(&mut ctx.synthesized_fns);
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default() };
+    // The renderer rule's post-mono run (#4239) reads the entry program's
+    // table; a module lowering's IR is folded into the entry's.
+    let declared_reprs = if ctx.current_module.is_none() { ctx.declared_repr_table() } else { Default::default() };
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), declared_reprs };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {
