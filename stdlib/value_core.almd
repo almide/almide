@@ -945,7 +945,7 @@ fn value_field(v: Value, key: String) -> Result[Value, String] = {
   else {
     let n = prim.load32(h + 8) / 2
     let idx = __vobj_find(v, key, 0, n)
-    if idx < 0 then err("missing field '" + key + "'")
+    if idx < 0 then err("missing field '" + string.__err_text(key) + "'")
     else {
       let val: Value = prim.load_handle(h + 12 + (2 * idx + 1) * 8)
       ok(val)

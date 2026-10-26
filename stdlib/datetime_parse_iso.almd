@@ -99,7 +99,7 @@ fn datetime_parse_iso(s: String) -> Result[Int, String] = {
         none => __dpi_build(d, tm, 0),
         some(i) => match __dpi_offset(time_z, i) {
           some(off) => __dpi_build(d, tm, off),
-          none => err("invalid offset: " + string.slice(time_z, i, string.len(time_z))),
+          none => err("invalid offset: " + string.__err_text(string.slice(time_z, i, string.len(time_z)))),
         },
       },
       _ => err("invalid datetime format"),
