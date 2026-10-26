@@ -19,7 +19,8 @@
 ///     (the literal's own evaluation order); a String element shows quoted
 ///     (`string.quote`), an Int/Bool element as its digits / `true`/`false`;
 ///   - any other part whose type mentions a runtime-backed type (a `Var` of
-///     `List[HttpRequest]`, an element this pass has no nested display for) routes
+///     `List[HttpRequest]`, a user variant whose payload holds one (#4230), an
+///     element this pass has no nested display for) routes
 ///     to the unlinked `compound.to_string` — the established honest wall, never
 ///     the carrier's bytes.
 ///
@@ -27,19 +28,35 @@
 pub fn rewrite_runtime_backed_interps(program: &mut almide_ir::IrProgram) {
     use almide_ir::visit_mut::IrMutVisitor;
     let mut records: HashMap<String, Vec<(almide_lang::intern::Sym, Ty)>> = HashMap::new();
+    let mut variants: HashMap<String, Vec<Ty>> = HashMap::new();
     let decls = program.type_decls.iter().chain(program.modules.iter().flat_map(|m| m.type_decls.iter()));
     for td in decls {
-        if td.generics.as_ref().is_some_and(|g| !g.is_empty()) {
-            continue;
-        }
-        if let almide_ir::IrTypeDeclKind::Record { fields } = &td.kind {
-            records.insert(
-                td.name.as_str().to_string(),
-                fields.iter().map(|f| (f.name, f.ty.clone())).collect(),
-            );
+        // Generic declarations are kept: a field of a fixed runtime-backed type
+        // (`Got(T, HttpRequest)`) mentions one whatever the arguments are, and a
+        // field of a type parameter mentions nothing by itself (the arguments are
+        // asked separately). Only the literal flattening needs no arguments.
+        match &td.kind {
+            almide_ir::IrTypeDeclKind::Record { fields } => {
+                records.insert(
+                    td.name.as_str().to_string(),
+                    fields.iter().map(|f| (f.name, f.ty.clone())).collect(),
+                );
+            }
+            // A variant's payloads, every case's in one list (#4230): the
+            // question asked of a declaration is only "does any field mention a
+            // runtime-backed type", so the case a field belongs to is irrelevant.
+            almide_ir::IrTypeDeclKind::Variant { cases, .. } => {
+                let payloads = cases.iter().flat_map(|c| match &c.kind {
+                    almide_ir::IrVariantKind::Unit => Vec::new(),
+                    almide_ir::IrVariantKind::Tuple { fields } => fields.clone(),
+                    almide_ir::IrVariantKind::Record { fields } => fields.iter().map(|f| f.ty.clone()).collect(),
+                });
+                variants.insert(td.name.as_str().to_string(), payloads.collect());
+            }
+            almide_ir::IrTypeDeclKind::Alias { .. } => {}
         }
     }
-    let mut v = RbInterp { records: &records };
+    let mut v = RbInterp { records: &records, variants: &variants };
     for f in program.functions.iter_mut() {
         v.visit_expr_mut(&mut f.body);
     }
@@ -57,8 +74,10 @@ pub fn rewrite_runtime_backed_interps(program: &mut almide_ir::IrProgram) {
 }
 
 struct RbInterp<'a> {
-    /// Non-generic record declarations: name → declaration-ordered fields.
+    /// Record declarations: name → declaration-ordered fields.
     records: &'a HashMap<String, Vec<(almide_lang::intern::Sym, Ty)>>,
+    /// Variant declarations: name → the payload types of all cases.
+    variants: &'a HashMap<String, Vec<Ty>>,
 }
 
 impl almide_ir::visit_mut::IrMutVisitor for RbInterp<'_> {
@@ -86,8 +105,8 @@ impl almide_ir::visit_mut::IrMutVisitor for RbInterp<'_> {
 }
 
 impl RbInterp<'_> {
-    /// Does `ty` mention a runtime-backed type anywhere (through containers and
-    /// declared record fields)? `seen` holds the record declarations already on
+    /// Does `ty` mention a runtime-backed type anywhere (through containers,
+    /// declared record fields and variant payloads, #4230)? `seen` holds the record declarations already on
     /// the path: a recursive record (`kids: List[Node]`) adds nothing on re-entry,
     /// so it mentions one only if some non-recursive field does.
     fn mentions_rb(&self, ty: &Ty, seen: &mut Vec<String>) -> bool {
@@ -100,12 +119,22 @@ impl RbInterp<'_> {
                 if seen.contains(&key) {
                     return false;
                 }
-                let Some(fs) = self.records.get(&key) else { return false };
+                let fields: Vec<&Ty> = match (self.records.get(&key), self.variants.get(&key)) {
+                    (Some(fs), _) => fs.iter().map(|(_, t)| t).collect(),
+                    (None, Some(ps)) => ps.iter().collect(),
+                    (None, None) => return false,
+                };
                 seen.push(key);
-                let hit = fs.iter().any(|(_, t)| self.mentions_rb(t, seen));
+                let hit = fields.into_iter().any(|t| self.mentions_rb(t, seen));
                 seen.pop();
                 hit
             }
+            // A structural variant type carries its cases' payloads inline.
+            Ty::Variant { cases, .. } => cases.iter().any(|c| match &c.payload {
+                almide_lang::types::VariantPayload::Unit => false,
+                almide_lang::types::VariantPayload::Tuple(ts) => ts.iter().any(|t| self.mentions_rb(t, seen)),
+                almide_lang::types::VariantPayload::Record(fs) => fs.iter().any(|(_, t)| self.mentions_rb(t, seen)),
+            }),
             Ty::Applied(_, args) | Ty::Tuple(args) => args.iter().any(|a| self.mentions_rb(a, seen)),
             Ty::Record { fields } | Ty::OpenRecord { fields } => {
                 fields.iter().any(|(_, t)| self.mentions_rb(t, seen))
