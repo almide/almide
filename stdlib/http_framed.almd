@@ -34,16 +34,8 @@ effect fn __http_framed_text(url: String, frame: String) -> Result[String, Strin
 
 effect fn __http_framed_status(url: String, frame: String) -> Result[String, String] = _
 
-effect fn __http_framed_bytes(url: String, frame: String) -> Result[Bytes, String] = _
-
 @implements("http.__request")
 effect fn __request_impl(method: String, url: String, body: String, flat: List[String]) -> Result[String, String] = __http_framed_text(
-  url,
-  __http_frame(method, body, flat),
-)
-
-@implements("http.__request_bytes")
-effect fn __request_bytes_impl(method: String, url: String, body: String, flat: List[String]) -> Result[Bytes, String] = __http_framed_bytes(
   url,
   __http_frame(method, body, flat),
 )

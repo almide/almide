@@ -14,12 +14,12 @@ impl Emitter<'_> {
     /// Element-wise and row-wise kernels.
     pub(crate) fn lower_matrix_call_b(&mut self, func: &str, args: &[IrExpr]) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
-            ("add", [a, b]) => self.lower_matrix_zip(ZipOp::Add, a, b)?,
-            ("sub", [a, b]) => self.lower_matrix_zip(ZipOp::Sub, a, b)?,
-            ("div", [a, b]) => self.lower_matrix_zip(ZipOp::Div, a, b)?,
-            ("fma", [a, ka, b, kb]) => self.lower_matrix_fma(&[(a, ka), (b, kb)])?,
-            ("fma3", [a, ka, b, kb, c, kc]) => self.lower_matrix_fma(&[(a, ka), (b, kb), (c, kc)])?,
-            ("neg", [m]) => self.lower_matrix_unary(func, m, None)?,
+            ("__add", [a, b]) => self.lower_matrix_zip(ZipOp::Add, a, b)?,
+            ("__sub", [a, b]) => self.lower_matrix_zip(ZipOp::Sub, a, b)?,
+            ("__div", [a, b]) => self.lower_matrix_zip(ZipOp::Div, a, b)?,
+            ("__fma", [a, ka, b, kb]) => self.lower_matrix_fma(&[(a, ka), (b, kb)])?,
+            ("__fma3", [a, ka, b, kb, c, kc]) => self.lower_matrix_fma(&[(a, ka), (b, kb), (c, kc)])?,
+            ("__neg", [m]) => self.lower_matrix_unary(func, m, None)?,
             ("scale" | "map", [m, x]) => self.lower_matrix_unary(func, m, Some(x))?,
             ("broadcast_add_row", [m, x]) => self.lower_matrix_row_bias(m, x)?,
             _ => return self.lower_matrix_call_c(func, args),
@@ -30,10 +30,7 @@ impl Emitter<'_> {
     /// Products, row/column movers and byte encoders.
     fn lower_matrix_call_c(&mut self, func: &str, args: &[IrExpr]) -> Result<Option<Option<Lowered>>, EmitError> {
         let out = match (func, args) {
-            ("mul", [a, b]) => self.lower_matrix_mul(a, b)?,
-            ("linear_row", [x, w, b]) => self.lower_matrix_linear(x, w, Some(b))?,
-            ("linear_row_no_bias", [x, w]) => self.lower_matrix_linear(x, w, None)?,
-            ("conv1d", [_, _, _, _, _, _]) => self.lower_matrix_conv1d(args)?,
+            ("__mul", [a, b]) => self.lower_matrix_mul(a, b)?,
             ("slice_rows", [m, s, e]) => self.lower_matrix_slice_rows(m, s, e)?,
             ("gather_rows", [m, ids]) => self.lower_matrix_gather_rows(m, ids)?,
             ("concat_cols" | "concat_cols_many", [ms]) => self.lower_matrix_concat_cols(ms)?,

@@ -99,10 +99,6 @@ fn response_with(url: &str, headers: &[(String, String)]) -> client::HttpTextRes
     client::request_response("GET", url, "", headers).unwrap_or_else(|e| panic!("GET {url}: {e}"))
 }
 
-fn bytes_ok(url: &str) -> Vec<u8> {
-    client::request_bytes("GET", url, "", &[]).unwrap_or_else(|e| panic!("GET {url} as bytes: {e}"))
-}
-
 /// The same GET through the call handle (`http.start` + wait).
 fn start_get(url: &str) -> Result<client::HttpTextResponse, String> {
     client::http_call_spawn("GET", url, "", vec![], 5000, 0).and_then(|sh| client::http_call_wait(&sh))
@@ -189,7 +185,6 @@ fn child_request() {
     let started = Instant::now();
     let result = match kind {
         "response" => client::request_response(method, url, "", &headers).map(|(c, _, b)| format!("{c} {b}")),
-        "bytes" => client::request_bytes(method, url, "", &headers).map(|b| format!("0 {}", String::from_utf8_lossy(&b))),
         "start" => client::http_call_spawn(method, url, "", headers, 10_000, 0)
             .and_then(|sh| client::http_call_wait(&sh))
             .map(|(c, _, b)| format!("{c} {b}")),
@@ -322,10 +317,8 @@ fn a_crlf_in_a_header_value_is_refused_before_sending() {
         let hs = vec![("X-Test".to_string(), v.to_string())];
         let e = client::request_response("GET", &url, "", &hs).expect_err(v);
         assert!(e.starts_with("invalid header value for \"X-Test\""), "{e}");
-        let e2 = client::request_bytes("GET", &url, "", &hs).expect_err(v);
+        let e2 = client::http_call_spawn("GET", &url, "", hs, 0, 0).err().expect("start refuses");
         assert_eq!(e2, e);
-        let e3 = client::http_call_spawn("GET", &url, "", hs, 0, 0).err().expect("start refuses");
-        assert_eq!(e3, e);
     }
     for k in ["X-Test\r\nX-Injected", "X Test", "X:Test", ""] {
         let hs = vec![(k.to_string(), "v".to_string())];
@@ -384,8 +377,6 @@ fn a_chunk_extension_does_not_empty_the_body() {
     let r = get_ok(&format!("http://127.0.0.1:{port}/"));
     assert_eq!((r.0, r.2.as_str()), (200, "hello world"));
     let (port, _rx) = origin(reply);
-    assert_eq!(bytes_ok(&format!("http://127.0.0.1:{port}/")), b"hello world");
-    let (port, _rx) = origin(reply);
     let r = start_get(&format!("http://127.0.0.1:{port}/")).expect("the started call is answered");
     assert_eq!((r.0, r.2.as_str()), (200, "hello world"));
 }
@@ -408,8 +399,6 @@ fn a_100_continue_is_skipped_for_the_final_response() {
     let r = get_ok(&format!("http://127.0.0.1:{port}/"));
     assert_eq!((r.0, r.2.as_str()), (200, "ok"));
     assert!(r.1.iter().any(|(k, _)| k == "X-Final") && !r.1.iter().any(|(k, _)| k == "Link"));
-    let (port, _rx) = origin(reply);
-    assert_eq!(bytes_ok(&format!("http://127.0.0.1:{port}/")), b"ok");
     let (port, _rx) = origin(reply);
     let r = start_get(&format!("http://127.0.0.1:{port}/")).expect("the started call is answered");
     assert_eq!((r.0, r.2.as_str()), (200, "ok"));
@@ -446,8 +435,8 @@ fn the_response_size_is_capped() {
     assert!(out.starts_with(&want), "{out}");
     // Under the cap it is answered whole.
     let (port, _rx) = origin(big.as_bytes());
-    let out = in_child(&format!("bytes|GET|http://127.0.0.1:{port}/"), &[("ALMIDE_HTTP_MAX_RESPONSE_BYTES", "10000")]);
-    assert_eq!(out, format!("ok 0 {}", "x".repeat(5000)));
+    let out = in_child(&format!("response|GET|http://127.0.0.1:{port}/"), &[("ALMIDE_HTTP_MAX_RESPONSE_BYTES", "10000")]);
+    assert_eq!(out, format!("ok 200 {}", "x".repeat(5000)));
 }
 
 // ── #2820: the trust store ──
@@ -607,8 +596,8 @@ fn lowercase_http_proxy_and_all_proxy_are_read_and_start_uses_them() {
     let proxy_url = format!("127.0.0.1:{pp}"); // no scheme = http://, as curl and reqwest read it
     let out = in_child("response|GET|http://a.invalid/", &[("http_proxy", &proxy_url)]);
     assert_eq!(out, "ok 200 via proxy: GET http://a.invalid/ HTTP/1.1");
-    let out = in_child("bytes|GET|http://b.invalid/", &[("ALL_PROXY", &proxy_url)]);
-    assert_eq!(out, "ok 0 via proxy: GET http://b.invalid/ HTTP/1.1");
+    let out = in_child("response|GET|http://b.invalid/", &[("ALL_PROXY", &proxy_url)]);
+    assert_eq!(out, "ok 200 via proxy: GET http://b.invalid/ HTTP/1.1");
     let out = in_child("start|GET|http://c.invalid/", &[("HTTP_PROXY", &proxy_url)]);
     assert_eq!(out, "ok 200 via proxy: GET http://c.invalid/ HTTP/1.1");
 }

@@ -49,7 +49,7 @@ pub(crate) struct StdlibPool {
     /// its flat impl name (`int_to_int8`). Helpers (`__sext`) ride along so
     /// intra-source calls resolve through the interpreter's layered fn table.
     pub(crate) fns: HashMap<Sym, IrFunction>,
-    /// `("int", "to_int8")` → `int_to_int8` — the registry's mapping, split at
+    /// `("int", "__to_int8")` → `int_to_int8` — the registry's mapping, split at
     /// the dot. Present even when the impl fn failed to lower (the dispatch
     /// tier then misses on the fn lookup and falls through to `Unsupported`,
     /// exactly as before the pool existed).
@@ -155,8 +155,8 @@ fn build() -> StdlibPool {
 }
 
 /// The bundled module a registry source belongs to: the ONE module every
-/// entry names (`SRC_BYTES_TYPED` → `bytes`). A source serving several
-/// modules (`SRC_CLOCK_NOW` → `datetime` + `env`) has no single owner and
+/// entry names (`SRC_BYTES_CORE` → `bytes`). A source serving several
+/// modules (`SRC_UINT64_CONVERT` → `uint64` + `int`) has no single owner and
 /// lowers as a plain entry program, as every source did before.
 fn owning_module(entries: &[(&str, &'static str)]) -> Option<&'static str> {
     let mut modules = entries.iter().filter_map(|(_, call)| call.split_once('.').map(|(m, _)| m));
@@ -171,7 +171,7 @@ fn owning_module(entries: &[(&str, &'static str)]) -> Option<&'static str> {
 ///
 /// The source is checked AS its owning module (`canonicalize_program_in`,
 /// the driver's bundled-entry recipe, #1837): an unprefixed type it declares
-/// (`type Endian` in the bytes source) keeps the stdlib's bare key instead of
+/// (`type FileStat` in the fs source) keeps the stdlib's bare key instead of
 /// the `self.`-qualified shadow key an entry program's declaration takes —
 /// the same identity leak one level down that #1837 closed for the driver.
 fn lower_registry_source(source: &str, module: Option<&str>) -> Option<Vec<IrFunction>> {

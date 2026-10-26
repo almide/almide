@@ -219,14 +219,6 @@ fn __hvl_elem(h: Int, n: Int, idx: Int) -> List[Int] = {
   v
 }
 
-fn map_get_or_hval(m: Map[String, List[Int]], k: String, default: List[Int]) -> List[Int] = {
-  let h = prim.handle(m)
-  let n = prim.load32(h + 4)
-  let idx = __hvl_find(h, n, k, 0)
-  if idx < 0 then default
-  else __hvl_elem(h, n, idx)
-}
-
 // ── list.group_by ── v0: fold in list order; a key's group keeps its FIRST-seen
 // position, each element appends to its group (native pushes to the entry's Vec).
 // The accumulator recursion is __hvf_at's exact shape (each step's map is a fresh

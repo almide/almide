@@ -582,12 +582,8 @@ impl Emitter<'_> {
             ("transpose", [m]) => self.lower_matrix_transpose(m)?,
             ("row_dot" | "dot_row", [m, r, v]) => self.lower_matrix_row_dot(m, r, v)?,
             // Kernel families, shape-grouped (name split in the subs).
-            ("pow", [m, e]) => return self.lower_matrix_elementwise_pow(m, e).map(Some),
-            ("select_rows", [m, ids]) => {
-                return self.lower_matrix_select_rows(m, ids).map(Some)
-            }
             (
-                "from_bytes_f32_le" | "from_bytes_f16_le" | "from_bytes_f64_le" | "select_rows_f32",
+                "from_bytes_f32_le" | "from_bytes_f16_le" | "from_bytes_f64_le",
                 [a, b, c, d],
             ) => return self.lower_matrix_loader(func, a, b, c, d).map(Some),
             _ => return self.lower_matrix_call_b(func, args),

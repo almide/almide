@@ -150,12 +150,12 @@ impl Bridge {
         rec: &mut RecExpr<AlmideExpr>,
     ) -> Option<Id> {
         match (func, args.len()) {
-            ("mul", 2) => {
+            ("__mul", 2) => {
                 let a = self.lift_node(&args[0], rec);
                 let b = self.lift_node(&args[1], rec);
                 Some(rec.add(AlmideExpr::MatrixMul([a, b])))
             }
-            ("add", 2) => {
+            ("__add", 2) => {
                 let a = self.lift_node(&args[0], rec);
                 let b = self.lift_node(&args[1], rec);
                 Some(rec.add(AlmideExpr::MatrixAdd([a, b])))
@@ -165,16 +165,10 @@ impl Bridge {
                 let s = self.lift_node(&args[1], rec);
                 Some(rec.add(AlmideExpr::MatrixScale([m, s])))
             }
-            ("linear_row", 3) => {
-                let x = self.lift_node(&args[0], rec);
-                let w = self.lift_node(&args[1], rec);
-                let b = self.lift_node(&args[2], rec);
-                Some(rec.add(AlmideExpr::MatrixLinearRow([x, w, b])))
-            }
             // Fused form — normally produced only by the rewrites, but
             // also accepted as input (the user called the intrinsic
             // directly) so that lift is idempotent.
-            ("mul_scaled", 3) => {
+            ("__mul_scaled", 3) => {
                 let a = self.lift_node(&args[0], rec);
                 let s = self.lift_node(&args[1], rec);
                 let b = self.lift_node(&args[2], rec);

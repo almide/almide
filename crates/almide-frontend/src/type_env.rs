@@ -519,8 +519,8 @@ impl TypeEnv {
     }
 
     /// What a `Named` type IS, for the capability walks (eq / hash / ord).
-    /// An opaque newtype (`mod type SafePath = String`) is registered in
-    /// `types` as itself — `Named(SafePath)` — so the walk read the name as a
+    /// An opaque newtype (`mod type SafeHtml = String`) is registered in
+    /// `types` as itself — `Named(SafeHtml)` — so the walk read the name as a
     /// cycle and said yes for any target; its target is what decides (#3755).
     /// The wasm leg erases the newtype and compares the target, and native's
     /// derive follows the same answer (`lower_type_decl`).
@@ -710,7 +710,7 @@ impl TypeEnv {
                 } else {
                     // A stdlib-owned type with no declaration is the builtin
                     // `Value` (it can hold a Float, #3588) or a runtime-backed
-                    // handle (`HttpRequest`, `JsonPath`, …): native has no
+                    // handle (`HttpRequest`, `HttpCall`, …): native has no
                     // `Ord` for either. Wasm ordered the handle by whatever its
                     // representation happened to be, and native refused the
                     // build (#3755). An opaque handle has no order to give.
@@ -862,6 +862,9 @@ impl TypeEnv {
                 names.push(format!("{}.{}", module, func));
             }
         }
+        // Every caller feeds a did-you-mean: a `__`-prefixed fn is an internal
+        // carrier (`int.__to_uint16`), never a name to suggest.
+        names.retain(|n| !n.rsplit('.').next().is_some_and(|last| last.starts_with("__")));
         names
     }
 

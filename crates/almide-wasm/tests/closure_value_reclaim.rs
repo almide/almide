@@ -106,7 +106,7 @@ fn a_self_assign_through_a_module_call_releases_the_old_value() {
 }
 
 /// Value blocks and Map[String, Value] values: every Value arm (merge, pick,
-/// omit, rename, field, set_path, remove_path, keys, to_map) takes its own
+/// omit, get, set_path, remove_path, as_object) takes its own
 /// credit on what it shares, so the tagged glue releases each exactly once.
 #[test]
 fn value_blocks_release_their_payloads() {
@@ -116,7 +116,7 @@ fn value_blocks_release_their_payloads() {
             looped(
                 n,
                 "import json",
-                "    let k = \"x\" + int.to_string(i % 5)\n    let doc = json.parse(\"{\\\"a\\\":{\\\"b\\\":[1,2,3]},\\\"\" + k + \"\\\":\\\"s\\\"}\") ?? value.null()\n    let d2 = json.set_path(doc, json.index(json.field(json.field(json.root(), \"a\"), \"b\"), 1), value.string(\"v\" + k)) ?? value.null()\n    let d3 = json.set_path(d2, json.field(json.field(json.root(), \"new\"), \"deep\"), value.int(i)) ?? value.null()\n    let d4 = json.remove_path(d3, json.field(json.root(), k))\n    let d5 = value.merge(d4, value.object([(\"m\", value.string(k)), (\"a\", value.null())]))\n    let d6 = value.pick(d5, [\"a\", \"m\", \"new\"])\n    let d7 = value.omit(d6, [\"m\"])\n    let d8 = value.to_camel_case(value.object([(\"snake_key\", value.array([value.string(k)]))]))\n    let f = value.field(d5, \"m\") ?? value.null()\n    let s = value.as_string(f) ?? \"\"\n    let ks = value.keys(d5)\n    let m = json.to_map(d5) ?? [:]\n    let mv: Map[String, Value] = [k: value.string(\"y\" + int.to_string(i % 3))]\n    total = total + string.len(json.stringify(d7)) + string.len(json.stringify(d8)) + string.len(s) + list.len(ks) + map.len(m) + map.len(mv)",
+                "    let k = \"x\" + int.to_string(i % 5)\n    let doc = json.parse(\"{\\\"a\\\":{\\\"b\\\":[1,2,3]},\\\"\" + k + \"\\\":\\\"s\\\"}\") ?? value.null()\n    let d2 = value.set_path(doc, value.index(value.key(value.key(value.root(), \"a\"), \"b\"), 1), value.string(\"v\" + k)) ?? value.null()\n    let d3 = value.set_path(d2, value.key(value.key(value.root(), \"new\"), \"deep\"), value.int(i)) ?? value.null()\n    let d4 = value.remove_path(d3, value.key(value.root(), k))\n    let d5 = value.merge(d4, value.object([(\"m\", value.string(k)), (\"a\", value.null())]))\n    let d6 = value.pick(d5, [\"a\", \"m\", \"new\"])\n    let d7 = value.omit(d6, [\"m\"])\n    let d8 = value.object([(\"snakeKey\", value.array([value.string(k)]))])\n    let f = value.get(d5, \"m\") ?? value.null()\n    let s = value.as_string(f) ?? \"\"\n    let ks = list.map(value.as_object(d5) ?? [], (kv) => kv.0)\n    let m = map.from_list(value.as_object(d5) ?? [])\n    let mv: Map[String, Value] = [k: value.string(\"y\" + int.to_string(i % 3))]\n    total = total + string.len(json.stringify(d7)) + string.len(json.stringify(d8)) + string.len(s) + list.len(ks) + map.len(m) + map.len(mv)",
             )
         },
         "56890",

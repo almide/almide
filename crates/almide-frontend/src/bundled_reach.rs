@@ -563,16 +563,16 @@ mod tests {
 
     #[test]
     fn a_ufcs_method_reaches_every_module_declaring_it() {
-        // `tail` has an Almide body in list.almd; the receiver type is not
+        // `sum` has an Almide body in list.almd; the receiver type is not
         // known before checking, so the member name alone must reach list.
-        let r = reached("fn f(xs: List[Int]) -> List[Int] = xs.tail()\n");
+        let r = reached("fn f(xs: List[Int]) -> Int = xs.sum()\n");
         assert!(r.contains(&"list"), "{r:?}");
     }
 
     #[test]
     fn a_reached_module_reaches_what_its_body_names() {
         // int8's bodies call `int.*`: reaching int8 reaches int.
-        let r = reached("fn f(x: Int8) -> Int16 = int8.to_int16(x)\n");
+        let r = reached("fn f(x: Int8) -> Int8 = int8.abs(x)\n");
         assert!(r.contains(&"int8") && r.contains(&"int"), "{r:?}");
     }
 }

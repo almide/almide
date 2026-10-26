@@ -65,6 +65,21 @@ impl Checker {
             self.validate_mut_args(&format!("{}.{}", if let ExprKind::Ident { name, .. } = &object.kind { name.as_str() } else { "?" }, field), &arg_refs);
             return result;
         }
+        // A removed spelling whose whole module is gone (`error.chain`): the
+        // object no longer names a module, so the walk below would report an
+        // undefined variable and skip the ledger. Name the removal (E002).
+        if !shadowed_by_local
+            && let ExprKind::Ident { name, .. } = &object.kind
+            && self.env.import_table.resolve(name.as_str()).is_none()
+            && crate::removed_spellings::lookup(&format!("{}.{}", name, field)).is_some()
+        {
+            let full = format!("{}.{}", name, field);
+            let prev = self.callee_span_hint.take();
+            self.callee_span_hint = callee_span_snapshot;
+            let ty = self.emit_unresolved_call_diagnostic(&full);
+            self.callee_span_hint = prev;
+            return ty;
+        }
         // UFCS method: obj.method(args) -> module.method(obj, args)
         let obj_ty = self.infer_expr(object);
         let obj_concrete = resolve_ty(&obj_ty, &self.uf);
@@ -351,8 +366,21 @@ impl Checker {
         }
         // Use the *full* surface (TOML + bundled `.almd`) so fns migrated through the Stdlib Unification arc still power the E002 suggestion. `module_functions` only sees TOML, so after `stdlib/string.almd` replaced the TOML the method-call try-snippet silently disappeared.
         let module_funcs = crate::stdlib::module_functions_current(module);
-        let suggestion = almide_base::diagnostic::suggest(field, module_funcs.iter().copied());
-        let hint = if let Some(close) = &suggestion {
+        // A spelling a dialect epoch removed (`.to_uint16()` on an Int): the
+        // ledger's repair is the answer, never a near-match — the nearest
+        // name is often the internal `__` carrier the removal left behind.
+        let removal = crate::removed_spellings::lookup(&format!("{}.{}", module, field));
+        let suggestion = if removal.is_some() {
+            None
+        } else {
+            almide_base::diagnostic::suggest(field, module_funcs.iter().copied())
+        };
+        let hint = if let Some(r) = removal {
+            format!(
+                "Almide doesn't use method-call syntax, and there is no `{m}.{field}` either: {repair}",
+                m = module, field = field, repair = crate::removed_spellings::hint(r)
+            )
+        } else if let Some(close) = &suggestion {
             format!(
                 "Almide doesn't use method-call syntax. Write `{m}.{close}(x)` (or `x |> {m}.{close}`). Method syntax `x.{field}()` is not supported.",
                 m = module, close = close, field = field

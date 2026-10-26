@@ -209,12 +209,12 @@ fn as_str(v: Option<&Value>) -> Option<&str> {
 // ── int ─────────────────────────────────────────────────────────
 
 fn int_fn(func: &str, args: &[Value]) -> Option<Flow> {
-    // The sized→Int widenings (`int.from_uint16`, `int.from_int32`, …): every
+    // The sized→Int widenings (`int.__from_uint16`, `int.__from_int32`, …): every
     // native impl is a widening/bit-preserving cast into i64 — the carrier the
     // interp already holds, with the value pre-wrapped to its declared width by
     // whatever produced it (C-180). Identity here, exactly like the reverse
     // `to_*` casts' truncation lives with the producers.
-    if let Some(rest) = func.strip_prefix("from_") {
+    if let Some(rest) = func.strip_prefix("__from_") {
         if matches!(
             rest,
             "uint8" | "uint16" | "uint32" | "uint64" | "int8" | "int16" | "int32" | "int64"
@@ -378,7 +378,7 @@ fn int_fn_a(func: &str, args: &[Value]) -> Option<Flow> {
             let n = as_int(args.first())?;
             Flow::val(Value::str(n.to_string()))
         }
-        "to_float" => {
+        "__raw_to_float" => {
             let n = as_int(args.first())?;
             Flow::val(Value::Float(n as f64))
         }
@@ -415,8 +415,8 @@ fn int_fn_b(func: &str, args: &[Value]) -> Option<Flow> {
 
 // ── float ───────────────────────────────────────────────────────
 
-/// The sized-float CONVERSIONS (`float.to_float32`/`to_float64`/
-/// `from_float32`/`from_float64`): the interpreter carries every float in one
+/// The sized-float CONVERSIONS (`float.__raw_to_float32`/`__to_float64`/
+/// `__from_float32`/`__from_float64`): the interpreter carries every float in one
 /// `f64`, and `Float32`/`Float64` are the SAME carrier at the language level
 /// (the narrowing to f32 precision is the emitters' concern), so each of these
 /// is the identity here. Bridged so a fixture that merely NAMES a sized float
@@ -424,10 +424,10 @@ fn int_fn_b(func: &str, args: &[Value]) -> Option<Flow> {
 fn float_sized_conv(func: &str, args: &[Value]) -> Option<Flow> {
     let n = as_float(args.first())?;
     match func {
-        "to_float64" | "from_float64" => Some(Flow::val(Value::Float(n))),
+        "__to_float64" | "__from_float64" => Some(Flow::val(Value::Float(n))),
         // f32 round-trips through the narrower precision, exactly as both
         // emitters do — the value a `Float32` can actually hold.
-        "to_float32" | "from_float32" => Some(Flow::val(Value::Float(n as f32 as f64))),
+        "__raw_to_float32" | "__from_float32" => Some(Flow::val(Value::Float(n as f32 as f64))),
         _ => None,
     }
 }
@@ -438,18 +438,11 @@ fn float_fn(func: &str, args: &[Value]) -> Option<Flow> {
         .or_else(|| float_text_fn(func, args))
 }
 
-/// The one-operand surface: rounding, sign, width conversion and the
-/// classification predicates.
+/// The one-operand surface: width conversion and the classification
+/// predicates.
 fn float_unary_fn(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
-        "from_int" => Value::Float(as_int(args.first())? as f64),
-        // A negative operand gives the fixed +qNaN (C-055), as runtime/rs
-        // almide_rt_float_sqrt and stdlib/float_core.almd do.
-        "sqrt" => Value::Float({
-            let x = as_float(args.first())?;
-            let r = x.sqrt();
-            if x < 0.0 { r.abs() } else { r }
-        }),
+        "__from_int" => Value::Float(as_int(args.first())? as f64),
         "is_nan" => Value::Bool(as_float(args.first())?.is_nan()),
         "is_infinite" => Value::Bool(as_float(args.first())?.is_infinite()),
         _ => return None,
@@ -482,7 +475,7 @@ fn math_vendored_libm(func: &str, args: &[Value]) -> Option<f64> {
         "cos" => vl::almide_rt_libm_cos(x),
         "ln" | "log" => vl::almide_rt_libm_log(x),
         "log10" => vl::almide_rt_libm_log10(x),
-        "fpow" | "powf" | "pow" => {
+        "__fpow" | "powf" | "__pow" => {
             let y = as_float(args.get(1))?;
             vl::almide_rt_libm_pow(x, y)
         }

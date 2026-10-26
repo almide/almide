@@ -205,7 +205,6 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     ("secret", ModuleEffects::Pure),
     ("option", ModuleEffects::Pure),
     ("result", ModuleEffects::Pure),
-    ("error", ModuleEffects::Pure),
     ("bytes", ModuleEffects::Pure),
     ("matrix", ModuleEffects::Pure),
     ("math", ModuleEffects::Pure),

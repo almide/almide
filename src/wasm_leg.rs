@@ -322,23 +322,16 @@ fn link_self_host(
                     crate::ir::CallTarget::Module { module, func, .. } => {
                         // The native JSON serializer formats floats through
                         // the linked float.to_string.
-                        if (module.as_str() == "json" || module.as_str() == "value")
-                            && func.as_str() == "stringify"
+                        if (module.as_str() == "json" && func.as_str() == "stringify")
+                            || (module.as_str() == "value" && func.as_str() == "__stringify")
                         {
                             out.insert("float.to_string".to_string());
                         }
-                        // string.from_bytes lowers as from_list ∘ the
-                        // linked lossy decoder (same WHATWG algorithm).
-                        if module.as_str() == "string" && func.as_str() == "from_bytes" {
-                            out.insert("bytes.to_string_lossy".to_string());
-                        }
-                        // value.object and the key renames box their pairs
-                        // through the linked `__vu_fold_pairs` (C-401: one
-                        // entry per key), which lives in value_utils — linked
-                        // through its registered surface value.pick.
-                        if module.as_str() == "value"
-                            && matches!(func.as_str(), "object" | "to_camel_case" | "to_snake_case")
-                        {
+                        // value.object boxes its pairs through the linked
+                        // `__vu_fold_pairs` (C-401: one entry per key), which
+                        // lives in value_utils — linked through its registered
+                        // surface value.pick.
+                        if module.as_str() == "value" && func.as_str() == "object" {
                             out.insert("value.pick".to_string());
                         }
                         // testing.assert_contains lowers as a native arm
@@ -380,7 +373,7 @@ fn link_self_host(
             // `**` on floats lowers to the LINKED vendored pow — the
             // demand is implicit in the operator.
             crate::ir::IrExprKind::BinOp { op: crate::ir::BinOp::PowFloat, .. } => {
-                out.insert("math.fpow".to_string());
+                out.insert("math.__fpow".to_string());
             }
             // `%` on floats lowers to the LINKED exact remainder (wasm has no
             // float rem instruction, #3080).
@@ -613,7 +606,7 @@ pub fn infer_module_capturing(
         // dropped: a bundled module inferred here is not in the context it
         // was written for, and measured on 2026-10-07 `http` reports 48
         // errors (its self-qualified `http.*` calls and types) and `json` 1
-        // (`JsonPath`) that are artifacts of that context, not defects. A
+        // (a runtime-backed type) that are artifacts of that context, not defects. A
         // cross-module call the checker cannot resolve here (args.almd had no
         // `import env`, so `env.args` was E003, not E006) is caught by the
         // context-free rule in scripts/check-cap-effect-consistency.sh.

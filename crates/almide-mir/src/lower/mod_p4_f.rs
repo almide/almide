@@ -140,26 +140,13 @@ fn list_call_name_flat_map_heap(func: &str, result_ty: &Ty) -> Option<String> {
 }
 
 fn list_call_name_hof_combinators(func: &str, arg_tys: &[Ty], result_ty: &Ty) -> Option<String> {
-    // Pattern-1 name-router (codopsy8 complexity sweep): the 5 groups below are
+    // Pattern-1 name-router (codopsy8 complexity sweep): the groups below are
     // independent, self-contained classifications (one per `func` name) — a pure
     // text-move split, called in the SAME order via early return. No logic change.
-    list_call_name_shuffle_choice(func, arg_tys)
-        .or_else(|| list_call_name_group_by(func, arg_tys, result_ty))
+    list_call_name_group_by(func, arg_tys, result_ty)
         .or_else(|| list_call_name_zip_with(func, arg_tys, result_ty))
         .or_else(|| list_call_name_scan(func, arg_tys))
         .or_else(|| list_call_name_unique_by(func, arg_tys))
-}
-
-/// Extracted from `list_call_name_hof_combinators` (codopsy8 complexity sweep, group 1 of
-/// 5): `list.shuffle` / `list.choice` ARE `random.shuffle`/`random.choice` under a second
-/// stdlib name (the same almide_rt intrinsics) — delegate to the random element-repr
-/// router. The Entropy capability stays honest: the witness derives from the LINKED
-/// self-host body (prim.random_get), not the call-site module name. Verbatim.
-fn list_call_name_shuffle_choice(func: &str, arg_tys: &[Ty]) -> Option<String> {
-    if matches!(func, "shuffle" | "choice") {
-        return Some(random_call_name(func, arg_tys));
-    }
-    None
 }
 
 /// Extracted from `list_call_name_hof_combinators` (codopsy8 complexity sweep, group 2 of
@@ -274,13 +261,13 @@ fn list_call_name_source_keyed(func: &str, arg_tys: &[Ty], result_ty: &Ty, enum_
 /// which double-frees under the nested Option[List[String]] drop (is_balanced's fold). Verbatim.
 fn list_call_name_drop_end(func: &str, arg_tys: &[Ty]) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
-    // The suffix-copy family (#808): drop_end / take_end / tail all clone a slot
+    // The suffix-copy family (#808): drop_end / take_end both clone a slot
     // range of the source, so a heap element needs the rc-aware `_str`/`_value`
     // twin (the generic i64 copy aliases each handle UN-OWNED — source and result
     // both release it at scope end, the rc_dec double-free trap). Any OTHER heap
     // element routes to an UNREGISTERED `_heapelem` name → the render walls
     // cleanly instead of double-freeing (the take_while-family precedent).
-    if !matches!(func, "drop_end" | "take_end" | "tail") {
+    if !matches!(func, "drop_end" | "take_end") {
         return None;
     }
     if let Some(Ty::Applied(TypeConstructorId::List, a)) = arg_tys.first() {
@@ -654,7 +641,7 @@ fn list_call_name_enumerate_str_source(func: &str, arg_tys: &[Ty]) -> Option<Str
 /// ([`list_call_name_heap_elem_combinators`]). Verbatim.
 fn list_call_name_str_elem_combinators(func: &str, arg_tys: &[Ty]) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
-    if !matches!(func, "take_while" | "drop_while" | "chunk" | "windows" | "window" | "reduce") {
+    if !matches!(func, "take_while" | "drop_while" | "chunk" | "window" | "reduce") {
         return None;
     }
     if let Some(Ty::Applied(TypeConstructorId::List, s)) = arg_tys.first() {
@@ -674,7 +661,7 @@ fn list_call_name_str_elem_combinators(func: &str, arg_tys: &[Ty]) -> Option<Str
 /// rc-correct heap variants land. Scalar element lists (Int/Float/Bool) are unaffected. Verbatim.
 fn list_call_name_heap_elem_combinators(func: &str, arg_tys: &[Ty]) -> Option<String> {
     use almide_lang::types::constructor::TypeConstructorId;
-    if !matches!(func, "chunk" | "windows" | "window" | "take_while" | "drop_while" | "reduce") {
+    if !matches!(func, "chunk" | "window" | "take_while" | "drop_while" | "reduce") {
         return None;
     }
     if let Some(Ty::Applied(TypeConstructorId::List, s)) = arg_tys.first() {

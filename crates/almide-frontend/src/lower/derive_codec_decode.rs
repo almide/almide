@@ -37,10 +37,10 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
         // the doc ("expected Object" at runtime).
         let field_var = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f_decl.ty.clone(), Mutability::Let, None);
 
-        // value.field(_v, "key") — returns Result[Value, String]
+        // value.__field(_v, "key") — returns Result[Value, String]
         let get_field_call = IrExpr {
             kind: IrExprKind::Call {
-                target: CallTarget::Module { module: sym("value"), func: sym("field"), def_id: None },
+                target: CallTarget::Module { module: sym("value"), func: sym("__field"), def_id: None },
                 args: vec![
                     IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None },
                     IrExpr { kind: IrExprKind::LitStr { value: key_name(f) }, ty: Ty::String, span: None, def_id: None },
@@ -147,7 +147,7 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
             }
             }
         } else {
-            // Required: value.field(_v, "key")? |> as_T?
+            // Required: value.__field(_v, "key")? |> as_T?
             let get_and_try = IrExpr {
                 kind: IrExprKind::Try { expr: Box::new(get_field_call) },
                 ty: value_ty.clone(), span: None, def_id: None,
@@ -199,7 +199,7 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
     // `@codec_slots("k0", "k1", …)` (#1679): the object keys in DECLARATION
     // order — the order `T.encode` writes them, so the order a round-tripped
     // document carries them. The native `DecodeSlotHintPass` reads it to hand
-    // every `value.field(_v, "k_i")` in this body its slot index; the wasm leg
+    // every `value.__field(_v, "k_i")` in this body its slot index; the wasm leg
     // ignores the attribute, and a user-written decode never carries it.
     let codec_slots = almide_lang::ast::Attribute {
         name: sym("codec_slots"),

@@ -652,6 +652,10 @@ impl Checker {
         if let Some(t) = self.infer_plus_op_concat(lc, rc, &lt) {
             return t;
         }
+        // Bytes concatenation (R-bytes-16): lowered to `bytes.__concat`.
+        if *lc == Ty::Bytes && *rc == Ty::Bytes {
+            return Ty::Bytes;
+        }
         // Matrix addition
         if *lc == Ty::Matrix || *rc == Ty::Matrix {
             return Ty::Matrix;
@@ -728,7 +732,7 @@ impl Checker {
                 "Unwrap the Result operand first: `!` propagates the error (effect fn body), \
                  `?? fallback` supplies a default, or `match` handles ok/err"
             } else {
-                "Use + with numeric types, String, or List"
+                "Use + with numeric types, String, List, or Bytes"
             };
             self.emit(super::err(
                 format!("operator '+' requires numeric, String, or List types but got {} and {}", lc.display(), rc.display()),
@@ -768,10 +772,10 @@ impl Checker {
             self.emit(super::err(
                 format!(
                     "operator '+' mixes sized numeric types {} and {} — \
-                     explicit conversion required (e.g. `.to_{}()`)",
+                     explicit conversion required (e.g. `{}.from(x)`)",
                     lc.display(), rc.display(),
                     lc.display().to_lowercase()),
-                "Convert one side with `.to_intN()` / `.to_floatN()` before the op",
+                "Convert one side with `<type>.from(x)` (`int32.from(x)`, `float64.from(x)`) before the op",
                 format!("operator +")));
             return Some(lc.clone());
         }

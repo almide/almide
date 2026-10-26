@@ -10,13 +10,6 @@ fn __hshare_elem(h: Int, i: Int) -> List[Int] = {
   v
 }
 
-fn list_get_or_hshare(xs: List[List[Int]], i: Int, default: List[Int]) -> List[Int] = {
-  let h = prim.handle(xs)
-  let len = prim.load32(h + 4)
-  if i < 0 then default
-  else if i >= len then default else __hshare_elem(h, i)
-}
-
 fn __take_h_fill(dh: Int, sh: Int, n: Int, i: Int) -> Int = if i >= n then 0
 else {
   let e = prim.load64(sh + 12 + i * 8)

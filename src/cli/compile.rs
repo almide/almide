@@ -6,8 +6,8 @@ use crate::{parse_file, canonicalize, check, diagnostic, resolve, project, out, 
 ///
 /// The second half is the module's name when the file is a BUNDLED stdlib
 /// module's staged source — the entry program then IS that module, and the
-/// checker must know (its own `type Endian` is the stdlib's bare `Endian`,
-/// not a user shadow `self.Endian`; and its body check is lenient, see
+/// checker must know (its own `type IpAddr` is the stdlib's bare `IpAddr`,
+/// not a user shadow `self.IpAddr`; and its body check is lenient, see
 /// `parse_and_typecheck_for_compile`). `None` for every user file.
 pub(crate) fn resolve_module_to_file(module: &str) -> (String, Option<String>) {
     if module.ends_with(".almd") {
@@ -116,7 +116,7 @@ fn resolve_module_name(module: Option<&str>) -> String {
 /// `bundled_module` is the entry program's identity when `file` is a bundled
 /// stdlib module's staged source (`resolve_module_to_file`): the checker
 /// keys that module's own owned types bare, and the body check is lenient —
-/// bundled sources reference runtime-backed nominal types (JsonPath,
+/// bundled sources reference runtime-backed nominal types (HttpCall,
 /// HttpRequest, ...) that only exist when the module is IMPORTED, and
 /// interface extraction doesn't need the body check to pass.
 pub(crate) fn parse_and_typecheck_for_compile(file: &str, bundled_module: Option<&str>) -> (almide::ast::Program, String, check::Checker) {

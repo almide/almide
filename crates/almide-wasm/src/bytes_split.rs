@@ -1,24 +1,21 @@
-//! `bytes.split` / `bytes.lines` — the List[Bytes] splitters (#1423
-//! stage 4). The self-host twins (`stdlib/bytes_core.almd`'s split,
-//! `stdlib/bytes_split.almd`'s lines) build their
+//! `bytes.split` — the List[Bytes] splitter (#1423 stage 4). The self-host
+//! twin (`stdlib/bytes_core.almd`'s split) builds its
 //! result through `prim.alloc_list_str` + `prim.store_str(lh + 12 + idx *
 //! 8, ..)` — the incumbent's 8-byte slot stride written RAW, where this
-//! layout packs a List[Bytes] as 4-byte handles — so they cannot link
-//! (the coupled-type proxy is right about them). Both are native arms in
+//! layout packs a List[Bytes] as 4-byte handles — so it cannot link
+//! (the coupled-type proxy is right about it). It is a native arm in
 //! the `chunks` shape instead: two passes over the payload (count, then
 //! fill), every piece a fresh block copied out of the source, handles
 //! stored into a list block sized from the count. Semantics are
 //! `runtime/rs/src/bytes.rs` verbatim: `split` on an EMPTY separator is
 //! the one-element list holding a copy of the input, otherwise a
 //! non-overlapping left-to-right scan (KMP searches, crate::kmp) whose
-//! tail piece (possibly empty)
-//! is always pushed; `lines` splits on `\n` (no `\r` handling) and pushes
-//! the final tail only when it is non-empty.
+//! tail piece (possibly empty) is always pushed.
 
 use almide_ir::IrExpr;
 use wasm_encoder::BlockType;
 
-use crate::bytes::{byte_at, BYTES};
+use crate::bytes::BYTES;
 use crate::emitter::Emitter;
 use crate::*;
 
@@ -46,60 +43,6 @@ impl Emitter<'_> {
         i.memory_copy(0, 0);
         i.local_get(ho).local_get(hw).i32_add().local_get(hp).i32_store(slot_memarg(0));
         i.local_get(hw).i32_const(4).i32_add().local_set(hw);
-    }
-
-    /// lines: `b.lines()` — pieces between `\n` bytes, the trailing
-    /// piece only when non-empty (native `if start < b.len()`).
-    pub(crate) fn lower_bytes_lines(&mut self, b: &IrExpr) -> ArmResult {
-        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
-        let hb = self.hold_i32()?;
-        let hn = self.hold_i32()?;
-        let hc = self.hold_i32()?;
-        let hs = self.hold_i32()?;
-        let he = self.hold_i32()?;
-        let ho = self.hold_i32()?;
-        let hw = self.hold_i32()?;
-        let hp = self.hold_i32()?;
-        let mut i = self.f.instructions();
-        i.local_set(hb);
-        i.local_get(hb).i32_load(len_memarg()).local_set(hn);
-        // pass 1: count = #'\n' + (n > 0 && last != '\n')
-        i.i32_const(0).local_set(hc);
-        i.i32_const(0).local_set(hs);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hs).local_get(hn).i32_ge_u().br_if(1);
-        i.local_get(hb).local_get(hs).i32_add().i32_load8_u(byte_at()).i32_const(10).i32_eq();
-        i.local_get(hc).i32_add().local_set(hc);
-        i.local_get(hs).i32_const(1).i32_add().local_set(hs);
-        i.br(0).end().end();
-        i.local_get(hn).i32_const(0).i32_gt_u();
-        i.local_get(hb).local_get(hn).i32_add().i32_const(1).i32_sub().i32_load8_u(byte_at());
-        i.i32_const(10).i32_ne();
-        i.i32_and().local_get(hc).i32_add().local_set(hc);
-        // the list block: count × 4-byte handles
-        i.local_get(hc).i32_const(4).i32_mul().call(F_ALLOC).local_set(ho);
-        i.i32_const(0).local_set(hw);
-        i.i32_const(0).local_set(hs);
-        // pass 2: each piece [start, next '\n' or n)
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(hs).local_get(hn).i32_ge_u().br_if(1);
-        i.local_get(hs).local_set(he);
-        i.block(BlockType::Empty).loop_(BlockType::Empty);
-        i.local_get(he).local_get(hn).i32_ge_u().br_if(1);
-        i.local_get(hb).local_get(he).i32_add().i32_load8_u(byte_at()).i32_const(10).i32_eq().br_if(1);
-        i.local_get(he).i32_const(1).i32_add().local_set(he);
-        i.br(0).end().end();
-        let _ = i;
-        self.emit_bytes_piece(&PieceSink { hb, ho, hw, hp }, hs, he);
-        let mut i = self.f.instructions();
-        i.local_get(he).i32_const(1).i32_add().local_set(hs);
-        i.br(0).end().end();
-        i.local_get(ho);
-        let _ = i;
-        for _ in 0..8 {
-            self.release_i32();
-        }
-        Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(BYTES)))))
     }
 
     /// split: `b.split(sep)` — an empty separator yields `[copy of b]`;

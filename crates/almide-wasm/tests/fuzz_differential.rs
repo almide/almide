@@ -247,7 +247,7 @@ impl Gen {
     fn expr_str(&mut self, depth: usize) -> String {
             match (self.rng.below(6), self.var_of(Ty::MapIS)) {
                 (0, Some(m)) => format!(
-                    "map.get_or({m}, {}, {})",
+                    "map.get({m}, {}) ?? ({})",
                     self.expr(Ty::Int, depth.saturating_sub(1)),
                     self.leaf(Ty::Str)
                 ),

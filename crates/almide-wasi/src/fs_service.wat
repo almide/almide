@@ -394,7 +394,7 @@
       (then (return (i32.add (global.get $fsp) (i32.const 8192)) (global.get $cwd_len))))
     (i32.const 0) (i32.const 0))
 
-  ;; `$TMPDIR`, else "/tmp" (the self-hosted env.temp_dir's answer).
+  ;; `$TMPDIR`, else "/tmp" (the self-hosted fs.temp_dir's answer).
   (func $tmp (result i32 i32)
     (local $p i32) (local $l i32)
     (call $s_tmpdir) (call $env_get) (local.set $l) (local.set $p)
@@ -797,16 +797,6 @@
                                   (i32.const 0) (local.get $e)))))
     (local.set $o (call $alloc (i32.const 8)))
     (i64.store (local.get $o) (i64.load offset=96 (global.get $fsp)))
-    (call $ok (local.get $o) (i32.const 8)))
-
-  (func $op_modified_at (param $op i32) (param $a i32) (param $al i32) (param $b i32) (param $bl i32) (result i64)
-    (local $e i32) (local $o i32)
-    (local.set $e (call $stat (local.get $a) (local.get $al) (i32.const 1)))
-    (if (local.get $e)
-      (then (return (call $fail_e (local.get $op) (local.get $a) (local.get $al) (i32.const 0) (i32.const 0)
-                                  (i32.const 0) (local.get $e)))))
-    (local.set $o (call $alloc (i32.const 8)))
-    (i64.store (local.get $o) (call $mtime_secs))
     (call $ok (local.get $o) (i32.const 8)))
 
   ;; fs.stat: [size, is_dir, is_file, modified] as i64 LE (host op 38).

@@ -38,7 +38,7 @@ impl Emitter<'_> {
 
     fn lower_host_leaf_op(&mut self, name: &str, args: &[IrExpr]) -> Result<Option<SliceTy>, EmitError> {
         use crate::fs_meta::{
-            OP_HTTP_FRAMED_BYTES, OP_HTTP_FRAMED_RESPONSE, OP_HTTP_FRAMED_STATUS, OP_HTTP_FRAMED_TEXT, OP_HTTP_SERVE_BIND, OP_HTTP_SERVE_NEXT,
+            OP_HTTP_FRAMED_RESPONSE, OP_HTTP_FRAMED_STATUS, OP_HTTP_FRAMED_TEXT, OP_HTTP_SERVE_BIND, OP_HTTP_SERVE_NEXT,
             OP_HTTP_SERVE_REPLY, PROC_LEAVES,
         };
         // The http_framed leaves (#1710 increment 3): url in a, the
@@ -47,7 +47,6 @@ impl Emitter<'_> {
         let framed = match name {
             "__http_framed_text" => Some(OP_HTTP_FRAMED_TEXT),
             "__http_framed_status" => Some(OP_HTTP_FRAMED_STATUS),
-            "__http_framed_bytes" => Some(OP_HTTP_FRAMED_BYTES),
             "__http_framed_response" => Some(OP_HTTP_FRAMED_RESPONSE),
             _ => None,
         };
@@ -57,8 +56,7 @@ impl Emitter<'_> {
         if let Some(op) = framed.or(proc) {
             let [a, b] = args else { return unsup("host-leaf-arity") };
             self.fs_call_str2(a, b, op)?;
-            let t = if op == OP_HTTP_FRAMED_BYTES { self.fs_result_bytes()? } else { self.fs_result_string()? };
-            return Ok(Some(t));
+            return Ok(Some(self.fs_result_string()?));
         }
         // The http.serve loop's leaves (#2650): bind (port text), next (the
         // request as a List[String] of frames), reply (the response's cells

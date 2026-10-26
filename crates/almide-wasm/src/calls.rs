@@ -567,7 +567,6 @@ impl Emitter<'_> {
                 // own string buffer, and builds Option via typed constructors.
                 "string_byte_slice",
                 "string_to_int",
-                "int_from_hex",
                 "float_parse",
                 // The JSON parser: raw ops build its OWN string buffers
                 // (layout-shared); every Value comes through the public

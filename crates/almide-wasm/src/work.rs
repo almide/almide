@@ -68,14 +68,6 @@ pub(crate) enum Helper {
     /// inlines the type's shape, so a type that contains itself has to
     /// become a CALL somewhere or the emitter recurses forever.
     NamedOp { op: NamedOp, ti: u32 },
-    /// `$jp_set(j, path, k, nv) -> Value` — json.set_path's recursive
-    /// core over THIS backend's Value layout.
-    JsonPathSet { vdec: u32 },
-    /// `$jp_remove(j, path, k) -> Value` — json.remove_path's core.
-    JsonPathRemove,
-    /// `$jv_nests_past(v, budget) -> i32` — the Value holds containers
-    /// nested more than `budget` deep (json.set_path's bound, #4209).
-    JsonNestsPast,
     /// `$scan_deep_<key>(block, stride, off, needle) -> i32` — the scan
     /// family's DEEP lane: compound keys (tuples, records) compare by
     /// the type-directed `==` instead of a word/byte class.

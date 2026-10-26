@@ -97,7 +97,7 @@ effect fn main() -> Unit = {
   for i in 0..<100 {
     {M}
   }
-  println("${bytes.get_or(b, 5, 0)}")
+  println("${bytes.get(b, 5) ?? 0}")
 }
 "#,
     ),

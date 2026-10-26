@@ -1,14 +1,8 @@
 // json — the FORMAT over the `value.*` data model: parse / stringify /
-// stringify_pretty, the json-branded path API, and the typed-key
-// conveniences. Constructors and accessors live on `value.*` — the second
+// stringify_pretty. Constructors and accessors live on `value.*` — the second
 // names (`json.null`, `json.as_int`, `value.get`, …) were dropped after
 // their one-release E040 deprecation window (#1078); every fn on this
-// surface has exactly one name. Runtime impls stay in `runtime/rs/src/json.rs`;
-// `JsonPath` is the opaque path-traversal nominal type.
-//
-// Runtime ABI — `j: &Value`, `key: &str`, `path: &AlmideJsonPath`, etc.
-// `set_path` returns `Result[Value, String]`, so callers propagate via
-// `!` / `?` / match.
+// surface has exactly one name. Runtime impls stay in `runtime/rs/src/json.rs`.
 /// Value or err; lenient, trailing text ignored; nesting over 1000 is err.
 @intrinsic("almide_rt_json_parse")
 fn parse(text: String) -> Result[Value, String] = _
@@ -23,12 +17,3 @@ fn stringify(v: Value) -> String = _
 /// JSON with 2-space indent; [] and {} inline, NaN/inf null.
 @intrinsic("almide_json_stringify_pretty")
 fn stringify_pretty(v: Value) -> String = _
-
-// ── key-based typed extraction ──
-// ── path API ──
-// The declared repr of a JsonPath (#4204): `$`, then `.name` for each field
-// step and `[i]` for each index step, on every leg. Named after the
-// runtime-backed row (`stdlib_info::runtime_backed_repr_surface`).
-@intrinsic("almide_rt_json_path_repr")
-@borrow_ref(path)
-fn __json_path_repr(path: JsonPath) -> String = _

@@ -7,13 +7,10 @@
 // standard `prepare_lambda` lambda-prep and renders as an ordinary
 // Rust closure.
 //
-// `MatrixFusionPass` runs *before* `StdlibLoweringPass` (see
-// `crates/almide-codegen/src/target.rs`), so `matrix.__add(matrix.scale(
-// a, ka), matrix.scale(b, kb))` already collapses to `matrix.__fma(a,
-// ka, b, kb)` by the time the InlineRust dispatch fires. No
-// fusion-preserving reorder is needed — the fused form is still a
-// plain `CallTarget::Module { module: "matrix", func: "fma" }`, which
-// the bundled `@inline_rust` path dispatches directly.
+// The operators desugar to the internal `__add` / `__sub` / `__mul` /
+// `__div` / `__neg` below (R-matrix-14); `__mul_scaled`, `__fma` and
+// `__fma3` are the fused kernels only the `@rewrite` rules and the
+// desugars emit (R-matrix-02).
 // ── construction + metadata ──
 /// rows x cols of 0.0; negatives clamp to 0.
 @intrinsic("almide_rt_matrix_zeros")

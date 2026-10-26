@@ -186,7 +186,7 @@ pub struct Interpreter<'a> {
     /// then payload, exactly as native's derived `Ord` and both wasm legs do.
     pub(crate) variant_tags: crate::value::VariantTags,
     /// The opaque NEWTYPE decls (`mod type SafeHtml = String`, `local type
-    /// JsonPath = Int`) under the identity their ctor call and ctor pattern
+    /// Path = Int`) under the identity their ctor call and ctor pattern
     /// carry into the IR — bare for a bundled module's own or the entry
     /// program's plain one, `self.Value` for the entry program's shadow of a
     /// stdlib-owned name, `m.Token` for a module's (#1835). Both backends

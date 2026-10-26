@@ -297,17 +297,6 @@ pub fn almide_http_request_response(method: &str, url: &str, body: &str, headers
         .map(|(status, headers, body)| AlmideHttpResponse { status, body, headers })
 })(); __almide_r.map_err(Into::into) }
 
-// ── Binary client ──
-//
-// Mirrors the String client but returns the raw response body as `Vec<u8>`
-// (Almide `Bytes`) with NO UTF-8 conversion, so binary payloads (images,
-// audio — e.g. TTS mp3/wav) survive byte-identical.
-
-
-pub fn almide_rt_http___request_bytes(method: &str, url: &str, body: &str, headers: &[AlmideString]) -> Result<Vec<u8>, AlmideString> { let __almide_r: Result<Vec<u8>, String> = (|| {
-    request_bytes(method, url, body, &header_pairs(headers))
-})(); __almide_r.map_err(Into::into) }
-
 // ── Call handle (#2631) ──
 //
 // The in-flight call itself — the worker thread, the limits, cancel, the

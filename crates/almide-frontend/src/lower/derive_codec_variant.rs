@@ -140,7 +140,7 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
 
     // TUPLE-FREE tag/payload split (so neither side materializes a `(String, Value)` tuple the
     // trust-spine cannot lower): read the tag via `value.variant_tag(_v)` (Result[String, String])
-    // and the payload via `value.field(_v, _tag)` (Result[Value, String]) — both simple Results the
+    // and the payload via `value.__field(_v, _tag)` (Result[Value, String]) — both simple Results the
     // trust-spine already lowers, wrapped as `match tag { ok(_tag) => match field { ok(_payload) =>
     // <if-chain>, err(e) => err(e) }, err(e) => err(e) }`.
     let var_tag = wk.vt.alloc(sym("_tag"), Ty::String, Mutability::Let, None);
@@ -270,7 +270,7 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
                         let get_field = IrExpr {
                             kind: IrExprKind::Try { expr: Box::new(IrExpr {
                                 kind: IrExprKind::Call {
-                                    target: CallTarget::Module { module: sym("value"), func: sym("field"), def_id: None },
+                                    target: CallTarget::Module { module: sym("value"), func: sym("__field"), def_id: None },
                                     args: vec![
                                         IrExpr { kind: IrExprKind::Var { id: var_payload }, ty: value_ty.clone(), span: None, def_id: None },
                                         IrExpr { kind: IrExprKind::LitStr { value: key.clone() }, ty: Ty::String, span: None, def_id: None },
@@ -310,10 +310,10 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
         };
     }
 
-    // Inner: `match value.field(_v, _tag) { ok(_payload) => <if-chain>, err(_e2) => err(_e2) }`.
+    // Inner: `match value.__field(_v, _tag) { ok(_payload) => <if-chain>, err(_e2) => err(_e2) }`.
     let field_call = IrExpr {
         kind: IrExprKind::Call {
-            target: CallTarget::Module { module: sym("value"), func: sym("field"), def_id: None },
+            target: CallTarget::Module { module: sym("value"), func: sym("__field"), def_id: None },
             args: vec![
                 IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None },
                 IrExpr { kind: IrExprKind::Var { id: var_tag }, ty: Ty::String, span: None, def_id: None },
@@ -336,16 +336,16 @@ pub(super) fn auto_derive_variant_decode(wk: &mut CodecWk, type_ty: &Ty, cases: 
         },
         ty: result_ty.clone(), span: None, def_id: None,
     };
-    // `let _tag = value.keys(_v) |> list.get(0) ?? ""` — the variant tag (first Object key) as a
-    // PLAIN String (NOT a Result), built from RECOGNIZED self-host module calls (value.keys /
+    // `let _tag = value.__keys(_v) |> list.get(0) ?? ""` — the variant tag (first Object key) as a
+    // PLAIN String (NOT a Result), built from RECOGNIZED self-host module calls (value.__keys /
     // list.get / `??`) so the trust-spine materializes it. A simple `let` bind (not the Ok-payload of
     // an outer Result-match, which the trust-spine walls when it wraps a heap-String subject whose arm
-    // re-borrows the same param). A non-Object `_v` → `value.keys` returns `[]` → `""` → `value.field`
+    // re-borrows the same param). A non-Object `_v` → `value.__keys` returns `[]` → `""` → `value.__field`
     // then yields the same "expected Object" the strict tuple path did.
     let keys_ty = Ty::list(Ty::String);
     let keys_call = IrExpr {
         kind: IrExprKind::Call {
-            target: CallTarget::Module { module: sym("value"), func: sym("keys"), def_id: None },
+            target: CallTarget::Module { module: sym("value"), func: sym("__keys"), def_id: None },
             args: vec![IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None }],
             type_args: vec![],
         },
@@ -755,7 +755,7 @@ pub(super) fn derive_container_helpers(
         ),
     );
 
-    // __decode_option_T(v, key) = match value.field(v, key) {
+    // __decode_option_T(v, key) = match value.__field(v, key) {
     //   err(_) => ok(none),
     //   ok(fv) => if fv == value.null() then ok(none)
     //             else { let x = T.decode(fv)?; ok(some(x)) }
@@ -806,7 +806,7 @@ pub(super) fn derive_container_helpers(
             IrExprKind::Match {
                 subject: Box::new(call_mod(
                     "value",
-                    "field",
+                    "__field",
                     vec![evar(v_f, &value_ty), evar(key_f, &Ty::String)],
                     Ty::result(value_ty.clone(), Ty::String),
                 )),

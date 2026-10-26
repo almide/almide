@@ -133,14 +133,6 @@ fn __msv_elem(h: Int, n: Int, idx: Int) -> Map[String, String] = {
   v
 }
 
-fn map_get_or_msv(m: Map[String, Map[String, String]], k: String, default: Map[String, String]) -> Map[String, String] = {
-  let h = prim.handle(m)
-  let n = prim.load32(h + 4)
-  let idx = __msv_find(h, n, k, 0)
-  if idx < 0 then default
-  else __msv_elem(h, n, idx)
-}
-
 // Free an INNER `Map[String, String]` handle: sweep its 2m String slots at last ref,
 // then the block (a flat rc_dec alone would leak every inner key/value String).
 fn __drop_msv_inner_slots(ih: Int, m2: Int, j: Int) -> Unit = if j >= m2 then ()

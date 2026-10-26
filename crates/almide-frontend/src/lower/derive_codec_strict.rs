@@ -16,8 +16,8 @@
 //            An unknown tag is `T.decode`'s own `unknown variant for T`.
 //
 // Every worker is a dotted per-type fn (`T.__strict…`), built only from the
-// calls the decode derive already uses on every leg (`value.keys`,
-// `value.omit`, `value.field`, `value.as_array`, `list.get`, `list.len`,
+// calls the decode derive already uses on every leg (`value.__keys`,
+// `value.omit`, `value.__field`, `value.as_array`, `list.get`, `list.len`,
 // `__err_at`, `__err_at_index`), so no leg needs a new helper. A value of the
 // wrong shape walks clean: `T.decode` reports the shape error itself.
 
@@ -54,11 +54,11 @@ fn first_nonempty(wk: &mut CodecWk, msgs: Vec<IrExpr>) -> IrExpr {
     acc
 }
 
-/// The first key of `v` outside `allowed` (`list.get(value.keys(value.omit(v, allowed)), 0)`).
+/// The first key of `v` outside `allowed` (`list.get(value.__keys(value.omit(v, allowed)), 0)`).
 fn first_unknown_key(v: IrExpr, allowed: Vec<IrExpr>) -> IrExpr {
     let value_ty = Ty::Named(sym("Value"), vec![]);
     let omitted = call_mod_("value", "omit", vec![v, e_(IrExprKind::List { elements: allowed }, Ty::list(Ty::String))], value_ty);
-    let keys = call_mod_("value", "keys", vec![omitted], Ty::list(Ty::String));
+    let keys = call_mod_("value", "__keys", vec![omitted], Ty::list(Ty::String));
     call_mod_("list", "get", vec![keys, e_(IrExprKind::LitInt { value: 0 }, Ty::Int)], Ty::option(Ty::String))
 }
 
@@ -198,7 +198,7 @@ fn unknown_key_expr(wk: &mut CodecWk, v: IrExpr, allowed: Vec<IrExpr>) -> IrExpr
 }
 
 /// A worker `T.__strict_<tag>(v) -> String` whose body is
-/// `match value.field(v, "<key>") { ok(x) => at(<walk x>, "<key>"), err(_) => "" }`.
+/// `match value.__field(v, "<key>") { ok(x) => at(<walk x>, "<key>"), err(_) => "" }`.
 fn strict_field_worker(wk: &mut CodecWk, tag: &str, key: &str, walk_ty: &Ty) -> Option<String> {
     let value_ty = Ty::Named(sym("Value"), vec![]);
     let name = format!("{}.__strict_f_{}", wk.type_name, tag);
@@ -211,7 +211,7 @@ fn strict_field_worker(wk: &mut CodecWk, tag: &str, key: &str, walk_ty: &Ty) -> 
     let at = strict_at_worker(wk);
     let v = wk.vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
     let body = e_(IrExprKind::Match {
-        subject: Box::new(call_mod_("value", "field", vec![v_var(v), s_lit(key)], Ty::result(value_ty.clone(), Ty::String))),
+        subject: Box::new(call_mod_("value", "__field", vec![v_var(v), s_lit(key)], Ty::result(value_ty.clone(), Ty::String))),
         arms: vec![
             IrMatchArm {
                 pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: x, ty: value_ty.clone() }) },
@@ -303,11 +303,11 @@ pub(super) fn auto_derive_variant_strict(wk: &mut CodecWk, cases: &[IrVariantDec
             }
         };
         if let Some(walk) = payload_walk {
-            // T.__strict_c_<Case>(v) = match value.field(v, "<Case>") { ok(p) => at(walk(p), "<Case>"), err(_) => "" }
+            // T.__strict_c_<Case>(v) = match value.__field(v, "<Case>") { ok(p) => at(walk(p), "<Case>"), err(_) => "" }
             let v = wk.vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
             let p = wk.vt.alloc(sym("_p"), value_ty.clone(), Mutability::Let, None);
             let body = e_(IrExprKind::Match {
-                subject: Box::new(call_mod_("value", "field", vec![v_var(v), s_lit(&cname)], Ty::result(value_ty.clone(), Ty::String))),
+                subject: Box::new(call_mod_("value", "__field", vec![v_var(v), s_lit(&cname)], Ty::result(value_ty.clone(), Ty::String))),
                 arms: vec![
                     IrMatchArm {
                         pattern: IrPattern::Ok { inner: Box::new(IrPattern::Bind { var: p, ty: value_ty.clone() }) },
@@ -334,12 +334,12 @@ pub(super) fn auto_derive_variant_strict(wk: &mut CodecWk, cases: &[IrVariantDec
         }
         wk.out.push(mk_worker_fn(&case_fn, vec![(v, "_v", value_ty.clone()), (tag, "_tag", Ty::String)], Ty::String, chain));
     }
-    // T.__strict(v) = { let tag = list.get(value.keys(v), 0) ?? ""; first_nonempty([unknown key after the tag, case walk]) }
+    // T.__strict(v) = { let tag = list.get(value.__keys(v), 0) ?? ""; first_nonempty([unknown key after the tag, case walk]) }
     let v = wk.vt.alloc(sym("_v"), value_ty.clone(), Mutability::Let, None);
     let tag = wk.vt.alloc(sym("_tag"), Ty::String, Mutability::Let, None);
     let tag_expr = e_(IrExprKind::UnwrapOr {
         expr: Box::new(call_mod_("list", "get", vec![
-            call_mod_("value", "keys", vec![v_var(v)], Ty::list(Ty::String)),
+            call_mod_("value", "__keys", vec![v_var(v)], Ty::list(Ty::String)),
             e_(IrExprKind::LitInt { value: 0 }, Ty::Int),
         ], Ty::option(Ty::String))),
         fallback: Box::new(s_lit("")),

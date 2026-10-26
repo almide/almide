@@ -32,7 +32,6 @@ impl Emitter<'_> {
             // mut clear (native s.clear()): var write-back of the empty
             // string (#1423 stage 4).
             ("clear", [v]) => self.lower_string_clear(v),
-            ("from_bytes", [xs]) => self.lower_string_from_bytes(xs),
             ("is_empty", [s]) => {
                 self.lower_arg(s, Some(STR), ArgMode::Borrow)?;
                 self.f.instructions().i32_load(len_memarg()).i32_eqz();
@@ -44,7 +43,6 @@ impl Emitter<'_> {
             ("lines", [s]) => self.lower_string_lines(s),
             ("to_list", [s]) => self.lower_string_chars(s),
             ("capitalize", [s]) => self.lower_string_capitalize(s),
-            ("run_length_encode", [s]) => self.lower_string_rle(s),
             ("to_codepoint", [s]) => self.lower_string_codepoint(s),
             ("reverse", [s]) => self.lower_string_reverse(s),
             ("first" | "last", [s]) => self.lower_string_first_last(func == "last", s),
@@ -383,24 +381,6 @@ impl Emitter<'_> {
         Ok(Some(Lowered::scalar(BOOL)))
     }
 
-    /// from_bytes = from_list ∘ the NATIVE WHATWG lossy helper
-    /// (String::from_utf8_lossy verbatim). The self-host
-    /// string_from_bytes reads the list len header raw and the
-    /// self-host bytes_to_string_lossy is a RAW COPY (not lossy) —
-    /// both unlinkable; the helper is the one true decoder.
-    fn lower_string_from_bytes(&mut self, xs: &IrExpr) -> ArmResult {
-        match self.lower_bytes_call("from_list", std::slice::from_ref(xs))? {
-            Some(Lowered { ty: SliceTy::Scalar(Scalar::Bytes), .. }) => {}
-            other => return unsup(&format!("from-bytes-of:{other:?}")),
-        }
-        // The Bytes block is this arm's own intermediate: decoded, then
-        // released (the 16 B per call the ownership matrix showed).
-        let hb = self.hold_i32()?;
-        let lossy = self.work.helper(Helper::Utf8Lossy);
-        self.f.instructions().local_tee(hb).call(lossy).local_get(hb).call(F_DEC_FLAT);
-        self.release_i32();
-        Ok(Some(Lowered::owned(STR)))
-    }
 }
 
 impl Emitter<'_> {
@@ -436,137 +416,9 @@ impl Emitter<'_> {
                 self.f.instructions().i32_const(i32::from(first)).call(F_STR_REPLACE);
                 Ok(Some(Lowered::owned(STR)))
             }
-            // string.join(xs, sep) is list.join with the module spelled
-            // the other way — same F_LIST_JOIN, same List[String] demand.
-            ("join", [xs, sep]) => {
-                match self.lower_arg(xs, None, ArgMode::Borrow)? {
-                    SliceTy::List(h) if self.types.el(h) == STR => {}
-                    other => return unsup(&format!("string-join-of:{other:?}")),
-                }
-                self.lower_arg(sep, Some(STR), ArgMode::Borrow)?;
-                self.f.instructions().call(F_LIST_JOIN);
-                Ok(Some(Lowered::owned(STR)))
-            }
             _ => return Ok(None),
         }
         .map(Some)
-    }
-}
-
-impl Emitter<'_> {
-    /// #1423 stage 4 — the `error` module trio, semantics verbatim from
-    /// runtime/rs/src/error.rs:
-    ///   message(r)      = err payload, or "" on ok
-    ///   context(r, msg) = ok passes through; err rebuilds as
-    ///                     "{msg}: {e}"
-    ///   chain(outer, c) = "{outer}\ncaused by: {c}"
-    /// Ok(None) = not an error-module fn handled here.
-    pub(crate) fn lower_error_call(
-        &mut self,
-        func: &str,
-        args: &[IrExpr],
-    ) -> Result<Option<Option<Lowered>>, EmitError> {
-        let out: SliceTy = match (func, args) {
-            ("message", [r]) => {
-                let got = self.lower_arg(r, None, ArgMode::Borrow)?;
-                let SliceTy::Result(_, er) = got else {
-                    return unsup(&format!("error-message-of:{got:?}"));
-                };
-                if self.types.el(er) != STR {
-                    return unsup("error-message-err-ty");
-                }
-                let hr = self.hold_i32()?;
-                let empty = self.pool.intern("");
-                let mut i = self.f.instructions();
-                i.local_tee(hr)
-                    .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                    .i32_eqz()
-                    .if_(BlockType::Result(ValType::I32));
-                i.i32_const(empty as i32);
-                i.else_();
-                // `r` is borrowed, so the payload handed out as owned needs
-                // its own reference: without it a temporary `r` frees it
-                // after the call, and a live `r` loses it when the message
-                // is dropped.
-                i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_FIELD)).call(F_INC);
-                i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_FIELD));
-                i.end();
-                let _ = i;
-                self.release_i32();
-                STR
-            }
-            ("context", [r, msg]) => {
-                // Pass-through arm: RETAINED in, owned out (the ok path hands the
-                // input back; the err path releases it after reading its message).
-                let got = self.lower_arg(r, None, ArgMode::Retain)?;
-                let dec_in = self.dec_fn_of(got);
-                let SliceTy::Result(ok_h, er) = got else {
-                    return unsup(&format!("error-context-of:{got:?}"));
-                };
-                if self.types.el(er) != STR {
-                    return unsup("error-context-err-ty");
-                }
-                let hr = self.hold_i32()?;
-                self.f.instructions().local_set(hr);
-                self.lower_arg(msg, Some(STR), ArgMode::Borrow)?;
-                let hm = self.hold_i32()?;
-                let sep = self.pool.intern(": ");
-                // The label is escaped by C-418's rule (#4126), as on native.
-                let et = self.work.helper(Helper::ErrText);
-                let hout = self.hold_i32()?;
-                let hpre = self.hold_i32()?;
-                let he = self.hold_i32()?;
-                let mut i = self.f.instructions();
-                i.local_set(hm);
-                i.local_get(hr)
-                    .i32_load(slot_memarg(almide_layout::SUM_TAG))
-                    .i32_eqz()
-                    .if_(BlockType::Result(ValType::I32));
-                // ok: pass the Result through untouched.
-                i.local_get(hr);
-                i.else_();
-                // err: "{msg}: {e}" in a fresh err block. "{msg}: " is a block
-                // of this arm's own making: parked, consumed by the outer
-                // concat, released (as `chain` does).
-                i.local_get(hm).call(et).local_tee(he);
-                i.i32_const(sep as i32).call(F_CONCAT).local_tee(hpre);
-                i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_FIELD));
-                i.call(F_CONCAT).local_set(hm);
-                i.local_get(hpre).call(F_DEC_FLAT);
-                i.local_get(he).call(F_DEC_FLAT);
-                i.i32_const(16)
-                    .call(F_ALLOC)
-                    .local_tee(hout)
-                    .i32_const(1)
-                    .i32_store(slot_memarg(almide_layout::SUM_TAG));
-                i.local_get(hout).local_get(hm).i32_store(slot_memarg(almide_layout::SUM_FIELD));
-                i.local_get(hr).call(dec_in);
-                i.local_get(hout);
-                i.end();
-                let _ = i;
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                self.release_i32();
-                SliceTy::Result(ok_h, er)
-            }
-            ("chain", [outer, cause]) => {
-                self.lower_arg(outer, Some(STR), ArgMode::Borrow)?;
-                let sep = self.pool.intern("\ncaused by: ");
-                // The inner concat is a block of this arm's own making:
-                // parked, consumed by the outer concat, released (it was
-                // the 32 B per call the ownership matrix showed).
-                let hm = self.hold_i32()?;
-                self.f.instructions().i32_const(sep as i32).call(F_CONCAT).local_tee(hm);
-                self.lower_arg(cause, Some(STR), ArgMode::Borrow)?;
-                self.f.instructions().call(F_CONCAT).local_get(hm).call(F_DEC_FLAT);
-                self.release_i32();
-                STR
-            }
-            _ => return Ok(None),
-        };
-        Ok(Some(Some(Lowered::owned(out))))
     }
 }
 

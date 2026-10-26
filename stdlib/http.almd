@@ -198,8 +198,8 @@ fn query_params(req: HttpRequest) -> Result[List[(String, String)], String] = ma
 // ANY complete response is `Ok` — a 404 or a 3xx included; `Err` is a
 // transport failure only. Redirects are NEVER followed: the 3xx and its
 // `Location` header are the answer. The one-shot forms are `get` / `request`
-// (the body text), `get_response` / `send` (the whole response) and
-// `get_bytes` / `request_bytes` (the raw body bytes); `start` is the handle.
+// (the body text) and `get_response` / `send` (the whole response); `start`
+// is the handle.
 /// Body even for a 404; err only on transport.
 @intrinsic("almide_http_get")
 effect fn get(url: String) -> Result[String, String] = _
@@ -233,10 +233,6 @@ effect fn send(req: HttpRequest) -> Result[HttpResponse, String] = http.__reques
 @intrinsic("almide_http_request_response")
 @borrow_ref(flat)
 effect fn __request_response(method: String, url: String, body: String, flat: List[String]) -> Result[HttpResponse, String] = _
-
-@intrinsic("almide_rt_http___request_bytes")
-@borrow_ref(flat)
-effect fn __request_bytes(method: String, url: String, body: String, flat: List[String]) -> Result[Bytes, String] = _
 
 // ── Call handle and per-call limits (#2631) ──
 //

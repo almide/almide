@@ -206,10 +206,12 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
     // sized-module cell (`uint8.to_int8_checked`, …) walled value-position
     // matches (#958). `checked_conversion_family_is_admitted` derives the
     // cell list from the stdlib sources, so a new cell cannot drift out of
-    // this predicate again.
+    // this predicate again. The internal `__`-named cells (`int.__to_int8_checked`)
+    // are the same shape under their internal name.
+    let cell = func.strip_prefix("__").unwrap_or(func);
     if is_numeric_module(module)
-        && (func.starts_with("to_") || func.starts_with("from_"))
-        && func.ends_with("_checked")
+        && (cell.starts_with("to_") || cell.starts_with("from_"))
+        && cell.ends_with("_checked")
     {
         return true;
     }
@@ -259,33 +261,14 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
         "map" => matches!(func, "get" | "find"),
         // The int/float checked conversions are admitted by the FAMILY SHAPE
         // rule above the match — see the checked-numeric-conversion comment.
-        // json.as_int/as_float/as_bool build a materialized Option (Some(scalar) / None) by reading
-        // the shared Value tag (@4) — a `match`/`??` over the result EXECUTES. as_int/as_float WIDEN
-        // across Int/Float exactly like v0. json.as_string is the heap-payload case: Some(a deep copy
-        // of the Str payload @12) / None — the repr-poly Option[String] materialization (a 0-or-1-
-        // element DynListStr, same path as list.get_str); as_array (List[Value]) is a refinement.
-        // json.get is self-hosted (`match value.get(j,key) { ok(v) => some(v), err(_) => none }`),
-        // so it returns a materialized Option[Value] — `json.get(v,k) ?? d` (→ option.value_unwrap_or)
-        // and a `match` over it EXECUTE. The ubiquitous json-accessor idiom, the root of the
-        // wasm-bindgen get_str/get_kind cascade.
-        // json.get_<T>(j, key) is self-hosted (`match value.get(j,key) { ok(v) => __r2o(value.as_<T>(v)),
-        // err(_) => none }`), returning a materialized Option[T] — `json.get_string(v,k) ?? ""`,
-        // `json.get_bool(v,k) ?? false`, `json.get_array(v,k) ?? []` and a `match` over any of them
-        // EXECUTE (the typed-accessor sibling of json.get, the manifest/jsonrpc parser idiom root).
         // http.header on a response (`__http_response_header`) is self-hosted (stdlib/http_response.almd) returning a real
         // materialized Option[String] — a `match` over it EXECUTES. `http.poll` is
         // the one Option-returning host op (crate::host_ops, #2739): an ordinary
         // call, so its result is a real Option block.
         "http" => matches!(func, "__http_response_header" | "poll"),
-        "json" => matches!(
-            func,
-            "as_int" | "as_float" | "as_bool" | "as_string" | "get" | "as_array"
-                | "get_string" | "get_int" | "get_float" | "get_bool" | "get_array"
-                | "get_path"
-        ),
         // value.get / get_<kind> / get_path are self-hosted (json_get_typed.almd,
-        // json_path.almd; #4220) with the same some()/none ctors as their json
-        // siblings — a materialized Option, so a `match`/`??` over one EXECUTES.
+        // json_path.almd; #4220) with the ordinary some()/none ctors — a
+        // materialized Option, so a `match`/`??` over one EXECUTES.
         "value" => matches!(
             func,
             "get" | "get_string" | "get_int" | "get_float" | "get_bool" | "get_array" | "get_object"

@@ -1,7 +1,7 @@
 // http_response — SELF-HOSTED HttpResponse builder family (PURE data ctors on
 // the blanket-impure http module; serve/network stay walled). v0's
 // AlmideHttpResponse { status, body, headers: Vec<(String,String)> } is opaque
-// nominal — the v1 self-host owns the rep (the JsonPath precedent): a
+// nominal — the v1 self-host owns the rep (the value.Path precedent): a
 // List[String] `[int.to_string(status), body, k1, v1, k2, v2, …]` — header
 // pairs flat from slot 2, insertion-ordered exactly like v0's Vec pushes.
 // get_header scans pairs first-match; set_header overwrites in place or

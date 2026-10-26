@@ -1,6 +1,6 @@
 //! #2758 (#1696 step 4) — the `m[k] = v` statement (`IrStmtKind::MapInsert`)
 //! in the structural witness. Its in-place window (map_inplace.rs) is the
-//! one `map.insert(m, k, v)` takes: the key and the value go through
+//! one in-place map insert takes: the key and the value go through
 //! `lower_arg` under `Retain` (a borrowed handle shares, an owned one moves
 //! into the map), and the var's block is rebound (`witness_mut_rebind`: the
 //! old credit released, the block now in the slot held). The functional

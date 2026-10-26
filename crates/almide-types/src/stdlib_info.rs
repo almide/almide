@@ -6,16 +6,15 @@
 pub const STDLIB_MODULES: &[&str] = &[
     "string", "list", "int", "float", "bool", "bytes", "matrix", "fs", "env", "map",
     "json", "http", "process", "math", "random", "regex", "io", "result",
-    "option", "error", "datetime", "testing", "value", "set", "deque", "heap",
+    "option", "datetime", "testing", "value", "set", "deque", "heap",
     "base64", "hex", "hash", "net", "url", "zlib",
     // Arbitrary-precision integers (R-L1-03). Never auto-imported: `import bigint`.
     "bigint",
     // Never auto-imported: `import secret` is the opt-in (#4107).
     "secret",
     // Sized numeric types (Stage 3 of the sized-numeric-types arc).
-    // Each hosts UFCS conversion methods (`.to_int64()`,
-    // `.to_float32()`, ...). Auto-imported alongside `int` / `float`
-    // so users never need `import int32`.
+    // Each hosts its conversions (`int32.from(x)`, ...). Auto-imported
+    // alongside `int` / `float` so users never need `import int32`.
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
     "float32", "float64",
@@ -24,7 +23,7 @@ pub const STDLIB_MODULES: &[&str] = &[
 /// Bundled stdlib modules written in Almide (.almd files embedded in the compiler binary).
 pub const BUNDLED_MODULES: &[&str] = &[
     "args", "path", "list", "int", "base64", "hex", "hash", "float", "bool", "bytes",
-    "error", "math", "datetime", "value", "option", "result",
+    "math", "datetime", "value", "option", "result",
     "map", "set", "string", "deque", "heap",
     "env", "io", "random", "regex", "testing",
     "process", "fs", "http", "html", "json", "matrix", "net", "url", "zlib",
@@ -76,7 +75,7 @@ pub const AUTO_IMPORT_BUNDLED: &[&str] = &[
     // without requiring a redundant `import <name>`. The set mirrors
     // the auto-import behavior the generated `stdlib_sigs` previously
     // provided.
-    "error", "math", "datetime", "value", "option", "result",
+    "math", "datetime", "value", "option", "result",
     "map", "set", "string", "deque", "heap",
     "int8", "int16", "int32", "int64",
     "uint8", "uint16", "uint32", "uint64",
@@ -103,9 +102,6 @@ pub const RUNTIME_BACKED_TYPES: &[(&str, &str)] = &[
     // The in-flight call of `http.start` (#2631): a shared handle whose last
     // copy going away cancels the call.
     ("http", "HttpCall"),
-    // The opaque path handle of `json.root()`/`json.field(...)` — self-hosted
-    // as a `List[String]` newtype, still spelled `JsonPath` in signatures.
-    ("json", "JsonPath"),
 ];
 
 /// The owning module of a runtime-backed nominal type, accepting the bare
@@ -154,7 +150,7 @@ pub fn is_runtime_backed_repr(module: &str, func: &str) -> bool {
 
 /// Nominal type names a stdlib module OWNS, `(module, type name)`: the
 /// builtin dynamic `Value`, every `RUNTIME_BACKED_TYPES` row, and every
-/// `type` declared in a bundled module (`fs.FileStat`, `bytes.Endian`, …).
+/// `type` declared in a bundled module (`fs.FileStat`, `net.IpAddr`, …).
 ///
 /// The checker gives a stdlib type its BARE name as its canonical identity
 /// (`Ty::Named("Value")` is what every `json.*` / `value.*` signature
@@ -173,8 +169,6 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("http", "HttpRequest"),
     ("http", "HttpResponse"),
     ("http", "HttpCall"),
-    ("json", "JsonPath"),
-    ("bytes", "Endian"),
     ("http", "HttpLimits"),
     ("http", "HttpHandler"),
     ("http", "HttpMiddleware"),
@@ -192,7 +186,6 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("net", "IpAddr"),
     ("unix", "Fd"),
     ("uuid", "Uuid"),
-    ("path", "SafePath"),
     ("process", "ProcessStatus"),
     ("process", "ProcessCommand"),
     ("process", "ProcessChild"),
@@ -333,7 +326,6 @@ fn bundled_source_core(name: &str) -> Option<&'static str> {
         "float" => Some(crate::embedded::SRC_FLOAT),
         "bool" => Some(crate::embedded::SRC_BOOL),
         "bytes" => Some(crate::embedded::SRC_BYTES),
-        "error" => Some(crate::embedded::SRC_ERROR),
         "value" => Some(crate::embedded::SRC_VALUE),
         "secret" => Some(crate::embedded::SRC_SECRET),
         _ => None,
@@ -442,9 +434,9 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         // ── string-only ──
         "trim" | "split" | "pad_start"
         | "starts_with" | "ends_with"
-        | "to_bytes" | "to_upper" | "to_lower" | "capitalize"
+        | "to_upper" | "to_lower" | "capitalize"
         | "replace" | "lines"
-        | "repeat" | "from_bytes"
+        | "repeat"
         | "is_digit" | "is_alpha" | "is_alphanumeric"
         | "is_whitespace" | "is_upper" | "is_lower"
         | "to_codepoint" | "from_codepoint"
@@ -460,9 +452,9 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         | "reduce" | "group_by"
         | "remove_at" | "find_index"
         | "scan" | "intersperse"
-        | "windows" | "dedup" | "zip_with"
+        | "dedup" | "zip_with"
         | "push" | "pop"
-        | "shuffle" | "window" => vec!["list"],
+        | "window" => vec!["list"],
 
         // ── list + map + set ──
         "fold" | "any" | "all" => vec!["list", "map", "set"],
@@ -471,9 +463,7 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         "find" | "partition" | "update" => vec!["list", "map"],
 
         // ── map-only ──
-        "keys" | "values" | "merge"
-        | "delete"
-        => vec!["map"],
+        "keys" | "values" | "merge" => vec!["map"],
 
         // ── set-only ──
         "union" | "intersection" | "difference" | "symmetric_difference"
@@ -484,12 +474,11 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         // so it belongs to the sized-numeric table below — see #893.)
         "to_hex"
         | "band" | "bor" | "bxor" | "bnot" | "bshl" | "bshr"
-        | "wrap_add" | "wrap_mul" | "rotate_right" | "rotate_left"
-        | "to_u32" | "to_u8" => vec!["int"],
+        | "wrap_add" | "wrap_mul" | "rotate_right" | "rotate_left" => vec!["int"],
 
         // ── float-only ──
-        "to_fixed" | "round" | "floor" | "ceil" | "sqrt"
-        | "is_nan" | "is_infinite" | "to_int" => vec!["float"],
+        "to_fixed" | "round" | "floor" | "ceil"
+        | "is_nan" | "is_infinite" => vec!["float"],
 
         // ── option-only ──
         "is_some" | "is_none" | "to_result" | "or_else" => vec!["option"],
@@ -499,12 +488,6 @@ fn resolve_ufcs_exclusive(method: &str) -> Vec<&'static str> {
         "map_err"
         | "is_ok" | "is_err"
         | "to_err_option" | "to_option" => vec!["result"],
-
-        // ── error-only ──
-        "context" | "message" | "chain" => vec!["error"],
-
-        // ── datetime-only ──
-        "is_before" | "is_after" => vec!["datetime"],
 
         _ => vec![],
     }
@@ -529,7 +512,7 @@ fn resolve_ufcs_ambiguous_string_list(method: &str) -> Vec<&'static str> {
         "take" | "drop" | "take_end" | "drop_end" => vec!["string", "list"],
         "reverse" => vec!["string", "list"],
         "index_of" => vec!["string", "list"],
-        "join" => vec!["string", "list"],
+        "join" => vec!["list"],
         "slice" => vec!["string", "list"],
 
         // ── ambiguous: string + list + map + set ──
@@ -558,36 +541,30 @@ fn resolve_ufcs_ambiguous_container(method: &str) -> Vec<&'static str> {
         "map" | "filter" => vec!["list", "map", "set", "result", "option"],
 
         // ── ambiguous: list + map + set ──
-        "insert" | "clear" => vec!["list", "map", "set"],
+        "insert" => vec!["list", "set"],
+        "clear" => vec!["list", "map", "set"],
         "remove" => vec!["map", "set"],
 
         // ── ambiguous: string + list + map ──
-        "get" | "get_or" => vec!["string", "list", "map"],
+        "get" => vec!["string", "list", "map"],
         "set" => vec!["list", "map"],
 
         // ── ambiguous: list ──
         "swap" | "sort" | "min" | "max" => vec!["list"],
 
         // ── ambiguous: int + float ──
-        "abs" | "clamp" => vec!["int", "float"],
-        "to_float" => vec!["string", "int"],
-
-        // ── ambiguous: math + float ──
-        "sign" => vec!["math", "float"],
+        "abs" | "clamp" | "sign" => vec!["int", "float"],
 
         _ => vec![],
     }
 }
 
-/// Sized numeric conversion methods (Stage 3). Every sized int / float
-/// provides these UFCS methods. The concrete module (int32, uint8, float32,
-/// ...) is picked by the receiver's type at codegen (`resolve_module_from_ty`).
+/// Methods every sized int / float module provides. The concrete module
+/// (int32, uint8, float32, ...) is picked by the receiver's type at codegen
+/// (`resolve_module_from_ty`).
 fn resolve_ufcs_sized_numeric(method: &str) -> Vec<&'static str> {
     match method {
-        "to_int8" | "to_int16" | "to_int32" | "to_int64"
-        | "to_uint8" | "to_uint16" | "to_uint32" | "to_uint64"
-        | "to_float32" | "to_float64"
-        // `to_string` too (#893): every sized-numeric module declares one, and
+        // `to_string` (#893): every sized-numeric module declares one, and
         // the UFCS resolver reaches this table when `env.functions` has no
         // entry — which is the case for an embedder that hands the renderer a
         // bare source (no resolved bundled modules), so `big.to_string()`
@@ -596,7 +573,7 @@ fn resolve_ufcs_sized_numeric(method: &str) -> Vec<&'static str> {
         // candidate list is only consulted after `builtin_module_for_type`
         // has already picked the ONE module for the receiver's type, so
         // listing them together cannot make a call ambiguous.
-        | "to_string" => vec![
+        "to_string" => vec![
             "int", "float",
             "int8", "int16", "int32", "int64",
             "uint8", "uint16", "uint32", "uint64",

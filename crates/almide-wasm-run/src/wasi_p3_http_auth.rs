@@ -66,8 +66,8 @@ fn http_hex_value(i: &mut wasm_encoder::InstructionSink<'_>, at: u32, hex: u32) 
     i.end();
 }
 
-/// Whether the framed request's headers (`hdr_ptr..frame_end`, ops 48..=50
-/// only) name `Authorization` in any case: `flag` = 1 when they do.
+/// Whether the framed request's headers (`hdr_ptr..frame_end`, the framed
+/// ops only) name `Authorization` in any case: `flag` = 1 when they do.
 #[allow(clippy::too_many_arguments)]
 fn http_caller_sends_authorization(
     i: &mut wasm_encoder::InstructionSink<'_>,

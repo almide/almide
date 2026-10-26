@@ -11,56 +11,32 @@
 
 /// Plain-signature members (scalars in, scalar/String out).
 pub(crate) const SIZED_CONVERT_VERIFIED: &[&str] = &[
-    "float64_to_int16", "float64_to_int32", "float64_to_int64", "float64_to_int8",
-    "float64_to_string", "float64_to_uint16", "float64_to_uint32", "float64_to_uint64",
-    "float64_to_uint8", "float_to_float64", "float_to_int", "float_to_int16",
-    "float_to_int16_saturating", "float_to_int32", "float_to_int32_saturating",
-    "float_to_int64", "float_to_int64_saturating", "float_to_int8", "float_to_int8_saturating",
-    "float_to_uint16", "float_to_uint16_saturating", "float_to_uint32",
-    "float_to_uint32_saturating", "float_to_uint64", "float_to_uint64_saturating",
-    "float_to_uint8", "float_to_uint8_saturating", "int16_max_value", "int16_min_value",
-    "int16_to_float64", "int16_to_int32", "int16_to_int64", "int16_to_int8",
-    "int16_to_int8_saturating", "int16_to_string", "int16_to_uint16",
-    "int16_to_uint16_saturating", "int16_to_uint32", "int16_to_uint32_saturating",
-    "int16_to_uint64", "int16_to_uint64_saturating", "int16_to_uint8",
-    "int16_to_uint8_saturating", "int32_max_value", "int32_min_value", "int32_to_float64",
-    "int32_to_int16", "int32_to_int16_saturating", "int32_to_int64", "int32_to_int8",
-    "int32_to_int8_saturating", "int32_to_string", "int32_to_uint16",
-    "int32_to_uint16_saturating", "int32_to_uint32", "int32_to_uint32_saturating",
-    "int32_to_uint64", "int32_to_uint64_saturating", "int32_to_uint8",
-    "int32_to_uint8_saturating", "int64_max_value", "int64_min_value", "int64_to_float64",
-    "int64_to_int16", "int64_to_int16_saturating", "int64_to_int32",
-    "int64_to_int32_saturating", "int64_to_int8", "int64_to_int8_saturating",
-    "int64_to_string", "int64_to_uint16", "int64_to_uint16_saturating", "int64_to_uint32",
-    "int64_to_uint32_saturating", "int64_to_uint64", "int64_to_uint64_saturating",
-    "int64_to_uint8", "int64_to_uint8_saturating", "int8_max_value", "int8_min_value",
-    "int8_to_float64", "int8_to_int16", "int8_to_int32", "int8_to_int64", "int8_to_string",
-    "int8_to_uint16", "int8_to_uint16_saturating", "int8_to_uint32",
-    "int8_to_uint32_saturating", "int8_to_uint64", "int8_to_uint64_saturating",
-    "int8_to_uint8", "int8_to_uint8_saturating", "int_from_int16", "int_from_int32",
+    "float64_to_string",
+    "float_to_float64", "float_to_int",
+    "float_to_uint64", "float_to_uint64_saturating",
+    "int16_max_value", "int16_min_value",
+    "int16_to_string",
+    "int32_max_value", "int32_min_value",
+    "int32_to_string",
+    "int64_max_value", "int64_min_value",
+    "int64_to_string",
+    "int8_max_value", "int8_min_value",
+    "int8_to_string",
+    "int_from_int16", "int_from_int32",
     "int_from_int64", "int_from_int8", "int_from_uint16", "int_from_uint32", "int_from_uint64",
     "int_from_uint64_saturating", "int_from_uint8", "int_max_value", "int_min_value",
     "int_to_int16", "int_to_int16_saturating", "int_to_int32", "int_to_int32_saturating",
     "int_to_int64", "int_to_int8", "int_to_int8_saturating", "int_to_uint16",
     "int_to_uint16_saturating", "int_to_uint32", "int_to_uint32_saturating", "int_to_uint64",
     "int_to_uint64_saturating", "int_to_uint8", "int_to_uint8_saturating", "uint16_max_value",
-    "uint16_min_value", "uint16_to_float64", "uint16_to_int16", "uint16_to_int16_saturating",
-    "uint16_to_int32", "uint16_to_int64", "uint16_to_int8", "uint16_to_int8_saturating",
-    "uint16_to_string", "uint16_to_uint32", "uint16_to_uint64", "uint16_to_uint8",
-    "uint16_to_uint8_saturating", "uint32_max_value", "uint32_min_value", "uint32_to_float64",
-    "uint32_to_int16", "uint32_to_int16_saturating", "uint32_to_int32",
-    "uint32_to_int32_saturating", "uint32_to_int64", "uint32_to_int8",
-    "uint32_to_int8_saturating", "uint32_to_string", "uint32_to_uint16",
-    "uint32_to_uint16_saturating", "uint32_to_uint64", "uint32_to_uint8",
-    "uint32_to_uint8_saturating", "uint64_max_value", "uint64_min_value", "uint64_to_float64",
-    "uint64_to_int16", "uint64_to_int16_saturating", "uint64_to_int32",
-    "uint64_to_int32_saturating", "uint64_to_int64", "uint64_to_int64_saturating",
-    "uint64_to_int8", "uint64_to_int8_saturating", "uint64_to_string", "uint64_to_uint16",
-    "uint64_to_uint16_saturating", "uint64_to_uint32", "uint64_to_uint32_saturating",
-    "uint64_to_uint8", "uint64_to_uint8_saturating", "uint8_max_value", "uint8_min_value",
-    "uint8_to_float64", "uint8_to_int16", "uint8_to_int32", "uint8_to_int64", "uint8_to_int8",
-    "uint8_to_int8_saturating", "uint8_to_string", "uint8_to_uint16", "uint8_to_uint32",
-    "uint8_to_uint64",
+    "uint16_min_value",
+    "uint16_to_string",
+    "uint32_max_value", "uint32_min_value",
+    "uint32_to_string",
+    "uint64_max_value", "uint64_min_value", "uint64_to_float64",
+    "uint64_to_string",
+    "uint8_max_value", "uint8_min_value",
+    "uint8_to_string",
 ];
 
 /// Scalar/text self-host impls admitted by the stage-72 tail audit:
@@ -91,9 +67,9 @@ pub(crate) const SCALAR_TEXT_VERIFIED: &[&str] = &[
     "string_contains", "string_count", "string_trim_start", "string_trim_end",
     "string_is_alpha", "string_is_digit", "string_is_alphanumeric_uni", "string_is_upper",
     "string_is_lower",
-    "base64_encode", "base64_encode_url", "hash_fnv1a32_bytes",
-    "datetime_add_days", "datetime_add_hours", "datetime_add_minutes", "datetime_add_seconds", "datetime_day", "datetime_diff_seconds", "datetime_format", "datetime_from_unix", "datetime_hour", "datetime_is_after", "datetime_is_before", "datetime_minute", "datetime_month", "datetime_second", "datetime_to_iso", "datetime_to_unix", "datetime_weekday", "datetime_year",
-    "string_is_whitespace", "string_to_bytes",
+    "base64_encode", "base64_encode_url",
+    "datetime_add_days", "datetime_add_hours", "datetime_add_minutes", "datetime_add_seconds", "datetime_day", "datetime_format", "datetime_hour", "datetime_minute", "datetime_month", "datetime_second", "datetime_to_iso", "datetime_weekday", "datetime_year",
+    "string_is_whitespace",
 ];
 
 /// Same audit, Option/Result-returning (constructor-built sums).
@@ -144,12 +120,12 @@ pub(crate) const BYTES_FAMILY_VERIFIED: &[&str] = &[
     "bytes_read_f32_be_array", "bytes_read_f32_le_array", "bytes_read_f64_be_array",
     "bytes_read_f64_le_array", "bytes_read_i16_be_array", "bytes_read_i16_le_array",
     "bytes_read_i32_be_array", "bytes_read_i32_le_array", "bytes_read_i64_be_array",
-    "bytes_read_i64_le_array", "bytes_read_string_be", "bytes_read_u16_be_array",
+    "bytes_read_i64_le_array", "bytes_read_u16_be_array",
     "bytes_read_u16_le_array", "bytes_read_u32_be_array", "bytes_read_u32_le_array",
     // bytes_append_multi.almd cursor tail (#1099): the __bam grow-append
     // shape — prim.load32(handle+4) is the Bytes LEN header (len = bytes
     // on both legs); same audit as the append_* family above.
-    "bytes_write_bool", "bytes_write_string_be",
+    "bytes_write_bool",
     // bytes_core.almd search/edit/predicate family (#1423 stage 4, audited
     // 2026-09-03): read-only load8 walks over the digest-shared Bytes
     // payload (handle+12 = OUR PAYLOAD, load32(h+4) = the byte length on
@@ -167,27 +143,13 @@ pub(crate) const BYTES_FAMILY_VERIFIED: &[&str] = &[
 /// The exempt-tier members of the same audit (tuple/Option returners
 /// with literal-built sums).
 pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
-    // bytes_typed.almd (Endian-argument wrappers, #1098): audited 2026-08-25 —
-    // prim.alloc_bytes + load8/store8 on Bytes payloads only (len=bytes on
-    // both legs), payload offset 12 = OUR PAYLOAD; reads/sets cross-call the
-    // C-229 native matrix; write_* return the fresh grown block (v1 rebind
-    // form). In THIS tier since #1839: the Endian argument is the stdlib's
-    // DECLARED variant (`type Endian = | LittleEndian | BigEndian`), consumed
-    // by a language-level `match` this emitter lowers with its own layout —
-    // the coupled-type proxy fires on the Named param, the body never touches
-    // the block. (The 1-byte-block twin and its registered ctor builders are
-    // gone — they split the representation whenever the decl was present.)
-    "bytes_read_uint16", "bytes_read_uint32",
-    "bytes_read_int32", "bytes_read_float32", "bytes_write_uint16", "bytes_write_uint32",
-    "bytes_write_int32", "bytes_write_float32", "bytes_set_uint16", "bytes_set_uint32",
-    "bytes_set_int32", "bytes_set_float32",
+    // bytes_cursor.almd `_at` readers: (Int, T?) tuples built as literals.
     "bytes_read_bool_at", "bytes_read_f16_le_at", "bytes_read_f32_be_at", "bytes_read_f32_le_at",
     "bytes_read_f64_be_at", "bytes_read_f64_le_at", "bytes_read_i16_be_at", "bytes_read_i16_le_at",
     "bytes_read_i32_be_at", "bytes_read_i32_le_at", "bytes_read_i64_be_at", "bytes_read_i64_le_at",
-    "bytes_read_string_at", "bytes_read_string_be_at", "bytes_read_u16_be_at",
+    "bytes_read_u16_be_at",
     "bytes_read_u16_le_at", "bytes_read_u32_be_at", "bytes_read_u32_le_at", "bytes_read_u8_at",
-    "bytes_take_at", "json_get_array", "json_get_bool", "json_get_float", "json_get_int",
-    "json_get_string",
+    "bytes_take_at",
     // bytes_core.almd index_of (#1423 stage 4): the same read-only walk as
     // contains, its `Int?` built via some()/none in tail position.
     "bytes_index_of",
@@ -211,7 +173,6 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // ffi.to_int (R-ffi-01): the identity ptr_to_int cast. The other ffi
     // bodies are prim-free calls to the bridge above (ffi_bridge.almd).
     "ffi_to_int",
-    "bytes_skip_length_prefixed_le",
     // http_response.almd (audited 2026-08-25): PURE Almide over the
     // published List[String] rep — list/string surfaces only, the RFC
     // 9110 ASCII fold spelled with chars/index_of/slice. get_header
@@ -242,7 +203,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // list.get — all native arms here, no raw layout reads. set/remove
     // are REJECTED: their pair walks read the incumbent's inline-pairs
     // Value layout (tag@h+4, count@h+8) — see PORT-MATRIX.
-    "json_path_root", "json_path_field", "json_path_index", "json_path_get",
+    "json_path_index",
     "http_get_header", "http_req_header", "http_param",
     // regex_engine.almd Option returners (same audit).
     "regex_find", "regex_captures",
@@ -299,32 +260,17 @@ pub(crate) const PROCESS_SUM: &[&str] = &[
 /// (the one list class both layouts share). One vendored libm on every
 /// target is the bit-parity mechanism itself.
 pub(crate) const MATH_VERIFIED: &[&str] = &[
-    "math_abs", "math_atan", "math_choose", "math_cos", "math_e", "math_exp",
-    "math_factorial", "math_fmax", "math_fmin", "math_fpow", "math_log", "math_log10",
-    "math_log2", "math_log_gamma", "math_max", "math_min", "math_pi", "math_pow",
+    "math_atan", "math_choose", "math_cos", "math_e", "math_exp",
+    "math_factorial", "math_fpow", "math_log", "math_log10",
+    "math_log2", "math_log_gamma", "math_pi", "math_pow",
     "math_sign", "math_sin", "math_sqrt", "math_tan", "math_tanh",
 ];
 
 /// Option-returning members (the checked trio cells).
 pub(crate) const SIZED_CONVERT_SUM_BUILDERS: &[&str] = &[
-    "float_to_int16_checked", "float_to_int32_checked", "float_to_int64_checked",
-    "float_to_int8_checked", "float_to_uint16_checked", "float_to_uint32_checked",
-    "float_to_uint64_checked", "float_to_uint8_checked", "int16_to_int8_checked",
-    "int16_to_uint16_checked", "int16_to_uint32_checked", "int16_to_uint64_checked",
-    "int16_to_uint8_checked", "int32_to_int16_checked", "int32_to_int8_checked",
-    "int32_to_uint16_checked", "int32_to_uint32_checked", "int32_to_uint64_checked",
-    "int32_to_uint8_checked", "int64_to_int16_checked", "int64_to_int32_checked",
-    "int64_to_int8_checked", "int64_to_uint16_checked", "int64_to_uint32_checked",
-    "int64_to_uint64_checked", "int64_to_uint8_checked", "int8_to_uint16_checked",
-    "int8_to_uint32_checked", "int8_to_uint64_checked", "int8_to_uint8_checked",
     "int_from_uint64_checked", "int_to_int16_checked", "int_to_int32_checked",
     "int_to_int8_checked", "int_to_uint16_checked", "int_to_uint32_checked",
-    "int_to_uint64_checked", "int_to_uint8_checked", "uint16_to_int16_checked",
-    "uint16_to_int8_checked", "uint16_to_uint8_checked", "uint32_to_int16_checked",
-    "uint32_to_int32_checked", "uint32_to_int8_checked", "uint32_to_uint16_checked",
-    "uint32_to_uint8_checked", "uint64_to_int16_checked", "uint64_to_int32_checked",
-    "uint64_to_int64_checked", "uint64_to_int8_checked", "uint64_to_uint16_checked",
-    "uint64_to_uint32_checked", "uint64_to_uint8_checked", "uint8_to_int8_checked",
+    "int_to_uint64_checked", "int_to_uint8_checked",
 ];
 
 /// The matrix compositions (#1423 stage 4): stdlib/matrix_fused.almd is
@@ -340,9 +286,7 @@ pub(crate) const SIZED_CONVERT_SUM_BUILDERS: &[&str] = &[
 /// Parity evidence: spec/wasm_cross/matrix_composition_family.almd.
 pub(crate) const MATRIX_COMPOSITIONS: &[&str] = &[
     "matrix_mul_scaled",
-    "matrix_mul_f32", "matrix_mul_f32_scaled", "matrix_mul_f32_t", "matrix_mul_f32_t_scaled",
-    "matrix_zeros_f32", "matrix_ones_f32",
-    "matrix_append_rows", "matrix_linear_f32_row_no_bias",
+    "matrix_append_rows",
 ];
 
 /// Every admitted tier: its members and whether its bodies are exempt

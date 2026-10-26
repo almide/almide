@@ -1202,17 +1202,16 @@ fn ty_needs_repr(ctx: &RenderContext, ty: &Ty) -> bool {
         // Anonymous records get an inline literal repr.
         Ty::Record { .. } | Ty::OpenRecord { .. } => true,
         // Named records/variants → repr only when a generated impl exists —
-        // or the runtime's own, for a runtime-owned twin (`Endian`,
-        // `FileStat`, `ProcessStatus`) the program references under the
+        // or the runtime's own, for a runtime-owned twin (`FileStat`,
+        // `ProcessStatus`) the program references under the
         // reserved spelling: its impl lives in the runtime, so the route
         // holds with or without the bundled decl (#1829).
         //
         // Asked under the MODULE-QUALIFIED spelling too (#2496): a value
-        // built through `bytes.LittleEndian` types as `bytes.Endian`, and
-        // both these tables are keyed by the bare name `render_type` emits
-        // — so the qualified spelling fell to the `Display` path and rustc
-        // met `AlmideEndian` with no `Display` (E0277), while the bare
-        // `BigEndian` spelling of the same value printed fine.
+        // typed `fs.FileStat` and both these tables are keyed by the bare
+        // name `render_type` emits — so the qualified spelling fell to the
+        // `Display` path and rustc met the runtime type with no `Display`
+        // (E0277), while the bare spelling of the same value printed fine.
         // An opaque newtype renders as its WRAPPED type (#2496, #2860): a
         // repr-backed target takes the newtype's delegating `AlmideRepr`
         // impl, anything else the Display path through `.0`

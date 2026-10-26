@@ -42,8 +42,8 @@ fn render_type_decl_alias(ctx: &RenderContext, td: &IrTypeDecl, target: &Ty) -> 
         // #3755: lowering marks the newtype `Eq` / `Ord` exactly when the
         // checker finds its target comparable / orderable — what the wasm
         // leg (which erases the newtype) already does. Without the `Ord`
-        // derive, `list.min` over `path.SafePath` passed check and rustc
-        // refused `SafePath: Ord`; with an unconditional `PartialEq`, a
+        // derive, `list.min` over `html.SafeHtml` passed check and rustc
+        // refused `SafeHtml: Ord`; with an unconditional `PartialEq`, a
         // newtype over a closure-bearing type failed to compile at all.
         let derives_conv = |c: &str| td.deriving.as_ref().is_some_and(|d| d.iter().any(|s| s.as_str() == c));
         let derives = match (derives_conv("Eq"), derives_conv("Ord")) {

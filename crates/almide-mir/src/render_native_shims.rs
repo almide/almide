@@ -83,9 +83,9 @@ const SHIMS: &[(&str, &[NTy], Option<NTy>, &str)] = &[
             "fn rt_float_to_bits(f: f64) -> i64 { if f.is_nan() { 0x7FF8_0000_0000_0000_u64 as i64 } else { f.to_bits() as i64 } }"),
     // Square-and-multiply with wrapping steps; a negative exponent is the
     // v0 abort `Error: negative exponent`, exit 1 (almide_rt_math_pow).
-    ("math.pow", &[NTy::I64, NTy::I64],
+    ("math.__pow", &[NTy::I64, NTy::I64],
             Some(NTy::I64),
-            "fn rt_math_pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { eprintln!(\"Error: negative exponent\"); std::process::exit(1); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
+            "fn rt_math___pow(base: i64, exp: i64) -> i64 {\n    if exp < 0 { eprintln!(\"Error: negative exponent\"); std::process::exit(1); }\n    let mut result: i64 = 1;\n    let mut b = base;\n    let mut e = exp as u64;\n    while e > 0 {\n        if e & 1 == 1 { result = result.wrapping_mul(b); }\n        e >>= 1;\n        if e > 0 { b = b.wrapping_mul(b); }\n    }\n    result\n}"),
     // #1869: `list.range` joins the floor as a closed shim. The lowering
     // materializes a `let`-bound range that is indexed or measured as
     // `CallFn list.range(s, e)`; without a floor entry the whole program

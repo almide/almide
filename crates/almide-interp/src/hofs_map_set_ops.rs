@@ -20,17 +20,14 @@ impl<'a> Interpreter<'a> {
             // (stdlib/map.almd: `fn contains[K, V](m, key) -> Bool`) —
             // same op as the `contains_key`/`has` aliases.
             "contains" | "contains_key" | "has" => Some(self.map_contains_key(args)),
-            // `map.set` is FUNCTIONAL (`-> Map`, returns a new map); the
-            // mutating `map.insert` (`mut m, .. -> Unit`) is intercepted by the
-            // in-place-mutation guard above.
+            // `map.set` is FUNCTIONAL (`-> Map`, returns a new map).
             "set" => Some(self.map_set(args)),
             "keys" => Some(self.map_keys(args)),
             "values" => Some(self.map_values(args)),
             // Served natively so a String-keyed map never reaches the pool's
             // scalar core impl (the wrong-impl guard walled these on
-            // Map[String, _], #1226). All three are element-type-blind over
-            // the insertion-ordered entry list both backends share.
-            "get_or" => Some(self.map_get_or(args)),
+            // Map[String, _], #1226). Both are element-type-blind over the
+            // insertion-ordered entry list both backends share.
             "from_list" => Some(self.map_from_list(args)),
             "to_list" => Some(self.map_entries(args)),
             // v0's AlmideMap semantics exactly: remove keeps order, merge is
@@ -60,15 +57,6 @@ impl<'a> Interpreter<'a> {
                 Flow::val(Value::Map(Rc::new(out)))
             }
             _ => Flow::Abort("internal: map.merge bad args".into()),
-        }
-    }
-
-    fn map_get_or(&mut self, args: &[Value]) -> Flow {
-        match (args.first(), args.get(1), args.get(2)) {
-            (Some(Value::Map(e)), Some(k), Some(d)) => Flow::val(
-                e.iter().find(|(ek, _)| ek == k).map(|(_, v)| v.clone()).unwrap_or_else(|| d.clone()),
-            ),
-            _ => Flow::Abort("internal: map.get_or bad args".into()),
         }
     }
 

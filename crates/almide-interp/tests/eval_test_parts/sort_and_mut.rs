@@ -412,13 +412,13 @@ fn main() -> Unit = {
 
 #[test]
 fn mut_param_map_insert_reaches_the_caller() {
-    // The C-061 shape: a `mut Map` param mutated by `map.insert`, insert-new
+    // The C-061 shape: a `mut Map` param mutated by `m[k] = v`, insert-new
     // and overwrite both landing in the caller's slot. (The read-back
-    // `map.get_or` route is covered by the real `mut_map_param` fixture in the
+    // `map.get(m, k) ?? d` route is covered by the real `mut_map_param` fixture in the
     // 3-way gate — its Int-key self-host body is out of scope at this
     // harness's no-mono cut.)
     let src = r#"
-fn put(mut m: Map[Int, Int], k: Int, v: Int) -> Unit = map.insert(m, k, v)
+fn put(mut m: Map[Int, Int], k: Int, v: Int) -> Unit = { m[k] = v }
 
 fn main() -> Unit = {
   var counts: Map[Int, Int] = [:]

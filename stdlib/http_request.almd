@@ -1,6 +1,6 @@
 // http_request — SELF-HOSTED HttpRequest rep for the wasm legs (#2588). v0's
 // AlmideHttpRequest { method, path, body, headers, params } is opaque nominal;
-// here it is a List[String] (the http_response / JsonPath precedent):
+// here it is a List[String] (the http_response precedent):
 //
 //   [method, target, body, <header count>, k1, v1, …, kn, vn, p1, v1, …]
 //

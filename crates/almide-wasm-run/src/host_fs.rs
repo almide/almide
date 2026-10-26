@@ -223,17 +223,16 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
     }
 }
 
-/// The metadata / host-environment ops (17+) — split for the
+/// The metadata / host-environment ops (19+) — split for the
 /// complexity budget. Bodies verbatim from the native runtime.
 fn fs_dispatch_meta(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     match op {
-        // 62 is fold_lines_chunked's size probe: op 17's body under the
-        // chunked call's name (#2744), native's `metadata` before the workers.
-        17 | 62 => match sfs::metadata(a) {
+        // 62 is fold_lines_chunked's size probe (#2744), native's `metadata`
+        // before the workers.
+        62 => match sfs::metadata(a) {
             Ok(m) => fs_ok_i64(m.len() as i64),
             Err(e) => fs_err(io_err(fs_op_name(op), &q(a), e)),
         },
-        18 => fs_mtime(op, a),
         19 | 20 => fs_copy_or_rename(op, a, b),
         21 => fs_temp_file(a),
         22 => (pack(0, usize::from(sfs::is_symlink(a))), Vec::new()),
@@ -260,17 +259,6 @@ fn fs_err(m: String) -> (i64, Vec<u8>) {
 /// An ok answer carrying one i64 LE.
 fn fs_ok_i64(v: i64) -> (i64, Vec<u8>) {
     (pack(0, 8), v.to_le_bytes().to_vec())
-}
-
-/// op 18: the modification time in Unix seconds.
-fn fs_mtime(op: i32, a: &str) -> (i64, Vec<u8>) {
-    match sfs::metadata(a)
-        .map_err(|e| io_err(fs_op_name(op), &q(a), e))
-        .and_then(|m| m.modified().map_err(|e| io_err(fs_op_name(op), &q(a), e)))
-    {
-        Ok(t) => fs_ok_i64(t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64),
-        Err(m) => fs_err(m),
-    }
 }
 
 fn same_file(a: &str, b: &str) -> bool {
@@ -477,7 +465,8 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     match op {
         // Decomposed by op family (codopsy cc 38 -> per-family fns): the
         // http and env arms live in `fs_dispatch_http` / `fs_dispatch_env`.
-        43..=50 => fs_dispatch_http(op, a, b),
+        // Op 50 (framed raw-bytes http) is retired: no guest emits it.
+        43..=49 => fs_dispatch_http(op, a, b),
         26 | 27 | 28 | 29 | 33 | 37 => fs_dispatch_env(op, a, b),
         // incremental stdin (op 35) — same empty answer in the harness.
         35 => (pack(0, 0), Vec::new()),
@@ -500,10 +489,10 @@ fn fs_entropy(n: usize) -> (i64, Vec<u8>) {
     (pack(0, out.len()), out)
 }
 
-/// The http op family (43..=50) of `fs_dispatch_host`, verbatim.
+/// The http op family (43..=49) of `fs_dispatch_host`, verbatim.
 fn fs_dispatch_http(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     match op {
-        48..=50 => fs_http_framed(op, a, b),
+        48 | 49 => fs_http_framed(op, a, b),
         43..=47 => fs_http_plain(op, a, b),
         // env.set (#1423 bucket C ruling): key in a, value in b.
         _ => fs_err(format!("unknown fs op {op}")),
@@ -534,11 +523,11 @@ fn fs_http_plain(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     fs_text_or_err(almide_rt_core::http_client_core::request(method, a, &body, &[]))
 }
 
-/// The framed request family (#1710 increment 3, ops 48..=50): url in a, the
+/// The framed request family (#1710 increment 3, ops 48..=49): url in a, the
 /// decimal CHAR-length frame in b — method cell, body cell, then header
 /// key/value cells, `<len>\n<payload>` each, exactly as
 /// stdlib/http_framed.almd builds it. 48 answers the body text, 49 answers
-/// `<status>\n<body>`, 50 raw bytes.
+/// `<status>\n<body>`. Op 50 (raw bytes) is retired.
 fn fs_http_framed(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     use almide_rt_core::http_client_core as client;
     let frame = String::from_utf8_lossy(b).to_string();
@@ -548,11 +537,7 @@ fn fs_http_framed(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     };
     match op {
         48 => fs_text_or_err(client::request(&method, a, &body, &headers)),
-        49 => fs_text_or_err(client::request_status(&method, a, &body, &headers).map(|(code, text)| format!("{code}\n{text}"))),
-        _ => match client::request_bytes(&method, a, &body, &headers) {
-            Ok(bytes) => (pack(0, bytes.len()), bytes),
-            Err(m) => fs_err(m),
-        },
+        _ => fs_text_or_err(client::request_status(&method, a, &body, &headers).map(|(code, text)| format!("{code}\n{text}"))),
     }
 }
 
@@ -577,11 +562,11 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // (http_client.rs), so error texts and framing match native
         // byte-for-byte. Stock artifacts never reach here (the build-path
         // op audit refuses unserved ops); the embedded lane serves them.
-        // The framed request family (#1710 increment 3, ops 48..=50):
+        // The framed request family (#1710 increment 3, ops 48..=49):
         // url in a, the decimal CHAR-length frame in b — method cell,
         // body cell, then header key/value cells, `<len>\n<payload>`
         // each, exactly as stdlib/http_framed.almd builds it. 48 answers
-        // the body text, 49 answers `<status>\n<body>`, 50 raw bytes.
+        // the body text, 49 answers `<status>\n<body>`; 50 is retired.
         // env.set (#1423 bucket C ruling): key in a, value in b.
         37 => {
             let v = String::from_utf8_lossy(b).to_string();

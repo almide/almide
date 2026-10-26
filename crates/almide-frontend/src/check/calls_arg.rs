@@ -242,7 +242,7 @@ impl Checker {
         if let Some(sib) = float_sibling {
             return format!(
                 "`{}` is Int-only. For Floats use `{}(x)`, which preserves the Float — \
-                 not `float.to_int`, which truncates",
+                 not `int.from_saturating`, which truncates",
                 fn_name, sib
             );
         }
@@ -308,7 +308,7 @@ impl Checker {
         expected_resolved: &Ty, arg_resolved: &Ty,
     ) {
         let ArgSite { fn_name, param_name } = site;
-        // #740: an Int-only math builtin given a Float — point at the Float-preserving sibling, not the truncating `float.to_int`.
+        // #740: an Int-only builtin given a Float — point at the Float-preserving sibling, not the truncating `int.from_saturating`.
         let float_sibling = if matches!(arg_resolved, Ty::Float)
             && matches!(expected_resolved, Ty::Int)
         {
