@@ -139,21 +139,9 @@ fn peel(e: &Expr) -> &Expr {
     }
 }
 
-/// The name a call or method call invokes.
-fn callee(e: &Expr) -> Option<String> {
-    match peel(e) {
-        Expr::Call(c) => match &*c.func {
-            Expr::Path(p) => Some(last_segment(&p.path)),
-            _ => None,
-        },
-        Expr::MethodCall(m) => Some(m.method.to_string()),
-        _ => None,
-    }
-}
-
 /// The text parameters of a signature, by position among its typed
 /// parameters: a `&'static str` is a literal of the runtime's own (a call
-/// name such as `"net.unix_send"`), never the program's data, so it is not one.
+/// name such as `"unix.write_fds"`), never the program's data, so it is not one.
 fn text_params(sig: &syn::Signature) -> Vec<Option<String>> {
     sig.inputs
         .iter()
