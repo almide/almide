@@ -125,7 +125,7 @@ fn native_random_bytes_reads_only_the_os_csprng() {
         body.contains("almide_os_entropy("),
         "random.bytes no longer fills from almide_os_entropy:\n{body}"
     );
-    for other in ["next_u64", "ALMIDE_RNG_STATE", "almide_rng_seed", "RandomState"] {
+    for other in ["next_u64", "RNG_STATE", "almide_rng_seed", "RandomState"] {
         assert!(
             !body.contains(other),
             "random.bytes draws from `{other}`:\n{body}"
