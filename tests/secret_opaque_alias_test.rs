@@ -146,3 +146,61 @@ fn an_own_type_named_secret_is_its_own_type() {
     );
     assert!(ok, "a module's own `type Secret` must check:\n{out}");
 }
+
+fn assert_refused(name: &str, src: &str, code: &str, needle: &str) {
+    let (ok, out) = check_single(name, src);
+    assert!(!ok, "{name}: check passed, but the Secret crossed its boundary:\n{out}");
+    assert!(out.contains(code), "{name}: expected {code}, got:\n{out}");
+    assert!(out.contains(needle), "{name}: expected `{needle}`, got:\n{out}");
+}
+
+fn assert_checks(name: &str, src: &str) {
+    let (ok, out) = check_single(name, src);
+    assert!(ok, "{name}: must check:\n{out}");
+}
+
+const READS: &str = "cannot use opaque type 'Secret' as another record type outside its module 'secret'";
+const FORGES: &str = "cannot use another record type as opaque type 'Secret' outside its module 'secret'";
+
+/// A structural record type is no way into an opaque one (row 21): a Secret
+/// never fills `{ hidden: .. }`, an open row, a structural bound, a user
+/// record of the same shape — at the top of a slot or inside it — and no
+/// such record fills a Secret slot.
+#[test]
+fn a_structural_record_type_is_no_way_into_a_secret() {
+    assert_refused("param_closed", "import secret\nfn peek(r: { hidden: String }) -> String = r.hidden\nfn main() -> Unit = println(peek(secret.new(\"pw\")))\n", "E033", READS);
+    assert_refused("param_open_row", "import secret\nfn peek(r: { hidden: String, .. }) -> String = r.hidden\nfn main() -> Unit = println(peek(secret.new(\"pw\")))\n", "E033", READS);
+    assert_refused("param_bound", "import secret\nfn peek[T: { hidden: String, .. }](r: T) -> String = r.hidden\nfn main() -> Unit = println(peek(secret.new(\"pw\")))\n", "E033", READS);
+    assert_refused("param_user_record", "import secret\ntype Fake = { hidden: String }\nfn peek(r: Fake) -> String = r.hidden\nfn main() -> Unit = println(peek(secret.new(\"pw\")))\n", "E033", READS);
+    assert_refused("param_in_list", "import secret\nfn peek(rs: List[{ hidden: String }]) -> String = rs |> list.map((r) => r.hidden) |> list.join(\",\")\nfn main() -> Unit = println(peek([secret.new(\"pw\")]))\n", "E033", READS);
+    assert_refused("let_annotation", "import secret\nfn main() -> Unit = {\n  let r: { hidden: String } = secret.new(\"pw\")\n  println(r.hidden)\n}\n", "E033", READS);
+    assert_refused("forge_user_record", "import secret\ntype Fake = { hidden: String }\nfn main() -> Unit = {\n  let f = Fake { hidden: \"x\" }\n  println(secret.reveal(f))\n}\n", "E033", FORGES);
+    // Control: the same shapes on a plain record check.
+    assert_checks("param_plain", "type Plain = { hidden: String }\nfn peek(r: { hidden: String }) -> String = r.hidden\nfn main() -> Unit = println(peek(Plain { hidden: \"x\" }))\n");
+}
+
+/// Every spread copies the base's fields: E033 with or without an override,
+/// and when the base's type is only known after the solve.
+#[test]
+fn every_spread_of_a_secret_is_e033() {
+    let msg = "cannot build a record update of opaque type 'Secret' outside its module 'secret'";
+    assert_refused("spread_bare", "import secret\nfn main() -> Unit = {\n  let s = secret.new(\"pw\")\n  let t = { ...s }\n  println(\"${t}\")\n}\n", "E033", msg);
+    assert_refused("spread_override", "import secret\nfn main() -> Unit = {\n  let s = secret.new(\"pw\")\n  let t = { ...s, hidden: \"x\" }\n  println(\"${t}\")\n}\n", "E033", msg);
+    assert_refused("spread_in_lambda", "import secret\nfn main() -> Unit = {\n  let xs = [secret.new(\"pw\")] |> list.map((x) => { ...x })\n  println(\"${xs}\")\n}\n", "E033", msg);
+}
+
+/// #4239: a generic `==` is structural, so no instantiation may hold a
+/// Secret — whatever it holds, directly or through a generic caller, and
+/// through a stdlib fn's equality bound.
+#[test]
+fn a_secret_never_reaches_a_generic_compare() {
+    let msg = "a generic `==` is structural";
+    assert_refused("eq_int", "import secret\nfn same[A](a: A, b: A) -> Bool = a == b\nfn main() -> Unit = println(\"${same(secret.new(1), secret.new(2))}\")\n", "E103", msg);
+    assert_refused("eq_string", "import secret\nfn same[A](a: A, b: A) -> Bool = a == b\nfn main() -> Unit = println(\"${same(secret.new(\"a\"), secret.new(\"b\"))}\")\n", "E103", msg);
+    assert_refused("eq_nested", "import secret\nfn same[A](a: A, b: A) -> Bool = a == b\nfn main() -> Unit = println(\"${same([secret.new(\"a\")], [secret.new(\"b\")])}\")\n", "E103", msg);
+    assert_refused("eq_through_caller", "import secret\nfn same[A](a: A, b: A) -> Bool = a == b\nfn also[B](a: B, b: B) -> Bool = same(a, b)\nfn main() -> Unit = println(\"${also(secret.new(\"a\"), secret.new(\"b\"))}\")\n", "E103", msg);
+    assert_refused("eq_stdlib", "import secret\nfn main() -> Unit = {\n  let k = secret.new(\"a\")\n  println(\"${list.contains([k], k)}\")\n}\n", "E103", "its compare is generic and structural");
+    // Controls: the generic over plain values, and the concrete constant-time `==`.
+    assert_checks("eq_plain", "fn same[A](a: A, b: A) -> Bool = a == b\nfn main() -> Unit = println(\"${same(1, 2)} ${same(\"a\", \"a\")}\")\n");
+    assert_checks("eq_concrete", "import secret\nfn main() -> Unit = println(\"${secret.new(\"a\") == secret.new(\"b\")}\")\n");
+}

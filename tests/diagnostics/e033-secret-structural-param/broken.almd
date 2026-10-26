@@ -1,0 +1,11 @@
+// A structural record type is no way into an opaque one: a `Secret` passed
+// where `{ hidden: String }` is expected is refused, so the field is never
+// read outside the `secret` module.
+import secret
+
+fn peek(r: { hidden: String }) -> String = r.hidden
+
+fn main() -> Unit = {
+  let s = secret.new("pw")
+  println(peek(s))
+}
