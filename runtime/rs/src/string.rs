@@ -245,19 +245,19 @@ pub fn almide_rt_string_strip_suffix_ref<'a>(s: &'a str, suffix: &str) -> Option
 
 pub fn almide_rt_string_first(s: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { s.chars().next().map(|c| c.to_string()) }; __almide_v.into_almide() }
 pub fn almide_rt_string_last(s: &str) -> Option<AlmideString> { let __almide_v: Option<String> = { s.chars().last().map(|c| c.to_string()) }; __almide_v.into_almide() }
-pub fn almide_rt_string_take(s: &str, n: i64) -> AlmideString { let __almide_out: String = s.chars().take(n as usize).collect(); __almide_out.into() }
+pub fn almide_rt_string_take(s: &str, n: i64) -> AlmideString { let __almide_out: String = s.chars().take(n.max(0) as usize).collect(); __almide_out.into() }
 /// Byte offset where the last `n` codepoints start (`0` when the string has
-/// no more than `n`; a negative `n` is a huge count, as `n as usize` makes
-/// it). Walks back from the end, so finding it costs O(n), not O(len).
+/// no more than `n`; a negative `n` is 0, #4147 — it was a huge count through
+/// `n as usize`). Walks back from the end, so finding it costs O(n), not O(len).
 fn almide_string_tail_start(s: &str, n: i64) -> usize {
-    let k = n as usize;
+    let k = n.max(0) as usize;
     if k == 0 {
         return s.len();
     }
     s.char_indices().rev().nth(k - 1).map_or(0, |(i, _)| i)
 }
 pub fn almide_rt_string_take_end(s: &str, n: i64) -> AlmideString { let __almide_out: String = s[almide_string_tail_start(s, n)..].to_string(); __almide_out.into() }
-pub fn almide_rt_string_drop(s: &str, n: i64) -> AlmideString { let __almide_out: String = s.chars().skip(n as usize).collect(); __almide_out.into() }
+pub fn almide_rt_string_drop(s: &str, n: i64) -> AlmideString { let __almide_out: String = s.chars().skip(n.max(0) as usize).collect(); __almide_out.into() }
 pub fn almide_rt_string_drop_end(s: &str, n: i64) -> AlmideString { let __almide_out: String = s[..almide_string_tail_start(s, n)].to_string(); __almide_out.into() }
 
 // ── Algorithmic primitives (Phase 3 stdlib expansion) ──

@@ -511,15 +511,15 @@ pub fn almide_rt_matrix_linear_row_no_bias(x: &AlmideMatrix, weight: &AlmideMatr
 }
 
 pub fn almide_rt_matrix_slice_rows(m: &AlmideMatrix, start: i64, end: i64) -> AlmideMatrix {
-    // `list.slice` over the rows, with C-034's index doctrine spelled out
-    // instead of left to the `as usize` wrap that used to carry it: a
-    // NEGATIVE start is the EMPTY (0-row) matrix, a negative or past-the-end
-    // end is `len`, and `start >= end` is empty (#2475 — the self-hosted leg
-    // clamped only `end` and read the list header as a row pointer).
+    // `list.slice` over the rows: both bounds clamp into [0, len] — a
+    // negative bound is 0 (#4147; it used to follow the `as usize` wrap, a
+    // negative start empty and a negative end `len`) — and `start >= end` is
+    // the 0-row matrix (#2475 — the self-hosted leg clamped only `end` and
+    // read the list header as a row pointer).
     let len = m.len();
-    let e = if end < 0 { len } else { (end as u64).min(len as u64) as usize };
-    if start < 0 || (start as u64) >= e as u64 { return vec![].into(); }
-    let s = start as usize;
+    let e = (end.max(0) as u64).min(len as u64) as usize;
+    let s = (start.max(0) as u64).min(len as u64) as usize;
+    if s >= e { return vec![].into(); }
     mk(e - s, m.cols, m.data[s * m.cols..e * m.cols].to_vec())
 }
 
