@@ -1580,13 +1580,13 @@
 | `add` | `a + b` | R-matrix-14 |
 | `append_rows` | `concat_rows([a, b])` | R-matrix-11 |
 | `concat_cols_many` | `matrix.concat_cols` | R-matrix-06 |
-| `conv1d` | nnlib | R-matrix-01（nnlib） |
+| `conv1d` | nn.kernels | R-matrix-01（nn.kernels） |
 | `div` | `a / b` | R-matrix-14 |
 | `fma` | 内部の `__fma` | R-matrix-02（内部の `__fma`） |
 | `fma3` | 内部の `__fma3` | R-matrix-02（内部の `__fma3`） |
-| `linear_f32_row_no_bias` | nnlib | R-matrix-01（nnlib） |
-| `linear_row` | nnlib | R-matrix-01（nnlib） |
-| `linear_row_no_bias` | nnlib | R-matrix-01（nnlib） |
+| `linear_f32_row_no_bias` | nn.kernels | R-matrix-01（nn.kernels） |
+| `linear_row` | nn.kernels | R-matrix-01（nn.kernels） |
+| `linear_row_no_bias` | nn.kernels | R-matrix-01（nn.kernels） |
 | `mul` | `a * b` | R-matrix-14 |
 | `mul_f32` | `a * b` | R-matrix-03 |
 | `mul_f32_scaled` | `matrix.scale(a * b, s)` | R-matrix-03 |
@@ -1598,7 +1598,7 @@
 | `pow` | `matrix.map(m, (x) => float.pow(x, e))` | R-matrix-13 |
 | `row_dot` | `matrix.dot_row` | R-matrix-06 |
 | `select_rows` | `matrix.gather_rows` | R-matrix-04 |
-| `select_rows_f32` | nnlib | R-matrix-01（nnlib） |
+| `select_rows_f32` | nn.kernels | R-matrix-01（nn.kernels） |
 | `sub` | `a - b` | R-matrix-14 |
 | `zeros_f32` | `matrix.zeros`（f32 のデータは from_bytes_f32_le で読む） | R-matrix-03 |
 

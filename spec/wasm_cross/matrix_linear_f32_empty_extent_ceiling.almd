@@ -5,7 +5,7 @@
 // (2^28 + 2 elements) succeeded and printed a shape, and `w_rows = i64::MAX`
 // took a raw `capacity overflow` panic (exit 101), where wasm aborts with
 // `Error: matrix dimensions too large` + exit 1 (#2783, nightly fuzz #2781).
-// The kernel left the stdlib for package almide/nnlib (dialect epoch 15); the
+// The kernel left the stdlib for module nn.kernels of package almide-graphics/nn (dialect epoch 15); the
 // cells now pin the `matrix.zeros` shape it delegated to. The guard fires
 // before either allocator is asked for anything, so the over-ceiling cell
 // costs no memory. The in-range and clamped cells come first; the fixture

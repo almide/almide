@@ -10,11 +10,11 @@
 // so the zeros are observed through the printed lists, which spell the sign
 // (`0.0` vs `-0.0`) that `==` cannot see. (The Q1_0 / Q8_0 selectors whose
 // dequantization-zero sign this fixture also pinned, #1358, left the stdlib at
-// dialect epoch 14 for package almide/nnlib.)
+// dialect epoch 14 for module nn.kernels of package almide-graphics/nn.)
 import matrix
 import bytes
 
-// The f32 row selector (it left the stdlib for package almide/nnlib in
+// The f32 row selector (it left the stdlib for module nn.kernels of package almide-graphics/nn in
 // dialect epoch 15), composed from the loader and the gather: decode the whole
 // aligned rows after the offset (a negative offset reads from 0), then gather
 // them (an out-of-range id is the all-zero row, a negative id is row 0).

@@ -4,15 +4,15 @@
 
 > **Dialect epoch 14:** the neural-network kernels (attention, RoPE, the row
 > norms, the activations, the Q1_0/Q8_0 loaders and the Qwen3 blocks — 25
-> functions) moved to package [almide/nnlib](https://github.com/almide/nnlib):
-> `almide add almide/nnlib@v0.1.0`, `import nnlib`, then `nnlib.gelu(m)` for
+> functions) moved to package [almide-graphics/nn](https://github.com/almide-graphics/nn) (module `nn.kernels`):
+> `almide add almide-graphics/nn@v0.2.0 --trust github.com/almide-graphics`, `import nn.kernels`, then `kernels.gelu(m)` for
 > `matrix.gelu(m)`, with the same arguments. Calling the old spelling is a
 > check-time error that names the new one.
 >
 > **Dialect epoch 15:** the arithmetic functions became the operators
 > (`add` is `a + b`; `sub`, `mul`, `div` likewise), the dense
 > kernels `linear_row`, `linear_row_no_bias`, `linear_f32_row_no_bias`,
-> `conv1d` and `select_rows_f32` moved to almide/nnlib, and the `_f32`
+> `conv1d` and `select_rows_f32` moved to almide-graphics/nn, and the `_f32`
 > product fusions are `*` with `matrix.transpose` / `matrix.scale`.
 
 `Matrix` is a row-major, dense, `Float`-valued matrix (`f64`). All operations
@@ -89,7 +89,7 @@ shorter operand instead, identically on both targets.
 |---|---|
 | `matrix.broadcast_add_row(m, row: Matrix) -> Matrix` | Add a (1×cols) row to every row of m |
 
-The dense kernels (`linear_row`, `conv1d`, ...) live in package almide/nnlib.
+The dense kernels (`linear_row`, `conv1d`, ...) live in module nn.kernels of package almide-graphics/nn.
 
 ## Shapes and domains
 
@@ -132,7 +132,7 @@ bound is 0, the negative-count rule of #4147), and `start >= end` is empty;
 
 Rows read from a byte buffer are a decode and a gather:
 `matrix.gather_rows(matrix.from_bytes_f32_le(b, offset, rows, cols)!, ids)`
-(the Q1_0 / Q8_0 quantized loaders moved to package almide/nnlib at dialect
+(the Q1_0 / Q8_0 quantized loaders moved to module nn.kernels of package almide-graphics/nn at dialect
 epoch 14, and `select_rows_f32` at epoch 15).
 
 The `from_bytes_f16_le` / `_f32_le` / `_f64_le` *decoders* keep a stored

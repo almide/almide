@@ -8579,11 +8579,11 @@
 },
 {
 "name": "linear_f32_row_no_bias",
-"to": "nnlib"
+"to": "nn.kernels"
 },
 {
 "name": "select_rows_f32",
-"to": "nnlib"
+"to": "nn.kernels"
 },
 {
 "name": "add",
@@ -8623,15 +8623,15 @@
 },
 {
 "name": "linear_row",
-"to": "nnlib"
+"to": "nn.kernels"
 },
 {
 "name": "linear_row_no_bias",
-"to": "nnlib"
+"to": "nn.kernels"
 },
 {
 "name": "conv1d",
-"to": "nnlib"
+"to": "nn.kernels"
 },
 {
 "name": "row_dot",

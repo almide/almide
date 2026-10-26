@@ -235,8 +235,8 @@ pub fn suggestion(url: &str) -> Option<String> {
         .iter()
         .filter(|(_, r)| *r != repo || owner != DEFAULT_TRUSTED_OWNER)
         .map(|(p, r)| (edit_distance(&fold(p), &wanted).min(edit_distance(&fold(r), &wanted)), p, r))
-        // Within 2 edits, and at most a third of the name: `mylib` is two
-        // edits from `nnlib` and means nothing by it.
+        // Within 2 edits, and at most a third of the name: `mydfa` is two
+        // edits from `dfa` and means nothing by it.
         .filter(|(d, _, _)| *d <= 2 && *d * 3 <= wanted.len())
         .min_by_key(|(d, p, _)| (*d, p.len()));
     if let Some((_, pkg, r)) = near {

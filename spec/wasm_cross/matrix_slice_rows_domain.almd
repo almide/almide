@@ -18,7 +18,7 @@
 // negative count to usize and died in a raw `capacity overflow` (#2480).
 //
 // (The conv1d kernel's width and stride cells, pinned here before, left the
-// stdlib with the kernel at dialect epoch 15 for package almide/nnlib.)
+// stdlib with the kernel at dialect epoch 15 for module nn.kernels of package almide-graphics/nn.)
 fn show(m: Matrix) -> String = "r=${matrix.rows(m)} c=${matrix.cols(m)} ${matrix.to_lists(m)}"
 
 fn main() -> Unit = {

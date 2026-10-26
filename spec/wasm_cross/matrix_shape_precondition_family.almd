@@ -7,7 +7,7 @@
 // another's require them EQUAL — `*` (cols(a) == rows(b)), `concat_cols`
 // (every non-empty member's row count) and `from_lists` (every row's width).
 // (The linear-row and conv1d kernels, pinned here before, left the stdlib at
-// dialect epoch 15 for package almide/nnlib.)
+// dialect epoch 15 for module nn.kernels of package almide-graphics/nn.)
 // Violating any of them was a raw Rust panic natively (exit 101, the form
 // ALS-T6 forbids) against a silent truncation or an out-of-block read on the
 // wasm legs — #2481 / #2482 / #2483.
