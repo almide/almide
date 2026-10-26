@@ -221,14 +221,15 @@ fn the_llm_examples_check_against_the_real_almai() {
         }
     }
     assert!(checked >= 3, "the llm subproject holds the three llm examples, found {checked}");
-    // KNOWN BROKEN (2026-10-26, #4229): the pinned almai pulls almide/llm
-    // v0.1.0, which calls `value.str` and `http.request_stream`, both removed
-    // by the stdlib redesign's wave 4 with no deprecation window (downstream
-    // migrates itself). Until llm → almai → this lock move to the new names,
-    // the examples are expected to fail checking — and the day they check
-    // again this branch says so, so the exemption cannot outlive the fix.
+    // KNOWN BROKEN (2026-10-26, #4229): the pinned almai (and the almide/llm
+    // v0.1.0 it pulls) still calls stdlib spellings the redesign removed with
+    // no deprecation window (downstream migrates itself). Until llm → almai →
+    // this lock move to the new names, the examples are expected to fail
+    // checking with removed-spelling diagnostics — every one of them names the
+    // dialect epoch that removed the spelling — and the day they check again
+    // this branch says so, so the exemption cannot outlive the fix.
     if !broken.is_empty() {
-        let stale = broken.iter().all(|b| b.contains("value.str") || b.contains("request_stream"));
+        let stale = broken.iter().all(|b| b.contains(" at dialect epoch "));
         assert!(stale, "llm examples broken by something other than #4229:\n{}", broken.join("\n"));
         return;
     }
