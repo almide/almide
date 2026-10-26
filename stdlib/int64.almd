@@ -168,7 +168,7 @@ fn count_leading_zeros(x: Int64) -> Int = int.count_leading_zeros(int.from_int64
 fn count_trailing_zeros(x: Int64) -> Int = int.min(int.count_trailing_zeros(int.from_int64(x)), 64)
 
 /// Number of set bits among the 64.
-fn count_ones(x: Int64) -> Int = int.pop_count(int.from_int64(x))
+fn count_ones(x: Int64) -> Int = int.count_ones(int.from_int64(x))
 
 /// The 8 bytes in reverse order (endian flip).
 fn byte_swap(x: Int64) -> Int64 = int.to_int64(int.byte_swap(int.from_int64(x)))

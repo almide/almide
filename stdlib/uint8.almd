@@ -107,7 +107,7 @@ fn count_leading_zeros(x: UInt8) -> Int = int.count_leading_zeros(int.from_uint8
 fn count_trailing_zeros(x: UInt8) -> Int = int.min(int.count_trailing_zeros(int.from_uint8(x)), 8)
 
 /// Number of set bits among the 8.
-fn count_ones(x: UInt8) -> Int = int.pop_count(int.from_uint8(x))
+fn count_ones(x: UInt8) -> Int = int.count_ones(int.from_uint8(x))
 
 /// The bytes in reverse order; one byte, so x itself.
 fn byte_swap(x: UInt8) -> UInt8 = x

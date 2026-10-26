@@ -157,7 +157,7 @@ fn count_leading_zeros(x: Int32) -> Int = int.count_leading_zeros(int.band(int.f
 fn count_trailing_zeros(x: Int32) -> Int = int.min(int.count_trailing_zeros(int.from_int32(x)), 32)
 
 /// Number of set bits among the 32.
-fn count_ones(x: Int32) -> Int = int.pop_count(int.band(int.from_int32(x), 4294967295))
+fn count_ones(x: Int32) -> Int = int.count_ones(int.band(int.from_int32(x), 4294967295))
 
 /// The 4 bytes in reverse order (endian flip).
 fn byte_swap(x: Int32) -> Int32 = int.to_int32(int.bshr(int.byte_swap(int.band(int.from_int32(x), 4294967295)), 32))

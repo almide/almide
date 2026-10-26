@@ -134,7 +134,7 @@ fn count_trailing_zeros(x: UInt32) -> Int = int.min(
 )
 
 /// Number of set bits among the 32.
-fn count_ones(x: UInt32) -> Int = int.pop_count(int.from_uint32(x))
+fn count_ones(x: UInt32) -> Int = int.count_ones(int.from_uint32(x))
 
 /// The 4 bytes in reverse order (endian flip).
 fn byte_swap(x: UInt32) -> UInt32 = int.to_uint32(int.bshr(int.byte_swap(int.from_uint32(x)), 32))
