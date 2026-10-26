@@ -7,12 +7,12 @@
 // - `scale(x, ka) + scale(y, kb) [+ scale(z, kc)]`: two rounded products and a
 //   rounded sum per term, never a fused step, zip shape included;
 // - `scale(a * b, alpha)` (the gelu / softmax / norm compositions left the
-//   stdlib at dialect epoch 14 for package almide/nnlib);
+//   stdlib at dialect epoch 14 for module nn.kernels of package almide-graphics/nn);
 // - `concat_rows([base, extra])`: an operand with no rows yields the other,
 //   else base's rows then extra's;
 // - the f32 spellings (`ones` / `zeros` and `*` with an optional transpose and
 //   scale) are the f64 arithmetic on every leg. (The `linear_f32_row_no_bias`
-//   kernel cells left with the kernel for package almide/nnlib.)
+//   kernel cells left with the kernel for module nn.kernels of package almide-graphics/nn.)
 fn show(tag: String, m: Matrix) -> Unit = {
   let l = matrix.to_lists(m)
   let s = matrix.shape(m)

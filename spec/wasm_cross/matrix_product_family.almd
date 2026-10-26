@@ -6,7 +6,7 @@
 //   rows or cols gives the all-zero / empty product;
 // The operands are small integers and halves so every summation order agrees
 // (native's matmul may run through the platform BLAS). (swiglu_gate, pinned
-// here before, left the stdlib at dialect epoch 14 for package almide/nnlib;
+// here before, left the stdlib at dialect epoch 14 for module nn.kernels of package almide-graphics/nn;
 // the linear-row and conv1d kernels followed it at epoch 15.)
 fn show(tag: String, m: Matrix) -> Unit = {
   let l = matrix.to_lists(m)

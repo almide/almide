@@ -437,7 +437,7 @@ Almide: `value`（データモデル 20 関数: 構築・取り出し・`stringi
 
 ### 3.9 `matrix`
 
-9 言語とも標準に行列演算は無い（2 章の表）。数値計算は外部（numpy, ndarray, gonum, Nx, Owl, multik, swift-numerics の一部）。Almide は epoch 14 で NN 用の 25 関数を `almide/nnlib` パッケージへ移した（matrix.md 冒頭）。
+9 言語とも標準に行列演算は無い（2 章の表）。数値計算は外部（numpy, ndarray, gonum, Nx, Owl, multik, swift-numerics の一部）。Almide は epoch 14 で NN 用の 25 関数を `almide-graphics/nn` パッケージへ移した（matrix.md 冒頭）。
 
 ### 3.10 `env` に入っているもの
 

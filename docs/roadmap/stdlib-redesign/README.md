@@ -292,7 +292,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-math-03](L2-math.md#r-math-03-実数の数学関数は-math-に集めるsqrt-を-math-に戻しfloatsqrt-を撤去---採用r-math-01-の-sqrt-の部分を見直す) | 実数の数学関数は `math` に集める（`sqrt` を `math` に戻し、`float.sqrt` を撤去） | ○ | #3972 |
 | [R-math-04](L2-math.md#r-math-04-expm1log1p-を足す---採用) | `expm1`・`log1p` を足す | ○ | #3980 |
 | [R-math-05](L2-math.md#r-math-05-逆双曲線関数-asinhacoshatanh-を足す完全性の規則-2-の見直し---採用) | 逆双曲線関数 `asinh`・`acosh`・`atanh` を足す（完全性の規則 2 の見直し） | ○ | #3980 |
-| [R-matrix-01](L2-matrix.md#r-matrix-01-推論用のカーネルを-almidennlib-へ移す---採用) | 推論用のカーネルを `almide/nnlib` へ移す | ○ | #3852 |
+| [R-matrix-01](L2-matrix.md#r-matrix-01-推論用のカーネルを-almide-graphicsnn-へ移す---採用) | 推論用のカーネルを `almide-graphics/nn` へ移す | ○ | #3852 |
 | [R-matrix-02](L2-matrix.md#r-matrix-02-fusion-の対象を内部の名前にする---採用) | fusion の対象を内部の名前にする | ○ | #3852 |
 | [R-matrix-03](L2-matrix.md#r-matrix-03-32-bit-の試験版-matrixfloat32-を撤去する---採用) | 32 bit の試験版 `Matrix[Float32]` を撤去する | ○ | #3852 |
 | [R-matrix-04](L2-matrix.md#r-matrix-04-select_rows-を撤去しgather_rows-に一本化する---採用) | `select_rows` を撤去し、`gather_rows` に一本化する | ○ | #3852 |

@@ -2,11 +2,11 @@
 // The f32 row selector decodes identically on both targets (the shared f32 LE
 // decoder the full-matrix loader uses, then `matrix.gather_rows` on a
 // row-subset schedule).
-// Its Q1_0 / Q8_0 siblings left the stdlib at dialect epoch 14 (package almide/nnlib).
+// Its Q1_0 / Q8_0 siblings left the stdlib at dialect epoch 14 (module nn.kernels of package almide-graphics/nn).
 import matrix
 import bytes
 
-// The f32 row selector (it left the stdlib for package almide/nnlib in
+// The f32 row selector (it left the stdlib for module nn.kernels of package almide-graphics/nn in
 // dialect epoch 15), composed from the loader and the gather: decode the whole
 // aligned rows after the offset (a negative offset reads from 0), then gather
 // them (an out-of-range id is the all-zero row, a negative id is row 0).
