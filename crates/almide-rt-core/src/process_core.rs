@@ -371,7 +371,7 @@ impl AlmideProcChild {
         {
             std::os::unix::process::CommandExt::process_group(&mut command, 0);
         }
-        let operand = if dir.is_empty() { format!("{cmd:?}") } else { format!("{}, {}", almide_proc_q(dir), almide_proc_q(cmd)) };
+        let operand = if dir.is_empty() { almide_proc_q(cmd) } else { format!("{}, {}", almide_proc_q(dir), almide_proc_q(cmd)) };
         let mut child = command.spawn().map_err(|e| almide_proc_call_err(call, &operand, e))?;
         let out = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let err = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -533,7 +533,7 @@ pub fn almide_proc_run_cmd(cmd: &str, args: &[impl AsRef<str>], dir: &str, stdin
     if !stdin.is_empty() {
         command.stdin(std::process::Stdio::piped());
     }
-    let operand = if dir.is_empty() { format!("{cmd:?}") } else { format!("{}, {}", almide_proc_q(dir), almide_proc_q(cmd)) };
+    let operand = if dir.is_empty() { almide_proc_q(cmd) } else { format!("{}, {}", almide_proc_q(dir), almide_proc_q(cmd)) };
     let mut child = command.spawn().map_err(|e| almide_proc_call_err("process.run", &operand, e))?;
     if let Some(mut w) = child.stdin.take() {
         let _ = std::io::Write::write_all(&mut w, stdin.as_bytes());

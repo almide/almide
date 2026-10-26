@@ -410,7 +410,7 @@ pub fn almide_rt_fs_write_bytes(path: &str, data: &Vec<u8>) -> Result<(), Almide
 pub fn almide_rt_fs_append(path: &str, content: &str) -> Result<(), AlmideString> {
     almide_rt_fs_append_with("fs.append_text", path, content.as_bytes())
 }
-fn almide_rt_fs_append_with(call: &str, path: &str, data: &[u8]) -> Result<(), AlmideString> {
+fn almide_rt_fs_append_with(call: &'static str, path: &str, data: &[u8]) -> Result<(), AlmideString> {
     let __almide_r: Result<(), String> = (|| {
         use std::io::Write;
         let mut f = std::fs::OpenOptions::new().append(true).create(true).open(path).map_err(|e| io_err(call, &fs_q(path), e))?;
