@@ -32,8 +32,14 @@ fn declared(module: &str) -> Option<BTreeSet<String>> {
     Some(v["functions"].as_array().into_iter().flatten().filter_map(|f| f["name"].as_str().map(String::from)).collect())
 }
 
-/// Every module a removal names, with its declared surface.
+/// Every module a removal names, with its declared surface, read once per
+/// process so the tests below judge one surface.
 fn surfaces() -> BTreeMap<String, Option<BTreeSet<String>>> {
+    static CACHE: std::sync::OnceLock<BTreeMap<String, Option<BTreeSet<String>>>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(read_surfaces).clone()
+}
+
+fn read_surfaces() -> BTreeMap<String, Option<BTreeSet<String>>> {
     let mut out = BTreeMap::new();
     for r in removed_spellings::all() {
         let module = r.from.split('.').next().unwrap_or("").to_string();
