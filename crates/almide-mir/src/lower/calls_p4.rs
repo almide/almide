@@ -638,15 +638,15 @@ impl LowerCtx {
     ) -> Option<ValueId> {
         use almide_ir::BinOp;
         // The `**` OPERATOR has no single hardware instruction — it desugars to a CALL into
-        // the self-hosted pow stdlib (`math.__fpow(a, b)` / `math.__pow(a, b)`).
+        // the self-hosted pow stdlib (`math.__fpow(a, b)` / `int.pow(a, b)`).
         // `PowFloat` → `math.__fpow` (the bit-exact libm transcription),
-        // `PowInt` → `math.__pow` (exponentiation-by-squaring). Both callees live in a
+        // `PowInt` → `int.pow` (exponentiation-by-squaring). Both callees live in a
         // PURE_MODULES module, so the synthesized `Op::CallFn` carries an EMPTY capability
         // witness (sound), and the corpus `count_ir_calls` credits the operator node 1:1 so
         // `mir_calls <= ir_calls` holds BY CONSTRUCTION (no elision-masking over-count).
         let pow_callee = match op {
             BinOp::PowFloat => Some("math.__fpow"),
-            BinOp::PowInt => Some("math.__pow"),
+            BinOp::PowInt => Some("int.pow"),
             _ => None,
         };
         if let Some(callee) = pow_callee {
@@ -660,7 +660,7 @@ impl LowerCtx {
                 args: vec![CallArg::Scalar(a), CallArg::Scalar(b)],
                 result: Some(repr),
             });
-            // `math.__pow` computes in the i64 carrier every integer rides here, so a
+            // `int.pow` computes in the i64 carrier every integer rides here, so a
             // NARROW result type (`Int32`, `UInt8`, …) has to come back to its declared
             // width — the same wrap `*` and `+` already apply through `narrow_wrap`.
             // Without it `let a: Int32 = 999997` made `a ^ 2` print the un-narrowed
