@@ -629,9 +629,10 @@ mod classification_gate {
         for f in ["exec", "output", "run", "start", "poll", "wait", "stop", "read_new_stdout", "child_pid", "kill"] {
             assert_eq!(stdlib_call_effect("process", f), vec![Proc], "process.{f}");
         }
-        for f in ["args", "pid", "env"] {
-            assert_eq!(stdlib_call_effect("process", f), vec![EnvRead], "process.{f}");
-        }
+        // argv and the variables live in `env` (R-process-01); `process.pid`
+        // is the one environment reader left in `process`.
+        assert_eq!(stdlib_call_effect("process", "pid"), vec![EnvRead], "process.pid");
+        assert_eq!(stdlib_call_effect("env", "args"), vec![EnvRead], "env.args");
         assert_eq!(stdlib_call_effect("uuid", "v4"), vec![Rand]);
         assert_eq!(stdlib_call_effect("uuid", "v7"), vec![Time, Rand]);
         assert!(stdlib_call_effect("uuid", "parse").is_empty());

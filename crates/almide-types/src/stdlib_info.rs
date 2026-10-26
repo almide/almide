@@ -728,7 +728,7 @@ mod ordered_tests {
         assert!(!super::is_ordered_stdlib_fn("fs", "read_text"));
         assert!(!super::is_ordered_stdlib_fn("io", "print"));
         assert!(!super::is_ordered_runtime_symbol("almide_rt_env_get"));
-        assert_eq!(t.len(), 31, "{t:?}");
+        assert_eq!(t.len(), 30, "{t:?}");
     }
 
     #[test]
