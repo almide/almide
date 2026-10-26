@@ -2661,8 +2661,8 @@
 {
 "mod": "http",
 "name": "decode_json",
-"sig": "fn http.decode_json[A](req: HttpRequest, decode: (Value) -> Result[A, String]) -> Result[A, HttpResponse]",
-"kind": "据え置き"
+"sig": "fn http.decode_json[A: Decode](req: HttpRequest) -> Result[A, HttpResponse]",
+"kind": "意味変更"
 },
 {
 "mod": "http",
