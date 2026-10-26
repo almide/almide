@@ -658,7 +658,7 @@ impl Checker {
         }
         // Matrix addition
         if *lc == Ty::Matrix || *rc == Ty::Matrix {
-            return Ty::Matrix;
+            return self.check_matrix_operands("+", lc, rc);
         }
         self.infer_plus_op_numeric_check(lc, rc);
         if let Some(t) = self.infer_plus_op_sized(lc, rc, left, right) {
