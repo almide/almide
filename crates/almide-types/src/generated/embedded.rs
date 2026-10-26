@@ -23,6 +23,7 @@ effect fn has_flag(name: String) -> Bool = __has(__options(env.args()), name)
 
 
 
+@category
 fn __has(args: List[String], name: String) -> Bool = {
 
 
@@ -34,12 +35,14 @@ fn __has(args: List[String], name: String) -> Bool = {
 
 
 
+@category
 fn __options(args: List[String]) -> List[String] = match list.index_of(args, "--") {
   some(i) => list.take(args, i),
   none => args,
 }
 
 
+@category
 fn __operands(args: List[String]) -> List[String] = match list.index_of(args, "--") {
   some(i) => list.drop(args, i + 1),
   none => [],
@@ -94,6 +97,7 @@ effect fn positional() -> List[String] = __positional(env.args())
 
 
 
+@category
 fn __positional(args: List[String]) -> List[String] = list.filter(
   __options(args),
   (a) => not string.starts_with(a, "-"),
@@ -5685,7 +5689,10 @@ effect fn get(name: String) -> String? = _
 /// Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
 @ordered
 @category("Env.write")
-effect fn set(name: String, value: String) -> Result[Unit, String] = match __set_refusal(name, value) {
+effect fn set(name: String, value: String) -> Result[Unit, String] = match __set_refusal(
+  name,
+  value,
+) {
   some(why) => err("env.set: " + why),
   none => {
     __set(name, value)
