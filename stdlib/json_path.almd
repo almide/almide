@@ -1,3 +1,8 @@
+// json_path — SELF-HOSTED value.Path API (root/key/index/get_path/set_path/remove_path).
+// The rep is a List[String] of segments, root-first — "f<name>" is a key step, "i<int>"
+// an index step (digits from int.to_string, so int.parse always round-trips). A step
+// appends to a uniquely owned path in place (the `let seg` + `path + [seg]` shape), so
+// building a deep path stays linear.
 fn json_path_index(path: List[String], i: Int) -> List[String] = {
   let seg = "i" + int.to_string(i)
   path + [seg]
@@ -36,7 +41,10 @@ fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Value? 
 fn value_path_root() -> List[String] = []
 
 @implements("value.key")
-fn value_path_key(p: List[String], name: String) -> List[String] = p + ["f" + name]
+fn value_path_key(p: List[String], name: String) -> List[String] = {
+  let seg = "f" + name
+  p + [seg]
+}
 
 @implements("value.index")
 fn value_path_index(p: List[String], i: Int) -> List[String] =

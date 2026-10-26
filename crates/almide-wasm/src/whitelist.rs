@@ -178,7 +178,7 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // 9110 ASCII fold spelled with chars/index_of/slice. get_header
     // (Option ret) sits in the SUM tier below.
     "http_response", "http_json", "http_redirect", "http_with_headers",
-    "http_status", "http_body", "http_set_header",
+    "http_status", "http_body", "http_body_bytes", "http_set_header",
     // The #1791 read side (audited 2026-09-03): the same list/string
     // surface plus int.parse / map.new / map.contains / map.set.
     "http_status_code", "http_headers_flat", "http_header_values",
@@ -198,12 +198,13 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // 8-byte scratch, a T6 prim.die on a negative n; C-394 pins the lengths
     // and two draws differing, not the bytes.
     "random_bytes",
-    // json_path.almd, READ side only (audited 2026-08-25): the path rep
-    // is a plain List[String]; get walks value.__field / value.as_array /
+    // json_path.almd, READ side only (audited 2026-08-25): the value.Path
+    // rep is a plain List[String]; get walks value.__field / value.as_array /
     // list.get — all native arms here, no raw layout reads. set/remove
     // are REJECTED: their pair walks read the incumbent's inline-pairs
     // Value layout (tag@h+4, count@h+8) — see PORT-MATRIX.
-    "json_path_index",
+    "value_path_root", "value_path_key", "value_path_index", "json_path_index",
+    "value_get_path",
     "http_get_header", "http_req_header", "http_param",
     // regex_engine.almd Option returners (same audit).
     "regex_find", "regex_captures",
