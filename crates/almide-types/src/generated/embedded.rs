@@ -87,20 +87,35 @@ effect fn option_or(name: String, fallback: String) -> String = match option(nam
   none => fallback,
 }
 
-/// Args before `--` not starting with -, then every arg after `--`; option values too.
-effect fn positional() -> List[String] = __positional(env.args())
+/// Args before `--` that are not flags or values of the named options, then all after `--`.
+effect fn positional(options: List[String]) -> List[String] = __positional(env.args(), options)
 
 
 
 
 
-fn __positional(args: List[String]) -> List[String] = list.filter(
-  __options(args),
-  (a) => not string.starts_with(a, "-"),
-) + __operands(args)
 
-/// i-th positional arg; none if out of range.
-effect fn positional_at(i: Int) -> String? = list.get(positional()!, i)
+
+
+
+
+
+fn __positional(args: List[String], options: List[String]) -> List[String] =
+  __positional_at(__options(args), options, 0, []) + __operands(args)
+
+
+@category
+fn __positional_at(args: List[String], options: List[String], i: Int, acc: List[String]) -> List[String] =
+  if i >= list.len(args) then acc
+  else {
+    let a = list.get_or(args, i, "")
+    if not string.starts_with(a, "-") then __positional_at(args, options, i + 1, acc + [a])
+    else if string.starts_with(a, "--") and list.contains(options, string.drop(a, 2)) then __positional_at(args, options, i + 2, acc)
+    else __positional_at(args, options, i + 1, acc)
+  }
+
+/// i-th positional arg (see positional); none if out of range.
+effect fn positional_at(i: Int, options: List[String]) -> String? = list.get(positional(options)!, i)
 "#;
 pub const SRC_BASE64: &str = r#"
 
@@ -1389,7 +1404,7 @@ fn skip(b: Bytes, pos: Int, n: Int) -> Int = _
 @intrinsic("almide_rt_bytes_skip_length_prefixed_le")
 fn skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int = _
 
-/// Copy of start..end capped at len; empty if start >= end.
+/// Copy of start..end, each clamped to 0..len; empty if start >= end.
 @intrinsic("almide_rt_bytes_slice")
 fn slice(b: Bytes, start: Int, end: Int) -> Bytes = _
 
@@ -1997,26 +2012,31 @@ fn pop(mut b: Bytes) -> Int? = {
   last
 }
 
-/// The first n bytes; all of b past its length; n < 0 aborts.
-fn take(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.take: negative count ${n}")
-else bytes.slice(b, 0, n)
 
-/// b without its first n bytes; empty past its length; n < 0 aborts.
-fn drop(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.drop: negative count ${n}")
-else bytes.slice(b, n, bytes.len(b))
 
-/// The last n bytes; all of b past its length; n < 0 aborts.
-fn take_end(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.take_end: negative count ${n}")
-else bytes.slice(b, int.max(bytes.len(b) - n, 0), bytes.len(b))
+/// The first n bytes; all of b past its length; empty if n < 0.
+fn take(b: Bytes, n: Int) -> Bytes = bytes.slice(b, 0, int.max(n, 0))
 
-/// b without its last n bytes; empty past its length; n < 0 aborts.
-fn drop_end(b: Bytes, n: Int) -> Bytes = if n < 0 then panic("bytes.drop_end: negative count ${n}")
-else bytes.slice(b, 0, int.max(bytes.len(b) - n, 0))
+/// b without its first n bytes; empty past its length; all of b if n < 0.
+fn drop(b: Bytes, n: Int) -> Bytes = bytes.slice(b, int.max(n, 0), bytes.len(b))
 
-/// (first n bytes, the rest); n past the end gives (b, empty); n < 0 aborts.
-fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) =
-  if n < 0 then panic("bytes.split_at: negative index ${n}")
-  else (bytes.slice(b, 0, n), bytes.slice(b, n, bytes.len(b)))
+/// The last n bytes; all of b past its length; empty if n < 0.
+fn take_end(b: Bytes, n: Int) -> Bytes = {
+  let k = int.min(int.max(n, 0), bytes.len(b))
+  bytes.slice(b, bytes.len(b) - k, bytes.len(b))
+}
+
+/// b without its last n bytes; empty past its length; all of b if n < 0.
+fn drop_end(b: Bytes, n: Int) -> Bytes = {
+  let k = int.min(int.max(n, 0), bytes.len(b))
+  bytes.slice(b, 0, bytes.len(b) - k)
+}
+
+/// (first n bytes, the rest); n past the end gives (b, empty), n < 0 gives (empty, b).
+fn split_at(b: Bytes, n: Int) -> (Bytes, Bytes) = {
+  let k = int.max(n, 0)
+  (bytes.slice(b, 0, k), bytes.slice(b, k, bytes.len(b)))
+}
 
 /// The first byte, or none if b is empty.
 fn first(b: Bytes) -> Int? = bytes.get(b, 0)
@@ -4955,9 +4975,9 @@ fn diff_seconds(a: Int, b: Int) -> Int = _
 @intrinsic("almide_rt_datetime_format")
 fn format(ts: Int, pattern: String) -> String = _
 
-/// UTC epoch secs; out-of-range fields roll over.
+/// UTC epoch secs; a field out of range is err, as in parse_iso.
 @intrinsic("almide_rt_datetime_from_parts")
-fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = _
+fn from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String] = _
 
 /// Identity: seconds are already a timestamp.
 @intrinsic("almide_rt_datetime_from_unix")
@@ -5164,12 +5184,32 @@ fn __ep_doe(y: Int, m: Int, d: Int) -> Int = {
   yoe * 365 + yoe / 4 - yoe / 100 + doy
 }
 
-fn datetime_from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Int = {
-  let era = __ep_era(y, m)
-  let doe = __ep_doe(y, m, d)
-  let days = era * 146097 + doe - 719468
-  days * 86400 + h * 3600 + min * 60 + s
-}
+fn __ep_leap(y: Int) -> Bool = y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
+
+fn __ep_days_in_month(y: Int, m: Int) -> Int = if m == 2 then (if __ep_leap(y) then 29 else 28)
+else if m == 4 or m == 6 or m == 9 or m == 11 then 30 else 31
+
+
+
+
+
+
+
+
+@implements("datetime.from_parts")
+fn datetime_from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String] =
+  if y < 0 or y > 9999 then err("year out of range: " + int.to_string(y))
+  else if m < 1 or m > 12 then err("month out of range: " + int.to_string(m))
+  else if d < 1 or d > __ep_days_in_month(y, m) then err("day out of range: " + int.to_string(d))
+  else if h < 0 or h > 23 then err("hour out of range: " + int.to_string(h))
+  else if min < 0 or min > 59 then err("minute out of range: " + int.to_string(min))
+  else if s < 0 or s > 59 then err("second out of range: " + int.to_string(s))
+  else {
+    let era = __ep_era(y, m)
+    let doe = __ep_doe(y, m, d)
+    let days = era * 146097 + doe - 719468
+    ok(days * 86400 + h * 3600 + min * 60 + s)
+  }
 "#;
 pub const SRC_DATETIME_FORMAT: &str = r#"
 
@@ -5334,11 +5374,6 @@ fn __dpi_sign_at(t: String) -> Int? = match (string.index_of(t, "+"), string.ind
   (none, none) => none,
 }
 
-fn __dpi_leap(y: Int) -> Bool = y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
-
-fn __dpi_days_in_month(y: Int, m: Int) -> Int = if m == 2 then (if __dpi_leap(y) then 29 else 28)
-else if m == 4 or m == 6 or m == 9 or m == 11 then 30 else 31
-
 
 fn __dpi_offset(t: String, i: Int) -> Int? = {
   let sign = string.slice(t, i, i + 1)
@@ -5358,6 +5393,7 @@ fn __dpi_offset(t: String, i: Int) -> Int? = {
 }
 
 
+
 fn __dpi_build(d: List[Int], tm: List[Int], off: Int) -> Result[Int, String] = {
   let y = list.get(d, 0) ?? 0
   let mo = list.get(d, 1) ?? 0
@@ -5365,13 +5401,10 @@ fn __dpi_build(d: List[Int], tm: List[Int], off: Int) -> Result[Int, String] = {
   let h = list.get(tm, 0) ?? 0
   let mi = list.get(tm, 1) ?? 0
   let s = list.get(tm, 2) ?? 0
-  if y < 0 or y > 9999 then err("year out of range: " + int.to_string(y))
-  else if mo < 1 or mo > 12 then err("month out of range: " + int.to_string(mo))
-  else if dd < 1 or dd > __dpi_days_in_month(y, mo) then err("day out of range: " + int.to_string(dd))
-  else if h < 0 or h > 23 then err("hour out of range: " + int.to_string(h))
-  else if mi < 0 or mi > 59 then err("minute out of range: " + int.to_string(mi))
-  else if s < 0 or s > 59 then err("second out of range: " + int.to_string(s))
-  else ok(datetime.from_parts(y, mo, dd, h, mi, s) - off)
+  match datetime.from_parts(y, mo, dd, h, mi, s) {
+    ok(t) => ok(t - off),
+    err(e) => err(e),
+  }
 }
 
 fn datetime_parse_iso(s: String) -> Result[Int, String] = {
@@ -16446,12 +16479,12 @@ fn flatten[T](xss: List[List[T]]) -> List[T] = _
 
 
 
-/// First n elements; all if n >= len or n < 0.
+/// First n elements; all if n >= len, [] if n < 0.
 @intrinsic("almide_rt_list_take")
 @reuse(xs)
 fn take[A](xs: List[A], n: Int) -> List[A] = _
 
-/// All but the first n; [] if n >= len or n < 0.
+/// All but the first n; [] if n >= len, all if n < 0.
 @intrinsic("almide_rt_list_drop")
 @reuse(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
@@ -16471,7 +16504,7 @@ fn index_of[A](xs: List[A], x: A) -> Int? = _
 @intrinsic("almide_rt_list_last")
 fn last[A](xs: List[A]) -> A? = _
 
-/// Runs of n, last may be short; n = 0 aborts.
+/// Runs of n, last may be short; n <= 0 aborts.
 @intrinsic("almide_rt_list_chunk")
 fn chunk[A](xs: List[A], n: Int) -> List[List[A]] = _
 
@@ -16618,7 +16651,7 @@ fn unique_by[A, K](xs: List[A], f: (A) -> K) -> List[A] = _
 @intrinsic("almide_rt_list_range")
 fn range(start: Int, end: Int) -> List[Int] = _
 
-/// Indices start..<end, clamped; [] if start >= end.
+/// Indices start..<end, each clamped to 0..len; [] if start >= end.
 @intrinsic("almide_rt_list_slice")
 @reuse(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
@@ -16642,7 +16675,7 @@ fn repeat[A](val: A, n: Int) -> List[A] = _
 @consume(xs)
 fn intersperse[A](xs: List[A], sep: A) -> List[A] = _
 
-/// All n-long runs; [] if n > len; n = 0 aborts.
+/// All n-long runs; [] if n > len; n <= 0 aborts.
 @intrinsic("almide_rt_list_windows")
 fn windows[A](xs: List[A], n: Int) -> List[List[A]] = _
 
@@ -16650,12 +16683,12 @@ fn windows[A](xs: List[A], n: Int) -> List[List[A]] = _
 @intrinsic("almide_rt_list_dedup")
 fn dedup[A](xs: List[A]) -> List[A] = _
 
-/// Last n elements; all if n >= len or n < 0.
+/// Last n elements; all if n >= len, [] if n < 0.
 @intrinsic("almide_rt_list_take_end")
 @reuse(xs)
 fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 
-/// All but the last n; [] if n >= len or n < 0.
+/// All but the last n; [] if n >= len, all if n < 0.
 @intrinsic("almide_rt_list_drop_end")
 @reuse(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
@@ -16665,7 +16698,7 @@ fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
 @consume(xs)
 fn shuffle[A](xs: List[A]) -> List[A] = _
 
-/// All n-long runs; [] if n > len; n = 0 aborts.
+/// All n-long runs; [] if n > len; n <= 0 aborts.
 @intrinsic("almide_rt_list_window")
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
@@ -16701,7 +16734,7 @@ fn bundled_probe(n: Int) -> Int = n + 1
 
 
 
-/// (take n, drop n); n past the end gives (xs, []).
+/// (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
 fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), list.drop(xs, n))
 
 
@@ -17709,14 +17742,10 @@ fn list_chunk(xs: List[Int], n: Int) -> List[List[Int]] = {
 
 
 
-  if n == 0 then prim.die(prim.handle("Error: chunk size must be positive\n")) else ()
+
+  if n <= 0 then prim.die(prim.handle("Error: chunk size must be positive\n")) else ()
   let sh = prim.handle(xs)
   let total = prim.load32(sh + 4)
-
-
-
-  let n = if n < 0 then (if total > 0 then total else 1)
-  else n
 
 
 
@@ -17744,7 +17773,8 @@ else {
 fn __do_windows(xs: List[Int], n: Int) -> List[List[Int]] = {
 
 
-  if n == 0 then prim.die(prim.handle("Error: window size must be positive\n")) else ()
+
+  if n <= 0 then prim.die(prim.handle("Error: window size must be positive\n")) else ()
   let sh = prim.handle(xs)
   let total = prim.load32(sh + 4)
 
@@ -17789,15 +17819,9 @@ fn __chunk_outer_str(oh: Int, sh: Int, total: Int, cn: Int, ci: Int, start: Int)
   }
 
 fn list_chunk_str(xs: List[String], n: Int) -> List[List[String]] = {
-  if n == 0 then prim.die(prim.handle("Error: chunk size must be positive\n")) else ()
+  if n <= 0 then prim.die(prim.handle("Error: chunk size must be positive\n")) else ()
   let sh = prim.handle(xs)
   let total = prim.load32(sh + 4)
-
-
-
-
-  let n = if n < 0 then (if total > 0 then total else 1)
-  else n
 
 
 
@@ -17820,7 +17844,7 @@ else {
 }
 
 fn __do_windows_str(xs: List[String], n: Int) -> List[List[String]] = {
-  if n == 0 then prim.die(prim.handle("Error: window size must be positive\n")) else ()
+  if n <= 0 then prim.die(prim.handle("Error: window size must be positive\n")) else ()
   let sh = prim.handle(xs)
   let total = prim.load32(sh + 4)
 
@@ -18987,7 +19011,7 @@ fn list_swap_heapelem(xs: List[Value], i: Int, j: Int) -> List[Value] = {
 fn list_take_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let start = if n < 0 then 0
+  let start = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let cnt = len - start
   let buf: List[Value] = prim.alloc_list_str(cnt)
@@ -18998,7 +19022,7 @@ fn list_take_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
 fn list_drop_end_heapelem(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let endi = if n < 0 then 0
+  let endi = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let buf: List[Value] = prim.alloc_list_str(endi)
   let _c = __lsh_copy(h + 12, prim.handle(buf) + 12, endi, 0)
@@ -19048,9 +19072,7 @@ fn list_take_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
 
-
-
-  let k = if n < 0 then len
+  let k = if n < 0 then 0
   else if n > len then len else n
   let out: List[List[Int]] = prim.alloc_list_str(k)
   let _x = __take_h_fill(prim.handle(out), h, k, 0)
@@ -19060,7 +19082,7 @@ fn list_take_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
 fn list_drop_hshare(xs: List[List[Int]], n: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let start = if n < 0 then len
+  let start = if n < 0 then 0
   else if n > len then len else n
   let k = len - start
   let out: List[List[Int]] = prim.alloc_list_str(k)
@@ -19091,14 +19113,12 @@ else {
 
 
 
-
-
 fn list_slice_hshare(xs: List[List[Int]], start: Int, end: Int) -> List[List[Int]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let e0 = if end < 0 then len
+  let e0 = if end < 0 then 0
   else if end > len then len else end
-  let s0 = if start < 0 then len else start
+  let s0 = if start < 0 then 0 else start
   let k = if s0 >= e0 then 0 else e0 - s0
   let out: List[List[Int]] = prim.alloc_list_str(k)
   let _x = __drop_h_fill(prim.handle(out), h, s0, k, 0)
@@ -19737,7 +19757,7 @@ fn list_tail(xs: List[Int]) -> List[Int] = {
 fn list_take_end(xs: List[Int], n: Int) -> List[Int] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let start = if n < 0 then 0
+  let start = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let newlen = len - start
   let buf = prim.alloc_list(newlen)
@@ -19748,10 +19768,11 @@ fn list_take_end(xs: List[Int], n: Int) -> List[Int] = {
 
 
 
+
 fn list_drop_end(xs: List[Int], n: Int) -> List[Int] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let endi = if n < 0 then 0
+  let endi = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let buf = prim.alloc_list(endi)
   let _c = __copy_slots(h + 12, prim.handle(buf) + 12, endi, 0)
@@ -19766,7 +19787,7 @@ fn list_drop_end(xs: List[Int], n: Int) -> List[Int] = {
 fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let endi = if n < 0 then 0
+  let endi = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let buf = prim.alloc_list_str(endi)
   let _c = __copy_slots_rc(h + 12, prim.handle(buf) + 12, endi, 0)
@@ -19779,7 +19800,7 @@ fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
 fn list_take_end_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let start = if n < 0 then 0
+  let start = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let cnt = len - start
   let buf = prim.alloc_list_str(cnt)
@@ -21703,7 +21724,7 @@ else {
   __copy_slice(srch, dsth, start, count, i + 1)
 }
 
-fn __clamp_len(n: Int, len: Int) -> Int = if n < 0 then len
+fn __clamp_len(n: Int, len: Int) -> Int = if n < 0 then 0
 else if n > len then len else n
 
 fn list_take(xs: List[Int], n: Int) -> List[Int] = {
@@ -21732,9 +21753,9 @@ fn list_drop(xs: List[Int], n: Int) -> List[Int] = {
 fn list_slice(xs: List[Int], start: Int, end: Int) -> List[Int] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let e = if end < 0 then len
+  let e = if end < 0 then 0
   else (if end > len then len else end)
-  let s = if start < 0 then len else start
+  let s = if start < 0 then 0 else start
   let count = if s >= e then 0 else e - s
   let buf = prim.alloc_list(count)
   let bh = prim.handle(buf)
@@ -21746,7 +21767,7 @@ pub const SRC_LIST_TAKEDROP_STR: &str = r#"
 
 
 
-fn __clamp_str(n: Int, len: Int) -> Int = if n < 0 then len
+fn __clamp_str(n: Int, len: Int) -> Int = if n < 0 then 0
 else if n > len then len else n
 
 fn __copy_slice_str(srch: Int, dsth: Int, start: Int, count: Int, i: Int) -> Int =
@@ -21785,9 +21806,9 @@ fn list_drop_str(xs: List[String], n: Int) -> List[String] = {
 fn list_slice_str(xs: List[String], start: Int, end: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let e = if end < 0 then len
+  let e = if end < 0 then 0
   else (if end > len then len else end)
-  let s = if start < 0 then len else start
+  let s = if start < 0 then 0 else start
   let count = if s >= e then 0 else e - s
   let buf = prim.alloc_list_str(count)
   let _x = __copy_slice_str(h, prim.handle(buf), s, count, 0)
@@ -28772,7 +28793,7 @@ fn linear_row(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix = _
 @intrinsic("almide_rt_matrix_linear_row_no_bias")
 fn linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix = _
 
-/// Rows [start, end), end clamped to the row count.
+/// Rows [start, end), each bound clamped to 0..row count.
 @intrinsic("almide_rt_matrix_slice_rows")
 fn slice_rows(m: Matrix, start: Int, end: Int) -> Matrix = _
 
@@ -29265,14 +29286,14 @@ fn matrix_transpose(m: List[List[Float]]) -> List[List[Float]] = {
 
 
 
-
 fn matrix_slice_rows(m: List[List[Float]], start: Int, end: Int) -> List[List[Float]] = {
   let hm = prim.handle(m)
   let len = prim.load32(hm + 4)
-  let e = if end < 0 or end > len then len else end
-  let n = if start >= 0 and start < e then e - start else 0
+  let e = if end < 0 then 0 else (if end > len then len else end)
+  let s = if start < 0 then 0 else start
+  let n = if s < e then e - s else 0
   let out: List[List[Float]] = prim.alloc_list_str(n)
-  let _x = __mx_slice_fill(prim.handle(out), hm, start, n, 0)
+  let _x = __mx_slice_fill(prim.handle(out), hm, s, n, 0)
   out
 }
 
@@ -38898,19 +38919,19 @@ fn first(s: String) -> String? = _
 @intrinsic("almide_rt_string_last")
 fn last(s: String) -> String? = _
 
-/// First n codepoints; all of s if n < 0.
+/// First n codepoints; "" if n < 0.
 @intrinsic("almide_rt_string_take")
 fn take(s: String, n: Int) -> String = _
 
-/// Last n codepoints; all of s if n < 0.
+/// Last n codepoints; "" if n < 0.
 @intrinsic("almide_rt_string_take_end")
 fn take_end(s: String, n: Int) -> String = _
 
-/// s minus first n codepoints; "" if n < 0.
+/// s minus first n codepoints; s if n < 0.
 @intrinsic("almide_rt_string_drop")
 fn drop(s: String, n: Int) -> String = _
 
-/// s minus last n codepoints; "" if n < 0.
+/// s minus last n codepoints; s if n < 0.
 @intrinsic("almide_rt_string_drop_end")
 fn drop_end(s: String, n: Int) -> String = _
 
@@ -39164,10 +39185,8 @@ fn window(s: String, n: Int) -> List[String] =
   if n <= 0 then panic("string.window: size must be positive, got ${n}")
   else list.window(string.chars(s), n) |> list.map((cs) => string.join(cs, ""))
 
-/// (first n characters, the rest); n past the end gives (s, ""); n < 0 aborts.
-fn split_at(s: String, n: Int) -> (String, String) =
-  if n < 0 then panic("string.split_at: negative index ${n}")
-  else (string.take(s, n), string.drop(s, n))
+/// (first n characters, the rest); n past the end gives (s, ""), n < 0 gives ("", s).
+fn split_at(s: String, n: Int) -> (String, String) = (string.take(s, n), string.drop(s, n))
 
 /// s with each run of equal adjacent characters collapsed to one.
 fn dedup(s: String) -> String = string.join(list.dedup(string.chars(s)), "")
@@ -40950,7 +40969,6 @@ pub const SRC_STRING_TAKE_DROP: &str = r#"
 
 
 
-
 fn __td_skip(addr: Int, end: Int) -> Int = if addr >= end then addr
 else if prim.load8(addr) / 64 == 2 then __td_skip(addr + 1, end) else addr
 
@@ -40998,14 +41016,14 @@ fn __td_slice(s: String, lo: Int, hi: Int) -> String = {
 
 fn string_take(s: String, n: Int) -> String = {
   let count = __td_count(s)
-  let k = if n < 0 then count
+  let k = if n < 0 then 0
   else (if n > count then count else n)
   __td_slice(s, 0, k)
 }
 
 fn string_drop(s: String, n: Int) -> String = {
   let count = __td_count(s)
-  let k = if n < 0 then count
+  let k = if n < 0 then 0
   else (if n > count then count else n)
   __td_slice(s, k, count)
 }
@@ -41033,8 +41051,8 @@ fn string_take_end(s: String, n: Int) -> String = {
   let h = prim.handle(s)
   let base = h + 12
   let end = base + prim.load32(h + 4)
-  let start = if n < 0 then base
-  else __td_back(base, end, n)
+
+  let start = __td_back(base, end, n)
   __td_bytes(start, end)
 }
 
@@ -41042,8 +41060,8 @@ fn string_drop_end(s: String, n: Int) -> String = {
   let h = prim.handle(s)
   let base = h + 12
   let end = base + prim.load32(h + 4)
-  let cut = if n < 0 then base
-  else __td_back(base, end, n)
+
+  let cut = __td_back(base, end, n)
   __td_bytes(base, cut)
 }
 "#;
@@ -44617,7 +44635,7 @@ fn list_swap_value(xs: List[Value], i: Int, j: Int) -> List[Value] = {
 fn list_take_end_value(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let start = if n < 0 then 0
+  let start = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let cnt = len - start
   let buf = prim.alloc_list_str(cnt)
@@ -44628,7 +44646,7 @@ fn list_take_end_value(xs: List[Value], n: Int) -> List[Value] = {
 fn list_drop_end_value(xs: List[Value], n: Int) -> List[Value] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let endi = if n < 0 then 0
+  let endi = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let buf = prim.alloc_list_str(endi)
   let _c = __lsv_copy(h + 12, prim.handle(buf) + 12, endi, 0)
@@ -45046,7 +45064,7 @@ else {
 fn list_take_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let count = if n < 0 then len
+  let count = if n < 0 then 0
   else if n > len then len else n
   let buf = prim.alloc_list_str(count)
   __ldls_share(h, prim.handle(buf), 0, count, 0)
@@ -45060,7 +45078,7 @@ fn list_take_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
 fn list_drop_liststr(xs: List[List[String]], n: Int) -> List[List[String]] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let start = if n < 0 then len
+  let start = if n < 0 then 0
   else if n > len then len else n
   let count = len - start
   let buf = prim.alloc_list_str(count)

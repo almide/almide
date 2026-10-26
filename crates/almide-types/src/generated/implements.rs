@@ -4,6 +4,7 @@ pub const DECLARED: &[(&str, &[(&str, &str)])] = &[
     (crate::embedded::SRC_BYTES_CORE, &[("bytes_split", "bytes.split")]),
     (crate::embedded::SRC_BYTES_CT, &[("bytes_is_equal_constant_time", "bytes.is_equal_constant_time"), ("string_is_equal_constant_time", "string.is_equal_constant_time")]),
     (crate::embedded::SRC_BYTES_RAWPTR, &[("ffi_to_int", "ffi.to_int")]),
+    (crate::embedded::SRC_DATETIME_CALENDAR, &[("datetime_from_parts", "datetime.from_parts")]),
     (crate::embedded::SRC_FFI_BRIDGE, &[("ffi_address", "ffi.address"), ("ffi_read", "ffi.read"), ("ffi_write", "ffi.write")]),
     (crate::embedded::SRC_FLOAT_CHECKED, &[("float_to_int_checked", "float.to_int_checked")]),
     (crate::embedded::SRC_FLOAT_SATURATING, &[("float_to_int_saturating", "float.to_int_saturating")]),
@@ -23,6 +24,7 @@ pub const DECLARED: &[(&str, &[(&str, &str)])] = &[
 pub const PRIM_FREE: &[&str] = &[
     "bytes_is_equal_constant_time",
     "string_is_equal_constant_time",
+    "datetime_from_parts",
     "ffi_address",
     "ffi_read",
     "ffi_write",
