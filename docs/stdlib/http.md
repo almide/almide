@@ -129,11 +129,12 @@ concatenation.
 ```almd check
 import http
 
-type User: Codec = { name: String, age: Int }
+// What the client may set: an input type (`: Decode`, not `Codec`).
+type NewUser: Decode = { name: String, age: Int }
 
 effect fn get_user(req: HttpRequest) -> HttpResponse = http.response(200, "user " + (http.param(req, "id") ?? ""))
 
-effect fn create_user(req: HttpRequest) -> HttpResponse = match http.decode_json(req, (v) => User.decode(v)) {
+effect fn create_user(req: HttpRequest) -> HttpResponse = match http.decode_json[NewUser](req) {
   ok(u) => http.response(201, u.name),
   err(bad) => bad,
 }
@@ -154,6 +155,7 @@ effect fn main() -> Unit = {
   println(show(app, "GET", "/users/42?x=1", "")!)
   println(show(app, "POST", "/users", "{\"name\":\"ann\",\"age\":3}")!)
   println(show(app, "POST", "/users", "{}")!)
+  println(show(app, "POST", "/users", "{\"name\":\"ann\",\"age\":3,\"is_admin\":true}")!)
   println(show(app, "DELETE", "/users/42", "")!)
   println(show(app, "GET", "/nope", "")!)
 }
@@ -162,6 +164,7 @@ effect fn main() -> Unit = {
 200 user 42
 201 ann
 400 Bad Request: missing field 'name'
+400 Bad Request: unknown key 'is_admin'
 405 Method Not Allowed
 404 Not Found
 ```
@@ -193,8 +196,15 @@ effect fn main() -> Unit = {
   `http.wrap(app, [a, b])` is `a(b(app))`: the first in the list is the
   outermost. A middleware may answer without calling the handler it wraps.
   Per-request data travels as arguments; there is no mutable context.
-- **Bad input** — `http.decode_json(req, decode)` parses the body and runs a
-  Codec decoder; its `err` is a ready `400 Bad Request` response naming why.
+- **Request bodies** — `http.decode_json[T](req)` parses the body into an
+  input type `T`: a record declared `: Decode` and not also `Encode`, whose
+  every field is input (C-436). A `Codec` type — one the program also sends
+  or stores — is the check error E110, and so is a `Codec` record nested in
+  `T`: decode into the input type and build the domain value in code, so a
+  field the client must not set (`is_admin`) has no way in. The body decodes
+  with `T.decode_strict`; its `err` is a ready `400 Bad Request` response
+  naming why: not JSON, a wrong field type, a missing field, or a key
+  outside `T` (`unknown key '<k>'`).
 - **Out of scope** — built-in logger / CORS / sessions, streaming responses
   and WebSocket are left to packages.
 
@@ -1287,9 +1297,9 @@ http.router(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpRespo
 // @since unreleased
 http.wrap(handler: (HttpRequest) -> Result[HttpResponse, String], middleware: List[((HttpRequest) -> Result[HttpResponse, String]) -> (HttpRequest) -> Result[HttpResponse, String]]) -> (HttpRequest) -> Result[HttpResponse, String]
 
-// JSON body through decode; err is a 400 response.
+// JSON body into input type T, strictly; err is a 400 response.
 // @since unreleased
-http.decode_json(req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse]
+http.decode_json(req: HttpRequest) -> Result[T, HttpResponse]
 ```
 
 ## Type index (4 types)

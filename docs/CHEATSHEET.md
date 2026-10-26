@@ -1070,30 +1070,37 @@ fn Event.decode(v: Value) -> Result[Event, String] = {
 Always pair a hand-written codec with a roundtrip test:
 `test "Event roundtrips" { assert_eq(Event.decode(Event.encode(C(Click{x:1,y:2}))), ok(C(Click{x:1,y:2}))) }`
 
-**Rule 5 — decode untrusted input into an INPUT type, then build the domain
-type.** A request body decoded straight into the domain type sets every field
-it names — `{"is_admin": true}` makes an admin (mass assignment). Declare a
-Codec type holding only what the client may set, decode into it with
-`T.decode_strict` (refuses unknown keys with `unknown key '<k>'`; plain
-`T.decode` ignores them), then construct the domain value in code:
+**Rule 5 — a request decodes into an input type (`: Decode`), never into a
+type you also send or store (`: Codec`).** `Codec` is `Encode + Decode`:
+`: Decode` derives only `T.decode` (and, for a record, `T.decode_strict`),
+`: Encode` only `T.encode`. A `: Decode`-only type is an INPUT type, and
+every field of it is input — so it lists exactly what the client may set.
+`http.decode_json[T](req)` accepts only an input type (a `Codec` type is
+E110, so `{"is_admin": true}` can never reach `User`), decodes strictly (a key
+outside `T` is `400 Bad Request: unknown key '<k>'`), and the handler builds
+the domain value in code. Records nested in an input type are input types
+too. Elsewhere `T.decode` stays lenient (unknown keys ignored) and
+`T.decode_strict` refuses them:
 
 ```almide check
-import json
+import http
 import secret
 
-// Only what the client may set. `User` is not Codec at all, so a request
-// body can never be decoded into it — `is_admin` has no way in. The password
-// stays a Secret: it prints as Secret(***) in logs and assert failures.
-type SignupInput: Codec = { name: String, email: String, password: Secret[String] }
+// Only what the client may set. Every field of a `: Decode` type is input.
+// The password stays a Secret: it prints as Secret(***) in logs and asserts.
+type SignupInput: Decode = { name: String, email: String, password: Secret[String] }
 type User = { name: String, email: String, password: Secret[String], is_admin: Bool }
 
-effect fn signup(body: String) -> User = {
-  let input = SignupInput.decode_strict(json.parse(body)!)!   // unknown keys → err
-  User { name: input.name, email: input.email, password: input.password, is_admin: false }
+effect fn signup(req: HttpRequest) -> HttpResponse = match http.decode_json[SignupInput](req) {
+  ok(i) => {
+    let user = User { name: i.name, email: i.email, password: i.password, is_admin: false }
+    http.response(201, user.name)
+  },
+  err(bad) => bad,   // unknown key, bad JSON, wrong field type → 400
 }
 
-// A type that must be Codec both ways keeps input off a field with @skip_decode
-// (never read, still encoded) — it needs a default.
+// A type that must be Codec both ways (persisted, mirrored) keeps input off a
+// field with @skip_decode (never read, still encoded) — it needs a default.
 type Account: Codec = { name: String, @skip_decode is_admin: Bool = false }
 ```
 `@skip` keeps a field out of both `decode` and `encode`. Field attributes are
@@ -1114,14 +1121,15 @@ shows up in `"${user}"`, in an `assert_eq` failure and in the `almide test`
 report. Hold it as `Secret[String]`: every renderer prints `Secret(***)`,
 `secret.reveal(s)` is the one way out, `==` on `Secret[String]` /
 `Secret[Bytes]` is constant time (any other `Secret` has no `==`, E103), and a
-`: Codec` record with a Secret field derives `decode` only — `T.encode` is
-E023, so build an outgoing Value by hand with `secret.reveal`.
+record with a Secret field is read, never written: declare it `: Decode`
+(a `: Codec` one derives `decode` only and `T.encode` is E023), and build an
+outgoing Value by hand with `secret.reveal`.
 
 ```almide check
 import json
 import secret
 
-type LoginInput: Codec = { user: String, password: Secret[String] }
+type LoginInput: Decode = { user: String, password: Secret[String] }
 
 effect fn main() -> Unit = {
   let input = LoginInput.decode(json.parse("{\"user\":\"ana\",\"password\":\"hunter2\"}")!)!
