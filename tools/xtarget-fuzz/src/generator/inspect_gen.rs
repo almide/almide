@@ -333,14 +333,14 @@ const SHAPE_RECIPES: &[Recipe] = &[
     // The codecs over n bytes that do not repeat in any short period (a run
     // of zeros is one LZ77 match on native); a decoder's input is its own
     // encoder's output, so the run decodes successfully on both legs.
-    Recipe { func: "zlib.compress", size: "data", args: &[("data", CODEC_BYTES)] },
-    Recipe { func: "zlib.compress_level", size: "data", args: &[("data", CODEC_BYTES), ("level", "6")] },
-    Recipe { func: "zlib.deflate", size: "data", args: &[("data", CODEC_BYTES)] },
-    Recipe { func: "zlib.deflate_level", size: "data", args: &[("data", CODEC_BYTES), ("level", "6")] },
-    Recipe { func: "zlib.gzip", size: "data", args: &[("data", CODEC_BYTES)] },
-    Recipe { func: "zlib.decompress", size: "data", args: &[("data", "zlib.compress(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
-    Recipe { func: "zlib.inflate", size: "data", args: &[("data", "zlib.deflate(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
-    Recipe { func: "zlib.gunzip", size: "data", args: &[("data", "zlib.gzip(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
+    Recipe { func: "zlib.compress", size: "b", args: &[("b", CODEC_BYTES)] },
+    Recipe { func: "zlib.compress_level", size: "b", args: &[("b", CODEC_BYTES), ("level", "6")] },
+    Recipe { func: "zlib.deflate", size: "b", args: &[("b", CODEC_BYTES)] },
+    Recipe { func: "zlib.deflate_level", size: "b", args: &[("b", CODEC_BYTES), ("level", "6")] },
+    Recipe { func: "zlib.gzip", size: "b", args: &[("b", CODEC_BYTES)] },
+    Recipe { func: "zlib.decompress", size: "b", args: &[("b", "zlib.compress(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
+    Recipe { func: "zlib.inflate", size: "b", args: &[("b", "zlib.deflate(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
+    Recipe { func: "zlib.gunzip", size: "b", args: &[("b", "zlib.gzip(bytes.from_list(list.range(0, {n}) |> list.map((i) => i * 7919 % 251)))!")] },
     // `io.write` is generic over its handle (`H: Write`) now, outside the
     // generator's type universe, so it has no recipe until the generator
     // builds handles; its last recipe wrote 4n bytes so every size was past
