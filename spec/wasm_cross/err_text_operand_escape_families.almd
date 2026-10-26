@@ -1,0 +1,34 @@
+// @contract: C-418
+// ALS-R5: the operand a runtime error text embeds is escaped by C-418's one
+// rule beyond fs / process / net too (#4126): datetime.parse_iso's offset
+// and json.parse's unexpected character (error.context's label and
+// value.field's key: err_text_label_and_key_escape.almd). Each input below
+// carries LF, ESC, a C1 control (U+0085) and a bidi control (U+202E); every
+// err text reads them as `\n`, `\u{1b}`, `\u{85}`, `\u{202e}`, the same bytes
+// on native, wasm and the reference evaluator, and no line of stdout holds a
+// raw control. An ordinary operand reads back as is.
+import json
+
+fn shown[T](r: Result[T, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err " + e,
+}
+
+fn raw_control(t: String) -> Bool = string.chars(t) |> list.any((c) => {
+  let n = string.codepoint(c) ?? 0
+  n < 32 or (n >= 127 and n <= 159) or n == 8238
+})
+
+effect fn main() -> Unit = {
+  let bad = "\n\u{1b}[2K\u{85}\u{202e}x"
+  let lines = [
+    shown(datetime.parse_iso("2024-01-01T00:00:00+" + bad)),
+    shown(datetime.parse_iso("2024-01-01T00:00:00+0x:00")),
+    shown(json.parse("\u{1b}")),
+    shown(json.parse("[\u{85}]")),
+    shown(json.parse("[\u{202e}]")),
+    shown(json.parse("[@]"))
+  ]
+  println(lines |> list.join("\n"))
+  println("raw control: ${lines |> list.any((l) => raw_control(l))}")
+}

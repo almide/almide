@@ -121,7 +121,13 @@ fn the_spec_fixtures_read_the_same_on_native_embedded_and_p3() {
     }
     let scratch = tempfile::tempdir().expect("tempdir");
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/embedded_cross");
-    for name in ["http_error_classes.almd", "http_header_refusal.almd", "http_url_redaction.almd", "http_url_redaction_dial.almd"] {
+    for name in [
+        "http_error_classes.almd",
+        "http_header_refusal.almd",
+        "http_url_redaction.almd",
+        "http_url_redaction_dial.almd",
+        "http_error_quote_c1_bidi.almd",
+    ] {
         let out = assert_same(name, &three_legs(&dir.join(name), &[], scratch.path()));
         assert!(!out.contains("unexpected ok"), "{name}:\n{out}");
         assert_no_password(name, &out);
