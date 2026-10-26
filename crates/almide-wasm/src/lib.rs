@@ -224,6 +224,7 @@ mod types_table;
 mod value;
 mod value_json_map;
 mod utf8_helpers;
+pub use utf8_helpers::emit_errtext_multibyte;
 mod json_helpers;
 mod value_helpers;
 mod whitelist;

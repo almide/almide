@@ -180,7 +180,7 @@ struct HttpErrFns {
 
 /// `(src, len, dst, url) -> dst_end`: write `src[..len]` at `dst` quoted by
 /// `http_quote`'s rule — `"` and `\` escaped, `\t` `\r` `\n` `\0`, any
-/// other character C-418 escapes (C0, DEL, C1, the bidi controls) as
+/// other character C-418 escapes (C0, DEL, C1, Cf / Zl / Zp, the Tags block) as
 /// `\u{<lowercase hex>}`, every other byte copied — between double quotes. With `url` nonzero the text is a URL and
 /// is quoted as `http_quote_url` quotes it: the span rt-core's
 /// `http_url_password_span` finds is written as `HTTP_URL_PASSWORD_MASK`.
@@ -189,7 +189,9 @@ fn shim_http_quote() -> Function {
     let (k, b) = (4u32, 5u32);
     // Local 6 is `http_hex_digit`'s scratch; 7..=9 the password span.
     let (from, to, start) = (7u32, 8u32, 9u32);
-    let mut f = Function::new([(6, ValType::I32)]);
+    // 10..=12: the multi-byte escape's code point, length and hex shift.
+    let (cp, m, sh) = (10u32, 11u32, 12u32);
+    let mut f = Function::new([(9, ValType::I32)]);
     let mut i = f.instructions();
     let put = |i: &mut wasm_encoder::InstructionSink<'_>, byte: i32| {
         i.local_get(dst).i32_const(byte).i32_store8(mem8(0));
@@ -234,33 +236,14 @@ fn shim_http_quote() -> Function {
     put(&mut i, '}' as i32);
     i.br(1);
     i.end();
-    // The multi-byte characters C-418 escapes (C1 and the bidi controls,
-    // #4126), each matched as its UTF-8 bytes and written `\u{<hex>}`. The set
-    // is C-418's own predicate run over the code points here, not a copy of
-    // it. `k` moves past the whole sequence and the loop continues (depth 3
-    // from inside the two ifs: if, if, the per-byte block, the loop).
-    for cp in 0x80u32..=0xffff {
-        let Some(c) = char::from_u32(cp) else { continue };
-        if !almide_base::err_text::almide_rt_errtext_is_escaped(c) {
-            continue;
-        }
-        let mut buf = [0u8; 4];
-        let seq = c.encode_utf8(&mut buf).as_bytes().to_vec();
-        let n = seq.len() as i32;
-        i.local_get(k).i32_const(n).i32_add().local_get(len).i32_le_u().if_(BlockType::Empty);
-        i.i32_const(1);
-        for (j, byte) in seq.iter().enumerate() {
-            i.local_get(src).local_get(k).i32_add().i32_load8_u(mem8(j as u64)).i32_const(*byte as i32).i32_eq().i32_and();
-        }
-        i.if_(BlockType::Empty);
-        for c in format!("\\u{{{cp:x}}}").bytes() {
-            put(&mut i, c as i32);
-        }
-        i.local_get(k).i32_const(n).i32_add().local_set(k);
-        i.br(3);
-        i.end();
-        i.end();
-    }
+    // The multi-byte characters C-418 escapes (C1, Cf / Zl / Zp and the Tags
+    // block, #4126 / #4265): decoded and tested against the rule's own table
+    // by the emitter's shared helper, not a copy of it. From the per-byte
+    // block the loop is 1.
+    let addr = |i: &mut wasm_encoder::InstructionSink<'_>| {
+        i.local_get(src).local_get(k).i32_add();
+    };
+    almide_wasm::emit_errtext_multibyte(&mut i, &addr, (k, len, b, dst), (cp, m, sh), 1);
     i.local_get(dst).local_get(b).i32_store8(mem8(0));
     i.local_get(dst).i32_const(1).i32_add().local_set(dst);
     i.end();
