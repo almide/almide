@@ -170,9 +170,10 @@ fn located(path: &Path, content: &str, offset: usize, message: &str) -> String {
 /// Parse `content` as the manifest, or say where it is not TOML.
 fn read_manifest<'i>(path: &Path, content: &'i str) -> Result<Manifest<'i>, String> {
     let not_toml = |e: toml::de::Error| {
+        // The parser's message can quote the offending text (#4126): escaped.
         let message = format!(
             "{}\n  hint: almide.toml is read as TOML — fix this line; every command reads the manifest",
-            e.message().trim()
+            almide_base::err_text::almide_rt_errtext_escape(e.message().trim())
         );
         match e.span() {
             Some(s) => located(path, content, s.start, &message),
@@ -181,7 +182,57 @@ fn read_manifest<'i>(path: &Path, content: &'i str) -> Result<Manifest<'i>, Stri
     };
     let values: toml::Table = toml::from_str(content).map_err(not_toml)?;
     let spans = toml::de::DeTable::parse(content).map_err(not_toml)?.into_inner();
+    refuse_control_text(path, content, &spans)?;
     Ok(Manifest { values, spans })
+}
+
+/// #4126: a key or string of `almide.toml` holding a character that moves or
+/// hides text when printed — a C0 / C1 control, DEL or a bidirectional control,
+/// the set C-418 escapes in runtime error texts — is refused when the manifest
+/// is read. Every command reads the manifest through [`read_manifest`], so no
+/// text that came from `almide.toml` (a package or dependency name, an unknown
+/// key a warning quotes, a URL, an owner) can carry one into a diagnostic or a
+/// `Built …` line: a cloned repository cannot set the terminal's title, erase
+/// a line or forge one. No field Almide reads needs such a character; a TOML
+/// escape (`"\u001b"`) is refused the same as a raw byte, since the decoded
+/// text is what would be printed. The refusal shows the text escaped.
+fn refuse_control_text(path: &Path, content: &str, table: &toml::de::DeTable<'_>) -> Result<(), String> {
+    use almide_base::err_text::{almide_rt_errtext_is_escaped as escaped, almide_rt_errtext_quote as quote};
+    let refuse = |offset: usize, what: &str, text: &str| {
+        let message = format!(
+            "almide.toml {what} {} holds a control or bidirectional-control character\n  hint: \
+             write it without one; a manifest's names, keys and strings are printed in diagnostics, \
+             where such a character can rewrite the terminal",
+            quote(text)
+        );
+        Err(located(path, content, offset, &message))
+    };
+    fn walk<'a, 'i>(
+        v: &'a toml::de::DeValue<'i>,
+        offset: usize,
+        out: &mut Vec<(usize, &'static str, &'a str)>,
+    ) {
+        match v {
+            toml::de::DeValue::String(s) => out.push((offset, "string", s.as_ref())),
+            toml::de::DeValue::Array(items) => items.iter().for_each(|i| walk(i.get_ref(), i.span().start, out)),
+            toml::de::DeValue::Table(t) => {
+                for (k, v) in t.iter() {
+                    out.push((k.span().start, "key", k.get_ref().as_ref()));
+                    walk(v.get_ref(), v.span().start, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut texts = Vec::new();
+    for (k, v) in table.iter() {
+        texts.push((k.span().start, "key", k.get_ref().as_ref()));
+        walk(v.get_ref(), v.span().start, &mut texts);
+    }
+    match texts.into_iter().find(|(_, _, t)| t.chars().any(escaped)) {
+        Some((offset, what, text)) => refuse(offset, what, text),
+        None => Ok(()),
+    }
 }
 
 /// The spanned value under `key` in a spanned table.
