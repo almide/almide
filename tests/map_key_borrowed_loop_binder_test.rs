@@ -72,7 +72,7 @@ fn borrowed_loop_binder_is_the_map_key_without_a_second_borrow() {
         // The binder keeps its per-element borrow ...
         assert!(body.contains(".iter()") && !body.contains(".cloned()"), "{name} lost its borrowed binder: {body}");
         // ... and reaches the key slot as the reference it already is.
-        assert!(body.contains(&format!("almide_rt_map_get_or(&counts, {binder}, 0i64)")), "{name}: {body}");
+        assert!(body.contains(&format!("almide_rt_map_get(&counts, {binder})")), "{name}: {body}");
         assert!(!body.contains(&format!("&{binder},")) && !body.contains(&format!("&{binder})")), "{name} doubles the borrow: {body}");
     }
     assert!(fn_body(&rust, "count_words").contains("almide_rt_map_contains(&counts, w)"), "{}", fn_body(&rust, "count_words"));
@@ -81,7 +81,7 @@ fn borrowed_loop_binder_is_the_map_key_without_a_second_borrow() {
     // body only borrows it, so its key keeps the single `&`; a scalar list's
     // binder is `&i64` off `.iter()` and passes as it is.
     let total = fn_body(&rust, "total");
-    for spelling in ["for j in r.clone() {", "almide_rt_map_get_or(m, &j, 0i64)", "for k in 0i64..n {", "almide_rt_map_get_or(m, &k, 0i64)", ".iter() {", "almide_rt_map_get_or(m, i, 0i64)"] {
+    for spelling in ["for j in r.clone() {", "almide_rt_map_get(m, &j)", "for k in 0i64..n {", "almide_rt_map_get(m, &k)", ".iter() {", "almide_rt_map_get(m, i)"] {
         assert!(total.contains(spelling), "missing `{spelling}`:\n{total}");
     }
 
