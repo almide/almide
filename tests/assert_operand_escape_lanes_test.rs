@@ -45,11 +45,9 @@ const HOSTILE_LINE: &str = "A\\u{1b}[31mB\\u{202e}C";
 /// The other operand: a C1 control (U+0085) and an isolate (U+2066).
 const OTHER: &str = "x\\u{85}y\\u{2066}";
 
-/// C-418's escaped class: C0, DEL, C1, and the bidi controls.
+/// C-418's escaped class: its one table (C0, DEL, C1, Cf / Zl / Zp, Tags).
 fn raw_class(c: char) -> bool {
-    let n = c as u32;
-    (n <= 0x1f && c != '\n') || (0x7f..=0x9f).contains(&n) || n == 0x061c || n == 0x200e || n == 0x200f
-        || (0x202a..=0x202e).contains(&n) || (0x2066..=0x2069).contains(&n)
+    c != '\n' && almide_base::err_text::almide_rt_errtext_is_escaped(c)
 }
 
 fn dir(tag: &str) -> PathBuf {
