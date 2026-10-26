@@ -193,9 +193,9 @@ matrix.select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) 
 // @since 0.9.3 or earlier
 matrix.to_lists(m: Matrix) -> List[List[Float]]
 
-// Element at (row, col); out of range aborts.
+// Element at (row, col); none out of range.
 // @since 0.9.3 or earlier
-matrix.get(m: Matrix, row: Int, col: Int) -> Float
+matrix.get(m: Matrix, row: Int, col: Int) -> Option[Float]
 
 // Row count; 0 for an empty matrix.
 // @since 0.9.3 or earlier
@@ -245,9 +245,9 @@ matrix.pow(m: Matrix, exp: Float) -> Matrix
 // @since 0.9.3 or earlier
 matrix.map(m: Matrix, f: (Float) -> Float) -> Matrix
 
-// f32 LE rows x cols at offset; all 0 if data short.
+// f32 LE rows x cols at offset; none if data short.
 // @since 0.13.4 or earlier
-matrix.from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix
+matrix.from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]
 
 // Row-major f64 LE, 8 bytes per element.
 // @since 0.13.4 or earlier
@@ -261,13 +261,13 @@ matrix.to_bytes_f32_le(m: Matrix) -> Bytes
 // @since unreleased
 matrix.to_bytes_f16_le(m: Matrix) -> Bytes
 
-// f16 LE rows x cols at offset; all 0 if data short.
+// f16 LE rows x cols at offset; none if data short.
 // @since 0.13.4 or earlier
-matrix.from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix
+matrix.from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]
 
-// f64 LE rows x cols at offset; all 0 if data short.
+// f64 LE rows x cols at offset; none if data short.
 // @since 0.13.4 or earlier
-matrix.from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix
+matrix.from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]
 
 // bias added to each row; cols cut to bias.
 // @since 0.13.4 or earlier

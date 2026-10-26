@@ -976,7 +976,6 @@
 4639	spec/wasm_fail/int_parse_err_propagates.almd
 3230	spec/wasm_fail/matrix_concat_cols_rows_aborts.almd
 3603	spec/wasm_fail/matrix_conv1d_stride_aborts.almd
-4811	spec/wasm_fail/matrix_index_oob_aborts.almd
 3265	spec/wasm_fail/matrix_linear_row_bias_aborts.almd
 2386	spec/wasm_fail/matrix_ragged_from_lists_aborts.almd
 3203	spec/wasm_fail/matrix_shape_mismatch_aborts.almd

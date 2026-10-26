@@ -1340,7 +1340,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `matrix.linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix` — x times f32 LE W^T.
 - `matrix.select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix` — f32 LE rows at row_ids; past-data rows are 0.
 - `matrix.to_lists(m: Matrix) -> List[List[Float]]` — Rows as lists; r x 0 gives r empty rows.
-- `matrix.get(m: Matrix, row: Int, col: Int) -> Float` — Element at (row, col); out of range aborts.
+- `matrix.get(m: Matrix, row: Int, col: Int) -> Option[Float]` — Element at (row, col); none out of range.
 - `matrix.rows(m: Matrix) -> Int` — Row count; 0 for an empty matrix.
 - `matrix.cols(m: Matrix) -> Int` — Width of row 0; 0 when there are no rows.
 - `matrix.add(a: Matrix, b: Matrix) -> Matrix` — Elementwise a + b; shapes truncate to overlap.
@@ -1353,12 +1353,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `matrix.neg(m: Matrix) -> Matrix` — Every element negated.
 - `matrix.pow(m: Matrix, exp: Float) -> Matrix` — Elementwise x^exp; x < 0, fractional exp: NaN.
 - `matrix.map(m: Matrix, f: (Float) -> Float) -> Matrix` — f applied to every element.
-- `matrix.from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` — f32 LE rows x cols at offset; all 0 if data short.
+- `matrix.from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f32 LE rows x cols at offset; none if data short.
 - `matrix.to_bytes_f64_le(m: Matrix) -> Bytes` — Row-major f64 LE, 8 bytes per element.
 - `matrix.to_bytes_f32_le(m: Matrix) -> Bytes` — Row-major f32 LE, 4 bytes each (rounded).
 - `matrix.to_bytes_f16_le(m: Matrix) -> Bytes` — Row-major f16 LE, 2 bytes each (rounded to nearest even; overflow is inf).
-- `matrix.from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` — f16 LE rows x cols at offset; all 0 if data short.
-- `matrix.from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix` — f64 LE rows x cols at offset; all 0 if data short.
+- `matrix.from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f16 LE rows x cols at offset; none if data short.
+- `matrix.from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f64 LE rows x cols at offset; none if data short.
 - `matrix.broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix` — bias added to each row; cols cut to bias.
 - `matrix.split_cols_even(m: Matrix, n: Int) -> List[Matrix]` — n slices cols/n wide, remainder dropped; [] if n = 0.
 - `matrix.concat_cols(matrices: List[Matrix]) -> Matrix` — Side-by-side join; [] gives 0 x 0.

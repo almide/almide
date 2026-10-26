@@ -423,7 +423,6 @@ matrix_from_bytes_count_domain	439	20	1450
 matrix_from_bytes_offset_domain	430	9	1208
 matrix_head_count_domain	706	338	1214
 matrix_index_domain_family	370	19	1167
-matrix_index_oob_aborts	339		
 matrix_pow_libm	381	11	1097
 matrix_q1_full_loader_cols_beyond_buffer	126438	139457	1454
 matrix_q_dims_guard	662	40	1435
