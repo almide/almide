@@ -65,7 +65,11 @@ fn lower_for_interp(source: &str) -> Result<almide_ir::IrProgram, String> {
         //   secret — #4107: `secret.new` / `secret.reveal` and the type's
         //          declared `Secret.repr`, pure Almide (the declared-repr
         //          walkers are frontend IR, so the interp runs them as is).
-        const INTERP_BUNDLED_MODULES: &[&str] = &["args", "html", "path", "secret", "url"];
+        //   http   — row 22 (C-436): `http.decode_json[T]` is generic over the
+        //          caller's input type, so the self-host pool (lowered without
+        //          mono) has no body for it; lowered as a module here it is
+        //          monomorphized per input type like any user generic.
+        const INTERP_BUNDLED_MODULES: &[&str] = &["args", "html", "http", "path", "secret", "url"];
         let mut bundled: Vec<(String, almide_lang::ast::Program)> = Vec::new();
         for imp in &prog.imports {
             let almide_lang::ast::Decl::Import { path, .. } = imp else { continue };
