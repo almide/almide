@@ -1316,6 +1316,10 @@ mod tests {
     /// guest's own out-of-bounds trap — `Error: wasm trap: out of bounds
     /// memory access`, exit 1, as a guest load past the end gives — never a
     /// host panic, and never a host allocation sized by the forged length.
+    /// Negative control (2026-10-26): with `read_guest`'s bounds check
+    /// removed (the span sliced unchecked) the guest thread panicked at the
+    /// slice ("panicked at crates/almide-wasm-run/src/host.rs:417:12") and
+    /// this test failed.
     #[test]
     fn a_forged_span_traps_instead_of_panicking_the_host() {
         let oob = "Error: wasm trap: out of bounds memory access\n";
