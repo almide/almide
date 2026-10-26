@@ -21,12 +21,10 @@ effect fn fail() -> Int = err("boom")
 effect fn parent(route: String) -> Unit = {
   let c = process.start(process.ProcessCommand { cmd: "sleep", args: ["30"] })!
   println(int.to_string(process.child_pid(c)!))
-  println(
-    match process.poll(c)! {
-      none => "running",
-      some(_) => "ended",
-    },
-  )
+  println(match process.poll(c)! {
+    none => "running",
+    some(_) => "ended",
+  })
   match route {
     "exit" => process.exit(3),
     "error" => println(int.to_string(fail()!)),
