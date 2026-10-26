@@ -30,7 +30,12 @@ pub mod http_client_core {
     include!("generated/err_text.rs");
     include!("http_client_core.rs");
 }
-pub mod http_server_core;
+/// The http server core: its stderr quoting escapes C-418's set (#4126), so
+/// the module inlines the escaper's predicate beside itself.
+pub mod http_server_core {
+    include!("generated/err_text.rs");
+    include!("http_server_core.rs");
+}
 /// The subprocess family (#2589, ADR-0025): `runtime/rs/src/process.rs`
 /// includes it, the embedded host serves `almide:process/spawn` with it.
 pub mod process_core {
