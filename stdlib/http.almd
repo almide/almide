@@ -669,9 +669,14 @@ fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
 // the rest of the list on every step (`list.take`), O(n²) in middleware.
 fn __apply(mw: HttpMiddleware, inner: HttpHandler) -> HttpHandler = mw(inner)
 
-/// JSON body through decode; err is a 400 response.
-fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
-  ok(v) => match decode(v) {
+// Row 22 (C-436): T is an input type — a `: Decode` record that is not also
+// `Encode`; a `Codec` T is E110 at the call (`@input_sink`). The body decodes
+// with `T.decode_strict`, so a key outside T's fields (an input type skips no
+// field, E053) is `400 Bad Request: unknown key '<k>'`.
+/// JSON body into input type T, strictly; err is a 400 response.
+@input_sink
+fn decode_json[T: Decode](req: HttpRequest) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
+  ok(v) => match T.decode_strict(v) {
     ok(x) => ok(x),
     err(e) => err(http.response(400, "Bad Request: " + e)),
   },
