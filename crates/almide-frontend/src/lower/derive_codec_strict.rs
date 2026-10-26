@@ -18,7 +18,10 @@
 // Every worker is a dotted per-type fn (`T.__strict…`), built only from the
 // calls the decode derive already uses on every leg (`value.__keys`,
 // `value.omit`, `value.__field`, `value.as_array`, `list.get`, `list.len`,
-// `__err_at`, `__err_at_index`), so no leg needs a new helper. A value of the
+// `__err_at`, `__err_at_index`) plus C-418's escaper `string.__err_text`,
+// which every leg already links, for the one operand the input supplies (the
+// unknown key), so no leg needs a new helper.
+// The path segments are the type's own field and case names. A value of the
 // wrong shape walks clean: `T.decode` reports the shape error itself.
 
 fn s_lit(s: &str) -> IrExpr {
@@ -180,12 +183,17 @@ fn strict_list_worker(wk: &mut CodecWk, list_ty: &Ty, elem: &Ty) -> String {
 }
 
 /// `unknown key '<k>'` for the first key of `v` outside `allowed`, else "".
+/// The key is the input's, so it goes through C-418's escaper
+/// (`string.__err_text`) like every runtime error text's operand (#4263): a
+/// key carrying ESC, a bidi control or a newline reaches the error, and
+/// `http.decode_json`'s 400 body, escaped.
 fn unknown_key_expr(wk: &mut CodecWk, v: IrExpr, allowed: Vec<IrExpr>) -> IrExpr {
     let first = first_unknown_key(v, allowed);
     let k = wk.vt.alloc(sym("_k"), Ty::String, Mutability::Let, None);
+    let shown = call_mod_("string", "__err_text", vec![s_var(k)], Ty::String);
     let msg = e_(IrExprKind::BinOp {
         op: BinOp::ConcatStr,
-        left: Box::new(e_(IrExprKind::BinOp { op: BinOp::ConcatStr, left: Box::new(s_lit("unknown key '")), right: Box::new(s_var(k)) }, Ty::String)),
+        left: Box::new(e_(IrExprKind::BinOp { op: BinOp::ConcatStr, left: Box::new(s_lit("unknown key '")), right: Box::new(shown) }, Ty::String)),
         right: Box::new(s_lit("'")),
     }, Ty::String);
     e_(IrExprKind::Match {
