@@ -59,6 +59,15 @@ const FIXTURE: &str = "spec/wasm_cross/http_decode_json_input_type.almd";
 /// The safe shape's over-post cell: the second body posts `is_admin`.
 const OVER_POST_CELL: &str = "HttpResponse { status: 400, body: \"Bad Request: unknown key 'is_admin'\", headers: 1 }";
 
+/// The sink's strictness at depth: a nested record, a list element and a
+/// variant payload each refuse an unknown key, naming where it was.
+const DEEP_CELLS: &[&str] = &[
+    "HttpResponse { status: 400, body: \"Bad Request: unknown key 'verified', at address\", headers: 1 }",
+    "HttpResponse { status: 400, body: \"Bad Request: unknown key 'is_admin', at tags[1]\", headers: 1 }",
+    "HttpResponse { status: 400, body: \"Bad Request: unknown key 'is_admin', at Rename\", headers: 1 }",
+    "HttpResponse { status: 400, body: \"Bad Request: unknown key 'verified', at Pin[0]\", headers: 1 }",
+];
+
 /// The vulnerable shape: the body decoded straight into the type the
 /// program also sends out.
 const OVER_POST_PROGRAM: &str = r#"import http
@@ -94,7 +103,10 @@ fn the_fixture_refuses_the_over_post_on_both_legs() {
     let (ok, out, err) = almide("run", &path, &[], None);
     assert!(ok, "native run failed:\n{err}");
     assert!(out.lines().any(|l| l == OVER_POST_CELL), "native: missing `{OVER_POST_CELL}`:\n{out}");
-    assert!(out.lines().next().is_some_and(|l| l == "ok m e is_admin=false city=-"), "native: the accepted body:\n{out}");
+    assert!(out.lines().next().is_some_and(|l| l == "ok m e is_admin=false city=- tags=0"), "native: the accepted body:\n{out}");
+    for deep in DEEP_CELLS {
+        assert!(out.lines().any(|l| l == *deep), "native: missing nested refusal `{deep}`:\n{out}");
+    }
     if !wasmtime_available() {
         eprintln!("wasmtime unavailable — wasm leg skipped");
         return;
