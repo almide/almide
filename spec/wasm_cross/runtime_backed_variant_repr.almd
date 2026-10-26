@@ -13,8 +13,7 @@ type Ev = | Got(HttpRequest) | Hit { at: JsonPath } | Nothing
 
 type Tag[T] = | Tagged(T, HttpRequest)
 
-fn leaks(t: String) -> Bool = ["TOKXYZ-SECRET", "sid=COOKIE-SECRET", "Bearer", "Authorization", "Cookie"]
-  |> list.any((s) => string.contains(t, s))
+fn leaks(t: String) -> Bool = ["TOKXYZ-SECRET", "sid=COOKIE-SECRET", "Bearer", "Authorization", "Cookie"] |> list.any((s) => string.contains(t, s))
 
 effect fn main() -> Unit = {
   let h = map.from_list([("Authorization", "Bearer TOKXYZ-SECRET"), ("Cookie", "sid=COOKIE-SECRET")])

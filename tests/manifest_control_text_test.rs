@@ -23,12 +23,20 @@ fn project(tag: &str, manifest: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("mkdir");
     std::fs::write(dir.join("almide.toml"), manifest).expect("write manifest");
-    std::fs::write(dir.join("main.almd"), "effect fn main() -> Unit = println(\"hi\")\n").expect("write source");
+    std::fs::write(
+        dir.join("main.almd"),
+        "effect fn main() -> Unit = println(\"hi\")\n",
+    )
+    .expect("write source");
     dir
 }
 
 fn run(dir: &PathBuf, args: &[&str]) -> Output {
-    Command::new(almide_bin()).args(args).current_dir(dir).output().expect("spawn almide")
+    Command::new(almide_bin())
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .expect("spawn almide")
 }
 
 /// The characters that move or hide text when printed, found in `bytes`
@@ -56,32 +64,58 @@ fn assert_clean(what: &str, out: &Output) {
 /// unknown top-level key, a `[package]` name, a dependency name, a string
 /// value, and a bidi control.
 const CASES: &[(&str, &str)] = &[
-    ("unknown-key-raw", "[package]\nname = \"app\"\n\"\u{1b}]0;pwn\u{7}\u{1b}[2Kfake\" = 1\n"),
-    ("unknown-key-escape", "[package]\nname = \"app\"\n\"\\u001b]0;pwn\\u0007\\u001b[2Kfake\" = 1\n"),
-    ("package-name", "[package]\nname = \"app\\u001b[2K\\rBuilt ok\"\n"),
-    ("dependency-name", "[package]\nname = \"app\"\n\n[dependencies]\n\"d\\u001b[31m\" = { path = \"../d\" }\n"),
-    ("string-value", "[package]\nname = \"app\"\ndescription = \"line\\nINFO: forged\"\n"),
-    ("bidi", "[package]\nname = \"app\"\nlicense = \"MIT\u{202e}txt.exe\"\n"),
+    (
+        "unknown-key-raw",
+        "[package]\nname = \"app\"\n\"\u{1b}]0;pwn\u{7}\u{1b}[2Kfake\" = 1\n",
+    ),
+    (
+        "unknown-key-escape",
+        "[package]\nname = \"app\"\n\"\\u001b]0;pwn\\u0007\\u001b[2Kfake\" = 1\n",
+    ),
+    (
+        "package-name",
+        "[package]\nname = \"app\\u001b[2K\\rBuilt ok\"\n",
+    ),
+    (
+        "dependency-name",
+        "[package]\nname = \"app\"\n\n[dependencies]\n\"d\\u001b[31m\" = { path = \"../d\" }\n",
+    ),
+    (
+        "string-value",
+        "[package]\nname = \"app\"\ndescription = \"line\\nINFO: forged\"\n",
+    ),
+    (
+        "bidi",
+        "[package]\nname = \"app\"\nlicense = \"MIT\u{202e}txt.exe\"\n",
+    ),
 ];
 
 #[test]
 fn a_manifest_text_with_a_terminal_control_is_refused_and_never_printed_raw() {
     for (tag, manifest) in CASES {
         let dir = project(tag, manifest);
-        for args in [&["check", "main.almd"][..], &["build", "main.almd", "-o", "app"][..]] {
+        for args in [
+            &["check", "main.almd"][..],
+            &["build", "main.almd", "-o", "app"][..],
+        ] {
             let out = run(&dir, args);
             let what = format!("{tag}: almide {}", args.join(" "));
             assert!(!out.status.success(), "{what}: the manifest was accepted");
             let stderr = String::from_utf8_lossy(&out.stderr);
             // TOML itself refuses a raw C0 byte in a string; everything else is
             // the manifest reader's refusal.
-            let toml_refused = tag.ends_with("-raw") && stderr.contains("almide.toml is read as TOML");
+            let toml_refused =
+                tag.ends_with("-raw") && stderr.contains("almide.toml is read as TOML");
             assert!(
-                toml_refused || stderr.contains("holds a control or bidirectional-control character"),
+                toml_refused
+                    || stderr.contains("holds a control or bidirectional-control character"),
                 "{what}: not refused for its control character:\n{}",
                 stderr.escape_debug()
             );
-            assert!(stderr.contains("almide.toml:"), "{what}: the refusal names no line: {stderr}");
+            assert!(
+                stderr.contains("almide.toml:"),
+                "{what}: the refusal names no line: {stderr}"
+            );
             assert_clean(&what, &out);
         }
         let _ = std::fs::remove_dir_all(&dir);
@@ -95,7 +129,11 @@ fn the_refusal_shows_the_text_escaped() {
     let dir = project("shown", CASES[1].1);
     let out = run(&dir, &["check", "main.almd"]);
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains(r#"key "\u{1b}]0;pwn\u{7}\u{1b}[2Kfake""#), "{}", stderr.escape_debug());
+    assert!(
+        stderr.contains(r#"key "\u{1b}]0;pwn\u{7}\u{1b}[2Kfake""#),
+        "{}",
+        stderr.escape_debug()
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -108,7 +146,11 @@ fn an_ordinary_manifest_is_read_as_before() {
         "[package]\nname = \"app\"\ndescription = \"日本語 \\\"q\\\" C:\\\\dir\"\n",
     );
     let out = run(&dir, &["run", "main.almd"]);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "hi");
     assert_clean("ordinary", &out);
     let _ = std::fs::remove_dir_all(&dir);
