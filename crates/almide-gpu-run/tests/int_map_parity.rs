@@ -53,7 +53,7 @@ fn gpu() -> Option<Gpu> {
             Some(g)
         }
         Err(e) => {
-            assert!(std::env::var_os("ALMIDE_GPU_REQUIRED").is_none(), "ALMIDE_GPU_REQUIRED is set and {e}");
+            assert!(!almide_base::env::flag("ALMIDE_GPU_REQUIRED"), "ALMIDE_GPU_REQUIRED is set and {e}");
             eprintln!("SKIP int_map_parity: {e}");
             None
         }

@@ -66,7 +66,7 @@ fn witness_layouts(ir: &almide_ir::IrProgram) -> (crate::lower::RecordLayouts, c
 /// Lower every function of `source` (with its resolved cross-module siblings)
 /// to MIR under strict values: the lowered functions, plus each walled
 /// function with its wall. Shared by the witness producer and the affine-shape
-/// census, so both read the same MIR.
+/// census (`pipeline_affine.rs`), so both read the same MIR.
 #[allow(clippy::type_complexity)]
 fn witness_lowered(
     source: &str,
@@ -85,19 +85,6 @@ fn witness_lowered(
         }
     }
     Ok((lowered, walled))
-}
-
-/// Every lowered function's [`crate::affine_shape::AffineShape`] (#4236), in
-/// lowering order, plus the walled functions — which are NOT classified, and
-/// are named so a census never counts them silently.
-#[allow(clippy::type_complexity)]
-pub fn program_affine_shapes(
-    source: &str,
-    self_modules: &[(String, almide_lang::ast::Program, bool)],
-) -> Result<(Vec<(String, crate::affine_shape::AffineShape)>, Vec<(String, String)>), LowerError> {
-    let (lowered, walled) = witness_lowered(source, self_modules)?;
-    let shapes = lowered.iter().map(|f| (f.name.clone(), crate::affine_shape::affine_shape(f))).collect();
-    Ok((shapes, walled))
 }
 
 /// Lower `source` (with its resolved cross-module siblings) and emit every

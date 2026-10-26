@@ -18,6 +18,10 @@ wgpu = { version = "30.0.1", default-features = false, features = ["std", "wgsl"
 pollster = "1.0.1"
 
 [dev-dependencies]
+almide-base = { path = "../almide-base" }
 almide-frontend = { path = "../almide-frontend" }
 almide-driver = { path = "../almide-driver" }
 almide-interp = { path = "../almide-interp" }
+# The affine-shape census example (#4236) reads the MIR the GPU leg will
+# take its eligibility rule from.
+almide-mir = { path = "../almide-mir" }

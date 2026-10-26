@@ -154,11 +154,13 @@ dependencies = [
 name = "almide-gpu-run"
 version = "0.12.2"
 dependencies = [
+ "almide-base",
  "almide-driver",
  "almide-frontend",
  "almide-interp",
  "almide-ir",
  "almide-lang",
+ "almide-mir",
  "pollster",
  "wgpu",
 ]

@@ -1159,6 +1159,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_FUZZ_BASE=value` | harness | the first seed of the differential fuzz's fixed seed range (default 0) |
 | `ALMIDE_FUZZ_HOST_ORACLE` | harness | run the differential fuzz in host-oracle mode (arm selection is deterministic per seed and mode) |
 | `ALMIDE_FUZZ_ITERS=value` | harness | how many seeds the differential fuzz's fixed range covers (default 200) |
+| `ALMIDE_GPU_REQUIRED` | harness | fail the GPU leg's parity tests when no wgpu adapter is found instead of printing SKIP (#4236; the `gpu-parity` CI job sets it over lavapipe; crates/almide-gpu-run/tests/int_map_parity.rs) |
 | `ALMIDE_HEAP_TRACE` | debug | print the interpreter's heap-block allocations and frees |
 | `ALMIDE_HTTP_MAX_RESPONSE_BYTES=value` | runtime | the http client's cap on a buffered response in bytes, read by the compiled program (default 1 GiB; 0 = no cap, #2825) |
 | `ALMIDE_HTTP_TIMEOUT_SECS=value` | runtime | the http client's connect and read timeout in seconds, read by the compiled program (default 30; 0 = none) |
