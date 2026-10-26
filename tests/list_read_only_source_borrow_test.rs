@@ -442,7 +442,7 @@ fn a_scalar_read_of_the_source_in_a_later_argument_still_lets_it_move() {
     );
 }
 
-/// The tail recursion of #3398 over 4000 elements, timed against its own
+/// The tail recursion of #3398 over 2000 elements, timed against its own
 /// control in the same binary: `moved` drops at the source's last use (the
 /// owned twin, no element cloned), `kept` reads the source once more after the
 /// drop, which keeps it borrowed and clones every kept element. Both are
@@ -453,8 +453,11 @@ fn a_scalar_read_of_the_source_in_a_later_argument_still_lets_it_move() {
 /// is inside its subset, so timing it measured a renderer this test does not
 /// inspect; and the elements were `String`s, whose clone is a reference-count
 /// bump since ADR-0013, so `kept` stopped allocating per element and the ratio
-/// collapsed (moved 158 ms vs kept 180 ms). Each element is now an 8-Int list,
-/// whose clone allocates, compiled with `-O` as a release build is.
+/// collapsed (moved 158 ms vs kept 180 ms). Each element is now a 64-Int list,
+/// whose clone allocates and copies 512 bytes while a move shifts 24, compiled
+/// with `-O` as a release build is (8-Int elements measured only 365 ms vs
+/// 1368 ms: the owned twin's `drain` shifts the tail, so both sides are O(n²)
+/// and only the per-element cost separates them).
 /// The gate is a RATIO, so a slow machine moves both sides.
 #[test]
 fn perf_tail_recursion_moves_instead_of_cloning() {
@@ -477,7 +480,7 @@ fn perf_tail_recursion_moves_instead_of_cloning() {
         \x20 }\n\
         \n\
         effect fn main() -> Unit = {\n\
-        \x20 let xs = list.map(list.range(0, 4000), (i) => [i, i, i, i, i, i, i, i])\n\
+        \x20 let xs = list.map(list.range(0, 2000), (i) => list.range(i, i + 64))\n\
         \x20 let t0 = env.millis()\n\
         \x20 let a = moved(xs, 0) + moved(xs, 0) + moved(xs, 0) + moved(xs, 0) + moved(xs, 0)\n\
         \x20 let t1 = env.millis()\n\
@@ -502,7 +505,7 @@ fn perf_tail_recursion_moves_instead_of_cloning() {
     let stdout = String::from_utf8_lossy(&run.stdout);
     let f: Vec<i64> = stdout.split_whitespace().map(|w| w.parse().unwrap()).collect();
     assert_eq!(f.len(), 4, "unexpected output: {stdout}\n{}", String::from_utf8_lossy(&run.stderr));
-    assert_eq!((f[0], f[1]), (160000, 160000), "the two shapes disagree on the sum");
+    assert_eq!((f[0], f[1]), (640000, 640000), "the two shapes disagree on the sum");
     let (moved_ms, kept_ms) = (f[2], f[3]);
     assert!(
         moved_ms * 5 <= kept_ms.max(1),
