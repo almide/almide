@@ -202,10 +202,12 @@ call:env.cwd
 call:env.get
 call:env.millis
 call:env.os
+call:env.secret
 call:env.set
 call:env.sleep_ms
 call:env.temp_dir
 call:eprintln
+call:error.context
 call:fan.map
 call:ffi.address
 call:ffi.read
@@ -286,9 +288,7 @@ call:fs.write_bytes_raw
 call:hash.fnv1a32
 call:hash.fnv1a32_bytes
 call:hash.hmac_sha256
-call:hash.hmac_sha256_hex
 call:hash.hmac_sha512
-call:hash.hmac_sha512_hex
 call:hash.is_valid_hmac_sha256
 call:hash.is_valid_hmac_sha512
 call:hash.sha256
@@ -669,11 +669,13 @@ call:result.to_err_option
 call:result.to_option
 call:result.unwrap_or
 call:result.unwrap_or_else
+call:secret.__almd_mono11_Secret.repr__Bytes
 call:secret.__almd_mono11_Secret.repr__Int
 call:secret.__almd_mono11_Secret.repr__String
 call:secret.__almd_mono3_new__Bytes
 call:secret.__almd_mono3_new__Int
 call:secret.__almd_mono3_new__String
+call:secret.__almd_mono6_reveal__Bytes
 call:secret.__almd_mono6_reveal__Int
 call:secret.__almd_mono6_reveal__String
 call:set.__almd_mono14___fallible_all__Int_cString
