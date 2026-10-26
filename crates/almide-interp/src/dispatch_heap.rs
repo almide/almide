@@ -750,7 +750,7 @@ fn heap_addr(v: Option<&Value>) -> Option<u32> {
 /// body's (possibly mislabeling) declared return type is the only thing that
 /// could type it back — exactly the leak the hinted path's strictness closes,
 /// so the un-hinted path must not open it from the other side.
-fn heap_scalar_slots(items: &[Value], shape: &str) -> Result<Vec<i64>, String> {
+fn heap_scalar_slots(items: &[Value], shape: &'static str) -> Result<Vec<i64>, String> {
     items
         .iter()
         .map(|e| match e {
@@ -765,7 +765,7 @@ fn heap_scalar_slots(items: &[Value], shape: &str) -> Result<Vec<i64>, String> {
         .collect()
 }
 
-fn heap_scalar_slot(e: &Value, shape: &str) -> Result<i64, String> {
+fn heap_scalar_slot(e: &Value, shape: &'static str) -> Result<i64, String> {
     match e {
         Value::Int(i) => Ok(*i),
         // A NaN's BIT PATTERN is arch- and backend-conditional (#1403: x86

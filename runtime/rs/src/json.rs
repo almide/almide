@@ -72,11 +72,11 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
                 c if c == b'-' || c.is_ascii_digit() => parse_number(t, pos),
                 _ => {
                     let ch = t[*pos..].chars().next().unwrap_or('\u{FFFD}');
-                    Err(format!("unexpected char '{}' at pos {}", ch, t[..*pos].chars().count()))
+                    Err(format!("unexpected char '{}' at pos {}", almide_rt_errtext_escape(&ch.to_string()), t[..*pos].chars().count()))
                 }
             }
         }
-        fn parse_literal(t: &str, pos: &mut usize, word: &[u8], v: AlmideValue, msg: &str) -> Result<AlmideValue, String> {
+        fn parse_literal(t: &str, pos: &mut usize, word: &[u8], v: AlmideValue, msg: &'static str) -> Result<AlmideValue, String> {
             if t.as_bytes()[*pos..].starts_with(word) { *pos += word.len(); Ok(v) } else { Err(msg.into()) }
         }
         /// A string at its opening quote. The escape-free run becomes the

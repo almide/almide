@@ -96,18 +96,18 @@ pub fn almide_net_request_end() -> Vec<AlmideNetOpened> {
 
 /// The slot behind `h`: the invalid-handle err past the end (a negative
 /// handle included), the closed err for an emptied slot.
-fn almide_net_get<'a, T>(v: &'a mut [Option<T>], kind: &str, h: i64) -> Result<&'a mut T, String> {
+fn almide_net_get<'a, T>(v: &'a mut [Option<T>], kind: &'static str, h: i64) -> Result<&'a mut T, String> {
     let i = usize::try_from(h).ok().filter(|i| *i < v.len()).ok_or_else(|| net_err_invalid_handle(kind, h))?;
     v[i].as_mut().ok_or_else(|| net_err_closed_handle(kind, h))
 }
 
-fn almide_net_len(f: &str, len: i64) -> Result<usize, String> {
+fn almide_net_len(f: &'static str, len: i64) -> Result<usize, String> {
     usize::try_from(len).map_err(|_| net_err_negative_len(f, len))
 }
 
 /// Resolve `host:port`. An IP literal (IPv6 bare or in brackets) is parsed,
 /// never looked up; a name goes to the platform resolver.
-fn almide_net_resolve(f: &str, host: &str, port: i64) -> Result<Vec<std::net::SocketAddr>, String> {
+fn almide_net_resolve(f: &'static str, host: &str, port: i64) -> Result<Vec<std::net::SocketAddr>, String> {
     let head = format!("{f}({}:{port})", almide_rt_errtext_escape(host));
     let port = u16::try_from(port).map_err(|_| net_err_port_range(&head))?;
     let bare = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host);
@@ -124,7 +124,7 @@ fn almide_net_resolve(f: &str, host: &str, port: i64) -> Result<Vec<std::net::So
 }
 
 /// Try each address in turn; the last failure classifies the err.
-fn almide_net_each<T>(f: &str, host: &str, port: i64, mut go: impl FnMut(&std::net::SocketAddr) -> std::io::Result<T>) -> Result<T, String> {
+fn almide_net_each<T>(f: &'static str, host: &str, port: i64, mut go: impl FnMut(&std::net::SocketAddr) -> std::io::Result<T>) -> Result<T, String> {
     let addrs = almide_net_resolve(f, host, port)?;
     let mut last = None;
     for a in &addrs {
@@ -288,7 +288,7 @@ const ALMIDE_NET_READ_CHUNK: usize = 64 * 1024;
 /// A zero-length read answers empty WITHOUT the syscall: Linux's `recv` on
 /// a zero-length buffer waits for data where macOS returns at once, so
 /// `tcp_read(c, 0)` on an idle stream hung on Linux (#3679's CI).
-fn almide_net_read_once(s: &mut std::net::TcpStream, n: usize, f: &str) -> Result<Vec<u8>, String> {
+fn almide_net_read_once(s: &mut std::net::TcpStream, n: usize, f: &'static str) -> Result<Vec<u8>, String> {
     if n == 0 {
         return Ok(Vec::new());
     }
