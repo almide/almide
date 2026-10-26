@@ -136,11 +136,11 @@
 67296	spec/wasm_cross/ctor_scalar_call_payload.almd
 65856	spec/wasm_cross/ctor_turbofish_family.almd
 66176	spec/wasm_cross/ctor_var_copy_semantics.almd
-66640	spec/wasm_cross/datetime_format.almd
+66608	spec/wasm_cross/datetime_format.almd
 ~	spec/wasm_cross/datetime_monotonic_ns.almd
 68608	spec/wasm_cross/datetime_parse_iso_strict.almd
 67936	spec/wasm_cross/datetime_parse_iso_year_range.almd
-67120	spec/wasm_cross/datetime_pre_epoch.almd
+67088	spec/wasm_cross/datetime_pre_epoch.almd
 68096	spec/wasm_cross/declaration_forms.almd
 67808	spec/wasm_cross/declaration_literal_domain.almd
 66032	spec/wasm_cross/deep_eq_heap.almd
@@ -616,7 +616,7 @@
 65968	spec/wasm_cross/nan_canonical_observation.almd
 66576	spec/wasm_cross/native_wall_shapes.almd
 66352	spec/wasm_cross/negative_float_literal_sized.almd
-67712	spec/wasm_cross/negative_offset_and_width_totality.almd
+67696	spec/wasm_cross/negative_offset_and_width_totality.almd
 65840	spec/wasm_cross/nested_box_guard_binder.almd
 65808	spec/wasm_cross/nested_ctor_pattern.almd
 71248	spec/wasm_cross/nested_field_path_mut.almd
@@ -686,7 +686,7 @@
 65904	spec/wasm_cross/r5_mod_global_init_order.almd
 65792	spec/wasm_cross/r5_mod_producer_variant.almd
 66240	spec/wasm_cross/r5_wasm_inferred_record_repr.almd
-86384	spec/wasm_cross/r5_wasm_interp_alias_rc.almd
+86368	spec/wasm_cross/r5_wasm_interp_alias_rc.almd
 227936	spec/wasm_cross/r5_wasm_split_replace_iterative.almd
 65968	spec/wasm_cross/r5_wasm_tuple_variant_pattern.almd
 66768	spec/wasm_cross/random_bytes.almd
