@@ -272,6 +272,7 @@ pub const PURE_MODULES: &[&str] = &[
     "string_codepoint",
     "string_concat",
     "string_eq",
+    "string_err_text",
     "string_first_last",
     "string_from_bytes_self",
     "string_from_codepoint",

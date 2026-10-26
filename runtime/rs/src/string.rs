@@ -42,6 +42,9 @@ pub fn almide_rt_string_trim(s: &str) -> AlmideString { let __almide_out: String
 pub fn almide_rt_string_trim_start(s: &str) -> AlmideString { let __almide_out: String = s.trim_start().to_string(); __almide_out.into() }
 pub fn almide_rt_string_trim_end(s: &str) -> AlmideString { let __almide_out: String = s.trim_end().to_string(); __almide_out.into() }
 pub fn almide_rt_string_contains(s: &str, sub: &str) -> bool { s.contains(sub) }
+/// C-418's escaper (#4126), for `string.__err_text`: the self-hosted error
+/// texts' twin of what the native runtime calls directly.
+pub fn almide_rt_string___err_text(s: &str) -> AlmideString { almide_rt_errtext_escape(s).into() }
 /// Constant-time equality over the UTF-8 bytes (#4106): same algorithm as
 /// `almide_rt_bytes_is_equal_constant_time` (kept self-contained so this
 /// module links without `bytes`). Length mismatch is false at once.

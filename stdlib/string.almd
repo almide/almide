@@ -486,23 +486,12 @@ fn unique_by[K](s: String, f: (String) -> K) -> String = string.join(
 fn __join(xs: List[String], sep: String) -> String = list.__join_string(xs, sep)
 
 // ── C-418's escaper, for the self-hosted bodies (#4126) ──
-// The Almide twin of almide-base's err_text.rs, rule for rule: a runtime error
-// text that embeds a text the program passed (datetime.parse_iso's offset,
-// json.parse's unexpected character, value.field's key, error.context's
-// label) writes each C0 control, DEL, C1 control and bidirectional control
-// in it as `\n` `\r` `\t` `\0` or `\u{<lowercase hex>}`, and keeps every other
-// character as it is. Native calls the Rust one; the wasm bodies and the
-// interp oracle call this. A dunder name: not part of the module's surface.
-fn __err_text(s: String) -> String = if string.chars(s) |> list.any((c) => err_escaped(string.codepoint(c) ?? 0)) then
-  string.chars(s) |> list.map((c) => err_char(c, string.codepoint(c) ?? 0)) |> list.join("")
-else s
-
-local fn err_escaped(n: Int) -> Bool = n <= 31 or (n >= 127 and n <= 159) or n == 1564 or n == 8206 or n == 8207 or (n >= 8234 and n <= 8238) or (n >= 8294 and n <= 8297)
-
-local fn err_char(c: String, n: Int) -> String = match n {
-  10 => "\\n",
-  13 => "\\r",
-  9 => "\\t",
-  0 => "\\0",
-  _ => if err_escaped(n) then "\\u{" + int.to_hex(n) + "}" else c,
-}
+// A runtime error text that embeds a text the program passed (datetime.parse_iso's
+// offset, json.parse's unexpected character, value.field's key, error.context's
+// label) writes each C0 control, DEL, C1 control and bidirectional control in it
+// as `\n` `\r` `\t` `\0` or `\u{<lowercase hex>}`, and keeps every other character.
+// Native is almide-base's err_text.rs; the wasm bodies and the interp oracle run
+// the pure-Almide twin in stdlib/string_err_text.almd. A dunder name: not part of
+// the module's surface.
+@intrinsic("almide_rt_string___err_text")
+fn __err_text(s: String) -> String = _
