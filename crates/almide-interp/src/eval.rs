@@ -114,6 +114,14 @@ impl<'a> Interpreter<'a> {
             IrExprKind::BinOp { op, left, right } => self.eval_binop(*op, left, right, scope),
             IrExprKind::UnOp { op, operand } => {
                 let v = val!(self.eval_expr(operand, scope));
+                // `-m` on a Matrix is `matrix.__neg(m)` on both backends.
+                if crate::surface::is_matrix_ty(&operand.ty) {
+                    return Some(self.dispatch_module_resolved(
+                        almide_base::intern::sym("matrix"),
+                        almide_base::intern::sym("__neg"),
+                        vec![v],
+                    ));
+                }
                 let flow = self.eval_unop(*op, v);
                 // #4163: a sized int's negation wraps at its width, as `0 - x` does.
                 if matches!(op, UnOp::NegInt) {

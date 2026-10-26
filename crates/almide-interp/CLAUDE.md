@@ -22,6 +22,7 @@ This crate adds a third, independent judge. It evaluates the IR at the cut point
 - `hofs.rs` — the in-interp HOFs (map/filter/fold/…) and the interp-native container ops, plus the in-place-mutation predicate.
 - `inplace.rs` — the `mut`-receiver mutators (`list.push`, `set.insert`, …), modeled as read → transform → write-back on the receiver's binding. `Rc::make_mut` on the binding's own storage slot IS the COW rule: sole owner mutates in place (a push loop stays linear), an alias forces the copy (C-033).
 - `bridge.rs` — the `prim.*` scalar floor, the scalar/string arms a self-hosted body consumes as its floor INSIDE the pool tier, and the two boundary fallbacks (the sized-numeric `to_string` observers, `bytes.zeros`) — every arm one the corpus reaches, gated by the fallback ledger.
+- `surface.rs` — the public fns written in a BUNDLED module (not a registry source, so the pool has no body for them): thin wrappers forwarded to their registry body (`int.pow` → `math.__pow`), restated bodies (`int.parse_radix`, `bytes.get_*`/`next_*`, `list.binary_search`, `deque.*`), the generic `<T>.from` family with its `Numeric` pivots chosen by the argument's static type, and Matrix operators as the `matrix.*` calls the backends lower them to.
 - `stdlib_pool.rs` — the self-hosted stdlib bodies (the SAME sources the wasm leg links), lowered once; below the container tier they are the vote (#2185).
 
 ## Coverage model — does a NEW stdlib fn get covered automatically?

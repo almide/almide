@@ -271,6 +271,12 @@ impl<'a> Interpreter<'a> {
 
         let l = val!(self.eval_expr(left, scope));
         let r = val!(self.eval_expr(right, scope));
+        // A Matrix operand: the operator IS a `matrix.*` call (`a + b` →
+        // `matrix.__add`, `m * k` → `matrix.scale`), the rewrite both
+        // backends' lowering applies, answered by the same registry bodies.
+        if let Some(f) = self.eval_matrix_binop(op, &left.ty, &right.ty, &l, &r) {
+            return f;
+        }
         // The UNSIGNED 64-bit lane (#872, C-179): a `UInt64` operand's `i64`
         // slot is a u64 BIT PATTERN, so division, remainder and ordering must
         // read it unsigned — the signed reading made `u64::MAX / 3` come out

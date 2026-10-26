@@ -50,6 +50,12 @@ impl<'a> Interpreter<'a> {
         for a in args {
             evaled.push(val!(self.eval_expr(a, scope)));
         }
+        // The generic `<T>.from` family (`float.from`, `int8.from_checked`, …):
+        // its body reads the source through the `Numeric` pivots, chosen by
+        // the argument's STATIC type — read here, where the type still is.
+        if let Some(flow) = self.eval_numeric_carrier(module, func, args, &evaled) {
+            return flow;
+        }
         // `prim.handle`'s STATIC argument type — the only honest way to tell
         // a Bytes value from a List[Int] value at materialization (see
         // `handle_arg_ty`). Stashed, not threaded: the hint is consumed by
@@ -387,8 +393,18 @@ impl<'a> Interpreter<'a> {
         // the body cannot take this call, and the reason says so.
         let (func, func_def, gate_mut) = match self.resolve_body_for_arity(module, func, args.len()) {
             Ok(found) => found,
-            Err(why) if floor_first => return Flow::Unsupported(why),
-            Err(why) => return self.no_body_fallback(module, func, args, why),
+            Err(why) => {
+                // A public fn written in its BUNDLED module (`int.pow`,
+                // `bytes.get_u16_le`), which the registry pool does not lower:
+                // its bundled definition, from `surface.rs`.
+                if let Some(flow) = self.eval_bundled_surface(module, func, &args) {
+                    return flow;
+                }
+                if floor_first {
+                    return Flow::Unsupported(why);
+                }
+                return self.no_body_fallback(module, func, args, why);
+            }
         };
         // These sites receive EAGERLY-evaluated args, so a `mut` parameter's
         // caller lvalue is already gone — the Named path's copy-out (#1022)
