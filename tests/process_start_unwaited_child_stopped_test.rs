@@ -112,3 +112,31 @@ fn children_already_waited_on_or_stopped_are_left_alone() {
     assert_gone(pid_of(&stdout, "stopped"), "an explicitly stopped child");
     assert_gone(pid_of(&stdout, "child"), "main returns after a wait and a stop");
 }
+
+/// C-437's fixture observes itself: run with no arguments it runs its own
+/// binary as the parent once per exit route and reports whether the child the
+/// parent left running still exists after the parent ended.
+#[test]
+fn the_c437_fixture_sees_every_route_stop_the_child() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/spec/native_only/process_start_exit_stops_children.almd");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let bin = dir.path().join("process_start_exit_stops_children");
+    let build = Command::new(almide()).arg("build").arg(fixture).arg("-o").arg(&bin).output().expect("build");
+    assert!(build.status.success(), "build failed: {}", String::from_utf8_lossy(&build.stderr));
+    // Timed apart from the build: an exit that waited for its `sleep 30`
+    // would also find the child gone afterwards, so the clock is the witness.
+    let start = Instant::now();
+    let out = Command::new(&bin).output().expect("run the fixture");
+    let elapsed = start.elapsed();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "stdout: {stdout}\nstderr: {stderr}");
+    assert_eq!(
+        stdout,
+        "return: exit 0, stderr [], child running at exit, then stopped\n\
+         exit: exit 3, stderr [], child running at exit, then stopped\n\
+         error: exit 1, stderr [Error: boom], child running at exit, then stopped\n",
+        "stderr: {stderr}"
+    );
+    assert!(elapsed < Duration::from_secs(20), "an exit waited for its child: {elapsed:?}");
+}
