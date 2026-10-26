@@ -26,7 +26,7 @@ else {
   let pair = list.get(values, 0) |> option.unwrap_or((0, ""))
   let v = pair.0
   let s = pair.1
-  if n >= v then s + to_roman_step(n - v, values) else to_roman_step(n, list.tail(values))
+  if n >= v then s + to_roman_step(n - v, values) else to_roman_step(n, list.drop(values, 1))
 }
 
 fn to_roman(n: Int) -> String = to_roman_step(n, NUMERALS)

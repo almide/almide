@@ -1,10 +1,10 @@
 // list completeness tests — functions not covered elsewhere
-test "list.get_or in bounds" {
-  assert_eq(list.get_or([10, 20, 30], 1, 0), 20)
+test "list.get ?? in bounds" {
+  assert_eq(list.get([10, 20, 30], 1) ?? 0, 20)
 }
 
-test "list.get_or out of bounds" {
-  assert_eq(list.get_or([10, 20], 5, 99), 99)
+test "list.get ?? out of bounds" {
+  assert_eq(list.get([10, 20], 5) ?? 99, 99)
 }
 
 test "list.set basic" {
@@ -383,8 +383,8 @@ test "list.drop_end more than length" {
   assert_eq(list.drop_end([1, 2], 5), [])
 }
 
-test "list.windows basic" {
-  let ws = list.windows([1, 2, 3, 4], 2)
+test "list.window basic" {
+  let ws = list.window([1, 2, 3, 4], 2)
   assert_eq(list.len(ws), 3)
   assert_eq(list.get(ws, 0), some([1, 2]))
   assert_eq(list.get(ws, 2), some([3, 4]))

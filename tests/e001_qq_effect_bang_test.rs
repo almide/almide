@@ -44,7 +44,7 @@ fn an_argv_reader_with_a_payload_fallback_reports_one_error_naming_the_bang() {
         dir.path(),
         "import args\n\
          effect fn main() -> Unit = {\n\
-         \x20 let ledger = args.positional_at(0, []) ?? \"ledger.toml\"\n\
+         \x20 let ledger = args.option(\"ledger\") ?? \"ledger.toml\"\n\
          \x20 println(ledger)\n\
          }\n",
     );
@@ -52,7 +52,7 @@ fn an_argv_reader_with_a_payload_fallback_reports_one_error_naming_the_bang() {
     assert_eq!(count(&out, QQ_MISMATCH), 1, "{out}");
     assert!(!out.contains("call to println()"), "the cascade on the binding's use is dropped:\n{out}");
     assert!(
-        out.contains("`args.positional_at(0, [])! ?? \"ledger.toml\"`"),
+        out.contains("`args.option(\"ledger\")! ?? \"ledger.toml\"`"),
         "the hint spells the repair:\n{out}"
     );
 }

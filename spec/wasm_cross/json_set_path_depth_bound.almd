@@ -1,5 +1,5 @@
 // @contract: C-433
-// json.set_path keeps the nesting bound json.parse has (#4209, R-L0-47,
+// value.set_path keeps the nesting bound json.parse has (#4209, R-L0-47,
 // C-391): the value it builds nests its path's steps plus the new value's
 // own nesting, and past 1000 the answer is `err("json: nesting deeper than
 // 1000")`, the text parse gives, on every leg — where it used to build the
@@ -11,9 +11,9 @@
 // each one.
 import json
 
-fn path_of(d: Int) -> JsonPath = list.range(0, d) |> list.fold(
-  json.root(),
-  (acc, _i) => json.field(acc, "k"),
+fn path_of(d: Int) -> value.Path = list.range(0, d) |> list.fold(
+  value.root(),
+  (acc, _i) => value.key(acc, "k"),
 )
 
 fn nest(d: Int) -> Value = list.range(0, d) |> list.fold(
@@ -28,17 +28,17 @@ fn show(r: Result[Value, String]) -> String = match r {
 
 effect fn main() -> Unit = {
   let doc = json.parse("{\"a\": [1, 2]}")!
-  println("path 1000: " + show(json.set_path(doc, path_of(1000), value.int(1))))
-  println("path 1001: " + show(json.set_path(doc, path_of(1001), value.int(1))))
-  println("path 999 + []: " + show(json.set_path(doc, path_of(999), value.array([]))))
-  println("path 1000 + []: " + show(json.set_path(doc, path_of(1000), value.array([]))))
-  println("path 1000 + {}: " + show(json.set_path(doc, path_of(1000), value.object([]))))
-  println("root + 1000 deep: " + show(json.set_path(doc, json.root(), nest(1000))))
-  println("path 1 + 1000 deep: " + show(json.set_path(doc, path_of(1), nest(1000))))
-  println("path 500 + 500 deep: " + show(json.set_path(doc, path_of(500), nest(500))))
-  println("path 500 + 501 deep: " + show(json.set_path(doc, path_of(500), nest(501))))
-  println("deep entry first: " + show(json.set_path(doc, path_of(500), value.object([("x", nest(499)), ("y", value.int(2))]))))
-  println("deep entry last: " + show(json.set_path(doc, path_of(500), value.object([("y", value.int(2)), ("x", nest(500))]))))
-  println("shallow edit: " + show(json.set_path(doc, json.index(json.field(json.root(), "a"), 0), value.int(9))))
-  println("path 40000: " + show(json.set_path(doc, path_of(40000), value.int(1))))
+  println("path 1000: " + show(value.set_path(doc, path_of(1000), value.int(1))))
+  println("path 1001: " + show(value.set_path(doc, path_of(1001), value.int(1))))
+  println("path 999 + []: " + show(value.set_path(doc, path_of(999), value.array([]))))
+  println("path 1000 + []: " + show(value.set_path(doc, path_of(1000), value.array([]))))
+  println("path 1000 + {}: " + show(value.set_path(doc, path_of(1000), value.object([]))))
+  println("root + 1000 deep: " + show(value.set_path(doc, value.root(), nest(1000))))
+  println("path 1 + 1000 deep: " + show(value.set_path(doc, path_of(1), nest(1000))))
+  println("path 500 + 500 deep: " + show(value.set_path(doc, path_of(500), nest(500))))
+  println("path 500 + 501 deep: " + show(value.set_path(doc, path_of(500), nest(501))))
+  println("deep entry first: " + show(value.set_path(doc, path_of(500), value.object([("x", nest(499)), ("y", value.int(2))]))))
+  println("deep entry last: " + show(value.set_path(doc, path_of(500), value.object([("y", value.int(2)), ("x", nest(500))]))))
+  println("shallow edit: " + show(value.set_path(doc, value.index(value.key(value.root(), "a"), 0), value.int(9))))
+  println("path 40000: " + show(value.set_path(doc, path_of(40000), value.int(1))))
 }

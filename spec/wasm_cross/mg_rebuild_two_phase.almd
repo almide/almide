@@ -18,7 +18,7 @@ fn init() -> Unit = {
   items = []
   for i in 0..<count {
     items = items + [
-      { a: int.to_float(i), b: int.to_float(i) * 2.0 }
+      { a: float.from(i), b: float.from(i) * 2.0 }
     ]
   }
 }

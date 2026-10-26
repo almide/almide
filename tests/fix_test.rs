@@ -353,13 +353,13 @@ fn fix_leaves_real_2arg_calls_alone() {
     // a known comparison-fn / module pair. A 2-arg list fn should be
     // untouched.
     let src = r#"
-fn head_or_default(xs: List[Int], d: Int) -> Int = list.get_or(xs, 0, d)
+fn head_or_default(xs: List[Int], d: Int) -> Int = list.get(xs, 0) ?? d
 "#;
     let path = write_tmp("fix_no_rewrite.almd", src);
     let out = Command::new(almide()).args(["fix", &path]).output().unwrap();
     assert!(out.status.success());
     let after = std::fs::read_to_string(&path).unwrap();
-    assert!(after.contains("list.get_or"), "unrelated fn clipped:\n{}", after);
+    assert!(after.contains("list.get(xs, 0) ?? d"), "unrelated fn clipped:\n{}", after);
 }
 
 #[test]

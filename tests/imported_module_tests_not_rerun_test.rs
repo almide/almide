@@ -26,7 +26,7 @@ fn wasmtime_available() -> bool {
     Command::new("wasmtime").arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
-/// The issue's repro (`process.spawn` then; its successor `process.start`,
+/// The issue's repro (the old spawn call then; its successor `process.start`,
 /// native-only, now): it keeps both files on native.
 const NATIVE_HELPER: &str = "import process\n\
 \n\

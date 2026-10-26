@@ -6,7 +6,7 @@ fn main() -> Unit = {
   let r4: Float = r0
   let y7: Result[Bool, String] = ok(map.contains(map.filter(["k0": (if true then 7 else -1), "k1": 127, "k2": 256, "k3": 10], ((y5, y6) => true)), "日本語"))
   let r8: Result[Bool, String] = y7
-  let r10: Option[String] = option.map(some(math.sign(1)), ((s9) => "Ǆ"))
+  let r10: Option[String] = option.map(some(int.sign(1)), ((s9) => "Ǆ"))
   println("r0 = ${r0}")
   println("r3 = ${r3}")
   println("r4 = ${r4}")

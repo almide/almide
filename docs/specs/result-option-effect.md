@@ -274,7 +274,7 @@ test "fallible lambdas (in fn bodies — test bodies keep unwrap semantics, L9)"
 | `fn main() = ...` | `fn main()` | 純粋。副作用なし |
 | `effect fn main() -> Unit = ...` | `fn main() -> Result<(), String>` | 自動リフト |
 
-- **main は引数を取らない。** コマンドライン引数は `process.args()`(Go 方式)
+- **main は引数を取らない。** コマンドライン引数は `env.args()`(プログラム名を除く argv)
 - 未処理の Err が main に到達したら、**両ターゲットで exit 1 + stderr `Error: <msg>`**
   (Display、引用符なし)。`!` による Option の none 由来(`err("none")`)も同じ経路で
   両ターゲット一致(旧記述の「wasm が exit 0 で黙殺する残存乖離」は解消済み — 実測で
@@ -312,6 +312,7 @@ almide repr 形(ok/err)への統一は未実施(既知の表示形差)。
 
 ```almide
 import process
+import env
 
 fn positive(n: Int) -> Int! = {
   guard n > 0 else err("must be positive")    // guard condition else diverge_expr — else は戻りチャネルへ
@@ -319,7 +320,7 @@ fn positive(n: Int) -> Int! = {
 }
 
 effect fn main() -> Unit = {
-  let n = list.len(process.args())
+  let n = list.len(env.args())
   guard n > 0 else process.exit(3)             // else: Never(process.exit)
   println(int.to_string(n))
 }

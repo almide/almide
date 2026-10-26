@@ -905,8 +905,8 @@ effect fn main() -> Unit = {{
 }
 
 /// #1710 PR B, the framed family on the p3 component: `request` /
-/// `send` / `get_response` / `request_bytes` / `get_bytes` ride the same
-/// async-lowered exchange (ops 48, 50 and the response op 65). The frame the guest
+/// `send` / `get_response` ride the same async-lowered exchange (op 48
+/// and the response op 65; op 50, the retired bytes form, is unused). The frame the guest
 /// builds (stdlib/http_framed.almd: method, body, header cells with CHAR
 /// counts) is parsed in the shim; the method lands as the named variant
 /// case (or `other(string)`), the headers through `fields.append` (the
@@ -933,11 +933,11 @@ effect fn main() -> Unit = {{
     ok(r) => println("gets:${{http.status(r)}}:" + http.body(r)),
     err(e) => println("gets err:" + e),
   }}
-  match http.get_bytes("http://{addr}/hello") {{
+  match (http.get_response("http://{addr}/hello") |> result.map((r) => http.body_bytes(r))) {{
     ok(b) => println("bytes:${{bytes.len(b)}}"),
     err(e) => println("bytes err:" + e),
   }}
-  match http.request_bytes("DELETE", "http://{addr}/gone", "", []) {{
+  match (http.send(http.new_request("DELETE", "http://{addr}/gone", "", [])) |> result.map((r) => http.body_bytes(r))) {{
     ok(b) => println("rb:${{bytes.len(b)}}"),
     err(e) => println("rb err:" + e),
   }}
@@ -1198,7 +1198,7 @@ effect fn main() -> Unit = {
   for x in a {
     println("arg=[${x}]")
   }
-  let pa = process.args()
+  let pa = env.args()
   println("process argc=${list.len(pa)}")
   let t0 = datetime.monotonic_ns()
   env.sleep_ms(120)

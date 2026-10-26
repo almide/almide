@@ -118,22 +118,21 @@ Tests: `tests/checker_test.rs` (`pure_fn_admits_output_and_abort_builtins`,
 
 ### 2.2 Stdlib readers are effect fns
 
-*Dialect epoch 8 (#3248).* `io.read_byte`, `io.read_n_bytes` and
-`process.args` read stdin or argv, and became `effect fn`s like `io.read_line`
-and `env.args`. They were plain `fn`s, so a pure fn could read the outside
+*Dialect epoch 8 (#3248).* `io.read_byte`, `io.read_n_bytes` and the
+`process` argv reader read stdin or argv, and became `effect fn`s like
+`io.read_line` and `env.args` (argv now lives only in `env.args`). They were plain `fn`s, so a pure fn could read the outside
 world through them; a call from a pure fn is now E006. The byte readers have
 since been replaced by `io.read`, `io.read_exact` and `io.read_to_end` over a
 `Read` handle (`io.stdin()`, a `net.TcpStream`, a `unix.Fd`), which are
 `effect fn`s the same way.
 
-*Dialect epoch 13.* The `args` module's readers (`args.raw`, `args.flag`,
-`args.option`, `args.option_or`, `args.positional`, `args.positional_at`)
-read argv the same way and are `effect fn`s too (#848's ruling: argv is an
+*Dialect epoch 13.* The `args` module's readers (`args.has_flag`,
+`args.option`, `args.positional`) read argv the same way and are `effect fn`s too (#848's ruling: argv is an
 effect). Mark the caller `effect fn`, or read the arguments in
 `effect fn main` and pass the value in. Unlike the template-dispatched
 readers above, they have Almide bodies, so a call is typed
 `Result[T, String]` like a user effect fn's and is propagated with `!`
-(`args.flag("verbose")!`).
+(`args.has_flag("verbose")!`).
 
 ```almide check-fail=E006
 import io
@@ -147,7 +146,7 @@ fn first_byte(h: io.Stdin) -> Int = match io.read(h, 1) {
 ```almide check-fail=E006
 import args
 
-fn verbose() -> Bool = args.flag("verbose")
+fn verbose() -> Bool = args.has_flag("verbose")
 ```
 
 Tests: `tests/diagnostics/e006-io-read-in-pure-fn/`,
@@ -496,9 +495,9 @@ parent on its own.
 | `FS` | `FS.read`, `FS.write` | `fs`: reading and listing is `FS.read`; writing, removing, renaming, creating is `FS.write` (`fs.copy` both) |
 | `Net` | `Net.fetch`, `Net.listen` | `http`'s `effect fn`s are `Net.fetch`, `http.serve` `Net.listen`; `net.tcp_connect` / `unix_connect` `Net.fetch`, the listen/accept fns `Net.listen`, and an operation on an open stream or a shared-memory region both (it cannot tell which side opened it) |
 | `IO` | `IO.stdin`, `IO.stdout`, `IO.stderr` | the `io` readers are `IO.stdin`, `io.print` / `write` / `write_bytes` and `println` are `IO.stdout`, `eprintln` is `IO.stderr` |
-| `Env` | `Env.read`, `Env.write` | `env` and `args` read (`Env.read`); `env.set` writes (`Env.write`); `process.args` / `pid` / `env` read |
-| — | `Proc` | starting and signalling a process: `process.exec` and friends, `kill`, `is_alive`. No parent grants it: a started command can reach every other capability |
-| — | `Time` | the clock: `datetime.now` / `monotonic_ns`, `env.millis` / `unix_timestamp` / `sleep_ms`, `process.sleep` |
+| `Env` | `Env.read`, `Env.write` | `env` and `args` read (`Env.read`); `env.set` writes (`Env.write`); `process.pid` reads |
+| — | `Proc` | starting and signalling a process: `process.exec` and friends, `kill`. No parent grants it: a started command can reach every other capability |
+| — | `Time` | the clock: `datetime.now` / `now_ms` / `monotonic_ns`, `env.sleep_ms` |
 | — | `Rand` | `random` |
 | — | `Fan` | `fan` |
 | — | `Abort` | `panic`, a failing `assert*`, `process.exit` (`panic` and a failing assert also write `IO.stderr`) |

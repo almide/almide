@@ -76,9 +76,7 @@ fn omitted(pos: &str, div: &str) -> bool {
     pos == "lambda" && div == "never_effect_fn"
 }
 
-const PRELUDE: &str = r#"import process
-
-fn f() -> String = {
+const PRELUDE: &str = r#"import process\n\nfn f() -> String = {
   println("f")
   "x"
 }
@@ -135,7 +133,7 @@ fn dispatch_main(cells: &[(String, String, i32, &str, String)]) -> String {
         arms.push_str(&format!("    \"{name}\" => {name}()!,\n"));
     }
     format!(
-        "effect fn main() -> Unit = {{\n  let which = list.get(process.args(), 1) ?? \"\"\n  println(\"start\")\n  match which {{\n{arms}    _ => println(\"no such cell\"),\n  }}\n  println(\"unreachable\")\n}}\n"
+        "import env\n\neffect fn main() -> Unit = {{\n  let which = list.get(env.args(), 1) ?? \"\"\n  println(\"start\")\n  match which {{\n{arms}    _ => println(\"no such cell\"),\n  }}\n  println(\"unreachable\")\n}}\n"
     )
 }
 

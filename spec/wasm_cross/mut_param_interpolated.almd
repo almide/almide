@@ -22,7 +22,7 @@ fn show_str(mut s: String) -> Unit = {
 }
 
 fn show_map(mut m: Map[String, Int]) -> Unit = {
-  map.insert(m, "a", 1)
+  m = map.set(m, "a", 1)
   println("map ${m}")
 }
 

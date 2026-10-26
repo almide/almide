@@ -65,7 +65,7 @@ effect fn main() -> Unit = {
   // 7. a temporary source: a call's result goes to the owned twin as is
   println("${bytes.to_list(bytes.set(bytes.from_list([2, 2, 100]), 0, -1))}")
   let tb = bytes.from_list([1, 2])
-  println("${bytes.to_list(bytes.set(bytes.concat(tb, tb), 3, 7))} ${bytes.to_list(tb)}")
+  println("${bytes.to_list(bytes.set(tb + tb, 3, 7))} ${bytes.to_list(tb)}")
 }
 "#;
 

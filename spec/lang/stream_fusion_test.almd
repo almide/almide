@@ -34,7 +34,7 @@ fn first_odd_over(xs: List[Int], lo: Int) -> Int? = xs |> list.filter((x) => x >
 
 fn count_over(xs: List[Int], lo: Int) -> Int = xs |> list.map((x) => x + 1) |> list.count((x) => x > lo)
 
-fn float_total(xs: List[Int]) -> Float = xs |> list.map((x) => float.from_int(x) / 4.0) |> list.fold(
+fn float_total(xs: List[Int]) -> Float = xs |> list.map((x) => float.from(x) / 4.0) |> list.fold(
   0.0,
   (a, x) => a + x,
 )

@@ -10,11 +10,12 @@
 //!    vs random.rs's thread-local). The runtime's own take the `ALMIDE_`
 //!    prefix now.
 //! 3. `used_stdlib_modules` is call-driven, so a program that only NAMED
-//!    `Endian` never spliced bytes.rs (E0425 / E0433). A reference to a
-//!    runtime-owned type pulls the module that defines it.
-//! 4. Under the auto-import the bundled `Endian` decl never reaches the
-//!    program, so `${e}` fell to `Display`, which the runtime enum has not
-//!    (E0277). A runtime-owned twin is repr-capable regardless of the decl.
+//!    a stdlib-owned type never spliced its module (E0425 / E0433). A
+//!    reference to a stdlib-owned type pulls the module that defines it
+//!    (pinned on `net.IpAddr` since `bytes.Endian` left the stdlib).
+//! 4. `${e}` on a stdlib-owned variant fell to `Display`, which the runtime
+//!    enum has not (E0277). A stdlib-owned twin is repr-capable regardless
+//!    of the decl.
 //! 5. `"${m.size} ${m.is_file} ${kind(m)}"` rendered a `format!` that
 //!    borrows `m.size` and moves `m` in the same argument list (E0505); the
 //!    clone pass now applies the call guard's rule to the interpolation.
@@ -24,9 +25,9 @@
 //! local item shadows a glob import legally) and pulls a stdlib module the
 //! v1 native renderer walls on, so the v0 emitter under test is the one
 //! that runs. Items 3–5 are cross-target promises; item 5's shape also runs
-//! on `--target wasm` here and must print the same bytes (the auto-import
-//! `Endian` shapes of 3 and 4 wall on the wasm leg on either side of this
-//! change — the wasm-side gap is #1839 — so those pin NATIVE only).
+//! on `--target wasm` here and must print the same bytes (the shapes of 3
+//! and 4 walled on the wasm leg on either side of this change — the
+//! wasm-side gap is #1839 — so those pin NATIVE only).
 
 use std::path::Path;
 use std::process::Command;
@@ -110,45 +111,46 @@ fn top_let_named_after_a_runtime_const_builds() {
     );
 }
 
-/// Item 3: naming `Endian` (an annotation, a ctor, a pattern) without a
-/// single `bytes.*` call.
+/// Item 3: naming `IpAddr` (an annotation, a ctor, a pattern) without a
+/// single `net.*` call.
 #[test]
-fn naming_endian_without_a_bytes_call_splices_bytes_rs() {
+fn naming_ip_addr_without_a_net_call_splices_its_module() {
     assert_native_builds(
-        "endian_eq",
-        "effect fn main() -> Unit = {\n  let e: Endian = BigEndian\n  println(\"${e == LittleEndian}\")\n}\n",
+        "ip_eq",
+        "import net\neffect fn main() -> Unit = {\n  let e: IpAddr = V4(127, 0, 0, 1)\n  println(\"${e == V6([0, 0, 0, 0, 0, 0, 0, 1])}\")\n}\n",
         "false\n",
     );
     assert_native_builds(
-        "endian_match",
-        "effect fn main() -> Unit = {\n  let e: Endian = BigEndian\n  let s = match e { LittleEndian => \"le\", BigEndian => \"be\" }\n  println(s)\n  let f: Endian = LittleEndian\n  let t = match f { LittleEndian => \"le\", BigEndian => \"be\" }\n  println(t)\n}\n",
-        "be\nle\n",
+        "ip_match",
+        "import net\neffect fn main() -> Unit = {\n  let e: IpAddr = V6([0, 0, 0, 0, 0, 0, 0, 1])\n  let s = match e { V4(_, _, _, _) => \"v4\", V6(_) => \"v6\" }\n  println(s)\n  let f: IpAddr = V4(10, 0, 0, 1)\n  let t = match f { V4(a, _, _, _) => \"v4 ${a}\", V6(_) => \"v6\" }\n  println(t)\n}\n",
+        "v6\nv4 10\n",
     );
 }
 
-/// Item 4: `${e}` on an `Endian` value with `bytes` auto-imported — the
-/// literal form the explicit-import program already printed (`BigEndian`).
+/// Item 4: `${e}` on a value of a bundled stdlib-owned variant type — the
+/// declared variant repr. (The original pin was on `bytes.Endian` under the
+/// auto-import; no auto-imported stdlib variant type remains, so the pin now
+/// runs on `net.IpAddr` under an explicit import.)
 #[test]
-fn endian_interpolation_under_the_auto_import_has_a_repr_route() {
+fn owned_variant_interpolation_has_a_repr_route() {
     assert_native_builds(
-        "endian_repr",
-        "effect fn main() -> Unit = {\n  let e = BigEndian\n  println(\"${e}\")\n}\n",
-        "BigEndian\n",
+        "ip_repr",
+        "import net\neffect fn main() -> Unit = {\n  let e = V4(10, 0, 0, 1)\n  println(\"${e}\")\n}\n",
+        "V4(10, 0, 0, 1)\n",
     );
     assert_native_builds(
-        "endian_repr_beside_a_call",
-        "effect fn main() -> Unit = {\n  let e: Endian = BigEndian\n  println(\"${e} ${bytes.len(bytes.zeros(0))}\")\n}\n",
-        "BigEndian 0\n",
+        "ip_repr_beside_a_call",
+        "import net\neffect fn main() -> Unit = {\n  let e: IpAddr = V4(10, 0, 0, 1)\n  println(\"${e} ${net.ip_to_string(e)}\")\n}\n",
+        "V4(10, 0, 0, 1) 10.0.0.1\n",
     );
-    // #2496: the MODULE-QUALIFIED ctor spelling types as `bytes.Endian`,
-    // and the repr router asked both its tables under that name while they
-    // are keyed by the bare one `render_type` emits — so the same value
-    // printed under `BigEndian` and was rustc E0277 under
-    // `bytes.LittleEndian`. One type, one route, either spelling.
+    // #2496: the MODULE-QUALIFIED ctor spelling types as the owner-qualified
+    // type, and the repr router asked both its tables under that name while
+    // they are keyed by the bare one `render_type` emits. One type, one
+    // route, either spelling.
     assert_native_builds(
-        "endian_repr_module_qualified",
-        "effect fn main() -> Unit = {\n  let e = bytes.LittleEndian\n  println(\"${e}\")\n}\n",
-        "LittleEndian\n",
+        "ip_repr_module_qualified",
+        "import net\neffect fn main() -> Unit = {\n  let e = net.V4(10, 0, 0, 1)\n  println(\"${e}\")\n}\n",
+        "V4(10, 0, 0, 1)\n",
     );
 }
 

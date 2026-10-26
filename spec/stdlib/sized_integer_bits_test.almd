@@ -3,21 +3,21 @@
 // counts run over its bits, a shift count is taken mod the width, and `bshr` fills
 // with the sign on a signed type and with zeros on an unsigned one (the UInt64 upper
 // half included, which a signed Int pivot would sign-fill).
-fn i8(n: Int) -> Int8 = int.to_int8(n)
+fn i8(n: Int) -> Int8 = int8.from_wrapping(n)
 
-fn i16(n: Int) -> Int16 = int.to_int16(n)
+fn i16(n: Int) -> Int16 = int16.from_wrapping(n)
 
-fn i32(n: Int) -> Int32 = int.to_int32(n)
+fn i32(n: Int) -> Int32 = int32.from_wrapping(n)
 
-fn i64(n: Int) -> Int64 = int.to_int64(n)
+fn i64(n: Int) -> Int64 = int64.from(n)
 
-fn u8(n: Int) -> UInt8 = int.to_uint8(n)
+fn u8(n: Int) -> UInt8 = uint8.from_wrapping(n)
 
-fn u16(n: Int) -> UInt16 = int.to_uint16(n)
+fn u16(n: Int) -> UInt16 = uint16.from_wrapping(n)
 
-fn u32(n: Int) -> UInt32 = int.to_uint32(n)
+fn u32(n: Int) -> UInt32 = uint32.from_wrapping(n)
 
-fn u64(n: Int) -> UInt64 = int.to_uint64(n)
+fn u64(n: Int) -> UInt64 = uint64.from_wrapping(n)
 
 // ── band / bor / bxor / bnot ──
 test "and, or, xor and not over the type's bits" {

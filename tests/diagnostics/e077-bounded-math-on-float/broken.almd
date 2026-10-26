@@ -1,5 +1,5 @@
 // ALS-B10: a math call computing on Float arguments is a Float operation.
 @bounded
-fn lower(a: Float, b: Float) -> Float = math.fmin(a, b)
+fn root(a: Float) -> Float = math.sqrt(a)
 
-fn main() -> Unit = println(float.to_string(lower(1.5, 2.5)))
+fn main() -> Unit = println(float.to_string(root(2.25)))

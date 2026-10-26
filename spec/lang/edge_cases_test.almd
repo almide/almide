@@ -272,7 +272,7 @@ test "string chars and join" {
   let s = "hello"
   let chars = string.to_list(s)
   assert_eq(chars, ["h", "e", "l", "l", "o"])
-  let rejoined = string.join(chars, "-")
+  let rejoined = list.join(chars, "-")
   assert_eq(rejoined, "h-e-l-l-o")
 }
 
@@ -378,8 +378,8 @@ test "list zip_with" {
 
 test "map get_or" {
   let m = map.set(map.new(), "a", 1)
-  assert_eq(map.get_or(m, "a", 0), 1)
-  assert_eq(map.get_or(m, "b", 99), 99)
+  assert_eq(map.get(m, "a") ?? 0, 1)
+  assert_eq(map.get(m, "b") ?? 99, 99)
 }
 
 test "map set overwrites" {
@@ -401,9 +401,9 @@ test "float to_string" {
 }
 
 test "float from_int" {
-  assert_eq(float.from_int(42), 42.0)
-  assert_eq(float.from_int(0), 0.0)
-  assert_eq(float.from_int(-5), -5.0)
+  assert_eq(float.from(42), 42.0)
+  assert_eq(float.from(0), 0.0)
+  assert_eq(float.from(-5), -5.0)
 }
 
 test "float clamp" {

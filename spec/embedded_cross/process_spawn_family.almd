@@ -9,6 +9,7 @@
 // they are printed as predicates. The commands are POSIX `sh` / `cat` /
 // `sleep`, present on every CI image this lane runs on.
 import process
+import env
 
 fn show(r: Result[String, String]) -> String = match r {
   ok(s) => "ok ${s}",
@@ -52,5 +53,5 @@ effect fn main() -> Unit = {
   // The `start` handle (poll / wait / stop) is native-only (E081 on the wasm
   // legs); its tests are spec/stdlib/process_start_test.almd.
   println("self pid positive=${process.pid() > 0}")
-  println("home set=${process.env("HOME") != none} unset=${process.env("ALMIDE_NONEXISTENT_VAR_2589") == none}")
+  println("home set=${env.get("HOME") != none} unset=${env.get("ALMIDE_NONEXISTENT_VAR_2589") == none}")
 }

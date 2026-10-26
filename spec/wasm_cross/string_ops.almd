@@ -2,7 +2,7 @@
 fn main() -> Unit = {
   // split / join roundtrip
   let parts = string.split("one:two:three", ":")
-  let joined = string.join(parts, ",")
+  let joined = list.join(parts, ",")
   println(joined)
   // slice
   let s = "hello world"

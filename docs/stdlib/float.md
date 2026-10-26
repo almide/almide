@@ -15,41 +15,6 @@ fn main() -> Unit = {
 3.14
 ```
 
-### `float.to_int(n: Float) -> Int`
-
-Truncate a float to an integer (rounds toward zero).
-
-```almd run
-fn main() -> Unit = {
-  println("${float.to_int(3.9)}")
-}
-```
-```output
-3
-```
-
-`float.to_int` saturates: NaN gives `0` and a value past the `Int` range gives
-`Int` max or min, so a bad input is indistinguishable from a real one. Its
-twins say which one you mean — the conversion trio every lossy Float → integer
-conversion carries:
-
-- `float.to_int_checked(n: Float) -> Option[Int]` — `some` only when `n` is an
-  integer in the `Int` range; `none` for NaN, ±inf, a fractional part or out of
-  range.
-- `float.to_int_saturating(n: Float) -> Int` — the clamp, spelled explicitly
-  (the same value as `float.to_int`).
-
-```almd run
-fn main() -> Unit = {
-  println("${float.to_int_checked(12.0)} ${float.to_int_checked(12.9)} ${float.to_int_checked(1.0 / 0.0)}")
-  println("${float.to_int_saturating(-1.0 / 0.0)}")
-}
-```
-```output
-some(12) none none
--9223372036854775808
-```
-
 ### `float.round(n: Float) -> Float`
 
 Round a float to the nearest integer value (as Float), halves away from zero
@@ -104,19 +69,6 @@ fn main() -> Unit = {
 2.5
 ```
 
-### `float.sqrt(n: Float) -> Float`
-
-Return the square root of a float.
-
-```almd run
-fn main() -> Unit = {
-  println(float.to_string(float.sqrt(9.0)))
-}
-```
-```output
-3.0
-```
-
 ### `float.parse(s: String) -> Result[Float, String]`
 
 Parse a string into a finite float. Returns err if the string is not a valid number.
@@ -137,19 +89,6 @@ fn main() -> Unit = {
 ```output
 ok(3.14)
 err(invalid float literal)
-```
-
-### `float.from_int(n: Int) -> Float`
-
-Convert an integer to a float.
-
-```almd run
-fn main() -> Unit = {
-  println(float.to_string(float.from_int(42)))
-}
-```
-```output
-42.0
 ```
 
 ### `float.min(a: Float, b: Float) -> Float`
@@ -260,20 +199,12 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (61 functions)
+## Signature index (27 functions)
 
 ```
 // Shortest round-trip digits, no exponent; 2.0 keeps .0.
 // @since 0.5.0 or earlier
 float.to_string(n: Float) -> String
-
-// Truncates toward 0, saturating; NaN gives 0.
-// @since 0.5.0 or earlier
-float.to_int(n: Float) -> Int
-
-// Nearest Float; may round when |n| > 2^53.
-// @since 0.5.0 or earlier
-float.from_int(n: Int) -> Float
 
 // Finite Float from s trimmed of ASCII space; err on junk, inf, NaN, overflow.
 // @since 0.5.0 or earlier
@@ -286,10 +217,6 @@ float.to_fixed(n: Float, decimals: Int) -> String
 // IEEE-754 bits as Int; any NaN gives the canonical NaN.
 // @since 0.12.1 or earlier
 float.to_bits(f: Float) -> Int
-
-// Square root; NaN below 0, -0.0 stays -0.0.
-// @since 0.5.0 or earlier
-float.sqrt(n: Float) -> Float
 
 // Magnitude; -0.0 gives 0.0, NaN stays NaN.
 // @since 0.5.0 or earlier
@@ -334,130 +261,6 @@ float.is_nan(n: Float) -> Bool
 // True for inf and -inf; false for NaN.
 // @since 0.6.0 or earlier
 float.is_infinite(n: Float) -> Bool
-
-// Truncates toward 0, saturating; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_int8(n: Float) -> Int8
-
-// Truncates toward 0, saturating; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_int16(n: Float) -> Int16
-
-// Truncates toward 0, saturating; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_int32(n: Float) -> Int32
-
-// Truncates toward 0, saturating; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_uint8(n: Float) -> UInt8
-
-// Truncates toward 0, saturating; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_uint16(n: Float) -> UInt16
-
-// Truncates toward 0, saturating; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_uint32(n: Float) -> UInt32
-
-// Truncates toward 0, saturating; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_uint64(n: Float) -> UInt64
-
-// Nearest Float32; overflow gives inf.
-// @since 0.15.0 or earlier
-float.to_float32(n: Float) -> Float32
-
-// Truncates toward 0, saturating; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_int64(n: Float) -> Int64
-
-// Same f64 value; always exact.
-// @since 0.15.0 or earlier
-float.to_float64(n: Float) -> Float64
-
-// Exact widening; never rounds.
-// @since 0.15.0 or earlier
-float.from_float32(n: Float32) -> Float
-
-// Same f64 value; always exact.
-// @since 0.15.0 or earlier
-float.from_float64(n: Float64) -> Float
-
-// some iff n is an integer in -2^63..2^63-1; NaN and ±inf give none.
-// @since unreleased
-float.to_int_checked(n: Float) -> Option[Int]
-
-// some iff n is an integer in -128..127.
-// @since 0.15.0 or earlier
-float.to_int8_checked(n: Float) -> Option[Int8]
-
-// some iff n is an integer in -32768..32767.
-// @since 0.15.0 or earlier
-float.to_int16_checked(n: Float) -> Option[Int16]
-
-// some iff n is an integer in -2^31..2^31-1.
-// @since 0.15.0 or earlier
-float.to_int32_checked(n: Float) -> Option[Int32]
-
-// some iff n is an integer in -2^63..2^63-1.
-// @since 0.15.0 or earlier
-float.to_int64_checked(n: Float) -> Option[Int64]
-
-// some iff n is an integer in 0..255.
-// @since 0.15.0 or earlier
-float.to_uint8_checked(n: Float) -> Option[UInt8]
-
-// some iff n is an integer in 0..65535.
-// @since 0.15.0 or earlier
-float.to_uint16_checked(n: Float) -> Option[UInt16]
-
-// some iff n is an integer in 0..2^32-1.
-// @since 0.15.0 or earlier
-float.to_uint32_checked(n: Float) -> Option[UInt32]
-
-// some iff n is an integer in 0..2^64-1.
-// @since 0.15.0 or earlier
-float.to_uint64_checked(n: Float) -> Option[UInt64]
-
-// some if n is exact in Float32; NaN and ±inf give none.
-// @since 0.15.0 or earlier
-float.to_float32_checked(n: Float) -> Option[Float32]
-
-// Truncates, clamps to Int range; NaN gives 0.
-// @since unreleased
-float.to_int_saturating(n: Float) -> Int
-
-// Truncates, clamps to -128..127; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_int8_saturating(n: Float) -> Int8
-
-// Truncates, clamps to -32768..32767; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_int16_saturating(n: Float) -> Int16
-
-// Truncates, clamps to Int32 range; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_int32_saturating(n: Float) -> Int32
-
-// Truncates, clamps to Int64 range; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_int64_saturating(n: Float) -> Int64
-
-// Truncates, clamps to 0..255; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_uint8_saturating(n: Float) -> UInt8
-
-// Truncates, clamps to 0..65535; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_uint16_saturating(n: Float) -> UInt16
-
-// Truncates, clamps to 0..2^32-1; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_uint32_saturating(n: Float) -> UInt32
-
-// Truncates, clamps to 0..2^64-1; NaN gives 0.
-// @since 0.15.0 or earlier
-float.to_uint64_saturating(n: Float) -> UInt64
 
 // Round toward 0; -0.5 gives -0.0.
 // @since unreleased

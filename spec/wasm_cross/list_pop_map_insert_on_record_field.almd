@@ -1,6 +1,6 @@
 // @contract: C-226, C-033
 // #2908: the rest of the in-place collection ops on a record FIELD place —
-// `list.pop(h.f)`, `map.insert(h.f, k, v)`, `map.delete(h.f, k)` and
+// `list.pop(h.f)`, `h.f = map.set(h.f, k, v)`, `h.f = map.remove(h.f, k)` and
 // `map.clear(h.f)` — where `h` is a record var or a `mut` record parameter.
 // They take the copy-on-write field write `list.push` on a field already
 // takes (#2411): a copy bound before the op keeps the old contents (C-033),
@@ -32,11 +32,11 @@ effect fn main() -> Unit = {
   var it = { id: 1, kids: [1, 2, 3] }
   println(int.to_string(drain(it)))
   var cell = { name: "c", memo: map.new(), words: ["a", "bb", "ccc"] }
-  map.insert(cell.memo, "x", 1)
-  map.insert(cell.memo, "y", 2)
-  map.insert(cell.memo, "x", 3)
+  cell.memo = map.set(cell.memo, "x", 1)
+  cell.memo = map.set(cell.memo, "y", 2)
+  cell.memo = map.set(cell.memo, "x", 3)
   let before = cell
-  map.delete(cell.memo, "y")
+  cell.memo = map.remove(cell.memo, "y")
   println("${cell.memo} ${before.memo}")
   let w1 = last_word(cell)
   let p = list.pop(cell.words)
@@ -49,7 +49,7 @@ effect fn main() -> Unit = {
   map.clear(cell.memo)
   println("${cell.memo} ${before.memo} ${cell.name}")
   for i in 0..<1000 {
-    map.insert(cell.memo, int.to_string(i % 7), i)
+    cell.memo = map.set(cell.memo, int.to_string(i % 7), i)
     list.push(it.kids, i)
   }
   var total = 0

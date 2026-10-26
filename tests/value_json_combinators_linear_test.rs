@@ -5,7 +5,7 @@
 //!   both legs (80,000 disjoint keys: 13.7 s native, > 35 s wasm).
 //! - `value.pick` / `value.omit` scanned the key list for every field: O(n·k)
 //!   (80,000 fields and keys: 11.8 s native, 26.9 s wasm).
-//! - `json.set_path` cloned the whole document per call natively, so a fold
+//! - `value.set_path` cloned the whole document per call natively, so a fold
 //!   of n calls copied n² nodes (40,000 fields: 18 s; 40,000 indices: 3.4 s).
 //!
 //! merge / pick / omit now look keys up through an index built once per call
@@ -51,12 +51,14 @@ fn ends(ks: List[String], mid: Int) -> String =
 fn merge_src(n: usize) -> String {
     let half = n / 2;
     format!(
-        r#"{OBJ}
+        r#"import json
+
+{OBJ}
 fn main() -> Unit = {{
   let m = value.merge(obj("a", {n}), obj("b", {n}))
-  println(ends(value.keys(m), {n}))
+  println(ends(list.map(value.as_object(m) ?? [], (kv) => kv.0), {n}))
   let o = value.merge(obj("k", {n}), value.object(list.range(0, {half}) |> list.map((i) => ("k${{i * 2}}", value.string("v")))))
-  println("${{ends(value.keys(o), {half})}} ${{value.stringify(value.pick(o, ["k0", "k1", "k2"]))}}")
+  println("${{ends(list.map(value.as_object(o) ?? [], (kv) => kv.0), {half})}} ${{json.stringify(value.pick(o, ["k0", "k1", "k2"]))}}")
 }}
 "#
     )
@@ -77,9 +79,9 @@ fn merge_self_src(n: usize) -> String {
         r#"import json
 {OBJ}
 effect fn main() -> Unit = {{
-  let v = json.parse(value.stringify(obj("k", {n})))!
+  let v = json.parse(json.stringify(obj("k", {n})))!
   let m = value.merge(v, v)
-  println("${{ends(value.keys(m), 1)}} ${{value.stringify(value.pick(m, ["k1"]))}}")
+  println("${{ends(list.map(value.as_object(m) ?? [], (kv) => kv.0), 1)}} ${{json.stringify(value.pick(m, ["k1"]))}}")
 }}
 "#
     )
@@ -95,9 +97,9 @@ fn pick_src(n: usize) -> String {
 fn main() -> Unit = {{
   let v = obj("k", {n})
   let ks = list.reverse(list.range(0, {n}) |> list.map((i) => "k${{i}}"))
-  println("${{ends(value.keys(value.pick(v, ks)), 1)}} ${{list.len(value.keys(value.omit(v, ks)))}}")
+  println("${{ends(list.map(value.as_object(value.pick(v, ks)) ?? [], (kv) => kv.0), 1)}} ${{list.len(list.map(value.as_object(value.omit(v, ks)) ?? [], (kv) => kv.0))}}")
   let evens = list.range(0, {n} / 2) |> list.map((i) => "k${{i * 2}}")
-  println("${{ends(value.keys(value.omit(v, evens)), 0)}} ${{ends(value.keys(value.pick(v, evens)), 1)}}")
+  println("${{ends(list.map(value.as_object(value.omit(v, evens)) ?? [], (kv) => kv.0), 0)}} ${{ends(list.map(value.as_object(value.pick(v, evens)) ?? [], (kv) => kv.0), 1)}}")
 }}
 "#
     )
@@ -119,11 +121,11 @@ fn set_obj_src(n: usize) -> String {
 effect fn main() -> Unit = {{
   var acc = value.object([])
   for i in 0..<{n} {{
-    acc = json.set_path(acc, json.field(json.root(), "k${{i}}"), value.int(i))!
+    acc = value.set_path(acc, value.key(value.root(), "k${{i}}"), value.int(i))!
   }}
-  acc = json.set_path(acc, json.field(json.root(), "k0"), value.string("again"))!
-  let ks = value.keys(acc)
-  println("${{list.len(ks)}} ${{list.first(ks) ?? "-"}} ${{list.last(ks) ?? "-"}} ${{value.stringify(value.pick(acc, ["k0", "k1"]))}}")
+  acc = value.set_path(acc, value.key(value.root(), "k0"), value.string("again"))!
+  let ks = list.map(value.as_object(acc) ?? [], (kv) => kv.0)
+  println("${{list.len(ks)}} ${{list.first(ks) ?? "-"}} ${{list.last(ks) ?? "-"}} ${{json.stringify(value.pick(acc, ["k0", "k1"]))}}")
 }}
 "#
     )
@@ -139,11 +141,11 @@ fn set_arr_src(n: usize) -> String {
 effect fn main() -> Unit = {{
   var acc = value.array(list.repeat(value.int(0), {n}))
   for i in 0..<{n} {{
-    acc = json.set_path(acc, json.index(json.root(), i), value.int(i + 1))!
+    acc = value.set_path(acc, value.index(value.root(), i), value.int(i + 1))!
   }}
-  acc = json.set_path(acc, json.index(json.root(), -1), value.string("last"))!
+  acc = value.set_path(acc, value.index(value.root(), -1), value.string("last"))!
   let xs = value.as_array(acc) ?? []
-  println("${{list.len(xs)}} ${{value.stringify(list.first(xs) ?? value.null())}} ${{value.stringify(list.get(xs, {n} - 2) ?? value.null())}} ${{value.stringify(list.last(xs) ?? value.null())}}")
+  println("${{list.len(xs)}} ${{json.stringify(list.first(xs) ?? value.null())}} ${{json.stringify(list.get(xs, {n} - 2) ?? value.null())}} ${{json.stringify(list.last(xs) ?? value.null())}}")
 }}
 "#
     )
@@ -196,8 +198,8 @@ type Cell = (&'static str, fn(usize) -> String, fn(usize) -> String);
 const MERGE: Cell = ("value.merge (disjoint)", merge_src, merge_want);
 const MERGE_SELF: Cell = ("value.merge (v, v)", merge_self_src, merge_self_want);
 const PICK_OMIT: Cell = ("value.pick / value.omit", pick_src, pick_want);
-const SET_OBJ: Cell = ("json.set_path (object fold)", set_obj_src, set_obj_want);
-const SET_ARR: Cell = ("json.set_path (array fold)", set_arr_src, set_arr_want);
+const SET_OBJ: Cell = ("value.set_path (object fold)", set_obj_src, set_obj_want);
+const SET_ARR: Cell = ("value.set_path (array fold)", set_arr_src, set_arr_want);
 
 /// The wasm cells at n and 2n, each under its budget, each equal to native.
 fn wasm_doubling((name, src, want): Cell, n: usize, fuel_n: u64) {
@@ -255,7 +257,9 @@ fn native_bodies_stay_fast_at_the_issue_sizes() {
 /// random objects must equal native's.
 #[test]
 fn the_interp_bodies_agree_with_native_on_small_objects() {
-    let src = r#"fn lcg(s: Int) -> Int = (s * 1103515245 + 12345) % 2147483648
+    let src = r#"import json
+
+fn lcg(s: Int) -> Int = (s * 1103515245 + 12345) % 2147483648
 
 fn keyname(r: Int) -> String = match r % 6 {
   0 => "a",
@@ -289,7 +293,7 @@ fn case(seed: Int) -> String = {
   let a = value.object(pa)
   let b = value.object(pb)
   let scalar = if s3 % 3 == 0 then value.int(7) else a
-  "${value.stringify(value.merge(a, b))} ${value.stringify(value.merge(b, a))} ${value.stringify(value.merge(a, a))} ${value.stringify(value.merge(scalar, b))} | ${value.stringify(value.pick(a, ks))} ${value.stringify(value.omit(a, ks))} ${value.stringify(value.pick(scalar, ks))} ${value.stringify(value.omit(scalar, ks))}"
+  "${json.stringify(value.merge(a, b))} ${json.stringify(value.merge(b, a))} ${json.stringify(value.merge(a, a))} ${json.stringify(value.merge(scalar, b))} | ${json.stringify(value.pick(a, ks))} ${json.stringify(value.omit(a, ks))} ${json.stringify(value.pick(scalar, ks))} ${json.stringify(value.omit(scalar, ks))}"
 }
 
 fn main() -> Unit = {

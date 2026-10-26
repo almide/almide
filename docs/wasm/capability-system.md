@@ -46,8 +46,6 @@ Shorthand groups: `IO` = FS.read + FS.write + IO.stdin + IO.stdout + IO.stderr, 
 | `fs.is_file(path)` | `(String) -> Bool` | Check if path is regular file |
 | `fs.is_symlink(path)` | `(String) -> Bool` | Check if path is symbolic link |
 | `fs.stat(path)` | `(String) -> Result[{size, is_dir, is_file, modified}, String]` | File metadata |
-| `fs.file_size(path)` | `(String) -> Result[Int, String]` | File size in bytes |
-| `fs.modified_at(path)` | `(String) -> Result[Int, String]` | Modification timestamp |
 | `fs.list_dir(path)` | `(String) -> Result[List[String], String]` | List directory entries |
 | `fs.walk(dir)` | `(String) -> Result[List[String], String]` | Recursive file listing |
 | `fs.glob(pattern)` | `(String) -> Result[List[String], String]` | Glob pattern matching |
@@ -117,8 +115,6 @@ Shorthand groups: `IO` = FS.read + FS.write + IO.stdin + IO.stdout + IO.stderr, 
 | `http.request(method, url, body, headers)` | `(String, String, String, List[(String, String)]) -> Result[String, String]` | Any method (`"POST"`, `"PUT"`, `"PATCH"`, `"DELETE"`, ...), the body |
 | `http.get_response(url)` | `(String) -> Result[HttpResponse, String]` | HTTP GET, the whole response |
 | `http.send(req)` | `(HttpRequest) -> Result[HttpResponse, String]` | Sends a request built with `http.new_request`, the whole response |
-| `http.get_bytes(url)` | `(String) -> Result[Bytes, String]` | HTTP GET, the raw body bytes |
-| `http.request_bytes(method, url, body, headers)` | `(String, String, String, List[(String, String)]) -> Result[Bytes, String]` | Any method, the raw body bytes |
 | `http.start(req, limits)` | `(HttpRequest, HttpLimits) -> Result[HttpCall, String]` | Begins a request and returns a call handle at once |
 
 Note: Pure response builder functions (`http.response`, `http.json`, `http.redirect`, `http.with_headers`) and request functions (`http.new_request`, `http.method`, `http.path`, `http.header`, `http.headers`, `http.body`, `http.query_params`) do not require `Net.fetch` because they operate on in-memory data structures, not the network.
@@ -173,8 +169,6 @@ artifacts refuse it at build time (#2659).
 | `env.args()` | `() -> List[String]` | Command-line arguments |
 | `env.cwd()` | `() -> Result[String, String]` | Current working directory |
 | `env.os()` | `() -> String` | Operating system name |
-| `env.temp_dir()` | `() -> String` | System temp directory |
-| `process.args()` | `() -> List[String]` | Command-line arguments (process module) |
 
 **WASI imports:**
 
@@ -226,9 +220,8 @@ Setting environment variables is not part of WASI preview 1. The host must provi
 | `process.exec_status_timeout(cmd, args, ms)` | `(String, List[String], Int) -> Result[ProcessStatus, String]` | `exec_status`, killed at the deadline |
 | `process.run(cmd, args)` | `(String, List[String]) -> Result[Int, String]` | Run on this terminal; exit code |
 | `process.run_in(dir, cmd, args)` | `(String, String, List[String]) -> Result[Int, String]` | `run` in `dir` |
-| `process.spawn(cmd, args)` | `(String, List[String]) -> Result[Int, String]` | Start in the background; pid |
+| `process.start(c)` | `(ProcessCommand) -> Result[ProcessChild, String]` | Start in the background; a handle to poll, wait on or stop |
 | `process.kill(pid, signal)` | `(Int, Int) -> Result[Unit, String]` | Signal a process |
-| `process.is_alive(pid)` | `(Int) -> Bool` | Whether the process exists |
 | `process.pid()` | `() -> Int` | This program's pid |
 
 Process execution is the most dangerous capability. An agent with `Proc` can execute arbitrary shell commands, which can bypass all other capability restrictions at the OS level.
@@ -254,19 +247,19 @@ proc = ["git", "cargo"]
 
 - The compiler checks every call that starts a child (`exec`, `exec_in`,
   `exec_with_stdin`, `exec_status`, `exec_status_timeout`, `run`, `run_in`,
-  `spawn`, and the deprecated `exec_attached`): its command must be a string literal on the list. A literal off the
+  `start`, and the deprecated `exec_attached`): its command must be a string literal on the list. A literal off the
   list is refused with ``process.exec("make") (line N): `make` is not in
   [permissions] proc``. A command computed at run time, or a spawning fn passed
   as a value, cannot be checked and is refused too (`cli::check_proc_allowlist`:
   `run`, `build` and `test` on both targets; `almide check` sees the direct
   calls).
-- `process.kill` and `process.is_alive` start no child but reach processes, so
-  the list bounds them as the `kill` command (#4125): without `kill` on it they
-  are refused with ``process.kill("kill") (line N): `kill` is not in
+- `process.kill` starts no child but reaches processes, so
+  the list bounds it as the `kill` command (#4125): without `kill` on it it
+  is refused with ``process.kill("kill") (line N): `kill` is not in
   [permissions] proc``.
 - The embedded wasm host holds the same list and answers a command outside it
-  with an err naming the command, before anything runs (`kill` / `is_alive`
-  outside it: the same err, and not-alive).
+  with an err naming the command, before anything runs (`kill`
+  outside it: the same err).
 - Without the key nothing is bounded. `proc = []` allows no command.
 
 #### On wasm: the private `almide:process/spawn` import
@@ -308,8 +301,7 @@ ABI on stock runtimes) and states its bounds and falsifiers.
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `datetime.now()` | `() -> Int` | Current Unix timestamp (seconds) |
-| `env.millis()` | `() -> Int` | Milliseconds since epoch |
-| `env.unix_timestamp()` | `() -> Int` | Unix timestamp (seconds) |
+| `datetime.now_ms()` | `() -> Int` | Milliseconds since epoch |
 | `env.sleep_ms(ms)` | `(Int) -> Unit` | Sleep for milliseconds |
 
 Note: Pure datetime functions (`datetime.format`, `datetime.year`, `datetime.add_days`, etc.) do NOT require `Time` because they operate on integer timestamps, not the system clock.
@@ -378,7 +370,6 @@ None. Fan is implemented internally using `std::thread::scope` (Rust target) or 
 |----------|-----------|-------------|
 | `io.read_line()` | `() -> String` | Read one line from stdin |
 | `io.read_all()` | `() -> String` | Read all of stdin |
-| `process.stdin_lines()` | `() -> Result[List[String], String]` | Read all stdin lines |
 
 **WASI imports:**
 

@@ -33,20 +33,20 @@ test "int.rotate_* with a negative count rotates the other way" {
   assert_eq(int.rotate_left(1, -64), 1)
 }
 
-test "int.to_u32" {
-  assert_eq(int.to_u32(255), 255)
-  assert_eq(int.to_u32(0), 0)
-  assert_eq(int.to_u32(4294967296), 0)
+test "int.wrap 32" {
+  assert_eq(int.wrap(255, 32), 255)
+  assert_eq(int.wrap(0, 32), 0)
+  assert_eq(int.wrap(4294967296, 32), 0)
 }
 
-test "int.to_u8" {
-  assert_eq(int.to_u8(255), 255)
-  assert_eq(int.to_u8(256), 0)
-  assert_eq(int.to_u8(300), 44)
+test "int.wrap 8" {
+  assert_eq(int.wrap(255, 8), 255)
+  assert_eq(int.wrap(256, 8), 0)
+  assert_eq(int.wrap(300, 8), 44)
 }
 
-test "int.bits_to_float" {
-  assert_eq(int.bits_to_float(4607182418800017408), 1.0)
-  assert_eq(int.bits_to_float(0), 0.0)
-  assert_eq(float.to_bits(int.bits_to_float(4614253070214989087)), 4614253070214989087)
+test "float.from_bits" {
+  assert_eq(float.from_bits(4607182418800017408), 1.0)
+  assert_eq(float.from_bits(0), 0.0)
+  assert_eq(float.to_bits(float.from_bits(4614253070214989087)), 4614253070214989087)
 }

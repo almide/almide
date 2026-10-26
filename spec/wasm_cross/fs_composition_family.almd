@@ -14,9 +14,9 @@ effect fn main() -> Unit = {
   fs.write_bytes(d + "/wb.bin", bytes.from_list([72, 105, 33, 300]))!
   println("wb=${fs.read_text(d + "/wb.bin")!}")
   var raw = bytes.zeros(3)
-  bytes.set_at(raw, 0, 65)
-  bytes.set_at(raw, 1, 66)
-  bytes.set_at(raw, 2, 67)
+  bytes.put_u8(raw, 0, 65)
+  bytes.put_u8(raw, 1, 66)
+  bytes.put_u8(raw, 2, 67)
   fs.write_bytes(d + "/wr.bin", raw)!
   println("wr=${fs.read_text(d + "/wr.bin")!}")
   fs.mkdir_p(d + "/sub/inner")!
@@ -79,7 +79,7 @@ effect fn main() -> Unit = {
   }
   let pb = fs.read_bytes_if_exists(d + "/a.txt")!
   match pb {
-    some(xs) => println("bytes=${bytes.len(xs)} b0=${bytes.get_or(xs, 0, 0 - 1)}"),
+    some(xs) => println("bytes=${bytes.len(xs)} b0=${bytes.get(xs, 0) ?? (0 - 1)}"),
     none => println("bytes=none"),
   }
   let ab = fs.read_bytes_if_exists(d + "/no")!
@@ -89,7 +89,7 @@ effect fn main() -> Unit = {
   }
   let pr = fs.read_bytes_if_exists(d + "/a.txt")!
   match pr {
-    some(b) => println("raw=${bytes.len(b)} r0=${bytes.get_or(b, 0, 0 - 1)}"),
+    some(b) => println("raw=${bytes.len(b)} r0=${bytes.get(b, 0) ?? (0 - 1)}"),
     none => println("raw=none"),
   }
   let ar = fs.read_bytes_if_exists(d + "/no")!

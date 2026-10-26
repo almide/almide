@@ -4,7 +4,7 @@
 // A path segment is the STRING `"i<int>"`, and the wasm emitter recovers the
 // number with an atoi it writes inline (json_path_helpers.rs `seg_prologue`).
 // That accumulator was an i32, so `acc = acc * 10 + digit` wrapped mod 2^32
-// and an index no array could have became one it could: `json.index(root, i)`
+// and an index no array could have became one it could: `value.index(root, i)`
 // with `i = -9223372036854775807` accumulated to -1, negated to 1, and hit
 // element 1 of a three-element array that native left alone (#2396).
 //
@@ -24,10 +24,10 @@ import json
 fn arr() -> Value = json.parse("[10, 20, 30]") ?? value.null()
 
 fn show(label: String, i: Int) -> Unit = {
-  let p = json.index(json.root(), i)
-  let g = json.get_path(arr(), p) ?? value.string("none")
-  let s = json.set_path(arr(), p, value.int(99)) ?? value.null()
-  let r = json.remove_path(arr(), p)
+  let p = value.index(value.root(), i)
+  let g = value.get_path(arr(), p) ?? value.string("none")
+  let s = value.set_path(arr(), p, value.int(99)) ?? value.null()
+  let r = value.remove_path(arr(), p)
   println("${label} get=${json.stringify(g)} set=${json.stringify(s)} rm=${json.stringify(r)}")
 }
 
@@ -71,22 +71,22 @@ fn main() -> Unit = {
   // under a field step still resolves — the fix is in the shared segment
   // prologue, so both spellings exercise it.
   let doc = json.parse("{\"xs\": [1, 2, 3], \"n\": 7}") ?? value.null()
-  let deep = json.index(json.field(json.root(), "xs"), -9223372036854775807)
-  println("deep-get: ${json.stringify(json.get_path(doc, deep) ?? value.string("none"))}")
-  println("deep-set: ${json.stringify(json.set_path(doc, deep, value.int(99)) ?? value.null())}")
-  println("deep-rm: ${json.stringify(json.remove_path(doc, deep))}")
-  let inr = json.index(json.field(json.root(), "xs"), 1)
-  println("deep-ok-get: ${json.stringify(json.get_path(doc, inr) ?? value.string("none"))}")
-  println("deep-ok-set: ${json.stringify(json.set_path(doc, inr, value.int(99)) ?? value.null())}")
-  println("deep-ok-rm: ${json.stringify(json.remove_path(doc, inr))}")
+  let deep = value.index(value.key(value.root(), "xs"), -9223372036854775807)
+  println("deep-get: ${json.stringify(value.get_path(doc, deep) ?? value.string("none"))}")
+  println("deep-set: ${json.stringify(value.set_path(doc, deep, value.int(99)) ?? value.null())}")
+  println("deep-rm: ${json.stringify(value.remove_path(doc, deep))}")
+  let inr = value.index(value.key(value.root(), "xs"), 1)
+  println("deep-ok-get: ${json.stringify(value.get_path(doc, inr) ?? value.string("none"))}")
+  println("deep-ok-set: ${json.stringify(value.set_path(doc, inr, value.int(99)) ?? value.null())}")
+  println("deep-ok-rm: ${json.stringify(value.remove_path(doc, inr))}")
   // An index step over a NON-array passes the node through on every leg; the
   // out-of-range index must not change that either.
   let obj = json.parse("{\"a\": 1}") ?? value.null()
-  let onobj = json.index(json.root(), -9223372036854775807)
-  println("obj-rm: ${json.stringify(json.remove_path(obj, onobj))}")
-  println("obj-set: ${json.stringify(json.set_path(obj, onobj, value.int(99)) ?? value.null())}")
+  let onobj = value.index(value.root(), -9223372036854775807)
+  println("obj-rm: ${json.stringify(value.remove_path(obj, onobj))}")
+  println("obj-set: ${json.stringify(value.set_path(obj, onobj, value.int(99)) ?? value.null())}")
   // The empty array: every index is out of range, including the wrap points.
   let empty = json.parse("[]") ?? value.null()
-  println("empty-rm: ${json.stringify(json.remove_path(empty, onobj))}")
-  println("empty-rm0: ${json.stringify(json.remove_path(empty, json.index(json.root(), 0)))}")
+  println("empty-rm: ${json.stringify(value.remove_path(empty, onobj))}")
+  println("empty-rm0: ${json.stringify(value.remove_path(empty, value.index(value.root(), 0)))}")
 }

@@ -53,7 +53,7 @@ fn total(xs: List[Float]) -> Float = xs |> list.fold(0.0, (a, x) => a + x)
 fn row_sink(v: List[Float]) -> Float = v |> list.map((x) => x * 2.0) |> total
 
 fn row_enum(v: List[Float], i: Int) -> Float =
-  v |> list.enumerate |> list.map(((j, x)) => int.to_float(j + i) * x) |> total
+  v |> list.enumerate |> list.map(((j, x)) => float.from(j + i) * x) |> total
 
 fn rows(v: List[Float], n: Int) -> List[Float] = list.range(0, n) |> list.map((i) => row_sink(v) + row_enum(v, i))
 
@@ -95,7 +95,7 @@ fn the_fused_sink_computes_what_the_call_did() {
 /// Not a sink: the parameter is read twice, so substituting the argument
 /// chain for it would run the argument twice.
 const TWICE: &str = r#"
-fn mean(xs: List[Float]) -> Float = (xs |> list.fold(0.0, (a, x) => a + x)) / int.to_float(list.len(xs))
+fn mean(xs: List[Float]) -> Float = (xs |> list.fold(0.0, (a, x) => a + x)) / float.from(list.len(xs))
 
 fn f(v: List[Float]) -> Float = v |> list.map((x) => x * 2.0) |> mean
 

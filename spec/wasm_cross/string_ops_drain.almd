@@ -28,14 +28,14 @@ fn b2s(b: Bool) -> String = if b then "T" else "F"
 fn from_code(code: Int) -> String = {
   var bs: List[Int] = []
   list.push(bs, code)
-  string.from_bytes(bs)
+  bytes.to_string_lossy(bytes.from_list(bs))
 }
 
 fn from_codes2(a: Int, b: Int) -> String = {
   var bs: List[Int] = []
   list.push(bs, a)
   list.push(bs, b)
-  string.from_bytes(bs)
+  bytes.to_string_lossy(bytes.from_list(bs))
 }
 
 fn section_cmp() -> Unit = {

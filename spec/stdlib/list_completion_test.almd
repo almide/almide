@@ -1,3 +1,5 @@
+import random
+
 test "list.take_end" {
   assert_eq(list.take_end([1, 2, 3, 4], 2), [3, 4])
   assert_eq(list.take_end([1], 5), [1])
@@ -21,9 +23,9 @@ test "list.unique_by" {
   assert_eq(result, [1, 2, 3])
 }
 
-test "list.shuffle preserves length" {
+test "random.shuffle preserves length" {
   let xs = [1, 2, 3, 4, 5]
-  let shuffled = list.shuffle(xs)
+  let shuffled = random.shuffle(xs)
   assert_eq(list.len(shuffled), 5)
 }
 

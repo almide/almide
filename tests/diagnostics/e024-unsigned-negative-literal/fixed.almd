@@ -5,5 +5,5 @@ fn main() -> Unit = {
   let k: UInt64 = 5
   let b: Int8 = -1
   let z: UInt32 = -0
-  println("${uint64.to_string(k)}:${int.to_string(int.from_int8(b))}:${uint32.to_string(z)}")
+  println("${uint64.to_string(k)}:${int.to_string(int.from(b))}:${uint32.to_string(z)}")
 }

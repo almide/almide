@@ -7,11 +7,11 @@ import list
 
 // Helper: convert a string to an integer, returning Result
 fn str_to_int(s: String) -> Result[Int, String] = {
-  let bytes = string.to_bytes(s)
-  let len = list.len(bytes)
+  let bs = bytes.to_list(bytes.from_string(s))
+  let len = list.len(bs)
   if len == 0 then err("invalid integer")
   else {
-    let first = match list.get(bytes, 0) {
+    let first = match list.get(bs, 0) {
       some(v) => v,
       none => 0,
     }
@@ -21,16 +21,16 @@ fn str_to_int(s: String) -> Result[Int, String] = {
     else {
       // Get digit bytes (skip leading minus if present)
       let digit_bytes = if is_negative then {
-        let indices = list.fold(bytes, [], (acc, _b) => acc + [list.len(acc)])
+        let indices = list.fold(bs, [], (acc, _b) => acc + [list.len(acc)])
         list.fold(indices, [], (acc, i) => {
           if i >= start_index then {
-            match list.get(bytes, i) {
+            match list.get(bs, i) {
               some(v) => acc + [v],
               none => acc,
             }
           } else acc
         })
-      } else bytes
+      } else bs
       if list.len(digit_bytes) == 0 then err("invalid integer")
       else {
         let result = list.fold(digit_bytes, ok(0), (acc, b) => {
@@ -273,9 +273,9 @@ fn generate_report(input: String) -> Result[String, String] = {
               match honor_roll(students) {
                 err(e) => err(e),
                 ok(honors) => {
-                  let student_lines = string.join(lines, "\n")
+                  let student_lines = list.join(lines, "\n")
                   let class_line = "class average: " + int.to_string(cavg)
-                  let honor_line = "honor roll: " + string.join(honors, ", ")
+                  let honor_line = "honor roll: " + list.join(honors, ", ")
                   ok(student_lines + "\n" + class_line + "\n" + honor_line)
                 },
               }

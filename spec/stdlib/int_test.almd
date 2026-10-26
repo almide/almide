@@ -57,20 +57,20 @@ test "int.parse float string fails" {
 }
 
 // ── parse_hex ──
-test "int.from_hex lowercase" {
-  assert_eq(int.from_hex("a"), ok(10))
+test "int.parse_radix lowercase" {
+  assert_eq(int.parse_radix("a", 16), ok(10))
 }
 
-test "int.from_hex uppercase" {
-  assert_eq(int.from_hex("FF"), ok(255))
+test "int.parse_radix uppercase" {
+  assert_eq(int.parse_radix("FF", 16), ok(255))
 }
 
-test "int.from_hex zero" {
-  assert_eq(int.from_hex("0"), ok(0))
+test "int.parse_radix zero" {
+  assert_eq(int.parse_radix("0", 16), ok(0))
 }
 
-test "int.from_hex large" {
-  assert_eq(int.from_hex("ffff"), ok(65535))
+test "int.parse_radix large" {
+  assert_eq(int.parse_radix("ffff", 16), ok(65535))
 }
 
 // ── abs ──

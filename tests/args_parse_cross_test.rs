@@ -51,7 +51,7 @@ fn build(file: &Path, out: &Path, wasm: bool) {
 const PROGRAM: &str = r#"import args
 
 effect fn main() -> Unit = {
-  println("dry_run=${args.flag("dry-run")!} delete=${args.has_flag("delete")!} d=${args.has_flag("d")!}")
+  println("dry_run=${args.has_flag("dry-run")!} delete=${args.has_flag("delete")!} d=${args.has_flag("d")!}")
   println("out=${args.option("out")! ?? "none"}")
   println("positional=${list.join(args.positional(["out"])!, ",")}")
   println("unnamed=${list.join(args.positional([])!, ",")}")

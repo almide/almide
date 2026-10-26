@@ -22,7 +22,7 @@ effect fn main() -> Unit = {
   note("a")
   note("b")
   println(int.to_string(list.len(seen)))
-  println(list.get_or(seen, 1, "-"))
+  println(list.get(seen, 1) ?? "-")
   // (2) Flat-ctor element class: List[Option[Int]] cell
   var acc: List[Int?] = []
   let put = (x: Int) => {
@@ -42,5 +42,5 @@ effect fn main() -> Unit = {
   log = log + ["outside"]
   mark("b")
   println(int.to_string(list.len(log)))
-  println(list.get_or(log, 0, "-") + list.get_or(log, 2, "-") + list.get_or(log, 3, "-"))
+  println(list.get(log, 0) ?? "-" + list.get(log, 2) ?? "-" + list.get(log, 3) ?? "-")
 }

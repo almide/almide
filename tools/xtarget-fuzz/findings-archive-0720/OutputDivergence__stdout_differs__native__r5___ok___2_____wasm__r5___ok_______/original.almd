@@ -7,7 +7,7 @@ fn main() -> Unit = {
   let v4: Result[String, String] = ok(r0)
   let r5: Result[String, String] = v4
   let s6: Result[Float, String] = ok(0.3)
-  let r8: Float = (if false then math.fpow(result.unwrap_or_else(s6, ((tmp7) => 0.3)), 1000000.0) else 0.000001)
+  let r8: Float = (if false then float.pow(result.unwrap_or_else(s6, ((tmp7) => 0.3)), 1000000.0) else 0.000001)
   let r9: Float = r8
   println("r0 = ${r0}")
   println("r2 = ${r2}")

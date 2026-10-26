@@ -317,32 +317,6 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `process.env(key: String) -> Option[String]`
-
-Get the value of an environment variable, or None if not set
-
-```almd check
-import process
-
-effect fn main() -> Unit = {
-  let home = process.env("HOME") ?? "/tmp"
-  println(home)
-}
-```
-
-### `process.spawn(cmd: String, args: List[String]) -> Result[Int, String]`
-
-Spawn a child process without waiting, return its PID
-
-```almd check
-import process
-
-effect fn main() -> Unit = {
-  let pid = process.spawn("node", ["server.js"])!
-  println("started pid ${pid}")
-}
-```
-
 ### `process.kill(pid: Int, signal: Int) -> Result[Unit, String]`
 
 Send a signal to a process by PID (e.g. 15 for SIGTERM, 9 for SIGKILL). The
@@ -359,62 +333,14 @@ signal goes through the kill(2) system call, never a `kill` program found on
 import process
 
 effect fn main() -> Unit = {
-  let pid = process.spawn("sleep", ["30"])!
-  process.kill(pid, 15)!
-}
-```
-
-### `process.is_alive(pid: Int) -> Bool`
-
-Check if a process with the given PID is still running. A child this process
-spawned is polled through its handle (and reaped once it has exited), so the
-answer turns `false` when the child exits or is killed — a zombie never
-answers `true`. Any other pid is asked of the OS with kill(2) and signal 0
-(a process owned by another user is alive). A pid outside 1..=2147483647 is
-never alive. Under `[permissions] proc`, `kill` must be on the list.
-
-```almd check
-import process
-
-effect fn main() -> Unit = {
-  let pid = process.spawn("sleep", ["30"])!
-  let running = process.is_alive(pid)
-  println(if running then "running" else "exited")
-  process.kill(pid, 15)!
-}
-```
-
-### `process.args() -> List[String]`
-
-The full argv, the program path first.
-
-### `process.stdin_lines() -> Result[List[String], String]`
-
-All lines of standard input; an `err` on input that is not UTF-8.
-
-### `process.env(key: String) -> String?`
-
-The value of an environment variable, or `none` if it is not set.
-
-### `process.sleep(ms: Int) -> Unit`
-
-Block for `ms` milliseconds; a negative `ms` is 0.
-
-```almd check
-import process
-
-effect fn main() -> Unit = {
-  let args = process.args()
-  let home = process.env("HOME") ?? "/tmp"
-  let lines = process.stdin_lines()!
-  process.sleep(10)
-  println("${list.len(args)} arg(s), home ${home}, ${list.len(lines)} line(s)")
+  let c = process.start(process.ProcessCommand { cmd: "sleep", args: ["30"] })!
+  process.kill(process.child_pid(c), 15)!
 }
 ```
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (17 functions)
+## Signature index (11 functions)
 
 ```
 // Stdout on exit 0; else err with stderr text.
@@ -469,33 +395,9 @@ effect process.exit(code: Int) -> Never
 // @since 0.12.3 or earlier
 effect process.pid() -> Int
 
-// Full argv, program name at index 0.
-// @since 0.10.3 or earlier
-effect process.args() -> List[String]
-
-// All stdin lines; err on non-UTF-8 input.
-// @since 0.5.0 or earlier
-effect process.stdin_lines() -> List[String]
-
-// Variable value, or none if unset.
-// @since 0.12.3 or earlier
-effect process.env(key: String) -> Option[String]
-
-// Pid of cmd started in the background.
-// @since 0.12.3 or earlier
-effect process.spawn(cmd: String, args: List[String]) -> Int
-
 // Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
 // @since 0.12.3 or earlier
 effect process.kill(pid: Int, signal: Int) -> Unit
-
-// Blocks ms milliseconds; negative is 0.
-// @since 0.20.0 or earlier
-effect process.sleep(ms: Int) -> Unit
-
-// True while pid exists; false for a pid <= 0.
-// @since 0.12.3 or earlier
-effect process.is_alive(pid: Int) -> Bool
 ```
 
 ## Type index (2 types)

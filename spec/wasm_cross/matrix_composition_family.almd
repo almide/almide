@@ -1,18 +1,18 @@
 // @contract: C-161
 // Native's fused matrix entry points are its own compositions, and they run
 // byte-identically on every leg once each leg serves the leaves (#1423 stage
-// 4; stdlib/matrix_fused.almd links them prim-free):
-// - fma / fma3: native's `x*ka + y*kb [+ z*kc]` — two rounded products and a
-//   rounded sum per term, never a fused step — IS add∘scale, zip shape included;
-// - mul_scaled = scale∘mul (the gelu / softmax / norm compositions left the
+// 4; stdlib/matrix_fused.almd links them prim-free). The public fused names
+// left the stdlib in dialect epoch 15, so each cell is now written as the
+// composition itself:
+// - `scale(x, ka) + scale(y, kb) [+ scale(z, kc)]`: two rounded products and a
+//   rounded sum per term, never a fused step, zip shape included;
+// - `scale(a * b, alpha)` (the gelu / softmax / norm compositions left the
 //   stdlib at dialect epoch 14 for package almide/nnlib);
-// - append_rows: an operand with no rows yields the other, else base's rows
-//   then extra's;
-// - linear_f32_row_no_bias: the sequential widen-mul-add dot over the f32
-//   weights in the byte buffer, the all-zero rows(x) × w_rows matrix for an
-//   empty extent, a negative offset read from 0;
-// - the f32 family (C-161's `_f32` constructor aliases, mul_f32 and its scaled
-//   / transposed forms) is the f64 arithmetic on every leg.
+// - `concat_rows([base, extra])`: an operand with no rows yields the other,
+//   else base's rows then extra's;
+// - the f32 spellings (`ones` / `zeros` and `*` with an optional transpose and
+//   scale) are the f64 arithmetic on every leg. (The `linear_f32_row_no_bias`
+//   kernel cells left with the kernel for package almide/nnlib.)
 fn show(tag: String, m: Matrix) -> Unit = {
   let l = matrix.to_lists(m)
   let s = matrix.shape(m)
@@ -35,53 +35,32 @@ fn main() -> Unit = {
     [1.0, 1.0, 1.0]
   ])
   let e = matrix.zeros(0, 0)
-  show("fma", matrix.fma(a, 2.0, c, -3.0))
+  show("fma", matrix.scale(a, 2.0) + matrix.scale(c, -3.0))
   show(
     "fma_zip",
-    matrix.fma(
-      a,
-      1.0,
-      matrix.from_lists([
+    matrix.scale(a, 1.0) + matrix.scale(matrix.from_lists([
         [10.0, 20.0],
         [30.0, 40.0],
         [50.0, 60.0]
-      ]),
-      1.0,
-    ),
+      ]), 1.0),
   )
-  show("fma3", matrix.fma3(a, 2.0, c, -3.0, a, 0.5))
-  show("mul_scaled", matrix.mul_scaled(a, 0.5, b))
-  show("append", matrix.append_rows(a, matrix.from_lists([
+  show("fma3", matrix.scale(a, 2.0) + matrix.scale(c, -3.0) + matrix.scale(a, 0.5))
+  show("mul_scaled", matrix.scale(a * b, 0.5))
+  show("append", matrix.concat_rows([a, matrix.from_lists([
     [7.0, 8.0, 9.0]
-  ])))
-  show("append_base0", matrix.append_rows(e, a))
-  show("append_extra0", matrix.append_rows(a, matrix.zeros(0, 5)))
-  let w = matrix.from_lists([
-    [0.1, 0.25, -3.0],
-    [1.5, 2.0, 0.3],
-    [-0.7, 0.0, 9.0],
-    [1.0, 1.0, 1.0]
-  ])
-  let wb = matrix.to_bytes_f32_le(w)
-  let x = matrix.from_lists([
-    [1.1, 2.2, 3.3],
-    [-0.5, 0.125, 7.0]
-  ])
-  show("lin_f32", matrix.linear_f32_row_no_bias(x, wb, 0, 4, 3))
-  show("lin_f32_off", matrix.linear_f32_row_no_bias(x, wb, 12, 3, 3))
-  show("lin_f32_negoff", matrix.linear_f32_row_no_bias(x, wb, -5, 2, 3))
-  show("lin_f32_rows0", matrix.linear_f32_row_no_bias(x, wb, 0, 0, 3))
-  show("lin_f32_cols0", matrix.linear_f32_row_no_bias(x, wb, 0, 2, 0))
-  let f = matrix.ones_f32(2, 3)
-  let z = matrix.zeros_f32(3, 2)
+  ])]))
+  show("append_base0", matrix.concat_rows([e, a]))
+  show("append_extra0", matrix.concat_rows([a, matrix.zeros(0, 5)]))
+  let f = matrix.ones(2, 3)
+  let z = matrix.zeros(3, 2)
   let fs = matrix.shape(f)
   let zs = matrix.shape(z)
   let z21 = matrix.get(z, 2, 1) ?? -1.0
   println("f32 ctors: ${fs} ${zs} ${z21}")
-  let m1 = matrix.mul_f32(f, matrix.ones_f32(3, 2))
-  let m2 = matrix.mul_f32_scaled(f, 4.0, matrix.ones_f32(3, 2))
-  let m3 = matrix.mul_f32_t(f, matrix.ones_f32(2, 3))
-  let m4 = matrix.mul_f32_t_scaled(f, 0.5, matrix.ones_f32(2, 3))
+  let m1 = f * matrix.ones(3, 2)
+  let m2 = matrix.scale(f * matrix.ones(3, 2), 4.0)
+  let m3 = f * matrix.transpose(matrix.ones(2, 3))
+  let m4 = matrix.scale(f * matrix.transpose(matrix.ones(2, 3)), 0.5)
   let v1 = matrix.get(m1, 1, 1) ?? -1.0
   let v2 = matrix.get(m2, 0, 0) ?? -1.0
   let s3 = matrix.shape(m3)
@@ -90,7 +69,7 @@ fn main() -> Unit = {
   fma_overlap()
 }
 
-// fma / fma3 over operands of different shapes: the result is the overlap
+// the two- and three-term scaled sums over operands of different shapes: the result is the overlap
 // (rows and cols each the shortest operand's), and every cell is native's
 // `x*ka + y*kb [+ z*kc]` — two rounded products and a rounded sum, left to
 // right, never contracted to a fused multiply-add.
@@ -112,46 +91,34 @@ fn fma_overlap() -> Unit = {
     [30.0]
   ])
   let e = matrix.zeros(0, 0)
-  show("ov_1x1_nxn", matrix.fma(one, 2.0, big, 3.0))
-  show("ov_nxn_1x1", matrix.fma(big, 2.0, one, 3.0))
-  show("ov_wide_tall", matrix.fma(wide, 1.0, tall, -1.0))
-  show("ov_tall_big", matrix.fma(tall, 0.5, big, 2.0))
-  show("ov_empty", matrix.fma(e, 1.0, big, 1.0))
-  show("ov_big_empty", matrix.fma(big, 1.0, matrix.zeros(2, 0), 1.0))
-  show("ov_alias", matrix.fma(big, 1.0, big, -1.0))
-  show("ov3_1x1", matrix.fma3(big, 1.0, one, 1.0, big, 1.0))
-  show("ov3_mixed", matrix.fma3(wide, 2.0, big, 1.0, tall, -0.5))
-  show("ov3_empty", matrix.fma3(big, 1.0, big, 1.0, e, 1.0))
+  show("ov_1x1_nxn", matrix.scale(one, 2.0) + matrix.scale(big, 3.0))
+  show("ov_nxn_1x1", matrix.scale(big, 2.0) + matrix.scale(one, 3.0))
+  show("ov_wide_tall", matrix.scale(wide, 1.0) + matrix.scale(tall, -1.0))
+  show("ov_tall_big", matrix.scale(tall, 0.5) + matrix.scale(big, 2.0))
+  show("ov_empty", matrix.scale(e, 1.0) + matrix.scale(big, 1.0))
+  show("ov_big_empty", matrix.scale(big, 1.0) + matrix.scale(matrix.zeros(2, 0), 1.0))
+  show("ov_alias", matrix.scale(big, 1.0) + matrix.scale(big, -1.0))
+  show("ov3_1x1", matrix.scale(big, 1.0) + matrix.scale(one, 1.0) + matrix.scale(big, 1.0))
+  show("ov3_mixed", matrix.scale(wide, 2.0) + matrix.scale(big, 1.0) + matrix.scale(tall, -0.5))
+  show("ov3_empty", matrix.scale(big, 1.0) + matrix.scale(big, 1.0) + matrix.scale(e, 1.0))
   // rounding: 0.1*10 rounds to 1.0 before the sum, so the cell is 0.0 (a
-  // contracted fma would keep 5.55e-17); fma3 sums left to right
+  // contracted fma would keep 5.55e-17); three terms sum left to right
   show(
     "round",
-    matrix.fma(
-      matrix.from_lists([
+    matrix.scale(matrix.from_lists([
         [0.1]
-      ]),
-      10.0,
-      matrix.from_lists([
+      ]), 10.0) + matrix.scale(matrix.from_lists([
         [-1.0]
-      ]),
-      1.0,
-    ),
+      ]), 1.0),
   )
   show(
     "round3",
-    matrix.fma3(
-      matrix.from_lists([
+    matrix.scale(matrix.from_lists([
         [1.0e16]
-      ]),
-      1.0,
-      matrix.from_lists([
+      ]), 1.0) + matrix.scale(matrix.from_lists([
         [1.0]
-      ]),
-      1.0,
-      matrix.from_lists([
+      ]), 1.0) + matrix.scale(matrix.from_lists([
         [-1.0e16]
-      ]),
-      1.0,
-    ),
+      ]), 1.0),
   )
 }

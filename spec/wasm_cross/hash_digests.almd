@@ -13,7 +13,7 @@ fn main() -> Unit = {
   println(int.to_string(hash.fnv1a32(bytes.from_string(""))))
   println(int.to_string(hash.fnv1a32(bytes.from_string("a"))))
   println(int.to_string(hash.fnv1a32(bytes.from_string("foobar"))))
-  println(int.to_string(hash.fnv1a32_bytes(bytes.from_string("hello"))))
+  println(int.to_string(hash.fnv1a32(bytes.from_string("hello"))))
   println(hash.sha256_hex(bytes.from_string("")))
   println(hash.sha256_hex(bytes.from_string("abc")))
   println(hash.sha256_hex(bytes.from_string("The quick brown fox jumps over the lazy dog")))

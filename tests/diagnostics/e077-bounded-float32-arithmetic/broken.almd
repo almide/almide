@@ -3,4 +3,4 @@
 @bounded
 fn double(x: Float32) -> Float32 = x + x
 
-fn main() -> Unit = println(float32.to_string(double(float.to_float32(1.5))))
+fn main() -> Unit = println(float32.to_string(double(float32.from(1.5))))

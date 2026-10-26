@@ -28,7 +28,7 @@ fn main() -> Unit = {
       let obj = value.object([("name", value.string("test")), ("value", value.int(42))])
       var i = 0
       while i < 10000 {
-        let _s = value.stringify(obj)
+        let _s = json.stringify(obj)
         i = i + 1
       }
     },

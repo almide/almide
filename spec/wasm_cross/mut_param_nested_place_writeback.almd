@@ -39,7 +39,7 @@ fn push_s(mut s: String, t: String) -> Unit = {
 }
 
 fn put_m(mut m: Map[String, Int], k: String, v: Int) -> Unit = {
-  map.insert(m, k, v)
+  m = map.set(m, k, v)
 }
 
 fn push_b(mut b: Bytes, v: Int) -> Unit = {

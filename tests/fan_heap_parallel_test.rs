@@ -86,14 +86,14 @@ fn heap_shaped_fans_route_to_the_parallel_runtime_and_print_what_the_sequential_
 const ROW_KERNEL: &str = r#"fn row(v: List[Float], n: Int, i: Int) -> Float = {
   var s = 0.0
   var j = 0
-  while j < n { s = s + v[j] * int.to_float(i + j); j = j + 1 }
+  while j < n { s = s + v[j] * float.from(i + j); j = j + 1 }
   s
 }
 
 fn grow(v: List[Float], i: Int) -> Float = {
   var w = v
-  w = w + [int.to_float(i)]
-  list.len(w) |> int.to_float
+  w = w + [float.from(i)]
+  list.len(w) |> float.from
 }
 
 effect fn rows(v: List[Float], n: Int) -> List[Float] =
@@ -103,7 +103,7 @@ effect fn grown(v: List[Float], n: Int) -> List[Float] =
   fan { list.map(list.range(0, n), (i) => grow(v, i)) }
 
 effect fn main() -> Unit = {
-  let v = list.map(list.range(0, 64), (i) => int.to_float(i) * 0.5)
+  let v = list.map(list.range(0, 64), (i) => float.from(i) * 0.5)
   println("${rows(v, 64)!}")
   println("${grown(v, 4)!}")
 }

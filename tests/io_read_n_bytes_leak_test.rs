@@ -3,7 +3,7 @@
 //! staging block, decoded them into the returned `List[Int]`, and never
 //! released the staging block: one block per
 //! call, so a read-to-EOF loop leaked one per chunk. Found while porting
-//! `process.stdin_lines` to wasm (#3620), whose body reads stdin this way.
+//! the stdin line reader to wasm (#3620), whose body read stdin this way.
 use std::io::Write;
 use std::process::{Command, Stdio};
 

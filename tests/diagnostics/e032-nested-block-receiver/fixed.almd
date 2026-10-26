@@ -1,5 +1,5 @@
 fn main() -> Unit = {
   var buf = bytes.zeros(4)
-  bytes.set_at(buf, 0, 7)
+  bytes.put_u8(buf, 0, 7)
   println(int.to_string(bytes.len(buf)))
 }

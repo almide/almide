@@ -101,7 +101,7 @@ fn serve() -> u16 {
     port
 }
 
-/// The framed family (request / send / request_bytes), served on native,
+/// The framed family (request / send, and send read as raw body bytes), served on native,
 /// the embedded lane and stock p3.
 fn framed_program(port: u16) -> String {
     let base = format!("http://127.0.0.1:{port}");
@@ -119,7 +119,7 @@ effect fn main() -> Unit = {{
   show("response-headers", r)
   show("short", http.request("POST", "{base}/e", "日本語", [("Content-Length", "2")]))
   show("long", http.send(http.new_request("PUT", "{base}/e", "abc", [("content-length", "99")])) |> result.map((r) => "${{int.to_string(http.status(r))}} ${{http.body(r)}}"))
-  show("equal", http.request_bytes("POST", "{base}/e", "xyz", [("CONTENT-LENGTH", "3")]) |> result.map((b) => bytes.to_string_lossy(b)))
+  show("equal", http.send(http.new_request("POST", "{base}/e", "xyz", [("CONTENT-LENGTH", "3")])) |> result.map((r) => bytes.to_string_lossy(http.body_bytes(r))))
   show("empty", http.send(http.new_request("PATCH", "{base}/e", "", [("Content-Length", "5")])) |> result.map((r) => http.body(r)))
   show("get", http.request("GET", "{base}/e", "", [("content-length", "7"), ("X-K", "v")]))
 }}

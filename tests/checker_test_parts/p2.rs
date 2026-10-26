@@ -499,7 +499,7 @@ fn map_with_closure_key_rejected() {
 fn map_with_closure_value_allowed() {
     // A closure is fine as a `Map` *value* — only the key must be comparable.
     has_no_errors(
-        "effect fn main() -> Unit = {\n  var m: Map[String, () -> Unit] = map.new()\n  map.insert(m, \"a\", () => {})\n}"
+        "effect fn main() -> Unit = {\n  var m: Map[String, () -> Unit] = map.new()\n  m[\"a\"] = () => {}\n}"
     );
 }
 

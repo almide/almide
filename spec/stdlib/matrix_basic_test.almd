@@ -42,7 +42,7 @@ test "add is element-wise" {
     [10.0, 20.0],
     [30.0, 40.0]
   ])
-  let c = matrix.add(a, b)
+  let c = a + b
   assert_eq(matrix.get(c, 0, 0), some(11.0))
   assert_eq(matrix.get(c, 1, 1), some(44.0))
 }
@@ -68,7 +68,7 @@ test "mul is matrix multiplication (2x3 @ 3x2 = 2x2)" {
     [0.0, 1.0],
     [1.0, 1.0]
   ])
-  let c = matrix.mul(a, b)
+  let c = a * b
   let (r, col) = matrix.shape(c)
   assert_eq(r, 2)
   assert_eq(col, 2)
@@ -91,7 +91,7 @@ test "mul identity returns same values" {
     [1.0, 0.0],
     [0.0, 1.0]
   ])
-  let r = matrix.mul(a, id)
+  let r = a * id
   assert_eq(matrix.get(r, 0, 0), some(2.0))
   assert_eq(matrix.get(r, 0, 1), some(3.0))
   assert_eq(matrix.get(r, 1, 0), some(4.0))
@@ -107,7 +107,7 @@ test "mul_scaled fuses alpha * A * B" {
     [1.0, 0.0],
     [0.0, 1.0]
   ])
-  let r = matrix.mul_scaled(a, 3.0, b)
+  let r = matrix.scale(a * b, 3.0)
   assert_eq(matrix.get(r, 0, 0), some(3.0))
   assert_eq(matrix.get(r, 0, 1), some(6.0))
   assert_eq(matrix.get(r, 1, 0), some(9.0))
@@ -134,7 +134,7 @@ test "slice_rows extracts row range" {
 test "zeros then mul with ones = zeros" {
   let z = matrix.zeros(3, 3)
   let o = matrix.ones(3, 3)
-  let r = matrix.mul(z, o)
+  let r = z * o
   assert_eq(matrix.get(r, 0, 0), some(0.0))
   assert_eq(matrix.get(r, 2, 2), some(0.0))
 }

@@ -21,7 +21,7 @@ and body of either kind of message: `header`, `header_values`, `headers`,
 `body`, `body_bytes`, `set_header`, `set_body` and `set_body_bytes` take a
 request or a response and give back the same kind. A header list is
 `List[(String, String)]` everywhere — `with_headers`, `new_request`,
-`request`, `request_bytes` and what `headers` returns — in wire order, a
+`request` and what `headers` returns — in wire order, a
 repeated field kept.
 
 The client functions are `effect fn`s that return `Result`. Propagation is
@@ -430,8 +430,8 @@ Hello!
 
 The body as `Bytes`: exactly the UTF-8 bytes of `http.body(m)`. A message
 body is held as text today, so this does not recover bytes a lossy decode
-replaced. For a binary download (an image, audio) use `http.get_bytes` /
-`http.request_bytes`, which return the raw body bytes.
+replaced; a body that is not UTF-8 (an image, audio) is not recovered
+byte for byte.
 
 ```almd run
 import http
@@ -648,14 +648,15 @@ fn main() -> Unit = {
 
 Any complete response is `ok` — a 404 and a 3xx included; `err` is a
 transport failure only. Redirects are never followed: a 3xx and its
-`Location` header are the answer. The one-shot client is a two-by-three grid,
-plus the call handle:
+`Location` header are the answer. The one-shot client is a two-by-two grid,
+plus the call handle; the body as `Bytes` is `http.body_bytes` of the whole
+response:
 
-| | body text | whole response | raw body bytes |
-|---|---|---|---|
-| GET | `http.get(url)` | `http.get_response(url)` | `http.get_bytes(url)` |
-| any method, body and headers | `http.request(method, url, body, headers)` | `http.send(http.new_request(method, url, body, headers))` | `http.request_bytes(method, url, body, headers)` |
-| as a handle, with limits | | `http.start(req, limits)` — see [Per-call limits and cancellation](#per-call-limits-and-cancellation) | |
+| | body text | whole response |
+|---|---|---|
+| GET | `http.get(url)` | `http.get_response(url)` |
+| any method, body and headers | `http.request(method, url, body, headers)` | `http.send(http.new_request(method, url, body, headers))` |
+| as a handle, with limits | | `http.start(req, limits)` — see [Per-call limits and cancellation](#per-call-limits-and-cancellation) |
 
 There is no per-verb function: a POST is `http.request("POST", url, body,
 headers)`, and a POST whose status you need is
@@ -734,7 +735,7 @@ macOS, longer on Linux), with the same text.
 
 | | connect | between reads | whole call | response size |
 |---|---|---|---|---|
-| `get` / `request` / `get_response` / `send` / `get_bytes` / `request_bytes` | 30 s | 30 s | none | 1 GiB |
+| `get` / `request` / `get_response` / `send` | 30 s | 30 s | none | 1 GiB |
 | `http.start` | `total_ms` | `idle_ms` | `total_ms` | none |
 
 - The 30 s defaults are `ALMIDE_HTTP_TIMEOUT_SECS` (`0` = none).
@@ -819,8 +820,8 @@ Python, Go and Node refuse the same input.
 
 #### Proxies (#2819)
 
-Every client path (`get`, `request`, `get_response`, `send`, `get_bytes`,
-`request_bytes`, `http.start`) reads the proxy variables the way curl and
+Every client path (`get`, `request`, `get_response`, `send`,
+`http.start`) reads the proxy variables the way curl and
 reqwest read them:
 
 - `https://` URLs use `HTTPS_PROXY` / `https_proxy`.
@@ -963,39 +964,6 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `http.get_bytes(url: String) -> Result[Bytes, String]`
-
-Send an HTTP GET and return the raw response body as `Bytes` (no UTF-8
-conversion), so binary payloads such as images or TTS audio survive intact.
-The text client — `body` and `body_bytes` included — decodes the body as
-lossy UTF-8, so it corrupts a body that is not UTF-8; `get_bytes` and
-`request_bytes` are the lossless binary download path.
-
-```almd check
-import fs
-import http
-
-effect fn main() -> Unit = {
-  let audio = http.get_bytes("https://tts.example.com/say.mp3")!
-  fs.write_bytes("say.mp3", audio)!
-}
-```
-
-### `http.request_bytes(method: String, url: String, body: String, headers: List[(String, String)]) -> Result[Bytes, String]`
-
-Like `http.request` but returns the raw response body as `Bytes`.
-
-```almd check
-import http
-
-effect fn main() -> Unit = {
-  let url = "https://api.example.com/render"
-  let body = '{"text": "hello"}'
-  let blob = http.request_bytes("POST", url, body, [("Content-Type", "application/json")])!
-  println(int.to_string(bytes.len(blob)))
-}
-```
-
 ## Per-call limits and cancellation
 
 A call can be held as a handle, `HttpCall`, instead of blocking until it
@@ -1063,7 +1031,7 @@ effect fn follow(c: HttpCall, started: Int) -> Result[String, String] = {
   match http.poll(c) {
     some(ok(resp)) => ok("done: ${http.status(resp)}"),
     some(err(e)) => ok(e),
-    none => if env.millis() - started > 3000 then {
+    none => if datetime.now_ms() - started > 3000 then {
       http.cancel(c)
       ok("stopped")
     } else {
@@ -1076,7 +1044,7 @@ effect fn follow(c: HttpCall, started: Int) -> Result[String, String] = {
 effect fn main() -> Unit = {
   let limits = { total_ms: 30 * 60 * 1000, idle_ms: 120 * 1000 }
   let c = http.start(http.new_request("GET", "http://127.0.0.1:8080/events", "", []), limits)!
-  println(follow(c, env.millis())!)
+  println(follow(c, datetime.now_ms())!)
 }
 ```
 
@@ -1112,7 +1080,7 @@ them.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (36 functions)
+## Signature index (34 functions)
 
 ```
 // Serves 0.0.0.0:port forever; handler err is a 500.
@@ -1202,14 +1170,6 @@ effect http.get_response(url: String) -> HttpResponse
 // Sends req to the URL its target names; the whole reply, any status; redirects not followed.
 // @since unreleased
 effect http.send(req: HttpRequest) -> HttpResponse
-
-// Raw body bytes, not UTF-8 decoded.
-// @since 0.27.7 or earlier
-effect http.get_bytes(url: String) -> Bytes
-
-// Raw body bytes for any method and headers.
-// @since 0.27.7 or earlier
-effect http.request_bytes(method: String, url: String, body: String, headers: List[(String, String)]) -> Bytes
 
 // Begins sending req; returns at once with a handle.
 // @since unreleased

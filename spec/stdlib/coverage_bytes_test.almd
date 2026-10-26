@@ -9,7 +9,7 @@ test "bytes.from_string" {
 test "bytes.set" {
   var b = bytes.from_list([10, 20, 30])
   b = bytes.set(b, 1, 99)
-  assert_eq(bytes.get_or(b, 1, 0), 99)
+  assert_eq(bytes.get(b, 1) ?? 0, 99)
 }
 
 test "bytes.repeat" {

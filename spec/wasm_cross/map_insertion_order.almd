@@ -33,7 +33,7 @@ fn main() -> Unit = {
   // insert (mutable, in-place) preserves order across its own grow.
   var mp: Map[String, Int] = [:]
   for n in list.range(0, 20) {
-    map.insert(mp, "i${int.to_string(n)}", n)
+    mp = map.set(mp, "i${int.to_string(n)}", n)
   }
   println("insert-keys: [${list.join(map.keys(mp), ",")}]")
   // remove preserves the survivors' order.

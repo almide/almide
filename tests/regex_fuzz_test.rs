@@ -199,8 +199,8 @@ fn render_call(op: &str, pat: &str, hay: &str) -> String {
         "is_match" => format!("  println(b2s(regex.is_match(regex.new({p}), {h})))\n"),
         "full_match" => format!("  println(b2s(regex.is_full_match(regex.new({p}), {h})))\n"),
         "find" => format!("  println(ostr(regex.find(regex.new({p}), {h})))\n"),
-        "find_all" => format!("  println(\"[\" + string.join(regex.find_all(regex.new({p}), {h}), \"|\") + \"]\")\n"),
-        "split" => format!("  println(\"[\" + string.join(regex.split(regex.new({p}), {h}), \"|\") + \"]\")\n"),
+        "find_all" => format!("  println(\"[\" + list.join(regex.find_all(regex.new({p}), {h}), \"|\") + \"]\")\n"),
+        "split" => format!("  println(\"[\" + list.join(regex.split(regex.new({p}), {h}), \"|\") + \"]\")\n"),
         "captures" => format!("  println(olist(regex.captures(regex.new({p}), {h})))\n"),
         "replace" => format!("  println(\"<\" + regex.replace(regex.new({p}), {h}, {r}) + \">\")\n"),
         "replace_first" => format!("  println(\"<\" + regex.replace_first(regex.new({p}), {h}, {r}) + \">\")\n"),
@@ -214,7 +214,7 @@ import regex
 fn b2s(b: Bool) -> String = if b then \"T\" else \"F\"
 fn ostr(o: Option[String]) -> String = match o {{ some(s) => s, none => \"NONE\" }}
 fn olist(o: Option[List[String?]]) -> String =
-  match o {{ some(xs) => \"[\" + string.join(xs |> list.map((x) => x ?? \"\"), \"|\") + \"]\", none => \"NONE\" }}
+  match o {{ some(xs) => \"[\" + list.join(xs |> list.map((x) => x ?? \"\"), \"|\") + \"]\", none => \"NONE\" }}
 
 fn main() -> Unit = {{
 ";

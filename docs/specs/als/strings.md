@@ -61,9 +61,9 @@ Contracts: C-018, C-019。
 
 ## ALS-S4 バイト列との相互変換
 
-`string.from_bytes` は **UTF-8 lossy デコード**（不正シーケンスは U+FFFD に
-置換、`String::from_utf8_lossy` と同一の置換規則）。`string.to_bytes` は
-UTF-8 バイト列をそのまま返し、有効な文字列に対して `from_bytes ∘ to_bytes`
+`bytes.to_string_lossy` は **UTF-8 lossy デコード**（不正シーケンスは U+FFFD に
+置換、`String::from_utf8_lossy` と同一の置換規則）。`bytes.from_string` は
+UTF-8 バイト列をそのまま返し、有効な文字列に対して `to_string_lossy ∘ from_string`
 は恒等。
 `string.byte_slice(s, start, end)` は UTF-8 バイト単位の半開区間をコピーし、
 両端がコードポイント境界かつ `0 <= start <= end <= バイト長` の場合だけ

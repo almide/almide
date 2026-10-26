@@ -1,3 +1,0 @@
-expects_code = "E006"
-expects_error = "cannot call effect function 'process.env' from a pure function"
-hint_substring = "effect fn"

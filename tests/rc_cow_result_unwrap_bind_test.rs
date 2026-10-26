@@ -2,14 +2,13 @@
 //! `Bytes` (an RcCow-represented type) inside a `Result` must be bindable
 //! through `!` — `let b = f(...)!` — and build natively.
 //!
-//! `almide check` was green and rustc red for `http.get_bytes` /
-//! `http.request_bytes`: the binding is typed `AlmideRcCow<Vec<u8>>` (the
-//! Almide `Bytes` shape), the intrinsic returns `Result<Vec<u8>, String>`,
-//! and the #617 glue that wraps a raw runtime result decided "is this a
-//! native runtime symbol" by the `almide_rt_` prefix alone. The two http
-//! intrinsics are spelled `almide_http_*` (the older runtime spelling, shared
-//! with json and regex), so the `?` handed the binding a bare `Vec<u8>`
-//! (E0308). Every `almide_rt_` sibling in the table below already glued.
+//! `almide check` was green and rustc red for the two http raw-body clients
+//! (since removed for `http.body_bytes` of a response): the binding is typed
+//! `AlmideRcCow<Vec<u8>>` (the Almide `Bytes` shape), the intrinsic returned
+//! `Result<Vec<u8>, String>`, and the #617 glue that wraps a raw runtime
+//! result decided "is this a native runtime symbol" by the `almide_rt_`
+//! prefix alone, so the `?` handed the binding a bare `Vec<u8>` (E0308).
+//! Every `almide_rt_` sibling in the table below already glued.
 //!
 //! The table is the closed set of PUBLIC stdlib fns declared
 //! `-> Result[..Bytes.., _]` (`grep -n '-> Result\[.*Bytes' stdlib/<module>.almd`,
@@ -49,12 +48,6 @@ const ROWS: &[Row] = &[
     Row { tag: "base64.decode_url", imports: &["base64"], call: "base64.decode_url(\"AQI=\")" },
     Row { tag: "hex.decode", imports: &["hex"], call: "hex.decode(\"0102\")" },
     Row { tag: "fs.read_bytes", imports: &["fs"], call: "fs.read_bytes(\"/nonexistent/2497\")" },
-    Row { tag: "http.get_bytes", imports: &["http"], call: "http.get_bytes(\"http://127.0.0.1:9/\")" },
-    Row {
-        tag: "http.request_bytes",
-        imports: &["http"],
-        call: "http.request_bytes(\"GET\", \"http://127.0.0.1:9/\", \"\", [])",
-    },
     // The handle readers take an opaque handle, so the placeholder builds one.
     Row { tag: "io.read", imports: &["io", "net"], call: "io.read(net.tcp_connect(\"127.0.0.1\", 9)!, 1)" },
     Row { tag: "io.read_exact", imports: &["io"], call: "io.read_exact(io.stdin()!, 1)" },
@@ -153,39 +146,5 @@ fn every_result_bytes_fn_binds_through_bang_and_builds_natively() {
         "`let b = f(...)!` over a Result[Bytes, _] stdlib fn must build natively (#2497); {} row(s) failed:\n{}",
         failed.len(),
         failed.join("\n")
-    );
-}
-
-/// The exact #2497 repro, with the generated line that carried the E0308
-/// pinned by shape: the `?`-unwrapped intrinsic result is wrapped into the
-/// binding's `AlmideRcCow` before the binding sees it.
-#[test]
-fn http_get_bytes_bang_binding_is_glued_into_the_rc_cow_shape() {
-    let src = "import http\n\neffect fn main() -> Unit = {\n  let b = http.get_bytes(\"http://127.0.0.1:9/\")!\n  println(int.to_string(bytes.len(b)))\n}\n";
-    let dir = std::env::temp_dir().join(format!("almide-2497-emit-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("mk temp dir");
-    let path = dir.join("p.almd");
-    std::fs::write(&path, src).expect("write source");
-    let out = Command::new(almide_bin())
-        .arg(&path)
-        .args(["--target", "rust"])
-        .output()
-        .expect("spawn almide emit");
-    let _ = std::fs::remove_dir_all(&dir);
-    assert!(out.status.success(), "emit failed:\n{}", String::from_utf8_lossy(&out.stderr));
-    let rust = String::from_utf8_lossy(&out.stdout);
-    // The runtime's own `pub fn almide_http_get_bytes(` is spliced above the
-    // program; the binding is the `let` that CALLS it.
-    let bind = rust
-        .lines()
-        .find(|l| l.trim_start().starts_with("let ") && l.contains("almide_http_get_bytes("))
-        .unwrap_or_else(|| panic!("no binding line calls almide_http_get_bytes:\n{rust}"));
-    // The glue names its value type since the generic-producer fix
-    // (`AlmideRcCow::<Vec<u8>>::from(..)`); the bare spelling is the same glue.
-    assert!(
-        bind.contains("AlmideRcCow::from")
-            || bind.contains("AlmideRcCow::<Vec<u8>>::from")
-            || bind.contains("AlmideRcCow::new"),
-        "the `?`-unwrapped Vec<u8> must be glued into the AlmideRcCow binding (#2497), got:\n{bind}"
     );
 }

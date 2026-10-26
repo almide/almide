@@ -22,9 +22,9 @@ fn fdiv(a: Float64, b: Float64) -> Float64 = a / b
 
 fn fneg(a: Float64) -> Float64 = -a
 
-fn i(n: Int) -> Int64 = int.to_int64(n)
+fn i(n: Int) -> Int64 = int64.from(n)
 
-fn f(x: Float) -> Float64 = float.to_float64(x)
+fn f(x: Float) -> Float64 = float64.from(x)
 
 test "Int64 arithmetic operators" {
   assert_eq(int64.to_string(add(i(2), i(3))), "5")

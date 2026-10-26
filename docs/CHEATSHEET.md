@@ -74,7 +74,7 @@ type Event: Codec = | Click(Int, Int) | Scroll{dy: Int} | Quit
 // Event.encode(Quit)             → {"Quit": null}
 ```
 Skip `: Codec` only for variants that never serialize
-(internal enums like `Endian` in `stdlib/bytes.almd`). Every other
+(internal enums a program never writes out). Every other
 variant should opt in — the roundtrip code is LLM-error prone when
 hand-written.
 
@@ -190,9 +190,9 @@ fn main() -> Unit = {
 ```
 Caller must pass a `var` binding (`let`, a non-`mut` parameter or a temporary
 is E032). `mut` can be on any parameter, any position. This is how every
-in-place stdlib op works (`list.push`, `list.pop`, `list.clear`, `map.insert`,
-`map.delete`, `map.clear`, `string.push`, `string.clear`, and the whole `bytes` writer family — `push`, `append_*`,
-`put_*`, `write_*`, `fill`, `clear`, `copy_from`): the receiver is a `mut`
+in-place stdlib op works (`list.push`, `list.pop`, `list.clear`, `map.clear`,
+`string.push`, `string.clear`, and the whole `bytes` writer family — `push`, `append_*`,
+`put_*`, `fill`, `clear`, `copy_from`): the receiver is a `mut`
 parameter, so a local buffer is a `var` and a helper that writes its caller's
 buffer declares `mut b: Bytes`. Value semantics otherwise: `let c = a` copies,
 and a callee cannot reach its caller's binding through a plain parameter.
@@ -211,7 +211,7 @@ A user-declared effect fn is **always fallible**: a call yields
 `Result[T, String]`, even when the body cannot fail. `-> T` is the canonical
 spelling — the `effect` already says it can fail.
 
-A pure `fn` may still call `println`, `eprintln`, `panic` and `assert` / `assert_eq` / `assert_ne`: they write or abort, never read, and do not make the fn `effect` (ADR-0022). Every other effect (`fs`, `env`, `io.*`, `http`, `fan`, …) from a pure fn is E006. The stdlib readers are effect fns too: `io.read` / `io.read_exact` / `io.read_to_end` on `io.stdin()!`, `process.args` and the `args` readers (`args.flag`, `args.option`, `args.option_or`, `args.positional`, `args.positional_at`, `args.raw`) read stdin or argv, so they need an `effect fn` caller like `io.read_line` and `env.args` do (dialect epoch 8; a pure fn calling one is E006). The ones returning `String?` (`args.option`, `args.positional_at`) take `!` before a default — `args.positional_at(0)! ?? "in.txt"`: `!` propagates the error, `??` defaults the none (#3522).
+A pure `fn` may still call `println`, `eprintln`, `panic` and `assert` / `assert_eq` / `assert_ne`: they write or abort, never read, and do not make the fn `effect` (ADR-0022). Every other effect (`fs`, `env`, `io.*`, `http`, `fan`, …) from a pure fn is E006. The stdlib readers are effect fns too: `io.read` / `io.read_exact` / `io.read_to_end` on `io.stdin()!`, `env.args` and the `args` readers (`args.has_flag`, `args.option`, `args.positional`) read stdin or argv, so they need an `effect fn` caller like `io.read_line` does (dialect epoch 8; a pure fn calling one is E006). The one returning `String?` (`args.option`) takes `!` before a default — `args.option("out")! ?? "out.txt"`: `!` propagates the error, `??` defaults the none (#3522).
 
 Read the `!` on an effect call like Swift's `await`: it marks the point where
 the world is touched, whether or not this particular call can fail (Almide has
@@ -901,8 +901,8 @@ caller. For bytes, read a handle: `io.read(io.stdin()!, n)!`, `io.read_to_end(io
 ## Entry point
 ```
 effect fn main() -> Unit = {
-  let args = process.args()              // command-line args (Go-style)
-  let name = list.get(args, 1) ?? "world"
+  let args = env.args()              // command-line args, without the program name
+  let name = list.get(args, 0) ?? "world"
   let content = fs.read_text("config.txt")!   // propagate error with !
   println("Hello, ${name}: ${content}")
 }
@@ -923,7 +923,7 @@ on Windows.
 let path = fs.create_temp_file("report")!
 fs.write_text(path, data)!
 ```
-Command-line arguments are accessed via `process.args()` (not main parameters).
+Command-line arguments are accessed via `env.args()` (not main parameters); argv[0], the program name, is not in the list.
 
 ## Operators (precedence high→low)
 `. () [] ! ? ?. ??` (postfix) > `not -` (prefix) > `>>` > `^` (power) > `* / %` > `+ -` > `..< ...` > `|>` > `== != < > <= >=` (non-assoc) > `and` > `or`
@@ -962,7 +962,6 @@ Full function signatures: [docs/stdlib/](stdlib/)
 | [bytes](stdlib/bytes.md) | Binary data | auto-imported | 67 |
 | [matrix](stdlib/matrix.md) | 2D matrix operations | auto-imported | 39 |
 | [testing](stdlib/testing.md) | Test assertions | `import testing` | 7 |
-| [error](stdlib/error.md) | Error construction | auto-imported | 3 |
 | [fs](stdlib/fs.md) | File system | `import fs` | 24 |
 | [env](stdlib/env.md) | Environment and system | `import env` | 9 |
 | [process](stdlib/process.md) | Child processes (`process.ProcessCommand` + `output` / `run` / `start`), exit, signals | `import process` | 17 |
@@ -994,7 +993,7 @@ fn main() -> Unit = {
     ok(_) => println("valid"),
     err(reason) => println(reason),
   }
-  println(regex.replace_with(digits, "a1b22", (cs) => "<${list.get_or(cs, 0, none) ?? ""}>"))
+  println(regex.replace_with(digits, "a1b22", (cs) => "<${(list.get(cs, 0) ?? none) ?? ""}>"))
 }
 ```
 
@@ -1063,7 +1062,7 @@ fn Event.encode(e: Event) -> Value = match e {
   S(s) => value.merge(Scroll.encode(s), value.object([("type", value.string("scroll"))])),
 }
 fn Event.decode(v: Value) -> Result[Event, String] = {
-  let tag = value.as_string(value.field(v, "type")!)!
+  let tag = value.as_string(value.get(v, "type")!)!
   match tag {
     "click"  => result.map(Click.decode(v), (c) => C(c)),
     "scroll" => result.map(Scroll.decode(v), (s) => S(s)),
@@ -1191,9 +1190,9 @@ compatibility only; `--profile critical` refuses them (E100).
 
 - `bytes`: typed byte IO is one matrix — `get_<t>(b, pos) -> T?` reads at a position (none out of range), `next_<t>(b, pos) -> (T?, next_pos)` reads and advances (the position stays when nothing is read), `put_<t>(b, pos, x)` overwrites in place (a window outside the buffer aborts), `append_<t>(b, x)` grows; `get_<t>_array(b, pos, count) -> List[T]?` for bulk. Every type of 2+ bytes carries `_le` / `_be`; `<t>` ∈ `u8|i8|u16|i16|u32|i32|i64|f16|f32|f64|bool` (no u64: `get_i64_*` reads the same bits). `bytes.new()` is empty, `bytes.zeros(n)` is n zero bytes.
 - `matrix` holds the generic dense ops; the neural-network kernels (`gelu`, `softmax_rows`, attention, RoPE, norms, Q1_0/Q8_0, Qwen3 blocks) are package `almide/nnlib` and the OpenAI / Anthropic streaming clients package `almide/llm` since dialect epoch 14 (`import nnlib`, `nnlib.gelu(m)`).
-- `matrix`: row-shaped ops use `_rows` suffix (`slice_rows`, `gather_rows`); singular `_row` when an op consumes/produces *one* row (`linear_row`, `dot_row`, `broadcast_add_row`); column ops use `_cols` (`split_cols_even`, `concat_cols`).
+- `matrix`: row-shaped ops use `_rows` suffix (`slice_rows`, `gather_rows`); singular `_row` when an op consumes/produces *one* row (`dot_row`, `broadcast_add_row`); column ops use `_cols` (`split_cols_even`, `concat_cols`).
 - `from_X` builds from another representation, `to_X` is its inverse (e.g. `from_bytes_f64_le` ↔ `to_bytes_f64_le`).
-- sized integers (`int8`…`int64`, `uint8`…`uint64`, plus `int` = i64): `x.to_<dst>()` truncates (Rust `as` semantics); every **lossy** pair also has `to_<dst>_checked` → `Option` (None on overflow) and `to_<dst>_saturating` (clamp) — lossless pairs have only the plain form. Every carrier has `min_value()`/`max_value()`. Widening is `int.from_<src>(x)`; the one lossy widening `UInt64 → Int` has `int.from_uint64_checked/_saturating`.
+- numeric conversions are named after the type they build (`int`, `float`, `int8`…`int64`, `uint8`…`uint64`, `float32`, `float64`): `T.from(x)` takes any numeric `x` and aborts when the value is not a `T` (a Float is truncated toward zero first); `T.from_checked(x)` → `Option` (`none` unless `T` holds x exactly); `T.from_saturating(x)` clamps (NaN 0); `T.from_wrapping(x)` keeps the low bits of an integer (two's complement). E.g. `float.from(n)`, `int.from_saturating(f)`, `uint8.from_wrapping(n)`. Every integer carrier has `min_value()`/`max_value()`.
 
 ## Common mistakes (DO NOT)
 - `list[1, 2, 3]` → **WRONG**. Write `[1, 2, 3]`. `list` is a module, not a type constructor
@@ -1232,13 +1231,13 @@ compatibility only; `--profile critical` refuses them (E100).
 - `net.unix_connect` / `net.unix_send` / `net.shm_create` / … → **WRONG** (moved). `import unix`: `unix.connect`, `unix.write_fds`, `unix.select` (was `unix_wait`), `unix.shm_create`; bytes via `io.read` / `io.write` / `io.close` on the `unix.Fd`
 - `process.exec_status` / `exec_status_timeout` / `exec_in` / `exec_with_stdin` → **WRONG** (removed). One record: `process.output(process.ProcessCommand { cmd: "git", args: ["status"], dir: "repo", stdin: "", timeout_ms: 5000 })!` → `{code, stdout, stderr}`; write the type name so `dir` / `stdin` / `timeout_ms` can be left out
 - `process.run(cmd, args)` / `process.run_in(dir, cmd, args)` / `process.exec_attached` → **WRONG**. `process.run(process.ProcessCommand { cmd: "cargo", args: ["build"] })!` returns the exit code
-- `process.spawn(cmd, args)` / `process.is_alive(pid)` → **WRONG** (removed). `let c = process.start(process.ProcessCommand { cmd, args })!`, then `process.poll(c)!` (`none` while running), `process.wait(c)!`, `process.stop(c, 500)!`, `process.child_pid(c)!`
+- a background child: `let c = process.start(process.ProcessCommand { cmd, args })!`, then `process.poll(c)!` (`none` while running), `process.wait(c)!`, `process.stop(c, 500)!`, `process.child_pid(c)!`
 - `process.exec("sh", ["-c", "git status | head"])` to get a shell → avoid. Programs take argv lists: `process.exec("git", ["status"])!`, and do the piping in Almide
 
 ## Complete example
 ```almide check
 import fs
-import process
+import env
 
 type AppError =
   | NotFound(String)
@@ -1251,15 +1250,15 @@ effect fn greet(name: String) -> Result[Unit, AppError] = {
 }
 
 effect fn main() -> Result[Unit, AppError] = {
-  let args = process.args()
-  let cmd = list.get(args, 1) ?? "help"
+  let args = env.args()
+  let cmd = list.get(args, 0) ?? "help"
   match cmd {
     "greet" => {
-      let name = list.get(args, 2) ?? "world"
+      let name = list.get(args, 1) ?? "world"
       greet(name)
     },
     "read" => {
-      let path = list.get(args, 2) ?? "input.txt"
+      let path = list.get(args, 1) ?? "input.txt"
       let content = fs.read_text(path).map_err((e) => Io(e))!
       println(content)
       ok(())

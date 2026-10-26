@@ -24,7 +24,7 @@ type FetchOutcome =
 
 
 local fn jget(v: Value, key: String) -> Value =
-  result.to_option(value.field(v, key)) ?? value.null()
+  result.to_option(value.get(v, key)) ?? value.null()
 
 local fn jstr(v: Value, key: String) -> Option[String] =
   result.to_option(value.as_string(jget(v, key)))
@@ -70,7 +70,7 @@ local fn classify_errors(errors: List[Value]) -> FetchOutcome = {
   else if list.contains(kinds, "NOT_FOUND") or list.contains(kinds, "FORBIDDEN") then BoardNotFound
   else {
     let messages = list.filter_map(errors, (e) => jstr(e, "message"))
-    FetchError(if list.is_empty(messages) then "graphql error" else string.join(messages, "; "))
+    FetchError(if list.is_empty(messages) then "graphql error" else list.join(messages, "; "))
   }
 }
 

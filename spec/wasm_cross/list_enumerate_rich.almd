@@ -27,5 +27,5 @@ effect fn main() -> Unit = {
     let (i, n) = e
     println("${int.to_string(i)}:${show(n)}")
   }
-  println(show(list.get_or(src, 2, Leaf(0))))
+  println(show(list.get(src, 2) ?? Leaf(0)))
 }

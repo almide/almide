@@ -32,7 +32,7 @@ port = 8080
 
 ### The whole-file readers read regular files of at most 1 GiB
 
-`read_text` / `read_bytes` / `read_lines` / `read_bytes_raw` and their
+`read_text` / `read_bytes` / `read_lines` and their
 `_if_exists` twins read a **regular file** of at most **1 GiB**
 (1073741824 bytes), the same on native, the embedded wasm host and the stock
 WASI legs (contract C-431, #4201):
@@ -330,7 +330,7 @@ erring chunk body handles its own error.
 
 Fold exactly the lines owned by the byte range `[start, end)` — a line
 belongs to the range containing the byte before its first byte — so folding
-a partition of `[0, file_size)` visits every line exactly once.
+a partition of `[0, size)` (the size from `fs.stat`) visits every line exactly once.
 
 ```almd check
 import fs
@@ -342,7 +342,7 @@ effect fn main() -> Unit = {
   let part = fs.fold_lines_range(path, 0, 4096, 0, (acc, line) => acc + 1)!
   println(int.to_string(part))
   // a partition of [0, file_size) visits every line exactly once
-  let size = fs.file_size(path)!
+  let size = fs.stat(path)!.size
   let first = fs.fold_lines_range(path, 0, 4, 0, (acc, line) => acc + 1)!
   let second = fs.fold_lines_range(path, 4, size, 0, (acc, line) => acc + 1)!
   println("${first} + ${second}")
@@ -546,25 +546,6 @@ effect fn main() -> Unit = {
 false
 ```
 
-### `fs.file_size(path: String) -> Result[Int, String]`
-
-Get file size in bytes
-
-```almd run
-import fs
-
-effect fn main() -> Unit = {
-  let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write_bytes("${dir}/data.bin", bytes.from_list([0, 1, 2, 3, 4]))!
-  let size = fs.file_size("${dir}/data.bin")!
-  println(int.to_string(size))
-  fs.remove_all(dir)!
-}
-```
-```output
-5
-```
-
 ### `fs.temp_dir() -> String`
 
 Get the system temporary directory path
@@ -673,28 +654,9 @@ effect fn main() -> Unit = {
 not a symlink
 ```
 
-### `fs.modified_at(path: String) -> Result[Int, String]`
-
-Get file modification time as Unix timestamp (seconds)
-
-```almd run
-import fs
-
-effect fn main() -> Unit = {
-  let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write_text("${dir}/file.txt", "hello")!
-  let ts = fs.modified_at("${dir}/file.txt")!
-  println("${ts > 0}")
-  fs.remove_all(dir)!
-}
-```
-```output
-true
-```
-
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (39 functions)
+## Signature index (36 functions)
 
 ```
 // Whole regular file (<= 1 GiB) as UTF-8; err if missing or not UTF-8.
@@ -793,10 +755,6 @@ effect fs.walk(dir: String) -> List[String]
 // @since 0.5.0 or earlier
 effect fs.remove_all(path: String) -> Unit
 
-// Size in bytes; err if missing.
-// @since 0.5.0 or earlier
-effect fs.file_size(path: String) -> Int
-
 // Host temp dir; a location, not a safe name.
 // @since 0.5.0 or earlier
 effect fs.temp_dir() -> String
@@ -820,14 +778,6 @@ effect fs.create_temp_dir(prefix: String) -> String
 // True for a symlink, even a dangling one.
 // @since 0.6.0 or earlier
 effect fs.is_symlink(path: String) -> Bool
-
-// Mtime in Unix seconds; err if missing.
-// @since 0.6.0 or earlier
-effect fs.modified_at(path: String) -> Int
-
-// Whole regular file (<= 1 GiB) as Bytes; err if missing.
-// @since 0.13.4 or earlier
-effect fs.read_bytes_raw(path: String) -> Bytes
 
 // dir as an FsRoot; err if dir is not a directory.
 // @since unreleased

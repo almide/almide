@@ -22,7 +22,7 @@ test "every partition folds every line exactly once" {
   // lines: "aa"(0..2) "bbb"(3..6) "c"(7..8) "dddd"(9..13), size 14
   fs.write_text(p, "aa\nbbb\nc\ndddd\n")!
   let whole = fs.read_lines(p)!
-  let size = fs.file_size(p)!
+  let size = fs.stat(p)!.size
   let partitions = [
     [0, size],
     [0, 7, size],
@@ -42,7 +42,7 @@ test "no trailing newline still partitions exactly" {
   let p = d + "/tail.txt"
   fs.write_text(p, "one\ntwo\nthree")!
   let whole = fs.read_lines(p)!
-  let size = fs.file_size(p)!
+  let size = fs.stat(p)!.size
   for cuts in [
     [0, 5, size],
     [0, 4, size],
@@ -57,7 +57,7 @@ test "crlf boundary cuts stay exact" {
   let p = d + "/crlf.txt"
   fs.write_text(p, "a\r\nbb\r\nc\r\n")!
   let whole = fs.read_lines(p)!
-  let size = fs.file_size(p)!
+  let size = fs.stat(p)!.size
   for cuts in [
     [0, 2, size],
     [0, 3, size],

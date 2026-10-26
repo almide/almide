@@ -1,42 +1,42 @@
 // Coverage tests for json accessor functions
 import json
 
-test "json.get_string" {
+test "value.get_string" {
   let v = json.parse('{"name": "Alice"}')!
-  assert_eq(json.get_string(v, "name"), some("Alice"))
-  assert_eq(json.get_string(v, "missing"), none)
+  assert_eq(value.get_string(v, "name"), some("Alice"))
+  assert_eq(value.get_string(v, "missing"), none)
 }
 
-test "json.get_int" {
+test "value.get_int" {
   let v = json.parse('{"age": 30}')!
-  assert_eq(json.get_int(v, "age"), some(30))
-  assert_eq(json.get_int(v, "missing"), none)
+  assert_eq(value.get_int(v, "age"), some(30))
+  assert_eq(value.get_int(v, "missing"), none)
 }
 
 // #2476 — Int-only: a Float field is none, even an integral one, never truncated
 // (the `value.as_int` rule); the widening runs one way (get_float takes an Int).
-test "json.get_int on a Float field is none" {
+test "value.get_int on a Float field is none" {
   let v = json.parse('{"f": 2.7, "g": 3.0, "i": 3}')!
-  assert_eq(json.get_int(v, "f"), none)
-  assert_eq(json.get_int(v, "g"), none)
-  assert_eq(json.get_int(v, "i"), some(3))
-  assert_eq(json.get_float(v, "i"), some(3.0))
+  assert_eq(value.get_int(v, "f"), none)
+  assert_eq(value.get_int(v, "g"), none)
+  assert_eq(value.get_int(v, "i"), some(3))
+  assert_eq(value.get_float(v, "i"), some(3.0))
 }
 
-test "json.get_bool" {
+test "value.get_bool" {
   let v = json.parse('{"active": true}')!
-  assert_eq(json.get_bool(v, "active"), some(true))
-  assert_eq(json.get_bool(v, "missing"), none)
+  assert_eq(value.get_bool(v, "active"), some(true))
+  assert_eq(value.get_bool(v, "missing"), none)
 }
 
-test "json.get_float" {
+test "value.get_float" {
   let v = json.parse('{"score": 3.14}')!
-  let r = json.get_float(v, "score")
+  let r = value.get_float(v, "score")
   assert(r != none)
 }
 
-test "json.get_array" {
+test "value.get_array" {
   let v = json.parse('{"items": [1, 2, 3]}')!
-  let r = json.get_array(v, "items")
+  let r = value.get_array(v, "items")
   assert(r != none)
 }

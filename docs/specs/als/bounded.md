@@ -245,7 +245,7 @@ fn quadruple(x: Int) -> Int = double(double(x))
 
 test "@bounded calls @bounded and first-order stdlib" {
   assert_eq(quadruple(5), 20)
-  assert_eq(math.max(quadruple(1), 3), 4)
+  assert_eq(int.max(quadruple(1), 3), 4)
 }
 ```
 

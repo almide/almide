@@ -47,10 +47,10 @@ test "user Box type and recursive enum compile and run together" {
   assert_eq("${t}", "Node(Leaf(1), Node(Leaf(2), Leaf(3)))")
 }
 
-// ── Item 6: List[String] param used by both string.join and list.len ──
+// ── Item 6: List[String] param used by both list.join and list.len ──
 fn summary(xs: List[String]) -> String = {
   let n = list.len(xs)
-  string.join(xs, ",") + "/" + int.to_string(n)
+  list.join(xs, ",") + "/" + int.to_string(n)
 }
 
 test "List[String] param consumed by join and len at once" {

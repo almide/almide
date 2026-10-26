@@ -1,6 +1,6 @@
-import json
+import http
 fn main() -> Unit = {
-  let names = ["b", "a"]
-  let first = list.min(names) ?? "a"
-  println("${json.field(json.root(), first)}")
+  let paths = ["/b", "/a"]
+  let first = list.min(paths) ?? "/a"
+  println("${http.path(http.new_request("GET", first, "", []))}")
 }

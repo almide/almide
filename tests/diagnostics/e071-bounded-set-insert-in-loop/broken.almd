@@ -1,0 +1,9 @@
+// ALS-B4: set.insert inside a counted loop allocates per iteration.
+@bounded
+fn fill() -> Int = {
+  var s: Set[Int] = set.new()
+  for i in 0..<3 { s = set.insert(s, i) }
+  set.len(s)
+}
+
+fn main() -> Unit = println("${fill()}")

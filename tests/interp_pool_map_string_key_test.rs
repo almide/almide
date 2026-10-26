@@ -1,5 +1,5 @@
 //! A self-hosted body the interp's pool tier runs builds a `Map[String, _]`
-//! the way user code does — `map.insert(seen, k, v)` with a repeated key — and
+//! the way user code does — `seen[k] = v` with a repeated key — and
 //! must keep ONE entry per key, as both backends do. The body that first
 //! exposed it was `http.query_params`'s old `__qp_fill`, which handed the third
 //! oracle `["q": "a", "q": "c"]` for `?q=a&q=c`. That decoder is gone
@@ -25,9 +25,9 @@ fn assert_agrees_or_abstains(source: &str, expected: &str) {
 #[test]
 fn a_pool_body_keeps_one_entry_per_repeated_string_key() {
     assert_agrees_or_abstains(
-        "fn main() -> Unit = {\n\
+        "import json\n\nfn main() -> Unit = {\n\
          \x20 let v = value.object([(\"q\", value.string(\"a\")), (\"q\", value.string(\"c\"))])\n\
-         \x20 println(\"${value.keys(v)} ${value.stringify(v)}\")\n\
+         \x20 println(\"${list.map(value.as_object(v) ?? [], (kv) => kv.0)} ${json.stringify(v)}\")\n\
          }\n",
         "[\"q\"] {\"q\":\"c\"}\n",
     );
@@ -36,9 +36,9 @@ fn a_pool_body_keeps_one_entry_per_repeated_string_key() {
 #[test]
 fn a_pool_body_keeps_distinct_string_keys_apart() {
     assert_agrees_or_abstains(
-        "fn main() -> Unit = {\n\
+        "import json\n\nfn main() -> Unit = {\n\
          \x20 let w = value.object([(\"a\", value.int(1)), (\"b\", value.string(\"a b\")), (\"a\", value.int(3))])\n\
-         \x20 println(\"${value.keys(w)} ${value.stringify(w)}\")\n\
+         \x20 println(\"${list.map(value.as_object(w) ?? [], (kv) => kv.0)} ${json.stringify(w)}\")\n\
          }\n",
         "[\"a\", \"b\"] {\"a\":3,\"b\":\"a b\"}\n",
     );

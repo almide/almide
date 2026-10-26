@@ -40,7 +40,7 @@ effect fn main() -> Unit = {
       match json.parse(tc.arguments) {
         err(_) => println("Failed to parse tool arguments"),
         ok(args) => {
-          let path = json.get_string(args, "path") |> option.unwrap_or("examples/csv-to-json.almd")
+          let path = value.get_string(args, "path") |> option.unwrap_or("examples/csv-to-json.almd")
           match fs.read_text(path) {
             err(e) => println("Failed to read file: " + e),
             ok(content) => {

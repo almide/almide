@@ -123,8 +123,8 @@ fn main() -> Unit = {
   let num = regex.new("([0-9])([0-9])?")
   println(regex.replace(num, "a1b22", "#"))
   println(regex.replace_first(num, "a1b22", "$1"))
-  println(regex.replace_with(num, "a1b22", (g) => "<" + (list.get_or(g, 2, none) ?? "-") + ">"))
-  println(regex.replace_first_with(num, "a1b22", (g) => "[" + (list.get_or(g, 0, none) ?? "") + "]"))
+  println(regex.replace_with(num, "a1b22", (g) => "<" + ((list.get(g, 2) ?? none) ?? "-") + ">"))
+  println(regex.replace_first_with(num, "a1b22", (g) => "[" + ((list.get(g, 0) ?? none) ?? "") + "]"))
 }
 ```
 ```output

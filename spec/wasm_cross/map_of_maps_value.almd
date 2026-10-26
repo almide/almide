@@ -14,5 +14,5 @@ fn main() -> Unit = {
   var row: Map[String, Int] = map.new()
   map.set(row, "x", 7)
   map.set(mm, "r1", row)
-  println(int.to_string(map.get_or(map.get_or(mm, "r1", map.new()), "x", 0 - 1)))
+  println(int.to_string(map.get(map.get(mm, "r1") ?? map.new(), "x") ?? (0 - 1)))
 }

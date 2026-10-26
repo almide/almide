@@ -46,7 +46,7 @@ pub enum GenType {
     /// hashable, byte-comparable case).
     Map(Box<GenType>),
     /// A fixed-width number (`Int8` … `UInt64`, `Float32`, `Float64`), built
-    /// from a small Int through its `int.to_<width>` conversion.
+    /// from a small Int through its `<width>.from` conversion.
     Sized(&'static str),
     /// `Bytes`, built with `bytes.from_list` (or `bytes.zeros(n)` when sized).
     Bytes,
@@ -57,8 +57,6 @@ pub enum GenType {
     /// `str` / `bool` / `null` / `array` / `object` (an object of n keys when
     /// sized).
     Value,
-    /// `bytes.Endian`: `LittleEndian` or `BigEndian`. Only ever an argument.
-    Endian,
     /// `Set[elem]`, built with `set.from_list`; the element is a hashable
     /// scalar ([`GenType::is_set_elem`]).
     Set(Box<GenType>),
@@ -140,7 +138,6 @@ impl GenType {
             GenType::Bytes => out.push_str("Bytes"),
             GenType::Matrix => out.push_str("Matrix"),
             GenType::Value => out.push_str("Value"),
-            GenType::Endian => out.push_str("Endian"),
             GenType::Nominal(k) => out.push_str(k),
             GenType::Secret(e) => {
                 out.push_str("Secret[");
@@ -167,7 +164,7 @@ impl GenType {
 
     /// A value of the fixed-width type `name` from the Int expression `n`.
     pub fn sized_literal(name: &str, n: &str) -> String {
-        format!("int.to_{}({n})", name.to_lowercase())
+        format!("{}.from({n})", name.to_lowercase())
     }
 
     /// `true` if a value of this type can be compared with `==` and
@@ -233,7 +230,7 @@ impl GenType {
         match self {
             GenType::Bytes => Some((String::new(), format!("bytes.to_list({v})"))),
             GenType::Matrix => Some((String::new(), format!("matrix.to_lists({v})"))),
-            GenType::Value => Some((String::new(), format!("value.stringify({v})"))),
+            GenType::Value => Some((String::new(), format!("json.stringify({v})"))),
             GenType::Nominal(k) => Some((String::new(), super::nominal::fill(super::nominal::get(k)?.observe, v, 0))),
             GenType::List(e) => Some((String::new(), format!("list.map({v}, {})", inner(e)?))),
             GenType::Option(e) => Some((String::new(), format!("option.map({v}, {})", inner(e)?))),
@@ -313,10 +310,8 @@ impl GenType {
             GenType::Sized(_) => true,
             GenType::Set(e) => e.is_observable(),
             // A Bytes or Matrix value has no string form (E089); a Value is
-            // observed through `value.stringify`.
+            // observed through `json.stringify`.
             GenType::Bytes | GenType::Matrix | GenType::Value => false,
-            // Only ever an argument: never printed.
-            GenType::Endian => false,
             // No string form of its own: observed through its readers.
             GenType::Nominal(_) | GenType::ResultNom(..) => false,
             // Prints `Secret(***)`: observed through `secret.reveal`.
@@ -337,7 +332,6 @@ impl GenType {
             | GenType::Bytes
             | GenType::Matrix
             | GenType::Value => 1,
-            | GenType::Endian
             | GenType::Nominal(_) => 1,
             GenType::List(e)
             | GenType::Option(e)
@@ -388,7 +382,7 @@ mod tests {
 
     /// #3636: the observed image of a non-printable value is a call, and a
     /// call interpolated inside `${…}` whose type is a Result is E041
-    /// (base64.decode, hex.decode, json.parse, value.field, value.as_array in
+    /// (base64.decode, hex.decode, json.parse, value.as_array in
     /// the inspection diamond). It is bound to a typed `let` first.
     #[test]
     fn a_non_printable_value_is_bound_to_a_typed_let_before_it_is_printed() {
@@ -400,7 +394,7 @@ mod tests {
         let p = render_print("v", &GenType::Option(Box::new(GenType::Matrix)));
         assert!(p.starts_with("let v_o: Option[List[List[Float]]] = option.map(v, "), "{p}");
         let p = render_print("w", &GenType::Value);
-        assert_eq!(p, "let w_o: String = value.stringify(w)\n  println(\"w = ${w_o}\")");
+        assert_eq!(p, "let w_o: String = json.stringify(w)\n  println(\"w = ${w_o}\")");
         // A printable value is interpolated as it is.
         assert_eq!(render_print("x", &GenType::Int), "println(\"x = ${x}\")");
     }

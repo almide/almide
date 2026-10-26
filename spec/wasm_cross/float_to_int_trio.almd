@@ -1,8 +1,8 @@
 // @contract: C-414
-// The Float -> Int conversion trio (#4145): float.to_int_checked is some only
+// The Float -> Int conversions (#4145): int.from_checked(x) is some only
 // when the value is an integer in the 64-bit Int range — none for NaN, ±inf,
 // a fractional part, 2^63 and beyond (and 1e400, which reads as inf) — and
-// float.to_int_saturating is float.to_int spelled explicitly: truncate toward
+// int.from_saturating(x) truncates toward
 // zero, clamp to Int min/max, NaN to 0. Edges: ±2^63, the largest double below
 // 2^63, -0.0, fractions on both sides of zero.
 fn opt(o: Int?) -> String = match o {
@@ -14,36 +14,36 @@ fn main() -> Unit = {
   let inf = 1.0 / 0.0
   let nan = 0.0 / 0.0
   let two63 = 9223372036854775808.0
-  println(opt(float.to_int_checked(12.0)))
+  println(opt(int.from_checked(12.0)))
   // some 12
-  println(opt(float.to_int_checked(-12.0)))
+  println(opt(int.from_checked(-12.0)))
   // some -12
-  println(opt(float.to_int_checked(12.9)))
+  println(opt(int.from_checked(12.9)))
   // none
-  println(opt(float.to_int_checked(-12.9)))
+  println(opt(int.from_checked(-12.9)))
   // none
-  println(opt(float.to_int_checked(-0.0)))
+  println(opt(int.from_checked(-0.0)))
   // some 0
-  println(opt(float.to_int_checked(nan)))
+  println(opt(int.from_checked(nan)))
   // none
-  println(opt(float.to_int_checked(inf)))
+  println(opt(int.from_checked(inf)))
   // none
-  println(opt(float.to_int_checked(0.0 - inf)))
+  println(opt(int.from_checked(0.0 - inf)))
   // none
-  println(opt(float.to_int_checked(1e300)))
+  println(opt(int.from_checked(1e300)))
   // none
-  println(opt(float.to_int_checked(two63)))
+  println(opt(int.from_checked(two63)))
   // none
-  println(opt(float.to_int_checked(0.0 - two63)))
+  println(opt(int.from_checked(0.0 - two63)))
   // some -9223372036854775808
-  println(opt(float.to_int_checked(9223372036854774784.0)))
+  println(opt(int.from_checked(9223372036854774784.0)))
   // some 9223372036854774784
-  println(opt(float.to_int_checked(1e18)))
+  println(opt(int.from_checked(1e18)))
   // some 1000000000000000000
-  println("${float.to_int_saturating(12.9)} ${float.to_int_saturating(-12.9)}")
+  println("${int.from_saturating(12.9)} ${int.from_saturating(-12.9)}")
   // 12 -12
-  println("${float.to_int_saturating(nan)} ${float.to_int_saturating(inf)} ${float.to_int_saturating(0.0 - inf)}")
+  println("${int.from_saturating(nan)} ${int.from_saturating(inf)} ${int.from_saturating(0.0 - inf)}")
   // 0 9223372036854775807 -9223372036854775808
   // 9223372036854775807 9223372036854775807
-  println("${float.to_int_saturating(1e300)} ${float.to_int_saturating(two63)}")
+  println("${int.from_saturating(1e300)} ${int.from_saturating(two63)}")
 }

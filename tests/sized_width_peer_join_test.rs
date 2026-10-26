@@ -111,7 +111,7 @@ fn a_sized_value_may_not_be_returned_into_a_canonical_slot() {
         "explicit widening required",
     );
     // The explicit widening is the fix, and it type-checks.
-    assert_accepted("fn f(u: UInt8) -> Int = int.from_uint8(u)");
+    assert_accepted("fn f(u: UInt8) -> Int = int.from(u)");
     // A literal body has no width of its own — it adopts the declared one.
     assert_accepted("fn f() -> Int8 = 5");
     assert_accepted("fn f(u: UInt8) -> UInt8 = u");

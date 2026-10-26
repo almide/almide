@@ -18,14 +18,11 @@ let DOUBLE_PI = PI * 2.0
 fn linear(t: Float) -> Float = t
 
 // ── Power easing (quad/cubic/quart/quint) ──
-fn ease_in_power(t: Float, p: Float) -> Float = math.fpow(t, p)
+fn ease_in_power(t: Float, p: Float) -> Float = float.pow(t, p)
 
-fn ease_out_power(t: Float, p: Float) -> Float = 1.0 - math.fpow(1.0 - t, p)
+fn ease_out_power(t: Float, p: Float) -> Float = 1.0 - float.pow(1.0 - t, p)
 
-fn ease_in_out_power(t: Float, p: Float) -> Float = if t < 0.5 then math.fpow(t * 2.0, p) / 2.0 else 1.0 - math.fpow(
-  t * (0.0 - 2.0) + 2.0,
-  p,
-) / 2.0
+fn ease_in_out_power(t: Float, p: Float) -> Float = if t < 0.5 then float.pow(t * 2.0, p) / 2.0 else 1.0 - float.pow(t * (0.0 - 2.0) + 2.0, p) / 2.0
 
 fn ease_in_quad(t: Float) -> Float = t * t
 
@@ -35,19 +32,19 @@ fn ease_in_out_quad(t: Float) -> Float = ease_in_out_power(t, 2.0)
 
 fn ease_in_cubic(t: Float) -> Float = t * t * t
 
-fn ease_out_cubic(t: Float) -> Float = 1.0 - math.fpow(1.0 - t, 3.0)
+fn ease_out_cubic(t: Float) -> Float = 1.0 - float.pow(1.0 - t, 3.0)
 
 fn ease_in_out_cubic(t: Float) -> Float = ease_in_out_power(t, 3.0)
 
 fn ease_in_quart(t: Float) -> Float = t * t * t * t
 
-fn ease_out_quart(t: Float) -> Float = 1.0 - math.fpow(1.0 - t, 4.0)
+fn ease_out_quart(t: Float) -> Float = 1.0 - float.pow(1.0 - t, 4.0)
 
 fn ease_in_out_quart(t: Float) -> Float = ease_in_out_power(t, 4.0)
 
 fn ease_in_quint(t: Float) -> Float = t * t * t * t * t
 
-fn ease_out_quint(t: Float) -> Float = 1.0 - math.fpow(1.0 - t, 5.0)
+fn ease_out_quint(t: Float) -> Float = 1.0 - float.pow(1.0 - t, 5.0)
 
 fn ease_in_out_quint(t: Float) -> Float = ease_in_out_power(t, 5.0)
 
@@ -66,17 +63,14 @@ fn ease_out_circ(t: Float) -> Float = math.sqrt(1.0 - (t - 1.0) * (t - 1.0))
 fn ease_in_out_circ(t: Float) -> Float = if t < 0.5 then (1.0 - math.sqrt(1.0 - 4.0 * t * t)) / 2.0 else (math.sqrt(1.0 - (0.0 - 2.0 * t + 2.0) * (0.0 - 2.0 * t + 2.0)) + 1.0) / 2.0
 
 // ── Expo ──
-fn ease_in_expo(t: Float) -> Float = if t == 0.0 then 0.0 else math.fpow(2.0, 10.0 * t - 10.0)
+fn ease_in_expo(t: Float) -> Float = if t == 0.0 then 0.0 else float.pow(2.0, 10.0 * t - 10.0)
 
-fn ease_out_expo(t: Float) -> Float = if t == 1.0 then 1.0 else 1.0 - math.fpow(2.0, 0.0 - 10.0 * t)
+fn ease_out_expo(t: Float) -> Float = if t == 1.0 then 1.0 else 1.0 - float.pow(2.0, 0.0 - 10.0 * t)
 
 fn ease_in_out_expo(t: Float) -> Float = if t == 0.0 then 0.0
 else if t == 1.0 then 1.0
-else if t < 0.5 then math.fpow(2.0, 20.0 * t - 10.0) / 2.0
-else (2.0 - math.fpow(
-  2.0,
-  0.0 - 20.0 * t + 10.0,
-)) / 2.0
+else if t < 0.5 then float.pow(2.0, 20.0 * t - 10.0) / 2.0
+else (2.0 - float.pow(2.0, 0.0 - 20.0 * t + 10.0)) / 2.0
 
 // ── Back ──
 fn ease_in_back(t: Float) -> Float = {
@@ -108,7 +102,7 @@ fn ease_in_elastic(t: Float) -> Float = {
     let p = 0.3
     let s = p / 4.0
     let u = t - 1.0
-    0.0 - math.fpow(2.0, 10.0 * u) * math.sin((u - s) * DOUBLE_PI / p)
+    0.0 - float.pow(2.0, 10.0 * u) * math.sin((u - s) * DOUBLE_PI / p)
   }
 }
 
@@ -117,7 +111,7 @@ fn ease_out_elastic(t: Float) -> Float = {
   else {
     let p = 0.3
     let s = p / 4.0
-    math.fpow(2.0, 0.0 - 10.0 * t) * math.sin((t - s) * DOUBLE_PI / p) + 1.0
+    float.pow(2.0, 0.0 - 10.0 * t) * math.sin((t - s) * DOUBLE_PI / p) + 1.0
   }
 }
 
@@ -128,10 +122,10 @@ fn ease_in_out_elastic(t: Float) -> Float = {
     let s = p / 4.0
     if t < 0.5 then {
       let u = 2.0 * t - 1.0
-      0.0 - math.fpow(2.0, 10.0 * u) * math.sin((u - s) * DOUBLE_PI / p) / 2.0
+      0.0 - float.pow(2.0, 10.0 * u) * math.sin((u - s) * DOUBLE_PI / p) / 2.0
     } else {
       let u = 2.0 * t - 1.0
-      math.fpow(2.0, 0.0 - 10.0 * u) * math.sin((u - s) * DOUBLE_PI / p) / 2.0 + 1.0
+      float.pow(2.0, 0.0 - 10.0 * u) * math.sin((u - s) * DOUBLE_PI / p) / 2.0 + 1.0
     }
   }
 }

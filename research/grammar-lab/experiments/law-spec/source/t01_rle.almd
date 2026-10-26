@@ -1,5 +1,5 @@
 // Run-length encoding: "aaab" encodes as "3a1b".
-fn encode(s: String) -> String = group(string.to_list(s)) |> list.map(((c, n)) => "${n}${c}") |> string.join("")
+fn encode(s: String) -> String = group(string.to_list(s)) |> list.map(((c, n)) => "${n}${c}") |> list.join("")
 
 fn group(cs: List[String]) -> List[(String, Int)] = cs |> list.fold(
   [],

@@ -1,5 +1,6 @@
 // wasm:skip — process.start keeps a live child behind a handle, a native runtime table; the wasm legs refuse the family at check time (E081, proofs/target-availability.toml)
 import process
+import env
 
 fn sleeper(timeout_ms: Int) -> process.ProcessCommand = process.ProcessCommand {
   cmd: "perl",
@@ -42,7 +43,7 @@ test "the stdin text reaches the child" {
 
 test "read_new_stdout answers only what is new since the last read" {
   let c = process.start(process.ProcessCommand { cmd: "perl", args: ["-e", '$| = 1; print "a"; sleep 100'] })!
-  process.sleep(500)
+  env.sleep_ms(500)
   assert_eq(process.read_new_stdout(c)!, "a")
   assert_eq(process.read_new_stdout(c)!, "")
   let _ = process.stop(c, 200)

@@ -16,38 +16,6 @@ Program arguments come after `--`:
 almide run app.almd -- --verbose --output=out.txt input.csv
 ```
 
-### `args.raw() -> List[String]`
-
-The argument list as given, argv[0] included.
-
-```almd check
-import args
-
-effect fn main() -> Unit = {
-  let all = args.raw()!
-  println("${all}")
-}
-```
-
-`--` ends option parsing: flags and options are read only from the arguments
-before the first `--`, and every argument after it is positional, a leading
-`-` included — so a file named `-d` is passed safely as `-- -d`.
-
-### `args.flag(name: String) -> Bool`
-
-True when `--name` is present (before `--`). No short form is derived from the
-name: `-d` is neither `--dry-run` nor `--delete`. A one-letter name also
-matches its short spelling, so a program declares a short form by reading it:
-`args.flag("dry-run")! or args.flag("n")!`. Same as `args.has_flag`.
-
-```almd check
-import args
-
-effect fn main() -> Unit = {
-  if args.flag("verbose")! then println("loud") else ()
-}
-```
-
 ### `args.option(name: String) -> Option[String]`
 
 The value of `--name`, accepting both spellings — `--name=value` and
@@ -64,19 +32,6 @@ effect fn main() -> Unit = {
     some(path) => fs.write_text(path, body)!,
     none => println(body),
   }
-}
-```
-
-### `args.option_or(name: String, fallback: String) -> String`
-
-`args.option` with a default.
-
-```almd check
-import args
-
-effect fn main() -> Unit = {
-  let out = args.option_or("output", "out.txt")!
-  println(out)
 }
 ```
 
@@ -100,32 +55,11 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `args.positional_at(i: Int, options: List[String]) -> Option[String]`
-
-The i-th argument of `positional(options)`, or `none` when there are fewer.
-
-```almd check
-import args
-
-effect fn main() -> Unit = {
-  let input = args.positional_at(0, [])! ?? "-"
-  println(input)
-}
-```
-
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (7 functions)
+## Signature index (3 functions)
 
 ```
-// Same as env.args; argv[0] excluded.
-// @since 0.2.0 or earlier
-effect args.raw() -> List[String]
-
-// True on --name before `--`; a one-letter name also matches -name. No short form is derived.
-// @since 0.2.0 or earlier
-effect args.flag(name: String) -> Bool
-
 // True on --name before `--`; a one-letter name also matches -name. No short form is derived.
 // @since unreleased
 effect args.has_flag(name: String) -> Bool
@@ -134,17 +68,9 @@ effect args.has_flag(name: String) -> Bool
 // @since 0.2.0 or earlier
 effect args.option(name: String) -> Option[String]
 
-// option(name), or fallback when absent.
-// @since 0.2.0 or earlier
-effect args.option_or(name: String, fallback: String) -> String
-
 // Args before `--` that are not flags or values of the named options, then all after `--`.
 // @since 0.2.0 or earlier
 effect args.positional(options: List[String]) -> List[String]
-
-// i-th positional arg (see positional); none if out of range.
-// @since 0.2.0 or earlier
-effect args.positional_at(i: Int, options: List[String]) -> Option[String]
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

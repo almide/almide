@@ -8,8 +8,8 @@ fn main() -> Unit = {
   let xs = ["a" + "a", "bb" + ""]
   var c1 = "x" + "y"
   var c2 = "p" + "q"
-  c1 = list.get_or(xs, 0, "d")
-  c2 = list.get_or(xs, 0, "d")
+  c1 = list.get(xs, 0) ?? "d"
+  c2 = list.get(xs, 0) ?? "d"
   println(c1)
   println(c2)
 }

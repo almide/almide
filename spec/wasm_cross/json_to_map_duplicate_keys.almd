@@ -1,15 +1,20 @@
 // @contract: C-380
-// json.to_map builds a Map, and a Map holds one entry per key (almide/almide#3700).
-// An object can repeat a key (value.object accepts it; json.parse refuses it,
-// C-401), and the repeated key must not reach the map twice. It keeps the position of its
-// first occurrence and takes the value of its last, as an upsert per field would.
-// A Str value is taken verbatim; any other value is its value.stringify text. A
-// non-object is none. Every later read of the map (len, get, iteration, equality)
-// then agrees across targets.
+// An object's pairs built into a Map (`value.as_object(v)` then `map.from_list`)
+// hold one entry per key (almide/almide#3700). An object can repeat a key in
+// its source (value.object folds it; json.parse refuses it, C-401), and the
+// repeated key must not reach the map twice. It keeps the position of its
+// first occurrence and takes the value of its last, as an upsert per field
+// would. A non-object is none. Every later read of the map (len, get,
+// iteration, equality) then agrees across targets.
 import json
 
+fn to_map(v: Value) -> Map[String, Value]? = match value.as_object(v) {
+  ok(pairs) => some(map.from_list(pairs)),
+  err(_) => none,
+}
+
 fn show(label: String, v: Value) -> Unit = {
-  match json.to_map(v) {
+  match to_map(v) {
     some(m) => {
       println("${label} ${m} len=${map.len(m)}")
       for (k, x) in m {
@@ -50,7 +55,7 @@ fn main() -> Unit = {
   }
   show("empty", value.object([]))
   show("not-object", value.array([value.int(1)]))
-  let a = json.to_map(value.object([("k", value.int(1)), ("k", value.int(2))])) ?? map.new()
-  let b = json.to_map(value.object([("k", value.int(2))])) ?? map.new()
+  let a = to_map(value.object([("k", value.int(1)), ("k", value.int(2))])) ?? map.new()
+  let b = to_map(value.object([("k", value.int(2))])) ?? map.new()
   println("equal=${a == b}")
 }

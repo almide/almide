@@ -1,5 +1,5 @@
 // Run-length encoding: "aaab" encodes as "3a1b".
-fn encode(s: String) -> String = group(string.to_list(s)) |> list.flat_map(((c, n)) => split_run(c, n)) |> string.join("")
+fn encode(s: String) -> String = group(string.to_list(s)) |> list.flat_map(((c, n)) => split_run(c, n)) |> list.join("")
 
 fn split_run(c: String, n: Int) -> List[String] =
   if n <= 9 then ["${n}${c}"]

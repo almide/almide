@@ -13,9 +13,9 @@ effect fn main() -> Unit = {
   let d = fs.create_temp_dir("qw")!
   let p = d + "/f.txt"
   fs.write_text(p, "hello")!
-  let sz = fs.file_size(p)!
+  let sz = fs.stat(p)!.size
   println("size=${sz}")
-  let m = fs.modified_at(p)!
+  let m = fs.stat(p)!.modified
   println("mt_pos=${m > 1700000000}")
   println("isd=${fs.is_dir(d)} isf=${fs.is_file(p)} isd_f=${fs.is_dir(p)} isf_d=${fs.is_file(d)} miss=${fs.is_file(d + "/nope")}")
   fs.append_text(p, " world")!
@@ -29,7 +29,7 @@ effect fn main() -> Unit = {
     err(_) => println("badcopy=err"),
   }
   let tf = fs.create_temp_file("qwf")!
-  println("tf_exists=${fs.exists(tf)} tf_size=${fs.file_size(tf)!}")
+  println("tf_exists=${fs.exists(tf)} tf_size=${fs.stat(tf)!.size}")
   fs.remove_all(tf)!
   let cw = env.cwd()
   match cw {
@@ -40,7 +40,7 @@ effect fn main() -> Unit = {
     some(v) => println("path_some=${string.len(v) > 0}"),
     none => println("path=none"),
   }
-  let sz_miss = fs.file_size(d + "/nope")
+  let sz_miss = fs.stat(d + "/nope") |> result.map((s) => s.size)
   match sz_miss {
     ok(_) => println("miss=ok"),
     err(_) => println("miss=err"),

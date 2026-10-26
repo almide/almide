@@ -9,9 +9,9 @@ import json
 
 fn main() -> Unit = {
   // #651: \uXXXX BMP escapes (1/2/3-byte UTF-8) and an astral surrogate pair.
-  println(json.get_string(json.parse('{"k":"\\u0041\\u00e9\\u3042"}') ?? value.null(), "k") ?? "MISS")
-  println(json.get_string(json.parse('{"k":"\\uD83D\\uDE00"}') ?? value.null(), "k") ?? "MISS")
-  println(json.get_string(json.parse('{"k":"a\\u0062c"}') ?? value.null(), "k") ?? "MISS")
+  println(value.get_string(json.parse('{"k":"\\u0041\\u00e9\\u3042"}') ?? value.null(), "k") ?? "MISS")
+  println(value.get_string(json.parse('{"k":"\\uD83D\\uDE00"}') ?? value.null(), "k") ?? "MISS")
+  println(value.get_string(json.parse('{"k":"a\\u0062c"}') ?? value.null(), "k") ?? "MISS")
   // #663: -0.0 keeps its sign bit through parse → stringify.
   println(json.stringify(json.parse("-0.0") ?? value.null()))
   // #667: exponent-form numbers are correctly rounded (not off by a ULP).

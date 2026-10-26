@@ -4,16 +4,16 @@
 // assert both an abort and a clean exit, the C-198 split).
 //
 // FAMILY COMPLETENESS. The kernels that index one operand's extent against
-// another's require them EQUAL — `mul` (cols(a) == rows(b)), `linear_row` /
-// `_no_bias` (cols(x) == cols(w), len(bias) == rows(w)), `conv1d`
-// (cols(weight) == in_ch * kernel, len(bias) == out_ch), `concat_cols`
+// another's require them EQUAL — `*` (cols(a) == rows(b)), `concat_cols`
 // (every non-empty member's row count) and `from_lists` (every row's width).
+// (The linear-row and conv1d kernels, pinned here before, left the stdlib at
+// dialect epoch 15 for package almide/nnlib.)
 // Violating any of them was a raw Rust panic natively (exit 101, the form
 // ALS-T6 forbids) against a silent truncation or an out-of-block read on the
 // wasm legs — #2481 / #2482 / #2483.
 //
-// The ELEMENTWISE pair family is deliberately NOT in this rule: `add`,
-// `sub`, `div` and `broadcast_add_row` ZIP-truncate to the shorter operand,
+// The ELEMENTWISE pair family is deliberately NOT in this rule: `+`,
+// `-`, `/` and `broadcast_add_row` ZIP-truncate to the shorter operand,
 // identically on every leg, and those cells are pinned here so the guard work
 // never silently converts them into aborts. (`swiglu_gate`, `silu_mul` and the
 // attention entries left the stdlib at dialect epoch 14, with the activations
@@ -35,33 +35,26 @@ fn main() -> Unit = {
   ])
   let e = matrix.zeros(0, 0)
   // In-domain: the shapes that fit still compute.
-  println("mul=${show(matrix.mul(a, b))}")
-  println("lin=${show(matrix.linear_row(a, a, [0.5, 0.25]))}")
-  println("lin_nb=${show(matrix.linear_row_no_bias(a, a))}")
+  println("mul=${show(a * b)}")
   println("concat=${show(matrix.concat_cols([b, b]))}")
-  println("conv=${show(matrix.conv1d(b, matrix.from_lists([
-    [1.0, 2.0, 3.0, 4.0]
-  ]), [0.5], 2, 1, 0))}")
   // An EMPTY operand answers the degenerate shape, never the abort.
-  println("mul_empty_l=${show(matrix.mul(e, b))}")
-  println("mul_empty_r=${show(matrix.mul(a, e))}")
-  println("lin_empty_x=${show(matrix.linear_row(e, b, [1.0]))}")
-  println("lin_empty_w=${show(matrix.linear_row(a, e, [1.0]))}")
+  println("mul_empty_l=${show(e * b)}")
+  println("mul_empty_r=${show(a * e)}")
   println("concat_empty_member=${show(matrix.concat_cols([b, e]))}")
   println("concat_empty_first=${show(matrix.concat_cols([e, b]))}")
   // An r×0 operand keeps its rows and contracts over nothing.
-  println("mul_rx0=${show(matrix.mul(matrix.zeros(2, 0), e))}")
+  println("mul_rx0=${show(matrix.zeros(2, 0) * e)}")
   // #3651: an empty operand is empty whatever width it was built with — a
   // 0-row matrix reports 0 columns, so no hidden width may reach the
   // inner-dimension check.
-  let e_wide = matrix.mul(e, matrix.from_lists([
+  let e_wide = e * matrix.from_lists([
     [5.0]
-  ]))
+  ])
   println("mul_empty_wide=${show(e_wide)}")
-  println("mul_empty_wide_r=${show(matrix.mul(matrix.from_lists([
+  println("mul_empty_wide_r=${show(matrix.from_lists([
     [1.0]
-  ]), e_wide))}")
-  println("mul_zeros_0x3_r=${show(matrix.mul(a, matrix.zeros(0, 3)))}")
+  ]) * e_wide)}")
+  println("mul_zeros_0x3_r=${show(a * matrix.zeros(0, 3))}")
   // from_lists accepts uniform rows, including 0-wide ones.
   println("from_uniform=${show(matrix.from_lists([
     [1.0, 2.0],
@@ -73,9 +66,9 @@ fn main() -> Unit = {
   ]))}")
   // The ELEMENTWISE pairs keep the zip rule: rows to the shorter operand,
   // cols per row to the shorter row.
-  println("add_zip=${show(matrix.add(a, b))}")
-  println("sub_zip=${show(matrix.sub(a, b))}")
-  println("div_zip=${show(matrix.div(a, b))}")
+  println("add_zip=${show(a + b)}")
+  println("sub_zip=${show(a - b)}")
+  println("div_zip=${show(a / b)}")
   println("bar_short=${show(matrix.broadcast_add_row(a, [10.0]))}")
   println("bar_long=${show(matrix.broadcast_add_row(a, [10.0, 20.0, 30.0, 40.0]))}")
 }

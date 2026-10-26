@@ -26,7 +26,7 @@ def w(name, body):
 
 w("verify.almd", proto + "\n" + common + f"""
 fn check(b: Int) -> Int = {{
-  let x = int.bits_to_float(b)
+  let x = float.from_bits(b)
   let a = float.to_string(x)
   let s = {entry}(x)
   if a == s then 0 else {{
@@ -45,7 +45,7 @@ fn main() -> Unit = {{
 
 w("dump_proto.almd", proto + "\n" + common + f"""
 fn dump(b: Int) -> Int = {{
-  println({entry}(int.bits_to_float(b)))
+  println({entry}(float.from_bits(b)))
   0
 }}
 
@@ -58,7 +58,7 @@ fn main() -> Unit = {{
 
 w("dump_native.almd", common + f"""
 fn dump(b: Int) -> Int = {{
-  println(float.to_string(int.bits_to_float(b)))
+  println(float.to_string(float.from_bits(b)))
   0
 }}
 
@@ -74,7 +74,7 @@ fn main() -> Unit = {{ println({entry}(1.5)) }}
 """)
 
 w("bench_proto.almd", proto + "\n" + common + f"""
-fn conv(b: Int) -> Int = string.len({entry}(int.bits_to_float(b)))
+fn conv(b: Int) -> Int = string.len({entry}(float.from_bits(b)))
 
 fn main() -> Unit = {{
   println(int.to_string(random_bits({seed}, {n}, conv)))
@@ -82,7 +82,7 @@ fn main() -> Unit = {{
 """)
 
 w("bench_std.almd", common + f"""
-fn conv(b: Int) -> Int = string.len(float.to_string(int.bits_to_float(b)))
+fn conv(b: Int) -> Int = string.len(float.to_string(float.from_bits(b)))
 
 fn main() -> Unit = {{
   println(int.to_string(random_bits({seed}, {n}, conv)))

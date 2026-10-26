@@ -29,7 +29,7 @@ fn refused(p: String) -> String = match regex.compile(p) {
 }
 
 fn olist(o: List[String?]?) -> String = match o {
-  some(xs) => "[" + string.join(xs |> list.map((x) => x ?? ""), "|") + "]",
+  some(xs) => "[" + list.join(xs |> list.map((x) => x ?? ""), "|") + "]",
   none => "NONE",
 }
 
@@ -83,18 +83,18 @@ fn main() -> Unit = {
   println(regex.replace_first(regex.new("[0-9]+"), "a1b2c3", "X"))
   println(regex.replace(regex.new("[0-9]+"), "no digits", "X"))
   // ── split edges ──
-  println("[" + string.join(regex.split(regex.new(","), "a,,b,"), "|") + "]")
-  println("[" + string.join(regex.split(regex.new("[,;]"), "a,b;c"), "|") + "]")
-  println("[" + string.join(regex.split(regex.new(","), "hello"), "|") + "]")
-  println("[" + string.join(regex.split(regex.new(""), "abc"), "|") + "]")
-  println("[" + string.join(regex.split(regex.new("\\s+"), "hello   world  foo"), "|") + "]")
+  println("[" + list.join(regex.split(regex.new(","), "a,,b,"), "|") + "]")
+  println("[" + list.join(regex.split(regex.new("[,;]"), "a,b;c"), "|") + "]")
+  println("[" + list.join(regex.split(regex.new(","), "hello"), "|") + "]")
+  println("[" + list.join(regex.split(regex.new(""), "abc"), "|") + "]")
+  println("[" + list.join(regex.split(regex.new("\\s+"), "hello   world  foo"), "|") + "]")
   // ── full_match / find_all ──
   println(b2s(regex.is_full_match(regex.new("[0-9]+"), "123")))
   println(b2s(regex.is_full_match(regex.new("[0-9]+"), "abc123")))
   println(b2s(regex.is_full_match(regex.new(""), "")))
-  println("[" + string.join(regex.find_all(regex.new("[0-9]+"), "a1b22c333"), "|") + "]")
-  println("[" + string.join(regex.find_all(regex.new("\\w+"), "one two  three"), "|") + "]")
-  println("[" + string.join(regex.find_all(regex.new("[本語]"), "日本語日本"), "|") + "]")
+  println("[" + list.join(regex.find_all(regex.new("[0-9]+"), "a1b22c333"), "|") + "]")
+  println("[" + list.join(regex.find_all(regex.new("\\w+"), "one two  three"), "|") + "]")
+  println("[" + list.join(regex.find_all(regex.new("[本語]"), "日本語日本"), "|") + "]")
   // ── empty alternation arms (leading / trailing / middle / triple / nested) ──
   // An empty arm is an empty Seq that matches length-0 at any position. wasm
   // previously dropped TRAILING empty arms (parser appended a spurious atom).
@@ -112,9 +112,9 @@ fn main() -> Unit = {
   // <>
   println(b2s(regex.is_full_match(regex.new("a|"), "")))
   // empty arm full-matches "" → T
-  println("[" + string.join(regex.find_all(regex.new("a|"), "bza"), "|") + "]")
+  println("[" + list.join(regex.find_all(regex.new("a|"), "bza"), "|") + "]")
   // zero-width loop
-  println("[" + string.join(regex.split(regex.new("a|"), "abc"), "|") + "]")
+  println("[" + list.join(regex.split(regex.new("a|"), "abc"), "|") + "]")
   println(olist(regex.captures(regex.new("(a|)"), "b")))
   // group with empty arm → [""]
   println(olist(regex.captures(regex.new("(|a)"), "b")))

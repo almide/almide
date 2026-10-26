@@ -1,4 +1,0 @@
-// The fixed manifest grants `Time`.
-import env
-
-effect fn main() -> Unit = println("${env.millis() > 0}")

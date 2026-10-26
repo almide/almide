@@ -1,73 +1,74 @@
 import value
+import json
 
 // value_test — Value type construction and stringify
 test "value.int" {
   let v = value.int(42)
-  let s = value.stringify(v)
+  let s = json.stringify(v)
   assert_eq(s, "42")
 }
 
 test "value.string" {
   let v = value.string("hello")
-  let s = value.stringify(v)
+  let s = json.stringify(v)
   assert_eq(s.contains("hello"), true)
 }
 
 test "value.bool true" {
   let v = value.bool(true)
-  assert_eq(value.stringify(v), "true")
+  assert_eq(json.stringify(v), "true")
 }
 
 test "value.bool false" {
   let v = value.bool(false)
-  assert_eq(value.stringify(v), "false")
+  assert_eq(json.stringify(v), "false")
 }
 
 test "value.float" {
   let v = value.float(3.14)
-  let s = value.stringify(v)
+  let s = json.stringify(v)
   assert_eq(s.contains("3.14"), true)
 }
 
 test "value.null" {
   let v = value.null()
-  assert_eq(value.stringify(v), "null")
+  assert_eq(json.stringify(v), "null")
 }
 
 test "value.array" {
   let v = value.array([value.int(1), value.int(2)])
-  let s = value.stringify(v)
+  let s = json.stringify(v)
   assert_eq(s.contains("1"), true)
   assert_eq(s.contains("2"), true)
 }
 
 test "value.object" {
   let v = value.object([("name", value.string("Alice"))])
-  let s = value.stringify(v)
+  let s = json.stringify(v)
   assert_eq(s.contains("Alice"), true)
 }
 
 test "value.object nested" {
   let inner = value.object([("x", value.int(1))])
   let outer = value.object([("point", inner)])
-  let s = value.stringify(outer)
+  let s = json.stringify(outer)
   assert_eq(s.contains("point"), true)
 }
 
-test "value.stringify empty array" {
+test "json.stringify empty array" {
   let v = value.array([])
-  assert_eq(value.stringify(v), "[]")
+  assert_eq(json.stringify(v), "[]")
 }
 
-test "value.keys" {
+test "value.as_object" {
   let o = value.object([("a", value.int(1)), ("b", value.int(2))])
-  let ks = value.keys(o)
+  let ks = list.map(value.as_object(o) ?? [], (kv) => kv.0)
   assert_eq(list.len(ks), 2)
   assert_eq(list.contains(ks, "a"), true)
   assert_eq(list.contains(ks, "b"), true)
 }
 
-test "value.keys empty object" {
+test "value.as_object empty object" {
   let o = value.object([])
-  assert_eq(list.len(value.keys(o)), 0)
+  assert_eq(list.len(list.map(value.as_object(o) ?? [], (kv) => kv.0)), 0)
 }

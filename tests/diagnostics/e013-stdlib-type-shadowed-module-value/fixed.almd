@@ -7,6 +7,6 @@ import self.shadow
 
 effect fn main() -> Unit = {
   let v = json.parse("{\"n\": 1}")!
-  let mine = shadow.mk(value.as_int(value.field(v, "n")!)!)
+  let mine = shadow.mk(value.get_int(v, "n") ?? 0)
   println(int.to_string(mine.n))
 }

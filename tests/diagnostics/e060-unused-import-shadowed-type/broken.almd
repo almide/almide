@@ -1,10 +1,10 @@
-// A user `type Endian` shadows the stdlib's (#1837): every bare `Endian`
+// A user `type IpAddr` shadows the stdlib's (#1837): every bare `IpAddr`
 // and `Little` below is the program's own declaration, so they use no
-// import — `import bytes` stays unused (#1853).
-import bytes
+// import — `import net` stays unused (#1853).
+import net
 
-type Endian = | Little | Big
+type IpAddr = | Little | Big
 
-fn f(e: Endian) -> Endian = e
+fn f(e: IpAddr) -> IpAddr = e
 
 fn main() -> Unit = println(match f(Little) { Little => "little", Big => "big" })

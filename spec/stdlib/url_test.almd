@@ -64,9 +64,9 @@ test "parse rejects non-urls and out-of-range ports with reasons" {
 }
 
 test "query_pairs and build_query are a family pair" {
-  assert_eq(url.build_query(url.query_pairs("a=1&b=two")), "a=1&b=two")
-  assert_eq(url.query_pairs(""), [])
-  assert_eq(url.query_pairs("flag&x=1"), [("flag", ""), ("x", "1")])
+  assert_eq(url.build_query(url.parse_query("a=1&b=two") ?? []), "a=1&b=two")
+  assert_eq(url.parse_query("") ?? [], [])
+  assert_eq(url.parse_query("flag&x=1") ?? [], [("flag", ""), ("x", "1")])
   assert_eq(url.build_query([("q", "a b"), ("lang", "ja")]), "q=a%20b&lang=ja")
   assert_eq(url.build_query([]), "")
 }

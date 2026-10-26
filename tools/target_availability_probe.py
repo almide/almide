@@ -79,23 +79,15 @@ SIZED_FLOATS = {"Float32", "Float64"}
 STRING_TVARS = {"E", "F"}
 
 # Cells the interface JSON renders as `{"kind": "unknown"}` — types its
-# emitter does not model (the raw-pointer FFI surface, the f32 matrix, the
-# Never return). Keyed "mod.fn" -> {param name | "return": type node}. A NEW
+# emitter does not model (the raw-pointer FFI surface, the Never return). Keyed "mod.fn" -> {param name | "return": type node}. A NEW
 # unknown cell outside this table is an ERROR line, never a guess.
 RAWPTR = {"kind": "named", "name": "RawPtr"}
-MAT_F32 = {"kind": "named", "name": "Matrix", "args": [{"kind": "named", "name": "Float32"}]}
 NEVER = {"kind": "never"}
 UNMODELED = {
     "bytes.as_mut_ptr": {"return": RAWPTR},
     "bytes.as_ptr": {"return": RAWPTR},
     "bytes.copy_to_ptr": {"ptr": RAWPTR},
     "bytes.from_raw_ptr": {"ptr": RAWPTR},
-    "matrix.zeros_f32": {"return": MAT_F32},
-    "matrix.ones_f32": {"return": MAT_F32},
-    "matrix.mul_f32": {"a": MAT_F32, "b": MAT_F32, "return": MAT_F32},
-    "matrix.mul_f32_scaled": {"a": MAT_F32, "b": MAT_F32, "return": MAT_F32},
-    "matrix.mul_f32_t": {"a": MAT_F32, "b": MAT_F32, "return": MAT_F32},
-    "matrix.mul_f32_t_scaled": {"a": MAT_F32, "b": MAT_F32, "return": MAT_F32},
     "process.exit": {"return": NEVER},
 }
 
@@ -110,9 +102,7 @@ NOMINAL = {
     "Rng": ("random.seeded(1)", "random.seeded", "random"),
     # A capability root over the probe's own working directory.
     "FsRoot": ('fs.open_root(".")!', "fs.open_root", "fs"),
-    "JsonPath": ("json.root()", "json.root", "json"),
     "SafeHtml": ("html.empty()", "html.empty", "html"),
-    "SafePath": ('path.trusted("x")', "path.trusted", "path"),
     "HttpResponse": ('http.response(200, "x")', "http.response", "http"),
     # The call handle (#2631): only `http.start` makes one.
     "HttpCall": ('http.start(http.new_request("GET", "http://127.0.0.1:1/", "", []), { total_ms: 1, idle_ms: 0 })!', "http.start", "http"),
@@ -244,9 +234,6 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
             return ctx.hoist(name, "0")
         if name in SIZED_FLOATS:
             return ctx.hoist(name, "0.0")
-        if name == "Matrix" and [render(a) for a in t.get("args", [])] == ["Float32"]:
-            ctx.ctors.add("matrix.zeros_f32")
-            return "matrix.zeros_f32(1, 1)"
         if name == "RawPtr":
             ctx.ctors.add("bytes.as_ptr")
             return f"bytes.as_ptr({dummy({'kind': 'bytes'}, ctx, types)})"

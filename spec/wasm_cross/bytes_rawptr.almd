@@ -10,7 +10,7 @@ import ffi
 // writes through as_mut_ptr into a fresh buffer, with capacity clamping.
 import ffi
 
-fn row(b: Bytes) -> String = int.to_string(bytes.read_u8(b, 0)) + "," + int.to_string(bytes.read_u8(b, 1)) + "," + int.to_string(bytes.read_u8(b, 2)) + "," + int.to_string(bytes.read_u8(b, 3))
+fn row(b: Bytes) -> String = int.to_string(bytes.get(b, 0) ?? 0) + "," + int.to_string(bytes.get(b, 1) ?? 0) + "," + int.to_string(bytes.get(b, 2) ?? 0) + "," + int.to_string(bytes.get(b, 3) ?? 0)
 
 // #3420: a RawPtr BORROWS the Bytes it points into, so the block outlives
 // the call the pointer is handed to. On wasm each `round_trip*` shape freed
@@ -180,7 +180,7 @@ effect fn main() -> Unit = {
   var small = bytes.zeros(4)
   let m = bytes.copy_to_ptr(src, bytes.as_mut_ptr(small), 2)
   println("m:" + int.to_string(m))
-  println("small01:" + int.to_string(bytes.read_u8(small, 0)) + "," + int.to_string(bytes.read_u8(small, 1)))
+  println("small01:" + int.to_string(bytes.get(small, 0) ?? 0) + "," + int.to_string(bytes.get(small, 1) ?? 0))
   // EMPTY buffer: as_ptr/as_mut_ptr return NULL (no data region exists), and
   // every bridge op through null moves nothing. Before, native handed out
   // Vec's DANGLING sentinel and copy_to_ptr through it was UB (silent heap

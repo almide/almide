@@ -294,10 +294,6 @@ fn sandbox_arg(b: &mut Builder, sig: &Signature, param: &SigType, name: &str) ->
     // ADR-0027 D4: a fixed command set, present at these paths on linux and
     // macos, and no shell: a generated argument list is data, never code.
     const COMMANDS: &[&str] = &["/bin/echo", "/bin/cat", "/usr/bin/true", "/usr/bin/false", "/no/such/command"];
-    // A spawned child shares the program's stdout and runs beside it: what it
-    // prints lands wherever the scheduler puts it, so spawn draws commands
-    // that print nothing.
-    const SILENT: &[&str] = &["/usr/bin/true", "/usr/bin/false", "/no/such/command"];
     const DIRS: &[&str] = &["sub", "empty_dir", ".", "missing_dir"];
     if !sig.effect || *param != SigType::String {
         return None;
@@ -306,7 +302,6 @@ fn sandbox_arg(b: &mut Builder, sig: &Signature, param: &SigType, name: &str) ->
         ("fs", _) => PATHS,
         ("env", _) => ENV_NAMES,
         ("args", _) => ARG_NAMES,
-        ("process", "cmd") if sig.func == "spawn" => SILENT,
         // A child that exits before reading its input races the write
         // (EPIPE or not, by timing, on every leg): the input goes to one that
         // reads it all.
@@ -403,7 +398,6 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
         GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
         GenType::Matrix => matrix_literal(b),
         GenType::Value => value_literal(b, 0),
-        GenType::Endian => b.rng.pick(&["LittleEndian", "BigEndian"]).to_string(),
         GenType::Nominal(k) => nominal_literal(b, k),
         GenType::Secret(inner) => format!("secret.new({})", gen_lambda_body(b, inner)),
         // Compound goals: construct (and hoist if ambiguous).
@@ -418,7 +412,7 @@ fn gen_leaf(b: &mut Builder, goal: &GenType) -> String {
     }
 }
 
-/// A fixed-width number through its `int.to_<width>` conversion (from a
+/// A fixed-width number through its `<width>.from` conversion (from a
 /// non-negative Int, so every width holds it), or `Bytes` from a short list.
 fn sized_or_bytes(b: &mut Builder, goal: &GenType) -> String {
     const SMALL: &[i64] = &[0, 1, 2, 7, 100];
@@ -495,7 +489,6 @@ fn gen_construct(b: &mut Builder, goal: &GenType) -> String {
         | GenType::Bytes
         | GenType::Matrix
         | GenType::Value => gen_leaf(b, goal),
-        | GenType::Endian
         | GenType::Nominal(_)
         | GenType::Secret(_) => gen_leaf(b, goal),
         GenType::Set(elem) => {
@@ -817,7 +810,6 @@ fn gen_lambda_body(b: &mut Builder, goal: &GenType) -> String {
         GenType::Sized(_) | GenType::Bytes => sized_or_bytes(b, goal),
         GenType::Matrix => matrix_literal(b),
         GenType::Value => value_literal(b, 0),
-        GenType::Endian => b.rng.pick(&["LittleEndian", "BigEndian"]).to_string(),
         GenType::Nominal(k) => nominal_literal(b, k),
         GenType::Secret(inner) => format!("secret.new({})", gen_lambda_body(b, inner)),
         GenType::Set(e) => format!("set.from_list([{}])", gen_lambda_body(b, e)),

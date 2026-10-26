@@ -1,5 +1,5 @@
 // path / args — bundled-module coverage.
-// Regression guard: `path.is_absolute` and `args.flag` were `?`-suffixed
+// Regression guard: `path.is_absolute` and `args.has_flag` were `?`-suffixed
 // declarations that stopped parsing when trailing-`?` identifiers were
 // removed; parser error-recovery silently dropped them and no test noticed.
 import path
@@ -21,11 +21,11 @@ test "path.is_absolute" {
   assert_eq(path.is_absolute("relative/path"), false)
 }
 
-test "args.flag on empty argv" {
+test "args.has_flag on empty argv" {
   // The test harness runs with no program args: flag lookups must miss.
   // The readers are effect fns (dialect epoch 13), so a call is propagated
   // with `!` like any effect fn's.
-  assert_eq(args.flag("verbose")!, false)
+  assert_eq(args.has_flag("verbose")!, false)
   assert_eq(args.option("output")!, none)
-  assert_eq(args.option_or("output", "out.txt")!, "out.txt")
+  assert_eq((args.option("output")! ?? "out.txt"), "out.txt")
 }

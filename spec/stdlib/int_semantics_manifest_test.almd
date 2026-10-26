@@ -63,20 +63,16 @@ test "int.parse_radix unit=value" {
   assert_eq("${int.parse_radix("-0xff", 16) ?? 0}", "-255")
 }
 
-test "int.from_hex unit=value" {
-  assert_eq("${int.from_hex("ff") ?? 0}", "255")
+test "int.__raw_to_float unit=value" {
+  assert_eq("${int.__raw_to_float(3)}", "3")
 }
 
-test "int.to_float unit=value" {
-  assert_eq("${int.to_float(3)}", "3")
+test "int.__bits_to_float unit=bit-pattern" {
+  assert_eq("${int.__bits_to_float(4607182418800017408)}", "1")
 }
 
-test "int.bits_to_float unit=bit-pattern" {
-  assert_eq("${int.bits_to_float(4607182418800017408)}", "1")
-}
-
-test "int.bits_to_f32 unit=bit-pattern" {
-  assert_eq("${int.bits_to_f32(1065353216)}", "1")
+test "int.__bits_to_f32 unit=bit-pattern" {
+  assert_eq("${int.__bits_to_f32(1065353216)}", "1")
 }
 
 test "int.abs unit=value" {
@@ -183,153 +179,145 @@ test "int.rotate_left unit=count" {
   assert_eq("${int.rotate_left(int.min_value(), 1)}", "1")
 }
 
-test "int.to_u32 unit=value" {
-  assert_eq("${int.to_u32(0 - 1)}", "4294967295")
+test "int.__to_int8 unit=value" {
+  assert_eq("${int.__to_int8(200)}", "-56")
 }
 
-test "int.to_u8 unit=value" {
-  assert_eq("${int.to_u8(0 - 1)}", "255")
+test "int.__to_int16 unit=value" {
+  assert_eq("${int.__to_int16(40000)}", "-25536")
 }
 
-test "int.to_int8 unit=value" {
-  assert_eq("${int.to_int8(200)}", "-56")
+test "int.__to_int32 unit=value" {
+  assert_eq("${int.__to_int32(4294967296)}", "0")
 }
 
-test "int.to_int16 unit=value" {
-  assert_eq("${int.to_int16(40000)}", "-25536")
+test "int.__to_uint8 unit=value" {
+  assert_eq("${int.__to_uint8(0 - 1)}", "255")
 }
 
-test "int.to_int32 unit=value" {
-  assert_eq("${int.to_int32(4294967296)}", "0")
+test "int.__to_uint16 unit=value" {
+  assert_eq("${int.__to_uint16(0 - 1)}", "65535")
 }
 
-test "int.to_uint8 unit=value" {
-  assert_eq("${int.to_uint8(0 - 1)}", "255")
+test "int.__to_uint32 unit=value" {
+  assert_eq("${int.__to_uint32(0 - 1)}", "4294967295")
 }
 
-test "int.to_uint16 unit=value" {
-  assert_eq("${int.to_uint16(0 - 1)}", "65535")
+test "int.__to_uint64 unit=value" {
+  let u = int.__to_uint64(0 - 1)
+  assert_eq("${int.from_checked(u) ?? (0 - 1)}", "-1")
 }
 
-test "int.to_uint32 unit=value" {
-  assert_eq("${int.to_uint32(0 - 1)}", "4294967295")
+test "int.__raw_to_float32 unit=value" {
+  assert_eq("${float.from(int.__raw_to_float32(3))}", "3")
 }
 
-test "int.to_uint64 unit=value" {
-  let u = int.to_uint64(0 - 1)
-  assert_eq("${int.from_uint64_checked(u) ?? (0 - 1)}", "-1")
+test "int.__to_float64 unit=value" {
+  assert_eq("${float.from(int.__to_float64(3))}", "3")
 }
 
-test "int.to_float32 unit=value" {
-  assert_eq("${float.from_float32(int.to_float32(3))}", "3")
+test "int.__to_int64 unit=value" {
+  assert_eq("${int.__to_int64(0 - 42)}", "-42")
 }
 
-test "int.to_float64 unit=value" {
-  assert_eq("${float.from_float64(int.to_float64(3))}", "3")
+test "int.__from_int8 unit=value" {
+  assert_eq("${int.__from_int8(int8.from_wrapping(0 - 5))}", "-5")
 }
 
-test "int.to_int64 unit=value" {
-  assert_eq("${int.to_int64(0 - 42)}", "-42")
+test "int.__from_int16 unit=value" {
+  assert_eq("${int.__from_int16(int16.from_wrapping(0 - 5))}", "-5")
 }
 
-test "int.from_int8 unit=value" {
-  assert_eq("${int.from_int8(int.to_int8(0 - 5))}", "-5")
+test "int.__from_int32 unit=value" {
+  assert_eq("${int.__from_int32(int32.from_wrapping(0 - 5))}", "-5")
 }
 
-test "int.from_int16 unit=value" {
-  assert_eq("${int.from_int16(int.to_int16(0 - 5))}", "-5")
+test "int.__from_int64 unit=value" {
+  assert_eq("${int.__from_int64(int64.from(0 - 5))}", "-5")
 }
 
-test "int.from_int32 unit=value" {
-  assert_eq("${int.from_int32(int.to_int32(0 - 5))}", "-5")
+test "int.__from_uint8 unit=value" {
+  assert_eq("${int.__from_uint8(uint8.from(200))}", "200")
 }
 
-test "int.from_int64 unit=value" {
-  assert_eq("${int.from_int64(int.to_int64(0 - 5))}", "-5")
+test "int.__from_uint16 unit=value" {
+  assert_eq("${int.__from_uint16(uint16.from(40000))}", "40000")
 }
 
-test "int.from_uint8 unit=value" {
-  assert_eq("${int.from_uint8(int.to_uint8(200))}", "200")
+test "int.__from_uint32 unit=value" {
+  assert_eq("${int.__from_uint32(uint32.from(3000000000))}", "3000000000")
 }
 
-test "int.from_uint16 unit=value" {
-  assert_eq("${int.from_uint16(int.to_uint16(40000))}", "40000")
+test "int.__from_uint64 unit=value" {
+  assert_eq("${int.__from_uint64(uint64.from(7))}", "7")
 }
 
-test "int.from_uint32 unit=value" {
-  assert_eq("${int.from_uint32(int.to_uint32(3000000000))}", "3000000000")
+test "int.__to_int8_checked unit=value" {
+  assert_eq("${int.__to_int8_checked(200) ?? int8.from(0)}", "0")
 }
 
-test "int.from_uint64 unit=value" {
-  assert_eq("${int.from_uint64(int.to_uint64(7))}", "7")
+test "int.__to_int16_checked unit=value" {
+  assert_eq("${int.__to_int16_checked(40000) ?? int16.from(0)}", "0")
 }
 
-test "int.to_int8_checked unit=value" {
-  assert_eq("${int.to_int8_checked(200) ?? int.to_int8(0)}", "0")
+test "int.__to_int32_checked unit=value" {
+  assert_eq("${int.__to_int32_checked(4294967296) ?? int32.from(0)}", "0")
 }
 
-test "int.to_int16_checked unit=value" {
-  assert_eq("${int.to_int16_checked(40000) ?? int.to_int16(0)}", "0")
+test "int.__to_uint8_checked unit=value" {
+  assert_eq("${int.__to_uint8_checked(0 - 1) ?? uint8.from(0)}", "0")
 }
 
-test "int.to_int32_checked unit=value" {
-  assert_eq("${int.to_int32_checked(4294967296) ?? int.to_int32(0)}", "0")
+test "int.__to_uint16_checked unit=value" {
+  assert_eq("${int.__to_uint16_checked(0 - 1) ?? uint16.from(0)}", "0")
 }
 
-test "int.to_uint8_checked unit=value" {
-  assert_eq("${int.to_uint8_checked(0 - 1) ?? int.to_uint8(0)}", "0")
+test "int.__to_uint32_checked unit=value" {
+  assert_eq("${int.__to_uint32_checked(0 - 1) ?? uint32.from(0)}", "0")
 }
 
-test "int.to_uint16_checked unit=value" {
-  assert_eq("${int.to_uint16_checked(0 - 1) ?? int.to_uint16(0)}", "0")
+test "int.__to_uint64_checked unit=value" {
+  assert_eq("${int.from_wrapping(int.__to_uint64_checked(0 - 1) ?? uint64.from(0))}", "0")
 }
 
-test "int.to_uint32_checked unit=value" {
-  assert_eq("${int.to_uint32_checked(0 - 1) ?? int.to_uint32(0)}", "0")
+test "int.__to_float32_checked unit=value" {
+  assert_eq("${float.from(int.__to_float32_checked(16777217) ?? float32.from(0))}", "0")
 }
 
-test "int.to_uint64_checked unit=value" {
-  assert_eq("${int.from_uint64(int.to_uint64_checked(0 - 1) ?? int.to_uint64(0))}", "0")
+test "int.__to_int8_saturating unit=value" {
+  assert_eq("${int.__to_int8_saturating(200)}", "127")
 }
 
-test "int.to_float32_checked unit=value" {
-  assert_eq("${float.from_float32(int.to_float32_checked(16777217) ?? int.to_float32(0))}", "0")
+test "int.__to_int16_saturating unit=value" {
+  assert_eq("${int.__to_int16_saturating(40000)}", "32767")
 }
 
-test "int.to_int8_saturating unit=value" {
-  assert_eq("${int.to_int8_saturating(200)}", "127")
+test "int.__to_int32_saturating unit=value" {
+  assert_eq("${int.__to_int32_saturating(4294967296)}", "2147483647")
 }
 
-test "int.to_int16_saturating unit=value" {
-  assert_eq("${int.to_int16_saturating(40000)}", "32767")
+test "int.__to_uint8_saturating unit=value" {
+  assert_eq("${int.__to_uint8_saturating(0 - 1)}", "0")
 }
 
-test "int.to_int32_saturating unit=value" {
-  assert_eq("${int.to_int32_saturating(4294967296)}", "2147483647")
+test "int.__to_uint16_saturating unit=value" {
+  assert_eq("${int.__to_uint16_saturating(0 - 1)}", "0")
 }
 
-test "int.to_uint8_saturating unit=value" {
-  assert_eq("${int.to_uint8_saturating(0 - 1)}", "0")
+test "int.__to_uint32_saturating unit=value" {
+  assert_eq("${int.__to_uint32_saturating(0 - 1)}", "0")
 }
 
-test "int.to_uint16_saturating unit=value" {
-  assert_eq("${int.to_uint16_saturating(0 - 1)}", "0")
+test "int.__to_uint64_saturating unit=value" {
+  assert_eq("${int.from_wrapping(int.__to_uint64_saturating(0 - 1))}", "0")
 }
 
-test "int.to_uint32_saturating unit=value" {
-  assert_eq("${int.to_uint32_saturating(0 - 1)}", "0")
+test "int.__from_uint64_checked unit=value" {
+  assert_eq("${int.__from_uint64_checked(uint64.from_wrapping(0 - 1)) ?? (0 - 1)}", "-1")
 }
 
-test "int.to_uint64_saturating unit=value" {
-  assert_eq("${int.from_uint64(int.to_uint64_saturating(0 - 1))}", "0")
-}
-
-test "int.from_uint64_checked unit=value" {
-  assert_eq("${int.from_uint64_checked(int.to_uint64(0 - 1)) ?? (0 - 1)}", "-1")
-}
-
-test "int.from_uint64_saturating unit=value" {
-  assert_eq("${int.from_uint64_saturating(int.to_uint64(0 - 1))}", "9223372036854775807")
+test "int.__from_uint64_saturating unit=value" {
+  assert_eq("${int.__from_uint64_saturating(uint64.from_wrapping(0 - 1))}", "9223372036854775807")
 }
 
 test "int.min_value unit=value" {

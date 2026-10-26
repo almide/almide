@@ -40,22 +40,6 @@ Alice
 missing
 ```
 
-### `map.get_or(m: Map[K, V], key: K, default: V) -> V`
-
-Get a value by key, returning a default if the key doesn't exist.
-
-```almd run
-fn main() -> Unit = {
-  let m = map.from_list([("name", "Alice")])
-  println(map.get_or(m, "name", "unknown"))
-  println(map.get_or(m, "email", "unknown"))
-}
-```
-```output
-Alice
-unknown
-```
-
 ### `map.set(m: Map[K, V], key: K, value: V) -> Map[K, V]`
 
 Return a new map with the key set to value. Immutable — does not modify the original.
@@ -324,33 +308,6 @@ fn main() -> Unit = {
 ["alice": 100, "bob": 75]
 ```
 
-### `map.insert(m: Map[K, V], key: K, value: V) -> Unit`
-
-Insert a key-value pair in place. Requires var binding.
-
-```almd run
-fn main() -> Unit = {
-  var m: Map[String, String] = map.new()
-  map.insert(m, "name", "Alice")
-  println("${m}")
-}
-```
-```output
-["name": "Alice"]
-```
-
-### `map.delete(m: Map[K, V], key: K) -> Unit`
-
-Remove a key in place. Requires var binding.
-
-```almd check
-fn main() -> Unit = {
-  var m = map.from_list([("keep", 1), ("temp", 2)])
-  map.delete(m, "temp")
-  println("${m}")
-}
-```
-
 ### `map.clear(m: Map[K, V]) -> Unit`
 
 Remove all entries in place. Requires var binding.
@@ -366,7 +323,7 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (40 functions)
+## Signature index (37 functions)
 
 ```
 // An empty Map[K, V].
@@ -376,10 +333,6 @@ map.new() -> Map[K, V]
 // Value for key, or none when absent.
 // @since 0.5.0 or earlier
 map.get(m: Map[K, V], key: K) -> Option[V]
-
-// Value for key, or default when absent.
-// @since 0.5.0 or earlier
-map.get_or(m: Map[K, V], key: K, default: V) -> V
 
 // Copy with key -> value; an existing key is overwritten and keeps its position.
 // @since 0.5.0 or earlier
@@ -456,14 +409,6 @@ map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]
 // key -> f(old) if present, else init appended.
 // @since 0.57.0
 map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]
-
-// In-place key -> value; an existing key is overwritten and keeps its position.
-// @since 0.9.3 or earlier
-map.insert(mut m: Map[K, V], key: K, value: V) -> Unit
-
-// Removes key in place; no-op when absent.
-// @since 0.9.3 or earlier
-map.delete(mut m: Map[K, V], key: K) -> Unit
 
 // Removes every entry of m in place.
 // @since 0.9.3 or earlier

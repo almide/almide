@@ -4,7 +4,7 @@ fn parse_and_count(data: String) -> Int = {
   match json.parse(data) {
     err(_) => -1,
     ok(v) => {
-      let n = match json.get_array(v, "items") {
+      let n = match value.get_array(v, "items") {
         some(arr) => list.len(arr),
         none => 0,
       }

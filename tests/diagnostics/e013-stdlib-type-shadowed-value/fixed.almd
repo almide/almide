@@ -8,6 +8,6 @@ type Value = { n: Int }
 
 effect fn main() -> Unit = {
   let v = json.parse("{\"n\": 1}")!
-  let mine = Value { n: value.as_int(value.field(v, "n")!)! }
+  let mine = Value { n: value.get_int(v, "n") ?? 0 }
   println(int.to_string(mine.n))
 }

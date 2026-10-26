@@ -1,0 +1,3 @@
+// #4159: `datetime.now_ms` reads the clock, so it is `Time` — a manifest
+// granting `Env` (and `IO` for the print) does not admit it.
+effect fn main() -> Unit = println("${datetime.now_ms() > 0}")

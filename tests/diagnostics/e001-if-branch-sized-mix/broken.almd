@@ -2,7 +2,7 @@
 // other a canonical Int VALUE, so the join needs an explicit conversion.
 fn pick(flag: Bool) -> UInt8 = {
   let fallback = 7
-  if flag then int.to_uint8(1) else fallback
+  if flag then uint8.from(1) else fallback
 }
 
 fn main() -> Unit = println("${pick(true)}")

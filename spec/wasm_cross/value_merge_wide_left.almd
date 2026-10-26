@@ -5,20 +5,22 @@
 // only the FIRST of A's repeats of a key B has takes B's LAST value for it, A's other repeats and the
 // keys B lacks are untouched, and B's new keys append once, at their first position, with their last
 // value.
+import json
+
 fn wide(n: Int) -> Value = value.object(list.range(0, n) |> list.map((i) => if i % 500 == 7 then ("dup", value.int(i)) else ("k${i}", value.int(i))))
 
 effect fn main() -> Unit = {
   let a = wide(2000)
   let b = value.object([("dup", value.string("b1")), ("fresh", value.int(1)), ("k1999", value.bool(true)), ("dup", value.string("b2")), ("fresh", value.int(2))])
   let r = value.merge(a, b)
-  let ks = value.keys(r)
-  println("${list.len(value.keys(a))} ${list.len(ks)}")
+  let ks = list.map(value.as_object(r) ?? [], (kv) => kv.0)
+  println("${list.len(list.map(value.as_object(a) ?? [], (kv) => kv.0))} ${list.len(ks)}")
   println("${list.take(ks, 9)} ${list.drop(ks, 1997)}")
   println("${list.filter(list.enumerate(ks), ((_, k)) => k == "dup" or k == "fresh") |> list.map(((i, _)) => i)}")
-  println(value.stringify(value.pick(r, ["k0", "k1999", "fresh"])))
-  println(value.stringify(value.merge(
+  println(json.stringify(value.pick(r, ["k0", "k1999", "fresh"])))
+  println(json.stringify(value.merge(
     value.object([("x", value.int(1)), ("y", value.int(2)), ("x", value.int(3)), ("z", value.int(4)), ("x", value.int(5))]),
     value.object([("z", value.int(40)), ("x", value.int(10)), ("w", value.int(0)), ("x", value.int(30))]),
   )))
-  println(value.stringify(value.merge(b, a) |> value.pick(["dup", "fresh", "k3"])))
+  println(json.stringify(value.merge(b, a) |> value.pick(["dup", "fresh", "k3"])))
 }

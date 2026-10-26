@@ -34,10 +34,10 @@ const RANGE_OPS: &[(&str, &str)] = &[
     ("take_while", "list.len(list.take_while(cs, is_a))"),
     ("drop_while", "list.len(list.drop_while(cs, is_a))"),
     ("window", "list.len(list.window(cs, 2))"),
-    ("windows", "list.len(list.windows(cs, 2))"),
+    ("windows", "list.len(list.window(cs, 2))"),
     ("chunk", "list.len(list.chunk(cs, 2))"),
     ("get", "string.len(list.get(cs, 1) ?? \"\")"),
-    ("get_or", "string.len(list.get_or(cs, 1, \"\"))"),
+    ("get_or", "string.len(list.get(cs, 1) ?? \"\")"),
     ("first", "string.len(list.first(cs) ?? \"\")"),
     ("last", "string.len(list.last(cs) ?? \"\")"),
     ("find", "string.len(list.find(cs, is_a) ?? \"\")"),
@@ -467,11 +467,11 @@ fn perf_tail_recursion_moves_instead_of_cloning() {
         \n\
         effect fn main() -> Unit = {\n\
         \x20 let xs = list.map(list.range(0, 4000), (i) => \"s${i}\")\n\
-        \x20 let t0 = env.millis()\n\
+        \x20 let t0 = datetime.now_ms()\n\
         \x20 let a = moved(xs, 0) + moved(xs, 0) + moved(xs, 0) + moved(xs, 0) + moved(xs, 0)\n\
-        \x20 let t1 = env.millis()\n\
+        \x20 let t1 = datetime.now_ms()\n\
         \x20 let b = kept(xs, 0) + kept(xs, 0) + kept(xs, 0) + kept(xs, 0) + kept(xs, 0)\n\
-        \x20 let t2 = env.millis()\n\
+        \x20 let t2 = datetime.now_ms()\n\
         \x20 println(\"${a} ${b} ${t1 - t0} ${t2 - t1}\")\n\
         }\n";
     let (_dir, path, rust) = emit_rust("tail_perf.almd", src);

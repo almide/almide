@@ -19,8 +19,8 @@ fn main() -> Unit = {
   println(list.join(lines, ","))
   let ent = map.to_list(m)
   println(int.to_string(list.len(ent)))
-  println(int.to_string(map.get_or(m, "k3", 0 - 1)))
-  println(int.to_string(map.get_or(m, "nope", 0 - 1)))
+  println(int.to_string(map.get(m, "k3") ?? (0 - 1)))
+  println(int.to_string(map.get(m, "nope") ?? (0 - 1)))
   let m2 = map.from_list([("a", 1), ("b", 2), ("a", 3)])
-  println("${int.to_string(map.len(m2))} ${int.to_string(map.get_or(m2, "a", 0))}")
+  println("${int.to_string(map.len(m2))} ${int.to_string(map.get(m2, "a") ?? 0)}")
 }

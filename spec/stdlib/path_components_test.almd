@@ -12,7 +12,7 @@ test "components are the segments of the normalized path" {
 
 test "components of a relative path join back to its normalized form" {
   let p = "a/./b/../c//d"
-  assert_eq(string.join(path.components(p), "/"), path.normalize(p))
+  assert_eq(list.join(path.components(p), "/"), path.normalize(p))
 }
 
 test "relative_to is lexical and never climbs" {

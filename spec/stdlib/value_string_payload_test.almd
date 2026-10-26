@@ -22,7 +22,7 @@ test "a Value payload does not follow a later push on its source" {
 
 test "string payloads survive parse, field reads and stringify" {
   let v = json.parse("{\"name\": \"Ada \\\"L\\\"\", \"tags\": [\"x\", \"y\\n\"]}")!
-  assert_eq(json.get_string(v, "name"), some("Ada \"L\""))
+  assert_eq(value.get_string(v, "name"), some("Ada \"L\""))
   assert_eq(json.stringify(v), "{\"name\":\"Ada \\\"L\\\"\",\"tags\":[\"x\",\"y\\n\"]}")
 }
 

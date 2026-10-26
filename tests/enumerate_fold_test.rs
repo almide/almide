@@ -8,7 +8,7 @@ fn enumerate_fold_preserves_scalar_and_escaping_results() {
     let source = dir.path().join("main.almd");
     std::fs::write(&source, r#"
 fn calc(xs: List[Float]) -> Float =
-  list.fold(list.enumerate(xs), 0.0, (acc, p) => acc + float.from_int(p.0) * p.1)
+  list.fold(list.enumerate(xs), 0.0, (acc, p) => acc + float.from(p.0) * p.1)
 fn item(p: (Int, Int)) -> Int = p.1
 effect fn main() -> Unit = {
   assert(calc([]) == 0.0)

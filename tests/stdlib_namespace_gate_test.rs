@@ -86,14 +86,11 @@ const DROPPED: &[&str] = &[
 /// aliases do not resolve — in either module.
 #[test]
 fn json_surface_is_exactly_the_format_identity() {
-    // The one-sentence identity: json is the FORMAT (parse/print), plus the
-    // json-branded path API and typed-key conveniences that have no second
-    // name. Anything else is a regression toward the two-names problem.
+    // The one-sentence identity: json is the FORMAT (parse/print). The path
+    // API and the typed-key readers live on value.* (R-json-01). Anything
+    // else is a regression toward the two-names problem.
     let allowed: HashSet<&str> = [
         "parse", "stringify", "stringify_pretty",
-        "root", "field", "index", "get_path", "set_path", "remove_path",
-        "get_string", "get_int", "get_float", "get_bool", "get_array",
-        "to_map",
     ]
     .into();
     let mut declared: HashSet<String> = HashSet::new();
@@ -118,9 +115,9 @@ fn json_surface_is_exactly_the_format_identity() {
     }
     // The survivors must all exist, or a dropped alias lost its operation.
     for survivor in [
-        "value.null", "value.object", "value.array", "value.keys", "value.string",
+        "value.null", "value.object", "value.array", "value.string",
         "value.int", "value.bool", "value.float", "value.as_string", "value.as_int",
-        "value.as_float", "value.as_bool", "value.as_array", "value.field",
+        "value.as_float", "value.as_bool", "value.as_array", "value.get",
     ] {
         assert!(declared.contains(survivor), "survivor {survivor} is not declared");
     }

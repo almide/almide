@@ -70,6 +70,6 @@ effect fn main() -> Unit = {
     },
     d,
   ))
-  println("size=${fs.file_size(big)!}")
+  println("size=${fs.stat(big)!.size}")
   fs.remove_all(d)!
 }

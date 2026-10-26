@@ -9,7 +9,7 @@ type HtmlBuilder: Builder = { parts: List[String] }
 
 fn HtmlBuilder.add_field(b: HtmlBuilder, key: String, value: String) -> HtmlBuilder = HtmlBuilder { parts: b.parts + [key + "=" + value] }
 
-fn HtmlBuilder.build(b: HtmlBuilder) -> String = string.join(b.parts, " ")
+fn HtmlBuilder.build(b: HtmlBuilder) -> String = list.join(b.parts, " ")
 
 test "builder pattern via protocol" {
   let html = HtmlBuilder { parts: [] }

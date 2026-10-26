@@ -2,76 +2,72 @@
 
 # Standard library
 
-Every public function of the 50 stdlib modules, 1667 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 50 stdlib modules, 1307 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
 | Module | Functions | Types |
 |---|---:|---:|
-| [args](#args) | 7 | 0 |
+| [args](#args) | 3 | 0 |
 | [base64](#base64) | 4 | 0 |
 | [bigint](#bigint) | 24 | 1 |
 | [bool](#bool) | 3 | 0 |
-| [bytes](#bytes) | 210 | 1 |
+| [bytes](#bytes) | 183 | 1 |
 | [compute](#compute) | 7 | 0 |
-| [datetime](#datetime) | 23 | 0 |
+| [datetime](#datetime) | 18 | 0 |
 | [deque](#deque) | 60 | 1 |
 | [duration](#duration) | 7 | 0 |
-| [env](#env) | 9 | 0 |
-| [error](#error) | 3 | 0 |
+| [env](#env) | 6 | 0 |
+| [error](#error) | 0 | 0 |
 | [ffi](#ffi) | 4 | 0 |
-| [float](#float) | 61 | 0 |
-| [float32](#float32) | 33 | 0 |
-| [float64](#float64) | 33 | 0 |
-| [fs](#fs) | 41 | 1 |
-| [hash](#hash) | 18 | 0 |
+| [float](#float) | 27 | 0 |
+| [float32](#float32) | 24 | 0 |
+| [float64](#float64) | 24 | 0 |
+| [fs](#fs) | 38 | 1 |
+| [hash](#hash) | 17 | 0 |
 | [heap](#heap) | 16 | 1 |
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 5 | 0 |
-| [http](#http) | 36 | 4 |
-| [int](#int) | 88 | 0 |
-| [int16](#int16) | 56 | 0 |
-| [int32](#int32) | 58 | 0 |
-| [int64](#int64) | 60 | 0 |
-| [int8](#int8) | 54 | 0 |
+| [http](#http) | 34 | 4 |
+| [int](#int) | 47 | 0 |
+| [int16](#int16) | 37 | 0 |
+| [int32](#int32) | 37 | 0 |
+| [int64](#int64) | 37 | 0 |
+| [int8](#int8) | 37 | 0 |
 | [io](#io) | 12 | 0 |
-| [json](#json) | 15 | 0 |
-| [list](#list) | 79 | 0 |
-| [map](#map) | 40 | 0 |
-| [math](#math) | 35 | 0 |
-| [matrix](#matrix) | 49 | 0 |
+| [json](#json) | 3 | 0 |
+| [list](#list) | 74 | 0 |
+| [map](#map) | 37 | 0 |
+| [math](#math) | 27 | 0 |
+| [matrix](#matrix) | 27 | 0 |
 | [net](#net) | 16 | 2 |
 | [option](#option) | 14 | 0 |
-| [path](#path) | 14 | 0 |
-| [process](#process) | 17 | 2 |
+| [path](#path) | 11 | 0 |
+| [process](#process) | 11 | 2 |
 | [random](#random) | 10 | 0 |
 | [regex](#regex) | 16 | 1 |
 | [result](#result) | 15 | 0 |
 | [secret](#secret) | 2 | 0 |
 | [set](#set) | 42 | 0 |
-| [string](#string) | 89 | 0 |
+| [string](#string) | 85 | 0 |
 | [testing](#testing) | 10 | 0 |
-| [uint16](#uint16) | 50 | 0 |
-| [uint32](#uint32) | 54 | 0 |
-| [uint64](#uint64) | 58 | 0 |
-| [uint8](#uint8) | 46 | 0 |
+| [uint16](#uint16) | 35 | 0 |
+| [uint32](#uint32) | 35 | 0 |
+| [uint64](#uint64) | 35 | 0 |
+| [uint8](#uint8) | 35 | 0 |
 | [unix](#unix) | 10 | 0 |
-| [url](#url) | 10 | 1 |
+| [url](#url) | 9 | 1 |
 | [uuid](#uuid) | 7 | 0 |
-| [value](#value) | 34 | 0 |
-| [zlib](#zlib) | 13 | 0 |
+| [value](#value) | 29 | 0 |
+| [zlib](#zlib) | 11 | 0 |
 
 ## args
 
 [args.md](args.md)
 
-- `effect args.raw() -> List[String]` — Same as env.args; argv[0] excluded.
-- `effect args.flag(name: String) -> Bool` — True on --name before `--`; a one-letter name also matches -name.
 - `effect args.has_flag(name: String) -> Bool` — True on --name before `--`; a one-letter name also matches -name.
 - `effect args.option(name: String) -> Option[String]` — Value of --name=v or --name v before `--`; none if absent.
-- `effect args.option_or(name: String, fallback: String) -> String` — option(name), or fallback when absent.
 - `effect args.positional(options: List[String]) -> List[String]` — Args before `--` that are not flags or values of the named options, then all after `--`.
-- `effect args.positional_at(i: Int, options: List[String]) -> Option[String]` — i-th positional arg (see positional); none if out of range.
 
 ## base64
 
@@ -142,7 +138,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `bytes.as_ptr(b: Bytes) -> RawPtr   (deprecated — use ffi.address)` — Address of the data; null if empty.
 - `bytes.clear(mut b: Bytes) -> Unit` — Truncates b to length 0 in place.
 - `bytes.compare(a: Bytes, b: Bytes) -> Int` — Lexicographic -1, 0 or 1; a prefix sorts first.
-- `bytes.concat(a: Bytes, b: Bytes) -> Bytes` — New Bytes holding a then b.
 - `bytes.contains(b: Bytes, needle: Bytes) -> Bool` — True if needle occurs in b, or needle is empty.
 - `bytes.copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit` — Copies len bytes of src into b; clamped to fit.
 - `bytes.copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int   (deprecated — use ffi.write)` — Writes up to cap bytes to ptr; count, 0 if null.
@@ -154,31 +149,22 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `bytes.from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes   (deprecated — use ffi.read)` — Copy of len bytes at ptr; empty if null or len <= 0.
 - `bytes.from_string(s: String) -> Bytes` — UTF-8 encoding of s.
 - `bytes.get(b: Bytes, i: Int) -> Option[Int]` — Byte at index i, or none when out of range.
-- `bytes.get_or(b: Bytes, i: Int, default: Int) -> Int` — Byte at index i, or default when out of range.
 - `bytes.index_of(b: Bytes, needle: Bytes) -> Option[Int]` — First offset of needle, or none; some(0) if empty.
 - `bytes.insert(b: Bytes, i: Int, x: Int) -> Bytes` — Copy with x's low byte at i, clamped to 0..len.
 - `bytes.is_empty(b: Bytes) -> Bool` — True when b holds no bytes.
 - `bytes.is_valid_utf8(b: Bytes) -> Bool` — Whether b is valid UTF-8; true when empty.
 - `bytes.len(b: Bytes) -> Int` — Byte count; 0 for an empty buffer.
-- `bytes.lines(b: Bytes) -> List[Bytes]` — Pieces split at LF; CR kept; a final LF adds no piece.
 - `bytes.map(b: Bytes, f: (Int) -> Int) -> Bytes` — f applied per byte; results cut to low 8 bits.
 - `bytes.zeros(n: Int) -> Bytes` — n zero bytes; empty if n <= 0.
 - `bytes.pad_start(b: Bytes, n: Int, fill: Int) -> Bytes` — Left-padded with fill to length n; as-is if longer.
 - `bytes.pad_end(b: Bytes, n: Int, fill: Int) -> Bytes` — Right-padded with fill to length n; as-is if longer.
 - `bytes.push(mut b: Bytes, x: Int) -> Unit` — Appends x's low 8 bits in place.
-- `bytes.set_at(mut b: Bytes, i: Int, val: Int) -> Unit` — Sets byte i to val's low 8 bits; no-op out of range.
 - `bytes.copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit` — Copies src_start..src_end to dst; no-op if it won't fit.
-- `bytes.read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String]` — Up to count u32-LE-prefixed strings; stops if cut off.
-- `bytes.read_string_at(b: Bytes, pos: Int, len: Int) -> String` — len bytes at pos, lossy UTF-8; empty if out of range.
-- `bytes.read_string_be(b: Bytes, pos: Int) -> String` — String after a u32 BE length at pos; empty if cut off.
-- `bytes.read_string_be_at(b: Bytes, pos: Int) -> (Int, Option[String])` — Cursor form of read_string_be; (pos, none) if cut off.
-- `bytes.read_u8(b: Bytes, pos: Int) -> Int` — Byte at pos; 0 if out of range.
 - `bytes.remove_at(b: Bytes, i: Int) -> Bytes` — Copy without the byte at pos; as-is if out of range.
 - `bytes.repeat(b: Bytes, n: Int) -> Bytes` — b concatenated n times; empty if n <= 0.
 - `bytes.reverse(b: Bytes) -> Bytes` — Copy with the byte order reversed.
 - `bytes.set(b: Bytes, i: Int, x: Int) -> Bytes` — Copy with byte i set to x; as-is if out of range.
 - `bytes.skip(b: Bytes, pos: Int, n: Int) -> Int` — pos + n, capped at len.
-- `bytes.skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int` — Offset past count u32-LE-prefixed records.
 - `bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes` — Copy of start..end, each clamped to 0..len; empty if start >= end.
 - `bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]` — Pieces between sep matches; [b] for an empty sep.
 - `bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool` — True if b begins with prefix, or prefix is empty.
@@ -187,24 +173,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `bytes.to_string(b: Bytes) -> Result[String, String]` — UTF-8 decode; err "invalid UTF-8: ..." if bad.
 - `bytes.to_string_lossy(b: Bytes) -> String` — UTF-8 decode; invalid sequences become U+FFFD.
 - `bytes.append_bool(mut b: Bytes, x: Bool) -> Unit` — Appends 1 for true, 0 for false.
-- `bytes.write_f64_be(mut b: Bytes, val: Float) -> Unit` — Appends val as 8-byte f64, BE.
-- `bytes.write_i64_be(mut b: Bytes, val: Int) -> Unit` — Appends val as 8 bytes, BE.
-- `bytes.write_string_be(mut b: Bytes, s: String) -> Unit` — Appends s after a u32 BE byte-length prefix.
-- `bytes.write_u32_be(mut b: Bytes, val: Int) -> Unit` — Appends val's low 32 bits, BE.
-- `bytes.write_u8(mut b: Bytes, val: Int) -> Unit` — Appends val's low 8 bits; 256 becomes 0.
 - `bytes.xor(a: Bytes, b: Bytes) -> Bytes` — Bytewise XOR, as long as the shorter input.
-- `bytes.read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16` — UInt16 at offset; 0 if out of range.
-- `bytes.read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32` — UInt32 at offset; 0 if out of range.
-- `bytes.read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32` — Int32 at offset; 0 if out of range.
-- `bytes.read_float32(b: Bytes, offset: Int, endian: Endian) -> Float32` — Float32 at offset; 0 if out of range.
-- `bytes.write_uint16(mut b: Bytes, value: UInt16, endian: Endian) -> Unit` — Appends value as 2 bytes in endian order.
-- `bytes.write_uint32(mut b: Bytes, value: UInt32, endian: Endian) -> Unit` — Appends value as 4 bytes in endian order.
-- `bytes.write_int32(mut b: Bytes, value: Int32, endian: Endian) -> Unit` — Appends value as 4 bytes in endian order.
-- `bytes.write_float32(mut b: Bytes, value: Float32, endian: Endian) -> Unit` — Appends value as 4 bytes in endian order.
-- `bytes.set_uint16(mut b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
-- `bytes.set_uint32(mut b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
-- `bytes.set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
-- `bytes.set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit` — Writes value at offset; no-op out of range.
 - `bytes.get_u8(b: Bytes, pos: Int) -> Option[Int]` — The byte at pos as 0..255; none outside 0..len.
 - `bytes.next_u8(b: Bytes, pos: Int) -> (Option[Int], Int)` — (get_u8(b, pos), pos + 1); the position stays at pos when nothing is read.
 - `bytes.put_u8(mut b: Bytes, pos: Int, x: Int) -> Unit` — Writes x's low 8 bits at pos in place; pos outside 0..len aborts.
@@ -355,13 +324,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `datetime.add_minutes(ts: Int, n: Int) -> Int` — ts + n * 60; n may be negative.
 - `datetime.add_seconds(ts: Int, n: Int) -> Int` — ts + n; n may be negative.
 - `datetime.day(ts: Int) -> Int` — Calendar day 1..31 (UTC).
-- `datetime.diff_seconds(a: Int, b: Int) -> Int` — a - b; positive when a is later.
 - `datetime.format(ts: Int, pattern: String) -> String` — Replaces %Y %m %d %H %M %S (UTC); no %% escape.
 - `datetime.from_parts(y: Int, m: Int, d: Int, h: Int, min: Int, s: Int) -> Result[Int, String]` — UTC epoch secs; a field out of range is err, as in parse_iso.
-- `datetime.from_unix(seconds: Int) -> Int` — Identity: seconds are already a timestamp.
 - `datetime.hour(ts: Int) -> Int` — UTC hour of day, 0..23.
-- `datetime.is_after(a: Int, b: Int) -> Bool` — a > b; false when equal.
-- `datetime.is_before(a: Int, b: Int) -> Bool` — a < b; false when equal.
 - `datetime.minute(ts: Int) -> Int` — UTC minute, 0..59.
 - `datetime.month(ts: Int) -> Int` — UTC month, 1..12.
 - `effect datetime.now() -> Int` — Wall-clock Unix seconds (not monotonic).
@@ -370,7 +335,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `datetime.parse_iso(s: String) -> Result[Int, String]` — Epoch secs of YYYY-MM-DDTHH:MM:SSZ, year 0..=9999; fractions err.
 - `datetime.second(ts: Int) -> Int` — UTC second, 0..59.
 - `datetime.to_iso(ts: Int) -> String` — YYYY-MM-DDTHH:MM:SSZ in UTC.
-- `datetime.to_unix(ts: Int) -> Int` — Identity: a timestamp is already Unix seconds.
 - `datetime.weekday(ts: Int) -> String` — English day name in UTC; 0 is Thursday.
 - `datetime.year(ts: Int) -> Int` — Calendar year in UTC.
 
@@ -455,23 +419,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [env.md](env.md)
 
-- `effect env.unix_timestamp() -> Int` — Wall-clock seconds since the Unix epoch.
 - `effect env.args() -> List[String]` — Program arguments, argv[0] excluded.
 - `effect env.get(name: String) -> Option[String]` — Value of name, or none if unset.
 - `effect env.set(name: String, value: String) -> Unit` — Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
 - `effect env.cwd() -> String` — Absolute current directory; err if unreadable.
-- `effect env.millis() -> Int` — Wall-clock ms since the Unix epoch.
 - `effect env.sleep_ms(ms: Int) -> Unit` — Blocks ms milliseconds; a negative ms hangs.
-- `effect env.temp_dir() -> String` — Host temp dir; may end with /.
 - `env.os() -> String` — Host OS: macos, linux, windows or unknown; "wasi" on wasm (C-189).
-
-## error
-
-[error.md](error.md)
-
-- `error.chain(outer: String, cause: String) -> String` — outer + "\ncaused by: " + cause.
-- `error.context(r: Result[T, String], msg: String) -> Result[T, String]` — err(e) becomes err("msg: e"); ok unchanged.
-- `error.message(r: Result[T, String]) -> String` — Error text of r; "" when r is ok.
 
 ## ffi
 
@@ -487,12 +440,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 [float.md](float.md)
 
 - `float.to_string(n: Float) -> String` — Shortest round-trip digits, no exponent; 2.0 keeps .0.
-- `float.to_int(n: Float) -> Int` — Truncates toward 0, saturating; NaN gives 0.
-- `float.from_int(n: Int) -> Float` — Nearest Float; may round when |n| > 2^53.
 - `float.parse(s: String) -> Result[Float, String]` — Finite Float from s trimmed of ASCII space; err on junk, inf, NaN, overflow.
 - `float.to_fixed(n: Float, decimals: Int) -> String` — Fixed-point, ties to even; decimals outside 0..4096 abort.
 - `float.to_bits(f: Float) -> Int` — IEEE-754 bits as Int; any NaN gives the canonical NaN.
-- `float.sqrt(n: Float) -> Float` — Square root; NaN below 0, -0.0 stays -0.0.
 - `float.abs(n: Float) -> Float` — Magnitude; -0.0 gives 0.0, NaN stays NaN.
 - `float.floor(n: Float) -> Float` — Round toward -inf; -0.5 gives -1.0.
 - `float.ceil(n: Float) -> Float` — Round toward +inf; -0.5 gives -0.0.
@@ -504,37 +454,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `float.signum(x: Float) -> Float` — 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
 - `float.is_nan(n: Float) -> Bool` — True only for NaN (unequal to itself).
 - `float.is_infinite(n: Float) -> Bool` — True for inf and -inf; false for NaN.
-- `float.to_int8(n: Float) -> Int8` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_int16(n: Float) -> Int16` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_int32(n: Float) -> Int32` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_uint8(n: Float) -> UInt8` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_uint16(n: Float) -> UInt16` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_uint32(n: Float) -> UInt32` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_uint64(n: Float) -> UInt64` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_float32(n: Float) -> Float32` — Nearest Float32; overflow gives inf.
-- `float.to_int64(n: Float) -> Int64` — Truncates toward 0, saturating; NaN gives 0.
-- `float.to_float64(n: Float) -> Float64` — Same f64 value; always exact.
-- `float.from_float32(n: Float32) -> Float` — Exact widening; never rounds.
-- `float.from_float64(n: Float64) -> Float` — Same f64 value; always exact.
-- `float.to_int_checked(n: Float) -> Option[Int]` — some iff n is an integer in -2^63..2^63-1; NaN and ±inf give none.
-- `float.to_int8_checked(n: Float) -> Option[Int8]` — some iff n is an integer in -128..127.
-- `float.to_int16_checked(n: Float) -> Option[Int16]` — some iff n is an integer in -32768..32767.
-- `float.to_int32_checked(n: Float) -> Option[Int32]` — some iff n is an integer in -2^31..2^31-1.
-- `float.to_int64_checked(n: Float) -> Option[Int64]` — some iff n is an integer in -2^63..2^63-1.
-- `float.to_uint8_checked(n: Float) -> Option[UInt8]` — some iff n is an integer in 0..255.
-- `float.to_uint16_checked(n: Float) -> Option[UInt16]` — some iff n is an integer in 0..65535.
-- `float.to_uint32_checked(n: Float) -> Option[UInt32]` — some iff n is an integer in 0..2^32-1.
-- `float.to_uint64_checked(n: Float) -> Option[UInt64]` — some iff n is an integer in 0..2^64-1.
-- `float.to_float32_checked(n: Float) -> Option[Float32]` — some if n is exact in Float32; NaN and ±inf give none.
-- `float.to_int_saturating(n: Float) -> Int` — Truncates, clamps to Int range; NaN gives 0.
-- `float.to_int8_saturating(n: Float) -> Int8` — Truncates, clamps to -128..127; NaN gives 0.
-- `float.to_int16_saturating(n: Float) -> Int16` — Truncates, clamps to -32768..32767; NaN gives 0.
-- `float.to_int32_saturating(n: Float) -> Int32` — Truncates, clamps to Int32 range; NaN gives 0.
-- `float.to_int64_saturating(n: Float) -> Int64` — Truncates, clamps to Int64 range; NaN gives 0.
-- `float.to_uint8_saturating(n: Float) -> UInt8` — Truncates, clamps to 0..255; NaN gives 0.
-- `float.to_uint16_saturating(n: Float) -> UInt16` — Truncates, clamps to 0..65535; NaN gives 0.
-- `float.to_uint32_saturating(n: Float) -> UInt32` — Truncates, clamps to 0..2^32-1; NaN gives 0.
-- `float.to_uint64_saturating(n: Float) -> UInt64` — Truncates, clamps to 0..2^64-1; NaN gives 0.
 - `float.trunc(x: Float) -> Float` — Round toward 0; -0.5 gives -0.0.
 - `float.is_finite(x: Float) -> Bool` — True unless x is inf, -inf or NaN.
 - `float.pow(base: Float, exp: Float) -> Float` — base to the exp; NaN for a negative base with a fractional exp.
@@ -552,15 +471,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [float32.md](float32.md)
 
-- `float32.to_int8(x: Float32) -> Int8` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_int16(x: Float32) -> Int16` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_int32(x: Float32) -> Int32` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_int64(x: Float32) -> Int64` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_uint8(x: Float32) -> UInt8` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_uint16(x: Float32) -> UInt16` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_uint32(x: Float32) -> UInt32` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_uint64(x: Float32) -> UInt64` — Truncates toward 0, saturating; NaN gives 0.
-- `float32.to_float64(x: Float32) -> Float64` — Exact widening; never rounds.
 - `float32.to_string(x: Float32) -> String` — Shortest f32 round-trip digits, no exponent; 0.1 stays 0.1, 2.0 keeps .0.
 - `float32.compare(a: Float32, b: Float32) -> Int` — -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
 - `float32.min(a: Float32, b: Float32) -> Float32` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
@@ -590,15 +500,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [float64.md](float64.md)
 
-- `float64.to_int8(x: Float64) -> Int8` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_int16(x: Float64) -> Int16` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_int32(x: Float64) -> Int32` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_int64(x: Float64) -> Int64` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_uint8(x: Float64) -> UInt8` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_uint16(x: Float64) -> UInt16` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_uint32(x: Float64) -> UInt32` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_uint64(x: Float64) -> UInt64` — Truncates toward 0, saturating; NaN gives 0.
-- `float64.to_float32(x: Float64) -> Float32` — Nearest Float32; overflow becomes infinity.
 - `float64.to_string(x: Float64) -> String` — Plain decimal, never an exponent; 2.0 keeps .0.
 - `float64.compare(a: Float64, b: Float64) -> Int` — -1, 0 or 1 in IEEE 754 total order: -0.0 < 0.0, NaN above inf, NaN equal to NaN.
 - `float64.min(a: Float64, b: Float64) -> Float64` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
@@ -652,15 +553,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect fs.rename(src: String, dst: String) -> Unit` — Moves src to dst; replaces an existing dst.
 - `effect fs.walk(dir: String) -> List[String]` — Sorted paths below dir; links listed, not followed.
 - `effect fs.remove_all(path: String) -> Unit` — Deletes a tree or file; err if missing.
-- `effect fs.file_size(path: String) -> Int` — Size in bytes; err if missing.
 - `effect fs.temp_dir() -> String` — Host temp dir; a location, not a safe name.
 - `effect fs.stat(path: String) -> FileStat` — Size, kind and mtime; err if missing.
 - `effect fs.glob(pattern: String) -> List[String]` — Sorted * and ** matches; links not followed.
 - `effect fs.create_temp_file(prefix: String) -> String` — New private file, random name; its path.
 - `effect fs.create_temp_dir(prefix: String) -> String` — New private dir, random name; its path.
 - `effect fs.is_symlink(path: String) -> Bool` — True for a symlink, even a dangling one.
-- `effect fs.modified_at(path: String) -> Int` — Mtime in Unix seconds; err if missing.
-- `effect fs.read_bytes_raw(path: String) -> Bytes` — Whole regular file (<= 1 GiB) as Bytes; err if missing.
 - `effect fs.open_root(dir: String) -> FsRoot` — dir as an FsRoot; err if dir is not a directory.
 - `effect fs.root_read_text(root: FsRoot, path: String) -> String` — read_text of path inside root; err if it escapes.
 - `effect fs.root_read_bytes(root: FsRoot, path: String) -> Bytes` — read_bytes of path inside root; err if it escapes.
@@ -674,7 +572,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 [hash.md](hash.md)
 
 - `hash.fnv1a32(b: Bytes) -> Int` — 32-bit FNV-1a of b, in 0..4294967295.
-- `hash.fnv1a32_bytes(b: Bytes) -> Int` — 32-bit FNV-1a of b, in 0..4294967295.
 - `hash.sha256(b: Bytes) -> Bytes` — 32-byte SHA-256 digest of b.
 - `hash.sha256_hex(b: Bytes) -> String` — SHA-256 of b as 64 lowercase hex chars.
 - `hash.crc32(b: Bytes) -> Int` — CRC-32 (IEEE, reflected) as an unsigned Int; 0 for empty b.
@@ -757,8 +654,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect http.request(method: String, url: String, body: String, headers: List[(String, String)]) -> String` — Reply body for any method; any status is ok.
 - `effect http.get_response(url: String) -> HttpResponse` — Whole reply, 404 included; redirects not followed.
 - `effect http.send(req: HttpRequest) -> HttpResponse` — Sends req to the URL its target names; the whole reply, any status; redirects not followed.
-- `effect http.get_bytes(url: String) -> Bytes` — Raw body bytes, not UTF-8 decoded.
-- `effect http.request_bytes(method: String, url: String, body: String, headers: List[(String, String)]) -> Bytes` — Raw body bytes for any method and headers.
 - `effect http.start(req: HttpRequest, limits: HttpLimits) -> HttpCall` — Begins sending req; returns at once with a handle.
 - `effect http.poll(c: HttpCall) -> Option[Result[HttpResponse, String]]` — Never blocks: none while running, then the result.
 - `effect http.read_new(c: HttpCall) -> String` — Body text since the last read_new; never blocks.
@@ -779,10 +674,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int.to_string(n: Int) -> String` — Decimal digits, with - when negative.
 - `int.to_hex(n: Int) -> String` — Lowercase hex, no 0x; -1 gives 16 f digits.
 - `int.parse(s: String) -> Result[Int, String]` — Decimal Int from s trimmed of ASCII space/tab/LF/FF/CR; err on junk or overflow.
-- `int.from_hex(s: String) -> Result[Int, String]` — Hex, any case, 0x optional; err on junk or > 2^63-1.
-- `int.to_float(n: Int) -> Float` — Nearest Float; may round when |n| > 2^53.
-- `int.bits_to_float(bits: Int) -> Float` — Float whose IEEE-754 binary64 bits are bits.
-- `int.bits_to_f32(bits: Int) -> Float` — Low 32 bits read as binary32, widened to Float.
 - `int.abs(n: Int) -> Int` — Magnitude of n; min_value wraps to itself.
 - `int.min(a: Int, b: Int) -> Int` — Lesser of a and b.
 - `int.max(a: Int, b: Int) -> Int` — Greater of a and b.
@@ -811,43 +702,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `int.wrap_mul(a: Int, b: Int, bits: Int) -> Int` — (a * b) mod 2^bits, non-negative when bits < 64.
 - `int.rotate_right(a: Int, n: Int, bits: Int) -> Int` — Low bits of a rotated right by n mod bits; bits <= 0 aborts.
 - `int.rotate_left(a: Int, n: Int, bits: Int) -> Int` — Low bits of a rotated left by n mod bits; bits <= 0 aborts.
-- `int.to_u32(a: Int) -> Int` — Low 32 bits as unsigned; -1 becomes 4294967295.
-- `int.to_u8(a: Int) -> Int` — Low 8 bits as unsigned; 300 becomes 44.
-- `int.to_int8(n: Int) -> Int8` — Wraps to 8 bits; 200 becomes -56.
-- `int.to_int16(n: Int) -> Int16` — Wraps to 16 bits; 40000 becomes -25536.
-- `int.to_int32(n: Int) -> Int32` — Wraps to 32 bits; 2^31 becomes -2^31.
-- `int.to_uint8(n: Int) -> UInt8` — Wraps to 8 bits; -1 becomes 255.
-- `int.to_uint16(n: Int) -> UInt16` — Wraps to 16 bits; -1 becomes 65535.
-- `int.to_uint32(n: Int) -> UInt32` — Wraps to 32 bits; -1 becomes 2^32-1.
-- `int.to_uint64(n: Int) -> UInt64` — Wraps to 64 bits; -1 becomes 2^64-1.
-- `int.to_float32(n: Int) -> Float32` — Float32 value; may round when |n| > 2^24.
-- `int.to_float64(n: Int) -> Float64` — Float64 value; may round when |n| > 2^53.
-- `int.to_int64(n: Int) -> Int64` — Same value as Int64; always exact.
-- `int.from_int8(n: Int8) -> Int` — Sign-extending widen; always exact.
-- `int.from_int16(n: Int16) -> Int` — Sign-extending widen; always exact.
-- `int.from_int32(n: Int32) -> Int` — Sign-extending widen; always exact.
-- `int.from_int64(n: Int64) -> Int` — Same value as Int; always exact.
-- `int.from_uint8(n: UInt8) -> Int` — Zero-extending widen; always exact.
-- `int.from_uint16(n: UInt16) -> Int` — Zero-extending widen; always exact.
-- `int.from_uint32(n: UInt32) -> Int` — Zero-extending widen; always exact.
-- `int.from_uint64(n: UInt64) -> Int` — Reinterprets bits; values >= 2^63 go negative.
-- `int.to_int8_checked(n: Int) -> Option[Int8]` — some(n), or none outside -128..127.
-- `int.to_int16_checked(n: Int) -> Option[Int16]` — some(n), or none outside -32768..32767.
-- `int.to_int32_checked(n: Int) -> Option[Int32]` — some(n), or none outside -2^31..2^31-1.
-- `int.to_uint8_checked(n: Int) -> Option[UInt8]` — some(n), or none outside 0..255.
-- `int.to_uint16_checked(n: Int) -> Option[UInt16]` — some(n), or none outside 0..65535.
-- `int.to_uint32_checked(n: Int) -> Option[UInt32]` — some(n), or none outside 0..2^32-1.
-- `int.to_uint64_checked(n: Int) -> Option[UInt64]` — some(n), or none if n is negative.
-- `int.to_float32_checked(n: Int) -> Option[Float32]` — some(f), or none if the f32 does not hold n exactly.
-- `int.to_int8_saturating(n: Int) -> Int8` — Clamps n to -128..127.
-- `int.to_int16_saturating(n: Int) -> Int16` — Clamps n to -32768..32767.
-- `int.to_int32_saturating(n: Int) -> Int32` — Clamps n to -2^31..2^31-1.
-- `int.to_uint8_saturating(n: Int) -> UInt8` — Clamps n to 0..255.
-- `int.to_uint16_saturating(n: Int) -> UInt16` — Clamps n to 0..65535.
-- `int.to_uint32_saturating(n: Int) -> UInt32` — Clamps n to 0..2^32-1.
-- `int.to_uint64_saturating(n: Int) -> UInt64` — Negative n clamps to 0.
-- `int.from_uint64_checked(n: UInt64) -> Option[Int]` — some(n), or none if n exceeds 2^63-1.
-- `int.from_uint64_saturating(n: UInt64) -> Int` — Clamps n to at most 2^63-1.
 - `int.min_value() -> Int` — Smallest Int: -2^63.
 - `int.max_value() -> Int` — Largest Int: 2^63-1.
 - `int.compare(a: Int, b: Int) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
@@ -869,26 +723,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [int16.md](int16.md)
 
-- `int16.to_int8(x: Int16) -> Int8` — Wraps to 8 bits; 128 becomes -128.
-- `int16.to_int32(x: Int16) -> Int32` — Sign-extending widen; always exact.
-- `int16.to_int64(x: Int16) -> Int64` — Sign-extending widen; always exact.
-- `int16.to_uint8(x: Int16) -> UInt8` — Wraps to 8 bits; -1 becomes 255.
-- `int16.to_uint16(x: Int16) -> UInt16` — Wraps to 16 bits; -1 becomes 65535.
-- `int16.to_uint32(x: Int16) -> UInt32` — Wraps to 32 bits; -1 becomes 2^32-1.
-- `int16.to_uint64(x: Int16) -> UInt64` — Wraps to 64 bits; -1 becomes 2^64-1.
-- `int16.to_float32(x: Int16) -> Float32` — Same value as Float32; always exact.
-- `int16.to_float64(x: Int16) -> Float64` — Same value as Float64; always exact.
 - `int16.to_string(x: Int16) -> String` — Decimal digits, with - when negative.
-- `int16.to_int8_checked(x: Int16) -> Option[Int8]` — some(x), or none if outside -128..127.
-- `int16.to_int8_saturating(x: Int16) -> Int8` — Clamps x to -128..127.
-- `int16.to_uint8_checked(x: Int16) -> Option[UInt8]` — some(x), or none if outside 0..255.
-- `int16.to_uint8_saturating(x: Int16) -> UInt8` — Clamps x to 0..255.
-- `int16.to_uint16_checked(x: Int16) -> Option[UInt16]` — some(x), or none if x is negative.
-- `int16.to_uint16_saturating(x: Int16) -> UInt16` — Negative x clamps to 0.
-- `int16.to_uint32_checked(x: Int16) -> Option[UInt32]` — some(x), or none if x is negative.
-- `int16.to_uint32_saturating(x: Int16) -> UInt32` — Negative x clamps to 0.
-- `int16.to_uint64_checked(x: Int16) -> Option[UInt64]` — some(x), or none if x is negative.
-- `int16.to_uint64_saturating(x: Int16) -> UInt64` — Negative x clamps to 0.
 - `int16.min_value() -> Int16` — Smallest Int16: -32768.
 - `int16.max_value() -> Int16` — Largest Int16: 32767.
 - `int16.compare(a: Int16, b: Int16) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
@@ -930,28 +765,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [int32.md](int32.md)
 
-- `int32.to_int8(x: Int32) -> Int8` — Wraps to 8 bits; 128 becomes -128.
-- `int32.to_int16(x: Int32) -> Int16` — Wraps to 16 bits; 32768 becomes -32768.
-- `int32.to_int64(x: Int32) -> Int64` — Sign-extending widen; always exact.
-- `int32.to_uint8(x: Int32) -> UInt8` — Wraps to 8 bits; -1 becomes 255.
-- `int32.to_uint16(x: Int32) -> UInt16` — Wraps to 16 bits; -1 becomes 65535.
-- `int32.to_uint32(x: Int32) -> UInt32` — Wraps to 32 bits; -1 becomes 2^32-1.
-- `int32.to_uint64(x: Int32) -> UInt64` — Wraps to 64 bits; -1 becomes 2^64-1.
-- `int32.to_float32(x: Int32) -> Float32` — Float32 value; may round when abs(x) > 2^24.
-- `int32.to_float64(x: Int32) -> Float64` — Same value as Float64; always exact.
 - `int32.to_string(x: Int32) -> String` — Decimal digits, with - when negative.
-- `int32.to_int8_checked(x: Int32) -> Option[Int8]` — some(x), or none if outside -128..127.
-- `int32.to_int8_saturating(x: Int32) -> Int8` — Clamps x to -128..127.
-- `int32.to_int16_checked(x: Int32) -> Option[Int16]` — some(x), or none if outside -32768..32767.
-- `int32.to_int16_saturating(x: Int32) -> Int16` — Clamps x to -32768..32767.
-- `int32.to_uint8_checked(x: Int32) -> Option[UInt8]` — some(x), or none if outside 0..255.
-- `int32.to_uint8_saturating(x: Int32) -> UInt8` — Clamps x to 0..255.
-- `int32.to_uint16_checked(x: Int32) -> Option[UInt16]` — some(x), or none if outside 0..65535.
-- `int32.to_uint16_saturating(x: Int32) -> UInt16` — Clamps x to 0..65535.
-- `int32.to_uint32_checked(x: Int32) -> Option[UInt32]` — some(x), or none if x is negative.
-- `int32.to_uint32_saturating(x: Int32) -> UInt32` — Negative x clamps to 0.
-- `int32.to_uint64_checked(x: Int32) -> Option[UInt64]` — some(x), or none if x is negative.
-- `int32.to_uint64_saturating(x: Int32) -> UInt64` — Negative x clamps to 0.
 - `int32.min_value() -> Int32` — Smallest Int32: -2147483648.
 - `int32.max_value() -> Int32` — Largest Int32: 2147483647.
 - `int32.compare(a: Int32, b: Int32) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
@@ -993,30 +807,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [int64.md](int64.md)
 
-- `int64.to_int8(x: Int64) -> Int8` — Wraps to 8 bits; 128 becomes -128.
-- `int64.to_int16(x: Int64) -> Int16` — Wraps to 16 bits; 32768 becomes -32768.
-- `int64.to_int32(x: Int64) -> Int32` — Wraps to 32 bits; 2^31 becomes -2^31.
-- `int64.to_uint8(x: Int64) -> UInt8` — Wraps to 8 bits; -1 becomes 255.
-- `int64.to_uint16(x: Int64) -> UInt16` — Wraps to 16 bits; -1 becomes 65535.
-- `int64.to_uint32(x: Int64) -> UInt32` — Wraps to 32 bits; -1 becomes 2^32-1.
-- `int64.to_uint64(x: Int64) -> UInt64` — Wraps to 64 bits; -1 becomes 2^64-1.
-- `int64.to_float32(x: Int64) -> Float32` — Float32 value; may round when abs(x) > 2^24.
-- `int64.to_float64(x: Int64) -> Float64` — Float64 value; may round when abs(x) > 2^53.
 - `int64.to_string(x: Int64) -> String` — Decimal digits, with - when negative.
-- `int64.to_int8_checked(x: Int64) -> Option[Int8]` — some(x), or none if outside -128..127.
-- `int64.to_int8_saturating(x: Int64) -> Int8` — Clamps x to -128..127.
-- `int64.to_int16_checked(x: Int64) -> Option[Int16]` — some(x), or none if outside -32768..32767.
-- `int64.to_int16_saturating(x: Int64) -> Int16` — Clamps x to -32768..32767.
-- `int64.to_int32_checked(x: Int64) -> Option[Int32]` — some(x), or none if outside -2^31..2^31-1.
-- `int64.to_int32_saturating(x: Int64) -> Int32` — Clamps x to -2^31..2^31-1.
-- `int64.to_uint8_checked(x: Int64) -> Option[UInt8]` — some(x), or none if outside 0..255.
-- `int64.to_uint8_saturating(x: Int64) -> UInt8` — Clamps x to 0..255.
-- `int64.to_uint16_checked(x: Int64) -> Option[UInt16]` — some(x), or none if outside 0..65535.
-- `int64.to_uint16_saturating(x: Int64) -> UInt16` — Clamps x to 0..65535.
-- `int64.to_uint32_checked(x: Int64) -> Option[UInt32]` — some(x), or none if outside 0..2^32-1.
-- `int64.to_uint32_saturating(x: Int64) -> UInt32` — Clamps x to 0..2^32-1.
-- `int64.to_uint64_checked(x: Int64) -> Option[UInt64]` — some(x), or none if x is negative.
-- `int64.to_uint64_saturating(x: Int64) -> UInt64` — Negative x clamps to 0.
 - `int64.min_value() -> Int64` — Smallest Int64: -2^63.
 - `int64.max_value() -> Int64` — Largest Int64: 2^63-1.
 - `int64.compare(a: Int64, b: Int64) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
@@ -1058,24 +849,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [int8.md](int8.md)
 
-- `int8.to_int16(x: Int8) -> Int16` — Sign-extending widen; always exact.
-- `int8.to_int32(x: Int8) -> Int32` — Sign-extending widen; always exact.
-- `int8.to_int64(x: Int8) -> Int64` — Sign-extending widen; always exact.
-- `int8.to_uint8(x: Int8) -> UInt8` — Wraps to 8 bits; -1 becomes 255.
-- `int8.to_uint16(x: Int8) -> UInt16` — Wraps to 16 bits; -1 becomes 65535.
-- `int8.to_uint32(x: Int8) -> UInt32` — Wraps to 32 bits; -1 becomes 2^32-1.
-- `int8.to_uint64(x: Int8) -> UInt64` — Wraps to 64 bits; -1 becomes 2^64-1.
-- `int8.to_float32(x: Int8) -> Float32` — Same value as Float32; always exact.
-- `int8.to_float64(x: Int8) -> Float64` — Same value as Float64; always exact.
 - `int8.to_string(x: Int8) -> String` — Decimal digits, with - when negative.
-- `int8.to_uint8_checked(x: Int8) -> Option[UInt8]` — some(x), or none if x is negative.
-- `int8.to_uint8_saturating(x: Int8) -> UInt8` — Negative x clamps to 0.
-- `int8.to_uint16_checked(x: Int8) -> Option[UInt16]` — some(x), or none if x is negative.
-- `int8.to_uint16_saturating(x: Int8) -> UInt16` — Negative x clamps to 0.
-- `int8.to_uint32_checked(x: Int8) -> Option[UInt32]` — some(x), or none if x is negative.
-- `int8.to_uint32_saturating(x: Int8) -> UInt32` — Negative x clamps to 0.
-- `int8.to_uint64_checked(x: Int8) -> Option[UInt64]` — some(x), or none if x is negative.
-- `int8.to_uint64_saturating(x: Int8) -> UInt64` — Negative x clamps to 0.
 - `int8.min_value() -> Int8` — Smallest Int8: -128.
 - `int8.max_value() -> Int8` — Largest Int8: 127.
 - `int8.compare(a: Int8, b: Int8) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
@@ -1137,18 +911,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `json.parse(text: String) -> Result[Value, String]` — Value or err; lenient, trailing text ignored; nesting over 1000 is err.
 - `json.stringify(v: Value) -> String` — Compact JSON; a Float 1.0 prints as 1, NaN/inf as null.
 - `json.stringify_pretty(v: Value) -> String` — JSON with 2-space indent; [] and {} inline, NaN/inf null.
-- `json.get_string(j: Value, key: String) -> Option[String]` — String at key; none if absent or non-string.
-- `json.get_int(j: Value, key: String) -> Option[Int]` — Int at key; none if absent or not an Int (a Float is never truncated).
-- `json.get_float(j: Value, key: String) -> Option[Float]` — Float at key (Int widens); none if absent.
-- `json.get_bool(j: Value, key: String) -> Option[Bool]` — Bool at key; none if absent or non-Bool.
-- `json.get_array(j: Value, key: String) -> Option[List[Value]]` — Array at key; none if absent or non-array.
-- `json.root() -> JsonPath` — Empty path: the whole value.
-- `json.field(path: JsonPath, name: String) -> JsonPath` — path extended by object key name.
-- `json.index(path: JsonPath, i: Int) -> JsonPath` — path plus index i; negative i counts from end.
-- `json.get_path(j: Value, path: JsonPath) -> Option[Value]` — Value at path, or none if a step misses.
-- `json.set_path(j: Value, path: JsonPath, value: Value) -> Result[Value, String]` — j with value at path; missing keys created; err if nested past 1000.
-- `json.remove_path(j: Value, path: JsonPath) -> Value` — j minus the entry at path; unchanged if absent.
-- `json.to_map(j: Value) -> Option[Map[String, String]]` — Object as key->string map (non-strings as JSON).
 
 ## list
 
@@ -1157,7 +919,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.len(xs: List[A]) -> Int` — Element count; 0 for an empty list.
 - `list.length(xs: List[A]) -> Int   (deprecated — use list.len)` — Alias of list.len.
 - `list.get(xs: List[A], i: Int) -> Option[A]` — Element at index i, or none when out of range.
-- `list.get_or(xs: List[A], i: Int, default: A) -> A` — Element at i, or default when out of range.
 - `list.set(xs: List[A], i: Int, x: A) -> List[A]` — Copy with slot i = x; no-op if i out of range.
 - `list.swap(xs: List[A], i: Int, j: Int) -> List[A]` — Copy with i and j swapped; no-op if either OOB.
 - `list.sort(xs: List[A]) -> List[A]` — Ascending copy; Floats in IEEE totalOrder.
@@ -1168,7 +929,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.flatten(xss: List[List[T]]) -> List[T]` — Inner lists concatenated in order.
 - `list.take(xs: List[A], n: Int) -> List[A]` — First n elements; all if n >= len, [] if n < 0.
 - `list.drop(xs: List[A], n: Int) -> List[A]` — All but the first n; [] if n >= len, all if n < 0.
-- `list.tail(xs: List[A]) -> List[A]` — All but the first element; [] when empty.
 - `list.unique(xs: List[A]) -> List[A]` — Duplicates removed; first occurrences kept.
 - `list.index_of(xs: List[A], x: A) -> Option[Int]` — Index of the first x, or none.
 - `list.last(xs: List[A]) -> Option[A]` — Final element, or none when empty.
@@ -1206,18 +966,15 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.remove_at(xs: List[A], i: Int) -> List[A]` — Copy without slot i; no-op if i out of range.
 - `list.repeat(x: A, n: Int) -> List[A]` — n copies of x; [] for n <= 0.
 - `list.intersperse(xs: List[A], sep: A) -> List[A]` — sep between adjacent elements.
-- `list.windows(xs: List[A], n: Int) -> List[List[A]]` — All n-long runs; [] if n > len; n <= 0 aborts.
 - `list.dedup(xs: List[A]) -> List[A]` — Adjacent equal runs collapsed; not global.
 - `list.take_end(xs: List[A], n: Int) -> List[A]` — Last n elements; all if n >= len, [] if n < 0.
 - `list.drop_end(xs: List[A], n: Int) -> List[A]` — All but the last n; [] if n >= len, all if n < 0.
-- `list.shuffle(xs: List[A]) -> List[A]` — Random permutation; unseeded, differs per run.
 - `list.window(xs: List[A], n: Int) -> List[List[A]]` — All n-long runs; [] if n > len; n <= 0 aborts.
 - `list.binary_search(xs: List[Int], target: Int) -> Option[Int]` — Index of target in ascending xs, or none.
 - `list.push(mut xs: List[A], x: A) -> Unit` — Appends x to xs in place.
 - `list.with_capacity(cap: Int) -> List[A]` — Empty list; cap is only a preallocation hint.
 - `list.pop(mut xs: List[A]) -> Option[A]` — Removes and yields the last element; none if empty.
 - `list.clear(mut xs: List[A]) -> Unit` — Removes every element of xs in place.
-- `list.bundled_probe(n: Int) -> Int` — n + 1; bundled-dispatch smoke fn.
 - `list.split_at(xs: List[T], n: Int) -> (List[T], List[T])` — (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
 - `list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]` — [seed, f(seed), ...] of length n; [] if n <= 0.
 - `list.find_map(xs: List[A], f: (A) -> Option[B]) -> Option[B]` — The first some that f gives, or none; f is not called after the hit.
@@ -1240,7 +997,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `map.new() -> Map[K, V]` — An empty Map[K, V].
 - `map.get(m: Map[K, V], key: K) -> Option[V]` — Value for key, or none when absent.
-- `map.get_or(m: Map[K, V], key: K, default: V) -> V` — Value for key, or default when absent.
 - `map.set(m: Map[K, V], key: K, value: V) -> Map[K, V]` — Copy with key -> value; an existing key is overwritten and keeps its position.
 - `map.contains(m: Map[K, V], key: K) -> Bool` — true when key is present.
 - `map.remove(m: Map[K, V], key: K) -> Map[K, V]` — Copy without key; unchanged if absent.
@@ -1260,8 +1016,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `map.find(m: Map[K, V], f: (K, V) -> Bool) -> Option[(K, V)]` — First (k, v) where f holds, or none.
 - `map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]` — Copy with key's value f(v); no-op if absent.
 - `map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]` — key -> f(old) if present, else init appended.
-- `map.insert(mut m: Map[K, V], key: K, value: V) -> Unit` — In-place key -> value; an existing key is overwritten and keeps its position.
-- `map.delete(mut m: Map[K, V], key: K) -> Unit` — Removes key in place; no-op when absent.
 - `map.clear(mut m: Map[K, V]) -> Unit` — Removes every entry of m in place.
 - `map.enumerate(m: Map[K, V]) -> List[(Int, (K, V))]` — (index, (key, value)) pairs in insertion order, index from 0.
 - `map.zip(m: Map[K, V], ys: List[B]) -> List[((K, V), B)]` — Entries paired with ys by position; stops at the shorter.
@@ -1283,25 +1037,17 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [math.md](math.md)
 
-- `math.abs(n: Int) -> Int` — Magnitude of n; min_value wraps to itself.
 - `math.atan(x: Float) -> Float` — Arctangent in radians, within -pi/2..pi/2.
 - `math.choose(n: Int, k: Int) -> Int` — Binomial n over k; 0 if k < 0 or k > n; overflow wraps.
 - `math.cos(x: Float) -> Float` — Cosine of x radians; NaN for infinite x.
 - `math.e() -> Float` — Euler's number, 2.718281828459045.
 - `math.exp(x: Float) -> Float` — e to the x; overflows to inf above ~709.78.
 - `math.factorial(n: Int) -> Int` — Product 1..n; 1 for n <= 0; wraps past 20, 0 from 66 on.
-- `math.fmax(a: Float, b: Float) -> Float` — Greater; a NaN operand is ignored; 0.0 > -0.0.
-- `math.fmin(a: Float, b: Float) -> Float` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
-- `math.fpow(base: Float, exp: Float) -> Float` — base to the exp; NaN for negative base, fractional exp.
 - `math.log(x: Float) -> Float` — Natural log; -inf at 0, NaN for negative x.
 - `math.log10(x: Float) -> Float` — Base-10 log; -inf at 0, NaN for negative x.
 - `math.log2(x: Float) -> Float` — Base-2 log; -inf at 0, NaN for negative x.
 - `math.log_gamma(x: Float) -> Float` — ln|Gamma(x)| on the whole line; inf at the poles.
-- `math.max(a: Int, b: Int) -> Int` — Greater of a and b.
-- `math.min(a: Int, b: Int) -> Int` — Lesser of a and b.
 - `math.pi() -> Float` — The circle constant, 3.141592653589793.
-- `math.pow(base: Int, exp: Int) -> Int` — base to the exp, wrapping; negative exp aborts.
-- `math.sign(n: Int) -> Int` — -1, 0 or 1 by the sign of n.
 - `math.sin(x: Float) -> Float` — Sine of x radians; NaN for infinite x.
 - `math.sqrt(x: Float) -> Float` — Square root; NaN below 0, -0.0 stays -0.0.
 - `math.tan(x: Float) -> Float` — Tangent of x radians; NaN for infinite x.
@@ -1328,23 +1074,11 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `matrix.shape(m: Matrix) -> (Int, Int)` — (rows, cols); (0, 0) with no rows.
 - `matrix.transpose(m: Matrix) -> Matrix` — cols x rows copy; r x 0 becomes 0 x 0.
 - `matrix.from_lists(xs: List[List[Float]]) -> Matrix` — Matrix of the equal-length rows xs; [] is 0 x 0.
-- `matrix.select_rows(m: Matrix, row_ids: List[Int]) -> Matrix` — Rows at row_ids; id < 0 is row 0, past end zeros.
-- `matrix.append_rows(base: Matrix, extra: Matrix) -> Matrix` — base rows then extra; empty side gives other.
-- `matrix.linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix` — x times f32 LE W^T.
-- `matrix.select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix` — f32 LE rows at row_ids; past-data rows are 0.
 - `matrix.to_lists(m: Matrix) -> List[List[Float]]` — Rows as lists; r x 0 gives r empty rows.
 - `matrix.get(m: Matrix, row: Int, col: Int) -> Option[Float]` — Element at (row, col); none out of range.
 - `matrix.rows(m: Matrix) -> Int` — Row count; 0 for an empty matrix.
 - `matrix.cols(m: Matrix) -> Int` — Width of row 0; 0 when there are no rows.
-- `matrix.add(a: Matrix, b: Matrix) -> Matrix` — Elementwise a + b; shapes truncate to overlap.
-- `matrix.mul(a: Matrix, b: Matrix) -> Matrix` — Matrix product; cols(a) == rows(b) is not checked.
 - `matrix.scale(m: Matrix, s: Float) -> Matrix` — Every element times s.
-- `matrix.fma(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix` — a*ka + b*kb in one pass; shapes truncate.
-- `matrix.fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix` — a*ka + b*kb + c*kc; shapes truncate.
-- `matrix.sub(a: Matrix, b: Matrix) -> Matrix` — Elementwise a - b; shapes truncate to overlap.
-- `matrix.div(a: Matrix, b: Matrix) -> Matrix` — Elementwise a / b; x/0.0 is inf or NaN.
-- `matrix.neg(m: Matrix) -> Matrix` — Every element negated.
-- `matrix.pow(m: Matrix, exp: Float) -> Matrix` — Elementwise x^exp; x < 0, fractional exp: NaN.
 - `matrix.map(m: Matrix, f: (Float) -> Float) -> Matrix` — f applied to every element.
 - `matrix.from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f32 LE rows x cols at offset; none if data short.
 - `matrix.to_bytes_f64_le(m: Matrix) -> Bytes` — Row-major f64 LE, 8 bytes per element.
@@ -1356,20 +1090,10 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `matrix.split_cols_even(m: Matrix, n: Int) -> List[Matrix]` — n slices cols/n wide, remainder dropped; [] if n = 0.
 - `matrix.concat_cols(xs: List[Matrix]) -> Matrix` — Side-by-side join; [] gives 0 x 0.
 - `matrix.concat_cols_many(matrices: List[Matrix]) -> Matrix   (deprecated — use matrix.concat_cols)` — Alias of matrix.concat_cols.
-- `matrix.linear_row(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix` — x W^T + bias; empty x or W gives 0 x 0.
-- `matrix.linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix` — x W^T; empty x or W gives 0 x 0.
 - `matrix.slice_rows(m: Matrix, start: Int, end: Int) -> Matrix` — Rows [start, end), each bound clamped to 0..row count.
-- `matrix.conv1d(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, stride: Int, padding: Int) -> Matrix` — 1-D conv over rows; [] if input too short.
 - `matrix.gather_rows(m: Matrix, indices: List[Int]) -> Matrix` — Rows at indices; out of range is a zero row.
 - `matrix.dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float` — Row r dot vec; 0.0 if r is out of range.
 - `matrix.row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float   (deprecated — use matrix.dot_row)` — Alias of matrix.dot_row.
-- `matrix.zeros_f32(rows: Int, cols: Int) -> Matrix[Float32]` — Float32 rows x cols of 0.0; negatives clamp.
-- `matrix.ones_f32(rows: Int, cols: Int) -> Matrix[Float32]` — Float32 rows x cols of 1.0; negatives clamp.
-- `matrix.mul_f32(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32]` — Float32 product; cols(a) == rows(b) is not checked.
-- `matrix.mul_f32_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32]` — alpha * (a x b), Float32.
-- `matrix.mul_f32_t(a: Matrix[Float32], b: Matrix[Float32]) -> Matrix[Float32]` — a x transpose(b), Float32.
-- `matrix.mul_f32_t_scaled(a: Matrix[Float32], alpha: Float, b: Matrix[Float32]) -> Matrix[Float32]` — alpha * (a x transpose(b)), Float32.
-- `matrix.mul_scaled(a: Matrix, alpha: Float, b: Matrix) -> Matrix` — Same as scale(mul(a, b), alpha).
 - `matrix.zip_with(a: Matrix, b: Matrix, f: (Float, Float) -> Float) -> Matrix` — f over each pair of same-position elements; a shape mismatch aborts.
 - `matrix.concat_rows(xs: List[Matrix]) -> Matrix` — Rows of every matrix, top to bottom; empty members skipped, a width mismatch aborts.
 
@@ -1417,9 +1141,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [path.md](path.md)
 
-- `path.from_string(s: String) -> Result[SafePath, String]` — SafePath of s; err unless relative and inside.
-- `path.trusted(s: String) -> SafePath` — SafePath of s with no traversal check.
-- `path.to_string(p: SafePath) -> String` — Path text inside p, unchanged.
 - `path.join(base: String, child: String) -> String` — base/child; an absolute child replaces base.
 - `path.join_within(base: String, child: String) -> Result[String, String]` — base/child; err if child could leave base.
 - `path.dirname(path: String) -> String` — path minus last segment; "" if no slash.
@@ -1449,13 +1170,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect process.kill(pid: Int, signal: Int) -> Unit` — Sends signal to pid; err is kill's stderr.
 - `effect process.exit(code: Int) -> Never` — Ends with code 0..=255; others abort, exit 1.
 - `effect process.pid() -> Int` — OS process ID of this program.
-- `effect process.args() -> List[String]` — Full argv, program name at index 0.
-- `effect process.stdin_lines() -> List[String]` — All stdin lines; err on non-UTF-8 input.
-- `effect process.env(key: String) -> Option[String]` — Variable value, or none if unset.
-- `effect process.spawn(cmd: String, args: List[String]) -> Int` — Pid of cmd started in the background.
 - `effect process.kill(pid: Int, signal: Int) -> Unit` — Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
-- `effect process.sleep(ms: Int) -> Unit` — Blocks ms milliseconds; negative is 0.
-- `effect process.is_alive(pid: Int) -> Bool` — True while pid exists; false for a pid <= 0.
 
 ## random
 
@@ -1574,7 +1289,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.trim(s: String) -> String` — s without leading/trailing whitespace.
 - `string.split(s: String, sep: String) -> List[String]` — Pieces around sep; empty pieces kept.
 - `string.split_once(s: String, sep: String) -> Option[(String, String)]` — Split at the FIRST occurrence of `sep`: `(before, after)`, none ⇔ `sep` absent.
-- `string.join(list: List[String], sep: String) -> String` — Items with sep between; "" for [].
 - `string.len(s: String) -> Int` — Codepoint count (not bytes).
 - `string.length(s: String) -> Int   (deprecated — use string.len)` — Alias of string.len.
 - `string.contains(s: String, sub: String) -> Bool` — sub occurs in s; true for empty sub.
@@ -1584,7 +1298,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.slice(s: String, start: Int, end: Int) -> String` — Codepoints [start, end), clamped to s.
 - `string.byte_slice(s: String, start: Int, end: Int) -> Option[String]` — Byte range [start, end); none if bad or mid-char.
 - `string.pad_start(s: String, n: Int, fill: String) -> String` — Left-padded to n chars with fill; never truncates.
-- `string.to_bytes(s: String) -> List[Int]` — UTF-8 bytes of s as Ints 0..255.
 - `string.capitalize(s: String) -> String` — First char uppercased as to_upper does, rest untouched.
 - `string.to_upper(s: String) -> String` — Unicode uppercase; never folds non-ASCII into ASCII; not for identity.
 - `string.to_lower(s: String) -> String` — Unicode lowercase; never folds non-ASCII into ASCII; not for identity.
@@ -1594,7 +1307,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.to_list(s: String) -> List[String]` — Each codepoint as a one-char string.
 - `string.index_of(s: String, needle: String) -> Option[Int]` — Codepoint index of first needle, or none.
 - `string.repeat(s: String, n: Int) -> String` — s repeated n times; empty for n <= 0.
-- `string.from_bytes(bytes: List[Int]) -> String` — Lossy UTF-8 decode; bad sequences become U+FFFD.
 - `string.is_digit(s: String) -> Bool` — All ASCII 0-9; false for empty s.
 - `string.is_alpha(s: String) -> Bool` — All Unicode letters; false for empty s.
 - `string.is_alphanumeric(s: String) -> Bool` — All letters/digits; false for empty s.
@@ -1620,7 +1332,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.take_end(s: String, n: Int) -> String` — Last n codepoints; "" if n < 0.
 - `string.drop(s: String, n: Int) -> String` — s minus first n codepoints; s if n < 0.
 - `string.drop_end(s: String, n: Int) -> String` — s minus last n codepoints; s if n < 0.
-- `string.run_length_encode(s: String) -> List[(String, Int)]` — (char, count) per run of equal codepoints.
 - `string.push(mut s: String, x: String) -> Unit` — Appends x to s in place.
 - `string.pop(mut s: String) -> Option[String]` — Removes and returns the last character; none if s is empty.
 - `string.clear(mut s: String) -> Unit` — Empties s in place.
@@ -1682,22 +1393,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [uint16.md](uint16.md)
 
-- `uint16.to_int8(x: UInt16) -> Int8` — Wraps to 8 bits; 255 becomes -1.
-- `uint16.to_int16(x: UInt16) -> Int16` — Wraps to 16 bits; 65535 becomes -1.
-- `uint16.to_int32(x: UInt16) -> Int32` — Zero-extending widen; always exact.
-- `uint16.to_int64(x: UInt16) -> Int64` — Zero-extending widen; always exact.
-- `uint16.to_uint8(x: UInt16) -> UInt8` — Wraps to 8 bits; 256 becomes 0.
-- `uint16.to_uint32(x: UInt16) -> UInt32` — Zero-extending widen; always exact.
-- `uint16.to_uint64(x: UInt16) -> UInt64` — Zero-extending widen; always exact.
-- `uint16.to_float32(x: UInt16) -> Float32` — Same value as Float32; always exact.
-- `uint16.to_float64(x: UInt16) -> Float64` — Same value as Float64; always exact.
 - `uint16.to_string(x: UInt16) -> String` — Decimal digits; never a sign.
-- `uint16.to_int8_checked(x: UInt16) -> Option[Int8]` — some(x), or none if x exceeds 127.
-- `uint16.to_int8_saturating(x: UInt16) -> Int8` — Clamps x to at most 127.
-- `uint16.to_int16_checked(x: UInt16) -> Option[Int16]` — some(x), or none if x exceeds 32767.
-- `uint16.to_int16_saturating(x: UInt16) -> Int16` — Clamps x to at most 32767.
-- `uint16.to_uint8_checked(x: UInt16) -> Option[UInt8]` — some(x), or none if x exceeds 255.
-- `uint16.to_uint8_saturating(x: UInt16) -> UInt8` — Clamps x to at most 255.
 - `uint16.min_value() -> UInt16` — Smallest UInt16: 0.
 - `uint16.max_value() -> UInt16` — Largest UInt16: 65535.
 - `uint16.compare(a: UInt16, b: UInt16) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
@@ -1737,26 +1433,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [uint32.md](uint32.md)
 
-- `uint32.to_int8(x: UInt32) -> Int8` — Wraps to 8 bits; 255 becomes -1.
-- `uint32.to_int16(x: UInt32) -> Int16` — Wraps to 16 bits; 65535 becomes -1.
-- `uint32.to_int32(x: UInt32) -> Int32` — Wraps to 32 bits; 2^32-1 becomes -1.
-- `uint32.to_int64(x: UInt32) -> Int64` — Zero-extending widen; always exact.
-- `uint32.to_uint8(x: UInt32) -> UInt8` — Wraps to 8 bits; 256 becomes 0.
-- `uint32.to_uint16(x: UInt32) -> UInt16` — Wraps to 16 bits; 65536 becomes 0.
-- `uint32.to_uint64(x: UInt32) -> UInt64` — Zero-extending widen; always exact.
-- `uint32.to_float32(x: UInt32) -> Float32` — Float32 value; may round when x > 2^24.
-- `uint32.to_float64(x: UInt32) -> Float64` — Same value as Float64; always exact.
 - `uint32.to_string(x: UInt32) -> String` — Decimal digits; never a sign.
-- `uint32.to_int8_checked(x: UInt32) -> Option[Int8]` — some(x), or none if x exceeds 127.
-- `uint32.to_int8_saturating(x: UInt32) -> Int8` — Clamps x to at most 127.
-- `uint32.to_int16_checked(x: UInt32) -> Option[Int16]` — some(x), or none if x exceeds 32767.
-- `uint32.to_int16_saturating(x: UInt32) -> Int16` — Clamps x to at most 32767.
-- `uint32.to_int32_checked(x: UInt32) -> Option[Int32]` — some(x), or none if x exceeds 2^31-1.
-- `uint32.to_int32_saturating(x: UInt32) -> Int32` — Clamps x to at most 2^31-1.
-- `uint32.to_uint8_checked(x: UInt32) -> Option[UInt8]` — some(x), or none if x exceeds 255.
-- `uint32.to_uint8_saturating(x: UInt32) -> UInt8` — Clamps x to at most 255.
-- `uint32.to_uint16_checked(x: UInt32) -> Option[UInt16]` — some(x), or none if x exceeds 65535.
-- `uint32.to_uint16_saturating(x: UInt32) -> UInt16` — Clamps x to at most 65535.
 - `uint32.min_value() -> UInt32` — Smallest UInt32: 0.
 - `uint32.max_value() -> UInt32` — Largest UInt32: 4294967295.
 - `uint32.compare(a: UInt32, b: UInt32) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
@@ -1796,30 +1473,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [uint64.md](uint64.md)
 
-- `uint64.to_int8(x: UInt64) -> Int8` — Wraps to 8 bits; 255 becomes -1.
-- `uint64.to_int16(x: UInt64) -> Int16` — Wraps to 16 bits; 65535 becomes -1.
-- `uint64.to_int32(x: UInt64) -> Int32` — Wraps to 32 bits; 2^32-1 becomes -1.
-- `uint64.to_int64(x: UInt64) -> Int64` — Wraps to 64 bits; 2^64-1 becomes -1.
-- `uint64.to_uint8(x: UInt64) -> UInt8` — Wraps to 8 bits; 256 becomes 0.
-- `uint64.to_uint16(x: UInt64) -> UInt16` — Wraps to 16 bits; 65536 becomes 0.
-- `uint64.to_uint32(x: UInt64) -> UInt32` — Wraps to 32 bits; 2^32 becomes 0.
-- `uint64.to_float32(x: UInt64) -> Float32` — Float32 value; may round when x > 2^24.
-- `uint64.to_float64(x: UInt64) -> Float64` — Float64 value; may round when x > 2^53.
 - `uint64.to_string(x: UInt64) -> String` — Decimal digits, no sign; exact up to 2^64-1.
-- `uint64.to_int8_checked(x: UInt64) -> Option[Int8]` — some(x), or none if x exceeds 127.
-- `uint64.to_int8_saturating(x: UInt64) -> Int8` — Clamps x to at most 127.
-- `uint64.to_int16_checked(x: UInt64) -> Option[Int16]` — some(x), or none if x exceeds 32767.
-- `uint64.to_int16_saturating(x: UInt64) -> Int16` — Clamps x to at most 32767.
-- `uint64.to_int32_checked(x: UInt64) -> Option[Int32]` — some(x), or none if x exceeds 2^31-1.
-- `uint64.to_int32_saturating(x: UInt64) -> Int32` — Clamps x to at most 2^31-1.
-- `uint64.to_int64_checked(x: UInt64) -> Option[Int64]` — some(x), or none if x exceeds 2^63-1.
-- `uint64.to_int64_saturating(x: UInt64) -> Int64` — Clamps x to at most 2^63-1.
-- `uint64.to_uint8_checked(x: UInt64) -> Option[UInt8]` — some(x), or none if x exceeds 255.
-- `uint64.to_uint8_saturating(x: UInt64) -> UInt8` — Clamps x to at most 255.
-- `uint64.to_uint16_checked(x: UInt64) -> Option[UInt16]` — some(x), or none if x exceeds 65535.
-- `uint64.to_uint16_saturating(x: UInt64) -> UInt16` — Clamps x to at most 65535.
-- `uint64.to_uint32_checked(x: UInt64) -> Option[UInt32]` — some(x), or none if x exceeds 2^32-1.
-- `uint64.to_uint32_saturating(x: UInt64) -> UInt32` — Clamps x to at most 2^32-1.
 - `uint64.min_value() -> UInt64` — Smallest UInt64: 0.
 - `uint64.max_value() -> UInt64` — Largest UInt64: 2^64-1.
 - `uint64.compare(a: UInt64, b: UInt64) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
@@ -1859,18 +1513,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [uint8.md](uint8.md)
 
-- `uint8.to_int8(x: UInt8) -> Int8` — Wraps to 8 bits; 255 becomes -1.
-- `uint8.to_int16(x: UInt8) -> Int16` — Zero-extending widen; always exact.
-- `uint8.to_int32(x: UInt8) -> Int32` — Zero-extending widen; always exact.
-- `uint8.to_int64(x: UInt8) -> Int64` — Zero-extending widen; always exact.
-- `uint8.to_uint16(x: UInt8) -> UInt16` — Zero-extending widen; always exact.
-- `uint8.to_uint32(x: UInt8) -> UInt32` — Zero-extending widen; always exact.
-- `uint8.to_uint64(x: UInt8) -> UInt64` — Zero-extending widen; always exact.
-- `uint8.to_float32(x: UInt8) -> Float32` — Same value as Float32; always exact.
-- `uint8.to_float64(x: UInt8) -> Float64` — Same value as Float64; always exact.
 - `uint8.to_string(x: UInt8) -> String` — Decimal digits; never a sign.
-- `uint8.to_int8_checked(x: UInt8) -> Option[Int8]` — some(x), or none if x exceeds 127.
-- `uint8.to_int8_saturating(x: UInt8) -> Int8` — Clamps x to at most 127.
 - `uint8.min_value() -> UInt8` — Smallest UInt8: 0.
 - `uint8.max_value() -> UInt8` — Largest UInt8: 255.
 - `uint8.compare(a: UInt8, b: UInt8) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
@@ -1929,7 +1572,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `url.decode_component(s: String) -> Result[String, String]` — Percent-decoded s; err on bad escape/UTF-8; + kept.
 - `url.parse(s: String) -> Result[Url, String]` — Url from s, cleaned as WHATWG does; err on a bad scheme, host or port, a backslash or control char, userinfo, IPv6.
 - `url.to_string(u: Url) -> String` — URL text of u; empty query/fragment omitted.
-- `url.query_pairs(query: String) -> List[(String, String)]` — Undecoded (k, v) pairs; bare key gets "".
 - `url.build_query(xs: List[(String, String)]) -> String` — k=v joined by &, both sides percent-encoded.
 - `url.encode_form(s: String) -> String` — Like encode_component, but a space becomes +.
 - `url.decode_form(s: String) -> Result[String, String]` — + as space, then percent-decoded; err on bad escape/UTF-8.
@@ -1967,11 +1609,6 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `value.omit(v: Value, keys: List[String]) -> Value` — v minus the listed keys; non-objects as-is.
 - `value.pick(v: Value, keys: List[String]) -> Value` — Only the listed keys of v; a non-object picks to {}.
 - `value.string(s: String) -> Value` — Value holding the String s.
-- `value.stringify(v: Value) -> String` — Compact JSON; NaN/inf print as null.
-- `value.to_camel_case(v: Value) -> Value` — Top-level keys to camelCase; nested untouched.
-- `value.to_snake_case(v: Value) -> Value` — Top-level keys to snake_case; userID -> user_i_d.
-- `value.field(v: Value, key: String) -> Result[Value, String]` — Value at key; err if missing or v not an Object.
-- `value.keys(v: Value) -> List[String]` — Object keys in order; [] for non-objects.
 - `value.as_object(v: Value) -> Result[List[(String, Value)], String]` — Object pairs in order; err if v is another kind.
 - `value.get(v: Value, key: String) -> Option[Value]` — Value at key; none if absent or v is not an Object.
 - `value.get_string(v: Value, key: String) -> Option[String]` — String at key; none if absent or another kind.
@@ -2002,5 +1639,3 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect zlib.gzip(b: Bytes) -> Bytes` — RFC 1952 gzip of b; bytes vary by target.
 - `zlib.gunzip(b: Bytes) -> Result[Bytes, String]` — Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
 - `zlib.gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
-- `zlib.crc32(data: Bytes) -> Int` — CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
-- `zlib.adler32(data: Bytes) -> Int` — Adler-32 as an unsigned Int; 1 for empty data.

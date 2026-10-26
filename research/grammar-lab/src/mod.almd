@@ -28,7 +28,7 @@ effect fn get_almide_bin() -> String = resolve_bin("ALMIDE_BIN", "almide", "../.
 // ── Helpers ──
 effect fn println(s: String) -> Unit = io.print(s + "\n")
 
-fn jstr(v: Value, key: String) -> String = json.get_string(v, key) ?? ""
+fn jstr(v: Value, key: String) -> String = value.get_string(v, key) ?? ""
 
 fn truncate(s: String, n: Int) -> String =
   if string.len(s) <= n then s else string.slice(s, 0, n) + "\n… (truncated)"
@@ -84,26 +84,26 @@ effect fn run_experiment() -> Result[Unit, String] = {
   let dir = args[0]
   let config = json.parse(fs.read_text("${dir}/experiment.json")!)!
   let experiment = jstr(config, "name")
-  let trials = int.parse(parse_cli_string(args, "--trials", "")) ?? (json.get_int(config, "trials") ?? 5)
-  let repair_rounds = json.get_int(config, "repair_rounds") ?? 0
+  let trials = int.parse(parse_cli_string(args, "--trials", "")) ?? (value.get_int(config, "trials") ?? 5)
+  let repair_rounds = value.get_int(config, "repair_rounds") ?? 0
   let model_filter = parse_cli_string(args, "--model", "")
   let task_filter = parse_cli_string(args, "--task", "")
-  let task_names = json.get_array(config, "tasks") ?? [] |> list.map((t) => value.as_string(t) ?? "") |> list.filter((t) => task_filter == "" or t == task_filter)
+  let task_names = value.get_array(config, "tasks") ?? [] |> list.map((t) => value.as_string(t) ?? "") |> list.filter((t) => task_filter == "" or t == task_filter)
   let runtime_path = jstr(config, "runtime_file")
   let runtime = if runtime_path == "" then "" else strip_blocks(fs.read_text("${dir}/${runtime_path}")!)
   let layer1 = fs.read_text("prompts/layer1_rules.md")!
-  let variants = json.get_array(config, "variants") ?? [] |> list.map((v) => {
+  let variants = value.get_array(config, "variants") ?? [] |> list.map((v) => {
     let name = jstr(v, "name")
     let layer2_path = "prompts/layer2_${name}.md"
-    { name: name, transpile_mode: jstr(v, "transpile_regex"), with_laws: json.get_bool(v, "with_laws") ?? false, layer2: layer2_path }
+    { name: name, transpile_mode: jstr(v, "transpile_regex"), with_laws: value.get_bool(v, "with_laws") ?? false, layer2: layer2_path }
   })
   let tasks = task_names |> list.map((t) => load_task(dir, t)!)!
-  let stamp = int.to_string(env.unix_timestamp())
+  let stamp = int.to_string(datetime.now())
   let out_root = "outputs/${experiment}/${stamp}"
   println("=== Grammar Lab ===")
   println("Experiment: ${experiment}  trials: ${trials}  repair rounds: ${repair_rounds}  outputs: ${out_root}")
   var all_results: List[Value] = []
-  for model_json in json.get_array(config, "models") ?? [] {
+  for model_json in value.get_array(config, "models") ?? [] {
     let model_name = jstr(model_json, "name")
     if model_filter != "" and model_filter != model_name then continue
     println("Model: ${model_name}")
@@ -129,7 +129,7 @@ effect fn run_experiment() -> Result[Unit, String] = {
   ok(())
 }
 
-fn flag(r: Value, key: String) -> Bool = json.get_bool(r, key) ?? false
+fn flag(r: Value, key: String) -> Bool = value.get_bool(r, key) ?? false
 
 fn mark(b: Bool) -> String = if b then "pass" else "FAIL"
 
@@ -218,14 +218,14 @@ fn strip_blocks(code: String) -> String = {
       result = result + [line]
     }
   }
-  string.join(result, "\n")
+  list.join(result, "\n")
 }
 
 // ── Transpile ──
 fn transpile(code: String, mode: String) -> String =
   match mode {
-    "paren-to-fn-lambda" => string.split(code, "\n") |> list.map((line) => transpile_line_paren_to_(line)) |> string.join("\n"),
-    "combinator-to-match" => string.split(code, "\n") |> list.map((line) => transpile_line_combinator(line)) |> string.join("\n"),
+    "paren-to-fn-lambda" => string.split(code, "\n") |> list.map((line) => transpile_line_paren_to_(line)) |> list.join("\n"),
+    "combinator-to-match" => string.split(code, "\n") |> list.map((line) => transpile_line_combinator(line)) |> list.join("\n"),
     _ => code,
   }
 
@@ -311,7 +311,7 @@ fn replace_all_str(s: String, old: String, replacement: String) -> String = if n
   s
 } else {
   let parts = string.split(s, old)
-  string.join(parts, replacement)
+  list.join(parts, replacement)
 }
 
 fn transpile_line_combinator(line: String) -> String = {
@@ -386,7 +386,7 @@ fn extract_code(response: String) -> String = {
     else if in_block then code_lines = code_lines + [line]
     else ()
   }
-  if list.len(code_lines) == 0 then response else string.join(code_lines, "\n")
+  if list.len(code_lines) == 0 then response else list.join(code_lines, "\n")
 }
 
 // ── Evaluation ──
@@ -436,19 +436,19 @@ effect fn print_summary(results: List[Value]) -> Unit = {
   for model in models {
     println("")
     println("Model: ${model}")
-    println(string.pad_end("", 26, " ") + (variants |> list.map((v) => string.pad_end(v, 16, " ")) |> string.join("")))
+    println(string.pad_end("", 26, " ") + (variants |> list.map((v) => string.pad_end(v, 16, " ")) |> list.join("")))
     for (key, label) in metrics {
-      println(string.pad_end("  ${label}", 26, " ") + (variants |> list.map((v) => cell(count(results, model, v, key))) |> string.join("")))
+      println(string.pad_end("  ${label}", 26, " ") + (variants |> list.map((v) => cell(count(results, model, v, key))) |> list.join("")))
     }
-    println(string.pad_end("  survived but wrong, 1st", 26, " ") + (variants |> list.map((v) => string.pad_end(int.to_string(wrong_survivors(results, model, v, "gate_1", "hidden_1")), 16, " ")) |> string.join("")))
-    println(string.pad_end("  survived but wrong, fin", 26, " ") + (variants |> list.map((v) => string.pad_end(int.to_string(wrong_survivors(results, model, v, "gate_2", "hidden_2")), 16, " ")) |> string.join("")))
+    println(string.pad_end("  survived but wrong, 1st", 26, " ") + (variants |> list.map((v) => string.pad_end(int.to_string(wrong_survivors(results, model, v, "gate_1", "hidden_1")), 16, " ")) |> list.join("")))
+    println(string.pad_end("  survived but wrong, fin", 26, " ") + (variants |> list.map((v) => string.pad_end(int.to_string(wrong_survivors(results, model, v, "gate_2", "hidden_2")), 16, " ")) |> list.join("")))
     println("  hidden, final by task:")
     for task in tasks {
       let cells = variants |> list.map((v) => {
         let rows = results |> list.filter((r) => jstr(r, "model") == model and jstr(r, "variant") == v and jstr(r, "task") == task)
         cell((rows |> list.filter((r) => flag(r, "hidden_2")) |> list.len, list.len(rows)))
       })
-      println(string.pad_end("    ${task}", 26, " ") + string.join(cells, ""))
+      println(string.pad_end("    ${task}", 26, " ") + list.join(cells, ""))
     }
     if list.len(variants) == 2 then {
       for (key, label) in metrics {
@@ -464,7 +464,7 @@ effect fn print_summary(results: List[Value]) -> Unit = {
 // ── Fisher's Exact Test ──
 fn log_choose(n: Int, k: Int) -> Float = {
   // log(C(n, k)) = log_gamma(n+1) - log_gamma(k+1) - log_gamma(n-k+1)
-  math.log_gamma(int.to_float(n + 1)) - math.log_gamma(int.to_float(k + 1)) - math.log_gamma(int.to_float(n - k + 1))
+  math.log_gamma(float.from(n + 1)) - math.log_gamma(float.from(k + 1)) - math.log_gamma(float.from(n - k + 1))
 }
 
 fn hypergeometric_log_pmf(a: Int, b: Int, c: Int, d: Int) -> Float = {
@@ -484,7 +484,7 @@ fn fishers_exact_p(a: Int, b: Int, c: Int, d: Int) -> Float = {
   let observed_log_p = hypergeometric_log_pmf(a, b, c, d)
   let observed_p = math.exp(observed_log_p)
   // Enumerate all possible values of a (0..min(r1, c1))
-  let max_a = math.min(r1, c1)
+  let max_a = int.min(r1, c1)
   var p_value = 0.0
   for i in 0...max_a {
     let bi = r1 - i
@@ -500,7 +500,7 @@ fn fishers_exact_p(a: Int, b: Int, c: Int, d: Int) -> Float = {
     } else { () }
   }
   // Clamp to [0, 1]
-  math.fmin(1.0, p_value)
+  float.min(1.0, p_value)
 }
 
 // ── CLI Helpers ──

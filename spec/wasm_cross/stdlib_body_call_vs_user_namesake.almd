@@ -28,10 +28,10 @@ effect fn main() -> Unit = {
   println(bytes.to_string(base64.decode("d29ybGQ=")!)!)
   println(path.extension("a/b/c.txt") ?? "none")
   let doc = json.parse("{\"a\": {\"b\": [1, 2, 3]}}")!
-  let at = json.index(json.field(json.field(json.root(), "a"), "b"), 1)
-  println(json.stringify(json.get_path(doc, at) ?? value.null()))
-  println(json.stringify(json.set_path(doc, at, value.int(9))!))
-  println(json.stringify(json.remove_path(doc, at)))
+  let at = value.index(value.key(value.key(value.root(), "a"), "b"), 1)
+  println(json.stringify(value.get_path(doc, at) ?? value.null()))
+  println(json.stringify(value.set_path(doc, at, value.int(9))!))
+  println(json.stringify(value.remove_path(doc, at)))
   // The entry program's own calls reach its own fns.
   println(int.to_string(base64_decode(1) + basename(1)))
   println(int.to_string(json_path_get_go(1) + json_path_set_go(1) + json_path_rm_go(1)))

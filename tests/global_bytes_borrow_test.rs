@@ -45,9 +45,9 @@ effect fn main() -> Unit = {
   println(int.to_string(maybe(last)))
   // An immutable global is a static place: borrowed by a user fn and by a
   // runtime fn, it is never moved out of.
-  println("${int.to_string(size(TBL))} ${int.to_string(bytes.read_u8(TBL, 2))}")
+  println("${int.to_string(size(TBL))} ${int.to_string(bytes.get(TBL, 2) ?? 0)}")
   // Still the global's own value: nothing above moved or changed it.
-  pending = bytes.concat(pending, bytes.from_string("!"))
+  pending = pending + bytes.from_string("!")
   println("${int.to_string(size(pending))} ${bytes.to_string_lossy(pending)}")
 }
 "#;
@@ -97,7 +97,7 @@ fn report() -> String = {
   chunks = [bytes.from_string("de"), bytes.from_string("fgh")]
   let first = "${int.to_string(size(pending))} ${int.to_string(total(chunks))} ${int.to_string(maybe(last))}"
   last = some(pending)
-  pending = bytes.concat(pending, bytes.from_string("!"))
+  pending = pending + bytes.from_string("!")
   "${first}\n${int.to_string(maybe(last))} ${int.to_string(size(TBL))} ${int.to_string(size(pending))} ${bytes.to_string_lossy(pending)}"
 }
 "#;

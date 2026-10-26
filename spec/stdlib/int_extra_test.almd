@@ -39,11 +39,11 @@ test "int.clamp squeezes into range" {
 test "int.to_hex roundtrip" {
   let hex = int.to_hex(255)
   assert_eq(hex, "ff")
-  assert_eq(int.from_hex(hex), ok(255))
+  assert_eq(int.parse_radix(hex, 16), ok(255))
 }
 
-test "int.from_hex mixed case" {
-  assert_eq(int.from_hex("Ff"), ok(255))
+test "int.parse_radix mixed case" {
+  assert_eq(int.parse_radix("Ff", 16), ok(255))
 }
 
 test "int.to_string roundtrip with parse" {

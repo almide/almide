@@ -3,10 +3,9 @@
 //!
 //! Every runtime module is spliced flat into the user's Rust module, and the
 //! emitter spelled the runtime's `Value` enum, the `HttpRequest` /
-//! `HttpResponse` / `JsonPath` aliases and the `Endian` / `FileStat` /
-//! `ProcessStatus` twins by their Almide names — so `type Value = { n: Int }`
-//! beside anything that pulled the owning module in was E0428 / E0574 /
-//! E0560 at rustc after a green `almide check` (ALS-T6). The runtime spells
+//! `HttpResponse` aliases and the `FileStat` / `ProcessStatus` twins by
+//! their Almide names — so `type Value = { n: Int }` beside anything that
+//! pulled the owning module in was E0428 / E0574 / E0560 at rustc after a green `almide check` (ALS-T6). The runtime spells
 //! them under reserved `Almide*` names now and the walker
 //! (`walker/runtime_owned.rs`) renders every reference with the reserved
 //! spelling, leaving the bare one to the user's declaration.
@@ -17,7 +16,7 @@
 //! wasm leg has no runtime prelude to collide with, so this pins NATIVE only,
 //! per the tests/native_mut_param_pins_test.rs doctrine. Each program pulls
 //! the module whose runtime source defines the twin (json → value.rs,
-//! http → http.rs, bytes → bytes.rs, fs → fs.rs, process → process.rs) and
+//! http → http.rs, fs → fs.rs, process → process.rs) and
 //! uses only functions that do not hand back the shadowed type, since the
 //! checker resolves a user `Value` and the runtime's `Value` to ONE name —
 //! that coexistence is a checker-side gap, not a spelling collision.
@@ -118,20 +117,14 @@ fn user_types_named_http_call_and_http_limits_build_beside_the_handle() {
 }
 
 #[test]
-fn user_type_named_json_path_builds_beside_json() {
+fn user_type_named_http_request_builds_beside_http() {
+    // `json.parse` / `json.stringify` hand back no HttpRequest, so the user's
+    // HttpRequest is the only one the program spells while http.rs (and its
+    // `AlmideHttpRequest`) is spliced in.
     assert_user_type_builds(
-        "JsonPath",
-        "import json\ntype JsonPath = { n: Int }\neffect fn main() -> Unit = {\n  let x = JsonPath { n: 7 }\n  let v = json.parse(\"{\\\"a\\\":1}\")!\n  println(\"${x.n} ${json.stringify(v)}\")\n}\n",
+        "HttpRequest",
+        "import http\nimport json\ntype HttpRequest = { n: Int }\neffect fn main() -> Unit = {\n  let x = HttpRequest { n: 7 }\n  let v = json.parse(\"{\\\"a\\\":1}\")!\n  println(\"${x.n} ${json.stringify(v)}\")\n}\n",
         "7 {\"a\":1}\n",
-    );
-}
-
-#[test]
-fn user_type_named_endian_builds_with_bytes_rs_spliced() {
-    assert_user_type_builds(
-        "Endian",
-        "import bytes\ntype Endian = { n: Int }\neffect fn main() -> Unit = {\n  let x = Endian { n: 7 }\n  println(\"${x.n} ${bytes.len(bytes.zeros(2))}\")\n}\n",
-        "7 2\n",
     );
 }
 
@@ -169,16 +162,17 @@ fn user_type_named_after_a_runtime_private_item_builds() {
     );
 }
 
-/// With `bytes` auto-imported the bundled `Endian` decl never reaches the
-/// program, and a bare `LittleEndian` PATTERN rendered as a catch-all binding
-/// (E0170 at rustc). The runtime-owned ctors are registered unconditionally
-/// now, so construction and patterns qualify against `AlmideEndian` alike.
+/// A bare ctor PATTERN of a stdlib-owned variant rendered as a catch-all
+/// binding (E0170 at rustc) when the decl did not reach the program. The
+/// owned ctors qualify in construction and in patterns alike. (First pinned
+/// on `bytes.Endian` under the auto-import; no auto-imported stdlib variant
+/// remains, so this runs on `net.IpAddr` under an explicit import.)
 #[test]
-fn endian_ctors_qualify_without_an_explicit_bytes_import() {
+fn owned_variant_ctors_qualify_in_construction_and_patterns() {
     assert_user_type_builds(
-        "EndianAuto",
-        "fn pick(big: Bool) -> Endian = if big then BigEndian else LittleEndian\nfn name(e: Endian) -> String = match e { LittleEndian => \"le\", BigEndian => \"be\" }\neffect fn main() -> Unit = {\n  var t = bytes.zeros(0)\n  bytes.write_uint16(t, 258, LittleEndian)\n  bytes.write_uint16(t, 258, pick(true))\n  println(\"${int.from_uint16(bytes.read_uint16(t, 0, LittleEndian))} ${int.from_uint16(bytes.read_uint16(t, 2, BigEndian))} ${name(pick(false))} ${name(pick(true))}\")\n}\n",
-        "258 258 le be\n",
+        "IpAddrCtors",
+        "import net\nfn pick(v6: Bool) -> IpAddr = if v6 then V6([0, 0, 0, 0, 0, 0, 0, 1]) else V4(127, 0, 0, 1)\nfn name(e: IpAddr) -> String = match e { V4(_, _, _, _) => \"v4\", V6(_) => \"v6\" }\neffect fn main() -> Unit = {\n  println(\"${name(pick(false))} ${name(pick(true))} ${net.is_loopback(pick(true))}\")\n}\n",
+        "v4 v6 true\n",
     );
 }
 
@@ -187,16 +181,12 @@ fn endian_ctors_qualify_without_an_explicit_bytes_import() {
 /// they printed before (and what the wasm leg prints).
 #[test]
 fn runtime_twins_keep_their_repr_equality_and_patterns() {
-    // (`import bytes` is explicit and `bytes.len` is called: a program that
-    // only NAMES `Endian` never splices bytes.rs, and under the auto-import
-    // the bundled decl never reaches the program so `${e}` has no repr route
-    // — both pre-existing walls on either side of this change.)
-    let source = "import bytes\nimport fs\nimport process\nfn kind(m: FileStat) -> String = match m { FileStat { is_dir, .. } => if is_dir then \"dir\" else \"file\" }\neffect fn main() -> Unit = {\n  let p = \"/tmp/almd_1821_twin_repr_pin.txt\"\n  fs.write_text(p, \"abc\")!\n  let m = fs.stat(p)!\n  println(\"${m.size} ${m.is_file} ${m == m}\")\n  println(kind(m))\n  let s = process.output(process.ProcessCommand { cmd: \"true\", args: [] })!\n  println(\"${s.code} ${s} ${s == s}\")\n  let e: Endian = BigEndian\n  println(\"${e} ${e == LittleEndian} ${bytes.len(bytes.zeros(0))}\")\n}\n";
+    let source = "import fs\nimport process\nfn kind(m: FileStat) -> String = match m { FileStat { is_dir, .. } => if is_dir then \"dir\" else \"file\" }\neffect fn main() -> Unit = {\n  let p = \"/tmp/almd_1821_twin_repr_pin.txt\"\n  fs.write_text(p, \"abc\")!\n  let m = fs.stat(p)!\n  println(\"${m.size} ${m.is_file} ${m == m}\")\n  println(kind(m))\n  let s = process.output(process.ProcessCommand { cmd: \"true\", args: [] })!\n  println(\"${s.code} ${s} ${s == s}\")\n}\n";
     let (ok, stdout, stderr) = run_inline("twins", source);
     assert!(ok, "the twin program must build on the inline native path:\n{stderr}");
     assert_eq!(
         stdout,
-        "3 true true\nfile\n0 ProcessStatus { code: 0, stdout: \"\", stderr: \"\" } true\nBigEndian false 0\n",
+        "3 true true\nfile\n0 ProcessStatus { code: 0, stdout: \"\", stderr: \"\" } true\n",
         "twin repr / equality / pattern output drifted:\nstderr={stderr}"
     );
 }

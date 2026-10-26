@@ -59,7 +59,7 @@ fn lower_for_interp(source: &str) -> Result<almide_ir::IrProgram, String> {
         //          `mod type SafeHtml = String` newtype is the interp's
         //          identity ctor + pass-through pattern (#1835).
         //   path — #1844: the next stop of availability_pure_batch after html
-        //          (`path.from_string`); a `mod type SafePath = String` twin.
+        //          (`path.join`).
         //   url  — #1844: closes stdlib_type_shadow (`url.parse`); pure
         //          string arithmetic over the bridge, no prim reached.
         //   secret — #4107: `secret.new` / `secret.reveal` and the type's

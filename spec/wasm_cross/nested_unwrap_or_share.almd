@@ -20,7 +20,7 @@ fn main() -> Unit = {
   let t: (Bool?)? = some(some(true))
   let xs: List[Bool?] = option.to_list(t)
   println("xs = ${xs}")
-  let g: Bool? = list.get_or(option.to_list(t), 5, none)
+  let g: Bool? = list.get(option.to_list(t), 5) ?? none
   println("g = ${g}")
   // option.or_else kept edition (fuzz index 622), the v1-leg twin: the KEPT
   // payload Dups into the rebuilt some() — the scalar twin raw-copied the
