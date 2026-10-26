@@ -225,11 +225,29 @@ pub fn almide_rt_map_key_bytes<K: 'static>(k: &K) -> Option<Vec<u8>> {
     None
 }
 
-/// The probe distance at which an insert marks its index flooded (#4104).
-/// A good spread at load 3/4 keeps clusters far shorter; keys crafted to
-/// collide under the fast hash make every insert walk the whole cluster, so
-/// past this the owner moves to the ordered index.
+/// The least probe distance at which an insert marks its index flooded
+/// (#4104); the bound a table actually uses is [`almide_map_flood_bound`].
+/// Keys crafted to collide under the fast hash make every insert walk the
+/// whole cluster, so past the bound the owner moves to the ordered index.
 pub const ALMIDE_MAP_FLOOD_PROBES: usize = 128;
+
+/// Probe steps allowed per bit of the table's size. The longest cluster of a
+/// WELL-spread hash grows with the table — logarithmically: linear probing at
+/// load 3/4 (dead slots count toward it) gives a longest probe of about
+/// 18·log2(slots), and plain Int keys churned by delete + insert at 100 000
+/// entries (tests/map_delete_amortized_test.rs) reach 156 steps. A fixed 128
+/// therefore flagged honest maps of ~100 000 entries as flooded, and every
+/// later operation paid the ordered index's allocation and O(log n) walk.
+pub const ALMIDE_MAP_FLOOD_PROBES_PER_BIT: usize = 32;
+
+/// The flood bound of a table of `slot_len` (a power of two) slots:
+/// 32·log2(slot_len), at least [`ALMIDE_MAP_FLOOD_PROBES`]. Still O(log n),
+/// the ordered index's own per-operation cost, so colliding keys cost at most
+/// that many steps each before the owner moves.
+#[inline]
+fn almide_map_flood_bound(slot_len: usize) -> usize {
+    ALMIDE_MAP_FLOOD_PROBES.max(ALMIDE_MAP_FLOOD_PROBES_PER_BIT.saturating_mul(slot_len.trailing_zeros() as usize))
+}
 
 /// The hash index beside an insertion-ordered entry vector: `hashes[p]` is
 /// the full hash of entry `p`, `slots` is a power-of-two linear-probe table
@@ -253,7 +271,7 @@ pub const ALMIDE_MAP_FLOOD_PROBES: usize = 128;
 pub struct AlmideKeyIndex {
     hashes: Vec<u64>,
     slots: Vec<u64>,
-    /// An insert probed past [`ALMIDE_MAP_FLOOD_PROBES`] (#4104).
+    /// An insert probed past [`almide_map_flood_bound`] (#4104).
     flooded: bool,
 }
 
@@ -346,7 +364,7 @@ impl AlmideKeyIndex {
             probes += 1;
         }
         self.slots[i] = (h & ALMIDE_MAP_SLOT_TAG) | p as u64;
-        if probes > ALMIDE_MAP_FLOOD_PROBES {
+        if probes > almide_map_flood_bound(self.slots.len()) {
             self.flooded = true;
         }
     }
