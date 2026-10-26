@@ -505,7 +505,9 @@ mod availability_tests {
             .filter(|s| s.effect && HOSTLESS_EFFECT_MODULES.contains(&s.module))
             .map(|s| format!("{}.{}", s.module, s.func))
             .collect();
-        assert!(effects.len() >= 8, "{effects:?}");
+        // Five since wave 4A made zlib's decoders (decompress / inflate /
+        // gunzip) plain fns returning Result: only the encoders stay effects.
+        assert!(effects.len() >= 5, "{effects:?}");
         for f in &effects {
             let known = LEG_DEPENDENT_ENCODERS.iter().any(|(e, d)| e == f || d == f);
             assert!(known, "{f}: a hostless effect function neither an encoder nor a decoder of one — classify it in LEG_DEPENDENT_ENCODERS");
