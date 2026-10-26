@@ -159,6 +159,10 @@ effect env.args() -> List[String]
 // @since 0.5.0 or earlier
 effect env.get(name: String) -> Option[String]
 
+// Value of name as a Secret (prints Secret(***), constant-time ==), or none if unset. For a token or key.
+// @since unreleased
+effect env.secret(name: String) -> Option[Secret[String]]
+
 // Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
 // @since 0.5.0 or earlier
 effect env.set(name: String, value: String) -> Unit

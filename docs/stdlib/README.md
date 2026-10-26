@@ -421,6 +421,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `effect env.args() -> List[String]` — Program arguments, argv[0] excluded.
 - `effect env.get(name: String) -> Option[String]` — Value of name, or none if unset.
+- `effect env.secret(name: String) -> Option[Secret[String]]` — Value of name as a Secret (prints Secret(***), constant-time ==), or none if unset.
 - `effect env.set(name: String, value: String) -> Unit` — Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
 - `effect env.cwd() -> String` — Absolute current directory; err if unreadable.
 - `effect env.sleep_ms(ms: Int) -> Unit` — Blocks ms milliseconds; a negative ms hangs.
@@ -576,18 +577,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `hash.sha256_hex(b: Bytes) -> String` — SHA-256 of b as 64 lowercase hex chars.
 - `hash.crc32(b: Bytes) -> Int` — CRC-32 (IEEE, reflected) as an unsigned Int; 0 for empty b.
 - `hash.adler32(b: Bytes) -> Int` — Adler-32 as an unsigned Int; 1 for empty b.
-- `hash.md5(b: Bytes) -> Bytes` — 16-byte MD5 digest of b.
-- `hash.md5_hex(b: Bytes) -> String` — MD5 of b as 32 lowercase hex chars.
-- `hash.sha1(b: Bytes) -> Bytes` — 20-byte SHA-1 digest of b.
-- `hash.sha1_hex(b: Bytes) -> String` — SHA-1 of b as 40 lowercase hex chars.
 - `hash.sha512(b: Bytes) -> Bytes` — 64-byte SHA-512 digest of b.
 - `hash.sha512_hex(b: Bytes) -> String` — SHA-512 of b as 128 lowercase hex chars.
-- `hash.hmac_sha256(key: Bytes, b: Bytes) -> Bytes` — 32-byte HMAC-SHA256 of b under key (RFC 2104); key first.
-- `hash.hmac_sha256_hex(key: Bytes, b: Bytes) -> String` — HMAC-SHA256 of b under key as 64 lowercase hex chars.
-- `hash.hmac_sha512(key: Bytes, b: Bytes) -> Bytes` — 64-byte HMAC-SHA512 of b under key (RFC 2104); key first.
-- `hash.hmac_sha512_hex(key: Bytes, b: Bytes) -> String` — HMAC-SHA512 of b under key as 128 lowercase hex chars.
-- `hash.is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool` — True if tag is the HMAC-SHA256 of b under key, compared in constant time.
-- `hash.is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool` — True if tag is the HMAC-SHA512 of b under key, compared in constant time.
+- `hash.hmac_sha256(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]` — 32-byte HMAC-SHA256 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time.
+- `hash.hmac_sha512(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]` — 64-byte HMAC-SHA512 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time.
+- `hash.is_valid_hmac_sha256(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool` — True if tag is the HMAC-SHA256 of b under key, compared in constant time.
+- `hash.is_valid_hmac_sha512(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool` — True if tag is the HMAC-SHA512 of b under key, compared in constant time.
 
 ## heap
 

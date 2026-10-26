@@ -152,22 +152,6 @@ hash.crc32(b: Bytes) -> Int
 // @since unreleased
 hash.adler32(b: Bytes) -> Int
 
-// 16-byte MD5 digest of b. For compatibility only: MD5 is broken, never use it for security.
-// @since unreleased
-hash.md5(b: Bytes) -> Bytes
-
-// MD5 of b as 32 lowercase hex chars. For compatibility only, never for security.
-// @since unreleased
-hash.md5_hex(b: Bytes) -> String
-
-// 20-byte SHA-1 digest of b. For compatibility only: SHA-1 is broken, never use it for security.
-// @since unreleased
-hash.sha1(b: Bytes) -> Bytes
-
-// SHA-1 of b as 40 lowercase hex chars. For compatibility only, never for security.
-// @since unreleased
-hash.sha1_hex(b: Bytes) -> String
-
 // 64-byte SHA-512 digest of b. Not a MAC: sha512(key ++ msg) is forgeable by length extension; use hash.hmac_sha512 / hash.is_valid_hmac_sha512.
 // @since unreleased
 hash.sha512(b: Bytes) -> Bytes
@@ -176,29 +160,21 @@ hash.sha512(b: Bytes) -> Bytes
 // @since unreleased
 hash.sha512_hex(b: Bytes) -> String
 
-// 32-byte HMAC-SHA256 of b under key (RFC 2104); key first.
+// 32-byte HMAC-SHA256 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time. Hex: hex.encode(secret.reveal(tag)).
 // @since unreleased
-hash.hmac_sha256(key: Bytes, b: Bytes) -> Bytes
+hash.hmac_sha256(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]
 
-// HMAC-SHA256 of b under key as 64 lowercase hex chars.
+// 64-byte HMAC-SHA512 of b under key (RFC 2104), key first; the tag is a Secret, so its == is constant time. Hex: hex.encode(secret.reveal(tag)).
 // @since unreleased
-hash.hmac_sha256_hex(key: Bytes, b: Bytes) -> String
+hash.hmac_sha512(key: Secret[Bytes], b: Bytes) -> Secret[Bytes]
 
-// 64-byte HMAC-SHA512 of b under key (RFC 2104); key first.
+// True if tag is the HMAC-SHA256 of b under key, compared in constant time. A hex tag: hash.is_valid_hmac_sha256(key, b, secret.new(hex.decode(sig) ?? bytes.from_list([]))).
 // @since unreleased
-hash.hmac_sha512(key: Bytes, b: Bytes) -> Bytes
+hash.is_valid_hmac_sha256(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool
 
-// HMAC-SHA512 of b under key as 128 lowercase hex chars.
+// True if tag is the HMAC-SHA512 of b under key, compared in constant time. A hex tag: hash.is_valid_hmac_sha512(key, b, secret.new(hex.decode(sig) ?? bytes.from_list([]))).
 // @since unreleased
-hash.hmac_sha512_hex(key: Bytes, b: Bytes) -> String
-
-// True if tag is the HMAC-SHA256 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha256(key, b, hex.decode(sig) ?? bytes.from_list([])).
-// @since unreleased
-hash.is_valid_hmac_sha256(key: Bytes, b: Bytes, tag: Bytes) -> Bool
-
-// True if tag is the HMAC-SHA512 of b under key, compared in constant time. Use this, not ==. A hex tag: hash.is_valid_hmac_sha512(key, b, hex.decode(sig) ?? bytes.from_list([])).
-// @since unreleased
-hash.is_valid_hmac_sha512(key: Bytes, b: Bytes, tag: Bytes) -> Bool
+hash.is_valid_hmac_sha512(key: Secret[Bytes], b: Bytes, tag: Secret[Bytes]) -> Bool
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
