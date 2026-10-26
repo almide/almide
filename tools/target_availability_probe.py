@@ -58,13 +58,21 @@ DOCDIR = os.path.join(ROOT, "docs/stdlib")
 REGISTRY = os.path.join(ROOT, "crates/almide-types/src/stdlib_info.rs")
 LEGS = ("structural", "stock-p1", "embedded")
 
-# Modules that need an explicit import (the rest are auto-imported).
-EXPLICIT_IMPORT = {
-    "json", "fs", "http", "env", "io", "random", "regex", "process",
-    "testing", "url", "args", "base64", "compute", "hash", "hex",
-    "path", "html", "duration", "net", "zlib", "unix", "uuid", "bigint",
-    "ffi",
-}
+def _registry_list(const: str) -> list:
+    """The names of a `pub const <const>: &[&str]` in stdlib_info.rs, re-read
+    so the probe holds no copy that can drift."""
+    src = open(REGISTRY, encoding="utf-8").read()
+    m = re.search(rf"pub const {const}[^=]*= &\[(.*?)\];", src, re.S)
+    return re.findall(r'"([a-z0-9_]+)"', re.sub(r"//[^\n]*", "", m.group(1)))
+
+
+# Modules that need an explicit import: every registered module outside the
+# auto-import surface (TIER1_ALWAYS_ACCESSIBLE + AUTO_IMPORT_BUNDLED), the one
+# list the resolver reads. A hand-kept set here missed every module added
+# after it (`secret`).
+EXPLICIT_IMPORT = (set(_registry_list("STDLIB_MODULES")) | set(_registry_list("BUNDLED_MODULES"))) - (
+    set(_registry_list("TIER1_ALWAYS_ACCESSIBLE")) | set(_registry_list("AUTO_IMPORT_BUNDLED"))
+)
 # docs/stdlib pages that document CHECKER surface (clock constructors), not
 # a module interface — tools/gen-stdlib-doc-index.py's own exclusion — and the
 # generated index page README.md.
@@ -122,6 +130,8 @@ NOMINAL = {
     "IpAddr": ('net.parse_ip("127.0.0.1")!', "net.parse_ip", "net"),
     "Fd": ("unix.shm_create(8)!", "unix.shm_create", "unix"),
     "Uuid": ('uuid.parse("00000000-0000-0000-0000-000000000000")!', "uuid.parse", "uuid"),
+    # An opaque wrapper: only `secret.new` makes one.
+    "Secret": ("secret.new(0)", "secret.new", "secret"),
     "ProcessChild": ('process.start(process.ProcessCommand { cmd: "true", args: [] })!', "process.start", "process"),
 }
 BYTES8 = "bytes.from_list([0, 0, 0, 0, 0, 0, 0, 0])"
