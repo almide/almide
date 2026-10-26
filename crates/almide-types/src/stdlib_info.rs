@@ -737,6 +737,7 @@ mod ordered_tests {
     fn the_ordered_table_is_the_d3_set() {
         let t = super::ordered_stdlib_fns();
         assert!(super::is_ordered_stdlib_fn("env", "set"));
+        assert!(super::is_ordered_stdlib_fn("env", "remove"));
         assert!(super::is_ordered_stdlib_fn("fs", "write_text"));
         assert!(super::is_ordered_stdlib_fn("io", "read_line"));
         assert!(super::is_ordered_stdlib_fn("process", "start"));
@@ -746,10 +747,11 @@ mod ordered_tests {
         assert!(super::is_ordered_runtime_symbol("almide_rt_process___os_start"));
         // reads, output and the clock are not ordered (D3)
         assert!(!super::is_ordered_stdlib_fn("env", "get"));
+        assert!(!super::is_ordered_stdlib_fn("env", "vars"));
         assert!(!super::is_ordered_stdlib_fn("fs", "read_text"));
         assert!(!super::is_ordered_stdlib_fn("io", "print"));
         assert!(!super::is_ordered_runtime_symbol("almide_rt_env_get"));
-        assert_eq!(t.len(), 30, "{t:?}");
+        assert_eq!(t.len(), 31, "{t:?}");
     }
 
     #[test]
