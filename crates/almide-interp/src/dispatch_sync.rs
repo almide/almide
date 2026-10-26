@@ -165,7 +165,7 @@ impl<'a> Interpreter<'a> {
     /// abstain upstream) for a non-block address, an unknown tag, an
     /// unreadable child, or a depth past the cap — never a guess. The cap is
     /// the JSON value domain's own bound (`almide_base::json_limits`, #4209):
-    /// every Value json.parse or json.set_path can make is walked, its
+    /// every Value json.parse or value.set_path can make is walked, its
     /// innermost scalar sitting at depth JSON_MAX_DEPTH; only a Value built
     /// deeper through the infallible `value.array` / `value.object` abstains.
     fn dyn_node_of(&self, addr: u32, depth: u32) -> Option<crate::value::DynNode> {

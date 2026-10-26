@@ -289,20 +289,20 @@ effect fn cmd_show(commit_hash: String) -> Result[Unit, String] = {
 
 effect fn main() -> Unit = {
   let args = env.args()
-  let cmd = list.get(args, 1) ?? ""
+  let cmd = list.get(args, 0) ?? ""
   match cmd {
     "init" => {
       cmd_init()!
     },
     "add" => {
-      let fname = list.get(args, 2) ?? ""
+      let fname = list.get(args, 1) ?? ""
       match cmd_add(fname) {
         ok(_) => (),
         err(_) => process.exit(1),
       }
     },
     "commit" => {
-      let msg = list.get(args, 3) ?? ""
+      let msg = list.get(args, 2) ?? ""
       match cmd_commit(msg) {
         ok(_) => (),
         err(_) => process.exit(1),
@@ -315,36 +315,36 @@ effect fn main() -> Unit = {
       cmd_log()!
     },
     "diff" => {
-      let h1 = list.get(args, 2) ?? ""
-      let h2 = list.get(args, 3) ?? ""
+      let h1 = list.get(args, 1) ?? ""
+      let h2 = list.get(args, 2) ?? ""
       match cmd_diff(h1, h2) {
         ok(_) => (),
         err(_) => process.exit(1),
       }
     },
     "checkout" => {
-      let hash = list.get(args, 2) ?? ""
+      let hash = list.get(args, 1) ?? ""
       match cmd_checkout(hash) {
         ok(_) => (),
         err(_) => process.exit(1),
       }
     },
     "reset" => {
-      let hash = list.get(args, 2) ?? ""
+      let hash = list.get(args, 1) ?? ""
       match cmd_reset(hash) {
         ok(_) => (),
         err(_) => process.exit(1),
       }
     },
     "rm" => {
-      let fname = list.get(args, 2) ?? ""
+      let fname = list.get(args, 1) ?? ""
       match cmd_rm(fname) {
         ok(_) => (),
         err(_) => process.exit(1),
       }
     },
     "show" => {
-      let hash = list.get(args, 2) ?? ""
+      let hash = list.get(args, 1) ?? ""
       match cmd_show(hash) {
         ok(_) => (),
         err(_) => process.exit(1),

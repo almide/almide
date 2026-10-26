@@ -309,7 +309,7 @@ pending_self_host_ceiling = 0
 # streaming and tcp read/write/close twins left the surface (send, start,
 # io.read / io.write / io.close replace them); http.send and io.close take
 # their place. No served function moved.
-pending_port_ceiling = 20
+pending_port_ceiling = 18
 
 # The unprobed class (#1827), per leg. Empty since #2588: the five
 # HttpRequest readers (http.query_params / req_body / req_header / req_method /
@@ -328,21 +328,7 @@ reason = "embedded-lane-served (#1710 increment 1, ops 43..=47): `almide run --t
 issue = "#1423"
 
 [[unavailable]]
-fn = "http.get_bytes"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
-issue = "#1423"
-
-[[unavailable]]
 fn = "http.request"
-legs = ["stock-p1"]
-class = "pending-port"
-reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"
-issue = "#1423"
-
-[[unavailable]]
-fn = "http.request_bytes"
 legs = ["stock-p1"]
 class = "pending-port"
 reason = "embedded-lane-served (#1710 increment 3, the framed ops 48..=50): `almide run --target wasm` serves the 4-arg request family through the http_framed splice and the transcribed native client (C-328); the DEFAULT stock artifact still refuses at build via the op audit"

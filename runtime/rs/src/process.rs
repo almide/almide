@@ -7,12 +7,9 @@
 //
 // The suffix is load-bearing. A reader who recognises `(os error 2)` keeps
 // recognising it, and anything classifying on the errno tail keeps working.
-// `fs.rs` carries the twin of this pair (its `io_err`); the subprocess
-// family's own copy is `almide_proc_call_err` in the shared core below, which
-// the embedded wasm host runs too (#2589).
-fn call_err(call: &str, args: &str, e: impl std::fmt::Display) -> String {
-    format!("{call}({args}): {e}")
-}
+// `fs.rs` carries its own copy (its `io_err`); the subprocess family's is
+// `almide_proc_call_err` in the shared core below, which the embedded wasm
+// host runs too (#2589).
 // The quoting twin (`almide_proc_q`: quotes plus C-418's control/bidi
 // escapes, the rule `fs` reproduces in its hand-written WAT) lives in the
 // shared core.

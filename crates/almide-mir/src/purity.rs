@@ -149,7 +149,6 @@ pub const PURE_MODULES: &[&str] = &[
     "list_fold_ols",
     "list_foldf",
     "list_get",
-    "list_get_or_str",
     "list_get_str",
     "list_heapelem",
     "list_hshare",

@@ -118,7 +118,7 @@ impl Why {
 /// (`witness_field_value`). #2758: `m[k] = v` — the in-place window
 /// (map_inplace.rs) lowers the key and the value through `lower_arg`
 /// (`Retain`) and rebinds the var (`witness_mut_rebind`), exactly the
-/// `map.insert(m, k, v)` route; its functional fallback declines at emission.
+/// `m[k] = v` route; its functional fallback declines at emission.
 fn write_subset(s: &IrStmtKind) -> Option<String> {
     match s {
         IrStmtKind::Assign { value, .. } => value_subset(value).map(|w| w.at("assign")),

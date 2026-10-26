@@ -36,7 +36,7 @@
 //     value being parsed.
 // The bound is crates/almide-base/src/json_limits.rs's JSON_MAX_DEPTH; this
 // is its self-hosted reading (tests/json_depth_limit_test.rs pins the two),
-// shared with json.set_path's bound (#4209, stdlib/json_path.almd).
+// shared with value.set_path's bound (#4209, stdlib/json_path.almd).
 fn __json_max_depth() -> Int = 1000
 
 // The err text, spelled out (a runtime int.to_string costs every JSON

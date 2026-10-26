@@ -203,7 +203,7 @@ pub struct CodegenAnnotations {
     /// binding shares their heap value via `var b = a`, `let b = a`, `b = r.field`,
     /// an if/match arm, or a destructure element) AND mutated in place (IndexAssign,
     /// FieldAssign, ListSwap/Reverse/RotateLeft/CopySlice, or an in-place stdlib
-    /// mutator like `list.push`/`map.insert`). Without a copy-on-write at the
+    /// mutator like `list.push`/`bytes.put_u8`). Without a copy-on-write at the
     /// mutation, the sibling binding would observe the mutation — violating Almide's
     /// value semantics (RcCow doc, `lib.rs`). Populated by `AliasCowPass`.
     ///

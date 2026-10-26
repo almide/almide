@@ -3,8 +3,8 @@
 //! through the shared `$scan_*` helpers. Keys and set elements are
 //! scalars (equality must be defined); map values are any slice type.
 //!
-//! Mutation doctrine matches List: binds deep-copy, so `map.insert`'s
-//! `mut` form is a var write-back of a functionally-built block. (The
+//! Mutation doctrine matches List: binds deep-copy, so the in-place
+//! `m[k] = v` form is a var write-back of a functionally-built block. (The
 //! functional build copies per insert — quadratic for adversarial loops;
 //! upgrade to cap-aware in-place growth if a fixture ever trips it.)
 
@@ -606,7 +606,7 @@ impl Emitter<'_> {
         };
     }
 
-    /// `map.insert` / `map.delete` on a record var's field (#2908): the
+    /// The in-place insert (`m[k] = v`) on a record var's field (#2908): the
     /// functional op over the same receiver, written back as `h.f = op(..)`
     /// through the copy-on-write field write — the one path every field
     /// write's credits already ride.

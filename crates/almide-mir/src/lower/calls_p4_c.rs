@@ -168,7 +168,7 @@ impl LowerCtx {
         }
         if crate::lower::is_map_msv_ty(ty) {
             // `Map[String, Map[String, String]]` arg temp (the inline nested-map literal
-            // fed straight to `map.get_or` — map_fold_heap_acc's r7): `$__drop_map_msv`
+            // fed straight to `map.get` — map_fold_heap_acc's r7): `$__drop_map_msv`
             // sweeps each last-ref inner map; the flat fallback leaked the whole nested
             // map per iteration (loop OOM).
             self.value_drops.entry(dst).or_default().named_route = Some("map_msv".to_string());

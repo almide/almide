@@ -1424,7 +1424,7 @@ impl Checker {
 
     /// #2704: `!` on a NEVER-ERR effect call (a stdlib `@intrinsic` effect fn
     /// whose declared return is not a `Result`, e.g. `random.int`,
-    /// `env.millis`) is the silent no-op of #1049 in every effect-fn body:
+    /// `datetime.now_ms`) is the silent no-op of #1049 in every effect-fn body:
     /// an `effect fn` body (where `auto_unwrap` already accepts it) and an
     /// `effect (…) -> …` slot lambda such as an `http.serve` handler, which
     /// #1055 gives effect-fn body ergonomics. ADR-0002 §D6: a stdlib

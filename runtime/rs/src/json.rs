@@ -292,13 +292,6 @@ pub fn almide_rt_json_parse(text: &str) -> Result<AlmideValue, AlmideString> {
 
 // ── Key-based getters ──
 
-pub fn almide_json_get(j: &AlmideValue, key: &str) -> Option<AlmideValue> {
-    match j {
-        AlmideValue::Object(entries) => entries.iter().find(|(k, _)| k.as_ref() == key).map(|(_, v)| v.clone()),
-        _ => None,
-    }
-}
-
 
 
 

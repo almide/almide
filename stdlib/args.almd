@@ -3,7 +3,7 @@
 //
 // Every reader is an `effect fn` (dialect epoch 13): argv is input, and a
 // plain fn writes and aborts but never reads (ADR-0022), the rule
-// `process.args` already followed (#3248). The `__` helpers take the list as
+// `env.args` already followed (#3248). The `__` helpers take the list as
 // a parameter and stay plain. `import env` lets the checker resolve
 // `env.args` here, so the effect rule judges this file (without it the call
 // was an unresolved name in the bundled context and E006 could not fire).
@@ -45,7 +45,7 @@ fn __operands(args: List[String]) -> List[String] = match list.index_of(args, "-
 fn __flag_at(args: List[String], long: String, short: String, i: Int) -> Bool =
   if i >= list.len(args) then false
   else {
-    // Read the element ONCE — a repeated `list.get_or` on a heap list param
+    // Read the element ONCE — a repeated `list.get` on a heap list param
     // inside a bundled module doubled the borrow (#892).
     let a = list.get(args, i) ?? ""
     if a == long or a == short then true

@@ -199,8 +199,8 @@ impl Checker {
     /// Validate `mut`-parameter arguments for a UFCS METHOD call.
     ///
     /// `obj.m(a, b)` desugars to `module.m(obj, a, b)`, so the receiver is argument 0 —
-    /// and for the in-place stdlib mutators (`list.push(mut xs, x)`, `map.insert(mut m, …)`,
-    /// `bytes.set_at(mut b, …)`) argument 0 IS the `mut` parameter. The static-resolution
+    /// and for the in-place stdlib mutators (`list.push(mut xs, x)`, `bytes.put_u8(mut b, …)`)
+    /// argument 0 IS the `mut` parameter. The static-resolution
     /// branch above passes only the explicit args, which is right for `module.fn(...)`
     /// where there is no receiver; reusing that list here indexed a vector the receiver was
     /// not in, so the receiver was never checked.

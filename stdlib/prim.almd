@@ -193,13 +193,6 @@ fn random_get(buf: Int, len: Int) -> Int = _
 @intrinsic("almide_rt_prim_args_get_list")
 fn args_get_list() -> List[String] = _
 
-// The argv[0]-INCLUSIVE twin of args_get_list — `process.args()` = native
-// std::env::args() (program path + program args). The SAME args_sizes_get/args_get
-// WASI bridge with skip=0; the SAME Capability::CliArgs accounting. Reached only by
-// the self-hosted `process.args` (process_args.almd). No native runtime impl.
-@intrinsic("almide_rt_prim_args_get_list_full")
-fn args_get_list_full() -> List[String] = _
-
 // The environ_sizes_get + environ_get WASI lookup, packaged as ONE high-level HEAP-RESULT
 // prim — the Env profile's sandbox exit (reaches Capability::CliArgs, the same
 // process-initial-state class as argv). Scans the `KEY=VALUE` environ entries for `name`
@@ -391,10 +384,10 @@ fn read_n_bytes(n: Int) -> List[Int] = _
 // a DISTINCT capability: a clock read is neither a filesystem nor an entropy effect). Writes
 // the current clock value (nanoseconds) as an i64 at `time_ptr`, returning the i32 errno
 // (zero-extended). `id` selects the clock (0 = CLOCK_REALTIME), `precision` is the requested
-// resolution (ns). Reached only by the self-hosted `env.unix_timestamp`
-// (env_unix_timestamp.almd) in the v1 trust-spine wasm backend; the render emits the WASI
+// resolution (ns). Reached by the self-hosted `datetime.now` / `datetime.monotonic_ns`
+// (clock_now.almd) in the v1 trust-spine wasm backend; the render emits the WASI
 // clock_time_get host call. No native runtime impl — the native target uses
-// env.unix_timestamp's own @intrinsic.
+// their own @intrinsic.
 @intrinsic("almide_rt_prim_clock_time_get")
 fn clock_time_get(id: Int, precision: Int, time_ptr: Int) -> Int = _
 

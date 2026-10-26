@@ -19,10 +19,7 @@ fn json_path_get_go(j: Value, path: List[String], k: Int) -> Value? =
 
 fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Value? = match value.as_array(j) {
   ok(xs) => {
-    let n = list.len(xs)
-    let idx = if i < 0 then n + i else i
-    if idx < 0 then none
-    else match list.get(xs, idx) {
+    match list.get(xs, i) {
       some(v) => json_path_get_go(v, path, k + 1),
       none => none,
     }
@@ -32,9 +29,8 @@ fn json_path_step_index(j: Value, path: List[String], k: Int, i: Int) -> Value? 
 
 // ── value.Path (#4220) ── stdlib/value.almd's root/key/index/get_path/set_path/
 // remove_path on the wasm leg, over this file's List[String] segment rep (the newtype
-// eraser publishes Named("Path") → List[String]). The walks are the
-// json ones; the one difference is the index: value.index treats a negative i as OUT
-// OF RANGE (it never counts from the end), so a negative step is recorded as the
+// eraser publishes Named("Path") → List[String]). value.index treats a negative i as
+// OUT OF RANGE (it never counts from the end), so a negative step is recorded as the
 // largest Int, which no array reaches — get misses, set and remove leave v as is.
 @implements("value.root")
 fn value_path_root() -> List[String] = []
@@ -66,8 +62,8 @@ fn value_remove_path(v: Value, p: List[String]) -> Value = json_path_rm_go(v, p,
 // walks go by SLOT index (key @ h+12+(2i)*8, value @ +8), not by key lookup, so duplicate
 // keys transform each entry exactly like native's entries map. Over a non-object, set
 // AUTOVIVIFIES: the whole node is replaced by a fresh single-key object, and descents are
-// seeded with `{}` (__jp_empty_obj). An Index step normalizes a negative i from the end
-// (n + i); a non-array node or an out-of-range index is a NO-OP — the shared `j` returned
+// seeded with `{}` (__jp_empty_obj). An Index step is never negative (value.index); a
+// non-array node or an out-of-range index is a NO-OP — the shared `j` returned
 // bare (auto-acquire, the value_pick `else v` precedent) stands in for native's clone,
 // byte-identical because Values are immutable. Rebuilds go through the PROVEN
 // value.object / value.array ctors: the entry walks Dup borrowed slot handles into
@@ -164,8 +160,7 @@ fn __jps_pairs(j: Value, path: List[String], k: Int, key: String, nv: Value, i: 
 fn json_path_set_index(j: Value, path: List[String], k: Int, i: Int, nv: Value) -> Value =
   if prim.load32(prim.handle(j) + 4) == 5 then {
     let n = prim.load32(prim.handle(j) + 8)
-    let idx = if i < 0 then n + i else i
-    if idx >= 0 and idx < n then value.array(__jps_items(j, path, k, nv, idx, 0, n, []))
+    if i < n then value.array(__jps_items(j, path, k, nv, i, 0, n, []))
     else j
   } else j
 
@@ -213,8 +208,7 @@ fn __jpr_pairs(j: Value, path: List[String], k: Int, key: String, last: Bool, i:
 fn json_path_rm_index(j: Value, path: List[String], k: Int, i: Int, last: Bool) -> Value =
   if prim.load32(prim.handle(j) + 4) == 5 then {
     let n = prim.load32(prim.handle(j) + 8)
-    let idx = if i < 0 then n + i else i
-    if idx >= 0 and idx < n then value.array(__jpr_items(j, path, k, idx, last, 0, n, []))
+    if i < n then value.array(__jpr_items(j, path, k, i, last, 0, n, []))
     else j
   } else j
 

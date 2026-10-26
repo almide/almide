@@ -223,7 +223,7 @@ fn step(op: &Op, escaped: &mut HashSet<ValueId>) {
         // `spec/lang/rccow_value_semantics_test.almd` ("record copy shields
         // the original's bytes field": `var p2 = p1` Dup+field-copies `buf`
         // into a fresh record, and reading `p2.buf` back via `LoadHandle`
-        // before `bytes.set_at` was wrongly treated as never-escaped).
+        // before `bytes.put_u8` was wrongly treated as never-escaped).
         Op::Prim {
             kind: crate::PrimKind::LoadHandle,
             dst: Some(d),

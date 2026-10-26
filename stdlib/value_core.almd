@@ -197,8 +197,8 @@ else {
 // `acc + [k]` list-concat rc_inc; the returned list co-owns each, freed by its scope-end DropListStr).
 // No Object holds a key twice (C-401, #4112): a pair list that repeats a key
 // is folded as one upsert per pair — the key keeps the POSITION of its first
-// occurrence and takes the VALUE of its last, the json.to_map rule (C-380,
-// ALS-C1), as native's almide_rt_object_upsert does. Every reader (field,
+// occurrence and takes the VALUE of its last, the C-380 rule
+// (ALS-C1), as native's almide_rt_object_upsert does. Every reader (field,
 // keys, stringify, to_map) then sees one entry, and json.stringify never
 // writes a key twice. A short list compares pairwise; a longer one is indexed.
 fn __vobj_key_at(pairs: List[(String, Value)], i: Int) -> String = match list.get(pairs, i) {
@@ -691,7 +691,7 @@ else {
   0
 }
 
-// list.take_end / list.drop_end / list.tail over a List[Value] — the rc-aware
+// list.take_end / list.drop_end over a List[Value] — the rc-aware
 // counterparts of the generic i64 versions (#808 class: the raw __copy_slots copy
 // aliases each Value handle un-owned → source and result both release it at scope
 // end, the rc_dec double-free trap). Each copied element is CO-OWNED via __lsv_copy;
@@ -740,15 +740,6 @@ fn list_drop_end_value(xs: List[Value], n: Int) -> List[Value] = {
 // with EXACTLY ONE prim.rc_inc — never the over-counting tuple+list-concat+value.object chain (which
 // rc_inc'd a second time). a and b stay BORROWED; the result owns one fresh ref per slot, freed once by
 // its scope-end __vdrop_obj. The in-a-position fill matches v0 byte-for-byte (overriding keys do NOT move).
-fn list_tail_value(xs: List[Value]) -> List[Value] = {
-  let h = prim.handle(xs)
-  let n = prim.load32(h + 4)
-  let newlen = if n > 0 then n - 1 else 0
-  let buf = prim.alloc_list_str(newlen)
-  let _c = __lsv_copy(h + 12 + 8, prim.handle(buf) + 12, newlen, 0)
-  buf
-}
-
 // ── The key index (#4207) ── a STABLE merge sort of slot indices by key, so a
 // lookup is a binary search: merge / pick / omit cost O((n + m) log(n + m))
 // key comparisons where a scan per key cost O(n·m). The order is any total
@@ -1483,10 +1474,6 @@ fn __drop_result_lv(r: Result[List[Value], String]) -> Unit = {
   prim.rc_dec(h)
 }
 
-// list.get_or over a List[Value] → the ELEMENT directly (not an Option). The
-// repr-poly `_str` deep copy (string.repeat) corrupts a dynamic Value block, so
-// SHARE the element exactly like list.get_value's Some arm (the borrowed handle
-// is auto-acquired on return; the list keeps owning the original).
 fn __drop_result_value(r: Result[Value, String]) -> Unit = {
   let h = prim.handle(r)
   if prim.load32(h + 0) == 1 then {

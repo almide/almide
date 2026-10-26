@@ -126,7 +126,7 @@ pub(crate) fn droppable_ty(t: &Ty) -> bool {
         // #2010 item 5 / the flat matrix block: a dynamic `Value` (spelled
         // as the bare Named type) and a `Matrix` are credits the typed drop
         // releases like any other (rc_droppable). Unbound, a `${value.int(2)}`
-        // part or a `matrix.to_lists(matrix.pow(m, e))` operand kept its
+        // part or a `matrix.to_lists(matrix.transpose(m))` operand kept its
         // block for the program's life (#2975, #2974).
         Ty::Named(name, args) if args.is_empty() && name.as_str() == "Value" => true,
         Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _) => true,

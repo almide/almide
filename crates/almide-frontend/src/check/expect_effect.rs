@@ -164,8 +164,8 @@ impl Checker {
         self.pending_call_ret = self.call_expect.remove(&id);
     }
 
-    /// The generic bindings an expected result implies: `map.get_or(..) ->
-    /// V` in a handler slot binds `V` to the handler, so the slots of the
+    /// The generic bindings an expected result implies: `map.get(..) ?? d`
+    /// of type `V` in a handler slot binds `V` to the handler, so the slots of the
     /// args that produce `V` read it.
     pub(crate) fn bindings_from_expected_ret(&mut self, sig: Option<&crate::types::FnSig>) -> Bindings {
         let mut seeds = Bindings::new();

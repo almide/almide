@@ -545,7 +545,7 @@ fn rewrite_call_method(object: Box<IrExpr>, method: Sym, args: Vec<IrExpr>, type
     // Other Type.method patterns → Type_method standalone calls
     if method.contains('.') {
         // Bundled-stdlib modules (lowercase heads like
-        // `uint32.to_int64`) carry the `almide_rt_` prefix
+        // `uint32.from_checked`) carry the `almide_rt_` prefix
         // at their definition site (see `walker/mod.rs`
         // rename of `fn <clean_name>` → `fn almide_rt_<m>_<clean>`).
         // Mirror that prefix at the call site so UFCS

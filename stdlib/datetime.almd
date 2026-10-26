@@ -51,8 +51,8 @@ fn month(ts: Int) -> Int = _
 // exception (koka `now() : <ndet,utc>`, lean4 `BaseIO`, roc `!`). Callers
 // see the RAW Int (bundled-stdlib effect fns carry their own propagation and
 // are never Result-lifted), so inside an effect fn the spelling is unchanged:
-// `let t = datetime.now()`. `env.millis` took this shape first; these two
-// were the last Clock reads a pure fn could reach.
+// `let t = datetime.now()`. These two were the last Clock reads a pure fn
+// could reach.
 /// Wall-clock Unix seconds (not monotonic).
 @intrinsic("almide_rt_datetime_now")
 effect fn now() -> Int = _

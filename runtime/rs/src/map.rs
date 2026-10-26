@@ -580,7 +580,7 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
         self.entries.push(Some((k, v)));
         self.note_push(h);
     }
-    /// `m[k] = f(map.get_or(m, k, init))` in ONE probe (the walker's
+    /// `m[k] = f(map.get(m, k) ?? init)` in ONE probe (the walker's
     /// `map_upsert` form): present → the slot becomes `f(old)` in place,
     /// absent → `(k, f(init))` is appended. The same hash and position the
     /// two-step `get_or` + `insert` computed twice. `f` runs before the
@@ -705,7 +705,7 @@ pub fn almide_rt_map_new<K, V>() -> AlmideMap<K, V> { AlmideMap::new() }
 pub fn almide_rt_map_len<K, V>(m: &AlmideMap<K, V>) -> i64 { m.len() as i64 }
 pub fn almide_rt_map_is_empty<K, V>(m: &AlmideMap<K, V>) -> bool { m.is_empty() }
 // The read side borrows its key (`@borrow_ref(key)` in stdlib/map.almd):
-// `map.get_or(counts, w, 0)` no longer clones `w` at the call site — the
+// `map.get(counts, w)` no longer clones `w` at the call site — the
 // clone was one third of the word-count loop's map cost (#2157). `Q` is the
 // borrowed key form: `&String`/`&str` for a String key, `&i64` for Int.
 pub fn almide_rt_map_get<K: PartialEq + 'static, V: Clone, Q: ?Sized + PartialEq + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q) -> Option<V>

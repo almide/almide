@@ -133,7 +133,7 @@ fn dispatch_main(cells: &[(String, String, i32, &str, String)]) -> String {
         arms.push_str(&format!("    \"{name}\" => {name}()!,\n"));
     }
     format!(
-        "import env\n\neffect fn main() -> Unit = {{\n  let which = list.get(env.args(), 1) ?? \"\"\n  println(\"start\")\n  match which {{\n{arms}    _ => println(\"no such cell\"),\n  }}\n  println(\"unreachable\")\n}}\n"
+        "import env\n\neffect fn main() -> Unit = {{\n  let which = list.get(env.args(), 0) ?? \"\"\n  println(\"start\")\n  match which {{\n{arms}    _ => println(\"no such cell\"),\n  }}\n  println(\"unreachable\")\n}}\n"
     )
 }
 

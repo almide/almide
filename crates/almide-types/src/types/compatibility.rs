@@ -42,7 +42,7 @@ impl Ty {
     /// discrimination:
     ///   - `Matrix.compatible(Matrix[T])` = true for all T (bare param
     ///     accepts any typed value — pre-P4 stdlib `matrix.shape(m: Matrix)`
-    ///     stays usable with `matrix.zeros_f32` results).
+    ///     stays usable with `matrix.zeros` results).
     ///   - `Matrix[Ty::Float].compatible(Matrix)` = true only for the
     ///     `Float` dtype (`Matrix` is the alias for `Matrix[Float]`; bare
     ///     runtime repr is f64).

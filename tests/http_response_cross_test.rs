@@ -3,7 +3,9 @@
 //! native answers through the response accessors — the status, `header`,
 //! every value of a repeated field in order (`header_values`), the lowercased
 //! set of `headers`' names and the body — for a 200, a 404 and
-//! an unfollowed 302, and the same err text for a closed port. That is C-328's
+//! an unfollowed 302, and the same err text for a closed port. A body that is
+//! not UTF-8 reads back byte for byte through `body_bytes`, and `body` is its
+//! lossy decoding, on every lane. That is C-328's
 //! p3 comparison: the header SET, lowercased, since wasi:http fields need not
 //! keep the wire spelling or the order across names. The set leaves out the
 //! fields the client manages (C-370's nine): a stock wasi:http host withholds
@@ -57,6 +59,11 @@ fn read_request(s: &mut TcpStream) -> (String, String, String) {
 fn reply(first: &str, body: &str, x_echo: &str) -> Vec<u8> {
     let path = first.split_whitespace().nth(1).unwrap_or("/");
     let method = first.split_whitespace().next().unwrap_or("");
+    if path == "/bin" {
+        let mut out = b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n".to_vec();
+        out.extend_from_slice(&[0xff, 0x41, 0xfe, 0x42]);
+        return out;
+    }
     let (status, extra, payload) = match path {
         "/ok" => ("200 OK", "X-A: 1\r\nSet-Cookie: a=1\r\nset-cookie: b=2\r\nX-Multi: v\r\nKeep-Alive: timeout=5\r\n", "héllo\nworld".to_string()),
         "/missing" => ("404 Not Found", "X-Why: gone\r\n", "nope".to_string()),
@@ -115,6 +122,10 @@ effect fn main() -> Unit = {{
   println(show("delete", http.send(http.new_request("DELETE", "{base}/echo", "", []))))
   println(show("request", http.send(http.new_request("OPTIONS", "{base}/echo", "r-body", [("X-Echo", "λ v")]))))
   println(show("closed", http.get_response("http://127.0.0.1:{dead}/ok")))
+  match http.get_response("{base}/bin") {{
+    ok(resp) => println("bin bytes=${{bytes.to_list(http.body_bytes(resp)) |> list.map((b) => int.to_string(b)) |> list.join(",")}} text=[${{http.body(resp)}}]"),
+    err(e) => println("bin err: ${{e}}"),
+  }}
   // The text client's empty PATCH: the same request framing as send's —
   // no content, not a chunked `0\r\n\r\n`.
   match http.request("PATCH", "{base}/echo", "", []) {{
@@ -185,6 +196,7 @@ fn the_full_response_family_reads_the_same_on_native_and_the_p3_component() {
     assert!(native.0.contains("redir 302 a=- loc=/ok "), "{}", native.0);
     assert!(native.0.contains("request 200 ") && native.0.contains("body=[OPTIONS|r-body|λ v]"), "{}", native.0);
     assert!(native.0.contains("closed err: "), "{}", native.0);
+    assert!(native.0.contains("bin bytes=255,65,254,66 text=[\u{FFFD}A\u{FFFD}B]"), "{}", native.0);
     assert!(native.0.contains("patch 200 a=- loc=- cookies= keys=content-length body=[PATCH||]"), "{}", native.0);
     assert!(native.0.contains("plain-patch [PATCH||]"), "{}", native.0);
     let p3 = p3(&file, dir.path());

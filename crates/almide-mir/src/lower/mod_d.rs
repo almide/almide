@@ -5,7 +5,7 @@
 // this crate to; there is no boundary of meaning here, and `include!` at module
 // level is the one splice Rust allows (an impl-item position rejects it).
 
-/// A sized-int WIDENING conversion call (`int8.to_int64(x)`, `uint32.to_int64(x)`, …)
+/// A sized-int WIDENING conversion call (`int.__to_int64(x)` over any sized int)
 /// whose runtime is the IDENTITY on the canonical-i64 slot value: every integer width
 /// lives sign-/zero-extended in one i64 (the `Ty` docs + `extern_wasm_abi` pin this),
 /// and the Rust runtime is `n as i64` over that already-canonical value (`u64 as i64`

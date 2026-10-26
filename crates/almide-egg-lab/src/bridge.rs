@@ -89,6 +89,28 @@ impl Bridge {
     }
 
     fn lift_node(&mut self, expr: &IrExpr, rec: &mut RecExpr<AlmideExpr>) -> Id {
+        // The matrix operators (R-matrix-14): `a * b`, `a + b` and a scale by a
+        // Float lift as the `__mul` / `__add` / `scale` calls they mean, so the
+        // `@rewrite` rules see `a * matrix.scale(b, s)` as they see the calls.
+        if let IrExprKind::BinOp { op, left, right } = &expr.kind {
+            match op {
+                BinOp::MulMatrix | BinOp::AddMatrix => {
+                    let a = self.lift_node(left, rec);
+                    let b = self.lift_node(right, rec);
+                    let node = if *op == BinOp::MulMatrix { AlmideExpr::MatrixMul([a, b]) } else { AlmideExpr::MatrixAdd([a, b]) };
+                    return rec.add(node);
+                }
+                BinOp::ScaleMatrix => {
+                    let (m, s) = if is_matrix_ty(&left.ty) { (left, right) } else { (right, left) };
+                    if s.ty == Ty::Float {
+                        let m = self.lift_node(m, rec);
+                        let s = self.lift_node(s, rec);
+                        return rec.add(AlmideExpr::MatrixScale([m, s]));
+                    }
+                }
+                _ => {}
+            }
+        }
         if let IrExprKind::Call { target, args, .. } = &expr.kind {
             if let CallTarget::Module { module, func, .. } = target {
                 let m = module.as_str();

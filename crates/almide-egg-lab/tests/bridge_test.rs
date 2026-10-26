@@ -647,6 +647,40 @@ fn matrix_mul_scaled_reorders_arguments_correctly() {
     assert_eq!(arg_ids, vec![0, 2, 1]);
 }
 
+fn matrix_binop(op: BinOp, left: IrExpr, right: IrExpr) -> IrExpr {
+    IrExpr {
+        kind: IrExprKind::BinOp { op, left: Box::new(left), right: Box::new(right) },
+        ty: Ty::Matrix,
+        span: None, def_id: None,
+    }
+}
+
+fn saturate_to_string(expr: &IrExpr) -> String {
+    let mut bridge = Bridge::new();
+    let (rec, root) = bridge.lift(expr);
+    let runner = Runner::default().with_iter_limit(64).with_node_limit(10_000).with_expr(&rec).run(&fusion_rules());
+    let canonical_root = runner.egraph.find(root);
+    let (_, best) = Extractor::new(&runner.egraph, FusionCost).find_best(canonical_root);
+    best.to_string()
+}
+
+/// The operator spellings (R-matrix-14) fuse as the calls do: `a * scale(b, s)`,
+/// `scale(a, s) * b` and `a * (b * s)` all reach `__mul_scaled`.
+#[test]
+fn matrix_operators_fuse_like_the_calls() {
+    let rhs = matrix_binop(BinOp::MulMatrix, matrix_var(0), matrix_call("scale", vec![matrix_var(1), scalar_var(2)]));
+    assert_eq!(saturate_to_string(&rhs), "(matrix_mul_scaled _slot_0 _slot_2 _slot_1)");
+    let lhs = matrix_binop(BinOp::MulMatrix, matrix_call("scale", vec![matrix_var(0), scalar_var(2)]), matrix_var(1));
+    assert_eq!(saturate_to_string(&lhs), "(matrix_mul_scaled _slot_0 _slot_1 _slot_2)");
+    let scaled_op = IrExpr {
+        kind: IrExprKind::BinOp { op: BinOp::ScaleMatrix, left: Box::new(scalar_var(2)), right: Box::new(matrix_var(1)) },
+        ty: Ty::Matrix,
+        span: None, def_id: None,
+    };
+    let nested = matrix_binop(BinOp::MulMatrix, matrix_var(0), scaled_op);
+    assert_eq!(saturate_to_string(&nested), "(matrix_mul_scaled _slot_0 _slot_2 _slot_1)");
+}
+
 /// Build a `Block { stmts; trailing }` IR fragment from a list of
 /// `(var, value)` Bind pairs. Used to feed the let-split inline path.
 fn block_lets(binds: Vec<(VarId, IrExpr)>, trailing: IrExpr) -> IrExpr {

@@ -42,8 +42,8 @@ fn main() -> Unit = {
   ]) / matrix.zeros(1, 2))
   show("add_empty", a + e)
   show("add_r0", matrix.zeros(3, 0) + c)
-  show("zeros_after_free", matrix.scale(matrix.zeros(1, 2), -1.0))
-  show("neg", matrix.scale(a, -1.0))
+  show("zeros_after_free", -matrix.zeros(1, 2))
+  show("neg", -a)
   show("scale", matrix.scale(a, -0.5))
   let k = 3.0
   show("map", matrix.map(a, (x) => x * k - 1.0))

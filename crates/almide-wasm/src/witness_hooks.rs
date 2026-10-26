@@ -397,7 +397,7 @@ impl Emitter<'_> {
     pub(crate) fn witness_module_result(&mut self, name: &str, args: &[almide_ir::IrExpr], hooks_before: usize) {
         let Some(w) = self.witness.as_ref() else { return };
         // A SCALAR argument has no RC site of its own (an arm may lower it
-        // bare — `math.pow`'s operands); any site inside it (a nested
+        // bare — `math.__pow`'s operands); any site inside it (a nested
         // call's arguments) is that call's own hook. Every droppable — or
         // untyped — argument must have gone through `lower_arg`.
         let scalar = |a: &almide_ir::IrExpr| {

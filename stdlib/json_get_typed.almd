@@ -1,10 +1,8 @@
-// json_get_typed — SELF-HOSTED key-based typed `json.get_<T>(j, key)` over `value.__field`
+// json_get_typed — SELF-HOSTED key-based typed `value.get_<T>(v, key)` over `value.__field`
 // (Result[Value, String], wasm-linked) composed with the per-type `value.as_<T>` accessor
 // (Result[T, String], wasm-linked): the field is fetched, then coerced to the requested
-// type; a missing key OR a type mismatch yields None. Byte-identical to the
-// `almide_json_get_<T>` intrinsics across all cases (absent key, present-but-wrong-type,
-// present-matching, null), so the v1 trust spine lowers the ubiquitous
-// `json.get_string(v,k) ?? ""` / `json.get_bool(v,k) ?? false` / `json.get_array(v,k) ?? []`
+// type; a missing key OR a type mismatch yields None, byte-identical to native. The v1
+// trust spine lowers the `value.get_string(v, k) ?? ""` / `value.get_array(v, k) ?? []`
 // accessor family through the PROVEN `value.__field` + `value.as_*` + Option-ctor path with NO
 // hand-written wasm runtime to drift from the native oracle.
 //
@@ -38,8 +36,7 @@ fn __r2o_arr(r: Result[List[Value], String]) -> List[Value]? = match r {
 }
 
 // ── value.get / value.get_<kind> (#4220) ── the Option readers of stdlib/value.almd,
-// linked on the wasm leg as the same minimal-body shape as json.get_<T>: one
-// `match value.__field(...)` whose Ok arm tail-calls a flat Result -> Option adapter.
+// linked on the wasm leg in the minimal-body shape above.
 // `value.get` answers the Value itself; `get_int` never truncates a Float and
 // `get_float` widens an Int, exactly as value.as_int / value.as_float do.
 fn __r2o_val(r: Result[Value, String]) -> Value? = match r {
@@ -56,19 +53,34 @@ fn __r2o_obj(r: Result[List[(String, Value)], String]) -> List[(String, Value)]?
 fn value_get(v: Value, key: String) -> Value? = __r2o_val(value.__field(v, key))
 
 @implements("value.get_string")
-fn value_get_string(v: Value, key: String) -> String? = json_get_string(v, key)
+fn value_get_string(v: Value, key: String) -> String? = match value.__field(v, key) {
+  ok(x) => __r2o_str(value.as_string(x)),
+  err(_) => none,
+}
 
 @implements("value.get_int")
-fn value_get_int(v: Value, key: String) -> Int? = json_get_int(v, key)
+fn value_get_int(v: Value, key: String) -> Int? = match value.__field(v, key) {
+  ok(x) => __r2o_int(value.as_int(x)),
+  err(_) => none,
+}
 
 @implements("value.get_float")
-fn value_get_float(v: Value, key: String) -> Float? = json_get_float(v, key)
+fn value_get_float(v: Value, key: String) -> Float? = match value.__field(v, key) {
+  ok(x) => __r2o_float(value.as_float(x)),
+  err(_) => none,
+}
 
 @implements("value.get_bool")
-fn value_get_bool(v: Value, key: String) -> Bool? = json_get_bool(v, key)
+fn value_get_bool(v: Value, key: String) -> Bool? = match value.__field(v, key) {
+  ok(x) => __r2o_bool(value.as_bool(x)),
+  err(_) => none,
+}
 
 @implements("value.get_array")
-fn value_get_array(v: Value, key: String) -> List[Value]? = json_get_array(v, key)
+fn value_get_array(v: Value, key: String) -> List[Value]? = match value.__field(v, key) {
+  ok(x) => __r2o_arr(value.as_array(x)),
+  err(_) => none,
+}
 
 @implements("value.get_object")
 fn value_get_object(v: Value, key: String) -> List[(String, Value)]? = match value.__field(v, key) {

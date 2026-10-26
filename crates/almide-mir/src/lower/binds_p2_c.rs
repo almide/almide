@@ -149,7 +149,7 @@ impl LowerCtx {
         if is_self_host_option_module_fn(module, func) {
             self.value_shapes.insert(dst, crate::lower::VariantShape::Option);
         }
-        // A FUNCTION-valued module-call result (`let f = map.get_or(m, k, d)` —
+        // A FUNCTION-valued module-call result (`let f = map.get(m, k) ?? d` —
         // the closure-valued map read): the result IS a closure block — track it
         // so a later `f()` dispatches via CallIndirect, and its scope-end drop
         // routes to the recursive `$__drop_closure` (`closure_values` drives

@@ -378,8 +378,8 @@ impl Checker {
                      explicit widening required (e.g. `int.from_{}(...)`)",
                     name, rr.display(), rb.display(), rb.display().to_lowercase()
                 ),
-                "Widen the value at the return: `int.from_uint8(x)` / `int.from_int32(x)` \
-                 (`float.from_float32(x)` for the float widths).",
+                "Widen the value at the return: `int.from(x)` \
+                 (`float.from(x)` for the float widths).",
                 format!("fn '{}'", name),
             ).with_code("E001"));
         }

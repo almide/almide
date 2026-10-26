@@ -432,8 +432,8 @@ impl LowerCtx {
                     crate::lower::mutable_global_info(target).map(|(_, ty)| ty)
                 };
                 // Functional REBIND: `m[k] = v` ≡ `m = map.set(m, k, v)` (value
-                // semantics) — the SAME treatment the `map.insert(m, k, v)` CALL form
-                // already gets below; the repr dispatch suffixes the self-host
+                // semantics) — the SAME treatment the other in-place mutators
+                // already get below; the repr dispatch suffixes the self-host
                 // (set_skv/str/…) exactly like a source-level call. Both legs take this
                 // path (one shared rewrite, mir==ir symmetric); classify credits the
                 // MapInsert node with the one synthetic call. Needs the declared map ty
@@ -537,7 +537,7 @@ impl LowerCtx {
                 // loop with break/continue is WALLED, because the v0 wasm backend frees
                 // AFTER the break branch target and would leak).
                 IrExprKind::Break | IrExprKind::Continue => Ok(()),
-                // The v0 IN-PLACE mutators (`bytes.push`, `map.insert`, `list.push`,
+                // The v0 IN-PLACE mutators (`bytes.push`, `list.push`,
                 // `map.clear`, …) rewrite to their functional rebinds and re-dispatch
                 // through the Assign/FieldAssign path — see `rewrite_inplace_mutation`.
                 IrExprKind::Call { target: CallTarget::Module { .. }, .. } => {

@@ -457,7 +457,7 @@ fn desugar_all_try_call_access_passes(
         .or_else(|| desugar_map_access_calls(cur))
         // `buf[i]` over Bytes → `bytes.index(buf, i)` — same contract.
         .or_else(|| desugar_bytes_index_calls(cur))
-        // Matrix BinOps → matrix.mul/add/sub — same contract.
+        // Matrix BinOps → matrix.__mul/__add/__sub — same contract.
         .or_else(|| desugar_matrix_binops(cur))
         // `buf[i] = v` over Bytes → the checked `bytes.index` then `bytes.__set_u8`
         // (#2893) — same contract (both counted Module calls match the lowering's).

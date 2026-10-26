@@ -12,7 +12,6 @@ import env
 effect fn main() -> Result[Unit, String] = {
   println("args=" + list.join(env.args(), ","))
   println("pos=" + list.join(args.positional(["out"])!, ","))
-  println("raw=" + list.join(env.args()!, ","))
   println("flag_q=${args.has_flag("quiet")!}")
   println("flag_v=${args.has_flag("verbose")!}")
   println("opt=" + (args.option("out")! ?? "NONE"))

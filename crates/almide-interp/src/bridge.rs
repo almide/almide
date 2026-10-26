@@ -271,7 +271,7 @@ fn prim_bitwise_fn(func: &str, args: &[Value]) -> Option<Flow> {
 /// Int ⇄ Float is `f64.convert_i64_s` / saturating `i64.trunc_sat_f64_s`
 /// (Rust's float→int `as` is exactly the saturating truncate); `fbits` /
 /// `ffrombits` are the raw f64 ⇄ i64 reinterpret (`float.to_bits` /
-/// `int.bits_to_float`). For f32 the language-level Float32 is CARRIED widened
+/// `float.from_bits`). For f32 the language-level Float32 is CARRIED widened
 /// (one f64 in this oracle, the widened bits in the backends), the narrowing
 /// rounds to nearest, and the pattern lives in the low 32 bits.
 fn prim_repr_fn(func: &str, args: &[Value]) -> Option<Flow> {

@@ -124,7 +124,7 @@ impl Emitter<'_> {
             // Result block: the frontend absorbs the `!` on this
             // @intrinsic effect call (the probe showed the Bind's value is
             // the bare Call typed String), the same convention env.os /
-            // env.temp_dir ride — and read-to-end cannot fail.
+            // fs.temp_dir ride — and read-to-end cannot fail.
             ("io", "read_all", []) => {
                 self.io_read_all()?;
                 Some(Lowered::owned(STR))

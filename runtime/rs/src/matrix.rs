@@ -154,20 +154,6 @@ pub fn almide_rt_matrix_rows_uniform(rows: &[Vec<f64>]) {
     }
 }
 
-/// `conv1d`'s stride is a STEP: below 1 it has no meaning (0 divides the
-/// output length by zero, a negative one walks backwards) — the head-count
-/// class (C-198), not the negative-dimension clamp class. A stride of 0 was a
-/// raw `attempt to divide by zero` panic natively (exit 101) against the
-/// language's own `Error: division by zero` on the wasm leg; a negative one
-/// wrapped through `as usize` natively to a huge step (one output row) while
-/// the wasm leg divided by it and answered no rows.
-pub fn almide_rt_matrix_stride(stride: i64) -> usize {
-    if stride < 1 {
-        almide_abort("stride must be positive");
-    }
-    stride as usize
-}
-
 pub fn almide_rt_matrix_zeros(rows: i64, cols: i64) -> AlmideMatrix {
     let (r, c) = almide_rt_matrix_dims(rows, cols);
     // Row-lazy on purpose (#1532 confirm night, seed 514359535655/2163):

@@ -307,7 +307,7 @@ impl Emitter<'_> {
         Ok(())
     }
 
-    /// `m[k] = v` on a C-319 cell (#3339) — the `map.insert` mut form,
+    /// `m[k] = v` on a C-319 cell (#3339) — the in-place insert form,
     /// whose write-back reads the occupant through the cell, releases it
     /// and stores the functional `set`'s fresh block back. It walled before:
     /// a captured-and-written var is such a cell (a module `var` written
@@ -338,7 +338,7 @@ impl Emitter<'_> {
             }
             // `m[k] = v` on a map var — the in-place window when the var
             // owns its block (#1219), else the same write-back the
-            // `map.insert` mut form runs (functional `set`, rebind).
+            // in-place insert form runs (functional `set`, rebind).
             IrStmtKind::MapInsert { target, key, value } => {
                 if self.try_map_set_in_place(target, key, value)? {
                     return Ok(());
@@ -514,7 +514,7 @@ impl Emitter<'_> {
                         };
                         let (koff, voff, esz) = crate::collections::entry_layout(k, v);
                         // #1219: the cursor below holds the block across
-                        // the body — a `map.insert(m, …)` there must not
+                        // the body — an `m[k] = v` there must not
                         // grow it in place under us, so the subject
                         // witnesses a second holder (a borrowed subject
                         // takes +1; an owned one is the cursor's own), and

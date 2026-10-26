@@ -21,6 +21,10 @@ pub struct AlmideHttpResponse {
     pub status: i64,
     pub body: String,
     pub headers: Vec<(String, String)>,
+    /// The fetched body's bytes when they are not valid UTF-8, so `body` holds
+    /// their lossy decoding and `body_bytes` answers these. `None` whenever
+    /// `body` IS the body: a built response, or a fetched UTF-8 one.
+    pub body_raw: Option<Vec<u8>>,
 }
 
 // A record may hold any of the http types, and a record's repr calls each field's
@@ -33,10 +37,10 @@ impl AlmideRepr for AlmideHttpResponse {
 
 impl AlmideHttpResponse {
     pub fn new(status: i64, body: String) -> Self {
-        Self { status, body, headers: vec![("Content-Type".into(), "text/plain".into())] }
+        Self { status, body, headers: vec![("Content-Type".into(), "text/plain".into())], body_raw: None }
     }
     pub fn json(status: i64, body: String) -> Self {
-        Self { status, body, headers: vec![("Content-Type".into(), "application/json".into())] }
+        Self { status, body, headers: vec![("Content-Type".into(), "application/json".into())], body_raw: None }
     }
     /// EXACTLY the caller's headers — no seeded `Content-Type` (#1352). Entries
     /// are upserted in map order, so the list carries at most one entry per
@@ -61,7 +65,18 @@ impl AlmideHttpResponse {
                 }
             }
         }
-        Self { status, body, headers: list }
+        Self { status, body, headers: list, body_raw: None }
+    }
+    /// A fetched response: the body text is the lossy decoding of `raw`,
+    /// which is kept only when that decoding lost bytes.
+    fn fetched(status: i64, headers: Vec<(String, String)>, raw: Vec<u8>) -> Self {
+        match String::from_utf8(raw) {
+            Ok(body) => Self { status, body, headers, body_raw: None },
+            Err(e) => {
+                let raw = e.into_bytes();
+                Self { status, body: String::from_utf8_lossy(&raw).into_owned(), headers, body_raw: Some(raw) }
+            }
+        }
     }
 }
 
@@ -88,7 +103,7 @@ fn upsert_header(headers: &mut Vec<(String, String)>, key: &str, value: &str) {
 // ── Response builders ──
 
 pub fn almide_http_redirect(url: &str, code: i64) -> AlmideHttpResponse {
-    AlmideHttpResponse { status: code, body: String::new(), headers: vec![("Location".into(), url.to_string())] }
+    AlmideHttpResponse { status: code, body: String::new(), headers: vec![("Location".into(), url.to_string())], body_raw: None }
 }
 
 pub fn almide_rt_http_not_found(body: &str) -> AlmideHttpResponse {
@@ -118,6 +133,12 @@ pub fn almide_http_set_status(mut resp: AlmideHttpResponse, code: i64) -> Almide
 pub fn almide_http_get_body(resp: &AlmideHttpResponse) -> AlmideString { let __almide_v: String = (|| {
     resp.body.clone()
 })(); __almide_v.into_almide() }
+
+/// `http.body_bytes` on a response: the bytes the server sent, never the
+/// lossy text `body` answers.
+pub fn almide_http_get_body_bytes(resp: &AlmideHttpResponse) -> Vec<u8> {
+    resp.body_raw.clone().unwrap_or_else(|| resp.body.as_bytes().to_vec())
+}
 
 pub fn almide_http_set_header(mut resp: AlmideHttpResponse, key: &str, value: &str) -> AlmideHttpResponse {
     upsert_header(&mut resp.headers, key, value);
@@ -154,6 +175,7 @@ fn flat_pairs(headers: &[(String, String)]) -> Vec<String> {
 /// route's status and headers, no body).
 pub fn almide_http_set_body(mut resp: AlmideHttpResponse, body: &str) -> AlmideHttpResponse {
     resp.body = body.to_string();
+    resp.body_raw = None;
     resp
 }
 
@@ -293,8 +315,8 @@ pub fn almide_http_get_response(url: &str) -> Result<AlmideHttpResponse, AlmideS
 }
 
 pub fn almide_http_request_response(method: &str, url: &str, body: &str, headers: &[AlmideString]) -> Result<AlmideHttpResponse, AlmideString> { let __almide_r: Result<AlmideHttpResponse, String> = (|| {
-    request_response(method, url, body, &header_pairs(headers))
-        .map(|(status, headers, body)| AlmideHttpResponse { status, body, headers })
+    request_response_bytes(method, url, body, &header_pairs(headers))
+        .map(|(status, headers, raw)| AlmideHttpResponse::fetched(status, headers, raw))
 })(); __almide_r.map_err(Into::into) }
 
 // ── Call handle (#2631) ──
@@ -351,7 +373,7 @@ impl AlmideHttpCall {
 }
 
 fn http_call_response(r: Result<HttpTextResponse, String>) -> Result<AlmideHttpResponse, String> {
-    r.map(|(status, headers, body)| AlmideHttpResponse { status, body, headers })
+    r.map(|(status, headers, body)| AlmideHttpResponse { status, body, headers, body_raw: None })
 }
 
 pub fn almide_http_call_start(

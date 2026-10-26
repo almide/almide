@@ -202,8 +202,8 @@ pub fn is_self_host_option_module_fn(module: &str, func: &str) -> bool {
     // (#956's matrix rule: lossy pair ⇒ trio, on every carrier) and returns
     // a materialized Option[scalar], so a value-position `match` / `??` over
     // it EXECUTES. The enumerated per-fn list this replaces drifted the
-    // moment #956 completed the matrix: `int.from_uint64_checked` and every
-    // sized-module cell (`uint8.to_int8_checked`, …) walled value-position
+    // moment #956 completed the matrix: `int.__from_uint64_checked` and every
+    // sized-module cell (`int8.from_checked`, …) walled value-position
     // matches (#958). `checked_conversion_family_is_admitted` derives the
     // cell list from the stdlib sources, so a new cell cannot drift out of
     // this predicate again. The internal `__`-named cells (`int.__to_int8_checked`)
@@ -699,7 +699,7 @@ fn interp_list_to_string(inner: &Ty) -> (&'static str, &'static str) {
             _,
         ) => interp_list_nested_elem(inner),
         Ty::Applied(TypeConstructorId::Map, _) => interp_list_map_elem(inner),
-        // `${List[(String, Int)]}` → `[("é", 2), ("a", 1)]` — string.run_length_encode's
+        // `${List[(String, Int)]}` → `[("é", 2), ("a", 1)]` — a run-length
         // pair list (stdlib/list_to_string_lsi.almd).
         Ty::Tuple(ts)
             if ts.len() == 2 && matches!(ts[0], Ty::String) && matches!(ts[1], Ty::Int) =>

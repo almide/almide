@@ -108,9 +108,6 @@ pub fn almide_rt_matrix_row_dot(m: &AlmideMatrix, r: i64, vec: &[f64]) -> f64 {
 pub fn almide_rt_matrix_mul_scaled(a: &AlmideMatrix, alpha: f64, b: &AlmideMatrix) -> AlmideMatrix {
     almide_rt_matrix_scale(&almide_rt_matrix_mul(a, b), alpha)
 }
-pub fn almide_rt_matrix_mul_f32_t(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
-    almide_rt_matrix_mul(a, &almide_rt_matrix_transpose(b))
-}
 
 // append_rows: row-wise concat — used for KV-cache accumulation.
 pub fn almide_rt_matrix_append_rows(a: &AlmideMatrix, b: &AlmideMatrix) -> AlmideMatrix {
@@ -139,64 +136,4 @@ pub fn almide_rt_matrix_zip_with(a: &AlmideMatrix, b: &AlmideMatrix, f: std::rc:
     almide_rt_matrix_shape_eq(a.rows, b.rows);
     almide_rt_matrix_shape_eq(a.cols, b.cols);
     mk(a.rows, a.cols, a.data.iter().zip(b.data.iter()).map(|(x, y)| f(*x, *y)).collect())
-}
-
-
-// ── f32 bytes-resident path (L2-2): weights stay in the source GGUF buffer ──
-//
-// Mirror of the Q1_0 path for plain f32 tensors: no decoded AlmideMatrix is
-// ever materialised for weights, so the model record (and its per-call deep
-// clones — measured at ~13 GB per generated token) disappears entirely.
-
-// Parallel sweep over output elements. Two implementations:
-// - `almide_par` (cargo builds, see cli/mod.rs): rayon's persistent pool.
-//   Per-call scoped threads measured 2.8 tok/s vs rayon's 4.9 — the spawn
-//   cost per GEMV region beats the work for the small projections.
-// - otherwise (raw-rustc test harness, no external crates): serial. Tests
-//   need correctness, not throughput.
-#[cfg(almide_par)]
-fn par_out_rows(out: &mut [f64], f: impl Fn(usize, &mut f64) + Sync) {
-    use rayon::prelude::*;
-    if out.len() < 256 {
-        for (j, o) in out.iter_mut().enumerate() {
-            f(j, o);
-        }
-        return;
-    }
-    const CHUNK: usize = 64;
-    out.par_chunks_mut(CHUNK).enumerate().for_each(|(ci, oc)| {
-        let j0 = ci * CHUNK;
-        for (dj, o) in oc.iter_mut().enumerate() {
-            f(j0 + dj, o);
-        }
-    });
-}
-
-#[cfg(not(almide_par))]
-fn par_out_rows(out: &mut [f64], f: impl Fn(usize, &mut f64) + Sync) {
-    for (j, o) in out.iter_mut().enumerate() {
-        f(j, o);
-    }
-}
-
-/// The empty-extent answer of the `linear_*_row_no_bias` family: the all-zero
-/// `rows(x) × w_rows` matrix, i.e. `zeros(rows(x), w_rows)` — so its shape
-/// clamps and ceilings through `almide_rt_matrix_dims` like every constructor
-/// (C-161) instead of reaching `vec!` unchecked (#2783).
-fn linear_empty_out(x_rows: usize, w_rows: i64) -> AlmideMatrix {
-    let (r, c) = almide_rt_matrix_dims(x_rows as i64, w_rows);
-    mk(r, c, vec![0.0f64; r * c])
-}
-
-
-
-/// The byte start of selected row `rid` (clamped to 0) when its whole
-/// `row_bytes` window `off + rid·row_bytes ..+ row_bytes` lies inside a
-/// `len`-byte buffer; `None` = the all-zero row. Checked, not wrapped: an
-/// `rid` near i64::MAX wrapped `rid·row_bytes` to just below `off`, passed the
-/// bound, and sliced from a wrapped start (#2676, fuzz seed 579914833587
-/// index 9386).
-fn select_row_window(off: usize, rid: i64, row_bytes: usize, len: usize) -> Option<usize> {
-    let base = (rid.max(0) as usize).checked_mul(row_bytes)?.checked_add(off)?;
-    (base.checked_add(row_bytes)? <= len).then_some(base)
 }

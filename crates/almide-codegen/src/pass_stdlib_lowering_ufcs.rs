@@ -212,8 +212,8 @@ fn try_inline_intrinsic_exp_log(module: &str, func: &str, args: &[IrExpr], ty: &
             target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("log10") },
             args: vec![], type_args: vec![],
         })),
-        // float.from_int / int.to_float / float.to_int: walker handles inline cast
-        // math.pow: Int exponentiation — keep as runtime call (i64.pow needs u32 cast)
+        // float.__from_int / int.__raw_to_float / float.__to_int: walker handles inline cast
+        // math.__pow: Int exponentiation — keep as runtime call (i64.pow needs u32 cast)
         // ── math.__fpow(base, exp) → base.powf(exp) ──
         ("math", "__fpow") if args.len() >= 2 => Some(mk(IrExprKind::Call {
             target: CallTarget::Method { object: Box::new(args[0].clone()), method: almide_base::intern::sym("powf") },

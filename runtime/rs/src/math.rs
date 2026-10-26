@@ -21,7 +21,7 @@
 #[inline(always)] pub fn almide_rt_math_log2(x: f64) -> f64 { almide_rt_libm_log2(x) }
 #[inline(always)] pub fn almide_rt_math_log10(x: f64) -> f64 { almide_rt_libm_log10(x) }
 #[inline(always)] pub fn almide_rt_math_exp(x: f64) -> f64 { almide_rt_libm_exp(x) }
-// Integer pow (math.pow on Int) is TOTAL like integer `/`/`%` (C-001 family):
+// Integer pow (math.__pow on Int) is TOTAL like integer `/`/`%` (C-001 family):
 // a NEGATIVE exponent has no integer result, so it ABORTS with `Error: negative
 // exponent` + exit 1 on BOTH targets instead of the old `exp as u32` u32-wrap
 // (which silently produced garbage and diverged from the wasm loop). For a
@@ -30,7 +30,7 @@
 // the old `base.pow(exp as u32)` on every in-range case (overflow-checks=off) and
 // extends deterministically to exponents `>= 2^32` (the full i64 count, e.g.
 // `2^(2^32) = 0`) where the old u32-truncation and the wasm loop disagreed.
-/// `Error: <msg>` + exit-1 abort message for a negative `math.pow` exponent.
+/// `Error: <msg>` + exit-1 abort message for a negative `math.__pow` exponent.
 /// Same wording byte-for-byte as the wasm `__pow_trap` so the two targets'
 /// stderr is identical (the C-001 totality discipline).
 pub const ALMIDE_POW_NEGATIVE_EXPONENT_MSG: &str = "negative exponent";
@@ -77,23 +77,6 @@ pub fn almide_rt_math_pow(base: i64, exp: i64) -> i64 {
 
 #[inline(always)] pub fn almide_rt_math_sign(n: i64) -> i64 { if n > 0 { 1 } else if n < 0 { -1 } else { 0 } }
 
-// Float min/max — explicit NaN/tie decision tree, mirrored bit-for-bit by the
-// self-hosted wasm leg (`float_min`/`float_max` in stdlib/float_core.almd).
-// Deliberately NOT `f64::min`/`f64::max`: those are the llvm.minnum/maxnum
-// intrinsics whose ±0-tie order is UNSPECIFIED — under `#[inline(always)]`
-// x86 selects `maxsd` (returns the SECOND operand on ties), silently
-// contradicting both the non-inlined library call and the wasm emit.
-// Ties follow IEEE-754-2019 zero ordering (C-049, ALS-T23):
-// min(±0)= -0.0, max(±0)= +0.0, commutative.
-#[inline(always)] pub fn almide_rt_math_fmin(a: f64, b: f64) -> f64 {
-    if a.is_nan() { b }
-    else if b.is_nan() { a }
-    else if a < b { a }
-    else if b < a { b }
-    // Tie (a == b, the ±0 pair included): IEEE-754-2019 minimum — a
-    // negative-signed operand wins, commutatively (min(0,-0) = -0).
-    else if a.is_sign_negative() { a } else { b }
-}
 // Float pow delegates to the vendored musl-libm `pow` (deterministic +
 // bit-identical to the WASM port). This also makes all the special cases
 // (0/inf/nan/neg-base, odd/even integer exponent) match exactly cross-target.

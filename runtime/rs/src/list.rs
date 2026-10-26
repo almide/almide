@@ -18,7 +18,7 @@ pub fn almide_rt_list_sort<A: Ord + Clone>(xs: &[A]) -> Vec<A> { let mut v = xs.
 // instead of the `Ord`-bounded generics (IntrinsicLoweringPass swaps the
 // symbol). This is the ORDERING twin of the wasm sign-magnitude bit trick and
 // matches the interp's `total_cmp`. NOTE: this list-min/max totalOrder is a
-// DIFFERENT contract from the SCALAR `float.min`/`max`/`math.fmin`/`fmax`,
+// DIFFERENT contract from the SCALAR `float.min`/`max`,
 // which keep their C-049 NaN-IGNORING semantics. See C-055.
 pub fn almide_rt_list_sort_float(xs: &[f64]) -> Vec<f64> { let mut v = xs.to_vec(); v.sort_by(|a, b| a.total_cmp(b)); v }
 pub fn almide_rt_list_min_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().min_by(|a, b| a.total_cmp(b)) }
@@ -48,7 +48,6 @@ pub fn almide_rt_list_max<T: Ord + Clone>(xs: &[T]) -> Option<T> { xs.iter().max
 // used to keep the `as usize` wrap (chunk: the whole list as one chunk,
 // windows: empty).
 pub fn almide_rt_list_chunk<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n <= 0 { almide_abort("chunk size must be positive"); } xs.chunks(n as usize).map(|c| c.to_vec()).collect() }
-pub fn almide_rt_list_windows<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n <= 0 { almide_abort("window size must be positive"); } if (n as usize) > xs.len() { return vec![]; } xs.windows(n as usize).map(|w| w.to_vec()).collect() }
 pub fn almide_rt_list_dedup<T: Clone + PartialEq>(xs: &[T]) -> Vec<T> { let mut r = Vec::new(); for x in xs { if r.last() != Some(x) { r.push(x.clone()); } } r }
 // The seen set is an `AlmideMap` (#3704): it hashes only the exact-equality
 // key types (Int, String, Bool, their pairs, List[Int] / List[String]) and
@@ -81,8 +80,8 @@ pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C>(a: Vec<A>, b: Vec<B>, f: s
 // Takes a SLICE, not an owned `Vec`. The element type is already `Clone`, so
 // consuming the outer list bought nothing — and it made `flatten` unusable
 // alongside a borrow of the same binding in one expression:
-// `list.get_or(xs, 0, list.flatten(xs))` moved `xs` into `flatten` while
-// `get_or` borrowed it, so `check` accepted and rustc rejected with E0505
+// `list.get(xs, 0)` beside `list.flatten(xs)` moved `xs` into `flatten` while
+// `get` borrowed it, so `check` accepted and rustc rejected with E0505
 // (differential fuzz). A slice parameter takes a borrow like every other
 // read-only list fn, and an owned `Vec` still deref-coerces into it.
 pub fn almide_rt_list_flatten<T: Clone>(xs: &[Vec<T>]) -> Vec<T> { xs.iter().flatten().cloned().collect() }
@@ -240,10 +239,10 @@ pub fn almide_rt_list_unique_by<T: Clone, K: PartialEq + 'static>(xs: Vec<T>, f:
     }
     result
 }
-// Same ALS-T6 guard as `almide_rt_list_windows`: n == 0 aborts with the
+// Same ALS-T6 guard as `almide_rt_list_chunk`: n <= 0 aborts with the
 // unified `Error: …` + exit 1 form (std's `windows(0)` panics — a raw Rust
-// panic exit 101 the wasm leg never shows). n > len returns empty like the
-// plural twin instead of leaking std's behavior.
+// panic exit 101 the wasm leg never shows). n > len returns empty instead of
+// leaking std's behavior.
 pub fn almide_rt_list_window<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> {
     if n <= 0 { almide_abort("window size must be positive"); }
     if (n as usize) > xs.len() { return vec![]; }

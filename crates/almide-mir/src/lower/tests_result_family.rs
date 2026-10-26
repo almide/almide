@@ -24,7 +24,7 @@ fn result_family_is_a_total_function_of_the_type() {
         ResultFamily::HeapOk
     );
     // Scalar classes — len-as-tag: scalar Ok payload (the int.parse /
-    // float.parse / fs.file_size shapes), including the scalar-scalar class
+    // float.parse shapes), including the scalar-scalar class
     // (Result[Int, Int] — the err payload's high bits live at @16, which is
     // exactly why a cap-as-tag read must never be applied to this family).
     assert_eq!(result_family(&res(Ty::Int, Ty::String)), ResultFamily::Scalar);

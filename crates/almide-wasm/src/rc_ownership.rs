@@ -660,7 +660,7 @@ impl Emitter<'_> {
             // result is `Owned` (two `View` arms exist). Predicting owned is
             // safe either way: the join then asks each arm what it actually
             // was and gives a borrowed one its +1. Predicting borrowed left
-            // `if c then name else string.join(xs, ".")` (path.stem) with a
+            // `if c then name else list.join(xs, ".")` (path.stem) with a
             // borrowed join over an owned arm — its block leaked (#2977).
             IrExprKind::Call { target: almide_ir::CallTarget::Module { .. }, .. }
             | IrExprKind::Try { .. }

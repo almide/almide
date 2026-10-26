@@ -343,9 +343,7 @@ impl<'a> Interpreter<'a> {
         // STATELESS bridge cannot serve — they read the run's argv, which is
         // interpreter state (`with_args`, empty by default = exactly how the
         // oracle harness runs every fixture on all three legs).
-        // `args_get_list` answers argv[1..]; `args_get_list_full` prepends an
-        // argv[0] whose only cross-target observable is NONEMPTINESS (the
-        // fixtures assert it, never print it — C-181's argv0 normalization).
+        // `args_get_list` answers argv[1..].
         if let Some(flow) = self.prim_floor(module.as_str(), func.as_str(), &args) {
             return flow;
         }
@@ -461,11 +459,6 @@ impl<'a> Interpreter<'a> {
             "args_get_list" => {
                 let items: Vec<Value> =
                     self.args.iter().map(|s| Value::str(s.clone())).collect();
-                Some(Flow::val(Value::list(items)))
-            }
-            "args_get_list_full" => {
-                let mut items = vec![Value::str("interp")];
-                items.extend(self.args.iter().map(|s| Value::str(s.clone())));
                 Some(Flow::val(Value::list(items)))
             }
             // The env floor (same tier as argv, C-133): `prim.env_get`

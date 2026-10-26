@@ -58,7 +58,7 @@ impl<'a> Interpreter<'a> {
     /// reason.
     ///
     /// Scalar-only is a correctness line, not laziness: the pool tier resolves
-    /// a PUBLIC container fn (`map.get_or`, `list.…`) by NAME to its scalar
+    /// a PUBLIC container fn (`map.get`, `list.…`) by NAME to its scalar
     /// core impl — the type-directed rewrite that picks `_skv`/`_str`/`_hval`
     /// variants is a MIR-lowering pass the interp never runs. A heap-keyed Map
     /// materialized in ANY layout would therefore be walked by a body that

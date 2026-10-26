@@ -51,9 +51,8 @@ fn list_chunk(xs: List[Int], n: Int) -> List[List[Int]] = {
   outer
 }
 
-// ── list.windows / list.window — all CONTIGUOUS (overlapping) sub-slices of length n. v0's
-// xs.windows(n): n > len → [], else len-n+1 windows. window and windows behave identically here
-// (windows(n) already yields nothing for n > len). Each window reuses the chunk-copy helper. ──
+// ── list.window — all CONTIGUOUS (overlapping) sub-slices of length n. v0's
+// xs.windows(n): n > len → [], else len-n+1 windows. Each window reuses the chunk-copy helper. ──
 fn __win_outer(oh: Int, sh: Int, n: Int, num: Int, wi: Int) -> Int = if wi >= num then 0
 else {
   let w = __chunk_one(sh, wi, n)
@@ -147,7 +146,5 @@ fn __do_windows_str(xs: List[String], n: Int) -> List[List[String]] = {
   let _x = __win_outer_str(prim.handle(outer), sh, n, num, 0)
   outer
 }
-
-fn list_windows_str(xs: List[String], n: Int) -> List[List[String]] = __do_windows_str(xs, n)
 
 fn list_window_str(xs: List[String], n: Int) -> List[List[String]] = __do_windows_str(xs, n)

@@ -17,7 +17,7 @@
 //! Scope: only a fn carrying `@codec_slots` (the derive is its sole author),
 //! only the borrowed-lookup shape, and only a lookup on that fn's `Value`
 //! parameter with a literal key that is one of the declared slots. A
-//! `value.field` a user writes stays on the plain path. Native only: the
+//! `value.get` a user writes stays on the plain path. Native only: the
 //! wasm leg neither reads the attribute nor carries the `_at` symbol, so its
 //! output is untouched.
 

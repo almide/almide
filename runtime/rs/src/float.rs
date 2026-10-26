@@ -44,9 +44,12 @@ pub fn almide_rt_float_abs(n: f64) -> f64 { n.abs() }
 pub fn almide_rt_float_ceil(n: f64) -> f64 { n.ceil() }
 pub fn almide_rt_float_floor(n: f64) -> f64 { n.floor() }
 pub fn almide_rt_float_round(n: f64) -> f64 { n.round() }
-// Explicit NaN/tie decision tree — see almide_rt_math_fmin/fmax (math.rs) for
-// why `f64::min`/`f64::max` (llvm.minnum/maxnum, unspecified ±0-tie order)
-// must not be used. Ties follow IEEE-754-2019 zero ordering (C-049,
+// Explicit NaN/tie decision tree, mirrored bit-for-bit by the self-hosted
+// wasm leg (`float_min`/`float_max` in stdlib/float_core.almd). Deliberately
+// NOT `f64::min`/`f64::max`: those are the llvm.minnum/maxnum intrinsics whose
+// ±0-tie order is UNSPECIFIED — under `#[inline(always)]` x86 selects `maxsd`
+// (returns the SECOND operand on ties), silently contradicting both the
+// non-inlined library call and the wasm emit. Ties follow IEEE-754-2019 zero ordering (C-049,
 // ALS-T23): min(±0 tie) = -0.0, max(±0 tie) = +0.0, commutative.
 pub fn almide_rt_float_min(a: f64, b: f64) -> f64 {
     if a.is_nan() { b }

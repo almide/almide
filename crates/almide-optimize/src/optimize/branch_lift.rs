@@ -842,7 +842,7 @@ mod tests {
     }
 
     /// #2948: a root fn `insert(tag, mut m)` beside the LOWERED `map` module
-    /// (the native leg's IR, where `map.insert(mut m, ..)` is present). The
+    /// (the native leg's IR, where a stdlib `map.insert(mut m, ..)` was present). The
     /// user's call writes its SECOND argument; reading the stdlib fn's
     /// position 0 instead let the branch be outlined and the write was lost on
     /// native only.

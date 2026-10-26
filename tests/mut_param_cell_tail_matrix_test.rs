@@ -128,7 +128,7 @@ fn program_with_main(cells: &[Cell], main: &str) -> String {
 fn dispatch_main(cells: &[Cell]) -> String {
     let arms: String = cells.iter().map(|c| format!("    \"{}\" => {{\n  {}\n    }},\n", c.name, c.call)).collect();
     format!(
-        "import env\n\neffect fn main() -> Unit = {{\n  let which = list.get(env.args(), 1) ?? \"\"\n  match which {{\n{arms}    _ => println(\"no such cell\"),\n  }}\n}}\n"
+        "import env\n\neffect fn main() -> Unit = {{\n  let which = list.get(env.args(), 0) ?? \"\"\n  match which {{\n{arms}    _ => println(\"no such cell\"),\n  }}\n}}\n"
     )
 }
 

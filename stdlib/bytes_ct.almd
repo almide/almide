@@ -4,7 +4,7 @@
 //
 // The walk ORs a[i] ^ b[i] over EVERY index and tests the accumulator against
 // zero once, after the walk. The only branches are the public length check and
-// the index check `i >= n` (plus `bytes.get_or`'s own bounds check, also on the
+// the index check `i >= n` (plus `bytes.get`'s own bounds check, also on the
 // index): no byte value reaches a condition, so there is no early exit on the
 // first difference. tests/constant_time_compare_structure_test.rs inspects the
 // emitted wasm for exactly that. This file never reaches `prim.`, so its

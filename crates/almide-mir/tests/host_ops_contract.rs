@@ -316,7 +316,7 @@ fn an_unlisted_capability_bearing_intrinsic_fails_the_matrix() {
     assert_eq!(faults.len(), 1, "{faults:?}");
     assert!(faults[0].starts_with("env.fake_clock"));
     // A listed row in the same shape passes.
-    let listed = "@intrinsic(\"almide_rt_env_millis\")\neffect fn millis() -> Int = _\n";
+    let listed = "@intrinsic(\"almide_rt_env_sleep_ms\")\neffect fn sleep_ms(ms: Int) -> Unit = _\n";
     assert!(matrix_faults("env", listed).is_empty());
 }
 

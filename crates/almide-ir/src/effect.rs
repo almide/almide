@@ -139,7 +139,7 @@ pub enum ModuleEffects {
 ///
 /// A row is the module's default; a function whose operation differs says so
 /// with `@category(…)` in its own declaration (`fs.write_text` is `FS.write`,
-/// `process.args` `Env.read`), never in a list here (#4155).
+/// `process.pid` `Env.read`), never in a list here (#4155).
 pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     // Files. A function that changes the file system declares `FS.write`.
     ("fs", ModuleEffects::All(&[Effect::FsRead])),
@@ -163,8 +163,8 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     // The process environment: variables and argv. `env.set` declares
     // `Env.write`; the clock readers declare `Time`.
     ("env", ModuleEffects::All(&[Effect::EnvRead])),
-    // Starting and signalling processes. The readers (`process.args`,
-    // `process.pid`) declare `Env.read`, `process.exit` `Abort`.
+    // Starting and signalling processes. The reader `process.pid`
+    // declares `Env.read`, `process.exit` `Abort`.
     ("process", ModuleEffects::All(&[Effect::Proc])),
     ("args", ModuleEffects::All(&[Effect::EnvRead])),
     // The clock: `datetime.now` / `monotonic_ns`; the calendar math is pure.

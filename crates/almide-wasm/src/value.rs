@@ -618,7 +618,7 @@ impl Emitter<'_> {
                 // takes its own credits, as `map.keys` does (#2010 stage 2b).
                 // Its typed drop releases every element, so without the inc
                 // each dropped key list spent one of the Value's own credits
-                // — `value.keys(v)` released twice freed the keys under `v`.
+                // — `value.__keys(v)` released twice freed the keys under `v`.
                 let hl = self.hold_i32()?;
                 self.f.instructions().call(vk).local_set(hl);
                 self.emit_inc_elems(hl, STR);

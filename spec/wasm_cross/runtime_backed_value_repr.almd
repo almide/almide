@@ -3,15 +3,15 @@
 // nested in a record field, a list element, an option payload and a tuple,
 // byte-identically on native and wasm. An HttpRequest / HttpResponse shows
 // method, path, body (status and body for a response) and the header COUNT,
-// never a header value; a value.Path shows `$` then `.name` / `[i]` per step.
+// never a header value.
 // #4204: wasm printed the self-hosted carriers — the request's list with
-// every header value (`["GET", "/x", "", "2", "Authorization", "Bearer …"]`),
-// the path's segment list (`["fuser", "i0"]`) — wherever the value sat in a
+// every header value (`["GET", "/x", "", "2", "Authorization", "Bearer …"]`)
+// — wherever the value sat in a
 // container, and native's bare `${req}` failed in rustc (E0277). The body
 // carries the five nested-string escapes, so the repr's quoting is pinned too.
 import http
 
-type Wrap = { req: HttpRequest, resp: HttpResponse, path: value.Path }
+type Wrap = { req: HttpRequest, resp: HttpResponse }
 
 fn leaks(t: String) -> Bool = [
   "TOKXYZ-SECRET",
@@ -30,20 +30,15 @@ effect fn main() -> Unit = {
     "denied",
     map.from_list([("Set-Cookie", "sid=SETCOOKIE-SECRET"), ("X-A", "1"), ("X-B", "2")]),
   )
-  let path = value.root() |> value.key("user") |> value.index(0) |> value.key("na me") |> value.index(-1)
   let lines = [
     "${req}",
     "${resp}",
-    "${path}",
-    "${value.root()}",
-    "${Wrap { req: req, resp: resp, path: path }}",
+    "${Wrap { req: req, resp: resp }}",
     "${[req, req]}",
     "${[resp]}",
-    "${[path, value.root()]}",
     "${some(req)}",
     "${some(resp)}",
-    "${some(path)}",
-    "${(req, path, 1)}"
+    "${(req, resp, 1)}"
   ]
   println(lines |> list.join("\n"))
   println("leaked: ${lines |> list.any((l) => leaks(l))}")

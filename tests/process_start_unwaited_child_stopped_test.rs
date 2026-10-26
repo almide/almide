@@ -113,8 +113,8 @@ fn children_already_waited_on_or_stopped_are_left_alone() {
     assert_gone(pid_of(&stdout, "child"), "main returns after a wait and a stop");
 }
 
-/// C-437's fixture observes itself: run with no arguments it runs its own
-/// binary as the parent once per exit route and reports whether the child the
+/// C-437's fixture observes itself: run with its own path as the argument it
+/// runs that binary as the parent once per exit route and reports whether the child the
 /// parent left running still exists after the parent ended.
 #[test]
 fn the_c437_fixture_sees_every_route_stop_the_child() {
@@ -126,7 +126,7 @@ fn the_c437_fixture_sees_every_route_stop_the_child() {
     // Timed apart from the build: an exit that waited for its `sleep 30`
     // would also find the child gone afterwards, so the clock is the witness.
     let start = Instant::now();
-    let out = Command::new(&bin).output().expect("run the fixture");
+    let out = Command::new(&bin).arg(&bin).output().expect("run the fixture");
     let elapsed = start.elapsed();
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);

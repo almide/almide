@@ -125,7 +125,7 @@ and `to_lists` gives three empty rows).
 bound is 0, the negative-count rule of #4147), and `start >= end` is empty;
 `split_cols_even(m, n)` answers the empty list for `n <= 0`.
 
-**Negation is IEEE** (C-355): `matrix.scale(m, -1.0)` flips the sign bit, so a
+**Negation is IEEE** (C-355): `-m` flips the sign bit, so a
 `0.0` cell becomes `-0.0` and `1.0` over it is `-inf` on both targets.
 
 ## Byte decoders

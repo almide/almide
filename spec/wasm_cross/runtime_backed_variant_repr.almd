@@ -8,7 +8,7 @@
 // value); v1 now refuses it, and the leg that renders it prints the repr.
 import http
 
-type Ev = | Got(HttpRequest) | Hit { at: value.Path } | Nothing
+type Ev = | Got(HttpRequest) | Hit { at: HttpResponse } | Nothing
 
 type Tag[T] = | Tagged(T, HttpRequest)
 
@@ -17,9 +17,9 @@ fn leaks(t: String) -> Bool = ["TOKXYZ-SECRET", "sid=COOKIE-SECRET", "Bearer", "
 effect fn main() -> Unit = {
   let h = map.from_list([("Authorization", "Bearer TOKXYZ-SECRET"), ("Cookie", "sid=COOKIE-SECRET")])
   let req = http.new_request("GET", "/v", "", h)
-  let path = value.root() |> value.key("user") |> value.index(2)
+  let resp = http.response(200, "ok")
   let a = Got(req)
-  let b = Hit { at: path }
+  let b = Hit { at: resp }
   let c: Tag[Int] = Tagged(7, req)
   let lines = ["${a}", "${b}", "${c}", "${Nothing}"]
   println(lines |> list.join("\n"))

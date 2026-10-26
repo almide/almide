@@ -130,7 +130,7 @@ fn render_binop_matrix(ctx: &RenderContext, op: BinOp, (left, right): (&IrExpr, 
             };
             // `m * k` admits an `Int` scalar (the frontend's ScaleMatrix
             // dispatch); the runtime scales by an f64. Convert it the way
-            // the wasm legs do (`int.to_float`), or rustc refuses the i64
+            // the wasm legs do (`float.from`), or rustc refuses the i64
             // the checker accepted (#2894).
             let scalar = if matches!(scalar_ty, Ty::Int) { format!("(({scalar}) as f64)") } else { scalar.to_string() };
             let scalar = scalar.as_str();
@@ -817,7 +817,7 @@ pub(super) fn rc_cow_raw_type(ty_str: &str) -> String {
 /// (`almide_http_get_bytes`). That spelling is the runtime's own too, and a
 /// user-module fn never receives it (the normalizer only ever prefixes
 /// `almide_rt_`), so it is judged against the same registry (#2497: the
-/// `Result[Bytes, String]` of `http.get_bytes` reached a `let` binding raw —
+/// `Result[Bytes, String]` of the since-removed `http.get_bytes` reached a `let` binding raw —
 /// `let mut b: AlmideRcCow<Vec<u8>> = (almide_http_get_bytes(u))?;`, rustc
 /// E0308 after a green `check`, while every `almide_rt_` sibling glued).
 ///

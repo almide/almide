@@ -139,7 +139,7 @@ effect fn main() -> Unit = {
 }
 ";
     let dir = project(&[("src/fixes.almd", fixes), ("src/main.almd", main)]);
-    assert_eq!(native_stdout(dir.path()), "dev/a,dev\nx/a,dev\n1\n");
+    assert_eq!(native_stdout(dir.path()), "dev/a,dev\nx/a,dev\n0\n");
     assert_same_on_both(dir.path(), true);
 }
 

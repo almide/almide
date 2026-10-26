@@ -278,7 +278,7 @@ const BOUNDED_ALLOC_CALLS: &[&str] = &[
 ];
 
 /// The `float.*` members that COMPUTE on Floats (ALS-B10 / E077): the
-/// `math.fpow` / `fmin` / `fmax` computations moved here (R-math-01). The
+/// former `math.fpow` / `fmin` / `fmax` computations moved here (R-math-01). The
 /// rest of `float.*` observes a Float (`to_string`, `sign`, ...).
 const BOUNDED_FLOAT_COMPUTE_CALLS: &[&str] = &["float.pow", "float.min", "float.max"];
 

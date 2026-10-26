@@ -464,7 +464,7 @@ fn rewrite_expr_call_module(module: Sym, func: Sym, args: Vec<IrExpr>, type_args
         // template owns reference semantics and the wrapper
         // would produce `&mut b.clone()` — mutation on a
         // temp, silently dropped. Elsewhere (by-value params
-        // like `value.field(v, key)` that take `Value` owned
+        // like `value.__field(v, key)` that take `Value` owned
         // and reuse `v` across several `?`-propagating calls
         // after the codec derive), keep the wrappers so the
         // clone-insertion pass's ownership plumbing works.

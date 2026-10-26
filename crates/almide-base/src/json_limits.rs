@@ -7,7 +7,7 @@
 // tests/json_depth_limit_test.rs pins to this constant.
 //
 // `json.parse` refuses an array or object opened inside JSON_MAX_DEPTH
-// others, and `json.set_path` refuses to build a value nested deeper than
+// others, and `value.set_path` refuses to build a value nested deeper than
 // that (its path's steps plus the new value's own nesting), both with the
 // one text `json_depth_error()` names, so every value the JSON functions
 // build stays parseable and every recursive walk stays bounded.
