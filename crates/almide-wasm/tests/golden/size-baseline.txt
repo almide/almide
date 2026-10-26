@@ -70,7 +70,6 @@
 19959	spec/wasm_cross/bytes_search_edit_family.almd
 8701	spec/wasm_cross/bytes_set_on_record_field.almd
 4602	spec/wasm_cross/bytes_set_value_semantics.almd
-5672	spec/wasm_cross/bytes_string_window_domain.almd
 8587	spec/wasm_cross/bytes_temp_receiver.almd
 5301	spec/wasm_cross/bytes_to_string_err_release.almd
 10835	spec/wasm_cross/bytes_writer_family.almd
@@ -186,7 +185,6 @@
 4556	spec/wasm_cross/env_set_refusal.almd
 1808	spec/wasm_cross/env_sleep_pause.almd
 3828	spec/wasm_cross/err_arm_takes_let_match_type.almd
-35164	spec/wasm_cross/err_text_label_and_key_escape.almd
 34107	spec/wasm_cross/err_text_operand_escape_families.almd
 2098	spec/wasm_cross/error_operators.almd
 1931	spec/wasm_cross/exit_code_out_of_range.almd
@@ -996,9 +994,7 @@
 3329	spec/wasm_fail/effect_err_aborts_both_legs.almd
 3494	spec/wasm_fail/int_parse_err_propagates.almd
 3230	spec/wasm_fail/matrix_concat_cols_rows_aborts.almd
-3603	spec/wasm_fail/matrix_conv1d_stride_aborts.almd
 4811	spec/wasm_fail/matrix_index_oob_aborts.almd
-3265	spec/wasm_fail/matrix_linear_row_bias_aborts.almd
 2386	spec/wasm_fail/matrix_ragged_from_lists_aborts.almd
 3203	spec/wasm_fail/matrix_shape_mismatch_aborts.almd
 1754	spec/wasm_fail/stack_overflow_abort.almd
