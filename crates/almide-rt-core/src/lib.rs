@@ -23,7 +23,13 @@
 //! runtime module (runtime/rs/src/errtext.rs) defines it once; here each such
 //! core is an inline module that inlines the same file beside itself, so the
 //! bare name resolves without a `crate::` path.
-pub mod http_client_core;
+/// The http client (#1715) and, through its includes, the URL / request
+/// checks and the error renderer: their quoted operands go through C-418's
+/// escaper (`http_quote`), so the module inlines it beside itself.
+pub mod http_client_core {
+    include!("generated/err_text.rs");
+    include!("http_client_core.rs");
+}
 pub mod http_server_core;
 /// The subprocess family (#2589, ADR-0025): `runtime/rs/src/process.rs`
 /// includes it, the embedded host serves `almide:process/spawn` with it.

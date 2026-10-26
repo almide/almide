@@ -113,27 +113,15 @@ pub fn http_is_framing_header(name: &str) -> bool {
 /// head, the quoted URL, middle, the wasi:http case name, tail.
 pub const HTTP_ERR_UNCLASSIFIED: [&str; 3] = ["http request to ", " failed (", ")"];
 
-/// Quote `s` in double quotes: `"` and `\` are escaped, TAB, CR, LF and NUL
-/// read `\t` `\r` `\n` `\0`, every other ASCII control (and DEL) reads
-/// `\u{<hex>}` in lowercase hex, and every other byte is copied. Equal to
-/// Rust's `{:?}` on ASCII text; the p3 shim implements the same bytes.
+/// Quote `s` in double quotes: `"` and `\` are escaped, and every character
+/// C-418 escapes (C0, DEL, C1 and the bidi controls, #4126) is written by
+/// that one rule (`almide_rt_errtext_escape`): TAB, CR, LF and NUL read `\t`
+/// `\r` `\n` `\0`, the rest `\u{<lowercase hex>}`. Every other character is
+/// copied. On ASCII text this is Rust's `{:?}`, and the p3 shim's
+/// `$http_quote` writes the same bytes for every text that reaches it (a URL
+/// that passed the request checks is ASCII).
 pub fn http_quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\t' => out.push_str("\\t"),
-            '\r' => out.push_str("\\r"),
-            '\n' => out.push_str("\\n"),
-            '\0' => out.push_str("\\0"),
-            c if (c as u32) < 0x20 || c as u32 == 0x7f => out.push_str(&format!("\\u{{{:x}}}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
+    format!("\"{}\"", almide_rt_errtext_escape(&s.replace('\\', "\\\\").replace('"', "\\\"")))
 }
 
 /// What replaces the userinfo password wherever an error quotes a URL
