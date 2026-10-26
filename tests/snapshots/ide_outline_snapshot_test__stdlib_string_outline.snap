@@ -2,6 +2,7 @@
 source: tests/ide_outline_snapshot_test.rs
 expression: "run_outline(&[\"@stdlib/string\"])"
 ---
+fn string.__err_text(s: String) -> String
 fn string.__join(xs: List[String], sep: String) -> String
 fn string.byte_len(s: String) -> Int
 fn string.byte_slice(s: String, start: Int, end: Int) -> Option[String]
@@ -38,6 +39,7 @@ fn string.is_alpha(s: String) -> Bool
 fn string.is_alphanumeric(s: String) -> Bool
 fn string.is_digit(s: String) -> Bool
 fn string.is_empty(s: String) -> Bool
+fn string.is_equal_constant_time(a: String, b: String) -> Bool
 fn string.is_lower(s: String) -> Bool
 fn string.is_upper(s: String) -> Bool
 fn string.is_whitespace(s: String) -> Bool
