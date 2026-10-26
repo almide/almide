@@ -56,6 +56,9 @@ impl Checker {
         // opaque type itself, so the boundary reads through every alias link.
         let n = &self.opaque_check_target(*n);
         let bare = n.as_str().rsplit('.').next().unwrap_or(n.as_str()).to_string();
+        if let Some(found) = self.foreign_user_opaque_record(*n, &bare) {
+            return found;
+        }
         let owner = self.env.opaque_records.get(&sym(&bare)).copied()?;
         // Only the bundled module's own type: its bare key or `owner.T`. A user
         // type of the same name (`m.Secret`, an in-package or dependency module
@@ -67,6 +70,43 @@ impl Checker {
             return None;
         }
         Some((bare, owner))
+    }
+
+    /// A user module's `mod type` / `local type` record (#4241): `Some(None)`
+    /// when `n` is one and this code is inside its visibility, `Some(Some(..))`
+    /// when it is foreign here, `None` when `n` is no user opaque record. A
+    /// `mod type` is visible to its whole PROJECT (the same package rule as
+    /// `mod fn`, `check_fn_visibility`), a `local type` to its file.
+    fn foreign_user_opaque_record(&self, n: Sym, bare: &str) -> Option<Option<(String, Sym)>> {
+        let (owner, vis) = match self.env.opaque_user_records.get(&n) {
+            Some(found) => *found,
+            // A bare spelling of a module's type (dual-registered for
+            // unqualified access): the one user opaque record of that name.
+            None if !n.as_str().contains('.') && self.env.prefixed_bare_aliases.contains(&n) => {
+                let mut hits = self.env.opaque_user_records.iter()
+                    .filter(|(k, _)| k.as_str().rsplit('.').next() == Some(bare));
+                let first = hits.next()?;
+                if hits.next().is_some() {
+                    return None;
+                }
+                *first.1
+            }
+            None => return None,
+        };
+        let caller = self.current_module_prefix.clone();
+        let pkg_of = |m: Option<&str>| -> String {
+            let Some(m) = m else { return String::new() };
+            if let Some((root, _)) = m.split_once('.') {
+                return root.to_string();
+            }
+            if self.env.dep_root_modules.contains(&sym(m)) { m.to_string() } else { String::new() }
+        };
+        let inside = match vis {
+            crate::ast::Visibility::Public => true,
+            crate::ast::Visibility::Local => caller.as_deref() == Some(owner.as_str()),
+            crate::ast::Visibility::Mod => pkg_of(caller.as_deref()) == pkg_of(Some(owner.as_str())),
+        };
+        Some(if inside { None } else { Some((bare.to_string(), owner)) })
     }
 
     /// Where a value of `actual` fills an `expected` slot, the foreign
@@ -151,7 +191,7 @@ impl Checker {
         }
         let named = self.opaque_entry_fns(owner.as_str(), bare);
         let hint = if named.is_empty() {
-            format!("'{}' is opaque: build and read it with the `{}` module's fns", bare, owner)
+            format!("'{}' is opaque outside `{}`: build and read it through that module's public API", bare, owner)
         } else {
             let list: Vec<String> = named.iter().map(|f| format!("`{owner}.{f}`")).collect();
             format!("'{}' is opaque: build and read it with the `{}` module's fns ({})", bare, owner, list.join(", "))

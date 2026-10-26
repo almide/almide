@@ -51,17 +51,26 @@ pub fn register_type_decl(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, 
     // prefix before the rebind: the entry program's shadow scope is `self`,
     // not a module its own constructor call would be foreign to.
     let defining_module = prefix.map(sym).or(env.alias_owner_module);
+    // Registered under its module's prefix (not the unprefixed pre-pass
+    // copy a module's own inference makes, #3164).
+    let declared_in_module = prefix.is_some();
     let identity = opaque_alias_identity(env, prefix, name);
     let owner = type_decl_prefix(env, prefix, name);
     let prefix = owner.as_deref();
     let user_shadow = shadows_stdlib_type(prefix, name);
 
-    // A bundled module's `mod type` record is opaque outside it (#4107).
+    // A `mod type` / `local type` record is opaque outside its visibility:
+    // a bundled module's outside that module (#4107), a user module's
+    // outside its project or file (#4241). Read off the declaration.
     if !matches!(visibility, ast::Visibility::Public)
         && matches!(resolved, Ty::Record { .. })
-        && let Some(m) = defining_module.filter(|m| almide_lang::stdlib_info::is_bundled_module(m.as_str()))
+        && let Some(m) = defining_module
     {
-        env.opaque_records.insert(sym(name), m);
+        if almide_lang::stdlib_info::is_bundled_module(m.as_str()) {
+            env.opaque_records.insert(sym(name), m);
+        } else if declared_in_module {
+            env.opaque_user_records.insert(sym(&prefixed_key(prefix, name)), (m, visibility));
+        }
     }
     resolved = register_type_decl_opaque_alias(env, identity, defining_module, resolved, &gnames, visibility);
     register_type_decl_variant_ctors(env, diagnostics, name, prefix, &mut resolved);
