@@ -80,7 +80,8 @@ fn matrix_linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_row
   if rows == 0 or w_rows <= 0 or w_cols <= 0 then matrix.zeros(rows, w_rows)
   else {
     let off = if w_offset < 0 then 0 else w_offset
-    let w = matrix.from_bytes_f32_le(w_bytes, off, w_rows, w_cols)
+    // A window past the buffer reads as the all-zero weight, as native does.
+    let w = matrix.from_bytes_f32_le(w_bytes, off, w_rows, w_cols) ?? matrix.zeros(w_rows, w_cols)
     matrix.linear_row_no_bias(x, w)
   }
 }

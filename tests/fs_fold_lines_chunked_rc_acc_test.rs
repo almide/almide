@@ -30,16 +30,16 @@ fn tool_available(tool: &str) -> bool {
 
 const PROGRAM: &str = r#"import fs
 
-fn grow(m: Matrix, l: String) -> Matrix = matrix.from_lists([[matrix.get(m, 0, 0) + float.from_int(string.len(l))]])
+fn grow(m: Matrix, l: String) -> Matrix = matrix.from_lists([[(matrix.get(m, 0, 0) ?? 0.0) + float.from_int(string.len(l))]])
 
 effect fn main() -> Unit = {
   let d = fs.create_temp_dir("chunked_rc_acc")!
   let p = d + "/lines.txt"
   fs.write(p, "a\nbb\nccc\ndddd\neeeee\n")!
   let ms = fs.fold_lines_chunked(p, 2, matrix.from_lists([[0.5]]), grow)!
-  println("matrix ${ms |> list.map((m) => matrix.get(m, 0, 0))}")
+  println("matrix ${ms |> list.map((m) => matrix.get(m, 0, 0) ?? 0.0)}")
   let ms_id = fs.fold_lines_chunked(p, 3, matrix.from_lists([[1.0]]), (m, l) => m)!
-  println("matrix-id ${ms_id |> list.map((m) => matrix.get(m, 0, 0))}")
+  println("matrix-id ${ms_id |> list.map((m) => matrix.get(m, 0, 0) ?? 0.0)}")
   let bs = fs.fold_lines_chunked(p, 3, bytes.zeros(0), (b, l) => bytes.concat(b, bytes.from_string(l)))!
   println("bytes ${bs |> list.map((b) => bytes.to_string(b) ?? "?")}")
   let k = bytes.from_string("kk")

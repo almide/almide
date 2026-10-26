@@ -8,5 +8,5 @@ fn main() -> Unit = {
     [2.0, 0.0]
   ])
   let g = matrix.map(m, (x) => gelu_scalar(x))
-  println(float.to_string(matrix.get(g, 0, 0)))
+  println(float.to_string(matrix.get(g, 0, 0) ?? 0.0))
 }

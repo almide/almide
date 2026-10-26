@@ -195,28 +195,32 @@ pub fn almide_rt_matrix_cols(m: &AlmideMatrix) -> i64 {
     if m.is_empty() { 0 } else { m[0].len() as i64 }
 }
 
-/// The INDEX-DOMAIN rule for the element accessor (#1423 night findings, C-282).
-/// `matrix.get` is indexing — the matrix analogue of `xs[i]`, which aborts with
-/// `Error: index out of bounds` (the `almide_index` macro) rather than inventing
-/// a value. An out-of-range row/col used to be a RAW index on both legs: a Rust
-/// slice panic (exit 101) natively against a wasm OOB trap (exit 134), and for a
-/// NEGATIVE index the wasm leg did not even fail — `row as usize` wrapped and it
-/// returned whatever heap bytes it landed on, exit 0 (the silent-wrong class,
-/// found by extending the fuzzer's positive-OOB finding to the whole family).
-/// Compared as i64 BEFORE any cast, so a negative can never wrap past the test.
+/// The INDEX-DOMAIN rule for the element accessor (C-282): `Some(value)` in
+/// range, `None` out of range, NEGATIVE included. An out-of-range row/col used
+/// to be a RAW index on both legs: a Rust slice panic (exit 101) natively
+/// against a wasm OOB trap (exit 134), and for a NEGATIVE index the wasm leg
+/// returned whatever heap bytes it landed on, exit 0. Compared as i64 BEFORE
+/// any cast, so a negative can never wrap past the test. (Before stdlib
+/// redesign R-matrix-08 an out-of-range index aborted.)
 #[inline]
-pub fn almide_rt_matrix_bounds(idx: i64, extent: usize) {
-    if idx < 0 || (idx as u64) >= extent as u64 {
-        almide_abort("matrix index out of bounds");
-    }
+pub fn almide_rt_matrix_in_range(idx: i64, extent: usize) -> bool {
+    idx >= 0 && (idx as u64) < extent as u64
 }
 
-pub fn almide_rt_matrix_get(m: &AlmideMatrix, row: i64, col: i64) -> f64 {
-    almide_rt_matrix_bounds(row, m.len());
+pub fn almide_rt_matrix_get(m: &AlmideMatrix, row: i64, col: i64) -> Option<f64> {
+    if !almide_rt_matrix_in_range(row, m.len()) { return None; }
     let r = &m[row as usize];
     // The COL extent is this row's own width, so a ragged matrix is exact.
-    almide_rt_matrix_bounds(col, r.len());
-    r[col as usize]
+    if !almide_rt_matrix_in_range(col, r.len()) { return None; }
+    Some(r[col as usize])
+}
+
+/// C-341: the byte window fits exactly when `0 <= offset <= len` and
+/// `need <= len - offset` — judged on the buffer side, never as
+/// `offset + need`, which wraps for an offset near i64::MAX.
+#[inline]
+pub fn almide_rt_matrix_window_fits(len: usize, offset: i64, need: usize) -> bool {
+    offset >= 0 && (offset as u64) <= len as u64 && need as u64 <= len as u64 - offset as u64
 }
 
 pub fn almide_rt_matrix_transpose(m: &AlmideMatrix) -> AlmideMatrix {
@@ -237,20 +241,19 @@ pub fn almide_rt_matrix_from_lists(rows: &[Vec<f64>]) -> AlmideMatrix {
     rows.to_vec().into()
 }
 
-pub fn almide_rt_matrix_from_bytes_f32_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> AlmideMatrix {
+pub fn almide_rt_matrix_from_bytes_f32_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> Option<AlmideMatrix> {
     // #1503: a negative dimension clamps to the empty matrix (the C-034 /
     // C-161 rule the constructors already follow) and a negative offset is
     // out of bounds by definition — the raw `as usize` casts turned either
     // into a multi-exabyte size and died in the forbidden T6 form (capacity
     // overflow, exit 101). `almide_rt_matrix_dims` also enforces the element
-    // ceiling, and the bounds compare is overflow-safe in u128.
+    // ceiling, and the window is judged buffer-side (C-341).
     let (r, c) = almide_rt_matrix_dims(rows, cols);
     let need = r * c * 4;
-    let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
-    if offset < 0 || (offset as u128) + (need as u128) > data.len() as u128 {
-        for _ in 0..r { result.push(vec![0.0f64; c]); }
-        return result.into();
+    if !almide_rt_matrix_window_fits(data.len(), offset, need) {
+        return None;
     }
+    let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
     let off = offset as usize;
     let bytes = &data[off..off + need];
     for i in 0..r {
@@ -263,10 +266,10 @@ pub fn almide_rt_matrix_from_bytes_f32_le(data: &Vec<u8>, offset: i64, rows: i64
         }
         result.push(row);
     }
-    result.into()
+    Some(result.into())
 }
 
-pub fn almide_rt_matrix_from_bytes_f16_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> AlmideMatrix {
+pub fn almide_rt_matrix_from_bytes_f16_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> Option<AlmideMatrix> {
     // IEEE-754 half-precision → f32 → f64, inlined to keep the matrix.rs
     // file a single contiguous block of `pub fn almide_rt_matrix_*` functions
     // (simplifies the runtime-stripping logic in src/cli/mod.rs).
@@ -275,14 +278,13 @@ pub fn almide_rt_matrix_from_bytes_f16_le(data: &Vec<u8>, offset: i64, rows: i64
     // out of bounds by definition — the raw `as usize` casts turned either
     // into a multi-exabyte size and died in the forbidden T6 form (capacity
     // overflow, exit 101). `almide_rt_matrix_dims` also enforces the element
-    // ceiling, and the bounds compare is overflow-safe in u128.
+    // ceiling, and the window is judged buffer-side (C-341).
     let (r, c) = almide_rt_matrix_dims(rows, cols);
     let need = r * c * 2;
-    let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
-    if offset < 0 || (offset as u128) + (need as u128) > data.len() as u128 {
-        for _ in 0..r { result.push(vec![0.0f64; c]); }
-        return result.into();
+    if !almide_rt_matrix_window_fits(data.len(), offset, need) {
+        return None;
     }
+    let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
     let off = offset as usize;
     let bytes = &data[off..off + need];
     for i in 0..r {
@@ -313,7 +315,7 @@ pub fn almide_rt_matrix_from_bytes_f16_le(data: &Vec<u8>, offset: i64, rows: i64
         }
         result.push(row);
     }
-    result.into()
+    Some(result.into())
 }
 
 pub fn almide_rt_matrix_to_lists(m: &AlmideMatrix) -> Vec<Vec<f64>> {

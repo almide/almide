@@ -74,5 +74,5 @@ test "Matrix[Float32] accessors via compat" {
   let (r, c) = matrix.shape(m)
   assert_eq(r, 3)
   assert_eq(c, 3)
-  assert_eq(matrix.get(m, 0, 0), 1.0)
+  assert_eq(matrix.get(m, 0, 0), some(1.0))
 }

@@ -61,17 +61,16 @@ pub fn almide_rt_matrix_to_bytes_f16_le(m: &AlmideMatrix) -> Vec<u8> {
     out.into()
 }
 
-pub fn almide_rt_matrix_from_bytes_f64_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> AlmideMatrix {
+pub fn almide_rt_matrix_from_bytes_f64_le(data: &Vec<u8>, offset: i64, rows: i64, cols: i64) -> Option<AlmideMatrix> {
     // #1503: negative dims clamp to the empty matrix (C-034/C-161), a negative
-    // offset is OOB by definition, and the bounds compare is overflow-safe —
-    // same discipline as the f32/f16 loaders in matrix.rs.
+    // offset is OOB by definition, and the window is judged buffer-side
+    // (C-341) — same discipline as the f32/f16 loaders in matrix.rs.
     let (r, c) = almide_rt_matrix_dims(rows, cols);
     let need = r * c * 8;
-    let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
-    if offset < 0 || (offset as u128) + (need as u128) > data.len() as u128 {
-        for _ in 0..r { result.push(vec![0.0f64; c]); }
-        return result.into();
+    if !almide_rt_matrix_window_fits(data.len(), offset, need) {
+        return None;
     }
+    let mut result: Vec<Vec<f64>> = Vec::with_capacity(r);
     let off = offset as usize;
     let bytes = &data[off..off + need];
     for i in 0..r {
@@ -84,7 +83,7 @@ pub fn almide_rt_matrix_from_bytes_f64_le(data: &Vec<u8>, offset: i64, rows: i64
         }
         result.push(row);
     }
-    result.into()
+    Some(result.into())
 }
 
 pub fn almide_rt_matrix_gather_rows(m: &AlmideMatrix, indices: &[i64]) -> AlmideMatrix {
@@ -244,8 +243,9 @@ pub fn almide_rt_matrix_linear_f32_row_no_bias(
     almide_rt_matrix_shape_eq(x.cols, n_in);
     // The weight window must be IN the buffer. Out of it, the answer is the
     // all-zero output — the same edge the unfused composition takes, because
-    // `from_bytes_f32_le` over a window past the end is the all-zero matrix
-    // (C-341) and a zero weight makes a zero product. Without the test the
+    // the self-hosted definition reads `from_bytes_f32_le(..) ?? zeros(..)`
+    // (C-341's `none` for a window past the end) and a zero weight makes a
+    // zero product. Without the test the
     // slice below was a raw `range end index N out of range` panic (exit 101,
     // the form ALS-T6 forbids) on a buffer one element short.
     let need = out_cols.saturating_mul(n_in).saturating_mul(4);
@@ -289,9 +289,8 @@ pub fn almide_rt_matrix_select_rows_f32(
     let off = offset.max(0) as usize;
     let mut out = Vec::<f64>::with_capacity(row_ids.len() * c);
     for &rid in row_ids {
-        // A row past the buffer is the all-zero row — the same defined
-        // OOB→zeros edge `from_bytes_f32_le` (and the decoded-matrix
-        // `select_rows`) contract; an unchecked slice here was a raw panic
+        // A row past the buffer is the all-zero row — the defined OOB→zeros
+        // edge of the row-subset loader (the full loader answers `none`); an unchecked slice here was a raw panic
         // while the wasm leg read undefined bytes (the 2026-08-12 fuzz
         // divergence, run 31515916427).
         let Some(base) = select_row_window(off, rid, c * 4, data.len()) else {

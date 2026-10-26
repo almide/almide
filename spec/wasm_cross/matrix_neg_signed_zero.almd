@@ -19,7 +19,10 @@
 // keep the sign, `sub(zeros, zeros)` is a SUBTRACTION and is +0.0 by IEEE on
 // both legs, and the norms/activations that route a zero through a product
 // keep whatever the product gives.
-fn recip(m: Matrix, r: Int, c: Int) -> String = float.to_string(1.0 / matrix.get(m, r, c))
+fn recip(m: Matrix, r: Int, c: Int) -> String = match matrix.get(m, r, c) {
+  some(x) => float.to_string(1.0 / x),
+  none => "none",
+}
 
 fn main() -> Unit = {
   let z = matrix.from_lists([

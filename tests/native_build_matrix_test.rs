@@ -36,13 +36,13 @@ effect fn main() -> () = {
   while r < 3 {
     var c = 0
     while c < 2 {
-      s = s + float.to_string(matrix.get(m, r, c)) + " "
+      s = s + float.to_string(matrix.get(m, r, c) ?? 0.0) + " "
       c = c + 1
     }
     r = r + 1
   }
   println(s)
-  println(float.to_string(matrix.get(matrix.transpose(m), 0, 2)))
+  println(float.to_string(matrix.get(matrix.transpose(m), 0, 2) ?? 0.0))
 }
 "#;
 

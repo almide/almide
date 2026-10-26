@@ -35,7 +35,7 @@ effect fn run(n: Int, d: Int) -> Unit = {
   for i in 0..<d {
     let r = matrix.fma(one, 2.0, big, 3.0)
     let r3 = matrix.fma3(big, 1.0, one, 1.0, big, 0.5)
-    acc = acc + matrix.get(r, 0, 0) + matrix.get(r3, 0, 0)
+    acc = acc + (matrix.get(r, 0, 0) ?? 0.0) + (matrix.get(r3, 0, 0) ?? 0.0)
   }
   let t1 = datetime.monotonic_ns()!
   println("${acc} ${t1 - t0}")

@@ -136,9 +136,10 @@ impl Emitter<'_> {
     }
 
     /// from_bytes_f32_le / from_bytes_f16_le / from_bytes_f64_le (`width`
-    /// = the element's byte count): negative dims clamp to the empty
-    /// matrix; a negative offset or a short buffer is the all-zero matrix
-    /// (the family's OOB→zeros edge).
+    /// = the element's byte count) answer `Option[Matrix]` (C-341):
+    /// negative dims clamp to 0 and the C-161 ceiling aborts first; then a
+    /// negative offset, an offset past the end or a short buffer is `none`
+    /// (NULL_ADDR), anything else `some` of the decoded matrix.
     pub(crate) fn lower_matrix_from_bytes(
         &mut self,
         width: i64,
@@ -168,24 +169,29 @@ impl Emitter<'_> {
         // (`Error: matrix dimensions too large` — differential fuzz, seed
         // 544202078563 index 874). The division-form guard cannot wrap.
         self.q_dims_guard(hr, hc);
+        {
+            let mut i = self.f.instructions();
+            // fits? offset >= 0 && offset <= len && r*c*width <= len - offset
+            // — subtraction on the buffer side, never `offset + r*c*width`:
+            // an offset near i64::MAX wrapped that sum negative, passed the
+            // test and read a subnormal out of the wrong bytes (#1909). r and
+            // c are clamped >= 0 and `q_dims_guard` has already refused a
+            // count past the element ceiling, so `r*c*width` cannot wrap.
+            i.local_get(hoff).i64_const(0).i64_ge_s();
+            i.local_get(hoff);
+            i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
+            i.i64_le_s().i32_and();
+            i.local_get(hr).local_get(hc).i64_mul().i64_const(width).i64_mul();
+            i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
+            i.local_get(hoff).i64_sub();
+            i.i64_le_s().i32_and();
+            i.if_(BlockType::Result(ValType::I32));
+        }
         let ho = self.mat_alloc_out64(hr, hc)?;
         let hk = self.hold_i32()?;
         let hn = self.hold_i32()?;
+        let hbox = self.hold_i32()?;
         let mut i = self.f.instructions();
-        // in-bounds? offset >= 0 && offset <= len && r*c*width <= len - offset
-        // — subtraction on the buffer side, never `offset + r*c*width`:
-        // an offset near i64::MAX wrapped that sum negative, passed the
-        // test and read a subnormal out of the wrong bytes (#1909). r and
-        // c are clamped >= 0 and `mat_alloc_out64` has already refused a
-        // product past the element ceiling, so `r*c*width` cannot wrap.
-        i.local_get(hoff).i64_const(0).i64_ge_s();
-        i.local_get(hoff);
-        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
-        i.i64_le_s().i32_and();
-        i.local_get(hr).local_get(hc).i64_mul().i64_const(width).i64_mul();
-        i.local_get(hd).i32_load(len_memarg()).i64_extend_i32_u();
-        i.local_get(hoff).i64_sub();
-        i.i64_le_s().i32_and().if_(BlockType::Empty);
         i.i32_const(0).local_set(hk);
         i.local_get(hr).local_get(hc).i64_mul().i32_wrap_i64().local_set(hn);
         i.block(BlockType::Empty).loop_(BlockType::Empty);
@@ -208,17 +214,26 @@ impl Emitter<'_> {
         i.f64_store(mat_elem());
         i.local_get(hk).i32_const(1).i32_add().local_set(hk);
         i.br(0).end().end();
-        i.end();
+        // `some(m)`: a one-slot box owning the fresh matrix.
+        i.i32_const(SliceTy::Matrix.slot_size() as i32).call(F_ALLOC).local_tee(hbox);
         i.local_get(ho);
         let _ = i;
-        for _ in 0..3 {
+        self.store_ty_slot(SliceTy::Matrix, almide_layout::OPTION_FIELD);
+        {
+            let mut i = self.f.instructions();
+            i.local_get(hbox);
+            i.else_();
+            i.i32_const(almide_layout::NULL_ADDR as i32);
+            i.end();
+        }
+        for _ in 0..4 {
             self.release_i32();
         }
         for _ in 0..3 {
             self.release_i64();
         }
         self.release_i32();
-        Ok(Some(Lowered::owned(SliceTy::Matrix)))
+        Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(SliceTy::Matrix)))))
     }
 
     /// select_rows_f32: rid clamps to 0; a row whose f32 window leaves

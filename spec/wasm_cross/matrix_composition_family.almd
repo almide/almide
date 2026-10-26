@@ -76,16 +76,16 @@ fn main() -> Unit = {
   let z = matrix.zeros_f32(3, 2)
   let fs = matrix.shape(f)
   let zs = matrix.shape(z)
-  let z21 = matrix.get(z, 2, 1)
+  let z21 = matrix.get(z, 2, 1) ?? -1.0
   println("f32 ctors: ${fs} ${zs} ${z21}")
   let m1 = matrix.mul_f32(f, matrix.ones_f32(3, 2))
   let m2 = matrix.mul_f32_scaled(f, 4.0, matrix.ones_f32(3, 2))
   let m3 = matrix.mul_f32_t(f, matrix.ones_f32(2, 3))
   let m4 = matrix.mul_f32_t_scaled(f, 0.5, matrix.ones_f32(2, 3))
-  let v1 = matrix.get(m1, 1, 1)
-  let v2 = matrix.get(m2, 0, 0)
+  let v1 = matrix.get(m1, 1, 1) ?? -1.0
+  let v2 = matrix.get(m2, 0, 0) ?? -1.0
   let s3 = matrix.shape(m3)
-  let v4 = matrix.get(m4, 1, 1)
+  let v4 = matrix.get(m4, 1, 1) ?? -1.0
   println("f32 mul: ${v1} ${v2} ${s3} ${v4}")
   fma_overlap()
 }

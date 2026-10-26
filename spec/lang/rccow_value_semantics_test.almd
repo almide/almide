@@ -25,8 +25,8 @@ test "matrix copy stays independent of derived result" {
   ])
   var m2 = m
   let m3 = matrix.scale(m2, 5.0)
-  assert_eq(matrix.get(m, 0, 0), 2.0)
-  assert_eq(matrix.get(m3, 0, 0), 10.0)
+  assert_eq(matrix.get(m, 0, 0), some(2.0))
+  assert_eq(matrix.get(m3, 0, 0), some(10.0))
 }
 
 test "record copy shields the original's bytes field" {

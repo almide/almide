@@ -28,9 +28,9 @@ treat the value as immutable; combinators return fresh matrices.
 | `matrix.zeros(rows: Int, cols: Int) -> Matrix` | Zero-filled |
 | `matrix.ones(rows: Int, cols: Int) -> Matrix` | One-filled |
 | `matrix.from_lists(rows: List[List[Float]]) -> Matrix` | From nested lists |
-| `matrix.from_bytes_f64_le(data, offset, rows, cols) -> Matrix` | Read flat f64 LE bytes |
-| `matrix.from_bytes_f32_le(data, offset, rows, cols) -> Matrix` | Read flat f32 LE (promoted to f64) |
-| `matrix.from_bytes_f16_le(data, offset, rows, cols) -> Matrix` | Read flat IEEE-754 half (GGML weights) |
+| `matrix.from_bytes_f64_le(b, offset, rows, cols) -> Option[Matrix]` | Read flat f64 LE bytes; `none` if the data does not fit |
+| `matrix.from_bytes_f32_le(b, offset, rows, cols) -> Option[Matrix]` | Read flat f32 LE (promoted to f64); `none` if the data does not fit |
+| `matrix.from_bytes_f16_le(b, offset, rows, cols) -> Option[Matrix]` | Read flat IEEE-754 half (GGML weights); `none` if the data does not fit |
 
 ## Conversions
 
@@ -48,7 +48,7 @@ treat the value as immutable; combinators return fresh matrices.
 | `matrix.shape(m) -> (Int, Int)` | `(rows, cols)` |
 | `matrix.rows(m) -> Int` | Row count |
 | `matrix.cols(m) -> Int` | Column count |
-| `matrix.get(m, r, c) -> Float` | Element accessor |
+| `matrix.get(m, r, c) -> Option[Float]` | Element accessor; `none` out of range (C-282) |
 
 ## Arithmetic
 
@@ -92,8 +92,7 @@ the shorter operand instead, identically on both targets.
 **A shape precondition is a defined abort.** A kernel that indexes one
 operand's extent against another's requires them equal, and a violation stops
 the program with `Error: matrix shape mismatch` on stderr and exit code 1 —
-the same one-line abort the element index (`Error: matrix index out of bounds`) already use, on
-native and on both wasm legs, never a panic and never a truncated answer
+on native and on both wasm legs, never a panic and never a truncated answer
 (C-353):
 
 | Call | Requires |
@@ -113,7 +112,7 @@ rather than aborting (`mul(m, zeros(0, 0))` is the `rows(m)×0` matrix,
 **A matrix with no rows has no columns** (C-161). A Matrix is a list of
 equal-width rows, and its width is the width of row 0. So every 0-row matrix
 is 0 × 0: `shape` answers `(0, 0)` and `cols` answers `0`, whatever width
-produced it. `zeros(0, 3)`, `from_bytes_f32_le(b, 0, 0, 3)`,
+produced it. `zeros(0, 3)`, `from_bytes_f32_le(b, 0, 0, 3)!`,
 `select_rows_f32(b, 0, 3, [])` and `slice_rows(m, 5, 9)` are all 0 × 0 on both
 targets. This keeps `from_lists(to_lists(m))` shape-preserving: `to_lists` of
 a rowless matrix is `[]`, and `from_lists([])` is 0 × 0. It does not work the
@@ -144,7 +143,10 @@ negative row id clamps to row 0 and a negative offset clamps to 0 — never a
 panic, never a read past the buffer (C-229).
 
 The `from_bytes_f16_le` / `_f32_le` / `_f64_le` *decoders* keep a stored
-`-0.0`: there the sign is the datum and survives (C-269).
+`-0.0`: there the sign is the datum and survives (C-269). They answer `none`
+unless `0 <= offset <= len(b)` and `rows * cols * width <= len(b) - offset`
+(C-341), after a negative dimension clamps to 0 and an over-ceiling count
+aborts with `Error: matrix dimensions too large` (C-161).
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 

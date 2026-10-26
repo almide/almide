@@ -149,24 +149,26 @@ fn matrix_cols(m: List[List[Float]]) -> Int = {
   if prim.load32(h + 4) == 0 then 0 else prim.load32(prim.load64(h + 12) + 4)
 }
 
-// The index-domain guard (C-282): out of range — negative included — is the
-// same unified abort `xs[i]` raises, byte-identical to the native
-// `almide_rt_matrix_bounds`. A raw index here was an OOB memory trap for a
-// too-large index and a SILENT out-of-block read for a negative one.
-fn __mx_bounds(idx: Int, extent: Int) -> Int = {
-  if idx < 0 or idx >= extent then prim.die(prim.handle("Error: matrix index out of bounds\n")) else ()
-  0
-}
+// The index domain (C-282): `some(value)` in range, `none` out of range —
+// negative included — compared as i64 BEFORE any address is formed. A raw
+// index here was an OOB memory trap for a too-large index and a SILENT
+// out-of-block read for a negative one. (Before stdlib redesign R-matrix-08
+// the guard aborted with `Error: matrix index out of bounds`.)
+fn __mx_get_none() -> Float? = none
 
-fn matrix_get(m: List[List[Float]], row: Int, col: Int) -> Float = {
+fn __mx_get_some(x: Float) -> Float? = some(x)
+
+fn matrix_get(m: List[List[Float]], row: Int, col: Int) -> Float? = {
   let h = prim.handle(m)
   let rows = prim.load32(h + 4)
-  let _gr = __mx_bounds(row, rows)
-  let rh = prim.load64(h + 12 + row * 8)
-  // The COL extent is this row's own width — the native twin reads r.len().
-  let cols = prim.load32(rh + 4)
-  let _gc = __mx_bounds(col, cols)
-  prim.ffrombits(prim.load64(rh + 12 + col * 8))
+  if row < 0 or row >= rows then __mx_get_none()
+  else {
+    let rh = prim.load64(h + 12 + row * 8)
+    // The COL extent is this row's own width — the native twin reads r.len().
+    let cols = prim.load32(rh + 4)
+    if col < 0 or col >= cols then __mx_get_none()
+    else __mx_get_some(prim.ffrombits(prim.load64(rh + 12 + col * 8)))
+  }
 }
 
 // ── element-wise ──
@@ -485,15 +487,21 @@ else {
 }
 
 // ── byte decode ──
-// v0 from_bytes_f32_le: off + r·c·4 past the buffer → the all-zero r×c matrix; else each
-// element f32::from_le_bytes as f64 (prim.bits_to_f32 = the same widen on the raw bits).
-fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+// v0 from_bytes_f32_le (C-341): `none` unless `0 <= off <= len` and
+// `r·c·4 <= len - off`; else `some` of each element f32::from_le_bytes as f64
+// (prim.bits_to_f32 = the same widen on the raw bits). Before stdlib redesign
+// R-matrix-15 a non-fitting window answered the all-zero r×c matrix.
+fn __mx_load_none() -> List[List[Float]]? = none
+
+fn __mx_load_some(m: List[List[Float]]) -> List[List[Float]]? = some(m)
+
+fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let hd = prim.handle(data)
   let len = prim.load32(hd + 4)
   // #1503: a negative dimension clamps to the empty matrix (the C-034 rule
   // the constructors follow) and a negative offset is OOB by definition —
   // unclamped, the allocs below took a negative size and the legs died in
-  // undefined forms instead of the family's OOB→zeros edge.
+  // undefined forms instead of the family's `none` edge.
   let r = if rows < 0 then 0 else rows
   let c = if cols < 0 then 0 else cols
   // The shared ceiling BEFORE `r * c * 4`: that product overflows for a
@@ -509,11 +517,11 @@ fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   // this test and left the self-host's, so the incumbent leg still answered
   // a subnormal where native answered zeros). `len` is a length, so
   // `len - offset` cannot overflow once `offset` is known non-negative.
-  if offset < 0 or offset > len or need > len - offset then __mx_const(r, c, 0.0)
+  if offset < 0 or offset > len or need > len - offset then __mx_load_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __mx_f32_rows(prim.handle(out), hd, offset, r, c, 0)
-    out
+    __mx_load_some(out)
   }
 }
 
@@ -583,7 +591,7 @@ fn matrix_select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int
   out
 }
 
-// v0 from_bytes_f16_le: the same OOB→zeros edge; per element IEEE-754 half → f64
+// v0 from_bytes_f16_le: the same `none` edge; per element IEEE-754 half → f64
 // (bit-exact — mirrors stdlib/bytes_f16.almd's __f16_decode, private copy so no
 // registered cross-reference).
 fn __mx_f16_pow2(k: Int) -> Float = prim.ffrombits(prim.bshl(1023 + k, 52))
@@ -606,7 +614,7 @@ fn __mx_f16_decode(bits: Int) -> Float = {
   }
 }
 
-fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let hd = prim.handle(data)
   let len = prim.load32(hd + 4)
   // #1503: same clamp discipline as from_bytes_f32_le above.
@@ -625,11 +633,11 @@ fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   // this test and left the self-host's, so the incumbent leg still answered
   // a subnormal where native answered zeros). `len` is a length, so
   // `len - offset` cannot overflow once `offset` is known non-negative.
-  if offset < 0 or offset > len or need > len - offset then __mx_const(r, c, 0.0)
+  if offset < 0 or offset > len or need > len - offset then __mx_load_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __mx_f16_rows(prim.handle(out), hd, offset, r, c, 0)
-    out
+    __mx_load_some(out)
   }
 }
 

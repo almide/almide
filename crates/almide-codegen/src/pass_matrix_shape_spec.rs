@@ -385,7 +385,8 @@ fn rewrite_stmt(stmt: &mut IrStmt, shapes: &mut HashMap<VarId, Shape>) -> bool {
 /// one `from_lists` calls per cell inline in release mode, so the emitted
 /// code still collapses to straight-line constant-index arithmetic under
 /// LLVM. Dispatch and allocation are gone before the loop body sees
-/// anything.
+/// anything. `get` answers `Option` (C-282); every index here is inside the
+/// statically known shape, so the `unwrap_or(0.0)` never fires.
 ///
 /// Shape arguments `(m, k, n)` mean `a` is `m × k`, `b` is `k × n`, and
 /// the result is `m × n`.
@@ -408,7 +409,7 @@ fn make_unrolled_mul(
             let mut terms = Vec::with_capacity(k as usize);
             for p in 0..k {
                 terms.push(format!(
-                    "almide_rt_matrix_get(__almide_sa, {i}i64, {p}i64) * almide_rt_matrix_get(__almide_sb, {p}i64, {j}i64)",
+                    "almide_rt_matrix_get(__almide_sa, {i}i64, {p}i64).unwrap_or(0.0) * almide_rt_matrix_get(__almide_sb, {p}i64, {j}i64).unwrap_or(0.0)",
                 ));
             }
             let sum = if terms.is_empty() {

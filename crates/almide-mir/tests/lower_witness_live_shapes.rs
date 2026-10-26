@@ -234,7 +234,7 @@ fn repeat_kv(kv: Matrix, n_kv_heads: Int, n_rep: Int) -> Matrix = {
 effect fn main() -> Unit = {
   let x = matrix.from_lists([[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0]])
   let p = per_head_shift(x, [0.5, 1.5], 2, 0.5)
-  println(float.to_string(matrix.get(p, 0, 0)))
+  println(float.to_string(matrix.get(p, 0, 0) ?? 0.0))
   let r2 = repeat_kv(x, 2, 2)
   println(int.to_string(matrix.cols(r2)))
 }
