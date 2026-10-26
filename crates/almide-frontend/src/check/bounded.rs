@@ -133,30 +133,6 @@ pub fn is_memory_unsafe_call(m: &str, f: &str) -> bool {
     almide_lang::stdlib_info::is_memory_unsafe_stdlib_fn(m, f)
 }
 
-/// #4106: is `m.f` a digest broken for security? Declared once, at the
-/// functions (`@insecure_digest` on `hash.md5`/`md5_hex`/`sha1`/`sha1_hex`).
-/// `--profile critical` refuses such a call with E100, and no `--allow`
-/// grants it back; the default profile is unchanged.
-pub fn is_insecure_digest_call(m: &str, f: &str) -> bool {
-    almide_lang::stdlib_info::is_insecure_digest_stdlib_fn(m, f)
-}
-
-/// E100 for an `@insecure_digest` call under `--profile critical` (#4106).
-fn insecure_digest_err(m: &str, f: &str, fn_name: &str, span: Option<BSpan>) -> Diagnostic {
-    let mut d = Diagnostic::error(
-        format!("`{m}.{f}` is a digest broken for security (`@insecure_digest`) and is not admissible under `--profile critical`"),
-        "use `hash.sha256` / `hash.sha512` for a digest, and `hash.hmac_sha256` / `hash.is_valid_hmac_sha256` for a keyed MAC; keep md5/sha1 compatibility code in a module that is not checked with `--profile critical`".to_string(),
-        format!("fn {}()", fn_name),
-    )
-    .with_code("E100");
-    if let Some(s) = span {
-        d.line = Some(s.line);
-        d.col = Some(s.col);
-        d.end_col = Some(s.end_col);
-    }
-    d
-}
-
 /// E100 (#4008): a construct outside the memory-safety guarantee under
 /// `--profile critical`. Not an ALS §B rule (E070–E079): the plain `@bounded`
 /// attribute does not raise it; the critical profile does.
@@ -949,11 +925,6 @@ impl BoundedCx<'_, '_> {
                 self.fn_name,
                 call.span.or(self.fn_span),
             ));
-            return true;
-        }
-        // #4106: a digest broken for security (`@insecure_digest`: md5, sha1).
-        if self.checker.profile_critical && is_insecure_digest_call(m, f) {
-            self.diags.push(insecure_digest_err(m, f, self.fn_name, call.span.or(self.fn_span)));
             return true;
         }
         if m == "io" {

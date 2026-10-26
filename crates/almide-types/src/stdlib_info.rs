@@ -595,21 +595,6 @@ pub fn is_memory_unsafe_stdlib_fn(module: &str, func: &str) -> bool {
 /// import line is the one visible place a reader finds raw memory in a file.
 pub const MEMORY_UNSAFE_OPT_IN: &str = "ffi";
 
-/// Every bundled stdlib fn declared `@insecure_digest` (#4106): a digest that
-/// is broken for security (`hash.md5`, `md5_hex`, `sha1`, `sha1_hex`), kept for
-/// compatibility only. `--profile critical` refuses a call to one (E100); the
-/// default profile is unchanged. Derived from the one declaration site.
-pub fn insecure_digest_stdlib_fns() -> &'static [(&'static str, String, Option<String>)] {
-    use std::sync::OnceLock;
-    static TABLE: OnceLock<Vec<(&'static str, String, Option<String>)>> = OnceLock::new();
-    TABLE.get_or_init(|| marked_stdlib_fns("@insecure_digest"))
-}
-
-/// True if `module.func` is an `@insecure_digest` stdlib fn (#4106).
-pub fn is_insecure_digest_stdlib_fn(module: &str, func: &str) -> bool {
-    insecure_digest_stdlib_fns().iter().any(|(m, f, _)| *m == module && f == func)
-}
-
 /// Every bundled stdlib fn declared `@signals_process` (#4125): it starts no
 /// child but signals or probes a pid, so `[permissions] proc` bounds it as the
 /// `kill` command it used to run. Derived from the one declaration site.
@@ -724,14 +709,5 @@ mod ordered_tests {
         assert!(!super::TIER1_ALWAYS_ACCESSIBLE.contains(&m));
         assert!(!super::AUTO_IMPORT_BUNDLED.contains(&m));
         assert!(super::memory_unsafe_stdlib_fns().iter().any(|(module, _, _)| *module == m));
-    }
-
-    #[test]
-    fn the_insecure_digest_table_is_md5_and_sha1() {
-        let mut t: Vec<String> = super::insecure_digest_stdlib_fns().iter().map(|(m, f, _)| format!("{m}.{f}")).collect();
-        t.sort();
-        assert_eq!(t, ["hash.md5", "hash.md5_hex", "hash.sha1", "hash.sha1_hex"]);
-        assert!(!super::is_insecure_digest_stdlib_fn("hash", "sha256"));
-        assert!(!super::is_insecure_digest_stdlib_fn("hash", "hmac_sha256"));
     }
 }

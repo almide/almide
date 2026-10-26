@@ -51,9 +51,6 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // Outside the memory-safety guarantee (#4008): `--profile critical`
     // refuses a call (E100); crates/almide-types `memory_unsafe_stdlib_fns`
     "memory_unsafe",
-    // A digest that is broken for security (md5, sha1; #4106): `--profile
-    // critical` refuses a call (E100); crates/almide-types `insecure_digest_stdlib_fns`
-    "insecure_digest",
     // Signals or probes a pid (#4125): `[permissions] proc` bounds it as the
     // `kill` command; crates/almide-types `signals_process_stdlib_fns`
     "signals_process",
