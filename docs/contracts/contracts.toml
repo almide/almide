@@ -783,6 +783,7 @@ since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/cross_module_spread.almd", class = "fixture" },
+  { path = "tests/record_spread_no_override_test.rs", name = "a_spread_with_no_override_copies_its_base_on_every_leg", class = "fixture" },
 ]
 
 # ── NUMERIC TOTALITY: pow (Cluster-2) ───────────────────────────────
@@ -5564,19 +5565,20 @@ evidence  = [
 id        = "C-425"
 spec      = "ALS-E16"
 title     = "A value prints through its type's declared repr wherever it is rendered; a Secret prints Secret(***) on every path"
-statement = "A value whose type declares `fn T.repr` renders as that function's result wherever the value is rendered: at the top of a string interpolation, inside an enclosing record, list, option, result, tuple, map or variant payload, and as an operand of an `assert_eq` / `assert_ne` failure block. A value with no declared repr anywhere in its type renders structurally, as before. `secret.Secret[A]` declares one: a Secret renders as the 11 bytes `Secret(***)` for every A, so no stdout or stderr byte of a run carries the wrapped value unless the program calls `secret.reveal`. Identical on native, wasm and the interpreter."
+statement = "A value whose type declares `fn T.repr` renders as that function's result wherever the value is rendered: at the top of a string interpolation, inside an enclosing record, list, set, option, result, tuple, map or variant payload, and as an operand of an `assert_eq` / `assert_ne` failure block, including inside a generic function's body, where the value renders through the declared repr of the type the call instantiates the type parameter with. A value with no declared repr anywhere in its type renders structurally, as before. `secret.Secret[A]` declares one: a Secret renders as the 11 bytes `Secret(***)` for every A, so no stdout or stderr byte of a run carries the wrapped value unless the program calls `secret.reveal`. Identical on native, wasm and the interpreter."
 since     = "0.69.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/secret_never_rendered.almd", class = "fixture" },
   { path = "tests/secret_render_canary_test.rs", name = "no_renderer_prints_a_planted_canary", class = "fixture" },
+  { path = "tests/secret_render_canary_test.rs", name = "generic_bodies_and_sets_render_the_declared_form_on_every_leg", class = "fixture" },
 ]
 
 [[contract]]
 id        = "C-426"
 spec      = "ALS-C3"
 title     = "== on Secret[String] and Secret[Bytes] compares the revealed values; any other Secret, and a variant or map holding one, is E103"
-statement = "`==` / `!=` (and `assert_eq` / `assert_ne`) on `Secret[String]` or `Secret[Bytes]` is true exactly when the revealed values are equal, computed by `string.is_equal_constant_time` / `bytes.is_equal_constant_time`; a record, tuple, list, option or result holding such a Secret compares field by field, element by element, with that rule at each Secret. `==` on a `Secret[A]` for any other A, on a variant holding a Secret, or on a map or set holding a Secret is refused at check time with E103 and the hint `secret.reveal(a) == secret.reveal(b)`. Identical on native, wasm and the interpreter."
+statement = "`==` / `!=` (and `assert_eq` / `assert_ne`) on `Secret[String]` or `Secret[Bytes]` is true exactly when the revealed values are equal, computed by `string.is_equal_constant_time` / `bytes.is_equal_constant_time`; a record, tuple, list, option or result holding such a Secret compares field by field, element by element, with that rule at each Secret. `==` on a `Secret[A]` for any other A, on a variant holding a Secret, or on a map or set holding a Secret is refused at check time with E103 and the hint `secret.reveal(a) == secret.reveal(b)`. A generic function whose body compares a value of its type parameter with `==` / `!=` (directly or through another generic function), and a stdlib function that compares its argument by equality (`list.contains`), refuse at check time with E103 every call that instantiates the parameter with a type holding a Secret, whatever the Secret holds: a generic compare is structural, never constant time. Identical on native, wasm and the interpreter."
 since     = "0.69.0"
 status    = "active"
 evidence  = [
@@ -5584,6 +5586,8 @@ evidence  = [
   { path = "tests/diagnostics/e103-secret-eq-non-string/broken.almd", class = "fixture" },
   { path = "tests/diagnostics/e103-secret-variant-eq/broken.almd", class = "fixture" },
   { path = "tests/diagnostics/e103-secret-assert-eq-non-string/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e103-secret-generic-eq/broken.almd", class = "fixture" },
+  { path = "tests/secret_opaque_alias_test.rs", name = "a_secret_never_reaches_a_generic_compare", class = "fixture" },
 ]
 
 [[contract]]
