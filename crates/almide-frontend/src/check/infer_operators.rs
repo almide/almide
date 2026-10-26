@@ -512,7 +512,8 @@ impl Checker {
             });
             // #2606: and for the post-solve Eq check — a function anywhere in
             // the operand type has no equality.
-            self.deferred_eq_checks.push((lt.clone(), left.span, format!("operator '{}'", op)));
+            let in_fn = self.generic_fn_key();
+            self.deferred_eq_checks.push(super::EqSite { ty: lt.clone(), span: left.span, what: format!("operator '{}'", op), in_fn, generic_compare: false });
         }
         // Ordering (< <= > >=) is defined ONLY on scalar orderable
         // types. On a compound operand (Tuple/Option/Result/List/

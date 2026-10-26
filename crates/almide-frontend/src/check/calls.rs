@@ -558,7 +558,9 @@ impl Checker {
             let Some(binding) = bindings.get(g) else { continue };
             match bound.cap {
                 Cap::Eq if !Self::sig_keys_on(sig, *g) => {
-                    self.deferred_eq_checks.push((binding.clone(), span, format!("{qualified}()")));
+                    // #4239: the stdlib fn's body compares its parameter structurally.
+                    let in_fn = self.generic_fn_key();
+                    self.deferred_eq_checks.push(super::EqSite { ty: binding.clone(), span, what: format!("{qualified}()"), in_fn, generic_compare: true });
                 }
                 Cap::Eq => {}
                 Cap::Ord => self.deferred_ord_elem_checks.push((binding.clone(), span, qualified.to_string())),

@@ -366,36 +366,7 @@ impl Checker {
     /// CALLER's generics is the caller's requirement too. To a fixpoint,
     /// since a chain may be any length.
     fn propagate_interp_reqs(&mut self) {
-        loop {
-            let mut added: Vec<(Sym, InterpReq)> = Vec::new();
-            for call in &self.generic_calls {
-                let Some(caller) = call.caller else { continue };
-                let Some(reqs) = self.interp_reqs.get(&call.callee) else { continue };
-                for req in reqs {
-                    let t = crate::types::substitute(&req.ty, &call.bindings);
-                    if !mentions_rigid_generic(&t) {
-                        continue;
-                    }
-                    let known = self.interp_reqs.get(&caller).is_some_and(|rs| rs.iter().any(|r| {
-                        r.ty == t && r.origin.file == req.origin.file && r.origin.span == req.origin.span
-                    })) || added.iter().any(|(c, r)| {
-                        *c == caller && r.ty == t && r.origin.file == req.origin.file && r.origin.span == req.origin.span
-                    });
-                    if known {
-                        continue;
-                    }
-                    let mut via = vec![call.site.clone()];
-                    via.extend(req.via.iter().cloned());
-                    added.push((caller, InterpReq { ty: t, origin: req.origin.clone(), via }));
-                }
-            }
-            if added.is_empty() {
-                break;
-            }
-            for (caller, req) in added {
-                self.interp_reqs.entry(caller).or_default().push(req);
-            }
-        }
+        propagate_reqs(&self.generic_calls, &mut self.interp_reqs);
     }
 
     /// One E089 for a (call, requirement) pair, anchored on the first site

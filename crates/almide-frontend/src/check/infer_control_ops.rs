@@ -201,6 +201,10 @@ impl Checker {
                 // field: of an opaque record outside its module it is a
                 // literal of it (E033, #4107).
                 self.reject_foreign_opaque_record(&resolve_ty(&base_ty, &self.uf), "build a record update of");
+                // Every spread form (`{ ...b }`, `{ ...b, f: v }`, `T { ...b }`)
+                // copies the base's fields; a base still open here is judged
+                // once it resolves.
+                self.deferred_opaque_spreads.push((base_ty.clone(), self.current_span));
                 // #3358: an updated field takes the base record's DECLARED field
                 // type, as the same field of a record literal does
                 // (`constrain_record_fields`). Without this the value was

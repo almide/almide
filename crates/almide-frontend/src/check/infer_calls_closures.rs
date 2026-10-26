@@ -612,7 +612,8 @@ impl Checker {
             self.join_sized_peers(&peers, "assert argument");
             // #2606: the comparison needs an Eq operand type (post-solve E016).
             if let ExprKind::Ident { name, .. } = &callee.kind {
-                self.deferred_eq_checks.push((peers[0].0.clone(), span, format!("{}()", name)));
+                let in_fn = self.generic_fn_key();
+                self.deferred_eq_checks.push(super::EqSite { ty: peers[0].0.clone(), span, what: format!("{}()", name), in_fn, generic_compare: false });
             }
         }
         ty

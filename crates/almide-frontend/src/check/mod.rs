@@ -286,7 +286,18 @@ pub struct Checker {
     /// post-solve EQUALITY check (E016, #2606): a function anywhere in the
     /// type has no equality ("Function types are never Eq",
     /// docs/specs/type-system.md).
-    pub(crate) deferred_eq_checks: Vec<(Ty, Option<crate::ast::Span>, String)>,
+    pub(crate) deferred_eq_checks: Vec<EqSite>,
+    /// #4239, checker-wide like `interp_reqs`: for each generic fn, the
+    /// operand types (in its rigid generics) its body compares with `==` —
+    /// a requirement every instantiation must meet: a generic compare is
+    /// structural, so no instantiation may hold a Secret (E103).
+    pub(crate) eq_reqs: std::collections::HashMap<Sym, Vec<InterpReq>>,
+    /// #4239: (call site, requirement origin) pairs already reported.
+    pub(crate) eq_reported: std::collections::HashSet<(String, usize, usize, String, usize, usize)>,
+    /// Record-update bases (`{ ...b }`) awaiting the post-solve opaque
+    /// check (E033): a base whose type is still open at the spread is
+    /// judged once it resolves.
+    pub(crate) deferred_opaque_spreads: Vec<(Ty, Option<crate::ast::Span>)>,
     /// Annotation-resolved types awaiting the post-solve UNKNOWN-NAME check
     /// (E029): a `Ty::Named` whose sym is not a declared type compiles to a
     /// nonexistent Rust type (E0412/E0422/E0425) after `check` accepted — the
@@ -718,6 +729,9 @@ impl Checker {
             interp_reported: std::collections::HashSet::new(),
             deferred_ord_elem_checks: Vec::new(),
             deferred_eq_checks: Vec::new(),
+            eq_reqs: std::collections::HashMap::new(),
+            eq_reported: std::collections::HashSet::new(),
+            deferred_opaque_spreads: Vec::new(),
             deferred_empty_collection_checks: Vec::new(),
             deferred_int_overflow_checks: Vec::new(),
             deferred_float_overflow_checks: Vec::new(),
@@ -1499,6 +1513,7 @@ include!("post_solve_validation.rs");
 include!("unknown_type_root.rs");
 include!("qualified_type_head.rs");
 include!("interp_string_form.rs");
+include!("generic_eq.rs");
 include!("lint_error_surface.rs");
 include!("bounded.rs");
 include!("concurrent_reach_check.rs");

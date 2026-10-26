@@ -69,9 +69,21 @@ impl Checker {
         use std::collections::HashSet;
         let mut reported: HashSet<(usize, usize)> = HashSet::new();
         let checks = std::mem::take(&mut self.deferred_eq_checks);
-        for (ty, span, what) in checks {
-            let resolved = resolve_ty(&ty, &self.uf);
+        for site in checks {
+            let resolved = resolve_ty(&site.ty, &self.uf);
+            // #4239: an operand typed by the enclosing fn's generics is also
+            // a requirement on every instantiation, judged at its calls.
+            self.record_eq_requirement(&site, &resolved);
+            let (span, what) = (site.span, site.what.clone());
             if self.env.is_eq(&resolved) {
+                // #4239: a stdlib generic compare is structural.
+                if let Some(diag) = self.generic_compare_secret_diag(&site, &resolved) {
+                    if span.is_some_and(|s| !reported.insert((s.line, s.col))) {
+                        continue;
+                    }
+                    self.diagnostics.push(diag);
+                    continue;
+                }
                 // #4107: a Secret compares only in constant time (R-secret-03).
                 if let Some(mut diag) = crate::secret_type::secret_eq_diagnostic(&self.env, &resolved, &what) {
                     if span.is_some_and(|s| !reported.insert((s.line, s.col))) {
