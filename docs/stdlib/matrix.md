@@ -120,8 +120,8 @@ other way round: an r × 0 matrix keeps its r rows (`zeros(3, 0)` is `(3, 0)`
 and `to_lists` gives three empty rows).
 
 **Row ranges and counts clamp** (C-354), the way `list.slice` does:
-`slice_rows(m, start, end)` treats a negative `start` as the empty matrix and
-a negative or past-the-end `end` as `rows(m)`, so `start >= end` is empty;
+`slice_rows(m, start, end)` clamps both bounds into `0..rows(m)` (a negative
+bound is 0, the negative-count rule of #4147), and `start >= end` is empty;
 `split_cols_even(m, n)` answers the empty list for `n <= 0`; `conv1d`'s
 `kernel` and `padding` clamp at 0. Its `stride` is a step, not a width: a
 stride below 1 aborts with `Error: stride must be positive`.
