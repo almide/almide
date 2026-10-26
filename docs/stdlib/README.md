@@ -781,7 +781,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `http.mount(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` — Sub-app under prefix: /api/x reaches it as /x.
 - `http.router(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]` — Route table as a handler; err on conflicting routes.
 - `http.wrap(handler: (HttpRequest) -> Result[HttpResponse, String], middleware: List[((HttpRequest) -> Result[HttpResponse, String]) -> (HttpRequest) -> Result[HttpResponse, String]]) -> (HttpRequest) -> Result[HttpResponse, String]` — Applies middleware; the first is the outermost.
-- `http.decode_json(req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse]` — JSON body through decode; err is a 400 response.
+- `http.decode_json(req: HttpRequest) -> Result[T, HttpResponse]` — JSON body into input type T, strictly; err is a 400 response.
 
 ## int
 
