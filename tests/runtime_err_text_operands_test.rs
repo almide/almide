@@ -58,19 +58,36 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-const SOURCES: [&str; 4] = ["runtime/rs/src", "crates/almide-rt-core/src", "crates/almide-wasm-run/src", "crates/almide-interp/src"];
+const SOURCES: [&str; 4] = [
+    "runtime/rs/src",
+    "crates/almide-rt-core/src",
+    "crates/almide-wasm-run/src",
+    "crates/almide-interp/src",
+];
 
 /// The ONE escaper's entry points (crates/almide-base/src/err_text.rs).
 const ESCAPE_ROOTS: [&str; 2] = ["almide_rt_errtext_escape", "almide_rt_errtext_quote"];
 
-const TEXT_TYPES: [&str; 7] = ["str", "String", "AlmideString", "Path", "PathBuf", "OsStr", "OsString"];
+const TEXT_TYPES: [&str; 7] = [
+    "str",
+    "String",
+    "AlmideString",
+    "Path",
+    "PathBuf",
+    "OsStr",
+    "OsString",
+];
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
-            if p.file_name().is_some_and(|n| n == "generated" || n == "tests") {
+            if p.file_name()
+                .is_some_and(|n| n == "generated" || n == "tests")
+            {
                 continue;
             }
             rust_files(&p, out);
@@ -82,17 +99,23 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 
 fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|a| {
-        a.path().is_ident("cfg") && a.parse_args::<syn::Meta>().is_ok_and(|m| m.path().is_ident("test"))
+        a.path().is_ident("cfg")
+            && a.parse_args::<syn::Meta>()
+                .is_ok_and(|m| m.path().is_ident("test"))
     })
 }
 
 fn is_text_type(ty: &syn::Type) -> bool {
     let text = ty.to_token_stream().to_string();
-    text.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|w| TEXT_TYPES.contains(&w))
+    text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .any(|w| TEXT_TYPES.contains(&w))
 }
 
 fn last_segment(path: &syn::Path) -> String {
-    path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default()
+    path.segments
+        .last()
+        .map(|s| s.ident.to_string())
+        .unwrap_or_default()
 }
 
 /// A function's tail expression: the last statement of its block when that
@@ -187,7 +210,9 @@ impl FnFacts {
         for f in files {
             Defs { defs: &mut defs }.visit_file(f);
         }
-        let mut facts = FnFacts { summaries: BTreeMap::new() };
+        let mut facts = FnFacts {
+            summaries: BTreeMap::new(),
+        };
         for (sig, _) in &defs {
             facts.summaries.entry(sig.ident.to_string()).or_default();
         }
@@ -197,7 +222,8 @@ impl FnFacts {
                 let name = sig.ident.to_string();
                 // A function that does not return text cannot pass text on
                 // (`fn fields(half: &str) -> Option<Vec<i64>>`).
-                let returns_text = matches!(&sig.output, syn::ReturnType::Type(_, ty) if is_text_type(ty));
+                let returns_text =
+                    matches!(&sig.output, syn::ReturnType::Type(_, ty) if is_text_type(ty));
                 if ESCAPE_ROOTS.contains(&name.as_str()) || !returns_text {
                     continue;
                 }
@@ -237,12 +263,60 @@ fn result_carries(facts: &FnFacts, param: &str, block: &syn::Block) -> bool {
 
 /// Methods that keep a text a text (`s.trim()` is still `s`'s bytes).
 const TEXT_KEEPING_METHODS: &[&str] = &[
-    "to_string", "to_owned", "as_str", "as_ref", "trim", "trim_start", "trim_end", "trim_matches", "to_lowercase",
-    "to_uppercase", "clone", "into", "display", "to_string_lossy", "to_str", "as_path", "strip_prefix",
-    "strip_suffix", "unwrap", "unwrap_or", "unwrap_or_default", "replace", "join", "as_os_str", "iter", "into_iter",
-    "lines", "split", "split_whitespace", "chars", "first", "last", "get", "expect", "split_once", "rsplit_once",
-    "splitn", "rsplit", "map", "filter", "collect", "next", "nth", "ok", "ok_or", "cloned", "copied", "skip", "take",
-    "unwrap_or_else", "trim_start_matches", "trim_end_matches", "find_map", "and_then",
+    "to_string",
+    "to_owned",
+    "as_str",
+    "as_ref",
+    "trim",
+    "trim_start",
+    "trim_end",
+    "trim_matches",
+    "to_lowercase",
+    "to_uppercase",
+    "clone",
+    "into",
+    "display",
+    "to_string_lossy",
+    "to_str",
+    "as_path",
+    "strip_prefix",
+    "strip_suffix",
+    "unwrap",
+    "unwrap_or",
+    "unwrap_or_default",
+    "replace",
+    "join",
+    "as_os_str",
+    "iter",
+    "into_iter",
+    "lines",
+    "split",
+    "split_whitespace",
+    "chars",
+    "first",
+    "last",
+    "get",
+    "expect",
+    "split_once",
+    "rsplit_once",
+    "splitn",
+    "rsplit",
+    "map",
+    "filter",
+    "collect",
+    "next",
+    "nth",
+    "ok",
+    "ok_or",
+    "cloned",
+    "copied",
+    "skip",
+    "take",
+    "unwrap_or_else",
+    "trim_start_matches",
+    "trim_end_matches",
+    "find_map",
+    "and_then",
 ];
 
 /// One function's analysis.
@@ -263,7 +337,10 @@ fn format_parts(m: &syn::Macro) -> Option<(String, Vec<String>, Vec<Expr>)> {
         .ok()?;
     let mut it = args.into_iter();
     let template = match it.next()? {
-        Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(s), .. }) => s.value(),
+        Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(s),
+            ..
+        }) => s.value(),
         _ => return None,
     };
     let rest: Vec<Expr> = it
@@ -288,7 +365,11 @@ fn format_captures(template: &str) -> Vec<String> {
             }
             let inner: String = chars.by_ref().take_while(|&c| c != '}').collect();
             let name = inner.split(':').next().unwrap_or("");
-            if name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_') {
+            if name
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphabetic() || c == '_')
+            {
                 captures.push(name.to_string());
             }
         }
@@ -304,14 +385,19 @@ impl Scan<'_> {
     /// Does `e`'s value carry text that has not been through an escaper?
     fn carries(&self, e: &Expr) -> bool {
         match e {
-            Expr::Path(p) => p.path.get_ident().is_some_and(|i| self.text.contains(&i.to_string())),
+            Expr::Path(p) => p
+                .path
+                .get_ident()
+                .is_some_and(|i| self.text.contains(&i.to_string())),
             Expr::Reference(r) => self.carries(&r.expr),
             Expr::Paren(p) => self.carries(&p.expr),
             Expr::Group(g) => self.carries(&g.expr),
             Expr::Unary(u) if matches!(u.op, syn::UnOp::Deref(_)) => self.carries(&u.expr),
             Expr::Index(i) => self.carries(&i.expr),
             Expr::Try(t) => self.carries(&t.expr),
-            Expr::Binary(b) if matches!(b.op, syn::BinOp::Add(_)) => self.carries(&b.left) || self.carries(&b.right),
+            Expr::Binary(b) if matches!(b.op, syn::BinOp::Add(_)) => {
+                self.carries(&b.left) || self.carries(&b.right)
+            }
             // `(halves.next(), halves.next())`, `[a, b]`: a part carries.
             Expr::Tuple(t) => t.elems.iter().any(|e| self.carries(e)),
             Expr::Array(a) => a.elems.iter().any(|e| self.carries(e)),
@@ -321,16 +407,32 @@ impl Scan<'_> {
                     return self.carries(&m.receiver) || m.args.iter().any(|a| self.carries(a));
                 }
                 // A method of the runtime's own: through its summary.
-                self.facts.summaries.get(&name).is_some_and(|sum| m.args.iter().enumerate().any(|(i, a)| sum.contains(&i) && self.carries(a)))
+                self.facts.summaries.get(&name).is_some_and(|sum| {
+                    m.args
+                        .iter()
+                        .enumerate()
+                        .any(|(i, a)| sum.contains(&i) && self.carries(a))
+                })
             }
             Expr::Call(c) => {
-                let Expr::Path(p) = &*c.func else { return false };
+                let Expr::Path(p) = &*c.func else {
+                    return false;
+                };
                 let name = last_segment(&p.path);
                 match self.facts.summaries.get(&name) {
                     // A function of the runtime's own: through its summary.
-                    Some(sum) => c.args.iter().enumerate().any(|(i, a)| sum.contains(&i) && self.carries(a)),
+                    Some(sum) => c
+                        .args
+                        .iter()
+                        .enumerate()
+                        .any(|(i, a)| sum.contains(&i) && self.carries(a)),
                     // `String::from`, `PathBuf::from`, `Path::new`, `Some(..)`, …
-                    None => matches!(name.as_str(), "from" | "new" | "Some" | "Ok" | "Err" | "Box") && c.args.iter().any(|a| self.carries(a)),
+                    None => {
+                        matches!(
+                            name.as_str(),
+                            "from" | "new" | "Some" | "Ok" | "Err" | "Box"
+                        ) && c.args.iter().any(|a| self.carries(a))
+                    }
                 }
             }
             Expr::Macro(m) => self.macro_carries(&m.mac),
@@ -353,7 +455,9 @@ impl Scan<'_> {
         if !matches!(macro_name(m).as_str(), "format" | "panic" | "format_args") {
             return false;
         }
-        let Some((_, captures, args)) = format_parts(m) else { return false };
+        let Some((_, captures, args)) = format_parts(m) else {
+            return false;
+        };
         captures.iter().any(|c| self.text.contains(c)) || args.iter().any(|a| self.carries(a))
     }
 
@@ -371,7 +475,8 @@ impl Scan<'_> {
         }
         if self.carries(e) {
             let shown: String = e.to_token_stream().to_string().chars().take(160).collect();
-            self.findings.push(format!("{} :: {} :: {site}: {shown}", self.file, self.func));
+            self.findings
+                .push(format!("{} :: {} :: {site}: {shown}", self.file, self.func));
         }
     }
 
@@ -404,7 +509,11 @@ fn is_pass_through(e: &Expr) -> bool {
         Expr::Path(p) => p.path.get_ident().is_some(),
         Expr::Reference(r) => is_pass_through(&r.expr),
         Expr::MethodCall(m) => {
-            matches!(m.method.to_string().as_str(), "to_string" | "to_owned" | "clone" | "into") && m.args.is_empty() && is_pass_through(&m.receiver)
+            matches!(
+                m.method.to_string().as_str(),
+                "to_string" | "to_owned" | "clone" | "into"
+            ) && m.args.is_empty()
+                && is_pass_through(&m.receiver)
         }
         _ => false,
     }
@@ -495,8 +604,10 @@ impl<'ast> Visit<'ast> for Scan<'_> {
         // Writing text into a buffer makes the buffer text: `out.push(c)` for
         // a `c` of the program's text. So a hand-rolled quoting loop is not
         // an escaper unless it goes through err_text; only the one rule is.
-        if matches!(m.method.to_string().as_str(), "push" | "push_str" | "extend" | "insert" | "insert_str")
-            && m.args.iter().any(|a| self.carries(a))
+        if matches!(
+            m.method.to_string().as_str(),
+            "push" | "push_str" | "extend" | "insert" | "insert_str"
+        ) && m.args.iter().any(|a| self.carries(a))
         {
             if let Expr::Path(p) = peel(&m.receiver) {
                 if let Some(i) = p.path.get_ident() {
@@ -504,7 +615,10 @@ impl<'ast> Visit<'ast> for Scan<'_> {
                 }
             }
         }
-        let error_handler = matches!(m.method.to_string().as_str(), "map_err" | "ok_or_else" | "unwrap_or_else" | "or_else");
+        let error_handler = matches!(
+            m.method.to_string().as_str(),
+            "map_err" | "ok_or_else" | "unwrap_or_else" | "or_else"
+        );
         if !error_handler && self.carries(&m.receiver) {
             for a in &m.args {
                 if let Expr::Closure(c) = peel(a) {
@@ -530,11 +644,22 @@ impl<'ast> Visit<'ast> for Scan<'_> {
 
     fn visit_macro(&mut self, m: &'ast syn::Macro) {
         if matches!(macro_name(m).as_str(), "write" | "writeln") {
-            if let Ok(args) = m.parse_body_with(syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated) {
+            if let Ok(args) = m.parse_body_with(
+                syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated,
+            ) {
                 let mut it = args.iter();
-                if let (Some(dst), Some(Expr::Lit(syn::ExprLit { lit: syn::Lit::Str(t), .. }))) = (it.next(), it.next()) {
+                if let (
+                    Some(dst),
+                    Some(Expr::Lit(syn::ExprLit {
+                        lit: syn::Lit::Str(t),
+                        ..
+                    })),
+                ) = (it.next(), it.next())
+                {
                     let rest: Vec<&Expr> = it.collect();
-                    let inline = format_captures(&t.value()).iter().any(|c| self.text.contains(c));
+                    let inline = format_captures(&t.value())
+                        .iter()
+                        .any(|c| self.text.contains(c));
                     if inline || rest.iter().any(|a| self.carries(a)) {
                         if let Expr::Path(p) = peel(dst) {
                             if let Some(i) = p.path.get_ident() {
@@ -547,7 +672,8 @@ impl<'ast> Visit<'ast> for Scan<'_> {
         }
         if macro_name(m) == "panic" && self.macro_carries(m) {
             let shown: String = m.to_token_stream().to_string().chars().take(160).collect();
-            self.findings.push(format!("{} :: {} :: panic!: {shown}", self.file, self.func));
+            self.findings
+                .push(format!("{} :: {} :: panic!: {shown}", self.file, self.func));
         }
         // The arguments of a format-like macro are expressions too: an `Err`
         // built inside one is still an error value.
@@ -614,13 +740,23 @@ impl<'ast> Visit<'ast> for PerFn<'_> {
 fn findings_in(files: &[(String, String)]) -> Vec<String> {
     let parsed: Vec<(String, syn::File)> = files
         .iter()
-        .map(|(label, src)| (label.clone(), syn::parse_file(src).unwrap_or_else(|e| panic!("{label}: {e}"))))
+        .map(|(label, src)| {
+            (
+                label.clone(),
+                syn::parse_file(src).unwrap_or_else(|e| panic!("{label}: {e}")),
+            )
+        })
         .collect();
     let asts: Vec<syn::File> = parsed.iter().map(|(_, f)| f.clone()).collect();
     let facts = FnFacts::of(&asts);
     let mut findings = Vec::new();
     for (label, ast) in &parsed {
-        PerFn { facts: &facts, file: label.clone(), findings: &mut findings }.visit_file(ast);
+        PerFn {
+            facts: &facts,
+            file: label.clone(),
+            findings: &mut findings,
+        }
+        .visit_file(ast);
     }
     findings
 }
@@ -691,9 +827,22 @@ fn control_a_raw_operand_and_a_debug_operand_are_caught() {
     "#;
     let mut files = runtime_sources();
     files.push(("<twins>".to_string(), twins.to_string()));
-    let found: Vec<String> = findings_in(&files).into_iter().filter(|f| f.starts_with("<twins>")).collect();
+    let found: Vec<String> = findings_in(&files)
+        .into_iter()
+        .filter(|f| f.starts_with("<twins>"))
+        .collect();
     let caught = |f: &str| found.iter().any(|x| x.contains(&format!(":: {f} ::")));
-    for twin in ["twin_raw_quote", "twin_inline_capture", "twin_let_slice", "twin_destructure", "twin_tuple_let", "twin_debug", "twin_ok_or", "twin_panic", "twin_hand_rolled_quote"] {
+    for twin in [
+        "twin_raw_quote",
+        "twin_inline_capture",
+        "twin_let_slice",
+        "twin_destructure",
+        "twin_tuple_let",
+        "twin_debug",
+        "twin_ok_or",
+        "twin_panic",
+        "twin_hand_rolled_quote",
+    ] {
         assert!(caught(twin), "{twin} was not caught:\n{}", found.join("\n"));
     }
     for clean in ["twin_escaped", "twin_length_only"] {

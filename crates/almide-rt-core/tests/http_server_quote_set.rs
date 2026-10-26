@@ -9,7 +9,9 @@ use almide_rt_core::http_server_core::{almide_rt_errtext_is_escaped, http_server
 #[test]
 fn the_server_quote_escapes_exactly_c418s_set() {
     for cp in 0u32..=0x2fff {
-        let Some(c) = char::from_u32(cp) else { continue };
+        let Some(c) = char::from_u32(cp) else {
+            continue;
+        };
         let got = http_server_quote(&c.to_string());
         let want = match c {
             '"' => "\"\\\"\"".to_string(),
