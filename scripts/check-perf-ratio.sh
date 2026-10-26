@@ -178,6 +178,9 @@ IDIOM_CEILING=1.15
 MIN_SECONDS=0.08
 
 out=$(mktemp -t perf-ratio.XXXXXX.json)
+# Declared up front: the idiom leg sets it only where valgrind exists, and the
+# later EXIT traps name it — unset, `set -u` failed the trap (and the run).
+idiom_dir=""
 trap 'rm -f "$out"' EXIT
 
 # The four anchored rows are ALSO built with the IR optimizer's perf passes
