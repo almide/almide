@@ -22,6 +22,7 @@ effect fn has_flag(name: String) -> Bool = __has(__options(env.args()), name)
 // --dry-run and --delete). A long name's "short" comparand is "--" + name
 // again, so only --name matches; a one-letter name also matches -name, which
 // is how a program declares a short form: `has_flag("dry-run")! or has_flag("n")!`.
+@category
 fn __has(args: List[String], name: String) -> Bool = {
   // Recursion instead of `list.any` with a CAPTURING lambda: a capture inside
   // a BUNDLED module mislowers on wasm (#892). The recursion carries the two
@@ -33,12 +34,14 @@ fn __has(args: List[String], name: String) -> Bool = {
 // The arguments before the first `--` (#4144): `--` ends option parsing, so
 // flags and options are read from this prefix only, and everything after the
 // marker is positional.
+@category
 fn __options(args: List[String]) -> List[String] = match list.index_of(args, "--") {
   some(i) => list.take(args, i),
   none => args,
 }
 
 // The arguments after the first `--` (none when there is no marker).
+@category
 fn __operands(args: List[String]) -> List[String] = match list.index_of(args, "--") {
   some(i) => list.drop(args, i + 1),
   none => [],
@@ -93,6 +96,7 @@ effect fn positional() -> List[String] = __positional(env.args())
 // after `--`. Dropping one more here ate the FIRST real argument (#891:
 // `-- input.csv out.csv` gave `out.csv`). After the first `--` every argument
 // is positional, a leading `-` included (#4144: a file named `-d`).
+@category
 fn __positional(args: List[String]) -> List[String] = list.filter(
   __options(args),
   (a) => not string.starts_with(a, "-"),
