@@ -486,7 +486,7 @@ fn route_unit(
             continue;
         }
         let mut router = SegmentRouter {
-            synth: ReprSynth { facts: table, var_table, out: &mut out, pending: &mut pending, scope: scope.clone() },
+            synth: ReprSynth { facts: table, var_table: &mut *var_table, out: &mut out, pending: &mut pending, scope: scope.clone() },
             changed: false,
         };
         router.visit_expr_mut(&mut f.body);
