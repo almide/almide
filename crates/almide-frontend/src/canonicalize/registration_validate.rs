@@ -5,7 +5,7 @@
 // later. Split out of `registration.rs`, which registers declarations; both
 // halves share that file's imports via `include!`.
 
-const FIELD_RECURSIVE_PROTOCOLS: &[&str] = &["Codec", "Ord", "Hash"];
+const FIELD_RECURSIVE_PROTOCOLS: &[&str] = &["Codec", "Encode", "Decode", "Ord", "Hash"];
 /// The field-type slots a structural type exposes to its derive: record fields, and every variant case's payload (tuple positions / record fields).
 fn type_field_slots(ty: &Ty) -> Vec<(String, Ty)> {
     match ty {
@@ -52,10 +52,12 @@ fn leaf_satisfies(env: &TypeEnv, leaf: Sym, proto: &str) -> bool {
     if declares(leaf.as_str()) || declares(bare) {
         return true;
     }
-    if proto == "Codec" {
+    if super::protocols::is_codec_family(proto) {
         let has = |m: &str| env.functions.contains_key(&sym(&format!("{}.{}", leaf, m)))
             || env.functions.contains_key(&sym(&format!("{}.{}", bare, m)));
-        return has("encode") && has("decode");
+        // A hand-written method satisfies the direction it is (C-435).
+        let protocol_methods = super::protocols::builtin_protocol(proto).map(|p| p.method_names()).unwrap_or_default();
+        return protocol_methods.iter().all(|m| has(m));
     }
     false
 }
@@ -184,14 +186,17 @@ fn validate_derive_field_support(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic
         for proto in protocols {
             let p = proto.as_str();
             if !FIELD_RECURSIVE_PROTOCOLS.contains(&p) { continue; }
+            // `: Codec` is also `Encode` and `Decode` (C-435): the declared
+            // composition is judged once, not again through each part.
+            if super::protocols::implied_by_another(p, protocols) { continue; }
             // #1522: the Codec derive emits ONE encode/decode pair per type, so a
             // generic type's `T` field reaches codegen unresolved — check green,
             // a dozen rustc errors. A type parameter has no wire form; reject the
             // derive itself here until a monomorphizing derive exists.
-            if p == "Codec" && ty.contains_typevar() {
+            if super::protocols::is_codec_family(p) && ty.contains_typevar() {
                 if reported.insert((*type_name, *proto, sym("<generic>"))) {
                     diagnostics.push(err(
-                        format!("type '{}' derives 'Codec' but is generic — the Codec derive cannot encode a type parameter", type_name),
+                        format!("type '{}' derives '{}' but is generic — the Codec derive cannot encode a type parameter", type_name, p),
                         "The derive emits one encode/decode pair per type, and a type parameter has no wire form. Hand-write encode/decode for this type, or wrap each concrete instantiation in its own `: Codec` type.".to_string(),
                         format!("type {} : Codec", type_name),
                     ).with_code("E023"));
@@ -228,6 +233,19 @@ fn validate_secret_codec_field(
     site: DeriveSite, field_name: &str, field_ty: &Ty,
 ) -> bool {
     let DeriveSite { type_name, proto } = site;
+    // An `Encode`-only type derives nothing but `encode`, and a Secret is
+    // never encoded (R-secret-04): the declaration has nothing to derive.
+    let (_, decodes) = super::protocols::codec_directions(&[proto]);
+    if !decodes && crate::secret_type::holds_secret(env, field_ty) {
+        if reported.insert((type_name, proto, sym("<encode-secret>"))) {
+            diagnostics.push(err(
+                format!("type '{}' derives '{}' but field '{}' holds a Secret, which is never encoded", type_name, proto, field_name),
+                "A Secret is read from input and never written out. Declare the type `: Decode` if it is input, or keep the Secret out of the type you send.".to_string(),
+                format!("type {} : {}", type_name, proto),
+            ).with_code("E023"));
+        }
+        return true;
+    }
     let is_variant = matches!(env.types.get(&type_name), Some(Ty::Variant { .. }));
     if let Some(payload) = crate::secret_type::secret_payload(field_ty).filter(|_| !is_variant) {
         if let Some((offender, hint)) = codec_field_shape_error(payload)
@@ -268,11 +286,11 @@ fn validate_derive_field(
     // derived here.
     let p = proto.as_str();
     // #4107 (R-secret-04): a Secret field is judged by its own rule.
-    if p == "Codec" && validate_secret_codec_field(env, diagnostics, reported, site, field_name, field_ty) {
+    if super::protocols::is_codec_family(p) && validate_secret_codec_field(env, diagnostics, reported, site, field_name, field_ty) {
         return;
     }
     // #655: the Codec derive has no Map/Set arm — reject such a field here rather than emitting invalid Rust / silent-wrong wasm. Same E023 family (a field that cannot satisfy Codec).
-    if p == "Codec" {
+    if super::protocols::is_codec_family(p) {
         if let Some(container) = codec_unsupported_container(field_ty) {
             if reported.insert((type_name, proto, sym(container))) {
                 diagnostics.push(err(
@@ -331,6 +349,11 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
         let type_ty = Ty::Named(*type_name, vec![]);
 
         for proto_name in protocol_names {
+            // A part of a declared composition (`Encode` of `Codec`) is
+            // judged through the composition, once (C-435).
+            if super::protocols::implied_by_another(proto_name.as_str(), protocol_names) {
+                continue;
+            }
             let proto_def = match env.protocols.get(proto_name) {
                 Some(p) => p.clone(),
                 None => continue,

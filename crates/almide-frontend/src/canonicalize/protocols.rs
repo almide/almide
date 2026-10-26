@@ -203,7 +203,8 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         ],
         derivable: true,
     },
-    // Codec: fn encode(v: Self) -> Value, fn decode(v: Value) -> Result[Self, String]
+    // Codec = Encode + Decode (Swift's `Codable`): its requirements are the
+    // union of its parts', and a `: Codec` type conforms to both parts.
     BuiltinProtocol {
         name: "Codec",
         methods: |s, v| vec![
@@ -213,9 +214,11 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
         conformers: &[],
         derivable: true,
     },
-    // Encode: fn encode(v: Self) -> Value
+    // Encode: fn encode(v: Self) -> Value — the type is written out.
     BuiltinProtocol { name: "Encode", methods: |s, v| vec![method("encode", &[("v", s)], v.clone())], conformers: &[], derivable: true },
-    // Decode: fn decode(v: Value) -> Result[Self, String]
+    // Decode: fn decode(v: Value) -> Result[Self, String] — the type is read
+    // from input. A `: Decode` type that is not also `Encode` is an INPUT type:
+    // every field of it is input (row 22, E110).
     BuiltinProtocol {
         name: "Decode",
         methods: |s, v| vec![method("decode", &[("v", v)], Ty::result(s.clone(), Ty::String))],
@@ -250,6 +253,59 @@ pub const BUILTIN_PROTOCOLS: &[BuiltinProtocol] = &[
 /// The built-in protocol named `name`, if there is one.
 pub fn builtin_protocol(name: &str) -> Option<&'static BuiltinProtocol> {
     BUILTIN_PROTOCOLS.iter().find(|p| p.name == name)
+}
+
+/// The built-in protocols that are compositions of others, with their parts:
+/// `Codec` is `Encode + Decode`. A type declaring a composition conforms to
+/// each part, and derives exactly the union of what the parts derive.
+pub const PROTOCOL_PARTS: &[(&str, &[&str])] = &[("Codec", &["Encode", "Decode"])];
+
+/// The direction protocols a derive writes code for: `Encode` derives
+/// `encode`; `Decode` derives `decode` and, for a record, `decode_strict`
+/// (the decode that refuses a key outside the record's decoded fields).
+pub const ENCODE_PROTOCOL: &str = "Encode";
+pub const DECODE_PROTOCOL: &str = "Decode";
+/// The derived method a record conforming to `Decode` has beyond the
+/// protocol's own requirement. Records only: a variant's wire form is a tag
+/// and a payload, with no field set to hold keys to.
+pub const RECORD_DECODE_METHOD: &str = "decode_strict";
+
+/// `name` and every protocol it is composed of (`Codec` → Codec, Encode,
+/// Decode). A protocol with no parts is just itself.
+pub fn protocol_closure(name: &str) -> Vec<&str> {
+    let mut out = vec![name];
+    if let Some((_, parts)) = PROTOCOL_PARTS.iter().find(|(p, _)| *p == name) {
+        out.extend(parts.iter().copied());
+    }
+    out
+}
+
+/// Is `part` a part of another protocol in `declared` (so the declaration
+/// already covers it)? The derive-field and implementation validators judge
+/// a composition once, through the protocol the type declared.
+pub fn implied_by_another(part: &str, declared: &[almide_base::intern::Sym]) -> bool {
+    declared.iter().any(|d| d.as_str() != part
+        && PROTOCOL_PARTS.iter().any(|(p, parts)| *p == d.as_str() && parts.contains(&part)))
+}
+
+/// Which codec directions a list of declared protocols derives:
+/// `(encode, decode)`.
+pub fn codec_directions(declared: &[almide_base::intern::Sym]) -> (bool, bool) {
+    let mut enc = false;
+    let mut dec = false;
+    for d in declared {
+        for p in protocol_closure(d.as_str()) {
+            enc |= p == ENCODE_PROTOCOL;
+            dec |= p == DECODE_PROTOCOL;
+        }
+    }
+    (enc, dec)
+}
+
+/// Is `name` a codec-family protocol (one whose closure holds a direction)?
+/// Its derive serializes field by field, so the field grammar applies.
+pub fn is_codec_family(name: &str) -> bool {
+    protocol_closure(name).iter().any(|p| *p == ENCODE_PROTOCOL || *p == DECODE_PROTOCOL)
 }
 
 /// Register built-in conventions as protocols.

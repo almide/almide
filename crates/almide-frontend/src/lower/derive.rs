@@ -40,9 +40,18 @@ pub(super) fn generate_auto_derives(ctx: &mut LowerCtx, type_decls: &[IrTypeDecl
         };
 
         for conv in derives {
+            // The codec directions are derived once below, from the table.
+            if crate::canonicalize::protocols::is_codec_family(conv.as_str()) { continue; }
             let fn_name = format!("{}.{}", td.name, conv.to_lowercase());
             if fn_names.contains(fn_name.as_str()) { continue; }
-            auto.extend(derive_one(ctx, td, &type_ty, fields.as_deref(), conv, &fn_names));
+            auto.extend(derive_one(ctx, td, &type_ty, fields.as_deref(), conv));
+        }
+        // C-435: `Encode` derives `encode`, `Decode` derives `decode` (and a
+        // record's `decode_strict`), `Codec` is both — read off the protocol
+        // table, so a decode-only input type has no `encode` to send it out.
+        let (enc, dec) = crate::canonicalize::protocols::codec_directions(derives);
+        if enc || dec {
+            auto.extend(derive_codec(ctx, td, &type_ty, fields.as_deref(), &fn_names, CodecDirs { encode: enc, decode: dec }));
         }
     }
     auto
@@ -61,7 +70,6 @@ fn derive_one(
     type_ty: &Ty,
     fields: Option<&[IrFieldDecl]>,
     conv: &str,
-    fn_names: &std::collections::HashSet<&str>,
 ) -> Vec<IrFunction> {
     match conv {
         "Repr" => {
@@ -82,7 +90,6 @@ fn derive_one(
             }
         }
         "Eq" => derive_eq(ctx, td, type_ty, fields),
-        "Codec" => derive_codec(ctx, td, type_ty, fields, fn_names),
         _ => Vec::new(),
     }
 }
@@ -104,7 +111,14 @@ fn derive_eq(
     Vec::new()
 }
 
-/// `encode` / `decode`, plus the container helpers every Codec type provides.
+/// Which codec directions a type's declared protocols derive (C-435).
+#[derive(Copy, Clone)]
+struct CodecDirs {
+    encode: bool,
+    decode: bool,
+}
+
+/// `encode` / `decode`, plus the container helpers of each derived direction.
 ///
 /// `encode` and `decode` are checked for individually rather than as a pair: a
 /// type may hand-write one and derive the other.
@@ -114,9 +128,13 @@ fn derive_codec(
     type_ty: &Ty,
     fields: Option<&[IrFieldDecl]>,
     fn_names: &std::collections::HashSet<&str>,
+    dirs: CodecDirs,
 ) -> Vec<IrFunction> {
     let mut out = Vec::new();
-    let wants = |suffix: &str| !fn_names.contains(format!("{}.{}", td.name, suffix).as_str());
+    let wants = |suffix: &str| {
+        let derived = if suffix == "encode" { dirs.encode } else { dirs.decode };
+        derived && !fn_names.contains(format!("{}.{}", td.name, suffix).as_str())
+    };
     // Nested-container shapes generate per-type workers on demand (#1065);
     // `wk` collects them across the encode/decode builders, memoized by name.
     let mut workers = Vec::new();
@@ -139,7 +157,7 @@ fn derive_codec(
                 if wants("decode") {
                     out.push(auto_derive_decode(&mut wk, type_ty, fields));
                 }
-                if wants("decode_strict") {
+                if wants(crate::canonicalize::protocols::RECORD_DECODE_METHOD) {
                     out.push(auto_derive_decode_strict(&mut wk, type_ty, fields));
                 }
             }
@@ -159,11 +177,16 @@ fn derive_codec(
     // every Codec type provides — real bodies the v1 leg links; on v0 the
     // BuiltinLowering call-rewrite keeps them unused (DCE'd).
     if !fn_names.contains(format!("__encode_list_{}", td.name).as_str()) {
-        // A Secret-holding type has no `encode`, so no encode helpers (#4107).
-        let no_encode = fields.is_some_and(|fs| fs.iter().any(|f| crate::secret_type::holds_secret(ctx_env, &f.ty)));
+        // A Secret-holding type has no `encode`, so no encode helpers (#4107);
+        // a decode-only or encode-only type has the helpers of its one
+        // direction (C-435).
+        let no_encode = !dirs.encode || fields.is_some_and(|fs| fs.iter().any(|f| crate::secret_type::holds_secret(ctx_env, &f.ty)));
+        let no_decode = !dirs.decode;
+        let is_enc = |n: &str| n.starts_with("__encode_") || n.ends_with(".__list_enc_go");
+        let is_dec = |n: &str| n.starts_with("__decode_") || n.ends_with(".__list_dec_go") || n.ends_with(".__list_dec_at");
         out.extend(derive_container_helpers(&mut ctx.var_table, &td.name, type_ty)
             .into_iter()
-            .filter(|f| !(no_encode && (f.name.as_str().starts_with("__encode_") || f.name.as_str().ends_with(".__list_enc_go")))));
+            .filter(|f| !(no_encode && is_enc(f.name.as_str())) && !(no_decode && is_dec(f.name.as_str()))));
     }
     out
 }

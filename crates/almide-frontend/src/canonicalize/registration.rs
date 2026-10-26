@@ -518,6 +518,16 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     let is_effect = effect.unwrap_or(false);
     let key = prefixed_key(prefix, name);
     let min_p = params.iter().take_while(|p| p.default.is_none()).count();
+    // `@input_sink` (row 22, C-436): the `Decode`-bounded type parameters
+    // are input types at every call — read off the declaration, never a name.
+    if attrs.iter().any(|a| a.name.as_str() == "input_sink") {
+        let mut tvs: Vec<Sym> = pb.iter()
+            .filter(|(_, ps)| ps.iter().any(|p| super::protocols::protocol_closure(p.as_str()).contains(&super::protocols::DECODE_PROTOCOL)))
+            .map(|(tv, _)| *tv)
+            .collect();
+        tvs.sort_by_key(|t| t.as_str());
+        env.input_sinks.insert(sym(&key), tvs);
+    }
     env.functions.insert(sym(&key), FnSig { params: ptys, ret, is_effect, generics: gnames, structural_bounds: sb, protocol_bounds: pb, protocol_bound_args: pba, mut_params });
     match crate::deprecation::parse(attrs) {
         Ok(Some(dep)) => { env.deprecations.insert(sym(&key), dep); }
@@ -595,26 +605,32 @@ pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str,
             env.functions.insert(sym(&key), sig);
         }
     };
+    // C-435: the codec directions come from the protocol table — `Encode`
+    // derives `encode`, `Decode` derives `decode` (+ `decode_strict` for a
+    // record), and `Codec` is both.
+    let (wants_encode, wants_decode) = super::protocols::codec_directions(derives);
+    if wants_encode || wants_decode {
+        // #4107 (R-secret-04): a type holding a Secret derives `decode`
+        // only; its `encode` does not exist (E023 at the reference).
+        let holds = env.types.get(&sym(&canonical)).or_else(|| env.types.get(&sym(type_name)))
+            .is_some_and(|t| crate::secret_type::holds_secret(env, t));
+        if wants_encode && !holds {
+            register(env, "encode", FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
+        }
+        if wants_decode {
+            register(env, "decode", FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
+            // #4108: the strict sibling — refuses a key outside the
+            // record's decoded fields. Records only: a variant's wire form
+            // is a tag plus a payload, with no field set to hold keys to.
+            if is_record {
+                register(env, super::protocols::RECORD_DECODE_METHOD, FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
+            }
+        }
+    }
     for d in derives {
         match d.as_str() {
             "Eq" => register(env, "eq", FnSig { params: vec![("a".into(), type_ty.clone()), ("b".into(), type_ty.clone())], ret: Ty::Bool, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] }),
             "Repr" => register(env, "repr", FnSig { params: vec![("v".into(), type_ty.clone())], ret: Ty::String, is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] }),
-            "Codec" => {
-                // #4107 (R-secret-04): a type holding a Secret derives `decode`
-                // only; its `encode` does not exist (E023 at the reference).
-                let holds = env.types.get(&sym(&canonical)).or_else(|| env.types.get(&sym(type_name)))
-                    .is_some_and(|t| crate::secret_type::holds_secret(env, t));
-                if !holds {
-                    register(env, "encode", FnSig { params: vec![("v".into(), type_ty.clone())], ret: value_ty.clone(), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
-                }
-                register(env, "decode", FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
-                // #4108: the strict sibling — refuses a key outside the
-                // record's decoded fields. Records only: a variant's wire form
-                // is a tag plus a payload, with no field set to hold keys to.
-                if is_record {
-                    register(env, "decode_strict", FnSig { params: vec![("v".into(), value_ty.clone())], ret: Ty::result(type_ty.clone(), Ty::String), is_effect: false, generics: vec![], structural_bounds: empty_sb.clone(), protocol_bounds: empty_pb.clone(), protocol_bound_args: HashMap::new(), mut_params: vec![] });
-                }
-            }
             _ => {}
         }
     }
