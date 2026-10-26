@@ -10,13 +10,13 @@ import datetime
 
 fn main() -> Unit = {
   // 2024-03-05T13:07:09Z built from parts (see ALS-T17 SCOPE: year 0..9999).
-  let ts = datetime.from_parts(2024, 3, 5, 13, 7, 9)
+  let ts = datetime.from_parts(2024, 3, 5, 13, 7, 9) ?? 0
   println(datetime.format(ts, "%Y-%m-%d"))
   println(datetime.format(ts, "%H:%M:%S"))
   println(datetime.format(ts, "%Y-%m-%dT%H:%M:%SZ"))
   println(datetime.format(ts, "date=%Y/%m/%d time=%H.%M.%S"))
   // The unix epoch and one day later — leading-zero months/days.
-  let epoch = datetime.from_parts(1970, 1, 2, 0, 0, 0)
+  let epoch = datetime.from_parts(1970, 1, 2, 0, 0, 0) ?? 0
   println(datetime.format(epoch, "%d/%m/%Y %H:%M:%S"))
   // An unrecognized specifier and a stray '%' pass through unchanged.
   println(datetime.format(ts, "%Y%% %q end"))

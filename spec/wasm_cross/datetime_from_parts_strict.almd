@@ -1,0 +1,48 @@
+// @contract: C-360
+// datetime.from_parts refuses a field out of range by name, with parse_iso's
+// rules and texts, on every leg (#4149). Before, from_parts rolled over
+// (2026-02-30 became 2026-03-02, month 13 the next January) while parse_iso
+// refused the same fields, so a date checked by one constructor was read
+// differently by the other. Each row prints both constructors' answer.
+import datetime
+
+fn show(r: Result[Int, String]) -> String = match r {
+  ok(n) => "ok(" + int.to_string(n) + ")",
+  err(e) => "err(" + e + ")",
+}
+
+fn pad(n: Int) -> String = if n >= 0 and n < 10 then "0" + int.to_string(n) else int.to_string(n)
+
+fn row(y: Int, mo: Int, d: Int, h: Int, mi: Int, s: Int) -> Unit = {
+  let iso = int.to_string(y) + "-" + pad(mo) + "-" + pad(d) + "T" + pad(h) + ":" + pad(mi) + ":" + pad(s) + "Z"
+  let a = show(datetime.from_parts(y, mo, d, h, mi, s))
+  let b = show(datetime.parse_iso(iso))
+  println(iso + " from_parts=" + a + " parse_iso=" + b + (if a == b then " same" else " DIFFERENT"))
+}
+
+fn main() -> Unit = {
+  row(2026, 2, 28, 0, 0, 0)
+  row(2026, 2, 30, 0, 0, 0)
+  row(2026, 13, 1, 0, 0, 0)
+  row(2026, 0, 1, 0, 0, 0)
+  row(2024, 2, 29, 12, 0, 0)
+  row(2023, 2, 29, 12, 0, 0)
+  row(2100, 2, 29, 0, 0, 0)
+  row(2000, 2, 29, 0, 0, 0)
+  row(2026, 4, 31, 0, 0, 0)
+  row(2026, 1, 0, 0, 0, 0)
+  row(2026, 1, 1, 24, 0, 0)
+  row(2026, 1, 1, 0, 60, 0)
+  row(2026, 1, 1, 0, 0, 60)
+  row(1969, 12, 31, 23, 59, 59)
+  row(0, 1, 1, 0, 0, 0)
+  row(9999, 12, 31, 23, 59, 59)
+  row(10000, 1, 1, 0, 0, 0)
+  // The first refused field wins, in year, month, day, hour, minute, second order.
+  println(show(datetime.from_parts(2026, 13, 45, 99, 99, 99)))
+  println(show(datetime.from_parts(0 - 1, 13, 1, 0, 0, 0)))
+  println(show(datetime.from_parts(2026, 2, 30, 0, 0 - 1, 0)))
+  println(show(datetime.from_parts(2026, 1, 1, 0, 0, 0 - 1)))
+  println(show(datetime.from_parts(0 - 9223372036854775807 - 1, 1, 1, 0, 0, 0)))
+  println(show(datetime.from_parts(2026, 1, 9223372036854775807, 0, 0, 0)))
+}

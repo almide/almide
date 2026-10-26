@@ -37,8 +37,26 @@ pub fn almide_rt_datetime_weekday(ts: i64) -> AlmideString {
     __almide_out.into()
 }
 
-pub fn almide_rt_datetime_from_parts(y: i64, m: i64, d: i64, h: i64, min: i64, s: i64) -> i64 {
-    almide_rt_epoch_from_civil(y, m, d) + h * 3600 + min * 60 + s
+/// The UTC instant of six civil fields, or the first field out of range by
+/// name (#4149): year 0..=9999, month 1..=12, day 1..=days-in-month, hour
+/// 0..=23, minute and second 0..=59 — `parse_iso`'s rules and messages, which
+/// it reads from here, so the two constructors agree on what a date is.
+/// Before this, `from_parts(2026, 2, 30, …)` rolled over to 2026-03-02 while
+/// `parse_iso` refused the same fields.
+pub fn almide_rt_datetime_from_parts(y: i64, m: i64, d: i64, h: i64, min: i64, s: i64) -> Result<i64, AlmideString> {
+    almide_rt_datetime_civil_fields(y, m, d, h, min, s).map_err(Into::into)
+}
+
+/// The one range check of both constructors, then the exact arithmetic (every
+/// field bounded, so no step can wrap).
+fn almide_rt_datetime_civil_fields(y: i64, mo: i64, dd: i64, h: i64, mi: i64, sec: i64) -> Result<i64, String> {
+    if !(0..=9999).contains(&y) { return Err(format!("year out of range: {y}")); }
+    if !(1..=12).contains(&mo) { return Err(format!("month out of range: {mo}")); }
+    if dd < 1 || dd > almide_rt_days_in_month(y, mo) { return Err(format!("day out of range: {dd}")); }
+    if !(0..=23).contains(&h) { return Err(format!("hour out of range: {h}")); }
+    if !(0..=59).contains(&mi) { return Err(format!("minute out of range: {mi}")); }
+    if !(0..=59).contains(&sec) { return Err(format!("second out of range: {sec}")); }
+    Ok(almide_rt_epoch_from_civil(y, mo, dd) + h * 3600 + mi * 60 + sec)
 }
 
 pub fn almide_rt_datetime_to_iso(ts: i64) -> AlmideString {
@@ -112,13 +130,7 @@ pub fn almide_rt_datetime_parse_iso(s: &str) -> Result<i64, AlmideString> {
         };
         let (y, mo, dd) = (d[0], d[1], d[2]);
         let (h, mi, sec) = (tm[0], tm[1], tm[2]);
-        if !(0..=9999).contains(&y) { return Err(format!("year out of range: {y}")); }
-        if !(1..=12).contains(&mo) { return Err(format!("month out of range: {mo}")); }
-        if dd < 1 || dd > almide_rt_days_in_month(y, mo) { return Err(format!("day out of range: {dd}")); }
-        if !(0..=23).contains(&h) { return Err(format!("hour out of range: {h}")); }
-        if !(0..=59).contains(&mi) { return Err(format!("minute out of range: {mi}")); }
-        if !(0..=59).contains(&sec) { return Err(format!("second out of range: {sec}")); }
-        Ok(almide_rt_datetime_from_parts(y, mo, dd, h, mi, sec) - offset)
+        Ok(almide_rt_datetime_civil_fields(y, mo, dd, h, mi, sec)? - offset)
     })();
     __almide_r.map_err(Into::into)
 }
