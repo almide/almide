@@ -298,18 +298,6 @@ const SHAPE_RECIPES: &[Recipe] = &[
             "list.range(0, {n}) |> list.map((i) => http.route(\"GET /r${100000000 + i}/{id}\", (req) => http.response(200, http.param(req, \"id\") ?? \"-\")))",
         )],
     },
-    // A body of n fixed-width ints the decode callback accepts (`ok` of its
-    // length, `{as_t}` making the length a T), so the parse and the decode
-    // both run whole and the call returns ok: the 400 responses are its
-    // refusals.
-    Recipe {
-        func: "http.decode_json",
-        size: "req",
-        args: &[
-            ("req", "http.new_request(\"POST\", \"/j\", \"[\" + (list.range(0, {n}) |> list.map((i) => int.to_string(100000000 + i)) |> list.join(\",\")) + \"]\", map.new())"),
-            ("decode", "(v) => match value.as_array(v) { ok(xs) => ok({as_t}(list.len(xs))), err(e) => err(e) }"),
-        ],
-    },
     // The name the route binds: the probes run inside its handler, the
     // routed request filling `req` ([`ROUTED`]), so the lookup hits.
     Recipe { func: "http.param", size: "req", args: &[("name", "\"id\"")] },
@@ -1541,9 +1529,7 @@ pub(crate) mod tests {
             "bytes.copy_within",
             "bytes.copy_from",
             "regex.full_match",
-            // outside the model until a Result could carry a nominal error,
-            // and until a probe could run inside a routed handler
-            "http.decode_json",
+            // outside the model until a probe could run inside a routed handler
             "http.param",
         ] {
             assert!(covered.contains(name), "{name} has no in-domain input");
@@ -1587,28 +1573,6 @@ pub(crate) mod tests {
         }
         let _ = std::fs::remove_dir_all(&dir);
         assert!(failed.is_empty(), "in-domain probes that did not take the success path:\n{}", failed.join("\n"));
-    }
-
-    /// `http.decode_json` is sized by a JSON body its decode callback accepts
-    /// (n ints, decoded to their count), so the call takes the ok path; its
-    /// `Result[T, HttpResponse]` stops every probe on `err` with the
-    /// response shown through HttpResponse's readers. At String the callback
-    /// returns the count as a String.
-    #[test]
-    fn decode_json_is_sized_with_a_body_its_callback_accepts() {
-        let t = target("http.decode_json");
-        assert!(t.in_domain() && t.size_param == Some(0) && t.rebind_param.is_none());
-        let direct = t.direct_program(1000, 4, true);
-        assert!(direct.contains("  var x: HttpRequest = http.new_request(\"POST\", \"/j\", \"[\" + (list.range(0, 1000) |> list.map((i) => int.to_string(100000000 + i))"), "{direct}");
-        assert!(direct.contains("let r: Result[Int, HttpResponse] = http.decode_json(x, (v) => match value.as_array(v) { ok(xs) => ok((list.len(xs))), err(e) => err(e) })"), "{direct}");
-        assert!(direct.contains("err(e) => {\n        let eo: (Int, (String, Map[String, String])) = (http.status_code(e), (http.body(e), http.headers(e)))\n        panic(\"inspect: the probed call returned err: ${eo}\")"), "{direct}");
-        let catalogue = crate::generator::catalogue::build();
-        let sig = catalogue.iter().find(|s| s.module == "http" && s.func == "decode_json").unwrap();
-        let heap = Target::new_filled(sig, &catalogue, GenType::String).expect("heap target");
-        assert!(heap.direct_program(1000, 4, true).contains("ok(int.to_string(list.len(xs)))"));
-        let project = t.diamond_project(64);
-        let main = &project.files.iter().find(|(p, _)| p.ends_with("main.almd")).unwrap().1;
-        assert!(main.contains("let d_o: Result[Int, String] = match d { ok(o0) => ok(o0), err(e0) => {"), "{main}");
     }
 
     /// `http.param` answers `some` only for a request the router bound path

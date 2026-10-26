@@ -578,6 +578,14 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
         return None;
     }
 
+    // An `@input_sink` (`http.decode_json[T: Decode]`) takes only a
+    // user-declared input type for its type parameter (row 22, E110); the
+    // generator's universe holds no user record type, so no call it could
+    // write would check. Read off the declaration, like `mut` below.
+    if attrs.iter().any(|a| sym_str(a.name) == "input_sink") {
+        return None;
+    }
+
     // Skip non-deterministic functions (the `effect` flag misses these).
     // Sourced from the shared `NamedDenylist` so the synthesis and
     // mutation paths deny the same surface.
