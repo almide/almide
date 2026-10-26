@@ -138,3 +138,86 @@ fn a_recursive_fan_under_a_process_limit_answers() {
     );
     assert_eq!(String::from_utf8_lossy(&out.stdout), "4096\n");
 }
+
+/// The bound itself (#4141): fan arms (and line-fold workers) share one pool
+/// of live threads, one per available CPU and at most `ALMIDE_FAN_THREADS`;
+/// an arm past it runs inline. A depth-10 two-arm fan asks for 1023 arm
+/// threads at once; its leaves churn long enough that every thread it holds
+/// is alive at the same time, and `/proc/<pid>/task` is sampled until it
+/// exits. The answer must not change. Negative control: with the bound check
+/// in `almide_fan_spawn` removed, the peak is the whole tree (hundreds of
+/// threads) and this test fails.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_deep_fan_holds_at_most_one_arm_thread_per_cpu() {
+    let dir = tempfile::Builder::new()
+        .prefix("t4141b")
+        .tempdir()
+        .expect("tempdir");
+    std::fs::write(
+        dir.path().join("main.almd"),
+        r#"fn churn(x: Int, k: Int) -> Int = {
+  var acc = x
+  var i = 0
+  while i < k {
+    acc = (acc * 31 + i) % 1000003
+    i = i + 1
+  }
+  acc
+}
+
+effect fn f(n: Int) -> Int = if n == 0 then {
+  if churn(n, 3000000) >= 0 then 1 else 0
+} else {
+  let (a, b) = fan { f(n - 1)!, f(n - 1)! }
+  a + b
+}
+
+effect fn main() -> Unit = {
+  println(int.to_string(f(10)!))
+}
+"#,
+    )
+    .expect("write");
+    let bin = dir.path().join("fandeep");
+    let b = Command::new(almide())
+        .args(["build", "main.almd", "-o"])
+        .arg(&bin)
+        .current_dir(dir.path())
+        .output()
+        .expect("almide build");
+    assert!(
+        b.status.success(),
+        "build failed:\n{}",
+        String::from_utf8_lossy(&b.stderr)
+    );
+    let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+    for (cap, arms) in [(None, cpus), (Some(2usize), cpus.min(2))] {
+        let mut cmd = Command::new(&bin);
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        if let Some(c) = cap {
+            cmd.env("ALMIDE_FAN_THREADS", c.to_string());
+        }
+        let mut child = cmd.spawn().expect("run");
+        let task = format!("/proc/{}/task", child.id());
+        let mut peak = 0usize;
+        while child.try_wait().expect("wait").is_none() {
+            if let Ok(rd) = std::fs::read_dir(&task) {
+                peak = peak.max(rd.count());
+            }
+            std::thread::sleep(std::time::Duration::from_micros(500));
+        }
+        let out = child.wait_with_output().expect("output");
+        assert_eq!(out.status.code(), Some(0), "ALMIDE_FAN_THREADS={cap:?}: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "1024\n", "ALMIDE_FAN_THREADS={cap:?}");
+        // the main thread, the arm threads, and room for an arm thread that
+        // has left the pool but not yet left the kernel's task list
+        let limit = 1 + 2 * arms + 1;
+        assert!(
+            peak <= limit,
+            "ALMIDE_FAN_THREADS={cap:?}: the run held {peak} threads at once, over {limit} (one arm thread per CPU, {cpus} CPUs)"
+        );
+        assert!(peak >= 1, "the sampler never saw the process");
+    }
+}
