@@ -232,3 +232,44 @@ fn __jpr_items(j: Value, path: List[String], k: Int, tgt: Int, last: Bool, i: In
       }
     } else __jpr_items(j, path, k, tgt, last, i + 1, n, acc + [ev])
   }
+
+// ── value.__set_path_steps ── the wasm leg's body for the native runtime walk
+// value.set_path calls over the bundled Path's (is_key, name, index) steps
+// (stdlib/value.almd). Pure Almide over the public Value surface — no layout
+// reads — so the structural leg links it: the depth bound first (#4209,
+// json.parse's err text), then one rebuild per step of the path.
+@implements("value.__set_path_steps")
+fn value_set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = {
+  let n = list.len(steps)
+  if n > __jpath_max_depth() or __vsp_nests_past(x, __jpath_max_depth() - n) then err(__jpath_depth_error())
+  else ok(__vsp_set(v, steps, 0, x))
+}
+
+// x holds containers nested more than `budget` deep; the walk stops at the
+// budget, so it is at most 1000 frames whatever x holds.
+fn __vsp_nests_past(x: Value, budget: Int) -> Bool = match value.as_array(x) {
+  ok(xs) => budget == 0 or list.any(xs, (e) => __vsp_nests_past(e, budget - 1)),
+  err(_) => match value.as_object(x) {
+    ok(kvs) => budget == 0 or list.any(kvs, (kv) => __vsp_nests_past(kv.1, budget - 1)),
+    err(_) => false,
+  },
+}
+
+fn __vsp_set(v: Value, steps: List[(Bool, String, Int)], k: Int, x: Value) -> Value = match list.get(steps, k) {
+  none => x,
+  some((true, name, _)) => match value.as_object(v) {
+    ok(pairs) => if list.any(pairs, ((pk, _)) => pk == name) then value.object(list.map(
+      pairs,
+      ((pk, pv)) => if pk == name then (pk, __vsp_set(pv, steps, k + 1, x)) else (pk, pv),
+    ))
+    else value.object(pairs + [(name, __vsp_set(value.object([]), steps, k + 1, x))]),
+    err(_) => value.object([(name, __vsp_set(value.object([]), steps, k + 1, x))]),
+  },
+  some((false, _, i)) => match value.as_array(v) {
+    ok(xs) => match list.get(xs, i) {
+      some(child) => value.array(list.set(xs, i, __vsp_set(child, steps, k + 1, x))),
+      none => v,
+    },
+    err(_) => v,
+  },
+}

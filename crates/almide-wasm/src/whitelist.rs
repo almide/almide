@@ -205,6 +205,10 @@ pub(crate) const BYTES_FAMILY_SUM: &[&str] = &[
     // Value layout (tag@h+4, count@h+8) — see PORT-MATRIX.
     "value_path_root", "value_path_key", "value_path_index", "json_path_index",
     "value_get_path",
+    // value.__set_path_steps (the wasm body of value.set_path's walk): pure
+    // Almide over value.as_object / as_array and the constructors, no layout
+    // reads — unlike json_path_set_go below the REJECTED line.
+    "value_set_path_steps",
     "http_get_header", "http_req_header", "http_param",
     // regex_engine.almd Option returners (same audit).
     "regex_find", "regex_captures",
