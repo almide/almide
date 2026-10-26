@@ -66,13 +66,17 @@ fn user_module_fn_name(module: &str, func: &str) -> String {
 fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
     use almide_ir::CallTarget;
     // 1) NODE KEYS over BOTH function sets, paired with the body to scan for edges/roots.
-    let mut nodes: Vec<(String, &almide_ir::IrFunction)> = Vec::new();
+    // A STDLIB module's function also carries its module's name: a sibling call inside it
+    // is a bare `Named` (lower/calls.rs, #3283), which `is_native_only_stdlib_call` reads
+    // in that module. A user module never does, so its names are never read as stdlib's.
+    let mut nodes: Vec<(String, &almide_ir::IrFunction, Option<&str>)> = Vec::new();
     for f in &ir.functions {
-        nodes.push((f.name.as_str().to_string(), f));
+        nodes.push((f.name.as_str().to_string(), f, None));
     }
     for m in &ir.modules {
         for f in &m.functions {
-            nodes.push((user_module_fn_name(m.name.as_str(), f.name.as_str()), f));
+            let stdlib = almide_lang::stdlib_info::is_any_stdlib(m.name.as_str()).then_some(m.name.as_str());
+            nodes.push((user_module_fn_name(m.name.as_str(), f.name.as_str()), f, stdlib));
         }
     }
     // Root-(a): an `@extern` decl whose target is `rust`/`rs`/`c` (NOT `wasm`/`ts` — those lower
@@ -86,9 +90,10 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
     // enumerated permanently-no-wasm stdlib effect (root-(b)). A remaining `CallTarget::Module`
     // is ALWAYS a stdlib call here (user modules were already rewritten to `Named` by
     // `resolve_user_module_calls`), so this matches only the genuine stdlib effect roots.
-    struct Collector {
+    struct Collector<'m> {
         edges: Vec<String>,
         native_call: bool,
+        module: Option<&'m str>,
     }
     // net.* (any func) / the no-wasm process fns / http.request / zlib.* — the tight,
     // enumerated no-wasm set. process.args is EXCLUDED (WASI args_get exists AND v0's
@@ -103,8 +108,19 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
     // over WASI random_get (calls_random.rs) — a REAL v1 gap. Structural, not a
     // v1 lowering gap — the E3/E4/E5 native-root precedent. Named (codopsy cc),
     // split out of `Collector::visit_expr` below.
+    //
+    // The wave-4 surface (R-unix-01, R-process-02/03, R-http-01) keeps the same
+    // class under new spellings: the Unix sockets and shared memory moved from
+    // `net` to `unix`; `output` / `run` / `start` and the child verbs replaced
+    // exec_status / exec_status_timeout / run_in / spawn / is_alive and are now
+    // Almide bodies, which `resolve_user_module_calls` links like a user module,
+    // so the root is the `__os_*` runtime leaf they call; and `request` / `send`
+    // (request_status's successor) are bodies over the `__request` /
+    // `__request_response` leaves, while `get_response` (get_status's successor)
+    // stays an intrinsic.
     fn is_native_only_stdlib_call(module: &str, func: &str) -> bool {
         module == "net"
+            || module == "unix"
             || module == "zlib"
             || (module == "process"
                 && matches!(
@@ -112,24 +128,19 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                     "exec"
                         | "exit"
                         | "run"
-                        | "spawn"
                         | "kill"
-                        | "is_alive"
-                        | "exec_status"
-                        // #1040: the deadline twin — same no-child-process
-                        // structural class as exec_status.
-                        | "exec_status_timeout"
-                        // #2540: the terminal-attached run — same class
-                        // (`run` above; #3379 adds the cwd twin and keeps
-                        // the deprecated alias).
-                        | "run_in"
-                        | "exec_attached"
                         | "env"
+                        | "__os_output"
+                        | "__os_run"
+                        | "__os_start"
+                        | "__os_poll"
+                        | "__os_wait"
+                        | "__os_stop"
+                        | "__os_read_new"
+                        | "__os_child_pid"
                 ))
-            // request_status/get_status are the same OS-socket client as
-            // request — the status-preserving twins added in 0.61.0.
             || (module == "http"
-                && matches!(func, "request" | "serve" | "request_status" | "get_status"))
+                && matches!(func, "request" | "serve" | "get_response" | "__request" | "__request_response"))
             // #1106 / C-215: the _if_exists classification keys on
             // ErrorKind::NotFound, which the WASI prim floor does not expose
             // (no errno on prim.read_text_file's error path) — native-only by
@@ -149,7 +160,7 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
                         | "create_temp_dir"
                 ))
     }
-    impl almide_ir::visit::IrVisitor for Collector {
+    impl almide_ir::visit::IrVisitor for Collector<'_> {
         fn visit_expr(&mut self, e: &almide_ir::IrExpr) {
             use almide_ir::IrExprKind::{Call, TailCall};
             let target = match &e.kind {
@@ -158,7 +169,15 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
             };
             if let Some(t) = target {
                 match t {
-                    CallTarget::Named { name } => self.edges.push(name.as_str().to_string()),
+                    CallTarget::Named { name } => {
+                        // A stdlib body's bare call to its own runtime leaf
+                        // (`process.output` → `__os_output`) is the same root as
+                        // the qualified `process.__os_output`.
+                        if self.module.is_some_and(|m| is_native_only_stdlib_call(m, name.as_str())) {
+                            self.native_call = true;
+                        }
+                        self.edges.push(name.as_str().to_string())
+                    }
                     CallTarget::Module { module, func, .. } => {
                         if is_native_only_stdlib_call(module.as_str(), func.as_str()) {
                             self.native_call = true;
@@ -174,8 +193,8 @@ fn compute_native_ffi_set(ir: &almide_ir::IrProgram) -> HashSet<String> {
     // 2/3) Seed roots + record forward edges.
     let mut native: HashSet<String> = HashSet::new();
     let mut fwd: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (key, f) in &nodes {
-        let mut c = Collector { edges: Vec::new(), native_call: false };
+    for (key, f, module) in &nodes {
+        let mut c = Collector { edges: Vec::new(), native_call: false, module: *module };
         almide_ir::visit::IrVisitor::visit_expr(&mut c, &f.body);
         if is_native_extern(f) || c.native_call {
             native.insert(key.clone());
