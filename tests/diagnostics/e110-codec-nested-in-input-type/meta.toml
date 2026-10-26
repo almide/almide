@@ -1,0 +1,3 @@
+expects_code = "E110"
+expects_error = "its field `address` holds `Address`, which is also sent out"
+hint_substring = "type AddressInput: Decode"

@@ -1,0 +1,3 @@
+expects_code = "E110"
+expects_error = "type parameter `T` of `body_as` reaches `http.decode_json`"
+hint_substring = "Mark `body_as` `@input_sink`"
