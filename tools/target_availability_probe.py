@@ -148,8 +148,31 @@ class Ctx:
         return name
 
 
+# Type variables pinned for the current synthesis (variant 6): a generic the
+# call's arguments cannot fix — it appears only in the return — is given an
+# input record that derives Decode, the one bound a return-only stdlib
+# generic carries (`http.decode_json[T: Decode]`); left open it would default
+# to Int, which conforms to nothing.
+PINNED: dict = {}
+PROBE_INPUT = "ProbeIn"
+PROBE_INPUT_DECL = f"type {PROBE_INPUT}: Decode = {{ n: Int }}\n"
+
+
 def tvar(name: str) -> dict:
+    if name in PINNED:
+        return {"kind": "named", "name": PINNED[name]}
     return {"kind": "string"} if name in STRING_TVARS else {"kind": "int"}
+
+
+def return_only_generics(f: dict, params, ret) -> list:
+    """The fn's generics no parameter mentions but its return does."""
+    def mentions(t, g):
+        if t.get("kind") == "type_var":
+            return t.get("name") == g
+        subs = [t[k] for k in ("inner", "ok", "err", "key", "value", "return") if k in t]
+        subs += t.get("params", []) + t.get("elements", []) + t.get("args", [])
+        return any(mentions(x, g) for x in subs)
+    return [g for g in f.get("generics", []) if mentions(ret, g) and not any(mentions(t, g) for _, t in params)]
 
 
 def render(t: dict) -> str:
@@ -384,6 +407,26 @@ def resolve_unknowns(mod, f):
 
 
 def synth(mod, f, params, ret, types, variant, shape=0):
+    if variant != 6:
+        return _synth(mod, f, params, ret, types, variant, shape)
+    pinned = return_only_generics(f, params, ret)
+    if not pinned:
+        return None, "no-return-only-generic"
+    PINNED.clear()
+    PINNED.update({g: PROBE_INPUT for g in pinned})
+    try:
+        prog, ctx = _synth(mod, f, params, ret, types, 0, shape)
+    finally:
+        PINNED.clear()
+    if prog is None:
+        return prog, ctx
+    targs = ", ".join(PROBE_INPUT if g in pinned else render(tvar(g)) for g in f.get("generics", []))
+    prog = prog.replace(f"{mod}.{f['name']}(", f"{mod}.{f['name']}[{targs}](", 1)
+    head, sep, rest = prog.partition("effect fn main()")
+    return f"{head}{PROBE_INPUT_DECL}\n{sep}{rest}", ctx
+
+
+def _synth(mod, f, params, ret, types, variant, shape=0):
     """A minimal program calling module.fn once, or (None, why).
 
     variant 0: plain args, discarded bind.
@@ -406,6 +449,10 @@ def synth(mod, f, params, ret, types, variant, shape=0):
                wasi:http/handler@0.3.0 export, where main is not run), so
                the opening print of every other variant walls it there by
                the shape rule, not by the fn.
+    variant 6: (built by `synth`) variant 0 with every return-only generic
+               pinned by an explicit type argument to a declared
+               `ProbeIn: Decode` record — `http.decode_json[T: Decode]`
+               left open defaults T to Int, which has no Decode.
 
     Tuple-shaped returns are CONSUMED the way real code consumes them,
     through a `shape` ladder of their own (every variant tries each):
@@ -707,7 +754,7 @@ def measure(mod, f, types, leg, tmp, env):
     except Unsynth as e:
         return "error", str(e)
     verdict, ctors = None, set()
-    for variant, shape in [(v, sh) for v in (0, 1, 2, 3, 4, 5) for sh in (0, 1, 2)]:
+    for variant, shape in [(v, sh) for v in (0, 1, 2, 3, 4, 5, 6) for sh in (0, 1, 2)]:
         try:
             prog, ctx = synth(mod, f, params, ret, types, variant, shape)
         except Unsynth as e:
