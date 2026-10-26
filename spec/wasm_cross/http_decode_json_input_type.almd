@@ -45,7 +45,7 @@ effect fn main() -> Unit = {
     "{\"name\":\"m\",\"email\":\"e\",\"address\":{\"city\":\"k\",\"verified\":true}}",
     "{\"name\":\"m\",\"email\":\"e\",\"tags\":[{\"city\":\"a\"},{\"city\":\"b\",\"is_admin\":true}]}",
     "{\"name\":\"m\"}",
-    "not json",
+    "not json"
   ]
   for body in bodies {
     println(create(http.new_request("POST", "/users", body, [:])))
@@ -56,7 +56,7 @@ effect fn main() -> Unit = {
     "{\"Pin\":[{\"city\":\"c\",\"verified\":true}]}",
     "{\"Delete\":null,\"Rename\":{\"name\":\"n\"}}",
     "{\"Delete\":null}",
-    "{\"Drop\":null}",
+    "{\"Drop\":null}"
   ]
   for body in commands {
     println(command(http.new_request("POST", "/commands", body, [:])))
