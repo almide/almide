@@ -81,7 +81,7 @@
 70	48	786	70	spec/wasm_cross/captured_var_value_stored.almd
 153	125	5430	153	spec/wasm_cross/checked_conversion_exact_bounds.almd
 ~	spec/wasm_cross/checked_conversion_value_match.almd
-39	26	396	39	spec/wasm_cross/chunk_str.almd
+23	11	215	20	spec/wasm_cross/chunk_str.almd
 13	9	57	13	spec/wasm_cross/closure_accumulator.almd
 33	8	356	33	spec/wasm_cross/closure_borrowed_arg_guard.almd
 28	16	214	28	spec/wasm_cross/closure_bytes_list_index_arg.almd
@@ -135,10 +135,11 @@
 14	2	169	14	spec/wasm_cross/ctor_scalar_call_payload.almd
 9	7	44	9	spec/wasm_cross/ctor_turbofish_family.almd
 5	0	53	5	spec/wasm_cross/ctor_var_copy_semantics.almd
-108	89	966	108	spec/wasm_cross/datetime_format.almd
+110	89	998	110	spec/wasm_cross/datetime_format.almd
+1542	1495	19192	1542	spec/wasm_cross/datetime_from_parts_strict.almd
 ~	spec/wasm_cross/datetime_monotonic_ns.almd
-1807	1780	17140	1807	spec/wasm_cross/datetime_parse_iso_strict.almd
-826	797	8301	826	spec/wasm_cross/datetime_parse_iso_year_range.almd
+1827	1800	17460	1827	spec/wasm_cross/datetime_parse_iso_strict.almd
+839	810	8509	839	spec/wasm_cross/datetime_parse_iso_year_range.almd
 261	236	3822	261	spec/wasm_cross/datetime_pre_epoch.almd
 25	14	266	25	spec/wasm_cross/declaration_forms.almd
 48	22	986	48	spec/wasm_cross/declaration_literal_domain.almd
@@ -439,10 +440,11 @@
 ~	spec/wasm_cross/line_endings_bare_cr.almd
 27389	27367	285908	27389	spec/wasm_cross/list_arg_map_view.almd
 10	5	52	10	spec/wasm_cross/list_call_element.almd
-17	10	168	17	spec/wasm_cross/list_chunk_windows.almd
+2	0	58	0	spec/wasm_cross/list_chunk_negative.almd
+3	0	58	0	spec/wasm_cross/list_chunk_windows.almd
 2	0	58	0	spec/wasm_cross/list_chunk_zero.almd
 85	19	1435	85	spec/wasm_cross/list_comprehensive.almd
-291	236	3276	291	spec/wasm_cross/list_count_index_truncation.almd
+252	202	2840	211	spec/wasm_cross/list_count_index_truncation.almd
 108	76	1082	108	spec/wasm_cross/list_count_stride_product_wrap.almd
 9	2	102	9	spec/wasm_cross/list_cross_module_variant.almd
 7	1	112	7	spec/wasm_cross/list_element_hof_chain.almd
@@ -478,7 +480,7 @@
 4	1	2147483672	4	spec/wasm_cross/list_repeat_size_ceiling.almd
 20	14	248	20	spec/wasm_cross/list_rest_pattern.almd
 18	2	242	18	spec/wasm_cross/list_set_value.almd
-47	30	325	47	spec/wasm_cross/list_slice_oob.almd
+52	33	466	52	spec/wasm_cross/list_slice_oob.almd
 10	1	101	10	spec/wasm_cross/list_sort_short.almd
 16	12	213	16	spec/wasm_cross/list_sort_str.almd
 17	9	89	17	spec/wasm_cross/list_string_param_join_len.almd
@@ -561,7 +563,7 @@
 9	2	92	9	spec/wasm_cross/matrix_select_rows_wrapped_rid.almd
 213	186	2718	213	spec/wasm_cross/matrix_shape_family.almd
 214	180	3039	214	spec/wasm_cross/matrix_shape_precondition_family.almd
-169	134	2291	169	spec/wasm_cross/matrix_slice_rows_domain.almd
+166	131	2237	166	spec/wasm_cross/matrix_slice_rows_domain.almd
 103	77	1394	103	spec/wasm_cross/matrix_zero_cols_rows.almd
 336	167	13203	336	spec/wasm_cross/memory_stress.almd
 26	15	235	26	spec/wasm_cross/mg_rebuild_two_phase.almd
@@ -613,6 +615,7 @@
 23	10	1122	23	spec/wasm_cross/nan_canonical_bytes_write.almd
 0	0	0	0	spec/wasm_cross/nan_canonical_observation.almd
 21	10	265	21	spec/wasm_cross/native_wall_shapes.almd
+303	281	3409	303	spec/wasm_cross/negative_count_rule.almd
 7	5	29	7	spec/wasm_cross/negative_float_literal_sized.almd
 55	27	566	55	spec/wasm_cross/negative_offset_and_width_totality.almd
 40	35	640	40	spec/wasm_cross/nested_box_guard_binder.almd
@@ -800,7 +803,7 @@
 123	117	2087	123	spec/wasm_cross/string_case_unicode.almd
 263	236	2123	263	spec/wasm_cross/string_codepoint.almd
 50	23	456	50	spec/wasm_cross/string_codepoint_index.almd
-123	40	1663	123	spec/wasm_cross/string_count_truncation.almd
+123	40	1621	123	spec/wasm_cross/string_count_truncation.almd
 29	18	261	29	spec/wasm_cross/string_empty_pattern.almd
 4	3	14	4	spec/wasm_cross/string_float_stable.almd
 52	44	744	52	spec/wasm_cross/string_from_bytes.almd
@@ -964,7 +967,7 @@
 26	19	268	26	spec/wasm_cross/value_borrowed_constructors.almd
 83	49	964	83	spec/wasm_cross/value_codec_matrix_temporaries_release.almd
 116	49	1487	116	spec/wasm_cross/value_deep_eq.almd
-43	17	573	43	spec/wasm_cross/value_domain_arith.almd
+53	26	895	53	spec/wasm_cross/value_domain_arith.almd
 40	28	492	40	spec/wasm_cross/value_eq.almd
 199	142	2324	199	spec/wasm_cross/value_keys_non_object.almd
 59	27	671	59	spec/wasm_cross/value_merge.almd

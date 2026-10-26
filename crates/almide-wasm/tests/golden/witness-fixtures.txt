@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 989 of 990
+# certified: 992 of 993
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -139,6 +139,7 @@ spec/wasm_cross/ctor_scalar_call_payload.almd
 spec/wasm_cross/ctor_turbofish_family.almd
 spec/wasm_cross/ctor_var_copy_semantics.almd
 spec/wasm_cross/datetime_format.almd
+spec/wasm_cross/datetime_from_parts_strict.almd
 spec/wasm_cross/datetime_monotonic_ns.almd
 spec/wasm_cross/datetime_parse_iso_strict.almd
 spec/wasm_cross/datetime_parse_iso_year_range.almd
@@ -442,6 +443,7 @@ spec/wasm_cross/licm_zero_trip_hoist.almd
 spec/wasm_cross/line_endings_bare_cr.almd
 spec/wasm_cross/list_arg_map_view.almd
 spec/wasm_cross/list_call_element.almd
+spec/wasm_cross/list_chunk_negative.almd
 spec/wasm_cross/list_chunk_windows.almd
 spec/wasm_cross/list_chunk_zero.almd
 spec/wasm_cross/list_comprehensive.almd
@@ -616,6 +618,7 @@ spec/wasm_cross/nan_canonical_bytes_set_write.almd
 spec/wasm_cross/nan_canonical_bytes_write.almd
 spec/wasm_cross/nan_canonical_observation.almd
 spec/wasm_cross/native_wall_shapes.almd
+spec/wasm_cross/negative_count_rule.almd
 spec/wasm_cross/negative_float_literal_sized.almd
 spec/wasm_cross/negative_offset_and_width_totality.almd
 spec/wasm_cross/nested_box_guard_binder.almd
