@@ -24,7 +24,7 @@ type FetchOutcome =
 
 
 local fn jget(v: Value, key: String) -> Value =
-  result.to_option(value.get(v, key)) ?? value.null()
+  value.get(v, key) ?? value.null()
 
 local fn jstr(v: Value, key: String) -> Option[String] =
   result.to_option(value.as_string(jget(v, key)))

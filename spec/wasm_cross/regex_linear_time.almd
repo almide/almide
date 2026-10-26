@@ -38,7 +38,7 @@ fn main() -> Unit = {
   println(line("split", list.len(regex.split(regex.new("(a+)+b"), bang)) == 1))
   // captures: the last instance of the repeated group, as the walk answered
   match regex.captures(regex.new("^(a+)+(!)$"), bang) {
-    some(cs) => println("captures=${list.len(cs)} ${string.len(list.get(cs, 0) ?? none ?? "")} ${list.get(cs, 2) ?? none ?? ""}"),
+    some(cs) => println("captures=${list.len(cs)} ${string.len((list.get(cs, 0) ?? none) ?? "")} ${(list.get(cs, 2) ?? none) ?? ""}"),
     none => println("captures=none"),
   }
   // the rule is the walk's, so a short input answers what it always did
