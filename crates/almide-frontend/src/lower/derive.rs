@@ -220,7 +220,7 @@ fn derive_codec(
         let is_dec = |n: &str| n.starts_with("__decode_") || n.ends_with(".__list_dec_go") || n.ends_with(".__list_dec_at");
         out.extend(derive_container_helpers(&mut ctx.var_table, &td.name, type_ty)
             .into_iter()
-            .filter(|f| !(no_encode && is_enc(f.name.as_str())) && !(no_decode && is_dec(f.name.as_str()))));
+            .filter(|f| !(no_encode && is_enc(f.name.as_str()) || no_decode && is_dec(f.name.as_str()))));
     }
     out
 }
