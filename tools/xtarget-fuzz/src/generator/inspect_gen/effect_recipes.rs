@@ -93,7 +93,7 @@ pub(super) const EFFECT_RECIPES: &[Recipe] = &[
     Recipe { func: "args.flag", size: "", args: &[("name", "\"flag\"")] },
     Recipe { func: "args.option", size: "", args: &[("name", "\"opt\"")] },
     Recipe { func: "args.option_or", size: "", args: &[("name", "\"opt\""), ("fallback", "\"none\"")] },
-    Recipe { func: "args.positional_at", size: "", args: &[("i", "0")] },
+    Recipe { func: "args.positional_at", size: "", args: &[("i", "0"), ("options", "[]")] },
     Recipe { func: "env.get", size: "", args: &[("name", "\"XF_GREETING\"")] },
     Recipe { func: "env.set", size: "value", args: &[("name", "\"XF_SET\""), ("value", "string.repeat(\"aé\", {n})")] },
     // Past the native 64 KiB stdout buffer at every size, so every size

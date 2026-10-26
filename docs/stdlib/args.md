@@ -80,11 +80,13 @@ effect fn main() -> Unit = {
 }
 ```
 
-### `args.positional() -> List[String]`
+### `args.positional(options: List[String]) -> List[String]`
 
 Arguments that are not flags, with argv[0] dropped, followed by every argument
-after `--`. Before `--` this filters on a leading `-`, so a value supplied as
-`--name value` stays in the list — write `--name=value` to keep it out.
+after `--`. `options` names every option the program reads with `args.option`:
+the argument after `--name` is that option's value, not a positional, so
+`--out report.txt input.txt` with `["out"]` gives `["input.txt"]`. Pass `[]`
+when the program reads no options.
 
 ```almd check
 import args
@@ -92,19 +94,21 @@ import args
 fn process(file: String) -> Unit = println("processing ${file}")
 
 effect fn main() -> Unit = {
-  for file in args.positional()! { process(file) }
+  let out = args.option("out")! ?? "report.txt"
+  for file in args.positional(["out"])! { process(file) }
+  println("writing ${out}")
 }
 ```
 
-### `args.positional_at(i: Int) -> Option[String]`
+### `args.positional_at(i: Int, options: List[String]) -> Option[String]`
 
-The i-th positional argument, or `none` when there are fewer.
+The i-th argument of `positional(options)`, or `none` when there are fewer.
 
 ```almd check
 import args
 
 effect fn main() -> Unit = {
-  let input = args.positional_at(0)! ?? "-"
+  let input = args.positional_at(0, [])! ?? "-"
   println(input)
 }
 ```

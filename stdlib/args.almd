@@ -86,17 +86,32 @@ effect fn option_or(name: String, fallback: String) -> String = match option(nam
   none => fallback,
 }
 
-/// Args before `--` not starting with -, then every arg after `--`; option values too.
-effect fn positional() -> List[String] = __positional(env.args())
+/// Args before `--` that are not flags or values of the named options, then all after `--`.
+effect fn positional(options: List[String]) -> List[String] = __positional(env.args(), options)
 
 // `env.args()` ALREADY excludes argv[0] — it is the user's arguments, the ones
 // after `--`. Dropping one more here ate the FIRST real argument (#891:
 // `-- input.csv out.csv` gave `out.csv`). After the first `--` every argument
 // is positional, a leading `-` included (#4144: a file named `-d`).
-fn __positional(args: List[String]) -> List[String] = list.filter(
-  __options(args),
-  (a) => not string.starts_with(a, "-"),
-) + __operands(args)
+//
+// `options` names the options the program reads with `args.option` (#4144):
+// the argument after `--name` is that option's value — the one `option(name)`
+// answers — and is not positional, so `--out report.txt input.txt` with
+// `["out"]` is `["input.txt"]`, not `["report.txt", "input.txt"]`. Before,
+// `positional()` took no names and could not tell a value from a file.
+fn __positional(args: List[String], options: List[String]) -> List[String] =
+  __positional_at(__options(args), options, 0, []) + __operands(args)
 
-/// i-th positional arg; none if out of range.
-effect fn positional_at(i: Int) -> String? = list.get(positional()!, i)
+// Recursion with the names as a parameter, not a capturing lambda (#892).
+@category
+fn __positional_at(args: List[String], options: List[String], i: Int, acc: List[String]) -> List[String] =
+  if i >= list.len(args) then acc
+  else {
+    let a = list.get_or(args, i, "")
+    if not string.starts_with(a, "-") then __positional_at(args, options, i + 1, acc + [a])
+    else if string.starts_with(a, "--") and list.contains(options, string.drop(a, 2)) then __positional_at(args, options, i + 2, acc)
+    else __positional_at(args, options, i + 1, acc)
+  }
+
+/// i-th positional arg (see positional); none if out of range.
+effect fn positional_at(i: Int, options: List[String]) -> String? = list.get(positional(options)!, i)

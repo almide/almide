@@ -74,7 +74,7 @@ read here is what the current compiler accepts.
   touched); it is Swift `try`, never `try!`. On a stdlib effect fn that cannot
   fail the `!` is a no-op. An effect fn returning `Option[T]` (`args.option`,
   `args.positional_at`) takes the `!` before a default:
-  `args.positional_at(0)! ?? "in.txt"` — `!` propagates the error, `??`
+  `args.positional_at(0, [])! ?? "in.txt"` — `!` propagates the error, `??`
   defaults the none (without the `!`, `??` wants an `Option[T]`: E001).
 - Generics use `[T]` (not `<T>`). Variants use leading `|`.
 - `match` is exhaustive; missing arms emit a warning.
