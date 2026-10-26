@@ -65,9 +65,9 @@
 - 内容: `linear_f32_row_no_bias`、`select_rows_f32`、`linear_row`、`linear_row_no_bias`、`conv1d` を標準から撤去し、`almide-graphics/nn` に同じ名前・同じ引数で置きます。nn.kernels の本体は汎用の演算で書きます（`linear_row(x, w, b)` = `broadcast_add_row(mul(x, transpose(w)), b)`、f32 の 2 関数は `from_bytes_f32_le` の後に同じ計算）。
 - 根拠の L0 規則: L1 R-L1-22、epoch 14 の裁定（NN のカーネルは nn.kernels）。
 - (a) 標準に推論のカーネルを持つ言語はありません。
-- (b) nn.kernels は純粋な Almide の package（`src/mod.almd`、intrinsic なし）なので、native と wasm の両方で動きます。いまの f32 の 2 関数は GGUF のバッファを直接読む intrinsic で、移した後は速さが下がることがあります。速さは nn.kernels の側の課題とし、標準の面の判定には入れません。
+- (b) nn.kernels は純粋な Almide のモジュール（`src/kernels.almd`、intrinsic なし）なので、native と wasm の両方で動きます。いまの f32 の 2 関数は GGUF のバッファを直接読む intrinsic で、移した後は速さが下がることがあります。速さは nn.kernels の側の課題とし、標準の面の判定には入れません。
 - (c) epoch 14 で兄弟のカーネル（`linear_q8_0_row_no_bias` など）はすでに nn.kernels にあります。半分だけが標準に残っていると、LLM はどちらに置かれているかを当てられません。
-- (d) 撤去 5。#3852 の手順どおり、先に nn.kernels の版を出し、`@deprecated(since=15, use="kernels.linear_row")` などのヒントがその版を名指しできるようにします。removal epoch 16。`almide fix`: `matrix.<fn>(…)` → `import nn.kernels` を足して `kernels.<fn>(…)`。使用数（spec/tests/docs/stdlib）: `linear_f32_row_no_bias` 9/0/5/0、`select_rows_f32` 10/0/6/0、`linear_row` 8/0/4/0、`linear_row_no_bias` 2/0/4/1、`conv1d` 15/0/5/0。nn.kernels 自身が `matrix.linear_row`（2）・`linear_row_no_bias`（2）・`linear_f32_row_no_bias`（1）を呼んでいるので、nn.kernels の中の定義に付け替えます。CHEATSHEET:1066 の `linear_row` の例を差し替えます。
+- (d) 撤去 5。#3852 の手順どおり、先に almide-graphics/nn の版を出し、`@deprecated(since=15, use="kernels.linear_row")` などのヒントがその版を名指しできるようにします。removal epoch 16。`almide fix`: `matrix.<fn>(…)` → `import nn.kernels` を足して `kernels.<fn>(…)`。使用数（spec/tests/docs/stdlib）: `linear_f32_row_no_bias` 9/0/5/0、`select_rows_f32` 10/0/6/0、`linear_row` 8/0/4/0、`linear_row_no_bias` 2/0/4/1、`conv1d` 15/0/5/0。nn.kernels 自身が `matrix.linear_row`（2）・`linear_row_no_bias`（2）・`linear_f32_row_no_bias`（1）を呼んでいるので、nn.kernels の中の定義に付け替えます。CHEATSHEET:1066 の `linear_row` の例を差し替えます。
 - ゲート案: `crates/almide-types/src/self_host_registry.rs`・`docs/stdlib/matrix.md` の索引・`since.toml`・semantics-manifest・検品台帳の行を同じ変更で再生成し、`check_stdlib_fn_count` で公開数の減りを確かめます。
 - issue: #3852（1 節）
 
@@ -84,7 +84,7 @@
 ### R-matrix-03 32 bit の試験版 `Matrix[Float32]` を撤去する — ○ 採用
 
 - 内容: `zeros_f32`、`ones_f32`、`mul_f32`、`mul_f32_scaled`、`mul_f32_t`、`mul_f32_t_scaled` を撤去します。f32 のデータは `from_bytes_f32_le` で `Matrix`（Float）に読みます。
-- 根拠の L0 規則: 完全性の規則 2（CLAUDE.md の「family は行列で広げる」）。#3852 は「演算の表を完成させるか、nn.kernels へ移すか」を求めていました。nn.kernels へは移せません（nn.kernels は intrinsic を持たない純粋な Almide の package で、`Matrix[Float32]` を作る手段が標準の外にないため）。表を完成させるには `Matrix` と同じ約 30 セルが要り、その消費者は spec のほかにありません。
+- 根拠の L0 規則: 完全性の規則 2（CLAUDE.md の「family は行列で広げる」）。#3852 は「演算の表を完成させるか、nn.kernels へ移すか」を求めていました。nn.kernels へは移せません（nn.kernels は intrinsic を持たない純粋な Almide のモジュールで、`Matrix[Float32]` を作る手段が標準の外にないため）。表を完成させるには `Matrix` と同じ約 30 セルが要り、その消費者は spec のほかにありません。
 - (a) 外部ライブラリは要素の型ごとに同じ演算の表を持ちます（numpy の dtype、ndarray のジェネリクス）。構築子 2 つと積 4 つだけという形は、どこにもありません。
 - (b) runtime の SmallF32 の格納（`cblas_sgemm`）は内部に残してよく、公開の面だけを外します。
 - (c) `Matrix[Float32]` を作れても `add` の型が合わず、LLM が書き始めるとすぐ行き止まりになります。

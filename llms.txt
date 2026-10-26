@@ -31,10 +31,11 @@ read here is what the current compiler accepts.
   (declare it `: Decode`; a `: Codec` one derives `decode` only).
 - Not in the stdlib since dialect epoch 14: the neural-network kernels
   (`gelu`, `softmax_rows`, attention, RoPE, the row norms, Q1_0/Q8_0, the
-  Qwen3 blocks) are module `nn.kernels` of package `almide-graphics/nn` (`import nn.kernels`, then `kernels.gelu(m)`),
-  and the OpenAI / Anthropic streaming clients are package `almide/llm`
-  (`import llm`, then `llm.openai_streaming_call(...)`); add one with
-  `almide add almide-graphics/nn@v0.2.0 --trust github.com/almide-graphics`. The `mem` module and `bytes.heap_save` /
+  Qwen3 blocks) are module `nn.kernels` of package `almide-graphics/nn`
+  (`almide add almide-graphics/nn@v0.2.0 --trust github.com/almide-graphics`,
+  `import nn.kernels`, then `kernels.gelu(m)`), and the OpenAI / Anthropic
+  streaming clients are package `almide/llm` (`almide add llm`, `import llm`,
+  then `llm.openai_streaming_call(...)`). The `mem` module and `bytes.heap_save` /
   `heap_restore` are gone: they did nothing under reference counting.
 - Dependencies come from `github.com/almide` unless the project's
   `almide.toml` trusts another owner (`[trust] owners = ["github.com/alice"]`).

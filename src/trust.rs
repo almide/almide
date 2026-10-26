@@ -23,6 +23,13 @@
 /// The owner every project trusts without a grant.
 pub const DEFAULT_TRUSTED_OWNER: &str = "github.com/almide";
 
+/// Owners the Almide project itself publishes under besides
+/// [`DEFAULT_TRUSTED_OWNER`]. They are NOT trusted by default (a project
+/// still grants them in `[trust] owners`); listing one only stops
+/// [`suggestion`] from calling it a lookalike of `almide`: the stdlib's own
+/// removal hints send a model to `almide-graphics/nn` (module `nn.kernels`).
+pub const ALMIDE_PROJECT_OWNERS: &[&str] = &["github.com/almide-graphics"];
+
 /// The `host/owner` a git source belongs to, lowercased.
 ///
 /// `Ok(None)` for a source on the local filesystem (`file://…` or a path),
@@ -226,6 +233,9 @@ pub fn suggestion(url: &str) -> Option<String> {
     let wanted = fold(repo);
     let packages = almide_packages();
     let line = |pkg: &str, repo: &str| format!("hint: did you mean `almide add {pkg}`?  (github.com/almide/{repo})");
+    if ALMIDE_PROJECT_OWNERS.contains(&owner.as_str()) {
+        return None;
+    }
     if owner != DEFAULT_TRUSTED_OWNER {
         if let Some((pkg, r)) = packages.iter().find(|(p, r)| fold(p) == wanted || fold(r) == wanted) {
             return Some(line(pkg, r));
@@ -275,7 +285,11 @@ mod tests {
         assert!(suggestion("https://github.com/alice/almide-bindgen").unwrap().contains("almide add bindgen"));
         assert!(suggestion("https://github.com/almlde/whatever").unwrap().contains("github.com/almide/whatever"));
         assert_eq!(suggestion("https://github.com/alice/totally-unrelated-thing"), None);
-        assert_eq!(suggestion("https://github.com/alice/mylib"), None, "two edits on a five-letter name is noise");
+        assert_eq!(suggestion("https://github.com/alice/mydfa"), None, "two edits on a five-letter name is noise");
+        // A sibling Almide owner is not a lookalike: the epoch-14/15 removal
+        // hints name almide-graphics/nn.
+        assert_eq!(suggestion("https://github.com/almide-graphics/nn"), None);
+        assert!(!is_trusted(&[], "github.com/almide-graphics"), "a sibling owner still needs a grant");
     }
 
     #[test]
