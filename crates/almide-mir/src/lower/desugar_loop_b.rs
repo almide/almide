@@ -560,3 +560,143 @@ pub fn desugar_loop_break(body: &IrExpr, next_var: &mut u32) -> Option<IrExpr> {
         body.ty.clone(),
     ))
 }
+
+// ─────────── effect-`!` inside a loop body of the VOID `main` → the die continuation ───────────
+//
+// `desugar_loop_unwrap` (above) is the loop form for a `Result`-returning body: an `!` there
+// must DELIVER its `Err` after the loop, so it threads an error flag. The void `main` has no
+// result to deliver — its `!` ABORTS (`Error: <msg>` on stderr, exit 1: the die line
+// `build_unwrap_match` already builds for a top-level `!` in main). An abort needs no flag and
+// no post-loop dispatch: the loop body is an ordinary statement block whose `!` desugars to
+// the SAME continuation match as straight-line main code —
+//
+//   for x in xs { pre; let v = e!; post }  →  for x in xs { pre; match e { err($e) => <die>,
+//                                                                       ok(v) => { post } } }
+//
+// The die arm never returns, so every iteration either runs `post` with the Ok payload or the
+// process ends exactly where native's `?` would have ended `main` (same stderr line, same
+// exit code). The match is then an ordinary statement Result match — its lowering either
+// dispatches on a tracked subject or walls; it never linearizes a call-bearing arm.
+//
+// A call-argument `!` (`println(f(e!))`) is first ANF-hoisted into its own `let $t = e!`
+// statement by the SAME `desugar_callarg_unwrap` the straight-line path uses — it only lifts
+// out of unconditionally-evaluated positions (never an `if`/`match` arm or a `??` fallback);
+// a `!` under the right operand of a short-circuit `and`/`or` is NOT unconditional, so a body
+// carrying one is not hoisted (it keeps its wall). A body with a raw `break`/`continue` is
+// declined here (the continuation would nest the jump inside a match arm); `desugar_loop_break`
+// rewrites breaks to its flag form first and this pass picks the loop up on re-entry.
+
+/// Does `e` hold an effect-`!` (`Unwrap`, or the auto-`?` `Try`) outside a lambda body?
+fn unit_main_has_bang(e: &IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct U(bool);
+    impl IrVisitor for U {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::Unwrap { .. } | IrExprKind::Try { .. } => self.0 = true,
+                IrExprKind::Lambda { .. } => return,
+                _ => {}
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut u = U(false);
+    u.visit_expr(e);
+    u.0
+}
+
+/// Does `e` hold a `break`/`continue`, or a `!` under the (conditionally evaluated) right
+/// operand of `and`/`or`? Either shape is declined by [`desugar_unit_main_loop`].
+fn unit_main_loop_body_declines(e: &IrExpr) -> bool {
+    use almide_ir::visit::{walk_expr, IrVisitor};
+    struct D(bool);
+    impl IrVisitor for D {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::Break | IrExprKind::Continue => self.0 = true,
+                IrExprKind::BinOp { op: almide_ir::BinOp::And | almide_ir::BinOp::Or, right, .. }
+                    if unit_main_has_bang(right) =>
+                {
+                    self.0 = true
+                }
+                IrExprKind::Lambda { .. } => return,
+                _ => {}
+            }
+            walk_expr(self, e);
+        }
+    }
+    let mut d = D(false);
+    d.visit_expr(e);
+    d.0
+}
+
+/// Rewrite ONE `for`/`while` loop of the void `main` whose body carries an effect-`!` into the
+/// die-continuation form (see the section comment). `None` = not such a loop, or nothing in
+/// its body could be rewritten (the `!` then keeps its honest wall downstream).
+pub(crate) fn desugar_unit_main_loop(
+    loop_expr: &IrExpr,
+    next_var: &mut u32,
+    ret_is_result: bool,
+) -> Option<IrExpr> {
+    if crate::lower::bang_return_probe() {
+        return None;
+    }
+    let lbody = match &loop_expr.kind {
+        IrExprKind::ForIn { body, .. } => body,
+        IrExprKind::While { cond, body } if !unit_main_has_bang(cond) => body,
+        _ => return None,
+    };
+    let mut cur = loop_uw_node(IrExprKind::Block { stmts: lbody.clone(), expr: None }, Ty::Unit);
+    if !unit_main_has_bang(&cur) || unit_main_loop_body_declines(&cur) {
+        return None;
+    }
+    let mut changed = false;
+    // Bounded: each hoist removes one nested `!` from a statement value.
+    for _ in 0..256 {
+        let Some(n) = desugar_callarg_unwrap(&cur, next_var) else { break };
+        cur = n;
+        changed = true;
+    }
+    if let Some(r) = desugar_effect_unwrap_inner(&cur, next_var, true, ret_is_result) {
+        cur = r;
+        changed = true;
+    }
+    if !changed {
+        return None;
+    }
+    let new_body = vec![IrStmt { kind: IrStmtKind::Expr { expr: cur }, span: loop_expr.span.clone() }];
+    let kind = match &loop_expr.kind {
+        IrExprKind::ForIn { var, var_tuple, iterable, .. } => IrExprKind::ForIn {
+            var: *var,
+            var_tuple: var_tuple.clone(),
+            iterable: iterable.clone(),
+            body: new_body,
+        },
+        IrExprKind::While { cond, .. } => IrExprKind::While { cond: cond.clone(), body: new_body },
+        _ => unreachable!("matched above"),
+    };
+    Some(IrExpr { kind, ty: loop_expr.ty.clone(), span: loop_expr.span.clone(), def_id: loop_expr.def_id })
+}
+
+/// The STATEMENT-position twin: rewrite the first `!`-bearing loop statement of a void-`main`
+/// block (the block TAIL loop is reached through `desugar_tail_effect_unwrap`).
+fn desugar_unit_main_block_loops(
+    body: &IrExpr,
+    next_var: &mut u32,
+    ret_is_result: bool,
+) -> Option<IrExpr> {
+    let IrExprKind::Block { stmts, expr: tail } = &body.kind else { return None };
+    for (i, s) in stmts.iter().enumerate() {
+        let IrStmtKind::Expr { expr } = &s.kind else { continue };
+        let Some(nl) = desugar_unit_main_loop(expr, next_var, ret_is_result) else { continue };
+        let mut new_stmts = stmts.clone();
+        new_stmts[i] = IrStmt { kind: IrStmtKind::Expr { expr: nl }, span: s.span.clone() };
+        return Some(IrExpr {
+            kind: IrExprKind::Block { stmts: new_stmts, expr: tail.clone() },
+            ty: body.ty.clone(),
+            span: body.span.clone(),
+            def_id: body.def_id,
+        });
+    }
+    None
+}
