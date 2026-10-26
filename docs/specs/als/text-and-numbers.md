@@ -66,17 +66,17 @@ Fixture: `spec/wasm_cross/json_*.almd` 群（`json_string_span.almd` 含む）�
 
 **裁定**: サイズ引数の非正値の挙動は次のとおり規範化する —
 
-- `n < 0`: `chunk(xs, n)` は**全体を 1 チャンク**として返す（空リストは空のまま）。
-  `windows(xs, n)` は**空リスト**を返す。
-- `n == 0`: **定義域エラー** — ALS-T6 の終了規約に従い、`chunk` は
+- `n <= 0`: **定義域エラー**。負のサイズは ALS-T16 の負の個数規則で 0 と
+  読む（almide/almide#4147）ので、`n < 0` も `n == 0` と同じく — ALS-T6 の終了規約に従い、`chunk` は
   `Error: chunk size must be positive`、`windows` は
   `Error: window size must be positive` を stderr に 1 行出力し exit code 1 で
   停止する。生の Rust panic（exit 101）や wasm trap（exit 134）、無言の
   空/全ウィンドウ返しは不適合。
 
-> 注記: `n < 0` の裁定は歴史的に v0 の Rust 実装詳細（`chunks(n as usize)` の
-> usize 再解釈）から生まれた挙動を**明示的に規範へ昇格**したものである。以後この
-> 挙動の根拠は本節であり、Rust の型変換ではない。`n == 0` はその再解釈でも定義
+> 注記: 以前の `n < 0` の裁定（`chunk` は全体を 1 チャンク、`windows` は空）は
+> v0 の Rust 実装詳細（`chunks(n as usize)` の usize 再解釈）を規範へ昇格した
+> ものだったが、負の個数を 0 と読む ALS-T16 の規則（#4147）に合わせて撤回した。
+> 負のサイズの abort は `spec/wasm_cross/list_chunk_negative.almd` が固定する。`n == 0` はその再解釈でも定義
 > されず（Rust は panic）、v0.28.4 で T6 形式の abort に規範化した — それ以前は
 > native が生 panic、wasm は `windows(xs, 0)` が **len+1 個の空ウィンドウを
 > 無言で返していた**（silent-wrong）。
@@ -262,13 +262,16 @@ Contracts: C-049, C-140。
 
 List / String の **個数（count）や添字（index）** を受け取る API は、i64 値を内部幅へ
 **狭める前に**、i64 全体の上でクランプする。ラップや符号化けによる誤アクセスは
-不適合。クランプの向きは API の種類で決まり、**負の個数は 0 に丸められない**
-（fixture `spec/wasm_cross/string_count_truncation.almd`、
-`list_count_index_truncation.almd` が固定する）:
+不適合。クランプの向きは API の種類で決まる。**負の個数は 0 と読む**
+（almide/almide#4147。以前は符号なしに再解釈して `take(xs, -1)` が全体を
+返し、`?limit=-1` が件数の上限を外した）。fixture
+`spec/wasm_cross/negative_count_rule.almd`、`string_count_truncation.almd`、
+`list_count_index_truncation.almd` が固定する:
 
 | 種類 | 規則 | 負値・巨大値の結果 |
 |------|------|--------------------|
-| 個数（`list.take/drop/take_end/drop_end/chunk/windows`、`list.slice` の start/end、`string.take/drop/take_end/drop_end`、`pad_start/pad_end` の幅） | **符号なし**として `min(n as usize, len)` | 負値は巨大な符号なし値として `len` に飽和: `take(-1)` = 全体、`drop(-1)` = 空、`chunk(-1)` = 1 チャンク、`windows(-1)` = 空。`2^32` 以上も `len` に飽和（小さい値へラップしない） |
+| 個数（`list.take/drop/take_end/drop_end/split_at`、`string.take/drop/take_end/drop_end/split_at`、`bytes.take/drop/take_end/drop_end/split_at`、`pad_start/pad_end` の幅）と範囲の端（`list.slice`・`bytes.slice`・`matrix.slice_rows` の start/end） | **符号あり** `max(n, 0).min(len)` | 負値は 0: `take(-1)` = 空、`drop(-1)` = 全体、`slice(xs, -2, 3)` = `slice(xs, 0, 3)`。`2^32` 以上は `len` に飽和（小さい値へラップしない） |
+| サイズ（`list.chunk/windows/window`、`string.chunk/window`、`bytes.chunk/window`） | 定義域は 1 以上（ALS-T4） | 0 以下（負値を含む）は abort |
 | 反復回数（`string.repeat` / `list.repeat` / `bytes.repeat`） | **符号あり**、負は 0 | `repeat(s, -1)` = 空（両ターゲット; panic / trap は不適合） |
 | `string.slice` の start/end | **符号あり** `max(0).min(len)` | 負の start は 0 |
 | 添字（`list.get/get_or/set/insert/remove_at/swap/update`） | **符号なし** `i as usize` | 負や `2^32` 以上の添字は範囲外として no-op / default / append の経路 |
@@ -276,15 +279,17 @@ List / String の **個数（count）や添字（index）** を受け取る API 
 `list.product` は `list.sum` と同じく i64 wrap（オーバーフローは 2^64 mod）。
 
 ```almide
-test "negative counts saturate, negative repeat is empty, negative slice start is 0" {
-  assert_eq(string.take("abcde", -1), "abcde")
-  assert_eq(string.drop("abcde", -1), "")
+test "a negative count is 0: take is empty, drop keeps everything, repeat is empty" {
+  assert_eq(string.take("abcde", -1), "")
+  assert_eq(string.drop("abcde", -1), "abcde")
   assert_eq(string.repeat("xy", -1), "")
-  assert_eq(list.take([1, 2, 3], -1), [1, 2, 3])
+  assert_eq(list.len(list.take([1, 2, 3], -1)), 0)
+  assert_eq(list.slice([1, 2, 3], -2, 2), [1, 2])
 }
 ```
 
-Fixture: `spec/wasm_cross/string_count_truncation.almd`、
+Fixture: `spec/wasm_cross/negative_count_rule.almd`、
+`spec/wasm_cross/string_count_truncation.almd`、
 `spec/wasm_cross/list_count_index_truncation.almd`。Contracts: C-054, C-056。
 
 ## ALS-T17 datetime.format の指定子置換
@@ -539,8 +544,15 @@ Unix 秒 `ts` から暦フィールドを取り出す `datetime.year` / `month` 
 — `ts` が負で日境界上にないときも、その秒が属する日を答える:
 `to_iso(-1)` は `1969-12-31T23:59:59Z`、`weekday(-1)` は `Wednesday`。
 時刻側（`hour` / `minute` / `second`）は従来どおり床剰余であり、両者は同じ日を
-指す。`from_parts` は全域で逆関数である（`from_parts(1969, 12, 31, 23, 59, 59)`
-は `-1`）。
+指す。`from_parts` は値域内で逆関数である（`from_parts(1969, 12, 31, 23, 59, 59)`
+は `ok(-1)`）。
+
+`datetime.from_parts(y, mo, d, h, mi, s)` は `Result[Int, String]` を返し、
+`parse_iso` と**同じ値域・同じ文言**で範囲外の欄を err にする（年 → 月 → 日 →
+時 → 分 → 秒の順で最初の範囲外の欄。almide/almide#4149）。繰り上がりはしない:
+`from_parts(2026, 2, 30, 0, 0, 0)` は `err("day out of range: 30")` であって
+2026-03-02 ではない。二つの構築子が同じ入力を別の日付として読むことはない。
+Fixture: `spec/wasm_cross/datetime_from_parts_strict.almd`。
 
 `datetime.parse_iso(s)` は前後の空白を除去し、次の文法を読む:
 

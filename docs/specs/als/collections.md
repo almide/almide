@@ -32,10 +32,13 @@ Contracts: C-015, C-426。
 ## ALS-C4 範囲外アクセスの縮退規則
 
 読み取り系の範囲外は**安全に縮退**する: `list.get` は none、`slice` は
-範囲を clamp、`take`/`drop` は空/全体へ縮退。負値の扱いは
-`list_slice_oob.almd` が固定する: `slice` は**負の start → 空**・負の end →
-len、`take(xs, 負)` は全体・`drop(xs, 負)` は空(start<0 を 0 へ clamp する
-挙動は #1532 が「発明されたバグ」と裁定した不適合)。逆転した範囲は空。
+範囲を clamp、`take`/`drop` は空/全体へ縮退。負値は **0 として読む**
+（ALS-T16 の負の個数規則、almide/almide#4147）: `slice` の負の start・負の
+end はどちらも 0、`take(xs, 負)` は空・`drop(xs, 負)` は全体。
+`list_slice_oob.almd` と `negative_count_rule.almd` が固定する（以前の
+「負の start → 空・負の end → len・`take(xs, 負)` は全体」は `as usize` の
+再解釈から来たもので、`?limit=-1` が件数の上限を外したため撤回した）。
+逆転した範囲は空。
 いずれもヒープ外アクセスや trap を起こしてはならない
 （`xs[i]` 添字**構文**の範囲外 abort は ALS-T6 が別途規定する）。
 Contracts: C-034。
