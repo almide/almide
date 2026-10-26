@@ -131,3 +131,90 @@ fn an_explicit_reveal_shows_the_canary_on_every_leg() {
         assert!(text.contains(&format!("revealed: {CANARY}")), "{leg}: the reveal control did not show the canary:\n{text}");
     }
 }
+
+/// #4239 / #4240: the shapes the concrete fixture above cannot reach — a
+/// Secret rendered inside a GENERIC body (the type there is `A`; only the
+/// instance knows it is a Secret), and a Secret inside a `Set` at any depth
+/// (`Secret[Bytes]` included, which walled the wasm leg). Every leg prints
+/// the declared form, byte for byte the same.
+const GENERIC_AND_SET: &str = r#"import secret
+
+type Vault = { keys: Set[Secret[String]] }
+
+fn show[A](x: A) -> String = "${x}"
+
+fn wrap[A](x: A) -> List[A] = [x]
+
+fn twice[A](x: A) -> String = show([x, x])
+
+fn main() -> Unit = {
+  let s = secret.new("CANARY4107x")
+  println(show(s))
+  println(show(wrap(s)))
+  println(show((s, 1)))
+  println(show(some(s)))
+  println(twice(s))
+  println(show(Vault { keys: set.from_list([s]) }))
+  println("${set.from_list([s])}")
+  println("${Vault { keys: set.from_list([s]) }}")
+  println("${some(set.from_list([s]))}")
+  println("${set.from_list([secret.new(bytes.from_string("CANARY4107x"))])}")
+  println("${map.from_list([(s, 1)])}")
+  println(show(set.from_list([1, 2])))
+}
+"#;
+
+const GENERIC_AND_SET_OUT: &str = "Secret(***)
+[Secret(***)]
+(Secret(***), 1)
+some(Secret(***))
+[Secret(***), Secret(***)]
+Vault { keys: set.from_list([Secret(***)]) }
+set.from_list([Secret(***)])
+Vault { keys: set.from_list([Secret(***)]) }
+some(set.from_list([Secret(***)]))
+set.from_list([Secret(***)])
+[Secret(***): 1]
+set.from_list([1, 2])
+";
+
+/// The stock-runtime leg: the `to_wasi` build artifact under a stock
+/// wasmtime, not the embedded host `almide run --target wasm` uses.
+fn stock_wasm(file: &Path) -> Option<String> {
+    if !wasmtime_available() {
+        return None;
+    }
+    let wasm = file.with_extension("wasm");
+    let o = Command::new(almide()).arg("build").arg(file).args(["--target", "wasm", "-o"]).arg(&wasm).output().expect("almide builds");
+    assert!(o.status.success(), "stock wasm build failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    let o = Command::new("wasmtime").arg("run").arg(&wasm).output().expect("wasmtime runs");
+    Some(format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)))
+}
+
+#[test]
+fn generic_bodies_and_sets_render_the_declared_form_on_every_leg() {
+    let file = scratch("generic_set").join("secret_generic_set.almd");
+    std::fs::write(&file, GENERIC_AND_SET).unwrap();
+    let mut runs = legs(&file);
+    if let Some(out) = stock_wasm(&file) {
+        runs.push(("stock wasm", out));
+    }
+    assert!(runs.len() >= 2, "at least native and the interpreter must vote");
+    for (leg, text) in &runs {
+        assert!(!text.contains(CANARY), "{leg}: the canary reached the output:\n{text}");
+        assert_eq!(text, GENERIC_AND_SET_OUT, "{leg}: not the declared form, byte for byte");
+    }
+}
+
+/// The control for the generic route: the same generic `show` handed the
+/// REVEALED value prints the canary on every leg — the scanner reads what
+/// the generic body prints.
+#[test]
+fn a_generic_show_of_the_revealed_value_shows_the_canary() {
+    let src = "import secret\nfn show[A](x: A) -> String = \"${x}\"\nfn main() -> Unit = {\n  let s = secret.new(\"CANARY4107x\")\n  println(show(secret.reveal(s)))\n  println(show([secret.reveal(s)]))\n}\n";
+    let file = scratch("generic_control").join("secret_generic_revealed.almd");
+    std::fs::write(&file, src).unwrap();
+    for (leg, text) in legs(&file) {
+        assert!(text.contains(&format!("{CANARY}\n[\"{CANARY}\"]")), "{leg}: the generic reveal control did not show the canary:\n{text}");
+    }
+}
