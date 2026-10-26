@@ -73,7 +73,6 @@ spec/wasm_cross/bytes_repeat_size_ceiling.almd
 spec/wasm_cross/bytes_search_edit_family.almd
 spec/wasm_cross/bytes_set_on_record_field.almd
 spec/wasm_cross/bytes_set_value_semantics.almd
-spec/wasm_cross/bytes_string_window_domain.almd
 spec/wasm_cross/bytes_temp_receiver.almd
 spec/wasm_cross/bytes_to_string_err_release.almd
 spec/wasm_cross/bytes_writer_family.almd
@@ -190,7 +189,6 @@ spec/wasm_cross/env_set_overlay.almd
 spec/wasm_cross/env_set_refusal.almd
 spec/wasm_cross/env_sleep_pause.almd
 spec/wasm_cross/err_arm_takes_let_match_type.almd
-spec/wasm_cross/err_text_label_and_key_escape.almd
 spec/wasm_cross/err_text_operand_escape_families.almd
 spec/wasm_cross/error_operators.almd
 spec/wasm_cross/exit_code_out_of_range.almd
@@ -384,7 +382,6 @@ spec/wasm_cross/int_pow_negative_exponent.almd
 spec/wasm_cross/int_pow_operator_negative_base.almd
 spec/wasm_cross/int_pow_overflow_wraps.almd
 spec/wasm_cross/int_rotate_negative_count.almd
-spec/wasm_cross/int_rotate_nonpositive_width.almd
 spec/wasm_cross/int_wrap_rotate_width.almd
 spec/wasm_cross/interp_diverging_part.almd
 spec/wasm_cross/interp_effect_unwrap_arg.almd

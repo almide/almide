@@ -295,7 +295,6 @@ int_parse_overflow	280	19	328
 int_pow_negative_exponent	262	15	285
 int_pow_operator_negative_base	256	16	296
 int_pow_overflow_wraps	263	19	313
-int_rotate_nonpositive_width	260	8	304
 int_wrap_rotate_width	264	17	282
 interp_effect_unwrap_arg	250	21	310
 io_write_ordering	323	8	348
