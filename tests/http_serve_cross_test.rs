@@ -66,6 +66,7 @@ const SCRIPT: &[&[u8]] = &[
     b"GET /fail HTTP/1.1\r\nHost: a\r\n\r\n",
     b"DELETE /hello HTTP/1.1\r\nHost: a\r\n\r\n",
     b"GET /clock HTTP/1.1\r\nHost: a\r\n\r\n",
+    b"GET /fail-bidi HTTP/1.1\r\nHost: a\r\n\r\n",
 ];
 
 fn free_port() -> u16 {
@@ -270,6 +271,16 @@ fn http_serve_answers_the_same_status_headers_and_body_on_native_and_the_embedde
         );
     }
     assert!(native.responses[9].ends_with(b"\r\n\r\ntrue true"), "{:?}", String::from_utf8_lossy(&native.responses[9]));
+    // #4126: the stderr quoting escapes C-418's set, the bidi controls
+    // included, on both legs; no raw U+202E reaches the log.
+    for run in [&native, &wasm] {
+        assert!(
+            run.stderr.lines().any(|l| l.ends_with(": handler error: \"denied \\u{202e}\\u{85}x\"")),
+            "{:?}",
+            run.stderr
+        );
+        assert!(!run.stderr.contains('\u{202e}'), "{:?}", run.stderr);
+    }
     assert_eq!(native.responses.len(), wasm.responses.len());
     for (i, (n, w)) in native.responses.iter().zip(&wasm.responses).enumerate() {
         if let Err(diff) = same_answer(n, w) {
