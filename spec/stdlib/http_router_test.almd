@@ -1,4 +1,4 @@
-// @contract: C-368, C-404, C-406
+// @contract: C-368, C-404, C-406, C-436
 // #2588 — http.router / route / mount / wrap / new_request / param /
 // decode_json. A handler is a plain function from a request to a response,
 // and so are a router and a wrapped app, so a whole app is tested by calling
@@ -6,7 +6,8 @@
 // native and on wasm alike.
 import http
 
-type User: Codec = { name: String, age: Int }
+// What the client may set (an input type, C-436): every field is input.
+type NewUser: Decode = { name: String, age: Int }
 
 effect fn get_user(req: HttpRequest) -> HttpResponse = http.response(
   200,
@@ -15,10 +16,7 @@ effect fn get_user(req: HttpRequest) -> HttpResponse = http.response(
 
 effect fn me(req: HttpRequest) -> HttpResponse = http.response(200, "me")
 
-effect fn create_user(req: HttpRequest) -> HttpResponse = match http.decode_json(
-  req,
-  (v) => User.decode(v),
-) {
+effect fn create_user(req: HttpRequest) -> HttpResponse = match http.decode_json[NewUser](req) {
   ok(u) => http.response(201, "${u.name}:${u.age}"),
   err(bad) => bad,
 }
@@ -190,6 +188,12 @@ test "bad input is a 400, not a 500" {
     "400 Bad Request: the body is not JSON (expected null)",
   )
   assert_eq(call_body(h, "POST", "/users", "{\"name\":\"ann\",\"age\":3}")!, "201 ann:3")
+  // The sink decodes strictly (C-436): a key outside the input type is a
+  // 400, so an over-post of a field the client may not set never lands.
+  assert_eq(
+    call_body(h, "POST", "/users", "{\"name\":\"ann\",\"age\":3,\"is_admin\":true}")!,
+    "400 Bad Request: unknown key 'is_admin'",
+  )
 }
 
 test "a handler err stays an err: serve turns it into its 500" {
