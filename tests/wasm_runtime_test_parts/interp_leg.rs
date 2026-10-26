@@ -65,6 +65,10 @@ fn lower_for_interp(source: &str) -> Result<almide_ir::IrProgram, String> {
         //   secret — #4107: `secret.new` / `secret.reveal` and the type's
         //          declared `Secret.repr`, pure Almide (the declared-repr
         //          walkers are frontend IR, so the interp runs them as is).
+        //   env / hash — row 20 (C-438, C-422): `env.secret` and the Secret
+        //          HMAC cells are pure Almide over the env floor and
+        //          sha256/sha512; lowered as modules, their effect fns carry
+        //          the Result their callers' `!` reads.
         //   http   — row 22 (C-436): `http.decode_json[T]` is generic over the
         //          caller's input type, so the self-host pool (lowered without
         //          mono) has no body for it; lowered as a module here it is
@@ -73,10 +77,7 @@ fn lower_for_interp(source: &str) -> Result<almide_ir::IrProgram, String> {
         //          pure Almide over a `{ neg, limbs }` record, and `from[S:
         //          Numeric]` wants the per-type mono only a module lowering
         //          gives, so the registry pool has no body for any of it.
-        //   hash   — C-422 (hash_hmac_rfc4231): the HMAC / md5 / sha1 /
-        //          sha512 bodies are pure Almide beside the four `@intrinsic`
-        //          stubs the pool serves (their Hole bodies fall through to it).
-        const INTERP_BUNDLED_MODULES: &[&str] = &["args", "bigint", "hash", "html", "http", "path", "secret", "url"];
+        const INTERP_BUNDLED_MODULES: &[&str] = &["args", "bigint", "env", "hash", "html", "http", "path", "secret", "url"];
         let mut bundled: Vec<(String, almide_lang::ast::Program)> = Vec::new();
         for imp in &prog.imports {
             let almide_lang::ast::Decl::Import { path, .. } = imp else { continue };
