@@ -120,14 +120,9 @@ const BOUNDED: &[(&str, &str, &str, &str)] = &[
     ("set_to_string.almd", "__sts_fill_neg", "__sts_fill_neg", DIGITS),
     ("string.almd", "merge_sort_with", "merge_sort_with", HALVING),
     ("value_core.almd", "__varr_eq", "value_eq", VALUE_NESTING),
-    // value.set_path / remove_path (stdlib/value.almd, #4220): one frame per
-    // step of the Path, the JSON path walk's bound.
-    ("value.almd", "__set_steps", "__set_steps", PATH_SEGMENTS),
+    // value.remove_path (stdlib/value.almd, #4220): one frame per step of
+    // the Path, the JSON path walk's bound.
     ("value.almd", "__remove_steps", "__remove_steps", PATH_SEGMENTS),
-    // set_path's nesting probe stops at its budget (at most 1000 levels,
-    // the JSON depth cap), whatever the Value holds — json_path.almd's
-    // `__json_nests_past` bound.
-    ("value.almd", "__nests_past", "__nests_past", VALUE_NESTING),
     ("value_core.almd", "__vobj_eq", "value_eq", VALUE_NESTING),
     ("value_core.almd", "__drop_value", "__vdrop_arr", VALUE_NESTING),
     ("value_core.almd", "__drop_value", "__vdrop_obj", VALUE_NESTING),
