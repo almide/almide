@@ -34,7 +34,7 @@ pub fn set_allowlist(list: Option<Vec<String>>) {
     *ALLOW.lock().unwrap_or_else(|p| p.into_inner()) = list;
 }
 
-fn allowed(call: &str, cmd: &str) -> Result<(), String> {
+fn allowed(call: &'static str, cmd: &str) -> Result<(), String> {
     match &*ALLOW.lock().unwrap_or_else(|p| p.into_inner()) {
         Some(list) if !list.iter().any(|c| c == cmd) => {
             let shown = almide_base::err_text::almide_rt_errtext_escape(cmd);
@@ -143,11 +143,11 @@ pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String
             // #4125: signalling is bounded by `[permissions] proc` as the
             // `kill` command it used to run (src/cli/mod.rs PROC_SIGNALLING).
             allowed("process.kill", "kill")?;
-            let num = |s: &str| s.parse::<i64>().map_err(|_| format!("malformed process operand `{s}`"));
+            let num = |s: &str| s.parse::<i64>().map_err(|_| format!("malformed process operand `{}`", almide_base::err_text::almide_rt_errtext_escape(s)));
             core::almide_proc_kill(num(a)?, num(b)?, signal).map(|()| String::new())
         }
         88 => {
-            let pid = a.parse::<i64>().map_err(|_| format!("malformed process operand `{a}`"))?;
+            let pid = a.parse::<i64>().map_err(|_| format!("malformed process operand `{}`", almide_base::err_text::almide_rt_errtext_escape(&a)))?;
             // is_alive answers a Bool: outside the bound it is never alive.
             if allowed("process.is_alive", "kill").is_err() {
                 return Ok("0".to_string());

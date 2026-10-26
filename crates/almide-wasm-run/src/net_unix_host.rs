@@ -29,7 +29,7 @@ pub(crate) const OP_FIRST: i32 = 104;
 pub(crate) const OP_LAST: i32 = 116;
 
 fn int(s: &str) -> Result<i64, String> {
-    s.trim().parse().map_err(|_| format!("malformed net operand {s:?}"))
+    s.trim().parse().map_err(|_| format!("malformed net operand {}", almide_base::err_text::almide_rt_errtext_quote(s)))
 }
 
 fn ints(s: &str) -> Result<Vec<i64>, String> {

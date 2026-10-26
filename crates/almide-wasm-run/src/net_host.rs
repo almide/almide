@@ -59,7 +59,7 @@ impl NetRun {
 }
 
 fn int(s: &str) -> Result<i64, String> {
-    s.trim().parse().map_err(|_| format!("malformed net operand {s:?}"))
+    s.trim().parse().map_err(|_| format!("malformed net operand {}", almide_base::err_text::almide_rt_errtext_quote(s)))
 }
 
 fn text(r: Result<i64, String>) -> Result<Vec<u8>, String> {

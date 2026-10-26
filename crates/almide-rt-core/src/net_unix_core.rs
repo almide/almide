@@ -107,7 +107,7 @@ impl AlmideUnixTables {
     }
 
     /// `fd` itself when the table holds it; else the err naming `call`.
-    fn check(&self, call: &str, fd: i64) -> Result<i64, String> {
+    fn check(&self, call: &'static str, fd: i64) -> Result<i64, String> {
         if fd < 0 || fd > i64::from(i32::MAX) {
             return Err(format!("{call}: not a file descriptor: {fd}"));
         }
@@ -123,7 +123,7 @@ impl AlmideUnixTables {
 
     /// Run `f` on the held descriptor `fd` viewed as a `T` (a listener, a
     /// file), then hold it again.
-    fn with_as<T, R>(&mut self, call: &str, fd: i64, f: impl FnOnce(&T) -> R) -> Result<R, String>
+    fn with_as<T, R>(&mut self, call: &'static str, fd: i64, f: impl FnOnce(&T) -> R) -> Result<R, String>
     where
         T: From<std::os::fd::OwnedFd>,
         std::os::fd::OwnedFd: From<T>,
@@ -348,7 +348,7 @@ fn almide_shm_read_at(f: &std::fs::File, offset: u64, len: usize) -> std::io::Re
 /// Off Unix there is nothing to hold: every call is the platform err.
 #[cfg(not(unix))]
 impl AlmideUnixTables {
-    fn unsupported<T>(call: &str) -> Result<T, String> {
+    fn unsupported<T>(call: &'static str) -> Result<T, String> {
         Err(format!("{call}: Unix-domain sockets and shared-memory files need a Unix platform"))
     }
     pub fn held(&self) -> usize { 0 }
