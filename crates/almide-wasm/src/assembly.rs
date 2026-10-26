@@ -43,6 +43,8 @@ struct HelperLits {
     false_base: u32,
     oom_msg: u32,
     repeat_msg: u32,
+    /// `$alloc`'s out-of-memory probe (runtime_alloc.rs `emit_alloc`).
+    oom_probe: bool,
 }
 
 impl HelperLits {
@@ -57,7 +59,7 @@ impl HelperLits {
             crate::checked_alloc::set_message(at(F_ALLOC, crate::checked_alloc::TEXT));
             crate::checked_alloc::set_overrun_message(at(F_ALLOC, crate::checked_alloc::OVERRUN_TEXT));
         }
-        Self { true_base, false_base, oom_msg, repeat_msg }
+        Self { true_base, false_base, oom_msg, repeat_msg, oom_probe: false }
     }
 }
 
@@ -70,7 +72,7 @@ fn static_helpers(lit: &HelperLits, counters: Option<u32>) -> Vec<(u32, Function
         (F_ITOA, emit_itoa()),
         (F_APPEND_I64, emit_append_i64()),
         (F_APPEND_BOOL, emit_append_bool(lit.true_base, lit.false_base)),
-        (F_ALLOC, emit_alloc(lit.oom_msg, counters, crate::canonical_alloc::armed())),
+        (F_ALLOC, emit_alloc(lit.oom_msg, counters, crate::canonical_alloc::armed(), lit.oom_probe)),
         (F_INT_TO_STRING, emit_int_to_string()),
         (F_CONCAT, emit_concat()),
         (F_STR_EQ, emit_str_eq()),
@@ -156,7 +158,11 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
             .chain(extra_fns.iter().map(|(_, f)| f)),
         if crate::host_exports::string_abi() { &[F_ALLOC, F_DEC_FLAT] } else { &[] },
     );
-    let lits = HelperLits::intern(pool, &used);
+    let mut lits = HelperLits::intern(pool, &used);
+    // Row 1 / C-434: a module running the contained serve loop marks its
+    // allocator's wrapped-frontier die for the embedded host (emit_alloc).
+    // The probe is no call edge, so `used` above is unchanged by it.
+    lits.oom_probe = work.host_ops.borrow().contains(&crate::fs_meta::OP_HTTP_SERVE_RUN);
     // ── assemble the module structurally ────────────────────────────────
     let line_start = (pool.data.len() as u32 + 15) & !15;
     let heap_start = u64::from(line_start) + LINE_BUF_MIN;
