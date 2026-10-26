@@ -108,6 +108,8 @@ NOMINAL = {
     # value's path (R-value, wave 4A): built from `value.root()` by key/index.
     "Path": ("value.root()", "value.root", None),
     "Rng": ("random.seeded(1)", "random.seeded", "random"),
+    # A capability root over the probe's own working directory.
+    "FsRoot": ('fs.open_root(".")!', "fs.open_root", "fs"),
     "JsonPath": ("json.root()", "json.root", "json"),
     "SafeHtml": ("html.empty()", "html.empty", "html"),
     "SafePath": ('path.trusted("x")', "path.trusted", "path"),

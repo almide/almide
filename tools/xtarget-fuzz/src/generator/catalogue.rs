@@ -511,7 +511,8 @@ mod availability_tests {
             assert!(known, "{f}: a hostless effect function neither an encoder nor a decoder of one — classify it in LEG_DEPENDENT_ENCODERS");
         }
         for (e, d) in LEG_DEPENDENT_ENCODERS {
-            assert!(effects.contains(&e.to_string()) && effects.contains(&d.to_string()), "{e} / {d} not catalogued");
+            // The decoder is a plain fn since wave 4A: catalogued, not an effect.
+            assert!(effects.contains(&e.to_string()) && cat.iter().any(|s| format!("{}.{}", s.module, s.func) == *d), "{e} / {d} not catalogued");
             let s = cat.iter().find(|s| format!("{}.{}", s.module, s.func) == *e).unwrap();
             assert_eq!(s.observed_through, Some(*d));
         }
