@@ -13,24 +13,26 @@
 //! `assert_ne` through every route: `almide run` on native and wasm, and
 //! `almide test` on its default lane, `--target rust` and `--target wasm`.
 //! On each it requires the escaped operand text and no byte of the escaped
-//! class anywhere in the output. Skips cleanly when the binary is unavailable.
+//! class anywhere in the output. Skips when wasmtime is missing, unless
+//! `ALMIDE_EXPECT_TOOLS` is set.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn almide_bin() -> String {
-    if let Ok(bin) = std::env::var("ALMIDE_BIN") {
-        return bin;
-    }
-    let cargo_bin = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/release/almide");
-    if cargo_bin.exists() {
-        return cargo_bin.to_str().unwrap().to_string();
-    }
-    "almide".to_string()
+/// The binary cargo built from this tree, never one on PATH: a stale binary
+/// would answer for a tree it was not built from.
+fn almide_bin() -> &'static str {
+    env!("CARGO_BIN_EXE_almide")
 }
 
+/// The wasm legs need wasmtime; without it the test skips, unless
+/// `ALMIDE_EXPECT_TOOLS` says a skip would be a false pass.
 fn available() -> bool {
-    Command::new(almide_bin()).arg("--version").output().is_ok()
+    let ok = Command::new("wasmtime").arg("--version").output().is_ok_and(|o| o.status.success());
+    if !ok && std::env::var_os("ALMIDE_EXPECT_TOOLS").is_some() {
+        panic!("ALMIDE_EXPECT_TOOLS is set but wasmtime is not on PATH");
+    }
+    ok
 }
 
 /// The operand under test: ESC (a colour sequence), U+202E, a newline.
