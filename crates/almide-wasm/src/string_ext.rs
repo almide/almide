@@ -514,8 +514,11 @@ impl Emitter<'_> {
                 self.lower_arg(msg, Some(STR), ArgMode::Borrow)?;
                 let hm = self.hold_i32()?;
                 let sep = self.pool.intern(": ");
+                // The label is escaped by C-418's rule (#4126), as on native.
+                let et = self.work.helper(Helper::ErrText);
                 let hout = self.hold_i32()?;
                 let hpre = self.hold_i32()?;
+                let he = self.hold_i32()?;
                 let mut i = self.f.instructions();
                 i.local_set(hm);
                 i.local_get(hr)
@@ -528,10 +531,12 @@ impl Emitter<'_> {
                 // err: "{msg}: {e}" in a fresh err block. "{msg}: " is a block
                 // of this arm's own making: parked, consumed by the outer
                 // concat, released (as `chain` does).
-                i.local_get(hm).i32_const(sep as i32).call(F_CONCAT).local_tee(hpre);
+                i.local_get(hm).call(et).local_tee(he);
+                i.i32_const(sep as i32).call(F_CONCAT).local_tee(hpre);
                 i.local_get(hr).i32_load(slot_memarg(almide_layout::SUM_FIELD));
                 i.call(F_CONCAT).local_set(hm);
                 i.local_get(hpre).call(F_DEC_FLAT);
+                i.local_get(he).call(F_DEC_FLAT);
                 i.i32_const(16)
                     .call(F_ALLOC)
                     .local_tee(hout)
@@ -542,6 +547,7 @@ impl Emitter<'_> {
                 i.local_get(hout);
                 i.end();
                 let _ = i;
+                self.release_i32();
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();

@@ -620,6 +620,9 @@ impl Emitter<'_> {
                 let not_obj = self.intern_kind_msgs("expected Object");
                 let miss_pre = self.pool.intern("missing field '");
                 let miss_post = self.pool.intern("'");
+                // The key is escaped by C-418's rule (#4126), as on native.
+                let et = self.work.helper(Helper::ErrText);
+                let he = self.hold_i32()?;
                 let ht = self.hold_i32()?;
                 let mut i = self.f.instructions();
                 i.local_get(hv).i32_load(m_tag).local_set(ht);
@@ -637,10 +640,12 @@ impl Emitter<'_> {
                 i.local_get(hr);
                 // The key is no longer needed. Park the intermediate
                 // prefix so the second concatenation can release it.
-                i.i32_const(miss_pre as i32).local_get(hk).call(F_CONCAT).local_tee(hk);
+                i.local_get(hk).call(et).local_set(he);
+                i.i32_const(miss_pre as i32).local_get(he).call(F_CONCAT).local_tee(hk);
                 i.i32_const(miss_post as i32).call(F_CONCAT);
                 i.i32_store(m_pay);
                 i.local_get(hk).call(F_DEC_FLAT);
+                i.local_get(he).call(F_DEC_FLAT);
                 i.else_();
                 i.local_get(hr).i32_const(0).i32_store(m_tag);
                 // The object keeps the field's Value: the ok payload is a
@@ -651,6 +656,7 @@ impl Emitter<'_> {
                 i.end();
                 i.end();
                 i.local_get(hr);
+                self.release_i32();
                 self.release_i32();
                 self.release_i32();
                 self.release_i32();

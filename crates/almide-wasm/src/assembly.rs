@@ -506,6 +506,7 @@ fn helper_body(h: &Helper, work: &FnWork, helper_snapshot: &[Helper], hpos: usiz
     }
     Helper::ValueField => value_helpers::emit_value_field_helper(),
     Helper::Utf8Lossy => utf8_helpers::emit_utf8_lossy_helper(),
+    Helper::ErrText => utf8_helpers::emit_err_text_helper(),
     Helper::ValueEq { key_off, val_off } => value_helpers::emit_value_eq_helper(
         work.helper_base.get() + hpos as u32,
         *key_off,
@@ -553,6 +554,7 @@ pub(crate) fn resolve_extras(
             None => match h {
             Helper::ValueKeys
             | Helper::Utf8Lossy
+            | Helper::ErrText
             | Helper::BytesToString { .. } => vec![ValType::I32],
             Helper::ScanF64 => vec![ValType::I32, ValType::I32, ValType::I32, ValType::F64],
             Helper::ScanDeep { .. } => {
