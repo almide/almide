@@ -1,0 +1,9 @@
+// The fix: the function that reads the file says so.
+import fs
+
+effect fn reads(p: String) -> Result[Result[String, String], String] = result.map(ok(p), fs.read_text)
+
+effect fn main() -> Unit = println(match reads("s.txt") {
+  ok(r) => r ?? "none",
+  err(e) => e,
+})

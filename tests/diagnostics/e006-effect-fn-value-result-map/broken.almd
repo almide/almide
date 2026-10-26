@@ -1,0 +1,12 @@
+// E006: a pure fn hands `fs.read_text` to `result.map` as a value. The
+// value carries its effect bit to the call site (ADR-0009 D2, #4151), so the
+// call is refused like `fs.read_text(p)` would be. v0.68.0-rc2 checked this
+// and printed the file on both targets: ok("<file contents>").
+import fs
+
+fn sneaky(p: String) -> Result[Result[String, String], String] = result.map(ok(p), fs.read_text)
+
+effect fn main() -> Unit = println(match sneaky("s.txt") {
+  ok(r) => r ?? "none",
+  err(e) => e,
+})
