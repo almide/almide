@@ -45,7 +45,7 @@ JSON 数値・`\u` エスケープのデコード、整数形数値の f64 へ�
 decode エラーメッセージの文言はターゲット間で byte 一致する。
 
 `Codec` は `Encode` と `Decode` の合成である（C-435）。`: Decode` を宣言した型
-`T` は `T.decode`（レコード型ならさらに `T.decode_strict`）だけを、`: Encode`
+`T` は `T.decode` と `T.decode_strict` だけを、`: Encode`
 を宣言した型は `T.encode` だけを derive し、`: Codec` は両方を derive する。
 `: Codec` の型は `Encode` と `Decode` の両方に適合する（`[T: Decode]` の境界を
 満たす）。宣言していない向きのメソッドの参照は E002 で拒否する。`Encode` で
@@ -59,9 +59,14 @@ decode は宣言順にフィールドを walk して最初のエラーを返す:
 `expected Object`、必須キーの欠落に `missing field '<key>'`、型不一致に
 Value variant 名を使う `expected Int` / `expected Float` / `expected Str` /
 `expected Bool`（C-084 の語彙）。未知キーは無視する。派生の
-`T.decode_strict`（レコード型のみ）はフィールドを読む前に object のキーを
-文書順に見て、decode されるフィールドの wire キーでない最初のキー `k` に
-`unknown key 'k'` を返し、無ければ `T.decode` と同じ結果を返す（C-429）。
+`T.decode_strict`（record と variant）は decode の前に値を walk して、どの
+深さでも型の外にある最初のキー `k` に `unknown key 'k'` を返す。入れ子の
+キーにはその record の経路を `, at address.geo` / `, at tags[1]` の形で付ける。
+record では自身のキー（文書順。decode されるフィールドの wire キーでないもの）
+を先に見て、次に `Decode` の型を持つフィールドを宣言順に walk する。variant
+では最初のキーが tag で、その後のキーは未知キーである。tag の case の
+payload（record なら record として、tuple なら要素ごとに `[i]` を付けて）を
+case 名の経路で walk する。何も無ければ `T.decode` と同じ結果を返す（C-429）。
 `@skip` のフィールドは decode も encode もされず、`@skip_decode` の
 フィールドは decode されず encode はされる。どちらも default を取り、その
 キーは未知キーとして扱う。default の無い skip フィールドは E104 で拒否

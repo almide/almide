@@ -307,12 +307,13 @@ fn isqrt(n: Int) -> Int = {
 
 `Codec` is `Encode + Decode`. A `: Decode`-only type is an input type: every
 field of it is input, so it lists exactly what the client may set.
-`http.decode_json[T](req)` accepts only an input type (a `Codec` type is
-E110: a body decoded straight into a type you also send sets every field it
-names, `{"is_admin": true}` → admin) and decodes strictly (a key outside `T`
-is `400 Bad Request: unknown key '<k>'`). Records nested in an input type are
-input types too. Elsewhere `T.decode` ignores unknown keys and
-`T.decode_strict` refuses them. Field attributes are only `@skip` /
+`http.decode_json[T](req)` accepts only an input type, record or variant (a
+`Codec` type is E110: a body decoded straight into a type you also send sets
+every field it names, `{"is_admin": true}` → admin) and decodes strictly (a
+key outside `T` at any depth is `400 Bad Request: unknown key '<k>'`, with its
+path). Records nested in an input type are input types too. Elsewhere
+`T.decode` ignores unknown keys and `T.decode_strict` refuses them at every
+depth. Field attributes are only `@skip` /
 `@skip_decode` (and WGSL's `@builtin` / `@location`), for two-way types;
 `@serde(skip)`, `@json_ignore`, `@redact` are E053.
 
@@ -348,7 +349,7 @@ type Account: Codec = { name: String, @skip_decode is_admin: Bool = false }
 | E005 | Arg type mismatch | Often needs explicit conversion (`int.to_string(n)` etc) |
 | E006 | Pure fn calls effect fn | Mark the caller `effect fn`, and propagate the call's error with `!` (`f(x)!`) unless a `!` / `??` / `match` already consumes its Result |
 | E109 | Pure fn runs an effect fn reached as a value (field, list element, stored closure) | Mark the fn `effect fn`, or hand it a value that does no I/O |
-| E110 | `http.decode_json[T]` (an `@input_sink`) handed a type that is also sent out (`Codec`), a nested `Codec` record, a variant, or a forwarded type parameter | Decode into a `: Decode` input type listing what the client may set, then build the domain value in code |
+| E110 | `http.decode_json[T]` (an `@input_sink`) handed a type that is also sent out (`Codec`), an input type holding a `Codec` record (a field or a variant payload), or a forwarded type parameter | Decode into a `: Decode` input type listing what the client may set, then build the domain value in code |
 | E007/E008 | Fan block misuse | See `docs/specs/fan.md` |
 | E009 | Reassign immutable | `let` → `var` |
 | E010 | Non-exhaustive match | Add the missing arm(s) or `_ => ...` |

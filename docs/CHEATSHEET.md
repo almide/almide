@@ -1072,15 +1072,16 @@ Always pair a hand-written codec with a roundtrip test:
 
 **Rule 5 — a request decodes into an input type (`: Decode`), never into a
 type you also send or store (`: Codec`).** `Codec` is `Encode + Decode`:
-`: Decode` derives only `T.decode` (and, for a record, `T.decode_strict`),
-`: Encode` only `T.encode`. A `: Decode`-only type is an INPUT type, and
-every field of it is input — so it lists exactly what the client may set.
-`http.decode_json[T](req)` accepts only an input type (a `Codec` type is
-E110, so `{"is_admin": true}` can never reach `User`), decodes strictly (a key
-outside `T` is `400 Bad Request: unknown key '<k>'`), and the handler builds
-the domain value in code. Records nested in an input type are input types
-too. Elsewhere `T.decode` stays lenient (unknown keys ignored) and
-`T.decode_strict` refuses them:
+`: Decode` derives only `T.decode` and `T.decode_strict`, `: Encode` only
+`T.encode`. A `: Decode`-only type is an INPUT type, and every field of it
+is input — so it lists exactly what the client may set. `http.decode_json[T](req)`
+accepts only an input type, record or variant (a `Codec` type is E110, so
+`{"is_admin": true}` can never reach `User`), decodes strictly (a key outside
+`T` at any depth is `400 Bad Request: unknown key '<k>'`, with its path:
+`…, at address`), and the handler builds the domain value in code. Records
+nested in an input type are input types too. Elsewhere `T.decode` stays
+lenient (unknown keys ignored) and `T.decode_strict` refuses them at every
+depth:
 
 ```almide check
 import http
