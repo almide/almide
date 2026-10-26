@@ -39537,9 +39537,9 @@ fn __et_char(c: String, n: Int) -> String = match n {
 }
 
 @implements("string.__err_text")
-fn string_err_text(s: String) -> String = if string.chars(s) |> list.any((c) => __et_escaped(string.codepoint(c) ?? 0)) then
-  string.chars(s) |> list.map((c) => __et_char(c, string.codepoint(c) ?? 0)) |> list.join("")
-else s
+fn string_err_text(s: String) -> String =
+  if string.chars(s) |> list.any((c) => __et_escaped(string.codepoint(c) ?? 0)) then string.chars(s) |> list.map((c) => __et_char(c, string.codepoint(c) ?? 0)) |> list.join("")
+  else s
 "#;
 pub const SRC_STRING_FIRST_LAST: &str = r#"
 
