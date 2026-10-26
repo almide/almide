@@ -5,7 +5,8 @@
 /// entropy, the clocks and panic; p3 adds env.get (26), the program
 /// arguments (29) and env.sleep_ms (36) over wasi:cli/environment and
 /// monotonic-clock.wait-for (ADR-0023 step 3), env.set (37) through the
-/// guest-side overlay env.get reads first (#3223), the http client
+/// guest-side overlay env.get reads first (#3223), env.vars' frames (77,
+/// #3908) over the same environment and overlay, the http client
 /// (43..=50), and — through the spliced p1 fs service over its
 /// wasi:filesystem@0.3 adapter (#3140) — every op the p1 fs service
 /// answers, the fan prefetch triple (40..=42) and env.os / env.temp_dir /
@@ -16,7 +17,7 @@ pub fn serves(op: i32, p3: bool) -> bool {
     // 76: a deliberate exit's mark (#4203), answered 0.
     let common = matches!(op, 30..=32 | 34..=35 | 60 | 73 | 74 | 76);
     let extra = p3
-        && (matches!(op, 26 | 29 | 36 | 37 | 40..=50 | 65)
+        && (matches!(op, 26 | 29 | 36 | 37 | 40..=50 | 65 | 77)
             || crate::wasi::FS_SERVICE_OPS.iter().any(|(o, _, _)| *o == op));
     common || extra
 }
@@ -147,6 +148,7 @@ fn operation_name(op: i32) -> &'static str {
             61 => "fs.fold_lines_range", 62 => "fs.fold_lines_chunked",
             63 => "fs.read_bytes", 64 => "fs.read_bytes_if_exists",
             73 => "panic",
+            77 => "env.vars",
             91..=103 => "the net core (net.tcp_*)",
             // Interim embedded-only ops (#3620): WASI has neither Unix-domain
             // sockets nor shared memory; they retire at ADR-0023 step 7.

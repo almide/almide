@@ -61,6 +61,11 @@ pub(crate) const OP_SLEEP_MS: i32 = 36;
 /// later env.get observes the set exactly as native's process-level
 /// setenv does. Stock-p1 artifacts keep the defined refusal.
 pub(crate) const OP_ENV_SET: i32 = 37;
+/// env.vars' leaf `__environ` (#3908): no operands; answers frames, one
+/// `name=value` per variable of the environment the program started with,
+/// then one per overlay entry (op 37's sets, and `env.remove`'s marks with
+/// the value NUL) — the guest's Almide body lets the later entry win.
+pub(crate) const OP_ENV_VARS: i32 = 77;
 /// The http string client (#1710 increment 1): url in a, body in b, the
 /// method IS the op. Served on the embedded host by the transcribed
 /// native client; ops 40-42 are the fan prefetch protocol, so this

@@ -99,7 +99,7 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         // read bytes, list, exists read; write text and remove write.
         120..=123 => &[FS_READ],
         124 | 125 => &[FS_WRITE],
-        26..=29 | 33 | 37 => &[ENV],
+        26..=29 | 33 | 37 | 77 => &[ENV],
         30 | 73 => &[STDOUT],
         32 => &[ENTROPY],
         34 | 36 | 60 => &[CLOCK],

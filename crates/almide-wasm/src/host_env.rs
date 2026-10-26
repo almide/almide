@@ -9,7 +9,7 @@ use wasm_encoder::BlockType;
 
 use crate::emitter::Emitter;
 use crate::fs_meta::{
-    OP_ARGS, OP_CWD, OP_ENV_GET, OP_ENV_OS, OP_STDIN_TAKE, OP_STDOUT_RAW, OP_TEMP_DIR,
+    OP_ARGS, OP_CWD, OP_ENV_GET, OP_ENV_OS, OP_ENV_VARS, OP_STDIN_TAKE, OP_STDOUT_RAW, OP_TEMP_DIR,
 };
 use crate::*;
 
@@ -102,6 +102,12 @@ impl Emitter<'_> {
             ("http", "__http_framed_bytes", [u, f]) => {
                 self.fs_call_str2(u, f, crate::fs_meta::OP_HTTP_FRAMED_BYTES)?;
                 Some(Lowered::owned(self.fs_result_bytes()?))
+            }
+            // `env.vars`' leaf (#3908): the `name=value` frames, every one
+            // kept (no argv0 to skip).
+            ("env", "__environ", []) => {
+                self.fs_call_0(OP_ENV_VARS)?;
+                Some(Lowered::owned(self.frames_to_string_list(false)?))
             }
             ("env", "os", []) => {
                 self.fs_call_0(OP_ENV_OS)?;
