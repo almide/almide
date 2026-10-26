@@ -31,6 +31,7 @@ impl Checker {
         self.validate_unresolved_binding_types();
         self.validate_type_param_inference();
         self.validate_input_sinks();
+        self.validate_deferred_protocol_bounds();
         self.validate_implicit_propagation();
         self.lint_error_surface(program);
         self.check_bounded_profile(program);
@@ -176,6 +177,7 @@ impl Checker {
             self.deferred_cascade_diags.len(),
             self.deferred_type_param_checks.len(),
             self.deferred_input_sink_checks.len(),
+            self.deferred_protocol_bounds.len(),
         );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -235,6 +237,7 @@ impl Checker {
         self.deferred_cascade_diags.truncate(saved_deferred_lens.14);
         self.deferred_type_param_checks.truncate(saved_deferred_lens.15);
         self.deferred_input_sink_checks.truncate(saved_deferred_lens.16);
+        self.deferred_protocol_bounds.truncate(saved_deferred_lens.17);
         // #3164: the ENTRY program has no prefixed key to carry the result —
         // its bare keys are the real ones — so the refreshed types go back
         // onto them, where the main pass reads them. (A module's prefixed keys
