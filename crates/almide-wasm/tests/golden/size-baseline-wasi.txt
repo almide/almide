@@ -97,6 +97,7 @@
 36325	spec/wasm_cross/codec_decode_errors.almd
 42274	spec/wasm_cross/codec_decode_field_order.almd
 35170	spec/wasm_cross/codec_deep_nesting.almd
+44371	spec/wasm_cross/codec_direction_split.almd
 29858	spec/wasm_cross/codec_doc_array.almd
 36839	spec/wasm_cross/codec_empty_and_bool.almd
 32041	spec/wasm_cross/codec_extra_keys.almd
@@ -335,6 +336,7 @@
 2959	spec/wasm_cross/hof_closure_string_tail.almd
 28715	spec/wasm_cross/hof_fn_value_callbacks.almd
 11756	spec/wasm_cross/host_floor_string_alloc.almd
+38906	spec/wasm_cross/http_decode_json_input_type.almd
 14202	spec/wasm_cross/http_query_params_decoder.almd
 13940	spec/wasm_cross/http_response_headers.almd
 457	spec/wasm_cross/i64_min_literal.almd
