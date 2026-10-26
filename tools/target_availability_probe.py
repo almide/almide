@@ -62,7 +62,8 @@ LEGS = ("structural", "stock-p1", "embedded")
 EXPLICIT_IMPORT = {
     "json", "fs", "http", "env", "io", "random", "regex", "process",
     "testing", "url", "args", "base64", "compute", "hash", "hex",
-    "path", "html", "duration", "net", "zlib", "unix", "uuid",
+    "path", "html", "duration", "net", "zlib", "unix", "uuid", "bigint",
+    "ffi",
 }
 # docs/stdlib pages that document CHECKER surface (clock constructors), not
 # a module interface — tools/gen-stdlib-doc-index.py's own exclusion — and the
