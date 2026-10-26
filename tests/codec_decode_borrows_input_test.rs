@@ -100,7 +100,7 @@ fn derived_field_reads_carry_their_declaration_slot() {
         }\n";
     let rust = emitted(user_src, "slot-user");
     let read_y = rust.lines().skip_while(|l| !l.starts_with("pub fn read_y(")).take_while(|l| !l.starts_with('}')).collect::<Vec<_>>().join("\n");
-    assert!(read_y.contains("almide_rt_value_field"), "the user's lookup is still a runtime field read:\n{read_y}");
+    assert!(read_y.contains("almide_rt_value_get("), "the user's lookup is still a runtime field read:\n{read_y}");
     assert!(!read_y.contains("_field_ref_at("), "a user's value.get must not be slot-hinted:\n{read_y}");
 }
 

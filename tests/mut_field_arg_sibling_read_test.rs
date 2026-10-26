@@ -165,9 +165,11 @@ fn run_native(src: &str, dir: &Path, label: &str) -> String {
 fn every_in_place_mutator_with_a_field_receiver_evaluates_sibling_reads_before_the_borrow() {
     let ms = mutators();
     // The matrix is only as good as its row count: the byte writers alone are
-    // ~50 fns, and push/insert anchor the list/map/string rows.
+    // ~50 fns, and push anchors the list/string rows. Map has no in-place
+    // mutator with a sibling argument any more (`map.insert` became the
+    // `m[key] = value` index write, R-map-01); its rows join by existing.
     assert!(ms.len() >= 50, "found only {} mutators — the signature scan broke", ms.len());
-    for (m, f) in [("bytes", "put_u8"), ("bytes", "copy_within"), ("string", "push"), ("list", "push"), ("map", "insert")] {
+    for (m, f) in [("bytes", "put_u8"), ("bytes", "copy_within"), ("string", "push"), ("list", "push")] {
         assert!(ms.iter().any(|x| x.module == m && x.name == f), "{m}.{f} missing from the matrix");
     }
     let dir = tempfile::tempdir().expect("tempdir");

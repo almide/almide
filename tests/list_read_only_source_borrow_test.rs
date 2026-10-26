@@ -34,10 +34,8 @@ const RANGE_OPS: &[(&str, &str)] = &[
     ("take_while", "list.len(list.take_while(cs, is_a))"),
     ("drop_while", "list.len(list.drop_while(cs, is_a))"),
     ("window", "list.len(list.window(cs, 2))"),
-    ("windows", "list.len(list.window(cs, 2))"),
     ("chunk", "list.len(list.chunk(cs, 2))"),
     ("get", "string.len(list.get(cs, 1) ?? \"\")"),
-    ("get_or", "string.len(list.get(cs, 1) ?? \"\")"),
     ("first", "string.len(list.first(cs) ?? \"\")"),
     ("last", "string.len(list.last(cs) ?? \"\")"),
     ("find", "string.len(list.find(cs, is_a) ?? \"\")"),
@@ -52,7 +50,7 @@ const RANGE_OPS: &[(&str, &str)] = &[
 ];
 
 /// Expected value of each `RANGE_OPS` call on `["a", "a", "b", "c"]`.
-const EXPECTED: &[i64] = &[2, 2, 2, 2, 2, 2, 2, 3, 3, 2, 1, 1, 1, 1, 1, 0, 2, 1, 1, 0, 4, 0, 7];
+const EXPECTED: &[i64] = &[2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 0, 2, 1, 1, 0, 4, 0, 7];
 
 /// Callback ops stream fusion may turn into an iterator chain.
 const FUSED: &[&str] = &["find", "find_index", "any", "all"];
@@ -229,8 +227,8 @@ fn range_ops_emit_a_borrow_of_a_used_afterwards_source() {
 //
 // Family rule: every range op whose result is a sub-list of its source
 // (`-> List[A]`) has a twin, and so does `find` (it may move its hit out).
-// The single-element reads (`get`, `get_or`, `first`, `last`) copy one element
-// at most and the nested-list ops (`window`, `windows`, `chunk`) copy elements
+// The single-element reads (`get`, `first`, `last`) copy one element
+// at most and the nested-list ops (`window`, `chunk`) copy elements
 // into several results anyway: neither gains from a move, so neither has one.
 
 use almide_codegen::owned_source::owned_twins;

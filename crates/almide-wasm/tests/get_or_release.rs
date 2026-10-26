@@ -33,8 +33,8 @@ const MAP_OPTION_DEFAULT: &str = r#"effect fn main() -> Unit = {
   var acc = 0
   while i < 1000 {
     let m = ["k1": some(i + 1)]
-    acc = acc + (map.get(m, "k1") ?? some(0) ?? 0)
-    acc = acc + (map.get(m, "k2") ?? some(1) ?? 0)
+    acc = acc + ((map.get(m, "k1") ?? some(0)) ?? 0)
+    acc = acc + ((map.get(m, "k2") ?? some(1)) ?? 0)
     i = i + 1
   }
   println(int.to_string(acc))
@@ -75,8 +75,8 @@ effect fn main() -> Unit = {
     let q = list.get(ps, 0) ?? dp
     let q2 = list.get(ps, 3) ?? dp
     let so = ["s": some("v" + int.to_string(i))]
-    let o = map.get(so, "s") ?? none ?? "none"
-    let o2 = map.get(so, "t") ?? some("w") ?? "none"
+    let o = (map.get(so, "s") ?? none) ?? "none"
+    let o2 = (map.get(so, "t") ?? some("w")) ?? "none"
     let ls = ["a" + int.to_string(i), "b"]
     let e = list.get(ls, 1) ?? ("c" + int.to_string(i))
     if i % 50 == 0 then {

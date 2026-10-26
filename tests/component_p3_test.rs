@@ -1185,7 +1185,6 @@ effect fn main() -> Unit = {
 // cached list), argv[0] skipped with an empty and a spaced argument, and
 // a sleep that is observed on the monotonic clock.
 const ENV_PROBE: &str = r#"import env
-import process
 
 effect fn main() -> Unit = {
   println(env.get("P3_PROBE_KEY") ?? "<none>")

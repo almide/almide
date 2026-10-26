@@ -8,10 +8,11 @@
 //! served it.
 //!
 //! The matrix lives in `spec/wasm_cross/bytes_set_on_record_field.almd`
-//! (C-033). This file carries what the fixture cannot: the DECLARED OMISSION
-//! stays a wall (a nested path `o.inner.buf` is refused by name, not written
-//! through the alias — the shape that printed `42 42` before), pinned so a
-//! later change that starts accepting it has to say so here; and the shape
+//! (C-033). This file carries what the fixture cannot: a nested path
+//! `o.inner.buf` (the shape that printed `42 42` before) — the removed
+//! `bytes.set_*` family walled it by name (`bytes-set-nonvar`); `bytes.put_u8`
+//! takes its receiver as a `mut` parameter, so the nested place is written
+//! back after the call and must leave the alias intact on both legs; and the shape
 //! the fixture does not spell because the incumbent brick refuses its
 //! enclosing loop — a `for` loop of sets through the field after a snapshot.
 
@@ -99,16 +100,10 @@ fn sets_through_the_field_in_a_loop_leave_the_snapshot_intact_on_both_legs() {
 }
 
 #[test]
-fn a_nested_path_receiver_is_refused_by_name_rather_than_written_through_the_alias() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let built = build(NESTED_PATH, "wasm", dir.path());
-    assert!(
-        !built.status.success(),
-        "a nested receiver path has an owner the field gate does not model and must wall, not build"
-    );
-    let stderr = String::from_utf8_lossy(&built.stderr);
-    assert!(
-        stderr.contains("bytes-set-nonvar"),
-        "the refusal must name the receiver shape (bytes-set-nonvar), got:\n{stderr}"
-    );
+fn a_nested_path_receiver_writes_back_without_reaching_the_alias() {
+    if !wasmtime_available() {
+        return;
+    }
+    // `o1` keeps its 8; only `o2`'s copy of the nested block reads 42.
+    assert_eq!(agree(NESTED_PATH, "nested path").trim(), "8 42");
 }

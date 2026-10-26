@@ -61,11 +61,14 @@ fn closure_map_read_borrows_the_cell_in_place() {
         "expected an in-place cell borrow in the closure read:\n{out}"
     );
     // The closure body must not deep-clone the cell per read any more.
+    // The read statement is the `let cur` line; the write back (`stats =
+    // map.set(stats, ...)`) after it is a separate statement and not pinned
+    // here. The unfused `map.get(..) ?? 0` reads as one `match` line.
     let closure = out.split("Rc::new(move").nth(1).expect("closure body present");
-    let closure_body = closure.split("})").next().unwrap();
+    let read = closure.lines().find(|l| l.contains("let cur")).expect("the `let cur` read in the closure");
     assert!(
-        !closure_body.contains(".get()"),
-        "closure read still snapshots the cell:\n{closure_body}"
+        !read.contains(".get()"),
+        "closure read still snapshots the cell:\n{read}"
     );
 }
 
