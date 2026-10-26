@@ -445,6 +445,7 @@ impl Checker {
         self.expect_lambda(body, &ret_ty);
         self.lambda_expect.clear();
         self.call_expect.clear();
+        self.qq_fallback_expect.clear();
         self.expect_expr(body, &ret_ty);
         // ADR-0002 Phase 1b (#1103): a `-> T!` fn's body gets the SAME
         // value-tail acceptance an effect fn's lifted body has — the

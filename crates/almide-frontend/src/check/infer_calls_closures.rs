@@ -981,8 +981,14 @@ impl Checker {
     fn infer_expr_g3_unwrap_or(&mut self, expr: &mut ast::Expr) -> Ty {
         let ExprKind::UnwrapOr { expr: inner, fallback, .. } = &mut expr.kind else { unreachable!() };
         let t = self.infer_expr(inner);
-        if let Some(payload) = resolve_ty(&t, &self.uf).option_inner().or_else(|| resolve_ty(&t, &self.uf).result_ok_ty()) {
-            self.expect_expr(fallback, &payload);
+        let payload = resolve_ty(&t, &self.uf).option_inner().or_else(|| resolve_ty(&t, &self.uf).result_ok_ty());
+        if let Some(payload) = &payload {
+            self.expect_expr(fallback, payload);
+        }
+        if let Some(slot) = self.qq_fallback_expect.remove(&fallback.id)
+            && !payload.as_ref().is_some_and(|p| self.holds_pure_fn(&resolve_ty(p, &self.uf)))
+        {
+            self.expect_expr(fallback, &slot);
         }
         let ft = self.infer_expr(fallback);
         let resolved = resolve_ty(&t, &self.uf);
