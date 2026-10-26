@@ -389,7 +389,8 @@ impl<'a> Interpreter<'a> {
         // the body cannot take this call, and the reason says so.
         let (func, func_def, gate_mut) = match self.resolve_body_for_arity(module, func, args.len()) {
             Ok(found) => found,
-            Err(why) => return self.abstain_or_bridge(floor_first, module, func, &args, why),
+            Err(why) if floor_first => return Flow::Unsupported(why),
+            Err(why) => return self.no_body_fallback(module, func, args, why),
         };
         // These sites receive EAGERLY-evaluated args, so a `mut` parameter's
         // caller lvalue is already gone — the Named path's copy-out (#1022)

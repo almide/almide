@@ -131,6 +131,45 @@ pub(crate) fn module_of_impl(impl_name: Sym) -> Option<(Sym, Sym)> {
     pool().impl_to_call.get(&impl_name).copied()
 }
 
+/// One auto-imported bundled module's own source, lowered as that module:
+/// its fns by their bare declared name (`parse`, `range_step`) — the
+/// definitions the native and wasm legs compile for `M.f` when the registry
+/// names no impl for it. `None` when the source did not lower.
+type BundledBodies = Option<&'static HashMap<Sym, IrFunction>>;
+
+static BUNDLED: OnceLock<std::sync::Mutex<HashMap<Sym, BundledBodies>>> = OnceLock::new();
+
+/// The body an AUTO-IMPORTED bundled module declares for `func`
+/// (`list.range_step`, `int8.parse`), for a call no other tier answers.
+///
+/// The driver loads an auto-imported module's source whenever a program
+/// names it (`almide_frontend::bundled_reach`), so both backends run the
+/// module's own Almide body for a fn the registry has no impl for. The
+/// interp leg's lowering loads only the modules a fixture IMPORTS (the
+/// harness allowlist); an auto-imported module is named, never imported,
+/// so no import line can key it in. This tier lowers that same source
+/// once per process, as its owning module (the registry sources' recipe),
+/// and is consulted LAST — after the lowered body, the pool and the bridge
+/// — so a call any of them already answers keeps its answer.
+pub(crate) fn bundled_body(module: Sym, func: Sym) -> Option<&'static IrFunction> {
+    bundled_module(module)?.get(&func).filter(|d| !matches!(d.body.kind, almide_ir::IrExprKind::Hole))
+}
+
+fn bundled_module(module: Sym) -> BundledBodies {
+    let name = module.as_str();
+    if !almide_lang::stdlib_info::AUTO_IMPORT_BUNDLED.contains(&name) {
+        return None;
+    }
+    let cell = BUNDLED.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    let mut loaded = cell.lock().ok()?;
+    *loaded.entry(module).or_insert_with(|| {
+        let source = almide_lang::stdlib_info::bundled_source(name)?;
+        let fns: HashMap<Sym, IrFunction> =
+            lower_registry_source(source, Some(name))?.into_iter().map(|f| (f.name, f)).collect();
+        Some(&*Box::leak(Box::new(fns)))
+    })
+}
+
 fn build() -> StdlibPool {
     let mut fns: HashMap<Sym, IrFunction> = HashMap::new();
     let mut call_map: HashMap<(Sym, Sym), Sym> = HashMap::new();
