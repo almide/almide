@@ -139,10 +139,6 @@ pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String
             flush();
             core::almide_proc_run(a, &cells(b)?).map(|c| c.to_string())
         }
-        86 => {
-            allowed("process.spawn", a)?;
-            core::almide_proc_spawn(a, &cells(b)?).map(|p| p.to_string())
-        }
         87 => {
             // #4125: signalling is bounded by `[permissions] proc` as the
             // `kill` command it used to run (src/cli/mod.rs PROC_SIGNALLING).
@@ -150,14 +146,8 @@ pub(crate) fn call(op: i32, a: &str, b: &str, flush: &dyn Fn()) -> Result<String
             let num = |s: &str| s.parse::<i64>().map_err(|_| format!("malformed process operand `{}`", almide_base::err_text::almide_rt_errtext_escape(s)));
             core::almide_proc_kill(num(a)?, num(b)?, signal).map(|()| String::new())
         }
-        88 => {
-            let pid = a.parse::<i64>().map_err(|_| format!("malformed process operand `{}`", almide_base::err_text::almide_rt_errtext_escape(&a)))?;
-            // is_alive answers a Bool: outside the bound it is never alive.
-            if allowed("process.is_alive", "kill").is_err() {
-                return Ok("0".to_string());
-            }
-            Ok(if core::almide_proc_is_alive(pid, signal) { "1" } else { "0" }.to_string())
-        }
+        // 86 (spawn) and 88 (is_alive) served the surface process.start
+        // replaced (R-process-03); their numbers stay unused.
         89 => Ok(std::process::id().to_string()),
         90 => {
             let mut all = cells(b)?;

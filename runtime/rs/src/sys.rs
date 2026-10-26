@@ -99,7 +99,7 @@ mod almide_rt_sys_ffi {
     }
 
     /// `kill(pid, sig)` (#4125): `Err(errno)` on failure. The syscall itself,
-    /// so `process.kill` / `is_alive` never run a `kill` found on PATH. The
+    /// so `process.kill` never runs a `kill` found on PATH. The
     /// caller (process_core's `almide_proc_kill`) passes only pid > 0 and
     /// 0 <= sig <= 31, so a process group or "every process" is never named.
     #[cfg(unix)]

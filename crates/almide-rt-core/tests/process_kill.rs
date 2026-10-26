@@ -1,7 +1,7 @@
-//! C-417 (#4125): process.kill / is_alive validate before the syscall, so a
+//! C-417 (#4125): process.kill validates before the syscall, so a
 //! pid that names a process group or "every process" never reaches kill(2),
 //! and a failed kill(2) answers a fixed errno text.
-use almide_rt_core::process_core::{almide_proc_is_alive, almide_proc_kill};
+use almide_rt_core::process_core::almide_proc_kill;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 static CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -21,7 +21,6 @@ fn refused_operands_never_reach_the_syscall() {
                 "process.kill({pid}, 0): pid must be in 1..=2147483647"
             ))
         );
-        assert!(!almide_proc_is_alive(pid, counting));
     }
     for sig in [-1i64, 32, 64, i64::MAX] {
         assert_eq!(
@@ -52,7 +51,4 @@ fn errno_texts_are_fixed() {
         almide_proc_kill(7, 9, |_, _| Err(99)),
         Err("process.kill(7, 9): signal failed (errno 99)".to_string())
     );
-    // EPERM: the process exists (someone else's); ESRCH: it does not.
-    assert!(almide_proc_is_alive(7, |_, _| Err(1)));
-    assert!(!almide_proc_is_alive(7, |_, _| Err(3)));
 }

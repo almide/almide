@@ -239,31 +239,6 @@ pub fn almide_proc_run_in(dir: &str, cmd: &str, args: &[impl AsRef<str>]) -> Res
     }
 }
 
-/// The children this process spawned and has not yet reaped, by pid (#2494):
-/// the handle is kept so `is_alive` can reap an exited child with `try_wait`
-/// instead of reporting a zombie alive forever. Process-wide.
-pub fn almide_proc_spawned_children() -> &'static std::sync::Mutex<std::collections::HashMap<u32, std::process::Child>> {
-    static CHILDREN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u32, std::process::Child>>> =
-        std::sync::OnceLock::new();
-    CHILDREN.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
-}
-
-/// Start `cmd` in the background (stdin null); its pid.
-pub fn almide_proc_spawn(cmd: &str, args: &[impl AsRef<str>]) -> Result<i64, String> {
-    let child = std::process::Command::new(cmd)
-        .args(args.iter().map(|a| a.as_ref()))
-        .stdin(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| almide_proc_call_err("process.spawn", &almide_proc_q(cmd), e))?;
-    let pid = child.id();
-    let mut children = almide_proc_spawned_children().lock().unwrap_or_else(|e| e.into_inner());
-    // Reap the children that have exited since the last look, so a program
-    // that spawns without ever asking is_alive does not accumulate zombies.
-    children.retain(|_, c| matches!(c.try_wait(), Ok(None)));
-    children.insert(pid, child);
-    Ok(pid as i64)
-}
-
 /// The signal syscall a consumer hands the core (#4125): `kill(pid, sig)`,
 /// `Err(errno)` on failure. The core holds no `unsafe` and links no libc, so
 /// native passes its sys.rs wrapper and the embedded host a rustix call —
@@ -300,25 +275,6 @@ pub fn almide_proc_kill(pid: i64, signal: i64, send: AlmideProcSignal) -> Result
         return Err(fail("signal must be in 0..=31"));
     }
     send(target, signal as i32).map_err(|errno| fail(&almide_proc_signal_errno_text(errno)))
-}
-
-/// True while `pid` exists. A child of ours answers through its handle (an
-/// exited child is reaped and answers false); any other positive pid is asked
-/// with signal 0 through `send` (EPERM = it exists, owned by someone else).
-/// A pid outside 1..=2147483647 is never alive (#4125).
-pub fn almide_proc_is_alive(pid: i64, send: AlmideProcSignal) -> bool {
-    let Some(target) = almide_proc_target_pid(pid) else { return false };
-    {
-        let mut children = almide_proc_spawned_children().lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(child) = children.get_mut(&(target as u32)) {
-            let running = matches!(child.try_wait(), Ok(None));
-            if !running {
-                children.remove(&(target as u32));
-            }
-            return running;
-        }
-    }
-    matches!(send(target, 0), Ok(()) | Err(1))
 }
 
 /// The Windows `send` (no kill(2) there): signal 0 asks `tasklist`, any other
