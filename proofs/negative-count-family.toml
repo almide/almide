@@ -433,7 +433,6 @@ position = [
 value = [
   "list.range.start",
   "list.range.end",
-  "list.binary_search.target",
   "list.bundled_probe.n",
   "list.range_step.start",
   "list.range_step.end",
