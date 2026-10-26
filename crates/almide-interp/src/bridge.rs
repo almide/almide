@@ -163,6 +163,23 @@ fn bytes_fn(func: &str, args: &[Value]) -> Option<Flow> {
     let f = match func {
         "to_list" => Flow::val(args.first()?.clone()),
         "len" => Flow::val(Value::Int(args.first()?.as_iter_items()?.len() as i64)),
+        // `almide_rt_bytes_to_string_lossy` — `String::from_utf8_lossy`. The
+        // body's String block has no faithful read-back at the boundary
+        // (`return sync`), so a lossy decode written as
+        // `bytes.to_string_lossy(bytes.from_list(..))` (the replacement of
+        // the removed `string.from_bytes`) is answered here.
+        "to_string_lossy" => {
+            let octets: Option<Vec<u8>> = args
+                .first()?
+                .as_iter_items()?
+                .iter()
+                .map(|v| match v {
+                    Value::Int(n) => Some(*n as u8),
+                    _ => None,
+                })
+                .collect();
+            Flow::val(Value::str(String::from_utf8_lossy(&octets?).into_owned()))
+        }
         // C-197: an unsatisfiable size is the defined abort on every leg —
         // the infallible `vec![_; n]` panicked with a capacity overflow on
         // `bytes.zeros(i64::MAX)` instead (fuzz seed 500705518626 index 711).

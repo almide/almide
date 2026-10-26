@@ -27,6 +27,7 @@ mod f32_display;
 mod hofs;
 mod inplace;
 mod stdlib_pool;
+mod surface;
 mod heap;
 mod vfs;
 mod value;
