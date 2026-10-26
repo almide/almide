@@ -82,8 +82,8 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-044 | Result/Option construction and matching are byte-identical | 0.24.0 | active | fixture | 6 |
 | C-045 | A List[String] param works across join / len / index / iteration | 0.24.0 | active | fixture | 3 |
 | C-046 | Record spread-update and cross-module monomorphization are byte-identical | 0.24.0 | active | fixture | 1 |
-| C-047 | math.pow negative exponent and rotate non-positive width are total — they abort, never trap/wrap | 0.24.0 | active | fixture | 3 |
-| C-048 | int.wrap_* / int.rotate_* saturate the mask to u64::MAX for bits >= 64 | 0.24.0 | active | fixture | 1 |
+| C-047 | math.pow with a negative exponent is total — it aborts, never traps or wraps | 0.24.0 | active | fixture | 2 |
+| C-048 | int.wrap_* / int.rotate_* run on the 64-bit register and int.wrap saturates its mask for bits >= 64 | 0.24.0 | active | fixture | 1 |
 | C-049 | float.sign is f64::signum; float/math min/max ignore NaN | 0.24.0 | active | fixture | 1 |
 | C-050 | string.split(\"\") and string.run_length_encode are codepoint-granular | 0.24.0 | active | fixture | 1 |
 | C-051 | math.log_gamma is bit-identical (both targets use the vendored musl-libm log) | 0.24.0 | active | fixture | 2 |
@@ -452,7 +452,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-414 | float.to_int_checked and float.to_int_saturating complete the Float to Int conversion trio | 0.69.0 | active | fixture | 1 |
 | C-415 | random.int, float, choice and shuffle draw from OS entropy on native and the embedded wasm lane: draws in one clock tick differ, and threads started together draw different streams | 0.69.0 | active | fixture | 0 |
 | C-416 | net reads and received descriptors are bounded: a read never pre-allocates its length, and at most 28 untaken descriptors wait per Unix socket | 0.69.0 | active | fixture | 0 |
-| C-417 | process.kill and process.is_alive ask the kernel with kill(2), refuse a pid outside 1..=2147483647, answer fixed err texts, and are bounded by [permissions] proc as the kill command | 0.69.0 | active | fixture | 0 |
+| C-417 | process.kill asks the kernel with kill(2), refuses a pid outside 1..=2147483647, answers fixed err texts, and is bounded by [permissions] proc as the kill command | 0.69.0 | active | fixture | 0 |
 | C-418 | a runtime error text escapes the control and bidi characters of the user data it embeds, with one rule and the same bytes on every leg | 0.69.0 | active | fixture | 3 |
 | C-419 | bigint text in a radix that is not a power of two is limited to 4300 digits with one fixed text, a power-of-two radix has no limit, and bigint.pow refuses a result sure to pass 30 * 2^28 bits before computing | 0.69.0 | active | fixture | 1 |
 | C-420 | list.range_step lists every Int start + i * step strictly before end, with a count that does not wrap at the ends of Int | 0.69.0 | active | fixture | 1 |
@@ -472,4 +472,5 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-434 | a runtime abort inside an http.serve handler fails only that request: the fixed C-409 500, one stderr line, and the server keeps serving | 0.69.0 | active | fixture | 0 |
 | C-435 | `Codec` is `Encode + Decode`: a `: Decode` type derives only `decode` (+ a record's `decode_strict`), a `: Encode` type only `encode`, and an input type skips no field | 0.69.0 | active | fixture | 1 |
 | C-436 | `http.decode_json[T](req)` decodes a request body only into an input type: a `Codec` T is E110, and a key outside T is `400 Bad Request: unknown key '<k>'` | 0.69.0 | active | fixture | 1 |
+| C-437 | A process.start child neither waited on nor stopped is stopped when the program exits by main's return, process.exit or an effect error | 0.69.0 | active | fixture | 0 |
 
