@@ -466,14 +466,23 @@ effect fn main() -> Unit = {
 
 Get a header value from a request
 
-```almd check
-import http
+A credential in a header is checked, not just looked for: wrap both sides in
+`secret.new`, whose `==` on `Secret[String]` is constant time (C-426), and
+answer 401 to a missing or wrong one. Plain `==` on the header text returns at
+the first differing byte, so its timing leaks the token.
 
-fn handle(req: HttpRequest) -> HttpResponse = {
-  let auth = http.req_header(req, "Authorization")
-  match auth {
-    some(_) => http.response(200, "ok"),
-    none => http.response(401, "missing Authorization"),
+```almd check
+import env
+import http
+import secret
+
+effect fn handle(req: HttpRequest) -> HttpResponse = {
+  let expected = env.get("API_TOKEN") |> option.map((t) => secret.new("Bearer " + t))
+  match (http.req_header(req, "Authorization"), expected) {
+    (some(got), some(want)) => if secret.new(got) == want then http.response(200, "ok")
+    else http.response(401, "invalid token"),
+    (none, _) => http.response(401, "missing Authorization"),
+    (_, none) => http.response(500, "API_TOKEN is not set"),
   }
 }
 
