@@ -205,9 +205,9 @@ mod tests {
 
     /// The ruling of 2026-10-26: an uncapped run's budget follows the
     /// environment — the tightest cgroup limit on the path, physical memory,
-    /// 4 GiB — and is 4 GiB when nothing can be read. Negative control: with
-    /// `cap_from` taking 4 GiB without the `min`, every row but the last
-    /// failed.
+    /// 4 GiB — and is 4 GiB when nothing can be read. Negative control
+    /// (2026-10-26): with `cap_from` folding without the `min`, the first row
+    /// failed, "v2 child" left 4294967296 right 67108864.
     #[test]
     fn the_default_cap_is_the_least_limit_the_environment_sets() {
         let gib2 = "MemTotal:        2097152 kB\n";
