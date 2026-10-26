@@ -29,9 +29,7 @@ fn run(src: &str, target: Option<&str>) -> (String, Option<u64>) {
 
 fn program(step: &str, steps: u32) -> String {
     format!(
-        "import json
-
-effect fn main() -> Unit = {{
+        "effect fn main() -> Unit = {{
   var x: value.Path = value.root()
   var i = 0
   while i < {steps} {{
