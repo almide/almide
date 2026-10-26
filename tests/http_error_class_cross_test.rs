@@ -131,6 +131,13 @@ fn the_spec_fixtures_read_the_same_on_native_embedded_and_p3() {
         let out = assert_same(name, &three_legs(&dir.join(name), &[], scratch.path()));
         assert!(!out.contains("unexpected ok"), "{name}:\n{out}");
         assert_no_password(name, &out);
+        // C-418 (#4265): no character of the escape set reaches a text raw.
+        let raw: Vec<String> = out
+            .chars()
+            .filter(|c| *c != '\n' && almide_base::err_text::almide_rt_errtext_is_escaped(*c))
+            .map(|c| format!("U+{:04X}", c as u32))
+            .collect();
+        assert!(raw.is_empty(), "{name}: raw C-418 characters reached the output: {raw:?}");
     }
 }
 
