@@ -1,0 +1,5 @@
+// E053 (row 22 R4, C-435): every field of an input type is input, so a field
+// the decoder must skip contradicts the declaration.
+type UserInput: Decode = { name: String, @skip_decode is_admin: Bool = false }
+
+effect fn main() -> Unit = println("declared")

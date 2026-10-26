@@ -1,0 +1,15 @@
+// E110 (row 22, C-436): the input type itself is `: Decode`, but it holds
+// `Address`, which is also sent out — adding `verified: Bool = false` to the
+// shared `Address` would make it settable from the request body.
+import http
+
+type Address: Codec = { city: String, verified: Bool = false }
+
+type SignupInput: Decode = { name: String, address: Address }
+
+effect fn signup(req: HttpRequest) -> HttpResponse = match http.decode_json[SignupInput](req) {
+  ok(i) => http.response(201, i.name),
+  err(bad) => bad,
+}
+
+effect fn main() -> Unit = println(http.body(signup(http.new_request("POST", "/s", "{}", [:]))!))

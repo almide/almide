@@ -1,0 +1,12 @@
+// E110 (row 22, C-436): the sink refuses a key outside a record's fields, and
+// a variant has no field set to hold keys to.
+import http
+
+type Command: Decode = | Rename { name: String } | Delete
+
+effect fn run(req: HttpRequest) -> HttpResponse = match http.decode_json[Command](req) {
+  ok(_) => http.response(200, "ok"),
+  err(bad) => bad,
+}
+
+effect fn main() -> Unit = println(http.body(run(http.new_request("POST", "/c", "{}", [:]))!))

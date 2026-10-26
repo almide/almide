@@ -1,0 +1,17 @@
+// The body decodes into an input type that lists what the client may set;
+// the program builds `User` from it, so `is_admin` is never input.
+import http
+
+type User: Codec = { name: String, email: String, is_admin: Bool = false }
+
+type UserInput: Decode = { name: String, email: String }
+
+effect fn create(req: HttpRequest) -> HttpResponse = match http.decode_json[UserInput](req) {
+  ok(i) => {
+    let u = User { name: i.name, email: i.email, is_admin: false }
+    http.response(201, "${u.name} is_admin=${u.is_admin}")
+  },
+  err(bad) => bad,
+}
+
+effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{}", [:]))!))

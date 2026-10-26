@@ -1,0 +1,42 @@
+// @contract: C-436
+// C-436: `http.decode_json[T](req)` decodes the body into the input type `T`
+// (a `: Decode` record that is not also `Encode`) with `T.decode_strict`. A
+// key outside T — the over-posted `is_admin`, a typo — is
+// `400 Bad Request: unknown key '<k>'`; a missing field and a body that is
+// not JSON are 400s naming why. The handler builds the domain value, so
+// `is_admin` is never input. A record nested in T is an input type too and
+// decodes with its own `decode` (its unknown keys are ignored, never set).
+import http
+
+type User: Codec = { name: String, email: String, is_admin: Bool = false }
+
+type AddressInput: Decode = { city: String }
+
+type UserInput: Decode = { name: String, email: String, address: AddressInput? }
+
+fn create(req: HttpRequest) -> String = match http.decode_json[UserInput](req) {
+  ok(i) => {
+    let u = User { name: i.name, email: i.email, is_admin: false }
+    let city = match i.address {
+      some(a) => a.city,
+      none => "-",
+    }
+    "ok ${u.name} ${u.email} is_admin=${u.is_admin} city=${city}"
+  },
+  err(bad) => "${bad}",
+}
+
+effect fn main() -> Unit = {
+  let bodies = [
+    "{\"name\":\"m\",\"email\":\"e\"}",
+    "{\"name\":\"m\",\"email\":\"e\",\"is_admin\":true}",
+    "{\"is_admin\":true,\"name\":\"m\",\"email\":\"e\"}",
+    "{\"name\":\"m\",\"email\":\"e\",\"zz\":1,\"yy\":2}",
+    "{\"name\":\"m\",\"email\":\"e\",\"address\":{\"city\":\"k\",\"verified\":true}}",
+    "{\"name\":\"m\"}",
+    "not json"
+  ]
+  for body in bodies {
+    println(create(http.new_request("POST", "/users", body, [:])))
+  }
+}

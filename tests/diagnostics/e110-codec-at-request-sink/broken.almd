@@ -1,0 +1,13 @@
+// E110 (row 22, C-436): the request body decodes straight into `User`, a type
+// the program also sends out. Its input surface is its whole field set, so the
+// client sets `is_admin` by posting it (mass assignment, CWE-915).
+import http
+
+type User: Codec = { name: String, email: String, is_admin: Bool = false }
+
+effect fn create(req: HttpRequest) -> HttpResponse = match http.decode_json[User](req) {
+  ok(u) => http.response(201, "${u.name} is_admin=${u.is_admin}"),
+  err(bad) => bad,
+}
+
+effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{}", [:]))!))

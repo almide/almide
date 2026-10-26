@@ -1,0 +1,22 @@
+// The body is a record input type; the program builds the variant from it.
+import http
+
+type Command = | Rename { name: String } | Delete
+
+type CommandInput: Decode = { op: String, name: String = "" }
+
+effect fn run(req: HttpRequest) -> HttpResponse = match http.decode_json[CommandInput](req) {
+  ok(i) => {
+    let c = match i.op {
+      "rename" => Rename { name: i.name },
+      _ => Delete,
+    }
+    http.response(200, match c {
+      Rename { name } => name,
+      Delete => "deleted",
+    })
+  },
+  err(bad) => bad,
+}
+
+effect fn main() -> Unit = println(http.body(run(http.new_request("POST", "/c", "{}", [:]))!))

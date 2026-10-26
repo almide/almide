@@ -1,0 +1,3 @@
+expects_code = "E110"
+expects_error = "only into a record input type, and `Command` is a variant"
+hint_substring = "type CommandInput: Decode"
