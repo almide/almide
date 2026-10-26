@@ -3526,6 +3526,21 @@ WHOLE matching element ("--out=x"), not the part after the prefix.
 """
 
 [[args.fn]]
+name = "__positional_at"
+index_unit = "element-index"
+setup = [
+  'let kept = args.__positional_at(["--out", "r.txt", "in.txt"], ["out"], 0, [])',
+  'let late = args.__positional_at(["a", "b"], [], 1, [])',
+]
+probe = 'list.join(kept, ",") + " " + list.join(late, ",")'
+expect = "in.txt b"
+note = """
+i is the 0-based RAW-argv position the scan starts at, as for __flag_at:
+starting at 0 skips "--out" AND its value "r.txt" (a named option, #4144) and
+keeps "in.txt"; starting at 1 never sees "a" at position 0.
+"""
+
+[[args.fn]]
 name = "positional_at"
 index_unit = "element-index"
 probe = 'args.positional_at(0, [])! ?? "none"'
