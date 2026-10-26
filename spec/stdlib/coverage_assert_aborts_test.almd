@@ -3,7 +3,6 @@
 // process (native) or a fresh instance (wasm), and passes when the child ends
 // in a defined abort whose text contains `expected`. Every abort counts, not
 // only `panic`, and each call gets its own child.
-import env
 import testing
 import fs
 

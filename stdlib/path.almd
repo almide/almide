@@ -1,6 +1,5 @@
 // path — file path manipulation (secure-by-design Layer 3)
 // Bundled stdlib module (written in Almide, auto multi-target)
-
 // Whether `s` stays inside the directory it is joined to: relative (no
 // leading `/` or `\`, no drive letter `C:`, no leading `~`), no NUL, and no
 // `..` segment once split on BOTH separators — `..\..\x` climbs on Windows.

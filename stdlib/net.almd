@@ -162,7 +162,10 @@ local fn __parse_v4(t: String, whole: String) -> Result[IpAddr, String] = {
 
 local fn __group(t: String) -> Int? =
   if string.len(t) == 0 or string.len(t) > 4 then none
-  else if string.to_list(string.to_lower(t)) |> list.all((c) => string.contains("0123456789abcdef", c)) then int.parse_radix(t, 16)?
+  else if string.to_list(string.to_lower(t)) |> list.all((c) => string.contains("0123456789abcdef", c)) then int.parse_radix(
+    t,
+    16,
+  )?
   else none
 
 // One side of a `::` (or the whole address without one) as its groups; an

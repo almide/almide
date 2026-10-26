@@ -11,8 +11,6 @@
 // a `let` annotation, a ctor bound to a name, a fn parameter, a fn result, a
 // `match` subject, an `==`, an interpolation and a list element. No auto-imported
 // stdlib variant type remains, so that half needs `import net`.
-import net
-
 type Endian = | LittleEndian | BigEndian
 
 fn host(a: IpAddr) -> String = match a {
@@ -20,7 +18,17 @@ fn host(a: IpAddr) -> String = match a {
   V6(parts) => "v6:${list.len(parts)}",
 }
 
-fn loopback(v6: Bool) -> IpAddr = if v6 then V6([0, 0, 0, 0, 0, 0, 0, 1]) else V4(127, 0, 0, 1)
+fn loopback(v6: Bool) -> IpAddr = if v6 then V6([
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  1
+])
+else V4(127, 0, 0, 1)
 
 fn name(e: Endian) -> String = match e {
   LittleEndian => "le",

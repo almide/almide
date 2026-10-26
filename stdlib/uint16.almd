@@ -116,7 +116,10 @@ fn parse(s: String) -> Result[UInt16, String] =
 
 // ── Integer: radix text (R-sized-06) ──
 /// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
-fn to_string_radix(x: UInt16, radix: Int) -> String = int.to_string_radix(int.__from_uint16(x), radix)
+fn to_string_radix(x: UInt16, radix: Int) -> String = int.to_string_radix(
+  int.__from_uint16(x),
+  radix,
+)
 
 /// UInt16 from trimmed s in radix, the grammar of int.parse_radix; err on junk, a sign of -, or above 65535.
 fn parse_radix(s: String, radix: Int) -> Result[UInt16, String] = {

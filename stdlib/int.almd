@@ -323,10 +323,12 @@ fn __to_uint64_saturating(n: Int) -> UInt64 = if n < 0 then int.__to_uint64(0) e
 // ── U64 → Int is the one lossy widening (the upper half exceeds i64::MAX);
 //    checked/saturating complete its trio next to the plain `from_uint64` ──
 /// some(n), or none if n exceeds 2^63-1.
-fn __from_uint64_checked(n: UInt64) -> Int? = if int.__from_uint64(n) >= 0 then some(int.__from_uint64(n)) else none
+fn __from_uint64_checked(n: UInt64) -> Int? =
+  if int.__from_uint64(n) >= 0 then some(int.__from_uint64(n)) else none
 
 /// Clamps n to at most 2^63-1.
-fn __from_uint64_saturating(n: UInt64) -> Int = if int.__from_uint64(n) >= 0 then int.__from_uint64(n) else 9223372036854775807
+fn __from_uint64_saturating(n: UInt64) -> Int =
+  if int.__from_uint64(n) >= 0 then int.__from_uint64(n) else 9223372036854775807
 
 // ── Bounds ──
 /// Smallest Int: -2^63.

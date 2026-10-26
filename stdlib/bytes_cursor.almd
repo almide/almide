@@ -17,7 +17,8 @@
 fn __bc_n(b: Bytes) -> Int = prim.load32(prim.handle(b) + 4)
 
 fn bytes_read_u8_at(b: Bytes, pos: Int) -> (Int, Int?) =
-  if pos < 0 or pos > __bc_n(b) - 1 then (pos, none) else (pos + 1, some(bytes.get(b, pos) ?? 0))
+  if pos < 0 or pos > __bc_n(b) - 1 then (pos, none)
+  else (pos + 1, some(bytes.get(b, pos) ?? 0))
 
 fn bytes_read_bool_at(b: Bytes, pos: Int) -> (Int, Bool?) =
   if pos < 0 or pos >= __bc_n(b) then (pos, none) else (pos + 1, some(prim.load8(prim.handle(b) + 12 + pos) != 0))

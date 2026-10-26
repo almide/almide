@@ -17,8 +17,6 @@
 // reach the mark after the 5 s escape has fired.
 // The spin reads clocks rather than calling env.sleep_ms, so the incumbent
 // leg renders the fixture too (it walls env.sleep_ms).
-import env
-
 effect fn main() -> Unit = {
   let a = datetime.monotonic_ns()
   let escape = datetime.now_ms() + 5000

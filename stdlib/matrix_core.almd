@@ -296,7 +296,8 @@ fn matrix_transpose(m: List[List[Float]]) -> List[List[Float]] = {
 fn matrix_slice_rows(m: List[List[Float]], start: Int, end: Int) -> List[List[Float]] = {
   let hm = prim.handle(m)
   let len = prim.load32(hm + 4)
-  let e = if end < 0 then 0 else (if end > len then len else end)
+  let e = if end < 0 then 0
+  else (if end > len then len else end)
   let s = if start < 0 then 0 else start
   let n = if s < e then e - s else 0
   let out: List[List[Float]] = prim.alloc_list_str(n)

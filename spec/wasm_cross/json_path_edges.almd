@@ -69,7 +69,11 @@ fn main() -> Unit = {
   // {"xs":[10,20,99]}
   p_set(
     "s_deep_neg",
-    value.set_path(deep, value.key(value.index(value.key(value.root(), "xs"), n - 1), "k"), value.string("Z")),
+    value.set_path(
+      deep,
+      value.key(value.index(value.key(value.root(), "xs"), n - 1), "k"),
+      value.string("Z"),
+    ),
   )
   // ...{"k":"Z"}
   // 3/4. set_path Index over object / scalar / bool / null → no-op
@@ -144,7 +148,11 @@ fn main() -> Unit = {
   // Deep chain over a scalar root:
   p_set(
     "av_deep",
-    value.set_path(int42, value.key(value.key(value.key(value.root(), "x"), "y"), "z"), value.int(1)),
+    value.set_path(
+      int42,
+      value.key(value.key(value.key(value.root(), "x"), "y"), "z"),
+      value.int(1),
+    ),
   )
   // {"x":{"y":{"z":1}}}
   // Field AFTER Index over an int element (a[1]=7 autovivifies to {"z":3}):
@@ -155,19 +163,31 @@ fn main() -> Unit = {
   let oa_inner = value.object([("a", inner)])
   p_set(
     "av_after_idx",
-    value.set_path(oa_inner, value.key(value.index(value.key(value.root(), "a"), 1), "z"), value.int(3)),
+    value.set_path(
+      oa_inner,
+      value.key(value.index(value.key(value.root(), "a"), 1), "z"),
+      value.int(3),
+    ),
   )
   // {"a":[{},{"z":3}]}
   // Field-THEN-Index over an autovivified node: Index local no-op yields the
   // autoviv `{}` (NOT the untouched root, NOT null):
   p_set(
     "av_field_idx",
-    value.set_path(int42, value.key(value.index(value.key(value.root(), "x"), 0), "y"), value.int(1)),
+    value.set_path(
+      int42,
+      value.key(value.index(value.key(value.root(), "x"), 0), "y"),
+      value.int(1),
+    ),
   )
   // {"x":{}}
   p_set(
     "av_idx_field2",
-    value.set_path(int42, value.index(value.key(value.key(value.root(), "x"), "y"), 0), value.int(1)),
+    value.set_path(
+      int42,
+      value.index(value.key(value.key(value.root(), "x"), "y"), 0),
+      value.int(1),
+    ),
   )
   // {"x":{"y":{}}}
   // Field after an OOB Index keeps the whole subtree a no-op (Index OOB wins):

@@ -78,29 +78,32 @@ fn raw() -> Bytes = bytes.from_list([
 fn zl() -> Bytes = (bytes.from_list([120, 218]) + raw()) + bytes.from_list([6, 126, 66, 40])
 
 fn gz() -> Bytes = (bytes.from_list([
-      31,
-      139,
-      8,
-      0,
-      0,
-      0,
-      0,
-      0,
-      2,
-      19
-    ]) + raw()) + bytes.from_list([
-    166,
-    223,
-    224,
-    152,
-    183,
-    0,
-    0,
-    0
-  ])
+  31,
+  139,
+  8,
+  0,
+  0,
+  0,
+  0,
+  0,
+  2,
+  19
+]) + raw()) + bytes.from_list([
+  166,
+  223,
+  224,
+  152,
+  183,
+  0,
+  0,
+  0
+])
 
 // A stored block that declares 100 bytes and holds 50.
-fn stored_cut() -> Bytes = bytes.from_list([1, 100, 0, 155, 255]) + bytes.repeat(bytes.from_list([7]), 50)
+fn stored_cut() -> Bytes = bytes.from_list([1, 100, 0, 155, 255]) + bytes.repeat(
+  bytes.from_list([7]),
+  50,
+)
 
 // The `_max` forms are plain `fn`s: callable from a pure function.
 fn bounded(f: String, b: Bytes, n: Int) -> String = match f {

@@ -1,5 +1,3 @@
-import math
-
 // trait_impl_test — Convention methods and protocols
 // ── Convention methods (fn Type.method) ──
 type Color = | Red | Green | Blue

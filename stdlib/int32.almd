@@ -87,7 +87,10 @@ local fn shift_count(n: Int) -> Int = {
 fn count_leading_zeros(x: Int32) -> Int = int.count_leading_zeros(int.band(int.__from_int32(x), 4294967295)) - 32
 
 /// Zero bits below the lowest set bit; 32 for 0.
-fn count_trailing_zeros(x: Int32) -> Int = int.min(int.count_trailing_zeros(int.__from_int32(x)), 32)
+fn count_trailing_zeros(x: Int32) -> Int = int.min(
+  int.count_trailing_zeros(int.__from_int32(x)),
+  32,
+)
 
 /// Number of set bits among the 32.
 fn count_ones(x: Int32) -> Int = int.pop_count(int.band(int.__from_int32(x), 4294967295))

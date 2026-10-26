@@ -14,18 +14,18 @@ fn main() -> Unit = {
   let mi: Map[Int, String] = [1: "one", 2: "two"]
   let ms: Map[String, String] = ["a": "x", "b": "y"]
   let go = list.get([
-      mb,
-      ["k2": true]
-    ], 1) ?? [:]
+    mb,
+    ["k2": true]
+  ], 1) ?? [:]
   println("${map.len(go)}")
   let go2 = list.get([mo, mo, mo], 2) ?? ["kx": none]
   println("${map.len(go2)}")
   let gi = list.get([mi, mi], 9) ?? [:]
   println("${map.len(gi)}")
   let gs = list.get([
-      ms,
-      ["only": "z"]
-    ], 0) ?? [:]
+    ms,
+    ["only": "z"]
+  ], 0) ?? [:]
   println(map.get(gs, "a") ?? "?")
   // the Result-element flat half: Result[<one-level-exact>, String] elements
   // (Option[Float] / scalar payloads) ride the same view + per-slot sweep
@@ -38,10 +38,10 @@ fn main() -> Unit = {
     err(e) => println(e),
   }
   let miss = list.get([
-      (if false then ra else ra),
-      ra,
-      rb
-    ], 5) ?? rd
+    (if false then ra else ra),
+    ra,
+    rb
+  ], 5) ?? rd
   match miss {
     ok(v) => println("miss-ok"),
     err(e) => println(e),
@@ -56,9 +56,9 @@ fn main() -> Unit = {
   var acc = 0
   while i < 2000 {
     let g = list.get([
-        ["kA": "vvvvvvvvvvvv"],
-        ["kB": "wwwwwwwwwwww"]
-      ], i % 3) ?? ["kZ": "z"]
+      ["kA": "vvvvvvvvvvvv"],
+      ["kB": "wwwwwwwwwwww"]
+    ], i % 3) ?? ["kZ": "z"]
     acc = acc + map.len(g)
     i = i + 1
   }

@@ -3,8 +3,6 @@
 // regenerates and diffs). Each case executes a manifest probe; a
 // failure here means the implementation drifted from the DECLARED
 // semantic dimension (#419 class).
-import env
-
 test "env.sleep_ms unit=millisecond" {
   assert_eq("${1}", "1")
 }

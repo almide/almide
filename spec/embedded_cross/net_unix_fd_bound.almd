@@ -6,7 +6,6 @@
 // wait untaken per socket; one that arrives while 28 wait is closed on
 // receipt and never held. Here 300 messages each carry one descriptor: 28
 // are taken, a file still opens, and once taken the queue has room again.
-import env
 import fs
 import io
 import random
