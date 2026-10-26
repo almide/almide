@@ -1,0 +1,26 @@
+// @contract: C-418
+// ALS-R5: error.context's label and value.field's key are escaped by C-418's
+// rule (#4126), so one that carries LF, ESC, a C1 or a bidi control reads
+// `\n`, `\u{1b}`, `\u{85}`, `\u{202e}` in the err text and cannot forge a
+// line of the `Error:` report; error.context's inner err is the program's own
+// value and is kept as it is. An ordinary label or key reads back as is. The
+// wasm leg builds both texts in the emitter itself (its `$err_text` helper);
+// the same bytes on native and wasm.
+import json
+
+fn shown[T](r: Result[T, String]) -> String = match r {
+  ok(_) => "ok",
+  err(e) => "err " + e,
+}
+
+effect fn main() -> Unit = {
+  let bad = "\n\u{1b}[2K\u{85}\u{202e}x"
+  let inner: Result[Int, String] = err("inner")
+  let fine: Result[Int, String] = ok(1)
+  let obj = json.parse("{\"a\": 1}") ?? value.null()
+  println(shown(error.context(inner, "reading " + bad)))
+  println(shown(error.context(inner, "reading a.txt")))
+  println(shown(error.context(fine, "reading " + bad)))
+  println(shown(value.field(obj, "k" + bad)))
+  println(shown(value.field(obj, "plain key")))
+}
