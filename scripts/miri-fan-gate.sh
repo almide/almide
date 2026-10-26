@@ -33,10 +33,15 @@
 #               nested inside a `fan { }` block's arms
 #   par_filter  `list.filter` / `list.any` under `fan { }` arms — the
 #               `list.par_filter` / `list.par_any` twins (almide_fan_search)
-#   min_bounded gate offers made inside `fan.min(compute…)` arms and a
-#               `fan.bounded` body (the metered race fold, once `fan.race`)
 #   fold        `fs.fold_lines_chunked`'s line-fold workers, which start
 #               through the fan arms' bounded spawn (`almide_fan_spawn`)
+#
+# `fan.min(compute…)` (the metered race fold, once `fan.race`) and
+# `fan.bounded` start no thread: they lower to sequential folds over outlined
+# regions whose bodies are PURE, and a pure body can reach no offer — a
+# `fan { }` there is E007 and `fan.map` is an effect. That is checked first
+# (`almide check` must refuse both programs below), so if either rule goes,
+# this gate goes red until those shapes join the Miri programs.
 #
 # The controls: for the gate shapes, the same crate with the caller's wait
 # for its helpers removed MUST come back UB (a helper still inside a gate
@@ -72,7 +77,7 @@ CHURN='fn churn(x: Int, k: Int) -> Int = {
 }
 '
 
-mkdir -p "$WORK/gate" "$WORK/par_filter" "$WORK/min_bounded" "$WORK/fold"
+mkdir -p "$WORK/gate" "$WORK/par_filter" "$WORK/fold"
 { echo "$CHURN"; cat <<'EOF'; } > "$WORK/gate/main.almd"
 effect fn inner(x: Int) -> Int = {
   let ys = fan.map(list.range(0, 4), (y) => ok(churn(x + y, 20)))!
@@ -100,27 +105,36 @@ effect fn main() -> Unit = {
   println("kept=" + int.to_string(list.len(kept)) + " any=" + (if hit then "yes" else "no"))
 }
 EOF
-{ echo "$CHURN"; cat <<'EOF'; } > "$WORK/min_bounded/main.almd"
-fn inner(x: Int) -> Int = {
-  let (a, b) = fan {
-    list.filter(list.range(0, 12), (y) => churn(x + y, 20) % 2 == 0),
-    list.filter(list.range(0, 12), (y) => churn(x + y, 10) % 3 == 0),
-  }
-  list.len(a) + list.len(b)
-}
-
+# fan.min / fan.bounded: an offer inside their pure bodies must be refused
+for form in block map; do
+  case $form in
+    block) inner='  let (a, b) = fan { list.filter(list.range(0, 12), (y) => churn(x + y, 20) % 2 == 0), list.filter(list.range(0, 12), (y) => y > x) }
+  list.len(a) + list.len(b)' ;;
+    map) inner='  let ys = fan.map(list.range(0, 12), (y) => ok(churn(x + y, 20))) ?? []
+  list.len(ys)' ;;
+  esac
+  mkdir -p "$WORK/min_bounded_$form"
+  { echo "$CHURN"; printf 'fn inner(x: Int) -> Int = {\n%s\n}\n\n' "$inner"; cat <<'EOF'; } > "$WORK/min_bounded_$form/main.almd"
 effect fn main() -> Unit = {
   let w = fan.min(compute.ms(50)) { inner(1), inner(2) } ?? -1
   let r = fan.bounded(compute.ms(50)) { inner(3) } ?? -1
   println("min=" + int.to_string(w) + " bounded=" + int.to_string(r))
 }
 EOF
+  if (cd "$WORK/min_bounded_$form" && "$ALMIDE_BIN" check main.almd) >"$WORK/min_bounded_$form/check.log" 2>&1 \
+    || ! grep -q 'can only be used inside an effect fn' "$WORK/min_bounded_$form/check.log"; then
+    echo "::error::miri-fan-gate: a fan offer ($form form) inside a fan.min / fan.bounded body is no longer refused (\"can only be used inside an effect fn\") — those shapes may reach the fan gate and must join the Miri programs"
+    cat "$WORK/min_bounded_$form/check.log"
+    exit 1
+  fi
+  echo "min_bounded ($form): refused, \"$(grep -m1 -o '[^:]*can only be used inside an effect fn' "$WORK/min_bounded_$form/check.log")\" — fan.min / fan.bounded start no thread"
+done
 cat > "$WORK/fold/main.almd" <<'EOF'
 import fs
 
 effect fn main() -> Unit = {
   let text = list.range(0, 40) |> list.map((i) => "line " + int.to_string(i)) |> list.join("\n")
-  fs.write_text("fold.txt", text + "\n")!
+  fs.write("fold.txt", text + "\n")!
   let parts = fs.fold_lines_chunked("fold.txt", 4, 0, (acc, line) => acc + string.len(line))!
   println("parts=" + int.to_string(list.len(parts)) + " total=" + int.to_string(list.fold(parts, 0, (a, b) => a + b)))
 }
@@ -131,11 +145,10 @@ EOF
 declare -A NEEDS=(
   [gate]='almide_rt_fan_map_par(|fn almide_fan_deal|fn almide_fan_steal'
   [par_filter]='almide_rt_list_par_filter(|almide_rt_list_par_any(|fn almide_fan_deal'
-  [min_bounded]='almide_rt_list_par_filter(|__almd_bounded_|fn almide_fan_deal'
   [fold]='almide_rt_fs_fold_lines_chunked(|fn almide_fan_spawn'
 )
-declare -A CONTROL=([gate]=wait [par_filter]=wait [min_bounded]=wait [fold]=race)
-SHAPES="${MIRI_SHAPES:-gate par_filter min_bounded fold}"
+declare -A CONTROL=([gate]=wait [par_filter]=wait [fold]=race)
+SHAPES="${MIRI_SHAPES:-gate par_filter fold}"
 
 miri() { # dir rate
   (cd "$1" && ALMIDE_FAN_COST_OFF=1 \
