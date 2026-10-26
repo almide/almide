@@ -159,25 +159,25 @@ fn next_power_of_two(x: Int) -> Int = _
 @intrinsic("almide_rt_int_prev_power_of_two")
 fn prev_power_of_two(x: Int) -> Int = _
 
-// ── Wrapping / masking ──
-/// (a + b) mod 2^bits, non-negative when bits < 64.
+// ── Wrapping and rotation over the 64-bit register (R-int-12) ──
+// An N-bit register composes with int.wrap: int.wrap(int.wrap_add(a, b), bits).
+/// a + b wrapped to 64 bits.
 @intrinsic("almide_rt_int_wrap_add")
-fn wrap_add(a: Int, b: Int, bits: Int) -> Int = _
+fn wrap_add(a: Int, b: Int) -> Int = _
 
-/// (a * b) mod 2^bits, non-negative when bits < 64.
+/// a * b wrapped to 64 bits.
 @intrinsic("almide_rt_int_wrap_mul")
-fn wrap_mul(a: Int, b: Int, bits: Int) -> Int = _
+fn wrap_mul(a: Int, b: Int) -> Int = _
 
-// The count is reduced into [0, bits) Euclidean-ly: a negative count rotates
-// the other way (#2492, C-358). bits <= 0 aborts (C-047), bits >= 64
-// saturates the mask (C-048).
-/// Low bits of a rotated right by n mod bits; bits <= 0 aborts.
+// The count is reduced into [0, 64) Euclidean-ly: a negative count rotates
+// the other way (#2492, C-358).
+/// The 64 bits of a rotated right by n; n is taken mod 64.
 @intrinsic("almide_rt_int_rotate_right")
-fn rotate_right(a: Int, n: Int, bits: Int) -> Int = _
+fn rotate_right(a: Int, n: Int) -> Int = _
 
-/// Low bits of a rotated left by n mod bits; bits <= 0 aborts.
+/// The 64 bits of a rotated left by n; n is taken mod 64.
 @intrinsic("almide_rt_int_rotate_left")
-fn rotate_left(a: Int, n: Int, bits: Int) -> Int = _
+fn rotate_left(a: Int, n: Int) -> Int = _
 
 /// Low 32 bits as unsigned; -1 becomes 4294967295.
 @intrinsic("almide_rt_int_to_u32")
@@ -379,7 +379,7 @@ else if bits >= 64 then x
 else int.band(x, int.bnot(int.bshl(-1, bits)))
 
 /// a - b wrapped to 64 bits.
-fn wrap_sub(a: Int, b: Int) -> Int = int.wrap_add(int.wrap_add(a, int.bnot(b), 64), 1, 64)
+fn wrap_sub(a: Int, b: Int) -> Int = int.wrap_add(int.wrap_add(a, int.bnot(b)), 1)
 
 /// Zero-filling right shift of the 64 bits; n is taken mod 64.
 fn bshr_logical(a: Int, n: Int) -> Int = {

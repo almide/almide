@@ -784,26 +784,25 @@ evidence  = [
   { path = "spec/wasm_cross/cross_module_spread.almd", class = "fixture" },
 ]
 
-# ── NUMERIC TOTALITY: pow / rotate (Cluster-2) ───────────────────────
+# ── NUMERIC TOTALITY: pow (Cluster-2) ───────────────────────────────
 [[contract]]
 id        = "C-047"
 spec      = "ALS-T6"
-title     = "math.pow negative exponent and rotate non-positive width are total — they abort, never trap/wrap"
-statement = "`math.pow(base, exp)` with a NEGATIVE exponent aborts with stderr `Error: negative exponent` + exit 1 on BOTH targets (never the old native `exp as u32` u32-wrap garbage nor the wasm `return 1`); `int.rotate_left`/`rotate_right` with a non-positive `bits` width abort with `Error: rotate width must be positive` + exit 1 (never a native rem-by-zero panic exit 101 nor a wasm `i64.rem_s` trap exit 134). Non-negative pow stays byte-identical including overflow, which wraps under exponentiation-by-squaring (`2^64=0`, `0^0=1`, exponents `>= 2^32` define the full i64 count and never hang)."
+title     = "math.pow with a negative exponent is total — it aborts, never traps or wraps"
+statement = "`math.pow(base, exp)` with a NEGATIVE exponent aborts with stderr `Error: negative exponent` + exit 1 on BOTH targets (never the old native `exp as u32` u32-wrap garbage nor the wasm `return 1`). Non-negative pow stays byte-identical including overflow, which wraps under exponentiation-by-squaring (`2^64=0`, `0^0=1`, exponents `>= 2^32` define the full i64 count and never hang)."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
   { path = "spec/wasm_cross/int_pow_negative_exponent.almd", class = "fixture" },
   { path = "spec/wasm_cross/int_pow_overflow_wraps.almd", class = "fixture" },
-  { path = "spec/wasm_cross/int_rotate_nonpositive_width.almd", class = "fixture" },
 ]
 
-# ── NUMERIC WRAP/ROTATE WIDTH MASK (Cluster-2) ───────────────────────
+# ── NUMERIC WRAP/ROTATE 64-BIT REGISTER (Cluster-2) ─────────────────
 [[contract]]
 id        = "C-048"
 spec      = "ALS-T14"
-title     = "int.wrap_* / int.rotate_* saturate the mask to u64::MAX for bits >= 64"
-statement = "`int.wrap_add`/`wrap_mul`/`rotate_left`/`rotate_right` model an N-bit register: for `bits >= 64` the low-bit mask is `u64::MAX`, matching native `if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 }`. The wasm emit computed `(1 << bits) - 1` directly, but `i64.shl` masks the shift amount mod 64 so `1 << 64` wrapped to 1 and the mask collapsed to 0 — every `bits >= 64` result silently diverged. Now byte-identical native == wasm via a `bits >= 64 ? -1 : (1<<bits)-1` select."
+title     = "int.wrap_* / int.rotate_* run on the 64-bit register and int.wrap saturates its mask for bits >= 64"
+statement = "`int.wrap_add`/`wrap_mul`/`rotate_left`/`rotate_right` take no width (R-int-12): they wrap and rotate the 64-bit Int itself, byte-identically native == wasm (`int.wrap_add(int.max_value(), 1)` = `int.min_value()`, `int.rotate_left(1, 63)` = `int.min_value()`, `int.rotate_left(1, 64)` = 1). An N-bit register composes with `int.wrap(x, bits)`, whose mask for `bits >= 64` saturates to `u64::MAX` and keeps `x` (`int.wrap(-1, 100)` = -1), never a `1 << bits` that `i64.shl` masks mod 64 into a zero mask (the old wasm emit's divergence); below 64 it is the non-negative low `bits` bits (`int.wrap(int.wrap_add(65535, 2), 16)` = 1)."
 since     = "0.24.0"
 status    = "active"
 evidence  = [
@@ -4732,7 +4731,7 @@ evidence  = [
 id        = "C-358"
 spec      = "ALS-T19"
 title     = "float.round, math.choose, int.rotate_* and math.log_gamma are exact over their whole domain on every leg"
-statement = "Four scalar cells that were only right on part of their domain are exact everywhere, byte-identically on native and both wasm legs. `float.round` is native `f64::round` — round half away from zero on the TRUE value — so `round(0.49999999999999994)` is `0.0`, `round(-0.49999999999999994)` is `-0.0` and an odd integer at or above 2^52 is unchanged (#2477; the self-hosted `floor(x + 0.5)` rounded the sum first). `math.choose(n, k)` is the exact binomial coefficient whenever it fits in an Int and its two's-complement wrap mod 2^64 (C-170) when it does not (`choose(62, 31)` = 465428353255261088, `choose(67, 33)` = C(67,33) - 2^64; #2491: the running product overflowed before it divided), computed on every leg by the same power-of-two count plus odd-part product with a Newton inverse mod 2^64. `int.rotate_left` / `rotate_right` reduce the count into `[0, bits)` Euclidean-ly, so a negative count rotates the other way (`rotate_left(1, -1, 8)` = 128; #2492: `(n % bits) as u32` made every negative count an over-wide shift that returned 0); the width rules C-047 / C-048 are unchanged. `math.log_gamma` is `ln|Γ(x)|` on the whole real line: below 0.5 the reflection formula `ln(π / |sin(πx)|) - ln Γ(1 - x)` (with `|sin(πx)|` on the reduced fraction) carries the work to the Lanczos series, the non-positive integers and ±inf give `+inf`, NaN stays NaN (#2493: the series alone gave NaN at -0.5 and +inf at -6.5); the `sin` and `log` are the vendored musl-libm on every leg, so C-051's bit-identity holds over the extended domain."
+statement = "Four scalar cells that were only right on part of their domain are exact everywhere, byte-identically on native and both wasm legs. `float.round` is native `f64::round` — round half away from zero on the TRUE value — so `round(0.49999999999999994)` is `0.0`, `round(-0.49999999999999994)` is `-0.0` and an odd integer at or above 2^52 is unchanged (#2477; the self-hosted `floor(x + 0.5)` rounded the sum first). `math.choose(n, k)` is the exact binomial coefficient whenever it fits in an Int and its two's-complement wrap mod 2^64 (C-170) when it does not (`choose(62, 31)` = 465428353255261088, `choose(67, 33)` = C(67,33) - 2^64; #2491: the running product overflowed before it divided), computed on every leg by the same power-of-two count plus odd-part product with a Newton inverse mod 2^64. `int.rotate_left` / `rotate_right` reduce the count into `[0, 64)` Euclidean-ly, so a negative count rotates the other way (`rotate_left(1, -1)` = `int.min_value()`; #2492: `(n % bits) as u32` made every negative count an over-wide shift that returned 0); the register is the 64-bit Int (C-048). `math.log_gamma` is `ln|Γ(x)|` on the whole real line: below 0.5 the reflection formula `ln(π / |sin(πx)|) - ln Γ(1 - x)` (with `|sin(πx)|` on the reduced fraction) carries the work to the Lanczos series, the non-positive integers and ±inf give `+inf`, NaN stays NaN (#2493: the series alone gave NaN at -0.5 and +inf at -6.5); the `sin` and `log` are the vendored musl-libm on every leg, so C-051's bit-identity holds over the extended domain."
 since     = "0.63.0"
 status    = "active"
 evidence  = [

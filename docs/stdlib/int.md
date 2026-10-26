@@ -215,54 +215,58 @@ fn main() -> Unit = {
 -1
 ```
 
-### `int.wrap_add(a: Int, b: Int, bits: Int) -> Int`
+### `int.wrap_add(a: Int, b: Int) -> Int`
 
-Wrapping addition within a given bit width. Overflow wraps around.
+Wrapping addition over the 64-bit Int: overflow wraps around. For an N-bit
+register, compose with `int.wrap`: `int.wrap(int.wrap_add(a, b), bits)`.
 
 ```almd run
 fn main() -> Unit = {
-  println("${int.wrap_add(255, 1, 8)}")
+  println("${int.wrap_add(int.max_value(), 1)}")
+  println("${int.wrap(int.wrap_add(255, 1), 8)}")
+}
+```
+```output
+-9223372036854775808
+0
+```
+
+### `int.wrap_mul(a: Int, b: Int) -> Int`
+
+Wrapping multiplication over the 64-bit Int: overflow wraps around. For an
+N-bit register, compose with `int.wrap`.
+
+```almd run
+fn main() -> Unit = {
+  println("${int.wrap(int.wrap_mul(16, 16), 8)}")
 }
 ```
 ```output
 0
 ```
 
-### `int.wrap_mul(a: Int, b: Int, bits: Int) -> Int`
+### `int.rotate_right(a: Int, n: Int) -> Int`
 
-Wrapping multiplication within a given bit width. Overflow wraps around.
+Rotate the 64 bits of `a` right. The count `n` is taken modulo 64
+(Euclidean), so a negative count rotates left: `rotate_right(1, -1) = 2`.
 
 ```almd run
 fn main() -> Unit = {
-  println("${int.wrap_mul(16, 16, 8)}")
+  println("${int.rotate_right(4, 1)}")
 }
 ```
 ```output
-0
+2
 ```
 
-### `int.rotate_right(a: Int, n: Int, bits: Int) -> Int`
+### `int.rotate_left(a: Int, n: Int) -> Int`
 
-Rotate bits right within a given bit width. The count `n` is taken modulo `bits`
-(Euclidean), so a negative count rotates left: `rotate_right(1, -1, 8) = 2`.
+Rotate the 64 bits of `a` left. The count `n` is taken modulo 64
+(Euclidean), so a negative count rotates right: `rotate_left(2, -1) = 1`.
 
 ```almd run
 fn main() -> Unit = {
-  println("${int.rotate_right(1, 1, 8)}")
-}
-```
-```output
-128
-```
-
-### `int.rotate_left(a: Int, n: Int, bits: Int) -> Int`
-
-Rotate bits left within a given bit width. The count `n` is taken modulo `bits`
-(Euclidean), so a negative count rotates right: `rotate_left(1, -1, 8) = 128`.
-
-```almd run
-fn main() -> Unit = {
-  println("${int.rotate_left(128, 1, 8)}")
+  println("${int.rotate_left(int.min_value(), 1)}")
 }
 ```
 ```output

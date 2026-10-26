@@ -1,24 +1,31 @@
 // @contract: C-048
-// `int.wrap_add`/`wrap_mul`/`rotate_*` model an N-bit register; for `bits >= 64`
-// the mask saturates to u64::MAX (`if bits >= 64 { u64::MAX } else { (1<<bits)-1 }`).
+// `int.wrap_add`/`wrap_mul`/`rotate_*` take no width: they work on the 64-bit
+// register (R-int-12). An N-bit register composes with `int.wrap(x, bits)`, whose
+// mask saturates for `bits >= 64` (`if bits >= 64 { u64::MAX } else { (1<<bits)-1 }`).
 // The wasm emit used to compute `(1 << bits) - 1` directly, and `i64.shl` masks
 // the shift amount mod 64, so `1 << 64` wrapped to 1 and the mask collapsed to 0
 // — every `bits >= 64` result silently became garbage. Now byte-identical.
 fn main() -> Unit = {
-  println(int.to_string(int.rotate_left(1, 1, 63)))
+  println(int.to_string(int.rotate_left(1, 1)))
   // 2
-  println(int.to_string(int.rotate_left(1, 1, 64)))
-  // 2  (was wasm 0)
-  println(int.to_string(int.rotate_left(1, 1, 65)))
-  // 3  (was wasm 1)
-  println(int.to_string(int.rotate_right(8, 1, 64)))
+  println(int.to_string(int.rotate_left(1, 63)))
+  // -9223372036854775808
+  println(int.to_string(int.rotate_left(1, 64)))
+  // 1
+  println(int.to_string(int.rotate_right(8, 1)))
   // 4
-  println(int.to_string(int.wrap_mul(3, 3, 64)))
-  // 9  (was wasm 0)
-  println(int.to_string(int.wrap_mul(7, 7, 8)))
+  println(int.to_string(int.wrap_mul(3, 3)))
+  // 9
+  println(int.to_string(int.wrap(int.wrap_mul(7, 7), 8)))
   // 49
-  println(int.to_string(int.wrap_add(1, 1, 100)))
-  // 2
+  println(int.to_string(int.wrap_add(int.max_value(), 1)))
+  // -9223372036854775808
+  println(int.to_string(int.wrap(int.wrap_add(65535, 2), 16)))
   // 1  (16-bit wrap)
-  println(int.to_string(int.wrap_add(65535, 2, 16)))
+  println(int.to_string(int.wrap(-1, 63)))
+  // 9223372036854775807
+  println(int.to_string(int.wrap(-1, 64)))
+  // -1  (mask saturates)
+  println(int.to_string(int.wrap(-1, 100)))
+  // -1  (was wasm 0)
 }
