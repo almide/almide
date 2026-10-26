@@ -129,9 +129,9 @@ fn get_object(v: Value, key: String) -> List[(String, Value)]? = match value.get
 // ── paths (R-value-03) ──
 // A path is its steps from the root: (true, name, 0) is the key `name` and
 // (false, "", i) the array index i. A negative index is out of range — it does
-// not count from the end — so it never matches. Pure Almide over `get` /
-// `as_array` / `as_object` and the constructors, so every target walks the
-// same code.
+// not count from the end — so it never matches. get_path / remove_path are
+// pure Almide over `get` / `as_array` / `as_object` and the constructors;
+// set_path's walk is the native runtime's, in place (`__set_path_steps`).
 /// A path into a Value: key and index steps from the root.
 mod type Path = List[(Bool, String, Int)]
 
@@ -155,19 +155,22 @@ fn get_path(v: Value, p: Path) -> Value? = match p {
 
 /// v with x at p; missing keys are created, a missed index leaves v as is; err when the result would nest past 1000.
 fn set_path(v: Value, p: Path, x: Value) -> Result[Value, String] = match p {
-  Path(steps) => if list.len(steps) > 1000 or __nests_past(x, 1000 - list.len(steps)) then err("json: nesting deeper than 1000")
-  else ok(__set_steps(v, steps, 0, x))
+  Path(steps) => value.__set_path_steps(v, steps, x)
 }
 
-// x holds containers nested more than `budget` deep — json.parse's bound
-// (#4209), so a value set_path builds is one parse could have made.
-local fn __nests_past(x: Value, budget: Int) -> Bool = match value.as_array(x) {
-  ok(xs) => budget == 0 or list.any(xs, (e) => __nests_past(e, budget - 1)),
-  err(_) => match value.as_object(x) {
-    ok(kvs) => budget == 0 or list.any(kvs, (kv) => __nests_past(kv.1, budget - 1)),
-    err(_) => false,
-  },
-}
+// set_path's walk (#4207). The runtime takes v BY VALUE (`@consume`), so a
+// document at its last use — the accumulator of a fold of set_path calls —
+// is updated in place: only the path is walked, every untouched sibling stays
+// where it is. A rebuild per call (copy the pairs, map them, wrap them again)
+// made a fold of n calls copy n² nodes. A v still read afterwards is cloned
+// at the call site, which is what the rebuild cost anyway. The runtime also
+// holds the nesting bound (#4209, C-433): a result nested past 1000 — the
+// path's steps plus x's own nesting — is json.parse's err, so a value
+// set_path builds is one parse could have made. The wasm leg and the interp
+// oracle run stdlib/json_path.almd's `value.set_path` body instead.
+@intrinsic("almide_rt_value_set_path")
+@consume(v, x)
+fn __set_path_steps(v: Value, steps: List[(Bool, String, Int)], x: Value) -> Result[Value, String] = _
 
 /// v minus the entry at p; unchanged if absent; null for the root.
 fn remove_path(v: Value, p: Path) -> Value = match p {
@@ -190,33 +193,6 @@ local fn __get_steps(v: Value, steps: List[(Bool, String, Int)], k: Int) -> Valu
   some(step) => match __step_at(v, step) {
     some(child) => __get_steps(child, steps, k + 1),
     none => none,
-  },
-}
-
-local fn __set_steps(v: Value, steps: List[(Bool, String, Int)], k: Int, x: Value) -> Value = match list.get(
-  steps,
-  k,
-) {
-  none => x,
-  some((true, name, _)) => match value.as_object(v) {
-    ok(pairs) => if list.any(pairs, ((pk, _)) => pk == name) then value.object(list.map(
-      pairs,
-      ((pk, pv)) => if pk == name then (pk, __set_steps(pv, steps, k + 1, x))
-      else (pk, pv),
-    ))
-    else value.object(pairs + [
-      (name, __set_steps(value.object([]), steps, k + 1, x))
-    ]),
-    err(_) => value.object([
-      (name, __set_steps(value.object([]), steps, k + 1, x))
-    ]),
-  },
-  some((false, _, i)) => match value.as_array(v) {
-    ok(xs) => match list.get(xs, i) {
-      some(child) => value.array(list.set(xs, i, __set_steps(child, steps, k + 1, x))),
-      none => v,
-    },
-    err(_) => v,
   },
 }
 

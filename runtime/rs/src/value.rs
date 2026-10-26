@@ -1,6 +1,12 @@
 // AlmideValue — universal data model for Codec protocol
 // All public functions use `almide_rt_` prefix for consistent codegen dispatch.
 
+// The nesting bound (#4020 / #4209): JSON_MAX_DEPTH and json_depth_error(),
+// declared once for every leg. Spliced HERE, not in json.rs: value.set_path
+// holds it too and links without json.rs, while json.rs always pulls this
+// module in (it names AlmideValue), so both read the one copy.
+include!("../../../crates/almide-base/src/json_limits.rs");
+
 /// An object key (#1679). The keys of every document a program parses come
 /// from a small fixed vocabulary — the field names of its types — so they are
 /// interned: the first sighting fills one slot of a fixed table, every later
@@ -406,6 +412,63 @@ pub fn almide_rt_value_merge(a: &AlmideValue, b: &AlmideValue) -> AlmideValue {
             AlmideValue::Object(out)
         }
         (_, b) => b.clone(),
+    }
+}
+
+/// `value.set_path` (stdlib/value.almd's `__set_path_steps`, #4207): `v` with
+/// `x` at the path `steps` — `(true, name, _)` a key step, `(false, _, i)` an
+/// index step. `v` and `x` are taken BY VALUE (`@consume`), so a document at
+/// its last use is updated IN PLACE: only the path is walked, every untouched
+/// sibling stays where it is, and a fold of n calls is n walks instead of n
+/// whole-document copies. The answer is the self-hosted walk's
+/// (stdlib/json_path.almd, the wasm leg and the interp oracle; C-090): a key
+/// step over a non-Object replaces it with an Object holding just that key, a
+/// missing key is appended holding `{}` for the steps below it, an index step
+/// that misses — a negative index, one past the end, a non-Array — leaves the
+/// value as is (the keys created above it stay). A result nested past
+/// JSON_MAX_DEPTH — the path's steps plus `x`'s own nesting — is
+/// `json_depth_error()` (#4209, C-433), checked before anything is touched.
+pub fn almide_rt_value_set_path(v: AlmideValue, steps: &[(bool, AlmideString, i64)], x: AlmideValue) -> Result<AlmideValue, AlmideString> {
+    if steps.len() > JSON_MAX_DEPTH || almide_rt_value_nests_past(&x, JSON_MAX_DEPTH - steps.len()) {
+        return Err(json_depth_error().into());
+    }
+    let mut root = v;
+    let mut cur: &mut AlmideValue = &mut root;
+    for (is_key, name, i) in steps {
+        if *is_key {
+            if !matches!(cur, AlmideValue::Object(_)) {
+                *cur = AlmideValue::Object(Vec::new());
+            }
+            let AlmideValue::Object(entries) = cur else { unreachable!() };
+            // No Object holds a key twice (C-401), so the first match is the one.
+            let at = match entries.iter().position(|(k, _)| k.as_ref() == name.as_str()) {
+                Some(at) => at,
+                None => {
+                    entries.push((almide_rt_intern_key(name.as_str()), AlmideValue::Object(Vec::new())));
+                    entries.len() - 1
+                }
+            };
+            cur = &mut entries[at].1;
+        } else {
+            match cur {
+                AlmideValue::Array(items) if usize::try_from(*i).is_ok_and(|at| at < items.len()) => {
+                    cur = &mut items[*i as usize];
+                }
+                _ => return Ok(root),
+            }
+        }
+    }
+    *cur = x;
+    Ok(root)
+}
+
+/// `v` holds containers nested more than `budget` deep. Recurses at most
+/// `budget + 1` frames whatever `v` holds.
+fn almide_rt_value_nests_past(v: &AlmideValue, budget: usize) -> bool {
+    match v {
+        AlmideValue::Array(items) => budget == 0 || items.iter().any(|x| almide_rt_value_nests_past(x, budget - 1)),
+        AlmideValue::Object(entries) => budget == 0 || entries.iter().any(|(_, x)| almide_rt_value_nests_past(x, budget - 1)),
+        _ => false,
     }
 }
 

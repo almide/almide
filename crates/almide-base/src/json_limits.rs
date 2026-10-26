@@ -1,6 +1,6 @@
 // json_limits (#4020 / #4209, R-json-04, R-L0-47): the JSON value domain's
 // nesting bound — the ONE declaration every leg reads. The native runtime
-// splices this file into runtime/rs/src/json.rs (`include!`), the
+// splices this file into runtime/rs/src/value.rs (`include!`), the
 // structural wasm leg reads it as `almide_base::json_limits`, and the
 // self-hosted stdlib/json_parse.almd + stdlib/json_path.almd bodies (the
 // wasm parse and the interp oracle) carry it as a literal that

@@ -2,8 +2,9 @@
 // AlmideValue type is defined in value.rs (included before this file)
 
 // The nesting bound (#4020 / #4209): JSON_MAX_DEPTH and json_depth_error(),
-// declared once for every leg.
-include!("../../../crates/almide-base/src/json_limits.rs");
+// declared once for every leg, are spliced into value.rs (value.set_path
+// holds the same bound and links without this module; this one always pulls
+// value.rs in).
 
 // ── Parse + Stringify ──
 
