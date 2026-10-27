@@ -254,6 +254,7 @@ spec/wasm_cross/ctor_scalar_call_payload.almd
 spec/wasm_cross/ctor_turbofish_family.almd
 spec/wasm_cross/ctor_var_copy_semantics.almd
 spec/wasm_cross/datetime_format.almd
+spec/wasm_cross/datetime_from_parts_strict.almd
 spec/wasm_cross/datetime_monotonic_ns.almd
 spec/wasm_cross/datetime_parse_iso_strict.almd
 spec/wasm_cross/datetime_parse_iso_year_range.almd
@@ -299,9 +300,11 @@ spec/wasm_cross/endian_explicit_import.almd
 spec/wasm_cross/enumerate_unnameable_element.almd
 spec/wasm_cross/env_args.almd
 spec/wasm_cross/env_platform_reporting.almd
+spec/wasm_cross/env_secret.almd
 spec/wasm_cross/env_set_overlay.almd
 spec/wasm_cross/env_set_refusal.almd
 spec/wasm_cross/env_sleep_pause.almd
+spec/wasm_cross/env_vars_remove.almd
 spec/wasm_cross/err_arm_takes_let_match_type.almd
 spec/wasm_cross/err_text_operand_escape_families.almd
 spec/wasm_cross/error_operators.almd
@@ -543,6 +546,7 @@ spec/wasm_cross/licm_mut_param_named_call.almd
 spec/wasm_cross/licm_zero_trip_hoist.almd
 spec/wasm_cross/list_arg_map_view.almd
 spec/wasm_cross/list_call_element.almd
+spec/wasm_cross/list_chunk_negative.almd
 spec/wasm_cross/list_chunk_windows.almd
 spec/wasm_cross/list_chunk_zero.almd
 spec/wasm_cross/list_comprehensive.almd
@@ -717,6 +721,7 @@ spec/wasm_cross/nan_canonical_bytes_set_write.almd
 spec/wasm_cross/nan_canonical_bytes_write.almd
 spec/wasm_cross/nan_canonical_observation.almd
 spec/wasm_cross/native_wall_shapes.almd
+spec/wasm_cross/negative_count_rule.almd
 spec/wasm_cross/negative_float_literal_sized.almd
 spec/wasm_cross/negative_offset_and_width_totality.almd
 spec/wasm_cross/nested_box_guard_binder.almd
