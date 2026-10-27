@@ -770,11 +770,6 @@ class = "legacy"
 names = 44
 
 [[site]]
-id = "crates/almide-types/src/stdlib_info.rs::STDLIB_OWNED_TYPES::table"
-class = "legacy"
-names = 16
-
-[[site]]
 id = "crates/almide-types/src/stdlib_info.rs::TIER1_ALWAYS_ACCESSIBLE::table"
 class = "legacy"
 names = 11
