@@ -39,6 +39,27 @@ struct Run {
     stderr: String,
     /// `budget type_size … work=N`.
     type_work: u64,
+    /// `budget exhaustiveness_steps … work=N`.
+    match_work: u64,
+}
+
+impl Run {
+    fn work(&self, budget: &str) -> u64 {
+        match budget {
+            "type_size" => self.type_work,
+            "exhaustiveness_steps" => self.match_work,
+            other => panic!("no work column for {other}"),
+        }
+    }
+}
+
+fn work_of(stderr: &str, budget: &str) -> u64 {
+    stderr
+        .lines()
+        .find(|l| l.starts_with(&format!("budget {budget} ")))
+        .and_then(|l| l.split_whitespace().find_map(|f| f.strip_prefix("work=")))
+        .and_then(|n| n.parse().ok())
+        .unwrap_or_else(|| panic!("no `budget {budget}` report line:\n{stderr}"))
 }
 
 fn scratch(name: &str, text: &str) -> PathBuf {
@@ -75,13 +96,9 @@ fn check(name: &str, text: &str, extra: &[&str]) -> Run {
     };
     let mut stderr = String::new();
     child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
-    let type_work = stderr
-        .lines()
-        .find(|l| l.starts_with("budget type_size "))
-        .and_then(|l| l.split_whitespace().find_map(|f| f.strip_prefix("work=")))
-        .and_then(|n| n.parse().ok())
-        .unwrap_or_else(|| panic!("no `budget type_size` report line:\n{stderr}"));
-    Run { ok: status.success(), stderr, type_work }
+    let type_work = work_of(&stderr, "type_size");
+    let match_work = work_of(&stderr, "exhaustiveness_steps");
+    Run { ok: status.success(), stderr, type_work, match_work }
 }
 
 /// #4114: `let t(i) = (t(i-1), t(i-1))`.
@@ -119,6 +136,27 @@ fn wide_match(width: usize) -> String {
     )
 }
 
+/// A tuple of `Bool`s whose rows name both constructors in every column:
+/// the witness search branches twice per column (Maranget's worst case).
+fn bool_matrix(width: usize) -> String {
+    let params: Vec<String> = (0..width).map(|i| format!("x{i}: Bool")).collect();
+    let subject: Vec<String> = (0..width).map(|i| format!("x{i}")).collect();
+    let mut arms = String::new();
+    for (k, val) in ["true", "false"].iter().enumerate() {
+        for i in 0..width {
+            let row: Vec<&str> = (0..width).map(|j| if j == i { *val } else { "_" }).collect();
+            arms.push_str(&format!("  ({}) => {},\n", row.join(", "), k * width + i));
+        }
+    }
+    let args: Vec<&str> = (0..width).map(|_| "true").collect();
+    format!(
+        "fn f({}) -> Int = match ({}) {{\n{arms}}}\n\neffect fn main() -> Unit = println(\"${{f({})}}\")\n",
+        params.join(", "),
+        subject.join(", "),
+        args.join(", "),
+    )
+}
+
 /// A long interpolation chain.
 fn interpolation(parts: usize) -> String {
     let body: String = (0..parts).map(|i| format!("${{a}}-{i}")).collect();
@@ -132,22 +170,22 @@ fn nesting(depth: usize) -> String {
 
 /// The gate's predicate over one generator: every size ends in `verdict`
 /// (checked by the caller's closure) and the counted work is linear.
-fn assert_linear(shape: &str, sizes: &[usize], gen: impl Fn(usize) -> String, extra: &[&str], verdict: impl Fn(usize, &Run)) {
+fn assert_linear(shape: &str, budget: &str, sizes: &[usize], gen: impl Fn(usize) -> String, extra: &[&str], verdict: impl Fn(usize, &Run)) {
     let mut prev: Option<(usize, u64)> = None;
     for &n in sizes {
         let run = check(&format!("{shape}-{n}.almd"), &gen(n), extra);
         verdict(n, &run);
         if let Some((pn, pw)) = prev {
-            let per_unit = run.type_work.max(1) as f64 / n as f64;
+            let per_unit = run.work(budget).max(1) as f64 / n as f64;
             let prev_per_unit = pw.max(1) as f64 / pn as f64;
             assert!(
                 per_unit <= LINEAR_SLACK * prev_per_unit,
-                "{shape}: counted work is not linear in the source — {pw} at size {pn}, {} at size {n} ({:.1}× per unit)",
-                run.type_work,
+                "{shape}: counted {budget} work is not linear in the source — {pw} at size {pn}, {} at size {n} ({:.1}× per unit)",
+                run.work(budget),
                 per_unit / prev_per_unit,
             );
         }
-        prev = Some((n, run.type_work));
+        prev = Some((n, run.work(budget)));
     }
 }
 
@@ -164,22 +202,34 @@ fn ends_clean(shape: &'static str) -> impl Fn(usize, &Run) {
 
 #[test]
 fn the_doubling_chain_ends_in_e111_with_linear_work() {
-    assert_linear("doubling", &[16, 32, 64, 128], doubling, &[], ends_in_e111("doubling"));
+    assert_linear("doubling", "type_size", &[16, 32, 64, 128], doubling, &[], ends_in_e111("doubling"));
 }
 
 #[test]
 fn the_generic_doubling_ends_in_e111_with_linear_work() {
-    assert_linear("generic-doubling", &[16, 32, 64, 128], generic_doubling, &[], ends_in_e111("generic doubling"));
+    assert_linear("generic-doubling", "type_size", &[16, 32, 64, 128], generic_doubling, &[], ends_in_e111("generic doubling"));
 }
 
 #[test]
 fn a_wide_match_checks_with_linear_work() {
-    assert_linear("wide-match", &[6, 12, 24], wide_match, &[], ends_clean("wide match"));
+    assert_linear("wide-match", "exhaustiveness_steps", &[6, 12, 24], wide_match, &[], ends_clean("wide match"));
+}
+
+#[test]
+fn the_bool_matrix_ends_in_e113_with_linear_work() {
+    assert_linear("bool-matrix", "exhaustiveness_steps", &[24, 48, 96], bool_matrix, &[], |n, run| {
+        assert!(!run.ok, "bool matrix at {n} checked clean past the exhaustiveness budget");
+        assert!(run.stderr.contains("error[E113]"), "bool matrix at {n}: expected E113:\n{}", run.stderr);
+    });
+    // Small, the same shape is judged in full (its later rows are E014,
+    // unreachable — a verdict, not the budget).
+    let small = check("bool-matrix-8.almd", &bool_matrix(8), &[]);
+    assert!(!small.stderr.contains("E113"), "an 8-wide bool matrix ran into the budget:\n{}", small.stderr);
 }
 
 #[test]
 fn a_long_interpolation_checks_with_linear_work() {
-    assert_linear("interpolation", &[500, 1000, 2000, 4000], interpolation, &[], ends_clean("interpolation"));
+    assert_linear("interpolation", "type_size", &[500, 1000, 2000, 4000], interpolation, &[], ends_clean("interpolation"));
 }
 
 #[test]
@@ -241,7 +291,7 @@ fn lifting_the_type_budget_fails_the_gate() {
     let value = format!("type_size={U64_MAX}");
     let lifted = ["--budget", value.as_str()];
     let result = std::panic::catch_unwind(|| {
-        assert_linear("doubling-lifted", &[8, 12, 16], doubling, &lifted, |_, _| {});
+        assert_linear("doubling-lifted", "type_size", &[8, 12, 16], doubling, &lifted, |_, _| {});
     });
     assert!(result.is_err(), "the doubling chain passed the linearity gate with the type-size budget lifted — the gate does not read the budget");
 }

@@ -430,6 +430,7 @@ severity はフィクスチャ全件で実際の level と照合される(`tests
 | `manifest_bytes` | 1048576 bytes | size of one `almide.toml` or `almide.lock` read, the project's own or a dependency's, checked before and while it is read (#4194) | error `<file> is larger than N bytes` |
 | `dependency_count` | 1000 packages | distinct packages one dependency resolution visits, the transitive closure included, counted before each is fetched | error `too many dependencies (N, max M)` |
 | `dependency_depth` | 64 levels | length of the chain of dependencies from the root package to the one being resolved, counted before it is fetched | error `dependency chain too deep (N, max M)` |
+| `exhaustiveness_steps` | 100000 steps | recursive steps of the exhaustiveness and reachability check of one `match` (pattern-matrix usefulness is exponential in the worst case) | E113 |
 <!-- almide budgets --md: end -->
 
 #### `--profile critical`
