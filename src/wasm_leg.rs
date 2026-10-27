@@ -426,6 +426,18 @@ fn link_self_host(
         });
         here || below
     }
+    fn scan_own_calls(e: &crate::ir::IrExpr, module: &str, out: &mut HashSet<String>) {
+        if let crate::ir::IrExprKind::Call { target: crate::ir::CallTarget::Named { name }, .. }
+        | crate::ir::IrExprKind::TailCall { target: crate::ir::CallTarget::Named { name }, .. } = &e.kind
+            && !name.as_str().contains('.')
+        {
+            out.insert(format!("{module}.{}", name.as_str()));
+        }
+        e.clone().map_children(&mut |c| {
+            scan_own_calls(&c, module, out);
+            c
+        });
+    }
     fn scan_program(ir: &crate::ir::IrProgram, out: &mut HashSet<String>) {
         let bodies = ir.functions.iter().chain(ir.modules.iter().flat_map(|m| m.functions.iter()));
         if bodies.into_iter().any(|f| err_reaches_float(&f.body)) {
@@ -441,6 +453,11 @@ fn link_self_host(
         for m in &ir.modules {
             for f in &m.functions {
                 scan_expr(&f.body, out);
+                // A module's bare call to its own fn (`__address(b)` inside
+                // stdlib/ffi.almd, a `local` intrinsic) is the surface
+                // `<module>.<fn>`: demand it under that key, so a registered
+                // self-host body for it is loaded (ADR-0031).
+                scan_own_calls(&f.body, m.name.as_str(), out);
             }
             for tl in &m.top_lets {
                 scan_expr(&tl.value, out);
