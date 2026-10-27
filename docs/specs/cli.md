@@ -1187,11 +1187,12 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DWARF_FIXTURES=value` | harness | the DWARF line-table span-resolution measurement (`crates/almide-wasm/tests/dwarf_lines.rs`, ignored test): the `.almd` files to measure, comma-separated (#1315) |
 | `ALMIDE_EXPECT_TOOLS` | harness | make a harness test FAIL instead of skipping when an external tool (wasmtime, wasm-tools) is missing; CI sets it |
 | `ALMIDE_F32_SWEEP_N=value` | harness | how many xorshift32 bit patterns the Float32 printer sweep prints (`${x}` and `float32.to_string`) and compares with Rust f32 Display on each leg (default 100000; tests/float32_to_string_cross_target_test.rs) |
+| `ALMIDE_FAKE_RUSTC_VERSION=value` | harness | the version a fake `rustc` reports in tests/rustc_floor_test.rs, which forwards every other invocation to `ALMIDE_REAL_RUSTC` (the rustc-floor refusal's probe) |
 | `ALMIDE_FALLBACK_NAMES` | tool | make `almide test` print one `FALLBACK <file>` line per file the wasm leg did not pass — the wasm coverage ratchet's data feed |
 | `ALMIDE_FAN_COST_OFF` | ablation | go parallel on every `fan` offer the cost model (#3341) would keep sequential — the pre-#3341 behaviour, on both legs (native threads and the embedded wasm host's instances); the ablation the crossover measurement and the parallel-path tests use |
 | `ALMIDE_FAN_PAR_OFF` | ablation | keep `fan` chunk maps off the structural leg's instance-parallel offer (#3003): every chunk runs sequentially in the run's own instance |
 | `ALMIDE_FAN_SEQUENTIAL` | runtime | run `fan.*` sequentially in the native runtime, and build a `--host js` fan over async hooks with one suspension per element instead of the overlap protocol (#3383) — a determinism lever for measurement; the observable result is the same by contract |
-| `ALMIDE_FAN_THREADS=value` | runtime | cap the worker count of `fan`'s parallel maps on both legs — native threads and the embedded wasm host's chunk instances (#3003) — and the live native threads `fan { }` arms and `fs.fold_lines_chunked` workers share, one per CPU by default, past which an arm runs inline (#4141; a measurement lever for thread-scaling curves, the observable result is the same by contract; default: available parallelism) |
+| `ALMIDE_FAN_THREADS=value` | runtime | cap the worker count of `fan`'s parallel maps on both legs — native threads and the embedded wasm host's chunk instances (#3003; a measurement lever for thread-scaling curves, the observable result is the same by contract; default: available parallelism) |
 | `ALMIDE_FLAGS_BIN=value` | tool | the compiler research/benchmark/perf/bench.py asks for the native `--release` rustflags (`almide build --print-release-rustflags`) when the measured one predates that flag (#3883); it must share the measured build's release flags; unset asks the measured compiler |
 | `ALMIDE_FLOAT_SWEEP_N=value` | harness | how many xorshift64 bit patterns the float printer sweep prints and compares with Rust `format!` on each leg (default 100000; tests/float_to_string_cross_target_test.rs) |
 | `ALMIDE_FMOD_SWEEP_N=value` | harness | how many xorshift64 bit-pattern pairs the float `%` sweep compares with Rust `%` on each leg, as Float and as Float32 (default 20000; tests/float_fmod_cross_target_test.rs) |
@@ -1235,6 +1236,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_PROBE_OUT=value` | harness | the file a charge-probed native program writes its `__ALMD_PROBE` meter line to; `almide run --time-report` sets it to a fresh temp path so the program's own stderr is never read as the reading (#3489). Unset = the line goes to stderr |
 | `ALMIDE_PROBE_SRC=value` | harness | the source file the heap probe compiles (unset = the probe is skipped) |
 | `ALMIDE_PROFILE` | debug | print per-pass and per-phase timings of the native pipeline |
+| `ALMIDE_REAL_RUSTC=value` | harness | the real `rustc` the fake one in tests/rustc_floor_test.rs runs for anything but `--version` |
 | `ALMIDE_REGION_DEBUG` | debug | print the region-window pass's decisions (native and structural leg) |
 | `ALMIDE_REGION_OFF` | ablation | turn the region-window allocation pass off (native and structural leg) |
 | `ALMIDE_REGION_TRAP_STALE` | trap | arm the native region prelude's stale-reference trap (#2200) |
