@@ -279,8 +279,7 @@ fn run_wasm(src_path: &Path, wasm_path: &Path) -> Option<String> {
     if let Ok(out) = Command::new("wasmtime")
         .arg(wasm_path.to_str().unwrap())
         .output()
-    {
-        if out.status.code() != Some(127) {
+        && out.status.code() != Some(127) {
             if !out.status.success() {
                 panic!(
                     "wasm run (wasmtime) failed:\n{}",
@@ -289,7 +288,6 @@ fn run_wasm(src_path: &Path, wasm_path: &Path) -> Option<String> {
             }
             return Some(String::from_utf8_lossy(&out.stdout).to_string());
         }
-    }
     let js = format!(
         "const{{readFileSync}}=require('fs');const{{WASI}}=require('wasi');\
          const w=new WASI({{version:'preview1',args:[],env:{{}}}});\

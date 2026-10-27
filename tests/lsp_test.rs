@@ -748,7 +748,7 @@ fn lsp_try_fix_reaches_client_as_code_action() {
 
     let resp = c.code_action(1, TEST_URI, json!([e013]));
     let actions = resp["result"].as_array().unwrap();
-    let fix = actions.iter().find(|a| a["title"].as_str().map_or(false, |t| t.contains("p.name")))
+    let fix = actions.iter().find(|a| a["title"].as_str().is_some_and(|t| t.contains("p.name")))
         .unwrap_or_else(|| panic!("expected a quickfix applying `p.name`, got {}", resp["result"]));
     let edits = &fix["edit"]["changes"][TEST_URI];
     assert_eq!(edits[0]["newText"].as_str(), Some("p.name"), "quickfix edit text: {}", fix);

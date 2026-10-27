@@ -69,7 +69,7 @@ fn fixed() -> Vec<u32> {
         }
     }
     v.push((2.0f32).powi(-12).to_bits());
-    v.push(1048576.25f32.to_bits());
+    v.push(1_048_576.3_f32.to_bits());
     v
 }
 

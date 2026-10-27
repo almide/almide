@@ -507,7 +507,7 @@ fn make_program_with_vars(vars: Vec<(&str, Option<Span>, bool)>) -> IrProgram {
         IrParam {
             var: id,
             ty: Ty::Int,
-            name: info.name.clone(),
+            name: info.name,
             borrow: ParamBorrow::Own,
             is_mut: false,
             open_record: None,

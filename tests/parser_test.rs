@@ -980,7 +980,7 @@ fn error_recovery_stmt_error_nodes() {
     if let Decl::Fn { body: Some(body), .. } = &prog.decls[0] {
         if let ExprKind::Block { stmts, .. } = &body.kind {
             let has_error = stmts.iter().any(|s| matches!(s, Stmt::Error { .. }));
-            assert!(has_error, "block should contain Stmt::Error node, got: {:?}", stmts.iter().map(|s| std::mem::discriminant(s)).collect::<Vec<_>>());
+            assert!(has_error, "block should contain Stmt::Error node, got: {:?}", stmts.iter().map(std::mem::discriminant).collect::<Vec<_>>());
         } else {
             panic!("expected block body");
         }

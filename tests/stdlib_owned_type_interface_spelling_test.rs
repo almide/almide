@@ -37,11 +37,10 @@ fn spelled_type_names(iface: &serde_json::Value) -> Vec<String> {
     fn walk(v: &serde_json::Value, out: &mut Vec<String>) {
         match v {
             serde_json::Value::Object(map) => {
-                if map.get("kind").and_then(|k| k.as_str()) == Some("named") {
-                    if let Some(n) = map.get("name").and_then(|n| n.as_str()) {
+                if map.get("kind").and_then(|k| k.as_str()) == Some("named")
+                    && let Some(n) = map.get("name").and_then(|n| n.as_str()) {
                         out.push(n.to_string());
                     }
-                }
                 for child in map.values() {
                     walk(child, out);
                 }

@@ -26,13 +26,12 @@ fn advertised() -> Vec<(String, String)> {
             continue;
         }
         // `string: len trim …` (continuation lines carry no colon)
-        if let Some((m, names)) = l.split_once(':') {
-            if !m.contains(' ') {
+        if let Some((m, names)) = l.split_once(':')
+            && !m.contains(' ') {
                 module = Some(m.to_string());
                 out.extend(names.split_whitespace().map(|n| (m.to_string(), n.to_string())));
                 continue;
             }
-        }
         if let Some(m) = &module {
             out.extend(l.split_whitespace().map(|n| (m.clone(), n.to_string())));
         }

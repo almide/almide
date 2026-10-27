@@ -102,7 +102,7 @@ fn collect_cases() -> Vec<PathBuf> {
         for entry in entries.flatten() {
             // `silent/` is not a case: it holds the programs that must
             // check with NO diagnostic (#2149, `diagnostic_silent_test.rs`).
-            if entry.file_type().map_or(false, |t| t.is_dir()) && entry.file_name() != "silent" {
+            if entry.file_type().is_ok_and(|t| t.is_dir()) && entry.file_name() != "silent" {
                 cases.push(entry.path());
             }
         }
@@ -304,7 +304,7 @@ fn run_check_json(file: &Path) -> Vec<DiagJson> {
         .output()
         .expect("almide check --json");
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-    stdout.lines().filter_map(|l| DiagJson::parse(l)).collect()
+    stdout.lines().filter_map(DiagJson::parse).collect()
 }
 
 /// Minimal subset of the `almide check --json` payload the harness

@@ -118,15 +118,13 @@ fn sweep() -> Vec<Row> {
             // A parameter spelled by the module's own type alias (`handler:
             // HttpHandler`) is the aliased type at every call: route on that.
             for (_, t) in sig.params.iter_mut() {
-                if let Ty::Named(n, a) = t {
-                    if a.is_empty() {
-                        if let Some(almide::ir::IrTypeDecl { kind: almide::ir::IrTypeDeclKind::Alias { target }, .. }) =
+                if let Ty::Named(n, a) = t
+                    && a.is_empty()
+                        && let Some(almide::ir::IrTypeDecl { kind: almide::ir::IrTypeDeclKind::Alias { target }, .. }) =
                             almide_frontend::lower::lower_bundled_type_decl(module, n.as_str())
                         {
                             *t = target;
                         }
-                    }
-                }
             }
             for (args, ret) in instantiations(&sig) {
                 let raw = routers_call_name(module, func, &args, &ret, RouterHints::default());

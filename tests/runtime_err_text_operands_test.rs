@@ -578,13 +578,12 @@ impl<'ast> Visit<'ast> for Scan<'_> {
     }
 
     fn visit_expr_call(&mut self, c: &'ast syn::ExprCall) {
-        if let Expr::Path(p) = &*c.func {
-            if last_segment(&p.path) == "Err" {
+        if let Expr::Path(p) = &*c.func
+            && last_segment(&p.path) == "Err" {
                 for a in &c.args {
                     self.error_value(a, "Err(..)");
                 }
             }
-        }
         visit::visit_expr_call(self, c);
     }
 
@@ -596,13 +595,10 @@ impl<'ast> Visit<'ast> for Scan<'_> {
             m.method.to_string().as_str(),
             "push" | "push_str" | "extend" | "insert" | "insert_str"
         ) && m.args.iter().any(|a| self.carries(a))
-        {
-            if let Expr::Path(p) = peel(&m.receiver) {
-                if let Some(i) = p.path.get_ident() {
+            && let Expr::Path(p) = peel(&m.receiver)
+                && let Some(i) = p.path.get_ident() {
                     self.text.insert(i.to_string());
                 }
-            }
-        }
         let error_handler = matches!(
             m.method.to_string().as_str(),
             "map_err" | "ok_or_else" | "unwrap_or_else" | "or_else"
@@ -631,8 +627,8 @@ impl<'ast> Visit<'ast> for Scan<'_> {
     }
 
     fn visit_macro(&mut self, m: &'ast syn::Macro) {
-        if matches!(macro_name(m).as_str(), "write" | "writeln") {
-            if let Ok(args) = m.parse_body_with(
+        if matches!(macro_name(m).as_str(), "write" | "writeln")
+            && let Ok(args) = m.parse_body_with(
                 syn::punctuated::Punctuated::<Expr, syn::Token![,]>::parse_terminated,
             ) {
                 let mut it = args.iter();
@@ -648,16 +644,13 @@ impl<'ast> Visit<'ast> for Scan<'_> {
                     let inline = format_captures(&t.value())
                         .iter()
                         .any(|c| self.text.contains(c));
-                    if inline || rest.iter().any(|a| self.carries(a)) {
-                        if let Expr::Path(p) = peel(dst) {
-                            if let Some(i) = p.path.get_ident() {
+                    if (inline || rest.iter().any(|a| self.carries(a)))
+                        && let Expr::Path(p) = peel(dst)
+                            && let Some(i) = p.path.get_ident() {
                                 self.text.insert(i.to_string());
                             }
-                        }
-                    }
                 }
             }
-        }
         if macro_name(m) == "panic" && self.macro_carries(m) {
             let shown: String = m.to_token_stream().to_string().chars().take(160).collect();
             self.findings

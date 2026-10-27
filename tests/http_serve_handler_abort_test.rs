@@ -46,11 +46,10 @@ fn request(port: u16, body: &str) -> std::io::Result<String> {
 fn wait_up(port: u16) {
     let start = Instant::now();
     while start.elapsed() < Duration::from_secs(240) {
-        if let Ok(r) = request(port, "X") {
-            if r.starts_with("HTTP/1.1 200") {
+        if let Ok(r) = request(port, "X")
+            && r.starts_with("HTTP/1.1 200") {
                 return;
             }
-        }
         std::thread::sleep(Duration::from_millis(200));
     }
     panic!("the server never came up on {port}");

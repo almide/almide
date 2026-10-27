@@ -94,11 +94,10 @@ fn native_deps_keep_their_spec_and_file_order() {
 /// could not split as empty, which allows everything.
 #[test]
 fn a_permission_list_that_is_not_an_array_of_strings_is_refused() {
-    let e = parse("perm-str", "[package]\nname = \"a\"\n\n[permissions]\nallow = \"IO\"\n").err().expect("a string is not a list");
+    let e = parse("perm-str", "[package]\nname = \"a\"\n\n[permissions]\nallow = \"IO\"\n").expect_err("a string is not a list");
     assert!(e.contains("almide.toml:5: [permissions].allow must be an array of strings"), "{e}");
     let e = parse("perm-int", "[package]\nname = \"a\"\n\n[permissions]\nproc = [\n  \"git\",\n  3,\n]\n")
-        .err()
-        .expect("an integer is not a command");
+        .expect_err("an integer is not a command");
     assert!(e.contains("[permissions].proc must be an array of strings"), "{e}");
 }
 
@@ -160,7 +159,6 @@ fn a_target_table_other_than_native_deps_is_refused() {
         "target-other",
         "[package]\nname = \"a\"\n\n[target.'cfg(unix)'.dependencies]\nfoo = { path = \"../foo\" }\n",
     )
-    .err()
-    .expect("only native-deps is target-specific");
+    .expect_err("only native-deps is target-specific");
     assert!(e.contains("almide.toml:4: unknown table `dependencies` in [target.'cfg(unix)']"), "{e}");
 }

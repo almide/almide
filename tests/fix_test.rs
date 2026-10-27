@@ -546,7 +546,7 @@ effect fn main() -> Unit = {
     let mut lines: Vec<String> = src.lines().map(str::to_string).collect();
     for a in &sugg {
         let (line, col) = (a["line"].as_u64().unwrap() as usize, a["col"].as_u64().unwrap() as usize);
-        lines[line - 1].insert_str(col - 1, "!");
+        lines[line - 1].insert(col - 1, '!');
     }
     let fixed = lines.join("\n") + "\n";
     for line in ["x = get()!", "acc.total = get()!", "xs[0] = get()!"] {

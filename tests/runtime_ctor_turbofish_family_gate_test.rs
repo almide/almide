@@ -91,7 +91,7 @@ fn return_only_generic_runtime_fns() -> BTreeSet<String> {
             from = fn_start;
             // Name runs to `<` (generic fn) or `(` (monomorphic — skip).
             let rest = &src[fn_start..];
-            let name_end = match rest.find(|c: char| c == '<' || c == '(') {
+            let name_end = match rest.find(['<', '(']) {
                 Some(i) => i,
                 None => continue,
             };
