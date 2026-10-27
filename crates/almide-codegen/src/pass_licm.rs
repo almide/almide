@@ -559,7 +559,7 @@ pub(crate) fn is_inplace_mutator(symbol: &str) -> bool {
         | "almide_rt_string_push" | "almide_rt_string_push_char" | "almide_rt_string_clear"
     )
     // Bytes builders mutate their buffer in place (the runtime takes `&mut`): push,
-    // clear, fill, copy_within, copy_from, set_at, as_mut_ptr, plus every
+    // clear, fill, copy_within, copy_from, set_at, plus every
     // append_*/set_*/write_*. Matched by shape — the read side is
     // read_*/get/slice/len/… (disjoint). This is the complete &mut set in
     // runtime/rs/src/bytes.rs (mirrors almide-mir's lower/calls.rs list); note
@@ -569,7 +569,7 @@ pub(crate) fn is_inplace_mutator(symbol: &str) -> bool {
     // rendered as `&mut G.with(|c| (**c.borrow()).clone())` — a mutation of a
     // discarded clone, silently wrong on native while wasm wrote through.
     || symbol.strip_prefix("almide_rt_bytes_").is_some_and(|m| {
-        matches!(m, "push" | "clear" | "fill" | "copy_within" | "copy_from" | "set_at" | "as_mut_ptr")
+        matches!(m, "push" | "clear" | "fill" | "copy_within" | "copy_from" | "set_at")
             || m.starts_with("append_") || m.starts_with("set_") || m.starts_with("write_")
     })
 }

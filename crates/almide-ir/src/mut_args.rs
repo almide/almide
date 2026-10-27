@@ -22,8 +22,8 @@ use crate::{CallTarget, IrExpr, IrExprKind, VarId};
 /// every param a `@mutating(p)` attribute names (the older spelling), and the
 /// FIRST param for a bare `@mutating` (the receiver — the reading native borrow
 /// inference has always given it, and the one the runtime's `&mut` agrees
-/// with: `@mutating fn as_mut_ptr(b: Bytes)` is `almide_rt_bytes_as_mut_ptr(b:
-/// &mut ..)`). The IR lowering fills `IrFunction::mutated_params` from this,
+/// with: a bare `@mutating fn f(b: Bytes)` is `almide_rt_<module>_f(b: &mut
+/// ..)`). The IR lowering fills `IrFunction::mutated_params` from this,
 /// so a lowered fn and an unlowered declaration answer the same.
 pub fn declared_mut_positions(params: &[Param], attrs: &[Attribute]) -> Vec<usize> {
     let mut out: Vec<usize> = params.iter().enumerate().filter(|(_, p)| p.is_mut).map(|(i, _)| i).collect();
@@ -236,8 +236,9 @@ mod tests {
         assert_eq!(stdlib_mut_positions("list", "push"), Some(vec![0]));
         assert_eq!(stdlib_mut_positions("list", "len"), None);
         assert_eq!(stdlib_mut_positions("bytes", "set_uint16"), Some(vec![0]));
-        // A bare `@mutating` writes its receiver.
-        assert_eq!(stdlib_mut_positions("bytes", "as_mut_ptr"), Some(vec![0]));
+        // A bare `@mutating` writes its receiver (no bundled fn spells it
+        // since `bytes.as_mut_ptr` left at epoch 15; the declaration rule is
+        // `declared_mut_positions_reads_a_bare_mutating_as_the_receiver`).
         assert_eq!(stdlib_mut_positions("no_such_module", "push"), None);
     }
 
@@ -248,5 +249,13 @@ mod tests {
         for (m, f, idxs) in &all {
             assert_eq!(stdlib_mut_positions(m, f).as_ref(), Some(idxs), "{m}.{f}");
         }
+    }
+
+    #[test]
+    fn declared_mut_positions_reads_a_bare_mutating_as_the_receiver() {
+        let src = "@mutating\nfn poke(b: Bytes, x: Int) -> Unit = _\n";
+        let program = almide_lang::parse_cached(src).expect("parse");
+        let Some(Decl::Fn { params, attrs, .. }) = program.decls.first() else { panic!("no fn") };
+        assert_eq!(declared_mut_positions(params, attrs), vec![0]);
     }
 }
