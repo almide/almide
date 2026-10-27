@@ -113,14 +113,9 @@ impl IrMutVisitor for Split<'_> {
         }
         for (i, arg) in args.iter_mut().enumerate() {
             let Ty::Fn { params, .. } = &arg.ty else { continue };
-            let spread: usize = params.iter().map(tuple_width).sum();
-            if spread == params.len() {
-                continue;
-            }
-            if impl_callback_arity(&surface, i) != Some(spread) {
-                continue;
-            }
-            if self.split(arg) {
+            let Some(want) = impl_callback_arity(&surface, i) else { continue };
+            let Some(mask) = spread_mask(params, want) else { continue };
+            if self.split(arg, &mask) {
                 self.rewritten += 1;
             }
         }
@@ -135,18 +130,33 @@ fn tuple_width(t: &Ty) -> usize {
     }
 }
 
+/// Which of a callback's parameters to spread so it takes `want` separate
+/// parameters, or `None` when no spread reaches that count. Every tuple
+/// parameter spreads first; when that overshoots — an accumulator that is
+/// itself a tuple, `map.fold(m, (0, 0), (acc, (k, v)) => …)` — only the
+/// trailing parameter (the entry) spreads.
+pub fn spread_mask(params: &[Ty], want: usize) -> Option<Vec<bool>> {
+    let all: Vec<bool> = params.iter().map(|t| tuple_width(t) > 1).collect();
+    let count = |mask: &[bool]| -> usize {
+        params.iter().zip(mask).map(|(t, &m)| if m { tuple_width(t) } else { 1 }).sum()
+    };
+    let last: Vec<bool> = (0..params.len()).map(|i| i + 1 == params.len() && all[i]).collect();
+    [all, last].into_iter().find(|m| m.iter().any(|&b| b) && count(m) == want)
+}
+
 impl Split<'_> {
     fn fresh(&mut self, ty: &Ty) -> VarId {
         self.var_table.alloc_fresh("__entry", ty.clone(), Mutability::Let, None)
     }
 
     /// Rewrite one callback argument to take its tuple parameters spread.
-    fn split(&mut self, arg: &mut IrExpr) -> bool {
+    fn split(&mut self, arg: &mut IrExpr, mask: &[bool]) -> bool {
         let Ty::Fn { params: ptys, ret, is_effect } = arg.ty.clone() else { return false };
         let spread_tys: Vec<Ty> = ptys
             .iter()
-            .flat_map(|t| match t {
-                Ty::Tuple(es) if es.len() >= 2 => es.clone(),
+            .zip(mask)
+            .flat_map(|(t, &spread)| match t {
+                Ty::Tuple(es) if spread => es.clone(),
                 other => vec![other.clone()],
             })
             .collect();
@@ -155,11 +165,15 @@ impl Split<'_> {
         if let IrExprKind::Lambda { params, body, .. } = &mut arg.kind {
             let mut new_params: Vec<(VarId, Ty)> = Vec::new();
             let mut prologue: Vec<IrStmt> = Vec::new();
-            for (var, pty) in std::mem::take(params) {
+            for ((var, pty), &spread) in std::mem::take(params).into_iter().zip(mask) {
                 let Ty::Tuple(es) = &pty else {
                     new_params.push((var, pty));
                     continue;
                 };
+                if !spread {
+                    new_params.push((var, pty));
+                    continue;
+                }
                 if es.len() < 2 {
                     new_params.push((var, pty));
                     continue;
@@ -216,9 +230,9 @@ impl Split<'_> {
         let callee = std::mem::take(arg);
         let mut new_params: Vec<(VarId, Ty)> = Vec::new();
         let mut call_args: Vec<IrExpr> = Vec::new();
-        for pty in &ptys {
+        for (pty, &spread) in ptys.iter().zip(mask) {
             match pty {
-                Ty::Tuple(es) if es.len() >= 2 => {
+                Ty::Tuple(es) if spread => {
                     let parts: Vec<VarId> = es.iter().map(|t| self.fresh(t)).collect();
                     call_args.push(IrExpr {
                         kind: IrExprKind::Tuple {

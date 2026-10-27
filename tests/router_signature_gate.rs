@@ -145,23 +145,15 @@ fn sweep() -> Vec<Row> {
 /// The sweep routes the same adapted types, read from the same declaration.
 fn spread_entry_callbacks(module: &str, func: &str, mut args: Vec<Ty>) -> Vec<Ty> {
     let Some(decl) = registry_signature(&format!("{module}.{func}")) else { return args };
-    let width = |t: &Ty| match t {
-        Ty::Tuple(es) if es.len() >= 2 => es.len(),
-        _ => 1,
-    };
     for (i, arg) in args.iter_mut().enumerate() {
         let Ty::Fn { params, .. } = arg else { continue };
-        let spread: usize = params.iter().map(width).sum();
-        if spread == params.len() {
-            continue;
-        }
-        if !matches!(decl.params.get(i), Some(Ty::Fn { params: dp, .. }) if dp.len() == spread) {
-            continue;
-        }
+        let Some(Ty::Fn { params: dp, .. }) = decl.params.get(i) else { continue };
+        let Some(mask) = almide::ir::entry_split::spread_mask(params, dp.len()) else { continue };
         *params = params
             .iter()
-            .flat_map(|p| match p {
-                Ty::Tuple(es) if es.len() >= 2 => es.clone(),
+            .zip(&mask)
+            .flat_map(|(p, &spread)| match p {
+                Ty::Tuple(es) if spread => es.clone(),
                 other => vec![other.clone()],
             })
             .collect();
