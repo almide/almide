@@ -57,20 +57,23 @@ for module in COVERED_MODULES:
     entries = {e["name"]: e for e in manifest[module].get("fn", [])}
     src = open(f"stdlib/{module}.almd").read()
     int_fns = []
-    for m in re.finditer(r'^(?:pub )?(?:effect )?fn (\w+)\(((?:[^()]|\([^()]*\))*)\)\s*->\s*([^=]+)=', src, re.M):
+    # Internal `__` carriers are not REQUIRED to carry an entry, but an entry
+    # that declares one (a probe pinning a carrier's semantics) is kept and
+    # must still name an Int-bearing fn — so STALE checks against both sets.
+    internal_int_fns = []
+    for m in re.finditer(r'^(?:pub )?(?:effect )?fn (\w+)(?:\[(?:[^\[\]]|\[[^\[\]]*\])*\])?\(((?:[^()]|\([^()]*\))*)\)\s*->\s*([^=]+)=', src, re.M):
         name, params, ret = m.group(1), m.group(2), m.group(3)
-        # `__` fns are internal carriers, not surface: no manifest entry.
-        if name.startswith("__"):
+        if not (re.search(r'\bInt\b', params) or re.search(r'\bInt\b', ret)):
             continue
-        if re.search(r'\bInt\b', params) or re.search(r'\bInt\b', ret):
-            int_fns.append(name)
+        # `__` fns are internal carriers, not surface: no entry required.
+        (internal_int_fns if name.startswith("__") else int_fns).append(name)
     for name in int_fns:
         if name not in entries:
             print(f"MISSING: {module}.{name} bears Int in its signature but has no "
                   f"semantics-manifest entry (declare its index_unit + probe)")
             failed = True
     for name in entries:
-        if name not in int_fns:
+        if name not in int_fns and name not in internal_int_fns:
             print(f"STALE: manifest entry {module}.{name} matches no Int-bearing fn "
                   f"in stdlib/{module}.almd")
             failed = True

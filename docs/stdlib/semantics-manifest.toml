@@ -1585,8 +1585,269 @@ expect = "2"
 #                   VALUES the produced elements run over, end EXCLUSIVE)
 #   element-index — the Int is a 0-based ELEMENT position (binary_search's
 #                   some(i) — over a SORTED list)
+
+[[bytes.fn]]
+name = "fold"
+index_unit = "byte-value"
+probe = 'bytes.fold(bytes.from_list([1, 2, 200]), 0, (acc, v) => acc + v)'
+expect = '203'
+
+[[bytes.fn]]
+name = "zip"
+index_unit = "byte-value"
+probe = 'bytes.zip(bytes.from_list([7, 255]), ["a", "b", "c"])'
+expect = '[(7, "a"), (255, "b")]'
+
+[[bytes.fn]]
+name = "zip_with"
+index_unit = "byte-value"
+probe = 'bytes.zip_with(bytes.from_list([7, 255]), [1, 2, 3], (v, k) => v * k)'
+expect = '[7, 510]'
+
+[[bytes.fn]]
+name = "filter_map"
+index_unit = "byte-value"
+probe = 'bytes.filter_map(bytes.from_list([1, 200, 3]), (v) => if v > 2 then some(v + 1) else none)'
+expect = '[201, 4]'
+
+[[bytes.fn]]
+name = "find_map"
+index_unit = "byte-value"
+probe = 'bytes.find_map(bytes.from_list([1, 200, 3]), (v) => if v > 2 then some(v * 2) else none)'
+expect = 'some(400)'
+
+[[bytes.fn]]
+name = "scan"
+index_unit = "byte-value"
+probe = 'bytes.scan(bytes.from_list([1, 2, 200]), 0, (acc, v) => acc + v)'
+expect = '[1, 3, 203]'
+
+[[bytes.fn]]
+name = "group_by"
+index_unit = "byte-value"
+probe = 'map.get(bytes.group_by(bytes.from_list([1, 200, 3, 250]), (v) => v > 100), true) ?? []'
+expect = '[200, 250]'
+
+[[bytes.fn]]
+name = "sort_by"
+index_unit = "byte-value"
+probe = 'bytes.sort_by(bytes.from_list([3, 200, 1]), (v) => 0 - v)'
+expect = '[200, 3, 1]'
+
+[[bytes.fn]]
+name = "min_by"
+index_unit = "byte-value"
+probe = 'bytes.min_by(bytes.from_list([3, 200, 1]), (v) => 0 - v)'
+expect = 'some(200)'
+
+[[bytes.fn]]
+name = "max_by"
+index_unit = "byte-value"
+probe = 'bytes.max_by(bytes.from_list([3, 200, 1]), (v) => 0 - v)'
+expect = 'some(1)'
+
+[[bytes.fn]]
+name = "unique_by"
+index_unit = "byte-value"
+probe = 'bytes.to_list(bytes.unique_by(bytes.from_list([3, 200, 4, 201]), (v) => v % 2))'
+expect = '[3, 200]'
 [list]
 default_index_unit = "value"
+
+[[list.fn]]
+name = "len"
+index_unit = "element-count"
+probe = 'list.len([4, 5, 6])'
+expect = '3'
+
+[[list.fn]]
+name = "length"
+index_unit = "element-count"
+probe = 'list.length([4, 5, 6])'
+expect = '3'
+
+[[list.fn]]
+name = "get"
+index_unit = "element-index"
+probe = 'list.get([10, 20, 30], 1)'
+expect = 'some(20)'
+
+[[list.fn]]
+name = "set"
+index_unit = "element-index"
+probe = 'list.set([10, 20, 30], 1, 99)'
+expect = '[10, 99, 30]'
+
+[[list.fn]]
+name = "swap"
+index_unit = "element-index"
+probe = 'list.swap([10, 20, 30], 0, 2)'
+expect = '[30, 20, 10]'
+
+[[list.fn]]
+name = "enumerate"
+index_unit = "element-index"
+probe = 'list.enumerate(["a", "b"])'
+expect = '[(0, "a"), (1, "b")]'
+note = """
+Indices start at 0.
+"""
+
+[[list.fn]]
+name = "take"
+index_unit = "element-count"
+probe = 'list.take([10, 20, 30], 2)'
+expect = '[10, 20]'
+
+[[list.fn]]
+name = "drop"
+index_unit = "element-count"
+probe = 'list.drop([10, 20, 30], 2)'
+expect = '[30]'
+
+[[list.fn]]
+name = "index_of"
+index_unit = "element-index"
+probe = 'list.index_of([10, 20, 30, 20], 20)'
+expect = 'some(1)'
+note = """
+The FIRST occurrence.
+"""
+
+[[list.fn]]
+name = "chunk"
+index_unit = "element-count"
+probe = 'list.chunk([1, 2, 3, 4, 5], 2)'
+expect = '[[1, 2], [3, 4], [5]]'
+
+[[list.fn]]
+name = "count"
+index_unit = "element-count"
+probe = 'list.count([1, 2, 3, 4], (x) => x > 1)'
+expect = '3'
+
+[[list.fn]]
+name = "find_index"
+index_unit = "element-index"
+probe = 'list.find_index([1, 5, 7], (x) => x > 2)'
+expect = 'some(1)'
+
+[[list.fn]]
+name = "update"
+index_unit = "element-index"
+probe = 'list.update([10, 20, 30], 2, (x) => x + 1)'
+expect = '[10, 20, 31]'
+
+[[list.fn]]
+name = "slice"
+index_unit = "element-index"
+probe = 'list.slice([10, 20, 30, 40], 1, 3)'
+expect = '[20, 30]'
+note = """
+Half-open: start included, end excluded.
+"""
+
+[[list.fn]]
+name = "insert"
+index_unit = "element-index"
+probe = 'list.insert([10, 20, 30], 1, 15)'
+expect = '[10, 15, 20, 30]'
+note = """
+The new element lands AT index i; the old one shifts right.
+"""
+
+[[list.fn]]
+name = "remove_at"
+index_unit = "element-index"
+probe = 'list.remove_at([10, 20, 30], 1)'
+expect = '[10, 30]'
+
+[[list.fn]]
+name = "repeat"
+index_unit = "element-count"
+probe = 'list.repeat(7, 3)'
+expect = '[7, 7, 7]'
+
+[[list.fn]]
+name = "take_end"
+index_unit = "element-count"
+probe = 'list.take_end([10, 20, 30], 2)'
+expect = '[20, 30]'
+
+[[list.fn]]
+name = "drop_end"
+index_unit = "element-count"
+probe = 'list.drop_end([10, 20, 30], 2)'
+expect = '[10]'
+
+[[list.fn]]
+name = "window"
+index_unit = "element-count"
+probe = 'list.window([1, 2, 3, 4], 3)'
+expect = '[[1, 2, 3], [2, 3, 4]]'
+
+[[list.fn]]
+name = "binary_search"
+index_unit = "element-index"
+probe = 'list.binary_search([10, 20, 30], 20)'
+expect = 'some(1)'
+
+[[list.fn]]
+name = "with_capacity"
+index_unit = "element-count"
+probe = 'list.len(list.with_capacity(16) + [1])'
+expect = '1'
+note = """
+Capacity is a hint: the list starts EMPTY whatever cap is.
+"""
+
+[[list.fn]]
+name = "split_at"
+index_unit = "element-index"
+probe = 'list.split_at([10, 20, 30], 1)'
+expect = '([10], [20, 30])'
+
+[[list.fn]]
+name = "iterate"
+index_unit = "element-count"
+probe = 'list.iterate(1, (x) => x * 2, 4)'
+expect = '[1, 2, 4, 8]'
+note = """
+n counts the elements, seed included.
+"""
+
+[[list.fn]]
+name = "sort_with"
+index_unit = "ordering"
+probe = 'list.sort_with([3, 1, 2], (a, b) => b - a)'
+expect = '[3, 2, 1]'
+note = """
+cmp answers an ordering Int: negative sorts a first.
+"""
+
+[[list.fn]]
+name = "min_with"
+index_unit = "ordering"
+probe = 'list.min_with([3, 1, 2], (a, b) => b - a)'
+expect = 'some(3)'
+
+[[list.fn]]
+name = "max_with"
+index_unit = "ordering"
+probe = 'list.max_with([3, 1, 2], (a, b) => b - a)'
+expect = 'some(1)'
+
+[[list.fn]]
+name = "binary_search_by"
+index_unit = "element-index"
+probe = 'list.binary_search_by(["a", "bb", "ccc"], 2, (s) => string.len(s))'
+expect = 'some(1)'
+
+[[list.fn]]
+name = "binary_search_with"
+index_unit = "element-index"
+probe = 'list.binary_search_with([30, 20, 10], 10, (a, b) => b - a)'
+expect = 'some(2)'
 
 [[bytes.fn]]
 name = "__read_i16_be"
@@ -2196,6 +2457,24 @@ probe = "1"
 expect = "1"
 note = """
 Declared, not probed (host-capability): `__stdin_read(_h: Stdin, max: Int) -> Result[Bytes, String]`.
+"""
+
+[[io.fn]]
+name = "read"
+index_unit = "byte-count"
+probe = '1'
+expect = '1'
+note = """
+Declared, not probed (host-capability): `read[H: Read](h: H, max: Int) -> Result[Bytes, String]`.
+"""
+
+[[io.fn]]
+name = "read_exact"
+index_unit = "byte-count"
+probe = '1'
+expect = '1'
+note = """
+Declared, not probed (host-capability): `read_exact[H: Read](h: H, n: Int) -> Result[Bytes, String]`.
 """
 
 [env]
@@ -2886,6 +3165,33 @@ index_unit = "value"
 probe = 'int.__uint64_exact(-1)'
 expect = "none"
 
+[[int.fn]]
+name = "from"
+index_unit = "value"
+probe = 'int.from(int8.from_wrapping(0 - 5))'
+expect = '-5'
+
+[[int.fn]]
+name = "from_checked"
+index_unit = "value"
+probe = 'int.from_checked(2.5)'
+expect = 'none'
+note = """
+none unless Int holds x exactly.
+"""
+
+[[int.fn]]
+name = "from_saturating"
+index_unit = "value"
+probe = 'int.from_saturating(1e30)'
+expect = '9223372036854775807'
+
+[[int.fn]]
+name = "from_wrapping"
+index_unit = "value"
+probe = 'int.from_wrapping(uint8.from(200))'
+expect = '200'
+
 [process]
 default_index_unit = "value"
 
@@ -3034,7 +3340,24 @@ expect = "3 9"
 
 [fs]
 default_index_unit = "byte-value"
-fn = []
+
+[[fs.fn]]
+name = "fold_lines_range"
+index_unit = "element-index"
+probe = '1'
+expect = '1'
+note = """
+Declared, not probed (host-capability): `fold_lines_range[A](path: String, start: Int, end: Int, init: A, f: (A, String) -> A) -> Result[A, String]`.
+"""
+
+[[fs.fn]]
+name = "fold_lines_chunked"
+index_unit = "count"
+probe = '1'
+expect = '1'
+note = """
+Declared, not probed (host-capability): `fold_lines_chunked[A](path: String, workers: Int, init: A, f: (A, String) -> A) -> Result[List[A], String]`.
+"""
 
 [http]
 
@@ -3259,11 +3582,57 @@ Declared, not probed (host-capability): `udp_recv_from(sock: UdpSocket, max: Int
 
 [map]
 default_index_unit = "value"
-fn = []
+
+[[map.fn]]
+name = "len"
+index_unit = "element-count"
+probe = 'map.len(map.set(map.set(map.new(), "a", 1), "b", 2))'
+expect = '2'
+
+[[map.fn]]
+name = "enumerate"
+index_unit = "element-index"
+probe = 'map.enumerate(map.set(map.new(), "a", 1))'
+expect = '[(0, ("a", 1))]'
 
 [set]
 default_index_unit = "value"
-fn = []
+
+[[set.fn]]
+name = "len"
+index_unit = "element-count"
+probe = 'set.len(set.from_list([1, 2, 2]))'
+expect = '2'
+
+[[set.fn]]
+name = "count"
+index_unit = "element-count"
+probe = 'set.count(set.from_list([1, 2, 3]), (x) => x > 1)'
+expect = '2'
+
+[[set.fn]]
+name = "enumerate"
+index_unit = "element-index"
+probe = 'set.enumerate(set.from_list([5]))'
+expect = '[(0, 5)]'
+
+[[set.fn]]
+name = "sort_with"
+index_unit = "ordering"
+probe = 'set.sort_with(set.from_list([3, 1, 2]), (a, b) => b - a)'
+expect = '[3, 2, 1]'
+
+[[set.fn]]
+name = "min_with"
+index_unit = "ordering"
+probe = 'set.min_with(set.from_list([3, 1, 2]), (a, b) => b - a)'
+expect = 'some(3)'
+
+[[set.fn]]
+name = "max_with"
+index_unit = "ordering"
+probe = 'set.max_with(set.from_list([3, 1, 2]), (a, b) => b - a)'
+expect = 'some(1)'
 
 [option]
 default_index_unit = "value"
