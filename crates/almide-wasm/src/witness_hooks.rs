@@ -698,7 +698,10 @@ impl Emitter<'_> {
     /// (not when the rhs spends the var's credit, which declines here — its
     /// callee's write-back is not audited). The new occupant mirrors the
     /// Bind route: an owned rhs is a new object, a borrowed Var rhs took
-    /// `rc_inc_top` on its source, anything else declines.
+    /// `rc_inc_top` on its source, a view read out of a bound block (a slot,
+    /// a `!` payload, a borrowed `o ?? fallback` join over a bound carrier)
+    /// or a top-let global took it on the view (`bind_view`'s share),
+    /// anything else declines.
     pub(crate) fn witness_assign(&mut self, idx: u32, released_old: bool, spends: bool, value: &almide_ir::IrExpr) {
         if self.witness.is_none() {
             return;
@@ -709,10 +712,12 @@ impl Emitter<'_> {
         }
         let owned = self.rc_owned_result(value);
         let src = self.witness_src_local(value);
+        let view = crate::witness_unwrap::is_extraction_view(value) || self.witness_top_let_ty(value).is_some();
         let Some(w) = self.witness.as_mut() else { return };
         let ok = match (owned, src) {
             (true, _) => w.assign(idx, released_old, None),
             (false, Some(s)) => w.assign(idx, released_old, Some(s)),
+            (false, None) if view => w.assign_view(idx, released_old),
             (false, None) => {
                 w.decline("assign:view-result");
                 true
