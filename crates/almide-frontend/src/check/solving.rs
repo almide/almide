@@ -20,6 +20,11 @@ impl Checker {
                 self.note_errored_slots(c);
                 self.report_constraint_mismatch(c);
             }
+            // ADR-0030: a resolution this unification ran stopped at the
+            // type-size budget — E111 at the constraint's site.
+            if super::types::take_type_budget_hit() {
+                self.report_type_budget_at(c.span, None);
+            }
         }
         // ADR-0021: a lambda channel nothing constrained takes the join of its
         // `!` operands — before the slot defaults, which only fill what is
