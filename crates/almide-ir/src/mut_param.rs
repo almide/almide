@@ -847,7 +847,7 @@ fn rewrite_multi_body(func: &mut IrFunction, vt: &mut VarTable, bufs: &[(VarId, 
     let orig_ty = single_layer.clone().unwrap_or_else(|| func.ret_ty.clone());
     let mut elems: Vec<Ty> = if was_unit { vec![] } else { vec![orig_ty.clone()] };
     elems.extend(bufs.iter().map(|(_, t)| t.clone()));
-    let tuple_ty = Ty::Tuple(elems);
+    let tuple_ty = Ty::Tuple(elems.into());
     func.ret_ty = tuple_ty.clone();
     let reads = || bufs.iter().map(|(v, t)| var_read(*v, t.clone())).collect::<Vec<_>>();
     let mut old_body = std::mem::replace(&mut func.body, unit_placeholder());
@@ -1346,7 +1346,7 @@ impl<'a> CallSiteRewriter<'a> {
             let read = var_read(buf, ty.clone());
             writebacks.extend(writeback_stmts(&place, read, self.vt, span));
         }
-        call.ty = Ty::Tuple(elem_tys);
+        call.ty = Ty::Tuple(elem_tys.into());
         let mut stmts = vec![IrStmt {
             kind: IrStmtKind::BindDestructure { pattern: IrPattern::Tuple { elements: pats }, value: call },
             span,
