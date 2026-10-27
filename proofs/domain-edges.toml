@@ -100,7 +100,7 @@
 
 wasm_budget_bytes = 1073741824
 count = 67
-skip_count = 148
+skip_count = 146
 
 [[divergence]]
 cell   = "bytes.new:len:i32_max"
@@ -375,14 +375,6 @@ reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocat
 # type-check, with the measured reason (`skip_count` above). The gate diffs
 # these both ways too: a slot that BECOMES unbuildable is coverage lost and
 # fails; a slot that becomes buildable must have its row deleted.
-
-[[skip]]
-slot   = "bytes.copy_to_ptr(cap)"
-reason = "unbuildable: no VALUES entry for parameter type `RawPtr`"
-
-[[skip]]
-slot   = "bytes.from_raw_ptr(len)"
-reason = "unbuildable: no VALUES entry for parameter type `RawPtr`"
 
 [[skip]]
 slot   = "bytes.read_bool_at(pos)"

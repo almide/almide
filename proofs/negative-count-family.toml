@@ -498,11 +498,8 @@ checked = [
   "bytes.get_f16_be_array.count",
   "bytes.next_bytes.n",
 ]
-# raw-memory: a raw-pointer length under `import ffi`: outside the memory-safety guarantee, where the caller promises the length
-raw_memory = [
-  "bytes.copy_to_ptr.cap",
-  "bytes.from_raw_ptr.len",
-]
+# raw-memory: a raw-pointer length under `import ffi`. Empty since ADR-0031 removed the bytes raw-pointer spellings: a Region carries its own length
+raw_memory = []
 # shape-read: a matrix shape or offset that describes data already in a byte buffer; a shape the data cannot fill is zero-filled or refused, as documented
 shape_read = [
   "matrix.linear_f32_row_no_bias.w_rows",
