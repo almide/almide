@@ -384,7 +384,8 @@ fn a_flag_judged_store_against_a_hoisted_count_is_accepted() -> Result<(), Strin
         br 0))";
     let r = bounds_judged(body, "c0 w0", "1:12 1:33", &[21])?;
     assert_eq!(r.bounds_operands, 1);
-    assert!(bounds(body, "c0 w0", "1:12 1:33").unwrap_err().contains("changes the list"));
+    // Unrecorded, the judge is a call handed the list.
+    assert!(bounds(body, "c0 w0", "1:12 1:33").unwrap_err().contains("handed"));
     Ok(())
 }
 
