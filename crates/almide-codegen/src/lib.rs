@@ -51,6 +51,7 @@ pub mod pass_var_storage;
 pub mod pass_borrow_lowering;
 pub mod pass_slice_binders;
 pub mod pass_str_map_key;
+pub mod pass_box_take;
 pub mod pass_thread_share;
 pub mod owned_source;
 pub mod pass_owned_source_hoist;
@@ -81,6 +82,7 @@ pub mod prelude_string;
 mod prelude_fan;
 mod prelude_stack;
 mod prelude_rem;
+mod prelude_box;
 pub use prelude_region::region_arena_prelude_source;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
@@ -555,6 +557,7 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str(&format!("{vis}struct AlmideWriteBack<'a, T, F: FnMut() -> T>({vis}&'a mut T, {vis}F);\n"));
     s.push_str("impl<'a, T, F: FnMut() -> T> Drop for AlmideWriteBack<'a, T, F> { fn drop(&mut self) { *self.0 = (self.1)(); } }\n");
     s.push_str(&almide_repr_prelude(vis));
+    s.push_str(&prelude_box::box_prelude(vis));
     s.push_str(&prelude_region::region_arena_prelude(vis, prelude_region::region_trap_armed()));
     s
 }

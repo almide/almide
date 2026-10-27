@@ -79,6 +79,15 @@ pub(crate) fn case_field_is_boxed(ctx: &RenderContext, ty: Option<&Ty>, ctor: &s
     }
 }
 
+/// Is field `field` of a record typed `ty` an `AlmideBox` — a field closing a
+/// cycle of a recursive record (#4251)?
+pub(crate) fn record_field_is_boxed(ctx: &RenderContext, ty: &Ty, field: &str) -> bool {
+    match ty {
+        Ty::Named(n, _) => ctx.ann.boxed_record_fields.contains(&(n.to_string(), field.to_string())),
+        _ => false,
+    }
+}
+
 /// The enum the variant case `ctor` of a value typed `ty` belongs to (#3176).
 /// The value's own type answers first when it is an enum with that case:
 /// `ctor_to_enum` is keyed by the bare case name program-wide, so of two

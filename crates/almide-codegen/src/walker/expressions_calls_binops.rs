@@ -614,7 +614,7 @@ fn render_enum_constructor(ctx: &RenderContext, ctor_name: &str, enum_name: &str
             // A region twin's recursive field is an arena handle (#1991).
             format!("almide_rgn_alloc({})", rendered)
         } else if needs_box {
-            format!("std::boxed::Box::new({})", rendered)
+            format!("AlmideBox::new({})", rendered)
         } else {
             rendered
         }

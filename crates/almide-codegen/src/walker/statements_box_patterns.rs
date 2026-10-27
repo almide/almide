@@ -198,7 +198,9 @@ impl UnboxState {
         if self.borrowed { format!("&**{v}") } else { format!("&*{v}") }
     }
     fn out_of_box(&self, v: &str) -> String {
-        if self.borrowed { format!("&**{v}") } else { format!("*{v}") }
+        // An owned `AlmideBox` moves its value out by call (#4252): it has a
+        // drop, so `*v` cannot move through it.
+        if self.borrowed { format!("&**{v}") } else { format!("almide_box_take({v})") }
     }
 }
 

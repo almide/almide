@@ -155,6 +155,11 @@ pub struct CodegenAnnotations {
     /// `boxed_fields` keyed by (enum, case, field): the bare case name is
     /// shared by every enum declaring it (#3176).
     pub boxed_case_fields: HashSet<(String, String, String)>,
+    /// (record type, field) for every field of a RECURSIVE record that names
+    /// a cycle member (#4251): the field is an `AlmideBox`, read through a
+    /// deref and built with `AlmideBox::new`. Keyed by the record's type name
+    /// (the `Ty::Named` spelling a member access carries).
+    pub boxed_record_fields: HashSet<(String, String)>,
     pub default_fields: HashMap<(String, String), IrExpr>,
     /// A record-payload case's field defaults keyed by (enum, case, field):
     /// `default_fields` keys a case by its bare name alone, so two modules'

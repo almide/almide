@@ -203,11 +203,23 @@ fn render_expr_while(ctx: &RenderContext, cond: &IrExpr, body: &[IrStmt]) -> Str
 }
 
 /// `Member { object, field }` case of `render_expr`.
-fn render_expr_member(ctx: &RenderContext, object: &IrExpr, field: &Sym) -> String {
+fn render_member_access(ctx: &RenderContext, object: &IrExpr, field: &Sym) -> String {
     let expr_s = render_expr(ctx, object);
     let field_s = ctx.field_ident(field.as_str());
     ctx.templates.render_with("field_access", None, &[], &[("expr", expr_s.as_str()), ("field", field_s.as_str())])
         .unwrap_or_else(|| format!("{}.{}", expr_s, field_s))
+}
+
+fn render_expr_member(ctx: &RenderContext, object: &IrExpr, field: &Sym) -> String {
+    let access = render_member_access(ctx, object, field);
+    // A field closing a recursive record's cycle is an `AlmideBox` (#4251).
+    // `BoxTakeLowering` wraps every read of it that only needs the place in a
+    // `Deref` (`(*r.f)`, below); one left bare MOVES the value out.
+    if super::record_field_is_boxed(ctx, &object.ty, field.as_str()) {
+        format!("almide_box_take({})", access)
+    } else {
+        access
+    }
 }
 
 /// `OptionSome { expr: inner }` case of `render_expr`.
@@ -488,6 +500,12 @@ fn render_expr_optional_chain(ctx: &RenderContext, inner: &IrExpr, field: &Sym) 
 
 /// `Deref { expr: inner }` case of `render_expr`.
 fn render_expr_deref(ctx: &RenderContext, inner: &IrExpr) -> String {
+    // The place behind a recursive record's boxed field (#4251).
+    if let IrExprKind::Member { object, field } = &inner.kind
+        && super::record_field_is_boxed(ctx, &object.ty, field.as_str())
+    {
+        return format!("(*{})", render_member_access(ctx, object, field));
+    }
     let name_s = render_expr(ctx, inner);
     ctx.templates.render_with("deref_var", None, &[], &[("name", name_s.as_str())])
         .unwrap_or_else(|| format!("(*{})", name_s))

@@ -78,6 +78,27 @@ impl NanoPass for BoxDerefPass {
             .collect();
         program.codegen_annotations.boxed_fields = boxed.iter().map(|(_, c, f)| (c.clone(), f.clone())).collect();
         program.codegen_annotations.boxed_case_fields = boxed.into_iter().collect();
+        // A recursive RECORD's fields that name a cycle member take the same
+        // indirection (#4251) — the literal site reads `boxed_fields` by the
+        // record's own name, a member access reads `boxed_record_fields`.
+        let boxed_records: Vec<(String, String)> = program.type_decls.iter()
+            .chain(program.modules.iter().flat_map(|m| m.type_decls.iter()))
+            .filter(|td| rec_ref.contains(&*td.name))
+            .filter_map(|td| match &td.kind {
+                IrTypeDeclKind::Record { fields } => Some((td.name.to_string(), fields)),
+                _ => None,
+            })
+            .flat_map(|(name, fields)| fields.iter()
+                .filter(|f| walker::ty_contains_any_recursive(&f.ty, rec_ref))
+                .map(move |f| (name.clone(), f.name.to_string())))
+            .collect();
+        // A literal names its record bare inside its own module and qualified
+        // (`mod.T`) from outside — the `default_fields` keying.
+        program.codegen_annotations.boxed_fields.extend(boxed_records.iter().flat_map(|(t, f)| {
+            let bare = t.rsplit('.').next().unwrap_or(t).to_string();
+            [(t.clone(), f.clone()), (bare, f.clone())]
+        }));
+        program.codegen_annotations.boxed_record_fields = boxed_records.into_iter().collect();
 
         // Build default_fields: for each variant/record constructor with default field values.
         // Chain module type_decls so types declared in submodules also fill defaults at
@@ -152,10 +173,28 @@ fn find_recursive_enums<'a>(type_decls: impl Iterator<Item = &'a IrTypeDecl>) ->
 fn build_type_ref_graph<'a>(type_decls: impl Iterator<Item = &'a IrTypeDecl>) -> HashMap<String, HashSet<String>> {
     let mut graph: HashMap<String, HashSet<String>> = HashMap::new();
     for td in type_decls {
-        if let IrTypeDeclKind::Variant { cases, .. } = &td.kind {
-            let mut refs = HashSet::new();
-            for case in cases { collect_variant_case_refs(case, &mut refs); }
-            graph.insert(td.name.to_string(), refs);
+        // Records are nodes of the same graph (#4251): a record that reaches
+        // itself through an `Option`, a tuple, a `List`, another record or a
+        // variant payload is a cycle member like a recursive variant, and every
+        // field of it that names a cycle member takes the indirection.
+        match &td.kind {
+            IrTypeDeclKind::Variant { cases, .. } => {
+                let mut refs = HashSet::new();
+                for case in cases { collect_variant_case_refs(case, &mut refs); }
+                graph.insert(td.name.to_string(), refs);
+            }
+            IrTypeDeclKind::Record { fields } => {
+                let mut refs = HashSet::new();
+                for f in fields { collect_type_names(&f.ty, &mut refs); }
+                graph.insert(td.name.to_string(), refs);
+            }
+            // An alias passes its target's references on, so a field spelled
+            // through `type Kids = List[T]` still closes `T`'s cycle.
+            IrTypeDeclKind::Alias { target } => {
+                let mut refs = HashSet::new();
+                collect_type_names(target, &mut refs);
+                graph.insert(td.name.to_string(), refs);
+            }
         }
     }
     graph
@@ -337,6 +376,17 @@ impl IrVisitor for DerefCollector<'_> {
         }
         walk_expr(self, expr); // recurse subject, arm bodies, and every other kind
     }
+
+    /// `let { next, .. } = l` on a recursive record binds its boxed fields
+    /// the way a match arm does (#4251).
+    fn visit_stmt(&mut self, stmt: &IrStmt) {
+        if let IrStmtKind::BindDestructure { pattern, value } = &stmt.kind
+            && walker::ty_contains_any_recursive(&value.ty, self.recursive_enums)
+        {
+            self.collect_wrapped(pattern);
+        }
+        walk_stmt(self, stmt);
+    }
 }
 
 impl DerefCollector<'_> {
@@ -347,6 +397,7 @@ impl DerefCollector<'_> {
         match pat {
             IrPattern::Constructor { name, .. } | IrPattern::RecordPattern { name, .. }
                 if find_td_for_ctor(self.type_decls, name.as_str())
+                    .or_else(|| find_record_td(self.type_decls, name.as_str()))
                     .is_some_and(|td| self.recursive_enums.contains(td.name.as_str())) =>
                 collect_deref_from_pattern(pat, self.recursive_enums, self.type_decls, self.name_to_var, self.deref_vars),
             IrPattern::Constructor { args, .. } => args.iter().for_each(|a| self.collect_wrapped(a)),
@@ -379,6 +430,14 @@ fn find_td_for_ctor<'a>(type_decls: &'a [IrTypeDecl], ctor: &str) -> Option<&'a 
         IrTypeDeclKind::Variant { cases, .. } if cases.iter().any(|c| c.name == ctor)))
 }
 
+/// The RECORD type-decl a record pattern names (bare inside its module,
+/// `mod.T` from outside).
+fn find_record_td<'a>(type_decls: &'a [IrTypeDecl], name: &str) -> Option<&'a IrTypeDecl> {
+    let bare = |n: &str| n.rsplit('.').next().unwrap_or(n).to_string();
+    type_decls.iter().find(|td| matches!(&td.kind, IrTypeDeclKind::Record { .. })
+        && (td.name.as_str() == name || bare(td.name.as_str()) == bare(name)))
+}
+
 fn collect_deref_from_pattern(pattern: &IrPattern, recursive: &HashSet<String>, type_decls: &[IrTypeDecl], name_to_var: &std::collections::HashMap<String, Vec<VarId>>, deref_vars: &mut HashSet<VarId>) {
     match pattern {
         IrPattern::Constructor { name, args } => {
@@ -392,7 +451,14 @@ fn collect_deref_from_pattern(pattern: &IrPattern, recursive: &HashSet<String>, 
         }
         IrPattern::RecordPattern { name, fields, .. } => {
             let td = find_td_for_ctor(type_decls, name.as_str());
-            let Some(IrVariantKind::Record { fields: case_fields }) = find_variant_case(td, name) else { return };
+            let case_fields = match find_variant_case(td, name) {
+                Some(IrVariantKind::Record { fields: case_fields }) => case_fields,
+                // A plain recursive record's own pattern (#4251).
+                _ => match find_record_td(type_decls, name.as_str()).map(|td| &td.kind) {
+                    Some(IrTypeDeclKind::Record { fields: record_fields }) => record_fields,
+                    _ => return,
+                },
+            };
             for field_pat in fields {
                 let is_recursive = case_fields.iter()
                     .find(|f| f.name == field_pat.name)

@@ -391,7 +391,7 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
         // Box recursive fields (annotation is target-aware — empty for non-Rust)
         if let Some(cn) = name {
             if super::case_field_is_boxed(ctx, Some(&expr.ty), cn.as_str(), k.as_str()) {
-                val_str = format!("std::boxed::Box::new({})", val_str);
+                val_str = format!("AlmideBox::new({})", val_str);
             }
         }
         // A closure stored in a struct field is `Rc<dyn Fn>`; the
@@ -435,7 +435,7 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
         let mut val_str = render_expr(ctx, default_expr);
         let needs_box = name.as_ref()
             .map_or(false, |cn| super::case_field_is_boxed(ctx, Some(&expr.ty), cn.as_str(), field_name));
-        if needs_box { val_str = format!("std::boxed::Box::new({})", val_str); }
+        if needs_box { val_str = format!("AlmideBox::new({})", val_str); }
         let fname = ctx.field_ident(field_name.as_str());
         field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", fname.as_str()), ("value", val_str.as_str())])
             .unwrap_or_else(|| format!("{}: {}", fname, val_str)));
@@ -497,7 +497,11 @@ fn render_expr_spread_record(ctx: &RenderContext, expr: &IrExpr) -> String {
     // in the `Clone` `BorrowLowering` spelled for it.
     let base_str = render_expr(ctx, base);
     let fields_str = fields.iter()
-        .map(|(k, v)| format!("{}: {}", ctx.field_ident(k.as_str()), render_expr(ctx, v)))
+        .map(|(k, v)| {
+            let val = render_expr(ctx, v);
+            let val = if super::record_field_is_boxed(ctx, &expr.ty, k.as_str()) { format!("AlmideBox::new({})", val) } else { val };
+            format!("{}: {}", ctx.field_ident(k.as_str()), val)
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let type_name = match &expr.ty {
@@ -801,6 +805,7 @@ fn render_expr_borrow(ctx: &RenderContext, expr: &IrExpr) -> String {
         // expression (`BorrowLowering`, #1210) — the parenthesised spelling.
         if let IrExprKind::Deref { expr: value } = &inner.kind
             && !matches!(value.kind, IrExprKind::Var { .. })
+            && !matches!(&value.kind, IrExprKind::Member { object, field } if super::record_field_is_boxed(ctx, &object.ty, field.as_str()))
         {
             return format!("&*({})", render_expr(ctx, value));
         }

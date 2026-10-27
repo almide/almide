@@ -125,9 +125,15 @@ fn render_type_decl_record(ctx: &RenderContext, td: &IrTypeDecl, generics_str: &
             // when the closure is nested in a List/Map/Tuple field. Fn-free
             // field types fall through to the normal renderer.
             let type_s = render_type_field_fn(ctx, &f.ty);
+            // A field closing a cycle of a recursive record (#4251).
+            let type_s = if ctx.ann.boxed_record_fields.contains(&(td.name.to_string(), f.name.to_string())) {
+                format!("AlmideBox<{}>", type_s)
+            } else {
+                type_s
+            };
             let fname = ctx.field_ident(f.name.as_str());
             ctx.templates.render_with("struct_field", None, &[], &[("name", fname.as_str()), ("type", type_s.as_str())])
-                .unwrap_or_else(|| format!("    pub {}: {},", fname, render_type(ctx, &f.ty)))
+                .unwrap_or_else(|| format!("    pub {}: {},", fname, type_s))
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -247,9 +253,10 @@ fn render_type_decl_variant(ctx: &RenderContext, td: &IrTypeDecl, generics_str: 
 
 /// The wrapper a recursive variant field takes: a region twin's field is an
 /// `AlmideRgn` handle into the prelude arena (#1991), any other recursive
-/// enum's field is a `Box`.
+/// enum's field is an `AlmideBox` — a `Box` whose drop, clone and `==` walk a
+/// deep value without one native frame per level (#4252, #4250).
 fn recursive_field_wrapper(ctx: &RenderContext, enum_name: &str) -> &'static str {
-    if ctx.ann.region_enums.contains(enum_name) { "AlmideRgn" } else { "std::boxed::Box" }
+    if ctx.ann.region_enums.contains(enum_name) { "AlmideRgn" } else { "AlmideBox" }
 }
 
 /// Build `impl AlmideRepr for <Type>` for a record or variant type, mirroring
@@ -319,6 +326,19 @@ fn render_repr_impl(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
     };
     let full_name = format!("{}{}", td.name, target_args);
 
+    // A recursive type's literal form is written piece by piece on an
+    // explicit stack (#4250): one level's pieces here, nested values of a
+    // cycle member deferred to the walk, so a 200 000-deep chain interpolates
+    // without one native frame per level.
+    if ctx.ann.recursive_enums.contains(td.name.as_str()) && !ctx.ann.region_enums.contains(td.name.as_str()) {
+        let parts = render_repr_parts_body(ctx, td)?;
+        return Some(format!(
+            "impl{g} AlmideRepr for {n} {{ fn almide_repr(&self) -> String {{ almide_repr_walk(self) }} }}\n\
+             impl{g} AlmideReprNode for {n} {{ fn almide_repr_parts(&self, out: &mut Vec<AlmideReprPart>) {{ {parts} }} }}",
+            g = impl_generics, n = full_name, parts = parts
+        ));
+    }
+
     let body = match &td.kind {
         IrTypeDeclKind::Record { fields } => {
             // `Type { f0: {}, f1: {} }`, fields in declaration order.
@@ -348,6 +368,143 @@ fn render_repr_impl(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
         "impl{} AlmideRepr for {} {{ fn almide_repr(&self) -> String {{ {} }} }}",
         impl_generics, full_name, body
     ))
+}
+
+/// The body of a recursive type's `almide_repr_parts`: the same literal form
+/// `render_repr_impl` formats in one go (record `T { f: v }`, tuple case
+/// `C(a, b)`, record case `C { f: v }`, unit case `C`), pushed as pieces.
+fn render_repr_parts_body(ctx: &RenderContext, td: &IrTypeDecl) -> Option<String> {
+    let mut g = ReprParts { ctx, n: 0 };
+    let lit = |s: &str| format!("out.push(AlmideReprPart::Lit({:?}));", s);
+    match &td.kind {
+        IrTypeDeclKind::Record { fields } => {
+            let shown = ctx.ann.repr_names.get(td.name.as_str())
+                .map(String::as_str).unwrap_or(td.name.as_str());
+            let mut code = lit(&format!("{} {{ ", shown));
+            for (i, f) in fields.iter().enumerate() {
+                code.push_str(&lit(&format!("{}{}: ", if i > 0 { ", " } else { "" }, f.name)));
+                let fname = ctx.field_ident(f.name.as_str());
+                let place = if ctx.ann.boxed_record_fields.contains(&(td.name.to_string(), f.name.to_string())) {
+                    format!("(&*self.{})", fname)
+                } else {
+                    format!("(&self.{})", fname)
+                };
+                code.push_str(&g.parts(&place, &f.ty));
+            }
+            code.push_str(&lit(" }"));
+            Some(code)
+        }
+        IrTypeDeclKind::Variant { cases, .. } => {
+            let arms = cases.iter().map(|v| {
+                let boxed = |field: &str| super::case_field_is_boxed(ctx, Some(&Ty::Named(td.name.clone(), vec![])), v.name.as_str(), field)
+                    || ctx.ann.boxed_case_fields.contains(&(td.name.to_string(), v.name.to_string(), field.to_string()));
+                match &v.kind {
+                    IrVariantKind::Unit => format!("{}::{} => {{ {} }}", td.name, v.name, lit(v.name.as_str())),
+                    IrVariantKind::Tuple { fields } => {
+                        let binds = (0..fields.len()).map(|i| format!("v{}", i)).collect::<Vec<_>>().join(", ");
+                        let mut code = lit(&format!("{}(", v.name));
+                        for (i, t) in fields.iter().enumerate() {
+                            if i > 0 { code.push_str(&lit(", ")); }
+                            let place = if boxed(&i.to_string()) { format!("(&**v{})", i) } else { format!("v{}", i) };
+                            code.push_str(&g.parts(&place, t));
+                        }
+                        code.push_str(&lit(")"));
+                        format!("{}::{}({}) => {{ {} }}", td.name, v.name, binds, code)
+                    }
+                    IrVariantKind::Record { fields } => {
+                        let rust_names: Vec<String> = fields.iter().map(|f| ctx.field_ident(f.name.as_str())).collect();
+                        let mut code = lit(&format!("{} {{ ", v.name));
+                        for (i, f) in fields.iter().enumerate() {
+                            code.push_str(&lit(&format!("{}{}: ", if i > 0 { ", " } else { "" }, f.name)));
+                            let place = if boxed(f.name.as_str()) { format!("(&**{})", rust_names[i]) } else { rust_names[i].clone() };
+                            code.push_str(&g.parts(&place, &f.ty));
+                        }
+                        code.push_str(&lit(" }"));
+                        format!("{}::{} {{ {} }} => {{ {} }}", td.name, v.name, rust_names.join(", "), code)
+                    }
+                }
+            }).collect::<Vec<_>>().join("\n            ");
+            Some(format!("match self {{\n            {}\n        }}", arms))
+        }
+        IrTypeDeclKind::Alias { .. } => None,
+    }
+}
+
+/// Generates the statements that push the pieces of one value: `place` is a
+/// Rust expression of type `&T` for the Almide type `ty`. A value with no
+/// cycle member inside is one piece (its ordinary repr); a cycle member is a
+/// deferred node; a container around a cycle member is opened here with the
+/// runtime's own literal spellings (`some(..)`, `[a, b]`, `["k": v]`, …).
+struct ReprParts<'a, 'c> {
+    ctx: &'a RenderContext<'c>,
+    n: usize,
+}
+
+impl ReprParts<'_, '_> {
+    fn fresh(&mut self) -> String {
+        self.n += 1;
+        format!("__rp{}", self.n)
+    }
+
+    fn parts(&mut self, place: &str, ty: &Ty) -> String {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let lit = |s: &str| format!("out.push(AlmideReprPart::Lit({:?}));", s);
+        let rec = &self.ctx.ann.recursive_enums;
+        if !super::ty_contains_any_recursive(ty, rec) {
+            return format!("out.push(AlmideReprPart::Text(({}).almide_repr()));", place);
+        }
+        match ty {
+            Ty::Named(n, _) if self.ctx.type_aliases.contains_key(n) => {
+                let target = self.ctx.type_aliases[n].clone();
+                self.parts(place, &target)
+            }
+            Ty::Named(n, _) if rec.contains(n.as_str()) => format!("out.push(almide_repr_node({}));", place),
+            Ty::Applied(TC::Option, args) if args.len() == 1 => {
+                let x = self.fresh();
+                let inner = self.parts(&x, &args[0]);
+                format!("match {place} {{ Some({x}) => {{ {} {inner} {} }} None => {{ {} }} }}", lit("some("), lit(")"), lit("none"))
+            }
+            Ty::Applied(TC::Result, args) if args.len() == 2 => {
+                let (a, b) = (self.fresh(), self.fresh());
+                let ok = self.parts(&a, &args[0]);
+                let err = self.parts(&b, &args[1]);
+                format!("match {place} {{ Ok({a}) => {{ {} {ok} {} }} Err({b}) => {{ {} {err} {} }} }}", lit("ok("), lit(")"), lit("err("), lit(")"))
+            }
+            Ty::Applied(TC::List, args) if args.len() == 1 => {
+                let (i, x) = (self.fresh(), self.fresh());
+                let inner = self.parts(&x, &args[0]);
+                format!("{} for ({i}, {x}) in ({place}).iter().enumerate() {{ if {i} > 0 {{ {} }} {inner} }} {}", lit("["), lit(", "), lit("]"))
+            }
+            Ty::Applied(TC::Set, args) if args.len() == 1 => {
+                let (i, x) = (self.fresh(), self.fresh());
+                let inner = self.parts(&x, &args[0]);
+                format!("{} for ({i}, {x}) in ({place}).iter().enumerate() {{ if {i} > 0 {{ {} }} {inner} }} {}", lit("set.from_list(["), lit(", "), lit("])"))
+            }
+            Ty::Applied(TC::Map, args) if args.len() == 2 => {
+                let (m, i, k, v) = (self.fresh(), self.fresh(), self.fresh(), self.fresh());
+                let key = self.parts(&k, &args[0]);
+                let val = self.parts(&v, &args[1]);
+                format!(
+                    "{{ let {m} = {place}; if {m}.is_empty() {{ {} }} else {{ {} for ({i}, ({k}, {v})) in {m}.iter().enumerate() {{ if {i} > 0 {{ {} }} {key} {} {val} }} {} }} }}",
+                    lit("[:]"), lit("["), lit(", "), lit(": "), lit("]")
+                )
+            }
+            Ty::Tuple(elems) => {
+                let t = self.fresh();
+                let mut code = format!("{{ let {t} = {place}; {}", lit("("));
+                for (k, e) in elems.iter().enumerate() {
+                    if k > 0 { code.push_str(&lit(", ")); }
+                    code.push_str(&self.parts(&format!("(&{t}.{k})"), e));
+                }
+                code.push_str(&lit(")"));
+                code.push_str(" }");
+                code
+            }
+            // A non-recursive generic wrapper around a cycle member keeps its
+            // own (recursive) repr.
+            _ => format!("out.push(AlmideReprPart::Text(({}).almide_repr()));", place),
+        }
+    }
 }
 
 /// One match arm of a variant's `AlmideRepr` impl.
