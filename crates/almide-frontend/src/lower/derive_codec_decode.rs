@@ -170,9 +170,17 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
     }
 
     // ok(TypeName { field1: _field1, field2: _field2, ... })
+    // The record is the decoded TYPE's, so it is named by `type_ty`: the
+    // entry program's shadow of a stdlib-owned name is `self.X` (#1828) while
+    // `type_name` is the bare spelling its convention fns are keyed by — a
+    // bare `X { .. }` named no struct in the emitted Rust (E0422, #4273).
+    let record_name = match type_ty {
+        Ty::Named(n, _) => *n,
+        _ => sym(&type_name),
+    };
     let record = IrExpr {
         kind: IrExprKind::Record {
-            name: Some(sym(&type_name)),
+            name: Some(record_name),
             // Each field value carries its DECLARED type — NOT Ty::Unknown. The v1 record
             // builder decides a field's heap-ness from `expr.ty` (binds_p3), so an Unknown
             // scalar field (`id: Int`) was mis-classified as heap → an rc_inc + i64.extend_i32_u
