@@ -181,7 +181,7 @@ pub(super) fn cargo_build_generated(rs_code: &str, project_dir: &std::path::Path
 /// `[profile.release]` (`lto = true`, `codegen-units = 1`), spelled for rustc.
 const FAST_PATH_RELEASE_ARGS: [&str; 4] = ["-C", "lto=fat", "-C", "codegen-units=1"];
 
-fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<std::path::PathBuf> {
+fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bool) -> Option<Result<std::path::PathBuf, String>> {
     let opt_level = if release { "3" } else { "1" };
     // The runtime is built for the same CPU as the main crate: fat LTO does
     // not inline across functions whose target features differ.
@@ -212,7 +212,7 @@ fn try_rlib_fast_build(rs_code: &str, project_dir: &std::path::Path, release: bo
     }
     let output = cmd.output().ok()?;
     if output.status.success() {
-        Some(bin_path)
+        Some(source_still_ours(&rs_path, &slim).map(|()| bin_path))
     } else {
         // else: fall through to the self-contained cargo build
         None
@@ -332,14 +332,36 @@ pub(super) fn cargo_build_generated_with_native(
         && !uses_matrix && !needs_runtime_crates(rs_code)
         && native_deps.is_empty() && source_root.is_none()
     {
-        if let Some(bin_path) = try_rlib_fast_build(rs_code, project_dir, release) {
-            return Ok(bin_path);
+        if let Some(built) = try_rlib_fast_build(rs_code, project_dir, release) {
+            return built;
         }
     }
 
-    write_generated_cargo_project(rs_code, project_dir, native_deps, inputs)?;
+    let src_dir = write_generated_cargo_project(rs_code, project_dir, native_deps, inputs)?;
+    let written = std::fs::read_to_string(src_dir.join("main.rs"))
+        .map_err(|e| format!("failed to read back {}: {}", src_dir.join("main.rs").display(), e))?;
 
-    run_cargo_build_and_locate_binary(project_dir, release)
+    let bin_path = run_cargo_build_and_locate_binary(project_dir, release)?;
+    source_still_ours(&src_dir.join("main.rs"), &written)?;
+    Ok(bin_path)
+}
+
+/// Is the generated source the build compiled still the one this process
+/// wrote (#4269)? The scratch dir is shared and every writer holds its
+/// `BuildDirLock`, but a process outside that protocol (another almide
+/// version, a manual edit, a cache sweep) that rewrites the file while
+/// rustc runs makes the binary someone else's program — and the build used
+/// to report `Built` for it with exit 0. A changed file is a failed build:
+/// the caller says so and exits non-zero instead of installing it.
+pub(super) fn source_still_ours(path: &std::path::Path, written: &str) -> Result<(), String> {
+    match std::fs::read_to_string(path) {
+        Ok(now) if now == written => Ok(()),
+        _ => Err(format!(
+            "the generated source {} changed while it was being compiled — another process wrote to the \
+             shared build directory. Nothing was installed; run the build again",
+            path.display()
+        )),
+    }
 }
 
 /// Scrub rustc output when our codegen produces invalid Rust — replaces
