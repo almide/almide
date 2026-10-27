@@ -5297,11 +5297,14 @@ effect fn vars() -> Map[String, String] = {
 
 
 
-local fn __vars_step(m: Map[String, String], entry: String) -> Map[String, String] =
-  match string.split_once(entry, "=") {
-    some((name, value)) => if value == "\u{0}" then map.remove(m, name) else map.set(m, name, value),
-    none => m,
-  }
+local fn __vars_step(m: Map[String, String], entry: String) -> Map[String, String] = match string.split_once(
+  entry,
+  "=",
+) {
+  some((name, value)) => if value == "\u{0}" then map.remove(m, name)
+  else map.set(m, name, value),
+  none => m,
+}
 
 
 @intrinsic("almide_rt_env___environ")
@@ -20197,29 +20200,29 @@ fn from_list[K, V](xs: List[(K, V)]) -> Map[K, V] = _
 @reuse(m)
 fn map[K, V, B](m: Map[K, V], f: (V) -> B) -> Map[K, B] = _
 
-/// Entries where f(k, v) holds, order kept.
+/// Entries where f((k, v)) holds, order kept.
 @intrinsic("almide_rt_map_filter")
-fn filter[K, V](m: Map[K, V], f: (K, V) -> Bool) -> Map[K, V] = _
+fn filter[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> Map[K, V] = _
 
-/// Folds f(acc, k, v) in insertion order.
+/// Folds f(acc, (k, v)) in insertion order.
 @intrinsic("almide_rt_map_fold")
-fn fold[K, V, A](m: Map[K, V], init: A, f: (A, K, V) -> A) -> A = _
+fn fold[K, V, A](m: Map[K, V], init: A, f: (A, (K, V)) -> A) -> A = _
 
-/// true if some f(k, v) holds; false when empty.
+/// true if some f((k, v)) holds; false when empty.
 @intrinsic("almide_rt_map_any")
-fn any[K, V](m: Map[K, V], f: (K, V) -> Bool) -> Bool = _
+fn any[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> Bool = _
 
-/// true if every f(k, v) holds; true when empty.
+/// true if every f((k, v)) holds; true when empty.
 @intrinsic("almide_rt_map_all")
-fn all[K, V](m: Map[K, V], f: (K, V) -> Bool) -> Bool = _
+fn all[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> Bool = _
 
-/// Number of entries where f(k, v) holds.
+/// Number of entries where f((k, v)) holds.
 @intrinsic("almide_rt_map_count")
-fn count[K, V](m: Map[K, V], f: (K, V) -> Bool) -> Int = _
+fn count[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> Int = _
 
 /// First (k, v) where f holds, or none.
 @intrinsic("almide_rt_map_find")
-fn find[K, V](m: Map[K, V], f: (K, V) -> Bool) -> (K, V)? = _
+fn find[K, V](m: Map[K, V], f: ((K, V)) -> Bool) -> (K, V)? = _
 
 /// Copy with key's value f(v); no-op if absent.
 @intrinsic("almide_rt_map_update")
@@ -20349,13 +20352,13 @@ fn __fallible_map[K, V, B, E](m: Map[K, V], f: (V) -> Result[B, E]) -> Result[Ma
   }
 }
 
-fn __fallible_filter[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[Map[K, V], E] = {
+fn __fallible_filter[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -> Result[Map[K, V], E] = {
   var out: List[(K, V)] = []
   var failed: E? = none
   var stop = false
   for p in map.to_list(m) {
     if stop then ()
-    else match f(p.0, p.1) {
+    else match f(p) {
       ok(keep) => if keep then list.push(out, p) else (),
       err(e) => {
         failed = some(e)
@@ -20369,13 +20372,13 @@ fn __fallible_filter[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Res
   }
 }
 
-fn __fallible_fold[K, V, A, E](m: Map[K, V], init: A, f: (A, K, V) -> Result[A, E]) -> Result[A, E] = {
+fn __fallible_fold[K, V, A, E](m: Map[K, V], init: A, f: (A, (K, V)) -> Result[A, E]) -> Result[A, E] = {
   var acc = init
   var failed: E? = none
   var stop = false
   for p in map.to_list(m) {
     if stop then ()
-    else match f(acc, p.0, p.1) {
+    else match f(acc, p) {
       ok(a) => {
         acc = a
       },
@@ -20391,13 +20394,13 @@ fn __fallible_fold[K, V, A, E](m: Map[K, V], init: A, f: (A, K, V) -> Result[A, 
   }
 }
 
-fn __fallible_any[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[Bool, E] = {
+fn __fallible_any[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -> Result[Bool, E] = {
   var hit = false
   var failed: E? = none
   var stop = false
   for p in map.to_list(m) {
     if stop then ()
-    else match f(p.0, p.1) {
+    else match f(p) {
       ok(b) => if b then {
         hit = true
         stop = true
@@ -20414,13 +20417,13 @@ fn __fallible_any[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result
   }
 }
 
-fn __fallible_all[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[Bool, E] = {
+fn __fallible_all[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -> Result[Bool, E] = {
   var held = true
   var failed: E? = none
   var stop = false
   for p in map.to_list(m) {
     if stop then ()
-    else match f(p.0, p.1) {
+    else match f(p) {
       ok(b) => if b then ()
       else {
         held = false
@@ -20438,13 +20441,13 @@ fn __fallible_all[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result
   }
 }
 
-fn __fallible_count[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[Int, E] = {
+fn __fallible_count[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -> Result[Int, E] = {
   var n = 0
   var failed: E? = none
   var stop = false
   for p in map.to_list(m) {
     if stop then ()
-    else match f(p.0, p.1) {
+    else match f(p) {
       ok(b) => if b then {
         n = n + 1
       } else (),
@@ -20462,7 +20465,7 @@ fn __fallible_count[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Resu
 
 
 
-fn __fallible_find[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Result[(K, V)?, E] = {
+fn __fallible_find[K, V, E](m: Map[K, V], f: ((K, V)) -> Result[Bool, E]) -> Result[(K, V)?, E] = {
   let es = map.to_list(m)
   var hit_at = list.len(es)
   var i = 0
@@ -20470,7 +20473,7 @@ fn __fallible_find[K, V, E](m: Map[K, V], f: (K, V) -> Result[Bool, E]) -> Resul
   var stop = false
   for p in es {
     if stop then ()
-    else match f(p.0, p.1) {
+    else match f(p) {
       ok(hit) => if hit then {
         hit_at = i
         stop = true
