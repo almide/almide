@@ -39,31 +39,30 @@ fn an_unwrapped_http_call_interpolates_inside_a_list_and_a_tuple_literal() {
 
 const REQ: &str = "  let req = http.new_request(\"POST\", \"/x\", \"b\", [(\"Authorization\", \"Bearer T\")])\n";
 
-/// A `value.Path` beside the request. It replaced the runtime-backed
-/// `JsonPath` here when that type was removed, but it is an ordinary
-/// `mod type` over a list with no declared repr, so it is no runtime-backed
-/// value: the declared-repr cases above leave it out (they passed with it only
-/// while the signature table mis-read `value.root()` as the builtin `Path`,
-/// a `String`). The variant case below still uses it as a payload.
-const PATH: &str = "  let path = value.root() |> value.key(\"user\")\n";
+/// A response beside the request: a second runtime-backed value with its own
+/// declared repr (`http.__http_response_repr`), as the C-432 fixture
+/// (spec/wasm_cross/runtime_backed_variant_repr.almd) carries it.
+const RESP: &str = "  let resp = http.response(200, \"ok\")\n";
 
 #[test]
 fn a_tuple_of_runtime_backed_values_interpolates_through_the_declared_reprs() {
     let src = format!(
-        "import http\nimport json\n\neffect fn main() -> Unit = {{\n{REQ}  println(\"${{(req, 1)}}\")\n}}\n"
+        "import http\nimport json\n\neffect fn main() -> Unit = {{\n{REQ}{RESP}  println(\"${{(req, resp, 1)}}\")\n}}\n"
     );
     let ops = main_ops(&src);
     assert_eq!(calls(&ops, "http.__http_request_repr"), 1, "{ops:#?}");
+    assert_eq!(calls(&ops, "http.__http_response_repr"), 1, "{ops:#?}");
     assert_eq!(calls(&ops, "list.to_string_s"), 0, "the carrier was displayed:\n{ops:#?}");
 }
 
 #[test]
 fn a_list_literal_of_runtime_backed_interpolations_lowers() {
     let src = format!(
-        "import http\nimport json\n\neffect fn main() -> Unit = {{\n{REQ}  let lines = [\"${{req}}\", \"${{(req, 1)}}\"]\n  println(lines |> list.join(\"\\n\"))\n}}\n"
+        "import http\nimport json\n\neffect fn main() -> Unit = {{\n{REQ}{RESP}  let lines = [\"${{req}}\", \"${{(req, resp, 1)}}\", \"${{some(resp)}}\"]\n  println(lines |> list.join(\"\\n\"))\n}}\n"
     );
     let ops = main_ops(&src);
     assert_eq!(calls(&ops, "http.__http_request_repr"), 2, "{ops:#?}");
+    assert_eq!(calls(&ops, "http.__http_response_repr"), 2, "{ops:#?}");
     for carrier in ["list.to_string_s", "list.to_string_x", "option.to_string_ls"] {
         assert_eq!(calls(&ops, carrier), 0, "the carrier was displayed via {carrier}:\n{ops:#?}");
     }
@@ -107,11 +106,11 @@ fn synthesized_reprs(ops: &[String], ty: &str) -> usize {
 fn a_user_variant_with_a_runtime_backed_payload_is_not_displayed_through_its_carrier() {
     let cases = [
         ("type Ev = | Got(HttpRequest) | Nothing", "let v = Got(req)", "Ev"),
-        ("type Ev = | Hit { at: value.Path } | Nothing", "let v = Hit { at: path }", "Ev"),
+        ("type Ev = | Hit { at: HttpResponse } | Nothing", "let v = Hit { at: resp }", "Ev"),
         ("type Tag[T] = | Tagged(T, HttpRequest)", "let v: Tag[Int] = Tagged(1, req)", "Tag"),
     ];
     for (decl, bind, ty) in cases {
-        let src = format!("import http\nimport json\n\n{decl}\n\neffect fn main() -> Unit = {{\n{REQ}{PATH}  {bind}\n  println(\"${{v}}\")\n}}\n");
+        let src = format!("import http\nimport json\n\n{decl}\n\neffect fn main() -> Unit = {{\n{REQ}{RESP}  {bind}\n  println(\"${{v}}\")\n}}\n");
         let shown = main_ops_if_lowered(&src).map_or(0, |ops| synthesized_reprs(&ops, ty));
         assert_eq!(shown, 0, "`{decl}` was displayed through its structural repr (the carrier):\n{src}");
     }
