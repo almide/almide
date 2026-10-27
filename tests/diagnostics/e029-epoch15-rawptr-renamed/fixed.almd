@@ -1,4 +1,6 @@
-// The fix: the opaque foreign token is spelled `Handle`.
+// The type `RawPtr` is `Handle` since dialect epoch 15 (ADR-0031 D1): an
+// opaque foreign token, only passed back to an `@extern` fn. `almide fix`
+// renames the spelling.
 fn keep(h: Handle) -> Int = 0
 
 fn main() -> Unit = println("ok")
