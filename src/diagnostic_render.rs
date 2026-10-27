@@ -16,17 +16,19 @@ pub fn init_color() {
     }
 }
 
-/// #4092: a raw bidirectional control character (U+202A..U+202E,
-/// U+2066..U+2069) echoed into the terminal reorders the rendered line — the
-/// same Trojan-Source effect E101 refuses in the source. Every echoed source
-/// line shows it as its escape `\u{202E}` instead, as rustc does.
+/// #4092 / #4266: a raw character E101 refuses (`is_hidden_source_char`: a
+/// bidi control, U+2028 / U+2029, a zero-width or Tags-block character, a raw
+/// control) echoed into the terminal reorders, breaks or hides the rendered
+/// line — and hands invisible text to the agent reading the diagnostic. Every
+/// echoed source line shows it as its escape `\u{202E}` instead, as rustc does
+/// for the bidi controls.
 fn escape_bidi(text: &str) -> std::borrow::Cow<'_, str> {
-    if !text.chars().any(|c| almide_lang::lexer::bidi_control_name(c).is_some()) {
+    if !text.chars().any(|c| almide_lang::lexer::is_hidden_source_char(c)) {
         return std::borrow::Cow::Borrowed(text);
     }
     let mut out = String::with_capacity(text.len() + 16);
     for c in text.chars() {
-        if almide_lang::lexer::bidi_control_name(c).is_some() {
+        if almide_lang::lexer::is_hidden_source_char(c) {
             out.push_str(&format!("\\u{{{:04X}}}", c as u32));
         } else {
             out.push(c);
@@ -39,7 +41,7 @@ fn escape_bidi(text: &str) -> std::borrow::Cow<'_, str> {
 /// run, so padding and carets stay under the characters they point at.
 fn escaped_width(line: &str, n: usize) -> usize {
     line.chars().take(n).map(|c| {
-        if almide_lang::lexer::bidi_control_name(c).is_some() { format!("\\u{{{:04X}}}", c as u32).len() } else { 1 }
+        if almide_lang::lexer::is_hidden_source_char(c) { format!("\\u{{{:04X}}}", c as u32).len() } else { 1 }
     }).sum()
 }
 
@@ -270,6 +272,16 @@ fn json_escape(s: &str) -> String {
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
             c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            // #4266: JSON leaves Cf / Zl / Zp / Tags raw, so a hidden
+            // character quoted into a message or `here` would reach the agent
+            // reading `--json` invisibly. Write it as `\uXXXX` (a surrogate
+            // pair above the BMP), which every JSON reader decodes back.
+            c if almide_lang::lexer::is_hidden_source_char(c) => {
+                let mut units = [0u16; 2];
+                for u in c.encode_utf16(&mut units).iter() {
+                    out.push_str(&format!("\\u{:04x}", u));
+                }
+            }
             c => out.push(c),
         }
     }
@@ -526,6 +538,23 @@ mod caret_tests {
         // col 11 is U+2066: after `  // a` (6), the 8-wide escape of U+202E,
         // ` } ` (3) — so the caret starts at rendered column 18, 8 wide.
         assert_eq!(caret(&out), (6 + 8 + 3 + 1, 8));
+    }
+
+    /// #4266: tag characters, U+2028 and zero-width characters are echoed as
+    /// escapes too — a diagnostic must not carry hidden text to its reader.
+    #[test]
+    fn hidden_characters_are_echoed_as_escapes() {
+        let src = "  let s = \"ok\u{E0049}\u{E0047}\u{200B}\u{2028}x\"";
+        let mut d = Diagnostic::error("m", "h", "c");
+        d.line = Some(1);
+        d.col = Some(3);
+        d.end_col = Some(6);
+        let out = display_with_source(&d, src);
+        assert!(
+            !out.chars().any(almide_lang::lexer::is_hidden_source_char),
+            "raw hidden character reached the rendered diagnostic:\n{out}"
+        );
+        assert!(out.contains("ok\\u{E0049}\\u{E0047}\\u{200B}\\u{2028}x"), "{out}");
     }
 
     /// Every string field is valid JSON whatever it holds. A Windows path in
