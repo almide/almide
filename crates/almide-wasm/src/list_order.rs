@@ -223,9 +223,7 @@ impl Emitter<'_> {
                 match elem {
                     FLOAT => {
                         for l in [hcur, hbest] {
-                            i.local_get(l);
-                            i.local_get(l).i64_const(63).i64_shr_s().i64_const(1).i64_shr_u();
-                            i.i64_xor();
+                            crate::list_sort::push_float_order_key(&mut i, l);
                         }
                         if is_min {
                             i.i64_lt_s();
