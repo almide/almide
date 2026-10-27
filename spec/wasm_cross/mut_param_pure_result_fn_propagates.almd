@@ -46,8 +46,12 @@ fn pick(hyps: Map[String, Hyp], mandatory: List[String], dummy_hyps: List[String
     let hy = map.get(hyps, h) ?? empty_hyp()
     let same = mandatory |> list.filter((m) => (map.get(hyps, m) ?? empty_hyp()).tc == hy.tc)
     match list.first(same) {
-      some(m) => { dummies = map.set(dummies, h, (map.get(hyps, m) ?? empty_hyp()).name) },
-      none => { dummies = map.set(dummies, h, "some_" + hy.tc) },
+      some(m) => {
+        dummies = map.set(dummies, h, (map.get(hyps, m) ?? empty_hyp()).name)
+      },
+      none => {
+        dummies = map.set(dummies, h, "some_" + hy.tc)
+      },
     }
   }
   dummies
