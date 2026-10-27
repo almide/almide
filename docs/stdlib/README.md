@@ -1004,12 +1004,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `map.is_empty(m: Map[K, V]) -> Bool` — true iff m has no entries.
 - `map.from_list(xs: List[(K, V)]) -> Map[K, V]` — Map of the pairs xs; a repeated key takes the last value.
 - `map.map(m: Map[K, V], f: (V) -> B) -> Map[K, B]` — Same keys and order, values replaced by f(v).
-- `map.filter(m: Map[K, V], f: (K, V) -> Bool) -> Map[K, V]` — Entries where f(k, v) holds, order kept.
-- `map.fold(m: Map[K, V], init: A, f: (A, K, V) -> A) -> A` — Folds f(acc, k, v) in insertion order.
-- `map.any(m: Map[K, V], f: (K, V) -> Bool) -> Bool` — true if some f(k, v) holds; false when empty.
-- `map.all(m: Map[K, V], f: (K, V) -> Bool) -> Bool` — true if every f(k, v) holds; true when empty.
-- `map.count(m: Map[K, V], f: (K, V) -> Bool) -> Int` — Number of entries where f(k, v) holds.
-- `map.find(m: Map[K, V], f: (K, V) -> Bool) -> Option[(K, V)]` — First (k, v) where f holds, or none.
+- `map.filter(m: Map[K, V], f: ((K, V)) -> Bool) -> Map[K, V]` — Entries where f((k, v)) holds, order kept.
+- `map.fold(m: Map[K, V], init: A, f: (A, (K, V)) -> A) -> A` — Folds f(acc, (k, v)) in insertion order.
+- `map.any(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool` — true if some f((k, v)) holds; false when empty.
+- `map.all(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool` — true if every f((k, v)) holds; true when empty.
+- `map.count(m: Map[K, V], f: ((K, V)) -> Bool) -> Int` — Number of entries where f((k, v)) holds.
+- `map.find(m: Map[K, V], f: ((K, V)) -> Bool) -> Option[(K, V)]` — First (k, v) where f holds, or none.
 - `map.update(m: Map[K, V], key: K, f: (V) -> V) -> Map[K, V]` — Copy with key's value f(v); no-op if absent.
 - `map.upsert(m: Map[K, V], key: K, init: V, f: (V) -> V) -> Map[K, V]` — key -> f(old) if present, else init appended.
 - `map.clear(mut m: Map[K, V]) -> Unit` — Removes every entry of m in place.

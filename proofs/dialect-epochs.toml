@@ -583,6 +583,7 @@ breaks = [
   "`map.get_or(m, key, default)` → rewrite as `map.get(m, key) ?? default`: one Option read, one fallback (R-map-02)",
   "`map.insert(m, key, value)` → rewrite as `m[key] = value`, or `m = map.set(m, key, value)`: the same in-place update (R-map-01)",
   "`map.delete(m, key)` → rewrite as `m = map.remove(m, key)`: the same in-place removal (R-map-01)",
+  "`map.filter`, `map.any`, `map.all`, `map.count` and `map.find` hand their callback the entry as ONE `(K, V)` tuple (`f: ((K, V)) -> Bool`), and `map.fold` hands it the accumulator and that tuple (`f: (A, (K, V)) -> A`), the element `map.to_list` yields (R-map-09, #4004): a lambda `(k, v) => …` still checks, its two parameters read as the tuple's elements, but `map.fold(m, init, (acc, k, v) => …)` is E004 — rewrite as `map.fold(m, init, (acc, (k, v)) => …)`; a named function passed as one of these callbacks takes the tuple (`fn keep(e: (String, Int)) -> Bool`) where it took the key and the value",
   "`math.abs(n)` → rewrite as `int.abs(n)`: the same, on the type it reads (R-math-01)",
   "`math.fmax(a, b)` → rewrite as `float.max(a, b)`: the same, on the type it reads (R-math-01)",
   "`math.fmin(a, b)` → rewrite as `float.min(a, b)`: the same, on the type it reads (R-math-01)",
