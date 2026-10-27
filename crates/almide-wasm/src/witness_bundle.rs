@@ -52,6 +52,7 @@ pub fn records(
 /// alloc <function index of $alloc in the shipped bytes>
 /// init <one token per init event: position:ordinal | ->
 /// bounds <one token per bounds token: position:ordinal | ->
+/// judges <one token per copy-on-write judge call: position:ordinal | ->
 /// ```
 ///
 /// laid out exactly as the witness texts (`;` between sites / stretches,
@@ -80,6 +81,7 @@ fn records_inner(
     let bounds = super::take_bounds();
     let init = super::take_init();
     let bounds_anchors = super::bounds::take_anchors();
+    let judge_anchors = super::bounds::take_judges();
     let init_anchors = super::init::take_anchors();
     let seals = super::anchor::take();
     let decls = super::decls::take_for(emitted).ok_or("no declaration table for the shipped module")?;
@@ -104,7 +106,7 @@ fn records_inner(
         Some(fmap) => {
     let locate = Locator::new(emitted, shipped, seals, fmap)?;
     format!(
-        "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\n",
+        "almide-anchors 1\nalloc {}\ninit {}\nbounds {}\njudges {}\n",
         {
             // `$alloc`'s slot, through the same map (the prune renumbers).
             let d = (crate::F_ALLOC - cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?) as usize;
@@ -115,6 +117,7 @@ fn records_inner(
         },
         locate.text(&pick(init_anchors))?,
         locate.text(&pick(bounds_anchors))?,
+        locate.text(&pick(judge_anchors))?,
     )
         }
     };
