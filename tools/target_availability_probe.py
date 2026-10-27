@@ -131,7 +131,10 @@ NOMINAL = {
     "Fd": ("unix.shm_create(8)!", "unix.shm_create", "unix"),
     "Uuid": ('uuid.parse("00000000-0000-0000-0000-000000000000")!', "uuid.parse", "uuid"),
     # An opaque wrapper: only `secret.new` makes one.
-    "Secret": ("secret.new(0)", "secret.new", "secret"),
+    "Secret": ("secret.new({0})", "secret.new", "secret"),
+    # The opaque collections (#4256): built through their list constructor.
+    "Deque": ("deque.from_list([{0}])", "deque.from_list", None),
+    "Heap": ("heap.from_list([{0}])", "heap.from_list", None),
     "ProcessChild": ('process.start(process.ProcessCommand { cmd: "true", args: [] })!', "process.start", "process"),
 }
 BYTES8 = "bytes.from_list([0, 0, 0, 0, 0, 0, 0, 0])"
@@ -288,6 +291,11 @@ def dummy(t: dict, ctx: Ctx, types: dict) -> str:
             for m in (imp or "").split(","):
                 if m:
                     ctx.imports.add(m)
+            # A generic opaque type is built at its own type argument
+            # (`Secret[Bytes]` is `secret.new(<bytes>)`), Int when unapplied.
+            if "{0}" in expr:
+                args = t.get("args") or []
+                expr = expr.replace("{0}", dummy(args[0], ctx, types) if args else "0")
             return expr
         if name in types:
             mod, kind = types[name]
