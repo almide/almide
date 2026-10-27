@@ -398,7 +398,7 @@ impl<'a> Interpreter<'a> {
         };
         let mut out = Vec::new();
         for (k, v) in entries.iter() {
-            let keep = val!(self.apply_closure(&clo, vec![Value::tuple(vec![k.clone(), v.clone()])]));
+            let keep = val!(self.apply_closure(&clo, entry_args(&clo, vec![], k, v)));
             if matches!(keep, Value::Bool(true)) {
                 out.push((k.clone(), v.clone()));
             }
@@ -418,7 +418,7 @@ impl<'a> Interpreter<'a> {
             Err(f) => return f,
         };
         for (k, v) in entries.iter() {
-            let hit = val!(self.apply_closure(&clo, vec![Value::tuple(vec![k.clone(), v.clone()])]));
+            let hit = val!(self.apply_closure(&clo, entry_args(&clo, vec![], k, v)));
             if matches!(hit, Value::Bool(true)) {
                 return Flow::val(Value::Option(Some(Box::new(Value::tuple(vec![
                     k.clone(),
@@ -445,7 +445,7 @@ impl<'a> Interpreter<'a> {
             Err(f) => return f,
         };
         for (k, v) in entries.iter() {
-            acc = val!(self.apply_closure(&clo, vec![acc, Value::tuple(vec![k.clone(), v.clone()])]));
+            acc = val!(self.apply_closure(&clo, entry_args(&clo, vec![acc], k, v)));
         }
         Flow::val(acc)
     }
@@ -515,3 +515,19 @@ include!("hofs_carrier.rs");
 include!("hofs_list_ops.rs");
 include!("hofs_map_set_ops.rs");
 include!("hofs_fallible.rs");
+
+/// The arguments a map entry callback is applied to (R-map-09): the leading
+/// ones, then the entry as ONE `(k, v)` tuple — the surface's callback. A
+/// closure with one parameter more than that is the spread form
+/// `almide_ir::entry_split` adapts a callback to where the self-hosted body
+/// declares it (the IR a wasm-leg cut point hands this interpreter), and gets
+/// the key and the value separately.
+pub(crate) fn entry_args(clo: &crate::Closure, mut lead: Vec<Value>, k: &Value, v: &Value) -> Vec<Value> {
+    if clo.params.len() == lead.len() + 2 {
+        lead.push(k.clone());
+        lead.push(v.clone());
+    } else {
+        lead.push(Value::tuple(vec![k.clone(), v.clone()]));
+    }
+    lead
+}
