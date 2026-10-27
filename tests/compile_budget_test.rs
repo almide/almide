@@ -41,6 +41,8 @@ struct Run {
     type_work: u64,
     /// `budget exhaustiveness_steps … work=N`.
     match_work: u64,
+    /// `built type_lists=N`: type element lists allocated (memory).
+    lists_built: u64,
 }
 
 impl Run {
@@ -48,6 +50,7 @@ impl Run {
         match budget {
             "type_size" => self.type_work,
             "exhaustiveness_steps" => self.match_work,
+            "type_lists" => self.lists_built,
             other => panic!("no work column for {other}"),
         }
     }
@@ -72,8 +75,16 @@ fn scratch(name: &str, text: &str) -> PathBuf {
 
 /// `almide check <src> --budget-report [extra]`, killed at the guard.
 fn check(name: &str, text: &str, extra: &[&str]) -> Run {
+    check_env(name, text, extra, None)
+}
+
+fn check_env(name: &str, text: &str, extra: &[&str], env: Option<(&str, &str)>) -> Run {
     let path = scratch(name, text);
-    let mut child = Command::new(env!("CARGO_BIN_EXE_almide"))
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
+    if let Some((k, v)) = env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd
         .arg("check")
         .arg(&path)
         .arg("--budget-report")
@@ -82,6 +93,14 @@ fn check(name: &str, text: &str, extra: &[&str]) -> Run {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn almide");
+    // Drain stderr on its own thread: a run with many diagnostics fills the
+    // pipe, and a child blocked on a full pipe would read as a hang.
+    let mut pipe = child.stderr.take().unwrap();
+    let reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = pipe.read_to_string(&mut text);
+        text
+    });
     let start = Instant::now();
     let status = loop {
         if let Some(s) = child.try_wait().expect("wait") {
@@ -94,11 +113,15 @@ fn check(name: &str, text: &str, extra: &[&str]) -> Run {
         }
         std::thread::sleep(Duration::from_millis(20));
     };
-    let mut stderr = String::new();
-    child.stderr.take().unwrap().read_to_string(&mut stderr).unwrap();
+    let stderr = reader.join().expect("stderr reader");
     let type_work = work_of(&stderr, "type_size");
     let match_work = work_of(&stderr, "exhaustiveness_steps");
-    Run { ok: status.success(), stderr, type_work, match_work }
+    let lists_built = stderr
+        .lines()
+        .find_map(|l| l.strip_prefix("built type_lists="))
+        .and_then(|n| n.trim().parse().ok())
+        .unwrap_or_else(|| panic!("no `built type_lists` report line:\n{stderr}"));
+    Run { ok: status.success(), stderr, type_work, match_work, lists_built }
 }
 
 /// #4114: `let t(i) = (t(i-1), t(i-1))`.
@@ -171,9 +194,21 @@ fn nesting(depth: usize) -> String {
 /// The gate's predicate over one generator: every size ends in `verdict`
 /// (checked by the caller's closure) and the counted work is linear.
 fn assert_linear(shape: &str, budget: &str, sizes: &[usize], make: impl Fn(usize) -> String, extra: &[&str], verdict: impl Fn(usize, &Run)) {
+    assert_linear_env(shape, budget, sizes, make, extra, None, verdict)
+}
+
+fn assert_linear_env(
+    shape: &str,
+    budget: &str,
+    sizes: &[usize],
+    make: impl Fn(usize) -> String,
+    extra: &[&str],
+    env: Option<(&str, &str)>,
+    verdict: impl Fn(usize, &Run),
+) {
     let mut prev: Option<(usize, u64)> = None;
     for &n in sizes {
-        let run = check(&format!("{shape}-{n}.almd"), &make(n), extra);
+        let run = check_env(&format!("{shape}-{n}.almd"), &make(n), extra, env);
         verdict(n, &run);
         if let Some((pn, pw)) = prev {
             let per_unit = run.work(budget).max(1) as f64 / n as f64;
@@ -346,4 +381,36 @@ fn the_dependency_and_manifest_budgets_refuse_before_fetching() {
     assert!(!ok && out.contains("too many dependencies (3, max 2)"), "dependency_count=2:\n{out}");
     let (ok, out) = check_in(&app, &["--budget", "manifest_bytes=10"]);
     assert!(!ok && out.contains("is larger than 10 bytes"), "manifest_bytes=10:\n{out}");
+}
+
+/// ADR-0030 D5: types share structure. With the type-size budget lifted, the
+/// #4114 chain checks clean, and the type lists it allocates — its memory —
+/// grow linearly with the chain, within the hang guard (its time).
+#[test]
+fn the_doubling_chain_shares_its_types_with_the_budget_lifted() {
+    let value = format!("type_size={U64_MAX}");
+    let lifted = ["--budget", value.as_str()];
+    assert_linear("doubling-shared", "type_lists", &[16, 32, 64, 128], doubling, &lifted, ends_clean("doubling, budget lifted"));
+    assert_linear("generic-doubling-shared", "type_lists", &[16, 32, 64, 128], generic_doubling, &lifted, ends_clean("generic doubling, budget lifted"));
+}
+
+/// The negative control of the sharing gate: with sharing disabled
+/// (`ALMIDE_CONTROL_NO_TYPE_SHARING`, every clone copies the tree) the same
+/// predicate must fail, because the lists allocated double with each line.
+#[test]
+fn disabling_type_sharing_fails_the_sharing_gate() {
+    let value = format!("type_size={U64_MAX}");
+    let lifted = ["--budget", value.as_str()];
+    let result = std::panic::catch_unwind(|| {
+        assert_linear_env(
+            "doubling-unshared",
+            "type_lists",
+            &[8, 12, 16],
+            doubling,
+            &lifted,
+            Some(("ALMIDE_CONTROL_NO_TYPE_SHARING", "1")),
+            |_, _| {},
+        );
+    });
+    assert!(result.is_err(), "the doubling chain stayed linear with type sharing disabled — the gate does not read the sharing");
 }
