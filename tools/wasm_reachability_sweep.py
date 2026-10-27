@@ -205,7 +205,7 @@ def synth_ty(ty, depth=0, tv="1"):
         name = ty.get("name", "")
         if name in NAMED_CANDIDATES: return NAMED_CANDIDATES[name]
         if len(name) == 1 and name.isupper(): return [tv]
-        return constructed(name, depth, tv)
+        return constructed(name, depth, tv, ty.get("args") or [])
     if k == "list":
         return [f"[{c}]" for c in synth_ty(ty.get("inner", {}), depth + 1, tv)[:1]]
     if k == "set":
@@ -264,9 +264,15 @@ def index_constructors(fns):
             CONSTRUCTORS.setdefault(ret["name"], []).append(f)
 
 
-def constructed(name, depth, tv):
+def constructed(name, depth, tv, args=()):
     """`module.ctor(args)` for each constructor of `name` whose own params
-    synthesize, every type variable at `tv`."""
+    synthesize, every type variable at `tv` — or, for an applied type
+    (`Secret[Bytes]`), at a value of its first type argument, so the generic
+    constructor (`secret.new[A](x: A)`) builds the type the param asks for."""
+    if args:
+        inner = synth_ty(args[0], depth + 1, tv)
+        if inner:
+            tv = inner[0]
     out = []
     for c in CONSTRUCTORS.get(name, []):
         parts = [synth_ty(p["type"], depth + 1, tv) for p in c["params"]]
