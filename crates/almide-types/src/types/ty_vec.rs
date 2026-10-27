@@ -151,6 +151,12 @@ impl From<&[Ty]> for TyVec {
     }
 }
 
+impl From<&Vec<Ty>> for TyVec {
+    fn from(items: &Vec<Ty>) -> Self {
+        TyVec::from(items.clone())
+    }
+}
+
 impl<const N: usize> From<[Ty; N]> for TyVec {
     fn from(items: [Ty; N]) -> Self {
         TyVec::from(Vec::from(items))

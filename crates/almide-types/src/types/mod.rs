@@ -519,7 +519,7 @@ impl Ty {
         match unique.len() {
             0 => Ty::Unit,
             1 => match unique.into_iter().next() { Some(t) => t, None => Ty::Unit },
-            _ => Ty::Union(unique),
+            _ => Ty::Union(unique.into()),
         }
     }
 
