@@ -35,6 +35,18 @@ pub(crate) struct Cli {
     /// build — the instrument the #4129 tests drive a dev binary with.
     #[arg(long = "lock-switches", global = true, hide = true)]
     pub(crate) lock_switches: bool,
+    /// Set a compile-cost budget for this run (repeatable): `--budget
+    /// type_size=8192`. The budgets bound what untrusted source can make the
+    /// compiler do (ADR-0030); `almide budgets` lists them. Only the command
+    /// line sets one — no attribute, manifest key or environment variable —
+    /// and `--profile critical` refuses it.
+    #[arg(long = "budget", value_name = "NAME=N", global = true)]
+    pub(crate) budget: Vec<String>,
+    /// Print each budget's observed maximum and counted work to stderr when
+    /// the run ends — what scripts/measure-compile-budgets.sh and the
+    /// blowup-shape gate (tests/compile_budget_test.rs) read.
+    #[arg(long = "budget-report", global = true, hide = true)]
+    pub(crate) budget_report: bool,
     /// `almide survive`'s hand-off to its child runs (#2147, #4129): every
     /// compiler read of this `.almd` path returns the text of
     /// `--survive-overlay-text` instead of the disk bytes. An argument, never
@@ -584,6 +596,13 @@ pub(crate) enum Commands {
         /// stays byte-identical to the baselines.
         #[arg(long = "trace-map")]
         trace_map: bool,
+    },
+    /// List the compile-cost budgets (ADR-0030): what each counts, its
+    /// default and the diagnostic that ends a run over it.
+    Budgets {
+        /// Render the markdown table `docs/specs/cli.md` embeds.
+        #[arg(long)]
+        md: bool,
     },
     /// List the `ALMIDE_*` environment switches the tree reads — the registry
     /// (`almide_base::env::SWITCHES`, #2205), enumerable at run time.
