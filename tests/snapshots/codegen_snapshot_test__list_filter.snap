@@ -208,7 +208,6 @@ pub fn almide_rt_list_is_empty<T>(xs: &[T]) -> bool { xs.is_empty() }
 pub fn almide_rt_list_first<A: Clone>(xs: &[A]) -> Option<A> { xs.first().cloned() }
 pub fn almide_rt_list_last<A: Clone>(xs: &[A]) -> Option<A> { xs.last().cloned() }
 pub fn almide_rt_list_get<T: Clone>(xs: &[T], i: i64) -> Option<T> { xs.get(i as usize).cloned() }
-pub fn almide_rt_list_get_or<T: Clone>(xs: &[T], i: i64, default: T) -> T { xs.get(i as usize).cloned().unwrap_or(default) }
 pub fn almide_rt_list_contains<T: PartialEq>(xs: &[T], x: T) -> bool { xs.contains(&x) }
 pub fn almide_rt_list_index_of<T: PartialEq>(xs: &[T], x: T) -> Option<i64> { xs.iter().position(|v| *v == x).map(|i| i as i64) }
 pub fn almide_rt_list_join(xs: &[AlmideString], sep: &str) -> AlmideString { let __almide_out: String = xs.join(sep); __almide_out.into() }
@@ -221,7 +220,7 @@ pub fn almide_rt_list_sort<A: Ord + Clone>(xs: &[A]) -> Vec<A> { let mut v = xs.
 // instead of the `Ord`-bounded generics (IntrinsicLoweringPass swaps the
 // symbol). This is the ORDERING twin of the wasm sign-magnitude bit trick and
 // matches the interp's `total_cmp`. NOTE: this list-min/max totalOrder is a
-// DIFFERENT contract from the SCALAR `float.min`/`max`/`math.fmin`/`fmax`,
+// DIFFERENT contract from the SCALAR `float.min`/`max`,
 // which keep their C-049 NaN-IGNORING semantics. See C-055.
 pub fn almide_rt_list_sort_float(xs: &[f64]) -> Vec<f64> { let mut v = xs.to_vec(); v.sort_by(|a, b| a.total_cmp(b)); v }
 pub fn almide_rt_list_min_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().min_by(|a, b| a.total_cmp(b)) }
@@ -251,7 +250,6 @@ pub fn almide_rt_list_max<T: Ord + Clone>(xs: &[T]) -> Option<T> { xs.iter().max
 // used to keep the `as usize` wrap (chunk: the whole list as one chunk,
 // windows: empty).
 pub fn almide_rt_list_chunk<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n <= 0 { almide_abort("chunk size must be positive"); } xs.chunks(n as usize).map(|c| c.to_vec()).collect() }
-pub fn almide_rt_list_windows<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> { if n <= 0 { almide_abort("window size must be positive"); } if (n as usize) > xs.len() { return vec![]; } xs.windows(n as usize).map(|w| w.to_vec()).collect() }
 pub fn almide_rt_list_dedup<T: Clone + PartialEq>(xs: &[T]) -> Vec<T> { let mut r = Vec::new(); for x in xs { if r.last() != Some(x) { r.push(x.clone()); } } r }
 // The seen set is an `AlmideMap` (#3704): it hashes only the exact-equality
 // key types (Int, String, Bool, their pairs, List[Int] / List[String]) and
@@ -284,8 +282,8 @@ pub fn almide_rt_list_zip_with<A: Clone, B: Clone, C>(a: Vec<A>, b: Vec<B>, f: s
 // Takes a SLICE, not an owned `Vec`. The element type is already `Clone`, so
 // consuming the outer list bought nothing — and it made `flatten` unusable
 // alongside a borrow of the same binding in one expression:
-// `list.get_or(xs, 0, list.flatten(xs))` moved `xs` into `flatten` while
-// `get_or` borrowed it, so `check` accepted and rustc rejected with E0505
+// `list.get(xs, 0)` beside `list.flatten(xs)` moved `xs` into `flatten` while
+// `get` borrowed it, so `check` accepted and rustc rejected with E0505
 // (differential fuzz). A slice parameter takes a borrow like every other
 // read-only list fn, and an owned `Vec` still deref-coerces into it.
 pub fn almide_rt_list_flatten<T: Clone>(xs: &[Vec<T>]) -> Vec<T> { xs.iter().flatten().cloned().collect() }
@@ -443,24 +441,10 @@ pub fn almide_rt_list_unique_by<T: Clone, K: PartialEq + 'static>(xs: Vec<T>, f:
     }
     result
 }
-pub fn almide_rt_list_shuffle<T>(mut xs: Vec<T>) -> Vec<T> {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64;
-    for i in (1..xs.len()).rev() {
-        let mut h = DefaultHasher::new();
-        seed.hash(&mut h);
-        i.hash(&mut h);
-        let j = (h.finish() as usize) % (i + 1);
-        xs.swap(i, j);
-        seed = seed.wrapping_add(1);
-    }
-    xs
-}
-// Same ALS-T6 guard as `almide_rt_list_windows`: n == 0 aborts with the
+// Same ALS-T6 guard as `almide_rt_list_chunk`: n <= 0 aborts with the
 // unified `Error: …` + exit 1 form (std's `windows(0)` panics — a raw Rust
-// panic exit 101 the wasm leg never shows). n > len returns empty like the
-// plural twin instead of leaking std's behavior.
+// panic exit 101 the wasm leg never shows). n > len returns empty instead of
+// leaking std's behavior.
 pub fn almide_rt_list_window<T: Clone>(xs: &[T], n: i64) -> Vec<Vec<T>> {
     if n <= 0 { almide_abort("window size must be positive"); }
     if (n as usize) > xs.len() { return vec![]; }
@@ -1476,9 +1460,6 @@ pub fn almide_rt_list_clear<A>(xs: &mut Vec<A>) { xs.clear(); }
 
 // ── Algorithmic primitives (Phase 3 stdlib expansion) ──
 
-pub fn almide_rt_list_binary_search(xs: &[i64], target: i64) -> Option<i64> {
-    xs.binary_search(&target).ok().map(|i| i as i64)
-}
 
 // map extern — Rust native implementations
 // TOML templates use &{m} for read-only, {m} for consuming
@@ -1707,11 +1688,29 @@ pub fn almide_rt_map_key_bytes<K: 'static>(k: &K) -> Option<Vec<u8>> {
     None
 }
 
-/// The probe distance at which an insert marks its index flooded (#4104).
-/// A good spread at load 3/4 keeps clusters far shorter; keys crafted to
-/// collide under the fast hash make every insert walk the whole cluster, so
-/// past this the owner moves to the ordered index.
+/// The least probe distance at which an insert marks its index flooded
+/// (#4104); the bound a table actually uses is [`almide_map_flood_bound`].
+/// Keys crafted to collide under the fast hash make every insert walk the
+/// whole cluster, so past the bound the owner moves to the ordered index.
 pub const ALMIDE_MAP_FLOOD_PROBES: usize = 128;
+
+/// Probe steps allowed per bit of the table's size. The longest cluster of a
+/// WELL-spread hash grows with the table — logarithmically: linear probing at
+/// load 3/4 (dead slots count toward it) gives a longest probe of about
+/// 18·log2(slots), and plain Int keys churned by delete + insert at 100 000
+/// entries (tests/map_delete_amortized_test.rs) reach 156 steps. A fixed 128
+/// therefore flagged honest maps of ~100 000 entries as flooded, and every
+/// later operation paid the ordered index's allocation and O(log n) walk.
+pub const ALMIDE_MAP_FLOOD_PROBES_PER_BIT: usize = 32;
+
+/// The flood bound of a table of `slot_len` (a power of two) slots:
+/// 32·log2(slot_len), at least [`ALMIDE_MAP_FLOOD_PROBES`]. Still O(log n),
+/// the ordered index's own per-operation cost, so colliding keys cost at most
+/// that many steps each before the owner moves.
+#[inline]
+fn almide_map_flood_bound(slot_len: usize) -> usize {
+    ALMIDE_MAP_FLOOD_PROBES.max(ALMIDE_MAP_FLOOD_PROBES_PER_BIT.saturating_mul(slot_len.trailing_zeros() as usize))
+}
 
 /// The hash index beside an insertion-ordered entry vector: `hashes[p]` is
 /// the full hash of entry `p`, `slots` is a power-of-two linear-probe table
@@ -1735,7 +1734,7 @@ pub const ALMIDE_MAP_FLOOD_PROBES: usize = 128;
 pub struct AlmideKeyIndex {
     hashes: Vec<u64>,
     slots: Vec<u64>,
-    /// An insert probed past [`ALMIDE_MAP_FLOOD_PROBES`] (#4104).
+    /// An insert probed past [`almide_map_flood_bound`] (#4104).
     flooded: bool,
 }
 
@@ -1828,7 +1827,7 @@ impl AlmideKeyIndex {
             probes += 1;
         }
         self.slots[i] = (h & ALMIDE_MAP_SLOT_TAG) | p as u64;
-        if probes > ALMIDE_MAP_FLOOD_PROBES {
+        if probes > almide_map_flood_bound(self.slots.len()) {
             self.flooded = true;
         }
     }
@@ -2044,7 +2043,7 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
         self.entries.push(Some((k, v)));
         self.note_push(h);
     }
-    /// `m[k] = f(map.get_or(m, k, init))` in ONE probe (the walker's
+    /// `m[k] = f(map.get(m, k) ?? init)` in ONE probe (the walker's
     /// `map_upsert` form): present → the slot becomes `f(old)` in place,
     /// absent → `(k, f(init))` is appended. The same hash and position the
     /// two-step `get_or` + `insert` computed twice. `f` runs before the
@@ -2169,13 +2168,11 @@ pub fn almide_rt_map_new<K, V>() -> AlmideMap<K, V> { AlmideMap::new() }
 pub fn almide_rt_map_len<K, V>(m: &AlmideMap<K, V>) -> i64 { m.len() as i64 }
 pub fn almide_rt_map_is_empty<K, V>(m: &AlmideMap<K, V>) -> bool { m.is_empty() }
 // The read side borrows its key (`@borrow_ref(key)` in stdlib/map.almd):
-// `map.get_or(counts, w, 0)` no longer clones `w` at the call site — the
+// `map.get(counts, w)` no longer clones `w` at the call site — the
 // clone was one third of the word-count loop's map cost (#2157). `Q` is the
 // borrowed key form: `&String`/`&str` for a String key, `&i64` for Int.
 pub fn almide_rt_map_get<K: PartialEq + 'static, V: Clone, Q: ?Sized + PartialEq + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q) -> Option<V>
 where K: std::borrow::Borrow<Q> { m.get(k).cloned() }
-pub fn almide_rt_map_get_or<K: PartialEq + 'static, V: Clone, Q: ?Sized + PartialEq + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q, default: V) -> V
-where K: std::borrow::Borrow<Q> { m.get(k).cloned().unwrap_or(default) }
 // Consuming (@consume(m) in stdlib/map.almd): a caller whose map is dead at
 // the call moves it in and this is one hash insert; a caller that still uses
 // the source gets its clone inserted by pass_clone at the call site. The
@@ -2315,8 +2312,6 @@ pub fn almide_rt_map_update_owned<K: PartialEq + Clone + 'static, V: Clone>(mut 
 
 // ── Mutable operations ──
 
-pub fn almide_rt_map_insert<K: PartialEq + 'static, V>(m: &mut AlmideMap<K, V>, k: K, v: V) { m.insert(k, v); }
-pub fn almide_rt_map_delete<K: PartialEq + 'static, V>(m: &mut AlmideMap<K, V>, k: K) { m.remove(&k); }
 pub fn almide_rt_map_clear<K, V>(m: &mut AlmideMap<K, V>) { m.clear(); }
 
 // sys — the native runtime's foreign calls (#4007).
@@ -2420,7 +2415,7 @@ mod almide_rt_sys_ffi {
     }
 
     /// `kill(pid, sig)` (#4125): `Err(errno)` on failure. The syscall itself,
-    /// so `process.kill` / `is_alive` never run a `kill` found on PATH. The
+    /// so `process.kill` never runs a `kill` found on PATH. The
     /// caller (process_core's `almide_proc_kill`) passes only pid > 0 and
     /// 0 <= sig <= 31, so a process group or "every process" is never named.
     #[cfg(unix)]

@@ -29,19 +29,15 @@ fn map.any[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Bool
 fn map.clear[K, V](m: Map[K, V]) -> Unit
 fn map.contains[K, V](m: Map[K, V], key: K) -> Bool
 fn map.count[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Int
-fn map.delete[K, V](m: Map[K, V], key: K) -> Unit
-fn map.entries[K, V](m: Map[K, V]) -> List[(K, V)]
 fn map.enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))]
 fn map.filter[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Map[K, V]
 fn map.filter_map[K, V, B](m: Map[K, V], f: fn((K, V)) -> Option[B]) -> List[B]
 fn map.find[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Option[(K, V)]
 fn map.find_map[K, V, B](m: Map[K, V], f: fn((K, V)) -> Option[B]) -> Option[B]
 fn map.fold[K, V, A](m: Map[K, V], init: A, f: fn(A, K, V) -> A) -> A
-fn map.from_list[K, V](pairs: List[(K, V)]) -> Map[K, V]
+fn map.from_list[K, V](xs: List[(K, V)]) -> Map[K, V]
 fn map.get[K, V](m: Map[K, V], key: K) -> Option[V]
-fn map.get_or[K, V](m: Map[K, V], key: K, default: V) -> V
 fn map.group_by[K, V, B](m: Map[K, V], f: fn((K, V)) -> B) -> Map[B, List[(K, V)]]
-fn map.insert[K, V](m: Map[K, V], key: K, value: V) -> Unit
 fn map.is_empty[K, V](m: Map[K, V]) -> Bool
 fn map.keys[K, V](m: Map[K, V]) -> List[K]
 fn map.len[K, V](m: Map[K, V]) -> Int
@@ -59,6 +55,7 @@ fn map.scan[K, V, B](m: Map[K, V], init: B, f: fn(B, (K, V)) -> B) -> List[B]
 fn map.set[K, V](m: Map[K, V], key: K, value: V) -> Map[K, V]
 fn map.sort_by[K, V, B](m: Map[K, V], f: fn((K, V)) -> B) -> List[(K, V)]
 fn map.sort_with[K, V](m: Map[K, V], cmp: fn((K, V), (K, V)) -> Int) -> List[(K, V)]
+fn map.to_list[K, V](m: Map[K, V]) -> List[(K, V)]
 fn map.update[K, V](m: Map[K, V], key: K, f: fn(V) -> V) -> Map[K, V]
 fn map.upsert[K, V](m: Map[K, V], key: K, init: V, f: fn(V) -> V) -> Map[K, V]
 fn map.values[K, V](m: Map[K, V]) -> List[V]
