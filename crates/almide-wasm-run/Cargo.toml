@@ -29,7 +29,9 @@ anyhow = "1"
 ctrlc = { version = "3.5", features = ["termination"] }
 wasmparser = "0.262"
 wasm-encoder = "0.262"
-wasmtime = "49.0.4"
+# wasmtime's defaults minus `cache`: the on-disk compilation cache is never
+# configured here, and the feature pulls zstd (RUSTSEC-2026-0391/0395/0398/0403/0410).
+wasmtime = { version = "49.0.4", default-features = false, features = ["anyhow", "async", "backtrace", "gc", "gc-copying", "gc-drc", "gc-null", "wat", "profiling", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "component-model-async", "threads", "stack-switching", "std", "debug", "compile-time-builtins", "wit-parser"] }
 # ADR-0023 step 7: the embedded lane runs an HTTP program's WASI 0.3
 # component. The p3 worlds come from wasmtime-wasi; wasi:http comes from
 # wasmtime-wasi-http WITHOUT `default-send-request` (no hyper client, no
