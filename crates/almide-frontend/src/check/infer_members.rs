@@ -75,8 +75,9 @@ impl Checker {
     /// The fns an E033 hint names, read off the owner module's signatures
     /// rather than spelled per type (#4256): the builder with the fewest
     /// parameters, then a one-parameter reader that answers the type's
-    /// content (a list of its type argument, else the argument) — `secret.new` /
-    /// `secret.reveal`, `heap.new` / `heap.to_list`. Ties go to the name.
+    /// content (a list of its type argument, else the argument) when exactly
+    /// one fn does — `secret.new` / `secret.reveal`, `heap.new` /
+    /// `heap.to_list`. Builder ties go to the name.
     fn opaque_entry_fns(&self, owner: &str, bare: &str) -> Vec<String> {
         let qualified = format!("{owner}.{bare}");
         let is_it = |t: &Ty| matches!(t, Ty::Named(n, _) if n.as_str() == bare || n.as_str() == qualified);
@@ -106,7 +107,17 @@ impl Checker {
                 _ => None,
             }
         };
-        let reader = fns.iter().filter_map(|f| reads(f.1).map(|rank| (rank, f))).min_by_key(|(rank, (name, _))| (*rank, *name)).map(|(_, f)| f);
+        // The best rank's reader, named only when it is the one fn of that
+        // rank: two list readers (`deque.to_list` / `deque.sort`) leave the
+        // signatures no way to tell which reads the content as it is.
+        let ranked: Vec<(u8, &(&str, &almide_lang::types::FnSig))> =
+            fns.iter().filter_map(|f| reads(f.1).map(|rank| (rank, f))).collect();
+        let best = ranked.iter().map(|(rank, _)| *rank).min();
+        let top: Vec<_> = ranked.iter().filter(|(rank, _)| Some(*rank) == best).collect();
+        let reader = match top.as_slice() {
+            [(_, f)] => Some(*f),
+            _ => None,
+        };
         builder.into_iter().chain(reader).map(|(name, _)| name.to_string()).collect()
     }
 
