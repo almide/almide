@@ -3122,6 +3122,7 @@ assert_aborts fixtures exercise it on both legs.
 
 [zlib]
 default_index_unit = "value"
+import = true
 
 [[zlib.fn]]
 name = "compress_level"
