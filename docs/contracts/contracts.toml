@@ -5722,3 +5722,18 @@ evidence  = [
   { path = "tests/diagnostics/e110-forwarded-input-type-parameter/broken.almd", class = "fixture" },
   { path = "tests/input_sink_test.rs", name = "admitting_codec_at_the_sink_lets_the_over_post_land", class = "fixture" },
 ]
+[[contract]]
+id        = "C-440"
+spec      = "ALS-I4"
+title     = "every compile-cost budget in the table holds: a counted limit the source cannot raise, ending in its defined diagnostic"
+statement = "ALS-I4 (ADR-0030, row 27): checking or building a program holds its input to every budget of the compile-cost table `almide budgets` prints (`docs/specs/cli.md`): `nesting` (levels of one expression), `type_size` (nodes of one inferred type), `generic_instances` (specialized instances of bounded generic fns, each instance's type arguments also held to `type_size`), `exhaustiveness_steps` (steps of one `match`'s coverage check), `manifest_bytes` (one `almide.toml` or `almide.lock`), `dependency_count` and `dependency_depth`. Each budget is a count, never a time or free memory, so one input gets one verdict on every machine. No attribute, manifest key, lock entry or environment variable changes a budget; only `--budget NAME=N` on the command line does, and `almide check --profile critical` refuses that flag. Input past a budget ends in that budget's diagnostic and a non-zero exit, never a crash, an out-of-memory kill or a hang: E111 `type too large (N+ nodes, max M)` at the expression or constraint whose type passed `type_size`, E112 for `generic_instances`, E113 `match too complex to check for exhaustiveness` for `exhaustiveness_steps`, the parse error `expression nesting too deep (max N)` for `nesting`, and an error naming the file, the figure and the budget for the three project budgets. A type over the budget is never assumed, and a match the check could not finish is never assumed exhaustive. Types share structure: with `type_size` lifted, `let t(i) = (t(i-1), t(i-1))` repeated n times, directly or through `fn dup[T](x: T) -> (T, T)`, checks clean in time and memory linear in n."
+since     = "0.69.0"
+status    = "active"
+evidence  = [
+  { path = "tests/diagnostics/e111-type-doubling-chain/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e111-type-doubling-through-a-generic/broken.almd", class = "fixture" },
+  { path = "tests/diagnostics/e113-bool-matrix-too-complex/broken.almd", class = "fixture" },
+  { path = "tests/compile_budget_test.rs", name = "the_doubling_chain_ends_in_e111_with_linear_work", class = "fixture" },
+  { path = "tests/compile_budget_test.rs", name = "the_doubling_chain_shares_its_types_with_the_budget_lifted", class = "fixture" },
+  { path = "tests/compile_budget_test.rs", name = "the_dependency_and_manifest_budgets_refuse_before_fetching", class = "fixture" },
+]
