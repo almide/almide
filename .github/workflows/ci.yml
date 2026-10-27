@@ -1655,6 +1655,9 @@ jobs:
       - name: Action closure — every pinned action's own action.yml, read at its commit, pins its nested uses and images (security row 16)
         run: bash scripts/check-action-pins.sh --closure
 
+      - name: Installers refuse a release whose attestation they could not verify, unless --skip-attestation (security row 16)
+        run: bash scripts/check-installer-attestation.sh --require-pwsh
+
       - name: Exit sites — every frame exit of the structural emitter goes through the ExitPlan renderer (#1995)
         run: bash scripts/check-exit-sites.sh
 
