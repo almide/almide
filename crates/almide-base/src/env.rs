@@ -189,6 +189,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_PROBE_OUT", Value, Harness, "the file a charge-probed native program writes its `__ALMD_PROBE` meter line to; `almide run --time-report` sets it to a fresh temp path so the program's own stderr is never read as the reading (#3489). Unset = the line goes to stderr"),
     sw("ALMIDE_PROBE_SRC", Value, Harness, "the source file the heap probe compiles (unset = the probe is skipped)"),
     sw("ALMIDE_PROFILE", Flag, Dbg, "print per-pass and per-phase timings of the native pipeline"),
+    sw("ALMIDE_RC_ANCHORS", Flag, Harness, "add the #4277 RC lines (`rcfns` / `rc`) to the anchor file the structural bundle producer writes, so almide-anchor-check matches each certified frame's recorded rc_inc / release events against the shipped calls; measurement-gated while #4278 is open"),
     sw("ALMIDE_REAL_RUSTC", Value, Harness, "the real `rustc` the fake one in tests/rustc_floor_test.rs runs for anything but `--version`"),
     sw("ALMIDE_REGION_DEBUG", Flag, Dbg, "print the region-window pass's decisions (native and structural leg)"),
     sw("ALMIDE_REGION_OFF", Flag, Ablation, "turn the region-window allocation pass off (native and structural leg)"),
