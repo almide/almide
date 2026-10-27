@@ -1082,7 +1082,7 @@ them.
 ```
 // Serves 0.0.0.0:port forever; handler err is a 500.
 // @since 0.5.0 or earlier
-effect http.serve(port: Int, handler: (HttpRequest) -> Result[HttpResponse, String]) -> Unit
+effect http.serve(port: Int, handler: HttpHandler) -> Unit
 
 // Reply with Content-Type text/plain.
 // @since 0.5.0 or earlier
@@ -1198,19 +1198,19 @@ http.param(req: HttpRequest, name: String) -> Option[String]
 
 // "GET /users/{id}" to a route; no method = any.
 // @since unreleased
-http.route(pattern: String, handler: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute
+http.route(pattern: String, handler: HttpHandler) -> HttpRoute
 
 // Sub-app under prefix: /api/x reaches it as /x.
 // @since unreleased
-http.mount(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute
+http.mount(prefix: String, sub: HttpHandler) -> HttpRoute
 
 // Route table as a handler; err on conflicting routes.
 // @since unreleased
-http.router(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]
+http.router(xs: List[HttpRoute]) -> Result[HttpHandler, String]
 
 // Applies middleware; the first is the outermost.
 // @since unreleased
-http.wrap(handler: (HttpRequest) -> Result[HttpResponse, String], middleware: List[((HttpRequest) -> Result[HttpResponse, String]) -> (HttpRequest) -> Result[HttpResponse, String]]) -> (HttpRequest) -> Result[HttpResponse, String]
+http.wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler
 
 // JSON body into input type T, strictly; err is a 400 response.
 // @since unreleased
@@ -1230,11 +1230,11 @@ type http.HttpHandler = (HttpRequest) -> Result[HttpResponse, String]
 
 // Wraps a handler: (next) => (req) => … next(req)! ….
 // @since unreleased
-type http.HttpMiddleware = ((HttpRequest) -> Result[HttpResponse, String]) -> (HttpRequest) -> Result[HttpResponse, String]
+type http.HttpMiddleware = (HttpHandler) -> HttpHandler
 
 // Route table row; build it with route or mount.
 // @since unreleased
-type http.HttpRoute = { method: String, pattern: String, segments: List[String], handler: (HttpRequest) -> Result[HttpResponse, String] }
+type http.HttpRoute = { method: String, pattern: String, segments: List[String], handler: HttpHandler }
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

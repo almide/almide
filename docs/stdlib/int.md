@@ -287,19 +287,19 @@ has `min_value()`/`max_value()`.
 ```
 // Decimal digits, with - when negative.
 // @since 0.5.0 or earlier
-int.to_string(n: Int) -> String
+int.to_string(x: Int) -> String
 
 // Lowercase hex, no 0x; -1 gives 16 f digits.
 // @since 0.5.0 or earlier
-int.to_hex(n: Int) -> String
+int.to_hex(x: Int) -> String
 
 // Decimal Int from s trimmed of ASCII space/tab/LF/FF/CR; err on junk or overflow.
 // @since 0.5.0 or earlier
 int.parse(s: String) -> Result[Int, String]
 
-// Magnitude of n; min_value wraps to itself.
+// Magnitude of x; min_value wraps to itself.
 // @since 0.5.0 or earlier
-int.abs(n: Int) -> Int
+int.abs(x: Int) -> Int
 
 // Lesser of a and b.
 // @since 0.5.0 or earlier
@@ -309,17 +309,17 @@ int.min(a: Int, b: Int) -> Int
 // @since 0.5.0 or earlier
 int.max(a: Int, b: Int) -> Int
 
-// n limited to lo..hi; aborts when lo > hi.
+// x limited to lo..hi; aborts when lo > hi.
 // @since 0.5.0 or earlier
-int.clamp(n: Int, lo: Int, hi: Int) -> Int
+int.clamp(x: Int, lo: Int, hi: Int) -> Int
 
-// True when n % 2 == 0; exact for negatives.
+// True when x % 2 == 0; exact for negatives.
 // @since 0.62.0
-int.is_even(n: Int) -> Bool
+int.is_even(x: Int) -> Bool
 
-// True when n % 2 != 0; -3 counts as odd.
+// True when x % 2 != 0; -3 counts as odd.
 // @since 0.62.0
-int.is_odd(n: Int) -> Bool
+int.is_odd(x: Int) -> Bool
 
 // Bitwise AND over all 64 bits.
 // @since 0.5.0 or earlier
@@ -333,9 +333,9 @@ int.bor(a: Int, b: Int) -> Int
 // @since 0.5.0 or earlier
 int.bxor(a: Int, b: Int) -> Int
 
-// Bitwise complement; equals -a - 1.
+// Bitwise complement; equals -x - 1.
 // @since 0.5.0 or earlier
-int.bnot(a: Int) -> Int
+int.bnot(x: Int) -> Int
 
 // a shifted left by n bits; n is taken mod 64.
 // @since 0.5.0 or earlier
@@ -347,11 +347,11 @@ int.bshr(a: Int, n: Int) -> Int
 
 // Leading zero bits of the 64-bit word; 64 for 0.
 // @since 0.16.0 or earlier
-int.count_leading_zeros(n: Int) -> Int
+int.count_leading_zeros(x: Int) -> Int
 
 // Trailing zero bits; 64 for 0.
 // @since 0.16.0 or earlier
-int.count_trailing_zeros(n: Int) -> Int
+int.count_trailing_zeros(x: Int) -> Int
 
 // Number of set bits; 64 for -1.
 // @since 0.16.0 or earlier
@@ -363,11 +363,11 @@ int.count_ones(x: Int) -> Int
 
 // The 64 bits in reverse order; 1 gives min_value.
 // @since 0.16.0 or earlier
-int.bit_reverse(n: Int) -> Int
+int.bit_reverse(x: Int) -> Int
 
 // The 8 bytes in reverse order (endian flip).
 // @since 0.16.0 or earlier
-int.byte_swap(n: Int) -> Int
+int.byte_swap(x: Int) -> Int
 
 // Bits needed to hold n; 0 for 0, 64 if negative.
 // @since 0.16.0 or earlier
@@ -377,37 +377,37 @@ int.bit_width(n: Int) -> Int   (deprecated — use int.bit_length)
 // @since unreleased
 int.bit_length(x: Int) -> Int
 
-// Floor of log2(n); -1 when n <= 0.
+// Floor of log2(x); -1 when x <= 0.
 // @since 0.16.0 or earlier
-int.log2_floor(n: Int) -> Int
+int.log2_floor(x: Int) -> Int
 
-// Ceiling of log2(n); 0 when n <= 1.
+// Ceiling of log2(x); 0 when x <= 1.
 // @since 0.16.0 or earlier
-int.log2_ceil(n: Int) -> Int
+int.log2_ceil(x: Int) -> Int
 
-// Least power of 2 >= n; 1 if n <= 1; min_value past 2^62.
+// Least power of 2 >= x; 1 if x <= 1; min_value past 2^62.
 // @since 0.16.0 or earlier
-int.next_power_of_two(n: Int) -> Int
+int.next_power_of_two(x: Int) -> Int
 
-// Greatest power of 2 <= n; 0 when n <= 0.
+// Greatest power of 2 <= x; 0 when x <= 0.
 // @since 0.16.0 or earlier
-int.prev_power_of_two(n: Int) -> Int
+int.prev_power_of_two(x: Int) -> Int
 
-// (a + b) mod 2^bits, non-negative when bits < 64.
+// a + b wrapped to 64 bits.
 // @since 0.5.0 or earlier
-int.wrap_add(a: Int, b: Int, bits: Int) -> Int
+int.wrap_add(a: Int, b: Int) -> Int
 
-// (a * b) mod 2^bits, non-negative when bits < 64.
+// a * b wrapped to 64 bits.
 // @since 0.5.0 or earlier
-int.wrap_mul(a: Int, b: Int, bits: Int) -> Int
+int.wrap_mul(a: Int, b: Int) -> Int
 
-// Low bits of a rotated right by n mod bits; bits <= 0 aborts.
+// The 64 bits of a rotated right by n; n is taken mod 64.
 // @since 0.5.0 or earlier
-int.rotate_right(a: Int, n: Int, bits: Int) -> Int
+int.rotate_right(a: Int, n: Int) -> Int
 
-// Low bits of a rotated left by n mod bits; bits <= 0 aborts.
+// The 64 bits of a rotated left by n; n is taken mod 64.
 // @since 0.5.0 or earlier
-int.rotate_left(a: Int, n: Int, bits: Int) -> Int
+int.rotate_left(a: Int, n: Int) -> Int
 
 // Smallest Int: -2^63.
 // @since 0.38.0

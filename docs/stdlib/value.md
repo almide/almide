@@ -184,7 +184,7 @@ value.index(p: Path, i: Int) -> Path
 // @since unreleased
 value.get_path(v: Value, p: Path) -> Option[Value]
 
-// v with x at p; missing keys are created, a missed index leaves v as is.
+// v with x at p; missing keys are created, a missed index leaves v as is; err when the result would nest past 1000.
 // @since unreleased
 value.set_path(v: Value, p: Path, x: Value) -> Result[Value, String]
 

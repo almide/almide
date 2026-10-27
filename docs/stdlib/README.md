@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 50 stdlib modules, 1307 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 51 stdlib modules, 1320 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -12,19 +12,18 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [base64](#base64) | 4 | 0 |
 | [bigint](#bigint) | 24 | 1 |
 | [bool](#bool) | 3 | 0 |
-| [bytes](#bytes) | 183 | 1 |
+| [bytes](#bytes) | 183 | 0 |
 | [compute](#compute) | 7 | 0 |
 | [datetime](#datetime) | 18 | 0 |
 | [deque](#deque) | 60 | 1 |
 | [duration](#duration) | 7 | 0 |
-| [env](#env) | 6 | 0 |
-| [error](#error) | 0 | 0 |
+| [env](#env) | 9 | 0 |
 | [ffi](#ffi) | 4 | 0 |
 | [float](#float) | 27 | 0 |
 | [float32](#float32) | 24 | 0 |
 | [float64](#float64) | 24 | 0 |
-| [fs](#fs) | 38 | 1 |
-| [hash](#hash) | 17 | 0 |
+| [fs](#fs) | 37 | 1 |
+| [hash](#hash) | 11 | 0 |
 | [heap](#heap) | 16 | 1 |
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 5 | 0 |
@@ -43,13 +42,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [net](#net) | 16 | 2 |
 | [option](#option) | 14 | 0 |
 | [path](#path) | 11 | 0 |
-| [process](#process) | 11 | 2 |
+| [process](#process) | 13 | 2 |
 | [random](#random) | 10 | 0 |
 | [regex](#regex) | 16 | 1 |
 | [result](#result) | 15 | 0 |
 | [secret](#secret) | 2 | 0 |
 | [set](#set) | 42 | 0 |
-| [string](#string) | 85 | 0 |
+| [string](#string) | 87 | 0 |
 | [testing](#testing) | 10 | 0 |
 | [uint16](#uint16) | 35 | 0 |
 | [uint32](#uint32) | 35 | 0 |
@@ -423,6 +422,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect env.get(name: String) -> Option[String]` — Value of name, or none if unset.
 - `effect env.secret(name: String) -> Option[Secret[String]]` — Value of name as a Secret (prints Secret(***), constant-time ==), or none if unset.
 - `effect env.set(name: String, value: String) -> Unit` — Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
+- `effect env.remove(name: String) -> Unit` — Removes name for this process and later spawns; ok if unset; err if name is empty or holds `=` or NUL.
+- `effect env.vars() -> Map[String, String]` — Every environment variable of this process, keyed and ordered by name.
 - `effect env.cwd() -> String` — Absolute current directory; err if unreadable.
 - `effect env.sleep_ms(ms: Int) -> Unit` — Blocks ms milliseconds; a negative ms hangs.
 - `env.os() -> String` — Host OS: macos, linux, windows or unknown; "wasi" on wasm (C-189).
@@ -440,21 +441,21 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [float.md](float.md)
 
-- `float.to_string(n: Float) -> String` — Shortest round-trip digits, no exponent; 2.0 keeps .0.
+- `float.to_string(x: Float) -> String` — Shortest round-trip digits, no exponent; 2.0 keeps .0.
 - `float.parse(s: String) -> Result[Float, String]` — Finite Float from s trimmed of ASCII space; err on junk, inf, NaN, overflow.
-- `float.to_fixed(n: Float, decimals: Int) -> String` — Fixed-point, ties to even; decimals outside 0..4096 abort.
+- `float.to_fixed(x: Float, decimals: Int) -> String` — Fixed-point, ties to even; decimals outside 0..4096 abort.
 - `float.to_bits(f: Float) -> Int` — IEEE-754 bits as Int; any NaN gives the canonical NaN.
-- `float.abs(n: Float) -> Float` — Magnitude; -0.0 gives 0.0, NaN stays NaN.
-- `float.floor(n: Float) -> Float` — Round toward -inf; -0.5 gives -1.0.
-- `float.ceil(n: Float) -> Float` — Round toward +inf; -0.5 gives -0.0.
-- `float.round(n: Float) -> Float` — Nearest whole value; halves round away from zero.
+- `float.abs(x: Float) -> Float` — Magnitude; -0.0 gives 0.0, NaN stays NaN.
+- `float.floor(x: Float) -> Float` — Round toward -inf; -0.5 gives -1.0.
+- `float.ceil(x: Float) -> Float` — Round toward +inf; -0.5 gives -0.0.
+- `float.round(x: Float) -> Float` — Nearest whole value; halves round away from zero.
 - `float.min(a: Float, b: Float) -> Float` — Lesser; a NaN operand is ignored; -0.0 < 0.0.
 - `float.max(a: Float, b: Float) -> Float` — Greater; a NaN operand is ignored; 0.0 > -0.0.
-- `float.clamp(n: Float, lo: Float, hi: Float) -> Float` — n limited to lo..hi; lo > hi or a NaN bound aborts.
+- `float.clamp(x: Float, lo: Float, hi: Float) -> Float` — x limited to lo..hi; lo > hi or a NaN bound aborts.
 - `float.sign(n: Float) -> Float   (deprecated — use float.signum)` — 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
 - `float.signum(x: Float) -> Float` — 1.0 or -1.0 by sign bit (0.0 gives 1.0, -0.0 gives -1.0); NaN for NaN.
-- `float.is_nan(n: Float) -> Bool` — True only for NaN (unequal to itself).
-- `float.is_infinite(n: Float) -> Bool` — True for inf and -inf; false for NaN.
+- `float.is_nan(x: Float) -> Bool` — True only for NaN (unequal to itself).
+- `float.is_infinite(x: Float) -> Bool` — True for inf and -inf; false for NaN.
 - `float.trunc(x: Float) -> Float` — Round toward 0; -0.5 gives -0.0.
 - `float.is_finite(x: Float) -> Bool` — True unless x is inf, -inf or NaN.
 - `float.pow(base: Float, exp: Float) -> Float` — base to the exp; NaN for a negative base with a fractional exp.
@@ -531,11 +532,11 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 [fs.md](fs.md)
 
 - `effect fs.read_text(path: String) -> String` — Whole regular file (<= 1 GiB) as UTF-8; err if missing or not UTF-8.
-- `effect fs.read_bytes(path: String) -> List[Int]` — Bytes as Ints 0..255; regular file <= 1 GiB; err if missing.
-- `effect fs.write(path: String, content: String) -> Unit` — Overwrites or creates; err if no parent dir.
-- `effect fs.write_bytes(path: String, bytes: List[Int]) -> Unit` — Writes low byte of each Int (-1 -> 255).
-- `effect fs.write_bytes_raw(path: String, data: Bytes) -> Unit` — Writes data verbatim, replacing the file.
-- `effect fs.append(path: String, content: String) -> Unit` — Appends content; creates the file if missing.
+- `effect fs.read_bytes(path: String) -> Bytes` — Whole regular file (<= 1 GiB) as Bytes; err if missing.
+- `effect fs.write_text(path: String, content: String) -> Unit` — Overwrites or creates; err if no parent dir.
+- `effect fs.write_bytes(path: String, data: Bytes) -> Unit` — Writes data verbatim, replacing the file.
+- `effect fs.append_text(path: String, content: String) -> Unit` — Appends content; creates the file if missing.
+- `effect fs.append_bytes(path: String, data: Bytes) -> Unit` — Appends data verbatim; creates the file if missing.
 - `effect fs.mkdir_p(path: String) -> Unit` — Creates dir and parents; ok if it exists.
 - `effect fs.exists(path: String) -> Bool` — False if missing or a dangling symlink.
 - `effect fs.read_lines(path: String) -> List[String]` — CRLF-aware lines of a regular file <= 1 GiB; a final newline adds no line.
@@ -627,7 +628,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [http.md](http.md)
 
-- `effect http.serve(port: Int, handler: (HttpRequest) -> Result[HttpResponse, String]) -> Unit` — Serves 0.0.0.0:port forever; handler err is a 500.
+- `effect http.serve(port: Int, handler: HttpHandler) -> Unit` — Serves 0.0.0.0:port forever; handler err is a 500.
 - `http.response(status: Int, body: String) -> HttpResponse` — Reply with Content-Type text/plain.
 - `http.json(status: Int, body: String) -> HttpResponse` — Reply with Content-Type application/json.
 - `http.with_headers(status: Int, body: String, headers: List[(String, String)]) -> HttpResponse` — Reply with exactly these headers in order; a name given twice, in any case, keeps its first spelling and last value.
@@ -656,47 +657,47 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect http.cancel(c: HttpCall) -> Unit` — Closes the connection; the call ends as err.
 - `http.new_request(method: String, target: String, body: String, headers: List[(String, String)]) -> HttpRequest` — Request built in code; target keeps its ?query (a full URL for send / start).
 - `http.param(req: HttpRequest, name: String) -> Option[String]` — Router-bound path parameter, decoded; none if unbound.
-- `http.route(pattern: String, handler: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` — "GET /users/{id}" to a route; no method = any.
-- `http.mount(prefix: String, sub: (HttpRequest) -> Result[HttpResponse, String]) -> HttpRoute` — Sub-app under prefix: /api/x reaches it as /x.
-- `http.router(routes: List[HttpRoute]) -> Result[(HttpRequest) -> Result[HttpResponse, String], String]` — Route table as a handler; err on conflicting routes.
-- `http.wrap(handler: (HttpRequest) -> Result[HttpResponse, String], middleware: List[((HttpRequest) -> Result[HttpResponse, String]) -> (HttpRequest) -> Result[HttpResponse, String]]) -> (HttpRequest) -> Result[HttpResponse, String]` — Applies middleware; the first is the outermost.
+- `http.route(pattern: String, handler: HttpHandler) -> HttpRoute` — "GET /users/{id}" to a route; no method = any.
+- `http.mount(prefix: String, sub: HttpHandler) -> HttpRoute` — Sub-app under prefix: /api/x reaches it as /x.
+- `http.router(xs: List[HttpRoute]) -> Result[HttpHandler, String]` — Route table as a handler; err on conflicting routes.
+- `http.wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler` — Applies middleware; the first is the outermost.
 - `http.decode_json(req: HttpRequest) -> Result[T, HttpResponse]` — JSON body into input type T, strictly; err is a 400 response.
 
 ## int
 
 [int.md](int.md)
 
-- `int.to_string(n: Int) -> String` — Decimal digits, with - when negative.
-- `int.to_hex(n: Int) -> String` — Lowercase hex, no 0x; -1 gives 16 f digits.
+- `int.to_string(x: Int) -> String` — Decimal digits, with - when negative.
+- `int.to_hex(x: Int) -> String` — Lowercase hex, no 0x; -1 gives 16 f digits.
 - `int.parse(s: String) -> Result[Int, String]` — Decimal Int from s trimmed of ASCII space/tab/LF/FF/CR; err on junk or overflow.
-- `int.abs(n: Int) -> Int` — Magnitude of n; min_value wraps to itself.
+- `int.abs(x: Int) -> Int` — Magnitude of x; min_value wraps to itself.
 - `int.min(a: Int, b: Int) -> Int` — Lesser of a and b.
 - `int.max(a: Int, b: Int) -> Int` — Greater of a and b.
-- `int.clamp(n: Int, lo: Int, hi: Int) -> Int` — n limited to lo..hi; aborts when lo > hi.
-- `int.is_even(n: Int) -> Bool` — True when n % 2 == 0; exact for negatives.
-- `int.is_odd(n: Int) -> Bool` — True when n % 2 != 0; -3 counts as odd.
+- `int.clamp(x: Int, lo: Int, hi: Int) -> Int` — x limited to lo..hi; aborts when lo > hi.
+- `int.is_even(x: Int) -> Bool` — True when x % 2 == 0; exact for negatives.
+- `int.is_odd(x: Int) -> Bool` — True when x % 2 != 0; -3 counts as odd.
 - `int.band(a: Int, b: Int) -> Int` — Bitwise AND over all 64 bits.
 - `int.bor(a: Int, b: Int) -> Int` — Bitwise OR over all 64 bits.
 - `int.bxor(a: Int, b: Int) -> Int` — Bitwise XOR over all 64 bits.
-- `int.bnot(a: Int) -> Int` — Bitwise complement; equals -a - 1.
+- `int.bnot(x: Int) -> Int` — Bitwise complement; equals -x - 1.
 - `int.bshl(a: Int, n: Int) -> Int` — a shifted left by n bits; n is taken mod 64.
 - `int.bshr(a: Int, n: Int) -> Int` — Arithmetic (sign-filling) right shift; n mod 64.
-- `int.count_leading_zeros(n: Int) -> Int` — Leading zero bits of the 64-bit word; 64 for 0.
-- `int.count_trailing_zeros(n: Int) -> Int` — Trailing zero bits; 64 for 0.
+- `int.count_leading_zeros(x: Int) -> Int` — Leading zero bits of the 64-bit word; 64 for 0.
+- `int.count_trailing_zeros(x: Int) -> Int` — Trailing zero bits; 64 for 0.
 - `int.pop_count(n: Int) -> Int   (deprecated — use int.count_ones)` — Number of set bits; 64 for -1.
 - `int.count_ones(x: Int) -> Int` — Number of set bits; 64 for -1.
-- `int.bit_reverse(n: Int) -> Int` — The 64 bits in reverse order; 1 gives min_value.
-- `int.byte_swap(n: Int) -> Int` — The 8 bytes in reverse order (endian flip).
+- `int.bit_reverse(x: Int) -> Int` — The 64 bits in reverse order; 1 gives min_value.
+- `int.byte_swap(x: Int) -> Int` — The 8 bytes in reverse order (endian flip).
 - `int.bit_width(n: Int) -> Int   (deprecated — use int.bit_length)` — Bits needed to hold n; 0 for 0, 64 if negative.
 - `int.bit_length(x: Int) -> Int` — Bits needed to hold x; 0 for 0, 64 if negative.
-- `int.log2_floor(n: Int) -> Int` — Floor of log2(n); -1 when n <= 0.
-- `int.log2_ceil(n: Int) -> Int` — Ceiling of log2(n); 0 when n <= 1.
-- `int.next_power_of_two(n: Int) -> Int` — Least power of 2 >= n; 1 if n <= 1; min_value past 2^62.
-- `int.prev_power_of_two(n: Int) -> Int` — Greatest power of 2 <= n; 0 when n <= 0.
-- `int.wrap_add(a: Int, b: Int, bits: Int) -> Int` — (a + b) mod 2^bits, non-negative when bits < 64.
-- `int.wrap_mul(a: Int, b: Int, bits: Int) -> Int` — (a * b) mod 2^bits, non-negative when bits < 64.
-- `int.rotate_right(a: Int, n: Int, bits: Int) -> Int` — Low bits of a rotated right by n mod bits; bits <= 0 aborts.
-- `int.rotate_left(a: Int, n: Int, bits: Int) -> Int` — Low bits of a rotated left by n mod bits; bits <= 0 aborts.
+- `int.log2_floor(x: Int) -> Int` — Floor of log2(x); -1 when x <= 0.
+- `int.log2_ceil(x: Int) -> Int` — Ceiling of log2(x); 0 when x <= 1.
+- `int.next_power_of_two(x: Int) -> Int` — Least power of 2 >= x; 1 if x <= 1; min_value past 2^62.
+- `int.prev_power_of_two(x: Int) -> Int` — Greatest power of 2 <= x; 0 when x <= 0.
+- `int.wrap_add(a: Int, b: Int) -> Int` — a + b wrapped to 64 bits.
+- `int.wrap_mul(a: Int, b: Int) -> Int` — a * b wrapped to 64 bits.
+- `int.rotate_right(a: Int, n: Int) -> Int` — The 64 bits of a rotated right by n; n is taken mod 64.
+- `int.rotate_left(a: Int, n: Int) -> Int` — The 64 bits of a rotated left by n; n is taken mod 64.
 - `int.min_value() -> Int` — Smallest Int: -2^63.
 - `int.max_value() -> Int` — Largest Int: 2^63-1.
 - `int.compare(a: Int, b: Int) -> Int` — -1, 0 or 1 as a is below, equal to or above b.
@@ -921,7 +922,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.contains(xs: List[A], x: A) -> Bool` — true if some element == x; NaN never matches.
 - `list.enumerate(xs: List[A]) -> List[(Int, A)]` — (index, element) pairs, index from 0.
 - `list.zip(xs: List[A], ys: List[B]) -> List[(A, B)]` — Pairs by position; stops at the shorter list.
-- `list.flatten(xss: List[List[T]]) -> List[T]` — Inner lists concatenated in order.
+- `list.flatten(xs: List[List[A]]) -> List[A]` — Inner lists concatenated in order.
 - `list.take(xs: List[A], n: Int) -> List[A]` — First n elements; all if n >= len, [] if n < 0.
 - `list.drop(xs: List[A], n: Int) -> List[A]` — All but the first n; [] if n >= len, all if n < 0.
 - `list.unique(xs: List[A]) -> List[A]` — Duplicates removed; first occurrences kept.
@@ -957,7 +958,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.unique_by(xs: List[A], f: (A) -> K) -> List[A]` — First element per distinct key f(x).
 - `list.range(start: Int, end: Int) -> List[Int]` — start up to end, exclusive; [] if end <= start.
 - `list.slice(xs: List[A], start: Int, end: Int) -> List[A]` — Indices start..<end, each clamped to 0..len; [] if start >= end.
-- `list.insert(xs: List[A], i: Int, val: A) -> List[A]` — Copy with val at i; i >= len or i < 0 appends.
+- `list.insert(xs: List[A], i: Int, x: A) -> List[A]` — Copy with x at i; i >= len or i < 0 appends.
 - `list.remove_at(xs: List[A], i: Int) -> List[A]` — Copy without slot i; no-op if i out of range.
 - `list.repeat(x: A, n: Int) -> List[A]` — n copies of x; [] for n <= 0.
 - `list.intersperse(xs: List[A], sep: A) -> List[A]` — sep between adjacent elements.
@@ -965,13 +966,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `list.take_end(xs: List[A], n: Int) -> List[A]` — Last n elements; all if n >= len, [] if n < 0.
 - `list.drop_end(xs: List[A], n: Int) -> List[A]` — All but the last n; [] if n >= len, all if n < 0.
 - `list.window(xs: List[A], n: Int) -> List[List[A]]` — All n-long runs; [] if n > len; n <= 0 aborts.
-- `list.binary_search(xs: List[Int], target: Int) -> Option[Int]` — Index of target in ascending xs, or none.
+- `list.binary_search(xs: List[A], target: A) -> Option[Int]` — Index of target in xs sorted ascending (list.sort's order), or none.
 - `list.push(mut xs: List[A], x: A) -> Unit` — Appends x to xs in place.
 - `list.with_capacity(cap: Int) -> List[A]` — Empty list; cap is only a preallocation hint.
 - `list.pop(mut xs: List[A]) -> Option[A]` — Removes and yields the last element; none if empty.
 - `list.clear(mut xs: List[A]) -> Unit` — Removes every element of xs in place.
-- `list.split_at(xs: List[T], n: Int) -> (List[T], List[T])` — (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
-- `list.iterate(seed: T, f: (T) -> T, n: Int) -> List[T]` — [seed, f(seed), ...] of length n; [] if n <= 0.
+- `list.split_at(xs: List[A], n: Int) -> (List[A], List[A])` — (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
+- `list.iterate(seed: A, f: (A) -> A, n: Int) -> List[A]` — [seed, f(seed), ...] of length n; [] if n <= 0.
 - `list.find_map(xs: List[A], f: (A) -> Option[B]) -> Option[B]` — The first some that f gives, or none; f is not called after the hit.
 - `list.new() -> List[A]` — An empty list; the same value as [].
 - `list.from_list(xs: List[A]) -> List[A]` — xs itself; the Container constructor from a list.
@@ -1075,12 +1076,12 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `matrix.cols(m: Matrix) -> Int` — Width of row 0; 0 when there are no rows.
 - `matrix.scale(m: Matrix, s: Float) -> Matrix` — Every element times s.
 - `matrix.map(m: Matrix, f: (Float) -> Float) -> Matrix` — f applied to every element.
-- `matrix.from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f32 LE rows x cols at offset; none if data short.
+- `matrix.from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f32 LE rows x cols of b at offset; none if b is short.
 - `matrix.to_bytes_f64_le(m: Matrix) -> Bytes` — Row-major f64 LE, 8 bytes per element.
 - `matrix.to_bytes_f32_le(m: Matrix) -> Bytes` — Row-major f32 LE, 4 bytes each (rounded).
 - `matrix.to_bytes_f16_le(m: Matrix) -> Bytes` — Row-major f16 LE, 2 bytes each (rounded to nearest even; overflow is inf).
-- `matrix.from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f16 LE rows x cols at offset; none if data short.
-- `matrix.from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f64 LE rows x cols at offset; none if data short.
+- `matrix.from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f16 LE rows x cols of b at offset; none if b is short.
+- `matrix.from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]` — f64 LE rows x cols of b at offset; none if b is short.
 - `matrix.broadcast_add_row(m: Matrix, bias: List[Float]) -> Matrix` — bias added to each row; cols cut to bias.
 - `matrix.split_cols_even(m: Matrix, n: Int) -> List[Matrix]` — n slices cols/n wide, remainder dropped; [] if n = 0.
 - `matrix.concat_cols(xs: List[Matrix]) -> Matrix` — Side-by-side join; [] gives 0 x 0.
@@ -1162,10 +1163,9 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `effect process.read_new_stdout(c: ProcessChild) -> String` — What c wrote to stdout since the last read; never blocks.
 - `effect process.read_new_stderr(c: ProcessChild) -> String` — What c wrote to stderr since the last read; never blocks.
 - `effect process.child_pid(c: ProcessChild) -> Int` — The OS process id of c, for process.kill.
-- `effect process.kill(pid: Int, signal: Int) -> Unit` — Sends signal to pid; err is kill's stderr.
+- `effect process.kill(pid: Int, signal: Int) -> Unit` — Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
 - `effect process.exit(code: Int) -> Never` — Ends with code 0..=255; others abort, exit 1.
 - `effect process.pid() -> Int` — OS process ID of this program.
-- `effect process.kill(pid: Int, signal: Int) -> Unit` — Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
 
 ## random
 
@@ -1173,8 +1173,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `effect random.int(min: Int, max: Int) -> Int` — Random Int in [min, max]; min if max <= min.
 - `effect random.float() -> Float` — Random Float in [0, 1).
-- `effect random.choice(xs: List[T]) -> Option[T]` — Random element of xs; none when empty.
-- `effect random.shuffle(xs: List[T]) -> List[T]` — Random permutation of xs as a new list.
+- `effect random.choice(xs: List[A]) -> Option[A]` — Random element of xs; none when empty.
+- `effect random.shuffle(xs: List[A]) -> List[A]` — Random permutation of xs as a new list.
 - `effect random.bytes(n: Int) -> Bytes` — n bytes from the OS cryptographic random source (CSPRNG); n < 0 aborts.
 - `random.seeded(seed: Int) -> Rng` — A generator whose stream is fixed by seed.
 - `random.next_int(rng: Rng, min: Int, max: Int) -> (Int, Rng)` — An Int in [min, max] (both ends) and the next state; min, state unchanged, if max <= min.
@@ -1286,7 +1286,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `string.split_once(s: String, sep: String) -> Option[(String, String)]` — Split at the FIRST occurrence of `sep`: `(before, after)`, none ⇔ `sep` absent.
 - `string.len(s: String) -> Int` — Codepoint count (not bytes).
 - `string.length(s: String) -> Int   (deprecated — use string.len)` — Alias of string.len.
-- `string.contains(s: String, sub: String) -> Bool` — sub occurs in s; true for empty sub.
+- `string.contains(s: String, needle: String) -> Bool` — needle occurs in s; true for empty needle.
 - `string.is_equal_constant_time(a: String, b: String) -> Bool` — True if a and b hold the same UTF-8 bytes, in time that depends only on their lengths: no early exit on the first differing byte.
 - `string.starts_with(s: String, prefix: String) -> Bool` — s begins with prefix; "" always matches.
 - `string.ends_with(s: String, suffix: String) -> Bool` — s ends with suffix; "" always matches.
@@ -1616,7 +1616,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `value.key(p: Path, name: String) -> Path` — p extended by the object key name.
 - `value.index(p: Path, i: Int) -> Path` — p extended by the array index i; a negative i is out of range.
 - `value.get_path(v: Value, p: Path) -> Option[Value]` — Value at p, or none if a step misses.
-- `value.set_path(v: Value, p: Path, x: Value) -> Result[Value, String]` — v with x at p; missing keys are created, a missed index leaves v as is.
+- `value.set_path(v: Value, p: Path, x: Value) -> Result[Value, String]` — v with x at p; missing keys are created, a missed index leaves v as is; err when the result would nest past 1000.
 - `value.remove_path(v: Value, p: Path) -> Value` — v minus the entry at p; unchanged if absent; null for the root.
 
 ## zlib

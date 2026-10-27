@@ -129,7 +129,7 @@ Out of scope, deliberately: TLS, AEAD, signatures and asymmetric crypto
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (17 functions)
+## Signature index (11 functions)
 
 ```
 // 32-bit FNV-1a of b, in 0..4294967295.

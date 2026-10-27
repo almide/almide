@@ -190,7 +190,7 @@ matrix.scale(m: Matrix, s: Float) -> Matrix
 // @since 0.9.3 or earlier
 matrix.map(m: Matrix, f: (Float) -> Float) -> Matrix
 
-// f32 LE rows x cols at offset; none if data short.
+// f32 LE rows x cols of b at offset; none if b is short.
 // @since 0.13.4 or earlier
 matrix.from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]
 
@@ -206,11 +206,11 @@ matrix.to_bytes_f32_le(m: Matrix) -> Bytes
 // @since unreleased
 matrix.to_bytes_f16_le(m: Matrix) -> Bytes
 
-// f16 LE rows x cols at offset; none if data short.
+// f16 LE rows x cols of b at offset; none if b is short.
 // @since 0.13.4 or earlier
 matrix.from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]
 
-// f64 LE rows x cols at offset; none if data short.
+// f64 LE rows x cols of b at offset; none if b is short.
 // @since 0.13.4 or earlier
 matrix.from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Option[Matrix]
 

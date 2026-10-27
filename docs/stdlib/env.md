@@ -148,7 +148,7 @@ effect fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (6 functions)
+## Signature index (9 functions)
 
 ```
 // Program arguments, argv[0] excluded.
@@ -166,6 +166,15 @@ effect env.secret(name: String) -> Option[Secret[String]]
 // Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
 // @since 0.5.0 or earlier
 effect env.set(name: String, value: String) -> Unit
+
+// Removes name for this process and later spawns; ok if unset; err if name is empty or holds `=` or NUL.
+// @since unreleased
+effect env.remove(name: String) -> Unit
+
+// Every environment variable of this process, keyed and ordered by name.
+// Holds secrets as plain values: read a credential by name with `env.secret` instead.
+// @since unreleased
+effect env.vars() -> Map[String, String]
 
 // Absolute current directory; err if unreadable.
 // @since 0.5.0 or earlier
