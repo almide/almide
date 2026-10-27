@@ -119,7 +119,7 @@
 |---|---|---|---|
 | `has_flag` | `effect fn args.has_flag(name: String) -> Bool` | 新規 | R-args-01 |
 | `option` | `effect fn args.option(name: String) -> String?` |  |  |
-| `positional` | `effect fn args.positional() -> List[String]` |  |  |
+| `positional` | `effect fn args.positional(options: List[String]) -> List[String]` |  |  |
 
 撤去（4）:
 
@@ -127,7 +127,7 @@
 |---|---|---|
 | `flag` | `has_flag` | R-args-01 |
 | `option_or` | `option(n)! ?? d` | R-args-02 |
-| `positional_at` | `list.get(args.positional()!, i)` | R-args-03 |
+| `positional_at` | `list.get(args.positional(options)!, i)` | R-args-03 |
 | `raw` | `env.args` | R-args-02 |
 
 ## base64
