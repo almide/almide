@@ -1,0 +1,3 @@
+expects_code = "E004"
+expects_error = "the lambda spells a tuple parameter's elements as separate parameters"
+hint_substring = "rewrite as `(acc, (k, v)) => …`"

@@ -656,7 +656,7 @@ fn dead_spelling<'a>(module: &str, name: &'a str) -> Option<DeadSpelling<'a>> {
     let rewrite = match (module, core) {
         ("list", "fold" | "scan") => format!("list.{core}(xs, z, (a, x) => f(a, x)!)!"),
         ("list", _) => format!("list.{}(xs, (x) => f(x)!)!", core),
-        ("map", "fold") => "map.fold(m, z, (a, k, v) => f(a, k, v)!)!".to_string(),
+        ("map", "fold") => "map.fold(m, z, (a, (k, v)) => f(a, k, v)!)!".to_string(),
         ("fs", "fold_lines") => "fs.fold_lines(path, z, (a, l) => f(a, l)!)!".to_string(),
         ("fs", _) => "fs.for_each_line(path, (l) => f(l)!)!".to_string(),
         (m, _) => format!("{m}.{core}(.., (x) => f(x)!)!"),
