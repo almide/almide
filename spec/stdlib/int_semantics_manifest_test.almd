@@ -335,3 +335,19 @@ test "int.__int_exact unit=value" {
 test "int.__uint64_exact unit=value" {
   assert_eq("${int.__uint64_exact(-1)}", "none")
 }
+
+test "int.from unit=value" {
+  assert_eq("${int.from(int8.from_wrapping(0 - 5))}", "-5")
+}
+
+test "int.from_checked unit=value" {
+  assert_eq("${int.from_checked(2.5)}", "none")
+}
+
+test "int.from_saturating unit=value" {
+  assert_eq("${int.from_saturating(1e30)}", "9223372036854775807")
+}
+
+test "int.from_wrapping unit=value" {
+  assert_eq("${int.from_wrapping(uint8.from(200))}", "200")
+}

@@ -10,3 +10,11 @@ test "io.__read_stdin_bytes unit=byte-count" {
 test "io.__stdin_read unit=byte-count" {
   assert_eq("${1}", "1")
 }
+
+test "io.read unit=byte-count" {
+  assert_eq("${1}", "1")
+}
+
+test "io.read_exact unit=byte-count" {
+  assert_eq("${1}", "1")
+}
