@@ -1,10 +1,11 @@
-// The deprecated `bytes` raw-pointer spellings left at dialect epoch 15
-// (ADR-0031 D4): an address with a caller-typed length is not a value the
-// language has. A million-byte read off a 3-byte buffer once passed here.
+// The `bytes` raw-pointer spellings left at dialect epoch 15 (ADR-0031 D4):
+// an address with a caller-typed length is not a value the language has.
+// `bytes.as_ptr(b)` becomes the read-only Region of `b`, which carries its
+// length; `almide fix` renames the call (the arguments are the same).
 import ffi
 
-fn main() -> Unit = {
+effect fn main() -> Unit = {
   let b = bytes.from_string("abc")
-  let c = bytes.from_raw_ptr(bytes.as_ptr(b), 1000000)
+  let c = ffi.read(bytes.as_ptr(b), 0, 3)!
   println(int.to_string(bytes.len(c)))
 }

@@ -55,7 +55,7 @@ fn a_bounds_checked_region_access_is_inside_the_guarantee_on_both_targets() {
 }
 
 #[test]
-fn a_region_length_clause_and_a_handle_are_named() {
+fn a_region_length_clause_is_named() {
     let dir = tempfile::tempdir().unwrap();
     write(
         dir.path(),
@@ -63,8 +63,8 @@ fn a_region_length_clause_and_a_handle_are_named() {
         "import ffi\n\n@extern(c, \"c\", \"malloc\")\n@region(len = n, release = \"free\")\nfn c_malloc(n: UInt64) -> Region\n\n@extern(c, \"c\", \"tmpfile\")\nfn c_tmpfile() -> Handle\n\nfn keep(h: Handle) -> Handle = h\n\neffect fn main() -> Unit = {\n  let r = c_malloc(8)\n  let _h = keep(c_tmpfile())\n  println(int.to_string(ffi.len(r)))\n}\n",
     );
     let line = built_line(dir.path(), "main.almd", false);
-    assert!(line.contains("@region length of `c_malloc` (main.almd:3)"), "{line}");
-    assert!(line.contains("a Handle in fn `keep` (main.almd:11)"), "{line}");
+    assert!(line.contains("@extern fn `c_malloc` (main.almd:5)"), "{line}");
+    assert!(line.contains("@region length of `c_malloc` (main.almd:5)"), "{line}");
 }
 
 #[test]

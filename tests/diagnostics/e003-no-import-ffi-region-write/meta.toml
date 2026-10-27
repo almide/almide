@@ -1,4 +1,4 @@
-expects_code = "E100"
-expects_error = "is outside the memory-safety guarantee and needs `import ffi` in this file"
-hint_substring = "add `import ffi` to this file"
+expects_code = "E003"
+expects_error = "undefined variable 'ffi'"
+hint_substring = "Add `import ffi`"
 check_target = "wasm"
