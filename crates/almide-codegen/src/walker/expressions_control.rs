@@ -379,6 +379,16 @@ fn case_literal_defaults<'a>(ctx: &'a RenderContext, ctor: &str, ty: &Ty) -> Opt
         .collect())
 }
 
+/// Is field `field` of the record literal `expr` an `AlmideBox`? A case or
+/// struct literal that spells its name reads the name-keyed `boxed_fields`; a
+/// recursive record's fields are also boxed by the literal's TYPE, so an
+/// unnamed literal the checker typed by its annotation (`let n: Node =
+/// { .. }`) boxes them too, as the spread literal does (#4251).
+fn literal_field_is_boxed(ctx: &RenderContext, expr: &IrExpr, name: Option<&Sym>, field: &str) -> bool {
+    name.is_some_and(|cn| super::case_field_is_boxed(ctx, Some(&expr.ty), cn.as_str(), field))
+        || super::record_field_is_boxed(ctx, &expr.ty, field)
+}
+
 fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
     let IrExprKind::Record { name, fields } = &expr.kind else { unreachable!() };
     // Build field strings (explicit + defaults for missing)
@@ -389,10 +399,8 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
     for (k, v) in fields.iter() {
         let mut val_str = render_expr_owned(ctx, v);
         // Box recursive fields (annotation is target-aware — empty for non-Rust)
-        if let Some(cn) = name {
-            if super::case_field_is_boxed(ctx, Some(&expr.ty), cn.as_str(), k.as_str()) {
-                val_str = format!("AlmideBox::new({})", val_str);
-            }
+        if literal_field_is_boxed(ctx, expr, name.as_ref(), k.as_str()) {
+            val_str = format!("AlmideBox::new({})", val_str);
         }
         // A closure stored in a struct field is `Rc<dyn Fn>`; the
         // box-by-default pass already boxed the field value, so no
@@ -433,9 +441,7 @@ fn render_expr_record(ctx: &RenderContext, expr: &IrExpr) -> String {
         };
         let Some(default_expr) = default_expr else { continue; };
         let mut val_str = render_expr(ctx, default_expr);
-        let needs_box = name.as_ref()
-            .map_or(false, |cn| super::case_field_is_boxed(ctx, Some(&expr.ty), cn.as_str(), field_name));
-        if needs_box { val_str = format!("AlmideBox::new({})", val_str); }
+        if literal_field_is_boxed(ctx, expr, name.as_ref(), field_name) { val_str = format!("AlmideBox::new({})", val_str); }
         let fname = ctx.field_ident(field_name.as_str());
         field_strs.push(ctx.templates.render_with("record_field", None, &[], &[("name", fname.as_str()), ("value", val_str.as_str())])
             .unwrap_or_else(|| format!("{}: {}", fname, val_str)));
