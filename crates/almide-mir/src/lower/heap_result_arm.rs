@@ -286,6 +286,19 @@ impl LowerCtx {
                 self.drop_arm_locals(arm_mark);
                 Some(obj)
             }
+            // An EMPTY-MAP arm (`o ?? [:]` → `match o { some(p) => p, none => [:] }`): the
+            // fresh empty block the owned-field `[:]` builds, MOVED OUT (`Consume` = `m`) —
+            // the empty-`[]` arm's balance. Nothing inside it to free.
+            IrExprKind::EmptyMap => {
+                let obj = self.try_lower_scalar_list_slots(&[])?;
+                self.ops.push(Op::Consume { v: obj });
+                Some(obj)
+            }
+            IrExprKind::MapLiteral { entries } if entries.is_empty() => {
+                let obj = self.try_lower_scalar_list_slots(&[])?;
+                self.ops.push(Op::Consume { v: obj });
+                Some(obj)
+            }
             // A TUPLE literal arm (`if c then (a, b) else (0, 0)`, `... else (parse(s), pos)`):
             // materialize the flat (scalar) or nested-ownership (heap-element) tuple block
             // (cert `i`) and MOVE IT OUT (`Consume` = `m`) — the same per-arm `"im"` balance as
