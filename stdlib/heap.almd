@@ -12,8 +12,11 @@
 // (R-L0-04). The fns that read every element (`contains`, `any`, `all`,
 // `count`) answer the same whatever the slots' order, so the order of the
 // list inside is never observable (R-heap-02); `to_list` is the pop order.
+// `Heap` is opaque (`mod type`, #4256): outside this module its fields cannot
+// be read and its record literal cannot be written (E033), so no caller sees
+// the slot order or builds a heap that breaks the heap invariant.
 /// A priority queue; the least element by its order comes out first.
-type Heap[A] = { slots: List[(A, Int)], next: Int, cmp: (A, A) -> Int }
+mod type Heap[A] = { slots: List[(A, Int)], next: Int, cmp: (A, A) -> Int }
 
 // The natural order of two values, as `list.sort_by` orders them (a generic
 // `<` lowers only for scalars on wasm, so the order is asked of `sort_by`).

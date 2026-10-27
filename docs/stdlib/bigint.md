@@ -10,6 +10,16 @@ negative value is two's complement with an endless run of 1 bits above it, so
 `bnot(x)` is `-x - 1` and `bshr` rounds toward -inf. Two BigInts holding the same
 value are `==`.
 
+Limits (#4196). Text in a radix that is not a power of two (decimal included)
+costs time quadratic in its length, so it is limited to 4300 digits, Python's
+default: `parse` / `parse_radix` answer
+`err("integer string conversion exceeds the limit of 4300 digits")` for more
+digits (leading zeros count, the sign does not), and `to_string` /
+`to_string_radix` abort with the same text when the result would be longer.
+Radix 2, 4, 8, 16 and 32 convert in linear time and have no limit — print a
+huge value in hex. `pow` aborts with `pow result too large` before computing a
+result sure to pass 30 * 2^28 bits (2^28 limbs, the list ceiling `bshl` meets).
+
 Not yet: the arithmetic operators `+ - * / %` on BigInt and `bigint.from` (a
 conversion from any number type) wait on the language; build values with
 `parse` and `pow` until then.
@@ -36,20 +46,22 @@ effect fn main() -> Unit = {
 ## Signature index (24 functions)
 
 ```
-// BigInt from trimmed decimal s with an optional + or -; err on junk.
+// BigInt from trimmed decimal s with an optional + or -; err on junk or more than 4300 digits.
 // @since unreleased
 bigint.parse(s: String) -> Result[BigInt, String]
 
 // BigInt from trimmed s in radix: a + or - sign, any case, and 0x, 0o, 0b allowed for 16, 8, 2;
-// err on junk; radix outside 2..36 aborts.
+// err on junk, and on more than 4300 digits in a radix that is not a power of two;
+// radix outside 2..36 aborts.
 // @since unreleased
 bigint.parse_radix(s: String, radix: Int) -> Result[BigInt, String]
 
-// Decimal digits, with - when negative.
+// Decimal digits, with - when negative; more than 4300 digits aborts.
 // @since unreleased
 bigint.to_string(x: BigInt) -> String
 
-// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts.
+// Digits of x in radix, lowercase, - when negative; radix outside 2..36 aborts, and so does
+// a radix that is not a power of two when the text would pass 4300 digits.
 // @since unreleased
 bigint.to_string_radix(x: BigInt, radix: Int) -> String
 
@@ -93,7 +105,7 @@ bigint.floor_div(a: BigInt, b: BigInt) -> BigInt
 // @since unreleased
 bigint.modulo(a: BigInt, b: BigInt) -> BigInt
 
-// base raised to exp; exp < 0 aborts.
+// base raised to exp; exp < 0 aborts, and so does a result sure to pass 30 * 2^28 bits.
 // @since unreleased
 bigint.pow(base: BigInt, exp: Int) -> BigInt
 

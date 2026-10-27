@@ -3,7 +3,7 @@ test "append_u8 builds a single byte" {
   var b = bytes.new()
   bytes.append_u8(b, 0x42)
   assert_eq(bytes.len(b), 1)
-  assert_eq(bytes.read_u8(b, 0), 0x42)
+  assert_eq(bytes.get(b, 0) ?? 0, 0x42)
 }
 
 test "append_u16_le writes 2 bytes little-endian" {
@@ -58,7 +58,7 @@ test "interleaved appends accumulate length" {
   bytes.append_u32_le(b, 2)
   bytes.append_f64_le(b, 3.0)
   assert_eq(bytes.len(b), 1 + 4 + 8)
-  assert_eq(bytes.read_u8(b, 0), 1)
+  assert_eq(bytes.get(b, 0) ?? 0, 1)
   assert_eq(bytes.get_u32_le(b, 1) ?? 0, 2)
   assert_eq(bytes.get_f64_le(b, 5) ?? 0.0, 3.0)
 }

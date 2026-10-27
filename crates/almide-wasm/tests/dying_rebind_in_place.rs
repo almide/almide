@@ -125,7 +125,7 @@ fn main() -> Unit = {
   var b = bytes.zeros(2)
   var c = b
   bytes.put_u8(c, 0, 5)
-  println("${bytes.get_or(b, 0, 0 - 1)} ${bytes.get_or(c, 0, 0 - 1)}")
+  println("${bytes.get(b, 0) ?? (0 - 1)} ${bytes.get(c, 0) ?? (0 - 1)}")
   println(keep("hi"))
   let base = "x"
   let both = list.fold(list.range(0, 2), base, (acc, k) => {

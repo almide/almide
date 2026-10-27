@@ -4,9 +4,10 @@
 //! rule (runtime/rs/src/matrix.rs + matrix_p2.rs) read on a layout whose
 //! rows are contiguous, so a row move is one `memory.copy`:
 //!
-//! - slice_rows / gather_rows read their indices as native's `as usize`
-//!   does: a negative start or index is past every row (the empty slice,
-//!   the all-zero gathered row), a negative end is "to the last row".
+//! - slice_rows clamps both bounds into [0, rows] (a negative bound is 0,
+//!   list.slice's rule, #4147); gather_rows reads its indices as native's
+//!   `as usize` does: a negative index is past every row (the all-zero
+//!   gathered row).
 //! - concat_cols of the empty list is the 0-row matrix; a first matrix with
 //!   no rows is ONE empty row (native's `vec![vec![]]`); each output row is
 //!   the concatenation of the operands that HAVE that row (a shorter
@@ -37,15 +38,17 @@ impl Emitter<'_> {
         i.local_get(row).local_get(cols).i32_mul().i32_const(3).i32_shl().i32_add();
     }
 
-    /// slice_rows(m, start, end): rows start..min(end, rows); a start at or
-    /// past that end is the empty matrix.
+    /// slice_rows(m, start, end): rows start..min(end, rows), each bound
+    /// clamped at 0; a start at or past that end is the empty matrix.
     pub(crate) fn lower_matrix_slice_rows(&mut self, m: &IrExpr, start: &IrExpr, end: &IrExpr) -> ArmResult {
         let (hm, hr, hc) = self.mat_open(m)?;
         let mut se = [0u32; 2];
         for (slot, e) in se.iter_mut().zip([start, end]) {
             self.lower_arg(e, Some(INT), ArgMode::Borrow)?;
             *slot = self.hold_i64()?;
-            self.f.instructions().local_set(*slot);
+            let h = *slot;
+            // #4147: a negative bound is 0 (list.slice's rule).
+            self.f.instructions().local_set(h).local_get(h).i64_const(0).local_get(h).i64_const(0).i64_gt_s().select().local_set(h);
         }
         let [hs, he] = se;
         let hn = self.hold_i32()?;

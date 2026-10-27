@@ -278,7 +278,7 @@
     fn map_insert_is_a_functional_rebind() {
         // var m = []; m[k] = v  — map insertion REBINDS through the self-host:
         // `m = map.set(m, k, v)` (value semantics — the same treatment the
-        // `map.insert(m, k, v)` CALL form gets), NOT an in-place MakeUnique
+        // other in-place mutators get), NOT an in-place MakeUnique
         // (the old elide-the-write model was a silent no-op on the v1 leg).
         let mi = stmt(IrStmtKind::MapInsert {
             target: VarId(0),

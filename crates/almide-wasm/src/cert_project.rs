@@ -92,19 +92,20 @@ const PURE_BOUND: &[u32] = &[cap::STDOUT];
 pub fn op_caps(op: i32) -> &'static [u32] {
     use cap::*;
     match op {
-        1 | 4..=6 | 11..=14 | 17 | 18 | 22..=25 | 38..=42 | 51 | 52 | 61..=64 => &[FS_READ],
+        1 | 4..=6 | 11..=14 | 22..=25 | 38..=42 | 51 | 52 | 61..=64 => &[FS_READ],
         2 | 3 | 7..=10 | 15 | 16 | 20 | 21 => &[FS_WRITE],
         19 => &[FS_READ, FS_WRITE],
         // The rooted family's descriptor ops (#4084, fs_root.rs): read text,
         // read bytes, list, exists read; write text and remove write.
         120..=123 => &[FS_READ],
         124 | 125 => &[FS_WRITE],
-        26..=29 | 33 | 37 => &[ENV],
+        26..=29 | 33 | 37 | 77 => &[ENV],
         30 | 73 => &[STDOUT],
         32 => &[ENTROPY],
         34 | 36 | 60 => &[CLOCK],
         35 => &[STDIN],
-        43..=50 | 53..=59 | 65 | 70..=72 => &[NET],
+        // 50 (framed raw-bytes http) is retired.
+        43..=49 | 53..=59 | 65 | 70..=72 | 75 => &[NET],
         80..=90 => &[PROC],
         // testing.assert_aborts's site pair (ADR-0029, #3792): op 117 runs a
         // site on a fresh instance — a child, the native leg's re-exec — and
@@ -117,7 +118,8 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         // dropped. The op itself reaches nothing — what a chunk could reach is
         // that function's, and the not-served fallback calls the same
         // function from this frame, so the call graph already counts it.
-        74 => &[],
+        // 76 is a deliberate exit's mark (#4203): it answers and reaches nothing.
+        74 | 76 => &[],
         _ => &[SENTINEL],
     }
 }
@@ -429,6 +431,16 @@ pub fn fs_call_ops(bytes: &[u8]) -> Result<Option<BTreeSet<i32>>, String> {
         }
     }
     Ok(Some(out))
+}
+
+/// The `almide.fs_call` op constants the module `bytes` shows: [`fs_call_ops`]
+/// with a site whose op is not a visible constant adding NOTHING, rather than
+/// voiding the set. The embedded host's allow-list (row 19 of the security
+/// table): a computed op fails closed, reaching only an op some other site
+/// names, where `None` used to leave the module with no list at all.
+pub fn fs_call_ops_visible(bytes: &[u8]) -> Result<BTreeSet<i32>, String> {
+    let m = decode(bytes)?;
+    Ok(m.bodies.iter().flat_map(|b| b.fs_ops.iter()).flatten().copied().collect())
 }
 
 /// The capability witnesses of the structural module `decls.bytes`:
@@ -780,5 +792,9 @@ mod tests {
             i.local_get(0);
         });
         assert_eq!(fs_call_ops(&computed).unwrap(), None, "an op the stack does not show cannot be bounded");
+        // Row 19: the host's list keeps the visible constants and drops the
+        // computed site, so it fails closed instead of vanishing.
+        assert_eq!(fs_call_ops_visible(&constant).unwrap(), [35].into());
+        assert_eq!(fs_call_ops_visible(&computed).unwrap(), BTreeSet::new());
     }
 }

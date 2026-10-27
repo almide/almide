@@ -32,6 +32,10 @@ impl NanoPass for MatchSubjectPass {
         Some(vec![Target::Rust])
     }
 
+    /// Effect inference reads the call shapes this pass rewrites in match
+    /// subjects; the emitted Rust differs when it runs first (pass-shuffle).
+    fn run_before(&self) -> Vec<&'static str> { vec!["EffectInference"] }
+
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
         let mut v = MatchSubjectVisitor;
         for func in &mut program.functions {

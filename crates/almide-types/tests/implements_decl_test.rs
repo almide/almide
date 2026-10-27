@@ -43,14 +43,51 @@ fn every_declared_impl_fn_is_defined_in_its_source() {
     }
 }
 
-/// `PRIM_FREE` only names declared bodies, and none of their sources reach `prim.`.
+/// The top-level function of `src` named `name`: its `fn` line up to the
+/// next top-level `fn` (comment lines dropped).
+fn body_of<'s>(src: &'s str, name: &str) -> Vec<&'s str> {
+    let is_top_fn = |l: &str| {
+        let t = l.trim_start_matches("effect ");
+        !l.starts_with(' ') && t.starts_with("fn ")
+    };
+    let starts = |l: &str| {
+        let t = l.trim_start_matches("effect ");
+        t.starts_with(&format!("fn {name}(")) || t.starts_with(&format!("fn {name}["))
+    };
+    let lines: Vec<&str> = src.lines().filter(|l| !l.trim_start().starts_with("//")).collect();
+    let Some(i) = lines.iter().position(|l| starts(l)) else { return Vec::new() };
+    let end = lines[i + 1..].iter().position(|l| is_top_fn(l)).map_or(lines.len(), |j| i + 1 + j);
+    lines[i..end].to_vec()
+}
+
+/// The names of `src`'s top-level functions.
+fn fn_names(src: &str) -> Vec<String> {
+    src.lines()
+        .filter(|l| !l.starts_with(' '))
+        .filter_map(|l| l.trim_start_matches("effect ").strip_prefix("fn "))
+        .map(|r| r.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect())
+        .collect()
+}
+
+/// `PRIM_FREE` only names declared bodies, and none of them reaches `prim.`,
+/// through its own lines or a function of its source it calls (#4204).
 #[test]
-fn prim_free_names_declared_bodies_whose_source_never_reaches_prim() {
+fn prim_free_names_declared_bodies_that_never_reach_prim() {
     for name in PRIM_FREE {
         let (src, _) = DECLARED
             .iter()
             .find(|(_, pairs)| pairs.iter().any(|(i, _)| i == name))
             .unwrap_or_else(|| panic!("{name} is in PRIM_FREE but declares nothing"));
-        assert!(!src.contains("prim."), "{name}'s source reaches prim.");
+        let names = fn_names(src);
+        let mut todo = vec![name.to_string()];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(f) = todo.pop() {
+            if !seen.insert(f.clone()) {
+                continue;
+            }
+            let body = body_of(src, &f).join("\n");
+            assert!(!body.contains("prim."), "{name} reaches prim. through {f}");
+            todo.extend(names.iter().filter(|g| body.contains(&format!("{g}("))).cloned());
+        }
     }
 }

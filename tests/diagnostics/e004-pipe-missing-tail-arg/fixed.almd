@@ -1,4 +1,4 @@
 fn main() -> Unit = {
-  let s = ["x", "y"] |> string.join(",")
+  let s = ["x", "y"] |> list.join(",")
   println(s)
 }

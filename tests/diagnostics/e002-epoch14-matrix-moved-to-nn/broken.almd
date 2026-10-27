@@ -1,0 +1,8 @@
+fn main() -> Unit = {
+  let m = matrix.from_lists([
+    [0.5, -1.0],
+    [2.0, 0.0]
+  ])
+  let g = matrix.gelu(m)
+  println(float.to_string(matrix.get(g, 0, 0) ?? 0.0))
+}

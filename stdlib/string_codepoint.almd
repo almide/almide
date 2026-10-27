@@ -1,6 +1,6 @@
-// string_codepoint — SELF-HOSTED `string.codepoint(s) -> Option[Int]` for v1 over the
-// prim floor. v0 = `s.chars().next().map(|c| c as i64)`: the first codepoint's scalar
-// value, or None for the empty string. This is the inverse of from_codepoint — decode the
+// string_codepoint — SELF-HOSTED `string.to_codepoint(s) -> Option[Int]` for v1 over the
+// prim floor (R-string-12, R-string-14). Native: the scalar value when s is EXACTLY one
+// codepoint, None for the empty string and for two or more codepoints. This is the inverse of from_codepoint — decode the
 // UTF-8 lead byte's width and combine the continuation bytes. The decoded value is always
 // >= 0, so -1 is a safe "empty" sentinel; the Option is materialized via none/some helpers
 // (the proven index_of pattern), so ?? and match execute on the result.
@@ -36,9 +36,15 @@ fn __sco_none() -> Int? = none
 
 fn __sco_some(i: Int) -> Int? = some(i)
 
+// The UTF-8 width of the codepoint whose lead byte is b0.
+fn __scp_width(b0: Int) -> Int = if b0 < 128 then 1
+else if b0 < 224 then 2
+else if b0 < 240 then 3 else 4
+
 fn string_codepoint(s: String) -> Int? = {
   let h = prim.handle(s)
   let blen = prim.load32(h + 4)
-  let cp = if blen == 0 then 0 - 1 else __scp_decode(h + 12)
+  let one = blen > 0 and blen == __scp_width(prim.load8(h + 12))
+  let cp = if one then __scp_decode(h + 12) else 0 - 1
   if cp < 0 then __sco_none() else __sco_some(cp)
 }

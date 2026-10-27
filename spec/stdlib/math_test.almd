@@ -2,31 +2,31 @@ import math
 
 // Comprehensive math module tests
 // ── abs ──
-test "math.abs" {
-  assert_eq(math.abs(-5), 5)
-  assert_eq(math.abs(0), 0)
-  assert_eq(math.abs(42), 42)
+test "int.abs" {
+  assert_eq(int.abs(-5), 5)
+  assert_eq(int.abs(0), 0)
+  assert_eq(int.abs(42), 42)
 }
 
 // ── min / max ──
-test "math.min and max" {
-  assert_eq(math.min(3, 7), 3)
-  assert_eq(math.max(3, 7), 7)
-  assert_eq(math.min(5, 5), 5)
-  assert_eq(math.max(-10, -3), -3)
+test "int.min and max" {
+  assert_eq(int.min(3, 7), 3)
+  assert_eq(int.max(3, 7), 7)
+  assert_eq(int.min(5, 5), 5)
+  assert_eq(int.max(-10, -3), -3)
 }
 
 // ── pow ──
-test "math.pow int" {
-  assert_eq(math.pow(2, 10), 1024)
-  assert_eq(math.pow(5, 0), 1)
-  assert_eq(math.pow(3, 3), 27)
+test "int.pow int" {
+  assert_eq(int.pow(2, 10), 1024)
+  assert_eq(int.pow(5, 0), 1)
+  assert_eq(int.pow(3, 3), 27)
 }
 
-test "math.fpow float" {
-  assert_eq(math.fpow(2.0, 10.0), 1024.0)
-  assert_eq(math.fpow(5.0, 0.0), 1.0)
-  assert_eq(math.fpow(9.0, 0.5) > 2.99, true)
+test "float.pow float" {
+  assert_eq(float.pow(2.0, 10.0), 1024.0)
+  assert_eq(float.pow(5.0, 0.0), 1.0)
+  assert_eq(float.pow(9.0, 0.5) > 2.99, true)
 }
 
 // ── pi / e ──
@@ -96,26 +96,26 @@ test "math.exp" {
 }
 
 // ── sign ──
-test "math.sign" {
-  assert_eq(math.sign(42), 1)
-  assert_eq(math.sign(-7), -1)
-  assert_eq(math.sign(0), 0)
+test "int.sign" {
+  assert_eq(int.sign(42), 1)
+  assert_eq(int.sign(-7), -1)
+  assert_eq(int.sign(0), 0)
 }
 
 // ── fmin / fmax / fpow ──
-test "math.fmin and fmax" {
-  assert_eq(math.fmin(1.5, 2.5), 1.5)
-  assert_eq(math.fmax(1.5, 2.5), 2.5)
+test "float.min and max" {
+  assert_eq(float.min(1.5, 2.5), 1.5)
+  assert_eq(float.max(1.5, 2.5), 2.5)
 }
 
-test "math.fmin negative" {
+test "float.min negative" {
   let a = 0.0 - 1.0
   let b = 0.0 - 2.0
-  assert_eq(math.fmin(a, b), b)
+  assert_eq(float.min(a, b), b)
 }
 
-test "math.fpow exact" {
-  assert_eq(math.fpow(2.0, 3.0), 8.0)
+test "float.pow exact" {
+  assert_eq(float.pow(2.0, 3.0), 8.0)
 }
 
 // ── factorial / choose ──
@@ -140,4 +140,23 @@ test "math.choose is exact up to the Int bound and wraps past it" {
   assert_eq(math.choose(9223372036854775807, 2), 4611686018427387905)
   assert_eq(math.choose(5, 6), 0)
   assert_eq(math.choose(5, -1), 0)
+}
+
+// #4212: factorial wraps mod 2^64, so it is 0 from the least n whose n! holds 64
+// factors of two, and answers that 0 without looping n times. The cut is derived
+// here, not copied: Legendre's v2(n!) = sum of n / 2^j.
+fn v2_factorial(n: Int) -> Int = if n < 2 then 0 else n / 2 + v2_factorial(n / 2)
+
+fn first_with_64_twos(n: Int) -> Int = if v2_factorial(n) >= 64 then n else first_with_64_twos(n + 1)
+
+test "math.factorial is 0 from the first n with 64 factors of two" {
+  let cut = first_with_64_twos(1)
+  assert_eq(cut, 66)
+  assert_eq(math.factorial(cut - 1), -9223372036854775807 - 1)
+  assert_eq(math.factorial(cut), 0)
+  assert_eq(math.factorial(cut + 1), 0)
+  assert_eq(math.factorial(1000000000000000000), 0)
+  assert_eq(math.factorial(9223372036854775807), 0)
+  assert_eq(math.factorial(20), 2432902008176640000)
+  assert_eq(math.factorial(-9223372036854775807 - 1), 1)
 }

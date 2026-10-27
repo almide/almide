@@ -751,7 +751,12 @@ fn crossmod_shape_matrix() {
     let check_wasm = wasmtime_available();
 
     let mut failures: Vec<String> = Vec::new();
-    for cell in cells() {
+    // Every cell on a full run; the CI slice (ALMIDE_CI_SLICE) of them, keyed
+    // by name, otherwise. Every verdict here is per cell.
+    let cells = almide_corpus::select(cells(), "crossmod_shape_matrix", |c| {
+        format!("tests/crossmod_matrix_test.rs#{}", c.name)
+    });
+    for cell in cells {
         let result = run_cell(&cell, check_wasm);
         match (&cell.status, result.native_ok) {
             (Status::Works, true) => {}

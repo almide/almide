@@ -1,7 +1,7 @@
-// string_from_codepoint — SELF-HOSTED `string.from_codepoint(cp) -> String` for v1 over
-// the prim floor. v0 = `char::from_u32(cp as u32).map(to_string).unwrap_or_default()`:
-// encode the Unicode scalar value as UTF-8, or "" for an invalid codepoint (negative,
-// a surrogate D800..DFFF, or > 10FFFF). The byte length and the byte fill live in SCALAR
+// string_from_codepoint — SELF-HOSTED `string.__from_codepoint(cp) -> String` for v1 over
+// the prim floor: the UTF-8 encoding of a Unicode scalar value, "" for an invalid one
+// (negative, a surrogate D800..DFFF, or > 10FFFF). The public `string.from_codepoint`
+// answers none for those before it asks (stdlib/string.almd). The byte length and the byte fill live in SCALAR
 // helpers, so from_codepoint keeps a plain heap tail (alloc_str once, no heap-result if).
 // `|` is replaced by `+` (the continuation/lead bits never overlap), so no prim.bor.
 fn __cp_nbytes(cp: Int) -> Int = if cp < 0 then 0

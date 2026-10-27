@@ -52,27 +52,43 @@ fn reject_removed_target(target: Option<&str>) {
 /// Compute the build's output path: `file`/`almide.toml`-derived default
 /// unless `-o` was given, plus the Windows `.exe` auto-suffix for native
 /// builds. Extracted verbatim from `cmd_build`.
-fn compute_output_path(file: &str, output: Option<&str>, is_wasm: bool) -> String {
-    let default_output = if is_wasm {
+///
+/// The manifest's name becomes a file name in the working directory only
+/// when it is a plain name (#4193): a cloned repo's `name = "../x"` or an
+/// absolute path would otherwise make `almide build` write — and mark
+/// executable — any file the user can write. Such a name is refused, not
+/// replaced, so the build never lands somewhere unexpected.
+fn compute_output_path(file: &str, output: Option<&str>, is_wasm: bool) -> Result<String, String> {
+    let default_output = if output.is_some() {
+        String::new()
+    } else if is_wasm {
         format!("{}.wasm", file.strip_suffix(".almd").unwrap_or("a.out"))
     } else if std::path::Path::new("almide.toml").exists() {
         // `[package].name` as TOML reads it — not the first line that starts
         // with `name`, which could be a key in any table (#3253).
-        project::manifest_package_name(std::path::Path::new("almide.toml"))
-            .unwrap_or_else(|| file.strip_suffix(".almd").unwrap_or("a.out").to_string())
+        match project::manifest_package_name(std::path::Path::new("almide.toml")) {
+            Some(name) => {
+                project::check_plain_name(&name).map_err(|e| {
+                    format!("refusing to name the build output after almide.toml's [package] name: {e}
+  hint: fix the name, or pass `-o <path>`")
+                })?;
+                name
+            }
+            None => file.strip_suffix(".almd").unwrap_or("a.out").to_string(),
+        }
     } else {
         file.strip_suffix(".almd").unwrap_or("a.out").to_string()
     };
     let output_raw = output.unwrap_or(&default_output);
 
     // On Windows, auto-append .exe for native builds
-    if cfg!(target_os = "windows") && !is_wasm
+    Ok(if cfg!(target_os = "windows") && !is_wasm
         && !output_raw.ends_with(".exe") && !output_raw.ends_with(".wasm")
     {
         format!("{}.exe", output_raw)
     } else {
         output_raw.to_string()
-    }
+    })
 }
 
 /// The generated crate's Cargo name for a native build of `file` (#3349):
@@ -144,7 +160,7 @@ fn install_artifact(built: &std::path::Path, dest: &std::path::Path) -> std::io:
 /// write it to `dest`. Exits the process on a compile error, otherwise prints
 /// the written path and returns.
 fn cmd_build_cdylib(rs_code: &str, crate_name: &str, dest: &std::path::Path, use_release: bool, native_deps: &[project::NativeDep], source_root: Option<&std::path::Path>, note: &str) {
-    let project_dir = std::env::temp_dir().join("almide-build-cdylib");
+    let project_dir = super::build_dir::cache_base().join("build-cdylib");
     // Strip fn main() from the code — cdylib has no entry point
     let lib_code = rs_code.replace("fn main()", "fn __almide_unused_main()");
     // Serialize across processes: the shared scratch dir's src + target would
@@ -265,7 +281,10 @@ pub fn cmd_build(args: BuildArgs) {
     }
 
     let requested_output = output;
-    let output = compute_output_path(file, output, is_wasm);
+    let output = compute_output_path(file, output, is_wasm).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1)
+    });
 
     let opts = crate::codegen::CodegenOptions { repr_c, allow_unverified: false, trace: false, meter_in_codegen: false };
     let (rs_code, metered, outside_guarantee) = crate::try_compile_reporting(file, no_check, &opts)

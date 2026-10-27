@@ -25,6 +25,12 @@ impl Checker {
         if s.as_str() == "Value" || self.env.types.contains_key(s) {
             return None;
         }
+        // The ADR-0001 clock types exist only in the checker; the E029 walk
+        // skips them, so a consequence held on one was never released and
+        // `duration.ms(5).cmp(..)` passed check as `Unknown` (#3960).
+        if almide_lang::time_units::TIME_MODULES.iter().any(|(_, t)| *t == s.as_str()) {
+            return None;
+        }
         if almide_lang::stdlib_info::runtime_backed_type_owner(s.as_str()).is_some() {
             return None;
         }

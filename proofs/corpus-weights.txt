@@ -60,7 +60,6 @@ bytes_push_inplace	325	9	336
 bytes_rawptr	330	11	384
 bytes_search_edit_family	421	121	788
 bytes_set_value_semantics	350	21	427
-bytes_string_window_domain	383	28	428
 bytes_temp_receiver	56991	87160	468
 bytes_writer_family	388	46	444
 call_closure_lambda_param	248	17	408
@@ -296,7 +295,6 @@ int_parse_overflow	280	19	328
 int_pow_negative_exponent	262	15	285
 int_pow_operator_negative_base	256	16	296
 int_pow_overflow_wraps	263	19	313
-int_rotate_nonpositive_width	260	8	304
 int_wrap_rotate_width	264	17	282
 interp_effect_unwrap_arg	250	21	310
 io_write_ordering	323	8	348
@@ -423,7 +421,6 @@ matrix_from_bytes_count_domain	439	20	1450
 matrix_from_bytes_offset_domain	430	9	1208
 matrix_head_count_domain	706	338	1214
 matrix_index_domain_family	370	19	1167
-matrix_index_oob_aborts	339		
 matrix_pow_libm	381	11	1097
 matrix_q1_full_loader_cols_beyond_buffer	126438	139457	1454
 matrix_q_dims_guard	662	40	1435

@@ -11,7 +11,7 @@ fn unsupported_component_args_are_named_before_writing_an_artifact() {
     // argv over wasi:cli/environment (ADR-0023 step 3), env.set through the
     // guest-side overlay env.get reads first (#3223).
     let env_set_source = dir.path().join("env_set.almd");
-    std::fs::write(&env_set_source, "import env\neffect fn main() -> Unit = env.set(\"ALMIDE_X\", \"1\")\n").expect("source");
+    std::fs::write(&env_set_source, "import env\neffect fn main() -> Unit = env.set(\"ALMIDE_X\", \"1\")!\n").expect("source");
     let component = |source: &std::path::Path, p3: bool| {
         std::fs::write(&artifact, b"existing artifact").expect("sentinel");
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));

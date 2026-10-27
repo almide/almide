@@ -14,11 +14,11 @@ fn opt(x: Int?) -> String = match x {
 
 fn main() -> Unit = {
   // count with empty pattern == char count + 1
-  println("count empty/empty=" + int.to_string(string.count("", "")))
-  println("count ascii/empty=" + int.to_string(string.count("abc", "")))
-  println("count cjk/empty=" + int.to_string(string.count("日本", "")))
+  println("count empty/empty=" + int.to_string(string.count_matches("", "")))
+  println("count ascii/empty=" + int.to_string(string.count_matches("abc", "")))
+  println("count cjk/empty=" + int.to_string(string.count_matches("日本", "")))
   // 2 chars
-  println("count mixed/empty=" + int.to_string(string.count("a日b", "")))
+  println("count mixed/empty=" + int.to_string(string.count_matches("a日b", "")))
   // 3 chars
   // last_index_of with empty pattern == Some(byte length)
   println("lio empty/empty=" + opt(string.last_index_of("", "")))
@@ -29,7 +29,7 @@ fn main() -> Unit = {
   println("lio mixed/empty=" + opt(string.last_index_of("a日b", "")))
   // Some(5 bytes)
   // non-empty pattern behaviour is unchanged (regression guard)
-  println("count ab=" + int.to_string(string.count("ababab", "ab")))
+  println("count ab=" + int.to_string(string.count_matches("ababab", "ab")))
   println("lio ab=" + opt(string.last_index_of("ababab", "ab")))
   println("lio miss=" + opt(string.last_index_of("abc", "z")))
 }

@@ -62,7 +62,10 @@ fn corpus_reproduces_on_stock_wasmtime() {
     let mut skipped = 0usize;
     let mut failures: Vec<String> = Vec::new();
     let mut allowed: Vec<String> = Vec::new();
-    for line in almide_corpus::manifest_rows(&manifest) {
+    let rows = almide_corpus::select(almide_corpus::manifest_rows(&manifest).collect::<Vec<_>>(), "wasi_gate", |line| {
+        line.splitn(3, '\t').nth(2).expect("manifest row").to_string()
+    });
+    for line in rows {
         let mut it = line.splitn(3, '\t');
         let want_hash = it.next().expect("manifest row");
         let want_exit: i32 = it.next().expect("manifest row").parse().expect("exit");
@@ -116,8 +119,11 @@ fn corpus_reproduces_on_stock_wasmtime() {
         failures.len(),
         failures.join("\n")
     );
+    // The 500-run floor is a whole-corpus count: the CI slice runs 1 in k
+    // rows, so it asserts only that the slice ran something.
+    let floor = if almide_corpus::full_run() { 500 } else { 1 };
     assert!(
-        swept >= 500,
-        "sweep looks broken: only {swept} fixtures ran ({skipped} host-variant outside)"
+        swept >= floor,
+        "sweep looks broken: only {swept} fixtures ran ({skipped} host-variant outside), floor {floor}"
     );
 }

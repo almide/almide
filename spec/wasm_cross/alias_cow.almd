@@ -12,7 +12,7 @@
 //   - IndexAssign  `a[i] = v`
 //   - FieldAssign  `a.f = v`
 //   - in-place stdlib mutators: list.push / list.pop / list.clear,
-//     map.insert, string.push
+//     map index assign `m[k] = v`, string.push
 //   - alias forms: var-alias, let-alias, chain, branch arm, record-field alias
 //
 // Each block prints the MUTATED binding and the ALIAS binding; the alias must
@@ -95,10 +95,10 @@ fn main() -> Unit = {
   let _ = list.pop(a11)
   println("K.mut=" + show(a11))
   println("K.alias=" + show(b11))
-  // L. map.insert (in-place stdlib mutator); the alias does not gain the key.
+  // L. map.set rebind (`m = map.set(m, k, v)`); the alias does not gain the key.
   var m12 = map.set(map.new(), "x", 1)
   var b12 = m12
-  map.insert(m12, "y", 2)
+  m12 = map.set(m12, "y", 2)
   println("L.mut_has_y=" + (if map.contains(m12, "y") then "yes" else "no"))
   println("L.alias_has_y=" + (if map.contains(b12, "y") then "yes" else "no"))
   println("L.mut_len=" + int.to_string(map.len(m12)))

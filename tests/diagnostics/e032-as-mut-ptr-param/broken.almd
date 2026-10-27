@@ -12,5 +12,5 @@ fn main() -> Unit = {
   var dst = bytes.from_list([0, 0, 0, 0])
   let src = bytes.from_list([1, 2, 3, 4])
   let _ = poke(dst, src)
-  println(int.to_string(bytes.get_or(dst, 0, 9)))
+  println(int.to_string(bytes.get(dst, 0) ?? 9))
 }

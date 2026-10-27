@@ -23,6 +23,16 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # The CI slice (owner decision 2026-10-25; scripts/lib/ci-slice.sh,
+  # crates/almide-corpus/src/ci_slice.rs): a PR or merge group whose base is
+  # not main judges a commit-rotated 1-in-8 slice of every corpus gate plus
+  # the fixtures the change touches; everything else — pushes to develop and
+  # main, tags, schedules, manual runs, PRs into main — runs the full corpus.
+  # Whole-corpus staleness / completeness checks run only on a full run, and a
+  # slice never rewrites a ledger. Job names do not change with it.
+  ALMIDE_CI_SLICE: ${{ ((github.event_name == 'pull_request' && github.base_ref != 'main') || (github.event_name == 'merge_group' && github.event.merge_group.base_ref != 'refs/heads/main')) && '8' || '1' }}
+  ALMIDE_CI_SEED: ${{ github.sha }}
+  ALMIDE_CI_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
   RUST_TOOLCHAIN: "1.96.0"  # runner-class MSRV: the almide binary embeds wasmtime 49 (commissioned host); compiler crates keep the 1.89 claim per-crate
   # Cold runners gain nothing from the workspace's release-incremental
   # profile (#1006) — it only bloats the caches. Opt out.
@@ -38,6 +48,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: CI slice — the change's own files (a full run does nothing)
+        run: bash scripts/ci-slice-prepare.sh
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -87,9 +99,16 @@ jobs:
           ALMIDE=./target/release/almide
           rust_pass=0; wasm_pass=0; rust_fail=0; wasm_fail=0; agree=0; both_pass=0; empty=0; errors=""
 
-          for f in $(find spec/ -name '*_test.almd' -type f | sort); do
+          # The CI slice (scripts/lib/ci-slice.sh): on a PR into develop the
+          # commit-rotated 1-in-8 slice of the test files plus the ones the
+          # change touches; every other run, all of them.
+          . scripts/lib/ci-slice.sh
+          find spec/ -name '*_test.almd' -type f | sed 's#^spec//#spec/#' | sort | ci_slice_filter cross-target-spec > /tmp/xt-selected.txt
+          selected=0
+          for f in $(cat /tmp/xt-selected.txt); do
             # Skip files marked with wasm:skip
             if head -3 "$f" | grep -q 'wasm:skip'; then continue; fi
+            selected=$((selected + 1))
 
             # `|| code=$?`, not `; code=$?`: the step shell is `bash -e`, and a
             # bare non-zero command (the first exit 5) would end the whole loop.
@@ -108,7 +127,12 @@ jobs:
             fi
           done
 
-          total=$(find spec/ -name '*_test.almd' -type f | wc -l)
+          total=$(wc -l < /tmp/xt-selected.txt | tr -d ' ')
+          judged=$((agree + $(printf '%b' "$errors" | grep -c . || true)))
+          if [ "$selected" -eq 0 ] || [ "$judged" -ne "$selected" ]; then
+            echo "::error::Cross-target: judged $judged of $selected selected test file(s) — a vacuous or partial sweep is not a pass"
+            exit 1
+          fi
           echo ""
           echo "=== Cross-Target Results ==="
           echo "Rust:  $rust_pass pass / $rust_fail fail"
@@ -169,6 +193,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: CI slice — the change's own files (a full run does nothing)
+        run: bash scripts/ci-slice-prepare.sh
 
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:

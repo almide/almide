@@ -3,9 +3,8 @@
 // this family (#1710 increment 3) and spec/embedded_cross/http_framed_errs
 // pins it. This skip retires with the render_wasm switchover (#1584).
 //
-// http.get_status / http.request_status return (status_code, body) for any
-// complete response; Err is transport-only. The `*_response` twins (#1791)
-// answer the whole record — status, every header line (repeats kept), body —
+// http.get_response / http.send answer the whole response for any complete
+// response; Err is transport-only. The record (#1791) carries — status, every header line (repeats kept), body —
 // pinned below by a loopback round-trip against a canned raw response
 // served over `net`: the listener is bound BEFORE the `fan` so the client's
 // dial is queued in the backlog until the server arm accepts. Probes follow the net_test.almd
@@ -15,6 +14,7 @@
 // external network; the status-code unit is declared out-of-band in
 // docs/stdlib/semantics-manifest.toml.
 import env
+import io
 import http
 import net
 
@@ -25,24 +25,24 @@ test "status verdict is a pure branch on the code" {
   assert_eq(verdict(200), "taken")
 }
 
-test "request_status to a closed local port is a transport err" {
-  let result = http.request_status("GET", "http://127.0.0.1:1", "", ["User-Agent": "almide-test"])
+test "send to a closed local port is a transport err, headers given" {
+  let result = http.send(http.new_request("GET", "http://127.0.0.1:1", "", [("User-Agent", "almide-test")]))
   match result {
     ok(_) => assert(false),
     err(_) => assert(true),
   }
 }
 
-test "get_status to a closed local port is a transport err" {
-  let result = http.get_status("http://127.0.0.1:1")
+test "get_response to a closed local port is a transport err" {
+  let result = http.get_response("http://127.0.0.1:1")
   match result {
     ok(_) => assert(false),
     err(_) => assert(true),
   }
 }
 
-test "request_response to a closed local port is a transport err" {
-  let result = http.request_response("GET", "http://127.0.0.1:1", "", map.new())
+test "send of a built request to a closed local port is a transport err" {
+  let result = http.send(http.new_request("GET", "http://127.0.0.1:1", "", []))
   match result {
     ok(_) => assert(false),
     err(_) => assert(true),
@@ -55,19 +55,14 @@ test "request_response to a closed local port is a transport err" {
 effect fn answer_once(port: Int, reply: String) -> Result[Unit, String] = {
   let server = net.tcp_listen("127.0.0.1", port)!
   let peer = net.tcp_accept(server)!
-  let _ = net.tcp_read(peer, 4096)!
-  net.tcp_write(peer, bytes.from_string(reply))!
-  net.tcp_close(peer)!
-  net.tcp_close_listener(server)!
+  let _ = io.read(peer, 4096)!
+  io.write(peer, bytes.from_string(reply))!
+  io.close(peer)!
+  io.close(server)!
   ok(())
 }
 
-effect fn fetch_retry(method: String, url: String, headers: Map[String, String], left: Int) -> Result[HttpResponse, String] = match http.request_response(
-  method,
-  url,
-  "",
-  headers,
-) {
+effect fn fetch_retry(method: String, url: String, headers: List[(String, String)], left: Int) -> Result[HttpResponse, String] = match http.send(http.new_request(method, url, "", headers)) {
   ok(resp) => ok(resp),
   err(e) => if left == 0 then err(e)
   else {
@@ -85,21 +80,21 @@ effect fn get_retry(url: String, left: Int) -> Result[HttpResponse, String] = ma
   },
 }
 
-test "request_response keeps status, every header and the body of a 3xx" {
+test "send keeps status, every header and the body of a 3xx" {
   let reply = "HTTP/1.1 302 Found\r\nLocation: /next\r\nSet-Cookie: a=1; HttpOnly\r\nSet-Cookie: b=2; Secure\r\nX-Frame-Options: DENY\r\nContent-Length: 5\r\n\r\nmoved"
   let (_, resp) = fan {
     answer_once(39190, reply)
-    fetch_retry("GET", "http://127.0.0.1:39190/old", ["User-Agent": "almide-test"], 100)
+    fetch_retry("GET", "http://127.0.0.1:39190/old", [("User-Agent", "almide-test")], 100)
   }
-  assert_eq(http.status_code(resp), 302)
+  assert_eq(http.status(resp), 302)
   assert_eq(http.body(resp), "moved")
-  assert_eq(http.get_header(resp, "location") ?? "none", "/next")
-  assert_eq(http.get_header(resp, "Set-Cookie") ?? "none", "a=1; HttpOnly")
+  assert_eq(http.header(resp, "location") ?? "none", "/next")
+  assert_eq(http.header(resp, "Set-Cookie") ?? "none", "a=1; HttpOnly")
   assert_eq(http.header_values(resp, "set-cookie"), ["a=1; HttpOnly", "b=2; Secure"])
-  let hs = http.headers(resp)
-  assert_eq(map.get(hs, "x-frame-options") ?? "none", "DENY")
-  assert_eq(map.get(hs, "set-cookie") ?? "none", "a=1; HttpOnly")
-  assert_eq(map.get(hs, "X-Frame-Options") ?? "none", "none")
+  assert_eq(
+    http.headers(resp),
+    [("Location", "/next"), ("Set-Cookie", "a=1; HttpOnly"), ("Set-Cookie", "b=2; Secure"), ("X-Frame-Options", "DENY"), ("Content-Length", "5")],
+  )
 }
 
 test "get_response is the GET cell of the family and a 404 is Ok" {
@@ -108,7 +103,7 @@ test "get_response is the GET cell of the family and a 404 is Ok" {
     answer_once(39191, reply)
     get_retry("http://127.0.0.1:39191/missing", 100)
   }
-  assert_eq(http.status_code(resp), 404)
+  assert_eq(http.status(resp), 404)
   assert_eq(http.body(resp), "gone")
-  assert_eq(http.headers(resp), ["content-type": "text/plain", "content-length": "4"])
+  assert_eq(http.headers(resp), [("Content-Type", "text/plain"), ("Content-Length", "4")])
 }

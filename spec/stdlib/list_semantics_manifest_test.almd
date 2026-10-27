@@ -3,6 +3,122 @@
 // regenerates and diffs). Each case executes a manifest probe; a
 // failure here means the implementation drifted from the DECLARED
 // semantic dimension (#419 class).
+test "list.len unit=element-count" {
+  assert_eq("${list.len([4, 5, 6])}", "3")
+}
+
+test "list.length unit=element-count" {
+  assert_eq("${list.length([4, 5, 6])}", "3")
+}
+
+test "list.get unit=element-index" {
+  assert_eq("${list.get([10, 20, 30], 1)}", "some(20)")
+}
+
+test "list.set unit=element-index" {
+  assert_eq("${list.set([10, 20, 30], 1, 99)}", "[10, 99, 30]")
+}
+
+test "list.swap unit=element-index" {
+  assert_eq("${list.swap([10, 20, 30], 0, 2)}", "[30, 20, 10]")
+}
+
+test "list.enumerate unit=element-index" {
+  assert_eq("${list.enumerate(["a", "b"])}", "[(0, \"a\"), (1, \"b\")]")
+}
+
+test "list.take unit=element-count" {
+  assert_eq("${list.take([10, 20, 30], 2)}", "[10, 20]")
+}
+
+test "list.drop unit=element-count" {
+  assert_eq("${list.drop([10, 20, 30], 2)}", "[30]")
+}
+
+test "list.index_of unit=element-index" {
+  assert_eq("${list.index_of([10, 20, 30, 20], 20)}", "some(1)")
+}
+
+test "list.chunk unit=element-count" {
+  assert_eq("${list.chunk([1, 2, 3, 4, 5], 2)}", "[[1, 2], [3, 4], [5]]")
+}
+
+test "list.count unit=element-count" {
+  assert_eq("${list.count([1, 2, 3, 4], (x) => x > 1)}", "3")
+}
+
+test "list.find_index unit=element-index" {
+  assert_eq("${list.find_index([1, 5, 7], (x) => x > 2)}", "some(1)")
+}
+
+test "list.update unit=element-index" {
+  assert_eq("${list.update([10, 20, 30], 2, (x) => x + 1)}", "[10, 20, 31]")
+}
+
+test "list.slice unit=element-index" {
+  assert_eq("${list.slice([10, 20, 30, 40], 1, 3)}", "[20, 30]")
+}
+
+test "list.insert unit=element-index" {
+  assert_eq("${list.insert([10, 20, 30], 1, 15)}", "[10, 15, 20, 30]")
+}
+
+test "list.remove_at unit=element-index" {
+  assert_eq("${list.remove_at([10, 20, 30], 1)}", "[10, 30]")
+}
+
+test "list.repeat unit=element-count" {
+  assert_eq("${list.repeat(7, 3)}", "[7, 7, 7]")
+}
+
+test "list.take_end unit=element-count" {
+  assert_eq("${list.take_end([10, 20, 30], 2)}", "[20, 30]")
+}
+
+test "list.drop_end unit=element-count" {
+  assert_eq("${list.drop_end([10, 20, 30], 2)}", "[10]")
+}
+
+test "list.window unit=element-count" {
+  assert_eq("${list.window([1, 2, 3, 4], 3)}", "[[1, 2, 3], [2, 3, 4]]")
+}
+
+test "list.binary_search unit=element-index" {
+  assert_eq("${list.binary_search([10, 20, 30], 20)}", "some(1)")
+}
+
+test "list.with_capacity unit=element-count" {
+  assert_eq("${list.len(list.with_capacity(16) + [1])}", "1")
+}
+
+test "list.split_at unit=element-index" {
+  assert_eq("${list.split_at([10, 20, 30], 1).1}", "[20, 30]")
+}
+
+test "list.iterate unit=element-count" {
+  assert_eq("${list.iterate(1, (x) => x * 2, 4)}", "[1, 2, 4, 8]")
+}
+
+test "list.sort_with unit=ordering" {
+  assert_eq("${list.sort_with([3, 1, 2], (a, b) => b - a)}", "[3, 2, 1]")
+}
+
+test "list.min_with unit=ordering" {
+  assert_eq("${list.min_with([3, 1, 2], (a, b) => b - a)}", "some(3)")
+}
+
+test "list.max_with unit=ordering" {
+  assert_eq("${list.max_with([3, 1, 2], (a, b) => b - a)}", "some(1)")
+}
+
+test "list.binary_search_by unit=element-index" {
+  assert_eq("${list.binary_search_by(["a", "bb", "ccc"], 2, (s) => string.len(s))}", "some(1)")
+}
+
+test "list.binary_search_with unit=element-index" {
+  assert_eq("${list.binary_search_with([30, 20, 10], 10, (a, b) => b - a)}", "some(2)")
+}
+
 test "list.__sum_int unit=value" {
   assert_eq("${list.__sum_int([1, 2, 3])}", "6")
 }
@@ -17,12 +133,4 @@ test "list.range unit=value" {
 
 test "list.range_step unit=value" {
   assert_eq("${list.range_step(5, 0, -2)}", "[5, 3, 1]")
-}
-
-test "list.binary_search unit=element-index" {
-  assert_eq("${list.binary_search([10, 20, 30], 20) ?? (0 - 1)}", "1")
-}
-
-test "list.bundled_probe unit=value" {
-  assert_eq("${list.bundled_probe(7)}", "8")
 }

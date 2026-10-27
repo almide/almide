@@ -51,6 +51,7 @@ pub mod pass_var_storage;
 pub mod pass_borrow_lowering;
 pub mod pass_slice_binders;
 pub mod pass_str_map_key;
+pub mod pass_box_take;
 pub mod pass_thread_share;
 pub mod owned_source;
 pub mod pass_owned_source_hoist;
@@ -81,6 +82,7 @@ pub mod prelude_string;
 mod prelude_fan;
 mod prelude_stack;
 mod prelude_rem;
+mod prelude_box;
 pub use prelude_region::region_arena_prelude_source;
 pub mod perceus_verified;
 pub mod pass_egg_saturation;
@@ -380,13 +382,25 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str("        { ALMIDE_STDOUT_LIVE.with(|c| c.set(true)); std::cell::RefCell::new(std::io::BufWriter::with_capacity(65536, std::io::stdout())) };\n}\n");
     s.push_str(&format!("{vis}fn almide_stdout_is_terminal() -> bool {{ static TTY: std::sync::OnceLock<bool> = std::sync::OnceLock::new(); *TTY.get_or_init(|| std::io::IsTerminal::is_terminal(&std::io::stdout())) }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_flush() {{ ALMIDE_STDOUT_BUF.with(|buf| {{ let _ = std::io::Write::flush(&mut *buf.borrow_mut()); }}); }}\n"));
-    // The exit-time counterpart: flush, then give back the two allocations the
+    // The exit-time teardown a linked runtime module owns (#4214): `process`
+    // sets it the first time a child starts, to stop every `process.start`
+    // child neither waited on nor stopped, so no child outlives the program.
+    // The prelude names no module symbol — a program that never starts a
+    // child does not link `process` — and pays one load when the slot is
+    // empty. ONE slot: a second module with exit-time work makes it a list.
+    // Every native exit route runs it: main's return and main's effect error
+    // (the `fn main` wrapper's `almide_stdout_finish`, below) and
+    // `process.exit` (runtime/rs/src/process.rs).
+    s.push_str(&format!("{vis}static ALMIDE_AT_EXIT: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();\n"));
+    s.push_str(&format!("{vis}fn almide_at_exit_run() {{ if let Some(f) = ALMIDE_AT_EXIT.get() {{ f() }} }}\n"));
+    // The exit-time counterpart: the module teardown above, then flush, then
+    // give back the two allocations the
     // buffer and the panic hook hold — the 64 KiB buffer (swapped for a
     // zero-capacity writer; the main thread's thread-locals are never
     // destructed at process exit) and the hook's box (`take_hook` restores
     // the default) — so the allocation ledger sees a process that frees what
     // it allocated, not a leak by design.
-    s.push_str(&format!("{vis}fn almide_stdout_finish() {{ almide_stdout_flush(); ALMIDE_STDOUT_BUF.with(|buf| {{ let _ = std::mem::replace(&mut *buf.borrow_mut(), std::io::BufWriter::with_capacity(0, std::io::stdout())); }}); drop(std::panic::take_hook()); }}\n"));
+    s.push_str(&format!("{vis}fn almide_stdout_finish() {{ almide_at_exit_run(); almide_stdout_flush(); ALMIDE_STDOUT_BUF.with(|buf| {{ let _ = std::mem::replace(&mut *buf.borrow_mut(), std::io::BufWriter::with_capacity(0, std::io::stdout())); }}); drop(std::panic::take_hook()); }}\n"));
     // The ONE runtime abort (#3022): `Error: <msg>\n` on stderr, then exit 1
     // (the §13 termination convention). Every abort the runtime and the
     // prelude macros raise goes through here, behind a process-wide once-guard:
@@ -398,7 +412,34 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // printing, so exactly one line and the same exit code on every leg. The
     // stderr write ignores its error: a panic here would leave the guard taken
     // and turn the abort into a join panic (exit 101).
-    s.push_str(&format!("{vis}fn almide_abort(msg: impl std::fmt::Display) -> ! {{ almide_fan_trap_wait(); static ALMIDE_ABORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_ABORTING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"Error: {{}}\\n\", msg)); }} almide_stdout_flush(); std::process::exit(1) }}\n"));
+    // A request-scoped abort (#4203): while `http.serve` runs a handler it sets
+    // ALMIDE_CONTAIN on its thread, and an abort there unwinds with the text it
+    // would have printed instead of ending the process; the serve loop catches
+    // it and answers that one request with the fixed 500. `resume_unwind` skips
+    // the panic hook, so no Rust banner is printed. Off the flag (everywhere
+    // else, and in a `fan` arm's own thread) the abort is unchanged.
+    s.push_str(&format!("{vis}struct AlmideContained(pub String);\n"));
+    s.push_str(&format!("thread_local! {{ {vis}static ALMIDE_CONTAIN: std::cell::Cell<bool> = const {{ std::cell::Cell::new(false) }}; }}\n"));
+    // The runtime tables a handler can open handles in (the process-wide net
+    // tables, #4199) register a hook here once per process (#4203). The serve
+    // loop calls every hook on its own thread with 0 before a handler, 1
+    // after it returns and 2 after it aborted: an abort closes what the
+    // handler opened and left open, since a table entry is not a value the
+    // unwind drops. What a handler opened is recorded per thread (the shared
+    // cores' request logs), so another thread's handles are never closed.
+    s.push_str(&format!("{vis}static ALMIDE_REQUEST_HOOKS: std::sync::Mutex<Vec<fn(u8)>> = std::sync::Mutex::new(Vec::new());\n"));
+    s.push_str(&format!("{vis}fn almide_request_hook(f: fn(u8)) {{ ALMIDE_REQUEST_HOOKS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(f) }}\n"));
+    s.push_str(&format!("{vis}fn almide_request_hooks(stage: u8) {{ let hs: Vec<fn(u8)> = ALMIDE_REQUEST_HOOKS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone(); for f in hs {{ f(stage) }} }}\n"));
+    s.push_str(&format!("{vis}fn almide_contained_unwind(text: impl FnOnce() -> String) {{ if ALMIDE_CONTAIN.with(|c| c.get()) {{ std::panic::resume_unwind(Box::new(AlmideContained(text()))) }} }}\n"));
+    // Out of memory is never contained (row 1 of the security table): an
+    // allocation that failed part-way through a handler leaves the data it was
+    // building half made, and a server that answered 500 and kept serving
+    // would go on with it. So the out-of-memory sites call `almide_abort_oom`,
+    // which skips `almide_contained_unwind` and ends the process under
+    // ALMIDE_CONTAIN too. The kind is the call path, never the message text.
+    s.push_str(&format!("{vis}fn almide_abort(msg: impl std::fmt::Display) -> ! {{ almide_contained_unwind(|| msg.to_string()); almide_abort_exit(msg) }}\n"));
+    s.push_str(&format!("{vis}fn almide_abort_oom() -> ! {{ almide_abort_exit(\"out of memory\") }}\n"));
+    s.push_str(&format!("{vis}fn almide_abort_exit(msg: impl std::fmt::Display) -> ! {{ almide_fan_trap_wait(); static ALMIDE_ABORTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_ABORTING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"Error: {{}}\\n\", msg)); }} almide_stdout_flush(); std::process::exit(1) }}\n"));
     // `panic(msg)` (#3118): the SAME once-guarded abort, spelled the way C-219
     // pins it on every leg — `PANIC: <msg>` on stderr with NO trailing newline,
     // exit 1 — never a raw Rust panic (exit 101 + the thread banner). A `--test`
@@ -408,7 +449,7 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // the closure calls aborts the C-219 way too. The `cfg!(test)` sits in
     // the MACRO so it is read in the crate the `panic` is written in — the
     // prelude may be compiled once, as a crate of its own, without `--test`.
-    s.push_str(&format!("{vis}fn almide_panic_abort(msg: std::fmt::Arguments<'_>) -> ! {{ almide_fan_trap_wait(); static ALMIDE_PANICKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_PANICKING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} almide_stdout_flush(); {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"PANIC: {{}}\", msg)); }} std::process::exit(1) }}\n"));
+    s.push_str(&format!("{vis}fn almide_panic_abort(msg: std::fmt::Arguments<'_>) -> ! {{ almide_contained_unwind(|| format!(\"PANIC: {{}}\", msg)); almide_fan_trap_wait(); static ALMIDE_PANICKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false); if ALMIDE_PANICKING.swap(true, std::sync::atomic::Ordering::SeqCst) {{ loop {{ std::thread::park(); }} }} almide_stdout_flush(); {{ let _ = std::io::Write::write_fmt(&mut std::io::stderr().lock(), format_args!(\"PANIC: {{}}\", msg)); }} std::process::exit(1) }}\n"));
     s.push_str(&format!("{macro_attr}macro_rules! almide_panic {{ ($($arg:tt)*) => {{ if cfg!(test) && std::env::var_os(\"ALMIDE_TEST_ABORT_PROBE\").is_none() {{ panic!($($arg)*) }} else {{ $crate::almide_panic_abort(format_args!($($arg)*)) }} }}; }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_write_fmt(args: std::fmt::Arguments<'_>, newline: bool) {{ if almide_fan_active() {{ return almide_fan_write_fmt(false, args, newline); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_fmt(&mut *w, args); if newline {{ let _ = std::io::Write::write_all(&mut *w, b\"\\n\"); }} if newline || almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
     s.push_str(&format!("{vis}fn almide_stdout_write_bytes(bytes: &[u8]) {{ if almide_fan_active() {{ return almide_out_write(false, bytes); }} ALMIDE_STDOUT_BUF.with(|buf| {{ let mut w = buf.borrow_mut(); let _ = std::io::Write::write_all(&mut *w, bytes); if bytes.contains(&b'\\n') || almide_stdout_is_terminal() {{ let _ = std::io::Write::flush(&mut *w); }} }}); }}\n"));
@@ -436,7 +477,7 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     // two reasons that were both live divergences (#895):
     //   * PRECEDENCE — `-3i64.pow(2)` parses as `-(3.pow(2))` == -9, because Rust
     //     binds method calls tighter than unary minus. The wasm leg (which routes
-    //     `^` to `math.pow`) said 9. The same trap was already fixed for Float `^`
+    //     `^` to `math.__pow`) said 9. The same trap was already fixed for Float `^`
     //     by giving it a call form; Int kept the operator form and kept the bug.
     //   * NEGATIVE EXPONENT — `exp as u32` wrapped a `-1` into 4294967295 and
     //     computed garbage, where wasm aborts. `^` is TOTAL like `/` and `%`
@@ -516,6 +557,7 @@ fn rust_runtime_prelude(for_crate: bool) -> String {
     s.push_str(&format!("{vis}struct AlmideWriteBack<'a, T, F: FnMut() -> T>({vis}&'a mut T, {vis}F);\n"));
     s.push_str("impl<'a, T, F: FnMut() -> T> Drop for AlmideWriteBack<'a, T, F> { fn drop(&mut self) { *self.0 = (self.1)(); } }\n");
     s.push_str(&almide_repr_prelude(vis));
+    s.push_str(&prelude_box::box_prelude(vis));
     s.push_str(&prelude_region::region_arena_prelude(vis, prelude_region::region_trap_armed()));
     s
 }

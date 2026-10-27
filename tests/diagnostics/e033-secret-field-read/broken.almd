@@ -1,0 +1,6 @@
+import secret
+
+fn main() -> Unit = {
+  let key = secret.new("k-123")
+  println(key.hidden)
+}

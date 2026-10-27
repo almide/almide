@@ -4,7 +4,7 @@
 //! but hard-coded "unwrap" for these three, so `some(int.parse("x"))` (an
 //! `Option[Result[Int, String]]` the checker accepts) lowered as
 //! `Some(int.parse("x")?)`: native failed to compile (E0308) and wasm walled.
-//! Found by the inspection campaign (error.message, seed 1791814733).
+//! Found by the inspection campaign (the `error` module's message reader, seed 1791814733).
 use std::process::Command;
 
 const PROGRAM: &str = r#"effect fn main() -> Unit = {

@@ -30,7 +30,7 @@ const PROG: &str = "import fs\n\
      fn width(line: String) -> Int = string.len(line)\n\
      effect fn main() -> Unit = {\n\
     \x20 let dir = fs.create_temp_dir(\"fs-stream-\")!\n\
-    \x20 fs.write(\"${dir}/d.csv\", \"1\\n2\\n3\\n\")!\n\
+    \x20 fs.write_text(\"${dir}/d.csv\", \"1\\n2\\n3\\n\")!\n\
     \x20 println(int.to_string(fs.fold_lines(\"${dir}/d.csv\", 0, (a, l) => a + parse_row(l))!))\n\
     \x20 println(int.to_string(fs.fold_lines(\"${dir}/d.csv\", 0, (a, l) => a + width(l))!))\n\
     \x20 fs.remove_all(dir)!\n\

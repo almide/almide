@@ -459,7 +459,7 @@
         // — the continuation has a SECOND heap let-bound if. With the BOUNDED-duplication relaxation
         // (≤ 2 remaining branch binds → ≤ 2^3 leaf arms), the fixpoint now resolves BOTH ifs into flat
         // leaves `let s=…; let t=…; println(s)`, each with its own balanced s+t drops — so it LOWERS
-        // soundly. (block_scalar's `let joined = if…; (value.str(if…), end)` is this 2-if shape.)
+        // soundly. (block_scalar's `let joined = if…; (value.string(if…), end)` is this 2-if shape.)
         let println_s = |v: u32| {
             stmt(IrStmtKind::Expr {
                 expr: ir_expr(

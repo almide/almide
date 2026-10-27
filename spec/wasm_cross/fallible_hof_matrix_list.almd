@@ -89,7 +89,7 @@ effect fn main() -> Unit = {
   show(
     "group_by",
     [5, 1, 4, 3] |> list.group_by((x) => key(x)!),
-    (m) => map.entries(m) |> list.map((e) => int.to_string(e.0) + ":" + ints(e.1)) |> list.join(" "),
+    (m) => map.to_list(m) |> list.map((e) => int.to_string(e.0) + ":" + ints(e.1)) |> list.join(" "),
   )
   show("group_by", [5, -1, 4] |> list.group_by((x) => key(x)!), (m) => int.to_string(map.len(m)))
   show("unique_by", [5, 1, 4, 3, 2] |> list.unique_by((x) => key(x)!), ints)

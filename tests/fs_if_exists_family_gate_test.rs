@@ -10,12 +10,12 @@ fn fs_if_exists_family_is_exactly_the_content_readers() {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("stdlib/fs.almd"),
     )
     .expect("read stdlib/fs.almd");
-    // Every content reader has its cell…
+    // Every content reader has its cell, answering the plain reader's type
+    // under an Option (`read_bytes` answers `Bytes`, R-fs-01)…
     for f in [
-        "fn read_text_if_exists",
-        "fn read_bytes_if_exists",
-        "fn read_lines_if_exists",
-        "fn read_bytes_raw_if_exists",
+        "fn read_text_if_exists(path: String) -> Result[String?, String]",
+        "fn read_bytes_if_exists(path: String) -> Result[Bytes?, String]",
+        "fn read_lines_if_exists(path: String) -> Result[List[String]?, String]",
     ] {
         assert!(src.contains(f), "content-reader family cell missing: {f}");
     }
@@ -25,8 +25,8 @@ fn fs_if_exists_family_is_exactly_the_content_readers() {
     // (absence tolerance there is rm -f, a different semantics).
     let count = src.matches("_if_exists(").count();
     assert_eq!(
-        count, 4,
-        "the _if_exists family changed size ({count} != 4) — update the family \
+        count, 3,
+        "the _if_exists family changed size ({count} != 3) — update the family \
          rule (stdlib/fs.almd comment + this gate) in the same PR"
     );
 }

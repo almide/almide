@@ -4,15 +4,12 @@
 // (Op::Prim, no ownership). Matches v0's f64 semantics for finite, non-NaN values.
 fn float_abs(x: Float) -> Float = prim.fabs(x)
 
-// A negative x gives the fixed +qNaN, exactly as math_sqrt (C-055).
-fn float_sqrt(x: Float) -> Float = if prim.flt(x, 0.0) then prim.ffrombits(0x7FF8000000000000) else prim.fsqrt(x)
-
 fn float_floor(x: Float) -> Float = prim.ffloor(x)
 
 fn float_ceil(x: Float) -> Float = prim.fceil(x)
 
 // float.min/max are NaN-AWARE — NOT the raw wasm f64.min/f64.max instructions (which
-// PROPAGATE NaN). The exact decision tree shared with math.fmin/fmax (math_float.almd):
+// PROPAGATE NaN). The exact decision tree:
 // ignore a NaN operand (return the other); a TIE (±0 pair included) follows IEEE-754-2019
 // zero ordering (C-049, ALS-T23): min(±0) = -0.0, max(±0) = +0.0, commutative — computed
 // as the bitwise OR (min) / AND (max) of the payloads, the identity on non-zero ties.

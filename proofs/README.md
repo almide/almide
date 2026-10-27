@@ -89,8 +89,9 @@ compiler with qualified use in safety-critical settings).
   semantics, boxes (a block whose one slot holds any value, lists and boxes
   included), `let` (fresh names), assignment, element store (copy into a
   fresh block), `if`, `while`, `make`, indexing with its bounds check, `len`,
-  `if` expressions and one-argument functions with recursion (a call runs
-  the body in a fresh environment holding only the parameter) — with a
+  `if` expressions and one- and two-argument functions with recursion (a
+  call runs the body in a fresh environment holding only its parameters,
+  two of them distinct, each argument given back in order on return) — with a
   big-step semantics that emits MemorySafe.v's heap trace in the
   layout the compiler uses (header, then one slot per element). Blocks are
   reference counted and freed: reading a list variable shares its block

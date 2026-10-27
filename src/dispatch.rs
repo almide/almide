@@ -410,8 +410,8 @@ fn dispatch_add(cmd: AddCmd) {
     // Write the manifest (and the grant), then lock it the way a build
     // would. Any failure puts both files back.
     let lock = proj.root.join("almide.lock");
-    let saved_manifest = std::fs::read(manifest).ok();
-    let saved_lock = std::fs::read(&lock).ok();
+    let saved_manifest = project::read_project_file_bytes(manifest).ok();
+    let saved_lock = project::read_project_file_bytes(&lock).ok();
     let restore = || {
         if let Some(bytes) = &saved_manifest {
             let _ = std::fs::write(manifest, bytes);
@@ -626,11 +626,11 @@ fn dispatch_tooling(command: Commands) {
             cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
         }
         Commands::Verify { args } => std::process::exit(cli::cmd_verify(&args)),
-        Commands::Survive { file, with, as_kind, json, timeout } => {
-            cli::cmd_survive(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout });
+        Commands::Survive { file, with, as_kind, json, timeout, allow_removed } => {
+            cli::cmd_survive(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout, allow_removed });
         }
-        Commands::Apply { file, with, as_kind, if_survives, force, json, timeout } => {
-            cli::cmd_apply(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout }, if_survives, force);
+        Commands::Apply { file, with, as_kind, if_survives, force, json, timeout, allow_removed } => {
+            cli::cmd_apply(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout, allow_removed }, if_survives, force);
         }
         Commands::SurviveTestLeg { file } => cli::cmd_survive_test_leg(&file),
         Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map } => {
@@ -650,7 +650,7 @@ fn dispatch_packages(command: Commands) {
         Commands::Update { dep } => dispatch_update(dep),
         Commands::Deps => dispatch_deps(),
         Commands::DepPath { name } => dispatch_dep_path(name),
-        Commands::Install { spec, tag, branch, name, bin_dir, target } => {
+        Commands::Install { spec, tag, branch, name, bin_dir, target, force, trust, allow_native } => {
             cli::cmd_install(
                 &spec,
                 tag.as_deref(),
@@ -658,6 +658,7 @@ fn dispatch_packages(command: Commands) {
                 name.as_deref(),
                 bin_dir.as_deref(),
                 target.as_deref(),
+                cli::InstallGrants { force, trust: trust.as_deref(), allow_native },
             );
         }
         Commands::SelfUpdate { version, skip_attestation } => {
@@ -696,7 +697,18 @@ fn refuse_invalid_manifest(command: &Commands) {
         return;
     }
     let path = std::path::Path::new("almide.toml");
-    let Ok(content) = std::fs::read_to_string(path) else { return };
+    if !path.exists() {
+        return;
+    }
+    // Bounded and regular-file only (#4194): a manifest linked to /dev/zero
+    // is refused here, on every command, instead of read until memory runs out.
+    let content = match project::read_project_file(path) {
+        Ok(c) => c,
+        Err(e) => {
+            err(&format!("error: {}", e));
+            std::process::exit(1);
+        }
+    };
     if let Err(e) = project::check_manifest(path, &content) {
         err(&format!("error: {}", e));
         std::process::exit(1);

@@ -232,12 +232,13 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve): (u32, Opti
     let mut f = Function::new([(2, ValType::I32), (1, ValType::I64), (7, ValType::I32)]);
     let mut i = f.instructions();
 
-    // ops 43..=47 (the string client) and 48..=50 (the framed family) —
+    // ops 43..=47 (the string client) and 48..=49 (the framed family; 50 is
+    // retired) —
     // forwarded whole to the http shim when the module's op set earned the
     // imports (#1710 PR B).
     if let Some(h) = f_http {
         i.local_get(op).i32_const(43).i32_ge_s();
-        i.local_get(op).i32_const(50).i32_le_s();
+        i.local_get(op).i32_const(49).i32_le_s();
         i.i32_and();
         // op 65: the full-response family (ADR-0023 step 4).
         i.local_get(op).i32_const(65).i32_eq().i32_or().if_(BlockType::Empty);
@@ -248,12 +249,13 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve): (u32, Opti
         i.end();
     }
 
-    // ops 70..=72 (`http.serve`'s loop): answered guest-side by the serve
-    // export's shim (#2659, wasi_p3_serve.rs).
+    // ops 70..=72 and 75 (`http.serve`'s loop): answered guest-side by the
+    // serve export's shim (#2659, #4203, wasi_p3_serve.rs).
     if let Some(s) = f_serve {
         i.local_get(op).i32_const(70).i32_ge_s();
         i.local_get(op).i32_const(72).i32_le_s();
-        i.i32_and().if_(BlockType::Empty);
+        i.i32_and();
+        i.local_get(op).i32_const(75).i32_eq().i32_or().if_(BlockType::Empty);
         for pidx in 0..5u32 {
             i.local_get(pidx);
         }
@@ -328,6 +330,11 @@ fn shim_fs_call(g: P3Globals, abi: &FsAbi, (f_self, f_http, f_serve): (u32, Opti
     // runtime has no second instance to run a chunk on: 0 = not served, and
     // the guest runs the chunks sequentially, as on every host before it.
     i.local_get(op).i32_const(74).i32_eq().if_(BlockType::Empty);
+    i.i64_const(0).return_();
+    i.end();
+
+    // op 76: a deliberate exit's mark (#4203): answered 0.
+    i.local_get(op).i32_const(76).i32_eq().if_(BlockType::Empty);
     i.i64_const(0).return_();
     i.end();
 

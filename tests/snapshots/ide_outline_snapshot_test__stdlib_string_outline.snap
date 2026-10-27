@@ -2,17 +2,18 @@
 source: tests/ide_outline_snapshot_test.rs
 expression: "run_outline(&[\"@stdlib/string\"])"
 ---
+fn string.__err_text(s: String) -> String
+fn string.__from_codepoint(n: Int) -> String
 fn string.__join(xs: List[String], sep: String) -> String
 fn string.byte_len(s: String) -> Int
 fn string.byte_slice(s: String, start: Int, end: Int) -> Option[String]
 fn string.capitalize(s: String) -> String
-fn string.chars(s: String) -> List[String]
 fn string.chunk(s: String, n: Int) -> List[String]
 fn string.clear(s: String) -> Unit
-fn string.codepoint(s: String) -> Option[Int]
 fn string.compare(a: String, b: String) -> Int
-fn string.contains(s: String, sub: String) -> Bool
-fn string.count(s: String, sub: String) -> Int
+fn string.contains(s: String, needle: String) -> Bool
+fn string.count(s: String, f: fn(String) -> Bool) -> Int
+fn string.count_matches(s: String, needle: String) -> Int
 fn string.dedup(s: String) -> String
 fn string.drop(s: String, n: Int) -> String
 fn string.drop_end(s: String, n: Int) -> String
@@ -25,8 +26,7 @@ fn string.find_index(s: String, f: fn(String) -> Bool) -> Option[Int]
 fn string.find_map[B](s: String, f: fn(String) -> Option[B]) -> Option[B]
 fn string.first(s: String) -> Option[String]
 fn string.fold[B](s: String, init: B, f: fn(B, String) -> B) -> B
-fn string.from_bytes(bytes: List[Int]) -> String
-fn string.from_codepoint(n: Int) -> String
+fn string.from_codepoint(n: Int) -> Option[String]
 fn string.from_list(xs: List[String]) -> String
 fn string.from_utf16(xs: List[Int]) -> Result[String, String]
 fn string.get(s: String, i: Int) -> Option[String]
@@ -38,10 +38,10 @@ fn string.is_alpha(s: String) -> Bool
 fn string.is_alphanumeric(s: String) -> Bool
 fn string.is_digit(s: String) -> Bool
 fn string.is_empty(s: String) -> Bool
+fn string.is_equal_constant_time(a: String, b: String) -> Bool
 fn string.is_lower(s: String) -> Bool
 fn string.is_upper(s: String) -> Bool
 fn string.is_whitespace(s: String) -> Bool
-fn string.join(list: List[String], sep: String) -> String
 fn string.last(s: String) -> Option[String]
 fn string.last_index_of(s: String, needle: String) -> Option[Int]
 fn string.len(s: String) -> Int
@@ -51,23 +51,23 @@ fn string.max(s: String) -> Option[String]
 fn string.max_by[K](s: String, f: fn(String) -> K) -> Option[String]
 fn string.max_with(s: String, cmp: fn(String, String) -> Int) -> Option[String]
 fn string.merge_sort_with(xs: List[String], cmp: fn(String, String) -> Int) -> List[String]
-fn string.merge_with(xs: List[String], ys: List[String], cmp: fn(String, String) -> Int, i: Int, j: Int, acc: List[String]) -> List[String]
+fn string.merge_with(xs: List[String], ys: List[String], cmp: fn(String, String) -> Int) -> List[String]
 fn string.min(s: String) -> Option[String]
 fn string.min_by[K](s: String, f: fn(String) -> K) -> Option[String]
 fn string.min_with(s: String, cmp: fn(String, String) -> Int) -> Option[String]
 fn string.new() -> String
-fn string.pad_end(s: String, n: Int, ch: String) -> String
-fn string.pad_start(s: String, n: Int, ch: String) -> String
+fn string.pad_end(s: String, n: Int, fill: String) -> String
+fn string.pad_start(s: String, n: Int, fill: String) -> String
 fn string.partition(s: String, f: fn(String) -> Bool) -> (List[String], List[String])
 fn string.pick_with(xs: List[String], i: Int, best: String, cmp: fn(String, String) -> Int, want_max: Bool) -> String
-fn string.push(s: String, suffix: String) -> Unit
+fn string.pop(s: String) -> Option[String]
+fn string.push(s: String, x: String) -> Unit
 fn string.reduce(s: String, f: fn(String, String) -> String) -> Option[String]
 fn string.remove_at(s: String, i: Int) -> String
 fn string.repeat(s: String, n: Int) -> String
 fn string.replace(s: String, from: String, to: String) -> String
 fn string.replace_first(s: String, from: String, to: String) -> String
 fn string.reverse(s: String) -> String
-fn string.run_length_encode(s: String) -> List[(String, Int)]
 fn string.scan[B](s: String, init: B, f: fn(B, String) -> B) -> List[B]
 fn string.slice(s: String, start: Int, end: Int) -> String
 fn string.sort(s: String) -> List[String]
@@ -82,7 +82,8 @@ fn string.strip_suffix(s: String, suffix: String) -> Option[String]
 fn string.take(s: String, n: Int) -> String
 fn string.take_end(s: String, n: Int) -> String
 fn string.take_while(s: String, f: fn(String) -> Bool) -> String
-fn string.to_bytes(s: String) -> List[Int]
+fn string.to_codepoint(s: String) -> Option[Int]
+fn string.to_list(s: String) -> List[String]
 fn string.to_lower(s: String) -> String
 fn string.to_upper(s: String) -> String
 fn string.to_utf16(s: String) -> List[Int]
@@ -91,7 +92,6 @@ fn string.trim_end(s: String) -> String
 fn string.trim_start(s: String) -> String
 fn string.unique(s: String) -> String
 fn string.unique_by[K](s: String, f: fn(String) -> K) -> String
-fn string.utf16_decode(xs: List[Int], i: Int, acc: List[String]) -> Result[String, String]
 fn string.utf16_units(cp: Int) -> List[Int]
 fn string.utf8_width(cp: Int) -> Int
 fn string.window(s: String, n: Int) -> List[String]

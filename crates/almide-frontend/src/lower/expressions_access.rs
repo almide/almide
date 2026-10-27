@@ -13,20 +13,15 @@ fn lower_expr_interp_string(ctx: &mut LowerCtx, expr: &ast::Expr, _ty: Ty, span:
             let ir_parts = parts.iter().map(|part| match part {
                 ast::StringPart::Lit { value } => IrStringPart::Lit { value: value.clone() },
                 ast::StringPart::Expr { expr } => {
-                    let mut ir_expr = lower_expr(ctx, expr);
-                    // Operator protocol: dispatch to an EXPLICIT user `repr` only.
-                    // An auto-derived `repr` is intentionally NOT used here — the
-                    // record/variant instead falls through to the codegen
-                    // `AlmideRepr` impl (the canonical literal form with quoted
-                    // strings), so an auto-derived and a plain record interpolate
-                    // byte-identically. An explicit `fn X.repr` still wins.
-                    if let Some(repr_fn) = ctx.find_explicit_convention_fn(&ir_expr.ty, "repr") {
-                        ir_expr = ctx.mk(IrExprKind::Call {
-                            target: CallTarget::Named { name: repr_fn },
-                            args: vec![ir_expr], type_args: vec![],
-                        }, Ty::String, None);
-                    }
-                    IrStringPart::Expr { expr: ir_expr }
+                    let ir_expr = lower_expr(ctx, expr);
+                    // Operator protocol: dispatch to an EXPLICIT `repr` only —
+                    // the value's own, or one declared on a type nested inside
+                    // it (#4107, `declared_repr.rs`). An auto-derived `repr` is
+                    // intentionally NOT used here — the record/variant instead
+                    // falls through to the codegen `AlmideRepr` impl (the
+                    // canonical literal form with quoted strings), so an
+                    // auto-derived and a plain record interpolate byte-identically.
+                    IrStringPart::Expr { expr: ctx.render_declared(ir_expr) }
                 }
             }).collect();
             ctx.mk(IrExprKind::StringInterp { parts: ir_parts }, Ty::String, span)
@@ -371,6 +366,14 @@ fn lower_expr_unary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
                 if let Some(target) = requirement_call_target(ctx, &operand_ty, crate::canonicalize::protocols::NEG_REQUIREMENT) {
                     return ctx.mk(IrExprKind::Call { target, args: vec![o], type_args: vec![] }, ty, span);
                 }
+                // The checker admits `-m` on a Matrix; it is `matrix.__neg(m)`,
+                // as `a - b` is the matrix subtraction (#3965). There is no
+                // matrix `UnOp`, and `NegInt` on a Matrix is an IR verify ICE.
+                if operand_ty == Ty::Matrix {
+                    let def_id = ctx.def_map.get(&sym("matrix.__neg")).copied();
+                    let target = CallTarget::Module { module: sym("matrix"), func: sym("__neg"), def_id };
+                    return ctx.mk(IrExprKind::Call { target, args: vec![o], type_args: vec![] }, Ty::Matrix, span);
+                }
             }
             let un_op = match (op.as_str(), &o.ty) {
                 ("not", _) => UnOp::Not,
@@ -378,6 +381,55 @@ fn lower_expr_unary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
                 _ => UnOp::NegInt,
             };
             ctx.mk(IrExprKind::UnOp { op: un_op, operand: Box::new(o) }, ty, span)
+}
+
+/// An operand's type, read from the VarTable when the lowered expr is a
+/// variable whose own type is still Unknown.
+fn operand_ty(ctx: &LowerCtx, e: &IrExpr) -> Ty {
+    match &e.kind {
+        IrExprKind::Var { id } if e.ty == Ty::Unknown => ctx.var_table.get(*id).ty.clone(),
+        _ => e.ty.clone(),
+    }
+}
+
+/// `==` / `!=` through the operator protocol: a Secret's constant-time
+/// compare (#4107, R-secret-03) or a convention `eq` fn. Hands the operands
+/// back when neither applies.
+fn lower_eq_protocol(
+    ctx: &mut LowerCtx, negate: bool, left_ty: &Ty, mut l: IrExpr, mut r: IrExpr, span: Option<crate::ast::Span>,
+) -> Result<IrExpr, (IrExpr, IrExpr)> {
+    if crate::secret_type::holds_secret(ctx.env, left_ty) {
+        l.ty = left_ty.clone();
+        r.ty = left_ty.clone();
+        let Some(eq) = ctx.lower_secret_eq(l, r, negate) else { unreachable!("holds_secret was checked") };
+        return Ok(eq);
+    }
+    let Some(eq_fn) = ctx.find_convention_fn(left_ty, "eq") else { return Err((l, r)) };
+    let call = ctx.mk(IrExprKind::Call {
+        target: CallTarget::Named { name: eq_fn },
+        args: vec![l, r], type_args: vec![],
+    }, Ty::Bool, span);
+    if negate {
+        return Ok(ctx.mk(IrExprKind::UnOp { op: UnOp::Not, operand: Box::new(call) }, Ty::Bool, span));
+    }
+    Ok(call)
+}
+
+/// ADR-0001 S3 time algebra, or a comparison of the erased i64s: an operand
+/// read from an annotated binding still carries the clock tag (#3752).
+fn lower_time_operands(
+    ctx: &mut LowerCtx, op: &str, (mut l, mut r): (IrExpr, IrExpr), l_time: bool, ty: Ty, span: Option<crate::ast::Span>,
+) -> IrExpr {
+    if let Some(out) = super::calls::lower_time_binop(ctx, op, l.clone(), r.clone(), l_time, span) {
+        return out;
+    }
+    for e in [&mut l, &mut r] {
+        if super::calls::is_time_ty(&e.ty) {
+            e.ty = Ty::Int;
+        }
+    }
+    let bin_op = binop_for(op, &Ty::Int, &Ty::Int);
+    ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span)
 }
 
 fn lower_expr_binary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>) -> IrExpr {
@@ -393,27 +445,15 @@ fn lower_expr_binary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             super::statements::coerce_literal_to_sized(&mut r, &l.ty, ctx.env);
             super::statements::coerce_literal_to_sized(&mut l, &r.ty, ctx.env);
             // Resolve operand types: if expr.ty is Unknown, try VarTable lookup
-            let left_ty = if l.ty == Ty::Unknown {
-                if let IrExprKind::Var { id } = &l.kind { ctx.var_table.get(*id).ty.clone() } else { l.ty.clone() }
-            } else { l.ty.clone() };
-            let left_ty = &left_ty;
+            let left_ty = &operand_ty(ctx, &l);
             // Operator protocol: dispatch == / != to convention methods if available
             if op == "==" || op == "!=" {
-                if let Some(eq_fn) = ctx.find_convention_fn(left_ty, "eq") {
-                    let call = ctx.mk(IrExprKind::Call {
-                        target: CallTarget::Named { name: eq_fn },
-                        args: vec![l, r], type_args: vec![],
-                    }, Ty::Bool, span);
-                    if op == "!=" {
-                        return ctx.mk(IrExprKind::UnOp { op: UnOp::Not, operand: Box::new(call) }, Ty::Bool, span);
-                    }
-                    return call;
+                match lower_eq_protocol(ctx, op == "!=", left_ty, l, r, span) {
+                    Ok(eq) => return eq,
+                    Err((l2, r2)) => { l = l2; r = r2; }
                 }
             }
-            let right_ty = if r.ty == Ty::Unknown {
-                if let IrExprKind::Var { id } = &r.kind { ctx.var_table.get(*id).ty.clone() } else { r.ty.clone() }
-            } else { r.ty.clone() };
-            let right_ty = &right_ty;
+            let right_ty = &operand_ty(ctx, &r);
             // ADR-0001 S3: time-type algebra erases to guarded/saturating Int
             // forms (comparisons fall through — they erase to Int compares).
             // Side detection reads the CHECKER's types of the operand ASTs: a
@@ -422,101 +462,30 @@ fn lower_expr_binary(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             let l_time = super::calls::is_time_ty(&ctx.expr_ty(left));
             let r_time = super::calls::is_time_ty(&ctx.expr_ty(right));
             if l_time || r_time {
-                if let Some(out) = super::calls::lower_time_binop(
-                    ctx, op.as_str(), l.clone(), r.clone(), l_time, span,
-                ) {
-                    return out;
-                }
-                // A comparison: an operand read from an annotated binding
-                // still carries the clock tag (#3752); compare the erased i64.
-                for e in [&mut l, &mut r] {
-                    if super::calls::is_time_ty(&e.ty) {
-                        e.ty = Ty::Int;
-                    }
-                }
-                let bin_op = binop_for(op.as_str(), &Ty::Int, &Ty::Int);
-                return ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span);
+                return lower_time_operands(ctx, op.as_str(), (l, r), l_time, ty, span);
             }
             if let Some(out) = lower_requirement_operator(ctx, op.as_str(), left_ty, (l.clone(), r.clone()), ty.clone(), span) {
                 return out;
             }
+            // `Bytes + Bytes` is concatenation (R-bytes-16): the stdlib's
+            // internal `bytes.__concat`, an ordinary module call every leg
+            // serves (native via its @intrinsic, wasm via the self-host row,
+            // the interp via the registry). There is no Bytes `BinOp`.
+            if op == "+" && *left_ty == Ty::Bytes && *right_ty == Ty::Bytes {
+                let def_id = ctx.def_map.get(&sym("bytes.__concat")).copied();
+                let target = CallTarget::Module { module: sym("bytes"), func: sym("__concat"), def_id };
+                return ctx.mk(IrExprKind::Call { target, args: vec![l, r], type_args: vec![] }, Ty::Bytes, span);
+            }
+            // `Matrix / Matrix` is `matrix.__div(a, b)` (R-matrix-14), as `-m`
+            // is `matrix.__neg(m)` above: there is no matrix division `BinOp`,
+            // and `DivInt` on two Matrix operands is an IR verify ICE.
+            if op == "/" && *left_ty == Ty::Matrix && *right_ty == Ty::Matrix {
+                let def_id = ctx.def_map.get(&sym("matrix.__div")).copied();
+                let target = CallTarget::Module { module: sym("matrix"), func: sym("__div"), def_id };
+                return ctx.mk(IrExprKind::Call { target, args: vec![l, r], type_args: vec![] }, Ty::Matrix, span);
+            }
             let bin_op = binop_for(op.as_str(), left_ty, right_ty);
             ctx.mk(IrExprKind::BinOp { op: bin_op, left: Box::new(l), right: Box::new(r) }, ty, span)
-}
-
-/// The `BinOp` an operator and its operand types lower to.
-///
-/// Falls back to `AddInt` for a pairing no arm claims. That is not a guess: an
-/// unclaimed pairing means the checker already rejected the expression (or
-/// resolved an operand to `Unknown` after an earlier error), so the lowered
-/// operator is never executed — it only has to exist for lowering to finish and
-/// let the real diagnostic be the one the user sees.
-pub(super) fn binop_for(op: &str, left_ty: &Ty, right_ty: &Ty) -> BinOp {
-    binop_arith(op, left_ty, right_ty)
-        .or_else(|| binop_other(op, left_ty, right_ty))
-        .unwrap_or(BinOp::AddInt)
-}
-
-/// Addition, subtraction and multiplication.
-///
-/// `+` is overloaded: on strings and lists it concatenates, so the operand types
-/// decide the operation and not just its width.
-///
-/// One group of the operand-typed operator table, arms verbatim and in source
-/// order. `None` means "not my group"; `binop_for` tries the groups in that
-/// order, so the operator an expression lowers to is unchanged.
-fn binop_arith(op: &str, left_ty: &Ty, right_ty: &Ty) -> Option<BinOp> {
-    Some(match (op, left_ty, right_ty) {
-        ("+", Ty::String, _) | ("+", _, Ty::String) => BinOp::ConcatStr,
-        ("+", Ty::Applied(TypeConstructorId::List, _), _) | ("+", _, Ty::Applied(TypeConstructorId::List, _)) => BinOp::ConcatList,
-        // Matrix operators
-        ("+", Ty::Matrix, Ty::Matrix) => BinOp::AddMatrix,
-        ("-", Ty::Matrix, Ty::Matrix) => BinOp::SubMatrix,
-        ("*", Ty::Matrix, Ty::Matrix) => BinOp::MulMatrix,
-        ("*", Ty::Matrix, Ty::Float) | ("*", Ty::Float, Ty::Matrix) => BinOp::ScaleMatrix,
-        ("*", Ty::Matrix, Ty::Int) | ("*", Ty::Int, Ty::Matrix) => BinOp::ScaleMatrix,
-        // Float dispatch covers canonical `Float` plus the sized
-        // `Float32`. Any other numeric type (Int / Int8 ... /
-        // UInt64) takes the Int path. The *width* of the
-        // arithmetic op (i32_add vs i64_add vs f32_add vs
-        // f64_add) is resolved at WASM emit time from the
-        // operand's valtype; Rust codegen emits plain `a + b`
-        // and lets rustc pick.
-        ("+", Ty::Float, _) | ("+", _, Ty::Float)
-        | ("+", Ty::Float32, _) | ("+", _, Ty::Float32) => BinOp::AddFloat,
-        ("+", _, _) => BinOp::AddInt,
-        ("-", Ty::Float, _) | ("-", _, Ty::Float)
-        | ("-", Ty::Float32, _) | ("-", _, Ty::Float32) => BinOp::SubFloat,
-        ("-", _, _) => BinOp::SubInt,
-        ("*", Ty::Float, _) | ("*", _, Ty::Float)
-        | ("*", Ty::Float32, _) | ("*", _, Ty::Float32) => BinOp::MulFloat,
-        _ => return None,
-    })
-}
-
-/// Division, remainder, exponentiation, comparison and the boolean connectives.
-///
-/// One group of the operand-typed operator table, arms verbatim and in source
-/// order. `None` means "not my group"; `binop_for` tries the groups in that
-/// order, so the operator an expression lowers to is unchanged.
-fn binop_other(op: &str, left_ty: &Ty, right_ty: &Ty) -> Option<BinOp> {
-    Some(match (op, left_ty, right_ty) {
-        ("*", _, _) => BinOp::MulInt,
-        ("/", Ty::Float, _) | ("/", _, Ty::Float)
-        | ("/", Ty::Float32, _) | ("/", _, Ty::Float32) => BinOp::DivFloat,
-        ("/", _, _) => BinOp::DivInt,
-        ("%", Ty::Float, _) | ("%", _, Ty::Float)
-        | ("%", Ty::Float32, _) | ("%", _, Ty::Float32) => BinOp::ModFloat,
-        ("%", _, _) => BinOp::ModInt,
-        ("^", Ty::Float, _) | ("^", _, Ty::Float)
-        | ("^", Ty::Float32, _) | ("^", _, Ty::Float32) => BinOp::PowFloat,
-        ("^", _, _) => BinOp::PowInt,
-        ("==", _, _) => BinOp::Eq, ("!=", _, _) => BinOp::Neq,
-        ("<", _, _) => BinOp::Lt, (">", _, _) => BinOp::Gt,
-        ("<=", _, _) => BinOp::Lte, (">=", _, _) => BinOp::Gte,
-        ("and", _, _) => BinOp::And, ("or", _, _) => BinOp::Or,
-        _ => return None,
-    })
 }
 
 fn lower_expr_record(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<crate::ast::Span>) -> IrExpr {
@@ -753,3 +722,4 @@ fn lower_expr_ident(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<c
 }
 
 include!("effect_slot_adapter.rs");
+include!("expressions_binop.rs");

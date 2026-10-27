@@ -9,8 +9,8 @@ effect fn main() -> Unit = {
     println("${e}")
   }
   var ms: Map[String, String] = map.new()
-  map.insert(ms, "k" + int.to_string(1), "v" + int.to_string(1))
-  map.insert(ms, "b", "c")
+  ms = map.set(ms, "k" + int.to_string(1), "v" + int.to_string(1))
+  ms = map.set(ms, "b", "c")
   var kept: List[(String, String)] = []
   for e in ms {
     kept = kept + [e]

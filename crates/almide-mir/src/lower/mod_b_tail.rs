@@ -40,7 +40,7 @@ fn die_on(lit: IrExpr) -> IrExpr {
 }
 /// Desugar `assert(cond)` / `assert_eq(a, b)` / `assert_ne(a, b)` (Unit-typed builtin
 /// calls — the test-block floor, also legal in a main body) to the §13 controlled-halt
-/// shape the SELF-HOST stdlib already proves out (math.pow's negative-exponent guard):
+/// shape the SELF-HOST stdlib already proves out (math.__pow's negative-exponent guard):
 /// `if <cond> then () else prim.die(prim.handle("assertion failed…"))`. Everything
 /// downstream is EXISTING machinery — the stmt-position Unit-`if` executes via
 /// `try_lower_unit_if`, `==`/`!=` dispatch through the ordinary BinOp lowering (whatever

@@ -1,7 +1,7 @@
 // @contract: C-117
 // #2948: a user fn whose name a stdlib mutator also has keeps its OWN `mut`
-// positions when branch_lift asks which args a call writes. `insert(tag, mut m)`
-// writes its second argument; the bundled `map.insert(mut m, ..)` writes its
+// positions when branch_lift asks which args a call writes. `clear(tag, mut m)`
+// writes its second argument; the bundled `map.clear(mut m)` writes its
 // first. The lift's table was built from whatever modules a leg had lowered and
 // keyed module fns under their bare name over the user's, so which positions a
 // call got depended on the leg: with the loop in `main`, native (which lowers
@@ -10,8 +10,8 @@
 // own fn, as here, develop printed 1 on native and 0 on wasm. The lookup now
 // resolves a bare call in its own scope and reads a stdlib fn's positions from
 // its declaration on both legs. Byte-identical native == wasm.
-fn insert(tag: String, mut m: Map[String, Int]) -> Unit = {
-  map.insert(m, tag, 1)
+fn clear(tag: String, mut m: Map[String, Int]) -> Unit = {
+  m = map.set(m, tag, 1)
 }
 
 fn push(label: String, mut xs: List[String]) -> Unit = {
@@ -24,7 +24,7 @@ fn push(label: String, mut xs: List[String]) -> Unit = {
 fn arm_writes(mut m: Map[String, Int], mut xs: List[String]) -> Unit = {
   for i in [1, 2, 3] {
     let s: String = if i == 1 then {
-      insert("a", m)
+      clear("a", m)
       "inserted"
     } else "kept"
     let t: String = if i == 2 then {

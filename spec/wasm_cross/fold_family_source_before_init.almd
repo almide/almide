@@ -31,7 +31,7 @@ effect fn main() -> Unit = {
   println("running=${running}")
   let total = src_set() |> set.fold(init(), (a, x) => a + x)
   println("total=${total}")
-  let summed = src_map() |> map.fold(init(), (a, _k, v) => a + v)
+  let summed = src_map() |> map.fold(init(), (a, (_k, v)) => a + v)
   println("summed=${summed}")
   let plain = src() |> list.fold(init(), (a, x) => a + x)
   println("plain=${plain}")

@@ -87,13 +87,13 @@ test "tco mut List param still loops" {
 
 fn fill_down(mut m: Map[Int, Int], n: Int) -> Int = if n == 0 then map.len(m)
 else {
-  map.insert(m, n, n * 10)
+  m = map.set(m, n, n * 10)
   fill_down(m, n - 1)
 }
 
 fn fill_down_bound(mut m: Map[Int, Int], n: Int) -> Int = if n == 0 then map.len(m)
 else {
-  map.insert(m, n, n * 10)
+  m = map.set(m, n, n * 10)
   let r = fill_down_bound(m, n - 1)
   r
 }

@@ -244,6 +244,10 @@ pub struct IrParam {
 
 // ── Top-level structures ────────────────────────────────────────
 
+/// The attribute a generator stamps on a fn it may leave out: the fn ships
+/// only when a call reaches it (`almide_optimize::on_demand`, after mono).
+pub const ON_DEMAND_ATTR: &str = "on_demand";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IrFunction {
     pub name: Sym,
@@ -604,4 +608,12 @@ pub struct IrProgram {
     /// User`) — the one conformance the type declares, never a search.
     #[serde(skip)]
     pub protocol_conformance_args: std::collections::HashMap<(Sym, Sym), Vec<Ty>>,
+    /// The function an operator requirement of a declared conforming type
+    /// is (#4099): `(type name, method) → target`, under the bare and the
+    /// qualified type name alike — `(BigInt, add) → bigint.add`. Lowering
+    /// desugars an operator on a concrete conforming type itself; a `T + T`
+    /// in a generic body is a `BinOp` until monomorphization binds `T`, and
+    /// mono reads this table to give it the same call.
+    #[serde(skip)]
+    pub operator_requirements: std::collections::HashMap<(Sym, Sym), crate::CallTarget>,
 }

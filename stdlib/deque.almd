@@ -12,9 +12,11 @@
 // `list.pop` (R-L0-04, R-deque-03); everything else is a copy. Positional and
 // range fns take the same arguments and give the same answers as the list fn
 // of the same name (R-deque-04), and the sequence algorithms are the list
-// ones over the front-to-back order (R-L0-42).
+// ones over the front-to-back order (R-L0-42). `Deque` is opaque (`mod
+// type`, #4256): outside this module neither half can be read or written
+// (E033), so how the elements are split between them is never observable.
 /// A double-ended queue, front to back.
-type Deque[A] = { front: List[A], back: List[A] }
+mod type Deque[A] = { front: List[A], back: List[A] }
 
 // ── construction and size (R-deque-01) ──
 /// An empty deque.

@@ -311,22 +311,44 @@ pub(crate) fn load_key(i: &mut wasm_encoder::InstructionSink<'_>, key: IdxKey) {
 
 /// Probe `index` for an EMPTY slot starting at `h` (masked); leaves the
 /// slot's absolute address in `q`.
-pub(crate) fn probe_empty(i: &mut wasm_encoder::InstructionSink<'_>, index: u32, mask: u32, h: u32, q: u32) {
+/// With `steps`, it also counts its steps there (reset first), so the
+/// caller can see a flood (#4104, map_ordered.rs).
+pub(crate) fn probe_empty_counted(
+    i: &mut wasm_encoder::InstructionSink<'_>,
+    index: u32,
+    mask: u32,
+    h: u32,
+    q: u32,
+    steps: Option<u32>,
+) {
+    if let Some(n) = steps {
+        i.i32_const(0).local_set(n);
+    }
     i.block(BlockType::Empty).loop_(BlockType::Empty);
     i.local_get(index).local_get(h).i32_const(2).i32_shl().i32_add().local_tee(q);
     i.i32_load(w(SLOTS)).i32_eqz().br_if(1);
+    if let Some(n) = steps {
+        i.local_get(n).i32_const(1).i32_add().local_set(n);
+    }
     i.local_get(h).i32_const(1).i32_add().local_get(mask).i32_and().local_set(h);
     i.br(0).end().end();
 }
 
+/// After a counted probe: past the flood bound, run `then`.
+pub(crate) fn if_flooded(i: &mut wasm_encoder::InstructionSink<'_>, steps: u32, then: impl FnOnce(&mut wasm_encoder::InstructionSink<'_>)) {
+    i.local_get(steps).i32_const(crate::map_ordered::FLOOD_PROBES).i32_gt_u().if_(BlockType::Empty);
+    then(i);
+    i.end();
+}
+
 /// `$mapidx_build_<key>(block, esz, koff) -> index`: a fresh index over
 /// every entry of the block (capacity = pow2 ≥ 2·entries, min 32).
-pub(crate) fn emit_build(key: IdxKey, hash: u32) -> Function {
+pub(crate) fn emit_build(key: IdxKey, hash: u32, ord_build: u32) -> Function {
     // params: 0=block, 1=esz, 2=koff; locals: 3=len, 4=cap, 5=idx, 6=p,
-    // 7=end, 8=ord, 9=h, 10=q, 11=mask
+    // 7=end, 8=ord, 9=h, 10=q, 11=mask, 12=steps
     let (block, esz, koff) = (0u32, 1u32, 2u32);
-    let (len, cap, idx, p, end, ord, h, q, mask) = (3u32, 4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32);
-    let mut f = Function::new([(9, ValType::I32)]);
+    let (len, cap, idx, p, end, ord, h, q, mask, steps) = (3u32, 4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32, 12u32);
+    let mut f = Function::new([(10, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(block).i32_load(len_memarg()).local_set(len);
     i.i32_const(32).local_set(cap);
@@ -348,7 +370,12 @@ pub(crate) fn emit_build(key: IdxKey, hash: u32) -> Function {
     i.local_get(p).local_get(koff).i32_add();
     load_key(&mut i, key);
     i.call(hash).local_get(mask).i32_and().local_set(h);
-    probe_empty(&mut i, idx, mask, h, q);
+    probe_empty_counted(&mut i, idx, mask, h, q, Some(steps));
+    // a flooded block is indexed by key order instead (#4104)
+    if_flooded(&mut i, steps, |i| {
+        i.local_get(idx).call(F_FREE);
+        i.local_get(block).local_get(esz).local_get(koff).call(ord_build).return_();
+    });
     i.local_get(q).local_get(ord).i32_const(1).i32_add().i32_store(w(SLOTS));
     i.local_get(ord).i32_const(1).i32_add().local_set(ord);
     i.local_get(p).local_get(esz).i32_add().local_set(p);
@@ -385,6 +412,7 @@ pub(crate) struct IdxFns {
     pub(crate) side_get: u32,
     pub(crate) side_set: u32,
     pub(crate) hash: u32,
+    pub(crate) ord: crate::map_ordered::OrdFns,
 }
 
 /// `$mapidx_find_<key>(block, esz, koff, needle) -> entry | 0`: the
@@ -416,7 +444,10 @@ pub(crate) fn emit_find(key: IdxKey, fns: IdxFns, build: u32) -> Function {
     i.local_get(block).local_get(esz).local_get(koff).call(build).local_set(v);
     i.local_get(block).local_get(v).call(fns.side_set).drop();
     i.end();
-    i.local_get(v).i32_load(w(almide_layout::PAYLOAD + 4)).local_set(mask);
+    i.local_get(v).i32_load(w(almide_layout::PAYLOAD + 4)).local_tee(mask);
+    i.i32_const(crate::map_ordered::ORDERED).i32_eq().if_(BlockType::Empty);
+    i.local_get(v).local_get(block).local_get(esz).local_get(koff).local_get(needle).call(fns.ord.find).return_();
+    i.end();
     i.local_get(needle).call(fns.hash).local_get(mask).i32_and().local_set(h);
     i.loop_(BlockType::Empty);
     i.local_get(v).local_get(h).i32_const(2).i32_shl().i32_add().i32_load(w(SLOTS)).local_tee(s);
@@ -454,10 +485,10 @@ pub(crate) fn emit_find(key: IdxKey, fns: IdxFns, build: u32) -> Function {
 /// (`$mapidx_grow`).
 pub(crate) fn emit_append(key: IdxKey, fns: IdxFns, grow: u32) -> Function {
     // params: 0=old, 1=new, 2=esz, 3=koff; locals: 4=v, 5=len, 6=mask,
-    // 7=h, 8=q, 9=v0
+    // 7=h, 8=q, 9=v0, 10=steps
     let (old, new, esz, koff) = (0u32, 1u32, 2u32, 3u32);
-    let (v, len, mask, h, q, v0) = (4u32, 5u32, 6u32, 7u32, 8u32, 9u32);
-    let mut f = Function::new([(6, ValType::I32)]);
+    let (v, len, mask, h, q, v0, steps) = (4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32);
+    let mut f = Function::new([(7, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(old).call(fns.side_get).local_tee(v).i32_eqz().if_(BlockType::Empty);
     i.i32_const(0).return_();
@@ -475,7 +506,8 @@ pub(crate) fn emit_append(key: IdxKey, fns: IdxFns, grow: u32) -> Function {
     i.local_get(new).i32_load(len_memarg()).local_set(len);
     i.local_get(v).i32_load(w(almide_layout::PAYLOAD + 4)).local_set(mask);
     // stale stamp, or the load would pass 1/2: drop and rebuild lazily —
-    // or, with holes, grow now
+    // or, with holes, grow now. An ordered index has no load bound.
+    i.local_get(mask).i32_const(crate::map_ordered::ORDERED).i32_ne().if_(BlockType::Empty);
     i.local_get(v).i32_load(w(almide_layout::PAYLOAD)).local_get(len).local_get(esz).i32_sub().i32_ne();
     i.local_get(len).local_get(esz).i32_div_u().i32_const(1).i32_shl().local_get(mask).i32_const(1).i32_add().i32_gt_u();
     i.i32_or().if_(BlockType::Empty);
@@ -487,14 +519,26 @@ pub(crate) fn emit_append(key: IdxKey, fns: IdxFns, grow: u32) -> Function {
     i.local_get(new).local_get(v).local_get(esz).local_get(koff).call(grow).local_tee(v);
     i.i32_load(w(almide_layout::PAYLOAD + 4)).local_set(mask);
     i.end();
+    i.end();
     // insert ordinal len/esz - 1 (slot value = ordinal + 1 = len/esz)
+    i.local_get(mask).i32_const(crate::map_ordered::ORDERED).i32_eq().if_(BlockType::Empty);
+    i.local_get(v).local_get(new).local_get(esz).local_get(koff);
+    i.local_get(len).local_get(esz).i32_div_u().call(fns.ord.add).local_set(v);
+    i.else_();
     i.local_get(new).i32_const(almide_layout::PAYLOAD as i32).i32_add();
     i.local_get(len).i32_add().local_get(esz).i32_sub().local_get(koff).i32_add();
     load_key(&mut i, key);
     i.call(fns.hash).local_get(mask).i32_and().local_set(h);
-    probe_empty(&mut i, v, mask, h, q);
+    probe_empty_counted(&mut i, v, mask, h, q, Some(steps));
     i.local_get(q).local_get(len).local_get(esz).i32_div_u().i32_store(w(SLOTS));
+    i.end();
     i.local_get(v).local_get(len).i32_store(w(almide_layout::PAYLOAD));
+    // this insert walked a flooded chain: index the block by key order
+    i.local_get(mask).i32_const(crate::map_ordered::ORDERED).i32_ne().if_(BlockType::Empty);
+    if_flooded(&mut i, steps, |i| {
+        i.local_get(new).local_get(v).local_get(esz).local_get(koff).call(fns.ord.from_index).local_set(v);
+    });
+    i.end();
     i.local_get(new).local_get(old).i32_ne().local_get(v).local_get(v0).i32_ne().i32_or().if_(BlockType::Empty);
     i.local_get(new).local_get(v).call(fns.side_set).drop();
     i.end();
@@ -532,10 +576,10 @@ pub(crate) fn helper_body(h: &Helper) -> Option<Function> {
             IdxKey::Int => emit_hash_int(),
             IdxKey::Str => emit_hash_str(),
         },
-        Helper::MapIdxBuild { key, hash } => emit_build(*key, *hash),
+        Helper::MapIdxBuild { key, hash, ord_build } => emit_build(*key, *hash, *ord_build),
         Helper::MapIdxFind { key, fns, build } => emit_find(*key, *fns, *build),
         Helper::MapIdxAppend { key, fns, grow } => emit_append(*key, *fns, *grow),
-        Helper::MapIdxGrow { key, hash } => crate::map_holes::emit_grow(*key, *hash),
+        Helper::MapIdxGrow { key, hash, from_index } => crate::map_holes::emit_grow(*key, *hash, *from_index),
         Helper::MapIdxKill { key, fns, build } => crate::map_holes::emit_kill(*key, *fns, *build),
         Helper::MapIdxSettle { key, fns } => crate::map_holes::emit_settle(*key, *fns),
         Helper::MapIdxDead { side_get } => crate::map_holes::emit_dead(*side_get),
@@ -550,6 +594,7 @@ impl Emitter<'_> {
             side_get: self.work.helper(Helper::MapIdxSideGet),
             side_set: self.work.helper(Helper::MapIdxSideSet { raw }),
             hash: self.work.helper(Helper::MapIdxHash { key }),
+            ord: crate::map_ordered::ord_fns(self.work, key),
         }
     }
 
@@ -564,7 +609,7 @@ impl Emitter<'_> {
             return self.scan_helper(k);
         };
         let fns = self.idx_fns(key);
-        let build = self.work.helper(Helper::MapIdxBuild { key, hash: fns.hash });
+        let build = self.work.helper(Helper::MapIdxBuild { key, hash: fns.hash, ord_build: fns.ord.build_all });
         Ok(self.work.helper(Helper::MapIdxFind { key, fns, build }))
     }
 
@@ -573,7 +618,7 @@ impl Emitter<'_> {
     pub(crate) fn keyed_append(&mut self, k: SliceTy) -> Option<u32> {
         let key = index_key(k)?;
         let fns = self.idx_fns(key);
-        let grow = self.work.helper(Helper::MapIdxGrow { key, hash: fns.hash });
+        let grow = self.work.helper(Helper::MapIdxGrow { key, hash: fns.hash, from_index: fns.ord.from_index });
         Some(self.work.helper(Helper::MapIdxAppend { key, fns, grow }))
     }
 
@@ -582,7 +627,7 @@ impl Emitter<'_> {
     pub(crate) fn keyed_kill(&mut self, k: SliceTy) -> Option<(u32, u32)> {
         let key = index_key(k)?;
         let fns = self.idx_fns(key);
-        let build = self.work.helper(Helper::MapIdxBuild { key, hash: fns.hash });
+        let build = self.work.helper(Helper::MapIdxBuild { key, hash: fns.hash, ord_build: fns.ord.build_all });
         let kill = self.work.helper(Helper::MapIdxKill { key, fns, build });
         Some((kill, self.work.helper(Helper::MapIdxSettle { key, fns })))
     }

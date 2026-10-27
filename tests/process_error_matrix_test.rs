@@ -13,6 +13,9 @@
 //! | `exec_status_timeout` | `exec failed: {errno}` |
 //! | `spawn` | `spawn '{cmd}' failed: {errno}` |
 //!
+//! Since R-process-02 the family is `exec`, `output`, `run` and `start`
+//! (one `ProcessCommand` record each but `exec`).
+//!
 //! Four said nothing at all, and the three that said something each said it
 //! differently. Fixing only the one in the repro would leave six. So the rule is
 //! stated here and gated, per the family discipline in CLAUDE.md:
@@ -59,38 +62,44 @@ const MISSING: &str = "almide-no-such-binary-2090";
 fn rows() -> Vec<(&'static str, String)> {
     vec![
         (
-            "let _ = process.exec_status(\"almide-no-such-binary-2090\", [])!",
-            format!("process.exec_status({MISSING:?}):"),
+            "let _ = process.output(process.ProcessCommand { cmd: \"almide-no-such-binary-2090\", args: [] })!",
+            format!("process.output({MISSING:?}):"),
         ),
         (
-            "let _ = process.exec_status_timeout(\"almide-no-such-binary-2090\", [], 1000)!",
-            format!("process.exec_status_timeout({MISSING:?}, 1000):"),
+            "let _ = process.output(process.ProcessCommand { cmd: \"almide-no-such-binary-2090\", args: [], timeout_ms: 1000 })!",
+            format!("process.output({MISSING:?}):"),
         ),
         (
-            "let _ = process.run(\"almide-no-such-binary-2090\", [])!",
+            "let _ = process.output(process.ProcessCommand { cmd: \"almide-no-such-binary-2090\", args: [], dir: \".\" })!",
+            format!("process.output(\".\", {MISSING:?}):"),
+        ),
+        (
+            "let _ = process.output(process.ProcessCommand { cmd: \"almide-no-such-binary-2090\", args: [], stdin: \"x\" })!",
+            format!("process.output({MISSING:?}):"),
+        ),
+        (
+            "let _ = process.run(process.ProcessCommand { cmd: \"almide-no-such-binary-2090\", args: [] })!",
             format!("process.run({MISSING:?}):"),
         ),
         (
-            "let _ = process.run_in(\".\", \"almide-no-such-binary-2090\", [])!",
-            format!("process.run_in(\".\", {MISSING:?}):"),
+            "let _ = process.run(process.ProcessCommand { cmd: \"almide-no-such-binary-2090\", args: [], dir: \".\" })!",
+            format!("process.run(\".\", {MISSING:?}):"),
         ),
         (
             "let _ = process.exec(\"almide-no-such-binary-2090\", [])!",
             format!("process.exec({MISSING:?}):"),
         ),
         (
-            "let _ = process.exec_in(\".\", \"almide-no-such-binary-2090\", [])!",
-            format!("process.exec_in(\".\", {MISSING:?}):"),
-        ),
-        (
-            "let _ = process.exec_with_stdin(\"almide-no-such-binary-2090\", [], \"x\")!",
-            format!("process.exec_with_stdin({MISSING:?}):"),
-        ),
-        (
-            "let _ = process.spawn(\"almide-no-such-binary-2090\", [])!",
-            format!("process.spawn({MISSING:?}):"),
+            "let _ = process.start(process.ProcessCommand { cmd: \"almide-no-such-binary-2090\", args: [] })!",
+            format!("process.start({MISSING:?}):"),
         ),
     ]
+}
+
+/// The rows the embedded wasm host serves: `start`'s handle is native-only
+/// (E081 on the wasm legs, proofs/target-availability.toml).
+fn wasm_rows() -> Vec<(&'static str, String)> {
+    rows().into_iter().filter(|(c, _)| !c.contains("process.start(")).collect()
 }
 
 /// Every row in the family names itself, and keeps the platform text verbatim.
@@ -126,7 +135,14 @@ fn every_spawn_failure_names_its_call_and_operand() {
 fn the_family_members_are_distinguishable_from_each_other() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut seen: Vec<(String, String)> = Vec::new();
-    for (i, (call, _)) in rows().into_iter().enumerate() {
+    let mut heads: Vec<String> = Vec::new();
+    for (i, (call, head)) in rows().into_iter().enumerate() {
+        // One fn spelled with several ProcessCommand fields (`timeout_ms`,
+        // `stdin`) is ONE member: its rows share a head by design.
+        if heads.contains(&head) {
+            continue;
+        }
+        heads.push(head);
         let out = run(
             dir.path(),
             &format!("d{i}.almd"),
@@ -172,7 +188,7 @@ fn a_child_that_ran_and_failed_is_untouched() {
 fn the_embedded_wasm_leg_renders_every_row_as_native_does() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut diverged = Vec::new();
-    for (i, (call, _)) in rows().into_iter().enumerate() {
+    for (i, (call, _)) in wasm_rows().into_iter().enumerate() {
         let file = dir.path().join(format!("leg{i}.almd"));
         std::fs::write(&file, format!("import process\neffect fn main() -> Unit = {{\n  {call}\n}}\n")).expect("write fixture");
         let leg = |extra: &[&str]| {
@@ -206,11 +222,11 @@ fn status_errors_escape_commands_and_omit_arguments() {
 import env
 effect fn main() -> Unit = {
   let cmd = env.args()[0]
-  match process.exec_status(cmd, ["private-argument-2103"]) {
+  match process.output(process.ProcessCommand { cmd: cmd, args: ["private-argument-2103"] }) {
     ok(_) => println("unexpected success"),
     err(e) => println(e),
   }
-  match process.exec_status_timeout(cmd, ["private-argument-2103"], 1000) {
+  match process.output(process.ProcessCommand { cmd: cmd, args: ["private-argument-2103"], timeout_ms: 1000 }) {
     ok(_) => println("unexpected success"),
     err(e) => println(e),
   }
@@ -219,40 +235,46 @@ effect fn main() -> Unit = {
     let built = Command::new(almide()).arg("build").arg(&file).arg("-o").arg(&app).output().expect("build");
     assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
     for (cmd, quoted) in [
-        ("missing-2103-\"quote", "\"missing-2103-\\\"quote\""),
-        ("missing-2103-\\slash", "\"missing-2103-\\\\slash\""),
+        // C-418 (#4126): quote and backslash are kept, control and bidi
+        // characters are escaped — the one rule every error text uses.
+        ("missing-2103-\"quote", "\"missing-2103-\"quote\""),
+        ("missing-2103-\\slash", "\"missing-2103-\\slash\""),
         ("missing-2103-\n\r\tcontrol", "\"missing-2103-\\n\\r\\tcontrol\""),
+        ("missing-2103-\u{1b}\u{85}\u{202e}", "\"missing-2103-\\u{1b}\\u{85}\\u{202e}\""),
         ("missing-2103-日本語", "\"missing-2103-日本語\""),
     ] {
         let host = Command::new(cmd).arg("private-argument-2103").output().expect_err("missing command").to_string();
         let output = Command::new(&app).arg(cmd).output().expect("run");
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
         assert_eq!(String::from_utf8_lossy(&output.stdout), format!(
-            "process.exec_status({quoted}): {host}\nprocess.exec_status_timeout({quoted}, 1000): {host}\n"));
+            "process.output({quoted}): {host}\nprocess.output({quoted}): {host}\n"));
     }
 }
 
-/// The subprocess family is extended by MATRIX, never point-wise (#3379:
-/// `run_in` was asked for because `exec_in` had no terminal-attached twin,
-/// and `exec_attached` was the one member C-374's list did not name).
-///
-/// The family is every fn stdlib/process.almd declares, minus the named
-/// non-members below. Each member must have every cell:
-/// - its `almide:process/spawn` WIT case (`exec_in` -> `exec-in`);
-/// - its `__proc_<fn>` leaf in the emitter's op table (fs_meta.rs);
-/// - its self-host registry row (the wasm legs);
-/// - its stock-p1 `host-capability` row in proofs/target-availability.toml;
-/// - when it starts a child: a `[permissions] proc` row (src/cli/mod.rs) and
-///   a spawn-failure row in [`rows`] above, which the two-leg test runs.
-///
-/// The pairs `exec`/`run` and `exec_in`/`run_in` are the capture-versus-
-/// terminal matrix; a cell missing on either axis fails here.
+/// The subprocess family is extended by MATRIX, never point-wise (#3379,
+/// R-process-02/03). Two groups, read off stdlib/process.almd:
+/// - the one-shot runs and the process-wide calls the wasm legs serve —
+///   `exec`, `output`, `run`, `kill`, `pid` — each with its
+///   `almide:process/spawn` WIT case, its `__proc_*` leaf (fs_meta.rs) and
+///   the self-host registry row of the surface it implements;
+/// - the `start` handle — `start`, `poll`, `wait`, `stop`, `read_new_stdout`,
+///   `read_new_stderr`, `child_pid` — native-only, each declared unavailable
+///   on the wasm legs in proofs/target-availability.toml (E081).
+/// Every fn that starts a child has a `[permissions] proc` row (src/cli/mod.rs)
+/// and a spawn-failure row in [`rows`].
 #[test]
 fn the_subprocess_family_has_every_cell() {
-    // Not in the family: process-wide state and the deprecated alias.
-    const NON_MEMBERS: &[&str] = &["exit", "args", "stdin_lines", "env", "sleep", "exec_attached"];
-    // Members that do not start a child.
-    const NO_CHILD: &[&str] = &["kill", "is_alive", "pid"];
+    const NON_MEMBERS: &[&str] = &["exit", "args", "stdin_lines", "env", "sleep"];
+    // (fn, WIT case, `__proc_` leaf, the registry surface its impl serves)
+    const SERVED: &[(&str, &str, &str, &str)] = &[
+        ("exec", "exec", "exec", "process.exec"),
+        ("output", "output", "output", "__os_output"),
+        ("run", "run-with", "run_cmd", "__os_run"),
+        ("kill", "kill", "kill", "process.kill"),
+        ("pid", "pid", "pid", "process.pid"),
+    ];
+    const HANDLE: &[&str] = &["start", "poll", "wait", "stop", "read_new_stdout", "read_new_stderr", "child_pid"];
+    const STARTS_A_CHILD: &[&str] = &["exec", "output", "run", "start"];
     let root = env!("CARGO_MANIFEST_DIR");
     let read = |p: &str| std::fs::read_to_string(format!("{root}/{p}")).unwrap_or_else(|e| panic!("{p}: {e}"));
     let stdlib = read("stdlib/process.almd");
@@ -263,34 +285,41 @@ fn the_subprocess_family_has_every_cell() {
     let permissions = read("src/cli/mod.rs");
     let failure_rows: Vec<String> = rows().into_iter().map(|(call, _)| call.to_string()).collect();
 
-    let family: Vec<String> = stdlib
+    let public: Vec<String> = stdlib
         .lines()
         .filter_map(|l| l.strip_prefix("effect fn ").or_else(|| l.strip_prefix("fn ")))
         .filter_map(|l| l.split('(').next())
         .map(str::to_string)
-        .filter(|f| !NON_MEMBERS.contains(&f.as_str()))
+        .filter(|f| !f.starts_with("__") && !NON_MEMBERS.contains(&f.as_str()))
         .collect();
-    for pair in [["exec", "run"], ["exec_in", "run_in"]] {
-        for f in pair {
-            assert!(family.iter().any(|m| m == f), "the capture/terminal matrix lost `process.{f}`");
+    let mut missing = Vec::new();
+    for f in &public {
+        if !SERVED.iter().any(|(n, ..)| n == f) && !HANDLE.contains(&f.as_str()) {
+            missing.push(format!("  process.{f}: in neither the served group nor the handle"));
         }
     }
-
-    let mut missing = Vec::new();
-    for f in &family {
-        let mut need = |ok: bool, cell: &str| {
-            if !ok {
-                missing.push(format!("  process.{f}: {cell}"));
-            }
-        };
-        let case = f.replace('_', "-");
-        need(wit.lines().any(|l| l.trim() == format!("{case},")), "WIT case in spawn.wit");
-        need(leaves.contains(&format!("(\"__proc_{f}\", ")), "__proc_ leaf in fs_meta.rs PROC_LEAVES");
-        need(registry.contains(&format!("\"process.{f}\")")), "self-host registry row");
-        need(availability.contains(&format!("fn = \"process.{f}\"")), "target-availability row");
-        if !NO_CHILD.contains(&f.as_str()) {
-            need(permissions.contains(&format!("(\"{f}\", ")), "[permissions] proc row in src/cli/mod.rs");
-            need(failure_rows.iter().any(|c| c.contains(&format!("process.{f}("))), "spawn-failure row in rows()");
+    for (f, case, leaf, surface) in SERVED {
+        if !wit.lines().any(|l| l.trim() == format!("{case},")) {
+            missing.push(format!("  process.{f}: WIT case `{case}` in spawn.wit"));
+        }
+        if !leaves.contains(&format!("(\"__proc_{leaf}\", ")) {
+            missing.push(format!("  process.{f}: __proc_{leaf} in fs_meta.rs PROC_LEAVES"));
+        }
+        if !registry.contains(&format!("\"{surface}\")")) {
+            missing.push(format!("  process.{f}: self-host registry row for {surface}"));
+        }
+    }
+    for f in HANDLE {
+        if !availability.contains(&format!("fn = \"process.{f}\"")) {
+            missing.push(format!("  process.{f}: target-availability row (native-only, E081)"));
+        }
+    }
+    for f in STARTS_A_CHILD {
+        if !permissions.contains(&format!("(\"{f}\", ")) {
+            missing.push(format!("  process.{f}: [permissions] proc row in src/cli/mod.rs"));
+        }
+        if !failure_rows.iter().any(|c| c.contains(&format!("process.{f}("))) {
+            missing.push(format!("  process.{f}: spawn-failure row in rows()"));
         }
     }
     assert!(missing.is_empty(), "the subprocess family is missing cells:\n{}", missing.join("\n"));

@@ -37,10 +37,15 @@ impl NanoPass for IrLinkFlattenPass {
 
         if program.modules.is_empty() {
             let renamed = qualify_rust_reserved_type_names(&mut program, &reserved_origins);
-            if renamed {
+            // The entry program's own declaration of a stdlib-owned name is
+            // `self.Type` (#1828) whether or not any module is linked: with
+            // no module (`type Secret = { .. }` and no import) it still needs
+            // the flat name, or the struct renders as `pub struct self.Secret`.
+            let scoped = program.type_decls.iter().any(|td| td.name.as_str().contains('.'));
+            if renamed || scoped {
                 mangle_qualified_type_names(&mut program);
             }
-            return PassResult { program, changed: renamed };
+            return PassResult { program, changed: renamed || scoped };
         }
 
         let modules = std::mem::take(&mut program.modules);
@@ -348,6 +353,8 @@ fn remap_codegen_annotations(ann: &mut CodegenAnnotations, r: &TypeRename) {
         .map(|(e, c, f)| (remap(&e), c, f)).collect();
     ann.boxed_fields = std::mem::take(&mut ann.boxed_fields).into_iter()
         .map(|(c, f)| (remap_ctor(&c), f)).collect();
+    ann.boxed_record_fields = std::mem::take(&mut ann.boxed_record_fields).into_iter()
+        .map(|(t, f)| (remap(&t), f)).collect();
     ann.ctor_to_enum = std::mem::take(&mut ann.ctor_to_enum).into_iter()
         .map(|(c, e)| (remap_ctor(&c), remap(&e))).collect();
     // #844: recursive_enums is keyed by the PRE-flatten qualified name

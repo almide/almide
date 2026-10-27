@@ -3,8 +3,8 @@
 //! through the shared `$scan_*` helpers. Keys and set elements are
 //! scalars (equality must be defined); map values are any slice type.
 //!
-//! Mutation doctrine matches List: binds deep-copy, so `map.insert`'s
-//! `mut` form is a var write-back of a functionally-built block. (The
+//! Mutation doctrine matches List: binds deep-copy, so the in-place
+//! `m[k] = v` form is a var write-back of a functionally-built block. (The
 //! functional build copies per insert — quadratic for adversarial loops;
 //! upgrade to cap-aware in-place growth if a fixture ever trips it.)
 
@@ -196,40 +196,6 @@ impl Emitter<'_> {
                 self.release_i32(); // mh
                 Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(v)))))
             }
-            ("get_or", [m, key, default]) => {
-                // the default lowers after the probe: one that reads the
-                // var would settle (move) the entry the probe found
-                let raw = !matches!(&m.kind, IrExprKind::Var { id } if crate::rc_ownership::rc_mentions_var(default, *id));
-                let (_mh, _kh, eh, k, v, lay) = self.map_scan(m, key, (ArgMode::Borrow, raw))?;
-                // The default ALWAYS evaluates (native argument order,
-                // #1919) — see list.get_or; the entry handle is already a
-                // held local.
-                let hd = self.hold_for(v)?;
-                self.lower_arg(default, Some(v), ArgMode::Retain)?;
-                self.f.instructions().local_set(hd);
-                // The result is OWNED either way (#2932): a miss hands the
-                // default's Retain credit over; a hit shares the entry's
-                // value (+1, the map keeps its own credit) and releases the
-                // unused default. Declaring it a view leaked the default's
-                // credit on every call with a heap default.
-                self.f
-                    .instructions()
-                    .local_get(eh)
-                    .i32_eqz()
-                    .if_(BlockType::Result(v.val_type()));
-                self.f.instructions().local_get(hd);
-                self.f.instructions().else_();
-                self.f.instructions().local_get(eh).i32_const(lay.1 as i32).i32_add();
-                self.load_ty_slot_at(v); // eh is ABSOLUTE (inside payload)
-                self.share_handle_top(v);
-                self.emit_release_hold(hd, v);
-                self.f.instructions().end();
-                self.release_for(v);
-                self.release_i32();
-                self.release_for(k);
-                self.release_i32();
-                Ok(Some(self.selected_default_result(v)))
-            }
             // The functional set: a copy with the entry overwritten or
             // appended (map_inplace.rs holds the core; the in-place
             // window shares it as its shared-block fallback).
@@ -270,30 +236,6 @@ impl Emitter<'_> {
                     return unsup("var:unmapped");
                 };
                 let ret = self.lower_map_call("set", args, ret_hint)?;
-                self.emit_rebind_mut_var_fresh(*id, var_idx, var_ty, vglob)?;
-                let _ = ret;
-                Ok(None)
-            }
-            // mut delete (#1423 stage 4): the var write-back of the
-            // functional `remove` — the same shape `insert` takes over
-            // `set`. The fresh block is the var's alone, so an alias or
-            // holder bound before the delete keeps the pre-delete entries
-            // (C-033's value semantics), and insertion order is preserved.
-            ("delete", [m, key]) => {
-                if let Some((id, path)) = crate::list_mut::record_field_receiver(m) {
-                    return self.lower_map_field_write(&id, &path, m, "remove", args);
-                }
-                let IrExprKind::Var { id } = &m.kind else {
-                    return unsup("map-delete-nonvar");
-                };
-                // #3640: a var that owns its block deletes in place.
-                if self.try_map_delete_in_place(id, key)? {
-                    return Ok(None);
-                }
-                let Some((var_idx, var_ty, vglob)) = self.mut_var(id) else {
-                    return unsup("var:unmapped");
-                };
-                let ret = self.lower_map_call("remove", args, ret_hint)?;
                 self.emit_rebind_mut_var_fresh(*id, var_idx, var_ty, vglob)?;
                 let _ = ret;
                 Ok(None)
@@ -396,7 +338,7 @@ impl Emitter<'_> {
                 }
                 Ok(Some(Lowered::owned(SliceTy::List(self.types.intern(side)))))
             }
-            ("entries", [m]) => {
+            ("to_list", [m]) => {
                 let (kh, vh) = match self.lower_arg(m, None, ArgMode::Borrow)? {
                     SliceTy::Map(kh, vh) => (kh, vh),
                     other => return unsup(&format!("map-entries-of:{other:?}")),
@@ -664,7 +606,7 @@ impl Emitter<'_> {
         };
     }
 
-    /// `map.insert` / `map.delete` on a record var's field (#2908): the
+    /// The in-place insert (`m[k] = v`) on a record var's field (#2908): the
     /// functional op over the same receiver, written back as `h.f = op(..)`
     /// through the copy-on-write field write — the one path every field
     /// write's credits already ride.

@@ -16,7 +16,7 @@
 // are rewritten now; other `__` names link like any user fn.
 fn __helper(x: Int) -> String = int.to_string(x + 1)
 
-fn value_to_float(n: Int) -> Float = int.to_float(n) + 0.5
+fn value_to_float(n: Int) -> Float = float.from(n) + 0.5
 
 fn value_helper(s: String) -> String = s + "!"
 

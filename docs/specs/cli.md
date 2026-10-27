@@ -46,10 +46,20 @@ native バイナリに時間制限が無いのと同じく、`--target wasm` の
 プロセス単位の制限を自前で持つ。テスト: `tests/wasm_run_no_time_limit_test.rs`
 
 **native のビルドキャッシュ**(#2500): native ターゲットは生成 Rust を共有スクラッチ dir
-（`ALMIDE_RUN_PROJECT_DIR`、既定 `<temp>/almide-run`）でビルドし、生成コードの内容ハッシュを名前にした
+（`ALMIDE_RUN_PROJECT_DIR`、既定 `<cache base>/run`）でビルドし、生成コードの内容ハッシュを名前にした
 `target/<profile>/almide-<hash>` にバイナリを置く。同じ生成コードは `almide run` / `almide build`
 のどちらから来てもこの 1 本を再利用し、cargo を呼ばない。dir 内の書き込み（ビルド・退避・掃除）は
 すべて `.almide-build.lock` の下で直列化され、キャッシュヒットだけがロック無しで走る。
+
+- **置き場所**（#4180）: native のビルドキャッシュ（`run`、`build-cdylib`、ランタイムの rlib
+  `almide-rtlib-<key>`、`almide test` のワーカー `test/native`）は、すべて利用者ごとの非公開の土台
+  `<temp>/almide-<euid>` の下に置く。土台は mode 0700 で排他的に作る。すでにある場合は、実体の
+  ディレクトリで、実行中の利用者の持ち物で、グループと他人に権限が無いときだけ使う。それ以外は直さずに
+  拒否する（exit 1）。中身を他人が書いたかもしれないため。Linux の `/tmp` のような共有の temp で、
+  他人が先に作った dir に置いたバイナリが自分の権限で実行される穴を塞ぐ。
+- **ヒットの条件**（#4180）: ビルド時にバイナリの SHA-256 を `almide-<hash>.sha256` に記録し、
+  ヒットはその値とバイナリの中身が一致するときだけ。記録が無いか一致しなければ作り直す。
+  テスト: `tests/build_cache_private_test.rs`
 
 - **退避**: ヒットのたびにバイナリの mtime を更新し、7 日間使われなかった `almide-<hash>`
   （と `deps/` に残る同じ世代の `almide_out-*` オブジェクト）を、次のミス時にロックの下で削除する。
@@ -68,8 +78,8 @@ native バイナリに時間制限が無いのと同じく、`--target wasm` の
 
 テスト: `tests/run_cache_recovery_test.rs`
 
-**stdout のバッファリング**(#2245): native バイナリの `println` / `io.print` / `io.write` /
-`io.write_bytes` は 1 つの 64 KiB バッファを通る(順序はプログラム順)。stdout が端末なら書き込み
+**stdout のバッファリング**(#2245): native バイナリの `println` / `io.print` /
+`io.write(io.stdout()!, …)` は 1 つの 64 KiB バッファを通る(順序はプログラム順)。stdout が端末なら書き込み
 ごとに flush、パイプやファイルならブロック単位。flush 点は終了時・panic 時・`main` が err を返した
 時・子プロセス起動前・stdin 読み取り前、そして常に flush する `io.print`(`io.print("")` が明示
 flush)。stderr(`eprintln`)は無バッファなので、端末以外では stdout との相対順序は保たれない。
@@ -195,11 +205,11 @@ almide test --update-snapshots x_test.almd  # スナップショットの受理(
 ときは `0 tests in 1 file (2 filtered out)` のように除外数も付く。`--json` は各行に
 `"tests"` と `"filtered_out"` を持つ。
 
-**ゼロの扱いは二種類ある**(#2084):
+**ゼロの扱い**(#2084, #4264):
 
 | 状況 | 終了コード | 理由 |
 |---|---|---|
-| `--run` が 1 件も一致しなかった | 0 | 絞り込んだのは呼び出し側。件数表示で自明になる |
+| `--run` が 1 件も一致しなかった | **5** | 何も走っていない。CI のフィルタの打ち間違いが緑に見えないように。メッセージはパターンが一致しなかったと言う。`--allow-no-tests` で opt-out |
 | 実行すべきテストが 1 件も無かった | **5** | 事故。`--allow-no-tests` で opt-out |
 
 「テストが無かった」は**テストファイルが見つからなかった場合と、名指ししたファイルに
@@ -245,18 +255,25 @@ FAILED: e.almd
 
 テスト: `tests/imported_module_tests_not_rerun_test.rs`
 
-`--run <pattern>` は **生成された関数名に対する大文字小文字を区別する部分文字列一致**で、
-`test "…"` のラベルそのものではない。関数名は `__test_almd_` とそのファイル内での宣言順の
-4 桁の序数（`where` の case は 1 件ずつ数える）を前置し、ラベルの空白・記号を `_` に畳んだ
-綴りになる（`almide_ir::test_fn_name` と `crates/almide-base/src/names.rs`）。序数があるので
-畳むと同じ綴りになるラベル（`"a b"` と `"a_b"`）も別の関数になる（#3488）。したがって 2 件目の
-`test "beta fails"` は `__test_almd_0001_beta_fails` で、`--run beta` と `--run beta_fails`
-では選ばれるが、`--run "beta fails"`（空白のまま）では選ばれない。`--run __test_almd_` は
-全件を選ぶ。
+`--run <pattern>` は **テスト自身の名前（`test "…"` に書いた文字列、`where` の case は
+`名前 / case`）に対する大文字小文字を区別する部分文字列一致**である（#4264）。失敗報告に出る
+名前をそのまま渡せば選ばれる: `--run "beta fails"`（空白のまま）も、`--run "値が無ければ"` の
+ような ASCII 以外の名前も一致する。生成された関数名（`__test_almd_0001_beta_fails`、
+`almide_ir::test_fn_name`）には一致させない — 以前はそちらに一致させていたため、空白や記号を
+含む名前、ASCII 以外の文字で書いた名前（関数名では畳まれてハッシュが付く）を自分の名前で
+選べなかった。
 
-この規則は **native レグと wasm レグで同一**である（#2085）。native はパターンを Rust の
-テストハーネスに渡し、wasm はランナー合成の時点で同じ述語で絞る。どちらのレグでも、
-1件も一致しないパターンは 0 件を実行して成功終了する。
+この規則は **native レグと wasm レグで同一**である（#2085）。述語は
+`almide_base::names::test_name_matches_filter` の一つだけで、wasm はランナー合成の時点で
+これで絞り、native は同じ述語で選んだテストの完全なパスを `--exact` で Rust のテスト
+ハーネスに渡す。1 件も一致しないパターンは上の表のとおり 5 で終わる。
+
+**ファイルの判定は終了コードだけでは決めない**(#4255)。テストの中で `process.exit(0)` を
+呼ぶとプロセスは 0 で終わるが、残りのテストは走っていない。native は各テストが本体の
+最後まで到達したときに `ALMIDE_TEST_LEDGER` の指すファイルへ自分の名前を追記し
+（`test_module` テンプレート。プログラムの stdout ではないハーネス自身の記録）、選んだ
+全テストの完了記録があるときだけ通し、wasm は組み込みホストがランナーの `main` が最後まで戻ったことを確かめる。
+足りなければそのファイルは失敗し、最初に終わらなかったテストの名前を出す。
 
 テスト: `tests/wasm_test_filter_parity_test.rs`
 
@@ -740,7 +757,14 @@ git diff src/calc.almd | almide survive src/calc.almd --with - --json
 - exit: `0` = 生き残る、`1` = 生き残らない、`2` = 判定できない（読めない / hunk が
   当たらない）。`--json` 時は `2` も `{"schema_version":1,"error":"…"}` を stdout に出す
 
-**生き残る** = error の診断・テスト・契約のどれも `newly_broken` に無いこと。
+**生き残る** = error の診断・テスト・契約のどれも `newly_broken` に無く、
+テスト・契約のどれも `removed` に無いこと（#4267）。テストを消せば何も
+`newly_broken` にならないので、消すことは生き残ることではない。意図した削除は
+`--allow-removed`（`survive` と `apply` の両方）で通す。MCP の `almide_survive` は
+これを渡さない。名前は残ったまま、値を読むアサーション（`assert` / `assert_eq` /
+`assert_ne` / `testing.assert_*` で、引数のどれかがリテラルでないもの）を全部失った
+テスト（`assert(true)` や空の本体）は `newly_broken`（`after: "hollowed"`）になる。
+
 warning の `newly_broken` は報告するが判定には入れない（`almide check` 自体が
 warning で失敗しない。また未使用変数 lint は error の無いファイルでしか走らない
 ので、最後の error を直すと元からあった warning が表に出る — これで拒否すると
@@ -930,6 +954,32 @@ almide trust bob                # github.com/bob と同じ
 
 ---
 
+### `almide install`
+
+```bash
+almide install github.com/almide/<repo>          # 既定のブランチの最新コミット
+almide install <spec> --tag v1.2.0               # タグ
+almide install ./path/to/project                 # ローカルのディレクトリ
+almide install <spec> --name tool --bin-dir ~/bin
+```
+
+パッケージを取得し、そのパッケージをルートプロジェクトとして `--release` でビルドして、bin ディレクトリ
+（`--bin-dir`、`ALMIDE_INSTALL`、既定 `~/.local/bin` の順）に置く。
+
+- **信頼**（#4184）: 取得元の持ち主（`host/owner`）は、既定で信頼される `github.com/almide` か、
+  `--trust <owner>` で名指ししたものに限る。それ以外は**取得する前に**拒否する。`almide add` と同じ規則。
+  ローカルのディレクトリには信頼は要らない。
+- **ネイティブコード**（#4184）: パッケージ自身のネイティブコード（`native/` の Rust、`[native-deps]`
+  のクレートとその build script、`@extern(rust|c)`）は、ビルド時に利用者の権限で動く。
+  `[permissions] native` が見るのは依存だけなので、install はそれを列挙し、`--allow-native`
+  が無ければ拒否する。純 Almide のパッケージはフラグ無しで入る。
+- **置き場所**（#4183）: 名前（`[package] name` か `--name`）は 1 つの素の識別子
+  （英字・数字・`_`、数字で始まらない）でなければならない。出力は bin ディレクトリ内の一時名に作ってから
+  rename で置くので、宛先の symlink の先には決して書かない。almide が入れていない既存のファイル
+  （bin ディレクトリの `.almide-installed` に記録が無いもの）や symlink は、`--force` が無ければ置き換えない。
+
+テスト: `tests/install_destination_test.rs`、`tests/install_native_gate_test.rs`
+
 ### `almide deps`
 
 依存パッケージの一覧を表示。依存を取得し、各パッケージ(直接依存の後に、それらを通じて
@@ -1103,10 +1153,16 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_CACHE_MAX_BYTES=value` | tool | the size bound of each native build cache — the `almide test` worker cache (`<temp>/almide-test/native`, least recently used worker dirs emptied first) and a build scratch dir's per-program binaries and objects (`<temp>/almide-run`): `4G` (default), `512M`, a byte count, or `0`/`off` for no bound (#2608) |
 | `ALMIDE_CAPTURE_MOVE_OFF` | ablation | make CaptureClone clone every capture again, as before #2231, instead of moving a value whose sole user is the closure — the ablation the ownership certifier's sensitivity test drives |
 | `ALMIDE_CERTIFY_OWNERSHIP=value` | debug | run the native ownership certifier after the pass pipeline (#2231): `report` prints every violation, `fail` aborts the build on one, `off` skips it; unset = `fail` in a debug build, `off` in a release build |
+| `ALMIDE_CI_BASE=value` | harness | the commit a sliced CI run diffs HEAD against to find the change's own files (a PR's base sha, a merge group's base_sha): every fixture the change touches joins the `ALMIDE_CI_SLICE` slice; scripts/ci-slice-prepare.sh resolves it into `ALMIDE_CI_TOUCHED` |
+| `ALMIDE_CI_SEED=value` | harness | the commit sha whose first 7 hex digits rotate the `ALMIDE_CI_SLICE` residue class, so consecutive commits judge different slices (CI passes `github.sha`); unset = offset 0 |
+| `ALMIDE_CI_SLICE=value` | harness | `k` > 1 makes every corpus-iterating test and script judge a commit-rotated 1-in-k slice of its fixtures plus the ones the change touches, skip its whole-corpus staleness / completeness checks and never rewrite a ledger (crates/almide-corpus/src/ci_slice.rs, scripts/lib/ci-slice.sh); CI sets it on PRs and merge groups whose base is not main; unset or 1 = the full run, unchanged |
+| `ALMIDE_CI_TOUCHED=value` | harness | a file listing the repo-relative paths the change touches, one per line (written by scripts/ci-slice-prepare.sh); read instead of running `git diff` against `ALMIDE_CI_BASE` |
 | `ALMIDE_COMPILER_STACK=value` | tool | stack size in bytes of the compiler driver thread (default 256 MiB); a deep input that overflows it is the regression test's subject |
 | `ALMIDE_COMPONENT_ADAPTER` | route | route `--component` through the preview1 adapter instead of the direct component emission |
 | `ALMIDE_COMPONENT_P3` | route | emit a WASI 0.3 component (stdio over component-model streams, the async canonical ABI) under `--component`; runs on a stock wasmtime 46+ with no feature flag (`wasmtime run app.wasm`, `-S http` for an http client — ADR-0023 step 1) |
+| `ALMIDE_CONTROL_ADMIT_CODEC_AT_INPUT` | ablation | make an `@input_sink` parameter (`http.decode_json[T]`) admit a type that is also `Encode` (a `Codec` type) instead of E110: the negative control of the row-22 input-type gate (tests/input_sink_test.rs), whose over-post cell must flip from E110 to `is_admin=true`; never set otherwise |
 | `ALMIDE_CONTROL_BIN=value` | harness | an `almide` binary the security route tests (`tests/effect_value_laundering_test.rs`, `proc_category_test.rs`, `permissions_routes_test.rs`) run INSTEAD of the one under test — the negative control: a build without the check fails their assertions (#4151, #4155) |
+| `ALMIDE_CONTROL_IGNORE_SKIP_DECODE` | ablation | make the Codec derive read a `@skip_decode` field from input again: the negative control of the #4108 field-skip matrix gate (tests/codec_field_skip_test.rs), which must flip its `admin=false` cell; never set otherwise |
 | `ALMIDE_CORPUS_FILTER=value` | harness | substring filter over the fixture paths the 3-way oracle test evaluates |
 | `ALMIDE_CORPUS_SHARD=value` | harness | `k/N` (1-based) walks the k-th modulo slice of the SORTED spec/wasm_cross corpus in the six corpus giants (#2381), read after the sort; `merge/N` reads the N shards' partials from `ALMIDE_CORPUS_SHARD_DIR` and judges the whole-corpus ceilings and the name-keyed bridge ledger; unset = the unsharded gate |
 | `ALMIDE_CORPUS_SHARD_DIR=value` | harness | directory where a sharded corpus gate writes its walked-fixture list and its partial counts / bridge names, and where `merge/N` reads them; unset = a local slice that writes nothing |
@@ -1136,6 +1192,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DEBUG_EFFECTS` | debug | print the effect inference pass's per-function results (native codegen) |
 | `ALMIDE_DEBUG_MIR_OPS` | harness | print every MIR op with its index (the classify_corpus example — the certificate-bisection instrument) |
 | `ALMIDE_DEFAULTS_DEBUG` | debug | print the record-default resolution when no default keys were found (native codegen) |
+| `ALMIDE_DEPS_CACHE_ONLY` | tool | resolve dependencies only from what is already on disk: a dependency not in the cache is an error, nothing is cloned and `almide.lock` is never written. Set by `almide mcp` on every tool child (#4179) |
 | `ALMIDE_DISABLE_OPT` | ablation | run the optimiser pipeline with every optional pass off (ablation; the always-on enabler passes still run) |
 | `ALMIDE_DUMP_IR=value` | debug | dump the IR after the named passes (comma-separated, or `all`) on the native pipeline, and the post-chain body of every fn whose name contains the value on the v1 pipeline |
 | `ALMIDE_DUMP_MIR` | debug | print every lowered fn's op stream before the native render runs |
@@ -1144,6 +1201,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_DWARF_FIXTURES=value` | harness | the DWARF line-table span-resolution measurement (`crates/almide-wasm/tests/dwarf_lines.rs`, ignored test): the `.almd` files to measure, comma-separated (#1315) |
 | `ALMIDE_EXPECT_TOOLS` | harness | make a harness test FAIL instead of skipping when an external tool (wasmtime, wasm-tools) is missing; CI sets it |
 | `ALMIDE_F32_SWEEP_N=value` | harness | how many xorshift32 bit patterns the Float32 printer sweep prints (`${x}` and `float32.to_string`) and compares with Rust f32 Display on each leg (default 100000; tests/float32_to_string_cross_target_test.rs) |
+| `ALMIDE_FAKE_RUSTC_VERSION=value` | harness | the version a fake `rustc` reports in tests/rustc_floor_test.rs, which forwards every other invocation to `ALMIDE_REAL_RUSTC` (the rustc-floor refusal's probe) |
 | `ALMIDE_FALLBACK_NAMES` | tool | make `almide test` print one `FALLBACK <file>` line per file the wasm leg did not pass — the wasm coverage ratchet's data feed |
 | `ALMIDE_FAN_COST_OFF` | ablation | go parallel on every `fan` offer the cost model (#3341) would keep sequential — the pre-#3341 behaviour, on both legs (native threads and the embedded wasm host's instances); the ablation the crossover measurement and the parallel-path tests use |
 | `ALMIDE_FAN_PAR_OFF` | ablation | keep `fan` chunk maps off the structural leg's instance-parallel offer (#3003): every chunk runs sequentially in the run's own instance |
@@ -1192,6 +1250,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_PROBE_OUT=value` | harness | the file a charge-probed native program writes its `__ALMD_PROBE` meter line to; `almide run --time-report` sets it to a fresh temp path so the program's own stderr is never read as the reading (#3489). Unset = the line goes to stderr |
 | `ALMIDE_PROBE_SRC=value` | harness | the source file the heap probe compiles (unset = the probe is skipped) |
 | `ALMIDE_PROFILE` | debug | print per-pass and per-phase timings of the native pipeline |
+| `ALMIDE_REAL_RUSTC=value` | harness | the real `rustc` the fake one in tests/rustc_floor_test.rs runs for anything but `--version` |
 | `ALMIDE_REGION_DEBUG` | debug | print the region-window pass's decisions (native and structural leg) |
 | `ALMIDE_REGION_OFF` | ablation | turn the region-window allocation pass off (native and structural leg) |
 | `ALMIDE_REGION_TRAP_STALE` | trap | arm the native region prelude's stale-reference trap (#2200) |
@@ -1210,6 +1269,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_TCO_DEBUG` | debug | print the native tail-call loop rewrite decisions |
 | `ALMIDE_TEST_ABORT_PROBE` | runtime | marks a native testing.assert_aborts child (ADR-0029) so `panic` takes the C-219 abort path there; set by the parent, never by hand |
 | `ALMIDE_TEST_LAX_WASM` | gate | let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run |
+| `ALMIDE_TEST_LEDGER=value` | runtime | the completion-ledger file a native `almide test` binary appends each finished test's name to (#4255): set by the runner, never by hand |
 | `ALMIDE_TEST_SIGNALLED_CALL_URL=value` | harness | the loopback URL that turns the almide-rt-core http test's re-run of itself into the signalled-call child (#3857): it spawns a missing command while a call waits on that URL; set by the parent test, never by hand |
 | `ALMIDE_TEST_VERBOSE` | tool | show the full cargo / rustc output of the `almide test` harness build |
 | `ALMIDE_TEST_WASM_RUNNER=value` | tool | `wasmtime` runs the wasm leg of `almide test` on the `wasmtime` CLI (the stock `to_wasi` artifact) instead of the embedded host every `almide` binary carries (#3046) — the comparison route; unset is the embedded host |

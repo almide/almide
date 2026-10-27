@@ -20,35 +20,30 @@ let greeting = "hello from " + "almide"
 fn deny(path: String) -> Result[Unit, String] = err("denied ${path}")
 
 effect fn app(req: HttpRequest) -> HttpResponse = {
-  let path = http.req_path(req)
+  let path = http.path(req)
   let route = string.split(path, "?") |> list.get(0) ?? path
   match route {
     "/hello" => http.response(200, greeting),
     "/echo" => http.with_headers(
       201,
-      "${http.req_method(req)} ${http.req_body(req)}",
+      "${http.method(req)} ${http.body(req)}",
       [
-        "X-Echo": http.req_header(req, "x-token") ?? "none",
-        "Content-Type": "text/plain; charset=utf-8"
+        ("X-Echo", http.header(req, "x-token") ?? "none"),
+        ("Content-Type", "text/plain; charset=utf-8")
       ],
     ),
-    "/teapot" => http.response(200, "short and stout") |> http.status(418),
+    "/teapot" => http.response(200, "short and stout") |> http.set_status(418),
     // Answers the server refuses (a status that is not a final status code,
     // a header name that is not a token, a value holding a control
     // character) or reshapes (the framing fields it owns are dropped).
     "/s42" => http.response(42, "x"),
     "/s103" => http.response(103, "x"),
-    "/hname" => http.with_headers(200, "x", ["a b": "v"]),
-    "/hctl" => http.with_headers(200, "x", ["X-C": "a\u{1}b"]),
+    "/hname" => http.with_headers(200, "x", [("a b", "v")]),
+    "/hctl" => http.with_headers(200, "x", [("X-C", "a\u{1}b")]),
     "/hframe" => http.with_headers(
       200,
       "hello",
-      [
-        "Content-Length": "99",
-        "Transfer-Encoding": "chunked",
-        "Keep-Alive": "timeout=5",
-        "X-Kept": "1"
-      ],
+      [("Content-Length", "99"), ("Transfer-Encoding", "chunked"), ("Keep-Alive", "timeout=5"), ("X-Kept", "1")],
     ),
     "/fail" => {
       deny(route)!

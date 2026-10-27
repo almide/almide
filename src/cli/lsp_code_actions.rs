@@ -175,15 +175,18 @@ fn compute_workspace_symbols(query: &str, workspace_root: &Option<std::path::Pat
     results
 }
 
+/// The workspace index's sweep. The skip rule applies to the directories it
+/// FINDS, not to the root it was given: a workspace that itself lives in a
+/// dot-directory (a temp dir, `~/.config/x`) is still indexed (#4186).
 fn collect_almd_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-    let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if name.starts_with('.') || name == "target" || name == "node_modules" { return; }
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let p = entry.path();
             // Symlinks are neither followed nor collected (#4140).
             let Ok(kind) = entry.file_type() else { continue };
-            if kind.is_dir() { collect_almd_files(&p, out); }
+            if kind.is_dir() {
+                if !super::project_scope::is_skipped_dir(&entry.file_name().to_string_lossy()) { collect_almd_files(&p, out); }
+            }
             else if kind.is_file() && p.extension().map_or(false, |e| e == "almd") { out.push(p); }
         }
     }
@@ -362,8 +365,8 @@ fn project_deps_for(file_path: Option<&str>, cache: &mut DepCache, allow_fetch: 
 fn manifest_fingerprint(toml: &std::path::Path) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    std::fs::read(toml).ok().hash(&mut h);
-    std::fs::read(toml.with_file_name("almide.lock")).ok().hash(&mut h);
+    crate::project::read_project_file_bytes(toml).ok().hash(&mut h);
+    crate::project::read_project_file_bytes(&toml.with_file_name("almide.lock")).ok().hash(&mut h);
     h.finish()
 }
 

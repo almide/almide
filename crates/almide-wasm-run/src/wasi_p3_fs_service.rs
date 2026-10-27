@@ -10,7 +10,7 @@
 // imports served by a small adapter over wasi:filesystem@0.3.0
 // (`p3_fs_adapter.wat`): path resolution against the full preopen table and
 // the cwd, list_dir / walk / glob, the metadata family, copy / rename, the
-// temp-dir family, the line readers and env.os / env.temp_dir / env.cwd all
+// temp-dir family, the line readers and env.os / fs.temp_dir / env.cwd all
 // answer what the p1 artifact answers, because they are the same code.
 
 use crate::wasi::fs_service::{service_wat_ext, FsSplice, FsTypes, SpliceTargets, FS_PAGE};

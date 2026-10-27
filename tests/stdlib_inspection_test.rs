@@ -146,7 +146,9 @@ fn every_public_stdlib_function_has_one_ledger_row_and_stamps_carry_evidence() {
     // The emitter reading is derived, so a refactor that hides the dispatch
     // from it would silently shrink every fingerprint back to the stdlib body.
     let lowered = want.keys().filter(|n| fp.wasm.contains_key(*n)).count();
-    assert!(lowered > 300, "the wasm emitter dispatch serves only {lowered} public functions — has its shape changed?");
+    // Measured 256 after dialect epoch 15 removed the off-target spellings
+    // (their emitter arms went with them); it was above 300 before.
+    assert!(lowered > 250, "the wasm emitter dispatch serves only {lowered} public functions — has its shape changed?");
     for r in &rows {
         let name = r.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
         *seen.entry(name.clone()).or_default() += 1;

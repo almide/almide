@@ -103,7 +103,7 @@ test "chunk, window, split_at" {
   assert_eq(string.split_at("ab", 9), ("ab", ""))
   testing.assert_aborts("string.chunk", () => string.chunk("ab", 0))
   testing.assert_aborts("string.window", () => string.window("ab", 0))
-  testing.assert_aborts("string.split_at", () => string.split_at("ab", -1))
+  assert_eq(string.split_at("ab", -1), ("", "ab"))
 }
 
 test "dedup, intersperse, unique, unique_by" {

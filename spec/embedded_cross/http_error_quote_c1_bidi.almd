@@ -1,0 +1,21 @@
+// @contract: C-418
+// ALS-R5 (#4126): an http error quotes its operand by C-418's rule, the C1
+// and bidi controls included: a URL whose path holds U+0085 and U+202E reads
+// `\u{85}` and `\u{202e}` in the connect class's text (an isolate pair
+// `\u{2066}` / `\u{2069}`), and `"` keeps its escape. Before,
+// the http quoting escaped the ASCII controls only, so a bidi control in a URL
+// reordered the error line. tests/http_error_class_cross_test.rs runs this on
+// native, the embedded lane and the stock p3 component.
+import http
+
+fn show(tag: String, r: Result[String, String]) -> Unit = {
+  match r {
+    ok(_) => println("${tag}: unexpected ok"),
+    err(e) => println("${tag}: ${e}"),
+  }
+}
+
+effect fn main() -> Unit = {
+  show("connect", http.get("http://127.0.0.1:9/a\u{85}b\u{202e}c\"d"))
+  show("connect-isolate", http.get("http://127.0.0.1:9/\u{2066}x\u{2069}"))
+}

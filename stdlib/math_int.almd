@@ -1,16 +1,7 @@
-// math_int — SELF-HOSTED scalar Int math (abs/max/min/sign/pow) for v1, plain scalar
-// if/arithmetic — NO heap, NO prim floor. Matches v0's i64 ops.
-// The runtime linker auto-includes the ones a program calls (all share this file).
-fn math_abs(n: Int) -> Int = if n < 0 then 0 - n else n
-
-fn math_max(a: Int, b: Int) -> Int = if a > b then a else b
-
-fn math_min(a: Int, b: Int) -> Int = if a < b then a else b
-
 fn math_sign(n: Int) -> Int = if n > 0 then 1
 else if n < 0 then 0 - 1 else 0
 
-// math.pow via exponentiation-by-squaring expressed with `% 2` (is-odd) and `/ 2` (halve)
+// math.__pow via exponentiation-by-squaring expressed with `% 2` (is-odd) and `/ 2` (halve)
 // — the SAME algorithm + wrapped i64 result as v0 (`e & 1` / `e >>= 1`), in O(log exp).
 // exp >= 0 byte-matches v0; v0 ABORTS on a negative exponent (an error path), which this
 // returns 1 for instead (no infinite loop) — the value path is exact.
@@ -31,7 +22,14 @@ fn math_pow(base: Int, exp: Int) -> Int = {
 // matching v0's empty inclusive range). Wraps like v0's i64 product for large n.
 fn __fact(n: Int, acc: Int) -> Int = if n <= 1 then acc else __fact(n - 1, acc * n)
 
-fn math_factorial(n: Int) -> Int = __fact(n, 1)
+// #4212: the product is taken mod 2^64, so once n! holds 64 factors of two the
+// wrapped product is 0 and stays 0 (every later factor keeps the 2^64 divisor).
+// Legendre: v2(n!) = n - popcount(n), nondecreasing in n; v2(65!) = 65 - 2 = 63
+// and v2(66!) = 66 - 2 = 64. So 66 is the least n whose product is 0 mod 2^64,
+// and every n >= 66 answers 0 without looping n times (an input-chosen n of
+// 10^18 used to run for centuries). Same cut, same derivation, as the native
+// `almide_rt_math_factorial` (runtime/rs/src/math.rs).
+fn math_factorial(n: Int) -> Int = if n >= 66 then 0 else __fact(n, 1)
 
 // math.choose = C(n,k): 0 when k<0 or k>n, else C(n, min(k, n-k)) EXACTLY, reduced mod
 // 2^64 like every Int product (the true binomial whenever it fits in an Int). The same
@@ -73,10 +71,118 @@ fn __choose_loop(n: Int, k: Int, i: Int, num: Int, den: Int, twos: Int) -> Int =
   }
 }
 
+// #4212: `__choose_loop` runs min(k, n-k) times, linear in the VALUE of k, so an
+// input-chosen n of 10^18 ran for centuries. Past 64 steps the answer comes from the
+// odd-factorial form instead, polylogarithmic in n, op for op the native
+// `almide_rt_math_choose_odd_factorials` (runtime/rs/src/math.rs, which says why):
+// C(n, k) = 2^t * O(n) / (O(k) O(n-k)), O(m) the odd part of m!, t the carries of
+// k + (n-k) in base 2 (Kummer). O(m) = prod_{i>=0} F(m >> i), F(x) the product of the
+// odd numbers <= x, taken over the binary blocks of [0, x + 1): the odd numbers of
+// [b*2^s, (b+1)*2^s) multiply to G_s(b), G_s(y) = prod_{odd j < 2^s} (2^s y + j).
+//
+// `__choose_block(s, y)` is G_s(y) mod 2^64 in Horner form. Its coefficients are fixed
+// numbers: the coefficient of y^i carries 2^(s*i), so only the terms with s*i < 64
+// survive (150 in all), from G_1(y) = 2y + 1 and G_(s+1)(y) = G_s(2y) * G_s(2y + 1).
+// The native runtime derives the same table at run time, so the two legs agreeing on
+// spec/stdlib/math_choose_large_test.almd checks this table against that derivation.
+fn __choose_block(s: Int, y: Int) -> Int = match s {
+  1 => 1 + y * 2,
+  2 => 3 + y * (16 + y * 16),
+  3 => 105 + y * (1408 + y * (5504 + y * (8192 + y * 4096))),
+  4 => 2027025 + y * (65571840 + y * (748588032 + y * (4251713536 + y * (13635026944 + y * (25836912640 + y * (28655484928 + y * (17179869184 + y * 4294967296))))))),
+  5 => 191898783962510625 + y * (-3904619229925974016 + y * (7048248523113521152 + y * (6506726038364487680 + y * (6914499455618121728 + y * (-1600528917293170688 + y * (132186010900496384 + y * (7387759364515299328 + y * (5427301544888369152 + y * (6998593820933750784 + y * (-8745990476353503232 + y * ((-9223372036854775807 - 1) + y * (-4611686018427387904)))))))))))),
+  6 => 2357173134616391233 + y * (7657803463945027584 + y * (3494150956406472704 + y * (6231373528281645056 + y * (8841743760237789184 + y * (-5219545524285210624 + y * (-3444460967054802944 + y * (6444651066767179776 + y * 6222848785119182848))))))),
+  7 => -5636733533894480767 + y * (837863529390800896 + y * (6437700056657690624 + y * (-8698215261607559168 + y * (669943047668105216 + y * (-6659275736509054976 + y * (-4909908756252327936 + y * (-2305843009213693952 + y * (-576460752303423488)))))))),
+  8 => 976013773578705153 + y * (-851135463862304768 + y * (7865380266846453760 + y * (1454259983506997248 + y * (-2326310555603697664 + y * (7403917787397095424 + y * 2467972595799031808))))),
+  9 => 4414235575625265665 + y * (8396726101933555712 + y * (-2678157545398337536 + y * (-1397180211740540928 + y * (-4157354619690811392 + y * (6917529027641081856 + y * 2305843009213693952))))),
+  10 => 228171713749607425 + y * (3658443071839797248 + y * (1569758007158374400 + y * (-4177370129362845696 + y * (-2088685064681422848)))),
+  11 => 8147960259420145665 + y * (-5500959231139905536 + y * (7212702516927004672 + y * (6980579422424268800 + y * (-5733082325642641408)))),
+  12 => -1781561055693402111 + y * (-3702884905827434496 + y * (-2694078589296443392 + y * (2017612633061982208 + y * 1008806316530991104))),
+  13 => -4254975262804729855 + y * (5358067909027430400 + y * (746381890600042496 + y * ((-9223372036854775807 - 1) + y * (-4611686018427387904)))),
+  14 => -4655786762270523391 + y * (-6179656669845258240 + y * (-6179656669845258240)),
+  15 => 4532345594002046977 + y * (-4040969114867466240 + y * (-4040969114867466240)),
+  16 => -9210330763468668927 + y * (-6963479817589096448 + y * (-6963479817589096448)),
+  17 => 2379654741567340545 + y * (-367606319584116736 + y * (-367606319584116736)),
+  18 => -163048201465364479 + y * (-2940850556672933888 + y * (-2940850556672933888)),
+  19 => -5581490335608471551 + y * (-5080060379673919488 + y * (-5080060379673919488)),
+  20 => -8945982324696154111 + y * (-3746994889972252672 + y * (-3746994889972252672)),
+  21 => -7582819382550593535 + y * (6917529027641081856 + y * 6917529027641081856),
+  22 => 706669200915038209,
+  23 => -8884406028943228927,
+  24 => -3619557559851024383,
+  25 => -5982329348688969727,
+  26 => -6937515613325623295,
+  27 => 6233541109558018049,
+  28 => 667651195405336577,
+  29 => -8968933556613021695,
+  30 => -3814578681792167935,
+  31 => -6476235858977488895,
+  32 => -8340785699527589887,
+  33 => 1765172674654371841,
+  34 => 3530345349308743681,
+  35 => 7060690698617487361,
+  36 => -4325362676474576895,
+  37 => -8650725352949153791,
+  38 => 1145293367811244033,
+  39 => 2290586735622488065,
+  40 => 4581173471244976129,
+  41 => 9162346942489952257,
+  42 => -122050188729647103,
+  43 => -244100377459294207,
+  44 => -488200754918588415,
+  45 => -976401509837176831,
+  46 => -1952803019674353663,
+  47 => -3905606039348707327,
+  48 => -7811212078697414655,
+  49 => 2824319916314722305,
+  50 => 5648639832629444609,
+  51 => -7149464408450662399,
+  52 => 4147815256808226817,
+  53 => 8295630513616453633,
+  54 => -1855483046476644351,
+  55 => -3710966092953288703,
+  56 => -7421932185906577407,
+  57 => 3602879701896396801,
+  58 => 7205759403792793601,
+  59 => -4035225266123964415,
+  60 => -8070450532247928831,
+  61 => 2305843009213693953,
+  62 => 4611686018427387905,
+  63 => -9223372036854775807,
+  _ => 1,
+}
+
+// F(nn - 1): the odd numbers below nn, one block per set bit s >= 1 of nn from the top;
+// the 1-wide block (bit 0) holds an even number. nn = 2^63 wraps to the minimum Int,
+// whose bit 63 an arithmetic shift still reads.
+fn __choose_odd_below(nn: Int, s: Int, base: Int, acc: Int) -> Int =
+  if s < 1 then acc
+  else if prim.band(prim.bshr(nn, s), 1) == 1 then __choose_odd_below(
+    nn,
+    s - 1,
+    base + prim.bshl(1, s),
+    acc * __choose_block(s, prim.bshr(base, s)),
+  )
+  else __choose_odd_below(nn, s - 1, base, acc)
+
+// O(m) * acc: the odd part of m! (m >= 0), mod 2^64.
+fn __choose_odd_fact(m: Int, acc: Int) -> Int =
+  if m == 0 then acc
+  else __choose_odd_fact(m / 2, acc * __choose_odd_below(m + 1, 63, 0, 1))
+
+fn __choose_ones(x: Int, c: Int) -> Int = if x == 0 then c else __choose_ones(x / 2, c + x % 2)
+
+fn __choose_odd_factorials(n: Int, k: Int) -> Int = {
+  let t = __choose_ones(k, 0) + __choose_ones(n - k, 0) - __choose_ones(n, 0)
+  let odd = __choose_odd_fact(n, 1) * __choose_inv(__choose_odd_fact(k, 1)) * __choose_inv(__choose_odd_fact(n - k, 1))
+  if t >= 64 then 0 else prim.bshl(odd, t)
+}
+
 fn math_choose(n: Int, k: Int) -> Int = if k < 0 then 0
 else if k > n then 0
 else {
   let nk = n - k
   let k2 = if k < nk then k else nk
-  __choose_loop(n, k2, 0, 1, 1, 0)
+  if k2 > 64 then __choose_odd_factorials(n, k2)
+  else __choose_loop(n, k2, 0, 1, 1, 0)
 }

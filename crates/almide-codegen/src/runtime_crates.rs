@@ -23,7 +23,7 @@ const TLS_CRATES: &[(&str, &str)] = &[
 /// generated code (the runtime is inlined as source).
 pub const RUNTIME_MODULE_CRATES: &[(&str, &[(&str, &str)])] = &[
     ("http", TLS_CRATES),
-    ("zlib", &[("flate2", "1")]),
+    ("zlib", &[("flate2", "1"), ("miniz_oxide", "0.8")]),
 ];
 
 /// The crates.io dependencies (name, Cargo spec) generated Rust `rs_code`

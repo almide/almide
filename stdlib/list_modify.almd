@@ -305,25 +305,12 @@ fn list_remove_at(xs: List[Int], i: Int) -> List[Int] = {
   buf
 }
 
-// list.tail = list.drop(xs, 1): a fresh List[Int] of elements [1, n) (empty when n<=1).
-// Self-contained copy (reusing __copy_slots), so it needs no cross-stdlib call.
-fn list_tail(xs: List[Int]) -> List[Int] = {
-  let h = prim.handle(xs)
-  let n = prim.load32(h + 4)
-  let newlen = if n > 0 then n - 1 else 0
-  let buf = prim.alloc_list(newlen)
-  let bh = prim.handle(buf)
-  let src1 = h + 12 + 8
-  let _c = __copy_slots(src1, bh + 12, newlen, 0)
-  buf
-}
-
-// list.take_end(xs, n): the LAST n elements (whole list when n<0 or n>=len, per v0's
-// n as usize). start = clamped; copy [start, len) into a fresh List[Int].
+// list.take_end(xs, n): the LAST n elements (empty when n<0 — a negative count is 0,
+// #4147 — whole list when n>=len). start = clamped; copy [start, len) into a fresh List[Int].
 fn list_take_end(xs: List[Int], n: Int) -> List[Int] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let start = if n < 0 then 0
+  let start = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let newlen = len - start
   let buf = prim.alloc_list(newlen)
@@ -332,12 +319,13 @@ fn list_take_end(xs: List[Int], n: Int) -> List[Int] = {
   buf
 }
 
-// list.drop_end(xs, n): all but the LAST n elements (empty when n<0 or n>=len). end =
+// list.drop_end(xs, n): all but the LAST n elements (whole list when n<0, #4147; empty
+// when n>=len). end =
 // clamped; copy [0, end) into a fresh List[Int].
 fn list_drop_end(xs: List[Int], n: Int) -> List[Int] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let endi = if n < 0 then 0
+  let endi = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let buf = prim.alloc_list(endi)
   let _c = __copy_slots(h + 12, prim.handle(buf) + 12, endi, 0)
@@ -352,7 +340,7 @@ fn list_drop_end(xs: List[Int], n: Int) -> List[Int] = {
 fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let endi = if n < 0 then 0
+  let endi = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let buf = prim.alloc_list_str(endi)
   let _c = __copy_slots_rc(h + 12, prim.handle(buf) + 12, endi, 0)
@@ -365,22 +353,11 @@ fn list_drop_end_str(xs: List[String], n: Int) -> List[String] = {
 fn list_take_end_str(xs: List[String], n: Int) -> List[String] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let start = if n < 0 then 0
+  let start = if n < 0 then len
   else (if n >= len then 0 else len - n)
   let cnt = len - start
   let buf = prim.alloc_list_str(cnt)
   let _c = __copy_slots_rc(h + 12 + start * 8, prim.handle(buf) + 12, cnt, 0)
-  buf
-}
-
-// list.tail over a List[String] — elements [1, n), each kept element CO-OWNED
-// (#808 sibling: the raw list_tail copy had the identical un-owned alias).
-fn list_tail_str(xs: List[String]) -> List[String] = {
-  let h = prim.handle(xs)
-  let n = prim.load32(h + 4)
-  let newlen = if n > 0 then n - 1 else 0
-  let buf = prim.alloc_list_str(newlen)
-  let _c = __copy_slots_rc(h + 12 + 8, prim.handle(buf) + 12, newlen, 0)
   buf
 }
 

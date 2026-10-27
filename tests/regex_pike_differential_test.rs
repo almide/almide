@@ -144,6 +144,9 @@ mod rt {
     /// runs past the state limit if the limit is raised.
     pub fn counted_is_match(pat: &str, s: &str) -> bool {
         let mut c = rx_compiled(pat);
+        // These patterns are refused, so rx_compiled stood the empty pattern
+        // in for them (#4195); compile the real one here.
+        c.rx = rx_compile(pat);
         c.prog = rx_program_as(&c.rx, true);
         let chars: Vec<char> = s.chars().collect();
         let mut m = AlmideRxMatcher::new(&c, &chars, false);

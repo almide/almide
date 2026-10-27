@@ -1,0 +1,8 @@
+// #4013 drill: the range fill loop advances its cursor two slots per step
+// (a stride bug), so every other slot of the block is never written. The
+// init witness records the step beside the instruction, and a step that is
+// not the slot width is rejected.
+effect fn main() -> Unit = {
+  let r = 0..<3
+  println("${list.len(r)}")
+}

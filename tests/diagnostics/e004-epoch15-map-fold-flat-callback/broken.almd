@@ -1,0 +1,7 @@
+// R-map-09: map.fold hands its callback the accumulator and the entry as ONE
+// (K, V) tuple. The flat `(acc, k, v)` lambda left at dialect epoch 15, so it
+// is E004 whose hint is the grouped rewrite.
+fn main() -> Unit = {
+  let m = ["a": 1, "b": 2]
+  println(int.to_string(map.fold(m, 0, (acc, k, v) => acc + v)))
+}

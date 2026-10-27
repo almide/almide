@@ -11,10 +11,6 @@
 // OFF-SIGNATURE call site is rewritten to the unlinkable `_x` name by the lowering
 // (`desugar_offtype_testing_asserts`), so a different instantiation walls honestly
 // instead of misreading a block.
-fn testing_assert_gt(a: Int, b: Int) -> Unit = if a > b then () else prim.die(prim.handle("assert_gt failed\n"))
-
-fn testing_assert_lt(a: Int, b: Int) -> Unit = if a < b then () else prim.die(prim.handle("assert_lt failed\n"))
-
 fn testing_assert_approx(a: Float, b: Float, epsilon: Float) -> Unit =
   if float.abs(a - b) < epsilon then () else prim.die(prim.handle("assert_approx failed\n"))
 

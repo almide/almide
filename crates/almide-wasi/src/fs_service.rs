@@ -1,5 +1,5 @@
 //! The p1 fs service (#2742): the `fs.*` host ops (and `env.os` /
-//! `env.temp_dir` / `env.cwd`, which answer from the same environment) over
+//! `fs.temp_dir` / `env.cwd`, which answer from the same environment) over
 //! WASI preview 1, for a stock-runtime artifact.
 //!
 //! Before this, the p1 shim served none of them, so the build path's op
@@ -44,8 +44,6 @@ pub const FS_SERVICE_OPS: &[(i32, &str, i32)] = &[
     (14, "op_read_bytes", 14),
     (15, "op_write", 15),
     (16, "op_append", 16),
-    (17, "op_file_size", 17),
-    (18, "op_modified_at", 18),
     (19, "op_copy", 19),
     (20, "op_rename", 20),
     (21, "op_create_temp_file", 21),
@@ -66,12 +64,11 @@ pub const FS_SERVICE_OPS: &[(i32, &str, i32)] = &[
     // 61: fold_lines_range (and fold_lines_chunked's worker read) — the raw
     // bytes reader under the range's name; the guest walks the bytes and
     // validates UTF-8 only in what it reads (#2744, #3758).
-    // 62: fold_lines_chunked's size probe — op 17's body under its name.
+    // 62: fold_lines_chunked's size probe — the file-size body under its name.
     (61, "op_read_bytes", 61),
     (62, "op_file_size", 62),
-    // 63/64: the Bytes-typed readers, ops 14/25's bodies under the writer's
-    // call name (#2890 — sharing 14/25 said `fs.read_bytes` where native
-    // says `fs.read_bytes_raw`).
+    // 63/64: the Bytes-typed readers `fs.read_bytes` / `_if_exists`, ops
+    // 14/25's bodies under their own op (#2890).
     (63, "op_read_bytes", 63),
     (64, "op_read_bytes_if_exists", 64),
     // 120..=125: the rooted family by descriptor (#4084) — a walk from the
@@ -94,7 +91,7 @@ pub fn serves(op: i32) -> bool {
 /// host spells its messages from this table too.
 const FS_OP_NAMES: &[(i32, &str)] = &[
     (1, "fs.read_text"),
-    (2, "fs.write"),
+    (2, "fs.write_text"),
     (3, "fs.write_bytes"),
     (7, "fs.mkdir_p"),
     (8, "fs.remove"),
@@ -104,10 +101,8 @@ const FS_OP_NAMES: &[(i32, &str)] = &[
     (12, "fs.read_lines"),
     (13, "fs.read_text_if_exists"),
     (14, "fs.read_bytes"),
-    (15, "fs.write_bytes_raw"),
-    (16, "fs.append"),
-    (17, "fs.file_size"),
-    (18, "fs.modified_at"),
+    (15, "fs.write_bytes"),
+    (16, "fs.append_text"),
     (19, "fs.copy"),
     (20, "fs.rename"),
     (21, "fs.create_temp_file"),
@@ -120,15 +115,15 @@ const FS_OP_NAMES: &[(i32, &str)] = &[
     (52, "fs.for_each_line"),
     (61, "fs.fold_lines_range"),
     (62, "fs.fold_lines_chunked"),
-    (63, "fs.read_bytes_raw"),
-    (64, "fs.read_bytes_raw_if_exists"),
+    (63, "fs.read_bytes"),
+    (64, "fs.read_bytes_if_exists"),
     // 120..=125: the rooted family's descriptor ops (#4084), each under the
     // PLAIN call whose answer it gives on `<root>/<segments>` (123, exists,
     // answers no io error, so it needs no name).
     (120, "fs.read_text"),
-    (121, "fs.read_bytes_raw"),
+    (121, "fs.read_bytes"),
     (122, "fs.list_dir"),
-    (124, "fs.write"),
+    (124, "fs.write_text"),
     (125, "fs.remove"),
 ];
 
@@ -183,6 +178,17 @@ pub fn service_wat_ext(fsp: u32, ops: &[i32], extra_arms: &str) -> String {
         let (at, len) = place(text.as_bytes());
         tail.push_str(&format!(
             "    (if (i32.eq (local.get $e) (i32.const {wasi})) (then (return (i32.const {at}) (i32.const {len}))))\n"
+        ));
+    }
+    // The bounded reader's two refusals (#4201) under pseudo-errnos past
+    // every WASI code: `$read_fd` answers them, the texts are almide-base's.
+    for (code, text) in [
+        (1001, almide_base::fs_errno::FS_READ_NOT_REGULAR_TEXT),
+        (1002, almide_base::fs_errno::FS_READ_TOO_LARGE_TEXT),
+    ] {
+        let (at, len) = place(text.as_bytes());
+        tail.push_str(&format!(
+            "    (if (i32.eq (local.get $e) (i32.const {code})) (then (return (i32.const {at}) (i32.const {len}))))\n"
         ));
     }
     tail.push_str("    (i32.const 0) (i32.const 0))\n");

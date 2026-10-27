@@ -1,7 +1,7 @@
 //! The http router's per-request work was O(L²) in the request path length L
 //! (stdlib inspection, 2026-10-16): native took 0.29 s user for a 404 at
 //! 40k characters and 4.7 s at 160k, so one long request tied up a server.
-//! `__bad_escape` recursed over `string.chars(path)` with `list.drop(cs, 1)`
+//! `__bad_escape` recursed over `string.to_list(path)` with `list.drop(cs, 1)`
 //! — a copy of the rest of the path per character — and `__bind_into`
 //! dropped one segment off the request's parts per step the same way.
 //!
@@ -38,7 +38,7 @@ effect fn serve_file(req: HttpRequest) -> HttpResponse = {
 effect fn deep(req: HttpRequest) -> HttpResponse = http.response(200, "deep")
 
 effect fn sub(req: HttpRequest) -> HttpResponse = {
-  let p = http.req_path(req)
+  let p = http.path(req)
   http.response(200, "sub ${string.len(p)} ${string.take(p, 12)} ${string.take_end(p, 12)}")
 }
 
@@ -91,13 +91,13 @@ effect fn main() -> Unit = {
     "/m" + string.repeat("/t", 3000) + "?z=1"
   ]
   for p in paths {
-    let res = app(http.new_request("GET", p, "", map.new()))!
-    println("${summary(p)} -> ${http.status_code(res)} ${http.body(res)} ${http.get_header(res, "Allow") ?? ""}")
+    let res = app(http.new_request("GET", p, "", []))!
+    println("${summary(p)} -> ${http.status(res)} ${http.body(res)} ${http.header(res, "Allow") ?? ""}")
   }
-  let head = app(http.new_request("HEAD", "/files" + string.repeat("/h", 2000), "", map.new()))!
-  println("HEAD ${http.status_code(head)} [${http.body(head)}]")
-  let del = app(http.new_request("DELETE", "/files" + string.repeat("/h", 2000), "", map.new()))!
-  println("DELETE ${http.status_code(del)} ${http.get_header(del, "Allow") ?? ""}")
+  let head = app(http.new_request("HEAD", "/files" + string.repeat("/h", 2000), "", []))!
+  println("HEAD ${http.status(head)} [${http.body(head)}]")
+  let del = app(http.new_request("DELETE", "/files" + string.repeat("/h", 2000), "", []))!
+  println("DELETE ${http.status(del)} ${http.header(del, "Allow") ?? ""}")
 }
 "#;
 
@@ -167,8 +167,8 @@ effect fn main() -> Unit = {
     "rest" => "/files" + string.repeat("/s%20", n),
     _ => "/",
   }
-  let res = app(http.new_request("GET", path, "", map.new()))!
-  println("${http.status_code(res)} ${http.body(res)}")
+  let res = app(http.new_request("GET", path, "", []))!
+  println("${http.status(res)} ${http.body(res)}")
 }
 "#;
 

@@ -1,5 +1,5 @@
 //! Synthesized Value/string helper FUNCTION BODIES (the `$value_eq`,
-//! `$value_merge`, `$vjson*`, `$vfield`, `$vkeys`, `$split` forms) —
+//! `$vjson*`, `$vfield`, `$vkeys`, `$split` forms) —
 //! split from value.rs for the file budget. The Value layout contract
 //! lives in value.rs's module doc.
 
@@ -101,154 +101,6 @@ pub(crate) fn emit_value_eq_helper(self_idx: u32, key_off: u32, val_off: u32) ->
     f
 }
 
-/// `res` := the byte offset of the FIRST pair in `p[0..hi)` whose key
-/// equals `ka`, or -1. `idx` is scratch.
-fn scan_first(ins: &mut wasm_encoder::InstructionSink, key_off: u32, s: [u32; 5]) {
-    let [p, hi, ka, idx, res] = s;
-    ins.i32_const(-1).local_set(res);
-    ins.i32_const(0).local_set(idx);
-    ins.block(BlockType::Empty).loop_(BlockType::Empty);
-    ins.local_get(idx).local_get(hi).i32_ge_u().br_if(1);
-    ins.local_get(p).local_get(idx).i32_add().i32_load(slot_memarg(0));
-    ins.i32_load(slot_memarg(key_off));
-    ins.local_get(ka).call(F_STR_EQ).if_(BlockType::Empty);
-    ins.local_get(idx).local_set(res);
-    ins.br(2);
-    ins.end();
-    ins.local_get(idx).i32_const(4).i32_add().local_set(idx);
-    ins.br(0).end().end();
-}
-
-/// `res` := the byte offset of the LAST pair in `p[0..hi)` whose key
-/// equals `ka`, or -1. `idx` is scratch.
-fn scan_last(ins: &mut wasm_encoder::InstructionSink, key_off: u32, s: [u32; 5]) {
-    let [p, hi, ka, idx, res] = s;
-    ins.i32_const(-1).local_set(res);
-    ins.local_get(hi).local_set(idx);
-    ins.block(BlockType::Empty).loop_(BlockType::Empty);
-    ins.local_get(idx).i32_eqz().br_if(1);
-    ins.local_get(idx).i32_const(4).i32_sub().local_set(idx);
-    ins.local_get(p).local_get(idx).i32_add().i32_load(slot_memarg(0));
-    ins.i32_load(slot_memarg(key_off));
-    ins.local_get(ka).call(F_STR_EQ).if_(BlockType::Empty);
-    ins.local_get(idx).local_set(res);
-    ins.br(2);
-    ins.end();
-    ins.br(0).end().end();
-}
-
-/// `$value_merge(a, b) -> i32` — object merge (the oracle value_merge,
-/// a fold of B's pairs into A: replace the first pair with that key, else
-/// append): A's pairs in order (the first pair of a key B has takes B's
-/// LAST value for it, keeping A's key object), then B's pairs whose keys
-/// are new, once each at the first position, carrying the last value; a
-/// fresh pair tuple only where overridden (immutable sharing elsewhere).
-/// Duplicate keys (`value.object` keeps them) follow the fold (#2735).
-/// Any non-Object operand yields b itself.
-pub(crate) fn emit_value_merge_helper(key_off: u32, val_off: u32) -> Function {
-    let (a, b, pa, pb, la, lb, out, w, i, j, ka, fd) =
-        (0u32, 1u32, 2u32, 3u32, 4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32, 11u32);
-    let (fv, idx, res) = (12u32, 13u32, 14u32);
-    let m_tag = slot_memarg(almide_layout::SUM_TAG);
-    let m_pay = slot_memarg(almide_layout::SUM_FIELD);
-    let mut f = Function::new([(13, ValType::I32)]);
-    let mut ins = f.instructions();
-    ins.local_get(a).i32_load(m_tag).i32_const(VT_OBJECT).i32_ne();
-    ins.local_get(b).i32_load(m_tag).i32_const(VT_OBJECT).i32_ne();
-    ins.i32_or().if_(BlockType::Empty);
-    // #2010 item 5: both operands are BORROWED — every block the result
-    // shares with them takes its own credit (here b itself).
-    ins.local_get(b).call(F_INC);
-    ins.local_get(b).return_();
-    ins.end();
-    ins.local_get(a).i32_load(m_pay).local_set(pa);
-    ins.local_get(b).i32_load(m_pay).local_set(pb);
-    ins.local_get(pa).i32_load(len_memarg()).local_set(la);
-    ins.local_get(pb).i32_load(len_memarg()).local_set(lb);
-    // `fd` := 1 when B's pair at `j` carries a NEW key — in neither A nor
-    // earlier in B (the pair the fold appends).
-    let new_b_key = |ins: &mut wasm_encoder::InstructionSink| {
-        ins.local_get(pb).local_get(j).i32_add().i32_load(slot_memarg(0));
-        ins.i32_load(slot_memarg(key_off)).local_set(ka);
-        scan_first(ins, key_off, [pa, la, ka, idx, res]);
-        ins.local_get(res).i32_const(0).i32_lt_s().local_set(fd);
-        scan_first(ins, key_off, [pb, j, ka, idx, res]);
-        ins.local_get(res).i32_const(0).i32_lt_s().local_get(fd).i32_and().local_set(fd);
-    };
-    // count B's NEW keys (bytes) into w
-    ins.i32_const(0).local_set(w);
-    ins.i32_const(0).local_set(j);
-    ins.block(BlockType::Empty).loop_(BlockType::Empty);
-    ins.local_get(j).local_get(lb).i32_ge_u().br_if(1);
-    new_b_key(&mut ins);
-    ins.local_get(fd).if_(BlockType::Empty);
-    ins.local_get(w).i32_const(4).i32_add().local_set(w);
-    ins.end();
-    ins.local_get(j).i32_const(4).i32_add().local_set(j);
-    ins.br(0).end().end();
-    ins.local_get(la).local_get(w).i32_add().call(F_ALLOC).local_set(out);
-    // pass A: value overridden where B has the key (first A pair of it only).
-    // B is asked first (#3642): the scan of A's prefix for an earlier pair
-    // of the key runs only for a key B has, so the pass is O(|A|·|B|), not
-    // O(|A|²). `w` (free until the fresh pair below) keeps B's offset.
-    ins.i32_const(0).local_set(i);
-    ins.block(BlockType::Empty).loop_(BlockType::Empty);
-    ins.local_get(i).local_get(la).i32_ge_u().br_if(1);
-    ins.local_get(pa).local_get(i).i32_add().i32_load(slot_memarg(0)).local_set(fd);
-    ins.local_get(fd).i32_load(slot_memarg(key_off)).local_set(ka);
-    ins.i32_const(0).local_set(fv);
-    scan_last(&mut ins, key_off, [pb, lb, ka, idx, res]);
-    ins.local_get(res).i32_const(0).i32_ge_s().if_(BlockType::Empty);
-    ins.local_get(res).local_set(w);
-    scan_first(&mut ins, key_off, [pa, i, ka, idx, res]);
-    ins.local_get(res).i32_const(0).i32_lt_s().if_(BlockType::Empty);
-    ins.local_get(pb)
-        .local_get(w)
-        .i32_add()
-        .i32_load(slot_memarg(0))
-        .i32_load(slot_memarg(val_off))
-        .local_set(fv);
-    // a fresh (key, b-val) pair replaces fd
-    ins.i32_const(8).call(F_ALLOC).local_tee(w);
-    ins.local_get(ka).i32_store(slot_memarg(key_off));
-    ins.local_get(w).local_get(fv).i32_store(slot_memarg(val_off));
-    ins.local_get(ka).call(F_INC);
-    ins.local_get(fv).call(F_INC);
-    ins.local_get(w).local_set(fd);
-    ins.end();
-    ins.end();
-    // an A pair B did not override is shared: +1 (fv stays 0 on a miss)
-    ins.local_get(fv).i32_eqz().if_(BlockType::Empty);
-    ins.local_get(fd).call(F_INC);
-    ins.end();
-    ins.local_get(out).local_get(i).i32_add().local_get(fd).i32_store(slot_memarg(0));
-    ins.local_get(i).i32_const(4).i32_add().local_set(i);
-    ins.br(0).end().end();
-    // pass B: append the new keys (the shared pair tuple holding each
-    // key's LAST value), cursor after A
-    ins.local_get(la).local_set(i);
-    ins.i32_const(0).local_set(j);
-    ins.block(BlockType::Empty).loop_(BlockType::Empty);
-    ins.local_get(j).local_get(lb).i32_ge_u().br_if(1);
-    new_b_key(&mut ins);
-    ins.local_get(fd).if_(BlockType::Empty);
-    scan_last(&mut ins, key_off, [pb, lb, ka, idx, res]);
-    ins.local_get(pb).local_get(res).i32_add().i32_load(slot_memarg(0)).local_tee(fd).call(F_INC);
-    ins.local_get(out).local_get(i).i32_add().local_get(fd).i32_store(slot_memarg(0));
-    ins.local_get(i).i32_const(4).i32_add().local_set(i);
-    ins.end();
-    ins.local_get(j).i32_const(4).i32_add().local_set(j);
-    ins.br(0).end().end();
-    // box: a fresh Object Value over the merged pairs
-    ins.i32_const(16).call(F_ALLOC).local_tee(fd);
-    ins.i32_const(VT_OBJECT).i32_store(m_tag);
-    ins.local_get(fd).local_get(out).i32_store(m_pay);
-    ins.local_get(fd);
-    ins.end();
-    f
-}
-
-
 /// `$vfield(v, key) -> i32`: 0 not-object / 1 missing / value address.
 pub(crate) fn emit_value_field_helper() -> Function {
     let (v, key, p, end, pair) = (0u32, 1u32, 2u32, 3u32, 4u32);
@@ -323,13 +175,15 @@ pub(crate) fn emit_value_keys_helper() -> Function {
 }
 
 /// `$split(s, sep) -> List[String]` — two passes: count pieces, then
-/// alloc + fill (each piece a fresh owned string).
+/// alloc + fill (each piece a fresh owned string), both over KMP searches.
 pub(crate) fn emit_string_split_helper() -> Function {
     let (sb, sep) = (0u32, 1u32);
     let (slen, seplen, p, j, cnt, dst, slot, start, piece) =
         (2u32, 3u32, 4u32, 5u32, 6u32, 7u32, 8u32, 9u32, 10u32);
+    // the KMP registers (j doubles as its cursor)
+    let (tbl, k, c, res) = (11u32, 12u32, 13u32, 14u32);
     let pay = almide_layout::PAYLOAD as i32;
-    let mut f = Function::new([(9, ValType::I32)]);
+    let mut f = Function::new([(13, ValType::I32)]);
     let mut i = f.instructions();
     i.local_get(sb).i32_load(len_memarg()).local_set(slen);
     i.local_get(sep).i32_load(len_memarg()).local_set(seplen);
@@ -378,42 +232,19 @@ pub(crate) fn emit_string_split_helper() -> Function {
     i.local_get(slot).local_get(piece).i32_store(raw8());
     i.local_get(dst).return_();
     i.end();
-    // Pass shared matcher: at position p, do seplen bytes match?
-    // (emitted twice — once per pass — via this closure)
-    let emit_match = |i: &mut wasm_encoder::InstructionSink, hit_then_else: &mut dyn FnMut(&mut wasm_encoder::InstructionSink)| {
-        // j = 0; loop { j >= seplen -> HIT; bytes differ -> MISS }
-        i.local_set(j); // expects 0 pushed by caller
-        i.block(BlockType::Result(ValType::I32)); // yields 1 hit / 0 miss
-        i.loop_(BlockType::Empty);
-        i.local_get(j).local_get(seplen).i32_ge_u().if_(BlockType::Empty);
-        i.i32_const(1).br(2);
-        i.end();
-        i.local_get(sb).i32_const(pay).i32_add().local_get(p).i32_add().local_get(j).i32_add().i32_load8_u(raw8());
-        i.local_get(sep).i32_const(pay).i32_add().local_get(j).i32_add().i32_load8_u(raw8());
-        i.i32_ne().if_(BlockType::Empty);
-        i.i32_const(0).br(2);
-        i.end();
-        i.local_get(j).i32_const(1).i32_add().local_set(j);
-        i.br(0);
-        i.end();
-        i.i32_const(0); // unreachable filler for the block result
-        i.end();
-        hit_then_else(i);
-    };
+    // Both passes are forward walks of KMP searches, each resuming past the
+    // last separator with one table (crate::kmp, #4206).
+    let kmp = crate::kmp::Kmp { hay: sb, n: slen, pat: sep, m: seplen, tbl, k, c, q: j };
+    kmp.emit_table(&mut i);
     // ── pass 1: count = 1 + matches ──
     i.i32_const(1).local_set(cnt);
     i.i32_const(0).local_set(p);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(p).local_get(seplen).i32_add().local_get(slen).i32_gt_u().br_if(1);
-    i.i32_const(0);
-    emit_match(&mut i, &mut |i| {
-        i.if_(BlockType::Empty);
-        i.local_get(cnt).i32_const(1).i32_add().local_set(cnt);
-        i.local_get(p).local_get(seplen).i32_add().local_set(p);
-        i.else_();
-        i.local_get(p).i32_const(1).i32_add().local_set(p);
-        i.end();
-    });
+    i.local_get(p).local_set(j);
+    kmp.emit_find(&mut i, res);
+    i.local_get(res).i32_const(0).i32_lt_s().br_if(1);
+    i.local_get(cnt).i32_const(1).i32_add().local_set(cnt);
+    i.local_get(res).local_get(seplen).i32_add().local_set(p);
     i.br(0);
     i.end();
     i.end();
@@ -421,30 +252,24 @@ pub(crate) fn emit_string_split_helper() -> Function {
     i.local_get(cnt).i32_const(4).i32_mul().call(F_ALLOC).local_set(dst);
     i.local_get(dst).i32_const(pay).i32_add().local_set(slot);
     // ── pass 2: fill ──
-    i.i32_const(0).local_set(p);
     i.i32_const(0).local_set(start);
     i.block(BlockType::Empty).loop_(BlockType::Empty);
-    i.local_get(p).local_get(seplen).i32_add().local_get(slen).i32_gt_u().br_if(1);
-    i.i32_const(0);
-    emit_match(&mut i, &mut |i| {
-        i.if_(BlockType::Empty);
-        // piece = s[start, p)
-        i.local_get(p).local_get(start).i32_sub().call(F_ALLOC).local_set(piece);
-        i.local_get(piece).i32_const(pay).i32_add();
-        i.local_get(sb).i32_const(pay).i32_add().local_get(start).i32_add();
-        i.local_get(p).local_get(start).i32_sub();
-        i.memory_copy(0, 0);
-        i.local_get(slot).local_get(piece).i32_store(raw8());
-        i.local_get(slot).i32_const(4).i32_add().local_set(slot);
-        i.local_get(p).local_get(seplen).i32_add().local_set(p);
-        i.local_get(p).local_set(start);
-        i.else_();
-        i.local_get(p).i32_const(1).i32_add().local_set(p);
-        i.end();
-    });
+    i.local_get(start).local_set(j);
+    kmp.emit_find(&mut i, res);
+    i.local_get(res).i32_const(0).i32_lt_s().br_if(1);
+    // piece = s[start, res)
+    i.local_get(res).local_get(start).i32_sub().call(F_ALLOC).local_set(piece);
+    i.local_get(piece).i32_const(pay).i32_add();
+    i.local_get(sb).i32_const(pay).i32_add().local_get(start).i32_add();
+    i.local_get(res).local_get(start).i32_sub();
+    i.memory_copy(0, 0);
+    i.local_get(slot).local_get(piece).i32_store(raw8());
+    i.local_get(slot).i32_const(4).i32_add().local_set(slot);
+    i.local_get(res).local_get(seplen).i32_add().local_set(start);
     i.br(0);
     i.end();
     i.end();
+    kmp.emit_free(&mut i);
     // final piece [start, slen)
     i.local_get(slen).local_get(start).i32_sub().call(F_ALLOC).local_set(piece);
     i.local_get(piece).i32_const(pay).i32_add();

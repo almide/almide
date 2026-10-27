@@ -98,6 +98,9 @@ impl From<std::process::Output> for Run {
 fn run_generator(generator: &str, oracle: &Path, mode: Option<&str>) -> Run {
     let mut cmd = Command::new("bash");
     cmd.arg(format!("scripts/{generator}.sh")).current_dir(root()).env("ORACLE", oracle);
+    // The generators' own refusals are the subject, not the CI slice a PR
+    // shard inherits (which would refuse a whole-file regen first).
+    cmd.env_remove("ALMIDE_CI_SLICE");
     match mode {
         Some(m) => cmd.env("ALMIDE_MANIFEST_TREE_CHECK", m),
         None => cmd.env_remove("ALMIDE_MANIFEST_TREE_CHECK"),

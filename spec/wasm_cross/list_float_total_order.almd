@@ -14,7 +14,7 @@
 // mirrors with f64::total_cmp. All three votes agree.
 //
 // ASYMMETRY (deliberate): this list-extremum/ordering totalOrder is DISTINCT
-// from the SCALAR float.min/float.max/math.fmin/math.fmax, which keep their
+// from the SCALAR float.min/float.max, which keep their
 // C-049 NaN-IGNORING semantics.
 type R = { name: String, v: Float }
 

@@ -1,0 +1,3 @@
+expects_code = "E001"
+expects_error = "expected Value but got P"
+hint_substring = "its `encode` builds one"

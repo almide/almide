@@ -26,7 +26,7 @@ fn vhad(a: V3, b: V3) -> V3 = v3(a.x * b.x, a.y * b.y, a.z * b.z)
 fn vdot(a: V3, b: V3) -> Float = a.x * b.x + a.y * b.y + a.z * b.z
 
 fn vnorm(a: V3) -> V3 = {
-  let len = float.sqrt(vdot(a, a))
+  let len = math.sqrt(vdot(a, a))
   if len > 0.0 then vmul(a, 1.0 / len) else a
 }
 
@@ -51,7 +51,7 @@ fn hit_sphere(ro: V3, rd: V3, s: Sphere) -> Float = {
   let disc = b * b - c
   if disc < 0.0 then -1.0
   else {
-    let sq = float.sqrt(disc)
+    let sq = math.sqrt(disc)
     let t1 = 0.0 - b - sq
     let t2 = 0.0 - b + sq
     if t1 > 0.001 then t1
@@ -94,8 +94,8 @@ fn sky(rd: V3) -> V3 = {
 
 // Checkerboard floor at y = 0.
 fn floor_color(p: V3) -> V3 = {
-  let cx = float.to_int(float.floor(p.x * 0.9))
-  let cz = float.to_int(float.floor(p.z * 0.9))
+  let cx = int.from_saturating(float.floor(p.x * 0.9))
+  let cz = int.from_saturating(float.floor(p.z * 0.9))
   if (cx + cz) % 2 == 0 then v3(0.97, 0.97, 0.97)
   else v3(0.09, 0.1, 0.13)
 }
@@ -170,16 +170,16 @@ fn trace(ro0: V3, rd0: V3, depth: Int) -> V3 = {
   acc
 }
 
-fn channel(v: Float) -> Int = float.to_int(float.min(255.0, float.max(0.0, v * 255.0)))
+fn channel(v: Float) -> Int = int.from_saturating(float.min(255.0, float.max(0.0, v * 255.0)))
 
 // Gamma-ish lift so the terminal image doesn't crush the shadows.
-fn tone(c: V3) -> V3 = v3(float.sqrt(c.x), float.sqrt(c.y), float.sqrt(c.z))
+fn tone(c: V3) -> V3 = v3(math.sqrt(c.x), math.sqrt(c.y), math.sqrt(c.z))
 
 fn pixel(px: Int, py: Int, w: Int, h: Int) -> V3 = {
   let cam = v3(0.0, 1.4, -4.7)
-  let fx = (int.to_float(px) + 0.5) / int.to_float(w) * 2.0 - 1.0
-  let fy = 1.0 - (int.to_float(py) + 0.5) / int.to_float(h) * 2.0
-  let aspect = int.to_float(w) / int.to_float(h) * 0.5
+  let fx = (float.from(px) + 0.5) / float.from(w) * 2.0 - 1.0
+  let fy = 1.0 - (float.from(py) + 0.5) / float.from(h) * 2.0
+  let aspect = float.from(w) / float.from(h) * 0.5
   let rd = vnorm(v3(fx * aspect, fy * 0.62 - 0.12, 1.0))
   tone(trace(cam, rd, 3))
 }

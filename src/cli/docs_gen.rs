@@ -360,12 +360,12 @@ fn check_bytes_io_matrix() -> Vec<String> {
 fn check_builtin_conformance_matrix() -> Vec<String> {
     let mut seen: std::collections::HashMap<&str, std::collections::HashSet<String>> = std::collections::HashMap::new();
     let mut drifts = Vec::new();
-    for (module, proto, method) in almide::canonicalize::protocols::builtin_conformance_requirements() {
-        let names = seen.entry(module).or_insert_with(|| module_function_names(module));
-        if !names.contains(&method) {
+    for r in almide::canonicalize::protocols::builtin_conformance_requirements() {
+        let names = seen.entry(r.module).or_insert_with(|| module_function_names(r.module));
+        if !names.contains(&r.function) {
             drifts.push(format!(
                 "built-in conformance: `{}` conforms to {} but does not define `{}.{}`",
-                module, proto, module, method
+                r.module, r.protocol, r.module, r.function
             ));
         }
     }
@@ -435,72 +435,56 @@ fn check_numeric_protocol_matrix() -> Vec<String> {
     drifts
 }
 
-/// The integer-conversion MATRIX gate (#956). The conversion family is defined
-/// by a rule, not by enumeration-by-hand: over the carriers {Int, Int8..Int64,
-/// UInt8..UInt64}, every ordered pair has the plain (truncating) form, and a
-/// pair whose source range does not fit the destination — a LOSSY pair — must
-/// also have `_checked` (Option on overflow) and `_saturating` (clamp), while a
-/// lossless pair must NOT (an always-`Some` checked variant is noise). Every
-/// carrier module also carries `min_value`/`max_value`. This computes the
-/// expected surface from the range table and diffs it against the compiler's
-/// own module interfaces in both directions, so the family can never again be
-/// extended point-wise: a new carrier or a forgotten cell is a drift here.
+/// The numeric-conversion MATRIX gate (#956). The conversion family is defined
+/// by a rule, not by enumeration-by-hand: every numeric carrier is built FROM
+/// any `Numeric` source by its own module's generic constructors, never by a
+/// point-wise `to_<carrier>` / `from_<carrier>` cell on another module. Each
+/// integer carrier {Int, Int8..Int64, UInt8..UInt64} carries `from` (exact,
+/// aborts outside the range), `from_checked` (Option), `from_saturating`
+/// (clamp) and `from_wrapping`, plus `min_value`/`max_value`; each float
+/// carrier {Float, Float32, Float64} carries `from` and `from_checked`. The
+/// retired pair-wise spellings must stay absent, so the family can never again
+/// be extended point-wise: a new carrier or a forgotten cell is a drift here.
 fn check_numeric_conversion_matrix() -> Vec<String> {
-    // (module, min, max) — i128 so u64::MAX fits.
-    const CARRIERS: &[(&str, i128, i128)] = &[
-        ("int8", i8::MIN as i128, i8::MAX as i128),
-        ("int16", i16::MIN as i128, i16::MAX as i128),
-        ("int32", i32::MIN as i128, i32::MAX as i128),
-        ("int64", i64::MIN as i128, i64::MAX as i128),
-        ("uint8", 0, u8::MAX as i128),
-        ("uint16", 0, u16::MAX as i128),
-        ("uint32", 0, u32::MAX as i128),
-        ("uint64", 0, u64::MAX as i128),
-    ];
-    const INT: (&str, i128, i128) = ("int", i64::MIN as i128, i64::MAX as i128);
-    let lossy = |s: &(&str, i128, i128), d: &(&str, i128, i128)| !(d.1 <= s.1 && s.2 <= d.2);
+    const INTEGERS: &[&str] = &["int", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64"];
+    const FLOATS: &[&str] = &["float", "float32", "float64"];
 
     let mut expect_present: Vec<(&str, String)> = Vec::new();
     let mut expect_absent: Vec<(&str, String)> = Vec::new();
-    for s in CARRIERS {
-        for d in CARRIERS.iter().filter(|d| d.0 != s.0) {
-            expect_present.push((s.0, format!("to_{}", d.0)));
-            let target = if lossy(s, d) { &mut expect_present } else { &mut expect_absent };
-            target.push((s.0, format!("to_{}_checked", d.0)));
-            target.push((s.0, format!("to_{}_saturating", d.0)));
+    for m in INTEGERS {
+        for f in ["from", "from_checked", "from_saturating", "from_wrapping", "min_value", "max_value"] {
+            expect_present.push((*m, f.to_string()));
         }
-        // The Int column is spelled on the `int` module: plain `from_<s>`, and
-        // the trio tail exactly for the one lossy widening (UInt64 → Int).
-        expect_present.push(("int", format!("from_{}", s.0)));
-        let target = if lossy(s, &INT) { &mut expect_present } else { &mut expect_absent };
-        target.push(("int", format!("from_{}_checked", s.0)));
-        target.push(("int", format!("from_{}_saturating", s.0)));
-        // The Int row: plain `to_<d>` always; trio iff lossy (Int → Int64 is
-        // the identity range, so its checked/saturating must not exist).
-        expect_present.push(("int", format!("to_{}", s.0)));
-        let target = if lossy(&INT, s) { &mut expect_present } else { &mut expect_absent };
-        target.push(("int", format!("to_{}_checked", s.0)));
-        target.push(("int", format!("to_{}_saturating", s.0)));
     }
-    for m in CARRIERS.iter().map(|c| c.0).chain(["int"]) {
-        expect_present.push((m, "min_value".to_string()));
-        expect_present.push((m, "max_value".to_string()));
+    for m in FLOATS {
+        for f in ["from", "from_checked"] {
+            expect_present.push((*m, f.to_string()));
+        }
+    }
+    for m in INTEGERS.iter().chain(FLOATS) {
+        for d in INTEGERS.iter().chain(FLOATS).filter(|d| *d != m) {
+            for f in [format!("to_{d}"), format!("to_{d}_checked"), format!("to_{d}_saturating"), format!("from_{d}")] {
+                expect_absent.push((*m, f));
+            }
+        }
     }
 
     let mut drifts = Vec::new();
     let mut surface: std::collections::HashMap<&str, std::collections::HashSet<String>> =
         std::collections::HashMap::new();
-    for m in CARRIERS.iter().map(|c| c.0).chain(["int"]) {
-        surface.insert(m, module_function_names(m));
+    // Read exactly the modules the expectations name, so a new row's module
+    // is never a second list to keep in step.
+    for (m, _) in expect_present.iter().chain(&expect_absent) {
+        surface.entry(*m).or_insert_with(|| module_function_names(m));
     }
     for (m, f) in &expect_present {
         if !surface[m].contains(f) {
-            drifts.push(format!("numeric matrix: `{m}.{f}` is required (lossy pair or bounds) but missing"));
+            drifts.push(format!("numeric matrix: `{m}.{f}` is required but missing"));
         }
     }
     for (m, f) in &expect_absent {
         if surface[m].contains(f) {
-            drifts.push(format!("numeric matrix: `{m}.{f}` exists but the pair is lossless — a checked/saturating form there is noise; remove it or fix the range table"));
+            drifts.push(format!("numeric matrix: `{m}.{f}` is a point-wise conversion cell; build the value with `{}.from` / `from_checked` instead", f.trim_start_matches("to_").trim_start_matches("from_").trim_end_matches("_checked").trim_end_matches("_saturating")));
         }
     }
     drifts

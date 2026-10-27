@@ -36,7 +36,7 @@ fn parent_of(path: &str) -> Option<&str> {
 
 /// Overlay-key normalization: `.` segments and doubled slashes collapse, so
 /// `/tmp/./x` and `/tmp/x` name the SAME entry — the exact identity C-042's
-/// fixture pins (`fs.write(path)` then `fs.read_text` through the
+/// fixture pins (`fs.write_text(path)` then `fs.read_text` through the
 /// `./`-normalized spelling of the same path; the wasm leg's `$path_norm`
 /// makes the same collapse). Without this the read misses the overlay and
 /// falls back to the real fs — where a leftover from another leg's earlier
@@ -75,6 +75,13 @@ fn host_err(e: std::io::Error) -> String {
     almide_base::fs_errno::fs_io_error_text(&e)
 }
 
+/// The real-fs fallback read: native's bounded reader (#4201) — a regular
+/// file only, at most `FS_READ_MAX_BYTES` — so a fixture naming `/dev/zero`
+/// or a FIFO answers native's err instead of hanging the in-process leg.
+fn host_read(path: &str) -> std::io::Result<Vec<u8>> {
+    almide_base::fs_errno::fs_read_bounded_path(std::path::Path::new(path), almide_base::fs_errno::FS_READ_MAX_BYTES)
+}
+
 /// `prim.read_text_file` — overlay first, then a READ-ONLY real-fs fallback.
 pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
     let path = &normalize(path);
@@ -84,7 +91,7 @@ pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
         Some(VfsEntry::File(content)) => String::from_utf8(content.clone())
             .map_err(|_| almide_base::fs_errno::INVALID_UTF8_TEXT.to_string()),
         Some(VfsEntry::Dir) => Err(EISDIR.to_string()),
-        None => std::fs::read_to_string(path).map_err(host_err),
+        None => host_read(path).and_then(almide_base::fs_errno::fs_read_bounded_text).map_err(host_err),
     }
 }
 
@@ -93,7 +100,7 @@ pub(crate) fn read_text(vfs: &Vfs, path: &str) -> Result<String, String> {
 /// enforces natively.
 /// The content is BYTES: what `prim.write_text_file` really carries once a
 /// stdlib body has filled an `alloc_str` block byte by byte
-/// (`fs.write_bytes` / `fs.write_bytes_raw`) — a String arrives as its UTF-8.
+/// (`fs.write_bytes`) — a String arrives as its UTF-8.
 pub(crate) fn write_bytes(vfs: &mut Vfs, path: &str, content: &[u8]) -> Result<(), String> {
     let path = &normalize(path);
     if name_too_long(path) {
@@ -203,7 +210,7 @@ pub(crate) fn read_bytes(vfs: &Vfs, path: &str) -> Result<Vec<u8>, String> {
     match vfs.get(path.as_str()) {
         Some(VfsEntry::File(content)) => Ok(content.clone()),
         Some(VfsEntry::Dir) => Err(EISDIR.to_string()),
-        None => std::fs::read(path).map_err(host_err),
+        None => host_read(path).map_err(host_err),
     }
 }
 

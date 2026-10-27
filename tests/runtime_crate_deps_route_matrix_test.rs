@@ -99,7 +99,7 @@ fn the_table_matches_the_runtime_manifest() {
     for (module, crates) in almide_codegen::RUNTIME_MODULE_CRATES {
         for (name, spec) in crates.iter() {
             let line = if spec.starts_with('{') { format!("{name} = {spec}") } else { format!("{name} = \"{spec}\"") };
-            if *name == "flate2" {
+            if *name == "flate2" || *name == "miniz_oxide" {
                 continue; // the runtime crate builds zlib only inside generated projects
             }
             assert!(manifest.lines().any(|l| l.trim() == line), "{module}: `{line}` is not runtime/rs/Cargo.toml's spelling");
@@ -107,6 +107,7 @@ fn the_table_matches_the_runtime_manifest() {
     }
     let src = |f: &str| std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("runtime/rs/src").join(f)).unwrap();
     assert!(src("zlib.rs").contains("flate2"), "the zlib runtime module no longer names flate2 — update RUNTIME_MODULE_CRATES");
+    assert!(src("zlib.rs").contains("miniz_oxide"), "the zlib runtime module no longer names miniz_oxide — update RUNTIME_MODULE_CRATES");
     assert!(src("http.rs").contains("rustls"), "the http runtime module no longer names rustls — update RUNTIME_MODULE_CRATES");
 }
 
@@ -115,7 +116,7 @@ fn the_table_matches_the_runtime_manifest() {
 #[test]
 fn runtime_crate_deps_per_module() {
     let names = |code: &str| almide_codegen::runtime_crate_deps(code).into_iter().map(|(n, _)| n).collect::<Vec<_>>();
-    assert_eq!(names("fn f() { almide_rt_zlib_deflate(x) }"), ["flate2"]);
+    assert_eq!(names("fn f() { almide_rt_zlib_deflate(x) }"), ["flate2", "miniz_oxide"]);
     assert_eq!(names("fn f() { almide_rt_http_get(x) }"), ["rustls", "webpki-roots", "rustls-native-certs"]);
     assert_eq!(names("fn f() { almide_rt_sse_anthropic_messages(x); almide_rt_http_get(y) }"), ["rustls", "webpki-roots", "rustls-native-certs"]);
     assert!(names("fn f() { almide_rt_list_len(x) }").is_empty());

@@ -37,11 +37,18 @@
      interleaved with the events of what its elements evaluate (other
      blocks); the theorem says the interleaved trace is safe exactly when
      the windowed one is.
+   - `fill_window`: a LOOP FILL — an allocation whose slot count is a
+     run-time value, filled by a countdown loop — is accepted when the loop
+     counts down the same local the block was sized from and its cursor
+     advances by one slot; then at EVERY count the run holds, the loop's
+     stores are exactly the site's slots, and the window is MemorySafe and
+     initializes the block.
    - `check_init_cert_sound`: the byte parser inside the proof; an accepted
-     witness denotes sites that are all `site_ok`.
+     witness denotes sites that are all `site_ok` or `fill_ok`.
 
    HONEST SCOPE. The witness covers the allocation sites the emitter
-   records (crates/almide-wasm/src/witness_init.rs: list literals today), so
+   records (crates/almide-wasm/src/witness_init.rs: list literals and range
+   lists today), so
    `sited` holds of a run only when every allocation it makes comes from a
    recorded site; the corpus coverage is measured, not assumed
    (proofs/structural-wall.sh). TRUSTED, as for the other witnesses: that
@@ -433,11 +440,116 @@ Proof.
   specialize (Hi 20 ltac:(lia)). simpl in Hi. discriminate.
 Qed.
 
+(* ── Loop fills: a slot count known only at run time ──────────────────── *)
+
+(* A FILL site is an allocation whose slot count is a run-time value held in
+   local K, followed by the emitter's countdown fill loop (ranges.rs): a
+   cursor starts at the first slot, and while the counter L is positive the
+   loop stores one W-byte slot at the cursor, advances the cursor by S
+   bytes and decrements L. The certificate binds the fill to the allocation
+   twice: the loop counts down the SAME local the allocation sized the block
+   from (K = L), and the cursor advances by exactly one slot (S = W). With
+   both, the loop stores slot 0, 1, ..., c - 1 for whatever count c the run
+   holds — every slot of the block, none past it. *)
+Record Fill := mkFill { FH : nat; FW : nat; FK : nat; FR : Repr; FL : nat; FS : nat }.
+
+Definition fill_ok (f : Fill) : bool :=
+  (0 <? FH f)%nat && (0 <? FW f)%nat && Nat.eqb (FK f) (FL f) && Nat.eqb (FS f) (FW f).
+
+(* The concrete site a run with count c performs. *)
+Definition fill_site (f : Fill) (c : nat) : Site := mkSite (FH f) (FW f) c (FR f) (seq 0 c).
+
+(* The countdown loop itself, from cursor offset `cur` with `k` slots left:
+   a store at the cursor, then the rest one step on. *)
+Fixpoint countdown (b : Blk) (f : Fill) (cur : Z) (k : nat) : list Ev :=
+  match k with
+  | O => []
+  | S k' => EStore b cur (Z.of_nat (FW f)) (FR f) :: countdown b f (cur + Z.of_nat (FS f)) k'
+  end.
+
+(* The loop's run: the allocation of c slots, the allocator's header, then
+   the countdown from the first slot. *)
+Definition fill_events (b : Blk) (f : Fill) (c : nat) : list Ev :=
+  EAlloc b (site_size (fill_site f c)) (FR f) :: EStore b 0 (Z.of_nat (FH f)) (FR f) ::
+  countdown b f (Z.of_nat (FH f)) c.
+
+Lemma countdown_slots : forall b f k j, FS f = FW f ->
+  countdown b f (Z.of_nat (FH f) + Z.of_nat j * Z.of_nat (FW f)) k =
+  map (slot_store b (fill_site f (j + k))) (seq j k).
+Proof.
+  intros b f k. induction k as [| k IH]; intros j E; [reflexivity |].
+  cbn [countdown seq map].
+  assert (T : countdown b f (Z.of_nat (FH f) + Z.of_nat j * Z.of_nat (FW f) + Z.of_nat (FS f)) k =
+              map (slot_store b (fill_site f (j + S k))) (seq (S j) k)).
+  { rewrite E. replace (Z.of_nat (FH f) + Z.of_nat j * Z.of_nat (FW f) + Z.of_nat (FW f))
+      with (Z.of_nat (FH f) + Z.of_nat (S j) * Z.of_nat (FW f)) by lia.
+    rewrite (IH (S j) E). replace (S j + k)%nat with (j + S k)%nat by lia. reflexivity. }
+  rewrite T. reflexivity.
+Qed.
+
+(* The countdown loop's run IS the concrete site's window. *)
+Lemma fill_events_site : forall b f c, FS f = FW f ->
+  fill_events b f c = site_events b (fill_site f c).
+Proof.
+  intros b f c E. unfold fill_events, site_events. f_equal. f_equal.
+  pose proof (countdown_slots b f c 0 E) as H. simpl in H.
+  replace (Z.of_nat (FH f) + 0) with (Z.of_nat (FH f)) in H by lia. rewrite H. reflexivity.
+Qed.
+
+Lemma fill_site_ok : forall f c, fill_ok f = true -> site_ok (fill_site f c) = true.
+Proof.
+  intros f c H. unfold fill_ok in H. repeat rewrite andb_true_iff in H.
+  destruct H as [[[H1 H2] _] _].
+  unfold site_ok, fill_site. simpl. rewrite H1, H2. simpl.
+  apply andb_true_iff. split.
+  - apply forallb_forall. intros i Hi. apply existsb_exists. exists i. split; [exact Hi | apply Nat.eqb_refl].
+  - apply forallb_forall. intros i Hi. apply in_seq in Hi. apply Nat.ltb_lt. lia.
+Qed.
+
+(* `fill_window`: an accepted fill, run at ANY count c from a block that is
+   not live, is MemorySafe, leaves every other block as it was, and leaves
+   its block initialized over its whole extent. *)
+Theorem fill_window : forall f c b h, fill_ok f = true -> ~ live h b ->
+  holds safe_ev h (fill_events b f c) /\
+  (forall d, d <> b -> after h (fill_events b f c) d = h d) /\
+  exists x, after h (fill_events b f c) b = Some x /\ shaped (fill_site f c) x /\
+    forall j, 0 <= j < size x -> init x j = true.
+Proof.
+  intros f c b h Ok NL.
+  assert (E : FS f = FW f).
+  { unfold fill_ok in Ok. repeat rewrite andb_true_iff in Ok. destruct Ok as [_ E]. apply Nat.eqb_eq. exact E. }
+  rewrite (fill_events_site b f c E). exact (site_window (fill_site f c) b h (fill_site_ok f c Ok) NL).
+Qed.
+Print Assumptions fill_window.
+
+(* Controls: the count and the counter must be the same local, and the
+   cursor must advance by one slot. *)
+Example accepts_fill : fill_ok (mkFill 12 8 3 0 3 8)%nat = true.
+Proof. reflexivity. Qed.
+
+Example rejects_fill_other_counter : fill_ok (mkFill 12 8 3 0 4 8)%nat = false.
+Proof. reflexivity. Qed.
+
+Example rejects_fill_wrong_step : fill_ok (mkFill 12 8 3 0 3 16)%nat = false.
+Proof. reflexivity. Qed.
+
+(* A cursor that advances by two slots leaves slot 1 unwritten: the run of
+   that loop at count 2, then a load of slot 1, is not Initialized. *)
+Example wrong_step_read_uninitialized :
+  ~ Initialized (fill_events 0%nat (mkFill 12 8 3 0 3 16)%nat 2 ++ [ELoad 0%nat 20 8 0%nat]).
+Proof.
+  unfold Initialized. simpl. unfold set. simpl.
+  intros [_ [_ [_ [_ [[x [Hx Hi]] _]]]]]. injection Hx as <-.
+  specialize (Hi 20 ltac:(lia)). simpl in Hi. discriminate.
+Qed.
+
 (* ── The certificate as bytes ───────────────────────────────────────────── *)
 
 (* Format (whitespace between tokens is ignored):
      cert ::= site (';' site)*
-     site ::= 'h' N 'w' N 'n' N 'r' N ('s' N)*
+     site ::= 'h' N 'w' N 'n' N 'r' N ('s' N)*          a fixed site
+            | 'h' N 'w' N 'v' N 'r' N 'f' N 't' N        a loop fill (count
+              in local v, loop counting down local f, cursor step t)
    A string that does not parse is REJECTED. The empty string and an empty
    site list are vacuous (no allocation recorded). *)
 
@@ -485,7 +597,19 @@ Fixpoint stores_at (fuel : nat) (cs : list ascii) : option (list nat * list asci
       end
   end.
 
-Definition site_at (cs : list ascii) : option (Site * list ascii) :=
+Inductive Entry := EFixed (s : Site) | EFill (f : Fill).
+
+Definition entry_ok (e : Entry) : bool :=
+  match e with EFixed s => site_ok s | EFill f => fill_ok f end.
+
+(* The end of a loop-fill site: blanks, then the end or a `;`. *)
+Definition at_end (cs : list ascii) : option (list ascii) :=
+  match skip_blank cs with
+  | [] => Some []
+  | c :: r => if is_semi c then Some (c :: r) else None
+  end.
+
+Definition site_at (cs : list ascii) : option (Entry * list ascii) :=
   match field "h"%char cs with
   | Some (h, r1) =>
       match field "w"%char r1 with
@@ -495,19 +619,39 @@ Definition site_at (cs : list ascii) : option (Site * list ascii) :=
               match field "r"%char r3 with
               | Some (k, r4) =>
                   match stores_at (S (List.length r4)) r4 with
-                  | Some (ix, r5) => Some (mkSite h w n k ix, r5)
+                  | Some (ix, r5) => Some (EFixed (mkSite h w n k ix), r5)
                   | None => None
                   end
               | None => None
               end
-          | None => None
+          | None =>
+              match field "v"%char r2 with
+              | Some (v, r3) =>
+                  match field "r"%char r3 with
+                  | Some (k, r4) =>
+                      match field "f"%char r4 with
+                      | Some (l, r5) =>
+                          match field "t"%char r5 with
+                          | Some (t, r6) =>
+                              match at_end r6 with
+                              | Some r7 => Some (EFill (mkFill h w v k l t), r7)
+                              | None => None
+                              end
+                          | None => None
+                          end
+                      | None => None
+                      end
+                  | None => None
+                  end
+              | None => None
+              end
           end
       | None => None
       end
   | None => None
   end.
 
-Fixpoint sites_at (fuel : nat) (cs : list ascii) : option (list Site) :=
+Fixpoint sites_at (fuel : nat) (cs : list ascii) : option (list Entry) :=
   match fuel with
   | O => None
   | S f =>
@@ -528,39 +672,50 @@ Fixpoint sites_at (fuel : nat) (cs : list ascii) : option (list Site) :=
       end
   end.
 
-Definition parse_init (s : string) : option (list Site) :=
+Definition parse_init (s : string) : option (list Entry) :=
   let cs := list_ascii_of_string s in sites_at (S (List.length cs)) cs.
 
 Definition check_init_cert (s : string) : bool :=
   match parse_init s with
-  | Some ss => forallb site_ok ss
+  | Some ss => forallb entry_ok ss
   | None => false
   end.
 
-(* What ACCEPT means: the string denotes sites, every one accepted — so each
-   one's window, wherever it runs, is MemorySafe and leaves its block fully
-   initialized (`site_window`), and a trace built from them is MemorySafe
+(* What ACCEPT means: the string denotes sites, every one accepted. A fixed
+   site's window, wherever it runs, is MemorySafe and leaves its block fully
+   initialized (`site_window`); a loop fill's run does the same at EVERY
+   count the run holds (`fill_window`). A trace built from them is MemorySafe
    with the two other certificates (`certified_sited_memory_safe`). *)
 Theorem check_init_cert_sound : forall s,
   check_init_cert s = true ->
   exists ss, parse_init s = Some ss /\
-    forall st, In st ss -> site_ok st = true /\
-      forall b h, ~ live h b ->
-        holds safe_ev h (site_events b st) /\
-        exists x, after h (site_events b st) b = Some x /\ shaped st x /\
-          forall j, 0 <= j < size x -> init x j = true.
+    forall e, In e ss ->
+      match e with
+      | EFixed st => site_ok st = true /\
+          forall b h, ~ live h b ->
+            holds safe_ev h (site_events b st) /\
+            exists x, after h (site_events b st) b = Some x /\ shaped st x /\
+              forall j, 0 <= j < size x -> init x j = true
+      | EFill f => fill_ok f = true /\
+          forall c b h, ~ live h b ->
+            holds safe_ev h (fill_events b f c) /\
+            exists x, after h (fill_events b f c) b = Some x /\ shaped (fill_site f c) x /\
+              forall j, 0 <= j < size x -> init x j = true
+      end.
 Proof.
   intros s H. unfold check_init_cert in H.
   destruct (parse_init s) as [ss |] eqn:Hp; [| discriminate].
-  exists ss. split; [reflexivity |]. intros st Hin.
-  rewrite forallb_forall in H. specialize (H st Hin). split; [exact H |].
-  intros b h NL. destruct (site_window st b h H NL) as [Hs [_ Hx]]. split; [exact Hs | exact Hx].
+  exists ss. split; [reflexivity |]. intros e Hin.
+  rewrite forallb_forall in H. specialize (H e Hin).
+  destruct e as [st | f]; simpl in H; split; try exact H.
+  - intros b h NL. destruct (site_window st b h H NL) as [Hs [_ Hx]]. split; [exact Hs | exact Hx].
+  - intros c b h NL. destruct (fill_window f c b h H NL) as [Hs [_ Hx]]. split; [exact Hs | exact Hx].
 Qed.
 Print Assumptions check_init_cert_sound.
 
 Example parses_two_sites :
   parse_init "h12 w8 n2 r0 s0 s1 ; h12w4n1r3s0" =
-    Some [(mkSite 12 8 2 0 [0; 1])%nat; (mkSite 12 4 1 3 [0])%nat].
+    Some [EFixed (mkSite 12 8 2 0 [0; 1])%nat; EFixed (mkSite 12 4 1 3 [0])%nat].
 Proof. reflexivity. Qed.
 
 Example accepts_cert : check_init_cert "h12 w8 n3 r0 s0 s1 s2" = true.
@@ -588,4 +743,15 @@ Example init_edges :
   check_init_cert "h0 w8 n0 r0" = false /\ check_init_cert "h 12 w8 n0 r0" = false /\
   check_init_cert "h12 w8 n1 r0 s0 ;" = true /\ check_init_cert "h012 w8 n01 r0 s000" = true /\
   check_init_cert ";" = false.
+Proof. repeat split; reflexivity. Qed.
+
+(* Loop fills as bytes: the range literal's countdown fill, a counter that is
+   not the count, a cursor that skips a slot. *)
+Example fill_bytes :
+  parse_init "h12 w8 v4 r0 f4 t8" = Some [EFill (mkFill 12 8 4 0 4 8)%nat] /\
+  check_init_cert "h12 w8 v4 r0 f4 t8 ; h12 w8 n1 r0 s0" = true /\
+  check_init_cert "h12 w8 v4 r0 f5 t8" = false /\
+  check_init_cert "h12 w8 v4 r0 f4 t16" = false /\
+  check_init_cert "h12 w8 v4 r0 f4 t8 s0" = false /\
+  check_init_cert "h12 w8 v4 r0 f4" = false.
 Proof. repeat split; reflexivity. Qed.

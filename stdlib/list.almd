@@ -23,14 +23,10 @@ fn length[A](xs: List[A]) -> Int = _
 @intrinsic("almide_rt_list_get")
 fn get[A](xs: List[A], i: Int) -> A? = _
 
-/// Element at i, or default when out of range.
-@intrinsic("almide_rt_list_get_or")
-fn get_or[A](xs: List[A], i: Int, default: A) -> A = _
-
-/// Copy with slot i = val; no-op if i out of range.
+/// Copy with slot i = x; no-op if i out of range.
 @intrinsic("almide_rt_list_set")
 @reuse(xs)
-fn set[A](xs: List[A], i: Int, val: A) -> List[A] = _
+fn set[A](xs: List[A], i: Int, x: A) -> List[A] = _
 
 /// Copy with i and j swapped; no-op if either OOB.
 @intrinsic("almide_rt_list_swap")
@@ -61,30 +57,27 @@ fn zip[A, B](xs: List[A], ys: List[B]) -> List[(A, B)] = _
 
 // Borrows: the runtime takes a slice and clones each element out, so `flatten`
 // can appear alongside another borrow of the same binding in one expression.
-// Consuming it made `list.get_or(xs, 0, list.flatten(xs))` move `xs` into
-// `flatten` while `get_or` borrowed it — `check` accepted, rustc rejected with
+// Consuming it made `list.get(xs, 0)` beside `list.flatten(xs)` move `xs` into
+// `flatten` while `get` borrowed it — `check` accepted, rustc rejected with
 // E0505 (differential fuzz).
 /// Inner lists concatenated in order.
 @intrinsic("almide_rt_list_flatten")
-fn flatten[T](xss: List[List[T]]) -> List[T] = _
+fn flatten[A](xs: List[List[A]]) -> List[A] = _
 
 // The range ops (take / drop / slice / take_end / drop_end / take_while /
 // drop_while / find …) borrow their source and copy only what they return:
 // consuming it cloned the WHOLE list per call whenever the source was read
 // again, O(n) per `take(xs, 2)` (#3397). Gated by
 // tests/list_read_only_source_borrow_test.rs.
-/// First n elements; all if n >= len or n < 0.
+/// First n elements; all if n >= len, [] if n < 0.
 @intrinsic("almide_rt_list_take")
 @reuse(xs)
 fn take[A](xs: List[A], n: Int) -> List[A] = _
 
-/// All but the first n; [] if n >= len or n < 0.
+/// All but the first n; [] if n >= len, all if n < 0.
 @intrinsic("almide_rt_list_drop")
 @reuse(xs)
 fn drop[A](xs: List[A], n: Int) -> List[A] = _
-
-/// All but the first element; [] when empty.
-fn tail[A](xs: List[A]) -> List[A] = list.drop(xs, 1)
 
 /// Duplicates removed; first occurrences kept.
 @intrinsic("almide_rt_list_unique")
@@ -98,7 +91,7 @@ fn index_of[A](xs: List[A], x: A) -> Int? = _
 @intrinsic("almide_rt_list_last")
 fn last[A](xs: List[A]) -> A? = _
 
-/// Runs of n, last may be short; n = 0 aborts.
+/// Runs of n, last may be short; n <= 0 aborts.
 @intrinsic("almide_rt_list_chunk")
 fn chunk[A](xs: List[A], n: Int) -> List[List[A]] = _
 
@@ -245,60 +238,50 @@ fn unique_by[A, K](xs: List[A], f: (A) -> K) -> List[A] = _
 @intrinsic("almide_rt_list_range")
 fn range(start: Int, end: Int) -> List[Int] = _
 
-/// Indices start..<end, clamped; [] if start >= end.
+/// Indices start..<end, each clamped to 0..len; [] if start >= end.
 @intrinsic("almide_rt_list_slice")
 @reuse(xs)
 fn slice[A](xs: List[A], start: Int, end: Int) -> List[A] = _
 
-/// Copy with val at i; i >= len or i < 0 appends.
+/// Copy with x at i; i >= len or i < 0 appends.
 @intrinsic("almide_rt_list_insert")
 @consume(xs)
-fn insert[A](xs: List[A], i: Int, val: A) -> List[A] = _
+fn insert[A](xs: List[A], i: Int, x: A) -> List[A] = _
 
 /// Copy without slot i; no-op if i out of range.
 @intrinsic("almide_rt_list_remove_at")
 @consume(xs)
 fn remove_at[A](xs: List[A], i: Int) -> List[A] = _
 
-/// n copies of val; [] for n <= 0.
+/// n copies of x; [] for n <= 0.
 @intrinsic("almide_rt_list_repeat")
-fn repeat[A](val: A, n: Int) -> List[A] = _
+fn repeat[A](x: A, n: Int) -> List[A] = _
 
 /// sep between adjacent elements.
 @intrinsic("almide_rt_list_intersperse")
 @consume(xs)
 fn intersperse[A](xs: List[A], sep: A) -> List[A] = _
 
-/// All n-long runs; [] if n > len; n = 0 aborts.
-@intrinsic("almide_rt_list_windows")
-fn windows[A](xs: List[A], n: Int) -> List[List[A]] = _
-
 /// Adjacent equal runs collapsed; not global.
 @intrinsic("almide_rt_list_dedup")
 fn dedup[A](xs: List[A]) -> List[A] = _
 
-/// Last n elements; all if n >= len or n < 0.
+/// Last n elements; all if n >= len, [] if n < 0.
 @intrinsic("almide_rt_list_take_end")
 @reuse(xs)
 fn take_end[A](xs: List[A], n: Int) -> List[A] = _
 
-/// All but the last n; [] if n >= len or n < 0.
+/// All but the last n; [] if n >= len, all if n < 0.
 @intrinsic("almide_rt_list_drop_end")
 @reuse(xs)
 fn drop_end[A](xs: List[A], n: Int) -> List[A] = _
 
-/// Random permutation; unseeded, differs per run.
-@intrinsic("almide_rt_list_shuffle")
-@consume(xs)
-fn shuffle[A](xs: List[A]) -> List[A] = _
-
-/// All n-long runs; [] if n > len; n = 0 aborts.
+/// All n-long runs; [] if n > len; n <= 0 aborts.
 @intrinsic("almide_rt_list_window")
 fn window[A](xs: List[A], n: Int) -> List[List[A]] = _
 
-/// Index of target in ascending xs, or none.
-@intrinsic("almide_rt_list_binary_search")
-fn binary_search(xs: List[Int], target: Int) -> Int? = _
+/// Index of target in xs sorted ascending (list.sort's order), or none.
+fn binary_search[A](xs: List[A], target: A) -> Int? = list.binary_search_by(xs, target, (x) => x)
 
 // ── mutable (in-place) ──
 /// Appends x to xs in place.
@@ -321,15 +304,10 @@ fn pop[A](mut xs: List[A]) -> A? = _
 fn clear[A](mut xs: List[A]) -> Unit = _
 
 // ── bundled-Almide extensions (non-TOML, pure Almide body) ──
-// Smoke fn: covered by spec/stdlib/list_bundled_test.almd as a regression
-// guard for the bundled-dispatch pipeline. Do not remove.
-/// n + 1; bundled-dispatch smoke fn.
-fn bundled_probe(n: Int) -> Int = n + 1
-
 // Split a list at index `n`. Equivalent to `(list.take(xs, n), list.drop(xs, n))`.
 // Demonstrates bundled-Almide calling existing stdlib fns.
-/// (take n, drop n); n past the end gives (xs, []).
-fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), list.drop(xs, n))
+/// (take n, drop n); n past the end gives (xs, []), n < 0 gives ([], xs).
+fn split_at[A](xs: List[A], n: Int) -> (List[A], List[A]) = (list.take(xs, n), list.drop(xs, n))
 
 // Build [seed, f(seed), f(f(seed)), ...] of length `n`. `f` runs exactly `n`
 // times: the last result is computed and dropped, as the recursive form did.
@@ -346,8 +324,8 @@ fn split_at[T](xs: List[T], n: Int) -> (List[T], List[T]) = (list.take(xs, n), l
 // it is the spelling this body already holds its constant stack with, and
 // swapping it would move the allocation ledger to buy nothing.
 /// [seed, f(seed), ...] of length n; [] if n <= 0.
-fn iterate[T](seed: T, f: (T) -> T, n: Int) -> List[T] = {
-  var out: List[T] = []
+fn iterate[A](seed: A, f: (A) -> A, n: Int) -> List[A] = {
+  var out: List[A] = []
   var x = seed
   for _ in 0..<n {
     list.push(out, x)
@@ -563,15 +541,23 @@ fn unzip[A, B](xs: List[(A, B)]) -> (List[A], List[B]) = {
   (firsts, seconds)
 }
 
+// Walks the values instead of computing a count: `end - start` overflows Int
+// for bounds of opposite sign (#4197), and the count it gave was truncated.
+// A next value is taken only when `x + step` stays inside Int (the guard
+// `x <= MAX - step` / `x >= MIN - step` cannot itself overflow) and before end.
 /// start, start + step, ... before end; counts down for step < 0; step = 0 aborts.
 fn range_step(start: Int, end: Int, step: Int) -> List[Int] = {
   if step == 0 then panic("list.range_step: step must not be 0") else ()
-  let steps = if step > 0 then (if end > start then (end - start - 1) / step + 1 else 0)
-  else if start > end then (start - end - 1) / (0 - step) + 1
-  else 0
   var out: List[Int] = []
-  for i in 0..<steps {
-    list.push(out, start + i * step)
+  var x = start
+  var more = if step > 0 then start < end else start > end
+  while more {
+    list.push(out, x)
+    more = if step > 0 then x <= 9223372036854775807 - step and x + step < end
+    else x >= -9223372036854775807 - 1 - step and x + step > end
+    if more then {
+      x = x + step
+    } else ()
   }
   out
 }

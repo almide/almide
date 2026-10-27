@@ -67,10 +67,10 @@ fn unix_and_shm_error_paths_agree_on_native_and_the_embedded_lane() {
     cross("net_unix_errors");
 }
 
-/// The error program's lines are the contract's text, pinned on native: an
-/// unheld descriptor is refused by the core before any system call, so a
-/// program cannot reach (or close) a descriptor it was never given — the
-/// standard streams included — on either leg.
+/// The error program's lines are the contract's text, pinned on native: a
+/// descriptor the program no longer holds (closed, or a closed listener) is
+/// refused by the core before any system call. `unix.Fd` is opaque, so a
+/// program cannot even name a descriptor it was never given.
 #[test]
 fn an_unheld_descriptor_is_refused_before_any_system_call() {
     let src = fixture("net_unix_errors");
@@ -79,20 +79,16 @@ fn an_unheld_descriptor_is_refused_before_any_system_call() {
     for want in [
         "err unix_connect(<path>): No such file or directory",
         "err unix_listen(<path>): Address already in use",
-        "fd -1\n  err unix_accept: not a file descriptor: -1\n",
-        "fd 0\n  err unix_accept: descriptor 0 is not open in this program\n",
-        "  err unix_close: descriptor 2 is not open in this program\n",
         "fd closed\n  err unix_accept: descriptor ",
-        "  err shm_write: descriptor 0 is not open in this program\n",
-        "err unix_send: descriptor 0 is not open in this program\n",
-        "err unix_send: not a file descriptor: -5\n",
         "err shm_create: negative size -1\n",
         "err shm_resize: negative size -1\n",
-        "err shm_write: negative offset -1\n",
         "err shm_read: negative offset or length (-1, 1)\n",
         "err shm_read: negative offset or length (0, -1)\n",
         "err unix_send: 29 descriptors in one message (at most 28)\n",
+        "  err shm_read: descriptor closed is not open in this program\n",
+        "err unix_send: descriptor closed is not open in this program\n",
         "take 0\nok false\n",
+        "err unix_close: descriptor <listener> is not open in this program\n",
     ] {
         assert!(out.contains(want), "missing {want:?} in:\n{out}");
     }

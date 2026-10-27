@@ -1,5 +1,5 @@
-//! The in-place `map.set` window (#1219 stage 1). `m[k] = v`,
-//! `map.insert(m, k, v)` and the rebind `m = map.set(m, k, v)` all
+//! The in-place `map.set` window (#1219 stage 1). `m[k] = v` and the
+//! rebind `m = map.set(m, k, v)` both
 //! funnel here when the receiver is a mutable var the frame owns: the
 //! write lands IN the var's block when the block is the var's alone
 //! (overwrite the entry, or append through `$map_reserve`'s list-push
@@ -31,7 +31,7 @@
 //! (`$inc_entries`), and the shared original loses the var's credit.
 //!
 //! Order: key, then value, then the receiver read — a value that reads
-//! the map (`m[k] = map.get_or(m, k, 0) + 1`, the counter idiom) sees
+//! the map (`m[k] = (map.get(m, k) ?? 0) + 1`, the counter idiom) sees
 //! the pre-write block, exactly as the functional set evaluates, and a
 //! var read has no effect so the reordering is unobservable.
 
@@ -43,7 +43,7 @@ use crate::work::Helper;
 use crate::*;
 
 #[path = "dying_move.rs"]
-mod dying_move;
+pub(crate) mod dying_move;
 
 /// The holds a map-set core works on: the receiver block, the key, the
 /// scan's ABSOLUTE entry address (0 = absent) and the value.

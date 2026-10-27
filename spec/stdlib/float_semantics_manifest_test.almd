@@ -3,12 +3,12 @@
 // regenerates and diffs). Each case executes a manifest probe; a
 // failure here means the implementation drifted from the DECLARED
 // semantic dimension (#419 class).
-test "float.to_int unit=value" {
-  assert_eq("${float.to_int(0.0 - 3.9)}", "-3")
+test "float.__to_int unit=value" {
+  assert_eq("${float.__to_int(0.0 - 3.9)}", "-3")
 }
 
-test "float.from_int unit=value" {
-  assert_eq("${float.from_int(2)}", "2")
+test "float.__from_int unit=value" {
+  assert_eq("${float.__from_int(2)}", "2")
 }
 
 test "float.to_fixed unit=count" {

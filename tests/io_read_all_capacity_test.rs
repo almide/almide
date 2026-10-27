@@ -142,7 +142,7 @@ fn read_all_continues_the_cursor_a_line_read_left() {
         &source,
         r#"import io
 effect fn main() -> Unit = {
-  println("first=${io.read_line()}")
+  println("first=${(io.read_line() ?? "")}")
   println("rest=${string.len(io.read_all())}")
 }
 "#,

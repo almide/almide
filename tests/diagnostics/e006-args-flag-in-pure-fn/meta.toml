@@ -1,3 +1,0 @@
-expects_code = "E006"
-expects_error = "cannot call effect function 'args.flag' from a pure function"
-hint_substring = "pass the value in"

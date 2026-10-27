@@ -120,7 +120,7 @@ mod tests {
     #[test]
     fn module_to_effect_mapping() {
         assert_eq!(module_to_effect("fs", "read_text"), vec![Effect::FsRead]);
-        assert_eq!(module_to_effect("fs", "write"), vec![Effect::FsWrite]);
+        assert_eq!(module_to_effect("fs", "write_text"), vec![Effect::FsWrite]);
         assert_eq!(module_to_effect("io", "read_line"), vec![Effect::IoStdin]);
         assert!(module_to_effect("path", "join").is_empty());
         assert_eq!(module_to_effect("http", "get"), vec![Effect::NetFetch]);

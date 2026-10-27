@@ -10,7 +10,7 @@ impl LowerCtx {
         let faithful = self.check_call_module_faithful(module.as_str(), func.as_str(), args)?;
         self.seed_call_module_heap_read_shape(dst, ty, module.as_str(), func.as_str(), faithful);
         self.seed_call_module_heap_drop_route(dst, ty);
-        // A `Value` result (value.str/int/… or a Value-returning combinator) drops via the
+        // A `Value` result (value.string/int/… or a Value-returning combinator) drops via the
         // runtime-tag-dispatched DropValue (a heap-payload Value owns one handle).
         if crate::lower::is_value_ty(ty) {
             self.value_handles.insert(dst);
@@ -149,7 +149,7 @@ impl LowerCtx {
         if is_self_host_option_module_fn(module, func) {
             self.value_shapes.insert(dst, crate::lower::VariantShape::Option);
         }
-        // A FUNCTION-valued module-call result (`let f = map.get_or(m, k, d)` —
+        // A FUNCTION-valued module-call result (`let f = map.get(m, k) ?? d` —
         // the closure-valued map read): the result IS a closure block — track it
         // so a later `f()` dispatches via CallIndirect, and its scope-end drop
         // routes to the recursive `$__drop_closure` (`closure_values` drives
@@ -164,14 +164,6 @@ impl LowerCtx {
         // below add only the refinements that need &self layout knowledge
         // (the variant-err classes), which the shared seeder cannot host yet.
         let materialized = crate::lower::is_self_host_materialized_result_fn(module, func)
-            // An ELEMENT-SHARING accessor whose element type IS a Result
-            // (`list.get_or([r0, r1], i, d)` over Result elements — the #1527
-            // List-argument view family): the hshare route shares a REAL
-            // materialized block back (the view admits only real elements), so
-            // the bound var must carry the same type-keyed read shape the
-            // match-subject path would seed — without it a later `match` over
-            // the var fell to the untracked linearization wall.
-            || (module == "list" && func == "get_or")
             // The unwrap_or family's result is the Ok payload / the default —
             // a REAL block for every REGISTERED route (an unregistered repr
             // routes `_x` and walls before any bind exists). Without the seed,
@@ -275,7 +267,7 @@ impl LowerCtx {
             return true;
         }
         if crate::lower::is_list_str_str_ty(ty) {
-            // `List[(String,String)]` (map.entries) — DropListStrStr frees each tuple's two
+            // `List[(String,String)]` (map.to_list) — DropListStrStr frees each tuple's two
             // Strings; the flat heap_elem_lists DropListStr would leak them (a render loop OOMs).
             self.value_drops.entry(dst).or_default().str_str_elems = true;
             return true;

@@ -2,8 +2,8 @@
 // #1423 stage 4: the int bit-introspection family (count_leading_zeros,
 // count_trailing_zeros, pop_count, bit_reverse, byte_swap, bit_width,
 // log2_floor, log2_ceil, next_power_of_two, prev_power_of_two), the f32
-// reinterpret `int.bits_to_f32`, and the `Int -> Float32` convert
-// (`int.to_float32`, its checked twin and the eight sized-int twins)
+// reinterpret `float32.from_bits`, and the `Int -> Float32` convert
+// (`float32.from`, its checked twin and the eight sized-int twins)
 // close on the STRUCTURAL leg. Native (runtime/rs/src/int.rs) is the
 // oracle: every fn prints over the domain-edge values (zero, one, -1,
 // the i32 rails, u32::MAX, 2^32, the i64 rails and their neighbours) and
@@ -46,7 +46,7 @@ fn main() -> Unit = {
     println("bits ${n} clz=${int.count_leading_zeros(n)} ctz=${int.count_trailing_zeros(n)} pop=${int.pop_count(n)} width=${int.bit_width(n)}")
     println("log ${n} floor=${int.log2_floor(n)} ceil=${int.log2_ceil(n)} next=${int.next_power_of_two(n)} prev=${int.prev_power_of_two(n)}")
     println("swap ${n} rev=${int.bit_reverse(n)} bswap=${int.byte_swap(n)}")
-    println("f32 ${n} ${float32.to_string(int.to_float32(n))} ${opt32(int.to_float32_checked(n))} ${int.bits_to_f32(n)}")
+    println("f32 ${n} ${float32.to_string(float32.from(n))} ${opt32(float32.from_checked(n))} ${float.from(float32.from_bits(n))}")
   }
   // bits_to_f32 reads the LOW 32 bits: sign, ±0, ±inf, NaN, subnormal, 1.0, the high half ignored
   for bits in [
@@ -65,9 +65,9 @@ fn main() -> Unit = {
     -4294967296,
     -1
   ] {
-    println("bits_to_f32 ${bits} ${int.bits_to_f32(bits)}")
+    println("bits_to_f32 ${bits} ${float.from(float32.from_bits(bits))}")
   }
-  // the sized twins ride int.to_float32 through their widening
+  // the sized twins ride float32.from through their widening
   for n in [
     0,
     1,
@@ -85,7 +85,7 @@ fn main() -> Unit = {
     9223372036854775807,
     -9223372036854775808
   ] {
-    println("sized ${n} i8=${float32.to_string(int8.to_float32(int.to_int8(n)))} u8=${float32.to_string(uint8.to_float32(int.to_uint8(n)))} i16=${float32.to_string(int16.to_float32(int.to_int16(n)))} u16=${float32.to_string(uint16.to_float32(int.to_uint16(n)))}")
-    println("sized ${n} i32=${float32.to_string(int32.to_float32(int.to_int32(n)))} u32=${float32.to_string(uint32.to_float32(int.to_uint32(n)))} i64=${float32.to_string(int64.to_float32(int.to_int64(n)))} u64=${float32.to_string(uint64.to_float32(int.to_uint64(n)))}")
+    println("sized ${n} i8=${float32.to_string(float32.from(int8.from_wrapping(n)))} u8=${float32.to_string(float32.from(uint8.from_wrapping(n)))} i16=${float32.to_string(float32.from(int16.from_wrapping(n)))} u16=${float32.to_string(float32.from(uint16.from_wrapping(n)))}")
+    println("sized ${n} i32=${float32.to_string(float32.from(int32.from_wrapping(n)))} u32=${float32.to_string(float32.from(uint32.from_wrapping(n)))} i64=${float32.to_string(float32.from(int64.from(n)))} u64=${float32.to_string(float32.from(uint64.from_wrapping(n)))}")
   }
 }

@@ -2,7 +2,7 @@
 //! droppable value produced by a call or born in the expression (a
 //! literal list, an interpolation, an inner concat) and consumed directly
 //! by a binary op, a `for … in`, a `match`, an index, or an interpolation
-//! (`xs + [4]`, `a + b + c`, `for c in string.chars(s)`) had no owner.
+//! (`xs + [4]`, `a + b + c`, `for c in string.to_list(s)`) had no owner.
 //! The consumer reads the block and never spends its credit, so every
 //! such temporary stayed at rc 1 forever.
 //!
@@ -126,7 +126,7 @@ pub(crate) fn droppable_ty(t: &Ty) -> bool {
         // #2010 item 5 / the flat matrix block: a dynamic `Value` (spelled
         // as the bare Named type) and a `Matrix` are credits the typed drop
         // releases like any other (rc_droppable). Unbound, a `${value.int(2)}`
-        // part or a `matrix.to_lists(matrix.pow(m, e))` operand kept its
+        // part or a `matrix.to_lists(matrix.transpose(m))` operand kept its
         // block for the program's life (#2975, #2974).
         Ty::Named(name, args) if args.is_empty() && name.as_str() == "Value" => true,
         Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _) => true,
@@ -232,9 +232,12 @@ impl Binder<'_> {
         // user record, `let { a, c } = P { … }` / `= mk()`), which
         // `droppable_ty` does not list: it kept its block (#2977). A Named
         // that turns out flat on this leg binds a plain local — harmless.
+        // An anonymous record literal (`let { x, y } = { x: …, y: … }`, a
+        // block whose tail is one, a fan record) is the structural `Record`
+        // type, which kept its block the same way (#3794).
         let named = |s: &IrStmt| {
             matches!(&s.kind, IrStmtKind::BindDestructure { value, .. }
-                if (droppable_ty(&value.ty) || matches!(value.ty, Ty::Named(..)))
+                if (droppable_ty(&value.ty) || matches!(value.ty, Ty::Named(..) | Ty::Record { .. }))
                     && !matches!(value.kind, IrExprKind::Var { .. }))
         };
         if !stmts.iter().any(named) {

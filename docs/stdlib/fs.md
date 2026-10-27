@@ -4,8 +4,8 @@ File system. import fs, effect.
 
 ### The `_if_exists` content readers — absence as a value
 
-`read_text_if_exists` / `read_bytes_if_exists` / `read_lines_if_exists` /
-`read_bytes_raw_if_exists` return `Result[Option[T], String]`:
+`read_text_if_exists` / `read_bytes_if_exists` / `read_lines_if_exists`
+return `Result[Option[T], String]`:
 `ok(none)` when the path (or a parent) does not exist, `ok(some(content))`
 when readable, `err(msg)` for real failures (permission, a directory at the
 path, IO). Race-free — the classification happens inside the one read
@@ -20,7 +20,7 @@ effect fn main() -> Unit = {
   let path = "${dir}/config.toml"
   let cfg = fs.read_text_if_exists(path)! ?? "default"
   println(cfg)
-  fs.write(path, "port = 8080")!
+  fs.write_text(path, "port = 8080")!
   println(fs.read_text_if_exists(path)! ?? "default")
   fs.remove_all(dir)!
 }
@@ -29,6 +29,27 @@ effect fn main() -> Unit = {
 default
 port = 8080
 ```
+
+### The whole-file readers read regular files of at most 1 GiB
+
+`read_text` / `read_bytes` / `read_lines` and their
+`_if_exists` twins read a **regular file** of at most **1 GiB**
+(1073741824 bytes), the same on native, the embedded wasm host and the stock
+WASI legs (contract C-431, #4201):
+
+- a character or block device, a FIFO or a socket (`/dev/zero`, `/dev/null`,
+  a named pipe) errs `fs.read_text("/dev/zero"): Not a regular file`. The
+  open does not block on a FIFO with no writer, and the opened descriptor is
+  what is judged, so a file swapped in after a check cannot slip past;
+- a larger file errs `fs.read_bytes("big.bin"): File too large (the read
+  limit is 1073741824 bytes)` — from its size before a byte is read, and from
+  the bytes actually read when the size under-reports;
+- a directory keeps its own `Is a directory (os error 21)`.
+
+The `_if_exists` twins answer these as `err`, never `ok(none)`. To walk a
+file larger than the limit, stream it with `fs.fold_lines` /
+`fs.for_each_line`. Reading standard input is `io.read_all`, not
+`fs.read_text("/dev/stdin")`.
 
 ### `fs.read_text(path: String) -> Result[String, String]`
 
@@ -39,7 +60,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/config.toml", "port = 8080")!
+  fs.write_text("${dir}/config.toml", "port = 8080")!
   let text = fs.read_text("${dir}/config.toml")!
   println(text)
   fs.remove_all(dir)!
@@ -49,18 +70,18 @@ effect fn main() -> Unit = {
 port = 8080
 ```
 
-### `fs.read_bytes(path: String) -> Result[List[Int], String]`
+### `fs.read_bytes(path: String) -> Result[Bytes, String]`
 
-Read file contents as a list of bytes
+Read file contents as `Bytes`
 
 ```almd run
 import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write_bytes("${dir}/image.png", [137, 80, 78, 71])!
-  let bytes = fs.read_bytes("${dir}/image.png")!
-  println("${bytes}")
+  fs.write_bytes("${dir}/image.png", bytes.from_list([137, 80, 78, 71]))!
+  let data = fs.read_bytes("${dir}/image.png")!
+  println("${bytes.to_list(data)}")
   fs.remove_all(dir)!
 }
 ```
@@ -68,7 +89,7 @@ effect fn main() -> Unit = {
 [137, 80, 78, 71]
 ```
 
-### `fs.write(path: String, content: String) -> Result[Unit, String]`
+### `fs.write_text(path: String, content: String) -> Result[Unit, String]`
 
 Write a string to a file, creating or overwriting it
 
@@ -77,7 +98,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/output.txt", "hello")!
+  fs.write_text("${dir}/output.txt", "hello")!
   println(fs.read_text("${dir}/output.txt")!)
   fs.remove_all(dir)!
 }
@@ -86,17 +107,17 @@ effect fn main() -> Unit = {
 hello
 ```
 
-### `fs.write_bytes(path: String, bytes: List[Int]) -> Result[Unit, String]`
+### `fs.write_bytes(path: String, data: Bytes) -> Result[Unit, String]`
 
-Write a list of bytes to a file
+Write `Bytes` to a file, creating or overwriting it
 
 ```almd run
 import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write_bytes("${dir}/out.bin", [0, 1, 2])!
-  println("${fs.read_bytes("${dir}/out.bin")!}")
+  fs.write_bytes("${dir}/out.bin", bytes.from_list([0, 1, 2]))!
+  println("${bytes.to_list(fs.read_bytes("${dir}/out.bin")!)}")
   fs.remove_all(dir)!
 }
 ```
@@ -104,7 +125,7 @@ effect fn main() -> Unit = {
 [0, 1, 2]
 ```
 
-### `fs.append(path: String, content: String) -> Result[Unit, String]`
+### `fs.append_text(path: String, content: String) -> Result[Unit, String]`
 
 Append a string to a file, creating it if it doesn't exist
 
@@ -114,14 +135,34 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   let log = "${dir}/log.txt"
-  fs.append(log, "first line\n")!
-  fs.append(log, "new line\n")!
+  fs.append_text(log, "first line\n")!
+  fs.append_text(log, "new line\n")!
   println("${fs.read_lines(log)!}")
   fs.remove_all(dir)!
 }
 ```
 ```output
 ["first line", "new line"]
+```
+
+### `fs.append_bytes(path: String, data: Bytes) -> Result[Unit, String]`
+
+Append `Bytes` to a file, creating it if it doesn't exist
+
+```almd run
+import fs
+
+effect fn main() -> Unit = {
+  let dir = fs.create_temp_dir("fs-doc-")!
+  let out = "${dir}/out.bin"
+  fs.append_bytes(out, bytes.from_list([1, 2]))!
+  fs.append_bytes(out, bytes.from_list([3]))!
+  println("${bytes.to_list(fs.read_bytes(out)!)}")
+  fs.remove_all(dir)!
+}
+```
+```output
+[1, 2, 3]
 ```
 
 ### `fs.mkdir_p(path: String) -> Result[Unit, String]`
@@ -151,7 +192,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/config.toml", "")!
+  fs.write_text("${dir}/config.toml", "")!
   println(if fs.exists("${dir}/config.toml") then "found" else "missing")
   println(if fs.exists("${dir}/other.toml") then "found" else "missing")
   fs.remove_all(dir)!
@@ -173,7 +214,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/data.csv", "a,1\nb,2\n")!
+  fs.write_text("${dir}/data.csv", "a,1\nb,2\n")!
   let lines = fs.read_lines("${dir}/data.csv")!
   println("${lines}")
   fs.remove_all(dir)!
@@ -196,7 +237,7 @@ fn parse_row(line: String) -> Int = int.parse(line) ?? 0
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/data.csv", "1\n2\n3\n")!
+  fs.write_text("${dir}/data.csv", "1\n2\n3\n")!
   let total = fs.fold_lines("${dir}/data.csv", 0, (acc, line) => acc + parse_row(line))!
   println(int.to_string(total))
   fs.remove_all(dir)!
@@ -222,11 +263,11 @@ fn add_row(acc: Int, line: String) -> Int! = {
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   let path = "${dir}/data.csv"
-  fs.write(path, "1\n2\n3\n")!
+  fs.write_text(path, "1\n2\n3\n")!
   let stats = fs.fold_lines(path, 0, (acc, line) => add_row(acc, line)!)!
   println(int.to_string(stats))
   // first err wins; later lines are never visited
-  fs.write(path, "1\noops\n3\n")!
+  fs.write_text(path, "1\noops\n3\n")!
   let failed = fs.fold_lines(path, 0, (acc, line) => add_row(acc, line)!)
   match failed {
     ok(n) => println(int.to_string(n)),
@@ -250,7 +291,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/data.csv", "a,1\nb,2\nc,3\n")!
+  fs.write_text("${dir}/data.csv", "a,1\nb,2\nc,3\n")!
   var count = 0
   fs.for_each_line("${dir}/data.csv", (line) => { count = count + 1 })!
   println(int.to_string(count))
@@ -274,7 +315,7 @@ effect fn emit(line: String) -> Unit = {
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   let path = "${dir}/data.csv"
-  fs.write(path, "one\ntwo\n")!
+  fs.write_text(path, "one\ntwo\n")!
   fs.for_each_line(path, (line) => emit(line)!)!
   fs.remove_all(dir)!
 }
@@ -289,7 +330,7 @@ erring chunk body handles its own error.
 
 Fold exactly the lines owned by the byte range `[start, end)` — a line
 belongs to the range containing the byte before its first byte — so folding
-a partition of `[0, file_size)` visits every line exactly once.
+a partition of `[0, size)` (the size from `fs.stat`) visits every line exactly once.
 
 ```almd check
 import fs
@@ -297,11 +338,11 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   let path = "${dir}/data.csv"
-  fs.write(path, "a\nbb\nccc\n")!
+  fs.write_text(path, "a\nbb\nccc\n")!
   let part = fs.fold_lines_range(path, 0, 4096, 0, (acc, line) => acc + 1)!
   println(int.to_string(part))
   // a partition of [0, file_size) visits every line exactly once
-  let size = fs.file_size(path)!
+  let size = fs.stat(path)!.size
   let first = fs.fold_lines_range(path, 0, 4, 0, (acc, line) => acc + 1)!
   let second = fs.fold_lines_range(path, 4, size, 0, (acc, line) => acc + 1)!
   println("${first} + ${second}")
@@ -324,7 +365,7 @@ fn combine(a: Int, b: Int) -> Int = a + b
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/data.csv", "a\nb\nc\nd\ne\n")!
+  fs.write_text("${dir}/data.csv", "a\nb\nc\nd\ne\n")!
   let partials = fs.fold_lines_chunked("${dir}/data.csv", 8, 0, step)!
   let stats = partials |> list.fold(0, (acc, m) => combine(acc, m))
   println(int.to_string(stats))
@@ -341,7 +382,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/temp.txt", "scratch")!
+  fs.write_text("${dir}/temp.txt", "scratch")!
   fs.remove("${dir}/temp.txt")!
   println("${fs.exists("${dir}/temp.txt")}")
   fs.remove_all(dir)!
@@ -361,8 +402,8 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   fs.mkdir_p("${dir}/src")!
-  fs.write("${dir}/src/main.almd", "")!
-  fs.write("${dir}/src/util.almd", "")!
+  fs.write_text("${dir}/src/main.almd", "")!
+  fs.write_text("${dir}/src/util.almd", "")!
   let entries = fs.list_dir("${dir}/src/")!
   println("${entries |> list.sort}")
   fs.remove_all(dir)!
@@ -382,7 +423,7 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   fs.mkdir_p("${dir}/src")!
-  fs.write("${dir}/readme.md", "")!
+  fs.write_text("${dir}/readme.md", "")!
   println(if fs.is_dir("${dir}/src") then "directory" else "not a directory")
   println(if fs.is_dir("${dir}/readme.md") then "directory" else "not a directory")
   fs.remove_all(dir)!
@@ -403,7 +444,7 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   fs.mkdir_p("${dir}/src")!
-  fs.write("${dir}/readme.md", "")!
+  fs.write_text("${dir}/readme.md", "")!
   println(if fs.is_file("${dir}/readme.md") then "file" else "not a file")
   println(if fs.is_file("${dir}/src") then "file" else "not a file")
   fs.remove_all(dir)!
@@ -423,7 +464,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/a.txt", "hello")!
+  fs.write_text("${dir}/a.txt", "hello")!
   fs.copy("${dir}/a.txt", "${dir}/b.txt")!
   println(fs.read_text("${dir}/b.txt")!)
   fs.remove_all(dir)!
@@ -442,7 +483,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/old.txt", "hello")!
+  fs.write_text("${dir}/old.txt", "hello")!
   fs.rename("${dir}/old.txt", "${dir}/new.txt")!
   println("${fs.exists("${dir}/old.txt")} ${fs.exists("${dir}/new.txt")}")
   fs.remove_all(dir)!
@@ -474,8 +515,8 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   fs.mkdir_p("${dir}/src/util")!
-  fs.write("${dir}/src/main.almd", "")!
-  fs.write("${dir}/src/util/io.almd", "")!
+  fs.write_text("${dir}/src/main.almd", "")!
+  fs.write_text("${dir}/src/util/io.almd", "")!
   let all_files = fs.walk("${dir}/src")!
   println("${all_files |> list.map((f) => string.replace(f, dir, "")) |> list.sort}")
   fs.remove_all(dir)!
@@ -495,7 +536,7 @@ import fs
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
   fs.mkdir_p("${dir}/build/obj")!
-  fs.write("${dir}/build/obj/main.o", "")!
+  fs.write_text("${dir}/build/obj/main.o", "")!
   fs.remove_all("${dir}/build/")!
   println("${fs.exists("${dir}/build")}")
   fs.remove_all(dir)!
@@ -503,25 +544,6 @@ effect fn main() -> Unit = {
 ```
 ```output
 false
-```
-
-### `fs.file_size(path: String) -> Result[Int, String]`
-
-Get file size in bytes
-
-```almd run
-import fs
-
-effect fn main() -> Unit = {
-  let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write_bytes("${dir}/data.bin", [0, 1, 2, 3, 4])!
-  let size = fs.file_size("${dir}/data.bin")!
-  println(int.to_string(size))
-  fs.remove_all(dir)!
-}
-```
-```output
-5
 ```
 
 ### `fs.temp_dir() -> String`
@@ -549,7 +571,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/file.txt", "hello")!
+  fs.write_text("${dir}/file.txt", "hello")!
   let info = fs.stat("${dir}/file.txt")! // {size, is_dir, is_file, modified}
   println("${info.size} ${info.is_dir} ${info.is_file} ${info.modified > 0}")
   fs.remove_all(dir)!
@@ -623,7 +645,7 @@ import fs
 
 effect fn main() -> Unit = {
   let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/link", "a regular file, not a symlink")!
+  fs.write_text("${dir}/link", "a regular file, not a symlink")!
   println(if fs.is_symlink("${dir}/link") then "symlink" else "not a symlink")
   fs.remove_all(dir)!
 }
@@ -632,53 +654,34 @@ effect fn main() -> Unit = {
 not a symlink
 ```
 
-### `fs.modified_at(path: String) -> Result[Int, String]`
-
-Get file modification time as Unix timestamp (seconds)
-
-```almd run
-import fs
-
-effect fn main() -> Unit = {
-  let dir = fs.create_temp_dir("fs-doc-")!
-  fs.write("${dir}/file.txt", "hello")!
-  let ts = fs.modified_at("${dir}/file.txt")!
-  println("${ts > 0}")
-  fs.remove_all(dir)!
-}
-```
-```output
-true
-```
-
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (41 functions)
+## Signature index (37 functions)
 
 ```
-// Whole file as UTF-8; err if missing or not UTF-8.
+// Whole regular file (<= 1 GiB) as UTF-8; err if missing or not UTF-8.
 // @since 0.5.0 or earlier
 effect fs.read_text(path: String) -> String
 
-// Bytes as Ints 0..255; err if missing.
+// Whole regular file (<= 1 GiB) as Bytes; err if missing.
 // @since 0.5.0 or earlier
-effect fs.read_bytes(path: String) -> List[Int]
+effect fs.read_bytes(path: String) -> Bytes
 
 // Overwrites or creates; err if no parent dir.
-// @since 0.5.0 or earlier
-effect fs.write(path: String, content: String) -> Unit
-
-// Writes low byte of each Int (-1 -> 255).
-// @since 0.5.0 or earlier
-effect fs.write_bytes(path: String, bytes: List[Int]) -> Unit
+// @since unreleased
+effect fs.write_text(path: String, content: String) -> Unit
 
 // Writes data verbatim, replacing the file.
-// @since 0.13.4 or earlier
-effect fs.write_bytes_raw(path: String, data: Bytes) -> Unit
+// @since 0.5.0 or earlier
+effect fs.write_bytes(path: String, data: Bytes) -> Unit
 
 // Appends content; creates the file if missing.
-// @since 0.5.0 or earlier
-effect fs.append(path: String, content: String) -> Unit
+// @since unreleased
+effect fs.append_text(path: String, content: String) -> Unit
+
+// Appends data verbatim; creates the file if missing.
+// @since unreleased
+effect fs.append_bytes(path: String, data: Bytes) -> Unit
 
 // Creates dir and parents; ok if it exists.
 // @since 0.5.0 or earlier
@@ -688,7 +691,7 @@ effect fs.mkdir_p(path: String) -> Unit
 // @since 0.6.0 or earlier
 effect fs.exists(path: String) -> Bool
 
-// CRLF-aware lines; a final newline adds no line.
+// CRLF-aware lines of a regular file <= 1 GiB; a final newline adds no line.
 // @since 0.5.0 or earlier
 effect fs.read_lines(path: String) -> List[String]
 
@@ -712,17 +715,13 @@ effect fs.fold_lines_chunked(path: String, workers: Int, init: A, f: (A, String)
 // @since 0.54.0
 effect fs.read_text_if_exists(path: String) -> Option[String]
 
-// Bytes as Ints, or none if missing.
+// File Bytes, or none if missing.
 // @since 0.54.0
-effect fs.read_bytes_if_exists(path: String) -> Option[List[Int]]
+effect fs.read_bytes_if_exists(path: String) -> Option[Bytes]
 
 // read_lines result, or none if missing.
 // @since 0.54.0
 effect fs.read_lines_if_exists(path: String) -> Option[List[String]]
-
-// File Bytes, or none if missing.
-// @since 0.54.0
-effect fs.read_bytes_raw_if_exists(path: String) -> Option[Bytes]
 
 // Deletes a file or empty dir; err if missing.
 // @since 0.5.0 or earlier
@@ -756,10 +755,6 @@ effect fs.walk(dir: String) -> List[String]
 // @since 0.5.0 or earlier
 effect fs.remove_all(path: String) -> Unit
 
-// Size in bytes; err if missing.
-// @since 0.5.0 or earlier
-effect fs.file_size(path: String) -> Int
-
 // Host temp dir; a location, not a safe name.
 // @since 0.5.0 or earlier
 effect fs.temp_dir() -> String
@@ -784,14 +779,6 @@ effect fs.create_temp_dir(prefix: String) -> String
 // @since 0.6.0 or earlier
 effect fs.is_symlink(path: String) -> Bool
 
-// Mtime in Unix seconds; err if missing.
-// @since 0.6.0 or earlier
-effect fs.modified_at(path: String) -> Int
-
-// Whole file as Bytes; err if missing.
-// @since 0.13.4 or earlier
-effect fs.read_bytes_raw(path: String) -> Bytes
-
 // dir as an FsRoot; err if dir is not a directory.
 // @since unreleased
 effect fs.open_root(dir: String) -> FsRoot
@@ -800,7 +787,7 @@ effect fs.open_root(dir: String) -> FsRoot
 // @since unreleased
 effect fs.root_read_text(root: FsRoot, path: String) -> String
 
-// read_bytes_raw of path inside root; err if it escapes.
+// read_bytes of path inside root; err if it escapes.
 // @since unreleased
 effect fs.root_read_bytes(root: FsRoot, path: String) -> Bytes
 

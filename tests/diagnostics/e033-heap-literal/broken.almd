@@ -1,0 +1,7 @@
+// #4256: a hand-built `Heap` literal could break the heap invariant, and
+// `heap.pop` would then answer out of order. `Heap` is opaque, so the
+// literal is refused outside the `heap` module.
+effect fn main() -> Unit = {
+  var forged: Heap[Int] = Heap { slots: [(9, 0), (1, 1)], next: 2, cmp: (a, b) => a - b }
+  println("${heap.pop(forged)} ${heap.peek(forged)}")
+}

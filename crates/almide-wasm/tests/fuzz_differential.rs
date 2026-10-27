@@ -247,7 +247,7 @@ impl Gen {
     fn expr_str(&mut self, depth: usize) -> String {
             match (self.rng.below(6), self.var_of(Ty::MapIS)) {
                 (0, Some(m)) => format!(
-                    "map.get_or({m}, {}, {})",
+                    "map.get({m}, {}) ?? ({})",
                     self.expr(Ty::Int, depth.saturating_sub(1)),
                     self.leaf(Ty::Str)
                 ),
@@ -753,22 +753,20 @@ fn run_seed(seed: u64, tally: &mut Tally) -> Result<(), String> {
 
 #[test]
 fn differential_fuzz_fixed_seed_range() {
-    let iters: u64 = std::env::var("ALMIDE_FUZZ_ITERS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(200);
+    let explicit: Option<u64> = std::env::var("ALMIDE_FUZZ_ITERS").ok().and_then(|v| v.parse().ok());
     let base: u64 =
         std::env::var("ALMIDE_FUZZ_BASE").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-    let mut tally = Tally {
-        checker_rejected: 0,
-        emit_refused: 0,
-        abort_class: 0,
-        oracle_abstained: 0,
-        host_compared: 0,
-        compared: 0,
+    // CI slice (ALMIDE_CI_SLICE=k): seeds offset, offset+k, … of 0..200 (25 at k=8, rotated per commit); full run = all.
+    let seeds: Vec<u64> = match (explicit, almide_corpus::ci_slice()) {
+        (None, Some(s)) => (0..200u64).filter(|i| i % s.k == s.offset).map(|i| base + i).collect(),
+        (n, _) => (base..base + n.unwrap_or(200)).collect(),
     };
+    let iters = seeds.len() as u64;
+    assert!(iters > 0, "no seed selected");
+    println!("fuzz: {iters} seed(s) of the fixed range (ALMIDE_CI_SLICE={})", almide_corpus::ci_slice().map_or(1, |s| s.k));
+    let mut tally = Tally { checker_rejected: 0, emit_refused: 0, abort_class: 0, oracle_abstained: 0, host_compared: 0, compared: 0 };
     let mut findings: Vec<String> = Vec::new();
-    for seed in base..base + iters {
+    for seed in seeds {
         if let Err(f) = run_seed(seed, &mut tally) {
             findings.push(f);
         }

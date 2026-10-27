@@ -242,6 +242,14 @@ fn shim_fs_call(
         i.end();
     }
 
+    // op 76: a deliberate exit's mark (#4203) — only a host that contains a
+    // handler abort reads it; here it answers 0.
+    if has(76) {
+        i.local_get(op).i32_const(76).i32_eq().if_(BlockType::Empty);
+        i.i64_const(0).return_();
+        i.end();
+    }
+
     // Everything else: the defined refusal.
     refuse(&mut i, park, MSG, UNSUPPORTED_MSG.len());
     i.end();
@@ -566,11 +574,27 @@ fn shim_env_get(park: u64, g_plen: u32, g_ppos: u32, log: env_overlay::OverlayLo
 /// frames encoding — staged at park+DATA. Answer `pack(0, total)`.
 /// `i_sizes` / `i_get` are the import indices the args pair landed on.
 fn shim_args(park: u64, g_plen: u32, g_ppos: u32, i_sizes: u32, i_get: u32) -> Function {
+    shim_frames(park, (g_plen, g_ppos), (i_sizes, i_get), None)
+}
+
+/// op 77 (`env.vars`' leaf `__environ`, #3908): op 29's frames over the
+/// environ pair instead — one `name=value` frame per `environ_get` string —
+/// then the overlay log's entries as `name=value` frames (`env.set`'s
+/// values, `env.remove`'s NUL marks). The guest's Almide body lets the later
+/// frame win, so the program's own writes override what it started with.
+fn shim_env_vars(park: u64, g_plen: u32, g_ppos: u32, log: env_overlay::OverlayLog, i_sizes: u32, i_get: u32) -> Function {
+    shim_frames(park, (g_plen, g_ppos), (i_sizes, i_get), Some(log))
+}
+
+/// The frames shim behind ops 29 and 77: a `(sizes_get, get)` WASI pair's
+/// strings re-framed, plus the overlay log's entries when `ovl` is given.
+fn shim_frames(park: u64, (g_plen, g_ppos): (u32, u32), (i_sizes, i_get): (u32, u32), ovl: Option<env_overlay::OverlayLog>) -> Function {
     // params 0..4 unused beyond the ABI; locals: 5=argc 6=i 7=s 8=n 9=out
-    // 10=frames_base 11=stage 12=need
+    // 10=frames_base 11=stage 12=need, and with the overlay 13=p 14=end
+    // 15=klen 16=vlen
     let (argc, idx, s, n, out, frames_base) = (5u32, 6u32, 7u32, 8u32, 9u32, 10u32);
     let (stage, need) = (11u32, 12u32);
-    let mut f = Function::new([(8, ValType::I32)]);
+    let mut f = Function::new([(if ovl.is_some() { 12 } else { 8 }, ValType::I32)]);
     let mut i = f.instructions();
     i.i32_const((park + NREAD) as i32).i32_const((park + NREAD + 4) as i32).call(i_sizes); // args_sizes_get
     i.if_(BlockType::Empty);
@@ -584,6 +608,10 @@ fn shim_args(park: u64, g_plen: u32, g_ppos: u32, i_sizes: u32, i_get: u32) -> F
     // empty list for a process that WAS given arguments (#2120).
     i.local_get(argc).i32_const(8).i32_mul();
     i.i32_const(park as i32).i32_load(mem(NREAD + 4)).i32_const(2).i32_mul().i32_add().local_set(need);
+    // The overlay's frames are each shorter than their log entry.
+    if let Some(log) = ovl {
+        i.local_get(need).global_get(log.g_len).i32_add().local_set(need);
+    }
     stage_for(&mut i, park, need, stage);
     i.local_get(stage);
     i.local_get(stage).local_get(argc).i32_const(4).i32_mul().i32_add();
@@ -611,6 +639,9 @@ fn shim_args(park: u64, g_plen: u32, g_ppos: u32, i_sizes: u32, i_get: u32) -> F
     i.local_get(out).i32_const(4).i32_add().local_get(n).i32_add().local_set(out);
     i.local_get(idx).i32_const(1).i32_add().local_set(idx);
     i.br(0).end().end();
+    if let Some(log) = ovl {
+        env_overlay::emit_frames(&mut i, log, out, env_overlay::FrameLocals { p: 13, endp: 14, klen: 15, vlen: 16 });
+    }
     // Answer where the frames already are — the slide down to DATA the park
     // used to require is a copy of the whole payload for nothing (#2120).
     i.local_get(out).local_get(frames_base).i32_sub().local_set(n); // total

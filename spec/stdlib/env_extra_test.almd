@@ -1,5 +1,6 @@
 import env
 import string
+import fs
 
 test "env.args returns a list" {
   let args = env.args()
@@ -7,13 +8,13 @@ test "env.args returns a list" {
   assert(list.len(args) >= 0)
 }
 
-test "env.unix_timestamp returns positive int" {
-  let ts = env.unix_timestamp()
+test "datetime.now returns positive int" {
+  let ts = datetime.now()
   assert(ts > 1700000000)
 }
 
-test "env.millis returns positive int" {
-  let ms = env.millis()
+test "datetime.now_ms returns positive int" {
+  let ms = datetime.now_ms()
   assert(ms > 0)
 }
 
@@ -22,7 +23,7 @@ test "env.os returns known value" {
   assert(string.len(os) > 0)
 }
 
-test "env.temp_dir returns a path" {
-  let dir = env.temp_dir()
+test "fs.temp_dir returns a path" {
+  let dir = fs.temp_dir()
   assert(string.len(dir) > 0)
 }

@@ -1,4 +1,4 @@
-<!-- description: Stdlib redesign L2/L3 — matrix: finish the epoch-14 cut (#3852): kernels to nnlib, fusion targets internal, the Float32 preview retired, select_rows folded into gather_rows, and shape or length mismatches abort instead of answering zeros -->
+<!-- description: Stdlib redesign L2/L3 — matrix: finish the epoch-14 cut (#3852): kernels to nn.kernels, fusion targets internal, the Float32 preview retired, select_rows folded into gather_rows, and shape or length mismatches abort instead of answering zeros -->
 # L2/L3: matrix
 
 > Last updated: 2026-10-21
@@ -51,7 +51,7 @@
 
 ### L2 の判定
 
-- 推論用のカーネル 5 関数 → R-matrix-01（`almide/nnlib` へ）。
+- 推論用のカーネル 5 関数 → R-matrix-01（`almide-graphics/nn` へ）。
 - fusion の対象 3 関数 → R-matrix-02（内部の `__` 名へ）。
 - 32 bit の試験版 6 関数 → R-matrix-03（撤去）。
 - 重複: `select_rows` と `gather_rows` → R-matrix-04。`concat_cols_many`・`row_dot` → R-matrix-06（#3851 A）。
@@ -60,14 +60,14 @@
 
 ## 案
 
-### R-matrix-01 推論用のカーネルを `almide/nnlib` へ移す — ○ 採用
+### R-matrix-01 推論用のカーネルを `almide-graphics/nn` へ移す — ○ 採用
 
-- 内容: `linear_f32_row_no_bias`、`select_rows_f32`、`linear_row`、`linear_row_no_bias`、`conv1d` を標準から撤去し、`almide/nnlib` に同じ名前・同じ引数で置きます。nnlib の本体は汎用の演算で書きます（`linear_row(x, w, b)` = `broadcast_add_row(mul(x, transpose(w)), b)`、f32 の 2 関数は `from_bytes_f32_le` の後に同じ計算）。
-- 根拠の L0 規則: L1 R-L1-22、epoch 14 の裁定（NN のカーネルは nnlib）。
+- 内容: `linear_f32_row_no_bias`、`select_rows_f32`、`linear_row`、`linear_row_no_bias`、`conv1d` を標準から撤去し、`almide-graphics/nn` に同じ名前・同じ引数で置きます。nn.kernels の本体は汎用の演算で書きます（`linear_row(x, w, b)` = `broadcast_add_row(mul(x, transpose(w)), b)`、f32 の 2 関数は `from_bytes_f32_le` の後に同じ計算）。
+- 根拠の L0 規則: L1 R-L1-22、epoch 14 の裁定（NN のカーネルは nn.kernels）。
 - (a) 標準に推論のカーネルを持つ言語はありません。
-- (b) nnlib は純粋な Almide の package（`src/mod.almd`、intrinsic なし）なので、native と wasm の両方で動きます。いまの f32 の 2 関数は GGUF のバッファを直接読む intrinsic で、移した後は速さが下がることがあります。速さは nnlib の側の課題とし、標準の面の判定には入れません。
-- (c) epoch 14 で兄弟のカーネル（`linear_q8_0_row_no_bias` など）はすでに nnlib にあります。半分だけが標準に残っていると、LLM はどちらに置かれているかを当てられません。
-- (d) 撤去 5。#3852 の手順どおり、先に nnlib の版を出し、`@deprecated(since=15, use="nnlib.linear_row")` などのヒントがその版を名指しできるようにします。removal epoch 16。`almide fix`: `matrix.<fn>(…)` → `import nnlib` を足して `nnlib.<fn>(…)`。使用数（spec/tests/docs/stdlib）: `linear_f32_row_no_bias` 9/0/5/0、`select_rows_f32` 10/0/6/0、`linear_row` 8/0/4/0、`linear_row_no_bias` 2/0/4/1、`conv1d` 15/0/5/0。nnlib 自身が `matrix.linear_row`（2）・`linear_row_no_bias`（2）・`linear_f32_row_no_bias`（1）を呼んでいるので、nnlib の中の定義に付け替えます。CHEATSHEET:1066 の `linear_row` の例を差し替えます。
+- (b) nn.kernels は純粋な Almide のモジュール（`src/kernels.almd`、intrinsic なし）なので、native と wasm の両方で動きます。いまの f32 の 2 関数は GGUF のバッファを直接読む intrinsic で、移した後は速さが下がることがあります。速さは nn.kernels の側の課題とし、標準の面の判定には入れません。
+- (c) epoch 14 で兄弟のカーネル（`linear_q8_0_row_no_bias` など）はすでに nn.kernels にあります。半分だけが標準に残っていると、LLM はどちらに置かれているかを当てられません。
+- (d) 撤去 5。#3852 の手順どおり、先に almide-graphics/nn の版を出し、`@deprecated(since=15, use="kernels.linear_row")` などのヒントがその版を名指しできるようにします。removal epoch 16。`almide fix`: `matrix.<fn>(…)` → `import nn.kernels` を足して `kernels.<fn>(…)`。使用数（spec/tests/docs/stdlib）: `linear_f32_row_no_bias` 9/0/5/0、`select_rows_f32` 10/0/6/0、`linear_row` 8/0/4/0、`linear_row_no_bias` 2/0/4/1、`conv1d` 15/0/5/0。nn.kernels 自身が `matrix.linear_row`（2）・`linear_row_no_bias`（2）・`linear_f32_row_no_bias`（1）を呼んでいるので、nn.kernels の中の定義に付け替えます。CHEATSHEET:1066 の `linear_row` の例を差し替えます。
 - ゲート案: `crates/almide-types/src/self_host_registry.rs`・`docs/stdlib/matrix.md` の索引・`since.toml`・semantics-manifest・検品台帳の行を同じ変更で再生成し、`check_stdlib_fn_count` で公開数の減りを確かめます。
 - issue: #3852（1 節）
 
@@ -84,12 +84,12 @@
 ### R-matrix-03 32 bit の試験版 `Matrix[Float32]` を撤去する — ○ 採用
 
 - 内容: `zeros_f32`、`ones_f32`、`mul_f32`、`mul_f32_scaled`、`mul_f32_t`、`mul_f32_t_scaled` を撤去します。f32 のデータは `from_bytes_f32_le` で `Matrix`（Float）に読みます。
-- 根拠の L0 規則: 完全性の規則 2（CLAUDE.md の「family は行列で広げる」）。#3852 は「演算の表を完成させるか、nnlib へ移すか」を求めていました。nnlib へは移せません（nnlib は intrinsic を持たない純粋な Almide の package で、`Matrix[Float32]` を作る手段が標準の外にないため）。表を完成させるには `Matrix` と同じ約 30 セルが要り、その消費者は spec のほかにありません。
+- 根拠の L0 規則: 完全性の規則 2（CLAUDE.md の「family は行列で広げる」）。#3852 は「演算の表を完成させるか、nn.kernels へ移すか」を求めていました。nn.kernels へは移せません（nn.kernels は intrinsic を持たない純粋な Almide のモジュールで、`Matrix[Float32]` を作る手段が標準の外にないため）。表を完成させるには `Matrix` と同じ約 30 セルが要り、その消費者は spec のほかにありません。
 - (a) 外部ライブラリは要素の型ごとに同じ演算の表を持ちます（numpy の dtype、ndarray のジェネリクス）。構築子 2 つと積 4 つだけという形は、どこにもありません。
 - (b) runtime の SmallF32 の格納（`cblas_sgemm`）は内部に残してよく、公開の面だけを外します。
 - (c) `Matrix[Float32]` を作れても `add` の型が合わず、LLM が書き始めるとすぐ行き止まりになります。
 - (d) 撤去 6。`@deprecated(since=15, use="matrix.zeros")` など、removal epoch 16。`almide fix` は機械的に書き換えられない（型が変わる）ので、`removed_spellings.rs` のヒントで `from_bytes_f32_le` と Float の行列を示します。使用数: `zeros_f32` 2/0/3/0、`ones_f32` 18/8/3/0、`mul_f32` 3/5/3/0、`mul_f32_scaled` 2/1/3/0、`mul_f32_t` 2/0/3/0、`mul_f32_t_scaled` 2/0/3/0（多くは `spec/stdlib/matrix_f32_test.almd`）。
-- 再開の条件: 標準の中か nnlib に f32 の消費者が現れたら、`Matrix[Float32]` を `Matrix` と同じ演算の表とゲートつきで出し直します。
+- 再開の条件: 標準の中か nn.kernels に f32 の消費者が現れたら、`Matrix[Float32]` を `Matrix` と同じ演算の表とゲートつきで出し直します。
 - issue: #3852（1 節の Float32 preview）
 
 ### R-matrix-04 `select_rows` を撤去し、`gather_rows` に一本化する — ○ 採用
@@ -113,7 +113,7 @@
 - (a) numpy・gonum・ndarray・Nx は、形の不一致を例外か panic にします。重なる部分だけで計算する外部ライブラリはありません。
 - (b) 純粋な計算の検査を足すだけで、abort の文言は両 target で同じにします（wasm_cross fixture で固定）。
 - (c) 形を間違えた LLM のコードが、いまは小さな行列や 0 を返して先に進み、ずっと後で違う答えになります。止まれば、その場所で直せます。
-- (d) 端の意味変更です。値を正しく返していた入力の結果は 1 つも変わらず、意味のない値を返していた入力だけが abort になります（定義域を狭める変更で、R-L0-14 の 4 の「同じ名前で別の意味」には当たりません。L0 の「位置を指定した書き込み」と同じく、正しい入力の結果は変わらないので、epoch の `breaks` には入れません）。名前は変えないので `@deprecated` は付けません。abort の文言が、合わなかった形と関数の名前を示します。入れる前に、spec・tests・nnlib・下流のプロジェクトで、不一致の形で呼んでいる箇所を数えます（nnlib の `shape_mismatch()` は `append_rows` を使っていて、この変更の対象外です）。
+- (d) 端の意味変更です。値を正しく返していた入力の結果は 1 つも変わらず、意味のない値を返していた入力だけが abort になります（定義域を狭める変更で、R-L0-14 の 4 の「同じ名前で別の意味」には当たりません。L0 の「位置を指定した書き込み」と同じく、正しい入力の結果は変わらないので、epoch の `breaks` には入れません）。名前は変えないので `@deprecated` は付けません。abort の文言が、合わなかった形と関数の名前を示します。入れる前に、spec・tests・nn.kernels・下流のプロジェクトで、不一致の形で呼んでいる箇所を数えます（nn.kernels の `shape_mismatch()` は `append_rows` を使っていて、この変更の対象外です）。
 - ゲート案: 関数ごとに不一致の入力 1 つを abort の fixture にし、契約の台帳に新しい C 番号を置きます（als に先に置く）。
 - issue: #3927
 
@@ -205,8 +205,8 @@
 | `from_lists` | `matrix.from_lists(rows: List[List[Float]]) -> Matrix` | numpy `array` / Nx `tensor` / gonum `NewDense` | 据え置き | — |
 | `select_rows` | `matrix.select_rows(m: Matrix, row_ids: List[Int]) -> Matrix` | numpy `m[idx]` / ndarray `select` / Nx `take` | 撤去 | R-matrix-04 |
 | `append_rows` | `matrix.append_rows(base: Matrix, extra: Matrix) -> Matrix` | numpy `vstack` / ndarray `concatenate(Axis(0))` / Nx `concatenate` | 撤去 → `concat_rows([a, b])` | R-matrix-11 |
-| `linear_f32_row_no_bias` | `matrix.linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix` | torch `F.linear` / 外部のみ | 撤去 | R-matrix-01（nnlib） |
-| `select_rows_f32` | `matrix.select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix` | torch `embedding` / 外部のみ | 撤去 | R-matrix-01（nnlib） |
+| `linear_f32_row_no_bias` | `matrix.linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix` | torch `F.linear` / 外部のみ | 撤去 | R-matrix-01（nn.kernels） |
+| `select_rows_f32` | `matrix.select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> Matrix` | torch `embedding` / 外部のみ | 撤去 | R-matrix-01（nn.kernels） |
 | `to_lists` | `matrix.to_lists(m: Matrix) -> List[List[Float]]` | numpy `tolist` / Nx `to_list` | 据え置き | — |
 | `get` | `matrix.get(m: Matrix, row: Int, col: Int) -> Float` | numpy `m[i, j]`（例外）/ Rust ndarray `get` → Option・`m[[i, j]]` → panic / gonum `At`（panic） | 意味変更（`Option[Float]` を返す） | R-matrix-08 |
 | `rows` | `matrix.rows(m: Matrix) -> Int` | ndarray `nrows` / numpy `shape[0]` | 据え置き | — |
@@ -230,10 +230,10 @@
 | `split_cols_even` | `matrix.split_cols_even(m: Matrix, n: Int) -> List[Matrix]` | numpy `hsplit` / Nx `split` | 据え置き | — |
 | `concat_cols` | `matrix.concat_cols(matrices: List[Matrix]) -> Matrix` | numpy `hstack` / ndarray `concatenate(Axis(1))` / gonum `Augment` | 据え置き | — |
 | `concat_cols_many` | `matrix.concat_cols_many(matrices: List[Matrix]) -> Matrix`（`@deprecated`） | — | 撤去 | R-matrix-06 |
-| `linear_row` | `matrix.linear_row(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix` | torch `F.linear` / Axon `dense` | 撤去 | R-matrix-01（nnlib） |
-| `linear_row_no_bias` | `matrix.linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix` | torch `F.linear(bias=None)` | 撤去 | R-matrix-01（nnlib） |
+| `linear_row` | `matrix.linear_row(x: Matrix, weight: Matrix, bias: List[Float]) -> Matrix` | torch `F.linear` / Axon `dense` | 撤去 | R-matrix-01（nn.kernels） |
+| `linear_row_no_bias` | `matrix.linear_row_no_bias(x: Matrix, weight: Matrix) -> Matrix` | torch `F.linear(bias=None)` | 撤去 | R-matrix-01（nn.kernels） |
 | `slice_rows` | `matrix.slice_rows(m: Matrix, start: Int, end: Int) -> Matrix` | numpy `m[a:b]` / ndarray `slice` / gonum `Slice` | 意味変更（負の位置で abort。正の側は丸める） | R-L0-29、R-L0-46 |
-| `conv1d` | `matrix.conv1d(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, stride: Int, padding: Int) -> Matrix` | torch `conv1d` / Axon `conv` | 撤去 | R-matrix-01（nnlib） |
+| `conv1d` | `matrix.conv1d(input: Matrix, weight: Matrix, bias: List[Float], kernel: Int, stride: Int, padding: Int) -> Matrix` | torch `conv1d` / Axon `conv` | 撤去 | R-matrix-01（nn.kernels） |
 | `gather_rows` | `matrix.gather_rows(m: Matrix, indices: List[Int]) -> Matrix` | numpy `take(axis=0)` / Nx `take` / torch `index_select` | 意味変更 | R-matrix-04・R-matrix-05（範囲外は abort） |
 | `dot_row` | `matrix.dot_row(m: Matrix, r: Int, vec: List[Float]) -> Float` | numpy `m[r] @ v` / ndarray `row(r).dot(v)` | 意味変更 | R-matrix-05（範囲外は abort） |
 | `row_dot` | `matrix.row_dot(m: Matrix, r: Int, vec: List[Float]) -> Float`（`@deprecated`） | — | 撤去 | R-matrix-06 |

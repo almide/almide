@@ -13,7 +13,7 @@
 //! the inline and the closure routes) left one block per line live, the
 //! prefetch fans (`fan.map` / `list.find_map` over `fs.read_text`) one Result shell
 //! per element, and the size probe under `fs.fold_lines_chunked` /
-//! `fs.file_size` its 8-byte scratch.
+//! `fs.stat` its 8-byte scratch.
 //!
 //! The negative control for a use-after-free: callbacks that KEEP the line
 //! (`acc + [line]`, a fallible `ok(acc + [line])`) return it in a list that
@@ -171,7 +171,7 @@ fn fold_lines_chunked_releases_the_size_probe() {
 effect fn main() -> Unit = {
   let parts = fs.fold_lines_chunked("{D}/in.txt", 3, [], (acc, line) => acc + [line])!
   println(int.to_string(list.len(parts)))
-  println(int.to_string(fs.file_size("{D}/in.txt")!))
+  println(int.to_string(fs.stat("{D}/in.txt")!.size))
 }
 "#,
         "3\n19\n",

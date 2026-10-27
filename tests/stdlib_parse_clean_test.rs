@@ -2,7 +2,7 @@
 //!
 //! The parser never crashes — it records diagnostics in `Parser::errors` and
 //! skips to the next declaration. For user code that is the right behavior,
-//! but for the bundled stdlib it silently DROPS declarations: `args.flag?`
+//! but for the bundled stdlib it silently DROPS declarations: an `args` reader
 //! and `path.is_absolute?` shipped for weeks as unparseable decls that
 //! error-recovery swallowed, so the functions simply did not exist and no
 //! test noticed. This gate makes any such rot a hard test failure.

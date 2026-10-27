@@ -74,6 +74,16 @@ permissions:
   attestations: write
 
 env:
+  # The CI slice (owner decision 2026-10-25; scripts/lib/ci-slice.sh,
+  # crates/almide-corpus/src/ci_slice.rs): a PR or merge group whose base is
+  # not main judges a commit-rotated 1-in-8 slice of every corpus gate plus
+  # the fixtures the change touches; everything else — pushes to develop and
+  # main, tags, schedules, manual runs, PRs into main — runs the full corpus.
+  # Whole-corpus staleness / completeness checks run only on a full run, and a
+  # slice never rewrites a ledger. Job names do not change with it.
+  ALMIDE_CI_SLICE: ${{ ((github.event_name == 'pull_request' && github.base_ref != 'main') || (github.event_name == 'merge_group' && github.event.merge_group.base_ref != 'refs/heads/main')) && '8' || '1' }}
+  ALMIDE_CI_SEED: ${{ github.sha }}
+  ALMIDE_CI_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || '' }}
   # Bump this suffix to force a clean rebuild of the opam (Rocq) cache.
   OPAM_CACHE_VERSION: v1
   OCAML_VERSION: "5.4.1"
@@ -89,7 +99,11 @@ jobs:
     # an opam cache miss). Without a ceiling, a superlinear-witness regression runs
     # to GitHub's 6h default and dies CANCELLED by the next push — never red, so
     # nobody sees it (the 2026-07-27 fan_any_early_winner incident burned a full
-    # day of runners this way). 100 min = cold build + headroom, still a fast red.
+    # day of runners this way). The walls grew past that budget: with the
+    # structural wall's per-artifact anchor check (#4011 (d)) and the native wall
+    # (#4006), a warm run measured ~1h40m (40124872670, 2026-10-24: every wall
+    # passed, then the 100-min ceiling cancelled the tests). 150 min = that run +
+    # headroom; a superlinear regression still goes red, not to the 6h default.
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,7 +126,7 @@ jobs:
       # broken opam root is never cached.
       - name: Restore opam root (OCaml + Rocq)
         id: opam-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.opam
           key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}
@@ -191,12 +205,10 @@ jobs:
           cargo --version
 
       - name: make verify-trust (proof spine + axiom audit + PCC gate + tests)
-        # A PR certifies a commit-rotated 1-in-8 slice of the structural wall's
-        # fixtures (proofs/structural-wall.sh); every push (develop after a
-        # merge, main, a tag) and a manual run certify them all.
-        env:
-          STRUCTURAL_WALL_STRIDE: ${{ github.event_name == 'pull_request' && '8' || '1' }}
-          STRUCTURAL_WALL_SEED: ${{ github.sha }}
+        # A PR into develop certifies the CI slice of the structural wall's
+        # fixtures (ALMIDE_CI_SLICE, set at the top of this workflow); every
+        # push (develop after a merge, main, a tag), a manual run and a PR
+        # into main certify them all.
         run: |
           eval "$(opam env)"
           make verify-trust
@@ -233,7 +245,7 @@ jobs:
       # the cache always holds a known-good toolchain.
       - name: Save opam root (OCaml + Rocq)
         if: success() && steps.opam-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.opam
           key: opam-${{ runner.os }}-ocaml${{ env.OCAML_VERSION }}-rocq${{ env.ROCQ_CORE_VERSION }}-${{ env.OPAM_CACHE_VERSION }}

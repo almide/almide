@@ -100,7 +100,7 @@ test "scalar index through a member-field list" {
 fn rebind_read(n: Int) -> Float = {
   var a: List[Float] = []
   for i in 0..<n {
-    a = a + [int.to_float(i) + 1.0]
+    a = a + [float.from(i) + 1.0]
   }
   var b: List[Float] = []
   for i in 0..<n {

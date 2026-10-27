@@ -1,9 +1,9 @@
 // `almide test --run <pattern>` must select the SAME tests on both legs (#2085).
 //
 // The wasm leg has no argv: it selects at runner-synthesis time, so the check is
-// "which tests did the synthesized runner get built out of". The native leg hands
-// the pattern to the Rust test harness, which substring-matches the EMITTED fn
-// name — so `almide_base::names` owns the predicate and both legs read it.
+// "which tests did the synthesized runner get built out of". The native leg
+// selects with the same predicate and hands the Rust test harness the exact
+// paths (#4264) — `almide_base::names` owns the predicate and both legs read it.
 //
 // The bug this pins was invisible to every other gate: `cmd_test_wasm` took the
 // filter as `_run_filter` and dropped it at the signature, so the wasm leg ran
@@ -77,20 +77,20 @@ fn a_filter_matching_nothing_still_renders_an_empty_runner() {
     assert_eq!(tests_built_in(BOTH, Some("zzz-no-such-test")), 0);
 }
 
-/// The predicate is the native leg's, not a lookalike: the pattern is compared
-/// against the emitted fn name. `beta fails` (with the space) selecting nothing
-/// is native's existing behaviour — surprising, but the point of #2085 is that
-/// both legs are surprising in the SAME way.
+/// The predicate both legs read compares the pattern against the test's own
+/// label (#4264): `beta fails` with the space selects it; the emitted fn
+/// name's spelling `beta_fails` does not.
 #[test]
-fn the_predicate_matches_the_emitted_name_on_both_legs() {
-    let ir_name = "__test_almd_beta fails";
-    assert_eq!(rust_safe_fn_name(ir_name), "__test_almd_beta_fails");
-    assert!(test_name_matches_filter(ir_name, "beta"));
-    assert!(test_name_matches_filter(ir_name, "beta_fails"));
-    assert!(!test_name_matches_filter(ir_name, "beta fails"));
-    assert!(!test_name_matches_filter(ir_name, "BETA"));
+fn the_predicate_matches_the_source_label_on_both_legs() {
+    let ir_name = "__test_almd_0001_beta fails";
+    assert_eq!(rust_safe_fn_name(ir_name), "__test_almd_0001_beta_fails");
+    assert!(test_name_matches_filter("beta fails", "beta"));
+    assert!(test_name_matches_filter("beta fails", "beta fails"));
+    assert!(!test_name_matches_filter("beta fails", "beta_fails"));
+    assert!(!test_name_matches_filter("beta fails", "BETA"));
 
     // The wasm leg agrees with the predicate on the same spellings.
-    assert_eq!(tests_built_in(BOTH, Some("beta fails")), 0);
-    assert_eq!(render(BOTH, Some("beta_fails")), render(ONLY_BETA, None));
+    assert_eq!(render(BOTH, Some("beta fails")), render(ONLY_BETA, None));
+    assert_eq!(tests_built_in(BOTH, Some("beta_fails")), 0);
+    assert_eq!(tests_built_in(BOTH, Some("__test_almd_")), 0, "the mangled prefix is not part of any label");
 }

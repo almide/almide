@@ -150,18 +150,29 @@ struct Eraser<'a> {
 
 impl IrMutVisitor for Eraser<'_> {
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
+        // Patterns are erased against their subject's type BEFORE the walk
+        // substitutes it away (#4275).
+        if let IrExprKind::Match { subject, arms } = &mut e.kind {
+            for arm in arms.iter_mut() {
+                self.erase_pattern(&mut arm.pattern, Some(&subject.ty));
+            }
+        }
         walk_expr_mut(self, e);
-        e.ty = subst(&e.ty, self.map);
+        let declared = std::mem::replace(&mut e.ty, Ty::Unknown);
+        e.ty = subst(&declared, self.map);
         if let IrExprKind::Lambda { params, .. } = &mut e.kind {
             for (_, ty) in params.iter_mut() {
                 *ty = subst(ty, self.map);
             }
         }
-        self.erase_ctor_call(e);
+        self.erase_ctor_call(e, &declared);
         fold_unit_bind_match(e);
     }
 
     fn visit_stmt_mut(&mut self, s: &mut IrStmt) {
+        if let IrStmtKind::BindDestructure { pattern, value } = &mut s.kind {
+            self.erase_pattern(pattern, Some(&value.ty));
+        }
         walk_stmt_mut(self, s);
         if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
             *ty = subst(ty, self.map);
@@ -173,28 +184,83 @@ impl IrMutVisitor for Eraser<'_> {
         if let IrPattern::Bind { ty, .. } = p {
             *ty = subst(ty, self.map);
         }
-        // The 1-arg newtype ctor PATTERN always matches — it IS the inner.
-        let inner = match p {
-            IrPattern::Constructor { name, args }
-                if args.len() == 1 && self.map.contains_key(name.as_str()) =>
-            {
-                Some(args.remove(0))
-            }
-            _ => None,
-        };
-        if let Some(ip) = inner {
-            *p = ip;
-        }
     }
 }
 
 impl Eraser<'_> {
+    /// Is a constructor `name` at a position typed `ty` the newtype `name`'s
+    /// own constructor? The map is keyed by the bare type name, while a
+    /// user's variant may spell a case the same way — `| Path(String)` beside
+    /// `value`'s `mod type Path` (#4275): the position's type decides. A
+    /// position whose type is not known keeps the name's reading.
+    fn is_ctor_at(&self, name: &str, ty: Option<&Ty>) -> bool {
+        self.map.contains_key(name)
+            && match ty {
+                Some(Ty::Named(n, _)) => n.as_str() == name,
+                _ => true,
+            }
+    }
+
+    /// The 1-arg newtype ctor PATTERN always matches — it IS the inner.
+    /// `ty` is the type of the value the pattern meets (pre-erasure),
+    /// carried down through the shapes whose sub-position type is evident.
+    fn erase_pattern(&self, p: &mut IrPattern, ty: Option<&Ty>) {
+        let arg = |i: usize| match ty {
+            Some(Ty::Applied(_, args)) => args.get(i).cloned(),
+            _ => None,
+        };
+        match p {
+            IrPattern::Constructor { name, args } if args.len() == 1 && self.is_ctor_at(name, ty) => {
+                let target = self.map.get(name.as_str()).cloned();
+                let mut inner = args.remove(0);
+                self.erase_pattern(&mut inner, target.as_ref());
+                *p = inner;
+            }
+            IrPattern::Constructor { args, .. } => {
+                for a in args.iter_mut() {
+                    self.erase_pattern(a, None);
+                }
+            }
+            IrPattern::RecordPattern { fields, .. } => {
+                for f in fields.iter_mut() {
+                    if let Some(fp) = &mut f.pattern {
+                        self.erase_pattern(fp, None);
+                    }
+                }
+            }
+            IrPattern::Tuple { elements } => {
+                for (i, el) in elements.iter_mut().enumerate() {
+                    let et = match ty {
+                        Some(Ty::Tuple(ts)) => ts.get(i).cloned(),
+                        _ => None,
+                    };
+                    self.erase_pattern(el, et.as_ref());
+                }
+            }
+            IrPattern::Some { inner } | IrPattern::Ok { inner } => self.erase_pattern(inner, arg(0).as_ref()),
+            IrPattern::Err { inner } => self.erase_pattern(inner, arg(1).as_ref()),
+            IrPattern::As { inner, .. } => self.erase_pattern(inner, ty),
+            IrPattern::List { elements, rest } => {
+                let et = arg(0);
+                for el in elements.iter_mut() {
+                    self.erase_pattern(el, et.as_ref());
+                }
+                if let Some(r) = rest {
+                    self.erase_pattern(r, ty);
+                }
+            }
+            IrPattern::Wildcard | IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::None => {}
+        }
+    }
+
     /// The 1-arg newtype ctor CALL is its payload (same block, same
-    /// ownership — the arg was already visited).
-    fn erase_ctor_call(&self, e: &mut IrExpr) {
+    /// ownership — the arg was already visited). `declared` is the call's
+    /// type before erasure: a construction the checker typed as another
+    /// type's case is that case (#4275).
+    fn erase_ctor_call(&self, e: &mut IrExpr, declared: &Ty) {
         let is_ctor = matches!(&e.kind,
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
-                if args.len() == 1 && self.map.contains_key(name.as_str()));
+                if args.len() == 1 && self.is_ctor_at(name.as_str(), Some(declared)));
         if !is_ctor {
             return;
         }

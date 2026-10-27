@@ -1,34 +1,34 @@
 import json
 
 // json extra tests — get, keys, as_*, null, stringify_pretty, path API
-test "value.field existing key" {
-  let obj = value.object([("name", value.str("Alice"))])
-  let v = value.field(obj, "name")?
+test "value.get existing key" {
+  let obj = value.object([("name", value.string("Alice"))])
+  let v = value.get(obj, "name")
   assert_eq(option.is_some(v), true)
 }
 
-test "value.field missing key" {
-  let obj = value.object([("name", value.str("Alice"))])
-  let v = value.field(obj, "age")?
+test "value.get missing key" {
+  let obj = value.object([("name", value.string("Alice"))])
+  let v = value.get(obj, "age")
   assert_eq(option.is_none(v), true)
 }
 
-test "value.keys of object" {
+test "value.as_object of object" {
   let obj = value.object([("a", value.int(1)), ("b", value.int(2))])
-  let ks = value.keys(obj)
+  let ks = list.map(value.as_object(obj) ?? [], (kv) => kv.0)
   assert_eq(list.len(ks), 2)
   assert_eq(list.contains(ks, "a"), true)
   assert_eq(list.contains(ks, "b"), true)
 }
 
-test "value.keys of empty object" {
+test "value.as_object of empty object" {
   let obj = value.object([])
-  let ks = value.keys(obj)
+  let ks = list.map(value.as_object(obj) ?? [], (kv) => kv.0)
   assert_eq(list.len(ks), 0)
 }
 
 test "value.as_string on string value" {
-  let v = value.str("hello")
+  let v = value.string("hello")
   assert_eq(value.as_string(v)?, some("hello"))
 }
 
@@ -43,7 +43,7 @@ test "value.as_int on int value" {
 }
 
 test "value.as_int on non-int" {
-  let v = value.str("99")
+  let v = value.string("99")
   assert_eq(value.as_int(v)?, none)
 }
 
@@ -64,7 +64,7 @@ test "value.as_float on float value" {
 }
 
 test "value.as_float on non-float" {
-  let v = value.str("2.71")
+  let v = value.string("2.71")
   assert_eq(value.as_float(v)?, none)
 }
 
@@ -97,7 +97,7 @@ test "value.object empty" {
 }
 
 test "json.parse roundtrip array" {
-  let arr = value.array([value.str("a"), value.str("b")])
+  let arr = value.array([value.string("a"), value.string("b")])
   let text = json.stringify(arr)
   match json.parse(text) {
     ok(v) => {
@@ -111,7 +111,7 @@ test "json.parse roundtrip array" {
 test "json.parse nested object" {
   match json.parse('{"user": {"name": "Alice", "age": 30}}') {
     ok(v) => {
-      let user = value.field(v, "user")?
+      let user = value.get(v, "user")
       assert_eq(option.is_some(user), true)
     },
     err(_) => assert(false, "should parse"),
@@ -136,8 +136,8 @@ test "json.stringify_pretty on nested" {
   assert_eq(string.contains(s, "x"), true)
 }
 
-test "value.str empty" {
-  let v = value.str("")
+test "value.string empty" {
+  let v = value.string("")
   let s = json.stringify(v)
   assert_eq(s, '""')
 }

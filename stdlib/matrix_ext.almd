@@ -153,49 +153,6 @@ else {
   if k > 9223372036854775807 / in_ch then 9223372036854775807 else in_ch * k
 }
 
-fn matrix_conv1d(input: List[List[Float]], weight: List[List[Float]], bias: List[Float], kernel: Int, stride: Int, padding: Int) -> List[List[Float]] = {
-  let hin = prim.handle(input)
-  let hw = prim.handle(weight)
-  let t_in = prim.load32(hin + 4)
-  let out_ch = prim.load32(hw + 4)
-  if t_in == 0 or out_ch == 0 then __mxe_zeros(0, 0)
-  else {
-    let irow0 = prim.load64(hin + 12)
-    let in_ch = prim.load32(irow0 + 4)
-    let s = __mxe_stride(stride)
-    let k = if kernel < 0 then 0 else kernel
-    let p = if padding < 0 then 0 else padding
-    if p > 268435456 then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
-    // The weight row is `in_ch * kernel` taps wide and the bias has one entry
-    // per output channel: a short weight row or bias read past its block here
-    // and panicked natively.
-    let _w = __mxe_shape_eq(prim.load32(prim.load64(hw + 12) + 4), __mxe_taps(in_ch, k))
-    let _b = __mxe_shape_eq(prim.load32(prim.handle(bias) + 4), out_ch)
-    let t_padded = t_in + 2 * p
-    if t_padded < k then __mxe_zeros(0, 0)
-    else {
-      let t_out = (t_padded - k) / s + 1
-      let _d = __mxe_dims_guard(t_out, out_ch)
-      let out: List[List[Float]] = prim.alloc_list_str(t_out)
-      let _x = __cv_rows(
-        prim.handle(out),
-        hin,
-        hw,
-        prim.handle(bias),
-        t_in,
-        in_ch,
-        out_ch,
-        k,
-        s,
-        p,
-        t_out,
-        0,
-      )
-      out
-    }
-  }
-}
-
 // ── byte codecs (LE — wasm memory is little-endian, so an 8/4-byte store IS the
 //    to_le_bytes sequence) ──
 fn __tb64_row(bh: Int, rh: Int, c: Int, pos: Int, j: Int) -> Int = if j >= c then pos + c * 8
@@ -249,7 +206,7 @@ fn matrix_to_bytes_f32_le(m: List[List[Float]]) -> Bytes = {
   out
 }
 
-// from_bytes_f64_le: out-of-range (offset + rows*cols*8 > len) → zeros(rows, cols).
+// from_bytes_f64_le (C-341): `none` unless `0 <= off <= len` and `rows*cols*8 <= len - off`.
 fn __fb64_row(dh: Int, src: Int, c: Int, j: Int) -> Int = if j >= c then 0
 else {
   prim.store64(dh + 12 + j * 8, prim.load64(src + j * 8))
@@ -264,7 +221,11 @@ else {
   __fb64_rows(ho, base, r, c, i + 1)
 }
 
-fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+fn __fb64_none() -> List[List[Float]]? = none
+
+fn __fb64_some(m: List[List[Float]]) -> List[List[Float]]? = some(m)
+
+fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let bh = prim.handle(data)
   let len = prim.load32(bh + 4)
   // #1503: negative dims clamp to the empty matrix, negative offset is OOB —
@@ -278,10 +239,10 @@ fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   if r > 0 and c > 268435456 / r then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
   // C-341, SUBTRACTIVE (the f32/f16 twins in matrix_core carry the same
   // rewrite): the additive test wrapped for an offset near i64::MAX.
-  if offset < 0 or offset > len or r * c * 8 > len - offset then __mxe_zeros(r, c)
+  if offset < 0 or offset > len or r * c * 8 > len - offset then __fb64_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __fb64_rows(prim.handle(out), bh + 12 + offset, r, c, 0)
-    out
+    __fb64_some(out)
   }
 }

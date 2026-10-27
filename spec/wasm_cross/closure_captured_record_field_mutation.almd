@@ -39,7 +39,7 @@ effect fn main() -> Unit = {
   }
   str_once()
   let map_once = () => {
-    map.insert(h.m, "k", 3)
+    h.m = map.set(h.m, "k", 3)
   }
   map_once()
   let bytes_once = () => {

@@ -14,11 +14,11 @@ effect fn main() -> Unit = {
     name: "read_file",
     description: "Read the contents of a source file",
     parameters: value.object([
-      ("type", value.str("object")),
+      ("type", value.string("object")),
       ("properties", value.object([
-        ("path", value.object([("type", value.str("string")), ("description", value.str("File path to read"))]))
+        ("path", value.object([("type", value.string("string")), ("description", value.string("File path to read"))]))
       ])),
-      ("required", value.array([value.str("path")]))
+      ("required", value.array([value.string("path")]))
     ]),
   }
   let opts = almai.defaults() |> almai.with_system("You are a code reviewer. Review Almide source files for quality, correctness, and style.") |> almai.with_tools([read_file_tool])
@@ -40,7 +40,7 @@ effect fn main() -> Unit = {
       match json.parse(tc.arguments) {
         err(_) => println("Failed to parse tool arguments"),
         ok(args) => {
-          let path = json.get_string(args, "path") |> option.unwrap_or("examples/csv-to-json.almd")
+          let path = value.get_string(args, "path") |> option.unwrap_or("examples/csv-to-json.almd")
           match fs.read_text(path) {
             err(e) => println("Failed to read file: " + e),
             ok(content) => {

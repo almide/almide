@@ -6,9 +6,9 @@ Binary data manipulation. `import bytes`.
 Most operations are O(1) or O(n).
 
 For source scanners, convert once with `bytes.from_string(source)` and use
-`bytes.get_or(buffer, offset, -1)` while scanning. This uses compact `u8`
-storage on native; `string.to_bytes` instead returns `List[Int]` (`i64`
-elements). Neither conversion is a zero-copy borrowed view. To extract a
+`bytes.get(buffer, offset) ?? -1` while scanning. This uses compact `u8`
+storage on native; `bytes.to_list` of it gives a `List[Int]` (`i64`
+elements) instead. Neither conversion is a zero-copy borrowed view. To extract a
 UTF-8 token by its byte offsets, use `string.byte_slice(source, start, end)`.
 
 ## Naming convention
@@ -53,7 +53,6 @@ fn main() -> Unit = {
 | `bytes.is_empty(b) -> Bool` | Length == 0 |
 | `bytes.is_eof(b, i) -> Bool` | `i` is at or past the end |
 | `bytes.get(b, i) -> Int?` | Single byte |
-| `bytes.get_or(b, i, default) -> Int` | Single byte with fallback |
 | `bytes.compare(a, b) -> Int` | Lexicographic order |
 
 ## Slicing & combining
@@ -61,7 +60,7 @@ fn main() -> Unit = {
 | Signature | Purpose |
 |---|---|
 | `bytes.slice(b, start, end) -> Bytes` | Half-open slice |
-| `bytes.concat(a, b) -> Bytes` | Concatenate |
+| `a + b` | Concatenate (Bytes `+`, like String and List) |
 | `bytes.repeat(b, n) -> Bytes` | Repeat `n` times (bounded; an oversized result aborts) |
 | `bytes.chunk(b, n) -> List[Bytes]` | Pieces of `n` bytes; `n <= 0` aborts |
 | `bytes.pad_start(b, n, byte)` / `bytes.pad_end(b, n, byte)` | Pad to length `n` |
@@ -83,14 +82,13 @@ fn main() -> Unit = {
 Every cell of type × byte order × operation exists; `almide docs-gen --check`
 fails if one is missing. The signature index below lists each one.
 
-## Higher-level readers
+## Strings inside a buffer
 
-| Signature | Purpose |
+| Shape | Composition |
 |---|---|
-| `bytes.read_string_at(b, pos, len)` | UTF-8 substring of `len` bytes |
-| `bytes.read_length_prefixed_strings_le(b, pos, count)` | List of `count` length-prefixed strings |
-| `bytes.skip_length_prefixed_le(b, pos, count)` | The byte offset past `count` LE-length-prefixed records |
-| `bytes.write_string_be(b, s)` | Append a length-prefixed string |
+| `len` bytes at `pos` as text | `bytes.to_string_lossy(bytes.slice(b, pos, pos + len))` |
+| a u32-length-prefixed string at `pos` | `bytes.next_u32_le(b, pos)` (or `_be`), then `bytes.next_bytes(b, p, n)` |
+| append a u32-length-prefixed string | `bytes.append_u32_be(b, n)`, then `bytes.append_bytes(b, bytes.from_string(s))` |
 
 ## Pointer interop (deprecated — use `ffi`)
 
@@ -108,7 +106,7 @@ outside the memory-safety guarantee: each call is E100 in a file without
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (209 functions)
+## Signature index (183 functions)
 
 ```
 // Appends x rounded to f32, BE.
@@ -187,10 +185,6 @@ bytes.clear(mut b: Bytes) -> Unit
 // @since unreleased
 bytes.compare(a: Bytes, b: Bytes) -> Int
 
-// New Bytes holding a then b.
-// @since 0.9.3 or earlier
-bytes.concat(a: Bytes, b: Bytes) -> Bytes
-
 // True if needle occurs in b, or needle is empty.
 // @since 0.13.4 or earlier
 bytes.contains(b: Bytes, needle: Bytes) -> Bool
@@ -235,10 +229,6 @@ bytes.from_string(s: String) -> Bytes
 // @since 0.9.3 or earlier
 bytes.get(b: Bytes, i: Int) -> Option[Int]
 
-// Byte at index i, or default when out of range.
-// @since 0.9.3 or earlier
-bytes.get_or(b: Bytes, i: Int, default: Int) -> Int
-
 // First offset of needle, or none; some(0) if empty.
 // @since 0.13.4 or earlier
 bytes.index_of(b: Bytes, needle: Bytes) -> Option[Int]
@@ -258,10 +248,6 @@ bytes.is_valid_utf8(b: Bytes) -> Bool
 // Byte count; 0 for an empty buffer.
 // @since 0.9.3 or earlier
 bytes.len(b: Bytes) -> Int
-
-// Pieces split at LF; CR kept; a final LF adds no piece.
-// @since 0.13.4 or earlier
-bytes.lines(b: Bytes) -> List[Bytes]
 
 // f applied per byte; results cut to low 8 bits.
 // @since unreleased
@@ -283,33 +269,9 @@ bytes.pad_end(b: Bytes, n: Int, fill: Int) -> Bytes
 // @since 0.9.8 or earlier
 bytes.push(mut b: Bytes, x: Int) -> Unit
 
-// Sets byte i to val's low 8 bits; no-op out of range.
-// @since 0.22.0 or earlier
-bytes.set_at(mut b: Bytes, i: Int, val: Int) -> Unit
-
 // Copies src_start..src_end to dst; no-op if it won't fit.
 // @since 0.22.0 or earlier
 bytes.copy_within(mut b: Bytes, src_start: Int, src_end: Int, dst: Int) -> Unit
-
-// Up to count u32-LE-prefixed strings; stops if cut off.
-// @since 0.13.4 or earlier
-bytes.read_length_prefixed_strings_le(b: Bytes, pos: Int, count: Int) -> List[String]
-
-// len bytes at pos, lossy UTF-8; empty if out of range.
-// @since 0.13.4 or earlier
-bytes.read_string_at(b: Bytes, pos: Int, len: Int) -> String
-
-// String after a u32 BE length at pos; empty if cut off.
-// @since 0.11.0 or earlier
-bytes.read_string_be(b: Bytes, pos: Int) -> String
-
-// Cursor form of read_string_be; (pos, none) if cut off.
-// @since 0.15.0 or earlier
-bytes.read_string_be_at(b: Bytes, pos: Int) -> (Int, Option[String])
-
-// Byte at pos; 0 if out of range.
-// @since 0.11.0 or earlier
-bytes.read_u8(b: Bytes, pos: Int) -> Int
 
 // Copy without the byte at pos; as-is if out of range.
 // @since 0.13.4 or earlier
@@ -331,11 +293,7 @@ bytes.set(b: Bytes, i: Int, x: Int) -> Bytes
 // @since 0.13.4 or earlier
 bytes.skip(b: Bytes, pos: Int, n: Int) -> Int
 
-// Offset past count u32-LE-prefixed records.
-// @since 0.13.4 or earlier
-bytes.skip_length_prefixed_le(b: Bytes, pos: Int, count: Int) -> Int
-
-// Copy of start..end capped at len; empty if start >= end.
+// Copy of start..end, each clamped to 0..len; empty if start >= end.
 // @since 0.9.3 or earlier
 bytes.slice(b: Bytes, start: Int, end: Int) -> Bytes
 
@@ -346,6 +304,13 @@ bytes.split(b: Bytes, sep: Bytes) -> List[Bytes]
 // True if b begins with prefix, or prefix is empty.
 // @since 0.13.4 or earlier
 bytes.starts_with(b: Bytes, prefix: Bytes) -> Bool
+
+// True if a and b hold the same bytes, in time that depends only on their
+// lengths: no early exit on the first differing byte. Use it to compare a
+// MAC, token or password hash; `==` returns at the first difference. A length
+// mismatch is false at once (lengths are public).
+// @since unreleased
+bytes.is_equal_constant_time(a: Bytes, b: Bytes) -> Bool
 
 // Each byte as an Int in 0..255.
 // @since 0.9.3 or earlier
@@ -363,77 +328,9 @@ bytes.to_string_lossy(b: Bytes) -> String
 // @since unreleased
 bytes.append_bool(mut b: Bytes, x: Bool) -> Unit
 
-// Appends val as 8-byte f64, BE.
-// @since 0.11.0 or earlier
-bytes.write_f64_be(mut b: Bytes, val: Float) -> Unit
-
-// Appends val as 8 bytes, BE.
-// @since 0.11.0 or earlier
-bytes.write_i64_be(mut b: Bytes, val: Int) -> Unit
-
-// Appends s after a u32 BE byte-length prefix.
-// @since 0.11.0 or earlier
-bytes.write_string_be(mut b: Bytes, s: String) -> Unit
-
-// Appends val's low 32 bits, BE.
-// @since 0.11.0 or earlier
-bytes.write_u32_be(mut b: Bytes, val: Int) -> Unit
-
-// Appends val's low 8 bits; 256 becomes 0.
-// @since 0.11.0 or earlier
-bytes.write_u8(mut b: Bytes, val: Int) -> Unit
-
 // Bytewise XOR, as long as the shorter input.
 // @since 0.13.4 or earlier
 bytes.xor(a: Bytes, b: Bytes) -> Bytes
-
-// UInt16 at offset; 0 if out of range.
-// @since 0.15.0 or earlier
-bytes.read_uint16(b: Bytes, offset: Int, endian: Endian) -> UInt16
-
-// UInt32 at offset; 0 if out of range.
-// @since 0.15.0 or earlier
-bytes.read_uint32(b: Bytes, offset: Int, endian: Endian) -> UInt32
-
-// Int32 at offset; 0 if out of range.
-// @since 0.15.0 or earlier
-bytes.read_int32(b: Bytes, offset: Int, endian: Endian) -> Int32
-
-// Float32 at offset; 0 if out of range.
-// @since 0.15.0 or earlier
-bytes.read_float32(b: Bytes, offset: Int, endian: Endian) -> Float32
-
-// Appends value as 2 bytes in endian order.
-// @since 0.15.0 or earlier
-bytes.write_uint16(mut b: Bytes, value: UInt16, endian: Endian) -> Unit
-
-// Appends value as 4 bytes in endian order.
-// @since 0.15.0 or earlier
-bytes.write_uint32(mut b: Bytes, value: UInt32, endian: Endian) -> Unit
-
-// Appends value as 4 bytes in endian order.
-// @since 0.15.0 or earlier
-bytes.write_int32(mut b: Bytes, value: Int32, endian: Endian) -> Unit
-
-// Appends value as 4 bytes in endian order.
-// @since 0.15.0 or earlier
-bytes.write_float32(mut b: Bytes, value: Float32, endian: Endian) -> Unit
-
-// Writes value at offset; no-op out of range.
-// @since 0.15.0 or earlier
-bytes.set_uint16(mut b: Bytes, offset: Int, value: UInt16, endian: Endian) -> Unit
-
-// Writes value at offset; no-op out of range.
-// @since 0.15.0 or earlier
-bytes.set_uint32(mut b: Bytes, offset: Int, value: UInt32, endian: Endian) -> Unit
-
-// Writes value at offset; no-op out of range.
-// @since 0.15.0 or earlier
-bytes.set_int32(mut b: Bytes, offset: Int, value: Int32, endian: Endian) -> Unit
-
-// Writes value at offset; no-op out of range.
-// @since 0.15.0 or earlier
-bytes.set_float32(mut b: Bytes, offset: Int, value: Float32, endian: Endian) -> Unit
 
 // The byte at pos as 0..255; none outside 0..len. The same value as get.
 // @since unreleased
@@ -759,23 +656,23 @@ bytes.chunk(b: Bytes, n: Int) -> List[Bytes]
 // @since unreleased
 bytes.pop(mut b: Bytes) -> Option[Int]
 
-// The first n bytes; all of b past its length; n < 0 aborts.
+// The first n bytes; all of b past its length; empty if n < 0.
 // @since unreleased
 bytes.take(b: Bytes, n: Int) -> Bytes
 
-// b without its first n bytes; empty past its length; n < 0 aborts.
+// b without its first n bytes; empty past its length; all of b if n < 0.
 // @since unreleased
 bytes.drop(b: Bytes, n: Int) -> Bytes
 
-// The last n bytes; all of b past its length; n < 0 aborts.
+// The last n bytes; all of b past its length; empty if n < 0.
 // @since unreleased
 bytes.take_end(b: Bytes, n: Int) -> Bytes
 
-// b without its last n bytes; empty past its length; n < 0 aborts.
+// b without its last n bytes; empty past its length; all of b if n < 0.
 // @since unreleased
 bytes.drop_end(b: Bytes, n: Int) -> Bytes
 
-// (first n bytes, the rest); n past the end gives (b, empty); n < 0 aborts.
+// (first n bytes, the rest); n past the end gives (b, empty), n < 0 gives (empty, b).
 // @since unreleased
 bytes.split_at(b: Bytes, n: Int) -> (Bytes, Bytes)
 
@@ -946,14 +843,6 @@ bytes.strip_suffix(b: Bytes, suffix: Bytes) -> Option[Bytes]
 // Non-overlapping occurrences of needle; len + 1 for an empty needle.
 // @since unreleased
 bytes.count_matches(b: Bytes, needle: Bytes) -> Int
-```
-
-## Type index (1 types)
-
-```
-// Byte order: LittleEndian or BigEndian.
-// @since 0.15.0 or earlier
-type bytes.Endian = LittleEndian | BigEndian
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

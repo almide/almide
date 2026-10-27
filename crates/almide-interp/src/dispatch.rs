@@ -163,25 +163,12 @@ impl<'a> Interpreter<'a> {
     /// Step 2 of [`Self::eval_named_call`]: the pure lookups between the
     /// builtins and the flat fn table. `None` = none of them claims `name`.
     fn eval_named_ctor_or_sibling(&mut self, name: Sym, args: &[IrExpr], scope: &Scope) -> Option<Flow> {
-        let n = name.as_str();
         // 2a. Variant constructor (Unit / Tuple). Record-variant ctors arrive
         //     as `Record` nodes, handled in eval. Look up in the registry.
         if let Some((ty_name, kind)) = self.variant_ctor(name) {
             return Some(self.eval_variant_ctor_call(ty_name, name, kind, args, scope));
         }
-        // 2b. The stdlib's only BUNDLED variant type (bytes.Endian): its decl
-        //     lives in the bundled module, never in the program, so the ctor
-        //     registry above misses it. The checker already typed the ctor —
-        //     build the variant value directly (the same value the inplace
-        //     tier's `endian_is_big` and the bytes read bridge dispatch on).
-        if args.is_empty() && matches!(n, "LittleEndian" | "BigEndian") {
-            return Some(Flow::val(Value::Variant {
-                ty: None,
-                ctor: name,
-                payload: VariantPayload::Unit,
-            }));
-        }
-        // 2c. An opaque NEWTYPE's constructor (`SafeHtml(s)`, `Value(s)` under
+        // 2b. An opaque NEWTYPE's constructor (`SafeHtml(s)`, `Value(s)` under
         //     its `self.Value` identity, #1835): both backends erase the
         //     wrapper — the value IS its payload — so the call is an identity
         //     on its one argument. Registered by name from the program's
@@ -189,7 +176,7 @@ impl<'a> Interpreter<'a> {
         if args.len() == 1 && self.newtype_ctors.contains(&name) {
             return Some(self.eval_expr(&args[0], scope));
         }
-        // 2d. Inside a LOWERED MODULE body, a bare sibling call resolves
+        // 2c. Inside a LOWERED MODULE body, a bare sibling call resolves
         //     against the executing module FIRST (#1844) — the scope the
         //     checker bound it in — before the flat table and before the
         //     unique-definer rule of step 4: `to_string(a)` inside
@@ -219,6 +206,9 @@ impl<'a> Interpreter<'a> {
     /// module's own definition of `name`, when a module body is executing
     /// (`cur_space`) and its module defines the name.
     pub(crate) fn own_module_sibling(&self, name: Sym) -> Option<&'a almide_ir::IrFunction> {
+        if let Some(module) = self.cur_bundled.get() {
+            return self.bundled_fn(module, name);
+        }
         let space = self.cur_space.get();
         let owner = self.program.modules.get(space.checked_sub(1)? as usize)?.name;
         self.module_fns.get(&(owner, name)).copied()

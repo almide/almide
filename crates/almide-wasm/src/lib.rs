@@ -101,6 +101,7 @@ fn unsup<T>(what: &str) -> Result<T, EmitError> {
 
 mod bytes;
 mod bytes_append;
+mod kmp;
 mod fan_par;
 pub mod decline_site;
 mod imports;
@@ -134,6 +135,7 @@ mod map_inplace;
 mod map_holes;
 mod map_index;
 mod map_merge;
+mod map_ordered;
 mod map_remove;
 mod set_insert;
 mod program_tables;
@@ -147,6 +149,7 @@ mod patterns;
 mod prim;
 mod runtime;
 mod runtime_alloc;
+mod deep_walk;
 mod runtime_large;
 mod runtime_line;
 mod line_bounded;
@@ -199,7 +202,6 @@ mod fs_meta;
 mod host_env;
 mod host_read_all;
 mod host_read_line;
-mod json_path_helpers;
 mod newtype;
 mod arg_rebind;
 mod arg_temps;
@@ -478,8 +480,8 @@ enum SliceTy {
     /// `Map[K, V]` — i32 block; payload = INSERTION-ORDERED (k, v) entries
     /// (the oracle's semantics), entry layout from `pack_fields`. Keys are
     /// scalars (equality must be defined); values any slice type. Same
-    /// no-in-place-mutation doctrine: binds deep-copy, `map.insert`'s mut
-    /// form is a var write-back.
+    /// no-in-place-mutation doctrine: binds deep-copy, the in-place
+    /// `m[k] = v` form is a var write-back.
     Map(ETy, ETy),
     /// `Set[T]` — i32 block; an insertion-ordered element vector with the
     /// dedup-on-insert invariant (layout-identical to List[T]).

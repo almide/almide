@@ -10,7 +10,7 @@
 // rewrite the Float shape (and failed IR verification doing it).
 fn neg_zero(n: Int) -> Float = if n < 2 then -0.0 else neg_zero(n - 1) + neg_zero(n - 2)
 
-fn rounded(n: Int) -> Float = if n < 2 then 0.1 * int.to_float(n) + 0.3 else rounded(n - 1) + rounded(n - 2)
+fn rounded(n: Int) -> Float = if n < 2 then 0.1 * float.from(n) + 0.3 else rounded(n - 1) + rounded(n - 2)
 
 // String `+` is concatenation: associative but not commutative.
 fn word(n: Int) -> String = if n < 2 then "${n}" else word(n - 1) + word(n - 2)

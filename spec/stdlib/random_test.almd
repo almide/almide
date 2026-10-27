@@ -134,10 +134,10 @@ test "random.float stays below 1.0 over many draws (#2495)" {
 // u64::MAX as f64 — 2^64 after rounding — and the top 1024 u64 draws each came
 // out exactly 1.0.
 test "the 53-bit float construction tops out below 1.0 (#2495)" {
-  let top = int.to_float(9007199254740991) / 9007199254740992.0
+  let top = float.from(9007199254740991) / 9007199254740992.0
   assert(top < 1.0)
   assert(top > 0.9999999999999)
-  assert(int.to_float(0) / 9007199254740992.0 == 0.0)
+  assert(float.from(0) / 9007199254740992.0 == 0.0)
 }
 
 test "random.float multiple calls succeed" {

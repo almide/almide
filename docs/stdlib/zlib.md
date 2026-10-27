@@ -1,11 +1,13 @@
 # zlib
 
-DEFLATE compression in its three container formats. `import zlib`, `effect fn`.
+DEFLATE compression in its three container formats. `import zlib`.
 
-Every function is an `effect fn` returning `Bytes`, so calls sit in an
-`effect fn` and propagate failure with `?`. Compression itself is
-deterministic, but the calls are effectful because they go through the host
-zlib library rather than a self-hosted implementation.
+The decoders (`decompress`, `inflate`, `gunzip` and their `_max` forms) are
+plain fns returning `Result[Bytes, String]`: decoding is a pure transform whose
+output is byte-identical on both targets, so a pure fn may call them (R-zlib-02).
+The compressors stay `effect fn`s: native goes through the host zlib library,
+whose compressed bytes differ from the wasm legs', so their output is not a
+pure function of the input.
 
 **Both targets.** The wasm legs carry a self-hosted zlib (#1700, C-331 —
 `stdlib/zlib_inflate.almd` and `stdlib/zlib_deflate.almd`): every entry point
@@ -23,7 +25,7 @@ Three container formats share one DEFLATE core, and they are NOT interchangeable
 | raw DEFLATE (RFC 1951) | `deflate` | `inflate` |
 | gzip (RFC 1952) | `gzip` | `gunzip` |
 
-### `effect zlib.compress(data: Bytes) -> Bytes`
+### `effect zlib.compress(b: Bytes) -> Bytes`
 
 zlib container, default level.
 
@@ -31,51 +33,51 @@ zlib container, default level.
 effect fn pack(b: Bytes) -> Result[Bytes, String] = ok(zlib.compress(b))
 ```
 
-### `effect zlib.compress_level(data: Bytes, level: Int) -> Bytes`
+### `effect zlib.compress_level(b: Bytes, level: Int) -> Bytes`
 
 zlib container at an explicit level, 0 (store) to 9 (smallest).
 
-### `effect zlib.decompress(data: Bytes) -> Bytes`
+### `zlib.decompress(b: Bytes) -> Result[Bytes, String]`
 
 Inverse of `compress`.
 
-### `effect zlib.deflate(data: Bytes) -> Bytes`
+### `effect zlib.deflate(b: Bytes) -> Bytes`
 
 Raw DEFLATE — no header, no checksum. What you want when an outer format
 already frames the stream.
 
-### `effect zlib.deflate_level(data: Bytes, level: Int) -> Bytes`
+### `effect zlib.deflate_level(b: Bytes, level: Int) -> Bytes`
 
 Raw DEFLATE at an explicit level.
 
-### `effect zlib.inflate(data: Bytes) -> Bytes`
+### `zlib.inflate(b: Bytes) -> Result[Bytes, String]`
 
 Inverse of `deflate`.
 
-### `effect zlib.gzip(data: Bytes) -> Bytes`
+### `effect zlib.gzip(b: Bytes) -> Bytes`
 
 gzip container — the on-disk `.gz` format, and `Content-Encoding: gzip`.
 
-### `effect zlib.gunzip(data: Bytes) -> Bytes`
+### `zlib.gunzip(b: Bytes) -> Result[Bytes, String]`
 
 Inverse of `gzip`.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (13 functions)
+## Signature index (11 functions)
 
 ```
-// Zlib-framed DEFLATE of data; bytes vary by target.
+// Zlib-framed DEFLATE of b; bytes vary by target.
 // @since 0.20.0 or earlier
-effect zlib.compress(data: Bytes) -> Bytes
+effect zlib.compress(b: Bytes) -> Bytes
 
 // Like compress; level clamped to 0..9, unused on wasm.
 // @since 0.20.0 or earlier
-effect zlib.compress_level(data: Bytes, level: Int) -> Bytes
+effect zlib.compress_level(b: Bytes, level: Int) -> Bytes
 
-// Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
+// Inflated zlib stream; err on corrupt input, bytes after it, or output over 268435456 bytes.
 // @since 0.20.0 or earlier
-effect zlib.decompress(data: Bytes) -> Bytes
+zlib.decompress(b: Bytes) -> Result[Bytes, String]
 
 // Like decompress, output bound max_len bytes; max_len <= 0 aborts.
 // @since unreleased
@@ -83,39 +85,31 @@ zlib.decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String]
 
 // Raw DEFLATE, no header; bytes vary by target.
 // @since 0.20.0 or earlier
-effect zlib.deflate(data: Bytes) -> Bytes
+effect zlib.deflate(b: Bytes) -> Bytes
 
 // Like deflate; level clamped to 0..9, unused on wasm.
 // @since 0.20.0 or earlier
-effect zlib.deflate_level(data: Bytes, level: Int) -> Bytes
+effect zlib.deflate_level(b: Bytes, level: Int) -> Bytes
 
-// Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
+// Raw DEFLATE decoded; err on a corrupt stream, bytes after it, or output over 268435456 bytes.
 // @since 0.20.0 or earlier
-effect zlib.inflate(data: Bytes) -> Bytes
+zlib.inflate(b: Bytes) -> Result[Bytes, String]
 
 // Like inflate, output bound max_len bytes; max_len <= 0 aborts.
 // @since unreleased
 zlib.inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String]
 
-// RFC 1952 gzip of data; bytes vary by target.
+// RFC 1952 gzip of b; bytes vary by target.
 // @since 0.20.0 or earlier
-effect zlib.gzip(data: Bytes) -> Bytes
+effect zlib.gzip(b: Bytes) -> Bytes
 
 // Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.
 // @since 0.20.0 or earlier
-effect zlib.gunzip(data: Bytes) -> Bytes
+zlib.gunzip(b: Bytes) -> Result[Bytes, String]
 
 // Like gunzip, output bound max_len bytes (all members); max_len <= 0 aborts.
 // @since unreleased
 zlib.gunzip_max(b: Bytes, max_len: Int) -> Result[Bytes, String]
-
-// CRC-32 (IEEE) as an unsigned Int; 0 for empty data.
-// @since 0.62.0
-zlib.crc32(data: Bytes) -> Int
-
-// Adler-32 as an unsigned Int; 1 for empty data.
-// @since 0.62.0
-zlib.adler32(data: Bytes) -> Int
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->

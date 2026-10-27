@@ -14,10 +14,10 @@ fn almide() -> String {
 
 const SRC: &str = r#"
 fn row(v: List[Float], n: Int) -> Float =
-  list.fold(0..<n, 0.0, (acc, j) => acc + float.from_int(j) * v[j])
+  list.fold(0..<n, 0.0, (acc, j) => acc + float.from(j) * v[j])
 
 fn rows(v: List[Float], n: Int) -> List[Float] =
-  list.map(0..<n, (i) => row(v, n) + float.from_int(i))
+  list.map(0..<n, (i) => row(v, n) + float.from(i))
 
 fn incl(n: Int) -> Int = list.fold(0...n, 0, (a, x) => a + x)
 

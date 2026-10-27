@@ -1,0 +1,23 @@
+// @contract: C-328
+// The userinfo password in the connect class (#4205): a closed port, so the
+// text names the URL with the password read as `***` (an empty one too),
+// a user name with no `:` kept, and the query and fragment verbatim — the
+// same class and text on native, the embedded lane and the stock p3
+// component, whose shim strips the userinfo from the authority it hands the
+// host as rt-core does (tests/http_error_class_cross_test.rs runs all three
+// and refuses any output holding the password).
+import http
+
+fn show(tag: String, r: Result[String, String]) -> Unit = {
+  match r {
+    ok(_) => println("${tag}: unexpected ok"),
+    err(e) => println("${tag}: ${e}"),
+  }
+}
+
+effect fn main() -> Unit = {
+  show("password", http.get("http://alice:s3cret@127.0.0.1:9/p?token=abc123&x=1#frag"))
+  show("user-only", http.get("http://alice@127.0.0.1:9/p?token=abc123"))
+  show("empty-password", http.get("http://alice:@127.0.0.1:9/p"))
+  show("framed", http.request("PUT", "http://alice:s3cret@127.0.0.1:9/x", "y", [("X-Ok", "fine")]))
+}

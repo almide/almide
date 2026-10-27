@@ -14,7 +14,7 @@ use std::process::Command;
 const FOLD_ARG: &str = r#"effect fn main() -> Unit = {
   println("${bytes.len(list.fold([1, 2], bytes.zeros(3), (acc, x) => acc))}")
   println("${matrix.rows(list.fold([1, 2], matrix.zeros(3, 1), (acc, x) => acc))}")
-  println("${bytes.len(list.fold([1, 2], bytes.zeros(3), (acc, x) => bytes.concat(acc, bytes.zeros(x))))}")
+  println("${bytes.len(list.fold([1, 2], bytes.zeros(3), (acc, x) => acc + bytes.zeros(x)))}")
   println("${bytes.is_eof(list.fold([true, false], bytes.from_list([100, 100]), (b, t) => bytes.from_list([1])), 7)}")
 }
 "#;

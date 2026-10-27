@@ -790,9 +790,9 @@ fn main() -> Unit = {
   row_uint64(9223372036854775807)
   row_uint64(9223372036854775808)
   row_uint64(18446744073709551615)
-  row_float32(float.to_float32(0.1))
-  row_float32(float.to_float32(2.0))
-  row_float32(float.to_float32(-123.456))
+  row_float32(float32.from(0.1))
+  row_float32(float32.from(2.0))
+  row_float32(float32.from(-123.456))
   let hi_int8: Int8 = 127
   println("main_line_int8: ${hi_int8}")
   println("${hi_int8}")
@@ -814,7 +814,7 @@ fn main() -> Unit = {
   let hi_uint64: UInt64 = 18446744073709551615
   println("main_line_uint64: ${hi_uint64}")
   println("${hi_uint64}")
-  let hi_float32: Float32 = float.to_float32(-123.456)
+  let hi_float32: Float32 = float32.from(-123.456)
   println("main_line_float32: ${hi_float32}")
   println("${hi_float32}")
   let bu: Box[UInt64] = Box { v: hi_uint64 }
@@ -822,9 +822,9 @@ fn main() -> Unit = {
   let bi2: Box[Int] = Box { v: -2 }
   let bu2: Box[UInt64] = Box { v: hi_uint64 }
   println("shared box: ${bu} ${bi} ${bi2} ${bu2}")
-  let tf: Tree[Float32] = Node(Leaf, float.to_float32(0.1))
+  let tf: Tree[Float32] = Node(Leaf, float32.from(0.1))
   let td: Tree[Float] = Node(Leaf, 0.1 + 0.2)
   let td2: Tree[Float] = Node(Leaf, 0.1)
-  let tf2: Tree[Float32] = Node(Leaf, float.to_float32(0.1 + 0.2))
+  let tf2: Tree[Float32] = Node(Leaf, float32.from(0.1 + 0.2))
   println("shared tree: ${tf} ${td} ${td2} ${tf2}")
 }

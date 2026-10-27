@@ -1,50 +1,52 @@
 // Coverage tests for int stdlib functions
 test "int.wrap_add" {
-  assert(int.wrap_add(255, 1, 8) == 0)
-  assert(int.wrap_add(100, 200, 16) == 300)
+  assert(int.wrap_add(100, 200) == 300)
+  assert_eq(int.wrap_add(int.max_value(), 1), int.min_value())
+  assert(int.wrap(int.wrap_add(255, 1), 8) == 0)
 }
 
 test "int.wrap_mul" {
-  assert(int.wrap_mul(2, 3, 8) == 6)
-  assert(int.wrap_mul(16, 16, 8) == 0)
+  assert(int.wrap_mul(2, 3) == 6)
+  assert_eq(int.wrap_mul(4294967296, 4294967296), 0)
+  assert(int.wrap(int.wrap_mul(16, 16), 8) == 0)
 }
 
 test "int.rotate_right" {
-  assert_eq(int.rotate_right(1, 1, 8), 128)
-  assert_eq(int.rotate_right(128, 1, 8), 64)
+  assert_eq(int.rotate_right(1, 1), int.min_value())
+  assert_eq(int.rotate_right(128, 1), 64)
 }
 
 test "int.rotate_left" {
-  assert_eq(int.rotate_left(1, 1, 8), 2)
-  assert_eq(int.rotate_left(128, 1, 8), 1)
+  assert_eq(int.rotate_left(1, 1), 2)
+  assert_eq(int.rotate_left(int.min_value(), 1), 1)
+  assert_eq(int.rotate_left(-1, 5), -1)
 }
 
-// #2492 — the count is reduced into [0, bits) Euclidean-ly: a negative count
+// #2492 — the count is reduced into [0, 64) Euclidean-ly: a negative count
 // rotates the other way (it used to become an over-wide shift and return 0).
 test "int.rotate_* with a negative count rotates the other way" {
-  assert_eq(int.rotate_left(1, -1, 8), 128)
-  assert_eq(int.rotate_right(1, -1, 8), 2)
-  assert_eq(int.rotate_left(1, -9, 8), 128)
-  assert_eq(int.rotate_right(128, -1, 8), 1)
-  assert_eq(int.rotate_left(1, -1, 64), -9223372036854775808)
-  assert_eq(int.rotate_right(1, -63, 64), -9223372036854775808)
-  assert_eq(int.rotate_left(1, -64, 64), 1)
+  assert_eq(int.rotate_left(1, -1), int.min_value())
+  assert_eq(int.rotate_right(1, -1), 2)
+  assert_eq(int.rotate_left(1, -65), int.min_value())
+  assert_eq(int.rotate_right(int.min_value(), -1), 1)
+  assert_eq(int.rotate_right(1, -63), int.min_value())
+  assert_eq(int.rotate_left(1, -64), 1)
 }
 
-test "int.to_u32" {
-  assert_eq(int.to_u32(255), 255)
-  assert_eq(int.to_u32(0), 0)
-  assert_eq(int.to_u32(4294967296), 0)
+test "int.wrap 32" {
+  assert_eq(int.wrap(255, 32), 255)
+  assert_eq(int.wrap(0, 32), 0)
+  assert_eq(int.wrap(4294967296, 32), 0)
 }
 
-test "int.to_u8" {
-  assert_eq(int.to_u8(255), 255)
-  assert_eq(int.to_u8(256), 0)
-  assert_eq(int.to_u8(300), 44)
+test "int.wrap 8" {
+  assert_eq(int.wrap(255, 8), 255)
+  assert_eq(int.wrap(256, 8), 0)
+  assert_eq(int.wrap(300, 8), 44)
 }
 
-test "int.bits_to_float" {
-  assert_eq(int.bits_to_float(4607182418800017408), 1.0)
-  assert_eq(int.bits_to_float(0), 0.0)
-  assert_eq(float.to_bits(int.bits_to_float(4614253070214989087)), 4614253070214989087)
+test "float.from_bits" {
+  assert_eq(float.from_bits(4607182418800017408), 1.0)
+  assert_eq(float.from_bits(0), 0.0)
+  assert_eq(float.to_bits(float.from_bits(4614253070214989087)), 4614253070214989087)
 }

@@ -42,7 +42,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 
 ## モジュールのページ
 
-[args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
+[args](L2-args.md) ・ [base64](L2-base64.md) ・ [bigint](L2-bigint.md) ・ [bool](L2-bool.md) ・ [bytes](L2-bytes.md) ・ [compute](L2-compute.md) ・ [datetime](L2-datetime.md) ・ [deque](L2-deque.md) ・ [duration](L2-duration.md) ・ [env](L2-env.md) ・ [error](L2-error.md) ・ [ffi](L2-ffi.md) ・ [float](L2-float.md) ・ [fs](L2-fs.md) ・ [hash](L2-hash.md) ・ [heap](L2-heap.md) ・ [hex](L2-hex.md) ・ [html](L2-html.md) ・ [http](L2-http.md) ・ [int](L2-int.md) ・ [io](L2-io.md) ・ [json](L2-json.md) ・ [list](L2-list.md) ・ [map](L2-map.md) ・ [math](L2-math.md) ・ [matrix](L2-matrix.md) ・ [net](L2-net.md) ・ [option](L2-option.md) ・ [path](L2-path.md) ・ [process](L2-process.md) ・ [random](L2-random.md) ・ [regex](L2-regex.md) ・ [result](L2-result.md) ・ [secret](L2-secret.md) ・ [set](L2-set.md) ・ [sized-numbers](L2-sized-numbers.md) ・ [string](L2-string.md) ・ [testing](L2-testing.md) ・ [unix](L2-unix.md) ・ [url](L2-url.md) ・ [uuid](L2-uuid.md) ・ [value](L2-value.md) ・ [zlib](L2-zlib.md)
 
 ## 案の状態（全 356 件: ○ 291・× 61・保留 4）
 
@@ -96,6 +96,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-L0-45](L0-conventions.md#r-l0-45-メモリ安全でない標準の関数は-ffiread-と-ffiwrite-の-2-つだけにする---採用) | メモリ安全でない標準の関数は `ffi.read` と `ffi.write` の 2 つだけにする | ○ | #4008、#4013 |
 | [R-L0-46](L0-conventions.md#r-l0-46-位置を受け取る関数を全数で表にし役割の規則r-l0-33をゲートにする---採用) | 位置を受け取る関数を全数で表にし、役割の規則（R-L0-33）をゲートにする | ○ | #4005 |
 | [R-L0-47](L0-conventions.md#r-l0-47-信頼しない入力を読む関数は時間と大きさに上限を持つ---採用) | 信頼しない入力を読む関数は、時間と大きさに上限を持つ | ○ | #4019、#4020 |
+| [R-L0-48](L0-conventions.md#r-l0-48-codec-の入力-フィールドを読まない属性decode_strictフィールドの属性の語彙---採用) | Codec の入力: フィールドを読まない属性・`decode_strict`・フィールドの属性の語彙 | ○ | #4108 |
 | [R-L0-G](L0-conventions.md#ゲートの束r-l0-g---採用) | ゲートの束（R-L0-G） | ○ | #3949 |
 | [R-L1-01](L1-categories.md#r-l1-01-両端キュー-deque---採用) | 両端キュー `deque` | ○ | #3932 |
 | [R-L1-02](L1-categories.md#r-l1-02-優先度キュー-heap---採用) | 優先度キュー `heap` | ○ | #3933 |
@@ -159,6 +160,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-bytes-26](L2-bytes.md#r-bytes-26-bytesget_u8-と-getappend_u8-と-push-を-1-つにする---不採用役割の違いを明記) | `bytes.get_u8` と `get`、`append_u8` と `push` を 1 つにする | × | なし |
 | [R-bytes-27](L2-bytes.md#r-bytes-27-bytes-に-text-の要件をそろえる---採用) | `bytes` に `Text` の要件をそろえる | ○ | #4012 |
 | [R-bytes-28](L2-bytes.md#r-bytes-28-bytesnewlen-を-byteszerosn-に改名しbytesnew-を空のバイト列にする---採用) | `bytes.new(len)` を `bytes.zeros(n)` に改名し、`bytes.new()` を空のバイト列にする | ○ | #4012 |
+| [R-bytes-29](L2-bytes.md#r-bytes-29-定数時間の比較-bytesis_equal_constant_time-を置く---採用) | 定数時間の比較 `bytes.is_equal_constant_time` を置く | ○ | #4106 |
 | [R-compute-01](L2-compute.md#r-compute-01-computecompare-を足す---採用) | `compute.compare` を足す | ○ | #3902 |
 | [R-compute-02](L2-compute.md#r-compute-02-duration-と統合するまたは読み出し関数を足す---不採用) | `duration` と統合する、または読み出し関数を足す | × | — |
 | [R-compute-03](L2-compute.md#r-compute-03-compute-を共通のプロトコル-timeamount-に従わせる---採用) | `Compute` を共通のプロトコル `TimeAmount` に従わせる | ○ | #3964 |
@@ -182,6 +184,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-env-02](L2-env.md#r-env-02-envvars-と-envremove-を足す---採用) | `env.vars` と `env.remove` を足す | ○ | #3908 |
 | [R-env-03](L2-env.md#r-env-03-envget-を--で受ける形を自前の-effect-fn-と同じにする---採用r-l0-17-に従う) | `env.get` を `??` で受ける形を、自前の effect fn と同じにする | ○ | #3900 |
 | [R-env-04](L2-env.md#r-env-04-待ち時間タイムアウトの引数を-duration-にする---不採用) | 待ち時間・タイムアウトの引数を `Duration` にする | × | なし |
+| [R-env-05](L2-env.md#r-env-05-資格情報を-secretstring-で読む-envsecret-を足す---採用2026-10-26) | 資格情報を `Secret[String]` で読む `env.secret` を足す | ○ | なし |
 | [R-error-01](L2-error.md#r-error-01-errorcontexterrormessageerrorchain-を撤去しerror-モジュールを閉じる---採用) | `error.context`・`error.message`・`error.chain` を撤去し、`error` モジュールを閉じる | ○ | #3909 |
 | [R-error-02](L2-error.md#r-error-02-errorcontext-を-resultcontext-として残す---不採用) | `error.context` を `result.context` として残す | × | — |
 | [R-ffi-01](L2-ffi.md#r-ffi-01-ffi-を作りbytes-の生ポインタ-5-関数を移す---採用) | `ffi` を作り、`bytes` の生ポインタ 5 関数を移す | ○ | #3853 |
@@ -207,6 +210,8 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-hash-03](L2-hash.md#r-hash-03-md5sha-1sha-512-を足す---採用) | MD5・SHA-1・SHA-512 を足す | ○ | #3915 |
 | [R-hash-04](L2-hash.md#r-hash-04-_hex-のセルの入力を-bytes-に変える---不採用-r-hash-05-で採用に変更) | `_hex` のセルの入力を Bytes に変える | ×（→ R-hash-05） | — |
 | [R-hash-05](L2-hash.md#r-hash-05-_hex-も-bytes-を受け取る完全性の規則-2-の見直し---採用) | `_hex` も `Bytes` を受け取る（完全性の規則 2 の見直し） | ○ | #3985 |
+| [R-hash-06](L2-hash.md#r-hash-06-hmac-と定数時間の比較を-hash-に置く完全性の規則-4-の見直し---採用) | HMAC と定数時間の比較を `hash` に置く（完全性の規則 4 の見直し） | ○ | #4106 |
+| [R-hash-07](L2-hash.md#r-hash-07-秘密は-secret-で受け渡し壊れた要約を撤去するr-hash-03r-hash-06-の見直し---採用2026-10-26) | 秘密は `Secret` で受け渡し、壊れた要約を撤去する（R-hash-03・R-hash-06 の見直し） | ○ | なし |
 | [R-heap-01](L2-heap.md#r-heap-01-heap-モジュールを足す---採用) | `heap` モジュールを足す | ○ | #3933 |
 | [R-heap-02](L2-heap.md#r-heap-02-heap-には中の並びに依存しないセルだけを置くcontainsanyallcountfilterclear---採用) | heap には中の並びに依存しないセルだけを置く（`contains`・`any`・`all`・`count`・`filter`・`clear`） | ○ | #3968 |
 | [R-heap-03](L2-heap.md#r-heap-03-heapnew_with-の例を引き算にしない---採用文書だけ) | `heap.new_with` の例を引き算にしない | ○ | #3968 |
@@ -289,7 +294,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-math-03](L2-math.md#r-math-03-実数の数学関数は-math-に集めるsqrt-を-math-に戻しfloatsqrt-を撤去---採用r-math-01-の-sqrt-の部分を見直す) | 実数の数学関数は `math` に集める（`sqrt` を `math` に戻し、`float.sqrt` を撤去） | ○ | #3972 |
 | [R-math-04](L2-math.md#r-math-04-expm1log1p-を足す---採用) | `expm1`・`log1p` を足す | ○ | #3980 |
 | [R-math-05](L2-math.md#r-math-05-逆双曲線関数-asinhacoshatanh-を足す完全性の規則-2-の見直し---採用) | 逆双曲線関数 `asinh`・`acosh`・`atanh` を足す（完全性の規則 2 の見直し） | ○ | #3980 |
-| [R-matrix-01](L2-matrix.md#r-matrix-01-推論用のカーネルを-almidennlib-へ移す---採用) | 推論用のカーネルを `almide/nnlib` へ移す | ○ | #3852 |
+| [R-matrix-01](L2-matrix.md#r-matrix-01-推論用のカーネルを-almide-graphicsnn-へ移す---採用) | 推論用のカーネルを `almide-graphics/nn` へ移す | ○ | #3852 |
 | [R-matrix-02](L2-matrix.md#r-matrix-02-fusion-の対象を内部の名前にする---採用) | fusion の対象を内部の名前にする | ○ | #3852 |
 | [R-matrix-03](L2-matrix.md#r-matrix-03-32-bit-の試験版-matrixfloat32-を撤去する---採用) | 32 bit の試験版 `Matrix[Float32]` を撤去する | ○ | #3852 |
 | [R-matrix-04](L2-matrix.md#r-matrix-04-select_rows-を撤去しgather_rows-に一本化する---採用) | `select_rows` を撤去し、`gather_rows` に一本化する | ○ | #3852 |
@@ -347,6 +352,10 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-result-04](L2-result.md#r-result-04-抜けている役割の関数を足さない---不採用) | 抜けている役割の関数を足さない | × | — |
 | [R-result-05](L2-result.md#r-result-05-resultpartition-を-result-に残す---採用据え置き) | `result.partition` を result に残す | ○ | #3949 |
 | [R-result-06](L2-result.md#r-result-06-resultcollect-を戻す---不採用) | `result.collect` を戻す | × | なし |
+| [R-secret-01](L2-secret.md#r-secret-01-secretnew-と-secretreveal-を足す---採用) | `secret.new` と `secret.reveal` を足す | ○ | #4107 |
+| [R-secret-02](L2-secret.md#r-secret-02-表示は-secret宣言-1-か所---採用) | 表示は `Secret(***)`、宣言 1 か所 | ○ | #4107 |
+| [R-secret-03](L2-secret.md#r-secret-03--は定数時間string--bytes-以外は-e103---採用) | `==` は定数時間、String / Bytes 以外は E103 | ○ | #4107 |
+| [R-secret-04](L2-secret.md#r-secret-04-codec-は-decode-だけ導出encode-は-e023---採用) | Codec は decode だけ導出、encode は E023 | ○ | #4107 |
 | [R-set-01](L2-set.md#r-set-01-setcount-と-setfind-を足す---採用) | `set.count` と `set.find` を足す | ○ | #3901 |
 | [R-set-02](L2-set.md#r-set-02-setis_superset-を足す---不採用) | `set.is_superset` を足す | × | — |
 | [R-set-03](L2-set.md#r-set-03-setpartition-を足す---不採用) | `set.partition` を足す | × | — |
@@ -380,6 +389,7 @@ Almide の標準関数 1,001 個（44 モジュール。一巡目の記録は 99
 | [R-string-16](L2-string.md#r-string-16-string-に-sequencegrowable-の要件をそろえる---採用) | `string` に `Sequence`・`Growable` の要件をそろえる | ○ | #4000 |
 | [R-string-17](L2-string.md#r-string-17-stringchars-を-to_list-にしnewfrom_list-を置く---採用r-string-16-の保留を解く) | `string.chars` を `to_list` にし、`new`・`from_list` を置く | ○ | #4004 |
 | [R-string-18](L2-string.md#r-string-18-部分文字列を数える-stringcount-を-count_matches-にしcount-は-container-の述語の形にする---採用) | 部分文字列を数える `string.count` を `count_matches` にし、`count` は `Container` の述語の形にする | ○ | #4012 |
+| [R-string-19](L2-string.md#r-string-19-定数時間の比較-stringis_equal_constant_time-を置く---採用) | 定数時間の比較 `string.is_equal_constant_time` を置く | ○ | #4106 |
 | [R-testing-01](L2-testing.md#r-testing-01-大小と含むの族の規則をゲートに書く---採用関数は変えない) | 大小と含むの族の規則をゲートに書く | ○ | #3949 |
 | [R-testing-02](L2-testing.md#r-testing-02-assert_gtassert_lt-を順序のある型すべてで使えるようにする---採用) | `assert_gt`・`assert_lt` を順序のある型すべてで使えるようにする | ○ | #3980 |
 | [R-unix-01](L2-unix.md#r-unix-01-unix-モジュールを作りnetunix_netshm_-を移す---採用) | `unix` モジュールを作り、`net.unix_*`・`net.shm_*` を移す | ○ | #3853 |

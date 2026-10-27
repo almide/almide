@@ -146,7 +146,7 @@ any compiler. Package management (`add`, `deps`, `update`, `install`) and
 
 ```text
 error: package 'myapp' requires almide >= 0.70.0
-  installed version: 0.68.0
+  installed version: 0.69.0
 ```
 
 `ALMIDE_SKIP_VERSION_CHECK=1` bypasses it. A release build honours that only

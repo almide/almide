@@ -96,7 +96,9 @@ struct Sweep {
     /// The rows actually evaluated — the whole corpus, one slice of it under
     /// `k/N`, or nothing under `merge/N`.
     rows: Vec<SweepRow>,
-    /// Every fixture stem of spec/wasm_cross, sorted, before any slice.
+    /// Every fixture stem of spec/wasm_cross this run must cover, sorted,
+    /// before the shard: the whole corpus on a full run, the CI slice under
+    /// `ALMIDE_CI_SLICE` (the merge's coverage expectation either way).
     all_stems: Vec<String>,
     shard: Option<almide_corpus::CorpusShard>,
 }
@@ -121,8 +123,17 @@ impl Sweep {
         }
     }
 
+    /// A partial view of the corpus — a shard's slice, or any run under the
+    /// CI slice (including its merge): name-keyed staleness, reason drift and
+    /// witness attribution need the whole corpus and are judged only on a
+    /// full, unsharded-or-merged run.
+    fn partial(&self) -> bool {
+        self.slice().is_some() || !almide_corpus::full_run()
+    }
+
     /// Regenerating either ledger needs ONE sweep of the WHOLE corpus.
     fn refuse_update_under_shard(&self) {
+        almide_corpus::refuse_regen("interp ledgers");
         assert!(
             self.shard.is_none(),
             "ALMIDE_UPDATE_INTERP_LEDGER over a corpus slice or merge would not be one sweep of the whole corpus — unset ALMIDE_CORPUS_SHARD to regenerate"
@@ -154,6 +165,10 @@ fn sweep_corpus() -> Option<Sweep> {
         return None;
     }
     let stem_of = |e: &std::fs::DirEntry| e.path().file_stem().unwrap().to_str().unwrap().to_string();
+    // ALMIDE_CI_SLICE (crates/almide-corpus/src/ci_slice.rs): the slice is
+    // taken before the shard, so a solo leg walks slice ∩ shard and the
+    // merge's coverage expectation is the slice, never the whole corpus.
+    entries = almide_corpus::select(entries, SHARD_GATE, |e| format!("spec/wasm_cross/{}", e.file_name().to_string_lossy()));
     let all_stems: Vec<String> = entries.iter().map(stem_of).collect();
     let shard = almide_corpus::corpus_shard();
     if let Some(s) = shard {
@@ -263,9 +278,9 @@ fn audit_abstain_ledger(sweep: &Sweep) -> String {
     // unclassing them in check-abstain-classes.sh, which reads the reason text
     // (#2333).
     let mut recorded = parse_reason_ledger(&ledger_text, false);
-    if sweep.slice().is_some() {
-        // The ledger ∩ this shard: `stale` below then asks only about the
-        // fixtures this shard actually walked.
+    if sweep.partial() {
+        // The ledger ∩ this shard (and ∩ the CI slice): `stale` below then
+        // asks only about the fixtures this run actually walked.
         let walked = sweep.walked();
         recorded.retain(|n, _| walked.contains(n));
     }
@@ -396,10 +411,11 @@ fn fallback_ledger_path() -> PathBuf {
 /// holds the witness equal to the observed one, like the reason, so a fixture
 /// that sorts ahead of the recorded witness is a ledger edit in its own PR —
 /// before, the column was written but never compared, and a regenerated
-/// ledger silently disagreed with the committed one (int.from_uint16/32
+/// ledger silently disagreed with the committed one (the UInt16/UInt32 widenings
 /// moved from endian_explicit_import to declaration_literal_domain).
 fn audit_bridge_fallback_ledger(sweep: &Sweep) -> String {
     let slice = sweep.slice();
+    let partial = sweep.partial();
     // name → (smallest fixture stem that reached it, that fixture's reason)
     let mut observed: std::collections::BTreeMap<String, (String, String)> =
         std::collections::BTreeMap::new();
@@ -488,8 +504,9 @@ fn audit_bridge_fallback_ledger(sweep: &Sweep) -> String {
         .filter(|(n, _)| !ledger.contains(*n))
         .collect();
     // A slice cannot judge `stale` or a reason drift: the name's first
-    // fixture may be in another shard. Both are judged by `merge/N`.
-    let stale: Vec<&String> = if slice.is_some() {
+    // fixture may be in another shard. Both are judged by `merge/N` — of a
+    // full run only: under ALMIDE_CI_SLICE even the merge sees 1 in k.
+    let stale: Vec<&String> = if partial {
         Vec::new()
     } else {
         ledger.iter().filter(|n| !observed.contains_key(*n)).collect()
@@ -502,6 +519,7 @@ fn audit_bridge_fallback_ledger(sweep: &Sweep) -> String {
         walked_n,
         match slice {
             Some(almide_corpus::CorpusShard::Slice { k, n }) => format!(" — shard {k}/{n}: new names judged here, stale/drift in the merge"),
+            _ if partial => " — CI slice: new names judged; stale/drift/witness on the full run".to_string(),
             _ => String::new(),
         }
     );
@@ -539,7 +557,7 @@ fn audit_bridge_fallback_ledger(sweep: &Sweep) -> String {
     }
     let drifted: Vec<(&String, &String, &String)> = observed
         .iter()
-        .filter(|_| slice.is_none())
+        .filter(|_| !partial)
         .filter_map(|(n, (_, why))| {
             recorded
                 .get(n)
@@ -567,7 +585,7 @@ fn audit_bridge_fallback_ledger(sweep: &Sweep) -> String {
     // slice may not hold the smallest stem).
     let misattributed: Vec<(&String, &String, &String)> = observed
         .iter()
-        .filter(|_| slice.is_none())
+        .filter(|_| !partial)
         .filter_map(|(n, (stem, _))| {
             rows.get(n)
                 .map(|(rec, _)| rec)

@@ -1,0 +1,6 @@
+// The fix: the function that reads the file says so.
+import fs
+
+effect fn reads(p: String) -> Result[String, String] = fs.read_text |> ((f) => f(p))
+
+effect fn main() -> Unit = println(reads("s.txt") ?? "none")

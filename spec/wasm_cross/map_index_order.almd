@@ -23,7 +23,7 @@ fn probe(label: String, m: Map[Int, Int], n: Int, stride: Int) -> String = {
   var hit = 0
   var miss = 0
   for i in 0..<n {
-    hit = hit + map.get_or(m, i * stride, 0) * (i + 1)
+    hit = hit + map.get(m, i * stride) ?? 0 * (i + 1)
     let absent = map.contains(m, i * stride + 1)
     miss = miss + (if absent then 1 else 0)
   }

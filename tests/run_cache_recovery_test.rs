@@ -88,6 +88,27 @@ fn cached_binaries(run_dir: &Path) -> Vec<String> {
     names
 }
 
+/// The private cache base the compiler uses under `tmp` (#4180):
+/// `<tmp>/almide-<euid>`, created here with mode 0700 when absent.
+fn cache_base(tmp: &Path) -> PathBuf {
+    #[cfg(unix)]
+    let dir = {
+        use std::os::unix::fs::DirBuilderExt;
+        // SAFETY: geteuid has no preconditions.
+        let dir = tmp.join(format!("almide-{}", unsafe { libc::geteuid() }));
+        std::fs::create_dir_all(tmp).unwrap();
+        let _ = std::fs::DirBuilder::new().mode(0o700).create(&dir);
+        dir
+    };
+    #[cfg(not(unix))]
+    let dir = {
+        let dir = tmp.join("almide");
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    };
+    dir
+}
+
 fn set_mtime(path: &Path, when: SystemTime) {
     std::fs::File::options().write(true).open(path).unwrap().set_modified(when).unwrap();
 }
@@ -383,7 +404,7 @@ fn worker_entries(native: &Path, name: &str) -> Vec<String> {
 /// passing test file; returns (tempdir, native cache path, test file path).
 fn worker_tree() -> (tempfile::TempDir, PathBuf, PathBuf) {
     let td = tempfile::tempdir().unwrap();
-    let native = td.path().join("tmp/almide-test/native");
+    let native = cache_base(&td.path().join("tmp")).join("test/native");
     std::fs::create_dir_all(&native).unwrap();
     std::fs::create_dir_all(td.path().join("home")).unwrap();
     let test_file = td.path().join("a_test.almd");
@@ -500,7 +521,7 @@ fn clean_empties_every_worker_dir_and_reports_the_tree() {
     fake_worker(&native, "old", Duration::from_secs(30 * 24 * 60 * 60), Duration::from_secs(30 * 24 * 60 * 60));
     fake_worker(&native, "today", Duration::from_secs(60), Duration::from_secs(60));
     // ...and a runtime rlib dir, which `clean` empties by the same rule.
-    let rtlib = fake_rtlib(&td.path().join("tmp"), "0123456789abcdef", Duration::from_secs(60));
+    let rtlib = fake_rtlib(&cache_base(&td.path().join("tmp")), "0123456789abcdef", Duration::from_secs(60));
 
     let tmp = td.path().join("tmp");
     let clean = || {
@@ -616,7 +637,7 @@ fn week_old_runtime_rlib_dirs_are_evicted_and_the_one_in_use_is_touched() {
     let out = almide_run_rtlib(td.path(), &a);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     assert_eq!(String::from_utf8_lossy(&out.stdout), "one\n");
-    let mine = rtlib_dirs(&tmp);
+    let mine = rtlib_dirs(&cache_base(&tmp));
     assert_eq!(mine.len(), 1, "the rlib fast path must have built exactly one rlib dir: {mine:?}");
     let mine = mine.into_iter().next().unwrap();
 
@@ -626,8 +647,8 @@ fn week_old_runtime_rlib_dirs_are_evicted_and_the_one_in_use_is_touched() {
     for name in [".almide-build.lock", "almide_rt.rs", "libalmide_rt.rlib"] {
         set_mtime(&mine.join(name), then);
     }
-    let _ = std::fs::remove_file(tmp.join(".almide-evict-stamp"));
-    let dead = fake_rtlib(&tmp, "deadbeefdeadbeef", month);
+    let _ = std::fs::remove_file(cache_base(&tmp).join(".almide-evict-stamp"));
+    let dead = fake_rtlib(&cache_base(&tmp), "deadbeefdeadbeef", month);
 
     // A DIFFERENT program: a content-cache miss, so the build really reaches
     // the rlib path. (Re-running the same program is a lock-free binary hit
@@ -651,13 +672,13 @@ fn week_old_runtime_rlib_dirs_are_evicted_and_the_one_in_use_is_touched() {
         vec![".almide-build.lock".to_string()],
         "the month-old rlib dir must be emptied to its lockfile, found {left:?}"
     );
-    assert!(tmp.join(".almide-evict-stamp").is_file(), "the rlib sweep stamps the temp dir");
+    assert!(cache_base(&tmp).join(".almide-evict-stamp").is_file(), "the rlib sweep stamps the cache base");
 
     // Rate limit: a sibling that goes stale within the day is not swept
     // again. A THIRD program, because re-running `a` is a lock-free binary
     // hit that never consults the rlib cache — it would pass without the
     // rate limit doing anything.
-    let dead2 = fake_rtlib(&tmp, "beefbeefbeefbeef", month);
+    let dead2 = fake_rtlib(&cache_base(&tmp), "beefbeefbeefbeef", month);
     let c = write_program(td.path(), "c.almd", "three");
     // Backdate the in-use rlib again, so its refresh is evidence that THIS
     // build consulted the rlib cache rather than the previous one's touch.

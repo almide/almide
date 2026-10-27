@@ -7,31 +7,9 @@
 import prim
 
 fn matrix_mul_scaled(a: Matrix, s: Float, b: Matrix) -> Matrix = {
-  let p = matrix.mul(a, b)
+  let p = matrix.__mul(a, b)
   matrix.scale(p, s)
 }
-
-fn matrix_mul_f32(a: Matrix, b: Matrix) -> Matrix = matrix.mul(a, b)
-
-fn matrix_mul_f32_scaled(a: Matrix, s: Float, b: Matrix) -> Matrix = {
-  let p = matrix.mul(a, b)
-  matrix.scale(p, s)
-}
-
-fn matrix_mul_f32_t(a: Matrix, b: Matrix) -> Matrix = {
-  let t = matrix.transpose(b)
-  matrix.mul(a, t)
-}
-
-fn matrix_mul_f32_t_scaled(a: Matrix, s: Float, b: Matrix) -> Matrix = {
-  let t = matrix.transpose(b)
-  let p = matrix.mul(a, t)
-  matrix.scale(p, s)
-}
-
-fn matrix_zeros_f32(rows: Int, cols: Int) -> Matrix = matrix.zeros(rows, cols)
-
-fn matrix_ones_f32(rows: Int, cols: Int) -> Matrix = matrix.ones(rows, cols)
 
 // ── named compositions (#1423 stage 4) — each is native's own arithmetic,
 // so every leg that serves the leaves serves these ──
@@ -41,14 +19,14 @@ fn matrix_ones_f32(rows: Int, cols: Int) -> Matrix = matrix.ones(rows, cols)
 fn matrix_fma(a: Matrix, ka: Float, b: Matrix, kb: Float) -> Matrix = {
   let sa = matrix.scale(a, ka)
   let sb = matrix.scale(b, kb)
-  matrix.add(sa, sb)
+  matrix.__add(sa, sb)
 }
 
 // fma3: native `x * ka + y * kb + z * kc`, left to right.
 fn matrix_fma3(a: Matrix, ka: Float, b: Matrix, kb: Float, c: Matrix, kc: Float) -> Matrix = {
   let ab = matrix_fma(a, ka, b, kb)
   let sc = matrix.scale(c, kc)
-  matrix.add(ab, sc)
+  matrix.__add(ab, sc)
 }
 
 // append_rows: native — an operand with no rows yields (a copy of) the
@@ -66,21 +44,5 @@ fn matrix_append_rows(base: Matrix, extra: Matrix) -> Matrix = {
   else {
     if matrix.cols(base) != matrix.cols(extra) then prim.die(prim.handle("Error: matrix shape mismatch\n")) else ()
     matrix.from_lists(matrix.to_lists(base) + matrix.to_lists(extra))
-  }
-}
-
-// linear_f32_row_no_bias: native (matrix_p2.rs) reads W's f32 rows straight
-// out of the byte buffer and runs the sequential widen-mul-add dot — exactly
-// linear_row_no_bias over from_bytes_f32_le's decode (f32 → f64 widening is
-// exact; both sums run k-ascending from 0.0, mul then add). Native's edges,
-// spelled here: an empty x or a zero out/in extent is the all-zero
-// rows(x) × w_rows matrix, and a negative offset reads from 0 (`max(0)`).
-fn matrix_linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_rows: Int, w_cols: Int) -> Matrix = {
-  let rows = matrix.rows(x)
-  if rows == 0 or w_rows <= 0 or w_cols <= 0 then matrix.zeros(rows, w_rows)
-  else {
-    let off = if w_offset < 0 then 0 else w_offset
-    let w = matrix.from_bytes_f32_le(w_bytes, off, w_rows, w_cols)
-    matrix.linear_row_no_bias(x, w)
   }
 }

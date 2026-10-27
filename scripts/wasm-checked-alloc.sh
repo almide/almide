@@ -17,6 +17,14 @@
 # through a dangling `ffi` address, and overrun_write.almd writes 16 bytes
 # into a 4-byte buffer.
 #
+# The sandbox (#4224): each run gets the cwd preopened as `.` and a FRESH,
+# real temp root preopened at /tmp — the guest's `$TMPDIR` is unset, so its
+# temp root is /tmp. Without one, `fs.create_temp_dir` is refused in both
+# builds and every fs fixture compares two refusals. A sandbox control must
+# run proofs/fixtures/heap-check/temp_root.almd to exit 0 under the harness,
+# and its negative leg must see the same program refused without the temp
+# root, so the control can fail.
+#
 #   scripts/wasm-checked-alloc.sh [fixture.almd ...]   (default: spec/wasm_cross/*.almd)
 #   WASM_CHECKED_SHARD=i/n                              (every n-th fixture from i)
 set -uo pipefail
@@ -46,10 +54,33 @@ build() {
   fi
 }
 
-# run <wasm> <prefix>: writes prefix.out / prefix.err / prefix.rc
+# run <wasm> <prefix>: writes prefix.out / prefix.err / prefix.rc, with a
+# fresh temp root at /tmp (each build starts from the same empty one).
 run() {
+  rm -rf "$tmp/troot" && mkdir "$tmp/troot"
+  (cd "$tmp" && with_timeout "$WASMTIME" run --dir=. --dir="$tmp/troot::/tmp" "$1" </dev/null >"$2.out" 2>"$2.err"; echo $? >"$2.rc")
+}
+
+# run_bare <wasm> <prefix>: the same without the temp root (the sandbox
+# control's negative leg).
+run_bare() {
   (cd "$tmp" && with_timeout "$WASMTIME" run --dir=. "$1" </dev/null >"$2.out" 2>"$2.err"; echo $? >"$2.rc")
 }
+
+echo "== sandbox control: a program that makes its own temp dir runs under the harness =="
+build "$ROOT/proofs/fixtures/heap-check/temp_root.almd" "$tmp/s.wasm" 0 || { echo "FAIL: the sandbox control does not build" >&2; exit 1; }
+run "$tmp/s.wasm" "$tmp/s"
+if [ "$(cat "$tmp/s.rc")" != 0 ] || [ "$(cat "$tmp/s.out")" != "temp root served" ]; then
+  echo "FAIL: under the harness's sandbox the temp-root program exits $(cat "$tmp/s.rc"): $(head -c 300 "$tmp/s.err")" >&2
+  exit 1
+fi
+rm -rf "$tmp/tmp"
+run_bare "$tmp/s.wasm" "$tmp/s0"
+if [ "$(cat "$tmp/s0.rc")" = 0 ] || ! grep -q "create_temp_dir" "$tmp/s0.err"; then
+  echo "FAIL: without a temp root the sandbox control did not fail (exit $(cat "$tmp/s0.rc")) — the control has no teeth" >&2
+  exit 1
+fi
+echo "  ok: with the temp root exit 0 ('temp root served'); without it exit $(cat "$tmp/s0.rc"): $(head -c 160 "$tmp/s0.err")"
 
 # control <fixture> <message fragment> <what it does>
 control() {

@@ -87,6 +87,9 @@ fn run(program: &str, args: &[&str]) -> Answer {
 fn run_env(program: &str, args: &[&str], env: &[(&str, String)]) -> Answer {
     let mut cmd = Command::new(program);
     cmd.args(args).current_dir(repo_root());
+    // The twins answer over forged inputs; the shell gate must judge all of
+    // them, never the CI slice a PR shard inherits (scripts/lib/ci-slice.sh).
+    cmd.env_remove("ALMIDE_CI_SLICE");
     for (k, v) in env {
         cmd.env(k, v);
     }

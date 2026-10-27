@@ -24,7 +24,24 @@ fn almide() -> &'static str {
 /// EOF is the server's exit condition, so this cannot hang on a missing
 /// response the way a framed, long-lived client can.
 fn mcp_session(requests: &[Value]) -> Vec<Value> {
-    let mut child = Command::new(almide())
+    mcp_session_with(None, None, requests)
+}
+
+/// [`mcp_session`] with the server started in `dir`: the directory it serves,
+/// which every path argument must stay under (#4178).
+fn mcp_session_in(dir: &std::path::Path, requests: &[Value]) -> Vec<Value> {
+    mcp_session_with(Some(dir), None, requests)
+}
+
+fn mcp_session_with(dir: Option<&std::path::Path>, home: Option<&std::path::Path>, requests: &[Value]) -> Vec<Value> {
+    let mut cmd = Command::new(almide());
+    if let Some(d) = dir {
+        cmd.current_dir(d);
+    }
+    if let Some(h) = home {
+        cmd.env("HOME", h);
+    }
+    let mut child = cmd
         .arg("mcp")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -110,7 +127,7 @@ fn survive_reports_the_delta_of_an_edit_without_writing_it() {
     let dir = tempfile::tempdir().unwrap();
     let before = "fn label(n: Int) -> String = n\n";
     let file = write_temp(dir.path(), "label.almd", before);
-    let responses = mcp_session(&[
+    let responses = mcp_session_in(dir.path(), &[
         init(),
         call(2, "almide_survive", json!({
             "file": file,
@@ -135,7 +152,7 @@ fn check_returns_structured_diagnostics_with_a_fix_snippet() {
         "bad.almd",
         "fn add(a: Int, b: Int) -> Int = a + b\n\nfn main() -> Unit = {\n  print(add(1, 2))\n}\n",
     );
-    let responses = mcp_session(&[init(), call(2, "almide_check", json!({"file": file}))]);
+    let responses = mcp_session_in(dir.path(), &[init(), call(2, "almide_check", json!({"file": file}))]);
     let out = payload(&responses[1]);
     assert_eq!(out["ok"], false);
     assert!(out["errors"].as_u64().unwrap() >= 1, "{}", out);
@@ -153,7 +170,7 @@ fn check_returns_structured_diagnostics_with_a_fix_snippet() {
 fn check_on_a_clean_file_is_ok_with_no_diagnostics() {
     let dir = tempfile::tempdir().unwrap();
     let file = write_temp(dir.path(), "ok.almd", "fn add(a: Int, b: Int) -> Int = a + b\n");
-    let responses = mcp_session(&[init(), call(2, "almide_check", json!({"file": file}))]);
+    let responses = mcp_session_in(dir.path(), &[init(), call(2, "almide_check", json!({"file": file}))]);
     let out = payload(&responses[1]);
     assert_eq!(out["ok"], true, "{}", out);
     assert_eq!(out["errors"], 0);
@@ -184,7 +201,7 @@ fn json_check_reports_a_total_parse_failure_as_json() {
     assert_eq!(out.status.code(), Some(1));
 
     // Same file through MCP: structured, and honestly marked not-ok.
-    let responses = mcp_session(&[init(), call(2, "almide_check", json!({"file": file}))]);
+    let responses = mcp_session_in(dir.path(), &[init(), call(2, "almide_check", json!({"file": file}))]);
     let payload = payload(&responses[1]);
     assert_eq!(payload["ok"], false);
     assert_eq!(payload["diagnostics"][0]["line"], 1);
@@ -211,7 +228,7 @@ fn api_lists_stdlib_signatures() {
 fn api_on_a_broken_file_is_a_tool_error_that_says_what_to_do() {
     let dir = tempfile::tempdir().unwrap();
     let file = write_temp(dir.path(), "broken.almd", "fn f() -> Int = \"nope\"\n");
-    let responses = mcp_session(&[init(), call(2, "almide_api", json!({"target": file}))]);
+    let responses = mcp_session_in(dir.path(), &[init(), call(2, "almide_api", json!({"target": file}))]);
     assert_eq!(responses[1]["result"]["isError"], true);
     let text = responses[1]["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("almide_check"), "{}", text);
@@ -246,7 +263,7 @@ fn fmt_check_json_reports_drift_and_keeps_the_gate_exit_code() {
     assert_eq!(out.status.code(), Some(0));
 
     // Same answer through MCP.
-    let responses = mcp_session(&[init(), call(2, "almide_fmt_check", json!({"paths": [messy]}))]);
+    let responses = mcp_session_in(dir.path(), &[init(), call(2, "almide_fmt_check", json!({"paths": [messy]}))]);
     let out = payload(&responses[1]);
     assert_eq!(out["report"]["ok"], false);
     assert_eq!(out["exit_code"], 1);
@@ -267,4 +284,138 @@ fn protocol_errors_are_distinguished_from_tool_errors() {
     assert_eq!(responses[1]["error"]["code"], -32601, "unadvertised method");
     assert_eq!(responses[2]["result"]["isError"], true, "unknown tool is a tool error");
     assert_eq!(responses[3]["result"], json!({}), "ping");
+}
+
+/// The error text of a tool call that must fail.
+fn tool_error(response: &Value) -> String {
+    assert_eq!(response["result"]["isError"], true, "expected a tool error: {}", response);
+    response["result"]["content"][0]["text"].as_str().expect("text content").to_string()
+}
+
+/// #4178: `"path": "--update-snapshots"` reached `almide test` as the flag
+/// and rewrote the failing test's expected snapshot. A tool argument is a
+/// path, never a flag: the call is refused and the file stays byte-identical.
+/// Control: the same tool with a real path runs and reports the mismatch.
+#[test]
+fn a_flag_shaped_test_path_is_refused_and_the_snapshot_is_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = "import testing\ntest \"snap\" { testing.assert_snapshot(\"actual\", \"expected\") }\n";
+    let file = write_temp(dir.path(), "snap_test.almd", source);
+    let responses = mcp_session_in(dir.path(), &[
+        init(),
+        call(2, "almide_test", json!({"path": "--update-snapshots"})),
+        call(3, "almide_test", json!({"path": "--no-check"})),
+        call(4, "almide_test", json!({"path": "snap_test.almd", "run": "--update-snapshots"})),
+        call(5, "almide_test", json!({"path": "snap_test.almd"})),
+    ]);
+    for r in &responses[1..3] {
+        assert!(tool_error(r).contains("never a flag"), "{}", r);
+    }
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), source, "a tool argument rewrote the snapshot");
+    // A flag-shaped `run` filter is the filter's VALUE: no test matches it.
+    let filtered = payload(&responses[3]);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), source, "a `run` filter rewrote the snapshot: {}", filtered);
+    let ran = payload(&responses[4]);
+    assert_eq!(ran["ok"], false, "{}", ran);
+    assert_eq!(ran["files_failed"], 1, "{}", ran);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+}
+
+/// #4178: paths are confined to the project the server serves. `..`, an
+/// absolute path elsewhere, a symlink out of the root and a `cwd` outside it
+/// are all refused before the child runs, so neither a file's first token
+/// nor its existence leaks. Control: a path inside the root is checked.
+#[test]
+fn paths_outside_the_project_root_are_refused() {
+    let outer = tempfile::tempdir().unwrap();
+    let project = outer.path().join("project");
+    let outside = outer.path().join("outside");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let secret = write_temp(&outside, "env.almd", "AWS_SECRET = hunter2\n");
+    write_temp(&project, "ok.almd", "fn add(a: Int, b: Int) -> Int = a + b\n");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&outside, project.join("link")).unwrap();
+    let responses = mcp_session_in(&project, &[
+        init(),
+        call(2, "almide_check", json!({"file": "../outside/env.almd"})),
+        call(3, "almide_check", json!({"file": secret})),
+        call(4, "almide_check", json!({"file": "ok.almd", "cwd": outside.to_string_lossy()})),
+        call(5, "almide_check", json!({"file": "../outside/missing.almd"})),
+        call(6, "almide_fmt_check", json!({"paths": ["ok.almd", "../outside"]})),
+        call(7, "almide_api", json!({"target": "../outside/env.almd"})),
+        call(8, "almide_check", json!({"file": "ok.almd"})),
+        call(9, "almide_check", json!({"file": "link/env.almd"})),
+    ]);
+    for r in responses[1..7].iter().chain(responses.get(8)) {
+        let e = tool_error(r);
+        assert!(e.contains("outside the project root"), "{}", e);
+        assert!(!e.contains("AWS_SECRET") && !e.contains("hunter2"), "the refusal leaked the file: {}", e);
+    }
+    let ok = payload(&responses[7]);
+    assert_eq!(ok["ok"], true, "{}", ok);
+}
+
+/// #4179: `almide_check` is annotated read-only and offline, so its child
+/// resolves dependencies from the cache only: a git dependency that is not
+/// cached is an error, nothing is cloned under `$HOME/.almide/cache`, and
+/// `almide.lock` is not written. Control: a plain `almide check` in the same
+/// project fetches the dependency and writes the lock.
+#[test]
+fn check_never_fetches_or_writes_the_lock() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = root.path().join("repo");
+    let home = root.path().join("home");
+    let app = root.path().join("app");
+    for d in [&repo.join("src"), &home, &app] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(repo.join("almide.toml"), "[package]\nname = \"dep\"\nversion = \"0.1.0\"\n").unwrap();
+    std::fs::write(repo.join("src/mod.almd"), "fn f() -> Int = 1\n").unwrap();
+    let git = |args: &[&str]| {
+        let ok = Command::new("git")
+            .args(["-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(&repo)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        assert!(ok, "git {args:?} failed");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-qm", "init"]);
+    git(&["tag", "v0.1.0"]);
+    std::fs::write(
+        app.join("almide.toml"),
+        format!(
+            "[package]\nname = \"mcp_offline_probe\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep = {{ git = \"file://{}\", tag = \"v0.1.0\" }}\n",
+            repo.display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(app.join("main.almd"), "effect fn main() -> Unit = println(\"x\")\n").unwrap();
+    let cache = home.join(".almide").join("cache");
+    let cloned = || std::fs::read_dir(&cache).map(|mut d| d.next().is_some()).unwrap_or(false);
+
+    let responses = mcp_session_with(Some(&app), Some(&home), &[
+        init(),
+        call(2, "almide_check", json!({"file": "main.almd"})),
+    ]);
+    let text = responses[1]["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string();
+    assert!(!app.join("almide.lock").exists(), "almide_check wrote almide.lock: {}", text);
+    assert!(!cloned(), "almide_check cloned into the dependency cache: {}", text);
+    assert!(text.contains("not fetched yet"), "an uncached dependency must be reported, not fetched: {}", text);
+
+    let control = Command::new(almide())
+        .args(["check", "main.almd"])
+        .current_dir(&app)
+        .env("HOME", &home)
+        .output()
+        .expect("run almide check");
+    assert!(
+        app.join("almide.lock").exists() && cloned(),
+        "control: a plain `almide check` must fetch and lock (stderr: {})",
+        String::from_utf8_lossy(&control.stderr)
+    );
 }

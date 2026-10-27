@@ -9,7 +9,7 @@ import int
 
 fn smooth_dot(xs: List[Float], r: Int) -> Float = {
   let n = list.len(xs)
-  var acc = float.from_int(r)
+  var acc = float.from(r)
   for i in 1..<n - 1 {
     let s = xs[i - 1] * 0.25 + xs[i] * 0.5 + xs[i + 1] * 0.25
     acc = acc + s * xs[i / 2]
@@ -29,7 +29,7 @@ effect fn main() -> Unit = {
   let args = env.args()
   let n = arg(args, 0, 1000)
   let reps = arg(args, 1, 10)
-  let xs = list.map(0..<n, (i) => float.from_int(i * 7919 % 1000) / 1000.0)
+  let xs = list.map(0..<n, (i) => float.from(i * 7919 % 1000) / 1000.0)
   var total = 0.0
   for r in 0..<reps {
     total = total + smooth_dot(xs, r)

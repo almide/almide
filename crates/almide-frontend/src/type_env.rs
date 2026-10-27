@@ -41,9 +41,18 @@ struct ShadowedBindings {
     fn_min_params: Vec<Option<usize>>,
     fn_defaults: Vec<Option<Vec<Option<almide_lang::ast::Expr>>>>,
     fn_visibility: Vec<Option<almide_lang::ast::Visibility>>,
-    fn_decl_spans: Vec<Option<(usize, usize)>>,
+    fn_decl_spans: Vec<Option<FnDeclSite>>,
     deprecations: Vec<Option<crate::deprecation::Deprecation>>,
     def_map: Vec<Option<almide_ir::DefId>>,
+}
+
+/// A fn declaration's position and the module whose file holds it (`None`
+/// for the entry program) — the file the position is relative to (#4271).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FnDeclSite {
+    pub line: usize,
+    pub col: usize,
+    pub module: Option<Sym>,
 }
 
 /// The keys a `register_decls(.., prefix = None)` over these decls can write.
@@ -240,6 +249,10 @@ pub struct TypeEnv {
     /// loaded — so its `type Url` replaces the pre-registered `url.Url`
     /// instead of being a second declaration of it (E020).
     pub stdlib_preregistered_types: std::collections::HashSet<Sym>,
+    /// Fns declared `@input_sink` (row 22, C-436), keyed like `functions`,
+    /// with the type parameters whose bound includes `Decode`: each call must
+    /// bind those to an input type (E110, `check/input_sink.rs`).
+    pub input_sinks: std::collections::HashMap<Sym, Vec<Sym>>,
     /// Types that implement the Eq protocol (via `deriving Eq`)
     pub eq_types: std::collections::HashSet<Sym>,
     /// Structural bounds for generic type parameters: TypeVar name → OpenRecord constraint
@@ -290,8 +303,11 @@ pub struct TypeEnv {
     /// conformance a type declares per protocol is THE implementation — no
     /// other is searched for.
     pub type_protocol_args: std::collections::HashMap<Sym, std::collections::HashMap<Sym, Vec<Ty>>>,
-    /// Function declaration locations: fn key -> (line, col)
-    pub fn_decl_spans: std::collections::HashMap<Sym, (usize, usize)>,
+    /// Function declaration locations: fn key -> (line, col, declaring
+    /// module). A span is a position in the DECLARING file, so it is only
+    /// drawn beside a diagnostic of that same file (#4271): see
+    /// [`TypeEnv::fn_decl_span_in`].
+    pub fn_decl_spans: std::collections::HashMap<Sym, FnDeclSite>,
     /// Whether we're inside a test block (effect fn calls return Result[T, String])
     pub in_test_block: bool,
     /// Fn names whose parse failed mid-body. Checker suppresses cascading
@@ -316,6 +332,10 @@ pub struct TypeEnv {
     pub opaque_alias_visibility: std::collections::HashMap<Sym, crate::ast::Visibility>,
     /// Which module defined each opaque alias (None = main file).
     pub opaque_alias_module: std::collections::HashMap<Sym, Option<Sym>>,
+    /// A bundled module's `mod type` RECORD (`secret.Secret`, #4107): outside
+    /// its module the type is opaque — its fields cannot be read and its
+    /// literal cannot be written (E033). Bare type name → owning module.
+    pub opaque_records: std::collections::HashMap<Sym, Sym>,
 }
 
 impl TypeEnv {
@@ -360,6 +380,7 @@ impl TypeEnv {
             top_lets: std::collections::HashMap::new(),
             prefixed_bare_aliases: std::collections::HashSet::new(),
             stdlib_preregistered_types: std::collections::HashSet::new(),
+            input_sinks: std::collections::HashMap::new(),
             eq_types: std::collections::HashSet::new(),
             structural_bounds: std::collections::HashMap::new(),
             generic_protocol_bounds: std::collections::HashMap::new(),
@@ -382,6 +403,7 @@ impl TypeEnv {
             def_map: std::collections::HashMap::new(),
             opaque_alias_targets: std::collections::HashMap::new(),
             opaque_alias_visibility: std::collections::HashMap::new(),
+            opaque_records: std::collections::HashMap::new(),
             opaque_alias_module: std::collections::HashMap::new(),
             alias_owner_module: None,
             entry_bundled_module: None,
@@ -509,8 +531,8 @@ impl TypeEnv {
     }
 
     /// What a `Named` type IS, for the capability walks (eq / hash / ord).
-    /// An opaque newtype (`mod type SafePath = String`) is registered in
-    /// `types` as itself — `Named(SafePath)` — so the walk read the name as a
+    /// An opaque newtype (`mod type SafeHtml = String`) is registered in
+    /// `types` as itself — `Named(SafeHtml)` — so the walk read the name as a
     /// cycle and said yes for any target; its target is what decides (#3755).
     /// The wasm leg erases the newtype and compares the target, and native's
     /// derive follows the same answer (`lower_type_decl`).
@@ -700,7 +722,7 @@ impl TypeEnv {
                 } else {
                     // A stdlib-owned type with no declaration is the builtin
                     // `Value` (it can hold a Float, #3588) or a runtime-backed
-                    // handle (`HttpRequest`, `JsonPath`, …): native has no
+                    // handle (`HttpRequest`, `HttpCall`, …): native has no
                     // `Ord` for either. Wasm ordered the handle by whatever its
                     // representation happened to be, and native refused the
                     // build (#3755). An opaque handle has no order to give.
@@ -843,7 +865,7 @@ impl TypeEnv {
             names.push(name.to_string());
         }
         // Builtins not in env.functions
-        for &b in &["println", "eprintln", "panic", "assert", "assert_eq", "assert_ne", "to_string"] {
+        for b in crate::check::OUTPUT_ABORT_BUILTINS.iter().map(|(b, _)| *b).chain(["to_string"]) {
             names.push(b.to_string());
         }
         // Stdlib module-qualified function names (e.g. "string.trim", "list.map")
@@ -852,6 +874,9 @@ impl TypeEnv {
                 names.push(format!("{}.{}", module, func));
             }
         }
+        // Every caller feeds a did-you-mean: a `__`-prefixed fn is an internal
+        // carrier (`int.__to_uint16`), never a name to suggest.
+        names.retain(|n| !n.rsplit('.').next().is_some_and(|last| last.starts_with("__")));
         names
     }
 
@@ -881,6 +906,16 @@ impl TypeEnv {
         let names_other = self.lookup_ctor_owned(name, module.as_str()).is_some()
             || self.selective_top_let(name).is_some();
         (names_fn || !names_other).then_some(module)
+    }
+
+    /// Where `name` is declared, as a `(line, col)` of the file being checked
+    /// (`cur_mod`, `None` for the entry program) — or `None` when it is
+    /// declared in another file. The span is a position in the DECLARING
+    /// file: a stdlib or imported module fn's line drawn as a secondary label
+    /// over the caller's file underlined an unrelated line of it (#4271).
+    pub fn fn_decl_span_in(&self, name: &Sym, cur_mod: Option<&str>) -> Option<(usize, usize)> {
+        let site = self.fn_decl_spans.get(name)?;
+        (site.module.as_ref().map(|m| m.as_str()) == cur_mod).then_some((site.line, site.col))
     }
 
     /// Resolve a bare variant-constructor name to its (type name, case). Returns

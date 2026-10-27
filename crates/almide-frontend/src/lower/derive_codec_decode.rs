@@ -12,7 +12,22 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
     let mut field_vars = Vec::new();
     let key_name = |f: &IrFieldDecl| -> String { f.alias.map(|a| a.to_string()).unwrap_or_else(|| f.name.to_string()) };
 
-    for f in fields {
+    for f_decl in fields {
+        // #4107 (R-secret-04): a `Secret[A]` field decodes as an A field
+        // (its default revealed) and is wrapped as the Secret afterwards.
+        let secret_inner = crate::secret_type::secret_payload(&f_decl.ty).cloned();
+        let f_owned;
+        let f = match &secret_inner {
+            Some(a) => {
+                f_owned = IrFieldDecl {
+                    ty: a.clone(),
+                    default: f_decl.default.clone().map(|d| e_(IrExprKind::Member { object: Box::new(d), field: sym("hidden") }, a.clone())),
+                    ..f_decl.clone()
+                };
+                &f_owned
+            }
+            None => f_decl,
+        };
         let is_option = f.ty.is_option();
         let has_default = f.default.is_some();
         let inner_ty = f.ty.inner().cloned().unwrap_or_else(|| f.ty.clone());
@@ -20,12 +35,12 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
         // field literally named `v` would shadow the document in the emitted
         // Rust and every later field would read the decoded value instead of
         // the doc ("expected Object" at runtime).
-        let field_var = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f.ty.clone(), Mutability::Let, None);
+        let field_var = wk.vt.alloc(sym(&format!("_f_{}", f.name)), f_decl.ty.clone(), Mutability::Let, None);
 
-        // value.field(_v, "key") — returns Result[Value, String]
+        // value.__field(_v, "key") — returns Result[Value, String]
         let get_field_call = IrExpr {
             kind: IrExprKind::Call {
-                target: CallTarget::Module { module: sym("value"), func: sym("field"), def_id: None },
+                target: CallTarget::Module { module: sym("value"), func: sym("__field"), def_id: None },
                 args: vec![
                     IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None },
                     IrExpr { kind: IrExprKind::LitStr { value: key_name(f) }, ty: Ty::String, span: None, def_id: None },
@@ -35,7 +50,14 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
             ty: Ty::result(value_ty.clone(), Ty::String), span: None, def_id: None,
         };
 
-        let decode_expr = if is_option {
+        let decode_expr = if !crate::attr_vocab::codec_field_use(&f.attrs).decoded {
+            // `@skip` / `@skip_decode` (#4108): input never sets this field —
+            // a key naming it is treated like any unknown key. The default is
+            // required at declaration (E104), so it is always present here.
+            let mut default_expr = f.default.clone().unwrap_or(IrExpr { kind: IrExprKind::Unit, ty: f.ty.clone(), span: None, def_id: None });
+            if matches!(default_expr.ty, Ty::Unknown) { default_expr.ty = f.ty.clone(); }
+            default_expr
+        } else if is_option {
             let payload = IrExpr { kind: IrExprKind::Var { id: var_v }, ty: value_ty.clone(), span: None, def_id: None };
             if let Some(inline) = decode_option_field_inline(wk, payload.clone(), &key_name(f), &inner_ty, &value_ty) {
                 inline
@@ -125,7 +147,7 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
             }
             }
         } else {
-            // Required: value.field(_v, "key")? |> as_T?
+            // Required: value.__field(_v, "key")? |> as_T?
             let get_and_try = IrExpr {
                 kind: IrExprKind::Try { expr: Box::new(get_field_call) },
                 ty: value_ty.clone(), span: None, def_id: None,
@@ -133,17 +155,32 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
             dec_field_expr(wk, get_and_try, &f.ty, &value_ty, &key_name(f))
         };
 
+        let decode_expr = match &secret_inner {
+            Some(_) => e_(IrExprKind::Record {
+                name: Some(sym(crate::secret_type::SECRET_TYPE.1)),
+                fields: vec![(sym("hidden"), decode_expr)],
+            }, f_decl.ty.clone()),
+            None => decode_expr,
+        };
         stmts.push(IrStmt {
-            kind: IrStmtKind::Bind { var: field_var, mutability: Mutability::Let, ty: f.ty.clone(), value: decode_expr },
+            kind: IrStmtKind::Bind { var: field_var, mutability: Mutability::Let, ty: f_decl.ty.clone(), value: decode_expr },
             span: None,
         });
-        field_vars.push((f.name, field_var, f.ty.clone()));
+        field_vars.push((f.name, field_var, f_decl.ty.clone()));
     }
 
     // ok(TypeName { field1: _field1, field2: _field2, ... })
+    // The record is the decoded TYPE's, so it is named by `type_ty`: the
+    // entry program's shadow of a stdlib-owned name is `self.X` (#1828) while
+    // `type_name` is the bare spelling its convention fns are keyed by — a
+    // bare `X { .. }` named no struct in the emitted Rust (E0422, #4273).
+    let record_name = match type_ty {
+        Ty::Named(n, _) => *n,
+        _ => sym(&type_name),
+    };
     let record = IrExpr {
         kind: IrExprKind::Record {
-            name: Some(sym(&type_name)),
+            name: Some(record_name),
             // Each field value carries its DECLARED type — NOT Ty::Unknown. The v1 record
             // builder decides a field's heap-ness from `expr.ty` (binds_p3), so an Unknown
             // scalar field (`id: Int`) was mis-classified as heap → an rc_inc + i64.extend_i32_u
@@ -170,11 +207,13 @@ pub(super) fn auto_derive_decode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
     // `@codec_slots("k0", "k1", …)` (#1679): the object keys in DECLARATION
     // order — the order `T.encode` writes them, so the order a round-tripped
     // document carries them. The native `DecodeSlotHintPass` reads it to hand
-    // every `value.field(_v, "k_i")` in this body its slot index; the wasm leg
+    // every `value.__field(_v, "k_i")` in this body its slot index; the wasm leg
     // ignores the attribute, and a user-written decode never carries it.
     let codec_slots = almide_lang::ast::Attribute {
         name: sym("codec_slots"),
-        args: fields.iter().map(|f| almide_lang::ast::AttrArg {
+        // The ENCODED keys: a `@skip` field is not on the wire, so it holds
+        // no slot (the slot is a hint with a scan fallback either way).
+        args: fields.iter().filter(|f| crate::attr_vocab::codec_field_use(&f.attrs).encoded).map(|f| almide_lang::ast::AttrArg {
             name: None,
             value: almide_lang::ast::AttrValue::String { value: key_name(f) },
         }).collect(),

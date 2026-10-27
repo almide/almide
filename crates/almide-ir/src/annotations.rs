@@ -155,6 +155,11 @@ pub struct CodegenAnnotations {
     /// `boxed_fields` keyed by (enum, case, field): the bare case name is
     /// shared by every enum declaring it (#3176).
     pub boxed_case_fields: HashSet<(String, String, String)>,
+    /// (record type, field) for every field of a RECURSIVE record that names
+    /// a cycle member (#4251): the field is an `AlmideBox`, read through a
+    /// deref and built with `AlmideBox::new`. Keyed by the record's type name
+    /// (the `Ty::Named` spelling a member access carries).
+    pub boxed_record_fields: HashSet<(String, String)>,
     pub default_fields: HashMap<(String, String), IrExpr>,
     /// A record-payload case's field defaults keyed by (enum, case, field):
     /// `default_fields` keys a case by its bare name alone, so two modules'
@@ -203,7 +208,7 @@ pub struct CodegenAnnotations {
     /// binding shares their heap value via `var b = a`, `let b = a`, `b = r.field`,
     /// an if/match arm, or a destructure element) AND mutated in place (IndexAssign,
     /// FieldAssign, ListSwap/Reverse/RotateLeft/CopySlice, or an in-place stdlib
-    /// mutator like `list.push`/`map.insert`). Without a copy-on-write at the
+    /// mutator like `list.push`/`bytes.put_u8`). Without a copy-on-write at the
     /// mutation, the sibling binding would observe the mutation — violating Almide's
     /// value semantics (RcCow doc, `lib.rs`). Populated by `AliasCowPass`.
     ///
@@ -256,6 +261,23 @@ pub struct CodegenAnnotations {
 }
 
 impl CodegenAnnotations {
+    /// Is field `field` of a value typed `ty` an `AlmideBox` — a field closing
+    /// a recursive record's cycle (#4251)? A structurally typed value (an
+    /// unannotated `let c = { .. }`) is the declared record its shape renders
+    /// as — the `named_records` label its literal and binding spell. The ONE
+    /// answer the walker's literal/member rendering and `BoxTakeLowering`'s
+    /// place decision share.
+    pub fn record_field_is_boxed(&self, ty: &almide_lang::types::Ty, field: &str) -> bool {
+        use almide_lang::types::Ty;
+        let boxed = |n: &str| self.boxed_record_fields.contains(&(n.to_string(), field.to_string()));
+        match ty {
+            Ty::Named(n, _) => boxed(n.as_str()),
+            Ty::Record { fields } | Ty::OpenRecord { fields } =>
+                self.named_records.label_for(fields).is_some_and(|n| boxed(&n)),
+            _ => false,
+        }
+    }
+
     /// Look up the storage mode for a variable. Checks VarId first (precise),
     /// then falls back to uppercased name for cross-module synthetic refs only.
     pub fn get_var_storage(&self, var: &VarId) -> VarStorage {

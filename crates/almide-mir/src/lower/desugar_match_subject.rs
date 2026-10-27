@@ -86,8 +86,16 @@ fn match_subject_needs_hoist(subject: &IrExpr, arms: &[almide_ir::IrMatchArm]) -
     let has_literal_arm = arms
         .iter()
         .any(|a| matches!(a.pattern, almide_ir::IrPattern::Literal { .. }));
+    // A TUPLE-typed CALL subject destructured by tuple patterns (`match bytes.next_u32_be(b, p)
+    // { (some(n), q) => …, (none, _) => … }` — the checked cursor reads): the tuple-pattern
+    // routes dispatch on a tracked VAR, so bind the call once and match the var (evaluation
+    // count and order unchanged — the subject ran exactly once before the arms either way).
+    let tuple_call_subject = matches!(subject.ty, Ty::Tuple(_))
+        && matches!(subject.kind, IrExprKind::Call { .. })
+        && arms.iter().any(|a| matches!(a.pattern, almide_ir::IrPattern::Tuple { .. }));
     (has_literal_arm && !is_pure_match_subject(subject) && !is_variant_subject(&subject.ty))
         || is_hoistable_call_subject(subject)
+        || tuple_call_subject
 }
 
 /// The call shapes hoisted EVEN for an Option/Result subject: a COMPUTED call

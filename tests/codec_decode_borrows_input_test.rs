@@ -48,7 +48,7 @@ fn emitted(source: &str, tag: &str) -> String {
 const SRC: &str = "type Address: Codec = { city: String }\n\
     type User: Codec = { name: String, tags: List[String], address: Address, homes: List[Address], alt: Address? }\n\
     fn main() -> Unit = {\n\
-      let v = value.object([(\"name\", value.str(\"a\")), (\"tags\", value.array([])), (\"address\", value.object([(\"city\", value.str(\"t\"))])), (\"homes\", value.array([]))])\n\
+      let v = value.object([(\"name\", value.string(\"a\")), (\"tags\", value.array([])), (\"address\", value.object([(\"city\", value.string(\"t\"))])), (\"homes\", value.array([]))])\n\
       match User.decode(v) { ok(u) => println(u.name), err(e) => println(e) }\n\
     }\n";
 
@@ -77,7 +77,7 @@ fn every_field_read_is_a_borrowed_lookup() {
 /// writes the key to — and the runtime tries that slot before scanning. The
 /// hint is the field's position among ALL declared fields (an `Option` field
 /// still takes a slot even though it reads through the option driver), and a
-/// `value.field` a user writes never gets one.
+/// `value.get` a user writes never gets one.
 #[test]
 fn derived_field_reads_carry_their_declaration_slot() {
     if !tool_available() { eprintln!("skipping: almide binary not available"); return; }
@@ -91,17 +91,17 @@ fn derived_field_reads_carry_their_declaration_slot() {
     assert!(address.contains("(almide_rt_value_field_ref_at(__almide_ir1_v, \"city\", 0))?"), "the nested record's own decode is hinted too:\n{address}");
 
     // A hand-written lookup on a Value stays on the plain path — the hint is
-    // the derive's knowledge of the declaration, not a property of `value.field`.
+    // the derive's knowledge of the declaration, not a property of `value.get`.
     let user_src = "type Point: Codec = { x: Int, y: Int }\n\
-        effect fn read_y(v: Value) -> Int = value.as_int(value.field(v, \"y\")!)!\n\
+        effect fn read_y(v: Value) -> Int = value.as_int(value.get(v, \"y\")!)!\n\
         effect fn main() -> Unit = {\n\
           let v = value.object([(\"x\", value.int(1)), (\"y\", value.int(2))])\n\
           println(int.to_string(read_y(v)!))\n\
         }\n";
     let rust = emitted(user_src, "slot-user");
     let read_y = rust.lines().skip_while(|l| !l.starts_with("pub fn read_y(")).take_while(|l| !l.starts_with('}')).collect::<Vec<_>>().join("\n");
-    assert!(read_y.contains("almide_rt_value_field"), "the user's lookup is still a runtime field read:\n{read_y}");
-    assert!(!read_y.contains("_field_ref_at("), "a user's value.field must not be slot-hinted:\n{read_y}");
+    assert!(read_y.contains("almide_rt_value_get("), "the user's lookup is still a runtime field read:\n{read_y}");
+    assert!(!read_y.contains("_field_ref_at("), "a user's value.get must not be slot-hinted:\n{read_y}");
 }
 
 #[test]
@@ -127,7 +127,7 @@ const OPT_MATRIX_SRC: &str = "type WithDefault: Codec = { city: String, zip: Str
     type Plain: Codec = { city: String }\n\
     type Rec: Codec = { name: String, a: WithDefault?, b: Plain?, c: List[Int]?, d: Int?, tag: String = \"t\", xs: List[Int] = [] }\n\
     fn main() -> Unit = {\n\
-      let v = value.object([(\"name\", value.str(\"a\"))])\n\
+      let v = value.object([(\"name\", value.string(\"a\"))])\n\
       match Rec.decode(v) { ok(r) => println(r.name), err(e) => println(e) }\n\
     }\n";
 

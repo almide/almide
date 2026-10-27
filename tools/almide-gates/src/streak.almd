@@ -24,7 +24,7 @@ fn fold(verdicts: List[String], i: Int, green: Int, full: Int, green_done: Bool,
     green: green,
     full: full,
   } else {
-    let v = list.get_or(verdicts, i, "TRUNCATED")
+    let v = list.get(verdicts, i) ?? "TRUNCATED"
     if v == "GREEN" then fold(
       verdicts,
       i + 1,

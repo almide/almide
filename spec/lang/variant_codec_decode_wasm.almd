@@ -2,8 +2,8 @@
 // A standalone fixture locking in derived-Codec DECODE of tagged variants across every payload
 // shape the trust-spine handles: unit (Plain), tuple with scalar/String fields (Pair), a List
 // field (Multi), a nested scalar-record field (Wrap(Color)), and a record-shaped case with a
-// String + nested record (Tag). The decode reads the tag as a plain String (value.keys |> list.get
-// ?? "") and the payload via value.field — no (String, Value) tuple — then `ok(Ctor(..))`
+// String + nested record (Tag). The decode reads the tag as a plain String (the object's first key
+// ?? "") and the payload via value.get — no (String, Value) tuple — then `ok(Ctor(..))`
 // materializes the variant (a nested scalar-record field is stored + freed by the masked rc_dec).
 // Encode → decode roundtrip, byte-identical to v0 --target wasm.
 type Color: Codec = { r: Int, g: Int, b: Int }

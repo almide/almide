@@ -25,7 +25,7 @@ fn zld_stored_stream(data: Bytes, mut out: Bytes) -> Unit = {
     zld_push_u16_le(out, nlen)
     var k = 0
     while k < take {
-      bytes.push(out, bytes.get_or(data, pos + k, 0))
+      bytes.push(out, bytes.get(data, pos + k) ?? 0)
       k = k + 1
     }
     pos = pos + take
@@ -60,7 +60,7 @@ fn zld_crc32(b: Bytes) -> Int = {
   var i = 0
   let n = bytes.len(b)
   while i < n {
-    cc = int.bxor(t[int.band(int.bxor(cc, bytes.get_or(b, i, 0)), 255)], int.bshr(cc, 8))
+    cc = int.bxor(t[int.band(int.bxor(cc, bytes.get(b, i) ?? 0), 255)], int.bshr(cc, 8))
     i = i + 1
   }
   int.bxor(cc, 4294967295)
@@ -72,7 +72,7 @@ fn zld_adler32(b: Bytes) -> Int = {
   var i = 0
   let n = bytes.len(b)
   while i < n {
-    s1 = (s1 + bytes.get_or(b, i, 0)) % 65521
+    s1 = (s1 + bytes.get(b, i) ?? 0) % 65521
     s2 = (s2 + s1) % 65521
     i = i + 1
   }

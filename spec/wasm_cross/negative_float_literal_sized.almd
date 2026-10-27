@@ -7,14 +7,14 @@
 // negatives broke. Folded into the literal now, at the context type.
 fn take32(f: Float32) -> String = float32.to_string(f)
 
-fn take64(f: Float64) -> String = float.to_string(float.from_float64(f))
+fn take64(f: Float64) -> String = float.to_string(float.from(f))
 
 fn main() -> Unit = {
   let a: Float32 = -2.5
   let b: Float64 = -2.5
   let c: Float = -2.5
   println(float32.to_string(a))
-  println(float.to_string(float.from_float64(b)))
+  println(float.to_string(float.from(b)))
   println(float.to_string(c))
   println(take32(-1.25))
   println(take64(-1.25))

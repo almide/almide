@@ -27,6 +27,7 @@ mod verify;
 pub mod lsp;
 pub mod mcp;
 mod mcp_tools;
+pub(crate) mod project_scope;
 pub mod repl;
 mod ide;
 mod fix;
@@ -61,7 +62,7 @@ pub use commands::{cmd_init, cmd_test, cmd_test_fast, cmd_test_json, cmd_test_up
 pub use test_wasm::cmd_test_wasm;
 pub use fmt_command::{cmd_fmt, FmtMode};
 pub use clean::cmd_clean;
-pub use install::cmd_install;
+pub use install::{cmd_install, InstallGrants};
 pub use selfupdate::cmd_self_update;
 pub use verify::cmd_verify;
 pub use ide::{cmd_ide_outline, cmd_ide_doc, cmd_ide_stdlib_snapshot};
@@ -163,19 +164,43 @@ pub fn proc_grant_without_list(proj: &crate::project::Project, refuse: bool) -> 
     Ok(())
 }
 
-/// The subprocess fns that START a child, with the index of the argument
-/// that names the command (#2589).
-const PROC_SPAWNING: &[(&str, usize)] = &[
-    ("exec", 0),
-    ("exec_in", 1),
-    ("exec_with_stdin", 0),
-    ("exec_status", 0),
-    ("exec_status_timeout", 0),
-    ("run", 0),
-    ("run_in", 1),
-    ("exec_attached", 0),
-    ("spawn", 0),
+/// The subprocess fns that START a child, with how the call names its
+/// command (#2589): `exec`'s first argument, or the `cmd` field of the
+/// `ProcessCommand` record `output` / `run` / `start` take (R-process-02).
+const PROC_SPAWNING: &[(&str, ProcCommandAt)] = &[
+    ("exec", ProcCommandAt::Arg),
+    ("output", ProcCommandAt::RecordCmd),
+    ("run", ProcCommandAt::RecordCmd),
+    ("start", ProcCommandAt::RecordCmd),
 ];
+
+/// The command a `@signals_process` stdlib fn (#4125: it starts no child but
+/// signals or probes a pid) is bounded as by `[permissions] proc` — the one
+/// it used to run. The embedded host applies the same rule at run time
+/// (host_process.rs, ops 87 / 88).
+const PROC_SIGNAL_COMMAND: &str = "kill";
+#[derive(Clone, Copy)]
+enum ProcCommandAt {
+    /// The first argument is the command.
+    Arg,
+    /// The first argument is a `ProcessCommand`; its `cmd` field is the command.
+    RecordCmd,
+}
+
+/// The command literal a spawning call names, if it names one.
+fn proc_command_literal(at: ProcCommandAt, args: &[almide::ir::IrExpr]) -> Option<&str> {
+    use almide::ir::IrExprKind;
+    let first = &args.first()?.kind;
+    let cmd = match (at, first) {
+        (ProcCommandAt::Arg, k) => k,
+        (ProcCommandAt::RecordCmd, IrExprKind::Record { fields, .. }) => &fields.iter().find(|(n, _)| n.as_str() == "cmd")?.1.kind,
+        (ProcCommandAt::RecordCmd, _) => return None,
+    };
+    match cmd {
+        IrExprKind::LitStr { value } => Some(value.as_str()),
+        _ => None,
+    }
+}
 
 /// `[permissions] proc` (#2589, ADR-0025), statically: every call that starts
 /// a child must name its command as a string literal on the list. A command
@@ -195,15 +220,24 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
                 IrExprKind::Call { target: CallTarget::Module { module, func, .. }, args, .. }
                     if module.as_str() == "process" =>
                 {
+                    if almide_types::stdlib_info::is_signals_process_stdlib_fn("process", func.as_str())
+                        && !self.allow.iter().any(|c| c == PROC_SIGNAL_COMMAND)
+                    {
+                        let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
+                        self.bad.push(format!(
+                            "process.{func}(\"{PROC_SIGNAL_COMMAND}\"){line}: `{PROC_SIGNAL_COMMAND}` is not in [permissions] proc"
+                        ));
+                    }
                     if let Some(&(_, at)) = PROC_SPAWNING.iter().find(|(f, _)| *f == func.as_str()) {
                         let line = e.span.map_or(String::new(), |s| format!(" (line {})", s.line));
-                        match args.get(at).map(|a| &a.kind) {
-                            Some(IrExprKind::LitStr { value }) if self.allow.iter().any(|c| c == value) => {}
-                            Some(IrExprKind::LitStr { value }) => {
+                        match proc_command_literal(at, args) {
+                            Some(value) if self.allow.iter().any(|c| c == value) => {}
+                            Some(value) => {
                                 self.bad.push(format!("process.{func}(\"{value}\"){line}: `{value}` is not in [permissions] proc"))
                             }
-                            _ => self.bad.push(format!(
-                                "process.{func}{line}: the command is not a string literal, so [permissions] proc cannot check it"
+                            None => self.bad.push(format!(
+                                "process.{func}{line}: the command is not a string literal{}, so [permissions] proc cannot check it",
+                                if matches!(at, ProcCommandAt::RecordCmd) { " in a `process.ProcessCommand { cmd: \"…\", … }` written at the call" } else { "" }
                             )),
                         }
                     }
@@ -212,6 +246,13 @@ pub fn check_proc_allowlist(ir: &almide::ir::IrProgram, allow: &[String]) -> Res
                     let n = name.as_str();
                     if let Some(f) = n.strip_prefix("process.").filter(|f| PROC_SPAWNING.iter().any(|(p, _)| p == f)) {
                         self.bad.push(format!("process.{f} passed as a value: [permissions] proc cannot check its command"));
+                    }
+                    if let Some(f) = n.strip_prefix("process.").filter(|f| almide_types::stdlib_info::is_signals_process_stdlib_fn("process", f)) {
+                        if !self.allow.iter().any(|c| c == PROC_SIGNAL_COMMAND) {
+                            self.bad.push(format!(
+                                "process.{f} passed as a value: `{PROC_SIGNAL_COMMAND}` is not in [permissions] proc"
+                            ));
+                        }
                     }
                 }
                 _ => {}
@@ -534,7 +575,7 @@ fn collect_test_files(dir: &std::path::Path) -> Vec<String> {
     let mut files = Vec::new();
     // Skip hidden directories, target/, node_modules/, etc.
     let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    if dir_name.starts_with('.') || dir_name == "target" || dir_name == "node_modules" {
+    if project_scope::is_skipped_dir(dir_name) {
         return files;
     }
     if let Ok(entries) = std::fs::read_dir(dir) {

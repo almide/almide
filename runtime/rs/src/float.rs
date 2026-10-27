@@ -24,20 +24,32 @@ pub fn almide_rt_float32_to_string(n: f32) -> AlmideString {
     };
     __almide_out.into()
 }
-// Any spelling of nan parses to the fixed +qNaN 0x7FF8000000000000 (C-055):
-// Rust's parser answers -NaN for "-nan", and the self-hosted wasm parse has no
-// sign to copy, so the sign is fixed rather than inherited.
-pub fn almide_rt_float_parse(s: &str) -> Result<f64, AlmideString> { let __almide_r: Result<f64, String> = (|| { s.trim().parse::<f64>().map(|v| if v.is_nan() { f64::from_bits(0x7FF8_0000_0000_0000) } else { v }).map_err(|e| e.to_string()) })(); __almide_r.map_err(Into::into) }
+// Finite-only (C-413, #4121): a NaN / inf spelling ("nan", "inf", "Infinity",
+// any case or sign) is `invalid float literal`, and a finite literal that
+// rounds past f64::MAX ("1e400") is `float literal out of range`; underflow to
+// 0 stays ok. Trims ASCII whitespace only (str::trim_ascii, C-413). A
+// non-finite parse of text holding a digit can only be overflow: Rust's
+// grammar spells the specials with letters alone.
+pub fn almide_rt_float_parse(s: &str) -> Result<f64, AlmideString> {
+    let t = s.trim_ascii();
+    let r: Result<f64, String> = match t.parse::<f64>() {
+        Ok(v) if v.is_finite() => Ok(v),
+        Ok(_) if t.bytes().any(|b| b.is_ascii_digit()) => Err("float literal out of range".to_string()),
+        Ok(_) => Err("invalid float literal".to_string()),
+        Err(e) => Err(e.to_string()),
+    };
+    r.map_err(Into::into)
+}
 pub fn almide_rt_float_abs(n: f64) -> f64 { n.abs() }
 pub fn almide_rt_float_ceil(n: f64) -> f64 { n.ceil() }
 pub fn almide_rt_float_floor(n: f64) -> f64 { n.floor() }
 pub fn almide_rt_float_round(n: f64) -> f64 { n.round() }
-// The fixed +qNaN below zero, matching almide_rt_math_sqrt (C-055), and by
-// the same sign-clearing `abs` (a selected NaN constant is folded away).
-pub fn almide_rt_float_sqrt(n: f64) -> f64 { let r = n.sqrt(); if n < 0.0 { r.abs() } else { r } }
-// Explicit NaN/tie decision tree — see almide_rt_math_fmin/fmax (math.rs) for
-// why `f64::min`/`f64::max` (llvm.minnum/maxnum, unspecified ±0-tie order)
-// must not be used. Ties follow IEEE-754-2019 zero ordering (C-049,
+// Explicit NaN/tie decision tree, mirrored bit-for-bit by the self-hosted
+// wasm leg (`float_min`/`float_max` in stdlib/float_core.almd). Deliberately
+// NOT `f64::min`/`f64::max`: those are the llvm.minnum/maxnum intrinsics whose
+// ±0-tie order is UNSPECIFIED — under `#[inline(always)]` x86 selects `maxsd`
+// (returns the SECOND operand on ties), silently contradicting both the
+// non-inlined library call and the wasm emit. Ties follow IEEE-754-2019 zero ordering (C-049,
 // ALS-T23): min(±0 tie) = -0.0, max(±0 tie) = +0.0, commutative.
 pub fn almide_rt_float_min(a: f64, b: f64) -> f64 {
     if a.is_nan() { b }
@@ -92,18 +104,11 @@ pub fn almide_rt_float_to_bits(f: f64) -> i64 {
 
 // ── Sized conversions (for `@intrinsic` migration of `float.to_*`) ──
 
-pub fn almide_rt_float_to_int8(n: f64) -> i8 { n as i8 }
-pub fn almide_rt_float_to_int16(n: f64) -> i16 { n as i16 }
-pub fn almide_rt_float_to_int32(n: f64) -> i32 { n as i32 }
-pub fn almide_rt_float_to_int64(n: f64) -> i64 { n as i64 }
-pub fn almide_rt_float_to_uint8(n: f64) -> u8 { n as u8 }
-pub fn almide_rt_float_to_uint16(n: f64) -> u16 { n as u16 }
-pub fn almide_rt_float_to_uint32(n: f64) -> u32 { n as u32 }
 pub fn almide_rt_float_to_uint64(n: f64) -> u64 { n as u64 }
 pub fn almide_rt_float_to_float32(n: f64) -> f32 { n as f32 }
 pub fn almide_rt_float_to_float64(n: f64) -> f64 { n }
 
-// ── Widening conversions (sized → Float, for typed-bytes Endian dispatch) ──
+// ── Widening conversions (sized → Float) ──
 
 pub fn almide_rt_float_from_float32(n: f32) -> f64 { n as f64 }
 pub fn almide_rt_float_from_float64(n: f64) -> f64 { n }

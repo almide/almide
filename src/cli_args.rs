@@ -432,6 +432,22 @@ pub(crate) enum Commands {
         /// Build target (default: native)
         #[arg(long)]
         target: Option<String>,
+        /// Replace an existing file at the destination that `almide install`
+        /// did not put there (#4183). Without it such a file is refused, so
+        /// a package named `git` or `almide` cannot silently replace a tool.
+        #[arg(long)]
+        force: bool,
+        /// Trust the owner of a remote spec that is not trusted by default
+        /// (#4184): `host/owner`, or `owner` for github.com. Only
+        /// github.com/almide is trusted without it.
+        #[arg(long)]
+        trust: Option<String>,
+        /// Allow the installed package's own native code to be compiled
+        /// (#4184): its `native/` Rust files, its `[native-deps]` crates (their
+        /// build scripts run at build time) and its `@extern(rust|c)` fns.
+        /// Without it such a package is refused and its native code listed.
+        #[arg(long = "allow-native")]
+        allow_native: bool,
     },
     /// Update almide to the latest version
     #[command(name = "self-update")]
@@ -496,6 +512,11 @@ pub(crate) enum Commands {
         /// Per-run time limit in seconds for every child check / test / run
         #[arg(long, default_value_t = 600)]
         timeout: u64,
+        /// Let an edit that DELETES tests or `// @contract:` lines survive. By
+        /// default a test or contract present before the edit and absent after
+        /// it does not survive (#4267)
+        #[arg(long = "allow-removed")]
+        allow_removed: bool,
     },
     /// Verify-then-write: run `survive` on the edit and write it (atomically)
     /// only if nothing is newly broken. `--force` writes whatever the verdict.
@@ -522,6 +543,10 @@ pub(crate) enum Commands {
         /// Per-run time limit in seconds for every child check / test / run
         #[arg(long, default_value_t = 600)]
         timeout: u64,
+        /// Let an edit that DELETES tests or `// @contract:` lines survive
+        /// (reported in the verdict). Off by default (#4267)
+        #[arg(long = "allow-removed")]
+        allow_removed: bool,
     },
     /// Internal to `almide survive`: compile one file's test harness and run it
     /// captured, printing `{compiled, exit_code, output}` as one JSON line.

@@ -20,7 +20,7 @@ fn main() -> Unit = {
   let m3 = map.remove(m, "b")
   println(int.to_string(map.len(m3)))
   // entries
-  let es = map.entries(m)
+  let es = map.to_list(m)
   println(int.to_string(list.len(es)))
   // Set
   let s = set.from_list([

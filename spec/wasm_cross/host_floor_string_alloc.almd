@@ -13,8 +13,8 @@
 // the 13-byte hole back: the new block's header and payload wrote 7 bytes INTO
 // the live neighbour. Nothing traps on that — `$rc_dec`'s double-free sentinel
 // never fires, because no refcount is wrong — it is silent corruption of an
-// unrelated value. That is how it surfaced: `args.option_or("a","-") +
-// args.option_or("b","=")` in ONE expression printed `45,61,3,0,61,59` on wasm
+// unrelated value. That is how it surfaced: `(args.option("a")! ?? "-") +
+// (args.option("b")! ?? "=")` in ONE expression printed `45,61,3,0,61,59` on wasm
 // against `45,61,59,45,61,59` native — a block HEADER (len 3) had landed inside
 // a live string's bytes.
 //
@@ -33,7 +33,7 @@ fn path_of(dir: String, n: Int) -> String = dir + "/f" + int.to_string(n) + ".tx
 
 // Width-n file of `n` payload bytes; returns n so the caller can `??` it.
 effect fn seed(dir: String, n: Int) -> Int = {
-  let _ = fs.write(path_of(dir, n), string.repeat("x", n))!
+  let _ = fs.write_text(path_of(dir, n), string.repeat("x", n))!
   n
 }
 
@@ -69,9 +69,9 @@ effect fn main() -> Unit = {
   // printable would still move this number.
   var census = 0
   var c = 0
-  let bytes = string.to_bytes(acc)
-  while c < list.len(bytes) {
-    census = census + (list.get(bytes, c) ?? 0)
+  let codes = bytes.to_list(bytes.from_string(acc))
+  while c < list.len(codes) {
+    census = census + (list.get(codes, c) ?? 0)
     c = c + 1
   }
   println("census=" + int.to_string(census))

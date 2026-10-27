@@ -112,23 +112,19 @@ effect fn gen_conformance(root: String) -> String = {
 effect fn main() -> Unit = {
   let args = env.args()
   // `env.args()` is the USER arguments only, 0-based — the program name is not element 0.
-  let cmd = list.get_or(args, 0, "roadmap-readme")
+  let cmd = list.get(args, 0) ?? "roadmap-readme"
   // `output-parity` is the one subcommand whose root is the REPOSITORY, not a doc
   // directory — it walks `spec/` and reads a baseline under `proofs/`.
-  let root = list.get_or(
-    args,
-    1,
-    match cmd {
-      "output-parity" => ".",
-      "env-switches-doc" => ".",
-      "fold-seed-source" => ".",
-      "impl-count" => ".",
-      "certified-leaks" => ".",
-      "check-contracts" => "docs/contracts",
-      "bench" => "docs/benchmarks",
-      _ => "docs/roadmap",
-    },
-  )
+  let root = list.get(args, 1) ?? (match cmd {
+    "output-parity" => ".",
+    "env-switches-doc" => ".",
+    "fold-seed-source" => ".",
+    "impl-count" => ".",
+    "certified-leaks" => ".",
+    "check-contracts" => "docs/contracts",
+    "bench" => "docs/benchmarks",
+    _ => "docs/roadmap",
+  })
   let body = match cmd {
     "contracts-readme" => gen_contracts_readme(root)!,
     "conformance" => gen_conformance(root)!,
@@ -139,7 +135,7 @@ effect fn main() -> Unit = {
     // answer, not a failure. Wired here anyway so the streak rule the other gates cite has one
     // implementation rather than a shell copy and an Almide copy.
     "fuzz-track-record" => {
-      let n = int.parse(list.get_or(args, 2, "20")) ?? 20
+      let n = int.parse(list.get(args, 2) ?? "20") ?? 20
       list.join(track_record.report(n)!, "\n") + "\n"
     },
     // The contract-ledger gate. Like `output-parity` it reports through its EXIT CODE — the
@@ -148,13 +144,13 @@ effect fn main() -> Unit = {
     // The build-speed benchmark and its ratchet (#999). Reporting mode rewrites the
     // baseline; `--check` re-measures and fails on a regression beyond the tolerance.
     "bench" => {
-      let alm = list.get_or(args, 3, "almide")
-      let target = list.get_or(args, 4, "examples/lisp.almd")
+      let alm = list.get(args, 3) ?? "almide"
+      let target = list.get(args, 4) ?? "examples/lisp.almd"
       let base = root + "/build-speed.txt"
       // `--readme` renders the committed baseline into the measurements page and does NOT measure: a
       // generated block whose content depended on the generator's machine would be stale for
       // everyone but its author. Measuring and publishing are separate acts.
-      let mode = list.get_or(args, 2, "")
+      let mode = list.get(args, 2) ?? ""
       if mode == "--readme" or mode == "--check-readme" then {
         let base_lines = fs.read_lines(base) ?? []
         let block = bench.readme_block(base_lines)
@@ -171,7 +167,7 @@ effect fn main() -> Unit = {
         let stale = readmes |> list.filter(((_, text)) => bench.splice_block(text, block) != text) |> list.map(((p, _)) => p)
         if mode == "--readme" then {
           for (p, text) in readmes {
-            fs.write(p, bench.splice_block(text, block))!
+            fs.write_text(p, bench.splice_block(text, block))!
           }
           println("build-speed: block rendered from " + base + " into " + list.join(targets, ", "))
           process.exit(0)
@@ -201,7 +197,7 @@ effect fn main() -> Unit = {
       } else ()
       let rows = bench.measure(alm, target)!
       let text = bench.baseline_text(alm, target, rows, 150)!
-      fs.write(base, text)!
+      fs.write_text(base, text)!
       println(text)
       process.exit(0)
     },
@@ -213,7 +209,7 @@ effect fn main() -> Unit = {
     // #2205: the switch table docs/specs/cli.md embeds must be what the compiler under
     // test renders from the registry. Args: root, then the almide binary to ask.
     "env-switches-doc" => {
-      let alm = list.get_or(args, 2, root + "/target/release/almide")
+      let alm = list.get(args, 2) ?? (root + "/target/release/almide")
       let v = env_switches_doc.run(root, alm)!
       println(list.join(v.lines, "\n"))
       if v.ok then process.exit(0) else process.exit(1)
@@ -229,7 +225,7 @@ effect fn main() -> Unit = {
     // this gate compares against proofs/impl-count-ledger.toml and is the ledger's only
     // writer (`--update`). Args: root, then optionally `--update`.
     "impl-count" => {
-      let v = impl_count.run(root, list.get_or(args, 2, "") == "--update")!
+      let v = impl_count.run(root, list.get(args, 2) ?? "" == "--update")!
       println(list.join(v.lines, "\n"))
       if v.ok then process.exit(0) else process.exit(1)
     },
@@ -238,7 +234,7 @@ effect fn main() -> Unit = {
     // proofs/certified-leaks.txt, each row owned by an OPEN issue. Args: root, then
     // optionally `--update` (the ledger's only writer).
     "certified-leaks" => {
-      let v = certified_leaks.run(root, list.get_or(args, 2, "") == "--update")!
+      let v = certified_leaks.run(root, list.get(args, 2) ?? "" == "--update")!
       println(list.join(v.lines, "\n"))
       if v.ok then process.exit(0) else process.exit(1)
     },
@@ -256,11 +252,7 @@ effect fn main() -> Unit = {
       let update = list.contains(args, "--update")
       let pos = args |> list.filter((a) => a != "--update")
       let alm_env = env.get("ALMIDE_BIN") ?? ""
-      let alm = list.get_or(
-        pos,
-        2,
-        if alm_env != "" then alm_env else root + "/target/release/almide",
-      )
+      let alm = list.get(pos, 2) ?? (if alm_env != "" then alm_env else root + "/target/release/almide")
       let tools = parity_sweep.tool_check(alm)!
       if list.len(tools.lines) > 0 then {
         println(list.join(tools.lines, "\n"))
@@ -292,13 +284,12 @@ effect fn main() -> Unit = {
 fn first_divergence(expected: String, actual: String) -> String = {
   let e = string.split(expected, "\n")
   let a = string.split(actual, "\n")
-  let hit = list.range(0, int.max(list.len(e), list.len(a))) |> list.find((i) => list.get_or(e, i, "<missing>") != list.get_or(a, i, "<missing>"))
+  let hit = list.range(0, int.max(list.len(e), list.len(a))) |> list.find((i) => (list.get(e, i) ?? "<missing>") != list.get(a, i) ?? "<missing>")
   match hit {
-    some(i) => "line " + int.to_string(i + 1) + "\n  committed: " + list.get_or(e, i, "<missing>") + "\n  rendered:  " + list.get_or(
+    some(i) => "line " + int.to_string(i + 1) + "\n  committed: " + list.get(e, i) ?? "<missing>" + "\n  rendered:  " + list.get(
       a,
       i,
-      "<missing>",
-    ),
+    ) ?? "<missing>",
     none => "",
   }
 }

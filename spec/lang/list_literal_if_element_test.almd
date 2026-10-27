@@ -44,7 +44,7 @@ test "if element with a call-valued condition" {
     "tail"
   ]
   assert_eq(list.len(xs), 2)
-  assert_eq(list.get_or(xs, 0, ""), "yes")
+  assert_eq(list.get(xs, 0) ?? "", "yes")
 }
 
 test "if element whose else arm is a variable" {
@@ -53,7 +53,7 @@ test "if element whose else arm is a variable" {
     (if string.contains(fallback, "z") then "hit" else fallback),
     "tail"
   ]
-  assert_eq(list.get_or(xs, 0, ""), "fb")
+  assert_eq(list.get(xs, 0) ?? "", "fb")
 }
 
 test "if element nested inside the condition of another if" {
@@ -62,6 +62,6 @@ test "if element nested inside the condition of another if" {
     (if string.starts_with(r, (if true then "a" else r)) then "outer" else r),
     "z"
   ]
-  assert_eq(list.get_or(xs, 0, ""), "outer")
+  assert_eq(list.get(xs, 0) ?? "", "outer")
   assert_eq(list.len(xs), 2)
 }

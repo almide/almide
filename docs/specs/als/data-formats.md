@@ -1,13 +1,13 @@
 # ALS — データ形式（Data Formats）
 
-> Last updated: 2026-08-27
+> Last updated: 2026-10-26
 
 JSON / 正規表現 / バイナリ形式の観測規範。参照方法は [strings.md](strings.md)
 冒頭と同じ。
 
 ## ALS-D1 JSON パス操作
 
-`json.get_path`・`set_path`・`remove_path` のエッジケース（欠損キー・配列
+`value.get_path`・`set_path`・`remove_path` のエッジケース（欠損キー・配列
 範囲外・型不一致ノード・空パス）は infallible native oracle（serde_json 上の
 参照実装）と観測等価: 欠損は none / no-op に縮退し、trap しない。
 Contracts: C-031。
@@ -44,6 +44,13 @@ JSON 数値・`\u` エスケープのデコード、整数形数値の f64 へ�
 モジュール dispatch、動的 Value モデル（merge / array 往復）、および
 decode エラーメッセージの文言はターゲット間で byte 一致する。
 
+`Codec` は `Encode` と `Decode` の合成である（C-435）。`: Decode` を宣言した型
+`T` は `T.decode` と `T.decode_strict` だけを、`: Encode`
+を宣言した型は `T.encode` だけを derive し、`: Codec` は両方を derive する。
+`: Codec` の型は `Encode` と `Decode` の両方に適合する（`[T: Decode]` の境界を
+満たす）。宣言していない向きのメソッドの参照は E002 で拒否する。`Encode` で
+ない `: Decode` の型を入力の型と呼び、そのフィールドはすべて入力である。入力の
+型のフィールドに `@skip` / `@skip_decode` を付けると E053 で拒否する。
 `: Codec` を宣言した型 `T` は静的メソッド `T.encode` / `T.decode` を持つ。
 レコードの encode は宣言順に走り、`none` のフィールドを省略する（明示
 null は出さない。`Value?` の `some(null)` だけが明示 null になる）。
@@ -51,7 +58,22 @@ default 付きフィールドは実値をそのまま出し、`Value` フィー�
 decode は宣言順にフィールドを walk して最初のエラーを返す: object 以外に
 `expected Object`、必須キーの欠落に `missing field '<key>'`、型不一致に
 Value variant 名を使う `expected Int` / `expected Float` / `expected Str` /
-`expected Bool`（C-084 の語彙）。未知キーは無視する。Option フィールドは
+`expected Bool`（C-084 の語彙）。未知キーは無視する。派生の
+`T.decode_strict`（record と variant）は decode の前に値を walk して、どの
+深さでも型の外にある最初のキー `k` に `unknown key 'k'` を返す。入れ子の
+キーにはその record の経路を `, at address.geo` / `, at tags[1]` の形で付ける。
+record では自身のキー（文書順。decode されるフィールドの wire キーでないもの）
+を先に見て、次に `Decode` の型を持つフィールドを宣言順に walk する。variant
+では最初のキーが tag で、その後のキーは未知キーである。tag の case の
+payload（record なら record として、tuple なら要素ごとに `[i]` を付けて）を
+case 名の経路で walk する。何も無ければ `T.decode` と同じ結果を返す（C-429）。
+`@skip` のフィールドは decode も encode もされず、`@skip_decode` の
+フィールドは decode されず encode はされる。どちらも default を取り、その
+キーは未知キーとして扱う。default の無い skip フィールドは E104 で拒否
+する（C-428、`spec/wasm_cross/codec_field_skip_matrix.almd`）。
+`Secret[A]` のフィールドは `A` の wire 形から decode して包む。Secret を持つ
+型には `T.encode` を derive せず、`T.encode` の参照は E023 で拒否する（C-427、
+`spec/wasm_cross/secret_eq_and_decode.almd`）。Option フィールドは
 欠落も明示 null も `none` に畳むが、`Value?` は三状態（欠落 → `none`、
 明示 null → `some(null)`、値 → `some(v)`）。default 付きフィールドは欠落
 時に default 値を取る。`Float` フィールドは整数形 JSON 数値を f64 へ拡張
@@ -65,7 +87,7 @@ Value variant 名を使う `expected Int` / `expected Float` / `expected Str` /
 `spec/wasm_cross/codec_variant_roundtrip.almd`・
 `spec/wasm_cross/codec_extra_keys.almd`・
 `spec/wasm_cross/codec_float_int.almd` — が固定する。
-Contracts: C-084, C-085, C-087, C-095, C-098, C-103, C-209。
+Contracts: C-084, C-085, C-087, C-095, C-098, C-103, C-209, C-427, C-428, C-429, C-435。
 
 ## ALS-D7 バイト列ブリッジ
 

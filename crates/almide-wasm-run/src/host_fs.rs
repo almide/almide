@@ -31,10 +31,11 @@ impl FsErrSuffix for &str {
         (*self).to_string()
     }
 }
-/// Source-shaped quoting — the twin of `fs.rs`'s `q`. Deliberately not `{:?}`;
-/// see that file for why the escape table is not reproduced.
+/// Source-shaped quoting — the twin of `fs.rs`'s `fs_q`: quotes plus C-418's
+/// control/bidi escapes, the ONE function every leg runs (almide-base's
+/// err_text.rs, #4126). Deliberately not `{:?}`; see fs.rs for why.
 fn q(s: &str) -> String {
-    format!("\"{s}\"")
+    almide_base::err_text::almide_rt_errtext_quote(s)
 }
 /// The Almide call an fs op came from — ONE table with the p1 fs service
 /// (`almide_wasi::fs_op_name`), so the stock-runtime artifact and this host
@@ -195,7 +196,7 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
         // raw-BYTES reader, and routing them there fed the guest bytes where it
         // decodes length-prefixed frames — `fs.fold_lines` then summed an empty
         // walk and answered 0 instead of 6, silently.
-        12 => match sfs::read_to_string(a) {
+        12 => match sfs::read_to_string_bounded(a) {
             Ok(t) => {
                 let lines: Vec<String> = t.lines().map(str::to_string).collect();
                 let buf = frames(&lines);
@@ -210,29 +211,28 @@ fn fs_dispatch_r2(op: i32, a: &str) -> (i64, Vec<u8>) {
         // Absence is the READ's own NotFound, as native classifies it
         // (C-215): an `exists` pre-check read a symlink loop (ELOOP) or a
         // file parent (ENOTDIR) as absent where native errs (#4154).
-        13 => match sfs::read_to_string(a) {
+        13 => match sfs::read_to_string_bounded(a) {
             Ok(t) => ok_text(t),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (pack(2, 0), Vec::new()),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
-        _ => match sfs::read(a) {
+        _ => match sfs::read_bounded(a) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },
     }
 }
 
-/// The metadata / host-environment ops (17+) — split for the
+/// The metadata / host-environment ops (19+) — split for the
 /// complexity budget. Bodies verbatim from the native runtime.
 fn fs_dispatch_meta(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     match op {
-        // 62 is fold_lines_chunked's size probe: op 17's body under the
-        // chunked call's name (#2744), native's `metadata` before the workers.
-        17 | 62 => match sfs::metadata(a) {
+        // 62 is fold_lines_chunked's size probe (#2744), native's `metadata`
+        // before the workers.
+        62 => match sfs::metadata(a) {
             Ok(m) => fs_ok_i64(m.len() as i64),
             Err(e) => fs_err(io_err(fs_op_name(op), &q(a), e)),
         },
-        18 => fs_mtime(op, a),
         19 | 20 => fs_copy_or_rename(op, a, b),
         21 => fs_temp_file(a),
         22 => (pack(0, usize::from(sfs::is_symlink(a))), Vec::new()),
@@ -242,7 +242,7 @@ fn fs_dispatch_meta(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         24 => fs_read_lines(a),
         // 64 is `read_bytes_raw_if_exists`: op 25's body under its own name
         // (#2890).
-        25 | 64 => match sfs::read(a) {
+        25 | 64 => match sfs::read_bounded(a) {
             Ok(bytes) => (pack(0, bytes.len()), bytes),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (pack(2, 0), Vec::new()),
             Err(e) => fs_err(io_err(fs_op_name(op), &q(a), e)),
@@ -259,17 +259,6 @@ fn fs_err(m: String) -> (i64, Vec<u8>) {
 /// An ok answer carrying one i64 LE.
 fn fs_ok_i64(v: i64) -> (i64, Vec<u8>) {
     (pack(0, 8), v.to_le_bytes().to_vec())
-}
-
-/// op 18: the modification time in Unix seconds.
-fn fs_mtime(op: i32, a: &str) -> (i64, Vec<u8>) {
-    match sfs::metadata(a)
-        .map_err(|e| io_err(fs_op_name(op), &q(a), e))
-        .and_then(|m| m.modified().map_err(|e| io_err(fs_op_name(op), &q(a), e)))
-    {
-        Ok(t) => fs_ok_i64(t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64),
-        Err(m) => fs_err(m),
-    }
 }
 
 fn same_file(a: &str, b: &str) -> bool {
@@ -322,7 +311,7 @@ fn fs_stat(op: i32, a: &str) -> (i64, Vec<u8>) {
 
 /// op 24: read a text file as framed lines (none-class on NotFound).
 fn fs_read_lines(path: &str) -> (i64, Vec<u8>) {
-    match sfs::read_to_string(path) {
+    match sfs::read_to_string_bounded(path) {
         Ok(t) => {
             let lines: Vec<String> = t.lines().map(str::to_string).collect();
             let buf = frames(&lines);
@@ -476,34 +465,34 @@ fn fs_dispatch_host(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     match op {
         // Decomposed by op family (codopsy cc 38 -> per-family fns): the
         // http and env arms live in `fs_dispatch_http` / `fs_dispatch_env`.
-        43..=50 => fs_dispatch_http(op, a, b),
-        26 | 27 | 28 | 29 | 33 | 37 => fs_dispatch_env(op, a, b),
+        // Op 50 (framed raw-bytes http) is retired: no guest emits it.
+        43..=49 => fs_dispatch_http(op, a, b),
+        26 | 27 | 28 | 29 | 33 | 37 | 77 => fs_dispatch_env(op, a, b),
         // incremental stdin (op 35) — same empty answer in the harness.
         35 => (pack(0, 0), Vec::new()),
-        32 => {
-            let n = b.len();
-            let mut seed = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos() as u64
-                | 1;
-            let mut out = Vec::with_capacity(n);
-            for _ in 0..n {
-                seed ^= seed << 13;
-                seed ^= seed >> 7;
-                seed ^= seed << 17;
-                out.push(seed as u8);
-            }
-            (pack(0, out.len()), out)
-        }
+        32 => fs_entropy(b.len()),
         _ => err_s(format!("unknown fs op {op}")),
     }
 }
 
-/// The http op family (43..=50) of `fs_dispatch_host`, verbatim.
+/// op 32 (`prim.random_get`, #4122): `n` bytes from the OS CSPRNG
+/// (getrandom(2) on Linux, getentropy(3) on macOS), the source the stock
+/// wasm leg's WASI `random_get` and native `random.*` draw from. A clock-seeded
+/// generator reseeded per call answered the SAME bytes to every call inside
+/// one clock tick. An OS entropy failure is a host fault, not a guest value:
+/// it aborts the run instead of handing out predictable bytes.
+fn fs_entropy(n: usize) -> (i64, Vec<u8>) {
+    let mut out = vec![0u8; n];
+    if let Err(e) = getrandom::fill(&mut out) {
+        panic!("random: the OS entropy source failed: {e}");
+    }
+    (pack(0, out.len()), out)
+}
+
+/// The http op family (43..=49) of `fs_dispatch_host`, verbatim.
 fn fs_dispatch_http(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     match op {
-        48..=50 => fs_http_framed(op, a, b),
+        48 | 49 => fs_http_framed(op, a, b),
         43..=47 => fs_http_plain(op, a, b),
         // env.set (#1423 bucket C ruling): key in a, value in b.
         _ => fs_err(format!("unknown fs op {op}")),
@@ -534,11 +523,11 @@ fn fs_http_plain(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     fs_text_or_err(almide_rt_core::http_client_core::request(method, a, &body, &[]))
 }
 
-/// The framed request family (#1710 increment 3, ops 48..=50): url in a, the
+/// The framed request family (#1710 increment 3, ops 48..=49): url in a, the
 /// decimal CHAR-length frame in b — method cell, body cell, then header
 /// key/value cells, `<len>\n<payload>` each, exactly as
 /// stdlib/http_framed.almd builds it. 48 answers the body text, 49 answers
-/// `<status>\n<body>`, 50 raw bytes.
+/// `<status>\n<body>`. Op 50 (raw bytes) is retired.
 fn fs_http_framed(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     use almide_rt_core::http_client_core as client;
     let frame = String::from_utf8_lossy(b).to_string();
@@ -548,15 +537,11 @@ fn fs_http_framed(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     };
     match op {
         48 => fs_text_or_err(client::request(&method, a, &body, &headers)),
-        49 => fs_text_or_err(client::request_status(&method, a, &body, &headers).map(|(code, text)| format!("{code}\n{text}"))),
-        _ => match client::request_bytes(&method, a, &body, &headers) {
-            Ok(bytes) => (pack(0, bytes.len()), bytes),
-            Err(m) => fs_err(m),
-        },
+        _ => fs_text_or_err(client::request_status(&method, a, &body, &headers).map(|(code, text)| format!("{code}\n{text}"))),
     }
 }
 
-/// The env op family (26/27/28/29/33/37) of `fs_dispatch_host`, verbatim.
+/// The env op family (26/27/28/29/33/37/77) of `fs_dispatch_host`, verbatim.
 fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
@@ -565,7 +550,10 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // process-level setenv makes a later get observe the set, and the
         // overlay reproduces that observable without std::env::set_var
         // (unsafe under threads — the wasmtime host runs multi-threaded).
+        // `env.remove`'s mark (#3908) is an overlay entry with the value
+        // NUL — the one value `env.set` refuses — and reads as unset.
         26 => match with_env_overlay(|o| o.get(a).cloned()) {
+            Some(v) if v == "\0" => (pack(2, 0), Vec::new()),
             Some(v) => ok_text(v),
             None => match std::env::var(a) {
                 Ok(v) => ok_text(v),
@@ -577,16 +565,30 @@ fn fs_dispatch_env(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
         // (http_client.rs), so error texts and framing match native
         // byte-for-byte. Stock artifacts never reach here (the build-path
         // op audit refuses unserved ops); the embedded lane serves them.
-        // The framed request family (#1710 increment 3, ops 48..=50):
+        // The framed request family (#1710 increment 3, ops 48..=49):
         // url in a, the decimal CHAR-length frame in b — method cell,
         // body cell, then header key/value cells, `<len>\n<payload>`
         // each, exactly as stdlib/http_framed.almd builds it. 48 answers
-        // the body text, 49 answers `<status>\n<body>`, 50 raw bytes.
+        // the body text, 49 answers `<status>\n<body>`; 50 is retired.
         // env.set (#1423 bucket C ruling): key in a, value in b.
         37 => {
             let v = String::from_utf8_lossy(b).to_string();
             with_env_overlay(|o| o.insert(a.to_string(), v));
             (pack(0, 0), Vec::new())
+        }
+        // env.vars' leaf (#3908): `name=value` frames, the process
+        // environment first and the overlay's entries (sets and remove
+        // marks) after, by name so the answer is the same run to run. The
+        // guest's Almide body lets the later entry win, as on the stock legs.
+        77 => {
+            let mut entries: Vec<String> = std::env::vars_os()
+                .filter_map(|(k, v)| Some(format!("{}={}", k.into_string().ok()?, v.into_string().ok()?)))
+                .collect();
+            let mut overlay: Vec<String> = with_env_overlay(|o| o.iter().map(|(k, v)| format!("{k}={v}")).collect());
+            overlay.sort();
+            entries.extend(overlay);
+            let buf = frames(&entries);
+            (pack(0, buf.len()), buf)
         }
         27 => ok_text(std::env::consts::OS.to_string()),
         28 => ok_text(std::env::temp_dir().to_string_lossy().replace('\\', "/")),
@@ -669,7 +671,7 @@ fn fs_dispatch(op: i32, a: &str, b: &[u8]) -> (i64, Vec<u8>) {
     let ok_text = |t: String| (pack(0, t.len()), t.into_bytes());
     let err_s = |m: String| (pack(1, m.len()), m.into_bytes());
     match op {
-        1 => match sfs::read_to_string(a) {
+        1 => match sfs::read_to_string_bounded(a) {
             Ok(t) => ok_text(t),
             Err(e) => err_s(io_err(fs_op_name(op), &q(a), e)),
         },

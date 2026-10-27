@@ -30,7 +30,7 @@
 //!
 //! THE THIRD LEDGER — LIVE AT EXIT. Native drops every value when it goes
 //! out of scope; the wasm leg releases by hand, so a missing release is a
-//! wasm-only defect that stdout parity cannot see (#2932's `map.get_or`
+//! wasm-only defect that stdout parity cannot see (#2932's `map.get(..) ??`
 //! default, #2944's field write, #2931's OOM). From the same armed run,
 //! `allocs − frees − region_reclaimed` after `main` returns is the number
 //! of blocks the program never released — the armed `main` drops its
@@ -295,6 +295,9 @@ fn corpus_allocation_watermarks_hold() {
     .expect("run manifest");
 
     let update = std::env::var("ALMIDE_UPDATE_ALLOC").is_ok();
+    if update {
+        almide_corpus::refuse_regen("alloc_ledger");
+    }
     let (bp, cp, lp) = (baseline_path(), count_baseline_path(), live_baseline_path());
     let ((mut baseline, mut refused), (mut counts, mut count_refused)) =
         if update { Default::default() } else { (read_ledger(&bp), read_ledger(&cp)) };
@@ -305,8 +308,17 @@ fn corpus_allocation_watermarks_hold() {
     let mut count_rows = String::new();
     let mut live_rows = String::from(LIVE_HEADER);
     let mut offences = Vec::new();
-    for line in almide_corpus::manifest_rows(&manifest) {
-        let rel = line.splitn(3, '\t').nth(2).expect("manifest row");
+    let selected: Vec<&str> = almide_corpus::select(
+        almide_corpus::manifest_rows(&manifest).map(|line| line.splitn(3, '\t').nth(2).expect("manifest row")).collect(),
+        "alloc_ledger",
+        |rel| rel.to_string(),
+    );
+    // Under the CI slice, a row whose fixture did not run is neither stale
+    // nor drifted: the leftover checks below judge the selected rows only,
+    // and the full run judges every row.
+    let ran: std::collections::BTreeSet<String> = selected.iter().map(|r| r.to_string()).collect();
+    let judged = |rel: &str| almide_corpus::full_run() || ran.contains(rel);
+    for rel in selected {
         let text = std::fs::read_to_string(almide_corpus::resolve(&root, rel)).expect("fixture readable");
         // A `!` row: the structural leg REFUSES this fixture (the CLI
         // reroutes it to the incumbent — sql_highlight_tokens' unfoldable
@@ -351,6 +363,11 @@ fn corpus_allocation_watermarks_hold() {
         std::fs::write(&lp, &live_rows).expect("write live-at-exit baseline");
         return;
     }
+    live.retain(|rel, _| judged(rel));
+    baseline.retain(|rel, _| judged(rel));
+    counts.retain(|rel, _| judged(rel));
+    refused.retain(|rel| judged(rel));
+    count_refused.retain(|rel| judged(rel));
     for rel in live.keys() {
         offences.push(format!("{rel}: in the live-at-exit ledger but not measured (not in the corpus, refused or host-variant) — drop the row"));
     }

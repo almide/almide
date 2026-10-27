@@ -1,0 +1,37 @@
+// @contract: C-415
+// random.* draws from OS entropy on native and on the embedded host (#4122).
+// The embedded host served `prim.random_get` (fs op 32) from a clock-seeded
+// generator reseeded on every call, so draws inside one clock tick were
+// EQUAL; native seeded each thread's generator from the clock, so `fan`
+// arms started in the same tick shared one stream. The program prints only
+// threshold verdicts, never a drawn value, so the two legs compare.
+import random
+
+/// The longest stretch of equal neighbours in xs (1 when no two are equal).
+fn longest_run(xs: List[Int]) -> Int = {
+  let step = list.fold(
+    list.drop(xs, 1),
+    (list.first(xs) ?? 0, 1, 1),
+    ((prev, cur, best), x) => {
+      let c = if x == prev then cur + 1 else 1
+      (x, c, if c > best then c else best)
+    },
+  )
+  let (_, _, best) = step
+  best
+}
+
+effect fn draws(n: Int) -> List[Int] = list.range(0, n) |> list.map((_) => random.int(0, 1_000_000_000))
+
+effect fn main() -> Unit = {
+  // 1,000 draws over 10^9 values: a repeat anywhere has odds of about 1 in
+  // 2,000, so 990 distinct and no equal neighbours are far inside chance.
+  let xs = draws(1000)!
+  println("drawn ${list.len(xs)}")
+  println("distinct at least 990 ${list.len(list.unique(xs)) >= 990}")
+  println("no equal neighbours ${longest_run(xs) <= 1}")
+  // Eight fan arms (threads on native) each draw four values: every arm's
+  // stream is its own.
+  let arms = fan.map(list.range(0, 8), (_) => draws(4))!
+  println("arms ${list.len(arms)} all distinct ${list.len(list.unique(arms)) == 8}")
+}

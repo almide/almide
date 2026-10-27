@@ -197,9 +197,9 @@ fn probe_values(width: &str) -> Vec<(&'static str, &'static str)> {
             ("18446744073709551615", "18446744073709551615"),
         ],
         "Float32" => vec![
-            ("float.to_float32(0.1)", "0.1"),
-            ("float.to_float32(2.0)", "2"),
-            ("float.to_float32(-123.456)", "-123.456"),
+            ("float32.from(0.1)", "0.1"),
+            ("float32.from(2.0)", "2"),
+            ("float32.from(-123.456)", "-123.456"),
         ],
         other => panic!("sized width `{other}` has no probe values in the display matrix"),
     }

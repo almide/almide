@@ -1,5 +1,5 @@
 //! Ordering and slicing list surfaces (sort/sort_by/min/max/take/
-//! chunk/windows) — split from list.rs for the complexity budget; the
+//! chunk) — split from list.rs for the complexity budget; the
 //! dispatcher falls through here first (Ok(None) = not this family).
 
 use almide_ir::IrExpr;
@@ -15,8 +15,7 @@ impl Emitter<'_> {
         args: &[IrExpr],
     ) -> Result<Option<Option<Lowered>>, EmitError> {
         match (func, args) {
-            // First n elements (native `take(n as usize)`): a NEGATIVE
-            // n reinterprets huge and takes the WHOLE list.
+            // First n elements; a NEGATIVE n is 0 (#4147).
             ("take", [xs, n]) => self.lower_list_take(xs, n),
             ("min" | "max", [xs]) => self.lower_list_min_max(func, xs).map(Some),
             ("remove_at", [xs, idx]) => self.lower_list_remove_at(xs, idx).map(Some),
@@ -45,12 +44,9 @@ impl Emitter<'_> {
                 self.emit_merge_sort(elem)?;
                 Ok(Some(Some(Lowered::owned(SliceTy::List(h)))))
             }
-            ("chunk" | "windows", [xs, n_arg]) => {
-                self.lower_list_chunk_windows(func, xs, n_arg).map(Some)
-            }
+            ("chunk", [xs, n_arg]) => self.lower_list_chunk(func, xs, n_arg).map(Some),
             ("sort_by", [xs, cb]) => self.lower_list_sort_by(xs, cb).map(Some),
-            // skip(n as usize): a NEGATIVE n reinterprets huge — EMPTY
-            // (take's mirror keeps the WHOLE list; the asymmetry is v0's).
+            // All but the first n; a NEGATIVE n is 0 (#4147) — the whole list.
             ("drop", [xs, n]) => {
                 let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => h,
@@ -65,6 +61,7 @@ impl Emitter<'_> {
                 let ho = self.hold_i32()?;
                 let mut i = self.f.instructions();
                 i.local_set(hn);
+                i.local_get(hn).i64_const(0).local_get(hn).i64_const(0).i64_gt_s().select().local_set(hn); // #4147: a negative count is 0
                 // keep_bytes = n < 0 || n >= len/stride ? 0 : len - n*stride
                 // (index-domain test — the byte product wraps for a huge n,
                 // #2685)
@@ -317,14 +314,13 @@ impl Emitter<'_> {
     }
 
 
-    fn lower_list_chunk_windows(
+    fn lower_list_chunk(
         &mut self,
         func: &str,
         xs: &IrExpr,
         n_arg: &IrExpr,
     ) -> ArmResult {
 
-                let windows = func == "windows";
                 let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
                     SliceTy::List(h) => h,
                     other => return unsup(&format!("list-{func}-of:{other:?}")),
@@ -336,15 +332,13 @@ impl Emitter<'_> {
                 self.f.instructions().local_set(hxs);
                 self.lower_arg(n_arg, Some(INT), ArgMode::Borrow)?;
                 let hn = self.hold_i64()?;
-                let msg = self.pool.intern(if windows {
-                    "window size must be positive"
-                } else {
-                    "chunk size must be positive"
-                });
+                let msg = self.pool.intern("chunk size must be positive");
                 {
                     let mut i = self.f.instructions();
                     i.local_set(hn);
-                    i.local_get(hn).i64_eqz();
+                    // A size of 0 or less aborts: a negative size is read
+                    // as 0 (#4147; chunk(-1) used to be one chunk).
+                    i.local_get(hn).i64_const(0).i64_le_s();
                     i.if_(BlockType::Empty);
                     i.i32_const(msg as i32);
                 }
@@ -364,63 +358,43 @@ impl Emitter<'_> {
                         .i32_div_u()
                         .i64_extend_i32_u()
                         .local_set(htot);
-                    if windows {
-                        // n < 0 or n > total → zero windows
-                        i.local_get(hn).i64_const(0).i64_lt_s();
-                        i.local_get(hn).local_get(htot).i64_gt_s();
-                        i.i32_or().if_(BlockType::Result(ValType::I32));
-                        i.i32_const(0);
-                        i.else_();
-                        i.local_get(htot).local_get(hn).i64_sub().i64_const(1).i64_add().i32_wrap_i64();
-                        i.end();
-                        i.local_set(hnum);
-                    } else {
-                        // negative n → everything in one chunk
-                        i.local_get(hn).i64_const(0).i64_lt_s().if_(BlockType::Empty);
-                        // select(v1, v2, cond) = cond ? v1 : v2
-                        i.local_get(htot)
-                            .i64_const(1)
-                            .local_get(htot)
-                            .i64_const(0)
-                            .i64_gt_s()
-                            .select()
-                            .local_set(hn);
-                        i.end();
-                        i.local_get(htot).local_get(hn).i64_div_s();
-                        i.local_get(htot).local_get(hn).i64_rem_s().i64_const(0).i64_ne().i64_extend_i32_u();
-                        i.i64_add().i32_wrap_i64().local_set(hnum);
-                    }
+                    // negative n → everything in one chunk
+                    i.local_get(hn).i64_const(0).i64_lt_s().if_(BlockType::Empty);
+                    // select(v1, v2, cond) = cond ? v1 : v2
+                    i.local_get(htot)
+                        .i64_const(1)
+                        .local_get(htot)
+                        .i64_const(0)
+                        .i64_gt_s()
+                        .select()
+                        .local_set(hn);
+                    i.end();
+                    i.local_get(htot).local_get(hn).i64_div_s();
+                    i.local_get(htot).local_get(hn).i64_rem_s().i64_const(0).i64_ne().i64_extend_i32_u();
+                    i.i64_add().i32_wrap_i64().local_set(hnum);
                     i.local_get(hnum).i32_const(2).i32_shl().call(F_ALLOC).local_set(ho);
                     i.i32_const(0).local_set(hk);
                     i.block(BlockType::Empty).loop_(BlockType::Empty);
                     i.local_get(hk).local_get(hnum).i32_ge_u().br_if(1);
-                    // row size: windows → n; chunk → min(n, total - k*n)
-                    if windows {
-                        i.local_get(hn).local_set(hcs);
-                    } else {
-                        // cs = n > remaining ? remaining : n
-                        i.local_get(htot).local_get(hk).i64_extend_i32_u().local_get(hn).i64_mul().i64_sub();
-                        i.local_get(hn);
-                        i.local_get(hn);
-                        i.local_get(htot).local_get(hk).i64_extend_i32_u().local_get(hn).i64_mul().i64_sub();
-                        i.i64_gt_s().select().local_set(hcs);
-                    }
+                    // row size: min(n, total - k*n)
+                    // cs = n > remaining ? remaining : n
+                    i.local_get(htot).local_get(hk).i64_extend_i32_u().local_get(hn).i64_mul().i64_sub();
+                    i.local_get(hn);
+                    i.local_get(hn);
+                    i.local_get(htot).local_get(hk).i64_extend_i32_u().local_get(hn).i64_mul().i64_sub();
+                    i.i64_gt_s().select().local_set(hcs);
                     i.local_get(hcs).i32_wrap_i64().i32_const(stride).i32_mul().call(F_ALLOC).local_set(hrow);
-                    // copy from source: start = windows ? k : k*n (elements)
+                    // copy from source: start = k*n (elements)
                     i.local_get(hrow).i32_const(almide_layout::PAYLOAD as i32).i32_add();
                     i.local_get(hxs).i32_const(almide_layout::PAYLOAD as i32).i32_add();
-                    if windows {
-                        i.local_get(hk).i32_const(stride).i32_mul().i32_add();
-                    } else {
-                        i.local_get(hk)
-                            .i64_extend_i32_u()
-                            .local_get(hn)
-                            .i64_mul()
-                            .i32_wrap_i64()
-                            .i32_const(stride)
-                            .i32_mul()
-                            .i32_add();
-                    }
+                    i.local_get(hk)
+                        .i64_extend_i32_u()
+                        .local_get(hn)
+                        .i64_mul()
+                        .i32_wrap_i64()
+                        .i32_const(stride)
+                        .i32_mul()
+                        .i32_add();
                     i.local_get(hcs).i32_wrap_i64().i32_const(stride).i32_mul();
                     i.memory_copy(0, 0);
                     if let Some(inc) = inc_elems {
@@ -515,8 +489,7 @@ impl Emitter<'_> {
 }
 
 impl Emitter<'_> {
-    /// First n elements (native `take(n as usize)`; a NEGATIVE n
-    /// reinterprets huge and takes the whole list) — split from
+    /// First n elements (a NEGATIVE n is 0, #4147) — split from
     /// `lower_list_order_call` for the complexity budget.
     fn lower_list_take(&mut self, xs: &IrExpr, n: &IrExpr) -> Result<Option<Option<Lowered>>, EmitError> {
                 let h = match self.lower_arg(xs, None, ArgMode::Borrow)? {
@@ -532,6 +505,7 @@ impl Emitter<'_> {
                 let ho = self.hold_i32()?;
                 let mut i = self.f.instructions();
                 i.local_set(hn);
+                i.local_get(hn).i64_const(0).local_get(hn).i64_const(0).i64_gt_s().select().local_set(hn); // #4147: a negative count is 0
                 // bytes = n < 0 || n >= len/stride ? len : n*stride
                 // select(v1, v2, cond) = cond ? v1 : v2 — LEN is v1. The
                 // test is in the INDEX domain: the byte product n*stride

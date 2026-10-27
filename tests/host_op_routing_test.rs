@@ -23,7 +23,7 @@ fn fs_program(tag: &str) -> String {
 effect fn main() -> Unit = {{
   let dir = fs.temp_dir()
   let p = "${{dir}}/almide_1921_routing_probe_{tag}_{pid}.txt"
-  fs.write(p, "hello")!
+  fs.write_text(p, "hello")!
   let t = fs.read_text(p)!
   println("read=${{t}} exists=${{fs.exists(p)}}")
 }}

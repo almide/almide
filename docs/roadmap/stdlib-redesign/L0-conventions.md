@@ -699,6 +699,21 @@ effect fn を呼んだときの型（`!` が要るか、`??` をそのまま書�
 - ゲート案: 当てはめの 3 関数に、上限ちょうどと上限を 1 超える入力の cross fixture（err の文言まで両 target で同じ）。
 - issue: #4019、#4020
 
+## R-L0-48 Codec の入力: フィールドを読まない属性・`decode_strict`・フィールドの属性の語彙 — ○ 採用
+
+- いま: 導出した `T.decode` は、宣言したフィールドを入力からすべて読みます。`type User: Codec = { name: String, is_admin: Bool = false }` に要求の本文 `{"name": "m", "is_admin": true}` を渡すと `is_admin` が true になります（mass assignment、#4108）。フィールドに `@skip` や `@serde(skip)` を書いても、属性は読まれずに捨てられ、何も起きませんでした。
+- 案（規則）:
+  1. レコードのフィールドに `@skip`（decode でも encode でも扱わない）と `@skip_decode`（decode では読まない、encode では書く）を置けます。どちらも既定値（`= 値`）が必要で、無いと E104 です。読まないフィールドのキーが入力にあっても、知らないキーと同じに扱います。別名の構文（`@skip_decode role as "role_name": String = "user"`）と組み合わせられます。
+  2. 知らないキーは、これまでどおり `T.decode` では無視します。拒みたいときのために、Codec のレコード型すべてに `fn T.decode_strict(v: Value) -> Result[T, String]` を導出します。フィールドを読む前に、decode で読むフィールドのキー以外のキーを探し、文書の順で最初のものを `err("unknown key '<k>'")` で返します。variant 型には導出しません。
+  3. レコードのフィールドに置ける属性は `@builtin`・`@location`・`@skip`・`@skip_decode` だけです。ほかの属性はエラーの E053 です（関数の属性の E053 は警告のまま）。ほかの言語の綴りには、Almide の綴りをヒントで示します（`@serde(skip)` → `@skip`、`@skip_deserializing` → `@skip_decode`、`@redact` → 型 `Secret[String]`）。
+- 族: {decode, encode} × {読む, 読まない} の 4 マスのうち、`@skip` と `@skip_decode` が 2 マス、印の無いフィールドが 1 マスです。出力だけから隠すマス（`@skip_encode`）は意図して置きません。出力から隠すのは `Secret[A]` の型か、出力用の別の型の役目です。表は `crates/almide-frontend/src/attr_vocab.rs` の `CODEC_FIELD_SKIPS` に 1 回だけ宣言し、導出の両半分とゲートがそこを読みます。
+- (a) 知らないキーを既定で無視するのは 8 つ中 6 つ（serde・Go・pydantic・Rails・Ecto・Swift）。拒む切り替えは serde の `deny_unknown_fields`、Go の `DisallowUnknownFields`、pydantic の `extra='forbid'`。フィールドを入力から外すのは serde の `skip`・`skip_deserializing`、Jackson の `READ_ONLY`、kotlinx の `@Transient` で、どれも既定値を求めます。
+- (c) 知らないキーを拒んでも mass assignment は防げません。`is_admin` は知っているキーだからです。防ぐのは「入力用の型に decode してから、領域の型を組み立てる」書き方（Rails の strong parameters、Ecto の changeset、FastAPI の `UserIn`、OWASP）と、両方向の Codec が要る型に付ける `@skip_decode` です。CHEATSHEET はこの書き方を教えます。
+- (d) `@skip`・`@skip_decode`・`decode_strict` は追加です。フィールドの知らない属性をエラーにするのは、受け入れていたコードを拒むので epoch 15 の breaks に 1 行あります。`decode_strict` は導出のメソッドで、標準のモジュールの関数ではないため target-surface.json には載せず、「一覧に出ない共通の約束」に書きます。
+- ゲート: `spec/wasm_cross/codec_field_skip_matrix.almd`（{印なし, `@skip`, `@skip_decode`} × 入力 {キーなし, キーあり, 知らないキー} × {`decode`, `decode_strict`} と `encode`。C-428・C-429）、`tests/codec_field_skip_test.rs`（族の表から両 leg を検査し、`@skip_decode` を無視させる対照で admin=false が admin=true に変わることを確かめる）、`tests/diagnostics/e104-*`・`e053-unknown-field-attribute-*`（C-430）。
+- 綴り: `decode_strict` は R-L0-25 の「`decode_<変種>`（Result）」の形です。知らないキーを拒む切り替えの綴りに多数派はありません（serde `deny_unknown_fields`、Go `DisallowUnknownFields`、pydantic `extra='forbid'`、kotlinx は既定で拒み `ignoreUnknownKeys` で緩める）。`@skip` は serde・Go（`json:"-"`）・kotlinx（`@Transient`）・Jackson（`@JsonIgnore`）が同じ意味で持つ「両方向で外す」の最も短い綴りで、`@skip_decode` は serde の `skip_deserializing` を Almide の動詞 `decode`（R-L0-25）で書いたものです。
+- issue: #4108
+
 ## ゲートの束（R-L0-G） — ○ 採用
 
 R-L0-02、03、04、07、09、10、12、16 の検査を、1 つのテスト `tests/stdlib_surface_conventions_test.rs` にまとめます。入力は interface JSON（`mut` 欄つき）です。規則ごとの許容リストは、L2 の案で解消するたびに減らします。増やす方向には変えられません。

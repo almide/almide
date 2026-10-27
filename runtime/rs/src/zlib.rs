@@ -1,9 +1,10 @@
 // zlib — compression/decompression runtime for Almide.
-// Uses the flate2 crate for zlib, deflate, and gzip support.
+// Encodes with the flate2 crate; decodes with miniz_oxide's core inflater (the
+// engine flate2 itself runs) over a non-wrapping output buffer, so a distance
+// reaching before the start of a stream is refused rather than read as the
+// empty window's zeros (#4268).
 
-use flate2::{Compression, Crc, Decompress, FlushDecompress, Status};
-use flate2::read::{ZlibEncoder, DeflateEncoder, GzEncoder};
-use std::io::Read;
+use std::io::Read as _;
 
 // ── Zlib (with header) ──
 
@@ -13,8 +14,8 @@ pub fn almide_rt_zlib_compress(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
 
 pub fn almide_rt_zlib_compress_level(data: &[u8], level: i64) -> Result<Vec<u8>, AlmideString> {
     let __almide_r: Result<Vec<u8>, String> = (|| {
-        let lvl = Compression::new(level.clamp(0, 9) as u32);
-        let mut encoder = ZlibEncoder::new(data, lvl);
+        let lvl = flate2::Compression::new(level.clamp(0, 9) as u32);
+        let mut encoder = flate2::read::ZlibEncoder::new(data, lvl);
         let mut out = Vec::new();
         encoder.read_to_end(&mut out)
             .map_err(|e| format!("zlib.compress: {}", e))?;
@@ -42,8 +43,8 @@ pub fn almide_rt_zlib_deflate(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
 
 pub fn almide_rt_zlib_deflate_level(data: &[u8], level: i64) -> Result<Vec<u8>, AlmideString> {
     let __almide_r: Result<Vec<u8>, String> = (|| {
-        let lvl = Compression::new(level.clamp(0, 9) as u32);
-        let mut encoder = DeflateEncoder::new(data, lvl);
+        let lvl = flate2::Compression::new(level.clamp(0, 9) as u32);
+        let mut encoder = flate2::read::DeflateEncoder::new(data, lvl);
         let mut out = Vec::new();
         encoder.read_to_end(&mut out)
             .map_err(|e| format!("zlib.deflate: {}", e))?;
@@ -61,9 +62,12 @@ pub fn almide_rt_zlib_inflate_max(data: &[u8], max_len: i64) -> Result<Vec<u8>, 
     zlib_inflate_capped(data, zlib_checked_max("inflate_max", max_len))
 }
 
+/// A raw DEFLATE stream is the whole input: a byte after its final block is
+/// `trailing data after stream`, as a byte after a gzip member is refused (#4268).
 fn zlib_inflate_capped(data: &[u8], max: u64) -> Result<Vec<u8>, AlmideString> {
     let mut out = Vec::new();
     match zlib_raw_inflate(data, 0, &mut out, max) {
+        Ok(after) if after < data.len() => Err(zlib_decode_err("zlib.inflate", ZLIB_TRAILING.into())),
         Ok(_) => Ok(out),
         Err(e) => Err(zlib_decode_err("zlib.inflate", e)),
     }
@@ -73,7 +77,7 @@ fn zlib_inflate_capped(data: &[u8], max: u64) -> Result<Vec<u8>, AlmideString> {
 
 pub fn almide_rt_zlib_gzip(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
     let __almide_r: Result<Vec<u8>, String> = (|| {
-        let mut encoder = GzEncoder::new(data, Compression::default());
+        let mut encoder = flate2::read::GzEncoder::new(data, flate2::Compression::default());
         let mut out = Vec::new();
         encoder.read_to_end(&mut out)
             .map_err(|e| format!("zlib.gzip: {}", e))?;
@@ -111,6 +115,7 @@ const ZLIB_CORRUPT: &str = "corrupt deflate stream";
 const ZLIB_CRC: &str = "crc mismatch";
 const ZLIB_SIZE: &str = "size mismatch";
 const ZLIB_ADLER: &str = "adler32 mismatch";
+const ZLIB_TRAILING: &str = "trailing data after stream";
 
 // ── The output bound (R-L0-47, R-zlib-04, #4020) ──
 //
@@ -150,40 +155,53 @@ fn zlib_checked_max(func: &str, max_len: i64) -> u64 {
 /// Inflate the raw DEFLATE stream at `data[start..]` onto `out`; Ok is the
 /// position of the first byte after it. A stream that needs bytes past the
 /// input is incomplete, one the inflater rejects is corrupt, one whose output
-/// would take `out` past `max` bytes exceeds the bound. A fresh inflater per
-/// stream: a distance reaching before `out`'s length at entry reads the empty
-/// window's zeros, as the self-hosted decoder does.
+/// would take `out` past `max` bytes exceeds the bound. Each stream decodes
+/// into its own non-wrapping buffer: a distance reaching before the stream's
+/// first output byte is corrupt (RFC 1951 §3.2.5, zlib's "invalid distance too
+/// far back"), whether or not an earlier gzip member came before it (#4268).
 ///
 /// The bound is judged in stream order, as the self-hosted decoder judges it
-/// symbol by symbol: the stream exceeds it when the bytes decoded before the
-/// stream ends, fails or runs out of input pass `max`. The inflater decodes
-/// up to one 32 KiB window ahead of the room it is handed and reports a
-/// failure it meets there at once, so it is handed a whole window of room on
-/// every call: then every byte it decoded before a failure has been delivered
-/// and counted, and `out` holds at most `max` + 32 KiB when the bound stops it.
+/// symbol by symbol: the inflater is never handed room past `max` + 1 bytes,
+/// so a failure it meets before the bound is that failure, and output that
+/// fills the room exceeds the bound. `out` holds at most `max` + 1 bytes.
 fn zlib_raw_inflate(data: &[u8], start: usize, out: &mut Vec<u8>, max: u64) -> Result<usize, ZlibDecodeError> {
     let input = data.get(start..).unwrap_or(&[]);
-    let mut inf = Decompress::new(false);
-    let mut chunk = vec![0u8; 32 * 1024];
+    let room = max.saturating_sub(out.len() as u64).saturating_add(1);
+    let mut buf = vec![0u8; room.min(64 * 1024) as usize];
+    let mut inf = miniz_oxide::inflate::core::DecompressorOxide::new();
+    let (mut in_pos, mut out_pos) = (0usize, 0usize);
     loop {
-        let (seen_in, seen_out) = (inf.total_in(), inf.total_out());
-        let rest = &input[inf.total_in() as usize..];
-        let status = inf.decompress(rest, &mut chunk, FlushDecompress::None);
-        out.extend_from_slice(&chunk[..(inf.total_out() - seen_out) as usize]);
-        if out.len() as u64 > max {
+        let (status, n_in, n_out) = miniz_oxide::inflate::core::decompress(
+            &mut inf,
+            &input[in_pos..],
+            &mut buf,
+            out_pos,
+            miniz_oxide::inflate::core::inflate_flags::TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF,
+        );
+        in_pos += n_in;
+        out_pos += n_out;
+        if out.len() as u64 + out_pos as u64 > max {
             return Err(ZlibDecodeError::Exceeds(max));
         }
         match status {
-            Err(_) => return Err(ZlibDecodeError::Text(ZLIB_CORRUPT)),
-            Ok(Status::StreamEnd) => return Ok(start + inf.total_in() as usize),
-            Ok(_) if inf.total_in() == seen_in && inf.total_out() == seen_out => return Err(ZlibDecodeError::Text(ZLIB_INCOMPLETE)),
-            Ok(_) => {}
+            miniz_oxide::inflate::TINFLStatus::Done => {
+                out.extend_from_slice(&buf[..out_pos]);
+                return Ok(start + in_pos);
+            }
+            miniz_oxide::inflate::TINFLStatus::HasMoreOutput => {
+                let grown = (buf.len() as u64).saturating_mul(2).min(room) as usize;
+                buf.resize(grown, 0);
+            }
+            miniz_oxide::inflate::TINFLStatus::NeedsMoreInput | miniz_oxide::inflate::TINFLStatus::FailedCannotMakeProgress => {
+                return Err(ZlibDecodeError::Text(ZLIB_INCOMPLETE));
+            }
+            _ => return Err(ZlibDecodeError::Text(ZLIB_CORRUPT)),
         }
     }
 }
 
 fn zlib_crc32(bytes: &[u8]) -> u32 {
-    let mut crc = Crc::new();
+    let mut crc = flate2::Crc::new();
     crc.update(bytes);
     crc.sum()
 }
@@ -263,7 +281,8 @@ fn zlib_adler32(bytes: &[u8]) -> u32 {
     (s2 << 16) | s1
 }
 
-/// The zlib container: CMF FLG, the DEFLATE stream, a big-endian Adler-32.
+/// The zlib container: CMF FLG, the DEFLATE stream, a big-endian Adler-32, and
+/// nothing after it (#4268).
 fn zlib_decode(data: &[u8], max: u64) -> Result<Vec<u8>, ZlibDecodeError> {
     if data.len() < 2 {
         return Err(ZLIB_EOF.into());
@@ -283,6 +302,9 @@ fn zlib_decode(data: &[u8], max: u64) -> Result<Vec<u8>, ZlibDecodeError> {
     let stored = u32::from_be_bytes([data[after], data[after + 1], data[after + 2], data[after + 3]]);
     if zlib_adler32(&out) != stored {
         return Err(ZLIB_ADLER.into());
+    }
+    if after + 4 < data.len() {
+        return Err(ZLIB_TRAILING.into());
     }
     Ok(out)
 }

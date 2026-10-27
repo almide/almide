@@ -27,27 +27,27 @@ fn socket_name(b: &mut Builder) -> String {
 
 /// A stream to the sink: what is sent drains, nothing ever arrives.
 fn sink_stream() -> String {
-    format!("(net.unix_connect({SINK}) ?? -1)")
+    format!("(unix.connect({SINK}) ?? -1)")
 }
 
 /// A fresh shared-memory file of 8 bytes.
 fn shm() -> String {
-    "(net.shm_create(8) ?? -1)".into()
+    "(unix.shm_create(8) ?? -1)".into()
 }
 
 /// A listener at `p` with one connection pending.
 fn pending_listener(p: &str) -> String {
-    format!("{{ let ul: Int = net.unix_listen({p}) ?? -1\n let _uc: Int = net.unix_connect({p}) ?? -1\n ul }}")
+    format!("{{ let ul: Int = unix.listen({p}) ?? -1\n let _uc: Int = unix.connect({p}) ?? -1\n ul }}")
 }
 
 /// A socket holding "hello world" and one shared-memory descriptor, its
 /// peer closed.
 fn pending_socket(p: &str) -> String {
     format!(
-        "{{ let ul: Int = net.unix_listen({p}) ?? -1\n let uc: Int = net.unix_connect({p}) ?? -1\n \
-         let us: Int = net.unix_accept(ul) ?? -1\n \
-         let _uw: Result[Unit, String] = net.unix_send(uc, bytes.from_string(\"hello world\"), [{}])\n \
-         let _ux: Result[Unit, String] = net.unix_close(uc)\n let _uy: Result[Unit, String] = net.unix_close(ul)\n us }}",
+        "{{ let ul: Int = unix.listen({p}) ?? -1\n let uc: Int = unix.connect({p}) ?? -1\n \
+         let us: Int = unix.accept(ul) ?? -1\n \
+         let _uw: Result[Unit, String] = unix.write_fds(uc, bytes.from_string(\"hello world\"), [{}])\n \
+         let _ux: Result[Unit, String] = io.close(uc)\n let _uy: Result[Unit, String] = io.close(ul)\n us }}",
         shm()
     )
 }

@@ -197,6 +197,10 @@ impl Checker {
             ExprKind::SpreadRecord { base, fields, .. } => {
                 let base_ty = self.infer_expr(base);
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
+                // An update builds a new value of the base's type field by
+                // field: of an opaque record outside its module it is a
+                // literal of it (E033, #4107).
+                self.reject_foreign_opaque_record(&resolve_ty(&base_ty, &self.uf), "build a record update of");
                 // #3358: an updated field takes the base record's DECLARED field
                 // type, as the same field of a record literal does
                 // (`constrain_record_fields`). Without this the value was
@@ -348,7 +352,7 @@ impl Checker {
         expect: Option<&super::types::TailExpect>,
     ) -> MatchArmTypes {
         // If ANY arm is an explicit `ok(..)`/`err(..)` ctor, this match PRODUCES a Result (it
-        // re-wraps — base64 decode's `match bs { ok(b) => ok(string.from_bytes(b)), err(e) =>
+        // re-wraps — base64 decode's `match bs { ok(b) => ok(bytes.to_string_lossy(b)), err(e) =>
         // err(e) }`), so NO arm is auto-unwrapped: every arm keeps its Result type and the
         // match types as Result, not its OK type. (Auto-unwrapping only the effect-call arms
         // while a ctor arm stayed Result mismatched — `Result[(String,Int),String]` vs

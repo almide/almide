@@ -393,11 +393,17 @@ template = "// use {module};"
 
 # ── Test ──
 
+# The completion ledger (#4255): a test that runs to the end of its body drops
+# its `AlmdTestDone`, which appends the test's name to the file named by
+# ALMIDE_TEST_LEDGER. `almide test` passes a file only when every selected test
+# is in it — exit status 0 is not that: `process.exit(0)` inside a test ends the
+# binary with 0 before the remaining tests ran. A panicking test (a failure,
+# libtest's own verdict) records nothing.
 [test_module]
-template = "mod tests {{\n    use super::*;\n\n{tests}\n}}"
+template = "mod tests {{\n    use super::*;\n\n    #[allow(dead_code)]\n    struct AlmdTestDone(&'static str);\n    impl Drop for AlmdTestDone {{\n        fn drop(&mut self) {{\n            if std::thread::panicking() {{ return; }}\n            let Some(path) = std::env::var_os(\"ALMIDE_TEST_LEDGER\") else {{ return }};\n            use std::io::Write as _;\n            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {{\n                let _ = writeln!(f, \"{{}}\", self.0);\n            }}\n        }}\n    }}\n\n{tests}\n}}"
 
 [test_block]
-template = "#[test]\nfn {name}() {{\n{body}\n}}"
+template = "#[test]\nfn {name}() {{\n    let _almd_done = AlmdTestDone(\"{name}\");\n{body}\n}}"
 
 # testing.assert_aborts (ADR-0029): the child entry. The ordinary run skips it
 # (ignored); a call re-executes the binary with `--ignored --exact
@@ -445,7 +451,7 @@ template = "{object}.get(&{key}).cloned()"
 [map_insert]
 template = "{target}.insert({key}, {value});"
 
-# `m[k] = e(map.get_or(m, k, d))` in one probe (walker/statements_map_upsert.rs).
+# `m[k] = e(map.get(m, k) ?? d)` in one probe (walker/statements_map_upsert.rs).
 [map_upsert]
 template = "{target}.upsert_with({key}, {default}, |{old}| {value});"
 
@@ -490,10 +496,10 @@ template = "{expr}.clone()"
 # almide_rt_list_range's try_reserve discipline, inlined so the template has
 # no linkage dependency.
 [range_expr]
-template = "{{ let __almide_rs: i64 = {start}; let __almide_re: i64 = {end}; let __almide_rn = __almide_re.saturating_sub(__almide_rs).max(0) as usize; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() {{ almide_abort(\"out of memory\"); }} __almide_rv.extend(__almide_rs..__almide_re); __almide_rv }}"
+template = "{{ let __almide_rs: i64 = {start}; let __almide_re: i64 = {end}; let __almide_rn = __almide_re.saturating_sub(__almide_rs).max(0) as usize; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() {{ almide_abort_oom(); }} __almide_rv.extend(__almide_rs..__almide_re); __almide_rv }}"
 
 [range_inclusive]
-template = "{{ let __almide_rs: i64 = {start}; let __almide_re: i64 = {end}; let __almide_rn = if __almide_re >= __almide_rs {{ ((__almide_re as i128) - (__almide_rs as i128) + 1) as usize }} else {{ 0 }}; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() {{ almide_abort(\"out of memory\"); }} __almide_rv.extend(__almide_rs..=__almide_re); __almide_rv }}"
+template = "{{ let __almide_rs: i64 = {start}; let __almide_re: i64 = {end}; let __almide_rn = if __almide_re >= __almide_rs {{ ((__almide_re as i128) - (__almide_rs as i128) + 1) as usize }} else {{ 0 }}; let mut __almide_rv: Vec<i64> = Vec::new(); if __almide_rv.try_reserve_exact(__almide_rn).is_err() {{ almide_abort_oom(); }} __almide_rv.extend(__almide_rs..=__almide_re); __almide_rv }}"
 
 [for_tuple_destructure]
 template = "({vars})"

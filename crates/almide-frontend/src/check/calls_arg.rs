@@ -11,14 +11,58 @@ impl Checker {
         &mut self, site: ArgSite<'_>,
         param_ty: &Ty, arg_ty: &Ty,
         structural_bounds: &HashMap<Sym, Ty>,
+        apart: &[Sym],
         bindings: &mut HashMap<Sym, Ty>,
     ) -> bool {
         let ArgSite { fn_name: _, param_name: _ } = site;
         if let Ty::TypeVar(tv) = param_ty {
-            self.unify_call_arg_typevar(site, *tv, arg_ty, structural_bounds, bindings)
+            self.unify_call_arg_typevar(site, *tv, arg_ty, structural_bounds, apart, bindings)
         } else {
-            self.unify_call_arg_concrete(site, param_ty, arg_ty, bindings)
+            self.unify_call_arg_concrete(site, param_ty, arg_ty, apart, bindings)
         }
+    }
+
+    /// The caller's own type parameters that a call to `sig` must keep apart
+    /// from the callee's same-named ones (#4218). Inside `gather[A]`, the `A`
+    /// of an argument's type is the CALLER's `A`, and `option.is_none[A]`'s
+    /// `A` is another variable that only shares its spelling: unifying the two
+    /// by name made `A := A?` (and even `A := A`) fail the occurs check, so
+    /// the callee's parameter stayed unbound — E025 on `option.is_none(o)` —
+    /// where the same body over `T` checked. A call to the fn being checked
+    /// itself is left as it was: there the letters ARE the same variables.
+    pub(crate) fn caller_letters_apart_from(&self, sig: &crate::types::FnSig) -> Vec<Sym> {
+        let Some((key, letters)) = &self.current_fn else { return Vec::new() };
+        if letters.is_empty() || sig.generics.is_empty() {
+            return Vec::new();
+        }
+        let is_self = self.env.functions.get(key).is_some_and(|cur| {
+            cur.generics == sig.generics && cur.params == sig.params && cur.ret == sig.ret
+        });
+        if is_self {
+            return Vec::new();
+        }
+        letters.iter().copied().filter(|l| sig.generics.contains(l)).collect()
+    }
+
+    /// [`crate::types::unify`] of a callee's signature type against a
+    /// caller-side type with the caller's letters in `apart` renamed for the
+    /// match, then renamed back in the bindings: the callee's `A` binds to
+    /// the caller's `A?` as it binds to any other type.
+    pub(crate) fn unify_apart(sig_ty: &Ty, actual: &Ty, apart: &[Sym], bindings: &mut HashMap<Sym, Ty>) -> bool {
+        if apart.is_empty() {
+            return crate::types::unify(sig_ty, actual, bindings);
+        }
+        let outer = |g: &Sym| sym(&format!("{}\u{0}outer", g.as_str()));
+        let there: HashMap<Sym, Ty> = apart.iter().map(|g| (*g, Ty::TypeVar(outer(g)))).collect();
+        let back: HashMap<Sym, Ty> = apart.iter().map(|g| (outer(g), Ty::TypeVar(*g))).collect();
+        let renamed = crate::types::substitute(actual, &there);
+        // Bound values are caller-side types too: rename them for the
+        // consistency check, and back afterwards.
+        let mut scratch: HashMap<Sym, Ty> =
+            bindings.iter().map(|(k, v)| (*k, crate::types::substitute(v, &there))).collect();
+        let ok = crate::types::unify(sig_ty, &renamed, &mut scratch);
+        *bindings = scratch.into_iter().map(|(k, v)| (k, crate::types::substitute(&v, &back))).collect();
+        ok
     }
 
     // TypeVar-param path of `unify_call_arg`: bind to a structural bound
@@ -27,6 +71,7 @@ impl Checker {
     fn unify_call_arg_typevar(
         &mut self, site: ArgSite<'_>, tv: Sym, arg_ty: &Ty,
         structural_bounds: &HashMap<Sym, Ty>,
+        apart: &[Sym],
         bindings: &mut HashMap<Sym, Ty>,
     ) -> bool {
         let ArgSite { fn_name, param_name } = site;
@@ -43,7 +88,7 @@ impl Checker {
                 true
             }
         } else {
-            crate::types::unify(&Ty::TypeVar(tv), arg_ty, bindings);
+            Self::unify_apart(&Ty::TypeVar(tv), arg_ty, apart, bindings);
             false
         }
     }
@@ -53,13 +98,23 @@ impl Checker {
     // types differ.
     fn unify_call_arg_concrete(
         &mut self, site: ArgSite<'_>, param_ty: &Ty, arg_ty: &Ty,
+        apart: &[Sym],
         bindings: &mut HashMap<Sym, Ty>,
     ) -> bool {
-        crate::types::unify(param_ty, arg_ty, bindings);
+        Self::unify_apart(param_ty, arg_ty, apart, bindings);
         let expected = if bindings.is_empty() { param_ty.clone() } else { crate::types::substitute(param_ty, bindings) };
         let expected_resolved = self.env.resolve_named(&expected);
         let arg_resolved = self.env.resolve_named(arg_ty);
         if !types_mismatch(&expected_resolved, &arg_resolved) {
+            // #4173: structural compatibility ignores the effect bit, so an
+            // `effect (A) -> B` value passed check into a plain `(A) -> B`
+            // slot and failed later in rustc (E0271 / E0308) or walled the
+            // wasm leg. The runtime shapes differ: the value returns the
+            // effect carrier.
+            if self.effect_value_in_pure_slot(&expected_resolved, &arg_resolved) {
+                self.emit_effect_value_in_pure_slot(site, &expected, arg_ty);
+                return true;
+            }
             return false;
         }
         // #1055: an `effect (A) -> B` slot accepts BOTH a pure `(A) -> B`
@@ -75,6 +130,51 @@ impl Checker {
         let arg_resolved = self.with_slot_defaults(&arg_resolved);
         self.emit_call_arg_mismatch(site, &expected, &arg_shown, &expected_resolved, &arg_resolved);
         true
+    }
+
+    /// #4173: does an `effect (A) -> B` value fill a plain `(A) -> B` slot,
+    /// directly or as the element of the same container (`List`, `Option`, a
+    /// tuple)? Only the plain-spelled effect type is meant: a value typed with
+    /// the carrier (`(A) -> Result[B, String]`, a named effect fn) already
+    /// mismatches on its return, and the fallible-HOF rewrites own that shape.
+    fn effect_value_in_pure_slot(&self, expected: &Ty, actual: &Ty) -> bool {
+        let inner = |e: &Ty, a: &Ty| self.effect_value_in_pure_slot(&self.env.resolve_named(e), &self.env.resolve_named(a));
+        match (expected, actual) {
+            (Ty::Fn { is_effect: false, .. }, Ty::Fn { is_effect: true, ret, .. }) => {
+                !matches!(self.env.resolve_named(ret), Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, _))
+            }
+            (Ty::Applied(ei, ea), Ty::Applied(ai, aa)) if ei == ai && ea.len() == aa.len() => {
+                ea.iter().zip(aa.iter()).any(|(e, a)| inner(e, a))
+            }
+            (Ty::Tuple(ea), Ty::Tuple(aa)) if ea.len() == aa.len() => ea.iter().zip(aa.iter()).any(|(e, a)| inner(e, a)),
+            _ => false,
+        }
+    }
+
+    /// The #4173 diagnostic: E005, naming both ways out.
+    fn emit_effect_value_in_pure_slot(&mut self, site: ArgSite<'_>, expected: &Ty, arg_ty: &Ty) {
+        let ArgSite { fn_name, param_name } = site;
+        let mut diag = super::err(
+            format!(
+                "argument '{}' expects {} but got {}: an effect fn value cannot fill a plain fn slot",
+                param_name,
+                expected.display(),
+                arg_ty.display()
+            ),
+            format!(
+                "The value runs effects and returns the effect carrier, so a plain `{}` slot cannot call it. \
+                 Either make the slot an effect slot — `{}: effect (A) -> B` — in an `effect fn`, or pass a \
+                 lambda that handles the error: `(x) => f(x) ?? fallback`.",
+                expected.display(),
+                param_name
+            ),
+            format!("call to {}()", fn_name),
+        )
+        .with_code("E005");
+        if let Some((line, col)) = self.env.fn_decl_span_in(&sym(fn_name), self.current_module_prefix.as_deref()) {
+            diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));
+        }
+        self.emit(diag);
     }
 
     /// The #1055 effect-slot acceptance: expected is `Fn { is_effect: true }`
@@ -142,7 +242,7 @@ impl Checker {
         if let Some(sib) = float_sibling {
             return format!(
                 "`{}` is Int-only. For Floats use `{}(x)`, which preserves the Float — \
-                 not `float.to_int`, which truncates",
+                 not `int.from_saturating`, which truncates",
                 fn_name, sib
             );
         }
@@ -208,7 +308,7 @@ impl Checker {
         expected_resolved: &Ty, arg_resolved: &Ty,
     ) {
         let ArgSite { fn_name, param_name } = site;
-        // #740: an Int-only math builtin given a Float — point at the Float-preserving sibling, not the truncating `float.to_int`.
+        // #740: an Int-only builtin given a Float — point at the Float-preserving sibling, not the truncating `int.from_saturating`.
         let float_sibling = if matches!(arg_resolved, Ty::Float)
             && matches!(expected_resolved, Ty::Int)
         {
@@ -250,7 +350,7 @@ impl Checker {
             format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
             hint,
             format!("call to {}()", fn_name)).with_code("E005");
-        if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(fn_name)) {
+        if let Some((line, col)) = self.env.fn_decl_span_in(&sym(fn_name), self.current_module_prefix.as_deref()) {
             diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));
         }
         if let Some((_, fixed)) = &stdlib_sibling {
@@ -271,13 +371,13 @@ impl Checker {
     /// #2097: the mismatched argument is a DIRECT stdlib call (optionally
     /// `!`-unwrapped), and that call's module has a same-stem sibling whose
     /// return type — seen through the same unwrap — is the expected type.
-    /// `fs.read_bytes` returns `List[Int]`, `fs.read_bytes_raw` returns
-    /// `Bytes`, four lines apart; nothing in the first name suggests the
-    /// second exists, and "Fix the argument type" was the only hint.
+    /// `list.find` answers the element, `list.find_index` its position;
+    /// nothing in the first name says the second exists, and "Fix the
+    /// argument type" was the only hint.
     ///
     /// Returns the hint and the argument text with the callee renamed. A
-    /// lookup, not a guess: the sibling must share the stem (`read_bytes` /
-    /// `read_bytes_raw`), take the same number of arguments, and return the
+    /// lookup, not a guess: the sibling must share the stem (`find` /
+    /// `find_index`), take the same number of arguments, and return the
     /// expected type exactly. Anything else keeps today's wording.
     fn stdlib_sibling_rewrite(&self, tys: MismatchTys<'_>) -> Option<(String, String)> {
         let is_ident = |s: &str| {

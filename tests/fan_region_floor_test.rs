@@ -5,7 +5,7 @@
 //! that render's subset still refused two kinds of region the wasm leg runs:
 //!
 //!   1. an arm that calls a stdlib fn the v1 render has no native body for
-//!      (`string.split`, `int.to_float`);
+//!      (`string.split`, `float.from`);
 //!   2. a region whose signature the two renders spell differently (a record,
 //!      a variant, a tuple, `List[String]`, `Option`, a closure).
 //!
@@ -117,7 +117,7 @@ const STDLIB_ARMS: &str = r#"fn spin(n: Int) -> Int = {
 
 fn parts(s: String) -> Int = list.len(string.split(s, ",")) + spin(string.len(s))
 
-fn half(n: Int) -> Float = int.to_float(spin(n)) / 2.0
+fn half(n: Int) -> Float = float.from(spin(n)) / 2.0
 
 effect fn parts_units(s: String, ns: Int) -> Result[Int, String] =
   if ns > 3000 then ok(-1)
@@ -493,7 +493,9 @@ fn run_native(path: &Path, force_codegen_meter: bool) -> (Option<i32>, String, S
 #[test]
 fn the_codegen_meter_charges_like_the_whole_program_render() {
     let mut failures = Vec::new();
-    for name in [
+    // The CI slice (ALMIDE_CI_SLICE) of the twelve fixtures off a full run;
+    // each verdict is per fixture.
+    let names = almide_corpus::select(vec![
         "fuel_race_boundary",
         "fuel_bounded_boundary",
         "fuel_dyn_charge",
@@ -506,7 +508,8 @@ fn the_codegen_meter_charges_like_the_whole_program_render() {
         "fuel_race_err_skip",
         "fuel_var_budget",
         "fuel_zero_budget_inline",
-    ] {
+    ], "fan_region_floor::codegen_meter", |n| format!("spec/wasm_cross/{n}.almd"));
+    for name in names {
         let path = fixture(name);
         let (code, out, err, _) = run_native(&path, false);
         let (m_code, m_out, m_err, announced) = run_native(&path, true);

@@ -9,6 +9,7 @@ import env
 import int
 
 let vocab_size = 5000
+
 let modulus = 2147483648
 
 fn next(s: Int) -> Int = (s * 1103515245 + 12345) % modulus
@@ -17,7 +18,7 @@ fn letters(s: Int, k: Int, acc: String) -> String =
   if k == 0 then acc
   else {
     let s2 = next(s)
-    letters(s2, k - 1, acc + string.from_codepoint(97 + (s2 / 65536) % 26))
+    letters(s2, k - 1, acc + (string.from_codepoint(97 + (s2 / 65536) % 26) ?? ""))
   }
 
 fn word_of(i: Int) -> String = {
@@ -37,13 +38,8 @@ effect fn main() -> Unit = {
     none => 2000000,
   }
   let vocab = list.range(0, vocab_size) |> list.map(word_of)
-  let counts = list.range(0, n)
-    |> list.map((i) => vocab[draw(i)])
-    |> list.group_by((w) => w)
-    |> map.map((ws) => list.len(ws))
-  let top = map.entries(counts)
-    |> list.sort_by(((w, c)) => (0 - c, w))
-    |> list.take(10)
+  let counts = list.range(0, n) |> list.map((i) => vocab[draw(i)]) |> list.group_by((w) => w) |> map.map((ws) => list.len(ws))
+  let top = map.to_list(counts) |> list.sort_by(((w, c)) => (0 - c, w)) |> list.take(10)
   for (w, c) in top {
     println("${w} ${c}")
   }

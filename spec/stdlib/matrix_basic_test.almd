@@ -5,8 +5,8 @@ test "zeros creates all-zero matrix" {
   let (r, c) = matrix.shape(z)
   assert_eq(r, 2)
   assert_eq(c, 3)
-  assert_eq(matrix.get(z, 0, 0), 0.0)
-  assert_eq(matrix.get(z, 1, 2), 0.0)
+  assert_eq(matrix.get(z, 0, 0), some(0.0))
+  assert_eq(matrix.get(z, 1, 2), some(0.0))
 }
 
 test "ones creates all-one matrix" {
@@ -14,8 +14,8 @@ test "ones creates all-one matrix" {
   let (r, c) = matrix.shape(o)
   assert_eq(r, 3)
   assert_eq(c, 2)
-  assert_eq(matrix.get(o, 0, 0), 1.0)
-  assert_eq(matrix.get(o, 2, 1), 1.0)
+  assert_eq(matrix.get(o, 0, 0), some(1.0))
+  assert_eq(matrix.get(o, 2, 1), some(1.0))
 }
 
 test "transpose swaps dimensions" {
@@ -27,10 +27,10 @@ test "transpose swaps dimensions" {
   let (r, c) = matrix.shape(t)
   assert_eq(r, 3)
   assert_eq(c, 2)
-  assert_eq(matrix.get(t, 0, 0), 1.0)
-  assert_eq(matrix.get(t, 0, 1), 4.0)
-  assert_eq(matrix.get(t, 2, 0), 3.0)
-  assert_eq(matrix.get(t, 2, 1), 6.0)
+  assert_eq(matrix.get(t, 0, 0), some(1.0))
+  assert_eq(matrix.get(t, 0, 1), some(4.0))
+  assert_eq(matrix.get(t, 2, 0), some(3.0))
+  assert_eq(matrix.get(t, 2, 1), some(6.0))
 }
 
 test "add is element-wise" {
@@ -42,9 +42,9 @@ test "add is element-wise" {
     [10.0, 20.0],
     [30.0, 40.0]
   ])
-  let c = matrix.add(a, b)
-  assert_eq(matrix.get(c, 0, 0), 11.0)
-  assert_eq(matrix.get(c, 1, 1), 44.0)
+  let c = a + b
+  assert_eq(matrix.get(c, 0, 0), some(11.0))
+  assert_eq(matrix.get(c, 1, 1), some(44.0))
 }
 
 test "scale multiplies every element" {
@@ -53,9 +53,9 @@ test "scale multiplies every element" {
     [3.0, 4.0]
   ])
   let s = matrix.scale(a, 2.5)
-  assert_eq(matrix.get(s, 0, 0), 2.5)
-  assert_eq(matrix.get(s, 0, 1), 5.0)
-  assert_eq(matrix.get(s, 1, 1), 10.0)
+  assert_eq(matrix.get(s, 0, 0), some(2.5))
+  assert_eq(matrix.get(s, 0, 1), some(5.0))
+  assert_eq(matrix.get(s, 1, 1), some(10.0))
 }
 
 test "mul is matrix multiplication (2x3 @ 3x2 = 2x2)" {
@@ -68,18 +68,18 @@ test "mul is matrix multiplication (2x3 @ 3x2 = 2x2)" {
     [0.0, 1.0],
     [1.0, 1.0]
   ])
-  let c = matrix.mul(a, b)
+  let c = a * b
   let (r, col) = matrix.shape(c)
   assert_eq(r, 2)
   assert_eq(col, 2)
-  assert_eq(matrix.get(c, 0, 0), 4.0)
+  assert_eq(matrix.get(c, 0, 0), some(4.0))
   // 1*1 + 2*0 + 3*1
-  assert_eq(matrix.get(c, 0, 1), 5.0)
+  assert_eq(matrix.get(c, 0, 1), some(5.0))
   // 1*0 + 2*1 + 3*1
-  assert_eq(matrix.get(c, 1, 0), 10.0)
+  assert_eq(matrix.get(c, 1, 0), some(10.0))
   // 4*1 + 5*0 + 6*1
   // 4*0 + 5*1 + 6*1
-  assert_eq(matrix.get(c, 1, 1), 11.0)
+  assert_eq(matrix.get(c, 1, 1), some(11.0))
 }
 
 test "mul identity returns same values" {
@@ -91,11 +91,11 @@ test "mul identity returns same values" {
     [1.0, 0.0],
     [0.0, 1.0]
   ])
-  let r = matrix.mul(a, id)
-  assert_eq(matrix.get(r, 0, 0), 2.0)
-  assert_eq(matrix.get(r, 0, 1), 3.0)
-  assert_eq(matrix.get(r, 1, 0), 4.0)
-  assert_eq(matrix.get(r, 1, 1), 5.0)
+  let r = a * id
+  assert_eq(matrix.get(r, 0, 0), some(2.0))
+  assert_eq(matrix.get(r, 0, 1), some(3.0))
+  assert_eq(matrix.get(r, 1, 0), some(4.0))
+  assert_eq(matrix.get(r, 1, 1), some(5.0))
 }
 
 test "mul_scaled fuses alpha * A * B" {
@@ -107,11 +107,11 @@ test "mul_scaled fuses alpha * A * B" {
     [1.0, 0.0],
     [0.0, 1.0]
   ])
-  let r = matrix.mul_scaled(a, 3.0, b)
-  assert_eq(matrix.get(r, 0, 0), 3.0)
-  assert_eq(matrix.get(r, 0, 1), 6.0)
-  assert_eq(matrix.get(r, 1, 0), 9.0)
-  assert_eq(matrix.get(r, 1, 1), 12.0)
+  let r = matrix.scale(a * b, 3.0)
+  assert_eq(matrix.get(r, 0, 0), some(3.0))
+  assert_eq(matrix.get(r, 0, 1), some(6.0))
+  assert_eq(matrix.get(r, 1, 0), some(9.0))
+  assert_eq(matrix.get(r, 1, 1), some(12.0))
 }
 
 test "slice_rows extracts row range" {
@@ -125,16 +125,29 @@ test "slice_rows extracts row range" {
   let (r, c) = matrix.shape(s)
   assert_eq(r, 2)
   assert_eq(c, 2)
-  assert_eq(matrix.get(s, 0, 0), 3.0)
+  assert_eq(matrix.get(s, 0, 0), some(3.0))
   // row 1 of original
   // row 2, col 1 of original
-  assert_eq(matrix.get(s, 1, 1), 6.0)
+  assert_eq(matrix.get(s, 1, 1), some(6.0))
 }
 
 test "zeros then mul with ones = zeros" {
   let z = matrix.zeros(3, 3)
   let o = matrix.ones(3, 3)
-  let r = matrix.mul(z, o)
-  assert_eq(matrix.get(r, 0, 0), 0.0)
-  assert_eq(matrix.get(r, 2, 2), 0.0)
+  let r = z * o
+  assert_eq(matrix.get(r, 0, 0), some(0.0))
+  assert_eq(matrix.get(r, 2, 2), some(0.0))
+}
+
+test "get answers none out of range, negative included" {
+  let m = matrix.from_lists([
+    [1.0, 2.0],
+    [3.0, 4.0]
+  ])
+  assert_eq(matrix.get(m, 1, 1), some(4.0))
+  assert_eq(matrix.get(m, 2, 0), none)
+  assert_eq(matrix.get(m, 0, 2), none)
+  assert_eq(matrix.get(m, -1, 0), none)
+  assert_eq(matrix.get(m, 0, -1), none)
+  assert_eq(matrix.get(m, 9223372036854775807, 0), none)
 }

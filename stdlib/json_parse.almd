@@ -34,6 +34,15 @@
 //     opened inside 1000 others is `json: nesting deeper than 1000`, checked
 //     where the oracle checks it. `depth` counts the containers around the
 //     value being parsed.
+// The bound is crates/almide-base/src/json_limits.rs's JSON_MAX_DEPTH; this
+// is its self-hosted reading (tests/json_depth_limit_test.rs pins the two),
+// shared with value.set_path's bound (#4209, stdlib/json_path.almd).
+fn __json_max_depth() -> Int = 1000
+
+// The err text, spelled out (a runtime int.to_string costs every JSON
+// program its formatting code); the test pins it to json_depth_error().
+fn __json_depth_error() -> String = "json: nesting deeper than 1000"
+
 fn json_parse(text: String) -> Result[Value, String] = {
   let h = prim.handle(text)
   let blen = prim.load32(h + 4)
@@ -103,10 +112,10 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
     if b == 34 then match __jp_string(base, len, q) {
       ok(r) => {
         let (s, np) = r
-        ok((value.str(s), np))
+        ok((value.string(s), np))
       },
       err(e) => err(e),
-    } else if (b == 123 or b == 91) and depth >= 1000 then err("json: nesting deeper than 1000")
+    } else if (b == 123 or b == 91) and depth >= __json_max_depth() then err(__json_depth_error())
     else if b == 123 then {
       let q2 = __jp_ws(base, len, q + 1)
       if q2 < len and prim.load8(base + q2) == 125 then {
@@ -131,7 +140,7 @@ fn __jp_value(base: Int, len: Int, p: Int, depth: Int) -> Result[(Value, Int), S
     else {
       let (cp, _l) = __jp_cp(base, q)
       let cpos = __jp_charpos(base, q, 0, 0)
-      err("unexpected char '" + string.from_codepoint(cp) + "' at pos " + int.to_string(cpos))
+      err("unexpected char '" + string.__err_text(string.from_codepoint(cp) ?? "") + "' at pos " + int.to_string(cpos))
     }
   }
 }
@@ -476,7 +485,7 @@ fn __jp_object(base: Int, len: Int, p0: Int, acc0: List[(String, Value)], depth:
           if map.contains(seen, k) then {
             error = __jp_at("json: duplicate key", base, p)
           } else {
-            map.insert(seen, k, 0)
+            seen = map.set(seen, k, 0)
             let c = __jp_ws(base, len, kp)
             if c >= len then {
               error = "unexpected end of input"

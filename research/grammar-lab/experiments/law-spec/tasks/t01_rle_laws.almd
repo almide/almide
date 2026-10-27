@@ -4,7 +4,7 @@ law "decode inverts encode" for (n: Int where it >= 1, m: Int where it >= 1) {
 }
 
 law "every count is a single digit" for (n: Int where it >= 1) {
-  let cs = string.chars(encode(string.repeat("a", n)))
+  let cs = string.to_list(encode(string.repeat("a", n)))
   let digit = (c: String) => result.is_ok(int.parse(c))
   list.range(1, list.len(cs)) |> list.all((i) => not (digit(cs[i - 1]) and digit(cs[i])))
 }

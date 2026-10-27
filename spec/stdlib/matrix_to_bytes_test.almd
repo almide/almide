@@ -1,4 +1,5 @@
-// matrix.to_bytes_*_le — round-trip with from_bytes_*_le.
+// matrix.to_bytes_*_le — round-trip with from_bytes_*_le, which answer
+// some(matrix) when the data fits and none when it does not.
 test "to_bytes_f64_le round-trip preserves all values" {
   let m = matrix.from_lists([
     [1.5, -2.5, 3.0],
@@ -6,13 +7,13 @@ test "to_bytes_f64_le round-trip preserves all values" {
   ])
   let b = matrix.to_bytes_f64_le(m)
   assert_eq(bytes.len(b), 2 * 3 * 8)
-  let m2 = matrix.from_bytes_f64_le(b, 0, 2, 3)
+  let m2 = matrix.from_bytes_f64_le(b, 0, 2, 3)!
   assert_eq(matrix.rows(m2), 2)
   assert_eq(matrix.cols(m2), 3)
-  assert_eq(matrix.get(m2, 0, 0), 1.5)
-  assert_eq(matrix.get(m2, 0, 2), 3.0)
-  assert_eq(matrix.get(m2, 1, 1), 5.5)
-  assert_eq(matrix.get(m2, 1, 2), -6.25)
+  assert_eq(matrix.get(m2, 0, 0), some(1.5))
+  assert_eq(matrix.get(m2, 0, 2), some(3.0))
+  assert_eq(matrix.get(m2, 1, 1), some(5.5))
+  assert_eq(matrix.get(m2, 1, 2), some(-6.25))
 }
 
 test "to_bytes_f32_le round-trips with f32 precision loss tolerated" {
@@ -22,12 +23,12 @@ test "to_bytes_f32_le round-trips with f32 precision loss tolerated" {
   ])
   let b = matrix.to_bytes_f32_le(m)
   assert_eq(bytes.len(b), 2 * 2 * 4)
-  let m2 = matrix.from_bytes_f32_le(b, 0, 2, 2)
+  let m2 = matrix.from_bytes_f32_le(b, 0, 2, 2)!
   // 1.5 / -0.25 / 0.5 / 2.0 are all exactly representable in f32.
-  assert_eq(matrix.get(m2, 0, 0), 1.5)
-  assert_eq(matrix.get(m2, 0, 1), -0.25)
-  assert_eq(matrix.get(m2, 1, 0), 0.5)
-  assert_eq(matrix.get(m2, 1, 1), 2.0)
+  assert_eq(matrix.get(m2, 0, 0), some(1.5))
+  assert_eq(matrix.get(m2, 0, 1), some(-0.25))
+  assert_eq(matrix.get(m2, 1, 0), some(0.5))
+  assert_eq(matrix.get(m2, 1, 1), some(2.0))
 }
 
 test "to_bytes_f64_le on a 1x1 matrix" {
@@ -37,4 +38,16 @@ test "to_bytes_f64_le on a 1x1 matrix" {
   let b = matrix.to_bytes_f64_le(m)
   assert_eq(bytes.len(b), 8)
   assert_eq(bytes.get_f64_le(b, 0) ?? 0.0, 42.0)
+}
+
+test "from_bytes_*_le answer none when the data does not fit" {
+  let b = bytes.zeros(8)
+  assert_eq(matrix.rows(matrix.from_bytes_f64_le(b, 0, 1, 1)!), 1)
+  assert_eq(matrix.rows(matrix.from_bytes_f32_le(b, 0, 1, 2)!), 1)
+  assert_eq(matrix.rows(matrix.from_bytes_f16_le(b, 0, 2, 2)!), 2)
+  assert(option.is_none(matrix.from_bytes_f64_le(b, 0, 1, 2)))
+  assert(option.is_none(matrix.from_bytes_f32_le(b, 4, 1, 2)))
+  assert(option.is_none(matrix.from_bytes_f16_le(b, 9, 1, 0)))
+  assert(option.is_none(matrix.from_bytes_f32_le(b, -1, 1, 1)))
+  assert(option.is_none(matrix.from_bytes_f64_le(b, 9223372036854775807, 1, 1)))
 }

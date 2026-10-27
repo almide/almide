@@ -245,8 +245,8 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 
-    /// Last n elements (native `n as usize >= len ? whole : tail`):
-    /// a NEGATIVE n reinterprets huge and takes the WHOLE list.
+    /// Last n elements (`n >= len ? whole : tail`); a NEGATIVE n is 0
+    /// (#4147) — the empty list.
     pub(crate) fn lower_list_take_end(
         &mut self,
         xs: &IrExpr,
@@ -266,6 +266,7 @@ impl Emitter<'_> {
         let ho = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hn);
+        i.local_get(hn).i64_const(0).local_get(hn).i64_const(0).i64_gt_s().select().local_set(hn); // #4147: a negative count is 0
         i.local_get(hb).i32_load(len_memarg()).local_set(hl);
         // start = big ? 0 : len - n*stride (index-domain big test
         // first — the byte product wraps for a huge n)
@@ -297,8 +298,8 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(SliceTy::List(h))))
     }
 
-    /// All but the last n (native `n as usize >= len ? empty : head`):
-    /// a NEGATIVE n reinterprets huge and drops EVERYTHING.
+    /// All but the last n (`n >= len ? empty : head`); a NEGATIVE n is 0
+    /// (#4147) — the whole list.
     pub(crate) fn lower_list_drop_end(
         &mut self,
         xs: &IrExpr,
@@ -321,6 +322,7 @@ impl Emitter<'_> {
         let ho = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hn);
+        i.local_get(hn).i64_const(0).local_get(hn).i64_const(0).i64_gt_s().select().local_set(hn); // #4147: a negative count is 0
         i.local_get(hb).i32_load(len_memarg()).local_set(hl);
         // end = big ? 0 : len - n*stride (index-domain big test first)
         i.i32_const(0);
@@ -362,6 +364,7 @@ impl Emitter<'_> {
         let hc = self.hold_i32()?;
         let mut i = self.f.instructions();
         i.local_set(hn);
+        i.local_get(hn).i64_const(0).local_get(hn).i64_const(0).i64_gt_s().select().local_set(hn); // #4147: a negative count is 0
         i.local_get(hb).i32_load(len_memarg()).local_set(hl);
         // end = big ? 0 : len - n*stride, exactly as the copying form
         i.i32_const(0);

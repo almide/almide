@@ -4,9 +4,8 @@
 //   drop(s, n)      = s.chars().skip(n)   — all but the first n
 //   take_end(s, n)  = the last n codepoints
 //   drop_end(s, n)  = all but the last n
-// v0 casts n to usize, so a NEGATIVE n becomes a huge count: take treats n<0 as "take
-// all", drop as "drop all" (→ empty), take_end as "the whole string", drop_end as
-// "drop all" (→ empty). Each fn reduces to two codepoint indices [lo, hi) and copies
+// A NEGATIVE n is 0 (#4147): take and take_end answer "", drop and drop_end the
+// whole string. (v0 cast n to usize, so it was a huge count: take/take_end took all.) Each fn reduces to two codepoint indices [lo, hi) and copies
 // that UTF-8 byte range — self-contained (no other stdlib call, since the production
 // auto-linker is single-pass), mirroring string_slice's proven walk.
 fn __td_skip(addr: Int, end: Int) -> Int = if addr >= end then addr
@@ -56,14 +55,14 @@ fn __td_slice(s: String, lo: Int, hi: Int) -> String = {
 
 fn string_take(s: String, n: Int) -> String = {
   let count = __td_count(s)
-  let k = if n < 0 then count
+  let k = if n < 0 then 0
   else (if n > count then count else n)
   __td_slice(s, 0, k)
 }
 
 fn string_drop(s: String, n: Int) -> String = {
   let count = __td_count(s)
-  let k = if n < 0 then count
+  let k = if n < 0 then 0
   else (if n > count then count else n)
   __td_slice(s, k, count)
 }
@@ -91,8 +90,8 @@ fn string_take_end(s: String, n: Int) -> String = {
   let h = prim.handle(s)
   let base = h + 12
   let end = base + prim.load32(h + 4)
-  let start = if n < 0 then base
-  else __td_back(base, end, n)
+  // __td_back answers `end` for k <= 0, so a negative n keeps nothing.
+  let start = __td_back(base, end, n)
   __td_bytes(start, end)
 }
 
@@ -100,7 +99,7 @@ fn string_drop_end(s: String, n: Int) -> String = {
   let h = prim.handle(s)
   let base = h + 12
   let end = base + prim.load32(h + 4)
-  let cut = if n < 0 then base
-  else __td_back(base, end, n)
+  // A negative n cuts nothing (__td_back answers `end`).
+  let cut = __td_back(base, end, n)
   __td_bytes(base, cut)
 }

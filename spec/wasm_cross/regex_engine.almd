@@ -29,7 +29,7 @@ fn refused(p: String) -> String = match regex.compile(p) {
 }
 
 fn olist(o: List[String?]?) -> String = match o {
-  some(xs) => "[" + string.join(xs |> list.map((x) => x ?? ""), "|") + "]",
+  some(xs) => "[" + list.join(xs |> list.map((x) => x ?? ""), "|") + "]",
   none => "NONE",
 }
 
@@ -83,18 +83,18 @@ fn main() -> Unit = {
   println(regex.replace_first(regex.new("[0-9]+"), "a1b2c3", "X"))
   println(regex.replace(regex.new("[0-9]+"), "no digits", "X"))
   // ── split edges ──
-  println("[" + string.join(regex.split(regex.new(","), "a,,b,"), "|") + "]")
-  println("[" + string.join(regex.split(regex.new("[,;]"), "a,b;c"), "|") + "]")
-  println("[" + string.join(regex.split(regex.new(","), "hello"), "|") + "]")
-  println("[" + string.join(regex.split(regex.new(""), "abc"), "|") + "]")
-  println("[" + string.join(regex.split(regex.new("\\s+"), "hello   world  foo"), "|") + "]")
+  println("[" + list.join(regex.split(regex.new(","), "a,,b,"), "|") + "]")
+  println("[" + list.join(regex.split(regex.new("[,;]"), "a,b;c"), "|") + "]")
+  println("[" + list.join(regex.split(regex.new(","), "hello"), "|") + "]")
+  println("[" + list.join(regex.split(regex.new(""), "abc"), "|") + "]")
+  println("[" + list.join(regex.split(regex.new("\\s+"), "hello   world  foo"), "|") + "]")
   // ── full_match / find_all ──
   println(b2s(regex.is_full_match(regex.new("[0-9]+"), "123")))
   println(b2s(regex.is_full_match(regex.new("[0-9]+"), "abc123")))
   println(b2s(regex.is_full_match(regex.new(""), "")))
-  println("[" + string.join(regex.find_all(regex.new("[0-9]+"), "a1b22c333"), "|") + "]")
-  println("[" + string.join(regex.find_all(regex.new("\\w+"), "one two  three"), "|") + "]")
-  println("[" + string.join(regex.find_all(regex.new("[本語]"), "日本語日本"), "|") + "]")
+  println("[" + list.join(regex.find_all(regex.new("[0-9]+"), "a1b22c333"), "|") + "]")
+  println("[" + list.join(regex.find_all(regex.new("\\w+"), "one two  three"), "|") + "]")
+  println("[" + list.join(regex.find_all(regex.new("[本語]"), "日本語日本"), "|") + "]")
   // ── empty alternation arms (leading / trailing / middle / triple / nested) ──
   // An empty arm is an empty Seq that matches length-0 at any position. wasm
   // previously dropped TRAILING empty arms (parser appended a spurious atom).
@@ -112,9 +112,9 @@ fn main() -> Unit = {
   // <>
   println(b2s(regex.is_full_match(regex.new("a|"), "")))
   // empty arm full-matches "" → T
-  println("[" + string.join(regex.find_all(regex.new("a|"), "bza"), "|") + "]")
+  println("[" + list.join(regex.find_all(regex.new("a|"), "bza"), "|") + "]")
   // zero-width loop
-  println("[" + string.join(regex.split(regex.new("a|"), "abc"), "|") + "]")
+  println("[" + list.join(regex.split(regex.new("a|"), "abc"), "|") + "]")
   println(olist(regex.captures(regex.new("(a|)"), "b")))
   // group with empty arm → [""]
   println(olist(regex.captures(regex.new("(|a)"), "b")))
@@ -228,4 +228,21 @@ fn main() -> Unit = {
   // nested star terminates (empty instance ends the loop) → T
   // empty instance is still counted → [, ]
   println(olist(regex.captures(regex.new("(a*)*"), "")))
+  // ── \s is the ASCII whitespace set [ \t\n\v\f\r] (#4257) ──
+  // each of U+0009..U+000D and U+0020 against \s, \S, [\s], [^\s] → TFTF per line
+  for cp in [
+    9,
+    10,
+    11,
+    12,
+    13,
+    32
+  ] {
+    let ch = string.from_codepoint(cp) ?? ""
+    println("${cp} ${b2s(regex.is_match(regex.new("\\s"), ch))}${b2s(regex.is_match(regex.new("\\S"), ch))}${b2s(regex.is_match(regex.new("[\\s]"), ch))}${b2s(regex.is_match(regex.new("[^\\s]"), ch))}")
+  }
+  // a no-whitespace validator refuses a form feed and a vertical tab → F F T
+  println(b2s(regex.is_full_match(regex.new("^\\S+$"), "user\u{c}name")))
+  println(b2s(regex.is_full_match(regex.new("^\\S+$"), "user\u{b}name")))
+  println(b2s(regex.is_full_match(regex.new("^\\S+$"), "username")))
 }

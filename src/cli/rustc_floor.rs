@@ -30,19 +30,46 @@ pub(crate) fn min_rustc_string() -> String {
     format!("{a}.{b}.{c}")
 }
 
-/// The rustc the direct-rustc routes run: `rustc` on PATH, else
-/// `~/.cargo/bin/rustc` (`crate::find_rustc`).
+/// The rustc the direct-rustc routes run: `rustc` on PATH, else the one
+/// rustup installs under the cargo home (`crate::find_rustc`).
 pub(crate) fn locate_rustc() -> String {
     if std::process::Command::new("rustc").arg("--version").output().is_ok() {
         return "rustc".to_string();
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        let cargo_rustc = std::path::PathBuf::from(home).join(".cargo/bin/rustc");
-        if cargo_rustc.exists() {
-            return cargo_rustc.to_string_lossy().to_string();
-        }
+    let fallback = fallback_rustc(
+        cfg!(windows),
+        std::env::var_os("CARGO_HOME"),
+        std::env::var_os("HOME"),
+        std::env::var_os("USERPROFILE"),
+    );
+    match fallback {
+        Some(p) if p.exists() => p.to_string_lossy().to_string(),
+        _ => "rustc".to_string(),
     }
-    "rustc".to_string()
+}
+
+/// Where rustup puts rustc when it is not on PATH: `$CARGO_HOME/bin`, else
+/// `.cargo/bin` under the home directory. On Windows the home is
+/// `%USERPROFILE%` (HOME is normally unset there) and the file is
+/// `rustc.exe`; a fallback that looked for `$HOME/.cargo/bin/rustc` found
+/// nothing on Windows, so the floor judged whatever `rustc` spawn failed
+/// to start rather than the toolchain rustup installed. Pure, so the
+/// Windows answer is tested on every host.
+pub(crate) fn fallback_rustc(
+    windows: bool,
+    cargo_home: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+    userprofile: Option<std::ffi::OsString>,
+) -> Option<std::path::PathBuf> {
+    let nonempty = |v: Option<std::ffi::OsString>| v.filter(|v| !v.is_empty());
+    let cargo_home = match nonempty(cargo_home) {
+        Some(c) => std::path::PathBuf::from(c),
+        None => {
+            let home = if windows { nonempty(userprofile).or(nonempty(home)) } else { nonempty(home) };
+            std::path::PathBuf::from(home?).join(".cargo")
+        }
+    };
+    Some(cargo_home.join("bin").join(if windows { "rustc.exe" } else { "rustc" }))
 }
 
 /// `rustc 1.96.0 (ac68faa20 2026-05-25)` / `rustc 1.99.0-nightly (…)` →
@@ -114,6 +141,36 @@ mod tests {
         assert_eq!(parse_rustc_version("rustc 1.77"), None);
         assert_eq!(parse_rustc_version("hello"), None);
         assert_eq!(parse_rustc_version(""), None);
+    }
+
+    /// The Windows path (CVE-2024-24576 is a Windows bug): the fallback is
+    /// `%USERPROFILE%\.cargo\bin\rustc.exe` (or `%CARGO_HOME%\bin\rustc.exe`),
+    /// and rustup's CRLF `--version` line is judged like any other. No CI
+    /// runner executes Windows, so this is the gate for that path.
+    #[test]
+    fn the_windows_fallback_and_version_line_are_judged() {
+        use std::ffi::OsString;
+        use std::path::Path;
+        let os = |s: &str| Some(OsString::from(s));
+        let exe = Path::new(".cargo").join("bin").join("rustc.exe");
+        let p = fallback_rustc(true, None, None, os("C:\\Users\\u")).unwrap();
+        assert!(p.starts_with("C:\\Users\\u") && p.ends_with(&exe), "{}", p.display());
+        // USERPROFILE wins over a HOME that a POSIX shell exported.
+        let p = fallback_rustc(true, None, os("/home/msys"), os("C:\\Users\\u")).unwrap();
+        assert!(p.starts_with("C:\\Users\\u") && p.ends_with(&exe), "{}", p.display());
+        // CARGO_HOME wins over both.
+        let p = fallback_rustc(true, os("D:\\cargo"), None, os("C:\\Users\\u")).unwrap();
+        assert!(p.starts_with("D:\\cargo") && p.ends_with(Path::new("bin").join("rustc.exe")), "{}", p.display());
+        assert_eq!(fallback_rustc(true, None, None, None), None);
+        // Unix keeps $HOME/.cargo/bin/rustc and never reads USERPROFILE.
+        let p = fallback_rustc(false, None, os("/home/u"), os("C:\\Users\\u")).unwrap();
+        assert_eq!(p, Path::new("/home/u").join(".cargo").join("bin").join("rustc"));
+        assert_eq!(fallback_rustc(false, None, None, os("C:\\Users\\u")), None);
+        // rustup on Windows ends the line with CRLF.
+        let rustc = "C:\\Users\\u\\.cargo\\bin\\rustc.exe";
+        let e = judge(rustc, "rustc 1.77.1 (7cf61ebde 2024-03-27)\r\n").unwrap_err();
+        assert!(e.contains("rustc 1.77.1 is too old") && e.contains(rustc), "{e}");
+        assert!(judge(rustc, &format!("rustc {} (x 2026-05-25)\r\n", min_rustc_string())).is_ok());
     }
 
     #[test]

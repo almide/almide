@@ -8,6 +8,14 @@
 //!
 //! a block of an H-byte header (`$alloc` writes rc / len / cap) and N slots
 //! of W bytes, representation R, then the slots stored, in emission order.
+//! A block whose slot count is a run-time value is a LOOP FILL:
+//!
+//!   `h H w W v K r R f L t S`
+//!
+//! the count in wasm local K at the `call $alloc`, then the countdown loop
+//! on local L whose cursor advances S bytes per stored slot. The checker
+//! accepts it when K = L and S = W — the loop counts down the count the
+//! block was sized from, one slot per step (InitCert.v `fill_window`).
 //! Sites are joined by `;`. The checker accepts a site when every slot below
 //! N is stored and none at or past it; InitCert.v proves that the window of
 //! an accepted site leaves its block initialized over its whole extent, with
@@ -19,15 +27,21 @@
 //! the checker rejects (scripts/witness-reinject.sh init re-injects such a
 //! bug and requires the rejection).
 //!
-//! COVERAGE: list literals (`[a, b, c]`, emitter.rs). Every other allocation
+//! COVERAGE: list literals (`[a, b, c]`, emitter.rs) and range lists
+//! (`a..b`, ranges.rs — a loop fill). Every other allocation
 //! site — records, variants, strings, the runtime's routines — records
 //! nothing yet, so INITIALIZATION is certified for list-literal blocks only;
 //! the corpus count of recorded sites is reported by proofs/structural-wall.sh.
 //!
-//! TRUSTED, as for the other witnesses: that the recorded events are the
-//! instructions the bytes contain, and that the block stays in the
-//! emitter's private local until its last store (no element expression can
-//! name the block being built).
+//! Each event also keeps its ANCHOR (witness_anchor.rs): where in the body
+//! its instruction ends — the site at its `local.set` of the block, a fill
+//! at the `local.get` of the block after the loop, a store at the store.
+//! `almide-anchor-check` decodes the shipped bytes and checks every located
+//! event against the instructions there (#4011 (d)): the allocation's size,
+//! the store's width, offset and address local, the fill loop's shape.
+//!
+//! TRUSTED: that the representation R is the block's (no instruction
+//! carries it), and that `$alloc` writes the header.
 
 use std::sync::Mutex;
 
@@ -39,7 +53,11 @@ pub(crate) struct Site(usize);
 struct State {
     pass: usize,
     sites: Vec<String>,
+    /// Each site's anchors, in event order (the site, then each fill or
+    /// store), parallel to `sites`.
+    anchors: Vec<String>,
     done: Vec<(usize, String)>,
+    done_anchors: Vec<(usize, String)>,
 }
 
 fn state() -> &'static Mutex<Option<State>> {
@@ -59,8 +77,10 @@ pub(crate) fn start() {
 impl State {
     fn flush(&mut self) {
         let sites = std::mem::take(&mut self.sites);
+        let anchors = std::mem::take(&mut self.anchors);
         if !sites.is_empty() {
             self.done.push((self.pass, sites.iter().map(|s| s.trim_end()).collect::<Vec<_>>().join(";")));
+            self.done_anchors.push((self.pass, anchors.iter().map(|s| s.trim_end()).collect::<Vec<_>>().join(";")));
         }
     }
 }
@@ -75,19 +95,52 @@ pub(crate) fn begin_pass(pass: usize) {
 
 /// The `call $alloc` of a block of `count` slots of `width` bytes behind an
 /// `hdr`-byte header, representation `repr`, was just emitted.
-pub(crate) fn site(hdr: u32, width: u32, count: usize, repr: u32) -> Option<Site> {
+pub(crate) fn site(hdr: u32, width: u32, count: usize, repr: u32, at: &wasm_encoder::Function) -> Option<Site> {
+    let a = crate::witness::anchor::at(at);
     with(|s| {
         s.sites.push(format!("h{hdr} w{width} n{count} r{repr} "));
+        s.anchors.push(format!("{a} "));
         Site(s.sites.len() - 1)
     })
 }
 
-/// Slot `i` of `site` was just stored.
-pub(crate) fn store(site: Option<Site>, i: usize) {
+/// The `call $alloc` of a block of a run-time count of `width`-byte slots,
+/// the count in wasm local `count_local`, was just emitted.
+pub(crate) fn fill_site(hdr: u32, width: u32, count_local: u32, repr: u32, at: &wasm_encoder::Function) -> Option<Site> {
+    let a = crate::witness::anchor::at(at);
+    with(|s| {
+        s.sites.push(format!("h{hdr} w{width} v{count_local} r{repr} "));
+        s.anchors.push(format!("{a} "));
+        Site(s.sites.len() - 1)
+    })
+}
+
+/// `site`'s countdown fill loop was just emitted: it counts down local
+/// `counter` and advances its cursor `step` bytes per stored slot.
+pub(crate) fn fill(site: Option<Site>, counter: u32, step: u32, at: &wasm_encoder::Function) {
     if let Some(Site(k)) = site {
+        let a = crate::witness::anchor::at(at);
+        with(|s| {
+            if let Some(t) = s.sites.get_mut(k) {
+                t.push_str(&format!("f{counter} t{step} "));
+            }
+            if let Some(t) = s.anchors.get_mut(k) {
+                t.push_str(&format!("{a} "));
+            }
+        });
+    }
+}
+
+/// Slot `i` of `site` was just stored.
+pub(crate) fn store(site: Option<Site>, i: usize, at: &wasm_encoder::Function) {
+    if let Some(Site(k)) = site {
+        let a = crate::witness::anchor::at(at);
         with(|s| {
             if let Some(t) = s.sites.get_mut(k) {
                 t.push_str(&format!("s{i} "));
+            }
+            if let Some(t) = s.anchors.get_mut(k) {
+                t.push_str(&format!("{a} "));
             }
         });
     }
@@ -100,7 +153,20 @@ pub fn take() -> Vec<(usize, String)> {
         return Vec::new();
     };
     s.flush();
+    *taken_anchors().lock().expect("init anchors") = std::mem::take(&mut s.done_anchors);
     s.done
+}
+
+fn taken_anchors() -> &'static Mutex<Vec<(usize, String)>> {
+    use std::sync::OnceLock;
+    static A: OnceLock<Mutex<Vec<(usize, String)>>> = OnceLock::new();
+    A.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// The anchors of the witness the last [`take`] returned, per pass: per
+/// site (`;`-joined) the anchor of each event, `serial@offset` or `-`.
+pub fn take_anchors() -> Vec<(usize, String)> {
+    std::mem::take(&mut *taken_anchors().lock().expect("init anchors"))
 }
 
 #[cfg(test)]

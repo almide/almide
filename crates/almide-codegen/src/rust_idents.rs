@@ -24,8 +24,8 @@
 ///   operators lower to a runtime call, not a `CallTarget::Module` (float `**`
 ///   renders `almide_rt_math_fpow(..)` via the power_expr template);
 /// - the module that defines a runtime-owned type the code names (#1829):
-///   `let e: Endian = BigEndian` names bytes.rs's `AlmideEndian` without
-///   calling a `bytes.*` fn (`walker::runtime_owned::modules_spelled_in`).
+///   a `FileStat` param names fs.rs's `AlmideFileStat` without calling an
+///   `fs.*` fn (`walker::runtime_owned::modules_spelled_in`).
 ///
 /// - the module whose source DEFINES an `Almide*` type the code names
 ///   (`AlmideMap` in map.rs): a `Map[K, V]` in a signature renders as

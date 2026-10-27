@@ -1,0 +1,7 @@
+// E006 (#4159): `env.get` reads the environment, so it is an `effect fn` and
+// a pure fn cannot read $HOME through it.
+import env
+
+fn home() -> String = env.get("HOME") ?? "none"
+
+effect fn main() -> Unit = println(home())

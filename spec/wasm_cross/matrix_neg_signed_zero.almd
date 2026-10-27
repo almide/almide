@@ -1,6 +1,6 @@
 // @contract: C-355
-// `matrix.neg` is IEEE-754 NEGATION — a sign flip — so `neg(+0.0)` is -0.0
-// and `neg(-0.0)` is +0.0, identically on both targets. The self-hosted body
+// Unary minus on a Matrix (`-m`) is IEEE-754 NEGATION — a sign flip — so it maps
+// +0.0 to -0.0 and -0.0 to +0.0, identically on both targets. The self-hosted body
 // spelled it `0.0 - x`, and IEEE `0.0 - 0.0` is +0.0: a matrix of zeros came
 // back +0.0 on both wasm legs where native's `-x` answered -0.0 (#2484). The
 // sign is invisible to `==` and to `float.to_string`'s rounding, so it is
@@ -16,20 +16,23 @@
 // this op spelled as a subtraction from zero?" is exactly the question that
 // has to be asked of every cell, not just the one the issue named:
 // `scale(m, -1.0)` and `map(m, (x) => -x)` are multiplications/negations and
-// keep the sign, `sub(zeros, zeros)` is a SUBTRACTION and is +0.0 by IEEE on
+// keep the sign, `zeros - zeros` is a SUBTRACTION and is +0.0 by IEEE on
 // both legs, and the norms/activations that route a zero through a product
 // keep whatever the product gives.
-fn recip(m: Matrix, r: Int, c: Int) -> String = float.to_string(1.0 / matrix.get(m, r, c))
+fn recip(m: Matrix, r: Int, c: Int) -> String = match matrix.get(m, r, c) {
+  some(x) => float.to_string(1.0 / x),
+  none => "none",
+}
 
 fn main() -> Unit = {
   let z = matrix.from_lists([
     [0.0, -0.0, 1.0, -1.0]
   ])
-  let n = matrix.neg(z)
+  let n = -z
   println("neg=${matrix.to_lists(n)}")
   println("neg_recip=${recip(n, 0, 0)},${recip(n, 0, 1)},${recip(n, 0, 2)},${recip(n, 0, 3)}")
   // Negating twice returns the original bits.
-  println("neg_neg=${matrix.to_lists(matrix.neg(n))}")
+  println("neg_neg=${matrix.to_lists(-n)}")
   // scale by -1 is a MULTIPLICATION: the sign flips by the product rule.
   let s = matrix.scale(z, -1.0)
   println("scale_recip=${recip(s, 0, 0)},${recip(s, 0, 1)}")
@@ -37,7 +40,7 @@ fn main() -> Unit = {
   let mp = matrix.map(z, (x) => -x)
   println("map_recip=${recip(mp, 0, 0)},${recip(mp, 0, 1)}")
   // sub IS a subtraction: `0.0 - 0.0` is +0.0 on both legs, by IEEE.
-  let sb = matrix.sub(matrix.zeros(1, 1), matrix.zeros(1, 1))
+  let sb = matrix.zeros(1, 1) - matrix.zeros(1, 1)
   println("sub_recip=${recip(sb, 0, 0)}")
   // A stored -0.0 survives from_lists / to_lists / transpose unchanged.
   let t = matrix.transpose(z)

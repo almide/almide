@@ -184,7 +184,7 @@ impl Signature {
 /// `base64` / `hex` / `hash` / `zlib` / `path` / `url` / `regex` are pure but
 /// not auto-imported: a program that calls one starts with `import <module>`
 /// ([`imports_for`]); so is `json`, whose functions over a `Value` or a
-/// `String` the grammar reaches. `error` and `value` are auto-imported.
+/// `String` the grammar reaches. `value` is auto-imported.
 ///
 /// `(module_name, source_text, needs_import)`.
 const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
@@ -211,7 +211,6 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     // Host addresses over a live buffer (`effect_recipes.rs`, `verdicts.rs`).
     ("ffi", include_str!("../../../../stdlib/ffi.almd"), true),
     ("matrix", include_str!("../../../../stdlib/matrix.almd"), false),
-    ("error", include_str!("../../../../stdlib/error.almd"), false),
     ("value", include_str!("../../../../stdlib/value.almd"), false),
     ("base64", include_str!("../../../../stdlib/base64.almd"), true),
     ("hex", include_str!("../../../../stdlib/hex.almd"), true),
@@ -228,12 +227,13 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("datetime", include_str!("../../../../stdlib/datetime.almd"), false),
     ("http", include_str!("../../../../stdlib/http.almd"), true),
     ("html", include_str!("../../../../stdlib/html.almd"), true),
+    // An opaque holder whose renderers all print `Secret(***)` (#4107).
+    ("secret", include_str!("../../../../stdlib/secret.almd"), true),
     // The asserts abort the same way on every leg outside a test block
     // (C-381, C-339), so a failing one is an observable, comparable outcome.
     ("testing", include_str!("../../../../stdlib/testing.almd"), true),
-    // Host-decided results only (`verdicts.rs`), and `process.env` over the
-    // sandbox's fixed env: every other function of these is an effect a
-    // sandbox does not reproduce.
+    // Host-decided results only (`verdicts.rs`): every other function of
+    // these is an effect a sandbox does not reproduce.
     ("random", include_str!("../../../../stdlib/random.almd"), true),
     ("process", include_str!("../../../../stdlib/process.almd"), true),
     // Over the loopback fixtures only (`oracle/fixture.rs`, `term.rs`).
@@ -291,10 +291,10 @@ const WEIGHT_OVERRIDES: &[(&str, &str, u32)] = &[
     ("string", "capitalize", 12),
     ("string", "reverse", 9),
     ("string", "slice", 9),
-    ("string", "chars", 9),
+    ("string", "to_list", 9),
     ("string", "len", 8),
     ("string", "index_of", 8),
-    ("string", "codepoint", 8),
+    ("string", "to_codepoint", 8),
     ("string", "from_codepoint", 8),
     ("string", "count", 7),
     ("string", "replace", 7),
@@ -307,13 +307,11 @@ const WEIGHT_OVERRIDES: &[(&str, &str, u32)] = &[
     ("float", "to_fixed", 10),
     ("float", "parse", 9),
     ("float", "round", 7),
-    ("float", "sqrt", 6),
     ("float", "abs", 5),
     // ── int width / conversion ──
     ("int", "to_string", 7),
     ("int", "parse", 7),
     ("int", "to_hex", 6),
-    ("int", "to_float", 6),
     ("int", "abs", 5),
     // ── higher-order functions (closure surface) ──
     ("list", "map", 9),
@@ -382,6 +380,12 @@ pub fn imports_for(src: &str) -> String {
             out.push_str(&format!("import {module}\n"));
         }
     }
+    // The deprecated raw-pointer `bytes` spellings are outside the
+    // memory-safety guarantee: a file calling one must `import ffi` (E100).
+    let raw_ptr = ["bytes.as_ptr(", "bytes.as_mut_ptr(", "bytes.data_ptr(", "bytes.copy_to_ptr(", "bytes.from_raw_ptr("];
+    if raw_ptr.iter().any(|c| src.contains(c)) && !out.contains("import ffi\n") {
+        out.push_str("import ffi\n");
+    }
     out
 }
 
@@ -446,21 +450,21 @@ mod availability_tests {
     #[test]
     fn native_only_functions_are_left_out_of_the_catalogue() {
         let unavailable = wasm_unavailable(TARGET_AVAILABILITY);
-        assert!(unavailable.contains("http.request_stream"));
+        assert!(unavailable.contains("http.start"));
         let cat = build();
         // A row the embedded host serves stays, its wasm leg run there.
         let unserved = |n: &String| unavailable.contains(n) && !embedded_only().contains(n);
         assert!(!cat.iter().any(|s| unserved(&format!("{}.{}", s.module, s.func))));
-        // Every unavailable row is stock-p1 only since the structural leg
-        // admitted `http.request_stream`, its last wall: so the row stays.
-        assert!(cat.iter().any(|s| s.module == "http" && s.func == "request_stream"), "a row the embedded host serves stays");
+        // `http.start` walls only the stock artifact (stock-p1): the embedded
+        // host serves the call handle, so the row stays.
+        assert!(cat.iter().any(|s| s.module == "http" && s.func == "start"), "a row the embedded host serves stays");
         assert!(cat.iter().any(|s| s.module == "matrix" && s.func == "dot_row"), "a served matrix fn stays");
     }
 
     #[test]
     fn value_and_json_functions_over_the_grammar_are_catalogued() {
         let names: Vec<String> = build().iter().map(|s| format!("{}.{}", s.module, s.func)).collect();
-        for want in ["value.field", "value.pick", "value.to_camel_case", "value.stringify", "json.parse", "json.stringify", "json.to_map"] {
+        for want in ["value.get", "value.pick", "value.as_object", "json.parse", "json.stringify"] {
             assert!(names.iter().any(|n| n == want), "{want} is not in the catalogue");
         }
         let src = "fn main() -> Unit = {\n  let s = json.stringify(value.null())\n}\n";
@@ -478,13 +482,13 @@ mod availability_tests {
         let src = "fn main() -> Unit = {\n  let a = base64.encode(bytes.zeros(2))\n  let b = regex.is_match(\"a\", \"a\")\n}\n";
         assert_eq!(imports_for(src), "import base64\nimport regex\n");
         // auto-imported modules and look-alike identifiers need none
-        assert_eq!(imports_for("let x = error.chain(\"a\", \"b\")\nlet y = mypath.x"), "");
+        assert_eq!(imports_for("let x = list.len([1])\nlet y = mypath.x"), "");
         // A match inside a string literal still imports: an unused import is
         // only a warning, while a call inside an interpolation
         // (`"${base64.encode(b)}"`) that the scan skipped would be an E003.
         assert_eq!(imports_for("let z = string.len(\"url.\")"), "import url\n");
         let cat = build();
-        for m in ["base64", "hex", "hash", "zlib", "path", "url", "regex", "error"] {
+        for m in ["base64", "hex", "hash", "zlib", "path", "url", "regex"] {
             assert!(cat.iter().any(|s| s.module == m), "{m} has a synthesizable function in the catalogue");
         }
     }
@@ -497,13 +501,16 @@ mod availability_tests {
             .filter(|s| s.effect && HOSTLESS_EFFECT_MODULES.contains(&s.module))
             .map(|s| format!("{}.{}", s.module, s.func))
             .collect();
-        assert!(effects.len() >= 8, "{effects:?}");
+        // Five since wave 4A made zlib's decoders (decompress / inflate /
+        // gunzip) plain fns returning Result: only the encoders stay effects.
+        assert!(effects.len() >= 5, "{effects:?}");
         for f in &effects {
             let known = LEG_DEPENDENT_ENCODERS.iter().any(|(e, d)| e == f || d == f);
             assert!(known, "{f}: a hostless effect function neither an encoder nor a decoder of one — classify it in LEG_DEPENDENT_ENCODERS");
         }
         for (e, d) in LEG_DEPENDENT_ENCODERS {
-            assert!(effects.contains(&e.to_string()) && effects.contains(&d.to_string()), "{e} / {d} not catalogued");
+            // The decoder is a plain fn since wave 4A: catalogued, not an effect.
+            assert!(effects.contains(&e.to_string()) && cat.iter().any(|s| format!("{}.{}", s.module, s.func) == *d), "{e} / {d} not catalogued");
             let s = cat.iter().find(|s| format!("{}.{}", s.module, s.func) == *e).unwrap();
             assert_eq!(s.observed_through, Some(*d));
         }
@@ -552,11 +559,16 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
         params,
         return_type,
         attrs,
+        visibility,
         ..
     } = decl
     else {
         return None;
     };
+    // A `local fn` / `mod fn` is not public surface either.
+    if !matches!(visibility, almide::ast::Visibility::Public) {
+        return None;
+    }
 
     // Effect functions only from the sandboxed modules: a clock, a socket or
     // a process is not reproducible across legs.
@@ -573,6 +585,14 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     // ledger's rule, tests/stdlib_inspection_test.rs): not public surface, so
     // a program calling it is a finding about the generator.
     if func.starts_with("__") {
+        return None;
+    }
+
+    // An `@input_sink` (`http.decode_json[T: Decode]`) takes only a
+    // user-declared input type for its type parameter (row 22, E110); the
+    // generator's universe holds no user record type, so no call it could
+    // write would check. Read off the declaration, like `mut` below.
+    if attrs.iter().any(|a| sym_str(a.name) == "input_sink") {
         return None;
     }
 

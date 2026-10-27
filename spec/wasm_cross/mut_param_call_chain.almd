@@ -18,11 +18,11 @@ effect fn g(mut a: Int) -> Unit = {
 
 effect fn walk(mut buf: Bytes, n: Int) -> Unit = if n == 0 then ()
 else {
-  bytes.set_at(buf, n % 64, int.band(n, 255))
+  bytes.put_u8(buf, n % 64, int.band(n, 255))
   walk(buf, n - 1)!
 }
 
-effect fn poke(mut buf: Bytes, v: Int) -> Unit = bytes.set_at(buf, 0, v)
+effect fn poke(mut buf: Bytes, v: Int) -> Unit = bytes.put_u8(buf, 0, v)
 
 fn grow(mut xs: List[Int], x: Int) -> Unit = list.push(xs, x)
 
@@ -35,7 +35,7 @@ effect fn main() -> Unit = {
   walk(buf, 2000)!
   var sum = 0
   for i in 0..<64 {
-    sum = sum + bytes.get_or(buf, i, 0)
+    sum = sum + bytes.get(buf, i) ?? 0
   }
   println("sum=${sum}")
   var i2 = 0
@@ -43,7 +43,7 @@ effect fn main() -> Unit = {
     poke(buf, int.band(i2, 255))!
     i2 = i2 + 1
   }
-  println("p0=${bytes.get_or(buf, 0, 0)}")
+  println("p0=${bytes.get(buf, 0) ?? 0}")
   var xs: List[Int] = []
   var j = 0
   while j < 100 {

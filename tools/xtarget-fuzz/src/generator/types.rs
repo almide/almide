@@ -46,7 +46,7 @@ pub enum GenType {
     /// hashable, byte-comparable case).
     Map(Box<GenType>),
     /// A fixed-width number (`Int8` … `UInt64`, `Float32`, `Float64`), built
-    /// from a small Int through its `int.to_<width>` conversion.
+    /// from a small Int through its `<width>.from` conversion.
     Sized(&'static str),
     /// `Bytes`, built with `bytes.from_list` (or `bytes.zeros(n)` when sized).
     Bytes,
@@ -57,14 +57,15 @@ pub enum GenType {
     /// `str` / `bool` / `null` / `array` / `object` (an object of n keys when
     /// sized).
     Value,
-    /// `bytes.Endian`: `LittleEndian` or `BigEndian`. Only ever an argument.
-    Endian,
     /// `Set[elem]`, built with `set.from_list`; the element is a hashable
     /// scalar ([`GenType::is_set_elem`]).
     Set(Box<GenType>),
     /// A stdlib nominal type (`HttpResponse`, `SafeHtml`, …), built and
     /// observed through its module's pure functions ([`super::nominal`]).
     Nominal(&'static str),
+    /// `secret.Secret[inner]` (#4107): built with `secret.new`, observed
+    /// through `secret.reveal` — its own rendering is always `Secret(***)`.
+    Secret(Box<GenType>),
 }
 
 /// The fixed-width number types the value grammar builds.
@@ -137,8 +138,12 @@ impl GenType {
             GenType::Bytes => out.push_str("Bytes"),
             GenType::Matrix => out.push_str("Matrix"),
             GenType::Value => out.push_str("Value"),
-            GenType::Endian => out.push_str("Endian"),
             GenType::Nominal(k) => out.push_str(k),
+            GenType::Secret(e) => {
+                out.push_str("Secret[");
+                e.render_into(out);
+                out.push(']');
+            }
         }
     }
 
@@ -159,7 +164,7 @@ impl GenType {
 
     /// A value of the fixed-width type `name` from the Int expression `n`.
     pub fn sized_literal(name: &str, n: &str) -> String {
-        format!("int.to_{}({n})", name.to_lowercase())
+        format!("{}.from({n})", name.to_lowercase())
     }
 
     /// `true` if a value of this type can be compared with `==` and
@@ -219,10 +224,13 @@ impl GenType {
                 format!("match {v} {{ ok({x}) => ok({expr}), err({ev}) => {{\n    let {ev}o: {seen} = {eo}\n    err(\"${{{ev}o}}\")\n  }} }}"),
             ));
         }
+        if let GenType::Secret(e) = self {
+            return e.observe(&format!("secret.reveal({v})"), depth + 1);
+        }
         match self {
             GenType::Bytes => Some((String::new(), format!("bytes.to_list({v})"))),
             GenType::Matrix => Some((String::new(), format!("matrix.to_lists({v})"))),
-            GenType::Value => Some((String::new(), format!("value.stringify({v})"))),
+            GenType::Value => Some((String::new(), format!("json.stringify({v})"))),
             GenType::Nominal(k) => Some((String::new(), super::nominal::fill(super::nominal::get(k)?.observe, v, 0))),
             GenType::List(e) => Some((String::new(), format!("list.map({v}, {})", inner(e)?))),
             GenType::Option(e) => Some((String::new(), format!("option.map({v}, {})", inner(e)?))),
@@ -249,7 +257,7 @@ impl GenType {
         match self {
             GenType::Nominal(k) => super::nominal::get(k).is_some_and(|n| n.observe_calls_effect),
             GenType::ResultNom(e, k) => e.observe_calls_effect() || GenType::Nominal(k).observe_calls_effect(),
-            GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) => e.observe_calls_effect(),
+            GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) | GenType::Secret(e) => e.observe_calls_effect(),
             GenType::Tuple2(a, b) => a.observe_calls_effect() || b.observe_calls_effect(),
             GenType::Tuple3(a, b, c) => a.observe_calls_effect() || b.observe_calls_effect() || c.observe_calls_effect(),
             _ => false,
@@ -261,7 +269,7 @@ impl GenType {
         match self {
             GenType::Nominal(k) => super::nominal::get(k).is_some_and(|n| n.refuses_var),
             GenType::ResultNom(e, k) => e.refuses_var() || GenType::Nominal(k).refuses_var(),
-            GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) => e.refuses_var(),
+            GenType::List(e) | GenType::Option(e) | GenType::Result(e) | GenType::Map(e) | GenType::Set(e) | GenType::Secret(e) => e.refuses_var(),
             GenType::Tuple2(a, b) => a.refuses_var() || b.refuses_var(),
             GenType::Tuple3(a, b, c) => a.refuses_var() || b.refuses_var() || c.refuses_var(),
             _ => false,
@@ -281,6 +289,7 @@ impl GenType {
             GenType::Nominal(k) => (super::nominal::get(k)?.observed)(),
             GenType::List(e) => GenType::List(inner(e)?),
             GenType::Option(e) => GenType::Option(inner(e)?),
+            GenType::Secret(e) => return e.observed(),
             GenType::Result(e) | GenType::ResultNom(e, _) => GenType::Result(inner(e)?),
             GenType::Tuple2(a, b) => GenType::Tuple2(inner(a)?, inner(b)?),
             GenType::Tuple3(a, b, c) => GenType::Tuple3(inner(a)?, inner(b)?, inner(c)?),
@@ -301,12 +310,12 @@ impl GenType {
             GenType::Sized(_) => true,
             GenType::Set(e) => e.is_observable(),
             // A Bytes or Matrix value has no string form (E089); a Value is
-            // observed through `value.stringify`.
+            // observed through `json.stringify`.
             GenType::Bytes | GenType::Matrix | GenType::Value => false,
-            // Only ever an argument: never printed.
-            GenType::Endian => false,
             // No string form of its own: observed through its readers.
             GenType::Nominal(_) | GenType::ResultNom(..) => false,
+            // Prints `Secret(***)`: observed through `secret.reveal`.
+            GenType::Secret(_) => false,
         }
     }
 
@@ -323,14 +332,14 @@ impl GenType {
             | GenType::Bytes
             | GenType::Matrix
             | GenType::Value => 1,
-            | GenType::Endian
             | GenType::Nominal(_) => 1,
             GenType::List(e)
             | GenType::Option(e)
             | GenType::Result(e)
             | GenType::ResultNom(e, _)
             | GenType::Map(e)
-            | GenType::Set(e) => {
+            | GenType::Set(e)
+            | GenType::Secret(e) => {
                 1 + e.depth()
             }
             GenType::Tuple2(a, b) => 1 + a.depth().max(b.depth()),
@@ -373,7 +382,7 @@ mod tests {
 
     /// #3636: the observed image of a non-printable value is a call, and a
     /// call interpolated inside `${…}` whose type is a Result is E041
-    /// (base64.decode, hex.decode, json.parse, value.field, value.as_array in
+    /// (base64.decode, hex.decode, json.parse, value.as_array in
     /// the inspection diamond). It is bound to a typed `let` first.
     #[test]
     fn a_non_printable_value_is_bound_to_a_typed_let_before_it_is_printed() {
@@ -385,7 +394,7 @@ mod tests {
         let p = render_print("v", &GenType::Option(Box::new(GenType::Matrix)));
         assert!(p.starts_with("let v_o: Option[List[List[Float]]] = option.map(v, "), "{p}");
         let p = render_print("w", &GenType::Value);
-        assert_eq!(p, "let w_o: String = value.stringify(w)\n  println(\"w = ${w_o}\")");
+        assert_eq!(p, "let w_o: String = json.stringify(w)\n  println(\"w = ${w_o}\")");
         // A printable value is interpolated as it is.
         assert_eq!(render_print("x", &GenType::Int), "println(\"x = ${x}\")");
     }

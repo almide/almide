@@ -38,7 +38,7 @@ fn scalar_key(line: String) -> String = {
   let parts = string.split(line, "=")
   if list.len(parts) < 2 then ""
   else {
-    let k = string.trim(list.get_or(parts, 0, ""))
+    let k = string.trim(list.get(parts, 0) ?? "")
     // A key is a bare identifier; anything with a space or a quote is not one, which keeps
     // `{ path = "x" }` inline tables and quoted values from being read as assignments.
     if k == "" or string.contains(k, " ") or string.contains(k, '"') then "" else k
@@ -72,9 +72,9 @@ fn inline_get(item: String, field: String) -> String = {
   let parts = string.split(item, marker)
   if list.len(parts) < 2 then ""
   else {
-    let rest = list.get_or(parts, 1, "")
+    let rest = list.get(parts, 1) ?? ""
     let closed = string.split(rest, '"')
-    list.get_or(closed, 0, "")
+    list.get(closed, 0) ?? ""
   }
 }
 
@@ -88,11 +88,11 @@ fn inline_num(item: String, field: String) -> String = {
   let parts = string.split(item, marker)
   if list.len(parts) < 2 then ""
   else {
-    let rest = string.trim(list.get_or(parts, 1, ""))
+    let rest = string.trim(list.get(parts, 1) ?? "")
     // Bare token: stop at the first separator that can follow one.
-    let at_comma = list.get_or(string.split(rest, ","), 0, rest)
-    let at_brace = list.get_or(string.split(at_comma, "}"), 0, at_comma)
-    string.trim(list.get_or(string.split(at_brace, " "), 0, at_brace))
+    let at_comma = list.get(string.split(rest, ","), 0) ?? rest
+    let at_brace = list.get(string.split(at_comma, "}"), 0) ?? at_comma
+    string.trim(list.get(string.split(at_brace, " "), 0) ?? at_brace)
   }
 }
 
@@ -187,7 +187,7 @@ else s.out }
 // non-empty, so a `'''` on a line of its own does not add a trailing blank line to the value.
 fn step_multi(s: Scan, line: String) -> Scan =
   if not string.contains(line, "'''") then { ...s, multi_lines: s.multi_lines + [line] } else {
-    let before = list.get_or(string.split(line, "'''"), 0, "")
+    let before = list.get(string.split(line, "'''"), 0) ?? ""
     let all = if before == "" then s.multi_lines
     else s.multi_lines + [before]
     let cleared: List[String] = []
@@ -230,7 +230,7 @@ fn step_scalar(s: Scan, n: Int, line: String) -> Scan = {
     if string.contains(after, "'''") then { ...s, cur: with_scalar(
       s.cur,
       k,
-      list.get_or(string.split(after, "'''"), 0, ""),
+      list.get(string.split(after, "'''"), 0) ?? "",
     ) } else { ...s, multi: k, multi_lines: first }
   } else if has_key(s.cur, k) then problem(
     s,
@@ -269,7 +269,7 @@ fn finish(s: Scan, n: Int) -> Scan = {
 }
 
 fn scan(lines: List[String], i: Int, s: Scan) -> Scan = if i >= list.len(lines) then finish(s, i)
-else scan(lines, i + 1, step(s, i + 1, list.get_or(lines, i, "")))
+else scan(lines, i + 1, step(s, i + 1, list.get(lines, i) ?? ""))
 
 // Parse an array-of-tables document into its blocks, in source order, with every recovery
 // the scanner made named in `problems` (line-numbered, 1-based).
@@ -288,13 +288,13 @@ test "a multi-line evidence array, comments and blank lines read as one block" {
   let d = parse_doc(src)
   assert_eq(d.problems, [])
   assert_eq(list.len(d.tables), 1)
-  let t = list.get_or(d.tables, 0, empty_table())
+  let t = list.get(d.tables, 0) ?? empty_table()
   assert_eq(table_get(t, "spec"), "ALS-T1")
   assert_eq(
     t.array_items |> list.map((it) => inline_get(it, "path")),
     ["spec/wasm_cross/a.almd", "x.rs"],
   )
-  assert_eq(inline_num(list.get_or(t.array_items, 1, ""), "n"), "1000")
+  assert_eq(inline_num(list.get(t.array_items, 1) ?? "", "n"), "1000")
 }
 
 test "an unclosed evidence array is reported, and the next [[contract]] still opens its own block" {
@@ -334,7 +334,7 @@ test "a ''' statement spanning lines is one value, and the key after it is read"
   let src = "[[contract]]\nid = \"C-001\"\nstatement = '''\nfirst line\n# not a comment\nlast'''\nsince = \"0.1.0\"\n"
   let d = parse_doc(src)
   assert_eq(d.problems, [])
-  let t = list.get_or(d.tables, 0, empty_table())
+  let t = list.get(d.tables, 0) ?? empty_table()
   assert_eq(table_get(t, "statement"), "first line\n# not a comment\nlast")
   assert_eq(table_get(t, "since"), "0.1.0")
 }

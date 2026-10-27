@@ -15,7 +15,7 @@ fn heavy(n: Int) -> Int = {
   while i < n { acc = (acc + i) % 1000; i = i + 1 }
   acc
 }
-fn costly(n: Int, v: Float) -> Float = float.from_int(heavy(n)) * 0.0 + v
+fn costly(n: Int, v: Float) -> Float = float.from(heavy(n)) * 0.0 + v
 
 effect fn main() -> Unit = {
   // plain Float arms; the cheaper second arm wins

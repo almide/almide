@@ -364,8 +364,8 @@ impl LowerCtx {
     /// generic (fallback) `Match` arm body, verbatim.
     ///
     /// A NESTED `match` arm (`match int.parse(c) { ok(n) => value.int(n), err(_) =>
-    /// match float.parse(c) { … } }` — try_decimal; `if … then match int.from_hex(..) {
-    /// ok(n) => value.int(n), err(_) => value.str(raw) } else …` — parse_number's then-arm).
+    /// match float.parse(c) { … } }` — try_decimal; `if … then match int.parse_radix(.., 16) {
+    /// ok(n) => value.int(n), err(_) => value.string(raw) } else …` — parse_number's then-arm).
     /// Recurse through the SAME machinery the tail-position `match` uses: a variant subject
     /// runs the proven `try_lower_variant_value_match` (subject-drop-before-arms over a
     /// scalar payload, then a heap-result-`if` skeleton), an Int-literal subject desugars
@@ -381,7 +381,7 @@ impl LowerCtx {
         arms: &[IrMatchArm],
         result_ty: &Ty,
     ) -> Option<ValueId> {
-        // PER-ARM FRAME: the match SUBJECT (`int.from_hex(string.drop(c, 2))`) materializes
+        // PER-ARM FRAME: the match SUBJECT (`int.parse_radix(string.drop(c, 2), 16)`) materializes
         // heap-arg temps (the `string.drop` result) into `live_heap_handles`. Unlike every
         // other arm kind here, the match lowering does not move them out — they must be freed
         // WITHIN this arm (inside the wasm then/else branch), else they leak to the FUNCTION

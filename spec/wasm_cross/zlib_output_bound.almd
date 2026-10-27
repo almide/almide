@@ -16,7 +16,7 @@
 import zlib
 
 fn show(r: Result[Bytes, String]) -> String = match r {
-  ok(b) => "ok ${bytes.len(b)} ${bytes.get_or(b, bytes.len(b) - 1, 0)}",
+  ok(b) => "ok ${bytes.len(b)} ${bytes.get(b, bytes.len(b) - 1) ?? 0}",
   err(e) => "err ${e}",
 }
 
@@ -75,43 +75,34 @@ fn raw() -> Bytes = bytes.from_list([
   0
 ])
 
-fn zl() -> Bytes = bytes.concat(
-  bytes.concat(bytes.from_list([120, 218]), raw()),
-  bytes.from_list([6, 126, 66, 40]),
-)
+fn zl() -> Bytes = (bytes.from_list([120, 218]) + raw()) + bytes.from_list([6, 126, 66, 40])
 
-fn gz() -> Bytes = bytes.concat(
-  bytes.concat(
-    bytes.from_list([
-      31,
-      139,
-      8,
-      0,
-      0,
-      0,
-      0,
-      0,
-      2,
-      19
-    ]),
-    raw(),
-  ),
-  bytes.from_list([
-    166,
-    223,
-    224,
-    152,
-    183,
-    0,
-    0,
-    0
-  ]),
-)
+fn gz() -> Bytes = (bytes.from_list([
+  31,
+  139,
+  8,
+  0,
+  0,
+  0,
+  0,
+  0,
+  2,
+  19
+]) + raw()) + bytes.from_list([
+  166,
+  223,
+  224,
+  152,
+  183,
+  0,
+  0,
+  0
+])
 
 // A stored block that declares 100 bytes and holds 50.
-fn stored_cut() -> Bytes = bytes.concat(
-  bytes.from_list([1, 100, 0, 155, 255]),
-  bytes.repeat(bytes.from_list([7]), 50),
+fn stored_cut() -> Bytes = bytes.from_list([1, 100, 0, 155, 255]) + bytes.repeat(
+  bytes.from_list([7]),
+  50,
 )
 
 // The `_max` forms are plain `fn`s: callable from a pure function.
@@ -138,7 +129,7 @@ effect fn main() -> Unit = {
     println("decompress_max ${n}: " + bounded("decompress", zl(), n))
     println("gunzip_max ${n}: " + bounded("gunzip", gz(), n))
   }
-  let two = bytes.concat(gz(), gz())
+  let two = gz() + gz()
   for n in [183, 365, 366, 367] {
     println("gunzip_max two ${n}: " + bounded("gunzip", two, n))
   }

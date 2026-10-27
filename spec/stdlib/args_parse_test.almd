@@ -1,0 +1,52 @@
+// args parsing rules (#4144), tested on the list helpers every reader runs
+// over `env.args()` (a test binary has no program arguments; the end-to-end
+// argv runs on native and both wasm legs are tests/args_parse_cross_test.rs).
+import args
+
+test "a long name derives no short form" {
+  assert_eq(args.__has(["-d"], "dry-run"), false)
+  assert_eq(args.__has(["-d"], "delete"), false)
+  assert_eq(args.__has(["--dry-run"], "dry-run"), true)
+  assert_eq(args.__has(["--dry-run"], "delete"), false)
+}
+
+test "a one-letter name is the declared short form" {
+  assert_eq(args.__has(["-d"], "d"), true)
+  assert_eq(args.__has(["--d"], "d"), true)
+  assert_eq(args.__has(["-n"], "d"), false)
+}
+
+test "-- ends option parsing" {
+  assert_eq(args.__options(["--dry-run", "--", "--delete", "-d"]), ["--dry-run"])
+  assert_eq(args.__operands(["--dry-run", "--", "--delete", "-d"]), ["--delete", "-d"])
+  assert_eq(args.__has(args.__options(["--", "--delete"]), "delete"), false)
+  assert_eq(args.__options(["a", "-v"]), ["a", "-v"])
+  assert_eq(args.__operands(["a", "-v"]), [])
+}
+
+test "everything after -- is positional, a second -- included" {
+  assert_eq(
+    args.__positional(
+      [
+        "in.txt",
+        "-v",
+        "--",
+        "-d",
+        "--",
+        "x"
+      ],
+      [],
+    ),
+    ["in.txt", "-d", "--", "x"],
+  )
+  // with no option named, a value stays an ordinary argument (#4144)
+  assert_eq(args.__positional(["--out", "r.txt", "in.txt"], []), ["r.txt", "in.txt"])
+}
+
+test "the value of a named option is not positional (#4144)" {
+  assert_eq(args.__positional(["--out", "r.txt", "in.txt"], ["out"]), ["in.txt"])
+  assert_eq(args.__positional(["in.txt", "--out", "r.txt", "b"], ["out"]), ["in.txt", "b"])
+  assert_eq(args.__positional(["--dry-run", "in.txt"], ["out"]), ["in.txt"])
+  assert_eq(args.__positional(["--out=r.txt", "in.txt"], ["out"]), ["in.txt"])
+  assert_eq(args.__positional(["--", "--out", "r.txt"], ["out"]), ["--out", "r.txt"])
+}

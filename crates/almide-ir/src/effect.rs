@@ -138,8 +138,8 @@ pub enum ModuleEffects {
 /// disagrees with the function that declares it.
 ///
 /// A row is the module's default; a function whose operation differs says so
-/// with `@category(…)` in its own declaration (`fs.write` is `FS.write`,
-/// `process.args` `Env.read`), never in a list here (#4155).
+/// with `@category(…)` in its own declaration (`fs.write_text` is `FS.write`,
+/// `process.pid` `Env.read`), never in a list here (#4155).
 pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     // Files. A function that changes the file system declares `FS.write`.
     ("fs", ModuleEffects::All(&[Effect::FsRead])),
@@ -153,11 +153,18 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     // a shared-memory region cannot tell which side opened it, so it carries
     // both.
     ("net", ModuleEffects::All(&[Effect::NetFetch, Effect::NetListen])),
-    // The process environment: variables and argv. `env.set` declares
-    // `Env.write`; the clock readers declare `Time`.
+    // Unix-domain sockets and shared memory (R-unix-01): connecting is
+    // `Net.fetch`, listening and accepting `Net.listen`, as in `net`; an
+    // operation on an open descriptor carries both.
+    ("unix", ModuleEffects::All(&[Effect::NetFetch, Effect::NetListen])),
+    // `uuid.v4` draws entropy; `v7` reads the clock too (declared there).
+    // parse / to_string / the byte conversions / compare are pure.
+    ("uuid", ModuleEffects::EffectFns(&[Effect::Rand])),
+    // The process environment: variables and argv. `env.set` and
+    // `env.remove` declare `Env.write`; the clock readers declare `Time`.
     ("env", ModuleEffects::All(&[Effect::EnvRead])),
-    // Starting and signalling processes. The readers (`process.args`,
-    // `process.pid`) declare `Env.read`, `process.exit` `Abort`.
+    // Starting and signalling processes. The reader `process.pid`
+    // declares `Env.read`, `process.exit` `Abort`.
     ("process", ModuleEffects::All(&[Effect::Proc])),
     ("args", ModuleEffects::All(&[Effect::EnvRead])),
     // The clock: `datetime.now` / `monotonic_ns`; the calendar math is pure.
@@ -195,9 +202,9 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
     ("set", ModuleEffects::Pure),
     ("deque", ModuleEffects::Pure),
     ("heap", ModuleEffects::Pure),
+    ("secret", ModuleEffects::Pure),
     ("option", ModuleEffects::Pure),
     ("result", ModuleEffects::Pure),
-    ("error", ModuleEffects::Pure),
     ("bytes", ModuleEffects::Pure),
     ("matrix", ModuleEffects::Pure),
     ("math", ModuleEffects::Pure),
@@ -227,8 +234,7 @@ pub const STDLIB_MODULE_EFFECTS: &[(&str, ModuleEffects)] = &[
 /// `effect fn`s in a `Pure` module, each with no host access. The gate refuses
 /// any other `effect fn` in a `Pure` module: a new one must be classified.
 pub const HOST_FREE_EFFECT_FNS: &[&str] = &[
-    "zlib.compress", "zlib.compress_level", "zlib.decompress", "zlib.deflate",
-    "zlib.deflate_level", "zlib.inflate", "zlib.gzip", "zlib.gunzip",
+    "zlib.compress", "zlib.compress_level", "zlib.deflate", "zlib.deflate_level", "zlib.gzip",
 ];
 
 /// Runtime-symbol prefixes that are not their module's name
@@ -591,7 +597,11 @@ mod classification_gate {
         assert_eq!(stdlib_call_effect("random", "int"), vec![Rand]);
         assert_eq!(runtime_symbol_effect("almide_rt_random_int"), vec![Rand]);
         assert_eq!(stdlib_call_effect("io", "read_line"), vec![IoStdin]);
-        assert_eq!(stdlib_call_effect("io", "write"), vec![IoStdout]);
+        // The generic writer carries none of its own: the handle is the
+        // capability, and `io.stdout()` is `IO.stdout` (R-L0-44).
+        assert!(stdlib_call_effect("io", "write").is_empty());
+        assert_eq!(stdlib_call_effect("io", "stdout"), vec![IoStdout]);
+        assert_eq!(stdlib_call_effect("io", "eprint"), vec![IoStderr]);
         assert!(stdlib_call_effect("path", "join").is_empty());
         assert!(stdlib_call_effect("url", "parse").is_empty());
         assert_eq!(stdlib_call_effect("datetime", "now"), vec![Time]);
@@ -616,15 +626,25 @@ mod classification_gate {
     #[test]
     fn the_leaves_4155_assigns() {
         use Effect::*;
-        for f in ["exec", "exec_in", "exec_with_stdin", "exec_status", "exec_status_timeout", "run", "run_in", "exec_attached", "spawn", "kill", "is_alive"] {
+        for f in ["exec", "output", "run", "start", "poll", "wait", "stop", "read_new_stdout", "child_pid", "kill"] {
             assert_eq!(stdlib_call_effect("process", f), vec![Proc], "process.{f}");
         }
-        for f in ["args", "pid", "env"] {
-            assert_eq!(stdlib_call_effect("process", f), vec![EnvRead], "process.{f}");
-        }
+        // argv and the variables live in `env` (R-process-01); `process.pid`
+        // is the one environment reader left in `process`.
+        assert_eq!(stdlib_call_effect("process", "pid"), vec![EnvRead], "process.pid");
+        assert_eq!(stdlib_call_effect("env", "args"), vec![EnvRead], "env.args");
+        assert_eq!(stdlib_call_effect("uuid", "v4"), vec![Rand]);
+        assert_eq!(stdlib_call_effect("uuid", "v7"), vec![Time, Rand]);
+        assert!(stdlib_call_effect("uuid", "parse").is_empty());
+        assert_eq!(stdlib_call_effect("unix", "connect"), vec![NetFetch]);
+        assert_eq!(stdlib_call_effect("unix", "listen"), vec![NetListen]);
+        assert_eq!(stdlib_call_effect("net", "lookup_host"), vec![NetFetch]);
+        assert!(stdlib_call_effect("net", "parse_ip").is_empty());
         assert_eq!(stdlib_call_effect("process", "exit"), vec![Abort]);
         assert_eq!(stdlib_call_effect("env", "get"), vec![EnvRead]);
         assert_eq!(stdlib_call_effect("env", "set"), vec![EnvWrite]);
+        assert_eq!(stdlib_call_effect("env", "remove"), vec![EnvWrite]);
+        assert_eq!(stdlib_call_effect("env", "vars"), vec![EnvRead]);
         assert_eq!(stdlib_call_effect("fs", "read_text"), vec![FsRead]);
         assert_eq!(stdlib_call_effect("fs", "remove_all"), vec![FsWrite]);
         assert_eq!(stdlib_call_effect("fs", "copy"), vec![FsRead, FsWrite]);

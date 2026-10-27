@@ -145,38 +145,76 @@ fn detect_shared_mut(program: &IrProgram) -> HashSet<VarId> {
         .chain(program.modules.iter().flat_map(|m| m.functions.iter().flat_map(|f| f.params.iter().map(|p| p.var))))
         .collect();
     struct LambdaWalker<'a> { vt: &'a VarTable, globals: &'a HashSet<VarId>, params: &'a HashSet<VarId>, out: HashSet<VarId> }
-    impl almide_ir::visit::IrVisitor for LambdaWalker<'_> {
-        fn visit_expr(&mut self, expr: &IrExpr) {
-            if let IrExprKind::Lambda { params, body, .. } = &expr.kind {
-                let param_set: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
-                // Vars this lambda mutates (assigned, or passed `&mut` to a method
-                // like `list.push`). A non-Copy `var` mutated ONLY through a method
-                // is recorded with `Mutability::Let` (it is never reassigned), so the
-                // mutability flag alone misses it — hence the explicit mutation scan.
-                let mutated = written_vars(body);
-                for v in almide_ir::free_vars::free_vars(body, &param_set) {
-                    let info = self.vt.get(v);
-                    // `module_origin`: another module's global at its use-site id (#3307).
-                    if self.globals.contains(&v) || info.module_origin.is_some() { continue; }
-                    // A captured var that is mutated through the closure must become a
-                    // shared cell so the mutation is visible to the enclosing scope.
-                    // Copy types lower to `Rc<Cell<T>>`, non-Copy to `AlmideSharedMut`
-                    // (`Rc<RefCell<T>>`) — the walker picks by type. Without this a
-                    // non-Copy capture went through `AlmideRcCow`, whose copy-on-write loses
-                    // the mutation. (Closure v2: P3 = Copy, P6 = non-Copy.)
-                    // For a function param, the `Var` flag is a TCO artifact, so only a
-                    // genuine closure-body mutation counts (see `params` note above).
-                    let needs_cell = if self.params.contains(&v) {
-                        mutated.contains(&v)
-                    } else {
-                        matches!(info.mutability, Mutability::Var) || mutated.contains(&v)
-                    };
-                    if needs_cell {
-                        self.out.insert(v);
-                    }
+    impl LambdaWalker<'_> {
+        /// One lambda's captures. `chain_scope`: a fused chain's step /
+        /// collector lambda, which renders as a non-`move` scope the chain
+        /// borrows (#3891) — a `mut` param written there is a unique reborrow
+        /// of the caller's place, never a cell (the mut-param rebind already
+        /// gave every param that needs one a `var` local of its own).
+        fn scan_lambda(&mut self, params: &[(VarId, Ty)], body: &IrExpr, chain_scope: bool) {
+            let param_set: HashSet<VarId> = params.iter().map(|(v, _)| *v).collect();
+            // Vars this lambda mutates (assigned, or passed `&mut` to a method
+            // like `list.push`). A non-Copy `var` mutated ONLY through a method
+            // is recorded with `Mutability::Let` (it is never reassigned), so the
+            // mutability flag alone misses it — hence the explicit mutation scan.
+            let mutated = written_vars(body);
+            for v in almide_ir::free_vars::free_vars(body, &param_set) {
+                let info = self.vt.get(v);
+                // `module_origin`: another module's global at its use-site id (#3307).
+                if self.globals.contains(&v) || info.module_origin.is_some() { continue; }
+                // A captured var that is mutated through the closure must become a
+                // shared cell so the mutation is visible to the enclosing scope.
+                // Copy types lower to `Rc<Cell<T>>`, non-Copy to `AlmideSharedMut`
+                // (`Rc<RefCell<T>>`) — the walker picks by type. Without this a
+                // non-Copy capture went through `AlmideRcCow`, whose copy-on-write loses
+                // the mutation. (Closure v2: P3 = Copy, P6 = non-Copy.)
+                // For a function param, the `Var` flag is a TCO artifact, so only a
+                // genuine closure-body mutation counts (see `params` note above).
+                let needs_cell = if self.params.contains(&v) {
+                    !chain_scope && mutated.contains(&v)
+                } else {
+                    matches!(info.mutability, Mutability::Var) || mutated.contains(&v)
+                };
+                if needs_cell {
+                    self.out.insert(v);
                 }
             }
-            almide_ir::visit::walk_expr(self, expr);
+        }
+        fn visit_chain_lambda(&mut self, l: &IrExpr) {
+            use almide_ir::visit::IrVisitor;
+            if let IrExprKind::Lambda { params, body, .. } = &l.kind {
+                self.scan_lambda(params, body, true);
+                self.visit_expr(body);
+            } else {
+                self.visit_expr(l);
+            }
+        }
+    }
+    impl almide_ir::visit::IrVisitor for LambdaWalker<'_> {
+        fn visit_expr(&mut self, expr: &IrExpr) {
+            match &expr.kind {
+                IrExprKind::Lambda { params, body, .. } => {
+                    self.scan_lambda(params, body, false);
+                    almide_ir::visit::walk_expr(self, expr);
+                }
+                IrExprKind::IterChain { source, steps, collector, .. } => {
+                    self.visit_expr(source);
+                    for step in steps {
+                        match step {
+                            IterStep::Take { n } => self.visit_expr(n),
+                            IterStep::Enumerate => {}
+                            other => if let Some(l) = other.lambda() { self.visit_chain_lambda(l) },
+                        }
+                    }
+                    if let IterCollector::Fold { init, .. } = collector {
+                        self.visit_expr(init);
+                    }
+                    if let Some(l) = collector.lambda() {
+                        self.visit_chain_lambda(l);
+                    }
+                }
+                _ => almide_ir::visit::walk_expr(self, expr),
+            }
         }
     }
     use almide_ir::visit::IrVisitor;

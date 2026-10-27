@@ -1,0 +1,31 @@
+// #4080: a value-returning call with a `mut` param, as the scrutinee of a
+// match or the condition of an if. The move-mode write-back makes each one a
+// block, `{ let (r, buf) = f(q); q = buf; r }`, which the lowering walled.
+fn pop_last(mut xs: List[Int]) -> Int? = list.pop(xs)
+
+fn grow(mut xs: List[Int]) -> Bool = {
+  list.push(xs, 9)
+  list.len(xs) > 2
+}
+
+fn drain(d: List[Int]) -> List[Int] = {
+  var q = d
+  var out: List[Int] = []
+  for _ in 0..<list.len(d) {
+    match pop_last(q) {
+      some(x) => list.push(out, x),
+      none => (),
+    }
+  }
+  out
+}
+
+fn grown(d: List[Int]) -> Int = {
+  var q = d
+  if grow(q) then list.len(q) else 0 - list.len(q)
+}
+
+effect fn main() -> Unit = {
+  println("${drain([1, 2, 3])}")
+  println("${grown([1, 2])} ${grown([1])}")
+}

@@ -1,10 +1,24 @@
 // @contract: C-050
 // `string.split(s, "")` splits per CODEPOINT with a leading + trailing empty
 // string — native `s.split("")` is `["", c0, c1, …, ""]` (and `["", ""]` for "").
-// `string.run_length_encode` groups by CODEPOINT (native `s.chars()`), so the
+// Run-length encoding over `string.to_list` groups by CODEPOINT (native `s.chars()`), so the
 // run string is the whole codepoint, not one byte. Both used to be byte-granular
 // on wasm (empty-delim returned [s]; rle emitted invalid single-byte strings for
 // multibyte). Now byte-identical on both targets, including multibyte.
+// Runs of equal codepoints, folded over `string.to_list` (the stdlib's
+// `run_length_encode` left in dialect epoch 15; this is its replacement).
+fn run_length_encode(s: String) -> List[(String, Int)] = {
+  let init: List[(String, Int)] = []
+  string.to_list(s) |> list.fold(
+    init,
+    (runs, c) => match list.last(runs) {
+      some((p, n)) => if p == c then list.drop_end(runs, 1) + [(c, n + 1)]
+      else runs + [(c, 1)],
+      none => [(c, 1)],
+    },
+  )
+}
+
 fn main() -> Unit = {
   println("${string.split("abc", "")}")
   // ["", "a", "b", "c", ""]
@@ -12,10 +26,10 @@ fn main() -> Unit = {
   // ["", "日", "本", ""]
   println("${string.split("", "")}")
   // ["", ""]
-  println("${string.run_length_encode("aaabb")}")
+  println("${run_length_encode("aaabb")}")
   // ASCII runs
-  println("${string.run_length_encode("ﬀ")}")
+  println("${run_length_encode("ﬀ")}")
   // [("ﬀ", 1)]
   // codepoint runs
-  println("${string.run_length_encode("aaİİb")}")
+  println("${run_length_encode("aaİİb")}")
 }

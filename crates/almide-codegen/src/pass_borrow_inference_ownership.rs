@@ -423,6 +423,8 @@ pub(crate) fn subject_root(s: &IrExpr) -> Option<VarId> {
     match &s.kind {
         IrExprKind::Var { id } => Some(*id),
         IrExprKind::Clone { expr } | IrExprKind::Borrow { expr, .. } | IrExprKind::Deref { expr } => subject_root(expr),
+        // BoxTakeLowering's move of a boxed binder out of its box.
+        IrExprKind::InlineRust { template, args } if template.starts_with("almide_box_take(") && args.len() == 1 => subject_root(&args[0].1),
         _ => None,
     }
 }
@@ -687,7 +689,7 @@ pub(crate) fn is_borrow_eligible(ty: &Ty, records: &HashSet<String>) -> bool {
         | Ty::Applied(TypeConstructorId::List, _)
         // Map/Set are heap collections too — without them a `mut Map`/`mut Set`
         // parameter is forced to `Own` here (never reaching the borrow analysis),
-        // so an in-place `map.insert(m, …)` emits `&mut m` against a non-`mut`
+        // so an in-place `m[k] = v` emits `&mut m` against a non-`mut`
         // owned binding and fails to borrow-check (#436, E0596). With them the
         // param is inferred Ref/RefMut/Own like a List.
         | Ty::Applied(TypeConstructorId::Map, _)

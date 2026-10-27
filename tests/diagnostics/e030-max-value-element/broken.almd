@@ -2,6 +2,6 @@
 // a Float inside a compound has no ordering. Check used to accept it while
 // native rustc rejected the monomorph (AlmideValue: Ord) and wasm walled.
 fn main() -> Unit = {
-  let xs = [value.int(2), value.str("a")]
+  let xs = [value.int(2), value.string("a")]
   println("${list.len(list.sort(xs))}")
 }

@@ -56,7 +56,7 @@ effect fn main() -> Unit = {
   }
 
   let results = fan.map(depths, (depth) => {
-    let iterations = math.pow(2, max_depth - depth + min_depth)
+    let iterations = int.pow(2, max_depth - depth + min_depth)
     let total = check_trees(iterations, depth)
     ok((iterations, depth, total))
   })!

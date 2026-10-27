@@ -1,4 +1,4 @@
-//! A list or map literal with a heap `??` element binds the element first (#2739 B2).
+//! A list, map or tuple literal with a heap `??` element binds the element first (#2739 B2).
 //!
 //! The literal builders materialize an element that is a variable or a
 //! literal; a heap `??` (`o ?? "none"` over an `Option[String]`) in element
@@ -38,13 +38,37 @@ fn is_heap_unwrap_or(e: &IrExpr) -> bool {
     matches!(e.kind, IrExprKind::UnwrapOr { .. }) && crate::lower::is_heap_ty(&e.ty)
 }
 
-/// The element slots of a list or map literal, in evaluation order.
+/// The element slots of a list, map or tuple literal, in evaluation order. A
+/// tuple literal standing as an element contributes its own slots, so a list
+/// of pairs (`[("X-Echo", o ?? "none")]`, the list-headers shape) binds the
+/// `??` inside its pairs as the map literal it replaced did.
 fn elements_mut(e: &mut IrExpr) -> Option<Vec<&mut IrExpr>> {
-    match &mut e.kind {
-        IrExprKind::List { elements } => Some(elements.iter_mut().collect()),
-        IrExprKind::MapLiteral { entries } => Some(entries.iter_mut().flat_map(|(k, v)| [k, v]).collect()),
-        _ => None,
+    fn leaves<'a>(e: &'a mut IrExpr, out: &mut Vec<&'a mut IrExpr>) {
+        if !matches!(e.kind, IrExprKind::Tuple { .. }) {
+            out.push(e);
+            return;
+        }
+        let IrExprKind::Tuple { elements } = &mut e.kind else { unreachable!() };
+        for x in elements.iter_mut() {
+            leaves(x, out);
+        }
     }
+    let mut out = Vec::new();
+    match &mut e.kind {
+        IrExprKind::List { elements } | IrExprKind::Tuple { elements } => {
+            for x in elements.iter_mut() {
+                leaves(x, &mut out);
+            }
+        }
+        IrExprKind::MapLiteral { entries } => {
+            for (k, v) in entries.iter_mut() {
+                leaves(k, &mut out);
+                leaves(v, &mut out);
+            }
+        }
+        _ => return None,
+    }
+    Some(out)
 }
 
 /// Bind each heap `??` element of the literal `e` to a fresh `let`, returning
@@ -71,16 +95,18 @@ struct Walk<'a> {
 }
 
 impl IrMutVisitor for Walk<'_> {
+    // Outermost literal first: a list of pairs binds the `??` inside its
+    // pairs before the pairs themselves are visited (each would otherwise
+    // become a block, which the list does not take as a plain element).
     fn visit_expr_mut(&mut self, e: &mut IrExpr) {
-        walk_expr_mut(self, e);
         let stmts = bind_elements(e, self.vt);
-        if stmts.is_empty() {
-            return;
+        if !stmts.is_empty() {
+            let ty = e.ty.clone();
+            let span = e.span;
+            let literal = std::mem::replace(e, IrExpr { kind: IrExprKind::Unit, ty: ty.clone(), span, def_id: None });
+            *e = IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(literal)) }, ty, span, def_id: None };
         }
-        let ty = e.ty.clone();
-        let span = e.span;
-        let literal = std::mem::replace(e, IrExpr { kind: IrExprKind::Unit, ty: ty.clone(), span, def_id: None });
-        *e = IrExpr { kind: IrExprKind::Block { stmts, expr: Some(Box::new(literal)) }, ty, span, def_id: None };
+        walk_expr_mut(self, e);
     }
 }
 

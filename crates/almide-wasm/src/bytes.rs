@@ -94,6 +94,36 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(SliceTy::Option(self.types.intern(INT)))))
     }
 
+    /// `bytes.get(b, i) ?? d` read in place (front_desugar.rs item 6): the
+    /// byte, or `d` out of range, with no `some` cell. `d` is a literal or a
+    /// variable, so evaluating it on both paths is unobservable.
+    fn lower_bytes_get_or(&mut self, b: &IrExpr, i: &IrExpr, d: &IrExpr) -> ArmResult {
+        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
+        let bh = self.hold_i32()?;
+        self.f.instructions().local_set(bh);
+        self.lower_arg(i, Some(INT), ArgMode::Borrow)?;
+        let ih = self.hold_i64()?;
+        self.f.instructions().local_set(ih);
+        self.lower_arg(d, Some(INT), ArgMode::Borrow)?;
+        let hd = self.hold_i64()?;
+        self.f.instructions().local_set(hd);
+        self.bytes_room(bh, ih, 1);
+        let mut ins = self.f.instructions();
+        ins.if_(BlockType::Result(ValType::I64));
+        ins.local_get(bh)
+            .local_get(ih)
+            .i32_wrap_i64()
+            .i32_add()
+            .i32_load8_u(byte_at())
+            .i64_extend_i32_u();
+        ins.else_().local_get(hd).end();
+        let _ = ins;
+        self.release_i64();
+        self.release_i64();
+        self.release_i32();
+        Ok(Some(Lowered::scalar(INT)))
+    }
+
     fn lower_bytes_set_arm(&mut self, b: &IrExpr, idx: &IrExpr, v: &IrExpr) -> ArmResult {
         // `@reuse(b)` (#3577): a dying source is written in place; a live one
         // is copied first, as before.
@@ -136,6 +166,8 @@ impl Emitter<'_> {
         let mut i = self.f.instructions();
         i.local_set(he);
         for h in [hs, he] {
+            // #4147: a negative bound is 0, then clamp to len.
+            i.local_get(h).i64_const(0).local_get(h).i64_const(0).i64_gt_s().select().local_set(h);
             i.local_get(h);
             i.local_get(hb).i32_load(len_memarg()).i64_extend_i32_u();
             i.local_get(h)
@@ -350,35 +382,6 @@ impl Emitter<'_> {
         Ok(Some(Lowered::owned(BYTES)))
     }
 
-    fn lower_bytes_get_or(&mut self, b: &IrExpr, i: &IrExpr, d: &IrExpr) -> ArmResult {
-        self.lower_arg(b, Some(BYTES), ArgMode::Borrow)?;
-        let bh = self.hold_i32()?;
-        self.f.instructions().local_set(bh);
-        self.lower_arg(i, Some(INT), ArgMode::Borrow)?;
-        let ih = self.hold_i64()?;
-        self.f.instructions().local_set(ih);
-        // the default ALWAYS evaluates (native argument order) —
-        // in-branch lowering would skip its effects in-bounds
-        self.lower_arg(d, Some(INT), ArgMode::Borrow)?;
-        let hd = self.hold_i64()?;
-        self.f.instructions().local_set(hd);
-        self.bytes_room(bh, ih, 1);
-        let mut ins = self.f.instructions();
-        ins.if_(BlockType::Result(ValType::I64));
-        ins.local_get(bh)
-            .local_get(ih)
-            .i32_wrap_i64()
-            .i32_add()
-            .i32_load8_u(byte_at())
-            .i64_extend_i32_u();
-        ins.else_().local_get(hd).end();
-        let _ = ins;
-        self.release_i64();
-        self.release_i64();
-        self.release_i32();
-        Ok(Some(Lowered::scalar(INT)))
-    }
-
     /// One-arg names.
     fn lower_bytes_unary(&mut self, func: &str, x: &IrExpr) -> ArmResult {
         match func {
@@ -388,7 +391,6 @@ impl Emitter<'_> {
             "len" => self.lower_bytes_len(x),
             "from_string" => self.lower_bytes_from_string(x),
             "from_list" => self.lower_bytes_from_list(x),
-            "lines" => self.lower_bytes_lines(x),
             _ => self.lower_bytes_new(x),
         }
     }
@@ -396,7 +398,7 @@ impl Emitter<'_> {
     /// Two-arg names.
     fn lower_bytes_pair(&mut self, func: &str, a: &IrExpr, b: &IrExpr) -> ArmResult {
         match func {
-            "concat" => self.lower_bytes_concat(a, b),
+            "__concat" => self.lower_bytes_concat(a, b),
             "chunks" => self.lower_bytes_chunks(a, b),
             "repeat" => self.lower_bytes_repeat(a, b),
             "split" => self.lower_bytes_split(a, b),
@@ -408,8 +410,7 @@ impl Emitter<'_> {
     fn lower_bytes_triple(&mut self, func: &str, a: &IrExpr, b: &IrExpr, c: &IrExpr) -> ArmResult {
         match func {
             "set" => self.lower_bytes_set_arm(a, b, c),
-            "slice" => self.lower_bytes_slice(a, b, c),
-            _ => self.lower_bytes_get_or(a, b, c),
+            _ => self.lower_bytes_slice(a, b, c),
         }
     }
 
@@ -440,14 +441,12 @@ impl Emitter<'_> {
             // Shape-grouped dispatch (pattern-count complexity; the
             // name split lives in the per-shape sub-dispatchers).
             ("to_string" | "to_list" | "to_string_lossy" | "len" | "from_string"
-            | "from_list" | "zeros" | "lines", [x]) => self.lower_bytes_unary(func, x),
-            ("concat" | "chunks" | "repeat" | "get" | "split", [a, b]) => {
+            | "from_list" | "zeros", [x]) => self.lower_bytes_unary(func, x),
+            ("__concat" | "chunks" | "repeat" | "get" | "split", [a, b]) => {
                 self.lower_bytes_pair(func, a, b)
             }
-            ("set" | "slice" | "get_or", [a, b, c]) => self.lower_bytes_triple(func, a, b, c),
-            ("read_length_prefixed_strings_le", [b, p, c]) => {
-                self.lower_bytes_lenprefix(b, p, c)
-            }
+            ("set" | "slice", [a, b, c]) => self.lower_bytes_triple(func, a, b, c),
+            (crate::emit::front_desugar::BYTES_GET_OR, [b, i, d]) => self.lower_bytes_get_or(b, i, d),
             ("fill", [b, v]) => self.lower_bytes_fill(b, v),
             ("clear", [b]) => self.lower_bytes_clear(b),
             // some(byte) / none (native b.get — usize-wrap: negative i
@@ -616,7 +615,7 @@ impl Emitter<'_> {
             }
             // slice: native usize-min clamps — a NEGATIVE bound casts
             // huge and saturates to len (s >= e is the empty buffer).
-            // The k-byte append family and the BE / Endian writers (#3294):
+            // The k-byte append family (#3294):
             // each is `push` k times — `$bytes_push`'s amortized growth, the
             // push receiver protocol (bytes_append.rs).
             (f, _) if crate::bytes_append::is_member(f) => self.lower_bytes_append(f, args),

@@ -32,10 +32,30 @@ import argparse, json, os, re, subprocess, sys, tempfile
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ALMIDE = os.environ.get("ALMIDE_BIN", os.path.join(REPO, "target/release/almide"))
 
-# Modules requiring an explicit `import` (CLAUDE.md); everything else is auto-imported.
-NEEDS_IMPORT = {"json", "fs", "http", "env", "io", "random", "regex", "process",
-                "testing", "net", "zlib", "base64", "hash", "hex", "html", "path", "compute",
-                "url", "bigint"}
+STDLIB_INFO = os.path.join(REPO, "crates/almide-types/src/stdlib_info.rs")
+
+
+def rust_str_list(const):
+    """The names of a `pub const <const>: &[&str]` in stdlib_info.rs, re-read
+    so the sweep holds no copy that can drift."""
+    src = open(STDLIB_INFO, encoding="utf-8").read()
+    m = re.search(rf"pub const {const}[^=]*= &\[(.*?)\];", src, re.S)
+    body = re.sub(r"//[^\n]*", "", m.group(1))
+    return re.findall(r'"([a-z0-9_]+)"', body)
+
+
+_AUTO_IMPORTED = None
+
+
+def needs_import(module):
+    """Whether a file must write `import <module>`: everything outside the
+    auto-import surface (TIER1_ALWAYS_ACCESSIBLE + AUTO_IMPORT_BUNDLED), the
+    one list the resolver reads. A hand-kept set here missed every module
+    added after it (`secret`, #4107)."""
+    global _AUTO_IMPORTED
+    if _AUTO_IMPORTED is None:
+        _AUTO_IMPORTED = set(rust_str_list("TIER1_ALWAYS_ACCESSIBLE")) | set(rust_str_list("AUTO_IMPORT_BUNDLED"))
+    return module not in _AUTO_IMPORTED
 
 _MEMORY_UNSAFE = None
 MEMORY_UNSAFE_RX = re.compile(r"^@memory_unsafe\s*\n(?:@[^\n]*\n)*(?:effect )?fn (\w+)", re.M)
@@ -76,9 +96,7 @@ DECL_RX = re.compile(
 
 def stdlib_modules():
     """STDLIB_MODULES re-read from stdlib_info.rs so the list cannot drift."""
-    src = open(os.path.join(REPO, "crates/almide-types/src/stdlib_info.rs")).read()
-    m = re.search(r"pub const STDLIB_MODULES[^=]*= &\[(.*?)\];", src, re.S)
-    return re.findall(r'"([a-z0-9_]+)"', m.group(1))
+    return rust_str_list("STDLIB_MODULES")
 
 
 def surface(module_filter=None):
@@ -108,12 +126,11 @@ def surface(module_filter=None):
 
 NAMED_CANDIDATES = {
     "Value": ['json.parse("1")!', 'json.parse("1")'],
-    "Int8": ["(1).to_int8()"], "Int16": ["(1).to_int16()"],
-    "Int32": ["(1).to_int32()"], "Int64": ["(1).to_int64()"],
-    "UInt8": ["(1).to_uint8()"], "UInt16": ["(1).to_uint16()"],
-    "UInt32": ["(1).to_uint32()"], "UInt64": ["(1).to_uint64()"],
-    "Float32": ["(1.0).to_float32()"], "Float64": ["(1.0).to_float64()"],
-    "Endian": ["LittleEndian"],
+    "Int8": ["int8.from(1)"], "Int16": ["int16.from(1)"],
+    "Int32": ["int32.from(1)"], "Int64": ["int64.from(1)"],
+    "UInt8": ["uint8.from(1)"], "UInt16": ["uint16.from(1)"],
+    "UInt32": ["uint32.from(1)"], "UInt64": ["uint64.from(1)"],
+    "Float32": ["float32.from(1.0)"], "Float64": ["float64.from(1.0)"],
     "Deque": ["deque.from_list([1, 2])"], "Heap": ["heap.from_list([1, 2])"],
     "BigInt": ['match bigint.parse("12") { ok(b) => b, err(e) => panic(e) }'],
     "Regex": ['regex.new("a")'],
@@ -188,7 +205,7 @@ def synth_ty(ty, depth=0, tv="1"):
         name = ty.get("name", "")
         if name in NAMED_CANDIDATES: return NAMED_CANDIDATES[name]
         if len(name) == 1 and name.isupper(): return [tv]
-        return []
+        return constructed(name, depth, tv, ty.get("args") or [])
     if k == "list":
         return [f"[{c}]" for c in synth_ty(ty.get("inner", {}), depth + 1, tv)[:1]]
     if k == "set":
@@ -213,6 +230,57 @@ def synth_ty(ty, depth=0, tv="1"):
     return []
 
 
+# A module reference in an argument spelling (`secret.new(1)`): the module
+# the probe has to import.
+MODULE_REF_RX = re.compile(r"(?<![\w).])([a-z][a-z0-9_]*)\.[a-z_]")
+
+# Named type -> the public fns that return it. A stdlib type with no literal
+# (an opaque `mod type`, `Secret[A]`) is built the way user code builds it:
+# through a fn of the surface that returns it. Filled from the surface itself
+# in `main`, so a new opaque type is probeable the day its module lands.
+CONSTRUCTORS = {}
+
+
+def mentions_named(ty, name):
+    """Whether a JSON-shaped type mentions the named type `name` anywhere."""
+    if isinstance(ty, dict):
+        if ty.get("kind") == "named" and ty.get("name") == name:
+            return True
+        return any(mentions_named(v, name) for v in ty.values())
+    if isinstance(ty, list):
+        return any(mentions_named(v, name) for v in ty)
+    return False
+
+
+def index_constructors(fns):
+    """Every pure, memory-safe surface fn whose result is a named type and
+    whose params do not need that type already: a constructor a probe can
+    call without an `effect` main or an `import ffi` of its own."""
+    for f in fns:
+        ret = f.get("ret_json", {})
+        if ret.get("kind") != "named" or f["effect"] or (f["module"], f["name"]) in memory_unsafe_fns():
+            continue
+        if not mentions_named(f["params"], ret.get("name")):
+            CONSTRUCTORS.setdefault(ret["name"], []).append(f)
+
+
+def constructed(name, depth, tv, args=()):
+    """`module.ctor(args)` for each constructor of `name` whose own params
+    synthesize, every type variable at `tv` — or, for an applied type
+    (`Secret[Bytes]`), at a value of its first type argument, so the generic
+    constructor (`secret.new[A](x: A)`) builds the type the param asks for."""
+    if args:
+        inner = synth_ty(args[0], depth + 1, tv)
+        if inner:
+            tv = inner[0]
+    out = []
+    for c in CONSTRUCTORS.get(name, []):
+        parts = [synth_ty(p["type"], depth + 1, tv) for p in c["params"]]
+        if all(parts):
+            out.append(f"{c['module']}.{c['name']}({', '.join(x[0] for x in parts)})")
+    return out
+
+
 def synth_args(params, tv="1"):
     """One argument spelling per param (first candidate), or None."""
     out = []
@@ -231,7 +299,12 @@ def programs(f, args, tv="Int"):
     scalar `var` binding hits a v1 subset wall the call itself never does), and
     both statement positions. The verdict must describe the FUNCTION, not the
     wrapper, so every shape gets a turn (see classify)."""
-    imp = f"import {f['module']}\n\n" if f["module"] in NEEDS_IMPORT else ""
+    # The fn's own module and every module an argument spelling reaches (a
+    # constructor-built argument, `secret.new(1)`), each imported when the
+    # auto-import surface does not already reach it.
+    reached = [f["module"]] + [m for a, _ in args for m in MODULE_REF_RX.findall(a)]
+    imp = "".join(f"import {m}\n" for m in dict.fromkeys(reached) if needs_import(m))
+    imp = imp + "\n" if imp else ""
     # A `@memory_unsafe` fn is outside the memory-safety guarantee; a user file
     # calls it only after the `import ffi` opt-in (E100, #4043).
     if (f["module"], f["name"]) in memory_unsafe_fns() and f["module"] != "ffi":
@@ -324,12 +397,32 @@ def classify_at(f, args, tv):
     return ("UNPROBEABLE", "no candidate shape builds natively"), any_checked
 
 
+def ci_slice(fns):
+    """The CI slice (scripts/lib/ci-slice.sh): under ALMIDE_CI_SLICE=k > 1 keep
+    the commit-rotated 1-in-k fns plus every fn of a module file the change
+    touches. Key: `stdlib/<module>.almd#<fn>`, so a change to
+    stdlib/<module>.almd touches each of its fns. Full run: every fn."""
+    if int(os.environ.get("ALMIDE_CI_SLICE", "1") or "1") <= 1:
+        return fns
+    keys = [f"stdlib/{f['module']}.almd#{f['name']}" for f in fns]
+    rc = subprocess.run(["bash", "-c", ". scripts/lib/ci-slice.sh && ci_slice_filter wasm-reachability"],
+                        input="".join(k + "\n" for k in keys), capture_output=True, text=True, cwd=REPO)
+    sys.stderr.write(rc.stderr)
+    if rc.returncode != 0:
+        sys.exit("wasm-reachability: the CI slice selection failed")
+    keep = set(rc.stdout.split())
+    return [f for f, k in zip(fns, keys) if k in keep]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--modules", nargs="*", help="limit to these modules")
     ap.add_argument("--json", help="write the raw result rows here")
     a = ap.parse_args()
-    fns = surface(set(a.modules) if a.modules else None)
+    every = surface()
+    index_constructors(every)
+    wanted = set(a.modules) if a.modules else None
+    fns = ci_slice([f for f in every if wanted is None or f["module"] in wanted])
     rows, counts = [], {"PARITY": 0, "GAP": 0, "UNPROBEABLE": 0}
     for i, f in enumerate(fns, 1):
         verdict, why = classify(f)

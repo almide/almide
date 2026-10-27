@@ -7,7 +7,7 @@ let ALPHA = "ABCDEF"
 
 let TBL = bytes.from_list([0x10, 0x20, 0x30, 0xFF])
 
-fn pick(i: Int) -> Int = bytes.read_u8(TBL, i)
+fn pick(i: Int) -> Int = bytes.get(TBL, i) ?? 0
 
 fn main() -> Unit = {
   println(string.slice(ALPHA, 1, 4))

@@ -44,7 +44,7 @@ pub fn has_tests(ir: &IrProgram) -> bool {
 /// run printed — a program can print the runner's `ok` itself.
 pub fn runs_test(f: &almide_ir::IrFunction, run_filter: Option<&str>) -> bool {
     f.is_test
-        && run_filter.is_none_or(|pattern| almide_lang::almide_base::names::test_name_matches_filter(f.name.as_str(), pattern))
+        && run_filter.is_none_or(|pattern| almide_lang::almide_base::names::test_name_matches_filter(f.display_name(), pattern))
 }
 
 /// Promote a test file's `test` fns to ordinary effect fns and synthesize the

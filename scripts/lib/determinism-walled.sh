@@ -8,11 +8,21 @@
 # <walled-names-file> holds one fixture basename per line. Prints one line per
 # offender and returns 1 on any: a wall without a ledger row (coverage shrank)
 # or a ledger row whose fixture no longer walls (STALE — prune it).
+# [selected-file] (the run's fixture paths, under an ALMIDE_CI_SLICE run):
+# only the rows of fixtures this run compared are judged — a row outside the
+# slice is not "no longer walling"; the full run judges every row.
 check_walled_ledger() {
-  local ledger="$1" seen="$2" gate="$3" rc=0 name
+  local ledger="$1" seen="$2" gate="$3" selected="${4:-}" rc=0 name
   [ -f "$ledger" ] || { echo "::error::$gate: wall ledger $ledger missing"; return 1; }
   local want; want="$(mktemp)"
   grep -v '^[[:space:]]*#' "$ledger" | grep -v '^[[:space:]]*$' | sed 's/[[:space:]]*::.*$//' | LC_ALL=C sort -u > "$want"
+  if [ -n "$selected" ] && [ "${ALMIDE_CI_SLICE:-1}" -gt 1 ] 2>/dev/null; then
+    local sel; sel="$(mktemp)"
+    # Rows name a fixture by basename (the determinism gates) or by path
+    # (output-parity): keep a row that matches either.
+    { cat "$selected"; sed 's#.*/##' "$selected"; } | LC_ALL=C sort -u > "$sel"
+    LC_ALL=C comm -12 "$want" "$sel" > "$want.in"; mv "$want.in" "$want"; rm -f "$sel"
+  fi
   local got; got="$(mktemp)"
   LC_ALL=C sort -u "$seen" > "$got"
   while IFS= read -r name; do

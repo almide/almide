@@ -1,7 +1,7 @@
-//! #3640 — `map.delete` / `map.remove` on a receiver the op owns deletes IN
-//! PLACE on the wasm leg, as native's `AlmideMap::remove` does. Each shape —
-//! the mutating `map.delete(m, k)` on a var, and the rebind of the functional
-//! `map.remove` in a loop, a self tail call and a fold callback — runs 200
+//! #3640 — `map.remove` on a receiver the op owns deletes IN PLACE on the
+//! wasm leg, as native's `AlmideMap::remove` does. Each shape — the rebind
+//! of the functional `map.remove` in a loop, a self tail call and a fold
+//! callback — runs 200
 //! and 400 deletes of present and of absent keys at two map sizes with the
 //! allocation counter armed (`almide_wasm::alloc_count`). The bytes the last
 //! 200 deletes request (the difference of the two runs) must not grow with
@@ -37,7 +37,6 @@ fn go(m: Map[Int, Int], i: Int, k: Int, n: Int) -> Map[Int, Int] = if i >= k the
 /// the step `i` and `n`).
 fn program(shape: &str, key: &str, n: u32, k: u32) -> String {
     let body = match shape {
-        "delete" => format!("  var m: Map[Int, Int] = build(n)\n  var i = 0\n  while i < {k} {{\n    map.delete(m, {key})\n    i = i + 1\n  }}"),
         "loop" => format!("  var m: Map[Int, Int] = build(n)\n  var i = 0\n  while i < {k} {{\n    m = map.remove(m, {key})\n    i = i + 1\n  }}"),
         "tail" => format!("  let m0: Map[Int, Int] = build(n)\n  let m = go(m0, 0, {k}, n)"),
         "fold" => format!("  let m0: Map[Int, Int] = build(n)\n  let m = list.range(0, {k}) |> list.fold(m0, (m, i) => map.remove(m, {key}))"),
@@ -64,7 +63,7 @@ fn delete_bytes(shape: &str, key: &str, n: u32) -> (u64, String) {
 #[test]
 fn an_owned_receiver_deletes_in_place() {
     let mut failures = Vec::new();
-    for shape in ["delete", "loop", "tail", "fold"] {
+    for shape in ["loop", "tail", "fold"] {
         for (what, key) in [("absent", "n + 7 + i"), ("present", "i * 3")] {
             let (small, out_s) = delete_bytes(shape, key, 2000);
             let (large, out_l) = delete_bytes(shape, key, 8000);
@@ -91,8 +90,8 @@ fn go(m: Map[Int, Int], i: Int) -> Map[Int, Int] = if i >= 10 then m else go(map
 effect fn main() -> Unit = {
   var m: Map[Int, Int] = build(40)
   let keep = m
-  map.delete(m, 3)
-  map.delete(m, 99)
+  m = map.remove(m, 3)
+  m = map.remove(m, 99)
   var m2 = m
   let keep2 = m2
   m2 = map.remove(m2, 5)
@@ -101,9 +100,9 @@ effect fn main() -> Unit = {
   let t = go(base, 0)
   let f = list.range(20, 25) |> list.fold(base, (acc, i) => map.remove(acc, i))
   let r = list.range(0, 3) |> list.fold(m2, (acc, i) => map.remove(acc, i + 100))
-  map.delete(m, 1)
+  m = map.remove(m, 1)
   m = map.set(m, 3, 33)
-  map.delete(m, 30)
+  m = map.remove(m, 30)
   m = map.set(m, 30, 300)
   println("${map.len(keep)} ${map.len(m)} ${map.len(keep2)} ${map.len(m2)} ${map.len(base)} ${map.len(t)} ${map.len(f)} ${map.len(r)}")
   println("${map.keys(m)}")

@@ -1,0 +1,2 @@
+// The fixed manifest grants `Time`.
+effect fn main() -> Unit = println("${datetime.now_ms() > 0}")

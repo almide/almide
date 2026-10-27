@@ -173,10 +173,72 @@ fn import_to_add(
 /// `_`-prefixed and `self` imports are always kept (they are deliberate), and
 /// liveness consults the token-level SUPERSET as well as the AST walk: deleting
 /// a live import destroys the program, so recall beats precision here.
+/// Every stdlib-owned variant case → the module owning its type (`V4` →
+/// `net`), read from the bundled declarations of `STDLIB_OWNED_TYPES`.
+fn stdlib_owned_ctor_owners() -> &'static std::collections::HashMap<String, &'static str> {
+    static OWNERS: std::sync::OnceLock<std::collections::HashMap<String, &'static str>> = std::sync::OnceLock::new();
+    OWNERS.get_or_init(|| {
+        let mut out = std::collections::HashMap::new();
+        for (module, ty) in almide_lang::stdlib_info::STDLIB_OWNED_TYPES.iter().copied() {
+            let Some(source) = almide_lang::stdlib_info::bundled_source(module) else { continue };
+            let Some(program) = almide_lang::parse_cached(source) else { continue };
+            for decl in &program.decls {
+                let Decl::Type { name, ty: TypeExpr::Variant { cases, .. }, .. } = decl else { continue };
+                if name.as_str() != ty { continue; }
+                for case in cases {
+                    let (VariantCase::Unit { name } | VariantCase::Tuple { name, .. } | VariantCase::Record { name, .. }) = case;
+                    out.entry(name.as_str().to_string()).or_insert(module);
+                }
+            }
+        }
+        out
+    })
+}
+
+/// The stdlib modules a file uses through a BARE spelling, with no `m.` in
+/// front: a stdlib-owned type name (`a: IpAddr`) or a case of a stdlib-owned
+/// variant (`V4(..)`). The checker's E060 counts these as uses of the owning
+/// module's import (#1853), so removal must too — token level, like
+/// `token_module_refs`, and a name the file declares itself is its own.
+fn bare_stdlib_owned_refs(program: &Program, source: &str) -> std::collections::HashSet<&'static str> {
+    use almide_lang::lexer::{Lexer, TokenType};
+    let mut declared: std::collections::HashSet<String> = Default::default();
+    for decl in &program.decls {
+        let Decl::Type { name, ty, .. } = decl else { continue };
+        declared.insert(name.as_str().to_string());
+        if let TypeExpr::Variant { cases, .. } = ty {
+            for case in cases {
+                let (VariantCase::Unit { name } | VariantCase::Tuple { name, .. } | VariantCase::Record { name, .. }) = case;
+                declared.insert(name.as_str().to_string());
+            }
+        }
+    }
+    let tokens: Vec<_> = Lexer::tokenize(source)
+        .into_iter()
+        .filter(|t| !matches!(t.token_type, TokenType::Newline | TokenType::Comment))
+        .collect();
+    let mut out = std::collections::HashSet::new();
+    for (i, t) in tokens.iter().enumerate() {
+        if !matches!(t.token_type, TokenType::TypeName) || declared.contains(&t.value) {
+            continue;
+        }
+        if i > 0 && matches!(tokens[i - 1].token_type, TokenType::Dot) {
+            continue;
+        }
+        let owner = almide_lang::stdlib_info::stdlib_owned_type_owner(&t.value)
+            .or_else(|| stdlib_owned_ctor_owners().get(&t.value).copied());
+        if let Some(m) = owner {
+            out.insert(m);
+        }
+    }
+    out
+}
+
 fn import_is_live(
     d: &Decl,
     used: &std::collections::HashSet<String>,
     token_refs: &std::collections::HashMap<String, std::collections::HashSet<String>>,
+    bare_owned: &std::collections::HashSet<&'static str>,
 ) -> bool {
     let Decl::Import { path, alias, .. } = d else { return true };
     let name = alias
@@ -184,6 +246,11 @@ fn import_is_live(
         .map(|a| a.to_string())
         .unwrap_or_else(|| path.last().map(|s| s.to_string()).unwrap_or_default());
     if name.starts_with('_') || path.first().map(|s| s.as_str()) == Some("self") {
+        return true;
+    }
+    // A bare stdlib-owned type or case (`IpAddr`, `V4`) uses the import of
+    // the module that owns it, whatever alias the import carries.
+    if path.len() == 1 && bare_owned.contains(path[0].as_str()) {
         return true;
     }
     // #4043: `import ffi` is the opt-in a `@memory_unsafe` call needs (E100
@@ -238,6 +305,17 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
             _ => None,
         })
         .collect();
+    // #4192: the names the existing imports already BIND — `import self.lexer`
+    // binds `lexer`, `import a.b as c` binds `c`. A use of a bound name is
+    // already resolved; adding a dependency's same-named module would make it
+    // ambiguous.
+    let bound: HashSet<String> = program.imports.iter()
+        .filter_map(|d| match d {
+            Decl::Import { path, names: None, alias, .. } =>
+                alias.as_ref().or(path.last()).map(|s| s.as_str().to_string()),
+            _ => None,
+        })
+        .collect();
 
     // Collect module identifiers used in member access patterns (module.func)
     let mut used = HashSet::new();
@@ -245,6 +323,7 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
         collect_module_refs_decl(decl, &mut used);
     }
     let token_refs = token_module_refs(source);
+    let bare_owned = bare_stdlib_owned_refs(program, source);
 
     // Also check auto-imported stdlib (Tier 1) — these don't need explicit import.
     // Both lists come from the registry: the resolver seeds `ImportTable::new`
@@ -259,6 +338,7 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
         .iter()
         .filter(|name| {
             !existing.contains(name.as_str())
+                && !bound.contains(name.as_str())
                 && !auto_imported.contains(name.as_str())
                 && !tier1.contains(name.as_str())
         })
@@ -267,8 +347,16 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
         })
         .collect();
     to_add.sort_by(|a, b| a.0.cmp(&b.0));
+    // #4192: `comment_map` is positional (module?, imports…, decls…), so an
+    // appended import takes an EMPTY comment slot of its own — otherwise it
+    // inherits the first declaration's comments and they print above it.
+    let module_slots = usize::from(matches!(program.decls.first(), Some(Decl::Module { .. })));
     for (display, segments) in to_add {
         let path: Vec<Sym> = segments.iter().map(|s| almide_base::intern::sym(s)).collect();
+        let slot = module_slots + program.imports.len();
+        if slot <= program.comment_map.len() {
+            program.comment_map.insert(slot, Vec::new());
+        }
         program.imports.push(Decl::Import { path, names: None, alias: None, span: None });
         messages.push(format!("Added `import {}`", display));
     }
@@ -288,7 +376,7 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
     program.imports.retain(|d| {
         let slot = module_slots + import_idx;
         import_idx += 1;
-        let keep = import_is_live(d, &used, &token_refs);
+        let keep = import_is_live(d, &used, &token_refs, &bare_owned);
         if !keep {
             dropped_slots.push(slot);
         }

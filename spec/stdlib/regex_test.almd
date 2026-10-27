@@ -43,7 +43,7 @@ test "regex.find_all no matches" {
 test "regex.find_all words" {
   let words = regex.find_all(regex.new("[a-z]+"), "hello world foo")
   assert_eq(list.len(words), 3)
-  assert_eq(list.get_or(words, 0, ""), "hello")
+  assert_eq(list.get(words, 0) ?? "", "hello")
 }
 
 // ── replace ──

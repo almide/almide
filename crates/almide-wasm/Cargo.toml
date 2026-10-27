@@ -30,7 +30,9 @@ almide-wasm-run = { path = "../almide-wasm-run" }
 almide-wasm-vm = { path = "../almide-wasm-vm" }
 almide = { path = "../.." }
 wasmparser = "0.262"
-wasmtime = "49.0.4"
+# wasmtime's defaults minus `cache`: the on-disk compilation cache is never
+# configured here, and the feature pulls zstd (RUSTSEC-2026-0391/0395/0398/0403/0410).
+wasmtime = { version = "49.0.4", default-features = false, features = ["anyhow", "async", "backtrace", "gc", "gc-copying", "gc-drc", "gc-null", "wat", "profiling", "parallel-compilation", "cranelift", "pooling-allocator", "demangle", "addr2line", "coredump", "debug-builtins", "runtime", "component-model", "component-model-async", "threads", "stack-switching", "std", "debug", "compile-time-builtins", "wit-parser"] }
 sha2 = "0.11"
 gimli = { version = "0.34", default-features = false, features = ["read", "std"] }
 

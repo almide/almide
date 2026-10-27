@@ -3,10 +3,9 @@
 //!
 //! Every runtime module is spliced flat into the user's Rust module, and the
 //! emitter spelled the runtime's `Value` enum, the `HttpRequest` /
-//! `HttpResponse` / `JsonPath` aliases and the `Endian` / `FileStat` /
-//! `ProcessStatus` twins by their Almide names — so `type Value = { n: Int }`
-//! beside anything that pulled the owning module in was E0428 / E0574 /
-//! E0560 at rustc after a green `almide check` (ALS-T6). The runtime spells
+//! `HttpResponse` aliases and the `FileStat` / `ProcessStatus` twins by
+//! their Almide names — so `type Value = { n: Int }` beside anything that
+//! pulled the owning module in was E0428 / E0574 / E0560 at rustc after a green `almide check` (ALS-T6). The runtime spells
 //! them under reserved `Almide*` names now and the walker
 //! (`walker/runtime_owned.rs`) renders every reference with the reserved
 //! spelling, leaving the bare one to the user's declaration.
@@ -17,7 +16,7 @@
 //! wasm leg has no runtime prelude to collide with, so this pins NATIVE only,
 //! per the tests/native_mut_param_pins_test.rs doctrine. Each program pulls
 //! the module whose runtime source defines the twin (json → value.rs,
-//! http → http.rs, bytes → bytes.rs, fs → fs.rs, process → process.rs) and
+//! http → http.rs, fs → fs.rs, process → process.rs) and
 //! uses only functions that do not hand back the shadowed type, since the
 //! checker resolves a user `Value` and the runtime's `Value` to ONE name —
 //! that coexistence is a checker-side gap, not a spelling collision.
@@ -56,7 +55,7 @@ fn run_inline(tag: &str, source: &str) -> (bool, String, String) {
 
 fn assert_user_type_builds(tag: &str, source: &str, expected_stdout: &str) {
     let (ok, stdout, stderr) = run_inline(tag, source);
-    for code in ["E0428", "E0574", "E0560", "E0170", "E0308"] {
+    for code in ["E0428", "E0255", "E0574", "E0560", "E0170", "E0308"] {
         assert!(!stderr.contains(code), "user type `{tag}` collided with the runtime again ({code}):\n{stderr}");
     }
     assert!(
@@ -112,26 +111,20 @@ fn user_types_named_http_call_and_http_limits_build_beside_the_handle() {
     // `http.start`) and its own of the same names.
     assert_user_type_builds(
         "HttpCall",
-        "import http\ntype HttpCall = { n: Int }\ntype HttpLimits = { n: Int }\neffect fn main() -> Unit = {\n  let x = HttpCall { n: 7 }\n  let y = HttpLimits { n: 8 }\n  let c = http.start(\"GET\", \"http://127.0.0.1:1/\", \"\", [:], { total_ms: 500, idle_ms: 0 })!\n  let r: Result[HttpResponse, String] = http.wait(c)\n  println(\"${x.n} ${y.n} ${match r { ok(_) => \"ok\", err(_) => \"err\" }}\")\n}\n",
+        "import http\ntype HttpCall = { n: Int }\ntype HttpLimits = { n: Int }\neffect fn main() -> Unit = {\n  let x = HttpCall { n: 7 }\n  let y = HttpLimits { n: 8 }\n  let c = http.start(http.new_request(\"GET\", \"http://127.0.0.1:1/\", \"\", []), { total_ms: 500, idle_ms: 0 })!\n  let r: Result[HttpResponse, String] = http.wait(c)\n  println(\"${x.n} ${y.n} ${match r { ok(_) => \"ok\", err(_) => \"err\" }}\")\n}\n",
         "7 8 err\n",
     );
 }
 
 #[test]
-fn user_type_named_json_path_builds_beside_json() {
+fn user_type_named_http_request_builds_beside_http() {
+    // `json.parse` / `json.stringify` hand back no HttpRequest, so the user's
+    // HttpRequest is the only one the program spells while http.rs (and its
+    // `AlmideHttpRequest`) is spliced in.
     assert_user_type_builds(
-        "JsonPath",
-        "import json\ntype JsonPath = { n: Int }\neffect fn main() -> Unit = {\n  let x = JsonPath { n: 7 }\n  let v = json.parse(\"{\\\"a\\\":1}\")!\n  println(\"${x.n} ${json.stringify(v)}\")\n}\n",
+        "HttpRequestBesideHttp",
+        "import http\nimport json\ntype HttpRequest = { n: Int }\neffect fn main() -> Unit = {\n  let x = HttpRequest { n: 7 }\n  let v = json.parse(\"{\\\"a\\\":1}\")!\n  println(\"${x.n} ${json.stringify(v)}\")\n}\n",
         "7 {\"a\":1}\n",
-    );
-}
-
-#[test]
-fn user_type_named_endian_builds_with_bytes_rs_spliced() {
-    assert_user_type_builds(
-        "Endian",
-        "import bytes\ntype Endian = { n: Int }\neffect fn main() -> Unit = {\n  let x = Endian { n: 7 }\n  println(\"${x.n} ${bytes.len(bytes.zeros(2))}\")\n}\n",
-        "7 2\n",
     );
 }
 
@@ -169,16 +162,17 @@ fn user_type_named_after_a_runtime_private_item_builds() {
     );
 }
 
-/// With `bytes` auto-imported the bundled `Endian` decl never reaches the
-/// program, and a bare `LittleEndian` PATTERN rendered as a catch-all binding
-/// (E0170 at rustc). The runtime-owned ctors are registered unconditionally
-/// now, so construction and patterns qualify against `AlmideEndian` alike.
+/// A bare ctor PATTERN of a stdlib-owned variant rendered as a catch-all
+/// binding (E0170 at rustc) when the decl did not reach the program. The
+/// owned ctors qualify in construction and in patterns alike. (First pinned
+/// on `bytes.Endian` under the auto-import; no auto-imported stdlib variant
+/// remains, so this runs on `net.IpAddr` under an explicit import.)
 #[test]
-fn endian_ctors_qualify_without_an_explicit_bytes_import() {
+fn owned_variant_ctors_qualify_in_construction_and_patterns() {
     assert_user_type_builds(
-        "EndianAuto",
-        "fn pick(big: Bool) -> Endian = if big then BigEndian else LittleEndian\nfn name(e: Endian) -> String = match e { LittleEndian => \"le\", BigEndian => \"be\" }\neffect fn main() -> Unit = {\n  var t = bytes.zeros(0)\n  bytes.write_uint16(t, 258, LittleEndian)\n  bytes.write_uint16(t, 258, pick(true))\n  println(\"${int.from_uint16(bytes.read_uint16(t, 0, LittleEndian))} ${int.from_uint16(bytes.read_uint16(t, 2, BigEndian))} ${name(pick(false))} ${name(pick(true))}\")\n}\n",
-        "258 258 le be\n",
+        "IpAddrCtors",
+        "import net\nfn pick(v6: Bool) -> IpAddr = if v6 then V6([0, 0, 0, 0, 0, 0, 0, 1]) else V4(127, 0, 0, 1)\nfn name(e: IpAddr) -> String = match e { V4(_, _, _, _) => \"v4\", V6(_) => \"v6\" }\neffect fn main() -> Unit = {\n  println(\"${name(pick(false))} ${name(pick(true))} ${net.is_loopback(pick(true))}\")\n}\n",
+        "v4 v6 true\n",
     );
 }
 
@@ -187,16 +181,92 @@ fn endian_ctors_qualify_without_an_explicit_bytes_import() {
 /// they printed before (and what the wasm leg prints).
 #[test]
 fn runtime_twins_keep_their_repr_equality_and_patterns() {
-    // (`import bytes` is explicit and `bytes.len` is called: a program that
-    // only NAMES `Endian` never splices bytes.rs, and under the auto-import
-    // the bundled decl never reaches the program so `${e}` has no repr route
-    // — both pre-existing walls on either side of this change.)
-    let source = "import bytes\nimport fs\nimport process\nfn kind(m: FileStat) -> String = match m { FileStat { is_dir, .. } => if is_dir then \"dir\" else \"file\" }\neffect fn main() -> Unit = {\n  let p = \"/tmp/almd_1821_twin_repr_pin.txt\"\n  fs.write(p, \"abc\")!\n  let m = fs.stat(p)!\n  println(\"${m.size} ${m.is_file} ${m == m}\")\n  println(kind(m))\n  let s = process.exec_status(\"true\", [])!\n  println(\"${s.code} ${s} ${s == s}\")\n  let e: Endian = BigEndian\n  println(\"${e} ${e == LittleEndian} ${bytes.len(bytes.zeros(0))}\")\n}\n";
+    let source = "import fs\nimport process\nfn kind(m: FileStat) -> String = match m { FileStat { is_dir, .. } => if is_dir then \"dir\" else \"file\" }\neffect fn main() -> Unit = {\n  let p = \"/tmp/almd_1821_twin_repr_pin.txt\"\n  fs.write_text(p, \"abc\")!\n  let m = fs.stat(p)!\n  println(\"${m.size} ${m.is_file} ${m == m}\")\n  println(kind(m))\n  let s = process.output(process.ProcessCommand { cmd: \"true\", args: [] })!\n  println(\"${s.code} ${s} ${s == s}\")\n}\n";
     let (ok, stdout, stderr) = run_inline("twins", source);
     assert!(ok, "the twin program must build on the inline native path:\n{stderr}");
     assert_eq!(
         stdout,
-        "3 true true\nfile\n0 ProcessStatus { code: 0, stdout: \"\", stderr: \"\" } true\nBigEndian false 0\n",
+        "3 true true\nfile\n0 ProcessStatus { code: 0, stdout: \"\", stderr: \"\" } true\n",
         "twin repr / equality / pattern output drifted:\nstderr={stderr}"
+    );
+}
+
+/// Run `almide <args>` in `dir`; returns (success, stdout, stderr).
+fn almide_in(dir: &Path, args: &[&str]) -> (bool, String, String) {
+    let out = Command::new(almide_bin()).args(args).current_dir(dir).output().expect("failed to spawn almide");
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).to_string(),
+        String::from_utf8_lossy(&out.stderr).to_string(),
+    )
+}
+
+/// #4282: the fs runtime opened with a crate-level `use std::path::Path;`,
+/// and a package module that uses `value.Path` gets the stdlib newtype
+/// emitted at the same level as `pub struct Path(..)` — so the native test
+/// build of a module holding both was E0255 (then E0117 / E0609 / E0277) at
+/// rustc while the wasm leg passed. The shape is almide-shell's: a user enum
+/// with a `Path(String)` case (#4275) beside fs and value paths. The runtime
+/// spells std items by full path now, and the build script refuses a
+/// name-binding crate-level `use` in any runtime source. Native and wasm must
+/// both pass the test file and print the same thing from a main.
+#[test]
+fn package_module_with_fs_and_value_path_builds_natively_and_agrees_with_wasm() {
+    let dir = std::env::temp_dir().join(format!("almd_4282_pkg_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("almide.toml"), "[package]\nname = \"p4282\"\nversion = \"0.0.1\"\n").unwrap();
+    std::fs::write(
+        dir.join("src/a.almd"),
+        "import fs\n\ntype Arg = | Str(String) | Path(String)\n\nfn name(a: Arg) -> String = match a {\n  Path(s) => s,\n  Str(s) => s,\n}\n\neffect fn here() -> Bool = fs.exists(\".\")\n\nfn dig() -> Int = {\n  let v = value.object([(\"a\", value.int(7))])\n  let got = value.get_path(v, value.key(value.root(), \"a\")) ?? value.int(0)\n  value.as_int(got) ?? -1\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src/a_test.almd"),
+        "import self.a as a\n\ntest \"fs and value.Path in one native build\" {\n  assert_eq(a.name(a.Path(\"/x\")), \"/x\")\n  assert_eq(a.dig(), 7)\n  assert(a.here()!)\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("main.almd"),
+        "import self.a as a\n\neffect fn main() -> Unit = {\n  let n = a.name(a.Path(\"/x\"))\n  let h = a.here()!\n  println(\"${n} ${a.dig()} ${h}\")\n}\n",
+    )
+    .unwrap();
+    let mut runs = Vec::new();
+    for target in [None, Some("wasm")] {
+        let leg = target.unwrap_or("native");
+        let mut test_args = vec!["test", "src/a_test.almd"];
+        let mut run_args = vec!["run", "main.almd"];
+        if let Some(t) = target {
+            test_args.extend(["--target", t]);
+            run_args.extend(["--target", t]);
+        }
+        for args in [&test_args, &run_args] {
+            let (ok, stdout, stderr) = almide_in(&dir, args);
+            for code in ["E0255", "E0117", "E0609", "E0277"] {
+                assert!(!stderr.contains(code) && !stdout.contains(code), "[{leg}] `almide {}` collided again ({code}):\n{stdout}\n{stderr}", args.join(" "));
+            }
+            assert!(ok, "[{leg}] `almide {}` failed:\nstdout={stdout}\nstderr={stderr}", args.join(" "));
+        }
+        let (_, stdout, _) = almide_in(&dir, &run_args);
+        runs.push(stdout);
+    }
+    std::fs::remove_dir_all(&dir).ok();
+    assert_eq!(runs[0], "/x 7 true\n", "native main output");
+    assert_eq!(runs[0], runs[1], "native and wasm disagree");
+}
+
+/// The rest of the #4282 class: the names the random (`Cell`) and zlib
+/// (`Compression`, `Status`, …) runtimes used to import at the crate root.
+#[test]
+fn user_types_named_after_formerly_imported_std_and_crate_items_build() {
+    assert_user_type_builds(
+        "Cell",
+        "import random\ntype Cell = { n: Int }\neffect fn main() -> Unit = {\n  let x = Cell { n: 7 }\n  println(\"${x.n} ${random.int(3, 3)}\")\n}\n",
+        "7 3\n",
+    );
+    assert_user_type_builds(
+        "Status",
+        "import zlib\ntype Status = { n: Int }\ntype Compression = { n: Int }\neffect fn main() -> Unit = {\n  let x = Status { n: 7 }\n  let y = Compression { n: 8 }\n  let c = zlib.compress(bytes.from_string(\"hello\"))!\n  let d = zlib.decompress(c)!\n  println(\"${x.n} ${y.n} ${bytes.len(d)}\")\n}\n",
+        "7 8 5\n",
     );
 }

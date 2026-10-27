@@ -9,7 +9,7 @@
 # public surface. Without this, a plain fn reading the wall clock makes the
 # purity claim ("pure = deterministic") silently false — the hole #1515
 # closed by effect-declaring `datetime.now` / `datetime.monotonic_ns`
-# (`env.millis` and the whole `random.*` surface already declared).
+# (`datetime.now_ms` and the whole `random.*` surface already declared).
 #
 # The cohort holds this without exception (koka `now() : <ndet,utc>`, lean4
 # `BaseIO`, roc `!`); this gate keeps it held here. Stdout is deliberately

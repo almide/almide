@@ -1,0 +1,9 @@
+// #4256: how a deque splits its elements between its two halves is an
+// implementation detail. `Deque` is opaque, so reading `d.front` outside the
+// `deque` module is refused.
+effect fn main() -> Unit = {
+  var d: Deque[Int] = deque.new()
+  deque.push_front(d, 1)
+  deque.push_front(d, 2)
+  println("${d.front}")
+}

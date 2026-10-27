@@ -32,7 +32,7 @@ fn dropped() -> List[Int] = list.drop_while([3, 2, 1, -4], (x) => pos(x)!) ?? []
 fn map_fold() -> Int = map.fold(
   map.from_list([("a", 1), ("b", 2)]),
   0,
-  (acc, k, v) => acc + key(v)!,
+  (acc, (k, v)) => acc + key(v)!,
 ) ?? -1
 
 fn map_any() -> Bool = map.any(map.from_list([("a", 1), ("b", 2)]), (k, v) => pos(v)!) ?? false

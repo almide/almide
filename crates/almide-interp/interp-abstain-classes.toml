@@ -65,6 +65,25 @@ patterns = [
   "capability: regex.new",
   "capability: regex.compile",
   "capability: http.query_params",
+  # (stdlib redesign wave 4, 2026-10-26) The combined 4A/4B surface the pool
+  # does not lower yet: string.from_codepoint's String? form and
+  # datetime.from_parts's Result form (4A), list.binary_search over any
+  # ordered element (4A), the io handle constructors, and the HttpMessage
+  # readers / list-header constructors (4B). Pure stdlib bodies or
+  # constant handles — dispatch glue, no architectural change.
+  "capability: string.from_codepoint",
+  "capability: datetime.from_parts",
+  "capability: list.binary_search",
+  "capability: io.stdin",
+  "capability: io.stdout",
+  "capability: io.stderr",
+  "capability: http.body",
+  "capability: http.new_request",
+  "capability: http.with_headers",
+  # (stdlib redesign wave 5) int.wrap, the N-bit register the width-free
+  # wrap_* / rotate_* compose with (R-int-12): a pure stdlib body over the
+  # bitwise floor the pool can lower with dispatch glue.
+  "capability: int.wrap",
   # env.sleep_ms (#1423 bucket A): the pause is wall-clock with no
   # observable value, so a sleep-that-does-nothing interp arm is a
   # faithful vote — bounded glue, no architectural change.
@@ -97,7 +116,6 @@ patterns = [
   "capability: HOF map.find",
   "capability: HOF list.update",
   "capability: list.min/max on non-comparable elements",
-  "capability: prim.args_get_list_full",
   "capability: prim.args_get_list",
   "capability: args.",
   "capability: prim.make_dir",
@@ -128,6 +146,13 @@ patterns = [
   #   prim.read_n_bytes — a raw fd read, the same tier as fd_write above.
   "capability: prim.random_get",
   "capability: prim.read_n_bytes",
+  # (stdlib wave 4) The handle-first io.read / io.write that replaced the
+  # raw-fd surface above: generic over the `Read` / `Write` handle, so the
+  # pool (lowered without mono) has no body for them, and under them sit the
+  # same raw stdin read / stdout write the two prims above named. The same
+  # fixtures, the same tier — fd glue, not a new evaluation model.
+  "capability: io.read",
+  "capability: io.write",
   # A store through a value the interp knows is NOT an address (the callee
   # was reached with an argument shape the block heap never handed out) —
   # dispatch-tier strictness, one level in from the heap boundary.

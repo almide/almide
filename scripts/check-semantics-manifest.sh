@@ -17,7 +17,7 @@ import os, re, subprocess, sys, tempfile, tomllib
 # ratchet: append modules, never remove. Each module generates its OWN
 # spec/stdlib/<module>_semantics_manifest_test.almd, so adding one leaves
 # every already-covered module's committed file byte-identical.
-COVERED_MODULES = ["string", "datetime", "bytes", "list", "math", "float", "io", "env", "random", "json", "value", "int", "process", "map", "set", "option", "result", "error", "regex", "bool", "testing", "args", "zlib", "path", "base64", "hex", "html", "fs", "http", "net"]
+COVERED_MODULES = ["string", "datetime", "bytes", "list", "math", "float", "io", "env", "random", "json", "value", "int", "process", "map", "set", "option", "result", "regex", "bool", "testing", "args", "zlib", "path", "base64", "hex", "html", "fs", "http", "net"]
 
 with open("docs/stdlib/semantics-manifest.toml", "rb") as f:
     manifest = tomllib.load(f)
@@ -44,7 +44,7 @@ for module in COVERED_MODULES:
         print(f"BAD default_index_unit {d!r} on module {module} — vocabulary: "
               f"{sorted(DEFAULT_UNIT_VOCAB)}")
         failed = True
-    for e in manifest[module]["fn"]:
+    for e in manifest[module].get("fn", []):
         for k in REQUIRED_ENTRY_FIELDS:
             if not e.get(k):
                 print(f"MISSING FIELD {k!r} on a {module} entry ({e.get('name', '?')})")
@@ -54,20 +54,26 @@ for module in COVERED_MODULES:
             print(f"BAD index_unit {u!r} on {module}.{e.get('name', '?')} — "
                   f"vocabulary: {sorted(UNIT_VOCAB)}")
             failed = True
-    entries = {e["name"]: e for e in manifest[module]["fn"]}
+    entries = {e["name"]: e for e in manifest[module].get("fn", [])}
     src = open(f"stdlib/{module}.almd").read()
     int_fns = []
-    for m in re.finditer(r'^(?:pub )?(?:effect )?fn (\w+)\(([^)]*)\)\s*->\s*([^=]+)=', src, re.M):
+    # Internal `__` carriers are not REQUIRED to carry an entry, but an entry
+    # that declares one (a probe pinning a carrier's semantics) is kept and
+    # must still name an Int-bearing fn — so STALE checks against both sets.
+    internal_int_fns = []
+    for m in re.finditer(r'^(?:pub )?(?:effect )?fn (\w+)(?:\[(?:[^\[\]]|\[[^\[\]]*\])*\])?\(((?:[^()]|\([^()]*\))*)\)\s*->\s*([^=]+)=', src, re.M):
         name, params, ret = m.group(1), m.group(2), m.group(3)
-        if re.search(r'\bInt\b', params) or re.search(r'\bInt\b', ret):
-            int_fns.append(name)
+        if not (re.search(r'\bInt\b', params) or re.search(r'\bInt\b', ret)):
+            continue
+        # `__` fns are internal carriers, not surface: no entry required.
+        (internal_int_fns if name.startswith("__") else int_fns).append(name)
     for name in int_fns:
         if name not in entries:
             print(f"MISSING: {module}.{name} bears Int in its signature but has no "
                   f"semantics-manifest entry (declare its index_unit + probe)")
             failed = True
     for name in entries:
-        if name not in int_fns:
+        if name not in int_fns and name not in internal_int_fns:
             print(f"STALE: manifest entry {module}.{name} matches no Int-bearing fn "
                   f"in stdlib/{module}.almd")
             failed = True
@@ -102,7 +108,7 @@ for module in COVERED_MODULES:
     # manifest table, and the generated test imports it.
     if manifest[module].get("import"):
         lines += [f"import {module}", ""]
-    for e in manifest[module]["fn"]:
+    for e in manifest[module].get("fn", []):
         probe, unit = e["probe"], e["index_unit"]
         expect = e["expect"].replace("\\", "\\\\").replace('"', '\\"')
         lines.append(f'test "{module}.{e["name"]} unit={unit}" {{')
@@ -130,7 +136,7 @@ for module in COVERED_MODULES:
 
 if failed:
     sys.exit(1)
-n = sum(len(manifest[m]["fn"]) for m in COVERED_MODULES)
+n = sum(len(manifest[m].get("fn", [])) for m in COVERED_MODULES)
 print(f"  semantics manifest: {len(COVERED_MODULES)} module(s), {n} entries, "
       f"coverage + regen-diff green")
 PYEOF

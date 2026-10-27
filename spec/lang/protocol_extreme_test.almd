@@ -38,7 +38,7 @@ fn Token.encode_val(t: Token) -> String = t.kind + ":" + t.value
 
 fn Token.decode_val(raw: String) -> Token = {
   let parts = string.split(raw, ":")
-  Token { kind: list.get_or(parts, 0, ""), value: list.get_or(parts, 1, "") }
+  Token { kind: list.get(parts, 0) ?? "", value: list.get(parts, 1) ?? "" }
 }
 
 test "encode then decode roundtrip" {

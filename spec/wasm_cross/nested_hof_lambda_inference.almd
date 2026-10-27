@@ -17,7 +17,7 @@ fn main() -> Unit = {
   let vs = list.zip(data, means) |> list.map((pair) => {
     let (row, mean) = pair
     let sq = list.map(row, (x) => (x - mean) * (x - mean))
-    list.fold(sq, 0.0, (acc, x) => acc + x) / int.to_float(list.len(row))
+    list.fold(sq, 0.0, (acc, x) => acc + x) / float.from(list.len(row))
   })
   println(vs |> list.map((v) => float.to_string(v)) |> list.join(","))
   // Same shape without zip: inner let-bound map inside an outer map lambda.

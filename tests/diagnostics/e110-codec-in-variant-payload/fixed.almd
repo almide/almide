@@ -1,0 +1,21 @@
+// The payload is an input type too; the program builds `Role` from it.
+import http
+
+type Role: Codec = { name: String, level: Int = 0 }
+
+type RoleInput: Decode = { name: String }
+
+type CommandInput: Decode = | Grant(RoleInput) | Revoke
+
+effect fn run(req: HttpRequest) -> HttpResponse = match http.decode_json[CommandInput](req) {
+  ok(c) => {
+    let msg = match c {
+      Grant(r) => Role { name: r.name, level: 0 }.name,
+      Revoke => "revoked",
+    }
+    http.response(200, msg)
+  },
+  err(bad) => bad,
+}
+
+effect fn main() -> Unit = println(http.body(run(http.new_request("POST", "/c", "{}", []))!))

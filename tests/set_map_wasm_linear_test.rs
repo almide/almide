@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 const SOURCE: &str = r#"effect fn main() -> Unit = {
   let s = set.from_list([1, 2, 3, 4, 5, 6])
   println("${set.map(s, (x) => x % 3)} ${set.map(s, (x) => "v${x % 2}")} ${set.map(s, (x) => x > 3)}")
-  println("${set.map(set.from_list([1, 2]), (x) => int.to_float(x) / 2.0)}")
+  println("${set.map(set.from_list([1, 2]), (x) => float.from(x) / 2.0)}")
   let big = list.range(0, 300000) |> set.from_list
   let m = set.map(big, (x) => x % 200000)
   let ms = set.map(set.from_list(list.range(0, 100000)), (x) => "k${x % 70000}")

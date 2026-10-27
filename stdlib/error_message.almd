@@ -1,9 +1,0 @@
-// error_message — SELF-HOSTED `error.message(r)`: Ok → "", Err → its message. Native runs the
-// runtime intrinsic and wasm lowers the call directly (string_ext.rs), so this body is what the
-// reference interpreter runs. It matches on `r` instead of reading a scalar `Result[Int, String]`
-// layout: the payload stays a value whatever its type (a len-as-tag read took an Ok String's
-// length for an Err tag).
-fn error_message(r: Result[Int, String]) -> String = match r {
-  ok(_) => "",
-  err(e) => e,
-}

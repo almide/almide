@@ -168,11 +168,17 @@ fn almide_map_key_hash_sized_int(a: &dyn std::any::Any) -> Option<u64> {
 /// hashes byte-identically to the stored `AlmideString`.
 pub trait AlmideMapKey {
     fn almide_key_hash(&self) -> Option<u64>;
+    /// The key's canonical bytes for the ordered fallback index (#4104).
+    fn almide_key_bytes(&self) -> Option<Vec<u8>>;
 }
 impl<T: 'static> AlmideMapKey for T {
     #[inline]
     fn almide_key_hash(&self) -> Option<u64> {
         almide_rt_map_key_hash(self)
+    }
+    #[inline]
+    fn almide_key_bytes(&self) -> Option<Vec<u8>> {
+        almide_rt_map_key_bytes(self)
     }
 }
 impl AlmideMapKey for str {
@@ -180,6 +186,67 @@ impl AlmideMapKey for str {
     fn almide_key_hash(&self) -> Option<u64> {
         Some(almide_rt_map_hash_bytes(self.as_bytes()))
     }
+    #[inline]
+    fn almide_key_bytes(&self) -> Option<Vec<u8>> {
+        Some(self.as_bytes().to_vec())
+    }
+}
+
+/// The canonical bytes of a key the index supports (#4104): one-to-one
+/// within a key type, so two keys of one map are equal exactly when their
+/// bytes are. Covers the same types as [`almide_rt_map_key_hash`]; a String
+/// and its `str` borrow encode the same way. Used only by the ordered
+/// fallback, never on the fast path.
+pub fn almide_rt_map_key_bytes<K: 'static>(k: &K) -> Option<Vec<u8>> {
+    let a = k as &dyn std::any::Any;
+    let le = |x: i64| x.to_le_bytes().to_vec();
+    let lp = |b: &[u8]| {
+        let mut v = (b.len() as u64).to_le_bytes().to_vec();
+        v.extend_from_slice(b);
+        v
+    };
+    if let Some(x) = a.downcast_ref::<i64>() { return Some(le(*x)); }
+    if let Some(s) = a.downcast_ref::<AlmideString>() { return Some(s.as_bytes().to_vec()); }
+    if let Some(b) = a.downcast_ref::<bool>() { return Some(vec![*b as u8]); }
+    if let Some((x, y)) = a.downcast_ref::<(i64, i64)>() { return Some([le(*x), le(*y)].concat()); }
+    if let Some((x, y)) = a.downcast_ref::<(AlmideString, AlmideString)>() { return Some([lp(x.as_bytes()), y.as_bytes().to_vec()].concat()); }
+    if let Some((x, y)) = a.downcast_ref::<(AlmideString, i64)>() { return Some([lp(x.as_bytes()), le(*y)].concat()); }
+    if let Some((x, y)) = a.downcast_ref::<(i64, AlmideString)>() { return Some([le(*x), y.as_bytes().to_vec()].concat()); }
+    if let Some(xs) = a.downcast_ref::<Vec<i64>>() { return Some(xs.iter().flat_map(|x| x.to_le_bytes()).collect()); }
+    if let Some(xs) = a.downcast_ref::<Vec<AlmideString>>() { return Some(xs.iter().flat_map(|s| lp(s.as_bytes())).collect()); }
+    if let Some(x) = a.downcast_ref::<i32>() { return Some(x.to_le_bytes().to_vec()); }
+    if let Some(x) = a.downcast_ref::<i16>() { return Some(x.to_le_bytes().to_vec()); }
+    if let Some(x) = a.downcast_ref::<i8>() { return Some(x.to_le_bytes().to_vec()); }
+    if let Some(x) = a.downcast_ref::<u64>() { return Some(x.to_le_bytes().to_vec()); }
+    if let Some(x) = a.downcast_ref::<u32>() { return Some(x.to_le_bytes().to_vec()); }
+    if let Some(x) = a.downcast_ref::<u16>() { return Some(x.to_le_bytes().to_vec()); }
+    if let Some(x) = a.downcast_ref::<u8>() { return Some(vec![*x]); }
+    if let Some(s) = a.downcast_ref::<String>() { return Some(s.as_bytes().to_vec()); }
+    None
+}
+
+/// The least probe distance at which an insert marks its index flooded
+/// (#4104); the bound a table actually uses is [`almide_map_flood_bound`].
+/// Keys crafted to collide under the fast hash make every insert walk the
+/// whole cluster, so past the bound the owner moves to the ordered index.
+pub const ALMIDE_MAP_FLOOD_PROBES: usize = 128;
+
+/// Probe steps allowed per bit of the table's size. The longest cluster of a
+/// WELL-spread hash grows with the table — logarithmically: linear probing at
+/// load 3/4 (dead slots count toward it) gives a longest probe of about
+/// 18·log2(slots), and plain Int keys churned by delete + insert at 100 000
+/// entries (tests/map_delete_amortized_test.rs) reach 156 steps. A fixed 128
+/// therefore flagged honest maps of ~100 000 entries as flooded, and every
+/// later operation paid the ordered index's allocation and O(log n) walk.
+pub const ALMIDE_MAP_FLOOD_PROBES_PER_BIT: usize = 32;
+
+/// The flood bound of a table of `slot_len` (a power of two) slots:
+/// 32·log2(slot_len), at least [`ALMIDE_MAP_FLOOD_PROBES`]. Still O(log n),
+/// the ordered index's own per-operation cost, so colliding keys cost at most
+/// that many steps each before the owner moves.
+#[inline]
+fn almide_map_flood_bound(slot_len: usize) -> usize {
+    ALMIDE_MAP_FLOOD_PROBES.max(ALMIDE_MAP_FLOOD_PROBES_PER_BIT.saturating_mul(slot_len.trailing_zeros() as usize))
 }
 
 /// The hash index beside an insertion-ordered entry vector: `hashes[p]` is
@@ -204,12 +271,14 @@ impl AlmideMapKey for str {
 pub struct AlmideKeyIndex {
     hashes: Vec<u64>,
     slots: Vec<u64>,
+    /// An insert probed past [`almide_map_flood_bound`] (#4104).
+    flooded: bool,
 }
 
 impl AlmideKeyIndex {
     pub fn with_capacity(n: usize) -> Self {
         let slot_len = (n * 4 / 3 + 1).next_power_of_two().max(32);
-        AlmideKeyIndex { hashes: Vec::with_capacity(n), slots: vec![ALMIDE_MAP_SLOT_EMPTY; slot_len] }
+        AlmideKeyIndex { hashes: Vec::with_capacity(n), slots: vec![ALMIDE_MAP_SLOT_EMPTY; slot_len], flooded: false }
     }
 
     /// Position of the entry whose hash is `h` and whose key `eq` confirms.
@@ -289,10 +358,21 @@ impl AlmideKeyIndex {
     fn place(&mut self, h: u64, p: u32) {
         let mask = self.slots.len() - 1;
         let mut i = (h as usize) & mask;
+        let mut probes = 0usize;
         while self.slots[i] != ALMIDE_MAP_SLOT_EMPTY {
             i = (i + 1) & mask;
+            probes += 1;
         }
         self.slots[i] = (h & ALMIDE_MAP_SLOT_TAG) | p as u64;
+        if probes > almide_map_flood_bound(self.slots.len()) {
+            self.flooded = true;
+        }
+    }
+
+    /// Did an insert probe past the flood bound (#4104)?
+    #[inline]
+    pub fn flooded(&self) -> bool {
+        self.flooded
     }
 }
 
@@ -304,6 +384,11 @@ pub enum AlmideKeyLookup {
     Linear,
     Unhashable,
     Built(AlmideKeyIndex),
+    /// The flooding fallback (#4104): keys crafted to collide under the fast
+    /// hash moved this collection to an index ordered by each key's canonical
+    /// bytes. Deterministic, no hidden entropy, O(log n) per operation
+    /// whatever the keys. A collection stays here once it arrives.
+    Ordered(std::collections::BTreeMap<Vec<u8>, usize>),
 }
 
 impl AlmideKeyLookup {
@@ -314,6 +399,34 @@ impl AlmideKeyLookup {
             AlmideKeyLookup::Built(_) => k.almide_key_hash(),
             _ => None,
         }
+    }
+
+    /// `Some(position)` answered by the ordered index, `None` when this is not
+    /// one (the caller takes the hash or linear lane).
+    #[inline]
+    pub fn ordered_position<Q: ?Sized + AlmideMapKey>(&self, k: &Q) -> Option<Option<usize>> {
+        match self {
+            AlmideKeyLookup::Ordered(t) => Some(k.almide_key_bytes().and_then(|b| t.get(&b).copied())),
+            _ => None,
+        }
+    }
+
+    /// Re-index under the ordered fallback (#4104). `keys` are the owner's
+    /// live keys in position order: the owner compacts its holes first.
+    pub fn rebuild_ordered<'a, K: AlmideMapKey + 'a>(&mut self, keys: impl Iterator<Item = &'a K>) {
+        let mut t = std::collections::BTreeMap::new();
+        for (p, k) in keys.enumerate() {
+            match k.almide_key_bytes() {
+                Some(b) => {
+                    t.insert(b, p);
+                }
+                None => {
+                    *self = AlmideKeyLookup::Unhashable;
+                    return;
+                }
+            }
+        }
+        *self = AlmideKeyLookup::Ordered(t);
     }
 
     /// Index every key of a collection that just crossed the threshold.
@@ -387,7 +500,28 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
     #[inline]
     fn position<Q: ?Sized + PartialEq + AlmideMapKey>(&self, k: &Q) -> Option<usize>
     where K: std::borrow::Borrow<Q> {
+        if let Some(found) = self.lookup.ordered_position(k) {
+            return found;
+        }
         self.position_with(k, self.lookup.hash_for(k))
+    }
+
+    /// The ordered fallback (#4104): drop the holes, then index the live keys
+    /// by their canonical bytes.
+    fn to_ordered(&mut self) {
+        self.entries.retain(Option::is_some);
+        self.dead = 0;
+        self.lookup.rebuild_ordered(self.entries.iter().flatten().map(|(k, _)| k));
+    }
+
+    /// Append `(k, v)` to an ordered map whose index lacks `k`.
+    fn ordered_append(&mut self, k: K, v: V) {
+        let p = self.entries.len();
+        let b = k.almide_key_bytes();
+        self.entries.push(Some((k, v)));
+        if let (AlmideKeyLookup::Ordered(t), Some(b)) = (&mut self.lookup, b) {
+            t.insert(b, p);
+        }
     }
 
     /// A new entry was appended: extend the index, or build it at the threshold.
@@ -396,6 +530,9 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
         if let AlmideKeyLookup::Built(ix) = &mut self.lookup {
             if let Some(h) = h {
                 ix.push(h);
+            }
+            if ix.flooded() {
+                self.to_ordered();
             }
             return;
         }
@@ -422,6 +559,17 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
     /// Insert: update the value in place if the key exists (preserving its
     /// position), else append the new entry. Matches insertion-order semantics.
     pub fn insert(&mut self, k: K, v: V) {
+        if let Some(found) = self.lookup.ordered_position(&k) {
+            match found {
+                Some(i) => {
+                    if let Some((_, slot)) = &mut self.entries[i] {
+                        *slot = v;
+                    }
+                }
+                None => self.ordered_append(k, v),
+            }
+            return;
+        }
         let h = self.lookup.hash_for(&k);
         if let Some(i) = self.position_with(&k, h) {
             if let Some((_, slot)) = &mut self.entries[i] {
@@ -432,12 +580,26 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
         self.entries.push(Some((k, v)));
         self.note_push(h);
     }
-    /// `m[k] = f(map.get_or(m, k, init))` in ONE probe (the walker's
+    /// `m[k] = f(map.get(m, k) ?? init)` in ONE probe (the walker's
     /// `map_upsert` form): present → the slot becomes `f(old)` in place,
     /// absent → `(k, f(init))` is appended. The same hash and position the
     /// two-step `get_or` + `insert` computed twice. `f` runs before the
     /// append, so an `f` that aborts leaves no half-inserted key behind.
     pub fn upsert_with<F: FnOnce(V) -> V>(&mut self, k: K, init: V, f: F) where V: Clone {
+        if let Some(found) = self.lookup.ordered_position(&k) {
+            match found {
+                Some(i) => {
+                    if let Some((_, slot)) = &mut self.entries[i] {
+                        *slot = f(slot.clone());
+                    }
+                }
+                None => {
+                    let v = f(init);
+                    self.ordered_append(k, v);
+                }
+            }
+            return;
+        }
         let h = self.lookup.hash_for(&k);
         if let Some(i) = self.position_with(&k, h) {
             if let Some((_, slot)) = &mut self.entries[i] {
@@ -453,6 +615,17 @@ impl<K: PartialEq + 'static, V> AlmideMap<K, V> {
     /// leaves a hole (amortized O(1), #3691), a linear one shifts.
     pub fn remove(&mut self, k: &K) {
         let Some(i) = self.position(k) else { return };
+        if let AlmideKeyLookup::Ordered(t) = &mut self.lookup {
+            if let Some(b) = k.almide_key_bytes() {
+                t.remove(&b);
+            }
+            self.entries[i] = None;
+            self.dead += 1;
+            if self.dead * 2 > self.entries.len() {
+                self.to_ordered();
+            }
+            return;
+        }
         let AlmideKeyLookup::Built(ix) = &mut self.lookup else {
             self.entries.remove(i);
             return;
@@ -532,13 +705,11 @@ pub fn almide_rt_map_new<K, V>() -> AlmideMap<K, V> { AlmideMap::new() }
 pub fn almide_rt_map_len<K, V>(m: &AlmideMap<K, V>) -> i64 { m.len() as i64 }
 pub fn almide_rt_map_is_empty<K, V>(m: &AlmideMap<K, V>) -> bool { m.is_empty() }
 // The read side borrows its key (`@borrow_ref(key)` in stdlib/map.almd):
-// `map.get_or(counts, w, 0)` no longer clones `w` at the call site — the
+// `map.get(counts, w)` no longer clones `w` at the call site — the
 // clone was one third of the word-count loop's map cost (#2157). `Q` is the
 // borrowed key form: `&String`/`&str` for a String key, `&i64` for Int.
 pub fn almide_rt_map_get<K: PartialEq + 'static, V: Clone, Q: ?Sized + PartialEq + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q) -> Option<V>
 where K: std::borrow::Borrow<Q> { m.get(k).cloned() }
-pub fn almide_rt_map_get_or<K: PartialEq + 'static, V: Clone, Q: ?Sized + PartialEq + AlmideMapKey>(m: &AlmideMap<K, V>, k: &Q, default: V) -> V
-where K: std::borrow::Borrow<Q> { m.get(k).cloned().unwrap_or(default) }
 // Consuming (@consume(m) in stdlib/map.almd): a caller whose map is dead at
 // the call moves it in and this is one hash insert; a caller that still uses
 // the source gets its clone inserted by pass_clone at the call site. The
@@ -626,9 +797,11 @@ pub fn almide_rt_map_merge<K: PartialEq + Clone + 'static, V: Clone>(a: &AlmideM
 // b's new keys append in b's order (`insert`).
 pub fn almide_rt_map_merge_owned<K: PartialEq + Clone + 'static, V: Clone>(mut a: AlmideMap<K, V>, b: &AlmideMap<K, V>) -> AlmideMap<K, V> { for (k, v) in b.iter() { a.insert(k.clone(), v.clone()); } a }
 
-pub fn almide_rt_map_filter<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> AlmideMap<K, V> {
-    let f = move |a, b| f(a, b);
-    m.iter().filter(|(k, v)| f((*k).clone(), (*v).clone())).map(|(k, v)| (k.clone(), v.clone())).collect()
+// R-map-09: the entry callbacks take the entry as ONE `(K, V)` tuple, the
+// element `map.to_list` yields — the shape every container's callback has.
+pub fn almide_rt_map_filter<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn((K, V)) -> bool>) -> AlmideMap<K, V> {
+    let f = move |e| f(e);
+    m.iter().filter(|(k, v)| f(((*k).clone(), (*v).clone()))).map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
 pub fn almide_rt_map_map_values<K: PartialEq + Clone + 'static, V: Clone, W>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(V) -> W>) -> AlmideMap<K, W> {
@@ -639,31 +812,31 @@ pub fn almide_rt_map_map_values<K: PartialEq + Clone + 'static, V: Clone, W>(m: 
 pub fn almide_rt_map_from_entries<K: PartialEq + 'static, V>(entries: Vec<(K, V)>) -> AlmideMap<K, V> { entries.into_iter().collect() }
 pub fn almide_rt_map_from_list<K: PartialEq + Clone + 'static, V: Clone>(keys: &[K], values: &[V]) -> AlmideMap<K, V> { keys.iter().cloned().zip(values.iter().cloned()).collect() }
 
-pub fn almide_rt_map_fold<K: Clone, V: Clone, A>(m: &AlmideMap<K, V>, init: A, f: std::rc::Rc<dyn Fn(A, K, V) -> A>) -> A {
-    let f = move |a, k, v| f(a, k, v);
+pub fn almide_rt_map_fold<K: Clone, V: Clone, A>(m: &AlmideMap<K, V>, init: A, f: std::rc::Rc<dyn Fn(A, (K, V)) -> A>) -> A {
+    let f = move |a, e| f(a, e);
     let mut acc = init;
-    for (k, v) in m.iter() { acc = f(acc, k.clone(), v.clone()); }
+    for (k, v) in m.iter() { acc = f(acc, (k.clone(), v.clone())); }
     acc
 }
-pub fn almide_rt_map_any<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> bool {
-    let f = move |a, b| f(a, b);
-    m.iter().any(|(k, v)| f(k.clone(), v.clone()))
+pub fn almide_rt_map_any<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn((K, V)) -> bool>) -> bool {
+    let f = move |e| f(e);
+    m.iter().any(|(k, v)| f((k.clone(), v.clone())))
 }
-pub fn almide_rt_map_all<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> bool {
-    let f = move |a, b| f(a, b);
-    m.iter().all(|(k, v)| f(k.clone(), v.clone()))
+pub fn almide_rt_map_all<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn((K, V)) -> bool>) -> bool {
+    let f = move |e| f(e);
+    m.iter().all(|(k, v)| f((k.clone(), v.clone())))
 }
-pub fn almide_rt_map_count<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> i64 {
-    let f = move |a, b| f(a, b);
-    m.iter().filter(|&(k, v)| f(k.clone(), v.clone())).count() as i64
+pub fn almide_rt_map_count<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn((K, V)) -> bool>) -> i64 {
+    let f = move |e| f(e);
+    m.iter().filter(|&(k, v)| f((k.clone(), v.clone()))).count() as i64
 }
 pub fn almide_rt_map_each<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V)>) {
     let f = move |a, b| f(a, b);
     for (k, v) in m.iter() { f(k.clone(), v.clone()); }
 }
-pub fn almide_rt_map_find<K: Clone + PartialEq + 'static, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> Option<(K, V)> {
-    let f = move |a, b| f(a, b);
-    m.iter().find(|&(k, v)| f(k.clone(), v.clone())).map(|(k, v)| (k.clone(), v.clone()))
+pub fn almide_rt_map_find<K: Clone + PartialEq + 'static, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn((K, V)) -> bool>) -> Option<(K, V)> {
+    let f = move |e| f(e);
+    m.iter().find(|&(k, v)| f((k.clone(), v.clone()))).map(|(k, v)| (k.clone(), v.clone()))
 }
 pub fn almide_rt_map_update<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, key: K, f: std::rc::Rc<dyn Fn(V) -> V>) -> AlmideMap<K, V> {
     almide_rt_map_update_owned(m.clone(), key, f)
@@ -678,6 +851,4 @@ pub fn almide_rt_map_update_owned<K: PartialEq + Clone + 'static, V: Clone>(mut 
 
 // ── Mutable operations ──
 
-pub fn almide_rt_map_insert<K: PartialEq + 'static, V>(m: &mut AlmideMap<K, V>, k: K, v: V) { m.insert(k, v); }
-pub fn almide_rt_map_delete<K: PartialEq + 'static, V>(m: &mut AlmideMap<K, V>, k: K) { m.remove(&k); }
 pub fn almide_rt_map_clear<K, V>(m: &mut AlmideMap<K, V>) { m.clear(); }

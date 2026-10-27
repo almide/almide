@@ -1,0 +1,23 @@
+// The Float -> Int conversion trio (#4145): to_int / to_int_saturating /
+// to_int_checked, the Int cell the sized cells already had.
+test "to_int_checked is some only for an integer in the Int range" {
+  assert_eq(int.from_checked(42.0), some(42))
+  assert_eq(int.from_checked(-0.0), some(0))
+  assert_eq(int.from_checked(-9223372036854775808.0), some(-9223372036854775807 - 1))
+  assert_eq(int.from_checked(9223372036854774784.0), some(9223372036854774784))
+  assert_eq(int.from_checked(42.5), none)
+  assert_eq(int.from_checked(0.0 / 0.0), none)
+  assert_eq(int.from_checked(1.0 / 0.0), none)
+  assert_eq(int.from_checked(-1.0 / 0.0), none)
+  assert_eq(int.from_checked(9223372036854775808.0), none)
+  assert_eq(int.from_checked(1e300), none)
+}
+
+test "to_int_saturating is to_int: truncate, clamp, NaN to 0" {
+  assert_eq(int.from_saturating(42.9), 42)
+  assert_eq(int.from_saturating(-42.9), -42)
+  assert_eq(int.from_saturating(0.0 / 0.0), 0)
+  assert_eq(int.from_saturating(1e300), 9223372036854775807)
+  assert_eq(int.from_saturating(-1.0 / 0.0), -9223372036854775807 - 1)
+  assert_eq(int.from_saturating(1e300), int.from_saturating(1e300))
+}

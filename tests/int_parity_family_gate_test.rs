@@ -13,7 +13,7 @@ fn stdlib(name: &str) -> String {
 #[test]
 fn int_parity_pair_is_complete_on_int_and_on_every_sized_module() {
     let int = stdlib("int.almd");
-    for f in ["fn is_even(n: Int) -> Bool", "fn is_odd(n: Int) -> Bool"] {
+    for f in ["fn is_even(x: Int) -> Bool", "fn is_odd(x: Int) -> Bool"] {
         assert!(int.contains(f), "parity pair cell missing on int: {f}");
     }
     let types = [

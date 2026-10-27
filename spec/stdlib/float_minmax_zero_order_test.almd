@@ -11,8 +11,8 @@ test "T23: min -> -0, max -> +0, in either order" {
   assert_eq(float.sign(float.min(0.0, mz)), -1.0)
   assert_eq(float.sign(float.max(mz, 0.0)), 1.0)
   assert_eq(float.sign(float.max(0.0, mz)), 1.0)
-  assert_eq(float.sign(math.fmin(mz, 0.0)), -1.0)
-  assert_eq(float.sign(math.fmin(0.0, mz)), -1.0)
-  assert_eq(float.sign(math.fmax(mz, 0.0)), 1.0)
-  assert_eq(float.sign(math.fmax(0.0, mz)), 1.0)
+  assert_eq(float.sign(float.min(mz, 0.0)), -1.0)
+  assert_eq(float.sign(float.min(0.0, mz)), -1.0)
+  assert_eq(float.sign(float.max(mz, 0.0)), 1.0)
+  assert_eq(float.sign(float.max(0.0, mz)), 1.0)
 }

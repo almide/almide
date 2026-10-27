@@ -30,7 +30,7 @@ fn run(path: &Path, extra: &[&str]) -> (String, Option<i32>, String) {
 #[test]
 fn tcp_fixtures_run_to_the_end_alike_on_native_and_the_embedded_lane() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("spec/embedded_cross");
-    for name in ["net_tcp_loopback", "net_tcp_errors", "net_tcp_timeouts"] {
+    for name in ["net_tcp_loopback", "net_tcp_errors", "net_tcp_timeouts", "net_tcp_fan_handles"] {
         let path = dir.join(format!("{name}.almd"));
         let native = run(&path, &[]);
         assert!(native.0.ends_with("done\n"), "{name}: native did not finish:\n{}\n{}", native.0, native.2);

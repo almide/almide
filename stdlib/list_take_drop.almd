@@ -1,7 +1,7 @@
 // list_take_drop — SELF-HOSTED `list.take` / `list.drop` for v1 over the prim floor:
 // allocate a new List[Int] (prim.alloc_list) and copy a contiguous run of i64 elements.
-// take = the first n, drop = all but the first n. The n<0 edges mirror v0's `n as usize`
-// (take(neg)=all, drop(neg)=empty). List[Int] (i64 value copies, fully sound). `xs`
+// take = the first n, drop = all but the first n. A negative n is 0 (#4147:
+// take(neg)=empty, drop(neg)=all; it used to mirror v0's `n as usize`). List[Int] (i64 value copies, fully sound). `xs`
 // borrowed; result owned.
 // Copy `count` i64 elements from source index `start` to dest index 0..count.
 fn __copy_slice(srch: Int, dsth: Int, start: Int, count: Int, i: Int) -> Int = if i >= count then 0
@@ -11,7 +11,7 @@ else {
   __copy_slice(srch, dsth, start, count, i + 1)
 }
 
-fn __clamp_len(n: Int, len: Int) -> Int = if n < 0 then len
+fn __clamp_len(n: Int, len: Int) -> Int = if n < 0 then 0
 else if n > len then len else n
 
 fn list_take(xs: List[Int], n: Int) -> List[Int] = {
@@ -36,13 +36,13 @@ fn list_drop(xs: List[Int], n: Int) -> List[Int] = {
 }
 
 // list.slice(xs, start, end) = elements [start, min(end, len)); empty when start >= end.
-// The negative edges mirror v0's `as usize` (negative end -> len, negative start -> empty).
+// Both bounds clamp into [0, len]: a negative bound is 0 (#4147).
 fn list_slice(xs: List[Int], start: Int, end: Int) -> List[Int] = {
   let h = prim.handle(xs)
   let len = prim.load32(h + 4)
-  let e = if end < 0 then len
+  let e = if end < 0 then 0
   else (if end > len then len else end)
-  let s = if start < 0 then len else start
+  let s = if start < 0 then 0 else start
   let count = if s >= e then 0 else e - s
   let buf = prim.alloc_list(count)
   let bh = prim.handle(buf)

@@ -78,8 +78,8 @@ test "take_at copies n bytes" {
   assert_eq(p, 3)
   let s = slice |> option.unwrap_or(bytes.new())
   assert_eq(bytes.len(s), 2)
-  assert_eq(bytes.read_u8(s, 0), 2)
-  assert_eq(bytes.read_u8(s, 1), 3)
+  assert_eq(bytes.get(s, 0) ?? 0, 2)
+  assert_eq(bytes.get(s, 1) ?? 0, 3)
 }
 
 test "take_at returns none when not enough bytes" {
@@ -121,7 +121,7 @@ test "read_i16_be_at sign-extends negatives" {
   assert_eq(v |> option.unwrap_or(0), -42)
 }
 
-// ── read_bool_at / read_f16_le_at / read_string_be_at ──
+// ── read_bool_at / read_f16_le_at ──
 test "read_bool_at advances and returns Some" {
   var b = bytes.new()
   bytes.append_u8(b, 1)
@@ -156,40 +156,4 @@ test "read_f16_le_at none at partial EOF" {
   let (v, p) = bytes.next_f16_le(b, 0)
   assert_eq(p, 0)
   assert(option.is_none(v), "expected none at partial eof")
-}
-
-test "read_string_be_at decodes u32 BE prefix + body" {
-  // slen = 3, body = "hey" (0x68 0x65 0x79)
-  var b = bytes.new()
-  bytes.append_u8(b, 0x00)
-  bytes.append_u8(b, 0x00)
-  bytes.append_u8(b, 0x00)
-  bytes.append_u8(b, 0x03)
-  bytes.append_u8(b, 0x68)
-  bytes.append_u8(b, 0x65)
-  bytes.append_u8(b, 0x79)
-  let (p, v) = bytes.read_string_be_at(b, 0)
-  assert_eq(p, 7)
-  assert_eq(v |> option.unwrap_or(""), "hey")
-}
-
-test "read_string_be_at none when prefix runs off" {
-  let b = bytes.zeros(3)
-  let (p, v) = bytes.read_string_be_at(b, 0)
-  assert_eq(p, 0)
-  assert(option.is_none(v), "expected none at short prefix")
-}
-
-test "read_string_be_at none when body runs off" {
-  // prefix says 10 bytes but only 2 follow
-  var b = bytes.new()
-  bytes.append_u8(b, 0x00)
-  bytes.append_u8(b, 0x00)
-  bytes.append_u8(b, 0x00)
-  bytes.append_u8(b, 0x0A)
-  bytes.append_u8(b, 0x61)
-  bytes.append_u8(b, 0x62)
-  let (p, v) = bytes.read_string_be_at(b, 0)
-  assert_eq(p, 0)
-  assert(option.is_none(v), "expected none at short body")
 }

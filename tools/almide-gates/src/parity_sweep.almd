@@ -36,12 +36,12 @@ type Sweep = { lines: List[String], matches: List[String], ok: Bool }
 
 type Candidates = { files: List[String], skipped: Int }
 
-// The perl `alarm; exec` wrapper is GONE (#1040): `process.exec_status_timeout`
+// The perl `alarm; exec` wrapper is GONE (#1040): `process.output`
 // kills on the deadline in the runtime itself. A fired deadline maps to code
 // 124 here — the same observable the perl wrapper produced — so the compared
 // exit codes are unchanged.
 effect fn run_capped(secs: Int, cmd: String, args: List[String]) -> process.ProcessStatus = {
-  process.exec_status_timeout(cmd, args, secs * 1000) ?? process.ProcessStatus {
+  process.output(process.ProcessCommand { cmd: cmd, args: args, timeout_ms: secs * 1000 }) ?? process.ProcessStatus {
     code: 124,
     stdout: "",
     stderr: "",
@@ -51,7 +51,7 @@ effect fn run_capped(secs: Int, cmd: String, args: List[String]) -> process.Proc
 // One fixture through both pipelines. The wasm leg is the STRUCTURAL build forced
 // (`ALMIDE_WASM_SKIP_STOCK_AUDIT=1 almide build --target wasm`, #2793 — it was the incumbent's
 // `render_program` before), so a structural decline is a WALL and never an incumbent module
-// standing in for it. `process.exec_status` takes no environment, so the variable rides on
+// standing in for it. `process.output` takes no environment, so the variable rides on
 // `env(1)`. The module path is masked out of the compared stderr (`parity.normalize_wasm_err`).
 effect fn run_one(root: String, alm: String, file: String, secs: Int) -> String = {
   let wasm = root + "/target/almide-gates-parity.wasm"
@@ -99,7 +99,7 @@ effect fn run_one(root: String, alm: String, file: String, secs: Int) -> String 
 effect fn is_runnable(path: String) -> Bool = {
   let src = fs.read_text(path) ?? ""
   string.contains(src, "fn main") and not string.contains(
-    list.get_or(string.split(src, "\n"), 0, ""),
+    list.get(string.split(src, "\n"), 0) ?? "",
     "wasm:skip",
   )
 }
@@ -195,7 +195,7 @@ effect fn tool_check(alm: String) -> Sweep = {
   // `command` is a shell BUILTIN: macOS ships a /usr/bin/command shim, Linux does not, so a
   // direct spawn "found" wasmtime on every developer machine and never on a CI runner
   // (#2438's shard 3 went red on exactly this). Ask a shell, as the bash original does.
-  let have_wasmtime = (process.exec_status("sh", ["-c", "command -v \"$1\"", "_", "wasmtime"]) ?? process.ProcessStatus {
+  let have_wasmtime = (process.output(process.ProcessCommand { cmd: "sh", args: ["-c", "command -v \"$1\"", "_", "wasmtime"] }) ?? process.ProcessStatus {
     code: 1,
     stdout: "",
     stderr: "",
@@ -343,7 +343,7 @@ effect fn sweep(root: String, alm: String, baseline_path: String, update: Bool) 
     ok: false,
   } else if update then {
     let text = if list.len(matches) == 0 then "" else list.join(matches, "\n") + "\n"
-    fs.write(baseline_path, text)!
+    fs.write_text(baseline_path, text)!
     Sweep {
       lines: [summary] + classes + ledger.lines + ["output-parity: baseline updated -> " + baseline_path + " (" + int.to_string(list.len(matches)) + " files)"],
       matches: matches,

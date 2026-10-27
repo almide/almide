@@ -41,11 +41,10 @@ fn governed_files(root: &Path) -> Vec<PathBuf> {
     if let Ok(entries) = std::fs::read_dir(&pass_dir) {
         for e in entries.flatten() {
             let p = e.path();
-            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with("pass_") && name.ends_with(".rs") {
+            if let Some(name) = p.file_name().and_then(|n| n.to_str())
+                && name.starts_with("pass_") && name.ends_with(".rs") {
                     out.push(p);
                 }
-            }
         }
     }
     for f in ["fold.rs", "visit.rs", "visit_mut.rs", "substitute.rs", "free_vars.rs"] {
@@ -162,7 +161,7 @@ fn find_violations(src: &str) -> Vec<Violation> {
         let body = &src[open..=close];
         let enclosing = enclosing_fn(src, b, open);
         let recurses = has_descent_primitive(body)
-            || enclosing.as_ref().map_or(false, |(name, _)| body.contains(&format!("{}(", name)));
+            || enclosing.as_ref().is_some_and(|(name, _)| body.contains(&format!("{}(", name)));
         if !recurses {
             continue;
         }
@@ -242,7 +241,7 @@ fn enclosing_fn(src: &str, b: &[u8], pos: usize) -> Option<(String, usize)> {
             k += 1;
         }
         let Some(bc) = body_close else { continue };
-        if bo < pos && pos < bc && best.as_ref().map_or(true, |(s, e, _)| bo > *s || bc < *e) {
+        if bo < pos && pos < bc && best.as_ref().is_none_or(|(s, e, _)| bo > *s || bc < *e) {
             best = Some((bo, bc, name));
         }
     }
@@ -267,8 +266,8 @@ fn scan_arms(src: &str, b: &[u8], open: usize, close: usize, defers: bool, out: 
                 // depth-1 `,`; a block body ends at its `}` then a `,`).
                 let body_start = i + 2;
                 let (body, next) = read_arm_body(b, src, body_start, close);
-                if let Some(binder) = catchall_binder(&pat) {
-                    if let Some(reason) = silent_body(&body, binder.as_deref()) {
+                if let Some(binder) = catchall_binder(&pat)
+                    && let Some(reason) = silent_body(&body, binder.as_deref()) {
                         // An empty `_ => {}` that defers to an external map_children/
                         // map_exprs on the scrutinee is not a drop. (A non-empty drop —
                         // `other => other` / `_ => x.kind` — produces the match value
@@ -279,7 +278,6 @@ fn scan_arms(src: &str, b: &[u8], open: usize, close: usize, defers: bool, out: 
                             out.push(Violation { line, arm: format!("{} => {}  [{}]", pat, body.trim(), reason) });
                         }
                     }
-                }
                 i = next;
                 arm_pat_start = next;
                 continue;
@@ -353,7 +351,7 @@ fn catchall_binder(pat: &str) -> Option<Option<String>> {
     if p == "_" { return Some(None); }
     // bare lowercase identifier, no `::`, `(`, `{`, `|`, `@`, `.`
     if !p.is_empty()
-        && p.chars().next().map_or(false, |c| c.is_ascii_lowercase() || c == '_')
+        && p.chars().next().is_some_and(|c| c.is_ascii_lowercase() || c == '_')
         && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
     {
         return Some(Some(p.to_string()));
@@ -365,12 +363,11 @@ fn catchall_binder(pat: &str) -> Option<Option<String>> {
 fn silent_body(body: &str, binder: Option<&str>) -> Option<&'static str> {
     let t = body.trim().trim_end_matches(',').trim();
     if t == "{}" || t == "{ }" { return Some("empty"); }
-    if let Some(name) = binder {
-        if t == name { return Some("returns-binding-unrecursed"); }
-    }
+    if let Some(name) = binder
+        && t == name { return Some("returns-binding-unrecursed"); }
     // `_ => expr.kind` / `self.kind` (returns scrutinee unmodified)
     if t.ends_with(".kind")
-        && t.split(['.', ' ']).next().map_or(false, |h| !h.is_empty())
+        && t.split(['.', ' ']).next().is_some_and(|h| !h.is_empty())
         && !t.contains('(')
     {
         return Some("returns-scrutinee-kind");

@@ -22,10 +22,10 @@ fn is_matrix_ty(ty: &Ty) -> bool {
 // ── Let-split chain inlining ────────────────────────────────────────
 //
 // `MatrixFusionPass` recognises both nested-call shapes
-//   matrix.mul(a, matrix.scale(b, s))
+//   a * matrix.scale(b, s)
 // and let-split shapes
 //   let scaled = matrix.scale(b, s)
-//   matrix.mul(a, scaled)
+//   a * scaled
 //
 // The egg bridge sees only `IrExprKind::Call`, so let-split chains
 // would lift as a single opaque `Block` slot and never enter

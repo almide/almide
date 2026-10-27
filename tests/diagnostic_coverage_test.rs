@@ -57,9 +57,9 @@ fn scan_diagnostic_codes() -> BTreeSet<String> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                if path.file_name().map_or(false, |n| n == "target") { continue; }
+                if path.file_name().is_some_and(|n| n == "target") { continue; }
                 walk(&path, codes);
-            } else if path.extension().map_or(false, |e| e == "rs") {
+            } else if path.extension().is_some_and(|e| e == "rs") {
                 let Ok(text) = std::fs::read_to_string(&path) else { continue };
                 let mut rest = text.as_str();
                 while let Some(pos) = rest.find("with_code(\"E") {
@@ -86,7 +86,7 @@ fn scan_cli_codes() -> BTreeSet<String> {
             let path = entry.path();
             if path.is_dir() {
                 walk(&path, codes);
-            } else if path.extension().map_or(false, |e| e == "rs") {
+            } else if path.extension().is_some_and(|e| e == "rs") {
                 let Ok(text) = std::fs::read_to_string(&path) else { continue };
                 let mut rest = text.as_str();
                 while let Some(pos) = rest.find("error[E") {
@@ -276,6 +276,12 @@ fn every_mechanical_verdict_emits_a_machine_applicable_repair_that_round_trips()
     let mut backlog: Vec<String> = Vec::new();
     let mut broken_round_trips: Vec<String> = Vec::new();
     let mut proven: Vec<String> = Vec::new();
+    // Every mechanical code on a full run; the CI slice (ALMIDE_CI_SLICE) of
+    // the codes, keyed by the code's doc, otherwise. A selected code is judged
+    // over ALL its families, so the backlog verdict stays per code.
+    let mechanical = almide_corpus::select(mechanical.into_iter().collect::<Vec<_>>(), "diagnostic_coverage::mechanical_round_trip", |c| {
+        format!("docs/diagnostics/{c}.md")
+    });
     for code in &mechanical {
         let prefix = format!("{}-", code.to_ascii_lowercase());
         let mut families: Vec<PathBuf> = std::fs::read_dir(&fixtures).expect("read tests/diagnostics")
@@ -402,11 +408,10 @@ fn uncoded_error_sites_ratchet() {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                if path.file_name().map_or(false, |n| n == "target") { continue; }
+                if path.file_name().is_some_and(|n| n == "target") { continue; }
                 walk(&path, f);
-            } else if path.extension().map_or(false, |e| e == "rs") {
-                if let Ok(text) = std::fs::read_to_string(&path) { f(&path, &text); }
-            }
+            } else if path.extension().is_some_and(|e| e == "rs")
+                && let Ok(text) = std::fs::read_to_string(&path) { f(&path, &text); }
         }
     }
     walk(&root, &mut |path, text| {

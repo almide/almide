@@ -1,0 +1,2 @@
+expects_error = "type 'String' does not implement protocol 'Numeric'"
+hint_substring = "Numeric"

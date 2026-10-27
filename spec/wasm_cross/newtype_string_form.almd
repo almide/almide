@@ -39,7 +39,7 @@ fn tag(n: Name) -> String = "name=${n}"
 effect fn main() -> Unit = {
   let id = Id(7)
   let s = Score(2.5)
-  println("${id} ${s} ${Name("a\"b")} ${Flag(true)} ${Byte(int.to_int8(3))} ${Outer(Score(3.0))}")
+  println("${id} ${s} ${Name("a\"b")} ${Flag(true)} ${Byte(int8.from(3))} ${Outer(Score(3.0))}")
   println("${Rec(P { x: 1 })} ${Case(Off(2))} ${Ids([1, 2])} ${Pair((1, "a"))}")
   let r4 = Rec(P { x: 4 })
   println("${[id]} ${some(Name("n"))} ${[r4]} ${[Outer(s)]}")
