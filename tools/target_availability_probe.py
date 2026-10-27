@@ -46,10 +46,12 @@ Output (stdout): one line per fn — `status<TAB>module.fn<TAB>detail`.
             synthesizer is the thing to fix, never the enumeration.
 """
 import json
+import multiprocessing
 import os
 import re
 import subprocess
 import sys
+import shutil
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -834,6 +836,20 @@ def measure(mod, f, types, leg, tmp, env):
     return status, detail
 
 
+_SWEEP = None
+
+
+def _measure_nth(i):
+    """Measure the i-th fn of the sweep in a scratch dir of its own."""
+    sigs, types, leg, tmp, env = _SWEEP
+    mod, f = sigs[i]
+    sub = tempfile.mkdtemp(dir=tmp)
+    try:
+        return measure(mod, f, types, leg, sub, env)
+    finally:
+        shutil.rmtree(sub, ignore_errors=True)
+
+
 def main():
     argv = sys.argv[1:]
     leg = "structural"
@@ -856,8 +872,16 @@ def main():
     sigs, types = enumerate_surface()
     tmp = tempfile.mkdtemp(prefix="almide-avail-")
     counts = {"ok": 0, "wall": 0, "unprobed": 0, "error": 0}
-    for mod, f in sigs:
-        status, detail = measure(mod, f, types, leg, tmp, env)
+    # Every fn is an independent compile, so the sweep fans out over forked
+    # workers (each with its own copy of the synthesis globals and its own
+    # scratch dir); the rows still print in surface order. AVAIL_JOBS=1 is
+    # the serial sweep.
+    global _SWEEP
+    _SWEEP = (sigs, types, leg, tmp, env)
+    jobs = int(os.environ.get("AVAIL_JOBS") or os.cpu_count() or 1)
+    with multiprocessing.get_context("fork").Pool(max(1, jobs)) as pool:
+        verdicts = list(pool.imap(_measure_nth, range(len(sigs))))
+    for (mod, f), (status, detail) in zip(sigs, verdicts):
         counts[status] += 1
         print(f"{status}\t{mod}.{f['name']}\t{detail}", flush=True)
         if status == "error":
