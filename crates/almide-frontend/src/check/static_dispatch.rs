@@ -199,17 +199,17 @@ impl Checker {
                 format!("unknown unit '{}.{}'", module, field),
                 almide_lang::time_units::unit_set_hint(module),
                 format!("call to {}.{}()", module, field)));
-            return Ty::Named(sym(ty_name), vec![]);
+            return Ty::Named(sym(ty_name), Default::default());
         }
         if arg_tys.len() != 1 {
             self.emit(super::err(
                 format!("{}.{}() expects 1 argument but got {}", module, field, arg_tys.len()),
                 format!("Usage: {}.{}(100)", module, field),
                 format!("call to {}.{}()", module, field)));
-            return Ty::Named(sym(ty_name), vec![]);
+            return Ty::Named(sym(ty_name), Default::default());
         }
         self.constrain(arg_tys[0].clone(), Ty::Int, "time constructor argument");
-        Ty::Named(sym(ty_name), vec![])
+        Ty::Named(sym(ty_name), Default::default())
     }
 
     /// `compute.compare(a, b)` / `duration.compare(a, b)` (R-duration-01,
@@ -227,7 +227,7 @@ impl Checker {
             return Ty::Int;
         }
         for a in arg_tys {
-            self.constrain(Ty::Named(sym(ty_name), vec![]), a.clone(), "clock compare argument");
+            self.constrain(Ty::Named(sym(ty_name), Default::default()), a.clone(), "clock compare argument");
         }
         Ty::Int
     }

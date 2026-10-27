@@ -346,7 +346,7 @@ pub fn validate_protocol_impls(env: &TypeEnv, diagnostics: &mut Vec<Diagnostic>)
             continue;
         }
         let is_generic = env.types.get(type_name).is_some_and(|t| t.contains_typevar());
-        let type_ty = Ty::Named(*type_name, vec![]);
+        let type_ty = Ty::Named(*type_name, Default::default());
 
         for proto_name in protocol_names {
             // A part of a declared composition (`Encode` of `Codec`) is

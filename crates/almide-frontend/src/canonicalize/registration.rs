@@ -46,7 +46,7 @@ pub fn infer_top_let_seed(env: &TypeEnv, prefix: Option<&str>, value: &ast::Expr
                 .unwrap_or_else(|| sym(n.as_str()));
             let canonical = super::resolve::follow_record_alias(canonical, &env.types);
             match env.types.get(&canonical) {
-                Some(decl) if !decl.has_unresolved_deep() => Ty::Named(canonical, vec![]),
+                Some(decl) if !decl.has_unresolved_deep() => Ty::Named(canonical, Default::default()),
                 _ => Ty::Unknown,
             }
         }
@@ -100,7 +100,7 @@ pub fn infer_literal_composite(expr: &ast::Expr) -> Option<Ty> {
             let elem = elements.first()
                 .map(|e| infer_literal_type(e))
                 .unwrap_or(Ty::Unknown);
-            Ty::Applied(TypeConstructorId::List, vec![elem])
+            Ty::Applied(TypeConstructorId::List, vec![elem].into())
         }
         ast::ExprKind::Tuple { elements } => {
             Ty::Tuple(elements.iter().map(infer_literal_type).collect())
@@ -109,19 +109,19 @@ pub fn infer_literal_composite(expr: &ast::Expr) -> Option<Ty> {
             let (k, v) = entries.first()
                 .map(|(k, v)| (infer_literal_type(k), infer_literal_type(v)))
                 .unwrap_or((Ty::Unknown, Ty::Unknown));
-            Ty::Applied(TypeConstructorId::Map, vec![k, v])
+            Ty::Applied(TypeConstructorId::Map, vec![k, v].into())
         }
         ast::ExprKind::Some { expr } => {
-            Ty::Applied(TypeConstructorId::Option, vec![infer_literal_type(expr)])
+            Ty::Applied(TypeConstructorId::Option, vec![infer_literal_type(expr)].into())
         }
         ast::ExprKind::None => {
-            Ty::Applied(TypeConstructorId::Option, vec![Ty::Unknown])
+            Ty::Applied(TypeConstructorId::Option, vec![Ty::Unknown].into())
         }
         ast::ExprKind::Ok { expr } => {
-            Ty::Applied(TypeConstructorId::Result, vec![infer_literal_type(expr), Ty::Unknown])
+            Ty::Applied(TypeConstructorId::Result, vec![infer_literal_type(expr), Ty::Unknown].into())
         }
         ast::ExprKind::Err { expr } => {
-            Ty::Applied(TypeConstructorId::Result, vec![Ty::Unknown, infer_literal_type(expr)])
+            Ty::Applied(TypeConstructorId::Result, vec![Ty::Unknown, infer_literal_type(expr)].into())
         }
         _ => return None,
     })
@@ -593,8 +593,8 @@ pub fn register_derive_sigs(env: &mut TypeEnv, derives: &[Sym], type_name: &str,
         Some(m) if !almide_lang::stdlib_info::is_bundled_module(m) => format!("{}.{}", m, type_name),
         _ => type_name.to_string(),
     };
-    let type_ty = Ty::Named(sym(&canonical), vec![]);
-    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let type_ty = Ty::Named(sym(&canonical), Default::default());
+    let value_ty = Ty::Named(sym("Value"), Default::default());
     let empty_sb: HashMap<Sym, Ty> = HashMap::new();
     let empty_pb: HashMap<Sym, Vec<Sym>> = HashMap::new();
     // The VALUE type is canonical (#433); the KEYS stay BARE. Consumers that

@@ -199,7 +199,7 @@ impl Checker {
                 // occurrence (static-dispatch receiver `Type.method`, enum
                 // case access `Color.Red` — the Member path infers the object
                 // before its own resolution).
-                else if self.env.types.contains_key(&sym(name)) { Ty::Named(sym(name), vec![]) }
+                else if self.env.types.contains_key(&sym(name)) { Ty::Named(sym(name), Default::default()) }
                 else {
                     // A capitalized name that is no ctor, no const param, no
                     // top-let and no declared type resolves to NOTHING.
@@ -228,7 +228,7 @@ impl Checker {
                     // own `type Secret` is `m.Secret`, never the bundled one,
                     // and an alias of the bundled type is the bundled type.
                     let built = self.record_type_canon(&n);
-                    self.reject_foreign_opaque_record(&Ty::Named(built, vec![]), "build a literal of");
+                    self.reject_foreign_opaque_record(&Ty::Named(built, Default::default()), "build a literal of");
                     self.infer_expr_record_named(&n, fields)
                 } else {
                     let field_tys: Vec<(Sym, Ty)> = fields.iter().map(|f| {

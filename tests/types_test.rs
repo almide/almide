@@ -43,7 +43,7 @@ fn display_map() {
 #[test]
 fn display_tuple() {
     assert_eq!(
-        Ty::Tuple(vec![Ty::Int, Ty::String]).display(),
+        Ty::Tuple(vec![Ty::Int, Ty::String].into()).display(),
         "(Int, String)"
     );
 }
@@ -79,7 +79,7 @@ fn display_variant() {
 
 #[test]
 fn display_named() {
-    assert_eq!(Ty::Named("MyType".into(), vec![]).display(), "MyType");
+    assert_eq!(Ty::Named("MyType".into(), Default::default()).display(), "MyType");
 }
 
 #[test]
@@ -167,10 +167,10 @@ fn compatible_fn_types() {
 
 #[test]
 fn compatible_tuple() {
-    let t1 = Ty::Tuple(vec![Ty::Int, Ty::String]);
-    let t2 = Ty::Tuple(vec![Ty::Int, Ty::String]);
-    let t3 = Ty::Tuple(vec![Ty::Int, Ty::Int]);
-    let t4 = Ty::Tuple(vec![Ty::Int]);
+    let t1 = Ty::Tuple(vec![Ty::Int, Ty::String].into());
+    let t2 = Ty::Tuple(vec![Ty::Int, Ty::String].into());
+    let t3 = Ty::Tuple(vec![Ty::Int, Ty::Int].into());
+    let t4 = Ty::Tuple(vec![Ty::Int].into());
     assert!(t1.compatible(&t2));
     assert!(!t1.compatible(&t3));
     assert!(!t1.compatible(&t4)); // different length
@@ -187,7 +187,7 @@ fn compatible_record() {
 
 #[test]
 fn compatible_named_and_variant() {
-    let named = Ty::Named("Color".into(), vec![]);
+    let named = Ty::Named("Color".into(), Default::default());
     let variant = Ty::Variant { name: "Color".into(), cases: vec![] };
     assert!(named.compatible(&variant));
     assert!(variant.compatible(&named));
@@ -195,7 +195,7 @@ fn compatible_named_and_variant() {
 
 #[test]
 fn compatible_different_named() {
-    assert!(!Ty::Named("A".into(), vec![]).compatible(&Ty::Named("B".into(), vec![])));
+    assert!(!Ty::Named("A".into(), Default::default()).compatible(&Ty::Named("B".into(), Default::default())));
 }
 
 // ---- unify ----
@@ -267,8 +267,8 @@ fn unify_unknown_always_succeeds() {
 #[test]
 fn unify_tuple() {
     let mut bindings = HashMap::new();
-    let sig = Ty::Tuple(vec![Ty::TypeVar("A".into()), Ty::TypeVar("B".into())]);
-    let actual = Ty::Tuple(vec![Ty::Int, Ty::String]);
+    let sig = Ty::Tuple(vec![Ty::TypeVar("A".into()), Ty::TypeVar("B".into())].into());
+    let actual = Ty::Tuple(vec![Ty::Int, Ty::String].into());
     assert!(unify(&sig, &actual, &mut bindings));
     assert_eq!(bindings.get(&sym("A")), Some(&Ty::Int));
     assert_eq!(bindings.get(&sym("B")), Some(&Ty::String));
@@ -344,10 +344,10 @@ fn substitute_tuple() {
     let mut bindings = HashMap::new();
     bindings.insert("A".into(), Ty::Int);
     let result = substitute(
-        &Ty::Tuple(vec![Ty::TypeVar("A".into()), Ty::String]),
+        &Ty::Tuple(vec![Ty::TypeVar("A".into()), Ty::String].into()),
         &bindings,
     );
-    assert_eq!(result, Ty::Tuple(vec![Ty::Int, Ty::String]));
+    assert_eq!(result, Ty::Tuple(vec![Ty::Int, Ty::String].into()));
 }
 
 #[test]
@@ -446,15 +446,15 @@ fn type_env_resolve_named() {
         name: "Color".into(),
         cases: vec![],
     });
-    let resolved = env.resolve_named(&Ty::Named("Color".into(), vec![]));
+    let resolved = env.resolve_named(&Ty::Named("Color".into(), Default::default()));
     assert!(matches!(resolved, Ty::Variant { name, .. } if name == "Color"));
 }
 
 #[test]
 fn type_env_resolve_named_unknown() {
     let env = TypeEnv::new();
-    let result = env.resolve_named(&Ty::Named("Unknown".into(), vec![]));
-    assert_eq!(result, Ty::Named("Unknown".into(), vec![]));
+    let result = env.resolve_named(&Ty::Named("Unknown".into(), Default::default()));
+    assert_eq!(result, Ty::Named("Unknown".into(), Default::default()));
 }
 
 #[test]
@@ -552,7 +552,7 @@ fn constructor_id_containers() {
 
 #[test]
 fn constructor_id_user_defined() {
-    let ty = Ty::Named("Tree".into(), vec![Ty::Int]);
+    let ty = Ty::Named("Tree".into(), vec![Ty::Int].into());
     assert_eq!(ty.constructor_id(), Some(TypeConstructorId::UserDefined("Tree".into())));
 }
 
@@ -652,14 +652,14 @@ fn is_container() {
     assert!(Ty::result(Ty::Int, Ty::String).is_container());
     assert!(Ty::map_of(Ty::String, Ty::Int).is_container());
     assert!(!Ty::Int.is_container());
-    assert!(!Ty::Named("Foo".into(), vec![]).is_container());
+    assert!(!Ty::Named("Foo".into(), Default::default()).is_container());
 }
 
 #[test]
 fn constructor_name() {
     assert_eq!(Ty::list(Ty::Int).constructor_name(), Some("List"));
     assert_eq!(Ty::Int.constructor_name(), Some("Int"));
-    assert_eq!(Ty::Named("Dog".into(), vec![]).constructor_name(), Some("Dog"));
+    assert_eq!(Ty::Named("Dog".into(), Default::default()).constructor_name(), Some("Dog"));
     assert_eq!(Ty::Unknown.constructor_name(), None);
     assert_eq!(Ty::TypeVar("T".into()).constructor_name(), None);
 }

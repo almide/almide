@@ -137,7 +137,7 @@ impl Checker {
         // fn() -> …" — but the object was never a function; the METHOD is
         // what does not exist. Name that directly.
         if field == "encode" && self.reject_secret_encode(&obj_concrete) {
-            return Ty::Named(sym("Value"), vec![]);
+            return Ty::Named(sym("Value"), Default::default());
         }
         if let Ty::Named(n, _) = &obj_concrete
             && let Some(hint) = self.missing_codec_direction_hint(*n, field.as_str())
@@ -361,8 +361,8 @@ impl Checker {
             ).with_code("E002"));
             return Some(Ty::Unknown);
         }
-        if field == "encode" && self.reject_secret_encode(&Ty::Named(almide_base::intern::sym(module), vec![])) {
-            return Some(Ty::Named(almide_base::intern::sym("Value"), vec![]));
+        if field == "encode" && self.reject_secret_encode(&Ty::Named(almide_base::intern::sym(module), Default::default())) {
+            return Some(Ty::Named(almide_base::intern::sym("Value"), Default::default()));
         }
         // Use the *full* surface (TOML + bundled `.almd`) so fns migrated through the Stdlib Unification arc still power the E002 suggestion. `module_functions` only sees TOML, so after `stdlib/string.almd` replaced the TOML the method-call try-snippet silently disappeared.
         let module_funcs = crate::stdlib::module_functions_current(module);
@@ -490,7 +490,7 @@ impl Checker {
                 format!("No type, variant constructor, or opaque alias named '{}' is in scope. Check the spelling or add the missing import.", name),
                 format!("call to {}()", name),
             ).with_code("E003"));
-            Ty::Named(sym(name), vec![])
+            Ty::Named(sym(name), Default::default())
         }
     }
 
@@ -550,7 +550,7 @@ impl Checker {
         } else {
             self.constrain(target_ty, arg_tys[0].clone(), format!("constructor {}()", name));
         }
-        Ty::Named(key, vec![])
+        Ty::Named(key, Default::default())
     }
     /// Resolve a concrete type to its declared type name.
     fn resolve_type_name(&self, ty: &Ty) -> Option<String> {

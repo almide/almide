@@ -40,7 +40,7 @@ fn norm_effect_fn(ty: &Ty) -> Ty {
     match mapped {
         Ty::Fn { params, ret, is_effect: true } => Ty::Fn {
             params,
-            ret: Box::new(Ty::Applied(TypeConstructorId::Result, vec![*ret, Ty::String])),
+            ret: Box::new(Ty::Applied(TypeConstructorId::Result, vec![*ret, Ty::String].into())),
             is_effect: false,
         },
         other => other,

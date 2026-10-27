@@ -34,7 +34,7 @@ impl BuiltinProtocol {
     /// The protocol definition registered under `name`.
     pub fn def(&self) -> ProtocolDef {
         let self_ty = Ty::TypeVar(sym("Self"));
-        let value_ty = Ty::Named(sym("Value"), vec![]);
+        let value_ty = Ty::Named(sym("Value"), Default::default());
         ProtocolDef {
             origin: None,
             name: self.name.into(),

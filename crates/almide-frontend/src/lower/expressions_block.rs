@@ -166,7 +166,7 @@ fn lower_pipe(ctx: &mut LowerCtx, left: &ast::Expr, right: &ast::Expr, ty: Ty, s
             let inner_ty = if is_wrapper {
                 inner_checked_ty
             } else {
-                Ty::Applied(TypeConstructorId::Option, vec![ty.clone()])
+                Ty::Applied(TypeConstructorId::Option, vec![ty.clone()].into())
             };
             let piped = lower_pipe(ctx, left, inner, inner_ty, span.clone());
             let ir_fallback = lower_expr(ctx, fallback);

@@ -750,7 +750,7 @@ impl TypeEnv {
         );
         let declared: Vec<Sym> = index.matching(fields).map(|shape| shape.name).collect();
         !declared.is_empty()
-            && declared.into_iter().all(|name| self.is_ord_inner(&Ty::Named(name, vec![]), seen))
+            && declared.into_iter().all(|name| self.is_ord_inner(&Ty::Named(name, Default::default()), seen))
             && fields.iter().all(|(_, field)| self.is_ord_inner(field, seen))
     }
 

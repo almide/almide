@@ -415,7 +415,7 @@ fn lower_call_json_convenience(
             let encoded = ctx.mk(IrExprKind::Call {
                 target: CallTarget::Named { name: encode_fn },
                 args: vec![ir_arg], type_args: vec![],
-            }, Ty::Named("Value".into(), vec![]), span);
+            }, Ty::Named("Value".into(), Default::default()), span);
             return Some(ctx.mk(IrExprKind::Call {
                 target: CallTarget::Module { module: sym(module), func: sym("stringify"), def_id: ctx.def_map.get(&sym(&format!("{}.stringify", module))).copied() },
                 args: vec![encoded], type_args: vec![],
@@ -431,8 +431,8 @@ fn lower_call_json_convenience(
         let parsed = ctx.mk(IrExprKind::Try { expr: Box::new(ctx.mk(IrExprKind::Call {
             target: CallTarget::Module { module: sym(module), func: sym("parse"), def_id: ctx.def_map.get(&sym(&format!("{}.parse", module))).copied() },
             args: vec![ir_arg], type_args: vec![],
-        }, Ty::result(Ty::Named("Value".into(), vec![]), Ty::String), span)) },
-        Ty::Named("Value".into(), vec![]), span);
+        }, Ty::result(Ty::Named("Value".into(), Default::default()), Ty::String), span)) },
+        Ty::Named("Value".into(), Default::default()), span);
         let decode_fn = sym(&format!("{}.decode", type_name));
         return Some(ctx.mk(IrExprKind::Call {
             target: CallTarget::Named { name: decode_fn },

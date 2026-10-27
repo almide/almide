@@ -759,7 +759,7 @@ mod tests {
         // A heap parameter beside the scalar loop-local (spectralnorm's row
         // kernel: `v: List[Float]` read, `var s: Float` written) is admitted:
         // a scalar binding holds no storage the parameter could share.
-        let list_ty = Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Float]);
+        let list_ty = Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Float].into());
         let heap_param = |f: &IrFunction, name: &str| {
             let mut f = f.clone();
             f.name = sym(name);
