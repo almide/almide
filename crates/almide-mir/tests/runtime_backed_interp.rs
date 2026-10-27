@@ -37,12 +37,20 @@ fn an_unwrapped_http_call_interpolates_inside_a_list_and_a_tuple_literal() {
     assert_eq!(calls(&ops, "compound.to_string"), 0, "walled through compound:\n{ops:#?}");
 }
 
-const REQ: &str = "  let req = http.new_request(\"POST\", \"/x\", \"b\", [(\"Authorization\", \"Bearer T\")])\n  let path = value.root() |> value.key(\"user\")\n";
+const REQ: &str = "  let req = http.new_request(\"POST\", \"/x\", \"b\", [(\"Authorization\", \"Bearer T\")])\n";
+
+/// A `value.Path` beside the request. It replaced the runtime-backed
+/// `JsonPath` here when that type was removed, but it is an ordinary
+/// `mod type` over a list with no declared repr, so it is no runtime-backed
+/// value: the declared-repr cases above leave it out (they passed with it only
+/// while the signature table mis-read `value.root()` as the builtin `Path`,
+/// a `String`). The variant case below still uses it as a payload.
+const PATH: &str = "  let path = value.root() |> value.key(\"user\")\n";
 
 #[test]
 fn a_tuple_of_runtime_backed_values_interpolates_through_the_declared_reprs() {
     let src = format!(
-        "import http\nimport json\n\neffect fn main() -> Unit = {{\n{REQ}  println(\"${{(req, path, 1)}}\")\n}}\n"
+        "import http\nimport json\n\neffect fn main() -> Unit = {{\n{REQ}  println(\"${{(req, 1)}}\")\n}}\n"
     );
     let ops = main_ops(&src);
     assert_eq!(calls(&ops, "http.__http_request_repr"), 1, "{ops:#?}");
@@ -52,7 +60,7 @@ fn a_tuple_of_runtime_backed_values_interpolates_through_the_declared_reprs() {
 #[test]
 fn a_list_literal_of_runtime_backed_interpolations_lowers() {
     let src = format!(
-        "import http\nimport json\n\neffect fn main() -> Unit = {{\n{REQ}  let lines = [\"${{req}}\", \"${{(req, path, 1)}}\", \"${{some(path)}}\"]\n  println(lines |> list.join(\"\\n\"))\n}}\n"
+        "import http\nimport json\n\neffect fn main() -> Unit = {{\n{REQ}  let lines = [\"${{req}}\", \"${{(req, 1)}}\"]\n  println(lines |> list.join(\"\\n\"))\n}}\n"
     );
     let ops = main_ops(&src);
     assert_eq!(calls(&ops, "http.__http_request_repr"), 2, "{ops:#?}");
@@ -103,7 +111,7 @@ fn a_user_variant_with_a_runtime_backed_payload_is_not_displayed_through_its_car
         ("type Tag[T] = | Tagged(T, HttpRequest)", "let v: Tag[Int] = Tagged(1, req)", "Tag"),
     ];
     for (decl, bind, ty) in cases {
-        let src = format!("import http\nimport json\n\n{decl}\n\neffect fn main() -> Unit = {{\n{REQ}  {bind}\n  println(\"${{v}}\")\n}}\n");
+        let src = format!("import http\nimport json\n\n{decl}\n\neffect fn main() -> Unit = {{\n{REQ}{PATH}  {bind}\n  println(\"${{v}}\")\n}}\n");
         let shown = main_ops_if_lowered(&src).map_or(0, |ops| synthesized_reprs(&ops, ty));
         assert_eq!(shown, 0, "`{decl}` was displayed through its structural repr (the carrier):\n{src}");
     }
