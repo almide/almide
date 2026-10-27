@@ -368,3 +368,39 @@ fn a_room_test_without_its_lower_bound_is_refused() {
     let body = BYTE.replace("local.get 1 i64.const 0 i64.ge_s", "i64.const 7 i64.const 0 i64.ge_s");
     assert!(bounds(&body, "c0 a0", "1:13 1:21").is_err());
 }
+
+#[test]
+fn a_flag_judged_store_against_a_hoisted_count_is_accepted() -> Result<(), String> {
+    // The loop's first store judges the list behind a flag (`if` with no
+    // abort), so the access reads the list's variable with no single
+    // dominating write; the hoisted count read it in the preheader.
+    let body = "local.get 0 i32.load offset=4 i64.extend_i32_u i64.const 8 i64.div_u local.set 4
+      (block (loop
+        local.get 1 local.get 4 i64.ge_u (if (then i32.const 0 drop unreachable))
+        local.get 2 i32.wrap_i64 i32.eqz (if (then local.get 0 call $alloc local.set 0))
+        local.get 0 local.set 3
+        local.get 3 local.get 1 i32.wrap_i64 i32.const 8 i32.mul i32.add i64.const 5 i64.store offset=12
+        local.get 1 i64.const 1 i64.add local.set 1
+        br 0))";
+    let r = bounds_judged(body, "c0 w0", "1:12 1:33", &[21])?;
+    assert_eq!(r.bounds_operands, 1);
+    assert!(bounds(body, "c0 w0", "1:12 1:33").unwrap_err().contains("changes the list"));
+    Ok(())
+}
+
+#[test]
+fn an_index_the_model_does_not_open_compares_by_its_instruction() -> Result<(), String> {
+    let body = "local.get 1 i64.const 3 i64.rem_s local.tee 2
+      local.get 0 i32.load offset=4 i32.const 8 i32.div_u i64.extend_i32_u
+      i64.ge_u (if (then i32.const 0 drop unreachable))
+      local.get 0 local.get 2 i32.wrap_i64 i32.const 8 i32.mul i32.add i64.load offset=12 drop";
+    let r = bounds(body, "c0 a0", "1:11 1:21")?;
+    assert_eq!(r.bounds_operands, 1);
+    // The same remainder computed again is another evaluation.
+    let again = body.replace(
+        "local.get 0 local.get 2 i32.wrap_i64",
+        "local.get 0 local.get 1 i64.const 3 i64.rem_s i32.wrap_i64",
+    );
+    assert!(bounds(&again, "c0 a0", "1:11 1:23").is_err());
+    Ok(())
+}
