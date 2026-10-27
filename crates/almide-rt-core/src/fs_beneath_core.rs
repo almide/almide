@@ -27,9 +27,11 @@
 // `<root>/<rel>` answers.
 //
 // On a platform without the descriptor calls (fs_beneath_sys.rs: 64-bit
-// Linux and macOS have them) the same functions check every prefix for a
-// symlink and then make the plain call — the pre-#4084 check, which a
-// concurrent rewrite can race.
+// Linux and macOS have them) the same functions refuse every call below the
+// root ([`fs_beneath_unsupported`]) instead of checking every prefix and then
+// making the plain call — the pre-#4084 check, which a concurrent rewrite
+// could race. Fail-closed: a program there gets an err, never an unbounded
+// path.
 //
 // Under `[permissions] fs` (fs_scoped_core.rs, included below) the root
 // itself is opened beneath the granted directory it falls under, so a rooted
@@ -45,6 +47,36 @@ include!("fs_scoped_core.rs");
 /// side completes it with the path the program wrote (`fs: path escapes
 /// root: <path>`).
 pub const FS_BENEATH_ESCAPE: &str = "fs: path escapes root";
+
+/// Whether this build has the descriptor calls a rooted or scoped fs call
+/// is made with (fs_beneath_sys.rs): 64-bit Linux and macOS. Where it is
+/// false those calls are refused, and the toolchain refuses
+/// `[permissions] fs` before a build ([`fs_scope_platform_check`]).
+pub const FS_BENEATH_SUPPORTED: bool = cfg!(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"));
+
+/// The refusal's text where [`FS_BENEATH_SUPPORTED`] is false.
+pub const FS_BENEATH_UNSUPPORTED: &str = "fs: a rooted or [permissions] fs call needs descriptor-relative opens (64-bit Linux, macOS), which this platform's build does not have, so it is refused rather than checked by path";
+
+/// The refusal a rooted or scoped call answers where the platform has no
+/// descriptor calls: `Unsupported`, with [`FS_BENEATH_UNSUPPORTED`].
+pub fn fs_beneath_unsupported() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Unsupported, FS_BENEATH_UNSUPPORTED)
+}
+
+/// The toolchain's build-time half (#4022 on such a platform): `Err` with
+/// the reason when `[permissions] fs` is set and this build has no
+/// descriptor calls, so the scope is refused before anything runs.
+pub fn fs_scope_platform_check(scoped: bool) -> Result<(), String> {
+    if scoped && !FS_BENEATH_SUPPORTED {
+        return Err(format!(
+            "`[permissions] fs` cannot be enforced on this platform ({}-bit {}): {}. Remove the key to run unbounded, or build on 64-bit Linux or macOS.",
+            usize::BITS,
+            std::env::consts::OS,
+            FS_BENEATH_UNSUPPORTED,
+        ));
+    }
+    Ok(())
+}
 
 /// Why a rooted call failed.
 #[derive(Debug)]
@@ -251,53 +283,33 @@ mod fs_beneath_imp {
     }
 }
 
-/// The path-based fallback: every prefix checked for a symlink, then the
-/// plain call (racy — see the file header).
+/// Elsewhere: no descriptor calls, so every call below the root is refused
+/// (fail-closed; see the file header).
 #[cfg(not(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64")))]
 mod fs_beneath_imp {
     type FsBeneathError = super::FsBeneathError;
 
-    fn checked(dir: &str, segs: &[&str]) -> Result<std::path::PathBuf, FsBeneathError> {
-        let mut p = std::path::PathBuf::from(dir);
-        for seg in segs {
-            p.push(seg);
-            if std::fs::symlink_metadata(&p).is_ok_and(|m| m.file_type().is_symlink()) {
-                return Err(FsBeneathError::Escape);
-            }
-        }
-        Ok(p)
+    fn refused<T>() -> Result<T, FsBeneathError> {
+        Err(FsBeneathError::Io(super::fs_beneath_unsupported()))
     }
 
-    fn all<'a>(parents: &[&'a str], last: &'a str) -> Vec<&'a str> {
-        parents.iter().copied().chain(std::iter::once(last)).collect()
+    pub fn read(_dir: &str, _parents: &[&str], _last: &str, _walk_only: bool, _hook: &mut dyn FnMut(usize)) -> Result<Vec<u8>, FsBeneathError> {
+        refused()
     }
 
-    pub fn read(dir: &str, parents: &[&str], last: &str, _walk_only: bool, hook: &mut dyn FnMut(usize)) -> Result<Vec<u8>, FsBeneathError> {
-        let p = checked(dir, &all(parents, last))?;
-        hook(parents.len());
-        super::fs_read_bounded_path(&p, super::FS_READ_MAX_BYTES).map_err(FsBeneathError::Io)
+    pub fn write(_dir: &str, _parents: &[&str], _last: &str, _data: &[u8]) -> Result<(), FsBeneathError> {
+        refused()
     }
 
-    pub fn write(dir: &str, parents: &[&str], last: &str, data: &[u8]) -> Result<(), FsBeneathError> {
-        std::fs::write(checked(dir, &all(parents, last))?, data).map_err(FsBeneathError::Io)
+    pub fn list(_dir: &str, _segs: &[&str]) -> Result<Vec<String>, FsBeneathError> {
+        refused()
     }
 
-    pub fn list(dir: &str, segs: &[&str]) -> Result<Vec<String>, FsBeneathError> {
-        let p = checked(dir, segs)?;
-        let mut names = Vec::new();
-        for e in std::fs::read_dir(p).map_err(FsBeneathError::Io)? {
-            names.push(e.map_err(FsBeneathError::Io)?.file_name().to_string_lossy().to_string());
-        }
-        Ok(names)
+    pub fn exists(_dir: &str, _parents: &[&str], _last: &str) -> Result<bool, FsBeneathError> {
+        refused()
     }
 
-    pub fn exists(dir: &str, parents: &[&str], last: &str) -> Result<bool, FsBeneathError> {
-        Ok(checked(dir, &all(parents, last))?.exists())
-    }
-
-    pub fn remove(dir: &str, parents: &[&str], last: &str) -> Result<(), FsBeneathError> {
-        let p = checked(dir, &all(parents, last))?;
-        let r = if p.is_dir() { std::fs::remove_dir(&p) } else { std::fs::remove_file(&p) };
-        r.map_err(FsBeneathError::Io)
+    pub fn remove(_dir: &str, _parents: &[&str], _last: &str) -> Result<(), FsBeneathError> {
+        refused()
     }
 }

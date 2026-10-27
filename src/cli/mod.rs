@@ -287,6 +287,10 @@ pub fn enforce_project_permissions(ir: &almide::ir::IrProgram, proj: &crate::pro
     // are run-time values, so the bound is enforced where they are used: the
     // embedded wasm host checks every fs op and preopens only these roots, and
     // the native build embeds them in `main` (`build::inject_fs_scope`).
+    // A platform whose build has no descriptor-relative fs calls cannot hold
+    // the bound against a concurrent rewrite: the key is refused here, before
+    // anything is built or run, rather than enforced by a racy path check.
+    almide_rt_core::fs_beneath_core::fs_scope_platform_check(proj.fs_allow.is_some())?;
     almide_wasm_run::set_fs_scope(proj.fs_allow.clone());
     // An absent `allow` is unchecked; an explicit `allow = []` allows no
     // capability at all (#4101).
