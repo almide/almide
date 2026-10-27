@@ -63,7 +63,7 @@ pub const BUDGETS: &[Budget] = &[
     },
     Budget {
         name: "type_size",
-        default: 4096,
+        default: 256,
         unit: "nodes",
         diagnostic: "E111",
         doc: "nodes of one inferred type, counted as the checker builds an expression's type and as it resolves an inference variable — `let t1 = (t0, t0)` doubled 22 times was 3.7 GB (#4114)",
@@ -98,7 +98,7 @@ pub const BUDGETS: &[Budget] = &[
     },
     Budget {
         name: "exhaustiveness_steps",
-        default: 100_000,
+        default: 400,
         unit: "steps",
         diagnostic: "E113",
         doc: "recursive steps of the exhaustiveness and reachability check of one `match` (pattern-matrix usefulness is exponential in the worst case)",

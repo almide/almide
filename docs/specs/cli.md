@@ -432,12 +432,12 @@ severity はフィクスチャ全件で実際の level と照合される(`tests
 | Budget | Default | Counts | Exceeding it |
 |---|---|---|---|
 | `nesting` | 500 levels | syntactic nesting of one expression or pattern, counted by the parser as it descends | parse error `expression nesting too deep (max N)` |
-| `type_size` | 4096 nodes | nodes of one inferred type, counted as the checker builds an expression's type and as it resolves an inference variable — `let t1 = (t0, t0)` doubled 22 times was 3.7 GB (#4114) | E111 |
+| `type_size` | 256 nodes | nodes of one inferred type, counted as the checker builds an expression's type and as it resolves an inference variable — `let t1 = (t0, t0)` doubled 22 times was 3.7 GB (#4114) | E111 |
 | `generic_instances` | 1000 instances | specialized instances of protocol-bounded generic fns one program monomorphizes, each instance's type arguments also held to `type_size`; polymorphic recursion would add a larger one per round without end | E112 |
 | `manifest_bytes` | 1048576 bytes | size of one `almide.toml` or `almide.lock` read, the project's own or a dependency's, checked before and while it is read (#4194) | error `<file> is larger than N bytes` |
 | `dependency_count` | 1000 packages | distinct packages one dependency resolution visits, the transitive closure included, counted before each is fetched | error `too many dependencies (N, max M)` |
 | `dependency_depth` | 64 levels | length of the chain of dependencies from the root package to the one being resolved, counted before it is fetched | error `dependency chain too deep (N, max M)` |
-| `exhaustiveness_steps` | 100000 steps | recursive steps of the exhaustiveness and reachability check of one `match` (pattern-matrix usefulness is exponential in the worst case) | E113 |
+| `exhaustiveness_steps` | 400 steps | recursive steps of the exhaustiveness and reachability check of one `match` (pattern-matrix usefulness is exponential in the worst case) | E113 |
 <!-- almide budgets --md: end -->
 
 #### `--profile critical`
