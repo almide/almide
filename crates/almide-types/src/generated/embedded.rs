@@ -16315,7 +16315,10 @@ pub const SRC_LIST_FOLD_FLOAT: &str = r#"
 
 
 
-fn __ftotal_ff(b: Int) -> Int = {
+
+
+fn __ftotal_ff(b0: Int) -> Int = {
+  let b = if prim.band(b0, 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000 then 0x7FF8000000000000 else b0
   let s = prim.bshr(b, 63)
   let m = prim.bshr_u(s, 1)
   prim.bxor(b, m)
@@ -18714,7 +18717,10 @@ pub const SRC_LIST_SORT_FLOAT: &str = r#"
 
 
 
-fn __ftotal_sf(b: Int) -> Int = {
+
+
+fn __ftotal_sf(b0: Int) -> Int = {
+  let b = if prim.band(b0, 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000 then 0x7FF8000000000000 else b0
   let s = prim.bshr(b, 63)
   let m = prim.bshr_u(s, 1)
   prim.bxor(b, m)
@@ -18997,7 +19003,10 @@ pub const SRC_LIST_SORTBY_FLOAT: &str = r#"
 
 
 
-fn __ftotal_sb(b: Int) -> Int = {
+
+
+fn __ftotal_sb(b0: Int) -> Int = {
+  let b = if prim.band(b0, 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000 then 0x7FF8000000000000 else b0
   let s = prim.bshr(b, 63)
   let m = prim.bshr_u(s, 1)
   prim.bxor(b, m)
