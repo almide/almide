@@ -1,5 +1,5 @@
-// E100 (#4043): a Region write in a file with no `import ffi`, checked on the
-// wasm route. The write is bounds-checked (ADR-0031: a 4096-byte write into a
+// #4043: a Region write in a file with no `import ffi` (E003: `ffi` is never
+// auto-imported), checked on the wasm route. The write is bounds-checked (ADR-0031: a 4096-byte write into a
 // 4-byte region is an err), but the import is still the opt-in.
 effect fn main() -> Unit = {
   let small = ffi.alloc(4)!

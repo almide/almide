@@ -1,4 +1,5 @@
-// E100 (#4043): a Region read in a file with no `import ffi`. The read is
+// #4043: a Region read in a file with no `import ffi`: `ffi` is never
+// auto-imported, so the module is unresolved (E003) and its hint is the import. The read is
 // bounds-checked (ADR-0031), but the import is still the one line that marks
 // a file as reaching memory foreign code can also reach.
 effect fn main() -> Unit = {

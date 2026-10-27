@@ -1,0 +1,4 @@
+// The fix: the opaque foreign token is spelled `Handle`.
+fn keep(h: Handle) -> Int = 0
+
+fn main() -> Unit = println("ok")

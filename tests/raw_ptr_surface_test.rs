@@ -116,7 +116,13 @@ fn the_floor_that_mints_from_an_int_is_not_user_nameable() {
 /// `import ffi` and the critical profile see it.
 #[test]
 fn every_stdlib_fn_holding_a_region_is_memory_unsafe() {
-    let touching: Vec<_> = user_sigs().into_iter().filter(|(_, _, s)| sig_holds(s, &is_region)).collect();
+    // A type's convention method (`Region.repr`) is reached through a value of
+    // the type, which a file holds only after an `ffi` call E100 already
+    // gated; the rule is about the module's functions.
+    let touching: Vec<_> = user_sigs()
+        .into_iter()
+        .filter(|(_, f, s)| !f.contains('.') && sig_holds(s, &is_region))
+        .collect();
     assert!(touching.iter().any(|(m, f, _)| *m == "ffi" && *f == "read"), "no Region fn found: {touching:?}");
     let unmarked: Vec<String> = touching
         .iter()
