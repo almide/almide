@@ -121,6 +121,8 @@ fn rewrite_to_loop(
     // Rewrite the body expression
     let old_body = std::mem::take(&mut func.body);
     let is_effect = func.is_effect;
+    // #4249: one per-iteration subject binding per match on a param.
+    let subjects = std::cell::RefCell::new(subject_slots(&func.params, &old_body, var_table));
     let rewritten = rewrite_tail_expr(
         old_body,
         &TailFrame {
@@ -132,6 +134,7 @@ fn rewrite_to_loop(
             dec_params: &dec_params,
             owned_params: &owned_params,
             borrowed_params: &kept_borrow_params,
+            subjects: &subjects,
         },
     );
     tco_owned_params.extend(owned_params.iter().copied());
@@ -411,6 +414,33 @@ struct TailFrame<'a> {
     /// (currently: `Bytes` params) — a tail-call arg there keeps its
     /// `Borrow` wrapper instead of being stripped to the owned form.
     borrowed_params: &'a HashSet<usize>,
+    /// The per-iteration subject bindings a moved match takes (#4249),
+    /// allocated up front per param, one per match on it.
+    subjects: &'a std::cell::RefCell<HashMap<VarId, Vec<VarId>>>,
+}
+
+/// One unbound `let` var per `match p { .. }` on a param `p` in `body` — the
+/// moved subject's per-iteration binding ([`rewrite_tail_expr`]).
+fn subject_slots(params: &[IrParam], body: &IrExpr, var_table: &mut VarTable) -> HashMap<VarId, Vec<VarId>> {
+    struct Count<'a> { params: &'a [IrParam], n: HashMap<VarId, usize> }
+    impl almide_ir::visit::IrVisitor for Count<'_> {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            if let IrExprKind::Match { subject, .. } = &e.kind
+                && let IrExprKind::Var { id } = &subject.kind
+                && self.params.iter().any(|p| p.var == *id)
+            {
+                *self.n.entry(*id).or_insert(0) += 1;
+            }
+            almide_ir::visit::walk_expr(self, e);
+        }
+    }
+    let mut c = Count { params, n: HashMap::new() };
+    almide_ir::visit::IrVisitor::visit_expr(&mut c, body);
+    c.n.into_iter().map(|(p, k)| {
+        let ty = params.iter().find(|q| q.var == p).map(|q| q.ty.clone()).unwrap_or(Ty::Unknown);
+        let vars = (0..k).map(|_| var_table.alloc("__tco_subject".into(), ty.clone(), Mutability::Let, None)).collect();
+        (p, vars)
+    }).collect()
 }
 
 /// Rewrite an expression in tail position:
@@ -494,7 +524,23 @@ fn rewrite_tail_expr(expr: IrExpr, f: &TailFrame<'_>) -> IrExpr {
         // Match: recurse into arm bodies. Subject and guards are non-terminal
         // regions — owned-param reads there clone (see the If arm).
         IrExprKind::Match { subject, arms } => {
-            let new_subject = wrap_owned_reads(*subject, owned_params);
+            // #4249: a loop param matched whole and never read again in the
+            // arms MOVES into the match — its arms rebind it (the self call's
+            // reassignment) or leave the loop. Cloning it there copied the
+            // whole value every iteration: O(n²) over a recursive walk, and a
+            // deep clone per step that overflowed the stack on native.
+            let moved_subject = match &subject.kind {
+                IrExprKind::Var { id } if owned_params.contains(id) => {
+                    let tracked: HashSet<VarId> = std::iter::once(*id).collect();
+                    let mut reads: HashMap<VarId, OwnedReadCensus> = HashMap::new();
+                    for arm in &arms {
+                        census_owned_reads(&arm.body, &tracked, false, &mut reads);
+                        if let Some(g) = &arm.guard { census_owned_reads(g, &tracked, false, &mut reads); }
+                    }
+                    !reads.contains_key(id)
+                }
+                _ => false,
+            };
             let new_arms = arms.into_iter().map(|arm| {
                 IrMatchArm {
                     pattern: arm.pattern,
@@ -502,8 +548,38 @@ fn rewrite_tail_expr(expr: IrExpr, f: &TailFrame<'_>) -> IrExpr {
                     body: rewrite_tail_expr(arm.body, f),
                 }
             }).collect();
+            if !moved_subject {
+                let new_subject = wrap_owned_reads(*subject, owned_params);
+                return IrExpr {
+                    kind: IrExprKind::Match { subject: Box::new(new_subject), arms: new_arms },
+                    ty: Ty::Unit,
+                    span: expr.span, def_id: None,
+                };
+            }
+            // The moved value is bound to a `let` of this iteration first, so
+            // what the arms bind out of it is this iteration's own (fresh to
+            // the clone pass): their last reads move, not copy — `c.next` of
+            // `Cons(c) => go(c.next, ..)` hands the tail over in O(1).
+            let subj_ty = subject.ty.clone();
+            let IrExprKind::Var { id: param } = &subject.kind else { unreachable!("a moved subject is a param") };
+            let param = *param;
+            let Some(subj) = f.subjects.borrow_mut().get_mut(&param).and_then(Vec::pop) else {
+                unreachable!("subject_slots counted every match on a param")
+            };
+            let bind = IrStmt {
+                kind: IrStmtKind::Bind { var: subj, mutability: Mutability::Let, ty: subj_ty.clone(), value: *subject },
+                span: None,
+            };
+            let matched = IrExpr {
+                kind: IrExprKind::Match {
+                    subject: Box::new(IrExpr { kind: IrExprKind::Var { id: subj }, ty: subj_ty, span: None, def_id: None }),
+                    arms: new_arms,
+                },
+                ty: Ty::Unit,
+                span: expr.span, def_id: None,
+            };
             IrExpr {
-                kind: IrExprKind::Match { subject: Box::new(new_subject), arms: new_arms },
+                kind: IrExprKind::Block { stmts: vec![bind], expr: Some(Box::new(matched)) },
                 ty: Ty::Unit,
                 span: expr.span, def_id: None,
             }
@@ -650,8 +726,14 @@ fn emit_tail_call_replacement(args: Vec<IrExpr>, f: &TailFrame<'_>) -> IrExpr {
 
     let (moved, moved_sources) = movable_accumulators(&args, params, &identity_carry, owned_params);
 
-    // Bind temporaries to argument expressions.
-    for (i, arg) in args.into_iter().enumerate() {
+    // Bind temporaries to argument expressions. A scalar argument that only
+    // reads and computes (`acc + n.v`) has no effect to order, so it binds
+    // FIRST: a heap argument after it is then the last read of the binder it
+    // projects (`n.next`), and moves instead of copying the rest of the value
+    // every iteration (#4249).
+    let mut args: Vec<(usize, Option<IrExpr>)> = args.into_iter().enumerate().collect();
+    args.sort_by_key(|(_, a)| !a.as_ref().is_some_and(|a| almide_ir::top_let_storage::clone_free(&a.ty) && reads_only(a)));
+    for (i, arg) in args {
         let Some(arg) = arg else { continue };
         let (tmp_var, tmp_ty) = &temps[i];
         let value = move_either_way_sources(wrap_owned_reads_except(arg, owned_params, &moved), &moved_sources);
@@ -787,3 +869,26 @@ fn emit_base_case(expr: IrExpr, result_var: VarId, dec_params: &[VarId], owned_p
 // compile time, never a silent wrong value.
 
 include!("pass_tco_owned_reads.rs");
+
+/// An expression with no effect and no abort: variable and field reads,
+/// literals, and the arithmetic, comparisons and logic that cannot trap (Int
+/// `+ - *` wrap; `/` and `%` can abort, a call can do anything). Its value
+/// does not depend on when it is evaluated among other such reads.
+fn reads_only(e: &IrExpr) -> bool {
+    match &e.kind {
+        IrExprKind::Var { .. } | IrExprKind::LitInt { .. } | IrExprKind::LitFloat { .. }
+        | IrExprKind::LitBool { .. } | IrExprKind::Unit => true,
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => reads_only(object),
+        IrExprKind::Deref { expr } | IrExprKind::Borrow { expr, mutable: false, .. } | IrExprKind::Clone { expr } => reads_only(expr),
+        IrExprKind::UnOp { operand, .. } => reads_only(operand),
+        IrExprKind::BinOp { op, left, right } => !matches!(
+            op,
+            BinOp::DivInt | BinOp::ModInt | BinOp::DivFloat | BinOp::ModFloat | BinOp::PowInt | BinOp::PowFloat
+        ) && matches!(
+            op,
+            BinOp::AddInt | BinOp::SubInt | BinOp::MulInt | BinOp::AddFloat | BinOp::SubFloat | BinOp::MulFloat
+                | BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte | BinOp::And | BinOp::Or
+        ) && reads_only(left) && reads_only(right),
+        _ => false,
+    }
+}
