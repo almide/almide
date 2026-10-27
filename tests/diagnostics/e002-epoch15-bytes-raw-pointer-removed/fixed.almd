@@ -1,6 +1,8 @@
-// The bounded copy: `bytes.slice` clamps to the buffer.
-fn main() -> Unit = {
+// The fix: a Region carries its own length, and a read past it is an err.
+import ffi
+
+effect fn main() -> Unit = {
   let b = bytes.from_string("abc")
-  let c = bytes.slice(b, 0, 1000000)
+  let c = ffi.read(ffi.region(b), 0, 3)!
   println(int.to_string(bytes.len(c)))
 }

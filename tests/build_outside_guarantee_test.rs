@@ -1,8 +1,10 @@
 //! `almide build` names, on its `Built` line, every place where the program
 //! leaves the memory-safety guarantee (#4008): an `@extern` fn, whose body is
-//! foreign code, and a raw pointer, the one value the `ffi` functions and the
-//! deprecated `bytes` raw-pointer spellings take or give. A build that stays
-//! inside the guarantee prints the line it always printed. The same set is
+//! foreign code, a `@region(len = …)` clause, the binding's unchecked word for
+//! a foreign buffer's length, and a `Handle`, the opaque token only foreign
+//! code reads through (ADR-0031). A `Region` access through `ffi.read` /
+//! `ffi.write` is bounds-checked, so it is inside the guarantee. A build that
+//! stays inside it prints the line it always printed. The same set is
 //! what `--profile critical` refuses (E100); this makes it visible in every
 //! profile, including in a module the entry file imports.
 use std::path::Path;
@@ -28,7 +30,7 @@ fn write(dir: &Path, name: &str, src: &str) {
     std::fs::write(p, src).unwrap();
 }
 
-const FFI: &str = "import ffi\n\neffect fn main() -> Unit = {\n  let b = bytes.from_list([1, 2, 3])\n  let c = ffi.read(ffi.address(b), 3)\n  println(int.to_string(bytes.len(c)))\n}\n";
+const FFI: &str = "import ffi\n\neffect fn main() -> Unit = {\n  let b = bytes.from_list([1, 2, 3])\n  let c = ffi.read(ffi.region(b), 0, 3)!\n  println(int.to_string(bytes.len(c)))\n}\n";
 
 #[test]
 fn a_program_inside_the_guarantee_prints_the_plain_line() {
@@ -40,15 +42,29 @@ fn a_program_inside_the_guarantee_prints_the_plain_line() {
     }
 }
 
+/// ADR-0031: a Region read is checked against the length its mint knew, so a
+/// program that only reads and writes Regions stays inside the guarantee.
 #[test]
-fn a_raw_pointer_is_named_with_its_fn_and_line_on_both_targets() {
+fn a_bounds_checked_region_access_is_inside_the_guarantee_on_both_targets() {
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), "main.almd", FFI);
     for wasm in [false, true] {
         let line = built_line(dir.path(), "main.almd", wasm);
-        assert!(line.contains(NOTE), "{line}");
-        assert!(line.contains("a raw pointer in fn `main` (main.almd:5)"), "{line}");
+        assert!(!line.contains(NOTE), "{line}");
     }
+}
+
+#[test]
+fn a_region_length_clause_and_a_handle_are_named() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        "main.almd",
+        "import ffi\n\n@extern(c, \"c\", \"malloc\")\n@region(len = n, release = \"free\")\nfn c_malloc(n: UInt64) -> Region\n\n@extern(c, \"c\", \"tmpfile\")\nfn c_tmpfile() -> Handle\n\nfn keep(h: Handle) -> Handle = h\n\neffect fn main() -> Unit = {\n  let r = c_malloc(8)\n  let _h = keep(c_tmpfile())\n  println(int.to_string(ffi.len(r)))\n}\n",
+    );
+    let line = built_line(dir.path(), "main.almd", false);
+    assert!(line.contains("@region length of `c_malloc` (main.almd:3)"), "{line}");
+    assert!(line.contains("a Handle in fn `keep` (main.almd:11)"), "{line}");
 }
 
 #[test]
@@ -64,19 +80,19 @@ fn an_extern_fn_is_named() {
 }
 
 #[test]
-fn a_raw_pointer_in_an_imported_module_is_named_with_that_module() {
+fn a_handle_in_an_imported_module_is_named_with_that_module() {
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), "almide.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\n");
     write(
         dir.path(),
         "src/leak.almd",
-        "import ffi\neffect fn read(b: Bytes, n: Int) -> Bytes = ffi.read(ffi.address(b), n)\n",
+        "@extern(c, \"c\", \"tmpfile\")\nfn tmp() -> Handle\nfn open() -> Handle = tmp()\n",
     );
     write(
         dir.path(),
         "src/main.almd",
-        "import self.leak\neffect fn main() -> Unit = {\n  let c = leak.read(bytes.from_list([1]), 1)!\n  println(int.to_string(bytes.len(c)))\n}\n",
+        "import self.leak\neffect fn main() -> Unit = {\n  let _h = leak.open()\n  println(\"ok\")\n}\n",
     );
     let line = built_line(dir.path(), "src/main.almd", false);
-    assert!(line.contains("a raw pointer in fn `read` (src/leak.almd:2)"), "{line}");
+    assert!(line.contains("a Handle in fn `open` (src/leak.almd:3)"), "{line}");
 }

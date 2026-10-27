@@ -1,4 +1,4 @@
 expects_code = "E100"
-expects_error = "`bytes.copy_to_ptr` is outside the memory-safety guarantee and needs `import ffi` in this file"
-hint_substring = "write `ffi.write` in place of the deprecated `bytes.copy_to_ptr`"
+expects_error = "is outside the memory-safety guarantee and needs `import ffi` in this file"
+hint_substring = "add `import ffi` to this file"
 check_target = "wasm"
