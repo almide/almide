@@ -43,15 +43,9 @@ import os, re, sys
 # Each entry: runtime fn name -> why the surface and runtime may disagree.
 # Keep this list short and every entry justified by what the CHECKER needs.
 ALLOW = {
-    # `bytes.as_mut_ptr` hands out a raw pointer for FFI. The runtime needs
-    # `&mut Vec<u8>` only because `Vec::as_mut_ptr` is a `&mut self` method;
-    # the call itself does not write the buffer — the foreign code that later
-    # receives the pointer may. Declaring the surface `mut` would force every
-    # FFI caller into `var` for a write the call does not perform, and it
-    # would not make the foreign write visible to the checker either (the
-    # pointer escapes the call). The surface keeps `@mutating` instead, which
-    # is what the codegen passes read to keep the buffer's storage unique.
-    "almide_rt_bytes_as_mut_ptr": "raw-pointer escape: the call does not write; @mutating carries the uniqueness requirement",
+    # (empty since ADR-0031 removed `bytes.as_mut_ptr`, the one raw-pointer
+    # escape: a writable Region is a fresh `ffi.alloc` buffer, never a Bytes
+    # value the caller holds)
 }
 
 def strip_comments(src, style):
