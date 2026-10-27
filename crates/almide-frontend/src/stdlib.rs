@@ -16,6 +16,14 @@ pub use almide_lang::stdlib_info::{
 /// user-facing doc page is user-facing.
 const NOT_USER_IMPORTABLE: &[&str] = &["prim"];
 
+/// Whether a user file may name `module` at all (E085 refuses the rest).
+/// The raw-pointer surface gate (`tests/raw_ptr_surface_test.rs`) reads the
+/// user-callable stdlib through this, so the floor `prim` — which mints a
+/// `RawPtr` from an `Int` — is excluded by the same declaration E085 uses.
+pub fn is_user_nameable_module(module: &str) -> bool {
+    !NOT_USER_IMPORTABLE.contains(&module)
+}
+
 /// Whether "Add `import X`" is the right hint for an unresolved `X`.
 ///
 /// This used to be a hand-written list of twelve names, and it had drifted
