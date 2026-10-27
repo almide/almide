@@ -50,7 +50,7 @@ use crate::decode::{is_load, store_width, Body};
 /// bytes and the runtime share.
 const LEN_OFF: u64 = 4;
 const PAYLOAD: i64 = 12;
-const FUEL: u32 = 64;
+pub(crate) const FUEL: u32 = 64;
 
 /// A value as an expression over the function's reads.
 #[derive(Clone, Debug)]
@@ -105,7 +105,7 @@ fn cst(t: &T) -> Option<i64> {
 }
 
 /// The variables `t` was read through, outermost first, each with its read.
-fn chain(t: &T) -> Vec<(Src, usize)> {
+pub(crate) fn chain(t: &T) -> Vec<(Src, usize)> {
     let mut v = Vec::new();
     let mut c = t;
     loop {
@@ -176,7 +176,7 @@ fn load_name(op: &Op<'_>) -> (&'static str, u64, u64) {
 
 /// What a leaf reads.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Src {
+pub(crate) enum Src {
     Local(u32),
     Global(u32),
 }
@@ -228,6 +228,11 @@ impl<'b, 'a> Flow<'b, 'a> {
             }
         }
         Flow { b, close, parent, abort_arm, judges }
+    }
+
+    /// Inside an aborting `if` (module header).
+    pub(crate) fn in_abort_arm(&self, k: usize) -> bool {
+        self.abort_arm[k]
     }
 
     /// Every path from the entry to `q` passes `p` (`p < q`, structured
@@ -286,7 +291,7 @@ impl<'b, 'a> Flow<'b, 'a> {
         Some(k)
     }
 
-    fn arg(&self, p: usize, k: usize, fuel: u32) -> T {
+    pub(crate) fn arg(&self, p: usize, k: usize, fuel: u32) -> T {
         match self.b.args.get(p).and_then(|a| a.get(k)).copied().flatten() {
             Some(q) => self.term(q, fuel),
             None => T::Unknown,

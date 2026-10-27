@@ -54,6 +54,8 @@ use wasmparser::{BlockType, Operator as Op};
 
 mod decode;
 mod operands;
+mod rc;
+pub use rc::{check_rc, RcReport};
 use decode::{branch_target, is_load};
 pub use decode::{decode, store_width, Body};
 
@@ -103,6 +105,8 @@ pub struct Report {
     pub bounds_unlocated: usize,
     /// Located accesses whose guard's operands were held to them.
     pub bounds_operands: usize,
+    /// #4277, when the anchor file carries `rc` lines.
+    pub rc: Option<RcReport>,
 }
 
 struct Ctx<'b, 'a> {
@@ -662,10 +666,15 @@ pub fn bundle_witness(bundle: &[u8], property: &str) -> Result<String, String> {
     Ok(String::new())
 }
 
-/// The anchor file: `(alloc, init anchors, bounds anchors, judge sites)`.
-/// The `judges` line is optional (a file without it locates no judge, and
-/// an access a judge sits in front of is then refused).
-pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>), String> {
+/// #4277's lines: the rc_inc routine, the release routines, and per
+/// certified frame its position and live RC events.
+pub type RcLines = (Option<u32>, std::collections::HashSet<u32>, Vec<(usize, String)>);
+
+/// The anchor file: `(alloc, init anchors, bounds anchors, judge sites, rc
+/// lines)`. The `judges` line is optional (a file without it locates no
+/// judge, and an access a judge sits in front of is then refused); so are
+/// the `rcfns` / `rc` pair (measurement-gated, #4277).
+pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>, Option<RcLines>), String> {
     let mut lines = text.lines();
     if lines.next() != Some("almide-anchors 1") {
         return Err("anchors: not an `almide-anchors 1` file".into());
@@ -690,6 +699,29 @@ pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>), Strin
             .map_err(|_| "anchors: bad alloc index".to_string())?,
     };
     let (init, bounds) = (field("init")?, field("bounds")?);
+    let mut rest: Vec<&str> = lines.collect();
+    let rc_at = rest.iter().position(|l| l.starts_with("rcfns"));
+    let rc_lines = match rc_at {
+        None => None,
+        Some(i) => {
+            let fns: Vec<&str> = rest[i].split_whitespace().skip(1).collect();
+            let inc = fns.first().and_then(|t| t.parse().ok());
+            let decs = fns.iter().skip(1).filter_map(|t| t.parse().ok()).collect();
+            let frames = rest
+                .get(i + 1)
+                .and_then(|l| l.strip_prefix("rc"))
+                .unwrap_or("")
+                .split(';')
+                .filter_map(|g| {
+                    let (p, e) = g.trim().split_once('|')?;
+                    Some((p.parse().ok()?, e.to_string()))
+                })
+                .collect();
+            rest.truncate(i);
+            Some((inc, decs, frames))
+        }
+    };
+    let mut lines = rest.into_iter();
     let judges = match lines.next() {
         None => Vec::new(),
         Some(l) => {
@@ -708,14 +740,14 @@ pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>), Strin
             v
         }
     };
-    Ok((alloc, init, bounds, judges))
+    Ok((alloc, init, bounds, judges, rc_lines))
 }
 
 /// The whole check: the shipped bytes, the bundle's two witnesses and the
 /// anchor file (whose `alloc` is a function index, as a `call` names it).
 pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String> {
     let bodies = decode(wasm)?;
-    let (alloc, ia, ba, judges) = parse_anchors(anchors)?;
+    let (alloc, ia, ba, judges, rc_lines) = parse_anchors(anchors)?;
     let mut rep = Report::default();
     check_init(
         &bodies,
@@ -725,5 +757,10 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         &mut rep,
     )?;
     check_bounds(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &mut rep)?;
+    if let Some((inc, decs, frames)) = rc_lines {
+        let mut r = RcReport::default();
+        check_rc(&bodies, inc, &decs, &frames, &mut r)?;
+        rep.rc = Some(r);
+    }
     Ok(rep)
 }

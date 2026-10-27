@@ -52,6 +52,7 @@ pub(crate) fn mark_pass(pass: usize) {
     crate::witness::modes::begin_pass(pass);
     crate::witness::bounds::begin_pass(pass);
     crate::witness::init::begin_pass(pass);
+    crate::witness::rc::begin_pass(pass);
     push(PASS_MARK, pass.to_string());
 }
 

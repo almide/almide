@@ -82,12 +82,18 @@ fn records_inner(
     let init = super::take_init();
     let bounds_anchors = super::bounds::take_anchors();
     let judge_anchors = super::bounds::take_judges();
+    let (rc_frames, rc_releases) = super::rc::take(pass);
     let init_anchors = super::init::take_anchors();
     let seals = super::anchor::take();
     let decls = super::decls::take_for(emitted).ok_or("no declaration table for the shipped module")?;
 
     let mut records = Vec::new();
     let mut uncertified = Vec::new();
+    let certified_names: std::collections::HashSet<String> = frames
+        .iter()
+        .filter(|(_, c)| !c.starts_with('!'))
+        .map(|(n, _)| n.clone())
+        .collect();
     for (name, cert) in frames {
         match cert.strip_prefix(super::DECLINE_PREFIX) {
             Some(reason) => uncertified.push((name, reason.trim().to_string())),
@@ -118,7 +124,7 @@ fn records_inner(
         locate.text(&pick(init_anchors))?,
         locate.text(&pick(bounds_anchors))?,
         locate.text(&pick(judge_anchors))?,
-    )
+    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases)?
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -146,6 +152,45 @@ fn records_inner(
     }
     records.push(Record { property: "caps-transitive", function: "(program)".into(), bytes: graph });
     Ok(((records, uncertified), anchor_file))
+}
+
+/// The rc sink's frames that the shipped pass certified.
+fn frames_certified(frames: &[(u64, String, String)], names: &std::collections::HashSet<String>) -> Vec<(u64, String)> {
+    frames.iter().filter(|(_, n, _)| names.contains(n)).map(|(k, _, e)| (*k, e.clone())).collect()
+}
+
+/// #4277, measurement-gated (`ALMIDE_RC_ANCHORS=1`, witness_rc.rs): the
+/// release routines as shipped function indices, and per certified frame its
+/// shipped position and live RC events:
+///
+/// ```text
+/// rcfns <inc index | -> <release index> ...
+/// rc <position>|<events>;...
+/// ```
+fn rc_lines(
+    locate: &Locator,
+    emitted: &[u8],
+    shipped: &[u8],
+    fmap: &[Option<u32>],
+    frames: &[(u64, String)],
+    releases: &std::collections::BTreeSet<u32>,
+) -> Result<String, String> {
+    if !almide_base::env::flag("ALMIDE_RC_ANCHORS") {
+        return Ok(String::new());
+    }
+    use crate::cert_project as cp;
+    let (ei, si) = (
+        cp::function_imports(emitted).map_err(|e| format!("imports: {e}"))?,
+        cp::function_imports(shipped).map_err(|e| format!("imports: {e}"))?,
+    );
+    let ship = |f: u32| f.checked_sub(ei).and_then(|d| fmap.get(d as usize).copied().flatten()).map(|j| j + si);
+    let inc = ship(crate::F_INC).map_or("-".to_string(), |i| i.to_string());
+    let decs: Vec<String> = releases.iter().filter_map(|&f| ship(f)).map(|i| i.to_string()).collect();
+    let rc: Vec<String> = frames
+        .iter()
+        .filter_map(|(k, ev)| locate.position(*k).map(|j| format!("{j}|{ev}")))
+        .collect();
+    Ok(format!("rcfns {inc} {}\nrc {}\n", decs.join(" "), rc.join(";")))
 }
 
 /// Turns the sinks' `serial@offset` anchors into `position:ordinal`.
@@ -241,6 +286,11 @@ impl Locator {
             }
         }
         Ok(Locator { pos, ends: em.into_iter().map(|(_, e)| e).collect(), ships_at: fmap.to_vec(), ords })
+    }
+
+    /// The shipped position of body `serial`, when it shipped.
+    fn position(&self, serial: u64) -> Option<u32> {
+        self.pos.get(&serial).and_then(|&i| self.ships_at[i])
     }
 
     fn token(&self, t: &str) -> String {

@@ -190,7 +190,15 @@ impl Emitter<'_> {
         idx
     }
 
+    /// The release routine of a `t` value (#4277: every one handed out is
+    /// recorded as a release for the RC byte check).
     pub(crate) fn dec_fn_of(&self, t: SliceTy) -> u32 {
+        let f = self.dec_fn_of_ty(t);
+        crate::witness::rc::release_fn(f);
+        f
+    }
+
+    fn dec_fn_of_ty(&self, t: SliceTy) -> u32 {
         if self.is_http_call(t) {
             // #2633: the host call id's own drop — cancel and forget.
             self.note_host_op(crate::fs_meta::OP_HTTP_CALL_DROP);
@@ -294,10 +302,19 @@ impl Emitter<'_> {
         if let Some(t) = self.arm_rests.ty_of(idx) {
             return self.dec_fn_of(t);
         }
-        let Some(&t) = self.owned_ty.get(&idx) else { return F_DEC_FLAT };
+        let Some(&t) = self.owned_ty.get(&idx) else {
+            crate::witness::rc::release_fn(F_DEC_FLAT);
+            return F_DEC_FLAT;
+        };
         // A C-319 cell local owns the CELL, not the occupant (#2010).
         let is_cell = self.locals.iter().any(|(v, &(i, _))| i == idx && self.cells.contains(v));
-        if is_cell { self.dec_cell_fn(t) } else { self.dec_fn_of(t) }
+        if is_cell {
+            let f = self.dec_cell_fn(t);
+            crate::witness::rc::release_fn(f);
+            f
+        } else {
+            self.dec_fn_of(t)
+        }
     }
 
     /// `Some($inc_elems)` when a spine of `elem` slots copied from another

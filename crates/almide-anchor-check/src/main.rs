@@ -27,6 +27,12 @@ fn main() {
                 "ANCHORS OK: init {} site(s) / {} store(s), {} fill(s), {} unlocated; bounds {} check(s), {} access(es), {} unlocated, {} operand pair(s)",
                 r.init_sites, r.init_stores, r.fill_sites, r.init_unlocated, r.bounds_checks, r.bounds_accesses, r.bounds_unlocated, r.bounds_operands
             );
+            if let Some(rc) = &r.rc {
+                println!(
+                    "RC OK: {} frame(s), {} event(s) matched to {} call(s), {} release(s) before an abort",
+                    rc.frames, rc.events, rc.calls, rc.pre_abort
+                );
+            }
         }
         Err(e) => {
             println!("ANCHORS REJECT: {e}");
