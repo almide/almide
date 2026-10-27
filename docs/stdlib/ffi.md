@@ -78,24 +78,36 @@ The removed spellings (dialect epoch 15; `almide fix` renames the first three):
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (4 functions)
+## Signature index (7 functions)
 
 ```
-// Address of b's first byte; null if b is empty.
+// A read-only view of b; b lives as long as the view.
 // @since unreleased
-ffi.address(b: Bytes) -> RawPtr
+ffi.region(b: Bytes) -> Region
 
-// The address as an Int; null is 0.
+// A fresh writable region of n zero bytes; err if n is negative.
 // @since unreleased
-ffi.to_int(p: RawPtr) -> Int
+effect ffi.alloc(n: Int) -> Region
 
-// Copy of len bytes at ptr; empty if null or len <= 0.
+// The region's length in bytes.
 // @since unreleased
-effect ffi.read(ptr: RawPtr, len: Int) -> Bytes
+ffi.len(r: Region) -> Int
 
-// Writes up to cap bytes of b to ptr; the count, 0 if null.
+// True if write may change the region (ffi.alloc and writable foreign regions).
 // @since unreleased
-effect ffi.write(ptr: RawPtr, b: Bytes, cap: Int) -> Int
+ffi.is_writable(r: Region) -> Bool
+
+// Copy of n bytes at off; err unless 0 <= off and off + n <= len(r).
+// @since unreleased
+effect ffi.read(r: Region, off: Int, n: Int) -> Bytes
+
+// Writes b at off; err if the region is read-only or b does not fit.
+// @since unreleased
+effect ffi.write(r: Region, off: Int, b: Bytes) -> Unit
+
+// A copy of the whole region as Bytes.
+// @since unreleased
+effect ffi.to_bytes(r: Region) -> Bytes
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
