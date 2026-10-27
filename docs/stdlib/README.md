@@ -15,7 +15,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [bytes](#bytes) | 183 | 0 |
 | [compute](#compute) | 7 | 0 |
 | [datetime](#datetime) | 18 | 0 |
-| [deque](#deque) | 60 | 1 |
+| [deque](#deque) | 60 | 0 |
 | [duration](#duration) | 7 | 0 |
 | [env](#env) | 9 | 0 |
 | [ffi](#ffi) | 4 | 0 |
@@ -24,7 +24,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [float64](#float64) | 24 | 0 |
 | [fs](#fs) | 37 | 1 |
 | [hash](#hash) | 11 | 0 |
-| [heap](#heap) | 16 | 1 |
+| [heap](#heap) | 16 | 0 |
 | [hex](#hex) | 3 | 0 |
 | [html](#html) | 5 | 0 |
 | [http](#http) | 34 | 4 |
@@ -1625,11 +1625,11 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `effect zlib.compress(b: Bytes) -> Bytes` — Zlib-framed DEFLATE of b; bytes vary by target.
 - `effect zlib.compress_level(b: Bytes, level: Int) -> Bytes` — Like compress; level clamped to 0..9, unused on wasm.
-- `zlib.decompress(b: Bytes) -> Result[Bytes, String]` — Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
+- `zlib.decompress(b: Bytes) -> Result[Bytes, String]` — Inflated zlib stream; err on corrupt input, bytes after it, or output over 268435456 bytes.
 - `zlib.decompress_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like decompress, output bound max_len bytes; max_len <= 0 aborts.
 - `effect zlib.deflate(b: Bytes) -> Bytes` — Raw DEFLATE, no header; bytes vary by target.
 - `effect zlib.deflate_level(b: Bytes, level: Int) -> Bytes` — Like deflate; level clamped to 0..9, unused on wasm.
-- `zlib.inflate(b: Bytes) -> Result[Bytes, String]` — Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
+- `zlib.inflate(b: Bytes) -> Result[Bytes, String]` — Raw DEFLATE decoded; err on a corrupt stream, bytes after it, or output over 268435456 bytes.
 - `zlib.inflate_max(b: Bytes, max_len: Int) -> Result[Bytes, String]` — Like inflate, output bound max_len bytes; max_len <= 0 aborts.
 - `effect zlib.gzip(b: Bytes) -> Bytes` — RFC 1952 gzip of b; bytes vary by target.
 - `zlib.gunzip(b: Bytes) -> Result[Bytes, String]` — Gzip members decoded; err on bad header, CRC, empty input or output over 268435456 bytes.

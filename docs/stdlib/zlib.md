@@ -75,7 +75,7 @@ effect zlib.compress(b: Bytes) -> Bytes
 // @since 0.20.0 or earlier
 effect zlib.compress_level(b: Bytes, level: Int) -> Bytes
 
-// Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
+// Inflated zlib stream; err on corrupt input, bytes after it, or output over 268435456 bytes.
 // @since 0.20.0 or earlier
 zlib.decompress(b: Bytes) -> Result[Bytes, String]
 
@@ -91,7 +91,7 @@ effect zlib.deflate(b: Bytes) -> Bytes
 // @since 0.20.0 or earlier
 effect zlib.deflate_level(b: Bytes, level: Int) -> Bytes
 
-// Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
+// Raw DEFLATE decoded; err on a corrupt stream, bytes after it, or output over 268435456 bytes.
 // @since 0.20.0 or earlier
 zlib.inflate(b: Bytes) -> Result[Bytes, String]
 
