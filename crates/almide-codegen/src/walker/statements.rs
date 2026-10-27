@@ -392,7 +392,7 @@ fn render_stmt_bind(ctx: &RenderContext, stmt: &IrStmt) -> String {
         let ty_str = type_s.as_str();
         ty_str == "Vec<u8>"
             || ty_str.starts_with("Vec<")
-            || ty_str.starts_with("HashMap<")
+            || ty_str.starts_with("std::collections::HashMap<")
             // #617: Bytes/Matrix render as AlmideRcCow — their in-place mutators
             // (&mut deref-coerce = make_mut COW) still need a `mut` binding,
             // exactly like the raw spellings above.

@@ -143,15 +143,16 @@ pub const RT_BOUNDARY_MARKER: &str = "//__ALMIDE_RT_BOUNDARY__";
 
 /// Rebuild full generated Rust source into a slim main that links the `almide_rt`
 /// rlib instead of inlining the runtime. Splits on [`RT_BOUNDARY_MARKER`]: the
-/// user code (after the marker) is prefixed with the crate attrs, std imports, and
-/// `extern crate almide_rt`. Returns `None` if the marker is absent (e.g. the
+/// user code (after the marker) is prefixed with the crate attrs and
+/// `extern crate almide_rt`. No std name is imported at the crate root (#4284):
+/// a user type may be named `HashMap` or `HashSet`, so the emitted code spells
+/// std items by full path. Returns `None` if the marker is absent (e.g. the
 /// source predates this emitter or isn't a Rust target) so callers fall back.
 pub fn slim_main_with_external_runtime(full_rs: &str) -> Option<String> {
     let idx = full_rs.find(RT_BOUNDARY_MARKER)?;
     let user_code = full_rs[idx + RT_BOUNDARY_MARKER.len()..].trim_start_matches('\n');
     let mut out = String::new();
     out.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use, uncommon_codepoints, confusable_idents, mixed_script_confusables)]\n\n");
-    out.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n");
     out.push_str("#[macro_use] extern crate almide_rt;\nuse almide_rt::*;\n\n");
     out.push_str(user_code);
     Some(out)
@@ -779,7 +780,6 @@ pub mod rust_idents;
 pub fn emit_runtime_crate() -> String {
     let mut out = String::new();
     out.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use, non_snake_case, uncommon_codepoints, confusable_idents, mixed_script_confusables)]\n\n");
-    out.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n\n");
     out.push_str(&rust_runtime_prelude(true));
     // Every std-only runtime module (exclude external-dep modules).
     let mut needed: std::collections::HashSet<&str> = std::collections::HashSet::new();
@@ -816,7 +816,6 @@ fn emit_source(program: &mut IrProgram, target: Target, config: &target::TargetC
     match target {
         Target::Rust => {
             output.push_str("#![allow(unused_parens, unused_variables, dead_code, unused_imports, unused_mut, unused_must_use, uncommon_codepoints, confusable_idents, mixed_script_confusables)]\n\n");
-            output.push_str("use std::collections::HashMap;\nuse std::collections::HashSet;\n\n");
             output.push_str(&rust_runtime_prelude(false));
             // Include runtime modules referenced in the IR. The IrProgram tracks
             // which stdlib modules are used across all functions and transitive

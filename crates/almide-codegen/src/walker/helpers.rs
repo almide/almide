@@ -269,7 +269,7 @@ pub fn render_type_field_fn(ctx: &RenderContext, ty: &Ty) -> String {
         }
         Ty::Applied(TCI::Map, args) if args.len() == 2 => {
             let (k, v) = (rf(&args[0]), rf(&args[1]));
-            tmpl("type_map", &[("key", k.as_str()), ("value", v.as_str())], format!("HashMap<{}, {}>", k, v))
+            tmpl("type_map", &[("key", k.as_str()), ("value", v.as_str())], format!("std::collections::HashMap<{}, {}>", k, v))
         }
         Ty::Applied(TCI::Option, args) if args.len() == 1 => {
             let inner = rf(&args[0]);
