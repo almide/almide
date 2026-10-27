@@ -51,7 +51,7 @@ pub(crate) struct Cli {
 /// into the version line (`<version> (release[, <sha>])`), from
 /// `ALMIDE_BUILD_PROVENANCE`, which only `.github/workflows/release.yml` sets.
 pub(crate) fn is_release_build() -> bool {
-    VERSION_LINE.contains("(release")
+    almide_base::env::lock_engaged_by_default(VERSION_LINE)
 }
 
 #[derive(Subcommand)]

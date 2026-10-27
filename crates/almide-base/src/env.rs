@@ -44,6 +44,10 @@ pub enum Scope {
     Ablation,
     /// Arms a runtime trap the shipped artifact leaves off.
     Trap,
+    /// Adds instrumentation to the emitted artifact — allocation counters, a
+    /// fixed or poisoning allocator — that a harness reads back. The program
+    /// computes the same values, but the artifact is not the shipped one.
+    Instrument,
     /// Adds stderr output only (a trace channel, a dump, a profile).
     Debug,
     /// A CLI / tooling knob that changes where things go or how much is kept,
@@ -74,13 +78,13 @@ const fn sw(name: &'static str, kind: Kind, scope: Scope, doc: &'static str) -> 
 
 use Kind::{Flag, Value};
 // `Debug` as a bare name would shadow the derive macro; the rows say `Dbg`.
-use Scope::{Ablation, Ci, Debug as Dbg, Gate, Harness, Route, Runtime, Tool, Trap};
+use Scope::{Ablation, Ci, Debug as Dbg, Gate, Harness, Instrument, Route, Runtime, Tool, Trap};
 
 /// Every `ALMIDE_*` switch the tree reads. Sorted by name; the gate proves the
 /// order and the completeness.
 pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_ABORT_SITE", Value, Runtime, "the testing.assert_aborts site a native test child runs (ADR-0029): set by the parent when it re-executes the test binary; never set by hand"),
-    sw("ALMIDE_ALLOC_COUNT", Flag, Harness, "build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs)"),
+    sw("ALMIDE_ALLOC_COUNT", Flag, Instrument, "build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs)"),
     sw("ALMIDE_BANG_RETURN", Flag, Ablation, "turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe)"),
     sw("ALMIDE_BENCH_DIR", Value, Harness, "the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`)"),
     sw("ALMIDE_BENCH_MAIN_NS", Value, Harness, "the file `almide bench` points a benched native binary at: the spliced `main` timer writes its elapsed nanoseconds there (#2980, the main-only boundary)"),
@@ -230,9 +234,9 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_VERIFIED_DEBUG", Flag, Dbg, "name the wasm leg that rendered, and why the other declined (the route oracle)"),
     sw("ALMIDE_VERSION_LINE", Value, Ci, "NOT read from the environment at run time: `build.rs` EMITS it as `cargo:rustc-env`, and `src/main.rs` reads it with `env!` at compile time. It is the string `almide --version` prints — `<version> (<kind>[, <sha>])` — assembled from ALMIDE_BUILD_PROVENANCE and ALMIDE_BUILD_SHA (#2384)"),
     sw("ALMIDE_WALL_REASON", Flag, Dbg, "make `almide test` say WHICH stage of the wasm leg declined a fallback file, not just `v1 wall`"),
-    sw("ALMIDE_WASM_ALLOC_COUNT", Flag, Harness, "emit the structural wasm leg's allocation counters (#2407: five i64 globals `$alloc`/`$free`/a region restore bump, exported as `__alloc_count` / `__alloc_reused` / `__alloc_bytes` / `__free_count` / `__region_reclaimed`; `main` also releases its top-let globals before returning) and make `almide run --target wasm` print `__ALMD_WASM_ALLOC allocs=N reused=N bytes=N frees=N reclaimed=N live=N heap_end=N` on stderr after the run, `live` being the heap blocks never released; off, the module is byte-identical to a build without the switch (the wasm twin of `ALMIDE_ALLOC_COUNT`; the ledgers are crates/almide-wasm/tests/golden/alloc-count-baseline.txt and live-at-exit-baseline.txt)"),
-    sw("ALMIDE_WASM_CANONICAL_ALLOC", Flag, Harness, "emit the structural wasm leg's `$alloc` without its free-list paths, so every request bumps (the stdlib inspection meter's fixed allocator, owner ruling 2026-10-15): a measured bytes-moved series then depends on the program's requests alone, not on which freed blocks the heap holds, and is an upper bound of the shipped module's copies; off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/canonical_alloc.rs)"),
-    sw("ALMIDE_WASM_CHECKED_ALLOC", Flag, Harness, "emit the structural wasm leg's `$free` poisoning a freed size-class block with 0xA5 and `$alloc` checking that poison before reusing the block, trapping on a write that landed while it was free (#4009: the wasm leg's use-after-free and stray-write detector; scripts/wasm-checked-alloc.sh runs the corpus under it); off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/checked_alloc.rs)"),
+    sw("ALMIDE_WASM_ALLOC_COUNT", Flag, Instrument, "emit the structural wasm leg's allocation counters (#2407: five i64 globals `$alloc`/`$free`/a region restore bump, exported as `__alloc_count` / `__alloc_reused` / `__alloc_bytes` / `__free_count` / `__region_reclaimed`; `main` also releases its top-let globals before returning) and make `almide run --target wasm` print `__ALMD_WASM_ALLOC allocs=N reused=N bytes=N frees=N reclaimed=N live=N heap_end=N` on stderr after the run, `live` being the heap blocks never released; off, the module is byte-identical to a build without the switch (the wasm twin of `ALMIDE_ALLOC_COUNT`; the ledgers are crates/almide-wasm/tests/golden/alloc-count-baseline.txt and live-at-exit-baseline.txt)"),
+    sw("ALMIDE_WASM_CANONICAL_ALLOC", Flag, Instrument, "emit the structural wasm leg's `$alloc` without its free-list paths, so every request bumps (the stdlib inspection meter's fixed allocator, owner ruling 2026-10-15): a measured bytes-moved series then depends on the program's requests alone, not on which freed blocks the heap holds, and is an upper bound of the shipped module's copies; off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/canonical_alloc.rs)"),
+    sw("ALMIDE_WASM_CHECKED_ALLOC", Flag, Instrument, "emit the structural wasm leg's `$free` poisoning a freed size-class block with 0xA5 and `$alloc` checking that poison before reusing the block, trapping on a write that landed while it was free (#4009: the wasm leg's use-after-free and stray-write detector; scripts/wasm-checked-alloc.sh runs the corpus under it); off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/checked_alloc.rs)"),
     sw("ALMIDE_WASM_FREES", Flag, Ci, "the frees-churn gate's switch; its compiler reader retired with the v0 emitter (#782), the gate that still sets it is #2207's"),
     sw("ALMIDE_WASM_SKIP_STOCK_AUDIT", Flag, Route, "skip the stock-WASI host-op audit on `almide build --target wasm` (the emitter-frontier probe the parity, diff-fuzz and availability gates build under); named ALMIDE_WASM_STRUCTURAL until #2934"),
     sw("ALMIDE_WASM_WATCHDOG_SECS", Value, Harness, "the wall-time seconds the IN-PROCESS test runner's epoch watchdog (`run_wasm` / `run_wasm_with` / `run_wasm_capped` in almide-wasm-run) lets a module run before it traps with `interrupt` (default 30); `almide run --target wasm` and `almide bench --target wasm` arm no watchdog on any setting, as native has none (#2615)"),
@@ -306,6 +310,16 @@ pub fn lock(allowed: Vec<String>) {
 /// Is the switch lock on?
 pub fn locked() -> bool {
     LOCK.get().is_some()
+}
+
+/// Does a binary whose `--version` line is `version_line` lock the switches
+/// with no `--lock-switches` on the command line? Only the release workflow's
+/// build says `(release` there (#2384), and that build locks by default
+/// (#4129). The CLI decides with this and nothing else, so the unit test below
+/// is the release-default engagement's check in every CI run; the release
+/// workflow runs `scripts/check-release-switch-lock.sh` on the artifact itself.
+pub fn lock_engaged_by_default(version_line: &str) -> bool {
+    version_line.contains("(release")
 }
 
 /// Why `name` cannot be passed to `--allow-switch`, if it cannot.
@@ -425,7 +439,7 @@ impl Scope {
     /// Does a switch of this scope change what the compiler emits or which
     /// check runs? Those are the ones the switch lock (#4129) holds back.
     pub fn changes_the_build(self) -> bool {
-        matches!(self, Scope::Route | Scope::Gate | Scope::Ablation | Scope::Trap)
+        matches!(self, Scope::Route | Scope::Gate | Scope::Ablation | Scope::Trap | Scope::Instrument)
     }
 
     /// The scope's name in the tables.
@@ -435,6 +449,7 @@ impl Scope {
             Scope::Gate => "gate",
             Scope::Ablation => "ablation",
             Scope::Trap => "trap",
+            Scope::Instrument => "instrument",
             Scope::Debug => "debug",
             Scope::Tool => "tool",
             Scope::Runtime => "runtime",
@@ -494,6 +509,27 @@ mod tests {
         for s in SWITCHES {
             assert!(s.name.starts_with("ALMIDE_"), "{}", s.name);
             assert!(!s.doc.is_empty(), "{} has no doc", s.name);
+        }
+    }
+
+    #[test]
+    fn a_release_version_line_engages_the_lock_and_a_dev_one_does_not() {
+        assert!(lock_engaged_by_default("0.70.0 (release, 1a2b3c4d5)"));
+        assert!(lock_engaged_by_default("0.70.0 (release)"));
+        assert!(!lock_engaged_by_default("0.70.0 (dev, 1a2b3c4d5)"));
+        assert!(!lock_engaged_by_default("0.70.0 (dev)"));
+        assert!(!lock_engaged_by_default("0.70.0"));
+    }
+
+    #[test]
+    fn every_scope_that_changes_the_artifact_is_one_the_lock_holds() {
+        // The lock's set is derived from the scope, so a scope whose doc says
+        // it changes what is emitted or checked must answer yes here.
+        for s in [Scope::Route, Scope::Gate, Scope::Ablation, Scope::Trap, Scope::Instrument] {
+            assert!(s.changes_the_build(), "{} must be held by the lock", s.label());
+        }
+        for s in [Scope::Debug, Scope::Tool, Scope::Runtime, Scope::Harness, Scope::Ci] {
+            assert!(!s.changes_the_build(), "{} is declared not to change the build", s.label());
         }
     }
 

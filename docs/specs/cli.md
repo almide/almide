@@ -1,6 +1,6 @@
 # CLI Specification
 
-> Last updated: 2026-10-23
+> Last updated: 2026-10-27
 
 ## Overview
 
@@ -1110,7 +1110,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 - 種別 `route`（実行するレッグを強制する）と `gate`（既定の検査を迂回する）のスイッチが ON のときは、
   そのプロセスで最初に読まれた時点で stderr に 1 行（`[almide] ALMIDE_X is set: …`）が出る。
   強制されたルートで出た verdict は、そう名乗る。
-- **スイッチ錠**（#4129）: 種別 `route` / `gate` / `ablation` / `trap` は「何をコンパイルするか・どの検査を走らせるか」を
+- **スイッチ錠**（#4129）: 種別 `route` / `gate` / `ablation` / `trap` / `instrument` は「何をコンパイルするか・どの検査を走らせるか」を
   変える。リリースビルド（`almide --version` が `(release…)` と名乗るもの）は、こうしたスイッチを環境から
   受け継いでも無視し、stderr に `[almide] ALMIDE_X is set but IGNORED: …` と 1 行出す。効かせるには
   コマンドラインで `--allow-switch ALMIDE_X` と名指しする（複数回可）。CI、`.envrc`、devcontainer、
@@ -1118,8 +1118,15 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
   検査を飛ばさせたりできないようにするため。ツールが自分で立てるスイッチ（`almide test` の
   `ALMIDE_NO_RTLIB`、`--time-report` の `ALMIDE_FUEL_PROBE`）は錠の対象外。開発ビルドは従来どおり
   環境を読み、隠しフラグ `--lock-switches` でリリースと同じ錠をかけられる。
+  錠が何を抑えるかは各スイッチが宣言した種別で決まるので、その宣言を検査する: 錠の外の種別
+  （`debug` / `tool` / `runtime` / `harness` / `ci`）のスイッチは、どれを ON にしても生成される
+  Rust・wasm・ネイティブプログラムの出力が変わってはならない（`tests/switch_scope_test.rs`）。
+  リリースビルドが既定で錠をかけることは `almide_base::env::lock_engaged_by_default` の単体テストと、
+  リリースワークフローが成果物そのものに走らせる `scripts/check-release-switch-lock.sh` で確かめる。
 - `--profile critical` は、こうしたスイッチが環境から 1 つでも ON で渡ると、`--allow-switch` の有無に
   関係なく拒否する（exit 1）。
+- `instrument` は生成物に計測（割り当てカウンタ、固定・毒入れアロケータ）を足すもの: プログラムの
+  計算は同じだが出荷物とは別物なので錠の対象。
 - `harness` はテストハーネス（`tests/`, `crates/*/tests`, `tools/`）が読むフック、`ci` はワークフローと
   `scripts/` だけが使うもの、`runtime` はコンパイルされたプログラム自身が実行時に読むもの。
 
@@ -1127,7 +1134,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | 変数 | 種別 | 説明 |
 |---|---|---|
 | `ALMIDE_ABORT_SITE=value` | runtime | the testing.assert_aborts site a native test child runs (ADR-0029): set by the parent when it re-executes the test binary; never set by hand |
-| `ALMIDE_ALLOC_COUNT` | harness | build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs) |
+| `ALMIDE_ALLOC_COUNT` | instrument | build the native program with a counting allocator that prints `__ALMD_ALLOC allocs=N deallocs=N reallocs=N peak=N` on stderr when `__almide_main` returns (the native borrow oracle's allocation lane, tests/native_borrow_oracle_test.rs) |
 | `ALMIDE_BANG_RETURN` | ablation | turn OFF the per-position `!` desugars of the v1 lowering so every `!` reaches the bind-position rule or walls loudly (the decline-matrix probe) |
 | `ALMIDE_BENCH_DIR=value` | harness | the fixture directory of the structural leg's perf probe (default `crates/almide-wasm/tests/perf`) |
 | `ALMIDE_BENCH_MAIN_NS=value` | harness | the file `almide bench` points a benched native binary at: the spliced `main` timer writes its elapsed nanoseconds there (#2980, the main-only boundary) |
@@ -1277,9 +1284,9 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_VERIFIED_DEBUG` | debug | name the wasm leg that rendered, and why the other declined (the route oracle) |
 | `ALMIDE_VERSION_LINE=value` | ci | NOT read from the environment at run time: `build.rs` EMITS it as `cargo:rustc-env`, and `src/main.rs` reads it with `env!` at compile time. It is the string `almide --version` prints — `<version> (<kind>[, <sha>])` — assembled from ALMIDE_BUILD_PROVENANCE and ALMIDE_BUILD_SHA (#2384) |
 | `ALMIDE_WALL_REASON` | debug | make `almide test` say WHICH stage of the wasm leg declined a fallback file, not just `v1 wall` |
-| `ALMIDE_WASM_ALLOC_COUNT` | harness | emit the structural wasm leg's allocation counters (#2407: five i64 globals `$alloc`/`$free`/a region restore bump, exported as `__alloc_count` / `__alloc_reused` / `__alloc_bytes` / `__free_count` / `__region_reclaimed`; `main` also releases its top-let globals before returning) and make `almide run --target wasm` print `__ALMD_WASM_ALLOC allocs=N reused=N bytes=N frees=N reclaimed=N live=N heap_end=N` on stderr after the run, `live` being the heap blocks never released; off, the module is byte-identical to a build without the switch (the wasm twin of `ALMIDE_ALLOC_COUNT`; the ledgers are crates/almide-wasm/tests/golden/alloc-count-baseline.txt and live-at-exit-baseline.txt) |
-| `ALMIDE_WASM_CANONICAL_ALLOC` | harness | emit the structural wasm leg's `$alloc` without its free-list paths, so every request bumps (the stdlib inspection meter's fixed allocator, owner ruling 2026-10-15): a measured bytes-moved series then depends on the program's requests alone, not on which freed blocks the heap holds, and is an upper bound of the shipped module's copies; off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/canonical_alloc.rs) |
-| `ALMIDE_WASM_CHECKED_ALLOC` | harness | emit the structural wasm leg's `$free` poisoning a freed size-class block with 0xA5 and `$alloc` checking that poison before reusing the block, trapping on a write that landed while it was free (#4009: the wasm leg's use-after-free and stray-write detector; scripts/wasm-checked-alloc.sh runs the corpus under it); off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/checked_alloc.rs) |
+| `ALMIDE_WASM_ALLOC_COUNT` | instrument | emit the structural wasm leg's allocation counters (#2407: five i64 globals `$alloc`/`$free`/a region restore bump, exported as `__alloc_count` / `__alloc_reused` / `__alloc_bytes` / `__free_count` / `__region_reclaimed`; `main` also releases its top-let globals before returning) and make `almide run --target wasm` print `__ALMD_WASM_ALLOC allocs=N reused=N bytes=N frees=N reclaimed=N live=N heap_end=N` on stderr after the run, `live` being the heap blocks never released; off, the module is byte-identical to a build without the switch (the wasm twin of `ALMIDE_ALLOC_COUNT`; the ledgers are crates/almide-wasm/tests/golden/alloc-count-baseline.txt and live-at-exit-baseline.txt) |
+| `ALMIDE_WASM_CANONICAL_ALLOC` | instrument | emit the structural wasm leg's `$alloc` without its free-list paths, so every request bumps (the stdlib inspection meter's fixed allocator, owner ruling 2026-10-15): a measured bytes-moved series then depends on the program's requests alone, not on which freed blocks the heap holds, and is an upper bound of the shipped module's copies; off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/canonical_alloc.rs) |
+| `ALMIDE_WASM_CHECKED_ALLOC` | instrument | emit the structural wasm leg's `$free` poisoning a freed size-class block with 0xA5 and `$alloc` checking that poison before reusing the block, trapping on a write that landed while it was free (#4009: the wasm leg's use-after-free and stray-write detector; scripts/wasm-checked-alloc.sh runs the corpus under it); off, the module is byte-identical to a build without the switch (crates/almide-wasm/src/checked_alloc.rs) |
 | `ALMIDE_WASM_FREES` | ci | the frees-churn gate's switch; its compiler reader retired with the v0 emitter (#782), the gate that still sets it is #2207's |
 | `ALMIDE_WASM_SKIP_STOCK_AUDIT` | route | skip the stock-WASI host-op audit on `almide build --target wasm` (the emitter-frontier probe the parity, diff-fuzz and availability gates build under); named ALMIDE_WASM_STRUCTURAL until #2934 |
 | `ALMIDE_WASM_WATCHDOG_SECS=value` | harness | the wall-time seconds the IN-PROCESS test runner's epoch watchdog (`run_wasm` / `run_wasm_with` / `run_wasm_capped` in almide-wasm-run) lets a module run before it traps with `interrupt` (default 30); `almide run --target wasm` and `almide bench --target wasm` arm no watchdog on any setting, as native has none (#2615) |
