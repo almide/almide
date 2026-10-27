@@ -522,6 +522,7 @@ fn wrap_unit_body_in_ok(body: &IrExpr, result_ty: Ty) -> IrExpr {
 /// - `desugar_matrix_binops` — matrix `a * b` / `+` / `-` → matrix.__mul/__add/__sub.
 /// - `desugar_hof_chain_anf` — the C-127 piped HOF chain → its source-`let` form.
 /// - `desugar_heap_if_call_args` — a HEAP-result `if` in argument position → let-decomposed (#881).
+/// - `desugar_heap_qq_operands` — a HEAP `??` as an `==`/`!=` side or a record/tuple field → let-decomposed.
 /// - `desugar_mutable_global_projection_args` / `desugar_bytes_index_assign` —
 ///   the two that need the fn's PARAMS to decide.
 /// - `desugar_unwrap_or_unwrap_fallback` — `a ?? f(..)!` over a heap payload → `(match a { … })!` (#1375).
@@ -543,6 +544,7 @@ fn apply_pre_lower_desugars(body: &IrExpr, params: &[almide_ir::IrParam]) -> Opt
         desugar_matrix_binops,
         desugar_hof_chain_anf,
         desugar_heap_if_call_args,
+        desugar_heap_qq_operands,
         desugar_mutable_global_projection_args,
         // BEFORE the branch/unwrap desugars: the rewrite moves the fallback's `!` OUT of the
         // conditional arm into the `let x = e!` position `desugar_let_unwrap` then handles.
