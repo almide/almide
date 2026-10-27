@@ -502,6 +502,10 @@ impl Checker {
 
 /// Push every open inference var (`?N`) in `t` onto `out`.
 pub(crate) fn collect_inference_vars(t: &Ty, out: &mut Vec<Ty>) {
+    // A subtree with no variable is skipped from its cache (ADR-0030 D5).
+    if !t.has_infer_var() {
+        return;
+    }
     if is_inference_var(t).is_some() {
         out.push(t.clone());
     }

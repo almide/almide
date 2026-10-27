@@ -761,10 +761,8 @@ impl Ty {
     where
         F: Fn(&Ty) -> bool,
     {
-        if pred(self) {
-            return true;
-        }
-        self.children().into_iter().any(|child| child.any_child_recursive(pred))
+        // Each shared list once (ADR-0030 D5).
+        self.any_node(&mut |t| pred(t))
     }
 
     /// Check if all child types (recursively) satisfy a predicate.
@@ -772,10 +770,8 @@ impl Ty {
     where
         F: Fn(&Ty) -> bool,
     {
-        if !pred(self) {
-            return false;
-        }
-        self.children().into_iter().all(|child| child.all_children_recursive(pred))
+        // Each shared list once (ADR-0030 D5).
+        !self.any_node(&mut |t| !pred(t))
     }
 
     /// Returns true if this type is a parameterized container (List, Option, Result, Map).
