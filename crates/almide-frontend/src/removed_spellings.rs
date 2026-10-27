@@ -50,7 +50,8 @@ fn between<'a>(s: &'a str, open: &str, close: &str) -> Option<(&'a str, &'a str)
 }
 
 fn callee(call: &str) -> Option<&str> {
-    let name = call.split('(').next()?.trim();
+    // A type-argument list (`http.decode_json[T](req)`) is not part of the name.
+    let name = call.split('(').next()?.split('[').next()?.trim();
     let (m, f) = name.split_once('.')?;
     let ident = |x: &str| !x.is_empty() && x.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
     (ident(m) && ident(f)).then_some(name)
@@ -101,20 +102,9 @@ fn table() -> &'static [Removal] {
             }
         }
         // A rewrite onto the same name (`io.write(data)` → `io.write(h, data)`)
-        // reshapes a spelling; a spelling another entry rewrites ONTO
-        // (`http.status_code(r)` → `http.status(r)`) is repurposed. Neither
-        // spelling left the stdlib, so neither is a removal.
-        let targets: Vec<String> = out
-            .iter()
-            .filter_map(|r| match &r.fate {
-                Fate::Rewritten { to, .. } => Some(to.clone()),
-                _ => None,
-            })
-            .collect();
-        out.retain(|r| {
-            let reshaped = matches!(&r.fate, Fate::Rewritten { to, .. } if *to == r.from);
-            !reshaped && !targets.contains(&r.from)
-        });
+        // reshapes the spelling; it did not leave the stdlib, so it is no
+        // removal.
+        out.retain(|r| !matches!(&r.fate, Fate::Rewritten { to, .. } if *to == r.from));
         out
     })
 }

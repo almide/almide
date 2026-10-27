@@ -53,8 +53,19 @@ fn read_surfaces() -> BTreeMap<String, Option<BTreeSet<String>>> {
 
 /// The removals that are public again.
 fn returned(surfaces: &BTreeMap<String, Option<BTreeSet<String>>>) -> Vec<String> {
+    // A spelling another removal rewrites ONTO was repurposed, not brought
+    // back: `http.status_code(r)` → `http.status(r)` makes `http.status` the
+    // getter in the same ledger that moved the old setter to `http.set_status`.
+    let repurposed: BTreeSet<&str> = removed_spellings::all()
+        .iter()
+        .filter_map(|r| match &r.fate {
+            removed_spellings::Fate::Rewritten { to, .. } => Some(to.as_str()),
+            _ => None,
+        })
+        .collect();
     removed_spellings::all()
         .iter()
+        .filter(|r| !repurposed.contains(r.from.as_str()))
         .filter(|r| {
             let (m, f) = r.from.split_once('.').unwrap_or(("", ""));
             surfaces.get(m).and_then(|s| s.as_ref()).is_some_and(|s| s.contains(f))
