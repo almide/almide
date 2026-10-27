@@ -202,7 +202,9 @@ fn generic_bodies_and_sets_render_the_declared_form_on_every_leg() {
     assert!(runs.len() >= 2, "at least native and the interpreter must vote");
     for (leg, text) in &runs {
         assert!(!text.contains(CANARY), "{leg}: the canary reached the output:\n{text}");
-        assert_eq!(text, GENERIC_AND_SET_OUT, "{leg}: not the declared form, byte for byte");
+        // The interp leg's capture is trimmed, as every interp comparison reads it.
+        let want = if *leg == "interp" { GENERIC_AND_SET_OUT.trim_end() } else { GENERIC_AND_SET_OUT };
+        assert_eq!(text, want, "{leg}: not the declared form, byte for byte");
     }
 }
 
