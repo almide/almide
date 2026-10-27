@@ -281,6 +281,41 @@ impl Ty {
         }
     }
 
+    /// Does `pred` hold at some node of this type? Each shared element list
+    /// ([`TyVec`]) is entered once, so a type that references one subtree many
+    /// times is searched in time linear in its shared form (ADR-0030 D5).
+    pub fn any_node(&self, pred: &mut dyn FnMut(&Ty) -> bool) -> bool {
+        self.find_map_node(&mut |t| pred(t).then_some(())).is_some()
+    }
+
+    /// The first `Some` `f` gives at a node of this type, depth first; each
+    /// shared element list is entered once (see [`Ty::any_node`]).
+    pub fn find_map_node<R>(&self, f: &mut dyn FnMut(&Ty) -> Option<R>) -> Option<R> {
+        fn go<R>(t: &Ty, f: &mut dyn FnMut(&Ty) -> Option<R>, seen: &mut std::collections::HashSet<usize>) -> Option<R> {
+            if let Some(r) = f(t) {
+                return Some(r);
+            }
+            match t {
+                Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) | Ty::Named(_, args) => {
+                    if !seen.insert(args.ptr_id()) {
+                        return None;
+                    }
+                    args.iter().find_map(|a| go(a, f, seen))
+                }
+                Ty::Fn { params, ret, .. } => params.iter().find_map(|a| go(a, f, seen)).or_else(|| go(ret, f, seen)),
+                Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().find_map(|(_, a)| go(a, f, seen)),
+                Ty::Variant { cases, .. } => cases.iter().find_map(|c| match &c.payload {
+                    VariantPayload::Unit => None,
+                    VariantPayload::Tuple(ts) => ts.iter().find_map(|a| go(a, f, seen)),
+                    VariantPayload::Record(fs) => fs.iter().find_map(|(_, a)| go(a, f, seen)),
+                }),
+                Ty::ConstParam { ty, .. } | Ty::ConstValue { ty, .. } => go(ty, f, seen),
+                _ => None,
+            }
+        }
+        go(self, f, &mut std::collections::HashSet::new())
+    }
+
     /// The element list of a composite type, when it has one.
     pub fn shared_args(&self) -> Option<&TyVec> {
         match self {
