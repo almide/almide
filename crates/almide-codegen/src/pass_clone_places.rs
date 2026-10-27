@@ -123,7 +123,14 @@ pub(super) fn insert_clones_reassign(var: VarId, value: IrExpr, ctx: &mut CloneC
     if let Some(value) = super::pass_clone_record_fields::rewrite_spread_reassign(var, &value, ctx) {
         return IrStmtKind::Assign { var, value };
     }
-    let movable = local && reads_once_plainly(&value, var);
+    // #4260: a `var` whose ONLY read is this reassignment's rhs (`b = add(b,
+    // i)` in a loop, `b` never read after it) has one syntactic use that the
+    // loop bumps, so it is classed `always`. That class exists for a read the
+    // next iteration repeats on the SAME value; here the statement overwrites
+    // `x` right after its read, so the read is its last use all the same.
+    let bumped_only = ctx.always.contains(&var) && ctx.bumped.contains(&var);
+    let movable = (local || (bumped_only && ctx.owned.contains(&var) && !ctx.captured.contains(&var)))
+        && reads_once_plainly(&value, var);
     let mut value = insert_clones_live(value, ctx);
     if movable {
         strip_var_clone(&mut value, var);
