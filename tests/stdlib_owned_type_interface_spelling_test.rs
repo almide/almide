@@ -64,7 +64,7 @@ fn spelled_type_names(iface: &serde_json::Value) -> Vec<String> {
 /// identity every stdlib signature carries — for every row of the registry.
 #[test]
 fn bundled_owner_modules_spell_their_own_types_bare() {
-    let mut owners: Vec<&str> = almide_lang::stdlib_info::STDLIB_OWNED_TYPES
+    let mut owners: Vec<&str> = almide_lang::stdlib_info::stdlib_owned_types()
         .iter()
         .map(|(m, _)| *m)
         .collect();
@@ -79,7 +79,7 @@ fn bundled_owner_modules_spell_their_own_types_bare() {
              program's shadow scope — the bundled module's own declaration must keep \
              the bare key: {scoped:?}"
         );
-        for (_, ty) in almide_lang::stdlib_info::STDLIB_OWNED_TYPES.iter().filter(|(m, _)| *m == module) {
+        for (_, ty) in almide_lang::stdlib_info::stdlib_owned_types().iter().filter(|(m, _)| *m == module) {
             assert!(
                 names.iter().any(|n| n == ty),
                 "`almide compile {module} --json` never spells its own `{ty}` bare; spelled: {names:?}"

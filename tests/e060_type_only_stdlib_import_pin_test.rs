@@ -48,7 +48,7 @@ fn assert_e060_on(label: &str, source: &str, import: &str) {
 /// Every stdlib-owned type whose owner needs an explicit `import` — the
 /// auto-imported owners (`value`'s `Value`) have no import line to judge.
 fn explicit_import_owned_types() -> Vec<(&'static str, &'static str)> {
-    almide::stdlib_info::STDLIB_OWNED_TYPES
+    almide::stdlib_info::stdlib_owned_types()
         .iter()
         .copied()
         .filter(|(module, _)| !almide::stdlib_info::AUTO_IMPORT_BUNDLED.contains(module))
