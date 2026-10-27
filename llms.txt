@@ -59,7 +59,11 @@ read here is what the current compiler accepts.
   fn-type slots spell it `(A) -> B!` / `(A) -> B!E`. Its E comes from the context
   (a typed slot or `let`, the fn its result propagates into), else from the
   join of its `!` operands: one shared E stays, a disagreement falls to String
-  (ADR-0021). In test blocks lambda-`!` stays unwrap. No `null`, no `throw`, no
+  (ADR-0021). A tuple parameter is a pattern: `((a, b)) => a + b`; the map
+  callbacks take the entry as ONE `(K, V)` tuple — `map.filter(m, ((k, v)) => v > 0)`,
+  `map.fold(m, 0, (acc, (k, v)) => acc + v)` — and where the ONLY parameter is a
+  tuple its elements may be separate parameters (`map.filter(m, (k, v) => v > 0)`).
+  In test blocks lambda-`!` stays unwrap. No `null`, no `throw`, no
   exceptions.
 - Effectful functions are written `effect fn f() -> T`. Pure functions
   cannot call effect functions (checked, emits E006) — also not as a value:

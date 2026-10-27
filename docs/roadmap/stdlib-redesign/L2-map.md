@@ -145,7 +145,7 @@ map.merge(a, b)             // 同じキーは b が勝つ。順序は a、そ�
 - 根拠の L0 規則: R-L0-04（`pop` はその場で末尾から取る動詞）、L1 の追加基準（5/9 以上）、R-L0-00
 - (a)
   - 取り出して消す: Rust・Python・Elixir・Kotlin・Swift の 5/9 が持ちます。ただし 4 言語はその場書き換えの戻り値として持つだけで、コピー版は Elixir `Map.pop` だけです。Almide では `map.get(m, k)` と `m = map.remove(m, k)` の 2 段で書けます。コピー版を `pop` と名付けると、R-L0-04 で「末尾から取るその場の動詞」と決めた `pop` の意味が割れます。
-  - 合わせ方を関数で決める merge: Gleam `combine`・Elixir `merge/3`・OCaml `union`・Swift `merging` の 4/9 で、綴りも割れています。`map.fold(b, a, (acc, k, v) => map.upsert(acc, k, v, (old) => g(old, v)))` で書けます。
+  - 合わせ方を関数で決める merge: Gleam `combine`・Elixir `merge/3`・OCaml `union`・Swift `merging` の 4/9 で、綴りも割れています。`map.fold(b, a, (acc, (k, v)) => map.upsert(acc, k, v, (old) => g(old, v)))` で書けます。
   - キーの変換: Kotlin `mapKeys` だけです。
 - (b)(d) 変更なし。
 - issue: なし
@@ -192,6 +192,7 @@ map.merge(a, b)             // 同じキーは b が勝つ。順序は a、そ�
 - 案: callback を、要素 `(K, V)` の組 1 つを受け取る形にします（`filter(m, f: ((K, V)) -> Bool)`、`fold(m, init: A, f: (A, (K, V)) -> A)`）。`map.to_list`・`from_list` はすでに組の列です。言語の規則として「組 1 つを受け取る関数の場所に、組の要素の数だけ引数を持つ無名関数を書ける」を入れるので、`map.filter(m, (k, v) => v > 0)` はそのまま通ります（Swift の `dict.filter { key, value in … }` と同じ規則）。
 - (a) Swift の `Dictionary` は `(key, value)` の組の `Collection` です。Rust の `HashMap` の反復、Kotlin の `Map.Entry`、Python の `items()` も組を 1 つずつ渡します。
 - (d) 型の変更です。2 引数の無名関数はそのまま通ります。`fold` の 3 引数の無名関数は、`almide fix` が `(acc, (k, v)) =>` に書き換えます。
+- 実装の状況（2026-10-27）: 実装しました。6 つの関数の callback は組 1 つ（`fold` は累積値と組）を受け取ります。検査器は、組 1 つだけを受け取る場所に書かれた、組の要素の数だけ引数を持つ無名関数を `((k, v)) =>` と読みます（場所の型だけから決め、関数の名前は見ません）。`fold` の `(acc, k, v) =>` は E004 で、ヒントが `(acc, (k, v)) =>` を示します（epoch 15 の `breaks`）。メソッド呼び出しの形（`m.filter((k, v) => …)`）では、この読み替えはまだ働きません。
 - issue: #4004
 
 ## L3: 関数表

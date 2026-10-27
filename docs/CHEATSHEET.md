@@ -470,6 +470,14 @@ let f = (x) => {
   let y = x * 2
   y + 1
 }
+
+// a tuple parameter: destructure it with a pattern
+pairs |> list.map(((a, b)) => a + b)
+// map callbacks take the entry as ONE (K, V) tuple
+map.filter(m, ((k, v)) => v > 0)
+map.fold(m, 0, (acc, (k, v)) => acc + v)
+// where the ONLY parameter is a tuple, its elements may be written as separate parameters
+map.filter(m, (k, v) => v > 0)
 ```
 
 **Lambdas and effects**: a lambda inherits the enclosing fn's effect
