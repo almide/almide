@@ -597,8 +597,9 @@
 34	21	800	34	spec/wasm_cross/mut_param_global_no_reach_in_place.almd
 24	7	284	24	spec/wasm_cross/mut_param_interpolated.almd
 23	11	19880	23	spec/wasm_cross/mut_param_loop_stays_in_place.almd
-69	36	736	69	spec/wasm_cross/mut_param_move_mode_gaps.almd
+86	38	940	86	spec/wasm_cross/mut_param_move_mode_gaps.almd
 182	93	1818	182	spec/wasm_cross/mut_param_nested_place_writeback.almd
+69	25	744	69	spec/wasm_cross/mut_param_pure_result_fn_propagates.almd
 371	293	3607	371	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2	0	32	2	spec/wasm_cross/mut_param_spread_reassign.almd
 19	6	8144	19	spec/wasm_cross/mut_param_tail_recursion.almd
