@@ -627,7 +627,8 @@ fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec
         }
     }
     functions.append(&mut ctx.synthesized_fns);
-    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default() };
+    let operator_requirements = operator_requirement_targets(&mut ctx, env);
+    let mut program = IrProgram { functions, top_lets, type_decls, var_table: ctx.var_table, def_table: ctx.def_table, modules: Vec::new(), type_registry: crate::types::TypeConstructorRegistry::new(), effect_fn_names, effect_map: Default::default(), codegen_annotations: Default::default(), used_stdlib_modules: Default::default(), protocol_conformance_args: Default::default(), operator_requirements };
 
     // Register user-defined types in the type constructor registry (HKT foundation)
     for td in &program.type_decls {
@@ -642,6 +643,34 @@ fn build_ir_program(mut ctx: LowerCtx, functions: Vec<IrFunction>, top_lets: Vec
     }
 
     program
+}
+
+/// The function each operator requirement of a declared conforming type
+/// lowers to (#4099): `(BigInt, add) -> bigint.add`. Lowering desugars an
+/// operator on a concrete conforming type itself; this table is for the
+/// operator written on a type PARAMETER (`fn f[T: Numeric](a: T, b: T) = a + b`),
+/// which monomorphization reaches only once `T` is bound. Keyed by the type's
+/// registered spelling and by its bare name.
+fn operator_requirement_targets(
+    ctx: &mut LowerCtx, env: &TypeEnv,
+) -> std::collections::HashMap<(almide_base::intern::Sym, almide_base::intern::Sym), CallTarget> {
+    use crate::canonicalize::protocols::{NEG_REQUIREMENT, OPERATOR_REQUIREMENTS, ORDER_REQUIREMENT};
+    let methods: Vec<&str> = OPERATOR_REQUIREMENTS.iter().map(|(_, m)| *m)
+        .chain([NEG_REQUIREMENT, ORDER_REQUIREMENT])
+        .collect();
+    let mut names: Vec<almide_base::intern::Sym> = env.type_protocols.keys().copied().collect();
+    names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+    let mut out = std::collections::HashMap::new();
+    for name in names {
+        let ty = Ty::Named(name, vec![]);
+        for method in &methods {
+            let Some(target) = expressions::requirement_call_target(ctx, &ty, method) else { continue };
+            let bare = name.as_str().rsplit_once('.').map_or(name.as_str(), |(_, b)| b);
+            out.insert((name, sym(method)), target.clone());
+            out.entry((sym(bare), sym(method))).or_insert(target);
+        }
+    }
+    out
 }
 
 // Post-processing passes shared by both lower_program and module lowering:
