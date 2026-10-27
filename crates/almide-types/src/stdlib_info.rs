@@ -197,6 +197,7 @@ pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
     ("bigint", "BigInt"),
     ("secret", "Secret"),
     ("value", "Path"),
+    ("ffi", "Region"),
 ];
 
 /// The owning module of a stdlib-owned nominal type, by BARE name — `None`
@@ -621,6 +622,16 @@ pub fn is_memory_unsafe_stdlib_fn(module: &str, func: &str) -> bool {
 /// import line is the one visible place a reader finds raw memory in a file.
 pub const MEMORY_UNSAFE_OPT_IN: &str = "ffi";
 
+/// The `ffi` module's bounds-checked memory view (ADR-0031 D1), declared in
+/// stdlib/ffi.almd. An `@extern(c)` parameter of this type crosses as
+/// (pointer, `size_t` length) and a wasm `@extern` one as (pointer, length);
+/// a return of it needs `@region(len = …, release = "…")`.
+pub const FFI_REGION_TYPE: &str = "Region";
+
+/// The attribute that states a foreign Region's length and release function
+/// on an `@extern` declaration (ADR-0031 D2, D6).
+pub const REGION_ATTR: &str = "region";
+
 /// Every bundled stdlib fn declared `@signals_process` (#4125): it starts no
 /// child but signals or probes a pid, so `[permissions] proc` bounds it as the
 /// `kill` command it used to run. Derived from the one declaration site.
@@ -717,14 +728,13 @@ mod ordered_tests {
     }
 
     #[test]
-    fn the_memory_unsafe_table_is_ffi_and_the_deprecated_bytes_spellings() {
+    fn the_memory_unsafe_table_is_the_ffi_surface() {
         let mut t: Vec<String> = super::memory_unsafe_stdlib_fns().iter().map(|(m, f, _)| format!("{m}.{f}")).collect();
         t.sort();
         assert_eq!(
             t,
             [
-                "bytes.as_mut_ptr", "bytes.as_ptr", "bytes.copy_to_ptr", "bytes.data_ptr", "bytes.from_raw_ptr",
-                "ffi.address", "ffi.read", "ffi.to_int", "ffi.write",
+                "ffi.alloc", "ffi.is_writable", "ffi.len", "ffi.read", "ffi.region", "ffi.to_bytes", "ffi.write",
             ]
         );
         assert!(!super::is_memory_unsafe_stdlib_fn("bytes", "get"));
