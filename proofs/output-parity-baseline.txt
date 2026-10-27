@@ -241,6 +241,7 @@ spec/wasm_cross/composition_fuzz_batch.almd
 spec/wasm_cross/compound_eq.almd
 spec/wasm_cross/compound_repr_interp.almd
 spec/wasm_cross/compound_repr_records_interp.almd
+spec/wasm_cross/compound_repr_recursive_interp.almd
 spec/wasm_cross/const_fold_nonfinite_float.almd
 spec/wasm_cross/container_alias_return.almd
 spec/wasm_cross/control_flow.almd
