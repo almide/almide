@@ -161,7 +161,7 @@ impl Checker {
         self.reject_foreign_opaque_record(&resolve_ty(ty, &self.uf), "destructure");
         if self.env.lookup_ctor_written(name.as_str(), self.current_module_prefix.as_deref()).is_none() {
             let head = self.record_type_canon(name);
-            self.reject_foreign_opaque_record(&Ty::Named(head, vec![]), "destructure");
+            self.reject_foreign_opaque_record(&Ty::Named(head, Default::default()), "destructure");
         }
         let resolved = self.env.resolve_named(ty);
         // Normalize module-qualified names: "varlib.Circle" → "Circle" (mirrors

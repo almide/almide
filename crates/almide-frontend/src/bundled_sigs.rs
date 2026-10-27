@@ -295,7 +295,7 @@ fn build_fn_sig(
     for n in builtin_named {
         known_types.insert(
             crate::canonicalize::resolve::builtin_named_type_key(None, n.as_str()),
-            almide_lang::types::Ty::Named(*n, vec![]),
+            almide_lang::types::Ty::Named(*n, Default::default()),
         );
     }
     let resolver_ctx = if known_types.is_empty() { None } else { Some(&known_types) };

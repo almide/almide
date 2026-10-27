@@ -662,7 +662,7 @@ fn operator_requirement_targets(
     names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
     let mut out = std::collections::HashMap::new();
     for name in names {
-        let ty = Ty::Named(name, vec![]);
+        let ty = Ty::Named(name, Default::default());
         for method in &methods {
             let Some(target) = expressions::requirement_call_target(ctx, &ty, method) else { continue };
             let bare = name.as_str().rsplit_once('.').map_or(name.as_str(), |(_, b)| b);
