@@ -19,9 +19,12 @@
 //! down goes through the `DerefMut` of every list on the path to it, so every
 //! ancestor's cache is cleared too.
 //!
-//! Equality compares pointers first: two references to one shared list are
-//! equal without a walk. `Debug` and serde see a plain list, so printed and
-//! serialized forms are unchanged.
+//! Lists are hash-consed: building a list whose elements equal a live list's
+//! returns that list, so two types built separately but spelled the same
+//! share their structure too, and equality is a pointer comparison in the
+//! common case (a structural compare otherwise, so it is always exact).
+//! `Debug` and serde see a plain list, so printed and serialized forms are
+//! unchanged.
 
 use std::sync::{Arc, OnceLock};
 
@@ -33,6 +36,89 @@ struct Meta {
     size: u64,
     /// An inference variable (`?N`) occurs in some element.
     infer_var: bool,
+    /// Any type variable (a generic `T` or an inference `?N`) occurs.
+    typevar: bool,
+    /// The structural hash of the elements, the interning key.
+    hash: u64,
+}
+
+fn compute_meta(items: &[Ty]) -> Meta {
+    use std::hash::{Hash, Hasher};
+    let mut m = Meta::default();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    items.len().hash(&mut h);
+    for t in items {
+        m.size = m.size.saturating_add(t.tree_size());
+        m.infer_var |= t.has_infer_var();
+        m.typevar |= t.has_typevar();
+        structural_hash(t).hash(&mut h);
+    }
+    m.hash = h.finish();
+    m
+}
+
+/// A hash of `t`'s structure, consistent with `PartialEq`: a shared list
+/// contributes its cached hash, so this is O(1) per list.
+pub(crate) fn structural_hash(t: &Ty) -> u64 {
+    use std::hash::{Hash, Hasher};
+    use super::VariantPayload;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    std::mem::discriminant(t).hash(&mut h);
+    match t {
+        Ty::Applied(id, args) => {
+            id.hash(&mut h);
+            args.node_hash().hash(&mut h);
+        }
+        Ty::Tuple(args) | Ty::Union(args) => args.node_hash().hash(&mut h),
+        Ty::Named(n, args) => {
+            n.hash(&mut h);
+            args.node_hash().hash(&mut h);
+        }
+        Ty::Record { fields } | Ty::OpenRecord { fields } => {
+            for (n, f) in fields {
+                n.hash(&mut h);
+                structural_hash(f).hash(&mut h);
+            }
+        }
+        Ty::Variant { name, cases } => {
+            name.hash(&mut h);
+            for c in cases {
+                c.name.hash(&mut h);
+                match &c.payload {
+                    VariantPayload::Unit => 0u8.hash(&mut h),
+                    VariantPayload::Tuple(ts) => ts.iter().for_each(|x| structural_hash(x).hash(&mut h)),
+                    VariantPayload::Record(fs) => fs.iter().for_each(|(n, x)| {
+                        n.hash(&mut h);
+                        structural_hash(x).hash(&mut h);
+                    }),
+                }
+            }
+        }
+        Ty::Fn { params, ret, is_effect } => {
+            params.iter().for_each(|x| structural_hash(x).hash(&mut h));
+            structural_hash(ret).hash(&mut h);
+            is_effect.hash(&mut h);
+        }
+        Ty::TypeVar(n) => n.hash(&mut h),
+        Ty::ConstParam { name, ty } => {
+            name.hash(&mut h);
+            structural_hash(ty).hash(&mut h);
+        }
+        Ty::ConstValue { ty, value } => {
+            structural_hash(ty).hash(&mut h);
+            value.hash(&mut h);
+        }
+        _ => {}
+    }
+    h.finish()
+}
+
+/// The live lists by structural hash (ADR-0030 D5 hash-consing). Weak, so a
+/// list no type holds any more is freed; dead entries are swept as a bucket
+/// grows.
+fn interner() -> &'static std::sync::Mutex<std::collections::HashMap<u64, Vec<std::sync::Weak<Node>>>> {
+    static T: OnceLock<std::sync::Mutex<std::collections::HashMap<u64, Vec<std::sync::Weak<Node>>>>> = OnceLock::new();
+    T.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
 #[derive(Clone, Default)]
@@ -62,14 +148,12 @@ impl TyVec {
     }
 
     fn meta(&self) -> Meta {
-        *self.0.meta.get_or_init(|| {
-            let mut m = Meta::default();
-            for t in &self.0.items {
-                m.size = m.size.saturating_add(t.tree_size());
-                m.infer_var |= t.has_infer_var();
-            }
-            m
-        })
+        *self.0.meta.get_or_init(|| compute_meta(&self.0.items))
+    }
+
+    /// The structural hash of the elements. O(1) once computed.
+    pub fn node_hash(&self) -> u64 {
+        self.meta().hash
     }
 
     /// Nodes in the elements' subtrees, saturating. O(1) once computed.
@@ -81,6 +165,11 @@ impl TyVec {
     /// computed.
     pub fn has_infer_var(&self) -> bool {
         self.meta().infer_var
+    }
+
+    /// Does any type variable occur in some element? O(1) once computed.
+    pub fn has_typevar(&self) -> bool {
+        self.meta().typevar
     }
 
     /// The same shared list (a pointer comparison).
@@ -140,8 +229,32 @@ impl std::fmt::Debug for TyVec {
 
 impl From<Vec<Ty>> for TyVec {
     fn from(items: Vec<Ty>) -> Self {
+        let meta = compute_meta(&items);
+        // The negative control of the sharing gate builds every list anew.
+        if almide_base::budget::type_sharing_disabled() {
+            almide_base::budget::note_type_list_built();
+            let cell = OnceLock::new();
+            let _ = cell.set(meta);
+            return TyVec(Arc::new(Node { items, meta: cell }));
+        }
+        let mut table = interner().lock().unwrap_or_else(|e| e.into_inner());
+        let bucket = table.entry(meta.hash).or_default();
+        for w in bucket.iter() {
+            if let Some(live) = w.upgrade() {
+                if live.items == items {
+                    return TyVec(live);
+                }
+            }
+        }
+        if bucket.len() >= 8 {
+            bucket.retain(|w| w.strong_count() > 0);
+        }
         almide_base::budget::note_type_list_built();
-        TyVec(Arc::new(Node { items, meta: OnceLock::new() }))
+        let cell = OnceLock::new();
+        let _ = cell.set(meta);
+        let node = Arc::new(Node { items, meta: cell });
+        bucket.push(Arc::downgrade(&node));
+        TyVec(node)
     }
 }
 

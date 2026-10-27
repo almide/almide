@@ -249,6 +249,13 @@ impl Checker {
             (None, None) => {
                 let a_resolved = resolve_ty_keeping_literals(a, &self.uf);
                 let b_resolved = resolve_ty_keeping_literals(b, &self.uf);
+                // Equal types unify. With shared, hash-consed types this is a
+                // pointer comparison, and it keeps a type that references one
+                // subtree many times from being unified once per reference
+                // (ADR-0030 D5).
+                if a_resolved == b_resolved {
+                    return true;
+                }
                 self.unify_structural(&a_resolved, &b_resolved)
             }
         }
