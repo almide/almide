@@ -124,3 +124,27 @@ jobs:
 
       - name: Every re-injected lost instruction is rejected by the witness's checker
         run: bash scripts/witness-reinject.sh ${{ matrix.property }}
+
+  build-certifies:
+    # #4011 (row 3 of the security table): `almide build --target wasm`
+    # judges its own certificate with the installed almide-verify and refuses
+    # to write the artifact on a rejection. Each lost-check bug of
+    # proofs/fixtures/bounds-witness/reinject/ is put back; the build must
+    # refuse with no file written, and write it once the verifier is moved
+    # away.
+    name: A build whose certificate is rejected writes nothing
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: linux-release-${{ env.RUST_TOOLCHAIN }}
+
+      - name: Every re-injected bug makes almide build refuse
+        run: bash scripts/check-build-certifies.sh
