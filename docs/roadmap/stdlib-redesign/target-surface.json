@@ -15,7 +15,7 @@
 {
 "mod": "args",
 "name": "positional",
-"sig": "effect fn args.positional() -> List[String]",
+"sig": "effect fn args.positional(options: List[String]) -> List[String]",
 "kind": "据え置き"
 },
 {
@@ -7799,7 +7799,7 @@
 },
 {
 "name": "positional_at",
-"to": "`list.get(args.positional()!, i)`"
+"to": "`list.get(args.positional(options)!, i)`"
 }
 ],
 "bytes": [
