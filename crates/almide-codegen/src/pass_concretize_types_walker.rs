@@ -545,7 +545,7 @@ fn resolve_node_ty_container(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable
         IrExprKind::Tuple { elements } => {
             let elem_tys: Vec<Ty> = elements.iter().map(|e| e.ty.clone()).collect();
             if elem_tys.iter().any(Ty::has_unresolved_deep) { None }
-            else { Some(Ty::Tuple(elem_tys)) }
+            else { Some(Ty::Tuple(elem_tys.into())) }
         }
         // `some(x)` has type `Option[x.ty]`; recover when the type
         // checker left an `Option[Unknown]` placeholder (typical for

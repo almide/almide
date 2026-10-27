@@ -603,7 +603,7 @@ pub const BUILTIN_TYPE_HEADS: &[BuiltinTypeHead] = &[
     // `Matrix[Float32]` / `Matrix[Float64]`.
     BuiltinTypeHead {
         name: "Matrix", arity: BuiltinArity::Params(&["T"]),
-        build: |ra| Ty::Applied(TypeConstructorId::Matrix, ra.to_vec()),
+        build: |ra| Ty::Applied(TypeConstructorId::Matrix, ra.to_vec().into()),
     },
 ];
 
@@ -842,7 +842,7 @@ fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Optio
     // name; stdlib / local generics stay bare.
     let qualified = known_types.and_then(|types| canonical_user_type_sym(name.as_str(), types, cur_mod));
     if let Some(qn) = qualified {
-        return Ty::Named(qn, ra);
+        return Ty::Named(qn, ra.into());
     }
     // A generic TRANSPARENT alias applied to its arguments (#3403) is its
     // body with each declared letter replaced by its argument, as a
@@ -853,7 +853,7 @@ fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Optio
     if let Some((key, body)) = known_types.and_then(|types| transparent_alias_entry(name.as_str(), types, cur_mod)) {
         let params = known_types.and_then(|types| declared_type_params(key.as_str(), types)).unwrap_or(&[]);
         if params.len() != ra.len() {
-            return Ty::Named(key, ra);
+            return Ty::Named(key, ra.into());
         }
         let bindings: HashMap<Sym, Ty> = params.iter().zip(ra)
             .filter_map(|(p, a)| match p { Ty::TypeVar(v) => Some((*v, a)), _ => None })
@@ -861,7 +861,7 @@ fn resolve_nominal_generic_type_expr(name: &Sym, ra: Vec<Ty>, known_types: Optio
         return almide_lang::types::substitute(body, &bindings);
     }
     let resolved_name = name.as_str().rsplit_once('.').map(|(_, bare)| sym(bare)).unwrap_or(*name);
-    Ty::Named(resolved_name, ra)
+    Ty::Named(resolved_name, ra.into())
 }
 
 // `TypeExpr::Variant { cases, .. }` resolution: lower each AST variant case form

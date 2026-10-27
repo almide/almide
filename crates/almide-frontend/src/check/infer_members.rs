@@ -201,7 +201,7 @@ impl Checker {
                         VariantPayload::Tuple(_) => self.ctor_fn_value_ty(&case, &qualified, qual_ty),
                         VariantPayload::Unit | VariantPayload::Record(_) => {
                             let generic_args = self.instantiate_type_generics(&qualified);
-                            Ty::Named(qual_ty, generic_args)
+                            Ty::Named(qual_ty, generic_args.into())
                         }
                     });
                 }

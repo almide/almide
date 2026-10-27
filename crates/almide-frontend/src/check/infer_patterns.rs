@@ -216,7 +216,7 @@ impl Checker {
             // When the outer call context later resolves ?N, the element vars
             // get their correct types through the constraint chain.
             let elem_vars: Vec<Ty> = elements.iter().map(|_| self.fresh_var()).collect();
-            self.constrain(resolved, Ty::Tuple(elem_vars.clone()), "tuple destructure");
+            self.constrain(resolved, Ty::Tuple(elem_vars.clone().into()), "tuple destructure");
             for (e, ev) in elements.iter().zip(elem_vars.iter()) { self.bind_pattern(e, ev); }
         } else {
             // A CONCRETE non-tuple value under a tuple pattern is a type

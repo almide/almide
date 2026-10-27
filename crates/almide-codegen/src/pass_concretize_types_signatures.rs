@@ -143,13 +143,13 @@ fn merge_more_concrete(a: &Ty, b: &Ty) -> Option<Ty> {
             let merged: Option<Vec<Ty>> = a1.iter().zip(a2.iter())
                 .map(|(x, y)| merge_more_concrete(x, y))
                 .collect();
-            merged.map(|m| Ty::Applied(c1.clone(), m))
+            merged.map(|m| Ty::Applied(c1.clone(), m.into()))
         }
         (Ty::Tuple(e1), Ty::Tuple(e2)) if e1.len() == e2.len() => {
             let merged: Option<Vec<Ty>> = e1.iter().zip(e2.iter())
                 .map(|(x, y)| merge_more_concrete(x, y))
                 .collect();
-            merged.map(Ty::Tuple)
+            merged.map(|m| Ty::Tuple(m.into()))
         }
         (Ty::Fn { is_effect: _, params: p1, ret: r1 }, Ty::Fn { is_effect: _, params: p2, ret: r2 })
             if p1.len() == p2.len() =>
