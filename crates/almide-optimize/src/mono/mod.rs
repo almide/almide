@@ -21,6 +21,7 @@ mod varid_remap;
 mod rewrite;
 mod propagation;
 
+use almide_base::budget::BudgetId;
 use std::collections::HashMap;
 use std::collections::BTreeMap;
 use almide_ir::*;
@@ -60,8 +61,8 @@ pub fn monomorphize(program: &mut IrProgram) {
     }
 
     // Fixed-point loop: transitive monomorphization (A → B → C chains)
-    // Converges when no new instances are discovered. Warns if instance count
-    // exceeds 1000 (possible infinite expansion).
+    // Converges when no new instances are discovered, or stops at the
+    // `generic_instances` budget (ADR-0030).
     // BTreeMap, not HashMap: `new` (below) is iterated to append specialized
     // functions to program.functions, and a function's WASM index is its position
     // there. HashMap iteration order is host-pointer-width AND Sym-intern-order
@@ -90,8 +91,17 @@ pub fn monomorphize(program: &mut IrProgram) {
         if new.is_empty() {
             break; // convergence: no new instances
         }
-        if all_instances.len() + new.len() > 1000 {
-            eprintln!("[WARN] monomorphization: {}+ instances, possible infinite expansion", all_instances.len() + new.len());
+        // ADR-0030: the `generic_instances` budget, and every instance's
+        // type arguments held to `type_size` — polymorphic recursion adds an
+        // instance per round, each type twice the last. The route that ran
+        // this pass reports E112 (`almide_driver::budget_refusal`).
+        let total = (all_instances.len() + new.len()) as u64;
+        almide_base::budget::observe(BudgetId::GenericInstances, total);
+        almide_base::budget::add_work(BudgetId::GenericInstances, new.len() as u64);
+        let type_cap = almide_base::budget::limit(BudgetId::TypeSize);
+        let oversized = new.values().flat_map(|b| b.values()).any(|t| t.size_capped(type_cap) > type_cap);
+        if total > almide_base::budget::limit(BudgetId::GenericInstances) || oversized {
+            almide_base::budget::exceed(BudgetId::GenericInstances, total);
             break;
         }
 
@@ -652,7 +662,21 @@ fn monomorphize_module_fns(program: &mut IrProgram, prune: bool) {
         walk_program_exprs_scoped(program, &mut d);
         let found = std::mem::take(&mut d.out);
         drop(d);
+        // ADR-0030: an instance whose type arguments pass `type_size` stops
+        // the expansion (each round of polymorphic recursion doubles them).
+        let type_cap = almide_base::budget::limit(BudgetId::TypeSize);
+        if found.iter().flat_map(|(_, _, b, _)| b.values()).any(|t| t.size_capped(type_cap) > type_cap) {
+            almide_base::budget::exceed(BudgetId::GenericInstances, seen.len() as u64 + 1);
+            break;
+        }
         if !specialize_discovered(program, found, &mut seen, &mut rename) {
+            break;
+        }
+        // ADR-0030: the same `generic_instances` budget as the top-level loop.
+        let total = seen.len() as u64;
+        almide_base::budget::observe(BudgetId::GenericInstances, total);
+        if total > almide_base::budget::limit(BudgetId::GenericInstances) {
+            almide_base::budget::exceed(BudgetId::GenericInstances, total);
             break;
         }
     }
