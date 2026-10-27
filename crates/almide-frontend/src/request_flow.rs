@@ -323,6 +323,16 @@ impl<'c, 'a> Walk<'c, 'a> {
 
     fn call(&mut self, target: &CallTarget, args: &[IrExpr], site: Option<Span>) {
         let (cx, summaries) = (self.cx, self.summaries);
+        // The sink first: a derived `User.decode` is also a fn of the
+        // program, and its summary must not stand in for the verdict.
+        if let CallTarget::Named { name } = target {
+            if let Some(why) = cx.sink(name.as_str(), self.entry) {
+                if self.any(args) {
+                    self.hits.push(Hit { why, decode: name.to_string(), via: Vec::new(), site });
+                }
+                return;
+            }
+        }
         if let Some(ix) = cx.callee(self.entry.module, target) {
             let s = &summaries[ix];
             let callee = qualified(&cx.fns[ix]);
@@ -344,13 +354,6 @@ impl<'c, 'a> Walk<'c, 'a> {
             CallTarget::Computed { callee } => self.taint(callee),
             _ => false,
         };
-        if let CallTarget::Named { name } = target {
-            if let Some(why) = self.cx.sink(name.as_str(), self.entry) {
-                if self.any(args) {
-                    self.hits.push(Hit { why, decode: name.to_string(), via: Vec::new(), site });
-                }
-            }
-        }
         // A higher-order stdlib call hands its data to the callbacks.
         if tainted_in {
             for a in args {
