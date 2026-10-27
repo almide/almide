@@ -18,7 +18,7 @@ type Order: Decode = { items: List[Item] }
 
 type Command: Decode = | Rename { name: String } | Delete
 
-fn key(k: String) -> String = json.stringify(value.str(k))
+fn key(k: String) -> String = json.stringify(value.string(k))
 
 fn doc(text: String) -> Value = json.parse(text) ?? value.null()
 

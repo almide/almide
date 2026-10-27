@@ -91,7 +91,7 @@ test "control: escape keeps a javascript: URL" {
 }
 
 test "script_json cannot close the script element or break a JS string" {
-  let v = value.object([("x", value.str("</script><script>alert(1)</script>")), ("ls", value.str("a\u{2028}b\u{2029}c&d"))])
+  let v = value.object([("x", value.string("</script><script>alert(1)</script>")), ("ls", value.string("a\u{2028}b\u{2029}c&d"))])
   let out = s(html.script_json(v))
   assert(not string.contains(out, "</script"))
   assert(not string.contains(out, "<"))
@@ -106,6 +106,6 @@ test "script_json cannot close the script element or break a JS string" {
 }
 
 test "control: plain json.stringify closes the script element" {
-  let v = value.object([("x", value.str("</script><script>"))])
+  let v = value.object([("x", value.string("</script><script>"))])
   assert(string.contains(json.stringify(v), "</script>"))
 }

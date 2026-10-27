@@ -119,7 +119,7 @@ import html
 import json
 
 fn main() -> Unit = {
-  let v = value.object([("x", value.str("</script>"))])
+  let v = value.object([("x", value.string("</script>"))])
   println("<script>const d = ${html.to_string(html.script_json(v))}</script>")
 }
 ```

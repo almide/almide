@@ -9,8 +9,8 @@ test "http.response creates plain text response" {
 test "http.html serves SafeHtml as text/html (#4120)" {
   let resp = http.html(200, html.escape("<b>hi</b>"))
   assert_eq(http.body(resp), "&lt;b&gt;hi&lt;/b&gt;")
-  assert_eq(http.get_header(resp, "Content-Type"), some("text/html; charset=utf-8"))
-  assert_eq(http.status_code(resp), 200)
+  assert_eq(http.header(resp, "Content-Type"), some("text/html; charset=utf-8"))
+  assert_eq(http.status(resp), 200)
 }
 
 test "http.json creates json response" {
