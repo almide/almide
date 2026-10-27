@@ -1,7 +1,8 @@
 // @contract: C-055
 // list.sort / list.min / list.max over List[Float] and list.sort_by with a Float
-// key ORDER by IEEE-754 totalOrder (the ordering twin of f64::total_cmp): NaN
-// takes its totalOrder position (greatest, after +inf) and -0.0 < +0.0.
+// key ORDER by IEEE-754 totalOrder (the ordering twin of f64::total_cmp) over
+// NaN-canonicalised values: every NaN orders as the one +qNaN (greatest, after
+// +inf) whatever its sign or producer, and -0.0 < +0.0.
 //
 // Before: native REJECTED Float ordering at compile (`f64: Ord` unsatisfied)
 // while wasm accepted it — and the `sort_by` Float-key path emitted an INVALID
@@ -63,12 +64,8 @@ fn main() -> Unit = {
   println("sort neg: " + fmtf(list.sort(ns)))
   println("min neg:  " + float.to_string(list.min(ns) ?? 99.0))
   println("max neg:  " + float.to_string(list.max(ns) ?? 99.0))
-  // +inf / -inf land at the totalOrder extremes (just inside ±NaN). These have
-  // a DETERMINISTIC sign on all three judges, unlike a divided NaN whose sign is
-  // implementation-defined (rustc const-folds `0.0/0.0` to +NaN, an x86 runtime
-  // `divsd` yields -NaN — see the contract note). NaN's top/bottom position is
-  // exercised in the native/wasm-only path that the contract cites; here we keep
-  // the 3-way-oracle fixture sign-deterministic.
+  // -inf is the least value and +inf the greatest below NaN (nan_rows above
+  // pins NaN after +inf for every producer).
   let inf = 1.0 / 0.0
   let ninf = -1.0 / 0.0
   let ws = [1.0, ninf, -2.0, inf, 0.5]
