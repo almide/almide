@@ -125,7 +125,9 @@ fn unify_union_actual(sig_ty: &Ty, members: &[Ty], bindings: &mut std::collectio
 /// Substitute TypeVars in a type using the collected bindings.
 /// Uses Ty::map_children for uniform recursive traversal.
 pub fn substitute(ty: &Ty, bindings: &std::collections::HashMap<Sym, Ty>) -> Ty {
-    if bindings.is_empty() {
+    // Nothing to substitute in a subtree with no type variable: it is
+    // shared, not copied (ADR-0030 D5).
+    if bindings.is_empty() || !ty.has_typevar() {
         return ty.clone();
     }
     match ty {

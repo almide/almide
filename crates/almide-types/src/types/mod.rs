@@ -316,6 +316,25 @@ impl Ty {
         go(self, f, &mut std::collections::HashSet::new())
     }
 
+    /// Does any type variable (generic or inference) occur in this type? A
+    /// shared element list answers from its cache.
+    pub fn has_typevar(&self) -> bool {
+        match self {
+            Ty::TypeVar(_) => true,
+            Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) | Ty::Named(_, args) => args.has_typevar(),
+            Ty::Fn { params, ret, .. } => params.iter().any(Ty::has_typevar) || ret.has_typevar(),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| t.has_typevar()),
+            Ty::Variant { cases, .. } => cases.iter().any(|c| match &c.payload {
+                VariantPayload::Unit => false,
+                VariantPayload::Tuple(ts) => ts.iter().any(Ty::has_typevar),
+                VariantPayload::Record(fs) => fs.iter().any(|(_, t)| t.has_typevar()),
+            }),
+            Ty::ConstParam { .. } => true,
+            Ty::ConstValue { ty, .. } => ty.has_typevar(),
+            _ => false,
+        }
+    }
+
     /// The element list of a composite type, when it has one.
     pub fn shared_args(&self) -> Option<&TyVec> {
         match self {
@@ -512,21 +531,22 @@ impl Ty {
     /// `is_unresolved()` / `is_unresolved_structural()` unless you specifically
     /// only care about the outermost layer.
     pub fn has_unresolved_deep(&self) -> bool {
-        match self {
-            Ty::Unknown | Ty::TypeVar(_) | Ty::OpenRecord { .. } => true,
-            Ty::Tuple(elems) => elems.iter().any(Self::has_unresolved_deep),
-            Ty::Applied(_, args) => args.iter().any(Self::has_unresolved_deep),
-            Ty::Fn { params, ret, is_effect: _ } => {
-                params.iter().any(Self::has_unresolved_deep) || ret.has_unresolved_deep()
+        // Each shared list is entered once (ADR-0030 D5).
+        fn go(t: &Ty, seen: &mut std::collections::HashSet<usize>) -> bool {
+            match t {
+                Ty::Unknown | Ty::TypeVar(_) | Ty::OpenRecord { .. } => true,
+                Ty::Tuple(elems) | Ty::Applied(_, elems) => seen.insert(elems.ptr_id()) && elems.iter().any(|e| go(e, seen)),
+                Ty::Fn { params, ret, is_effect: _ } => params.iter().any(|e| go(e, seen)) || go(ret, seen),
+                Ty::Record { fields } => fields.iter().any(|(_, e)| go(e, seen)),
+                Ty::Variant { cases, .. } => cases.iter().any(|case| match &case.payload {
+                    VariantPayload::Unit => false,
+                    VariantPayload::Tuple(ts) => ts.iter().any(|e| go(e, seen)),
+                    VariantPayload::Record(fs) => fs.iter().any(|(_, e)| go(e, seen)),
+                }),
+                _ => false,
             }
-            Ty::Record { fields } => fields.iter().any(|(_, t)| t.has_unresolved_deep()),
-            Ty::Variant { cases, .. } => cases.iter().any(|case| match &case.payload {
-                VariantPayload::Unit => false,
-                VariantPayload::Tuple(ts) => ts.iter().any(Self::has_unresolved_deep),
-                VariantPayload::Record(fs) => fs.iter().any(|(_, t)| t.has_unresolved_deep()),
-            }),
-            _ => false,
         }
+        go(self, &mut std::collections::HashSet::new())
     }
 
     /// Construct a normalized union type: flatten nested unions, deduplicate, sort.
