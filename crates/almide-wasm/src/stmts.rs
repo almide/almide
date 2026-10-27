@@ -307,12 +307,16 @@ impl Emitter<'_> {
         Ok(())
     }
 
-    /// `m[k] = v` on a C-319 cell (#3339) — the in-place insert form,
-    /// whose write-back reads the occupant through the cell, releases it
-    /// and stores the functional `set`'s fresh block back. It walled before:
+    /// `m[k] = v` outside the in-place window — the in-place insert form
+    /// (collections.rs `insert`), whose write-back releases the var's
+    /// occupant and stores the functional `set`'s fresh block back, the
+    /// rebind witnessed (`emit_rebind_mut_var_fresh`). On a C-319 cell
+    /// (#3339) it reads the occupant through the cell: that walled before,
     /// a captured-and-written var is such a cell (a module `var` written
-    /// from a callback too), so `seen[k] = v` in a closure was E082.
-    fn lower_cell_map_insert(&mut self, target: &VarId, key: &IrExpr, value: &IrExpr) -> Result<(), EmitError> {
+    /// from a callback too), so `seen[k] = v` in a closure was E082. On a
+    /// `mut` parameter (#2758) a bare `set` + store recorded no rebind, so
+    /// the frame declined (`map-insert:functional`).
+    fn lower_map_insert_writeback(&mut self, target: &VarId, key: &IrExpr, value: &IrExpr) -> Result<(), EmitError> {
         let var_expr = IrExpr { kind: IrExprKind::Var { id: *target }, ty: Ty::Unit, span: None, def_id: None };
         let args = self.owned_call_marks.pin_args(vec![var_expr, key.clone(), value.clone()]);
         self.arm_scope(|em| em.lower_map_call("insert", &args, None))?;
@@ -337,31 +341,15 @@ impl Emitter<'_> {
                 self.lower_field_assign(target, std::slice::from_ref(field), value)
             }
             // `m[k] = v` on a map var — the in-place window when the var
-            // owns its block (#1219), else the same write-back the
-            // in-place insert form runs (functional `set`, rebind).
+            // owns its block (#1219), else the in-place insert form's
+            // write-back (functional `set`, the old occupant released, the
+            // var rebound and the rebind witnessed): a C-319 cell, a `mut`
+            // parameter, a metered frame's var.
             IrStmtKind::MapInsert { target, key, value } => {
                 if self.try_map_set_in_place(target, key, value)? {
                     return Ok(());
                 }
-                if self.cells.contains(target) {
-                    return self.lower_cell_map_insert(target, key, value);
-                }
-                let Some(&(var_idx, _)) = self.locals.get(target) else {
-                    return unsup("map-insert:unmapped");
-                };
-                // #2758: this write-back records no rebind of the var's block.
-                self.witness_decline("map-insert:functional");
-                let var_expr = IrExpr {
-                    kind: IrExprKind::Var { id: *target },
-                    ty: Ty::Unit,
-                    span: None,
-                    def_id: None,
-                };
-                // Pinned: clones whose marks are keyed by address (#3143).
-                let args = self.owned_call_marks.pin_args(vec![var_expr, key.clone(), value.clone()]);
-                self.arm_scope(|em| em.lower_map_call("set", &args, None))?;
-                self.f.instructions().local_set(var_idx);
-                Ok(())
+                self.lower_map_insert_writeback(target, key, value)
             }
             IrStmtKind::Assign { var, value } => self.lower_assign(var, value),
             IrStmtKind::IndexAssign { target, index, value } => {
