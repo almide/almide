@@ -1,0 +1,22 @@
+// A write after free, spelled in the primitive floor. Since ADR-0031 no user
+// program can write through a dangling address (a Region holds its owner),
+// so this control is checked with `--stdlib-authority` on this directory,
+// the grant the stdlib's own sources have: `prim` is not user surface (E085).
+
+// The data address of a buffer that dies when this returns: its block goes
+// back to the allocator's free list, and the address dangles.
+fn dangling() -> Int = prim.handle(bytes.zeros(40)) + 12
+
+fn poke(addr: Int, i: Int) -> Unit = if i >= 8 then () else {
+  prim.store8(addr + i, 9)
+  poke(addr, i + 1)
+}
+
+effect fn main() -> Unit = {
+  let p = dangling()
+  // A use-after-free WRITE through the dangling address.
+  poke(p, 0)
+  // The next request of the same size class takes the freed block back.
+  let c = bytes.zeros(40)
+  println("wrote 8, reused ${bytes.len(c)}")
+}
