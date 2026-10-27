@@ -47,9 +47,11 @@ The tools check this themselves (#4127):
   verifies the attestation with `gh attestation verify`. Without `gh` it
   refuses; `--skip-attestation` installs on the checksum alone and says so.
 - `tools/install.sh` / `tools/install.ps1` refuse a missing or mismatched
-  checksum, and verify the attestation when `gh` is installed. Without `gh`
-  they print the command above, since a `curl | sh` install usually has no
-  `gh`.
+  checksum and verify the attestation with `gh attestation verify`. Without
+  `gh` they refuse, like `self-update`; `--skip-attestation`
+  (`curl … | sh -s -- --skip-attestation`) installs on the checksum alone and
+  says so. `scripts/check-installer-attestation.sh` runs both installers
+  against a stubbed release in CI.
 
 The qualification dossier attached to each release (`almide-dossier-*.md`)
 carries the trust-chain receipts for that tag; it is attested the same way.
