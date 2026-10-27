@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 50 stdlib modules, 1667 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 50 stdlib modules, 1671 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -27,8 +27,8 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [hash](#hash) | 18 | 0 |
 | [heap](#heap) | 16 | 1 |
 | [hex](#hex) | 3 | 0 |
-| [html](#html) | 5 | 0 |
-| [http](#http) | 48 | 4 |
+| [html](#html) | 8 | 0 |
+| [http](#http) | 49 | 4 |
 | [int](#int) | 88 | 0 |
 | [int16](#int16) | 56 | 0 |
 | [int32](#int32) | 58 | 0 |
@@ -724,11 +724,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [html.md](html.md)
 
-- `html.escape(s: String) -> SafeHtml` — s with & < > " ' turned into HTML entities.
+- `html.escape(s: String) -> SafeHtml` — s with & < > " ' turned into HTML entities; text context only.
 - `html.raw(s: String) -> SafeHtml` — s as SafeHtml, unescaped; trusted input only.
 - `html.to_string(h: SafeHtml) -> String` — HTML text inside h, as-is.
 - `html.concat(a: SafeHtml, b: SafeHtml) -> SafeHtml` — a then b as one SafeHtml; nothing re-escaped.
 - `html.empty() -> SafeHtml` — SafeHtml of the empty string.
+- `html.attr(name: String, value: String) -> SafeHtml` — name="value" with value escaped for a double-quoted attribute; aborts on a URL, event-handler or malformed name.
+- `html.url_attr(name: String, url: String) -> SafeHtml` — name="url" escaped, url kept only if relative or http, https or mailto; else about:invalid#almide-blocked.
+- `html.script_json(v: Value) -> SafeHtml` — json.stringify(v) with < > & U+2028 U+2029 as \u escapes; safe inside <script>.
 
 ## http
 
@@ -736,6 +739,7 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 - `effect http.serve(port: Int, f: (HttpRequest) -> Result[HttpResponse, String]) -> Unit` — Serves 0.0.0.0:port forever; handler err is a 500.
 - `http.response(status: Int, body: String) -> HttpResponse` — Reply with Content-Type text/plain.
+- `http.html(status: Int, body: SafeHtml) -> HttpResponse` — Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
 - `http.json(status: Int, body: String) -> HttpResponse` — Reply with Content-Type application/json.
 - `http.with_headers(status: Int, body: String, headers: Map[String, String]) -> HttpResponse` — Reply with headers as-is; no default Content-Type.
 - `http.redirect(url: String) -> HttpResponse` — 302 with Location url and empty body.

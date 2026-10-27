@@ -126,10 +126,10 @@ fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (5 functions)
+## Signature index (8 functions)
 
 ```
-// s with & < > " ' turned into HTML entities.
+// s with & < > " ' turned into HTML entities; text context only.
 // @since 0.18.1 or earlier
 html.escape(s: String) -> SafeHtml
 
@@ -148,6 +148,18 @@ html.concat(a: SafeHtml, b: SafeHtml) -> SafeHtml
 // SafeHtml of the empty string.
 // @since 0.18.1 or earlier
 html.empty() -> SafeHtml
+
+// name="value" with value escaped for a double-quoted attribute; aborts on a URL, event-handler or malformed name.
+// @since unreleased
+html.attr(name: String, value: String) -> SafeHtml
+
+// name="url" escaped, url kept only if relative or http, https or mailto; else about:invalid#almide-blocked.
+// @since unreleased
+html.url_attr(name: String, url: String) -> SafeHtml
+
+// json.stringify(v) with < > & U+2028 U+2029 as \u escapes; safe inside <script>.
+// @since unreleased
+html.script_json(v: Value) -> SafeHtml
 ```
 
 <!-- END GENERATED SIGNATURE INDEX -->
