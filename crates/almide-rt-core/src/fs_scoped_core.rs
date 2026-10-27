@@ -27,15 +27,21 @@
 // No-follow calls (`remove*`, `rename`, `is_symlink`) decide the parent and
 // keep the last name as written, so they act on a link, never through it.
 //
-// Residual windows, by construction of what std exposes: the metadata of an
-// entry the process may not open (EACCES on the read-only open) is taken by
-// the path's lstat after the walk checked the last name is no symlink; an
-// operation on a granted root ITSELF (the empty segment list: removing,
-// renaming or creating the grant's own directory) is made on the root's
-// canonical path. On a platform without the descriptor calls (other than
-// 64-bit Linux and macOS) every call decides and then makes the plain call
-// on the decided path: the pre-#4084 check, which a concurrent rewrite can
-// still race.
+// No path is used once a call is decided. The metadata of an entry the
+// process may not open is taken by descriptor too (`meta_at`: O_PATH on
+// Linux, fstatat on macOS). An operation on a granted root ITSELF (the empty
+// segment list) runs on the root's held descriptor — its metadata, listing,
+// opens — or, for the ops that act on the root's NAME (remove, rename), from
+// the root's parent directory's descriptor after the entry there is checked
+// to be the held root (same device and inode), so a root swapped after the
+// scope opened it is refused rather than acted on. The root's own path is
+// the trust anchor, as a preopened directory's is: it is opened by its
+// canonical path when first needed, and again after the root itself was
+// removed or replaced by a rename. On a platform without the descriptor
+// calls (other than 64-bit Linux and macOS) every scoped call is refused
+// (`fs_beneath_unsupported`), and the toolchain refuses `[permissions] fs`
+// there before it builds (`fs_scope_platform_check`): no check-then-call
+// path remains for a rewrite to race.
 //
 // Splice discipline (lib.rs): no `crate::` paths, no `use` lines; the inline
 // `mod almide_sfs` is the facade both consumers name.
@@ -73,10 +79,11 @@ struct FsScopedRoot {
     /// canonical form); a root that does not exist yet is re-anchored at
     /// every decision, as the scope's own check does.
     path: std::sync::OnceLock<std::path::PathBuf>,
-    /// The root's descriptor, opened on its first use and held for the
-    /// process; a root that does not exist yet is retried at the next call.
+    /// The root's descriptor, opened on its first use and held until the
+    /// root itself is removed or renamed; a root that does not exist yet is
+    /// retried at the next call.
     #[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
-    held: std::sync::OnceLock<std::os::fd::OwnedFd>,
+    held: std::sync::Mutex<Option<std::os::fd::OwnedFd>>,
 }
 
 static FS_SCOPED_CURRENT: std::sync::RwLock<Option<std::sync::Arc<FsScoped>>> = std::sync::RwLock::new(None);
@@ -148,7 +155,7 @@ impl FsScoped {
                     raw: r.clone(),
                     path: std::sync::OnceLock::new(),
                     #[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
-                    held: std::sync::OnceLock::new(),
+                    held: std::sync::Mutex::new(None),
                 })
                 .collect(),
         }
@@ -215,16 +222,45 @@ impl FsScoped {
 /// The descriptor half: 64-bit Linux and macOS.
 #[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
 impl FsScoped {
-    /// The held descriptor of root `i`, opened by its canonical path on the
-    /// first call that needs it.
-    fn held(&self, i: usize) -> std::io::Result<&std::os::fd::OwnedFd> {
-        let r = &self.roots[i];
-        if let Some(fd) = r.held.get() {
-            return Ok(fd);
+    /// The held descriptor of root `i` (a duplicate), opened by its
+    /// canonical path on the first call that needs it.
+    fn held(&self, i: usize) -> std::io::Result<std::os::fd::OwnedFd> {
+        let mut slot = self.roots[i].held.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(fd) = slot.as_ref() {
+            return fd.try_clone();
         }
         let fd: std::os::fd::OwnedFd = std::fs::File::open(self.root_path(i))?.into();
-        let _ = r.held.set(fd);
-        r.held.get().ok_or_else(|| std::io::Error::other("root descriptor"))
+        let out = fd.try_clone();
+        *slot = Some(fd);
+        out
+    }
+
+    /// Forget root `i`'s descriptor: the root itself was removed or renamed.
+    fn release(&self, i: usize) {
+        *self.roots[i].held.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+
+    /// The root `i` as a NAME in its parent: the parent's descriptor and the
+    /// root's last name, for the ops that act on the name (remove, rename).
+    /// When the scope holds the root, the entry under that name must be the
+    /// held directory (same device and inode): a root replaced since is the
+    /// refusal, never acted on.
+    fn root_entry(&self, i: usize) -> std::io::Result<(std::os::fd::OwnedFd, String)> {
+        let p = self.root_path(i);
+        let (Some(parent), Some(name)) = (p.parent(), p.file_name()) else {
+            return Err(fs_scoped_refused());
+        };
+        let name = name.to_string_lossy().into_owned();
+        let pfd: std::os::fd::OwnedFd = std::fs::File::open(parent)?.into();
+        let held = self.roots[i].held.lock().unwrap_or_else(|p| p.into_inner()).as_ref().map(std::os::fd::OwnedFd::try_clone);
+        if let Some(held) = held {
+            let held = std::fs::File::from(held?).metadata()?;
+            let here = almide_fs_beneath_sys::meta_at(std::os::fd::AsFd::as_fd(&pfd), &name)?;
+            if here.is_symlink() || here.identity() != fs_scoped_identity(&held) {
+                return Err(fs_scoped_refused());
+            }
+        }
+        Ok((pfd, name))
     }
 
     /// The directory `<root i>/<segs...>`, walked from the held root
@@ -232,10 +268,10 @@ impl FsScoped {
     fn dir(&self, i: usize, segs: &[String]) -> std::io::Result<std::os::fd::OwnedFd> {
         let root = self.held(i)?;
         if segs.is_empty() {
-            return root.try_clone();
+            return Ok(root);
         }
         let v: Vec<&str> = segs.iter().map(String::as_str).collect();
-        let r = fs_beneath_imp::parent_from(root, &v, false, &mut |_| {});
+        let r = fs_beneath_imp::parent_from(&root, &v, false, &mut |_| {});
         r.map_err(fs_scoped_from_beneath)
     }
 
@@ -252,7 +288,32 @@ impl FsScoped {
         let (i, segs) = self.place(path, true)?.segs()?;
         match segs.split_last() {
             Some((last, parents)) => Self::open_last(&self.dir(i, parents)?, last, how),
-            None => fs_scoped_open_path(&self.root_path(i), how),
+            None => self.open_root(i, how),
+        }
+    }
+
+    /// Root `i` itself opened as `how` says: its held descriptor when the
+    /// open only reads, the same entry re-opened (without following a
+    /// symlink, and checked to be the held one) when it writes, and its path
+    /// only while it does not exist yet — creating it is how it is anchored.
+    fn open_root(&self, i: usize, how: almide_fs_beneath_sys::Open) -> std::io::Result<std::fs::File> {
+        let held = match self.held(i) {
+            Ok(fd) => fd,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return fs_scoped_open_path(&self.root_path(i), how),
+            Err(e) => return Err(e),
+        };
+        let held = std::fs::File::from(held);
+        match how {
+            almide_fs_beneath_sys::Open::Dir | almide_fs_beneath_sys::Open::Read | almide_fs_beneath_sys::Open::Meta => Ok(held),
+            almide_fs_beneath_sys::Open::CreateNew => Err(std::io::Error::from_raw_os_error(17)),
+            _ => {
+                let (pfd, name) = self.root_entry(i)?;
+                let f = Self::open_last(&pfd, &name, how)?;
+                if fs_scoped_identity(&f.metadata()?) != fs_scoped_identity(&held.metadata()?) {
+                    return Err(fs_scoped_refused());
+                }
+                Ok(f)
+            }
         }
     }
 
@@ -263,20 +324,20 @@ impl FsScoped {
     }
 
     /// `path`'s metadata, its symlinks followed by the decision.
-    pub fn metadata(&self, path: &str) -> std::io::Result<std::fs::Metadata> {
+    pub fn metadata(&self, path: &str) -> std::io::Result<FsScopedMeta> {
         let (i, segs) = self.place(path, true)?.segs()?;
         let Some((last, parents)) = segs.split_last() else {
-            return std::fs::metadata(&self.root_path(i));
+            return std::fs::File::from(self.held(i)?).metadata().map(FsScopedMeta::from);
         };
         let dir = self.dir(i, parents)?;
         match Self::open_last(&dir, last, almide_fs_beneath_sys::Open::Meta) {
-            Ok(f) => f.metadata(),
-            // An entry the process may not open: its lstat, once the walk
-            // checked the last name is no symlink (the residual window).
+            Ok(f) => f.metadata().map(FsScopedMeta::from),
+            // An entry the process may not open: described by descriptor,
+            // its last name not followed (a symlink there is the refusal).
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied && !fs_scoped_refused_in(&e.to_string()) => {
-                match almide_fs_beneath_sys::symlink_at(std::os::fd::AsFd::as_fd(&dir), last) {
-                    Ok(false) => std::fs::symlink_metadata(self.joined(i, &segs)),
-                    Ok(true) => Err(fs_scoped_refused()),
+                match almide_fs_beneath_sys::meta_at(std::os::fd::AsFd::as_fd(&dir), last) {
+                    Ok(m) if m.is_symlink() => Err(fs_scoped_refused()),
+                    Ok(m) => Ok(m),
                     Err(_) => Err(e),
                 }
             }
@@ -307,7 +368,15 @@ impl FsScoped {
         let place = self.place(path, true)?;
         let (i, segs) = (place.root, place.segs);
         if segs.is_empty() {
-            return std::fs::create_dir_all(&self.root_path(i));
+            // The root itself: held (it exists) — a directory is done, any
+            // other entry is the plain call's EEXIST; missing, it is created
+            // by its path, which is how a root is anchored.
+            return match self.held(i) {
+                Ok(fd) if std::fs::File::from(fd).metadata()?.is_dir() => Ok(()),
+                Ok(_) => Err(std::io::Error::from_raw_os_error(17)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir_all(&self.root_path(i)),
+                Err(e) => Err(e),
+            };
         }
         let mut cur = self.dir(i, &[])?;
         for (k, seg) in segs.iter().enumerate() {
@@ -344,8 +413,10 @@ impl FsScoped {
     pub fn remove(&self, path: &str, dir: bool) -> std::io::Result<()> {
         let (i, segs) = self.place(path, false)?.segs()?;
         let Some((last, parents)) = segs.split_last() else {
-            let p = &self.root_path(i);
-            return if dir { std::fs::remove_dir(p) } else { std::fs::remove_file(p) };
+            let (pfd, name) = self.root_entry(i)?;
+            almide_fs_beneath_sys::unlink_at(std::os::fd::AsFd::as_fd(&pfd), &name, dir)?;
+            self.release(i);
+            return Ok(());
         };
         almide_fs_beneath_sys::unlink_at(std::os::fd::AsFd::as_fd(&self.dir(i, parents)?), last, dir)
     }
@@ -355,7 +426,10 @@ impl FsScoped {
     pub fn remove_dir_all(&self, path: &str) -> std::io::Result<()> {
         let (i, segs) = self.place(path, false)?.segs()?;
         let Some((last, parents)) = segs.split_last() else {
-            return std::fs::remove_dir_all(&self.root_path(i));
+            let (pfd, name) = self.root_entry(i)?;
+            fs_scoped_remove_entry(&pfd, &name)?;
+            self.release(i);
+            return Ok(());
         };
         let dir = self.dir(i, parents)?;
         fs_scoped_remove_entry(&dir, last)
@@ -365,13 +439,23 @@ impl FsScoped {
     pub fn rename(&self, from: &str, to: &str) -> std::io::Result<()> {
         let (i, a) = self.place(from, false)?.segs()?;
         let (j, b) = self.place(to, false)?.segs()?;
-        match (a.split_last(), b.split_last()) {
-            (Some((la, pa)), Some((lb, pb))) => {
-                let (da, db) = (self.dir(i, pa)?, self.dir(j, pb)?);
-                almide_fs_beneath_sys::rename_at(std::os::fd::AsFd::as_fd(&da), la, std::os::fd::AsFd::as_fd(&db), lb)
+        // Each side as a NAME in a held directory: its parent below the root,
+        // or, for a root itself, the root's parent (checked to hold it).
+        let side = |k: usize, segs: &[String]| -> std::io::Result<(std::os::fd::OwnedFd, String)> {
+            match segs.split_last() {
+                Some((last, parents)) => Ok((self.dir(k, parents)?, last.clone())),
+                None => self.root_entry(k),
             }
-            _ => std::fs::rename(self.joined(i, &a), self.joined(j, &b)),
+        };
+        let ((da, la), (db, lb)) = (side(i, &a)?, side(j, &b)?);
+        almide_fs_beneath_sys::rename_at(std::os::fd::AsFd::as_fd(&da), &la, std::os::fd::AsFd::as_fd(&db), &lb)?;
+        if a.is_empty() {
+            self.release(i);
         }
+        if b.is_empty() {
+            self.release(j);
+        }
+        Ok(())
     }
 
     /// A NEW file at `path` (O_EXCL, 0o600): an existing entry there — a
@@ -398,7 +482,11 @@ impl FsScoped {
     pub fn is_symlink(&self, path: &str) -> bool {
         let Ok((i, segs)) = self.place(path, false).and_then(FsScopedPlace::segs) else { return false };
         let Some((last, parents)) = segs.split_last() else {
-            return self.root_path(i).is_symlink();
+            // The root as a name in its parent (unchecked: a predicate).
+            let p = self.root_path(i);
+            let (Some(parent), Some(name)) = (p.parent(), p.file_name()) else { return false };
+            let Ok(pfd) = std::fs::File::open(parent) else { return false };
+            return matches!(almide_fs_beneath_sys::symlink_at(std::os::fd::AsFd::as_fd(&pfd), &name.to_string_lossy()), Ok(true));
         };
         self.dir(i, parents).is_ok_and(|d| matches!(almide_fs_beneath_sys::symlink_at(std::os::fd::AsFd::as_fd(&d), last), Ok(true)))
     }
@@ -451,49 +539,109 @@ fn fs_scoped_from_beneath(e: FsBeneathError) -> std::io::Error {
     }
 }
 
-/// The path-based half: elsewhere, every call decides and then makes the
-/// plain call on the decided path (racy, see the file header).
+/// An entry's identity: its device and inode.
+#[cfg(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64"))]
+fn fs_scoped_identity(m: &std::fs::Metadata) -> (u64, u64) {
+    (std::os::unix::fs::MetadataExt::dev(m), std::os::unix::fs::MetadataExt::ino(m))
+}
+
+/// Elsewhere: no descriptor calls, so every scoped call is refused, inside
+/// the scope or not (the toolchain refuses the scope before a build there
+/// too). The path-based
+/// check this replaced decided and then made the plain call, which a
+/// concurrent rewrite could race.
 #[cfg(not(all(any(target_os = "linux", target_os = "macos"), target_pointer_width = "64")))]
 impl FsScoped {
-    fn decided(&self, path: &str, follow: bool) -> std::io::Result<std::path::PathBuf> {
-        let (i, segs) = self.place(path, follow)?.segs()?;
-        Ok(self.joined(i, &segs))
+    pub fn open_with(&self, _path: &str, _o: &std::fs::OpenOptions) -> std::io::Result<std::fs::File> {
+        Err(fs_beneath_unsupported())
     }
-    pub fn open_with(&self, path: &str, o: &std::fs::OpenOptions) -> std::io::Result<std::fs::File> {
-        o.open(self.decided(path, true)?)
+    pub fn metadata(&self, _path: &str) -> std::io::Result<FsScopedMeta> {
+        Err(fs_beneath_unsupported())
     }
-    pub fn metadata(&self, path: &str) -> std::io::Result<std::fs::Metadata> {
-        std::fs::metadata(self.decided(path, true)?)
+    pub fn read_dir_names(&self, _path: &str) -> std::io::Result<Vec<std::ffi::OsString>> {
+        Err(fs_beneath_unsupported())
     }
-    pub fn read_dir_names(&self, path: &str) -> std::io::Result<Vec<std::ffi::OsString>> {
-        let mut out = Vec::new();
-        for e in std::fs::read_dir(self.decided(path, true)?)? {
-            out.push(e?.file_name());
-        }
-        Ok(out)
+    pub fn create_dir_all(&self, _path: &str) -> std::io::Result<()> {
+        Err(fs_beneath_unsupported())
     }
-    pub fn create_dir_all(&self, path: &str) -> std::io::Result<()> {
-        let place = self.place(path, true)?;
-        std::fs::create_dir_all(self.joined(place.root, &place.segs))
+    pub fn remove(&self, _path: &str, _dir: bool) -> std::io::Result<()> {
+        Err(fs_beneath_unsupported())
     }
-    pub fn remove(&self, path: &str, dir: bool) -> std::io::Result<()> {
-        let p = self.decided(path, false)?;
-        if dir { std::fs::remove_dir(p) } else { std::fs::remove_file(p) }
+    pub fn remove_dir_all(&self, _path: &str) -> std::io::Result<()> {
+        Err(fs_beneath_unsupported())
     }
-    pub fn remove_dir_all(&self, path: &str) -> std::io::Result<()> {
-        std::fs::remove_dir_all(self.decided(path, false)?)
+    pub fn rename(&self, _from: &str, _to: &str) -> std::io::Result<()> {
+        Err(fs_beneath_unsupported())
     }
-    pub fn rename(&self, from: &str, to: &str) -> std::io::Result<()> {
-        std::fs::rename(self.decided(from, false)?, self.decided(to, false)?)
+    pub fn is_symlink(&self, _path: &str) -> bool {
+        false
     }
-    pub fn is_symlink(&self, path: &str) -> bool {
-        self.decided(path, false).is_ok_and(|p| p.is_symlink())
+    pub fn create_new(&self, _path: &str) -> std::io::Result<std::fs::File> {
+        Err(fs_beneath_unsupported())
     }
-    pub fn create_new(&self, path: &str) -> std::io::Result<std::fs::File> {
-        std::fs::OpenOptions::new().write(true).create_new(true).open(self.decided(path, false)?)
+    pub fn create_dir(&self, _path: &str, _mode: u16) -> std::io::Result<()> {
+        Err(fs_beneath_unsupported())
     }
-    pub fn create_dir(&self, path: &str, _mode: u16) -> std::io::Result<()> {
-        std::fs::create_dir(self.decided(path, false)?)
+}
+
+/// The metadata a scoped call answers (`almide_sfs::metadata`): the fields
+/// the runtime reads, from a `std::fs::Metadata` or, for an entry the process
+/// may not open, from a descriptor-relative stat (`meta_at`).
+#[derive(Debug, Clone)]
+pub struct FsScopedMeta {
+    len: u64,
+    /// 1 file, 2 directory, 3 symlink, 0 anything else.
+    kind: u8,
+    modified: Option<std::time::SystemTime>,
+    /// Device and inode ((0, 0) where the platform does not say).
+    identity: (u64, u64),
+}
+
+impl FsScopedMeta {
+    /// From a `st_mode` (its S_IFMT bits), a size, a modification time and
+    /// the device and inode.
+    pub fn from_mode(mode: u32, len: u64, modified: Option<std::time::SystemTime>, identity: (u64, u64)) -> Self {
+        let kind = match mode & 0o170000 {
+            0o100000 => 1,
+            0o040000 => 2,
+            0o120000 => 3,
+            _ => 0,
+        };
+        FsScopedMeta { len, kind, modified, identity }
+    }
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+    pub fn is_file(&self) -> bool {
+        self.kind == 1
+    }
+    pub fn is_dir(&self) -> bool {
+        self.kind == 2
+    }
+    pub fn is_symlink(&self) -> bool {
+        self.kind == 3
+    }
+    pub fn modified(&self) -> std::io::Result<std::time::SystemTime> {
+        self.modified.ok_or_else(|| std::io::Error::from(std::io::ErrorKind::Unsupported))
+    }
+    /// Device and inode, when the platform says (unix).
+    pub fn identity(&self) -> (u64, u64) {
+        self.identity
+    }
+}
+
+impl From<std::fs::Metadata> for FsScopedMeta {
+    fn from(m: std::fs::Metadata) -> Self {
+        let t = m.file_type();
+        let kind = if t.is_symlink() { 3 } else if t.is_dir() { 2 } else if t.is_file() { 1 } else { 0 };
+        #[cfg(unix)]
+        let identity = (std::os::unix::fs::MetadataExt::dev(&m), std::os::unix::fs::MetadataExt::ino(&m));
+        #[cfg(not(unix))]
+        let identity = (0, 0);
+        FsScopedMeta { len: m.len(), kind, modified: m.modified().ok(), identity }
     }
 }
 
@@ -647,9 +795,11 @@ pub mod almide_sfs {
         std::io::Write::write_all(&mut File::create(p)?, data.as_ref())
     }
 
-    pub fn metadata<P: AsRef<std::path::Path>>(p: P) -> std::io::Result<std::fs::Metadata> {
+    /// `std::fs::metadata`'s answer as [`super::FsScopedMeta`], whose `len`,
+    /// `is_dir`, `is_file` and `modified` are the ones the runtime reads.
+    pub fn metadata<P: AsRef<std::path::Path>>(p: P) -> std::io::Result<super::FsScopedMeta> {
         match scope() {
-            None => std::fs::metadata(p),
+            None => std::fs::metadata(p).map(super::FsScopedMeta::from),
             Some(sc) => sc.metadata(&s(p.as_ref())),
         }
     }
@@ -847,6 +997,21 @@ pub mod almide_sfs {
         }
         fn __almide_s_is_symlink(&self) -> bool {
             is_symlink(self)
+        }
+    }
+
+    impl FsScopedPathExt for super::FsScopedMeta {
+        fn __almide_s_exists(&self) -> bool {
+            true
+        }
+        fn __almide_s_is_dir(&self) -> bool {
+            self.is_dir()
+        }
+        fn __almide_s_is_file(&self) -> bool {
+            self.is_file()
+        }
+        fn __almide_s_is_symlink(&self) -> bool {
+            self.is_symlink()
         }
     }
 

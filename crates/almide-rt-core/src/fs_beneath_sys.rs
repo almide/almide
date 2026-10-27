@@ -14,8 +14,10 @@
 // descriptor returned is owned (close-on-exec).
 //
 // Platforms: Linux and macOS on 64-bit targets, whose flag values and
-// `struct dirent` layouts are spelled below. Elsewhere `FD_BENEATH` is false
-// and the core falls back to its path-based check (racy, as before #4084).
+// `struct dirent` / `struct stat` layouts are spelled below. Elsewhere
+// `FS_BENEATH_SUPPORTED` is false and every rooted or scoped call is refused
+// (fs_beneath_core.rs), and the toolchain refuses `[permissions] fs` before a
+// build: there is no path-based check left to race.
 //
 // Splice discipline (lib.rs): no `crate::` paths, no `use` lines; the one
 // inline `mod` carries the lint allowance.
@@ -42,6 +44,16 @@ mod almide_fs_beneath_sys {
         pub const O_DIRECTORY: i32 = 0x10_0000;
         pub const O_CLOEXEC: i32 = 0x100_0000;
         pub const AT_REMOVEDIR: i32 = 0x80;
+        pub const AT_SYMLINK_NOFOLLOW: i32 = 0x20;
+        /// `struct stat` (64-bit inode): dev i32 @0, mode u16 @4, nlink u16 @6,
+        /// ino u64 @8, uid @16, gid @20, rdev @24, the four timespecs from @32
+        /// (mtime @48), size i64 @96, blocks @104, blksize @112, flags, gen,
+        /// lspare, qspare[2]: 144 bytes.
+        pub const STAT_SIZE: usize = 144;
+        pub const STAT_MODE: usize = 4;
+        pub const STAT_INO: usize = 8;
+        pub const STAT_MTIME: usize = 48;
+        pub const STAT_SIZE_AT: usize = 96;
         /// `struct dirent` (64-bit inode): ino u64, seekoff u64, reclen u16, namlen u16, type u8, name.
         pub const DIRENT_NAME: usize = 21;
     }
@@ -56,6 +68,9 @@ mod almide_fs_beneath_sys {
         pub const O_DIRECTORY: i32 = 0o40000;
         pub const O_NOFOLLOW: i32 = 0o100000;
         pub const O_CLOEXEC: i32 = 0o2000000;
+        /// A descriptor that names the entry without opening it for I/O: no
+        /// read permission on the entry is needed, and fstat answers it.
+        pub const O_PATH: i32 = 0o10000000;
         pub const AT_REMOVEDIR: i32 = 0x200;
         /// `struct dirent` on 64-bit glibc and musl: ino u64, off i64, reclen u16, type u8, name.
         pub const DIRENT_NAME: usize = 19;
@@ -71,6 +86,9 @@ mod almide_fs_beneath_sys {
         pub const O_DIRECTORY: i32 = 0o200000;
         pub const O_NOFOLLOW: i32 = 0o400000;
         pub const O_CLOEXEC: i32 = 0o2000000;
+        /// A descriptor that names the entry without opening it for I/O: no
+        /// read permission on the entry is needed, and fstat answers it.
+        pub const O_PATH: i32 = 0o10000000;
         pub const AT_REMOVEDIR: i32 = 0x200;
         /// `struct dirent` on 64-bit glibc and musl: ino u64, off i64, reclen u16, type u8, name.
         pub const DIRENT_NAME: usize = 19;
@@ -101,6 +119,9 @@ mod almide_fs_beneath_sys {
         fn __errno_location() -> *mut CInt;
         #[cfg(target_os = "macos")]
         fn __error() -> *mut CInt;
+        #[cfg(target_os = "macos")]
+        #[cfg_attr(target_arch = "x86_64", link_name = "fstatat$INODE64")]
+        fn fstatat(dirfd: CInt, path: *const std::ffi::c_char, buf: *mut u8, flags: CInt) -> CInt;
     }
 
     fn cname(name: &str) -> std::io::Result<std::ffi::CString> {
@@ -117,7 +138,7 @@ mod almide_fs_beneath_sys {
     }
 
     /// How a single entry is opened, never following a symlink at it.
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, PartialEq, Eq)]
     pub enum Open {
         /// A directory to walk or list.
         Dir,
@@ -255,6 +276,43 @@ mod almide_fs_beneath_sys {
         unsafe {
             *__error() = v;
         }
+    }
+
+    /// The metadata of the entry `name` under `dir` itself (a symlink there
+    /// is described, not followed), taken by descriptor without opening the
+    /// entry for I/O — so an entry the process may not read is described
+    /// too, with no path involved. Linux: an O_PATH | O_NOFOLLOW descriptor
+    /// and its fstat. macOS: fstatat(AT_SYMLINK_NOFOLLOW) on `dir`.
+    #[cfg(target_os = "linux")]
+    pub fn meta_at(dir: std::os::fd::BorrowedFd<'_>, name: &str) -> std::io::Result<super::FsScopedMeta> {
+        let c = cname(name)?;
+        let how = flags::O_PATH | flags::O_NOFOLLOW | flags::O_CLOEXEC;
+        // SAFETY: as in `open_at`; O_PATH reads no mode argument.
+        let fd = owned(unsafe { openat(std::os::fd::AsRawFd::as_raw_fd(&dir), c.as_ptr(), how) })?;
+        std::fs::File::from(fd).metadata().map(super::FsScopedMeta::from)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn meta_at(dir: std::os::fd::BorrowedFd<'_>, name: &str) -> std::io::Result<super::FsScopedMeta> {
+        let c = cname(name)?;
+        let mut buf = [0u8; flags::STAT_SIZE];
+        // SAFETY: `buf` is a live, writable buffer of `struct stat`'s size on
+        // this platform (64-bit inodes); `c` and `dir` as in `open_at`.
+        let r = unsafe { fstatat(std::os::fd::AsRawFd::as_raw_fd(&dir), c.as_ptr(), buf.as_mut_ptr(), flags::AT_SYMLINK_NOFOLLOW) };
+        if r < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let at = |o: usize| i64::from_ne_bytes(buf[o..o + 8].try_into().unwrap_or([0; 8]));
+        let mode = u16::from_ne_bytes([buf[flags::STAT_MODE], buf[flags::STAT_MODE + 1]]);
+        let (secs, nanos) = (at(flags::STAT_MTIME), at(flags::STAT_MTIME + 8));
+        let modified = if secs >= 0 {
+            std::time::UNIX_EPOCH.checked_add(std::time::Duration::new(secs as u64, nanos.clamp(0, 999_999_999) as u32))
+        } else {
+            std::time::UNIX_EPOCH.checked_sub(std::time::Duration::from_secs(secs.unsigned_abs()))
+        };
+        let dev = i32::from_ne_bytes([buf[0], buf[1], buf[2], buf[3]]) as u64;
+        let ino = at(flags::STAT_INO) as u64;
+        Ok(super::FsScopedMeta::from_mode(u32::from(mode), at(flags::STAT_SIZE_AT).max(0) as u64, modified, (dev, ino)))
     }
 
     /// Linux openat2(2): `rel` (segments joined by `/`) under `dir` as a
