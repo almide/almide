@@ -1,6 +1,6 @@
 // io extern — Rust native implementations
 
-use std::io::Write;
+use std::io::Write as _;
 
 // The stdout buffer, `almide_stdout_flush`, `almide_stdout_write_fmt` and
 // `almide_stdout_write_bytes` live in the runtime PRELUDE (#2245: every

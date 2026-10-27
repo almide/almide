@@ -1,6 +1,5 @@
 // fs extern — Rust native implementations (platform layer: native only, no WASM)
 
-use std::path::Path;
 
 // #2090 — a host call that fails at the syscall names ITSELF and the operand
 // that identifies it, then the platform's own text verbatim as a SUFFIX:
@@ -445,7 +444,7 @@ pub fn almide_rt_fs_list_dir(path: &str) -> Result<Vec<AlmideString>, AlmideStri
 // Delete
 pub fn almide_rt_fs_remove(path: &str) -> Result<(), AlmideString> {
     let __almide_r: Result<(), String> = (|| {
-        let p = Path::new(path);
+        let p = std::path::Path::new(path);
         if p.is_dir() { std::fs::remove_dir(path).map_err(|e| io_err("fs.remove", &fs_q(path), e)) }
         else { std::fs::remove_file(path).map_err(|e| io_err("fs.remove", &fs_q(path), e)) }
     })();
@@ -453,7 +452,7 @@ pub fn almide_rt_fs_remove(path: &str) -> Result<(), AlmideString> {
 }
 pub fn almide_rt_fs_remove_all(path: &str) -> Result<(), AlmideString> {
     let __almide_r: Result<(), String> = (|| {
-        let p = Path::new(path);
+        let p = std::path::Path::new(path);
         if p.is_dir() { std::fs::remove_dir_all(path).map_err(|e| io_err("fs.remove_all", &fs_q(path), e)) }
         else { std::fs::remove_file(path).map_err(|e| io_err("fs.remove_all", &fs_q(path), e)) }
     })();
@@ -472,7 +471,7 @@ pub fn almide_rt_fs_copy(src: &str, dst: &str) -> Result<(), AlmideString> {
         // wasm leg's self-hosted copy reads its source first, and std::fs::copy's
         // own InvalidInput text carries no errno. The embedded host's twin is
         // host_fs.rs `fs_copy_or_rename`.
-        if Path::new(src).is_dir() {
+        if std::path::Path::new(src).is_dir() {
             if let Err(e) = std::fs::read(src) {
                 return Err(io_err("fs.copy", &args, e));
             }
@@ -490,10 +489,10 @@ pub fn almide_rt_fs_copy(src: &str, dst: &str) -> Result<(), AlmideString> {
 pub fn almide_rt_fs_rename(src: &str, dst: &str) -> Result<(), AlmideString> { let __almide_r: Result<(), String> = (|| { std::fs::rename(src, dst).map_err(|e| io_err("fs.rename", &format!("{}, {}", fs_q(src), fs_q(dst)), e)) })(); __almide_r.map_err(Into::into) }
 
 // Predicates
-pub fn almide_rt_fs_exists(path: &str) -> bool { Path::new(path).exists() }
-pub fn almide_rt_fs_is_dir(path: &str) -> bool { Path::new(path).is_dir() }
-pub fn almide_rt_fs_is_file(path: &str) -> bool { Path::new(path).is_file() }
-pub fn almide_rt_fs_is_symlink(path: &str) -> bool { Path::new(path).is_symlink() }
+pub fn almide_rt_fs_exists(path: &str) -> bool { std::path::Path::new(path).exists() }
+pub fn almide_rt_fs_is_dir(path: &str) -> bool { std::path::Path::new(path).is_dir() }
+pub fn almide_rt_fs_is_file(path: &str) -> bool { std::path::Path::new(path).is_file() }
+pub fn almide_rt_fs_is_symlink(path: &str) -> bool { std::path::Path::new(path).is_symlink() }
 
 pub fn almide_rt_fs_stat(path: &str) -> Result<AlmideFileStat, AlmideString> {
     let __almide_r: Result<AlmideFileStat, String> = (|| {
@@ -529,7 +528,7 @@ pub fn almide_rt_fs_walk(dir: &str) -> Result<Vec<AlmideString>, AlmideString> {
     let __almide_v: Result<Vec<String>, AlmideString> = {
         let __almide_r: Result<Vec<String>, String> = (|| {
             let mut results = Vec::new();
-            walk_recursive(Path::new(dir), &mut results)?;
+            walk_recursive(std::path::Path::new(dir), &mut results)?;
             results.sort();
             Ok(results)
         })();
@@ -541,7 +540,7 @@ pub fn almide_rt_fs_walk(dir: &str) -> Result<Vec<AlmideString>, AlmideString> {
 // A symlink is an entry, never a level (#4143): the descriptor walk of
 // almide-rt-core opens each directory from its parent with O_NOFOLLOW, so a
 // link to the outside lists nothing outside and a link loop cannot repeat.
-fn walk_recursive(dir: &Path, results: &mut Vec<String>) -> Result<(), String> {
+fn walk_recursive(dir: &std::path::Path, results: &mut Vec<String>) -> Result<(), String> {
     let d = dir.to_string_lossy();
     let rels = fs_walk_nofollow(&d, None).map_err(|(rel, e)| io_err("fs.walk", &fs_q(&fs_walk_join(&d, &rel)), e))?;
     results.extend(rels.iter().map(|r| fs_walk_join(&d, r).replace('\\', "/")));
@@ -572,17 +571,17 @@ pub fn almide_rt_fs_glob(pattern: &str) -> Result<Vec<AlmideString>, AlmideStrin
             let pats = &segs[k..];
             let base = format!("{}{}", if absolute { "/" } else { "" }, segs[..k].join("/"));
             if pats.is_empty() {
-                let hit = !base.is_empty() && Path::new(&base).exists();
+                let hit = !base.is_empty() && std::path::Path::new(&base).exists();
                 return Ok(if hit { vec![base] } else { Vec::new() });
             }
-            if !base.is_empty() && !Path::new(&base).is_dir() { return Ok(Vec::new()); }
+            if !base.is_empty() && !std::path::Path::new(&base).is_dir() { return Ok(Vec::new()); }
             let root = if base.is_empty() { "." } else { base.as_str() };
             let prefix = if base.is_empty() || base == "/" { base.clone() } else { format!("{}/", base) };
             let depth = if pats.iter().any(|p| *p == "**") { None } else { Some(pats.len()) };
             let mut results = Vec::new();
             if !base.is_empty() && glob_segs_match(pats, &[]) { results.push(base.clone()); }
             let mut rels = Vec::new();
-            glob_walk(Path::new(root), "", depth, &mut rels)?;
+            glob_walk(std::path::Path::new(root), "", depth, &mut rels)?;
             for rel in rels {
                 let rsegs: Vec<&str> = rel.split('/').collect();
                 if glob_segs_match(pats, &rsegs) { results.push(format!("{}{}", prefix, rel)); }
@@ -600,7 +599,7 @@ pub fn almide_rt_fs_glob(pattern: &str) -> Result<Vec<AlmideString>, AlmideStrin
 // only), `None` unbounded.
 // The same no-follow walk as fs.walk (#4143): a symlinked directory is
 // matched as an entry and never descended.
-fn glob_walk(dir: &Path, rel_prefix: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), String> {
+fn glob_walk(dir: &std::path::Path, rel_prefix: &str, depth: Option<usize>, out: &mut Vec<String>) -> Result<(), String> {
     let d = dir.to_string_lossy();
     let rels = fs_walk_nofollow(&d, depth).map_err(|(rel, e)| io_err("fs.glob", &fs_q(&fs_walk_join(&d, &rel)), e))?;
     out.extend(rels.into_iter().map(|r| if rel_prefix.is_empty() { r } else { format!("{}/{}", rel_prefix, r) }));

@@ -55,7 +55,7 @@ fn run_inline(tag: &str, source: &str) -> (bool, String, String) {
 
 fn assert_user_type_builds(tag: &str, source: &str, expected_stdout: &str) {
     let (ok, stdout, stderr) = run_inline(tag, source);
-    for code in ["E0428", "E0574", "E0560", "E0170", "E0308"] {
+    for code in ["E0428", "E0255", "E0574", "E0560", "E0170", "E0308"] {
         assert!(!stderr.contains(code), "user type `{tag}` collided with the runtime again ({code}):\n{stderr}");
     }
     assert!(
@@ -188,5 +188,85 @@ fn runtime_twins_keep_their_repr_equality_and_patterns() {
         stdout,
         "3 true true\nfile\n0 ProcessStatus { code: 0, stdout: \"\", stderr: \"\" } true\n",
         "twin repr / equality / pattern output drifted:\nstderr={stderr}"
+    );
+}
+
+/// Run `almide <args>` in `dir`; returns (success, stdout, stderr).
+fn almide_in(dir: &Path, args: &[&str]) -> (bool, String, String) {
+    let out = Command::new(almide_bin()).args(args).current_dir(dir).output().expect("failed to spawn almide");
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).to_string(),
+        String::from_utf8_lossy(&out.stderr).to_string(),
+    )
+}
+
+/// #4282: the fs runtime opened with a crate-level `use std::path::Path;`,
+/// and a package module that uses `value.Path` gets the stdlib newtype
+/// emitted at the same level as `pub struct Path(..)` — so the native test
+/// build of a module holding both was E0255 (then E0117 / E0609 / E0277) at
+/// rustc while the wasm leg passed. The shape is almide-shell's: a user enum
+/// with a `Path(String)` case (#4275) beside fs and value paths. The runtime
+/// spells std items by full path now, and the build script refuses a
+/// name-binding crate-level `use` in any runtime source. Native and wasm must
+/// both pass the test file and print the same thing from a main.
+#[test]
+fn package_module_with_fs_and_value_path_builds_natively_and_agrees_with_wasm() {
+    let dir = std::env::temp_dir().join(format!("almd_4282_pkg_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("almide.toml"), "[package]\nname = \"p4282\"\nversion = \"0.0.1\"\n").unwrap();
+    std::fs::write(
+        dir.join("src/a.almd"),
+        "import fs\n\ntype Arg = | Str(String) | Path(String)\n\nfn name(a: Arg) -> String = match a {\n  Path(s) => s,\n  Str(s) => s,\n}\n\neffect fn here() -> Bool = fs.exists(\".\")\n\nfn dig() -> Int = {\n  let v = value.object([(\"a\", value.int(7))])\n  let got = value.get_path(v, value.key(value.root(), \"a\")) ?? value.int(0)\n  value.as_int(got) ?? -1\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src/a_test.almd"),
+        "import self.a as a\n\ntest \"fs and value.Path in one native build\" {\n  assert_eq(a.name(a.Path(\"/x\")), \"/x\")\n  assert_eq(a.dig(), 7)\n  assert(a.here()!)\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("main.almd"),
+        "import self.a as a\n\neffect fn main() -> Unit = {\n  let n = a.name(a.Path(\"/x\"))\n  let h = a.here()!\n  println(\"${n} ${a.dig()} ${h}\")\n}\n",
+    )
+    .unwrap();
+    let mut runs = Vec::new();
+    for target in [None, Some("wasm")] {
+        let leg = target.unwrap_or("native");
+        let mut test_args = vec!["test", "src/a_test.almd"];
+        let mut run_args = vec!["run", "main.almd"];
+        if let Some(t) = target {
+            test_args.extend(["--target", t]);
+            run_args.extend(["--target", t]);
+        }
+        for args in [&test_args, &run_args] {
+            let (ok, stdout, stderr) = almide_in(&dir, args);
+            for code in ["E0255", "E0117", "E0609", "E0277"] {
+                assert!(!stderr.contains(code) && !stdout.contains(code), "[{leg}] `almide {}` collided again ({code}):\n{stdout}\n{stderr}", args.join(" "));
+            }
+            assert!(ok, "[{leg}] `almide {}` failed:\nstdout={stdout}\nstderr={stderr}", args.join(" "));
+        }
+        let (_, stdout, _) = almide_in(&dir, &run_args);
+        runs.push(stdout);
+    }
+    std::fs::remove_dir_all(&dir).ok();
+    assert_eq!(runs[0], "/x 7 true\n", "native main output");
+    assert_eq!(runs[0], runs[1], "native and wasm disagree");
+}
+
+/// The rest of the #4282 class: the names the random (`Cell`) and zlib
+/// (`Compression`, `Status`, …) runtimes used to import at the crate root.
+#[test]
+fn user_types_named_after_formerly_imported_std_and_crate_items_build() {
+    assert_user_type_builds(
+        "Cell",
+        "import random\ntype Cell = { n: Int }\neffect fn main() -> Unit = {\n  let x = Cell { n: 7 }\n  println(\"${x.n} ${random.int(3, 3)}\")\n}\n",
+        "7 3\n",
+    );
+    assert_user_type_builds(
+        "Status",
+        "import zlib\ntype Status = { n: Int }\ntype Compression = { n: Int }\neffect fn main() -> Unit = {\n  let x = Status { n: 7 }\n  let y = Compression { n: 8 }\n  let c = zlib.compress(bytes.from_string(\"hello\"))!\n  let d = zlib.decompress(c)!\n  println(\"${x.n} ${y.n} ${bytes.len(d)}\")\n}\n",
+        "7 8 5\n",
     );
 }

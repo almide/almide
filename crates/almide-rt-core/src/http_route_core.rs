@@ -549,13 +549,13 @@ fn http_dial(
     host: &str,
     port: u16,
     timeout: &dyn Fn() -> Option<std::time::Duration>,
-) -> Result<TcpStream, HttpDialError> {
+) -> Result<std::net::TcpStream, HttpDialError> {
     let addrs = std::net::ToSocketAddrs::to_socket_addrs(&(host, port)).map_err(|_| HttpDialError::Resolve)?;
     let mut last: Option<std::io::Error> = None;
     for addr in addrs {
         let dialed = match timeout() {
-            Some(t) => TcpStream::connect_timeout(&addr, t),
-            None => TcpStream::connect(addr),
+            Some(t) => std::net::TcpStream::connect_timeout(&addr, t),
+            None => std::net::TcpStream::connect(addr),
         };
         match dialed {
             Ok(s) => return Ok(s),
@@ -569,7 +569,7 @@ fn http_dial(
 /// timeout, and the read (and write) timeout `read_default_secs`, both
 /// overridable by ALMIDE_HTTP_TIMEOUT_SECS. A failed dial is `u`'s dns,
 /// timeout or connect text (a proxy's dial adds which proxy).
-fn http_client_open(u: &AlmideHttpUrl, read_default_secs: u64) -> Result<(TcpStream, AlmideHttpRoute), String> {
+fn http_client_open(u: &AlmideHttpUrl, read_default_secs: u64) -> Result<(std::net::TcpStream, AlmideHttpRoute), String> {
     let connect_timeout = client_read_timeout(30);
     let io_timeout = client_read_timeout(read_default_secs);
     http_open_route(u, &mut |host, port| {

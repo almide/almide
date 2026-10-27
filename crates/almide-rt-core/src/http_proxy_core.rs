@@ -140,8 +140,8 @@ fn http_cidr_contains(net: std::net::IpAddr, bits: u32, ip: std::net::IpAddr) ->
 /// failures; the handshakes below read under the timeouts it set.
 fn http_open_route(
     u: &AlmideHttpUrl,
-    dial: &mut dyn FnMut(&str, u16) -> Result<TcpStream, String>,
-) -> Result<(TcpStream, AlmideHttpRoute), String> {
+    dial: &mut dyn FnMut(&str, u16) -> Result<std::net::TcpStream, String>,
+) -> Result<(std::net::TcpStream, AlmideHttpRoute), String> {
     let direct = AlmideHttpRoute { target: u.target.clone(), proxy_auth: None };
     let Some(p) = http_proxy_for(u)? else {
         return Ok((dial(&u.host, u.port)?, direct));
@@ -174,7 +174,7 @@ fn http_proxy_io(p: &AlmideHttpProxy, e: &std::io::Error) -> String {
 /// `CONNECT host:port` through an HTTP proxy (RFC 9110 §9.3.6); any 2xx
 /// opens the tunnel. The answer is read a byte at a time so nothing past its
 /// blank line is consumed.
-fn http_proxy_tunnel(s: &mut TcpStream, u: &AlmideHttpUrl, p: &AlmideHttpProxy) -> Result<(), String> {
+fn http_proxy_tunnel(s: &mut std::net::TcpStream, u: &AlmideHttpUrl, p: &AlmideHttpProxy) -> Result<(), String> {
     let hp = u.host_port();
     let mut req = format!("CONNECT {} HTTP/1.1\r\nHost: {}\r\n", hp, hp);
     if let Some((user, pass)) = &p.userinfo {
@@ -205,7 +205,7 @@ fn http_proxy_tunnel(s: &mut TcpStream, u: &AlmideHttpUrl, p: &AlmideHttpProxy) 
 }
 
 /// The SOCKS5 greeting, optional RFC 1929 login and CONNECT (RFC 1928).
-fn http_socks5_connect(s: &mut TcpStream, u: &AlmideHttpUrl, p: &AlmideHttpProxy, remote_dns: bool) -> Result<(), String> {
+fn http_socks5_connect(s: &mut std::net::TcpStream, u: &AlmideHttpUrl, p: &AlmideHttpProxy, remote_dns: bool) -> Result<(), String> {
     let io = |e: std::io::Error| http_proxy_io(p, &e);
     http_socks5_greet(s, p)?;
     let req = http_socks5_request(u, p, remote_dns)?;
@@ -236,7 +236,7 @@ fn http_socks5_fail(p: &AlmideHttpProxy, why: &str) -> String {
 }
 
 /// The method negotiation, and the RFC 1929 login when the proxy asks for it.
-fn http_socks5_greet(s: &mut TcpStream, p: &AlmideHttpProxy) -> Result<(), String> {
+fn http_socks5_greet(s: &mut std::net::TcpStream, p: &AlmideHttpProxy) -> Result<(), String> {
     let fail = |why: &str| http_socks5_fail(p, why);
     let io = |e: std::io::Error| http_proxy_io(p, &e);
     let greeting: &[u8] = if p.userinfo.is_some() { &[5, 2, 0, 2] } else { &[5, 1, 0] };

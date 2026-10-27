@@ -4,11 +4,7 @@
 // reaching before the start of a stream is refused rather than read as the
 // empty window's zeros (#4268).
 
-use flate2::{Compression, Crc};
-use miniz_oxide::inflate::core::{decompress as miniz_inflate, inflate_flags, DecompressorOxide};
-use miniz_oxide::inflate::TINFLStatus;
-use flate2::read::{ZlibEncoder, DeflateEncoder, GzEncoder};
-use std::io::Read;
+use std::io::Read as _;
 
 // ── Zlib (with header) ──
 
@@ -18,8 +14,8 @@ pub fn almide_rt_zlib_compress(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
 
 pub fn almide_rt_zlib_compress_level(data: &[u8], level: i64) -> Result<Vec<u8>, AlmideString> {
     let __almide_r: Result<Vec<u8>, String> = (|| {
-        let lvl = Compression::new(level.clamp(0, 9) as u32);
-        let mut encoder = ZlibEncoder::new(data, lvl);
+        let lvl = flate2::Compression::new(level.clamp(0, 9) as u32);
+        let mut encoder = flate2::read::ZlibEncoder::new(data, lvl);
         let mut out = Vec::new();
         encoder.read_to_end(&mut out)
             .map_err(|e| format!("zlib.compress: {}", e))?;
@@ -47,8 +43,8 @@ pub fn almide_rt_zlib_deflate(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
 
 pub fn almide_rt_zlib_deflate_level(data: &[u8], level: i64) -> Result<Vec<u8>, AlmideString> {
     let __almide_r: Result<Vec<u8>, String> = (|| {
-        let lvl = Compression::new(level.clamp(0, 9) as u32);
-        let mut encoder = DeflateEncoder::new(data, lvl);
+        let lvl = flate2::Compression::new(level.clamp(0, 9) as u32);
+        let mut encoder = flate2::read::DeflateEncoder::new(data, lvl);
         let mut out = Vec::new();
         encoder.read_to_end(&mut out)
             .map_err(|e| format!("zlib.deflate: {}", e))?;
@@ -81,7 +77,7 @@ fn zlib_inflate_capped(data: &[u8], max: u64) -> Result<Vec<u8>, AlmideString> {
 
 pub fn almide_rt_zlib_gzip(data: &[u8]) -> Result<Vec<u8>, AlmideString> {
     let __almide_r: Result<Vec<u8>, String> = (|| {
-        let mut encoder = GzEncoder::new(data, Compression::default());
+        let mut encoder = flate2::read::GzEncoder::new(data, flate2::Compression::default());
         let mut out = Vec::new();
         encoder.read_to_end(&mut out)
             .map_err(|e| format!("zlib.gzip: {}", e))?;
@@ -172,15 +168,15 @@ fn zlib_raw_inflate(data: &[u8], start: usize, out: &mut Vec<u8>, max: u64) -> R
     let input = data.get(start..).unwrap_or(&[]);
     let room = max.saturating_sub(out.len() as u64).saturating_add(1);
     let mut buf = vec![0u8; room.min(64 * 1024) as usize];
-    let mut inf = DecompressorOxide::new();
+    let mut inf = miniz_oxide::inflate::core::DecompressorOxide::new();
     let (mut in_pos, mut out_pos) = (0usize, 0usize);
     loop {
-        let (status, n_in, n_out) = miniz_inflate(
+        let (status, n_in, n_out) = miniz_oxide::inflate::core::decompress(
             &mut inf,
             &input[in_pos..],
             &mut buf,
             out_pos,
-            inflate_flags::TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF,
+            miniz_oxide::inflate::core::inflate_flags::TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF,
         );
         in_pos += n_in;
         out_pos += n_out;
@@ -188,15 +184,15 @@ fn zlib_raw_inflate(data: &[u8], start: usize, out: &mut Vec<u8>, max: u64) -> R
             return Err(ZlibDecodeError::Exceeds(max));
         }
         match status {
-            TINFLStatus::Done => {
+            miniz_oxide::inflate::TINFLStatus::Done => {
                 out.extend_from_slice(&buf[..out_pos]);
                 return Ok(start + in_pos);
             }
-            TINFLStatus::HasMoreOutput => {
+            miniz_oxide::inflate::TINFLStatus::HasMoreOutput => {
                 let grown = (buf.len() as u64).saturating_mul(2).min(room) as usize;
                 buf.resize(grown, 0);
             }
-            TINFLStatus::NeedsMoreInput | TINFLStatus::FailedCannotMakeProgress => {
+            miniz_oxide::inflate::TINFLStatus::NeedsMoreInput | miniz_oxide::inflate::TINFLStatus::FailedCannotMakeProgress => {
                 return Err(ZlibDecodeError::Text(ZLIB_INCOMPLETE));
             }
             _ => return Err(ZlibDecodeError::Text(ZLIB_CORRUPT)),
@@ -205,7 +201,7 @@ fn zlib_raw_inflate(data: &[u8], start: usize, out: &mut Vec<u8>, max: u64) -> R
 }
 
 fn zlib_crc32(bytes: &[u8]) -> u32 {
-    let mut crc = Crc::new();
+    let mut crc = flate2::Crc::new();
     crc.update(bytes);
     crc.sum()
 }

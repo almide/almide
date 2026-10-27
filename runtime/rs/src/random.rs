@@ -2,7 +2,6 @@
 // int/float/choice/shuffle use a per-thread xorshift seeded from OS entropy
 // (#4122; not for secrets); random.bytes reads the OS CSPRNG (getrandom / getentropy).
 
-use std::cell::Cell;
 
 // The seed (#4122): std's `RandomState` draws its SipHash keys from the OS
 // CSPRNG (getrandom / getentropy / BCryptGenRandom) once per THREAD, and that
@@ -19,7 +18,7 @@ fn almide_rng_seed() -> u64 {
 }
 
 thread_local! {
-    static ALMIDE_RNG_STATE: Cell<u64> = Cell::new(almide_rng_seed());
+    static ALMIDE_RNG_STATE: std::cell::Cell<u64> = std::cell::Cell::new(almide_rng_seed());
 }
 
 fn next_u64() -> u64 {

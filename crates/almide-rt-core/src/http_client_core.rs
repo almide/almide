@@ -16,8 +16,8 @@
 // so the TLS types are written fully qualified (no rustls/Arc imports to
 // collide or strand a cfg attribute), and the io/net imports here are the
 // COMPLEMENT of http.rs's (which keeps BufRead/BufReader/TcpListener).
-use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::io::Read as _;
+use std::io::Write as _;
 
 // URL, request head, proxies, dial limits and TLS trust: one include, so
 // this file stays under the 1000-line limit.
@@ -48,7 +48,7 @@ pub fn client_read_timeout(default_secs: u64) -> Option<std::time::Duration> {
 /// Errors are `url`'s classified texts. Whether a response that ENDED is whole
 /// is the caller's question (`http_parse_response`), because it depends on
 /// the request method.
-pub fn read_response_tolerant(stream: &mut impl Read, url: &str, max: Option<usize>) -> Result<Vec<u8>, String> {
+pub fn read_response_tolerant(stream: &mut impl std::io::Read, url: &str, max: Option<usize>) -> Result<Vec<u8>, String> {
     let mut response = Vec::new();
     let mut buf = [0u8; 8192];
     let mut head_whole = false;
@@ -93,7 +93,7 @@ pub fn read_response_tolerant(stream: &mut impl Read, url: &str, max: Option<usi
 /// SA_RESTART or not (signal(7)) — the SIGCHLD of a process the program spawns
 /// while a call is in flight is one. Taken as the end of the exchange, it
 /// turned a whole response into `malformed or incomplete response`.
-pub fn http_read_retrying<R: Read + ?Sized>(r: &mut R, buf: &mut [u8]) -> std::io::Result<usize> {
+pub fn http_read_retrying<R: std::io::Read + ?Sized>(r: &mut R, buf: &mut [u8]) -> std::io::Result<usize> {
     loop {
         match r.read(buf) {
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -245,8 +245,8 @@ pub fn decode_chunked_bytes(body: &[u8]) -> Result<Vec<u8>, String> {
 pub fn make_tls_stream(
     host: &str,
     url: &str,
-    mut stream: TcpStream,
-) -> Result<rustls::StreamOwned<rustls::ClientConnection, TcpStream>, String> {
+    mut stream: std::net::TcpStream,
+) -> Result<rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream>, String> {
     let config = http_tls_config()?;
     let server_name = rustls::pki_types::ServerName::try_from(host.to_string())
         .map_err(|_| http_error_text(HttpErrorClass::Tls, url))?;
@@ -307,7 +307,7 @@ pub fn http_parse_response(response: &[u8], head_request: bool) -> Result<HttpRa
 }
 
 /// Write the prepared request and read the whole response.
-pub fn http_exchange_raw(stream: &mut (impl Read + Write), url: &str, request: &[u8]) -> Result<Vec<u8>, String> {
+pub fn http_exchange_raw(stream: &mut (impl std::io::Read + std::io::Write), url: &str, request: &[u8]) -> Result<Vec<u8>, String> {
     stream.write_all(request).map_err(|e| http_io_error_text(url, &e))?;
     read_response_tolerant(stream, url, client_max_response_bytes())
 }

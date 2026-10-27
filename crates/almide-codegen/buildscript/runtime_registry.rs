@@ -21,6 +21,42 @@ fn reject_unterminated_test_block(path: &Path, content: &str) -> io::Result<()> 
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
 }
 
+/// Refuse a crate-root `use` that BINDS a name (#4282). Every runtime module is spliced
+/// flat into the generated crate, so `use std::path::Path;` put `Path` beside the
+/// stdlib's own `pub struct Path` (value.Path) and rustc rejected the program (E0255).
+/// A runtime source names an outside item by its full path instead; the only top-level
+/// `use` forms allowed are the ones that bind nothing a later item can collide with:
+/// a trait brought in anonymously (`use std::io::Write as _;`) and a glob
+/// (`pub use almide_libm::*;`, which any crate item legally shadows). A `use` inside a
+/// function or a nested `mod` is local and unaffected.
+fn reject_name_binding_use(path: &Path, content: &str) -> io::Result<()> {
+    for (n, line) in content.lines().enumerate() {
+        if line.starts_with(' ') || line.starts_with('\t') {
+            continue;
+        }
+        let t = line.trim();
+        let rest = match t.strip_prefix("pub use ").or_else(|| t.strip_prefix("use ")) {
+            Some(r) => r,
+            None => continue,
+        };
+        let r = rest.trim_end_matches(';').trim();
+        if r.ends_with("as _") || r.ends_with("::*") {
+            continue;
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{}:{}: `{t}` binds a name in the generated crate's root, where it can collide \
+                 with an Almide type of the same name (#4282). Spell the item by its full path \
+                 (`std::path::Path`), or import a trait as `use … as _;`.",
+                path.display(),
+                n + 1
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Read a runtime source file, INLINING any `include!("X.rs")` directive with the
 /// referenced file's content (resolved relative to this file's directory), recursively.
 /// The runtime is embedded as ONE source string per module and assembled by
@@ -92,6 +128,7 @@ pub fn generate(workspace_root: &Path, out_dir: &Path) -> io::Result<()> {
         let stem = module_name(&entry.path())?;
         let content = read_with_includes(&entry.path())?;
         reject_unterminated_test_block(&entry.path(), &content)?;
+        reject_name_binding_use(&entry.path(), &content)?;
         rust_out.push_str(&format!("    (\"{stem}\", {content:?}),\n"));
     }
     rust_out.push_str("];\n\n");

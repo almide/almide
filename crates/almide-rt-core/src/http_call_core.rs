@@ -77,7 +77,7 @@ pub struct AlmideHttpCallState {
     /// `Some` once the call is over: `Ok` = a complete response.
     outcome: Option<Result<(), String>>,
     /// A duplicate of the connection, kept only to shut it down.
-    socket: Option<TcpStream>,
+    socket: Option<std::net::TcpStream>,
 }
 
 pub struct AlmideHttpCallShared {
@@ -390,19 +390,19 @@ fn http_call_run(
 
 /// The stream a call reads and writes, and the TCP socket under it — the one
 /// the per-step timeouts must be set on (see `http_call_run`).
-trait AlmideHttpCallSock: Read + Write {
-    fn tcp(&self) -> &TcpStream;
+trait AlmideHttpCallSock: std::io::Read + std::io::Write {
+    fn tcp(&self) -> &std::net::TcpStream;
 }
 
-impl AlmideHttpCallSock for TcpStream {
-    fn tcp(&self) -> &TcpStream {
+impl AlmideHttpCallSock for std::net::TcpStream {
+    fn tcp(&self) -> &std::net::TcpStream {
         self
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl AlmideHttpCallSock for rustls::StreamOwned<rustls::ClientConnection, TcpStream> {
-    fn tcp(&self) -> &TcpStream {
+impl AlmideHttpCallSock for rustls::StreamOwned<rustls::ClientConnection, std::net::TcpStream> {
+    fn tcp(&self) -> &std::net::TcpStream {
         &self.sock
     }
 }
