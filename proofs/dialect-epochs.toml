@@ -376,6 +376,16 @@ breaks = [
   "a negative count is 0 and a range bound clamps into [0, len] (#4147, C-054): `list.take(xs, -1)` and `string.take(s, -1)` are empty where they returned everything, `list.drop` / `string.drop` with a negative count keep everything where they returned nothing, `take_end` / `drop_end` likewise, `list.slice`, `bytes.slice` and `matrix.slice_rows` read a negative start or end as 0 (a negative start was the empty result, a negative end ran to the end), `list.split_at(xs, -1)` is `([], xs)`; `bytes.take` / `drop` / `take_end` / `drop_end` / `split_at` and `string.split_at` answer the same way where they aborted",
   "`list.chunk` / `list.windows` / `list.window` with a negative size abort with `Error: chunk size must be positive` / `Error: window size must be positive` and exit 1, like a size of 0, where a negative chunk size answered the whole list as one chunk and a negative window size the empty list (#4147, C-129)",
   "`args.positional` and `args.positional_at` take the names of the options the program reads (`args.positional([\"out\"])`, `args.positional_at(0, [])`), and the argument after a named `--option` is that option's value, not a positional (#4144, C-181): `--out report.txt input.txt` with `[\"out\"]` is `[\"input.txt\"]`; a call without the list is an arity error",
+  "the type `RawPtr` → rewrite as `Handle`: an opaque foreign token, only passed back to an `@extern` fn (ADR-0031 D1); an `@extern(c)` fn returning a buffer the program reads returns `Region` with `@region(len = …, release = \"…\")` instead (D2)",
+  "`ffi.address(b)` → rewrite as `ffi.region(b)`: a read-only Region of `b` carrying its length and keeping `b` alive (ADR-0031 D1, D2)",
+  "`ffi.to_int(p)` → delete the call: an address has no `Int` form (ADR-0031 D7); hand the Region itself to the `@extern` fn, which receives its base and length",
+  "`bytes.data_ptr(b)` → rewrite as `ffi.region(b)`: a wasm `@extern` takes the Region and receives `(base, len)`, so its `(ptr: Int, len: Int)` parameters become one `Region` parameter (ADR-0031 D3, D7)",
+  "`bytes.as_ptr(b)` → rewrite as `ffi.region(b)`: the read-only Region of `b` (ADR-0031 D2)",
+  "`bytes.as_mut_ptr(b)` → rewrite as `ffi.alloc(bytes.len(b))!` and `ffi.write(r, 0, b)!`: a writable Region is a fresh allocation, never a view of a Bytes value, so a write cannot change a `let` (ADR-0031 D4, #3966); read it back with `ffi.to_bytes(r)!`",
+  "`bytes.from_raw_ptr(p, n)` → rewrite as `ffi.read(r, 0, n)!` with `r` a Region: the read is checked against the region's length (ADR-0031 D1)",
+  "`bytes.copy_to_ptr(b, p, cap)` → rewrite as `ffi.write(r, 0, b)!` with `r` a writable Region from `ffi.alloc`: the write is checked against the region's length and permission (ADR-0031 D1, D4)",
+  "`ffi.read` and `ffi.write` take a `Region` and an offset (ADR-0031 D1, D5): `ffi.read(r, off, n)` answers `err` unless `0 <= off` and `off + n <= ffi.len(r)`, and `ffi.write(r, off, b)` answers `Result[Unit, String]`, `err` for a read-only region or a write that does not fit — where they took a raw address and a caller-typed length, and `write` returned a clamped count. List indexing still aborts (C-067)",
+  "an `@extern(c)` parameter of type `Region` crosses as two C arguments, the pointer and its `size_t` length (ADR-0031 D3), and an `@extern(wasm)` one as `(base, len)`; an `@extern(c)` fn returning `Region` without `@region(len = …, release = \"…\")` is E090 (D2), and the runtime calls the named release function once, when the last copy of the region drops (D6)",
 ]
 
 # DEPRECATIONS — spellings accepted for a window, with the epoch that removes them
@@ -384,15 +394,6 @@ breaks = [
 # A window is a [[deprecation]] block: id, issue, since_epoch, since,
 # removal_epoch, summary, removal. `legacy-native-callback-names` (#3425,
 # since epoch 10) reached its removal_epoch 14 and is a break of epoch 14 above.
-
-[[deprecation]]
-id = "bytes-raw-pointers-to-ffi"
-issue = 3853
-since_epoch = 15
-since = "0.69.0"
-removal_epoch = 16
-summary = "The five `bytes` raw-pointer functions are `@deprecated` (E052) in favour of the `ffi` module, which needs `import ffi` (R-ffi-01). `ffi.read` / `ffi.write` are effect fns (R-ffi-02) and `ffi.write` takes the address first (R-ffi-03)."
-removal = "`bytes.as_ptr(b)` / `bytes.as_mut_ptr(b)` → `ffi.address(b)`; `bytes.data_ptr(b)` → `ffi.to_int(ffi.address(b))` (0 for an empty b); `bytes.from_raw_ptr(p, n)` → `ffi.read(p, n)` from an effect fn; `bytes.copy_to_ptr(b, p, c)` → `ffi.write(p, b, c)` from an effect fn — each with `import ffi`"
 
 [[deprecation]]
 id = "numeric-renames-wave-2"

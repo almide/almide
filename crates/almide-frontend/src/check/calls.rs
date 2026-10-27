@@ -1110,8 +1110,9 @@ impl Checker {
     // rather than a rename.
     fn unresolved_call_hint(&self, name: &str) -> (String, Option<String>, Option<&'static str>) {
         // A spelling a dialect epoch removed: say where it went (or that the
-        // call is deleted), as the ledger records it. No fix-it — the new
-        // spelling needs a dependency and an import, not a rename.
+        // call is deleted), as the ledger records it. The fix-it, when the
+        // rewrite is a pure rename, is attached by the caller
+        // (`removed_spellings::same_shape_rename`).
         if let Some(removal) = crate::removed_spellings::lookup(name) {
             return (crate::removed_spellings::hint(removal), None, None);
         }
@@ -1204,7 +1205,13 @@ impl Checker {
             }
         }
         // `try_replace` (Phase 3): when the hint is a clean rename and the callee's source span is available, emit both a concise `try` and the exact replacement range so `Diagnostic::apply_try_to` can rewrite the source. Rich multi-line snippets (conversion wrappers, operator suggestions) stay display-only via `with_try`.
-        if let Some(rich) = rich_snippet {
+        // A dialect-epoch removal whose ledger rewrite keeps the argument list
+        // (`ffi.address(b)` → `ffi.region(b)`, ADR-0031): the callee rename IS
+        // the edit, so `almide fix` applies it unattended.
+        let removal_rename = crate::removed_spellings::same_shape_rename(name);
+        if let (Some(to), Some(span)) = (&removal_rename, self.callee_span_hint) {
+            diag = diag.with_machine_fix(span.line, span.col, span.end_col, to.clone());
+        } else if let Some(rich) = rich_snippet {
             diag = diag.with_try(rich.to_string());
         } else if let (Some(fix), Some(span)) = (&fix_name, self.callee_span_hint) {
             // Almide `Span::end_col` is the column one past the last char (same convention as lexer emit — `end_col = col + token_len`). `apply_try_to` wants the exclusive upper bound, so use `end_col` directly.
