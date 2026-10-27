@@ -60,6 +60,20 @@ fn call_form(n: Int) -> Int = {
   b.n
 }
 
+// The #4260 probe's own shape: `b` is never read after the loop, so its one
+// syntactic read is the reassignment's rhs. The loop bumps that read into the
+// always-clone class, and the reassignment cloned the whole Box every step
+// (27 s at 20k) while the `call` row above, which reads `b.n` afterwards, moved.
+fn call_dead(n: Int) -> Int = {
+  var b = Box { m: [:], n: 0 }
+  var i = 0
+  while i < n {
+    b = add(b, i)
+    i = i + 1
+  }
+  i
+}
+
 fn empty() -> R = R { xs: [], s: "", m: [:], n: 0 }
 
 fn list_field(n: Int) -> Int = {
@@ -95,6 +109,7 @@ effect fn main() -> Unit = {
   let n = int.parse(list.get(args, 1) ?? "0") ?? 0
   let r = match list.get(args, 0) ?? "" {
     "call" => call_form(n),
+    "call_dead" => call_dead(n),
     "list" => list_field(n),
     "str" => str_field(n),
     "map" => map_field(n),
@@ -143,7 +158,7 @@ fn four_times_the_updates_is_not_sixteen_times_the_time() {
     // start, dominates the in-place reading; a small run over 2 s is already
     // no linear reading (the copying list row needs ~9 s at 100k).
     let (n, big) = (100_000u64, 400_000u64);
-    for shape in ["call", "list", "str", "map", "fold_rec", "fold_str"] {
+    for shape in ["call", "call_dead", "list", "str", "map", "fold_rec", "fold_str"] {
         let small = best_of_three(&bin, shape, n);
         assert!(small < Duration::from_secs(2), "{shape}: {n} updates took {small:?} — the update copies the collection");
         let large = best_of_three(&bin, shape, big);
