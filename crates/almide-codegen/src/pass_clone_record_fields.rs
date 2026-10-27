@@ -67,11 +67,52 @@ pub(super) fn rewrite_spread(base: IrExpr, fields: Vec<(Sym, IrExpr)>, ctx: &mut
     IrExprKind::SpreadRecord { base: Box::new(new_base), fields: new_fields }
 }
 
+/// `x = { ...x, f: g(x.f), n: x.n + 1 }` (#4261): the update is the rhs of
+/// `x`'s own reassignment, so its base read is `x`'s last use before the
+/// statement overwrites it — even inside a loop, where the liveness walk sees
+/// the next iteration's read and clones the base (the whole record, every
+/// collection in it) and every field read off it. When every occurrence of
+/// `x` in the initializers is a plain field read (the rule
+/// [`rewrite_spread`] applies to a dying base), the base moves and each
+/// named field read exactly once moves into its initializer:
+/// `r = { ...r, xs: r.xs + [i] }` appends to the moved `xs` in place, as
+/// the plain-var `xs = xs + [i]` does. `None`: not that shape.
+pub(super) fn rewrite_spread_reassign(var: VarId, value: &IrExpr, ctx: &mut CloneCtx) -> Option<IrExpr> {
+    let IrExprKind::SpreadRecord { base, fields } = &value.kind else { return None };
+    if !matches!(base.kind, IrExprKind::Var { id } if id == var) {
+        return None;
+    }
+    let movable = movable_fields_of(var, fields, ctx)?;
+    let IrExprKind::SpreadRecord { base, fields } = value.clone().kind else { unreachable!() };
+    let mut new_fields: Vec<_> = fields.into_iter().map(|(k, v)| (k, insert_clones_live(v, ctx))).collect();
+    for (_, v) in &mut new_fields {
+        strip_field_clones(v, var, &movable);
+    }
+    // The walk still visits the base (it counts `x`'s remaining uses), but
+    // the base stays the bare var: the reassignment overwrites it right after.
+    let walked = insert_clones_live(*base, ctx);
+    let base = match walked.kind {
+        IrExprKind::Clone { expr } => expr,
+        _ => Box::new(walked),
+    };
+    let kind = IrExprKind::SpreadRecord { base, fields: new_fields };
+    Some(IrExpr { kind, ty: value.ty.clone(), span: value.span, def_id: value.def_id })
+}
+
 fn spread_movable_fields(base: &IrExpr, fields: &[(Sym, IrExpr)], ctx: &CloneCtx) -> Option<(VarId, HashSet<Sym>)> {
     let IrExprKind::Var { id } = base.kind else { return None };
-    if !ctx.owned.contains(&id) || ctx.always.contains(&id) || ctx.captured.contains(&id)
-        || ctx.loops.binders.contains(&id)
-    {
+    if ctx.loops.binders.contains(&id) {
+        return None;
+    }
+    let movable = movable_fields_of(id, fields, ctx)?;
+    (!movable.is_empty()).then_some((id, movable))
+}
+
+/// The named fields of `{ ...id, … }` whose single plain read `id.f` may move
+/// once the base moves — `None` when `id` is not an owned, uncaptured local or
+/// some occurrence of it in the initializers is not a plain field read.
+fn movable_fields_of(id: VarId, fields: &[(Sym, IrExpr)], ctx: &CloneCtx) -> Option<HashSet<Sym>> {
+    if !ctx.owned.contains(&id) || ctx.always.contains(&id) || ctx.captured.contains(&id) {
         return None;
     }
     let mut reads: HashMap<Sym, u32> = HashMap::new();
@@ -85,11 +126,10 @@ fn spread_movable_fields(base: &IrExpr, fields: &[(Sym, IrExpr)], ctx: &CloneCtx
         count_field_reads(e, id, &mut reads);
     }
     let named: HashSet<Sym> = fields.iter().map(|(k, _)| *k).collect();
-    let movable: HashSet<Sym> = reads.into_iter()
+    Some(reads.into_iter()
         .filter(|(f, n)| *n == 1 && named.contains(f))
         .map(|(f, _)| f)
-        .collect();
-    (!movable.is_empty()).then_some((id, movable))
+        .collect())
 }
 
 /// How many `b.f` nodes (the field read directly off the variable) each

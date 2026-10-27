@@ -120,6 +120,9 @@ pub(super) fn insert_clones_member(object: IrExpr, field: Sym, ty: Ty, span: Opt
 pub(super) fn insert_clones_reassign(var: VarId, value: IrExpr, ctx: &mut CloneCtx) -> IrStmtKind {
     let local = ctx.owned.contains(&var) && !ctx.always.contains(&var) && !ctx.captured.contains(&var);
     let value = if local { interp_as_append(value, var, None) } else { value };
+    if let Some(value) = super::pass_clone_record_fields::rewrite_spread_reassign(var, &value, ctx) {
+        return IrStmtKind::Assign { var, value };
+    }
     let movable = local && reads_once_plainly(&value, var);
     let mut value = insert_clones_live(value, ctx);
     if movable {
