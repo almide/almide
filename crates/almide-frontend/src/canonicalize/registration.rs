@@ -557,7 +557,11 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
         env.fn_visibility.insert(sym(&key), visibility);
     }
     if let Some(s) = span {
-        env.fn_decl_spans.insert(sym(&key), (s.line, s.col));
+        // The declaring module is the file the position is relative to: the
+        // prefixed pass names it, `infer_module`'s unprefixed one runs under
+        // `alias_owner_module` (#4271).
+        let module = prefix.map(sym).or(env.alias_owner_module);
+        env.fn_decl_spans.insert(sym(&key), crate::type_env::FnDeclSite { line: s.line, col: s.col, module });
     }
     if min_p < params.len() {
         env.fn_min_params.insert(sym(&key), min_p);
