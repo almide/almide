@@ -1,0 +1,93 @@
+// html's context builders (#4120, security row 11e): each probe payload from
+// the issue goes through the builder for its context, and the markup that
+// comes out cannot add an attribute, carry a `javascript:` URL or close the
+// <script> element early. Each `control` test runs the same payload through
+// `html.escape`, the text-context escape, and shows the property failing —
+// so a builder that silently degraded to `escape` would fail its own test.
+import html
+import json
+import testing
+
+fn s(h: SafeHtml) -> String = html.to_string(h)
+
+// The value part of `name="value"`: everything between the first `="` and
+// the final `"`. It must hold no `"` (which would end the attribute) and no
+// `<` or `>` (which would end or open a tag).
+fn value_part(markup: String) -> String = {
+  let start = (string.index_of(markup, "=\"") ?? 0) + 2
+  string.slice(markup, start, string.len(markup) - 1)
+}
+
+fn attr_value_contained(markup: String) -> Bool = {
+  let v = value_part(markup)
+  string.ends_with(markup, "\"") and not string.contains(v, "\"") and not string.contains(v, "<") and not string.contains(v, ">")
+}
+
+test "attr quotes and escapes, so a value cannot add an attribute" {
+  let m = s(html.attr("class", "x\" onmouseover=\"alert(1)"))
+  assert_eq(m, "class=\"x&quot; onmouseover=&quot;alert(1)\"")
+  assert(attr_value_contained(m))
+  let unquoted = s(html.attr("class", "x onmouseover=alert(1)"))
+  assert_eq(unquoted, "class=\"x onmouseover=alert(1)\"")
+  assert(attr_value_contained(unquoted))
+  assert_eq(s(html.attr("data-id", "<b>&'")), "data-id=\"&lt;b&gt;&amp;&#39;\"")
+}
+
+test "attr and url_attr refuse a name whose value is a URL, script or style" {
+  testing.assert_aborts("html.attr: `href` takes a URL; use html.url_attr", () => html.attr("href", "x"))
+  testing.assert_aborts("html.attr: `onclick` runs script or styles", () => html.attr("onclick", "x"))
+  testing.assert_aborts("html.attr: `style` runs script or styles", () => html.attr("style", "x"))
+  testing.assert_aborts("is not an attribute name", () => html.attr("a b", "x"))
+  testing.assert_aborts("is not an attribute name", () => html.attr("x=\"y\"", "x"))
+  testing.assert_aborts("html.url_attr: `onload` runs script or styles", () => html.url_attr("onload", "https://e.com"))
+}
+
+test "control: escape alone writes no quotes, so an unquoted attribute gains a handler" {
+  let v = s(html.escape("x onmouseover=alert(1)"))
+  assert_eq(v, "x onmouseover=alert(1)")
+  assert(not string.starts_with(v, "\""))
+}
+
+test "url_attr keeps http, https, mailto and relative URLs" {
+  assert_eq(s(html.url_attr("href", "https://example.com/a?b=1&c=2")), "href=\"https://example.com/a?b=1&amp;c=2\"")
+  assert_eq(s(html.url_attr("href", "HTTP://example.com")), "href=\"HTTP://example.com\"")
+  assert_eq(s(html.url_attr("href", "mailto:a@example.com")), "href=\"mailto:a@example.com\"")
+  assert_eq(s(html.url_attr("src", "/img/a.png")), "src=\"/img/a.png\"")
+  assert_eq(s(html.url_attr("href", "page.html#top")), "href=\"page.html#top\"")
+  assert_eq(s(html.url_attr("href", "?q=1")), "href=\"?q=1\"")
+}
+
+test "url_attr blocks every other scheme, however it is spelled" {
+  let blocked = "href=\"about:invalid#almide-blocked\""
+  assert_eq(s(html.url_attr("href", "javascript:alert(1)")), blocked)
+  assert_eq(s(html.url_attr("href", "JaVaScRiPt:alert(1)")), blocked)
+  assert_eq(s(html.url_attr("href", " javascript:alert(1)")), blocked)
+  assert_eq(s(html.url_attr("href", "java\tscript:alert(1)")), blocked)
+  assert_eq(s(html.url_attr("href", "java\nscript:alert(1)")), blocked)
+  assert_eq(s(html.url_attr("href", "\u{1}javascript:alert(1)")), blocked)
+  assert_eq(s(html.url_attr("href", "vbscript:msgbox(1)")), blocked)
+  assert_eq(s(html.url_attr("href", "data:text/html,<script>alert(1)</script>")), blocked)
+  assert_eq(s(html.url_attr("href", ":nothing")), blocked)
+  assert(attr_value_contained(s(html.url_attr("href", "https://e.com/\"><script>"))))
+}
+
+test "control: escape keeps a javascript: URL" {
+  assert_eq(s(html.escape("javascript:alert(1)")), "javascript:alert(1)")
+}
+
+test "script_json cannot close the script element or break a JS string" {
+  let v = value.object([("x", value.str("</script><script>alert(1)</script>")), ("ls", value.str("a\u{2028}b\u{2029}c&d"))])
+  let out = s(html.script_json(v))
+  assert(not string.contains(out, "</script"))
+  assert(not string.contains(out, "<"))
+  assert(not string.contains(out, "\u{2028}"))
+  assert(not string.contains(out, "\u{2029}"))
+  assert_eq(out, "{\"x\":\"\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e\",\"ls\":\"a\\u2028b\\u2029c\\u0026d\"}")
+  // The escapes are JSON's own: the text parses back to the same value.
+  assert_eq(json.parse(out) ?? value.null(), v)
+}
+
+test "control: plain json.stringify closes the script element" {
+  let v = value.object([("x", value.str("</script><script>"))])
+  assert(string.contains(json.stringify(v), "</script>"))
+}
