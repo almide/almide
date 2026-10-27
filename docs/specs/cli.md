@@ -756,7 +756,14 @@ git diff src/calc.almd | almide survive src/calc.almd --with - --json
 - exit: `0` = 生き残る、`1` = 生き残らない、`2` = 判定できない（読めない / hunk が
   当たらない）。`--json` 時は `2` も `{"schema_version":1,"error":"…"}` を stdout に出す
 
-**生き残る** = error の診断・テスト・契約のどれも `newly_broken` に無いこと。
+**生き残る** = error の診断・テスト・契約のどれも `newly_broken` に無く、
+テスト・契約のどれも `removed` に無いこと（#4267）。テストを消せば何も
+`newly_broken` にならないので、消すことは生き残ることではない。意図した削除は
+`--allow-removed`（`survive` と `apply` の両方）で通す。MCP の `almide_survive` は
+これを渡さない。名前は残ったまま、値を読むアサーション（`assert` / `assert_eq` /
+`assert_ne` / `testing.assert_*` で、引数のどれかがリテラルでないもの）を全部失った
+テスト（`assert(true)` や空の本体）は `newly_broken`（`after: "hollowed"`）になる。
+
 warning の `newly_broken` は報告するが判定には入れない（`almide check` 自体が
 warning で失敗しない。また未使用変数 lint は error の無いファイルでしか走らない
 ので、最後の error を直すと元からあった warning が表に出る — これで拒否すると
