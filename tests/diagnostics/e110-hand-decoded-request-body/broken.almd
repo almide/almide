@@ -1,0 +1,14 @@
+// E110 (row 22, #4232): the handler skips `http.decode_json` and parses the
+// body itself, straight into `User`, a type the program also sends out. The
+// client sets `is_admin` by posting it, exactly as at the sink.
+import http
+import json
+
+type User: Codec = { name: String, email: String, is_admin: Bool = false }
+
+effect fn create(req: HttpRequest) -> HttpResponse = {
+  let u = User.decode(json.parse(http.req_body(req))!)!
+  http.response(201, "${u.name} is_admin=${u.is_admin}")
+}
+
+effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{}", [:]))!))
