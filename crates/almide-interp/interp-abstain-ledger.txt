@@ -34,7 +34,6 @@ effect_tco_err_rewrap  interp fuel/recursion budget exhausted
 fs_root_escape  out-of-interp-scope capability: fs.open_root: no lowered body
 io_write_ordering  out-of-interp-scope capability: io.write: no lowered body
 io_write_raw_bytes  out-of-interp-scope capability: io.write: no lowered body
-json_set_path_depth_bound  type errors at interp cut point: ["argument 'p' expects String but got Path", "argument 'p' expects String but got Path", "argument 'p' expects String but got Path", "argument 'p' expects String but got Path", "argument 'p' expects String but got Path", "argument 'p' expects String but got Path", "argument 'p' expects String but got Path", "argument 'p' expects String but got Path", "argument 'p' expects String but got Path", "argument 'p' expects String but got Path", "argument 'p' expects String but got Path", "type mismatch in fn 'path_of': expected Path but got String"]
 list_repeat_size_ceiling  out-of-interp-scope capability: prim.alloc_list(268435456) beyond the interp arena ceiling
 loop_effect_match_stmt  out-of-interp-scope capability: prim.fd_write: no lowered body
 matrix_fma_ieee_specials  out-of-interp-scope capability: prim.handle of a container holding a NaN float (NaN bits are arch-conditional — #1403; a bit-compare vote would be a guess)
