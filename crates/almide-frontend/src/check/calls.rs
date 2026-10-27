@@ -146,7 +146,7 @@ impl Checker {
             self.reject_exit_literal(callee, argument);
         }
         let call_sig = self.lookup_call_sig(callee);
-        let arg_tys = self.infer_call_arg_tys(callee, args, &call_sig);
+        let mut arg_tys = self.infer_call_arg_tys(callee, args, &call_sig);
         let callee_span_snapshot = callee.span;
         match &mut callee.kind {
             ExprKind::Ident { name, .. } => {
@@ -182,6 +182,8 @@ impl Checker {
                         return ret;
                     }
                 }
+                // #4283: a fallible call in a builtin's argument is E041.
+                self.strip_builtin_effect_args(name.as_str(), args, &mut arg_tys);
                 let ret = self.check_named_call_spanned(&name, &arg_tys, type_args, callee_span_snapshot);
                 let arg_refs: Vec<&ast::Expr> = args.iter().collect();
                 self.validate_mut_args(&name, &arg_refs);
