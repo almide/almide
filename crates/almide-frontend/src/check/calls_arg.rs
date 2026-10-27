@@ -171,7 +171,7 @@ impl Checker {
             format!("call to {}()", fn_name),
         )
         .with_code("E005");
-        if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(fn_name)) {
+        if let Some((line, col)) = self.env.fn_decl_span_in(&sym(fn_name), self.current_module_prefix.as_deref()) {
             diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));
         }
         self.emit(diag);
@@ -350,7 +350,7 @@ impl Checker {
             format!("argument '{}' expects {} but got {}", param_name, expected.display(), arg_ty.display()),
             hint,
             format!("call to {}()", fn_name)).with_code("E005");
-        if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(fn_name)) {
+        if let Some((line, col)) = self.env.fn_decl_span_in(&sym(fn_name), self.current_module_prefix.as_deref()) {
             diag = diag.with_secondary(line, Some(col), format!("fn {}() defined here", fn_name));
         }
         if let Some((_, fixed)) = &stdlib_sibling {

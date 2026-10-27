@@ -712,7 +712,7 @@ impl Checker {
             None => (msg, format!("call to {}()", name)),
         };
         let mut diag = super::err(msg, hint, context).with_code("E006");
-        if let Some(&(line, col)) = self.env.fn_decl_spans.get(&sym(name)) {
+        if let Some((line, col)) = self.env.fn_decl_span_in(&sym(name), self.current_module_prefix.as_deref()) {
             diag = diag.with_secondary(line, Some(col), format!("'{}' declared as effect fn here", name));
         }
         self.emit(diag);
