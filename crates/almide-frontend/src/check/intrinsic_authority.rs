@@ -226,7 +226,16 @@ impl Checker {
         if self.env.lookup_var(module.as_str()).is_some() {
             return;
         }
-        let Some(canonical) = self.env.import_table.resolve(module.as_str()) else { return };
+        let Some(canonical) = self.env.import_table.resolve(module.as_str()) else {
+            // A stdlib module the file never imported (`b |> ffi.region`
+            // without `import ffi`): a spelling that reaches it anyway — a
+            // pipe stage resolves the stage by name — is still the module's
+            // fn, and still needs the opt-in.
+            if almide_lang::stdlib_info::is_stdlib_module(module.as_str()) || almide_lang::stdlib_info::is_bundled_module(module.as_str()) {
+                self.reject_unopted_memory_unsafe(module.as_str(), field.as_str(), span);
+            }
+            return;
+        };
         if !self.env.import_table.resolves_to_stdlib(module.as_str(), canonical.as_str()) {
             return;
         }
