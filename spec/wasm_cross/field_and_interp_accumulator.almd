@@ -7,6 +7,15 @@
 // the same bytes. The rows pin the accumulated values, a list field, a copy
 // taken before the loop (it must keep the old value), and the shapes that keep
 // the copy — a right side reading the place twice, the place not first.
+//
+// REBUILT-RECORD AND FOLD ACCUMULATORS (#4261, #4260). The same appends
+// written as a spread rebuild (`r = { ...r, xs: r.xs + [i], n: r.n + 1 }`) or
+// in a fold accumulator (`{ ...acc, xs: acc.xs + [i] }`, `acc + "x"`) move
+// the dying record's field (or the dying accumulator) into the append on
+// both legs instead of copying the whole collection per step. The negative
+// cells keep their copies: a record bound before the loop keeps its old
+// fields, a field read twice in the rebuild, and a base read again after a
+// rebuild that does not reassign it.
 type Buf = { text: String, xs: List[Int], n: Int }
 
 fn grow(n: Int) -> Buf = {
@@ -57,7 +66,62 @@ fn keep_old(n: Int) -> (String, String) = {
   (old.text, b.text)
 }
 
+type Acc = { xs: List[Int], s: String, m: Map[Int, Int], n: Int }
+
+fn empty_acc() -> Acc = Acc { xs: [], s: "", m: [:], n: 0 }
+
+fn rebuild(n: Int) -> Acc = {
+  var r = empty_acc()
+  for i in 0..<n {
+    r = { ...r, xs: r.xs + [i], n: r.n + 1 }
+    r = { ...r, s: r.s + "x", n: r.n + 1 }
+    r = { ...r, m: map.set(r.m, i, i * i) }
+  }
+  r
+}
+
+fn rebuild_keep(n: Int) -> (Acc, Acc) = {
+  var r = empty_acc()
+  r = { ...r, xs: r.xs + [100], s: r.s + "k" }
+  let old = r
+  for i in 0..<n {
+    r = { ...r, xs: r.xs + [i], s: r.s + "y", m: map.set(r.m, i, i) }
+  }
+  (old, r)
+}
+
+fn rebuild_twice(n: Int) -> Acc = {
+  var r = Acc { xs: [1], s: "a", m: [:], n: 0 }
+  for _ in 0..<n {
+    r = { ...r, xs: r.xs + [list.len(r.xs)], s: r.s + r.s }
+  }
+  r
+}
+
+fn rebuild_reread(r: Acc) -> (Acc, Acc) = {
+  let next = { ...r, xs: r.xs + [9], s: r.s + "z" }
+  (next, r)
+}
+
+fn fold_rec(n: Int) -> Acc = list.fold(list.range(0, n), empty_acc(), (acc, i) => { ...acc, xs: acc.xs + [i], s: acc.s + "f" })
+
+fn fold_str(n: Int) -> String = list.fold(list.range(0, n), "", (acc, i) => acc + "${i},")
+
+fn show_acc(r: Acc) -> String = "${r.xs} ${r.s} ${map.len(r.m)} ${r.n}"
+
 fn main() -> Unit = {
+  println(show_acc(rebuild(4)))
+  // [0, 1, 2, 3] xxxx 4 8
+  let (o, r) = rebuild_keep(3)
+  println("${show_acc(o)} | ${show_acc(r)}")
+  // [100] k 0 0 | [100, 0, 1, 2] kyyy 3 0
+  println(show_acc(rebuild_twice(3)))
+  // [1, 1, 2, 3] aaaaaaaa 0 0
+  let (nx, base) = rebuild_reread(rebuild(2))
+  println("${show_acc(nx)} | ${show_acc(base)}")
+  println(show_acc(fold_rec(5)))
+  println(fold_str(5))
+  println(int.to_string(list.len(rebuild(3000).xs) + string.len(fold_rec(3000).s) + string.len(fold_str(3000))))
   let g = grow(4)
   println("${g.text} ${g.xs} ${g.n}")
   // ab-0ab-1ab-2ab-3 [0, 1, 2, 3] 4
