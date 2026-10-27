@@ -6630,14 +6630,6 @@ is_match	\s		true
 full_match	\s		true
 find	\s		<>
 find_all	\s		[]
-is_match	\s			true
-full_match	\s			true
-find	\s			<	>
-find_all	\s			[	]
-is_match	\s		true
-full_match	\s		true
-find	\s		<>
-find_all	\s		[]
 is_match	\s	 	true
 full_match	\s	 	true
 find	\s	 	< >
@@ -6666,14 +6658,6 @@ is_match	\S		false
 full_match	\S		false
 find	\S		<none>
 find_all	\S		[]
-is_match	\S			false
-full_match	\S			false
-find	\S			<none>
-find_all	\S			[]
-is_match	\S		false
-full_match	\S		false
-find	\S		<none>
-find_all	\S		[]
 is_match	\S	 	false
 full_match	\S	 	false
 find	\S	 	<none>
@@ -6702,14 +6686,6 @@ is_match	[\s]		true
 full_match	[\s]		true
 find	[\s]		<>
 find_all	[\s]		[]
-is_match	[\s]			true
-full_match	[\s]			true
-find	[\s]			<	>
-find_all	[\s]			[	]
-is_match	[\s]		true
-full_match	[\s]		true
-find	[\s]		<>
-find_all	[\s]		[]
 is_match	[\s]	 	true
 full_match	[\s]	 	true
 find	[\s]	 	< >
@@ -6738,14 +6714,6 @@ is_match	[^\s]		false
 full_match	[^\s]		false
 find	[^\s]		<none>
 find_all	[^\s]		[]
-is_match	[^\s]			false
-full_match	[^\s]			false
-find	[^\s]			<none>
-find_all	[^\s]			[]
-is_match	[^\s]		false
-full_match	[^\s]		false
-find	[^\s]		<none>
-find_all	[^\s]		[]
 is_match	[^\s]	 	false
 full_match	[^\s]	 	false
 find	[^\s]	 	<none>
@@ -6774,14 +6742,6 @@ is_match	^\S+$		false
 full_match	^\S+$		false
 find	^\S+$		<none>
 find_all	^\S+$		[]
-is_match	^\S+$			false
-full_match	^\S+$			false
-find	^\S+$			<none>
-find_all	^\S+$			[]
-is_match	^\S+$		false
-full_match	^\S+$		false
-find	^\S+$		<none>
-find_all	^\S+$		[]
 is_match	^\S+$	 	false
 full_match	^\S+$	 	false
 find	^\S+$	 	<none>
@@ -6810,14 +6770,6 @@ is_match	\s+		true
 full_match	\s+		true
 find	\s+		<>
 find_all	\s+		[]
-is_match	\s+			true
-full_match	\s+			true
-find	\s+			<	>
-find_all	\s+			[	]
-is_match	\s+		true
-full_match	\s+		true
-find	\s+		<>
-find_all	\s+		[]
 is_match	\s+	 	true
 full_match	\s+	 	true
 find	\s+	 	< >
