@@ -4,7 +4,10 @@
 // MONOTONE totalOrder transform — so the insertion sort's plain signed `>` IS the totalOrder swap
 // test (v0 pre-transforms the same way). The element slots are opaque i64 (any element type, e.g.
 // a List[R] of records); only the KEY is Float. Scratch key list owned + dropped; result owned.
-fn __ftotal_sb(b: Int) -> Int = {
+// ONE NaN (R-float-09, #4258): any NaN keys as the canonical +qNaN 0x7FF8000000000000, so it
+// orders after +inf whatever sign the hardware gave it (x86 runtime 0/0 is -NaN).
+fn __ftotal_sb(b0: Int) -> Int = {
+  let b = if prim.band(b0, 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000 then 0x7FF8000000000000 else b0
   let s = prim.bshr(b, 63)
   let m = prim.bshr_u(s, 1)
   prim.bxor(b, m)
