@@ -232,9 +232,12 @@ impl Binder<'_> {
         // user record, `let { a, c } = P { … }` / `= mk()`), which
         // `droppable_ty` does not list: it kept its block (#2977). A Named
         // that turns out flat on this leg binds a plain local — harmless.
+        // An anonymous record literal (`let { x, y } = { x: …, y: … }`, a
+        // block whose tail is one, a fan record) is the structural `Record`
+        // type, which kept its block the same way (#3794).
         let named = |s: &IrStmt| {
             matches!(&s.kind, IrStmtKind::BindDestructure { value, .. }
-                if (droppable_ty(&value.ty) || matches!(value.ty, Ty::Named(..)))
+                if (droppable_ty(&value.ty) || matches!(value.ty, Ty::Named(..) | Ty::Record { .. }))
                     && !matches!(value.kind, IrExprKind::Var { .. }))
         };
         if !stmts.iter().any(named) {
