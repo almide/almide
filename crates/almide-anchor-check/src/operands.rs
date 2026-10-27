@@ -71,7 +71,69 @@ pub(crate) enum T {
         site: usize,
         args: Vec<T>,
     },
+    /// A read of a local through its one dominating write: `(local, the
+    /// read, the written value)` — the value, remembering which variable it
+    /// came through (two reads of one variable compare by the variable).
+    Def(u32, usize, Box<T>),
+    /// The value of an instruction this model does not open (`select`, a
+    /// remainder, a block result): equal only to itself.
+    Opaque(usize),
     Unknown,
+}
+
+/// `t` without the variables it came through.
+fn pl(t: &T) -> &T {
+    match t {
+        T::Def(_, _, v) => pl(v),
+        _ => t,
+    }
+}
+
+/// `t`'s children when it is the operator `n`.
+fn op<'t>(t: &'t T, n: &str) -> Option<&'t [T]> {
+    match pl(t) {
+        T::Op(m, xs) if *m == n => Some(xs),
+        _ => None,
+    }
+}
+
+fn cst(t: &T) -> Option<i64> {
+    match pl(t) {
+        T::Const(c) => Some(*c),
+        _ => None,
+    }
+}
+
+/// The variables `t` was read through, outermost first, each with its read.
+fn chain(t: &T) -> Vec<(Src, usize)> {
+    let mut v = Vec::new();
+    let mut c = t;
+    loop {
+        match c {
+            T::Def(l, u, x) => {
+                v.push((Src::Local(*l), *u));
+                c = x;
+            }
+            T::Local(l, u) => {
+                v.push((Src::Local(*l), *u));
+                break;
+            }
+            T::Global(g, u) => {
+                v.push((Src::Global(*g), *u));
+                break;
+            }
+            _ => break,
+        }
+    }
+    v
+}
+
+/// The instruction that evaluated an unopened value, a load or a call.
+fn site_id(t: &T) -> Option<usize> {
+    match pl(t) {
+        T::Load { site, .. } | T::Call { site, .. } | T::Opaque(site) => Some(*site),
+        _ => None,
+    }
 }
 
 fn pure(op: &Op<'_>) -> Option<&'static str> {
@@ -242,7 +304,7 @@ impl<'b, 'a> Flow<'b, 'a> {
             Op::I32Const { value } => T::Const(i64::from(*value)),
             Op::I64Const { value } => T::Const(*value),
             Op::LocalGet { local_index } => match self.reaching_def(*local_index, p) {
-                Some(q) => self.arg(q, 0, f),
+                Some(q) => T::Def(*local_index, p, Box::new(self.arg(q, 0, f))),
                 None => T::Local(*local_index, p),
             },
             Op::LocalTee { .. } => self.arg(p, 0, f),
@@ -257,7 +319,7 @@ impl<'b, 'a> Flow<'b, 'a> {
             }
             o => match pure(o) {
                 Some(name) => T::Op(name, (0..self.b.args[p].len()).map(|k| self.arg(p, k, f)).collect()),
-                None => T::Unknown,
+                None => T::Opaque(p),
             },
         }
     }
@@ -271,36 +333,28 @@ impl<'b, 'a> Flow<'b, 'a> {
         self.dominates(a, b) && !self.window(a, b).into_iter().any(|k| self.writes(k, src))
     }
 
-    /// `x` and `y` are the same value.
+    /// `x` and `y` are the same value: read through one variable with no
+    /// write of it between the reads, or the same operator over the same
+    /// values, or one evaluation of one unopened instruction.
     pub(crate) fn same(&self, x: &T, y: &T) -> bool {
-        match (x, y) {
+        let (cx, cy) = (chain(x), chain(y));
+        if cx.iter().any(|&(s1, u)| cy.iter().any(|&(s2, v)| s1 == s2 && self.unchanged(s1, u, v))) {
+            return true;
+        }
+        match (pl(x), pl(y)) {
             (T::Const(a), T::Const(b)) => a == b,
-            (T::Local(l, u), T::Local(m, v)) => l == m && self.unchanged(Src::Local(*l), *u, *v),
-            (T::Global(g, u), T::Global(h, v)) => g == h && self.unchanged(Src::Global(*g), *u, *v),
             (T::Op(n, xs), T::Op(m, ys)) => {
                 n == m && xs.len() == ys.len() && xs.iter().zip(ys).all(|(a, b)| self.same(a, b))
             }
-            // One load or call instruction reached by both through the same
-            // definitions: one evaluation.
-            (T::Load { site: s, .. }, T::Load { site: t, .. }) | (T::Call { site: s, .. }, T::Call { site: t, .. }) => s == t,
-            _ => false,
+            (a, b) => matches!((site_id(a), site_id(b)), (Some(s), Some(t)) if s == t),
         }
     }
 
     /// A judge call's argument, through any number of judges.
     fn strip<'t>(&self, t: &'t T) -> &'t T {
-        match t {
+        match pl(t) {
             T::Call { site, args } if args.len() == 1 && self.judges.contains(site) => self.strip(&args[0]),
             _ => t,
-        }
-    }
-
-    /// The first instruction a block term reads.
-    fn site_of(t: &T) -> Option<usize> {
-        match t {
-            T::Local(_, u) | T::Global(_, u) => Some(*u),
-            T::Load { site, .. } | T::Call { site, .. } => Some(*site),
-            _ => None,
         }
     }
 
@@ -308,13 +362,13 @@ impl<'b, 'a> Flow<'b, 'a> {
     /// value LOADED through it is something the block holds (an element), not
     /// the block, so a load's address is not searched.
     fn mentions(&self, t: &T, blk: &T) -> bool {
-        let hit = match (t, blk) {
-            (T::Local(l, _), T::Local(m, _)) => l == m,
-            (T::Global(g, _), T::Global(h, _)) => g == h,
-            (T::Load { site: s, .. }, T::Load { site: u, .. }) | (T::Call { site: s, .. }, T::Call { site: u, .. }) => s == u,
-            _ => false,
-        };
-        hit || match t {
+        // A block's identity: the innermost variable it was read through, or
+        // the instruction that produced it — not a hold local it passed
+        // through, which may since hold something else.
+        let root = |v: &T| chain(v).last().map(|&(s1, _)| s1);
+        let hit = matches!((root(t), root(blk)), (Some(a), Some(b)) if a == b)
+            || matches!((site_id(t), site_id(blk)), (Some(a), Some(b)) if a == b);
+        hit || match pl(t) {
             T::Op(_, xs) => xs.iter().any(|x| self.mentions(x, blk)),
             T::Call { args, .. } => args.iter().any(|x| self.mentions(x, blk)),
             _ => false,
@@ -329,61 +383,70 @@ impl<'b, 'a> Flow<'b, 'a> {
     /// count word.
     fn same_count(&self, cb: &T, ab: &T, count_at: usize, acc: usize) -> Result<(), String> {
         let (x, y) = (self.strip(cb), self.strip(ab));
-        let (Some(u), Some(v)) = (Self::site_of(x), Self::site_of(y)) else {
-            return Err(format!("the checked count is not a block's ({x:?} / {y:?})"));
-        };
-        let from = u.min(v);
-        if !self.dominates(from, acc) {
-            return Err("the block's first read does not dominate the access".into());
-        }
-        let src = match (x, y) {
-            (T::Local(l, _), T::Local(m, _)) if l == m => Some(Src::Local(*l)),
-            (T::Global(g, _), T::Global(h, _)) if g == h => Some(Src::Global(*g)),
-            _ if self.same(x, y) => None,
-            _ => return Err(format!("the check counts {x:?}, the access addresses {y:?}")),
-        };
         if !self.dominates(count_at, acc) {
             return Err("the count's read does not dominate the access".into());
         }
+        // Each variable both were read through is a candidate identity; else
+        // one evaluation of one instruction. The first candidate that holds
+        // decides.
+        let (cx, cy) = (chain(x), chain(y));
+        let mut cands: Vec<(Option<Src>, usize)> = cx
+            .iter()
+            .filter_map(|&(s1, u)| cy.iter().find(|&&(s2, _)| s2 == s1).map(|&(_, v)| (Some(s1), u.min(v))))
+            .collect();
+        if let (Some(a), Some(b)) = (site_id(x), site_id(y)) {
+            if a == b {
+                cands.push((None, a));
+            }
+        }
+        let mut last = format!("the check counts {x:?}, the access addresses {y:?}");
+        for (src, from) in cands {
+            match self.count_kept(x, src, from, count_at, acc) {
+                Ok(()) => return Ok(()),
+                Err(e) => last = e,
+            }
+        }
+        Err(last)
+    }
+
+    /// The block `x` (read through `src`, first at `from`) keeps its count
+    /// until the access at `acc` (module header of `same_count`).
+    fn count_kept(&self, x: &T, src: Option<Src>, from: usize, count_at: usize, acc: usize) -> Result<(), String> {
+        if !self.dominates(from, acc) {
+            return Err("the block's first read does not dominate the access".into());
+        }
         let counted: HashSet<usize> = self.window(count_at, acc).into_iter().collect();
         for k in self.window(from, acc) {
-            let op = &self.b.ops[k];
+            let ins = &self.b.ops[k];
             if let Some(src) = src {
                 if self.writes(k, src) {
-                    // A write of the judge's verdict on the local's own block.
+                    // A write of the judge's verdict on the variable's own block.
                     let val = self.arg(k, 0, FUEL);
-                    let judged = matches!(&val, T::Call { site, .. } if self.judges.contains(site));
-                    let own = match (self.strip(&val), src) {
-                        (T::Local(l, _), Src::Local(m)) => *l == m,
-                        (T::Global(g, _), Src::Global(h)) => *g == h,
-                        _ => false,
-                    };
+                    let judged = matches!(pl(&val), T::Call { site, .. } if self.judges.contains(site));
+                    let own = chain(self.strip(&val)).iter().any(|&(s1, _)| s1 == src);
                     if !(judged && own) {
-                        return Err(format!("instruction {k} ({op:?}) changes the list between the check and the access"));
+                        return Err(format!("instruction {k} ({ins:?}) changes the list between the check and the access"));
                     }
                 }
             }
             if !counted.contains(&k) {
                 continue;
             }
-            if matches!(op, Op::Call { .. } | Op::CallIndirect { .. }) && !self.judges.contains(&k) {
+            if matches!(ins, Op::Call { .. } | Op::CallIndirect { .. }) && !self.judges.contains(&k) {
                 let n = self.b.args[k].len();
                 if (0..n).any(|j| self.mentions(&self.arg(k, j, FUEL), x)) {
-                    return Err(format!("instruction {k} ({op:?}) is handed the list between the check and the access"));
+                    return Err(format!("instruction {k} ({ins:?}) is handed the list between the check and the access"));
                 }
             }
-            if let Some((4, off)) = store_width(op) {
+            if let Some((4, off)) = store_width(ins) {
                 // The effective address `base + constant`: the count word is
                 // the block's own address plus LEN, whatever the split.
                 let addr = self.arg(k, 0, FUEL);
-                let (base, eff) = match &addr {
-                    T::Op("i32.add", p) if p.len() == 2 => match &p[1] {
-                        T::Const(c) => (&p[0], off as i64 + c),
-                        _ => (&addr, off as i64),
-                    },
+                let (base, eff) = match op(&addr, "i32.add") {
+                    Some([b, c]) if cst(c).is_some() => (b, off as i64 + cst(c).unwrap_or(0)),
                     _ => (&addr, off as i64),
                 };
-                if eff == LEN_OFF as i64 && !matches!(base, T::Op(..)) && self.mentions(base, x) {
+                if eff == LEN_OFF as i64 && !matches!(pl(base), T::Op(..)) && self.mentions(base, x) {
                     return Err(format!("instruction {k} writes the list's count between the check and the access"));
                 }
             }
@@ -393,10 +456,10 @@ impl<'b, 'a> Flow<'b, 'a> {
 }
 
 fn affine(t: &T) -> (&T, i64) {
-    match t {
-        T::Op("i64.add", xs) if xs.len() == 2 => match &xs[1] {
-            T::Const(c) => (&xs[0], *c),
-            _ => (t, 0),
+    match op(t, "i64.add") {
+        Some([a, b]) => match cst(b) {
+            Some(c) => (a, c),
+            None => (t, 0),
         },
         _ => (t, 0),
     }
@@ -404,7 +467,7 @@ fn affine(t: &T) -> (&T, i64) {
 
 /// `len(B)`: `(B, the load)`.
 fn len(l: &T) -> Option<(&T, usize)> {
-    match l {
+    match pl(l) {
         T::Load { name: "i32.load", off: LEN_OFF, addr, site } => Some((&**addr, *site)),
         _ => None,
     }
@@ -413,32 +476,26 @@ fn len(l: &T) -> Option<(&T, usize)> {
 /// `0 <= I && I <= len(B) - w` (signed): `(I, I again, (B, its count's
 /// load), w)`.
 fn room_of(room: &T) -> Option<(&T, &T, (&T, usize), i64)> {
-    let T::Op("i32.and", a) = room else { return None };
-    let (T::Op("i64.ge_s", lo), T::Op("i64.le_s", hi)) = (a.first()?, a.get(1)?) else { return None };
-    if !matches!(lo.get(1)?, T::Const(0)) {
+    let [lo, hi] = op(room, "i32.and")? else { return None };
+    let [i1, z] = op(lo, "i64.ge_s")? else { return None };
+    let [i2, d] = op(hi, "i64.le_s")? else { return None };
+    if cst(z)? != 0 {
         return None;
     }
-    let T::Op("i64.sub", d) = hi.get(1)? else { return None };
-    let (T::Op("i64.extend_i32_u", e), T::Const(w)) = (d.first()?, d.get(1)?) else { return None };
-    Some((lo.first()?, hi.first()?, len(e.first()?)?, *w))
+    let [e, w] = op(d, "i64.sub")? else { return None };
+    let [l] = op(e, "i64.extend_i32_u")? else { return None };
+    Some((i1, i2, len(l)?, cst(w)?))
 }
 
 /// `len(B) / S` as the count operand: `((B, its count's load), S)`.
 fn count_of(t: &T) -> Option<((&T, usize), i64)> {
-    match t {
-        T::Op("i64.extend_i32_u", a) if a.len() == 1 => match &a[0] {
-            T::Op("i32.div_u", d) if d.len() == 2 => match (len(&d[0]), &d[1]) {
-                (Some(b), T::Const(s)) => Some((b, *s)),
-                _ => None,
-            },
-            _ => None,
-        },
-        T::Op("i64.div_u", d) if d.len() == 2 => match (&d[0], &d[1]) {
-            (T::Op("i64.extend_i32_u", e), T::Const(s)) if e.len() == 1 => len(&e[0]).map(|b| (b, *s)),
-            _ => None,
-        },
-        _ => None,
+    if let Some([d]) = op(t, "i64.extend_i32_u") {
+        let [l, s] = op(d, "i32.div_u")? else { return None };
+        return Some((len(l)?, cst(s)?));
     }
+    let [e, s] = op(t, "i64.div_u")? else { return None };
+    let [l] = op(e, "i64.extend_i32_u")? else { return None };
+    Some((len(l)?, cst(s)?))
 }
 
 /// The access instruction (`acc`; for an `a` anchored at the release call,
@@ -468,22 +525,18 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
         Op::I64GeU => {
             let (ix, cnt) = (fl.arg(cmp, 0, FUEL), fl.arg(cmp, 1, FUEL));
             let ((cb, count_at), s) = count_of(&cnt).ok_or_else(|| format!("the compare's right operand is not a list's count: {cnt:?}"))?;
-            let T::Op("i32.add", parts) = &addr else {
+            let Some([base, scaled]) = op(&addr, "i32.add") else {
                 return Err(format!("the access's address is not block + scaled index: {addr:?}"));
             };
-            let [base, scaled] = parts.as_slice() else { return Err("address arity".into()) };
-            let (ai, s2) = match scaled {
-                T::Op("i32.mul", m) if m.len() == 2 => match (&m[0], &m[1]) {
-                    (T::Op("i32.wrap_i64", w), T::Const(s2)) if w.len() == 1 => (&w[0], *s2),
+            let (ai, s2) = match op(scaled, "i32.mul") {
+                Some([w, c]) => match (op(w, "i32.wrap_i64"), cst(c)) {
+                    (Some([i]), Some(s2)) => (i, s2),
                     _ => return Err(format!("the access's index is not scaled by a constant: {scaled:?}")),
                 },
                 _ => return Err(format!("the access's index is not scaled: {scaled:?}")),
             };
-            let (ab, total) = match base {
-                T::Op("i32.add", p) if p.len() == 2 => match &p[1] {
-                    T::Const(c) => (&p[0], off as i64 + c),
-                    _ => (base, off as i64),
-                },
+            let (ab, total) = match op(base, "i32.add") {
+                Some([b, c]) if cst(c).is_some() => (b, off as i64 + cst(c).unwrap_or(0)),
                 _ => (base, off as i64),
             };
             if s <= 0 || s2 != s {
@@ -508,11 +561,10 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
             if !fl.same(i1, i2) {
                 return Err("the room test's two bounds test different indices".into());
             }
-            let T::Op("i32.add", p) = &addr else {
+            let Some([ab, wi]) = op(&addr, "i32.add") else {
                 return Err(format!("the byte access is not block + index: {addr:?}"));
             };
-            let [ab, wi] = p.as_slice() else { return Err("address arity".into()) };
-            let T::Op("i32.wrap_i64", ai) = wi else {
+            let Some(ai) = op(wi, "i32.wrap_i64") else {
                 return Err(format!("the byte access's index is {wi:?}"));
             };
             let k = off as i64 - PAYLOAD;
