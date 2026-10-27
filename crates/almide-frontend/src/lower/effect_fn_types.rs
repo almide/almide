@@ -48,10 +48,8 @@ fn norm_effect_fn(ty: &Ty) -> Ty {
 }
 
 fn has_effect_fn(ty: &Ty) -> bool {
-    if let Ty::Fn { is_effect: true, .. } = ty {
-        return true;
-    }
-    ty.children().into_iter().any(has_effect_fn)
+    // Each shared list once (ADR-0030 D5).
+    ty.any_node(&mut |t| matches!(t, Ty::Fn { is_effect: true, .. }))
 }
 
 /// Normalize `ty` in place, leaving it untouched when it holds no effect fn.
