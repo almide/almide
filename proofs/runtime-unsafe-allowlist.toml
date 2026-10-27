@@ -49,6 +49,12 @@ class = "c-call"
 reason = "SCM_RIGHTS descriptor passing (sendmsg / recvmsg / cmsg) and memfd for the unix module"
 
 [[file]]
+path = "crates/almide-codegen/src/prelude_box_body.rs"
+count = 25
+class = "emitted-prelude"
+reason = "AlmideBox (#4249-#4252), the indirection that closes a recursive type's cycle: a NonNull-owned heap cell with Send/Sync impls, its new / into_inner / Deref / DerefMut, and the type-erased drop, clone and == work queues (raw pointer plus unsafe fn step) that a nested drop, clone or compare pushes instead of recursing, so a long chain runs in constant native stack. Sound while each queued pointer is consumed exactly once by the draining outer call; spec/ recursive-record fixtures and the 200 000-long chain tests exercise drop, clone and == through it"
+
+[[file]]
 path = "crates/almide-codegen/src/prelude_region.rs"
 count = 9
 class = "emitted-prelude"
