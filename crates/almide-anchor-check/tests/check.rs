@@ -1,7 +1,7 @@
 //! The checker over hand-written modules: each shape it accepts, and for
 //! each, the one-instruction change it must refuse.
 
-use almide_anchor_check::{check_bounds, check_init, decode, Report};
+use almide_anchor_check::{check_bounds, check_init, decode, At, Report};
 
 /// Function 0 is `$alloc`; function 1 is the subject, its body `body`.
 fn module(locals: &str, body: &str) -> Vec<u8> {
@@ -20,11 +20,18 @@ fn init(body: &str, w: &str, a: &str) -> Result<Report, String> {
     check_init(&bodies, 0, w, a, &mut r).map(|()| r)
 }
 
+/// Locals: 0 the list block, 1 the index, 2 another index, 3 a block or
+/// payload pointer, 4 a hoisted count.
 fn bounds(body: &str, w: &str, a: &str) -> Result<Report, String> {
-    let bytes = module("(local i32 i64)", body);
+    bounds_judged(body, w, a, &[])
+}
+
+fn bounds_judged(body: &str, w: &str, a: &str, judges: &[usize]) -> Result<Report, String> {
+    let bytes = module("(local i32 i64 i64 i32 i64)", body);
     let bodies = decode(&bytes)?;
     let mut r = Report::default();
-    check_bounds(&bodies, w, a, &mut r).map(|()| r)
+    let js: Vec<At> = judges.iter().map(|&op| At { func: 1, op }).collect();
+    check_bounds(&bodies, w, a, &js, &mut r).map(|()| r)
 }
 
 // ── init: a fixed site ─────────────────────────────────────────────────────
@@ -146,21 +153,24 @@ fn a_fill_whose_counter_is_not_the_count_is_refused() {
 
 // ── bounds ─────────────────────────────────────────────────────────────────
 
-const READ: &str = "local.get 1 i64.const 3 i64.ge_u
+/// `xs[i]` read: the compare at 6, the guard's const at 8, the load at 18.
+const READ: &str = "local.get 1
+  local.get 0 i32.load offset=4 i32.const 8 i32.div_u i64.extend_i32_u
+  i64.ge_u
   (if (then i32.const 0 drop unreachable))
-  local.get 0 i64.load offset=12 drop";
+  local.get 0 local.get 1 i32.wrap_i64 i32.const 8 i32.mul i32.add i64.load offset=12 drop";
 
 #[test]
 fn a_guarded_read_is_accepted() -> Result<(), String> {
-    let r = bounds(READ, "c0 a0", "1:4 1:9")?;
-    assert_eq!((r.bounds_checks, r.bounds_accesses), (1, 1));
+    let r = bounds(READ, "c0 a0", "1:8 1:18")?;
+    assert_eq!((r.bounds_checks, r.bounds_accesses, r.bounds_operands), (1, 1, 1));
     Ok(())
 }
 
 #[test]
 fn a_guard_that_does_not_abort_is_refused() {
     let body = READ.replace("drop unreachable", "drop");
-    assert!(bounds(&body, "c0 a0", "1:4 1:8")
+    assert!(bounds(&body, "c0 a0", "1:8 1:17")
         .unwrap_err()
         .contains("abort"));
 }
@@ -168,27 +178,193 @@ fn a_guard_that_does_not_abort_is_refused() {
 #[test]
 fn a_guard_with_another_compare_is_refused() {
     let body = READ.replace("i64.ge_u", "i64.ge_s");
-    assert!(bounds(&body, "c0 a0", "1:4 1:9").is_err());
+    assert!(bounds(&body, "c0 a0", "1:8 1:18").is_err());
 }
 
 #[test]
 fn an_access_anchored_off_its_load_is_refused() {
-    assert!(bounds(READ, "c0 a0", "1:4 1:8").is_err());
+    assert!(bounds(READ, "c0 a0", "1:8 1:17").is_err());
 }
 
 #[test]
 fn a_check_after_its_access_is_refused() {
-    let body = "local.get 0 i64.load offset=12 drop
-      local.get 1 i64.const 3 i64.ge_u (if (then i32.const 0 drop unreachable))";
-    assert!(bounds(body, "c0 a0", "1:7 1:1")
+    let body = "local.get 0 local.get 1 i32.wrap_i64 i32.const 8 i32.mul i32.add i64.load offset=12 drop
+      local.get 1 local.get 0 i32.load offset=4 i32.const 8 i32.div_u i64.extend_i32_u i64.ge_u
+      (if (then i32.const 0 drop unreachable))";
+    assert!(bounds(body, "c0 a0", "1:16 1:6")
         .unwrap_err()
         .contains("not after"));
 }
 
 #[test]
 fn a_kill_carries_no_anchor_and_an_unlocated_event_is_counted() -> Result<(), String> {
-    let r = bounds(READ, "c0 a0 s0;c0 a0", "1:4 1:9 -;- -")?;
+    let r = bounds(READ, "c0 a0 s0;c0 a0", "1:8 1:18 -;- -")?;
     assert_eq!(r.bounds_unlocated, 2);
-    assert!(bounds(READ, "c0 a0 s0", "1:4 1:9 1:9").is_err());
+    assert!(bounds(READ, "c0 a0 s0", "1:8 1:18 1:18").is_err());
     Ok(())
+}
+
+// ── bounds: the guard's operands ───────────────────────────────────────────
+
+#[test]
+fn a_guard_on_another_index_is_refused() {
+    let body = READ.replace("local.get 0 local.get 1 i32.wrap_i64", "local.get 0 local.get 2 i32.wrap_i64");
+    assert!(bounds(&body, "c0 a0", "1:8 1:18").unwrap_err().contains("index"));
+}
+
+#[test]
+fn a_guard_on_a_constant_is_refused() {
+    let body = READ.replacen("local.get 1\n", "i64.const 0\n", 1);
+    assert!(bounds(&body, "c0 a0", "1:8 1:18").is_err());
+}
+
+#[test]
+fn a_count_in_the_wrong_slot_size_is_refused() {
+    let body = READ.replace("i32.const 8 i32.div_u", "i32.const 4 i32.div_u");
+    assert!(bounds(&body, "c0 a0", "1:8 1:18").unwrap_err().contains("slots"));
+}
+
+#[test]
+fn an_access_wider_than_its_slot_is_refused() {
+    let body = READ
+        .replace("i32.const 8 i32.div_u", "i32.const 4 i32.div_u")
+        .replace("i32.const 8 i32.mul", "i32.const 4 i32.mul");
+    assert!(bounds(&body, "c0 a0", "1:8 1:18").unwrap_err().contains("wide"));
+}
+
+#[test]
+fn an_access_past_the_slot_by_its_offset_is_refused() {
+    let body = READ.replace("i64.load offset=12", "i64.load offset=16");
+    assert!(bounds(&body, "c0 a0", "1:8 1:18").unwrap_err().contains("whole slot"));
+}
+
+#[test]
+fn the_count_of_another_list_is_refused() {
+    let body = READ.replace(
+        "local.get 0 i32.load offset=4",
+        "local.get 3 i32.load offset=4",
+    );
+    assert!(bounds(&body, "c0 a0", "1:8 1:18").is_err());
+}
+
+#[test]
+fn the_index_changed_between_check_and_access_is_refused() {
+    let body = READ.replace(
+        "(if (then i32.const 0 drop unreachable))",
+        "(if (then i32.const 0 drop unreachable)) i64.const 99 local.set 1",
+    );
+    assert!(bounds(&body, "c0 a0", "1:8 1:20").is_err());
+}
+
+#[test]
+fn the_list_rebound_between_check_and_access_is_refused() {
+    let body = READ.replace(
+        "(if (then i32.const 0 drop unreachable))",
+        "(if (then i32.const 0 drop unreachable)) local.get 3 local.set 0",
+    );
+    assert!(bounds(&body, "c0 a0", "1:8 1:20").is_err());
+}
+
+#[test]
+fn the_list_handed_to_a_call_between_check_and_access_is_refused() {
+    let body = READ.replace(
+        "(if (then i32.const 0 drop unreachable))",
+        "(if (then i32.const 0 drop unreachable)) local.get 0 call $alloc drop",
+    );
+    assert!(bounds(&body, "c0 a0", "1:8 1:21").unwrap_err().contains("handed"));
+}
+
+#[test]
+fn a_count_word_stored_between_check_and_access_is_refused() {
+    let body = READ.replace(
+        "(if (then i32.const 0 drop unreachable))",
+        "(if (then i32.const 0 drop unreachable)) local.get 0 i32.const 0 i32.store offset=4",
+    );
+    assert!(bounds(&body, "c0 a0", "1:8 1:21").unwrap_err().contains("count"));
+}
+
+#[test]
+fn a_check_behind_a_branch_does_not_cover_the_access() {
+    // The check sits in a block a branch can skip; the access is after it.
+    let body = "(block local.get 2 i32.wrap_i64 br_if 0
+        local.get 1 local.get 0 i32.load offset=4 i32.const 8 i32.div_u i64.extend_i32_u
+        i64.ge_u (if (then i32.const 0 drop unreachable)))
+      local.get 0 local.get 1 i32.wrap_i64 i32.const 8 i32.mul i32.add i64.load offset=12 drop";
+    assert!(bounds(body, "c0 a0", "1:12 1:23").unwrap_err().contains("dominate"));
+}
+
+/// A counting loop: the count hoisted into local 4, the payload pointer
+/// into local 3, the check at 18 (const 20), the load at 30.
+const LOOP: &str = "local.get 0 i32.load offset=4 i32.const 8 i32.div_u i64.extend_i32_u local.set 4
+  local.get 0 i32.const 12 i32.add local.set 3
+  (block (loop
+    local.get 1 local.get 4 i64.ge_u br_if 1
+    local.get 1 local.get 4 i64.ge_u (if (then i32.const 0 drop unreachable))
+    local.get 3 local.get 1 i32.wrap_i64 i32.const 8 i32.mul i32.add f64.load drop
+    local.get 1 i64.const 1 i64.add local.set 1
+    br 0))";
+
+#[test]
+fn a_hoisted_count_and_payload_pointer_are_accepted() -> Result<(), String> {
+    let r = bounds(LOOP, "c0 a0", "1:20 1:30")?;
+    assert_eq!(r.bounds_operands, 1);
+    Ok(())
+}
+
+#[test]
+fn a_list_rebound_inside_the_loop_of_its_hoisted_count_is_refused() {
+    let body = LOOP.replace("br 0))", "local.get 3 local.set 0 br 0))");
+    assert!(bounds(&body, "c0 a0", "1:20 1:30").unwrap_err().contains("changes the list"));
+}
+
+#[test]
+fn a_hoisted_count_rewritten_inside_the_loop_is_refused() {
+    let body = LOOP.replace("br 0))", "i64.const 1000 local.set 4 br 0))");
+    assert!(bounds(&body, "c0 a0", "1:20 1:30").is_err());
+}
+
+/// `xs[i] = v`: the count by `i64.div_u`, then the judge (here `$alloc`
+/// stands in for it, at 13) into local 3 and back into local 0, the store
+/// through local 3 at 24.
+const STORE: &str = "local.get 1
+  local.get 0 i32.load offset=4 i64.extend_i32_u i64.const 8 i64.div_u
+  i64.ge_u (if (then i32.const 0 drop unreachable))
+  local.get 0 call $alloc local.set 3 local.get 3 local.set 0
+  local.get 3 local.get 1 i32.wrap_i64 i32.const 8 i32.mul i32.add i64.const 5 i64.store offset=12";
+
+#[test]
+fn a_store_through_the_judges_block_is_accepted() -> Result<(), String> {
+    let r = bounds_judged(STORE, "c0 w0", "1:8 1:24", &[13])?;
+    assert_eq!(r.bounds_operands, 1);
+    Ok(())
+}
+
+#[test]
+fn a_store_through_an_unrecorded_judge_is_refused() {
+    assert!(bounds(STORE, "c0 w0", "1:8 1:24").is_err());
+}
+
+/// `b[i]` on Bytes: the room test, `i32.eqz` at 11 (const 13), the byte load at 21.
+const BYTE: &str = "local.get 1 i64.const 0 i64.ge_s
+  local.get 1 local.get 0 i32.load offset=4 i64.extend_i32_u i64.const 1 i64.sub i64.le_s
+  i32.and i32.eqz (if (then i32.const 0 drop unreachable))
+  local.get 0 local.get 1 i32.wrap_i64 i32.add i64.load8_u offset=12 drop";
+
+#[test]
+fn a_room_tested_byte_read_is_accepted() -> Result<(), String> {
+    let r = bounds(BYTE, "c0 a0", "1:13 1:21")?;
+    assert_eq!(r.bounds_operands, 1);
+    Ok(())
+}
+
+#[test]
+fn a_byte_access_wider_than_its_room_is_refused() {
+    let body = BYTE.replace("i64.load8_u", "i64.load16_u");
+    assert!(bounds(&body, "c0 a0", "1:13 1:21").unwrap_err().contains("room"));
+}
+
+#[test]
+fn a_room_test_without_its_lower_bound_is_refused() {
+    let body = BYTE.replace("local.get 1 i64.const 0 i64.ge_s", "i64.const 7 i64.const 0 i64.ge_s");
+    assert!(bounds(&body, "c0 a0", "1:13 1:21").is_err());
 }
