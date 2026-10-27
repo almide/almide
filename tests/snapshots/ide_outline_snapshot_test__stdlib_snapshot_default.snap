@@ -363,14 +363,14 @@ fn result.unwrap_or_else[A, E](r: Result[A, E], f: fn(E) -> A) -> A
 fn result.zip[A, B, E](a: Result[A, E], b: Result[B, E]) -> Result[(A, B), E]
 
 # @stdlib/map
-fn map.__fallible_all[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Bool, E]
-fn map.__fallible_any[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Bool, E]
-fn map.__fallible_count[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Int, E]
-fn map.__fallible_filter[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Map[K, V], E]
+fn map.__fallible_all[K, V, E](m: Map[K, V], f: fn((K, V)) -> Result[Bool, E]) -> Result[Bool, E]
+fn map.__fallible_any[K, V, E](m: Map[K, V], f: fn((K, V)) -> Result[Bool, E]) -> Result[Bool, E]
+fn map.__fallible_count[K, V, E](m: Map[K, V], f: fn((K, V)) -> Result[Bool, E]) -> Result[Int, E]
+fn map.__fallible_filter[K, V, E](m: Map[K, V], f: fn((K, V)) -> Result[Bool, E]) -> Result[Map[K, V], E]
 fn map.__fallible_filter_map[K, V, B, E](m: Map[K, V], f: fn((K, V)) -> Result[Option[B], E]) -> Result[List[B], E]
-fn map.__fallible_find[K, V, E](m: Map[K, V], f: fn(K, V) -> Result[Bool, E]) -> Result[Option[(K, V)], E]
+fn map.__fallible_find[K, V, E](m: Map[K, V], f: fn((K, V)) -> Result[Bool, E]) -> Result[Option[(K, V)], E]
 fn map.__fallible_find_map[K, V, B, E](m: Map[K, V], f: fn((K, V)) -> Result[Option[B], E]) -> Result[Option[B], E]
-fn map.__fallible_fold[K, V, A, E](m: Map[K, V], init: A, f: fn(A, K, V) -> Result[A, E]) -> Result[A, E]
+fn map.__fallible_fold[K, V, A, E](m: Map[K, V], init: A, f: fn(A, (K, V)) -> Result[A, E]) -> Result[A, E]
 fn map.__fallible_group_by[K, V, B, E](m: Map[K, V], f: fn((K, V)) -> Result[B, E]) -> Result[Map[B, List[(K, V)]], E]
 fn map.__fallible_map[K, V, B, E](m: Map[K, V], f: fn(V) -> Result[B, E]) -> Result[Map[K, B], E]
 fn map.__fallible_max_by[K, V, U, E](m: Map[K, V], f: fn((K, V)) -> Result[U, E]) -> Result[Option[(K, V)], E]
@@ -385,17 +385,17 @@ fn map.__fallible_sort_with[K, V, E](m: Map[K, V], cmp: fn((K, V), (K, V)) -> Re
 fn map.__fallible_update[K, V, E](m: Map[K, V], key: K, f: fn(V) -> Result[V, E]) -> Result[Map[K, V], E]
 fn map.__fallible_upsert[K, V, E](m: Map[K, V], key: K, init: V, f: fn(V) -> Result[V, E]) -> Result[Map[K, V], E]
 fn map.__fallible_zip_with[K, V, B, C, E](m: Map[K, V], ys: List[B], f: fn((K, V), B) -> Result[C, E]) -> Result[List[C], E]
-fn map.all[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Bool
-fn map.any[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Bool
+fn map.all[K, V](m: Map[K, V], f: fn((K, V)) -> Bool) -> Bool
+fn map.any[K, V](m: Map[K, V], f: fn((K, V)) -> Bool) -> Bool
 fn map.clear[K, V](m: Map[K, V]) -> Unit
 fn map.contains[K, V](m: Map[K, V], key: K) -> Bool
-fn map.count[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Int
+fn map.count[K, V](m: Map[K, V], f: fn((K, V)) -> Bool) -> Int
 fn map.enumerate[K, V](m: Map[K, V]) -> List[(Int, (K, V))]
-fn map.filter[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Map[K, V]
+fn map.filter[K, V](m: Map[K, V], f: fn((K, V)) -> Bool) -> Map[K, V]
 fn map.filter_map[K, V, B](m: Map[K, V], f: fn((K, V)) -> Option[B]) -> List[B]
-fn map.find[K, V](m: Map[K, V], f: fn(K, V) -> Bool) -> Option[(K, V)]
+fn map.find[K, V](m: Map[K, V], f: fn((K, V)) -> Bool) -> Option[(K, V)]
 fn map.find_map[K, V, B](m: Map[K, V], f: fn((K, V)) -> Option[B]) -> Option[B]
-fn map.fold[K, V, A](m: Map[K, V], init: A, f: fn(A, K, V) -> A) -> A
+fn map.fold[K, V, A](m: Map[K, V], init: A, f: fn(A, (K, V)) -> A) -> A
 fn map.from_list[K, V](xs: List[(K, V)]) -> Map[K, V]
 fn map.get[K, V](m: Map[K, V], key: K) -> Option[V]
 fn map.group_by[K, V, B](m: Map[K, V], f: fn((K, V)) -> B) -> Map[B, List[(K, V)]]
