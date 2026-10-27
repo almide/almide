@@ -114,14 +114,25 @@ impl NewtypeEraser<'_> {
 }
 impl almide_ir::visit_mut::IrMutVisitor for NewtypeEraser<'_> {
     fn visit_expr_mut(&mut self, e: &mut almide_ir::IrExpr) {
+        // Patterns are erased against their subject's type BEFORE the walk
+        // substitutes it away (#4275).
+        if let almide_ir::IrExprKind::Match { subject, arms } = &mut e.kind {
+            for arm in arms.iter_mut() {
+                self.erase_newtype_pattern(&mut arm.pattern, Some(&subject.ty));
+            }
+        }
         almide_ir::visit_mut::walk_expr_mut(self, e);
-        e.ty = self.subst(&e.ty);
+        let declared = std::mem::replace(&mut e.ty, almide_lang::types::Ty::Unknown);
+        e.ty = self.subst(&declared);
         self.subst_lambda_param_tys(e);
-        self.erase_newtype_ctor_call(e);
+        self.erase_newtype_ctor_call(e, &declared);
         self.erase_unit_bind_match(e);
     }
     fn visit_stmt_mut(&mut self, s: &mut almide_ir::IrStmt) {
         use almide_ir::IrStmtKind;
+        if let IrStmtKind::BindDestructure { pattern, value } = &mut s.kind {
+            self.erase_newtype_pattern(pattern, Some(&value.ty));
+        }
         almide_ir::visit_mut::walk_stmt_mut(self, s);
         if let IrStmtKind::Bind { ty, .. } = &mut s.kind {
             *ty = self.subst(ty);
@@ -133,18 +144,63 @@ impl almide_ir::visit_mut::IrMutVisitor for NewtypeEraser<'_> {
         if let IrPattern::Bind { ty, .. } = p {
             *ty = self.subst(ty);
         }
-        // The 1-arg newtype ctor PATTERN always matches — it IS the inner pattern.
-        let inner = if let IrPattern::Constructor { name, args } = p {
-            if args.len() == 1 && self.map.contains_key(name.as_str()) {
-                Some(args.remove(0))
-            } else {
-                None
+    }
+}
+impl NewtypeEraser<'_> {
+    /// Is a constructor `name` at a position typed `ty` the newtype `name`'s
+    /// own constructor? The table is keyed by the bare type name, while a
+    /// user's variant may spell a case the same way — `| Path(String)` beside
+    /// `value`'s `mod type Path` (#4275): the position's type decides. A
+    /// position whose type is not known keeps the name's reading.
+    fn is_newtype_ctor_at(&self, name: &str, ty: Option<&almide_lang::types::Ty>) -> bool {
+        use almide_lang::types::Ty;
+        self.map.contains_key(name)
+            && match ty {
+                Some(Ty::Named(n, _)) => n.as_str() == name,
+                _ => true,
             }
-        } else {
-            None
+    }
+
+    /// The 1-arg newtype ctor PATTERN always matches — it IS the inner
+    /// pattern. `ty` is the type of the value the pattern meets (pre-erasure),
+    /// carried down through the shapes whose sub-position type is evident.
+    fn erase_newtype_pattern(&self, p: &mut almide_ir::IrPattern, ty: Option<&almide_lang::types::Ty>) {
+        use almide_ir::IrPattern;
+        use almide_lang::types::Ty;
+        let arg = |i: usize| match ty {
+            Some(Ty::Applied(_, args)) => args.get(i).cloned(),
+            _ => None,
         };
-        if let Some(ip) = inner {
-            *p = ip;
+        match p {
+            IrPattern::Constructor { name, args } if args.len() == 1 && self.is_newtype_ctor_at(name, ty) => {
+                let target = self.map.get(name.as_str()).cloned();
+                let mut inner = args.remove(0);
+                self.erase_newtype_pattern(&mut inner, target.as_ref());
+                *p = inner;
+            }
+            IrPattern::Constructor { args, .. } => {
+                for a in args.iter_mut() { self.erase_newtype_pattern(a, None); }
+            }
+            IrPattern::RecordPattern { fields, .. } => {
+                for f in fields.iter_mut() {
+                    if let Some(fp) = &mut f.pattern { self.erase_newtype_pattern(fp, None); }
+                }
+            }
+            IrPattern::Tuple { elements } => {
+                for (i, el) in elements.iter_mut().enumerate() {
+                    let et = match ty { Some(Ty::Tuple(ts)) => ts.get(i).cloned(), _ => None };
+                    self.erase_newtype_pattern(el, et.as_ref());
+                }
+            }
+            IrPattern::Some { inner } | IrPattern::Ok { inner } => self.erase_newtype_pattern(inner, arg(0).as_ref()),
+            IrPattern::Err { inner } => self.erase_newtype_pattern(inner, arg(1).as_ref()),
+            IrPattern::As { inner, .. } => self.erase_newtype_pattern(inner, ty),
+            IrPattern::List { elements, rest } => {
+                let et = arg(0);
+                for el in elements.iter_mut() { self.erase_newtype_pattern(el, et.as_ref()); }
+                if let Some(r) = rest { self.erase_newtype_pattern(r, ty); }
+            }
+            IrPattern::Wildcard | IrPattern::Bind { .. } | IrPattern::Literal { .. } | IrPattern::None => {}
         }
     }
 }
@@ -163,11 +219,13 @@ impl NewtypeEraser<'_> {
 
     /// The 1-arg newtype ctor CALL is the payload itself (same block, same
     /// ownership — the arg was already erased/visited by the caller).
-    fn erase_newtype_ctor_call(&self, e: &mut almide_ir::IrExpr) {
+    /// `declared` is the call's type before erasure: a construction the
+    /// checker typed as another type's case is that case (#4275).
+    fn erase_newtype_ctor_call(&self, e: &mut almide_ir::IrExpr, declared: &almide_lang::types::Ty) {
         use almide_ir::{CallTarget, IrExprKind};
         let is_newtype_ctor = matches!(&e.kind,
             IrExprKind::Call { target: CallTarget::Named { name }, args, .. }
-                if args.len() == 1 && self.map.contains_key(name.as_str()));
+                if args.len() == 1 && self.is_newtype_ctor_at(name.as_str(), Some(declared)));
         if is_newtype_ctor {
             if let IrExprKind::Call { args, .. } = &mut e.kind {
                 let payload = args.pop().expect("1-arg ctor");
