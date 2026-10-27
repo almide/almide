@@ -187,6 +187,10 @@ fn every_spread_of_a_secret_is_e033() {
     assert_refused("spread_bare", "import secret\nfn main() -> Unit = {\n  let s = secret.new(\"pw\")\n  let t = { ...s }\n  println(\"${t}\")\n}\n", "E033", msg);
     assert_refused("spread_override", "import secret\nfn main() -> Unit = {\n  let s = secret.new(\"pw\")\n  let t = { ...s, hidden: \"x\" }\n  println(\"${t}\")\n}\n", "E033", msg);
     assert_refused("spread_in_lambda", "import secret\nfn main() -> Unit = {\n  let xs = [secret.new(\"pw\")] |> list.map((x) => { ...x })\n  println(\"${xs}\")\n}\n", "E033", msg);
+    // A base still open where the spread is inferred: the lambda's parameter
+    // is fixed to Secret only by the later call, so only the check deferred
+    // past the solve sees it.
+    assert_refused("spread_on_a_later_fixed_param", "import secret\nfn main() -> Unit = {\n  let f = (x) => { ...x }\n  let t = f(secret.new(\"pw\"))\n  println(\"${t}\")\n}\n", "E033", msg);
 }
 
 /// #4239: a generic `==` is structural, so no instantiation may hold a
