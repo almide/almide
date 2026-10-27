@@ -1,0 +1,14 @@
+// silent (E101 near-miss, #4266): non-ASCII identifiers that a reader can
+// tell apart are fine. One script (Cyrillic `привет`, Japanese `名前`), Latin
+// with Han (`user名`), and Greek `π` beside an unrelated Latin `pi_value`.
+// A hidden character written as an escape is ASCII in the source.
+fn привет() -> String = "hi"
+fn 名前() -> String = "taro"
+effect fn main() -> Unit = {
+  let user名 = 名前()
+  let π = 3
+  let pi_value = π + 1
+  let family = "👨\u{200D}👩\u{200D}👧"
+  let tagged = "fine\u{E0049}"
+  println("${привет()} ${user名} ${int.to_string(pi_value)} ${family} ${tagged}")
+}

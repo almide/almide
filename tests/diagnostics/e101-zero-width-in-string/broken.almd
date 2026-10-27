@@ -1,0 +1,6 @@
+// E101 (#4266): a zero-width space in a string literal makes two keys that
+// display the same compare different.
+effect fn main() -> Unit = {
+  let key = "ad​min"
+  println(if key == "admin" then "match" else "differ")
+}

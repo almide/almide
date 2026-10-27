@@ -1,0 +1,8 @@
+// E101 (#4266): the homoglyph rule sees an interpolation hole's identifiers:
+// the field name in the hole holds CYRILLIC SMALL LETTER A (U+0430), and it
+// appears nowhere else in the file.
+type User = { name: String }
+effect fn main() -> Unit = {
+  let u = User { name: "ann" }
+  println("hello ${u.nаme}")
+}
