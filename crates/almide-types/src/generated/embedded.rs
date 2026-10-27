@@ -11248,7 +11248,6 @@ fn empty() -> SafeHtml = SafeHtml("")
 
 
 
-
 fn __html_ascii(c: String) -> Bool = (string.codepoint(c) ?? 128) < 128
 
 
@@ -11261,7 +11260,10 @@ fn __html_blank(c: String) -> Bool = (string.codepoint(c) ?? 0) <= 32
 fn __html_name_char(c: String) -> Bool = __html_ascii(c) and (string.is_alphanumeric(c) or c == "-" or c == "_" or c == ":" or c == ".")
 
 fn __html_name_ok(name: String) -> Bool = match list.first(string.chars(name)) {
-  some(c) => __html_ascii(c) and string.is_alpha(c) and list.all(string.chars(name), (x) => __html_name_char(x)),
+  some(c) => __html_ascii(c) and string.is_alpha(c) and list.all(
+    string.chars(name),
+    (x) => __html_name_char(x),
+  ),
   none => false,
 }
 
@@ -11345,12 +11347,10 @@ fn url_attr(name: String, url: String) -> SafeHtml = {
 
 /// json.stringify(v) with < > & U+2028 U+2029 as \u escapes; safe inside <script>.
 fn script_json(v: Value) -> SafeHtml = {
-  let s = json.stringify(v)
-    |> string.replace("<", "\\u003c")
-    |> string.replace(">", "\\u003e")
-    |> string.replace("&", "\\u0026")
-    |> string.replace("\u{2028}", "\\u2028")
-    |> string.replace("\u{2029}", "\\u2029")
+  let s = json.stringify(v) |> string.replace("<", "\\u003c") |> string.replace(">", "\\u003e") |> string.replace(
+    "&",
+    "\\u0026",
+  ) |> string.replace("\u{2028}", "\\u2028") |> string.replace("\u{2029}", "\\u2029")
   SafeHtml(s)
 }
 "##;
