@@ -656,14 +656,14 @@ not a symlink
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (36 functions)
+## Signature index (37 functions)
 
 ```
 // Whole regular file (<= 1 GiB) as UTF-8; err if missing or not UTF-8.
 // @since 0.5.0 or earlier
 effect fs.read_text(path: String) -> String
 
-// Bytes as Ints 0..255; regular file <= 1 GiB; err if missing.
+// Whole regular file (<= 1 GiB) as Bytes; err if missing.
 // @since 0.5.0 or earlier
 effect fs.read_bytes(path: String) -> Bytes
 

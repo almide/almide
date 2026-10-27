@@ -605,7 +605,7 @@ hel
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (85 functions)
+## Signature index (87 functions)
 
 ```
 // s without leading/trailing whitespace.

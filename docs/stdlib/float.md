@@ -204,7 +204,7 @@ fn main() -> Unit = {
 ```
 // Shortest round-trip digits, no exponent; 2.0 keeps .0.
 // @since 0.5.0 or earlier
-float.to_string(n: Float) -> String
+float.to_string(x: Float) -> String
 
 // Finite Float from s trimmed of ASCII space; err on junk, inf, NaN, overflow.
 // @since 0.5.0 or earlier
@@ -212,7 +212,7 @@ float.parse(s: String) -> Result[Float, String]
 
 // Fixed-point, ties to even; decimals outside 0..4096 abort.
 // @since 0.5.0 or earlier
-float.to_fixed(n: Float, decimals: Int) -> String
+float.to_fixed(x: Float, decimals: Int) -> String
 
 // IEEE-754 bits as Int; any NaN gives the canonical NaN.
 // @since 0.12.1 or earlier
@@ -220,19 +220,19 @@ float.to_bits(f: Float) -> Int
 
 // Magnitude; -0.0 gives 0.0, NaN stays NaN.
 // @since 0.5.0 or earlier
-float.abs(n: Float) -> Float
+float.abs(x: Float) -> Float
 
 // Round toward -inf; -0.5 gives -1.0.
 // @since 0.5.0 or earlier
-float.floor(n: Float) -> Float
+float.floor(x: Float) -> Float
 
 // Round toward +inf; -0.5 gives -0.0.
 // @since 0.5.0 or earlier
-float.ceil(n: Float) -> Float
+float.ceil(x: Float) -> Float
 
 // Nearest whole value; halves round away from zero.
 // @since 0.5.0 or earlier
-float.round(n: Float) -> Float
+float.round(x: Float) -> Float
 
 // Lesser; a NaN operand is ignored; -0.0 < 0.0.
 // @since 0.5.0 or earlier
@@ -242,9 +242,9 @@ float.min(a: Float, b: Float) -> Float
 // @since 0.5.0 or earlier
 float.max(a: Float, b: Float) -> Float
 
-// n limited to lo..hi; lo > hi or a NaN bound aborts.
+// x limited to lo..hi; lo > hi or a NaN bound aborts.
 // @since 0.5.0 or earlier
-float.clamp(n: Float, lo: Float, hi: Float) -> Float
+float.clamp(x: Float, lo: Float, hi: Float) -> Float
 
 // 1.0 or -1.0 by sign bit (0.0 gives 1.0); NaN for NaN.
 // @since 0.5.13 or earlier
@@ -256,11 +256,11 @@ float.signum(x: Float) -> Float
 
 // True only for NaN (unequal to itself).
 // @since 0.6.0 or earlier
-float.is_nan(n: Float) -> Bool
+float.is_nan(x: Float) -> Bool
 
 // True for inf and -inf; false for NaN.
 // @since 0.6.0 or earlier
-float.is_infinite(n: Float) -> Bool
+float.is_infinite(x: Float) -> Bool
 
 // Round toward 0; -0.5 gives -0.0.
 // @since unreleased

@@ -284,7 +284,7 @@ effect fn main() -> Unit = {
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
-## Signature index (11 functions)
+## Signature index (13 functions)
 
 ```
 // Stdout on exit 0; else err with stderr text.
@@ -327,7 +327,7 @@ effect process.read_new_stderr(c: ProcessChild) -> String
 // @since unreleased
 effect process.child_pid(c: ProcessChild) -> Int
 
-// Sends signal to pid; err is kill's stderr.
+// Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
 // @since 0.12.3 or earlier
 effect process.kill(pid: Int, signal: Int) -> Unit
 
@@ -338,10 +338,6 @@ effect process.exit(code: Int) -> Never
 // OS process ID of this program.
 // @since 0.12.3 or earlier
 effect process.pid() -> Int
-
-// Sends signal (0..=31) to pid (> 0) by kill(2); err names why.
-// @since 0.12.3 or earlier
-effect process.kill(pid: Int, signal: Int) -> Unit
 ```
 
 ## Type index (2 types)

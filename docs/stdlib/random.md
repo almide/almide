@@ -109,11 +109,11 @@ effect random.float() -> Float
 
 // Random element of xs; none when empty. Not for secrets: use random.bytes.
 // @since 0.5.0 or earlier
-effect random.choice(xs: List[T]) -> Option[T]
+effect random.choice(xs: List[A]) -> Option[A]
 
 // Random permutation of xs as a new list. Not for secrets: use random.bytes.
 // @since 0.5.0 or earlier
-effect random.shuffle(xs: List[T]) -> List[T]
+effect random.shuffle(xs: List[A]) -> List[A]
 
 // n bytes from the OS cryptographic random source (CSPRNG); n < 0 aborts.
 // @since unreleased
