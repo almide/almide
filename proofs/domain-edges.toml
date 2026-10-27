@@ -99,235 +99,43 @@
 # `scripts/check-domain-edges.sh --selftest` proves that with forged cells.
 
 wasm_budget_bytes = 1073741824
-count = 67
-skip_count = 117
+count = 23
+skip_count = 128
 
 [[divergence]]
-cell   = "bytes.new:len:i32_max"
+cell   = "bytes.pad_end:n:i32_max"
 reason = "contracted divergence (C-197) at the declared wasm budget (#2387): a 2 GiB request (1-byte element at i32_max) exceeds wasm_budget_bytes, so the wasm leg takes the defined abort structurally while native answers; unpinned, this cell read AGREE and DIVERGE from one binary minutes apart"
 
 [[divergence]]
-cell   = "bytes.new:len:two_pow_32"
+cell   = "bytes.pad_end:n:two_pow_32"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
-cell   = "bytes.new:len:u32_max"
+cell   = "bytes.pad_end:n:u32_max"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
-cell   = "bytes.pad_left:target_len:i32_max"
+cell   = "bytes.pad_start:n:i32_max"
 reason = "contracted divergence (C-197) at the declared wasm budget (#2387): a 2 GiB request (1-byte element at i32_max) exceeds wasm_budget_bytes, so the wasm leg takes the defined abort structurally while native answers; unpinned, this cell read AGREE and DIVERGE from one binary minutes apart"
 
 [[divergence]]
-cell   = "bytes.pad_left:target_len:two_pow_32"
+cell   = "bytes.pad_start:n:two_pow_32"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
-cell   = "bytes.pad_left:target_len:u32_max"
+cell   = "bytes.pad_start:n:u32_max"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
-cell   = "bytes.pad_right:target_len:i32_max"
+cell   = "bytes.zeros:n:i32_max"
 reason = "contracted divergence (C-197) at the declared wasm budget (#2387): a 2 GiB request (1-byte element at i32_max) exceeds wasm_budget_bytes, so the wasm leg takes the defined abort structurally while native answers; unpinned, this cell read AGREE and DIVERGE from one binary minutes apart"
 
 [[divergence]]
-cell   = "bytes.pad_right:target_len:two_pow_32"
+cell   = "bytes.zeros:n:two_pow_32"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
-cell   = "bytes.pad_right:target_len:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f16_le_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f16_le_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f16_le_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f32_be_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f32_be_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f32_be_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f32_le_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f32_le_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f32_le_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f64_be_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f64_be_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f64_be_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f64_le_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f64_le_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_f64_le_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i16_be_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i16_be_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i16_be_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i16_le_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i16_le_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i16_le_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i32_be_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i32_be_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i32_be_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i32_le_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i32_le_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i32_le_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i64_be_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i64_be_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i64_be_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i64_le_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i64_le_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_i64_le_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_u16_be_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_u16_be_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_u16_be_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_u16_le_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_u16_le_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_u16_le_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_u32_be_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_u32_be_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_u32_be_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_u32_le_array:count:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_u32_le_array:count:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.read_u32_le_array:count:u32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.repeat:n:i32_max"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.repeat:n:two_pow_32"
-reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
-
-[[divergence]]
-cell   = "bytes.repeat:n:u32_max"
+cell   = "bytes.zeros:n:u32_max"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
@@ -344,6 +152,22 @@ reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocat
 
 [[divergence]]
 cell   = "list.range:start:i32_min"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "list.range_step:end:i32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "list.range_step:end:two_pow_32"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "list.range_step:end:u32_max"
+reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
+
+[[divergence]]
+cell   = "list.range_step:start:i32_min"
 reason = "contracted divergence (C-197, ratified A 2026-08-17): each leg allocates to its own structural bound and aborts with the same defined line beyond it; this cell sits between the two bounds, so the narrower leg aborts while the wider one answers"
 
 [[divergence]]
@@ -381,84 +205,104 @@ slot   = "bytes.copy_to_ptr(cap)"
 reason = "unbuildable: no VALUES entry for parameter type `RawPtr`"
 
 [[skip]]
+slot   = "bytes.fold(init)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int, Int) -> Int`"
+
+[[skip]]
 slot   = "bytes.from_raw_ptr(len)"
 reason = "unbuildable: no VALUES entry for parameter type `RawPtr`"
 
 [[skip]]
-slot   = "bytes.read_bool_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Bool?)`"
+slot   = "bytes.next_bool(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Bool?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_f16_le_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Float?)`"
+slot   = "bytes.next_bytes(n)"
+reason = "unrenderable: no RENDER entry for return type `(Bytes?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_f32_be_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Float?)`"
+slot   = "bytes.next_bytes(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Bytes?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_f32_le_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Float?)`"
+slot   = "bytes.next_f16_be(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Float?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_f64_be_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Float?)`"
+slot   = "bytes.next_f16_le(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Float?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_f64_le_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Float?)`"
+slot   = "bytes.next_f32_be(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Float?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_i16_be_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+slot   = "bytes.next_f32_le(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Float?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_i16_le_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+slot   = "bytes.next_f64_be(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Float?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_i32_be_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+slot   = "bytes.next_f64_le(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Float?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_i32_le_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+slot   = "bytes.next_i16_be(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_i64_be_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+slot   = "bytes.next_i16_le(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_i64_le_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+slot   = "bytes.next_i32_be(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_u16_be_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+slot   = "bytes.next_i32_le(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_u16_le_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+slot   = "bytes.next_i64_be(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_u32_be_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+slot   = "bytes.next_i64_le(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_u32_le_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+slot   = "bytes.next_i8(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int?, Int)`"
 
 [[skip]]
-slot   = "bytes.read_u8_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Int?)`"
+slot   = "bytes.next_u16_be(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int?, Int)`"
 
 [[skip]]
-slot   = "bytes.take_at(n)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Bytes?)`"
+slot   = "bytes.next_u16_le(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int?, Int)`"
 
 [[skip]]
-slot   = "bytes.take_at(pos)"
-reason = "unrenderable: no RENDER entry for return type `(Int, Bytes?)`"
+slot   = "bytes.next_u32_be(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int?, Int)`"
+
+[[skip]]
+slot   = "bytes.next_u32_le(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int?, Int)`"
+
+[[skip]]
+slot   = "bytes.next_u8(pos)"
+reason = "unrenderable: no RENDER entry for return type `(Int?, Int)`"
+
+[[skip]]
+slot   = "bytes.scan(init)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int, Int) -> Int`"
+
+[[skip]]
+slot   = "bytes.split_at(n)"
+reason = "unrenderable: no RENDER entry for return type `(Bytes, Bytes)`"
 
 [[skip]]
 slot   = "fs.fold_lines(init)"
@@ -565,76 +409,12 @@ slot   = "io.write(h)"
 reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
 
 [[skip]]
-slot   = "net.tcp_connect(port)"
-reason = "unrenderable: no RENDER entry for return type `Result[TcpStream, String]`"
+slot   = "list.binary_search_by(target)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int) -> Int`"
 
 [[skip]]
-slot   = "net.tcp_listen(port)"
-reason = "unrenderable: no RENDER entry for return type `Result[TcpListener, String]`"
-
-[[skip]]
-slot   = "net.tcp_read_timeout(len)"
-reason = "unbuildable: no VALUES entry for parameter type `TcpStream`"
-
-[[skip]]
-slot   = "net.tcp_read_timeout(timeout_ms)"
-reason = "unbuildable: no VALUES entry for parameter type `TcpStream`"
-
-[[skip]]
-slot   = "net.tcp_set_timeout(timeout_ms)"
-reason = "unbuildable: no VALUES entry for parameter type `TcpStream`"
-
-[[skip]]
-slot   = "net.udp_bind(port)"
-reason = "unrenderable: no RENDER entry for return type `Result[UdpSocket, String]`"
-
-[[skip]]
-slot   = "net.udp_recv_from(max)"
-reason = "unbuildable: no VALUES entry for parameter type `UdpSocket`"
-
-[[skip]]
-slot   = "net.udp_send_to(port)"
-reason = "unbuildable: no VALUES entry for parameter type `UdpSocket`"
-
-[[skip]]
-slot   = "process.exit(code)"
-reason = "unrenderable: no RENDER entry for return type `Never`"
-
-[[skip]]
-slot   = "process.kill(pid)"
-reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
-
-[[skip]]
-slot   = "process.kill(signal)"
-reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
-
-[[skip]]
-slot   = "process.stop(grace_ms)"
-reason = "unbuildable: no VALUES entry for parameter type `ProcessChild`"
-
-[[skip]]
-slot   = "unix.select(timeout_ms)"
-reason = "unbuildable: no VALUES entry for parameter type `List[Fd]`"
-
-[[skip]]
-slot   = "unix.shm_create(size)"
-reason = "unrenderable: no RENDER entry for return type `Result[Fd, String]`"
-
-[[skip]]
-slot   = "unix.shm_read(len)"
-reason = "unbuildable: no VALUES entry for parameter type `Fd`"
-
-[[skip]]
-slot   = "unix.shm_read(offset)"
-reason = "unbuildable: no VALUES entry for parameter type `Fd`"
-
-[[skip]]
-slot   = "unix.shm_resize(size)"
-reason = "unbuildable: no VALUES entry for parameter type `Fd`"
-
-[[skip]]
-slot   = "unix.shm_write(offset)"
-reason = "unbuildable: no VALUES entry for parameter type `Fd`"
+slot   = "list.binary_search_with(target)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int, Int) -> Int`"
 
 [[skip]]
 slot   = "list.fold(init)"
@@ -647,6 +427,10 @@ reason = "unbuildable: no VALUES entry for parameter type `(Int) -> Int`"
 [[skip]]
 slot   = "list.iterate(seed)"
 reason = "unbuildable: no VALUES entry for parameter type `(Int) -> Int`"
+
+[[skip]]
+slot   = "list.join(sep)"
+reason = "probe does not type-check: exit 1"
 
 [[skip]]
 slot   = "list.scan(init)"
@@ -781,6 +565,38 @@ slot   = "matrix.zeros(rows)"
 reason = "unrenderable: no RENDER entry for return type `Matrix`"
 
 [[skip]]
+slot   = "net.tcp_connect(port)"
+reason = "unrenderable: no RENDER entry for return type `Result[TcpStream, String]`"
+
+[[skip]]
+slot   = "net.tcp_listen(port)"
+reason = "unrenderable: no RENDER entry for return type `Result[TcpListener, String]`"
+
+[[skip]]
+slot   = "net.tcp_read_timeout(len)"
+reason = "unbuildable: no VALUES entry for parameter type `TcpStream`"
+
+[[skip]]
+slot   = "net.tcp_read_timeout(timeout_ms)"
+reason = "unbuildable: no VALUES entry for parameter type `TcpStream`"
+
+[[skip]]
+slot   = "net.tcp_set_timeout(timeout_ms)"
+reason = "unbuildable: no VALUES entry for parameter type `TcpStream`"
+
+[[skip]]
+slot   = "net.udp_bind(port)"
+reason = "unrenderable: no RENDER entry for return type `Result[UdpSocket, String]`"
+
+[[skip]]
+slot   = "net.udp_recv_from(max)"
+reason = "unbuildable: no VALUES entry for parameter type `UdpSocket`"
+
+[[skip]]
+slot   = "net.udp_send_to(port)"
+reason = "unbuildable: no VALUES entry for parameter type `UdpSocket`"
+
+[[skip]]
 slot   = "prim.alloc_list_str(n)"
 reason = "probe does not type-check: error[E025]: cannot infer a concrete type for this expression (type List[?0])"
 
@@ -817,6 +633,22 @@ slot   = "prim.int_to_ptr(a)"
 reason = "unrenderable: no RENDER entry for return type `RawPtr`"
 
 [[skip]]
+slot   = "process.exit(code)"
+reason = "unrenderable: no RENDER entry for return type `Never`"
+
+[[skip]]
+slot   = "process.kill(pid)"
+reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
+
+[[skip]]
+slot   = "process.kill(signal)"
+reason = "unrenderable: no RENDER entry for return type `Result[Unit, String]`"
+
+[[skip]]
+slot   = "process.stop(grace_ms)"
+reason = "unbuildable: no VALUES entry for parameter type `ProcessChild`"
+
+[[skip]]
 slot   = "result.filter(err_val)"
 reason = "unbuildable: no VALUES entry for parameter type `Result[Int, Int]`"
 
@@ -841,5 +673,41 @@ slot   = "set.remove(value)"
 reason = "unbuildable: no VALUES entry for parameter type `Set[Int]`"
 
 [[skip]]
+slot   = "string.fold(init)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int, String) -> Int`"
+
+[[skip]]
+slot   = "string.scan(init)"
+reason = "unbuildable: no VALUES entry for parameter type `(Int, String) -> Int`"
+
+[[skip]]
 slot   = "string.slice(start)"
 reason = "unbuildable: no VALUES entry for parameter type `Int = 9223372036854775807`"
+
+[[skip]]
+slot   = "string.split_at(n)"
+reason = "unrenderable: no RENDER entry for return type `(String, String)`"
+
+[[skip]]
+slot   = "unix.select(timeout_ms)"
+reason = "unbuildable: no VALUES entry for parameter type `List[Fd]`"
+
+[[skip]]
+slot   = "unix.shm_create(size)"
+reason = "unrenderable: no RENDER entry for return type `Result[Fd, String]`"
+
+[[skip]]
+slot   = "unix.shm_read(len)"
+reason = "unbuildable: no VALUES entry for parameter type `Fd`"
+
+[[skip]]
+slot   = "unix.shm_read(offset)"
+reason = "unbuildable: no VALUES entry for parameter type `Fd`"
+
+[[skip]]
+slot   = "unix.shm_resize(size)"
+reason = "unbuildable: no VALUES entry for parameter type `Fd`"
+
+[[skip]]
+slot   = "unix.shm_write(offset)"
+reason = "unbuildable: no VALUES entry for parameter type `Fd`"
