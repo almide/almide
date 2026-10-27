@@ -108,9 +108,13 @@
 # outside prelude_*.rs, and a `//` inside an emitted string (30 -> 32). The
 # memory-trap gate (#4023) names two: a trap violation the corpus and the seed
 # never reach, and a region bug that shows only in the unarmed layout (32 -> 34).
+# The loom fan gate (security row 6, 2026-10-27) compensates the Miri fan gate's
+# unsampled interleavings and names two of its own: interleavings past its
+# bounded models' preemption bounds, and C11 executions loom does not model
+# (36 -> 37).
 #
 # unmapped_blind_ceiling = "108"
-# uncompensated_blind_ceiling = "36"
+# uncompensated_blind_ceiling = "37"
 #
 # History of the unverified ceiling: it moved 0 -> 2 when enumerating the
 # Almide gates (#2128) brought `output-parity` and `fuzz-track-record` INTO the
@@ -898,7 +902,17 @@ class = "NEGATIVE_TESTED"
 evidence = "#4007 landing (2026-10-24): every invocation first runs a control, the same generated crate with the fan caller's wait for its helpers removed (almide_fan_deal returns while a helper is inside its gate), and refuses to judge unless Miri reports it UB. Measured on aarch64-apple-darwin, nightly-2026-08-01: the control came back UB ('deallocating while item is strongly protected', in almide_fan_deal) on seeds 0..8 and on seed 0 alone, four runs out of four; the unbroken crate ran clean on seeds 0..8 with its output equal to the native run. The same broken crate under miri-generated.sh's flags (one reported CPU, cost model on) came back clean — that corpus never crosses the gate. Rows 6/9 (2026-10-26, GCE n2-standard-8, x86_64-linux, nightly-2026-08-01): the gate runs one program per shape, each behind its own control — gate and par_filter (list.filter/list.any under fan arms) with the caller's wait removed came back UB ('deallocating while item [SharedReadOnly ...] is strongly protected'), the line-fold workers (fs.fold_lines_chunked, which hold no gate) with one unsynchronised static mut written by every worker came back UB ('Data race detected between (1) non-atomic write on thread ...'); every unbroken shape ran clean on seeds 0..8 at preemption rates 0.01 and 0.2 with output equal to native. fan.min / fan.bounded start no thread: the gate first requires `almide check` to refuse a fan block (E007) and a fan.map inside their pure bodies."
 measures = "whether Miri reports undefined behaviour in each shape's program (flat and nested fan.map offers, list.par_filter/par_any under fan arms, the line-fold workers) with every offer dealt to helper threads (four reported CPUs, ALMIDE_FAN_COST_OFF=1, the seeds of MIRI_SEEDS at each of MIRI_PREEMPTION_RATES), plus each shape's control verdict, the output against the native run, and the refusal of fan offers inside fan.min / fan.bounded bodies"
 varies = "landing (2026-10-24): control UB, program clean, output = native"
-blind = "an interleaving none of the seeds and preemption rates schedules (Miri samples two schedules per seed and does not enumerate them, and there is no loom or GenMC model of the gate protocol) -> UNCOMPENSATED; a fan shape the programs do not use -> UNCOMPENSATED; the wasm host's fan (host_fan.rs: safe Rust under the workspace forbid(unsafe_code), one instance with its own unshared linear memory per worker, so rustc rather than a gate holds it) -> UNCOMPENSATED"
+blind = "an interleaving none of the seeds and preemption rates schedules (Miri samples two schedules per seed and does not enumerate them) -> scripts/loom-fan-gate.sh (loom enumerates the gate protocol's interleavings from the same source, within the bounds its own row states); a fan shape the programs do not use -> UNCOMPENSATED; the wasm host's fan (host_fan.rs: safe Rust under the workspace forbid(unsafe_code), one instance with its own unshared linear memory per worker, so rustc rather than a gate holds it) -> UNCOMPENSATED"
+
+[[gate]]
+path = "scripts/loom-fan-gate.sh"
+reads = "scalar"
+wired_by = ".github/workflows/miri-nightly.yml"
+class = "NEGATIVE_TESTED"
+evidence = "Security row 6 landing (2026-10-27, GCE n2-standard-8, x86_64-linux, rust 1.96.0, loom 0.7.2, commit 5caace74a): every invocation first runs two controls planted in the extracted runtime source and refuses to judge unless loom reports a causality violation for each — `nowait` (the caller's wait for helpers inside its gate removed, the defect miri-fan-gate.sh's control plants) came back 'Causality violation: Concurrent read and write accesses to `UnsafeCell`' in 11 s, `noreaders` (withdraw no longer waits for the slot's readers) came back 'Causality violation: Concurrent read and write accesses' in 2 s; a control that fails without a causality violation (a build error, an unrelated panic) is refused as not the planted defect. The unbroken protocol passed all three models (flat offer unbounded, nested offer to 3 preemptions, two offers to 2) in 84 s; scripts/loom-fan-gate.sh exit 0, 97 s with the builds."
+measures = "whether loom finds an execution of the fan gate protocol (runtime/rs/src/list.rs, almide_fan_deal through almide_fan_steal, extracted by tools/loom-fan-gate/build.rs and run on loom's primitives) in which a helper's access to an offer's gate, block queue or borrowed taking loop is not happens-before that frame's teardown, or an offer does not run each block exactly once, plus each control's verdict"
+varies = "landing (2026-10-27): both controls red with a causality violation, the unbroken protocol green"
+blind = "an interleaving past the nested and two-offer models' preemption bounds (3 and 2, where unbounded did not finish in 300 s and 20 min) -> UNCOMPENSATED; a C11 execution loom does not explore (load buffering), or one a SeqCst access admits but the model's fence-sandwiched SeqCst forbids (the fences also order the thread's surrounding non-SeqCst accesses) -> UNCOMPENSATED; more threads, offers or blocks than the models' (one or two offers of two blocks, one helper of two turns) -> scripts/miri-fan-gate.sh (16- and 8-element offers, nested offers under fan arms, four CPUs); the pool's resident loop, wake-ups and thread-count budget, outside the extracted span -> scripts/miri-fan-gate.sh"
 
 [[gate]]
 path = "scripts/miri-generated.sh"
