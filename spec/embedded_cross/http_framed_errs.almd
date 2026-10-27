@@ -47,7 +47,7 @@ effect fn main() -> Unit = {
     "http://127.0.0.1:8a/",
     "http://u:pw@127.0.0.1:65536/p?q",
     "http://[::1]:70000/",
-    "http://127.0.0.1:000000000000000000080x/",
+    "http://127.0.0.1:000000000000000000080x/"
   ] {
     match http.get_response(url) {
       ok(_) => println("port:unexpected-ok"),

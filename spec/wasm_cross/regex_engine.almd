@@ -230,7 +230,14 @@ fn main() -> Unit = {
   println(olist(regex.captures(regex.new("(a*)*"), "")))
   // ── \s is the ASCII whitespace set [ \t\n\v\f\r] (#4257) ──
   // each of U+0009..U+000D and U+0020 against \s, \S, [\s], [^\s] → TFTF per line
-  for cp in [9, 10, 11, 12, 13, 32] {
+  for cp in [
+    9,
+    10,
+    11,
+    12,
+    13,
+    32
+  ] {
     let ch = string.from_codepoint(cp) ?? ""
     println("${cp} ${b2s(regex.is_match(regex.new("\\s"), ch))}${b2s(regex.is_match(regex.new("\\S"), ch))}${b2s(regex.is_match(regex.new("[\\s]"), ch))}${b2s(regex.is_match(regex.new("[^\\s]"), ch))}")
   }
