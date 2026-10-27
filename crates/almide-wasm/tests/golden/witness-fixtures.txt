@@ -1,7 +1,7 @@
 # spec/wasm_cross fixtures whose EVERY frame in the shipped emission pass carries a
 # certificate the portable checker (almide-verify) accepts (#2754). GROW-ONLY; re-anchor with
 # ALMIDE_UPDATE_WITNESS_FLOOR=1 cargo test --release -p almide-wasm --test witness_floor
-# certified: 992 of 993
+# certified: 996 of 997
 spec/wasm_cross/accum_recursion_declined.almd
 spec/wasm_cross/accum_recursion_int.almd
 spec/wasm_cross/adr0005_operator_equivalence.almd
@@ -102,6 +102,7 @@ spec/wasm_cross/codec_decode_error_surface.almd
 spec/wasm_cross/codec_decode_errors.almd
 spec/wasm_cross/codec_decode_field_order.almd
 spec/wasm_cross/codec_deep_nesting.almd
+spec/wasm_cross/codec_direction_split.almd
 spec/wasm_cross/codec_doc_array.almd
 spec/wasm_cross/codec_empty_and_bool.almd
 spec/wasm_cross/codec_extra_keys.almd
@@ -185,9 +186,11 @@ spec/wasm_cross/enumerate_unnameable_element.almd
 spec/wasm_cross/env_args.almd
 spec/wasm_cross/env_get.almd
 spec/wasm_cross/env_platform_reporting.almd
+spec/wasm_cross/env_secret.almd
 spec/wasm_cross/env_set_overlay.almd
 spec/wasm_cross/env_set_refusal.almd
 spec/wasm_cross/env_sleep_pause.almd
+spec/wasm_cross/env_vars_remove.almd
 spec/wasm_cross/err_arm_takes_let_match_type.almd
 spec/wasm_cross/err_text_operand_escape_families.almd
 spec/wasm_cross/error_operators.almd
@@ -350,6 +353,7 @@ spec/wasm_cross/hex_two_module_link.almd
 spec/wasm_cross/hof_closure_string_tail.almd
 spec/wasm_cross/hof_fn_value_callbacks.almd
 spec/wasm_cross/host_floor_string_alloc.almd
+spec/wasm_cross/http_decode_json_input_type.almd
 spec/wasm_cross/http_query_params_decoder.almd
 spec/wasm_cross/http_response_headers.almd
 spec/wasm_cross/i64_min_literal.almd

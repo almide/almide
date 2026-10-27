@@ -3,7 +3,3 @@
 # an unlisted fixture must exit with 0 live blocks; a row may only go down, and must
 # be lowered when it does. Every row names the issue that owns its leak mechanism.
 # live<TAB>issue<TAB>fixture
-6	#?	spec/wasm_cross/map_set_in_place.almd
-6	#?	spec/wasm_cross/mut_map_param.almd
-1	#?	spec/wasm_cross/mut_param_alias_cow.almd
-8	#?	spec/wasm_cross/mutator_writeback_releases_old_block.almd

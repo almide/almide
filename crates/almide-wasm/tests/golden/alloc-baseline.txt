@@ -524,7 +524,7 @@
 65792	spec/wasm_cross/map_of_maps_value.almd
 65872	spec/wasm_cross/map_rich_variant_key.almd
 66656	spec/wasm_cross/map_set_eq.almd
-268288	spec/wasm_cross/map_set_in_place.almd
+268096	spec/wasm_cross/map_set_in_place.almd
 141424	spec/wasm_cross/map_set_index_threshold.almd
 66960	spec/wasm_cross/map_set_ops.almd
 67872	spec/wasm_cross/map_set_typechange.almd
@@ -578,7 +578,7 @@
 66224	spec/wasm_cross/mut_call_two_mut_args_read.almd
 67232	spec/wasm_cross/mut_heap_param.almd
 66544	spec/wasm_cross/mut_list_param_read_by_range_ops.almd
-66336	spec/wasm_cross/mut_map_param.almd
+66176	spec/wasm_cross/mut_map_param.almd
 135328	spec/wasm_cross/mut_param_alias_cow.almd
 67616	spec/wasm_cross/mut_param_alias_in_place_mutators.almd
 65968	spec/wasm_cross/mut_param_branch_forward.almd
@@ -610,7 +610,7 @@
 66528	spec/wasm_cross/mutable_global_mut_arg_callee_touches_global.almd
 66112	spec/wasm_cross/mutable_global_repeat_writes.almd
 65744	spec/wasm_cross/mutable_global_scalar_assign.almd
-67952	spec/wasm_cross/mutator_writeback_releases_old_block.almd
+67760	spec/wasm_cross/mutator_writeback_releases_old_block.almd
 65872	spec/wasm_cross/mutual_append.almd
 66048	spec/wasm_cross/mutual_recursive_types.almd
 65728	spec/wasm_cross/mutual_tail_recursion.almd
