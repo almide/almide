@@ -5,8 +5,8 @@
 //! this file checks it instead of trusting it.
 //!
 //! For every registered switch the lock lets through, the compiler is run with
-//! that switch ON (a flag set to `1`, a value switch set to `1`) and must
-//! produce what it produces with no switch at all:
+//! that switch ON (see `PROBES`) and must produce what it produces with no
+//! switch at all:
 //!   - `almide emit --target rust` — the classic Rust emission, byte for byte;
 //!   - `almide build --target wasm` — the module, byte for byte;
 //!   - `almide build` (native) — the program's stdout, stderr and exit status,
@@ -45,7 +45,7 @@ effect fn main() -> Unit = {
   println(names)
   println(int.to_string(int.parse("42") ?? 0))
   var acc = ""
-  for i in 0..5 {
+  for i in 0..<5 {
     acc = acc + int.to_string(i)
   }
   println(acc)
@@ -118,9 +118,24 @@ fn artifacts(tag: &str, switch: Option<(&str, &str)>) -> Result<Artifacts, Strin
     Ok(Artifacts { rust: rust.stdout, wasm, native_run: (run.status.code(), run.stdout, run.stderr) })
 }
 
-/// The value a switch under test is set to: ON for a flag, a present value
-/// for a value switch.
-const PROBE: &str = "1";
+/// The values a switch under test is set to, in order: ON for a flag, a
+/// present value for a value switch, then a large number. A value that makes
+/// the build FAIL is not what the lock guards against (it builds nothing else
+/// and skips no check — `ALMIDE_COMPILER_STACK=1` is a one-byte stack), so the
+/// next probe is tried; the first probe the build accepts is compared, and a
+/// switch no probe lets build cannot be checked and is reported.
+const PROBES: [&str; 2] = ["1", "1073741824"];
+
+fn artifacts_under(tag: &str, name: &str) -> Result<Artifacts, String> {
+    let mut why = Vec::new();
+    for (i, p) in PROBES.iter().enumerate() {
+        match artifacts(&format!("{tag}-{i}"), Some((name, p))) {
+            Ok(a) => return Ok(a),
+            Err(e) => why.push(format!("{name}={p}: {e}")),
+        }
+    }
+    Err(why.join("\n"))
+}
 
 /// Which of the three artifacts differ from `base`.
 fn differs(base: &Artifacts, got: &Artifacts) -> Vec<&'static str> {
@@ -155,7 +170,7 @@ fn a_switch_the_lock_lets_through_does_not_change_the_build() {
 
     let unlocked: Vec<&'static Switch> = SWITCHES.iter().filter(|s| !s.scope.changes_the_build()).collect();
     assert!(unlocked.len() > 50, "the roster shrank to {} unlocked switches — is this the right registry?", unlocked.len());
-    let verdicts = par_map(&unlocked, |&sw| (sw, artifacts(sw.name, Some((sw.name, PROBE)))));
+    let verdicts = par_map(&unlocked, |&sw| (sw, artifacts_under(sw.name, sw.name)));
     let mut wrong = Vec::new();
     for (sw, got) in verdicts {
         match got {
@@ -165,7 +180,7 @@ fn a_switch_the_lock_lets_through_does_not_change_the_build() {
                     wrong.push(format!("{} (declared `{}`) changes {}", sw.name, sw.scope.label(), d.join(" and ")));
                 }
             }
-            Err(e) => wrong.push(format!("{} (declared `{}`) changes whether the build succeeds: {e}", sw.name, sw.scope.label())),
+            Err(e) => wrong.push(format!("{} (declared `{}`) fails the build under every probe, so it cannot be checked: {e}", sw.name, sw.scope.label())),
         }
     }
     assert!(
@@ -181,7 +196,7 @@ fn every_instrument_switch_changes_the_build() {
     let base = artifacts("ctl-base", None).unwrap_or_else(|e| panic!("baseline: {e}"));
     let inst: Vec<&'static Switch> = SWITCHES.iter().filter(|s| s.scope == Scope::Instrument).collect();
     assert!(!inst.is_empty(), "no `instrument` switch is registered, so this control controls nothing");
-    let verdicts = par_map(&inst, |&sw| (sw, artifacts(&format!("ctl-{}", sw.name), Some((sw.name, PROBE)))));
+    let verdicts = par_map(&inst, |&sw| (sw, artifacts_under(&format!("ctl-{}", sw.name), sw.name)));
     for (sw, got) in verdicts {
         let got = got.unwrap_or_else(|e| panic!("{}: {e}", sw.name));
         assert!(
