@@ -1268,6 +1268,7 @@ almide app.almd --emit-ir               # 型付き IR を JSON で出力
 | `ALMIDE_SURVIVE_OVERLAY_TEXT=value` | harness | RETIRED (#4129) with `ALMIDE_SURVIVE_OVERLAY`: no longer read |
 | `ALMIDE_TCO_DEBUG` | debug | print the native tail-call loop rewrite decisions |
 | `ALMIDE_TEST_ABORT_PROBE` | runtime | marks a native testing.assert_aborts child (ADR-0029) so `panic` takes the C-219 abort path there; set by the parent, never by hand |
+| `ALMIDE_TEST_LEDGER=value` | runtime | the completion-ledger file a native `almide test` binary appends each finished test's name to (#4255): set by the runner, never by hand |
 | `ALMIDE_TEST_LAX_WASM` | gate | let the default `almide test` lane (wasm first, native fallback) PASS a file whose wasm leg diverged — trapped where the native re-run passed; without it a diverged leg fails the run |
 | `ALMIDE_TEST_SIGNALLED_CALL_URL=value` | harness | the loopback URL that turns the almide-rt-core http test's re-run of itself into the signalled-call child (#3857): it spawns a missing command while a call waits on that URL; set by the parent test, never by hand |
 | `ALMIDE_TEST_VERBOSE` | tool | show the full cargo / rustc output of the `almide test` harness build |
