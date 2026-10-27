@@ -385,8 +385,8 @@ impl<'a> Interpreter<'a> {
         Flow::val(Value::Map(std::rc::Rc::new(out)))
     }
 
-    /// `map.filter(m, (k, v) -> Bool)` — entries kept in order where the
-    /// 2-ary callback answers true.
+    /// `map.filter(m, ((k, v)) -> Bool)` — entries kept in order where the
+    /// callback answers true for the entry as one `(k, v)` tuple (R-map-09).
     fn hof_map_filter(&mut self, args: &[Value]) -> Flow {
         let entries = match args.first() {
             Some(Value::Map(e)) => e.clone(),
@@ -398,7 +398,7 @@ impl<'a> Interpreter<'a> {
         };
         let mut out = Vec::new();
         for (k, v) in entries.iter() {
-            let keep = val!(self.apply_closure(&clo, vec![k.clone(), v.clone()]));
+            let keep = val!(self.apply_closure(&clo, vec![Value::tuple(vec![k.clone(), v.clone()])]));
             if matches!(keep, Value::Bool(true)) {
                 out.push((k.clone(), v.clone()));
             }
@@ -406,8 +406,8 @@ impl<'a> Interpreter<'a> {
         Flow::val(Value::Map(std::rc::Rc::new(out)))
     }
 
-    /// `map.find(m, (k, v) -> Bool)` — first entry (insertion order) the
-    /// 2-ary callback accepts, as `some((k, v))`; a full pass answers `none`.
+    /// `map.find(m, ((k, v)) -> Bool)` — first entry (insertion order) the
+    /// callback accepts, as `some((k, v))`; a full pass answers `none`.
     fn hof_map_find(&mut self, args: &[Value]) -> Flow {
         let entries = match args.first() {
             Some(Value::Map(e)) => e.clone(),
@@ -418,7 +418,7 @@ impl<'a> Interpreter<'a> {
             Err(f) => return f,
         };
         for (k, v) in entries.iter() {
-            let hit = val!(self.apply_closure(&clo, vec![k.clone(), v.clone()]));
+            let hit = val!(self.apply_closure(&clo, vec![Value::tuple(vec![k.clone(), v.clone()])]));
             if matches!(hit, Value::Bool(true)) {
                 return Flow::val(Value::Option(Some(Box::new(Value::tuple(vec![
                     k.clone(),
@@ -429,8 +429,8 @@ impl<'a> Interpreter<'a> {
         Flow::val(Value::Option(None))
     }
 
-    /// `map.fold(m, init, (acc, k, v) -> acc)` — the 3-ary callback form (the
-    /// list fold's callback is 2-ary, so it cannot be reused).
+    /// `map.fold(m, init, (acc, (k, v)) -> acc)` — the accumulator and the
+    /// entry as one `(k, v)` tuple (R-map-09).
     fn hof_map_fold(&mut self, args: &[Value]) -> Flow {
         let entries = match args.first() {
             Some(Value::Map(e)) => e.clone(),
@@ -445,7 +445,7 @@ impl<'a> Interpreter<'a> {
             Err(f) => return f,
         };
         for (k, v) in entries.iter() {
-            acc = val!(self.apply_closure(&clo, vec![acc, k.clone(), v.clone()]));
+            acc = val!(self.apply_closure(&clo, vec![acc, Value::tuple(vec![k.clone(), v.clone()])]));
         }
         Flow::val(acc)
     }
