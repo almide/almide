@@ -71,7 +71,8 @@ fn a_spread_with_no_override_copies_its_base_on_every_leg() {
         assert_eq!(run(&["--target", "wasm"]), OUT, "wasm");
     }
     match run_interp_capture(SRC) {
-        InterpLeg::Ran(_, o, _) => assert_eq!(o, OUT, "interp"),
+        // The interp leg's capture is trimmed, as every interp comparison reads it.
+        InterpLeg::Ran(_, o, _) => assert_eq!(o, OUT.trim_end(), "interp"),
         InterpLeg::Skip(why) => panic!("the interpreter must vote: {why}"),
     }
     // The emitted Rust carries no empty update.
