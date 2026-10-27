@@ -1,0 +1,15 @@
+// A list's type does not grow with its length.
+effect fn main() -> Unit = {
+  let t0 = 1
+  let t1 = [t0, t0]
+  let t2 = t1 + t1
+  let t3 = t2 + t2
+  let t4 = t3 + t3
+  let t5 = t4 + t4
+  let t6 = t5 + t5
+  let t7 = t6 + t6
+  let t8 = t7 + t7
+  let t9 = t8 + t8
+  let t10 = t9 + t9
+  println("ok ${list.len(t10)}")
+}
