@@ -193,10 +193,29 @@ pub fn add_work(id: BudgetId, n: u64) {
     WORK[id as usize].fetch_add(n, Ordering::Relaxed);
 }
 
+/// Type element lists allocated in this process ([`note_type_list_built`]):
+/// the memory measure of type sharing (ADR-0030 D5). With sharing, a chain
+/// of n doubling lines allocates O(n) lists; without it, O(2^n).
+static TYPE_LISTS_BUILT: AtomicU64 = AtomicU64::new(0);
+
+/// Count one type element list allocated (`almide_types::TyVec`).
+#[inline]
+pub fn note_type_list_built() {
+    TYPE_LISTS_BUILT.fetch_add(1, Ordering::Relaxed);
+}
+
+/// The negative control of the type-sharing gate
+/// (`ALMIDE_CONTROL_NO_TYPE_SHARING`): every clone of a type copies its
+/// whole tree, as before ADR-0030 D5. Read once.
+pub fn type_sharing_disabled() -> bool {
+    static OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *OFF.get_or_init(|| crate::env::flag("ALMIDE_CONTROL_NO_TYPE_SHARING"))
+}
+
 /// `budget <name> observed=<max> work=<sum> limit=<n>` per row: what
 /// `--budget-report` prints.
 pub fn report() -> String {
-    let mut out = String::new();
+    let mut out = format!("built type_lists={}\n", TYPE_LISTS_BUILT.load(Ordering::Relaxed));
     for (i, b) in BUDGETS.iter().enumerate() {
         out.push_str(&format!(
             "budget {} observed={} work={} limit={}\n",

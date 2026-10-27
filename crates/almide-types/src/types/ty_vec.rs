@@ -42,8 +42,19 @@ struct Node {
 }
 
 /// A composite type's element list, shared on clone (see the module doc).
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct TyVec(Arc<Node>);
+
+impl Clone for TyVec {
+    fn clone(&self) -> Self {
+        // The negative control of the sharing gate: copy the whole tree,
+        // as a `Vec<Ty>` did.
+        if almide_base::budget::type_sharing_disabled() {
+            return TyVec::from(self.0.items.clone());
+        }
+        TyVec(Arc::clone(&self.0))
+    }
+}
 
 impl TyVec {
     pub fn new() -> Self {
@@ -100,6 +111,9 @@ impl std::ops::Deref for TyVec {
 
 impl std::ops::DerefMut for TyVec {
     fn deref_mut(&mut self) -> &mut Vec<Ty> {
+        if Arc::get_mut(&mut self.0).is_none() {
+            almide_base::budget::note_type_list_built();
+        }
         let node = Arc::make_mut(&mut self.0);
         node.meta = OnceLock::new();
         &mut node.items
@@ -126,6 +140,7 @@ impl std::fmt::Debug for TyVec {
 
 impl From<Vec<Ty>> for TyVec {
     fn from(items: Vec<Ty>) -> Self {
+        almide_base::budget::note_type_list_built();
         TyVec(Arc::new(Node { items, meta: OnceLock::new() }))
     }
 }
