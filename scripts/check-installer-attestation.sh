@@ -75,10 +75,11 @@ gh_dir() { # <mode: none|pass|fail> -> a dir to prepend to PATH
 }
 
 write_checksums() { # <good|bad>
-  local a="almide-$os-$arch.tar.gz" h
+  local a="almide-$os-$arch.tar.gz" z="almide-windows-x86_64.zip" h hz
   h="$(sha "$rel/$a")"
-  [ "$1" = bad ] && h="$(printf '%064d' 0)"
-  { echo "$h  $a"; echo "$(sha "$rel/almide-windows-x86_64.zip" 2>/dev/null || printf '%064d' 1)  almide-windows-x86_64.zip"; } > "$rel/almide-checksums.sha256"
+  hz="$( [ -f "$rel/$z" ] && sha "$rel/$z" || printf '%064d' 1)"
+  if [ "$1" = bad ]; then h="$(printf '%064d' 0)"; hz="$h"; fi
+  { echo "$h  $a"; echo "$hz  $z"; } > "$rel/almide-checksums.sha256"
 }
 
 # case <label> <gh mode> <checksums> <expect: installed|refused> <want text> [installer args...]
