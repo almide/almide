@@ -163,48 +163,36 @@ pub fn is_runtime_backed_repr(module: &str, func: &str) -> bool {
 /// wrong value on wasm). Completeness is machine-checked:
 /// `stdlib_owned_types_matrix` (tests/runtime_backed_types_matrix.rs)
 /// asserts this list is exactly `Value` + the runtime-backed rows + the
-/// bundled `type` declarations.
-pub const STDLIB_OWNED_TYPES: &[(&str, &str)] = &[
-    ("value", "Value"),
-    ("http", "HttpRequest"),
-    ("http", "HttpResponse"),
-    ("http", "HttpCall"),
-    ("http", "HttpLimits"),
-    ("http", "HttpHandler"),
-    ("http", "HttpMiddleware"),
-    ("http", "HttpRoute"),
-    ("fs", "FileStat"),
-    ("fs", "FsRoot"),
-    ("html", "SafeHtml"),
-    ("io", "Stdin"),
-    ("io", "Stdout"),
-    ("io", "Stderr"),
-    ("net", "TcpListener"),
-    ("net", "TcpStream"),
-    ("net", "UdpSocket"),
-    ("net", "UdpPacket"),
-    ("net", "IpAddr"),
-    ("unix", "Fd"),
-    ("uuid", "Uuid"),
-    ("process", "ProcessStatus"),
-    ("process", "ProcessCommand"),
-    ("process", "ProcessChild"),
-    ("random", "Rng"),
-    ("regex", "Regex"),
-    ("url", "Url"),
-    ("deque", "Deque"),
-    ("heap", "Heap"),
-    ("bigint", "BigInt"),
-    ("secret", "Secret"),
-    ("value", "Path"),
-    ("ffi", "Region"),
-];
+/// bundled `type` declarations. The declared part is READ from the bundled
+/// sources (a top-level `type` / `mod type` / `local type` line), never kept
+/// as a list: a module that declares a type owns it the day it lands.
+pub fn stdlib_owned_types() -> &'static [(&'static str, &'static str)] {
+    use std::sync::OnceLock;
+    static TABLE: OnceLock<Vec<(&'static str, &'static str)>> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut out: Vec<(&'static str, &'static str)> = vec![("value", "Value")];
+        out.extend(RUNTIME_BACKED_TYPES.iter().copied());
+        for &module in BUNDLED_MODULES {
+            let Some(src) = bundled_source(module) else { continue };
+            for line in src.lines() {
+                let decl = line.strip_prefix("mod ").or_else(|| line.strip_prefix("local ")).unwrap_or(line);
+                let Some(rest) = decl.strip_prefix("type ") else { continue };
+                let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).unwrap_or(rest.len());
+                let name = &rest[..end];
+                if !name.is_empty() && !out.iter().any(|(m, t)| *m == module && *t == name) {
+                    out.push((module, name));
+                }
+            }
+        }
+        out
+    })
+}
 
 /// The owning module of a stdlib-owned nominal type, by BARE name — `None`
 /// for a qualified spelling and for every name a stdlib module does not own
 /// (the common case).
 pub fn stdlib_owned_type_owner(name: &str) -> Option<&'static str> {
-    STDLIB_OWNED_TYPES.iter().find_map(|(module, ty)| (*ty == name).then_some(*module))
+    stdlib_owned_types().iter().find_map(|(module, ty)| (*ty == name).then_some(*module))
 }
 
 /// The marker a built-in protocol requirement's name starts with when one
@@ -673,7 +661,9 @@ fn marked_stdlib_fns(mark: &str) -> Vec<(&'static str, String, Option<String>)> 
                 // another attribute or a doc line between the mark and its fn
             } else if pending {
                 pending = false;
-                let decl = line.strip_prefix("effect ").unwrap_or(line);
+                // A module-private fn (`local fn`, `mod fn`) carries its mark too.
+                let decl = line.strip_prefix("local ").or_else(|| line.strip_prefix("mod ")).unwrap_or(line);
+                let decl = decl.strip_prefix("effect ").unwrap_or(decl);
                 if let Some(rest) = decl.strip_prefix("fn ") {
                     let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
                     if !name.is_empty() {
@@ -734,6 +724,7 @@ mod ordered_tests {
         assert_eq!(
             t,
             [
+                "ffi.__address", "ffi.__load", "ffi.__store",
                 "ffi.alloc", "ffi.is_writable", "ffi.len", "ffi.read", "ffi.region", "ffi.to_bytes", "ffi.write",
             ]
         );

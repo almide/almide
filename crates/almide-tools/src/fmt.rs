@@ -179,7 +179,7 @@ fn stdlib_owned_ctor_owners() -> &'static std::collections::HashMap<String, &'st
     static OWNERS: std::sync::OnceLock<std::collections::HashMap<String, &'static str>> = std::sync::OnceLock::new();
     OWNERS.get_or_init(|| {
         let mut out = std::collections::HashMap::new();
-        for (module, ty) in almide_lang::stdlib_info::STDLIB_OWNED_TYPES.iter().copied() {
+        for (module, ty) in almide_lang::stdlib_info::stdlib_owned_types().iter().copied() {
             let Some(source) = almide_lang::stdlib_info::bundled_source(module) else { continue };
             let Some(program) = almide_lang::parse_cached(source) else { continue };
             for decl in &program.decls {

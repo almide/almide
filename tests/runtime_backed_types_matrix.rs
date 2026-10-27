@@ -76,7 +76,7 @@ fn stdlib_owned_types_are_value_plus_runtime_backed_plus_bundled_decls() {
     for (m, t) in almide_lang::stdlib_info::RUNTIME_BACKED_TYPES {
         expected.insert((m.to_string(), t.to_string()));
     }
-    let registry: BTreeSet<(String, String)> = almide_lang::stdlib_info::STDLIB_OWNED_TYPES
+    let registry: BTreeSet<(String, String)> = almide_lang::stdlib_info::stdlib_owned_types()
         .iter()
         .map(|(m, t)| (m.to_string(), t.to_string()))
         .collect();
@@ -92,7 +92,7 @@ fn stdlib_owned_types_are_value_plus_runtime_backed_plus_bundled_decls() {
         "STDLIB_OWNED_TYPES row(s) no stdlib module owns — remove them so a user \
          type of that name keeps its bare identity: {dead:?}"
     );
-    for (_, t) in almide_lang::stdlib_info::STDLIB_OWNED_TYPES {
+    for (_, t) in almide_lang::stdlib_info::stdlib_owned_types() {
         assert!(
             almide_lang::stdlib_info::stdlib_owned_type_owner(t).is_some(),
             "stdlib_owned_type_owner must answer every registry row: {t}"
