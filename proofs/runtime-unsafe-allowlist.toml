@@ -25,16 +25,10 @@ class = "fan-sync"
 reason = "the fan gate: a lifetime-erasing transmute of the take closure, one `unsafe impl Sync` (AlmideFanGate), raw parent pointers, the take-cell read and the slot reads (almide_fan_deal .. almide_fan_steal). kept: std::thread::scope in its place (no unsafe) measured 1.13-1.32x the pool's wall time on offers of fine and medium elements and 0.95-1.00x on coarse ones (mandelbrot, binarytrees, fanblock), Apple M-series 14 cores, 2026-10-24 (#4007). Checked under Miri with four CPUs and helpers on by scripts/miri-fan-gate.sh (miri-nightly.yml miri-fan), whose control drops the caller's wait and must come back UB"
 
 [[file]]
-path = "runtime/rs/src/bytes.rs"
-count = 2
-class = "ffi-surface"
-reason = "from_raw_parts / copy_nonoverlapping behind bytes.from_raw_ptr / copy_to_ptr; moves to ffi.read / ffi.write (R-ffi-01, #3853)"
-
-[[file]]
 path = "runtime/rs/src/ffi.rs"
 count = 2
 class = "ffi-surface"
-reason = "from_raw_parts / copy_nonoverlapping behind ffi.read / ffi.write (R-ffi-01, #4042): the one place a program reads or writes a raw address; @memory_unsafe, refused under --profile critical (E100)"
+reason = "from_raw_parts / copy_nonoverlapping behind ffi.read / ffi.write (R-ffi-01, #4042, ADR-0031): the one place a program reads or writes a raw address, reached only after the Almide-side bounds check against the Region's own length (and, for a write, its permission); @memory_unsafe, refused under --profile critical (E100)"
 
 [[file]]
 path = "runtime/rs/src/sys.rs"
@@ -68,9 +62,9 @@ reason = "MAIN_SIGPIPE_PRELUDE: signal(SIGPIPE, SIG_DFL) at the top of every nat
 
 [[file]]
 path = "crates/almide-codegen/src/walker/extern_c.rs"
-count = 1
+count = 2
 class = "emitted-prelude"
-reason = "the call glue of a program's own @extern(c) fn: the program declares the foreign signature"
+reason = "the call glue of a program's own @extern(c) fn: the program declares the foreign signature; and the release call a foreign Region's guard makes on its last drop, to the C function its `@region(release = …)` names (ADR-0031 D6)"
 
 [[file]]
 path = "crates/almide-base/src/native_stack_guard.rs"
