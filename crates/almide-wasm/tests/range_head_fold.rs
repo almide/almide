@@ -69,7 +69,7 @@ fn a_fold_source_survives_an_init_that_rebinds_it() {
         ("var xs = [\"a\", \"b\", \"c\"]\n  let r = xs |> list.fold({\n    xs = [\"z\"]\n    \"\"\n  }, (a, x) => a + x)", "abc"),
         ("var xs = [\"a\", \"b\", \"c\"]\n  let r = xs |> list.scan({\n    xs = [\"z\"]\n    \"\"\n  }, (a, x) => a + x)", "[\"a\", \"ab\", \"abc\"]"),
         ("var s = set.from_list([\"a\", \"b\"])\n  let r = s |> set.fold({\n    s = set.from_list([\"z\"])\n    \"\"\n  }, (a, x) => a + x)", "ab"),
-        ("var m = [\"a\": \"1\", \"b\": \"2\"]\n  let r = m |> map.fold({\n    m = [\"z\": \"9\"]\n    \"\"\n  }, (a, k, v) => a + k + v)", "a1b2"),
+        ("var m = [\"a\": \"1\", \"b\": \"2\"]\n  let r = m |> map.fold({\n    m = [\"z\": \"9\"]\n    \"\"\n  }, (a, (k, v)) => a + k + v)", "a1b2"),
     ];
     for (body, want) in cases {
         let src = format!("effect fn main() -> Unit = {{\n  {body}\n  println(\"${{r}}\")\n}}\n");
