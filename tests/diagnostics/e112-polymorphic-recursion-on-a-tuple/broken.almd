@@ -1,0 +1,6 @@
+// E112 (ADR-0030): `depth` calls itself on a pair of its argument, so every
+// call depth is a new instance whose type doubles the last. Monomorphization
+// stops at the budget.
+fn depth[T: Eq](x: T, n: Int) -> Int = if n == 0 then 0 else 1 + depth((x, x), n - 1)
+
+effect fn main() -> Unit = println("${depth(1, 3)}")

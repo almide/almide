@@ -1,0 +1,4 @@
+// Recurse on the same type: one instance covers every depth.
+fn depth[T: Eq](x: T, n: Int) -> Int = if n == 0 then 0 else 1 + depth(x, n - 1)
+
+effect fn main() -> Unit = println("${depth(1, 3)}")
