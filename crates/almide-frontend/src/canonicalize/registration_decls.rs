@@ -522,8 +522,12 @@ fn register_decl_type(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
         // looked that up here, where only bare `P` had ever been written — so
         // a conforming type from another module was reported as not
         // implementing the protocol (#1087). A stdlib-owned name's bare slot
-        // is the stdlib's (#1828): the user's derives never land on it.
-        let protocol_keys: Vec<Sym> = if type_key != prefixed_key(prefix, name) {
+        // is the stdlib's (#1828): the user's derives never land on it — in
+        // the entry program (`self.X`) and in a user module (`m.X`) alike.
+        // A module's `type Secret: Codec` once wrote Codec under the bare
+        // `Secret`, the stdlib's generic `secret.Secret[A]`, and the derive
+        // check judged THAT type: E023 "is generic" (#4273).
+        let protocol_keys: Vec<Sym> = if type_key != prefixed_key(prefix, name) || shadows_stdlib_type(owner.as_deref(), name) {
             vec![sym(&type_key)]
         } else {
             vec![sym(name), sym(&type_key)]
