@@ -100,6 +100,21 @@ fn table() -> &'static [Removal] {
                 }
             }
         }
+        // A rewrite onto the same name (`io.write(data)` → `io.write(h, data)`)
+        // reshapes a spelling; a spelling another entry rewrites ONTO
+        // (`http.status_code(r)` → `http.status(r)`) is repurposed. Neither
+        // spelling left the stdlib, so neither is a removal.
+        let targets: Vec<String> = out
+            .iter()
+            .filter_map(|r| match &r.fate {
+                Fate::Rewritten { to, .. } => Some(to.clone()),
+                _ => None,
+            })
+            .collect();
+        out.retain(|r| {
+            let reshaped = matches!(&r.fate, Fate::Rewritten { to, .. } if *to == r.from);
+            !reshaped && !targets.contains(&r.from)
+        });
         out
     })
 }
