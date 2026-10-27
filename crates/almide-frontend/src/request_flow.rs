@@ -322,18 +322,21 @@ impl<'c, 'a> Walk<'c, 'a> {
     }
 
     fn call(&mut self, target: &CallTarget, args: &[IrExpr], site: Option<Span>) {
-        if let Some(ix) = self.cx.callee(self.entry.module, target) {
-            let s = &self.summaries[ix];
-            let callee = qualified(&self.cx.fns[ix]);
+        let (cx, summaries) = (self.cx, self.summaries);
+        if let Some(ix) = cx.callee(self.entry.module, target) {
+            let s = &summaries[ix];
+            let callee = qualified(&cx.fns[ix]);
+            let mut found = Vec::new();
             for (i, a) in args.iter().enumerate() {
                 if let Some(Some(hit)) = s.sink_from.get(i) {
                     if self.taint(a) {
                         let mut via = vec![format!("{}(arg {})", callee, i + 1)];
                         via.extend(hit.via.iter().cloned());
-                        self.hits.push(Hit { why: hit.why.clone(), decode: hit.decode.clone(), via, site });
+                        found.push(Hit { why: hit.why.clone(), decode: hit.decode.clone(), via, site });
                     }
                 }
             }
+            self.hits.extend(found);
             return;
         }
         let tainted_in = self.any(args) || match target {
