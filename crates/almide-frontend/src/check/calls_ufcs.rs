@@ -7,7 +7,7 @@
 
 impl Checker {
     /// The `Member { object, field }` callee arm of [`Self::check_call_with_type_args`] — `object.field(...)`: static module/alias/TypeName/codec resolution, then the UFCS ladder (Fn-typed record field, builtin-module method, convention method, protocol method on a TypeVar, user-fn UFCS, cross-module UFCS), falling back to the E002 "no method syntax" diagnostic or a callable-object constraint. Verbatim text move: each step is an independent guard that either returns a resolved `Ty` or falls through to the next.
-    fn check_call_target_member(
+    pub(super) fn check_call_target_member(
         &mut self,
         object: &mut ast::Expr,
         field: &Sym,

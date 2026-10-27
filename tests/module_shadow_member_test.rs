@@ -61,6 +61,36 @@ fn a_shadowed_module_call_is_rejected_at_check_time() {
     }
 }
 
+/// #4254: the PIPE spelling of the same call. `xs |> list.len` is the call
+/// `list.len(xs)`, and with a local `list` that call goes through the local —
+/// the lowering already read it so, but the pipe's own module resolution ran
+/// ahead of the local and `check` passed a program both legs then refused
+/// (rustc E0061 natively, E082 on wasm). The pipe now takes the written call's
+/// route, so check refuses with the same arity error and the shadow hint.
+#[test]
+fn a_shadowed_module_pipe_is_rejected_at_check_time() {
+    for program in [
+        "effect fn main() -> Unit = {\n  let list = [3, 1, 2]\n  println(\"${list |> list.len}\")\n}\n",
+        "effect fn main() -> Unit = {\n  let list = [3, 1, 2]\n  let ys = list |> list.map((x) => x + 1)\n  println(\"${ys}\")\n}\n",
+        "effect fn main() -> Unit = {\n  let string = \"hello\"\n  println(string |> string.to_upper)\n}\n",
+    ] {
+        let (ok, text) = check(program);
+        assert!(!ok, "must not check clean:\n{program}\n{text}");
+        assert!(text.contains("E004"), "expected the written call's arity error, got:\n{text}");
+        assert!(text.contains("local binding"), "the hint must say the receiver is the local:\n{text}");
+    }
+}
+
+/// The negative control of the pipe cell: without a local, the same pipes are
+/// module calls and check clean.
+#[test]
+fn an_unshadowed_module_pipe_still_checks() {
+    let (ok, text) = check(
+        "effect fn main() -> Unit = {\n  let xs = [3, 1, 2]\n  println(\"${xs |> list.len} ${xs |> list.map((x) => x + 1) |> list.len}\")\n}\n",
+    );
+    assert!(ok, "{text}");
+}
+
 /// The receiver is the local, so the count the author reads is off by one.
 /// Without this note the message asks them to recount arguments they counted
 /// correctly (#2349) — the mistake is at the binding, usually lines above.
