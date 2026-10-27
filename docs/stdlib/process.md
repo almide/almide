@@ -282,39 +282,6 @@ effect fn main() -> Unit = {
 }
 ```
 
-## Kept until they move
-
-`args`, `stdin_lines`, `env` and `sleep` belong to `env` and `io` in the
-redesign; they stay here until their behavior contracts move.
-
-### `process.args() -> List[String]`
-
-The full argv, the program path first.
-
-### `process.stdin_lines() -> Result[List[String], String]`
-
-All lines of standard input; an `err` on input that is not UTF-8.
-
-### `process.env(key: String) -> String?`
-
-The value of an environment variable, or `none` if it is not set.
-
-### `process.sleep(ms: Int) -> Unit`
-
-Block for `ms` milliseconds; a negative `ms` is 0.
-
-```almd check
-import process
-
-effect fn main() -> Unit = {
-  let args = process.args()
-  let home = process.env("HOME") ?? "/tmp"
-  let lines = process.stdin_lines()!
-  process.sleep(10)
-  println("${list.len(args)} arg(s), home ${home}, ${list.len(lines)} line(s)")
-}
-```
-
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
 ## Signature index (11 functions)
