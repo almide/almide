@@ -153,9 +153,9 @@ fn a_switch_the_lock_lets_through_does_not_change_the_build() {
     let again = artifacts("base-again", None).unwrap_or_else(|e| panic!("baseline rerun: {e}"));
     assert_eq!(differs(&base, &again), Vec::<&str>::new(), "the baseline is not reproducible, so nothing below can be compared");
 
-    let unlocked: Vec<&Switch> = SWITCHES.iter().filter(|s| !s.scope.changes_the_build()).collect();
+    let unlocked: Vec<&'static Switch> = SWITCHES.iter().filter(|s| !s.scope.changes_the_build()).collect();
     assert!(unlocked.len() > 50, "the roster shrank to {} unlocked switches — is this the right registry?", unlocked.len());
-    let verdicts = par_map(&unlocked, |sw| (sw, artifacts(sw.name, Some((sw.name, PROBE)))));
+    let verdicts = par_map(&unlocked, |&sw| (sw, artifacts(sw.name, Some((sw.name, PROBE)))));
     let mut wrong = Vec::new();
     for (sw, got) in verdicts {
         match got {
@@ -179,9 +179,9 @@ fn a_switch_the_lock_lets_through_does_not_change_the_build() {
 #[test]
 fn every_instrument_switch_changes_the_build() {
     let base = artifacts("ctl-base", None).unwrap_or_else(|e| panic!("baseline: {e}"));
-    let inst: Vec<&Switch> = SWITCHES.iter().filter(|s| s.scope == Scope::Instrument).collect();
+    let inst: Vec<&'static Switch> = SWITCHES.iter().filter(|s| s.scope == Scope::Instrument).collect();
     assert!(!inst.is_empty(), "no `instrument` switch is registered, so this control controls nothing");
-    let verdicts = par_map(&inst, |sw| (sw, artifacts(&format!("ctl-{}", sw.name), Some((sw.name, PROBE)))));
+    let verdicts = par_map(&inst, |&sw| (sw, artifacts(&format!("ctl-{}", sw.name), Some((sw.name, PROBE)))));
     for (sw, got) in verdicts {
         let got = got.unwrap_or_else(|e| panic!("{}: {e}", sw.name));
         assert!(
