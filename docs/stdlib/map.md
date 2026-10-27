@@ -198,7 +198,7 @@ fn main() -> Unit = {
 3
 ```
 
-### `map.filter(m: Map[K, V], f: Fn[K, V] -> Bool) -> Map[K, V]`
+### `map.filter(m: Map[K, V], f: Fn[(K, V)] -> Bool) -> Map[K, V]`
 
 Return a new map containing only entries where the predicate returns true.
 
@@ -212,21 +212,21 @@ fn main() -> Unit = {
 ["a": 1, "c": 3]
 ```
 
-### `map.fold(m: Map[K, V], init: A, f: Fn[A, K, V] -> A) -> A`
+### `map.fold(m: Map[K, V], init: A, f: Fn[A, (K, V)] -> A) -> A`
 
 Accumulate over all entries with an initial value.
 
 ```almd run
 fn main() -> Unit = {
   let scores = map.from_list([("alice", 90), ("bob", 75), ("carol", 82)])
-  println("${map.fold(scores, 0, (acc, k, v) => acc + v)}")
+  println("${map.fold(scores, 0, (acc, (k, v)) => acc + v)}")
 }
 ```
 ```output
 247
 ```
 
-### `map.any(m: Map[K, V], f: Fn[K, V] -> Bool) -> Bool`
+### `map.any(m: Map[K, V], f: Fn[(K, V)] -> Bool) -> Bool`
 
 Check if any entry satisfies the predicate.
 
@@ -242,7 +242,7 @@ true
 false
 ```
 
-### `map.all(m: Map[K, V], f: Fn[K, V] -> Bool) -> Bool`
+### `map.all(m: Map[K, V], f: Fn[(K, V)] -> Bool) -> Bool`
 
 Check if all entries satisfy the predicate.
 
@@ -258,7 +258,7 @@ true
 false
 ```
 
-### `map.count(m: Map[K, V], f: Fn[K, V] -> Bool) -> Int`
+### `map.count(m: Map[K, V], f: Fn[(K, V)] -> Bool) -> Int`
 
 Count entries that satisfy the predicate.
 
@@ -272,7 +272,7 @@ fn main() -> Unit = {
 2
 ```
 
-### `map.find(m: Map[K, V], f: Fn[K, V] -> Bool) -> Option[(K, V)]`
+### `map.find(m: Map[K, V], f: Fn[(K, V)] -> Bool) -> Option[(K, V)]`
 
 Find the first entry matching the predicate. Returns Option[(K, V)].
 
@@ -378,29 +378,29 @@ map.from_list(xs: List[(K, V)]) -> Map[K, V]
 // @since 0.6.1 or earlier
 map.map(m: Map[K, V], f: (V) -> B) -> Map[K, B]
 
-// Entries where f(k, v) holds, order kept.
+// Entries where f((k, v)) holds, order kept.
 // @since 0.5.0 or earlier
-map.filter(m: Map[K, V], f: (K, V) -> Bool) -> Map[K, V]
+map.filter(m: Map[K, V], f: ((K, V)) -> Bool) -> Map[K, V]
 
-// Folds f(acc, k, v) in insertion order.
+// Folds f(acc, (k, v)) in insertion order.
 // @since 0.7.0 or earlier
-map.fold(m: Map[K, V], init: A, f: (A, K, V) -> A) -> A
+map.fold(m: Map[K, V], init: A, f: (A, (K, V)) -> A) -> A
 
-// true if some f(k, v) holds; false when empty.
+// true if some f((k, v)) holds; false when empty.
 // @since 0.7.0 or earlier
-map.any(m: Map[K, V], f: (K, V) -> Bool) -> Bool
+map.any(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool
 
-// true if every f(k, v) holds; true when empty.
+// true if every f((k, v)) holds; true when empty.
 // @since 0.7.0 or earlier
-map.all(m: Map[K, V], f: (K, V) -> Bool) -> Bool
+map.all(m: Map[K, V], f: ((K, V)) -> Bool) -> Bool
 
-// Number of entries where f(k, v) holds.
+// Number of entries where f((k, v)) holds.
 // @since 0.7.0 or earlier
-map.count(m: Map[K, V], f: (K, V) -> Bool) -> Int
+map.count(m: Map[K, V], f: ((K, V)) -> Bool) -> Int
 
 // First (k, v) where f holds, or none.
 // @since 0.7.0 or earlier
-map.find(m: Map[K, V], f: (K, V) -> Bool) -> Option[(K, V)]
+map.find(m: Map[K, V], f: ((K, V)) -> Bool) -> Option[(K, V)]
 
 // Copy with key's value f(v); no-op if absent.
 // @since 0.7.0 or earlier
