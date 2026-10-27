@@ -512,6 +512,11 @@ pub(crate) enum Commands {
         /// Per-run time limit in seconds for every child check / test / run
         #[arg(long, default_value_t = 600)]
         timeout: u64,
+        /// Let an edit that DELETES tests or `// @contract:` lines survive. By
+        /// default a test or contract present before the edit and absent after
+        /// it does not survive (#4267)
+        #[arg(long = "allow-removed")]
+        allow_removed: bool,
     },
     /// Verify-then-write: run `survive` on the edit and write it (atomically)
     /// only if nothing is newly broken. `--force` writes whatever the verdict.
@@ -538,6 +543,10 @@ pub(crate) enum Commands {
         /// Per-run time limit in seconds for every child check / test / run
         #[arg(long, default_value_t = 600)]
         timeout: u64,
+        /// Let an edit that DELETES tests or `// @contract:` lines survive
+        /// (reported in the verdict). Off by default (#4267)
+        #[arg(long = "allow-removed")]
+        allow_removed: bool,
     },
     /// Internal to `almide survive`: compile one file's test harness and run it
     /// captured, printing `{compiled, exit_code, output}` as one JSON line.

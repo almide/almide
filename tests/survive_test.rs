@@ -191,3 +191,53 @@ fn a_patch_that_does_not_apply_is_an_error_not_a_verdict() {
     assert!(got["error"].as_str().unwrap_or("").contains("does not apply"), "{raw}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #4267: an edit that deletes or hollows the guarding tests does not survive.
+/// `removed` used to be reported and ignored, so deleting the failing test was
+/// the easy way to make nothing newly broken — and `apply --if-survives` then
+/// wrote it. The four rows of the issue, on `breaks_test`'s project.
+#[test]
+fn deleting_or_hollowing_the_guarding_tests_does_not_survive() {
+    let dir = scratch_copy("breaks_test", "removal");
+    let original_test = std::fs::read_to_string(dir.join("calc_test.almd")).unwrap();
+    let edits = [
+        ("del_one.txt", "import calc\n\ntest \"add adds\" {\n  assert_eq(calc.add(1, 2), 3)\n}\n"),
+        ("del_all.txt", "import calc\n"),
+        ("hollow.txt", "import calc\n\ntest \"add adds\" {\n  assert(true)\n}\n\ntest \"twice doubles\" {\n  assert_eq(1, 1)\n}\n"),
+        ("added.txt", "import calc\n\ntest \"add adds\" {\n  assert_eq(calc.add(1, 2), 3)\n}\n\ntest \"twice doubles\" {\n  assert_eq(calc.twice(4), 8)\n}\n\ntest \"twice of zero\" {\n  assert_eq(calc.twice(0), 0)\n}\n"),
+    ];
+    for (name, text) in edits {
+        std::fs::write(dir.join(name), text).unwrap();
+    }
+    let survive = |edit: &str, extra: &[&str]| {
+        let args: Vec<&str> = ["survive", "calc_test.almd", "--with", edit, "--as", "text", "--json"].into_iter().chain(extra.iter().copied()).collect();
+        run(&dir, &args)
+    };
+
+    let (code, got, raw) = survive("del_one.txt", &[]);
+    assert_eq!((code, got["survives"].clone()), (1, Value::Bool(false)), "deleting a test must not survive\n{raw}");
+    assert_eq!(got["summary"]["tests"]["removed"], 1, "{raw}");
+
+    let (code, got, raw) = survive("del_all.txt", &[]);
+    assert_eq!((code, got["survives"].clone()), (1, Value::Bool(false)), "deleting every test must not survive\n{raw}");
+    assert_eq!(got["summary"]["tests"]["removed"], 2, "{raw}");
+
+    let (code, got, raw) = survive("hollow.txt", &[]);
+    assert_eq!((code, got["survives"].clone()), (1, Value::Bool(false)), "hollowed tests must not survive\n{raw}");
+    assert_eq!(got["summary"]["tests"]["newly_broken"], 2, "{raw}");
+    assert_eq!(got["tests"]["newly_broken"][0]["after"], "hollowed", "{raw}");
+
+    // A deliberate removal is an explicit flag, reported as such.
+    let (code, got, raw) = survive("del_one.txt", &["--allow-removed"]);
+    assert_eq!((code, got["survives"].clone()), (0, Value::Bool(true)), "--allow-removed lets a deletion through\n{raw}");
+
+    // The negative control: an edit that keeps every test (and adds one) survives.
+    let (code, got, raw) = survive("added.txt", &[]);
+    assert_eq!((code, got["survives"].clone()), (0, Value::Bool(true)), "{raw}");
+
+    // `apply --if-survives` refuses the deletion and writes nothing.
+    let (code, got, raw) = run(&dir, &["apply", "calc_test.almd", "--with", "del_all.txt", "--as", "text", "--if-survives", "--json"]);
+    assert_eq!((code, got["written"].clone()), (1, Value::Bool(false)), "{raw}");
+    assert_eq!(std::fs::read_to_string(dir.join("calc_test.almd")).unwrap(), original_test, "a refused apply wrote\n{raw}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -474,7 +474,7 @@ fn tool_survive_def() -> Value {
     json!({
         "name": "almide_survive",
         "title": "Judge an edit before writing it",
-        "description": "Apply a proposed edit IN MEMORY and report what it would change: check diagnostics, the tests that reach the file, and its contract fixtures, each bucketed {unchanged, newly_broken, newly_fixed, removed}, plus `survives` (no newly broken error, test or contract). `edit` is a unified diff or the file's full new text. The file is never written; like almide_test it compiles and runs tests (build artifacts under the system temp dir). Runs `almide survive --with - --json`.",
+        "description": "Apply a proposed edit IN MEMORY and report what it would change: check diagnostics, the tests that reach the file, and its contract fixtures, each bucketed {unchanged, newly_broken, newly_fixed, removed}, plus `survives` (no newly broken error, test or contract, no removed test or contract, and no test hollowed to assertions that read nothing). `edit` is a unified diff or the file's full new text. The file is never written; like almide_test it compiles and runs tests (build artifacts under the system temp dir). Runs `almide survive --with - --json`.",
         "inputSchema": obj_schema(
             json!({
                 "file": { "type": "string", "description": "The .almd file the edit is to" },

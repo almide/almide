@@ -626,11 +626,11 @@ fn dispatch_tooling(command: Commands) {
             cli::cmd_compile(module.as_deref(), json, dry_run, output.as_deref());
         }
         Commands::Verify { args } => std::process::exit(cli::cmd_verify(&args)),
-        Commands::Survive { file, with, as_kind, json, timeout } => {
-            cli::cmd_survive(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout });
+        Commands::Survive { file, with, as_kind, json, timeout, allow_removed } => {
+            cli::cmd_survive(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout, allow_removed });
         }
-        Commands::Apply { file, with, as_kind, if_survives, force, json, timeout } => {
-            cli::cmd_apply(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout }, if_survives, force);
+        Commands::Apply { file, with, as_kind, if_survives, force, json, timeout, allow_removed } => {
+            cli::cmd_apply(cli::SurviveArgs { file, with, as_kind, json, timeout_secs: timeout, allow_removed }, if_survives, force);
         }
         Commands::SurviveTestLeg { file } => cli::cmd_survive_test_leg(&file),
         Commands::Emit { file, target, emit_ast, emit_ir, emit_dialect, no_check, repr_c, trace_map } => {
