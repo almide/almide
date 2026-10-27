@@ -797,9 +797,11 @@ pub fn almide_rt_map_merge<K: PartialEq + Clone + 'static, V: Clone>(a: &AlmideM
 // b's new keys append in b's order (`insert`).
 pub fn almide_rt_map_merge_owned<K: PartialEq + Clone + 'static, V: Clone>(mut a: AlmideMap<K, V>, b: &AlmideMap<K, V>) -> AlmideMap<K, V> { for (k, v) in b.iter() { a.insert(k.clone(), v.clone()); } a }
 
-pub fn almide_rt_map_filter<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> AlmideMap<K, V> {
-    let f = move |a, b| f(a, b);
-    m.iter().filter(|(k, v)| f((*k).clone(), (*v).clone())).map(|(k, v)| (k.clone(), v.clone())).collect()
+// R-map-09: the entry callbacks take the entry as ONE `(K, V)` tuple, the
+// element `map.to_list` yields — the shape every container's callback has.
+pub fn almide_rt_map_filter<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn((K, V)) -> bool>) -> AlmideMap<K, V> {
+    let f = move |e| f(e);
+    m.iter().filter(|(k, v)| f(((*k).clone(), (*v).clone()))).map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
 pub fn almide_rt_map_map_values<K: PartialEq + Clone + 'static, V: Clone, W>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(V) -> W>) -> AlmideMap<K, W> {
@@ -810,31 +812,31 @@ pub fn almide_rt_map_map_values<K: PartialEq + Clone + 'static, V: Clone, W>(m: 
 pub fn almide_rt_map_from_entries<K: PartialEq + 'static, V>(entries: Vec<(K, V)>) -> AlmideMap<K, V> { entries.into_iter().collect() }
 pub fn almide_rt_map_from_list<K: PartialEq + Clone + 'static, V: Clone>(keys: &[K], values: &[V]) -> AlmideMap<K, V> { keys.iter().cloned().zip(values.iter().cloned()).collect() }
 
-pub fn almide_rt_map_fold<K: Clone, V: Clone, A>(m: &AlmideMap<K, V>, init: A, f: std::rc::Rc<dyn Fn(A, K, V) -> A>) -> A {
-    let f = move |a, k, v| f(a, k, v);
+pub fn almide_rt_map_fold<K: Clone, V: Clone, A>(m: &AlmideMap<K, V>, init: A, f: std::rc::Rc<dyn Fn(A, (K, V)) -> A>) -> A {
+    let f = move |a, e| f(a, e);
     let mut acc = init;
-    for (k, v) in m.iter() { acc = f(acc, k.clone(), v.clone()); }
+    for (k, v) in m.iter() { acc = f(acc, (k.clone(), v.clone())); }
     acc
 }
-pub fn almide_rt_map_any<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> bool {
-    let f = move |a, b| f(a, b);
-    m.iter().any(|(k, v)| f(k.clone(), v.clone()))
+pub fn almide_rt_map_any<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn((K, V)) -> bool>) -> bool {
+    let f = move |e| f(e);
+    m.iter().any(|(k, v)| f((k.clone(), v.clone())))
 }
-pub fn almide_rt_map_all<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> bool {
-    let f = move |a, b| f(a, b);
-    m.iter().all(|(k, v)| f(k.clone(), v.clone()))
+pub fn almide_rt_map_all<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn((K, V)) -> bool>) -> bool {
+    let f = move |e| f(e);
+    m.iter().all(|(k, v)| f((k.clone(), v.clone())))
 }
-pub fn almide_rt_map_count<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> i64 {
-    let f = move |a, b| f(a, b);
-    m.iter().filter(|&(k, v)| f(k.clone(), v.clone())).count() as i64
+pub fn almide_rt_map_count<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn((K, V)) -> bool>) -> i64 {
+    let f = move |e| f(e);
+    m.iter().filter(|&(k, v)| f((k.clone(), v.clone()))).count() as i64
 }
 pub fn almide_rt_map_each<K: Clone, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V)>) {
     let f = move |a, b| f(a, b);
     for (k, v) in m.iter() { f(k.clone(), v.clone()); }
 }
-pub fn almide_rt_map_find<K: Clone + PartialEq + 'static, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn(K, V) -> bool>) -> Option<(K, V)> {
-    let f = move |a, b| f(a, b);
-    m.iter().find(|&(k, v)| f(k.clone(), v.clone())).map(|(k, v)| (k.clone(), v.clone()))
+pub fn almide_rt_map_find<K: Clone + PartialEq + 'static, V: Clone>(m: &AlmideMap<K, V>, f: std::rc::Rc<dyn Fn((K, V)) -> bool>) -> Option<(K, V)> {
+    let f = move |e| f(e);
+    m.iter().find(|&(k, v)| f((k.clone(), v.clone()))).map(|(k, v)| (k.clone(), v.clone()))
 }
 pub fn almide_rt_map_update<K: PartialEq + Clone + 'static, V: Clone>(m: &AlmideMap<K, V>, key: K, f: std::rc::Rc<dyn Fn(V) -> V>) -> AlmideMap<K, V> {
     almide_rt_map_update_owned(m.clone(), key, f)
