@@ -242,6 +242,9 @@ impl Checker {
         let seeds = self.bindings_from_expected_ret(call_sig.as_ref());
         let mut tys: Vec<Ty> = Vec::with_capacity(args.len());
         for (i, a) in args.iter_mut().enumerate() {
+            if let Some(sig) = call_sig.as_ref() {
+                self.regroup_tuple_lambda_arg(a, sig, i, &bindings);
+            }
             let pinned = if is_lambda_arg(a) {
                 call_sig.as_ref().and_then(|sig| self.lambda_pin_for_arg(sig, i, &bindings))
             } else { None };
@@ -310,6 +313,70 @@ impl Checker {
             tys.push(aty);
         }
         tys
+    }
+
+    /// R-map-09: a lambda whose parameters spell a tuple slot's ELEMENTS one by
+    /// one is regrouped into the tuple-pattern form before it is inferred.
+    ///
+    /// - A slot taking ONE tuple (`f: ((K, V)) -> Bool`, or `(A) -> B` once an
+    ///   earlier argument bound `A` to a tuple) accepts a lambda with one
+    ///   parameter per element: `map.filter(m, (k, v) => v > 0)` reads as
+    ///   `((k, v)) => v > 0`, Swift's rule for a closure over a tuple element.
+    /// - A slot taking a tuple BESIDE other parameters (`map.fold`'s
+    ///   `(A, (K, V)) -> A`) does not: the flat `(acc, k, v) =>` is the spelling
+    ///   epoch 15 removed, so it is E004 with the grouped rewrite. The lambda is
+    ///   regrouped anyway so the body checks once, without a cascade.
+    ///
+    /// Read from the slot's type alone: any callback slot, no list of names. A
+    /// parameter with an annotation or a pattern of its own is left as written.
+    fn regroup_tuple_lambda_arg(&mut self, a: &mut ast::Expr, sig: &crate::types::FnSig, i: usize, bindings: &HashMap<Sym, Ty>) {
+        let Some((_, pty)) = sig.params.get(i) else { return };
+        let Ty::Fn { params: slot, .. } = crate::types::substitute(pty, bindings) else { return };
+        let arities: Vec<usize> = slot.iter().map(|t| match resolve_ty(t, &self.uf) {
+            Ty::Tuple(es) if es.len() >= 2 => es.len(),
+            _ => 1,
+        }).collect();
+        let span = a.span;
+        let Some(params) = lambda_params_mut(a) else { return };
+        if params.len() <= slot.len()
+            || arities.iter().sum::<usize>() != params.len()
+            || params.iter().any(|p| p.tuple_names.is_some() || p.ty.is_some())
+        {
+            return;
+        }
+        let mut flat = std::mem::take(params).into_iter();
+        let mut grouped: Vec<ast::LambdaParam> = Vec::with_capacity(arities.len());
+        for &n in &arities {
+            if n == 1 {
+                grouped.extend(flat.next());
+            } else {
+                let names: Vec<Sym> = flat.by_ref().take(n).map(|p| p.name).collect();
+                grouped.push(ast::LambdaParam { name: names[0], tuple_names: Some(names), ty: None });
+            }
+        }
+        let spelled = grouped.iter().map(|p| match &p.tuple_names {
+            Some(ns) => format!("({})", ns.iter().map(|n| n.as_str()).collect::<Vec<_>>().join(", ")),
+            None => p.name.as_str().to_string(),
+        }).collect::<Vec<_>>().join(", ");
+        *params = grouped;
+        if slot.len() == 1 {
+            return;
+        }
+        let saved = self.current_span;
+        if span.is_some() {
+            self.current_span = span;
+        }
+        self.emit(super::err(
+            format!(
+                "this callback takes {} parameter(s), and the lambda spells a tuple parameter's elements as separate parameters",
+                slot.len()
+            ),
+            format!(
+                "a tuple parameter is one parenthesized pattern: rewrite as `({spelled}) => …` (the flat `(acc, k, v)` callback of `map.fold` was removed at dialect epoch 15)"
+            ),
+            "lambda argument".to_string(),
+        ).with_code("E004"));
+        self.current_span = saved;
     }
 
     /// #3469: the fn type of call slot `i` when arg `a` is a bare fn reference
@@ -1507,6 +1574,16 @@ include!("calls_arg.rs");
 /// then inferred against fresh vars, an ill-typed `+` unified as concat instead
 /// of colliding, and the first complaint arrived at IR verify — past the point
 /// where an E-diagnostic promises that a check-green program builds (#1018).
+/// The parameter list of a lambda argument, through redundant parentheses
+/// (the [`is_lambda_arg`] reading).
+fn lambda_params_mut(a: &mut ast::Expr) -> Option<&mut Vec<ast::LambdaParam>> {
+    match &mut a.kind {
+        ExprKind::Lambda { params, .. } => Some(params),
+        ExprKind::Paren { expr } => lambda_params_mut(expr),
+        _ => None,
+    }
+}
+
 fn is_lambda_arg(a: &ast::Expr) -> bool {
     match &a.kind {
         ExprKind::Lambda { .. } => true,
