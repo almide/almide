@@ -5,7 +5,6 @@
 pub(crate) const BYTES_CORE_FNS: &[(&str, &str)] = &[("bytes_to_string", "bytes.to_string"), ("bytes_map_each", "bytes.map"),
                 ("bytes_from_string", "bytes.from_string"),
                 ("bytes_len", "bytes.len"),
-                ("bytes_data_ptr", "bytes.data_ptr"),
                 ("bytes_is_empty", "bytes.is_empty"),
                                 ("bytes_new", "bytes.zeros"),
                 ("bytes_concat", "bytes.__concat"),
