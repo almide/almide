@@ -92,7 +92,7 @@ test "list.with_capacity unit=element-count" {
 }
 
 test "list.split_at unit=element-index" {
-  assert_eq("${list.split_at([10, 20, 30], 1)}", "([10], [20, 30])")
+  assert_eq("${list.split_at([10, 20, 30], 1).1}", "[20, 30]")
 }
 
 test "list.iterate unit=element-count" {

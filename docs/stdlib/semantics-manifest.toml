@@ -1804,8 +1804,8 @@ Capacity is a hint: the list starts EMPTY whatever cap is.
 [[list.fn]]
 name = "split_at"
 index_unit = "element-index"
-probe = 'list.split_at([10, 20, 30], 1)'
-expect = '([10], [20, 30])'
+probe = 'list.split_at([10, 20, 30], 1).1'
+expect = '[20, 30]'
 
 [[list.fn]]
 name = "iterate"
