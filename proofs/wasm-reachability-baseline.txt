@@ -49,70 +49,28 @@ fs.root_remove :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)
 fs.root_write_text :: UNPROBEABLE :: parameter type outside the synthesizer (FsRoot)
 http.cancel :: UNPROBEABLE :: parameter type outside the synthesizer
 http.decode_json :: UNPROBEABLE :: parameter type outside the synthesizer
-http.delete :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.delete needs a declared capability not in this brick
-http.delete_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.get :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.get needs a declared capability not in this brick
-http.get_bytes :: UNPROBEABLE :: no candidate shape builds natively
 http.get_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
-http.get_status :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.mount :: UNPROBEABLE :: parameter type outside the synthesizer
-http.patch :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.patch needs a declared capability not in this brick
-http.patch_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.poll :: UNPROBEABLE :: parameter type outside the synthesizer
-http.post :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.post needs a declared capability not in this brick
-http.post_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
-http.put :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.put needs a declared capability not in this brick
-http.put_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
 http.read_new :: UNPROBEABLE :: parameter type outside the synthesizer
 http.request :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call http.request needs a declared capability not in this brick
-http.request_bytes :: UNPROBEABLE :: no candidate shape builds natively
-http.request_response :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
-http.request_status :: HOST_CAPABILITY :: http client is an OS socket API — checks and builds natively, the wasm leg walls (sweep verdict GAP: wasm build failed)
-http.request_stream :: UNPROBEABLE :: no candidate shape builds natively
-http.request_stream_with_limits :: UNPROBEABLE :: parameter type outside the synthesizer
 http.route :: UNPROBEABLE :: parameter type outside the synthesizer
 http.router :: UNPROBEABLE :: parameter type outside the synthesizer
 http.serve :: UNPROBEABLE :: parameter type outside the synthesizer
 http.start :: UNPROBEABLE :: parameter type outside the synthesizer
 http.wait :: UNPROBEABLE :: parameter type outside the synthesizer
 http.wrap :: UNPROBEABLE :: parameter type outside the synthesizer
-json.get_array :: UNPROBEABLE :: no candidate shape builds natively
-json.get_bool :: UNPROBEABLE :: no candidate shape builds natively
-json.get_float :: UNPROBEABLE :: no candidate shape builds natively
-json.get_int :: UNPROBEABLE :: no candidate shape builds natively
-json.get_path :: UNPROBEABLE :: parameter type outside the synthesizer
-json.get_string :: UNPROBEABLE :: no candidate shape builds natively
-json.remove_path :: UNPROBEABLE :: parameter type outside the synthesizer
-json.set_path :: UNPROBEABLE :: parameter type outside the synthesizer
 json.stringify :: UNPROBEABLE :: no candidate shape builds natively
 json.stringify_pretty :: UNPROBEABLE :: no candidate shape builds natively
-json.to_map :: UNPROBEABLE :: no candidate shape builds natively
-net.shm_create :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
-net.shm_read :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
-net.shm_resize :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
-net.shm_write :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
 net.tcp_accept :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_accept needs a declared capability not in this brick
 net.tcp_available :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_available needs a declared capability not in this brick
-net.tcp_close :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_close needs a declared capability not in this brick
-net.tcp_close_listener :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_close_listener needs a declared capability not in this brick
 net.tcp_connect :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_connect needs a declared capability not in this brick
 net.tcp_is_open :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: scalar binding outside the value subset cannot be faithfully computed in this brick (the permissive caps-counting path 
 net.tcp_listen :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_listen needs a declared capability not in this brick
 net.tcp_local_port :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_local_port needs a declared capability not in this brick
-net.tcp_read :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read needs a declared capability not in this brick
-net.tcp_read_exact :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_exact needs a declared capability not in this brick
 net.tcp_read_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_read_timeout needs a declared capability not in this brick
 net.tcp_set_timeout :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_set_timeout needs a declared capability not in this brick
-net.tcp_write :: HOST_CAPABILITY :: main is outside the MIR-lowering subset: effectful/impure stdlib Module call net.tcp_write needs a declared capability not in this brick
-net.unix_accept :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
-net.unix_close :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
-net.unix_connect :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
-net.unix_listen :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
-net.unix_poll :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
-net.unix_recv :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
-net.unix_send :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
-net.unix_take_fds :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
-net.unix_wait :: HOST_CAPABILITY :: WASI has neither Unix-domain sockets nor shared memory: the stock artifact refuses it (E081); the embedded host serves it through interim ops 104..=116 (proofs/target-availability.toml, #3620)
 result.flat_map :: UNPROBEABLE :: no candidate shape builds natively
 result.flatten :: UNPROBEABLE :: no candidate shape builds natively
 result.is_err :: UNPROBEABLE :: no candidate shape builds natively
@@ -136,12 +94,48 @@ value.as_bool :: UNPROBEABLE :: no candidate shape builds natively
 value.as_float :: UNPROBEABLE :: no candidate shape builds natively
 value.as_int :: UNPROBEABLE :: no candidate shape builds natively
 value.as_string :: UNPROBEABLE :: no candidate shape builds natively
-value.field :: UNPROBEABLE :: no candidate shape builds natively
-value.keys :: UNPROBEABLE :: no candidate shape builds natively
 value.merge :: UNPROBEABLE :: no candidate shape builds natively
 value.object :: UNPROBEABLE :: no candidate shape builds natively
 value.omit :: UNPROBEABLE :: no candidate shape builds natively
 value.pick :: UNPROBEABLE :: no candidate shape builds natively
-value.stringify :: UNPROBEABLE :: no candidate shape builds natively
-value.to_camel_case :: UNPROBEABLE :: no candidate shape builds natively
-value.to_snake_case :: UNPROBEABLE :: no candidate shape builds natively
+http.body :: UNPROBEABLE :: parameter type outside the synthesizer
+http.body_bytes :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+http.header :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+http.header_values :: UNPROBEABLE :: parameter type outside the synthesizer
+http.headers :: UNPROBEABLE :: parameter type outside the synthesizer
+http.send :: HOST_CAPABILITY :: the stock p1 artifact has no http import (proofs/target-availability.toml, pending-port #1710)
+http.set_body :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+http.set_body_bytes :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+http.set_header :: UNPROBEABLE :: parameter type outside the synthesizer
+io.close :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+io.read :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+io.read_exact :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+io.read_to_end :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+io.write :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+net.ip_to_string :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+net.is_loopback :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+net.lookup_host :: HOST_CAPABILITY :: native-only: no wasm leg serves UDP or name resolution (proofs/target-availability.toml)
+net.udp_bind :: HOST_CAPABILITY :: native-only: no wasm leg serves UDP or name resolution (proofs/target-availability.toml)
+net.udp_local_port :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+net.udp_recv_from :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+net.udp_send_to :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.child_pid :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.output :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.poll :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.read_new_stderr :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.read_new_stdout :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.run :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.start :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.stop :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+process.wait :: UNPROBEABLE :: parameter type outside the synthesizer (a protocol-bound handle, an opaque handle or a record the sweep cannot build)
+value.as_object :: UNPROBEABLE :: no candidate shape builds natively
+value.get :: UNPROBEABLE :: no candidate shape builds natively
+value.get_array :: UNPROBEABLE :: no candidate shape builds natively
+value.get_bool :: UNPROBEABLE :: no candidate shape builds natively
+value.get_float :: UNPROBEABLE :: no candidate shape builds natively
+value.get_int :: UNPROBEABLE :: no candidate shape builds natively
+value.get_object :: UNPROBEABLE :: no candidate shape builds natively
+value.get_path :: UNPROBEABLE :: parameter type outside the synthesizer
+value.get_string :: UNPROBEABLE :: no candidate shape builds natively
+value.remove_path :: UNPROBEABLE :: parameter type outside the synthesizer
+value.set_path :: UNPROBEABLE :: parameter type outside the synthesizer
