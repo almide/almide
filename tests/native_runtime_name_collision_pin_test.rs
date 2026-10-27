@@ -122,7 +122,7 @@ fn user_type_named_http_request_builds_beside_http() {
     // HttpRequest is the only one the program spells while http.rs (and its
     // `AlmideHttpRequest`) is spliced in.
     assert_user_type_builds(
-        "HttpRequest",
+        "HttpRequestBesideHttp",
         "import http\nimport json\ntype HttpRequest = { n: Int }\neffect fn main() -> Unit = {\n  let x = HttpRequest { n: 7 }\n  let v = json.parse(\"{\\\"a\\\":1}\")!\n  println(\"${x.n} ${json.stringify(v)}\")\n}\n",
         "7 {\"a\":1}\n",
     );
