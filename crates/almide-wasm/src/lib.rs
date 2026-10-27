@@ -149,6 +149,7 @@ mod patterns;
 mod prim;
 mod runtime;
 mod runtime_alloc;
+mod deep_walk;
 mod runtime_large;
 mod runtime_line;
 mod line_bounded;

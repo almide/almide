@@ -261,6 +261,7 @@ fn emit_program_pass(
     // call_indirect types, lifted lambdas).
     let reach = crate::global_reach::global_reach(&program_fns, &table, &global_map);
     let work = FnWork { region_pure: std::cell::RefCell::new(region_pure), global_reach: reach.into(), ..FnWork::default() };
+    work.deep_global_base.set(crate::deep_walk::global_base(global_decls.len()));
     work.bounded_lines.set(bounded_lines);
     // Calls made from display-helper bodies (BFS roots).
     let mut display_helper_calls: std::collections::HashSet<usize> = HashSet::new();

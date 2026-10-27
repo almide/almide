@@ -169,7 +169,7 @@ impl Emitter<'_> {
                 self.append_lit("some(");
                 self.f.instructions().local_get(ho);
                 self.load_ty_slot(et, almide_layout::OPTION_FIELD);
-                self.emit_display_at(et, true, ir_arg(ir, 0), path)?;
+                self.disp_last(")", |em| em.emit_display_at(et, true, ir_arg(ir, 0), path))?;
                 self.append_lit(")");
                 self.f.instructions().end();
                 self.release_i32();
@@ -187,13 +187,13 @@ impl Emitter<'_> {
                 self.append_lit("ok(");
                 self.f.instructions().local_get(hr);
                 self.load_ty_slot(ot, almide_layout::SUM_FIELD);
-                self.emit_display_at(ot, true, ir_arg(ir, 0), path)?;
+                self.disp_last(")", |em| em.emit_display_at(ot, true, ir_arg(ir, 0), path))?;
                 self.append_lit(")");
                 self.f.instructions().else_();
                 self.append_lit("err(");
                 self.f.instructions().local_get(hr);
                 self.load_ty_slot(et, almide_layout::SUM_FIELD);
-                self.emit_display_at(et, true, ir_arg(ir, 1), path)?;
+                self.disp_last(")", |em| em.emit_display_at(et, true, ir_arg(ir, 1), path))?;
                 self.append_lit(")");
                 self.f.instructions().end();
                 self.release_i32();
@@ -230,7 +230,7 @@ impl Emitter<'_> {
                 self.f.instructions().end();
                 self.f.instructions().local_get(cur);
                 self.load_ty_slot_at(el);
-                self.emit_display_at(el, true, ir_arg(ir, 0), path)?;
+                self.disp_off(|em| em.emit_display_at(el, true, ir_arg(ir, 0), path))?;
                 {
                     let mut i = self.f.instructions();
                     i.local_get(cur).i32_const(stride).i32_add().local_set(cur);
@@ -248,13 +248,14 @@ impl Emitter<'_> {
                 let hb = self.hold_i32()?;
                 self.f.instructions().local_set(hb);
                 self.append_lit("(");
+                let n = fields.len();
                 for (k, (fty, off)) in fields.into_iter().enumerate() {
                     if k > 0 {
                         self.append_lit(", ");
                     }
                     self.f.instructions().local_get(hb);
                     self.load_ty_slot(fty, off);
-                    self.emit_display_at(fty, true, ir_arg(ir, k), path)?;
+                    self.disp_part((k + 1 == n).then_some(")"), |em| em.emit_display_at(fty, true, ir_arg(ir, k), path))?;
                 }
                 self.append_lit(")");
                 self.release_i32();
@@ -273,11 +274,7 @@ impl Emitter<'_> {
                         return unsup("display-helper-failed");
                     }
                     let idx = self.work.helper(Helper::DisplayNamed { ti, irk });
-                    self.f
-                        .instructions()
-                        .local_get(self.cursor_local)
-                        .call(idx)
-                        .local_set(self.cursor_local);
+                    self.emit_display_call(ti, idx)?;
                 } else {
                     path.push(ti);
                     self.emit_display_named(ti, ir, path)?;
@@ -289,12 +286,12 @@ impl Emitter<'_> {
             // element array, so the list walk does the middle.
             SliceTy::Set(h) => {
                 self.append_lit("set.from_list(");
-                self.emit_display_at(SliceTy::List(h), nested, ir, path)?;
+                self.disp_off(|em| em.emit_display_at(SliceTy::List(h), nested, ir, path))?;
                 self.append_lit(")");
             }
             // `["k": v, …]` in insertion order; empty is the literal
             // `[:]` (the oracle's map repr).
-            SliceTy::Map(kh, vh) => self.emit_display_map(kh, vh, ir, path)?,
+            SliceTy::Map(kh, vh) => self.disp_off(|em| em.emit_display_map(kh, vh, ir, path))?,
             // A Value displays as its compact JSON — the SAME serializer
             // json.stringify uses (one repr, two spellings). The $vjson
             // helper appends AT THE DISPLAY CURSOR in place — the
@@ -364,6 +361,7 @@ impl Emitter<'_> {
                     // the last segment the source declares.
                     self.append_lit(&format!("{} {{ ", almide_ir::declared_type_name(&name)));
                 }
+                let n = fields.len();
                 for (k, fi) in fields.iter().enumerate() {
                     if k > 0 {
                         self.append_lit(", ");
@@ -373,7 +371,7 @@ impl Emitter<'_> {
                     self.load_ty_slot(fi.ty, fi.offset);
                     let inst = self.types.instance_field_ir(ir, 0, &fi.name);
                     let fir = inst.as_ref().or(fi.ir.as_ref()).or_else(|| record_field_ir(ir, &fi.name));
-                    self.emit_display_at(fi.ty, true, fir, path)?;
+                    self.disp_part((k + 1 == n).then_some(" }"), |em| em.emit_display_at(fi.ty, true, fir, path))?;
                 }
                 self.append_lit(" }");
                 self.release_i32();
@@ -416,6 +414,7 @@ impl Emitter<'_> {
                         self.append_lit(&c.name);
                     } else {
                         self.append_lit(&format!("{}{}", c.name, if record_case { " { " } else { "(" }));
+                        let n = c.fields.len();
                         for (j, f) in c.fields.iter().enumerate() {
                             if j > 0 {
                                 self.append_lit(", ");
@@ -426,7 +425,9 @@ impl Emitter<'_> {
                             self.f.instructions().local_get(hb);
                             self.load_ty_slot(f.ty, f.offset);
                             let inst = self.types.instance_field_ir(ir, c.tag as usize, &f.name);
-                            self.emit_display_at(f.ty, true, inst.as_ref().or(f.ir.as_ref()), path)?;
+                            let fir = inst.as_ref().or(f.ir.as_ref());
+                            let close = if record_case { " }" } else { ")" };
+                            self.disp_part((j + 1 == n).then_some(close), |em| em.emit_display_at(f.ty, true, fir, path))?;
                         }
                         self.append_lit(if record_case { " }" } else { ")" });
                     }
@@ -733,6 +734,10 @@ fn build_one_named_helper(
     // #2758: both operand blocks are lent (params 0 and 1).
     let hw = crate::witness::helper::HelperWitness::new(format!("<named-op:{op:?}:{ti}>"), "named-op", &[0, 1]);
     build_helper_body(table, types, work, pool, (Shell::PAIR, hw), |em| {
+        // #4250: a type on a cycle compares a deep pair on a bounded stack.
+        if matches!(op, crate::work::NamedOp::Eq) && em.types.named_on_cycle(ti) {
+            return em.emit_named_eq_deep(ti);
+        }
         em.f.instructions().local_get(0).local_get(1);
         match op {
             // `path` starts with `ti`, so a self-referencing field sees the
@@ -763,7 +768,7 @@ fn build_one_display_helper(
         em.f.instructions().local_get(1).local_set(2);
         em.f.instructions().local_get(0);
         let mut path = vec![ti];
-        em.emit_display_named(ti, ir.as_ref(), &mut path)?;
+        em.on_tail_spine(ti, |em| em.emit_display_named(ti, ir.as_ref(), &mut path))?;
         em.f.instructions().local_get(2);
         Ok(())
     })

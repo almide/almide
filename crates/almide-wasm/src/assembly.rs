@@ -378,6 +378,10 @@ pub(crate) fn assemble_module(a: AssembleIn<'_>) -> Result<Vec<u8>, EmitError> {
             &ConstExpr::i64_const(0),
         );
     }
+    // #4250/#4252: the deep-walk queues and depths, last of all — only when a
+    // recursive type's drop, `==` or display walks one (deep_walk.rs).
+    debug_assert!(!work.deep_globals_used.get() || globals.len() == work.deep_global_base.get());
+    crate::deep_walk::declare_globals(&mut globals, work);
 
     let mut exports = ExportSection::new();
     exports.export("memory", ExportKind::Memory, 0);

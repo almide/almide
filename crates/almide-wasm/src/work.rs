@@ -338,6 +338,16 @@ pub(crate) struct FnWork {
     /// declaration table charges them to the region opener, not the frame.
     pub(crate) meter_reads_pending: std::cell::Cell<u32>,
     pub(crate) meter_reads: std::cell::RefCell<HashMap<String, u32>>,
+    /// #4250/#4252: the index of the first of the deep-walk globals
+    /// (`deep_walk.rs`), appended after every other global, and whether any
+    /// helper uses them (a module with no recursive type declares none).
+    pub(crate) deep_global_base: std::cell::Cell<u32>,
+    pub(crate) deep_globals_used: std::cell::Cell<bool>,
+    /// While a recursive type's display body is written: `Some(closers)`
+    /// when nothing but fixed text follows the current position in that
+    /// body — the closing texts of the enclosing levels, outermost first
+    /// (deep_walk.rs). `None` everywhere else.
+    pub(crate) disp_tail: std::cell::RefCell<Option<Vec<&'static str>>>,
 }
 
 pub(crate) enum DisplayBuild {
