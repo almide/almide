@@ -23,6 +23,7 @@ effect fn has_flag(name: String) -> Bool = __has(__options(env.args()), name)
 
 
 
+@category
 fn __has(args: List[String], name: String) -> Bool = {
 
 
@@ -34,12 +35,14 @@ fn __has(args: List[String], name: String) -> Bool = {
 
 
 
+@category
 fn __options(args: List[String]) -> List[String] = match list.index_of(args, "--") {
   some(i) => list.take(args, i),
   none => args,
 }
 
 
+@category
 fn __operands(args: List[String]) -> List[String] = match list.index_of(args, "--") {
   some(i) => list.drop(args, i + 1),
   none => [],
@@ -100,6 +103,7 @@ effect fn positional(options: List[String]) -> List[String] = __positional(env.a
 
 
 
+@category
 fn __positional(args: List[String], options: List[String]) -> List[String] =
   __positional_at(__options(args), options, 0, []) + __operands(args)
 
@@ -5718,7 +5722,10 @@ effect fn get(name: String) -> String? = _
 /// Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
 @ordered
 @category("Env.write")
-effect fn set(name: String, value: String) -> Result[Unit, String] = match __set_refusal(name, value) {
+effect fn set(name: String, value: String) -> Result[Unit, String] = match __set_refusal(
+  name,
+  value,
+) {
   some(why) => err("env.set: " + why),
   none => {
     __set(name, value)
@@ -11191,15 +11198,21 @@ fn hex_decode(s: String) -> Result[Bytes, String] = {
   }
 }
 "#;
-pub const SRC_HTML: &str = r#"
+pub const SRC_HTML: &str = r##"
 
 
 
+
+
+
+import json
 
 mod type SafeHtml = String
 
 
-/// s with & < > " ' turned into HTML entities.
+
+
+/// s with & < > " ' turned into HTML entities; text context only.
 fn escape(s: String) -> SafeHtml = {
   let escaped = s |> string.replace("&", "&amp;") |> string.replace("<", "&lt;") |> string.replace(
     ">",
@@ -11230,7 +11243,117 @@ fn concat(a: SafeHtml, b: SafeHtml) -> SafeHtml = {
 
 /// SafeHtml of the empty string.
 fn empty() -> SafeHtml = SafeHtml("")
-"#;
+
+
+
+
+
+
+fn __html_ascii(c: String) -> Bool = (string.codepoint(c) ?? 128) < 128
+
+
+
+fn __html_blank(c: String) -> Bool = (string.codepoint(c) ?? 0) <= 32
+
+
+
+
+fn __html_name_char(c: String) -> Bool = __html_ascii(c) and (string.is_alphanumeric(c) or c == "-" or c == "_" or c == ":" or c == ".")
+
+fn __html_name_ok(name: String) -> Bool = match list.first(string.chars(name)) {
+  some(c) => __html_ascii(c) and string.is_alpha(c) and list.all(string.chars(name), (x) => __html_name_char(x)),
+  none => false,
+}
+
+
+
+
+fn __html_url_attr_name(n: String) -> Bool = match n {
+  "href" => true,
+  "src" => true,
+  "action" => true,
+  "formaction" => true,
+  "srcset" => true,
+  "xlink:href" => true,
+  "poster" => true,
+  "cite" => true,
+  "data" => true,
+  "background" => true,
+  "ping" => true,
+  "manifest" => true,
+  "codebase" => true,
+  "longdesc" => true,
+  "usemap" => true,
+  "icon" => true,
+  _ => false,
+}
+
+fn __html_active_attr_name(n: String) -> Bool = string.starts_with(n, "on") or n == "style" or n == "srcdoc"
+
+
+
+fn __html_attr_value(v: String) -> String = to_string(escape(v))
+
+/// name="value" with value escaped for a double-quoted attribute; aborts on a URL, event-handler or malformed name.
+fn attr(name: String, value: String) -> SafeHtml = {
+  let n = string.to_lower(name)
+  if not __html_name_ok(name) then panic("html.attr: `${name}` is not an attribute name")
+  else if __html_url_attr_name(n) then panic("html.attr: `${name}` takes a URL; use html.url_attr")
+  else if __html_active_attr_name(n) then panic("html.attr: `${name}` runs script or styles; no builder writes it")
+  else SafeHtml("${name}=\"${__html_attr_value(value)}\"")
+}
+
+fn __html_scheme_char(c: String) -> Bool = __html_ascii(c) and (string.is_alphanumeric(c) or c == "+" or c == "-" or c == ".")
+
+
+
+
+
+
+
+fn __html_scheme(url: String) -> String? = {
+  let cs = string.chars(url)
+  let i = list.find_index(cs, (c) => c == ":" or c == "/" or c == "?" or c == "#") ?? list.len(cs)
+  let head = list.take(cs, i)
+  let colon = list.get(cs, i) == some(":")
+  if colon and not list.is_empty(head) and list.all(head, (c) => __html_scheme_char(c)) then some(string.to_lower(list.join(head, "")))
+  else if colon or list.any(head, (c) => __html_blank(c)) then some("")
+  else none
+}
+
+
+
+fn __html_blocked_url() -> String = "about:invalid#almide-blocked"
+
+/// name="url" escaped, url kept only if relative or http, https or mailto; else about:invalid#almide-blocked.
+fn url_attr(name: String, url: String) -> SafeHtml = {
+  if not __html_name_ok(name) then panic("html.url_attr: `${name}` is not an attribute name")
+  else if __html_active_attr_name(string.to_lower(name)) then panic("html.url_attr: `${name}` runs script or styles; no builder writes it")
+  else {
+    let kept = match __html_scheme(url) {
+      none => url,
+      some(s) => match s {
+        "http" => url,
+        "https" => url,
+        "mailto" => url,
+        _ => __html_blocked_url(),
+      },
+    }
+    SafeHtml("${name}=\"${__html_attr_value(kept)}\"")
+  }
+}
+
+/// json.stringify(v) with < > & U+2028 U+2029 as \u escapes; safe inside <script>.
+fn script_json(v: Value) -> SafeHtml = {
+  let s = json.stringify(v)
+    |> string.replace("<", "\\u003c")
+    |> string.replace(">", "\\u003e")
+    |> string.replace("&", "\\u0026")
+    |> string.replace("\u{2028}", "\\u2028")
+    |> string.replace("\u{2029}", "\\u2029")
+  SafeHtml(s)
+}
+"##;
 pub const SRC_HTTP: &str = r#"
 
 
@@ -11256,6 +11379,7 @@ pub const SRC_HTTP: &str = r#"
 
 
 
+import html
 import json
 import url
 
@@ -11270,10 +11394,12 @@ effect fn serve(port: Int, f: effect (HttpRequest) -> HttpResponse) -> Unit = _
 @intrinsic("almide_rt_http_response")
 fn response(status: Int, body: String) -> HttpResponse = _
 
-
-
-
-
+/// Reply with Content-Type text/html; charset=utf-8; body is SafeHtml.
+fn html(status: Int, body: SafeHtml) -> HttpResponse = set_header(
+  response(status, html.to_string(body)),
+  "Content-Type",
+  "text/html; charset=utf-8",
+)
 
 /// Reply with Content-Type application/json.
 @intrinsic("almide_rt_http_json")
@@ -11902,9 +12028,14 @@ fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
 
 fn __apply(mw: HttpMiddleware, inner: HttpHandler) -> HttpHandler = mw(inner)
 
-/// JSON body through decode; err is a 400 response.
-fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
-  ok(v) => match decode(v) {
+
+
+
+
+/// JSON body into input type T, strictly; err is a 400 response.
+@input_sink
+fn decode_json[T: Decode](req: HttpRequest) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
+  ok(v) => match T.decode_strict(v) {
     ok(x) => ok(x),
     err(e) => err(http.response(400, "Bad Request: " + e)),
   },
@@ -12489,13 +12620,12 @@ fn __hs_cp(c: String) -> Int = string.codepoint(c) ?? 0
 
 
 
+
 fn __hs_quote_char(c: String) -> String = match c {
   "\\" => "\\\\",
   "\"" => "\\\"",
-  _ => if __hs_cp(c) < 32 or (__hs_cp(c) >= 127 and __hs_cp(c) <= 159) or __hs_bidi(__hs_cp(c)) then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
+  _ => if string.__err_text(c) != c then "\\u{${int.to_hex(__hs_cp(c))}}" else c,
 }
-
-fn __hs_bidi(n: Int) -> Bool = n == 1564 or n == 8206 or n == 8207 or (n >= 8234 and n <= 8238) or (n >= 8294 and n <= 8297)
 
 fn __hs_quote(s: String) -> String = "\"" + (string.chars(s) |> list.map((c) => __hs_quote_char(c)) |> list.join("")) + "\""
 
@@ -28692,9 +28822,9 @@ fn select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> M
 @intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
 
-/// Element at (row, col); out of range aborts.
+/// Element at (row, col); none out of range.
 @intrinsic("almide_rt_matrix_get")
-fn get(m: Matrix, row: Int, col: Int) -> Float = _
+fn get(m: Matrix, row: Int, col: Int) -> Float? = _
 
 /// Row count; 0 for an empty matrix.
 @intrinsic("almide_rt_matrix_rows")
@@ -28746,9 +28876,9 @@ fn pow(m: Matrix, exp: Float) -> Matrix = _
 fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
 
 
-/// f32 LE rows x cols at offset; all 0 if data short.
+/// f32 LE rows x cols at offset; none if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f32_le")
-fn from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 /// Row-major f64 LE, 8 bytes per element.
 @intrinsic("almide_rt_matrix_to_bytes_f64_le")
@@ -28762,13 +28892,13 @@ fn to_bytes_f32_le(m: Matrix) -> Bytes = _
 @intrinsic("almide_rt_matrix_to_bytes_f16_le")
 fn to_bytes_f16_le(m: Matrix) -> Bytes = _
 
-/// f16 LE rows x cols at offset; all 0 if data short.
+/// f16 LE rows x cols at offset; none if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f16_le")
-fn from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
-/// f64 LE rows x cols at offset; all 0 if data short.
+/// f64 LE rows x cols at offset; none if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f64_le")
-fn from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 
 /// bias added to each row; cols cut to bias.
@@ -29151,20 +29281,22 @@ fn matrix_cols(m: List[List[Float]]) -> Int = {
 
 
 
-fn __mx_bounds(idx: Int, extent: Int) -> Int = {
-  if idx < 0 or idx >= extent then prim.die(prim.handle("Error: matrix index out of bounds\n")) else ()
-  0
-}
 
-fn matrix_get(m: List[List[Float]], row: Int, col: Int) -> Float = {
+fn __mx_get_none() -> Float? = none
+
+fn __mx_get_some(x: Float) -> Float? = some(x)
+
+fn matrix_get(m: List[List[Float]], row: Int, col: Int) -> Float? = {
   let h = prim.handle(m)
   let rows = prim.load32(h + 4)
-  let _gr = __mx_bounds(row, rows)
-  let rh = prim.load64(h + 12 + row * 8)
+  if row < 0 or row >= rows then __mx_get_none()
+  else {
+    let rh = prim.load64(h + 12 + row * 8)
 
-  let cols = prim.load32(rh + 4)
-  let _gc = __mx_bounds(col, cols)
-  prim.ffrombits(prim.load64(rh + 12 + col * 8))
+    let cols = prim.load32(rh + 4)
+    if col < 0 or col >= cols then __mx_get_none()
+    else __mx_get_some(prim.ffrombits(prim.load64(rh + 12 + col * 8)))
+  }
 }
 
 
@@ -29485,7 +29617,13 @@ else {
 
 
 
-fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+
+
+fn __mx_load_none() -> List[List[Float]]? = none
+
+fn __mx_load_some(m: List[List[Float]]) -> List[List[Float]]? = some(m)
+
+fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let hd = prim.handle(data)
   let len = prim.load32(hd + 4)
 
@@ -29507,11 +29645,11 @@ fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
 
 
 
-  if offset < 0 or offset > len or need > len - offset then __mx_const(r, c, 0.0)
+  if offset < 0 or offset > len or need > len - offset then __mx_load_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __mx_f32_rows(prim.handle(out), hd, offset, r, c, 0)
-    out
+    __mx_load_some(out)
   }
 }
 
@@ -29604,7 +29742,7 @@ fn __mx_f16_decode(bits: Int) -> Float = {
   }
 }
 
-fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let hd = prim.handle(data)
   let len = prim.load32(hd + 4)
 
@@ -29623,11 +29761,11 @@ fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
 
 
 
-  if offset < 0 or offset > len or need > len - offset then __mx_const(r, c, 0.0)
+  if offset < 0 or offset > len or need > len - offset then __mx_load_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __mx_f16_rows(prim.handle(out), hd, offset, r, c, 0)
-    out
+    __mx_load_some(out)
   }
 }
 
@@ -30023,7 +30161,11 @@ else {
   __fb64_rows(ho, base, r, c, i + 1)
 }
 
-fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+fn __fb64_none() -> List[List[Float]]? = none
+
+fn __fb64_some(m: List[List[Float]]) -> List[List[Float]]? = some(m)
+
+fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let bh = prim.handle(data)
   let len = prim.load32(bh + 4)
 
@@ -30037,11 +30179,11 @@ fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   if r > 0 and c > 268435456 / r then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
 
 
-  if offset < 0 or offset > len or r * c * 8 > len - offset then __mxe_zeros(r, c)
+  if offset < 0 or offset > len or r * c * 8 > len - offset then __fb64_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __fb64_rows(prim.handle(out), bh + 12 + offset, r, c, 0)
-    out
+    __fb64_some(out)
   }
 }
 "#;
@@ -30127,7 +30269,8 @@ fn matrix_linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_row
   if rows == 0 or w_rows <= 0 or w_cols <= 0 then matrix.zeros(rows, w_rows)
   else {
     let off = if w_offset < 0 then 0 else w_offset
-    let w = matrix.from_bytes_f32_le(w_bytes, off, w_rows, w_cols)
+
+    let w = matrix.from_bytes_f32_le(w_bytes, off, w_rows, w_cols) ?? matrix.zeros(w_rows, w_cols)
     matrix.linear_row_no_bias(x, w)
   }
 }
@@ -32129,10 +32272,9 @@ fn join(base: String, child: String) -> String = {
 
   if string.starts_with(child, "/") then child
   else {
-    let b = if string.ends_with(base, "/") then string.slice(base, 0, string.len(base) - 1)
-    else base
+    let n = if string.ends_with(base, "/") then string.len(base) - 1 else string.len(base)
 
-    if string.len(b) > 0 then b + "/" + child
+    if n > 0 then string.slice(base, 0, n) + "/" + child
     else if string.starts_with(base, "/") then "/" + child
     else child
   }
@@ -39545,7 +39687,34 @@ pub const SRC_STRING_ERR_TEXT: &str = r#"
 
 
 
-fn __et_escaped(n: Int) -> Bool = n <= 31 or (n >= 127 and n <= 159) or n == 1564 or n == 8206 or n == 8207 or (n >= 8234 and n <= 8238) or (n >= 8294 and n <= 8297)
+
+
+
+fn __et_in(n: Int, lo: Int, hi: Int) -> Bool = n >= lo and n <= hi
+
+fn __et_escaped(n: Int) -> Bool =
+  __et_in(n, 0, 31)
+  or __et_in(n, 127, 159)
+  or __et_in(n, 173, 173)
+  or __et_in(n, 1536, 1541)
+  or __et_in(n, 1564, 1564)
+  or __et_in(n, 1757, 1757)
+  or __et_in(n, 1807, 1807)
+  or __et_in(n, 2192, 2193)
+  or __et_in(n, 2274, 2274)
+  or __et_in(n, 6158, 6158)
+  or __et_in(n, 8203, 8207)
+  or __et_in(n, 8232, 8238)
+  or __et_in(n, 8288, 8292)
+  or __et_in(n, 8294, 8303)
+  or __et_in(n, 65279, 65279)
+  or __et_in(n, 65529, 65531)
+  or __et_in(n, 69821, 69821)
+  or __et_in(n, 69837, 69837)
+  or __et_in(n, 78896, 78911)
+  or __et_in(n, 113824, 113827)
+  or __et_in(n, 119155, 119162)
+  or __et_in(n, 917504, 917631)
 
 fn __et_char(c: String, n: Int) -> String = match n {
   10 => "\\n",
