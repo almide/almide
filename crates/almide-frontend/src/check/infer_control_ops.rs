@@ -196,6 +196,11 @@ impl Checker {
             ExprKind::Tuple { elements, .. } => Ty::Tuple(elements.iter_mut().map(|e| self.infer_expr(e)).collect()),
             ExprKind::SpreadRecord { base, fields, .. } => {
                 let base_ty = self.infer_expr(base);
+                // E033: an update of a foreign opaque record builds a value of
+                // that type from fields the program chose — a Region with a
+                // forged length (ADR-0031), a Secret with a swapped payload.
+                let concrete_base = resolve_ty(&base_ty, &self.uf);
+                self.reject_foreign_opaque_record(&concrete_base, "update the fields of");
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 // #3358: an updated field takes the base record's DECLARED field
                 // type, as the same field of a record literal does
