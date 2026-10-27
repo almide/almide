@@ -23,6 +23,7 @@ impl Checker {
         self.validate_interp_instantiations();
         self.validate_ord_elem_types();
         self.validate_eq_operand_types();
+        self.validate_eq_operand_pairs();
         self.validate_unknown_named_types();
         self.validate_empty_collection_elements();
         self.validate_int_overflow_literals();
@@ -178,6 +179,7 @@ impl Checker {
             self.deferred_type_param_checks.len(),
             self.deferred_input_sink_checks.len(),
             self.deferred_protocol_bounds.len(),
+            self.deferred_eq_pair_checks.len(),
         );
 
         let self_name = self.env.self_module_name.map(|s| s.to_string());
@@ -238,6 +240,7 @@ impl Checker {
         self.deferred_type_param_checks.truncate(saved_deferred_lens.15);
         self.deferred_input_sink_checks.truncate(saved_deferred_lens.16);
         self.deferred_protocol_bounds.truncate(saved_deferred_lens.17);
+        self.deferred_eq_pair_checks.truncate(saved_deferred_lens.18);
         // #3164: the ENTRY program has no prefixed key to carry the result —
         // its bare keys are the real ones — so the refreshed types go back
         // onto them, where the main pass reads them. (A module's prefixed keys

@@ -476,6 +476,7 @@ impl Checker {
         }
         // Unify left/right types so TypeVars in none/err/constructors get resolved
         self.unify_infer(lt, rt);
+        let diags_before = self.diagnostics.len();
         // #1050: a Result on exactly ONE side of ==/!= can never compare —
         // `unify_infer` stays silent on a concrete mismatch, so this shape
         // used to pass check and explode as an E0308 in the generated Rust
@@ -538,6 +539,20 @@ impl Checker {
             // #2606: and for the post-solve Eq check — a function anywhere in
             // the operand type has no equality.
             self.deferred_eq_checks.push((lt.clone(), left.span, format!("operator '{}'", op)));
+        }
+        // #4018 (security row 11b): `unify_infer` is permissive, so whether the
+        // two operands name ONE type is judged after the solve, on every
+        // comparison operator (`eq_operands.rs`). A literal `none` side is the
+        // none-comparison rule's.
+        // An operand mismatch already reported above (with its own hint) is
+        // not reported twice.
+        if !(left_is_none || right_is_none) && self.diagnostics.len() == diags_before {
+            self.deferred_eq_pair_checks.push(super::eq_operands::EqPairSite {
+                op: *op,
+                left: (lt.clone(), super::eq_operands::LitShape::of(left)),
+                right: (rt.clone(), super::eq_operands::LitShape::of(right)),
+                span: left.span,
+            });
         }
         // Ordering (< <= > >=) is defined ONLY on scalar orderable
         // types. On a compound operand (Tuple/Option/Result/List/
