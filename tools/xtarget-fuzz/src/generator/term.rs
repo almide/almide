@@ -220,7 +220,7 @@ fn render_verdict_call(
         };
         // Out of scope like the raw result: a domain operand can be a host
         // choice too (`process.kill`'s pid is a fresh child's).
-        // The written operand is a `var` (E032): `bytes.as_mut_ptr`'s receiver.
+        // The written operand is a `var` (E032): a `mut` / `@mutating` receiver.
         let kw = if Some(i) == sig.mut_param { "var" } else { "let" };
         let v = b.fresh_name();
         b.stmts.push(format!("{kw} {v}: {} = {a}", ty.render()));
