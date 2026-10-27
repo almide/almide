@@ -520,7 +520,7 @@ pub fn register_fn_sig(env: &mut TypeEnv, decl: &FnSigToRegister<'_>) {
     let min_p = params.iter().take_while(|p| p.default.is_none()).count();
     // `@input_sink` (row 22, C-436): the `Decode`-bounded type parameters
     // are input types at every call — read off the declaration, never a name.
-    if attrs.iter().any(|a| a.name.as_str() == "input_sink") {
+    if attrs.iter().any(|a| a.name.as_str() == crate::request_flow::INPUT_SINK_ATTR) {
         let mut tvs: Vec<Sym> = pb.iter()
             .filter(|(_, ps)| ps.iter().any(|p| super::protocols::protocol_closure(p.as_str()).contains(&super::protocols::DECODE_PROTOCOL)))
             .map(|(tv, _)| *tv)
