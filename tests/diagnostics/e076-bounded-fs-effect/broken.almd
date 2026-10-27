@@ -4,4 +4,4 @@ import fs
 @bounded
 effect fn peek() -> String = fs.read_text("x.txt") ?? "missing"
 
-effect fn main() -> Unit = println(peek())
+effect fn main() -> Unit = println(peek()!)
