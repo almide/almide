@@ -353,7 +353,12 @@ fn render_generic_call_named(ctx: &RenderContext, name: almide_base::intern::Sym
     // for a module's own (#1835). The reserved prefix is the STRUCT's (the
     // #433 mangle), not a runtime helper's, so it is decided before the
     // invariant below.
-    if ctx.newtype_ctors.contains_key(&name) {
+    //
+    // A construction the checker typed as an ENUM's case is that case even
+    // when a newtype shares its spelling: a user's `| Path(String)` beside
+    // the stdlib's `mod type Path` (`value.Path`) was built as the stdlib's
+    // tuple struct (#4275).
+    if ctx.newtype_ctors.contains_key(&name) && !super::is_enum_case_of(ctx, name.as_str(), result_ty) {
         return render_call_expr(ctx, name.as_str(), args);
     }
     // Invariant: NormalizeRuntimeCallsPass collapses every
