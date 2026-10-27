@@ -174,10 +174,11 @@ const NO_TEST_SELECTED: &str = "tests::__almide_run_selected_no_test";
 /// - **Whether every selected test finished** (#4255). The exit status is not
 ///   the verdict: `process.exit(0)` inside a test ends the binary with 0
 ///   before the remaining tests run, and reading that 0 as "all passed"
-///   greened a file whose later tests failed or never ran. libtest writes one
-///   record per FINISHED test to `--logfile` — the harness's own channel, not
-///   the program's stdout — and a status-0 run that is missing a selected
-///   test's record fails, naming the first test that never finished.
+///   greened a file whose later tests failed or never ran. Each emitted test
+///   appends its name to the ledger file named by `ALMIDE_TEST_LEDGER` when it
+///   reaches the end of its body (the `test_module` template) — the harness's
+///   own channel, not the program's stdout — and a status-0 run missing a
+///   selected test's record fails, naming the first test that never finished.
 pub fn run_native_test_binary(file: &str, bin: &std::path::Path, program_args: &[String]) -> (i32, String, String) {
     let source = almide::source_overlay::read_to_string(file).unwrap_or_default();
     let names = test_name_map(&source);
@@ -200,16 +201,17 @@ pub fn run_native_test_binary(file: &str, bin: &std::path::Path, program_args: &
         }
         None => {}
     }
-    let log = native_test_log_path();
-    args.push("--logfile".to_string());
-    args.push(log.to_string_lossy().into_owned());
-    let (mut code, stdout, mut stderr) = super::run::run_binary_captured_io(bin, &args);
-    let records = std::fs::read_to_string(&log).unwrap_or_default();
-    let _ = std::fs::remove_file(&log);
+    let ledger = native_test_log_path();
+    let _ = std::fs::remove_file(&ledger);
+    let (mut code, stdout, mut stderr) =
+        super::run::run_binary_captured_io_env(bin, &args, &[("ALMIDE_TEST_LEDGER", ledger.as_os_str())]);
+    let records = std::fs::read_to_string(&ledger).unwrap_or_default();
+    let _ = std::fs::remove_file(&ledger);
     if code == 0 {
+        let finished: std::collections::HashSet<&str> = records.lines().collect();
         let unfinished: Vec<&str> = selected
             .iter()
-            .filter(|(m, _)| !libtest_log_has(&records, &libtest_path(m)))
+            .filter(|(m, _)| !finished.contains(m.as_str()))
             .map(|(_, label)| label.as_str())
             .collect();
         if let Some(first) = unfinished.first() {
@@ -224,16 +226,7 @@ pub fn run_native_test_binary(file: &str, bin: &std::path::Path, program_args: &
     (code, stdout, stderr)
 }
 
-/// Does libtest's `--logfile` carry a verdict record for `path`? Each finished
-/// test is one line, `ok <path>` / `failed[: <msg>] <path>` / `ignored <path>`.
-fn libtest_log_has(records: &str, path: &str) -> bool {
-    records.lines().any(|l| {
-        (l.starts_with("ok ") || l.starts_with("failed") || l.starts_with("ignored"))
-            && l.split_whitespace().any(|t| t == path)
-    })
-}
-
-/// A fresh scratch path for one binary's libtest log.
+/// A fresh scratch path for one binary's completion ledger.
 fn native_test_log_path() -> std::path::PathBuf {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

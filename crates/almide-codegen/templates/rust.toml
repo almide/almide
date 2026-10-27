@@ -393,11 +393,17 @@ template = "// use {module};"
 
 # ── Test ──
 
+# The completion ledger (#4255): a test that runs to the end of its body drops
+# its `AlmdTestDone`, which appends the test's name to the file named by
+# ALMIDE_TEST_LEDGER. `almide test` passes a file only when every selected test
+# is in it — exit status 0 is not that: `process.exit(0)` inside a test ends the
+# binary with 0 before the remaining tests ran. A panicking test (a failure,
+# libtest's own verdict) records nothing.
 [test_module]
-template = "mod tests {{\n    use super::*;\n\n{tests}\n}}"
+template = "mod tests {{\n    use super::*;\n\n    #[allow(dead_code)]\n    struct AlmdTestDone(&'static str);\n    impl Drop for AlmdTestDone {{\n        fn drop(&mut self) {{\n            if std::thread::panicking() {{ return; }}\n            let Some(path) = std::env::var_os(\"ALMIDE_TEST_LEDGER\") else {{ return }};\n            use std::io::Write as _;\n            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {{\n                let _ = writeln!(f, \"{{}}\", self.0);\n            }}\n        }}\n    }}\n\n{tests}\n}}"
 
 [test_block]
-template = "#[test]\nfn {name}() {{\n{body}\n}}"
+template = "#[test]\nfn {name}() {{\n    let _almd_done = AlmdTestDone(\"{name}\");\n{body}\n}}"
 
 # testing.assert_aborts (ADR-0029): the child entry. The ordinary run skips it
 # (ignored); a call re-executes the binary with `--ignored --exact

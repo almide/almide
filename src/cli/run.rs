@@ -377,7 +377,17 @@ pub fn run_binary_captured(bin: &std::path::Path, program_args: &[String]) -> (i
 /// attributes a test's stdout to the test from libtest's markers, which only
 /// the stdout stream carries (#2538).
 pub fn run_binary_captured_io(bin: &std::path::Path, program_args: &[String]) -> (i32, String, String) {
-    let Some(out) = with_exec_retry(|| binary_command(bin, program_args).output()) else {
+    run_binary_captured_io_env(bin, program_args, &[])
+}
+
+/// [`run_binary_captured_io`] with extra environment for the child — the
+/// test harness's completion ledger path (#4255).
+pub fn run_binary_captured_io_env(bin: &std::path::Path, program_args: &[String], env: &[(&str, &std::ffi::OsStr)]) -> (i32, String, String) {
+    let Some(out) = with_exec_retry(|| {
+        let mut cmd = binary_command(bin, program_args);
+        cmd.envs(env.iter().copied());
+        cmd.output()
+    }) else {
         return (1, String::new(), String::new());
     };
     (

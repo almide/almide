@@ -3,9 +3,10 @@
 //! #4255: the exit status is not the verdict. `process.exit(0)` inside a test
 //! ends the process with 0 before the remaining tests run, and the runner used
 //! to read that 0 as "every test in the file passed" — a later failing test,
-//! or one that never ran, turned green. The native leg now requires libtest's
-//! per-test completion record (its `--logfile`, not the program's stdout) for
-//! every selected test; the wasm leg's embedded host requires the runner
+//! or one that never ran, turned green. The native leg now requires a
+//! per-test completion record (the `ALMIDE_TEST_LEDGER` file each emitted test
+//! appends to when its body finishes, not the program's stdout) for every
+//! selected test; the wasm leg's embedded host requires the runner
 //! `main` to have returned.
 //!
 //! #4264: `--run <pattern>` is matched against each test's own name, as
