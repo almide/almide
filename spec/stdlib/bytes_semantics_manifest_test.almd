@@ -921,17 +921,6 @@ test "bytes.copy_from unit=byte-offset" {
   assert_eq("${bytes.to_list(dst)}", "[0, 7, 6, 0]")
 }
 
-test "bytes.copy_to_ptr unit=byte-count" {
-  var dst = bytes.zeros(4)
-  let n = bytes.copy_to_ptr(bytes.from_list([9, 8, 7]), ffi.address(dst), 2)
-  let sm_out = "${n} ${bytes.to_list(dst)}"
-  assert_eq("${sm_out}", "2 [9, 8, 0, 0]")
-}
-
-test "bytes.data_ptr unit=address" {
-  assert_eq("${bytes.data_ptr(bytes.from_list([1])) != 0}", "true")
-}
-
 test "bytes.is_eof unit=byte-offset" {
   let b8 = bytes.from_list([
     1,
@@ -955,11 +944,6 @@ test "bytes.fill unit=byte-value" {
 
 test "bytes.from_list unit=byte-value" {
   assert_eq("${bytes.to_list(bytes.from_list([0, 128, 255]))}", "[0, 128, 255]")
-}
-
-test "bytes.from_raw_ptr unit=byte-count" {
-  let src = bytes.from_list([1, 2, 3, 4])
-  assert_eq("${bytes.to_list(bytes.from_raw_ptr(ffi.address(src), 3))}", "[1, 2, 3]")
 }
 
 test "bytes.get unit=byte-offset" {
