@@ -57,10 +57,10 @@
 
 ### R-args-03 `positional_at` を撤去する — ○ 採用
 
-- いま: `args.positional_at(i)` は `list.get(args.positional()!, i)` と同じ値です。R-args-02 は同じ理由（ほかの関数の組み合わせで書ける）で `option_or` を撤去しました。
-- 案: 撤去し、`list.get(args.positional()!, i)` と書きます。
+- いま: `args.positional_at(i)` は `list.get(args.positional(options)!, i)` と同じ値です。R-args-02 は同じ理由（ほかの関数の組み合わせで書ける）で `option_or` を撤去しました。
+- 案: 撤去し、`list.get(args.positional(options)!, i)` と書きます。
 - 根拠の L0 規則: R-L0-01（同じ役割を 2 か所に置かない）。
-- (d) 撤去 1。`@deprecated(since=15, use="list.get(args.positional()!, i)")`、`removal_epoch = 16`、`almide fix` で書き換えます。
+- (d) 撤去 1。`@deprecated(since=15, use="list.get(args.positional(options)!, i)")`、`removal_epoch = 16`、`almide fix` で書き換えます。
 - issue: #3979
 
 ## L3: 関数表
@@ -72,8 +72,8 @@
 | `args.has_flag` | `effect fn has_flag(name: String) -> Bool`（案） | 同上 | 追加 | R-args-01 |
 | `args.option` | `effect fn option(name: String) -> String?` | Go `flag.String` / Python `add_argument("--x")` / Node `parseArgs` | 据え置き | — |
 | `args.option_or` | `effect fn option_or(name: String, fallback: String) -> String` | Python `default=` | 撤去（→ `option(n)! ?? d`） | R-args-02 |
-| `args.positional` | `effect fn positional() -> List[String]` | Go `flag.Args` / Node `positionals` | 据え置き（オプションの値も入ることを文書に明記。実測 `--out x` の `x` が入る） | — |
-| `args.positional_at` | `effect fn positional_at(i: Int) -> String?` | Go `flag.Arg(i)` | 撤去（→ `list.get(args.positional()!, i)`） | R-args-03 |
+| `args.positional` | `effect fn positional(options: List[String]) -> List[String]` | Go `flag.Args` / Node `positionals` | 据え置き（2026-10-26 のセキュリティ修正 #4144・C-181 で、読むオプションの名前 `options` を受け取り、`--name` の次の値を位置引数に入れなくなりました。前の「オプションの値も入る」は撤回） | — |
+| `args.positional_at` | `effect fn positional_at(i: Int, options: List[String]) -> String?` | Go `flag.Arg(i)` | 撤去（→ `list.get(args.positional(options)!, i)`） | R-args-03 |
 
 ## L0 への差し戻し（処理済み）
 
