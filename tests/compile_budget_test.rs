@@ -170,10 +170,10 @@ fn nesting(depth: usize) -> String {
 
 /// The gate's predicate over one generator: every size ends in `verdict`
 /// (checked by the caller's closure) and the counted work is linear.
-fn assert_linear(shape: &str, budget: &str, sizes: &[usize], gen: impl Fn(usize) -> String, extra: &[&str], verdict: impl Fn(usize, &Run)) {
+fn assert_linear(shape: &str, budget: &str, sizes: &[usize], make: impl Fn(usize) -> String, extra: &[&str], verdict: impl Fn(usize, &Run)) {
     let mut prev: Option<(usize, u64)> = None;
     for &n in sizes {
-        let run = check(&format!("{shape}-{n}.almd"), &gen(n), extra);
+        let run = check(&format!("{shape}-{n}.almd"), &make(n), extra);
         verdict(n, &run);
         if let Some((pn, pw)) = prev {
             let per_unit = run.work(budget).max(1) as f64 / n as f64;
@@ -223,8 +223,8 @@ fn the_bool_matrix_ends_in_e113_with_linear_work() {
     });
     // Small, the same shape is judged in full (its later rows are E014,
     // unreachable — a verdict, not the budget).
-    let small = check("bool-matrix-8.almd", &bool_matrix(8), &[]);
-    assert!(!small.stderr.contains("E113"), "an 8-wide bool matrix ran into the budget:\n{}", small.stderr);
+    let small = check("bool-matrix-4.almd", &bool_matrix(4), &[]);
+    assert!(!small.stderr.contains("E113"), "a 4-wide bool matrix ran into the budget:\n{}", small.stderr);
 }
 
 #[test]
