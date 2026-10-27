@@ -2886,72 +2886,6 @@ index_unit = "value"
 probe = 'int.__uint64_exact(-1)'
 expect = "none"
 
-[[int.fn]]
-name = "__trunc"
-index_unit = "value"
-probe = 'int.__trunc(-7)'
-expect = "-7"
-
-[[int.fn]]
-name = "__int_sat"
-index_unit = "value"
-probe = 'int.__int_sat(-7)'
-expect = "-7"
-
-[[int.fn]]
-name = "__uint64_sat"
-index_unit = "value"
-probe = 'int.__uint64_sat(-5)'
-expect = "0"
-
-[[int.fn]]
-name = "__to_float"
-index_unit = "value"
-probe = 'int.__to_float(3)'
-expect = "3"
-
-[[int.fn]]
-name = "__to_float_exact"
-index_unit = "value"
-probe = 'int.__to_float_exact(9007199254740993)'
-expect = "none"
-
-[[int.fn]]
-name = "__to_float32"
-index_unit = "value"
-probe = 'int.__to_float32(16777217)'
-expect = "16777216"
-
-[[int.fn]]
-name = "__to_float32_exact"
-index_unit = "value"
-probe = 'int.__to_float32_exact(16777216)'
-expect = "some(16777216)"
-
-[[int.fn]]
-name = "__decimal_exact"
-index_unit = "value"
-probe = 'int.__decimal_exact(-42)'
-expect = "some(\"-42\")"
-
-[[int.fn]]
-name = "__bits64"
-index_unit = "bit-pattern"
-probe = 'int.__bits64(-1)'
-expect = "-1"
-
-[[int.fn]]
-name = "__sum"
-index_unit = "value"
-probe = 'int.__sum([1, 2, 3])'
-expect = "6"
-
-[[int.fn]]
-name = "__product"
-index_unit = "value"
-probe = 'int.__product([2, 3, 4])'
-expect = "24"
-
 [process]
 default_index_unit = "value"
 
@@ -3013,105 +2947,8 @@ Declared, not probed (host-capability): the Int is the calling process's own
 OS pid, strictly positive on every supported host.
 """
 
-[[process.fn]]
-name = "__os_output"
-index_unit = "millisecond"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_output(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[ProcessStatus, String]`.
-"""
-
-[[process.fn]]
-name = "__os_run"
-index_unit = "millisecond"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_run(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String]`.
-"""
-
-[[process.fn]]
-name = "__os_start"
-index_unit = "millisecond"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_start(cmd: String, args: List[String], dir: String, stdin: String, timeout_ms: Int) -> Result[Int, String]`.
-"""
-
-[[process.fn]]
-name = "__os_poll"
-index_unit = "handle"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_poll(h: Int) -> Result[Bool, String]`.
-"""
-
-[[process.fn]]
-name = "__os_wait"
-index_unit = "handle"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_wait(h: Int) -> Result[ProcessStatus, String]`.
-"""
-
-[[process.fn]]
-name = "__os_stop"
-index_unit = "millisecond"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_stop(h: Int, grace_ms: Int) -> Result[ProcessStatus, String]`.
-"""
-
-[[process.fn]]
-name = "__os_read_new"
-index_unit = "handle"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_read_new(h: Int, which: Int) -> String`.
-"""
-
-[[process.fn]]
-name = "__os_child_pid"
-index_unit = "handle"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_child_pid(h: Int) -> Int`.
-"""
-
 [testing]
 default_index_unit = "value"
-
-[[testing.fn]]
-name = "__abort_site_selected"
-index_unit = "element-index"
-probe = "testing.__abort_site_selected()"
-expect = "-1"
-note = """
-The 0-based ordinal of the assert_aborts site this process or instance was
-started to run (ADR-0029), or -1. The test harness itself is never a child,
-so in-file the probe pins -1; the child side is the assert_aborts fixtures'
-(spec/stdlib/coverage_assert_aborts_test.almd), on both legs.
-"""
-
-[[testing.fn]]
-name = "__abort_site_run"
-index_unit = "element-index"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (a child process or instance): the Int is the 0-based
-ordinal of the lifted assert_aborts site the child runs, in declaration
-order — the same ordinal __abort_site_selected answers in the child. A
-probe here would start a child of a file that declares no site; the
-assert_aborts fixtures exercise it on both legs.
-"""
 
 # index_unit vocabulary — args:
 #   element-index — the Int is a 0-based list position. For the __ scan
@@ -3445,12 +3282,6 @@ name = "index_of"
 index_unit = "codepoint"
 probe = 'regex.index_of(regex.new("[0-9]"), "café7")'
 expect = "some(4)"
-
-[[regex.fn]]
-name = "__index_of"
-index_unit = "codepoint"
-probe = 'regex.__index_of("[0-9]", "café7")'
-expect = "4"
 
 [bool]
 default_index_unit = "value"
