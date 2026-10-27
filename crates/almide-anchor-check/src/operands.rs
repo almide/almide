@@ -304,7 +304,9 @@ impl<'b, 'a> Flow<'b, 'a> {
         }
     }
 
-    /// Does `t` hold the block `blk` anywhere?
+    /// Does `t` hold the block `blk` (or an address computed from it)? A
+    /// value LOADED through it is something the block holds (an element), not
+    /// the block, so a load's address is not searched.
     fn mentions(&self, t: &T, blk: &T) -> bool {
         let hit = match (t, blk) {
             (T::Local(l, _), T::Local(m, _)) => l == m,
@@ -315,14 +317,17 @@ impl<'b, 'a> Flow<'b, 'a> {
         hit || match t {
             T::Op(_, xs) => xs.iter().any(|x| self.mentions(x, blk)),
             T::Call { args, .. } => args.iter().any(|x| self.mentions(x, blk)),
-            T::Load { addr, .. } => self.mentions(addr, blk),
             _ => false,
         }
     }
 
-    /// `cb` (the block the check counted) and `ab` (the block the access
-    /// addresses) have the same count when the access at `acc` runs.
-    fn same_count(&self, cb: &T, ab: &T, acc: usize) -> Result<(), String> {
+    /// `cb` (the block the check counted, its count read at `count_at`) and
+    /// `ab` (the block the access addresses) have the same count when the
+    /// access at `acc` runs: from the first read of either to the access no
+    /// write of the variable but its own judge's; from the count's read to
+    /// the access no call but a judge handed the block and no store of its
+    /// count word.
+    fn same_count(&self, cb: &T, ab: &T, count_at: usize, acc: usize) -> Result<(), String> {
         let (x, y) = (self.strip(cb), self.strip(ab));
         let (Some(u), Some(v)) = (Self::site_of(x), Self::site_of(y)) else {
             return Err(format!("the checked count is not a block's ({x:?} / {y:?})"));
@@ -337,6 +342,10 @@ impl<'b, 'a> Flow<'b, 'a> {
             _ if self.same(x, y) => None,
             _ => return Err(format!("the check counts {x:?}, the access addresses {y:?}")),
         };
+        if !self.dominates(count_at, acc) {
+            return Err("the count's read does not dominate the access".into());
+        }
+        let counted: HashSet<usize> = self.window(count_at, acc).into_iter().collect();
         for k in self.window(from, acc) {
             let op = &self.b.ops[k];
             if let Some(src) = src {
@@ -354,6 +363,9 @@ impl<'b, 'a> Flow<'b, 'a> {
                     }
                 }
             }
+            if !counted.contains(&k) {
+                continue;
+            }
             if matches!(op, Op::Call { .. } | Op::CallIndirect { .. }) && !self.judges.contains(&k) {
                 let n = self.b.args[k].len();
                 if (0..n).any(|j| self.mentions(&self.arg(k, j, FUEL), x)) {
@@ -361,7 +373,17 @@ impl<'b, 'a> Flow<'b, 'a> {
                 }
             }
             if let Some((4, off)) = store_width(op) {
-                if off == LEN_OFF && self.mentions(&self.arg(k, 0, FUEL), x) {
+                // The effective address `base + constant`: the count word is
+                // the block's own address plus LEN, whatever the split.
+                let addr = self.arg(k, 0, FUEL);
+                let (base, eff) = match &addr {
+                    T::Op("i32.add", p) if p.len() == 2 => match &p[1] {
+                        T::Const(c) => (&p[0], off as i64 + c),
+                        _ => (&addr, off as i64),
+                    },
+                    _ => (&addr, off as i64),
+                };
+                if eff == LEN_OFF as i64 && !matches!(base, T::Op(..)) && self.mentions(base, x) {
                     return Err(format!("instruction {k} writes the list's count between the check and the access"));
                 }
             }
@@ -380,16 +402,17 @@ fn affine(t: &T) -> (&T, i64) {
     }
 }
 
-/// `len(B)`: `B`.
-fn len(l: &T) -> Option<&T> {
+/// `len(B)`: `(B, the load)`.
+fn len(l: &T) -> Option<(&T, usize)> {
     match l {
-        T::Load { name: "i32.load", off: LEN_OFF, addr, .. } => Some(&**addr),
+        T::Load { name: "i32.load", off: LEN_OFF, addr, site } => Some((&**addr, *site)),
         _ => None,
     }
 }
 
-/// `0 <= I && I <= len(B) - w` (signed): `(I, I again, B, w)`.
-fn room_of(room: &T) -> Option<(&T, &T, &T, i64)> {
+/// `0 <= I && I <= len(B) - w` (signed): `(I, I again, (B, its count's
+/// load), w)`.
+fn room_of(room: &T) -> Option<(&T, &T, (&T, usize), i64)> {
     let T::Op("i32.and", a) = room else { return None };
     let (T::Op("i64.ge_s", lo), T::Op("i64.le_s", hi)) = (a.first()?, a.get(1)?) else { return None };
     if !matches!(lo.get(1)?, T::Const(0)) {
@@ -400,8 +423,8 @@ fn room_of(room: &T) -> Option<(&T, &T, &T, i64)> {
     Some((lo.first()?, hi.first()?, len(e.first()?)?, *w))
 }
 
-/// `len(B) / S` as the count operand: `(B, S)`.
-fn count_of(t: &T) -> Option<(&T, i64)> {
+/// `len(B) / S` as the count operand: `((B, its count's load), S)`.
+fn count_of(t: &T) -> Option<((&T, usize), i64)> {
     match t {
         T::Op("i64.extend_i32_u", a) if a.len() == 1 => match &a[0] {
             T::Op("i32.div_u", d) if d.len() == 2 => match (len(&d[0]), &d[1]) {
@@ -444,7 +467,7 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
     match fl.b.ops[cmp] {
         Op::I64GeU => {
             let (ix, cnt) = (fl.arg(cmp, 0, FUEL), fl.arg(cmp, 1, FUEL));
-            let (cb, s) = count_of(&cnt).ok_or_else(|| format!("the compare's right operand is not a list's count: {cnt:?}"))?;
+            let ((cb, count_at), s) = count_of(&cnt).ok_or_else(|| format!("the compare's right operand is not a list's count: {cnt:?}"))?;
             let T::Op("i32.add", parts) = &addr else {
                 return Err(format!("the access's address is not block + scaled index: {addr:?}"));
             };
@@ -477,11 +500,11 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
             if !fl.same(ci, ai) || cc != ac + k / s {
                 return Err(format!("the check tests index {ix:?}, the access reads slot {ai:?} + {}", k / s));
             }
-            fl.same_count(cb, ab, acc)
+            fl.same_count(cb, ab, count_at, acc)
         }
         Op::I32Eqz => {
             let room = fl.arg(cmp, 0, FUEL);
-            let (i1, i2, cb, w) = room_of(&room).ok_or_else(|| format!("the room test is not `0 <= i <= len - w`: {room:?}"))?;
+            let (i1, i2, (cb, count_at), w) = room_of(&room).ok_or_else(|| format!("the room test is not `0 <= i <= len - w`: {room:?}"))?;
             if !fl.same(i1, i2) {
                 return Err("the room test's two bounds test different indices".into());
             }
@@ -499,7 +522,7 @@ pub(crate) fn covers(fl: &Flow<'_, '_>, cmp: usize, acc: usize) -> Result<(), St
             if ai.len() != 1 || !fl.same(i1, &ai[0]) {
                 return Err("the room test and the byte access use different indices".into());
             }
-            fl.same_count(cb, ab, acc)
+            fl.same_count(cb, ab, count_at, acc)
         }
         ref o => Err(format!("the guard's compare is {o:?}")),
     }
