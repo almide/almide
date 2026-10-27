@@ -118,7 +118,10 @@ fn texts(t: String) -> List[String] = [t]
 
 effect fn create(req: HttpRequest) -> HttpResponse = {
   let raw = http.req_body(req)
-  let users = texts(raw) |> list.map((t) => User.decode(json.parse(t) ?? json.null()))
+  let users = texts(raw) |> list.map((t) => match json.parse(t) {
+    ok(v) => User.decode(v),
+    err(e) => err(e),
+  })
   http.response(201, "${list.len(users)}")
 }
 

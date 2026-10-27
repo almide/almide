@@ -82,7 +82,7 @@ fi
     echo
     echo "[$name]"
     echo "observed_max = $obs"
-    echo "observed_in = \"$where\""
+    if [ "$obs" -gt 0 ]; then echo "observed_in = \"$where\""; fi
     echo "default = $lim"
     if [ "$obs" -gt 0 ]; then
       awk -v l="$lim" -v o="$obs" 'BEGIN { printf "headroom = %.1f\n", l / o }'
