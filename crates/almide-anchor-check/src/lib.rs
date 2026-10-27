@@ -37,12 +37,23 @@
 //!
 //! A located event that fails any of these REJECTS. An event anchored `-`
 //! (a kill, which no instruction carries; or one in a body that did not ship)
-//! is counted, not checked. TRUSTED: that `alloc <index>` names `$alloc`, the
-//! compare's operands (bounds), and the representation R (init).
+//! is counted, not checked.
+//!
+//! BOUNDS, the operands (operands.rs): each located `a` / `w` is held to its
+//! slot's latest located `c` — the compare tests this access's index against
+//! the count of the list it addresses, in the same slot units, the check
+//! dominating the access and nothing changing the index or the list's count
+//! in between (a recorded copy-on-write judge keeps the count). The anchor
+//! file's optional `judges` line locates those judge calls.
+//!
+//! TRUSTED: that `alloc <index>` names `$alloc`, that a recorded judge site
+//! calls a copy-on-write judge, and the representation R (init); the rest of
+//! operands.rs's TRUSTED list.
 
 use wasmparser::{BlockType, Operator as Op};
 
 mod decode;
+mod operands;
 use decode::{branch_target, is_load};
 pub use decode::{decode, store_width, Body};
 
@@ -90,6 +101,8 @@ pub struct Report {
     pub bounds_checks: usize,
     pub bounds_accesses: usize,
     pub bounds_unlocated: usize,
+    /// Located accesses whose guard's operands were held to them.
+    pub bounds_operands: usize,
 }
 
 struct Ctx<'b, 'a> {
@@ -534,8 +547,10 @@ pub fn check_bounds(
     bodies: &[Body<'_>],
     bounds: &str,
     anch: &str,
+    judges: &[At],
     rep: &mut Report,
 ) -> Result<(), String> {
+    let mut flows: std::collections::HashMap<usize, operands::Flow<'_, '_>> = std::collections::HashMap::new();
     let ctx = Ctx {
         bodies,
         alloc: u32::MAX,
@@ -562,6 +577,8 @@ pub fn check_bounds(
         // one access's, in one function; slots are independent in the
         // checker, so their mutual order is not a claim).
         let mut last: std::collections::HashMap<String, At> = std::collections::HashMap::new();
+        // Per slot, its latest located check.
+        let mut guard: std::collections::HashMap<String, At> = std::collections::HashMap::new();
         for (tok, a) in t.iter().zip(&g) {
             let kind = tok.chars().next().unwrap_or('?');
             let at = parse_at(a).map_err(what)?;
@@ -583,12 +600,24 @@ pub fn check_bounds(
                         'c' => {
                             ctx.check_guard(at)
                                 .map_err(|e| what(format!("`{tok}`: {e}")))?;
+                            guard.insert(tok[1..].to_string(), at);
                             rep.bounds_checks += 1;
                         }
                         _ => {
                             ctx.access(at, kind == 'w')
                                 .map_err(|e| what(format!("`{tok}`: {e}")))?;
                             rep.bounds_accesses += 1;
+                            let c = guard
+                                .get(&tok[1..])
+                                .copied()
+                                .ok_or_else(|| what(format!("`{tok}` has no located check of its slot")))?;
+                            let flow = flows.entry(at.func).or_insert_with(|| {
+                                let js = judges.iter().filter(|j| j.func == at.func).map(|j| j.op).collect();
+                                operands::Flow::new(&bodies[at.func], js)
+                            });
+                            operands::covers(flow, c.op - 2, at.op)
+                                .map_err(|e| what(format!("`{tok}` against its check at {}:{}: {e}", c.func, c.op)))?;
+                            rep.bounds_operands += 1;
                         }
                     }
                 }
@@ -633,8 +662,10 @@ pub fn bundle_witness(bundle: &[u8], property: &str) -> Result<String, String> {
     Ok(String::new())
 }
 
-/// The anchor file: `(alloc, init anchors, bounds anchors)`.
-pub fn parse_anchors(text: &str) -> Result<(u32, String, String), String> {
+/// The anchor file: `(alloc, init anchors, bounds anchors, judge sites)`.
+/// The `judges` line is optional (a file without it locates no judge, and
+/// an access a judge sits in front of is then refused).
+pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>), String> {
     let mut lines = text.lines();
     if lines.next() != Some("almide-anchors 1") {
         return Err("anchors: not an `almide-anchors 1` file".into());
@@ -658,14 +689,33 @@ pub fn parse_anchors(text: &str) -> Result<(u32, String, String), String> {
             .parse()
             .map_err(|_| "anchors: bad alloc index".to_string())?,
     };
-    Ok((alloc, field("init")?, field("bounds")?))
+    let (init, bounds) = (field("init")?, field("bounds")?);
+    let judges = match lines.next() {
+        None => Vec::new(),
+        Some(l) => {
+            let rest = if l == "judges" {
+                ""
+            } else {
+                l.strip_prefix("judges ")
+                    .ok_or_else(|| format!("anchors: expected `judges`, read `{l}`"))?
+            };
+            let mut v = Vec::new();
+            for t in rest.split_whitespace() {
+                if let Some(at) = parse_at(t)? {
+                    v.push(at);
+                }
+            }
+            v
+        }
+    };
+    Ok((alloc, init, bounds, judges))
 }
 
 /// The whole check: the shipped bytes, the bundle's two witnesses and the
 /// anchor file (whose `alloc` is a function index, as a `call` names it).
 pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String> {
     let bodies = decode(wasm)?;
-    let (alloc, ia, ba) = parse_anchors(anchors)?;
+    let (alloc, ia, ba, judges) = parse_anchors(anchors)?;
     let mut rep = Report::default();
     check_init(
         &bodies,
@@ -674,6 +724,6 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         &ia,
         &mut rep,
     )?;
-    check_bounds(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &mut rep)?;
+    check_bounds(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &mut rep)?;
     Ok(rep)
 }
