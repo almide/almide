@@ -4,7 +4,7 @@
 # holding the word `unsafe` and refuses any file whose count differs from its row — a new
 # `unsafe` needs a row and a reason, a removed one lowers the row in the same change.
 #
-# class: fan-sync (Almide values cross threads; Miri/loom are the plan), ffi-surface
+# class: fan-sync (Almide values cross threads; checked by Miri and loom, below), ffi-surface
 # (the raw-pointer stdlib surface, closed to ffi.read/ffi.write by R-L0-45),
 # c-call (a C / OS function; safe when its arguments are), emitted-prelude (Rust text the
 # compiler pastes into every generated program that needs it — crates/almide-codegen/src/
@@ -15,7 +15,8 @@
 # #4007: within the runtime, every c-call sits in ONE module per crate behind safe wrappers —
 # runtime/rs/src/sys.rs (os calls, plus cblas_dgemm) and crates/almide-rt-core/src/
 # net_unix_sys.rs. Checks: scripts/miri-generated.sh and scripts/asan-generated.sh over the
-# generated crates (.github/workflows/miri-nightly.yml), scripts/miri-fan-gate.sh for fan-sync,
+# generated crates (.github/workflows/miri-nightly.yml), scripts/miri-fan-gate.sh and
+# scripts/loom-fan-gate.sh (the gate protocol's interleavings enumerated) for fan-sync,
 # scripts/lib/sys-ffi-asan.almd for sys.rs's process paths.
 
 [[file]]
