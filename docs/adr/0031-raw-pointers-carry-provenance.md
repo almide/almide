@@ -1,6 +1,6 @@
 # ADR-0031: A pointer the program can read through carries its provenance — `RawPtr` splits into an opaque `Handle` and a bounds-checked `Region` (base, length, owner), and a foreign pointer becomes a `Region` only where its `@extern` declaration states the length
 
-- **Status**: Proposed. Every decision below waits on an owner ruling; see [Owner decisions](#owner-decisions-) (8 ○× questions, one decision each).
+- **Status**: Accepted (2026-10-27). The owner answered ○ to all eight [Owner decisions](#owner-decisions-); see [Implementation](#implementation-2026-10-27) for what landed and where it reads the decisions narrowly.
 - **Date**: 2026-10-27
 - **Scope**: the `RawPtr` type, the `ffi` module, the `@extern` signature ABI for pointers (`crates/almide-types/src/types/extern_abi.rs`), the deprecated `bytes` raw-pointer spellings, and security-table row 5.
 - **Related**:
@@ -98,6 +98,25 @@ Row 5 can then close by its own definition: the bounds check is a mechanism, and
 - every user-reachable stdlib fn returning a `RawPtr` takes a `Bytes`;
 - the module that mints one from an `Int` (`prim`) is excluded by the same declaration E085 reads (`stdlib::is_user_nameable_module`), and the exclusion is checked to be non-vacuous;
 - in a file that wrote `import ffi`, arithmetic on a `RawPtr`, an integer literal typed `RawPtr`, a `RawPtr` Codec field and `prim.int_to_ptr` are each refused, with a clean control.
+
+## Implementation (2026-10-27)
+
+All eight decisions land in dialect epoch 15, with no deprecation window (`proofs/dialect-epochs.toml`: each removed spelling is a `breaks` entry, `almide fix` renames a removed call whose rewrite keeps its arguments — `ffi.address(b)` / `bytes.as_ptr(b)` / `bytes.data_ptr(b)` → `ffi.region(b)` — and the type `RawPtr` → `Handle`; the rest carry a hint).
+
+- **D1.** `Handle` is the builtin head that was `RawPtr`. `Region` is `mod type Region = { owner, base, len, writable, keep }` in stdlib/ffi.almd: opaque outside the module (E033), so a program cannot read `base` or forge `len`. The three raw operations (`__address`, `__load`, `__store`) are `local` to stdlib/ffi.almd (E420 from anywhere else) and run only after `read` / `write` checked the bounds. Native implements them in runtime/rs/src/ffi.rs, wasm in stdlib/ffi_bridge.almd.
+- **D2.** `ffi.region(b)` (read-only, owner `b`), `ffi.alloc(n)` (an `effect fn`, so two calls are never merged into one shared buffer), and an `@extern(c)` fn declaring `@region(len = …, release = "…")` (check/extern_abi_check.rs validates the clause: E090 without it, or when `len` names no integer parameter). The clause is counted on the `Built` line.
+- **D3.** An `@extern(c)` Region parameter is `(*mut u8, usize)` in the glue (walker/extern_c.rs). An `@extern(wasm)` Region parameter is split into `(base, len)` before the structural emitter reads the program (crates/almide-wasm/src/extern_region.rs), and the JS host glue sees the same two numbers.
+- **D4.** A foreign Region is read-only too: D4's "writable regions come only from `ffi.alloc(n)`" is read literally. A foreign library writes its own buffer; the program hands it a Region (D3) to fill.
+- **D5.** `ffi.read` / `ffi.write` answer `err` with the offset, count and length; list indexing still aborts (C-067).
+- **D6.** The glue stores a release guard in the Region's `keep` closure; every copy shares one `Rc`, so the release function runs once, when the last copy drops.
+- **D7.** `ffi.to_int`, `ffi.address`, `bytes.data_ptr` and the four other `bytes` raw-pointer spellings are gone; `prim.int_to_ptr` / `ptr_to_int` remain the stdlib's own floor (E085 outside it).
+
+Read narrowly, and named for a decision if the owner wants otherwise:
+
+- D3's wasm `(i32 ptr, i32 len)`: the two values cross as the emitter's integer scalar (an `i64` at the import, a number at the JS hook), the ABI every other `Int` import parameter has. Narrowing them to `i32` needs a new scalar class in the wasm import ABI.
+- D3's component-model lowering (`list<u8>` / `own<resource>`) is not part of this change: the p2/p3 components take no `@extern(wasm)` hooks today.
+
+Gates: tests/raw_ptr_surface_test.rs (signature-derived: no user-reachable stdlib fn holds a Handle; every Region fn is `@memory_unsafe`; the forgery spellings are refused; the bounds and permission checks answer `err` on the native and the wasm leg), spec/wasm_cross/bytes_rawptr.almd (C-062, C-376), tests/extern_rust_abi_test.rs (the C ABI pair and the single release), scripts/check-rawptr-surface.py.
 
 ## Alternatives considered
 
