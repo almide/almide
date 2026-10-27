@@ -534,8 +534,10 @@ pub fn hand_decode_violations(program: &IrProgram) -> Vec<HandDecodeViolation> {
         return Vec::new();
     }
 
-    // Sources: the declared parameter types of every `@input_sink` fn in the
-    // modules the program reaches, and of the program's own.
+    // Sources: the declared parameter types of every stdlib `@input_sink` fn
+    // in the modules the program reaches. A user's own `@input_sink` fn names
+    // a sink, not a source: its parameter (often a plain `String`) is not
+    // request data by declaration.
     let mut reached: HashSet<String> = program.used_stdlib_modules.iter().cloned().collect();
     reached.extend(program.modules.iter().map(|m| m.name.to_string()));
     let mut called = ModulesCalled(HashSet::new());
@@ -550,15 +552,6 @@ pub fn hand_decode_violations(program: &IrProgram) -> Vec<HandDecodeViolation> {
         for t in crate::bundled_sigs::input_sink_param_types(m) {
             if !sources.contains(&t) {
                 sources.push(t);
-            }
-        }
-    }
-    for e in &fns {
-        if has_attr(e.f, INPUT_SINK_ATTR) {
-            for p in &e.f.params {
-                if !matches!(p.ty, Ty::TypeVar(_)) && !sources.contains(&p.ty) {
-                    sources.push(p.ty.clone());
-                }
             }
         }
     }
