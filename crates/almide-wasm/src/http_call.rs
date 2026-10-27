@@ -110,7 +110,7 @@ impl Emitter<'_> {
 
     /// The `HttpCall` slice type and its id slot's payload offset.
     fn http_call_ty(&self) -> Result<(SliceTy, u32), EmitError> {
-        let Some(t) = crate::ty::slice_ty_of(&almide_types::types::Ty::Named(almide_base::intern::sym("HttpCall"), vec![]), self.types)
+        let Some(t) = crate::ty::slice_ty_of(&almide_types::types::Ty::Named(almide_base::intern::sym("HttpCall"), Default::default()), self.types)
         else {
             return unsup("http-call-ty");
         };

@@ -42,10 +42,10 @@ use almide_mir::lower::{routers_call_name, RouterHints};
 const ROUTER_HOLE_CEILING: usize = 0;
 
 fn list(t: Ty) -> Ty {
-    Ty::Applied(TC::List, vec![t])
+    Ty::Applied(TC::List, vec![t].into())
 }
 fn option(t: Ty) -> Ty {
-    Ty::Applied(TC::Option, vec![t])
+    Ty::Applied(TC::Option, vec![t].into())
 }
 fn record() -> Ty {
     Ty::Record { fields: vec![(sym("x"), Ty::Int), (sym("y"), Ty::String)] }
@@ -59,7 +59,7 @@ fn lattice() -> Vec<Ty> {
         Ty::Float,
         Ty::String,
         Ty::Bool,
-        Ty::Tuple(vec![Ty::Int, Ty::String]),
+        Ty::Tuple(vec![Ty::Int, Ty::String].into()),
         record(),
         list(Ty::Int),
         list(Ty::String),
@@ -71,7 +71,7 @@ fn lattice() -> Vec<Ty> {
 /// The reduced lattice for signatures with three or more generics (keeps the
 /// product bounded while still crossing every repr class).
 fn small_lattice() -> Vec<Ty> {
-    vec![Ty::Int, Ty::String, Ty::Tuple(vec![Ty::Int, Ty::String]), list(Ty::Int), option(Ty::Int)]
+    vec![Ty::Int, Ty::String, Ty::Tuple(vec![Ty::Int, Ty::String].into()), list(Ty::Int), option(Ty::Int)]
 }
 
 /// Every instantiation of `sig`'s generics over the lattice, as
@@ -217,8 +217,8 @@ fn router_holes_are_ratcheted() {
 #[test]
 fn the_2154_shape_is_refused_by_the_router_itself() {
     // `list.sort_by(entries, ((w, c)) => (0 - c, w))` — a tuple element, a tuple key.
-    let elem = Ty::Tuple(vec![Ty::String, Ty::Int]);
-    let key = Ty::Tuple(vec![Ty::Int, Ty::String]);
+    let elem = Ty::Tuple(vec![Ty::String, Ty::Int].into());
+    let key = Ty::Tuple(vec![Ty::Int, Ty::String].into());
     let f = Ty::Fn { params: vec![elem.clone()], ret: Box::new(key), is_effect: false };
     let args = vec![list(elem.clone()), f];
     let raw = routers_call_name("list", "sort_by", &args, &list(elem), RouterHints::default());

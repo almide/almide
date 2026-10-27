@@ -9,7 +9,7 @@ use almide_base::intern::sym;
 pub(super) fn auto_derive_encode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFieldDecl]) -> IrFunction {
     let type_name = wk.type_name.to_string();
     let var = wk.vt.alloc(sym("_v"), type_ty.clone(), Mutability::Let, None);
-    let value_ty = Ty::Named(sym("Value"), vec![]);
+    let value_ty = Ty::Named(sym("Value"), Default::default());
 
     // `@skip` fields are never written (#4108): CODEC_FIELD_SKIPS decides.
     let entries: Vec<(String, Ty, IrExpr)> = fields.iter()
@@ -55,7 +55,7 @@ pub(super) fn auto_derive_encode(wk: &mut CodecWk, type_ty: &Ty, fields: &[IrFie
 /// instead of emitting an explicit null. Chunks are joined with list concat —
 /// a shape both render legs lower (verified native == wasm byte output).
 pub(super) fn build_object_arg(wk: &mut CodecWk, entries: &[(String, Ty, IrExpr)], value_ty: &Ty) -> IrExpr {
-    let pair_ty = Ty::Tuple(vec![Ty::String, value_ty.clone()]);
+    let pair_ty = Ty::Tuple(vec![Ty::String, value_ty.clone()].into());
     let chunk_ty = Ty::list(pair_ty.clone());
     let mk_pair = |key: &str, val: IrExpr| IrExpr {
         kind: IrExprKind::Tuple { elements: vec![

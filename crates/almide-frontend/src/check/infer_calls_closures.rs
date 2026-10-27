@@ -465,7 +465,7 @@ impl Checker {
         let elem = self.fresh_var();
         self.constrain(
             list_ty,
-            Ty::Applied(TypeConstructorId::List, vec![elem.clone()]),
+            Ty::Applied(TypeConstructorId::List, vec![elem.clone()].into()),
             "fan.min mapper list",
         );
         // The mapper body is a metered PURE region, exactly like a block arm.
@@ -1547,8 +1547,8 @@ impl Checker {
                 let inner_ty = self.infer_pipe(left, inner);
                 match &inner_ty {
                     Ty::Applied(TypeConstructorId::Result, args) if args.len() == 2 =>
-                        Ty::Applied(TypeConstructorId::Option, vec![args[0].clone()]),
-                    _ => Ty::Applied(TypeConstructorId::Option, vec![inner_ty]),
+                        Ty::Applied(TypeConstructorId::Option, vec![args[0].clone()].into()),
+                    _ => Ty::Applied(TypeConstructorId::Option, vec![inner_ty].into()),
                 }
             }
             _ => self.infer_pipe_direct(left, right),

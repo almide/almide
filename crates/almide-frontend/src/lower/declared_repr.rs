@@ -319,7 +319,7 @@ impl LowerCtx<'_> {
     /// `["k": v, …]` (`[:]` when empty), over `map.entries` — the form and
     /// order the legs print a map in.
     fn map_walker(&mut self, name: Sym, map_ty: &Ty, k: &Ty, v: &Ty) -> Sym {
-        let pair = Ty::Tuple(vec![k.clone(), v.clone()]);
+        let pair = Ty::Tuple(vec![k.clone(), v.clone()].into());
         let pairs_ty = Ty::list(pair.clone());
         let pairs_name = sym(&format!("{}_pairs", name));
         let m = self.var_table.alloc(sym("_m"), map_ty.clone(), Mutability::Let, None);

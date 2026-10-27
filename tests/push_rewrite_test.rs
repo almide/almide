@@ -21,7 +21,7 @@ fn e(kind: IrExprKind, ty: Ty) -> IrExpr {
 }
 
 fn list_ty() -> Ty {
-    Ty::Applied(TypeConstructorId::List, vec![Ty::Int])
+    Ty::Applied(TypeConstructorId::List, vec![Ty::Int].into())
 }
 
 fn var(id: VarId) -> IrExpr {

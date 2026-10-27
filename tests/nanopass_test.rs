@@ -407,7 +407,7 @@ mod borrow_insertion {
         // Locks the #647 perf win: record-typed leaf readers borrow instead of
         // deep-cloning the whole record on every call.
         let mut vt = VarTable::new();
-        let tok = Ty::Named(sym("Tok"), vec![]);
+        let tok = Ty::Named(sym("Tok"), Default::default());
         let p = mk_param(&mut vt, "t", tok.clone());
         let var_id = p.var;
         let body = mk_expr(IrExprKind::Member {
@@ -436,7 +436,7 @@ mod borrow_insertion {
         // must keep Own even though plain inference would make it Ref (see
         // record_param_reffed_when_only_field_read).
         let mut vt = VarTable::new();
-        let tok = Ty::Named(sym("Tok"), vec![]);
+        let tok = Ty::Named(sym("Tok"), Default::default());
         let p = mk_param(&mut vt, "p", tok.clone());
         let var_id = p.var;
         let body = mk_expr(IrExprKind::Member {
@@ -772,7 +772,7 @@ mod region_window {
     use super::*;
     use almide::codegen::pass_region_window::RegionWindowPass;
 
-    fn tree_ty() -> Ty { Ty::Named(sym("Tree"), vec![]) }
+    fn tree_ty() -> Ty { Ty::Named(sym("Tree"), Default::default()) }
 
     fn call(name: &str, args: Vec<IrExpr>, ty: Ty) -> IrExpr {
         mk_expr(IrExprKind::Call { target: CallTarget::Named { name: sym(name) }, args, type_args: vec![] }, ty)
@@ -900,7 +900,7 @@ mod region_window {
         // The twin fn's param carries the twin type and a FRESH VarId.
         let check = out.functions.iter().find(|f| f.name.as_str() == "check").unwrap();
         let twin_check = out.functions.iter().find(|f| f.name.as_str() == "__rgn_check").unwrap();
-        assert_eq!(twin_check.params[0].ty, Ty::Named(sym("__rgn_Tree"), vec![]));
+        assert_eq!(twin_check.params[0].ty, Ty::Named(sym("__rgn_Tree"), Default::default()));
         assert_ne!(twin_check.params[0].var, check.params[0].var);
     }
 
@@ -998,8 +998,8 @@ mod fan_parallel_routing {
 
     use almide::types::constructor::TypeConstructorId as TC;
 
-    pub(super) fn list_ty(t: Ty) -> Ty { Ty::Applied(TC::List, vec![t]) }
-    fn result_ty(t: Ty) -> Ty { Ty::Applied(TC::Result, vec![t, Ty::String]) }
+    pub(super) fn list_ty(t: Ty) -> Ty { Ty::Applied(TC::List, vec![t].into()) }
+    fn result_ty(t: Ty) -> Ty { Ty::Applied(TC::Result, vec![t, Ty::String].into()) }
 
     /// `(x) => ok(<body>)` with `x: Int`; `body` is built from the param var.
     pub(super) fn ok_lambda(vt: &mut VarTable, body: impl FnOnce(VarId) -> IrExpr) -> IrExpr {

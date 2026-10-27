@@ -82,7 +82,7 @@ fn infer_err_ty_from_enclosing(enclosing_ret: &Ty, inner_ty: &Ty) -> Option<Ty> 
             } else {
                 args[1].clone()
             };
-            return Some(Ty::Applied(TypeConstructorId::Result, vec![ok_ty, err_ty]));
+            return Some(Ty::Applied(TypeConstructorId::Result, vec![ok_ty, err_ty].into()));
         }
     }
     // Case 2: enclosing fn returns T (pre-lift, e.g. effect fn safe_div -> Int).
@@ -94,7 +94,7 @@ fn infer_err_ty_from_enclosing(enclosing_ret: &Ty, inner_ty: &Ty) -> Option<Ty> 
         } else {
             Ty::String
         };
-        return Some(Ty::Applied(TypeConstructorId::Result, vec![ok_ty, err_ty]));
+        return Some(Ty::Applied(TypeConstructorId::Result, vec![ok_ty, err_ty].into()));
     }
     None
 }

@@ -27,7 +27,7 @@ impl<'a> Concretizer<'a> {
         if ret.has_unresolved_deep() { return; }
         let (is_map, is_set) = detect_from_list_call_kind(value);
         let Some(elem) = from_list_elem_ty(ret, is_map, is_set) else { return };
-        let list_ty = Ty::Applied(TCI::List, vec![elem]);
+        let list_ty = Ty::Applied(TCI::List, vec![elem].into());
         let args = match &mut value.kind {
             IrExprKind::Call { args, .. } | IrExprKind::RuntimeCall { args, .. } => args,
             _ => return,
@@ -331,7 +331,7 @@ fn detect_from_list_call_kind(value: &IrExpr) -> (bool, bool) {
 fn from_list_elem_ty(ret: &Ty, is_map: bool, is_set: bool) -> Option<Ty> {
     use almide_lang::types::constructor::TypeConstructorId as TCI;
     if is_map {
-        match ret { Ty::Applied(TCI::Map, kv) if kv.len() == 2 => Some(Ty::Tuple(vec![kv[0].clone(), kv[1].clone()])), _ => None }
+        match ret { Ty::Applied(TCI::Map, kv) if kv.len() == 2 => Some(Ty::Tuple(vec![kv[0].clone(), kv[1].clone()].into())), _ => None }
     } else if is_set {
         match ret { Ty::Applied(TCI::Set, e) if e.len() == 1 => Some(e[0].clone()), _ => None }
     } else {
@@ -457,7 +457,7 @@ fn resolve_map_access_ty(object: &IrExpr, vt: &VarTable) -> Option<Ty> {
         args.get(1).cloned()
             .filter(|t| !t.has_unresolved_deep())
             .map(|v| Ty::Applied(
-                almide_lang::types::constructor::TypeConstructorId::Option, vec![v],
+                almide_lang::types::constructor::TypeConstructorId::Option, vec![v].into(),
             ))
     } else { None }
 }
@@ -540,7 +540,7 @@ fn resolve_node_ty_container(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable
             // List[T] where T = first element's type
             elements.first()
                 .and_then(|e| if_concrete(&e.ty))
-                .map(|t| Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![t]))
+                .map(|t| Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, vec![t].into()))
         }
         IrExprKind::Tuple { elements } => {
             let elem_tys: Vec<Ty> = elements.iter().map(|e| e.ty.clone()).collect();
@@ -551,7 +551,7 @@ fn resolve_node_ty_container(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable
         // checker left an `Option[Unknown]` placeholder (typical for
         // payloads built from pattern-bound names).
         IrExprKind::OptionSome { expr } => if_concrete(&expr.ty)
-            .map(|t| Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, vec![t])),
+            .map(|t| Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Option, vec![t].into())),
         // Clone preserves the inner type
         IrExprKind::Clone { expr } => if_concrete(&expr.ty),
         // Layout-transparent codegen wrappers: the node's value type is the
@@ -569,11 +569,11 @@ fn resolve_node_ty_container(expr: &IrExpr, vt: &VarTable, symbols: &SymbolTable
         => if_concrete(&expr.ty),
         // Range produces List[Int]
         IrExprKind::Range { .. } => Some(Ty::Applied(
-            almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Int],
+            almide_lang::types::constructor::TypeConstructorId::List, vec![Ty::Int].into(),
         )),
         // ResultOk wraps in Result[T, E]
         IrExprKind::ResultOk { expr } => if_concrete(&expr.ty)
-            .map(|t| Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, vec![t, Ty::String])),
+            .map(|t| Ty::Applied(almide_lang::types::constructor::TypeConstructorId::Result, vec![t, Ty::String].into())),
         IrExprKind::Call { target, args, .. } => resolve_call_ret_ty(target, args, vt, symbols),
         IrExprKind::RuntimeCall { symbol, args } => {
             // Post-IntrinsicLowering, the `Call { target: Module }` node

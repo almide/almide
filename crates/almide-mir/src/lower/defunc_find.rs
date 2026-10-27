@@ -21,7 +21,7 @@ fn defunc_find_elem_ty(xs: &IrExpr, params: &[(VarId, Ty)], result_ty: &Ty) -> O
     let two_level = matches!(&elem_ty, Ty::Matrix | Ty::Applied(TypeConstructorId::Matrix, _))
         || crate::lower::is_list_list_str_ty(&Ty::Applied(
             TypeConstructorId::List,
-            vec![elem_ty.clone()],
+            vec![elem_ty.clone()].into(),
         ));
     (!two_level).then_some(elem_ty)
 }

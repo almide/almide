@@ -224,7 +224,7 @@ impl Rewriter<'_> {
         let Ty::Applied(TypeConstructorId::Map, kv) = &iterable.ty else { return };
         let [kt, vt] = kv.as_slice() else { return };
         let (kt, vt) = (kt.clone(), vt.clone());
-        let pair_ty = Ty::Tuple(vec![kt.clone(), vt.clone()]);
+        let pair_ty = Ty::Tuple(vec![kt.clone(), vt.clone()].into());
         let span = iterable.span;
         let k = self.vars.alloc(sym("__entry_key"), kt.clone(), Mutability::Let, span);
         let v = self.vars.alloc(sym("__entry_value"), vt.clone(), Mutability::Let, span);

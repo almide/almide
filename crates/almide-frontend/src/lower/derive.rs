@@ -21,7 +21,7 @@ pub(super) fn generate_auto_derives(ctx: &mut LowerCtx, type_decls: &[IrTypeDecl
             Some(d) => d,
             None => continue,
         };
-        let type_ty = Ty::Named(td.name, vec![]);
+        let type_ty = Ty::Named(td.name, Default::default());
         // The entry program's shadow of a stdlib-owned name is declared
         // `self.X` (#1828), but its convention fns are keyed BARE (`X.eq`)
         // like every other root declaration's — that is the key

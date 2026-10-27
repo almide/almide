@@ -188,7 +188,7 @@ impl Checker {
                 // occurrence (static-dispatch receiver `Type.method`, enum
                 // case access `Color.Red` — the Member path infers the object
                 // before its own resolution).
-                else if self.env.types.contains_key(&sym(name)) { Ty::Named(sym(name), vec![]) }
+                else if self.env.types.contains_key(&sym(name)) { Ty::Named(sym(name), Default::default()) }
                 else {
                     // A capitalized name that is no ctor, no const param, no
                     // top-let and no declared type resolves to NOTHING.
@@ -213,7 +213,7 @@ impl Checker {
                 for f in fields.iter_mut() { self.infer_expr(&mut f.value); }
                 if let Some(n) = name {
                     let n = *n;
-                    self.reject_foreign_opaque_record(&Ty::Named(n, vec![]), "build a literal of");
+                    self.reject_foreign_opaque_record(&Ty::Named(n, Default::default()), "build a literal of");
                     self.infer_expr_record_named(&n, fields)
                 } else {
                     let field_tys: Vec<(Sym, Ty)> = fields.iter().map(|f| {

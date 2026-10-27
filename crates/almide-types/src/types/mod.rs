@@ -6,6 +6,9 @@ mod heap;
 mod unify;
 pub mod constructor;
 pub mod extern_abi;
+mod ty_vec;
+
+pub use ty_vec::TyVec;
 
 pub use heap::is_heap_ty;
 pub use unify::{unify, substitute, contains_typevar};
@@ -78,7 +81,7 @@ pub enum Ty {
     RawPtr,
     /// Parameterized type constructor: List[T], Option[T], Result[T,E], Map[K,V], Set[T], etc.
     /// Phase 4 of HKT Foundation — unifies all container types.
-    Applied(constructor::TypeConstructorId, Vec<Ty>),
+    Applied(constructor::TypeConstructorId, TyVec),
     Record { fields: Vec<(Sym, Ty)> },
     OpenRecord { fields: Vec<(Sym, Ty)> },
     Variant { name: Sym, cases: Vec<VariantCase> },
@@ -91,10 +94,10 @@ pub enum Ty {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         is_effect: bool,
     },
-    Tuple(Vec<Ty>),
-    Named(Sym, Vec<Ty>),
+    Tuple(TyVec),
+    Named(Sym, TyVec),
     /// Inline union type (e.g., Int | String). Members are sorted and deduplicated.
-    Union(Vec<Ty>),
+    Union(TyVec),
     /// Type variable for user-defined generics (e.g., T, U, A, B)
     TypeVar(Sym),
     /// Bottom type — returned by functions that never return (process.exit, panic).
@@ -212,7 +215,10 @@ impl Ty {
             }
             let mut each = |t: &Ty| if *n <= cap { go(t, cap, n) };
             match ty {
-                Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) | Ty::Named(_, args) => args.iter().for_each(&mut each),
+                // A shared list's count is cached (ADR-0030 D5): O(1).
+                Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) | Ty::Named(_, args) => {
+                    *n = n.saturating_add(args.subtree_size());
+                }
                 Ty::Fn { params, ret, .. } => {
                     params.iter().for_each(&mut each);
                     each(ret);
@@ -234,6 +240,53 @@ impl Ty {
         let mut n = 0;
         go(self, cap, &mut n);
         n
+    }
+
+    /// The node count of this type, saturating. A shared element list
+    /// ([`TyVec`]) answers from its cache, so a type built by doubling costs
+    /// O(depth), not O(2^depth).
+    pub fn tree_size(&self) -> u64 {
+        let sum = |ts: &[Ty]| ts.iter().fold(0u64, |a, t| a.saturating_add(t.tree_size()));
+        1u64.saturating_add(match self {
+            Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) | Ty::Named(_, args) => args.subtree_size(),
+            Ty::Fn { params, ret, .. } => sum(params).saturating_add(ret.tree_size()),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => {
+                fields.iter().fold(0u64, |a, (_, t)| a.saturating_add(t.tree_size()))
+            }
+            Ty::Variant { cases, .. } => cases.iter().fold(0u64, |a, c| a.saturating_add(match &c.payload {
+                VariantPayload::Unit => 0,
+                VariantPayload::Tuple(ts) => sum(ts),
+                VariantPayload::Record(fs) => fs.iter().fold(0u64, |a, (_, t)| a.saturating_add(t.tree_size())),
+            })),
+            Ty::ConstParam { ty, .. } | Ty::ConstValue { ty, .. } => ty.tree_size(),
+            _ => 0,
+        })
+    }
+
+    /// Does an inference variable (`?N`) occur in this type? A shared element
+    /// list answers from its cache.
+    pub fn has_infer_var(&self) -> bool {
+        match self {
+            Ty::TypeVar(n) => n.as_str().starts_with('?'),
+            Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) | Ty::Named(_, args) => args.has_infer_var(),
+            Ty::Fn { params, ret, .. } => params.iter().any(Ty::has_infer_var) || ret.has_infer_var(),
+            Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().any(|(_, t)| t.has_infer_var()),
+            Ty::Variant { cases, .. } => cases.iter().any(|c| match &c.payload {
+                VariantPayload::Unit => false,
+                VariantPayload::Tuple(ts) => ts.iter().any(Ty::has_infer_var),
+                VariantPayload::Record(fs) => fs.iter().any(|(_, t)| t.has_infer_var()),
+            }),
+            Ty::ConstParam { ty, .. } | Ty::ConstValue { ty, .. } => ty.has_infer_var(),
+            _ => false,
+        }
+    }
+
+    /// The element list of a composite type, when it has one.
+    pub fn shared_args(&self) -> Option<&TyVec> {
+        match self {
+            Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) | Ty::Named(_, args) => Some(args),
+            _ => None,
+        }
     }
 
     pub fn display(&self) -> String {
@@ -734,23 +787,23 @@ impl Ty {
 
     /// Construct List[T]
     #[inline]
-    pub fn list(inner: Ty) -> Ty { Ty::Applied(TypeConstructorId::List, vec![inner]) }
+    pub fn list(inner: Ty) -> Ty { Ty::Applied(TypeConstructorId::List, vec![inner].into()) }
 
     /// Construct Option[T]
     #[inline]
-    pub fn option(inner: Ty) -> Ty { Ty::Applied(TypeConstructorId::Option, vec![inner]) }
+    pub fn option(inner: Ty) -> Ty { Ty::Applied(TypeConstructorId::Option, vec![inner].into()) }
 
     /// Construct Result[T, E]
     #[inline]
-    pub fn result(ok: Ty, err: Ty) -> Ty { Ty::Applied(TypeConstructorId::Result, vec![ok, err]) }
+    pub fn result(ok: Ty, err: Ty) -> Ty { Ty::Applied(TypeConstructorId::Result, vec![ok, err].into()) }
 
     /// Construct Map[K, V]
     #[inline]
-    pub fn map_of(key: Ty, val: Ty) -> Ty { Ty::Applied(TypeConstructorId::Map, vec![key, val]) }
+    pub fn map_of(key: Ty, val: Ty) -> Ty { Ty::Applied(TypeConstructorId::Map, vec![key, val].into()) }
 
     /// Construct Set[T]
     #[inline]
-    pub fn set_of(elem: Ty) -> Ty { Ty::Applied(TypeConstructorId::Set, vec![elem]) }
+    pub fn set_of(elem: Ty) -> Ty { Ty::Applied(TypeConstructorId::Set, vec![elem].into()) }
 
     // ── Accessors (Phase 4: uniform access to container type args) ──
 

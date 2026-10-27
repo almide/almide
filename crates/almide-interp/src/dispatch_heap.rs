@@ -901,33 +901,33 @@ mod ty_short_tests {
     #[test]
     fn every_applied_type_renders_as_ctor_brackets() {
         for (ty, want) in [
-            (Ty::Applied(C::List, vec![Ty::Int]), "List[Int]"),
-            (Ty::Applied(C::Set, vec![Ty::String]), "Set[String]"),
+            (Ty::Applied(C::List, vec![Ty::Int].into()), "List[Int]"),
+            (Ty::Applied(C::Set, vec![Ty::String].into()), "Set[String]"),
             (
-                Ty::Applied(C::Map, vec![Ty::String, Ty::Int]),
+                Ty::Applied(C::Map, vec![Ty::String, Ty::Int].into()),
                 "Map[String, Int]",
             ),
             (
-                Ty::Applied(C::Result, vec![Ty::Int, Ty::String]),
+                Ty::Applied(C::Result, vec![Ty::Int, Ty::String].into()),
                 "Result[Int, String]",
             ),
             // Nesting goes through the same path at every level.
             (
-                Ty::Applied(C::List, vec![Ty::Applied(C::Set, vec![Ty::String])]),
+                Ty::Applied(C::List, vec![Ty::Applied(C::Set, vec![Ty::String].into())].into()),
                 "List[Set[String]]",
             ),
             // A user type keeps its SOURCE spelling, not `UserDefined("Foo")`.
             (
-                Ty::Applied(C::UserDefined("Foo".into()), vec![Ty::Int]),
+                Ty::Applied(C::UserDefined("Foo".into()), vec![Ty::Int].into()),
                 "Foo[Int]",
             ),
             // The shapes a fallback tends to spell its own way: three
             // arguments, and none at all.
             (
-                Ty::Applied(C::UserDefined("Trio".into()), vec![Ty::Int, Ty::Bool, Ty::Float]),
+                Ty::Applied(C::UserDefined("Trio".into()), vec![Ty::Int, Ty::Bool, Ty::Float].into()),
                 "Trio[Int, Bool, Float]",
             ),
-            (Ty::Applied(C::UserDefined("Nil".into()), vec![]), "Nil"),
+            (Ty::Applied(C::UserDefined("Nil".into()), Default::default()), "Nil"),
         ] {
             assert_eq!(ty_short(&ty), want, "rendering drifted for {ty:?}");
         }
@@ -938,7 +938,7 @@ mod ty_short_tests {
     /// without this failing and someone deciding it on purpose.
     #[test]
     fn option_is_the_only_shorthand() {
-        assert_eq!(ty_short(&Ty::Applied(C::Option, vec![Ty::Int])), "Int?");
+        assert_eq!(ty_short(&Ty::Applied(C::Option, vec![Ty::Int].into())), "Int?");
         let shorthand: Vec<&str> = [
             C::List,
             C::Set,
@@ -954,7 +954,7 @@ mod ty_short_tests {
         ]
         .iter()
         .filter(|c| {
-            let rendered = ty_short(&Ty::Applied((*c).clone(), vec![Ty::Int]));
+            let rendered = ty_short(&Ty::Applied((*c).clone(), vec![Ty::Int].into()));
             !rendered.ends_with("[Int]")
         })
         .map(|_| "deviating constructor")
@@ -972,9 +972,9 @@ mod ty_short_tests {
     #[test]
     fn an_applied_type_is_never_rendered_as_the_bare_word_applied() {
         for ty in [
-            Ty::Applied(C::Result, vec![Ty::Int, Ty::String]),
-            Ty::Applied(C::UserDefined("Payload".into()), vec![Ty::Bytes]),
-            Ty::Applied(C::Matrix, vec![Ty::Float]),
+            Ty::Applied(C::Result, vec![Ty::Int, Ty::String].into()),
+            Ty::Applied(C::UserDefined("Payload".into()), vec![Ty::Bytes].into()),
+            Ty::Applied(C::Matrix, vec![Ty::Float].into()),
         ] {
             let rendered = ty_short(&ty);
             assert_ne!(rendered, "Applied", "{ty:?} lost its constructor");

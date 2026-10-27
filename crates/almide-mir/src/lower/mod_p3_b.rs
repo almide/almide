@@ -248,7 +248,7 @@ impl LowerCtx {
         }
         let list_ty = Ty::Applied(
             almide_lang::types::constructor::TypeConstructorId::List,
-            vec![value.ty.clone()],
+            vec![value.ty.clone()].into(),
         );
         let xs_expr = IrExpr {
             kind: IrExprKind::Var { id: target },

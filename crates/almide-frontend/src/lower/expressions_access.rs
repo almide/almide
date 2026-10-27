@@ -230,7 +230,7 @@ fn lower_expr_for_in(ctx: &mut LowerCtx, expr: &ast::Expr, ty: Ty, span: Option<
             ctx.push_scope();
             let elem_ty = match &ir_iter.ty {
                 Ty::Applied(TypeConstructorId::List, args) if args.len() == 1 => args[0].clone(),
-                Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::Tuple(vec![args[0].clone(), args[1].clone()]),
+                Ty::Applied(TypeConstructorId::Map, args) if args.len() == 2 => Ty::Tuple(vec![args[0].clone(), args[1].clone()].into()),
                 _ => Ty::Unknown,
             };
             // For a tuple-destructure loop (`for (i, x) in …`) the loop var is a

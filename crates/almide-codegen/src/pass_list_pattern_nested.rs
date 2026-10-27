@@ -166,7 +166,7 @@ fn list_ty_from_binders(elements: &[IrPattern], rest: Option<&IrPattern>) -> Ty 
     elements.iter().find_map(|e| match e {
         IrPattern::Bind { ty, .. } | IrPattern::As { ty, .. } => Some(ty.clone()),
         _ => None,
-    }).map_or(Ty::Unknown, |t| Ty::Applied(TypeConstructorId::List, vec![t]))
+    }).map_or(Ty::Unknown, |t| Ty::Applied(TypeConstructorId::List, vec![t].into()))
 }
 
 /// Lists pulled out of one pattern: the fresh binders' reads and the list

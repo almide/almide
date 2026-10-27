@@ -264,7 +264,7 @@ impl Checker {
         // the binding together, so the two cannot drift apart.
         if let [(type_name, field_ty)] = candidates.as_slice() {
             let (type_name, field_ty) = (*type_name, field_ty.clone());
-            let named = Ty::Named(type_name, vec![]);
+            let named = Ty::Named(type_name, Default::default());
             self.unify_infer(ty, &named);
             field_ty
         } else if !candidates.is_empty() && candidates.iter().all(|(_, t)| *t == candidates[0].1) {
