@@ -318,7 +318,6 @@
 # (2026-10-25, #4182) 14 test fns the integration batch added wall on the MIR rung
 # (regex captures, http router guards, bigint, radix parse, a global Bytes callee).
 # Listed so the batch could land; #4189 owns burning them back down to EMPTY.
-spec/lang/global_bytes_callee_test.almd :: cursor  # #4189
 spec/stdlib/bigint_operators_test.almd :: b  # #4189
 spec/stdlib/bigint_test.almd :: b  # #4189
 spec/stdlib/http_router_test.almd :: __test_almd_0000_a request built in code answers every reader  # #4189
