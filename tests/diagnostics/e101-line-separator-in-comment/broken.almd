@@ -1,0 +1,8 @@
+// E101 (#4266): U+2028 LINE SEPARATOR inside a line comment. The lexer keeps
+// the rest of the line in the comment; an editor or web view that breaks on
+// U+2028 shows it as code on the next line.
+effect fn main() -> Unit = {
+  let admin = false
+  // admins only println("granted")
+  println(if admin then "granted" else "denied")
+}
