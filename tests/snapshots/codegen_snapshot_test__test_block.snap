@@ -9,8 +9,22 @@ pub fn add(a: i64, b: i64) -> i64 {
 mod tests {
     use super::*;
 
+    #[allow(dead_code)]
+    struct AlmdTestDone(&'static str);
+    impl Drop for AlmdTestDone {
+        fn drop(&mut self) {
+            if std::thread::panicking() { return; }
+            let Some(path) = std::env::var_os("ALMIDE_TEST_LEDGER") else { return };
+            use std::io::Write as _;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                let _ = writeln!(f, "{}", self.0);
+            }
+        }
+    }
+
     #[test]
     fn __test_almd_0000_addition() {
+        let _almd_done = AlmdTestDone("__test_almd_0000_addition");
         assert_eq!(add(1i64, 2i64), 3i64, "{}", "at line 5")
     }
 }
