@@ -1,0 +1,80 @@
+// @contract: C-132
+// #4274: a PURE fn declared `-> T!` with a `mut` parameter raises through its
+// Result exactly as an effect fn does. A `x!` inside it propagates the err to
+// the caller, and a write made before the err is visible there (#2917). The
+// wasm leg had wrapped such a fn's Result in the `(Result, Buf)` tuple, so a
+// `!` in its body had no Result to return through and the module aborted at
+// the first err (`unreachable`) where native propagated it — arlk's
+// rejection-path tests. The last part pins the native leg of the same report:
+// a `list.first` head read the clone pass borrows binds `&String`, and that
+// binder as a `map.get` key rendered `&&String` (rustc E0277).
+type Hyp = { name: String, tc: String }
+
+fn fails(n: Int) -> Int! = if n > 0 then err("bad ${n}") else ok(n)
+
+// a propagated `x!` after a write (List buffer)
+fn push_then_check(mut xs: List[Int], n: Int) -> Int! = {
+  list.push(xs, n)
+  let r = fails(n)!
+  ok(r + list.len(xs))
+}
+
+// a guard exit after a write (String buffer)
+fn check(t: String, expected: String, mut seen: String) -> Unit! = {
+  seen = seen + "<${t}>"
+  guard t == expected else err("type mismatch: ${t} vs ${expected}")
+  ok(())
+}
+
+// a pure caller with its own `mut` param, forwarding through `!`
+fn typed_body(mut seen: String, body: String, ty: String) -> String! = {
+  check(ty, ty, seen)!
+  check(body, ty, seen)!
+  ok(body)
+}
+
+fn show(r: Result[String, String]) -> String = match r {
+  ok(v) => "accepted ${v}",
+  err(e) => "rejected: ${e}",
+}
+
+fn empty_hyp() -> Hyp = { name: "", tc: "" }
+
+fn pick(hyps: Map[String, Hyp], mandatory: List[String], dummy_hyps: List[String]) -> Map[String, String] = {
+  var dummies: Map[String, String] = [:]
+  for h in dummy_hyps {
+    let hy = map.get(hyps, h) ?? empty_hyp()
+    let same = mandatory |> list.filter((m) => (map.get(hyps, m) ?? empty_hyp()).tc == hy.tc)
+    match list.first(same) {
+      some(m) => { dummies = map.set(dummies, h, (map.get(hyps, m) ?? empty_hyp()).name) },
+      none => { dummies = map.set(dummies, h, "some_" + hy.tc) },
+    }
+  }
+  dummies
+}
+
+effect fn main() -> Unit = {
+  var xs = [1]
+  let a = match push_then_check(xs, 0) {
+    ok(v) => "ok ${v}",
+    err(e) => "err ${e}",
+  }
+  println("${a} xs=${xs}")
+  let b = match push_then_check(xs, 2) {
+    ok(v) => "ok ${v}",
+    err(e) => "err ${e}",
+  }
+  println("${b} xs=${xs}")
+  let c = push_then_check(xs, 3) ?? -1
+  println("?? ${c} xs=${xs}")
+  var seen = ""
+  println(show(typed_body(seen, "x", "y")))
+  println("seen=${seen}")
+  println(show(typed_body(seen, "y", "y")))
+  println("seen=${seen}")
+  var hyps: Map[String, Hyp] = [:]
+  hyps = map.set(hyps, "a", { name: "na", tc: "t" })
+  hyps = map.set(hyps, "b", { name: "nb", tc: "t" })
+  let d = pick(hyps, ["a"], ["b", "c"])
+  println("${map.get(d, "b") ?? "-"} ${map.get(d, "c") ?? "-"}")
+}

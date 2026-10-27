@@ -63,7 +63,7 @@ fn string_channel(t: &Ty) -> bool {
 }
 
 /// Can every raising exit of `body` be paired with the buffer?
-fn pairable(body: &IrExpr) -> bool {
+pub(crate) fn pairable(body: &IrExpr) -> bool {
     struct Scan(bool);
     impl IrVisitor for Scan {
         fn visit_expr(&mut self, e: &IrExpr) {
@@ -121,8 +121,9 @@ fn through_empty_blocks_mut(e: &mut IrExpr) -> &mut IrExpr {
     e
 }
 
-/// Every `MutFns` key of a can-err effect move-mode fn whose raises can all
-/// be paired: effect, not never-err, [`pairable`].
+/// Every `MutFns` key of a can-err move-mode fn whose raises can all be
+/// paired: an [`err_channel`](crate::mut_param::err_channel) fn, not
+/// never-err, [`pairable`].
 pub(crate) fn carry_keys(
     program: &IrProgram,
     is_mut_key: impl Fn(&str) -> bool,
@@ -131,7 +132,7 @@ pub(crate) fn carry_keys(
     let mut keys = HashSet::new();
     let mut admit = |module: Option<&str>, f: &IrFunction| {
         let scoped = crate::mut_param::scope_key(module.unwrap_or(""), f.name.as_str());
-        if !f.is_effect || !is_mut_key(&scoped) || never_err.contains(&scoped) || !pairable(&f.body) {
+        if !crate::mut_param::err_channel(f) || !is_mut_key(&scoped) || never_err.contains(&scoped) || !pairable(&f.body) {
             return;
         }
         let spellings = crate::mut_param_unpropagated::fn_spellings(module, f.name.as_str());
