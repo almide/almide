@@ -227,6 +227,15 @@ fn member_reads(fields: &[(almide_base::intern::Sym, IrExpr)], b: VarId, f: almi
     impl IrVisitor for Find {
         fn visit_expr(&mut self, e: &IrExpr) {
             let owning = self.owning.contains(&key(e));
+            // #4261: an append in an owning position consumes its moved
+            // left operand (concat_dying.rs `try_concat_taken`), so the
+            // `b.f` of `b.f + s` / `b.f + [x]` is an owning read too.
+            if owning
+                && let Some(left) = crate::concat_dying::taken_append_left(e, self.b)
+                && matches!(&left.kind, IrExprKind::Member { field, .. } if *field == self.f)
+            {
+                self.owning.insert(key(left));
+            }
             match &e.kind {
                 IrExprKind::Member { object, field }
                     if *field == self.f && matches!(&object.kind, IrExprKind::Var { id } if *id == self.b) =>
