@@ -20,7 +20,10 @@ fn value_part(markup: String) -> String = {
 
 fn attr_value_contained(markup: String) -> Bool = {
   let v = value_part(markup)
-  string.ends_with(markup, "\"") and not string.contains(v, "\"") and not string.contains(v, "<") and not string.contains(v, ">")
+  string.ends_with(markup, "\"") and not string.contains(v, "\"") and not string.contains(v, "<") and not string.contains(
+    v,
+    ">",
+  )
 }
 
 test "attr quotes and escapes, so a value cannot add an attribute" {
@@ -34,12 +37,21 @@ test "attr quotes and escapes, so a value cannot add an attribute" {
 }
 
 test "attr and url_attr refuse a name whose value is a URL, script or style" {
-  testing.assert_aborts("html.attr: `href` takes a URL; use html.url_attr", () => html.attr("href", "x"))
-  testing.assert_aborts("html.attr: `onclick` runs script or styles", () => html.attr("onclick", "x"))
+  testing.assert_aborts(
+    "html.attr: `href` takes a URL; use html.url_attr",
+    () => html.attr("href", "x"),
+  )
+  testing.assert_aborts(
+    "html.attr: `onclick` runs script or styles",
+    () => html.attr("onclick", "x"),
+  )
   testing.assert_aborts("html.attr: `style` runs script or styles", () => html.attr("style", "x"))
   testing.assert_aborts("is not an attribute name", () => html.attr("a b", "x"))
   testing.assert_aborts("is not an attribute name", () => html.attr("x=\"y\"", "x"))
-  testing.assert_aborts("html.url_attr: `onload` runs script or styles", () => html.url_attr("onload", "https://e.com"))
+  testing.assert_aborts(
+    "html.url_attr: `onload` runs script or styles",
+    () => html.url_attr("onload", "https://e.com"),
+  )
 }
 
 test "control: escape alone writes no quotes, so an unquoted attribute gains a handler" {
@@ -49,7 +61,10 @@ test "control: escape alone writes no quotes, so an unquoted attribute gains a h
 }
 
 test "url_attr keeps http, https, mailto and relative URLs" {
-  assert_eq(s(html.url_attr("href", "https://example.com/a?b=1&c=2")), "href=\"https://example.com/a?b=1&amp;c=2\"")
+  assert_eq(
+    s(html.url_attr("href", "https://example.com/a?b=1&c=2")),
+    "href=\"https://example.com/a?b=1&amp;c=2\"",
+  )
   assert_eq(s(html.url_attr("href", "HTTP://example.com")), "href=\"HTTP://example.com\"")
   assert_eq(s(html.url_attr("href", "mailto:a@example.com")), "href=\"mailto:a@example.com\"")
   assert_eq(s(html.url_attr("src", "/img/a.png")), "src=\"/img/a.png\"")
@@ -82,7 +97,10 @@ test "script_json cannot close the script element or break a JS string" {
   assert(not string.contains(out, "<"))
   assert(not string.contains(out, "\u{2028}"))
   assert(not string.contains(out, "\u{2029}"))
-  assert_eq(out, "{\"x\":\"\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e\",\"ls\":\"a\\u2028b\\u2029c\\u0026d\"}")
+  assert_eq(
+    out,
+    "{\"x\":\"\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e\",\"ls\":\"a\\u2028b\\u2029c\\u0026d\"}",
+  )
   // The escapes are JSON's own: the text parses back to the same value.
   assert_eq(json.parse(out) ?? value.null(), v)
 }
