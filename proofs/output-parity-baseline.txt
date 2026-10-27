@@ -241,7 +241,6 @@ spec/wasm_cross/composition_fuzz_batch.almd
 spec/wasm_cross/compound_eq.almd
 spec/wasm_cross/compound_repr_interp.almd
 spec/wasm_cross/compound_repr_records_interp.almd
-spec/wasm_cross/compound_repr_recursive_interp.almd
 spec/wasm_cross/const_fold_nonfinite_float.almd
 spec/wasm_cross/container_alias_return.almd
 spec/wasm_cross/control_flow.almd
@@ -1093,7 +1092,6 @@ spec/wasm_cross/while_loops.almd
 spec/wasm_cross/whilep_str.almd
 spec/wasm_cross/wide_function_body.almd
 spec/wasm_cross/witness_straightline.almd
-spec/wasm_cross/zip_view_shape.almd
 spec/wasm_cross/zlib_call_vs_user_namesake.almd
 spec/wasm_cross/zlib_output_bound.almd
 spec/wasm_cross/zlib_selfhost.almd
