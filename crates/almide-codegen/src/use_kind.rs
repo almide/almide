@@ -548,6 +548,8 @@ impl<'a> Walk<'a> {
             IrExprKind::Fan { exprs } => self.fan(e.span, exprs),
             IrExprKind::RustMacro { args, .. } => self.each(args, Site::Operand),
             IrExprKind::Record { fields, .. } => self.fields(fields, Site::Construct(Ctor::Record)),
+            // `almide_box_take(x)` moves x out of its box into this position (BoxTakeLowering).
+            IrExprKind::InlineRust { template, args } if template.starts_with("almide_box_take(") => self.fields(args, site),
             IrExprKind::InlineRust { args, .. } => self.fields(args, Site::Operand),
             // FIELDS BEFORE THE BASE — the order the emitted Rust runs them
             // (`T { f: e, ..base }` evaluates each written field, then the
