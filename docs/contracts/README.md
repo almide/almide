@@ -97,7 +97,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-059 | Compilation does not overflow the native stack on wide or deep input, identically on every host and build profile | 0.25.0 | active | fixture | 1 |
 | C-060 | A Value reprs as its JSON text byte-identically on native and WASM, bare and as a Repr-record field | 0.26.7 | active | fixture | 2 |
 | C-061 | A mut Map parameter mutated in place builds on both targets and the mutation persists, byte-identical | 0.26.9 | active | fixture | 1 |
-| C-062 | The RawPtr / linear-memory bridge moves bytes byte-identically on both targets | 0.26.15 | active | fixture | 1 |
+| C-062 | A Region moves bytes byte-identically on both targets, and an access outside it is an err | 0.26.15 | active | fixture | 1 |
 | C-063 | Parsing a heterogeneous-nested glTF/JSON document and walking its arrays by element is byte-identical on both targets | 0.26.19 | active | fixture | 1 |
 | C-064 | The effect-fn Result auto-unwrap rule is identical across binding positions and type-directed, byte-identical on both targets | 0.26.20 | active | fixture | 3 |
 | C-065 | The string position API is codepoint-indexed end-to-end on both targets | 0.26.20 | active | fixture | 3 |
@@ -372,7 +372,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-334 | A closure call takes +1 on a borrowed heap argument: the RC-3 callee-owned convention holds through call_indirect | 0.62.0 | active | fixture | 4 |
 | C-335 | path.extension treats a leading dot as a hidden-file marker, not an extension, on both targets | 0.62.0 | active | fixture | 2 |
 | C-336 | Each test starts from re-initialized mutable module globals, on both targets | 0.57.1 | active | fixture | 0 |
-| C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 3 |
+| C-337 | The bytes search, edit and predicate family answers identically on every leg | 0.62.0 | active | fixture | 2 |
 | C-338 | The int bit family, bits_to_f32 and the Int -> Float32 convert agree on every leg | 0.62.0 | active | fixture | 2 |
 | C-339 | testing.assert_snapshot mismatches abort in the T18 form on both targets, inside test blocks too | 0.62.0 | active | fixture | 1 |
 | C-340 | The eager *_or family — option/result.unwrap_or, list/map/bytes.get_or — evaluates its default before the selection on both targets | 0.62.0 | active | fixture | 2 |
@@ -411,7 +411,7 @@ Evidence classes (weakest → strongest): `doc-only` < `by-construction` <
 | C-373 | var destructures with the let patterns and every bound name is mutable, identically on both targets | 0.67.0 | active | fixture | 1 |
 | C-374 | process on the embedded wasm host answers what native answers; a stand-alone artifact that starts a child carries the private almide:process/spawn import and is refused at load where it is not defined | 0.67.0 | active | fixture | 0 |
 | C-375 | a serve-shaped program built for stock wasm is a wasi:http/handler@0.3.0 export that wasmtime serve runs with no flags and that answers what native answers | 0.67.0 | active | fixture | 0 |
-| C-376 | A raw address taken from a Bytes block stays valid until the call it is handed to returns | 0.67.0 | active | fixture | 1 |
+| C-376 | A Region holds the Bytes it views, so the block outlives every use of the view | 0.67.0 | active | fixture | 1 |
 | C-377 | net tcp: loopback, handle numbering, EOF, close, is_open and tcp_local_port agree on native, the embedded wasm lane and the stock WASI 0.3 component | 0.68.0 | active | fixture | 0 |
 | C-378 | net tcp: every failure reads as errno-free classified text from one table, identical on native, the embedded wasm lane and the stock WASI 0.3 component | 0.68.0 | active | fixture | 0 |
 | C-379 | net tcp: timeouts and tcp_available are guest-enforced on the stock WASI 0.3 component and answer what native and the embedded wasm lane answer | 0.68.0 | active | fixture | 0 |

@@ -2,7 +2,7 @@
 
 # Standard library
 
-Every public function of the 50 stdlib modules, 1667 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
+Every public function of the 50 stdlib modules, 1665 in all, with its signature and the first sentence of its doc. Each module's page has the full doc, examples and the `@since` release.
 
 A `mut` parameter is written in place: the caller passes a `var` binding and sees the change (a `let`, a non-`mut` parameter or a temporary is E032). Every other parameter is read only, and a function that changes a value without `mut` returns a new one.
 
@@ -12,14 +12,14 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 | [base64](#base64) | 4 | 0 |
 | [bigint](#bigint) | 24 | 1 |
 | [bool](#bool) | 3 | 0 |
-| [bytes](#bytes) | 210 | 1 |
+| [bytes](#bytes) | 205 | 1 |
 | [compute](#compute) | 7 | 0 |
 | [datetime](#datetime) | 23 | 0 |
 | [deque](#deque) | 60 | 1 |
 | [duration](#duration) | 7 | 0 |
 | [env](#env) | 9 | 0 |
 | [error](#error) | 3 | 0 |
-| [ffi](#ffi) | 4 | 0 |
+| [ffi](#ffi) | 7 | 0 |
 | [float](#float) | 61 | 0 |
 | [float32](#float32) | 33 | 0 |
 | [float64](#float64) | 33 | 0 |
@@ -136,20 +136,15 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 - `bytes.append_u32_be(mut b: Bytes, x: Int) -> Unit` — Appends x's low 32 bits, BE.
 - `bytes.append_u32_le(mut b: Bytes, x: Int) -> Unit` — Appends x's low 32 bits, LE.
 - `bytes.append_u8(mut b: Bytes, x: Int) -> Unit` — Appends x's low 8 bits; 256 becomes 0.
-- `bytes.as_mut_ptr(b: Bytes) -> RawPtr   (deprecated — use ffi.address)` — Mutable address of the data; null if empty.
-- `bytes.as_ptr(b: Bytes) -> RawPtr   (deprecated — use ffi.address)` — Address of the data; null if empty.
 - `bytes.clear(mut b: Bytes) -> Unit` — Truncates b to length 0 in place.
 - `bytes.compare(a: Bytes, b: Bytes) -> Int` — Lexicographic -1, 0 or 1; a prefix sorts first.
 - `bytes.concat(a: Bytes, b: Bytes) -> Bytes` — New Bytes holding a then b.
 - `bytes.contains(b: Bytes, needle: Bytes) -> Bool` — True if needle occurs in b, or needle is empty.
 - `bytes.copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit` — Copies len bytes of src into b; clamped to fit.
-- `bytes.copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int   (deprecated — use ffi.write)` — Writes up to cap bytes to ptr; count, 0 if null.
-- `bytes.data_ptr(b: Bytes) -> Int   (deprecated — use ffi.address)` — Address of the data as an Int; target-specific.
 - `bytes.ends_with(b: Bytes, suffix: Bytes) -> Bool` — True if b ends with suffix, or suffix is empty.
 - `bytes.is_eof(b: Bytes, pos: Int) -> Bool` — True if pos >= len or pos is negative.
 - `bytes.fill(mut b: Bytes, x: Int) -> Unit` — Sets every byte to x's low 8 bits in place.
 - `bytes.from_list(xs: List[Int]) -> Bytes` — xs as bytes, low 8 bits each; -1 becomes 255.
-- `bytes.from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes   (deprecated — use ffi.read)` — Copy of len bytes at ptr; empty if null or len <= 0.
 - `bytes.from_string(s: String) -> Bytes` — UTF-8 encoding of s.
 - `bytes.get(b: Bytes, i: Int) -> Option[Int]` — Byte at index i, or none when out of range.
 - `bytes.get_or(b: Bytes, i: Int, default: Int) -> Int` — Byte at index i, or default when out of range.
@@ -475,10 +470,13 @@ A `mut` parameter is written in place: the caller passes a `var` binding and see
 
 [ffi.md](ffi.md)
 
-- `ffi.address(b: Bytes) -> RawPtr` — Address of b's first byte; null if b is empty.
-- `ffi.to_int(p: RawPtr) -> Int` — The address as an Int; null is 0.
-- `effect ffi.read(ptr: RawPtr, len: Int) -> Bytes` — Copy of len bytes at ptr; empty if null or len <= 0.
-- `effect ffi.write(ptr: RawPtr, b: Bytes, cap: Int) -> Int` — Writes up to cap bytes of b to ptr; the count, 0 if null.
+- `ffi.region(b: Bytes) -> Region` — A read-only view of b; b lives as long as the view.
+- `effect ffi.alloc(n: Int) -> Region` — A fresh writable region of n zero bytes; err if n is negative.
+- `ffi.len(r: Region) -> Int` — The region's length in bytes.
+- `ffi.is_writable(r: Region) -> Bool` — True if write may change the region (ffi.alloc and writable foreign regions).
+- `effect ffi.read(r: Region, off: Int, n: Int) -> Bytes` — Copy of n bytes at off; err unless 0 <= off and off + n <= len(r).
+- `effect ffi.write(r: Region, off: Int, b: Bytes) -> Unit` — Writes b at off; err if the region is read-only or b does not fit.
+- `effect ffi.to_bytes(r: Region) -> Bytes` — A copy of the whole region as Bytes.
 
 ## float
 

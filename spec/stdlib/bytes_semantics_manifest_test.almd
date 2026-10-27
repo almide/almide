@@ -3,7 +3,6 @@
 // regenerates and diffs). Each case executes a manifest probe; a
 // failure here means the implementation drifted from the DECLARED
 // semantic dimension (#419 class).
-
 test "bytes.get_i16_be unit=value" {
   assert_eq(
     "${(bytes.get_i16_be(
