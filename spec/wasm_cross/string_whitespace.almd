@@ -43,7 +43,7 @@ effect fn main() -> Unit = {
   println("[" + string.trim(vt + ff + "z" + vt) + "]")
   // [z] (VT/FF are ws)
   println("[" + string.trim(zwsp + "w" + zwsp) + "]")
-  // [​w​] (ZWSP kept)
+  // [\u{200b}w\u{200b}] (ZWSP kept)
   println(int.to_string(string.len(string.trim("")) + string.len(string.trim(ideo))))
   // 0
   // is_whitespace: all codepoints White_Space; EMPTY is vacuously TRUE.
