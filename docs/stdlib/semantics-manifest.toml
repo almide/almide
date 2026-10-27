@@ -3113,74 +3113,12 @@ probe here would start a child of a file that declares no site; the
 assert_aborts fixtures exercise it on both legs.
 """
 
-[[testing.fn]]
-name = "__assert_aborts_check"
-index_unit = "value"
-setup = [
-  'testing.__assert_aborts_check("boom", ["1", "", "PANIC: boom"], 7)',
-  'testing.__assert_aborts_check("went wrong", ["1", "", "Error: x\\nPANIC: it went wrong"], 8)',
-]
-probe = "true"
-expect = "true"
-note = """
-The Int is the 1-based source LINE of the assert_aborts call, printed in the
-failure block's `at:` field and never compared. The passing calls pin the
-verdict's shape: exit status "1" plus a header line, matched from the LAST
-header; every failing shape is pinned by tests/assert_aborts_runner_test.rs
-(an in-file failing call would fail the harness itself).
-"""
-
 # index_unit vocabulary — args:
 #   element-index — the Int is a 0-based list position. For the __ scan
 #                   helpers it is the RAW argv position the scan STARTS at;
 #                   for positional_at it is a position in the FILTERED
 #                   positional list (flag arguments removed first)
 [args]
-
-[[args.fn]]
-name = "__flag_at"
-index_unit = "element-index"
-setup = [
-  'let hit = args.__flag_at(["x", "--verbose"], "--verbose", "-v", 0)',
-  'let skipped = args.__flag_at(["--verbose", "x"], "--verbose", "-v", 1)',
-]
-probe = "hit and not skipped"
-expect = "true"
-note = """
-i is the 0-based RAW-argv position the scan starts at: starting at 0 finds
-"--verbose" sitting at position 1 (hit = true), while starting at 1 can
-never see the flag at position 0 (skipped = false) — i is a start index,
-not a match position or a count.
-"""
-
-[[args.fn]]
-name = "__find_prefixed"
-index_unit = "element-index"
-setup = [
-  'let found = args.__find_prefixed(["a", "--out=x"], "--out=", 0) ?? "none"',
-  'let skipped = args.__find_prefixed(["--out=x", "b"], "--out=", 1) ?? "none"',
-]
-probe = 'found + " " + skipped'
-expect = "--out=x none"
-note = """
-The same start-index dimension as __flag_at, and the some() payload is the
-WHOLE matching element ("--out=x"), not the part after the prefix.
-"""
-
-[[args.fn]]
-name = "__positional_at"
-index_unit = "element-index"
-setup = [
-  'let kept = args.__positional_at(["--out", "r.txt", "in.txt"], ["out"], 0, [])',
-  'let late = args.__positional_at(["a", "b"], [], 1, [])',
-]
-probe = 'list.join(kept, ",") + " " + list.join(late, ",")'
-expect = "in.txt b"
-note = """
-i is the 0-based RAW-argv position the scan starts at, as for __flag_at:
-starting at 0 skips "--out" AND its value "r.txt" (a named option, #4144) and
-keeps "in.txt"; starting at 1 never sees "a" at position 0.
-"""
 
 [zlib]
 default_index_unit = "value"
@@ -3306,17 +3244,6 @@ agreement, never a bug.
 """
 
 [[http.fn]]
-name = "__with_headers"
-index_unit = "status-code"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed: the private leaf behind with_headers, which the
-with_headers probe above runs — the same (status, body) order, the header
-list crossing flat as [k1, v1, …] (R-http-09). The Int is the status.
-"""
-
-[[http.fn]]
 name = "set_status"
 index_unit = "status-code"
 setup = [
@@ -3358,20 +3285,6 @@ generated file off the wasm leg. Measured out-of-band on the native leg
 (2026-08-13): serve(8791, handler) binds 0.0.0.0:8791 and answers a request
 to 127.0.0.1:8791, so the Int is a TCP PORT NUMBER, not a status and not a
 backlog size or a timeout.
-"""
-
-[[http.fn]]
-name = "__call_start"
-index_unit = "millisecond"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed: the private intrinsic behind http.start, whose two
-trailing Ints are HttpLimits.total_ms and .idle_ms, both MILLISECONDS, 0 = no
-limit. A calling probe would dial the network and push this generated file off
-the wasm leg. Measured by tests/http_call_handle_test.rs against a loopback
-server (2026-09-25): total_ms 1000 ends a call at ~1000 ms and idle_ms 500 a
-silent one at ~500 ms (C-366).
 """
 
 # index_unit vocabulary — net (HOST_CAPABILITY on the wasm leg — net is an OS
@@ -3504,168 +3417,6 @@ probe = "1"
 expect = "1"
 note = """
 Declared, not probed (host-capability): `udp_recv_from(sock: UdpSocket, max: Int) -> Result[UdpPacket, String]`.
-"""
-
-[[net.fn]]
-name = "__tcp_stream_read"
-index_unit = "byte-count"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__tcp_stream_read(h: TcpStream, max: Int) -> Result[Bytes, String]`.
-"""
-
-[[net.fn]]
-name = "__os_tcp_connect"
-index_unit = "port"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_tcp_connect(host: String, port: Int) -> Result[Int, String]`.
-"""
-
-[[net.fn]]
-name = "__os_tcp_read"
-index_unit = "byte-count"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_tcp_read(stream: Int, len: Int) -> Result[Bytes, String]`.
-"""
-
-[[net.fn]]
-name = "__os_tcp_write"
-index_unit = "handle"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_tcp_write(stream: Int, data: Bytes) -> Result[Unit, String]`.
-"""
-
-[[net.fn]]
-name = "__os_tcp_close"
-index_unit = "handle"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_tcp_close(stream: Int) -> Result[Unit, String]`.
-"""
-
-[[net.fn]]
-name = "__os_tcp_is_open"
-index_unit = "handle"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_tcp_is_open(stream: Int) -> Bool`.
-"""
-
-[[net.fn]]
-name = "__os_tcp_read_timeout"
-index_unit = "millisecond"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_tcp_read_timeout(stream: Int, len: Int, timeout_ms: Int) -> Result[Bytes, String]`.
-"""
-
-[[net.fn]]
-name = "__os_tcp_set_timeout"
-index_unit = "millisecond"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_tcp_set_timeout(stream: Int, timeout_ms: Int) -> Result[Unit, String]`.
-"""
-
-[[net.fn]]
-name = "__os_tcp_available"
-index_unit = "byte-count"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_tcp_available(stream: Int) -> Result[Int, String]`.
-"""
-
-[[net.fn]]
-name = "__os_tcp_listen"
-index_unit = "port"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_tcp_listen(host: String, port: Int) -> Result[Int, String]`.
-"""
-
-[[net.fn]]
-name = "__os_tcp_local_port"
-index_unit = "port"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_tcp_local_port(listener: Int) -> Result[Int, String]`.
-"""
-
-[[net.fn]]
-name = "__os_tcp_accept"
-index_unit = "handle"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_tcp_accept(listener: Int) -> Result[Int, String]`.
-"""
-
-[[net.fn]]
-name = "__os_tcp_close_listener"
-index_unit = "handle"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_tcp_close_listener(listener: Int) -> Result[Unit, String]`.
-"""
-
-[[net.fn]]
-name = "__os_udp_bind"
-index_unit = "port"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_udp_bind(host: String, port: Int) -> Result[Int, String]`.
-"""
-
-[[net.fn]]
-name = "__os_udp_local_port"
-index_unit = "port"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_udp_local_port(sock: Int) -> Result[Int, String]`.
-"""
-
-[[net.fn]]
-name = "__os_udp_send_to"
-index_unit = "port"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_udp_send_to(sock: Int, data: Bytes, host: String, port: Int) -> Result[Unit, String]`.
-"""
-
-[[net.fn]]
-name = "__os_udp_recv_from"
-index_unit = "byte-count"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_udp_recv_from(sock: Int, max: Int) -> Result[(Bytes, String, Int), String]`.
-"""
-
-[[net.fn]]
-name = "__os_udp_close"
-index_unit = "handle"
-probe = "1"
-expect = "1"
-note = """
-Declared, not probed (host-capability): `__os_udp_close(sock: Int) -> Result[Unit, String]`.
 """
 
 [map]
