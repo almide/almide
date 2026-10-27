@@ -625,19 +625,23 @@ fn run_cargo_test_no_run_and_locate_binary(project_dir: &std::path::Path) -> Res
         return Err(wrap_codegen_leak(combined));
     }
 
-    // Parse the JSON output to find the test binary path
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
-            if json.get("reason").and_then(|r| r.as_str()) == Some("compiler-artifact") {
-                if let Some(exe) = json.get("executable").and_then(|e| e.as_str()) {
-                    return Ok(std::path::PathBuf::from(exe));
-                }
-            }
-        }
-    }
+    locate_test_binary(&String::from_utf8_lossy(&output.stdout))
+        .ok_or_else(|| "could not determine test binary path from cargo output".to_string())
+}
 
-    Err("could not determine test binary path from cargo output".to_string())
+/// The libtest harness among `cargo test --no-run --message-format=json`'s
+/// artifacts: the one built with `profile.test == true`. `cargo test` also
+/// builds the crate's plain `bin` (an executable too, whose `main` runs no
+/// test), and taking the first executable artifact handed that one back —
+/// every test file on the cargo route (a runtime crate: http, zlib, …) ran
+/// zero tests and exited 0.
+fn locate_test_binary(cargo_json: &str) -> Option<std::path::PathBuf> {
+    cargo_json
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|json| json.get("reason").and_then(|r| r.as_str()) == Some("compiler-artifact"))
+        .filter(|json| json.pointer("/profile/test").and_then(|t| t.as_bool()) == Some(true))
+        .find_map(|json| json.get("executable").and_then(|e| e.as_str()).map(std::path::PathBuf::from))
 }
 
 pub(super) fn cargo_build_test_with_native(
@@ -704,6 +708,20 @@ mod tests {
     fn ignores_3_digit_almide_code() {
         assert!(!contains_rustc_error_code("error[E001]: type mismatch"));
         assert!(!contains_rustc_error_code("error[E013]: ..."));
+    }
+
+    /// `cargo test --no-run` lists the plain bin before the test harness; the
+    /// harness (profile.test) is the binary a test run executes.
+    #[test]
+    fn the_test_binary_is_the_profile_test_artifact() {
+        let json = concat!(
+            r#"{"reason":"compiler-artifact","target":{"kind":["lib"],"name":"flate2"},"profile":{"test":false},"executable":null}"#, "\n",
+            r#"{"reason":"compiler-artifact","target":{"kind":["bin"],"name":"almide-out"},"profile":{"test":false},"executable":"/t/debug/almide-out"}"#, "\n",
+            r#"{"reason":"compiler-artifact","target":{"kind":["bin"],"name":"almide-out"},"profile":{"test":true},"executable":"/t/debug/deps/almide_out-abc"}"#, "\n",
+            r#"{"reason":"build-finished","success":true}"#, "\n",
+        );
+        assert_eq!(super::locate_test_binary(json), Some(std::path::PathBuf::from("/t/debug/deps/almide_out-abc")));
+        assert_eq!(super::locate_test_binary(r#"{"reason":"compiler-artifact","profile":{"test":false},"executable":"/t/debug/almide-out"}"#), None);
     }
 
     #[test]
