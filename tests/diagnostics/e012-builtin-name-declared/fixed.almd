@@ -6,4 +6,4 @@ fn redact(s: String) -> String = string.replace(s, "secret", "***")
 
 effect fn log_line(s: String) -> Unit = io.print(redact(s) + "\n")
 
-effect fn main() -> Unit = log_line("the secret is out")
+effect fn main() -> Unit = log_line("the secret is out")!
