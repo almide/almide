@@ -1,4 +1,3 @@
-expects_code = "E100"
-expects_error = "`bytes.from_raw_ptr` is outside the memory-safety guarantee"
-hint_substring = "memory-safety guarantee"
-check_profile = "critical"
+expects_code = "E002"
+expects_error = "undefined function 'bytes.from_raw_ptr'"
+hint_substring = "was removed at dialect epoch 15"
