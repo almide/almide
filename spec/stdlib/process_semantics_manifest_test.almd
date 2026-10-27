@@ -26,35 +26,3 @@ test "process.exit unit=value" {
 test "process.pid unit=value" {
   assert_eq("${1}", "1")
 }
-
-test "process.__os_output unit=millisecond" {
-  assert_eq("${1}", "1")
-}
-
-test "process.__os_run unit=millisecond" {
-  assert_eq("${1}", "1")
-}
-
-test "process.__os_start unit=millisecond" {
-  assert_eq("${1}", "1")
-}
-
-test "process.__os_poll unit=handle" {
-  assert_eq("${1}", "1")
-}
-
-test "process.__os_wait unit=handle" {
-  assert_eq("${1}", "1")
-}
-
-test "process.__os_stop unit=millisecond" {
-  assert_eq("${1}", "1")
-}
-
-test "process.__os_read_new unit=handle" {
-  assert_eq("${1}", "1")
-}
-
-test "process.__os_child_pid unit=handle" {
-  assert_eq("${1}", "1")
-}

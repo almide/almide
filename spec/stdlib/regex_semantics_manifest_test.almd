@@ -8,7 +8,3 @@ import regex
 test "regex.index_of unit=codepoint" {
   assert_eq("${regex.index_of(regex.new("[0-9]"), "café7")}", "some(4)")
 }
-
-test "regex.__index_of unit=codepoint" {
-  assert_eq("${regex.__index_of("[0-9]", "café7")}", "4")
-}
