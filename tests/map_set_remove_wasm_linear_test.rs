@@ -27,7 +27,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const SEMANTICS: &str = r#"fn digest(m: Map[Int, Int]) -> Int = map.fold(m, 0, (acc, k, v) => (acc * 31 + k * 7 + v) % 1000000007)
+const SEMANTICS: &str = r#"fn digest(m: Map[Int, Int]) -> Int = map.fold(m, 0, (acc, (k, v)) => (acc * 31 + k * 7 + v) % 1000000007)
 
 fn sdig(s: Set[String]) -> String = set.to_list(s) |> list.take(5) |> list.join(",")
 

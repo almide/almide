@@ -13,7 +13,7 @@ type Holder = { snap: Map[Int, Int], tag: Int }
 fn checksum(m: Map[Int, Int]) -> Int = map.fold(
   m,
   0,
-  (acc, k, v) => (acc * 31 + k * 7 + v) % 1000000007,
+  (acc, (k, v)) => (acc * 31 + k * 7 + v) % 1000000007,
 )
 
 fn render(m: Map[Int, Int]) -> String = {

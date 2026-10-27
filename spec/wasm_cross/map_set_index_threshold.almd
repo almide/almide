@@ -9,7 +9,7 @@
 fn checksum(m: Map[Int, Int]) -> Int = map.fold(
   m,
   0,
-  (acc, k, v) => (acc * 31 + k * 7 + v) % 1000000007,
+  (acc, (k, v)) => (acc * 31 + k * 7 + v) % 1000000007,
 )
 
 fn render_keys(m: Map[Int, Int]) -> String = list.join(
@@ -95,7 +95,7 @@ fn main() -> Unit = {
     let k = "w" + int.to_string(i % 23)
     f[k] = map.get(f, k) ?? 0 + 1
   }
-  println("F.len=" + int.to_string(map.len(f)) + " w0=" + int.to_string(map.get(f, "w0") ?? 0) + " w22=" + int.to_string(map.get(f, "w22") ?? 0) + " total=" + int.to_string(map.fold(f, 0, (acc, _k, v) => acc + v)))
+  println("F.len=" + int.to_string(map.len(f)) + " w0=" + int.to_string(map.get(f, "w0") ?? 0) + " w22=" + int.to_string(map.get(f, "w22") ?? 0) + " total=" + int.to_string(map.fold(f, 0, (acc, (_k, v)) => acc + v)))
   // G. sets past the threshold: from_list dedup, contains, algebra,
   // equality in a different order. The relations (`is_subset` /
   // `is_disjoint`) are spelled through intersection lengths so the fixture

@@ -37,9 +37,9 @@ const SEMANTICS: &str = r#"type Holder = { snap: Map[String, Int], tag: Int }
 
 fn show(m: Map[String, Int]) -> String = map.to_list(m) |> list.map(((k, v)) => "${k}=${v}") |> list.join(",")
 
-fn showi(m: Map[Int, String]) -> String = map.fold(m, "", (acc, k, v) => acc + "${k}:${v};")
+fn showi(m: Map[Int, String]) -> String = map.fold(m, "", (acc, (k, v)) => acc + "${k}:${v};")
 
-fn digest(m: Map[Int, Int]) -> Int = map.fold(m, 0, (acc, k, v) => (acc * 31 + k * 7 + v) % 1000000007)
+fn digest(m: Map[Int, Int]) -> Int = map.fold(m, 0, (acc, (k, v)) => (acc * 31 + k * 7 + v) % 1000000007)
 
 fn drop_evens(m: Map[Int, Int], i: Int, n: Int) -> Map[Int, Int] = if i >= n then m
 else drop_evens(map.remove(m, i * 2), i + 1, n)

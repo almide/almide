@@ -10,17 +10,17 @@
 fn main() -> Unit = {
   let e: Map[String, String] = [:]
   let init = ["k0": 1, "k1": 2]
-  println("${map.fold(e, init, ((a, k, v) => a))}")
+  println("${map.fold(e, init, ((a, (k, v)) => a))}")
   let subj = ["a": 9, "b": 8]
-  println("${map.fold(subj, init, ((a, k, v) => a))}")
-  println("${map.fold(subj, init, ((a, k, v) => ["fresh": v]))}")
+  println("${map.fold(subj, init, ((a, (k, v)) => a))}")
+  println("${map.fold(subj, init, ((a, (k, v)) => ["fresh": v]))}")
   let y3: Map[String, String] = [:]
   let r7 = map.fold(
     map.get([
       "k0": ["k0": "x"]
     ], "missing") ?? y3,
     ["k0": 1],
-    ((a, k, v) => ["k": 10]),
+    ((a, (k, v)) => ["k": 10]),
   )
   println("r7 = ${r7}")
   // init must still be alive and intact after every fold above.

@@ -1,25 +1,25 @@
 // map higher-order function tests — fold, any, all, count, find, update, entries, merge, from_list, keys, values
 test "map.fold sums all values" {
   let m = ["a": 10, "b": 20, "c": 30]
-  let total = map.fold(m, 0, (acc, k, v) => acc + v)
+  let total = map.fold(m, 0, (acc, (k, v)) => acc + v)
   assert_eq(total, 60)
 }
 
 test "map.fold on empty map" {
   let m: Map[String, Int] = [:]
-  let result = map.fold(m, 42, (acc, k, v) => acc + v)
+  let result = map.fold(m, 42, (acc, (k, v)) => acc + v)
   assert_eq(result, 42)
 }
 
 test "map.fold multiplies values" {
   let m = ["x": 2, "y": 3, "z": 5]
-  let product = map.fold(m, 1, (acc, k, v) => acc * v)
+  let product = map.fold(m, 1, (acc, (k, v)) => acc * v)
   assert_eq(product, 30)
 }
 
 test "map.fold counts entries" {
   let m = ["a": 1, "b": 2]
-  let count = map.fold(m, 0, (acc, k, v) => acc + 1)
+  let count = map.fold(m, 0, (acc, (k, v)) => acc + 1)
   assert_eq(count, 2)
 }
 
@@ -257,7 +257,7 @@ test "map.get ?? option-valued map" {
 test "map.fold into an option-valued map accumulator" {
   let src: Map[String, Int] = ["a": 1, "b": 2]
   let acc0: Map[String, String?] = [:]
-  let r = map.fold(src, acc0, ((acc, k, v) => ["k": some("v")]))
+  let r = map.fold(src, acc0, ((acc, (k, v)) => ["k": some("v")]))
   assert_eq(map.get(r, "k") ?? none, some("v"))
 }
 
@@ -392,4 +392,29 @@ test "bare-map list literal with a computed element" {
   assert_eq(list.len(xs), 3)
   assert_eq(map.get(list.get(xs, 0) ?? d, "x") ?? false, true)
   assert_eq(map.contains(one, "x"), true)
+}
+
+// R-map-09: the entry callbacks take the entry as ONE (K, V) tuple — the
+// element map.to_list yields — written as a tuple pattern, a plain
+// parameter, two parameters read as the tuple's elements, or a named fn.
+fn heavy(e: (String, Int)) -> Bool = e.1 >= 5
+
+test "map entry callbacks take the entry tuple" {
+  let m = ["a": 1, "b": 5, "c": 10]
+  assert_eq(map.count(m, ((k, v)) => v >= 5), 2)
+  assert_eq(map.count(m, (e) => e.1 >= 5), 2)
+  assert_eq(map.count(m, (k, v) => v >= 5), 2)
+  assert_eq(map.count(m, heavy), 2)
+  assert_eq(map.filter(m, heavy), ["b": 5, "c": 10])
+  assert_eq(map.any(m, (e) => e.0 == "c"), true)
+  assert_eq(map.all(m, heavy), false)
+  assert_eq(map.find(m, (e) => e.1 > 1), some(("b", 5)))
+  assert_eq(map.fold(m, "", (acc, e) => acc + e.0), "abc")
+  assert_eq(map.fold(m, 0, (acc, (_, v)) => acc + v), 16)
+}
+
+test "a two-parameter lambda reads a tuple element's parts" {
+  let pairs = [(1, 2), (3, 4)]
+  assert_eq(list.map(pairs, (a, b) => a + b), [3, 7])
+  assert_eq(pairs |> list.filter((a, b) => a > 1), [(3, 4)])
 }
