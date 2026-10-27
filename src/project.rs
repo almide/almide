@@ -185,7 +185,14 @@ impl LineStarts {
 /// about 200 bytes, so 1 MiB holds a lock of several thousand dependencies —
 /// far past any real project — while a file linked to `/dev/zero` or a
 /// generated multi-gigabyte one stops here instead of exhausting memory.
+/// The default of the `manifest_bytes` compile-cost budget (ADR-0030), which
+/// is what [`read_project_file_bytes`] reads; `--budget manifest_bytes=N`
+/// moves it, nothing in a project does.
 pub const PROJECT_FILE_MAX_BYTES: u64 = 1 << 20;
+
+fn project_file_max_bytes() -> u64 {
+    almide_base::budget::limit(almide_base::budget::BudgetId::ManifestBytes)
+}
 
 /// The bytes of `almide.toml` / `almide.lock` at `path`, refused unless it is
 /// a regular file (a symlink to one is followed) of at most
@@ -196,11 +203,12 @@ pub const PROJECT_FILE_MAX_BYTES: u64 = 1 << 20;
 pub fn read_project_file_bytes(path: &Path) -> Result<Vec<u8>, String> {
     use std::io::Read;
     let failed = |e: std::io::Error| format!("Failed to read {}: {}", path.display(), e);
+    let max = project_file_max_bytes();
     let too_big = || {
         format!(
             "{} is larger than {} bytes, which no manifest or lock file is\n  hint: replace it with the real file",
             path.display(),
-            PROJECT_FILE_MAX_BYTES
+            max
         )
     };
     let meta = std::fs::metadata(path).map_err(failed)?;
@@ -210,12 +218,13 @@ pub fn read_project_file_bytes(path: &Path) -> Result<Vec<u8>, String> {
             path.display()
         ));
     }
-    if meta.len() > PROJECT_FILE_MAX_BYTES {
+    if meta.len() > max {
         return Err(too_big());
     }
     let mut bytes = Vec::with_capacity(meta.len() as usize);
-    std::fs::File::open(path).map_err(failed)?.take(PROJECT_FILE_MAX_BYTES + 1).read_to_end(&mut bytes).map_err(failed)?;
-    if bytes.len() as u64 > PROJECT_FILE_MAX_BYTES {
+    std::fs::File::open(path).map_err(failed)?.take(max.saturating_add(1)).read_to_end(&mut bytes).map_err(failed)?;
+    almide_base::budget::observe(almide_base::budget::BudgetId::ManifestBytes, bytes.len() as u64);
+    if bytes.len() as u64 > max {
         return Err(too_big());
     }
     Ok(bytes)
