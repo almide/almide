@@ -385,6 +385,41 @@ impl Checker {
         }
     }
 
+    /// `Never` is the bottom type (result-option-effect.md §Never): a `Never`
+    /// value fits every slot, but no other value fits a `Never` slot. The
+    /// solver's `compatible` lets `Never` match in BOTH directions (it is the
+    /// join's identity), so a fn declared `-> Never` whose body completes with
+    /// a value (`{ println("x") }` is `Unit`) passed `check` and failed the
+    /// native build: the lowering leaves a `Never` fn's tail un-Ok-wrapped
+    /// (#4226). The body of a `-> Never` fn must itself diverge — a `panic`,
+    /// `process.exit`, a call to another `-> Never` fn, or a branch whose arms
+    /// all do. An unresolved body type (a `_` hole, a still-open variable) is
+    /// not judged here.
+    fn check_never_return(&mut self, name: &str, ret_ty: &Ty, body_ty: &Ty, is_effect: bool) {
+        if resolve_ty(ret_ty, &self.uf) != Ty::Never {
+            return;
+        }
+        let mut rb = resolve_ty(body_ty, &self.uf);
+        if is_effect {
+            if let Ty::Applied(crate::types::TypeConstructorId::Result, args) = rb.clone() {
+                if let Some(ok) = args.first() { rb = resolve_ty(ok, &self.uf); }
+            }
+        }
+        if rb == Ty::Never || rb.contains_unknown() || rb.contains_typevar() {
+            return;
+        }
+        self.emit(err(
+            format!(
+                "fn '{}' declares -> Never but its body can complete with a {} value",
+                name, rb.display()
+            ),
+            "A `-> Never` fn must not return: end its body in `panic(..)`, \
+             `process.exit(..)` or a call to another `-> Never` fn — or declare \
+             the type the body actually yields (e.g. `-> Unit`).",
+            format!("fn '{}'", name),
+        ).with_code("E001"));
+    }
+
     fn check_fn_decl(&mut self, name: &str, decl: FnToCheck<'_>) {
         let FnToCheck { params, return_type, body, effect, generics, span: decl_span } = decl;
         self.env.push_scope();
@@ -483,6 +518,7 @@ impl Checker {
         // wherever inference happened to end — the last arm's last leaf.
         let saved_span = self.current_span;
         self.current_span = arm_blame::tail_report_span(body).or(saved_span);
+        self.check_never_return(name, &ret_ty, &body_ity, is_effect);
         if effect.unwrap_or(false) || fallible_marker {
             self.constrain_effect_body(name, &ret_ty, body_ity, body);
         } else {
