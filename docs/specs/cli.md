@@ -395,6 +395,7 @@ almide check app.almd --profile critical --allow IO  # critical profile (#567)
 | `--allow <CAP>` | `--profile critical` で capability を 1 つ許可(複数回指定可) |
 | `--json` | 診断を JSON で出力（1 行 1 診断、エディタ/エージェント統合用） |
 | `--explain <code>` | エラーコードの説明(`almide explain <code>` と同じ) |
+| `--budget NAME=N` | コンパイルコストの予算を 1 つ設定(下記、複数回指定可。`--profile critical` では拒否) |
 
 `./almide.toml` にどのリーダーも読まないキー(`brnach = "main"` など)があると、
 `check` / `build` / `run` / `test` を含む全コマンドが一度だけ警告する(#3382):
@@ -412,6 +413,31 @@ stderr に出る。表ごとの受理キーは [package-system.md §6](package-s
 severity はフィクスチャ全件で実際の level と照合される(`tests/explain_list_test.rs`)。
 | `--effects` | 各関数のエフェクト/ケイパビリティ分析。受け取ったクロージャを呼ぶ関数は `{} + whatever f (arg 1) does` と表示され pure に数えない(#3268)。クロージャのカテゴリ集合は値と一緒に流れ、呼ぶ側の呼び出し地点に課される(ADR-0026 D1、`docs/specs/effect-system.md`)。`[permissions]` 違反は `path:` 行で経路を示す(D4) |
 | `--timings` | lex / parse / check の phase 別 wall time（#1311） |
+
+#### コンパイルコストの予算（ADR-0030, #4136）
+
+コンパイラは信頼できない入力（PR の CI、ファイルを開いた瞬間の LSP、採点器、playground）を処理するので、
+入力に比例して仕事が増えるフェーズにはそれぞれ名前付きの**予算**がある。予算は数える（ノード数・インスタンス数・
+バイト数・段数）もので、秒や空きメモリでは測らない。だから同じ入力は、どの機械でも、native でも wasm 上の
+コンパイラでも、CLI でも LSP でも同じ判定になる。超えたら定義済みの診断で終わり、クラッシュ・OOM・ハングにはならない。
+
+- **ソースは予算を上げられない。** 属性・`almide.toml`・`almide.lock`・環境変数のどれも予算を読まない。
+- **上げられるのはコマンドラインだけ**: `--budget NAME=N`（複数回指定可、全サブコマンド共通）。
+  `--profile critical` は `--budget` を拒否する（既定の予算で判定する）。
+- `almide budgets` が一覧、`almide budgets --md` が下表そのもの（`tests/compile_budget_test.rs` が一致を検査）。
+- 隠しフラグ `--budget-report` は、終了時に各予算の観測最大値と数えた仕事量を stderr に出す
+  （`scripts/measure-compile-budgets.sh` と上記ゲートが読む）。
+
+<!-- almide budgets --md: begin -->
+| Budget | Default | Counts | Exceeding it |
+|---|---|---|---|
+| `nesting` | 500 levels | syntactic nesting of one expression or pattern, counted by the parser as it descends | parse error `expression nesting too deep (max N)` |
+| `type_size` | 4096 nodes | nodes of one inferred type, counted as the checker builds an expression's type and as it resolves an inference variable — `let t1 = (t0, t0)` doubled 22 times was 3.7 GB (#4114) | E111 |
+| `generic_instances` | 1000 instances | specialized instances of protocol-bounded generic fns one program monomorphizes, each instance's type arguments also held to `type_size`; polymorphic recursion would add a larger one per round without end | E112 |
+| `manifest_bytes` | 1048576 bytes | size of one `almide.toml` or `almide.lock` read, the project's own or a dependency's, checked before and while it is read (#4194) | error `<file> is larger than N bytes` |
+| `dependency_count` | 1000 packages | distinct packages one dependency resolution visits, the transitive closure included, counted before each is fetched | error `too many dependencies (N, max M)` |
+| `dependency_depth` | 64 levels | length of the chain of dependencies from the root package to the one being resolved, counted before it is fetched | error `dependency chain too deep (N, max M)` |
+<!-- almide budgets --md: end -->
 
 #### `--profile critical`
 
