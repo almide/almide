@@ -40,7 +40,7 @@ printf 'jobs:\n  sneak:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: d
 green "a new job pinned to RUST_TOOLCHAIN"
 
 fresh
-sed 's/^wasmtime = "49.0.4"/wasmtime = "50.0.0"/' "$root/crates/almide-wasm-run/Cargo.toml" > "$tmp/t/crates/almide-wasm-run/Cargo.toml"
+sed -E 's/^(wasmtime = (\{ *version = )?)"49\.0\.4"/\1"50.0.0"/' "$root/crates/almide-wasm-run/Cargo.toml" > "$tmp/t/crates/almide-wasm-run/Cargo.toml"
 red "the embedded wasmtime bumped without the list"
 
 fresh

@@ -67,7 +67,7 @@ for f in "$WF"/*.yml; do
          step ~ /wasmtime/ && match($0, /VERSION=v[0-9]+\.[0-9]+\.[0-9]+/) { print substr($0, RSTART + 9, RLENGTH - 9) }' "$f"
   } | sed 's/^/wasmtime-cli /'
 done | sort -u > "$found"
-grep -E '^wasmtime = "' "$CRATE" | sed -E 's/^wasmtime = "([^"]+)".*/wasmtime-crate \1/' >> "$found"
+grep -E '^wasmtime = (\{ *version = )?"' "$CRATE" | sed -E 's/^wasmtime = (\{ *version = )?"([^"]+)".*/wasmtime-crate \2/' >> "$found"
 sort -u -o "$found" "$found"
 
 listed=$({ grep -vE '^(#|[[:space:]]*$)' "$PINS" || true; } | awk '{ print $1 " " $2 ($1 == "floating" ? " " $3 : "") }' | sort -u)
