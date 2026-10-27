@@ -206,8 +206,10 @@ fn rx_parse_escape(chars: &[char], pos: &mut usize) -> AlmideRxNode {
         'D' => AlmideRxNode::Class(vec![('0', '9')], true),
         'w' => AlmideRxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], false),
         'W' => AlmideRxNode::Class(vec![('a', 'z'), ('A', 'Z'), ('0', '9'), ('_', '_')], true),
-        's' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\t'), ('\n', '\n'), ('\r', '\r')], false),
-        'S' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\t'), ('\n', '\n'), ('\r', '\r')], true),
+        // `\s` is the conventional ASCII whitespace set [ \t\n\v\f\r] — the
+        // one PCRE, Python, Rust, JS and POSIX [[:space:]] share (#4257).
+        's' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\r')], false),
+        'S' => AlmideRxNode::Class(vec![(' ', ' '), ('\t', '\r')], true),
         'b' => AlmideRxNode::WordBoundary(true),
         'B' => AlmideRxNode::WordBoundary(false),
         'n' => AlmideRxNode::Lit('\n'),
@@ -238,7 +240,7 @@ fn rx_parse_class(chars: &[char], pos: &mut usize) -> AlmideRxNode {
             match esc {
                 'd' => { ranges.push(('0', '9')); continue; }
                 'w' => { ranges.extend_from_slice(&[('a','z'),('A','Z'),('0','9'),('_','_')]); continue; }
-                's' => { ranges.extend_from_slice(&[(' ',' '),('\t','\t'),('\n','\n'),('\r','\r')]); continue; }
+                's' => { ranges.extend_from_slice(&[(' ',' '),('\t','\r')]); continue; }
                 'D' => { /* not fully supported in class, treat as literal */ ranges.push((esc, esc)); continue; }
                 'n' => { ranges.push(('\n', '\n')); continue; }
                 't' => { ranges.push(('\t', '\t')); continue; }

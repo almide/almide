@@ -4994,8 +4994,10 @@ pub const SRC_DEQUE: &str = r#"
 
 
 
+
+
 /// A double-ended queue, front to back.
-type Deque[A] = { front: List[A], back: List[A] }
+mod type Deque[A] = { front: List[A], back: List[A] }
 
 
 /// An empty deque.
@@ -9550,8 +9552,11 @@ pub const SRC_HEAP: &str = r#"
 
 
 
+
+
+
 /// A priority queue; the least element by its order comes out first.
-type Heap[A] = { slots: List[(A, Int)], next: Int, cmp: (A, A) -> Int }
+mod type Heap[A] = { slots: List[(A, Int)], next: Int, cmp: (A, A) -> Int }
 
 
 
@@ -31027,15 +31032,16 @@ else {
 
 
 
+
 fn __rx_esc_match(e: Int, c: Int) -> Bool = if e == 100 then c >= 48 and c <= 57
 else if e == 68 then {
   if c >= 48 and c <= 57 then false else true
 } else if e == 119 then (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57) or c == 95
 else if e == 87 then {
   if (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57) or c == 95 then false else true
-} else if e == 115 then c == 32 or c == 9 or c == 10 or c == 13
+} else if e == 115 then c == 32 or (c >= 9 and c <= 13)
 else if e == 83 then {
-  if c == 32 or c == 9 or c == 10 or c == 13 then false else true
+  if c == 32 or (c >= 9 and c <= 13) then false else true
 } else if e == 110 then c == 10
 else if e == 116 then c == 9
 else if e == 114 then c == 13 else c == e
@@ -31048,7 +31054,7 @@ else {
     let e = prim.load8(p + 1)
     let hit = if e == 100 then c >= 48 and c <= 57
     else if e == 119 then (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57) or c == 95
-    else if e == 115 then c == 32 or c == 9 or c == 10 or c == 13
+    else if e == 115 then c == 32 or (c >= 9 and c <= 13)
     else if e == 110 then c == 10
     else if e == 116 then c == 9 else c == __rx_cp(p + 1)
     if hit then true
@@ -42675,7 +42681,7 @@ effect fn compress(b: Bytes) -> Result[Bytes, String] = _
 @intrinsic("almide_rt_zlib_compress_level")
 effect fn compress_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
-/// Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
+/// Inflated zlib stream; err on corrupt input, bytes after it, or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_decompress")
 fn decompress(b: Bytes) -> Result[Bytes, String] = _
 
@@ -42692,7 +42698,7 @@ effect fn deflate(b: Bytes) -> Result[Bytes, String] = _
 @intrinsic("almide_rt_zlib_deflate_level")
 effect fn deflate_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
-/// Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
+/// Raw DEFLATE decoded; err on a corrupt stream, bytes after it, or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_inflate")
 fn inflate(b: Bytes) -> Result[Bytes, String] = _
 
@@ -43112,6 +43118,7 @@ else if sym == 17 then 3 else 4
 
 
 
+
 fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int, limit: Int, lencode: List[Int], distcode: List[Int]) -> (Int, Int, Int, Int) = {
   let lbase = zli_lbase()
   let lext = zli_lext()
@@ -43155,7 +43162,8 @@ fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int
         p = p5
         b = b5
         c = c5
-        let bad = if ds < 0 or ds >= 30 then 1 else 0
+        let far = dbase[dsc] + db > bytes.len(out) - base
+        let bad = if ds < 0 or ds >= 30 or far then 1 else 0
         let want = if bad == 1 then 0 else lbase[li] + eb
         let over = bad == 0 and bytes.len(out) + want > limit
         status = if bad == 1 then 0 - 1
@@ -43167,9 +43175,7 @@ fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int
     }
     var k = 0
     while k < clen {
-      let src = bytes.len(out) - dist
-      bytes.push(out, if src < base then 0
-      else bytes.get(out, src) ?? 0)
+      bytes.push(out, bytes.get(out, bytes.len(out) - dist) ?? 0)
       k = k + 1
     }
   }
@@ -43536,11 +43542,15 @@ fn zli_gunzip(data: Bytes, limit: Int) -> Result[Bytes, String] = {
 
 fn zli_inflate(data: Bytes, limit: Int) -> Result[Bytes, String] = {
   var out = bytes.zeros(0)
-  let (status, _after) = zli_inflate_stream(0, data, out, limit)
-  if status == 0 then ok(out)
-  else if status == 0 - 3 then err(zli_exceeds(limit))
-  else if status == 0 - 2 then err("zlib.inflate: incomplete deflate stream") else err("zlib.inflate: corrupt deflate stream")
+  let (status, after) = zli_inflate_stream(0, data, out, limit)
+
+
+  if status == 0 - 3 then err(zli_exceeds(limit))
+  else if status == 0 - 2 then err("zlib.inflate: incomplete deflate stream")
+  else if status != 0 then err("zlib.inflate: corrupt deflate stream")
+  else if after < bytes.len(data) then err("zlib.inflate: trailing data after stream") else ok(out)
 }
+
 
 
 
@@ -43565,7 +43575,8 @@ fn zli_decompress(data: Bytes, limit: Int) -> Result[Bytes, String] = {
     else if status == 0 - 2 then err("zlib.decompress: incomplete deflate stream")
     else if status != 0 then err("zlib.decompress: corrupt deflate stream")
     else if after + 4 > bytes.len(data) then err("zlib.decompress: unexpected end of file")
-    else if zli_adler32_from(out, 0) != stored then err("zlib.decompress: adler32 mismatch") else ok(out)
+    else if zli_adler32_from(out, 0) != stored then err("zlib.decompress: adler32 mismatch")
+    else if after + 4 < bytes.len(data) then err("zlib.decompress: trailing data after stream") else ok(out)
   }
 }
 
