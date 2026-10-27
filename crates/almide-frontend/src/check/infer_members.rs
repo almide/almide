@@ -62,11 +62,47 @@ impl Checker {
         if self.diagnostics.iter().any(|d| d.message == msg && d.line == line) {
             return;
         }
-        self.emit(super::err(
-            msg,
-            format!("'{}' is opaque: build and read it with the `{}` module's fns (`{}.new`, `{}.reveal`)", bare, owner, owner, owner),
-            format!("opaque type {}", bare),
-        ).with_code("E033"));
+        let named = self.opaque_entry_fns(owner.as_str(), bare);
+        let hint = if named.is_empty() {
+            format!("'{}' is opaque: build and read it with the `{}` module's fns", bare, owner)
+        } else {
+            let list: Vec<String> = named.iter().map(|f| format!("`{owner}.{f}`")).collect();
+            format!("'{}' is opaque: build and read it with the `{}` module's fns ({})", bare, owner, list.join(", "))
+        };
+        self.emit(super::err(msg, hint, format!("opaque type {}", bare)).with_code("E033"));
+    }
+
+    /// The fns an E033 hint names, read off the owner module's signatures
+    /// rather than spelled per type (#4256): the builder with the fewest
+    /// parameters, then a one-parameter reader that answers the type's
+    /// content (its type argument, or a list of it) — `secret.new` /
+    /// `secret.reveal`, `heap.new` / `heap.to_list`. Ties go to the name.
+    fn opaque_entry_fns(&self, owner: &str, bare: &str) -> Vec<String> {
+        let qualified = format!("{owner}.{bare}");
+        let is_it = |t: &Ty| matches!(t, Ty::Named(n, _) if n.as_str() == bare || n.as_str() == qualified);
+        let prefix = format!("{owner}.");
+        let mut fns: Vec<(&str, &almide_lang::types::FnSig)> = self
+            .env
+            .functions
+            .iter()
+            .filter_map(|(k, sig)| {
+                let name = k.as_str().strip_prefix(prefix.as_str())?;
+                (!name.contains('.') && !name.starts_with("__")).then_some((name, sig))
+            })
+            .collect();
+        fns.sort_by(|a, b| a.0.cmp(b.0));
+        let builder = fns
+            .iter()
+            .filter(|(_, sig)| is_it(&sig.ret) && !sig.params.iter().any(|(_, t)| is_it(t)))
+            .min_by_key(|(name, sig)| (sig.params.len(), *name));
+        let reader = fns.iter().find(|(_, sig)| match sig.params.as_slice() {
+            [(_, p @ Ty::Named(_, args))] if is_it(p) => args.first().is_some_and(|a| {
+                sig.ret == *a
+                    || matches!(&sig.ret, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e) if e.first() == Some(a))
+            }),
+            _ => false,
+        });
+        builder.into_iter().chain(reader).map(|(name, _)| name.to_string()).collect()
     }
 
     /// The declaration a type name finally denotes: follows transparent alias

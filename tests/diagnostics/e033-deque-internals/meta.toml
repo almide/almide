@@ -1,2 +1,3 @@
 expects_code = "E033"
 expects_error = "opaque type 'Deque'"
+hint_substring = "`deque.new`, `deque.to_list`"
