@@ -1,0 +1,14 @@
+diff --git a/crates/almide-wasm/src/bytes_rw.rs b/crates/almide-wasm/src/bytes_rw.rs
+index 64b35a07d..66ea439b2 100644
+--- a/crates/almide-wasm/src/bytes_rw.rs
++++ b/crates/almide-wasm/src/bytes_rw.rs
+@@ -193,7 +193,8 @@ impl Emitter<'_> {
+         self.f.instructions().local_set(ih);
+         // #4005: a Bytes index is never a fact candidate (a loose slot).
+         let site = crate::witness::bounds::site(None);
+-        self.bytes_room(bh, ih, 1);
++        // RE-INJECTED (#4005 operands drill): room for zero bytes.
++        self.bytes_room(bh, ih, 0);
+         let msg = self.pool.intern("index out of bounds");
+         self.f.instructions().i32_eqz().if_(BlockType::Empty).i32_const(msg as i32);
+         crate::witness::bounds::check(site, self.f);
