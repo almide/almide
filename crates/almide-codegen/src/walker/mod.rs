@@ -80,10 +80,15 @@ pub(crate) fn case_field_is_boxed(ctx: &RenderContext, ty: Option<&Ty>, ctor: &s
 }
 
 /// Is field `field` of a record typed `ty` an `AlmideBox` — a field closing a
-/// cycle of a recursive record (#4251)?
+/// cycle of a recursive record (#4251)? A structurally typed value (an
+/// unannotated `let c = { .. }`) is the declared record its shape renders as —
+/// the same `named_records` label the literal and the binding spell.
 pub(crate) fn record_field_is_boxed(ctx: &RenderContext, ty: &Ty, field: &str) -> bool {
+    let boxed = |n: &str| ctx.ann.boxed_record_fields.contains(&(n.to_string(), field.to_string()));
     match ty {
-        Ty::Named(n, _) => ctx.ann.boxed_record_fields.contains(&(n.to_string(), field.to_string())),
+        Ty::Named(n, _) => boxed(n.as_str()),
+        Ty::Record { fields } | Ty::OpenRecord { fields } =>
+            ctx.ann.named_records.label_for(fields).is_some_and(|n| boxed(&n)),
         _ => false,
     }
 }
