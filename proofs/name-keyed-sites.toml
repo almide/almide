@@ -117,7 +117,7 @@ names = 2
 [[site]]
 id = "crates/almide-codegen/src/pass_licm.rs::is_inplace_mutator::or-pattern"
 class = "legacy"
-names = 16
+names = 15
 
 [[site]]
 id = "crates/almide-codegen/src/pass_matrix_shape_spec.rs::infer_shape::or-pattern"
