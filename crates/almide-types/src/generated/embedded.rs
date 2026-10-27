@@ -43548,7 +43548,8 @@ fn zli_inflate(data: Bytes, limit: Int) -> Result[Bytes, String] = {
   if status == 0 - 3 then err(zli_exceeds(limit))
   else if status == 0 - 2 then err("zlib.inflate: incomplete deflate stream")
   else if status != 0 then err("zlib.inflate: corrupt deflate stream")
-  else if after < bytes.len(data) then err("zlib.inflate: trailing data after stream") else ok(out)
+  else if after < bytes.len(data) then err("zlib.inflate: trailing data after stream")
+  else ok(out)
 }
 
 
@@ -43576,7 +43577,8 @@ fn zli_decompress(data: Bytes, limit: Int) -> Result[Bytes, String] = {
     else if status != 0 then err("zlib.decompress: corrupt deflate stream")
     else if after + 4 > bytes.len(data) then err("zlib.decompress: unexpected end of file")
     else if zli_adler32_from(out, 0) != stored then err("zlib.decompress: adler32 mismatch")
-    else if after + 4 < bytes.len(data) then err("zlib.decompress: trailing data after stream") else ok(out)
+    else if after + 4 < bytes.len(data) then err("zlib.decompress: trailing data after stream")
+    else ok(out)
   }
 }
 
