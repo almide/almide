@@ -109,8 +109,8 @@ const UNIT_HINT: &str = "A Unit carries nothing to print. Drop the segment, or i
      value you meant — a `println` or other Unit-returning call has no text.";
 const MATRIX_HINT: &str = "Interpolate what you mean: `${matrix.to_lists(m)}` for the rows, or \
      `${matrix.rows(m)}x${matrix.cols(m)}` for the shape.";
-const RAWPTR_HINT: &str = "A raw pointer has no stable text. Interpolate the Bytes it was taken \
-     from (`bytes.from_raw_ptr(p, n)`), or the length.";
+const RAWPTR_HINT: &str = "A Handle is an opaque foreign token with no stable text. Interpolate \
+     what the foreign library reports about it, or a name for it.";
 const FN_HINT: &str = "A function value has no text. Call it and interpolate the result \
      (`${f(x)}`), or interpolate a name for it.";
 const HOLDS_HINT: &str = "Interpolate the printable parts instead — map the function values \
@@ -184,7 +184,7 @@ impl Checker {
             Ty::Bytes => gap("a Bytes value".into(), BYTES_HINT),
             Ty::Unit => gap("a Unit value".into(), UNIT_HINT),
             Ty::Matrix | Ty::Applied(TC::Matrix, _) => gap("a Matrix value".into(), MATRIX_HINT),
-            Ty::RawPtr => gap("a raw pointer".into(), RAWPTR_HINT),
+            Ty::RawPtr => gap("a Handle".into(), RAWPTR_HINT),
             Ty::Fn { .. } => gap("a function value".into(), FN_HINT),
             // An opaque newtype's string form is its TARGET's (#2496): the
             // emitted struct renders the wrapped value. So a newtype over
@@ -231,7 +231,7 @@ impl Checker {
     fn unprintable_leaf_in(&self, ty: &Ty, visiting: &mut Vec<Sym>) -> Option<String> {
         match ty {
             Ty::Fn { .. } => Some("a function value".to_string()),
-            Ty::RawPtr => Some("a raw pointer".to_string()),
+            Ty::RawPtr => Some("a Handle".to_string()),
             Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) => {
                 args.iter().find_map(|a| self.unprintable_leaf_in(a, visiting))
             }

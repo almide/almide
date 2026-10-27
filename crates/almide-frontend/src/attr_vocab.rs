@@ -51,6 +51,10 @@ pub const KNOWN_ATTRS: &[&str] = &[
     // Outside the memory-safety guarantee (#4008): `--profile critical`
     // refuses a call (E100); crates/almide-types `memory_unsafe_stdlib_fns`
     "memory_unsafe",
+    // A foreign Region's length and release function on its `@extern`
+    // declaration (ADR-0031 D2, D6): check/extern_abi_check.rs validates it,
+    // the native @extern(c) glue builds the Region from it
+    "region",
     // A digest that is broken for security (md5, sha1; #4106): `--profile
     // critical` refuses a call (E100); crates/almide-types `insecure_digest_stdlib_fns`
     "insecure_digest",
