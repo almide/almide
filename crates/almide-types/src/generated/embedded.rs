@@ -23,6 +23,7 @@ effect fn has_flag(name: String) -> Bool = __has(__options(env.args()), name)
 
 
 
+@category
 fn __has(args: List[String], name: String) -> Bool = {
 
 
@@ -34,12 +35,14 @@ fn __has(args: List[String], name: String) -> Bool = {
 
 
 
+@category
 fn __options(args: List[String]) -> List[String] = match list.index_of(args, "--") {
   some(i) => list.take(args, i),
   none => args,
 }
 
 
+@category
 fn __operands(args: List[String]) -> List[String] = match list.index_of(args, "--") {
   some(i) => list.drop(args, i + 1),
   none => [],
@@ -100,6 +103,7 @@ effect fn positional(options: List[String]) -> List[String] = __positional(env.a
 
 
 
+@category
 fn __positional(args: List[String], options: List[String]) -> List[String] =
   __positional_at(__options(args), options, 0, []) + __operands(args)
 
@@ -972,19 +976,6 @@ fn append_u32_le(mut b: Bytes, x: Int) -> Unit = _
 @intrinsic("almide_rt_bytes_append_u8")
 fn append_u8(mut b: Bytes, x: Int) -> Unit = _
 
-/// Mutable address of the data; null if empty.
-@deprecated(since=15, use="ffi.address")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_as_mut_ptr")
-@mutating
-fn as_mut_ptr(b: Bytes) -> RawPtr = _
-
-/// Address of the data; null if empty.
-@deprecated(since=15, use="ffi.address")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_as_ptr")
-fn as_ptr(b: Bytes) -> RawPtr = _
-
 /// size-byte pieces, last may be short; [] if size <= 0.
 @intrinsic("almide_rt_bytes_chunks")
 fn __chunks(b: Bytes, size: Int) -> List[Bytes] = _
@@ -1009,18 +1000,6 @@ fn contains(b: Bytes, needle: Bytes) -> Bool = _
 @intrinsic("almide_rt_bytes_copy_from")
 fn copy_from(mut b: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int) -> Unit = _
 
-/// Writes up to cap bytes to ptr; count, 0 if null.
-@deprecated(since=15, use="ffi.write", note="the address comes first (ptr, b, cap), and it is an effect fn")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_copy_to_ptr")
-fn copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = _
-
-/// Address of the data as an Int; target-specific.
-@deprecated(since=15, use="ffi.address", note="write `ffi.to_int(ffi.address(b))`, which is 0 for an empty b")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_data_ptr")
-fn data_ptr(b: Bytes) -> Int = _
-
 /// True if b ends with suffix, or suffix is empty.
 @intrinsic("almide_rt_bytes_ends_with")
 fn ends_with(b: Bytes, suffix: Bytes) -> Bool = _
@@ -1036,12 +1015,6 @@ fn fill(mut b: Bytes, x: Int) -> Unit = _
 /// xs as bytes, low 8 bits each; -1 becomes 255.
 @intrinsic("almide_rt_bytes_from_list")
 fn from_list(xs: List[Int]) -> Bytes = _
-
-/// Copy of len bytes at ptr; empty if null or len <= 0.
-@deprecated(since=15, use="ffi.read", note="ffi.read is an effect fn")
-@memory_unsafe
-@intrinsic("almide_rt_bytes_from_raw_ptr")
-fn from_raw_ptr(ptr: RawPtr, len: Int) -> Bytes = _
 
 /// UTF-8 encoding of s.
 @intrinsic("almide_rt_bytes_from_string")
@@ -2613,11 +2586,6 @@ fn bytes_from_string(s: String) -> Bytes = {
 }
 
 fn bytes_len(b: Bytes) -> Int = prim.load32(prim.handle(b) + 4)
-
-
-
-
-fn bytes_data_ptr(b: Bytes) -> Int = prim.handle(b) + 12
 
 fn bytes_is_empty(b: Bytes) -> Bool = {
   let n = prim.load32(prim.handle(b) + 4)
@@ -4228,71 +4196,6 @@ fn bytes_copy_from(dst: Bytes, src: Bytes, dst_off: Int, src_off: Int, len: Int)
   else 0
 }
 "#;
-pub const SRC_BYTES_RAWPTR: &str = r#"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-fn bytes_as_ptr(b: Bytes) -> RawPtr = {
-  let h = prim.handle(b)
-  if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
-}
-
-fn bytes_as_mut_ptr(b: Bytes) -> RawPtr = {
-  let h = prim.handle(b)
-  if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
-}
-
-fn __brp_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
-else {
-  prim.store8(dst + i, prim.load8(src + i))
-  __brp_copy(dst, src, n, i + 1)
-}
-
-
-
-fn bytes_from_raw_ptr(p: RawPtr, n: Int) -> Bytes = {
-  let src = prim.ptr_to_int(p)
-  if src == 0 or n <= 0 then prim.alloc_bytes(0)
-  else {
-    let out = prim.alloc_bytes(n)
-    let oh = prim.handle(out)
-    let _c = __brp_copy(oh + 12, src, n, 0)
-    out
-  }
-}
-
-fn bytes_copy_to_ptr(b: Bytes, ptr: RawPtr, cap: Int) -> Int = {
-  let dst = prim.ptr_to_int(ptr)
-  let h = prim.handle(b)
-  let len = if dst == 0 then 0 else prim.load32(h + 4)
-
-
-
-
-
-  let capped = if cap < 0 then len else cap
-  let n = if len < capped then len else capped
-  let _c = __brp_copy(dst, h + 12, n, 0)
-  n
-}
-
-
-@implements("ffi.to_int")
-fn ffi_to_int(p: RawPtr) -> Int = prim.ptr_to_int(p)
-"#;
 pub const SRC_BYTES_SKIP: &str = r#"
 
 
@@ -5718,7 +5621,10 @@ effect fn get(name: String) -> String? = _
 /// Sets name for this process and later spawns; err if name is empty or holds `=` or NUL, or value holds NUL.
 @ordered
 @category("Env.write")
-effect fn set(name: String, value: String) -> Result[Unit, String] = match __set_refusal(name, value) {
+effect fn set(name: String, value: String) -> Result[Unit, String] = match __set_refusal(
+  name,
+  value,
+) {
   some(why) => err("env.set: " + why),
   none => {
     __set(name, value)
@@ -6285,25 +6191,88 @@ pub const SRC_FFI: &str = r#"
 
 
 
-/// Address of b's first byte; null if b is empty.
+
+
+
+
+
+
+
+
+
+
+
+
+
+/// A view of memory: base, length, permission and owner (ADR-0031 D1).
+mod type Region = { owner: Bytes, base: Handle, len: Int, writable: Bool, keep: () -> Unit }
+
+/// A read-only view of b; b lives as long as the view.
+@memory_unsafe
+fn region(b: Bytes) -> Region = {
+  let base = __address(b)
+  { owner: b, base: base, len: bytes.len(b), writable: false, keep: () => () }
+}
+
+/// A fresh writable region of n zero bytes; err if n is negative.
+@memory_unsafe
+effect fn alloc(n: Int) -> Result[Region, String] =
+  if n < 0 then err("ffi.alloc: negative length ${n}")
+  else {
+    let buf = bytes.zeros(n)
+    let base = __address(buf)
+    ok({ owner: buf, base: base, len: n, writable: true, keep: () => () })
+  }
+
+/// The region's length in bytes.
+@memory_unsafe
+fn len(r: Region) -> Int = r.len
+
+/// True if write may change the region (ffi.alloc and writable foreign regions).
+@memory_unsafe
+fn is_writable(r: Region) -> Bool = r.writable
+
+/// Copy of n bytes at off; err unless 0 <= off and off + n <= len(r).
+@memory_unsafe
+effect fn read(r: Region, off: Int, n: Int) -> Result[Bytes, String] =
+  if n < 0 then err("ffi.read: negative count ${n}")
+  else if off < 0 or off > r.len - n then err("ffi.read: ${n} bytes at offset ${off} are outside a region of ${r.len} bytes")
+  else ok(__load(r.base, off, n))
+
+/// Writes b at off; err if the region is read-only or b does not fit.
+@memory_unsafe
+effect fn write(r: Region, off: Int, b: Bytes) -> Result[Unit, String] =
+  if not r.writable then err("ffi.write: the region is read-only (ffi.region views a Bytes value)")
+  else if off < 0 or off > r.len - bytes.len(b) then err("ffi.write: ${bytes.len(b)} bytes at offset ${off} are outside a region of ${r.len} bytes")
+  else {
+    __store(r.base, off, b)
+    ok(())
+  }
+
+/// A copy of the whole region as Bytes.
+@memory_unsafe
+effect fn to_bytes(r: Region) -> Result[Bytes, String] = ok(__load(r.base, 0, r.len))
+
+/// `Region(<len> bytes)`: the base address differs per target and is never shown.
+mod fn Region.repr(r: Region) -> String = "Region(${r.len} bytes)"
+
+
+
 @memory_unsafe
 @intrinsic("almide_rt_ffi_address")
-fn address(b: Bytes) -> RawPtr = _
+local fn __address(b: Bytes) -> Handle = _
 
-/// The address as an Int; null is 0.
-@memory_unsafe
-@intrinsic("almide_rt_ffi_to_int")
-fn to_int(p: RawPtr) -> Int = _
 
-/// Copy of len bytes at ptr; empty if null or len <= 0.
-@memory_unsafe
-@intrinsic("almide_rt_ffi_read")
-effect fn read(ptr: RawPtr, len: Int) -> Bytes = _
 
-/// Writes up to cap bytes of b to ptr; the count, 0 if null.
 @memory_unsafe
-@intrinsic("almide_rt_ffi_write")
-effect fn write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = _
+@intrinsic("almide_rt_ffi_load")
+local fn __load(base: Handle, off: Int, n: Int) -> Bytes = _
+
+
+
+@memory_unsafe
+@intrinsic("almide_rt_ffi_store")
+local effect fn __store(base: Handle, off: Int, b: Bytes) -> Unit = _
 "#;
 pub const SRC_FFI_BRIDGE: &str = r#"
 
@@ -6313,14 +6282,45 @@ pub const SRC_FFI_BRIDGE: &str = r#"
 
 
 
-@implements("ffi.address")
-fn ffi_address(b: Bytes) -> RawPtr = bytes.as_ptr(b)
 
-@implements("ffi.read")
-fn ffi_read(ptr: RawPtr, len: Int) -> Bytes = bytes.from_raw_ptr(ptr, len)
 
-@implements("ffi.write")
-fn ffi_write(ptr: RawPtr, b: Bytes, cap: Int) -> Int = bytes.copy_to_ptr(b, ptr, cap)
+
+
+
+
+
+@implements("ffi.__address")
+fn ffi_address(b: Bytes) -> Handle = {
+  let h = prim.handle(b)
+  if prim.load32(h + 4) == 0 then prim.int_to_ptr(0) else prim.int_to_ptr(h + 12)
+}
+
+fn __ffi_copy(dst: Int, src: Int, n: Int, i: Int) -> Int = if i >= n then 0
+else {
+  prim.store8(dst + i, prim.load8(src + i))
+  __ffi_copy(dst, src, n, i + 1)
+}
+
+@implements("ffi.__load")
+fn ffi_load(base: Handle, off: Int, n: Int) -> Bytes = {
+  let src = prim.ptr_to_int(base)
+  if src == 0 or n <= 0 then prim.alloc_bytes(0)
+  else {
+    let out = prim.alloc_bytes(n)
+    let oh = prim.handle(out)
+    let _c = __ffi_copy(oh + 12, src + off, n, 0)
+    out
+  }
+}
+
+@implements("ffi.__store")
+fn ffi_store(base: Handle, off: Int, b: Bytes) -> Unit = {
+  let dst = prim.ptr_to_int(base)
+  let h = prim.handle(b)
+  let n = if dst == 0 then 0 else prim.load32(h + 4)
+  let _c = __ffi_copy(dst + off, h + 12, n, 0)
+  ()
+}
 "#;
 pub const SRC_FLOAT: &str = r#"
 
@@ -11902,9 +11902,14 @@ fn wrap(handler: HttpHandler, middleware: List[HttpMiddleware]) -> HttpHandler =
 
 fn __apply(mw: HttpMiddleware, inner: HttpHandler) -> HttpHandler = mw(inner)
 
-/// JSON body through decode; err is a 400 response.
-fn decode_json[T](req: HttpRequest, decode: (Value) -> Result[T, String]) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
-  ok(v) => match decode(v) {
+
+
+
+
+/// JSON body into input type T, strictly; err is a 400 response.
+@input_sink
+fn decode_json[T: Decode](req: HttpRequest) -> Result[T, HttpResponse] = match json.parse(http.req_body(req)) {
+  ok(v) => match T.decode_strict(v) {
     ok(x) => ok(x),
     err(e) => err(http.response(400, "Bad Request: " + e)),
   },
@@ -28692,9 +28697,9 @@ fn select_rows_f32(data: Bytes, offset: Int, cols: Int, row_ids: List[Int]) -> M
 @intrinsic("almide_rt_matrix_to_lists")
 fn to_lists(m: Matrix) -> List[List[Float]] = _
 
-/// Element at (row, col); out of range aborts.
+/// Element at (row, col); none out of range.
 @intrinsic("almide_rt_matrix_get")
-fn get(m: Matrix, row: Int, col: Int) -> Float = _
+fn get(m: Matrix, row: Int, col: Int) -> Float? = _
 
 /// Row count; 0 for an empty matrix.
 @intrinsic("almide_rt_matrix_rows")
@@ -28746,9 +28751,9 @@ fn pow(m: Matrix, exp: Float) -> Matrix = _
 fn map(m: Matrix, f: (Float) -> Float) -> Matrix = _
 
 
-/// f32 LE rows x cols at offset; all 0 if data short.
+/// f32 LE rows x cols at offset; none if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f32_le")
-fn from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f32_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 /// Row-major f64 LE, 8 bytes per element.
 @intrinsic("almide_rt_matrix_to_bytes_f64_le")
@@ -28762,13 +28767,13 @@ fn to_bytes_f32_le(m: Matrix) -> Bytes = _
 @intrinsic("almide_rt_matrix_to_bytes_f16_le")
 fn to_bytes_f16_le(m: Matrix) -> Bytes = _
 
-/// f16 LE rows x cols at offset; all 0 if data short.
+/// f16 LE rows x cols at offset; none if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f16_le")
-fn from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f16_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
-/// f64 LE rows x cols at offset; all 0 if data short.
+/// f64 LE rows x cols at offset; none if data short.
 @intrinsic("almide_rt_matrix_from_bytes_f64_le")
-fn from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix = _
+fn from_bytes_f64_le(b: Bytes, offset: Int, rows: Int, cols: Int) -> Matrix? = _
 
 
 /// bias added to each row; cols cut to bias.
@@ -29151,20 +29156,22 @@ fn matrix_cols(m: List[List[Float]]) -> Int = {
 
 
 
-fn __mx_bounds(idx: Int, extent: Int) -> Int = {
-  if idx < 0 or idx >= extent then prim.die(prim.handle("Error: matrix index out of bounds\n")) else ()
-  0
-}
 
-fn matrix_get(m: List[List[Float]], row: Int, col: Int) -> Float = {
+fn __mx_get_none() -> Float? = none
+
+fn __mx_get_some(x: Float) -> Float? = some(x)
+
+fn matrix_get(m: List[List[Float]], row: Int, col: Int) -> Float? = {
   let h = prim.handle(m)
   let rows = prim.load32(h + 4)
-  let _gr = __mx_bounds(row, rows)
-  let rh = prim.load64(h + 12 + row * 8)
+  if row < 0 or row >= rows then __mx_get_none()
+  else {
+    let rh = prim.load64(h + 12 + row * 8)
 
-  let cols = prim.load32(rh + 4)
-  let _gc = __mx_bounds(col, cols)
-  prim.ffrombits(prim.load64(rh + 12 + col * 8))
+    let cols = prim.load32(rh + 4)
+    if col < 0 or col >= cols then __mx_get_none()
+    else __mx_get_some(prim.ffrombits(prim.load64(rh + 12 + col * 8)))
+  }
 }
 
 
@@ -29485,7 +29492,13 @@ else {
 
 
 
-fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+
+
+fn __mx_load_none() -> List[List[Float]]? = none
+
+fn __mx_load_some(m: List[List[Float]]) -> List[List[Float]]? = some(m)
+
+fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let hd = prim.handle(data)
   let len = prim.load32(hd + 4)
 
@@ -29507,11 +29520,11 @@ fn matrix_from_bytes_f32_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
 
 
 
-  if offset < 0 or offset > len or need > len - offset then __mx_const(r, c, 0.0)
+  if offset < 0 or offset > len or need > len - offset then __mx_load_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __mx_f32_rows(prim.handle(out), hd, offset, r, c, 0)
-    out
+    __mx_load_some(out)
   }
 }
 
@@ -29604,7 +29617,7 @@ fn __mx_f16_decode(bits: Int) -> Float = {
   }
 }
 
-fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let hd = prim.handle(data)
   let len = prim.load32(hd + 4)
 
@@ -29623,11 +29636,11 @@ fn matrix_from_bytes_f16_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
 
 
 
-  if offset < 0 or offset > len or need > len - offset then __mx_const(r, c, 0.0)
+  if offset < 0 or offset > len or need > len - offset then __mx_load_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __mx_f16_rows(prim.handle(out), hd, offset, r, c, 0)
-    out
+    __mx_load_some(out)
   }
 }
 
@@ -30023,7 +30036,11 @@ else {
   __fb64_rows(ho, base, r, c, i + 1)
 }
 
-fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]] = {
+fn __fb64_none() -> List[List[Float]]? = none
+
+fn __fb64_some(m: List[List[Float]]) -> List[List[Float]]? = some(m)
+
+fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> List[List[Float]]? = {
   let bh = prim.handle(data)
   let len = prim.load32(bh + 4)
 
@@ -30037,11 +30054,11 @@ fn matrix_from_bytes_f64_le(data: Bytes, offset: Int, rows: Int, cols: Int) -> L
   if r > 0 and c > 268435456 / r then prim.die(prim.handle("Error: matrix dimensions too large\n")) else ()
 
 
-  if offset < 0 or offset > len or r * c * 8 > len - offset then __mxe_zeros(r, c)
+  if offset < 0 or offset > len or r * c * 8 > len - offset then __fb64_none()
   else {
     let out: List[List[Float]] = prim.alloc_list_str(r)
     let _x = __fb64_rows(prim.handle(out), bh + 12 + offset, r, c, 0)
-    out
+    __fb64_some(out)
   }
 }
 "#;
@@ -30127,7 +30144,8 @@ fn matrix_linear_f32_row_no_bias(x: Matrix, w_bytes: Bytes, w_offset: Int, w_row
   if rows == 0 or w_rows <= 0 or w_cols <= 0 then matrix.zeros(rows, w_rows)
   else {
     let off = if w_offset < 0 then 0 else w_offset
-    let w = matrix.from_bytes_f32_le(w_bytes, off, w_rows, w_cols)
+
+    let w = matrix.from_bytes_f32_le(w_bytes, off, w_rows, w_cols) ?? matrix.zeros(w_rows, w_cols)
     matrix.linear_row_no_bias(x, w)
   }
 }
@@ -32129,10 +32147,9 @@ fn join(base: String, child: String) -> String = {
 
   if string.starts_with(child, "/") then child
   else {
-    let b = if string.ends_with(base, "/") then string.slice(base, 0, string.len(base) - 1)
-    else base
+    let n = if string.ends_with(base, "/") then string.len(base) - 1 else string.len(base)
 
-    if string.len(b) > 0 then b + "/" + child
+    if n > 0 then string.slice(base, 0, n) + "/" + child
     else if string.starts_with(base, "/") then "/" + child
     else child
   }
@@ -32599,11 +32616,13 @@ fn path_exists(path: String) -> Bool = _
 
 
 
+
+
 @intrinsic("almide_rt_prim_ptr_to_int")
-fn ptr_to_int(p: RawPtr) -> Int = _
+fn ptr_to_int(p: Handle) -> Int = _
 
 @intrinsic("almide_rt_prim_int_to_ptr")
-fn int_to_ptr(a: Int) -> RawPtr = _
+fn int_to_ptr(a: Int) -> Handle = _
 
 
 
@@ -46899,7 +46918,6 @@ pub fn source_of(stem: &str) -> Option<&'static str> {
         "bytes_f16" => Some(SRC_BYTES_F16),
         "bytes_lenprefix" => Some(SRC_BYTES_LENPREFIX),
         "bytes_mutate" => Some(SRC_BYTES_MUTATE),
-        "bytes_rawptr" => Some(SRC_BYTES_RAWPTR),
         "bytes_skip" => Some(SRC_BYTES_SKIP),
         "bytes_split" => Some(SRC_BYTES_SPLIT),
         "bytes_string" => Some(SRC_BYTES_STRING),
