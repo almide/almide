@@ -740,7 +740,7 @@
 18	13	174	18	spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
 1985	1947	136865	1985	spec/wasm_cross/regex_captures_accumulator_release.almd
 172	144	9819456	172	spec/wasm_cross/regex_counted_repetition.almd
-1046	979	260310	1046	spec/wasm_cross/regex_engine.almd
+1173	1106	321881	1173	spec/wasm_cross/regex_engine.almd
 2452	2208	583105	2452	spec/wasm_cross/regex_fuzz_batch.almd
 155	139	6105	142	spec/wasm_cross/regex_invalid_pattern.almd
 164	130	310430	164	spec/wasm_cross/regex_linear_time.almd

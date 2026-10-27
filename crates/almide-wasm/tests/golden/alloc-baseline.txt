@@ -740,7 +740,7 @@
 66208	spec/wasm_cross/ref_rust_or_pattern_heap_subject.almd
 71632	spec/wasm_cross/regex_captures_accumulator_release.almd
 3737056	spec/wasm_cross/regex_counted_repetition.almd
-75216	spec/wasm_cross/regex_engine.almd
+75360	spec/wasm_cross/regex_engine.almd
 131280	spec/wasm_cross/regex_fuzz_batch.almd
 72976	spec/wasm_cross/regex_invalid_pattern.almd
 200432	spec/wasm_cross/regex_linear_time.almd
@@ -993,9 +993,9 @@
 69584	spec/wasm_cross/wide_function_body.almd
 87536	spec/wasm_cross/witness_straightline.almd
 67600	spec/wasm_cross/zip_view_shape.almd
-87824	spec/wasm_cross/zlib_call_vs_user_namesake.almd
-88240	spec/wasm_cross/zlib_output_bound.almd
-102992	spec/wasm_cross/zlib_selfhost.almd
+87936	spec/wasm_cross/zlib_call_vs_user_namesake.almd
+88352	spec/wasm_cross/zlib_output_bound.almd
+103104	spec/wasm_cross/zlib_selfhost.almd
 66432	spec/wasm_fail/bigint_pow_ceiling_aborts.almd
 139040	spec/wasm_fail/bigint_to_string_limit_aborts.almd
 66032	spec/wasm_fail/effect_err_aborts_both_legs.almd
