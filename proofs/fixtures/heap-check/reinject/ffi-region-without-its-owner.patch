@@ -1,0 +1,12 @@
+diff --git a/stdlib/ffi.almd b/stdlib/ffi.almd
+--- a/stdlib/ffi.almd
++++ b/stdlib/ffi.almd
+@@ -44,7 +44,7 @@
+   else {
+     let buf = bytes.zeros(n)
+     let base = __address(buf)
+-    ok({ owner: buf, base: base, len: n, writable: true, keep: () => () })
++    ok({ owner: bytes.new(), base: base, len: n, writable: true, keep: () => () })
+   }
+ 
+ /// The region's length in bytes.

@@ -1,0 +1,23 @@
+// A write past the end of a block, spelled in the primitive floor. Since
+// ADR-0031 no user program can write past a buffer's end (every Region access
+// is bounds-checked), so this control is checked with `--stdlib-authority` on
+// this directory, the grant the stdlib's own sources have (E085 otherwise).
+
+fn poke(addr: Int, i: Int, n: Int) -> Unit = if i >= n then () else {
+  prim.store8(addr + i, 7)
+  poke(addr, i + 1, n)
+}
+
+// Writes 16 bytes into a 4-byte buffer: the 12 past its end land in the heap
+// beyond it, silently unless the allocator keeps a canary there. The buffer
+// dies when this returns, and `$free` checks the canary.
+fn overrun() -> Int = {
+  let small = bytes.zeros(4)
+  poke(prim.handle(small) + 12, 0, 16)
+  bytes.len(small)
+}
+
+effect fn main() -> Unit = {
+  let n = overrun()
+  println("wrote 16 into ${n}")
+}

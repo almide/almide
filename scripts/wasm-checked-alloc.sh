@@ -13,9 +13,13 @@
 #
 # Two negative controls must exit 0 in the ordinary build (the corruption is
 # silent) and 70 with their message under the switch, or the check has no
-# teeth and the gate fails: proofs/fixtures/heap-check/uaf_write.almd writes
-# through a dangling `ffi` address, and overrun_write.almd writes 16 bytes
-# into a 4-byte buffer.
+# teeth and the gate fails: proofs/fixtures/heap-check/raw/uaf_write.almd
+# writes through a dangling address, and overrun_write.almd writes 16 bytes
+# into a 4-byte buffer. Since ADR-0031 no user program can spell either (a
+# Region holds its owner and every access is bounds-checked), so they are
+# written in the primitive floor and built with `--stdlib-authority` on their
+# directory. The Region mechanisms themselves are re-injected by
+# scripts/wasm-checked-alloc-reinject.sh (ffi-region-*.patch).
 #
 # The sandbox (#4224): each run gets the cwd preopened as `.` and a FRESH,
 # real temp root preopened at /tmp — the guest's `$TMPDIR` is unset, so its
@@ -45,12 +49,13 @@ with_timeout() {
   if command -v timeout >/dev/null; then timeout "$RUN_TIMEOUT" "$@"; else "$@"; fi
 }
 
-# build <src> <out.wasm> <checked:0|1> → 0 when it built
+# build <src> <out.wasm> <checked:0|1> [extra flags…] → 0 when it built
 build() {
-  if [ "$3" = 1 ]; then
-    ALMIDE_WASM_CHECKED_ALLOC=1 "$ALMIDE" build "$1" --target wasm -o "$2" >/dev/null 2>&1
+  local src="$1" out="$2" checked="$3"; shift 3
+  if [ "$checked" = 1 ]; then
+    ALMIDE_WASM_CHECKED_ALLOC=1 "$ALMIDE" build "$src" --target wasm -o "$out" "$@" >/dev/null 2>&1
   else
-    env -u ALMIDE_WASM_CHECKED_ALLOC "$ALMIDE" build "$1" --target wasm -o "$2" >/dev/null 2>&1
+    env -u ALMIDE_WASM_CHECKED_ALLOC "$ALMIDE" build "$src" --target wasm -o "$out" "$@" >/dev/null 2>&1
   fi
 }
 
@@ -85,8 +90,10 @@ echo "  ok: with the temp root exit 0 ('temp root served'); without it exit $(ca
 # control <fixture> <message fragment> <what it does>
 control() {
   echo "== negative control: $3 =="
-  local f="$ROOT/proofs/fixtures/heap-check/$1"
-  build "$f" "$tmp/c0.wasm" 0 && build "$f" "$tmp/c1.wasm" 1 || { echo "FAIL: the control $1 does not build" >&2; exit 1; }
+  local dir="$ROOT/proofs/fixtures/heap-check/raw" f
+  f="$dir/$1"
+  build "$f" "$tmp/c0.wasm" 0 --stdlib-authority "$dir" && build "$f" "$tmp/c1.wasm" 1 --stdlib-authority "$dir" \
+    || { echo "FAIL: the control $1 does not build" >&2; exit 1; }
   run "$tmp/c0.wasm" "$tmp/c0"; run "$tmp/c1.wasm" "$tmp/c1"
   local c0 c1; c0=$(cat "$tmp/c0.rc"); c1=$(cat "$tmp/c1.rc")
   if [ "$c0" != 0 ] || [ "$c1" != 70 ] || ! grep -q "$2" "$tmp/c1.err"; then
