@@ -128,7 +128,9 @@ fn a_test_lane_failure_shows_the_same_operands_on_every_lane() {
         let mut args = vec!["test", "eq_test.almd"];
         args.extend_from_slice(lane);
         let (rc, out) = run(&args, &d);
-        check_route(&format!("{route} (assert_eq)"), rc, &out, &[&format!("expected: {OTHER}"), &format!("found:    {SHOWN}")]);
+        // The report pads `found:`; `--target wasm` prints the block as is.
+        let found = if out.contains(&format!("found:    {SHOWN}")) { format!("found:    {SHOWN}") } else { format!("found: {SHOWN}") };
+        check_route(&format!("{route} (assert_eq)"), rc, &out, &[&format!("expected: {OTHER}"), &found]);
         let mut args = vec!["test", "ne_test.almd"];
         args.extend_from_slice(lane);
         let (rc, out) = run(&args, &d);
