@@ -1,6 +1,6 @@
 test "map.fold sums values" {
   let m = ["a": 1, "b": 2, "c": 3]
-  let total = map.fold(m, 0, (acc, k, v) => acc + v)
+  let total = map.fold(m, 0, (acc, (k, v)) => acc + v)
   assert_eq(total, 6)
 }
 

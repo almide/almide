@@ -41,7 +41,7 @@ fn counter(i: Int) -> Int = {
   map.len(m) + map.len(shared) + string.len(vs) + f + list.len(map.to_list(doubled)) + map.fold(
     m,
     0,
-    (acc, k, v) => acc + v,
+    (acc, (k, v)) => acc + v,
   )
 }
 
