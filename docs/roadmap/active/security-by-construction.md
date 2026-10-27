@@ -116,7 +116,7 @@ Gaps the sweep found inside rows 1–16 (each row's status changes only in its g
 1. **Close class 5 first.** Ordinary code can no longer corrupt memory: the stdlib redesign's
    `ffi` module (R-ffi-01/02, R-L0-45) took the raw-address surface, #4008 made `--profile critical`
    refuse `ffi` and `@extern`, and #4043 made every `@memory_unsafe` call outside the stdlib need
-   the file's `import ffi` (negative fixtures `tests/diagnostics/e100-no-import-ffi-oob-*`).
+   the file's `import ffi` (negative fixtures `tests/diagnostics/e003-no-import-ffi-region-*`).
    What is left is the build receipt: a build that reaches `ffi` or `@extern` must say so (#4008).
 2. **Bound untrusted input** (#4019, #4020, #4021) and **scope file access** (#4022): these are
    behaviour changes with contracts and cross-target fixtures. They moved rows 9 and 10 to partly;
