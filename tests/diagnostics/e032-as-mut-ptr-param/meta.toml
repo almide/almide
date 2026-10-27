@@ -1,4 +1,0 @@
-expects_code = "E032"
-expects_error = "cannot pass immutable binding 'dst' to `mut` parameter of bytes.as_mut_ptr()"
-hint_substring = "declare it `mut dst: Bytes`"
-contract = "C-062"

@@ -332,14 +332,16 @@ fn remove_all_as(path: String, call: String) -> Result[Unit, String] = _
 @intrinsic("almide_rt_prim_path_exists")
 fn path_exists(path: String) -> Bool = _
 
-// RawPtr ⇄ Int reinterpret casts — the SAME i64 scalar at the value level (a raw
+// Handle ⇄ Int reinterpret casts — the SAME i64 scalar at the value level (a raw
 // linear-memory address); the v1 lowering emits NO op (identity), the type system
-// just changes hats. The bytes_rawptr bridge's address arithmetic runs on Int.
+// just changes hats. The ffi bridge's address arithmetic (stdlib/ffi_bridge.almd)
+// runs on Int. No user file can name them (E085): a user-reachable Int → pointer
+// path would bypass every Region bounds check (ADR-0031 D4).
 @intrinsic("almide_rt_prim_ptr_to_int")
-fn ptr_to_int(p: RawPtr) -> Int = _
+fn ptr_to_int(p: Handle) -> Int = _
 
 @intrinsic("almide_rt_prim_int_to_ptr")
-fn int_to_ptr(a: Int) -> RawPtr = _
+fn int_to_ptr(a: Int) -> Handle = _
 
 // The path_filestat_get WASI FULL-stat query, packaged as ONE high-level SCALAR prim — a
 // FS-READ sandbox exit (Capability::FsRead, same accounting as path_exists). Writes the raw

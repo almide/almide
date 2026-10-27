@@ -554,34 +554,7 @@ pub fn almide_rt_bytes_read_string_be(b: &Vec<u8>, pos: i64) -> AlmideString {
     };
     __almide_out.into()
 }
-// An EMPTY buffer has no data region, so both return NULL (which every bridge
-// consumer already treats as "move nothing"): `Vec::as_ptr` on an empty Vec is a
-// DANGLING sentinel, and `copy_to_ptr` through it was UB — a safe Almide program
-// corrupted the native heap and died silently while the wasm leg wrote past the
-// empty block and continued (differential fuzz, 2026-08-10 night). Mirrored by
-// the wasm self-host (stdlib/bytes_rawptr.almd), C-062.
-pub fn almide_rt_bytes_as_ptr(b: &Vec<u8>) -> *mut u8 {
-    if b.is_empty() { std::ptr::null_mut() } else { b.as_ptr() as *mut u8 }
-}
-pub fn almide_rt_bytes_as_mut_ptr(b: &mut Vec<u8>) -> *mut u8 {
-    if b.is_empty() { std::ptr::null_mut() } else { b.as_mut_ptr() }
-}
-
-/// Create Bytes from a raw pointer + length (unsafe: caller must ensure validity).
-pub fn almide_rt_bytes_from_raw_ptr(ptr: *mut u8, len: i64) -> Vec<u8> {
-    if ptr.is_null() || len <= 0 { return Vec::new(); }
-    unsafe { std::slice::from_raw_parts(ptr, len as usize).to_vec() }
-}
-
-/// Copy Bytes content to a raw pointer. Returns number of bytes written.
-pub fn almide_rt_bytes_copy_to_ptr(b: &Vec<u8>, ptr: *mut u8, cap: i64) -> i64 {
-    if ptr.is_null() { return 0; }
-    let n = b.len().min(cap as usize);
-    unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), ptr, n); }
-    n as i64
-}
-
-// ── In-place little-endian writes & data pointer ──
+// ── In-place little-endian writes ──
 
 pub fn almide_rt_bytes_set_f32_le(b: &mut Vec<u8>, pos: i64, val: f64) {
     let bytes = canonical_f32(val).to_le_bytes();
@@ -823,10 +796,6 @@ pub fn almide_rt_bytes_read_f64_be_array(b: &Vec<u8>, pos: i64, count: i64) -> V
         p += 8;
     }
     out
-}
-
-pub fn almide_rt_bytes_data_ptr(b: &Vec<u8>) -> i64 {
-    b.as_ptr() as i64
 }
 
 // ── Little-endian reads (match stdlib/defs/bytes.toml) ──
