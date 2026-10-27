@@ -18,6 +18,8 @@ pub mod bundled_reach;
 /// E008 generalized (ADR-0020 §3): no `var` reachable from a concurrent body.
 pub mod concurrent_reach;
 pub mod concurrent_reach_types;
+/// E110 phase 2 (#4232): request data decoded by hand into a type also sent out.
+pub mod request_flow;
 
 /// The one implementation of integer-literal decoding.
 mod literals;
