@@ -60,13 +60,17 @@ fn run_leg(path: &Path, env: &[(&str, &str)], wasm: bool) -> (bool, String, Stri
 
 /// The issue's rows (bind + equality, match, param, `${e}`), first pinned on
 /// `bytes.Endian`; that type left the stdlib and no auto-imported stdlib
-/// VARIANT remains, so the rows now spell the auto-imported generic record
-/// `deque.Deque` by its literal, with no `deque.*` call and no import.
+/// VARIANT remains, so the rows spell the auto-imported generic record
+/// `deque.Deque`, with no import. `Deque` is opaque since #4256, so no
+/// auto-imported stdlib record can be built by its literal any more: a row
+/// reaches its value through the module's constructor and keeps the type
+/// spelled in the bind and param positions. The spelling
+/// with no module call at all is gate 2's matrix.
 const ROWS: &[(&str, &str, &str)] = &[
-    ("eq", "effect fn main() -> Unit = {\n  let d: Deque[Int] = Deque { front: [1], back: [] }\n  println(\"${d == Deque { front: [2], back: [] }}\")\n}\n", "false\n"),
-    ("match", "effect fn main() -> Unit = {\n  let d: Deque[Int] = Deque { front: [1], back: [2, 3] }\n  let n = match d { Deque { front, back } => list.len(front) + list.len(back) }\n  println(\"${n}\")\n}\n", "3\n"),
-    ("param", "fn size(d: Deque[Int]) -> Int = match d { Deque { front, back } => list.len(front) + list.len(back) }\neffect fn main() -> Unit = {\n  println(\"${size(Deque { front: [], back: [4, 5] })}\")\n}\n", "2\n"),
-    ("repr", "effect fn main() -> Unit = {\n  let d: Deque[Int] = Deque { front: [1], back: [2] }\n  println(\"${d}\")\n}\n", "Deque { front: [1], back: [2] }\n"),
+    ("eq", "effect fn main() -> Unit = {\n  let d: Deque[Int] = deque.from_list([1])\n  println(\"${d == deque.from_list([2])}\")\n}\n", "false\n"),
+    ("match", "effect fn main() -> Unit = {\n  let d: Deque[Int] = deque.from_list([1, 2, 3])\n  let n = match deque.first(d) { some(x) => x + deque.len(d), none => 0 }\n  println(\"${n}\")\n}\n", "4\n"),
+    ("param", "fn size(d: Deque[Int]) -> Int = deque.len(d)\neffect fn main() -> Unit = {\n  println(\"${size(deque.from_list([4, 5]))}\")\n}\n", "2\n"),
+    ("repr", "effect fn main() -> Unit = {\n  let d: Deque[Int] = deque.from_list([1, 2])\n  println(\"${d}\")\n}\n", "Deque { front: [], back: [1, 2] }\n"),
 ];
 
 #[test]
