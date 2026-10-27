@@ -38,9 +38,22 @@ effect fn main() -> Unit = {
     ok(_) => println("scheme:unexpected-ok"),
     err(e) => println("scheme:${e}"),
   }
-  // (The out-of-range port probe left with `http.get_status`: the framed
-  // client now reaches wasi:http on the wasm lane, which names the bad port
-  // differently from native — #4231 restores the probe with the fix.)
+  // #4231: a port outside 1..=65535 (or not digits) is rt-core's
+  // `invalid port` text on both lanes — the wasm lane's framed client
+  // reaches wasi:http, so its shim checks the port before the host does.
+  for url in [
+    "http://127.0.0.1:99999/",
+    "http://127.0.0.1:0/",
+    "http://127.0.0.1:8a/",
+    "http://u:pw@127.0.0.1:65536/p?q",
+    "http://[::1]:70000/",
+    "http://127.0.0.1:000000000000000000080x/",
+  ] {
+    match http.get_response(url) {
+      ok(_) => println("port:unexpected-ok"),
+      err(e) => println("port:${e}"),
+    }
+  }
   match http.request("GET", "http://127.0.0.1:1/x", "", [("X-A", "1\r\nX-B: 2")]) {
     ok(_) => println("inject:unexpected-ok"),
     err(e) => println("inject:${e}"),

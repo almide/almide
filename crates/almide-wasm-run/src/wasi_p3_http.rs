@@ -132,9 +132,12 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
         (2, ValType::I64),
         (10, ValType::I32),
         (10, ValType::I32),
+        (8, ValType::I32),
     ]);
     // The URL's userinfo (wasi_p3_http_auth.rs).
     let al = AuthLocals { ui_ptr: 60, ui_len: 61, j: 62, b: 63, v: 64, w: 65, dec: 66, dlen: 67, enc: 68, flag: 69 };
+    // The port check (wasi_p3_http_err.rs, #4231).
+    let pl = PortLocals { e: 70, j: 71, ps: 72, v: 73, ok: 74, b: 75, q: 76, qn: 77 };
     let mut i = f.instructions();
     // ── the framed ops (48 / 49 / 65): parse the http_framed cell frame in `b` ──
     // `<len>\n<payload>` cells with CHAR-count lengths (string.len
@@ -181,6 +184,8 @@ fn shim_http(g: P3Globals, h: &HttpAbi, t: &HttpErrTexts, fns: HttpErrFns) -> Fu
     i.local_get(k).local_get(rest).i32_sub().local_set(auth_len);
     // rt-core never sends the userinfo in the authority (C-328).
     http_strip_userinfo(&mut i, (auth_ptr, auth_len), al);
+    // rt-core refuses a port outside 1..=65535 before any request exists.
+    http_url_port(&mut i, t, fns, f_alloc, (auth_ptr, auth_len), pl);
     i.local_get(k).local_get(a_len).i32_lt_u().if_(BlockType::Empty);
     i.local_get(a_ptr).local_get(k).i32_add().local_set(path_ptr);
     i.local_get(a_len).local_get(k).i32_sub().local_set(path_len);

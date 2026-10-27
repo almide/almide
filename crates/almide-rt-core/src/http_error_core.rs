@@ -70,6 +70,9 @@ pub const HTTP_ERR_URL_SLASHES: [&str; 2] = ["expected \"//\" after \"", ":\""];
 /// `unsupported scheme "<scheme>" (…)` — the scheme lowercased (a scheme is
 /// letters, digits, `+`, `-` and `.`, so quoting it adds only the quotes).
 pub const HTTP_ERR_URL_SCHEME: [&str; 2] = ["unsupported scheme \"", "\" (only http:// and https:// are supported)"];
+/// `invalid port <quoted port> (…)` — the port text as written; the p3 shim
+/// finds it too (#4231).
+pub const HTTP_ERR_URL_PORT: [&str; 2] = ["invalid port ", " (expected a number from 1 to 65535)"];
 
 /// refused-header: `(head, tail)` around the quoted field name.
 pub const HTTP_ERR_HEADER_NAME: (&str, &str) =

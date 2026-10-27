@@ -225,7 +225,10 @@ fn http_url_port(port_text: Option<&str>, default_port: u16) -> Result<u16, Stri
         None | Some("") => Ok(default_port),
         Some(p) => match p.parse::<u16>() {
             Ok(n) if n > 0 && p.bytes().all(|b| b.is_ascii_digit()) => Ok(n),
-            _ => Err(format!("invalid port {} (expected a number from 1 to 65535)", http_quote(p))),
+            _ => {
+                let [head, tail] = HTTP_ERR_URL_PORT;
+                Err(format!("{}{}{}", head, http_quote(p), tail))
+            }
         },
     }
 }

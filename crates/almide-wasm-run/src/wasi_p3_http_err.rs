@@ -29,6 +29,8 @@ struct HttpErrTexts {
     url_no_scheme: Piece,
     url_slashes: [Piece; 2],
     url_scheme: [Piece; 2],
+    /// `: invalid port ` and its tail, around the quoted port (#4231).
+    url_port: [Piece; 2],
     /// `[name, value, forbidden]` × `[head, tail]`.
     hdr: [[Piece; 2]; 3],
     too_large: [Piece; 3],
@@ -67,6 +69,8 @@ impl HttpErrTexts {
         let url_slashes = [put(format!(": {sh}").as_bytes()), put(st.as_bytes())];
         let [ch, ct] = hc::HTTP_ERR_URL_SCHEME;
         let url_scheme = [put(format!(": {ch}").as_bytes()), put(ct.as_bytes())];
+        let [ph, pt] = hc::HTTP_ERR_URL_PORT;
+        let url_port = [put(format!(": {ph}").as_bytes()), put(pt.as_bytes())];
         let hdr = [hc::HTTP_ERR_HEADER_NAME, hc::HTTP_ERR_HEADER_VALUE, hc::HTTP_ERR_HEADER_FORBIDDEN]
             .map(|(head, tail)| [put(head.as_bytes()), put(tail.as_bytes())]);
         let too_large = hc::HTTP_ERR_TOO_LARGE.map(|t| put(t.as_bytes()));
@@ -126,6 +130,7 @@ impl HttpErrTexts {
             url_no_scheme,
             url_slashes,
             url_scheme,
+            url_port,
             hdr,
             too_large,
             key_timeout,
@@ -379,6 +384,131 @@ fn shim_http_err(g: P3Globals, quote: u32) -> Function {
     i.global_get(g_plen).i64_extend_i32_u().i64_or();
     i.end();
     f
+}
+
+/// The locals `http_url_port` works in.
+#[derive(Clone, Copy)]
+struct PortLocals {
+    /// End of the host:port run (the first `?` / `#`, or the span's end).
+    e: u32,
+    j: u32,
+    /// Offset of the port text, or -1 when the authority names none.
+    ps: u32,
+    v: u32,
+    ok: u32,
+    b: u32,
+    /// The quoted port's buffer and length.
+    q: u32,
+    qn: u32,
+}
+
+/// The port half of rt-core's `http_parse_url` (#4231): the authority (its
+/// userinfo already stripped) is `host[:port]` or `[v6][:port]`, and a port
+/// text that is not 1..=65535 in ASCII digits is `invalid port "<it>"` —
+/// rt-core's reason, where wasi:http would answer HTTP-request-URI-invalid.
+/// An empty port is the scheme's default. Shapes rt-core refuses for their
+/// host first (an empty host, a second `:` outside brackets, an unterminated
+/// or trailing-garbage IPv6 literal) are left to the host as before.
+fn http_url_port(
+    i: &mut wasm_encoder::InstructionSink<'_>,
+    t: &HttpErrTexts,
+    fns: HttpErrFns,
+    f_alloc: u32,
+    (auth_ptr, auth_len): (u32, u32),
+    l: PortLocals,
+) {
+    let (a_ptr, a_len) = (1u32, 2u32);
+    let PortLocals { e, j, ps, v, ok, b, q, qn } = l;
+    let byte = |i: &mut wasm_encoder::InstructionSink<'_>, at: u32| {
+        i.local_get(auth_ptr).local_get(at).i32_add().i32_load8_u(mem8(0));
+    };
+    // e = the first `?` or `#`, or the span's end.
+    i.i32_const(0).local_set(e);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(e).local_get(auth_len).i32_ge_u().br_if(1);
+    byte(i, e);
+    i.local_set(b);
+    i.local_get(b).i32_const('?' as i32).i32_eq();
+    i.local_get(b).i32_const('#' as i32).i32_eq().i32_or().br_if(1);
+    i.local_get(e).i32_const(1).i32_add().local_set(e);
+    i.br(0).end().end();
+    i.i32_const(-1).local_set(ps);
+    i.local_get(e).i32_const(0).i32_gt_u().if_(BlockType::Empty);
+    i.local_get(auth_ptr).i32_load8_u(mem8(0)).i32_const('[' as i32).i32_eq().if_(BlockType::Empty);
+    // `[v6]:port` — j = the closing bracket.
+    i.i32_const(1).local_set(j);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(j).local_get(e).i32_ge_u().br_if(1);
+    byte(i, j);
+    i.i32_const(']' as i32).i32_eq().br_if(1);
+    i.local_get(j).i32_const(1).i32_add().local_set(j);
+    i.br(0).end().end();
+    i.local_get(j).i32_const(1).i32_add().local_get(e).i32_lt_u().if_(BlockType::Empty);
+    i.local_get(j).i32_const(1).i32_add().local_set(j);
+    byte(i, j);
+    i.i32_const(':' as i32).i32_eq().if_(BlockType::Empty);
+    i.local_get(j).i32_const(1).i32_add().local_set(ps);
+    i.end();
+    i.end();
+    i.else_();
+    // `host:port` — j = the first `:`; a non-empty host, no second `:`.
+    i.i32_const(0).local_set(j);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(j).local_get(e).i32_ge_u().br_if(1);
+    byte(i, j);
+    i.i32_const(':' as i32).i32_eq().br_if(1);
+    i.local_get(j).i32_const(1).i32_add().local_set(j);
+    i.br(0).end().end();
+    i.local_get(j).i32_const(0).i32_gt_u();
+    i.local_get(j).local_get(e).i32_lt_u().i32_and().if_(BlockType::Empty);
+    i.local_get(j).i32_const(1).i32_add().local_set(ps);
+    i.local_get(ps).local_set(j);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(j).local_get(e).i32_ge_u().br_if(1);
+    byte(i, j);
+    i.i32_const(':' as i32).i32_eq().if_(BlockType::Empty);
+    i.i32_const(-1).local_set(ps);
+    i.br(2);
+    i.end();
+    i.local_get(j).i32_const(1).i32_add().local_set(j);
+    i.br(0).end().end();
+    i.end();
+    i.end();
+    i.end();
+    // A non-empty port text: ASCII digits naming 1..=65535 (the value is
+    // held at 65536 once past the range, so it never overflows).
+    i.local_get(ps).i32_const(0).i32_ge_s();
+    i.local_get(ps).local_get(e).i32_lt_u().i32_and().if_(BlockType::Empty);
+    i.i32_const(0).local_set(v);
+    i.i32_const(1).local_set(ok);
+    i.local_get(ps).local_set(j);
+    i.block(BlockType::Empty).loop_(BlockType::Empty);
+    i.local_get(j).local_get(e).i32_ge_u().br_if(1);
+    byte(i, j);
+    i.i32_const('0' as i32).i32_sub().local_tee(b).i32_const(10).i32_ge_u().if_(BlockType::Empty);
+    i.i32_const(0).local_set(ok);
+    i.br(2);
+    i.end();
+    i.local_get(v).i32_const(10).i32_mul().local_get(b).i32_add().local_tee(v);
+    i.i32_const(65535).i32_gt_u().if_(BlockType::Empty);
+    i.i32_const(65536).local_set(v);
+    i.end();
+    i.local_get(j).i32_const(1).i32_add().local_set(j);
+    i.br(0).end().end();
+    i.local_get(ok).i32_eqz();
+    i.local_get(v).i32_eqz().i32_or();
+    i.local_get(v).i32_const(65535).i32_gt_u().i32_or().if_(BlockType::Empty);
+    // The port quoted as rt-core's `http_quote` quotes it, then the text.
+    i.i32_const(0).i32_const(0).i32_const(1);
+    i.local_get(e).local_get(ps).i32_sub().i32_const(6).i32_mul().i32_const(2).i32_add();
+    i.call(f_alloc).local_set(q);
+    i.local_get(auth_ptr).local_get(ps).i32_add();
+    i.local_get(e).local_get(ps).i32_sub();
+    i.local_get(q).i32_const(0).call(fns.quote);
+    i.local_get(q).i32_sub().local_set(qn);
+    http_err_call(i, fns, Quoted::Url(a_ptr, a_len), t.url_head, t.url_port[0], Some((q, qn)), t.url_port[1]);
+    i.end();
+    i.end();
 }
 
 /// `(name, name_len, value, value_len) -> code`: rt-core's
