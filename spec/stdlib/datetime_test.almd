@@ -227,7 +227,14 @@ test "datetime.parse_iso refuses a year outside 0..=9999 (#4118)" {
   assert_eq(parse_err(datetime.to_iso(253402300800)), "year out of range: 10000")
 }
 
-fn parts_err(y: Int, mo: Int, d: Int, h: Int, mi: Int, s: Int) -> String = match datetime.from_parts(y, mo, d, h, mi, s) {
+fn parts_err(y: Int, mo: Int, d: Int, h: Int, mi: Int, s: Int) -> String = match datetime.from_parts(
+  y,
+  mo,
+  d,
+  h,
+  mi,
+  s,
+) {
   ok(n) => "ok(${n})",
   err(e) => e,
 }

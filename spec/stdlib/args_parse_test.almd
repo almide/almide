@@ -26,14 +26,17 @@ test "-- ends option parsing" {
 
 test "everything after -- is positional, a second -- included" {
   assert_eq(
-    args.__positional([
-      "in.txt",
-      "-v",
-      "--",
-      "-d",
-      "--",
-      "x"
-    ], []),
+    args.__positional(
+      [
+        "in.txt",
+        "-v",
+        "--",
+        "-d",
+        "--",
+        "x"
+      ],
+      [],
+    ),
     ["in.txt", "-d", "--", "x"],
   )
   // with no option named, a value stays an ordinary argument (#4144)
