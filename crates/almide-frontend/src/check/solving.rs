@@ -399,14 +399,32 @@ impl Checker {
             (Ty::Named(na, _), Ty::Named(nb, _)) => self.unify_distinct_nominals(a, b, *na, *nb),
             (Ty::Named(_, _), _) => {
                 let resolved = self.env.resolve_named(a);
-                if resolved != *a { self.unify_infer(&resolved, b) } else { a.compatible(b) }
+                if resolved != *a { self.unify_infer(&resolved, b) }
+                else if self.opaque_against_record(a, b) { false }
+                else { a.compatible(b) }
             }
             (_, Ty::Named(_, _)) => {
                 let resolved = self.env.resolve_named(b);
-                if resolved != *b { self.unify_infer(a, &resolved) } else { a.compatible(b) }
+                if resolved != *b { self.unify_infer(a, &resolved) }
+                else if self.opaque_against_record(b, a) { false }
+                else { a.compatible(b) }
             }
             _ => return None,
         })
+    }
+
+    /// Is `named` a stdlib-owned nominal with no structural form (`Value`,
+    /// a runtime-backed handle — `resolve_named` leaves it as it is) and
+    /// `other` a record shape? `compatible` lets an unexpanded name meet any
+    /// record (the "one side not yet resolved" leniency), so a record reached
+    /// `json.stringify(v: Value)` as a `Value`: check green, rustc E0308 on
+    /// `&P` where `&AlmideValue` was expected (#4272). A type with no fields
+    /// is never a record's expansion.
+    fn opaque_against_record(&self, named: &Ty, other: &Ty) -> bool {
+        let Ty::Named(n, _) = named else { return false };
+        matches!(other, Ty::Record { .. } | Ty::OpenRecord { .. })
+            && !n.as_str().contains('.')
+            && almide_lang::stdlib_info::stdlib_owned_type_owner(n.as_str()).is_some()
     }
 
     /// Unify two nominal types with DIFFERENT names by expanding both to their
