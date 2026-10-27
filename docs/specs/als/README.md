@@ -44,7 +44,7 @@
 | [ALS-D3](./data-formats.md#als-d3-異種ネスト文書の走査) | 異種ネスト文書の走査 | C-063 |
 | [ALS-D4](./data-formats.md#als-d4-正規表現エンジン) | 正規表現エンジン | C-032, C-160, C-285, C-347, C-395 |
 | [ALS-D5](./data-formats.md#als-d5-半精度浮動小数のデコード) | 半精度浮動小数のデコード | C-037 |
-| [ALS-D6](./data-formats.md#als-d6-codec-と-json-デコード) | Codec と JSON デコード | C-084, C-085, C-095, C-098, C-103, C-209, C-211, C-216, C-217, C-357, C-427, C-428, C-429 |
+| [ALS-D6](./data-formats.md#als-d6-codec-と-json-デコード) | Codec と JSON デコード | C-084, C-085, C-095, C-098, C-103, C-209, C-211, C-216, C-217, C-357, C-427, C-428, C-429, C-435 |
 | [ALS-D7](./data-formats.md#als-d7-バイト列ブリッジ) | バイト列ブリッジ | C-062, C-090, C-376 |
 
 ## deterministic-time.md — 5 section(s)
@@ -101,13 +101,14 @@
 | [ALS-E30](./expressions.md#als-e30-ホールと未実装マーカーexprkindhole--todo--placeholder) | ホールと未実装マーカー(`ExprKind::Hole` / `Todo` / `Placeholder`) | C-268 |
 | [ALS-E31](./expressions.md#als-e31-スコープ付き領域exprkindscoped--scoped-fn) | スコープ付き領域(`ExprKind::Scoped` / `scoped fn`) | C-362, C-363, C-364 |
 
-## implementation.md — 3 section(s)
+## implementation.md — 4 section(s)
 
 | ID | Section | Contracts |
 |----|---------|-----------|
 | [ALS-I1](./implementation.md#als-i1-参照カウント規律（perceus）) | 参照カウント規律（Perceus） | C-041, C-066, C-071, C-086, C-121, C-122, C-130, C-149, C-146, C-159, C-319, C-334 |
 | [ALS-I2](./implementation.md#als-i2-コンパイラの決定性と資源) | コンパイラの決定性と資源 | C-040, C-059 |
 | [ALS-I3](./implementation.md#als-i3-v1-lowering-エッジの等価証拠) | v1 lowering エッジの等価証拠 | C-075, C-107, C-109, C-116, C-120, C-138, C-152, C-143, C-144, C-139, C-156, C-157, C-158, C-212, C-336 |
+| [ALS-I4](./implementation.md#als-i4-コンパイルコストの予算) | コンパイルコストの予算 | C-440 |
 
 ## runtime.md — 9 section(s)
 
@@ -120,7 +121,7 @@
 | [ALS-R5](./runtime.md#als-r5-プロセス環境) | プロセス環境 | C-096, C-112, C-118, C-133, C-189, C-214, C-215, C-290, C-327, C-330, C-328, C-329, C-331, C-366, C-367, C-370, C-374, C-375, C-377, C-378, C-379, C-382, C-383, C-385, C-389, C-390, C-394, C-404, C-405, C-407, C-408, C-409, C-415, C-416, C-417, C-418, C-420, C-421, C-431, C-434 |
 | [ALS-R6](./runtime.md#als-r6-ファイルシステムのパス解決) | ファイルシステムのパス解決 | C-042, C-137, C-220, C-225, C-227, C-228, C-229, C-230, C-270, C-272, C-273, C-278, C-282, C-283, C-284, C-392, C-393, C-396, C-397, C-398 |
 | [ALS-R7](./runtime.md#als-r7-ストリーミング行走査の可謬コールバック) | ストリーミング行走査の可謬コールバック | C-274, C-335 |
-| [ALS-R8](./runtime.md#als-r8-http-レスポンスヘッダの規範) | HTTP レスポンスヘッダの規範 | C-275, C-368, C-406, C-432 |
+| [ALS-R8](./runtime.md#als-r8-http-レスポンスヘッダの規範) | HTTP レスポンスヘッダの規範 | C-275, C-368, C-406, C-432, C-436 |
 | [ALS-R9](./runtime.md#als-r9-プロセス終了コードの値域) | プロセス終了コードの値域 | C-350, C-351 |
 
 ## semantics.md — 15 section(s)
@@ -190,4 +191,4 @@
 | [ALS-T30](./text-and-numbers.md#als-t30-testingassert_aborts-—-子で走る-abort-表明) | testing.assert_aborts — 子で走る abort 表明 | C-384 |
 | [ALS-T31](./text-and-numbers.md#als-t31-hmac-と定数時間比較) | HMAC と定数時間比較 | C-422, C-423 |
 
-137 sections across 11 chapters.
+138 sections across 11 chapters.
