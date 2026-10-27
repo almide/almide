@@ -1093,6 +1093,7 @@ spec/wasm_cross/while_loops.almd
 spec/wasm_cross/whilep_str.almd
 spec/wasm_cross/wide_function_body.almd
 spec/wasm_cross/witness_straightline.almd
+spec/wasm_cross/zip_view_shape.almd
 spec/wasm_cross/zlib_call_vs_user_namesake.almd
 spec/wasm_cross/zlib_output_bound.almd
 spec/wasm_cross/zlib_selfhost.almd
