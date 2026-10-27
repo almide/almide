@@ -196,7 +196,7 @@ mod tests {
     use almide_base::intern::sym;
 
     fn named(n: &str, args: Vec<Ty>) -> Ty {
-        Ty::Named(sym(n), args)
+        Ty::Named(sym(n), args.into())
     }
     fn list(t: Ty) -> Ty {
         Ty::Applied(TypeConstructorId::List, vec![t].into())

@@ -547,7 +547,7 @@ impl LowerCtx {
             Ty::Record { fields } => {
                 Some((fields.iter().map(|(n, _)| *n).collect(), fields.iter().map(|(_, t)| t.clone()).collect()))
             }
-            Ty::Tuple(elems) => Some((Vec::new(), elems.clone())),
+            Ty::Tuple(elems) => Some((Vec::new(), elems.clone().into_vec())),
             // The Applied spelling of a user record (`Applied(UserDefined("Pair"), args)`)
             // resolves exactly like `Named` — normalize and recurse.
             Ty::Applied(almide_lang::types::constructor::TypeConstructorId::UserDefined(n), args) => {
