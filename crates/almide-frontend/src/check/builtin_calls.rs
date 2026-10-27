@@ -22,6 +22,28 @@ pub(crate) fn types_mismatch(expected: &Ty, actual: &Ty) -> bool {
         && !expected.compatible(actual)
 }
 
+/// The output and abort builtins — the names a bare call resolves to BEFORE any
+/// user declaration (`check_builtin_call` runs first), with what each does.
+///
+/// The ONE table of these names (#4253). ADR-0022's `@pure` check reads it
+/// (the writes and aborts a plain `fn` may make and a `@pure` fn may not), and
+/// declaration registration refuses a top-level `fn` / `let` spelled with one
+/// of them: the builtin would answer every call to it, so the declaration
+/// could only ever be dead code — a redacting `fn println` that never runs.
+pub const OUTPUT_ABORT_BUILTINS: &[(&str, &str)] = &[
+    ("println", "writes to stdout"),
+    ("eprintln", "writes to stderr"),
+    ("panic", "aborts the program"),
+    ("assert", "aborts the program when it fails"),
+    ("assert_eq", "aborts the program when it fails"),
+    ("assert_ne", "aborts the program when it fails"),
+];
+
+/// Is `name` one of [`OUTPUT_ABORT_BUILTINS`]?
+pub fn is_output_abort_builtin(name: &str) -> bool {
+    OUTPUT_ABORT_BUILTINS.iter().any(|(b, _)| *b == name)
+}
+
 impl Checker {
     /// Try to resolve a call to a builtin function.
     /// Returns Some(Ty) if the name is a builtin, None otherwise.
@@ -168,6 +190,20 @@ mod tests {
     fn builtin_module_option() { assert_eq!(builtin_module_for_type(&Ty::option(Ty::Int)), Some("option")); }
     #[test]
     fn builtin_module_none() { assert_eq!(builtin_module_for_type(&Ty::Bool), None); }
+
+    /// Every name the table lists is one `check_builtin_output` answers, and
+    /// the arms answer no name outside it (#4253): the declaration refusal and
+    /// the call resolution read the same set.
+    #[test]
+    fn the_builtin_table_is_the_set_the_call_check_answers() {
+        let mut c = Checker::from_env(crate::types::TypeEnv::new());
+        for (name, _) in OUTPUT_ABORT_BUILTINS {
+            assert!(c.check_builtin_output(name, &[]).is_some(), "{name} is in the table but not answered");
+        }
+        for other in ["print", "to_string", "len", "debug", "assert_some"] {
+            assert!(c.check_builtin_output(other, &[]).is_none(), "{other} is answered but not in the table");
+        }
+    }
 
     #[test]
     fn mismatch_same_type() { assert!(!types_mismatch(&Ty::Int, &Ty::Int)); }

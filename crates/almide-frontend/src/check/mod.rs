@@ -25,6 +25,7 @@ mod toplet_order;
 mod infer;
 pub(crate) mod calls;
 mod builtin_calls;
+pub use builtin_calls::{is_output_abort_builtin, OUTPUT_ABORT_BUILTINS};
 mod static_dispatch;
 mod solving;
 mod arm_blame;

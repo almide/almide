@@ -865,7 +865,7 @@ impl TypeEnv {
             names.push(name.to_string());
         }
         // Builtins not in env.functions
-        for &b in &["println", "eprintln", "panic", "assert", "assert_eq", "assert_ne", "to_string"] {
+        for b in crate::check::OUTPUT_ABORT_BUILTINS.iter().map(|(b, _)| *b).chain(["to_string"]) {
             names.push(b.to_string());
         }
         // Stdlib module-qualified function names (e.g. "string.trim", "list.map")

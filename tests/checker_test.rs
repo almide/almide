@@ -1206,3 +1206,38 @@ fn matrix_operator_without_a_matrix_operation_is_refused() {
         assert!(error_hints(src).is_empty(), "{src} should check");
     }
 }
+
+/// #4253: every output / abort builtin's name is refused as a top-level `fn`,
+/// `let` or `var` — a bare call reaches the builtin, so the declaration could
+/// never run (and `eprintln` split the legs: native called the user fn, wasm
+/// the builtin). Walks THE table the call check reads, so a builtin added to
+/// it is covered here without a second list. A local or a parameter of the
+/// name still shadows, as every local does.
+#[test]
+fn a_builtin_name_cannot_be_declared_at_top_level() {
+    for (name, _) in almide::check::OUTPUT_ABORT_BUILTINS {
+        for decl in [
+            format!("fn {name}(s: String) -> Unit = ()"),
+            format!("effect fn {name}(s: String) -> Unit = ()"),
+            format!("let {name} = 5"),
+            format!("var {name} = 5"),
+        ] {
+            let src = format!("{decl}\neffect fn main() -> Unit = ()\n");
+            let errs = errors(&src);
+            assert!(
+                errs.iter().any(|m| m.contains(&format!("redefines the builtin '{name}'"))),
+                "`{decl}` must be refused: {errs:?}"
+            );
+        }
+        let local = format!("effect fn main() -> Unit = {{\n  let {name} = (s: String) => ()\n  {name}(\"x\")\n}}\n");
+        assert!(
+            !errors(&local).iter().any(|m| m.contains("redefines the builtin")),
+            "a local `{name}` shadows and is not a redefinition"
+        );
+        let param = format!("fn run({name}: (String) -> Unit) -> Unit = {name}(\"x\")\neffect fn main() -> Unit = ()\n");
+        assert!(
+            !errors(&param).iter().any(|m| m.contains("redefines the builtin")),
+            "a parameter `{name}` shadows and is not a redefinition"
+        );
+    }
+}

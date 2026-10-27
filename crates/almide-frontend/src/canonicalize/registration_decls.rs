@@ -394,6 +394,11 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
         }
     }
     for decl in decls {
+        // Once per declaration: `infer_module`'s unprefixed re-registration
+        // (`alias_owner_module`) sees the same decls again.
+        if env.alias_owner_module.is_none() {
+            refuse_builtin_named_decl(diagnostics, decl);
+        }
         match decl {
             ast::Decl::Fn { .. } => register_decl_fn(env, diagnostics, &mut seen_fn, decl, prefix),
             ast::Decl::Test { .. } => register_decl_test(diagnostics, &mut seen_test, decl),
@@ -413,6 +418,36 @@ pub fn register_decls(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, decl
         validate_derive_field_support(env, diagnostics);
         validate_convention_method_conflicts(env, diagnostics);
     }
+}
+/// E012 for a top-level `fn` or `let` spelled with an output / abort builtin's
+/// name (#4253). A bare call to that name resolves to the builtin before any
+/// declaration is consulted (`check_builtin_call`), so the declaration was dead
+/// code on every target — a `fn println` meant to redact every log line never
+/// ran, and nothing said so (and `eprintln` even split: native called the user
+/// fn, wasm the builtin). The builtins keep one meaning per spelling; a local
+/// `let` or a parameter of that name still shadows, as every local does.
+fn refuse_builtin_named_decl(diagnostics: &mut Vec<Diagnostic>, decl: &ast::Decl) {
+    let (kind, name, span) = match decl {
+        ast::Decl::Fn { name, span, .. } => ("fn", name.as_str(), span),
+        ast::Decl::TopLet { name, span, mutable, .. } => (if *mutable { "var" } else { "let" }, name.as_str(), span),
+        _ => return,
+    };
+    if !crate::check::is_output_abort_builtin(name) {
+        return;
+    }
+    let mut diag = err(
+        format!("top-level {kind} '{name}' redefines the builtin '{name}'"),
+        format!(
+            "Every call to `{name}(…)` reaches the builtin, never this declaration. Give it another name (e.g. `my_{name}`) and call that"
+        ),
+        format!("{kind} {name}"),
+    )
+    .with_code("E012");
+    if let Some(s) = span {
+        diag.line = Some(s.line);
+        diag.col = Some(s.col);
+    }
+    diagnostics.push(diag);
 }
 /// `ast::Decl::Fn` arm of [`register_decls`] — E012 duplicate-function diagnostic (skipped for `@extern` re-exports), signature registration, and DefTable registration. Verbatim text move; `continue` in the original loop becomes an early `return` here (both simply skip the rest of this decl's registration and move on to the next `decl`).
 fn register_decl_fn(env: &mut TypeEnv, diagnostics: &mut Vec<Diagnostic>, seen_fn: &mut HashMap<String, Option<ast::Span>>, decl: &ast::Decl, prefix: Option<&str>) {

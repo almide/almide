@@ -1,0 +1,9 @@
+// #4253: a top-level fn spelled with a builtin's name is never called —
+// every `println(…)` reaches the builtin, so the redaction never ran.
+import io
+
+fn redact(s: String) -> String = string.replace(s, "secret", "***")
+
+effect fn println(s: String) -> Unit = io.print(redact(s) + "\n")
+
+effect fn main() -> Unit = println("the secret is out")
