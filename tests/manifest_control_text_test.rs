@@ -82,7 +82,9 @@ const CASES: &[(&str, &str)] = &[
     ),
     (
         "string-value",
-        "[package]\nname = \"app\"\ndescription = \"line\\nINFO: forged\"\n",
+        // A free-text value may hold a newline or a tab (src/project.rs
+        // `refuse_control_text`); every other control is refused.
+        "[package]\nname = \"app\"\ndescription = \"line\\u001b[2K\\rINFO: forged\"\n",
     ),
     (
         "bidi",
