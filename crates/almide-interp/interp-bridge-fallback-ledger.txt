@@ -40,7 +40,7 @@ int.from_uint16  declaration_literal_domain  floor: consumed inside a self-hoste
 int.from_uint32  declaration_literal_domain  floor: consumed inside a self-hosted body
 int.from_uint64  checked_conversion_exact_bounds  floor: consumed inside a self-hosted body
 int.from_uint8  checked_conversion_value_match  floor: consumed inside a self-hosted body
-int.parse  datetime_parse_iso_strict  floor: consumed inside a self-hosted body
+int.parse  datetime_from_parts_strict  floor: consumed inside a self-hosted body
 int.to_float  int_bit_family  floor: consumed inside a self-hosted body
 int.to_string  availability_pure_batch  floor: consumed inside a self-hosted body
 math.fpow  matrix_pow_libm  floor: consumed inside a self-hosted body
@@ -57,8 +57,8 @@ string.lines  fs_composition_family  floor: consumed inside a self-hosted body
 string.repeat  availability_pure_batch  floor: consumed inside a self-hosted body
 string.replace  availability_pure_batch  floor: consumed inside a self-hosted body
 string.slice  codec_decode_error_surface  floor: consumed inside a self-hosted body
-string.split  datetime_parse_iso_strict  floor: consumed inside a self-hosted body
+string.split  datetime_from_parts_strict  floor: consumed inside a self-hosted body
 string.starts_with  codec_decode_error_surface  floor: consumed inside a self-hosted body
 string.take  json_path_edges  floor: consumed inside a self-hosted body
 string.to_upper  string_case_no_ascii_fold  floor: consumed inside a self-hosted body
-string.trim  datetime_parse_iso_strict  floor: consumed inside a self-hosted body
+string.trim  datetime_from_parts_strict  floor: consumed inside a self-hosted body

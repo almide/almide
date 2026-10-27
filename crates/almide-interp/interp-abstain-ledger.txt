@@ -34,7 +34,7 @@ bytes_cursor_read_domain  out-of-interp-scope capability: bytes.next_u8: no lowe
 bytes_f16  out-of-interp-scope capability: bytes.get_f16_le: no lowered body
 bytes_f16_offset_overflow  out-of-interp-scope capability: bytes.get_f16_le: no lowered body
 bytes_param_writeback  out-of-interp-scope capability: bytes.get_f32_le: no lowered body
-bytes_rawptr  out-of-interp-scope capability: prim.int_to_ptr: no lowered body
+bytes_rawptr  out-of-interp-scope capability: ffi.region: no lowered body
 bytes_set_on_record_field  out-of-interp-scope capability: bytes.get_f64_le: no lowered body
 count_domain_nonbytes  out-of-interp-scope capability: prim.read_n_bytes: no lowered body
 effect_tco_err_rewrap  interp fuel/recursion budget exhausted
