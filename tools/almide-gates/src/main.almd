@@ -116,15 +116,15 @@ effect fn main() -> Unit = {
   // `output-parity` is the one subcommand whose root is the REPOSITORY, not a doc
   // directory — it walks `spec/` and reads a baseline under `proofs/`.
   let root = list.get(args, 1) ?? (match cmd {
-      "output-parity" => ".",
-      "env-switches-doc" => ".",
-      "fold-seed-source" => ".",
-      "impl-count" => ".",
-      "certified-leaks" => ".",
-      "check-contracts" => "docs/contracts",
-      "bench" => "docs/benchmarks",
-      _ => "docs/roadmap",
-    })
+    "output-parity" => ".",
+    "env-switches-doc" => ".",
+    "fold-seed-source" => ".",
+    "impl-count" => ".",
+    "certified-leaks" => ".",
+    "check-contracts" => "docs/contracts",
+    "bench" => "docs/benchmarks",
+    _ => "docs/roadmap",
+  })
   let body = match cmd {
     "contracts-readme" => gen_contracts_readme(root)!,
     "conformance" => gen_conformance(root)!,
@@ -286,7 +286,10 @@ fn first_divergence(expected: String, actual: String) -> String = {
   let a = string.split(actual, "\n")
   let hit = list.range(0, int.max(list.len(e), list.len(a))) |> list.find((i) => (list.get(e, i) ?? "<missing>") != list.get(a, i) ?? "<missing>")
   match hit {
-    some(i) => "line " + int.to_string(i + 1) + "\n  committed: " + list.get(e, i) ?? "<missing>" + "\n  rendered:  " + list.get(a, i) ?? "<missing>",
+    some(i) => "line " + int.to_string(i + 1) + "\n  committed: " + list.get(e, i) ?? "<missing>" + "\n  rendered:  " + list.get(
+      a,
+      i,
+    ) ?? "<missing>",
     none => "",
   }
 }

@@ -96,7 +96,10 @@ fn run_state(run: json.Value) -> String = {
 }
 
 // `created_at` is an ISO timestamp; the report shows the date only.
-fn date_of(run: json.Value) -> String = list.get(string.split(value.get_string(run, "created_at") ?? "", "T"), 0) ?? ""
+fn date_of(run: json.Value) -> String = list.get(
+  string.split(value.get_string(run, "created_at") ?? "", "T"),
+  0,
+) ?? ""
 
 fn jobs_of(jobs_json: json.Value) -> List[json.Value] = value.get_array(jobs_json, "jobs") ?? []
 

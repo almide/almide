@@ -4,7 +4,6 @@
 // Then:  curl localhost:3000/hello
 //        curl -X POST -d '{"name":"alice"}' localhost:3000/greet
 //        curl localhost:3000/time
-import env
 import http
 import json
 
