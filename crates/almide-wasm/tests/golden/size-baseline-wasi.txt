@@ -195,7 +195,7 @@
 340	spec/wasm_cross/expr_stmt_comment.almd
 7666	spec/wasm_cross/fallible_hof_effect_callback_family.almd
 8075	spec/wasm_cross/fallible_hof_large_input.almd
-64580	spec/wasm_cross/fallible_hof_matrix_containers.almd
+64824	spec/wasm_cross/fallible_hof_matrix_containers.almd
 29390	spec/wasm_cross/fallible_hof_matrix_list.almd
 14657	spec/wasm_cross/fallible_hof_option_effect_callback.almd
 10141	spec/wasm_cross/fallible_hof_recursive_callee.almd
@@ -597,8 +597,9 @@
 3113	spec/wasm_cross/mut_param_global_no_reach_in_place.almd
 14139	spec/wasm_cross/mut_param_interpolated.almd
 3007	spec/wasm_cross/mut_param_loop_stays_in_place.almd
-11711	spec/wasm_cross/mut_param_move_mode_gaps.almd
+13148	spec/wasm_cross/mut_param_move_mode_gaps.almd
 19906	spec/wasm_cross/mut_param_nested_place_writeback.almd
+13960	spec/wasm_cross/mut_param_pure_result_fn_propagates.almd
 52798	spec/wasm_cross/mut_param_reassign_from_hof.almd
 2327	spec/wasm_cross/mut_param_spread_reassign.almd
 7394	spec/wasm_cross/mut_param_tail_recursion.almd
