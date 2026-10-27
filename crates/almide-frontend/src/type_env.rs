@@ -41,9 +41,18 @@ struct ShadowedBindings {
     fn_min_params: Vec<Option<usize>>,
     fn_defaults: Vec<Option<Vec<Option<almide_lang::ast::Expr>>>>,
     fn_visibility: Vec<Option<almide_lang::ast::Visibility>>,
-    fn_decl_spans: Vec<Option<(usize, usize)>>,
+    fn_decl_spans: Vec<Option<FnDeclSite>>,
     deprecations: Vec<Option<crate::deprecation::Deprecation>>,
     def_map: Vec<Option<almide_ir::DefId>>,
+}
+
+/// A fn declaration's position and the module whose file holds it (`None`
+/// for the entry program) — the file the position is relative to (#4271).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FnDeclSite {
+    pub line: usize,
+    pub col: usize,
+    pub module: Option<Sym>,
 }
 
 /// The keys a `register_decls(.., prefix = None)` over these decls can write.
@@ -294,8 +303,11 @@ pub struct TypeEnv {
     /// conformance a type declares per protocol is THE implementation — no
     /// other is searched for.
     pub type_protocol_args: std::collections::HashMap<Sym, std::collections::HashMap<Sym, Vec<Ty>>>,
-    /// Function declaration locations: fn key -> (line, col)
-    pub fn_decl_spans: std::collections::HashMap<Sym, (usize, usize)>,
+    /// Function declaration locations: fn key -> (line, col, declaring
+    /// module). A span is a position in the DECLARING file, so it is only
+    /// drawn beside a diagnostic of that same file (#4271): see
+    /// [`TypeEnv::fn_decl_span_in`].
+    pub fn_decl_spans: std::collections::HashMap<Sym, FnDeclSite>,
     /// Whether we're inside a test block (effect fn calls return Result[T, String])
     pub in_test_block: bool,
     /// Fn names whose parse failed mid-body. Checker suppresses cascading
@@ -894,6 +906,16 @@ impl TypeEnv {
         let names_other = self.lookup_ctor_owned(name, module.as_str()).is_some()
             || self.selective_top_let(name).is_some();
         (names_fn || !names_other).then_some(module)
+    }
+
+    /// Where `name` is declared, as a `(line, col)` of the file being checked
+    /// (`cur_mod`, `None` for the entry program) — or `None` when it is
+    /// declared in another file. The span is a position in the DECLARING
+    /// file: a stdlib or imported module fn's line drawn as a secondary label
+    /// over the caller's file underlined an unrelated line of it (#4271).
+    pub fn fn_decl_span_in(&self, name: &Sym, cur_mod: Option<&str>) -> Option<(usize, usize)> {
+        let site = self.fn_decl_spans.get(name)?;
+        (site.module.as_ref().map(|m| m.as_str()) == cur_mod).then_some((site.line, site.col))
     }
 
     /// Resolve a bare variant-constructor name to its (type name, case). Returns
