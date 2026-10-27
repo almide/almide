@@ -135,7 +135,7 @@ fn lower_fan_record(ctx: &mut LowerCtx, arms: Vec<IrExpr>, names: &[almide_base:
     }).collect();
     let fan_ty = match slot_tys.as_slice() {
         [one] => one.clone(),
-        many => Ty::Tuple(many.to_vec()),
+        many => Ty::Tuple(many.to_vec().into()),
     };
     let vars: Vec<VarId> = names.iter().zip(&slot_tys)
         .map(|(n, t)| ctx.var_table.alloc(sym(&format!("__fan_{}", n.as_str())), t.clone(), Mutability::Let, span))

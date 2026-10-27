@@ -91,7 +91,7 @@ impl CaseTable {
             Ty::Named(n, args) => found.iter()
                 .find(|c| c.enum_name == bare(n.as_str()))
                 .or_else(|| (found.len() == 1).then(|| &found[0]))
-                .map(|c| (c, args.clone())),
+                .map(|c| (c, args.to_vec())),
             _ => (found.len() == 1).then(|| (&found[0], Vec::new())),
         }
     }

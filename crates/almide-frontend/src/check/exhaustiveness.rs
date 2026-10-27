@@ -323,7 +323,7 @@ fn field_types(ctor: &CtorId, ty: &Ty, env: &TypeEnv) -> Vec<Ty> {
         CtorId::Ok => vec![resolved.result_ok_ty().unwrap_or(Ty::Unknown)],
         CtorId::Err => vec![resolved.result_err_ty().unwrap_or(Ty::Unknown)],
         CtorId::Tuple => match &resolved {
-            Ty::Tuple(tys) => tys.clone(),
+            Ty::Tuple(tys) => tys.clone().into_vec(),
             _ => vec![],
         },
         CtorId::Record => match &resolved {

@@ -51,7 +51,6 @@ Three properties none of them gives together:
 - inferred type size (nodes);
 - generic instantiations per program;
 - exhaustiveness work;
-- emitted code size per function;
 - manifest and lock size;
 - dependency count and depth.
 
@@ -84,8 +83,10 @@ Negative control: disabling type sharing and the type-size budget makes the #411
 - Budgets are a compatibility surface. Raising one is additive. Lowering one can refuse code that compiled before, so it needs a `proofs/dialect-epochs.toml` entry.
 - The LSP and graders can run on untrusted source without an OS-level sandbox for resource exhaustion. Isolation from side effects is separate (#4128).
 
-## Open
+## Rulings (2026-10-27)
 
-1. The exact figures (D6): measured before they are fixed.
-2. Whether the budget table is one more contract family in the ledger (`C-NNN` per budget), or a spec table with a single contract that "every budget in the table holds".
-3. Whether `almide fmt` shares the checker's budgets or has its own, since it runs without type checking.
+1. The figures (D6) are measured: `scripts/measure-compile-budgets.sh` writes `proofs/compile-budgets.toml`, and each new default is about ten times the corpus maximum. The two budgets that predate this ADR keep their earlier figures: `nesting` stays at 500 (15× the corpus maximum of 33), and `manifest_bytes` stays at 1 MiB (#4194).
+2. The budget table is one spec table (`almide budgets --md`, embedded in `docs/specs/cli.md`) with a single contract, C-440: "every budget in the table holds".
+3. `almide fmt` shares the table. It only parses, so the budget it meets is `nesting`.
+4. "Emitted code size per function" is dropped from D1. Emitted code is linear in the IR, which `nesting` and `type_size` already bound.
+5. D5 lands with the budget, not instead of it. Composite types share their argument lists (`almide_types::TyVec`): a clone is a pointer copy, and each list caches its node count and whether it holds an inference variable. Resolution memoizes per variable and per shared list. With the type-size budget lifted, the #4114 chain checks in time and memory linear in its length (`tests/compile_budget_test.rs`). Its negative control, `ALMIDE_CONTROL_NO_TYPE_SHARING`, makes every clone copy the tree again.

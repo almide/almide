@@ -568,7 +568,7 @@ impl Checker {
             });
         }
         self.env.auto_unwrap = saved_unwrap;
-        Ty::Tuple(elems)
+        Ty::Tuple(elems.into())
     }
 
     /// `ExprKind::Call` arm of [`Self::infer_expr_inner_g3`]. Verbatim text move.
@@ -854,10 +854,10 @@ impl Checker {
             match &p.tuple_names {
                 Some(names) if names.len() > 1 => {
                     let elems: Vec<Ty> = match &concrete {
-                        Ty::Tuple(es) if es.len() == names.len() => es.clone(),
+                        Ty::Tuple(es) if es.len() == names.len() => es.clone().into_vec(),
                         _ => {
                             let fresh: Vec<Ty> = names.iter().map(|_| self.fresh_var()).collect();
-                            self.constrain(ty.clone(), Ty::Tuple(fresh.clone()), "tuple lambda parameter");
+                            self.constrain(ty.clone(), Ty::Tuple(fresh.clone().into()), "tuple lambda parameter");
                             fresh
                         }
                     };

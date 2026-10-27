@@ -62,7 +62,7 @@ pub(super) fn lower_pattern(ctx: &mut LowerCtx, pat: &ast::Pattern, ty: &Ty) -> 
             lower_pattern_record(ctx, name, fields, *rest, ty),
         ast::Pattern::Tuple { elements } => {
             let elem_tys = match ty {
-                Ty::Tuple(tys) => tys.clone(),
+                Ty::Tuple(tys) => tys.to_vec(),
                 _ => vec![Ty::Unknown; elements.len()],
             };
             let ir_elems = elements.iter().enumerate().map(|(i, e)| {

@@ -94,7 +94,7 @@ fn register_type_decl_opaque_alias(env: &mut TypeEnv, identity: Sym, defining_mo
     env.opaque_alias_targets.insert(identity, resolved.clone());
     // Register as nominal type (not transparent alias)
     let generic_args: Vec<Ty> = gnames.iter().map(|g| Ty::TypeVar(*g)).collect();
-    let resolved = Ty::Named(identity, generic_args);
+    let resolved = Ty::Named(identity, generic_args.into());
     // Register constructor with visibility restriction. The OWNER is a
     // definition-time identity captured once: the prefixed registration
     // names it outright, and the per-module re-registration (which runs

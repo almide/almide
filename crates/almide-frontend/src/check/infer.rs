@@ -178,7 +178,7 @@ impl Checker {
                         // never pinned and mono left the call unspecialised.
                         _ => {
                             let generic_args = self.instantiate_type_generics(type_name.as_str());
-                            Ty::Named(type_name, generic_args)
+                            Ty::Named(type_name, generic_args.into())
                         }
                     }
                 }
@@ -362,7 +362,7 @@ impl Checker {
         };
         let result_named = self.record_case_type_name(n, type_name);
         let case_defaults = self.env.ctor_field_defaults.get(&ctor_sym).cloned().unwrap_or_default();
-        Ok((Ty::Named(result_named, generic_args), decl, true, case_defaults))
+        Ok((Ty::Named(result_named, generic_args.into()), decl, true, case_defaults))
     }
 
     /// #433: a qualified record-variant `mod.Ctor { … }` takes the namespaced
@@ -429,7 +429,7 @@ impl Checker {
             return Err(Ty::Unknown);
         }
         let generic_args = self.instantiate_type_generics(n);
-        let named = Ty::Named(canon, generic_args);
+        let named = Ty::Named(canon, generic_args.into());
         let (decl, closed) = match self.env.resolve_named(&named) {
             Ty::Record { fields } => (fields, true),
             Ty::OpenRecord { fields } => (fields, false),

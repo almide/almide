@@ -1075,7 +1075,7 @@ impl Checker {
             self.report_ambiguous_ctor(name);
             self.check_constructor_args(name, &case, arg_tys);
             let generic_args = self.instantiate_type_generics(type_name.as_str());
-            return Some(Ty::Named(type_name, generic_args));
+            return Some(Ty::Named(type_name, generic_args.into()));
         }
         // #2588: a top-level `let` holding a closure is callable like a local
         // one — `app(http.new_request(...))` against `let app = http.router(...)`.
@@ -1351,7 +1351,7 @@ impl Checker {
         for (aty, ety) in arg_tys.iter().zip(Self::ctor_tuple_payload(case, &subst).iter()) {
             self.unify_infer(aty, ety);
         }
-        Ty::Named(result_name, generic_args)
+        Ty::Named(result_name, generic_args.into())
     }
 
     /// A tuple-payload constructor used as a value (`Node`, `m.Node`): the
@@ -1361,7 +1361,7 @@ impl Checker {
         let (generic_args, subst) = self.instantiate_ctor_case(type_key);
         Ty::Fn {
             params: Self::ctor_tuple_payload(case, &subst),
-            ret: Box::new(Ty::Named(result_name, generic_args)),
+            ret: Box::new(Ty::Named(result_name, generic_args.into())),
             is_effect: false,
         }
     }

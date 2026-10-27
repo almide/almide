@@ -286,7 +286,7 @@ impl Checker {
                 }
                 None
             }
-            value => self.bang_channel_err_ty().map(|e| vec![value, e]),
+            value => self.bang_channel_err_ty().map(|e| vec![value, e]).map(Into::into),
         };
         let Some(target) = target else { return };
         for (_, payload, span) in err_payloads {
