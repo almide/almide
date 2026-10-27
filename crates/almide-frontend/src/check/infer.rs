@@ -100,6 +100,10 @@ impl Checker {
         let outer_expect = std::mem::replace(&mut self.expr_expect, expect);
         let frame = self.enter_isolation_frame(expr);
         let ity = self.infer_expr_inner(expr);
+        // ADR-0030: an expression's type is held to the `type_size` budget
+        // as it is built (E111), so a doubling chain stops at the budget.
+        let ity = self.within_type_budget(ity, expr.span);
+        self.report_type_budget_hit(expr.span);
         self.leave_isolation_frame(expr, &ity, frame);
         self.expr_expect = outer_expect;
         self.type_map.insert(expr.id, ity.clone());

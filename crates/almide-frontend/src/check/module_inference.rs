@@ -113,7 +113,9 @@ impl Checker {
         self.resolve_deferred_tuple_indices();
         self.flush_pending_toplet_tys();
         resolve_type_map(&mut self.type_map, &self.uf);
+        self.report_type_budget_hit(None);
         self.validate_after_solve(prog);
+        self.report_type_budget_hit(None);
         self.current_module_prefix = saved_prefix;
 
         // Restore

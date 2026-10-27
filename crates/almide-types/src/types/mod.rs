@@ -200,6 +200,42 @@ impl FnSig {
 }
 
 impl Ty {
+    /// The node count of this type as written (a type variable counts 1),
+    /// stopping once it passes `cap`, so the walk visits at most `cap + 1`
+    /// nodes. The `type_size` row of the compile-cost budget (ADR-0030)
+    /// judges types with it, whatever their size.
+    pub fn size_capped(&self, cap: u64) -> u64 {
+        fn go(ty: &Ty, cap: u64, n: &mut u64) {
+            *n += 1;
+            if *n > cap {
+                return;
+            }
+            let mut each = |t: &Ty| if *n <= cap { go(t, cap, n) };
+            match ty {
+                Ty::Applied(_, args) | Ty::Tuple(args) | Ty::Union(args) | Ty::Named(_, args) => args.iter().for_each(&mut each),
+                Ty::Fn { params, ret, .. } => {
+                    params.iter().for_each(&mut each);
+                    each(ret);
+                }
+                Ty::Record { fields } | Ty::OpenRecord { fields } => fields.iter().for_each(|(_, t)| each(t)),
+                Ty::Variant { cases, .. } => {
+                    for c in cases {
+                        match &c.payload {
+                            VariantPayload::Unit => {}
+                            VariantPayload::Tuple(ts) => ts.iter().for_each(&mut each),
+                            VariantPayload::Record(fs) => fs.iter().for_each(|(_, t)| each(t)),
+                        }
+                    }
+                }
+                Ty::ConstParam { ty, .. } | Ty::ConstValue { ty, .. } => each(ty),
+                _ => {}
+            }
+        }
+        let mut n = 0;
+        go(self, cap, &mut n);
+        n
+    }
+
     pub fn display(&self) -> String {
         if let Some(s) = self.display_leaf() {
             return s.to_string();

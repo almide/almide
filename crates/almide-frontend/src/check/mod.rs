@@ -46,6 +46,8 @@ mod effect_isolation_cascade;
 mod qq_effect_bang;
 mod expect_effect;
 mod regex_runtime;
+/// E111: an inferred type over the `type_size` budget (ADR-0030, #4114).
+mod type_budget;
 
 use almide_lang::ast;
 use almide_base::diagnostic::Diagnostic;
@@ -361,6 +363,9 @@ pub struct Checker {
     /// Protocol bounds whose type parameter was an open inference var at the
     /// call, judged post-solve — see `calls::DeferredBoundSite`.
     pub(crate) deferred_protocol_bounds: Vec<calls::DeferredBoundSite>,
+    /// Where E111 (a type over the `type_size` budget, ADR-0030) was
+    /// reported, so one site is named once — see `type_budget.rs`.
+    pub(crate) type_budget_sites: std::collections::HashSet<(usize, usize)>,
     /// #1123 / ADR-0008 N+1: sites where the pre-switch implementation
     /// inserted implicit propagation (auto-`?`). Post-solve, every site whose
     /// type resolved to Result is a hard error — E042 (must-use: a discarded
@@ -736,6 +741,7 @@ impl Checker {
             deferred_type_param_checks: Vec::new(),
             deferred_input_sink_checks: Vec::new(),
             deferred_protocol_bounds: Vec::new(),
+            type_budget_sites: std::collections::HashSet::new(),
             deferred_implicit_prop_checks: Vec::new(),
             effect_call_spans: std::collections::HashSet::new(),
             isolation_cascade: Default::default(),
@@ -1268,7 +1274,9 @@ impl Checker {
         self.resolve_deferred_tuple_indices();
         self.flush_pending_toplet_tys();
         resolve_type_map(&mut self.type_map, &self.uf);
+        self.report_type_budget_hit(None);
         self.validate_after_solve(program);
+        self.report_type_budget_hit(None);
         // Unused import warnings. Usage is judged SYNTACTICALLY first
         // (#1783): every `alias.x` spelling in the file — call targets,
         // record/variant constructors, type annotations, patterns — marks
