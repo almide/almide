@@ -1,8 +1,16 @@
+import html
 import http
 
 test "http.response creates plain text response" {
   let resp = http.response(200, "Hello")
   assert_eq(http.body(resp), "Hello")
+}
+
+test "http.html serves SafeHtml as text/html (#4120)" {
+  let resp = http.html(200, html.escape("<b>hi</b>"))
+  assert_eq(http.body(resp), "&lt;b&gt;hi&lt;/b&gt;")
+  assert_eq(http.get_header(resp, "Content-Type"), some("text/html; charset=utf-8"))
+  assert_eq(http.status_code(resp), 200)
 }
 
 test "http.json creates json response" {
