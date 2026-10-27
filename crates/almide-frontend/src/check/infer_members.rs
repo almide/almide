@@ -75,7 +75,7 @@ impl Checker {
     /// The fns an E033 hint names, read off the owner module's signatures
     /// rather than spelled per type (#4256): the builder with the fewest
     /// parameters, then a one-parameter reader that answers the type's
-    /// content (its type argument, or a list of it) — `secret.new` /
+    /// content (a list of its type argument, else the argument) — `secret.new` /
     /// `secret.reveal`, `heap.new` / `heap.to_list`. Ties go to the name.
     fn opaque_entry_fns(&self, owner: &str, bare: &str) -> Vec<String> {
         let qualified = format!("{owner}.{bare}");
@@ -95,13 +95,18 @@ impl Checker {
             .iter()
             .filter(|(_, sig)| is_it(&sig.ret) && !sig.params.iter().any(|(_, t)| is_it(t)))
             .min_by_key(|(name, sig)| (sig.params.len(), *name));
-        let reader = fns.iter().find(|(_, sig)| match sig.params.as_slice() {
-            [(_, p @ Ty::Named(_, args))] if is_it(p) => args.first().is_some_and(|a| {
-                sig.ret == *a
-                    || matches!(&sig.ret, Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e) if e.first() == Some(a))
-            }),
-            _ => false,
-        });
+        // 0 = answers a list of the content (the whole of it), 1 = the
+        // content itself; a list reader is preferred.
+        let reads = |sig: &almide_lang::types::FnSig| -> Option<u8> {
+            let [(_, p @ Ty::Named(_, args))] = sig.params.as_slice() else { return None };
+            let a = args.first().filter(|_| is_it(p))?;
+            match &sig.ret {
+                Ty::Applied(almide_lang::types::constructor::TypeConstructorId::List, e) if e.first() == Some(a) => Some(0),
+                r if r == a => Some(1),
+                _ => None,
+            }
+        };
+        let reader = fns.iter().filter_map(|f| reads(f.1).map(|rank| (rank, f))).min_by_key(|(rank, (name, _))| (*rank, *name)).map(|(_, f)| f);
         builder.into_iter().chain(reader).map(|(name, _)| name.to_string()).collect()
     }
 
