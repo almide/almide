@@ -837,6 +837,10 @@ fn extract_docs(source: &str) -> HashMap<std::string::String, DocInfo> {
     let lines: Vec<&str> = source.lines().collect();
 
     for (i, line) in lines.iter().enumerate() {
+        // #4035: only a top-level declaration (column 0) takes a doc — a
+        // body-level `let count = …` inside some fn is not a declaration and
+        // must not overwrite the doc of a public `fn count`.
+        if line.starts_with(|c: char| c.is_whitespace()) { continue; }
         if let Some(name) = detect_decl_name(line.trim()) {
             result.insert(name, collect_preceding_doc(&lines, i));
         }
@@ -1010,5 +1014,26 @@ fn empty_doc() -> Unit = ()
         );
         assert_eq!(docs["plain"].doc.as_deref(), Some("Plain run still documents."));
         assert_eq!(docs["empty_doc"].doc.as_deref(), Some(""));
+    }
+
+    /// #4035: a body-level `let` that shares a public fn's name is not a
+    /// declaration — the top-level fn keeps its doc.
+    #[test]
+    fn a_body_level_let_does_not_take_a_top_level_fns_doc() {
+        let src = "\
+/// Number of elements satisfying `f`.
+fn count[A](xs: List[A], f: (A) -> Bool) -> Int = 0
+
+fn other(xs: List[Int]) -> Int = {
+  let count = 3
+  count
+}
+
+/// A top-level constant.
+let limit = 4
+";
+        let docs = extract_docs(src);
+        assert_eq!(docs["count"].doc.as_deref(), Some("Number of elements satisfying `f`."));
+        assert_eq!(docs["limit"].doc.as_deref(), Some("A top-level constant."));
     }
 }
