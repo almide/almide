@@ -3,6 +3,7 @@
 // regenerates and diffs). Each case executes a manifest probe; a
 // failure here means the implementation drifted from the DECLARED
 // semantic dimension (#419 class).
+import html
 import http
 
 test "http.response unit=status-code" {
@@ -18,6 +19,14 @@ test "http.json unit=status-code" {
   assert_eq(
     "${http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")}",
     "{} application/json",
+  )
+}
+
+test "http.html unit=status-code" {
+  let r = http.html(201, html.escape("<b>"))
+  assert_eq(
+    "${http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")}",
+    "&lt;b&gt; text/html; charset=utf-8",
   )
 }
 

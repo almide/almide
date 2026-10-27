@@ -3798,6 +3798,20 @@ Content-Type, so a caller who picks json for the header gets no other change.
 """
 
 [[http.fn]]
+name = "html"
+index_unit = "status-code"
+setup = [
+  'let r = http.html(201, html.escape("<b>"))',
+]
+probe = 'http.body(r) + " " + (http.get_header(r, "Content-Type") ?? "none")'
+expect = "&lt;b&gt; text/html; charset=utf-8"
+note = """
+The (status, body) order of response and json, with a SafeHtml body (#4120):
+the body is written as the SafeHtml holds it, and the seeded Content-Type is
+text/html with its charset.
+"""
+
+[[http.fn]]
 name = "with_headers"
 index_unit = "status-code"
 setup = [
