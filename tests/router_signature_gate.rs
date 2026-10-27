@@ -127,6 +127,7 @@ fn sweep() -> Vec<Row> {
                         }
             }
             for (args, ret) in instantiations(&sig) {
+                let args = spread_entry_callbacks(module, func, args);
                 let raw = routers_call_name(module, func, &args, &ret, RouterHints::default());
                 let raw_fit = signature_fit(&raw, &args);
                 let fin = refuse_unless_fits(module, func, raw.clone(), &args);
@@ -135,6 +136,37 @@ fn sweep() -> Vec<Row> {
         }
     }
     rows
+}
+
+/// The callback a v1 / wasm leg actually routes: `almide_ir::entry_split`
+/// spreads a tuple-taking callback (`((K, V)) -> R`) into separate
+/// parameters before either leg lowers it, when the self-hosted body
+/// registered for the surface declares that many parameters at that position.
+/// The sweep routes the same adapted types, read from the same declaration.
+fn spread_entry_callbacks(module: &str, func: &str, mut args: Vec<Ty>) -> Vec<Ty> {
+    let Some(decl) = registry_signature(&format!("{module}.{func}")) else { return args };
+    let width = |t: &Ty| match t {
+        Ty::Tuple(es) if es.len() >= 2 => es.len(),
+        _ => 1,
+    };
+    for (i, arg) in args.iter_mut().enumerate() {
+        let Ty::Fn { params, .. } = arg else { continue };
+        let spread: usize = params.iter().map(width).sum();
+        if spread == params.len() {
+            continue;
+        }
+        if !matches!(decl.params.get(i), Some(Ty::Fn { params: dp, .. }) if dp.len() == spread) {
+            continue;
+        }
+        *params = params
+            .iter()
+            .flat_map(|p| match p {
+                Ty::Tuple(es) if es.len() >= 2 => es.clone(),
+                other => vec![other.clone()],
+            })
+            .collect();
+    }
+    args
 }
 
 fn short(t: &Ty) -> String {
