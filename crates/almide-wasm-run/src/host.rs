@@ -33,6 +33,12 @@ pub struct RunResult {
     pub stdout_bytes: Vec<u8>,
     pub stderr_bytes: Vec<u8>,
     pub exit: i32,
+    /// `main` RETURNED (#4255) — as opposed to the run ending through
+    /// `almide.exit` (`process.exit`, an abort) or a trap. Exit status 0 does
+    /// not imply it: `process.exit(0)` ends the run with 0 before `main` is
+    /// done, so a harness that needs `main` to have run to its end (the test
+    /// runner: every test reported) reads this, never the status.
+    pub main_returned: bool,
     /// The bump-heap watermark (exported `__heap` global) after the run:
     /// total bytes the module ever allocated plus the fixed base — the
     /// allocation-ledger observable (#1586). None if the module predates
@@ -688,6 +694,7 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
     let call = main.call(&mut store, ());
     let main_secs = main_started.elapsed().as_secs_f64();
     let recorded = exit.lock().expect("test harness invariant").take();
+    let main_returned = call.is_ok() && recorded.is_none();
     let exit_code = match (&call, recorded) {
         (Ok(()), None) => 0,
         (Err(_), Some(code)) => code,
@@ -759,6 +766,7 @@ fn run_compiled(engine: &wasmtime::Engine, module: &wasmtime::Module, launch: La
         stdout_bytes,
         stderr_bytes,
         exit: exit_code,
+        main_returned,
         heap_end,
         alloc_count,
         main_secs,

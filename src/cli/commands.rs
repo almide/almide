@@ -60,20 +60,38 @@ pub fn cmd_init() {
 /// One rule covers every shape of zero (#2084): no test file discovered, a named
 /// file with no `test` block, a directory of files that have none.
 ///
-/// Two zeroes are NOT that verdict, and both would otherwise be caught here:
+/// A `--run` pattern that excluded everything IS that verdict too (#4264):
+/// a filter that selects nothing ran nothing, and a green run of zero tests is
+/// how a mistyped CI filter hid. Its message names the pattern, not an absence.
 ///
-/// - a `--run` pattern that excluded everything — the caller's own narrowing,
-///   which is why the check reads `filtered_out` and not just `ran`;
+/// One zero is NOT that verdict:
+///
 /// - a file this leg DECLINED (`// wasm:skip`, or a wall routing it to native).
 ///   A skip means "these tests exist and this leg cannot run them", the opposite
 ///   of "there were none", and `wasm_skip_marker_stays_a_green_skip` pins that a
 ///   genuine skip stays green.
 pub(super) fn finish_test_run(counts: TestCounts, files: usize, declined: usize, allow_no_tests: bool) {
     err(&counts.summary(files));
-    if counts.found_nothing() && declined == 0 && !allow_no_tests {
-        err("no tests to run — pass --allow-no-tests if a run with no tests is expected");
+    if counts.ran == 0 && declined == 0 && !allow_no_tests {
+        if counts.found_nothing() {
+            err("no tests to run — pass --allow-no-tests if a run with no tests is expected");
+        } else {
+            err(&no_test_matched(counts));
+        }
         std::process::exit(NO_TESTS_EXIT);
     }
+}
+
+/// The zero-selection verdict (#4264): a `--run` pattern that matched no test
+/// in any file. It used to stay green — "the caller's own narrowing" — so a
+/// typo in a CI filter, or a test's name pasted from a report that the old
+/// matcher could not see, ran nothing and passed.
+fn no_test_matched(counts: TestCounts) -> String {
+    format!(
+        "the --run pattern matched no test ({} filtered out) — it is matched against each test's own name, \
+         as written in `test \"…\"`; pass --allow-no-tests if a run that selects nothing is expected",
+        counts.filtered_out
+    )
 }
 
 /// Shared "resolve `almide test [file]`'s target file list" logic — used by
@@ -166,7 +184,7 @@ fn run_test_binaries_parallel(compiled: Vec<(String, Result<std::path::PathBuf, 
     let mut results: Vec<TestRun> = bounded_parallel(compiled, cpu_slots(), move |(file, compile_result)| {
         let (code, stdout, stderr) = match compile_result {
             Ok(bin) => guard_worker_panic(
-                || super::run::run_binary_captured_io(&bin, &args),
+                || super::test_report::run_native_test_binary(&file, &bin, &args),
                 |msg| (1, msg, String::new()),
             ),
             Err(e) => (1, format!("Compile error for {}:\n{}", file, e), String::new()),
@@ -475,7 +493,10 @@ fn run_test_file_once(
         .join("test")
         .join(file.replace(['/', '.'], "_"));
     match super::run::compile_to_binary(file, no_check, true, false, Some(&worker_dir)) {
-        Ok(bin) => Ok(super::run::run_binary_captured(&bin, program_args)),
+        Ok(bin) => {
+            let (code, stdout, stderr) = super::test_report::run_native_test_binary(file, &bin, program_args);
+            Ok((code, stdout + &stderr))
+        }
         Err(e) => Err(format!("Compile error for {file}:\n{e}")),
     }
 }
@@ -507,7 +528,10 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
     // output instead of letting it stream to the terminal (#1313).
     for test_file in &test_files {
         let (code, output) = match super::run::compile_to_binary(test_file, false, true, false, None) {
-            Ok(bin) => super::run::run_binary_captured(&bin, &program_args),
+            Ok(bin) => {
+                let (code, stdout, stderr) = super::test_report::run_native_test_binary(test_file, &bin, &program_args);
+                (code, stdout + &stderr)
+            }
             Err(e) => (1, e),
         };
         let source = almide::source_overlay::read_to_string(test_file).unwrap_or_default();
@@ -533,7 +557,11 @@ pub fn cmd_test_json(file: &str, run_filter: Option<&str>, allow_no_tests: bool)
     if failed > 0 {
         std::process::exit(1);
     }
-    if counts.found_nothing() && !allow_no_tests {
+    // Nothing found, or a `--run` pattern that selected nothing (#4264).
+    if counts.ran == 0 && !allow_no_tests {
+        if !counts.found_nothing() {
+            err(&no_test_matched(counts));
+        }
         std::process::exit(NO_TESTS_EXIT);
     }
 }

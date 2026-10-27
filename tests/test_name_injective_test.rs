@@ -73,10 +73,15 @@ test \"sum\" where [\n  \"one\" [n = 1],\n  \"two\" [n = 2],\n] {\n  assert_eq(n
     assert!(out.contains("test: sum / two"), "the failing case is named:\n{out}");
 }
 
-/// `--run` still selects by a part of the label on the native harness.
+/// `--run` selects by the test's own label on the native harness (#4264):
+/// `a_b` is a substring of only one of the three labels, though the three
+/// emitted fn names all contain it.
 #[test]
-fn run_filter_still_selects_by_label() {
+fn run_filter_selects_by_label() {
     let (code, out) = almide_test("collide_filter_test.almd", COLLIDING, &["--run", "a_b"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("3 tests"), "`a_b` is a substring of all three emitted names:\n{out}");
+    assert!(out.contains("1 test in 1 file (2 filtered out)"), "only `a_b` itself is selected:\n{out}");
+    let (code, out) = almide_test("collide_filter_space_test.almd", COLLIDING, &["--run", "a b"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("1 test in 1 file (2 filtered out)"), "`a b` (with the space) selects its own test:\n{out}");
 }

@@ -148,6 +148,102 @@ pub fn harness_filter(program_args: &[String]) -> Option<&str> {
     program_args.iter().find(|a| !HARNESS_FLAGS.contains(&a.as_str())).map(String::as_str)
 }
 
+/// The libtest path of a test fn the native emitter wrote (`mod tests`, the
+/// walker's `rust_safe_fn_name` of the IR name — `test_name_map`'s left side).
+fn libtest_path(mangled: &str) -> String {
+    format!("tests::{mangled}")
+}
+
+/// A libtest path no emitted test can have (no Almide test fn is spelled in
+/// the `__almide_` space): what `--exact` gets when `--run` selected nothing,
+/// so the binary runs zero tests and still reports what it filtered out.
+const NO_TEST_SELECTED: &str = "tests::__almide_run_selected_no_test";
+
+/// Run one native (libtest) test binary for `file` the way `almide test`
+/// judges it, returning `(code, stdout, stderr)`.
+///
+/// Two things are decided here rather than by libtest:
+///
+/// - **Which tests run** (#4264). `--run <pattern>` is matched against each
+///   test's SOURCE name — the string in `test "…"`, what a failure prints —
+///   with the predicate the wasm leg's runner synthesis uses
+///   (`almide_base::names::test_name_matches_filter`). libtest only matches
+///   its own (mangled) fn names, so it is handed the selected tests' exact
+///   paths instead of the pattern: a name with a space, punctuation or a
+///   non-ASCII script used to select nothing.
+/// - **Whether every selected test finished** (#4255). The exit status is not
+///   the verdict: `process.exit(0)` inside a test ends the binary with 0
+///   before the remaining tests run, and reading that 0 as "all passed"
+///   greened a file whose later tests failed or never ran. libtest writes one
+///   record per FINISHED test to `--logfile` — the harness's own channel, not
+///   the program's stdout — and a status-0 run that is missing a selected
+///   test's record fails, naming the first test that never finished.
+pub fn run_native_test_binary(file: &str, bin: &std::path::Path, program_args: &[String]) -> (i32, String, String) {
+    let source = almide::source_overlay::read_to_string(file).unwrap_or_default();
+    let names = test_name_map(&source);
+    let filter = harness_filter(program_args);
+    let selected: Vec<&(String, String)> = names
+        .iter()
+        .filter(|(_, label)| filter.is_none_or(|p| almide_base::names::test_name_matches_filter(label, p)))
+        .collect();
+    let mut args: Vec<String> = HARNESS_FLAGS.iter().map(|f| f.to_string()).collect();
+    match filter {
+        // The source could not be enumerated (it does not parse — the build
+        // has already failed then): libtest's own matching is all there is.
+        Some(p) if names.is_empty() => args.push(p.to_string()),
+        Some(_) => {
+            args.push("--exact".to_string());
+            if selected.is_empty() {
+                args.push(NO_TEST_SELECTED.to_string());
+            }
+            args.extend(selected.iter().map(|(m, _)| libtest_path(m)));
+        }
+        None => {}
+    }
+    let log = native_test_log_path();
+    args.push("--logfile".to_string());
+    args.push(log.to_string_lossy().into_owned());
+    let (mut code, stdout, mut stderr) = super::run::run_binary_captured_io(bin, &args);
+    let records = std::fs::read_to_string(&log).unwrap_or_default();
+    let _ = std::fs::remove_file(&log);
+    if code == 0 {
+        let unfinished: Vec<&str> = selected
+            .iter()
+            .filter(|(m, _)| !libtest_log_has(&records, &libtest_path(m)))
+            .map(|(_, label)| label.as_str())
+            .collect();
+        if let Some(first) = unfinished.first() {
+            code = 1;
+            stderr.push_str(&format!(
+                "Error: the test binary exited with status 0 before every test finished (process.exit inside a test?)\n  first unfinished: test: {first}\n  never finished: {} of {} selected test(s)\n",
+                unfinished.len(),
+                selected.len()
+            ));
+        }
+    }
+    (code, stdout, stderr)
+}
+
+/// Does libtest's `--logfile` carry a verdict record for `path`? Each finished
+/// test is one line, `ok <path>` / `failed[: <msg>] <path>` / `ignored <path>`.
+fn libtest_log_has(records: &str, path: &str) -> bool {
+    records.lines().any(|l| {
+        (l.starts_with("ok ") || l.starts_with("failed") || l.starts_with("ignored"))
+            && l.split_whitespace().any(|t| t == path)
+    })
+}
+
+/// A fresh scratch path for one binary's libtest log.
+fn native_test_log_path() -> std::path::PathBuf {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    std::env::temp_dir().join(format!("almide-test-{}-{n}-{nanos}.log", std::process::id()))
+}
+
 /// Report one failing test file as a STRUCTURED record: the assertion's `.almd`
 /// site, expected/found, and a real diff for multi-line strings, lists and
 /// records. Falls back to the raw captured output when nothing parses — a

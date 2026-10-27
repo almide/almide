@@ -264,15 +264,55 @@ impl WasmTestRunner {
     }
 }
 
-/// A finished run's verdict from whether it exited 0 — shared by both runners
-/// so the classification is one rule. `selected` is how many tests the runner
-/// was synthesized over ([`almide_driver::test_runner::runs_test`]): the runner
-/// runs them in order and any failure ends the run non-zero, so a run that
-/// exited 0 ran all of them. The count is NOT read off stdout (#3489): the
+/// How a wasm test run ended, as the HARNESS saw it (#4255). The exit status
+/// alone is not the verdict: `process.exit(0)` inside a test ends the run with
+/// status 0 before the runner `main` reached the remaining tests, and reading
+/// that 0 as "every test passed" greened a file whose later tests failed or
+/// never ran.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RunEnd {
+    /// The runner `main` ran to its end: every selected test reported.
+    Completed,
+    /// Status 0, but the runner did not reach its end.
+    ExitedZeroEarly,
+    /// A non-zero status: a failing test, an abort, a trap.
+    Failed,
+}
+
+impl RunEnd {
+    /// The embedded host knows whether `main` returned.
+    fn embedded(r: &almide_wasm_run::RunResult) -> RunEnd {
+        match (r.exit, r.main_returned) {
+            (0, true) => RunEnd::Completed,
+            (0, false) => RunEnd::ExitedZeroEarly,
+            _ => RunEnd::Failed,
+        }
+    }
+
+    /// A stock runtime reports only the status, so a status-0 run is checked
+    /// against the runner's per-test headers: fewer `test: ` lines than
+    /// selected tests means the run stopped before reaching the rest. (An exit
+    /// inside the LAST selected test is invisible to this lane; the embedded
+    /// host, the default, sees it.)
+    fn stock(success: bool, stdout: &str, selected: usize) -> RunEnd {
+        if !success {
+            return RunEnd::Failed;
+        }
+        let started = stdout.lines().filter(|l| l.starts_with("test: ")).count();
+        if started < selected { RunEnd::ExitedZeroEarly } else { RunEnd::Completed }
+    }
+}
+
+/// A finished run's verdict from how it ENDED ([`RunEnd`]) — shared by both
+/// runners so the classification is one rule. `selected` is how many tests the
+/// runner was synthesized over ([`almide_driver::test_runner::runs_test`]): the
+/// runner runs them in order and any failure ends the run non-zero, so a run
+/// that reached the end of `main` ran all of them (exit status 0 alone does
+/// not say that, #4255). The count is NOT read off stdout (#3489): the
 /// runner's `ok` line shares stdout with the tests, and a test that printed
 /// `ok` counted as a test.
-fn wasm_run_outcome(test_file: &str, (declared_tests, selected): (usize, usize), bytes_len: usize, success: bool, stdout: &str, stderr: &str) -> WasmTestOutcome {
-    if success {
+fn wasm_run_outcome(test_file: &str, (declared_tests, selected): (usize, usize), bytes_len: usize, run: RunEnd, stdout: &str, stderr: &str) -> WasmTestOutcome {
+    if run == RunEnd::Completed {
         let ran = selected;
         return WasmTestOutcome::Pass {
             file: test_file.to_string(),
@@ -291,6 +331,13 @@ fn wasm_run_outcome(test_file: &str, (declared_tests, selected): (usize, usize),
     }
     let mut detail = String::new();
     if !last_test.is_empty() { detail.push_str(&format!("  trapped at: {}\n", last_test)); }
+    if run == RunEnd::ExitedZeroEarly {
+        detail.push_str(&format!(
+            "  the test run ended with exit status 0 before every test reported (process.exit inside a test?) — {} of {} selected test(s) never finished\n",
+            selected.saturating_sub(stdout.lines().filter(|l| l.starts_with("test: ")).count().saturating_sub(1)),
+            selected,
+        ));
+    }
     // From the failure block when there is one: the first
     // stderr lines may be the program's own (#2538), which
     // `printed` carries under their own label.
@@ -498,11 +545,11 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
             return match almide_wasm_run::run_wasm_unbounded(&module.almide) {
                 Ok(r) => {
                     report_alloc_count(&r);
-                    wasm_run_outcome(test_file, counts, module.reported_len(), r.exit == 0, &r.stdout, &r.stderr)
+                    wasm_run_outcome(test_file, counts, module.reported_len(), RunEnd::embedded(&r), &r.stdout, &r.stderr)
                 }
                 // A module the host cannot instantiate FAILS, as the CLI's
                 // non-zero exit did — it is not a benign skip.
-                Err(e) => wasm_run_outcome(test_file, counts, module.reported_len(), false, "", &format!("Error: embedded wasm host: {e:#}\n")),
+                Err(e) => wasm_run_outcome(test_file, counts, module.reported_len(), RunEnd::Failed, "", &format!("Error: embedded wasm host: {e:#}\n")),
             };
         }
         // A stock runtime cannot start the fresh instance an abort site runs
@@ -532,14 +579,11 @@ pub(super) fn compile_and_run_wasm_test(test_file: &str, wasm_path: std::path::P
             }
         }
         match cmd.arg(&wasm_path).output() {
-            Ok(result) => wasm_run_outcome(
-                test_file,
-                counts,
-                wasi.len(),
-                result.status.success(),
-                &String::from_utf8_lossy(&result.stdout),
-                &String::from_utf8_lossy(&result.stderr),
-            ),
+            Ok(result) => {
+                let stdout = String::from_utf8_lossy(&result.stdout);
+                let end = RunEnd::stock(result.status.success(), &stdout, counts.1);
+                wasm_run_outcome(test_file, counts, wasi.len(), end, &stdout, &String::from_utf8_lossy(&result.stderr))
+            }
             Err(e) => skip_env(format!("ALMIDE_TEST_WASM_RUNNER=wasmtime, and the `wasmtime` CLI did not start: {e}")),
         }
     };
@@ -705,7 +749,7 @@ pub(super) fn run_native_fallback_phase(fallback: &[String], program_args: &std:
         let worker_dir = scratch.native_worker_dir(&tf);
         let (built, (code, stdout, stderr)) = guard_worker_panic(
             || match super::run::compile_to_binary(&tf, no_check, true, false, Some(&worker_dir)) {
-                Ok(bin) => (true, super::run::run_binary_captured_io(&bin, &args)),
+                Ok(bin) => (true, super::test_report::run_native_test_binary(&tf, &bin, &args)),
                 Err(e) => (false, (1, format!("Compile error for {}:\n{}", tf, e), String::new())),
             },
             |msg| (false, (1, format!("Compile error for {}:\n{}", tf, msg), String::new())),
