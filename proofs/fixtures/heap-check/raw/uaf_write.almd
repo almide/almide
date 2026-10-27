@@ -4,8 +4,13 @@
 // the grant the stdlib's own sources have: `prim` is not user surface (E085).
 
 // The data address of a buffer that dies when this returns: its block goes
-// back to the allocator's free list, and the address dangles.
-fn dangling() -> Int = prim.handle(bytes.zeros(40)) + 12
+// back to the allocator's free list, and the address dangles. The buffer is
+// built from a list, so it is a heap block of this call, never a constant.
+fn dangling(n: Int) -> Int = {
+  let b = bytes.from_list(list.repeat(1, n))
+  let a = prim.handle(b) + 12
+  a
+}
 
 fn poke(addr: Int, i: Int) -> Unit = if i >= 8 then () else {
   prim.store8(addr + i, 9)
@@ -13,10 +18,10 @@ fn poke(addr: Int, i: Int) -> Unit = if i >= 8 then () else {
 }
 
 effect fn main() -> Unit = {
-  let p = dangling()
+  let p = dangling(40)
   // A use-after-free WRITE through the dangling address.
   poke(p, 0)
   // The next request of the same size class takes the freed block back.
-  let c = bytes.zeros(40)
+  let c = bytes.from_list(list.repeat(2, 40))
   println("wrote 8, reused ${bytes.len(c)}")
 }
