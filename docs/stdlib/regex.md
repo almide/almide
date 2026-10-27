@@ -227,7 +227,7 @@ pattern without expanding it.
 | `a`, `\.`, `\\` | literal characters (escape a metacharacter with `\`) |
 | `.` | any character except `\n` |
 | `[abc]`, `[a-z]`, `[^0-9]` | character class, range, negated class (a leading `]` is a member) |
-| `\d` `\w` `\s` and `\D` `\W` `\S` | digit, word (`[A-Za-z0-9_]`), whitespace, and their negations; inside a class `\d` `\w` `\s` `\n` `\t` |
+| `\d` `\w` `\s` and `\D` `\W` `\S` | digit, word (`[A-Za-z0-9_]`), whitespace (`[ \t\n\v\f\r]`, the ASCII set every mainstream engine uses), and their negations; inside a class `\d` `\w` `\s` `\n` `\t` |
 | `\n` `\t` `\r` | control characters |
 | `^`, `$` | start / end of the string |
 | `\b`, `\B` | word boundary / non-boundary (ASCII word characters) |

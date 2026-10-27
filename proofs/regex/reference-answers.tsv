@@ -6622,3 +6622,219 @@ find	[a\]b]	a]b	<a>
 find_all	[a\]b]	a]b	[a|]|b]
 split	[a\]b]	a]b	[|||]
 captures	[a\]b]	a]b	[a]
+is_match	\s		true
+full_match	\s		true
+find	\s		<>
+find_all	\s		[]
+is_match	\s		true
+full_match	\s		true
+find	\s		<>
+find_all	\s		[]
+is_match	\s			true
+full_match	\s			true
+find	\s			<	>
+find_all	\s			[	]
+is_match	\s		true
+full_match	\s		true
+find	\s		<>
+find_all	\s		[]
+is_match	\s	 	true
+full_match	\s	 	true
+find	\s	 	< >
+find_all	\s	 	[ ]
+is_match	\s	a	false
+full_match	\s	a	false
+find	\s	a	<none>
+find_all	\s	a	[]
+is_match	\s	username	true
+full_match	\s	username	false
+find	\s	username	<>
+find_all	\s	username	[]
+is_match	\s	username	true
+full_match	\s	username	false
+find	\s	username	<>
+find_all	\s	username	[]
+is_match	\s	ab	true
+full_match	\s	ab	false
+find	\s	ab	<>
+find_all	\s	ab	[|]
+is_match	\S		false
+full_match	\S		false
+find	\S		<none>
+find_all	\S		[]
+is_match	\S		false
+full_match	\S		false
+find	\S		<none>
+find_all	\S		[]
+is_match	\S			false
+full_match	\S			false
+find	\S			<none>
+find_all	\S			[]
+is_match	\S		false
+full_match	\S		false
+find	\S		<none>
+find_all	\S		[]
+is_match	\S	 	false
+full_match	\S	 	false
+find	\S	 	<none>
+find_all	\S	 	[]
+is_match	\S	a	true
+full_match	\S	a	true
+find	\S	a	<a>
+find_all	\S	a	[a]
+is_match	\S	username	true
+full_match	\S	username	false
+find	\S	username	<u>
+find_all	\S	username	[u|s|e|r|n|a|m|e]
+is_match	\S	username	true
+full_match	\S	username	false
+find	\S	username	<u>
+find_all	\S	username	[u|s|e|r|n|a|m|e]
+is_match	\S	ab	true
+full_match	\S	ab	false
+find	\S	ab	<a>
+find_all	\S	ab	[a|b]
+is_match	[\s]		true
+full_match	[\s]		true
+find	[\s]		<>
+find_all	[\s]		[]
+is_match	[\s]		true
+full_match	[\s]		true
+find	[\s]		<>
+find_all	[\s]		[]
+is_match	[\s]			true
+full_match	[\s]			true
+find	[\s]			<	>
+find_all	[\s]			[	]
+is_match	[\s]		true
+full_match	[\s]		true
+find	[\s]		<>
+find_all	[\s]		[]
+is_match	[\s]	 	true
+full_match	[\s]	 	true
+find	[\s]	 	< >
+find_all	[\s]	 	[ ]
+is_match	[\s]	a	false
+full_match	[\s]	a	false
+find	[\s]	a	<none>
+find_all	[\s]	a	[]
+is_match	[\s]	username	true
+full_match	[\s]	username	false
+find	[\s]	username	<>
+find_all	[\s]	username	[]
+is_match	[\s]	username	true
+full_match	[\s]	username	false
+find	[\s]	username	<>
+find_all	[\s]	username	[]
+is_match	[\s]	ab	true
+full_match	[\s]	ab	false
+find	[\s]	ab	<>
+find_all	[\s]	ab	[|]
+is_match	[^\s]		false
+full_match	[^\s]		false
+find	[^\s]		<none>
+find_all	[^\s]		[]
+is_match	[^\s]		false
+full_match	[^\s]		false
+find	[^\s]		<none>
+find_all	[^\s]		[]
+is_match	[^\s]			false
+full_match	[^\s]			false
+find	[^\s]			<none>
+find_all	[^\s]			[]
+is_match	[^\s]		false
+full_match	[^\s]		false
+find	[^\s]		<none>
+find_all	[^\s]		[]
+is_match	[^\s]	 	false
+full_match	[^\s]	 	false
+find	[^\s]	 	<none>
+find_all	[^\s]	 	[]
+is_match	[^\s]	a	true
+full_match	[^\s]	a	true
+find	[^\s]	a	<a>
+find_all	[^\s]	a	[a]
+is_match	[^\s]	username	true
+full_match	[^\s]	username	false
+find	[^\s]	username	<u>
+find_all	[^\s]	username	[u|s|e|r|n|a|m|e]
+is_match	[^\s]	username	true
+full_match	[^\s]	username	false
+find	[^\s]	username	<u>
+find_all	[^\s]	username	[u|s|e|r|n|a|m|e]
+is_match	[^\s]	ab	true
+full_match	[^\s]	ab	false
+find	[^\s]	ab	<a>
+find_all	[^\s]	ab	[a|b]
+is_match	^\S+$		false
+full_match	^\S+$		false
+find	^\S+$		<none>
+find_all	^\S+$		[]
+is_match	^\S+$		false
+full_match	^\S+$		false
+find	^\S+$		<none>
+find_all	^\S+$		[]
+is_match	^\S+$			false
+full_match	^\S+$			false
+find	^\S+$			<none>
+find_all	^\S+$			[]
+is_match	^\S+$		false
+full_match	^\S+$		false
+find	^\S+$		<none>
+find_all	^\S+$		[]
+is_match	^\S+$	 	false
+full_match	^\S+$	 	false
+find	^\S+$	 	<none>
+find_all	^\S+$	 	[]
+is_match	^\S+$	a	true
+full_match	^\S+$	a	true
+find	^\S+$	a	<a>
+find_all	^\S+$	a	[a]
+is_match	^\S+$	username	false
+full_match	^\S+$	username	false
+find	^\S+$	username	<none>
+find_all	^\S+$	username	[]
+is_match	^\S+$	username	false
+full_match	^\S+$	username	false
+find	^\S+$	username	<none>
+find_all	^\S+$	username	[]
+is_match	^\S+$	ab	false
+full_match	^\S+$	ab	false
+find	^\S+$	ab	<none>
+find_all	^\S+$	ab	[]
+is_match	\s+		true
+full_match	\s+		true
+find	\s+		<>
+find_all	\s+		[]
+is_match	\s+		true
+full_match	\s+		true
+find	\s+		<>
+find_all	\s+		[]
+is_match	\s+			true
+full_match	\s+			true
+find	\s+			<	>
+find_all	\s+			[	]
+is_match	\s+		true
+full_match	\s+		true
+find	\s+		<>
+find_all	\s+		[]
+is_match	\s+	 	true
+full_match	\s+	 	true
+find	\s+	 	< >
+find_all	\s+	 	[ ]
+is_match	\s+	a	false
+full_match	\s+	a	false
+find	\s+	a	<none>
+find_all	\s+	a	[]
+is_match	\s+	username	true
+full_match	\s+	username	false
+find	\s+	username	<>
+find_all	\s+	username	[]
+is_match	\s+	username	true
+full_match	\s+	username	false
+find	\s+	username	<>
+find_all	\s+	username	[]
+is_match	\s+	ab	true
+full_match	\s+	ab	false
+find	\s+	ab	<>
+find_all	\s+	ab	[]

@@ -228,4 +228,14 @@ fn main() -> Unit = {
   // nested star terminates (empty instance ends the loop) → T
   // empty instance is still counted → [, ]
   println(olist(regex.captures(regex.new("(a*)*"), "")))
+  // ── \s is the ASCII whitespace set [ \t\n\v\f\r] (#4257) ──
+  // each of U+0009..U+000D and U+0020 against \s, \S, [\s], [^\s] → TFTF per line
+  for cp in [9, 10, 11, 12, 13, 32] {
+    let ch = string.from_codepoint(cp) ?? ""
+    println("${cp} ${b2s(regex.is_match(regex.new("\\s"), ch))}${b2s(regex.is_match(regex.new("\\S"), ch))}${b2s(regex.is_match(regex.new("[\\s]"), ch))}${b2s(regex.is_match(regex.new("[^\\s]"), ch))}")
+  }
+  // a no-whitespace validator refuses a form feed and a vertical tab → F F T
+  println(b2s(regex.is_full_match(regex.new("^\\S+$"), "user\u{c}name")))
+  println(b2s(regex.is_full_match(regex.new("^\\S+$"), "user\u{b}name")))
+  println(b2s(regex.is_full_match(regex.new("^\\S+$"), "username")))
 }
