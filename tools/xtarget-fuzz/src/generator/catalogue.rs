@@ -208,7 +208,8 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     ("float32", include_str!("../../../../stdlib/float32.almd"), false),
     ("float64", include_str!("../../../../stdlib/float64.almd"), false),
     ("bytes", include_str!("../../../../stdlib/bytes.almd"), false),
-    // Host addresses over a live buffer (`effect_recipes.rs`, `verdicts.rs`).
+    // Bounds-checked Regions (ADR-0031). No `Region` nominal is built yet, so
+    // its fns are not drawn; listed so a program naming `ffi.` imports it.
     ("ffi", include_str!("../../../../stdlib/ffi.almd"), true),
     ("matrix", include_str!("../../../../stdlib/matrix.almd"), false),
     ("error", include_str!("../../../../stdlib/error.almd"), false),
@@ -596,7 +597,7 @@ fn signature_from_decl(module: &'static str, decl: &Decl) -> Option<Signature> {
     // A `mut` parameter needs a `var` at the call: the generator hoists one
     // (term.rs). Two `mut` parameters are left to the mutation path. The
     // positions are the compiler's own answer (`mut p` and `@mutating`), so a
-    // `@mutating` receiver (`bytes.as_mut_ptr`) gets its `var` too (E032).
+    // `@mutating` receiver gets its `var` too (E032).
     let muts: Vec<usize> = almide::ir::mut_args::declared_mut_positions(params, attrs);
     if muts.len() > 1 {
         return None;

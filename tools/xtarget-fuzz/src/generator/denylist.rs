@@ -85,13 +85,16 @@ const NONDETERMINISTIC_FUNCTIONS: &[(&str, &str)] = &[
 /// observation into a layout one and reports a "divergence" no contract
 /// promises against. Screened as a word so the UFCS form is caught too.
 ///
+/// Empty since ADR-0031 (dialect epoch 15): `bytes.data_ptr`, `ffi.to_int`
+/// and every other address-as-`Int` spelling left the stdlib, so no stdlib
+/// fn hands a program an address. The table stays so a future address-unit
+/// fn has a place to land (the matrix test below holds it to the manifest).
+///
 /// An address-unit entry whose observable result a contract pins
 /// native == wasm is NOT here: it stays a valid seed, and
 /// [`ADDRESS_UNIT_PINNED_BY_CONTRACT`] lists it. A test holds the two
 /// tables to the manifest's address-unit set cell for cell.
-const HOST_ADDRESS_FUNCTIONS: &[(&str, &str)] = &[
-    ("bytes", "data_ptr"), // as_ptr / handle + 12 — target layout
-];
+const HOST_ADDRESS_FUNCTIONS: &[(&str, &str)] = &[];
 
 /// Address-unit functions whose result a contract pins leg-independent,
 /// with the contract that pins it. Exists so the matrix test can tell an
@@ -279,20 +282,6 @@ mod tests {
     fn function_predicate_agrees_with_table() {
         assert!(NamedDenylist::is_denied_function("list", "shuffle"));
         assert!(!NamedDenylist::is_denied_function("list", "map"));
-        assert!(NamedDenylist::is_denied_function("bytes", "data_ptr"));
-    }
-
-    /// #3193: the nightly mutated `data_ptr(b("")) >= 0` into `>= 160` and
-    /// reported native `false` / wasm `true` — an address magnitude, which
-    /// no contract promises. Both the call and the UFCS form are screened.
-    #[test]
-    fn denies_host_address_observations() {
-        let repro = "let p1 = bytes.data_ptr(abcde)\n\
-                     println(\"${bytes.data_ptr(b(\"\")) >= 160}\")";
-        assert_eq!(NamedDenylist::source_references_denied_surface(repro), Some("data_ptr"));
-        assert!(NamedDenylist::source_references_denied_surface("buf.data_ptr()").is_some());
-        // A longer identifier that merely contains the word stays allowed.
-        assert!(NamedDenylist::source_references_denied_surface("let data_ptrs = 1").is_none());
     }
 
     /// Every `index_unit = "address"` fn in the semantics manifest is in
@@ -305,12 +294,14 @@ mod tests {
         let text = std::fs::read_to_string(path).expect("read semantics-manifest.toml");
         let mut manifest: Vec<(String, String)> = Vec::new();
         let (mut module, mut name) = (String::new(), String::new());
+        let mut fns_parsed = 0usize;
         for line in text.lines().map(str::trim) {
             if let Some(m) = line.strip_prefix("[[").and_then(|l| l.strip_suffix(".fn]]")) {
                 module = m.to_string();
                 name.clear();
             } else if let Some(n) = line.strip_prefix("name = \"").and_then(|l| l.strip_suffix('"')) {
                 name = n.to_string();
+                fns_parsed += 1;
             } else if line == "index_unit = \"address\"" {
                 manifest.push((module.clone(), name.clone()));
             }
@@ -323,7 +314,9 @@ mod tests {
             .collect();
         manifest.sort();
         tables.sort();
-        assert!(!manifest.is_empty(), "no address-unit fn parsed from {path}");
+        // Since ADR-0031 no stdlib fn returns an address, so the set may be
+        // empty; the parse itself must still have read the manifest's fns.
+        assert!(fns_parsed > 0, "no fn parsed from {path}");
         assert_eq!(manifest, tables, "address-unit fns vs HOST_ADDRESS_FUNCTIONS + ADDRESS_UNIT_PINNED_BY_CONTRACT");
     }
 }
