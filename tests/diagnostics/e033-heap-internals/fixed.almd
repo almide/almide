@@ -1,0 +1,8 @@
+// #4256: a heap's slot order is never observable (R-heap-02). `Heap` is
+// opaque, so reading `h.slots` outside the `heap` module is refused.
+effect fn main() -> Unit = {
+  var h: Heap[Int] = heap.new()
+  heap.push(h, 5)
+  heap.push(h, 1)
+  println("${heap.to_list(h)}")
+}

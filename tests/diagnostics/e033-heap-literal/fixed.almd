@@ -1,0 +1,9 @@
+// #4256: a hand-built `Heap` literal could break the heap invariant, and
+// `heap.pop` would then answer out of order. `Heap` is opaque, so the
+// literal is refused outside the `heap` module.
+effect fn main() -> Unit = {
+  var built: Heap[Int] = heap.new_with((a, b) => a - b)
+  heap.push(built, 9)
+  heap.push(built, 1)
+  println("${heap.pop(built)} ${heap.peek(built)}")
+}

@@ -1,0 +1,2 @@
+expects_code = "E033"
+expects_error = "opaque type 'Deque'"
