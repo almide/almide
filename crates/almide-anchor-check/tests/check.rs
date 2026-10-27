@@ -1,7 +1,7 @@
 //! The checker over hand-written modules: each shape it accepts, and for
 //! each, the one-instruction change it must refuse.
 
-use almide_anchor_check::{check_bounds, check_init, decode, At, Report};
+use almide_anchor_check::{check_bounds, check_init, check_rc, decode, At, RcReport, Report};
 
 /// Function 0 is `$alloc`; function 1 is the subject, its body `body`.
 fn module(locals: &str, body: &str) -> Vec<u8> {
@@ -403,5 +403,41 @@ fn an_index_the_model_does_not_open_compares_by_its_instruction() -> Result<(), 
         "local.get 0 local.get 1 i64.const 3 i64.rem_s i32.wrap_i64",
     );
     assert!(bounds(&again, "c0 a0", "1:11 1:23").is_err());
+    Ok(())
+}
+
+// ── rc (#4277): recorded events against the release calls ─────────────────
+
+fn rc(body: &str, events: &str) -> Result<RcReport, String> {
+    let bytes = module("(local i32 i32)", body);
+    let bodies = decode(&bytes)?;
+    let mut r = RcReport::default();
+    // `$alloc` (function 0) stands in for the release routine.
+    let releases = [0u32].into_iter().collect();
+    check_rc(&bodies, None, &releases, &[(1, events.to_string())], &mut r).map(|()| r)
+}
+
+#[test]
+fn a_recorded_release_on_its_local_is_matched() -> Result<(), String> {
+    let r = rc("local.get 0 call $alloc drop", "d0")?;
+    assert_eq!((r.frames, r.events, r.calls), (1, 1, 1));
+    // Read through a hold local, the release still names the variable.
+    rc("local.get 0 local.set 1 local.get 1 call $alloc drop", "d0")?;
+    Ok(())
+}
+
+#[test]
+fn a_dropped_release_a_doubled_one_and_one_on_another_local_are_refused() {
+    assert!(rc("local.get 0 call $alloc drop", "").unwrap_err().contains("no call []; calls with no recorded event [d@1"));
+    assert!(rc("local.get 0 call $alloc drop", "d0 d0").unwrap_err().contains("no call [d0]"));
+    assert!(rc("local.get 1 call $alloc drop", "d0").is_err());
+    assert!(rc("local.get 0 call $alloc drop local.get 0 call $alloc drop", "d0").is_err());
+}
+
+#[test]
+fn dead_and_pre_abort_releases_are_not_live_events() -> Result<(), String> {
+    rc("return local.get 0 call $alloc drop", "")?;
+    let r = rc("local.get 0 call $alloc drop unreachable", "")?;
+    assert_eq!(r.pre_abort, 1);
     Ok(())
 }

@@ -175,6 +175,13 @@ impl WitnessRecorder {
     /// path — the instructions are emitted but never run).
     fn log(&mut self, ev: Ev) {
         if !self.branches.dead() {
+            // #4277: a live rc_inc / release, for the byte check.
+            match ev {
+                Ev::Op(_, c @ ('a' | 'd')) => crate::witness::rc::event(c, None),
+                Ev::LOp(l, c @ ('a' | 'd')) => crate::witness::rc::event(c, Some(l)),
+                Ev::DecOld(l) => crate::witness::rc::event('d', Some(l)),
+                _ => {}
+            }
             self.log.push(ev);
         }
     }
@@ -651,6 +658,7 @@ pub fn start_collecting() {
     crate::witness::bounds::start();
     crate::witness::init::start();
     crate::witness::anchor::start();
+    crate::witness::rc::start();
     crate::witness::decls::start();
 }
 
@@ -677,6 +685,10 @@ pub use init::take as take_init;
 /// The init witness sink (split for the file budget).
 #[path = "witness_init.rs"]
 pub(crate) mod init;
+
+/// Where the ownership witness's RC events are (#4277, witness_rc.rs).
+#[path = "witness_rc.rs"]
+pub mod rc;
 
 /// Where in the bytes each bounds / init event is (#4011 (d),
 /// witness_anchor.rs).

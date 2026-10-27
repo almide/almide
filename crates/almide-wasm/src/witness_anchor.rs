@@ -70,6 +70,11 @@ pub(crate) fn at(f: &wasm_encoder::Function) -> String {
     }
 }
 
+/// The serial of the body being emitted, if a sweep collects (#4277).
+pub(crate) fn current() -> Option<u64> {
+    state().lock().expect("anchor sink").as_ref().and_then(|s| s.open.last().copied())
+}
+
 /// The digest of a body's bytes (without the size prefix).
 pub fn body_digest(raw: &[u8]) -> u64 {
     use std::hash::{Hash, Hasher};
