@@ -11,7 +11,7 @@ effect fn compress(b: Bytes) -> Result[Bytes, String] = _
 @intrinsic("almide_rt_zlib_compress_level")
 effect fn compress_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
-/// Inflated zlib stream; err on corrupt input or output over 268435456 bytes.
+/// Inflated zlib stream; err on corrupt input, bytes after it, or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_decompress")
 fn decompress(b: Bytes) -> Result[Bytes, String] = _
 
@@ -28,7 +28,7 @@ effect fn deflate(b: Bytes) -> Result[Bytes, String] = _
 @intrinsic("almide_rt_zlib_deflate_level")
 effect fn deflate_level(b: Bytes, level: Int) -> Result[Bytes, String] = _
 
-/// Raw DEFLATE decoded; err on a corrupt stream or output over 268435456 bytes.
+/// Raw DEFLATE decoded; err on a corrupt stream, bytes after it, or output over 268435456 bytes.
 @intrinsic("almide_rt_zlib_inflate")
 fn inflate(b: Bytes) -> Result[Bytes, String] = _
 

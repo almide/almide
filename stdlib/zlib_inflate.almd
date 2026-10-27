@@ -251,8 +251,9 @@ else if sym == 17 then 3 else 4
 
 // (status, pos, buf, cnt)
 // `base` is where this stream's output starts in `out`: a distance reaching
-// before it reads zeros, the way a fresh native inflater's empty window does —
-// an earlier gzip member's bytes are not this member's history.
+// before it is corrupt (RFC 1951 §3.2.5; zlib's "invalid distance too far
+// back"), never read as zeros — an earlier gzip member's bytes are not this
+// member's history either (#4268).
 fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int, limit: Int, lencode: List[Int], distcode: List[Int]) -> (Int, Int, Int, Int) = {
   let lbase = zli_lbase()
   let lext = zli_lext()
@@ -296,7 +297,8 @@ fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int
         p = p5
         b = b5
         c = c5
-        let bad = if ds < 0 or ds >= 30 then 1 else 0
+        let far = dbase[dsc] + db > bytes.len(out) - base
+        let bad = if ds < 0 or ds >= 30 or far then 1 else 0
         let want = if bad == 1 then 0 else lbase[li] + eb
         let over = bad == 0 and bytes.len(out) + want > limit
         status = if bad == 1 then 0 - 1
@@ -308,9 +310,7 @@ fn zli_codes(pos: Int, buf: Int, cnt: Int, inp: Bytes, mut out: Bytes, base: Int
     }
     var k = 0
     while k < clen {
-      let src = bytes.len(out) - dist
-      bytes.push(out, if src < base then 0
-      else bytes.get(out, src) ?? 0)
+      bytes.push(out, bytes.get(out, bytes.len(out) - dist) ?? 0)
       k = k + 1
     }
   }
@@ -677,15 +677,19 @@ fn zli_gunzip(data: Bytes, limit: Int) -> Result[Bytes, String] = {
 
 fn zli_inflate(data: Bytes, limit: Int) -> Result[Bytes, String] = {
   var out = bytes.zeros(0)
-  let (status, _after) = zli_inflate_stream(0, data, out, limit)
-  if status == 0 then ok(out)
-  else if status == 0 - 3 then err(zli_exceeds(limit))
-  else if status == 0 - 2 then err("zlib.inflate: incomplete deflate stream") else err("zlib.inflate: corrupt deflate stream")
+  let (status, after) = zli_inflate_stream(0, data, out, limit)
+  // A raw DEFLATE stream is the whole input: a byte after its final block is
+  // refused, as a byte after a gzip member is (#4268).
+  if status == 0 - 3 then err(zli_exceeds(limit))
+  else if status == 0 - 2 then err("zlib.inflate: incomplete deflate stream")
+  else if status != 0 then err("zlib.inflate: corrupt deflate stream")
+  else if after < bytes.len(data) then err("zlib.inflate: trailing data after stream") else ok(out)
 }
 
 // A zlib header is CMF FLG: CM 8, CINFO <= 7, FCHECK making CMF*256+FLG a
 // multiple of 31; FDICT is refused. An input cut off before the two header
-// bytes or inside the Adler-32 trailer is `unexpected end of file`.
+// bytes or inside the Adler-32 trailer is `unexpected end of file`; a byte
+// after the trailer is `trailing data after stream` (#4268).
 fn zli_decompress(data: Bytes, limit: Int) -> Result[Bytes, String] = {
   let cmf = bytes.get(data, 0) ?? 0
   let flg = bytes.get(data, 1) ?? 0
@@ -706,7 +710,8 @@ fn zli_decompress(data: Bytes, limit: Int) -> Result[Bytes, String] = {
     else if status == 0 - 2 then err("zlib.decompress: incomplete deflate stream")
     else if status != 0 then err("zlib.decompress: corrupt deflate stream")
     else if after + 4 > bytes.len(data) then err("zlib.decompress: unexpected end of file")
-    else if zli_adler32_from(out, 0) != stored then err("zlib.decompress: adler32 mismatch") else ok(out)
+    else if zli_adler32_from(out, 0) != stored then err("zlib.decompress: adler32 mismatch")
+    else if after + 4 < bytes.len(data) then err("zlib.decompress: trailing data after stream") else ok(out)
   }
 }
 

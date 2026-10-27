@@ -18,6 +18,10 @@
 //! | DEFLATE stream needs bytes past the input     | `incomplete deflate stream`     |
 //! | DEFLATE stream malformed                      | `corrupt deflate stream`        |
 //! | CRC-32 / ISIZE / Adler-32 trailer wrong       | `crc mismatch` / `size mismatch` / `adler32 mismatch` |
+//! | bytes after a zlib / raw DEFLATE stream       | `trailing data after stream` (#4268) |
+//!
+//! A distance reaching before the stream's first output byte is `corrupt
+//! deflate stream` (RFC 1951 §3.2.5), never the empty window's zeros (#4268).
 //!
 //! The probe pins every named case to its text on both legs, then sweeps
 //! every prefix and every single-byte xor of three valid vectors and requires
@@ -139,6 +143,10 @@ effect fn main() -> Unit = {
   println("decompress bad-table: " + run("decompress", bytes.from_list([120, 156, 165, 204, 139, 13, 128, 32, 12, 4, 208, 85, 110, 0, 112, 0, 183, 1, 115, 74, 147, 74, 19, 104, 76, 112, 122, 221, 193, 1, 222, 243, 70, 36, 189, 164, 18, 143, 74, 198, 164, 30, 177, 217, 244, 29, 214, 137, 202, 98, 149, 35, 128, 55, 199, 130, 242, 12, 200, 203, 25, 63, 208, 93, 74, 210, 13, 254, 187, 120, 1, 122, 109, 47, 153]))!)
   println("decompress far: " + run("decompress", bytes.from_list([120, 156, 3, 2, 0, 0, 3, 0, 1]))!)
   println("decompress trailing-garbage: " + run("decompress", bytes.from_list([120, 156, 165, 204, 139, 13, 128, 32, 12, 4, 208, 85, 110, 0, 112, 0, 183, 225, 115, 74, 147, 74, 19, 104, 76, 112, 122, 221, 193, 1, 222, 243, 70, 36, 189, 164, 18, 143, 74, 198, 164, 30, 177, 217, 244, 29, 214, 137, 202, 98, 149, 35, 128, 55, 199, 130, 242, 12, 200, 203, 25, 63, 208, 93, 74, 210, 13, 254, 187, 120, 1, 122, 109, 47, 153, 120, 121, 122]))!)
+  println("inflate far-after-lit: " + run("inflate", bytes.from_list([75, 4, 18, 0]))!)
+  println("inflate trailing-xyz: " + run("inflate", bytes.from_list([203, 72, 205, 201, 201, 87, 200, 64, 34, 203, 243, 139, 114, 82, 0, 88, 89, 90]))!)
+  println("decompress trailing-GARBAGE: " + run("decompress", bytes.from_list([120, 156, 203, 72, 205, 201, 201, 87, 200, 64, 34, 203, 243, 139, 114, 82, 0, 104, 125, 8, 197, 71, 65, 82, 66, 65, 71, 69]))!)
+  println("decompress two-streams: " + run("decompress", bytes.from_list([120, 156, 203, 72, 205, 201, 201, 87, 200, 64, 39, 1, 104, 3, 8, 177, 120, 156, 43, 78, 77, 206, 207, 75, 81, 40, 46, 41, 74, 77, 204, 5, 0, 36, 49, 5, 41]))!)
   sweep("gunzip", bytes.from_list([31, 139, 8, 0, 0, 0, 0, 0, 0, 255, 165, 204, 139, 13, 128, 32, 12, 4, 208, 85, 110, 0, 112, 0, 183, 225, 115, 74, 147, 74, 19, 104, 76, 112, 122, 221, 193, 1, 222, 243, 70, 36, 189, 164, 18, 143, 74, 198, 164, 30, 177, 217, 244, 29, 214, 137, 202, 98, 149, 35, 128, 55, 199, 130, 242, 12, 200, 203, 25, 63, 208, 93, 74, 210, 13, 254, 187, 120, 1, 219, 199, 77, 67, 133, 0, 0, 0]))!
   sweep("inflate", bytes.from_list([165, 204, 139, 13, 128, 32, 12, 4, 208, 85, 110, 0, 112, 0, 183, 225, 115, 74, 147, 74, 19, 104, 76, 112, 122, 221, 193, 1, 222, 243, 70, 36, 189, 164, 18, 143, 74, 198, 164, 30, 177, 217, 244, 29, 214, 137, 202, 98, 149, 35, 128, 55, 199, 130, 242, 12, 200, 203, 25, 63, 208, 93, 74, 210, 13, 254, 187, 120, 1]))!
   sweep("decompress", bytes.from_list([120, 156, 165, 204, 139, 13, 128, 32, 12, 4, 208, 85, 110, 0, 112, 0, 183, 225, 115, 74, 147, 74, 19, 104, 76, 112, 122, 221, 193, 1, 222, 243, 70, 36, 189, 164, 18, 143, 74, 198, 164, 30, 177, 217, 244, 29, 214, 137, 202, 98, 149, 35, 128, 55, 199, 130, 242, 12, 200, 203, 25, 63, 208, 93, 74, 210, 13, 254, 187, 120, 1, 122, 109, 47, 153]))!
@@ -176,12 +184,12 @@ const EXPECTED: &[(&str, &str)] = &[
     ("gunzip btype3", "err zlib.gunzip: corrupt deflate stream"),
     ("gunzip bad-table", "err zlib.gunzip: corrupt deflate stream"),
     ("gunzip stored-nlen", "err zlib.gunzip: corrupt deflate stream"),
-    ("gunzip far", "ok 3 4282505490"),
+    ("gunzip far", "err zlib.gunzip: corrupt deflate stream"),
     ("gunzip two-members", "ok 266 953613778"),
     ("gunzip trailing-garbage", "err zlib.gunzip: invalid gzip header"),
     ("gunzip trailing-zeros", "err zlib.gunzip: invalid gzip header"),
     ("gunzip trailing-magic", "err zlib.gunzip: unexpected end of file"),
-    ("gunzip second-far", "ok 136 4065034020"),
+    ("gunzip second-far", "err zlib.gunzip: corrupt deflate stream"),
     ("gunzip second-bad-crc", "err zlib.gunzip: crc mismatch"),
     ("inflate empty", "err zlib.inflate: incomplete deflate stream"),
     ("inflate spaced", "err zlib.inflate: corrupt deflate stream"),
@@ -190,13 +198,13 @@ const EXPECTED: &[(&str, &str)] = &[
     ("inflate stored-nlen", "err zlib.inflate: corrupt deflate stream"),
     ("inflate stored-ok", "ok 5 907060870"),
     ("inflate stored-trunc", "err zlib.inflate: incomplete deflate stream"),
-    ("inflate far", "ok 3 4282505490"),
+    ("inflate far", "err zlib.inflate: corrupt deflate stream"),
     ("inflate lit286", "err zlib.inflate: corrupt deflate stream"),
     ("inflate okfixed", "ok 4 2912478533"),
     ("inflate bad-table", "err zlib.inflate: corrupt deflate stream"),
     ("inflate trunc40", "err zlib.inflate: incomplete deflate stream"),
     ("inflate trunc1", "err zlib.inflate: incomplete deflate stream"),
-    ("inflate trailing-garbage", "ok 133 1129170907"),
+    ("inflate trailing-garbage", "err zlib.inflate: trailing data after stream"),
     ("inflate nonfinal-then-eof", "err zlib.inflate: incomplete deflate stream"),
     ("inflate dist30", "err zlib.inflate: corrupt deflate stream"),
     ("decompress empty", "err zlib.decompress: unexpected end of file"),
@@ -216,8 +224,13 @@ const EXPECTED: &[(&str, &str)] = &[
     ("decompress deflate-trunc", "err zlib.decompress: incomplete deflate stream"),
     ("decompress btype3", "err zlib.decompress: corrupt deflate stream"),
     ("decompress bad-table", "err zlib.decompress: corrupt deflate stream"),
-    ("decompress far", "ok 3 4282505490"),
-    ("decompress trailing-garbage", "ok 133 1129170907"),
+    ("decompress far", "err zlib.decompress: corrupt deflate stream"),
+    ("decompress trailing-garbage", "err zlib.decompress: trailing data after stream"),
+    // #4268: a distance before the first output byte, and bytes after the stream
+    ("inflate far-after-lit", "err zlib.inflate: corrupt deflate stream"),
+    ("inflate trailing-xyz", "err zlib.inflate: trailing data after stream"),
+    ("decompress trailing-GARBAGE", "err zlib.decompress: trailing data after stream"),
+    ("decompress two-streams", "err zlib.decompress: trailing data after stream"),
 ];
 
 fn almide_bin() -> String {
