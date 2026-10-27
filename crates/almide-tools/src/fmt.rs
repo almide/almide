@@ -305,6 +305,17 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
             _ => None,
         })
         .collect();
+    // #4192: the names the existing imports already BIND — `import self.lexer`
+    // binds `lexer`, `import a.b as c` binds `c`. A use of a bound name is
+    // already resolved; adding a dependency's same-named module would make it
+    // ambiguous.
+    let bound: HashSet<String> = program.imports.iter()
+        .filter_map(|d| match d {
+            Decl::Import { path, names: None, alias, .. } =>
+                alias.as_ref().or(path.last()).map(|s| s.as_str().to_string()),
+            _ => None,
+        })
+        .collect();
 
     // Collect module identifiers used in member access patterns (module.func)
     let mut used = HashSet::new();
@@ -327,6 +338,7 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
         .iter()
         .filter(|name| {
             !existing.contains(name.as_str())
+                && !bound.contains(name.as_str())
                 && !auto_imported.contains(name.as_str())
                 && !tier1.contains(name.as_str())
         })
@@ -335,8 +347,16 @@ pub fn auto_imports(program: &mut Program, source: &str, dep_names: &[String], d
         })
         .collect();
     to_add.sort_by(|a, b| a.0.cmp(&b.0));
+    // #4192: `comment_map` is positional (module?, imports…, decls…), so an
+    // appended import takes an EMPTY comment slot of its own — otherwise it
+    // inherits the first declaration's comments and they print above it.
+    let module_slots = usize::from(matches!(program.decls.first(), Some(Decl::Module { .. })));
     for (display, segments) in to_add {
         let path: Vec<Sym> = segments.iter().map(|s| almide_base::intern::sym(s)).collect();
+        let slot = module_slots + program.imports.len();
+        if slot <= program.comment_map.len() {
+            program.comment_map.insert(slot, Vec::new());
+        }
         program.imports.push(Decl::Import { path, names: None, alias: None, span: None });
         messages.push(format!("Added `import {}`", display));
     }

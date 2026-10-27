@@ -1032,3 +1032,37 @@ fn fmt_check_exits_nonzero_on_unformatted_input_and_recurses_directories() {
         "--dry-run must print the formatted text"
     );
 }
+
+// #4192: a dependency module named like a name an existing import already
+// binds (`import self.lexer` binds `lexer`) is not added — the use is
+// resolved, and the edit would make `lexer` ambiguous.
+fn fmt_with_dep_submodule(input: &str, name: &str, full: &str) -> (Vec<String>, String) {
+    let tokens = Lexer::tokenize(input);
+    let mut parser = Parser::new(tokens);
+    let mut prog = parser.parse().expect("parse failed");
+    let subs: std::collections::HashMap<String, String> =
+        [(name.to_string(), full.to_string())].into_iter().collect();
+    let msgs = fmt::auto_imports(&mut prog, input, &[], &subs);
+    (msgs, fmt::format_program(&prog))
+}
+
+#[test]
+fn fmt_does_not_add_a_dep_module_a_self_import_already_binds() {
+    let src = "import self.lexer\n\n// a comment\neffect fn main() -> Unit = {\n  println(lexer.twice(\"a\"))\n}\n";
+    let (msgs, out) = fmt_with_dep_submodule(src, "lexer", "gramide_typescript.lexer");
+    assert!(msgs.is_empty(), "no import edit expected, got {msgs:?}");
+    assert!(!out.contains("gramide_typescript"), "a dep import was added:\n{out}");
+    assert!(out.contains("// a comment\neffect fn main"), "the comment left its fn:\n{out}");
+}
+
+// #4192: an import fmt does add takes its own empty comment slot, so the first
+// declaration's comment stays above that declaration.
+#[test]
+fn fmt_added_import_does_not_take_the_first_decls_comment() {
+    let src = "import self.util\n\n// a comment\neffect fn main() -> Unit = {\n  println(util.f(lexer.twice(\"a\")))\n}\n";
+    let (msgs, out) = fmt_with_dep_submodule(src, "lexer", "gramide_typescript.lexer");
+    assert_eq!(msgs, vec!["Added `import gramide_typescript.lexer`".to_string()]);
+    assert!(out.contains("import gramide_typescript.lexer\n"), "{out}");
+    assert!(out.contains("// a comment\neffect fn main"), "the comment left its fn:\n{out}");
+    assert!(!out.contains("// a comment\nimport"), "the comment moved onto the import:\n{out}");
+}
