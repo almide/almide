@@ -31,7 +31,7 @@ fn send_held(s: String) -> Int = {
   js_peek(r) + bytes.len(other) - 28
 }
 
-fn view_of(b: Bytes) -> Region = if bytes.len(b) > 1000000 then ffi.region(bytes.new()) else ffi.region(b)
+local fn view_of(b: Bytes) -> Region = if bytes.len(b) > 1000000 then ffi.region(bytes.new()) else ffi.region(b)
 
 fn send_helper(s: String) -> Int = {
   let b = bytes.from_string(s)
