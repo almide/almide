@@ -238,8 +238,8 @@ fn the_cli_spec_embeds_the_budget_table() {
 /// must refuse it.
 #[test]
 fn lifting_the_type_budget_fails_the_gate() {
-    let lifted = ["--budget", &format!("type_size={U64_MAX}")];
-    let lifted: Vec<&str> = lifted.iter().map(|s| s.as_ref()).collect();
+    let value = format!("type_size={U64_MAX}");
+    let lifted = ["--budget", value.as_str()];
     let result = std::panic::catch_unwind(|| {
         assert_linear("doubling-lifted", &[8, 12, 16], doubling, &lifted, |_, _| {});
     });
