@@ -146,6 +146,13 @@ patterns = [
   #   prim.read_n_bytes — a raw fd read, the same tier as fd_write above.
   "capability: prim.random_get",
   "capability: prim.read_n_bytes",
+  # (stdlib wave 4) The handle-first io.read / io.write that replaced the
+  # raw-fd surface above: generic over the `Read` / `Write` handle, so the
+  # pool (lowered without mono) has no body for them, and under them sit the
+  # same raw stdin read / stdout write the two prims above named. The same
+  # fixtures, the same tier — fd glue, not a new evaluation model.
+  "capability: io.read",
+  "capability: io.write",
   # A store through a value the interp knows is NOT an address (the callee
   # was reached with an argument shape the block heap never handed out) —
   # dispatch-tier strictness, one level in from the heap boundary.
