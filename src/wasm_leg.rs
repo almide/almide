@@ -232,6 +232,10 @@ pub(crate) fn lower_resolved(
     }
     link_self_host(&mut ir, &mut checker, &sources);
     almide_driver::link_ir(&mut ir);
+    // R-map-09: the inline map arms load an entry's key and value into two
+    // locals — the protocol the registered self-hosted bodies declare — so a
+    // `((k, v)) => …` callback is adapted to it here (almide_ir::entry_split).
+    crate::ir::entry_split::split_entry_callbacks(&mut ir);
     // #806 step 2, on this leg too (#2319): small pure-scalar fns inline as
     // reduced expressions at their call sites. The incumbent pipeline has run
     // this since #806 (almide-mir/pipeline.rs, post-link and pre-mut-param —
