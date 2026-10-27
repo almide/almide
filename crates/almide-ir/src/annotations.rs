@@ -261,6 +261,23 @@ pub struct CodegenAnnotations {
 }
 
 impl CodegenAnnotations {
+    /// Is field `field` of a value typed `ty` an `AlmideBox` — a field closing
+    /// a recursive record's cycle (#4251)? A structurally typed value (an
+    /// unannotated `let c = { .. }`) is the declared record its shape renders
+    /// as — the `named_records` label its literal and binding spell. The ONE
+    /// answer the walker's literal/member rendering and `BoxTakeLowering`'s
+    /// place decision share.
+    pub fn record_field_is_boxed(&self, ty: &almide_lang::types::Ty, field: &str) -> bool {
+        use almide_lang::types::Ty;
+        let boxed = |n: &str| self.boxed_record_fields.contains(&(n.to_string(), field.to_string()));
+        match ty {
+            Ty::Named(n, _) => boxed(n.as_str()),
+            Ty::Record { fields } | Ty::OpenRecord { fields } =>
+                self.named_records.label_for(fields).is_some_and(|n| boxed(&n)),
+            _ => false,
+        }
+    }
+
     /// Look up the storage mode for a variable. Checks VarId first (precise),
     /// then falls back to uppercased name for cross-module synthetic refs only.
     pub fn get_var_storage(&self, var: &VarId) -> VarStorage {

@@ -22,6 +22,7 @@
 
 use std::collections::HashSet;
 use almide_ir::*;
+use almide_ir::annotations::CodegenAnnotations;
 use super::pass::{NanoPass, PassResult, Target};
 
 #[derive(Debug)]
@@ -37,20 +38,21 @@ impl NanoPass for BoxTakeLoweringPass {
     }
 
     fn run(&self, mut program: IrProgram, _target: Target) -> PassResult {
+        let IrProgram { codegen_annotations: ann, functions, top_lets, modules, .. } = &mut program;
         let cx = Cx {
-            binders: program.codegen_annotations.box_binders.iter().copied().collect(),
-            fields: program.codegen_annotations.boxed_record_fields.clone(),
+            binders: ann.box_binders.iter().copied().collect(),
+            ann: &*ann,
         };
-        if cx.binders.is_empty() && cx.fields.is_empty() {
+        if cx.binders.is_empty() && ann.boxed_record_fields.is_empty() {
             return PassResult { program, changed: false };
         }
-        for func in &mut program.functions {
+        for func in functions.iter_mut() {
             func.body = cx.lower(std::mem::take(&mut func.body), false);
         }
-        for tl in &mut program.top_lets {
+        for tl in top_lets.iter_mut() {
             tl.value = cx.lower(std::mem::take(&mut tl.value), false);
         }
-        for module in &mut program.modules {
+        for module in modules.iter_mut() {
             for func in &mut module.functions {
                 func.body = cx.lower(std::mem::take(&mut func.body), false);
             }
@@ -62,18 +64,15 @@ impl NanoPass for BoxTakeLoweringPass {
     }
 }
 
-struct Cx {
+struct Cx<'a> {
     binders: HashSet<VarId>,
-    fields: HashSet<(String, String)>,
+    ann: &'a CodegenAnnotations,
 }
 
-impl Cx {
+impl Cx<'_> {
     fn boxed_member(&self, e: &IrExpr) -> bool {
         match &e.kind {
-            IrExprKind::Member { object, field } => match &object.ty {
-                almide_lang::types::Ty::Named(n, _) => self.fields.contains(&(n.to_string(), field.to_string())),
-                _ => false,
-            },
+            IrExprKind::Member { object, field } => self.ann.record_field_is_boxed(&object.ty, field.as_str()),
             _ => false,
         }
     }
@@ -161,6 +160,12 @@ impl Cx {
             IrExprKind::RustMacro { name, args } => IrExprKind::RustMacro {
                 name,
                 args: args.into_iter().map(|a| self.lower(a, true)).collect(),
+            },
+            // A prelude MACRO (`almide_index_ref!`) takes its operands as
+            // places — the walker renders them as written.
+            IrExprKind::RuntimeCall { symbol, args } if symbol.as_str().ends_with('!') => IrExprKind::RuntimeCall {
+                args: args.into_iter().map(|a| self.lower(a, true)).collect(),
+                symbol,
             },
             // A chain that does not consume its source iterates a borrow of it.
             IrExprKind::IterChain { source, consume, steps, collector } => IrExprKind::IterChain {
