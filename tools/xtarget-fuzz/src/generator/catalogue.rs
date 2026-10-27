@@ -184,7 +184,7 @@ impl Signature {
 /// `base64` / `hex` / `hash` / `zlib` / `path` / `url` / `regex` are pure but
 /// not auto-imported: a program that calls one starts with `import <module>`
 /// ([`imports_for`]); so is `json`, whose functions over a `Value` or a
-/// `String` the grammar reaches. `error` and `value` are auto-imported.
+/// `String` the grammar reaches. `value` is auto-imported.
 ///
 /// `(module_name, source_text, needs_import)`.
 const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
@@ -211,7 +211,6 @@ const BUNDLED_MODULES: &[(&str, &str, bool)] = &[
     // Host addresses over a live buffer (`effect_recipes.rs`, `verdicts.rs`).
     ("ffi", include_str!("../../../../stdlib/ffi.almd"), true),
     ("matrix", include_str!("../../../../stdlib/matrix.almd"), false),
-    ("error", include_str!("../../../../stdlib/error.almd"), false),
     ("value", include_str!("../../../../stdlib/value.almd"), false),
     ("base64", include_str!("../../../../stdlib/base64.almd"), true),
     ("hex", include_str!("../../../../stdlib/hex.almd"), true),
@@ -489,7 +488,7 @@ mod availability_tests {
         // (`"${base64.encode(b)}"`) that the scan skipped would be an E003.
         assert_eq!(imports_for("let z = string.len(\"url.\")"), "import url\n");
         let cat = build();
-        for m in ["base64", "hex", "hash", "zlib", "path", "url", "regex", "error"] {
+        for m in ["base64", "hex", "hash", "zlib", "path", "url", "regex"] {
             assert!(cat.iter().any(|s| s.module == m), "{m} has a synthesizable function in the catalogue");
         }
     }
