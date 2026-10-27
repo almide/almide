@@ -118,9 +118,8 @@ pub fn op_caps(op: i32) -> &'static [u32] {
         // dropped. The op itself reaches nothing — what a chunk could reach is
         // that function's, and the not-served fallback calls the same
         // function from this frame, so the call graph already counts it.
-        74 => &[],
-        // A deliberate exit's mark (#4203): it answers and reaches nothing.
-        76 => &[],
+        // 76 is a deliberate exit's mark (#4203): it answers and reaches nothing.
+        74 | 76 => &[],
         _ => &[SENTINEL],
     }
 }
