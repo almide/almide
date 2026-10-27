@@ -102,6 +102,7 @@ impl Checker {
             .or_else(|| clash.as_deref().map(builtin_named_decl_hint))
             .or_else(|| fallible_callback_shape_hint(&exp, &act))
             .or_else(|| arity_shape_hint(&exp, &act))
+            .or_else(|| self.encode_into_hint(&exp, &act))
         {
             Some(h) => h,
             None => Self::hint_with_conversion(mismatch_hint(&c.context), &exp, &act),
@@ -410,6 +411,19 @@ impl Checker {
                 else { a.compatible(b) }
             }
             _ => return None,
+        })
+    }
+
+    /// `x.encode()` is what turns the actual type into the expected one: a
+    /// `: Codec` record where its encoded `Value` is expected (#4272). Read
+    /// off the type's own `encode`, whatever it returns.
+    fn encode_into_hint(&self, exp: &Ty, act: &Ty) -> Option<String> {
+        let Ty::Named(n, _) = act else { return None };
+        let key = crate::canonicalize::registration::convention_fn_key(&self.env, n.as_str(), "encode")?;
+        let sig = self.env.functions.get(&key)?;
+        (sig.ret == *exp).then(|| {
+            let bare = n.as_str().rsplit('.').next().unwrap_or(n.as_str());
+            format!("'{bare}' is not a {} — its `encode` builds one: pass `x.encode()`", exp.display())
         })
     }
 
