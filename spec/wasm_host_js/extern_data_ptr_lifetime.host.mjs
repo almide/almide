@@ -1,5 +1,5 @@
-// The hook extern_data_ptr_lifetime.almd declares: it reads the bytes at
-// the address the guest hands over. The glue gives hooks no memory handle,
+// The hook extern_data_ptr_lifetime.almd declares: it reads the bytes of
+// the Region the guest hands over, as (base, length) — ADR-0031 D3. The glue gives hooks no memory handle,
 // so the instance's memory is captured as it is created.
 let memory = null;
 const instantiate = WebAssembly.instantiate;
