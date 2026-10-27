@@ -49,6 +49,7 @@ pub enum BudgetId {
     ManifestBytes = 3,
     DependencyCount = 4,
     DependencyDepth = 5,
+    ExhaustivenessSteps = 6,
 }
 
 /// Every budget, in [`BudgetId`] order.
@@ -95,9 +96,16 @@ pub const BUDGETS: &[Budget] = &[
         diagnostic: "error `dependency chain too deep (N, max M)`",
         doc: "length of the chain of dependencies from the root package to the one being resolved, counted before it is fetched",
     },
+    Budget {
+        name: "exhaustiveness_steps",
+        default: 100_000,
+        unit: "steps",
+        diagnostic: "E113",
+        doc: "recursive steps of the exhaustiveness and reachability check of one `match` (pattern-matrix usefulness is exponential in the worst case)",
+    },
 ];
 
-const N: usize = 6;
+const N: usize = 7;
 
 /// `0` = no override.
 static OVERRIDES: [AtomicU64; N] = [const { AtomicU64::new(0) }; N];
@@ -148,6 +156,7 @@ pub fn by_name(name: &str) -> Option<BudgetId> {
         BudgetId::ManifestBytes,
         BudgetId::DependencyCount,
         BudgetId::DependencyDepth,
+        BudgetId::ExhaustivenessSteps,
     ];
     IDS.into_iter().find(|id| id.row().name == name)
 }

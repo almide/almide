@@ -74,6 +74,7 @@ equal to the set of codes the compiler emits.
 | [E110](E110.md) | An `@input_sink` (`http.decode_json`) is handed a type that is not an input type: one also sent out (`Codec`), a record nested in it (a field or a variant payload) also sent out, or a forwarding type parameter (row 22); request data decoded by hand into such a type (#4232) |
 | [E111](E111.md) | An inferred type passed the `type_size` compile-cost budget — a doubling chain such as `let t1 = (t0, t0)` (ADR-0030, #4114) |
 | [E112](E112.md) | Monomorphization passed the `generic_instances` budget — polymorphic recursion that needs an instance per call depth (ADR-0030) |
+| [E113](E113.md) | A `match` whose exhaustiveness check passed the `exhaustiveness_steps` compile-cost budget (ADR-0030) |
 | [E420](E420.md) | Function visibility violation (placeholder code, renumber candidate) |
 
 Retired codes: **E039** (the result.collect/collect_map deprecation window — the fns are removed, `result.partition` is the substance) and **E040** (the json.*/value.* alias deprecation window) each fired

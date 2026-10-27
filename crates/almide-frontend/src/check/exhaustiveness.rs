@@ -413,6 +413,45 @@ fn missing_ctors(head: &[CtorId], ty: &Ty, env: &TypeEnv) -> Vec<CtorId> {
 }
 
 // ────────────────────────────────────────────────
+//  The step budget (ADR-0030)
+// ────────────────────────────────────────────────
+//
+// Usefulness over a pattern matrix is exponential in the worst case: a
+// tuple of n `Bool`s whose rows mention both constructors in every column
+// makes the witness search branch twice per column. Every recursive step of
+// one `match`'s check counts against `exhaustiveness_steps`; past it the
+// search stops, and the checker reports E113 for that match.
+
+thread_local! {
+    static STEPS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn step() -> bool {
+    let n = STEPS.with(|s| {
+        let n = s.get() + 1;
+        s.set(n);
+        n
+    });
+    n <= almide_base::budget::limit(almide_base::budget::BudgetId::ExhaustivenessSteps)
+}
+
+/// Start counting one `match`'s steps.
+fn start_steps() {
+    STEPS.with(|s| s.set(0));
+}
+
+/// The steps the last check took, and whether that passed the budget.
+pub fn steps_taken() -> (u64, bool) {
+    let n = STEPS.with(|s| s.get());
+    let over = n > almide_base::budget::limit(almide_base::budget::BudgetId::ExhaustivenessSteps);
+    almide_base::budget::add_work(almide_base::budget::BudgetId::ExhaustivenessSteps, n);
+    if !over {
+        almide_base::budget::observe(almide_base::budget::BudgetId::ExhaustivenessSteps, n);
+    }
+    (n, over)
+}
+
+// ────────────────────────────────────────────────
 //  Witness finding (core algorithm)
 // ────────────────────────────────────────────────
 
@@ -421,6 +460,10 @@ fn missing_ctors(head: &[CtorId], ty: &Ty, env: &TypeEnv) -> Vec<CtorId> {
 ///
 /// `types[i]` is the type of column `i`. The matrix rows and `types` have the same length.
 fn find_witness(matrix: &[Vec<Pat>], types: &[Ty], env: &TypeEnv) -> Option<Vec<Pat>> {
+    // Out of budget: no witness, and the caller reports E113 instead.
+    if !step() {
+        return Option::None;
+    }
     // Base case: no columns left.
     if types.is_empty() {
         // Useful iff no row covers the empty pattern (= matrix has no rows).
@@ -495,6 +538,7 @@ pub fn check_exhaustiveness(
     arms: &[ast::MatchArm],
     env: &TypeEnv,
 ) -> Vec<MissingArm> {
+    start_steps();
     let resolved = env.resolve_named(subject_ty);
 
     // Skip unanalyzable types.
@@ -562,6 +606,7 @@ pub fn find_unreachable_arms(
     arms: &[ast::MatchArm],
     env: &TypeEnv,
 ) -> Vec<usize> {
+    start_steps();
     let resolved = env.resolve_named(subject_ty);
     if matches!(ctor_set(&resolved, env), CtorSet::Opaque) {
         return vec![];
@@ -616,6 +661,11 @@ pub fn find_unreachable_arms(
 /// - `Wild`: if `P`'s head is complete, recurse for each constructor;
 ///   else use the default matrix and recurse on `q[1..]`.
 fn is_useful(matrix: &[Vec<Pat>], row: &[Pat], types: &[Ty], env: &TypeEnv) -> bool {
+    // Out of budget: useful (no arm is called dead), and the caller reports
+    // E113 instead.
+    if !step() {
+        return true;
+    }
     if types.is_empty() {
         // Empty row. Useful iff no row of matrix is empty (= matrix has
         // no rows at all — an empty matrix can't cover any value).
