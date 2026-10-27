@@ -232,6 +232,10 @@ pub(crate) fn lower_resolved(
     }
     link_self_host(&mut ir, &mut checker, &sources);
     almide_driver::link_ir(&mut ir);
+    // E112 (ADR-0030): linking stopped at the `generic_instances` budget.
+    if let Some(d) = almide_driver::budget_refusal() {
+        return Err(crate::diagnostic_render::display_with_source(&d, source_text).to_string());
+    }
     // #806 step 2, on this leg too (#2319): small pure-scalar fns inline as
     // reduced expressions at their call sites. The incumbent pipeline has run
     // this since #806 (almide-mir/pipeline.rs, post-link and pre-mut-param —
