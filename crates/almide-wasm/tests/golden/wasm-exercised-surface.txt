@@ -196,6 +196,7 @@ call:env.set
 call:env.sleep_ms
 call:env.vars
 call:eprintln
+call:error.context
 call:fan.map
 call:ffi.address
 call:ffi.read
@@ -289,6 +290,7 @@ call:html.raw
 call:html.to_string
 call:http.__almd_mono10_set_header___nHttpResponse
 call:http.__almd_mono11_decode_json___nCommandInput
+call:http.__almd_mono11_decode_json___nOrder
 call:http.__almd_mono11_decode_json___nUserInput
 call:http.__almd_mono4_body___nHttpResponse
 call:http.__almd_mono6_header___nHttpResponse
@@ -656,6 +658,7 @@ call:set.remove
 call:set.symmetric_difference
 call:set.to_list
 call:set.union
+call:string.__err_text
 call:string.byte_slice
 call:string.capitalize
 call:string.clear
