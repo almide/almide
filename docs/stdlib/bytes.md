@@ -92,19 +92,13 @@ fails if one is missing. The signature index below lists each one.
 | `bytes.skip_length_prefixed_le(b, pos, count)` | The byte offset past `count` LE-length-prefixed records |
 | `bytes.write_string_be(b, s)` | Append a length-prefixed string |
 
-## Pointer interop (deprecated — use `ffi`)
+## Pointer interop
 
-Deprecated since dialect epoch 15 in favour of the [`ffi`](ffi.md) module, and
-outside the memory-safety guarantee: each call is E100 in a file without
-`import ffi` (#4043) and under `--profile critical` (#4008).
-
-| Signature | Purpose |
-|---|---|
-| `bytes.as_ptr(b) -> RawPtr` | Read-only pointer to data region |
-| `bytes.as_mut_ptr(b) -> RawPtr` | Mutable pointer to data region |
-| `bytes.from_raw_ptr(ptr, len) -> Bytes` | Wrap a foreign buffer |
-| `bytes.copy_to_ptr(b, ptr, cap)` | Copy buffer into a foreign address |
-| `bytes.data_ptr(b)` | Address of the data (after the length prefix) |
+The `bytes` raw-pointer functions (`as_ptr`, `as_mut_ptr`, `from_raw_ptr`,
+`copy_to_ptr`, `data_ptr`) were removed at dialect epoch 15 (ADR-0031). Hand a
+`Bytes` value to foreign code as a bounds-checked [`ffi`](ffi.md) Region:
+`ffi.region(b)` for a read-only view, `ffi.alloc(n)!` for a buffer foreign code
+or `ffi.write` may fill.
 
 <!-- BEGIN GENERATED SIGNATURE INDEX (make stdlib-docs) — do not edit by hand -->
 
