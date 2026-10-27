@@ -22,7 +22,36 @@ fn fmtf(xs: List[Float]) -> String = list.join(list.map(xs, (x) => float.to_stri
 
 fn fmtr(xs: List[R]) -> String = list.join(list.map(xs, (r) => r.name), ",")
 
+fn zero() -> Float = float.parse("0") ?? 1.0
+
+// ONE NaN (R-float-09, #4258): every NaN orders as the canonical +qNaN
+// 0x7FF8000000000000 — after +inf — however it was produced. x86 answers -NaN
+// for a runtime invalid operation while a const-folded `0.0 / 0.0` is +NaN, so
+// before the fix the runtime rows sorted NaN FIRST on x86 and the constant row
+// split native (last) from wasm (first). Each row is the same on every leg.
+fn nan_row(name: String, v: Float) -> Unit = {
+  let lo = list.min([v, 1.0]) ?? 0.0
+  let hi = list.max([1.0, v]) ?? 0.0
+  let by = list.sort_by([R { name: "nan", v: v }, R { name: "one", v: 1.0 }, R { name: "neg", v: -1.0 }], (r) => r.v)
+  println("${name}: sort=${fmtf(list.sort([1.0, v, -1.0]))} min=${float.to_string(lo)} max=${float.to_string(hi)} sort_by=${fmtr(by)}")
+}
+
+fn nan_rows() -> Unit = {
+  let z = zero()
+  let i = 1.0 / z
+  nan_row("0/0 const", 0.0 / 0.0)
+  nan_row("0/0 runtime", z / z)
+  nan_row("inf-inf", i - i)
+  nan_row("0*inf", z * i)
+  nan_row("inf/inf", i / i)
+  nan_row("sqrt(-1)", math.sqrt(-1.0))
+  nan_row("float.nan()", float.nan())
+  nan_row("-(0/0)", -(z / z))
+  nan_row("-(0/0) const", -(0.0 / 0.0))
+}
+
 fn main() -> Unit = {
+  nan_rows()
   let xs = [3.5, 1.2, 2.8, 1.2, 0.0]
   println("sort: " + fmtf(list.sort(xs)))
   println("min:  " + float.to_string(list.min(xs) ?? 99.0))

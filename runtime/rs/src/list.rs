@@ -20,13 +20,29 @@ pub fn almide_rt_list_sort<A: Ord + Clone>(xs: &[A]) -> Vec<A> { let mut v = xs.
 // matches the interp's `total_cmp`. NOTE: this list-min/max totalOrder is a
 // DIFFERENT contract from the SCALAR `float.min`/`max`,
 // which keep their C-049 NaN-IGNORING semantics. See C-055.
-pub fn almide_rt_list_sort_float(xs: &[f64]) -> Vec<f64> { let mut v = xs.to_vec(); v.sort_by(|a, b| a.total_cmp(b)); v }
-pub fn almide_rt_list_min_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().min_by(|a, b| a.total_cmp(b)) }
-pub fn almide_rt_list_max_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().max_by(|a, b| a.total_cmp(b)) }
+//
+// ONE NaN (R-float-09, #4258): every NaN orders as the canonical +qNaN
+// 0x7FF8000000000000, so it sorts after +inf whatever its sign. x86 hardware
+// answers -NaN for an invalid runtime operation while a const-folded `0.0/0.0`
+// is +NaN; raw `total_cmp` put the first before -inf and the second after
+// +inf. The key is built in the INTEGER domain (a float select between NaNs
+// is foldable by LLVM, an integer one is not), the same key the wasm leg's
+// `__ftotal_*` and `float.compare`'s `order_key` compute.
+#[inline(always)]
+fn almide_float_order_key(x: f64) -> i64 {
+    let b = x.to_bits();
+    let b = (if (b & 0x7FFF_FFFF_FFFF_FFFF) > 0x7FF0_0000_0000_0000 { 0x7FF8_0000_0000_0000u64 } else { b }) as i64;
+    b ^ (((b >> 63) as u64) >> 1) as i64
+}
+#[inline(always)]
+fn almide_float_order(a: &f64, b: &f64) -> std::cmp::Ordering { almide_float_order_key(*a).cmp(&almide_float_order_key(*b)) }
+pub fn almide_rt_list_sort_float(xs: &[f64]) -> Vec<f64> { let mut v = xs.to_vec(); v.sort_by(almide_float_order); v }
+pub fn almide_rt_list_min_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().min_by(almide_float_order) }
+pub fn almide_rt_list_max_float(xs: &[f64]) -> Option<f64> { xs.iter().copied().max_by(almide_float_order) }
 pub fn almide_rt_list_sort_by_float<A: Clone>(xs: Vec<A>, f: std::rc::Rc<dyn Fn(A) -> f64>) -> Vec<A> {
     let f = move |a| f(a);
     let mut v = xs;
-    v.sort_by(|a, b| f(a.clone()).total_cmp(&f(b.clone())));
+    v.sort_by(|a, b| almide_float_order(&f(a.clone()), &f(b.clone())));
     v
 }
 // `list.sum`/`list.product` follow the language's integer-overflow law:

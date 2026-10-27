@@ -3,7 +3,10 @@
 // bits with signed-int `>`/`<` = garbage for f64. Here the running extremum carries the RAW f64 bits
 // (so `Some(best)` returns the original Float), and the COMPARISON uses the monotone totalOrder key.
 // max/min return Some(extremum)/None (None for the empty list, a materialized Option[Float]).
-fn __ftotal_ff(b: Int) -> Int = {
+// ONE NaN (R-float-09, #4258): any NaN keys as the canonical +qNaN 0x7FF8000000000000, so it
+// orders after +inf whatever sign the hardware gave it (x86 runtime 0/0 is -NaN).
+fn __ftotal_ff(b0: Int) -> Int = {
+  let b = if prim.band(b0, 0x7FFFFFFFFFFFFFFF) > 0x7FF0000000000000 then 0x7FF8000000000000 else b0
   let s = prim.bshr(b, 63)
   let m = prim.bshr_u(s, 1)
   prim.bxor(b, m)
