@@ -747,7 +747,7 @@ names = 46
 [[site]]
 id = "crates/almide-types/src/self_host_registry.rs::self_host_runtime::table"
 class = "legacy"
-names = 1777
+names = 1775
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
