@@ -44,7 +44,7 @@ for module in COVERED_MODULES:
         print(f"BAD default_index_unit {d!r} on module {module} — vocabulary: "
               f"{sorted(DEFAULT_UNIT_VOCAB)}")
         failed = True
-    for e in manifest[module]["fn"]:
+    for e in manifest[module].get("fn", []):
         for k in REQUIRED_ENTRY_FIELDS:
             if not e.get(k):
                 print(f"MISSING FIELD {k!r} on a {module} entry ({e.get('name', '?')})")
@@ -54,7 +54,7 @@ for module in COVERED_MODULES:
             print(f"BAD index_unit {u!r} on {module}.{e.get('name', '?')} — "
                   f"vocabulary: {sorted(UNIT_VOCAB)}")
             failed = True
-    entries = {e["name"]: e for e in manifest[module]["fn"]}
+    entries = {e["name"]: e for e in manifest[module].get("fn", [])}
     src = open(f"stdlib/{module}.almd").read()
     int_fns = []
     for m in re.finditer(r'^(?:pub )?(?:effect )?fn (\w+)\(((?:[^()]|\([^()]*\))*)\)\s*->\s*([^=]+)=', src, re.M):
@@ -105,7 +105,7 @@ for module in COVERED_MODULES:
     # manifest table, and the generated test imports it.
     if manifest[module].get("import"):
         lines += [f"import {module}", ""]
-    for e in manifest[module]["fn"]:
+    for e in manifest[module].get("fn", []):
         probe, unit = e["probe"], e["index_unit"]
         expect = e["expect"].replace("\\", "\\\\").replace('"', '\\"')
         lines.append(f'test "{module}.{e["name"]} unit={unit}" {{')
@@ -133,7 +133,7 @@ for module in COVERED_MODULES:
 
 if failed:
     sys.exit(1)
-n = sum(len(manifest[m]["fn"]) for m in COVERED_MODULES)
+n = sum(len(manifest[m].get("fn", [])) for m in COVERED_MODULES)
 print(f"  semantics manifest: {len(COVERED_MODULES)} module(s), {n} entries, "
       f"coverage + regen-diff green")
 PYEOF
