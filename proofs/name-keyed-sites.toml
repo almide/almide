@@ -268,7 +268,7 @@ names = 2
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::ALIASES::table"
 class = "legacy"
-names = 39
+names = 38
 
 [[site]]
 id = "crates/almide-frontend/src/stdlib.rs::MODULE_DESCRIPTIONS::table"
@@ -683,7 +683,7 @@ names = 9
 [[site]]
 id = "crates/almide-mir/src/purity.rs::PURE_MODULES::table"
 class = "legacy"
-names = 139
+names = 138
 
 [[site]]
 id = "crates/almide-mir/src/purity.rs::is_pure_fn_in_impure_module::or-pattern"
@@ -713,7 +713,7 @@ names = 9
 [[site]]
 id = "crates/almide-types/src/self_host_fn_tables.rs::BYTES_CORE_FNS::table"
 class = "legacy"
-names = 90
+names = 88
 
 [[site]]
 id = "crates/almide-types/src/self_host_fn_tables.rs::BYTES_MUTATE_FNS::table"
@@ -728,7 +728,7 @@ names = 46
 [[site]]
 id = "crates/almide-types/src/self_host_registry.rs::self_host_runtime::table"
 class = "legacy"
-names = 1230
+names = 1222
 
 [[site]]
 id = "crates/almide-types/src/stdlib_info.rs::AUTO_IMPORT_BUNDLED::table"
@@ -993,12 +993,12 @@ names = 2
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_SUM::table"
 class = "legacy"
-names = 73
+names = 71
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::BYTES_FAMILY_VERIFIED::table"
 class = "legacy"
-names = 44
+names = 43
 
 [[site]]
 id = "crates/almide-wasm/src/whitelist.rs::CODEC_ENCODE_VERIFIED::table"
