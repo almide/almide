@@ -1,5 +1,6 @@
 // @contract: C-062, C-376
 import ffi
+
 // Cross-target differential fixture: the Region bridge (ADR-0031). A Region
 // carries base, length, permission and owner; every `ffi.read` / `ffi.write`
 // is checked against the region's own length before it touches memory, so
@@ -7,7 +8,6 @@ import ffi
 // Bytes value refuses every write. The base address differs per target and
 // is never printed; only the bytes moved through a region, and the errs, are
 // observed, so stdout is byte-identical.
-
 fn show(b: Bytes) -> String = bytes.to_list(b) |> list.map((x) => int.to_string(x)) |> list.join(",")
 
 fn read_text(r: Result[Bytes, String]) -> String = match r {
@@ -32,7 +32,10 @@ effect fn round_trip(s: String) -> Bytes = {
   copy_out(ffi.region(b), bytes.len(b))!
 }
 
-effect fn round_trip_temp(s: String) -> Bytes = copy_out(ffi.region(bytes.from_string(s)), string.len(s))!
+effect fn round_trip_temp(s: String) -> Bytes = copy_out(
+  ffi.region(bytes.from_string(s)),
+  string.len(s),
+)!
 
 effect fn round_trip_held(s: String) -> Bytes = {
   let r = ffi.region(bytes.from_string(s))
