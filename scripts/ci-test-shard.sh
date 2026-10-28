@@ -67,6 +67,15 @@ solo_filter() {
 SOLO_LEGS="wasm_runtime_cross_target wasm_runtime_interp_oracle wasm_runtime_opt_parity run_parity interp_ledger"
 export SOLO_TARGETS
 
+# `nextest list --archive-file` unpacks the WHOLE archive (839 binaries,
+# 2026-10-28) into $TMPDIR. On CI that is a ~7.9 GB tmpfs, too small, so CI
+# points the listings at ALMIDE_ARCHIVE_TMP on the root volume
+# (.github/actions/fetch-test-archive). Only the listings: the test runs below
+# unpack to `.` and keep the job's own TMPDIR.
+nextest_list() {
+  TMPDIR="${ALMIDE_ARCHIVE_TMP:-${TMPDIR:-/tmp}}" cargo nextest list "$@"
+}
+
 enumerate() {
   cargo test --workspace --no-run --message-format=json 2>/dev/null | python3 -c '
 import sys, json
@@ -164,7 +173,7 @@ for pkg, kind, name in bins[shard]:
 # partitioner, the weights file and the shard-coverage gate keep their
 # exact contract.
 enumerate_archive() {
-  cargo nextest list --archive-file "$ARCHIVE" --message-format json | python3 -c '
+  nextest_list --archive-file "$ARCHIVE" --message-format json | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
 rows = []
@@ -193,7 +202,7 @@ case "${1:-}" in
     # proves the two ledger legs partition their binary with nothing lost.
     leg="$2"; ARCHIVE="$3"
     expr="$(solo_filter "$leg")" || exit 2
-    cargo nextest list --archive-file "$ARCHIVE" --workspace-remap . --message-format json -E "$expr" | python3 -c '
+    nextest_list --archive-file "$ARCHIVE" --workspace-remap . --message-format json -E "$expr" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
 # `list -E` still prints every testcase of a matched binary; the filter verdict
