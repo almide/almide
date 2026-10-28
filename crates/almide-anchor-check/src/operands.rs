@@ -137,6 +137,14 @@ pub(crate) fn is_loaded(t: &T) -> bool {
     matches!(pl(t), T::Load { .. })
 }
 
+/// The address a loaded value was read from.
+pub(crate) fn loaded_from(t: &T) -> Option<&T> {
+    match pl(t) {
+        T::Load { addr, .. } => Some(addr),
+        _ => None,
+    }
+}
+
 /// The instruction that evaluated an unopened value, a load or a call.
 fn site_id(t: &T) -> Option<usize> {
     match pl(t) {

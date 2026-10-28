@@ -34,6 +34,11 @@
 //! of a heap block's slot is the container's element credit, counted
 //! (`element`). Each count is printed per build, apart from the others.
 //!
+//! An event on an OUTER holder names it by the recorder's pseudo local (a
+//! global `0xC000_0000 | g`, a C-319 cell `0xA000_0000 | l`): it matches a
+//! call whose argument was read through that global, or loaded out of the
+//! block cell local `l` holds.
+//!
 //! TRUSTED (#4278, until its arm, routine and container certificates exist):
 //! that `rcfns` names every rc_inc and release routine; that an arm's own RC
 //! keeps the balance its ownership declaration states; that a compound
@@ -109,6 +114,33 @@ fn before_abort(b: &Body<'_>, k: usize) -> bool {
     false
 }
 
+/// The recorder's pseudo locals for an OUTER holder (almide-wasm
+/// `witness_holder`): a global, and a C-319 cell (the frame local holding
+/// the cell).
+const GLOBAL_HOLDER: u32 = 0xC000_0000;
+const CELL_HOLDER: u32 = 0xA000_0000;
+
+/// The names an RC call's argument answers to, in the recorder's terms: each
+/// local it was read through, each global (as its holder pseudo local), and,
+/// for a value loaded out of a block, the cell locals that block was read
+/// through (the cell's occupant).
+fn names(arg: &crate::operands::T) -> Vec<u32> {
+    let mut v: Vec<u32> = chain(arg)
+        .into_iter()
+        .map(|(s, _)| match s {
+            Src::Local(l) => l,
+            Src::Global(g) => GLOBAL_HOLDER | g,
+        })
+        .collect();
+    if let Some(addr) = crate::operands::loaded_from(arg) {
+        v.extend(chain(addr).into_iter().filter_map(|(s, _)| match s {
+            Src::Local(l) => Some(CELL_HOLDER | l),
+            Src::Global(_) => None,
+        }));
+    }
+    v
+}
+
 /// Check the `rc` lines (`frames` as `(position, events)`) over `bodies`.
 pub fn check_rc(
     bodies: &[Body<'_>],
@@ -152,14 +184,7 @@ pub fn check_rc(
             if crate::operands::is_loaded(&arg) {
                 elements.insert(k);
             }
-            let locals = chain(&arg)
-                .into_iter()
-                .filter_map(|(s, _)| match s {
-                    Src::Local(l) => Some(l),
-                    Src::Global(_) => None,
-                })
-                .collect();
-            calls.push((k, kind, locals));
+            calls.push((k, kind, names(&arg)));
         }
         rep.calls += calls.iter().filter(|c| c.1 != 'j').count();
         let evs: Vec<(char, Option<u32>)> = events

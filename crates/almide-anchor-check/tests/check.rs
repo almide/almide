@@ -525,3 +525,12 @@ fn an_if_whose_arms_both_yield_one_local_is_that_local() -> Result<(), String> {
     assert!(rc(&joined.replace("(else local.get 0)", "(else local.get 1)"), "d0").is_err());
     Ok(())
 }
+
+#[test]
+fn an_event_on_a_cell_holder_matches_the_release_of_its_occupant() -> Result<(), String> {
+    // Local 0 holds a cell; its occupant is loaded at offset 12 and released.
+    let r = rc("local.get 0 i32.load offset=12 call $alloc drop", &format!("d{}", 0xA000_0000u32))?;
+    assert_eq!((r.calls, r.element), (1, 0));
+    assert!(rc("local.get 1 i32.load offset=12 call $alloc drop", &format!("d{}", 0xA000_0000u32)).is_err());
+    Ok(())
+}
