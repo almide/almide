@@ -459,10 +459,11 @@ impl<'a> Walk<'a> {
             }
             IrExprKind::Match { subject, arms } => {
                 self.held.push(place_root(subject).into_iter().collect());
-                // #4294: a `String` subject matched against string literals,
-                // no arm binding, is read through a `&str` view (`Site::StrView`).
+                // #4294 / #4296: a `String` subject matched against string
+                // literals is read through a `&str` view (`Site::StrView`),
+                // whatever its arms bind: a binding arm copies its binder
+                // out of the view itself, where it is wanted as a value.
                 let site = if crate::pass_match_subject::matches_through_str_view(&subject.ty, arms)
-                    && arms.iter().all(|a| pattern_binds_nothing(&a.pattern))
                     && stable_string_operand(subject)
                 {
                     Site::StrView
@@ -761,8 +762,8 @@ fn stable_string_operand(e: &IrExpr) -> bool {
 
 /// Does a pattern bind nothing — literal, wildcard and nullary patterns only?
 /// A match whose every arm is such a pattern only compares its subject; a
-/// binding may move a payload out. Shared by the walk's [`Site::StrView`]
-/// and the borrow verdict's literal-subject rule for a `String` param.
+/// binding may move a payload out. The borrow verdict's literal-subject rule
+/// for a `String` param a match that is NOT a str view compares.
 pub(crate) fn pattern_binds_nothing(p: &IrPattern) -> bool {
     match p {
         IrPattern::Wildcard | IrPattern::Literal { .. } | IrPattern::None => true,
@@ -790,8 +791,8 @@ fn list_element_ty(ty: &Ty) -> Option<&Ty> {
 /// slot, a shared borrow, a clone, a field read whose value is not itself
 /// moved on, a nested borrowed iteration, or — for a `String` — an
 /// interpolation part or a `&str` comparison (a `==` against a literal, or a
-/// `match` against string literals that binds nothing, `Site::StrView`,
-/// #4294). Anything else (returned,
+/// `match` against string literals, `Site::StrView`, #4294 / #4296).
+/// Anything else (returned,
 /// concatenated, built into a value, handed to an owned slot, bound to a
 /// local, matched, captured, mutated) demands the element owned, and the
 /// borrow verdict owns the SOURCE for it: an owned source moves the element

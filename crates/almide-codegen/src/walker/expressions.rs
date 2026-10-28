@@ -155,8 +155,12 @@ fn render_expr_match(ctx: &RenderContext, expr: &IrExpr) -> String {
         subj
     };
     let borrowed = super::statements::subject_is_borrowed(ctx, subject);
+    // #4296: a `String` subject matched against string literals is a `&str`
+    // view (`MatchSubject`); its binding arms own their binder themselves.
+    let str_view = crate::pass_match_subject::matches_through_str_view(&subject.ty, arms)
+        .then(|| super::statements::str_view_subject_root(subject));
     let mut arms_raw = arms.iter()
-        .map(|arm| render_match_arm(ctx, arm, &expr.ty, &subject.ty, borrowed))
+        .map(|arm| render_match_arm(ctx, arm, &expr.ty, &subject.ty, borrowed, str_view))
         .collect::<Vec<_>>()
         .join("\n");
     // #610 refinement backstop: guard-lowered box patterns don't count toward
