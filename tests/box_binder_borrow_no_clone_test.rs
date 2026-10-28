@@ -88,6 +88,13 @@ fn a_box_binder_at_a_borrowing_call_is_not_cloned() {
             "`{name}` clones a box-bound binder to pass it to a borrowing callee (#2582):\n{body}"
         );
     }
+    // #4292: `moved_after` clones `l` for its owned slot either way (the
+    // borrowing sibling reads it afterwards), so `t` is borrowed — owned, the
+    // ownership certifier refused it (C4) — and the copy is the boxed value,
+    // read through the reference the borrowed match binds.
+    let moved = body_of(&rust, "moved_after");
+    assert!(moved.contains("fn moved_after(t: &Tree)"), "`moved_after` owns a param its body only reads (#4292):\n{moved}");
+    assert!(moved.contains("(*(*l)).clone()"), "`moved_after` copies the box, not its value (#4292):\n{moved}");
 }
 
 #[test]

@@ -271,8 +271,18 @@ pub(crate) fn is_named_in(ty: &Ty, names: &HashSet<String>) -> bool {
 /// after the verdict): the certifier's final IR spells a binder's capture as
 /// `let __cap = b` outside the closure, and that bind IS the capture (#3174).
 /// The verdict runs before the binds exist and passes an empty set.
+///
+/// #4292: a binder consumed where a later occurrence of it can still run
+/// (`Node(l, _, _) => keep(l, depth(l))`) is CLONED there whichever way the
+/// subject is matched — the clone pass keeps the binder live for the later
+/// read — so that consumption earns the subject's ownership nothing; it is a
+/// read, the same `cloned_anyway` rule `param_borrow` applies to a param.
+/// Admitted only at a [`part_clone_site`], the positions the borrow lowering
+/// already clones a by-reference binder at.
 pub(crate) fn scrutinee_binders_borrow_only(body: &IrExpr, var: VarId, uses: &UseSites, captures: &HashSet<VarId>) -> bool {
-    subject_binders(body, var, uses, captures, &|_| false).is_some()
+    let cloned_anyway = |u: &Use| part_clone_site(u)
+        && uses.of(u.var).any(|w| !std::ptr::eq(w, u) && after(u, w) && uses.keeps_live(u, w));
+    subject_binders(body, var, uses, captures, &cloned_anyway).is_some()
 }
 
 /// The binders every `match` on `var` introduces (transitively, through a
