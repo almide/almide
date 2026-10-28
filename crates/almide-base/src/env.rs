@@ -156,6 +156,7 @@ pub const SWITCHES: &[Switch] = &[
     sw("ALMIDE_FUZZ_BASE", Value, Harness, "the first seed of the differential fuzz's fixed seed range (default 0)"),
     sw("ALMIDE_FUZZ_HOST_ORACLE", Flag, Harness, "run the differential fuzz in host-oracle mode (arm selection is deterministic per seed and mode)"),
     sw("ALMIDE_FUZZ_ITERS", Value, Harness, "how many seeds the differential fuzz's fixed range covers (default 200)"),
+    sw("ALMIDE_GPU_REQUIRED", Flag, Harness, "fail the GPU leg's parity tests when no wgpu adapter is found instead of printing SKIP (#4236; the `gpu-parity` CI job sets it over lavapipe; crates/almide-gpu-run/tests/int_map_parity.rs)"),
     sw("ALMIDE_HEAP_TRACE", Flag, Dbg, "print the interpreter's heap-block allocations and frees"),
     sw("ALMIDE_HTTP_MAX_RESPONSE_BYTES", Value, Runtime, "the http client's cap on a buffered response in bytes, read by the compiled program (default 1 GiB; 0 = no cap, #2825)"),
     sw("ALMIDE_HTTP_TIMEOUT_SECS", Value, Runtime, "the http client's connect and read timeout in seconds, read by the compiled program (default 30; 0 = none)"),

@@ -1007,6 +1007,33 @@ jobs:
           cargo miri setup
           cargo miri test -p almide-str
 
+  gpu-parity:
+    name: GPU parity (almide-gpu-run on lavapipe)
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
+    # #4236 / #1331: the GPU leg's CPU ⇄ GPU parity and its negative controls
+    # (a kernel with the 64-bit carry, the multiply's cross terms or the signed
+    # high-word compare broken must be CAUGHT). The runner has no GPU; Mesa's
+    # lavapipe is a software Vulkan driver, so the same WGSL → SPIR-V → driver
+    # path runs. ALMIDE_GPU_REQUIRED turns a missing adapter into a failure —
+    # elsewhere (the workspace shards) these tests print SKIP instead.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - name: Install lavapipe (software Vulkan)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mesa-vulkan-drivers libvulkan1
+      - name: CPU ⇄ GPU parity and negative controls
+        env:
+          ALMIDE_GPU_REQUIRED: "1"
+        run: cargo test --release --locked -p almide-gpu-run -- --test-threads=1
+
   test-wasm:
     name: Test WASM
     needs: [changes, build]

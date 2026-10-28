@@ -63,6 +63,30 @@ fn witness_layouts(ir: &almide_ir::IrProgram) -> (crate::lower::RecordLayouts, c
     (records, variants)
 }
 
+/// Lower every function of `source` (with its resolved cross-module siblings)
+/// to MIR under strict values: the lowered functions, plus each walled
+/// function with its wall. Shared by the witness producer and the affine-shape
+/// census (`pipeline_affine.rs`), so both read the same MIR.
+#[allow(clippy::type_complexity)]
+fn witness_lowered(
+    source: &str,
+    self_modules: &[(String, almide_lang::ast::Program, bool)],
+) -> Result<(Vec<crate::MirFunction>, Vec<(String, String)>), LowerError> {
+    let _strict = crate::lower::StrictValuesGuard::set(true);
+    let ir = source_to_ir_with(source, self_modules)?;
+    let (globals, global_inits) = witness_globals(&ir);
+    let (records, variants) = witness_layouts(&ir);
+    let mut lowered: Vec<crate::MirFunction> = Vec::new();
+    let mut walled = Vec::new();
+    for func in &ir.functions {
+        match crate::lower::lower_function_all_with_globals(func, &globals, &global_inits, &records, &variants) {
+            Ok(all) => lowered.extend(all),
+            Err(e) => walled.push((func.name.to_string(), e.to_string())),
+        }
+    }
+    Ok((lowered, walled))
+}
+
 /// Lower `source` (with its resolved cross-module siblings) and emit every
 /// witness the untrusted producer can: ownership, names and caps per lowered
 /// function, plus the whole-program call-mode witness. `manifest_allow` is an
@@ -77,18 +101,7 @@ pub fn program_witnesses(
     self_modules: &[(String, almide_lang::ast::Program, bool)],
     manifest_allow: Option<&[String]>,
 ) -> Result<ProgramWitnesses, LowerError> {
-    let _strict = crate::lower::StrictValuesGuard::set(true);
-    let ir = source_to_ir_with(source, self_modules)?;
-    let (globals, global_inits) = witness_globals(&ir);
-    let (records, variants) = witness_layouts(&ir);
-    let mut lowered: Vec<crate::MirFunction> = Vec::new();
-    let mut walled = Vec::new();
-    for func in &ir.functions {
-        match crate::lower::lower_function_all_with_globals(func, &globals, &global_inits, &records, &variants) {
-            Ok(all) => lowered.extend(all),
-            Err(e) => walled.push((func.name.to_string(), e.to_string())),
-        }
-    }
+    let (mut lowered, walled) = witness_lowered(source, self_modules)?;
     if let Some(allow) = manifest_allow {
         lowered.iter_mut().for_each(|f| crate::certificate::apply_manifest_caps(f, allow));
     }
