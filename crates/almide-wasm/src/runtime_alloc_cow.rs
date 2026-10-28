@@ -40,10 +40,11 @@ pub(crate) fn emit_map_reserve() -> Function {
     i.local_get(base).local_get(la).i32_store(word(almide_layout::LEN.offset));
     // The window only reserves at rc == 1 (behind `$cow`), so the
     // outgrown block is released on every grow path through `$dec_flat`
-    // — freed, or left alone when static (#4304: the old `rc == 1 →
+    // — freed, or left alone when static (#4305: the old `rc == 1 →
     // $free` judge was no release on the other paths). A shared heap
     // block here would hand its entries' handles to `base` uncounted, so
     // that broken precondition is the defined abort, never a decrement.
+    // Precondition: a heap block reaches this grow path only uniquely held (rc == 1).
     i.local_get(block).global_get(G_LINE_END).i32_ge_u();
     i.local_get(block).i32_load(word(almide_layout::RC.offset)).i32_const(1).i32_gt_u();
     i.i32_and().if_(BlockType::Empty);
