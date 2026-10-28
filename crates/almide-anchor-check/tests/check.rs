@@ -548,3 +548,27 @@ fn a_release_an_arm_consumes_is_matched_inside_its_window() -> Result<(), String
     assert!(check_rc(&bodies, 0, None, &none, &[], &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
+
+fn consuming(main: &str, events: &str) -> Result<RcReport, String> {
+    let bytes = wat::parse_str(format!(
+        r#"(module (memory 1)
+             (func $rel (param i32))
+             (func $all (param i32) local.get 0 call $rel)
+             (func $some (param i32) local.get 0 (if (then local.get 0 call $rel)))
+             (func $main (local i32) {main}))"#
+    ))
+    .expect("wat");
+    let bodies = decode(&bytes)?;
+    let releases = [0u32].into_iter().collect();
+    let mut r = RcReport::default();
+    // The whole of main is one arm window.
+    check_rc(&bodies, 0, None, &releases, &[], &[(3, events.to_string())], &[vec![(3, 0, 1)], vec![]], &mut r).map(|()| r)
+}
+
+#[test]
+fn a_consumed_release_needs_a_callee_that_takes_the_parameter_on_every_path() -> Result<(), String> {
+    let r = consuming("local.get 0 call $all", "d0")?;
+    assert_eq!(r.consumed, 1);
+    assert!(consuming("local.get 0 call $some", "d0").unwrap_err().contains("some paths only"));
+    Ok(())
+}

@@ -50,7 +50,9 @@
 //! variable the frame's events name; an element release only if a later
 //! store writes the same slot; and a release or +1 counts as `consumed` only
 //! by a call inside an arm or routine window whose callee's own body takes
-//! ownership of that parameter.
+//! ownership of that parameter on EVERY path to its exits (a callee that
+//! takes it on some paths only is refused — a draft pending the owner's
+//! ruling).
 //!
 //! TRUSTED (#4278, until its arm, routine and container certificates exist):
 //! that `rcfns` names every rc_inc and release routine; that an arm's own RC
@@ -155,27 +157,50 @@ fn names(arg: &crate::operands::T) -> Vec<u32> {
     v
 }
 
-/// Does function `f` take ownership of its parameter `j`: release it, store
-/// it into a block, return it, or hand it to a callee that does (followed
-/// `depth` calls deep)? An imported function holds no credit.
-fn consumes(bodies: &[Body<'_>], imports: u32, releases: &HashSet<u32>, f: u32, j: u32, depth: u32) -> bool {
+/// How function `f` takes ownership of its parameter `j`: `(some, all)` —
+/// on some path, and on every path to an exit. A path takes it by releasing
+/// it, storing it into a block, returning it, or handing it to a callee that
+/// takes it on every path (followed `depth` calls deep). An exit is covered
+/// when it returns or tail-passes the parameter, or a taking instruction
+/// dominates it. An imported function takes nothing.
+fn takes(bodies: &[Body<'_>], imports: u32, releases: &HashSet<u32>, f: u32, j: u32, depth: u32) -> (bool, bool) {
     if depth == 0 {
-        return false;
+        return (false, false);
     }
-    let Some(b) = f.checked_sub(imports).and_then(|p| bodies.get(p as usize)) else { return false };
+    let Some(b) = f.checked_sub(imports).and_then(|p| bodies.get(p as usize)) else { return (false, false) };
     let fl = Flow::new(b, HashSet::new());
+    let dead = dead(b);
     let last = b.ops.len().saturating_sub(1);
-    b.ops.iter().enumerate().any(|(k, op)| {
-        let takes = |a: usize| names(&fl.arg(k, a, FUEL)).contains(&j);
-        match op {
-            Op::Call { function_index: g } | Op::ReturnCall { function_index: g } => (0..b.args[k].len())
-                .any(|a| takes(a) && (releases.contains(g) || consumes(bodies, imports, releases, *g, a as u32, depth - 1))),
-            Op::Return => (0..b.args[k].len()).any(takes),
-            Op::End if k == last => (0..b.args[k].len()).any(takes),
-            o if store_width(o).is_some() => takes(1),
-            _ => false,
+    let names_j = |k: usize, a: usize| names(&fl.arg(k, a, FUEL)).contains(&j);
+    let mut points: Vec<usize> = Vec::new();
+    let mut exits: Vec<(usize, bool)> = Vec::new();
+    for (k, op) in b.ops.iter().enumerate() {
+        if dead[k] {
+            continue;
         }
-    })
+        match op {
+            Op::Call { function_index: g } => {
+                if (0..b.args[k].len()).any(|a| {
+                    names_j(k, a) && (releases.contains(g) || takes(bodies, imports, releases, *g, a as u32, depth - 1).1)
+                }) {
+                    points.push(k);
+                }
+            }
+            Op::ReturnCall { function_index: g } => {
+                let passes = (0..b.args[k].len()).any(|a| {
+                    names_j(k, a) && (releases.contains(g) || takes(bodies, imports, releases, *g, a as u32, depth - 1).1)
+                });
+                exits.push((k, passes));
+            }
+            Op::Return => exits.push((k, (0..b.args[k].len()).any(|a| names_j(k, a)))),
+            Op::End if k == last => exits.push((k, (0..b.args[k].len()).any(|a| names_j(k, a)))),
+            o if store_width(o).is_some() && names_j(k, 1) => points.push(k),
+            _ => {}
+        }
+    }
+    let some = !points.is_empty() || exits.iter().any(|e| e.1);
+    let all = !exits.is_empty() && exits.iter().all(|&(e, ret)| ret || points.iter().any(|&c| fl.dominates(c, e)));
+    (some, all)
 }
 
 /// The release at `k` of a value loaded out of a slot replaces it: a later
@@ -292,19 +317,28 @@ pub fn check_rc(
         // variable as argument `j`, and the callee's own body takes ownership
         // of parameter `j` (releases, stores, returns or passes it on).
         for (kind, l) in pending {
-            let consumed = matches!(kind, 'd' | 'a')
-                && b.ops.iter().enumerate().any(|(k, op)| {
-                    let Op::Call { function_index: g } = op else { return false };
-                    !dead[k]
-                        && (inside(&windows[0], k) || inside(&windows[1], k))
-                        && (0..b.args[k].len()).any(|j| {
-                            names(&fl.arg(k, j, FUEL)).contains(&l) && consumes(bodies, imports, releases, *g, j as u32, 4)
-                        })
-                });
-            if consumed {
-                rep.consumed += 1;
-            } else {
-                unmatched.push(format!("{kind}{l}"));
+            // (some, all) over the window calls that take `l` as an argument.
+            let mut verdict = (false, false);
+            if matches!(kind, 'd' | 'a') {
+                for (k, op) in b.ops.iter().enumerate() {
+                    let Op::Call { function_index: g } = op else { continue };
+                    if dead[k] || !(inside(&windows[0], k) || inside(&windows[1], k)) {
+                        continue;
+                    }
+                    for j in 0..b.args[k].len() {
+                        if names(&fl.arg(k, j, FUEL)).contains(&l) {
+                            let (some, all) = takes(bodies, imports, releases, *g, j as u32, 4);
+                            verdict = (verdict.0 || some, verdict.1 || all);
+                        }
+                    }
+                }
+            }
+            match verdict {
+                (_, true) => rep.consumed += 1,
+                // DRAFT (pending the owner's ruling): a callee that takes the
+                // parameter on some paths but not all is refused.
+                (true, false) => unmatched.push(format!("{kind}{l} (its consuming callee takes it on some paths only)")),
+                _ => unmatched.push(format!("{kind}{l}")),
             }
         }
         for i in 0..calls.len() {

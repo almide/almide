@@ -262,7 +262,7 @@ impl<'b, 'a> Flow<'b, 'a> {
 
     /// Every path from the entry to `q` passes `p` (`p < q`, structured
     /// control: nothing in `(p, q]` leaves the construct `p` sits in).
-    fn dominates(&self, p: usize, q: usize) -> bool {
+    pub(crate) fn dominates(&self, p: usize, q: usize) -> bool {
         if p > q {
             return false;
         }
