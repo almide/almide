@@ -638,15 +638,15 @@ tamper_structural fan_bang '6s/^{|im}$/{|i}/' "#2755 fan payload"
 # `{|am}`); out of bounds ABORTS the process with nothing released — the
 # abort terminal discharges it, and an aborting path a returning path extends
 # needs no arm of its own (`check_line_prefix_safe`: `tagged_at`'s `t` aborts
-# holding its block after `ib`, a prefix of its returning `ibd`; `b` = the
-# index's read of it, #3259). Drills: the
-# view never shared; `t` never released on the returning path.
+# holding its block after `i`, a prefix of its returning `im` — the dying `t`
+# moves into the in-place append, #4261). Drills: the
+# view never shared; `t` never handed off on the returning path.
 echo
 echo "== structural leg, list index + abort exit  ⊳  proven checker (#2755) =="
 run_structural spec/wasm_cross/witness_straightline.almd elem_at 0
 run_structural spec/wasm_cross/witness_straightline.almd tagged_at 0
 tamper_structural elem_at '2s/^{|am}$/{|m}/' "#2755 index view"
-tamper_structural tagged_at '2s/^{|ibd}$/{|ib}/' "#2755 abort-path release"
+tamper_structural tagged_at '2s/^{|im}$/{|i}/' "#2755 abort-path release"
 
 # ── #2758: MODULE-SPACE LETS. main's prologue stores each top-let into its
 # global: `ALPHA`'s literal moves in (`im`); `TBL`'s initializer (a
