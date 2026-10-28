@@ -391,7 +391,56 @@ pub fn subject_is_borrowed(ctx: &RenderContext, subject: &IrExpr) -> bool {
     }
 }
 
-pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty, subject_ty: &almide_lang::types::Ty, borrowed: bool) -> String {
+/// The variable a str-view match subject reads (`&*x`, `x.as_str()`,
+/// `&*t.name`), through the borrow / clone / projection a pass wrapped it in.
+pub fn str_view_subject_root(subject: &IrExpr) -> Option<VarId> {
+    match &subject.kind {
+        IrExprKind::Var { id } => Some(*id),
+        IrExprKind::Borrow { expr, .. } | IrExprKind::Clone { expr } | IrExprKind::Deref { expr } => str_view_subject_root(expr),
+        IrExprKind::Member { object, .. } | IrExprKind::TupleIndex { object, .. } => str_view_subject_root(object),
+        IrExprKind::Call { target: CallTarget::Method { object, .. }, args, .. } if args.is_empty() => str_view_subject_root(object),
+        _ => None,
+    }
+}
+
+/// #4296: the arm of a match over a `&str` view of its `String` subject
+/// (`MatchSubject`: `match &*x { "a" => .., other => .. }`) binds `other` as
+/// a `&str` into the subject. The subject stays borrowed (`Site::StrView`);
+/// a binding arm whose binder is wanted as a value — returned, stored,
+/// handed on, cloned — takes its owned copy at the head of THAT arm,
+/// `let other: AlmideString = other.to_almide();`, so the copy is paid only
+/// where the binder is owned. A binder only read as `&*other` keeps the view,
+/// unless the arm also touches the subject's variable (a move of it there
+/// would outlive the borrow the view holds).
+fn str_view_rebind(ctx: &RenderContext, arm: &IrMatchArm, subject_root: Option<VarId>) -> Option<String> {
+    use almide_ir::visit::{IrVisitor, walk_expr, walk_stmt};
+    let var = match &arm.pattern {
+        IrPattern::Bind { var, .. } | IrPattern::As { var, .. } => *var,
+        _ => return None,
+    };
+    struct Scan { var: VarId, root: Option<VarId>, used: bool, owned: bool, root_seen: bool }
+    impl IrVisitor for Scan {
+        fn visit_expr(&mut self, e: &IrExpr) {
+            match &e.kind {
+                IrExprKind::Borrow { expr, as_str: true, mutable: false }
+                    if matches!(expr.kind, IrExprKind::Var { id } if id == self.var) => self.used = true,
+                IrExprKind::Var { id } if *id == self.var => { self.used = true; self.owned = true; }
+                IrExprKind::Var { id } if Some(*id) == self.root => self.root_seen = true,
+                _ => walk_expr(self, e),
+            }
+        }
+        fn visit_stmt(&mut self, s: &IrStmt) { walk_stmt(self, s); }
+    }
+    let mut scan = Scan { var, root: subject_root, used: false, owned: false, root_seen: false };
+    scan.visit_expr(&arm.body);
+    if !scan.used || !(scan.owned || scan.root_seen) {
+        return None;
+    }
+    let name = ctx.var_name(var);
+    Some(format!("let {name}: AlmideString = {name}.to_almide();"))
+}
+
+pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide_lang::types::Ty, subject_ty: &almide_lang::types::Ty, borrowed: bool, str_view: Option<Option<VarId>>) -> String {
     // #413/#3176: the arm's patterns are rendered against the SUBJECT's type,
     // so a case name two enums share qualifies with the enum the value has,
     // at the top level and at every nested position the type reaches.
@@ -421,7 +470,10 @@ pub fn render_match_arm(ctx: &RenderContext, arm: &IrMatchArm, match_ty: &almide
     };
     // The box move-outs (`let Tree::Leaf(a) = *__bx0 else …`) run FIRST in the
     // arm body, then the original body sees the inner bindings.
-    let body = if box_binds.is_empty() {
+    let rebind = str_view.and_then(|root| str_view_rebind(ctx, arm, root));
+    let body = if let Some(rebind) = rebind {
+        format!("{{ {} {} }}", rebind, raw_body)
+    } else if box_binds.is_empty() {
         raw_body
     } else {
         format!("{{ {} {} }}", box_binds.join(" "), raw_body)

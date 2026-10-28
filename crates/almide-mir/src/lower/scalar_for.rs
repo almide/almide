@@ -494,7 +494,13 @@ impl LowerCtx {
         let body_mark = self.live_heap_handles.len();
         self.in_frame += 1;
         self.scalar_loop_depth += 1;
-        let ok = self.lower_while_body_stmts(body).is_ok();
+        let ok = match self.lower_while_body_stmts(body) {
+            Ok(()) => true,
+            Err(e) => {
+                crate::trace::trace("ALMIDE_DBG_ELEM", || format!("[for-list] body stmt declined: {e:?}"));
+                false
+            }
+        };
         self.scalar_loop_depth -= 1;
         self.in_frame -= 1;
         if !ok {
