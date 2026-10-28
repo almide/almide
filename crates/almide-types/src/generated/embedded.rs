@@ -11570,7 +11570,11 @@ local fn radix_digits(n: Int, radix: Int, acc: String) -> String = {
   else radix_digits(q, radix, digits)
 }
 
-local fn digit_char(d: Int) -> String = string.slice("0123456789abcdefghijklmnopqrstuvwxyz", d, d + 1)
+local fn digit_char(d: Int) -> String = string.slice(
+  "0123456789abcdefghijklmnopqrstuvwxyz",
+  d,
+  d + 1,
+)
 
 
 local fn digit_value(b: Int) -> Int = if b >= 48 and b <= 57 then b - 48
