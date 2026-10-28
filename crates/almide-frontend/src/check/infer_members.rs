@@ -83,6 +83,16 @@ impl Checker {
             // A bare spelling of a module's type (dual-registered for
             // unqualified access): the one user opaque record of that name.
             None if !n.as_str().contains('.') && self.env.prefixed_bare_aliases.contains(&n) => {
+                // Inside a module that declares its own type of this name the
+                // bare spelling names that one (the bundled `heap` reading its
+                // `Heap` beside a user module's `Heap`), never the user record.
+                if let Some(c) = self.current_module_prefix.as_deref()
+                    && (self.env.opaque_records.get(&n).is_some_and(|o| o.as_str() == c)
+                        || self.env.types.contains_key(&sym(&format!("{c}.{bare}"))))
+                    && !self.env.opaque_user_records.contains_key(&sym(&format!("{c}.{bare}")))
+                {
+                    return None;
+                }
                 let mut hits = self.env.opaque_user_records.iter()
                     .filter(|(k, _)| k.as_str().rsplit('.').next() == Some(bare));
                 let first = hits.next()?;
