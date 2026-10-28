@@ -10135,14 +10135,23 @@ local fn __http_response_html_types() -> List[String] = ["text/html", "applicati
 
 
 
+local fn __http_response_fold(s: String) -> String = string.to_list(s) |> list.map((c) => match string.index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", c) {
+  some(i) => string.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1),
+  none => c,
+}) |> list.join("")
+
+
+
 
 local fn __http_response_names_html(value: String) -> Bool = string.split(value, ",") |> list.any((entry) => list.contains(
   __http_response_html_types(),
-  string.to_lower(string.trim(list.first(string.split(entry, ";")) ?? "")),
+  __http_response_fold(string.trim(list.first(string.split(entry, ";")) ?? "")),
 ))
 
+local fn __http_response_is_content_type(name: String) -> Bool = string.len(name) == 12 and __http_response_fold(name) == "content-type"
+
 local fn __http_response_html_refusal(op: String, name: String, value: String) -> Unit =
-  if string.to_lower(name) == "content-type" and __http_response_names_html(value) then panic("${op}: an HTML Content-Type is served only from SafeHtml: build the page with the html builders and answer with http.html(status, page)")
+  if __http_response_is_content_type(name) and __http_response_names_html(value) then panic("${op}: an HTML Content-Type is served only from SafeHtml: build the page with the html builders and answer with http.html(status, page)")
   else ()
 
 fn __http_response_set_body_bytes(m: HttpResponse, body: Bytes) -> HttpResponse = http.__http_response_set_body(
