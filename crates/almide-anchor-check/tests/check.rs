@@ -599,3 +599,12 @@ fn a_push_routine_takes_its_block_on_every_path_only_when_the_grow_path_releases
     assert!(consuming("local.get 0 call $push_old drop", "d0").unwrap_err().contains("some paths only"));
     Ok(())
 }
+
+/// One taking argument accounts for one consumption: two recorded releases
+/// of a variable need two calls that take it.
+#[test]
+fn one_taking_call_accounts_for_one_consumed_release() -> Result<(), String> {
+    assert_eq!(consuming("local.get 0 call $all local.get 0 call $all", "d0 d0")?.consumed, 2);
+    assert!(consuming("local.get 0 call $all", "d0 d0").is_err());
+    Ok(())
+}

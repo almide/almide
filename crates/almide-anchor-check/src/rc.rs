@@ -322,26 +322,45 @@ pub fn check_rc(
         let inside = |w: &[(usize, usize, usize)], k: usize| w.iter().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
         // A variable's release (or prepaid +1) that is an arm's or a routine's
         // consumption of it: a call INSIDE an arm or routine window takes the
-        // variable as argument `j`, and the callee's own body takes ownership
-        // of parameter `j` (releases, stores, returns or passes it on).
+        // variable's value at that call as argument `j`, and the callee's own
+        // body takes ownership of parameter `j` (releases, stores, returns or
+        // passes it on). Each such argument accounts for ONE event, and never
+        // a call an event above already matched (a judge's release): two
+        // consumptions need two taking arguments.
+        let matched: HashSet<usize> = (0..calls.len()).filter(|&i| used[i]).map(|i| calls[i].0).collect();
+        let mut taken: HashSet<(usize, usize)> = HashSet::new();
         for (kind, l) in pending {
-            // (some, all) over the window calls that take `l` as an argument.
-            let mut verdict = (false, false);
+            // The first free taking argument, or else whether any took it on
+            // some paths only.
+            let mut partial = false;
+            let mut chosen = None;
             if matches!(kind, 'd' | 'a') {
-                for (k, op) in b.ops.iter().enumerate() {
+                'calls: for (k, op) in b.ops.iter().enumerate() {
                     let Op::Call { function_index: g } = op else { continue };
-                    if dead[k] || !(inside(&windows[0], k) || inside(&windows[1], k)) {
+                    if dead[k] || matched.contains(&k) || !(inside(&windows[0], k) || inside(&windows[1], k)) {
                         continue;
                     }
                     for j in 0..b.args[k].len() {
-                        if names(&fl.arg(k, j, FUEL)).contains(&l) {
-                            let (some, all) = takes(bodies, imports, releases, *g, j as u32, 4);
-                            verdict = (verdict.0 || some, verdict.1 || all);
+                        if taken.contains(&(k, j)) {
+                            continue;
                         }
+                        let arg = fl.arg(k, j, FUEL);
+                        if !(names(&arg).contains(&l) || fl.same(&arg, &fl.local_value(l, k, FUEL))) {
+                            continue;
+                        }
+                        let (some, all) = takes(bodies, imports, releases, *g, j as u32, 4);
+                        if all {
+                            chosen = Some((k, j));
+                            break 'calls;
+                        }
+                        partial |= some;
                     }
                 }
             }
-            match verdict {
+            if let Some(kj) = chosen {
+                taken.insert(kj);
+            }
+            match (partial, chosen.is_some()) {
                 (_, true) => rep.consumed += 1,
                 // The every-path rule (adopted 2026-10-28): a callee that
                 // takes the parameter on some paths but not all is refused.

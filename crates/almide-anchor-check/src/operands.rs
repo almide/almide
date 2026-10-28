@@ -360,6 +360,15 @@ impl<'b, 'a> Flow<'b, 'a> {
         Some(k)
     }
 
+    /// The value local `l` holds at instruction `p`, as a read of it there
+    /// would see it.
+    pub(crate) fn local_value(&self, l: u32, p: usize, fuel: u32) -> T {
+        match self.reaching_def(l, p) {
+            Some(q) => T::Def(l, p, Box::new(self.arg(q, 0, fuel))),
+            None => T::Local(l, p),
+        }
+    }
+
     pub(crate) fn arg(&self, p: usize, k: usize, fuel: u32) -> T {
         match self.b.args.get(p).and_then(|a| a.get(k)).copied().flatten() {
             Some(q) => self.term(q, fuel),
