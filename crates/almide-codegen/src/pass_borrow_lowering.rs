@@ -750,7 +750,7 @@ impl IrMutVisitor for Lower<'_> {
                 self.ref_binders.insert(id);
                 // A match over a `&str` view (#4296) binds a `&str` the arm
                 // copies out itself where it is wanted as a value (the
-                // walker's `str_view_rebind`): not a reference binder.
+                // `StrViewRebind` copy): not a reference binder.
                 if !crate::pass_match_subject::matches_through_str_view(&subject.ty, arms) {
                     let mut bound = Vec::new();
                     for arm in arms.iter() { pattern_binders(&arm.pattern, &mut bound); }

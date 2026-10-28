@@ -283,7 +283,7 @@ impl almide_ir::visit::IrVisitor for FreshBinds<'_> {
         // match on anything else (a captured or outer value) binds into
         // a value that outlives the iteration, and stays cloned.
         // A match over a `&str` view of its subject (#4296) binds a copy its
-        // own arm makes (the walker's `str_view_rebind`), whatever it views.
+        // own arm makes (`StrViewRebind`'s copy), whatever it views.
         if let IrExprKind::Match { subject, arms } = &expr.kind
             && (matches!(&subject.kind, IrExprKind::Var { id } if self.fresh.contains(id))
                 || crate::pass_match_subject::matches_through_str_view(&subject.ty, arms))

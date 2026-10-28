@@ -77,7 +77,7 @@ impl IrMutVisitor for MatchSubjectVisitor {
 /// verdict — which runs before this pass rewrites the subject — sees the
 /// subject read through that view exactly as the ownership certifier sees
 /// the rewritten `Borrow` afterwards. An arm that binds the subject binds a
-/// `&str` into it; the walker gives that arm its own owned copy where the
+/// `&str` into it; `StrViewRebind` gives that arm its own owned copy where the
 /// binder is wanted as a value (#4296), so binding arms read it too.
 pub(crate) fn matches_through_str_view(ty: &Ty, arms: &[IrMatchArm]) -> bool {
     matches!(ty, Ty::String) && arms.iter().any(|a| {
