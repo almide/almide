@@ -6,17 +6,17 @@
 //! about it in generated code is noise the author cannot act on.
 //!
 //! The programs: a lone Cyrillic `а` (the whole Cyrillic usage is confusable,
-//! and it collides with the runtime's Latin `a`), a Latin / Cyrillic look-alike
-//! pair, and a name from an excluded (archaic) script.
+//! and it collides with the runtime's Latin `a`) and a name from an excluded
+//! (archaic) script. A Latin / Cyrillic look-alike pair in one file is E101
+//! since #4266 (UTS #39), so it never reaches a render; the lone `а` still
+//! meets the runtime's Latin `a` in the generated crate.
 
 use std::process::Command;
 
 const LONE_CYRILLIC: &str = "fn \u{430}(n: Int) -> Int = n + 1\n\neffect fn main() -> Unit = {\n  println(int.to_string(\u{430}(1)))\n}\n";
-const LOOK_ALIKE_PAIR: &str = "fn a(n: Int) -> Int = n + 2\n\nfn \u{430}(n: Int) -> Int = n + 1\n\neffect fn main() -> Unit = {\n  println(int.to_string(a(1) + \u{430}(2)))\n}\n";
 const ARCHAIC_SCRIPT: &str = "fn \u{16a0}(n: Int) -> Int = n + 3\n\neffect fn main() -> Unit = {\n  println(int.to_string(\u{16a0}(1)))\n}\n";
 
-const PROGRAMS: [(&str, &str); 3] =
-    [("lone Cyrillic", LONE_CYRILLIC), ("look-alike pair", LOOK_ALIKE_PAIR), ("archaic script", ARCHAIC_SCRIPT)];
+const PROGRAMS: [(&str, &str); 2] = [("lone Cyrillic", LONE_CYRILLIC), ("archaic script", ARCHAIC_SCRIPT)];
 
 /// The identifier-lint warnings rustc reports for `rust` (type-checked only).
 fn identifier_lint_warnings(rust: &str) -> Vec<String> {
