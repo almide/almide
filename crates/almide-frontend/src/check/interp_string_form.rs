@@ -61,6 +61,9 @@ pub(crate) struct DeferredGenericCall {
     /// may then name that fn's rigid generics, and the callee's
     /// requirements transfer to it.
     pub caller: Option<Sym>,
+    /// The whole call's span (`span` is where the checker stood when the
+    /// call resolved — its last argument), for E114's anchor.
+    pub call_span: Option<crate::ast::Span>,
 }
 
 /// A call to a generic user fn with its bindings resolved (#2496).
@@ -70,6 +73,7 @@ pub(crate) struct GenericCall {
     pub bindings: std::collections::HashMap<Sym, Ty>,
     pub site: InterpLoc,
     pub caller: Option<Sym>,
+    pub call_span: Option<crate::ast::Span>,
 }
 
 /// A requirement a generic fn's body places on its instantiations: the
@@ -340,6 +344,7 @@ impl Checker {
                 bindings,
                 site: InterpLoc { file: file.clone(), span: call.span, label: format!("`{}`", call.callee.as_str()) },
                 caller: call.caller,
+                call_span: call.call_span,
             });
         }
         self.propagate_interp_reqs();

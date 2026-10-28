@@ -618,6 +618,7 @@ impl Checker {
                 caller: self.current_fn.as_ref()
                     .filter(|(_, gs)| !gs.is_empty())
                     .map(|(k, _)| *k),
+                call_span: self.call_span_hint.or(self.current_span),
             });
         }
 

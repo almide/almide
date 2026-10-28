@@ -1,0 +1,10 @@
+// Both fns pass on the type they were called with.
+fn wrap[T](x: T, n: Int) -> Int =
+  if n <= 0 then 0 else unwrap(x, n - 1)
+
+fn unwrap[U](y: U, n: Int) -> Int =
+  if n <= 0 then 0 else 1 + wrap(y, n - 1)
+
+effect fn main() -> Unit = {
+  println(int.to_string(wrap("a", 4)))
+}

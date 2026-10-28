@@ -376,6 +376,7 @@ type Account: Codec = { name: String, @skip_decode is_admin: Bool = false }
 | E006 | Pure fn calls effect fn | Mark the caller `effect fn`, and propagate the call's error with `!` (`f(x)!`) unless a `!` / `??` / `match` already consumes its Result |
 | E109 | Pure fn runs an effect fn reached as a value (field, list element, stored closure) | Mark the fn `effect fn`, or hand it a value that does no I/O |
 | E110 | `http.decode_json[T]` (an `@input_sink`) handed a type that is also sent out (`Codec`), an input type holding a `Codec` record (a field or a variant payload), or a forwarded type parameter | Decode into a `: Decode` input type listing what the client may set, then build the domain value in code |
+| E114 | Generic fn calls itself (directly or through other generic fns) at a growing type, e.g. `depth((x, x), n - 1)` inside `depth[T]` | Recurse at the type the fn was called with: collect values in a `List[T]`, or count levels in an `Int` |
 | E007/E008 | Fan block misuse | See `docs/specs/fan.md` |
 | E009 | Reassign immutable | `let` → `var` |
 | E010 | Non-exhaustive match | Add the missing arm(s) or `_ => ...` |

@@ -1,0 +1,3 @@
+expects_code = "E114"
+expects_error = "at a growing type: `c`'s `V` is `Option[U]` at this call"
+hint_substring = "Recurse at the type `b` was called with"

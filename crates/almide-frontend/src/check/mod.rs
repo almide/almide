@@ -1509,6 +1509,7 @@ include!("post_solve_validation.rs");
 include!("unknown_type_root.rs");
 include!("qualified_type_head.rs");
 include!("interp_string_form.rs");
+include!("polymorphic_recursion.rs");
 include!("lint_error_surface.rs");
 include!("bounded.rs");
 include!("concurrent_reach_check.rs");
