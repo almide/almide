@@ -354,7 +354,7 @@ impl Emitter<'_> {
         _want: Option<SliceTy>,
     ) -> Result<SliceTy, EmitError> {
         // #3406: a base that dies here is rebuilt in place (dying_move.rs).
-        if let Some(ty) = self.try_spread_dying(base, fields)? {
+        if let Some(ty) = self.routine(|r: &Option<_>| r.is_some(), |em| em.try_spread_dying(base, fields))? {
             return Ok(ty);
         }
         Ok({

@@ -132,6 +132,11 @@ pub(crate) fn chain(t: &T) -> Vec<(Src, usize)> {
     v
 }
 
+/// `t` is a value loaded out of a heap block (through any variables).
+pub(crate) fn is_loaded(t: &T) -> bool {
+    matches!(pl(t), T::Load { .. })
+}
+
 /// The instruction that evaluated an unopened value, a load or a call.
 fn site_id(t: &T) -> Option<usize> {
     match pl(t) {

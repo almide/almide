@@ -346,7 +346,7 @@ impl Emitter<'_> {
             // var rebound and the rebind witnessed): a C-319 cell, a `mut`
             // parameter, a metered frame's var.
             IrStmtKind::MapInsert { target, key, value } => {
-                if self.try_map_set_in_place(target, key, value)? {
+                if self.routine(|r: &bool| *r, |em| em.try_map_set_in_place(target, key, value))? {
                     return Ok(());
                 }
                 self.lower_map_insert_writeback(target, key, value)
@@ -654,13 +654,13 @@ impl Emitter<'_> {
     /// complexity budget.
     fn lower_assign(&mut self, var: &almide_ir::VarId, value: &IrExpr) -> Result<(), EmitError> {
                 let moved = self.take_moved_temp(value);
-                if self.try_str_append_assign(var, value)? {
+                if self.routine(|r: &bool| *r, |em| em.try_str_append_assign(var, value))? {
                     return Ok(());
                 }
-                if self.try_list_append_assign(var, value)? {
+                if self.routine(|r: &bool| *r, |em| em.try_list_append_assign(var, value))? {
                     return Ok(());
                 }
-                if self.try_map_set_assign(var, value)? {
+                if self.routine(|r: &bool| *r, |em| em.try_map_set_assign(var, value))? {
                     return Ok(());
                 }
                 let (local, declared) = match self.locals.get(var) {
@@ -769,7 +769,7 @@ impl Emitter<'_> {
         value: &IrExpr,
     ) -> Result<(), EmitError> {
         let moved = self.take_moved_temp(value);
-        if moved.is_none() && self.try_field_append_assign(target, path, value)? {
+        if moved.is_none() && self.routine(|r: &bool| *r, |em| em.try_field_append_assign(target, path, value))? {
             return Ok(());
         }
         let spends_var = self.assign_rhs_spends_var(value, *target);

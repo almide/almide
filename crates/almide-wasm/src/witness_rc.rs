@@ -31,6 +31,9 @@ struct State {
     /// Per pass, every stdlib arm's instruction window `(serial, from, to)`
     /// in body byte offsets — where RC the arm does inside itself lies.
     arms: HashMap<usize, Vec<(u64, usize, usize)>>,
+    /// Per pass, every taken compound routine's window (in-place append,
+    /// string building, map edits — `Emitter::routine`).
+    routines: HashMap<usize, Vec<(u64, usize, usize)>>,
 }
 
 fn state() -> &'static Mutex<Option<State>> {
@@ -82,6 +85,13 @@ pub(crate) fn arm(from: usize, to: usize) {
     with(|s| s.arms.entry(s.pass).or_default().push((serial, from, to)));
 }
 
+/// A compound routine that does RC inside itself was taken, emitted into
+/// the open body between byte offsets `from` and `to`.
+pub(crate) fn routine(from: usize, to: usize) {
+    let Some(serial) = crate::witness::anchor::current() else { return };
+    with(|s| s.routines.entry(s.pass).or_default().push((serial, from, to)));
+}
+
 /// `f` was handed out as a release routine.
 pub(crate) fn release_fn(f: u32) {
     with(|s| {
@@ -90,12 +100,18 @@ pub(crate) fn release_fn(f: u32) {
 }
 
 /// One pass's RC record: its frames `(serial, name, events)`, its release
-/// routines and its arm windows `(serial, from, to)`.
-pub type Taken = (Vec<(u64, String, String)>, BTreeSet<u32>, Vec<(u64, usize, usize)>);
+/// routines, its arm windows and its compound-routine windows, each
+/// `(serial, from, to)`.
+pub type Taken = (Vec<(u64, String, String)>, BTreeSet<u32>, Vec<(u64, usize, usize)>, Vec<(u64, usize, usize)>);
 
 /// The shipped pass's RC record.
 pub fn take(pass: usize) -> Taken {
     let Some(mut s) = state().lock().expect("rc sink").take() else { return Default::default() };
     let frames = s.frames.into_iter().filter(|f| f.0 == pass).map(|(_, k, n, e)| (k, n, e)).collect();
-    (frames, s.releases.remove(&pass).unwrap_or_default(), s.arms.remove(&pass).unwrap_or_default())
+    (
+        frames,
+        s.releases.remove(&pass).unwrap_or_default(),
+        s.arms.remove(&pass).unwrap_or_default(),
+        s.routines.remove(&pass).unwrap_or_default(),
+    )
 }

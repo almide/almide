@@ -82,7 +82,7 @@ fn records_inner(
     let init = super::take_init();
     let bounds_anchors = super::bounds::take_anchors();
     let judge_anchors = super::bounds::take_judges();
-    let (rc_frames, rc_releases, rc_arms) = super::rc::take(pass);
+    let (rc_frames, rc_releases, rc_arms, rc_routines) = super::rc::take(pass);
     let init_anchors = super::init::take_anchors();
     let seals = super::anchor::take();
     let decls = super::decls::take_for(emitted).ok_or("no declaration table for the shipped module")?;
@@ -124,7 +124,7 @@ fn records_inner(
         locate.text(&pick(init_anchors))?,
         locate.text(&pick(bounds_anchors))?,
         locate.text(&pick(judge_anchors))?,
-    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms)?
+    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms, &rc_routines)?
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -175,6 +175,7 @@ fn rc_lines(
     frames: &[(u64, String)],
     releases: &std::collections::BTreeSet<u32>,
     arms: &[(u64, usize, usize)],
+    routines: &[(u64, usize, usize)],
 ) -> Result<String, String> {
     if !almide_base::env::flag("ALMIDE_RC_ANCHORS") {
         return Ok(String::new());
@@ -191,11 +192,19 @@ fn rc_lines(
         .iter()
         .filter_map(|(k, ev)| locate.position(*k).map(|j| format!("{j}|{ev}")))
         .collect();
-    let windows: Vec<String> = arms
-        .iter()
-        .filter_map(|&(k, a, b)| locate.window(k, a, b).map(|(j, x, y)| format!("{j}:{x}-{y}")))
-        .collect();
-    Ok(format!("rcfns {inc} {}\nrc {}\nrcarms {}\n", decs.join(" "), rc.join(";"), windows.join(" ")))
+    let windows = |w: &[(u64, usize, usize)]| -> String {
+        w.iter()
+            .filter_map(|&(k, a, b)| locate.window(k, a, b).map(|(j, x, y)| format!("{j}:{x}-{y}")))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    Ok(format!(
+        "rcfns {inc} {}\nrc {}\nrcarms {}\nrcroutines {}\n",
+        decs.join(" "),
+        rc.join(";"),
+        windows(arms),
+        windows(routines)
+    ))
 }
 
 /// Turns the sinks' `serial@offset` anchors into `position:ordinal`.

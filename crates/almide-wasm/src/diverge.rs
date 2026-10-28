@@ -62,7 +62,7 @@ impl Emitter<'_> {
                 }
                 Ok(w)
             }
-            _ => match self.try_concat_dying(e)? {
+            _ => match self.routine(|r: &Option<_>| r.is_some(), |em| em.try_concat_dying(e))? {
                 Some(t) => Ok(t),
                 None => self.lower_node(e, want),
             },

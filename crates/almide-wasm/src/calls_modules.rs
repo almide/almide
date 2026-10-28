@@ -60,6 +60,24 @@ impl Emitter<'_> {
         }))
     }
 
+    /// Run a compound routine's route — the emitter's choice point between
+    /// an in-place or fused routine (append, string building, a map edit)
+    /// and the general lowering (#4277 / #4278). When the route is `taken`,
+    /// its instruction window is recorded: RC the routine does inside itself
+    /// is the routine's own, accounted by the witness at the operation.
+    pub(crate) fn routine<T>(
+        &mut self,
+        taken: impl Fn(&T) -> bool,
+        route: impl FnOnce(&mut Self) -> Result<T, EmitError>,
+    ) -> Result<T, EmitError> {
+        let from = self.f.byte_len();
+        let out = route(self)?;
+        if taken(&out) {
+            crate::witness::rc::routine(from, self.f.byte_len());
+        }
+        Ok(out)
+    }
+
     fn lower_module_call_dispatch(
         &mut self,
         target: &CallTarget,

@@ -414,7 +414,7 @@ fn rc(body: &str, events: &str) -> Result<RcReport, String> {
     let mut r = RcReport::default();
     // `$alloc` (function 0) stands in for the release routine.
     let releases = [0u32].into_iter().collect();
-    check_rc(&bodies, None, &releases, &[], &[(1, events.to_string())], &[], &mut r).map(|()| r)
+    check_rc(&bodies, None, &releases, &[], &[(1, events.to_string())], &[vec![], vec![]], &mut r).map(|()| r)
 }
 
 #[test]
@@ -452,11 +452,11 @@ fn a_rebind_release_matches_a_release_or_the_judge_on_its_local() -> Result<(), 
     let releases = std::collections::HashSet::new();
     let mut r = RcReport::default();
     // The call at 1 is the recorded judge: the rebind's release is inside it.
-    check_rc(&bodies, None, &releases, &[At { func: 1, op: 1 }], &[(1, "o0".into())], &[], &mut r)?;
+    check_rc(&bodies, None, &releases, &[At { func: 1, op: 1 }], &[(1, "o0".into())], &[vec![], vec![]], &mut r)?;
     assert_eq!((r.rebind_unmatched, r.judges_unmatched), (0, 0));
     // No judge and no release: the rebind is counted as one with no instruction.
     let mut r = RcReport::default();
-    check_rc(&bodies, None, &releases, &[], &[(1, "o0".into())], &[], &mut r)?;
+    check_rc(&bodies, None, &releases, &[], &[(1, "o0".into())], &[vec![], vec![]], &mut r)?;
     assert_eq!(r.rebind_unmatched, 1);
     Ok(())
 }
@@ -467,10 +467,10 @@ fn an_rc_call_inside_an_arm_window_is_the_arms_own() -> Result<(), String> {
     let bodies = decode(&bytes)?;
     let releases = [0u32].into_iter().collect();
     let mut r = RcReport::default();
-    check_rc(&bodies, None, &releases, &[], &[(1, String::new())], &[(1, 0, 2)], &mut r)?;
+    check_rc(&bodies, None, &releases, &[], &[(1, String::new())], &[vec![(1, 0, 2)], vec![]], &mut r)?;
     assert_eq!(r.arm_internal, 1);
     // Outside the window it is an unrecorded release.
-    assert!(check_rc(&bodies, None, &releases, &[], &[(1, String::new())], &[(1, 2, 2)], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, None, &releases, &[], &[(1, String::new())], &[vec![(1, 2, 2)], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -480,9 +480,9 @@ fn a_variables_release_inside_its_judge_is_matched() -> Result<(), String> {
     let bodies = decode(&bytes)?;
     let releases = std::collections::HashSet::new();
     let mut r = RcReport::default();
-    check_rc(&bodies, None, &releases, &[At { func: 1, op: 1 }], &[(1, "d0".into())], &[], &mut r)?;
+    check_rc(&bodies, None, &releases, &[At { func: 1, op: 1 }], &[(1, "d0".into())], &[vec![], vec![]], &mut r)?;
     // Without the judge there is no instruction for it.
-    assert!(check_rc(&bodies, None, &releases, &[], &[(1, "d0".into())], &[], &mut RcReport::default()).is_err());
+    assert!(check_rc(&bodies, None, &releases, &[], &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -495,5 +495,23 @@ fn a_write_inside_a_block_left_by_falling_through_still_defines_the_read() -> Re
     assert!(rc("(block local.get 0 i32.eqz br_if 0 local.get 0 local.set 1) local.get 1 call $alloc drop", "d0").is_err());
     // Written in one arm of an `if`: not on every path.
     assert!(rc("local.get 0 (if (then local.get 0 local.set 1)) local.get 1 call $alloc drop", "d0").is_err());
+    Ok(())
+}
+
+#[test]
+fn routine_and_element_rc_are_counted_apart() -> Result<(), String> {
+    let releases: std::collections::HashSet<u32> = [0u32].into_iter().collect();
+    // Inside a taken routine's window.
+    let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let mut r = RcReport::default();
+    check_rc(&bodies, None, &releases, &[], &[(1, String::new())], &[vec![], vec![(1, 0, 2)]], &mut r)?;
+    assert_eq!((r.routine_internal, r.arm_internal, r.element), (1, 0, 0));
+    // A value loaded out of a block's slot: the container's element credit.
+    let bytes = module("(local i32 i32)", "local.get 0 i32.load offset=12 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let mut r = RcReport::default();
+    check_rc(&bodies, None, &releases, &[], &[(1, String::new())], &[vec![], vec![]], &mut r)?;
+    assert_eq!(r.element, 1);
     Ok(())
 }

@@ -27,8 +27,18 @@
 //! accounts as the arm's handed-over credit): counted (`arm_internal`), not
 //! refused — the arm-certificate residue of #4278.
 //!
-//! TRUSTED: that `rcfns` names every rc_inc and release routine, and that an
-//! arm's own RC keeps the balance its ownership declaration states (#4278).
+//! Likewise an RC call left over inside a taken compound routine's window
+//! (`rcroutines`: an in-place append, string building, a map edit — every
+//! route the emitter takes through `Emitter::routine`) is that routine's own,
+//! counted (`routine_internal`); and one whose argument is a value loaded out
+//! of a heap block's slot is the container's element credit, counted
+//! (`element`). Each count is printed per build, apart from the others.
+//!
+//! TRUSTED (#4278, until its arm, routine and container certificates exist):
+//! that `rcfns` names every rc_inc and release routine; that an arm's own RC
+//! keeps the balance its ownership declaration states; that a compound
+//! routine's own RC keeps the balance of the operation the witness records;
+//! and that an element's RC keeps its container's credit invariant.
 
 use std::collections::HashSet;
 
@@ -47,6 +57,8 @@ pub struct RcReport {
     pub rebind_unmatched: usize,
     pub judges_unmatched: usize,
     pub arm_internal: usize,
+    pub routine_internal: usize,
+    pub element: usize,
 }
 
 /// Instructions no path reaches: after `br` / `br_table` / `return` /
@@ -104,7 +116,7 @@ pub fn check_rc(
     releases: &HashSet<u32>,
     judges: &[crate::At],
     frames: &[(usize, String)],
-    arms: &[(usize, usize, usize)],
+    windows: &[Vec<(usize, usize, usize)>; 2],
     rep: &mut RcReport,
 ) -> Result<(), String> {
     for (pos, events) in frames {
@@ -116,6 +128,8 @@ pub fn check_rc(
         // read through). Those on a path that aborts take part in matching;
         // left over, they are counted, not refused (#4278).
         let mut calls: Vec<(usize, char, Vec<u32>)> = Vec::new();
+        // Calls whose argument is a value loaded out of a heap block's slot.
+        let mut elements: HashSet<usize> = HashSet::new();
         let mut aborting: HashSet<usize> = HashSet::new();
         for (k, op) in b.ops.iter().enumerate() {
             let Op::Call { function_index } = op else { continue };
@@ -134,7 +148,11 @@ pub fn check_rc(
             if fl.in_abort_arm(k) || (kind == 'd' && before_abort(b, k)) {
                 aborting.insert(k);
             }
-            let locals = chain(&fl.arg(k, 0, FUEL))
+            let arg = fl.arg(k, 0, FUEL);
+            if crate::operands::is_loaded(&arg) {
+                elements.insert(k);
+            }
+            let locals = chain(&arg)
                 .into_iter()
                 .filter_map(|(s, _)| match s {
                     Src::Local(l) => Some(l),
@@ -185,15 +203,25 @@ pub fn check_rc(
             }
         }
         rep.judges_unmatched += (0..calls.len()).filter(|&i| !used[i] && calls[i].1 == 'j').count();
-        let in_arm = |k: usize| arms.iter().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
+        let inside = |w: &[(usize, usize, usize)], k: usize| w.iter().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
         for i in 0..calls.len() {
-            if !used[i] && calls[i].1 != 'j' && in_arm(calls[i].0) {
-                used[i] = true;
-                rep.arm_internal += 1;
-            } else if !used[i] && calls[i].1 != 'j' && aborting.contains(&calls[i].0) {
-                used[i] = true;
-                rep.pre_abort += 1;
+            if used[i] || calls[i].1 == 'j' {
+                continue;
             }
+            let k = calls[i].0;
+            let slot = if inside(&windows[0], k) {
+                &mut rep.arm_internal
+            } else if inside(&windows[1], k) {
+                &mut rep.routine_internal
+            } else if elements.contains(&k) {
+                &mut rep.element
+            } else if aborting.contains(&k) {
+                &mut rep.pre_abort
+            } else {
+                continue;
+            };
+            *slot += 1;
+            used[i] = true;
         }
         let extra: Vec<String> = (0..calls.len())
             .filter(|&i| !used[i] && calls[i].1 != 'j')

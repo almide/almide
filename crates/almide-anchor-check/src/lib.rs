@@ -668,7 +668,13 @@ pub fn bundle_witness(bundle: &[u8], property: &str) -> Result<String, String> {
 
 /// #4277's lines: the rc_inc routine, the release routines, and per
 /// certified frame its position and live RC events.
-pub type RcLines = (Option<u32>, std::collections::HashSet<u32>, Vec<(usize, String)>, Vec<(usize, usize, usize)>);
+pub type RcLines = (
+    Option<u32>,
+    std::collections::HashSet<u32>,
+    Vec<(usize, String)>,
+    Vec<(usize, usize, usize)>,
+    Vec<(usize, usize, usize)>,
+);
 
 /// The anchor file: `(alloc, init anchors, bounds anchors, judge sites, rc
 /// lines)`. The `judges` line is optional (a file without it locates no
@@ -717,19 +723,21 @@ pub fn parse_anchors(text: &str) -> Result<(u32, String, String, Vec<At>, Option
                     Some((p.parse().ok()?, e.to_string()))
                 })
                 .collect();
-            let arms = rest
-                .get(i + 2)
-                .and_then(|l| l.strip_prefix("rcarms"))
-                .unwrap_or("")
-                .split_whitespace()
-                .filter_map(|t| {
-                    let (p, r) = t.split_once(':')?;
-                    let (a, b) = r.split_once('-')?;
-                    Some((p.parse().ok()?, a.parse().ok()?, b.parse().ok()?))
-                })
-                .collect();
+            let windows = |line: Option<&&str>, key: &str| -> Vec<(usize, usize, usize)> {
+                line.and_then(|l| l.strip_prefix(key))
+                    .unwrap_or("")
+                    .split_whitespace()
+                    .filter_map(|t| {
+                        let (p, r) = t.split_once(':')?;
+                        let (a, b) = r.split_once('-')?;
+                        Some((p.parse().ok()?, a.parse().ok()?, b.parse().ok()?))
+                    })
+                    .collect()
+            };
+            let arms = windows(rest.get(i + 2), "rcarms");
+            let routines = windows(rest.get(i + 3), "rcroutines");
             rest.truncate(i);
-            Some((inc, decs, frames, arms))
+            Some((inc, decs, frames, arms, routines))
         }
     };
     let mut lines = rest.into_iter();
@@ -768,9 +776,9 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
         &mut rep,
     )?;
     check_bounds(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &mut rep)?;
-    if let Some((inc, decs, frames, arms)) = rc_lines {
+    if let Some((inc, decs, frames, arms, routines)) = rc_lines {
         let mut r = RcReport::default();
-        check_rc(&bodies, inc, &decs, &judges, &frames, &arms, &mut r)?;
+        check_rc(&bodies, inc, &decs, &judges, &frames, &[arms, routines], &mut r)?;
         rep.rc = Some(r);
     }
     Ok(rep)
