@@ -83,7 +83,7 @@ pub(crate) struct EqPairSite {
     pub span: Option<Span>,
 }
 
-const OPAQUE: LitShape = LitShape::Opaque;
+static OPAQUE: LitShape = LitShape::Opaque;
 
 fn is_numeric(t: &Ty) -> bool {
     matches!(
@@ -126,7 +126,7 @@ fn field<'a>(s: &'a LitShape, name: Sym) -> &'a LitShape {
 }
 
 /// The payload shape of argument `i` of an Option / Result literal.
-fn payload(s: &LitShape, id: &TypeConstructorId, i: usize) -> &LitShape {
+fn payload<'a>(s: &'a LitShape, id: &TypeConstructorId, i: usize) -> &'a LitShape {
     match (s, id, i) {
         (LitShape::Some(p), TypeConstructorId::Option, 0)
         | (LitShape::Ok(p), TypeConstructorId::Result, 0)

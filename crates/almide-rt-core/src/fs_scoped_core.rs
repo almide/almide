@@ -372,8 +372,9 @@ impl FsScoped {
             // other entry is the plain call's EEXIST; missing, it is created
             // by its path, which is how a root is anchored.
             return match self.held(i) {
-                Ok(fd) if std::fs::File::from(fd).metadata()?.is_dir() => Ok(()),
-                Ok(_) => Err(std::io::Error::from_raw_os_error(17)),
+                Ok(fd) => {
+                    if std::fs::File::from(fd).metadata()?.is_dir() { Ok(()) } else { Err(std::io::Error::from_raw_os_error(17)) }
+                }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir_all(&self.root_path(i)),
                 Err(e) => Err(e),
             };
