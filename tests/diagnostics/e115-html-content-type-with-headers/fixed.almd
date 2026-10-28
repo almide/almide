@@ -1,8 +1,0 @@
-// The page is SafeHtml: the name goes in through html.escape, and http.html
-// is the one writer of a text/html response.
-import html
-import http
-
-fn page(name: String) -> HttpResponse = http.html(200, html.concat(html.raw("<h1>"), html.concat(html.escape(name), html.raw("</h1>"))))
-
-fn main() -> Unit = println(http.body(page("guest")))

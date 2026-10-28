@@ -1,6 +1,6 @@
 # ADR-0032: A response's Content-Type is its body's type — `Body` gives each body type its media type, header writes cannot name Content-Type, and a script-capable type is built only by its safe module
 
-- **Status**: Proposed (2026-10-29). The owner ruled ○ on the direction; each [open sub-decision](#owner-decisions-) is one ○× question.
+- **Status**: Accepted (2026-10-29). The owner ruled ○ on the direction and on Q2, × on Q7; the rest were decided as recommended (○), including Q14–Q16 below. See [Owner decisions](#owner-decisions-).
 - **Date**: 2026-10-29
 - **Scope**: the `http` response surface (`response`, `html`, `json`, `with_headers`, `set_header`, `set_body`, `set_body_bytes`, `serve`), the `html` module's `SafeHtml`, a new `svg` module, the media type of a body, security-table row 11e, contract C-275.
 - **Related**:
@@ -51,15 +51,16 @@ The rule reads the protocol's declaration, never a list in http. The framing fie
 
 ### D4 — every other media type has a typed way in, and a script-capable one has none
 
-`http.typed(media_type: String, body: Bytes) -> Result[Typed, String]` builds a body of any well-formed media type. It answers `err` when another `Body` type **owns** that type.
+`http.typed(media_type: String, body: Bytes) -> TypedBody` builds a body of any well-formed media type, written as a literal (Q14): the checker reads it, so nothing about media types exists at run time. A type another `Body` type **owns** is refused.
 
 Ownership is declared on the safe types themselves:
 
-- `@media_owns("text/html", "application/xhtml+xml")` on `SafeHtml`;
-- `@media_owns("image/svg+xml")` on `SafeSvg`;
-- `@media_owns("*/xml", "*/*+xml")` on whatever holds active XML (Q7).
+- `@media_owns("text/html", "*/xml", "*/*+xml")` on `SafeHtml`'s media fn: any XML document can carry the XHTML namespace, so html owns the markup family, and XML stays unbuildable until an `xml` module (Q7 ×, #4310);
+- `@media_owns("image/svg+xml")` on `SafeSvg`'s media fn.
 
-Patterns follow RFC 6839: `*` is any type, and `*<suffix>` matches a longer subtype ending in `<suffix>`. The refused set is therefore the union of the declarations. Adding `SafeSvg` removes SVG from `typed` without touching http. A literal media type that `typed` would refuse is E117 at check time.
+The attribute sits on the type's `Body` requirement fn (`__safe_html_media_type`), the declaration that states the type's media type.
+
+Patterns follow RFC 6839: `*` is any type, and `*<suffix>` matches a longer subtype ending in `<suffix>`. The refused set is therefore the union of the declarations. Adding `SafeSvg` removes SVG from `typed` without touching http. A computed, malformed or owned media type is E117 at check time, and so is naming `http.typed` as a value. `Body` is sealed (Q15): a user type declaring it is E118.
 
 ### D5 — the safe modules
 
@@ -104,6 +105,9 @@ What it closes and none of them do: the header relabel.
 
 ## Owner decisions (○×)
 
+Answers (2026-10-29): Q1 ○, Q2 ○ (owner), Q3 ○, Q4 ○, Q5 ○ as amended by Q14, Q6 ○, Q7 × (owner; #4310), Q8 ○, Q9 ○, Q10 ○, Q11 ○ (`set_body` keeps its String signature and replaces the type; `http.with_body[B: Body]` takes any body), Q12 ○ (rc1 not tagged; re-checked at landing), Q13 ○, Q14 ○, Q15 ○, Q16 ○ (#4311).
+
+
 - **Q1.** The protocol is named `Body`, with requirements `T.media_type()` and `to_bytes`. Recommendation: ○.
 - **Q2.** One constructor, `http.response[B: Body]`. `http.html` is removed (its `SafeHtml` goes through `response`), and `with_headers` takes a `Body` instead of a `String`. Recommendation: ○.
 - **Q3.** JSON is typed: `json.Value` conforms to `Body` as `application/json`. `http.json(status, String)` stays as the textual form, because JSON served as JSON with nosniff runs no script. Recommendation: ○.
@@ -116,6 +120,9 @@ What it closes and none of them do: the header relabel.
 - **Q10.** A `Bytes` body is `application/octet-stream`. Recommendation: ○.
 - **Q11.** `set_body[B: Body]` replaces the body and the Content-Type together, so writing a String into an HTML response makes it `text/plain` instead of aborting. A fetched response keeps its upstream type until `set_body`. Recommendation: ○.
 - **Q12.** The break lands in dialect epoch 15 (0.69.0, still unreleased) rather than a new epoch 16. Recommendation: ○ if v0.69.0-rc1 is not yet tagged when it lands; otherwise epoch 16.
+- **Q14.** `http.typed` takes its media type only as a literal; any other argument is E117, so no media list exists at run time. Recommendation: ○.
+- **Q15.** `Body` is sealed: only stdlib declarations conform; a user `type T: Body` is E118. Recommendation: ○.
+- **Q16.** A Bytes body passes through today's String-bodied response rep, so non-UTF-8 bytes are decoded lossily; documented and filed as #4311. Recommendation: ○.
 - **Q13.** A response always carries a Content-Type: one built without a body is `String ""`, `text/plain; charset=utf-8`. Today `with_headers(st, s, [])` sends none. Recommendation: ○.
 
 ## Implementation plan (after the decisions)
