@@ -22,8 +22,11 @@ const RECV_DEADLINE: Duration = Duration::from_secs(60);
 /// an INVALID URI the server's params deserialization rejected, which is how
 /// the didChange test's hover went unanswered and hung the suite for 6h per
 /// run (#1008).
+/// A canonicalized Windows path carries the `\\?\` verbatim prefix, which is
+/// not part of the URI the server reports, so it is dropped here too.
 fn file_uri(path: &Path) -> String {
-    let s = path.display().to_string().replace('\\', "/");
+    let raw = path.display().to_string();
+    let s = raw.strip_prefix(r"\\?\").unwrap_or(&raw).replace('\\', "/");
     if s.starts_with('/') { format!("file://{s}") } else { format!("file:///{s}") }
 }
 

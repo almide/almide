@@ -146,3 +146,14 @@ incremental = true
 inherits = "dev"
 debug = 0
 strip = "debuginfo"
+
+# The native build cache hashes every cached binary with SHA-256 on each hit
+# and after each build (#4180), the second inside the shared build-dir lock.
+# Unoptimized, `sha2` hashed at ~25 MB/s: a fifth of a debug `almide build`,
+# serialized across every test that builds natively. Optimizing this one leaf
+# crate changes no semantics (debug_assertions and overflow checks stay on for
+# the compiler's own crates).
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.ci-test.package.sha2]
+opt-level = 3
