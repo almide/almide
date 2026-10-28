@@ -569,9 +569,17 @@ jobs:
         # SHAPE_MATRIX_SLICE (#3309): tests/shape_matrix_test.rs runs a fixed
         # quarter of the shape matrix per PR (the cells whose name hashes to 0
         # mod 4); .github/workflows/shape-matrix-nightly.yml runs all of it.
+        # ALMIDE_CERTIFY_OWNERSHIP=fail (#4292): ALMIDE_BIN is the RELEASE
+        # compiler, where the ownership certifier (#2231) is off by default, so
+        # the programs these tests compile and run were never certified — a
+        # debug build refused `box_binder_borrow_no_clone`'s `moved_after` (C4)
+        # while this leg passed it. Armed here, every program a test hands the
+        # compiler is certified as a debug build would; a test that sets the
+        # switch itself (the certifier's own controls) still wins.
         env:
           ALMIDE_BIN: /tmp/almide-bin/almide
           ALMIDE_EXPECT_TOOLS: "1"
+          ALMIDE_CERTIFY_OWNERSHIP: fail
           SHAPE_MATRIX_SLICE: "0/4"
         # The script enumerates every workspace test target from cargo's own
         # JSON (root package AND member crates — a bare `cargo test` at the root
@@ -793,6 +801,11 @@ jobs:
         run: ORACLE=/tmp/almide-bin/almide bash scripts/check-parity-goldens.sh
 
       - name: Almide spec tests (Rust target)
+        # The certifier armed (#4292): the corpus gate certifies spec/lang and
+        # spec/wasm_cross only; this run reaches spec/stdlib and
+        # spec/integration natively, with the release compiler.
+        env:
+          ALMIDE_CERTIFY_OWNERSHIP: fail
         run: |
           ALMIDE=/tmp/almide-bin/almide
           $ALMIDE test spec/ --target rust
