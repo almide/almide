@@ -153,7 +153,7 @@ fn spread_entry_callbacks(module: &str, func: &str, mut args: Vec<Ty>) -> Vec<Ty
             .iter()
             .zip(&mask)
             .flat_map(|(p, &spread)| match p {
-                Ty::Tuple(es) if spread => es.clone(),
+                Ty::Tuple(es) if spread => es.to_vec(),
                 other => vec![other.clone()],
             })
             .collect();
