@@ -108,9 +108,15 @@ pub type Taken = (Vec<(u64, String, String)>, BTreeSet<u32>, Vec<(u64, usize, us
 pub fn take(pass: usize) -> Taken {
     let Some(mut s) = state().lock().expect("rc sink").take() else { return Default::default() };
     let frames = s.frames.into_iter().filter(|f| f.0 == pass).map(|(_, k, n, e)| (k, n, e)).collect();
+    // `$dec_flat` is the runtime's own release, in every module whether or
+    // not a frame's `dec_fn_of` handed it out: the runtime routines that
+    // take a block (`$list_push`, `$bytes_push`, `$str_append`) release
+    // through it, and the checker's every-path rule must see that.
+    let mut releases = s.releases.remove(&pass).unwrap_or_default();
+    releases.insert(crate::F_DEC_FLAT);
     (
         frames,
-        s.releases.remove(&pass).unwrap_or_default(),
+        releases,
         s.arms.remove(&pass).unwrap_or_default(),
         s.routines.remove(&pass).unwrap_or_default(),
     )

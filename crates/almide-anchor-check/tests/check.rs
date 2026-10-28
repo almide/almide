@@ -555,7 +555,13 @@ fn consuming(main: &str, events: &str) -> Result<RcReport, String> {
              (func $rel (param i32))
              (func $all (param i32) local.get 0 call $rel)
              (func $some (param i32) local.get 0 (if (then local.get 0 call $rel)))
-             (func $main (local i32) {main}))"#
+             (func $main (local i32) {main})
+             (func $push_fixed (param i32) (result i32)
+               local.get 0 i32.load (if (then local.get 0 return))
+               local.get 0 call $rel i32.const 0)
+             (func $push_old (param i32) (result i32)
+               local.get 0 i32.load (if (then local.get 0 return))
+               local.get 0 i32.load (if (then local.get 0 call $rel)) i32.const 0))"#
     ))
     .expect("wat");
     let bodies = decode(&bytes)?;
@@ -570,5 +576,17 @@ fn a_consumed_release_needs_a_callee_that_takes_the_parameter_on_every_path() ->
     let r = consuming("local.get 0 call $all", "d0")?;
     assert_eq!(r.consumed, 1);
     assert!(consuming("local.get 0 call $some", "d0").unwrap_err().contains("some paths only"));
+    Ok(())
+}
+
+/// The `$bytes_push` / `$list_push` shape: the fast path hands the block back,
+/// the grow path must release it. Released only under a uniqueness judge (the
+/// pre-fix runtime), the shared grow path kept the caller's share, and the
+/// every-path rule refuses it.
+#[test]
+fn a_push_routine_takes_its_block_on_every_path_only_when_the_grow_path_releases_it() -> Result<(), String> {
+    let r = consuming("local.get 0 call $push_fixed drop", "d0")?;
+    assert_eq!(r.consumed, 1);
+    assert!(consuming("local.get 0 call $push_old drop", "d0").unwrap_err().contains("some paths only"));
     Ok(())
 }

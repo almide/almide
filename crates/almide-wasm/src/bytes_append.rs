@@ -9,7 +9,7 @@
 //! Every member now IS that push: the value's k bytes go through `$bytes_push`
 //! one at a time, so the whole family shares its one growth rule (in place
 //! while `cap - len >= 1`, else a fresh block at `max(cap * 2, 16)`, the
-//! outgrown block freed at rc 1), its receiver protocol (the COW read, which
+//! outgrown block released), its receiver protocol (the COW read, which
 //! makes a parameter receiver unique too, #3342) and its write-back. No second growth policy
 //! exists to drift from list.push's.
 //!
