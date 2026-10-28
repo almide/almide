@@ -56,7 +56,15 @@ impl LowerCtx {
             let is_closure_arg = matches!(
                 &a.kind,
                 IrExprKind::Lambda { .. } | IrExprKind::FnRef { .. } | IrExprKind::ClosureCreate { .. }
-            ) || matches!(&a.kind, IrExprKind::Var { id } if self.lambda_bindings.contains_key(id));
+            ) || matches!(&a.kind, IrExprKind::Var { id } if self.lambda_bindings.contains_key(id))
+                // A Fn-typed var bound to a tracked closure BLOCK (`let triple =
+                // make_multiplier(3)`) is passed as the combinator's closure, as
+                // the value position already passes it (`lower_pure_module_value_call`
+                // has no data-arg guard) — the in-test assert binds `list.map(xs,
+                // triple)` before comparing it (#4262).
+                || (matches!(a.ty, Ty::Fn { .. })
+                    && matches!(&a.kind, IrExprKind::Var { id }
+                        if self.value_of.get(id).is_some_and(|v| self.closure_values.contains(v))));
             // `List[<Fn>]` (B36) and `Map[String, <Fn>]` (the mclo family — the
             // hval handle-level twins + `$__drop_map_mclo`) are representable
             // closure CONTAINERS — excluded from the wall.
