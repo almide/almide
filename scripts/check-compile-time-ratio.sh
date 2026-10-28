@@ -96,14 +96,29 @@ read -r check_ratio wasm_ratio < <(python3 -c "print('%.3f %.3f' % ($sum_total /
 echo "compile-time ratio over ${#CORPUS[@]} files (min of $RUNS): lex+parse $((sum_front / 1000000))ms, check total $((sum_total / 1000000))ms, wasm build $((sum_wasm / 1000000))ms"
 echo "  check = $check_ratio   wasm = $wasm_ratio"
 
+# The band, one place: ok | high | low for a reading against its anchor.
+verdict_of() {
+  python3 -c "
+a, g, b = $1, $2, $BUDGET_PCT
+print('high' if g > a * (1 + b / 100) else 'low' if g < a * 0.5 else 'ok')"
+}
+
 status=0
 for row in check wasm; do
   anchor=$(awk -v r="$row" '$1 == r { print $2 }' "$BASELINE_FILE")
   [ -n "$anchor" ] || { echo "FAIL: no '$row' anchor in $BASELINE_FILE"; exit 1; }
+  # Negative control, run on every invocation: the band must call the
+  # release-fix tree's reading (#4289: check 6.65, wasm 27.3 against anchors
+  # near 4.6 / 20.6) high, and a reading at 40% of the anchor low. A band that
+  # stops biting fails here instead of reading green forever.
+  forged_high=$([ "$row" = check ] && echo 6.65 || echo 27.3)
+  forged_low=$(python3 -c "print($anchor * 0.4)")
+  [ "$(verdict_of "$anchor" "$forged_high")" = high ] \
+    || { echo "FAIL: negative control — the $row band reads release-fix's $forged_high as not high against $anchor"; exit 1; }
+  [ "$(verdict_of "$anchor" "$forged_low")" = low ] \
+    || { echo "FAIL: negative control — the $row band reads $forged_low as not low against $anchor"; exit 1; }
   got=$([ "$row" = check ] && echo "$check_ratio" || echo "$wasm_ratio")
-  verdict=$(python3 -c "
-a, g, b = $anchor, $got, $BUDGET_PCT
-print('high' if g > a * (1 + b / 100) else 'low' if g < a * 0.5 else 'ok')")
+  verdict=$(verdict_of "$anchor" "$got")
   case $verdict in
     ok) echo "  ok   $row $got (anchor $anchor, ceiling +$BUDGET_PCT%)";;
     high) echo "  FAIL $row $got is more than $BUDGET_PCT% above its anchor $anchor: compiling a small program got slower relative to reading it (#4289)"; status=1;;
