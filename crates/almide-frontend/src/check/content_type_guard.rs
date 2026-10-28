@@ -52,8 +52,9 @@ fn content_type_guard_of(module: &str, func: &str) -> Option<ContentTypeGuard> {
 
 /// Does a `Content-Type` value name one of `media`? Read as the run-time
 /// refusal reads it: each comma-separated entry up to its `;`, trimmed, in any
-/// case. (The run time trims and folds Unicode; on the ASCII spellings this
-/// matches, they agree, so a literal refused here is refused there too.)
+/// case, ASCII-folded as the run time folds it. (The run time trims every
+/// Unicode blank, a superset of the ASCII ones trimmed here, so a literal
+/// refused here is refused there too.)
 fn names_media(value: &str, media: &[String]) -> bool {
     value.split(',').any(|entry| {
         let t = entry.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
