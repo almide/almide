@@ -321,7 +321,7 @@ fn the_stock_serve_export_answers_what_native_answers_under_wasmtime_serve() {
     for (leg, raw) in [("native", &answers[FRAMED_AT].0), ("export", &answers[FRAMED_AT].1)] {
         let o = observe(raw).unwrap_or_else(|e| panic!("{leg}: {e}"));
         assert_eq!((o.status, o.body.as_slice()), (200, b"hello".as_slice()), "{leg}\n{log}");
-        assert_eq!(o.headers.keys().collect::<Vec<_>>(), ["x-content-type-options", "x-kept"], "{leg}: {:?}", String::from_utf8_lossy(raw));
+        assert_eq!(o.headers.keys().collect::<Vec<_>>(), ["content-type", "x-content-type-options", "x-kept"], "{leg}: {:?}", String::from_utf8_lossy(raw));
     }
     let refused = |raw: &[u8], status: u16, reason: &str| {
         let o = observe(raw).unwrap_or_else(|e| panic!("{e}: {:?}\n{log}", String::from_utf8_lossy(raw)));
