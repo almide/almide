@@ -507,12 +507,18 @@ fn routine_and_element_rc_are_counted_apart() -> Result<(), String> {
     let mut r = RcReport::default();
     check_rc(&bodies, 0, None, &releases, &[], &[(1, String::new())], &[vec![], vec![(1, 0, 2)]], &mut r)?;
     assert_eq!((r.routine_internal, r.arm_internal, r.element), (1, 0, 0));
-    // A value loaded out of a block's slot: the container's element credit.
-    let bytes = module("(local i32 i32)", "local.get 0 i32.load offset=12 call $alloc drop");
+    // A value loaded out of a block's slot and released, then the slot
+    // rewritten: the container's element credit (the replaced element).
+    let bytes = module("(local i32 i32)", "local.get 0 i32.load offset=12 call $alloc drop local.get 0 local.get 1 i32.store offset=12");
     let bodies = decode(&bytes)?;
     let mut r = RcReport::default();
     check_rc(&bodies, 0, None, &releases, &[], &[(1, String::new())], &[vec![], vec![]], &mut r)?;
     assert_eq!(r.element, 1);
+    // Released with no store to that slot after it, the slot still holds
+    // the released block: refused.
+    let bytes = module("(local i32 i32)", "local.get 0 i32.load offset=12 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    assert!(check_rc(&bodies, 0, None, &releases, &[], &[(1, String::new())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())
 }
 
@@ -537,13 +543,16 @@ fn an_event_on_a_cell_holder_matches_the_release_of_its_occupant() -> Result<(),
 
 #[test]
 fn a_release_an_arm_consumes_is_matched_inside_its_window() -> Result<(), String> {
+    // `$all` hands local 0 to the release routine on its one path: the arm
+    // consuming local 0.
+    let r = consuming("local.get 0 call $all", "d0")?;
+    assert_eq!(r.consumed, 1);
+    // A callee whose body never takes the parameter consumes nothing, even
+    // inside the window: `$alloc` reads its argument and returns a constant.
     let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop");
     let bodies = decode(&bytes)?;
-    // `$alloc` here is no release routine: it is the arm consuming local 0.
     let none = std::collections::HashSet::new();
-    let mut r = RcReport::default();
-    check_rc(&bodies, 0, None, &none, &[], &[(1, "d0".into())], &[vec![(1, 0, 2)], vec![]], &mut r)?;
-    assert_eq!(r.consumed, 1);
+    assert!(check_rc(&bodies, 0, None, &none, &[], &[(1, "d0".into())], &[vec![(1, 0, 2)], vec![]], &mut RcReport::default()).is_err());
     // Outside any window it is a release with no instruction.
     assert!(check_rc(&bodies, 0, None, &none, &[], &[(1, "d0".into())], &[vec![], vec![]], &mut RcReport::default()).is_err());
     Ok(())

@@ -1,15 +1,19 @@
 diff --git a/crates/almide-wasm/src/stmts_index.rs b/crates/almide-wasm/src/stmts_index.rs
-index 669d8c105..2b08aa445 100644
+index 669d8c105..7399af69a 100644
 --- a/crates/almide-wasm/src/stmts_index.rs
 +++ b/crates/almide-wasm/src/stmts_index.rs
-@@ -189,7 +189,9 @@ impl Emitter<'_> {
+@@ -189,9 +189,11 @@ impl Emitter<'_> {
                  // (payload_ptr.rs) — the read path's shape.
                  let list = (is_local && !in_cell).then_some(*target);
                  if let Some(dec) = self.elem_is_handle(el).then(|| self.dec_fn_of(el)) {
 -                    let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
+-                    self.f.instructions().i32_load(wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 }).call(dec);
+-                    crate::witness::bounds::access(site, false, self.f);
 +                    // RE-INJECTED (#4277 drill): the replaced element is read
-+                    // out of the new value's block, not the list's slot.
-+                    let off = self.emit_elem_addr(None, hv, hi, index, stride)?;
-                     self.f.instructions().i32_load(wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 }).call(dec);
-                     crate::witness::bounds::access(site, false, self.f);
++                    // out of the new value's block, not the list's slot (an
++                    // unchecked read, so no bounds access is recorded for it).
++                    let off = u64::from(almide_layout::PAYLOAD);
++                    self.f.instructions().local_get(hv).i32_load(wasm_encoder::MemArg { offset: off, align: 2, memory_index: 0 }).call(dec);
                  }
+                 let off = self.emit_elem_addr(list, hb, hi, index, stride)?;
+                 self.f.instructions().local_get(hv);

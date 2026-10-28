@@ -343,8 +343,8 @@ pub fn check_rc(
             }
             match verdict {
                 (_, true) => rep.consumed += 1,
-                // DRAFT (pending the owner's ruling): a callee that takes the
-                // parameter on some paths but not all is refused.
+                // The every-path rule (adopted 2026-10-28): a callee that
+                // takes the parameter on some paths but not all is refused.
                 (true, false) => unmatched.push(format!("{kind}{l} (its consuming callee takes it on some paths only)")),
                 _ => unmatched.push(format!("{kind}{l}")),
             }
