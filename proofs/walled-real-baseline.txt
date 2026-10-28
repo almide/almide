@@ -323,5 +323,6 @@ spec/stdlib/bigint_test.almd :: b  # #4189
 spec/stdlib/http_router_test.almd :: __test_almd_0017_a path the guard reads differently from the router is a 400 (C-406)  # #4189
 spec/stdlib/http_router_test.almd :: __test_almd_0018_a parameter that decodes to a traversal, a slash or NUL is a 400 (C-406)  # #4189
 spec/stdlib/int_radix_floor_test.almd :: ok_int  # #4189
-# #4230 / C-432: v1 refuses a user variant carrying a runtime-backed payload by design; the structural leg renders it.
-spec/wasm_cross/runtime_backed_variant_repr.almd :: main  # #4230
+# C-432: v1 refuses a user variant carrying a runtime-backed payload; the structural leg renders it.
+# Found under #4230 (closed by the integration merge); #4189 owns the MIR rung walls that batch added.
+spec/wasm_cross/runtime_backed_variant_repr.almd :: main  # #4189

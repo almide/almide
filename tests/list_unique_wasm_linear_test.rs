@@ -44,31 +44,54 @@ fn list_unique_is_linear_on_wasm_and_keeps_its_answers() {
     let native = Command::new(env!("CARGO_BIN_EXE_almide")).arg("run").arg(&file).output().expect("native run");
     assert!(native.status.success(), "{}", String::from_utf8_lossy(&native.stderr));
     assert_eq!(String::from_utf8_lossy(&native.stdout), EXPECTED, "native");
-    // Build first so only the wasm run is timed. Quadratic took ~15 s here.
-    let wasm = dir.path().join("unique.wasm");
-    let build = Command::new(env!("CARGO_BIN_EXE_almide"))
-        .args(["build"])
-        .arg(&file)
-        .args(["--target", "wasm", "-o"])
-        .arg(&wasm)
-        .output()
-        .expect("wasm build");
-    assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
-    let t = Instant::now();
-    let run = Command::new(env!("CARGO_BIN_EXE_almide"))
-        .arg("run")
-        .arg(&file)
-        .args(["--target", "wasm"])
-        .env("ALMIDE_WASM_ALLOC_COUNT", "1")
-        .output()
-        .expect("wasm run");
-    let took = t.elapsed();
-    assert!(run.status.success(), "{}", String::from_utf8_lossy(&run.stderr));
+    // The bound is RELATIVE, the way set_map_wasm_linear_test does it: the
+    // same program at a quarter of the sizes, timed interleaved on the same
+    // runner. Linear work grows ~4x, quadratic ~16x. An absolute bound (5 s)
+    // measured compile time as much as the run — the timed run armed
+    // ALMIDE_WASM_ALLOC_COUNT, which the build above had not, so it rebuilt —
+    // and missed at 6.4 s on a loaded runner with list.unique still linear
+    // (#4289). Each side is warmed first so only the run is timed.
+    let run_wasm = |f: &std::path::Path, alloc_count: bool| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_almide"));
+        cmd.arg("run").arg(f).args(["--target", "wasm"]);
+        if alloc_count {
+            cmd.env("ALMIDE_WASM_ALLOC_COUNT", "1");
+        }
+        let out = cmd.output().expect("wasm run");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        out
+    };
+    let run = run_wasm(&file, true);
     assert_eq!(String::from_utf8_lossy(&run.stdout), EXPECTED, "wasm");
     let counts = String::from_utf8_lossy(&run.stderr);
     assert!(counts.contains("live=0"), "wasm must free everything: {counts}");
+    let quarter = dir.path().join("unique_quarter.almd");
+    std::fs::write(&quarter, quarter_source()).expect("quarter source");
+    run_wasm(&file, false);
+    run_wasm(&quarter, false);
+    let time = |f: &std::path::Path| {
+        let t = Instant::now();
+        run_wasm(f, false);
+        t.elapsed()
+    };
+    let (mut full, mut small) = (Duration::MAX, Duration::MAX);
+    for _ in 0..3 {
+        small = small.min(time(&quarter));
+        full = full.min(time(&file));
+    }
     assert!(
-        took < Duration::from_secs(5),
-        "wasm list.unique / unique_by took {took:?} for 300,000 elements — quadratic again?"
+        full < small * 8,
+        "wasm list.unique / unique_by at 300,000 elements took {full:?} against {small:?} at a quarter of the size — quadratic again?"
     );
+}
+
+/// SOURCE with every large size divided by four (the small literal lists
+/// that check the answers stay as they are).
+fn quarter_source() -> String {
+    SOURCE
+        .replace("300000", "75000")
+        .replace("200000", "50000")
+        .replace("150000", "37500")
+        .replace("100000", "25000")
+        .replace("70000", "17500")
 }
