@@ -9,10 +9,10 @@ type User: Codec = { name: String, email: String, is_admin: Bool = false }
 type UserInput: Decode = { name: String, email: String }
 
 effect fn create(req: HttpRequest) -> HttpResponse = {
-  let i = UserInput.decode_strict(json.parse(http.req_body(req))!)!
+  let i = UserInput.decode_strict(json.parse(http.body(req))!)!
   let base = User.decode(json.parse("{\"name\":\"-\",\"email\":\"-\"}")!)!
   let u = User { name: i.name, email: i.email, is_admin: base.is_admin }
   http.response(201, "${u.name} is_admin=${u.is_admin}")
 }
 
-effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{\"name\":\"m\",\"email\":\"e\"}", [:]))!))
+effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{\"name\":\"m\",\"email\":\"e\"}", []))!))

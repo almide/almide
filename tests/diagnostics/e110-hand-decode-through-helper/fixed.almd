@@ -12,9 +12,9 @@ effect fn parse_user(text: String) -> User = {
 }
 
 effect fn create(req: HttpRequest) -> HttpResponse = {
-  let body = http.req_body(req)
+  let body = http.body(req)
   let u = parse_user(body)!
   http.response(201, "${u.name} is_admin=${u.is_admin}")
 }
 
-effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{\"name\":\"m\",\"email\":\"e\"}", [:]))!))
+effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{\"name\":\"m\",\"email\":\"e\"}", []))!))

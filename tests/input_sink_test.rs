@@ -15,7 +15,7 @@
 //! stands between the request body and the field, not a constant.
 //!
 //! The flow half (#4232): a handler that skips the sink and parses the body
-//! itself, `User.decode(json.parse(http.req_body(req))!)`, is E110 too — the
+//! itself, `User.decode(json.parse(http.body(req))!)`, is E110 too — the
 //! request data is followed to the decode (`almide_frontend::request_flow`).
 //! Its control (`ALMIDE_CONTROL_ADMIT_HAND_DECODE=1`) must flip that program
 //! to a run that prints `201 m is_admin=true`.
@@ -97,13 +97,13 @@ import json
 type User: Codec = { name: String, email: String, is_admin: Bool = false }
 
 effect fn create(req: HttpRequest) -> HttpResponse = {
-  let u = User.decode(json.parse(http.req_body(req))!)!
+  let u = User.decode(json.parse(http.body(req))!)!
   http.response(201, "${u.name} is_admin=${u.is_admin}")
 }
 
 effect fn main() -> Unit = {
-  let res = create(http.new_request("POST", "/users", "{\"name\":\"m\",\"email\":\"e\",\"is_admin\":true}", [:]))!
-  println("${http.status_code(res)} ${http.body(res)}")
+  let res = create(http.new_request("POST", "/users", "{\"name\":\"m\",\"email\":\"e\",\"is_admin\":true}", []))!
+  println("${http.status(res)} ${http.body(res)}")
 }
 "#;
 
@@ -117,7 +117,7 @@ type User: Codec = { name: String, email: String, is_admin: Bool = false }
 fn texts(t: String) -> List[String] = [t]
 
 effect fn create(req: HttpRequest) -> HttpResponse = {
-  let raw = http.req_body(req)
+  let raw = http.body(req)
   let users = texts(raw) |> list.map((t) => match json.parse(t) {
     ok(v) => User.decode(v),
     err(e) => err(e),
@@ -126,8 +126,8 @@ effect fn create(req: HttpRequest) -> HttpResponse = {
 }
 
 effect fn main() -> Unit = {
-  let res = create(http.new_request("POST", "/users", "{}", [:]))!
-  println("${http.status_code(res)} ${http.body(res)}")
+  let res = create(http.new_request("POST", "/users", "{}", []))!
+  println("${http.status(res)} ${http.body(res)}")
 }
 "#;
 

@@ -4,7 +4,7 @@
 //! Phase 1 judges the stdlib's own request-decode path: `http.decode_json[T]`
 //! is an `@input_sink`, and its `T` must be an input type (a `: Decode` type
 //! that is not also `Encode`). A handler that parses the body itself,
-//! `User.decode(json.parse(http.req_body(req))!)`, never calls the sink, so
+//! `User.decode(json.parse(http.body(req))!)`, never calls the sink, so
 //! the checker never saw it. This pass follows request data the way E109
 //! follows an effect: through bindings, patterns, containers, closures and
 //! user helpers, to the place it is decoded.
@@ -13,7 +13,7 @@
 //!   declared parameter type of an `@input_sink` fn (`http.decode_json(req:
 //!   HttpRequest)` makes `HttpRequest` one). Read off the declarations of
 //!   the modules the program reaches, never a list of names. Everything a
-//!   call computes from such a value (`http.req_body(req)`, `json.parse(..)`,
+//!   call computes from such a value (`http.body(req)`, `json.parse(..)`,
 //!   `value.*`) carries the taint; a user helper carries it exactly where its
 //!   body does (a per-parameter summary, solved to a fixpoint).
 //! - **Sink.** A call of a `Decode` requirement (`T.decode`,

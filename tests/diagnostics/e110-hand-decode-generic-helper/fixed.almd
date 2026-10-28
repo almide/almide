@@ -15,4 +15,4 @@ effect fn create(req: HttpRequest) -> HttpResponse = {
   }
 }
 
-effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{\"name\":\"m\",\"email\":\"e\"}", [:]))!))
+effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{\"name\":\"m\",\"email\":\"e\"}", []))!))

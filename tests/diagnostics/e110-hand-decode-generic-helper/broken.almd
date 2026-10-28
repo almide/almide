@@ -6,11 +6,11 @@ import json
 
 type User: Codec = { name: String, email: String, is_admin: Bool = false }
 
-effect fn body_as[T: Decode](req: HttpRequest) -> T = T.decode(json.parse(http.req_body(req))!)!
+effect fn body_as[T: Decode](req: HttpRequest) -> T = T.decode(json.parse(http.body(req))!)!
 
 effect fn create(req: HttpRequest) -> HttpResponse = {
   let u: User = body_as(req)!
   http.response(201, "${u.name} is_admin=${u.is_admin}")
 }
 
-effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{}", [:]))!))
+effect fn main() -> Unit = println(http.body(create(http.new_request("POST", "/u", "{}", []))!))
