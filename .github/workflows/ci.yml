@@ -1420,6 +1420,23 @@ jobs:
           fi
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
+      - name: Install the belts' Lean toolchains (retry-resilient)
+        # On a cache miss `lake build` downloaded the toolchain itself, once,
+        # with no retry: a TLS connect error to releases.lean-lang.org failed
+        # the release PR #4286's run 40638509907 before any proof was checked.
+        # Each belt's `lean-toolchain` is installed here with the same retry
+        # loop as elan; a cache hit makes every install a no-op.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for tc in $(cat crates/almide-perceus-belt/lean-toolchain crates/almide-race-belt/lean-toolchain crates/almide-edit-belt/lean-toolchain | sort -u); do
+            for i in 1 2 3 4 5; do
+              "$HOME/.elan/bin/elan" toolchain install "$tc" && break
+              [ "$i" = 5 ] && { echo "::error::could not install Lean toolchain $tc after 5 tries"; exit 1; }
+              echo "toolchain $tc download failed, retry ${i}/5"; sleep 20
+            done
+          done
+
       # The three belts are kernel-checked with `lake build` straight from the
       # cached elan (elan installs each belt's `lean-toolchain` on first use;
       # the toolchain lives in the ~/.elan cache keyed on those files). The
@@ -2127,6 +2144,9 @@ jobs:
         shell: bash
         run: |
           cargo test --test tool_arming_tripwire_test --test lsp_test --test fix_test --test diagnostic_harness_test
+          # The runtime's per-OS entropy arm (random.bytes, C-394), judged on
+          # each OS: a missing arm made every Windows random.bytes abort.
+          cargo test --test runtime_random_float_construction_test
           if [ "${{ runner.os }}" = "Windows" ]; then
             # The rustc floor on Windows (#4110, CVE-2024-24576 is a Windows
             # bug): a stub rustc.exe reporting 1.77.1 or the floor minus one
