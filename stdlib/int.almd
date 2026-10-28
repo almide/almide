@@ -398,12 +398,12 @@ fn to_string_radix(x: Int, radix: Int) -> String = {
 fn parse_radix(s: String, radix: Int) -> Result[Int, String] = {
   check_radix(radix)
   let t = string.trim(s)
-  let bytes = bytes.to_list(bytes.from_string(t))
-  match bytes {
+  let codes = bytes.to_list(bytes.from_string(t))
+  match codes {
     [] => err("cannot parse integer from empty string"),
     [45, ..rest] => accumulate_negative(strip_radix_prefix(rest, radix), radix, 0, true),
     [43, ..rest] => accumulate_negative(strip_radix_prefix(rest, radix), radix, 0, false),
-    _ => accumulate_negative(strip_radix_prefix(bytes, radix), radix, 0, false),
+    _ => accumulate_negative(strip_radix_prefix(codes, radix), radix, 0, false),
   }
 }
 
