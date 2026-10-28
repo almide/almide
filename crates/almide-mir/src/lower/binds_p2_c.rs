@@ -128,6 +128,22 @@ impl LowerCtx {
         }
     }
 
+    /// Seed only the READ shape of a real Option/Result block bound at `dst`
+    /// (no drop route: whoever produced the block owns that), so `x == y`,
+    /// `match x` and `x ?? d` over the let-bound value read its tag.
+    pub(crate) fn seed_variant_read_shape(&mut self, dst: ValueId, ty: &Ty) {
+        use almide_lang::types::constructor::TypeConstructorId as TC;
+        let shape = match ty {
+            Ty::Applied(TC::Option, a) if a.len() == 1 => crate::lower::VariantShape::Option,
+            Ty::Applied(TC::Result, a) if a.len() == 2 => match crate::lower::result_family(ty) {
+                crate::lower::ResultFamily::HeapOk => crate::lower::VariantShape::ResultHeapOk,
+                crate::lower::ResultFamily::Scalar => crate::lower::VariantShape::ResultScalar,
+            },
+            _ => return,
+        };
+        self.value_shapes.entry(dst).or_insert(shape);
+    }
+
     fn seed_call_module_heap_read_shape(
         &mut self,
         dst: ValueId,
@@ -148,6 +164,13 @@ impl LowerCtx {
         // track the bound result so a later `match` over the var EXECUTES.
         if is_self_host_option_module_fn(module, func) {
             self.value_shapes.insert(dst, crate::lower::VariantShape::Option);
+        } else if faithful {
+            // Any FAITHFUL module call's Option/Result result is a real block of
+            // the v1 variant layout — the self-host body built it through the
+            // same ctor rails a user fn's does (`seed_call_named_heap_read_shape`).
+            // The in-test assert binds its operands first (#4262) and must compare
+            // them as the direct call operands did.
+            self.seed_variant_read_shape(dst, ty);
         }
         // A FUNCTION-valued module-call result (`let f = map.get(m, k) ?? d` —
         // the closure-valued map read): the result IS a closure block — track it
