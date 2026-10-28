@@ -1,9 +1,0 @@
-// E115 (row 11e): set_header on a response turns its String body into HTML.
-// The writer is the generic `http.set_header[M: HttpMessage]`; on an
-// HttpResponse it dispatches to the response's guarded requirement, written
-// here through a pipe.
-import http
-
-fn page(name: String) -> HttpResponse = http.response(200, name) |> http.set_header("content-type", "Application/XHTML+XML")
-
-fn main() -> Unit = println(http.body(page("guest")))

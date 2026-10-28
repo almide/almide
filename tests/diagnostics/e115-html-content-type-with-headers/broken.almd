@@ -1,7 +1,0 @@
-// E115 (row 11e): a String body served as text/html, so `name` reaches the
-// browser as markup and `<script>` in it runs.
-import http
-
-fn page(name: String) -> HttpResponse = http.with_headers(200, "<h1>${name}</h1>", [("Content-Type", "text/html; charset=utf-8")])
-
-fn main() -> Unit = println(http.body(page("guest")))

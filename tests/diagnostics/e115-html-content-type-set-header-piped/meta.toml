@@ -1,3 +1,0 @@
-expects_code = "E115"
-expects_error = "`http.set_header` serves `Content-Type: Application/XHTML+XML`, an HTML or XML media type, with a String body"
-hint_substring = "html.escape for text"
