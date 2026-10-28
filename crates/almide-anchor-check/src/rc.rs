@@ -11,6 +11,14 @@
 //! calls, constants and local reads between it and `unreachable`) is counted
 //! apart: the witness does not record it by design (#4278).
 //!
+//! An owner rebind's release of the old block (`o`, the recorder's DecOld)
+//! is a release call, or happens inside the copy-on-write judge the
+//! anchor file's `judges` line locates (the judge releases its argument when
+//! it copies): it matches either, read through its local; a DecOld on a
+//! local that held nothing on its path has no instruction, so an unmatched
+//! `o` is counted (`rebind_unmatched`), not refused, and a judge call no `o`
+//! takes is counted (`judges_unmatched`) — both #4278's to settle.
+//!
 //! TRUSTED: that `rcfns` names every rc_inc and release routine.
 
 use std::collections::HashSet;
@@ -27,6 +35,8 @@ pub struct RcReport {
     pub events: usize,
     pub calls: usize,
     pub pre_abort: usize,
+    pub rebind_unmatched: usize,
+    pub judges_unmatched: usize,
 }
 
 /// Instructions no path reaches: after `br` / `br_table` / `return` /
@@ -78,8 +88,16 @@ fn before_abort(b: &Body<'_>, k: usize) -> bool {
 }
 
 /// Check the `rc` lines (`frames` as `(position, events)`) over `bodies`.
-pub fn check_rc(bodies: &[Body<'_>], inc: Option<u32>, releases: &HashSet<u32>, frames: &[(usize, String)], rep: &mut RcReport) -> Result<(), String> {
+pub fn check_rc(
+    bodies: &[Body<'_>],
+    inc: Option<u32>,
+    releases: &HashSet<u32>,
+    judges: &[crate::At],
+    frames: &[(usize, String)],
+    rep: &mut RcReport,
+) -> Result<(), String> {
     for (pos, events) in frames {
+        let judged: HashSet<usize> = judges.iter().filter(|j| j.func == *pos).map(|j| j.op).collect();
         let b = bodies.get(*pos).ok_or_else(|| format!("rc: no defined function at position {pos}"))?;
         let fl = Flow::new(b, HashSet::new());
         let dead = dead(b);
@@ -91,6 +109,8 @@ pub fn check_rc(bodies: &[Body<'_>], inc: Option<u32>, releases: &HashSet<u32>, 
                 'a'
             } else if releases.contains(function_index) {
                 'd'
+            } else if judged.contains(&k) {
+                'j'
             } else {
                 continue;
             };
@@ -110,7 +130,7 @@ pub fn check_rc(bodies: &[Body<'_>], inc: Option<u32>, releases: &HashSet<u32>, 
                 .collect();
             calls.push((k, kind, locals));
         }
-        rep.calls += calls.len();
+        rep.calls += calls.iter().filter(|c| c.1 != 'j').count();
         let evs: Vec<(char, Option<u32>)> = events
             .split_whitespace()
             .map(|t| {
@@ -123,8 +143,16 @@ pub fn check_rc(bodies: &[Body<'_>], inc: Option<u32>, releases: &HashSet<u32>, 
         rep.events += evs.len();
         let mut used = vec![false; calls.len()];
         let mut unmatched: Vec<String> = Vec::new();
-        // Named events first: each takes a call of its kind read through its local.
-        for &(kind, local) in evs.iter().filter(|e| e.1.is_some()) {
+        // Rebind releases first: a release or a judge call on their local.
+        for &(_, local) in evs.iter().filter(|e| e.0 == 'o') {
+            let l = local.unwrap_or(u32::MAX);
+            match (0..calls.len()).find(|&i| !used[i] && matches!(calls[i].1, 'd' | 'j') && calls[i].2.contains(&l)) {
+                Some(i) => used[i] = true,
+                None => rep.rebind_unmatched += 1,
+            }
+        }
+        // Named events next: each takes a call of its kind read through its local.
+        for &(kind, local) in evs.iter().filter(|e| e.1.is_some() && e.0 != 'o') {
             let l = local.unwrap_or(u32::MAX);
             match (0..calls.len()).find(|&i| !used[i] && calls[i].1 == kind && calls[i].2.contains(&l)) {
                 Some(i) => used[i] = true,
@@ -137,8 +165,9 @@ pub fn check_rc(bodies: &[Body<'_>], inc: Option<u32>, releases: &HashSet<u32>, 
                 None => unmatched.push(format!("{kind}-")),
             }
         }
+        rep.judges_unmatched += (0..calls.len()).filter(|&i| !used[i] && calls[i].1 == 'j').count();
         let extra: Vec<String> = (0..calls.len())
-            .filter(|&i| !used[i])
+            .filter(|&i| !used[i] && calls[i].1 != 'j')
             .map(|i| format!("{}@{} on {:?}", calls[i].1, calls[i].0, calls[i].2))
             .collect();
         if !unmatched.is_empty() || !extra.is_empty() {

@@ -759,7 +759,7 @@ pub fn check(wasm: &[u8], bundle: &[u8], anchors: &str) -> Result<Report, String
     check_bounds(&bodies, &bundle_witness(bundle, "bounds")?, &ba, &judges, &mut rep)?;
     if let Some((inc, decs, frames)) = rc_lines {
         let mut r = RcReport::default();
-        check_rc(&bodies, inc, &decs, &frames, &mut r)?;
+        check_rc(&bodies, inc, &decs, &judges, &frames, &mut r)?;
         rep.rc = Some(r);
     }
     Ok(rep)

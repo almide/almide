@@ -414,7 +414,7 @@ fn rc(body: &str, events: &str) -> Result<RcReport, String> {
     let mut r = RcReport::default();
     // `$alloc` (function 0) stands in for the release routine.
     let releases = [0u32].into_iter().collect();
-    check_rc(&bodies, None, &releases, &[(1, events.to_string())], &mut r).map(|()| r)
+    check_rc(&bodies, None, &releases, &[], &[(1, events.to_string())], &mut r).map(|()| r)
 }
 
 #[test]
@@ -439,5 +439,21 @@ fn dead_and_pre_abort_releases_are_not_live_events() -> Result<(), String> {
     rc("return local.get 0 call $alloc drop", "")?;
     let r = rc("local.get 0 call $alloc drop unreachable", "")?;
     assert_eq!(r.pre_abort, 1);
+    Ok(())
+}
+
+#[test]
+fn a_rebind_release_matches_a_release_or_the_judge_on_its_local() -> Result<(), String> {
+    let bytes = module("(local i32 i32)", "local.get 0 call $alloc local.set 0");
+    let bodies = decode(&bytes)?;
+    let releases = std::collections::HashSet::new();
+    let mut r = RcReport::default();
+    // The call at 1 is the recorded judge: the rebind's release is inside it.
+    check_rc(&bodies, None, &releases, &[At { func: 1, op: 1 }], &[(1, "o0".into())], &mut r)?;
+    assert_eq!((r.rebind_unmatched, r.judges_unmatched), (0, 0));
+    // No judge and no release: the rebind is counted as one with no instruction.
+    let mut r = RcReport::default();
+    check_rc(&bodies, None, &releases, &[], &[(1, "o0".into())], &mut r)?;
+    assert_eq!(r.rebind_unmatched, 1);
     Ok(())
 }
