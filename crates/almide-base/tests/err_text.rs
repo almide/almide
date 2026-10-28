@@ -86,16 +86,19 @@ fn wat_ranges(src: &str) -> Vec<(u32, u32)> {
 }
 
 /// `(lo, hi)` pairs from the self-hosted `__et_escaped`: each
-/// `__et_in(n, LO, HI)`.
+/// `__et_in(n, LO, HI)`, however the formatter wraps it.
 fn almd_ranges(src: &str) -> Vec<(u32, u32)> {
     let start = src.find("fn __et_escaped").expect("string_err_text.almd has no __et_escaped");
     let end = start + src[start..].find("\n\n").expect("__et_escaped has no end");
     src[start..end]
-        .split("__et_in(n, ")
+        .split("__et_in(")
         .skip(1)
         .map(|t| {
-            let args: Vec<u32> = t.split(')').next().unwrap().split(", ").map(|x| x.trim().parse().expect("decimal")).collect();
-            (args[0], args[1])
+            // `n, LO, HI` — on one line or, as `almide fmt` wraps a long
+            // chain, one argument per line with a trailing comma.
+            let args: Vec<&str> = t.split(')').next().unwrap().split(',').map(str::trim).filter(|x| !x.is_empty()).collect();
+            assert_eq!(args.first(), Some(&"n"), "__et_in's first argument is the codepoint: {args:?}");
+            (args[1].parse().expect("decimal"), args[2].parse().expect("decimal"))
         })
         .collect()
 }
