@@ -5,38 +5,35 @@
 // not a copy of the box. The ownership certifier's C4 refused the owned form.
 type Tree = | Leaf | Node(Tree, Int, Tree)
 
-fn depth(t: Tree) -> Int =
-  match t {
-    Leaf => 0,
-    Node(l, _, r) => 1 + (if depth(l) > depth(r) then depth(l) else depth(r)),
-  }
+fn depth(t: Tree) -> Int = match t {
+  Leaf => 0,
+  Node(l, _, r) => 1 + (if depth(l) > depth(r) then depth(l) else depth(r)),
+}
 
 fn keep(t: Tree, a: Int) -> Tree = if a > 100 then Leaf else t
 
 // The boxed binder moved into an owned call slot, then read by a borrowing one.
-fn moved_after(t: Tree) -> Tree =
-  match t {
-    Leaf => Leaf,
-    Node(l, _, _) => keep(l, depth(l)),
-  }
+fn moved_after(t: Tree) -> Tree = match t {
+  Leaf => Leaf,
+  Node(l, _, _) => keep(l, depth(l)),
+}
 
 // The boxed binder moved into a constructor, then read.
-fn regrow(t: Tree) -> Tree =
-  match t {
-    Leaf => Leaf,
-    Node(l, v, _) => Node(l, v + depth(l), Leaf),
-  }
+fn regrow(t: Tree) -> Tree = match t {
+  Leaf => Leaf,
+  Node(l, v, _) => Node(l, v + depth(l), Leaf),
+}
 
 // A heap payload that is not boxed, moved then read.
 type Bag = | Empty | Items(List[Int])
 
-fn take_all(xs: List[Int], n: Int) -> List[Int] = if n > 10 then [] else xs
+fn take_all(xs: List[Int], n: Int) -> List[Int] = if n > 10 then []
+else xs
 
-fn moved_items(b: Bag) -> List[Int] =
-  match b {
-    Empty => [],
-    Items(xs) => take_all(xs, list.len(xs)),
-  }
+fn moved_items(b: Bag) -> List[Int] = match b {
+  Empty => [],
+  Items(xs) => take_all(xs, list.len(xs)),
+}
 
 test "a boxed binder moved into an owned slot then read" {
   let t = Node(Node(Node(Leaf, 1, Leaf), 2, Leaf), 3, Leaf)
