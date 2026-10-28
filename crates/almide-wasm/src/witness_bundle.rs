@@ -82,7 +82,7 @@ fn records_inner(
     let init = super::take_init();
     let bounds_anchors = super::bounds::take_anchors();
     let judge_anchors = super::bounds::take_judges();
-    let (rc_frames, rc_releases) = super::rc::take(pass);
+    let (rc_frames, rc_releases, rc_arms) = super::rc::take(pass);
     let init_anchors = super::init::take_anchors();
     let seals = super::anchor::take();
     let decls = super::decls::take_for(emitted).ok_or("no declaration table for the shipped module")?;
@@ -124,7 +124,7 @@ fn records_inner(
         locate.text(&pick(init_anchors))?,
         locate.text(&pick(bounds_anchors))?,
         locate.text(&pick(judge_anchors))?,
-    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases)?
+    ) + &rc_lines(&locate, emitted, shipped, fmap, &frames_certified(&rc_frames, &certified_names), &rc_releases, &rc_arms)?
         }
     };
     let b = bounds.into_iter().find(|(p, _)| *p == pass).map(|(_, w)| w).unwrap_or_default();
@@ -174,6 +174,7 @@ fn rc_lines(
     fmap: &[Option<u32>],
     frames: &[(u64, String)],
     releases: &std::collections::BTreeSet<u32>,
+    arms: &[(u64, usize, usize)],
 ) -> Result<String, String> {
     if !almide_base::env::flag("ALMIDE_RC_ANCHORS") {
         return Ok(String::new());
@@ -190,7 +191,11 @@ fn rc_lines(
         .iter()
         .filter_map(|(k, ev)| locate.position(*k).map(|j| format!("{j}|{ev}")))
         .collect();
-    Ok(format!("rcfns {inc} {}\nrc {}\n", decs.join(" "), rc.join(";")))
+    let windows: Vec<String> = arms
+        .iter()
+        .filter_map(|&(k, a, b)| locate.window(k, a, b).map(|(j, x, y)| format!("{j}:{x}-{y}")))
+        .collect();
+    Ok(format!("rcfns {inc} {}\nrc {}\nrcarms {}\n", decs.join(" "), rc.join(";"), windows.join(" ")))
 }
 
 /// Turns the sinks' `serial@offset` anchors into `position:ordinal`.
@@ -286,6 +291,19 @@ impl Locator {
             }
         }
         Ok(Locator { pos, ends: em.into_iter().map(|(_, e)| e).collect(), ships_at: fmap.to_vec(), ords })
+    }
+
+    /// Body `serial`'s instructions between byte offsets `from` and `to`, as
+    /// `(shipped position, first ordinal, last ordinal)` in the shipped body;
+    /// `None` for a body that did not ship or an empty window.
+    fn window(&self, serial: u64, from: usize, to: usize) -> Option<(u32, usize, usize)> {
+        let &i = self.pos.get(&serial)?;
+        let j = self.ships_at[i]?;
+        let ends = &self.ends[i];
+        let first = ends.iter().position(|&e| e > from)?;
+        let last = ends.iter().rposition(|&e| e <= to)?;
+        let ords = self.ords.get(&i)?;
+        (first <= last).then(|| (j, ords[first], ords[last]))
     }
 
     /// The shipped position of body `serial`, when it shipped.

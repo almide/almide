@@ -29,8 +29,8 @@ fn main() {
             );
             if let Some(rc) = &r.rc {
                 println!(
-                    "RC OK: {} frame(s), {} event(s) matched to {} call(s), {} release(s) before an abort, {} rebind(s) with no instruction, {} judge(s) with no rebind",
-                    rc.frames, rc.events, rc.calls, rc.pre_abort, rc.rebind_unmatched, rc.judges_unmatched
+                    "RC OK: {} frame(s), {} event(s) matched to {} call(s), {} release(s) before an abort, {} rebind(s) with no instruction, {} judge(s) with no rebind, {} arm-internal call(s)",
+                    rc.frames, rc.events, rc.calls, rc.pre_abort, rc.rebind_unmatched, rc.judges_unmatched, rc.arm_internal
                 );
             }
         }

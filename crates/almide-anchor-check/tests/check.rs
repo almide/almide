@@ -414,7 +414,7 @@ fn rc(body: &str, events: &str) -> Result<RcReport, String> {
     let mut r = RcReport::default();
     // `$alloc` (function 0) stands in for the release routine.
     let releases = [0u32].into_iter().collect();
-    check_rc(&bodies, None, &releases, &[], &[(1, events.to_string())], &mut r).map(|()| r)
+    check_rc(&bodies, None, &releases, &[], &[(1, events.to_string())], &[], &mut r).map(|()| r)
 }
 
 #[test]
@@ -449,11 +449,24 @@ fn a_rebind_release_matches_a_release_or_the_judge_on_its_local() -> Result<(), 
     let releases = std::collections::HashSet::new();
     let mut r = RcReport::default();
     // The call at 1 is the recorded judge: the rebind's release is inside it.
-    check_rc(&bodies, None, &releases, &[At { func: 1, op: 1 }], &[(1, "o0".into())], &mut r)?;
+    check_rc(&bodies, None, &releases, &[At { func: 1, op: 1 }], &[(1, "o0".into())], &[], &mut r)?;
     assert_eq!((r.rebind_unmatched, r.judges_unmatched), (0, 0));
     // No judge and no release: the rebind is counted as one with no instruction.
     let mut r = RcReport::default();
-    check_rc(&bodies, None, &releases, &[], &[(1, "o0".into())], &mut r)?;
+    check_rc(&bodies, None, &releases, &[], &[(1, "o0".into())], &[], &mut r)?;
     assert_eq!(r.rebind_unmatched, 1);
+    Ok(())
+}
+
+#[test]
+fn an_rc_call_inside_an_arm_window_is_the_arms_own() -> Result<(), String> {
+    let bytes = module("(local i32 i32)", "local.get 0 call $alloc drop");
+    let bodies = decode(&bytes)?;
+    let releases = [0u32].into_iter().collect();
+    let mut r = RcReport::default();
+    check_rc(&bodies, None, &releases, &[], &[(1, String::new())], &[(1, 0, 2)], &mut r)?;
+    assert_eq!(r.arm_internal, 1);
+    // Outside the window it is an unrecorded release.
+    assert!(check_rc(&bodies, None, &releases, &[], &[(1, String::new())], &[(1, 2, 2)], &mut RcReport::default()).is_err());
     Ok(())
 }

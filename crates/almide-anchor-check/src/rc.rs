@@ -19,7 +19,13 @@
 //! `o` is counted (`rebind_unmatched`), not refused, and a judge call no `o`
 //! takes is counted (`judges_unmatched`) — both #4278's to settle.
 //!
-//! TRUSTED: that `rcfns` names every rc_inc and release routine.
+//! An RC call left over inside a stdlib arm's window (`rcarms`) is the arm's
+//! own (an inlined `list.get` takes its payload's +1, which the witness
+//! accounts as the arm's handed-over credit): counted (`arm_internal`), not
+//! refused — the arm-certificate residue of #4278.
+//!
+//! TRUSTED: that `rcfns` names every rc_inc and release routine, and that an
+//! arm's own RC keeps the balance its ownership declaration states (#4278).
 
 use std::collections::HashSet;
 
@@ -37,6 +43,7 @@ pub struct RcReport {
     pub pre_abort: usize,
     pub rebind_unmatched: usize,
     pub judges_unmatched: usize,
+    pub arm_internal: usize,
 }
 
 /// Instructions no path reaches: after `br` / `br_table` / `return` /
@@ -94,6 +101,7 @@ pub fn check_rc(
     releases: &HashSet<u32>,
     judges: &[crate::At],
     frames: &[(usize, String)],
+    arms: &[(usize, usize, usize)],
     rep: &mut RcReport,
 ) -> Result<(), String> {
     for (pos, events) in frames {
@@ -166,6 +174,13 @@ pub fn check_rc(
             }
         }
         rep.judges_unmatched += (0..calls.len()).filter(|&i| !used[i] && calls[i].1 == 'j').count();
+        let in_arm = |k: usize| arms.iter().any(|&(p, a, b)| p == *pos && a <= k && k <= b);
+        for i in 0..calls.len() {
+            if !used[i] && calls[i].1 != 'j' && in_arm(calls[i].0) {
+                used[i] = true;
+                rep.arm_internal += 1;
+            }
+        }
         let extra: Vec<String> = (0..calls.len())
             .filter(|&i| !used[i] && calls[i].1 != 'j')
             .map(|i| format!("{}@{} on {:?}", calls[i].1, calls[i].0, calls[i].2))
