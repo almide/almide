@@ -143,6 +143,8 @@ fn borrowed_loop_binder_compares_as_str_and_borrowed_param_stores_owned() {
         assert!(body.contains(".iter()") && !body.contains(".cloned()"), "{name} lost its borrowed binder: {body}");
         assert!(!body.contains(".clone()") && !body.contains(".to_string()") && !body.contains(".to_almide()"), "{name} clones: {body}");
     }
+    // #4294: the literal match reads the element, so the source is borrowed.
+    assert!(fn_body(&rust, "classify").starts_with("xs: &[AlmideString])"), "{}", fn_body(&rust, "classify"));
     // The stores convert the borrow into the owned binding's type.
     assert!(fn_body(&rust, "keep").contains("model = lit.to_almide();"), "{}", fn_body(&rust, "keep"));
     assert!(fn_body(&rust, "keep_list").contains("out = xs.to_vec();"), "{}", fn_body(&rust, "keep_list"));
