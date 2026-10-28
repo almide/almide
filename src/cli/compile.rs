@@ -24,8 +24,14 @@ pub(crate) fn resolve_module_to_file(module: &str) -> (String, Option<String>) {
     // for a module the binary is carrying the source of (#863).
     if almide::stdlib::is_any_stdlib(module) {
         if let Some(src) = almide::stdlib::get_bundled_source(module) {
+            // Staged through a per-process file renamed into place: two
+            // concurrent `almide compile <module>` runs share the final
+            // path, and a plain write truncates it under the other run's
+            // read, which then parses an empty module (0 functions).
             let tmp = std::env::temp_dir().join(format!("almide-stdlib-iface-{}.almd", module));
-            if let Err(e) = std::fs::write(&tmp, src) {
+            let staged = tmp.with_extension(format!("almd.{}", std::process::id()));
+            if let Err(e) = std::fs::write(&staged, src).and_then(|()| std::fs::rename(&staged, &tmp)) {
+                let _ = std::fs::remove_file(&staged);
                 err(&format!("error: cannot stage bundled stdlib source for '{}': {}", module, e));
                 std::process::exit(1);
             }
