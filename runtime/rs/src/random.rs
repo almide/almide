@@ -1,6 +1,7 @@
 // random extern — Rust native implementations (no external crate)
 // int/float/choice/shuffle use a per-thread xorshift seeded from OS entropy
-// (#4122; not for secrets); random.bytes reads the OS CSPRNG (getrandom / getentropy).
+// (#4122; not for secrets); random.bytes reads the OS CSPRNG (getrandom / getentropy /
+// BCryptGenRandom).
 
 
 // The seed (#4122): std's `RandomState` draws its SipHash keys from the OS
@@ -106,7 +107,25 @@ fn almide_os_entropy(chunk: &mut [u8]) -> bool {
     unsafe { getentropy(chunk.as_mut_ptr(), chunk.len()) == 0 }
 }
 
-#[cfg(not(unix))]
+// Windows reads BCryptGenRandom with the system-preferred RNG (no algorithm
+// handle to open or close): the CSPRNG the getrandom crate reads there too.
+// Until this arm existed every Windows `random.bytes` call aborted with the
+// "OS random source failed" text below (uuid.v4 / v7 with it).
+#[cfg(windows)]
+fn almide_os_entropy(chunk: &mut [u8]) -> bool {
+    #[link(name = "bcrypt")]
+    unsafe extern "system" {
+        fn BCryptGenRandom(alg: *mut std::ffi::c_void, buf: *mut u8, len: u32, flags: u32) -> i32;
+    }
+    const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
+    // A chunk is at most 256 bytes, so its length fits the u32 the call takes.
+    unsafe { BCryptGenRandom(std::ptr::null_mut(), chunk.as_mut_ptr(), chunk.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0 }
+}
+
+// No OS source known for this target: every draw aborts rather than return
+// predictable bytes. tests/runtime_random_float_construction_test.rs runs the
+// fill on each CI OS, so a host that lands here is a red test, not a silent one.
+#[cfg(not(any(unix, windows)))]
 fn almide_os_entropy(_chunk: &mut [u8]) -> bool {
     false
 }
