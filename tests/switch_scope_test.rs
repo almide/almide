@@ -11,6 +11,7 @@
 //!   - `almide build --target wasm` — the module, byte for byte;
 //!   - `almide build` (native) — the program's stdout, stderr and exit status,
 //!     run with no `ALMIDE_*` in its own environment.
+//!
 //! A switch that changes any of them is declared in the wrong scope: re-declare
 //! it as one the lock holds (`instrument`, `ablation`, `route`, …).
 //!

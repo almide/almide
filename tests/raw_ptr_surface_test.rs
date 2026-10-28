@@ -190,7 +190,7 @@ fn a_forged_pointer_or_region_is_refused_in_a_file_that_opted_in() {
                 .to_string(),
         ),
     ] {
-        let (ok, err) = check(&what.replace(' ', "_").replace('.', "_"), &src);
+        let (ok, err) = check(&what.replace([' ', '.'], "_"), &src);
         assert!(!ok && err.contains("error"), "{what}: a forged pointer or region checked clean:\n{src}\n{err}");
     }
 }
